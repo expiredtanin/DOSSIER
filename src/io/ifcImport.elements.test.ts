@@ -79,6 +79,29 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
     expect(text).toContain('"walls":9');
   });
 
+  it("[98] Pset_*Common: Brand-/Schallschutz, U-Wert, Einbruchhemmung, aussen, tragend (Rundreise)", async () => {
+    const door = sampleProject.openings!.find((o) => o.kind === "door")!;
+    const win = sampleProject.openings!.find((o) => o.kind === "window")!;
+    const wall0 = sampleProject.walls[0]!;
+    const src: Project = {
+      ...sampleProject,
+      walls: sampleProject.walls.map((w) => (w.id === wall0.id ? { ...w, isExternal: true, loadBearing: true } : w)),
+      openings: (sampleProject.openings ?? []).map((o) =>
+        o.id === door.id
+          ? { ...o, fireRating: "EI30", soundClass: "Rw 32 dB", burglaryClass: "RC2", uValue: 1.3, isExternal: false }
+          : o.id === win.id
+            ? { ...o, uValue: 0.9, isExternal: true }
+            : o,
+      ),
+    };
+    const { project: p } = await importInto(emptyProject, src);
+    const d = (p.openings ?? []).find((o) => o.kind === "door")!;
+    expect(d).toMatchObject({ fireRating: "EI30", soundClass: "Rw 32 dB", burglaryClass: "RC2", uValue: 1.3, isExternal: false });
+    const w = (p.openings ?? []).find((o) => o.kind === "window" && Math.abs(o.width - win.width) < 1e-6)!;
+    expect(w).toMatchObject({ uValue: 0.9, isExternal: true });
+    expect(p.walls.filter((x) => x.isExternal === true && x.loadBearing === true).length).toBe(1);
+  });
+
   it("Tür-Anschlag/Aufschlag und Fensterteilung aus OperationType/PartitioningType (Rundreise)", async () => {
     // Lage im Raum vergleichen (die Wand kann umgekehrt ankommen): Scharnierpunkt und Aufschlagrichtung.
     const physical = (o: Opening, w: Wall) => {

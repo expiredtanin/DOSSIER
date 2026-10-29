@@ -77,7 +77,13 @@ pub struct Info {
     pub layers: Vec<MatLayer>,
     /// Klassifikationen (eBKP-H, BKP ...) des Bauteils, sonst seines Typs.
     pub classifications: Vec<Classification>,
+    /// Eigenschaften aus `Pset_*Common` (IsExternal, LoadBearing, FireRating, AcousticRating,
+    /// ThermalTransmittance, SecurityRating, Reference) als Text; Wahrheitswerte "true"/"false".
+    pub common: BTreeMap<String, String>,
 }
+
+/// Eigenschaften der gemeinsamen Psets, die ins Modell übernommen werden.
+const COMMON_PROPS: [&str; 7] = ["IsExternal", "LoadBearing", "FireRating", "AcousticRating", "ThermalTransmittance", "SecurityRating", "Reference"];
 
 #[derive(Clone, Debug, Default)]
 pub struct Wall {
@@ -498,6 +504,7 @@ struct Ctx<'r, 'a> {
     type_of: HashMap<u64, u64>,
     fills: HashMap<u64, Vec<u64>>,
     sia: HashMap<u64, String>,
+    common: HashMap<u64, BTreeMap<String, String>>,
     storey_index: HashMap<u64, usize>,
 }
 
@@ -570,6 +577,7 @@ impl Ctx<'_, '_> {
                     own
                 }
             },
+            common: self.common.get(&id).cloned().unwrap_or_default(),
         }
     }
 
@@ -903,6 +911,7 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
     let mut type_of = HashMap::new();
     let mut fills: HashMap<u64, Vec<u64>> = HashMap::new();
     let mut sia = HashMap::new();
+    let mut common: HashMap<u64, BTreeMap<String, String>> = HashMap::new();
     let mut storeys = Vec::new();
     for &id in ids {
         let Some(e) = f.get(id) else { continue };
@@ -924,8 +933,28 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
                 if ps.ty != "IFCPROPERTYSET" {
                     continue;
                 }
+                let is_common = ps.arg(2).and_then(|v| v.as_str()).is_some_and(|n| n.starts_with("Pset_") && n.ends_with("Common"));
                 for p in refs(ps.arg(4)) {
                     let Some(pe) = f.get(p) else { continue };
+                    if is_common && pe.ty == "IFCPROPERTYSINGLEVALUE" {
+                        let name = pe.arg(0).and_then(|v| v.as_str()).unwrap_or("");
+                        let inner = match pe.arg(2) {
+                            Some(Value::Typed(_, a)) if a.len() == 1 => Some(&a[0]),
+                            other => other,
+                        };
+                        let text = match inner {
+                            Some(Value::Enum(e)) if e == "T" => Some("true".to_string()),
+                            Some(Value::Enum(e)) if e == "F" => Some("false".to_string()),
+                            Some(v) => v.as_str().map(str::to_string).or_else(|| v.as_f64().map(|x| x.to_string())),
+                            None => None,
+                        };
+                        if let (true, Some(text)) = (COMMON_PROPS.contains(&name), text) {
+                            for o in refs(e.arg(4)) {
+                                common.entry(o).or_default().entry(name.to_string()).or_insert_with(|| text.clone());
+                            }
+                        }
+                        continue;
+                    }
                     if pe.ty != "IFCPROPERTYSINGLEVALUE" || pe.arg(0).and_then(|v| v.as_str()) != Some("SIA416") {
                         continue;
                     }
@@ -960,7 +989,7 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
     }
     storeys.sort_by(|a, b| a.elevation.total_cmp(&b.elevation));
     let storey_index = storeys.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
-    let mut cx = Ctx { r, rels, type_of, fills, sia, storey_index };
+    let mut cx = Ctx { r, rels, type_of, fills, sia, common, storey_index };
     let mut out = Semantic { storeys, ..Default::default() };
 
     let spatial = |id: u64| f.get(id).is_some_and(|e| matches!(e.ty.as_str(), "IFCBUILDINGSTOREY" | "IFCBUILDING" | "IFCSITE" | "IFCSPACE"));
@@ -1085,6 +1114,7 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
             "typeName": i.type_name,
             "layers": i.layers.iter().map(|l| json!({ "material": l.material, "thickness": l.thickness, "color": l.color })).collect::<Vec<_>>(),
             "classifications": crate::ifc_import::classifications_json(&i.classifications),
+            "common": i.common,
         })
     };
     let mut push = |kind: &str, i: &Info, extra: serde_json::Value, nums: Vec<f64>, data: &mut Vec<f64>| {
@@ -1471,6 +1501,17 @@ ENDSEC;\nEND-ISO-10303-21;\n"
 #612=IFCRELDEFINESBYPROPERTIES('rr',$,$,$,(#500),#611);";
         let (_, s) = sem(&space_file(own));
         assert_eq!(s.spaces[0].sia.as_deref(), Some("FF"));
+    }
+
+    #[test]
+    fn common_pset_properties_are_read() {
+        let psets = "#620=IFCPROPERTYSINGLEVALUE('IsExternal',$,IFCBOOLEAN(.T.),$);#621=IFCPROPERTYSINGLEVALUE('FireRating',$,IFCLABEL('EI30'),$);\
+#622=IFCPROPERTYSINGLEVALUE('ThermalTransmittance',$,IFCTHERMALTRANSMITTANCEMEASURE(1.3),$);#623=IFCPROPERTYSINGLEVALUE('Fremd',$,IFCLABEL('x'),$);\
+#624=IFCPROPERTYSET('cp',$,'Pset_DoorCommon',$,(#620,#621,#622,#623));#625=IFCRELDEFINESBYPROPERTIES('cr',$,$,$,(#500),#624);";
+        let (_, s) = sem(&space_file(psets));
+        let c = &s.spaces[0].info.common;
+        assert_eq!((c.get("IsExternal").map(String::as_str), c.get("FireRating").map(String::as_str), c.get("ThermalTransmittance").map(String::as_str)), (Some("true"), Some("EI30"), Some("1.3")));
+        assert!(!c.contains_key("Fremd"), "nur bekannte Eigenschaften");
     }
 
     #[test]

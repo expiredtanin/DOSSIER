@@ -1562,8 +1562,15 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     unabhängig von anderen Bauteilen, projektübergreifend verschieden. GUIDs ändern sich einmalig
     gegenüber Exporten vor dem 28.10.
   - ✅ Georeferenz [69].
-  - ○ Offen: IsExternal/LoadBearing/ThermalTransmittance für Wand/Decke/Tür/Fenster brauchen
-    Modellfelder (z. B. am Wandtyp tragend/aussen, λ je Bauteil → U-Wert). · S–M
+  - ✅ **[98] IsExternal/LoadBearing/Brand-/Schallschutz/U-Wert im Pset.** (29.10.) Wand/Decke:
+    `Pset_WallCommon`/`Pset_SlabCommon` mit IsExternal und LoadBearing, nur wenn im Modell gesetzt
+    (`Wall`/`Ceiling` `isExternal`/`loadBearing`). Tür/Fenster: `Pset_DoorCommon`/`Pset_WindowCommon` mit
+    Reference (Nummer, sonst Typname), IsExternal (eigene Angabe > Wand > Raumlage wie die Liste [97]),
+    FireRating, AcousticRating, ThermalTransmittance (`IfcThermalTransmittanceMeasure`), SecurityRating.
+    Import liest dieselben Werte aus `Pset_*Common` zurück (Rundreise-Test; nur bekannte Eigenschaften).
+    Mit ifcopenshell geprüft (`exportIfc.validate.test.ts`: gültig). Offen: U-Wert der Wand aus den
+    Schichten (λ je Bauteil, [71]); Wand/Decke-Felder ohne UI; Reference-Rückimport (Nummer) fehlt;
+    IFC2x3 nicht gesondert geprüft. · S
   - ✅ IfcMaterialLayerSetUsage + Achs-Darstellung an Extrusions-Wänden. (28.10.) Wand-Placement am
     Wandanfang, X = Achse, Y = linke Normale (Rust rechnet die Welt-Profile und die Öffnungen ins
     Wandsystem); „Axis“-Darstellung (IfcPolyline, Unterkontext GRAPH_VIEW) + Usage (AXIS2, POSITIVE,

@@ -163,6 +163,19 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", { timeout: 60
     expect(r.out).toContain("0 Befunde");
     expect(r.status).toBe(0);
   });
+  it("[98] Pset_Door/Window/Wall/SlabCommon mit Kennwerten: gültig", () => {
+    const p: Project = {
+      ...sampleProject,
+      walls: sampleProject.walls.map((w, i) => (i === 0 ? { ...w, isExternal: true, loadBearing: true } : w)),
+      ceilings: (sampleProject.ceilings ?? []).map((c) => ({ ...c, isExternal: false, loadBearing: true })),
+      openings: (sampleProject.openings ?? []).map((o) => ({ ...o, mark: "X1", fireRating: "EI30", soundClass: "Rw 32 dB", burglaryClass: "RC2", uValue: 1.3, isExternal: true })),
+    };
+    const ifc = exportIfcSpf(p);
+    expect(ifc).toContain("IFCTHERMALTRANSMITTANCEMEASURE(1.3)");
+    const r = validate("psets-kennwerte", ifc);
+    expect(r.out).toContain("0 Befunde");
+    expect(r.status).toBe(0);
+  });
   it("Umlaute in Namen", () => {
     const p = { ...sampleProject, name: "Wohnüberbauung «Süd»", rooms: (sampleProject.rooms ?? []).map((r) => ({ ...r, name: "Küche/Essen" })) };
     const r = validate("umlaute", exportIfcSpf(p));

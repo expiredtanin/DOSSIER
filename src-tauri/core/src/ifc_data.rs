@@ -68,11 +68,16 @@ pub struct IfcOptions {
 
 // ── Puffer-Bausteine (Reihenfolge der Aufrufe = Reihenfolge der Zeichenketten) ─────────────────
 
-/// Pset-Eigenschaft (0 IfcIdentifier, 1 IfcBoolean, 2 IfcPositiveRatioMeasure, 3–5 Mengen).
+/// Pset-Eigenschaft (0 IfcIdentifier, 1 IfcBoolean, 2 IfcPositiveRatioMeasure, 3–5 Mengen, 6 IfcLabel,
+/// 7 IfcThermalTransmittanceMeasure).
 enum Prop {
     Ident(&'static str, String),
     Bool(&'static str, bool),
     Ratio(&'static str, f64),
+    /// IfcLabel (Freitext wie Feuerwiderstand).
+    Label(&'static str, String),
+    /// IfcThermalTransmittanceMeasure, W/(m²K).
+    Thermal(&'static str, f64),
     Qty(&'static str, QtyKind, f64),
 }
 
@@ -94,6 +99,14 @@ type TypeData = (String, String, Vec<(String, String, f64)>);
 
 fn type_ref<'a>(t: &'a TypeData, kind: f64, predefined: &'a str) -> TypeRef<'a> {
     TypeRef { kind, id: &t.0, name: &t.1, predefined, layers: t.2.iter().map(|(a, b, c)| (a.as_str(), b.as_str(), *c)).collect() }
+}
+
+/// `IsExternal`/`LoadBearing` für Wand und Decke, nur mit Angabe im Modell.
+fn structure_props(external: Option<bool>, load_bearing: Option<bool>) -> Vec<Prop> {
+    let mut v = Vec::new();
+    v.extend(external.map(|e| Prop::Bool("IsExternal", e)));
+    v.extend(load_bearing.map(|b| Prop::Bool("LoadBearing", b)));
+    v
 }
 
 fn ident(name: &'static str, v: &str) -> Prop {
@@ -155,6 +168,14 @@ fn w_psets(f: &mut Flat, list: &[Pset]) {
                 Prop::Ratio(name, v) => {
                     let a = f.str(name);
                     f.nums(&[a, 2.0, *v]);
+                }
+                Prop::Label(name, v) => {
+                    let (a, b) = (f.str(name), f.str(v));
+                    f.nums(&[a, 6.0, b]);
+                }
+                Prop::Thermal(name, v) => {
+                    let a = f.str(name);
+                    f.nums(&[a, 7.0, *v]);
                 }
                 Prop::Qty(name, kind, v) => {
                     let a = f.str(name);
@@ -544,14 +565,23 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     let openings: Vec<Opening> = p.openings.clone().unwrap_or_default();
     let wall_ident = |p: &Project, wall: &Wall, quantities: Vec<Qty>| -> (String, Option<TypeData>, Vec<Pset>) {
         let q = qto("Qto_WallBaseQuantities", quantities);
+        // Aussen/tragend nur mit Angabe im Modell (nichts erfunden).
+        let mut props: Vec<Prop> = Vec::new();
         match p.wall_type(wall) {
             Some(wt) => {
                 let layers = wt.layers.iter().map(|l| (l.component_id.clone(), component_name(p, &l.component_id), l.thickness)).collect();
-                let mut ps = vec![Pset { name: "Pset_WallCommon", props: vec![ident("Reference", &wt.name)] }];
+                props.push(ident("Reference", &wt.name));
+                props.extend(structure_props(wall.is_external, wall.load_bearing));
+                let mut ps = vec![Pset { name: "Pset_WallCommon", props }];
                 ps.extend(q);
                 (wt.name.clone(), Some((wt.id.clone(), wt.name.clone(), layers)), ps)
             }
-            None => (wall.id.clone(), None, q),
+            None => {
+                props.extend(structure_props(wall.is_external, wall.load_bearing));
+                let mut ps = if props.is_empty() { Vec::new() } else { vec![Pset { name: "Pset_WallCommon", props }] };
+                ps.extend(q);
+                (wall.id.clone(), None, ps)
+            }
         }
     };
     let cutouts_of = |p: &Project, wall: &Wall| -> Vec<(usize, Cutout)> {
@@ -669,10 +699,15 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let mut name = c.id.clone();
         let mut ty: Option<TypeData> = None;
         let mut psets: Vec<Pset> = Vec::new();
+        let mut slab_props: Vec<Prop> = Vec::new();
         if let Some((id, tname, layers)) = model3d::ceiling_type_ref(&p, c) {
             name = tname.to_string();
             ty = Some((id.to_string(), tname.to_string(), layers.iter().map(|l| (l.component_id.clone(), component_name(&p, &l.component_id), l.thickness)).collect()));
-            psets.push(Pset { name: "Pset_SlabCommon", props: vec![ident("Reference", tname)] });
+            slab_props.push(ident("Reference", tname));
+        }
+        slab_props.extend(structure_props(c.is_external, c.load_bearing));
+        if !slab_props.is_empty() {
+            psets.push(Pset { name: "Pset_SlabCommon", props: slab_props });
         }
         // Aussparungen (wie im 3D) als innere Ringe des Profils; Netto zieht sie ab.
         let inner: Vec<&[Vec2]> = c.openings.as_deref().unwrap_or(&[]).iter().filter(|r| r.len() >= 3).map(|r| r.as_slice()).collect();
@@ -718,6 +753,19 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 }
                 "Pset_WindowCommon"
             };
+            // Nummer ersetzt den Typnamen als Reference; Kennwerte nur mit Angabe im Modell.
+            if let Some(mark) = o.mark.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+                props.retain(|x| !matches!(x, Prop::Ident("Reference", _)));
+                props.insert(0, ident("Reference", mark));
+            }
+            if let Some(e) = crate::opening_schedule::opening_external(&p, o) {
+                props.push(Prop::Bool("IsExternal", e));
+            }
+            let label = |name: &'static str, v: &Option<String>| v.as_deref().map(str::trim).filter(|x| !x.is_empty()).map(|x| Prop::Label(name, x.to_string()));
+            props.extend(label("FireRating", &o.fire_rating));
+            props.extend(label("AcousticRating", &o.sound_class));
+            props.extend(o.u_value.filter(|u| *u > 0.0).map(|u| Prop::Thermal("ThermalTransmittance", u)));
+            props.extend(label("SecurityRating", &o.burglary_class));
             let mut psets = vec![Pset { name: pset_name, props }];
             psets.extend(qto(if is_door { "Qto_DoorBaseQuantities" } else { "Qto_WindowBaseQuantities" }, qty::opening_quantities(c.to - c.from, depth)));
             let label = crate::plan::walls::opening_label(o);
