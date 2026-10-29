@@ -195,4 +195,12 @@ describe("Mesh-Export vollständig", () => {
     const r2 = await validator.validateString(exportGltf(project), { maxIssues: 50 });
     expect(r2.issues.numErrors).toBe(0);
   });
+
+  it("leeres Projekt: gültige Szene ohne Knoten (kein leeres `nodes`, Validator EMPTY_ENTITY)", async () => {
+    const empty: Project = { ...sampleProject, walls: [], openings: [], ceilings: [], roofs: [], stairs: [], rooms: [], columns: [], context: [] };
+    const r1 = await validator.validateBytes(exportGlb(empty), { maxIssues: 50 });
+    expect(r1.issues.messages.filter((m) => m.severity === 0)).toEqual([]);
+    const r2 = await validator.validateString(exportGltf(empty), { maxIssues: 50 });
+    expect(r2.issues.numErrors).toBe(0);
+  });
 });
