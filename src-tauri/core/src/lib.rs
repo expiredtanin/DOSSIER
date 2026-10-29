@@ -92,6 +92,9 @@ pub mod commands;
 pub mod cmd_transform;
 pub mod cmd_edit;
 pub mod polyline_vertex;
+pub mod import_drawing;
+pub mod import_context;
+pub mod import_ifc;
 
 #[cfg(feature = "web")]
 mod web;

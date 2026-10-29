@@ -55,6 +55,12 @@ pub fn layers_call(name: &str, layers_json: &str, arg_json: &str, now_ms: f64) -
             let plan = layers::plan_import(&strings(&arg["names"]), &cats, &obj(&arg["colors"]), &obj(&arg["weights"]));
             json!({"children": plan.children, "parentCode": plan.parent_code, "codeByLayer": plan.code_by_layer})
         }
+        // Fehlende Kontext-Kategorien ergänzen (`ensureContextCategories`); `null` = nichts fehlt.
+        "ensureContext" => {
+            let mut cats = cats;
+            let codes = strings(&arg);
+            if crate::import_context::ensure_context_categories(&mut cats, codes.iter().map(String::as_str)) { Value::Array(cats) } else { Value::Null }
+        }
         _ => return String::new(),
     };
     out.to_string()

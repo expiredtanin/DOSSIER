@@ -804,6 +804,11 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     wie vorher bis auf erzeugte ids. Messung (vitest/Node, `--no-opt`-WASM, Container unter Last, bigSample(20),
     2,6 MB, 3600 Wände): Öffnen 106–115 ms (alter Weg ohne den Kern-Parse ≈ 210–260 ms: JSON zurück, Differenz,
     Commit), Speichern im Kern 32 ms (vorher Kopie des Baums ≈ 80 ms; `JSON.stringify` in JS 17–19 ms).
+    ◐ **Import-Umwandlung im Kern (29.10.):** Format-Modul liest, der Kern wandelt und wendet als EIN Undo-Schritt an
+    (`core/src/import_drawing.rs`, `import_ifc.rs`, `import_context.rs`, Bindungen `web/import.rs`, TS
+    `ProjectDocument.importDrawing/importIfc/importMesh`). Schritt 1: Kern-Fassung + vorübergehende Paritätstests
+    (`io/importParity.test.ts`, Fixtures über `DOSSIER_PARITY_FX`) neben der alten TS-Fassung; offen: Aufrufer umstellen,
+    TS-Umwandlung löschen.
   Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
   React-Store (TS-Spiegel bleibt bis S3), Befehls-Zustandsautomaten sind viel Code (`src/commands/cmds/*`).
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.

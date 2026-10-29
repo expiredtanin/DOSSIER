@@ -13,6 +13,41 @@ import { fieldOps } from "./opsBuild";
 import { opsMutation } from "./opsBuild";
 import type { ProjectMutation } from "./opsBuild";
 
+/**
+ * Gelesene Zeichnungs-Datei für den Kern ([K4] S4): Puffer des Format-Moduls, je Stück (paralleles Lesen
+ * grosser DXF) hintereinander als `[n, len_0 … len_{n−1}, daten …]`, die String-Tabellen je Stück, und wie
+ * der Puffer zu lesen ist (DXF/DWG bzw. PDF-Seite mit Massstab).
+ */
+export interface ImportSource {
+  geom: Float64Array;
+  strings: string[][];
+  source: { kind: "drawing" } | { kind: "pdf"; scale: number; texts?: boolean };
+}
+
+/** Entscheidung des Import-Dialogs (bzw. CLI) für {@link ProjectDocument.importDrawing}; Texte schon übersetzt. */
+export interface DrawingImportDecision {
+  target: { kind: "existing"; levelId: string } | { kind: "new"; name: string };
+  categoryMode: "byLayer" | "active";
+  activeCategoryCode: string;
+  importMeshes: boolean;
+  /** Mitte des Ausschnitts (Platzierung „viewCenter"); fehlt = an den Datei-Koordinaten. */
+  viewCenter?: [number, number];
+  /** Name einer neuen Zeichnung ohne Eingabe, `{n}` = Nummer. */
+  levelNameTemplate?: string;
+  /** Elternkategorie der neuen Layer-Kategorien. */
+  parentName?: string;
+  /** Name neuer Linienstile aus PDF-Strichmustern, `{pattern}` = Muster. */
+  dashStyleTemplate?: string;
+}
+
+/** Rohergebnis des IFC-Lesers (`fileio`): Bericht (JSON), Positionen, Indizes, Zahlen der Bauteil-Erkennung. */
+export interface IfcFlatInput {
+  meta: string;
+  positions: Float64Array;
+  indices: Uint32Array;
+  elementData?: Float64Array;
+}
+
 /** Ergebnis des Ladens einer Projektdatei ({@link ProjectDocument.loadFile}). */
 export type LoadFileResult =
   | { ok: true; project: Project; warnings: string[]; migratedFrom: number | null }
@@ -306,6 +341,48 @@ export class ProjectDocument {
     const project = applyOps(base, r.ops);
     this.mirror = project;
     return { project, ops: r.ops };
+  }
+
+  /**
+   * Kern-Aufruf, der Ops rechnet und gleich als Benutzer-Änderung anwendet (Importe, [K4] S4): `call`
+   * bekommt das Handle und liefert `{ops, …}`, `{problems}` oder einen Fehlertext mit `\u0001` vorn (wirft).
+   * Die Leseansicht wird mit den angewendeten Ops nachgeführt; die übrigen Felder kommen unverändert zurück.
+   */
+  private commitCore<R extends object>(base: Project, call: (h: number) => string): ({ project: Project; ops: CoreOp[] } & R) | { problems: string[] } {
+    this.ensure(base);
+    if (!this.handle) return { problems: ["Projekt-Dokument im Kern nicht offen."] };
+    const out = call(this.handle);
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    const r = fromMarkedJson<({ ops: CoreOp[] } & R) | { problems: string[] }>(out);
+    if ("problems" in r) return r;
+    const project = r.ops.length ? applyOps(base, r.ops) : base;
+    this.mirror = project;
+    return { ...r, project };
+  }
+
+  /**
+   * Zeichnungs-Import (DXF/DWG/PDF, [K4] S4): der Kern wandelt die gelesene Datei (`src`, Puffer des
+   * Format-Moduls) nach der Entscheidung des Dialogs in Ops (Zeichnungsebene, Kategorien je Layer,
+   * Linienstile, 2D-Zeichnungen, Kontext-Meshes) und wendet sie als EINEN Undo-Schritt an.
+   */
+  importDrawing(base: Project, src: ImportSource, decision: DrawingImportDecision, now: number) {
+    return this.commitCore<{ levelId: string; drawings: number; meshes: number }>(base, (h) =>
+      core().doc_import_drawing(h, src.geom, JSON.stringify(src.strings), JSON.stringify(src.source), JSON.stringify(decision), "", now),
+    );
+  }
+
+  /** IFC-Import ([B3]/[B4], [K4] S4): Kontext-Meshes bzw. (`opts.elements`) Bauteile, ein Undo-Schritt. */
+  importIfc(base: Project, flat: IfcFlatInput, opts: { fileName: string; group?: string; elements?: boolean }, now: number) {
+    return this.commitCore<{ report: Record<string, unknown>; summary: Record<string, number> | null; kept: Record<string, number>; contextObjects: number }>(base, (h) =>
+      core().doc_import_ifc(h, flat.meta, flat.positions, flat.indices, flat.elementData ?? new Float64Array(0), JSON.stringify(opts), "", now),
+    );
+  }
+
+  /** Mesh-Import (OBJ/STL/glTF/PLY, [C11], [K4] S4): Kontext-Meshes, ein Undo-Schritt. */
+  importMesh(base: Project, flat: { flat: Float64Array; strings: string[] }, opts: { fileName: string; placement?: string; group?: string }, now: number) {
+    return this.commitCore<{ report: Record<string, unknown>; contextObjects: number }>(base, (h) =>
+      core().doc_import_mesh(h, flat.flat, JSON.stringify(flat.strings), JSON.stringify(opts), "", now),
+    );
   }
 
   /** Abfrage eines Befehls zwischen den Schritten (`doc_cmd_query`: Treffer, Vorschau-Formen), JSON-Antwort. */
