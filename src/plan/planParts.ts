@@ -13,6 +13,7 @@
 
 import type { Plan, PlanBufRun, Primitive } from "./generatePlan";
 import { encodePlanBuf } from "./planBuf";
+import { isBufPiece, lazyPieces, type PlanPiece } from "./planLazy";
 import { core } from "../engine/coreWasm";
 
 /** Ein im Kern ablegbarer Puffer (Kern-Ergebnis `DecodedPlanBuf` oder eigener). */
@@ -54,21 +55,58 @@ function verifiedRuns(primitives: readonly Primitive[], runs: readonly PlanBufRu
   return clean;
 }
 
-const cache = new WeakMap<readonly Primitive[], { text: PlanParts | null; noText: PlanParts | null }>();
+const cache = new WeakMap<object, { text: PlanParts | null; noText: PlanParts | null }>();
 
 /**
- * Abschnitte eines Plans; einmal je `plan.primitives` (und Modus) gebaut. `texts`: der eigene
- * Puffer trägt Texte/Bilder mit JSON (SVG-Export) — sonst nur deren Typ (Szene, Auswahl).
+ * Abschnitte eines Plans; einmal je Plan (lazy, s. `planLazy.ts`) bzw. je `plan.primitives` (und
+ * Modus) gebaut. `texts`: der eigene Puffer trägt Texte/Bilder mit JSON (SVG-Export, Auswahl) —
+ * sonst nur deren Typ (Szene). Ein lazy Plan wird dabei nicht gelesen.
  */
 export function planParts(plan: Plan, texts = false): PlanParts {
-  const prims = plan.primitives;
-  let c = cache.get(prims);
+  const lazy = lazyPieces(plan);
+  const key: object = lazy ? plan : plan.primitives;
+  let c = cache.get(key);
   if (!c) {
     c = { text: null, noText: null };
-    cache.set(prims, c);
+    cache.set(key, c);
   }
   const hit = texts ? c.text : c.noText;
   if (hit) return hit;
+  const out = lazy ? partsFromPieces(lazy, texts) : partsFromRuns(plan, texts);
+  if (texts) c.text = out;
+  else c.noText = out;
+  return out;
+}
+
+/** Abschnitte aus den Stücken eines lazy Plans: TS-Listen zusammen in einen eigenen Puffer. */
+function partsFromPieces(pieces: readonly PlanPiece[], texts: boolean): PlanParts {
+  const rest: Primitive[] = [];
+  for (const pc of pieces) if (!isBufPiece(pc)) for (const p of pc) rest.push(p);
+  const own: HoldableBuf | null = rest.length ? { bytes: encodePlanBuf(rest, { textJson: texts, hatchJson: false }), hold: 0 } : null;
+  const bufs: HoldableBuf[] = [];
+  const segs: number[] = [];
+  let ownAt = 0;
+  let count = 0;
+  for (const pc of pieces) {
+    if (isBufPiece(pc)) {
+      let i = bufs.indexOf(pc.buf);
+      if (i < 0) i = bufs.push(pc.buf) - 1;
+      segs.push(i, pc.from, pc.to);
+      count += pc.to - pc.from;
+    } else if (pc.length) {
+      let i = bufs.indexOf(own!);
+      if (i < 0) i = bufs.push(own!) - 1;
+      segs.push(i, ownAt, ownAt + pc.length);
+      ownAt += pc.length;
+      count += pc.length;
+    }
+  }
+  return { bufs, segs, count };
+}
+
+/** Abschnitte eines gewöhnlichen Plans über die (per Objekt-Identität geprüften) `bufRuns`. */
+function partsFromRuns(plan: Plan, texts: boolean): PlanParts {
+  const prims = plan.primitives;
   const runs = verifiedRuns(prims, plan.bufRuns);
   const bufs: HoldableBuf[] = [];
   const bufIdx = new Map<HoldableBuf, number>();
@@ -111,10 +149,7 @@ export function planParts(plan: Plan, texts = false): PlanParts {
       ri++;
     }
   }
-  const out: PlanParts = { bufs, segs, count: prims.length };
-  if (texts) c.text = out;
-  else c.noText = out;
-  return out;
+  return { bufs, segs, count: prims.length };
 }
 
 /** Gedimmte Bereiche flach (`Plan.greyedRanges`). */

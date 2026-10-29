@@ -140,7 +140,7 @@ describe("Plan-Puffer v2", () => {
     const prims = Object.values(PRIMS);
     const lean = encodePlanBuf(prims, { lean: true });
     expect(lean.byteLength).toBeLessThan(encodePlanBuf(prims).byteLength);
-    expect(() => decodePlanBuf(lean)).toThrow();
+    expect(() => decodePlanBuf(lean).prims).toThrow();
     // Die GPU-Kompilierung liest beide gleich.
     const a = core().gpu_compile_flat(lean, 0, prims.length, 90, true);
     const b = core().gpu_compile_flat(encodePlanBuf(prims), 0, prims.length, 90, true);

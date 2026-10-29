@@ -53,7 +53,8 @@ import {
   type HatchRender,
   type Primitive,
 } from "./generatePlan/shared";
-import { subtractVoidsInPlan } from "./voids";
+import { subtractVoidsInPlan, voidPrisms } from "./voids";
+import { isBufPiece, lazyPlan, piecesOf, planCount, planFields, type PlanPiece } from "./planLazy";
 import { addSunShadow } from "./generatePlan/sunShadow";
 import { addSiteRules, addSiteViolations } from "./generatePlan/siteRules";
 import { lineWeightFactor, scalePrimitiveWeights } from "./lineWeightScale";
@@ -211,11 +212,6 @@ export interface PlanBufRun {
   to: number;
 }
 
-/** Kern-Abschnitte um `shift` verschieben (beim Zusammensetzen mehrerer Pläne). */
-function shiftRuns(runs: readonly PlanBufRun[] | undefined, shift: number, into: PlanBufRun[]): void {
-  for (const r of runs ?? []) into.push({ ...r, at: r.at + shift });
-}
-
 /**
  * Eine Gruppe kompakt gehaltener Zeichnungen. Ihre Linien entstehen erst beim
  * Kompilieren eines GPU-Chunks (kurzlebig, `build`), nicht als dauerhafte
@@ -254,26 +250,17 @@ export function materializeUnderlay(plan: Plan): Plan {
     for (const pr of g.build(g.drawings)) target.push(pr);
     if (g.tint && target.length > from) (g.above ? aboveGreyed : belowGreyed).push([from, target.length]);
   }
-  const primitives: Primitive[] = [];
-  for (const pr of below) primitives.push(pr);
-  for (const pr of plan.primitives) primitives.push(pr);
-  for (const pr of above) primitives.push(pr);
+  // Stücke statt Kopie (s. `planLazy.ts`): die Primitive des Plans werden dabei nicht gelesen.
+  const n = planCount(plan);
   const shifted = (plan.greyedRanges ?? []).map(([a, b]): [number, number] => [a + below.length, b + below.length]);
-  const aboveShift = below.length + plan.primitives.length;
+  const aboveShift = below.length + n;
   const ranges = [
     ...belowGreyed,
     ...shifted,
     ...aboveGreyed.map(([a, b]): [number, number] => [a + aboveShift, b + aboveShift]),
   ];
-  const bufRuns: PlanBufRun[] = [];
-  shiftRuns(plan.bufRuns, below.length, bufRuns);
-  return {
-    ...plan,
-    primitives,
-    underlay: undefined,
-    greyedRanges: ranges.length ? ranges : undefined,
-    bufRuns: bufRuns.length ? bufRuns : undefined,
-  };
+  const { underlay: _u, greyedRanges: _g, ...fields } = planFields(plan);
+  return lazyPlan({ ...fields, ...(ranges.length ? { greyedRanges: ranges } : {}) }, [below, ...piecesOf(plan), above]);
 }
 
 /** Ob Index `i` in einem der (sortierten, disjunkten) Bereiche liegt. */
@@ -412,15 +399,14 @@ export function generatePlan(
   // Der Kern liefert alles in EINEM Plan-Puffer (Gruppen in dieser Reihenfolge); die Abschnitte
   // merkt sich der Plan (`bufRuns`), damit die GPU sie direkt aus dem Puffer kompiliert.
   const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal);
-  const runs: PlanBufRun[] = [];
+  // Der Plan entsteht aus Stücken ([K3d], `planLazy.ts`): TS-Listen und Kern-Abschnitte; die
+  // Kern-Primitive werden erst gelesen, wenn ein Verbraucher sie als Objekte braucht.
+  const pieces: PlanPiece[] = [primitives];
   const pushGroups = (first: number, last: number): void => {
     if (!dom.buf) return;
     const from = dom.buf.groups[first][0];
     const to = dom.buf.groups[last][1];
-    const at = primitives.length;
-    const src = dom.buf.prims;
-    for (let i = from; i < to; i++) primitives.push(src[i]);
-    if (to > from) runs.push({ at, buf: dom.buf, from, to });
+    if (to > from) pieces.push({ buf: dom.buf, from, to });
   };
   // Decken, Dächer, Räume; Wände (Poché, Referenzlinie) mit ihren Öffnungs-Symbolen, je Wand
   // nacheinander; Treppen (Tritte + Lauflinie + Auf-/Abpfeil mit dem Grundriss-Schnitt, über der
@@ -428,6 +414,8 @@ export function generatePlan(
   pushGroups(G_CEILINGS, G_COLUMNS);
 
   // 2D-Zeichengeometrie zuletzt (über der Poché).
+  const drawingPrims: Primitive[] = [];
+  pieces.push(drawingPrims);
   const compact = compactUnderlay && !mono && !forPrint;
   // Kompakte Unterlage PRO KATEGORIE gruppiert: das Ein-/Ausblenden einer Ebene
   // entfernt dann nur deren Gruppe — die Chunks aller anderen Ebenen bleiben
@@ -437,13 +425,13 @@ export function generatePlan(
   for (const d of drawings) {
     const greyed = categoryDisplay(d.categoryCode).greyed;
     if (compact && isCompactUnderlayEligible(d)) {
-      addDrawing2DWithoutLines(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
+      addDrawing2DWithoutLines(drawingPrims, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
       const key = `${greyed ? 1 : 0}:${d.categoryCode}`;
       const grp = underGroups.get(key);
       if (grp) grp.ds.push(d);
       else underGroups.set(key, { ds: [d], greyed });
     } else {
-      addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator, !mono);
+      addDrawing2D(drawingPrims, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator, !mono);
     }
   }
   const underlay: UnderlayGroup[] = [];
@@ -474,18 +462,10 @@ export function generatePlan(
   // Sichtbarkeit über die Kategorie "90" (Referenzen).
   pushGroups(G_SOLIDS, G_SECTIONS);
 
-  // Schwarz-Weiss (mono): nachträglich alle Farben auf reine Tinte zwingen.
-  // Element-/Kategorie-/Hatch-Farben werden ignoriert, Füllungen werden weiss,
-  // Musterlinien/Striche schwarz — so entsteht ein reiner S/W-Plan.
-  // Abzugskörper (Aussparungen/Durchbrüche): von Wand-/Stützen-/Decken-Poché abziehen.
-  // Ersetzte Primitive erkennt der GPU-Pfad selbst (Identität); verschiebt das Zerlegen die
-  // Indizes, werden die Kern-Abschnitte neu ausgerichtet.
-  if (subtractVoidsInPlan(primitives, project, (floor?.baseElevation ?? 0) + (floor?.cutHeight ?? 1.0))) realignRuns(primitives, runs);
-
   // Baurechts-Verstösse über allem (Signal, soll nicht unter der Wand-Poché verschwinden).
-  if (includeGlobal) addSiteViolations(primitives, project, floorId);
-
-  if (mono) toMono(primitives);
+  const violations: Primitive[] = [];
+  if (includeGlobal) addSiteViolations(violations, project, floorId);
+  pieces.push(violations);
 
   // Georeferenzierte Luftbilder als Hintergrund-Ebenen (nur interaktive Ansicht,
   // nicht Teil der Vektor-Primitive) — im Mono-Modus ausgeblendet (reiner S/W-Plan).
@@ -514,13 +494,41 @@ export function generatePlan(
           ctx: [...g.ctx, lwf],
           build: (ds: Drawing2D[]) => g.build(ds).map((p) => scalePrimitiveWeights(p, lwf)),
         }));
-  // Mono färbt die Objekte um, der Massstab ersetzt sie: dann gilt der Puffer nicht mehr.
-  const keepRuns = !mono && lwf === 1 && runs.length > 0;
-  return {
-    primitives: lwf === 1 ? primitives : primitives.map((p) => scalePrimitiveWeights(p, lwf)),
+  const rest = {
     bounds: computeBounds(project, drawings, dom.buf?.bounds, primitives.slice(0, underlayCount)),
     backgroundImages,
     ...(scaledUnderlay.length ? { underlay: scaledUnderlay } : {}),
+  };
+  const hasVoids = voidPrisms(project).length > 0;
+  // Ohne Abzugskörper, Mono und Strichstärken-Massstab bleibt der Plan lazy: die Kern-Primitive
+  // werden erst bei Bedarf gelesen.
+  if (!hasVoids && !mono && lwf === 1) return lazyPlan(rest, pieces);
+
+  // Sonst wie bisher als Liste: die Schritte unten verändern Primitive.
+  const all: Primitive[] = [];
+  const runs: PlanBufRun[] = [];
+  for (const pc of pieces) {
+    if (isBufPiece(pc)) {
+      runs.push({ at: all.length, buf: pc.buf, from: pc.from, to: pc.to });
+      for (let i = pc.from; i < pc.to; i++) all.push(pc.buf.prim(i));
+    } else for (const pr of pc) all.push(pr);
+  }
+  // Abzugskörper (Aussparungen/Durchbrüche): von Wand-/Stützen-/Decken-Poché abziehen.
+  // Ersetzte Primitive erkennt der GPU-Pfad selbst (Identität); verschiebt das Zerlegen die
+  // Indizes, werden die Kern-Abschnitte neu ausgerichtet. Die Baurechts-Verstösse liegen über
+  // allem und haben keine Bauteil-Id — das Abziehen lässt sie unverändert.
+  if (hasVoids && subtractVoidsInPlan(all, project, (floor?.baseElevation ?? 0) + (floor?.cutHeight ?? 1.0))) realignRuns(all, runs);
+
+  // Schwarz-Weiss (mono): nachträglich alle Farben auf reine Tinte zwingen.
+  // Element-/Kategorie-/Hatch-Farben werden ignoriert, Füllungen werden weiss,
+  // Musterlinien/Striche schwarz — so entsteht ein reiner S/W-Plan.
+  if (mono) toMono(all);
+
+  // Mono färbt die Objekte um, der Massstab ersetzt sie: dann gilt der Puffer nicht mehr.
+  const keepRuns = !mono && lwf === 1 && runs.length > 0;
+  return {
+    primitives: lwf === 1 ? all : all.map((p) => scalePrimitiveWeights(p, lwf)),
+    ...rest,
     ...(keepRuns ? { bufRuns: runs } : {}),
   };
 }
@@ -593,10 +601,13 @@ export function generateVisibleLevelsPlan(
       ? project.drawingLevels.filter((l) => l.kind === active.kind && l.id !== activeLevelId)
       : [];
 
-  const primitives: Primitive[] = [];
+  // Stücke der Ebenen hintereinander (lazy, s. `planLazy.ts`): die Primitive werden dabei nicht
+  // gelesen. Früher eine `for`-Schleife statt `push(...p.primitives)` (Argumentzahl-Grenze bei
+  // Kataster-Importen) — die Stücke umgehen beides.
+  const pieces: PlanPiece[] = [];
+  let count = 0;
   const greyedRanges: Array<[number, number]> = [];
   const underlay: UnderlayGroup[] = [];
-  const bufRuns: PlanBufRun[] = [];
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   const extend = (b: Plan["bounds"]) => {
     bounds.minX = Math.min(bounds.minX, b.minX);
@@ -624,20 +635,15 @@ export function generateVisibleLevelsPlan(
       compactUnderlay,
     );
     for (const g of p.underlay ?? []) underlay.push({ ...g, tint: d.greyed, above: false });
-    // KEIN `primitives.push(...p.primitives)`: bei grossen Importen (z. B. ein
-    // Kataster-DXF einer ganzen Stadt, hunderttausende Drawing2D-Elemente →
-    // ebenso viele Primitives) sprengt der Spread-Operator die Argumentzahl-
-    // Grenze von `push` (RangeError "Maximum call stack size exceeded") — s.
-    // dieselbe, bereits dokumentierte Falle in `swissBuildings3d.ts::concatMeshes`/
-    // `dwgParser.ts`. Reine `for`-Schleife ist unbegrenzt sicher.
-    const from = primitives.length;
-    for (const pr of p.primitives) primitives.push(pr);
-    shiftRuns(p.bufRuns, from, bufRuns);
-    if (d.greyed && primitives.length > from) greyedRanges.push([from, primitives.length]);
+    const from = count;
+    const n = planCount(p);
+    for (const pc of piecesOf(p)) pieces.push(pc);
+    count += n;
+    if (d.greyed && n > 0) greyedRanges.push([from, count]);
     // Leere Ebenen melden als Platzhalter (0,0)–(1,1) — NICHT mitzählen: sonst zog
     // jede leere Nachbar-Ebene den Ausschnitt bis zum Ursprung (bei Landes-
     // koordinaten ~2,7 Mio. m daneben → "Einpassen" zeigte nichts).
-    if (p.primitives.length > 0 || p.underlay) extend(p.bounds);
+    if (n > 0 || p.underlay) extend(p.bounds);
   }
 
   const activePlan = generatePlan(
@@ -653,20 +659,21 @@ export function generateVisibleLevelsPlan(
     false,
     compactUnderlay,
   );
-  shiftRuns(activePlan.bufRuns, primitives.length, bufRuns);
-  for (const pr of activePlan.primitives) primitives.push(pr);
+  const activeCount = planCount(activePlan);
+  for (const pc of piecesOf(activePlan)) pieces.push(pc);
   for (const g of activePlan.underlay ?? []) underlay.push(g);
   // Aktive Ebene leer UND keine Nachbar-Ebene mit Inhalt → Platzhalter-Ausmass.
-  if (activePlan.primitives.length > 0 || activePlan.underlay || bounds.minX === Infinity) extend(activePlan.bounds);
+  if (activeCount > 0 || activePlan.underlay || bounds.minX === Infinity) extend(activePlan.bounds);
 
-  return {
-    primitives,
-    bounds,
-    backgroundImages: activePlan.backgroundImages,
-    ...(greyedRanges.length ? { greyedRanges } : {}),
-    ...(underlay.length ? { underlay } : {}),
-    ...(bufRuns.length ? { bufRuns } : {}),
-  };
+  return lazyPlan(
+    {
+      bounds,
+      backgroundImages: activePlan.backgroundImages,
+      ...(greyedRanges.length ? { greyedRanges } : {}),
+      ...(underlay.length ? { underlay } : {}),
+    },
+    pieces,
+  );
 }
 
 // ── Schnitt/Ansicht (abgeleitete Projektion aus render3d::section) ──────────────

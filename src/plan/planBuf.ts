@@ -446,10 +446,21 @@ export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions =
   return new Uint8Array(out);
 }
 
-/** Gelesener Plan-Puffer (Kern-Ergebnis); `bytes` bleibt für die GPU-Kompilierung erhalten. */
+/**
+ * Gelesener Plan-Puffer (Kern-Ergebnis); `bytes` bleibt für die GPU-Kompilierung erhalten.
+ * Die Primitive entstehen erst bei Bedarf ([K3d]): `prim(i)` liest einen Eintrag, `prims` alle
+ * (dieselben Objekte — einmal gelesen, bleibt ein Eintrag dasselbe Objekt).
+ */
 export interface DecodedPlanBuf {
   bytes: Uint8Array;
-  prims: Primitive[];
+  /** Alle Primitive (beim ersten Zugriff gelesen). */
+  readonly prims: Primitive[];
+  /** Anzahl Einträge. */
+  count: number;
+  /** Eintrag `i` als Primitiv (gelesen bei Bedarf, danach gemerkt). */
+  prim(i: number): Primitive;
+  /** Typ-Kennung des Eintrags `i` (1 polygon · 2 line · … · 6 text · 7 drawingText · 8 drawingTextPath · 9 drawingImage). */
+  tag(i: number): number;
   groups: Array<[number, number]>;
   bounds?: [number, number, number, number];
   /** Inhalts-Hash je Primitiv (vom Kern; Schlüssel des GPU-Chunk-Caches) oder null. */
@@ -458,7 +469,6 @@ export interface DecodedPlanBuf {
   hold: number;
 }
 
-/** UTF-16-Einheiten → ein String (exakt, auch einzelne Surrogate). */
 function unitsToString(u: Uint16Array): string {
   let s = "";
   for (let i = 0; i < u.length; i += 8192) {
@@ -499,11 +509,13 @@ export function decodePlanBuf(input: Uint8Array): DecodedPlanBuf {
   const nF64 = poolAt + nPool;
   if (!Number.isInteger(nF64) || bytes.byteLength !== nF64 * 8 + nUnits * 2) bad("Länge");
   const f = new Float64Array(bytes.buffer, bytes.byteOffset, nF64);
-  const all = unitsToString(new Uint16Array(bytes.buffer, bytes.byteOffset + nF64 * 8, nUnits));
+  // Texte erst beim ersten Zugriff als ein String gelesen.
+  let all: string | null = null;
   const strs: Array<string | undefined> = new Array(nStrings);
   const S = (i: number): string => {
     let s = strs[i];
     if (s === undefined) {
+      all ??= unitsToString(new Uint16Array(bytes.buffer, bytes.byteOffset + nF64 * 8, nUnits));
       const o = f[strAt + 2 * i];
       s = all.slice(o, o + f[strAt + 2 * i + 1]);
       strs[i] = s;
@@ -511,13 +523,23 @@ export function decodePlanBuf(input: Uint8Array): DecodedPlanBuf {
     return s;
   };
   // Schraffuren: einmal je Eintrag aus dem JSON (geteilt von allen Polygonen).
-  const hatchList: HatchRender[] = [];
+  // JSON je Schraffur erst beim ersten Polygon, das sie braucht (dann geteilt).
+  const hatchJs: number[] = [];
+  const hatchObjs: Array<HatchRender | undefined> = new Array(nHatches);
+  const hatchAtIdx = (h: number): HatchRender => {
+    let o = hatchObjs[h];
+    if (o === undefined) {
+      const js = hatchJs[h];
+      o = js >= 0 ? (JSON.parse(S(js)) as HatchRender) : (undefined as unknown as HatchRender);
+      hatchObjs[h] = o;
+    }
+    return o;
+  };
   let k = hatchAt;
   for (let i = 0; i < nHatches; i++) {
     // [jsonStr, pattern, kind, flags, scale, angle, color, lineWeight, ox, oy, seed, density,
     //  lengthMin, lengthMax, nDash, dash…, (Motiv: length, nPts, x,y…)]
-    const js = f[k];
-    hatchList.push(js >= 0 ? (JSON.parse(S(js)) as HatchRender) : (undefined as unknown as HatchRender));
+    hatchJs.push(f[k]);
     const hf = f[k + 3];
     k += 15 + f[k + 14];
     if (hf & 64) k += 2 + 2 * f[k + 1];
@@ -551,8 +573,7 @@ export function decodePlanBuf(input: Uint8Array): DecodedPlanBuf {
     found.sort((a, b) => a[0] - b[0]);
     for (const [kk, id] of found) o[PICK_KEYS[kk - 1]] = id;
   };
-  const prims: Primitive[] = new Array(nPrims);
-  for (let i = 0; i < nPrims; i++) {
+  const read = (i: number): Primitive => {
     let r = recAt + f[offAt + i];
     const tag = f[r];
     const fl = f[r + 1];
@@ -563,7 +584,7 @@ export function decodePlanBuf(input: Uint8Array): DecodedPlanBuf {
     switch (tag) {
       case 1: {
         o = { kind: "polygon", pts: pts(f[r + 5], f[r + 6]), fill: S(f[r]), stroke: S(f[r + 1]), strokeWidthMm: f[r + 2] };
-        if (f[r + 3] >= 0) o.hatch = hatchList[f[r + 3]];
+        if (f[r + 3] >= 0) o.hatch = hatchAtIdx(f[r + 3]);
         if (fl & F_GREYED_SET) o.greyed = (fl & F_GREYED) !== 0;
         if (fl & F_OPACITY) o.opacity = f[r + 4];
         let t = r + 7;
@@ -653,11 +674,33 @@ export function decodePlanBuf(input: Uint8Array): DecodedPlanBuf {
       default:
         bad(`Primitiv-Typ ${tag}`);
     }
-    prims[i] = o as unknown as Primitive;
-  }
+    return o as unknown as Primitive;
+  };
+  // Einmal gelesene Einträge bleiben dieselben Objekte (Identität zählt für `Plan.bufRuns`).
+  const cache: Array<Primitive | undefined> = new Array(nPrims);
+  const prim = (i: number): Primitive => {
+    if (!(i >= 0 && i < nPrims)) bad(`Eintrag ${i}`);
+    let p = cache[i];
+    if (p === undefined) {
+      p = read(i);
+      cache[i] = p;
+    }
+    return p;
+  };
+  let allPrims: Primitive[] | null = null;
   return {
     bytes,
-    prims,
+    get prims(): Primitive[] {
+      if (!allPrims) {
+        const out: Primitive[] = new Array(nPrims);
+        for (let i = 0; i < nPrims; i++) out[i] = prim(i);
+        allPrims = out;
+      }
+      return allPrims;
+    },
+    count: nPrims,
+    prim,
+    tag: (i: number): number => f[recAt + f[offAt + i]],
     groups,
     bounds: flags & 2 ? [hd[12], hd[13], hd[14], hd[15]] : undefined,
     hashes: hashes ? new Float64Array(bytes.buffer, bytes.byteOffset + hashAt * 8, nPrims) : null,
