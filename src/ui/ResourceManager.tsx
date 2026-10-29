@@ -126,10 +126,10 @@ export interface ResourceManagerHandlers {
    * Deckentypen. Optional, damit ältere Einbettungen ohne diesen Handler
    * weiter kompilieren; ohne Handler bleiben die Tabs verborgen.
    */
-  onAddDoorType?: () => void;
+  onAddDoorType?: (preset?: DoorType) => void;
   onPatchDoorType?: (id: string, patch: Partial<DoorType>) => void;
   onDeleteDoorType?: (id: string) => void;
-  onAddWindowType?: () => void;
+  onAddWindowType?: (preset?: WindowType) => void;
   onPatchWindowType?: (id: string, patch: Partial<WindowType>) => void;
   onDeleteWindowType?: (id: string) => void;
   onAddStairType?: () => void;

@@ -14,6 +14,7 @@
 //! Stärken: haar, rahmenHaar, rahmenAufsicht, fluegel, sims,
 //! Details ([94]): anschlag (Meter, 0 keiner), bank (0 fehlt | 1 keine | 2 innen | 3 beide | 4 aussen),
 //!   kastenSturz (0 vorgesetzt | 1 im Sturz), kastenTiefe, kastenArt (0 Rollladen | 1 Raffstore | 2 Markise),
+//! Türart ([95]): 0 Dreh | 1 Schiebe (vor der Wand, Aufschlagseite) | 2 Hebeschiebe | 3 Pendel,
 //! nFluegel, (pfosten, auto, breite, pfostenbreite, oeffenbar) × n]`.
 //!
 //! Ausgabe `[n, Eintrag × n]` in Zeichenreihenfolge:
@@ -117,6 +118,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
     let shading_sturz = r.num()? != 0.0;
     let shading_depth = r.num()?;
     let shading_kind = r.num()? as i64;
+    let door_kind = r.num()? as i64;
     let n_sash = r.count()?;
     let mut sashes = Vec::with_capacity(n_sash);
     for _ in 0..n_sash {
@@ -140,12 +142,45 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
         if let Some(gap) = opening_gap_quad(&w, position, width) {
             o.polygon(0.0, 0.0, 0.0, &gap);
         }
-        if !wandoeffnung {
-            let count = max(1.0, round(if leaf_count.is_nan() { 1.0 } else { leaf_count }));
+        let count = max(1.0, round(if leaf_count.is_nan() { 1.0 } else { leaf_count }));
+        if wandoeffnung {
+            // Reine Wandöffnung: nur Lücke (und Sturzlinien).
+        } else if door_kind == 1 {
+            sliding_leaves(&mut o, &w, jamb_start, jamb_end, &door, count, hair);
+        } else if door_kind == 2 {
+            // Gleise im Rahmen: hinter der Anschlag-Zone (bzw. mittig ohne Rahmentyp).
+            let half = total / 2.0;
+            let depth = max(0.12, if frame_width.is_nan() { 0.0 } else { frame_width });
+            let (lo, hi) = if !has_frame {
+                (ref_off - depth / 2.0, ref_off + depth / 2.0)
+            } else if frame_inset_side == 1.0 {
+                let e = ref_off + half - max(0.0, min(frame_inset, total));
+                (max(ref_off - half, e - depth), e)
+            } else if frame_inset_side == 2.0 {
+                (ref_off - depth / 2.0, ref_off + depth / 2.0)
+            } else {
+                let e = ref_off - half + max(0.0, min(frame_inset, total));
+                (e, min(ref_off + half, e + depth))
+            };
+            lift_slide(&mut o, jamb_start, jamb_end, wn, lo, hi, door.hinge_end, hair);
+        } else {
             for leaf in door_leaves(&w, position, width, &door, count) {
                 o.line(C_LEAF, hair, 0.0, 0.0, leaf.hinge, leaf.open_end);
                 if detail != Detail::Grob {
                     o.arc(hair, leaf.hinge, leaf.closed_end, leaf.open_end, leaf.radius);
+                }
+            }
+            if door_kind == 3 {
+                // Pendeltür: schlägt auch zur Gegenseite auf (Blatt gepunktet, Bogen).
+                let other = DoorParams { swing_right: !door.swing_right, ..door };
+                for leaf in door_leaves(&w, position, width, &other, count) {
+                    o.line(C_LEAF, hair, 0.0, 3.0, leaf.hinge, leaf.open_end);
+                    if detail != Detail::Grob {
+                        // Bögen laufen gegen den Uhrzeigersinn von `from` nach `to`: kurzen Bogen wählen.
+                        let (a, b) = (sub(leaf.closed_end, leaf.hinge), sub(leaf.open_end, leaf.hinge));
+                        let (from, to) = if a.x * b.y - a.y * b.x >= 0.0 { (leaf.closed_end, leaf.open_end) } else { (leaf.open_end, leaf.closed_end) };
+                        o.arc(hair, leaf.hinge, from, to, leaf.radius);
+                    }
                 }
             }
         }
@@ -319,6 +354,73 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
     Some(finish(o))
 }
 
+/// Pfeil von `a` nach `b` (Schaft + zwei Widerhaken) in Richtung der Schiebebewegung.
+fn arrow(o: &mut Out, a: V, b: V, side: V, hair: f64) {
+    let d = normalize(sub(b, a));
+    let l = hypot2(b.x - a.x, b.y - a.y);
+    let barb = min(0.12, l * 0.35);
+    o.line(C_LEAF, hair, 0.0, 0.0, a, b);
+    for k in [-1.0, 1.0] {
+        o.line(C_LEAF, hair, 0.0, 0.0, b, add(sub(b, scale(d, barb)), scale(side, k * barb * 0.45)));
+    }
+}
+
+/// Schiebetür vor der Wand (SIA): Blatt als schmales Rechteck in Schliessstellung auf der
+/// Aufschlagseite vor der Wandfläche, je Blatt ein Pfeil zur Parkseite (Bandseite bzw. aussen).
+fn sliding_leaves(o: &mut Out, w: &WallRef, js: V, je: V, p: &DoorParams, count: f64, hair: f64) {
+    let n = w.frame().1;
+    let side = (if p.swing_right { -1.0 } else { 1.0 }) * (if p.open_out { -1.0 } else { 1.0 });
+    let face = w.ref_off + side * w.total / 2.0;
+    let (n0, n1) = (face + side * 0.01, face + side * 0.05);
+    let wd = hypot2(je.x - js.x, je.y - js.y);
+    let ov = 0.05;
+    let leaf = |o: &mut Out, u0: f64, u1: f64| {
+        let a = along(js, je, u0);
+        let b = along(js, je, u1);
+        o.ring(C_LEAF, hair, 0.0, &[add(a, scale(n, n0)), add(b, scale(n, n0)), add(b, scale(n, n1)), add(a, scale(n, n1))]);
+    };
+    let mid_n = face + side * 0.12;
+    let at = |u: f64| add(along(js, je, u), scale(n, mid_n));
+    if count >= 2.0 {
+        leaf(o, -ov, wd / 2.0);
+        leaf(o, wd / 2.0, wd + ov);
+        arrow(o, at(wd * 0.4), at(wd * 0.1), n, hair);
+        arrow(o, at(wd * 0.6), at(wd * 0.9), n, hair);
+    } else {
+        leaf(o, -ov, wd + ov);
+        let (from, to) = if p.hinge_end { (wd * 0.25, wd * 0.75) } else { (wd * 0.75, wd * 0.25) };
+        arrow(o, at(from), at(to), n, hair);
+    }
+}
+
+/// Hebeschiebetür (SIA wie Schiebefenster): zwei Flügel auf versetzten Gleisen im Rahmen
+/// (`lo..hi` quer zur Wand), das feste Feld an der Bandseite, das Schiebefeld mit Pfeil dorthin.
+#[allow(clippy::too_many_arguments)]
+fn lift_slide(o: &mut Out, js: V, je: V, n: V, lo: f64, hi: f64, hinge_end: bool, hair: f64) {
+    let wd = hypot2(je.x - js.x, je.y - js.y);
+    let span = hi - lo;
+    if span <= 1e-3 || wd <= 1e-3 {
+        return;
+    }
+    let ts = min(0.05, span / 2.5);
+    let gap = (span - 2.0 * ts) / 3.0;
+    let outer = (lo + gap, lo + gap + ts);
+    let inner = (hi - gap - ts, hi - gap);
+    let ov = 0.03;
+    let (fixed_u, slide_u) = if hinge_end { ((wd / 2.0 - ov, wd), (0.0, wd / 2.0 + ov)) } else { ((0.0, wd / 2.0 + ov), (wd / 2.0 - ov, wd)) };
+    for ((u0, u1), (n0, n1)) in [(fixed_u, outer), (slide_u, inner)] {
+        let a = along(js, je, u0);
+        let b = along(js, je, u1);
+        o.ring(C_LEAF, hair, 0.0, &[add(a, scale(n, n0)), add(b, scale(n, n0)), add(b, scale(n, n1)), add(a, scale(n, n1))]);
+        let g = (n0 + n1) / 2.0;
+        o.line(C_GLASS, hair, 0.0, 0.0, add(a, scale(n, g)), add(b, scale(n, g)));
+    }
+    // Pfeil auf der Innenseite des Schiebefelds, zur Bandseite (über das feste Feld).
+    let an = inner.1 + gap.max(0.04);
+    let (from, to) = if hinge_end { (wd * 0.15, wd * 0.6) } else { (wd * 0.85, wd * 0.4) };
+    arrow(o, add(along(js, je, from), scale(n, an)), add(along(js, je, to), scale(n, an)), n, hair);
+}
+
 fn finish(o: Out) -> Vec<f64> {
     let mut out = Vec::with_capacity(o.buf.len() + 1);
     out.push(o.n as f64);
@@ -410,6 +512,7 @@ mod tests {
         b.extend([has_type as u8 as f64, 0.06, NAN, NAN, 0.0, NAN, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]); // Fenster
         b.extend([0.02, 0.02, 0.02, 0.02, 0.02]); // Strichstärken
         b.extend([0.0, 0.0, 0.0, 0.0, 0.0]); // Details: kein Anschlag, Bank fehlt, Kasten vorgesetzt
+        b.push(0.0); // Türart Dreh
         b.push(sashes.len() as f64);
         for s in sashes {
             b.extend(s);
@@ -573,5 +676,33 @@ mod tests {
         b[20] = 0.1; // Einzug aussen
         b[DETAILS] = 0.04;
         assert_eq!(polygons(&plan_opening(&b), 2.0).len(), 2);
+    }
+
+    /// [95] Türarten im Grundriss: Schiebetür (Blatt-Rechteck + Pfeil, kein Bogen), Hebeschiebe
+    /// (zwei Flügel auf versetzten Gleisen + Glaslinien + Pfeil), Pendel (Bögen beidseitig).
+    #[test]
+    fn tuerarten_nach_sia() {
+        const KIND: usize = DETAILS + 5;
+        let mut b = input(true, 1.0, false, &[]);
+        let arcs = |f: &[f64]| tags(f).iter().filter(|t| **t == 3.0).count();
+        assert_eq!(arcs(&plan_opening(&b)), 1);
+        b[KIND] = 1.0;
+        let f = plan_opening(&b);
+        assert_eq!(arcs(&f), 0);
+        assert_eq!(count_cls(&f, C_LEAF), 4 + 3);
+        b[15] = 2.0; // zwei Blätter
+        assert_eq!(count_cls(&plan_opening(&b), C_LEAF), 8 + 6);
+        b[15] = 1.0;
+        b[KIND] = 2.0;
+        let f = plan_opening(&b);
+        assert_eq!(count_cls(&f, C_LEAF), 8 + 3);
+        assert_eq!(count_cls(&f, C_GLASS), 2);
+        b[KIND] = 3.0;
+        assert_eq!(arcs(&plan_opening(&b)), 2);
+        // Grob: keine Bögen, aber beide Blätter.
+        b[9] = 0.0;
+        let f = plan_opening(&b);
+        assert_eq!(arcs(&f), 0);
+        assert_eq!(count_cls(&f, C_LEAF), 2);
     }
 }

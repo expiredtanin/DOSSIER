@@ -13,6 +13,7 @@ import { addItems, fieldOps, patchItem, removeItems } from "../core";
 import type { CoreOp } from "../core";
 import { t } from "../i18n";
 import { uniqueId } from "../tools/types";
+import { instantiatePreset } from "../model/openingPresets";
 import type {
   CeilingType,
   ContextObject,
@@ -208,8 +209,10 @@ export function useProjectActions(
   // (kein eigener Slice). Löschen ist geschützt, solange ein Element den Typ
   // per `typeId` referenziert. Defaults orientieren sich an den Element-Inline-
   // Werten (Tür 0.9×2.0, Fenster 1.2×1.4 Brüstung 0.9).
-  const addDoorType = () =>
+  const addDoorType = (preset?: DoorType) =>
     applyChange(() => {
+      // Aus der Typen-Bibliothek ([95]): Kopie der Vorlage mit neuer id.
+      if (preset) return addItems("doorTypes", [instantiatePreset(preset, uniqueId("dt"), preset.name)]);
       const dt: DoorType = {
         id: uniqueId("dt"),
         name: t("default.doorTypeName"),
@@ -234,8 +237,9 @@ export function useProjectActions(
       }
       return removeItems(p, "doorTypes", [id]);
     });
-  const addWindowType = () =>
+  const addWindowType = (preset?: WindowType) =>
     applyChange(() => {
+      if (preset) return addItems("windowTypes", [instantiatePreset(preset, uniqueId("ft"), preset.name)]);
       const wt: WindowType = {
         id: uniqueId("ft"),
         name: t("default.windowTypeName"),

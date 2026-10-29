@@ -311,7 +311,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     b.push(b01(o.opening_dir.is_some_and(|s| s != OpeningOpeningDir::In)));
     b.push(b01(o.hinge.is_some_and(|s| s != OpeningHinge::Start)));
     b.push(o.swing_angle.unwrap_or(f64::NAN));
-    b.push(b01(o.door_type == Some(OpeningDoorType::Wandoeffnung)));
+    b.push(b01(o.door_type == Some(OpeningDoorType::Wandoeffnung) || (door && door_type(p, o).is_some_and(|t| t.kind == DoorTypeKind::Wandoeffnung))));
     b.push(if door { crate::jsnum::max(1.0, round(door_type(p, o).map_or(1.0, |t| t.leaf_count))) } else { 1.0 });
     b.push(match o.lintel_lines.unwrap_or(OpeningLintelLines::Beide) {
         OpeningLintelLines::Keine => 0.0,
@@ -379,6 +379,12 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     b.push(match shading.map(|s| s.kind) {
         Some(WindowShadingKind::Raffstore) => 1.0,
         Some(WindowShadingKind::Markise) => 2.0,
+        _ => 0.0,
+    });
+    b.push(match dt.map(|t| t.kind) {
+        Some(DoorTypeKind::Schiebe) => 1.0,
+        Some(DoorTypeKind::Hebeschiebe) => 2.0,
+        Some(DoorTypeKind::Pendel) => 3.0,
         _ => 0.0,
     });
     b.push(sash_list.len() as f64);

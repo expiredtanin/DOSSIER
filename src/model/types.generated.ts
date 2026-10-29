@@ -500,7 +500,7 @@ export type DoorType = {
    * Bauart: normaler Drehflügel, reine Wandöffnung (kein Blatt/Schwenk),
    * Schiebetür. Ersetzt/ergänzt das Inline-Feld `Opening.doorType`.
    */
-  kind: "dreh" | "schiebe" | "wandoeffnung";
+  kind: "dreh" | "schiebe" | "wandoeffnung" | "hebeschiebe" | "pendel";
   /** Anzahl Türblätter (1 = einflügelig, 2 = zweiflügelig). */
   leafCount: 1 | 2;
   /** Blatt-Ausführung (3D/Detail): glatt, Kassette, Glasfüllung. */
@@ -2852,6 +2852,11 @@ export type WindowType = {
    * (Meter), abgeteilt durch einen Kämpfer. 0/fehlt ⇒ kein Oberlicht.
    */
   transomHeight?: number;
+  /**
+   * Einteilung des Oberlichts über dem Riegel (Pfosten/Riegel, [95]): Felder und Pfosten wie
+   * {@link sashes}, je Feld fest oder öffenbar (meist Kipp). Fehlt ⇒ ein festes Feld (bisher).
+   */
+  transomSashes?: Array<SashDef>;
   /**
    * Auf-/Untersicht-Andeutung im Grundriss (mittel/fein): eine Referenzlinie an
    * der gewählten Fläche(n) — sinnvoll, wenn die Öffnung die Schnittebene NICHT

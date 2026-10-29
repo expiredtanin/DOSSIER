@@ -462,6 +462,7 @@ impl<'a> Reader<'a> {
             0 => DoorKind::Swing,
             1 => DoorKind::Sliding,
             2 => DoorKind::WallOpening,
+            3 => DoorKind::DoubleSwing,
             k => return Err(format!("unbekannte Türart {k} bei {}", self.pos - 1)),
         };
         let leaf_count = self.f()?;
@@ -2251,6 +2252,7 @@ mod tests {
                 DoorKind::Swing => 0.0,
                 DoorKind::Sliding => 1.0,
                 DoorKind::WallOpening => 2.0,
+                DoorKind::DoubleSwing => 3.0,
             };
             self.n(&[k, p.leaf_count, p.swing_sign, p.dir_sign, if p.hinge_at_start { 1.0 } else { 0.0 }, p.transom_height]);
             self.n(&[if p.glazed { 1.0 } else { 0.0 }]);

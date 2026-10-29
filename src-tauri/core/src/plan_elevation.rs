@@ -39,7 +39,7 @@
 //! rahmenbreite, kaempferHoehe, sprossenZeilen (NaN = 1), sprossenSpalten (NaN = 1),
 //! bankAn, typArt (0 fest, 1 dreh, 2 kipp, 3 drehkipp, 4 schiebe),
 //! anschlag (Meter, 0 keiner), anschlagSeite (1 aussen | −1 innen; [94]),
-//! nFluegel, (pfosten, pfostenBreite (NaN), autoBreite (0/1), breite (NaN), art (-1 = typArt), bandLinks) × nFluegel
+//! tuerArt (0 Dreh | 1 Schiebe | 2 Hebeschiebe | 3 Pendel; [95]), nFluegel, (pfosten, pfostenBreite (NaN), autoBreite (0/1), breite (NaN), art (-1 = typArt), bandLinks) × nFluegel
 //! ```
 //! → `[n, (ok, tiefe, istTuer, 8 Ecken, Listen) × n]`; `ok` 0 = nicht sichtbar (sonst nichts mehr).
 //! Listen in dieser Reihenfolge, je `[anzahl, Einträge]`: glas, tuerblatt (Vierecke à 8 Werte),
@@ -827,7 +827,7 @@ fn rect(q: &Quad, fa0: f64, fa1: f64, fz0: f64, fz1: f64) -> Quad {
 }
 
 /// Feste Werte je Öffnung vor der Flügelliste (der letzte = Flügelzahl).
-const REC: usize = 21;
+const REC: usize = 22;
 
 /// Projiziert die zum Betrachter zeigende Wand-Langseite der Öffnung; `None` ohne sichtbare Seite.
 fn project_opening_rect(f: &Frame, o: &[f64]) -> Option<(Quad, f64)> {
@@ -873,34 +873,9 @@ fn project_opening_side(f: &Frame, o: &[f64]) -> Option<(Quad, f64, f64)> {
     None
 }
 
-fn layout_opening(o: &[f64], sashes: &[f64], pts: &Quad) -> OpeningOut {
-    let mut out = OpeningOut::default();
-    let (from, to, z_bottom, z_top) = (o[5], o[6], o[7], o[8]);
-    let w = to - from;
-    let h = z_top - z_bottom;
-    if o[9] != 0.0 {
-        // Tür: Blatt-Fläche, bei Glasblatt mit Teilverglasung (Kämpferhöhe von OBEN).
-        if o[10] != 0.0 {
-            let ratio = max(0.05, min(1.0, if o[11].is_nan() { 1.0 } else { o[11] }));
-            if ratio >= 1.0 - EPS {
-                out.glass.push(rect(pts, 0.04, 0.96, 0.0, 0.97));
-            } else {
-                let split_z = 0.97 * (1.0 - ratio);
-                out.glass.push(rect(pts, 0.04, 0.96, split_z, 0.97));
-                out.door_leaf.push(rect(pts, 0.04, 0.96, 0.0, split_z));
-                out.divisions.push((quad_at(pts, 0.04, split_z), quad_at(pts, 0.96, split_z)));
-            }
-        } else {
-            out.door_leaf.push(rect(pts, 0.04, 0.96, 0.0, 0.97));
-        }
-        return out;
-    }
-    let fw = o[12];
-    let fa = min(0.45, fw / max(w, 1e-6));
-    let fz = min(0.45, fw / max(h, 1e-6));
-    let transom = max(0.0, o[13]);
-    let f_tr = if transom > EPS && transom < h - fw { 1.0 - transom / h } else { 0.0 };
-    let field_top = if f_tr > 0.0 { f_tr - fz / 2.0 } else { 1.0 - fz };
+/// Flügel/Pfosten eines Feldbands `fz..field_top` (Anteile der Öffnungshöhe) über die lichte Breite.
+#[allow(clippy::too_many_arguments)]
+fn sash_band(out: &mut OpeningOut, o: &[f64], sashes: &[f64], pts: &Quad, w: f64, h: f64, fa: f64, fw: f64, fz: f64, field_top: f64, rows_in: f64, cols_in: f64) {
     let inner_w = max(1e-6, w * (1.0 - 2.0 * fa));
     let n_sashes = sashes.len() / 6;
     let sash = |k: usize| &sashes[6 * k..6 * k + 6];
@@ -942,8 +917,8 @@ fn layout_opening(o: &[f64], sashes: &[f64], pts: &Quad) -> OpeningOut {
         let g_b = fa1 - g_u;
         let gz0 = fz + g_v;
         let gz1 = field_top - g_v;
-        let rows = max(1.0, round(if o[14].is_nan() { 1.0 } else { o[14] })) as usize;
-        let cols = max(1.0, round(if o[15].is_nan() { 1.0 } else { o[15] })) as usize;
+        let rows = max(1.0, round(if rows_in.is_nan() { 1.0 } else { rows_in })) as usize;
+        let cols = max(1.0, round(if cols_in.is_nan() { 1.0 } else { cols_in })) as usize;
         if g_b - g_a > 1e-6 && gz1 - gz0 > 1e-6 {
             for r in 0..rows {
                 let rf = r as f64;
@@ -1000,6 +975,59 @@ fn layout_opening(o: &[f64], sashes: &[f64], pts: &Quad) -> OpeningOut {
             out.symbol.push((quad_at(pts, head - barb, gz0 + (gz1 - gz0) * 0.68), head_pt));
         }
     }
+}
+
+fn layout_opening(o: &[f64], sashes: &[f64], transom_sashes: &[f64], pts: &Quad) -> OpeningOut {
+    let mut out = OpeningOut::default();
+    let (from, to, z_bottom, z_top) = (o[5], o[6], o[7], o[8]);
+    let w = to - from;
+    let h = z_top - z_bottom;
+    if o[9] != 0.0 {
+        // Oberlicht über dem Kämpfer ([95]): festes Glasfeld, das Blatt endet darunter.
+        let transom = if o[13].is_nan() { 0.0 } else { o[13] };
+        let top = if transom > EPS && transom < h * 0.8 {
+            let f_tr = 1.0 - transom / h;
+            out.glass.push(rect(pts, 0.04, 0.96, f_tr + 0.015, 0.97));
+            out.divisions.push((quad_at(pts, 0.0, f_tr), quad_at(pts, 1.0, f_tr)));
+            f_tr - 0.015
+        } else {
+            0.97
+        };
+        let kind = o[20];
+        if kind == 2.0 {
+            // Hebeschiebetür: zwei Glasfelder, Pfeil auf dem Schiebefeld (zur Mitte hin).
+            out.glass.push(rect(pts, 0.04, 0.5, 0.03, top));
+            out.glass.push(rect(pts, 0.5, 0.96, 0.03, top));
+            out.divisions.push((quad_at(pts, 0.5, 0.0), quad_at(pts, 0.5, top)));
+            slide_arrow(&mut out, pts, 0.85, 0.6, top * 0.5, top);
+            return out;
+        }
+        // Tür: Blatt-Fläche, bei Glasblatt mit Teilverglasung (Kämpferhöhe von OBEN).
+        if o[10] != 0.0 {
+            let ratio = max(0.05, min(1.0, if o[11].is_nan() { 1.0 } else { o[11] }));
+            if ratio >= 1.0 - EPS {
+                out.glass.push(rect(pts, 0.04, 0.96, 0.0, top));
+            } else {
+                let split_z = top * (1.0 - ratio);
+                out.glass.push(rect(pts, 0.04, 0.96, split_z, top));
+                out.door_leaf.push(rect(pts, 0.04, 0.96, 0.0, split_z));
+                out.divisions.push((quad_at(pts, 0.04, split_z), quad_at(pts, 0.96, split_z)));
+            }
+        } else {
+            out.door_leaf.push(rect(pts, 0.04, 0.96, 0.0, top));
+        }
+        if kind == 1.0 {
+            slide_arrow(&mut out, pts, 0.75, 0.25, top * 0.5, top);
+        }
+        return out;
+    }
+    let fw = o[12];
+    let fa = min(0.45, fw / max(w, 1e-6));
+    let fz = min(0.45, fw / max(h, 1e-6));
+    let transom = max(0.0, o[13]);
+    let f_tr = if transom > EPS && transom < h - fw { 1.0 - transom / h } else { 0.0 };
+    let field_top = if f_tr > 0.0 { f_tr - fz / 2.0 } else { 1.0 - fz };
+    sash_band(&mut out, o, sashes, pts, w, h, fa, fw, fz, field_top, o[14], o[15]);
     if o[16] != 0.0 {
         let ov1 = 0.02 / max(w, 1e-6);
         let ov2 = 0.05 / max(w, 1e-6);
@@ -1009,10 +1037,24 @@ fn layout_opening(o: &[f64], sashes: &[f64], pts: &Quad) -> OpeningOut {
         out.sill.push(rect(pts, -ov2, 1.0 + ov2, -(h1 + h2), -h1));
     }
     if f_tr > 0.0 {
-        out.glass.push(rect(pts, fa, 1.0 - fa, f_tr + fz / 2.0, 1.0 - fz));
+        if transom_sashes.is_empty() {
+            out.glass.push(rect(pts, fa, 1.0 - fa, f_tr + fz / 2.0, 1.0 - fz));
+        } else {
+            // Oberlicht mit Einteilung (Pfosten/Riegel, [95]).
+            sash_band(&mut out, o, transom_sashes, pts, w, h, fa, fw, f_tr + fz / 2.0, 1.0 - fz, f64::NAN, f64::NAN);
+        }
         out.divisions.push((quad_at(pts, 0.0, f_tr), quad_at(pts, 1.0, f_tr)));
     }
     out
+}
+
+/// Schiebe-Pfeil (Schaft + zwei Widerhaken) von `tail` nach `head` (Anteile der Breite) auf Höhe `zc`.
+fn slide_arrow(out: &mut OpeningOut, pts: &Quad, tail: f64, head: f64, zc: f64, top: f64) {
+    let barb = (head - tail) * 0.22;
+    let head_pt = quad_at(pts, head, zc);
+    out.symbol.push((quad_at(pts, tail, zc), head_pt));
+    out.symbol.push((quad_at(pts, head - barb, zc - top * 0.08), head_pt));
+    out.symbol.push((quad_at(pts, head - barb, zc + top * 0.08), head_pt));
 }
 
 fn push_quads(f: &mut Vec<f64>, list: &[Quad]) {
@@ -1058,6 +1100,13 @@ pub fn openings(frame: &[f64], inp: &[f64]) -> Vec<f64> {
         let ns = ns as usize;
         let sashes = &inp[i + REC..i + REC + 6 * ns];
         i += REC + 6 * ns;
+        // Oberlicht-Einteilung ([95]): `[n, Flügel × n]`.
+        let nt = inp.get(i).copied().unwrap_or(f64::NAN);
+        if !(nt >= 0.0) || nt.fract() != 0.0 || i + 1 + 6 * nt as usize > inp.len() {
+            return Vec::new();
+        }
+        let transom_sashes = &inp[i + 1..i + 1 + 6 * nt as usize];
+        i += 1 + 6 * nt as usize;
         let geo = &o[..9];
         if geo.iter().any(|v| !v.is_finite()) {
             return Vec::new();
@@ -1080,7 +1129,7 @@ pub fn openings(frame: &[f64], inp: &[f64]) -> Vec<f64> {
                 for p in &pts {
                     f.extend([p.0, p.1]);
                 }
-                let out = layout_opening(o, sashes, &pts);
+                let out = layout_opening(o, sashes, transom_sashes, &pts);
                 push_quads(&mut f, &out.glass);
                 push_quads(&mut f, &out.door_leaf);
                 push_lines(&mut f, &out.divisions);
@@ -1189,9 +1238,7 @@ mod tests_ts {
     fn anschlag_verkleinert_die_ansicht_nur_von_seiner_seite() {
         let frame = [0.0, 0.0, -3.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
         let rec = |rebate: f64, side: f64| {
-            let mut b = vec![1.0, 0.0, 0.0, 5.0, 0.0, 0.3, 1.0, 2.2, 0.9, 2.3, 0.0, 0.0, f64::NAN, 0.06, 0.0, f64::NAN, f64::NAN, 1.0, 1.0, rebate, side, 0.0];
-            b.truncate(1 + REC);
-            b
+            vec![1.0, 0.0, 0.0, 5.0, 0.0, 0.3, 1.0, 2.2, 0.9, 2.3, 0.0, 0.0, f64::NAN, 0.06, 0.0, f64::NAN, f64::NAN, 1.0, 1.0, rebate, side, 0.0, 0.0, 0.0]
         };
         let width = |f: &[f64]| {
             assert_eq!(f[1], 1.0);
@@ -1202,5 +1249,45 @@ mod tests_ts {
         let w1 = width(&openings(&frame, &rec(0.05, 1.0)));
         let w2 = width(&openings(&frame, &rec(0.05, -1.0)));
         assert!((w0 - 1.2).abs() < 1e-9 && (w1 - 1.1).abs() < 1e-9 && (w2 - 1.2).abs() < 1e-9, "{w0} {w1} {w2}");
+    }
+
+    /// [95] Türarten/Oberlicht in der Ansicht: Hebeschiebe = zwei Glasfelder + Pfeil; Tür-Oberlicht;
+    /// Oberlicht-Einteilung eines Fensters mit Kippflügel und Pfosten.
+    #[test]
+    fn tuerarten_und_oberlicht_in_der_ansicht() {
+        let frame = [0.0, 0.0, -3.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
+        let rec = |door: f64, transom: f64, kind: f64, transom_sashes: &[[f64; 6]]| {
+            let mut b = vec![1.0, 0.0, 0.0, 5.0, 0.0, 0.3, 1.0, 2.2, 0.0, 2.3, door, 0.0, f64::NAN, 0.06, transom, f64::NAN, f64::NAN, 1.0, 1.0, 0.0, 1.0, kind];
+            if door == 0.0 {
+                b.extend([1.0, 0.0, f64::NAN, 1.0, f64::NAN, 3.0, 1.0]);
+            } else {
+                b.push(0.0);
+            }
+            b.push(transom_sashes.len() as f64);
+            for t in transom_sashes {
+                b.extend(t);
+            }
+            b
+        };
+        // Listen ab Index 12: glas, tuerblatt, teilungen, fluegel, bank, symbol.
+        let lists = |f: &[f64]| {
+            let mut i = 12;
+            let mut n = Vec::new();
+            for size in [8, 8, 4, 8, 8, 4] {
+                let c = f[i] as usize;
+                n.push(c);
+                i += 1 + c * size;
+            }
+            assert_eq!(i, f.len());
+            n
+        };
+        let hs = lists(&openings(&frame, &rec(1.0, 0.0, 2.0, &[])));
+        assert_eq!((hs[0], hs[1], hs[5]), (2, 0, 3));
+        let tr = lists(&openings(&frame, &rec(1.0, 0.4, 0.0, &[])));
+        assert_eq!((tr[0], tr[1], tr[2]), (1, 1, 1));
+        let plain = lists(&openings(&frame, &rec(0.0, 0.5, 0.0, &[])));
+        let split = lists(&openings(&frame, &rec(0.0, 0.5, 0.0, &[[0.0, f64::NAN, 1.0, f64::NAN, 2.0, 1.0], [1.0, 0.08, 1.0, f64::NAN, 0.0, 1.0], [0.0, f64::NAN, 1.0, f64::NAN, 0.0, 1.0]])));
+        assert_eq!(split[3], plain[3] + 2, "zwei Oberlicht-Felder");
+        assert!(split[5] >= plain[5] + 2, "Kipp-Symbol im Oberlicht");
     }
 }

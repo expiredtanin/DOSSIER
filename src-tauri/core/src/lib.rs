@@ -106,6 +106,7 @@ pub mod cmd_split;
 pub mod snap_model;
 pub mod solid_specs;
 pub mod highlight3d;
+pub mod opening_presets;
 
 #[cfg(feature = "web")]
 mod web;

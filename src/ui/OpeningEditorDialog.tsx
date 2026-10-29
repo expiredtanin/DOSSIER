@@ -291,6 +291,8 @@ const DOOR_KIND_OPTS = (): { value: DoorKind; label: string }[] => [
   { value: "dreh", label: t("oed.kind.dreh") },
   { value: "schiebe", label: t("oed.kind.schiebe") },
   { value: "wandoeffnung", label: t("oed.door.wandoeffnung") },
+  { value: "hebeschiebe", label: t("oed.door.hebeschiebe") },
+  { value: "pendel", label: t("oed.door.pendel") },
 ];
 
 function BasisPanel({
@@ -557,6 +559,23 @@ function cornerJoinOptions(): { value: FrameCornerJoin; label: string }[] {
   ];
 }
 
+/** Oberlicht-Einteilung ([95]): Anzahl Felder und Öffnungsart des ersten Felds. */
+function transomFields(wt: WindowType): { count: number; opening: OpeningKind } {
+  const fields = (wt.transomSashes ?? []).filter((s) => s.kind === "fluegel");
+  return { count: Math.max(1, fields.length), opening: fields[0]?.opening ?? "fest" };
+}
+
+/** Gleichmässige Oberlicht-Einteilung: `count` Felder, dazwischen Pfosten; ein festes Feld = keine Liste. */
+function transomSashes(count: number, opening: OpeningKind): SashDef[] | undefined {
+  if (count <= 1 && opening === "fest") return undefined;
+  const out: SashDef[] = [];
+  for (let i = 0; i < count; i++) {
+    if (i > 0) out.push({ kind: "pfosten", postWidth: 0.06 });
+    out.push({ kind: "fluegel", autoWidth: true, opening, hingeSide: i % 2 === 0 ? "left" : "right" });
+  }
+  return out;
+}
+
 /** Flügeleinteilung: Tabelle mit Flügel/Pfosten, Öffnungsart + Anschlag je Zeile. */
 function FluegelPanel({
   wt,
@@ -589,6 +608,27 @@ function FluegelPanel({
         min={0}
         onCommit={(n) => patchWt({ transomHeight: n || undefined })}
       />
+      {(wt.transomHeight ?? 0) > 0 && (
+        <>
+          <NumField
+            label={t("oed.f.transomFields")}
+            value={transomFields(wt).count}
+            step={1}
+            min={1}
+            onCommit={(n) => patchWt({ transomSashes: transomSashes(Math.max(1, Math.min(6, Math.round(n))), transomFields(wt).opening) })}
+          />
+          <SelField<OpeningKind>
+            label={t("oed.f.transomOpening")}
+            value={transomFields(wt).opening}
+            options={[
+              { value: "fest", label: t("oed.kind.fest") },
+              { value: "kipp", label: t("oed.kind.kipp") },
+              { value: "dreh", label: t("oed.kind.dreh") },
+            ]}
+            onChange={(v) => patchWt({ transomSashes: transomSashes(transomFields(wt).count, v) })}
+          />
+        </>
+      )}
       <NumField
         label={t("oed.f.mullionRows")}
         value={wt.mullionRows ?? 1}

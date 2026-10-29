@@ -6,6 +6,7 @@ import { t } from "../../i18n";
 import { FieldRow, NumberField, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
 import { ElevationPreview } from "../ElevationPreview";
+import { openingTypePresets } from "../../model/openingPresets";
 
 /**
  * Synthetische Öffnungs-Instanz NUR für die Vorschau: `ElevationPreview`
@@ -56,7 +57,7 @@ export function WindowStylesTab({
   onDeleteWindowType,
 }: {
   project: Project;
-  onAddWindowType?: () => void;
+  onAddWindowType?: (preset?: WindowType) => void;
   onPatchWindowType?: (id: string, patch: Partial<WindowType>) => void;
   onDeleteWindowType?: (id: string) => void;
 }) {
@@ -67,7 +68,12 @@ export function WindowStylesTab({
       emptyKey="resources.windowTypes.empty"
       placeholderKey="resources.windowTypes.placeholder"
       deleteKeyPrefix="resources.delete.windowType"
-      onAdd={onAddWindowType}
+      onAdd={() => onAddWindowType?.()}
+      presets={openingTypePresets().windowTypes.map((p) => ({ id: p.id, label: t(`preset.${p.id}`) }))}
+      onAddPreset={(id) => {
+        const p = openingTypePresets().windowTypes.find((x) => x.id === id);
+        if (p) onAddWindowType?.({ ...p, name: t(`preset.${p.id}`) });
+      }}
       onPatch={onPatchWindowType}
       onDelete={onDeleteWindowType}
       renderFields={(win, patch) => (

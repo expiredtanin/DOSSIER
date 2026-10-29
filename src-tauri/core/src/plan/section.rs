@@ -1523,12 +1523,35 @@ fn lintel_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, height: O
 fn door_cut(p: &Project, o: &Opening, c: &CrossSection) -> Vec<Primitive> {
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
     lintel_cut(&mut out, o, c, p.door_type(o).and_then(|t| t.lintel_height), 0.0);
-    if o.door_type == Some(OpeningDoorType::Wandoeffnung) {
+    let kind = p.door_type(o).map(|t| t.kind);
+    if o.door_type == Some(OpeningDoorType::Wandoeffnung) || kind == Some(DoorTypeKind::Wandoeffnung) {
         return out;
     }
     let mid = (c.face_min + c.face_max) / 2.0;
     let fw = min(DEFAULT_FRAME_WIDTH, (c.z_top - c.z_bottom) / 4.0);
+    if kind == Some(DoorTypeKind::Schiebe) {
+        // Schiebetür vor der Wand ([95]): Blatt vor der Fläche auf der Aufschlagseite (linke Normale wie im Grundriss).
+        let swing = if matches!(o.swing, None | Some(SwingSide::Left)) { 1.0 } else { -1.0 };
+        let dir = if matches!(o.opening_dir, None | Some(OpeningOpeningDir::In)) { 1.0 } else { -1.0 };
+        let face = if swing * dir > 0.0 { c.face_max } else { c.face_min };
+        let s = swing * dir;
+        out.push(opening_poly(rect(c.u_at(face + s * 0.01), c.u_at(face + s * (0.01 + DOOR_LEAF_THICKNESS)), c.z_bottom + 0.01, c.z_top + 0.03), true, &o.id));
+        return out;
+    }
     out.push(opening_poly(rect(c.u_at(mid - DEFAULT_FRAME_DEPTH / 2.0), c.u_at(mid + DEFAULT_FRAME_DEPTH / 2.0), c.z_top - fw, c.z_top), true, &o.id));
+    if kind == Some(DoorTypeKind::Hebeschiebe) {
+        // Zwei Flügel auf versetzten Gleisen, je mit Glaslinie.
+        for off in [-0.035, 0.035] {
+            let (a, b) = (mid + off - 0.02, mid + off + 0.02);
+            out.push(opening_poly(rect(c.u_at(a), c.u_at(b), c.z_bottom + 0.03, c.z_top - fw), true, &o.id));
+            let mut l = line(v2(c.u_at(mid + off), c.z_bottom + 0.03 + fw), v2(c.u_at(mid + off), c.z_top - 2.0 * fw), "section-window-glass", GLASS_MM, OPENING_INK);
+            if let Primitive::Line { opening_id, .. } = &mut l {
+                *opening_id = Some(o.id.clone());
+            }
+            out.push(l);
+        }
+        return out;
+    }
     out.push(opening_poly(rect(c.u_at(mid - DOOR_LEAF_THICKNESS / 2.0), c.u_at(mid + DOOR_LEAF_THICKNESS / 2.0), c.z_bottom + 0.01, c.z_top - fw), true, &o.id));
     out
 }

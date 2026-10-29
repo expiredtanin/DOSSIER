@@ -678,6 +678,18 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
                 flag(s.hinge_side != Some(SashDefHingeSide::Right)),
             ]);
         }
+        let transom = wt.transom_sashes.as_deref().unwrap_or(&[]);
+        w.num(transom.len() as f64);
+        for s in transom {
+            w.nums(&[
+                if s.kind == SashDefKind::Fluegel { 0.0 } else { 1.0 },
+                flag(s.auto_width == Some(false)),
+                opt(s.width),
+                opt(s.post_width),
+                opening_kind_code(s.opening),
+                flag(s.hinge_side != Some(SashDefHingeSide::Right)),
+            ]);
+        }
         return;
     }
     let Some(dt) = p.door_type(op) else {
@@ -703,6 +715,15 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
         flag(dt.frame_kind != Some(DoorTypeFrameKind::Blockrahmen)),
         opt(dt.panel_cols),
         opt(dt.panel_rows),
+        match dt.kind {
+            DoorTypeKind::Schiebe => 1.0,
+            DoorTypeKind::Hebeschiebe => 2.0,
+            DoorTypeKind::Pendel => 3.0,
+            _ => 0.0,
+        },
+        // Aufschlagseite wie im Grundriss (linke Normale), hier entlang der rechten Normalen.
+        -(if matches!(op.swing, None | Some(SwingSide::Left)) { 1.0 } else { -1.0 }) * (if matches!(op.opening_dir, None | Some(OpeningOpeningDir::In)) { 1.0 } else { -1.0 }),
+        flag(op.hinge == Some(OpeningHinge::End)),
     ]);
 }
 
