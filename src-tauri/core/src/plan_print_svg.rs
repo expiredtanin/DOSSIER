@@ -6,8 +6,8 @@
 //! Polylinie, Bögen als `<path>`.
 //!
 //! In TS bleiben: der `<svg>`-Rahmen und das weisse Blatt und die Bild-Schraffur-`<pattern>`
-//! (laufende Ids im Dokument). Die Einzeltexte setzt der Kern (`crate::text_layout`, Zeilen als
-//! `<tspan>` je Zeile mit je einem `<tspan>` je Run/Wort).
+//! (laufende Ids im Dokument). Einzeltexte und Raumstempel setzt der Kern (`crate::text_layout`,
+//! Zeilen als `<tspan>` je Zeile mit je einem `<tspan>` je Run/Wort), Grössen in Papier-mm.
 //!
 //! Format: Datensätze getrennt durch `\x1e`, Felder durch `\x1f`:
 //! - `E`, Ebene (0 = ins `<svg>`, 1 = in die offene Gruppe), Tag, dann Name/Wert-Paare;
@@ -24,10 +24,10 @@
 use crate::hatch::{self, Hatch, Motif, Pattern, V2};
 use crate::js_fmt::js_number;
 use crate::jsnum;
-use crate::plan_buf::{whole, Rec, View, F_COLOR, F_DASH_NULL, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON};
+use crate::plan_buf::{whole, Rec, View, F_COLOR, F_DASH_NULL, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT};
 use crate::plan_parts::{greyed_of, Part};
-use crate::plan_text::SingleText;
-use crate::text_layout::{wrap_doc_to_lines, LayoutOpts, LineAlign, TEXT_LINE_HEIGHT_MULT};
+use crate::plan_text::{SingleText, StampText};
+use crate::text_layout::{place_lines, stamp_block, wrap_doc_to_lines, Line, LayoutOpts, LineAlign, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use std::f64::consts::PI;
 
 /// Optionen: Massstab-Nenner, Blatt (mm) und Ausmass des Plans (`Plan.bounds`).
@@ -414,6 +414,15 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
             }
             out.el(0, "path", &attrs);
         }
+        T_TEXT => {
+            let js = view.string(whole(f[0])?)?;
+            let j: serde_json::Value = serde_json::from_str(&js).ok()?;
+            let jg = j.get("greyed").and_then(|g| g.as_bool()).unwrap_or(false);
+            let obj = j.get("opacity").and_then(|o| o.as_f64()).unwrap_or(1.0);
+            if let Ok(t) = serde_json::from_str::<StampText>(&js) {
+                stamp_node(out, &t, m, opacity_of(jg, obj));
+            }
+        }
         T_DRAWING_TEXT | T_IMAGE => {
             let js = view.string(whole(f[0])?)?;
             let j: serde_json::Value = serde_json::from_str(&js).ok()?;
@@ -458,14 +467,18 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
     Some(())
 }
 
-/// Einzeltext (Text-Werkzeug/DXF-Import) als `<text>` mit `<tspan>`-Zeilen (früher
-/// `drawingTextNode` in `planToPrintSvg.ts`): Grösse in Papier-mm, bei Spaltenbreite wortweise
-/// umbrochen (Run-Grenzen bleiben), gedreht um den Anker.
+/// Einzeltext (Text-Werkzeug/DXF-Import, auch Masszahlen und Koten) als `<text>` mit
+/// `<tspan>`-Zeilen (früher `drawingTextNode` in `planToPrintSvg.ts`): Grösse in Papier-mm (Höhe ×
+/// mm je Meter, wie die Plan-Ansicht beim Massstab), bei Spaltenbreite wortweise umbrochen
+/// (Run-Grenzen bleiben), gedreht um den Anker. Run-eigene `sizePt` wie in der SVG-Plan-Ansicht als
+/// Modell-pt (1 pt = 0.0254/72 m), also auch × mm je Meter.
 fn text_node(out: &mut Out, t: &SingleText, m: Map, opacity: String) {
     let k = m.k;
     let c = m.at(t.at.x, t.at.y);
     let unit_per_pt = (0.0254 / 72.0) * k;
-    let base_pt = if unit_per_pt > 0.0 { t.height_m / unit_per_pt } else { 0.0 };
+    // Basisgrösse in Modell-pt (bis 30.10. `height_m / unit_per_pt`: Meter durch mm je pt — die
+    // Runs kamen in Metern statt Papier-mm heraus, im Layout k-mal zu klein).
+    let base_pt = if unit_per_pt > 0.0 { t.height_m * k / unit_per_pt } else { 0.0 };
     let wrap = t.wrap().map(|w| w * k);
     let o = LayoutOpts { line_height: t.height_m * k * TEXT_LINE_HEIGHT_MULT, unit_per_pt, base_pt, color: t.color.as_deref().unwrap_or("#000000") };
     let lines = wrap_doc_to_lines(&t.doc(), &o, wrap);
@@ -481,36 +494,46 @@ fn text_node(out: &mut Out, t: &SingleText, m: Map, opacity: String) {
         attrs.push(("opacity", opacity));
     }
     out.tagged(&["X"], &attrs);
-    // `!wrapWidthUnits`: 0/NaN zählen wie keine Spalte.
-    let col = wrap.filter(|w| *w != 0.0 && !w.is_nan());
-    let mut y = c.y;
-    for (n, line) in lines.iter().enumerate() {
-        if n > 0 {
-            y += line.line_height;
-        }
-        let (anchor, x) = match (line.align, col) {
-            (LineAlign::Center, Some(w)) => ("middle", c.x + w / 2.0),
-            (LineAlign::Right, Some(w)) => ("end", c.x + w),
-            (LineAlign::Center, None) => ("middle", c.x),
-            (LineAlign::Right, None) => ("end", c.x),
-            (LineAlign::Left, _) => ("start", c.x),
-        };
+    let at = place_lines(lines.iter().map(|l| (l.align, l.line_height)), c.x, c.y, wrap);
+    for (line, (x, y)) in lines.iter().zip(at) {
         let content = if line.tspans.is_empty() { "\u{200b}" } else { "" };
-        out.tagged(&["L", content], &[("x", r3(x)), ("y", r3(y)), ("text-anchor", anchor.to_string())]);
-        for ts in &line.tspans {
-            let mut a: Vec<(&str, String)> = vec![("font-size", r3(ts.font_size)), ("fill", ts.fill.clone())];
-            if let Some(w) = ts.font_weight() {
-                a.push(("font-weight", w.to_string()));
-            }
-            if let Some(st) = ts.font_style() {
-                a.push(("font-style", st.to_string()));
-            }
-            a.push(("font-family", ts.font_family.clone().unwrap_or_else(|| "Helvetica, Arial, sans-serif".to_string())));
-            if let Some(d) = ts.text_decoration {
-                a.push(("text-decoration", d.to_string()));
-            }
-            out.tagged(&["R", &ts.text], &a);
+        line_node(out, line, content, x, y);
+    }
+}
+
+/// Zeilen-`<tspan>` mit je einem Run-`<tspan>`.
+fn line_node(out: &mut Out, line: &Line, content: &str, x: f64, y: f64) {
+    out.tagged(&["L", content], &[("x", r3(x)), ("y", r3(y)), ("text-anchor", line.align.anchor().to_string())]);
+    for ts in &line.tspans {
+        let mut a: Vec<(&str, String)> = vec![("font-size", r3(ts.font_size)), ("fill", ts.fill.clone())];
+        if let Some(w) = ts.font_weight() {
+            a.push(("font-weight", w.to_string()));
         }
+        if let Some(st) = ts.font_style() {
+            a.push(("font-style", st.to_string()));
+        }
+        a.push(("font-family", ts.font_family.clone().unwrap_or_else(|| "Helvetica, Arial, sans-serif".to_string())));
+        if let Some(d) = ts.text_decoration {
+            a.push(("text-decoration", d.to_string()));
+        }
+        out.tagged(&["R", &ts.text], &a);
+    }
+}
+
+/// Raumstempel als `<text>` (fehlte im Druck-SVG bis 30.10.): wie die Plan-Ansicht im Druckmodus —
+/// Rich-Text-Zeilen und Live-Zeilen (Fläche, Nutzung) als Block um den Anker zentriert
+/// ([`stamp_block`]), Grösse in Papier-pt (unabhängig vom Massstab).
+fn stamp_node(out: &mut Out, t: &StampText, m: Map, opacity: String) {
+    let c = m.at(t.at.x, t.at.y);
+    let extra: Vec<(&str, LineAlign)> = t.extra_lines.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
+    let placed = stamp_block(&t.doc, &extra, t.base_pt, PT_TO_MM, t.color.as_deref().unwrap_or("#000000"), c.y);
+    if placed.is_empty() {
+        return;
+    }
+    let attrs: Vec<(&str, String)> = if opacity.is_empty() { Vec::new() } else { vec![("opacity", opacity)] };
+    out.tagged(&["X"], &attrs);
+    for p in &placed {
+        line_node(out, &p.line, "", c.x, p.y);
     }
 }
 
@@ -565,19 +588,55 @@ mod tests {
 
     #[test]
     fn einzeltext_als_zeilen_und_runs() {
-        let js = "{\"kind\":\"drawingText\",\"at\":{\"x\":1,\"y\":2},\"text\":\"aa bb\",\"heightM\":0.5,\"angle\":0.5,\"color\":\"#123\",\"wrapWidth\":0.6,\"marks\":{\"bold\":true}}";
+        let js = "{\"kind\":\"drawingText\",\"at\":{\"x\":1,\"y\":2},\"text\":\"aa bb\",\"heightM\":0.5,\"angle\":0.5,\"color\":\"#123\",\"wrapWidth\":2,\"marks\":{\"bold\":true}}";
         let t: SingleText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
         let mut out = Out { s: String::new(), first: true };
         text_node(&mut out, &t, m, "0.5".into());
         let recs: Vec<Vec<&str>> = out.s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
-        // Drehung um den Anker (10, 80 mm), eine Zeile (Spalte 6 mm), je Wort/Leerraum ein Run.
+        // Drehung um den Anker (10, 80 mm), eine Zeile (Spalte 20 mm), je Wort/Leerraum ein Run.
         assert_eq!(recs[0], ["X", "transform", "rotate(-28.648 10 80)", "opacity", "0.5"]);
         assert_eq!(recs[1], ["L", "", "x", "10", "y", "80", "text-anchor", "start"]);
-        // Run-Grösse = heightM (wie die frühere TS-Fassung: `basePt · unitPerPt` mit `unitPerPt` in
-        // pt→mm, also Meter statt Papier-mm — bekannte Abweichung, bewusst unverändert übernommen).
-        assert_eq!(recs[2], ["R", "aa", "font-size", "0.5", "fill", "#123", "font-weight", "700", "font-family", "Helvetica, Arial, sans-serif"]);
+        // Run-Grösse in Papier-mm: 0.5 m × 10 mm/m (wie die Plan-Ansicht beim Massstab).
+        assert_eq!(recs[2], ["R", "aa", "font-size", "5", "fill", "#123", "font-weight", "700", "font-family", "Helvetica, Arial, sans-serif"]);
         assert_eq!((recs[3][1], recs[4][1], recs.len()), (" ", "bb", 5));
+    }
+
+    #[test]
+    fn einzeltext_umbruch_und_zeilen_in_papier_mm() {
+        // Spalte 2 m = 20 mm, Höhe 0.25 m = 2.5 mm: «aaaa bbbb» (je 4 × 2.5 × 0.55 = 5.5 mm) passt in
+        // eine Zeile; Run mit eigener Grösse 72 pt = 1 Modell-Zoll = 0.254 mm bei 10 mm/m.
+        let js = r##"{"at":{"x":0,"y":10},"text":"","heightM":0.25,"angle":0,"wrapWidth":2,"doc":{"version":1,"paragraphs":[{"runs":[{"text":"aaaa bbbb","marks":{}}]},{"runs":[{"text":"c","marks":{"sizePt":72}}],"lineHeight":2}]}}"##;
+        let t: SingleText = serde_json::from_str(js).unwrap();
+        let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
+        let mut out = Out { s: String::new(), first: true };
+        text_node(&mut out, &t, m, String::new());
+        let recs: Vec<Vec<&str>> = out.s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
+        let lines: Vec<&Vec<&str>> = recs.iter().filter(|r| r[0] == "L").collect();
+        assert_eq!(lines.len(), 2);
+        // Absatz-Zeilenhöhe 2 × Basisgrösse (2.5 mm).
+        assert_eq!((lines[0][5], lines[1][5]), ("0", "5"));
+        let sizes: Vec<&str> = recs.iter().filter(|r| r[0] == "R").map(|r| r[3]).collect();
+        assert_eq!(sizes, ["2.5", "2.5", "2.5", "0.254"]);
+    }
+
+    #[test]
+    fn raumstempel_als_block_in_papier_pt() {
+        let js = r##"{"at":{"x":2,"y":3},"doc":{"version":1,"paragraphs":[{"runs":[{"text":"Wohnen","marks":{"bold":true}}],"align":"center"}]},"extraLines":[{"text":"17.01 m²","align":"center"}],"basePt":10,"color":"#333"}"##;
+        let t: StampText = serde_json::from_str(js).unwrap();
+        let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 20.0 };
+        let mut out = Out { s: String::new(), first: true };
+        stamp_node(&mut out, &t, m, "0.3".into());
+        let recs: Vec<Vec<&str>> = out.s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
+        assert_eq!(recs[0], ["X", "opacity", "0.3"]);
+        // Anker (40, 140 mm); 10 pt = 3.528 mm, Live-Zeile 0.8 ×; Block um den Anker zentriert.
+        assert_eq!(&recs[1][..4], ["L", "", "x", "40"]);
+        assert_eq!(recs[1][7], "middle");
+        assert_eq!(recs[2], ["R", "Wohnen", "font-size", "3.528", "fill", "#333", "font-weight", "700", "font-family", "Helvetica, Arial, sans-serif"]);
+        assert_eq!((recs[4][1], recs[4][3]), ("17.01 m²", "2.822"));
+        let y0: f64 = recs[1][5].parse().unwrap();
+        let y1: f64 = recs[3][5].parse().unwrap();
+        assert!(y0 < 140.0 && y1 > 140.0 && (y1 - y0 - 10.0 * PT_TO_MM * 1.3).abs() < 1e-3);
     }
 
     #[test]

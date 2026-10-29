@@ -15,7 +15,7 @@ import "svg2pdf.js";
 import type { Layout, LayoutAnnotation, MasterLayout, Project } from "../model/types";
 import { generatePlan } from "../plan/generatePlan";
 import { planToPrintSvg } from "./planToPrintSvg";
-import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
+import { annotationTextLines } from "../text/renderHtml";
 import { docFromText } from "../text/richText";
 import {
   findMaster,
@@ -122,33 +122,12 @@ function buildAnnotationTextsSvg(
   svg.setAttribute("viewBox", `0 0 ${sheetW} ${sheetH}`);
 
   for (const ann of texts) {
-    const doc = ann.doc ?? docFromText(ann.text);
-    const lineHeight = ann.heightMm * 1.25;
-    const lines: SvgLine[] = wrapDocToLines(doc, {
-      x: 0,
-      y: 0,
-      lineHeight,
-      unitPerPt: 25.4 / 72,
-      basePt: (ann.heightMm / 25.4) * 72,
-      color: ann.color ?? "#111111",
-      ...(ann.widthMm && ann.widthMm > 0 ? { wrapWidthUnits: ann.widthMm } : {}),
-    });
-    let y = ann.yMm;
     const el = document.createElementNS(SVG_NS, "text");
-    lines.forEach((line, k) => {
-      if (k > 0) y += line.lineHeight;
-      const anchor = line.align === "center" ? "middle" : line.align === "right" ? "end" : "start";
-      const x = !ann.widthMm
-        ? ann.xMm
-        : line.align === "center"
-          ? ann.xMm + ann.widthMm / 2
-          : line.align === "right"
-            ? ann.xMm + ann.widthMm
-            : ann.xMm;
+    for (const line of annotationTextLines(ann, ann.doc ?? docFromText(ann.text))) {
       const lineTspan = document.createElementNS(SVG_NS, "tspan");
-      lineTspan.setAttribute("x", String(x));
-      lineTspan.setAttribute("y", String(y));
-      lineTspan.setAttribute("text-anchor", anchor);
+      lineTspan.setAttribute("x", String(line.x));
+      lineTspan.setAttribute("y", String(line.y));
+      lineTspan.setAttribute("text-anchor", line.anchor);
       if (line.tspans.length === 0) {
         lineTspan.textContent = "​";
       } else {
@@ -165,7 +144,7 @@ function buildAnnotationTextsSvg(
         }
       }
       el.appendChild(lineTspan);
-    });
+    }
     svg.appendChild(el);
   }
   return svg;

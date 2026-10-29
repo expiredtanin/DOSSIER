@@ -1,21 +1,47 @@
-// Tests für wrapDocToLines: Wortumbruch auf feste Breite unter Erhalt der
-// Run-Grenzen (gemischte Formatierung pro Zeile bleibt möglich).
+// Tests für layoutText: Wortumbruch auf feste Breite unter Erhalt der
+// Run-Grenzen (gemischte Formatierung pro Zeile bleibt möglich) und Lage der Zeilen.
 
 import { describe, expect, it } from "vitest";
 import { docFromText, makeRun, type RichTextDoc } from "./richText";
-import { docToHtml, docToLines, runCssProps, wrapDocToLines } from "./renderHtml";
+import { annotationTextLines, docToHtml, layoutText, runCssProps } from "./renderHtml";
 
 const OPTS = { x: 0, y: 0, lineHeight: 10, unitPerPt: 1, basePt: 10, color: "#000000" };
 
-describe("wrapDocToLines", () => {
-  it("ohne wrapWidthUnits identisch zu docToLines (eine Zeile je Absatz)", () => {
-    const doc = docFromText("hallo welt");
-    expect(wrapDocToLines(doc, OPTS)).toEqual(docToLines(doc, OPTS));
+describe("layoutText", () => {
+  it("ohne wrapWidthUnits eine Zeile je Absatz", () => {
+    const doc = docFromText("hallo welt\nzwei");
+    expect(layoutText(doc, OPTS).map((l) => l.tspans.map((t) => t.text).join(""))).toEqual(["hallo welt", "zwei"]);
+    expect(layoutText(doc, { ...OPTS, wrapWidthUnits: 0 })).toEqual(layoutText(doc, OPTS));
+  });
+
+  it("Lage: erste Grundlinie am Anker, weitere um den Vorschub tiefer; Mitte/rechts in der Spalte", () => {
+    const doc: RichTextDoc = {
+      version: 1,
+      paragraphs: [
+        { runs: [makeRun("a")] },
+        { runs: [makeRun("b")], align: "center", lineHeight: 2 },
+        { runs: [makeRun("c")], align: "right" },
+      ],
+    };
+    const at = (o: object) => layoutText(doc, { ...OPTS, x: 5, y: 7, ...o }).map((l) => [l.x, l.y, l.anchor]);
+    expect(at({})).toEqual([[5, 7, "start"], [5, 27, "middle"], [5, 37, "end"]]);
+    expect(at({ columnWidth: 40 })).toEqual([[5, 7, "start"], [25, 27, "middle"], [45, 37, "end"]]);
+    expect(at({ columnWidth: NaN })).toEqual(at({}));
+  });
+
+  it("Layout-Markup: Basis = Höhe in mm, Vorschub 1.25 × Höhe, Rahmen nur bei Breite > 0 umbrochen", () => {
+    const doc = docFromText("eins zwei drei");
+    const l = annotationTextLines({ xMm: 10, yMm: 20, heightMm: 4, widthMm: 15 }, doc);
+    expect(l.map((x) => x.y)).toEqual([20, 25, 30]);
+    expect(l[0].tspans[0]).toMatchObject({ fontSize: 4, fill: "#111111" });
+    // Negative Breite: kein Umbruch, aber (wie früher) Spalte für die Lage.
+    const r = annotationTextLines({ xMm: 10, yMm: 20, heightMm: 4, widthMm: -6 }, { version: 1, paragraphs: [{ runs: [makeRun("x")], align: "right" }] });
+    expect([r.length, r[0].x]).toEqual([1, 4]);
   });
 
   it("bricht lange Absätze wortweise auf mehrere Zeilen um", () => {
     const doc = docFromText("eins zwei drei vier fünf");
-    const lines = wrapDocToLines(doc, { ...OPTS, wrapWidthUnits: 30 });
+    const lines = layoutText(doc, { ...OPTS, wrapWidthUnits: 30 });
     expect(lines.length).toBeGreaterThan(1);
     const joined = lines.map((l) => l.tspans.map((t) => t.text).join("")).join(" ");
     expect(joined.replace(/\s+/g, " ").trim()).toBe("eins zwei drei vier fünf");
@@ -34,7 +60,7 @@ describe("wrapDocToLines", () => {
         },
       ],
     };
-    const lines = wrapDocToLines(doc, { ...OPTS, wrapWidthUnits: 1000 });
+    const lines = layoutText(doc, { ...OPTS, wrapWidthUnits: 1000 });
     expect(lines).toHaveLength(1);
     const boldTspan = lines[0].tspans.find((t) => t.text === "fett");
     expect(boldTspan?.fontWeight).toBe("700");
@@ -44,14 +70,14 @@ describe("wrapDocToLines", () => {
 
   it("leerer Absatz erzeugt eine leere Zeile (Vorschub bleibt erhalten)", () => {
     const doc: RichTextDoc = { version: 1, paragraphs: [{ runs: [] }, { runs: [makeRun("x")] }] };
-    const lines = wrapDocToLines(doc, { ...OPTS, wrapWidthUnits: 100 });
+    const lines = layoutText(doc, { ...OPTS, wrapWidthUnits: 100 });
     expect(lines).toHaveLength(2);
     expect(lines[0].tspans).toHaveLength(0);
   });
 
   it("sehr schmale Breite bricht auf ein Wort je Zeile um, ohne Wörter zu verlieren", () => {
     const doc = docFromText("aa bb cc");
-    const lines = wrapDocToLines(doc, { ...OPTS, wrapWidthUnits: 1 });
+    const lines = layoutText(doc, { ...OPTS, wrapWidthUnits: 1 });
     const words = lines.map((l) => l.tspans.map((t) => t.text).join("").trim());
     expect(words).toEqual(["aa", "bb", "cc"]);
   });

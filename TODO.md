@@ -319,6 +319,23 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Kern lesen); Fassade `wrapDocToLines` ungemerkt ~7 → ~28 µs je Aufruf (JSON hin, flache Zeilen zurück), gemerkt < 1 µs.
     Gefunden, bewusst unverändert: im Druck-SVG (Layout-Viewports) tragen die Runs der Einzeltexte `font-size` = Höhe in
     Metern statt Papier-mm (alte TS-Formel `basePt · unitPerPt`); offen als eigener Fehler.
+    ✅ (30.10.) behoben: Basisgrösse der Einzeltexte im Druck-SVG = Höhe × mm je Meter (wie die Plan-Ansicht beim
+    Massstab; betraf auch Masszahlen, Höhenkoten, Schnittlinien-Bezeichner — alles `drawingText`, im Layout 1:50 20-mal
+    zu klein). Raumstempel fehlten im Druck-SVG ganz (Eintrag `text` übergangen): jetzt als Block wie die Plan-Ansicht im
+    Druckmodus (`stamp_block`, 10 pt Papier). Test `planToPrintSvg.text.test.ts` (Layout-Viewport 1:50: Einzeltext,
+    Rich-Text mit Spalte, Masszahl 4 mm, Kote, Raumstempel) + Rust-Tests; Druck-SVG vorher/nachher in Chromium angesehen.
+    Offen: Run-eigene `sizePt` in Einzeltexten bedeuten in SVG-Ansicht und Druck Modell-pt, in der Render-Szene (GPU)
+    Papier-pt bei 1:100 — uneinheitlich (Editor setzt sie relativ zu 12 pt); Text entlang Pfad fehlt im Druck-SVG.
+    ✅ (30.10.) Zeilen-Lage im Kern: `text_layout::place_lines` (x/Grundlinie je Zeile, Mitte/rechts in der Spalte) und
+    `LineAlign::anchor`; Druck-SVG und die Bindungen `text_lines` (jetzt mit Anker x/y und Spaltenbreite) und
+    `text_stamp_block` (mit x) liefern gesetzte Zeilen (`x`, `y`, Anker). TS rechnet keine Zeilen-Lage mehr:
+    `layoutText`/`annotationTextLines` (`renderHtml.ts`) ersetzen `docToLines`/`wrapDocToLines` (gelöscht); SVG-Rückfall
+    der Plan-Ansicht (Einzeltexte, Raumstempel), Layout-Blatt und Layout-PDF legen nur noch Knoten an. Gleichheit
+    (temporärer Test alt gegen neu, danach entfernt): 400 Layout-Markups (Blatt-JSX + PDF-DOM; Breite fehlt/0/negativ/
+    NaN), 400 Einzeltexte/Raumstempel × Anzeige/1:50/1:200 und 3 Druck-SVG mit 80 Zufalls-Rich-Texten — Ausgabe
+    byte-gleich (18 819 Tspans). Der einfache Mehrzeilen-Text ohne Doc (`dy`) bleibt in der Plan-Ansicht wie er ist.
+    `nativeText.ts` (macOS) nicht umgestellt: setzt nur einzeilige Texte ohne Doc/Spalte, rechnet kein Layout (Anker =
+    `at`, Grösse = Höhe); die Farbumrechnung (`rgb()`-fähig) weicht von `plan_scene::to_rgba` ab — nicht doppelt.
     Nicht in der Tauri-App angesehen (nativer Text-Pfad `nativeText.ts` unverändert).
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
