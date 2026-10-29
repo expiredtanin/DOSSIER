@@ -81,8 +81,8 @@ describe("lazy Plan", () => {
     expect(plan.primitives.length).toBe(planCount(plan));
   });
 
-  it("Mono bleibt eine gewöhnliche Liste", () => {
+  it("Mono rechnet der Kern: auch dann bleibt der Plan lazy", () => {
     const plan = generatePlan(sampleProject, "eg", codes(sampleProject), undefined, "mittel", false, true);
-    expect(isLazyUnread(plan)).toBe(false);
+    expect(isLazyUnread(plan)).toBe(true);
   });
 });

@@ -192,6 +192,21 @@ describe("Plan-Puffer v2", () => {
     expect(core().gpu_compile_held(id, 1, 5, 90, true).length).toBe(0);
   });
 
+  it("Puffer einer Runde verdrängen sich nicht gegenseitig (viele Zeichnungs-Stücke)", () => {
+    const buf = encodePlanBuf([PRIMS.line]);
+    const c = core();
+    c.plan_buf_round_begin();
+    const ids: number[] = [];
+    for (let i = 0; i < 4200; i++) ids.push(c.plan_buf_hold(buf));
+    expect(ids.every((id) => c.plan_buf_is_held(id))).toBe(true);
+    c.plan_buf_round_end();
+    // Danach gelten die Grenzen wieder: die ältesten sind weg, die jüngsten noch da.
+    expect(c.plan_buf_is_held(ids[0])).toBe(false);
+    expect(c.plan_buf_is_held(ids[ids.length - 1])).toBe(true);
+    expect(c.plan_buf_touch(ids[0])).toBe(false);
+    for (const id of ids) c.plan_buf_release(id);
+  });
+
   it("Fehler einer Kern-Abfrage kommen als Meldung", () => {
     const doc = documentFor(sampleProject);
     expect(() => decodePlanBuf(doc.queryBin("planDomains", [1], "kein json"))).toThrow(/Plan-Argumente/);

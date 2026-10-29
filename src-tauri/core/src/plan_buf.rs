@@ -985,6 +985,7 @@ fn fnv(h: u64, v: u64) -> u64 {
 }
 
 /// Schlüssel der Linienzug-Prüfung (vorige einfache Linie).
+#[derive(Clone, Debug)]
 struct ChainKey {
     drawing: Option<usize>,
     color: Option<usize>,
@@ -999,6 +1000,7 @@ struct ChainKey {
 }
 
 /// Eine Linie mit geliehenen Feldern (Felder wie `Primitive::Line`), s. [`Writer::line_ref`].
+#[derive(Clone, Copy)]
 pub struct LineRef<'a> {
     pub a: Vec2,
     pub b: Vec2,
@@ -1019,8 +1021,12 @@ pub struct LineRef<'a> {
 /// Länge, bis zu der `Writer::intern` einen Text im Schnellweg merkt.
 const RECENT_MAX_LEN: usize = 64;
 
-/// Schreiber des Plan-Puffers aus Kern-Primitiven.
-pub struct Writer {
+/// String- und Schraffur-Tabellen eines Puffers. Die Caches der Plan-Erzeugung (`plan/cache.rs`)
+/// behalten sie über mehrere Puffer ([`Writer::with_tables`], [`Writer::finish_keep`]): so stehen in
+/// gemerkten Abschnitten ([`Segment`]) schon die endgültigen Indizes. Nicht mehr benutzte Einträge
+/// bleiben dabei stehen (der Leser liest nur, was ein Eintrag nennt).
+#[derive(Clone, Default)]
+pub struct Tables {
     units: Vec<u16>,
     strings: Vec<(usize, usize)>,
     str_map: FastMap<String, usize>,
@@ -1033,6 +1039,24 @@ pub struct Writer {
     /// Schnellweg vor dem JSON-Vergleich: Bit-Schlüssel → (Schraffur, Index, Hash).
     hatch_fast: FastMap<u64, Vec<(HatchRender, usize, u64)>>,
     n_hatches: usize,
+}
+
+impl Tables {
+    /// Umfang der Texte (UTF-16-Einheiten) — Mass für den Verschnitt behaltener Tabellen.
+    pub fn units_len(&self) -> usize {
+        self.units.len()
+    }
+}
+
+impl std::fmt::Debug for Tables {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Tables({} Texte, {} Schraffuren)", self.strings.len(), self.n_hatches)
+    }
+}
+
+/// Schreiber des Plan-Puffers aus Kern-Primitiven.
+pub struct Writer {
+    t: Tables,
     pub groups: Vec<(usize, usize)>,
     offsets: Vec<f64>,
     hashes: Option<Vec<f64>>,
@@ -1041,22 +1065,131 @@ pub struct Writer {
     prev: Option<ChainKey>,
     h: u64,
     pub bounds: Option<[f64; 4]>,
+    /// Laufende Aufnahme eines Abschnitts ([`Writer::mark`] … [`Writer::take_segment`]).
+    rec: Option<Recording>,
+    /// Nachbearbeitung jedes geschriebenen Primitivs (Schwarz-Weiss, Strichstärken-Faktor).
+    pub post: Option<crate::plan::extras::Post>,
+}
+
+/// Anfang und Merkposten eines aufgenommenen Abschnitts.
+struct Recording {
+    recs: usize,
+    pool: usize,
+    offsets: usize,
+    /// Stellen in `recs`, an denen eine Pool-Lage steht.
+    fix: Vec<usize>,
+    /// Erstes Primitiv als einfache Linie: Kettenschlüssel und Hash ohne Linienzug.
+    first: Option<(ChainKey, u64)>,
+    /// Teile einer behaltenen Gruppe ([`Writer::begin_kept`]) und der laufende Teil.
+    parts: Vec<Part>,
+    part: Option<PartStart>,
+}
+
+/// Anfang des laufenden Teils (absolute Lagen im Schreiber).
+struct PartStart {
+    recs: usize,
+    pool: usize,
+    offsets: usize,
+    fix: usize,
+    first: Option<(ChainKey, u64)>,
+}
+
+/// Ein Element einer behaltenen Gruppe ([`Kept`]): seine Bereiche (relativ zum Gruppenanfang),
+/// Linienzug-Schlüssel am Anfang (mit Hash ohne Linienzug) und am Ende, Ausmass und der
+/// Cache-Schlüssel des Aufrufers (`tag`, `flags`).
+#[derive(Clone, Debug)]
+pub struct Part {
+    pub tag: u64,
+    pub flags: u8,
+    pub bounds: [f64; 4],
+    prims: (u32, u32),
+    recs: (u32, u32),
+    pool: (u32, u32),
+    fix: (u32, u32),
+    first: Option<(ChainKey, u64)>,
+    /// Kettenschlüssel nach dem Element; `None` = Element ohne Primitive.
+    last: Option<Option<ChainKey>>,
+}
+
+/// Eine fertig geschriebene Gruppe (die 2D-Zeichnungen eines Plans, `plan/drawings.rs`), Element
+/// für Element ([`Part`]) wiederverwendbar: der nächste Puffer kopiert unveränderte Elemente in
+/// zusammenhängenden Läufen ([`Writer::copy_parts`]) statt sie neu zu erzeugen. Pool-Lagen relativ
+/// zum Gruppenanfang; String-/Schraffur-Indizes gelten für die behaltenen [`Tables`].
+#[derive(Clone, Debug, Default)]
+pub struct Kept {
+    recs: Vec<f64>,
+    pool: Vec<f64>,
+    offsets: Vec<f64>,
+    hashes: Vec<f64>,
+    fix: Vec<u32>,
+    pub parts: Vec<Part>,
+    /// `tag` → Teil.
+    index: HashMap<u64, usize>,
+}
+
+impl Kept {
+    /// Teil mit `tag` und `flags`; zuerst an der Stelle `hint` (gleiche Reihenfolge wie zuvor).
+    pub fn find(&self, tag: u64, flags: u8, hint: usize) -> Option<usize> {
+        let i = match self.parts.get(hint) {
+            Some(p) if p.tag == tag => hint,
+            _ => *self.index.get(&tag)?,
+        };
+        (self.parts[i].flags == flags).then_some(i)
+    }
+}
+
+/// Salz des Linienzug-Flags im Inhalts-Hash (das Flag hängt vom Vorgänger ab und wird deshalb
+/// zuletzt eingemischt — ein eingesetzter Abschnitt bestimmt es neu).
+const CHAIN_SALT: u64 = 0x6c69_6e65_7a75_6700;
+
+/// Strichmuster-Kennungen ab hier sind feste Kennungen (Linienstil, Konstruktionslinie, s.
+/// `plan/drawings.rs`); darunter vergibt jeder Aufruf eigene. Über die Grenze eines eingesetzten
+/// Abschnitts setzt sich ein Linienzug deshalb nur bei gleicher fester Kennung fort.
+pub const DASH_REF_FIXED: u32 = 999_999;
+/// Kennung der letzten Linie nach dem Einsetzen, wenn sie eine eigene (nicht feste) war: gleicht
+/// keiner Kennung, die danach vergeben wird.
+const DASH_REF_SPLICED: u32 = u32::MAX - 1;
+
+/// Fertig geschriebene Primitive eines Elements oder einer Domäne ([K4], Caches der
+/// Plan-Erzeugung, `plan/cache.rs`): Einträge (mit endgültigen String-/Schraffur-Indizes der
+/// behaltenen [`Tables`]), Pool und Inhalts-Hashes. [`Writer::splice`] setzt ihn wieder ein — mit
+/// demselben Inhalt, als wären die Primitive an dieser Stelle direkt geschrieben worden.
+#[derive(Clone, Debug, Default)]
+pub struct Segment {
+    recs: Vec<f64>,
+    pool: Vec<f64>,
+    /// Eintrags-Anfang je Primitiv, relativ.
+    offsets: Vec<f64>,
+    hashes: Vec<f64>,
+    /// Stellen in `recs` mit einer (relativen) Pool-Lage.
+    fix: Vec<u32>,
+    /// Erste Linie: Kettenschlüssel (mit Anfangspunkt) und Hash ohne Linienzug.
+    first: Option<(ChainKey, u64)>,
+    /// Kettenschlüssel nach dem Abschnitt (`None` = letzte Linie setzt keinen Linienzug fort).
+    last: Option<ChainKey>,
+}
+
+impl Segment {
+    /// Anzahl Primitive.
+    pub fn len(&self) -> usize {
+        self.offsets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.offsets.is_empty()
+    }
 }
 
 impl Writer {
     /// `hashes`: Inhalts-Hash je Primitiv ablegen (Schlüssel des GPU-Chunk-Caches).
     pub fn new(hashes: bool) -> Writer {
+        Writer::with_tables(Tables::default(), hashes)
+    }
+
+    /// Wie [`Writer::new`] mit behaltenen Tabellen (s. [`Tables`]).
+    pub fn with_tables(t: Tables, hashes: bool) -> Writer {
         Writer {
-            units: Vec::new(),
-            strings: Vec::new(),
-            str_map: FastMap::default(),
-            str_hash: Vec::new(),
-            recent: Default::default(),
-            recent_at: 0,
-            hatch_words: Vec::new(),
-            hatch_map: FastMap::default(),
-            hatch_fast: FastMap::default(),
-            n_hatches: 0,
+            t,
             groups: Vec::new(),
             offsets: Vec::new(),
             hashes: hashes.then(Vec::new),
@@ -1065,45 +1198,273 @@ impl Writer {
             prev: None,
             h: FNV_OFFSET,
             bounds: None,
+            rec: None,
+            post: None,
         }
+    }
+
+    /// Beginn eines Abschnitts: was bis [`Writer::take_segment`] geschrieben wird, wird zusätzlich
+    /// als [`Segment`] festgehalten.
+    pub fn mark(&mut self) {
+        self.rec = Some(Recording { recs: self.recs.len(), pool: self.pool.len(), offsets: self.offsets.len(), fix: Vec::new(), first: None, parts: Vec::new(), part: None });
+    }
+
+    /// Beginn einer behaltenen Gruppe (Elemente mit [`Writer::part_begin`]/[`Writer::part_end`] bzw.
+    /// [`Writer::copy_parts`], Abschluss mit [`Writer::end_kept`]).
+    pub fn begin_kept(&mut self) {
+        self.mark();
+    }
+
+    /// Beginn eines Elements der behaltenen Gruppe.
+    pub fn part_begin(&mut self) {
+        let (recs, pool, offsets) = (self.recs.len(), self.pool.len(), self.offsets.len());
+        if let Some(r) = self.rec.as_mut() {
+            r.part = Some(PartStart { recs, pool, offsets, fix: r.fix.len(), first: None });
+        }
+    }
+
+    /// Ende des Elements: als [`Part`] festhalten.
+    pub fn part_end(&mut self, tag: u64, flags: u8, bounds: [f64; 4]) {
+        let (recs, pool, offsets) = (self.recs.len(), self.pool.len(), self.offsets.len());
+        let last = (self.rec.as_ref().and_then(|r| r.part.as_ref()).is_some_and(|ps| offsets > ps.offsets)).then(|| self.prev.clone());
+        let Some(r) = self.rec.as_mut() else { return };
+        let Some(ps) = r.part.take() else { return };
+        let rel = |a: usize, b: usize, base: usize| ((a - base) as u32, (b - base) as u32);
+        r.parts.push(Part {
+            tag,
+            flags,
+            bounds,
+            prims: rel(ps.offsets, offsets, r.offsets),
+            recs: rel(ps.recs, recs, r.recs),
+            pool: rel(ps.pool, pool, r.pool),
+            fix: (ps.fix as u32, r.fix.len() as u32),
+            first: ps.first,
+            last,
+        });
+    }
+
+    /// Kopiert die Teile `from..to` (ein zusammenhängender Lauf) einer behaltenen Gruppe: Bereiche am
+    /// Stück, Pool-Lagen umgerechnet, Linienzug am Anfang des Laufs neu bestimmt (innerhalb des Laufs
+    /// sind die Vorgänger dieselben wie beim Aufnehmen). Läuft eine Aufnahme, werden die Teile übernommen.
+    pub fn copy_parts(&mut self, kept: &Kept, from: usize, to: usize) {
+        if from >= to {
+            return;
+        }
+        let (a, z) = (&kept.parts[from], &kept.parts[to - 1]);
+        let rb = self.recs.len();
+        let pb = self.pool.len();
+        let ob = self.offsets.len();
+        let (r0, r1) = (a.recs.0 as usize, z.recs.1 as usize);
+        let (q0, q1) = (a.pool.0 as usize, z.pool.1 as usize);
+        let (p0, p1) = (a.prims.0 as usize, z.prims.1 as usize);
+        let (f0, f1) = (a.fix.0 as usize, z.fix.1 as usize);
+        self.recs.extend_from_slice(&kept.recs[r0..r1]);
+        self.pool.extend_from_slice(&kept.pool[q0..q1]);
+        let dp = pb as f64 - q0 as f64;
+        for &at in &kept.fix[f0..f1] {
+            self.recs[rb + at as usize - r0] += dp;
+        }
+        let dr = rb as f64 - r0 as f64;
+        self.offsets.extend(kept.offsets[p0..p1].iter().map(|o| o + dr));
+        if let Some(hs) = self.hashes.as_mut() {
+            hs.extend_from_slice(&kept.hashes[p0..p1]);
+        }
+        // Linienzug am Anfang: das erste Element mit Primitiven entscheidet.
+        if let Some(first) = kept.parts[from..to].iter().find(|p| p.prims.1 > p.prims.0) {
+            let at_prim = ob + (first.prims.0 as usize - p0);
+            let at_flags = rb + (kept.offsets[first.prims.0 as usize] as usize - r0) + 1;
+            if let Some((k, h)) = &first.first {
+                let chain = self.chains_to(k);
+                let fl = self.recs[at_flags] as u32;
+                self.recs[at_flags] = (if chain { fl | F_CHAIN } else { fl & !F_CHAIN }) as f64;
+                if let Some(hs) = self.hashes.as_mut() {
+                    hs[at_prim] = ((if chain { fnv(*h, CHAIN_SALT) } else { *h }) >> 12) as f64;
+                }
+            }
+            if let Some(Some(k)) = kept.parts[from..to].iter().rev().find_map(|p| p.last.as_ref()) {
+                self.prev = Some(Self::spliced_key(k));
+            } else {
+                self.prev = None;
+            }
+        }
+        if let Some(r) = self.rec.as_mut() {
+            let fb = r.fix.len();
+            r.fix.extend(kept.fix[f0..f1].iter().map(|&at| rb + at as usize - r0));
+            let (gr, gq, go) = (r.recs, r.pool, r.offsets);
+            for p in &kept.parts[from..to] {
+                let mv = |x: (u32, u32), old0: usize, new0: usize, g: usize| (((x.0 as usize - old0) + new0 - g) as u32, ((x.1 as usize - old0) + new0 - g) as u32);
+                r.parts.push(Part {
+                    prims: mv(p.prims, p0, ob, go),
+                    recs: mv(p.recs, r0, rb, gr),
+                    pool: mv(p.pool, q0, pb, gq),
+                    fix: mv(p.fix, f0, fb, 0),
+                    ..p.clone()
+                });
+            }
+        }
+    }
+
+    /// Ob eine Linie mit Schlüssel `k` (Anfangspunkt in `k.b`) den Linienzug der vorigen fortsetzt —
+    /// wie in `line_ref`; eigene Strichmuster-Kennungen gelten über Abschnitte hinweg nie als gleich.
+    fn chains_to(&self, k: &ChainKey) -> bool {
+        self.prev.as_ref().is_some_and(|q| {
+            q.drawing == k.drawing
+                && q.color == k.color
+                && q.weight == k.weight
+                && q.greyed == k.greyed
+                && q.opacity == k.opacity
+                && q.dash == k.dash
+                && (q.dash != 2 || (k.dash_ref >= DASH_REF_FIXED && q.dash_ref == k.dash_ref))
+                && k.b.x == q.b.x
+                && k.b.y == q.b.y
+        })
+    }
+
+    /// Kettenschlüssel nach einem eingesetzten Abschnitt (eigene Kennungen unvergleichbar).
+    fn spliced_key(k: &ChainKey) -> ChainKey {
+        let mut k = k.clone();
+        if k.dash_ref < DASH_REF_FIXED {
+            k.dash_ref = DASH_REF_SPLICED;
+        }
+        k
+    }
+
+    /// Platz für eine Gruppe wie `k` vorab reservieren (spart das wiederholte Vergrössern).
+    pub fn reserve_like(&mut self, k: &Kept) {
+        self.recs.reserve(k.recs.len());
+        self.pool.reserve(k.pool.len());
+        self.offsets.reserve(k.offsets.len());
+        if let Some(h) = self.hashes.as_mut() {
+            h.reserve(k.hashes.len());
+        }
+        if let Some(r) = self.rec.as_mut() {
+            r.fix.reserve(k.fix.len());
+            r.parts.reserve(k.parts.len());
+        }
+    }
+
+    /// Schliesst die behaltene Gruppe ab: ihr Körper samt Teilen (Pool-Lagen relativ).
+    pub fn end_kept(&mut self) -> Kept {
+        let Some(r) = self.rec.take() else { return Kept::default() };
+        let mut recs = self.recs[r.recs..].to_vec();
+        for &at in &r.fix {
+            recs[at - r.recs] -= r.pool as f64;
+        }
+        Kept {
+            recs,
+            pool: self.pool[r.pool..].to_vec(),
+            offsets: self.offsets[r.offsets..].iter().map(|o| o - r.recs as f64).collect(),
+            hashes: self.hashes.as_ref().map_or_else(Vec::new, |h| h[r.offsets..].to_vec()),
+            fix: r.fix.iter().map(|&at| (at - r.recs) as u32).collect(),
+            index: r.parts.iter().enumerate().map(|(i, p)| (p.tag, i)).collect(),
+            parts: r.parts,
+        }
+    }
+
+    #[inline]
+    fn fix_pool(&mut self, at: usize) {
+        if let Some(r) = self.rec.as_mut() {
+            r.fix.push(at);
+        }
+    }
+
+    /// Der seit [`Writer::mark`] geschriebene Abschnitt (Pool-Lagen relativ, erste Linie ohne Linienzug).
+    pub fn take_segment(&mut self) -> Segment {
+        let Some(r) = self.rec.take() else { return Segment::default() };
+        let n = self.offsets.len() - r.offsets;
+        if n == 0 {
+            return Segment::default();
+        }
+        let mut recs = self.recs[r.recs..].to_vec();
+        for &at in &r.fix {
+            recs[at - r.recs] -= r.pool as f64;
+        }
+        let offsets: Vec<f64> = self.offsets[r.offsets..].iter().map(|o| o - r.recs as f64).collect();
+        let mut hashes = self.hashes.as_ref().map_or_else(Vec::new, |h| h[r.offsets..].to_vec());
+        if let Some((_, h)) = &r.first {
+            let at = offsets[0] as usize + 1;
+            recs[at] = (recs[at] as u32 & !F_CHAIN) as f64;
+            if let Some(x) = hashes.first_mut() {
+                *x = (h >> 12) as f64;
+            }
+        }
+        Segment {
+            recs,
+            pool: self.pool[r.pool..].to_vec(),
+            offsets,
+            hashes,
+            fix: r.fix.iter().map(|&at| (at - r.recs) as u32).collect(),
+            first: r.first,
+            last: self.prev.clone(),
+        }
+    }
+
+    /// Setzt einen mit denselben [`Tables`] aufgenommenen Abschnitt ein: Pool-Lagen umrechnen, den
+    /// Linienzug am Anfang wie beim direkten Schreiben bestimmen.
+    pub fn splice(&mut self, seg: &Segment) {
+        if seg.offsets.is_empty() {
+            return;
+        }
+        let rb = self.recs.len();
+        let pb = self.pool.len() as f64;
+        self.recs.extend_from_slice(&seg.recs);
+        self.pool.extend_from_slice(&seg.pool);
+        for &at in &seg.fix {
+            self.recs[rb + at as usize] += pb;
+        }
+        let first_prim = self.offsets.len();
+        self.offsets.extend(seg.offsets.iter().map(|o| o + rb as f64));
+        if let Some(hs) = self.hashes.as_mut() {
+            hs.extend_from_slice(&seg.hashes);
+        }
+        if let Some((k, h)) = &seg.first {
+            if self.chains_to(k) {
+                let at = rb + seg.offsets[0] as usize + 1;
+                self.recs[at] = (self.recs[at] as u32 | F_CHAIN) as f64;
+                if let Some(hs) = self.hashes.as_mut() {
+                    hs[first_prim] = (fnv(*h, CHAIN_SALT) >> 12) as f64;
+                }
+            }
+        }
+        self.prev = seg.last.as_ref().map(Self::spliced_key);
     }
 
     fn intern(&mut self, s: &str) -> (usize, u64) {
         // Schnellweg: die zuletzt gesehenen kurzen Texte (Linien eines Elements: Klasse, Farbe, Id).
         let short = s.len() <= RECENT_MAX_LEN;
         if short {
-            if let Some(e) = self.recent.iter().flatten().find(|e| &e.0[..e.1] == s.as_bytes()) {
+            if let Some(e) = self.t.recent.iter().flatten().find(|e| &e.0[..e.1] == s.as_bytes()) {
                 return (e.2, e.3);
             }
         }
-        let r = match self.str_map.get(s) {
-            Some(&i) => (i, self.str_hash[i]),
+        let r = match self.t.str_map.get(s) {
+            Some(&i) => (i, self.t.str_hash[i]),
             None => {
                 let r = self.append_string(s);
-                self.str_map.insert(s.to_string(), r.0);
+                self.t.str_map.insert(s.to_string(), r.0);
                 r
             }
         };
         if short {
             let mut b = [0u8; RECENT_MAX_LEN];
             b[..s.len()].copy_from_slice(s.as_bytes());
-            self.recent[self.recent_at] = Some((b, s.len(), r.0, r.1));
-            self.recent_at = (self.recent_at + 1) % self.recent.len();
+            self.t.recent[self.t.recent_at] = Some((b, s.len(), r.0, r.1));
+            self.t.recent_at = (self.t.recent_at + 1) % self.t.recent.len();
         }
         r
     }
 
     /// Text ohne Nachschlagen anhängen (JSON von Texten/Bildern: praktisch immer verschieden).
     fn append_string(&mut self, s: &str) -> (usize, u64) {
-        let off = self.units.len();
+        let off = self.t.units.len();
         let mut h = FNV_OFFSET;
         for u in s.encode_utf16() {
-            self.units.push(u);
+            self.t.units.push(u);
             h = fnv(h, u as u64);
         }
-        let i = self.strings.len();
-        self.strings.push((off, self.units.len() - off));
-        self.str_hash.push(h);
+        let i = self.t.strings.len();
+        self.t.strings.push((off, self.t.units.len() - off));
+        self.t.str_hash.push(h);
         (i, h)
     }
 
@@ -1128,6 +1489,7 @@ impl Writer {
     fn list(&mut self, l: &[f64]) {
         let off = self.pool.len();
         self.pool.extend_from_slice(l);
+        self.fix_pool(self.recs.len());
         self.recs.push(off as f64);
         self.recs.push(l.len() as f64);
         self.h = fnv(self.h, l.len() as u64);
@@ -1142,6 +1504,7 @@ impl Writer {
             self.pool.push(q.x);
             self.pool.push(q.y);
         }
+        self.fix_pool(self.recs.len());
         self.recs.push(off as f64);
         self.recs.push(p.len() as f64);
         self.h = fnv(self.h, p.len() as u64);
@@ -1156,28 +1519,28 @@ impl Writer {
         let simple = h.image.is_none() && h.gradient.is_none() && h.motif.is_none();
         let key = if simple { hatch_bits_key(h) } else { 0 };
         if simple {
-            if let Some(c) = self.hatch_fast.get(&key) {
+            if let Some(c) = self.t.hatch_fast.get(&key) {
                 if let Some(e) = c.iter().find(|e| hatch_bits_eq(&e.0, h)) {
                     return (e.1, e.2);
                 }
             }
         }
         let json = serde_json::to_string(h).unwrap_or_default();
-        if let Some(&e) = self.hatch_map.get(&json) {
+        if let Some(&e) = self.t.hatch_map.get(&json) {
             if simple {
-                self.hatch_fast.entry(key).or_default().push((h.clone(), e.0, e.1));
+                self.t.hatch_fast.entry(key).or_default().push((h.clone(), e.0, e.1));
             }
             return e;
         }
         let (js, jh) = self.intern(&json);
         let (cs, _) = self.intern(&h.color);
-        let idx = self.n_hatches;
-        self.n_hatches += 1;
-        self.hatch_words.push(js as f64);
-        write_hatch_words(&mut self.hatch_words, h, cs as f64);
-        self.hatch_map.insert(json, (idx, jh));
+        let idx = self.t.n_hatches;
+        self.t.n_hatches += 1;
+        self.t.hatch_words.push(js as f64);
+        write_hatch_words(&mut self.t.hatch_words, h, cs as f64);
+        self.t.hatch_map.insert(json, (idx, jh));
         if simple {
-            self.hatch_fast.entry(key).or_default().push((h.clone(), idx, jh));
+            self.t.hatch_fast.entry(key).or_default().push((h.clone(), idx, jh));
         }
         (idx, jh)
     }
@@ -1190,7 +1553,10 @@ impl Writer {
         // Weitere Ids (selten) erst hier sammeln.
         let rest: Vec<(u32, String)> = it.map(|(k, s)| (k, s.to_string())).collect();
         self.num(tag as f64);
-        self.num((flags | if rest.is_empty() { 0 } else { F_IDS }) as f64);
+        // Das Linienzug-Flag geht erst am Ende in den Hash ein (s. `CHAIN_SALT`).
+        let flags = flags | if rest.is_empty() { 0 } else { F_IDS };
+        self.recs.push(flags as f64);
+        self.h = fnv(self.h, ((flags & !F_CHAIN) as f64).to_bits());
         match first {
             None => {
                 self.num(0.0);
@@ -1218,6 +1584,7 @@ impl Writer {
         }
         let off = self.pool.len();
         self.pool.extend_from_slice(&l);
+        self.fix_pool(self.recs.len());
         self.recs.push(off as f64);
         self.recs.push(rest.len() as f64);
         for (k, h) in rest.iter().map(|r| r.0).zip(hs) {
@@ -1272,6 +1639,18 @@ impl Writer {
     /// Kennung): zwei Linien mit Muster-Liste setzen einen Linienzug nur bei gleicher Kennung fort
     /// (TS: dieselbe Array-Referenz), ohne Kennung nie.
     pub fn push_ref(&mut self, p: &Primitive, dash_ref: u32) {
+        // Linien bearbeitet `line_ref`.
+        if let Some(post) = self.post.filter(|q| q.active()) {
+            if !matches!(p, Primitive::Line { .. }) {
+                let mut q = p.clone();
+                post.apply(&mut q);
+                return self.push_ref_raw(&q, dash_ref);
+            }
+        }
+        self.push_ref_raw(p, dash_ref)
+    }
+
+    fn push_ref_raw(&mut self, p: &Primitive, dash_ref: u32) {
         match p {
             Primitive::Polygon {
                 pts,
@@ -1391,6 +1770,15 @@ impl Writer {
     /// Eine Linie aus geliehenen Feldern anhängen (wie [`Writer::push_ref`] mit `Primitive::Line`,
     /// ohne das Primitiv erst zu bauen — die 2D-Zeichnungen schreiben so direkt in den Puffer).
     pub fn line_ref(&mut self, l: &LineRef, dash_ref: u32) {
+        let posted;
+        let l = match self.post.filter(|q| q.active()) {
+            Some(q) => {
+                let (color, weight_mm) = q.line(l.color, l.weight_mm);
+                posted = LineRef { color, weight_mm, ..*l };
+                &posted
+            }
+            None => l,
+        };
         let plain = l.zigzag.is_none() && l.motif.is_none();
         let di = l.drawing_id.map(|s| self.intern(s).0);
         let ci = l.color.map(|s| self.intern(s).0);
@@ -1442,6 +1830,21 @@ impl Writer {
             self.pts(&m.points);
         }
         self.tail_ids(rest);
+        if let Some(r) = self.rec.as_mut() {
+            if plain {
+                let n = self.offsets.len();
+                let key = || (ChainKey { drawing: di, color: ci, weight: l.weight_mm, greyed: l.greyed, opacity: l.opacity, dash: ds, dash_ref, b: l.a }, self.h);
+                if n == r.offsets + 1 {
+                    r.first = Some(key());
+                }
+                if let Some(ps) = r.part.as_mut().filter(|ps| n == ps.offsets + 1) {
+                    ps.first = Some(key());
+                }
+            }
+        }
+        if chain {
+            self.h = fnv(self.h, CHAIN_SALT);
+        }
         self.end_prim();
         self.prev = plain.then_some(ChainKey { drawing: di, color: ci, weight: l.weight_mm, greyed: l.greyed, opacity: l.opacity, dash: ds, dash_ref, b: l.b });
     }
@@ -1466,6 +1869,11 @@ impl Writer {
     }
 
     pub fn finish(self) -> Vec<u8> {
+        self.finish_keep().0
+    }
+
+    /// Wie [`Writer::finish`]; die Tabellen kommen für den nächsten Puffer zurück.
+    pub fn finish_keep(self) -> (Vec<u8>, Tables) {
         let n_prims = self.offsets.len();
         let mut flags = 0;
         if self.hashes.is_some() {
@@ -1479,56 +1887,66 @@ impl Writer {
             MAGIC,
             VERSION,
             flags as f64,
-            self.strings.len() as f64,
-            self.n_hatches as f64,
-            self.hatch_words.len() as f64,
+            self.t.strings.len() as f64,
+            self.t.n_hatches as f64,
+            self.t.hatch_words.len() as f64,
             self.groups.len() as f64,
             n_prims as f64,
             self.recs.len() as f64,
             self.pool.len() as f64,
-            self.units.len() as f64,
+            self.t.units.len() as f64,
             0.0,
             b[0],
             b[1],
             b[2],
             b[3],
         ];
-        let n_f64 = HEAD + 2 * self.strings.len() + self.hatch_words.len() + 2 * self.groups.len() + n_prims * if self.hashes.is_some() { 2 } else { 1 } + self.recs.len() + self.pool.len();
-        let mut out = Vec::with_capacity(n_f64 * 8 + self.units.len() * 2);
-        let mut put = |v: f64| out.extend_from_slice(&v.to_le_bytes());
-        for v in head {
-            put(v);
-        }
-        for (o, n) in &self.strings {
-            put(*o as f64);
-            put(*n as f64);
-        }
-        for v in &self.hatch_words {
-            put(*v);
-        }
-        for (a, b) in &self.groups {
-            put(*a as f64);
-            put(*b as f64);
-        }
-        for v in &self.offsets {
-            put(*v);
-        }
+        let n_f64 = HEAD + 2 * self.t.strings.len() + self.t.hatch_words.len() + 2 * self.groups.len() + n_prims * if self.hashes.is_some() { 2 } else { 1 } + self.recs.len() + self.pool.len();
+        let mut out = Vec::with_capacity(n_f64 * 8 + self.t.units.len() * 2);
+        put_f64s(&mut out, &head);
+        let strings: Vec<f64> = self.t.strings.iter().flat_map(|&(o, n)| [o as f64, n as f64]).collect();
+        put_f64s(&mut out, &strings);
+        put_f64s(&mut out, &self.t.hatch_words);
+        let groups: Vec<f64> = self.groups.iter().flat_map(|&(a, b)| [a as f64, b as f64]).collect();
+        put_f64s(&mut out, &groups);
+        put_f64s(&mut out, &self.offsets);
         if let Some(hs) = &self.hashes {
-            for v in hs {
-                put(*v);
-            }
+            put_f64s(&mut out, hs);
         }
-        for part in [&self.recs, &self.pool] {
-            let at = out.len();
-            out.resize(at + part.len() * 8, 0);
-            for (d, v) in out[at..].chunks_exact_mut(8).zip(part.iter()) {
-                d.copy_from_slice(&v.to_le_bytes());
-            }
-        }
-        for u in &self.units {
-            out.extend_from_slice(&u.to_le_bytes());
-        }
-        out
+        put_f64s(&mut out, &self.recs);
+        put_f64s(&mut out, &self.pool);
+        put_u16s(&mut out, &self.t.units);
+        (out, self.t)
+    }
+}
+
+/// Zahlen als Bytes (little-endian) anhängen — auf little-endian-Zielen (WASM, x86, ARM) ein
+/// einziges Kopieren statt Zahl für Zahl (der Puffer ist mehrere MB gross).
+fn put_f64s(out: &mut Vec<u8>, v: &[f64]) {
+    #[cfg(target_endian = "little")]
+    {
+        // SAFETY: `f64` hat keine Füllbits und ist hier im Speicher genau `to_le_bytes`; die
+        // Ansicht lebt nur bis zum Kopieren.
+        let bytes = unsafe { std::slice::from_raw_parts(v.as_ptr().cast::<u8>(), std::mem::size_of_val(v)) };
+        out.extend_from_slice(bytes);
+    }
+    #[cfg(not(target_endian = "little"))]
+    for x in v {
+        out.extend_from_slice(&x.to_le_bytes());
+    }
+}
+
+/// UTF-16-Einheiten als Bytes (little-endian) anhängen, wie [`put_f64s`].
+fn put_u16s(out: &mut Vec<u8>, v: &[u16]) {
+    #[cfg(target_endian = "little")]
+    {
+        // SAFETY: wie `put_f64s`.
+        let bytes = unsafe { std::slice::from_raw_parts(v.as_ptr().cast::<u8>(), std::mem::size_of_val(v)) };
+        out.extend_from_slice(bytes);
+    }
+    #[cfg(not(target_endian = "little"))]
+    for x in v {
+        out.extend_from_slice(&x.to_le_bytes());
     }
 }
 
@@ -1665,7 +2083,7 @@ pub fn encode_error(msg: &str) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::model::{Marks, RichTextDoc};
     use crate::plan::prim::StampLine;
@@ -1883,6 +2301,167 @@ mod tests {
         assert!(matches!(g.prims[1], Prim::Polygon { hatch: 1, .. }), "no_hatch wird ein eigener Eintrag");
         assert!(matches!(g.prims[8], Prim::Placeholder));
         assert!(matches!(g.prims[13], Prim::DrawingArc { .. }));
+    }
+
+    /// Inhalt eines Puffers unabhängig von der Lage in den Tabellen: Primitive, Gruppen, Ausmass,
+    /// Inhalts-Hashes und Linienzug-Flags.
+    pub(crate) fn content(bytes: &[u8]) -> (String, Vec<(usize, usize)>, Option<[f64; 4]>, Vec<f64>, Vec<bool>) {
+        let v = View::parse(bytes).expect("Puffer lesbar");
+        let prims = v.prims().expect("Primitive lesbar");
+        let hashes = (0..v.len()).map(|i| v.hash(i).unwrap_or(-1.0)).collect();
+        let chain = (0..v.len()).map(|i| v.rec(i).is_some_and(|r| r.flags & F_CHAIN != 0)).collect();
+        (serde_json::to_string(&prims).unwrap(), v.groups().unwrap(), v.bounds(), hashes, chain)
+    }
+
+    fn mixed() -> (Vec<Primitive>, Vec<u32>) {
+        let mut prims = sample();
+        prims.extend(sample());
+        prims.push(line(4.0, 5.0, None));
+        prims.push(line(5.0, 6.0, None));
+        prims.push(line(6.0, 7.0, Some(Some(vec![0.4, 0.2]))));
+        prims.push(line(7.0, 8.0, Some(Some(vec![0.4, 0.2]))));
+        let n = prims.len();
+        let refs = (0..n).map(|i| if i >= n - 2 { DASH_REF_FIXED + 3 } else if i % 5 == 0 { 7 } else { 0 }).collect();
+        (prims, refs)
+    }
+
+    fn write_direct(prims: &[Primitive], refs: &[u32], order: &[usize]) -> Vec<u8> {
+        let mut w = Writer::new(true);
+        let s = w.begin_group();
+        for &i in order {
+            w.push_ref(&prims[i], refs[i]);
+        }
+        w.end_group(s);
+        w.finish()
+    }
+
+    /// Abschnitte ([`Segment`]) aufgenommen und wieder eingesetzt = dieselben Primitive direkt
+    /// geschrieben: bei jeder Aufteilung Byte für Byte (gleiche Tabellen), in anderer Reihenfolge
+    /// inhaltsgleich — auch Linienzüge über Abschnittsgrenzen und ihre Hashes.
+    #[test]
+    fn abschnitte_eingesetzt_wie_direkt() {
+        let (prims, refs) = mixed();
+        let all: Vec<usize> = (0..prims.len()).collect();
+        let direct = write_direct(&prims, &refs, &all);
+        let mut state = 7u64;
+        for round in 0..100 {
+            let mut w = Writer::new(true);
+            let s = w.begin_group();
+            let mut segs = Vec::new();
+            let mut i = 0;
+            while i < prims.len() {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let n = ((state >> 33) % 4) as usize;
+                w.mark();
+                for k in i..(i + n).min(prims.len()) {
+                    w.push_ref(&prims[k], refs[k]);
+                }
+                segs.push((i, w.take_segment()));
+                i += n;
+            }
+            w.end_group(s);
+            let (bytes, tables) = w.finish_keep();
+            assert!(bytes == direct, "Runde {round}: Aufnahme verändert die Ausgabe");
+            let mut w = Writer::with_tables(tables, true);
+            let s = w.begin_group();
+            for (_, seg) in &segs {
+                w.splice(seg);
+            }
+            w.end_group(s);
+            let (bytes, tables) = w.finish_keep();
+            assert!(bytes == direct, "Runde {round}: eingesetzt anders");
+            let order: Vec<usize> = segs.iter().rev().flat_map(|(i, seg)| *i..*i + seg.len()).collect();
+            let mut w = Writer::with_tables(tables, true);
+            let s = w.begin_group();
+            for (_, seg) in segs.iter().rev() {
+                w.splice(seg);
+            }
+            w.end_group(s);
+            assert_eq!(content(&w.finish()), content(&write_direct(&prims, &refs, &order)), "Runde {round}: rückwärts");
+        }
+    }
+
+    /// Behaltene Gruppe ([`Kept`]): Teile in beliebigen Läufen kopiert und mit neu geschriebenen
+    /// gemischt = alles direkt geschrieben (inhaltsgleich, Linienzüge an allen Grenzen).
+    #[test]
+    fn behaltene_teile_wie_direkt() {
+        let (prims, refs) = mixed();
+        // Teile: je 0–3 Primitive.
+        let mut state = 3u64;
+        let mut rnd = |n: u64| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((state >> 33) % n) as usize
+        };
+        let mut parts: Vec<(usize, usize)> = Vec::new();
+        let mut i = 0;
+        while i < prims.len() {
+            let n = rnd(4);
+            parts.push((i, (i + n).min(prims.len())));
+            i += n;
+        }
+        // Erste Aufnahme: alle Teile neu.
+        let mut w = Writer::new(true);
+        let s = w.begin_group();
+        w.begin_kept();
+        for (t, &(a, b)) in parts.iter().enumerate() {
+            w.part_begin();
+            for k in a..b {
+                w.push_ref(&prims[k], refs[k]);
+            }
+            w.part_end(t as u64, 0, [0.0; 4]);
+        }
+        let mut kept = w.end_kept();
+        w.end_group(s);
+        let (bytes, mut tables) = w.finish_keep();
+        let all: Vec<usize> = (0..prims.len()).collect();
+        assert!(bytes == write_direct(&prims, &refs, &all));
+        for round in 0..150 {
+            // Neue Reihenfolge der Teile (gemischt, manche fehlen, manche neu geschrieben).
+            let mut order: Vec<usize> = (0..parts.len()).filter(|_| rnd(10) < 9).collect();
+            for _ in 0..rnd(4) {
+                let (x, y) = (rnd(order.len().max(1) as u64), rnd(order.len().max(1) as u64));
+                if x < order.len() && y < order.len() {
+                    order.swap(x, y);
+                }
+            }
+            let fresh: Vec<bool> = order.iter().map(|_| rnd(5) == 0).collect();
+            let mut w = Writer::with_tables(tables, true);
+            let s = w.begin_group();
+            w.begin_kept();
+            let mut run: Option<(usize, usize)> = None;
+            for (&t, &f) in order.iter().zip(&fresh) {
+                let hit = if f { None } else { kept.find(t as u64, 0, run.map_or(0, |r| r.1)) };
+                match hit {
+                    Some(j) if run.is_some_and(|r| r.1 == j) => run.as_mut().unwrap().1 += 1,
+                    Some(j) => {
+                        if let Some((a, b)) = run.take() {
+                            w.copy_parts(&kept, a, b);
+                        }
+                        run = Some((j, j + 1));
+                    }
+                    None => {
+                        if let Some((a, b)) = run.take() {
+                            w.copy_parts(&kept, a, b);
+                        }
+                        w.part_begin();
+                        for k in parts[t].0..parts[t].1 {
+                            w.push_ref(&prims[k], refs[k]);
+                        }
+                        w.part_end(t as u64, 0, [0.0; 4]);
+                    }
+                }
+            }
+            if let Some((a, b)) = run.take() {
+                w.copy_parts(&kept, a, b);
+            }
+            let next = w.end_kept();
+            w.end_group(s);
+            let (bytes, t) = w.finish_keep();
+            tables = t;
+            let flat: Vec<usize> = order.iter().flat_map(|&t| parts[t].0..parts[t].1).collect();
+            assert_eq!(content(&bytes), content(&write_direct(&prims, &refs, &flat)), "Runde {round}");
+            kept = next;
+        }
     }
 
     #[test]

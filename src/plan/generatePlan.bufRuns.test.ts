@@ -1,6 +1,6 @@
-// Kern-Abschnitte im Plan ([K3d], Plan-Puffer v2): `Plan.bufRuns` zeigt auf unveränderte Primitive
-// aus dem Puffer des Kerns — auch nach Abzugskörpern, beim Überlagern mehrerer Geschosse und mit
-// der kompakten Unterlage; Mono und Strichstärken-Massstab lassen sie weg.
+// Kern-Abschnitte im Plan ([K3d], Plan-Puffer v2): `Plan.bufRuns` zeigt auf die Primitive aus den
+// Puffern des Kerns — der ganze Plan kommt aus dem Kern (auch Abzugskörper, Mono und
+// Strichstärken-Massstab), beim Überlagern mehrerer Geschosse und mit der kompakten Unterlage.
 
 import { describe, expect, it } from "vitest";
 import { generatePlan, generateVisibleLevelsPlan, materializeUnderlay } from "./generatePlan";
@@ -23,33 +23,36 @@ function checkRuns(plan: Plan): number {
 }
 
 describe("Plan.bufRuns", () => {
-  it("Beispiel-EG: ein Abschnitt (auch die 2D-Zeichnungen kommen aus dem Kern), alle Kern-Primitive abgedeckt", () => {
+  it("Beispiel-EG: Abschnitte (auch die 2D-Zeichnungen kommen aus dem Kern, als Stücke), alle Kern-Primitive abgedeckt", () => {
     const plan = generatePlan(sampleProject, "eg", codes(sampleProject));
-    expect(plan.bufRuns?.length).toBe(1);
+    expect(plan.bufRuns?.length).toBeGreaterThanOrEqual(1);
     const covered = checkRuns(plan);
-    expect(covered).toBe(plan.bufRuns![0].buf.prims.length);
+    const bufs = new Set(plan.bufRuns!.map((r) => r.buf));
+    expect(covered).toBe([...bufs].reduce((n, b) => n + b.count, 0));
+    expect(covered).toBe(plan.primitives.length);
   });
 
-  it("Abzugskörper zerlegen Polygone: Abschnitte werden neu ausgerichtet", () => {
+  it("Abzugskörper zerlegen Polygone (im Kern): alles bleibt Abschnitt", () => {
     const solid: ExtrudedSolid = {
       id: "void1",
       type: "extrudedSolid",
       levelId: "eg",
       operation: "subtract",
       height: 3,
+      // Durch die Wand W1 zwischen Tür und Innenwand.
       points: [
-        { x: 1, y: -0.5 },
-        { x: 1.4, y: -0.5 },
-        { x: 1.4, y: 0.5 },
-        { x: 1, y: 0.5 },
+        { x: 1.95, y: -0.5 },
+        { x: 2.15, y: -0.5 },
+        { x: 2.15, y: 0.5 },
+        { x: 1.95, y: 0.5 },
       ],
     } as ExtrudedSolid;
     const p: Project = { ...sampleProject, extrudedSolids: [solid] };
     const plan = generatePlan(p, "eg", codes(p));
-    const total = plan.bufRuns![0].buf.prims.length;
-    const covered = checkRuns(plan);
-    expect(covered).toBeGreaterThan(total / 2);
-    expect(covered).toBeLessThan(total);
+    expect(checkRuns(plan)).toBe(plan.primitives.length);
+    // Die Wand-Poché unter dem Körper ist ausgespart.
+    const walls = (q: Project) => JSON.stringify(generatePlan(q, "eg", codes(q)).primitives.filter((x) => x.kind === "polygon" && x.wallId));
+    expect(walls(p)).not.toBe(walls(sampleProject));
   });
 
   it("Überlagerung mehrerer Geschosse und kompakte Unterlage verschieben die Abschnitte mit", () => {
@@ -59,10 +62,11 @@ describe("Plan.bufRuns", () => {
     checkRuns(materializeUnderlay(plan));
   });
 
-  it("Mono und Strichstärken-Massstab: keine Abschnitte", () => {
-    expect(generatePlan(sampleProject, "eg", codes(sampleProject), undefined, "mittel", false, true).bufRuns).toBeUndefined();
+  it("Mono und Strichstärken-Massstab rechnet der Kern: alles bleibt Abschnitt", () => {
+    const mono = generatePlan(sampleProject, "eg", codes(sampleProject), undefined, "mittel", false, true);
+    expect(checkRuns(mono)).toBe(mono.primitives.length);
     const scaled: Project = { ...sampleProject, scaleLineWeights: true };
-    expect(generatePlan(scaled, "eg", codes(scaled), undefined, "mittel", false, false, true, 50).bufRuns).toBeUndefined();
-    expect(generatePlan(scaled, "eg", codes(scaled), undefined, "mittel", false, false, true, 100).bufRuns?.length).toBe(1);
+    const s50 = generatePlan(scaled, "eg", codes(scaled), undefined, "mittel", false, false, true, 50);
+    expect(checkRuns(s50)).toBe(s50.primitives.length);
   });
 });

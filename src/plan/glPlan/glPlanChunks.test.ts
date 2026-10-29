@@ -240,7 +240,7 @@ describe('GpuChunkCache: Kern-Abschnitte (Plan-Puffer v2, Inhalts-Hash)', () => 
     const { gl } = makeGl();
     const cache = new GpuChunkCache(gl);
     const a = generatePlan(p, 'eg', codes(p));
-    expect(a.bufRuns?.length).toBe(1);
+    expect(a.bufRuns?.length).toBeGreaterThanOrEqual(1);
     cache.update(a.primitives, 90, 6, a.greyedRanges, a.underlay, a.bufRuns);
     expect(cache.lastStats.recompiled).toBe(cache.lastStats.chunks);
     const b = generatePlan(p, 'eg', codes(p));

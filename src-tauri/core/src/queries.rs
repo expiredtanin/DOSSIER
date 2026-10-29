@@ -136,7 +136,9 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             let mut a = domains::PlanArgs::parse(1.0, "{}")?;
             a.scale = args[0];
             let c = domains::Ctx::new(p, &a);
-            buf_of(|sink| drawings::underlay_lines(&c, &args[2..], args[1] != 0.0, sink))
+            // Strichstärken nach Massstab wie im übrigen Plan.
+            let post = Some(crate::plan::extras::Post { mono: false, lw: crate::plan::extras::line_weight_factor(p, args[0]) }).filter(crate::plan::extras::Post::active);
+            buf_with(post, |sink| drawings::underlay_lines(&c, &args[2..], args[1] != 0.0, sink))
         }
         // Primitive einer Zeichnung (JSON in `text`, ohne Override-Regeln) beim Massstab `args[0]`.
         ("drawingPrims", 1) => {
@@ -157,10 +159,32 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
     }
 }
 
+/// Wie [`run_bin`] auf dem Dokument: `planDomains` mit den Plan-Caches des Dokuments (`plan/cache.rs`).
+pub fn run_bin_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
+    let model_err = |e: String| format!("Projekt passt nicht zum Kern-Modell: {e}");
+    if name == "planDomains" && args.len() == 1 {
+        let a = crate::plan::domains::PlanArgs::parse(args[0], text)?;
+        // Schlüssel der Zeichnungs-Stücke, die der Aufrufer schon hat (`"have": [k…]`).
+        let have: std::collections::HashSet<u64> = serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .and_then(|v| v.get("have").and_then(|h| h.as_array()).map(|h| h.iter().filter_map(|k| k.as_f64()).filter(|k| *k >= 0.0 && k.fract() == 0.0).map(|k| k as u64).collect()))
+            .unwrap_or_default();
+        let (p, revs, cache) = d.project_cached().map_err(model_err)?;
+        return crate::plan::domains::plan_domains_cached(p, revs, cache, &a, &have).map(|o| o.encode());
+    }
+    run_bin(d.project().map_err(model_err)?, name, args, text)
+}
+
 /// Plan-Puffer (eine Gruppe, ohne Inhalts-Hashes), in den `f` die Zeichnungs-Primitive schreibt.
 fn buf_of(f: impl FnOnce(&mut crate::plan::drawings::Sink) -> Result<(), String>) -> Result<Vec<u8>, String> {
+    buf_with(None, f)
+}
+
+/// Wie [`buf_of`] mit Nachbearbeitung (`extras::Post`).
+fn buf_with(post: Option<crate::plan::extras::Post>, f: impl FnOnce(&mut crate::plan::drawings::Sink) -> Result<(), String>) -> Result<Vec<u8>, String> {
     use crate::plan::drawings::{Keep, Sink, Target};
     let mut w = crate::plan_buf::Writer::new(false);
+    w.post = post;
     let start = w.begin_group();
     f(&mut Sink::new(Target::Buf(&mut w), Keep::All))?;
     w.end_group(start);

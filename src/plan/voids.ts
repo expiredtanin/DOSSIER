@@ -3,7 +3,8 @@
 // Ansichten aus demselben Modell:
 //
 //  • Grundriss: Poché-Polygone der getroffenen Bauteile minus Körper-Grundfläche, sofern der
-//    Körper die Schnitthöhe (Wände/Stützen) bzw. die Platte (Decken) durchdringt.
+//    Körper die Schnitthöhe (Wände/Stützen) bzw. die Platte (Decken) durchdringt — rechnet der
+//    Kern (`core/src/plan/extras.rs::subtract_voids`).
 //  • Schnitt:   Cut-Polygone minus Körper-Schnitt (Grundfläche ∩ Schnittspur × Höhenbereich), im Kern
 //               (`core/src/plan/section.rs`).
 //  • 3D/STEP:   Boolean-Differenz (truck, Mesh-CSG-Fallback), s. `toWalls3d/voids3d.ts`
@@ -20,8 +21,6 @@ import type { Pair } from "../geometry/polygonBool";
 import { core } from "../engine/coreWasm";
 import type { ExtrudedSolid, Project, Vec2 } from "../model/types";
 import { getFloor } from "../model/types";
-import { ceilingVerticalExtent, columnVerticalExtent } from "../model/wall";
-import type { Primitive } from "./generatePlan/shared";
 import type { SolidSpec } from "../engine/truckSolid";
 import type { RWall } from "./toWalls3d/shared";
 
@@ -31,8 +30,6 @@ export interface VoidPrism {
   z0: number;
   z1: number;
 }
-
-const EPS = 1e-7;
 
 /** Ob ein Körper als Abzugskörper wirkt (Prisma mit gültigem Profil). */
 export function isVoidSolid(s: ExtrudedSolid): boolean {
@@ -62,8 +59,6 @@ export function voidPrisms(project: Project): VoidPrism[] {
 }
 
 // ── Polygon-Booleans (Rust-Kern, `voids.rs`) ─────────────────────────────────
-
-const ring = (pts: Vec2[]): Pair[] => pts.map((p) => [p.x, p.y] as Pair);
 
 /** Ringliste flach für den Kern (`[n, (k, x, y …) × n]`). */
 function encodeRings(rings: Pair[][]): Float64Array {
@@ -105,87 +100,6 @@ export function subtractRings(
     out.push({ pts: rp, noStrokeEdges: ns });
   }
   return out;
-}
-
-// ── Grundriss ────────────────────────────────────────────────────────────────
-
-/** Teile der Strecke a→b ausserhalb aller Ringe, als Parameter-Intervalle [t0, t1]. */
-export function segmentOutside(a: Vec2, b: Vec2, cutters: Pair[][]): Array<[number, number]> {
-  const f = core().voids_segment_outside_flat(Float64Array.from([a.x, a.y, b.x, b.y]), encodeRings(cutters));
-  const out: Array<[number, number]> = [];
-  for (let k = 0; k < (f[0] ?? 0); k++) out.push([f[1 + 2 * k], f[2 + 2 * k]]);
-  return out;
-}
-
-/** Linien-Klassen der Wand-Poché, die ein Abzugskörper auf Schnitthöhe unterbricht. */
-const WALL_LINE_CLS = new Set(["wall-outline", "layer-joint", "layer-joint-l"]);
-
-/**
- * Zieht die Abzugskörper von den Bauteil-Polygonen eines Grundrisses ab (in place).
- * Wände: wenn der Körper die Schnitthöhe `cutZ` durchdringt. Stützen: ebenso, über ihren
- * Höhenbereich. Decken: wenn der Körper die Platte durchdringt (Deckendurchbruch). Liefert, ob
- * Abzugskörper da waren (dann kann sich die Liste verändert haben).
- */
-export function subtractVoidsInPlan(prims: Primitive[], project: Project, cutZ: number): boolean {
-  const voids = voidPrisms(project);
-  if (voids.length === 0) return false;
-  const ceilings = new Map((project.ceilings ?? []).map((c) => [c.id, c]));
-  const columns = new Map((project.columns ?? []).map((c) => [c.id, c]));
-  const cuttersFor = (z0: number, z1: number): Pair[][] =>
-    voids.filter((v) => v.z0 < z1 - EPS && v.z1 > z0 + EPS).map((v) => ring(v.pts));
-  const wallCutters = cuttersFor(cutZ - 1e-4, cutZ + 1e-4);
-  const out: Primitive[] = [];
-  for (const pr of prims) {
-    if (pr.kind === "line" && WALL_LINE_CLS.has(pr.cls) && wallCutters.length) {
-      const parts = segmentOutside(pr.a, pr.b, wallCutters);
-      const whole = parts.length === 1 && parts[0][0] === 0 && parts[0][1] === 1;
-      if (whole) out.push(pr);
-      else
-        for (const [t0, t1] of parts) {
-          const at = (t: number) => ({ x: pr.a.x + (pr.b.x - pr.a.x) * t, y: pr.a.y + (pr.b.y - pr.a.y) * t });
-          out.push({ ...pr, a: at(t0), b: at(t1) });
-        }
-      continue;
-    }
-    if (pr.kind !== "polygon" || pr.extrudedSolidId) {
-      out.push(pr);
-      continue;
-    }
-    let cutters: Pair[][] | null = null;
-    if (pr.wallId) cutters = wallCutters;
-    else if (pr.ceilingId) {
-      const c = ceilings.get(pr.ceilingId);
-      if (c) {
-        const { zBottom, zTop } = ceilingVerticalExtent(project, c);
-        cutters = cuttersFor(zBottom, zTop);
-      }
-    } else if (pr.columnId) {
-      const c = columns.get(pr.columnId);
-      if (c) {
-        const { zBottom, zTop } = columnVerticalExtent(project, c);
-        cutters = zBottom <= cutZ && zTop >= cutZ ? wallCutters : cuttersFor(zBottom, zTop);
-      }
-    }
-    if (!cutters || cutters.length === 0) {
-      out.push(pr);
-      continue;
-    }
-    const rest = subtractRings(ring(pr.pts), cutters, pr.noStrokeEdges ?? []);
-    if (rest === null) {
-      out.push(pr);
-      continue;
-    }
-    for (const r of rest) {
-      out.push({
-        ...pr,
-        pts: r.pts.map(([x, y]) => ({ x, y })),
-        noStrokeEdges: r.noStrokeEdges.length ? r.noStrokeEdges : undefined,
-      });
-    }
-  }
-  prims.length = 0;
-  for (const p of out) prims.push(p);
-  return true;
 }
 
 // ── 3D / B-Rep ───────────────────────────────────────────────────────────────

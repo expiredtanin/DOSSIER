@@ -126,6 +126,23 @@ describe("Op-Bauhelfer", () => {
     expect(fieldOps(sampleProject, "geoAnchor", undefined)).toEqual(projectDiffOps(sampleProject, { ...sampleProject, geoAnchor: undefined }));
   });
 
+  it("fieldOps: an Ort und Stelle ersetzte Elemente = nur replace; doppelte ids = ganzes Feld", () => {
+    const ws = sampleProject.walls;
+    const next = ws.map((w, i) => (i === 1 || i === 3 ? { ...w, height: 9 } : w));
+    expect(fieldOps(sampleProject, "walls", next)).toEqual([
+      { kind: "replace", collection: "walls", entity: next[1] },
+      { kind: "replace", collection: "walls", entity: next[3] },
+    ]);
+    // Nochmals vom Ergebnis aus (Eindeutigkeit gemerkt) und mit anderer id an einer Stelle.
+    const p2 = { ...sampleProject, walls: next };
+    const moved = next.map((w, i) => (i === 2 ? { ...w, id: "neu" } : w));
+    expect(fieldOps(p2, "walls", moved)).toEqual(projectDiffOps(p2, { ...p2, walls: moved }));
+    const dup = [ws[0], { ...ws[0] }];
+    const p3 = { ...sampleProject, walls: dup };
+    const dupNext = [ws[0], { ...ws[0], height: 1 }];
+    expect(fieldOps(p3, "walls", dupNext)).toEqual([{ kind: "setField", key: "walls", value: dupNext }]);
+  });
+
   it("opsMutation: wirkt wie eine Projekt → Projekt-Funktion und trägt die Ops mit", () => {
     const id = sampleProject.walls[0].id;
     const m = opsMutation((p) => patchItem(p, "walls", id, { height: 4.2 }));

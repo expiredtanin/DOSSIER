@@ -241,6 +241,8 @@ struct Memo<'a> {
     entries: Vec<MemoEntry<'a>>,
     /// Nächster zu ersetzender Eintrag, wenn die Tabelle voll ist.
     next: usize,
+    /// Zuletzt getroffener Eintrag (Zeichnungen folgen oft gleichartig aufeinander).
+    last: usize,
 }
 
 impl<'a> Memo<'a> {
@@ -248,7 +250,11 @@ impl<'a> Memo<'a> {
 
     fn get(&mut self, c: &Ctx<'a>, d: &'a Drawing2D) -> &MemoEntry<'a> {
         let key = (d.category_code.as_str(), shape_name(&d.geom));
+        if self.entries.get(self.last).is_some_and(|e| e.key == key) {
+            return &self.entries[self.last];
+        }
         if let Some(i) = self.entries.iter().position(|e| e.key == key) {
+            self.last = i;
             return &self.entries[i];
         }
         let e = MemoEntry { key, shown: c.shown(key.0), greyed: c.greyed(key.0), cat: c.cat(key.0), ov: c.overrides(key.0, Some(key.1)) };
@@ -261,6 +267,7 @@ impl<'a> Memo<'a> {
             self.entries[i] = e;
             i
         };
+        self.last = i;
         &self.entries[i]
     }
 }
@@ -1091,6 +1098,184 @@ pub fn plan_drawings(c: &Ctx, sink: &mut Sink, bounds: &mut Bounds) -> Result<()
     }
     sink.keep = Keep::All;
     Ok(())
+}
+
+/// Mittlere Grösse eines Stücks der 2D-Zeichnungen (Elemente) und Obergrenze.
+const CHUNK_MEAN: u64 = 256;
+const CHUNK_MAX: usize = 2048;
+
+#[inline]
+fn mix(h: u64, v: u64) -> u64 {
+    let x = (h ^ v).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    x ^ (x >> 31)
+}
+
+/// SplitMix64-Endmischung: gleichmässig verteilt auch für fortlaufende Element-Stände.
+#[inline]
+fn spread(v: u64) -> u64 {
+    let mut z = v.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Ein Stück der Zeichnungs-Domäne: Schlüssel und Puffer (`None`, wenn der Aufrufer es schon hat).
+pub type ChunkOut = (u64, Option<Vec<u8>>);
+
+/// Domäne „2D-Zeichnungen" in Stücken (`planDomains` mit Cache, `plan/cache.rs`): die gezeichneten
+/// Elemente werden inhaltsbestimmt in Stücke geteilt (Grenze nach einem Element, dessen Stand es
+/// will — eine Änderung verschiebt nur Grenzen in ihrer Nähe). Ein Stück ist ein eigener
+/// Plan-Puffer mit Schlüssel aus `salt` und den Element-Ständen; Stücke, deren Schlüssel der
+/// Aufrufer schon hat (`have`), kommen ohne Puffer zurück. Ein neues Stück übernimmt die Elemente
+/// des vorigen Stücks, aus dem es hervorgeht (fertig geschrieben, in Läufen kopiert), nur
+/// neue/geänderte Elemente werden erzeugt. Inhalt wie [`plan_drawings`] (ein Linienzug setzt sich
+/// über eine Stückgrenze nicht fort — das gäbe es nur bei doppelten ids).
+#[allow(clippy::too_many_arguments)]
+pub fn plan_drawings_chunked(c: &Ctx, stamps: &[u64], cache: &mut super::cache::DrawCache, salt: u64, have: &std::collections::HashSet<u64>, bounds: &mut Bounds) -> Result<Vec<ChunkOut>, String> {
+    use super::cache::Chunk;
+    if stamps.len() != c.p.drawings2d.len() {
+        return Err("Element-Stände der 2D-Zeichnungen fehlen".into());
+    }
+    let mut memo = Memo::default();
+    // Gezeichnete Elemente: (Index, Stand, gedimmt/kompakt).
+    let mut seq: Vec<(usize, u64, u8)> = Vec::new();
+    for (i, (d, &stamp)) in c.p.drawings2d.iter().zip(stamps).enumerate() {
+        if !on_floor(c, d) {
+            continue;
+        }
+        let m = memo.get(c, d);
+        if !m.shown {
+            continue;
+        }
+        let keep = if c.a.compact && compact_eligible(d) { Keep::NoLines } else { Keep::All };
+        seq.push((i, stamp, m.greyed as u8 | ((keep as u8) << 1)));
+    }
+    let mut old = std::mem::take(&mut cache.chunks);
+    let mut new: HashMap<u64, Chunk> = HashMap::new();
+    let mut out = Vec::new();
+    let mut next_ref = 0;
+    let mut start = 0;
+    let mut h = salt;
+    for k in 0..seq.len() {
+        let (_, stamp, flags) = seq[k];
+        h = mix(mix(h, stamp), flags as u64);
+        let end = spread(stamp) % CHUNK_MEAN == 0 || k + 1 - start >= CHUNK_MAX || k + 1 == seq.len();
+        if !end {
+            continue;
+        }
+        let key = h >> 12;
+        let part = &seq[start..=k];
+        start = k + 1;
+        h = salt;
+        if new.contains_key(&key) {
+            // Gleicher Inhalt zweimal (praktisch ausgeschlossen): das Stück ist schon da.
+            let ch = &new[&key];
+            bounds.merge(ch.bounds);
+            out.push((key, if have.contains(&key) { None } else { Some(chunk_bytes(ch)) }));
+            continue;
+        }
+        let mut ch = match old.remove(&key) {
+            Some(ch) => ch,
+            None => build_chunk(c, part, &cache.owner, &old, &new, &mut memo, &mut next_ref)?,
+        };
+        bounds.merge(ch.bounds);
+        // Der Puffer reist einmal; danach entsteht er bei Bedarf aus den Elementen neu.
+        let bytes = ch.bytes.take();
+        out.push((key, if have.contains(&key) { None } else { Some(bytes.unwrap_or_else(|| chunk_bytes(&ch))) }));
+        new.insert(key, ch);
+    }
+    // Zuordnung Element → Stück nachführen: Einträge verworfener Stücke weg, neue Stücke eintragen.
+    for (key, ch) in &old {
+        for p in &ch.kept.parts {
+            if cache.owner.get(&p.tag) == Some(key) {
+                cache.owner.remove(&p.tag);
+            }
+        }
+    }
+    for (key, ch) in new.iter_mut() {
+        if ch.fresh {
+            ch.fresh = false;
+            for p in &ch.kept.parts {
+                cache.owner.insert(p.tag, *key);
+            }
+        }
+    }
+    cache.chunks = new;
+    Ok(out)
+}
+
+/// Puffer eines gemerkten Stücks (alle Elemente in einem Lauf kopiert).
+fn chunk_bytes(ch: &super::cache::Chunk) -> Vec<u8> {
+    let mut w = Writer::with_tables(ch.tables.clone(), true);
+    let g = w.begin_group();
+    w.copy_parts(&ch.kept, 0, ch.kept.parts.len());
+    w.end_group(g);
+    w.finish()
+}
+
+/// Ein neues Stück aus den Elementen `part`: unveränderte Elemente des vorigen Stücks, aus dem das
+/// erste von ihnen stammt, werden in Läufen kopiert (mit dessen Tabellen), die übrigen erzeugt.
+#[allow(clippy::too_many_arguments)]
+fn build_chunk<'a>(
+    c: &Ctx<'a>,
+    part: &[(usize, u64, u8)],
+    owner: &HashMap<u64, u64>,
+    old: &HashMap<u64, super::cache::Chunk>,
+    new: &HashMap<u64, super::cache::Chunk>,
+    memo: &mut Memo<'a>,
+    next_ref: &mut u32,
+) -> Result<super::cache::Chunk, String> {
+    let base_key = part.iter().find_map(|(_, s, _)| owner.get(s).copied());
+    let base = base_key.and_then(|k| old.get(&k).or_else(|| new.get(&k)));
+    let mut w = Writer::with_tables(base.map_or_else(Default::default, |b| b.tables.clone()), true);
+    w.post = super::extras::post_for(c.p, c.a);
+    let g = w.begin_group();
+    w.begin_kept();
+    if let Some(b) = base {
+        w.reserve_like(&b.kept);
+    }
+    let mut run: Option<(usize, usize)> = None;
+    let mut cursor = 0;
+    let mut bounds = Bounds::new();
+    for &(i, stamp, flags) in part {
+        let found = base.filter(|_| owner.get(&stamp) == base_key.as_ref()).and_then(|b| b.kept.find(stamp, flags, cursor));
+        cursor = found.unwrap_or(cursor) + 1;
+        if let (Some(j), Some(b)) = (found, base) {
+            match run.as_mut() {
+                Some(r) if r.1 == j => r.1 += 1,
+                _ => {
+                    if let Some((x, y)) = run.take() {
+                        w.copy_parts(&b.kept, x, y);
+                    }
+                    run = Some((j, j + 1));
+                }
+            }
+            bounds.merge(b.kept.parts[j].bounds);
+            continue;
+        }
+        if let (Some((x, y)), Some(b)) = (run.take(), base) {
+            w.copy_parts(&b.kept, x, y);
+        }
+        let d = &c.p.drawings2d[i];
+        let m = memo.get(c, d);
+        let keep = if flags & 2 != 0 { Keep::NoLines } else { Keep::All };
+        w.part_begin();
+        let mut sink = Sink::new(Target::Buf(&mut w), keep);
+        sink.next_ref = *next_ref;
+        emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, flags & 1 != 0, c.a.scale, &mut sink, 0)?;
+        *next_ref = sink.next_ref;
+        let mut b = Bounds::new();
+        acc_bounds(&d.geom, &mut b);
+        bounds.merge(b.raw());
+        w.part_end(stamp, flags, b.raw());
+    }
+    if let (Some((x, y)), Some(b)) = (run.take(), base) {
+        w.copy_parts(&b.kept, x, y);
+    }
+    let kept = w.end_kept();
+    w.end_group(g);
+    let (bytes, tables) = w.finish_keep();
+    Ok(super::cache::Chunk { tables, kept, bounds: bounds.raw(), bytes: Some(bytes), fresh: true })
 }
 
 /// Gruppen der kompakten Unterlage: je (gedimmt, Ebene) in Reihenfolge des ersten Auftretens die

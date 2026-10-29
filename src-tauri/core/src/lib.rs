@@ -82,6 +82,7 @@ pub mod geo_translate;
 pub mod selection_filter;
 pub mod reorder;
 pub mod ugrid;
+pub mod wasm_alloc;
 
 #[cfg(feature = "web")]
 mod web;
