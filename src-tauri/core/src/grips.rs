@@ -161,7 +161,7 @@ fn calc(f: f64) -> Pass {
     Pass { f, v: Some(js_num(f)) }
 }
 
-fn arr(v: Option<&Value>) -> &[Value] {
+pub fn arr(v: Option<&Value>) -> &[Value] {
     v.and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
 }
 

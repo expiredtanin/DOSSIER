@@ -346,17 +346,6 @@ export function meshObjectsToImportedMeshes(objects: readonly MeshObject[], file
   });
 }
 
-/** Datei-Bytes → Kontext-Meshes + Bericht. */
-export async function meshBytesToImportedMeshes(
-  bytes: Uint8Array,
-  fileName: string,
-  read?: MeshReadOptions,
-  place?: MeshToContextOptions,
-): Promise<{ meshes: ImportedMesh[]; report: MeshImportReport }> {
-  const { objects, report } = await readMesh(bytes, fileName, read);
-  return { meshes: meshObjectsToImportedMeshes(objects, fileName, place), report };
-}
-
 /** Bericht als kurzer Text; `tr` übersetzt (Kern kennt kein i18n, die Hülle reicht `t` herein). */
 export function formatMeshReport(
   r: MeshImportReport,

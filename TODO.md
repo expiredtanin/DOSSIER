@@ -701,6 +701,25 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     ~1 ms → 0,2–0,5 ms, 5000 Punkte 18–22 → 9–16 ms; Auswahl (300 Wände) verschieben unverändert (5–11 ms). Bleibt:
     die Kopie der Liste in TS je Änderung (`slice` von 20 000 Elementen ≈ 0,14 ms) — Preis der unveränderlichen
     Leseansicht. Nicht in der Tauri-App geprüft.
+    **Aufräumen nach den parallelen Ports (29.10.):** Suche nach toten Exporten (Skript über alle `src/**/*.ts`:
+    Export ohne Nutzer ausser Tests/Fassade) und toten Bindungen (`#[wasm_bindgen]` ohne TS-Aufrufer), dazu
+    `cargo clippy` (dead_code, auch Web-Build). Gelöscht (TS): `wallVerticalExtent`/`ceilingVerticalExtent`/
+    `columnVerticalExtent` (`model/wall.ts`, Aufrufer `toSection`/`voids`/`sectionOpenings`/`toElevation` gab es
+    nicht mehr; Tests über die Kern-Abfrage `verticalExtents` bzw. Rust-Tests), `openingVerticalExtent`/
+    `wallAxisFrame`/`openingCenter` (`geometry/opening.ts`), `isValidOutline`/`outlineCentroid`, `getStairType`/
+    `openingsOfWall`/`openingLabel`/`columnLabel`/`getComponent` (`types.ts`), `MONO_INK`/`WALL_FALLBACK_MM`,
+    `scatterStrokes`, `ShaderProgram`, `SLAB_RGB`/`DRAWING_LINE_FALLBACK_RGB`, `booleanMesh` samt Typen,
+    `meshBytesToImportedMeshes`, `IDEAL_RISER`, `bulgeBetweenAngles`, `pointSegDistPx`, `coreReady`. Bindungen:
+    `doc_query`, `core_version`, `drawing3d_line_verts`/`drawing3d_pick_segs` (`web/drawing2d_3d.rs`),
+    `bulge_between_angles`, `scatter_strokes_flat`. Rust zusammengelegt: Höhenregeln (UK/OK von Wand/Stütze/Decke,
+    Geschoss-Bindung) einmal in `model/helpers.rs::heights` für typisierte Sicht und rohe Wurzel (`selection_info.rs`);
+    JS-Wahrheitswert `truthy` (vorher je eine Kopie in `geo_translate`/`layers`/`pens`) aus `grips`; `finite` →
+    `jsnum::or_zero` (Kopien in `kennzahlen`/`flaechen`/`room_program`); JS-`String(v)` einmal in
+    `js_fmt::js_string` (vorher `project_format` und `selection_info`, letztere ohne Listen); `arr` aus `grips`.
+    Bleibt bewusst: `geometry/geomTransform.ts` (Werkzeuge, zieht mit [K4] S3 Werkzeuge in den Kern), TS-Fassaden,
+    die nur Tests nutzen (`solidVolume`, `withoutHoles`, `straightSkeleton`, `stairCut`, `triangulate`,
+    Schraffur-Clipping in `glPlanHatch.ts`, `subtractRings` — prüfen Kern-Bindungen von TS aus), mehrere
+    `signed_area`/`bbox`-Varianten in Rust (verschiedene Punkt-Typen, teils mit JS-Semantik `jsnum::min`).
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

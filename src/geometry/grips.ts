@@ -113,8 +113,8 @@ export interface VerticalExtent {
 }
 
 /**
- * UK/OK von Wänden und Decken aus dem Kern (`selection_info.rs::vertical_extents`, Regeln wie
- * `wallVerticalExtent`/`ceilingVerticalExtent`): Geschoss-Bindungen und Deckentypen aus `project`, die
+ * UK/OK von Wänden und Decken aus dem Kern (`selection_info.rs::vertical_extents`, Regeln
+ * `model/helpers.rs::heights`): Geschoss-Bindungen und Deckentypen aus `project`, die
  * Elemente selbst als ganze Fassung (auch gerade gezogene, noch nicht übernommene — 3D-Griffe).
  */
 export function verticalExtents(

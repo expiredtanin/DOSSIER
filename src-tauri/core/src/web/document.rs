@@ -174,15 +174,9 @@ pub fn doc_json(h: u32) -> String {
     with_doc(h, |d| d.to_json()).unwrap_or_default()
 }
 
-/// Abfrage auf dem typisierten Projekt; Ergebnis als JSON. Fehler (Dokument nicht offen, Modell
-/// passt nicht, unbekannte Abfrage, Rechenfehler) kommen als Text mit vorangestelltem `\u{1}`.
-/// Abfragen s. `crate::queries`.
-#[wasm_bindgen]
-pub fn doc_query(h: u32, name: &str) -> String {
-    doc_query_args(h, name, &[], "")
-}
-
-/// Wie [`doc_query`] mit Zahlen- und Textargument.
+/// Abfrage auf dem typisierten Projekt mit Zahlen- und Textargument; Ergebnis als JSON. Fehler (Dokument
+/// nicht offen, Modell passt nicht, unbekannte Abfrage, Rechenfehler) kommen als Text mit vorangestelltem
+/// `\u{1}`. Abfragen s. `crate::queries`.
 #[wasm_bindgen]
 pub fn doc_query_args(h: u32, name: &str, args: &[f64], text: &str) -> String {
     let result = with_doc(h, |d| {
@@ -196,7 +190,7 @@ pub fn doc_query_args(h: u32, name: &str, args: &[f64], text: &str) -> String {
     }
 }
 
-/// Abfrage auf der rohen Projekt-Wurzel (`crate::queries::run_root`); Fehler wie bei [`doc_query`].
+/// Abfrage auf der rohen Projekt-Wurzel (`crate::queries::run_root`); Fehler wie bei [`doc_query_args`].
 #[wasm_bindgen]
 pub fn doc_query_root(h: u32, name: &str, text: &str) -> String {
     let result = with_doc(h, |d| crate::queries::run_root(&d.lookup(), name, text)).unwrap_or_else(|| Err("Dokument nicht offen".to_string()));

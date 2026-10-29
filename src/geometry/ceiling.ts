@@ -32,42 +32,9 @@ export function normalizeOutline(pts: Vec2[]): Vec2[] | null {
   return isCCW(clean) ? clean : clean.slice().reverse();
 }
 
-/** Ob ein Umriss ein gültiges (nicht entartetes) Deckenpolygon bildet. */
-export function isValidOutline(pts: Vec2[]): boolean {
-  const norm = normalizeOutline(pts);
-  return norm != null && ceilingArea(norm) >= MIN_CEILING_AREA;
-}
-
 /** Fläche eines Deckenumrisses in m² (immer positiv). */
 export function ceilingArea(pts: Vec2[]): number {
   return Math.abs(signedArea(pts));
-}
-
-/** Schwerpunkt (Zentroid) des Umriss-Polygons (für HUD/Beschriftung). */
-export function outlineCentroid(pts: Vec2[]): Vec2 {
-  const a = signedArea(pts);
-  if (Math.abs(a) < 1e-12) {
-    // Entartet: einfacher Mittelwert der Punkte.
-    let sx = 0,
-      sy = 0;
-    for (const p of pts) {
-      sx += p.x;
-      sy += p.y;
-    }
-    const n = pts.length || 1;
-    return { x: sx / n, y: sy / n };
-  }
-  let cx = 0,
-    cy = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i];
-    const q = pts[(i + 1) % pts.length];
-    const cr = p.x * q.y - q.x * p.y;
-    cx += (p.x + q.x) * cr;
-    cy += (p.y + q.y) * cr;
-  }
-  const f = 1 / (6 * a);
-  return { x: cx * f, y: cy * f };
 }
 
 /**

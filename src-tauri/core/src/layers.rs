@@ -11,16 +11,7 @@ use std::collections::HashSet;
 
 type Tree = Vec<Value>;
 
-/// JS-Wahrheitswert eines JSON-Werts (`if (c.visible)`).
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0 && !f.is_nan()),
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(_) => true,
-    }
-}
+use crate::grips::truthy;
 
 fn code_of(c: &Value) -> Option<&str> {
     c.get("code").and_then(Value::as_str)

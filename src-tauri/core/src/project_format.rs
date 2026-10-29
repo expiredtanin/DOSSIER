@@ -32,17 +32,7 @@ pub enum Parsed {
     Err(String),
 }
 
-/// JS-`String(v)` für die Meldungen.
-fn js_string(v: &Value) -> String {
-    match v {
-        Value::Null => "null".into(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.as_f64().map_or(n.to_string(), crate::js_fmt::js_number),
-        Value::String(s) => s.clone(),
-        Value::Array(a) => a.iter().map(|x| if x.is_null() { String::new() } else { js_string(x) }).collect::<Vec<_>>().join(","),
-        Value::Object(_) => "[object Object]".into(),
-    }
-}
+use crate::js_fmt::js_string;
 
 /// 1 → 2: Legacy-Türen (`doors`) werden zu Öffnungen (`openings`, kind `door`).
 fn migrate_doors(mut raw: Map<String, Value>) -> Map<String, Value> {

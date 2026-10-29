@@ -27,11 +27,6 @@ pub fn bulge_from_sagitta_point(ax: f64, ay: f64, bx: f64, by: f64, px: f64, py:
     b::from_sagitta_point(ax, ay, bx, by, px, py)
 }
 
-#[wasm_bindgen]
-pub fn bulge_between_angles(cx: f64, cy: f64, r: f64, a_from: f64, a_to: f64, sweep_sign: f64) -> f64 {
-    b::between_angles(cx, cy, r, a_from, a_to, sweep_sign)
-}
-
 /// `[x, y]` auf dem Bogen bei t∈[0,1].
 #[wasm_bindgen]
 pub fn bulge_point_at(ax: f64, ay: f64, bx: f64, by: f64, bulge: f64, t: f64) -> Vec<f64> {

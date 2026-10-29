@@ -9,7 +9,6 @@ export {
   bulgeArc,
   bulgeArcPoints,
   bulgePolylinePoints,
-  bulgeBetweenAngles,
   bulgeFromSagittaPoint,
   bulgePointAt,
   bulgeThroughPoint,
@@ -97,7 +96,6 @@ export {
 } from "../geometry/lineSegments";
 
 export {
-  openingVerticalExtent,
 } from "../geometry/opening";
 export { autoExteriorDimensions } from "../geometry/autoDimensions";
 export * as polygonBool from "../geometry/polygonBool";
@@ -255,7 +253,6 @@ export {
   meetScale,
   mmToPx,
   pointInPolygon,
-  pointSegDistPx,
   printStrokeVb,
   scaleFromView,
   toScreen,

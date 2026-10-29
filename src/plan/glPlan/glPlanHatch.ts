@@ -145,24 +145,6 @@ export function buildHatchRuns(poly: Vec2[], hatch: HatchRender): HatchRun[] {
 }
 
 /**
- * Streut kurze Striche deterministisch und MODELLRAUM-STABIL über ein Polygon (eine Zelle des
- * absoluten Gitters je Strich, Lage/Winkel/Länge aus `hash(ix, iy, seed)`), aufs Polygon geclippt.
- */
-export function scatterStrokes(
-  poly: Vec2[],
-  cell: number,
-  baseAngleRad: number,
-  seed: number,
-  strokeLen: number,
-  lenMin?: number,
-  lenMax?: number,
-): HatchRun[] {
-  return toRuns(
-    core().scatter_strokes_flat(flat(poly), cell, baseAngleRad, seed, strokeLen, lenMin ?? NaN, lenMax ?? NaN),
-  );
-}
-
-/**
  * Random-Vektor-Schraffur eines Polygons (Kies/Splitt): Dichte und Strichlänge an die Kachel
  * (8·scale px) gekoppelt, Seed nur aus Muster-Parametern + `hatch.seed`.
  */

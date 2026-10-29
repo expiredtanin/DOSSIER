@@ -15,7 +15,8 @@
 //! Der B-Rep-Körper einer Extrusion (`spec`) bleibt in TS (truck-Pipeline, `plan/extrudedSolidSpec.ts`).
 
 use crate::document::Lookup;
-use crate::grips::{field, js_num, num_of, truthy, xy};
+use crate::model::helpers::heights;
+use crate::grips::{arr, field, js_num, num_of, truthy, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::ops::id_of;
@@ -134,10 +135,6 @@ impl O {
     }
 }
 
-fn arr(v: Option<&Value>) -> &[Value] {
-    v.and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
-}
-
 /// Erstes Element, dessen Feld `key` gleich `val` ist (`===`; fehlend gleich fehlend).
 fn find_by<'a>(list: &'a [Value], key: &str, val: Option<&Value>) -> Option<&'a Value> {
     list.iter().find(|e| field(e, key) == val)
@@ -150,17 +147,6 @@ fn nn(v: Option<&Value>) -> Option<&Value> {
 
 fn str_of(v: Option<&Value>) -> Option<&str> {
     v.and_then(Value::as_str)
-}
-
-/// `String(v)` für die Anzeige (Name eines Geschosses).
-fn js_string(v: &Value) -> Value {
-    match v {
-        Value::String(_) => v.clone(),
-        Value::Number(n) => Value::from(crate::js_fmt::js_number(n.as_f64().unwrap_or(f64::NAN))),
-        Value::Null => Value::from("null"),
-        Value::Bool(b) => Value::from(if *b { "true" } else { "false" }),
-        _ => Value::from("[object Object]"),
-    }
 }
 
 /// Kategorie (Ebene) per Code: erster Treffer der Tiefensuche (`findCategory`).
@@ -186,10 +172,7 @@ fn component<'a>(root: &'a Map<String, Value>, id: Option<&Value>) -> Result<&'a
 
 /// Wert in einer Template-Zeichenkette (`${v}`).
 fn js_text(v: &Value) -> String {
-    match js_string(v) {
-        Value::String(s) => s,
-        _ => String::new(),
-    }
+    crate::js_fmt::js_string(v)
 }
 
 /// `x.color ?? cat?.color ?? fallback`.
@@ -305,7 +288,7 @@ fn anchor(root: &Map<String, Value>, a: Option<&Value>) -> Option<f64> {
         return nn(field(a, "z")).map(|z| num_of(Some(z)));
     }
     let f = level(root, field(a, "floorId"))?;
-    Some(num_or(field(f, "baseElevation"), 0.0) + num_or(field(a, "offset"), 0.0))
+    Some(heights::floor_anchor(num_or(field(f, "baseElevation"), 0.0), num_or(field(a, "offset"), 0.0)))
 }
 
 fn num_or(v: Option<&Value>, d: f64) -> f64 {
@@ -319,18 +302,14 @@ fn num_or(v: Option<&Value>, d: f64) -> f64 {
 /// (UK, OK) einer Wand oder Stütze: UK aus `bottom` sonst Geschoss-Basis, OK aus `top` sonst UK + Höhe.
 fn vertical_extent(root: &Map<String, Value>, el: &Value) -> (f64, f64) {
     let floor_base = level(root, field(el, "floorId")).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0));
-    let zb = anchor(root, field(el, "bottom")).unwrap_or(floor_base);
-    let zt = anchor(root, field(el, "top")).unwrap_or(zb + num_of(field(el, "height")));
-    (zb, zt)
+    heights::element(floor_base, anchor(root, field(el, "bottom")), anchor(root, field(el, "top")), num_of(field(el, "height")))
 }
 
 /// (UK, OK) einer Decke (`ceilingVerticalExtent`): OK aus `top` sonst Geschoss-Oberkante (Basis + Höhe), UK aus
 /// `bottom` sonst OK − `thickness` (die Decke wächst nach unten).
 fn ceiling_extent(root: &Map<String, Value>, c: &Value, thickness: f64) -> (f64, f64) {
     let floor_top = level(root, field(c, "floorId")).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0) + num_or(field(f, "floorHeight"), 0.0));
-    let zt = anchor(root, field(c, "top")).unwrap_or(floor_top);
-    let zb = anchor(root, field(c, "bottom")).unwrap_or(zt - thickness);
-    (zb, zt)
+    heights::ceiling(floor_top, anchor(root, field(c, "bottom")), anchor(root, field(c, "top")), || thickness)
 }
 
 /// Anfrage `verticalExtents`: Wände und Decken als ganze Elemente (die 3D-Griffe zeigen auch gerade gezogene,

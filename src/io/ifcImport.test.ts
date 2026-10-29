@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exportIfcSpf, ifcGuid } from "../export/exportIfc";
 import { sampleProject } from "../model/sampleProject";
-import { ceilingVerticalExtent } from "../model/wall";
+import { verticalExtents } from "../geometry/grips";
 import { polygonArea } from "../geometry/roomArea";
 import { wallMeshVolumes } from "../export/meshScene.testutil";
 import { formatIfcReport, handleIfcWorkerRequest, ifcToImportedMeshes, readIfc, type IfcProduct, type IfcWorkerRequest } from "./ifcImport";
@@ -100,7 +100,7 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
     const slabsExpected = (sampleProject.ceilings ?? [])
       .filter((c) => c.outline.length >= 3)
       .map((c) => {
-        const { zBottom, zTop } = ceilingVerticalExtent(sampleProject, c);
+        const { zBottom, zTop } = verticalExtents(sampleProject, [], [c]).ceilings[0];
         return Math.abs(polygonArea(c.outline)) * Math.max(zTop - zBottom, 0.001);
       })
       .sort((a, b) => a - b);

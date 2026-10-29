@@ -85,6 +85,16 @@ mod trig {
 
 pub use trig::{acos, atan2, cos, pow, sin, tan};
 
+/// Endliche Zahl oder 0 (NaN/±∞ → 0; Summen der Kennzahlen/Flächen).
+#[inline]
+pub fn or_zero(v: f64) -> f64 {
+    if v.is_finite() {
+        v
+    } else {
+        0.0
+    }
+}
+
 /// `Math.min(a, b)` (NaN gewinnt; −0 < +0).
 #[inline]
 pub fn min(a: f64, b: f64) -> f64 {
