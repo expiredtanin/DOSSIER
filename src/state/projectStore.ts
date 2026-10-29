@@ -23,8 +23,12 @@ const DB_VERSION = 1;
 interface ProjectRecord {
   name: string;
   savedAt: number;
-  project: Project;
+  /** Projekt als Objekt oder als Datei-Text (Autosave, `serializeProject`). */
+  project: StoredProject;
 }
+
+/** Gespeicherter Inhalt: Projekt-Objekt oder Datei-Text. */
+export type StoredProject = Project | string;
 
 /** `true`, sobald die Fehlmeldung „IndexedDB nicht verfügbar" geloggt wurde (nur einmal). */
 let warnedUnavailable = false;
@@ -88,7 +92,7 @@ function openDb(): Promise<IDBDatabase> {
  * Speichert ein Projekt unter `name` (überschreibt einen vorhandenen
  * Datensatz gleichen Namens). Ohne IndexedDB: no-op (wirft nicht).
  */
-export async function saveProject(name: string, project: Project): Promise<void> {
+export async function saveProject(name: string, project: StoredProject): Promise<void> {
   if (!name) return;
   if (!isAvailable()) {
     warnUnavailableOnce();
@@ -114,7 +118,7 @@ export async function saveProject(name: string, project: Project): Promise<void>
  * Lädt ein Projekt nach Namen. Liefert `null`, wenn es nicht existiert, die
  * Umgebung IndexedDB nicht unterstützt oder der Zugriff fehlschlägt.
  */
-export async function loadProject(name: string): Promise<Project | null> {
+export async function loadProject(name: string): Promise<StoredProject | null> {
   if (!name) return null;
   if (!isAvailable()) {
     warnUnavailableOnce();
@@ -135,7 +139,7 @@ export async function loadProject(name: string): Promise<Project | null> {
 }
 
 /** Wie {@link loadProject}, mit Speicherzeitpunkt (ms seit Epoche). */
-export async function loadProjectRecord(name: string): Promise<{ project: Project; savedAt: number } | null> {
+export async function loadProjectRecord(name: string): Promise<{ project: StoredProject; savedAt: number } | null> {
   if (!name || !isAvailable()) return null;
   try {
     const db = await openDb();

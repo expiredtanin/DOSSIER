@@ -1,5 +1,5 @@
 // [K4] S3 zweite Etappe: Store-Aktionen erzeugen Ops direkt (`applyChange`, `opsMutation`) statt
-// Projekt → Projekt + `diffToOps`. Geprüft: Ops gehen unverändert an den Kern (Verlauf, Prüfung),
+// Projekt → Projekt + Projekt-Differenz (gelöscht). Geprüft: Ops gehen unverändert an den Kern (Verlauf, Prüfung),
 // Leseansicht und Kern-Dokument bleiben gleich — auch über Zufallsfolgen der umgestellten
 // Aktionen mit Undo bis zum Anfang und Redo bis zum Ende.
 import { beforeEach, describe, expect, it } from "vitest";
@@ -40,7 +40,7 @@ function expectMirror(): void {
 }
 
 beforeEach(() => {
-  st().setProject(structuredClone(sampleProject));
+  st().loadProject(structuredClone(sampleProject));
   st().clearHistory();
 });
 

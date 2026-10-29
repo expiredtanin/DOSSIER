@@ -6,6 +6,7 @@
 // bleibt abgeleitet. Bezeichner englisch, UI-Text via t().
 
 import type { DrawingLevel, Project, Vec2 } from "../model/types";
+import type { ProjectMutation } from "../core";
 
 /** Werkzeug-Identität. */
 export type ToolId =
@@ -274,8 +275,8 @@ export interface ToolDraft {
 export interface ToolResult {
   /** Neuer Vorschau-Zustand; null = nichts zu zeigen. */
   draft: ToolDraft | null;
-  /** Bei Abschluss: Mutation, die App über setProject anwendet. */
-  commit?: (p: Project) => Project;
+  /** Bei Abschluss: Änderung mit mitgeführten Ops (`opsMutation`), die App über setProject anwendet. */
+  commit?: ProjectMutation;
   /** true → Werkzeug ist fertig und kehrt in seinen Ruhezustand zurück. */
   done?: boolean;
 }

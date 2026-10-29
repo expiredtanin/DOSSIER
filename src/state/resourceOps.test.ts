@@ -14,7 +14,7 @@ beforeEach(() => {
     components: sampleProject.components.map((c, i) => (i === 0 ? { ...c, colorPenId: "p1" } : c)),
     walls: sampleProject.walls.map((w, i) => (i === 0 ? { ...w, colorPenId: "p1" } : w)),
   };
-  st().setProject(p);
+  st().loadProject(p);
   st().clearHistory();
 });
 

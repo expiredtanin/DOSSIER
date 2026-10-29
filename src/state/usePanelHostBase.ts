@@ -9,7 +9,7 @@
 
 import { applyFillMode } from "./fillMode";
 import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, removeRoofHole, setFieldIfChanged, setRoofEdge } from "../core";
-import type { CoreOp } from "../core";
+import type { CoreOp, ProjectMutation } from "../core";
 import { useMemo, type RefObject } from "react";
 import type { DrawingLevel, Layout, Project } from "../model/types";
 import { resolvePenColor } from "../model/penSets";
@@ -107,7 +107,7 @@ function captureCameraState(
 
 export function usePanelHostBase(opts: {
   project: Project;
-  setProject: (updater: (p: Project) => Project) => void;
+  setProject: (updater: ProjectMutation) => void;
   /** Änderung direkt als Ops ([K4] S3), s. `ProjectSlice.applyChange`. */
   applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]), coalesceKey?: string) => void;
   activeLevelId: string;

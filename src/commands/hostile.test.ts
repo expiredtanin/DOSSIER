@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 import { COMMANDS } from "./registry";
 import type { CmdInput, CommandContext } from "./types";
 import { sampleProject } from "../model/sampleProject";
-import { applyOps, diffToOps, validateOps } from "../core/ops";
+import { applyOps, validateOps } from "../core/ops";
+import { projectDiffOps } from "../core/projectDiff.testutil";
 
 const level = sampleProject.drawingLevels.find((l) => l.kind === "floor")!;
 const ctx: CommandContext = {
@@ -76,7 +77,7 @@ describe("Befehle mit feindlichen Eingaben", () => {
             else [state, res] = cmd.onInput(state, hostile(opts), ctx);
             if (res?.commit) {
               const next = res.commit(sampleProject);
-              const ops = diffToOps(sampleProject, next);
+              const ops = projectDiffOps(sampleProject, next);
               const applied = applyOps(sampleProject, ops);
               validateOps(applied, ops, sampleProject); // darf melden, aber nicht werfen
             }

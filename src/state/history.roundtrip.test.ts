@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { getState, setState } from "./appStore";
 import { emptyProject } from "../model/sampleProject";
+import { setField } from "../core";
 
 beforeEach(() => {
   setState({ project: emptyProject, undoDepth: 0, redoDepth: 0, canUndo: false, canRedo: false });
@@ -11,7 +12,7 @@ beforeEach(() => {
 
 describe("Undo/Redo über den Anfang hinaus", () => {
   it("drei Schritte, mehrmals ganz zurück und vor", () => {
-    for (const name of ["A", "B", "C"]) getState().setProject((p) => ({ ...p, name }));
+    for (const name of ["A", "B", "C"]) getState().applyChange([setField("name", name)]);
     expect(getState().project.name).toBe("C");
     for (let round = 0; round < 3; round++) {
       for (let k = 0; k < 6; k++) getState().undo();

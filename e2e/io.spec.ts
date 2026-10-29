@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import {
+  blurFocus,
   discardIfAsked,
   elementRows,
   expect,
@@ -66,6 +67,12 @@ test("Speichern und Laden: .obp-Rundreise", async ({ page }) => {
   await expect(page.locator(".project-name")).toHaveText("Demo-Haus", { timeout: 4000 });
   await openTab(page, "Elemente");
   await expect(elementRows(page).filter({ hasText: "W9" })).toBeVisible();
+
+  // Öffnen leert den Verlauf ([K4] S4): Rückgängig führt nicht ins vorherige (leere) Projekt.
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator(".project-name")).toHaveText("Demo-Haus");
+  await expect(elementRows(page).filter({ hasText: "W9" })).toBeVisible();
 });
 
 test("Export IFC: Datei nicht leer, STEP-Kopf stimmt", async ({ page }) => {
@@ -108,5 +115,12 @@ test("Import einer kleinen DXF legt eine Zeichnung an", async ({ page }) => {
   await dialog.locator(".imp-btn.primary").click();
   await expect(dialog).toBeHidden();
   await openTab(page, "Zeichnungsebenen");
+  await expect(page.getByText("klein", { exact: false }).first()).toBeVisible();
+
+  // Ein Import = ein Undo-Schritt ([K4] S3): einmal Rückgängig entfernt Ebene und Zeichnungen, Wiederholen bringt alles zurück.
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.getByText("klein", { exact: false })).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+Shift+z");
   await expect(page.getByText("klein", { exact: false }).first()).toBeVisible();
 });

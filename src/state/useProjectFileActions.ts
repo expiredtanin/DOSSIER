@@ -8,7 +8,7 @@
 
 import { getState, useStore } from "./appStore";
 import type { NotifyKind } from "./notifySlice";
-import { parseProjectFile, parseProjectObject, serializeProject } from "../io/projectFormat";
+import { serializeProject } from "../io/projectFormat";
 import { AUTOSAVE_INTERVAL_MS, clearAutosave, createAutosaveTracker, readAutosave, writeAutosave } from "./autosave";
 import type { AutosaveRecovery } from "./autosave";
 import { useEffect, useRef, useState } from "react";
@@ -44,6 +44,8 @@ import type { LockInfo } from "../native/projectFile";
 import { addRecentProject, removeRecentProject } from "./recentProjects";
 import { emptyProject, sampleProject } from "../model/sampleProject";
 import { flattenCategories } from "../model/types";
+import { addItems, fieldOps } from "../core";
+import type { CoreOp } from "../core/ops";
 import type { ContextObject, Drawing2D, Project, Vec2 } from "../model/types";
 import type { PlanViewHandle } from "../views/plan/PlanView";
 
@@ -140,11 +142,12 @@ const errorText = (err: unknown): string => (err instanceof Error ? err.message 
 
 
 /**
- * Liest Projekt-Text über den gemeinsamen Format-Parser (Version, Migration, Toleranz) und
- * meldet Fehler sichtbar statt nur in der Konsole. `null` = nicht ladbar.
+ * Öffnet Projekt-Text im Kern (`openProjectFile`: Version, Migration, Toleranz; direkt ins
+ * Kern-Dokument, Verlauf leer) und meldet Fehler sichtbar statt nur in der Konsole. `null` = nicht
+ * ladbar (das bisherige Projekt bleibt).
  */
-function readProjectOrReport(content: string, notify: (msg: string, kind?: NotifyKind) => void): Project | null {
-  const r = parseProjectFile(content);
+function openProjectOrReport(content: string, notify: (msg: string, kind?: NotifyKind) => void): Project | null {
+  const r = getState().openProjectFile(content);
   if (!r.ok) {
     notify(`${t("project.open.failed")} ${r.error}`, "error");
     return null;
@@ -155,7 +158,7 @@ function readProjectOrReport(content: string, notify: (msg: string, kind?: Notif
 
 export function useProjectFileActions(
   project: Project,
-  setProject: (next: Project | ((p: Project) => Project)) => void,
+  applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[])) => void,
   setImportState: (next: ImportDialogState) => void,
   setExportSaveFormat: (format: ExportSaveFormat | null) => void,
   activeCategoryCode: string,
@@ -172,13 +175,9 @@ export function useProjectFileActions(
   const projectFileInputRef = useRef<HTMLInputElement>(null);
   // Meldungen als Toast (window.alert ist im Tauri-WKWebView wirkungslos).
   const notify = useStore((s) => s.notify);
-  // Ein anderes Projekt übernehmen (Neu, Vorlage, Öffnen, Wiederherstellen): ersetzt das Projekt und
-  // leert den Undo-Verlauf — sonst führte Rückgängig über das Laden hinaus ins vorherige Projekt, und
-  // jede Änderung dort verwarf den Redo-Stapel.
-  const replaceProject = (next: Project) => {
-    setProject(next);
-    getState().clearHistory();
-  };
+  // Ein anderes Projekt übernehmen (Neu, Vorlage, Öffnen, Wiederherstellen) lädt es im Kern als Ganzes
+  // (`loadProject`/`openProjectFile`, [K4] S4) und leert den Undo-Verlauf — sonst führte Rückgängig über
+  // das Laden hinaus ins vorherige Projekt, und jede Änderung dort verwarf den Redo-Stapel.
   // Verstecktes Datei-Input für „Neu aus Vorlage" (Datei wählen) — derselbe
   // Browser-Fallback wie `projectFileInputRef`, nur mit `.obpt`-Filter.
   const projectTemplateFileInputRef = useRef<HTMLInputElement>(null);
@@ -231,22 +230,20 @@ export function useProjectFileActions(
     const id = window.setInterval(() => {
       const p = projectRef.current;
       if (!autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) return;
-      void writeAutosave(openedProjectPathRef.current, p);
+      void writeAutosave(openedProjectPathRef.current, serializeProject(p));
     }, AUTOSAVE_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, []);
   const offerRecovery = (path: string | null) => {
     void readAutosave(path).then((r) => {
-      if (r) setRecovery({ path, project: r.project, savedAt: r.savedAt });
+      if (r) setRecovery({ path, text: r.text, savedAt: r.savedAt });
     });
   };
   // Start: Kopie eines nie gespeicherten Projekts aus der letzten Sitzung?
   useEffect(() => offerRecovery(null), []);
   const onRecoverRestore = () => {
     if (!recovery) return;
-    const parsed = parseProjectObject(recovery.project);
-    if (parsed.ok) replaceProject(parsed.project); // bleibt „ungespeichert" bis zum Speichern
-    else notify(`${t("project.open.failed")} ${parsed.error}`, "error");
+    openProjectOrReport(recovery.text, notify); // bleibt „ungespeichert" bis zum Speichern
     setRecovery(null);
   };
   const onRecoverDiscard = () => {
@@ -450,29 +447,23 @@ export function useProjectFileActions(
   // `guardDiscard`: bei ungespeicherten Änderungen erst der Dialog, s. o.
   const onNewProject = () => guardDiscard(() => {
     releaseCurrentProjectLock();
-    replaceProject(emptyProject);
+    getState().loadProject(emptyProject);
     lastSavedProjectRef.current = emptyProject;
   });
 
   // Übernimmt ein neues, noch UNGESPEICHERTES Projekt aus Vorlagen-Inhalt
-  // (Musterhaus ODER eine gewählte `.obpt`-Datei): grobe Form-Prüfung wie beim
-  // normalen Öffnen, aber bewusst OHNE Pfad/Lock zu setzen — die Vorlage
-  // bleibt unangetastet, das nächste „Speichern" fragt nach einem neuen Ort.
-  // Ersetzt ebenfalls das bisherige Projekt → über `guardDiscard`.
-  const applyTemplateContent = (content: string): boolean => {
-    try {
-      const parsed = readProjectOrReport(content, notify);
-      if (!parsed) return false;
-      guardDiscard(() => {
-        releaseCurrentProjectLock();
-        replaceProject(parsed);
-        lastSavedProjectRef.current = parsed;
-      });
-      return true;
-    } catch (err) {
-      console.error("Vorlage konnte nicht geladen werden:", err);
-      return false;
-    }
+  // (eine gewählte `.obpt`-Datei): Prüfung wie beim normalen Öffnen, aber
+  // bewusst OHNE Pfad/Lock zu setzen — die Vorlage bleibt unangetastet, das
+  // nächste „Speichern" fragt nach einem neuen Ort. Ersetzt ebenfalls das
+  // bisherige Projekt → über `guardDiscard` (der Kern lädt erst danach; eine
+  // kaputte Datei lässt das bisherige Projekt stehen).
+  const applyTemplateContent = (content: string): void => {
+    guardDiscard(() => {
+      const loaded = openProjectOrReport(content, notify);
+      if (!loaded) return;
+      releaseCurrentProjectLock();
+      lastSavedProjectRef.current = loaded;
+    });
   };
   // „Neu aus Vorlage: Musterhaus" — das eingebaute Demo-Haus (model/sampleProject.ts)
   // als Start eines neuen Projekts. `structuredClone`, damit spätere Bearbeitung
@@ -481,7 +472,7 @@ export function useProjectFileActions(
   const onNewProjectFromSample = () => guardDiscard(() => {
     releaseCurrentProjectLock();
     const next = structuredClone(sampleProject);
-    replaceProject(next);
+    getState().loadProject(next);
     lastSavedProjectRef.current = next;
   });
   // „Neu aus Vorlage: Datei wählen…" — native `.obpt`-Dialog unter Tauri, sonst
@@ -521,24 +512,19 @@ export function useProjectFileActions(
   // die Form, gibt einen evtl. vorher gehaltenen Lock frei und merkt sich Pfad
   // + ob WIR den Schreib-Lock für die neue Datei halten.
   const applyOpenedProjectFile = (path: string, content: string, lockOwned: boolean) => {
-    try {
-      const parsed = readProjectOrReport(content, notify);
-      if (!parsed) {
+    guardDiscard(() => {
+      const loaded = openProjectOrReport(content, notify);
+      if (!loaded) {
         if (lockOwned) void releaseProjectLock(path);
         return;
       }
-      guardDiscard(() => {
-        releaseCurrentProjectLock();
-        replaceProject(parsed);
-        lastSavedProjectRef.current = parsed;
-        openedProjectPathRef.current = path;
-        projectLockOwnedRef.current = lockOwned;
-        addRecentProject(path, parsed.name || "modell");
-        offerRecovery(path);
-      });
-    } catch (err) {
-      console.error("Projekt-Import fehlgeschlagen:", err);
-    }
+      releaseCurrentProjectLock();
+      lastSavedProjectRef.current = loaded;
+      openedProjectPathRef.current = path;
+      projectLockOwnedRef.current = lockOwned;
+      addRecentProject(path, loaded.name || "modell");
+      offerRecovery(path);
+    });
   };
   // Öffnen unter Tauri: nativer Dialog (echter Pfad) → Lock versuchen. Klappt
   // er → Projekt übernehmen. Schon gesperrt → Konflikt-Dialog (kein
@@ -652,19 +638,15 @@ export function useProjectFileActions(
   const onProjectFileChosen = (file: File) => {
     const r = new FileReader();
     r.onload = () => {
-      try {
-        const parsed = readProjectOrReport(String(r.result ?? ""), notify);
-        if (!parsed) return;
-        // Browser-Pfad hat keinen echten Dateipfad → kein Lock für die neue
-        // Datei, aber ein evtl. vorher (unter Tauri) gehaltener Lock wird frei.
-        guardDiscard(() => {
-          releaseCurrentProjectLock();
-          replaceProject(parsed);
-          lastSavedProjectRef.current = parsed;
-        });
-      } catch (err) {
-        console.error("Projekt-Import fehlgeschlagen:", err);
-      }
+      const content = String(r.result ?? "");
+      // Browser-Pfad hat keinen echten Dateipfad → kein Lock für die neue
+      // Datei, aber ein evtl. vorher (unter Tauri) gehaltener Lock wird frei.
+      guardDiscard(() => {
+        const loaded = openProjectOrReport(content, notify);
+        if (!loaded) return;
+        releaseCurrentProjectLock();
+        lastSavedProjectRef.current = loaded;
+      });
     };
     r.readAsText(file);
   };
@@ -675,10 +657,15 @@ export function useProjectFileActions(
   // Bestätigte Import-Entscheidung ausführen: ggf. neue Zeichnung anlegen, die
   // 2D-Konturen als Drawing2D anhängen, optional die Meshes als Kontext
   // übernehmen. Reihenfolge: erst Ebene (echte ID), dann Drawings/Kontext.
+  // Alles als Ops in EINER Gruppe ([K4] S3): ein Import = ein Undo-Schritt.
   const runImport = (decision: ImportDecision) => {
     // Hinweis bleibt, bis PlanView den neuen Plan gezeichnet hat (endBusyAfterPaint):
     // der Aufbau nach dem Einhängen blockiert noch einmal mehrere Sekunden.
     beginBusy(t("busy.import"));
+    getState().groupChanges(() => runImportSteps(decision));
+    setImportState(null);
+  };
+  const runImportSteps = (decision: ImportDecision) => {
     const levelId =
       decision.target.kind === "new"
         ? addDrawingLevel(decision.target.name)
@@ -699,17 +686,14 @@ export function useProjectFileActions(
       codeByLayer = plan.codeByLayer;
       if (plan.parent) {
         const parent = plan.parent;
-        setProject((p) => ({ ...p, layers: [...p.layers, parent] }));
+        applyChange((p) => fieldOps(p, "layers", [...p.layers, parent]));
       }
     }
     // PDF-Strichmuster ([76]): passenden Linienstil nehmen oder Strichmuster-Stil anlegen (vor den Zeichnungen).
     const dashPlan = planDashLineStyles(decision.parsed.layerDashes, project.lineStyles);
     if (dashPlan.created.length) {
       const created = dashPlan.created;
-      setProject((p) => ({
-        ...p,
-        lineStyles: [...p.lineStyles, ...created.filter((c) => !p.lineStyles.some((l) => l.id === c.id))],
-      }));
+      applyChange((p) => addItems("lineStyles", created.filter((c) => !p.lineStyles.some((l) => l.id === c.id))));
     }
     let drawings = buildDrawings(
       decision,
@@ -737,7 +721,6 @@ export function useProjectFileActions(
     }
     // Auf die Ziel-Ebene wechseln, damit die importierte Geometrie sichtbar ist.
     setActiveLevelId(levelId);
-    setImportState(null);
   };
 
   return {

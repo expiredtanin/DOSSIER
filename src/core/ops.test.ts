@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyOps, diffToOps, validateProject } from "./ops";
+import { applyOps, validateProject } from "./ops";
+import { projectDiffOps } from "./projectDiff.testutil";
 import type { CoreOp } from "./ops";
 import { sampleProject } from "../model/sampleProject";
 import type { Project } from "../model/types";
@@ -29,20 +30,20 @@ function mutate(p: Project, seed: number): Project {
 
 describe("CoreOps", () => {
   it("keine Änderung: keine Ops", () => {
-    expect(diffToOps(sampleProject, sampleProject)).toEqual([]);
+    expect(projectDiffOps(sampleProject, sampleProject)).toEqual([]);
   });
 
   it("Roundtrip: apply(JSON(diff)) ergibt das Zielprojekt, für viele zufällige Änderungen", () => {
     for (let seed = 1; seed <= 200; seed++) {
       const next = mutate(sampleProject, seed);
-      const ops = roundtrip(diffToOps(sampleProject, next));
+      const ops = roundtrip(projectDiffOps(sampleProject, next));
       expect(applyOps(sampleProject, ops)).toEqual(next);
     }
   });
 
   it("unveränderte Elemente behalten ihre Objekt-Identität", () => {
     const next = { ...sampleProject, walls: [...sampleProject.walls, { ...sampleProject.walls[0], id: "x-neu" }] };
-    const out = applyOps(sampleProject, diffToOps(sampleProject, next));
+    const out = applyOps(sampleProject, projectDiffOps(sampleProject, next));
     expect(out.walls[0]).toBe(sampleProject.walls[0]);
     expect(out.walls).toHaveLength(sampleProject.walls.length + 1);
   });
@@ -63,7 +64,7 @@ describe("CoreOps", () => {
   it("Feld entfernen und Listen ohne ids als ganzes Feld", () => {
     const withAnchor = { ...sampleProject, referenceElevationMasl: 400 } as Project;
     const next = { ...withAnchor, referenceElevationMasl: undefined } as Project;
-    const ops = diffToOps(withAnchor, next);
+    const ops = projectDiffOps(withAnchor, next);
     expect(ops).toEqual([{ kind: "setField", key: "referenceElevationMasl" }]);
     expect("referenceElevationMasl" in applyOps(withAnchor, ops)).toBe(false);
   });

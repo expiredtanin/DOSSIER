@@ -8,7 +8,6 @@
 import { describe, it, expect } from "vitest";
 import {
   activeGroupOps,
-  addNewElementsToActiveGroup,
   applyGroupDimming,
   applyGroupDimmingToPlan,
   containingGroupId,
@@ -220,36 +219,36 @@ describe("applyGroupDimmingToPlan", () => {
   });
 });
 
-describe("addNewElementsToActiveGroup", () => {
+describe("activeGroupOps ([K4] S3: neue Elemente in die aktive Gruppe, als Ops)", () => {
   const g1: Group = { id: "g1", wallIds: ["w1"], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] };
   const line = (id: string) =>
     ({ id, type: "drawing2d", levelId: "eg", categoryCode: "20", geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } } }) as Project["drawings2d"][number];
+  /** Wendet `ops` plus die Gruppen-Ops an (wie `EngineHost.commit` in App.tsx). */
+  const commit = (before: Project, ops: CoreOp[], path: string[]) => applyOps(before, [...ops, ...activeGroupOps(before, ops, path)]);
 
   it("neu gezeichnetes Element wird Mitglied der aktiven (innersten) Gruppe", () => {
-    const before = project([g1]);
-    const after: Project = { ...before, drawings2d: [line("d1")] };
-    const result = addNewElementsToActiveGroup(before, after, ["g1"]);
+    const result = commit(project([g1]), addItems("drawings2d", [line("d1")]), ["g1"]);
     const g = result.groups!.find((x) => x.id === "g1")!;
     expect(g.drawingIds).toEqual(["d1"]);
     expect(g.wallIds).toEqual(["w1"]); // bestehende Mitgliedschaft bleibt
   });
 
-  it("ohne aktive Gruppe (groupPath leer) bleibt das Projekt unverändert", () => {
-    const before = project([g1]);
-    const after: Project = { ...before, drawings2d: [line("d1")] };
-    const result = addNewElementsToActiveGroup(before, after, []);
-    expect(result).toBe(after); // unverändert (Referenzgleichheit)
+  it("ohne aktive Gruppe (groupPath leer) keine zusätzlichen Ops", () => {
+    expect(activeGroupOps(project([g1]), addItems("drawings2d", [line("d1")]), [])).toEqual([]);
   });
 
-  it("keine Änderung (before === after) ist ein No-op", () => {
-    const p = project([g1]);
-    expect(addNewElementsToActiveGroup(p, p, ["g1"])).toBe(p);
+  it("ohne neue Elemente (nur Ersetzen) keine zusätzlichen Ops", () => {
+    const p: Project = { ...project([g1]), drawings2d: [line("d0")] };
+    expect(activeGroupOps(p, [replaceItem("drawings2d", { ...line("d0"), color: "#f00" })], ["g1"])).toEqual([]);
+    expect(activeGroupOps(p, [], ["g1"])).toEqual([]);
+  });
+
+  it("unbekannte aktive Gruppe: keine zusätzlichen Ops", () => {
+    expect(activeGroupOps(project([g1]), addItems("drawings2d", [line("d1")]), ["gx"])).toEqual([]);
   });
 
   it("mehrere neue Elemente auf einmal (z. B. Feld/Array) werden alle Mitglied", () => {
-    const before = project([g1]);
-    const after: Project = { ...before, drawings2d: [line("d1"), line("d2"), line("d3")] };
-    const result = addNewElementsToActiveGroup(before, after, ["g1"]);
+    const result = commit(project([g1]), addItems("drawings2d", [line("d1"), line("d2"), line("d3")]), ["g1"]);
     const g = result.groups!.find((x) => x.id === "g1")!;
     expect(g.drawingIds.sort()).toEqual(["d1", "d2", "d3"]);
   });
@@ -257,36 +256,9 @@ describe("addNewElementsToActiveGroup", () => {
   it("verschachtelt: neues Element landet in der INNERSTEN (aktiven) Gruppe, nicht der äusseren", () => {
     const inner: Group = { id: "g1", wallIds: [], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] };
     const outer: Group = { id: "g2", wallIds: [], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: ["g1"] };
-    const before = project([inner, outer]);
-    const after: Project = { ...before, drawings2d: [line("d1")] };
-    const result = addNewElementsToActiveGroup(before, after, ["g2", "g1"]);
+    const result = commit(project([inner, outer]), addItems("drawings2d", [line("d1")]), ["g2", "g1"]);
     expect(result.groups!.find((x) => x.id === "g1")!.drawingIds).toEqual(["d1"]);
     expect(result.groups!.find((x) => x.id === "g2")!.drawingIds).toEqual([]);
-  });
-});
-
-describe("activeGroupOps ([K4] S3: Ops statt Differenz)", () => {
-  const mk = (id: string): Group => ({ id, wallIds: ["w1"], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] });
-  const line = (id: string) =>
-    ({ id, type: "drawing2d", levelId: "eg", categoryCode: "20", geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } } }) as Project["drawings2d"][number];
-  const wall = (id: string) => ({ id, start: { x: 0, y: 0 }, end: { x: 1, y: 0 } }) as unknown as Project["walls"][number];
-
-  it("gleiches Ergebnis wie addNewElementsToActiveGroup, Zufall", () => {
-    let x = 11;
-    const r = () => ((x = (x * 1664525 + 1013904223) % 4294967296) / 4294967296);
-    for (let n = 0; n < 200; n++) {
-      const before: Project = { ...project([mk("g1"), mk("g2")]), drawings2d: [line("d0")], walls: [wall("w0")] };
-      const ops: CoreOp[] = [];
-      const k = Math.floor(r() * 4);
-      if (k >= 1) ops.push(...addItems("drawings2d", [line(`a${n}`), line(`b${n}`)], r() < 0.5 ? 0 : undefined));
-      if (k >= 2) ops.push(...addItems("walls", [wall(`w${n}x`)]));
-      if (k >= 3) ops.push(replaceItem("drawings2d", { ...line("d0"), color: "#f00" }));
-      const path = r() < 0.2 ? [] : r() < 0.5 ? ["g1"] : ["g2", "g1", "gx"];
-      const after = applyOps(before, ops);
-      const legacy = addNewElementsToActiveGroup(before, after, path);
-      const viaOps = applyOps(before, [...ops, ...activeGroupOps(before, ops, path)]);
-      expect(viaOps).toEqual(legacy);
-    }
   });
 });
 

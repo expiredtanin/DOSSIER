@@ -8,12 +8,13 @@
 // laufen. Die Slice tippt daher nur ihre eigenen Felder; `get()` liefert
 // RootState (siehe appStore.ts), wir greifen punktuell auf View-Felder zu.
 
-import { applyOps, diffToOps } from "../core/ops";
+import { applyOps } from "../core/ops";
 import type { CoreOp } from "../core/ops";
+import type { ProjectMutation } from "../core";
+import type { LoadFileResult } from "../core/document";
 import {
   addItems,
   fieldOps,
-  isOpsMutation,
   patchItem,
   patchItems,
   removeItems,
@@ -75,21 +76,32 @@ export interface ProjectSlice {
 
   // ── Projekt direkt setzen (für Werkzeuge/Transformationen aus App) ────────
   /**
-   * Ersetzt das Projekt (Teil-/Updater wie React-setState). `coalesceKey`:
-   * NUR für bekannte Hochfrequenz-Aktionen (Griff-Ziehen, Inline-Text-Tippen)
-   * — verschmilzt aufeinanderfolgende Aufrufe mit demselben Key innerhalb
-   * `COALESCE_WINDOW_MS` zu EINEM Undo-Schritt, s. Kommentar bei der
-   * Implementierung unten.
+   * Änderung als Projekt → Projekt-Funktion MIT mitgeführten Ops (`opsMutation`, Schnittstellen wie
+   * `CommandResult.commit`); der Kern bekommt die Ops ([K4] S3 — keine Projekt-Differenz mehr).
+   * `coalesceKey`: NUR für bekannte Hochfrequenz-Aktionen (Griff-Ziehen, Inline-Text-Tippen) —
+   * gleicher Key im Zeitfenster = EIN Undo-Schritt. Ein anderes Projekt als Ganzes:
+   * {@link loadProject}/{@link openProjectFile}.
    */
-  setProject: (next: Project | ((p: Project) => Project), coalesceKey?: string) => void;
+  setProject: (next: ProjectMutation, coalesceKey?: string) => void;
   /**
    * Änderung direkt als Ops ([K4] S3): `ops` oder ein Op-Bauer auf dem aktuellen Projekt
-   * (`core/opsBuild.ts`). Geht ohne `diffToOps` an den Kern (Prüfung, Verlauf); sonst wie
+   * (`core/opsBuild.ts`). Geht direkt an den Kern (Prüfung, Verlauf); sonst wie
    * {@link setProject} (gleicher `coalesceKey` im Zeitfenster = ein Undo-Schritt).
    */
   applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]), coalesceKey?: string) => void;
   /** Die zuletzt angewendeten Ops (JSON-serialisierbar), jüngste zuletzt. */
   recentOps: () => CoreOp[][];
+  /**
+   * Ein anderes Projekt übernehmen (Neu, Musterhaus; [K4] S4): lädt es als Ganzes ins Kern-Dokument
+   * und leert den Verlauf (Rückgängig führt nicht ins vorherige Projekt).
+   */
+  loadProject: (next: Project) => void;
+  /**
+   * Projektdatei (Text) öffnen (Öffnen, Vorlage, Wiederherstellen): der Kern liest, migriert, prüft
+   * und lädt sie direkt (`ProjectDocument.loadFile`), der Verlauf wird geleert. Bei Fehler bleibt
+   * das Projekt unverändert.
+   */
+  openProjectFile: (text: string) => LoadFileResult;
 
   // ── Zeichnungsebenen (Levels/Geschosse) ──────────────────────────────────
   toggleLevelVisible: (id: string) => void;
@@ -485,32 +497,12 @@ export function createProjectSlice(
     return { project: res.project, ...historyPatch(doc) };
   };
 
-  // Bequemer immutabler Projekt-Updater (wie setProject in App). Zweiter,
-  // optionaler Parameter `coalesceKey`: NUR von den paar bekannten
-  // Hochfrequenz-Aktionen (Grip-Drag & Co., s. u.) gesetzt — alle anderen
-  // Aktionen rufen ohne Key auf und pushen damit IMMER diskret (kein
-  // Koaleszieren zwischen unterschiedlichen Aktionen möglich, auch nicht bei
-  // zufällig identischem Timing in Tests).
-  // [K4] S3: Projekt → Projekt-Funktionen gehen über `diffToOps` (Adapter für die Aktionen, die noch
-  // nicht umgestellt sind); Funktionen aus `opsMutation` tragen ihre Ops mit und sparen die Differenz.
-  const setProject = (
-    next: Project | ((p: Project) => Project),
-    coalesceKey?: string,
-  ) =>
-    set((s) => {
-      if (isOpsMutation(next)) return commitOps(s, next.toOps(s.project), coalesceKey);
-      const wanted =
-        typeof next === "function" ? (next as (p: Project) => Project)(s.project) : next;
-      // No-Op-Schutz: echte Immutable-Updates liefern bei tatsächlicher
-      // Änderung immer eine NEUE Referenz — bleibt sie gleich, gab es keine
-      // Änderung, also kein History-Eintrag (und `set` selbst benachrichtigt
-      // dann ebenfalls nicht, da der Patch leer ist).
-      if (wanted === s.project) return {};
-      // Das Projekt ändert sich NUR über Ops (core/ops.ts): die gewünschte Änderung wird in
-      // eine Op-Folge übersetzt; der Kern prüft (NaN, doppelte ids), wendet an und zeichnet den
-      // Undo-Schritt auf.
-      return commitOps(s, diffToOps(s.project, wanted), coalesceKey);
-    });
+  // Änderung mit mitgeführten Ops (`opsMutation`). Zweiter, optionaler Parameter `coalesceKey`: NUR
+  // von den paar bekannten Hochfrequenz-Aktionen (Grip-Drag & Co.) gesetzt — alle anderen Aktionen
+  // rufen ohne Key auf und pushen damit IMMER diskret. Das Projekt ändert sich NUR über Ops: der Kern
+  // prüft (NaN, doppelte ids), wendet an und zeichnet den Undo-Schritt auf ([K4] S3).
+  const setProject = (next: ProjectMutation, coalesceKey?: string) =>
+    set((s) => commitOps(s, next.toOps(s.project), coalesceKey));
 
   // Änderung direkt als Ops (ohne Differenz), s. `ProjectSlice.applyChange`.
   const applyChange = (
@@ -530,6 +522,19 @@ export function createProjectSlice(
     setProject,
     applyChange,
     recentOps: () => opLog.slice(),
+
+    loadProject: (next) => {
+      const doc = storeDocument(get().project);
+      doc.load(next);
+      set({ project: next, ...historyPatch(doc) });
+    },
+
+    openProjectFile: (text) => {
+      const doc = storeDocument(get().project);
+      const r = doc.loadFile(text);
+      if (r.ok) set({ project: r.project, ...historyPatch(doc) });
+      return r;
+    },
 
     // ── Zeichnungsebenen ───────────────────────────────────────────────────
     toggleLevelVisible: (id) =>
@@ -1894,18 +1899,16 @@ export function drawingVertices(
  * Bild-/PDF-Import). Direkt selektiert zurückgegeben, damit Griffe/Objekt-Info
  * sofort zum Verschieben/Skalieren bereitstehen.
  */
-export function addImageDrawing2d(
-  project: Project,
+export function imageDrawing2d(
   levelId: string,
   categoryCode: string,
   src: string,
   at: Vec2,
   widthM: number,
   heightM: number,
-): { project: Project; id: string } {
-  const id = uniqueId("dr2d");
-  const d: Drawing2D = {
-    id,
+): Drawing2D {
+  return {
+    id: uniqueId("dr2d"),
     type: "drawing2d",
     levelId,
     categoryCode,
@@ -1916,7 +1919,6 @@ export function addImageDrawing2d(
       src,
     },
   };
-  return { project: { ...project, drawings2d: [...project.drawings2d, d] }, id };
 }
 
 /**

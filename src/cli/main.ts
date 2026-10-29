@@ -94,8 +94,10 @@ import {
   distinctImportLayers,
   emptyProject,
   generateElevationPlan,
-  diffToOps,
   applyOps,
+  addItems,
+  fieldOps,
+  patchItem,
   generatePlan,
   generateSectionPlan,
   planToRenderScene,
@@ -110,7 +112,7 @@ import {
   validateProject,
   sampleProject,
 } from "../core";
-import type { Project } from "../core";
+import type { CoreOp, Project } from "../core";
 import { serveStdio } from "./mcp";
 
 type Args = { positional: string[]; flags: Map<string, string>; cmds: string[] };
@@ -396,7 +398,11 @@ async function importAny(path: string, args: Args): Promise<Project> {
       ...contoursToDrawings(parsed.contours, level.id, "byLayer", fallback, toCode, (l) => parsed.layerFillColors?.[l]),
       ...textsToDrawings(parsed.texts ?? [], level.id, "byLayer", fallback, toCode),
     ];
-    return applyOps(base, diffToOps(base, { ...base, layers, drawings2d: drawings, context: [...parsed.meshes] }));
+    return applyOps(base, [
+      ...fieldOps(base, "layers", layers),
+      ...fieldOps(base, "drawings2d", drawings),
+      ...fieldOps(base, "context", [...parsed.meshes]),
+    ]);
   }
   return fail(`Eingabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc, pdf, obj, stl, gltf, glb, ply)`);
 }
@@ -436,6 +442,14 @@ async function convert(input: string | undefined, output: string | undefined, ar
   return code === 0 ? runCmds(project, input, args) : code;
 }
 
+/** Ops: Kontext-Meshes anhängen und — wie in der App (siteSlice) — fehlende Kontext-Kategorien als Ebene ergänzen. */
+function contextOps(project: Project, meshes: NonNullable<Project["context"]>): CoreOp[] {
+  return [
+    ...(project.context ? addItems("context", meshes) : fieldOps(project, "context", meshes)),
+    ...fieldOps(project, "layers", ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : [])))),
+  ];
+}
+
 /** IFC in ein Projekt übernehmen (Kontext-Meshes, mit `--elements` als Bauteile); `report` = Bericht für `import-ifc`. */
 async function ifcInto(project: Project, bytes: Uint8Array, fileName: string, args: Args): Promise<{ next: Project; report: unknown }> {
   const group = args.flags.get("group");
@@ -444,7 +458,7 @@ async function ifcInto(project: Project, bytes: Uint8Array, fileName: string, ar
     const { products, report, elements } = await readIfcElements(bytes);
     const r = ifcElementsToProject(project, products, elements, { fileName, geoOrigin: projectGeoOrigin(project), group: grouping });
     return {
-      next: applyOps(project, diffToOps(project, r.project)),
+      next: r.project,
       report: { ...report, products: undefined, elements: r.summary, kept: elements.kept },
     };
   }
@@ -453,15 +467,7 @@ async function ifcInto(project: Project, bytes: Uint8Array, fileName: string, ar
   const byClass: Record<string, number> = {};
   for (const p of products) byClass[p.ifcClass] = (byClass[p.ifcClass] ?? 0) + 1;
   const triangles = products.reduce((s, p) => s + p.indices.length / 3, 0);
-  const next = applyOps(
-    project,
-    diffToOps(project, {
-      ...project,
-      context: [...(project.context ?? []), ...meshes],
-      // Wie in der App (siteSlice): fehlende Kontext-Kategorie als Ebene ergänzen.
-      layers: ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : []))),
-    }),
-  );
+  const next = applyOps(project, contextOps(project, meshes));
   return { next, report: { ...report, byClass, triangles, contextObjects: meshes.length } };
 }
 
@@ -508,14 +514,7 @@ async function meshInto(project: Project, bytes: Uint8Array, path: string, args:
     return fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
   const meshes = meshObjectsToImportedMeshes(read.objects, fileName, { placement, geoOrigin: projectGeoOrigin(project) });
-  const next = applyOps(
-    project,
-    diffToOps(project, {
-      ...project,
-      context: [...(project.context ?? []), ...meshes],
-      layers: ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : []))),
-    }),
-  );
+  const next = applyOps(project, contextOps(project, meshes));
   return { next, report: { ...read.report, contextObjects: meshes.length } };
 }
 
@@ -796,8 +795,8 @@ async function execute(project: Project, file: string, command: string, rest: st
       if (sec) await time("computeSection", () => computeSection(project, sec), Math.max(3, runs / 2));
       if (elev) await time("generateElevationPlan", () => generateElevationPlan(project, elev), Math.max(3, runs / 2));
       if (project.walls.length) {
-        const moved = { ...project, walls: [{ ...project.walls[0], height: (project.walls[0].height ?? 2.6) + 0.1 }, ...project.walls.slice(1)] };
-        await time("Op: diff+apply (1 Wand)", () => applyOps(project, diffToOps(project, moved)), runs * 20);
+        const w0 = project.walls[0];
+        await time("Op: patch+apply (1 Wand)", () => applyOps(project, patchItem(project, "walls", w0.id, { height: (w0.height ?? 2.6) + 0.1 })), runs * 20);
       }
       for (const [n, ms] of rows) process.stdout.write(`${n.padEnd(28)} ${ms.toFixed(2).padStart(9)} ms\n`);
       return 0;

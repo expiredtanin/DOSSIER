@@ -7,7 +7,7 @@ import type { Command, CommandContext, CmdInput } from "../types";
 import { explodeOps } from "../../editors/explode";
 import { translateOps, translateProject } from "../../model/geoRebase";
 import { applyOps } from "../../core/ops";
-import { isOpsMutation } from "../../core";
+import type { ProjectMutation } from "../../core";
 import { joinCommand } from "./join";
 import { defblockCommand } from "./defblock";
 import { terrainCommand } from "./terrain";
@@ -45,13 +45,13 @@ function ctxOf(p: Project, ids: string[] = []): CommandContext {
 function commitOf(cmd: Command, p: Project, inputs: CmdInput[], ids: string[] = []): { out: Project; viaOps: boolean } {
   const ctx = ctxOf(p, ids);
   let st = cmd.init();
-  let fn: ((p: Project) => Project) | undefined = cmd.autoRun?.(ctx).commit;
+  let fn: ProjectMutation | undefined = cmd.autoRun?.(ctx).commit;
   for (const input of inputs) {
     const [ns, res] = cmd.onInput(st, input, ctx);
     st = ns;
     if (res.commit) fn = res.commit;
   }
-  return { out: fn ? fn(p) : p, viaOps: fn ? isOpsMutation(fn) : true };
+  return { out: fn ? fn(p) : p, viaOps: fn ? typeof fn.toOps === "function" : true };
 }
 
 describe("Editier-Befehle: Ops", () => {

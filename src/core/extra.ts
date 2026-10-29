@@ -19,7 +19,7 @@ export { exportProjectStep } from "../export/exportStep";
 export { planToSvgString } from "../export/planToSvgString";
 export { setWasmBytesProvider } from "../engine/wasmSource";
 export { initCore, coreReady } from "../engine/coreWasm";
-export { applyOps, diffToOps, validateProject, validateOps } from "./ops";
+export { applyOps, validateProject, validateOps } from "./ops";
 export type { CoreOp } from "./ops";
 export type { Project, DrawingLevel } from "../model/types";
 export { computeKennzahlen, checkRoomProgram, solidVolume } from "../analysis/kennzahlen";
@@ -49,5 +49,5 @@ export { readPdfVectorPage, pdfPageToImport, pdfPageInfo, pdfMetersPerPt, isPdfF
 export type { PdfVectorPage, PdfVectorPath, PdfVectorText } from "../io/pdfVector";
 export { readMesh, meshObjectsToImportedMeshes, formatMeshReport, isMeshFile, MESH_UNITS, MESH_UNIT_SCALE } from "../io/meshImport";
 export type { MeshObject, MeshImportReport, MeshUnit, MeshUp, MeshPlacement } from "../io/meshImport";
-export { addItems, fieldOps, findItem, isOpsMutation, itemsOf, opsMutation, patchItem, patchItems, removeItems, replaceItem, replaceWithMany, setField, setFieldIfChanged } from "./opsBuild";
+export { addItems, fieldOps, findItem, itemsOf, opsMutation, patchItem, patchItems, removeItems, replaceItem, replaceWithMany, setField, setFieldIfChanged } from "./opsBuild";
 export type { EntityCollection, EntityOf, ProjectMutation } from "./opsBuild";
