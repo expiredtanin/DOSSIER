@@ -17,18 +17,25 @@ const UNSAVED = "unsaved";
 /** Schlüssel der Wiederherstellungskopie für eine Datei (oder ein ungespeichertes Projekt). */
 export const autosaveKey = (path: string | null): string => PREFIX + (path ?? UNSAVED);
 
-export const writeAutosave = (path: string | null, project: Project): Promise<void> =>
-  saveProject(autosaveKey(path), project);
+/** Sichert den Datei-Text des Projekts (`serializeProject`, wie beim Speichern; [K4] S4). */
+export const writeAutosave = (path: string | null, text: string): Promise<void> =>
+  saveProject(autosaveKey(path), text);
 
-export const readAutosave = (path: string | null): Promise<{ project: Project; savedAt: number } | null> =>
-  loadProjectRecord(autosaveKey(path));
+/** Liest die Kopie als Datei-Text (ältere Kopien als Objekt werden zu Text) — Wiederherstellen lädt sie
+ *  wie eine Datei (`openProjectFile`: Migration, Prüfung). */
+export const readAutosave = async (path: string | null): Promise<{ text: string; savedAt: number } | null> => {
+  const r = await loadProjectRecord(autosaveKey(path));
+  if (!r) return null;
+  return { text: typeof r.project === "string" ? r.project : JSON.stringify(r.project), savedAt: r.savedAt };
+};
 
 export const clearAutosave = (path: string | null): Promise<void> => deleteProject(autosaveKey(path));
 
 /** Eine angebotene Wiederherstellung. */
 export interface AutosaveRecovery {
   path: string | null;
-  project: Project;
+  /** Datei-Text der Kopie. */
+  text: string;
   savedAt: number;
 }
 

@@ -1,12 +1,12 @@
 // Op-Bauhelfer ([K4] S3): Ergebnis = das bisherige Projekt → Projekt-Muster (`map`/`filter`/Anhängen)
-// über `diffToOps`, auf Zufallsprojekten; unveränderte Elemente bleiben identisch.
+// über `projectDiffOps`, auf Zufallsprojekten; unveränderte Elemente bleiben identisch.
 import { describe, expect, it } from "vitest";
-import { applyOps, diffToOps } from "./ops";
+import { applyOps } from "./ops";
+import { projectDiffOps } from "./projectDiff.testutil";
 import {
   addItems,
   fieldOps,
   findItem,
-  isOpsMutation,
   opsMutation,
   patchItem,
   patchItems,
@@ -32,7 +32,7 @@ function project(seed: number): Project {
 }
 
 /** Alter Weg: Projekt → Projekt, dann über die Differenz. */
-const viaDiff = (p: Project, next: Project): Project => applyOps(p, diffToOps(p, next));
+const viaDiff = (p: Project, next: Project): Project => applyOps(p, projectDiffOps(p, next));
 
 describe("Op-Bauhelfer", () => {
   it("patchItem = map über die Liste (Teilobjekt und Funktion), Zufall", () => {
@@ -119,18 +119,16 @@ describe("Op-Bauhelfer", () => {
       const levels = p.drawingLevels.filter(() => r() < 0.8).map((z) => (r() < 0.3 ? { ...z, visible: !z.visible } : z));
       if (r() < 0.3) levels.reverse();
       const next = { ...p, drawingLevels: levels };
-      expect(fieldOps(p, "drawingLevels", levels)).toEqual(diffToOps(p, next));
+      expect(fieldOps(p, "drawingLevels", levels)).toEqual(projectDiffOps(p, next));
       expect(applyOps(p, fieldOps(p, "drawingLevels", levels))).toEqual(next);
     }
     expect(fieldOps(sampleProject, "layers", sampleProject.layers)).toEqual([]);
-    expect(fieldOps(sampleProject, "geoAnchor", undefined)).toEqual(diffToOps(sampleProject, { ...sampleProject, geoAnchor: undefined }));
+    expect(fieldOps(sampleProject, "geoAnchor", undefined)).toEqual(projectDiffOps(sampleProject, { ...sampleProject, geoAnchor: undefined }));
   });
 
   it("opsMutation: wirkt wie eine Projekt → Projekt-Funktion und trägt die Ops mit", () => {
     const id = sampleProject.walls[0].id;
     const m = opsMutation((p) => patchItem(p, "walls", id, { height: 4.2 }));
-    expect(isOpsMutation(m)).toBe(true);
-    expect(isOpsMutation((p: Project) => p)).toBe(false);
     expect(m(sampleProject).walls[0].height).toBe(4.2);
     expect(m.toOps(sampleProject)).toHaveLength(1);
   });

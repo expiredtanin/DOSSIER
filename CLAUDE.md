@@ -50,9 +50,10 @@ Der ganze Kern wandert nach Rust (`src-tauri/core`, Crate `dossier-core`); die U
   `src/core`. Neue Exporte **von Hand** in `src/core/index.ts` bzw. `src/core/extra.ts` eintragen —
   `scripts/core-facade.py` nicht mehr laufen lassen (es baut die Fassade aus direkten Importen neu und
   würde sie heute fast leeren).
-- **Das Projekt ändert sich nur über Ops** (`src/core/ops.ts`): `setProject(fn, coalesceKey?)` übersetzt
-  die Änderung in `CoreOp`s, validiert und wendet sie an. NaN/doppelte ids werden zurückgerollt. Gleicher
-  `coalesceKey` (Regler, Tippen) = ein Undo-Schritt.
+- **Das Projekt ändert sich nur über Ops** (Kern prüft und führt den Verlauf): `applyChange(ops | (p) => ops, coalesceKey?)`
+  mit den Helfern aus `src/core/opsBuild.ts` (`patchItem`, `addItems`, `removeItems` …); Befehle liefern `opsMutation`.
+  Mehrere Änderungen = ein Undo-Schritt über `groupChanges(fn, key?)`; gleicher `coalesceKey` (Regler, Tippen) ebenso.
+  Öffnen/Neu über `openProjectFile`/`loadProject` (Kern lädt, Verlauf leer). Kein `diffToOps` mehr.
 - **Modell-Typen kommen aus Rust** ([K4] S4): Neue Modellfelder/-typen NUR im Rust-Modell
   (`src-tauri/core/src/model/generated.rs`, `manual.rs`; serde- + ts-rs-Attribute, Regeln in `model/ts_export.rs`),
   dann `npm run gen:types` → `src/model/types.generated.ts` (nie von Hand ändern; `types.ts` re-exportiert sie und

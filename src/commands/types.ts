@@ -13,6 +13,7 @@ import type { Project, Vec2 } from "../model/types";
 import type { TranslationKey } from "../i18n";
 import type { DrawingLevel } from "../model/types";
 import type { SnapResult, ToolDraft } from "../tools/types";
+import type { ProjectMutation } from "../core";
 
 export type { DraftShape, SnapResult, ToolDraft } from "../tools/types";
 
@@ -112,8 +113,8 @@ export interface CommandContext {
 export interface CommandResult {
   /** Neuer Vorschau-Zustand; null = nichts zu zeigen. */
   draft: ToolDraft | null;
-  /** Bei Abschluss: immutable Mutation, die die Engine über setProject anwendet. */
-  commit?: (p: Project) => Project;
+  /** Bei Abschluss: Änderung mit mitgeführten Ops (`opsMutation`), die die Engine über setProject anwendet. */
+  commit?: ProjectMutation;
   /** true → Befehl ist fertig und kehrt in den Ruhezustand zurück. */
   done?: boolean;
   /**

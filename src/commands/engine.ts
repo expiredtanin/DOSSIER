@@ -13,8 +13,9 @@
 // Zustandsänderung ruft sie `emit()` → React-Komponenten (CommandLine, App)
 // abonnieren via subscribe() und re-rendern.
 
-import type { Project, Vec2 } from "../model/types";
+import type { Vec2 } from "../model/types";
 import type { SnapResult, ToolDraft } from "../tools/types";
+import type { ProjectMutation } from "../core";
 import { parseInput, resolvePoint } from "./parseInput";
 import { getCommand, resolveCommand, autocomplete } from "./registry";
 import type {
@@ -49,7 +50,7 @@ export interface EngineHost {
   /** Vorschau setzen (oder löschen). */
   setDraft(draft: ToolDraft | null): void;
   /** Commit immutabel anwenden. */
-  commit(mutate: (p: Project) => Project): void;
+  commit(mutate: ProjectMutation): void;
   /** Ist die aktive Ebene ein Geschoss? (für floorOnly-Befehle). */
   isFloor(): boolean;
   /**

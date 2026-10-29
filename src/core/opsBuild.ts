@@ -1,6 +1,6 @@
 // Op-Bauhelfer ([K4] S3, zweite Etappe): Aktionen beschreiben ihre Änderung direkt als
-// {@link CoreOp}s statt als Projekt → Projekt-Funktion, die `setProject` erst per `diffToOps` über
-// alle Listen zurückübersetzen muss (bei 3000 Wänden ≈ 2,4 ms je Mausschritt). Die Helfer lesen
+// {@link CoreOp}s statt als Projekt → Projekt-Funktion (früher übersetzte `setProject` sie per
+// Projekt-Differenz zurück: bei 3000 Wänden ≈ 2,4 ms je Mausschritt; die Differenz ist gelöscht). Die Helfer lesen
 // nur das betroffene Element; unveränderte Elemente bleiben unberührt (Identität in der
 // TS-Leseansicht, `applyOps`).
 //
@@ -9,7 +9,7 @@
 // {@link opsMutation} die Ops mit — `setProject` nimmt dann die Ops ohne Differenz.
 
 import type { Project } from "../model/types";
-import { applyOps, diffToOps } from "./ops";
+import { applyOps } from "./ops";
 import type { CoreOp } from "./ops";
 
 /** Projekt-Felder, die Listen von Elementen mit `id` sind (walls, drawings2d, rooms, …). */
@@ -173,28 +173,73 @@ export type ProjectMutation = ((p: Project) => Project) & { readonly toOps: (p: 
 
 /**
  * Verpackt einen Op-Bauer als Projekt → Projekt-Funktion (für Schnittstellen wie
- * `CommandResult.commit`). Aufgerufen liefert sie `applyOps(p, build(p))`; `setProject` erkennt
- * sie an `toOps` und übergibt die Ops ohne `diffToOps` an den Kern.
+ * `CommandResult.commit`). Aufgerufen liefert sie `applyOps(p, build(p))`; `setProject` übergibt
+ * ihre `toOps` an den Kern.
  */
 export function opsMutation(build: (p: Project) => CoreOp[]): ProjectMutation {
   const fn = (p: Project): Project => applyOps(p, build(p));
   return Object.assign(fn, { toOps: build });
 }
 
-/** Ob `fn` ihre Ops mitträgt. */
-export function isOpsMutation(fn: unknown): fn is ProjectMutation {
-  return typeof fn === "function" && typeof (fn as Partial<ProjectMutation>).toOps === "function";
-}
-
 /**
  * Ops, die das Feld `key` auf `value` bringen — für KLEINE Listen, die eine Hilfsfunktion als Ganzes
  * neu liefert (Ebenen nach `recomputeFloorElevations`, Kategorien-Baum …): Differenz nur über
- * dieses eine Feld (Elemente mit id einzeln, sonst `setField`). Grosse Listen (Wände, 2D) gehören
- * über {@link patchItem}/{@link patchItems}/{@link addItems}/{@link removeItems}.
+ * dieses eine Feld (Elemente mit id einzeln: `remove`/`replace`/`reorder`/`add`, sonst `setField`).
+ * `applyOps(p, fieldOps(p, key, v))[key]` ist inhaltlich `v`, Elemente aus `v` behalten ihre Identität.
+ * Grosse Listen (Wände, 2D) gehören über {@link patchItem}/{@link patchItems}/{@link addItems}/{@link removeItems}.
  */
 export function fieldOps<K extends keyof Project>(p: Project, key: K, value: Project[K] | undefined): CoreOp[] {
-  if (p[key] === value) return [];
-  const before = { [key]: p[key] } as unknown as Project;
-  const after = (value === undefined ? {} : { [key]: value }) as unknown as Project;
-  return diffToOps(before, after);
+  const va = p[key] as unknown;
+  const vb = value as unknown;
+  if (va === vb) return [];
+  if (isIdList(va) && isIdList(vb) && uniqueIds(va) && uniqueIds(vb)) return diffList(key, va, vb);
+  return [vb === undefined ? { kind: "setField", key } : { kind: "setField", key, value: vb }];
+}
+
+const isEntityList = (v: unknown): v is AnyEntity[] =>
+  Array.isArray(v) && v.length > 0 && v.every((x) => x !== null && typeof x === "object" && typeof (x as AnyEntity).id === "string");
+
+/** Ob `v` eine (auch leere) Liste ist, deren Elemente — falls vorhanden — alle `id`s tragen. */
+const isIdList = (v: unknown): v is AnyEntity[] => Array.isArray(v) && (v.length === 0 || isEntityList(v));
+
+/** Eindeutige ids? (Voraussetzung für die Element-Ops.) */
+function uniqueIds(list: AnyEntity[]): boolean {
+  const seen = new Set<string>();
+  for (const e of list) {
+    if (seen.has(e.id)) return false;
+    seen.add(e.id);
+  }
+  return true;
+}
+
+function diffList(collection: string, va: AnyEntity[], vb: AnyEntity[]): CoreOp[] {
+  const ops: CoreOp[] = [];
+  const inB = new Set(vb.map((e) => e.id));
+  const mapA = new Map(va.map((e) => [e.id, e]));
+  const removed = va.filter((e) => !inB.has(e.id)).map((e) => e.id);
+  if (removed.length) ops.push({ kind: "remove", collection, ids: removed });
+  // Geänderte Elemente (gleiche id, andere Referenz).
+  for (const e of vb) {
+    const old = mapA.get(e.id);
+    if (old !== undefined && old !== e) ops.push({ kind: "replace", collection, entity: e });
+  }
+  // Reihenfolge der behaltenen Elemente in vb.
+  const kept = va.filter((e) => inB.has(e.id)).map((e) => e.id);
+  const keptSet = new Set(kept);
+  const keptInB = vb.map((e) => e.id).filter((id) => keptSet.has(id));
+  if (keptInB.some((id, idx) => id !== kept[idx])) ops.push({ kind: "reorder", collection, ids: keptInB });
+  // Neue Elemente: zusammenhängende Läufe, von links nach rechts direkt an ihrer Zielposition
+  // in `vb` eingefügt (frühere Läufe stehen dann schon, die Position stimmt).
+  let i = 0;
+  while (i < vb.length) {
+    if (keptSet.has(vb[i].id)) {
+      i++;
+      continue;
+    }
+    const at = i;
+    const run: AnyEntity[] = [];
+    while (i < vb.length && !keptSet.has(vb[i].id)) run.push(vb[i++]);
+    ops.push({ kind: "add", collection, items: run, at });
+  }
+  return ops;
 }

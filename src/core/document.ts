@@ -1,14 +1,19 @@
-// Projekt-Dokument im Rust-Kern ([K4], Stufe S1; S3: Prüfung und Undo/Redo im Kern, s. `commit`).
-// Spiegelt das TS-Projekt über Ops nach Rust (`document.rs`). Befehle liefern vorerst noch
-// Projekt → Projekt (`setProject` → `diffToOps`); Rust hält
-// den Stand, auf dem die Ableitungen später direkt rechnen, ohne dass TS das Projekt je Aufruf
-// flach neu sammeln muss. Bei jedem Widerspruch (abgelehnte Ops, Fehler) wird das Dokument aus dem
-// vollen Projekt neu geöffnet — der Spiegel heilt sich selbst.
+// Projekt-Dokument im Rust-Kern ([K4], Stufe S1; S3: Prüfung und Undo/Redo im Kern, s. `commit`;
+// S4: Laden/Speichern der Projektdatei, s. `loadFile`/`serialize`). Änderungen kommen als Ops
+// (`commit`), ein anderes Projekt als Ganzes (`load`, `loadFile` — leert den Verlauf). TS hält die
+// Leseansicht (`current`). Das gemeinsame Abfrage-Dokument (`documentFor`) folgt fremden Projekten
+// feldweise (`sync`); bei jedem Widerspruch wird es aus dem vollen Projekt neu geöffnet.
 
 import type { Project } from "../model/types";
 import { core } from "../engine/coreWasm";
-import { applyOps, diffToOps, opsToJson } from "./ops";
+import { applyOps, opsToJson } from "./ops";
 import type { CoreOp } from "./ops";
+import { fieldOps } from "./opsBuild";
+
+/** Ergebnis des Ladens einer Projektdatei ({@link ProjectDocument.loadFile}). */
+export type LoadFileResult =
+  | { ok: true; project: Project; warnings: string[]; migratedFrom: number | null }
+  | { ok: false; error: string };
 
 /** Abfragen des Kerns (`queries.rs`). */
 export type QueryName =
@@ -38,7 +43,10 @@ export type QueryName =
   | "planDomains"
   | "ifcExportData"
   | "meshExportData"
-  | "modelJson";
+  | "modelJson"
+  | "groupMembership"
+  | "containingGroup"
+  | "expandToGroups";
 
 export class ProjectDocument {
   private handle = 0;
@@ -63,10 +71,19 @@ export class ProjectDocument {
     else if (this.limits) core().doc_history_limits(this.handle, this.limits[0], this.limits[1]);
   }
 
-  /** Bringt das Dokument auf den Stand `next` (über die Differenz als Ops). */
+  /**
+   * Bringt das Abfrage-Dokument auf den Stand `next` (ohne Verlauf): nur die Felder, deren Referenz
+   * sich geändert hat, je über {@link fieldOps} (Listen elementweise) — unveränderte Teile kosten
+   * nichts. Kein Weg für Benutzer-Änderungen (die gehen als Ops über {@link commit}).
+   */
   sync(next: Project): void {
     if (next === this.mirror) return;
-    const ops = diffToOps(this.mirror, next);
+    const a = this.mirror as unknown as Record<string, unknown>;
+    const b = next as unknown as Record<string, unknown>;
+    const ops: CoreOp[] = [];
+    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      if (a[key] !== b[key]) ops.push(...fieldOps(this.mirror, key as keyof Project, b[key] as never));
+    }
     this.mirror = next;
     if (ops.length === 0) return;
     if (!this.handle) {
@@ -106,7 +123,33 @@ export class ProjectDocument {
     return core().doc_query_bin(this.handle, name, Float64Array.from(args), text);
   }
 
-  /** Datei-Text des Projekts (Formatversion vorn, Einrückung 2). */
+  /**
+   * Projekt laden (Neu, Musterhaus, Abgleich nach einer Änderung vorbei an den Ops): ersetzt den
+   * ganzen Inhalt im Kern und leert den Verlauf. `project` wird die Leseansicht (Identität bleibt).
+   */
+  load(project: Project): void {
+    this.mirror = project;
+    if (!this.handle || !core().doc_load_json(this.handle, JSON.stringify(project))) this.reopen(project);
+  }
+
+  /**
+   * Projektdatei laden (Öffnen, Vorlage, Wiederherstellen; [K4] S4): der Kern liest den Text, migriert
+   * ältere Formate, prüft und ergänzt (`project_format.rs`) und lädt das Ergebnis direkt ins Dokument
+   * (Verlauf leer). Die Leseansicht kommt als JSON des Dokuments zurück. Bei Fehler bleibt alles, wie es war.
+   */
+  loadFile(text: string, now = Date.now()): LoadFileResult {
+    if (!this.handle) this.reopen({} as Project);
+    if (!this.handle) return { ok: false, error: "Projekt-Dokument im Kern nicht offen." };
+    const r = JSON.parse(core().doc_load_file(this.handle, text, now)) as
+      | { ok: true; warnings: string[]; migratedFrom: number | null }
+      | { ok: false; error: string };
+    if (!r.ok) return r;
+    const project = JSON.parse(core().doc_json(this.handle)) as Project;
+    this.mirror = project;
+    return { ok: true, project, warnings: r.warnings, migratedFrom: r.migratedFrom };
+  }
+
+  /** Datei-Text des Projekts (Formatversion vorn, Einrückung 2, Zeichen für Zeichen wie `JSON.stringify`). */
   serialize(): string {
     return this.handle ? core().doc_serialize(this.handle) : "";
   }
@@ -138,13 +181,11 @@ export class ProjectDocument {
 
   /**
    * Stellt sicher, dass das Dokument `base` spiegelt. Wurde das Projekt vorbei an den Ops
-   * geändert (Laden in Tests, fremder Stand), passt der Verlauf nicht mehr: er wird geleert.
+   * geändert (fremder Stand), passt der Verlauf nicht mehr: `base` wird als Ganzes geladen.
    */
   private ensure(base: Project): void {
     if (base === this.mirror && this.handle) return;
-    this.sync(base);
-    if (!this.handle) this.reopen(base);
-    if (this.handle) core().doc_history_clear(this.handle);
+    this.load(base);
   }
 
   /**
@@ -228,6 +269,15 @@ export class ProjectDocument {
 }
 
 let shared: ProjectDocument | null = null;
+
+/**
+ * Das gemeinsame Abfrage-Dokument (ohne Verlauf), z. B. für das CLI: eine dort geladene Datei
+ * ({@link ProjectDocument.loadFile}) ist sofort das Dokument der Abfragen auf ihrem Projekt.
+ */
+export function sharedDocument(): ProjectDocument {
+  if (!shared) shared = new ProjectDocument({} as Project);
+  return shared;
+}
 /** Dokument des Stores (mit Verlauf); Abfragen auf dessen aktuellem Projekt laufen direkt darüber. */
 let primary: ProjectDocument | null = null;
 

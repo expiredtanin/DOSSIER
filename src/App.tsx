@@ -36,7 +36,7 @@ import { activePenSet, resolvePenColor, resolvePenWeight } from "./model/penSets
 import { PenColorField } from "./ui/PenColorField";
 import { generatePlan, computeKennzahlen, checkRoomProgram } from "./core";
 import { programStatusLabel } from "./panels/KennzahlenSection";
-import type { CategoryDisplayResolver } from "./core";
+import type { CategoryDisplayResolver, ProjectMutation } from "./core";
 import { sectionPlaneFromLevel, sectionUAxisModel } from "./core";
 import { roofBaseElevation, roofGeometry } from "./core";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
@@ -156,8 +156,8 @@ import { useGripEditing } from "./state/useGripEditing";
 import { usePanelHostBase } from "./state/usePanelHostBase";
 import { useDockDragState } from "./state/useDockDragState";
 import { useMouseSelectionHandlers } from "./state/useMouseSelectionHandlers";
-import { activeGroupOps, addNewElementsToActiveGroup, containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
-import { addItems, fieldOps, isOpsMutation, opsMutation, patchItem, patchItems, removeItems, replaceItem, replaceWithMany, setFieldIfChanged } from "./core";
+import { activeGroupOps, containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
+import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, replaceItem, replaceWithMany, setFieldIfChanged } from "./core";
 import type { GroupMembership, MemberKind } from "./state/groupActions";
 import { isLocked, lockMembersOps } from "./state/objectLock";
 import { useProjectFileActions } from "./state/useProjectFileActions";
@@ -666,7 +666,7 @@ export default function App() {
 
   // Wendet ein ToolResult an: Draft (+ Snap-Marker) zeigen, ggf. committen/abschließen.
   const applyToolResult = (
-    res: { draft: ToolDraft | null; commit?: (p: Project) => Project; done?: boolean },
+    res: { draft: ToolDraft | null; commit?: ProjectMutation; done?: boolean },
     snapResult: ReturnType<typeof snapFor>,
   ) => {
     if (res.draft) setDraft({ ...res.draft, snap: snapResult });
@@ -937,23 +937,17 @@ export default function App() {
       setDraft: (d) => cmdLatest.current.setDraft(d),
       // Zeichnet man WÄHREND man eine Gruppe betreten hat (Isolation), wird
       // das neue Element automatisch Mitglied dieser Gruppe (Nutzer-Wunsch:
-      // „wenn man etwas neu zeichnet ... zeichnet man in der Gruppe") — s.
-      // state/groupActions.ts::addNewElementsToActiveGroup (Diff vor/nach
-      // Commit über alle Elementarten, additiv zur eigentlichen Mutation).
-      // [K4] S3: Befehle mit mitgeführten Ops (`opsMutation`) gehen ohne Projekt-Differenz an den
-      // Kern; die Gruppen-Zuordnung kommt dann als weitere Ops dazu (`activeGroupOps`).
+      // „wenn man etwas neu zeichnet ... zeichnet man in der Gruppe"). [K4] S3:
+      // Befehle tragen ihre Ops mit (`opsMutation`); die Gruppen-Zuordnung kommt
+      // als weitere Ops dazu (`activeGroupOps`).
       commit: (mutate) => {
         const groupPath = cmdLatest.current.groupPath;
-        if (isOpsMutation(mutate)) {
-          cmdLatest.current.setProject(
-            opsMutation((p) => {
-              const ops = mutate.toOps(p);
-              return [...ops, ...activeGroupOps(p, ops, groupPath)];
-            }),
-          );
-        } else {
-          cmdLatest.current.setProject((p) => addNewElementsToActiveGroup(p, mutate(p), groupPath));
-        }
+        cmdLatest.current.setProject(
+          opsMutation((p) => {
+            const ops = mutate.toOps(p);
+            return [...ops, ...activeGroupOps(p, ops, groupPath)];
+          }),
+        );
       },
       isFloor: () => cmdLatest.current.activeLevel.kind === "floor",
       // Frisch über `text`/`textbox` erzeugtes Element sofort inline editieren
@@ -1711,7 +1705,7 @@ export default function App() {
   } = useProjectActions(applyChange, notify, planViewRef);
 
   // IFC-Import: erst die Wahl Mesh/Bauteile (`IfcImportDialog`), dann [B3] Kontext-Meshes
-  // (`io/ifcImport.ts`) oder [B4] echte Bauteile (`io/ifcElements.ts`, übernommen über setProject).
+  // (`io/ifcImport.ts`) oder [B4] echte Bauteile (`io/ifcElements.ts`, übernommen als Ops).
   const [pendingIfc, setPendingIfc] = useState<File | null>(null);
   const importIfcFile = (f: File) => setPendingIfc(f);
   const runIfcImport = (f: File, mode: IfcImportMode) => {
@@ -1722,12 +1716,13 @@ export default function App() {
         .then(({ products, report, elements }) => {
           let summary: ReturnType<typeof ifcElementsToProject>["summary"] | null = null;
           let bounds: { x: number; y: number }[] = [];
-          setProject((p) => {
+          // Als Ops in einem Schritt ([K4] S3): ein IFC-Import = ein Undo-Schritt.
+          applyChange((p) => {
             const r = ifcElementsToProject(p, products, elements, { fileName: f.name, geoOrigin: projectGeoOrigin(p) });
             summary = r.summary;
             const added = new Set(p.walls.map((w) => w.id));
             bounds = r.project.walls.filter((w) => !added.has(w.id)).flatMap((w) => [w.start, w.end]);
-            return r.project;
+            return r.ops;
           });
           if (bounds.length) planViewRef.current?.fitBounds(bounds);
           if (summary) {
@@ -1913,7 +1908,7 @@ export default function App() {
     runImport,
   } = useProjectFileActions(
     project,
-    setProject,
+    applyChange,
     setImportState,
     setExportSaveFormat,
     activeCategoryCode,
@@ -3124,10 +3119,9 @@ export default function App() {
 
   // „Bild einfügen" (Werkzeug „image") — siehe state/useImportHandling.ts.
   const { onImageOrPdfFileChosen } = useImageImportHandling({
-    project,
     activeLevelId: activeLevel.id,
     activeCategoryCode,
-    setProject,
+    applyChange,
     notify,
     setSelectedDrawingId,
     setSelectedWallIds,

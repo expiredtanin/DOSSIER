@@ -18,7 +18,7 @@ import type { CopyMode, TransformOp } from "../tools/transform";
 import type { CommandEngine } from "../commands/engine";
 import type { CommandLineHandle } from "../ui/CommandLine";
 import type { Drawing2D, Project, Vec2 } from "../model/types";
-import type { CoreOp } from "../core";
+import type { CoreOp, ProjectMutation } from "../core";
 import { differenceDrawings, intersectionDrawings, unionDrawings } from "../editors/booleanOps";
 import type { BooleanResult } from "../editors/booleanOps";
 import { groupSelection, mergeMembership, ungroup, EMPTY_MEMBERSHIP } from "./groupActions";
@@ -236,7 +236,7 @@ export function useActiveToolKeys(
   toolStateRef: MutableRefObject<ToolState>,
   setDraft: (draft: ToolDraft | null) => void,
   setActiveTool: (id: ToolId) => void,
-  setProject: (next: Project | ((p: Project) => Project)) => void,
+  setProject: (next: ProjectMutation) => void,
 ): void {
   useEffect(() => {
     if (activeTool === "select") return;

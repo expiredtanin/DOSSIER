@@ -31,6 +31,28 @@ pub fn doc_open(json: &str) -> u32 {
     })
 }
 
+/// Projektdatei (Text) einlesen, migrieren, prüfen und ins Dokument laden ([K4] S4: Öffnen, Vorlage,
+/// Wiederherstellen); der Verlauf wird geleert. Antwort als JSON:
+/// `{"ok":true,"warnings":[…],"migratedFrom":null|n}` oder `{"ok":false,"error":"…"}` (Dokument unverändert).
+#[wasm_bindgen]
+pub fn doc_load_file(h: u32, text: &str, now_ms: f64) -> String {
+    let now = if now_ms.is_finite() { now_ms } else { 0.0 };
+    let v = match with_doc(h, |d| d.load_file(text, now)) {
+        Some(Ok((warnings, migrated_from))) => serde_json::json!({"ok": true, "warnings": warnings, "migratedFrom": migrated_from}),
+        Some(Err(error)) => serde_json::json!({"ok": false, "error": error}),
+        None => serde_json::json!({"ok": false, "error": "Dokument nicht offen"}),
+    };
+    v.to_string()
+}
+
+/// Projekt-JSON (ein Objekt, schon im aktuellen Format) ins Dokument laden (Neu, Musterhaus, Abgleich
+/// nach einer Änderung vorbei an den Ops); der Verlauf wird geleert. `false` bei kaputtem JSON (unverändert).
+#[wasm_bindgen]
+pub fn doc_load_json(h: u32, json: &str) -> bool {
+    let Ok(Value::Object(root)) = serde_json::from_str::<Value>(json) else { return false };
+    with_doc(h, |d| d.load(root)).is_some()
+}
+
 #[wasm_bindgen]
 pub fn doc_close(h: u32) {
     DOCS.with(|d| {

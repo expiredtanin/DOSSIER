@@ -2,7 +2,8 @@
 // Verlauf in Rust), Undo/Redo liefern Ops, mit denen die TS-Leseansicht nachgeführt wird.
 import { describe, expect, it } from "vitest";
 import { ProjectDocument } from "./document";
-import { diffToOps, validateOps, validateProject } from "./ops";
+import { validateOps, validateProject } from "./ops";
+import { projectDiffOps } from "./projectDiff.testutil";
 import type { CoreOp } from "./ops";
 import { sampleProject } from "../model/sampleProject";
 import type { Project, Wall } from "../model/types";
@@ -41,7 +42,7 @@ describe("Undo/Redo im Kern-Dokument", () => {
     let steps = 0;
     for (let seed = 1; seed <= 1000; seed++) {
       const next = mutate(cur, seed);
-      const ops = diffToOps(cur, next);
+      const ops = projectDiffOps(cur, next);
       if (!ops.length) continue;
       const r = d.commit(cur, ops, undefined, seed * 1000);
       expect("project" in r, `seed ${seed}`).toBe(true);
@@ -76,7 +77,7 @@ describe("Undo/Redo im Kern-Dokument", () => {
     for (let i = 0; i < 50; i++) {
       const w = cur.walls[0];
       const next = { ...cur, walls: [{ ...w, height: 3 + i / 100 }, ...cur.walls.slice(1)] };
-      const r = d.commit(cur, diffToOps(cur, next), "drag:W", 1000 + i * 10);
+      const r = d.commit(cur, projectDiffOps(cur, next), "drag:W", 1000 + i * 10);
       if ("project" in r) cur = r.project;
     }
     expect(d.historyState().undo).toBe(1);
@@ -85,7 +86,7 @@ describe("Undo/Redo im Kern-Dokument", () => {
     expect(back.walls[1]).toBe(cur.walls[1]);
     // Nach Undo beginnt dieselbe Serie einen neuen Schritt.
     const again = d.redo(back)!;
-    const r = d.commit(again, diffToOps(again, { ...again, name: "x" }), "drag:W", 1500);
+    const r = d.commit(again, projectDiffOps(again, { ...again, name: "x" }), "drag:W", 1500);
     expect("project" in r).toBe(true);
     expect(d.historyState().undo).toBe(2);
     d.close();
@@ -96,7 +97,7 @@ describe("Undo/Redo im Kern-Dokument", () => {
     let cur: Project = sampleProject;
     d.beginGroup();
     for (const name of ["a", "b", "c"]) {
-      const r = d.commit(cur, diffToOps(cur, { ...cur, name }), undefined, 0);
+      const r = d.commit(cur, projectDiffOps(cur, { ...cur, name }), undefined, 0);
       if ("project" in r) cur = r.project;
     }
     d.endGroup();
@@ -109,13 +110,13 @@ describe("Undo/Redo im Kern-Dokument", () => {
     const d = new ProjectDocument(sampleProject);
     const w = sampleProject.walls[0];
     const nan = { ...sampleProject, walls: [{ ...w, height: NaN }, ...sampleProject.walls.slice(1)] };
-    const r1 = d.commit(sampleProject, diffToOps(sampleProject, nan), undefined, 0);
+    const r1 = d.commit(sampleProject, projectDiffOps(sampleProject, nan), undefined, 0);
     expect(r1).toEqual({ problems: [`„walls" ${w.id}: NaN ist nicht endlich.`] });
     const dup = { ...sampleProject, walls: [...sampleProject.walls, { ...w }] };
-    const r2 = d.commit(sampleProject, diffToOps(sampleProject, dup), undefined, 0);
+    const r2 = d.commit(sampleProject, projectDiffOps(sampleProject, dup), undefined, 0);
     expect(r2).toEqual({ problems: [`Doppelte ids in „walls".`] });
     const inf = { ...sampleProject, referenceElevationMasl: -Infinity } as Project;
-    const r3 = d.commit(sampleProject, diffToOps(sampleProject, inf), undefined, 0);
+    const r3 = d.commit(sampleProject, projectDiffOps(sampleProject, inf), undefined, 0);
     expect(r3).toEqual({ problems: [`Feld „referenceElevationMasl": -Infinity ist nicht endlich.`] });
     expect(d.historyState().undo).toBe(0);
     expect(JSON.parse(d.json())).toEqual(plain(sampleProject));
@@ -156,7 +157,7 @@ describe("Undo/Redo im Kern-Dokument", () => {
     for (let i = 0; i < n; i++) {
       const k = (i * 7) % walls.length;
       const next = { ...cur, walls: cur.walls.map((w, j) => (j === k ? { ...w, height: 2 + i / 1000 } : w)) };
-      const r = d.commit(cur, diffToOps(cur, next), undefined, i * 1000);
+      const r = d.commit(cur, projectDiffOps(cur, next), undefined, i * 1000);
       if ("project" in r) cur = r.project;
     }
     const commitMs = (performance.now() - t) / n;

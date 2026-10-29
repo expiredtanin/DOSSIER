@@ -9,12 +9,14 @@
 
 import type { DragEvent } from "react";
 import { useRef } from "react";
-import { addImageDrawing2d } from "./projectSlice";
+import { imageDrawing2d } from "./projectSlice";
+import { addItems } from "../core";
+import type { CoreOp } from "../core/ops";
 import type { NotifyKind } from "./notifySlice";
 import { defaultImageSizeM, readImageFile } from "../io/imageAsset";
 import { rasterizePdfPages } from "../io/pdfImport";
 import { t } from "../i18n";
-import type { Project, Vec2 } from "../model/types";
+import type { Vec2 } from "../model/types";
 
 /**
  * „Bild einfügen" (Werkzeug „image"): kein Klick-Platzieren (Datei-Auswahl ist
@@ -23,10 +25,10 @@ import type { Project, Vec2 } from "../model/types";
  * (Griffe/Objekt-Info stehen direkt zum Verschieben/Skalieren bereit).
  */
 export function useImageImportHandling(opts: {
-  project: Project;
   activeLevelId: string;
   activeCategoryCode: string;
-  setProject: (next: Project | ((p: Project) => Project)) => void;
+  /** Änderung als Ops (Store `applyChange`): alle Bilder eines Einfügens = ein Undo-Schritt. */
+  applyChange: (ops: readonly CoreOp[]) => void;
   notify: (message: string, kind?: NotifyKind) => void;
   setSelectedDrawingId: (id: string | null) => void;
   setSelectedWallIds: (ids: string[]) => void;
@@ -44,10 +46,9 @@ export function useImageImportHandling(opts: {
   onImageOrPdfFileChosen: (file: File) => void;
 } {
   const {
-    project,
     activeLevelId,
     activeCategoryCode,
-    setProject,
+    applyChange,
     notify,
     setSelectedDrawingId,
     setSelectedWallIds,
@@ -65,17 +66,14 @@ export function useImageImportHandling(opts: {
   const insertImageDrawings = (
     assets: { src: string; naturalWidth: number; naturalHeight: number }[],
   ) => {
-    let cur = project;
-    let lastId: string | null = null;
-    assets.forEach((a, i) => {
+    const drawings = assets.map((a, i) => {
       const { widthM, heightM } = defaultImageSizeM(a.naturalWidth, a.naturalHeight);
       const cascade = i * 0.3;
       const at: Vec2 = { x: -widthM / 2 + cascade, y: -heightM / 2 - cascade };
-      const r = addImageDrawing2d(cur, activeLevelId, activeCategoryCode, a.src, at, widthM, heightM);
-      cur = r.project;
-      lastId = r.id;
+      return imageDrawing2d(activeLevelId, activeCategoryCode, a.src, at, widthM, heightM);
     });
-    setProject(cur);
+    applyChange(addItems("drawings2d", drawings));
+    const lastId = drawings.length ? drawings[drawings.length - 1].id : null;
     if (lastId) {
       setSelectedDrawingId(lastId);
       setSelectedWallIds([]);

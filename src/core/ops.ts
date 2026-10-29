@@ -2,16 +2,14 @@
 // lessons-bimcraft [6]/[8], Grundlage für [7] und [16]).
 //
 // Die interaktive Befehlslogik (Schritte, Prompts, Vorschau, Panels, Griffe) bleibt in der Hülle
-// und liefert weiterhin Projekt → Projekt-Funktionen. `setProject` übersetzt jede Änderung
-// über {@link diffToOps} in eine Folge von {@link CoreOp}s und wendet SIE mit {@link applyOps}
-// an — das Projekt ändert sich ausschliesslich durch Ops. Ops sind JSON-serialisierbar
-// (Undo-Verlauf [84], Makros [85], MCP [9], später ein Rust-Kern).
+// und beschreibt jede Änderung als Folge von {@link CoreOp}s (Bauhelfer `opsBuild.ts`) — das
+// Projekt ändert sich ausschliesslich durch Ops. Ops sind JSON-serialisierbar (Undo-Verlauf [84],
+// Makros [85], MCP [9]). Ein anderes Projekt als Ganzes lädt der Kern (`ProjectDocument.load`/`loadFile`).
 //
 // [K4] S3: Prüfung (`validateOps`/`validateProject`), Anwendung mit Verlauf und Undo/Redo liegen im
-// Rust-Kern (`src-tauri/core/src/ops.rs`, `document.rs`). Hier bleiben `diffToOps` (Adapter für die
-// Befehle, die noch Projekt → Projekt liefern) und `applyOps` als Nachführung der TS-Leseansicht:
-// TS wendet genau die Ops an, die der Kern angenommen oder für Undo/Redo geliefert hat —
-// unveränderte Elemente behalten so ihre Objekt-Identität (Caches in Plan/3D).
+// Rust-Kern (`src-tauri/core/src/ops.rs`, `document.rs`). Hier bleibt `applyOps` als Nachführung der
+// TS-Leseansicht: TS wendet genau die Ops an, die der Kern angenommen oder für Undo/Redo geliefert
+// hat — unveränderte Elemente behalten so ihre Objekt-Identität (Caches in Plan/3D).
 //
 // Granularität (bewusst grob, aber stabil):
 //  • Listen aus Elementen mit `id` (walls, ceilings, drawings2d, …): `add` / `replace` / `remove`
@@ -36,75 +34,6 @@ export type CoreOp =
   /** Setzt ein Projekt-Feld auf `value` (`undefined`/fehlend ⇒ Feld entfernen). `at`: Position, falls
    *  das Feld neu eingefügt wird (vom Kern-Undo gesetzt, damit die Feld-Reihenfolge exakt zurückkommt). */
   | { kind: "setField"; key: string; value?: unknown; at?: number };
-
-const isEntityList = (v: unknown): v is Entity[] =>
-  Array.isArray(v) && v.length > 0 && v.every((x) => x !== null && typeof x === "object" && typeof (x as Entity).id === "string");
-
-/** Ob `v` eine (auch leere) Liste ist, deren Elemente — falls vorhanden — alle `id`s tragen. */
-const isIdList = (v: unknown): v is Entity[] => Array.isArray(v) && (v.length === 0 || isEntityList(v));
-
-/** Eindeutige ids? (Voraussetzung für die Element-Ops.) */
-function uniqueIds(list: Entity[]): boolean {
-  const seen = new Set<string>();
-  for (const e of list) {
-    if (seen.has(e.id)) return false;
-    seen.add(e.id);
-  }
-  return true;
-}
-
-/**
- * Berechnet die Ops, die `prev` in `next` überführen. `applyOps(prev, diffToOps(prev, next))`
- * ist inhaltlich gleich `next` (Test), Elemente aus `next` behalten ihre Identität.
- */
-export function diffToOps(prev: Project, next: Project): CoreOp[] {
-  if (prev === next) return [];
-  const ops: CoreOp[] = [];
-  const a = prev as unknown as Record<string, unknown>;
-  const b = next as unknown as Record<string, unknown>;
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-  for (const key of keys) {
-    const va = a[key];
-    const vb = b[key];
-    if (va === vb) continue;
-    if (isIdList(va) && isIdList(vb) && uniqueIds(va) && uniqueIds(vb)) {
-      diffList(key, va, vb, ops);
-    } else {
-      ops.push(vb === undefined ? { kind: "setField", key } : { kind: "setField", key, value: vb });
-    }
-  }
-  return ops;
-}
-
-function diffList(collection: string, va: Entity[], vb: Entity[], ops: CoreOp[]): void {
-  const inB = new Set(vb.map((e) => e.id));
-  const mapA = new Map(va.map((e) => [e.id, e]));
-  const removed = va.filter((e) => !inB.has(e.id)).map((e) => e.id);
-  if (removed.length) ops.push({ kind: "remove", collection, ids: removed });
-  // Geänderte Elemente (gleiche id, andere Referenz).
-  for (const e of vb) {
-    const old = mapA.get(e.id);
-    if (old !== undefined && old !== e) ops.push({ kind: "replace", collection, entity: e });
-  }
-  // Reihenfolge der behaltenen Elemente in vb.
-  const kept = va.filter((e) => inB.has(e.id)).map((e) => e.id);
-  const keptSet = new Set(kept);
-  const keptInB = vb.map((e) => e.id).filter((id) => keptSet.has(id));
-  if (keptInB.some((id, idx) => id !== kept[idx])) ops.push({ kind: "reorder", collection, ids: keptInB });
-  // Neue Elemente: zusammenhängende Läufe, von links nach rechts direkt an ihrer Zielposition
-  // in `vb` eingefügt (frühere Läufe stehen dann schon, die Position stimmt).
-  let i = 0;
-  while (i < vb.length) {
-    if (keptSet.has(vb[i].id)) {
-      i++;
-      continue;
-    }
-    const at = i;
-    const run: Entity[] = [];
-    while (i < vb.length && !keptSet.has(vb[i].id)) run.push(vb[i++]);
-    ops.push({ kind: "add", collection, items: run, at });
-  }
-}
 
 /**
  * Wendet eine Op-Folge rein an (kein Zugriff auf Store/UI). Unberührte Listen und Elemente behalten

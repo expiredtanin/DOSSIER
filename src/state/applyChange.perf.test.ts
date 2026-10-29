@@ -22,7 +22,7 @@ function bigProject(n: number): Project {
 
 describe("Messung Store-Aktionen, 3000 Wände", () => {
   it("Griff ziehen, Auswahl verschieben, Eigenschaft tippen", () => {
-    st().setProject(bigProject(3000));
+    st().loadProject(bigProject(3000));
     st().clearHistory();
     const depth0 = st().undoDepth;
 

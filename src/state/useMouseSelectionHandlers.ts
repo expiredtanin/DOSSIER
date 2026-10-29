@@ -7,7 +7,7 @@
 
 import { opsMutation, patchItem, removeItems } from "../core";
 import type { Project, Vec2 } from "../model/types";
-import type { CategoryDisplayResolver } from "../core";
+import type { CategoryDisplayResolver, ProjectMutation } from "../core";
 import type { DisplayResolver } from "../viewport/Viewport3D";
 import type { PlanSelection, MarqueeSelection } from "../views/plan/PlanView";
 import type { Pick3dHit } from "../viewport/Wasm3DViewport";
@@ -42,7 +42,7 @@ export function useMouseSelectionHandlers(opts: {
   /** `coalesceKey`: s. `projectSlice.ts` `setProject` — von `commitTextEdit`
    *  genutzt, damit EIN Tipp-Vorgang EINEN Undo-Schritt erzeugt (wie beim
    *  Griff-Ziehen), statt bei jedem Tastendruck einen neuen zu pushen. */
-  setProject: (updater: (p: Project) => Project, coalesceKey?: string) => void;
+  setProject: (updater: ProjectMutation, coalesceKey?: string) => void;
   activeLevelId: string;
   visibleCodes: Set<string>;
   categoryDisplay: CategoryDisplayResolver & DisplayResolver;

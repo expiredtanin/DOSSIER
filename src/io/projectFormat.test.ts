@@ -71,3 +71,49 @@ describe("Migration 1 → 2: Legacy-Türen werden Öffnungen", () => {
     expect(r.project.openings!.some((o) => o.id === `${existing}-t` && o.kind === "door")).toBe(true);
   });
 });
+
+describe("Laden und Speichern im Kern ([K4] S4)", () => {
+  // Früher: TS `JSON.parse` → Prüfung/Migration → `JSON.stringify({ formatVersion, ...rest }, null, 2)`.
+  // Heute liest, migriert und schreibt der Kern; die Datei muss Zeichen für Zeichen gleich bleiben
+  // (Zahlen wie JS `String(n)`, Index-Schlüssel wie ein JS-Objekt vorn).
+  const reference = (p: object): string => JSON.stringify({ formatVersion: PROJECT_FORMAT_VERSION, ...p }, null, 2);
+  const TRICKY = [0.000005, 1.5e-7, 1e21, 2 ** 60, 2 ** 53 + 2, -0, 0.1 + 0.2, 1e16, 2.7755575615628914e-17, -1e-6];
+
+  it("Speichern nach Öffnen = JSON.stringify der Leseansicht (Beispiel, knifflige Zahlen, Index-Schlüssel)", () => {
+    const odd = {
+      ...structuredClone(sampleProject),
+      walls: sampleProject.walls.map((w, i) => ({ ...w, height: TRICKY[i % TRICKY.length] })),
+      zukunft: { b: 1, "21": "x\u0001\n😀", "10": [1.0, 2.5e-7], "007": null, "4294967295": 0 },
+    };
+    const texts = [JSON.stringify(sampleProject), JSON.stringify(odd), JSON.stringify(odd, null, 2).replace(/: 2,/g, ": 2.0,")];
+    for (const text of texts) {
+      const r = parseProjectFile(text);
+      expect(r.ok).toBe(true);
+      if (!r.ok) continue;
+      const saved = serializeProject(r.project);
+      expect(saved).toBe(reference(r.project));
+      const { formatVersion: _v, ...raw } = JSON.parse(text) as Record<string, unknown>;
+      expect(saved).toBe(reference(raw));
+    }
+  });
+
+  it("Index-Schlüssel stehen vorn, aufsteigend (wie JSON.parse in JS)", () => {
+    const text = `{"walls":[],"layers":[],"drawingLevels":[],"m":{"x":1,"10":2,"2":3,"01":4}}`;
+    const r = parseProjectFile(text);
+    expect(r.ok && Object.keys((r.project as unknown as { m: object }).m)).toEqual(["2", "10", "x", "01"]);
+    expect(r.ok && serializeProject(r.project)).toBe(r.ok && reference(r.project));
+  });
+
+  it("migrierte Datei wird im neuen Format gespeichert", () => {
+    const old = { ...structuredClone(sampleProject), formatVersion: 1, doors: [{ id: "TX", hostWallId: "W1", position: 0.5, width: 0.9, height: 2.1 }] };
+    const r = parseProjectFile(JSON.stringify(old));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const saved = serializeProject(r.project);
+    expect(saved).toBe(reference(r.project));
+    expect(JSON.parse(saved).doors).toBeUndefined();
+    const again = parseProjectFile(saved);
+    expect(again.ok && again.migratedFrom).toBeNull();
+    expect(again.ok && serializeProject(again.project)).toBe(saved);
+  });
+});

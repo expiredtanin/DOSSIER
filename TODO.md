@@ -351,6 +351,30 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Rückfall für Befehle ohne mitgeführte Ops in `App.tsx` (gibt es keine mehr; der Typ `commit: (p) => Project` erlaubt es noch).
     Offen: Ebenen-/Gruppen-Logik (`groupActions.ts`) nach Rust; Undo-Verlauf als Liste in der UI [84]; `diffToOps` entfällt erst, wenn auch
     Laden/Import/CLI Ops liefern.
+    **Vierte Etappe (29.10.): `diffToOps` gelöscht.** Laden, Import und CLI liefern Ops bzw. laden über den Kern:
+    Öffnen/Vorlage/Wiederherstellen = Store `openProjectFile(text)` (Kern liest, migriert, lädt direkt ins Dokument,
+    Verlauf leer, s. S4), Neu/Musterhaus = `loadProject(p)` (eine explizite Kern-Funktion „Projekt laden“,
+    `doc_load_json`, keine Differenz). DXF/PDF-Import (`runImport`: Ebene, Kategorien, Linienstile, Zeichnungen,
+    Kontext) als Ops in EINER Gruppe = ein Undo-Schritt (vorher bis zu fünf); Bilder einfügen (`imageDrawing2d` +
+    `addItems`); IFC-Bauteile (`ifcElementsToProject` liefert `ops` + `project`, App `applyChange`); CLI-Importe
+    (`fieldOps`/`addItems`/`contextOps`). Das Ressourcen-Fenster ruft nur die echten Handler (schon Ops), sein Projekt
+    ist eine Leseansicht. `setProject` nimmt nur noch `opsMutation` (Typ `ProjectMutation`), `CommandResult.commit`/
+    `ToolResult.commit`/`EngineHost.commit` ebenso; Rückfall `addNewElementsToActiveGroup` und `isOpsMutation`
+    gelöscht. Das gemeinsame Abfrage-Dokument (`documentFor` für fremde Projekte, CLI) folgt feldweise
+    (`fieldOps` je geänderter Referenz, kein Verlauf); Änderungen vorbei an den Ops laden das Store-Dokument neu
+    (`load`, Verlauf leer). Tests erzeugen Zufallsänderungen über `core/projectDiff.testutil.ts` (nur Tests).
+    e2e: Öffnen leert den Verlauf, DXF-Import = ein Undo-Schritt. Nicht in der Tauri-App geprüft (natives Öffnen mit
+    Sperre, Ressourcen-Fenster).
+    **Gruppen-Logik im Kern (29.10.):** `groups.rs` (transitive Mitgliedschaft mit Zyklenschutz, sichtbare Gruppe
+    im Isolations-Kontext, Auswahl um Gruppen erweitern; Abfragen `groupMembership`/`containingGroup`/
+    `expandToGroups`), Fassade `model/groups.ts` (letzte Mitgliedschaft gemerkt: Rahmen-Filter fragt je Element).
+    TS-Rechnung gelöscht (`transitiveMembership`, `topLevelGroups`, `containingGroupId`, `isInsideActiveGroup`,
+    `expandToGroups`); in `state/groupActions.ts` bleiben die Op-Bauer (`groupSelection`, `ungroup`,
+    `activeGroupOps`), das Dimmen der Plan-Primitive und `mergeMembership` für Auswahl-Mengen. Gleichheit (einmalig):
+    400 Zufallsprojekte × 10 Abfragen (Zyklen, doppelte Gruppen-ids, fehlende Gruppen, Pfade mit unbekannter
+    Gruppe), 16000 Vergleiche gleich der alten TS-Fassung. Ebenen-Logik (Kategorien-Baum, `recomputeFloorElevations`)
+    noch TS.
+    Offen: Ebenen-Logik nach Rust; Undo-Verlauf als Liste in der UI [84].
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur
@@ -367,6 +391,24 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Zufallsprojekte TS → JSON → Rust → JSON (Abfrage `modelJson`: typisiertes Modell OHNE `Extra`-Felder) gleich.
     `KNOWN_KEYS` per Test aus `model::Project` abgeglichen. `scripts/gen-rust-model.py` gelöscht. Offen: Varianten-Doku
     getaggter Enums (z. B. `Drawing2DGeom`-Varianten) lässt ts-rs weg (steht in Rust); Datei-I/O-Rest.
+    **Datei-I/O (29.10.):** Öffnen lädt die Datei im Kern direkt ins Dokument (`Document::load_file`, `doc_load_file`:
+    Parse, Migration, Prüfung; TS bekommt die Leseansicht als JSON des Dokuments) — kein TS-Parse und keine
+    Differenz mehr; Speichern, Autosave (jetzt Datei-Text statt Objekt in IndexedDB; alte Objekt-Kopien werden beim
+    Lesen zu Text) und Wiederherstellen (wie Öffnen, mit Migration) gehen denselben Weg. CLI/MCP laden ins
+    gemeinsame Abfrage-Dokument (`sharedDocument().loadFile`), Abfragen danach ohne erneute Übergabe. Speichern ist
+    jetzt Zeichen für Zeichen `JSON.stringify(…, null, 2)`: vorher schrieb der Kern Zahlen wie `5e-6`/`1.2e+20`
+    (JS: `0.000005`/`120000000000000000000`) — `JsFormatter` mit JS-Zahlen, Index-Schlüssel („10“, „21“) beim
+    Laden vorn wie in einem JS-Objekt, ganze Zahlen über 2⁵³ wie JS gerundet; Meldungen mit JS-Zahlen.
+    Gleichheit (einmalig, gegen die frühere TS-Fassung `e02c01d^:src/io/projectFormat.ts` + `JSON.stringify`):
+    1804 Dateien (Beispiel, leer, Projekt mit allen Element-Arten, bigSample(3), 80 Zufallsprojekte, 80 mit
+    kniffligen Zahlen/Index-Schlüsseln/Sonderzeichen; je 11 Fassungen: kompakt, eingerückt, Version 0, Version 1
+    mit Türen, kaputte Listen/unbekannte Felder/ohne id, zu neue/ungültige Version, ohne `walls`, „fremder
+    Schreiber“ mit `1.0`/`1e0`), 977 ladbar: Ergebnis, Hinweise, Migration, Fehlermeldungen (ausser JSON-Syntax-
+    Text) und gespeicherte Datei zeichengleich. Bleibende Tests: `projectFormat.test.ts`, `setProjectOps.test.ts`,
+    Rust `project_format`/`document`. CLI: `convert` obp → obp bytegleich, DXF/IFC-Import (auch `--elements`) gleich
+    wie vorher bis auf erzeugte ids. Messung (vitest/Node, `--no-opt`-WASM, Container unter Last, bigSample(20),
+    2,6 MB, 3600 Wände): Öffnen 106–115 ms (alter Weg ohne den Kern-Parse ≈ 210–260 ms: JSON zurück, Differenz,
+    Commit), Speichern im Kern 32 ms (vorher Kopie des Baums ≈ 80 ms; `JSON.stringify` in JS 17–19 ms).
   Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
   React-Store (TS-Spiegel bleibt bis S3), Befehls-Zustandsautomaten sind viel Code (`src/commands/cmds/*`).
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.
@@ -457,6 +499,7 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
   Panels/Griffe ändern das Projekt direkt. 28.10.: die häufigsten Aktionen (Griffe, Objekt-Info, Auswahl-Transformationen,
   Löschen, Zeichenbefehle) liefern ihre Änderung als JSON-Ops (`core/opsBuild.ts`, Store `applyChange`) — Grundlage für
   Makros/MCP; Rest (nur Laden/Import/CLI) unter [K4] S3. · L
+  29.10.: auch Laden, Import und CLI liefern Ops bzw. laden über den Kern; `diffToOps` gelöscht ([K4] S3).
 - ◐ **[7] Zentrale Validierung nach jedem Befehl.** 28.10.: jede Projektänderung wird im Kern geprüft (`ops.rs`, NaN/neue doppelte
   ids → Rücknahme mit Meldung); weitere Regeln (Bezüge, Geometrie) offen. · M
 - ◐ **[8] Undo über Befehle.** 28.10.: Verlauf im Rust-Kern als inverse Ops (coalesceKey, Gruppen, Speichergrenze), keine
@@ -467,6 +510,7 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
   Snapshots mehr ([K4] S3). 28.10.: Griffe, Objekt-Info, Auswahl-Transformationen, Löschen und Zeichenbefehle erzeugen Ops
   direkt (`applyChange`/`opsMutation`); Gruppen mit Schlüssel: ein Griff-Zug mit mitgeführten Ecken = ein Schritt. Offen:
   Rest (nur Laden/Import/CLI) unter [K4] S3. · M
+  29.10.: auch Laden/Import/CLI ohne Projekt-Differenz (`diffToOps` gelöscht); Öffnen/Neu leeren den Verlauf im Kern, ein Import = ein Schritt ([K4] S3/S4).
 - ◐ **[9] MCP-Brücke.** Headless `dossier-cli … mcp`; Brücke zum offenen Fenster fehlt. · M
 
 ### Daten

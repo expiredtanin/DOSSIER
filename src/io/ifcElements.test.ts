@@ -6,7 +6,8 @@ import "../engine/fileioWasm.setup";
 import { describe, expect, it } from "vitest";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { applyOps, diffToOps, validateProject } from "../core/ops";
+import { applyOps, validateProject } from "../core/ops";
+import { projectDiffOps } from "../core/projectDiff.testutil";
 import { exportIfcSpf } from "../export/exportIfc";
 import { emptyProject, sampleProject } from "../model/sampleProject";
 import type { Column, Opening, Project, Vec2, Wall } from "../model/types";
@@ -143,7 +144,7 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
 
   it("über Ops angewandt und gespeichert/geladen bleibt alles gleich", async () => {
     const { project: next } = await importInto(emptyProject, sampleProject);
-    const applied = applyOps(emptyProject, diffToOps(emptyProject, next));
+    const applied = applyOps(emptyProject, projectDiffOps(emptyProject, next));
     expect(applied.walls).toEqual(next.walls);
     expect(applied.openings).toEqual(next.openings);
     const back = parseProjectFile(serializeProject(applied));

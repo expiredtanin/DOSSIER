@@ -94,6 +94,27 @@ impl Document {
         }
     }
 
+    /// Projekt laden ([K4] S4: Öffnen, Neu, Vorlage, Wiederherstellen): ersetzt den ganzen Inhalt und
+    /// leert den Verlauf (Rückgängig führt nicht ins vorherige Projekt).
+    pub fn load(&mut self, root: Map<String, Value>) {
+        self.root = root;
+        self.typed = None;
+        self.dirty.clear();
+        self.history.clear();
+    }
+
+    /// Projektdatei (Text) einlesen, migrieren, prüfen (`project_format`) und laden wie [`Document::load`].
+    /// Ergebnis: Hinweise und Ausgangsversion einer Migration; bei Fehler bleibt das Dokument unverändert.
+    pub fn load_file(&mut self, text: &str, now_ms: f64) -> Result<(Vec<String>, Option<u64>), String> {
+        match crate::project_format::parse_project_file(text, now_ms) {
+            crate::project_format::Parsed::Ok { project, warnings, migrated_from } => {
+                self.load(project);
+                Ok((warnings, migrated_from))
+            }
+            crate::project_format::Parsed::Err(e) => Err(e),
+        }
+    }
+
     /// Datei-Text des Projekts (`serializeProject`): Formatversion vorn, Einrückung 2.
     pub fn serialize(&self) -> String {
         crate::project_format::serialize_project(&self.root)
@@ -443,6 +464,29 @@ mod tests {
         assert_eq!(d.project().unwrap().name, "");
         d.apply(&ops(json!([{"kind":"setField","key":"name","value":"X"}]))).unwrap();
         assert_eq!(d.project().unwrap().name, "X");
+    }
+
+    #[test]
+    fn laden_ersetzt_inhalt_und_leert_verlauf() {
+        let mut d = doc();
+        d.commit(ops(json!([{"kind":"setField","key":"name","value":"M"}])), None, 0.0, false).unwrap();
+        assert_eq!(d.history().undo_depth(), 1);
+        let n = d.field("walls").unwrap().as_array().unwrap().len();
+        assert_eq!(n, 2);
+        // Kaputte Datei: Fehler, Dokument und Verlauf unverändert.
+        assert!(d.load_file(r#"{"walls":[]}"#, 0.0).is_err());
+        assert_eq!(d.history().undo_depth(), 1);
+        // Alte Datei (Version 1 mit Türen): migriert geladen, Verlauf leer, typisierte Sicht neu.
+        let (warnings, from) = d
+            .load_file(r#"{"formatVersion":1,"id":"q","name":"Q","walls":[],"layers":[],"drawingLevels":[],"doors":[{"id":"D"}]}"#, 0.0)
+            .unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(from, Some(1));
+        assert_eq!(d.history().undo_depth(), 0);
+        assert_eq!(d.project().unwrap().walls.len(), 0);
+        assert_eq!(d.field("openings").unwrap()[0]["kind"], "door");
+        assert!(d.undo().is_none());
+        assert!(d.serialize().starts_with("{\n  \"formatVersion\": 2,\n  \"id\": \"q\""));
     }
 
     #[test]

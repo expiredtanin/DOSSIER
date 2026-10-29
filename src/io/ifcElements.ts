@@ -5,10 +5,14 @@
 // konnte, kommt wie beim Mesh-Import als Kontext-Mesh (`ifcImport.ts`).
 //
 // Keine Geometrie-Rechnung hier: TS ordnet nur zu (Geschoss nach Höhe, Typ nach Schichten) und setzt
-// die Objekte zusammen. Das Projekt wird nicht verändert — der Aufrufer übernimmt das Ergebnis über
-// `setProject` (App) bzw. `diffToOps`/`applyOps` (CLI), also über Ops.
+// die Objekte zusammen. Das Projekt wird nicht verändert — das Ergebnis sind Ops ([K4] S3), die der
+// Aufrufer übernimmt (App: Store `applyChange`, ein Undo-Schritt; CLI: `applyOps`).
 
 import { ensureContextCategories } from "../model/contextCategories";
+import { applyOps } from "../core/ops";
+import type { CoreOp } from "../core/ops";
+import { addItems, fieldOps } from "../core/opsBuild";
+import type { EntityOf } from "../core/opsBuild";
 import type {
   Ceiling,
   CeilingType,
@@ -287,8 +291,8 @@ function flatCategories(list: LayerCategory[], out: LayerCategory[] = []): Layer
 }
 
 /**
- * Setzt die erkannten Bauteile und die übrigen Kontext-Meshes ins Projekt (neues Objekt, das alte
- * bleibt unverändert). Geschosse werden nach Höhe wiederverwendet (±5 mm) oder angelegt, Wand- und
+ * Setzt die erkannten Bauteile und die übrigen Kontext-Meshes ins Projekt: `ops` (für den Store),
+ * `project` = `applyOps(project, ops)` (neues Objekt, das alte bleibt unverändert). Geschosse werden nach Höhe wiederverwendet (±5 mm) oder angelegt, Wand- und
  * Deckentypen nach Schichten (Material + Dicke) wiederverwendet oder angelegt, Materialien nach Namen.
  */
 export function ifcElementsToProject(
@@ -296,7 +300,7 @@ export function ifcElementsToProject(
   products: IfcProduct[],
   elements: IfcElementsData,
   opts: IfcElementsOptions,
-): { project: Project; summary: IfcElementsSummary } {
+): { ops: CoreOp[]; project: Project; summary: IfcElementsSummary } {
   const stamp = Date.now().toString(36);
   const newId = (kind: string) => `ifc-${kind}-${stamp}-${counter++}`;
   const summary: IfcElementsSummary = {
@@ -559,25 +563,27 @@ export function ifcElementsToProject(
     withClass(elements.walls) + withClass(elements.openings.filter((o) => o.kind !== "hole")) + withClass(elements.slabs) + withClass(elements.columns) + withClass(elements.spaces) +
     products.filter((p) => p.classifications?.length).length;
 
-  const next: Project = {
-    ...project,
-    drawingLevels: levels,
-    components,
-    wallTypes,
-    ...(ceilingTypes.length || project.ceilingTypes ? { ceilingTypes } : {}),
-    walls: [...project.walls, ...walls],
-    openings: [...(project.openings ?? []), ...openings],
-    ceilings: [...(project.ceilings ?? []), ...ceilings],
-    columns: [...(project.columns ?? []), ...columns],
-    rooms: [...(project.rooms ?? []), ...rooms],
+  // Fehlende Listen werden (wie früher beim Ersetzen des Projekts) leer angelegt.
+  const list = <K extends "openings" | "ceilings" | "columns" | "rooms">(key: K, items: EntityOf<K>[]): CoreOp[] =>
+    project[key] ? addItems(key, items) : fieldOps(project, key, items as Project[K]);
+  const ops: CoreOp[] = [
+    ...fieldOps(project, "drawingLevels", levels),
+    ...fieldOps(project, "components", components),
+    ...fieldOps(project, "wallTypes", wallTypes),
+    ...(ceilingTypes.length || project.ceilingTypes ? fieldOps(project, "ceilingTypes", ceilingTypes) : []),
+    ...addItems("walls", walls),
+    ...list("openings", openings),
+    ...list("ceilings", ceilings),
+    ...list("columns", columns),
+    ...list("rooms", rooms),
     ...(meshes.length
-      ? {
-          context: [...(project.context ?? []), ...meshes],
-          layers: ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : []))),
-        }
-      : {}),
-  };
-  return { project: next, summary };
+      ? [
+          ...(project.context ? addItems("context", meshes) : fieldOps(project, "context", meshes)),
+          ...fieldOps(project, "layers", ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : [])))),
+        ]
+      : []),
+  ];
+  return { ops, project: applyOps(project, ops), summary };
 }
 
 /** Meldung zum Bauteil-Import; `tr` übersetzt (Kern kennt kein i18n). */
