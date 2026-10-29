@@ -13,8 +13,7 @@
 // 2D-Geometrie (`plan/drawings.rs`), Schattenstudie und Baurecht, Abzugskörper, Mono und
 // Strichstärken-Massstab samt Ausmass (`plan/extras.rs`). `generatePlan` reicht nur noch
 // Sichtbarkeit (UI-Zustand) und Optionen weiter und setzt den Plan aus den Puffern zusammen.
-// Das `Primitive`-Vokabular und die Attribut-Auflösung für die übrigen TS-Pfade
-// leben in `generatePlan/shared.ts`.
+// Das `Primitive`-Vokabular lebt in `generatePlan/shared.ts`.
 
 import type {
   ContextImage,
@@ -28,13 +27,7 @@ import type {
 import { documentFor } from "../core/document";
 import { decodePlanBuf, type DecodedPlanBuf } from "./planBuf";
 import {
-  HATCH_INK,
-  HATCH_PAPER,
   SHOW_ALL,
-  resolveBackground,
-  resolveForeground,
-  resolveHatch,
-  resolveHatchId,
   type CategoryDisplayResolver,
   type DetailLevel,
   type HatchRender,
@@ -47,7 +40,6 @@ import { layersStyleSig } from "./generatePlan/layerSig";
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (Export-Pipeline,
 // PlanView, toSection.ts, toWalls3d.ts, toRenderScene.ts, …) importieren
 // weiterhin ausschliesslich von hier, unverändert zur Zeit vor dem Domänen-Split.
-export { HATCH_INK, HATCH_PAPER, resolveBackground, resolveForeground, resolveHatch, resolveHatchId };
 export type { CategoryDisplayResolver, DetailLevel, HatchRender, Primitive };
 
 /** Ein georeferenziertes Hintergrund-Rasterbild (Luftbild) im Grundriss —

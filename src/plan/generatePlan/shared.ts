@@ -1,24 +1,15 @@
 // Gemeinsame Grundlage des Grundriss-Generators: das `Primitive`-Vokabular
 // (das EINZIGE Austauschformat zwischen `generatePlan()`, Schnitt/Ansicht
 // und den Domänen — unter `generatePlan/` in TS, die meisten im Rust-Kern mit
-// derselben JSON-Form, `src-tauri/core/src/plan/prim.rs`), die By-Layer/By-Object-
-// Attribut-Auflösung (`resolve*`) sowie die Papier-mm-/Tinten-Konstanten, die
-// über mehrere Domänen hinweg identisch gelten müssen (SIA-Poché, Haarlinien).
+// derselben JSON-Form, `src-tauri/core/src/plan/prim.rs`) sowie die Papier-mm-/Tinten-
+// Konstanten (SIA-Poché, Haarlinien). Die By-Layer/By-Object-Attribut-Auflösung (`resolve*`)
+// rechnet der Kern (`src-tauri/core/src/plan/style.rs`).
 //
 // Jede Datei unter `generatePlan/` importiert von hier, NIE von `../generatePlan`
 // selbst — das hielte die Orchestrator-Datei (`generatePlan.ts`) andernfalls in
 // einem Zirkelimport mit jeder einzelnen Domäne.
 
-import type {
-  AttributeSource,
-  Component,
-  HatchPattern,
-  HatchStyle,
-  LayerCategory,
-  Project,
-  Vec2,
-} from "../../model/types";
-import { getHatch, getLineStyle } from "../../model/types";
+import type { HatchPattern, HatchStyle, Vec2 } from "../../model/types";
 import type { Marks, RichTextDoc } from "../../text/richText";
 import type { RoomStampLine } from "../../model/roomStamp";
 
@@ -419,170 +410,7 @@ export type Primitive =
       opacity?: number;
     };
 
-/**
- * Löst eine HatchStyle-Ressource (per id) zu einer darstellungsfertigen
- * {@link HatchRender} auf. Der Linienstil der Musterlinien wird, falls gesetzt,
- * aus dem Line Manager nachgeschlagen; sonst gilt ein dünner Default.
- *
- * VORDERGRUND (Muster-/Schraffurlinienfarbe bzw. Vollfüllung): der über
- * {@link resolveForeground} aufgelöste Vordergrund gewinnt, wenn gesetzt (Nach
- * Ebene/Nach Bauteil/eigener Wert); OHNE aufgelösten Wert bleibt es bei der
- * neutralen Tinte {@link HATCH_INK} (bisheriges Verhalten — 2026-07-04 war die
- * Vordergrund-Kette hier noch fest auf HATCH_INK gezwungen, unabhängig vom
- * Ergebnis; auf Nutzer-Wunsch wieder aufgehoben, da „Vordergrund" im Attribut-
- * Panel sonst wirkungslos bliebe — betrifft nur Elemente mit tatsächlich
- * gesetztem Vordergrund, unverändertes Verhalten für alle anderen).
- */
-export function resolveHatch(
-  project: Project,
-  hatchId: string,
-  wallAngleDeg?: number,
-  foreground?: string,
-  /**
-   * Platzierung am OBJEKT (s. `Drawing2D.hatchAngleDeg`/`hatchScale`/
-   * `hatchOrigin`): Winkel ersetzt, Massstab multipliziert, Anker verschiebt
-   * das Raster. Ohne Angabe bleibt alles bei der Ressource.
-   */
-  placement?: { angleDeg?: number; scale?: number; origin?: Vec2 },
-): HatchRender {
-  const h = getHatch(project, hatchId);
-  const ls = h.lineStyleId ? getLineStyle(project, h.lineStyleId) : null;
-  // Wandbezogener Winkel: `HatchRender.angle` wird von allen Renderern in der
-  // SVG-Konvention (im Uhrzeigersinn, Bildschirm-Y nach unten) verstanden — der
-  // Modell-Renderer negiert ihn in `toModelAngleRad`. Die Wandachse `wallAngleDeg`
-  // ist dagegen ein MODELL-Winkel (atan2 der Richtung, gegen den Uhrzeigersinn,
-  // Y nach oben). Wegen der Y-Spiegelung entspricht die Wandrichtung am Bildschirm
-  // dem Winkel −wallAngleDeg; das Muster folgt der Wand also, indem der
-  // Wandwinkel SUBTRAHIERT wird. Ohne Wandkontext (Decke) bleibt `angle` absolut.
-  // Objekt-Winkel ERSETZT den der Ressource (danach greift die Wandbindung
-  // weiterhin, damit „relativ zur Wand" auch mit eigenem Winkel funktioniert).
-  const baseAngle = placement?.angleDeg ?? h.angle;
-  const angle =
-    h.relativeToWall && wallAngleDeg != null ? baseAngle - wallAngleDeg : baseAngle;
-  return {
-    pattern: h.pattern,
-    // Objekt-Massstab MULTIPLIZIERT (die Ressource bleibt die Grundteilung).
-    scale: h.scale * (placement?.scale ?? 1),
-    angle,
-    origin: placement?.origin,
-    // Aufgelöster Vordergrund gewinnt (s. JSDoc oben), sonst neutrale Tinte.
-    color: foreground ?? HATCH_INK,
-    lineWeight: ls?.weight ?? 0.13,
-    dash: ls?.dash ?? null,
-    kind: h.kind,
-    lines: h.lines,
-    image: h.image,
-    gradient: h.gradient,
-    // Random-Streu-Parameter unverändert durchreichen (Erzeugung in glPlanHatch).
-    seed: h.seed,
-    density: h.density,
-    lengthMin: h.lengthMin,
-    lengthMax: h.lengthMax,
-    motif: h.motif,
-  };
-}
-
-/**
- * Kollabiert die Vordergrund-Farbkette (Muster-/Schraffurlinienfarbe) eines
- * Bauteils zu einem einzelnen Wert für {@link resolveHatch}. AUFLÖSUNGSREIHENFOLGE
- * (By-Layer/By-Object, siehe `docs`/Attribut-Panel):
- *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
- *   (`Component.foreground`) ?? `undefined`.
- * `source` fehlt/`"object"` ⇒ „Nach Bauteil" — bei WAND/DECKE bewusst der
- * DEFAULT (die Bauteil-Kette liefert die neutrale SIA-Poché, s.
- * {@link resolveBackground}). Ein Drawing2D hat KEIN eigenes Bauteil und
- * bietet „Nach Bauteil" im Attribut-Panel gar nicht erst an — dort wird ein
- * fehlendes Source-Feld vom AUFRUFER (`selectionInfo.ts`) explizit auf
- * `"layer"` gemappt, bevor er hier ankommt (dieser Resolver selbst bleibt
- * Bauteil-Default, unabhängig von der Elementart).
- */
-export function resolveForeground(
-  comp: Component,
-  override?: string,
-  category?: LayerCategory,
-  source?: AttributeSource,
-): string | undefined {
-  if (override != null) return override;
-  if (source === "layer") return category?.color ?? comp.foreground;
-  return comp.foreground;
-}
-
-/**
- * Kollabiert die Hintergrund-/Füllfarbkette (Poché-Override) eines Bauteils zu
- * einem einzelnen Wert, exakt analog zu {@link resolveForeground}:
- *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
- *   (`Component.background`) ?? `undefined`.
- * `undefined` als Endergebnis heißt „kein Override gesetzt" — Aufrufer fallen
- * dann auf ihren eigenen Default zurück (bei Wand/Decke die neutrale SIA-
- * Poché-Farbe HATCH_INK/HATCH_PAPER, NICHT `Component.color` — die reale
- * Bauteilfarbe soll die Schnitt-Konvention nicht überschreiben, nur ein
- * bewusster Override). Genau DIESE neutrale Poché ist bei Wand/Decke der
- * gewünschte Default („weisser Grund, schwarzer Vordergrund") — deshalb
- * bleibt „Nach Bauteil" dort der Default, nicht „Nach Ebene".
- */
-export function resolveBackground(
-  comp: Component,
-  override?: string,
-  category?: LayerCategory,
-  source?: AttributeSource,
-): string | undefined {
-  if (override != null) return override;
-  if (source === "layer") return category?.color ?? comp.background;
-  return comp.background;
-}
-
-/**
- * Kollabiert die Schraffur-Referenz (Hatch Manager) eines Elements zu einer
- * einzelnen `hatchId` für {@link resolveHatch} — By-Layer/By-Object, analog zu
- * {@link resolveForeground}:
- *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.hatch`) ??
- *   `fallback` (Bauteil-Schraffur, z. B. `Component.hatchId`/`viewHatchId`, oder
- *   `undefined` bei Drawing2D ohne Bauteil-Bezug).
- * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (DEFAULT bei Wand/Decke, s.
- * {@link resolveForeground}).
- * Ergebnis kann `undefined` sein — der Aufrufer fällt dann auf `NO_HATCH` zurück.
- */
-export function resolveHatchId(
-  override: string | undefined,
-  source: AttributeSource | undefined,
-  category: LayerCategory | undefined,
-  fallback?: string,
-): string | undefined {
-  if (override != null) return override;
-  if (source === "layer") return category?.hatch ?? fallback;
-  return fallback;
-}
-
-/**
- * Kollabiert die Strichstärke-Kette (mm Papier) eines Elements, By-Layer/By-
- * Object, analog zu {@link resolveHatchId}:
- *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.lw`) ??
- *   `fallback` (bisherige Bauteil-/LineStyle-/Kategorie-Default-Kette des
- *   Aufrufers — heutiges Verhalten).
- * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (DEFAULT bei Wand/Decke, s.
- * {@link resolveForeground}).
- */
-export function resolveStrokeWeight(
-  override: number | undefined,
-  source: AttributeSource | undefined,
-  category: LayerCategory | undefined,
-  fallback: number,
-): number {
-  if (override != null) return override;
-  if (source === "layer") return category?.lw ?? fallback;
-  return fallback;
-}
-
-// ── SIA-Poché-Füllung + monochrome Schraffur-Tinte ──────────────────────────
-// Die 2D-Poché einer (auch mehrschichtigen) Wand trägt NICHT die rohe Bauteil-
-// Albedo (3D-Materialfarbe), sondern einen neutralen Hintergrund, auf dem die
-// Schraffur-Musterlinien liegen: Vollmuster ("solid") = dunkle Tinten-Poché
-// (kein Linienmuster), jedes andere Muster (inkl. "none") = HELLER Hintergrund.
-// Dieselben zwei Werte sind AKTUELL auch die feste Schraffur-Vordergrundfarbe
-// (siehe {@link resolveHatch}) — Schnitt- wie Oberflächen-Schraffur zeigen also
-// einheitlich Tinte auf hellem Papier, unabhängig von Material-/Bauteilfarbe.
-export const HATCH_PAPER = "#f0f0f0";
-export const HATCH_INK = "#0f0f0f";
+// SIA-Poché und Schraffur-Tinte (HATCH_PAPER/HATCH_INK) stehen im Kern (`core/src/plan/style.rs`).
 /** Schraffur-Platzhalter „ohne" (für reine Umriss-/Sammelflächen). */
 export const NO_HATCH: HatchRender = {
   pattern: "none",

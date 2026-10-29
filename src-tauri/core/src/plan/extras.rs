@@ -159,15 +159,15 @@ pub fn site_and_shadow(p: &Project, floor: &str, when_ms: Option<f64>) -> (Vec<(
 const EPS: f64 = 1e-7;
 
 /// Ein Abzugskörper als Prisma (Welt-Höhen).
-struct VoidPrism {
-    pts: Vec<Vec2>,
-    z0: f64,
-    z1: f64,
+pub(crate) struct VoidPrism {
+    pub(crate) pts: Vec<Vec2>,
+    pub(crate) z0: f64,
+    pub(crate) z1: f64,
 }
 
 /// Abzugskörper des Projekts (`voidPrisms`): `operation: "subtract"`, ohne B-Rep, ohne Verjüngung,
 /// gültiges Profil und Höhe.
-fn void_prisms(p: &Project) -> Vec<VoidPrism> {
+pub(crate) fn void_prisms(p: &Project) -> Vec<VoidPrism> {
     let mut out = Vec::new();
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
         let is_void = s.operation.as_deref() == Some("subtract") && s.brep.is_none() && s.taper.unwrap_or(0.0) < 1e-6 && s.points.len() >= 3 && s.height > 0.0;

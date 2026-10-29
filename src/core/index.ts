@@ -118,10 +118,6 @@ export {
 export {
   NO_HATCH,
   type Primitive,
-  resolveBackground,
-  resolveForeground,
-  resolveHatchId,
-  resolveStrokeWeight,
 } from "../plan/generatePlan/shared";
 
 export {

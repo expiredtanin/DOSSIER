@@ -11,7 +11,8 @@ import { sampleProject } from "../model/sampleProject";
 import { selectionHighlightLines, projectToWalls3d, projectToModel3d, pickGeometry, draftWorldLines } from "./toWalls3d";
 import { hexToRgb } from "./toWalls3d/shared";
 import type { ToolDraft } from "../tools/types";
-import { resolveHatch, generatePlan } from "./generatePlan";
+import { generatePlan } from "./generatePlan";
+import { getHatch, getLineStyle } from "../model/types";
 import { roofGeometry, roofBaseElevation } from "../geometry/roof";
 
 const RGB: [number, number, number] = [1, 0.5, 0.1];
@@ -1799,6 +1800,14 @@ describe("sliceTermination: Wand endet an der Decke (Zuschnitt, nicht Priorität
 });
 
 describe("Schnitt-Schraffur-Orientierung: relativeToWall dreht bei Wand, nicht bei Decke (2D-Parität)", () => {
+  // Erwartung wie die 2D-Auflösung (`resolve_hatch` im Kern): relativeToWall zieht den Wandwinkel ab.
+  const resolveHatch = (p: Project, id: string, wallAngleDeg?: number) => {
+    const h = getHatch(p, id);
+    return {
+      angle: h.relativeToWall && wallAngleDeg != null ? h.angle - wallAngleDeg : h.angle,
+      lineWeight: (h.lineStyleId ? getLineStyle(p, h.lineStyleId) : null)?.weight ?? 0.13,
+    };
+  };
   // 2D-Referenz (verbindlich): splitWallLayers ruft resolveHatch(…, 90, …) (Wand
   // steht vertikal, relativeToWall-Muster drehen mit), splitSlabLayers ruft
   // resolveHatch(…, undefined, …) (Decke liegt, absoluter Winkel). Der 3D-Pfad muss
