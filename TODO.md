@@ -60,7 +60,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Quader; 6586 Bänder; IFC-Datei identisch). Öffnungen ~4–7×, Loch-Mesh ~1,6× schneller,
     `projectToModel3d` (1500 Wände) 193 → 126 ms; `isWatertight` allein ~4× langsamer (Übergabe der
     `number[]`, je Mesh < 3 µs), IFC-Export gesamt unverändert.
-- ○ **[K3] Plan, Schnitt, Ansicht in Rust**, Primitive direkt an render2d (ohne TS-Umweg). · L
+- ✅ **[K3] Plan, Schnitt, Ansicht in Rust** (abgeschlossen 29.10.), Primitive direkt an render2d (ohne TS-Umweg). · L
   Reihenfolge (Entscheid 27.10.: Risiko klein halten, Verbraucher zuerst):
   - ✅ **[K3b] Verbraucher auf Binärpuffer.** (Mac-Test 27.10. bestanden: Grundriss läuft, sieht gut aus) Plan-Puffer-Format (TS schreibt vorerst, Rust liest);
     GPU-Kompilierung (`glPlanCompile`/`glPlanHatch`) in Rust, Vertex-Puffer bitgleich zur TS-Ausgabe;
@@ -81,7 +81,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
       über `Math` der JS-Engine (musl-libm wich ab, auch in der Topologie). Leistung (Node, Min. über
       Wiederholungen): Beispiel-EG 1,5 → 0,8 ms, 100k Linien + 3000 Schraffurflächen 3,9 → 1,8 s, nur
       Schraffur ~2×, nur Linien 104 → 81 ms (davon Kodieren in TS 7–29 ms). Mac-Test bestanden.
-  - ◐ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
+  - ✅ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
     2D-Zeichnung, Kontext, Schnittlinien) direkt in den Plan-Puffer; JS-Objekte nur noch für Export/Overlay.
     Vorgehen (28.10.): je Domäne ein Rust-Modul mit flacher Primitivliste, TS nur als dünne Übersetzung
     (Farbe, Graustufen, Pick-ID) — kein Format-v2, bis [K3d] den Puffer direkt liefert.
@@ -187,7 +187,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     456 Fälle / 142 405 Primitive (9 Projekte inkl. 2D-Zeichnungen, Schnitt-/Ansichtslinien + schräg/senkrecht/beide
     Blickrichtungen, Mono/Detail/Massstab). Nicht in der App angesehen (e2e grün).
     (Die automatischen Höhenkoten `levelMarkers.ts` rechnet seit 29.10. der Kern, Abfrage `levelMarkers`.)
-  - ◐ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
+  - ✅ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
     typisierte Modell (Bauteil-Typen, Schraffuren, Linienstile, Kategorien) und einen Plan-Puffer v2 mit Pick-IDs + vollem `Primitive`-Umfang
     (Text, Schraffur-Optionen, Zickzack/Motiv); die Verbraucher von `Primitive[]` (SVG/PDF/DXF, Auswahl, Overlay) lesen dann den Puffer.
     Stand 28.10.: Rust-Grundlage `core/src/plan/{prim,style}.rs` (Primitive-Typ mit TS-gleicher JSON-Form, Auflösung By-Layer/By-Object,
@@ -356,13 +356,17 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Nicht in der Tauri-App angesehen (nativer Text-Pfad `nativeText.ts` unverändert).
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
-- ◐ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
+- ✅ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
+  **Abschluss (29.10.):** Rechnung liegt im Kern; TS hält Oberfläche, Zustandsautomaten der Befehle, Netz-Abrufe,
+  DOM-/jsPDF-Aufbau und dünne Fassaden. Bewusst in TS: `model/color.ts` (Farbmischer der UI), Sicht-Culling/Ansichts-
+  Transformation/GPU-Cache der Plan-Ansicht, Werkzeug-Vorschau aus UI-Zustand. Rest-Pendenzen: STEP-Import (truck),
+  Import-Ops als JSON zurück (42 MB beim 150k-Kataster), Undo-Liste in der UI [84]. Nicht auf dem Mac getestet.
   Ziel (Entscheid 28.10., Maintainer): nur die UI bleibt TS, alles andere Rust. Vorgehen in Stufen, jede verdrahtet und mit
   Gleichheitstest gegen die TS-Fassung, die im selben Schritt verschwindet:
   - ✅ **S1 Dokument im Kern** (28.10.): `document.rs` hält das Projekt als JSON-Baum, `core/document.ts` spiegelt jede
     Änderung von `store.project` (setProject, Laden, Undo/Redo) als Ops (`diffToOps` → `doc_apply`); Selbstheilung durch Neuöffnen.
     Test: 300 Zufallsänderungen, Kern-JSON == TS-Projekt. (Spiegel, TS ist noch Quelle der Änderungen.)
-  - ◐ **S2 Ableitungen lesen das Dokument** (28.10.): typisiertes Rust-Modell `model/` (`generated.rs` aus den TS-Typen per
+  - ✅ **S2 Ableitungen lesen das Dokument** (28.10.): typisiertes Rust-Modell `model/` (`generated.rs` aus den TS-Typen per
     `scripts/gen-rust-model.py`, `manual.rs` für getaggte Unions; Hin-und-zurück-Test gegen das Beispielprojekt mit
     `deny_unknown_fields`), `Document::project()` als gecachte typisierte Sicht, `documentFor(project)` (TS) hält ein gemeinsames
     Dokument per Differenz aktuell. Verbraucher bisher: Kennzahlen (`kennzahlen.rs::compute`), Baurecht-Prüfung/Footprint/Modellhöhe (`site_rules.rs`); Abfragen laufen
@@ -490,7 +494,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (Werkzeug-Vorschau aus dem UI-Zustand); `planPick`, `glPlanHatch`, `glPlanCompile`, `toRenderScene` sind schon Fassaden.
     Offen: STEP-Sammler (`exportStep.ts`) nutzt noch die TS-Helfer `voidPrisms`/`hittingVoids`/`subtractSpec`/`bbox`/
     `wallCorners` (`plan/voids.ts`) — auf die Kern-Spezifikationen umstellen, dann löschen. Nicht in der Tauri-App angesehen.
-  - ◐ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
+  - ✅ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
     **Erste Etappe (28.10.): Ops, Prüfung, Undo/Redo im Kern.** `core/src/ops.rs` (Op, Prüfung bitgleich zur TS-Fassung — gleiche
     Ablehnungen und Meldungen; NaN/±Infinity reisen als Marken `"\u0001NaN"`, weil JSON sie nicht kennt), `document.rs`
@@ -899,7 +903,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     die nur Tests nutzen (`solidVolume`, `withoutHoles`, `straightSkeleton`, `stairCut`, `triangulate`,
     Schraffur-Clipping in `glPlanHatch.ts`, `subtractRings` — prüfen Kern-Bindungen von TS aus), mehrere
     `signed_area`/`bbox`-Varianten in Rust (verschiedene Punkt-Typen, teils mit JS-Semantik `jsnum::min`).
-  - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
+  - ✅ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur
     `serde-compat`) erzeugt über `model/ts_export.rs` (eigener Sammler + Formatierer, Test `ts_types_aktuell`) die Datei
