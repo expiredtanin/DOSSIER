@@ -16,7 +16,7 @@ export type LoadFileResult =
   | { ok: false; error: string };
 
 /** Wurzel-Abfragen des Kerns (`queries.rs::run_root`). */
-export type RootQueryName = "penRebakeOps" | "penDeleteOps" | "penSeedOps";
+export type RootQueryName = "penRebakeOps" | "penDeleteOps" | "penSeedOps" | "folderPdfPages" | "layoutTitleBlock";
 
 /** Abfragen des Kerns (`queries.rs`). */
 export type QueryName =

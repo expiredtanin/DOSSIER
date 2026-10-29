@@ -417,7 +417,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (`insertAfterCode`) ging in TS verloren (die Ebene mit dem Ziel wurde übersprungen), jetzt steht es hinter dem Original.
     Offen: vertikale Ausdehnungen (`model/wall.ts`: `wallVerticalExtent` …, Kern hat `model/helpers.rs` schon — Aufrufer in
     `toSection`/`voids`/`geometry/opening`/Viewport fallen mit dem Plan-Port bzw. brauchen eine Abfrage je Bauteil),
-    Layout-/Ordnerbäume (`layoutModel.ts`), Parametrik-Regeln (`parametricWalls.ts`); Undo-Verlauf als Liste in der UI [84].
+    Parametrik-Regeln (`parametricWalls.ts`); Undo-Verlauf als Liste in der UI [84].
     **Stiftsätze im Kern (29.10.):** `pens.rs` (Standardpalette mit 255 Stiften, Freie-Farbe-Palette, `hsl_to_hex`, Neu-Backen
     der Stift-Farben/-Strichstärken `rebake_ops`, Standardsatz anlegen `seed_standard_ops`, Stift löschen samt Verweisen in
     Bauteilen und im Kategorien-Baum `delete_pen_ops`). Rechnung auf der rohen Projekt-Wurzel (`serde_json`, verlustfrei) und
@@ -430,6 +430,19 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (gewollt): Ebenen werden nur noch geschrieben, wenn sich etwas ändert (vorher immer ein `setField layers`), die Stifte
     des Standardsatzes als ein `setField` statt Listen-Differenz (gleiches Ergebnis), unveränderte Ebenen-Kategorien
     behalten nach dem Neu-Backen nicht mehr ihre Objekt-Identität.
+    **Layout-Blätter und Ordner-Bäume im Kern (29.10.):** `folder_tree.rs` (eine Rechnung für Layouts-, Master- und
+    Ausschnitte-Baum, vorher doppelt in `layoutModel.ts` und `state/viewSnapshotFolders.ts`: Baum aufbauen, Blätter eines
+    Ordners in Baum-Reihenfolge, Nachfahren-Test, Ordner löschen mit Hochziehen), `layout_model.rs` (Blattgrössen ISO 216 mit
+    freier Grösse, Seitenplanung Ordner-PDF, Titelblock mit Master-Vererbung, `js_trim` wie JS-`trim`); zustandslose Bindung
+    `layout_call` (`web/layout_model.rs`) plus Wurzel-Abfragen `folderPdfPages`/`layoutTitleBlock`. Der Kern rechnet auf Indizes
+    der Eingabelisten, TS (`model/folderTree.ts`, `layoutModel.ts`, `viewSnapshotFolders.ts`) setzt die Knoten aus den
+    Original-Objekten zusammen (Identität bleibt). In TS bleiben Fabriken, Viewport-/Annotations-CRUD, `moveLayoutToFolder`,
+    `moveFolderToFolder` (nur das Verschieben, der Zyklentest kommt aus dem Kern), `findMaster`/`findSnapshot`/
+    `resolveViewportScale`/`visibleCodesFromSnapshot` (Einzeiler-Nachschlagen) und die Format-Listen der Dropdowns.
+    Gleichheit (einmalig, Test gelöscht): 6000 Zufallsfälle Baum (doppelte Ordner-ids, Kreise, verwaiste Verweise, leere
+    Eltern) für alle drei Bäume, 6000 Ordner-Blätter, 8000 Löschen/Nachfahren/Verschieben (je Layout, Master, Ausschnitt),
+    3000 Blattgrössen, 6000 Titelblöcke (Unicode-Leerraum, Massstäbe 0/1e21/1e-7, doppelte Layout-ids), 4000 Ordner-PDF-Seiten.
+    Abweichung (gewollt): kaputte `parentId`-Ketten (Kreis, Selbstverweis) in `collectFolderLayouts` enden jetzt (TS: Stapelüberlauf).
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

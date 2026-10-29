@@ -71,6 +71,18 @@ pub fn run_root(root: &serde_json::Map<String, serde_json::Value>, name: &str, t
             let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("penSeedOps: {e}"))?;
             json(&crate::pens::seed_standard_ops(root, a["id"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or("")))
         }
+        // Layout-Blätter ([K4] S3, `layout_model.rs`): Seiten des Ordner-PDF (`text` = Ordner-id) und Titelblock
+        // (`text` = JSON `{layout, master, today}`).
+        "folderPdfPages" => json(
+            &crate::layout_model::folder_pdf_pages(root, text)
+                .iter()
+                .map(|p| serde_json::json!({"layout": p.layout, "widthMm": p.width_mm, "heightMm": p.height_mm}))
+                .collect::<Vec<_>>(),
+        ),
+        "layoutTitleBlock" => {
+            let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("layoutTitleBlock: {e}"))?;
+            json(&crate::layout_model::resolve_title_block(root, &a["layout"], &a["master"], a["today"].as_str().unwrap_or("")))
+        }
         _ => Err(format!("Unbekannte Wurzel-Abfrage: {name}")),
     }
 }

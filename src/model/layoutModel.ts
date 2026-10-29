@@ -1,9 +1,15 @@
 // Layout-Blätter mit Masterlayout (DOSSIER A3) — reine, testbare Logik.
 //
-// Enthält KEINE React-/DOM-Abhängigkeit: nur immutable CRUD auf Layouts/Master/
-// Viewports, die Master-Vererbung der Titelblock-Werte, die Auflösung eines
-// Viewports auf seinen gebundenen Ausschnitt und die Blatt-Geometrie (Papier-mm).
-// Das UI-Wiring (App.tsx setProject, LayoutEditor-Rendering) baut hierauf auf.
+// Enthält KEINE React-/DOM-Abhängigkeit: immutable CRUD auf Layouts/Master/Viewports, die
+// Master-Vererbung der Titelblock-Werte, die Auflösung eines Viewports auf seinen gebundenen
+// Ausschnitt und die Blatt-Geometrie (Papier-mm). Das UI-Wiring (App.tsx setProject, LayoutEditor-
+// Rendering) baut hierauf auf.
+//
+// Rechnung im Rust-Kern ([K4] S3, `src-tauri/core/src/layout_model.rs`, `folder_tree.rs`): Blattgrössen,
+// Ordner-Bäume (Aufbau, Blätter eines Ordners, Löschen, Nachfahren-Test), Seitenplanung des Ordner-PDF und
+// Titelblock. Hier bleiben Fabriken, einfache Listen-Änderungen (Viewports, Annotationen, Blatt verschieben)
+// und Nachschlagen; die Baum-Fassaden setzen die Knoten aus den Indizes des Kerns mit den Original-Objekten
+// zusammen (Objekt-Identität bleibt).
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
@@ -14,35 +20,16 @@ import type {
   LayoutFolder,
   LayoutOrientation,
   LayoutPaperFormat,
-  LayoutTitleBlock,
   LayoutViewport,
   MasterLayout,
   Project,
   ViewSnapshot,
 } from "./types";
+import { core } from "../engine/coreWasm";
+import { documentFor } from "../core/document";
+import { isDescendantFolder, treeBuild, treeCollect, treeDelete } from "./folderTree";
 
 // ── Blatt-Geometrie ──────────────────────────────────────────────────────────
-
-/**
- * Blattmasse je Format im Hochformat (mm) — offizielle ISO-216-Masse (auf ganze
- * mm gerundet). A-Reihe A0–A6 und B-Reihe B0–B6.
- */
-const PAGE_MM: Record<LayoutPaperFormat, { w: number; h: number }> = {
-  a0: { w: 841, h: 1189 },
-  a1: { w: 594, h: 841 },
-  a2: { w: 420, h: 594 },
-  a3: { w: 297, h: 420 },
-  a4: { w: 210, h: 297 },
-  a5: { w: 148, h: 210 },
-  a6: { w: 105, h: 148 },
-  b0: { w: 1000, h: 1414 },
-  b1: { w: 707, h: 1000 },
-  b2: { w: 500, h: 707 },
-  b3: { w: 353, h: 500 },
-  b4: { w: 250, h: 353 },
-  b5: { w: 176, h: 250 },
-  b6: { w: 125, h: 176 },
-};
 
 /**
  * Auswahlreihenfolge der Standard-Formate für Dropdowns (A-Reihe, dann B-Reihe).
@@ -71,16 +58,12 @@ export function sheetSizeMm(
   customWidthMm?: number,
   customHeightMm?: number,
 ): { w: number; h: number } {
-  if (
-    customWidthMm !== undefined &&
-    customHeightMm !== undefined &&
-    customWidthMm > 0 &&
-    customHeightMm > 0
-  ) {
-    return { w: customWidthMm, h: customHeightMm };
-  }
-  const base = PAGE_MM[paper];
-  return orientation === "landscape" ? { w: base.h, h: base.w } : base;
+  const out = core().layout_call(
+    "sheetSize",
+    JSON.stringify({ paper, landscape: orientation === "landscape", customWidthMm, customHeightMm }),
+  );
+  if (out === "") throw new Error(`Kern: unbekanntes Blattformat „${paper}"`);
+  return JSON.parse(out) as { w: number; h: number };
 }
 
 /**
@@ -179,30 +162,16 @@ export function buildLayoutTree(
   folders: LayoutFolder[],
   layouts: Layout[],
 ): LayoutTree {
-  const folderIds = new Set(folders.map((f) => f.id));
-  const nodes = new Map<string, FolderNode>();
-  for (const f of folders) {
-    nodes.set(f.id, { folder: f, subfolders: [], layouts: [] });
-  }
-
-  const rootFolders: FolderNode[] = [];
-  for (const f of folders) {
-    const node = nodes.get(f.id)!;
-    const parent =
-      f.parentId && folderIds.has(f.parentId) ? nodes.get(f.parentId) : undefined;
-    if (parent) parent.subfolders.push(node);
-    else rootFolders.push(node);
-  }
-
-  const rootLayouts: Layout[] = [];
-  for (const l of layouts) {
-    const node =
-      l.folderId && folderIds.has(l.folderId) ? nodes.get(l.folderId) : undefined;
-    if (node) node.layouts.push(l);
-    else rootLayouts.push(l);
-  }
-
-  return { rootLayouts, rootFolders };
+  const shape = treeBuild(folders, layouts);
+  const nodes: FolderNode[] = folders.map((folder) => ({ folder, subfolders: [], layouts: [] }));
+  shape.nodes.forEach((n, i) => {
+    nodes[i].subfolders = n.subfolders.map((j) => nodes[j]);
+    nodes[i].layouts = n.leaves.map((k) => layouts[k]);
+  });
+  return {
+    rootLayouts: shape.rootLeaves.map((k) => layouts[k]),
+    rootFolders: shape.rootFolders.map((j) => nodes[j]),
+  };
 }
 
 // ── Master-Baum (Ordner + Masterlayouts) ─────────────────────────────────────
@@ -235,30 +204,16 @@ export function buildMasterTree(
   folders: LayoutFolder[],
   masters: MasterLayout[],
 ): MasterTree {
-  const folderIds = new Set(folders.map((f) => f.id));
-  const nodes = new Map<string, MasterFolderNode>();
-  for (const f of folders) {
-    nodes.set(f.id, { folder: f, subfolders: [], masters: [] });
-  }
-
-  const rootFolders: MasterFolderNode[] = [];
-  for (const f of folders) {
-    const node = nodes.get(f.id)!;
-    const parent =
-      f.parentId && folderIds.has(f.parentId) ? nodes.get(f.parentId) : undefined;
-    if (parent) parent.subfolders.push(node);
-    else rootFolders.push(node);
-  }
-
-  const rootMasters: MasterLayout[] = [];
-  for (const m of masters) {
-    const node =
-      m.folderId && folderIds.has(m.folderId) ? nodes.get(m.folderId) : undefined;
-    if (node) node.masters.push(m);
-    else rootMasters.push(m);
-  }
-
-  return { rootMasters, rootFolders };
+  const shape = treeBuild(folders, masters);
+  const nodes: MasterFolderNode[] = folders.map((folder) => ({ folder, subfolders: [], masters: [] }));
+  shape.nodes.forEach((n, i) => {
+    nodes[i].subfolders = n.subfolders.map((j) => nodes[j]);
+    nodes[i].masters = n.leaves.map((k) => masters[k]);
+  });
+  return {
+    rootMasters: shape.rootLeaves.map((k) => masters[k]),
+    rootFolders: shape.rootFolders.map((j) => nodes[j]),
+  };
 }
 
 /**
@@ -271,24 +226,7 @@ export function collectFolderLayouts(
   folders: LayoutFolder[],
   layouts: Layout[],
 ): Layout[] {
-  const tree = buildLayoutTree(folders, layouts);
-  const find = (nodes: FolderNode[]): FolderNode | undefined => {
-    for (const n of nodes) {
-      if (n.folder.id === folderId) return n;
-      const deep = find(n.subfolders);
-      if (deep) return deep;
-    }
-    return undefined;
-  };
-  const node = find(tree.rootFolders);
-  if (!node) return [];
-  const out: Layout[] = [];
-  const walk = (n: FolderNode) => {
-    out.push(...n.layouts);
-    for (const sub of n.subfolders) walk(sub);
-  };
-  walk(node);
-  return out;
+  return treeCollect(folders, layouts, folderId).map((k) => layouts[k]);
 }
 
 /** Eine geplante Ordner-PDF-Seite: das Layout + seine effektive Blattgrösse (mm). */
@@ -309,13 +247,10 @@ export function folderPdfPages(
   project: Project,
   folderId: string,
 ): FolderPdfPage[] {
-  const folders = project.layoutFolders ?? [];
   const layouts = project.layouts ?? [];
-  return collectFolderLayouts(folderId, folders, layouts).map((layout) => {
-    const master = findMaster(project, layout);
-    const { w, h } = effectiveSheetSizeMm(master ?? layout);
-    return { layout, widthMm: w, heightMm: h };
-  });
+  return documentFor(project)
+    .queryRoot<{ layout: number; widthMm: number; heightMm: number }[]>("folderPdfPages", folderId)
+    .map((p) => ({ layout: layouts[p.layout], widthMm: p.widthMm, heightMm: p.heightMm }));
 }
 
 /**
@@ -329,15 +264,14 @@ export function deleteFolder(
   folders: LayoutFolder[],
   layouts: Layout[],
 ): { folders: LayoutFolder[]; layouts: Layout[] } {
-  const { folders: nextFolders, grandParentId } = foldersAfterDelete(folderId, folders);
-  const nextLayouts = layouts.map((l) =>
-    l.folderId === folderId
-      ? grandParentId
-        ? { ...l, folderId: grandParentId }
-        : { ...l, folderId: undefined }
-      : l,
-  );
-  return { folders: nextFolders, layouts: nextLayouts };
+  const plan = treeDelete(folders, layouts, folderId);
+  return {
+    folders: foldersAfterDelete(folders, plan.folders),
+    layouts: layouts.map((l, i) => {
+      const c = plan.leaves[i];
+      return c === null ? l : { ...l, folderId: c.v ?? undefined };
+    }),
+  };
 }
 
 /**
@@ -350,40 +284,23 @@ export function deleteMasterFolder(
   folders: LayoutFolder[],
   masters: MasterLayout[],
 ): { folders: LayoutFolder[]; masters: MasterLayout[] } {
-  const { folders: nextFolders, grandParentId } = foldersAfterDelete(folderId, folders);
-  const nextMasters = masters.map((m) =>
-    m.folderId === folderId
-      ? grandParentId
-        ? { ...m, folderId: grandParentId }
-        : { ...m, folderId: undefined }
-      : m,
-  );
-  return { folders: nextFolders, masters: nextMasters };
+  const plan = treeDelete(folders, masters, folderId);
+  return {
+    folders: foldersAfterDelete(folders, plan.folders),
+    masters: masters.map((m, i) => {
+      const c = plan.leaves[i];
+      return c === null ? m : { ...m, folderId: c.v ?? undefined };
+    }),
+  };
 }
 
 /**
- * Entfernt einen Ordner aus der flachen Liste und zieht dessen direkte
- * Unterordner auf die Elternebene (`grandParentId`). Das `kind`-Feld bleibt dabei
- * ERHALTEN (Spread statt Neu-Bau), damit ein hochgezogener Master-Ordner nicht
- * versehentlich zum Layout-Ordner wird. Liefert die neue Liste + `grandParentId`
- * (den die Blatt-Reparentierung der Aufrufer nutzt).
+ * Behaltene Ordner nach dem Löschen: direkte Unterordner rücken auf die Elternebene. Das `kind`-Feld bleibt
+ * dabei ERHALTEN (Spread statt Neu-Bau), damit ein hochgezogener Master-Ordner nicht versehentlich zum
+ * Layout-Ordner wird.
  */
-function foldersAfterDelete(
-  folderId: string,
-  folders: LayoutFolder[],
-): { folders: LayoutFolder[]; grandParentId?: string } {
-  const target = folders.find((f) => f.id === folderId);
-  const grandParentId = target?.parentId;
-  const nextFolders = folders
-    .filter((f) => f.id !== folderId)
-    .map((f) =>
-      f.parentId === folderId
-        ? grandParentId
-          ? { ...f, parentId: grandParentId }
-          : stripParentId(f)
-        : f,
-    );
-  return { folders: nextFolders, grandParentId };
+function foldersAfterDelete(folders: LayoutFolder[], kept: [number, { v: string | null } | null][]): LayoutFolder[] {
+  return kept.map(([i, c]) => (c === null ? folders[i] : c.v ? { ...folders[i], parentId: c.v } : stripParentId(folders[i])));
 }
 
 /** Ordner auf die Wurzelebene setzen (parentId entfernen, `kind` bleibt erhalten). */
@@ -406,16 +323,7 @@ export function isDescendant(
   candidateId: string,
   rootId: string,
 ): boolean {
-  if (candidateId === rootId) return true;
-  const byId = new Map(folders.map((f) => [f.id, f]));
-  const seen = new Set<string>();
-  let cur = byId.get(candidateId);
-  while (cur && cur.parentId && !seen.has(cur.id)) {
-    if (cur.parentId === rootId) return true;
-    seen.add(cur.id);
-    cur = byId.get(cur.parentId);
-  }
-  return false;
+  return isDescendantFolder(folders, candidateId, rootId);
 }
 
 /**
@@ -659,28 +567,12 @@ export function resolveTitleBlock(
   master: MasterLayout | undefined,
   today: string = new Date().toISOString().slice(0, 10),
 ): ResolvedTitleBlock {
-  const tb: LayoutTitleBlock = master?.titleBlock ?? {};
-  const firstVp = layout.viewports[0];
-  const firstSnap = firstVp ? findSnapshot(project, firstVp.snapshotId) : undefined;
-  const scaleN = firstVp
-    ? resolveViewportScale(firstVp, firstSnap)
-    : undefined;
-  const nonEmpty = (s: string | undefined): string | undefined =>
-    s && s.trim() ? s.trim() : undefined;
-  return {
-    projectName: nonEmpty(tb.projectName) ?? project.name,
-    sheetName: nonEmpty(tb.sheetName) ?? layout.name,
-    scale: nonEmpty(tb.scale) ?? (scaleN ? `1:${scaleN}` : "—"),
-    date: nonEmpty(tb.date) ?? today,
-    author: nonEmpty(tb.author) ?? "",
-    planNumber: nonEmpty(layout.planNumber) ?? autoPlanNumber(project, layout),
+  const arg = {
+    layout: { id: layout.id, name: layout.name, planNumber: layout.planNumber, viewports: layout.viewports.slice(0, 1) },
+    master: master ? { titleBlock: master.titleBlock } : null,
+    today,
   };
-}
-
-/** Laufende Plannummer: Position des Layouts in `project.layouts` (1-basiert, zweistellig). */
-function autoPlanNumber(project: Project, layout: Layout): string {
-  const i = (project.layouts ?? []).findIndex((l) => l.id === layout.id);
-  return String((i < 0 ? 0 : i) + 1).padStart(2, "0");
+  return documentFor(project).queryRoot<ResolvedTitleBlock>("layoutTitleBlock", JSON.stringify(arg));
 }
 
 /**

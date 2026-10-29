@@ -39,6 +39,7 @@ mod plan_print_svg;
 mod drawings;
 mod layers;
 mod pens;
+mod layout_model;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
