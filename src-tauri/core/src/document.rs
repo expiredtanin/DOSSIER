@@ -22,6 +22,107 @@ pub struct Document {
     dirty: HashSet<String>,
     /// Undo/Redo-Verlauf (inverse Ops, `ops::History`).
     history: History,
+    /// Nach `replace` nur dieses Element der typisierten Sicht neu lesen (Liste, Position).
+    dirty_items: Vec<(String, usize)>,
+    /// Änderungsstände je Feld und je Listenelement (Schlüssel der Plan-Caches).
+    revs: Revs,
+    /// Caches der Plan-Erzeugung (`plan::cache`), gültig über [`Revs`].
+    plan_cache: crate::plan::cache::PlanCache,
+    /// id → Position je Liste über die Aufrufe hinweg (eine Änderung an einem Element einer grossen
+    /// Liste sucht dann nicht jedes Mal linear); jede Op ausser `replace` verwirft ihre Liste.
+    pos: PosCache,
+}
+
+/// Änderungsstände ([K4], Caches der Ableitungen): ein globaler Zähler; jede Op vergibt ihrem Feld
+/// einen neuen Stand, `add`/`replace` den betroffenen Listenelementen neue Element-Stände. Gleicher
+/// Stand = unverändert. Laden beginnt eine neue Epoche (alle Stände ungültig).
+#[derive(Clone, Debug, Default)]
+pub struct Revs {
+    counter: u64,
+    epoch: u64,
+    field: HashMap<String, u64>,
+    /// Element-Stände je Liste (gleich lang und gleich geordnet wie die Liste), erst auf Anfrage.
+    items: HashMap<String, Vec<u64>>,
+}
+
+impl Revs {
+    fn next(&mut self) -> u64 {
+        self.counter += 1;
+        self.counter
+    }
+
+    fn reset(&mut self) {
+        self.epoch = self.next();
+        self.field.clear();
+        self.items.clear();
+    }
+
+    fn touch(&mut self, key: &str) {
+        let r = self.next();
+        self.field.insert(key.to_owned(), r);
+    }
+
+    /// Epoche (wechselt beim Laden).
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// Stand eines Feldes (0 = seit dem Laden unverändert).
+    pub fn field(&self, key: &str) -> u64 {
+        self.field.get(key).copied().unwrap_or(0)
+    }
+
+    /// Jüngster Stand aller Felder ausser `except` (ändert sich, sobald eines davon geändert wird).
+    pub fn max_except(&self, except: &[&str]) -> u64 {
+        self.field.iter().filter(|(k, _)| !except.contains(&k.as_str())).map(|(_, v)| *v).max().unwrap_or(0)
+    }
+
+    /// Element-Stände der Liste `key`, falls schon vergeben (s. [`Revs::items`]).
+    pub fn item_stamps(&self, key: &str) -> Option<&[u64]> {
+        self.items.get(key).map(Vec::as_slice)
+    }
+
+    /// Element-Stände der Liste `key` (Länge `n`); fehlen sie oder passen sie nicht, neu vergeben.
+    pub fn items(&mut self, key: &str, n: usize) -> &[u64] {
+        if self.items.get(key).is_none_or(|v| v.len() != n) {
+            let start = self.counter;
+            self.counter += n as u64;
+            self.items.insert(key.to_owned(), (start + 1..=start + n as u64).collect());
+        }
+        &self.items[key]
+    }
+
+    /// Element-Stände nach einer Op auf der Liste nachführen (`before` = Länge vor der Op).
+    fn item_op(&mut self, op: &Op, before: usize, removed: Option<&[bool]>, hit: Option<usize>) {
+        let key = op.key();
+        self.touch(key);
+        let Some(mut v) = self.items.remove(key) else { return };
+        if v.len() != before {
+            return;
+        }
+        match op {
+            Op::Add { items, at, .. } => {
+                let at = at.map_or(v.len(), |a| a.min(v.len()));
+                let start = self.counter;
+                self.counter += items.len() as u64;
+                v.splice(at..at, start + 1..=start + items.len() as u64);
+            }
+            Op::Replace { .. } => match hit {
+                Some(i) if i < v.len() => v[i] = self.next(),
+                Some(_) => return,
+                None => v.push(self.next()),
+            },
+            Op::Remove { .. } => match removed {
+                Some(keep) if keep.len() == v.len() => {
+                    let mut k = keep.iter();
+                    v.retain(|_| *k.next().unwrap_or(&false));
+                }
+                _ => return,
+            },
+            Op::Reorder { .. } | Op::SetField { .. } => return,
+        }
+        self.items.insert(key.to_owned(), v);
+    }
 }
 
 /// id → Position je Liste für die Dauer einer Op-Folge. Nur `replace` sucht darüber; jede andere Op
@@ -30,9 +131,10 @@ pub struct Document {
 /// `replace`) kosten so O(Liste + Ops) statt O(Liste · Ops). Gleiche Semantik wie `position`
 /// (erstes Vorkommen). Schlüssel ist ein Hash der id (keine Text-Kopien); jeder Treffer wird an der
 /// Liste nachgeprüft, bei einer Kollision sucht `find` linear.
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 struct PosCache(HashMap<String, PosEntry>);
 
+#[derive(Clone, Debug)]
 enum PosEntry {
     /// Einmal linear gesucht.
     Once,
@@ -88,7 +190,7 @@ impl PosCache {
 impl Document {
     pub fn from_json(text: &str) -> Result<Document, String> {
         match serde_json::from_str::<Value>(text) {
-            Ok(Value::Object(root)) => Ok(Document { root, typed: None, dirty: HashSet::new(), history: History::default() }),
+            Ok(Value::Object(root)) => Ok(Document { root, ..Default::default() }),
             Ok(_) => Err("Projekt ist kein JSON-Objekt".into()),
             Err(e) => Err(e.to_string()),
         }
@@ -100,6 +202,9 @@ impl Document {
         self.root = root;
         self.typed = None;
         self.dirty.clear();
+        self.dirty_items.clear();
+        self.revs.reset();
+        self.pos = PosCache::default();
         self.history.clear();
     }
 
@@ -136,10 +241,22 @@ impl Document {
             }
             self.typed = Some(parsed?);
             self.dirty.clear();
-        } else if !self.dirty.is_empty() {
-            let dirty: Vec<String> = self.dirty.drain().collect();
+            self.dirty_items.clear();
+        } else if !self.dirty.is_empty() || !self.dirty_items.is_empty() {
+            let mut dirty: Vec<String> = self.dirty.drain().collect();
             let mut failed = None;
             if let Some(t) = self.typed.as_mut() {
+                // Einzelne Elemente (nach `replace`), ausser ihre Liste wird ohnehin ganz gelesen;
+                // geht es nicht (Liste ohne Element-Weg, Element passt nicht), die ganze Liste.
+                for (key, i) in std::mem::take(&mut self.dirty_items) {
+                    if dirty.contains(&key) {
+                        continue;
+                    }
+                    let v = self.root.get(&key).and_then(|l| l.get(i));
+                    if !v.is_some_and(|v| t.set_item(&key, i, v) == Ok(true)) {
+                        dirty.push(key);
+                    }
+                }
                 for key in &dirty {
                     if let Err(e) = t.set_field(key, self.root.get(key).filter(|v| !v.is_null())) {
                         failed = Some(e);
@@ -168,11 +285,15 @@ impl Document {
     }
 
 
-    /// Wendet eine Op ohne Aufzeichnung an (Semantik wie `applyOps` in TS).
-    fn apply_raw(&mut self, op: &Op, pos: &mut PosCache) {
+    /// Wendet eine Op ohne Aufzeichnung an (Semantik wie `applyOps` in TS). Liefert bei `replace`
+    /// mit Treffer dessen Position; führt die Änderungsstände nach.
+    fn apply_raw(&mut self, op: &Op, pos: &mut PosCache) -> Option<usize> {
         if !matches!(op, Op::Replace { .. }) {
             pos.forget(op.key());
         }
+        let before = self.root.get(op.key()).and_then(Value::as_array).map_or(0, Vec::len);
+        let mut hit = None;
+        let mut removed = None;
         match op {
             Op::SetField { key, value, at } => match value {
                 Some(v) => match at {
@@ -197,7 +318,10 @@ impl Document {
                 let list = self.list_mut(collection);
                 let id = id_of(entity);
                 match pos.find(collection, list, id) {
-                    Some(i) => list[i] = entity.clone(),
+                    Some(i) => {
+                        list[i] = entity.clone();
+                        hit = Some(i);
+                    }
                     None => {
                         list.push(entity.clone());
                         pos.pushed(collection, id, list.len() - 1);
@@ -206,7 +330,12 @@ impl Document {
             }
             Op::Remove { collection, ids } => {
                 let drop: HashSet<&str> = ids.iter().map(String::as_str).collect();
-                self.list_mut(collection).retain(|e| !id_of(e).is_some_and(|i| drop.contains(i)));
+                let tracked = self.revs.items.contains_key(collection.as_str());
+                let list = self.list_mut(collection);
+                if tracked {
+                    removed = Some(list.iter().map(|e| !id_of(e).is_some_and(|i| drop.contains(i))).collect::<Vec<bool>>());
+                }
+                list.retain(|e| !id_of(e).is_some_and(|i| drop.contains(i)));
             }
             Op::Reorder { collection, ids } => {
                 let list = std::mem::take(self.list_mut(collection));
@@ -223,6 +352,19 @@ impl Document {
                 *self.list_mut(collection) = ordered;
             }
         }
+        self.revs.item_op(op, before, removed.as_deref(), hit);
+        hit
+    }
+
+    /// Nach einer angenommenen Op: was die typisierte Sicht neu lesen muss (ein Element nach
+    /// `replace` mit Treffer, sonst das Feld).
+    fn mark_dirty(&mut self, op: &Op, hit: Option<usize>) {
+        match (op, hit) {
+            (Op::Replace { collection, .. }, Some(i)) if self.typed.is_some() => self.dirty_items.push((collection.clone(), i)),
+            _ => {
+                self.dirty.insert(op.key().to_owned());
+            }
+        }
     }
 
     /// Wendet eine Op an und liefert (inverse Ops in Anwendungsreihenfolge, ob die Vorwärts-Op als
@@ -231,7 +373,7 @@ impl Document {
     /// (`add`: ids neu und eindeutig; `reorder`: alle ids eindeutig); sonst (fehlendes Feld, kein
     /// Array, Alt-Doppelungen) wird das ganze Feld samt Position gesichert. Ohne Hash über die ganze
     /// Liste — ein Drag-Schritt kostet nur das Suchen des Elements.
-    fn apply_recorded(&mut self, op: &Op, pos: &mut PosCache) -> (Vec<Op>, bool) {
+    fn apply_recorded(&mut self, op: &Op, pos: &mut PosCache) -> (Vec<Op>, bool, Option<usize>) {
         let key = op.key();
         let old = self.root.get(key);
         let snapshot = || {
@@ -259,9 +401,11 @@ impl Document {
             (Op::Replace { collection, entity }, Some(list)) => match pos.find(collection, list, id_of(entity)) {
                 Some(i) => {
                     // Direkt ersetzen (spart die zweite Suche in `apply_raw`).
-                    let slot = &mut self.root.get_mut(key).and_then(Value::as_array_mut).expect("Liste geprüft")[i];
-                    let prev = std::mem::replace(slot, entity.clone());
-                    return (vec![Op::Replace { collection: collection.clone(), entity: prev }], false);
+                    let list = self.root.get_mut(key).and_then(Value::as_array_mut).expect("Liste geprüft");
+                    let n = list.len();
+                    let prev = std::mem::replace(&mut list[i], entity.clone());
+                    self.revs.item_op(op, n, None, Some(i));
+                    return (vec![Op::Replace { collection: collection.clone(), entity: prev }], false, Some(i));
                 }
                 None => {
                     // Aufgezeichnet als `add` (so trifft jedes aufgezeichnete `replace` ein vorhandenes Element).
@@ -290,8 +434,8 @@ impl Document {
             }
             (Op::SetField { .. }, Some(_)) => unreachable!("setField hat keine Liste"),
         };
-        self.apply_raw(op, pos);
-        (inverse, as_add)
+        let hit = self.apply_raw(op, pos);
+        (inverse, as_add, hit)
     }
 
     /// Wendet `ops` atomar an und prüft sie (`ops::validate`). Verstösse → `Err(Meldungen)`,
@@ -307,14 +451,17 @@ impl Document {
         }
         let mut inverses: Vec<Vec<Op>> = Vec::with_capacity(ops.len());
         let mut as_add: Vec<bool> = Vec::with_capacity(ops.len());
-        let mut pos = PosCache::default();
+        let mut hits: Vec<Option<usize>> = Vec::with_capacity(ops.len());
+        let mut pos = std::mem::take(&mut self.pos);
         for op in ops {
-            let (inv, add) = self.apply_recorded(op, &mut pos);
+            let (inv, add, hit) = self.apply_recorded(op, &mut pos);
             inverses.push(inv);
             as_add.push(add);
+            hits.push(hit);
         }
         let problems = crate::ops::validate(&self.root, ops, &|k| had_dup.contains(k));
         if !problems.is_empty() {
+            // Nach der Rücknahme gilt keine gemerkte Position mehr sicher.
             let mut pos = PosCache::default();
             for inv in inverses.iter().rev() {
                 for op in inv {
@@ -323,6 +470,7 @@ impl Document {
             }
             return Err(problems);
         }
+        self.pos = pos;
         if sanitize {
             // Angenommene Nicht-endlich-Marken (zu tief für die Prüfung) als null speichern.
             let keys: HashSet<&str> = ops.iter().map(Op::key).collect();
@@ -332,8 +480,8 @@ impl Document {
                 }
             }
         }
-        for op in ops {
-            self.dirty.insert(op.key().to_owned());
+        for (op, hit) in ops.iter().zip(hits) {
+            self.mark_dirty(op, hit);
         }
         Ok((as_add, inverses.into_iter().rev().flatten().collect()))
     }
@@ -373,11 +521,12 @@ impl Document {
     }
 
     fn apply_unchecked(&mut self, ops: &[Op]) {
-        let mut pos = PosCache::default();
+        let mut pos = std::mem::take(&mut self.pos);
         for op in ops {
-            self.apply_raw(op, &mut pos);
-            self.dirty.insert(op.key().to_owned());
+            let hit = self.apply_raw(op, &mut pos);
+            self.mark_dirty(op, hit);
         }
+        self.pos = pos;
     }
 
     /// Einen Schritt zurück; liefert die angewendeten Ops (für die TS-Leseansicht), `None` = nichts.
@@ -404,6 +553,20 @@ impl Document {
 
     pub fn history_mut(&mut self) -> &mut History {
         &mut self.history
+    }
+
+    /// Änderungsstände (Schlüssel der Caches der Ableitungen).
+    pub fn revs(&self) -> &Revs {
+        &self.revs
+    }
+
+    /// Typisierte Sicht samt Änderungsständen (Element-Stände der 2D-Zeichnungen vergeben) und
+    /// Plan-Cache — getrennte Ausleihen für die gecachte Plan-Erzeugung (`plan::cache`).
+    pub fn project_cached(&mut self) -> Result<(&Project, &Revs, &mut crate::plan::cache::PlanCache), String> {
+        self.project()?;
+        let p = self.typed.as_ref().expect("gerade gelesen");
+        self.revs.items("drawings2d", p.drawings2d.len());
+        Ok((p, &self.revs, &mut self.plan_cache))
     }
 }
 

@@ -143,6 +143,19 @@ impl Bounds {
     fn get(&self) -> Option<[f64; 4]> {
         self.0[0].is_finite().then_some(self.0)
     }
+    /// Rohwerte (auch ohne Punkte), s. [`Bounds::merge`].
+    pub fn raw(&self) -> [f64; 4] {
+        self.0
+    }
+    /// Ein anderes Ausmass einrechnen — gleich wie seine Punkte einzeln (JS-`min`/`max` sind
+    /// vertauschbar und assoziativ, auch mit NaN und ±0).
+    pub fn merge(&mut self, r: [f64; 4]) {
+        let b = &mut self.0;
+        b[0] = min(b[0], r[0]);
+        b[1] = min(b[1], r[1]);
+        b[2] = max(b[2], r[2]);
+        b[3] = max(b[3], r[3]);
+    }
 }
 
 /// Pick-Bezug eines Polygons.
@@ -573,6 +586,137 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     }
     w.bounds = bounds.get();
     Ok(w.finish())
+}
+
+/// Kennung der Antwort von `planDomains` mit Cache ("PLBm").
+pub const MULTI_MAGIC: f64 = 1_347_175_021.0;
+
+/// Ergebnis von [`plan_domains_cached`]: der Haupt-Puffer (Gruppen wie [`plan_domains_buf`], die
+/// Gruppe der 2D-Zeichnungen leer, Ausmass über alles) und die Stücke der 2D-Zeichnungen in
+/// Zeichenreihenfolge.
+pub struct PlanOut {
+    pub main: Vec<u8>,
+    pub chunks: Vec<super::drawings::ChunkOut>,
+}
+
+impl PlanOut {
+    /// Als Bytes: `[MULTI_MAGIC, nStücke, Länge Haupt-Puffer, (Schlüssel, Länge | −1) × nStücke]`
+    /// (f64), dann der Haupt-Puffer und die mitgelieferten Stücke, je auf 8 Bytes aufgefüllt.
+    /// Länge −1 = Stück fehlt (der Aufrufer hat es schon).
+    pub fn encode(&self) -> Vec<u8> {
+        let mut head = vec![MULTI_MAGIC, self.chunks.len() as f64, self.main.len() as f64];
+        for (k, b) in &self.chunks {
+            head.push(*k as f64);
+            head.push(b.as_ref().map_or(-1.0, |b| b.len() as f64));
+        }
+        let pad = |n: usize| (8 - n % 8) % 8;
+        let total = head.len() * 8 + self.main.len() + pad(self.main.len()) + self.chunks.iter().filter_map(|(_, b)| b.as_ref()).map(|b| b.len() + pad(b.len())).sum::<usize>();
+        let mut out = Vec::with_capacity(total);
+        for v in head {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for b in std::iter::once(&self.main).chain(self.chunks.iter().filter_map(|(_, b)| b.as_ref())) {
+            out.extend_from_slice(b);
+            out.resize(out.len() + pad(b.len()), 0);
+        }
+        out
+    }
+}
+
+/// Wie [`plan_domains_buf`], mit den Caches des Dokuments (`plan/cache.rs`): die übrigen Domänen
+/// als Ganzes, die 2D-Zeichnungen als Stücke ([`super::drawings::plan_drawings_chunked`]); Stücke
+/// mit Schlüssel in `have` (hat der Aufrufer vom letzten Mal) kommen ohne Puffer. `revs` =
+/// Änderungsstände des Dokuments (mit Element-Ständen der Zeichnungen, s. `Document::project_cached`).
+/// Inhalt gleich [`plan_domains_buf`] (Haupt-Puffer mit den Stücken an Stelle der Gruppe 6).
+pub fn plan_domains_cached(p: &Project, revs: &crate::document::Revs, cache: &mut super::cache::PlanCache, a: &PlanArgs, have: &HashSet<u64>) -> Result<PlanOut, String> {
+    use super::cache::NOT_FOR_DRAWINGS;
+    use crate::plan_buf::Writer;
+    let c = Ctx::new(p, a);
+    let cc = cache.context(a, revs.epoch());
+    cc.trim();
+    let draw_sig = revs.max_except(NOT_FOR_DRAWINGS);
+    if cc.drawings.sig != draw_sig {
+        cc.drawings = Default::default();
+        cc.drawings.sig = draw_sig;
+    }
+    let fresh = cc.tables.units_len() == 0;
+    let mut w = Writer::with_tables(std::mem::take(&mut cc.tables), true);
+    let r = assemble_cached(&c, revs, cc, &mut w, have);
+    let (main, tables) = w.finish_keep();
+    cc.tables = tables;
+    if fresh {
+        cc.base_units = cc.tables.units_len();
+    }
+    match r {
+        Ok(chunks) => Ok(PlanOut { main, chunks }),
+        Err(e) => {
+            // Gemerkte Teile könnten auf Tabellen-Einträge zeigen, die nicht mehr passen: neu beginnen.
+            cc.reset();
+            Err(e)
+        }
+    }
+}
+
+/// Gruppen in Puffer-Reihenfolge (die Zeichnungen als Stücke daneben), die übrigen Domänen aus dem
+/// Cache bzw. neu (dann aufgenommen).
+fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache::CtxCache, w: &mut crate::plan_buf::Writer, have: &HashSet<u64>) -> Result<Vec<super::drawings::ChunkOut>, String> {
+    use super::cache::{selection_sig, RestEntry, NOT_FOR_REST};
+    let sig = (revs.max_except(NOT_FOR_REST), selection_sig(c.a));
+    if cc.rest.as_ref().is_some_and(|r| r.sig != sig) {
+        cc.rest = None;
+    }
+    let mut bounds = Bounds::new();
+    let mut fresh: Option<(DomainPrims, Bounds)> = None;
+    if cc.rest.is_none() {
+        let mut d = DomainPrims::default();
+        let mut b = Bounds::new();
+        domains_before(c, &mut d, &mut b)?;
+        domains_after(c, &mut d);
+        fresh = Some((d, b));
+    }
+    let mut segs: Vec<crate::plan_buf::Segment> = Vec::new();
+    let put = |w: &mut crate::plan_buf::Writer, k: usize, segs: &mut Vec<crate::plan_buf::Segment>| {
+        let start = w.begin_group();
+        match (&fresh, &cc.rest) {
+            (Some((d, _)), _) => {
+                let g = [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections][k];
+                w.mark();
+                for x in g.iter() {
+                    w.push(x);
+                }
+                segs.push(w.take_segment());
+            }
+            (None, Some(r)) => w.splice(&r.groups[k]),
+            (None, None) => {}
+        }
+        w.end_group(start);
+    };
+    for k in 0..6 {
+        put(w, k, &mut segs);
+    }
+    // Gruppe 6 bleibt im Haupt-Puffer leer; die Zeichnungen kommen als Stücke.
+    let start = w.begin_group();
+    w.end_group(start);
+    let salt = {
+        let mut h = revs.epoch() ^ 0x9E37_79B9_7F4A_7C15;
+        for b in super::cache::ctx_key(c.a).bytes() {
+            h = (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h ^ cc.drawings.sig.wrapping_mul(0xff51_afd7_ed55_8ccd)
+    };
+    let chunks = super::drawings::plan_drawings_chunked(c, revs.item_stamps("drawings2d").unwrap_or(&[]), &mut cc.drawings, salt, have, &mut bounds)?;
+    for k in 6..9 {
+        put(w, k, &mut segs);
+    }
+    match fresh {
+        Some((_, b)) => {
+            bounds.merge(b.raw());
+            cc.rest = Some(RestEntry { sig, groups: segs, bounds: b.raw() });
+        }
+        None => bounds.merge(cc.rest.as_ref().map_or(Bounds::new().raw(), |r| r.bounds)),
+    }
+    w.bounds = bounds.get();
+    Ok(chunks)
 }
 
 #[cfg(test)]

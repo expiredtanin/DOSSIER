@@ -9,3 +9,4 @@ pub mod walls;
 pub mod stairs;
 pub mod context;
 pub mod drawings;
+pub mod cache;

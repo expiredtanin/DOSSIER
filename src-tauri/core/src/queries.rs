@@ -109,6 +109,22 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
     }
 }
 
+/// Wie [`run_bin`] auf dem Dokument: `planDomains` mit den Plan-Caches des Dokuments (`plan/cache.rs`).
+pub fn run_bin_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
+    let model_err = |e: String| format!("Projekt passt nicht zum Kern-Modell: {e}");
+    if name == "planDomains" && args.len() == 1 {
+        let a = crate::plan::domains::PlanArgs::parse(args[0], text)?;
+        // Schlüssel der Zeichnungs-Stücke, die der Aufrufer schon hat (`"have": [k…]`).
+        let have: std::collections::HashSet<u64> = serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .and_then(|v| v.get("have").and_then(|h| h.as_array()).map(|h| h.iter().filter_map(|k| k.as_f64()).filter(|k| *k >= 0.0 && k.fract() == 0.0).map(|k| k as u64).collect()))
+            .unwrap_or_default();
+        let (p, revs, cache) = d.project_cached().map_err(model_err)?;
+        return crate::plan::domains::plan_domains_cached(p, revs, cache, &a, &have).map(|o| o.encode());
+    }
+    run_bin(d.project().map_err(model_err)?, name, args, text)
+}
+
 /// Plan-Puffer (eine Gruppe, ohne Inhalts-Hashes), in den `f` die Zeichnungs-Primitive schreibt.
 fn buf_of(f: impl FnOnce(&mut crate::plan::drawings::Sink) -> Result<(), String>) -> Result<Vec<u8>, String> {
     use crate::plan::drawings::{Keep, Sink, Target};

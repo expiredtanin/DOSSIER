@@ -168,7 +168,13 @@ export function greyedFlat(plan: Plan): Float64Array {
  */
 export function heldSegs(parts: PlanParts, fresh: boolean): Float64Array {
   const c = core();
-  for (const b of parts.bufs) if (!b.hold || (fresh && !c.plan_buf_is_held(b.hold))) b.hold = c.plan_buf_hold(b.bytes);
+  // Eine Runde: die Puffer dieses Plans (viele Zeichnungs-Stücke) verdrängen sich nicht gegenseitig.
+  c.plan_buf_round_begin();
+  try {
+    for (const b of parts.bufs) if (!b.hold || ((fresh || parts.bufs.length > 1) && !c.plan_buf_touch(b.hold))) b.hold = c.plan_buf_hold(b.bytes);
+  } finally {
+    c.plan_buf_round_end();
+  }
   const s = new Float64Array(parts.segs.length);
   for (let i = 0; i < parts.segs.length; i += 3) {
     s[i] = parts.bufs[parts.segs[i]].hold;

@@ -213,10 +213,6 @@ pub fn doc_serialize(h: u32) -> String {
 /// Fehler kommen als Fehlerpuffer (`plan_buf::encode_error`).
 #[wasm_bindgen]
 pub fn doc_query_bin(h: u32, name: &str, args: &[f64], text: &str) -> Vec<u8> {
-    let result = with_doc(h, |d| {
-        let p = d.project().map_err(|e| format!("Projekt passt nicht zum Kern-Modell: {e}"))?;
-        crate::queries::run_bin(&p, name, args, text)
-    })
-    .unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
+    let result = with_doc(h, |d| crate::queries::run_bin_doc(d, name, args, text)).unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
     result.unwrap_or_else(|e| crate::plan_buf::encode_error(&e))
 }

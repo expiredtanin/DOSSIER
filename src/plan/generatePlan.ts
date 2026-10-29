@@ -362,12 +362,12 @@ export function generatePlan(
   // der Wand-Poché; Stützen folgen nach den Treppen, die 2D-Zeichnungen darüber, Extrusionen danach.
   // Der Kern liefert alles in EINEM Plan-Puffer (Gruppen in dieser Reihenfolge); die Abschnitte
   // merkt sich der Plan (`bufRuns`), damit die GPU sie direkt aus dem Puffer kompiliert.
-  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact);
+  // Mono färbt die gelesenen Primitive um (s. `toMono`): dann keine behaltenen Stücke.
+  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, !mono);
   // Der Plan entsteht aus Stücken ([K3d], `planLazy.ts`): TS-Listen und Kern-Abschnitte; die
   // Kern-Primitive werden erst gelesen, wenn ein Verbraucher sie als Objekte braucht.
   const pieces: PlanPiece[] = [primitives];
   const pushGroups = (first: number, last: number): void => {
-    if (!dom.buf) return;
     const from = dom.buf.groups[first][0];
     const to = dom.buf.groups[last][1];
     if (to > from) pieces.push({ buf: dom.buf, from, to });
@@ -376,7 +376,10 @@ export function generatePlan(
   // nacheinander; Treppen; Stützen; 2D-Zeichnungen (über der Poché); extrudierte Körper
   // (Footprint-Umriss); Kontext-Konturen und Schnittführungs-Symbole (projektglobal, nur beim
   // aktiven Aufruf einer Mehrfach-Überlagerung).
-  pushGroups(G_CEILINGS, G_SECTIONS);
+  // Die 2D-Zeichnungen kommen als eigene Puffer-Stücke (an Stelle der Gruppe 6, s. `planDomains`).
+  pushGroups(G_CEILINGS, G_COLUMNS);
+  for (const c of dom.chunks) pieces.push({ buf: c, from: 0, to: c.count });
+  pushGroups(G_SOLIDS, G_SECTIONS);
   // Kompakte Linien-Unterlage (s. {@link UnderlayGroup}): die Linien einfacher Zeichnungen fehlen
   // im Puffer und entstehen erst bei Bedarf, PRO KATEGORIE gruppiert — das Ein-/Ausblenden einer
   // Ebene entfernt dann nur deren Gruppe, die Chunks aller anderen Ebenen bleiben gültig.
@@ -416,7 +419,7 @@ export function generatePlan(
           buildBuf: undefined,
         }));
   const rest = {
-    bounds: computeBounds(project, dom.buf?.bounds, primitives.slice(0, underlayCount)),
+    bounds: computeBounds(project, dom.buf.bounds, primitives.slice(0, underlayCount)),
     backgroundImages,
     ...(scaledUnderlay.length ? { underlay: scaledUnderlay } : {}),
   };
@@ -822,20 +825,34 @@ function toMono(primitives: Primitive[]): void {
   }
 }
 
-/** Primitive der Kern-Domänen (`planDomains` in `queries.rs`) als gelesener Plan-Puffer v2. */
+/** Primitive der Kern-Domänen (`planDomains` in `queries.rs`) als gelesene Plan-Puffer v2. */
 interface DomainPrims {
-  /** Fehlt, wenn das Geschoss nichts für den Kern enthält. */
-  buf?: DecodedPlanBuf;
+  /** Haupt-Puffer: Gruppen wie `plan/domains.rs::GROUPS`, Gruppe 6 (2D-Zeichnungen) leer. */
+  buf: DecodedPlanBuf;
+  /** Die 2D-Zeichnungen in Stücken (eigene Puffer, Zeichenreihenfolge). */
+  chunks: DecodedPlanBuf[];
   /** Argumente der Abfrage (für `drawingUnderlay`). */
-  args?: string;
+  args: string;
 }
 
 /** Gruppen des Puffers (`plan/domains.rs::GROUPS`). */
 const G_CEILINGS = 0;
+const G_COLUMNS = 5;
+const G_SOLIDS = 7;
 const G_SECTIONS = 9;
 const N_GROUPS = 10;
 
-const NO_DOMAINS: DomainPrims = {};
+/** Kennung der Antwort mit Zeichnungs-Stücken (`plan/domains.rs::MULTI_MAGIC`, "PLBm"). */
+const PLAN_MULTI_MAGIC = 1_347_175_021;
+
+/**
+ * Zuletzt gelieferte Zeichnungs-Stücke je Argument-Satz ([K4], Kern-Cache `plan/cache.rs`): ihre
+ * Schlüssel gehen beim nächsten Aufruf mit (`have`), unveränderte Stücke kommen dann ohne Puffer
+ * zurück und bleiben dieselben Objekte (auch für GPU-Chunks und gehaltene Puffer).
+ */
+const chunkStores = new Map<string, Map<number, DecodedPlanBuf>>();
+const MAX_CHUNK_STORES = 16;
+
 const DETAIL_CODE: Record<DetailLevel, number> = { grob: 0, mittel: 1, fein: 2 };
 
 /**
@@ -855,54 +872,70 @@ function planDomains(
   scale: number,
   forPrint: boolean,
   compact: boolean,
+  /** Stücke vom letzten Aufruf wiederverwenden (gleiche Objekte). */
+  reuse = true,
 ): DomainPrims {
-  const codes = new Set<string>();
-  let any = false;
-  const take = (list: ReadonlyArray<{ floorId: string; categoryCode: string }> | undefined) => {
-    for (const e of list ?? []) {
-      if (e.floorId !== floorId) continue;
-      codes.add(e.categoryCode);
-      any = true;
-    }
-  };
-  take(project.ceilings);
-  take(project.roofs);
-  take(project.rooms);
-  take(project.columns);
-  take(project.walls);
-  take(project.stairs);
-  for (const d of project.drawings2d) {
-    if (d.levelId !== floorId) continue;
-    codes.add(d.categoryCode);
-    any = true;
-  }
-  if (global) {
-    // Kontext-Objekte ohne Kategorie sind immer sichtbar; Schnittlinien hängen an "90".
-    for (const o of project.context ?? []) {
-      if (o.type === "image") continue;
-      any = true;
-      if (o.categoryCode !== undefined) codes.add(o.categoryCode);
-    }
-    if (project.drawingLevels.some((l) => (l.kind === "section" || l.kind === "elevation") && l.linePoints)) {
-      any = true;
-      codes.add("90");
-    }
-  }
-  if (!any && !(project.extrudedSolids ?? []).some((x) => x.levelId === floorId)) return NO_DOMAINS;
-  for (const o of project.openings ?? []) codes.add(o.categoryCode);
+  // Sichtbar und gezeichnet bzw. gedimmt: über die sichtbaren Codes (wenige), nicht über alle
+  // Elemente — der Kern zeichnet ein Element genau dann, wenn sein Code in `show` steht.
   const show: string[] = [];
   const grey: string[] = [];
-  for (const c of codes) {
-    if (!visibleCodes.has(c)) continue;
+  for (const c of visibleCodes) {
     const d = categoryDisplay(c);
     if (!d.render) continue;
     show.push(c);
     if (d.greyed) grey.push(c);
   }
   const args = JSON.stringify({ floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact });
-  const buf = decodePlanBuf(documentFor(project).queryBin("planDomains", [DETAIL_CODE[detail] ?? 1], args));
-  if (buf.groups.length !== N_GROUPS) throw new Error("planDomains: unerwartete Gruppen im Plan-Puffer");
-  return { buf, args };
+  const held = reuse ? chunkStores.get(args) : undefined;
+  const query = held && held.size ? `${args.slice(0, -1)},"have":[${[...held.keys()].join(",")}]}` : args;
+  const res = readPlanMulti(documentFor(project).queryBin("planDomains", [DETAIL_CODE[detail] ?? 1], query), held);
+  if (res.main.groups.length !== N_GROUPS) throw new Error("planDomains: unerwartete Gruppen im Plan-Puffer");
+  if (reuse) {
+    chunkStores.delete(args);
+    chunkStores.set(args, res.store);
+    if (chunkStores.size > MAX_CHUNK_STORES) chunkStores.delete(chunkStores.keys().next().value!);
+  }
+  return { buf: res.main, chunks: res.chunks, args };
+}
+
+/**
+ * Antwort von `planDomains` lesen: `[PLAN_MULTI_MAGIC, n, Länge Haupt, (Schlüssel, Länge | −1) × n]`,
+ * dann Haupt-Puffer und mitgelieferte Stücke (je auf 8 Bytes aufgefüllt); Länge −1 = Stück aus `held`.
+ */
+function readPlanMulti(
+  input: Uint8Array,
+  held: Map<number, DecodedPlanBuf> | undefined,
+): { main: DecodedPlanBuf; chunks: DecodedPlanBuf[]; store: Map<number, DecodedPlanBuf> } {
+  const bytes = input.byteOffset % 8 === 0 ? input : input.slice();
+  // Fehlerpuffer des Kerns: `decodePlanBuf` wirft dessen Meldung.
+  if (bytes.byteLength < 24 || new Float64Array(bytes.buffer, bytes.byteOffset, 1)[0] !== PLAN_MULTI_MAGIC) {
+    return { main: decodePlanBuf(bytes), chunks: [], store: new Map() };
+  }
+  const h = new Float64Array(bytes.buffer, bytes.byteOffset, 3);
+  const n = h[1];
+  const head = new Float64Array(bytes.buffer, bytes.byteOffset, 3 + 2 * n);
+  const pad = (len: number) => len + ((8 - (len % 8)) % 8);
+  let off = head.length * 8;
+  const main = decodePlanBuf(bytes.subarray(off, off + h[2]));
+  off += pad(h[2]);
+  const chunks: DecodedPlanBuf[] = [];
+  const store = new Map<number, DecodedPlanBuf>();
+  for (let i = 0; i < n; i++) {
+    const key = head[3 + 2 * i];
+    const len = head[4 + 2 * i];
+    let c: DecodedPlanBuf | undefined;
+    if (len < 0) {
+      c = held?.get(key);
+      if (!c) throw new Error("planDomains: Zeichnungs-Stück fehlt");
+    } else {
+      // Eigene Kopie: ein behaltenes Stück hält so nicht die ganze Antwort fest.
+      c = decodePlanBuf(bytes.slice(off, off + len));
+      off += pad(len);
+    }
+    chunks.push(c);
+    store.set(key, c);
+  }
+  return { main, chunks, store };
 }
 
 /**
@@ -911,7 +944,6 @@ function planDomains(
  * nicht enthält. `build` holt die Linien einer Teilmenge bei Bedarf (`drawingLines`).
  */
 function underlayGroups(project: Project, dom: DomainPrims, scaleDenominator: number): UnderlayGroup[] {
-  if (!dom.args) return [];
   const bytes = documentFor(project).queryBin("drawingUnderlay", [1], dom.args);
   if (bytes.byteLength % 8 !== 0) throw new Error("drawingUnderlay: unerwartete Antwort");
   const f = new Float64Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));

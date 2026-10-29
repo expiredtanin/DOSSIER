@@ -317,6 +317,22 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     kompakte Unterlage arbeiten (Linien bleiben im Puffer; `viewportContent` fordert sie heute immer an). Das erste Öffnen eines
     sehr grossen Dokuments ist im WASM langsam (200 000 Zeichnungen ~20 s, Speicherwachstum; vorher genauso, betrifft jetzt aber
     auch reine Zeichnungsprojekte in CLI/Tests, die vorher kein Dokument brauchten).
+    ✅ (29.10.) **Plan-Cache im Kern** ([K4]/[K3d], Leistung): `plan/cache.rs` je Argument-Satz (Geschoss, Detail, Massstab …).
+    Übrige Domänen als fertige Abschnitte mit behaltenen String-/Schraffur-Tabellen (gültig, solange sich ausser den Zeichnungen
+    nichts ändert); 2D-Zeichnungen in inhaltsbestimmten Stücken (~256 Elemente, eigener Plan-Puffer je Stück, Schlüssel aus den
+    Element-Ständen): `planDomains` liefert den Haupt-Puffer und nur die Stücke, die TS noch nicht hat (`have`, Antwort „PLBm“);
+    ein geändertes Stück kopiert seine unveränderten Elemente fertig geschrieben in Läufen (`plan_buf::Kept`). Dokument: Element-
+    Stände (`Revs`, neu bei `add`/`replace`), typisierte Sicht nach `replace` nur das Element (`model/items.rs`), id-Positionen über
+    die Aufrufe gemerkt; `fieldOps` erkennt an Ort und Stelle ersetzte Elemente ohne Mengen. WASM-Heap wächst in grossen Schritten
+    (`wasm_alloc.rs`: jedes `memory.grow` kostete ~0,5 ms, beim ersten Öffnen ~20 000 Mal). Gehaltene Puffer eines Plans fallen in
+    einer Runde nicht weg (`plan_buf_round_begin/end`, bis 4096 Puffer/256 MB). Gleichheit: Kern-Test mit/ohne Cache (Primitive,
+    Hashes, Linienzüge, Ausmass) über Zufallsänderungen inkl. Undo/Laden/Argumentwechsel und verlorene Stücke; CLI byte-gleich
+    (45 Ausgaben: `plan` SVG 1:100/1:50 + JSON, `dxf` 1:100/1:50 für 9 Projekte). Ein Linienzug über eine Stückgrenze entfällt
+    (gäbe es nur bei doppelten ids). Messung (vitest/Node, `--no-opt`, Container unter Last, Median): katbig 10k Zeichnungen
+    `generatePlan` unverändert 40 → 2,5 ms, nach einer Änderung 55 → 6 ms (TS alt 13 ms), Abgleich `documentFor` 18 → 0,6 ms;
+    20k Linien 31 → 6 ms / 63 → 7 ms; Kataster 150k 533 → 59 ms / 862 → 39 ms; Plan + WASM-Renderer nach Änderung katbig 90 →
+    38 ms, Kataster 1,8 → 0,6 s. Erstes Öffnen 200 000 Zeichnungen (`doc_open`) 9,6 → 1,8 s, Speicher 953 → 840 MB.
+    Nicht in der Tauri-App/im nativen Renderer angesehen.
   - ◐ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
     **Erste Etappe (28.10.): Ops, Prüfung, Undo/Redo im Kern.** `core/src/ops.rs` (Op, Prüfung bitgleich zur TS-Fassung — gleiche

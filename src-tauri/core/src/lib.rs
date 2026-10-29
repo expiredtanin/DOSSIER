@@ -72,6 +72,7 @@ pub mod ifc_stairs;
 pub mod ifc_data;
 pub mod mesh_data;
 pub mod groups;
+pub mod wasm_alloc;
 
 #[cfg(feature = "web")]
 mod web;
