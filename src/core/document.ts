@@ -54,6 +54,7 @@ export type QueryName =
   | "drawingLines"
   | "drawingPrims"
   | "levelMarkers"
+  | "planUnderlay"
   | "sectionPlan"
   | "elevationPlan"
   | "modelJson";

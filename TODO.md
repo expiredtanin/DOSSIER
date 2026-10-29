@@ -124,6 +124,14 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Decken-/Treppen-Bändern als Plan-Schraffur durch (GPU: Diagonale, SVG: keine) — jetzt die vorgesehene
     Rückfall-Schraffur. Ursache bleibt offen: `slabSegmentOwners` zählt Decken, das Schnitt-Modell emittiert je
     Deckenschicht und Treppentritt eine Platte (Index-Versatz; mehrschichtige Decken im Schnitt falsch geschichtet).
+    ✅ Behoben (29.10.): Besitzer kommen aus dem Schnitt-Modell statt aus Zählungen — `RSlab::source` (Decke + Schicht bzw.
+    Treppe), Wände über `RWall::wall_id`; `wall_segment_owners`/`slab_segment_owners`/`split_slab_layers` gelöscht. Jede
+    Deckenschicht ist ihr eigenes Band mit ihrem Bauteil (vorher wurde jede Schicht-Platte nochmals in alle Schichten geteilt,
+    ein Teil fiel auf die Rückfall-Schraffur); Treppentritte tragen Treppe/Kategorie, auch für die Tiefe (Mitte des Tritts).
+    Dächer gehen nicht mehr zusätzlich durch render3d (ungestylte Doppel-Bänder je Schicht × Fläche unter den gestylten,
+    Besitzer per Index falsch); von der Dominanz beschnittene Stücke behalten Kategorie und Treppe (Ebene aus → weg).
+    Gewollte Ausgabe-Änderung: nur Schnitte (CLI byte-gleich für Plan/Ansicht auf 9 Projekten, 18 Schnitte geändert,
+    angesehen: Beispiel, mehrschichtige Decken 4/2/1 Schichten mit Aussparung, 2 Treppen, 2 Dächer); Golden `schnitt.svg` neu.
     Leistung (29.10., Ausgabe bitgleich, Gleichheitstest nach jedem Schritt): render3d-Verdeckung über ein u-Raster mit nach
     Tiefe sortierten Zellen und Abbruch bei ganz verdeckter Kante (vorher jede Kante gegen jedes Prisma); Ansicht: Verdecker,
     Schatten, Eck-Verlängerung über Raster (`ugrid.rs`), Linien-Clipping nah→fern mit Abbruch; Schnitt-Dominanz nur gegen
@@ -133,6 +141,18 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Der Kern merkt sich die zuletzt vorbereiteten Schnitte (Schlüssel je `computeSection`): Schwarz-Weiss/Sichtbarkeit
     umschalten 8×8 ~1 ms statt Neurechnen. Offen: Szene mit vielen verdeckten (gestrichelten) Kanten bleibt teuer
     (16×16 mit verdeckten Kanten ~2,5 s, Strichmuster-Zerlegung in `plan_scene`).
+    ✅ (29.10.) Strichmuster im render2d-Shader statt CPU-Zerlegung: gestrichelte Linien/Züge/Umrisse gehen je Segment als
+    EINE Instanz (`DashSegment`: Lauflänge, Zuglänge, Muster bis 8 Einträge) an die neue Strich-Pipeline (`DASH_LINE_WGSL`); der
+    Fragment-Shader setzt Striche, Lücken und runde Strich-Enden je Pixel (Semantik wie `split_dash`, CPU-Spiegel
+    `dash_coverage` gegen die alte Zerlegung getestet; längere Muster zerlegt weiter die CPU). Die Zerlegung lag in
+    `render2d::tessellate` (nicht `plan_scene`) und war das eigentliche Problem: big16-Schnitt S2 (385 000 verdeckte Kanten)
+    173 Mio. Linien-Vertices/409 Mio. Indizes, `compile_scene` 9 s nativ — und schon 6×6 überschritt die WebGPU-Puffergrenze
+    (256 MB, „Buffer size … greater than the maximum“), der Schnitt wurde gar nicht gezeichnet. Jetzt 0,36 Mio. Vertices +
+    25 MB Instanzen, `compile_scene` ~0,1–0,9 s (Container unter Last). Bilder (Headless, lavapipe, `render_png --scene`):
+    13 Ausschnitte Schnitt/Plan alt vs. neu ≤ 0,09 % Pixel abweichend (Kanten-AA), Strich-Enden rund wie vorher.
+    SVG/PDF/DXF unberührt. Offen: Kern-Seite bleibt (big16 S2: Schnitt-Primitive 0,37 s, `planSceneBin` 0,45 s); der
+    Chunk-Pfad (`gpu_compile.rs`, WebGL/nativ-Chunks) zeichnet Striche weiterhin durchgezogen. Nicht in der Tauri-App/Metal und
+    nicht im Browser-WebGPU angesehen (nur lavapipe/Vulkan headless).
     TS-Fassung gelöscht (29.10.): `toSection.ts`/`toElevation.ts` sind dünne Fassaden (Ebene, Sichtbarkeit, truck-Körper →
     Abfrage), `sectionOpenings.ts`, `sectionExtras.ts`, `meshSection.ts`, `generateSectionPlan`/`resolve*SectionStyle` in
     `generatePlan.ts`, `windowSymbol` (opening.ts), `keyhole`/`voidSectionRects`/`subtractVoidsInSection` (voids.ts) und ihre
@@ -142,6 +162,13 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     render3d-Verdeckung) nicht neu gebaut.
     Bleibt in TS: `planUnderlay.ts` (legt den TS-Grundriss unter Schnitt/Ansicht; zieht mit `generatePlan`/`drawing2d.ts` um),
     das Bauen der truck-Körper (asynchron, eigenes WASM).
+    ✅ (29.10.) Grundriss-Unterlage im Kern: `plan/underlay.rs`, Abfrage `planUnderlay` (Argumente wie `planDomains` + Ebene +
+    `minY`) liest den Grundriss aus den Plan-Caches (Haupt-Puffer + Zeichnungs-Stücke), bildet ab (Drehung/Verschiebung,
+    Schraffurwinkel, Bilder nur ohne Drehung), dimmt, entfernt die Auswahl-Ids und hängt die Schnittlinie an; TS-Fassade
+    `planUnderlayPrimitives(project, level, floorId, minY, …)` in `generatePlan.ts` (dort auch `crossKindOverlayAllowed`).
+    `planUnderlay.ts` gelöscht, seine Tests als Rust-Tests. Gleichheit gegen die TS-Fassung (Object.is, inkl. Strip der Ids):
+    456 Fälle / 142 405 Primitive (9 Projekte inkl. 2D-Zeichnungen, Schnitt-/Ansichtslinien + schräg/senkrecht/beide
+    Blickrichtungen, Mono/Detail/Massstab). Nicht in der App angesehen (e2e grün).
     (Die automatischen Höhenkoten `levelMarkers.ts` rechnet seit 29.10. der Kern, Abfrage `levelMarkers`.)
   - ◐ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
     typisierte Modell (Bauteil-Typen, Schraffuren, Linienstile, Kategorien) und einen Plan-Puffer v2 mit Pick-IDs + vollem `Primitive`-Umfang
@@ -390,6 +417,11 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     20k Linien 31 → 6 ms / 63 → 7 ms; Kataster 150k 533 → 59 ms / 862 → 39 ms; Plan + WASM-Renderer nach Änderung katbig 90 →
     38 ms, Kataster 1,8 → 0,6 s. Erstes Öffnen 200 000 Zeichnungen (`doc_open`) 9,6 → 1,8 s, Speicher 953 → 840 MB.
     Nicht in der Tauri-App/im nativen Renderer angesehen.
+    Behoben (29.10.): je nach Code-Layout brach der WASM-Kern mit „assertion failed: psize >= size + min_overhead“ (dlmalloc)
+    ab, z. B. bei jedem Dach (`roof::compute_canonical`). Ursache: LTO bettete `GrowAhead::dealloc` samt std-dlmalloc
+    (`validate_size` liest den Chunk-Kopf vor dem Zeiger) in Funktionen ein, die den Block selbst angelegt hatten; LLVM wertete den
+    Lesezugriff ausserhalb der frischen Allokation als undefiniert und erzeugte eine bedingungslose Panik (im `wasm-objdump` sichtbar).
+    Die Allokator-Hülle ist jetzt `#[inline(never)]`. Gefunden mit einem Kern, der nach einer harmlosen Änderung reproduzierbar kippte.
     ✅ (29.10.) **`generatePlan` ganz im Kern** ([K3a]/[K3d]/[K4]): `core/src/plan/extras.rs` rechnet Schattenstudie und Baurecht
     (unterste Gruppe; Verstösse zuoberst), Abzugskörper (aus Wand-/Stützen-/Decken-Poché, über dieselben flachen Funktionen wie
     vorher), Schwarz-Weiss und Strichstärken nach Massstab (beim Schreiben, `plan_buf::Writer::post`, auch für die kompakte

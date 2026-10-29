@@ -241,7 +241,7 @@ export {
 export {
   crossKindOverlayAllowed,
   planUnderlayPrimitives,
-} from "../plan/planUnderlay";
+} from "../plan/generatePlan";
 
 export {
   type Bounds,
