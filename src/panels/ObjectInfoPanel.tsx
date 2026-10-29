@@ -36,6 +36,7 @@ import type {
   WallReferenceLine,
 } from "../model/types";
 import { SIA_CATEGORIES, siaLabelFull } from "../core";
+import type { EdgeSpec, RoofEdge } from "../core";
 import { Dropdown } from "../ui/Dropdown";
 import type { DetailLevel } from "../model/viewTypes";
 import { ColorHexField } from "../ui/ColorHexField";
@@ -1042,18 +1043,24 @@ export function RoofSection({
 
       {/* Grundriss-Masse (Breite/Tiefe): das Umriss-Rechteck neu bilden, die
           untere/linke Ecke (minX/minY) bleibt fix. */}
-      {numField("objinfo.roof.width", roof.width, 0.1, (v) => {
-        const w = Math.max(0.2, v);
-        host.onSetRoofPatch({
-          outline: rectOutline(roof.minX, roof.minY, w, roof.depth),
-        });
-      })}
-      {numField("objinfo.roof.depth", roof.depth, 0.1, (v) => {
-        const d = Math.max(0.2, v);
-        host.onSetRoofPatch({
-          outline: rectOutline(roof.minX, roof.minY, roof.width, d),
-        });
-      })}
+      {/* Mit Innenhöfen oder Kanten ausserhalb eines Vierecks würde das Rechteck die Höfe/Kantenneigungen
+          zerstören — dort entfallen Breite/Tiefe. */}
+      {roof.holes.length === 0 &&
+        roof.edges.length === 4 &&
+        numField("objinfo.roof.width", roof.width, 0.1, (v) => {
+          const w = Math.max(0.2, v);
+          host.onSetRoofPatch({
+            outline: rectOutline(roof.minX, roof.minY, w, roof.depth),
+          });
+        })}
+      {roof.holes.length === 0 &&
+        roof.edges.length === 4 &&
+        numField("objinfo.roof.depth", roof.depth, 0.1, (v) => {
+          const d = Math.max(0.2, v);
+          host.onSetRoofPatch({
+            outline: rectOutline(roof.minX, roof.minY, roof.width, d),
+          });
+        })}
 
       {/* Überstand: Traufe (senkrecht zum First) + Ortgang (Giebelseite). */}
       {numField("objinfo.roof.overhang", roof.overhang, 0.05, (v) =>
@@ -1075,6 +1082,46 @@ export function RoofSection({
         host.onSetRoofPatch({ baseElevation: v }),
       )}
 
+      {/* Kanten: Neigung je Kante (leer = Standard) und Giebel ([26]). Wirkt bei Sattel/Walm/
+          Mansarde/Zelt; Flach und Pult ignorieren sie. */}
+      {roof.shape !== "flach" && roof.shape !== "pult" && (
+        <RoofEdgesSection roof={roof} host={host} />
+      )}
+      {/* Innenhöfe: Liste mit Entfernen, Hinzufügen über den Befehl „Dachhof“. */}
+      {roof.shape !== "pult" && (
+        <>
+          <div className="objinfo-sep" />
+          <div className="objinfo-section-label">{t("objinfo.roof.courts")}</div>
+          {roof.holes.map((h, i) => (
+            <div className="objinfo-field" key={i}>
+              <span className="objinfo-flabel objinfo-muted">
+                {t("objinfo.roof.courtRow", { n: i + 1, area: h.area.toFixed(2) })}
+              </span>
+              <button
+                type="button"
+                className="objinfo-typebtn"
+                title={t("objinfo.roof.courtRemove")}
+                aria-label={t("objinfo.roof.courtRemove")}
+                onClick={() => host.onRemoveRoofHole(i)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <div className="objinfo-field">
+            <button
+              type="button"
+              className="objinfo-typebtn"
+              title={t("objinfo.roof.courtAdd")}
+              onClick={() => host.onRunCommand("roofhole")}
+            >
+              {t("objinfo.roof.courtAddBtn")}
+            </button>
+          </div>
+        </>
+      )}
+      <div className="objinfo-sep" />
+
       {/* Abgeleitete Werte (read-only). */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.roof.ridgeHeight")}</span>
@@ -1084,6 +1131,77 @@ export function RoofSection({
         <span className="objinfo-flabel">{t("objinfo.roof.area")}</span>
         <span className="objinfo-fval">{roof.footprintArea.toFixed(2)} m²</span>
       </div>
+    </>
+  );
+}
+
+/** Kantenliste eines Dachs: Neigung je Kante (leer = Standard) + Giebel-Schalter. */
+function RoofEdgesSection({
+  roof,
+  host,
+}: {
+  roof: RoofInfo;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  // Tippen einer Zahl = ein Undo-Schritt je Kante (gleicher coalesceKey, s. Host).
+  const setEdge = (e: RoofEdge, spec: EdgeSpec) => host.onSetRoofEdge(e.index, spec);
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.roof.edges")}</div>
+      {roof.edges.map((e) => {
+        const label =
+          e.ring === 0
+            ? t("objinfo.roof.edge", { n: e.edge + 1 })
+            : t("objinfo.roof.edgeCourt", { c: e.ring, n: e.edge + 1 });
+        const gable = e.spec.kind === "gable";
+        const placeholder = e.defaultGable ? t("objinfo.roof.edgeGable") : String(roof.pitchDeg);
+        return (
+          <div className="objinfo-field objinfo-roof-edge" key={e.index} data-edge={e.index}>
+            <span className="objinfo-flabel" title={`${e.length.toFixed(2)} m`}>
+              {label}
+            </span>
+            <input
+              type="number"
+              className="objinfo-text"
+              min={0}
+              max={89}
+              step={1}
+              disabled={gable}
+              placeholder={placeholder}
+              value={e.spec.kind === "pitch" ? Number(e.spec.deg.toFixed(2)) : ""}
+              aria-label={`${label}: ${t("objinfo.roof.edgePitch")}`}
+              title={t("objinfo.roof.edgePitch")}
+              onChange={(ev) => {
+                const raw = ev.target.value;
+                if (raw === "") return setEdge(e, { kind: "default" });
+                const v = Number(raw);
+                if (Number.isFinite(v)) setEdge(e, { kind: "pitch", deg: v });
+              }}
+            />
+            <label className="objinfo-muted" title={t("objinfo.roof.edgeGableHint")}>
+              <input
+                type="checkbox"
+                checked={gable}
+                aria-label={`${label}: ${t("objinfo.roof.edgeGable")}`}
+                onChange={(ev) => setEdge(e, ev.target.checked ? { kind: "gable" } : { kind: "default" })}
+              />
+              {t("objinfo.roof.edgeGable")}
+            </label>
+          </div>
+        );
+      })}
+      {roof.hasEdgePitch && (
+        <div className="objinfo-field">
+          <button
+            type="button"
+            className="objinfo-typebtn"
+            onClick={() => host.onSetRoofPatch({ edgePitchDeg: undefined })}
+          >
+            {t("objinfo.roof.edgesReset")}
+          </button>
+        </div>
+      )}
     </>
   );
 }

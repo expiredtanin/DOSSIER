@@ -23,6 +23,8 @@ export interface RoofPlane {
 export interface RoofGeometry {
   /** Traufe-Umriss (Grundriss, inkl. Überstand) als geschlossener Ring. */
   eaves: Vec2[];
+  /** Traufringe der Innenhöfe (`Roof.holes`, inkl. Überstand; der Hof schrumpft). */
+  eavesHoles: Vec2[][];
   /** Firstlinie(n) im Grundriss (leer bei Flach/Zelt). */
   ridges: [Vec2, Vec2][];
   /** Gratlinien (Walm/Zelt: Ecke → First/Spitze). */
@@ -74,7 +76,11 @@ const MANSARD_CODE = { giebel: 0, walm: 1, zelt: 2 } as const;
 
 function encodeRoof(roof: Roof): Float64Array {
   const pts = roof.outline;
-  const buf = new Float64Array(10 + 2 * pts.length);
+  const holes = roof.holes ?? [];
+  const edges = roof.edgePitchDeg;
+  let size = 10 + 2 * pts.length + 1 + 1 + (edges ? edges.length : 0);
+  for (const h of holes) size += 1 + 2 * h.length;
+  const buf = new Float64Array(size);
   buf[0] = SHAPE_CODE[roof.shape] ?? 0;
   buf[1] = roof.pitchDeg;
   buf[2] = roof.pitchUpperDeg ?? NaN;
@@ -85,10 +91,22 @@ function encodeRoof(roof: Roof): Float64Array {
   buf[7] = roof.overhangGable ?? NaN;
   buf[8] = roof.ridgeAxis === "y" ? 1 : 0;
   buf[9] = pts.length;
-  for (let i = 0; i < pts.length; i++) {
-    buf[10 + 2 * i] = pts[i].x;
-    buf[11 + 2 * i] = pts[i].y;
+  let i = 10;
+  for (const p of pts) {
+    buf[i++] = p.x;
+    buf[i++] = p.y;
   }
+  buf[i++] = holes.length;
+  for (const h of holes) {
+    buf[i++] = h.length;
+    for (const p of h) {
+      buf[i++] = p.x;
+      buf[i++] = p.y;
+    }
+  }
+  // Neigung je Kante: NaN = Feld fehlt, +∞ = Giebel (null), negativ = Standard.
+  buf[i++] = edges ? edges.length : NaN;
+  if (edges) for (const v of edges) buf[i++] = v === null ? Infinity : v;
   return buf;
 }
 
@@ -122,7 +140,13 @@ function decodeGeometry(b: Float64Array): RoofGeometry {
   const planes = polys().map((pts) => ({ pts }));
   const planesEnd = i;
   const gables = polys();
-  const geo: RoofGeometry = { eaves, ridges, hips, breaks, planes, gables, ridgeHeight };
+  const eavesHoles: Vec2[][] = [];
+  for (let n = b[i++]; n > 0; n--) {
+    const ring: Vec2[] = [];
+    for (let m = b[i++]; m > 0; m--) ring.push(pt());
+    eavesHoles.push(ring);
+  }
+  const geo: RoofGeometry = { eaves, eavesHoles, ridges, hips, breaks, planes, gables, ridgeHeight };
   planesFlat.set(geo, b.subarray(planesStart, planesEnd));
   return geo;
 }

@@ -178,6 +178,8 @@ impl Roof {
             overhang: self.overhang,
             overhang_gable: self.overhang_gable,
             ridge_axis: if self.ridge_axis == RoofRidgeAxis::Y { Axis::Y } else { Axis::X },
+            holes: self.holes.as_deref().unwrap_or(&[]).iter().map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect(),
+            edge_pitch_deg: self.edge_pitch_deg.clone(),
         }
     }
 }

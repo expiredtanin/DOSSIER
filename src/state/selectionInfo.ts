@@ -58,7 +58,8 @@ import {
   wallVerticalExtent,
 } from "../model/wall";
 import { ceilingArea, outlineBBox } from "../core";
-import { roofBBox, roofBaseElevation, roofGeometry } from "../core";
+import { roofBBox, roofBaseElevation, roofEdgeList, roofGeometry } from "../core";
+import type { RoofEdge } from "../core";
 import { openingGapQuad, openingVerticalExtent } from "../core";
 import { stairGeometry, stairBBox } from "../core";
 
@@ -115,6 +116,12 @@ export interface RoofInfo {
   /** Untere/linke Ecke der Bounding-Box (fix beim Breite/Tiefe-Resize). */
   minX: number;
   minY: number;
+  /** Kanten (Umriss, dann Höfe) mit Neigungsvorgabe ([26], `roofEdgeList`). */
+  edges: RoofEdge[];
+  /** Innenhöfe: Fläche (m²) und Punktzahl je Hof, in der Reihenfolge von `Roof.holes`. */
+  holes: { area: number; points: number }[];
+  /** Ob `edgePitchDeg` gesetzt ist. */
+  hasEdgePitch: boolean;
 }
 
 /**
@@ -867,6 +874,9 @@ function roofSelection(project: Project, roof: Roof): Selection {
     depth: Math.abs(bb.y1 - bb.y0),
     minX: bb.x0,
     minY: bb.y0,
+    edges: roofEdgeList(roof),
+    holes: (roof.holes ?? []).map((h) => ({ area: Math.abs(polygonArea(h)), points: h.length })),
+    hasEdgePitch: roof.edgePitchDeg !== undefined,
   };
   return {
     kind: "roof",

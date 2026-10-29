@@ -128,6 +128,15 @@ export {
 } from "../geometry/roof";
 
 export {
+  addRoofHole,
+  removeRoofHole,
+  roofEdgeList,
+  roofHoleWorks,
+  setRoofEdge,
+} from "../geometry/roofEdges";
+export type { EdgeSpec, RoofEdge } from "../geometry/roofEdges";
+
+export {
   SIA_CATEGORIES,
   balance,
   centroid,

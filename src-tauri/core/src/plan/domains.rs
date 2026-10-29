@@ -300,11 +300,18 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             .unwrap_or_else(no_hatch);
         let eaves: Vec<Vec2> = geo.eaves.iter().map(|q| pv(*q)).collect();
         if eaves.len() >= 3 {
-            out.push(polygon(eaves.clone(), "none", "none", 0.0, view_hatch, greyed, None, Pick::Roof(&roof.id)));
+            // Innenhöfe ([26]): als Loch in die Fläche eingebunden (Brücken-Kanten ohne Strich).
+            let merged = crate::polygon_holes::merge_holes(&geo.eaves, &geo.eaves_holes, 1e-4);
+            let ring: Vec<Vec2> = if geo.eaves_holes.is_empty() { eaves.clone() } else { merged.ring.iter().map(|q| pv(*q)).collect() };
+            let bridges = (!merged.bridge_edges.is_empty()).then(|| merged.bridge_edges.iter().map(|&k| k as f64).collect());
+            out.push(polygon(ring, "none", "none", 0.0, view_hatch, greyed, bridges, Pick::Roof(&roof.id)));
         }
-        let n = eaves.len();
-        for i in 0..n {
-            out.push(line(eaves[i], eaves[(i + 1) % n], "roof-eaves", ROOF_EAVES_MM, None, stroke, greyed));
+        for ring in std::iter::once(&geo.eaves).chain(geo.eaves_holes.iter()) {
+            let pts: Vec<Vec2> = ring.iter().map(|q| pv(*q)).collect();
+            let n = pts.len();
+            for i in 0..n {
+                out.push(line(pts[i], pts[(i + 1) % n], "roof-eaves", ROOF_EAVES_MM, None, stroke, greyed));
+            }
         }
         for l in &geo.ridges {
             out.push(line(pv(l[0]), pv(l[1]), "roof-ridge", ROOF_RIDGE_MM, None, stroke, greyed));

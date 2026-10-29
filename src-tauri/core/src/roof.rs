@@ -11,7 +11,7 @@
 //! Koordinaten: Grundriss (x, y) in Metern; 3D-Punkte [x, y, z] mit z = Höhe.
 //! Portiert aus `src/geometry/roof.ts` (dort bleiben Typen, Memo und `roofBaseElevation`).
 
-use crate::roof_skeleton::{clean_ring, convex_pieces, hip_roof, is_rectilinear_non_rect, is_skeleton_roofable, offset_ring, signed_area, Axis, Knee, Line, Offset, P2, P3};
+use crate::roof_skeleton::{clean_ring, convex_pieces, hip_roof, is_gable_edge, is_rectilinear_non_rect, is_simple_ring, is_skeleton_roofable, offset_ring, point_in_ring, rings_cross, signed_area, weighted_roof, Axis, Knee, Line, Offset, P2, P3};
 
 /// Dachform (`RoofShape` im TS-Modell).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +45,11 @@ pub struct RoofParams {
     pub overhang: f64,
     pub overhang_gable: Option<f64>,
     pub ridge_axis: Axis,
+    /// Innenhöfe (Ringe, Drehsinn egal); leer = keine.
+    pub holes: Vec<Vec<P2>>,
+    /// Neigung je Umrisskante (erst `outline`, dann die Höfe Ring für Ring), s. `Roof.edgePitchDeg`:
+    /// `None` = Giebel, negativ = Standard. Das Feld fehlt ganz = `None` am Parameter.
+    pub edge_pitch_deg: Option<Vec<Option<f64>>>,
 }
 
 /// Vollständige Dach-Geometrie (Grundriss-Linien + 3D-Flächen), wie `RoofGeometry` in TS.
@@ -52,6 +57,8 @@ pub struct RoofParams {
 pub struct RoofGeometry {
     /// Traufe-Umriss (inkl. Überstand), offener Ring.
     pub eaves: Vec<P2>,
+    /// Traufringe der Innenhöfe (inkl. Überstand, der Hof schrumpft), offene Ringe.
+    pub eaves_holes: Vec<Vec<P2>>,
     pub ridges: Vec<Line>,
     pub hips: Vec<Line>,
     pub breaks: Vec<Line>,
@@ -93,7 +100,7 @@ fn compute_canonical(x0: f64, y0: f64, x1: f64, y1: f64, e: f64, p: &RoofParams)
     let tan = a.tan();
     let h = half_d * tan; // Firsthöhe (Sattel/Walm/Mansarde)
     let eaves = vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
-    let geo = |ridges, hips, breaks, planes, gables, ridge_height| RoofGeometry { eaves: eaves.clone(), ridges, hips, breaks, planes, gables, ridge_height };
+    let geo = |ridges, hips, breaks, planes, gables, ridge_height| RoofGeometry { eaves: eaves.clone(), eaves_holes: vec![], ridges, hips, breaks, planes, gables, ridge_height };
 
     match p.shape {
         Shape::Flach => geo(vec![], vec![], vec![], vec![vec![[x0, y0, e], [x1, y0, e], [x1, y1, e], [x0, y1, e]]], vec![], 0.0),
@@ -281,6 +288,11 @@ pub fn roof_geometry(p: &RoofParams, eaves_z: f64) -> RoofGeometry {
     }
     let e = if eaves_z.is_finite() { eaves_z } else { 0.0 };
     let p = &RoofParams { outline, ..p.clone() };
+    // Höfe und/oder Neigung je Kante: gewichteter Skeleton über alle Ringe; scheitert er
+    // (ungültige Höfe, Budget), gilt das Dach wie ohne diese Felder.
+    if let Some(g) = custom_roof(p, e) {
+        return g;
+    }
     // Walm/Sattel/Mansarde/Zelt über einem rechtwinkligen, nicht-rechteckigen Grundriss
     // (L/T/U …): echte Flächen mit Graten und Kehlen statt Bounding-Box. Zelt/Mansard-Zelt:
     // eine einzelne Spitze gibt es dort nicht — Gegenstück ist das allseitig geneigte Skelett.
@@ -311,6 +323,7 @@ pub fn roof_geometry(p: &RoofParams, eaves_z: f64) -> RoofGeometry {
     let g = compute_canonical(y0, x0, y1, x1, e, p);
     RoofGeometry {
         eaves: g.eaves.iter().map(|q| [q[1], q[0]]).collect(),
+        eaves_holes: vec![],
         ridges: g.ridges.iter().map(swap_line).collect(),
         hips: g.hips.iter().map(swap_line).collect(),
         breaks: g.breaks.iter().map(swap_line).collect(),
@@ -366,7 +379,163 @@ fn skeleton_roof(p: &RoofParams, e: f64) -> RoofGeometry {
         None
     };
     let sk = hip_roof(&eaves, tan, e, axis, knee);
-    RoofGeometry { eaves, ridges: sk.ridges, hips: sk.hips, breaks: sk.breaks, planes: sk.planes, gables: sk.gables, ridge_height: sk.ridge_height }
+    RoofGeometry { eaves, eaves_holes: vec![], ridges: sk.ridges, hips: sk.hips, breaks: sk.breaks, planes: sk.planes, gables: sk.gables, ridge_height: sk.ridge_height }
+}
+
+/// Kantenvorgabe aus `edgePitchDeg` (nach Aufräumen des Rings mitgeführt).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EdgeSpec {
+    Default,
+    Gable,
+    Pitch(f64),
+}
+
+fn edge_spec(p: &RoofParams, index: usize) -> EdgeSpec {
+    match p.edge_pitch_deg.as_ref().and_then(|v| v.get(index)) {
+        None => EdgeSpec::Default,
+        Some(None) => EdgeSpec::Gable,
+        Some(Some(v)) if v.is_finite() && *v >= 0.0 => EdgeSpec::Pitch(v.min(89.0)),
+        Some(Some(_)) => EdgeSpec::Default,
+    }
+}
+
+/// Doppelte/kollineare Punkte entfernen und den Ring ausrichten (`ccw`); die Kantenvorgabe je
+/// Kante (Kante i = Punkt i → i+1) läuft mit. Kollineare Punkte zwischen verschieden
+/// vorgegebenen Kanten bleiben stehen.
+fn clean_tagged(pts: &[P2], tags: &[EdgeSpec], ccw: bool) -> (Vec<P2>, Vec<EdgeSpec>) {
+    let (mut pts, mut tags) = (pts.to_vec(), tags.to_vec());
+    // Doppelte Punkte: die Kante ohne Länge entfällt (Punkt i+1 fällt weg, Kante i mit ihm).
+    let mut i = 0;
+    while pts.len() > 3 && i < pts.len() {
+        let n = pts.len();
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        if (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-9 {
+            if i + 1 < n {
+                pts.remove(i + 1);
+                tags.remove(i);
+            } else {
+                // Letzter Punkt = erster: Punkt n-1 und seine Kante n-1 entfallen.
+                pts.remove(n - 1);
+                tags.remove(n - 1);
+            }
+        } else {
+            i += 1;
+        }
+    }
+    // Kollineare Punkte (Punkt j zwischen Kante j-1 und j, gleiche Vorgabe).
+    let mut changed = true;
+    while changed && pts.len() > 3 {
+        changed = false;
+        let m = pts.len();
+        for j in 0..m {
+            let (a, b, c) = (pts[(j + m - 1) % m], pts[j], pts[(j + 1) % m]);
+            let cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+            if cr.abs() < 1e-9 && tags[(j + m - 1) % m] == tags[j] {
+                pts.remove(j);
+                tags.remove(j);
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (signed_area(&pts) > 0.0) != ccw {
+        // Gespiegelter Umlauf: Kante j' (Punkt j' → j'+1) ist die frühere Kante n-2-j'.
+        let n = pts.len();
+        pts.reverse();
+        tags = (0..n).map(|j| tags[(2 * n - 2 - j) % n]).collect();
+    }
+    (pts, tags)
+}
+
+/// Dach mit Innenhöfen und/oder Neigung je Kante (Sattel/Walm/Mansarde/Zelt; Flach nur mit
+/// Höfen): alle Ringe in den gewichteten Skeleton ([`weighted_roof`]). `None`, wenn die Felder
+/// fehlen/wirkungslos sind oder die Eingabe nicht taugt — der Aufrufer rechnet dann wie bisher.
+fn custom_roof(p: &RoofParams, e: f64) -> Option<RoofGeometry> {
+    let flat = p.shape == Shape::Flach;
+    let gabled_shape = matches!(p.shape, Shape::Sattel | Shape::Walm | Shape::Mansarde | Shape::Zelt);
+    if !(gabled_shape || flat) || (p.holes.is_empty() && (flat || p.edge_pitch_deg.is_none())) {
+        return None;
+    }
+    // Ringe mit Kantenvorgaben (Index über die ungesäuberten Ringe, wie im Modell).
+    let mut base = 0usize;
+    let mut raw: Vec<(Vec<P2>, Vec<EdgeSpec>)> = Vec::new();
+    for (k, ring) in std::iter::once(&p.outline).chain(p.holes.iter()).enumerate() {
+        let specs: Vec<EdgeSpec> = (0..ring.len()).map(|i| if flat { EdgeSpec::Default } else { edge_spec(p, base + i) }).collect();
+        base += ring.len();
+        if ring.iter().any(|q| !q[0].is_finite() || !q[1].is_finite()) {
+            if k == 0 {
+                return None;
+            }
+            continue; // kaputter Hof: weglassen
+        }
+        raw.push(clean_tagged(ring, &specs, k == 0));
+    }
+    // Aussenring CCW, Höfe CW.
+    let mut raw = raw.into_iter();
+    let (outer, outer_specs) = raw.next()?;
+    if !is_simple_ring(&outer) {
+        return None;
+    }
+    let mut rings: Vec<(Vec<P2>, Vec<EdgeSpec>)> = vec![(outer, outer_specs)];
+    for (h, hs) in raw {
+        rings.push(clean_tagged(&h, &hs, false));
+    }
+    // Gültigkeit der Höfe: einfach, ganz im Umriss, ohne Schnitt mit Umriss/anderen Höfen.
+    for k in 1..rings.len() {
+        let h = &rings[k].0;
+        let ok = is_simple_ring(h)
+            && !rings_cross(h, &rings[0].0)
+            && h.iter().all(|&q| point_in_ring(q, &rings[0].0))
+            && (1..rings.len()).filter(|&j| j != k).all(|j| !rings_cross(h, &rings[j].0) && !h.iter().any(|&q| point_in_ring(q, &rings[j].0)) && !rings[j].0.iter().any(|&q| point_in_ring(q, h)));
+        if !ok {
+            return None;
+        }
+    }
+    // Neigung je Kante: Giebel → None, sonst tan. Standard folgt der Formregel (Satteldach:
+    // Kanten quer zur Firstrichtung sind Giebel).
+    let gabled_default = p.shape == Shape::Sattel || (p.shape == Shape::Mansarde && p.mansard_type == MansardType::Giebel);
+    let axis = gabled_default.then_some(p.ridge_axis);
+    let main_tan = (nn(p.pitch_deg).min(89.0) * DEG).tan();
+    let oe = nn(p.overhang);
+    let og = nn(p.overhang_gable.unwrap_or(p.overhang));
+    let mut eaves_rings: Vec<Vec<P2>> = Vec::new();
+    let mut slopes: Vec<Option<f64>> = Vec::new();
+    for (k, (pts, specs)) in rings.iter().enumerate() {
+        let n = pts.len();
+        let mine: Vec<Option<f64>> = (0..n)
+            .map(|i| {
+                if flat {
+                    return Some(0.0);
+                }
+                match specs[i] {
+                    EdgeSpec::Gable => None,
+                    EdgeSpec::Pitch(v) => Some((v * DEG).tan()),
+                    EdgeSpec::Default => (!is_gable_edge(pts[i], pts[(i + 1) % n], axis)).then_some(main_tan),
+                }
+            })
+            .collect();
+        // Traufüberstand: Giebelkanten Ortgang, sonst Traufe. Der Aussenring wächst, die Höfe
+        // (CW) schrumpfen — `offset_ring` versetzt nach rechts.
+        let offs: Vec<f64> = mine.iter().map(|s| if s.is_some() { oe } else { og }).collect();
+        let eaves = offset_ring(pts, Offset::PerIndex(&offs));
+        if k > 0 && !(signed_area(&eaves) < -1e-6 && is_simple_ring(&eaves) && !rings_cross(&eaves, &eaves_rings[0])) {
+            return None; // Hof durch den Überstand geschlossen
+        }
+        slopes.extend(mine);
+        eaves_rings.push(eaves);
+    }
+    // Mansarde: Knick bei `knee_ratio` der grössten Dachtiefe (Neigung 1 überall).
+    let knee = if p.shape == Shape::Mansarde {
+        let unit: Vec<Option<f64>> = slopes.iter().map(|s| s.map(|_| 1.0)).collect();
+        let depth = weighted_roof(&eaves_rings, &unit, 0.0, None, None).ok()?.ridge_height;
+        Some(Knee { d: depth * knee_ratio(p), tan_up: upper_tan(p) })
+    } else {
+        None
+    };
+    let sk = weighted_roof(&eaves_rings, &slopes, e, knee, None).ok()?;
+    let mut it = eaves_rings.into_iter();
+    let eaves = it.next()?;
+    Some(RoofGeometry { eaves, eaves_holes: it.collect(), ridges: sk.ridges, hips: sk.hips, breaks: sk.breaks, planes: sk.planes, gables: sk.gables, ridge_height: sk.ridge_height })
 }
 
 /// Pultdach auf rechtwinkligem Grundriss: EINE Ebene über dem (um Traufe/Ortgang geweiteten)
@@ -391,7 +560,7 @@ fn rectilinear_pult(p: &RoofParams, e: f64) -> RoofGeometry {
         })
         .collect();
     let planes = convex_pieces(&eaves).into_iter().map(|pc| pc.into_iter().map(up).collect()).collect();
-    RoofGeometry { eaves, ridges: vec![], hips: vec![], breaks: vec![], planes, gables, ridge_height: (smax - smin) * tan }
+    RoofGeometry { eaves, eaves_holes: vec![], ridges: vec![], hips: vec![], breaks: vec![], planes, gables, ridge_height: (smax - smin) * tan }
 }
 
 /// Punkt-in-Polygon (Ray-Casting), 2D-Aufsicht.
@@ -440,11 +609,12 @@ pub fn roof_underside_at(planes: &[Vec<P3>], total_layer_thickness: f64, x: f64,
 // ── Flache Kodierung für die WASM-Grenze ─────────────────────────────────────
 //
 // Eingabe: [shape, pitchDeg, pitchUpperDeg, mansardType, mansardKneeRatio, halfHipRatio,
-//           overhang, overhangGable, ridgeAxis, nPts, x0, y0, …]
+//           overhang, overhangGable, ridgeAxis, nPts, x0, y0, …,
+//           nHoles, (n, (x, y)…)…, nEdges (NaN = Feld fehlt), pitch… (+∞ = Giebel)]
 //   shape: 0 flach, 1 pult, 2 sattel, 3 walm, 4 mansarde, 5 zelt;
 //   mansardType: 0 giebel, 1 walm, 2 zelt; ridgeAxis: 0 x, 1 y; NaN = Feld fehlt.
 // Ausgabe: [ridgeHeight, nEaves, (x, y)…, nRidges, (x, y, x, y)…, nHips, …, nBreaks, …,
-//           nPlanes, (n, (x, y, z)…)…, nGables, (n, (x, y, z)…)…]
+//           nPlanes, (n, (x, y, z)…)…, nGables, (n, (x, y, z)…)…, nHoles, (n, (x, y)…)…]
 
 fn opt(v: f64) -> Option<f64> {
     v.is_finite().then_some(v)
@@ -470,7 +640,9 @@ pub fn decode_params(buf: &[f64]) -> Option<RoofParams> {
     if !(n.is_finite() && n >= 0.0 && n.fract() == 0.0) {
         return None;
     }
-    let pts = buf.get(10..10 + 2 * n as usize)?;
+    let end = 10 + 2 * n as usize;
+    let pts = buf.get(10..end)?;
+    let (holes, edge_pitch_deg) = decode_extra(buf.get(end..).unwrap_or(&[]))?;
     Some(RoofParams {
         outline: pts.chunks_exact(2).map(|c| [c[0], c[1]]).collect(),
         shape,
@@ -482,7 +654,37 @@ pub fn decode_params(buf: &[f64]) -> Option<RoofParams> {
         overhang: head[6],
         overhang_gable: opt(head[7]),
         ridge_axis: if head[8] == 1.0 { Axis::Y } else { Axis::X },
+        holes,
+        edge_pitch_deg,
     })
+}
+
+/// Anhang der Eingabe: `[nHoles, (n, (x, y)…)…, nEdges, v…]`; fehlt er (ältere Puffer), gibt es
+/// weder Höfe noch Kantenneigungen. `nEdges` = NaN: Feld fehlt; Wert +∞ = Giebel (`null`).
+#[allow(clippy::type_complexity)]
+fn decode_extra(buf: &[f64]) -> Option<(Vec<Vec<P2>>, Option<Vec<Option<f64>>>)> {
+    let count = |v: f64| (v.is_finite() && v >= 0.0 && v.fract() == 0.0 && v < 1e9).then_some(v as usize);
+    let Some(&nh) = buf.first() else { return Some((vec![], None)) };
+    let nh = count(nh)?;
+    let mut i = 1;
+    let mut holes = Vec::with_capacity(nh.min(1 << 12));
+    for _ in 0..nh {
+        let m = count(*buf.get(i)?)?;
+        i += 1;
+        let pts = buf.get(i..i + 2 * m)?;
+        i += 2 * m;
+        holes.push(pts.chunks_exact(2).map(|c| [c[0], c[1]]).collect());
+    }
+    let edges = match buf.get(i) {
+        None => None,
+        Some(v) if v.is_nan() => None,
+        Some(&v) => {
+            let m = count(v)?;
+            let vals = buf.get(i + 1..i + 1 + m)?;
+            Some(vals.iter().map(|&x| (x != f64::INFINITY).then_some(if x.is_nan() { -1.0 } else { x })).collect())
+        }
+    };
+    Some((holes, edges))
 }
 
 fn push_lines(out: &mut Vec<f64>, lines: &[Line]) {
@@ -529,6 +731,13 @@ pub fn encode_geometry(g: &RoofGeometry) -> Vec<f64> {
     push_lines(&mut out, &g.breaks);
     push_polys3(&mut out, &g.planes);
     push_polys3(&mut out, &g.gables);
+    out.push(g.eaves_holes.len() as f64);
+    for h in &g.eaves_holes {
+        out.push(h.len() as f64);
+        for q in h {
+            out.extend_from_slice(q);
+        }
+    }
     out
 }
 
@@ -551,6 +760,8 @@ mod tests {
             overhang: 0.0,
             overhang_gable: None,
             ridge_axis: Axis::X,
+            holes: vec![],
+            edge_pitch_deg: None,
         }
     }
 
@@ -681,5 +892,124 @@ mod tests {
             }
         }
         let _ = roof_underside_at(&[vec![[0.0, 0.0, 0.0]], vec![]], f64::NAN, f64::NAN, 0.0);
+    }
+
+    // ── Höfe und Neigung je Kante ([26]) ─────────────────────────────────────
+
+    const BIG: [P2; 4] = [[0.0, 0.0], [12.0, 0.0], [12.0, 8.0], [0.0, 8.0]];
+    const COURT: [P2; 4] = [[4.0, 2.0], [4.0, 6.0], [8.0, 6.0], [8.0, 2.0]]; // im Uhrzeigersinn
+
+    fn z_at(g: &RoofGeometry, x: f64, y: f64) -> Option<f64> {
+        roof_underside_at(&g.planes, 0.0, x, y)
+    }
+
+    #[test]
+    fn hof_flaechen_decken_umriss_minus_hof() {
+        for shape in [Shape::Walm, Shape::Zelt, Shape::Flach, Shape::Sattel, Shape::Mansarde] {
+            let p = RoofParams { holes: vec![COURT.to_vec()], ..params(&BIG, shape) };
+            let g = roof_geometry(&p, 3.0);
+            assert!(close(plan_area(&g) + signed_area(&COURT).abs(), 96.0) || (plan_area(&g) - 80.0).abs() < 1e-6, "{shape:?}: {}", plan_area(&g));
+            assert_eq!(g.eaves_holes.len(), 1, "{shape:?}");
+            assert!(z_at(&g, 6.0, 4.0).is_none(), "{shape:?}: Hof muss offen sein");
+            assert!(z_at(&g, 2.0, 4.0).is_some(), "{shape:?}");
+            // Hofkanten sind Traufen: auf Traufhöhe.
+            if !matches!(shape, Shape::Sattel | Shape::Mansarde) {
+                assert!((z_at(&g, 3.99, 4.0).unwrap() - 3.0).abs() < 0.05, "{shape:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn hof_mit_ueberstand_schrumpft_und_beliebige_drehrichtung() {
+        let ccw: Vec<P2> = COURT.iter().rev().copied().collect();
+        let a = roof_geometry(&RoofParams { holes: vec![COURT.to_vec()], overhang: 0.5, ..params(&BIG, Shape::Walm) }, 0.0);
+        let b = roof_geometry(&RoofParams { holes: vec![ccw], overhang: 0.5, ..params(&BIG, Shape::Walm) }, 0.0);
+        assert_eq!(a.planes.len(), b.planes.len());
+        assert!(close(plan_area(&a), plan_area(&b)));
+        // Aussen 13×9 = 117, Hof 3×3 = 9.
+        assert!((plan_area(&a) - (117.0 - 9.0)).abs() < 1e-6, "{}", plan_area(&a));
+        assert!(z_at(&a, 6.0, 4.0).is_none());
+        assert!(z_at(&a, 4.2, 4.0).is_some());
+    }
+
+    #[test]
+    fn ungueltiger_hof_wirkungslos() {
+        let plain = roof_geometry(&params(&BIG, Shape::Walm), 0.0);
+        for hole in [
+            vec![[10.0, 2.0], [10.0, 6.0], [14.0, 6.0], [14.0, 2.0]], // ragt hinaus
+            vec![[4.0, 2.0], [8.0, 6.0], [8.0, 2.0], [4.0, 6.0]],     // Schleife
+            vec![[4.0, 2.0], [4.0, 2.0]],                             // zu wenig Punkte
+        ] {
+            let g = roof_geometry(&RoofParams { holes: vec![hole], ..params(&BIG, Shape::Walm) }, 0.0);
+            assert_eq!(g, plain);
+        }
+        // Pult ignoriert Höfe.
+        let pult = roof_geometry(&params(&BIG, Shape::Pult), 0.0);
+        assert_eq!(roof_geometry(&RoofParams { holes: vec![COURT.to_vec()], ..params(&BIG, Shape::Pult) }, 0.0), pult);
+    }
+
+    #[test]
+    fn neigung_je_kante() {
+        // Kante 0 (y = 0) mit 20°, die übrigen mit 45° (Standard).
+        let p = RoofParams { edge_pitch_deg: Some(vec![Some(20.0), Some(-1.0), None.or(Some(-1.0)), Some(-1.0)]), ..params(&RECT, Shape::Walm) };
+        let g = roof_geometry(&p, 0.0);
+        assert!((plan_area(&g) - 24.0).abs() < 1e-6);
+        assert!((z_at(&g, 3.0, 0.5).unwrap() - 0.5 * 20f64.to_radians().tan()).abs() < 1e-9);
+        assert!((z_at(&g, 0.5, 2.0).unwrap() - 0.5).abs() < 1e-9);
+        assert!((z_at(&g, 3.0, 3.5).unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn giebel_je_kante_wie_satteldach() {
+        // Walm mit Giebel an den beiden Kanten quer zur X-Achse = Satteldach entlang X.
+        let p = RoofParams { edge_pitch_deg: Some(vec![Some(-1.0), None, Some(-1.0), None]), ..params(&RECT, Shape::Walm) };
+        let g = roof_geometry(&p, 1.0);
+        let sattel = roof_geometry(&params(&RECT, Shape::Sattel), 1.0);
+        assert!((g.ridge_height - 2.0).abs() < 1e-9);
+        assert_eq!(g.gables.len(), 2);
+        assert!((plan_area(&g) - plan_area(&sattel)).abs() < 1e-6);
+        assert_eq!(g.ridges.len(), 1);
+        // Alle Standard-Einträge am Satteldach: Giebelregel greift wie ohne das Feld.
+        let s = roof_geometry(&RoofParams { edge_pitch_deg: Some(vec![Some(-1.0); 4]), ..params(&RECT, Shape::Sattel) }, 1.0);
+        assert_eq!(s.gables.len(), 2);
+        assert!((s.ridge_height - sattel.ridge_height).abs() < 1e-9);
+        // Sattel, eine Giebelkante zur Traufe gemacht (30°): Pultartig, kein Giebel mehr dort.
+        let q = roof_geometry(&RoofParams { edge_pitch_deg: Some(vec![Some(-1.0), Some(30.0), Some(-1.0), None]), ..params(&RECT, Shape::Sattel) }, 0.0);
+        assert_eq!(q.gables.len(), 1);
+    }
+
+    #[test]
+    fn kantenindex_folgt_der_gespeicherten_reihenfolge() {
+        // Umriss im Uhrzeigersinn gespeichert: Kante 0 = (0,0)→(0,4) (x = 0), Giebel dort.
+        let cw: Vec<P2> = vec![[0.0, 0.0], [0.0, 4.0], [6.0, 4.0], [6.0, 0.0]];
+        let p = RoofParams { edge_pitch_deg: Some(vec![None, Some(-1.0), None, Some(-1.0)]), ..params(&cw, Shape::Walm) };
+        let g = roof_geometry(&p, 0.0);
+        assert_eq!(g.gables.len(), 2, "Giebel an Kante 0 und 2 (x = 0 und x = 6)");
+        assert!(g.gables.iter().all(|pl| pl.iter().all(|v| v[0].abs() < 1e-9 || (v[0] - 6.0).abs() < 1e-9)));
+        // Hofkanten schliessen an die Umrisskanten an (Index 4..): Hof-Kante 0 = (4,2)→(4,6).
+        let h = RoofParams { holes: vec![COURT.to_vec()], edge_pitch_deg: Some(vec![Some(-1.0); 4].into_iter().chain([Some(10.0)]).collect()), ..params(&BIG, Shape::Walm) };
+        let g = roof_geometry(&h, 0.0);
+        assert!((z_at(&g, 3.5, 4.0).unwrap() - 0.5 * 10f64.to_radians().tan()).abs() < 1e-9);
+        assert!((z_at(&g, 8.5, 4.0).unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn flache_encode_decode_rundreise_mit_hof() {
+        let p = RoofParams { holes: vec![COURT.to_vec()], edge_pitch_deg: Some(vec![Some(20.0), None, Some(-1.0)]), ..params(&BIG, Shape::Walm) };
+        let mut buf = vec![3.0, 45.0, f64::NAN, 0.0, f64::NAN, f64::NAN, 0.0, f64::NAN, 0.0, 4.0];
+        buf.extend(BIG.iter().flatten());
+        buf.extend([1.0, 4.0]);
+        buf.extend(COURT.iter().flatten());
+        buf.extend([3.0, 20.0, f64::INFINITY, -1.0]);
+        let d = decode_params(&buf).unwrap();
+        assert_eq!(d.holes, p.holes);
+        assert_eq!(d.edge_pitch_deg, p.edge_pitch_deg);
+        // Alter Puffer ohne Anhang: keine Höfe.
+        let d = decode_params(&buf[..10 + 8]).unwrap();
+        assert!(d.holes.is_empty() && d.edge_pitch_deg.is_none());
+        // Kaputter Anhang: None statt Panic.
+        assert!(decode_params(&buf[..10 + 8 + 3]).is_none());
+        let g = roof_geometry(&d, 0.0);
+        assert!(g.eaves_holes.is_empty());
     }
 }

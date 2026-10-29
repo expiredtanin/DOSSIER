@@ -1860,6 +1860,24 @@ pub struct Roof {
     pub locked: Option<bool>,
     /// Geschlossener Grundriss-Umriss (Meter); Geometrie nutzt die Bounding-Box.
     pub outline: Vec<Vec2>,
+    /// Innenhöfe/Lichthöfe als Ringe (Meter, jeder Ring geschlossen, Drehsinn egal). Das Dach
+    /// ist an dieser Stelle ausgespart (3D, Grundriss, Schnitt, Ansicht, IFC); die Hofkanten sind
+    /// innere Traufen. Wirkt bei Flach/Sattel/Walm/Mansarde/Zelt (Pult ignoriert sie); ein Ring,
+    /// der nicht ganz im Umriss liegt oder sich mit Umriss/anderen Höfen schneidet, macht die
+    /// Höfe wirkungslos (Dach wie ohne). Fehlt ⇒ keine Höfe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub holes: Option<Vec<Vec<Vec2>>>,
+    /// Neigung je Umrisskante in Grad. Nummerierung: erst die Kanten von `outline` (Kante i =
+    /// Punkt i → i+1, in der gespeicherten Reihenfolge), danach die Kanten der `holes` Ring für
+    /// Ring. Eintrag `null` = Giebel (senkrechte Wand, Kante läuft nicht nach innen), eine Zahl
+    /// ≥ 0 = Neigung dieser Kante (übersteuert `pitchDeg`), eine NEGATIVE Zahl (oder ein fehlender
+    /// Eintrag) = Standard: `pitchDeg`, bei Satteldach/Mansard-Satteldach mit Giebel an den
+    /// Kanten quer zur Firstrichtung. Fehlt das Feld ganz ⇒ alles Standard (wie bisher).
+    /// Wirkt bei Sattel/Walm/Mansarde/Zelt (Flach/Pult ignorieren es).
+    #[serde(rename = "edgePitchDeg", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub edge_pitch_deg: Option<Vec<Option<f64>>>,
     /// Dachform.
     pub shape: RoofShape,
     /// Hauptneigung in Grad (0 = flach).
