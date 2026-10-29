@@ -21,11 +21,11 @@ describe("Ebenen der Auswahl", () => {
     expect(selectionCategoryCodes(project, { drawingIds: ["nix"] })).toEqual([]);
   });
 
-  it("blendet genau die Codes aus (auch verschachtelt), unveränderte Teile bleiben dieselben Objekte", () => {
+  it("blendet genau die Codes aus (auch verschachtelt), nichts zu tun liefert dieselbe Liste", () => {
     const next = setCategoriesVisible(layers, new Set(["100"]), false);
     expect(next[1].children![0].visible).toBe(false);
     expect(next[1].children![1].visible).toBe(true);
-    expect(next[0]).toBe(layers[0]); // Wände unverändert (gleiches Objekt)
+    expect(next[0]).toEqual(layers[0]); // Wände unverändert (Kopie aus dem Kern)
     expect(setCategoriesVisible(layers, new Set(["100"]), true)).toBe(layers); // nichts zu tun → gleiche Referenz
   });
 

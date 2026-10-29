@@ -22,6 +22,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { GeoCategory } from "../io/geoContext";
+import { flattenCategories } from "./layers";
 import type { LayerCategory } from "./types";
 
 /** Eine Kategorie-Definition (Code + Default-Name/Farbe/Strichstärke). */
@@ -133,7 +134,7 @@ export function ensureContextCategories(
   layers: LayerCategory[],
   codes: Iterable<string>,
 ): LayerCategory[] {
-  const existing = new Set(collectCodes(layers));
+  const existing = new Set(flattenCategories(layers).map((c) => c.code));
   const missing = new Set<string>();
   for (const code of codes) {
     if (!existing.has(code)) missing.add(code);
@@ -160,16 +161,6 @@ export function ensureContextCategories(
   }
   if (missingTopLevel.length > 0) {
     out = [...out, ...missingTopLevel];
-  }
-  return out;
-}
-
-/** Alle Codes eines Kategorie-Baums (rekursiv über `children`). */
-function collectCodes(layers: LayerCategory[]): string[] {
-  const out: string[] = [];
-  for (const l of layers) {
-    out.push(l.code);
-    if (l.children) out.push(...collectCodes(l.children));
   }
   return out;
 }

@@ -1,5 +1,4 @@
 import type { Project } from "./types";
-import { recomputeFloorElevations } from "./types";
 import { MATERIAL_LIBRARY } from "../materials/library";
 import { materialFromAsset } from "../materials/runtime";
 
@@ -341,10 +340,11 @@ export const sampleProject: Project = {
     },
   ],
   // Oberste Schnitte: Geschosse + Schnitt/Ansicht + freie Zeichnung.
-  // baseElevation wird über recomputeFloorElevations gestapelt: EG=0, OG=2.6.
-  drawingLevels: recomputeFloorElevations([
-    { id: "eg", name: "Erdgeschoss", kind: "floor", visible: true, locked: false, floorHeight: 2.6, cutHeight: 1.0 },
-    { id: "og", name: "Obergeschoss", kind: "floor", visible: true, locked: false, floorHeight: 2.6, cutHeight: 1.0 },
+  // baseElevation = gestapelt wie `recomputeFloorElevations` (Kern): EG=0, OG=2.6. Ausgeschrieben, weil dieses
+  // Modul vor dem Laden des Kerns ausgewertet wird (Test: sampleProject.test.ts).
+  drawingLevels: [
+    { id: "eg", name: "Erdgeschoss", kind: "floor", visible: true, locked: false, floorHeight: 2.6, cutHeight: 1.0, baseElevation: 0 },
+    { id: "og", name: "Obergeschoss", kind: "floor", visible: true, locked: false, floorHeight: 2.6, cutHeight: 1.0, baseElevation: 2.6 },
     {
       id: "schnitt-a",
       name: "Schnitt A",
@@ -367,7 +367,7 @@ export const sampleProject: Project = {
       shadows: true,
     },
     { id: "detail-1", name: "Detail 1", kind: "drawing", visible: true, locked: false },
-  ]),
+  ],
   // Grafik-Kategorie-Baum (DOSSIER-Codes 1:1).
   layers: [
     { code: "00", name: "Raster", color: "#484850", lw: 0.13, visible: true, locked: false },

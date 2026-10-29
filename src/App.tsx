@@ -206,7 +206,7 @@ import { applyDrawingStyleOps, readDrawingStyle } from "./editors/matchProps";
 
 // Globaler Store (Slices: project/selection/view/layout).
 import { useStore } from "./state/appStore";
-import { categoryLabel, findCategory } from "./state/projectSlice";
+import { categoryLabel, findCategory } from "./model/layers";
 import { reconcileLayout } from "./state/layoutSlice";
 
 // Panel-System.

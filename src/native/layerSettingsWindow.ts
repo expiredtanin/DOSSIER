@@ -23,7 +23,7 @@
 
 import { useEffect, useRef } from "react";
 import { isTauriRuntime } from "./projectFile";
-import { findCategory } from "../state/projectSlice";
+import { findCategory } from "../model/layers";
 import type { HatchStyle, LayerCategory, Project } from "../model/types";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 
