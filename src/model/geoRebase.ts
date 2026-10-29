@@ -29,10 +29,10 @@ import type { Project } from "./types";
  * (`geoAnchor.model`, damit der LV95-Bezug exakt erhalten bleibt). Richtungs-
  * Vektoren (z. B. `Stair.dir`) und Winkel-Felder bleiben unangetastet — eine
  * reine Translation ändert keine Orientierung. Unveränderte Teile behalten ihre Identität;
- * (0,0) liefert das Projekt selbst.
+ * (0,0) und nicht endliche Werte (NaN, ±Infinity) liefern das Projekt selbst.
  */
 export function translateProject(project: Project, dx: number, dy: number): Project {
-  if (dx === 0 && dy === 0) return project;
+  if ((dx === 0 && dy === 0) || !Number.isFinite(dx) || !Number.isFinite(dy)) return project;
   const patch = documentFor(project).queryRoot<Partial<Project>>("translatePatch", JSON.stringify([dx, dy]));
   return { ...project, ...patch };
 }
@@ -40,10 +40,10 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
 /**
  * Ops für {@link translateProject}: je geändertem Element ein `replace` (Reihenfolge und Identität
  * unveränderter Elemente bleiben), `geoAnchor` als Feld. Das Ergebnis von `applyOps` ist gleich
- * `translateProject(project, dx, dy)`.
+ * `translateProject(project, dx, dy)`. Nicht endliche Werte ergeben keine Ops.
  */
 export function translateOps(project: Project, dx: number, dy: number): CoreOp[] {
-  if (dx === 0 && dy === 0) return [];
+  if ((dx === 0 && dy === 0) || !Number.isFinite(dx) || !Number.isFinite(dy)) return [];
   return documentFor(project).queryRoot<CoreOp[]>("translateOps", JSON.stringify([dx, dy]));
 }
 

@@ -459,7 +459,8 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     `selectionFilterPatch`); die Fassaden setzen `{...project, ...patch}` zusammen, `projectGeoOrigin` (Einzeiler) bleibt in TS.
     Gleichheit (einmalig, Test gelöscht): 3000 Zufallsprojekte mit allen Elementarten, allen 18 Zeichnungs-Formen, Kontext
     (Mesh/Terrain/Bild/Konturen mit Bogen), Geo-Anker, Verschiebung (0,0) — Projekt, Ops und Welt-Koordinaten
-    zeichengleich; 5000 Auswahl-Filter (doppelte ids, fehlende Listen).
+    zeichengleich; 5000 Auswahl-Filter (doppelte ids, fehlende Listen). Abweichung (gewollt): eine nicht endliche
+    Verschiebung (NaN/±Infinity) ändert nichts (TS erzeugte NaN-Koordinaten, die der Validator zurückrollte).
     **Z-Anordnen im Kern (29.10.):** `reorder.rs` (front/back/forward/backward für `drawings2d` und `drawingLevels`, vorher
     zweimal kopiert in `projectSlice.ts`), Bindung `reorder_call`, Fassade `model/reorder.ts` (`reorderByIds`, Objekt-Identität
     bleibt); 10000 Zufallsfälle gleich der alten Fassung (einmalig, Test gelöscht).

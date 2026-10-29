@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Column, ExtrudedSolid, Project } from "./types";
 import { sampleProject } from "./sampleProject";
-import { translateProject, projectToWorldCoords, projectGeoOrigin } from "./geoRebase";
+import { translateProject, translateOps, projectToWorldCoords, projectGeoOrigin } from "./geoRebase";
 
 const DX = 100;
 const DY = -50;
@@ -250,5 +250,14 @@ describe("projectGeoOrigin / projectToWorldCoords", () => {
     const world = projectToWorldCoords(local);
     expect(world.walls[0].start).toEqual({ x: 2600010, y: 1200020 });
     expect(world.walls[0].end).toEqual({ x: 2600015, y: 1200020 });
+  });
+});
+
+describe("translate: nicht endliche Verschiebung", () => {
+  it("ändert nichts (kein NaN im Modell)", () => {
+    for (const [dx, dy] of [[NaN, 1], [1, Infinity], [-Infinity, NaN]] as const) {
+      expect(translateProject(sampleProject, dx, dy)).toBe(sampleProject);
+      expect(translateOps(sampleProject, dx, dy)).toEqual([]);
+    }
   });
 });
