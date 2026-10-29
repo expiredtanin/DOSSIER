@@ -70,7 +70,7 @@ pub fn num_of(v: Option<&Value>) -> f64 {
 }
 
 /// `a ?? b` für Zahlen (fehlend/`null` → `b`).
-fn num_or(v: Option<&Value>, b: f64) -> f64 {
+pub(crate) fn num_or(v: Option<&Value>, b: f64) -> f64 {
     match v {
         None | Some(Value::Null) => b,
         v => num_of(v),
@@ -107,17 +107,17 @@ pub fn xy(v: &Value) -> (f64, f64) {
 
 /// `{...v, key: val}` (vorhandener Schlüssel behält seine Stelle). Der ersetzte Wert wird nicht kopiert
 /// (eine grosse Polylinie kostet sonst je Mausschritt eine Kopie mehr).
-fn with(v: &Value, key: &str, val: Value) -> Value {
+pub(crate) fn with(v: &Value, key: &str, val: Value) -> Value {
     with_all(v, vec![(key, val)])
 }
 
 /// Wie [`with`] für mehrere Felder in einem Durchgang (`{...v, a, b}`).
-fn with_all(v: &Value, fields: Vec<(&str, Value)>) -> Value {
+pub(crate) fn with_all(v: &Value, fields: Vec<(&str, Value)>) -> Value {
     with_opt(v, fields.into_iter().map(|(k, x)| (k, Some(x))).collect())
 }
 
 /// Wie [`with_all`]; `None` = `undefined` (das Feld fällt weg, wie in JSON).
-fn with_opt(v: &Value, fields: Vec<(&str, Option<Value>)>) -> Value {
+pub(crate) fn with_opt(v: &Value, fields: Vec<(&str, Option<Value>)>) -> Value {
     let mut fields: Vec<(&str, Option<Value>, bool)> = fields.into_iter().map(|(k, x)| (k, x, false)).collect();
     let src = v.as_object();
     let mut m = Map::with_capacity(src.map_or(0, Map::len) + fields.len());
@@ -160,7 +160,7 @@ fn calc(f: f64) -> Pass {
     Pass { f, v: Some(js_num(f)) }
 }
 
-fn arr(v: Option<&Value>) -> &[Value] {
+pub(crate) fn arr(v: Option<&Value>) -> &[Value] {
     v.and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
 }
 

@@ -5,10 +5,17 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { explodeGeom, explodeOps } from "./explode";
+import { explodeOps } from "./explode";
 import { applyOps } from "../core/ops";
 
 const explodeDrawings = (p: Project, ids: string[]) => applyOps(p, explodeOps(p, ids));
+
+/** Teilgeometrien einer Form über die Ops (Kern): `null`, wenn sie nicht zerlegt wird. */
+function explodeGeom(geom: Drawing2DGeom, project: Project): Drawing2DGeom[] | null {
+  const p = { ...project, drawings2d: [{ id: "d1", type: "drawing2d", levelId: "L", categoryCode: "0", geom }] } as Project;
+  const ops = explodeOps(p, ["d1"]);
+  return ops.length ? applyOps(p, ops).drawings2d.map((d) => d.geom) : null;
+}
 import { sampleProject } from "../model/sampleProject";
 import { bulgeArc } from "../geometry/bulge";
 import type { Drawing2D, Drawing2DGeom, Project } from "../model/types";

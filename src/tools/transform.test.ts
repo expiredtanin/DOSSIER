@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { commitTransform, rotateGizmoShapes } from "./transform";
+import { commitTransform, rotateGizmoShapes, transformPreview } from "./transform";
 import type { TransformSelection } from "./transform";
 import type { Ceiling, Drawing2D, ExtrudedSolid, Project, Roof, Room, Stair } from "../model/types";
 
@@ -467,5 +467,47 @@ describe("rotateGizmoShapes — Dreh-Darstellung (Referenz-/Winkel-Strahl + Radi
 
   it("Zentrum == Referenzpunkt (Radius 0): kein Gizmo, leeres Array", () => {
     expect(rotateGizmoShapes({ x: 1, y: 1 }, { x: 1, y: 1 }, { x: 5, y: 5 })).toEqual([]);
+  });
+});
+
+describe("transformPreview — Vorschau für alle 2D-Formen (Kern, Plan-Primitive)", () => {
+  const sel = (id: string): TransformSelection => ({ wallIds: [], drawingId: id });
+  const at = (geom: Drawing2D["geom"]) => project([{ ...line("d", 0), geom }]);
+  const move = [{ x: 0, y: 0 }, { x: 1, y: 0 }];
+  it("Kreis → Liniensegmente rundum", () => {
+    const s = transformPreview(at({ shape: "circle", center: { x: 0, y: 0 }, r: 1 }), sel("d"), "move", move, "move", 1);
+    expect(s.length).toBeGreaterThan(10);
+    expect(s.every((x) => x.kind === "line")).toBe(true);
+  });
+  it("Polylinie mit Bogen-Segment → Bogen abgetastet (nicht nur die Sehne)", () => {
+    const g = { shape: "polyline", pts: [{ x: 0, y: 0 }, { x: 2, y: 0 }], closed: false, bulge: [0.5] } as Drawing2D["geom"];
+    expect(transformPreview(at(g), sel("d"), "move", move, "move", 1).length).toBeGreaterThan(3);
+  });
+  it("Text → Rahmen-Polygon, verschoben", () => {
+    const s = transformPreview(at({ shape: "text", at: { x: 0, y: 0 }, text: "Hallo", height: 1, angle: 0 }), sel("d"), "move", move, "move", 1);
+    expect(s).toHaveLength(1);
+    expect(s[0].kind).toBe("poly");
+    if (s[0].kind === "poly") expect(s[0].pts[0].x).toBeCloseTo(1, 9);
+  });
+});
+
+describe("commitTransform — B-Rep-Körper (Spezifikation als transform gewickelt)", () => {
+  const body = {
+    id: "b", type: "extrudedSolid", points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 }], height: 3,
+    brep: { spec: { kind: "cuboid", min: [0, 0, 0], max: [2, 1, 3] }, origin: { x: 0, y: 0 } },
+  } as unknown as ExtrudedSolid;
+  const p = { ...project([]), extrudedSolids: [body] } as Project;
+  const sel: TransformSelection = { wallIds: [], drawingId: null, extrudedSolidId: "b" };
+  it("Drehung um 90°", () => {
+    const r = commitTransform(p, sel, "rotate", [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }], "move", 1).extrudedSolids![0];
+    const sp = r.brep!.spec as { kind: string; m: number[] };
+    expect(sp.kind).toBe("transform");
+    expect(sp.m[0]).toBeCloseTo(0, 12);
+    expect(sp.m[1]).toBeCloseTo(-1, 12);
+    expect(r.brep!.origin).toEqual(r.points[0]);
+  });
+  it("Skalierung skaliert auch die Höhe", () => {
+    const r = commitTransform(p, sel, "scale", [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }], "move", 1).extrudedSolids![0];
+    expect(r.height).toBe(6);
   });
 });

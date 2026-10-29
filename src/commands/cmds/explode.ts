@@ -2,12 +2,12 @@
 // Teilgeometrien, Polylinie → Segmente, Rechteck → vier Linien). Sofort-Befehl
 // ohne Punkt-Eingabe (wie Join/Split): wirkt auf die bestehende Auswahl.
 //
-// Die eigentliche Zerlegung liegt in `editors/explode.ts` — dort auch, was
+// Die eigentliche Zerlegung rechnet der Kern (`cmd_edit.rs`, Fassade `editors/explode.ts`) — dort auch, was
 // bewusst NICHT zerlegt wird (Kreis/Ellipse/Spline/Text/…): diese Elemente
 // bleiben unverändert stehen, statt zu verschwinden.
 
-import { explodeOps } from "../../editors/explode";
-import { opsMutation } from "../../core";
+import { cmdMutation } from "../../core";
+import { uniqueStamp } from "../../tools/types";
 import type { Command, CommandContext, CommandResult, CommandSelection, CommandState } from "../types";
 
 /** Gewählte 2D-Elemente (Mehrfachauswahl bevorzugt). */
@@ -32,7 +32,7 @@ export const explodeCommand: Command = {
   autoRun: (ctx: CommandContext): CommandResult => {
     const ids = selectedDrawingIds(ctx.selection);
     if (ids.length === 0) return { draft: null, done: true };
-    return { draft: null, done: true, commit: opsMutation((p) => explodeOps(p, ids)) };
+    return { draft: null, done: true, commit: cmdMutation({ cmd: "explode", ids, stamp: uniqueStamp() }) };
   },
 
   onInput: (): [CommandState, CommandResult] => done(),

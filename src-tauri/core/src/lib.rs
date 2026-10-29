@@ -88,6 +88,9 @@ pub mod plan_text;
 pub mod grips;
 pub mod selection_info;
 pub mod project_refs;
+pub mod commands;
+pub mod cmd_transform;
+pub mod cmd_edit;
 
 #[cfg(feature = "web")]
 mod web;

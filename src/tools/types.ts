@@ -372,3 +372,12 @@ export function uniqueId(prefix: string): string {
   idCounter += 1;
   return `${prefix}-${Date.now()}-${idCounter}`;
 }
+
+/**
+ * Stempel für ids, die der Kern vergibt (Befehle mit mehreren neuen Elementen, [K4] S3): der Kern
+ * hängt je Element `-k` an (`prefix-Zeit-Zähler-k`, s. `cmd_transform::IdGen`).
+ */
+export function uniqueStamp(): string {
+  idCounter += 1;
+  return `${Date.now()}-${idCounter}`;
+}

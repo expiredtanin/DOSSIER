@@ -51,6 +51,7 @@ export type { PdfVectorPage, PdfVectorPath, PdfVectorText } from "../io/pdfVecto
 export { readMesh, meshObjectsToImportedMeshes, formatMeshReport, isMeshFile, MESH_UNITS, MESH_UNIT_SCALE } from "../io/meshImport";
 export type { MeshObject, MeshImportReport, MeshUnit, MeshUp, MeshPlacement } from "../io/meshImport";
 export { addItems, fieldOps, findItem, itemsOf, opsMutation, patchItem, patchItems, removeItems, replaceItem, replaceWithMany, setField, setFieldIfChanged } from "./opsBuild";
+export { cmdMutation } from "./document";
 export type { EntityCollection, EntityOf, ProjectMutation } from "./opsBuild";
 export { EMPTY_MEMBERSHIP, containingGroupId, expandToGroups, isInsideActiveGroup, transitiveMembership } from "../model/groups";
 export type { GroupMembership, MemberKind } from "../model/groups";

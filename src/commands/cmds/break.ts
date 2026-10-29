@@ -18,65 +18,21 @@
 // Ring-Bögen übrig bleibt, ist klick-reihenfolge-abhängig — eigener,
 // grösserer Scope) und Bogen-Segmente (bulge) — beide s. PENDENZEN.md.
 
-import type { Drawing2D } from "../../model/types";
-import { uniqueId } from "../../tools/types";
-import { addItems, opsMutation, removeItems } from "../../core";
-import type { CoreOp } from "../../core";
-import { breakCurve, nearestOnPolyline } from "../../core";
-import { hasRealBulge } from "../../core";
-import { chainToGeom, geomToCurve, isTrimmable, pickCurveAt } from "./trim";
-import type {
-  Command,
-  CommandResult,
-  CommandState,
-  DraftShape,
-  Project,
-  Vec2,
-} from "../types";
+// Treffer, Reststücke und Vorschau rechnet der Kern (`src-tauri/core/src/cmd_edit.rs`, [K4] S3,
+// Geometrie `breakCurve` in `kernel2d`); hier nur der Zustandsautomat.
 
-/** Trifft der Klick eine offene, bogen-freie Kurve (line/gerade polyline)? */
-function pickBreakable(project: Project, levelId: string, pt: Vec2): Drawing2D | null {
-  const d = pickCurveAt(project, levelId, pt);
-  if (!d || !isTrimmable(d)) return null;
-  const curve = geomToCurve(d.geom);
-  if (!curve || curve.closed || hasRealBulge(curve.bulge)) return null;
-  return d;
-}
-
-function breakOps(p: Project, target: Drawing2D, p1: Vec2, p2: Vec2): CoreOp[] {
-  const curve = geomToCurve(target.geom);
-  if (!curve) return [];
-  const hit1 = nearestOnPolyline(curve.pts, false, p1);
-  const hit2 = nearestOnPolyline(curve.pts, false, p2);
-  if (!hit1 || !hit2) return [];
-  const pieces = breakCurve(curve.pts, hit1, hit2);
-  const replacements: Drawing2D[] = pieces.map((pts) => ({
-    ...target,
-    id: uniqueId("dr2d"),
-    geom: chainToGeom({ pts, closed: false }),
-  }));
-  // Ziel raus, Stücke hinten dran.
-  return [...removeItems(p, "drawings2d", [target.id]), ...addItems("drawings2d", replacements)];
-}
-
-/** Vorschau der Reststücke (für den Draft). */
-function breakPreview(target: Drawing2D, p1: Vec2, p2: Vec2): DraftShape[] {
-  const curve = geomToCurve(target.geom);
-  if (!curve) return [];
-  const hit1 = nearestOnPolyline(curve.pts, false, p1);
-  const hit2 = nearestOnPolyline(curve.pts, false, p2);
-  if (!hit1 || !hit2) return [];
-  return breakCurve(curve.pts, hit1, hit2)
-    .filter((pts) => pts.length >= 2)
-    .map((pts) => (pts.length === 2 ? { kind: "line" as const, a: pts[0], b: pts[1] } : { kind: "poly" as const, pts, closed: false }));
-}
+import { cmdMutation } from "../../core";
+import { uniqueStamp } from "../../tools/types";
+import { cmdQuery, decodeShapes, pair } from "../../tools/coreCmd";
+import type { Command, CommandResult, CommandState, Vec2 } from "../types";
 
 interface BreakP1 extends CommandState {
   phase: "p1";
 }
 interface BreakP2 extends CommandState {
   phase: "p2";
-  target: Drawing2D;
+  /** Getroffene Kurve (id). */
+  target: string;
   p1: Vec2;
   cursor: Vec2 | null;
 }
@@ -99,21 +55,21 @@ export const breakCommand: Command = {
     const s = state as BreakState;
     if (input.kind !== "point") return [s, { draft: null }];
     if (s.phase === "p1") {
-      const target = pickBreakable(ctx.project, ctx.level.id, input.point);
+      const target = cmdQuery<{ hit: string | null }>(ctx.project, { q: "pickBreakable", level: ctx.level.id, pt: pair(input.point) }).hit;
       if (!target) return [s, { draft: null }]; // daneben/ungeeignet → bleibt im ersten Schritt
       const ns: BreakP2 = { phase: "p2", target, p1: input.point, cursor: input.point, lastPoint: input.point };
       return [ns, { draft: null }];
     }
     // phase "p2"
     const { target, p1 } = s;
-    return [idle()[0], { draft: null, done: true, commit: opsMutation((p) => breakOps(p, target, p1, input.point)) }];
+    return [idle()[0], { draft: null, done: true, commit: cmdMutation({ cmd: "break", id: target, p1: pair(p1), p2: pair(input.point), stamp: uniqueStamp() }) }];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as BreakState;
     if (s.phase !== "p2") return [s, { draft: null }];
     const ns: BreakP2 = { ...s, cursor: point };
-    const preview = breakPreview(s.target, s.p1, point);
+    const preview = decodeShapes(cmdQuery<{ shapes: number[] }>(ctx.project, { q: "break", id: s.target, p1: pair(s.p1), pt: pair(point) }).shapes);
     return [ns, { draft: { preview, vertices: [s.p1] } }];
   },
 

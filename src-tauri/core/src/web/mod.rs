@@ -40,6 +40,7 @@ mod reorder;
 mod text_layout;
 mod grips;
 mod project_refs;
+mod commands;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
