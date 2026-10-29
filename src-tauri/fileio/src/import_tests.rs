@@ -919,3 +919,105 @@ fn bemassung_in_millimetern_ohne_block_rechnet_um() {
     assert!(d.contours.iter().any(|c| !c.filled && c.pts.len() == 2 && close(c.pts[0][1], 0.8) && close(c.pts[1][0], 4.0)));
     assert!(d.texts[0].text.starts_with("4000"), "{:?}", d.texts);
 }
+
+// ── Polylinien mit Bögen bleiben als Bögen erhalten (Kataster, 29.10.) ──────────
+
+/// Geschlossene LWPOLYLINE (Parzelle) mit zwei Bogen-Segmenten, in LV95.
+const PARZELLE: &[&str] = &[
+    "0", "LWPOLYLINE", "8", "Liegenschaften", "90", "4", "70", "1",
+    "10", "2600000", "20", "1200000", "42", "0.12",
+    "10", "2600030", "20", "1200000",
+    "10", "2600030", "20", "1200030", "42", "-0.25",
+    "10", "2600000", "20", "1200030",
+];
+
+#[test]
+fn lwpolyline_mit_bulges_behaelt_stuetzpunkte_und_bulges() {
+    let d = import_bytes(&dxf(&[], &[PARZELLE])).unwrap();
+    let c = only_contour(&d);
+    // `pts` bleibt tesselliert (Kontext, Fang), dazu die Stützpunkte mit Bulge für die Zeichnung.
+    assert!(c.pts.len() > 4);
+    let bv = c.bulge_verts.as_ref().expect("Stützpunkte mit Bulges");
+    assert_eq!(bv.len(), 4);
+    assert_eq!(bv[0], [2_600_000.0, 1_200_000.0, 0.12]);
+    assert_eq!(bv[1], [2_600_030.0, 1_200_000.0, 0.0]);
+    assert_eq!(bv[2], [2_600_030.0, 1_200_030.0, -0.25]);
+    assert!(c.closed);
+}
+
+#[test]
+fn polylinie_ohne_bulges_ohne_bulge_stuetzpunkte() {
+    let pl: &[&str] = &["0", "LWPOLYLINE", "8", "0", "90", "3", "70", "0", "10", "0", "20", "0", "10", "1", "20", "0", "10", "1", "20", "1"];
+    let d = import_bytes(&dxf(&[], &[pl])).unwrap();
+    assert!(only_contour(&d).bulge_verts.is_none());
+}
+
+#[test]
+fn bulges_in_bloecken_gespiegelt_und_verzerrt() {
+    let mut blk: Vec<&str> = vec!["0", "BLOCK", "8", "0", "2", "p", "10", "0", "20", "0", "30", "0", "70", "0"];
+    blk.extend(["0", "LWPOLYLINE", "8", "0", "90", "2", "70", "0", "10", "0", "20", "0", "42", "0.5", "10", "2", "20", "0"]);
+    blk.extend(["0", "ENDBLK"]);
+    // Gedreht und gleichmässig skaliert: Bulge bleibt, Stützpunkte abgebildet.
+    let d = import_bytes(&dxf(&[&blk], &[&["0", "INSERT", "2", "p", "10", "5", "20", "0", "30", "0", "41", "2", "42", "2", "50", "90"]])).unwrap();
+    let bv = only_contour(&d).bulge_verts.clone().unwrap();
+    assert!(close(bv[0][0], 5.0) && (bv[1][0] - 5.0).abs() < 1e-9 && close(bv[1][1], 4.0), "{bv:?}");
+    assert_eq!(bv[0][2], 0.5);
+    // Gespiegelt (x-Faktor −1): Bogen läuft andersherum → Bulge mit umgekehrtem Vorzeichen.
+    let d = import_bytes(&dxf(&[&blk], &[&["0", "INSERT", "2", "p", "10", "0", "20", "0", "30", "0", "41", "-1"]])).unwrap();
+    let c = only_contour(&d);
+    let bv = c.bulge_verts.clone().unwrap();
+    assert!(close(bv[1][0], -2.0));
+    assert_eq!(bv[0][2], -0.5);
+    // Der Scheitel der Tessellierung liegt auf derselben Seite wie der des gespiegelten Bulge-Bogens
+    // (Bulge −0.5 von (0,0) nach (−2,0): im Uhrzeigersinn → unterhalb der Sehne).
+    let apex = c.pts[c.pts.len() / 2];
+    assert!(apex[1] < -0.4, "Scheitel unterhalb der Sehne: {apex:?}");
+    // Ungleich skaliert: aus dem Kreisbogen wird eine Ellipse → nur die Tessellierung.
+    let d = import_bytes(&dxf(&[&blk], &[&["0", "INSERT", "2", "p", "10", "0", "20", "0", "30", "0", "41", "2", "42", "1"]])).unwrap();
+    assert!(only_contour(&d).bulge_verts.is_none());
+}
+
+#[test]
+fn bulge_stuetzpunkte_in_millimetern_umgerechnet() {
+    let mut l = vec!["0", "SECTION", "2", "HEADER", "9", "$INSUNITS", "70", "4", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"];
+    l.extend(["0", "LWPOLYLINE", "8", "0", "90", "2", "70", "0", "10", "1000", "20", "0", "42", "1", "10", "3000", "20", "0"]);
+    l.extend(["0", "ENDSEC", "0", "EOF"]);
+    let d = import_bytes(&l.join("\n").into_bytes()).unwrap();
+    let bv = only_contour(&d).bulge_verts.clone().unwrap();
+    assert!(close(bv[0][0], 1.0) && close(bv[1][0], 3.0));
+    assert_eq!(bv[0][2], 1.0);
+}
+
+#[test]
+fn schraffur_polylinienrand_mit_bulges() {
+    let d = import_bytes(&dxf(
+        &[],
+        &[&[
+            "0", "HATCH", "8", "BB", "2", "SOLID", "70", "1", "91", "1", "92", "3", "72", "1", "73", "1", "93", "3", "10", "0", "20", "0", "42", "0.3", "10", "10",
+            "20", "0", "42", "0", "10", "10", "20", "10", "42", "0", "97", "0",
+        ]],
+    ))
+    .unwrap();
+    let c = only_contour(&d);
+    assert!(c.closed && c.filled);
+    let bv = c.bulge_verts.clone().unwrap();
+    assert_eq!(bv.len(), 3);
+    assert_eq!(bv[0][2], 0.3);
+}
+
+#[test]
+fn kodierung_bulge_stuetzpunkte() {
+    let d = import_bytes(&dxf(&[], &[PARZELLE])).unwrap();
+    let (g, _) = encode(&d);
+    let mut i = 5;
+    let n_lc = g[i] as usize;
+    i += 1 + 2 * n_lc;
+    let n_counts = g[i] as usize;
+    i += 1 + 2 * n_counts;
+    assert_eq!(g[i], 1.0);
+    assert_eq!(g[i + 2], 9.0); // geschlossen + Bulge-Stützpunkte
+    let np = g[i + 4] as usize;
+    let j = i + 5 + 2 * np;
+    assert_eq!(g[j], 4.0);
+    assert_eq!(&g[j + 1..j + 4], &[2_600_000.0, 1_200_000.0, 0.12]);
+}

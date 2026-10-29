@@ -41,6 +41,8 @@ import {
   greyColor,
 } from "./planView/primitives";
 import { DraftOverlay } from "./planView/overlays";
+import { visibleGripIndices } from "./planView/gripCull";
+import { VbCircle } from "./planView/vbCircle";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, indexedInRegion, regionContains, type Bounds } from "../../core";
@@ -3320,7 +3322,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               pointerEvents="none"
             />
             {corners.map((s, i) => (
-              <circle
+              <VbCircle
                 key={`gbb-${i}`}
                 className="plan-grip plan-group-bbox-corner"
                 cx={s.x}
@@ -3415,11 +3417,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {gripsActive && (
         <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>
           {(meet) =>
-            grips!.map((g, i) => {
-              const s = toScreen(g);
+            // Viele Griffe (Kataster): nur die sichtbaren zeichnen (gripCull.ts).
+            (visibleGripIndices(grips!, toScreen, view, meet) ?? grips!.map((_, i) => i)).map((i) => {
+              const s = toScreen(grips![i]);
               const size = (4.5 * gripK(meet)) / meet;
               return (
-                <circle
+                <VbCircle
                   key={`grip-${i}`}
                   className="plan-grip"
                   cx={s.x}
@@ -3461,7 +3464,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {edgeGripsActive && (
         <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>
           {(s) =>
-        edgeGrips!.map((eg, i) => {
+        (visibleGripIndices(edgeGrips!.map((g) => g.mid), toScreen, view, s) ?? edgeGrips!.map((_, i) => i)).map((i) => {
+          const eg = edgeGrips![i];
           const m = toScreen(eg.mid);
           // Normale in den Bildschirmraum (Y spiegeln); auf Bildschirm-px-Größen.
           const sn = screenNormal(eg.normal);
@@ -3522,7 +3526,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             {pts.map((pt, i) => {
               const s = toScreen(pt);
               return (
-                <circle
+                <VbCircle
                   key={i}
                   cx={s.x}
                   cy={s.y}

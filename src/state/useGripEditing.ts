@@ -10,6 +10,7 @@ import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../mod
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { drawingVertices } from "./projectSlice";
+import { gripDrawingIdsFor } from "./gripLimits";
 import { areaMovePreview } from "../tools/transform";
 import { mvGeom } from "../core";
 import { drawingPreviewShapes } from "../tools/drawingPreview";
@@ -172,24 +173,12 @@ export function useGripEditing(opts: {
         ? [selectedDrawingId]
         : [];
 
-  // Bei grossen Auswahlen (z. B. Rahmen über Katasterdaten) gibt es KEINE Griffe:
-  // je Stützpunkt ein Eck- und ein Kanten-Griff ergaben zehntausende DOM-Elemente
-  // (Sekunden Wartezeit) und sind bei so vielen Punkten nicht bedienbar. Massgebend
-  // ist die GESAMTZAHL der Stützpunkte (wenige Objekte können riesige Umrisse
-  // haben), nicht die Objektzahl. Die Auswahl selbst (Hervorhebung, Verschieben,
-  // Eigenschaften) bleibt unberührt.
-  const MAX_GRIP_DRAWINGS = 50;
-  const MAX_GRIP_VERTICES = 600;
-  const gripDrawingIds = (() => {
-    if (effectiveDrawingIds.length > MAX_GRIP_DRAWINGS) return [];
-    let total = 0;
-    for (const id of effectiveDrawingIds) {
-      const d = project.drawings2d.find((x) => x.id === id);
-      if (d) total += drawingVertices(d, scaleDenominator).length;
-      if (total > MAX_GRIP_VERTICES) return [];
-    }
-    return effectiveDrawingIds;
-  })();
+  // Griff-Grenzen (s. gripLimits.ts): grosse Mehrfachauswahlen ohne Griffe, ein einzeln gewähltes
+  // Element immer mit Griffen (Kataster-Parzellen mit tausenden Stützpunkten).
+  const gripDrawingIds = gripDrawingIdsFor(effectiveDrawingIds, (id) => {
+    const d = project.drawings2d.find((x) => x.id === id);
+    return d ? drawingVertices(d, scaleDenominator).length : 0;
+  });
 
   // ── Höhen-Griffe im Schnitt/in der Ansicht ───────────────────────────────
   // Gewählte Wand: Griff an der Oberkante (ändert `height`). Gewähltes Fenster: Griffe

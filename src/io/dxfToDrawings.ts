@@ -16,6 +16,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Contour, ContourSet, Drawing2D, Drawing2DGeom, ImportedText, LayerCategory } from "../model/types";
+import type { ImportContour } from "./dxfParser";
 
 /** Wie DXF-Layer auf Kategorien abgebildet werden. */
 export type CategoryMode = "active" | "byLayer";
@@ -114,6 +115,20 @@ function contourGeom(contour: Contour): Drawing2DGeom | null {
       return { shape: "circle", center: { x: c.cx, y: c.cy }, r: c.r };
     }
     return { shape: "arc", center: { x: c.cx, y: c.cy }, r: c.r, a0: c.a0, a1: c.a1 };
+  }
+  // Polylinie mit Bögen (DXF-Bulges): Stützpunkte + `bulge` statt des tessellierten Linienzugs.
+  // VORZEICHEN: In DXF heisst Bulge > 0 „Bogen im Gegenuhrzeigersinn von a nach b" (Scheitel rechts
+  // der Sehne), im Modell liegt der Scheitel bei Bulge > 0 LINKS der Sehne (`kernel2d/src/bulge.rs`,
+  // Links-Normale) — also umgekehrt. Geprüft in `dxfBulgeImport.test.ts` gegen die Tessellierung des
+  // Imports.
+  const bp = (contour as ImportContour).bulgePolyline;
+  if (bp && bp.pts.length >= 2 && bp.bulge.length === bp.pts.length) {
+    return {
+      shape: "polyline",
+      pts: bp.pts.map((p) => ({ ...p })),
+      closed: contour.closed,
+      bulge: bp.bulge.map((b) => (b === 0 ? 0 : -b)),
+    };
   }
   const pts = contour.pts;
   if (pts.length < 2) return null;
