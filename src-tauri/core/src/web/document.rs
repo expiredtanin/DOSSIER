@@ -128,6 +128,29 @@ pub fn doc_history_state(h: u32) -> Vec<f64> {
     .unwrap_or_default()
 }
 
+/// Beschriftung für den nächsten Undo-Schritt (leer = keine); wird beim nächsten Aufzeichnen verbraucht.
+#[wasm_bindgen]
+pub fn doc_history_label(h: u32, label: &str) {
+    with_doc(h, |d| d.history_mut().set_label(label));
+}
+
+/// Verlaufsliste als JSON `{"undo":[…ältester zuerst],"redo":[…nächster zuerst]}` (Beschriftungen).
+#[wasm_bindgen]
+pub fn doc_history_labels(h: u32) -> String {
+    with_doc(h, |d| {
+        let (undo, redo) = d.history().labels();
+        serde_json::json!({ "undo": undo, "redo": redo }).to_string()
+    })
+    .unwrap_or_default()
+}
+
+/// Springt auf Undo-Tiefe `target` (mehrere Schritte in einem Aufruf): alle angewendeten Ops als
+/// JSON-Array (für die TS-Leseansicht, `doc_last_hits` passend dazu), leer = nichts.
+#[wasm_bindgen]
+pub fn doc_history_jump(h: u32, target: u32) -> String {
+    with_doc(h, |d| d.history_jump(target as usize).map(|ops| ops_to_json(&ops))).flatten().unwrap_or_default()
+}
+
 /// Verlauf leeren (z. B. nach einer Änderung am Projekt vorbei an den Ops).
 #[wasm_bindgen]
 pub fn doc_history_clear(h: u32) {

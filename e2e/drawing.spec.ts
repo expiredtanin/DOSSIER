@@ -103,3 +103,41 @@ test("Mehrmals ganz zurück und wieder vor: Redo bleibt vollständig", async ({ 
   // „Neues Projekt" ist nicht rückgängig zu machen (Verlauf beginnt neu).
   await expect(page.locator(".project-name")).toHaveText("Leeres Projekt");
 });
+
+// [84] Verlaufsliste: Klick auf einen Eintrag springt zu diesem Stand (mehrere Schritte in einem Aufruf).
+test("Verlauf-Panel: Klick springt zum Schritt", async ({ page }) => {
+  await startNewProject(page);
+  await openTab(page, "Elemente");
+  for (const [a, b] of [["0,0", "5,0"], ["5,0", "5,4"], ["5,4", "0,4"]]) {
+    await page.getByRole("button", { name: "Wand", exact: true }).click();
+    // Das Werkzeug bleibt nach dem Befehl gewählt: ein zweiter Klick schaltet es ab, dann erneut wählen.
+    if (!(await page.locator(".cmdline-prompt").textContent())?.includes("Startpunkt")) {
+      await page.getByRole("button", { name: "Wand", exact: true }).click();
+    }
+    await expect(page.locator(".cmdline-prompt")).toHaveText("Startpunkt der Wand:");
+    await commandInput(page).focus();
+    await typeCommand(page, a!);
+    await typeCommand(page, b!);
+    await finishCommand(page);
+  }
+  await expect(elementRows(page)).toHaveCount(3);
+  await blurFocus(page);
+
+  await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+  await page.getByRole("option", { name: "Verlauf" }).click();
+  const entries = page.getByTestId("history-entry");
+  // Jüngster oben: drei Wand-Schritte + Ausgangsstand.
+  await expect(entries).toHaveCount(4);
+  await expect(entries.first()).toContainText("Wand zeichnen");
+  await expect(entries.first()).toHaveAttribute("aria-selected", "true");
+  await expect(entries.last()).toContainText("Ausgangsstand");
+
+  // Erster Wand-Eintrag (vorletzte Zeile) → eine Wand; die späteren Schritte bleiben als Wiederholen stehen.
+  await entries.nth(2).click();
+  await expect(elementRows(page)).toHaveCount(1);
+  await expect(entries).toHaveCount(4);
+  await expect(entries.nth(2)).toHaveAttribute("aria-selected", "true");
+  // Oberster Eintrag → wieder alle drei.
+  await entries.first().click();
+  await expect(elementRows(page)).toHaveCount(3);
+});

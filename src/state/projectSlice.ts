@@ -66,8 +66,9 @@ import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { DEFAULT_PRESETS, type TextStylePreset } from "../text/richText";
 import { t } from "../i18n";
 import type { StoreApi } from "./store";
-import { createHistorySlice, historyPatch, storeDocument } from "./historySlice";
+import { createHistorySlice, historyPatch, labelCommit, storeDocument } from "./historySlice";
 import type { HistorySlice } from "./historySlice";
+import { opsLabel } from "./historyLabels";
 import type { NotifyKind } from "./notifySlice";
 
 /** Felder, die diese Slice in den RootState beisteuert. */
@@ -97,6 +98,7 @@ export interface ProjectSlice {
    */
   commitImport: <R extends object>(
     run: (doc: ProjectDocument, base: Project, now: number) => ({ project: Project; ops: CoreOp[] } & R) | { problems: string[] },
+    label?: string,
   ) => ({ ops: CoreOp[] } & R) | null;
   /**
    * Ein anderes Projekt übernehmen (Neu, Musterhaus; [K4] S4): lädt es als Ganzes ins Kern-Dokument
@@ -485,7 +487,7 @@ export function createProjectSlice(
   ): Partial<ProjectSlice & HistorySlice> => {
     if (ops.length === 0) return {};
     const doc = storeDocument(s.project);
-    const res = doc.commit(s.project, ops, coalesceKey, Date.now());
+    const res = labelCommit(doc, opsLabel(ops), () => doc.commit(s.project, ops, coalesceKey, Date.now()));
     if ("problems" in res) {
       const problems = res.problems;
       console.warn("Projektänderung verworfen:", problems);
@@ -509,7 +511,10 @@ export function createProjectSlice(
   const applyCmd = (req: object, coalesceKey?: string) =>
     set((s) => {
       const doc = storeDocument(s.project);
-      const res = doc.commitCmd(s.project, req, coalesceKey, Date.now());
+      const cmd = (req as { cmd?: unknown }).cmd;
+      const res = labelCommit(doc, typeof cmd === "string" ? `history.cmd.${cmd}` : "", () =>
+        doc.commitCmd(s.project, req, coalesceKey, Date.now()),
+      );
       if ("problems" in res) {
         const problems = res.problems;
         console.warn("Projektänderung verworfen:", problems);
@@ -534,7 +539,7 @@ export function createProjectSlice(
     let notice: string | undefined;
     set((s) => {
       const doc = storeDocument(s.project);
-      const res = doc.commitGrip(s.project, req, coalesceKey, Date.now());
+      const res = labelCommit(doc, "history.grip", () => doc.commitGrip(s.project, req, coalesceKey, Date.now()));
       if ("problems" in res) {
         const problems = res.problems;
         console.warn("Projektänderung verworfen:", problems);
@@ -563,11 +568,11 @@ export function createProjectSlice(
     applyChange,
     recentOps: () => opLog.slice(),
 
-    commitImport: (run) => {
+    commitImport: (run, label) => {
       let out: ReturnType<typeof run> | null = null;
       set((s) => {
         const doc = storeDocument(s.project);
-        const res = run(doc, s.project, Date.now());
+        const res = labelCommit(doc, label ?? "history.import", () => run(doc, s.project, Date.now()));
         out = res;
         if ("problems" in res) {
           const problems = res.problems;

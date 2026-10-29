@@ -8687,3 +8687,33 @@ body {
 .rpi-state {
   font-size: 11px;
 }
+
+/* Verlauf-Panel [84]: Zeilen wie .nav-row (eigene Klasse, damit der Element-Baum sie nicht mitzählt). */
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 2px 10px 2px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--label);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.history-row:hover {
+  background: var(--panel-2);
+}
+.history-row.active {
+  background: var(--active-dim);
+  border-radius: 999px;
+  border-bottom-color: transparent;
+  color: var(--active-light);
+}
+.history-row.active .nav-label {
+  font-weight: 600;
+  color: var(--active-light);
+}
+.history-row.future {
+  opacity: 0.45;
+}

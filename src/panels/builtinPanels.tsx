@@ -26,6 +26,7 @@ import { ElementTreePanel, ElementsTabIcon } from "./ElementTreePanel";
 import { ViewSnapshotsPanel, ViewSnapshotsTabIcon } from "./ViewSnapshotsPanel";
 import { LayoutsPanel, LayoutsTabIcon } from "./LayoutsPanel";
 import { BcfPanel } from "./BcfPanel";
+import { HistoryPanel } from "./HistoryPanel";
 import {
   ToolsTabIcon,
   AttributesTabIcon,
@@ -35,6 +36,7 @@ import {
   SiteTabIcon,
   RoomBalanceTabIcon,
   BcfTabIcon,
+  HistoryTabIcon,
 } from "./PanelIcons";
 
 /** IDs der eingebauten Dock-Panels (auch für defaultLayout/Filter nutzbar). */
@@ -50,6 +52,7 @@ export const BUILTIN_PANEL_IDS = {
   viewSnapshots: "view-snapshots",
   layouts: "layouts",
   bcf: "bcf",
+  history: "history",
 } as const;
 
 // Werkzeug-Palette (Symbol + Name je Werkzeug, ArchiCAD/Vectorworks-Stil).
@@ -157,4 +160,14 @@ registerPanel({
   icon: <BcfTabIcon />,
   hasDisplayMode: false,
   render: () => <BcfPanel />,
+});
+
+// Verlauf ([84]) — Undo-Schritte als Liste, Klick springt zum Schritt. Nicht im Standard-Layout,
+// erreichbar über „Bearbeiten > Verlauf" bzw. „Fenster > Panels".
+registerPanel({
+  id: BUILTIN_PANEL_IDS.history,
+  title: "nav.history",
+  icon: <HistoryTabIcon />,
+  hasDisplayMode: false,
+  render: () => <HistoryPanel />,
 });

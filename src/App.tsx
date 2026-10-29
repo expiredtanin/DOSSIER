@@ -1678,7 +1678,7 @@ export default function App() {
       .arrayBuffer()
       .then((buf) => readIfcFlat(new Uint8Array(buf), elements))
       .then((flat) => {
-        const r = getState().commitImport((doc, base, now) => doc.importIfc(base, flat, { fileName: f.name, elements }, now));
+        const r = getState().commitImport((doc, base, now) => doc.importIfc(base, flat, { fileName: f.name, elements }, now), "history.import.ifc");
         if (!r) return;
         const report = r.report;
         if (elements && r.summary) {
@@ -3302,7 +3302,7 @@ export default function App() {
         notify={notify}
         onImport={(read, fileName, placement) => {
           // Der Kern macht die Kontext-Meshes und übernimmt sie als EINEN Undo-Schritt ([K4] S4).
-          const r = getState().commitImport((doc, base, now) => doc.importMesh(base, read.flat, { fileName, placement }, now));
+          const r = getState().commitImport((doc, base, now) => doc.importMesh(base, read.flat, { fileName, placement }, now), "history.import.mesh");
           if (!r) return;
           fitToContextObjects(addedItems(r.ops, "context") as ContextObject[]);
           notify(formatMeshReport(read.report, t), r.contextObjects === 0 || read.report.truncated ? "warning" : "info");
@@ -3416,6 +3416,7 @@ export default function App() {
               onToggleResources={() => toggleResources()}
               onOpenSettings={() => openSettings()}
               onOpenBcf={() => setLayout((l) => revealPanel(l, "bcf"))}
+              onOpenHistory={() => setLayout((l) => revealPanel(l, "history"))}
             />
           )
         }

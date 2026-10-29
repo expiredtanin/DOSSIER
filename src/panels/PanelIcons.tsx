@@ -98,6 +98,17 @@ export function RoomBalanceTabIcon() {
   );
 }
 
+/** Verlauf — Uhr mit Rückwärtspfeil. */
+export function HistoryTabIcon() {
+  return (
+    <svg {...common}>
+      <path d="M2.5 8a5.5 5.5 0 1 0 1.8-4.1" />
+      <path d="M2.5 2.5v3h3" />
+      <path d="M8 5v3.2l2 1.3" />
+    </svg>
+  );
+}
+
 /** BCF-Themen — Sprechblase mit Haken (Koordinations-Thema). */
 export function BcfTabIcon() {
   return (

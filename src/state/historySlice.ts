@@ -38,7 +38,36 @@ export interface HistorySlice {
    * Alle Projekt-Änderungen in `fn` werden EIN Undo-Schritt. Mit `coalesceKey` schliessen
    * aufeinanderfolgende Gruppen mit gleichem Schlüssel (im Zeitfenster) an denselben Schritt an.
    */
-  groupChanges: (fn: () => void, coalesceKey?: string) => void;
+  groupChanges: (fn: () => void, coalesceKey?: string, label?: string) => void;
+  /** Beschriftungen der Schritte (Undo: ältester zuerst; Redo: nächster zuerst), für die Verlaufsliste [84]. */
+  historyEntries: () => { undo: string[]; redo: string[] };
+  /** Springt auf Undo-Tiefe `target` (0 = Anfang), mehrere Schritte in einem Kern-Aufruf. */
+  jumpHistory: (target: number) => void;
+}
+
+let activeLabel = "";
+
+/** Alle Änderungen in `fn` ohne eigene Beschriftung bekommen `label` (i18n-Schlüssel oder Text) als Schritt-Name. */
+export function withHistoryLabel<T>(label: string, fn: () => T): T {
+  const prev = activeLabel;
+  activeLabel = label;
+  try {
+    return fn();
+  } finally {
+    activeLabel = prev;
+  }
+}
+
+/** Führt einen Commit mit Beschriftung aus: die des umgebenden {@link withHistoryLabel}, sonst `fallback`. */
+export function labelCommit<T>(d: ProjectDocument, fallback: string, run: () => T): T {
+  const label = activeLabel || fallback;
+  if (!label) return run();
+  d.setHistoryLabel(label);
+  try {
+    return run();
+  } finally {
+    d.setHistoryLabel("");
+  }
 }
 
 let doc: ProjectDocument | null = null;
@@ -85,15 +114,23 @@ export function createHistorySlice(api: StoreApi<HistorySlice & { project: Proje
       d.clearHistory();
       set(historyPatch(d));
     },
-    groupChanges: (fn, coalesceKey) => {
+    groupChanges: (fn, coalesceKey, label) => {
       const d = storeDocument(get().project);
       if (coalesceKey) d.beginKeyedGroup(coalesceKey, Date.now());
       else d.beginGroup();
       try {
-        fn();
+        if (label) withHistoryLabel(label, fn);
+        else fn();
       } finally {
         d.endGroup();
       }
+    },
+    historyEntries: () => storeDocument(get().project).historyLabels(),
+    jumpHistory: (target) => {
+      const { project } = get();
+      const d = storeDocument(project);
+      const next = d.jumpTo(project, target);
+      if (next) set({ project: next, ...historyPatch(d) });
     },
   };
 }
