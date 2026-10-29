@@ -764,6 +764,12 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Signaturen (gelöscht: `mapRunsInRange`, `marksEqual`, `normalizeMarks`, `makeRun`, kein Aufrufer). Gleichheit (einmalig,
     Test gelöscht): 500 Zufallsdokumente × alle Operationen alt/neu gleich. Abweichung: Bereich mitten in einem Surrogatpaar
     ergibt U+FFFD (im Editor nicht erreichbar). Nicht in der Tauri-App geprüft.
+    ✅ (29.10.) **Gebäude-Mesh-Aufbereitung im Kern** ([K4]): `core/src/geo_mesh.rs` (Zuschnitt auf Bounding-Box, Zerlegen in
+    zusammenhängende Gebäude per Verschweissen + Union-Find, Dachüberstand-Untersichten entfernen), Bindungen
+    `web/geo_mesh.rs` (flache Puffer); `io/swissBuildings3d.ts` behält Abrufe (STAC/`netFetch`), Verschieben um die Origin und
+    `concatMeshes` (reine Kopier-/Versatz-Schleifen) sowie die Metadaten (Id, Name, Ebene). Gleichheit (einmalig, Test
+    gelöscht): 400 Zufallsmeshes (mehrere Gebäude, geteilte Ecken, Rest-Dreieck) × Zuschnitt/Soffiten/3 Verschweiss-Toleranzen
+    alt/neu gleich. Offen: Netz-Abrufe bleiben TS (`netFetch`). Nicht an echten Kacheln geprüft.
     ✅ (29.10.) **Fang-Kandidaten aus dem Modell im Kern** ([K4] S3/[K3d]): `snap_model.rs` sammelt je Dokument-Stand,
     Geschoss und sichtbaren Ebenen (vorher `baseSegments`/`collectCircles`/`roomAnchors`/`ellipseCenters` in
     `tools/snapping.ts`): Wandachsen + Schichtgrenzen, Raum-/Decken- (mit Aussparungen)/Dach-/Treppen-/Stützen-Umrisse,

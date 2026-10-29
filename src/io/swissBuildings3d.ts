@@ -36,6 +36,7 @@ import type { GeoOrigin, LV95 } from "./lv95";
 import { stacQuery, pickAsset, downloadAssetText, downloadAssetBinary } from "./stacApi";
 import { parseDxfAsync } from "./dxfParserAsync";
 import { importMeshes } from "./importSource";
+import { core } from "../engine/coreWasm";
 import type { ImportedMesh } from "../model/types";
 import { GEO_CATEGORY_DEFS, IMPORTED_ROOF_CATEGORY } from "../model/contextCategories";
 
@@ -54,6 +55,12 @@ const ASSET_PRIORITY = [
   ".obj.zip",
   ".ifc.zip",
 ];
+
+/** Kern-Ergebnis `[nPos, pos…, idx…]` ab Offset → Positionen/Indizes. */
+function decodeMesh(r: Float64Array, at: number): { mesh: { positions: number[]; indices: number[] } } {
+  const nPos = r[at] * 3;
+  return { mesh: { positions: Array.from(r.subarray(at + 1, at + 1 + nPos)), indices: Array.from(r.subarray(at + 1 + nPos)) } };
+}
 
 export type BuildingsVersion = "v2" | "v3";
 
@@ -77,49 +84,16 @@ export function shiftMeshToOrigin(
  * Schneidet ein Mesh auf eine (bereits origin-verschobene, lokale) Bounding-Box
  * zurecht: ein Dreieck bleibt, sobald MINDESTENS EIN Eckpunkt innerhalb der Box
  * liegt (grosszügig — schneidet Gebäude am Rand nicht mittendurch ab). Nötig,
- * weil eine einzelne swissBUILDINGS3D-DXF-Kachel (STAC-Tile) alle Gebäude der
- * GANZEN Kachel als EIN gemeinsames Mesh liefert (s. `dxfParser.ts::parseDxf`
- * — alle 3DFACE/Polyface-Entities eines Files landen im selben Positions-/
- * Indexpuffer) — ohne diesen Zuschnitt liefert ein einzelner Import ALLES in
- * der Kachel, auch weit ausserhalb des gesuchten Radius (bis zu mehreren km,
- * je nach Kachelgrösse). `positions` wird dabei KOMPAKTIERT (nicht referenzierte
- * Ecken entfernt, Indizes neu gemappt) — sonst sähe jeder Verbraucher, der roh
- * über `positions` statt über `indices` iteriert (z. B. eine Bounding-Box/
- * Kamera-Fit-Berechnung), weiterhin die volle, ungeschnittene Ausdehnung. Rein
- * (kein Netzwerk), exportiert für Unit-Tests.
+ * weil eine swissBUILDINGS3D-Kachel alle Gebäude der GANZEN Kachel als EIN
+ * Mesh liefert. `positions` wird KOMPAKTIERT (nicht referenzierte Ecken entfernt,
+ * Indizes neu vergeben). Rechnet der Kern (`core/src/geo_mesh.rs`); rein (kein Netzwerk).
  */
 export function clipMeshToBbox(
   mesh: ImportedMesh,
   bboxLocal: [number, number, number, number],
 ): ImportedMesh {
-  const [xMin, yMin, xMax, yMax] = bboxLocal;
-  const pos = mesh.positions;
-  const inBox = (idx: number): boolean => {
-    const x = pos[idx * 3];
-    const y = pos[idx * 3 + 1];
-    return x >= xMin && x <= xMax && y >= yMin && y <= yMax;
-  };
-  const keptTris: [number, number, number][] = [];
-  for (let i = 0; i + 2 < mesh.indices.length; i += 3) {
-    const a = mesh.indices[i];
-    const b = mesh.indices[i + 1];
-    const c = mesh.indices[i + 2];
-    if (inBox(a) || inBox(b) || inBox(c)) keptTris.push([a, b, c]);
-  }
-  const remap = new Map<number, number>();
-  const positions: number[] = [];
-  const indices: number[] = [];
-  const mapVertex = (old: number): number => {
-    let ni = remap.get(old);
-    if (ni === undefined) {
-      ni = positions.length / 3;
-      positions.push(pos[old * 3], pos[old * 3 + 1], pos[old * 3 + 2]);
-      remap.set(old, ni);
-    }
-    return ni;
-  };
-  for (const [a, b, c] of keptTris) indices.push(mapVertex(a), mapVertex(b), mapVertex(c));
-  return { ...mesh, positions, indices };
+  const r = core().geo_mesh_clip(Float64Array.from(mesh.positions), Float64Array.from(mesh.indices), Float64Array.from(bboxLocal));
+  return r.length === 0 ? { ...mesh, positions: [], indices: [] } : { ...mesh, ...decodeMesh(r, 0).mesh };
 }
 
 /** Sichtbarer Ebenen-/Gruppierungsname der importierten Gebäude (SitePanel). */
@@ -127,109 +101,29 @@ export const BUILDING_LAYER = "Gebäude";
 
 /**
  * Zerlegt ein Mesh in seine räumlich ZUSAMMENHÄNGENDEN Komponenten (Union-Find
- * über verschweisste Vertices) — je Komponente ein eigenes {@link ImportedMesh}.
- * So wird eine swissBUILDINGS3D-Kachel (ein Mesh mit ALLEN Gebäuden, s.
- * `dxfParser.ts::parseDxf`) in EINZELNE, getrennt anwähl-/löschbare Gebäude
- * aufgeteilt (Nutzer-Wunsch). Vertices werden per quantisierter Position
- * (`weldMm`) verschweisst, damit Dreiecke, die sich einen Eckpunkt teilen, aber
- * getrennte Indizes tragen (typisch für 3DFACE-DXF), als verbunden gelten. Jede
- * Komponente bekommt eine eigene Id + fortlaufenden Namen + `layer`. Rein (kein
- * Netzwerk), exportiert für Unit-Tests.
+ * über verschweisste Vertices, `weldMm`) — je Komponente ein eigenes {@link ImportedMesh}.
+ * So wird eine swissBUILDINGS3D-Kachel in EINZELNE, getrennt anwähl-/löschbare
+ * Gebäude aufgeteilt. Jede Komponente bekommt eine eigene Id + fortlaufenden Namen
+ * + `layer`. Die Zerlegung rechnet der Kern (`core/src/geo_mesh.rs`); rein (kein Netzwerk).
  */
 export function splitMeshComponents(mesh: ImportedMesh, weldMm = 1): ImportedMesh[] {
-  const pos = mesh.positions;
-  const vcount = Math.floor(pos.length / 3);
-  const idx = mesh.indices;
-  if (vcount < 3 || idx.length < 3) return idx.length >= 3 ? [mesh] : [];
-
-  // 1) Weld: gleiche (quantisierte) Position -> gemeinsamer kanonischer Index.
-  const q = weldMm / 1000; // Meter
-  const weldMap = new Map<string, number>();
-  const canonical = new Int32Array(vcount);
-  for (let i = 0; i < vcount; i++) {
-    const key = `${Math.round(pos[i * 3] / q)},${Math.round(pos[i * 3 + 1] / q)},${Math.round(pos[i * 3 + 2] / q)}`;
-    let c = weldMap.get(key);
-    if (c === undefined) {
-      c = i;
-      weldMap.set(key, i);
-    }
-    canonical[i] = c;
-  }
-
-  // 2) Union-Find über die kanonischen Vertices via Dreieckskanten.
-  const parent = new Int32Array(vcount);
-  for (let i = 0; i < vcount; i++) parent[i] = i;
-  const find = (x: number): number => {
-    let r = x;
-    while (parent[r] !== r) r = parent[r];
-    while (parent[x] !== r) {
-      const next = parent[x];
-      parent[x] = r;
-      x = next;
-    }
-    return r;
+  const vcount = Math.floor(mesh.positions.length / 3);
+  if (vcount < 3 || mesh.indices.length < 3) return mesh.indices.length >= 3 ? [mesh] : [];
+  const defaults = {
+    layer: mesh.layer ?? BUILDING_LAYER,
+    categoryCode: mesh.categoryCode ?? GEO_CATEGORY_DEFS.building.code,
   };
-  const union = (a: number, b: number) => {
-    const ra = find(a);
-    const rb = find(b);
-    if (ra !== rb) parent[ra] = rb;
-  };
-  for (let i = 0; i + 2 < idx.length; i += 3) {
-    const a = idx[i], b = idx[i + 1], c = idx[i + 2];
-    if (a >= vcount || b >= vcount || c >= vcount) continue;
-    union(canonical[a], canonical[b]);
-    union(canonical[b], canonical[c]);
-  }
-
-  // 3) Dreiecke nach Komponenten-Wurzel gruppieren.
-  const groups = new Map<number, number[]>();
-  for (let i = 0; i + 2 < idx.length; i += 3) {
-    const a = idx[i], b = idx[i + 1], c = idx[i + 2];
-    if (a >= vcount || b >= vcount || c >= vcount) continue;
-    const root = find(canonical[a]);
-    let g = groups.get(root);
-    if (!g) {
-      g = [];
-      groups.set(root, g);
-    }
-    g.push(a, b, c);
-  }
-  if (groups.size <= 1) {
-    return [
-      {
-        ...mesh,
-        layer: mesh.layer ?? BUILDING_LAYER,
-        categoryCode: mesh.categoryCode ?? GEO_CATEGORY_DEFS.building.code,
-      },
-    ];
-  }
-
-  // 4) Je Komponente ein eigenes Mesh (Positions kompaktiert, Indizes neu gemappt).
+  const r = core().geo_mesh_split(Float64Array.from(mesh.positions), Float64Array.from(mesh.indices), weldMm);
+  if (r.length === 0) return [{ ...mesh, ...defaults }];
   const out: ImportedMesh[] = [];
-  let n = 0;
-  for (const tri of groups.values()) {
-    const remap = new Map<number, number>();
-    const positions: number[] = [];
-    const indices: number[] = [];
-    for (const old of tri) {
-      let ni = remap.get(old);
-      if (ni === undefined) {
-        ni = positions.length / 3;
-        positions.push(pos[old * 3], pos[old * 3 + 1], pos[old * 3 + 2]);
-        remap.set(old, ni);
-      }
-      indices.push(ni);
-    }
-    out.push({
-      ...mesh,
-      id: `${mesh.id}-b${n}`,
-      name: `${mesh.name} #${n + 1}`,
-      layer: mesh.layer ?? BUILDING_LAYER,
-      categoryCode: mesh.categoryCode ?? GEO_CATEGORY_DEFS.building.code,
-      positions,
-      indices,
-    });
-    n++;
+  let at = 1;
+  for (let n = 0; n < r[0]; n++) {
+    const nPos = r[at] * 3;
+    const nIdx = r[at + 1];
+    const positions = Array.from(r.subarray(at + 2, at + 2 + nPos));
+    const indices = Array.from(r.subarray(at + 2 + nPos, at + 2 + nPos + nIdx));
+    at += 2 + nPos + nIdx;
+    out.push({ ...mesh, id: `${mesh.id}-b${n}`, name: `${mesh.name} #${n + 1}`, ...defaults, positions, indices });
   }
   return out;
 }
@@ -259,14 +153,6 @@ export function concatMeshes(parts: ImportedMesh[]): ImportedMesh | null {
   return { ...withGeom[0], positions, indices };
 }
 
-/** Ab welcher Höhe (Meter) über der Grundmauer ein Dreieck NICHT mehr als
- *  Boden-/Sockel-Deckel gilt (siehe {@link stripOverhangSoffits}). */
-const BASE_CAP_TOL = 0.05;
-/** Normalen-Höhenkomponente (z, Modell-Hoch-Achse): darunter gilt ein Dreieck
- *  als „zeigt deutlich nach unten" (Soffit-Kandidat). cos(70°) ≈ 0.34 — nur
- *  weitgehend WAAGRECHTE Unterseiten, keine steilen Dachflächen. */
-const SOFFIT_DOWN_THRESHOLD = -0.35;
-
 /**
  * Entfernt Dachüberstand-Untersichten (Soffiten) aus einem swissBUILDINGS3D-
  * Mesh: Dreiecke, deren Fläche deutlich nach UNTEN zeigt UND nicht auf
@@ -283,60 +169,12 @@ const SOFFIT_DOWN_THRESHOLD = -0.35;
  * Windung könnte dies vereinzelt eine echte Dachfläche statt einer Soffite
  * entfernen — visuell in Tauri zu verifizieren.
  *
- * `positions` wird KOMPAKTIERT (analog `clipMeshToBbox`). Rein (kein Netzwerk),
- * exportiert für Unit-Tests.
+ * `positions` wird KOMPAKTIERT (analog `clipMeshToBbox`). Rechnet der Kern
+ * (`core/src/geo_mesh.rs`); rein (kein Netzwerk).
  */
 export function stripOverhangSoffits(mesh: ImportedMesh): ImportedMesh {
-  const pos = mesh.positions;
-  const idx = mesh.indices;
-  if (idx.length < 3 || pos.length < 9) return mesh;
-
-  let minZ = Infinity;
-  for (let i = 2; i < pos.length; i += 3) {
-    if (pos[i] < minZ) minZ = pos[i];
-  }
-
-  const keptTris: [number, number, number][] = [];
-  for (let i = 0; i + 2 < idx.length; i += 3) {
-    const a = idx[i];
-    const b = idx[i + 1];
-    const c = idx[i + 2];
-    const ax = pos[a * 3], ay = pos[a * 3 + 1], az = pos[a * 3 + 2];
-    const bx = pos[b * 3], by = pos[b * 3 + 1], bz = pos[b * 3 + 2];
-    const cx = pos[c * 3], cy = pos[c * 3 + 1], cz = pos[c * 3 + 2];
-    // Boden-/Sockel-Deckel (alle drei Ecken nahe der Grundmauer-Höhe) bleibt
-    // in jedem Fall erhalten — kein Soffit-Kandidat.
-    const isBaseCap =
-      az <= minZ + BASE_CAP_TOL && bz <= minZ + BASE_CAP_TOL && cz <= minZ + BASE_CAP_TOL;
-    if (isBaseCap) {
-      keptTris.push([a, b, c]);
-      continue;
-    }
-    // Flächennormale (Modell x,y,z=Höhe): z-Komponente = "nach oben/unten".
-    const ux = bx - ax, uy = by - ay, uz = bz - az;
-    const vx = cx - ax, vy = cy - ay, vz = cz - az;
-    const nx = uy * vz - uz * vy;
-    const ny = uz * vx - ux * vz;
-    const nz = ux * vy - uy * vx;
-    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-    if (len > 1e-9 && nz / len < SOFFIT_DOWN_THRESHOLD) continue; // Soffit: weg
-    keptTris.push([a, b, c]);
-  }
-
-  const remap = new Map<number, number>();
-  const positions: number[] = [];
-  const indices: number[] = [];
-  const mapVertex = (old: number): number => {
-    let ni = remap.get(old);
-    if (ni === undefined) {
-      ni = positions.length / 3;
-      positions.push(pos[old * 3], pos[old * 3 + 1], pos[old * 3 + 2]);
-      remap.set(old, ni);
-    }
-    return ni;
-  };
-  for (const [a, b, c] of keptTris) indices.push(mapVertex(a), mapVertex(b), mapVertex(c));
-  return { ...mesh, positions, indices };
+  const r = core().geo_mesh_strip_soffits(Float64Array.from(mesh.positions), Float64Array.from(mesh.indices));
+  return r.length === 0 ? mesh : { ...mesh, ...decodeMesh(r, 0).mesh };
 }
 
 export interface FetchBuildings3dResult {
