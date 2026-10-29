@@ -4,7 +4,8 @@
 import { existsSync } from "node:fs";
 import { chromium, defineConfig } from "@playwright/test";
 
-const PORT = 5199;
+// Eigener Port je Worktree möglich (mehrere Agents gleichzeitig): E2E_PORT=…
+const PORT = Number(process.env.E2E_PORT ?? 5199);
 
 /**
  * Chromium: normalerweise das von `playwright install` gelieferte. In Cloud-Containern liegt eine
