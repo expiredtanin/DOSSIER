@@ -18,7 +18,7 @@
 // Manager läuft auch als eigenes natives Fenster ohne gemeinsamen Store.
 
 import { useState } from "react";
-import { FREE_COLOR_PALETTE } from "../model/penSets";
+import { freeColorPalette } from "../model/penSets";
 import { MATERIAL_PALETTE, RAL_CLASSIC, TANGO_PALETTE } from "../model/color";
 import type { BuiltinPaletteBanks, CustomPalette } from "../model/types";
 import { Swatch } from "./ColorSwatchCell";
@@ -59,7 +59,7 @@ export function FreeColorPicker({
     banks.push({
       id: "simple",
       label: t("pen.paletteSimple"),
-      entries: FREE_COLOR_PALETTE.map((hex) => ({ hex, title: hex })),
+      entries: freeColorPalette().map((hex) => ({ hex, title: hex })),
     });
   }
   if (builtinBanks?.tango !== false) {

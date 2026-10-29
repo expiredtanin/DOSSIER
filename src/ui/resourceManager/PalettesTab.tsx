@@ -12,7 +12,7 @@
 import { useState } from "react";
 import type { BuiltinPaletteBank, Project } from "../../model/types";
 import { MATERIAL_PALETTE, RAL_CLASSIC, TANGO_PALETTE } from "../../model/color";
-import { FREE_COLOR_PALETTE } from "../../model/penSets";
+import { freeColorPalette } from "../../model/penSets";
 import { t } from "../../i18n";
 import { DeleteButton, EmptyState, FieldRow, TextField } from "./fields";
 
@@ -20,15 +20,16 @@ import { DeleteButton, EmptyState, FieldRow, TextField } from "./fields";
  * Die vier mitgelieferten Bänke. `labelKey` statt fertigem Label, damit `t()`
  * erst zur RENDERZEIT läuft (Sprachwechsel wirkt sonst nicht — gleiche
  * Konvention wie `PATTERN_OPTIONS` in `HatchesTab.tsx`); Eigennamen
- * (Tango/Material/RAL) stehen direkt in `label`.
+ * (Tango/Material/RAL) stehen direkt in `label`. Eine Funktion, weil die Freie-Farbe-Palette aus dem
+ * Kern kommt (erst nach `initCore()` lesbar).
  */
-const BUILTIN_BANKS: {
+const builtinBanks = (): {
   id: BuiltinPaletteBank;
   label?: string;
   labelKey?: string;
   preview: string[];
-}[] = [
-  { id: "simple", labelKey: "pen.paletteSimple", preview: FREE_COLOR_PALETTE },
+}[] => [
+  { id: "simple", labelKey: "pen.paletteSimple", preview: freeColorPalette() },
   { id: "tango", label: "Tango", preview: TANGO_PALETTE.map((c) => c.hex) },
   { id: "material", label: "Material", preview: MATERIAL_PALETTE.map((c) => c.hex) },
   { id: "ral", label: "RAL Classic", preview: RAL_CLASSIC.map((c) => c.hex) },
@@ -73,7 +74,7 @@ export function PalettesTab({
       {/* Mitgelieferte Bänke: nur ein/aus — Inhalt ist fest. */}
       <div className="res-fields">
         <div className="res-section-label">{t("resources.palettes.builtin")}</div>
-        {BUILTIN_BANKS.map((bank) => (
+        {builtinBanks().map((bank) => (
           <FieldRow
             key={bank.id}
             label={bank.label ?? t(bank.labelKey!)}

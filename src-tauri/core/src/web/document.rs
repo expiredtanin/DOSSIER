@@ -196,6 +196,16 @@ pub fn doc_query_args(h: u32, name: &str, args: &[f64], text: &str) -> String {
     }
 }
 
+/// Abfrage auf der rohen Projekt-Wurzel (`crate::queries::run_root`); Fehler wie bei [`doc_query`].
+#[wasm_bindgen]
+pub fn doc_query_root(h: u32, name: &str, text: &str) -> String {
+    let result = with_doc(h, |d| crate::queries::run_root(d.root(), name, text)).unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
+    match result {
+        Ok(json) => json,
+        Err(e) => format!("\u{1}{e}"),
+    }
+}
+
 /// Boden-Spuren aller 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]` (Float32);
 /// leer bei Fehler oder ohne Zeichnungen.
 #[wasm_bindgen]

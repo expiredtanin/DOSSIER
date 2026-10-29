@@ -274,8 +274,8 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     0 Befunde, glTF-Validator über 390 GLB/glTF 0 Fehler (nach [C11]-Korrektur der leeren Szene). Messung (Node,
     Linux-Container, `--no-opt`-WASM, bigSample(20)): IFC 82,5 s → 2,4 s, GLB 212 s → 1,9 s; Beispielprojekt IFC
     11 → 4 ms, GLB 15 → 2,5 ms (vorher je Bauteil ein eigenes Kern-Dokument aus dem ganzen Projekt-JSON). Nicht in
-    der Tauri-App geprüft (e2e im Browser: IFC-Export grün). Bleibt: DXF-Sammler (`exportDxf.ts`), STEP (truck) und
-    die Modell-Verschiebung `translateProject` in TS (Befehl „Neuer Bezugspunkt“, DXF).
+    der Tauri-App geprüft (e2e im Browser: IFC-Export grün). Bleibt: DXF-Sammler (`exportDxf.ts`) und STEP (truck);
+    die Modell-Verschiebung `translateProject` liegt seit 29.10. im Kern (s. S3).
     Nächste: Export (Schedule/CSV, STL/OBJ, STEP), Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation) — hängt an Plan-Puffer v2.
     Grundriss (28.10.): Decken, Dächer, Räume, Wände+Öffnungen, Treppen, Stützen, Extrusionen, Kontext und Schnittlinien
     kommen über `planDomains` aus dem Dokument ([K3d]); seit 29.10. auch die 2D-Zeichnungen (`plan/drawings.rs`); übrig in
@@ -417,8 +417,62 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (`insertAfterCode`) ging in TS verloren (die Ebene mit dem Ziel wurde übersprungen), jetzt steht es hinter dem Original.
     Offen: vertikale Ausdehnungen (`model/wall.ts`: `wallVerticalExtent` …, Kern hat `model/helpers.rs` schon — Aufrufer in
     `toSection`/`voids`/`geometry/opening`/Viewport fallen mit dem Plan-Port bzw. brauchen eine Abfrage je Bauteil),
-    Stift-Referenzen im Kategorien-Baum beim Löschen eines Stifts (`projectSlice`, Stiftsatz-Logik), Layout-/Ordnerbäume
-    (`layoutModel.ts`), Parametrik-Regeln (`parametricWalls.ts`), Stiftsätze (`penSets.ts`); Undo-Verlauf als Liste in der UI [84].
+    Undo-Verlauf als Liste in der UI [84].
+    **Stiftsätze im Kern (29.10.):** `pens.rs` (Standardpalette mit 255 Stiften, Freie-Farbe-Palette, `hsl_to_hex`, Neu-Backen
+    der Stift-Farben/-Strichstärken `rebake_ops`, Standardsatz anlegen `seed_standard_ops`, Stift löschen samt Verweisen in
+    Bauteilen und im Kategorien-Baum `delete_pen_ops`). Rechnung auf der rohen Projekt-Wurzel (`serde_json`, verlustfrei) und
+    Ergebnis als Ops; neu: Wurzel-Abfragen (`queries::run_root`, `doc_query_root`, TS `ProjectDocument.queryRoot`) neben den
+    typisierten Abfragen. `model/penSets.ts` ist Fassade (Lese-Auflösung `resolvePenColor/Weight` einzeln je Swatch bleibt in TS,
+    `freeColorPalette()` statt Modul-Konstante, weil der Kern erst nach `initCore()` lesbar ist); `deletePen` in
+    `projectSlice` ruft `deletePenOps`. Gleichheit (einmalig, Test gelöscht): 4000 Zufallsprojekte Neu-Backen, 1500 Standardsatz,
+    3000 Stift-löschen (doppelte/fehlende Stift-ids, `constructor`/`__proto__` als Stift-id, fehlende Listen, verschachtelte
+    Kategorien), 20000 `hslToHex` — Ergebnis nach `applyOps` zeichengleich (auch Schlüsselreihenfolge). Abweichungen
+    (gewollt): Ebenen werden nur noch geschrieben, wenn sich etwas ändert (vorher immer ein `setField layers`), die Stifte
+    des Standardsatzes als ein `setField` statt Listen-Differenz (gleiches Ergebnis), unveränderte Ebenen-Kategorien
+    behalten nach dem Neu-Backen nicht mehr ihre Objekt-Identität.
+    **Layout-Blätter und Ordner-Bäume im Kern (29.10.):** `folder_tree.rs` (eine Rechnung für Layouts-, Master- und
+    Ausschnitte-Baum, vorher doppelt in `layoutModel.ts` und `state/viewSnapshotFolders.ts`: Baum aufbauen, Blätter eines
+    Ordners in Baum-Reihenfolge, Nachfahren-Test, Ordner löschen mit Hochziehen), `layout_model.rs` (Blattgrössen ISO 216 mit
+    freier Grösse, Seitenplanung Ordner-PDF, Titelblock mit Master-Vererbung, `js_trim` wie JS-`trim`); zustandslose Bindung
+    `layout_call` (`web/layout_model.rs`) plus Wurzel-Abfragen `folderPdfPages`/`layoutTitleBlock`. Der Kern rechnet auf Indizes
+    der Eingabelisten, TS (`model/folderTree.ts`, `layoutModel.ts`, `viewSnapshotFolders.ts`) setzt die Knoten aus den
+    Original-Objekten zusammen (Identität bleibt). In TS bleiben Fabriken, Viewport-/Annotations-CRUD, `moveLayoutToFolder`,
+    `moveFolderToFolder` (nur das Verschieben, der Zyklentest kommt aus dem Kern), `findMaster`/`findSnapshot`/
+    `resolveViewportScale`/`visibleCodesFromSnapshot` (Einzeiler-Nachschlagen) und die Format-Listen der Dropdowns.
+    Gleichheit (einmalig, Test gelöscht): 6000 Zufallsfälle Baum (doppelte Ordner-ids, Kreise, verwaiste Verweise, leere
+    Eltern) für alle drei Bäume, 6000 Ordner-Blätter, 8000 Löschen/Nachfahren/Verschieben (je Layout, Master, Ausschnitt),
+    3000 Blattgrössen, 6000 Titelblöcke (Unicode-Leerraum, Massstäbe 0/1e21/1e-7, doppelte Layout-ids), 4000 Ordner-PDF-Seiten.
+    Abweichung (gewollt): kaputte `parentId`-Ketten (Kreis, Selbstverweis) in `collectFolderLayouts` enden jetzt (TS: Stapelüberlauf).
+    **Parametrische Wände im Kern (29.10.):** `parametric_walls.rs` (Raster-, Modul-, bedingte-Dicke-, Referenzlinien- und
+    Sequenz-Regel, Duplikat-Entfernung, `exterior`/`interior`/`bearing`) auf `serde_json::Value` (vorhandene Wände behalten
+    unbekannte Felder), `Math.round/min/max/atan2` über `jsnum`; zustandslose Bindung `parametric_call`
+    (`web/parametric_walls.rs`), `model/parametricWalls.ts` ist Fassade mit gleichen Signaturen und hält nur den Zähler der
+    Wand-ids. Die App ruft die Engine noch nirgends auf (nur Tests): die Regel-UI fehlt weiterhin. Gleichheit (einmalig, Test
+    gelöscht): 3000 Zufallsregelwerke (verschachtelte Sequenzen, Raster mit/ohne gridId, Grenzpolygone mit 1–5 Punkten, Referenzwand
+    vorhanden/fehlend, fehlende/negative/0-Abstände, Toleranz 0/0,01/0,5) und 4000 Einzel-Regeln/Bedingungen/Duplikat-Listen,
+    Wand-ids samt Zähler gleich, Ergebnis zeichengleich bis auf die Schlüsselreihenfolge von Wänden mit `wallTypeId: undefined`.
+    Abweichung (gewollt): Achsen je Aufruf auf 1 000 000 begrenzt (TS rechnete bei absurd kleinem Abstand endlos).
+    **Projekt-Verschiebung und Auswahl-Export im Kern (29.10.):** `geo_translate.rs` (`translateProject`/`translateOps` aus
+    `model/geoRebase.ts`: Translation aller Modell-Koordinaten inkl. Kontext, Zeichnungen, Geo-Anker; Befehl „Neuer
+    Bezugspunkt“, `projectToWorldCoords` für DXF/IFC-Welt-Koordinaten) und `selection_filter.rs` (`filterProjectToSelection`
+    aus `state/exportScope.ts`: Export „nur Auswahl“), beide als Wurzel-Abfragen (`translatePatch`/`translateOps`/
+    `selectionFilterPatch`); die Fassaden setzen `{...project, ...patch}` zusammen, `projectGeoOrigin` (Einzeiler) bleibt in TS.
+    Gleichheit (einmalig, Test gelöscht): 3000 Zufallsprojekte mit allen Elementarten, allen 18 Zeichnungs-Formen, Kontext
+    (Mesh/Terrain/Bild/Konturen mit Bogen), Geo-Anker, Verschiebung (0,0) — Projekt, Ops und Welt-Koordinaten
+    zeichengleich; 5000 Auswahl-Filter (doppelte ids, fehlende Listen). Abweichung (gewollt): eine nicht endliche
+    Verschiebung (NaN/±Infinity) ändert nichts (TS erzeugte NaN-Koordinaten, die der Validator zurückrollte).
+    **Z-Anordnen im Kern (29.10.):** `reorder.rs` (front/back/forward/backward für `drawings2d` und `drawingLevels`, vorher
+    zweimal kopiert in `projectSlice.ts`), Bindung `reorder_call`, Fassade `model/reorder.ts` (`reorderByIds`, Objekt-Identität
+    bleibt); 10000 Zufallsfälle gleich der alten Fassung (einmalig, Test gelöscht).
+    **Übrig in TS (Stand 29.10., bewusst nicht portiert):** (1) Lese-Auflösungen je Render/Klick (`resolvePenColor/Weight`,
+    `isLocked`, `findMaster/findSnapshot`, `projectGeoOrigin`, `visibleCodesFromSnapshot`, `moveLayoutToFolder`/Viewport-/
+    Annotations-CRUD, Fabriken) — Einzeiler, ein Kern-Aufruf je Zugriff wäre teurer als die Rechnung; (2) Op-Bauer mit
+    `t()`/`Date.now()` (`setWallThickness`, `setCeilingThickness`, `addPenSet`, Layout-/Ordner-Anlage); (3) Griff-/Resize-Geometrie
+    in `projectSlice.ts` (`moveGrip`, `resizeGeom`, `drawingVertices`, `moveEdge` …, ~800 Zeilen) und `state/edgeGrips.ts` —
+    gehört zu „Befehle/Griffe im Kern“; (4) `selectionInfo.ts` (`deriveSelection`, 1350 Zeilen Objekt-Info für die Panels);
+    (5) `model/wall.ts` (vertikale Ausdehnungen, Aufrufer in `toSection`/`voids`/Viewport — fallen mit dem Plan-Port);
+    (6) `model/geometry.ts` (`wallBand`/`wallCorners`/`clippedBand`, Aufrufer in Werkzeugen/Fang), `model/color.ts`
+    (Farbraum-Umrechnung der UI), `state/viewSnapshots.ts`/`visibilitySets.ts` (UI-Zustand, localStorage).
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

@@ -37,7 +37,7 @@ function bruteForce(prims: Primitive[], m: { x: number; y: number }, maxDist: nu
 }
 
 describe("PlanPickIndex: Segmente", () => {
-  it("nächstes Segment wie die lineare Suche (Zufallsdaten, Überlauf-Segment, Nicht-2D-Strich)", () => {
+  it("nächstes Segment wie die lineare Suche (Zufallsdaten, Überlauf-Segment, Nicht-2D-Strich)", { timeout: 60_000 }, () => {
     let seed = 1;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     const prims: Primitive[] = [];

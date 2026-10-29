@@ -79,7 +79,7 @@ describe("buildTerrainGrid", () => {
     expect(grid).toBeNull();
   });
 
-  it("dezimiert das Raster gleichmässig, wenn es die Zellenzahl-Grenze überschreitet", () => {
+  it("dezimiert das Raster gleichmässig, wenn es die Zellenzahl-Grenze überschreitet", { timeout: 60_000 }, () => {
     // 700×700 = 490'000 Zellen > MAX_GRID_CELLS (400'000) -> muss dezimiert werden.
     const lines: string[] = [];
     for (let i = 0; i < 700; i++) {

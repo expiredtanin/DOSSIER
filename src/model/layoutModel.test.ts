@@ -673,3 +673,33 @@ describe("moveFolderToFolder", () => {
     expect(moveFolderToFolder(folders, "A", "A")).toEqual(folders);
   });
 });
+
+describe("Kern-Rechnung: Sonderfälle", () => {
+  it("collectFolderLayouts endet auch bei kaputten Ketten (Kreis, Selbstverweis)", () => {
+    const folders = [
+      { id: "a", name: "A", parentId: "b" },
+      { id: "b", name: "B", parentId: "a" },
+      { id: "s", name: "S", parentId: "s" },
+    ] as LayoutFolder[];
+    const layouts = [{ id: "l", name: "L", paper: "a4", orientation: "portrait", viewports: [], folderId: "s" }] as Layout[];
+    expect(collectFolderLayouts("zz", folders, layouts)).toEqual([]);
+    expect(collectFolderLayouts("s", folders, layouts)).toEqual([]);
+  });
+
+  it("buildLayoutTree behält die Original-Objekte (Identität)", () => {
+    const folder = { id: "f", name: "F" } as LayoutFolder;
+    const layout = { id: "l", name: "L", paper: "a4", orientation: "portrait", viewports: [], folderId: "f" } as Layout;
+    const tree = buildLayoutTree([folder], [layout]);
+    expect(tree.rootFolders[0].folder).toBe(folder);
+    expect(tree.rootFolders[0].layouts[0]).toBe(layout);
+  });
+
+  it("Titelblock trimmt wie JS (U+FEFF ja, U+0085 nein)", () => {
+    const p = { id: "p", name: "Haus", layouts: [], viewSnapshots: [] } as unknown as Project;
+    const l = { id: "x", name: "Blatt", paper: "a4", orientation: "portrait", viewports: [] } as Layout;
+    const m = { id: "m", name: "M", paper: "a4", orientation: "portrait", border: true, titleBlock: { author: "﻿ Ann  ", date: "\u0085" } } as MasterLayout;
+    const tb = resolveTitleBlock(p, l, m, "2026-01-01");
+    expect(tb.author).toBe("Ann");
+    expect(tb.date).toBe("\u0085");
+  });
+});

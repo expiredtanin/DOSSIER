@@ -4,12 +4,14 @@
 // Ordnern und die Auflösung der flachen Listen zum verschachtelten Baum. Das
 // UI-Wiring (App.tsx setProject, ViewSnapshotsPanel) baut hierauf auf.
 //
-// Spiegelbildlich zu `panels/layoutModel.ts` (Layouts-Baum), aber bewusst OHNE
-// Import aus dort — Ausschnitte-spezifisch und entkoppelt gehalten.
+// Baum-Rechnung (Aufbau, Löschen, Nachfahren-Test) im Rust-Kern ([K4] S3, `folder_tree.rs`, gemeinsam mit
+// dem Layouts-Baum in `model/layoutModel.ts`); hier setzen die Fassaden die Knoten aus den Indizes des
+// Kerns mit den Original-Objekten zusammen.
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { ViewSnapshot, ViewSnapshotFolder } from "../model/types";
+import { isDescendantFolder, treeBuild, treeDelete } from "../model/folderTree";
 
 // ── Fabrik ───────────────────────────────────────────────────────────────────
 
@@ -49,30 +51,16 @@ export function buildViewSnapshotTree(
   folders: ViewSnapshotFolder[],
   snapshots: ViewSnapshot[],
 ): ViewSnapshotTree {
-  const folderIds = new Set(folders.map((f) => f.id));
-  const nodes = new Map<string, ViewSnapshotFolderNode>();
-  for (const f of folders) {
-    nodes.set(f.id, { folder: f, subfolders: [], snapshots: [] });
-  }
-
-  const rootFolders: ViewSnapshotFolderNode[] = [];
-  for (const f of folders) {
-    const node = nodes.get(f.id)!;
-    const parent =
-      f.parentId && folderIds.has(f.parentId) ? nodes.get(f.parentId) : undefined;
-    if (parent) parent.subfolders.push(node);
-    else rootFolders.push(node);
-  }
-
-  const rootSnapshots: ViewSnapshot[] = [];
-  for (const s of snapshots) {
-    const node =
-      s.folderId && folderIds.has(s.folderId) ? nodes.get(s.folderId) : undefined;
-    if (node) node.snapshots.push(s);
-    else rootSnapshots.push(s);
-  }
-
-  return { rootSnapshots, rootFolders };
+  const shape = treeBuild(folders, snapshots);
+  const nodes: ViewSnapshotFolderNode[] = folders.map((folder) => ({ folder, subfolders: [], snapshots: [] }));
+  shape.nodes.forEach((n, i) => {
+    nodes[i].subfolders = n.subfolders.map((j) => nodes[j]);
+    nodes[i].snapshots = n.leaves.map((k) => snapshots[k]);
+  });
+  return {
+    rootSnapshots: shape.rootLeaves.map((k) => snapshots[k]),
+    rootFolders: shape.rootFolders.map((j) => nodes[j]),
+  };
 }
 
 // ── Baum-Umsortieren (Drag & Drop) + Löschen ────────────────────────────────
@@ -88,16 +76,7 @@ export function isDescendant(
   candidateId: string,
   rootId: string,
 ): boolean {
-  if (candidateId === rootId) return true;
-  const byId = new Map(folders.map((f) => [f.id, f]));
-  const seen = new Set<string>();
-  let cur = byId.get(candidateId);
-  while (cur && cur.parentId && !seen.has(cur.id)) {
-    if (cur.parentId === rootId) return true;
-    seen.add(cur.id);
-    cur = byId.get(cur.parentId);
-  }
-  return false;
+  return isDescendantFolder(folders, candidateId, rootId);
 }
 
 /**
@@ -147,25 +126,17 @@ export function deleteFolder(
   folders: ViewSnapshotFolder[],
   snapshots: ViewSnapshot[],
 ): { folders: ViewSnapshotFolder[]; snapshots: ViewSnapshot[] } {
-  const target = folders.find((f) => f.id === folderId);
-  const grandParentId = target?.parentId;
-  const nextFolders = folders
-    .filter((f) => f.id !== folderId)
-    .map((f) =>
-      f.parentId === folderId
-        ? grandParentId
-          ? { ...f, parentId: grandParentId }
-          : stripParentId(f)
-        : f,
-    );
-  const nextSnapshots = snapshots.map((s) =>
-    s.folderId === folderId
-      ? grandParentId
-        ? { ...s, folderId: grandParentId }
-        : stripFolderId(s)
-      : s,
-  );
-  return { folders: nextFolders, snapshots: nextSnapshots };
+  const plan = treeDelete(folders, snapshots, folderId);
+  return {
+    folders: plan.folders.map(([i, c]) =>
+      c === null ? folders[i] : c.v ? { ...folders[i], parentId: c.v } : stripParentId(folders[i]),
+    ),
+    snapshots: snapshots.map((s, i) => {
+      const c = plan.leaves[i];
+      if (c === null) return s;
+      return c.v ? { ...s, folderId: c.v } : stripFolderId(s);
+    }),
+  };
 }
 
 /** Ordner auf die Wurzelebene setzen (parentId entfernen). */
