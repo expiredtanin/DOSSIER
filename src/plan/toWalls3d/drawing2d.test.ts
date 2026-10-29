@@ -190,25 +190,29 @@ describe("Chargen an den Rust-Kern (Kataster-Grössenordnung)", { timeout: 60_00
   });
 
   it("viele Zeichnungen über mehrere Chargen: nichts geht verloren, Reihenfolge bleibt", () => {
-    const n = 60000; // 60000 × 11 Zahlen > eine Charge
+    // Eine Charge fasst 2^18 Doubles (`CHUNK_DOUBLES`, model3d.rs) = 23831 Linien à 11 Zahlen:
+    // 30000 Linien überschreiten die Grenze genau einmal (Mindestmass, Last-schonend).
+    const n = 30000;
     const p = projectWith(Array.from({ length: n }, (_, i) => line(i)) as unknown as Project["drawings2d"]);
     const v = emitDrawingLineVerts(p);
     expect(v.length).toBe(n * 2 * FLOATS_PER_VERTEX);
     expect(v[0]).toBe(0);
-    expect(v[FLOATS_PER_VERTEX * 2 * 33333]).toBe(33333);
+    expect(v[FLOATS_PER_VERTEX * 2 * 25000]).toBe(25000);
     expect(v[v.length - FLOATS_PER_VERTEX]).toBe(n - 1);
     const picks = pickDrawingSegs(p);
     expect(picks.length).toBe(n);
     expect(picks[n - 1].drawingId).toBe(`D${n - 1}`);
-    expect(picks[40000].start).toEqual([40000, 0]);
+    expect(picks[27000].start).toEqual([27000, 0]);
   });
 
   it("eine einzelne Polylinie grösser als eine Charge", () => {
-    const pts = Array.from({ length: 200000 }, (_, i) => ({ x: i, y: i % 2 }));
+    // Charge = 2^18 Doubles, je Punkt 2 (+7 Kopf): ab ~131000 Punkten sprengt eine Polylinie sie.
+    const N = 135000;
+    const pts = Array.from({ length: N }, (_, i) => ({ x: i, y: i % 2 }));
     const p = projectWith([
       { id: "P", type: "drawing2d", levelId: "eg", categoryCode: "2d-line", geom: { shape: "polyline", pts, closed: true } },
     ] as unknown as Project["drawings2d"]);
-    expect(emitDrawingLineVerts(p).length).toBe(200000 * 2 * FLOATS_PER_VERTEX);
-    expect(pickDrawingSegs(p).length).toBe(200000);
+    expect(emitDrawingLineVerts(p).length).toBe(N * 2 * FLOATS_PER_VERTEX);
+    expect(pickDrawingSegs(p).length).toBe(N);
   });
 });

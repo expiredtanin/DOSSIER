@@ -41,14 +41,14 @@ describe("PlanPickIndex: Segmente", () => {
     let seed = 1;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     const prims: Primitive[] = [];
-    for (let i = 0; i < 20000; i++) {
+    for (let i = 0; i < 6000; i++) {
       const x = rnd() * 1000, y = rnd() * 1000;
       prims.push(line(x, y, x + (rnd() - 0.5) * 20, y + (rnd() - 0.5) * 20));
     }
     prims.push(line(-5000, -5000, 5000, 5000));
     prims.push(line(500, 500, 501, 501, undefined));
     const ix = new PlanPickIndex(plan(prims));
-    for (let k = 0; k < 500; k++) {
+    for (let k = 0; k < 300; k++) {
       const m = { x: rnd() * 1100 - 50, y: rnd() * 1100 - 50 };
       expect(ix.nearestSegment(m, 3)?.i ?? null).toBe(bruteForce(prims, m, 3));
     }

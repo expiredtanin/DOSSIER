@@ -1512,6 +1512,13 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
     Rückgängig). Synthetischer Kataster (6750 Elemente, DXF und DWG) nur im Browser-Build (Chromium) geprüft,
     nicht in Tauri/macOS. Offen: f32-Versatz des SVG-Overlays bei LV95, s. [G10] (29.10. erledigt, Vieleck
     wieder `<circle>`).
+  - ✅ **Tests unter Last stabil** (29.10.): e2e `kataster.spec.ts` zoomte mit festen Pausen (100/400 ms) und
+    rechnete den Zoom-Ankerpunkt aus der noch nicht festgeschriebenen viewBox → unter Last Drift/Timeout.
+    Jetzt mehrere Rad-Ereignisse je Runde, dann `expect.poll` auf stabile viewBox; Griff-Abstand (±1 px) per
+    `expect.poll`. vitest: globales `testTimeout` 30 s (`vitest.config.ts`; Plan-Chunk-Test brach unter Last
+    an der 5-s-Vorgabe ab), Eingaben auf das Mindestmass (Charge `CHUNK_DOUBLES` überschreiten) verkleinert
+    (drawing2d, planPick, swissAlti3d ohne Text-Parsen, glPlanChunks), truckBrep-STEP-Test 120 s (Einlesen
+    ≈ 12 s im `--no-opt`-WASM). Je 5× vitest und 3× e2e unter 8 CPU-Brennern grün; nur Linux-Container.
   - ✅ **Kanten-Griffe einer Polylinie** (29.10.): liefen auch über die angehängten Bogen-Mitten-Griffe von
     `drawingVertices` → Dreiecke quer im Innern jeder Polylinie. Jetzt nur über die Eckpunkte und nur an
     geraden Segmenten (Bogen: eigener Mitten-Griff), `state/edgeGrips.ts` + vitest, e2e.
