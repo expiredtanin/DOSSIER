@@ -570,13 +570,14 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
 // ── Öffnungs-Einbauteile (Glas, Rahmen, Sprossen, Bank, Kasten) ─────────────
 
 /// Farbe je Bauteil-Klasse (Index = `Part` in `openings3d.rs`).
-const PART_RGB: [Rgb; 6] = [
+const PART_RGB: [Rgb; 7] = [
     [0.62, 0.76, 0.85],
     [0.85, 0.85, 0.83],
     [0.88, 0.88, 0.9],
     [0.8, 0.8, 0.78],
     [0.25, 0.27, 0.3],
     [0.93, 0.9, 0.85],
+    [0.9, 0.89, 0.86],
 ];
 
 /// Dreiecke eines Öffnungs-Quaders (Ecken-Bits: bit0 = Achse, bit1 = Höhe, bit2 = quer).
@@ -614,8 +615,9 @@ fn opening_kind_code(k: Option<OpeningKind>) -> f64 {
     }
 }
 
-fn write_common(w: &mut FlatWriter, frame_depth: Option<f64>, inset: Option<f64>, inner: bool, join: Option<FrameCornerJoin>, frame_width: Option<f64>, transom: Option<f64>) {
-    w.nums(&[opt(frame_depth), opt(inset), flag(inner), join_code(join), opt(frame_width), opt(transom)]);
+#[allow(clippy::too_many_arguments)]
+fn write_common(w: &mut FlatWriter, frame_depth: Option<f64>, inset: Option<f64>, side: f64, join: Option<FrameCornerJoin>, frame_width: Option<f64>, transom: Option<f64>, rebate: Option<f64>) {
+    w.nums(&[opt(frame_depth), opt(inset), side, join_code(join), opt(frame_width), opt(transom), opt(rebate)]);
 }
 
 fn glazing_panes_of(wt: &WindowType) -> f64 {
@@ -636,7 +638,14 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
             return;
         };
         w.num(1.0);
-        write_common(w, wt.frame_depth, wt.inset_from_face, wt.inset_face == Some(WindowTypeInsetFace::Innen), wt.frame_corner_join, wt.frame_width, wt.transom_height);
+        let side = match wt.inset_face {
+            Some(WindowTypeInsetFace::Innen) => 1.0,
+            Some(WindowTypeInsetFace::Mitte) => 2.0,
+            _ => 0.0,
+        };
+        write_common(w, wt.frame_depth, wt.inset_from_face, side, wt.frame_corner_join, wt.frame_width, wt.transom_height, wt.rebate_depth);
+        let sturz = wt.shading.as_ref().is_some_and(|s| s.mount == Some(WindowShadingMount::Sturz));
+        let rails = sturz && wt.shading.as_ref().is_some_and(|s| s.kind != WindowShadingKind::Markise);
         let shading = wt.shading.as_ref().filter(|s| s.create).map(|s| &s.r#box);
         w.nums(&[
             glazing_panes_of(wt),
@@ -652,6 +661,8 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
             shading.map_or(0.0, |b| b.width),
             shading.map_or(0.0, |b| b.height),
             shading.map_or(0.0, |b| b.depth),
+            flag(sturz),
+            flag(rails),
             op.wing_count.unwrap_or(wt.wing_count),
             opening_kind_code(Some(wt.kind)),
         ]);
@@ -674,7 +685,12 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
         return;
     };
     w.num(1.0);
-    write_common(w, dt.frame_depth, dt.inset_from_face, dt.inset_face == Some(DoorTypeInsetFace::Innen), dt.frame_corner_join, dt.frame_width, dt.transom_height);
+    let side = match dt.inset_face {
+        Some(DoorTypeInsetFace::Innen) => 1.0,
+        Some(DoorTypeInsetFace::Mitte) => 2.0,
+        _ => 0.0,
+    };
+    write_common(w, dt.frame_depth, dt.inset_from_face, side, dt.frame_corner_join, dt.frame_width, dt.transom_height, dt.rebate_depth);
     w.nums(&[
         flag(dt.threshold == Some(true)),
         dt.leaf_count,

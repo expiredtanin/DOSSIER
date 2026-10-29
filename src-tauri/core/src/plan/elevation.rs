@@ -272,6 +272,13 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
                 wt.and_then(|t| t.mullion_cols).unwrap_or(f64::NAN),
                 if matches!(wt.and_then(|t| t.sill_board), Some(WindowTypeSillBoard::Keine | WindowTypeSillBoard::Innen)) { 0.0 } else { 1.0 },
                 wt.map_or(0.0, |t| sash_kind(t.kind)),
+                // Anschlag nur mit Leibung (Einzug > 0 oder mittig), sonst gibt es keine Wandnase.
+                match (dt, wt) {
+                    (Some(t), _) if t.inset_face == Some(DoorTypeInsetFace::Mitte) || t.inset_from_face.unwrap_or(0.0) > 1e-4 => t.rebate_depth.unwrap_or(0.0),
+                    (_, Some(t)) if t.inset_face == Some(WindowTypeInsetFace::Mitte) || t.inset_from_face.unwrap_or(0.0) > 1e-4 => t.rebate_depth.unwrap_or(0.0),
+                    _ => 0.0,
+                },
+                if (door && dt.and_then(|t| t.inset_face) == Some(DoorTypeInsetFace::Innen)) || (!door && wt.and_then(|t| t.inset_face) == Some(WindowTypeInsetFace::Innen)) { -1.0 } else { 1.0 },
             ]);
             // Flügel: (pfosten, postWidth, autoWidth, width, opening, hingeLeft).
             let mut sashes: Vec<[f64; 6]> = Vec::new();

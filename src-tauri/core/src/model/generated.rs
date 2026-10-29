@@ -638,6 +638,9 @@ pub enum DoorTypeInsetFace {
     Aussen,
     #[serde(rename = "innen")]
     Innen,
+    /// Rahmen mittig in der Wand (Leibung beidseitig gleich tief); `insetFromFace` wirkt nicht.
+    #[serde(rename = "mitte")]
+    Mitte,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -729,6 +732,17 @@ pub struct DoorType {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub threshold: Option<bool>,
+    /// Anschlag (Maueranschlag): so weit (Meter, je Seite und oben) springt die Wand zwischen
+    /// der Fläche aus {@link insetFace} und der Rahmen-Vorderkante in die Öffnung vor. Wirkt nur
+    /// mit Leibung (`insetFromFace` > 0 bzw. `insetFace: "mitte"`). 0/fehlt ⇒ stumpf (bisher).
+    #[serde(rename = "rebateDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rebate_depth: Option<f64>,
+    /// Sturz: Höhe des Sturzes über der Öffnung (Meter), im Schnitt als eigener Querschnitt
+    /// gezeichnet. 0/fehlt ⇒ kein eigener Sturz (bisher).
+    #[serde(rename = "lintelHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lintel_height: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -830,6 +844,19 @@ pub enum WindowShadingKind {
     Unknown,
 }
 
+/// Einbau des Sonnenschutzkastens ({@link WindowShading.mount}).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum WindowShadingMount {
+    #[default]
+    #[serde(rename = "vorgesetzt")]
+    Vorgesetzt,
+    #[serde(rename = "sturz")]
+    Sturz,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct WindowShadingBox {
@@ -851,6 +878,11 @@ pub struct WindowShading {
     /// Kastenmasse (Meter): Breite (quer, meist = Öffnung), Höhe, Tiefe.
     #[ts(inline)]
     pub r#box: WindowShadingBox,
+    /// Einbau des Kastens: "vorgesetzt" (vor der Rahmenebene, bisher) oder "sturz" (Storenkasten
+    /// im Sturz, in der Wand verdeckt — in der Schweiz üblich bei Lamellenstoren). Fehlt ⇒ vorgesetzt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mount: Option<WindowShadingMount>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -877,6 +909,9 @@ pub enum WindowTypeInsetFace {
     Aussen,
     #[serde(rename = "innen")]
     Innen,
+    /// Rahmen mittig in der Wand (Leibung beidseitig gleich tief); `insetFromFace` wirkt nicht.
+    #[serde(rename = "mitte")]
+    Mitte,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -1042,6 +1077,17 @@ pub struct WindowType {
     #[serde(rename = "sillBoard", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, inline)]
     pub sill_board: Option<WindowTypeSillBoard>,
+    /// Anschlag (Maueranschlag): so weit (Meter, je Seite und oben) springt die Wand zwischen
+    /// der Fläche aus {@link insetFace} und der Rahmen-Vorderkante in die Öffnung vor. Wirkt nur
+    /// mit Leibung (`insetFromFace` > 0 bzw. `insetFace: "mitte"`). 0/fehlt ⇒ stumpf (bisher).
+    #[serde(rename = "rebateDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rebate_depth: Option<f64>,
+    /// Sturz: Höhe des Sturzes über der Öffnung (Meter), im Schnitt als eigener Querschnitt
+    /// gezeichnet. 0/fehlt ⇒ kein eigener Sturz (bisher).
+    #[serde(rename = "lintelHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lintel_height: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

@@ -145,6 +145,8 @@ pub struct WindowSpec {
     /// NaN = nicht gesetzt
     pub inset_from_face: f64,
     pub inset_inner: bool,
+    /// Rahmen mittig in der Wand (`insetFace: "mitte"`); hat Vorrang vor `inset_inner`/Einzug.
+    pub inset_mid: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -230,8 +232,7 @@ pub fn window_symbol(
         let inset = max(0.0, or_zero(spec.inset_from_face));
         let half_t = total / 2.0;
         let sign = if spec.inset_inner { 1.0 } else { -1.0 };
-        let mut front_rel = sign * (half_t - inset);
-        let mut back_rel = front_rel - sign * depth;
+        let (mut front_rel, mut back_rel) = if spec.inset_mid { (-depth / 2.0, depth / 2.0) } else { (sign * (half_t - inset), sign * (half_t - inset) - sign * depth) };
         front_rel = max(-half_t, min(half_t, front_rel));
         back_rel = max(-half_t, min(half_t, back_rel));
         let frame_outer_n = ref_off + max(front_rel, back_rel);

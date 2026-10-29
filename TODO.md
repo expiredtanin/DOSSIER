@@ -1378,6 +1378,17 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Zuständigkeitsbereich); Kanten-/Hof-Griffe im Grundriss; Mansarde mit Hof UND verschieden geneigten
   Kanten: zweite Dachschicht (Versatz > Knickbreite) nicht geschlossen; Schattenwurf (`sun.rs`) nimmt
   weiter die Hülle der Dachpunkte (Hof wirft Schatten).
+- ◐ **[94] Fenster/Türen: Konstruktionsdetails.** (29.10., Wunsch Maintainer vor den Lukarnen) Neue Typ-Felder (Fenster- und
+  Türtyp, optional, ohne sie bleibt alles wie bisher): Leibung `insetFace: "mitte"` (neben aussen/innen + `insetFromFace`
+  = Mass), Anschlag `rebateDepth` (Wandnase zwischen Anschlag-Fläche und Rahmen-Vorderkante; Grundriss je Wandschicht in
+  deren Schraffur, 3D Teil „Anschlag", Ansicht von der Anschlag-Seite mit kleinerer Rahmenfläche), Sturz `lintelHeight`
+  (Schnitt: eigener Querschnitt, neben einem Storenkasten nur über die Restdicke), Fensterbank nach `sillBoard` (Grundriss
+  fein: aussen bis 4 cm vor die Fassade, innen bis 2 cm vor die Innenfläche; Schnitt nur bei ausdrücklicher Wahl, aussen
+  mit Gefälle), Storenkasten `shading.mount: "sturz"` (Schweizer Lamellenstoren: Kasten im Sturz verdeckt — Grundriss
+  Überkopf-Rechteck ab Aussenfläche, fein Führungsschienen neben dem Anschlag; Schnitt Kasten + Lamellenpaket, vorgesetzter
+  Kasten jetzt auch im Schnitt; 3D nur Schienen). UI: „Fenster bearbeiten" (Rahmen/Sonnenschutz). Geprüft: Rust-Tests,
+  CLI-Grundriss/-Schnitt/-Ansicht als PNG angesehen (Linux). Offen: Anschlag im Schnitt (Sturz-Nase), Brüstung als
+  eigenes Bauteil, Anschlag/Leibung in den Ressourcen-Tabs (nur im Bearbeiten-Dialog).
 
 ## Priorität 4 — später
 

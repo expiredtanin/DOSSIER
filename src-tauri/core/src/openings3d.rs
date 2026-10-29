@@ -44,6 +44,8 @@ pub enum Part {
     Sill = 3,
     Symbol = 4,
     DoorLeaf = 5,
+    /// Maueranschlag (Wandnase in der Leibung, [94]).
+    Rebate = 6,
 }
 
 /// Ein Quader: Bauteil-Klasse und 8 Ecken (x, y, z), Ecken-Bits wie `OPENING_BOX_TRIS`.
@@ -151,6 +153,10 @@ pub struct WindowTypeIn {
     pub default_opening: SashOpening,
     /// Rollladenkasten (Breite, Höhe, Tiefe), nur bei `shading.create`.
     pub shading: Option<[f64; 3]>,
+    /// Kasten im Sturz (verdeckt, kein Quader) statt vorgesetzt.
+    pub shading_sturz: bool,
+    /// Führungsschienen in der Leibung (Kasten im Sturz, nicht Markise).
+    pub shading_rails: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -166,6 +172,10 @@ pub struct TypeIn {
     pub inset_from_face: f64,
     /// `(insetFace ?? "aussen") === "innen"`.
     pub inset_inner: bool,
+    /// `insetFace === "mitte"`: Rahmen symmetrisch um die Wandmitte.
+    pub inset_mid: bool,
+    /// Maueranschlag je Seite und oben (Meter), NaN/0 = keiner.
+    pub rebate_depth: f64,
     pub corner_join: CornerJoin,
     pub frame_width: f64,
     pub transom_height: f64,
@@ -408,10 +418,9 @@ fn across_wall_depth(frame_depth: f64, wall_thickness: f64) -> f64 {
 
 /// Quer-Versatz `[n_min, n_max]` des Rahmenkörpers: Vorderkante bündig mit der gewählten
 /// Wandfläche (minus Schichteinzug), `depth` zur Wandmitte hin, auf die halbe Dicke geklemmt.
-fn frame_normal_range(half: f64, depth: f64, inset: f64, inner: bool) -> (f64, f64) {
+fn frame_normal_range(half: f64, depth: f64, inset: f64, inner: bool, mid: bool) -> (f64, f64) {
     let sign = if inner { -1.0 } else { 1.0 };
-    let front = sign * (half - inset);
-    let back = front - sign * depth;
+    let (front, back) = if mid { (depth / 2.0, -depth / 2.0) } else { (sign * (half - inset), sign * (half - inset) - sign * depth) };
     let a = clamp_range(front, -half, half);
     let b = clamp_range(back, -half, half);
     (jmin(a, b), jmax(a, b))
@@ -421,7 +430,7 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
     let ty = o.ty.as_ref()?;
     let half = o.wall_thickness / 2.0;
     let depth = across_wall_depth(ty.frame_depth, o.wall_thickness);
-    let (n_min, n_max) = frame_normal_range(half, depth, or(ty.inset_from_face, 0.0), ty.inset_inner);
+    let (n_min, n_max) = frame_normal_range(half, depth, or(ty.inset_from_face, 0.0), ty.inset_inner, ty.inset_mid);
     let frame_width = or(ty.frame_width, DEFAULT_FRAME_WIDTH);
     let transom_height = jmax(0.0, or(ty.transom_height, 0.0));
     Some(match &ty.kind {
@@ -495,6 +504,23 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
             }
         }
     })
+}
+
+/// Maueranschlag: Wandnasen links, rechts und oben in der Zone zwischen der Anschlag-Fläche und
+/// der Rahmen-Vorderkante (aussen bzw. bei `insetFace: "innen"` innen; mittig: aussen).
+fn rebate_boxes(em: &mut Emitter, o: &OpeningIn, ty: &TypeIn, p: &FrameParams) {
+    let rd = jmin(or(ty.rebate_depth, 0.0), (o.to - o.from) / 2.0 - 0.01);
+    if !(rd > EPS) {
+        return;
+    }
+    let half = p.half_thickness;
+    let (n0, n1) = if ty.inset_inner && !ty.inset_mid { (-half, p.n_min) } else { (p.n_max, half) };
+    if n1 - n0 <= EPS {
+        return;
+    }
+    em.axis_box(o.from, o.from + rd, o.z_bottom, o.z_top, n0, n1, Part::Rebate);
+    em.axis_box(o.to - rd, o.to, o.z_bottom, o.z_top, n0, n1, Part::Rebate);
+    em.axis_box(o.from + rd, o.to - rd, o.z_top - rd, o.z_top, n0, n1, Part::Rebate);
 }
 
 /// Flügeleinteilung auf `[from, to]`: feste Breiten exakt, der Rest gleichmässig.
@@ -822,6 +848,9 @@ pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
                 door_leaf(&mut em, o, &p);
                 glass_panes(&mut em, o, &p);
             }
+            if let (Some(ty), Some(p)) = (&o.ty, resolve_frame(o)) {
+                rebate_boxes(&mut em, o, ty, &p);
+            }
         }
     }
     if detail == Detail::Coarse {
@@ -841,6 +870,18 @@ pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
             let Some(TypeIn { kind: KindIn::Window(wt), .. }) = &o.ty else { continue };
             let Some([bw, bh, bd]) = wt.shading else { continue };
             let Some(p) = resolve_frame(o) else { continue };
+            if wt.shading_sturz {
+                // Storenkasten im Sturz: verdeckt; sichtbar sind nur die Führungsschienen vor dem Rahmen.
+                if wt.shading_rails {
+                    let (rail_u, rail_n) = (0.03, 0.04);
+                    let (n0, n1) = if o.ty.as_ref().is_some_and(|t| t.inset_inner) { (p.n_min - 0.005 - rail_n, p.n_min - 0.005) } else { (p.n_max + 0.005, p.n_max + 0.005 + rail_n) };
+                    // Neben dem Anschlag (Wandnase) in der Leibung.
+                    let rd = o.ty.as_ref().map_or(0.0, |t| jmax(0.0, jmin(or(t.rebate_depth, 0.0), (o.to - o.from) / 2.0 - 0.01)));
+                    em.axis_box(o.from + rd, o.from + rd + rail_u, o.z_bottom, o.z_top, n0, n1, Part::Shading);
+                    em.axis_box(o.to - rd - rail_u, o.to - rd, o.z_bottom, o.z_top, n0, n1, Part::Shading);
+                }
+                continue;
+            }
             let h = jmax(0.0, bh);
             let d = jmax(0.0, bd);
             if h <= EPS || d <= EPS {
@@ -862,12 +903,12 @@ pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
 // Eingabe: `[detail (0 grob, 1 mittel, 2 fein, sonst andere), nWände, Wand…]`
 //   Wand = `sx, sy, ex, ey, nÖffnungen, Öffnung…`
 //   Öffnung = `from, to, zBottom, zTop, istTür, Wanddicke, typisiert (0/1)[, Typ]`
-//   Typ = `frameDepth, insetFromFace, insetInnen, Eckstoss (0 vertikal, 1 horizontal, 2 Gehrung),
-//          frameWidth, transomHeight,` dann
+//   Typ = `frameDepth, insetFromFace, einzugSeite (0 aussen, 1 innen, 2 mitte), Eckstoss (0 vertikal,
+//          1 horizontal, 2 Gehrung), frameWidth, transomHeight, Anschlag,` dann
 //     Tür: `threshold, leafCount, leafStyle (0 glatt, 1 glas, 2 kassette), glazingRatio, zarge,
 //           panelCols, panelRows`
 //     Fenster: `glazingPanes, mullionRows, mullionCols, sillBoard (0 aussen/fehlt, 1 keine,
-//           2 innen, 3 beide), Rollladen (0/1), Breite, Höhe, Tiefe, Flügelzahl-Default,
+//           2 innen, 3 beide), Rollladen (0/1), Breite, Höhe, Tiefe, imSturz, Schienen, Flügelzahl-Default,
 //           Öffnungsart-Default, nFlügel, Flügel…`
 //     Flügel = `Art (0 Flügel, 1 Pfosten, 2 andere), festeBreite, width, postWidth, Öffnungsart,
 //           BandLinks`
@@ -894,7 +935,8 @@ fn flag(r: &mut Reader) -> Option<bool> {
 fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
     let frame_depth = r.num()?;
     let inset_from_face = r.num()?;
-    let inset_inner = flag(r)?;
+    let inset_side = r.num()?;
+    let (inset_inner, inset_mid) = (inset_side == 1.0, inset_side == 2.0);
     let corner_join = match r.num()? as i64 {
         1 => CornerJoin::Horizontal,
         2 => CornerJoin::Mitre,
@@ -902,6 +944,7 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
     };
     let frame_width = r.num()?;
     let transom_height = r.num()?;
+    let rebate_depth = r.num()?;
     let kind = if door {
         KindIn::Door(DoorTypeIn {
             threshold: flag(r)?,
@@ -928,6 +971,8 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
         };
         let create = flag(r)?;
         let shading_box = [r.num()?, r.num()?, r.num()?];
+        let shading_sturz = flag(r)?;
+        let shading_rails = flag(r)?;
         let default_wing_count = r.num()?;
         let default_opening = opening_kind(r.num()?);
         let n = r.count()?;
@@ -955,9 +1000,11 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
             default_wing_count,
             default_opening,
             shading: if create { Some(shading_box) } else { None },
+            shading_sturz,
+            shading_rails,
         })
     };
-    Some(TypeIn { frame_depth, inset_from_face, inset_inner, corner_join, frame_width, transom_height, kind })
+    Some(TypeIn { frame_depth, inset_from_face, inset_inner, inset_mid, rebate_depth, corner_join, frame_width, transom_height, kind })
 }
 
 fn decode(buf: &[f64]) -> Option<(Vec<WallIn>, Detail)> {
@@ -1019,6 +1066,8 @@ mod tests {
             frame_depth: f64::NAN,
             inset_from_face: f64::NAN,
             inset_inner: false,
+            inset_mid: false,
+            rebate_depth: f64::NAN,
             corner_join: CornerJoin::Vertical,
             frame_width: f64::NAN,
             transom_height: f64::NAN,
@@ -1031,6 +1080,8 @@ mod tests {
                 default_wing_count: 1.0,
                 default_opening: SashOpening::TurnTilt,
                 shading: None,
+                shading_sturz: false,
+                shading_rails: false,
             }),
         }
     }
@@ -1040,6 +1091,8 @@ mod tests {
             frame_depth: f64::NAN,
             inset_from_face: f64::NAN,
             inset_inner: false,
+            inset_mid: false,
+            rebate_depth: f64::NAN,
             corner_join: CornerJoin::Vertical,
             frame_width: f64::NAN,
             transom_height: f64::NAN,
@@ -1189,9 +1242,13 @@ mod tests {
         assert!(jmin(0.0, -0.0).is_sign_negative());
         assert!(jmax(1.0, f64::NAN).is_nan());
         assert_eq!(clamp_range(5.0, 0.0, 1.0), 1.0);
-        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, false);
+        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, false, false);
         assert!(close(a, 0.08) && close(b, 0.15));
-        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, true);
+        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, true, false);
+        assert!(close(a, -0.15) && close(b, -0.08));
+        let (a, b) = frame_normal_range(0.15, 0.08, 0.1, true, true);
+        assert!(close(a, -0.04) && close(b, 0.04));
+        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, true, false);
         assert!(close(a, -0.15) && close(b, -0.08));
     }
 
@@ -1225,5 +1282,31 @@ mod tests {
         big.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1e12, 2.0, f64::NAN, 1.0, 1e12, 1e12]);
         assert!(opening_meshes_flat(&big)[0] >= 0.0);
         let _ = frame_ring_quads(f64::NAN, f64::INFINITY, -1.0, 1.0, -3.0, CornerJoin::Mitre, false);
+    }
+
+    #[test]
+    fn anschlag_und_storenschienen() {
+        let mut ty = window_type(SillBoard::None);
+        ty.inset_from_face = 0.12;
+        ty.frame_depth = 0.08;
+        ty.rebate_depth = 0.05;
+        let parts = |ty: &TypeIn, d: Detail| -> Vec<Part> { opening_meshes(&[wall(op(false, Some(ty.clone())))], d).into_iter().map(|m| m.part).collect() };
+        let n = |v: &[Part], p: Part| v.iter().filter(|x| **x == p).count();
+        assert_eq!(n(&parts(&ty, Detail::Coarse), Part::Rebate), 3);
+        // Mittig: Anschlag-Zone aussen bis zur Rahmen-Vorderkante.
+        ty.inset_mid = true;
+        assert_eq!(n(&parts(&ty, Detail::Fine), Part::Rebate), 3);
+        ty.inset_mid = false;
+        ty.rebate_depth = f64::NAN;
+        assert_eq!(n(&parts(&ty, Detail::Fine), Part::Rebate), 0);
+        if let KindIn::Window(w) = &mut ty.kind {
+            w.shading = Some([0.0, 0.25, 0.2]);
+        }
+        assert_eq!(n(&parts(&ty, Detail::Fine), Part::Shading), 1);
+        if let KindIn::Window(w) = &mut ty.kind {
+            w.shading_sturz = true;
+            w.shading_rails = true;
+        }
+        assert_eq!(n(&parts(&ty, Detail::Fine), Part::Shading), 2, "im Sturz: nur zwei Führungsschienen");
     }
 }

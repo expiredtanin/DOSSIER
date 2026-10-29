@@ -13,9 +13,10 @@ import { DeleteButton } from "./fields";
 
 // Bezugsfläche des Schichteinzugs — von aussen oder innen gemessen. Für Tür UND
 // Fenster genutzt (gleiche Semantik).
-export const INSET_FACE_OPTIONS: { value: "aussen" | "innen"; labelKey: string }[] = [
+export const INSET_FACE_OPTIONS: { value: "aussen" | "innen" | "mitte"; labelKey: string }[] = [
   { value: "aussen", labelKey: "resources.insetFace.aussen" },
   { value: "innen", labelKey: "resources.insetFace.innen" },
+  { value: "mitte", labelKey: "resources.insetFace.mitte" },
 ];
 
 export function TypeLibraryTab<T extends { id: string; name: string }>({

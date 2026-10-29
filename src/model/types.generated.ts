@@ -546,7 +546,7 @@ export type DoorType = {
    */
   insetFromFace?: number;
   /** Von welcher Wandfläche der {@link insetFromFace} gemessen wird; Default "aussen". */
-  insetFace?: "aussen" | "innen";
+  insetFace?: "aussen" | "innen" | "mitte";
   /**
    * Oberlicht: Höhe eines festen, verglasten Oberlichts über dem Türblatt
    * (Meter). 0/fehlt ⇒ kein Oberlicht. Das Oberlicht sitzt oberhalb eines
@@ -559,6 +559,17 @@ export type DoorType = {
   defaultHeight: number;
   /** Bodenschwelle/Anschlag zeichnen (3D/Detail). */
   threshold?: boolean;
+  /**
+   * Anschlag (Maueranschlag): so weit (Meter, je Seite und oben) springt die Wand zwischen
+   * der Fläche aus {@link insetFace} und der Rahmen-Vorderkante in die Öffnung vor. Wirkt nur
+   * mit Leibung (`insetFromFace` > 0 bzw. `insetFace: "mitte"`). 0/fehlt ⇒ stumpf (bisher).
+   */
+  rebateDepth?: number;
+  /**
+   * Sturz: Höhe des Sturzes über der Öffnung (Meter), im Schnitt als eigener Querschnitt
+   * gezeichnet. 0/fehlt ⇒ kein eigener Sturz (bisher).
+   */
+  lintelHeight?: number;
 };
 
 /** Ein freies 2D-Zeichenelement auf einer Zeichnungsebene. */
@@ -2758,7 +2769,15 @@ export type WindowShading = {
   kind: "rollladen" | "raffstore" | "markise";
   /** Kastenmasse (Meter): Breite (quer, meist = Öffnung), Höhe, Tiefe. */
   box: { width: number; height: number; depth: number };
+  /**
+   * Einbau des Kastens: "vorgesetzt" (vor der Rahmenebene, bisher) oder "sturz" (Storenkasten
+   * im Sturz, in der Wand verdeckt — in der Schweiz üblich bei Lamellenstoren). Fehlt ⇒ vorgesetzt.
+   */
+  mount?: WindowShadingMount;
 };
+
+/** Einbau des Sonnenschutzkastens ({@link WindowShading.mount}). */
+export type WindowShadingMount = "vorgesetzt" | "sturz";
 
 export type WindowType = {
   id: string;
@@ -2819,7 +2838,7 @@ export type WindowType = {
    */
   insetFromFace?: number;
   /** Von welcher Wandfläche der {@link insetFromFace} gemessen wird; Default "aussen". */
-  insetFace?: "aussen" | "innen";
+  insetFace?: "aussen" | "innen" | "mitte";
   /**
    * Schicht-Rücksprung an der Laibung: weicht die INNERSTE Wandschicht (meist
    * Gipsplatte/Holzverkleidung) an diesem Fenster um ihre eigene Dicke von der
@@ -2850,4 +2869,15 @@ export type WindowType = {
   defaultHeight: number;
   /** Fensterbank zeichnen (Detail): keine / innen / aussen / beide. */
   sillBoard?: "keine" | "innen" | "aussen" | "beide";
+  /**
+   * Anschlag (Maueranschlag): so weit (Meter, je Seite und oben) springt die Wand zwischen
+   * der Fläche aus {@link insetFace} und der Rahmen-Vorderkante in die Öffnung vor. Wirkt nur
+   * mit Leibung (`insetFromFace` > 0 bzw. `insetFace: "mitte"`). 0/fehlt ⇒ stumpf (bisher).
+   */
+  rebateDepth?: number;
+  /**
+   * Sturz: Höhe des Sturzes über der Öffnung (Meter), im Schnitt als eigener Querschnitt
+   * gezeichnet. 0/fehlt ⇒ kein eigener Sturz (bisher).
+   */
+  lintelHeight?: number;
 };

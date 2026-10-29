@@ -341,6 +341,7 @@ function BasisPanel({
           options={[
             { value: "aussen", label: t("oed.insetFace.aussen") },
             { value: "innen", label: t("oed.insetFace.innen") },
+            { value: "mitte", label: t("oed.insetFace.mitte") },
           ]}
           onChange={(v) => patchWt({ insetFace: v })}
         />
@@ -460,6 +461,34 @@ function RahmenPanel({
           options={cornerJoinOptions()}
           onChange={(v) => patchDt({ frameCornerJoin: v })}
         />
+        <SelField
+          label={t("oed.f.insetFace")}
+          value={dt.insetFace ?? "aussen"}
+          options={[
+            { value: "aussen", label: t("oed.insetFace.aussen") },
+            { value: "innen", label: t("oed.insetFace.innen") },
+            { value: "mitte", label: t("oed.insetFace.mitte") },
+          ]}
+          onChange={(v) => patchDt({ insetFace: v })}
+        />
+        <NumField
+          label={t("oed.f.insetFromFace")}
+          value={dt.insetFromFace ?? 0}
+          min={0}
+          onCommit={(n) => patchDt({ insetFromFace: n })}
+        />
+        <NumField
+          label={t("oed.f.rebateDepth")}
+          value={dt.rebateDepth ?? 0}
+          min={0}
+          onCommit={(n) => patchDt({ rebateDepth: n || undefined })}
+        />
+        <NumField
+          label={t("oed.f.lintelHeight")}
+          value={dt.lintelHeight ?? 0}
+          min={0}
+          onCommit={(n) => patchDt({ lintelHeight: n || undefined })}
+        />
       </>
     );
   }
@@ -489,6 +518,29 @@ function RahmenPanel({
           value={wt.frameCornerJoin ?? "vertikal"}
           options={cornerJoinOptions()}
           onChange={(v) => patchWt({ frameCornerJoin: v })}
+        />
+        <NumField
+          label={t("oed.f.rebateDepth")}
+          value={wt.rebateDepth ?? 0}
+          min={0}
+          onCommit={(n) => patchWt({ rebateDepth: n || undefined })}
+        />
+        <NumField
+          label={t("oed.f.lintelHeight")}
+          value={wt.lintelHeight ?? 0}
+          min={0}
+          onCommit={(n) => patchWt({ lintelHeight: n || undefined })}
+        />
+        <SelField
+          label={t("oed.f.sillBoard")}
+          value={wt.sillBoard ?? "aussen"}
+          options={[
+            { value: "keine", label: t("resources.sillBoard.keine") },
+            { value: "aussen", label: t("resources.sillBoard.aussen") },
+            { value: "innen", label: t("resources.sillBoard.innen") },
+            { value: "beide", label: t("resources.sillBoard.beide") },
+          ]}
+          onChange={(v) => patchWt({ sillBoard: v })}
         />
       </>
     );
@@ -680,6 +732,15 @@ function SonnenschutzPanel({
             onChange={(v) =>
               set({ kind: v as NonNullable<WindowType["shading"]>["kind"] })
             }
+          />
+          <SelField
+            label={t("oed.shading.mount")}
+            value={sh.mount ?? "vorgesetzt"}
+            options={[
+              { value: "vorgesetzt", label: t("oed.shading.vorgesetzt") },
+              { value: "sturz", label: t("oed.shading.sturz") },
+            ]}
+            onChange={(v) => set({ mount: v })}
           />
           <NumField
             label={t("oed.shading.boxHeight")}

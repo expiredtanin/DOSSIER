@@ -1321,6 +1321,8 @@ const DEFAULT_FRAME_DEPTH: f64 = 0.07;
 const DEFAULT_FRAME_WIDTH: f64 = 0.06;
 const DOOR_LEAF_THICKNESS: f64 = 0.04;
 const MIN_CROSS: f64 = 0.15;
+const LINTEL_FILL: &str = "#d4d7db";
+const SHADING_PACK_FILL: &str = "#e6e8eb";
 
 fn rect(u0: f64, u1: f64, v0: f64, v1: f64) -> Vec<Vec2> {
     vec![v2(min(u0, u1), v0), v2(max(u0, u1), v0), v2(max(u0, u1), v1), v2(min(u0, u1), v1)]
@@ -1418,6 +1420,7 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
         frame_depth: t.frame_depth.unwrap_or(f64::NAN),
         inset_from_face: t.inset_from_face.unwrap_or(f64::NAN),
         inset_inner: t.inset_face == Some(WindowTypeInsetFace::Innen),
+        inset_mid: t.inset_face == Some(WindowTypeInsetFace::Mitte),
     });
     let finite = [wall.start.x, wall.start.y, wall.end.x, wall.end.y, total, ref_off, o.position, o.width].iter().all(|x| x.is_finite());
     let sym = if finite {
@@ -1463,11 +1466,63 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
         }
         out.push(l);
     }
+    if let Some(t) = wt {
+        let shading = t.shading.as_ref().filter(|s| s.create);
+        let sturz_box = shading.filter(|s| s.mount == Some(WindowShadingMount::Sturz)).map_or(0.0, |s| max(0.0, s.r#box.depth));
+        lintel_cut(&mut out, o, c, t.lintel_height, sturz_box);
+        // Fensterbänke nur bei ausdrücklicher Wahl (bisherige Schnitte bleiben gleich).
+        let zb = c.z_bottom;
+        if matches!(t.sill_board, Some(WindowTypeSillBoard::Aussen | WindowTypeSillBoard::Beide)) {
+            // Aussen: mit Gefälle, bis 4 cm vor die Aussenfläche.
+            let out_s = min(f_min, c.face_min) - 0.04;
+            let pts = vec![v2(c.u_at(f_min), zb), v2(c.u_at(out_s), zb - 0.015), v2(c.u_at(out_s), zb - 0.045), v2(c.u_at(f_min), zb - 0.03)];
+            out.push(opening_poly(pts, true, &o.id));
+        }
+        if matches!(t.sill_board, Some(WindowTypeSillBoard::Innen | WindowTypeSillBoard::Beide)) {
+            let in_s = max(f_max, c.face_max) + 0.02;
+            out.push(opening_poly(rect(c.u_at(f_max), c.u_at(in_s), zb - 0.025, zb), true, &o.id));
+        }
+        if let Some(sh) = shading {
+            let h = max(0.0, sh.r#box.height);
+            let d = max(0.0, sh.r#box.depth);
+            if h > 1e-4 && d > 1e-4 {
+                // Im Sturz: ab der Aussenfläche in die Wand; vorgesetzt: vor der Rahmen-Vorderkante.
+                let (s0, s1) = if sturz_box > 0.0 { (c.face_min, c.face_min + d) } else { (f_min - d, f_min) };
+                out.push(opening_poly(rect(c.u_at(s0), c.u_at(s1), c.z_top, c.z_top + h), true, &o.id));
+                // Lamellen-/Rollpaket im Kasten.
+                let m = min(0.02, d / 4.0);
+                let mut pack = polygon(rect(c.u_at(s0 + m), c.u_at(s1 - m), c.z_top + m, c.z_top + h * 0.6), SHADING_PACK_FILL, OPENING_INK, GLASS_MM, no_hatch_base());
+                if let Primitive::Polygon { opening_id, .. } = &mut pack {
+                    *opening_id = Some(o.id.clone());
+                }
+                out.push(pack);
+            }
+        }
+    }
     Ok(out)
 }
 
-fn door_cut(o: &Opening, c: &CrossSection) -> Vec<Primitive> {
+/// Sturz im Schnitt ([94]): eigener Querschnitt über der Öffnung (Beton grau), neben einem
+/// Storenkasten im Sturz (`box_depth` ab der Aussenfläche) nur über den Rest der Wanddicke.
+fn lintel_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, height: Option<f64>, box_depth: f64) {
+    let h = height.unwrap_or(0.0);
+    if !(h > 1e-4) {
+        return;
+    }
+    let s0 = min(c.face_max, c.face_min + box_depth);
+    if c.face_max - s0 <= 1e-4 {
+        return;
+    }
+    let mut pr = polygon(rect(c.u_at(s0), c.u_at(c.face_max), c.z_top, c.z_top + h), LINTEL_FILL, OPENING_INK, FRAME_MM, no_hatch_base());
+    if let Primitive::Polygon { opening_id, .. } = &mut pr {
+        *opening_id = Some(o.id.clone());
+    }
+    out.push(pr);
+}
+
+fn door_cut(p: &Project, o: &Opening, c: &CrossSection) -> Vec<Primitive> {
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
+    lintel_cut(&mut out, o, c, p.door_type(o).and_then(|t| t.lintel_height), 0.0);
     if o.door_type == Some(OpeningDoorType::Wandoeffnung) {
         return out;
     }
@@ -1503,7 +1558,7 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
             continue;
         }
         let Some(c) = cross_section(p, wall, o, p0, u)? else { continue };
-        let prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(o, &c) };
+        let prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(p, o, &c) };
         let greyed = vis.greyed(&o.category_code);
         for pr in prims {
             out.push(if greyed { pr.with_greyed(true) } else { pr });
@@ -1642,6 +1697,36 @@ mod tests {
         let vis = Visibility { has_vis: true, invisible: ["31".to_string()].into_iter().collect(), ..Default::default() };
         let (hidden, _) = section_primitives(&out, false, false, &vis);
         assert!(!serde_json::to_string(&hidden).unwrap().contains("\"roofId\""));
+    }
+
+    /// [94] Sturz, Fensterbänke und Storenkasten im Sturz erscheinen im Schnitt nur, wenn gesetzt.
+    #[test]
+    fn sturz_baenke_und_storenkasten_im_schnitt() {
+        let mut p = sample();
+        // Schnittlinie quer durch die Mitte von O1 (Wand W1).
+        let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+        let w1 = p.walls.iter().find(|w| w.id == o1.host_wall_id).unwrap().clone();
+        let (u, n) = axis_frame(&w1);
+        let m = o1.position + o1.width / 2.0;
+        let c = (w1.start.x + u.0 * m, w1.start.y + u.1 * m);
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: c.0 - n.0 * 3.0, y: c.1 - n.1 * 3.0 }, Vec2 { x: c.0 + n.0 * 3.0, y: c.1 + n.1 * 3.0 }]), ..Default::default() };
+        let vis = Visibility::default();
+        let base = section_opening_primitives(&p, &l, &vis).unwrap();
+        assert!(!base.is_empty());
+        let typed = p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.type_id.is_some()).count();
+        assert!(typed > 0);
+        for t in p.window_types.iter_mut().flatten() {
+            t.lintel_height = Some(0.2);
+            t.sill_board = Some(WindowTypeSillBoard::Beide);
+            t.shading = Some(WindowShading { create: true, kind: WindowShadingKind::Raffstore, r#box: WindowShadingBox { width: 0.0, height: 0.3, depth: 0.18, ..Default::default() }, mount: Some(WindowShadingMount::Sturz), ..Default::default() });
+        }
+        for t in p.door_types.iter_mut().flatten() {
+            t.lintel_height = Some(0.2);
+        }
+        let more = section_opening_primitives(&p, &l, &vis).unwrap();
+        assert!(more.len() > base.len(), "{} {}", more.len(), base.len());
+        let json = serde_json::to_string(&more).unwrap();
+        assert!(json.contains(LINTEL_FILL) && json.contains(SHADING_PACK_FILL), "{json}");
     }
 
     #[test]

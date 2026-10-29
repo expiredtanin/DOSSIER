@@ -38,6 +38,7 @@
 //! istTuer, glasBlatt, glasAnteil (NaN = 1),
 //! rahmenbreite, kaempferHoehe, sprossenZeilen (NaN = 1), sprossenSpalten (NaN = 1),
 //! bankAn, typArt (0 fest, 1 dreh, 2 kipp, 3 drehkipp, 4 schiebe),
+//! anschlag (Meter, 0 keiner), anschlagSeite (1 aussen | −1 innen; [94]),
 //! nFluegel, (pfosten, pfostenBreite (NaN), autoBreite (0/1), breite (NaN), art (-1 = typArt), bandLinks) × nFluegel
 //! ```
 //! → `[n, (ok, tiefe, istTuer, 8 Ecken, Listen) × n]`; `ok` 0 = nicht sichtbar (sonst nichts mehr).
@@ -825,8 +826,16 @@ fn rect(q: &Quad, fa0: f64, fa1: f64, fz0: f64, fz1: f64) -> Quad {
     [quad_at(q, fa0, fz0), quad_at(q, fa1, fz0), quad_at(q, fa1, fz1), quad_at(q, fa0, fz1)]
 }
 
+/// Feste Werte je Öffnung vor der Flügelliste (der letzte = Flügelzahl).
+const REC: usize = 21;
+
 /// Projiziert die zum Betrachter zeigende Wand-Langseite der Öffnung; `None` ohne sichtbare Seite.
 fn project_opening_rect(f: &Frame, o: &[f64]) -> Option<(Quad, f64)> {
+    project_opening_side(f, o).map(|(q, d, _)| (q, d))
+}
+
+/// Wie [`project_opening_rect`], dazu die Seite (+1 = Seite +n, die Aussenseite; −1 = innen).
+fn project_opening_side(f: &Frame, o: &[f64]) -> Option<(Quad, f64, f64)> {
     let (sx, sz) = (o[0], o[1]);
     let ax = o[2] - o[0];
     let az = o[3] - o[1];
@@ -859,7 +868,7 @@ fn project_opening_rect(f: &Frame, o: &[f64]) -> Option<(Quad, f64)> {
         if depth <= EPS {
             continue;
         }
-        return Some((pts, depth));
+        return Some((pts, depth, if side > 0.0 { 1.0 } else { -1.0 }));
     }
     None
 }
@@ -1038,21 +1047,32 @@ pub fn openings(frame: &[f64], inp: &[f64]) -> Vec<f64> {
     let mut f = vec![n as f64];
     let mut i = 1;
     for _ in 0..n {
-        if i + 19 > inp.len() {
+        if i + REC > inp.len() {
             return Vec::new();
         }
-        let o = &inp[i..i + 19];
-        let ns = o[18];
-        if !(ns >= 0.0) || ns.fract() != 0.0 || i + 19 + 6 * ns as usize > inp.len() {
+        let o = &inp[i..i + REC];
+        let ns = o[REC - 1];
+        if !(ns >= 0.0) || ns.fract() != 0.0 || i + REC + 6 * ns as usize > inp.len() {
             return Vec::new();
         }
         let ns = ns as usize;
-        let sashes = &inp[i + 19..i + 19 + 6 * ns];
-        i += 19 + 6 * ns;
+        let sashes = &inp[i + REC..i + REC + 6 * ns];
+        i += REC + 6 * ns;
         let geo = &o[..9];
         if geo.iter().any(|v| !v.is_finite()) {
             return Vec::new();
         }
+        // Anschlag ([94]): von der Anschlag-Seite aus deckt die Wandnase Rahmen links, rechts und oben ab.
+        let mut oo = o.to_vec();
+        if let Some((_, _, side)) = project_opening_side(&fr, o) {
+            let rd = min(if o[18].is_nan() { 0.0 } else { o[18] }, (o[6] - o[5]) / 2.0 - 0.01);
+            if rd > 1e-4 && side * o[19] > 0.0 && o[8] - o[7] > 2.0 * rd {
+                oo[5] += rd;
+                oo[6] -= rd;
+                oo[8] -= rd;
+            }
+        }
+        let o = &oo[..];
         match project_opening_rect(&fr, o) {
             None => f.push(0.0),
             Some((pts, depth)) => {
@@ -1162,5 +1182,25 @@ mod tests_ts {
         }
         let f = occluded_points(&occ, &[3.0, 10.5, 0.5, 5.0, 10.5, 0.5, 0.5, 99.0, 0.5, 5.0]);
         assert_eq!(f, vec![3.0, 1.0, 0.0, 0.0]);
+    }
+
+    /// [94] Anschlag: von der Anschlag-Seite aus ist die sichtbare Öffnung um die Wandnasen kleiner.
+    #[test]
+    fn anschlag_verkleinert_die_ansicht_nur_von_seiner_seite() {
+        let frame = [0.0, 0.0, -3.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
+        let rec = |rebate: f64, side: f64| {
+            let mut b = vec![1.0, 0.0, 0.0, 5.0, 0.0, 0.3, 1.0, 2.2, 0.9, 2.3, 0.0, 0.0, f64::NAN, 0.06, 0.0, f64::NAN, f64::NAN, 1.0, 1.0, rebate, side, 0.0];
+            b.truncate(1 + REC);
+            b
+        };
+        let width = |f: &[f64]| {
+            assert_eq!(f[1], 1.0);
+            let xs = [f[4], f[6], f[8], f[10]];
+            xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - xs.iter().cloned().fold(f64::INFINITY, f64::min)
+        };
+        let w0 = width(&openings(&frame, &rec(0.0, 1.0)));
+        let w1 = width(&openings(&frame, &rec(0.05, 1.0)));
+        let w2 = width(&openings(&frame, &rec(0.05, -1.0)));
+        assert!((w0 - 1.2).abs() < 1e-9 && (w1 - 1.1).abs() < 1e-9 && (w2 - 1.2).abs() < 1e-9, "{w0} {w1} {w2}");
     }
 }

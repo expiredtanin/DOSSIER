@@ -287,8 +287,9 @@ describe("generatePlan — Fensterbank (window-sill) folgt der eingezogenen Rahm
     // die volle Wandfläche (−0.15 — der alte, fehlerhafte Wert vor dem Fix).
     expect(Math.max(...ys)).toBeCloseTo(-0.1, 6);
     expect(Math.max(...ys)).not.toBeCloseTo(-0.15, 2);
-    // Auskragung geht weiter nach aussen (algebraisch kleiner): −0.10 − 0.04.
-    expect(Math.min(...ys)).toBeCloseTo(-0.14, 6);
+    // Auskragung über die ganze Leibung bis 4 cm vor die Fassade ([94]): −0.15 − 0.04
+    // (früher endete die Bank bei −0.14, also in der Leibung).
+    expect(Math.min(...ys)).toBeCloseTo(-0.19, 6);
   });
 });
 
