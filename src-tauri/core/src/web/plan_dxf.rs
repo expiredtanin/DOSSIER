@@ -10,7 +10,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 /// Papierbereich 0/1, minX, minY, maxX, maxY]`. Texte setzt der Kern aus dem Text-JSON der Puffer
 /// (`plan_text`), die Standard-Schrift kommt aus den Textstilen des Projekts.
 #[wasm_bindgen]
-pub fn plan_dxf_flat(doc: u32, segs: &[f64], opts: &[f64]) -> Vec<u8> {
+pub fn plan_dxf_flat(doc: u32, segs: &[f64], opts: &[f64], floor: &str) -> Vec<u8> {
     let Ok([scale, hatches, cm, layout, min_x, min_y, max_x, max_y]) = <[f64; 8]>::try_from(opts) else { return Vec::new() };
     if !(scale.is_finite() && scale > 0.0) {
         return Vec::new();
@@ -26,6 +26,7 @@ pub fn plan_dxf_flat(doc: u32, segs: &[f64], opts: &[f64]) -> Vec<u8> {
             paper_layout: layout != 0.0,
             bounds: [min_x, min_y, max_x, max_y],
             default_font: crate::plan_text::default_font(p),
+            floor: floor.to_string(),
         };
         collect(&mut parts, p, &o).map(|f| encode(&f))
     })

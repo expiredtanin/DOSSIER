@@ -41,6 +41,19 @@ const DETAILREF_TEXT_HEIGHT_M: f64 = 0.2;
 const POINTMARKER_RADIUS_M: f64 = 0.08;
 const POINTMARKER_CROSS_M: f64 = 0.12;
 
+/// Die fixen Symbolgrössen oben (Kote, Detailverweis, Punktmarke) sind Papier-mm bei 1:100. Auf der
+/// Blatt-Ebene eines Layouts (Papier 1:1, [93]) gilt dasselbe Papiermass: Faktor 1/100.
+pub const SHEET_SYMBOL_FACTOR: f64 = 0.01;
+
+/// Faktor der fixen Symbolgrössen auf der Ebene `level`: 1 im Modell, [`SHEET_SYMBOL_FACTOR`] auf einem Blatt.
+pub fn symbol_factor(p: &Project, level: &str) -> f64 {
+    if p.drawing_levels.iter().any(|l| l.id == level && l.layout_id.as_deref().is_some_and(|s| !s.is_empty())) {
+        SHEET_SYMBOL_FACTOR
+    } else {
+        1.0
+    }
+}
+
 // Massstabsbalken, Papier-mm.
 const SCALEBAR_HEIGHT_MM: f64 = 1.5;
 const SCALEBAR_TICK_MM: f64 = 1.0;
@@ -366,12 +379,13 @@ fn kote_label(value: f64) -> String {
 /// roh = gefüllt. `at` ist die Spitze. Geteilt vom 2D-Element `kote` und den automatischen Koten
 /// im Schnitt/in der Ansicht ([`level_markers`]).
 #[allow(clippy::too_many_arguments)]
-fn push_kote(sink: &mut Sink, at: Vec2, value: f64, kind: KoteKind, color: &str, weight: f64, greyed: bool, id: Option<&str>) {
+fn push_kote(sink: &mut Sink, at: Vec2, value: f64, kind: KoteKind, color: &str, weight: f64, greyed: bool, id: Option<&str>, f: f64) {
     let up = if matches!(kind, KoteKind::OkFertig | KoteKind::OkRoh) { 1.0 } else { -1.0 };
     let filled = matches!(kind, KoteKind::OkRoh | KoteKind::UkRoh);
-    let pts = vec![at, v(at.x - KOTE_TRI_HALF_W_M, at.y + up * KOTE_TRI_SIZE_M), v(at.x + KOTE_TRI_HALF_W_M, at.y + up * KOTE_TRI_SIZE_M)];
+    let (size, half) = (KOTE_TRI_SIZE_M * f, KOTE_TRI_HALF_W_M * f);
+    let pts = vec![at, v(at.x - half, at.y + up * size), v(at.x + half, at.y + up * size)];
     sink.push(polygon(pts, if filled { color } else { "none" }, color, weight, no_hatch(), greyed, id), 0);
-    sink.push(text(v(at.x + KOTE_TRI_HALF_W_M + KOTE_TEXT_GAP_M, at.y + up * KOTE_TRI_SIZE_M * 0.5), kote_label(value), KOTE_TEXT_HEIGHT_M, 0.0, color, greyed, id), 0);
+    sink.push(text(v(at.x + half + KOTE_TEXT_GAP_M * f, at.y + up * size * 0.5), kote_label(value), KOTE_TEXT_HEIGHT_M * f, 0.0, color, greyed, id), 0);
 }
 
 /// Aufgelöster Stil eines Element-Aufrufs.
@@ -740,17 +754,19 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             }
         }
         Drawing2DGeom::Kote { at, value, kind, .. } => {
-            push_kote(em.sink, *at, *value, *kind, em.color, em.weight, em.greyed, Some(em.id));
+            push_kote(em.sink, *at, *value, *kind, em.color, em.weight, em.greyed, Some(em.id), symbol_factor(p, &d.level_id));
         }
         Drawing2DGeom::Detailref { at, label, sheet_layout_id, sheet_label } => {
-            em.circle(*at, DETAILREF_RADIUS_M, "none", Some(None));
-            em.seg(v(at.x - DETAILREF_RADIUS_M, at.y), v(at.x + DETAILREF_RADIUS_M, at.y));
+            let f = symbol_factor(p, &d.level_id);
+            let (radius, text_h) = (DETAILREF_RADIUS_M * f, DETAILREF_TEXT_HEIGHT_M * f);
+            em.circle(*at, radius, "none", Some(None));
+            em.seg(v(at.x - radius, at.y), v(at.x + radius, at.y));
             let sheet_name = sheet_layout_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.layouts.as_deref().unwrap_or(&[]).iter().find(|l| l.id == id)).map(|l| l.name.as_str());
             let lower = sheet_name.or(sheet_label.as_deref()).unwrap_or("");
-            let text_x = at.x - DETAILREF_RADIUS_M * 0.62;
-            em.text(v(text_x, at.y + DETAILREF_RADIUS_M * 0.32), label.clone(), DETAILREF_TEXT_HEIGHT_M);
+            let text_x = at.x - radius * 0.62;
+            em.text(v(text_x, at.y + radius * 0.32), label.clone(), text_h);
             if !lower.is_empty() {
-                em.text(v(text_x, at.y - DETAILREF_RADIUS_M * 0.68), lower.to_string(), DETAILREF_TEXT_HEIGHT_M);
+                em.text(v(text_x, at.y - radius * 0.68), lower.to_string(), text_h);
             }
         }
         Drawing2DGeom::Scalebar { at, segment_length, segments } => {
@@ -779,9 +795,11 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             }
         }
         Drawing2DGeom::Pointmarker { at } => {
-            em.circle(*at, POINTMARKER_RADIUS_M, "none", Some(None));
-            em.seg(v(at.x - POINTMARKER_CROSS_M, at.y), v(at.x + POINTMARKER_CROSS_M, at.y));
-            em.seg(v(at.x, at.y - POINTMARKER_CROSS_M), v(at.x, at.y + POINTMARKER_CROSS_M));
+            let f = symbol_factor(p, &d.level_id);
+            let (r, cross) = (POINTMARKER_RADIUS_M * f, POINTMARKER_CROSS_M * f);
+            em.circle(*at, r, "none", Some(None));
+            em.seg(v(at.x - cross, at.y), v(at.x + cross, at.y));
+            em.seg(v(at.x, at.y - cross), v(at.x, at.y + cross));
         }
         Drawing2DGeom::Text { at, text: s, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts } => {
             let color = marks.as_ref().and_then(|m| m.color.clone()).unwrap_or_else(|| em.color.to_string());
@@ -1357,7 +1375,7 @@ pub fn level_markers(p: &Project, b: [f64; 4]) -> Vec<Primitive> {
             LineRef { a: v(x - 0.3, z), b: v(min_x - LEADER_GAP_M, z), cls: "section-level-leader", weight_mm: 0.13, dash: None, zigzag: None, motif: None, color: Some(INK), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None },
             0,
         );
-        push_kote(&mut sink, v(x, z), jsnum::round(z * 100.0) / 100.0, KoteKind::OkFertig, INK, 0.18, false, None);
+        push_kote(&mut sink, v(x, z), jsnum::round(z * 100.0) / 100.0, KoteKind::OkFertig, INK, 0.18, false, None, 1.0);
     }
     out.prims
 }
@@ -1396,6 +1414,49 @@ mod tests {
 
     fn drawing(geom: serde_json::Value) -> serde_json::Value {
         serde_json::json!({ "id": "d1", "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": geom })
+    }
+
+    /// [93] Auf der Blatt-Ebene (Papier 1:1) haben Kote, Detailverweis und Punktmarke dasselbe
+    /// Papiermass wie im Grundriss bei 1:100 (Faktor 1/100), im Grundriss bleiben sie unverändert.
+    #[test]
+    fn symbole_auf_dem_blatt_in_papiergroesse() {
+        let levels = serde_json::json!({"drawingLevels": [
+            {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false},
+            {"id": "sh", "name": "Blatt", "kind": "drawing", "visible": true, "locked": false, "layoutId": "L"}
+        ]});
+        let p = project(levels);
+        let on = |level: &str, geom: serde_json::Value| -> Vec<Primitive> {
+            let mut d = drawing(geom);
+            d["levelId"] = serde_json::json!(level);
+            render(&p, d, 1.0)
+        };
+        let extent = |prims: &[Primitive]| -> f64 {
+            let mut b = Bounds::new();
+            for pr in prims {
+                match pr {
+                    Primitive::Polygon { pts, .. } => pts.iter().for_each(|q| b.acc(q.x, q.y)),
+                    Primitive::Line { a, b: q, .. } => {
+                        b.acc(a.x, a.y);
+                        b.acc(q.x, q.y);
+                    }
+                    Primitive::DrawingCircle { center, r, .. } => {
+                        b.acc(center.x - r, center.y - r);
+                        b.acc(center.x + r, center.y + r);
+                    }
+                    _ => {}
+                }
+            }
+            let r = b.get().unwrap();
+            (r[2] - r[0]).max(r[3] - r[1])
+        };
+        for geom in [
+            serde_json::json!({"shape": "kote", "at": {"x": 0.1, "y": -0.1}, "value": 3.25, "kind": "okFertig", "rotation": 0}),
+            serde_json::json!({"shape": "detailref", "at": {"x": 0.1, "y": -0.1}, "label": "A"}),
+            serde_json::json!({"shape": "pointmarker", "at": {"x": 0.1, "y": -0.1}}),
+        ] {
+            let (model, sheet) = (extent(&on("eg", geom.clone())), extent(&on("sh", geom.clone())));
+            assert!((sheet - model * SHEET_SYMBOL_FACTOR).abs() < 1e-9, "{geom}: {model} → {sheet}");
+        }
     }
 
     #[test]

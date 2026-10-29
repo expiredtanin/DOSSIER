@@ -1338,11 +1338,23 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Befehls-Kontext), Bild einfügen 60 mm mitten aufs Blatt; Layout-PDF legt die Blatt-Ebene über `planToPrintSvg`
   (fester Bereich, ohne Blatt) aufs Papier. Gelöscht: Annotations-Typen/-CRUD/-Mathe/-Rendering/-CSS, `annotationTextLines`.
   e2e `layoutSheet.spec.ts` (Linie, Polylinie, Rechteck, Fang auf Endpunkt, Griff ziehen + Undo, ein Undo-Schritt je
-  Element — identisch im Grundriss und auf dem Blatt). Offen: Blatt rendert über den SVG-Pfad der PlanView (wegen des
-  Hintergrunds, wie bei Luftbildern), nicht über render2d; Lineale/Objekt-Info zeigen Meter (y negativ) statt
-  Papier-mm; feste Modellgrössen anderer Befehle (Kote, Detailverweis, Punktmarke) nicht ans Papier angepasst; kein
-  Fang auf Viewport-Inhalt; Layout-DXF (`--layout`) ohne Blatt-Zeichnung; PDF-Export der Blatt-Zeichnung nicht
-  angesehen; nicht in der Tauri-App/macOS geprüft. · M
+  Element — identisch im Grundriss und auf dem Blatt).
+  (29.10. abends) Offene Punkte erledigt: **Papier-mm** auf dem Blatt (`tools/displayUnits.ts`): Lineale, Statusleiste,
+  Objekt-Info (X/Y/Breite/Höhe/Länge/Radius, auch Attribute-Masse), Cursor-HUD und Befehlszeilen-Felder in mm mit
+  y nach unten; getippte Koordinaten/Längen (`100,50`, `r10,20`, `50<30`, Längen-Felder, Griff-/Kanten-Felder) in mm
+  (`toModelInput`). **Symbole** Kote/Detailverweis/Punktmarke: feste Grössen sind Papier-mm bei 1:100, auf dem Blatt
+  Faktor 1/100 (`plan/drawings.rs::symbol_factor`, Vorschau über `sheet` im Befehls-Kontext). **Fang auf
+  Viewport-Inhalt** im Kern (`sheet_viewports.rs`: Plan je Viewport wie `ViewportPlanSvg`, abgebildet + geklippt;
+  `snap_model.rs` sammelt auf Blatt-Ebenen statt des Modells, neu je Dokument-Stand). **DXF/DWG `--layout`**: je
+  Projekt-Layout ein Papierbereich mit der Blatt-Zeichnung als Block (Faktor 1000) und den Ansichtsfenstern auf das
+  exportierte Geschoss (fileio `REC_SHEET*`; CLI + App). **PDF angesehen** (pdftoppm): Raumfüllung `#rrggbbaa`
+  druckte deckend dunkel und verdeckte die Raumstempel → `fill-opacity` (`plan_print_svg.rs`). Dazu: Geo-Verschieben
+  lässt Blatt-Zeichnungen in Ruhe; Objekt-Info committete X/Y bei Enter doppelt (Enter + blur) → behoben.
+  e2e: mm-Anzeige/getippte mm, Fang auf Viewport-Inhalt. Offen: Blatt rendert über den SVG-Pfad der PlanView, nicht
+  über render2d; im DXF-Blatt Bemassungen/Blöcke als einfache Linien/Texte, Viewports anderer Geschosse fehlen (nur
+  das exportierte Geschoss im Modellbereich); Viewport-Ausmass ohne Schatten der Sonnenstudie; reine Zahl-Schritte
+  (Versatz-Abstand, Radius ohne Feld) bleiben in Metern; Viewport-Inhalt im PDF nicht aufs Rechteck geklippt (nicht
+  geprüft); nicht in der Tauri-App/macOS geprüft. · M
 - ○ **[80] PDF mit Ebenen.** · M
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.

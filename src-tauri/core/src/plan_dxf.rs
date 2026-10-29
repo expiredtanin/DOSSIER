@@ -40,6 +40,10 @@ const REC_BLOCK: f64 = 16.0;
 const REC_BLOCK_END: f64 = 17.0;
 const REC_INSERT: f64 = 18.0;
 const REC_LAYOUT: f64 = 19.0;
+/// Papierbereich eines Projekt-Layouts, Ansichtsfenster darin, Blockeinfügung darin ([93], fileio `export.rs`).
+const REC_SHEET: f64 = 20.0;
+const REC_SHEET_VP: f64 = 21.0;
+const REC_SHEET_INSERT: f64 = 22.0;
 
 /// Sammel-Ebenen für Primitive ohne eigene Kategorie.
 const LAYER_HATCH: &str = "HATCH";
@@ -80,6 +84,9 @@ pub struct DxfOptions {
     pub bounds: [f64; 4],
     /// Standard-Schrift (erste Schrift der Projekt-Textstile, sonst Arial; [`crate::plan_text::default_font`]).
     pub default_font: String,
+    /// Exportierte Ebene (Geschoss): Ansichtsfenster der Projekt-Layouts, die sie zeigen, kommen mit in
+    /// den Papierbereich (`paper_layout`); leer = keine.
+    pub floor: String,
 }
 
 /// Schrift eines Texts (Familie nach `font_name_of`, sonst Standard-Schrift).
@@ -1106,15 +1113,7 @@ fn flatten<'a>(cats: &'a [LayerCategory], out: &mut Vec<&'a LayerCategory>) {
 /// Sammelt die flache Zeichnung aus den Abschnitten des Plans (Texte aus ihrem JSON). `None` bei
 /// kaputtem Puffer.
 pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<FlatDxf> {
-    // Primitive in Plan-Reihenfolge lesen.
-    let mut entries: Vec<Entry> = Vec::new();
-    for part in parts.iter_mut() {
-        let hatches = part.view.hatch_table()?;
-        for i in part.from..part.to {
-            let text = crate::plan_text::read_text(part, i).map(|t| crate::plan_text::dxf_text(&t, o.scale, &o.default_font));
-            entries.push(read_entry(part, i, &hatches, text.as_ref())?);
-        }
-    }
+    let entries = read_entries(parts, o.scale, &o.default_font)?;
 
     let mut cx = Ctx { project, o, flat: Flat::new() };
     let mut main = Buf::main();
@@ -1136,6 +1135,31 @@ pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<
     cx.flat.add_layer(LAYER_EXTRUSION, Some(rgb_from_hex("#d98c40")), 13.0);
     cx.flat.add_layer(LAYER_ZERO, None, 25.0);
 
+    emit_entries(&mut cx, &mut main, &entries, &layer_by_code, true);
+    cx.flat.set_pen(&mut main, -1.0);
+
+    // 5) Papierbereich (optional): Layout mit Ansichtsfenster im Planmassstab.
+    if o.paper_layout {
+        let [min_x, min_y, max_x, max_y] = o.bounds;
+        let w = max_x - min_x;
+        let h = max_y - min_y;
+        if [min_x, min_y, max_x, max_y].iter().all(|v| v.is_finite()) && w > 0.0 && h > 0.0 {
+            let (pw, ph, vw, vh) = paper_for(w, h, o.scale, 10.0);
+            let s = cx.flat.str(&format!("Plan 1-{}", js_number(o.scale)));
+            cx.flat.push(&mut main, &[REC_LAYOUT, s, pw, ph, pw / 2.0, ph / 2.0, vw, vh, (min_x + max_x) / 2.0, (min_y + max_y) / 2.0, o.scale]);
+        }
+        sheets(&mut cx, &mut main, &layer_by_code);
+    }
+    let Flat { root, strings, block_counts, .. } = cx.flat;
+    Some(FlatDxf { nums: root, strings, model: main.counts, blocks: block_counts })
+}
+
+/// Schritte 2–4 des Sammelns: Primitive (in Plan-Reihenfolge) in Entitäten von `main` übersetzen —
+/// Bemassungen, Blockinstanzen und Öffnungen als CAD-Objekte, der Rest je Primitiv.
+/// `objects = false`: auch Bemassungen, Blockinstanzen und Öffnungen nur als ihre Primitive (Inhalt
+/// eines Blocks, der keine weiteren Blöcke definieren darf).
+fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: &HashMap<&str, String>, objects: bool) {
+    let project = cx.project;
     // 2) Rückverweise Primitiv → Kategorie.
     let code_by_wall: HashMap<&str, &str> = project.walls.iter().map(|w| (w.id.as_str(), w.category_code.as_str())).collect();
     let code_by_drawing: HashMap<&str, &str> = project.drawings2d.iter().map(|d| (d.id.as_str(), d.category_code.as_str())).collect();
@@ -1203,6 +1227,9 @@ pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<
     }
     let opening_by_id: HashMap<&str, &Opening> = project.openings.iter().flatten().map(|x| (x.id.as_str(), x)).collect();
     let group_key = |e: &Entry| -> Option<(u8, String)> {
+        if !objects {
+            return None;
+        }
         if let Some(did) = &e.ids.drawing {
             if dim_by_id.contains_key(did.as_str()) {
                 return Some((b'd', did.clone()));
@@ -1241,25 +1268,25 @@ pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<
                 b'd' => {
                     let d = dim_by_id[id];
                     let layer = drawing_layer(Some(&key.1), LAYER_DEFAULT);
-                    cx.dimensions(&mut main, d, &layer);
+                    cx.dimensions(main, d, &layer);
                 }
                 b'b' => {
                     let d = block_by_id[id];
                     let layer = drawing_layer(Some(&d.id), LAYER_DEFAULT);
-                    if !cx.block_instance(&mut main, d, &prims, &layer, &mut names) {
+                    if !cx.block_instance(main, d, &prims, &layer, &mut names) {
                         for m in &members {
                             let l = layer_for(m);
-                            cx.emit(&mut main, &m.prim, &l, LAYER_HATCH);
+                            cx.emit(main, &m.prim, &l, LAYER_HATCH);
                         }
                     }
                 }
                 _ => {
                     let op = opening_by_id[id];
                     let layer = layer_by_code.get(op.category_code.as_str()).cloned().unwrap_or_else(|| LAYER_SYMBOLS.to_string());
-                    if !cx.opening(&mut main, op, &prims, &layer, &mut names) {
+                    if !cx.opening(main, op, &prims, &layer, &mut names) {
                         for m in &members {
                             let l = layer_for(m);
-                            cx.emit(&mut main, &m.prim, &l, LAYER_HATCH);
+                            cx.emit(main, &m.prim, &l, LAYER_HATCH);
                         }
                     }
                 }
@@ -1267,23 +1294,96 @@ pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<
             continue;
         }
         let l = layer_for(e);
-        cx.emit(&mut main, &e.prim, &l, LAYER_HATCH);
+        cx.emit(main, &e.prim, &l, LAYER_HATCH);
     }
-    cx.flat.set_pen(&mut main, -1.0);
+}
 
-    // 5) Papierbereich (optional): Layout mit Ansichtsfenster im Planmassstab.
-    if o.paper_layout {
-        let [min_x, min_y, max_x, max_y] = o.bounds;
-        let w = max_x - min_x;
-        let h = max_y - min_y;
-        if [min_x, min_y, max_x, max_y].iter().all(|v| v.is_finite()) && w > 0.0 && h > 0.0 {
-            let (pw, ph, vw, vh) = paper_for(w, h, o.scale, 10.0);
-            let s = cx.flat.str(&format!("Plan 1-{}", js_number(o.scale)));
-            cx.flat.push(&mut main, &[REC_LAYOUT, s, pw, ph, pw / 2.0, ph / 2.0, vw, vh, (min_x + max_x) / 2.0, (min_y + max_y) / 2.0, o.scale]);
+/// Primitive der Abschnitte in Plan-Reihenfolge lesen (Texte gesetzt beim Massstab `scale`).
+fn read_entries(parts: &mut [Part], scale: f64, font: &str) -> Option<Vec<Entry>> {
+    let mut entries: Vec<Entry> = Vec::new();
+    for part in parts.iter_mut() {
+        let hatches = part.view.hatch_table()?;
+        for i in part.from..part.to {
+            let text = crate::plan_text::read_text(part, i).map(|t| crate::plan_text::dxf_text(&t, scale, font));
+            entries.push(read_entry(part, i, &hatches, text.as_ref())?);
         }
     }
-    let Flat { root, strings, block_counts, .. } = cx.flat;
-    Some(FlatDxf { nums: root, strings, model: main.counts, blocks: block_counts })
+    Some(entries)
+}
+
+/// Papierbereiche der Projekt-Layouts ([93]): je Layout ein Blatt in mm, die Ansichtsfenster, die die
+/// exportierte Ebene zeigen (Mitte/Massstab wie in der App, `sheet_viewports.rs`), und die Zeichnung der
+/// Blatt-Ebene als Block (Papier-Meter, y nach oben mit Ursprung oben links), eingefügt mit Faktor
+/// 1000 an der oberen linken Papierecke. Im Block bleiben Bemassungen/Blöcke einfache Primitive.
+fn sheets(cx: &mut Ctx, main: &mut Buf, layer_by_code: &HashMap<&str, String>) {
+    use crate::plan::domains::{plan_domains_buf, PlanArgs};
+    let p = cx.project;
+    let codes: HashSet<String> = p.flat_categories().iter().map(|c| c.code.clone()).collect();
+    let mut used: HashSet<String> = HashSet::new();
+    used.insert(format!("Plan 1-{}", js_number(cx.o.scale)));
+    for (n, layout) in p.layouts.iter().flatten().enumerate() {
+        let master = layout.master_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.master_layouts.iter().flatten().find(|m| m.id == id));
+        let size = match master {
+            Some(m) => serde_json::to_value(m).ok(),
+            None => serde_json::to_value(layout).ok(),
+        }
+        .and_then(|v| crate::layout_model::effective_sheet_size(&v));
+        let Some((pw, ph)) = size else { continue };
+        // Eindeutiger Name (gleichnamige Blätter, Kollision mit dem Plan-Layout).
+        let base = if js_trim(&layout.name).is_empty() { format!("Blatt {}", n + 1) } else { layout.name.clone() };
+        let mut name = base.clone();
+        let mut k = 2;
+        while used.contains(&name) {
+            name = format!("{base} ({k})");
+            k += 1;
+        }
+        used.insert(name.clone());
+        let name_s = cx.flat.str(&name);
+        // Blatt-Zeichnung als Block (vor dem Blatt definiert).
+        let mut block: Option<String> = None;
+        if let Some(level) = p.drawing_levels.iter().find(|l| l.layout_id.as_deref() == Some(layout.id.as_str())) {
+            if p.drawings2d.iter().any(|d| d.level_id == level.id) {
+                let args = PlanArgs {
+                    floor: level.id.clone(),
+                    detail: crate::plan::style::Detail::Mittel,
+                    show: codes.clone(),
+                    grey: HashSet::new(),
+                    reference_lines: false,
+                    global: false,
+                    scale: 1.0,
+                    for_print: true,
+                    compact: false,
+                    mono: false,
+                    sun_when: None,
+                };
+                if let Some(entries) = plan_domains_buf(p, &args).ok().and_then(|buf| {
+                    let view = View::parse(&buf)?;
+                    let len = view.len();
+                    let mut parts = [Part::new(view, 0, len)?];
+                    read_entries(&mut parts, 1.0, &cx.o.default_font)
+                }) {
+                    let o1 = DxfOptions { scale: 1.0, include_hatches: cx.o.include_hatches, dim_cm: cx.o.dim_cm, paper_layout: false, bounds: [0.0; 4], default_font: cx.o.default_font.clone(), floor: String::new() };
+                    let mut sub = Ctx { project: p, o: &o1, flat: std::mem::replace(&mut cx.flat, Flat::new()) };
+                    let mut content = Buf::block();
+                    emit_entries(&mut sub, &mut content, &entries, layer_by_code, false);
+                    let bname = format!("SHEET_{}", n + 1);
+                    sub.flat.define_block(main, &bname, &name, &[], content);
+                    cx.flat = sub.flat;
+                    block = Some(bname);
+                }
+            }
+        }
+        cx.flat.push(main, &[REC_SHEET, name_s, pw, ph]);
+        if !cx.o.floor.is_empty() {
+            for m in crate::sheet_viewports::viewport_maps(p, layout).iter().filter(|m| m.level == cx.o.floor) {
+                cx.flat.push(main, &[REC_SHEET_VP, name_s, m.x_mm + m.w_mm / 2.0, ph - (m.y_mm + m.h_mm / 2.0), m.w_mm, m.h_mm, m.cx, m.cy, m.scale]);
+            }
+        }
+        if let Some(b) = block {
+            let bs = cx.flat.str(&b);
+            cx.flat.push(main, &[REC_SHEET_INSERT, name_s, bs, 0.0, ph, 1000.0]);
+        }
+    }
 }
 
 /// Ergebnis als Bytes: f64-Teil `[MAGIC "DXF1", nZahlen, nTexte, 8 Modell-, 8 Block-Zähler,
@@ -1313,6 +1413,46 @@ pub const DXF_MAGIC: f64 = 0x4458_4631 as f64;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [93] Mit Papierbereich: das Projekt-Layout als Blatt, sein Ansichtsfenster auf das exportierte
+    /// Geschoss und die Blatt-Zeichnung als Block, eingefügt mit Faktor 1000 oben links.
+    #[test]
+    fn projekt_layout_mit_blatt_zeichnung() {
+        let mut v = crate::sheet_viewports::tests::json();
+        v["drawings2d"].as_array_mut().unwrap().push(serde_json::json!(
+            {"id": "s1", "levelId": "sh", "categoryCode": "20", "geom": {"shape": "line", "a": {"x": 0.02, "y": -0.02}, "b": {"x": 0.1, "y": -0.02}}}
+        ));
+        let p: Project = serde_json::from_value(v).unwrap();
+        let a = crate::plan::domains::PlanArgs::parse(1.0, r#"{"floor":"eg","show":["20"],"scale":100}"#).unwrap();
+        let buf = crate::plan::domains::plan_domains_buf(&p, &a).unwrap();
+        let view = View::parse(&buf).unwrap();
+        let len = view.len();
+        let mut parts = [Part::new(view, 0, len).unwrap()];
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: true, bounds: [0.0, 0.0, 10.0, 4.0], default_font: "Arial".into(), floor: "eg".into() };
+        let f = collect(&mut parts, &p, &o).unwrap();
+        let find = |rec: f64, n: usize| -> Vec<Vec<f64>> {
+            f.nums.windows(n).filter(|w| w[0] == rec && f.strings.get(w[1] as usize).is_some_and(|s| s == "Blatt")).map(|w| w.to_vec()).collect()
+        };
+        let sheet = find(REC_SHEET, 4);
+        assert_eq!(sheet.len(), 1);
+        assert_eq!(&sheet[0][2..], &[420.0, 297.0]);
+        let vp = find(REC_SHEET_VP, 9);
+        assert_eq!(vp.len(), 1);
+        // Rechteck (100, 50, 200 × 100 mm) → Mitte (200, 297 − 100) im DXF-Papier (y nach oben), 1:100.
+        assert_eq!(&vp[0][2..6], &[200.0, 197.0, 200.0, 100.0]);
+        assert_eq!(vp[0][8], 100.0);
+        let ins = find(REC_SHEET_INSERT, 6);
+        assert_eq!(ins.len(), 1);
+        assert_eq!(f.strings[ins[0][2] as usize], "SHEET_1");
+        assert_eq!(&ins[0][3..], &[0.0, 297.0, 1000.0]);
+        assert!(f.strings.iter().any(|s| s == "SHEET_1") && f.nums.contains(&REC_BLOCK));
+        // Ohne Geschoss kein Ansichtsfenster.
+        let o2 = DxfOptions { floor: String::new(), ..o };
+        let view = View::parse(&buf).unwrap();
+        let mut parts = [Part::new(view, 0, len).unwrap()];
+        let f2 = collect(&mut parts, &p, &o2).unwrap();
+        assert!(!f2.nums.windows(2).any(|w| w[0] == REC_SHEET_VP && f2.strings.get(w[1] as usize).is_some_and(|s| s == "Blatt")));
+    }
 
     #[test]
     fn linientyp_aus_strichmuster() {

@@ -28,7 +28,7 @@ function ctxReq(ctx: CommandContext): object {
     floorHeight: ctx.level.floorHeight ?? null,
     cat: ctx.defaultCategoryCode,
     wallType: ctx.activeWallTypeId,
-    ...(ctx.level.layoutId ? { textHeight: SHEET_TEXT_HEIGHT_M } : {}),
+    ...(ctx.level.layoutId ? { textHeight: SHEET_TEXT_HEIGHT_M, sheet: true } : {}),
   };
 }
 

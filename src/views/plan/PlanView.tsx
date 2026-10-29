@@ -43,6 +43,7 @@ import {
 import { DraftOverlay } from "./planView/overlays";
 import { visibleGripIndices } from "./planView/gripCull";
 import { localViewBoxAttr, makeToLocal, pickOverlayOrigin } from "./planView/overlayOrigin";
+import type { DisplayUnits } from "../../tools/displayUnits";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, indexedInRegion, regionContains, type Bounds } from "../../core";
@@ -587,6 +588,8 @@ export interface PlanViewProps {
    * (wie bei Luftbildern), damit er sichtbar bleibt.
    */
   backdrop?: (origin: Vec2, pxPerMeter: number) => ReactNode;
+  /** Anzeige-Einheiten von Linealen und HUD (Layout-Blatt: Papier-mm, y nach unten, [93]). */
+  units?: DisplayUnits;
   /** Einpass-Bereich (Modell-Meter) statt der Plan-Grenzen — z. B. das Blatt. */
   fitBounds?: { minX: number; minY: number; maxX: number; maxY: number };
 }
@@ -715,6 +718,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       hoverDivideDelayMs = 300,
       hoverDivideCount = 2,
       backdrop,
+      units,
       fitBounds,
     },
     ref,
@@ -3535,6 +3539,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               vbPerPx={1 / meet}
               snapColor={snapColor}
               hudFields={hudFields ?? null}
+              units={units}
             />
           )}
         </LiveMeet>
@@ -3698,6 +3703,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               vbPerPx={1 / scale}
               pxPerMeter={scale * PX_PER_M}
               store={rulerCursor}
+              units={units}
             />
           </svg>
         );

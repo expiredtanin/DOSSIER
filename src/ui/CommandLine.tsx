@@ -8,6 +8,8 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
+import { NON_LENGTH_FIELDS } from "../commands/parseInput";
+import { MODEL_UNITS, dyToDisplay, lengthToDisplay, type DisplayUnits } from "../tools/displayUnits";
 
 export interface CommandLineOption {
   id: string;
@@ -56,6 +58,8 @@ export interface CommandLineProps {
   onTextChange?: (text: string) => void;
   /** Autocomplete-Kandidaten für ein Präfix (nur im Ruhezustand sinnvoll). */
   suggest: (prefix: string) => string[];
+  /** Anzeige-Einheiten der Längenfelder (Layout-Blatt: Papier-mm, [93]); Standard Meter. */
+  units?: DisplayUnits;
 }
 
 export interface CommandLineHandle {
@@ -77,7 +81,7 @@ export interface CommandLineHandle {
 
 export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
   function CommandLine(
-    { active, promptKey, options, fields, onSubmit, onOption, onCycleField, onCancel, suggest, onTextChange },
+    { active, promptKey, options, fields, onSubmit, onOption, onCycleField, onCancel, suggest, onTextChange, units = MODEL_UNITS },
     ref,
   ) {
     const [text, setTextRaw] = useState("");
@@ -202,12 +206,13 @@ export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
               // Winkelfeld in Grad, sonst Längen in Metern. Gelockte Werte fest
               // (mehr Nachkommastellen), live (maus-folgende) Werte gerundet.
               const isAngle = f.id === "angle";
-              const digits = isAngle ? (f.locked ? 1 : 0) : f.locked ? 3 : 2;
-              const unit = isAngle ? "°" : " m";
-              const text =
-                f.value == null
-                  ? "—"
-                  : `${Number(f.value.toFixed(digits)).toString()}${unit}`;
+              const isLength = !NON_LENGTH_FIELDS.has(f.id);
+              const paper = isLength && units.perMeter !== 1;
+              const digits = isAngle ? (f.locked ? 1 : 0) : paper ? (f.locked ? 2 : 1) : f.locked ? 3 : 2;
+              const unit = isAngle ? "°" : ` ${units.suffix}`;
+              const shown =
+                f.value == null ? null : f.id === "height" ? dyToDisplay(units, f.value) : isLength ? lengthToDisplay(units, f.value) : f.value;
+              const text = shown == null ? "—" : `${Number(shown.toFixed(digits)).toString()}${unit}`;
               return (
                 <span
                   key={f.id}

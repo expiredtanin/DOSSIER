@@ -95,6 +95,9 @@ pub struct Ctx<'a> {
     /// Schrifthöhe neuer Texte (Modell-Meter, `textHeight` im Kontext): im Grundriss die Vorgabe
     /// [`DEFAULT_TEXT_HEIGHT`], auf einem Layout-Blatt (Papier 1:1) die Papierhöhe.
     pub text_height: f64,
+    /// Faktor der fixen Symbolgrössen (Kote, Detailverweis, Punktmarke): 1 im Modell, auf einem
+    /// Layout-Blatt (`sheet: true` im Kontext) `plan::drawings::SHEET_SYMBOL_FACTOR`.
+    pub symbol: f64,
 }
 
 /// Schrifthöhe neuer Texte im Grundriss (Modell-Meter, 2.5 mm bei 1:100).
@@ -104,10 +107,18 @@ fn text_height_of(c: &Value) -> f64 {
     opt_n(c, "textHeight").filter(|h| *h > 0.0 && h.is_finite()).unwrap_or(DEFAULT_TEXT_HEIGHT)
 }
 
+fn symbol_of(c: &Value) -> f64 {
+    if c.get("sheet").and_then(Value::as_bool) == Some(true) {
+        crate::plan::drawings::SHEET_SYMBOL_FACTOR
+    } else {
+        1.0
+    }
+}
+
 pub(crate) fn ctx_of(v: &Value) -> Ctx<'_> {
     let c = v.get("ctx").unwrap_or(&Value::Null);
     let fh = opt_n(c, "floorHeight").filter(|h| *h > 0.0);
-    Ctx { level: s_of(c, "level"), floor_height: fh, cat: s_of(c, "cat"), wall_type: s_of(c, "wallType"), text_height: text_height_of(c) }
+    Ctx { level: s_of(c, "level"), floor_height: fh, cat: s_of(c, "cat"), wall_type: s_of(c, "wallType"), text_height: text_height_of(c), symbol: symbol_of(c) }
 }
 
 // ── Werte bauen ──────────────────────────────────────────────────────────────
@@ -923,21 +934,22 @@ pub struct Req {
     cat: String,
     wall_type: String,
     text_height: f64,
+    symbol: f64,
 }
 
 impl Req {
     pub fn new(v: Value) -> Req {
         let c = ctx_of(&v);
         let (level, floor_height, cat, wall_type) = (c.level.to_string(), c.floor_height, c.cat.to_string(), c.wall_type.to_string());
-        let text_height = c.text_height;
-        Req { cmd: s_of(&v, "cmd").to_string(), v, level, floor_height, cat, wall_type, text_height }
+        let (text_height, symbol) = (c.text_height, c.symbol);
+        Req { cmd: s_of(&v, "cmd").to_string(), v, level, floor_height, cat, wall_type, text_height, symbol }
     }
 }
 
 /// Wie [`preview`] mit gelesener Anfrage (Mausschritt: dieselbe Anfrage, neue Punkte).
 pub fn preview_req(root: &Map<String, Value>, req: &Req, pts: &[f64]) -> Preview {
     let v = &req.v;
-    let ctx = Ctx { level: &req.level, floor_height: req.floor_height, cat: &req.cat, wall_type: &req.wall_type, text_height: req.text_height };
+    let ctx = Ctx { level: &req.level, floor_height: req.floor_height, cat: &req.cat, wall_type: &req.wall_type, text_height: req.text_height, symbol: req.symbol };
     let pts = flat_pts(pts);
     let mut p = Preview { ok: true, ..Default::default() };
     let out = &mut p.shapes;

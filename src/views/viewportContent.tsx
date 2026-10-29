@@ -33,6 +33,7 @@ import type { SectionOutput } from "../core";
 import { generateElevationPlan } from "../core";
 import { crossKindOverlayAllowed, planUnderlayPrimitives } from "../core";
 import { levelMarkerPrimitives, levelMarksEnabled } from "../core";
+import { unitsForLevel } from "../tools/displayUnits";
 import { setSheetOwnerOutlines, setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { selectionHighlightLines } from "../core";
@@ -952,6 +953,7 @@ function LevelPlanView({
         selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}
         backdrop={backdrop}
+        units={unitsForLevel(level)}
         fitBounds={fitBounds}
       />
       {/* NACH PlanView gerendert (nicht als box-shadow auf .pane), damit der

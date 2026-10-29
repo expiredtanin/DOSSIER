@@ -14,9 +14,10 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
 
+import { lengthFromDisplay, lengthToDisplay, unitsForLevel, xToDisplay, yFromDisplay, yToDisplay } from "../tools/displayUnits";
 import { solidProps } from "../engine/truckSolid";
 import type { SolidProps, SolidSpec } from "../engine/truckSolid";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 // Anzeige-Fallbacks für die Öffnungs-Linien-Übersteuerung (LineStyleRow) —
 // dieselben Werte wie POCHE_STROKE/SYMBOL_HAIRLINE_MM im Grundriss (Kern: plan/style.rs)
 // (reine UI-Default-Anzeige, kein Re-Export nötig).
@@ -106,6 +107,11 @@ export function ObjectInfoPanel() {
   // Wert (wie bei Breite/Höhe oben).
   const px = bbox.minX + anchor.fx * width;
   const py = bbox.minY + anchor.fy * height;
+  // Auf einem Layout-Blatt zeigt und liest das Panel Papier-mm mit y nach unten ([93]).
+  const u = unitsForLevel(host.project.drawingLevels.find((z) => z.id === sel.floorId));
+  const len = (m: number): number => lengthToDisplay(u, m);
+  const unlen = (v: number): number => lengthFromDisplay(u, v);
+  const lenProps = { unit: u.suffix, digits: u.digits };
 
   // Rohe Drawing2D-Geometrie der Selektion (nur bei kind==="drawing2d") — für
   // die Linien-Länge/Kreis-Radius-Felder unten; die Selection-Sicht trägt
@@ -199,15 +205,17 @@ export function ObjectInfoPanel() {
             <div className="objinfo-xyzcol">
               <DimensionField
                 label={t("objinfo.x")}
-                value={px}
+                value={xToDisplay(u, px)}
                 min={-Infinity}
-                onCommit={(nx) => host.onMoveSelectionBy(nx - px, 0)}
+                {...lenProps}
+                onCommit={(nx) => host.onMoveSelectionBy(unlen(nx) - px, 0)}
               />
               <DimensionField
                 label={t("objinfo.y")}
-                value={py}
+                value={yToDisplay(u, py)}
                 min={-Infinity}
-                onCommit={(ny) => host.onMoveSelectionBy(0, ny - py)}
+                {...lenProps}
+                onCommit={(ny) => host.onMoveSelectionBy(0, yFromDisplay(u, ny) - py)}
               />
               {/* Z ehrlich: Das Modell ist 2D pro Ebene; es gibt keine Z am Element.
                   Daher „—" statt einer gefakten 0, mit kurzem Hinweis im Titel. */}
@@ -229,13 +237,15 @@ export function ObjectInfoPanel() {
           <div className="objinfo-section-label">{t("objinfo.dimensions")}</div>
           <DimensionField
             label={t("objinfo.width")}
-            value={width}
-            onCommit={(w) => commitSize(w, height)}
+            value={len(width)}
+            {...lenProps}
+            onCommit={(w) => commitSize(unlen(w), height)}
           />
           <DimensionField
             label={t("objinfo.height")}
-            value={height}
-            onCommit={(h) => commitSize(width, h)}
+            value={len(height)}
+            {...lenProps}
+            onCommit={(h) => commitSize(width, unlen(h))}
           />
           {/* Formspezifische Zusatzfelder (nur wenn das Modell den Wert direkt
               hergibt — andere Formen bleiben ohne Zusatzfeld, s. Dateikopf). */}
@@ -243,8 +253,9 @@ export function ObjectInfoPanel() {
             <>
               <DimensionField
                 label={t("objinfo.drawing.length")}
-                value={Math.hypot(width, height)}
-                onCommit={(v) => host.onSetDrawingLineLength(v)}
+                value={len(Math.hypot(width, height))}
+                {...lenProps}
+                onCommit={(v) => host.onSetDrawingLineLength(unlen(v))}
               />
               <DimensionField
                 label={t("objinfo.drawing.angle")}
@@ -264,16 +275,18 @@ export function ObjectInfoPanel() {
           {drawingShape === "circle" && (
             <DimensionField
               label={t("objinfo.drawing.radius")}
-              value={width / 2}
-              onCommit={(v) => host.onSetDrawingCircleRadius(v)}
+              value={len(width / 2)}
+              {...lenProps}
+              onCommit={(v) => host.onSetDrawingCircleRadius(unlen(v))}
             />
           )}
           {drawingShape === "arc" && rawDrawing?.geom.shape === "arc" && (
             <>
               <DimensionField
                 label={t("objinfo.drawing.radius")}
-                value={rawDrawing.geom.r}
-                onCommit={(v) => host.onSetDrawingArcRadius(v)}
+                value={len(rawDrawing.geom.r)}
+                {...lenProps}
+                onCommit={(v) => host.onSetDrawingArcRadius(unlen(v))}
               />
               <DimensionField
                 label={t("objinfo.drawing.startAngle")}
@@ -2036,6 +2049,7 @@ function DimensionField({
   min = 0,
   unit = "m",
   step = 0.01,
+  digits = 3,
 }: {
   label: string;
   value: number;
@@ -2043,16 +2057,24 @@ function DimensionField({
   min?: number;
   unit?: string;
   step?: number;
+  /** Nachkommastellen der Anzeige (Papier-mm: 1). */
+  digits?: number;
 }) {
   // Entwurf als String, damit Zwischenzustände (leer, „1.") tippbar sind.
   // `null` = kein aktiver Entwurf → zeige den Host-Wert.
   const [draft, setDraft] = useState<string | null>(null);
+  // Enter committet und nimmt danach den Fokus — das `blur` im selben Handler sieht noch den alten
+  // Entwurf (State noch nicht neu gerendert) und committete ein zweites Mal (X/Y: doppelte Verschiebung).
+  const pending = useRef<string | null>(null);
+  pending.current = draft;
 
-  const shown = draft ?? value.toFixed(3);
+  const shown = draft ?? (Object.is(Number(value.toFixed(digits)), -0) ? 0 : value).toFixed(digits);
 
   function commit() {
-    if (draft === null) return;
-    const v = Number(draft);
+    const d = pending.current;
+    if (d === null) return;
+    pending.current = null;
+    const v = Number(d);
     setDraft(null);
     if (isFinite(v) && v >= min) onCommit(v);
   }

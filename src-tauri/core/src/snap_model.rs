@@ -437,6 +437,13 @@ const DRAWING_FIELDS: [&str; 1] = ["drawings2d"];
 /// So viele Teile je Art und abgelegte Geschosse bleiben (älteste fallen weg).
 const KEEP: usize = 6;
 
+/// Ist `level` die Blatt-Ebene eines Layouts (`DrawingLevel.layoutId`)?
+fn is_sheet_level(root: &serde_json::Map<String, serde_json::Value>, level: &str) -> bool {
+    root.get("drawingLevels").and_then(|v| v.as_array()).is_some_and(|ls| {
+        ls.iter().any(|l| l.get("id").and_then(|v| v.as_str()) == Some(level) && l.get("layoutId").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()))
+    })
+}
+
 /// Gesammelte Teile und abgelegte Geschosse (Nummer ≥ 1) über die Aufrufe hinweg.
 #[derive(Default)]
 pub struct SnapCache {
@@ -479,8 +486,22 @@ impl SnapCache {
             level: level.to_owned(),
             codes: codes_key.clone(),
         };
-        let (mk, dk) = (key(&MODEL_FIELDS, doc.revs()), key(&DRAWING_FIELDS, doc.revs()));
-        let model = cached(&mut self.model, mk, || doc.project().map(|p| collect_model(p, level, &set)).unwrap_or_default());
+        let (mut mk, dk) = (key(&MODEL_FIELDS, doc.revs()), key(&DRAWING_FIELDS, doc.revs()));
+        // Blatt-Ebene eines Layouts ([93]): statt des (leeren) Modells die Inhalte der Viewports, auf das
+        // Blatt abgebildet und geklippt (`sheet_viewports.rs`). Sie hängen am ganzen Projekt: neu
+        // gesammelt bei jedem neuen Stand des Dokuments.
+        let sheet = is_sheet_level(doc.root(), level);
+        if sheet {
+            mk.revs = vec![u64::MAX, doc.revs().max_except(&[])];
+        }
+        let model = cached(&mut self.model, mk, || {
+            doc.project()
+                .map(|p| match crate::sheet_viewports::layout_of_level(p, level).filter(|_| sheet) {
+                    Some(l) => SnapPart { segs: SnapSet::new(crate::sheet_viewports::viewport_snap_segments(p, l)), ..SnapPart::default() },
+                    None => collect_model(p, level, &set),
+                })
+                .unwrap_or_default()
+        });
         let drawings = cached(&mut self.drawings, dk, || doc.project().map(|p| collect_drawings(p, level, &set)).unwrap_or_default());
         if let Some(e) = self.held.iter().find(|e| Rc::ptr_eq(&e.1.model, &model) && Rc::ptr_eq(&e.1.drawings, &drawings) && e.1.near_mode == near_mode) {
             return e.0;

@@ -8,6 +8,7 @@
 // Rein gesteuert (controlled): alle Werte kommen aus App (Modell + View-State),
 // keine eigene Logik. Bezeichner englisch, UI-Text/Kommentare deutsch.
 
+import { MODEL_UNITS, fmtDisplay, xToDisplay, yToDisplay, type DisplayUnits } from "../tools/displayUnits";
 import { useCursor } from "../state/cursorStore";
 import { useEffect, useRef, useState } from "react";
 import type { SnapSettings } from "../tools/types";
@@ -21,6 +22,8 @@ export interface StatusBarProps {
   showCursor: boolean;
   /** Einheit aus dem Projekt (vorerst fix „m"). */
   unit: string;
+  /** Anzeige-Einheiten der Cursor-Koordinaten (Layout-Blatt: Papier-mm, y nach unten, [93]). */
+  units?: DisplayUnits;
   /** Referenzlinien (Wandachsen) an/aus — sitzt jetzt in der Statusleiste. */
   referenceLines: boolean;
   /** Referenzlinien umschalten. */
@@ -358,6 +361,7 @@ export function StatusBar({
   hint,
   showCursor,
   unit,
+  units = MODEL_UNITS,
   referenceLines,
   onReferenceLines,
   referenceLinesEnabled,
@@ -372,7 +376,9 @@ export function StatusBar({
   const liveCursor = useCursor();
   const cursor = showCursor ? liveCursor : null;
   const coords = cursor
-    ? `${fmt(cursor.x)}, ${fmt(cursor.y)}`
+    ? units === MODEL_UNITS
+      ? `${fmt(cursor.x)}, ${fmt(cursor.y)}`
+      : `${fmtDisplay(units, xToDisplay(units, cursor.x))}, ${fmtDisplay(units, yToDisplay(units, cursor.y))}`
     : "—";
 
   return (
@@ -409,7 +415,7 @@ export function StatusBar({
         <Sep />
         <Field label={t("status.xy")} value={coords} />
         <Sep />
-        <Field label={t("status.unit")} value={unit} />
+        <Field label={t("status.unit")} value={units === MODEL_UNITS ? unit : units.suffix} />
         <Sep />
         <Field label={t("status.floor")} value={activeFloor} />
         <Sep />

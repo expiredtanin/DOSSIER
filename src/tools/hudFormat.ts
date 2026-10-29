@@ -6,6 +6,8 @@
 // Abhängigkeit — reine Werte rein, Segmente raus.
 
 import type { ToolDraft } from "./types";
+import { NON_LENGTH_FIELDS } from "../commands/parseInput";
+import { MODEL_UNITS, dyToDisplay, fmtDisplay, lengthToDisplay, type DisplayUnits } from "./displayUnits";
 
 /** Ein Segment des Cursor-HUDs (z. B. "L: 3.000m"), + Tab-Zyklus-Zustand. */
 export interface HudSeg {
@@ -31,7 +33,11 @@ export interface HudFieldsState {
 export function hudSegments(
   hud: NonNullable<ToolDraft["hud"]>,
   hudFields: HudFieldsState | null,
+  /** Anzeige-Einheiten der Längen (Layout-Blatt: Papier-mm, Δy nach unten, [93]). */
+  units: DisplayUnits = MODEL_UNITS,
 ): HudSeg[] {
+  const len = (m: number): string => fmtDisplay(units, lengthToDisplay(units, m));
+  const u = units.suffix;
   const liveFor = (id: string): number | null =>
     id === "length"
       ? (hud.length ?? null)
@@ -48,22 +54,21 @@ export function hudSegments(
   if (hudFields && hudFields.fields.length > 0) {
     for (const f of hudFields.fields) {
       const label = labelFor(f.id);
-      const unit = f.id === "angle" ? "°" : "m";
+      const isLength = !NON_LENGTH_FIELDS.has(f.id);
+      const unit = f.id === "angle" ? "°" : isLength ? u : "";
       const typedHere = f.active && hudFields.typed.trim() !== "";
-      const value = typedHere
-        ? hudFields.typed
-        : f.value != null
-          ? f.value.toFixed(3)
-          : (liveFor(f.id)?.toFixed(3) ?? "—");
+      const fmt = (v: number): string => (f.id === "height" ? fmtDisplay(units, dyToDisplay(units, v)) : isLength ? len(v) : v.toFixed(3));
+      const live = liveFor(f.id);
+      const value = typedHere ? hudFields.typed : f.value != null ? fmt(f.value) : live != null ? fmt(live) : "—";
       segs.push({ text: `${label}: ${value}${unit}`, active: f.active, locked: f.locked });
     }
     return segs;
   }
   if (hud.dx != null && hud.dy != null) {
-    segs.push({ text: `Δx: ${hud.dx.toFixed(3)}m`, active: false, locked: false });
-    segs.push({ text: `Δy: ${hud.dy.toFixed(3)}m`, active: false, locked: false });
+    segs.push({ text: `Δx: ${len(hud.dx)}${u}`, active: false, locked: false });
+    segs.push({ text: `Δy: ${fmtDisplay(units, dyToDisplay(units, hud.dy))}${u}`, active: false, locked: false });
   } else if (hud.length != null && hud.angleDeg != null) {
-    segs.push({ text: `L: ${hud.length.toFixed(3)}m`, active: false, locked: false });
+    segs.push({ text: `L: ${len(hud.length)}${u}`, active: false, locked: false });
     segs.push({ text: `W: ${hud.angleDeg.toFixed(3)}°`, active: false, locked: false });
   } else if (hud.text) {
     segs.push({ text: hud.text, active: false, locked: false });
