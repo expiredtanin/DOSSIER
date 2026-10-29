@@ -245,10 +245,6 @@ export interface RModel3d {
 export const WALL_RGB: RRgb = [0.82, 0.8, 0.76];
 /** Etwas hellerer, kühlerer Ton für Deckenplatten (heben sich von Wänden ab). */
 export const SLAB_RGB: RRgb = [0.86, 0.86, 0.88];
-/** Gedämpftes Lehm-/Geländegrün-grau (three.js mats.terrain = 0xa9b0a2). */
-export const TERRAIN_RGB: RRgb = [169 / 255, 176 / 255, 162 / 255];
-/** Neutrales Hellgrau für importierte Meshes (three.js mats.mesh = 0x9fa6ae). */
-export const IMPORTED_RGB: RRgb = [159 / 255, 166 / 255, 174 / 255];
 /** Fallback-Farbe für 2D-Zeichnungen ohne color/lineStyle/Kategorie (wie drawing2DColor in Viewport3D.tsx, "#888888"). */
 export const DRAWING_LINE_FALLBACK_RGB: RRgb = [0x88 / 255, 0x88 / 255, 0x88 / 255];
 

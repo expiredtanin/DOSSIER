@@ -16,7 +16,6 @@ mod room_area;
 mod room_boundary;
 mod polygon_holes;
 mod drawing2d_3d;
-mod wall_mesh_cut;
 mod plan_buf;
 mod project_format;
 mod gpu_compile;

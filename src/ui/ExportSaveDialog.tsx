@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { Dropdown } from "./Dropdown";
-import type { IfcExportOptions, IfcSchema } from "../export/ifcClassification";
+import type { IfcExportOptions, IfcSchema } from "../export/exportIfc";
 
 /** Direkt-herunterladbare Exportformate (mit Datei-Endung). */
 export type ExportSaveFormat = "csv" | "ifc" | "obj" | "stl" | "glb" | "step";

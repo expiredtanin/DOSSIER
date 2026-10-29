@@ -65,6 +65,12 @@ pub mod snap;
 pub mod plan_svg;
 pub mod plan_dxf;
 pub mod plan_print_svg;
+pub mod export_flat;
+pub mod geo_rebase;
+pub mod ifc_quantities;
+pub mod ifc_stairs;
+pub mod ifc_data;
+pub mod mesh_data;
 
 #[cfg(feature = "web")]
 mod web;

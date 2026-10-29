@@ -466,10 +466,15 @@ fn build_gltf(s: &Scene, uri_for_buffer: bool) -> (String, Vec<u8>) {
     }
 
     let mut j = String::from(
-        "{\"asset\":{\"version\":\"2.0\",\"generator\":\"Dossier\",\"extras\":{\"units\":\"m\",\"upAxis\":\"Y\",\"note\":\"Modell (x,y,z-hoch) -> glTF (x,z,-y); Norden = -Z\"}},\"scene\":0,\"scenes\":[{\"nodes\":[",
+        "{\"asset\":{\"version\":\"2.0\",\"generator\":\"Dossier\",\"extras\":{\"units\":\"m\",\"upAxis\":\"Y\",\"note\":\"Modell (x,y,z-hoch) -> glTF (x,z,-y); Norden = -Z\"}},\"scene\":0,\"scenes\":[{",
     );
-    j.push_str(&scene_nodes.iter().map(usize::to_string).collect::<Vec<_>>().join(","));
-    j.push_str("]}]");
+    // Leere Szene ohne `nodes` (glTF verlangt ≥ 1 Eintrag, wenn die Liste da ist; Validator EMPTY_ENTITY).
+    if !scene_nodes.is_empty() {
+        j.push_str("\"nodes\":[");
+        j.push_str(&scene_nodes.iter().map(usize::to_string).collect::<Vec<_>>().join(","));
+        j.push(']');
+    }
+    j.push_str("}]");
     if n_nodes > 0 {
         j.push_str(",\"nodes\":[");
         j.push_str(&nodes);
@@ -722,7 +727,7 @@ mod tests {
         let glb = export_glb(&n, "").unwrap();
         let (json, bl) = json_of_glb(&glb);
         assert_eq!(bl, 0);
-        assert!(json.trim_end().ends_with("\"scene\":0,\"scenes\":[{\"nodes\":[]}]}"));
+        assert!(json.trim_end().ends_with("\"scene\":0,\"scenes\":[{}]}"), "{json}");
         assert_eq!(export_obj(&n, "").unwrap().lines().count(), 5);
         assert_eq!(export_stl(&n, "").unwrap(), "solid dossier\nendsolid dossier\n");
     }

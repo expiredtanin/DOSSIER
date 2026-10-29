@@ -36,6 +36,8 @@ export type QueryName =
   | "pickGeometry"
   | "model3dParts"
   | "planDomains"
+  | "ifcExportData"
+  | "meshExportData"
   | "modelJson";
 
 export class ProjectDocument {

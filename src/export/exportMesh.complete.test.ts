@@ -1,13 +1,23 @@
 // Mesh-Export vollständig ([C11], 28.10.): Dächer, Treppen, Stützen, Kontext-Meshes, ein Knoten je Öffnung,
-// rechtshändige Achsen in OBJ/STL/glTF, Dreieckszahl wie die 3D-Ableitung, Khronos-Validator.
+// rechtshändige Achsen in OBJ/STL/glTF, Dreieckszahl wie die 3D-Ableitung, Khronos-Validator. Die Wicklung
+// (`orient_outward`) prüfen die Rust-Tests in `export_flat.rs`, hier das Volumen je Bauteil in der Datei.
 import { describe, it, expect } from "vitest";
 import "../engine/fileioWasm.setup";
 import validator from "gltf-validator";
 import { exportGlb, exportGltf, exportObj, exportStl } from "./exportMesh";
-import { orientOutward } from "./meshOrient";
 import { sampleProject } from "../model/sampleProject";
 import type { Column, ImportedMesh, Project, TerrainMesh } from "../model/types";
-import { emitColumns, emitOpeningMeshes, emitRoofs, emitStairMeshes, emitStairRailings, emitStairs } from "./model3dParts";
+import { ProjectDocument, type QueryName } from "../core/document";
+
+/** 3D-Ableitung des Kerns (`queries.rs`) auf einem eigenen Dokument — Vergleichswert für die Dreieckszahl. */
+function derive<T>(project: Project, name: QueryName, args: number[] = []): T {
+  const doc = new ProjectDocument(project);
+  try {
+    return doc.query<T>(name, args);
+  } finally {
+    doc.close();
+  }
+}
 
 interface Gltf {
   nodes: { name: string; mesh?: number; children?: number[]; extras?: { type: string; id: string } }[];
@@ -85,31 +95,6 @@ function objVolumes(obj: string): Map<string, number> {
   return out;
 }
 
-describe("orientOutward", () => {
-  it("dreht einen innen gewickelten Würfel nach aussen und gleicht gemischte Wicklung an", () => {
-    const pos = CUBE_POS;
-    const mixed = CUBE_IDX.slice();
-    // ein Dreieck umdrehen ⇒ widersprüchliche Wicklung
-    [mixed[1], mixed[2]] = [mixed[2], mixed[1]];
-    const inward: number[] = [];
-    for (let i = 0; i < CUBE_IDX.length; i += 3) inward.push(CUBE_IDX[i], CUBE_IDX[i + 2], CUBE_IDX[i + 1]);
-    const vol = (idx: number[]) => {
-      let v = 0;
-      for (let i = 0; i < idx.length; i += 3) {
-        const [a, b, c] = [idx[i] * 3, idx[i + 1] * 3, idx[i + 2] * 3];
-        v +=
-          pos[a] * (pos[b + 1] * pos[c + 2] - pos[b + 2] * pos[c + 1]) -
-          pos[a + 1] * (pos[b] * pos[c + 2] - pos[b + 2] * pos[c]) +
-          pos[a + 2] * (pos[b] * pos[c + 1] - pos[b + 1] * pos[c]);
-      }
-      return v / 6;
-    };
-    expect(vol(CUBE_IDX)).toBeCloseTo(8, 9);
-    expect(vol(orientOutward(pos, inward))).toBeCloseTo(8, 9);
-    expect(vol(orientOutward(pos, mixed))).toBeCloseTo(8, 9);
-  });
-});
-
 describe("Mesh-Export vollständig", () => {
   const project = withContext(sampleProject);
 
@@ -182,14 +167,15 @@ describe("Mesh-Export vollständig", () => {
   it("Dreieckszahl je Bauteilart = Summe der 3D-Ableitungen (Dach, Treppe, Stütze, Öffnungsteile)", () => {
     const g = glbJson(exportGlb(project));
     const tris = (type: string) => g.nodes.filter((n) => n.extras?.type === type).reduce((s, n) => s + nodeTris(g, n), 0);
-    const meshTris = (ms: { indices: number[] }[]) => ms.reduce((s, m) => s + m.indices.length / 3, 0);
-    expect(tris("roof")).toBe(meshTris(emitRoofs(project)));
-    expect(tris("column")).toBe(meshTris(emitColumns(project)));
-    expect(tris("window") + tris("door")).toBe(meshTris(emitOpeningMeshes(project, "mittel")));
-    const stairMeshes = meshTris(emitStairMeshes(project)) + meshTris(emitStairRailings(project));
+    const meshTris = (name: QueryName, args: number[] = []) => derive<{ indices: number[] }[]>(project, name, args).reduce((s, m) => s + m.indices.length / 3, 0);
+    expect(tris("roof")).toBe(meshTris("roofMeshes"));
+    expect(tris("column")).toBe(meshTris("columnMeshes"));
+    expect(tris("window") + tris("door")).toBe(meshTris("openingMeshes", [1]));
+    const stairMeshes = meshTris("stairMeshes") + meshTris("stairRailings");
     // Stufen-Prismen: jede Stufe wird zu einem Prisma (2 Kappen + Mantel) — mindestens die Mesh-Dreiecke.
-    expect(emitStairs(project).length).toBeGreaterThan(0);
-    expect(tris("stair")).toBeGreaterThanOrEqual(stairMeshes + emitStairs(project).length * 12);
+    const steps = derive<unknown[]>(project, "stairSlabs", [0]).length;
+    expect(steps).toBeGreaterThan(0);
+    expect(tris("stair")).toBeGreaterThanOrEqual(stairMeshes + steps * 12);
     // OBJ und glTF enthalten dieselben Dreiecke
     const faces = exportObj(project).split("\n").filter((l) => l.startsWith("f ")).length;
     const all = g.nodes.reduce((s, n) => s + nodeTris(g, n), 0);
@@ -207,6 +193,14 @@ describe("Mesh-Export vollständig", () => {
     const r1 = await validator.validateBytes(exportGlb(project), { maxIssues: 50 });
     expect(r1.issues.messages.filter((m) => m.severity === 0)).toEqual([]);
     const r2 = await validator.validateString(exportGltf(project), { maxIssues: 50 });
+    expect(r2.issues.numErrors).toBe(0);
+  });
+
+  it("leeres Projekt: gültige Szene ohne Knoten (kein leeres `nodes`, Validator EMPTY_ENTITY)", async () => {
+    const empty: Project = { ...sampleProject, walls: [], openings: [], ceilings: [], roofs: [], stairs: [], rooms: [], columns: [], context: [] };
+    const r1 = await validator.validateBytes(exportGlb(empty), { maxIssues: 50 });
+    expect(r1.issues.messages.filter((m) => m.severity === 0)).toEqual([]);
+    const r2 = await validator.validateString(exportGltf(empty), { maxIssues: 50 });
     expect(r2.issues.numErrors).toBe(0);
   });
 });

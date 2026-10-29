@@ -78,7 +78,11 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
       outline: shiftAll(c.outline, dx, dy),
       openings: c.openings?.map((h) => shiftAll(h, dx, dy)),
     })),
-    roofs: project.roofs?.map((r) => ({ ...r, outline: shiftAll(r.outline, dx, dy) })),
+    roofs: project.roofs?.map((r) => ({
+      ...r,
+      outline: shiftAll(r.outline, dx, dy),
+      ...(r.holes ? { holes: r.holes.map((h) => shiftAll(h, dx, dy)) } : {}),
+    })),
     stairs: project.stairs?.map((s) => ({
       ...s,
       start: shift(s.start, dx, dy),

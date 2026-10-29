@@ -38,11 +38,16 @@ describe("translateProject", () => {
     expect(oc.openings![0]).toEqual(src.openings![0].map((p) => ({ x: p.x + DX, y: p.y + DY })));
   });
 
-  it("verschiebt Dach-Umriss", () => {
-    const out = translateProject(sampleProject, DX, DY);
-    const r = sampleProject.roofs![0];
+  it("verschiebt Dach-Umriss inkl. Innenhöfe", () => {
+    const hole = [{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 2, y: 2 }, { x: 1, y: 2 }];
+    const withHole: Project = { ...sampleProject, roofs: [{ ...sampleProject.roofs![0], holes: [hole] }] };
+    const out = translateProject(withHole, DX, DY);
+    const r = withHole.roofs![0];
     const or_ = out.roofs!.find((x) => x.id === r.id)!;
     expect(or_.outline).toEqual(r.outline.map((p) => ({ x: p.x + DX, y: p.y + DY })));
+    expect(or_.holes![0]).toEqual(hole.map((p) => ({ x: p.x + DX, y: p.y + DY })));
+    // Ohne Höfe kein neues Feld.
+    expect("holes" in translateProject(sampleProject, DX, DY).roofs![0]).toBe(false);
   });
 
   it("Treppe: start/center verschieben sich, dir (Richtungsvektor) bleibt unverändert", () => {
