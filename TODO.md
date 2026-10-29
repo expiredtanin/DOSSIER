@@ -1343,6 +1343,39 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Papier-mm; feste Modellgrössen anderer Befehle (Kote, Detailverweis, Punktmarke) nicht ans Papier angepasst; kein
   Fang auf Viewport-Inhalt; Layout-DXF (`--layout`) ohne Blatt-Zeichnung; PDF-Export der Blatt-Zeichnung nicht
   angesehen; nicht in der Tauri-App/macOS geprüft. · M
+- ◐ **[94] Standard-Baustoffe und Ansichtsschraffur (SIA 400).** (29.10., Wunsch Maintainer) Kern `standards.rs`:
+  33 Baustoffe/Bekleidungen (Beton, Stahlbeton, Backstein, Kalksandstein, Porenbeton, Holz massiv, Brettsperrholz,
+  Holzwerkstoff, Mineral-/Steinwolle, EPS, XPS, Holzfaser, Trittschall, Gipskarton, Innen-/Aussenputz, Zementestrich,
+  Glas, Stahl, Aluminium, Naturstein, Erdreich, Kies/Sauberkeitsschicht, Luftschicht, Lattung vertikal/horizontal,
+  Boden-Deckel, Schindeln, Trapezblech, Faserzement, Tonziegel) je mit SIA-400-Schnittschraffur, Füll- und
+  Ansichtsfarbe, Ansichtsschraffur, 3D-Textur (gebündelt aus `manifest.json`, sonst nur ambientCG-Kennung →
+  „Textur laden" im Bauteil-Dialog) und Kennwerten (neue Felder `Component.lambda`/`density`/`fireClass` (VKF
+  RF1–RF4)/`elevationColor`/`surfacePattern`/`standardId`); Aufbauten Aussenwand verputzt mit Aussendämmung,
+  Innenwand Backstein, Holzständerwand hinterlüftet, Stahlbetondecke mit Trittschall + Estrich, Steildach Holz
+  gedämmt. Ansichtsschraffur (`surface_pattern.rs`): Linien/Lattung, Boden-Deckel, Läuferverband, Schindeln,
+  Trapezblech, Naturstein polygonal, Plattenteilung; Ausrichtung am Element (Wand: ab Wandanfang/UK; Dach:
+  traufparallel/Falllinie ab Traufe), je Element drehbar/versetzbar (`Wall`/`Roof.surfacePatternAngle`/`Offset`,
+  Attribute-Panel); Massstab: unter 0.7 mm Papierabstand jede 2./4./8. Linie, darunter weg (Ansicht bekommt den
+  Massstab als 3. Argument). Ansicht: sichtbare Wandseite (rechts der Achse = äusserste Schicht) mit Ansichtsfarbe
+  + Muster, Dachflächen; verdeckt wie die Kanten, Maler-Tiefe der eigenen Fläche. Grundriss: Dachaufsicht je
+  Dachfläche (`roof-surface-pattern`). Geprüft: Rust-Tests (Muster, Ausdünnung, Ansicht, Dachaufsicht,
+  Bibliothek), CLI-Ansicht 1:50/1:500 und Druck-SVG Grundriss/Schnitt angesehen (Linux-Container). Offen: 3D-
+  Linien (render3d) nicht umgesetzt; Decken-Untersicht/Bodenbeläge ohne Muster; Schnittschraffur-Strichmuster
+  (Beton unbewehrt, Estrich) im Schnitt-Druck durchgezogen; ambientCG-Kennungen CorrugatedSteel005, WoodSiding008,
+  Chipboard001 ohne Netz nicht geprüft; nicht in der Tauri-App/macOS geprüft. · M
+- ◐ **[95] Standards in neuen Projekten, „Standards laden".** (29.10.) Neu/Neu aus Musterhaus bringen die
+  Standards mit (`withStandards`, Kern-Abfrage `standardsMergeOps`); Ressourcen-Manager-Kopf: „Standards laden"
+  ergänzt nur Fehlendes (gleiche id oder gleicher Name = vorhanden, Verweise neuer Aufbauten zeigen dann auf das
+  vorhandene Bauteil), ein Undo-Schritt. Offen: Rückmeldung (Anzahl) nach dem Laden. · S
+- ◐ **[96] Linientypen nach SIA 400 / ISO 128.** (29.10.) Standard-Linienstile: Volllinie, Strichlinie fein/grob,
+  Punktlinie, Strichpunktlinie (Achse), Strich-Zweipunktlinie, Grundstücksgrenze, Baulinie/Bauteilgrenze,
+  Bruchlinie (Zickzack), Schraffurlinien. Fehler behoben: render2d warf Punkte (AN = 0) aus dem Muster und
+  verschob AN/AUS (Strichpunkt wurde Strichlinie) — Szenen- und Chunk-Pfad (`gpu_compile.rs`) behalten sie, der
+  Shader zeichnet sie rund; Bögen mit Punkten/> 4 Einträgen über den Linien-Strichpfad; Strichmuster skalieren auf
+  dem Bildschirm mit dem Massstab (`dash_scale` = N/100 in Linien-, Strich- und Bogen-Uniforms, vorher fest 1:100);
+  SVG-Export setzt runde Kappen bei Punkten. DXF/DWG: LTYPE je Linienstil (Name, Punkt = 0) wie bisher. Geprüft:
+  Rust-Tests (render2d, Kern), naga-Validierung der Shader, Druck-SVG (PDF-Pfad) mit allen Typen angesehen.
+  Offen: Bildschirm (WebGPU) nicht angesehen; CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
 - ○ **[80] PDF mit Ebenen.** · M
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.

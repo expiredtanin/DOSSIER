@@ -52,6 +52,7 @@ import {
   SectionLineSection,
   DetailRefSection,
 } from "./ObjectInfoPanel";
+import { SurfacePatternPlacement } from "./SurfacePatternPlacement";
 
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
  *  „custom" ist abgeleitet aus „ist ein expliziter Wert gesetzt?", nicht
@@ -784,6 +785,7 @@ export function AttributesPanel() {
       {sel.wall && <WallSection wall={sel.wall} host={host} />}
       {sel.ceiling && <CeilingSection ceiling={sel.ceiling} host={host} />}
       {sel.roof && <RoofSection roof={sel.roof} host={host} />}
+      {(sel.wall || sel.roof) && <SurfacePatternPlacement kind={sel.wall ? "wall" : "roof"} id={sel.id} host={host} />}
       {sel.opening && <OpeningSection opening={sel.opening} host={host} />}
       {sel.stair && <StairSection stair={sel.stair} host={host} />}
       {sel.room && <RoomSection room={sel.room} roomId={sel.id} host={host} />}

@@ -133,6 +133,7 @@ struct ArcGlobals {
     viewport_px   : vec2<f32>,
     px_per_screen : f32,
     stroke_scale  : f32,
+    dash_scale    : f32,
 };
 @group(0) @binding(0) var<uniform> g : ArcGlobals;
 
@@ -232,7 +233,9 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
         var progress = da;
         if (sweep < 0.0) { progress = -da; }
         progress = max(progress, 0.0);
-        let s_model = progress * r_m;
+        // Muster mit dem Massstab mitskalieren ([96]): statt das Muster zu strecken, die Lauflaenge stauchen.
+        let ds = select(1.0, g.dash_scale, g.dash_scale > 0.0);
+        let s_model = progress * r_m / ds;
         let m = s_model - dash_total * floor(s_model / dash_total);
 
         var cyc = array<f32, 4>(in.dash.x, in.dash.y, in.dash.z, in.dash.w);
@@ -249,7 +252,7 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
             acc = acc + seg;
         }
         let px_per_m = PX_PER_M_2D * pps;
-        let edge_px = edge * px_per_m;
+        let edge_px = edge * ds * px_per_m;
         // Signierter Abstand: innen "an" positiv, innen "aus" negativ.
         let sdist = select(-edge_px, edge_px, cur_on);
         cov_dash = smoothstep(-0.5, 0.5, sdist);
@@ -285,6 +288,7 @@ struct Globals {
     viewport_px  : vec2<f32>,
     stroke_px    : f32,
     stroke_scale : f32,
+    dash_scale   : f32,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 
@@ -335,9 +339,11 @@ fn vs_main(
     let s0 = run.x * pps;
     out.sy = vec2<f32>(s0 + c.x * seg_px + ext, c.y * hw);
     out.seg = vec4<f32>(s0, s0 + seg_px, run.y * pps, hw);
-    out.pat = vec2<f32>(run.z * pps, run.w);
-    out.d0 = d0 * pps;
-    out.d1 = d1 * pps;
+    // Muster bei 1:100 kompiliert, auf dem Papier in mm: mit dem Massstab mitskalieren ([96]).
+    let ds = select(1.0, globals.dash_scale, globals.dash_scale > 0.0);
+    out.pat = vec2<f32>(run.z * pps * ds, run.w);
+    out.d0 = d0 * pps * ds;
+    out.d1 = d1 * pps * ds;
     return out;
 }
 

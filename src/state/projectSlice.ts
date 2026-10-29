@@ -57,6 +57,7 @@ import {
   PEN_FALLBACK_COLOR,
   PEN_FALLBACK_WEIGHT,
 } from "../model/penSets";
+import { standardsMergeOps } from "../model/standards";
 import { reorderByIds } from "../model/reorder";
 import { transformMutation } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
@@ -182,6 +183,8 @@ export interface ProjectSlice {
   patchPenSetWeight: (setId: string, penId: string, weight: number) => void;
   /** Ersetzt `pens`/legt einen neuen Satz mit der 255er-CAD-Standardpalette an (s. `model/penSets.ts`). */
   seedStandardPenSet: () => void;
+  /** Ergänzt die fehlenden SIA-400-Standards (Baustoffe, Schraffuren, Linientypen, Aufbauten; [94]–[96]). */
+  loadStandards: () => void;
 
   // ── Benutzerdefinierte Farbpaletten (s. model/types.ts::CustomPalette) ────
   addCustomPalette: () => void;
@@ -1022,6 +1025,7 @@ export function createProjectSlice(
       }),
 
     seedStandardPenSet: () => applyChange((p) => seedStandardPenSetOps(p)),
+    loadStandards: () => applyChange((p) => standardsMergeOps(p)),
 
     addCustomPalette: () =>
       applyChange(

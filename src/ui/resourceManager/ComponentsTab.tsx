@@ -21,6 +21,7 @@ import { HatchSwatch } from "../hatchPreview";
 import { t } from "../../i18n";
 import { activePenSet, resolvePenColor } from "../../model/penSets";
 import { PenColorField } from "../PenColorField";
+import { ComponentStandardFields } from "./ComponentStandardFields";
 import {
   DeleteButton,
   FieldRow,
@@ -45,6 +46,7 @@ function MaterialCell({
   onClear: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [fetching, setFetching] = useState(false);
   const label = materialLabel(material);
   return (
     <>
@@ -61,6 +63,24 @@ function MaterialCell({
         )}
         <span className="res-material-name">{label}</span>
       </button>
+      {material?.libraryId && !material.color && (
+        // Standard-Bauteil mit ambientCG-Kennung ohne gebündelte Karten ([94]): bei Bedarf laden.
+        <button
+          className="res-add"
+          disabled={fetching}
+          title={t("material.fetchAmbient.hint")}
+          onClick={() => {
+            const id = material.libraryId!;
+            setFetching(true);
+            fetchMaterialMaps(id, "1K", material.sizeM ?? DEFAULT_TILE_SIZE_M)
+              .then(({ material: m }) => onAssign(m))
+              .catch((e) => console.error("[ambientcg] download failed:", e))
+              .finally(() => setFetching(false));
+          }}
+        >
+          {t("material.fetchAmbient")}
+        </button>
+      )}
       {open && (
         <MaterialPicker
           material={material}
@@ -87,6 +107,7 @@ function materialLabel(m: ComponentMaterial | undefined): string {
   if (m.libraryId) {
     const asset = MATERIAL_LIBRARY.find((a) => a.id === m.libraryId);
     if (asset) return asset.name;
+    if (!m.color) return `ambientCG ${m.libraryId}`;
   }
   return t("material.uploaded");
 }
@@ -739,6 +760,7 @@ function ComponentDetail({
             onClear={() => onPatch({ material: undefined })}
           />
         </FieldRow>
+        <ComponentStandardFields component={component} onPatch={onPatch} />
       </div>
     </div>
   );

@@ -335,6 +335,19 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             let bridges = (!merged.bridge_edges.is_empty()).then(|| merged.bridge_edges.iter().map(|&k| k as f64).collect());
             out.push(polygon(ring, "none", "none", 0.0, view_hatch, greyed, bridges, Pick::Roof(&roof.id)));
         }
+        // Ansichtsschraffur ([94]) der Eindeckung je Dachfläche (traufparallel/Falllinie, verkürzt projiziert).
+        if let Some(comp) = layers.first().filter(|l| !l.component_id.is_empty()).and_then(|l| p.component(&l.component_id)) {
+            if let Some((pat, spec)) = comp.surface_pattern.as_ref().and_then(|sp| Some((sp, crate::surface_pattern::spec_of(sp, roof.surface_pattern_angle.unwrap_or(0.0))?))) {
+                let off = roof.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
+                let w = pat.weight_mm.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(0.1);
+                let ink = pat.color.as_deref().or(comp.foreground.as_deref()).filter(|c| !c.trim().is_empty()).unwrap_or("#3a3f47");
+                for plane in &geo.planes {
+                    for (a, b) in crate::surface_pattern::segments_3d(plane, &spec, off, c.a.scale) {
+                        out.push(line(pv([a[0], a[1]]), pv([b[0], b[1]]), "roof-surface-pattern", w, None, ink, greyed));
+                    }
+                }
+            }
+        }
         for ring in std::iter::once(&geo.eaves).chain(geo.eaves_holes.iter()) {
             let pts: Vec<Vec2> = ring.iter().map(|q| pv(*q)).collect();
             let n = pts.len();
@@ -802,6 +815,25 @@ mod tests {
         assert_eq!(rooms[1]["extraLines"][0]["text"], "17.01 m²");
         assert_eq!(rooms[1]["extraLines"][1]["text"], "HNF · Hauptnutzfläche");
         assert!(r.bounds.is_some());
+    }
+
+    #[test]
+    fn dachaufsicht_mit_ansichtsschraffur() {
+        let mut p = sample();
+        p.roofs.as_mut().unwrap()[0].roof_type_id = Some("roof-warm".into());
+        let roof = p.roofs.as_ref().unwrap()[0].clone();
+        let outer = p.roof_layers(&roof)[0].component_id.clone();
+        let count = |p: &Project, scale: f64| {
+            let t = serde_json::json!({ "floor": "og", "show": ["31"], "grey": [], "scale": scale }).to_string();
+            let r = plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            serde_json::to_string(&r.roofs).unwrap().matches("roof-surface-pattern").count()
+        };
+        assert_eq!(count(&p, 100.0), 0);
+        let c = p.components.iter_mut().find(|c| c.id == outer).unwrap();
+        c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Lines, direction: Some(SurfacePatternDirection::Horizontal), spacing: 0.34, ..Default::default() });
+        let n = count(&p, 100.0);
+        assert!(n > 10, "{n}");
+        assert_eq!(count(&p, 5000.0), 0);
     }
 
     #[test]

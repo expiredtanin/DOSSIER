@@ -403,6 +403,88 @@ pub struct ComponentMaterial {
     pub extra: Extra,
 }
 
+/// Art einer Ansichtsschraffur ([94]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum SurfacePatternKind {
+    /// Parallele Linien im Abstand `spacing` (Lattung, Schalung, Stehfalz).
+    #[default]
+    #[serde(rename = "lines")]
+    Lines,
+    /// Boden-Deckel-Schalung: Deckleisten der Breite `width` im Abstand `spacing`.
+    #[serde(rename = "boardBatten")]
+    BoardBatten,
+    /// Läuferverband: Lagen der Höhe `height`, Stossfugen alle `spacing`, je Lage um ½ versetzt.
+    #[serde(rename = "runningBond")]
+    RunningBond,
+    /// Schindeln: Lagen der Höhe `height`, Stossfugen alle `spacing`, je Lage um ⅓ versetzt.
+    #[serde(rename = "shingles")]
+    Shingles,
+    /// Trapezblech: je Rippe (Abstand `spacing`, Obergurt `width`) vier Linien.
+    #[serde(rename = "trapezoid")]
+    Trapezoid,
+    /// Naturstein polygonal: unregelmässiges Netz um die Steingrösse `spacing`.
+    #[serde(rename = "polygonal")]
+    Polygonal,
+    /// Plattenteilung: Raster `spacing` × `height` ohne Versatz.
+    #[serde(rename = "grid")]
+    Grid,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Richtung der Musterlinien gegenüber dem Element ([94]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum SurfacePatternDirection {
+    /// Hauptlinien senkrecht (quer zur Wandachse; bei Dächern in Falllinie).
+    #[default]
+    #[serde(rename = "vertical")]
+    Vertical,
+    /// Hauptlinien waagrecht (entlang der Wandachse; bei Dächern traufparallel).
+    #[serde(rename = "horizontal")]
+    Horizontal,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Ansichtsschraffur eines Bauteils ([94]): Muster auf sichtbaren Flächen, im Kern zu Linien gerechnet
+/// (`surface_pattern.rs`). Masse in Metern am Bau; Ursprung an der Elementkante (Wandanfang/UK, Traufe).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct SurfacePattern {
+    #[ts(inline)]
+    pub kind: SurfacePatternKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, inline)]
+    pub direction: Option<SurfacePatternDirection>,
+    /// Hauptabstand (m): Linien-/Rippenabstand, Steinlänge, Plattenbreite.
+    pub spacing: f64,
+    /// Lagen-/Plattenhöhe (m; Läuferverband, Schindeln, Raster). Fehlt sie, gilt `spacing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub height: Option<f64>,
+    /// Breite (m) der Deckleiste bzw. des Trapez-Obergurts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub width: Option<f64>,
+    /// Grunddrehung (Grad) zusätzlich zur Richtung.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub angle: Option<f64>,
+    /// Strichstärke (Papier-mm); Default 0.1.
+    #[serde(rename = "weightMm", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub weight_mm: Option<f64>,
+    /// Linienfarbe; Default Vordergrund des Bauteils bzw. Dunkelgrau.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Ein Bauteil-Material (Component Manager) — vereint Plan-Schnittdarstellung
 /// (Schraffur) und 3D-Erscheinung. Ersetzt das frühere `Material`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
@@ -475,6 +557,32 @@ pub struct Component {
     /// Verschneidungs-Rang: höher läuft am Stoß durch (Backbone).
     #[serde(rename = "joinPriority")]
     pub join_priority: f64,
+    /// Wärmeleitfähigkeit λ in W/(m·K) (Bemessungswert, z. B. SIA 381/1, Herstellerangabe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lambda: Option<f64>,
+    /// Rohdichte in kg/m³.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub density: Option<f64>,
+    /// Brandverhalten nach VKF (Brandschutzrichtlinie 13-15): "RF1" (kein Brandbeitrag), "RF2"
+    /// (geringer), "RF3" (zulässiger), "RF4" (unzulässig). Freitext, damit auch Zusätze („RF1 (cr)") gehen.
+    #[serde(rename = "fireClass", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fire_class: Option<String>,
+    /// Flächenfarbe in der Ansicht (Fassade/Dachaufsicht). Fehlt sie, gilt die bisherige Farbe.
+    #[serde(rename = "elevationColor", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub elevation_color: Option<String>,
+    /// Ansichtsschraffur ([94]): Oberflächenmuster, das auf sichtbaren Flächen dieses Bauteils gezeichnet
+    /// wird (Ansicht, Dachaufsicht im Grundriss). Masse in Metern am Bau, Ausrichtung am Element.
+    #[serde(rename = "surfacePattern", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub surface_pattern: Option<SurfacePattern>,
+    /// Herkunft: Kennung des Standard-Eintrags ([94], „Standards laden"), damit erneutes Laden nichts verdoppelt.
+    #[serde(rename = "standardId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub standard_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -1661,6 +1769,16 @@ pub struct Wall {
     #[serde(rename = "sliceTermination", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub slice_termination: Option<SliceTermination>,
+    /// Ansichtsschraffur ([94]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
+    /// Ausrichtung am Element (Default 0).
+    #[serde(rename = "surfacePatternAngle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub surface_pattern_angle: Option<f64>,
+    /// Ansichtsschraffur ([94]): Versatz (m) des Musterursprungs (x entlang, y quer/aufwärts) gegenüber
+    /// der Elementkante.
+    #[serde(rename = "surfacePatternOffset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub surface_pattern_offset: Option<Vec2>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -1946,6 +2064,16 @@ pub struct Roof {
     #[serde(rename = "colorPenId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub color_pen_id: Option<String>,
+    /// Ansichtsschraffur ([94]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
+    /// Ausrichtung am Element (Default 0).
+    #[serde(rename = "surfacePatternAngle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub surface_pattern_angle: Option<f64>,
+    /// Ansichtsschraffur ([94]): Versatz (m) des Musterursprungs (x entlang, y quer/aufwärts) gegenüber
+    /// der Elementkante.
+    #[serde(rename = "surfacePatternOffset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub surface_pattern_offset: Option<Vec2>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

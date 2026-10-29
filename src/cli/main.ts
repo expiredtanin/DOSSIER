@@ -574,7 +574,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         // Wie die App: verdeckte Kanten nach der Ebene, geschnittene Fenster/Türen.
         plan = generateSectionPlan(o, false, { visibleCodes: allCodes, hiddenLines: lvl.hiddenLines, openings: true });
       } else {
-        plan = generateElevationPlan(project, lvl);
+        plan = generateElevationPlan(project, lvl, { scaleDenominator: scale });
         if (!plan) fail("keine gültige Ansichtslinie");
       }
       if (args.flags.get("format") === "json") {

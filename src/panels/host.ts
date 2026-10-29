@@ -394,6 +394,8 @@ export interface PanelHostValue {
    * "both" = heutiges Verhalten, "below"/"above" = die Wand endet an der Decke.
    */
   onSetWallSliceTermination: (termination: SliceTermination) => void;
+  /** Ansichtsschraffur ([94]) an der gewählten Wand bzw. am gewählten Dach drehen/versetzen. */
+  onSetSurfacePatternPlacement?: (patch: { surfacePatternAngle?: number; surfacePatternOffset?: { x: number; y: number } }) => void;
   /** Weist der Wand einen Wandtyp-Preset (mehrschichtiger Aufbau) zu. */
   onSetWallType: (wallTypeId: string) => void;
   /** Setzt die Gesamtdicke einer einschichtigen Wand (Meter). */

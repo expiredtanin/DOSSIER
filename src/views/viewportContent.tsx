@@ -664,7 +664,7 @@ function useCrossKindOverlay(
       let prims: Primitive[];
       if (l.kind === "elevation") {
         prims =
-          generateElevationPlan(project, l, { mono, visibleCodes, categoryDisplay })?.primitives ?? [];
+          generateElevationPlan(project, l, { mono, visibleCodes, categoryDisplay, scaleDenominator })?.primitives ?? [];
       } else if (l.kind === "section") {
         const sOut = sectionOutputs[l.id];
         prims = sOut
@@ -1140,9 +1140,9 @@ function SectionPlanView({
   const elevationPlan = useMemo(
     () =>
       isElevation
-        ? generateElevationPlan(inputs.project, inputs.level, { mono, visibleCodes, categoryDisplay })
+        ? generateElevationPlan(inputs.project, inputs.level, { mono, visibleCodes, categoryDisplay, scaleDenominator })
         : null,
-    [isElevation, inputs, mono, visibleCodes, categoryDisplay],
+    [isElevation, inputs, mono, visibleCodes, categoryDisplay, scaleDenominator],
   );
 
   const sectionPlan = useMemo(

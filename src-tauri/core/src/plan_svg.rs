@@ -103,7 +103,9 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                 if d.is_empty() {
                     return Some(String::new());
                 }
-                Some(format!(" stroke-dasharray=\"{}\"", d.iter().map(|v| num(v * mm_to_m)).collect::<Vec<_>>().join(" ")))
+                // Punkte (AN = 0) brauchen runde Kappen, sonst sind sie unsichtbar ([96]).
+                let cap = if d.iter().any(|v| *v == 0.0) { " stroke-linecap=\"round\"" } else { "" };
+                Some(format!(" stroke-dasharray=\"{}\"{cap}", d.iter().map(|v| num(v * mm_to_m)).collect::<Vec<_>>().join(" ")))
             };
             match rec.tag {
                 T_POLYGON => {
