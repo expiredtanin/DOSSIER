@@ -14,7 +14,6 @@ import { extrudedSolidSpec } from "../core";
 import type { SolidSpec } from "../engine/truckSolid";
 import {
   ceilingThickness,
-  flattenCategories,
   getCeilingType,
   getComponent,
   getWallType,
@@ -31,7 +30,6 @@ import type {
   Drawing2D,
   Drawing2DGeom,
   ExtrudedSolid,
-  LayerCategory,
   Opening,
   Project,
   Roof,
@@ -45,6 +43,7 @@ import type {
   Wall,
   WallReferenceLine,
 } from "../model/types";
+import { findCategory } from "../model/layers";
 import type { DetailLevel } from "../model/viewTypes";
 import { localToLv95 } from "../io/lv95";
 import { resolveForeground, resolveBackground, resolveHatchId, resolveStrokeWeight } from "../core";
@@ -545,14 +544,6 @@ export interface ContextObjectInfo {
 const WALL_FALLBACK_MM = 0.18;
 const DRAW_FALLBACK_COLOR = "#d0d0d0";
 const WALL_FALLBACK_COLOR = "#2b3039";
-
-/** Kategorie (per Code) im Baum suchen — flach, da Codes baumweit eindeutig sind. */
-function findCategory(
-  layers: LayerCategory[],
-  code: string,
-): LayerCategory | undefined {
-  return flattenCategories(layers).find((c) => c.code === code);
-}
 
 /** Ob eine 2D-Form geschlossen ist (Füllung/Schraffur sinnvoll). */
 function isClosedGeom(g: Drawing2DGeom): boolean {

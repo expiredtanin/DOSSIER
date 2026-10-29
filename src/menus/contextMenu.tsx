@@ -12,7 +12,7 @@ import { canSetVertexType, vertexTypeOf, type PolylineVertexType } from "../core
 import { nearestPolylineTarget, toleranceFor } from "../core";
 import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
-import { findCategory } from "../state/projectSlice";
+import { findCategory } from "../model/layers";
 import { MenuIcon } from "../ui/ContextMenu";
 import type { ContextMenuItem } from "../ui/ContextMenu";
 

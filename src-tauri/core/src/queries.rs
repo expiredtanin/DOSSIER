@@ -52,6 +52,11 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             let (expanded, group_ids) = crate::groups::expand_to_groups(p, &a.raw, &a.path);
             json(&serde_json::json!({"expanded": expanded, "groupIds": group_ids}))
         }
+        // Ebenen ([K4] S3, `layers.rs`): Kategorie-Codes der Auswahl (`text` = JSON der ids je Art).
+        ("selectionCategoryCodes", _) => {
+            let sel: crate::layers::SelectionMembers = serde_json::from_str(text).map_err(|e| format!("selectionCategoryCodes: {e}"))?;
+            json(&crate::layers::selection_category_codes(p, &sel))
+        }
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }
 }

@@ -379,7 +379,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Import (DXF-Layer/Linienstile in `runImport`, Bilder einfügen in `useImportHandling`, IFC-Bauteile in `App.tsx` `runIfcImport`),
     das Ressourcen-Fenster (Fremd-Synchronisation) und das CLI (`cli/main.ts`: ganze Dateien, Projekt → Projekt-Hilfen); dazu der
     Rückfall für Befehle ohne mitgeführte Ops in `App.tsx` (gibt es keine mehr; der Typ `commit: (p) => Project` erlaubt es noch).
-    Offen: Ebenen-/Gruppen-Logik (`groupActions.ts`) nach Rust; Undo-Verlauf als Liste in der UI [84]; `diffToOps` entfällt erst, wenn auch
+    Offen: Undo-Verlauf als Liste in der UI [84]; `diffToOps` entfällt erst, wenn auch
     Laden/Import/CLI Ops liefern.
     **Vierte Etappe (29.10.): `diffToOps` gelöscht.** Laden, Import und CLI liefern Ops bzw. laden über den Kern:
     Öffnen/Vorlage/Wiederherstellen = Store `openProjectFile(text)` (Kern liest, migriert, lädt direkt ins Dokument,
@@ -402,9 +402,23 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     `expandToGroups`); in `state/groupActions.ts` bleiben die Op-Bauer (`groupSelection`, `ungroup`,
     `activeGroupOps`), das Dimmen der Plan-Primitive und `mergeMembership` für Auswahl-Mengen. Gleichheit (einmalig):
     400 Zufallsprojekte × 10 Abfragen (Zyklen, doppelte Gruppen-ids, fehlende Gruppen, Pfade mit unbekannter
-    Gruppe), 16000 Vergleiche gleich der alten TS-Fassung. Ebenen-Logik (Kategorien-Baum, `recomputeFloorElevations`)
-    noch TS.
-    Offen: Ebenen-Logik nach Rust; Undo-Verlauf als Liste in der UI [84].
+    Gruppe), 16000 Vergleiche gleich der alten TS-Fassung.
+    **Ebenen- und Geschoss-Logik im Kern (29.10.):** `layers.rs` (Kategorien-Baum: abflachen, suchen, sichtbare Codes,
+    umschalten, Sichtbarkeit nach Codes, ändern, Unterkategorie, Duplikat, löschen, `nextFreeCode`, Isolieren/Ausblenden der
+    Auswahl, Import-Kategorien `planImportCategories`, Kategorie-Codes der Auswahl über die Abfrage `selectionCategoryCodes`),
+    `levels.rs` (`recomputeFloorElevations`); Rechnung auf `serde_json::Value` (verlustfrei), zustandslose Bindungen
+    `layers_call`/`levels_recompute_elevations` (`web/layers.rs`), TS-Fassade `model/layers.ts` (abgeflachter Baum je Baum-Array
+    gemerkt: `getLayerCategory` je Bauteil bleibt billig). `model/types.ts` re-exportiert die alten Namen; die TS-Rechnung in
+    `types.ts`, `projectSlice.ts` (Baum-Helfer), `selectionLayers.ts`, `selectionInfo.ts`, `dxfToDrawings.ts`,
+    `contextCategories.ts` ist gelöscht. `sampleProject` trägt die gestapelten Höhen ausgeschrieben (das Modul wird vor dem
+    Laden des Kerns ausgewertet; Test dagegen). Gleichheit (einmalig, Test gelöscht): 4000 Zufallsbäume (doppelte Codes,
+    nichtnumerische/negative Codes, fehlende Kinder) × 14 Rechnungen, 3000 Geschoss-Listen, 1500 Import-Pläne,
+    600 Auswahl-Abfragen gleich der alten TS-Fassung. Einzige Abweichung, gewollt: Das Duplikat einer Unterkategorie
+    (`insertAfterCode`) ging in TS verloren (die Ebene mit dem Ziel wurde übersprungen), jetzt steht es hinter dem Original.
+    Offen: vertikale Ausdehnungen (`model/wall.ts`: `wallVerticalExtent` …, Kern hat `model/helpers.rs` schon — Aufrufer in
+    `toSection`/`voids`/`geometry/opening`/Viewport fallen mit dem Plan-Port bzw. brauchen eine Abfrage je Bauteil),
+    Stift-Referenzen im Kategorien-Baum beim Löschen eines Stifts (`projectSlice`, Stiftsatz-Logik), Layout-/Ordnerbäume
+    (`layoutModel.ts`), Parametrik-Regeln (`parametricWalls.ts`), Stiftsätze (`penSets.ts`); Undo-Verlauf als Liste in der UI [84].
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

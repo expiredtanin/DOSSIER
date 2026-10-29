@@ -17,6 +17,7 @@
 
 import type { Contour, ContourSet, Drawing2D, Drawing2DGeom, ImportedText, LayerCategory } from "../model/types";
 import type { ImportContour } from "./dxfParser";
+import { planImportLayers } from "../model/layers";
 
 /** Wie DXF-Layer auf Kategorien abgebildet werden. */
 export type CategoryMode = "active" | "byLayer";
@@ -158,47 +159,10 @@ export function planImportCategories(
   layerColors: Readonly<Record<string, string>> = {},
   layerLineWeights: Readonly<Record<string, number>> = {},
 ): { parent: LayerCategory | null; codeByLayer: Map<string, string> } {
-  const used = new Set<string>();
-  const byName = new Map<string, string>();
-  const walk = (list: readonly LayerCategory[]) => {
-    for (const c of list) {
-      used.add(c.code);
-      byName.set(c.name.toLowerCase(), c.code);
-      if (c.children) walk(c.children);
-    }
-  };
-  walk(existing);
-  let next = Math.max(0, ...[...used].map((c) => parseInt(c, 10)).filter((n) => !isNaN(n))) + 1;
-  const allocate = (): string => {
-    while (used.has(String(next).padStart(2, "0"))) next++;
-    const code = String(next++).padStart(2, "0");
-    used.add(code);
-    return code;
-  };
-
-  const codeByLayer = new Map<string, string>();
-  const children: LayerCategory[] = [];
-  for (const name of layerNames) {
-    const known = byName.get(name.toLowerCase());
-    if (known) {
-      codeByLayer.set(name, known);
-      continue;
-    }
-    const code = allocate();
-    byName.set(name.toLowerCase(), code); // Dubletten mit anderer Schreibweise teilen sich die Kategorie
-    codeByLayer.set(name, code);
-    children.push({
-      code,
-      name,
-      color: layerColors[name] ?? "#707078",
-      lw: layerLineWeights[name] ?? 0.18,
-      visible: true,
-      locked: false,
-    });
-  }
+  const { children, parentCode, codeByLayer } = planImportLayers(layerNames, existing, layerColors, layerLineWeights);
   if (children.length === 0) return { parent: null, codeByLayer };
   const parent: LayerCategory = {
-    code: allocate(),
+    code: parentCode,
     name: parentName,
     color: "#707078",
     lw: 0.18,

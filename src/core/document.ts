@@ -45,6 +45,7 @@ export type QueryName =
   | "meshExportData"
   | "groupMembership"
   | "containingGroup"
+  | "selectionCategoryCodes"
   | "expandToGroups"
   | "drawingUnderlay"
   | "drawingLines"

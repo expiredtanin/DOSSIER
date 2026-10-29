@@ -72,6 +72,8 @@ pub mod ifc_stairs;
 pub mod ifc_data;
 pub mod mesh_data;
 pub mod groups;
+pub mod layers;
+pub mod levels;
 
 #[cfg(feature = "web")]
 mod web;

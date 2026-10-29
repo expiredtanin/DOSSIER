@@ -25,9 +25,17 @@ import {
 import { withVertexType, type PolylineVertexType } from "../core";
 import { sampleProject } from "../model/sampleProject";
 import {
+  addChildByCode,
+  applyVisibilityByCode,
+  findCategory,
   flattenCategories,
+  insertAfterCode,
+  nextFreeCode,
+  patchCategoryByCode,
   recomputeFloorElevations,
-} from "../model/types";
+  removeCategoryByCode,
+  toggleCategoryByCode,
+} from "../model/layers";
 import type {
   BuiltinPaletteBank,
   ColorPen,
@@ -741,7 +749,7 @@ export function createProjectSlice(
           get().notify(t("alert.layerInUse", { code: src.code, name: src.name }), "warning");
           return [];
         }
-        return fieldOps(p, "layers", removeByCode(p.layers, code));
+        return fieldOps(p, "layers", removeCategoryByCode(p.layers, code));
       }),
 
     assignWallCategory: (wallId, code) =>
@@ -2309,133 +2317,4 @@ function moveEdge(
     return patchItem(project, "walls", wallId, (w) => ({ ...w, start: mv(w.start), end: mv(w.end) }));
   }
   return [];
-}
-
-// ── Immutable Tree-Helfer (verschoben aus App.tsx, 1:1) ──────────────────────
-
-/** Schaltet die Sichtbarkeit der Kategorie mit `code` im Baum um (immutabel). */
-export function toggleCategoryByCode(
-  cats: LayerCategory[],
-  code: string,
-): LayerCategory[] {
-  return cats.map((c) => {
-    if (c.code === code) return { ...c, visible: !c.visible };
-    if (c.children)
-      return { ...c, children: toggleCategoryByCode(c.children, code) };
-    return c;
-  });
-}
-
-/**
- * Setzt im Baum die `visible`-Flags gemäß `codes` (Code → sichtbar?, immutabel).
- * Kategorien, deren Code nicht in der Map steht, bleiben unverändert; Codes der
- * Map, die es nicht mehr gibt, werden stillschweigend ignoriert.
- */
-export function applyVisibilityByCode(
-  cats: LayerCategory[],
-  codes: Record<string, boolean>,
-): LayerCategory[] {
-  return cats.map((c) => {
-    const next = c.code in codes ? { ...c, visible: codes[c.code] } : c;
-    if (next.children)
-      return { ...next, children: applyVisibilityByCode(next.children, codes) };
-    return next;
-  });
-}
-
-/** Nächster freier zweistelliger Code über den ganzen Baum hinweg. */
-export function nextFreeCode(cats: LayerCategory[]): string {
-  const used = new Set<string>();
-  const walk = (list: LayerCategory[]) => {
-    for (const c of list) {
-      used.add(c.code);
-      if (c.children) walk(c.children);
-    }
-  };
-  walk(cats);
-  const nums = [...used].map((c) => parseInt(c, 10)).filter((n) => !isNaN(n));
-  const start = nums.length ? Math.max(...nums) : 0;
-  for (let i = start + 1; i < 1000; i++) {
-    const c = String(i).padStart(2, "0");
-    if (!used.has(c)) return c;
-  }
-  return String(Date.now());
-}
-
-/** Findet eine Kategorie (per Code) im Baum oder `undefined`. */
-export function findCategory(
-  cats: LayerCategory[],
-  code: string,
-): LayerCategory | undefined {
-  for (const c of cats) {
-    if (c.code === code) return c;
-    if (c.children) {
-      const hit = findCategory(c.children, code);
-      if (hit) return hit;
-    }
-  }
-  return undefined;
-}
-
-/** Patcht die Kategorie mit `code` im Baum (immutabel). */
-function patchCategoryByCode(
-  cats: LayerCategory[],
-  code: string,
-  patch: Partial<LayerCategory>,
-): LayerCategory[] {
-  return cats.map((c) => {
-    if (c.code === code) return { ...c, ...patch };
-    if (c.children)
-      return { ...c, children: patchCategoryByCode(c.children, code, patch) };
-    return c;
-  });
-}
-
-/** Hängt `child` als letztes Kind an die Kategorie mit `parentCode` (immutabel). */
-function addChildByCode(
-  cats: LayerCategory[],
-  parentCode: string,
-  child: LayerCategory,
-): LayerCategory[] {
-  return cats.map((c) => {
-    if (c.code === parentCode)
-      return { ...c, children: [...(c.children ?? []), child] };
-    if (c.children)
-      return { ...c, children: addChildByCode(c.children, parentCode, child) };
-    return c;
-  });
-}
-
-/** Fügt `clone` direkt nach der Kategorie mit `code` auf derselben Ebene ein. */
-function insertAfterCode(
-  cats: LayerCategory[],
-  code: string,
-  clone: LayerCategory,
-): LayerCategory[] {
-  const out: LayerCategory[] = [];
-  for (const c of cats) {
-    const next =
-      c.children && !c.children.some((k) => k.code === code)
-        ? { ...c, children: insertAfterCode(c.children, code, clone) }
-        : c;
-    out.push(next);
-    if (c.code === code) out.push(clone);
-  }
-  return out;
-}
-
-/** Entfernt die Kategorie mit `code` (samt Kindern) aus dem Baum (immutabel). */
-function removeByCode(cats: LayerCategory[], code: string): LayerCategory[] {
-  const out: LayerCategory[] = [];
-  for (const c of cats) {
-    if (c.code === code) continue;
-    out.push(c.children ? { ...c, children: removeByCode(c.children, code) } : c);
-  }
-  return out;
-}
-
-/** Beschriftung einer Kategorie für die Status-Leiste: „Code Name". */
-export function categoryLabel(cats: LayerCategory[], code: string): string {
-  const c = findCategory(cats, code);
-  return c ? `${c.code} ${c.name}` : code;
 }

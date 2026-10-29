@@ -24,7 +24,6 @@ import type {
   DrawingLevel,
   HatchStyle,
   Layer,
-  LayerCategory,
   LineStyle,
   Opening,
   Project,
@@ -255,58 +254,9 @@ export const getFloor = (project: Project, id: string): DrawingLevel => {
   return g;
 };
 
-/**
- * Stapelt baseElevation der Geschosse in Dokumentreihenfolge: Das erste
- * Geschoss beginnt bei 0, jedes weitere bei baseElevation + floorHeight des
- * vorigen Geschosses. Nicht-Geschoss-Ebenen behalten baseElevation undefined.
- * Liefert eine neue Liste (mit neuen Geschoss-Objekten); die Eingabe bleibt
- * unverändert.
- */
-export const recomputeFloorElevations = (
-  levels: DrawingLevel[],
-): DrawingLevel[] => {
-  let nextBase = 0;
-  return levels.map((level) => {
-    if (level.kind !== "floor") {
-      return { ...level, baseElevation: undefined };
-    }
-    const baseElevation = nextBase;
-    nextBase = baseElevation + (level.floorHeight ?? 0);
-    return { ...level, baseElevation };
-  });
-};
-
-/** Flacht den Kategorie-Baum (Tiefensuche) in eine Liste ab. */
-export const flattenCategories = (cats: LayerCategory[]): LayerCategory[] => {
-  const out: LayerCategory[] = [];
-  const walk = (list: LayerCategory[]) => {
-    for (const c of list) {
-      out.push(c);
-      if (c.children) walk(c.children);
-    }
-  };
-  walk(cats);
-  return out;
-};
-
-/**
- * Liefert die LayerCategory zu einem Kategorie-Code (Baum durchsucht), oder
- * `undefined`, falls der Code auf keine Ebene verweist (verwaister
- * `categoryCode`). Nicht-werfend, damit die Attribut-Resolve-Kette
- * (`plan/generatePlan.ts`) robust auf einen fehlenden Ebenen-Wert zurückfallen
- * kann (→ Bauteil-Fallback).
- */
-export const getLayerCategory = (project: Project, code: string): LayerCategory | undefined =>
-  flattenCategories(project.layers).find((c) => c.code === code);
-
-/** Menge aller Codes sichtbarer Kategorien (Baum berücksichtigt). */
-export const collectVisibleCodes = (layers: LayerCategory[]): Set<string> => {
-  const codes = new Set<string>();
-  for (const c of flattenCategories(layers)) {
-    if (c.visible) codes.add(c.code);
-  }
-  return codes;
-};
+// Ebenen-Baum und Geschoss-Stapelung liegen im Rust-Kern ([K4] S3, `model/layers.ts`); Re-Export, damit
+// die Aufrufer gleich bleiben.
+export { collectVisibleCodes, flattenCategories, getLayerCategory, recomputeFloorElevations } from "./layers";
 
 /** Gesamtdicke eines Wandtyps = Summe der Schichtdicken. */
 export const wallTypeThickness = (wt: WallType): number =>
