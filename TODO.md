@@ -481,6 +481,14 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   betroffen:** macOS-Metal-Pfad (GPU-Kompilierung mit `origin`-Verschiebung), lokal gezeichnete Projekte,
   Standort-Import (Modell-(0,0) = Suchzentrum). Lösung: Szene relativ zu einem Ursprung kodieren
   (`renderSceneBin.ts`/`scene_bin.rs` + Kamera-Versatz in f64 in render2d, wie `GpuGeometry.origin`). · S–M
+  29.10. **Auch das SVG-Overlay** (Griffe, Fang-Marken, Hervorhebung, Texte) rechnet in viewBox-Einheiten
+  = Modell-m · 90 und der Browser in f32: bei LV95 (≈ 2.3e8) liegen Griffe beim Hineinzoomen neben der
+  Ecke (gemessen Chromium: 1 px bei 1:500, ~6 px bei Ausschnitt 11 m, ~80 px bei 1.5 m); Treffer und
+  GPU-Linien rechnen in f64 und stimmen. `<circle>`/`<rect>`/`x`/`y` (CSS-Längen, ±33.5 Mio. geklemmt)
+  fehlen dort ganz — Griffe/Fang sind auf Vieleck umgestellt ([C1] Kataster), offen: Lineal (`PlanRulers`),
+  Hover-Kreis einer Kreis-Zeichnung, HUD-Kasten. Lösung: Overlay relativ zu einem Ursprung (viewBox und
+  `toScreen` in PlanView minus Ursprung). Auch die CLI-SVG (`plan --out`) schreibt Landeskoordinaten
+  (senkrechte Linien fehlten im Chromium-Screenshot eines LV95-Plans).
 - ✅ **[G9] Dach-Gehrung an Walm-/Zeltspitzen** (neu 27.10.): an Punkten mit ≥ 3 Dachflächen trifft die
   paarweise Gehrung der Unterseite nicht exakt (Restlücke < 0.01 m²); solche Dächer gehen als nicht
   geschlossenes Face-Set ins IFC. · S–M
@@ -981,6 +989,20 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
     `libredwg-web.d.ts` entfernt. 7–8× schneller (200 000 Linien: 6–8 s → 0,8 s); neu auch Texte,
     Schraffuren, Ebenenfarben, geschlossene LWPOLYLINE, MINSERT, Bulges. Offen: echte swissBUILDINGS3D-
     v3-Kachel nur synthetisch nachgebaut geprüft (`io/testdata/tile*`), nicht in Tauri/macOS getestet.
+  - ✅ **Kataster: Griffe nach dem Anwählen** (29.10., Fehlerbericht „importierte DWG-Geometrien haben keine
+    Eckpunkte"): drei Ursachen. (1) Griffe waren `<circle cx cy>` — `cx`/`cy`/`r` sind CSS-Längen, Chromium
+    und WebKit klemmen sie auf ±33.5 Mio.; bei LV95 (viewBox-Einheit = m · 90 ≈ 2.3e8) lagen die Griffe
+    weit ausserhalb des Bildes (gemessen: −26.8 Mio. px), im DOM aber vorhanden. Jetzt Vieleck
+    (`views/plan/planView/vbCircle.tsx`), auch für Fang-Marken und gesetzte Stützpunkte. (2) Ein einzeln
+    gewähltes Element mit > 600 Stützpunkten bekam gar keine Griffe (Strassenparzellen/Bodenbedeckung nach
+    dem Zerlegen von Bögen und Schraffur-Rändern): Grenze gilt nur noch für Mehrfachauswahl
+    (`state/gripLimits.ts`), bei vielen Griffen zeichnet die Ansicht nur die sichtbaren (`gripCull.ts`).
+    (3) LWPOLYLINE/POLYLINE und Schraffur-Ränder aus einer Polylinie kommen mit Bögen als Polylinie mit
+    `bulge` statt fein zerlegt (`import.rs` `bulge_verts`, Kodierung Flag 8); **Vorzeichen: Modell-Bulge
+    = − DXF-Bulge** (Modell: Scheitel links der Sehne, DXF: Gegenuhrzeigersinn). Tests: Rust, vitest,
+    e2e `kataster.spec.ts` (Fixture `e2e/fixtures/kataster.dxf`, LV95: Klick, Griffe auf den Ecken, Ziehen,
+    Rückgängig). Synthetischer Kataster (6750 Elemente, DXF und DWG) nur im Browser-Build (Chromium) geprüft,
+    nicht in Tauri/macOS. Offen: f32-Versatz des SVG-Overlays bei LV95, s. [G10].
 - ✅ **[C2] DXF als eigenes Rust-Crate** (Lesen und Schreiben über acadrust, 28.10.)
   28.10. **DXF-Export in Rust:** statt eigenem Writer über acadrust (`fileio/src/export.rs`), **R2018 ASCII
   (UTF-8)** statt des alten AC1015-Kopfs mit UTF-8-Inhalt. `buildPlanDxf` (gleiche Signatur) sammelt nur noch

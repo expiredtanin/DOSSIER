@@ -4,3 +4,5 @@ import { resolve } from "node:path";
 export const BEISPIEL_OBP = resolve(".tmp-e2e/beispiel.obp");
 /** Kleine DXF (4 Linien, Rechteck 10 × 8 m). */
 export const KLEIN_DXF = resolve("e2e/fixtures/klein.dxf");
+/** Kleiner Kataster-Ausschnitt in LV95 (AV-artig: Parzellen mit Bögen, Grenzpunkte, Nummern, Gebäude). */
+export const KATASTER_DXF = resolve("e2e/fixtures/kataster.dxf");
