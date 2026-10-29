@@ -11,9 +11,9 @@
 // Seit [K3d] (29.10.) sammelt der Kern (`src-tauri/core/src/plan_dxf.rs`) Ebenen und Entitäten
 // direkt aus den Plan-Puffern und dem Projekt-Dokument in die flache Zeichnung (Kodierung s.
 // `src-tauri/fileio/src/export.rs`); Rust (acadrust, fileio) schreibt die Datei ([C1]/[C2]).
-// DXF = R2018 ASCII (UTF-8), DWG = R2018. Hier bleibt das Text-Layout (Zeilen der Raumstempel,
-// Absätze/Wörter der Einzeltexte, Schriftfamilien) — es geht als flache Eingabe an den Kern —
-// und die Übergabe an fileio. Das Format-Modul wird nachgeladen: vor `buildPlanDxf`/
+// DXF = R2018 ASCII (UTF-8), DWG = R2018. Auch die Texte (Zeilen der Raumstempel, Absätze/Wörter
+// der Einzeltexte, Schriftfamilien) setzt der Kern aus dem Text-JSON der Puffer; hier bleibt die
+// Übergabe an fileio. Das Format-Modul wird nachgeladen: vor `buildPlanDxf`/
 // `buildPlanDwg` einmal `await loadFileio()` (savePlanDxf und die CLI tun das).
 //
 // Fachplaner-Export (28.10., [C2]): damit in AutoCAD/BricsCAD weitergearbeitet werden kann, entstehen
@@ -27,18 +27,13 @@
 //     Ausrichtung (Raumstempel mit Fläche als TEXT, links/Mitte/rechts), optional Papierbereich.
 // Alles andere (Wände, Umrisse, Schraffuren) bleibt wie bisher Linie/Polylinie/HATCH.
 
-import type { Plan, Primitive } from "../plan/generatePlan";
+import type { Plan } from "../plan/generatePlan";
 import type { Project } from "../model/types";
-import type { Marks } from "../text/richText";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
-import { plainText } from "../text/richText";
-import { docToLines } from "../text/renderHtml";
 import { fileio, loadFileio } from "../engine/fileioWasm";
 import { core } from "../engine/coreWasm";
 import { documentFor } from "../core/document";
 import { planParts, withPlanParts } from "../plan/planParts";
-import { planTextEntries } from "../plan/planLazy";
-import { fontNameOf } from "./dxfCadParts";
 
 export interface ExportDxfOptions {
   /** Titel/Geschossname (nur als Kommentar-freundlicher Dateiname genutzt). */
@@ -82,59 +77,9 @@ export interface FlatDrawing {
   stats(): { model: Record<string, number>; blocks: Record<string, number> };
 }
 
-/** Eine Zeile einer (Rich-)Text-Ausgabe. */
-interface OutLine {
-  text: string;
-  /** Schrifthöhe (Meter). */
-  height: number;
-  align: 0 | 1 | 2;
-  marks?: Marks;
-  /** Versatz der Grundlinie vom Anker nach unten (Meter, ≥ 0 für spätere Zeilen). */
-  down: number;
-}
-
 /** Massstab des Exports (endlich und > 0, sonst 1:100). */
 function scaleOf(opts: ExportDxfOptions): number {
   return opts.scaleDenominator && Number.isFinite(opts.scaleDenominator) && opts.scaleDenominator > 0 ? opts.scaleDenominator : DEFAULT_SCALE_DENOMINATOR;
-}
-
-/**
- * Text-Eingabe für den Kern (`plan_dxf::texts_from`): je Raumstempel die gesetzten Zeilen, je
- * Einzeltext Anker/Winkel/Höhe/Spalte, Schrift und Absätze mit ihren Wörtern (`split(/\s+/)`).
- * Nur die Text-Einträge des Plans werden gelesen.
- */
-function textInput(plan: Plan, scale: number, defaultFont: string): { nums: Float64Array; strs: string } {
-  const nums: number[] = [];
-  const strs: string[] = [];
-  const idx = new Map<string, number>();
-  const S = (s: string): number => {
-    let i = idx.get(s);
-    if (i === undefined) {
-      i = strs.length;
-      strs.push(s);
-      idx.set(s, i);
-    }
-    return i;
-  };
-  const family = (marks: Marks | undefined): number => S(fontNameOf(marks?.font) ?? defaultFont);
-  for (const { i, p } of planTextEntries(plan)) {
-    if (p.kind === "text") {
-      const lines = stampLines(p, scale);
-      nums.push(i, 6, p.at.x, p.at.y, lines.length);
-      for (const l of lines) nums.push(S(l.text), l.height, l.align, family(l.marks), l.marks?.bold ? 1 : 0, l.marks?.italic ? 1 : 0, l.down);
-    } else if (p.kind === "drawingText") {
-      const paragraphs = p.doc ? plainText(p.doc).split("\n") : p.text.split(/\r?\n/);
-      const marks = p.marks ?? p.doc?.paragraphs[0]?.runs[0]?.marks;
-      const wrap = typeof p.wrapWidth === "number" ? p.wrapWidth : NaN;
-      nums.push(i, 7, p.at.x, p.at.y, p.angle, p.heightM, wrap, family(marks), marks?.bold ? 1 : 0, marks?.italic ? 1 : 0, paragraphs.length);
-      for (const para of paragraphs) {
-        const words = para.split(/\s+/);
-        nums.push(S(para), words.length);
-        for (const w of words) nums.push(S(w));
-      }
-    }
-  }
-  return { nums: Float64Array.from(nums), strs: strs.map((s) => "\0" + s).join("") };
 }
 
 /** Kern-Antwort (`plan_dxf::encode`) → flache Zeichnung; leer = Fehler. */
@@ -184,14 +129,11 @@ export function collectPlanDrawing(
   opts: ExportDxfOptions = {},
 ): FlatDrawing {
   const scale = scaleOf(opts);
-  // Standard-Schrift: erste im Projekt hinterlegte Schrift der Textstile, sonst Arial.
-  const defaultFont = (project.textStyles ?? []).map((s) => fontNameOf(s.marks.font)).find((f) => f) ?? "Arial";
-  const { nums, strs } = textInput(plan, scale, defaultFont);
   const b = plan.bounds;
   const o = Float64Array.of(scale, (opts.includeHatches ?? true) ? 1 : 0, opts.dimUnit === "cm" ? 1 : 0, opts.paperLayout ? 1 : 0, b.minX, b.minY, b.maxX, b.maxY);
   const doc = documentFor(project).id;
   // Eigener Puffer mit Schraffur-JSON (Verlauf-Schraffuren brauchen ihre Farben).
-  const bytes = withPlanParts(planParts(plan, true), (segs) => core().plan_dxf_flat(doc, segs, nums, strs, o, defaultFont));
+  const bytes = withPlanParts(planParts(plan, true), (segs) => core().plan_dxf_flat(doc, segs, o));
   return decodeFlat(bytes);
 }
 
@@ -240,36 +182,6 @@ function writeCad(format: CadExportFormat, drawing: FlatDrawing): Uint8Array {
     throw new Error(`${cadExtension(format).toUpperCase()}-Export fehlgeschlagen${why ? `: ${why}` : ""}`);
   }
   return bytes;
-}
-
-/** Stempel-/Textzeilen eines Primitivs `text` (Raumstempel): Rich-Text-Doc + Live-Zeilen, vertikal um den Anker zentriert wie in der Plan-Ansicht. */
-function stampLines(p: Extract<Primitive, { kind: "text" }>, scale: number): OutLine[] {
-  const unitPerPt = (0.0254 / 72) * scale; // 1 pt Papier in Modell-Metern
-  const baseFs = p.basePt * unitPerPt;
-  const lineGap = baseFs * 1.3;
-  const docLines = docToLines(p.doc, { x: 0, y: 0, lineHeight: lineGap, unitPerPt, basePt: p.basePt, color: p.color });
-  const lines = [
-    ...docLines.map((l) => ({ align: l.align, lineHeight: l.lineHeight, ts: l.tspans })),
-    ...p.extraLines.map((l) => ({ align: l.align, lineHeight: lineGap, ts: [{ text: l.text, fontSize: baseFs * 0.8, fontFamily: undefined as string | undefined, fontWeight: undefined as string | undefined, fontStyle: undefined as string | undefined }] })),
-  ];
-  if (lines.length === 0) return [];
-  const totalH = baseFs + lines.slice(1).reduce((s, l) => s + l.lineHeight, 0);
-  let down = -totalH / 2 + baseFs * 0.8;
-  const out: OutLine[] = [];
-  lines.forEach((l, k) => {
-    if (k > 0) down += l.lineHeight;
-    const text = l.ts.map((t) => t.text).join("");
-    const first = l.ts[0];
-    if (!text.trim() || !first) return;
-    out.push({
-      text,
-      height: Math.max(...l.ts.map((t) => t.fontSize)),
-      align: l.align === "center" ? 1 : l.align === "right" ? 2 : 0,
-      marks: { font: first.fontFamily, bold: first.fontWeight === "700", italic: first.fontStyle === "italic" },
-      down,
-    });
-  });
-  return out;
 }
 
 /** Baut die Datei und löst den Download aus (Browser). Lädt das Format-Modul bei Bedarf. */

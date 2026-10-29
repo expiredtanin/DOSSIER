@@ -20,19 +20,15 @@
 // Vektorlinien direkt ins SVG. So bleibt das PDF rein vektoriell und scharf.
 //
 // Seit [K3d] (29.10.) rechnet der Kern die Knoten aus den Plan-Puffern
-// (`src-tauri/core/src/plan_print_svg.rs`, Anweisungsliste); hier bleiben der
-// <svg>-Rahmen, die Bild-<pattern> (laufende Ids) und die Einzeltexte
-// (Text-Layout `wrapDocToLines`). Ausgabe unverändert (gleiche Knoten/Attribute).
+// (`src-tauri/core/src/plan_print_svg.rs`, Anweisungsliste) samt gesetzter Einzeltexte;
+// hier bleiben der <svg>-Rahmen und die Bild-<pattern> (laufende Ids). Ausgabe unverändert
+// (gleiche Knoten/Attribute).
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { HatchRender, Plan, Primitive } from "../plan/generatePlan";
-import type { Vec2 } from "../model/types";
-import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
-import { docFromText } from "../text/richText";
+import type { HatchRender, Plan } from "../plan/generatePlan";
 import { core } from "../engine/coreWasm";
 import { planParts, withPlanParts } from "../plan/planParts";
-import { planPrimAt } from "../plan/planLazy";
 
 /** SVG-Namespace für die programmatisch erzeugten Knoten. */
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -112,15 +108,6 @@ function mmPerMeter(n: number): number {
 }
 
 /**
- * Bildet einen Welt-Punkt (Meter) auf Papier-Millimeter ab. Der Inhalt wird so
- * verschoben, dass die Plan-Bounds (in mm) zentriert auf dem Blatt liegen.
- * Plan-Y zeigt nach oben → SVG-Y nach unten (Spiegelung), daher das Minus.
- */
-interface Mapper {
-  (p: Vec2): Vec2;
-}
-
-/**
  * Erzeugt das Druck-SVG aus einem Plan. Reihenfolge der Primitive bleibt
  * erhalten (Zeichenreihenfolge = Stapelung); Schraffuren werden als geklippte
  * Linien zwischen Grundfüllung und Umriss eingefügt.
@@ -147,11 +134,6 @@ export function planToPrintSvg(plan: Plan, opts: PrintSvgOptions): PrintSvg {
   // Blatt. Wir mappen maxY → offsetYmm.
   const offsetYmm = (opts.pageHeightMm - contentHmm) / 2;
 
-  const map: Mapper = (p) => ({
-    x: offsetXmm + (p.x - b.minX) * k,
-    y: offsetYmm + (b.maxY - p.y) * k,
-  });
-
   const svg = document.createElementNS(SVG_NS, "svg") as SVGSVGElement;
   svg.setAttribute("xmlns", SVG_NS);
   // Breite/Höhe als REINE Zahlen (= viewBox-Einheiten), KEINE „mm"-Einheit: so
@@ -175,7 +157,7 @@ export function planToPrintSvg(plan: Plan, opts: PrintSvgOptions): PrintSvg {
   const o = Float64Array.of(n, opts.pageWidthMm, opts.pageHeightMm, b.minX, b.minY, b.maxX, b.maxY);
   const ops = withPlanParts(planParts(plan, true), (segs) => core().plan_print_svg_ops(segs, o));
   if (!ops) throw new Error("Druck-SVG: Plan im Kern unlesbar");
-  applyOps(svg, ops.slice(1), plan, map, k);
+  applyOps(svg, ops.slice(1));
 
   return {
     svg,
@@ -187,17 +169,22 @@ export function planToPrintSvg(plan: Plan, opts: PrintSvgOptions): PrintSvg {
 
 /**
  * Legt die Knoten der Kern-Anweisungsliste an (Format s. `plan_print_svg.rs`): Elemente mit ihren
- * Attributen in Reihenfolge, Gruppen, Bild-Schraffuren (`<pattern>` hier) und Einzeltexte (Layout hier).
+ * Attributen in Reihenfolge, Gruppen, Bild-Schraffuren (`<pattern>` hier) und gesetzte Einzeltexte.
  */
-function applyOps(svg: SVGSVGElement, ops: string, plan: Plan, map: Mapper, mmPerM: number): void {
+function applyOps(svg: SVGSVGElement, ops: string): void {
   if (!ops) return;
   let g: SVGElement | null = null;
+  let text: SVGElement | null = null;
+  let line: SVGElement | null = null;
+  const attrs = (el: SVGElement, f: string[], from: number) => {
+    for (let i = from; i + 1 < f.length; i += 2) el.setAttribute(f[i], f[i + 1]);
+  };
   for (const rec of ops.split("\u001e")) {
     const f = rec.split("\u001f");
     switch (f[0]) {
       case "E": {
         const el = document.createElementNS(SVG_NS, f[2]) as SVGElement;
-        for (let i = 3; i + 1 < f.length; i += 2) el.setAttribute(f[i], f[i + 1]);
+        attrs(el, f, 3);
         (f[1] === "1" && g ? g : svg).appendChild(el);
         break;
       }
@@ -219,85 +206,27 @@ function applyOps(svg: SVGSVGElement, ops: string, plan: Plan, map: Mapper, mmPe
         g?.appendChild(el);
         break;
       }
-      case "T": {
-        const p = planPrimAt(plan, Number(f[1]));
-        if (p?.kind !== "drawingText") break;
-        const node = drawingTextNode(p, map, mmPerM);
-        if (node) {
-          if (f[2]) node.setAttribute("opacity", f[2]);
-          svg.appendChild(node);
-        }
+      case "X":
+        // Einzeltext: <text> mit Zeilen-<tspan>s, darin je Run/Wort ein <tspan>.
+        text = document.createElementNS(SVG_NS, "text") as SVGElement;
+        attrs(text, f, 1);
+        svg.appendChild(text);
+        break;
+      case "L":
+        line = document.createElementNS(SVG_NS, "tspan") as SVGElement;
+        attrs(line, f, 2);
+        if (f[1]) line.textContent = f[1];
+        text?.appendChild(line);
+        break;
+      case "R": {
+        const run = document.createElementNS(SVG_NS, "tspan") as SVGElement;
+        attrs(run, f, 2);
+        run.textContent = f[1];
+        line?.appendChild(run);
         break;
       }
     }
   }
-}
-
-/**
- * Modellverankerter Einzeltext (Text-Werkzeug/DXF-Import) als `<text>` mit
- * `<tspan>`-Zeilen — analog zur Bildschirm-Darstellung (PlanView.tsx
- * `case "drawingText"`), aber DOM-Knoten statt JSX. Bricht bei gesetzter
- * Spaltenbreite wortweise um (Run-Grenzen bleiben erhalten).
- */
-function drawingTextNode(
-  p: Extract<Primitive, { kind: "drawingText" }>,
-  map: Mapper,
-  mmPerM: number,
-): SVGTextElement | null {
-  const doc = p.doc ?? docFromText(p.text, p.marks ?? {});
-  const c = map(p.at);
-  const fontSizeMm = p.heightM * mmPerM;
-  const unitPerPt = (0.0254 / 72) * mmPerM;
-  const basePt = unitPerPt > 0 ? p.heightM / unitPerPt : 0;
-  const lineHeight = fontSizeMm * 1.25;
-  const wrapWidthUnits = p.wrapWidth && p.wrapWidth > 0 ? p.wrapWidth * mmPerM : undefined;
-  const lines: SvgLine[] = wrapDocToLines(doc, {
-    x: 0,
-    y: 0,
-    lineHeight,
-    unitPerPt,
-    basePt,
-    color: p.color,
-    ...(wrapWidthUnits ? { wrapWidthUnits } : {}),
-  });
-  if (lines.length === 0) return null;
-
-  const el = document.createElementNS(SVG_NS, "text");
-  const deg = -(p.angle * 180) / Math.PI;
-  if (deg) el.setAttribute("transform", `rotate(${round(deg)} ${round(c.x)} ${round(c.y)})`);
-  let y = c.y;
-  lines.forEach((line, k) => {
-    if (k > 0) y += line.lineHeight;
-    const anchor = line.align === "center" ? "middle" : line.align === "right" ? "end" : "start";
-    const x = !wrapWidthUnits
-      ? c.x
-      : line.align === "center"
-        ? c.x + wrapWidthUnits / 2
-        : line.align === "right"
-          ? c.x + wrapWidthUnits
-          : c.x;
-    const lineTspan = document.createElementNS(SVG_NS, "tspan");
-    lineTspan.setAttribute("x", String(round(x)));
-    lineTspan.setAttribute("y", String(round(y)));
-    lineTspan.setAttribute("text-anchor", anchor);
-    if (line.tspans.length === 0) {
-      lineTspan.textContent = "​";
-    } else {
-      for (const ts of line.tspans) {
-        const run = document.createElementNS(SVG_NS, "tspan");
-        run.setAttribute("font-size", String(round(ts.fontSize)));
-        run.setAttribute("fill", ts.fill);
-        if (ts.fontWeight) run.setAttribute("font-weight", ts.fontWeight);
-        if (ts.fontStyle) run.setAttribute("font-style", ts.fontStyle);
-        run.setAttribute("font-family", ts.fontFamily ?? "Helvetica, Arial, sans-serif");
-        if (ts.textDecoration) run.setAttribute("text-decoration", ts.textDecoration);
-        run.textContent = ts.text;
-        lineTspan.appendChild(run);
-      }
-    }
-    el.appendChild(lineTspan);
-  });
-  return el;
 }
 
 /** Auf 3 Nachkommastellen runden (kompaktes, exaktes SVG). */

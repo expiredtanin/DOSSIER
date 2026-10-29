@@ -7,9 +7,9 @@
 //!
 //! Gleiche Eingabe ⇒ dieselben Zahlen und Zeichenketten in derselben Reihenfolge wie die TS-Fassung
 //! (Zeichenketten-Indizes nach erstem Gebrauch, Definitionen an der Stelle ihres ersten Gebrauchs).
-//! Text-Layout bleibt TS: die Zeilen der Raumstempel und die Absätze/Wörter der Einzeltexte kommen
-//! fertig mit ([`TextIn`]); der Zeilenumbruch nach Spaltenbreite läuft hier (er hängt in Blöcken
-//! an der blocklokalen Grösse).
+//! Texte: die Zeilen der Raumstempel und die Absätze/Wörter der Einzeltexte setzt der Kern aus dem
+//! Text-JSON des Puffers ([`crate::plan_text::dxf_text`] → [`TextIn`]); der Zeilenumbruch nach
+//! Spaltenbreite läuft hier (er hängt in Blöcken an der blocklokalen Grösse).
 
 use crate::hatch::{self, Hatch, HatchKind, Motif, Pattern, V2};
 use crate::js_fmt::{js_number, to_fixed};
@@ -78,11 +78,11 @@ pub struct DxfOptions {
     pub paper_layout: bool,
     /// Ausmass des Plans (`Plan.bounds`) für den Papierbereich.
     pub bounds: [f64; 4],
-    /// Standard-Schrift (erste Schrift der Projekt-Textstile, sonst Arial; in TS aufgelöst).
+    /// Standard-Schrift (erste Schrift der Projekt-Textstile, sonst Arial; [`crate::plan_text::default_font`]).
     pub default_font: String,
 }
 
-/// Schrift eines Texts (in TS aufgelöst: Familie nach `fontNameOf`, sonst Standard-Schrift).
+/// Schrift eines Texts (Familie nach `font_name_of`, sonst Standard-Schrift).
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextStyleIn {
     pub family: String,
@@ -102,7 +102,7 @@ pub struct StampLine {
     pub down: f64,
 }
 
-/// Text-Eingabe aus TS je Plan-Index (Layout bleibt TS).
+/// Text-Eingabe je Text-Eintrag (aus dem Text-JSON gesetzt, s. [`crate::plan_text::dxf_text`]).
 #[derive(Clone, Debug, PartialEq)]
 pub enum TextIn {
     /// `text` (Raumstempel): Anker und Zeilen.
@@ -758,25 +758,13 @@ fn to_local(p: &Prim, f: Frame) -> Option<Prim> {
 }
 
 /// Zeilen eines Einzeltexts (`drawingTextLines`): Absätze, bei Spaltenbreite wortweise umbrochen
-/// (Zeichenzahl in UTF-16-Einheiten wie `String.length`); Zeilenabstand 1.25 × Höhe.
+/// (`text_layout::wrap_words`, Zeichenzahl in UTF-16-Einheiten); Zeilenabstand 1.25 × Höhe.
 fn single_lines(height: f64, wrap: f64, paras: &[(String, Vec<String>)]) -> Vec<(String, f64)> {
     let mut lines: Vec<String> = Vec::new();
     if wrap > 0.0 {
-        let max_chars = jsnum::max(1.0, (wrap / (height * 0.55)).floor());
-        let ulen = |s: &str| s.encode_utf16().count() as f64;
+        let m = crate::text_layout::max_chars(wrap, height);
         for (_, words) in paras {
-            let mut line = String::new();
-            for word in words {
-                if line.is_empty() {
-                    line = word.clone();
-                } else if ulen(&line) + 1.0 + ulen(word) <= max_chars {
-                    line.push(' ');
-                    line.push_str(word);
-                } else {
-                    lines.push(std::mem::replace(&mut line, word.clone()));
-                }
-            }
-            lines.push(line);
+            crate::text_layout::wrap_words(words, m, &mut lines);
         }
     } else {
         lines.extend(paras.iter().map(|p| p.0.clone()));
@@ -1115,17 +1103,16 @@ fn flatten<'a>(cats: &'a [LayerCategory], out: &mut Vec<&'a LayerCategory>) {
     }
 }
 
-/// Sammelt die flache Zeichnung aus den Abschnitten des Plans (`texts`: Text-Eingabe je
-/// Plan-Index). `None` bei kaputtem Puffer.
-pub fn collect(parts: &mut [Part], texts: &HashMap<usize, TextIn>, project: &Project, o: &DxfOptions) -> Option<FlatDxf> {
+/// Sammelt die flache Zeichnung aus den Abschnitten des Plans (Texte aus ihrem JSON). `None` bei
+/// kaputtem Puffer.
+pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<FlatDxf> {
     // Primitive in Plan-Reihenfolge lesen.
     let mut entries: Vec<Entry> = Vec::new();
-    let mut gi = 0usize;
     for part in parts.iter_mut() {
         let hatches = part.view.hatch_table()?;
         for i in part.from..part.to {
-            entries.push(read_entry(part, i, &hatches, texts.get(&gi))?);
-            gi += 1;
+            let text = crate::plan_text::read_text(part, i).map(|t| crate::plan_text::dxf_text(&t, o.scale, &o.default_font));
+            entries.push(read_entry(part, i, &hatches, text.as_ref())?);
         }
     }
 
@@ -1297,64 +1284,6 @@ pub fn collect(parts: &mut [Part], texts: &HashMap<usize, TextIn>, project: &Pro
     }
     let Flat { root, strings, block_counts, .. } = cx.flat;
     Some(FlatDxf { nums: root, strings, model: main.counts, blocks: block_counts })
-}
-
-/// Text-Eingabe aus TS lesen: Zahlen `[Index, Art, …]` (s. `src/export/exportDxf.ts`), Texte.
-/// Art 6 (Raumstempel): `[x, y, nZeilen, (Text, Höhe, Ausrichtung, Schrift, fett, kursiv, ab)*]`;
-/// Art 7 (Einzeltext): `[x, y, Winkel, Höhe, Spalte, Schrift, fett, kursiv, nAbsätze,
-/// (Absatz, nWörter, Wort*)*]`. Schrift/Text = Index in `strs`.
-pub fn texts_from(nums: &[f64], strs: &[&str]) -> Option<HashMap<usize, TextIn>> {
-    let mut out = HashMap::new();
-    let mut k = 0usize;
-    let mut next = || -> Option<f64> {
-        let v = *nums.get(k)?;
-        k += 1;
-        Some(v)
-    };
-    let s_of = |v: f64| -> Option<String> { strs.get(whole(v)?).map(|s| s.to_string()) };
-    loop {
-        let Some(idx) = next() else { break };
-        let idx = whole(idx)?;
-        let kind = next()?;
-        let at = V2 { x: next()?, y: next()? };
-        if kind == 6.0 {
-            let n = whole(next()?)?;
-            let mut lines = Vec::with_capacity(n.min(1024));
-            for _ in 0..n {
-                let text = s_of(next()?)?;
-                let height = next()?;
-                let align = next()?;
-                let family = s_of(next()?)?;
-                let bold = next()? != 0.0;
-                let italic = next()? != 0.0;
-                let down = next()?;
-                lines.push(StampLine { text, height, align, style: TextStyleIn { family, bold, italic }, down });
-            }
-            out.insert(idx, TextIn::Stamp { at, lines });
-        } else if kind == 7.0 {
-            let angle = next()?;
-            let height = next()?;
-            let wrap = next()?;
-            let family = s_of(next()?)?;
-            let bold = next()? != 0.0;
-            let italic = next()? != 0.0;
-            let n = whole(next()?)?;
-            let mut paras = Vec::with_capacity(n.min(1024));
-            for _ in 0..n {
-                let para = s_of(next()?)?;
-                let nw = whole(next()?)?;
-                let mut words = Vec::with_capacity(nw.min(1024));
-                for _ in 0..nw {
-                    words.push(s_of(next()?)?);
-                }
-                paras.push((para, words));
-            }
-            out.insert(idx, TextIn::Single { at, angle, height, wrap, style: TextStyleIn { family, bold, italic }, paras });
-        } else {
-            return None;
-        }
-    }
-    Some(out)
 }
 
 /// Ergebnis als Bytes: f64-Teil `[MAGIC "DXF1", nZahlen, nTexte, 8 Modell-, 8 Block-Zähler,

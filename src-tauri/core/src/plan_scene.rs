@@ -621,7 +621,7 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
 
 // ── Ausgaben ─────────────────────────────────────────────────────────────────────────────────────
 
-/// Eine Textzeile (von TS gesetzt) für die render2d-Szene.
+/// Eine Textzeile (gesetzt in `plan_text::scene_texts`) für die render2d-Szene.
 pub struct SText {
     pub pos: V2,
     pub size_mm: f64,
@@ -629,22 +629,6 @@ pub struct SText {
     /// 0 links · 1 Mitte · 2 rechts
     pub align: u32,
     pub content: Vec<u8>,
-}
-
-/// Texte aus `[x, y, sizeMm, r, g, b, a, align, nBytes]*` und den UTF-8-Bytes; `None` bei Unsinn.
-pub fn texts_from(nums: &[f64], bytes: &[u8]) -> Option<Vec<SText>> {
-    if nums.len() % 9 != 0 {
-        return None;
-    }
-    let mut out = Vec::with_capacity(nums.len() / 9);
-    let mut o = 0usize;
-    for t in nums.chunks_exact(9) {
-        let n = whole(t[8])?;
-        let content = bytes.get(o..o.checked_add(n)?)?.to_vec();
-        o += n;
-        out.push(SText { pos: v2(t[0], t[1]), size_mm: t[2], color: [t[3], t[4], t[5], t[6]], align: whole(t[7])? as u32, content });
-    }
-    (o == bytes.len()).then_some(out)
 }
 
 /// `z >>> 0` (ToUint32).
