@@ -81,6 +81,7 @@ export type QueryName =
   | "roofMeshes"
   | "roofCutLayers"
   | "openingSchedule"
+  | "openingPreview"
   | "scheduleRows"
   | "scheduleCsv"
   | "pickGeometry"

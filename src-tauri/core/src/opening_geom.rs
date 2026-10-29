@@ -147,6 +147,8 @@ pub struct WindowSpec {
     pub inset_inner: bool,
     /// Rahmen mittig in der Wand (`insetFace: "mitte"`); hat Vorrang vor `inset_inner`/Einzug.
     pub inset_mid: bool,
+    /// Rahmenbreite an der Leibung beim Wandende ([102]); NaN = wie `frame_width`.
+    pub frame_width_end: f64,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -262,7 +264,8 @@ pub fn window_symbol(
             vec![add(a, scale(n, frame_outer_n)), add(b, scale(n, frame_outer_n)), add(b, scale(n, frame_inner_n)), add(a, scale(n, frame_inner_n))]
         };
         sym.jamb_marks.push(frame_block(fw / 2.0, fw / 2.0));
-        sym.jamb_marks.push(frame_block(axis_width - fw / 2.0, fw / 2.0));
+        let fwe = if spec.frame_width_end.is_nan() { fw } else { max(0.01, spec.frame_width_end) };
+        sym.jamb_marks.push(frame_block(axis_width - fwe / 2.0, fwe / 2.0));
         for i in 0..segs.len().saturating_sub(1) {
             let u_pos = segs[i].2;
             if fein {

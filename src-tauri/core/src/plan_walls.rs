@@ -312,6 +312,21 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
     for _ in 0..n_gap {
         gaps.push((r.num()?, r.num()?));
     }
+    // [103] Schichteinzug (optional): je Leibung und Schicht Rücksprung und Zusatzstücke.
+    let mut adj: Vec<Adj> = Vec::new();
+    if let Some(n_adj) = r.count() {
+        for _ in 0..n_adj {
+            let (jamb, dir, layer, shift) = (r.num()?, r.num()?, r.count()?, r.num()?);
+            let n_p = r.count()?;
+            let mut pieces = Vec::with_capacity(n_p);
+            for _ in 0..n_p {
+                pieces.push([r.num()?, r.num()?, r.num()?, r.num()?]);
+            }
+            if jamb.is_finite() && shift.is_finite() && layer < n_layers && pieces.iter().flatten().all(|v| v.is_finite()) {
+                adj.push(Adj { jamb, dir, layer, shift: max(0.0, shift), pieces });
+            }
+        }
+    }
     if !(sx.is_finite() && sy.is_finite() && ex.is_finite() && ey.is_finite() && total.is_finite() && ref_off.is_finite()) {
         return None;
     }
@@ -353,6 +368,12 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
             .filter(|c| min(c.from, c.to) < e - CUTOUT_EPS && max(c.from, c.to) > s + CUTOUT_EPS)
             .copied()
             .collect();
+        let seg_adj: Vec<&Adj> = adj.iter().filter(|a| (a.dir > 0.0 && (a.jamb - e).abs() < 1e-6) || (a.dir < 0.0 && (a.jamb - s).abs() < 1e-6)).collect();
+        if !seg_adj.is_empty() {
+            let seg = Seg { s, e, p1, p2, wstart, wend, axis_len, sc, ec };
+            adjusted_segment(&mut o, &seg, &thick, ref_off - total / 2.0, &layer_cuts, &seg_cutouts, &seg_adj, &band_join_edges);
+            continue;
+        }
         let axis_pt = |d: f64| if d == s { p1 } else if d == e { p2 } else { along(wstart, wend, d) };
         let mut off = ref_off - total / 2.0;
         for li in 0..n_layers {
@@ -462,6 +483,196 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
     Some(out)
 }
 
+// ── Schichteinzug an Leibungen ([103]) ──────────────────────────────────────
+
+/// Anschluss einer Schicht an einer Leibung: `jamb` Achsmass der Rohbaukante, `dir` > 0 ⇒ die
+/// Öffnung liegt bei grösserem Achsmass (Segment endet hier), < 0 ⇒ Segment beginnt hier;
+/// `pieces` = `[x0, x1, o0, o1]` (x ab Rohbaukante in die Öffnung, o quer ab Aussenfläche).
+struct Adj {
+    jamb: f64,
+    dir: f64,
+    layer: usize,
+    shift: f64,
+    pieces: Vec<[f64; 4]>,
+}
+
+struct Seg {
+    s: f64,
+    e: f64,
+    p1: V,
+    p2: V,
+    wstart: V,
+    wend: V,
+    axis_len: f64,
+    sc: Option<Line>,
+    ec: Option<Line>,
+}
+
+/// Segment mit Schichteinzug: Schichtbänder je Schicht verkürzt bzw. um Zusatzstücke ergänzt;
+/// Umriss und Fugen aus dem Raster der Teilflächen (Kante zwischen Fläche und Leere = Umriss,
+/// zwischen zwei Schichten = Fuge, an Aussparungen nichts), Wandenden mit ihrem Gehrungsschnitt.
+#[allow(clippy::too_many_arguments)]
+fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: &Option<LayerCuts>, cutouts: &[Cutout], adj: &[&Adj], band_join_edges: &[f64]) {
+    let (s, e) = (g.s, g.e);
+    let axis_pt = |d: f64| if d == s { g.p1 } else if d == e { g.p2 } else { along(g.wstart, g.wend, d) };
+    let n_layers = thick.len();
+    let mut offs = vec![off0];
+    for t in thick {
+        let last = *offs.last().expect("nicht leer");
+        offs.push(last + t);
+    }
+    let (off_lo, off_hi) = (off0, offs[n_layers]);
+    let mut rects: Vec<(f64, f64, f64, f64, usize)> = Vec::new();
+    for li in 0..n_layers {
+        let (mut a, mut b) = (s, e);
+        for ad in adj.iter().filter(|ad| ad.layer == li) {
+            if ad.dir > 0.0 {
+                b = min(b, e - ad.shift);
+            } else {
+                a = max(a, s + ad.shift);
+            }
+        }
+        let (lo, hi) = (offs[li], offs[li + 1]);
+        let holes: Vec<(f64, f64)> = cutouts.iter().filter(|c| lo < max(c.off_a, c.off_b) - CUTOUT_EPS && hi > min(c.off_a, c.off_b) + CUTOUT_EPS).map(|c| (c.from, c.to)).collect();
+        let start_cut = if s <= 1e-6 { layer_cuts.as_ref().map_or(g.sc, |lc| lc.start[li]) } else { None };
+        let end_cut = if e >= g.axis_len - 1e-6 { layer_cuts.as_ref().map_or(g.ec, |lc| lc.end[li]) } else { None };
+        if b - a > CUTOUT_EPS {
+            for (pa, pb) in subtract_intervals(a, b, &holes) {
+                let bsc = if pa <= s + CUTOUT_EPS { start_cut } else { None };
+                let bec = if pb >= e - CUTOUT_EPS { end_cut } else { None };
+                o.polygon(ART_BAND, li, band_join_edges, &clipped_band(axis_pt(pa), axis_pt(pb), lo, hi, bsc, bec));
+                rects.push((pa, pb, lo, hi, li));
+            }
+        }
+        // Seitenfugen an Wandenden (wie im Normalfall).
+        let side_start = if s <= 1e-6 { layer_cuts.as_ref().and_then(|lc| lc.start_side[li]) } else { None };
+        let side_end = if e >= g.axis_len - 1e-6 { layer_cuts.as_ref().and_then(|lc| lc.end_side[li]) } else { None };
+        let u_seg = normalize(sub(g.p2, g.p1));
+        let n_seg = left_normal(u_seg);
+        let side_point = |base: V, layer_off: f64, cut: Line| {
+            let pt = add(base, scale(n_seg, layer_off));
+            line_intersect(pt, u_seg, cut.point, cut.dir).unwrap_or(pt)
+        };
+        if let Some(c) = side_start {
+            o.line(LINE_JOINT_L, li, side_point(g.p1, lo, c), side_point(g.p1, hi, c));
+        }
+        if let Some(c) = side_end {
+            o.line(LINE_JOINT_L, li, side_point(g.p2, lo, c), side_point(g.p2, hi, c));
+        }
+    }
+    for ad in adj {
+        for pc in &ad.pieces {
+            let (x0, x1) = if ad.dir > 0.0 { (ad.jamb + pc[0], ad.jamb + pc[1]) } else { (ad.jamb - pc[1], ad.jamb - pc[0]) };
+            let (y0, y1) = (off0 + pc[2], off0 + pc[3]);
+            if x1 - x0 <= CUTOUT_EPS || y1 - y0 <= CUTOUT_EPS {
+                continue;
+            }
+            o.polygon(ART_BAND, ad.layer, &[], &clipped_band(axis_pt(x0), axis_pt(x1), y0, y1, None, None));
+            rects.push((x0, x1, y0, y1, ad.layer));
+        }
+    }
+    // Raster der Teilflächen.
+    let mut xs: Vec<f64> = vec![s, e];
+    let mut ys: Vec<f64> = offs.clone();
+    for r in &rects {
+        xs.extend([r.0, r.1]);
+        ys.extend([r.2, r.3]);
+    }
+    let sort = |v: &mut Vec<f64>| {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        v.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    };
+    sort(&mut xs);
+    sort(&mut ys);
+    let (nx, ny) = (xs.len().saturating_sub(1), ys.len().saturating_sub(1));
+    const EMPTY: i64 = -1;
+    const CUT: i64 = -2;
+    let mut cell = vec![EMPTY; nx * ny];
+    for i in 0..nx {
+        let xm = (xs[i] + xs[i + 1]) / 2.0;
+        for j in 0..ny {
+            let ym = (ys[j] + ys[j + 1]) / 2.0;
+            cell[i * ny + j] = match rects.iter().find(|r| xm > r.0 && xm < r.1 && ym > r.2 && ym < r.3) {
+                Some(r) => r.4 as i64,
+                None if ym > off_lo && ym < off_hi && cutouts.iter().any(|c| xm > min(c.from, c.to) && xm < max(c.from, c.to)) => CUT,
+                None => EMPTY,
+            };
+        }
+    }
+    let at = |i: i64, j: i64| -> i64 {
+        if i < 0 || j < 0 || i as usize >= nx || j as usize >= ny {
+            EMPTY
+        } else {
+            cell[i as usize * ny + j as usize]
+        }
+    };
+    // 0 keine Kante · 1 Umriss · 2+k Fuge der Schicht k.
+    let kind = |a: i64, b: i64| -> i64 {
+        if a == b || a == CUT || b == CUT {
+            0
+        } else if a == EMPTY || b == EMPTY {
+            1
+        } else {
+            2 + a.min(b)
+        }
+    };
+    let emit = |o: &mut Out, k: i64, a: V, b: V| {
+        if k == 1 {
+            o.line(LINE_OUTLINE, 0, a, b);
+        } else if k >= 2 {
+            o.line(LINE_JOINT, (k - 2) as usize, a, b);
+        }
+    };
+    // Längskanten (entlang der Achse) bei y = ys[j].
+    for j in 0..=ny {
+        let y = ys[j];
+        let mut i = 0;
+        while i < nx {
+            let k = kind(at(i as i64, j as i64 - 1), at(i as i64, j as i64));
+            let mut i1 = i + 1;
+            while i1 < nx && kind(at(i1 as i64, j as i64 - 1), at(i1 as i64, j as i64)) == k {
+                i1 += 1;
+            }
+            if k != 0 {
+                let (x0, x1) = (xs[i], xs[i1]);
+                let sc = if x0 <= s + CUTOUT_EPS { g.sc } else { None };
+                let ec = if x1 >= e - CUTOUT_EPS { g.ec } else { None };
+                let q = clipped_band(axis_pt(x0), axis_pt(x1), y, y, sc, ec);
+                emit(o, k, q[0], q[1]);
+            }
+            i = i1;
+        }
+    }
+    // Querkanten bei x = xs[i] (an Wandenden mit Gehrung: deren Schnittlinie).
+    for i in 0..=nx {
+        let x = xs[i];
+        let mut j = 0;
+        while j < ny {
+            let k = kind(at(i as i64 - 1, j as i64), at(i as i64, j as i64));
+            let mut j1 = j + 1;
+            while j1 < ny && kind(at(i as i64 - 1, j1 as i64), at(i as i64, j1 as i64)) == k {
+                j1 += 1;
+            }
+            if k != 0 {
+                let (y0, y1) = (ys[j], ys[j1]);
+                if (x - s).abs() < CUTOUT_EPS && g.sc.is_some() {
+                    let q = clipped_band(g.p1, g.p2, y0, y1, g.sc, None);
+                    emit(o, k, q[0], q[3]);
+                } else if (x - e).abs() < CUTOUT_EPS && g.ec.is_some() {
+                    let q = clipped_band(g.p1, g.p2, y0, y1, None, g.ec);
+                    emit(o, k, q[1], q[2]);
+                } else {
+                    let base = axis_pt(x);
+                    let n = left_normal(normalize(sub(g.wend, g.wstart)));
+                    emit(o, k, add(base, scale(n, y0)), add(base, scale(n, y1)));
+                }
+            }
+            j = j1;
+        }
+    }
+    // Keine Umriss-Fläche: nicht jede Ausgabe lässt einzelne Kanten weg (SVG); die Linien oben ersetzen sie.
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,6 +722,50 @@ mod tests {
         let o = wall_poche(&wall(4.0, false, &[(1.0, 2.0)]));
         assert_eq!(count(&o, 1.0), 6);
         assert_eq!(count(&wall_poche(&wall(4.0, true, &[(1.0, 2.0)])), 1.0), 2);
+    }
+
+    /// Polygone (art, schicht, Ecken) der Ausgabe.
+    fn polys(out: &[f64]) -> Vec<(f64, usize, Vec<(f64, f64)>)> {
+        let (mut i, mut v) = (1, Vec::new());
+        for _ in 0..out[0] as usize {
+            if out[i] == 1.0 {
+                let q = i + 4 + out[i + 3] as usize;
+                v.push((out[i + 1], out[i + 2] as usize, (0..4).map(|k| (out[q + 2 * k], out[q + 2 * k + 1])).collect()));
+                i = q + 8;
+            } else {
+                i += 7;
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn schichteinzug_kuerzt_band_und_setzt_stueck() {
+        let mut b = wall(4.0, false, &[(1.0, 2.0)]);
+        // Innere Schicht (1) an der Leibung bei 1.0 um 5 cm zurück; äussere (0) bei 2.0 3 cm über den Rahmen.
+        b.extend([2.0, 1.0, 1.0, 1.0, 0.05, 0.0, 2.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.03, 0.0, 0.1]);
+        let o = wall_poche(&b);
+        let p = polys(&o);
+        let band1: Vec<_> = p.iter().filter(|x| x.0 == ART_BAND && x.1 == 1).collect();
+        assert!(band1.iter().any(|x| x.2.iter().any(|q| (q.0 - 0.95).abs() < 1e-9)));
+        // Zusatzstück der äusseren Schicht in der Öffnung (x 1.97 … 2.0).
+        assert!(p.iter().any(|x| x.0 == ART_BAND && x.1 == 0 && x.2.iter().any(|q| (q.0 - 1.97).abs() < 1e-9)));
+        // Umriss als Linien, Stufe am Rücksprung (Querlinie bei x = 0.95).
+        let mut i = 1;
+        let mut step = false;
+        for _ in 0..o[0] as usize {
+            if o[i] == 1.0 {
+                i += 4 + o[i + 3] as usize + 8;
+            } else {
+                if o[i + 1] == LINE_OUTLINE && (o[i + 3] - 0.95).abs() < 1e-9 && (o[i + 5] - 0.95).abs() < 1e-9 {
+                    step = true;
+                }
+                i += 7;
+            }
+        }
+        assert!(step);
+        // Ohne Block wie bisher.
+        assert_eq!(count(&wall_poche(&wall(4.0, false, &[(1.0, 2.0)])), 1.0), 6);
     }
 
     #[test]

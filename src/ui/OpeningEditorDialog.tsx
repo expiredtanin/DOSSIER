@@ -14,6 +14,8 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type {
   DoorType,
+  FrameDetail,
+  LayerReveal,
   FrameCornerJoin,
   Opening,
   OpeningKind,
@@ -22,7 +24,7 @@ import type {
   WindowType,
 } from "../model/types";
 import { getDoorType, getWindowType, sashesOfWindowType, glazingPanesOf } from "../model/types";
-import { ElevationPreview } from "./ElevationPreview";
+import { CorePreview, DoorFramePanel, FrameDetailPanel, RebatePanel, RevealPanel, ScopeSwitch } from "./OpeningDetailPanels";
 
 /** P0-Kategorien der Sidebar, je nach Öffnungsart. */
 type CatId =
@@ -31,7 +33,11 @@ type CatId =
   | "rahmen"
   | "fluegel"
   | "sonnenschutz"
-  | "tuerblatt";
+  | "tuerblatt"
+  | "rahmendetail"
+  | "anschlag"
+  | "zarge"
+  | "schichten";
 
 export interface OpeningEditorDialogProps {
   openingId: string;
@@ -68,16 +74,25 @@ export function OpeningEditorDialog({
         { id: "basis", label: t("oed.cat.basis") },
         { id: "groesse", label: t("oed.cat.groesse") },
         { id: "rahmen", label: t("oed.cat.rahmen") },
+        { id: "zarge", label: t("oed.cat.zarge") },
+        { id: "rahmendetail", label: t("oed.cat.rahmendetail") },
+        { id: "anschlag", label: t("oed.cat.anschlag") },
+        { id: "schichten", label: t("oed.cat.schichten") },
         { id: "tuerblatt", label: t("oed.cat.tuerblatt") },
       ]
     : [
         { id: "basis", label: t("oed.cat.basis") },
         { id: "groesse", label: t("oed.cat.groesse") },
         { id: "rahmen", label: t("oed.cat.rahmen") },
+        { id: "rahmendetail", label: t("oed.cat.rahmendetail") },
+        { id: "anschlag", label: t("oed.cat.anschlag") },
+        { id: "schichten", label: t("oed.cat.schichten") },
         { id: "fluegel", label: t("oed.cat.fluegel") },
         { id: "sonnenschutz", label: t("oed.cat.sonnenschutz") },
       ];
   const [cat, setCat] = useState<CatId>("basis");
+  // [102]/[103]: Detail-Panels wirken auf den Typ (alle Öffnungen) oder nur auf diese Öffnung.
+  const [scope, setScope] = useState<"type" | "opening">(opening?.frameDetail || opening?.layerReveals || opening?.doorFrame || opening?.doorFrameKind ? "opening" : "type");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -102,6 +117,24 @@ export function OpeningEditorDialog({
   const patchDt = (patch: Partial<DoorType>) => {
     if (dt) onPatchDoorType(dt.id, patch);
   };
+  const ty = isDoor ? dt : wt;
+  const onType = scope === "type" && !!ty;
+  // Werte des gewählten Geltungsbereichs; „nur diese Öffnung" zeigt die Übersteuerung (leer = wie Typ).
+  const frameDetail = onType ? ty?.frameDetail : opening.frameDetail;
+  const setFrameDetail = (v: FrameDetail | undefined) => (onType ? (isDoor ? patchDt({ frameDetail: v }) : patchWt({ frameDetail: v })) : onPatchOpening({ frameDetail: v }));
+  const typeReveals = isDoor ? dt?.layerReveals : wt?.layerReveals ?? (wt?.innerLayerRecess ? [{ layer: -1, mode: "zurueck" as const }] : undefined);
+  const reveals = onType ? typeReveals : opening.layerReveals ?? typeReveals;
+  const setReveals = (v: LayerReveal[] | undefined) =>
+    onType ? (isDoor ? patchDt({ layerReveals: v }) : patchWt({ layerReveals: v, innerLayerRecess: undefined })) : onPatchOpening({ layerReveals: v });
+  const overridden = !!(opening.frameDetail || opening.layerReveals || opening.doorFrame || opening.doorFrameKind);
+  const scopeBar = (
+    <ScopeSwitch
+      scope={onType ? "type" : "opening"}
+      onScope={setScope}
+      overridden={overridden}
+      onReset={() => onPatchOpening({ frameDetail: undefined, layerReveals: undefined, doorFrame: undefined, doorFrameKind: undefined })}
+    />
+  );
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -191,12 +224,24 @@ export function OpeningEditorDialog({
             {cat === "fluegel" && wt && <FluegelPanel wt={wt} patchWt={patchWt} />}
             {cat === "sonnenschutz" && wt && <SonnenschutzPanel wt={wt} patchWt={patchWt} />}
             {cat === "tuerblatt" && dt && <TuerblattPanel dt={dt} patchDt={patchDt} />}
+            {(cat === "rahmendetail" || cat === "anschlag" || cat === "zarge" || cat === "schichten") && scopeBar}
+            {cat === "rahmendetail" && <FrameDetailPanel value={frameDetail} onChange={setFrameDetail} isDoor={isDoor} />}
+            {cat === "anschlag" && <RebatePanel value={frameDetail} onChange={setFrameDetail} isDoor={isDoor} />}
+            {cat === "zarge" && isDoor && (
+              <DoorFramePanel
+                kind={onType ? dt?.frameKind : opening.doorFrameKind}
+                onKind={(k) => (onType ? patchDt({ frameKind: k }) : onPatchOpening({ doorFrameKind: k }))}
+                value={onType ? dt?.doorFrame : opening.doorFrame}
+                onChange={(v) => (onType ? patchDt({ doorFrame: v }) : onPatchOpening({ doorFrame: v }))}
+              />
+            )}
+            {cat === "schichten" && <RevealPanel project={project} opening={opening} value={reveals} onChange={setReveals} />}
           </div>
 
-          {/* 3. Live-Ansicht (Elevation). */}
+          {/* 3. Live-Ansicht aus dem Kern: Grundriss, Schnitt, Ansicht. */}
           <div className="oed-preview">
             <div className="oed-preview-title">{t("oed.preview")}</div>
-            <ElevationPreview opening={opening} wt={wt} dt={dt} />
+            <CorePreview project={project} openingId={opening.id} />
           </div>
         </div>
 

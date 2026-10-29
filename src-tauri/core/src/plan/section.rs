@@ -545,7 +545,7 @@ fn wall_layers_reversed_in_u(w: &Wall, u: (f64, f64)) -> bool {
 }
 
 /// `splitWallLayers`: stehende Teil-Rechtecke je Schicht quer zur Dicke (u).
-fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_world: (f64, f64)) -> Result<Vec<Cut>, String> {
+fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_world: (f64, f64), plane: &Plane) -> Result<Vec<Cut>, String> {
     let total = sum_thickness(layers);
     let [u_min, u_max, v_min, v_max] = bbox(&cp.pts);
     let u_span = u_max - u_min;
@@ -553,26 +553,91 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
         return Ok(vec![cp.clone()]);
     }
     let scale = u_span / total;
-    let ordered: Vec<&Layer> = if wall_layers_reversed_in_u(owner, u_world) { layers.iter().rev().collect() } else { layers.iter().collect() };
+    let reversed = wall_layers_reversed_in_u(owner, u_world);
+    let ordered: Vec<&Layer> = if reversed { layers.iter().rev().collect() } else { layers.iter().collect() };
     let category = p.layer_category(&owner.category_code);
     let mut out = Vec::with_capacity(layers.len());
+    // [103] Schichteinzug am Sturz (Stück liegt über der Öffnung) bzw. an der Brüstung (darunter).
+    let (top, bottom) = section_reveal(p, owner, plane, v_min, v_max);
+    let n = layers.len();
     let mut acc = 0.0;
-    for layer in ordered {
+    for (k, layer) in ordered.into_iter().enumerate() {
+        let li = if reversed { n - 1 - k } else { k };
         let comp = p.component_or_fallback(&layer.component_id);
         let (fill, hatch) = layer_style(p, comp, owner.hatch_id.as_deref(), owner.hatch_source, owner.foreground.as_deref(), owner.foreground_source, owner.background.as_deref(), owner.background_source, category, SECTION_WALL_AXIS_ANGLE_DEG)?;
         let u_left = u_min + acc * scale;
         acc += layer.thickness;
         let u_right = u_min + acc * scale;
-        let mut c = Cut::new(cp.kind, cp.index, vec![[u_left, v_max], [u_right, v_max], [u_right, v_min], [u_left, v_min]]);
-        c.fill = Some(fill);
-        c.hatch = Some(hatch);
-        c.join_priority = Some(comp.join_priority);
-        c.component_id = Some(comp.id.clone());
-        c.source_id = cp.source_id.clone();
-        c.category = cp.category.clone();
-        out.push(c);
+        let mk = |pts: Vec<[f64; 2]>| {
+            let mut c = Cut::new(cp.kind, cp.index, pts);
+            c.fill = Some(fill.clone());
+            c.hatch = Some(hatch.clone());
+            c.join_priority = Some(comp.join_priority);
+            c.component_id = Some(comp.id.clone());
+            c.source_id = cp.source_id.clone();
+            c.category = cp.category.clone();
+            c
+        };
+        let shift = |s: &Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>| s.as_ref().and_then(|(_, v)| v.iter().find(|a| a.layer == li)).map_or(0.0, |a| a.shift);
+        let (vb, vt) = (v_min + shift(&top), v_max - shift(&bottom));
+        if vt - vb > 1e-6 {
+            out.push(mk(vec![[u_left, vt], [u_right, vt], [u_right, vb], [u_left, vb]]));
+        }
+        // Zusatzstücke dieser Schicht in der Öffnung.
+        let u_of = |o: f64| if reversed { u_max - o * scale } else { u_min + o * scale };
+        for (side, below) in [(&top, true), (&bottom, false)] {
+            let Some((z, adj)) = side else { continue };
+            for a in adj.iter().filter(|a| a.layer == li) {
+                for pc in &a.pieces {
+                    let (z0, z1) = if below { (z - pc[1], z - pc[0]) } else { (z + pc[0], z + pc[1]) };
+                    let (ua, ub) = (min(u_of(pc[2]), u_of(pc[3])), max(u_of(pc[2]), u_of(pc[3])));
+                    out.push(mk(vec![[ua, z1], [ub, z1], [ub, z0], [ua, z0]]));
+                }
+            }
+        }
     }
     Ok(out)
+}
+
+/// Schichteinzug der Öffnung, deren Sturz (unten an `v_min`) bzw. Brüstung (oben an `v_max`) dieses
+/// Wandstück ist und die die Schnittebene quert: `(Öffnungs-OK bzw. -UK, Anschlüsse)`.
+#[allow(clippy::type_complexity)]
+fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f64) -> (Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>, Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>) {
+    let (mut top, mut bottom) = (None, None);
+    let u_raw = plane.u_model();
+    let l = hypot2(u_raw.0, u_raw.1);
+    if !(l > 1e-12) {
+        return (None, None);
+    }
+    let u = (u_raw.0 / l, u_raw.1 / l);
+    let (a, n) = axis_frame(wall);
+    let un = u.0 * n.0 + u.1 * n.1;
+    if un.abs() < MIN_CROSS {
+        return (None, None);
+    }
+    let p0 = plane.base();
+    let rel = (p0.0 - wall.start.x, p0.1 - wall.start.y);
+    let n0 = rel.0 * n.0 + rel.1 * n.1;
+    let a0 = rel.0 * a.0 + rel.1 * a.1;
+    let ua = u.0 * a.0 + u.1 * a.1;
+    let along = a0 + ((0.0 - n0) / un) * ua;
+    let (zb, zt) = p.wall_vertical_extent(wall);
+    for o in p.openings_of_wall(&wall.id) {
+        let Some(r) = crate::opening_detail::opening_reveal(p, wall, o) else { continue };
+        if along < r.from + 1e-4 || along > r.to - 1e-4 {
+            continue;
+        }
+        let o_bottom = zb + o.sill_height.max(0.0);
+        let o_top = zt.min(o_bottom + o.height);
+        let [_, _, t, b] = r.sides;
+        if (v_min - o_top).abs() < 1e-3 {
+            top = Some((o_top, t));
+        }
+        if (v_max - o_bottom).abs() < 1e-3 {
+            bottom = Some((o_bottom, b));
+        }
+    }
+    (top, bottom)
 }
 
 /// `attachCutStyles`: Stil, Herkunft, Schicht-Bänder, Terminierung, Dominanz.
@@ -598,7 +663,7 @@ fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option
                 if let Some(o) = owner {
                     let wt = p.wall_type_or_fallback(o);
                     if wt.layers.len() > 1 {
-                        bands.extend(split_wall_layers(&cp, p, &wt.layers, o, u_world)?);
+                        bands.extend(split_wall_layers(&cp, p, &wt.layers, o, u_world, plane)?);
                         continue;
                     }
                 }
@@ -1421,6 +1486,19 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
         inset_from_face: t.inset_from_face.unwrap_or(f64::NAN),
         inset_inner: t.inset_face == Some(WindowTypeInsetFace::Innen),
         inset_mid: t.inset_face == Some(WindowTypeInsetFace::Mitte),
+        frame_width_end: f64::NAN,
+    });
+    // [102] Rahmen-Detail: Lage/Tiefe übersteuert, Breite oben/unten, Anschlussprofile.
+    let det = crate::opening_detail::frame_of(p, o).filter(|f| f.detailed);
+    let spec = spec.map(|s| match &det {
+        Some(f) => crate::opening_geom::WindowSpec {
+            frame_depth: f.depth,
+            inset_from_face: f.inset,
+            inset_inner: f.face == crate::opening_detail::Face::Innen,
+            inset_mid: f.face == crate::opening_detail::Face::Mitte,
+            ..s
+        },
+        None => s,
     });
     let finite = [wall.start.x, wall.start.y, wall.end.x, wall.end.y, total, ref_off, o.position, o.width].iter().all(|x| x.is_finite());
     let sym = if finite {
@@ -1455,12 +1533,22 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
     let u1 = c.u_at(f_max);
     let h = c.z_top - c.z_bottom;
     let fwv = min(fw, h / 3.0);
+    let (sp, sh) = det.as_ref().map_or((0.0, 0.0), |f| (min(f.sill_profile, h / 4.0), min(f.shading_profile, h / 4.0)));
+    let (fwb, fwt) = det.as_ref().map_or((fwv, fwv), |f| (min(max(0.02, f.sides.bottom), h / 3.0), min(max(0.02, f.sides.top), h / 3.0)));
+    let (zb0, zt0) = (c.z_bottom + sp, c.z_top - sh);
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
-    out.push(opening_poly(rect(u0, u1, c.z_bottom, c.z_bottom + fwv), true, &o.id));
-    out.push(opening_poly(rect(u0, u1, c.z_top - fwv, c.z_top), true, &o.id));
+    out.push(opening_poly(rect(u0, u1, zb0, zb0 + fwb), true, &o.id));
+    out.push(opening_poly(rect(u0, u1, zt0 - fwt, zt0), true, &o.id));
+    // Fensterbank- und Storen-Anschlussprofil.
+    if sp > 1e-4 {
+        out.push(opening_poly(rect(u0, u1, c.z_bottom, zb0), true, &o.id));
+    }
+    if sh > 1e-4 {
+        out.push(opening_poly(rect(u0, u1, zt0, c.z_top), true, &o.id));
+    }
     for s in glass {
         let u = c.u_at(s);
-        let mut l = line(v2(u, c.z_bottom + fwv), v2(u, c.z_top - fwv), "section-window-glass", GLASS_MM, OPENING_INK);
+        let mut l = line(v2(u, zb0 + fwb), v2(u, zt0 - fwt), "section-window-glass", GLASS_MM, OPENING_INK);
         if let Primitive::Line { opening_id, .. } = &mut l {
             *opening_id = Some(o.id.clone());
         }
@@ -1524,6 +1612,11 @@ fn door_cut(p: &Project, o: &Opening, c: &CrossSection) -> Vec<Primitive> {
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
     lintel_cut(&mut out, o, c, p.door_type(o).and_then(|t| t.lintel_height), 0.0);
     let kind = p.door_type(o).map(|t| t.kind);
+    // [102] Zargen-Arten: Sturz-Profil der Zarge und Blatt im Falz.
+    if let Some(df) = crate::opening_detail::door_frame_of(p, o).filter(|_| matches!(kind, Some(DoorTypeKind::Dreh | DoorTypeKind::Pendel | DoorTypeKind::Unknown))) {
+        door_frame_cut(&mut out, o, c, &df);
+        return out;
+    }
     if o.door_type == Some(OpeningDoorType::Wandoeffnung) || kind == Some(DoorTypeKind::Wandoeffnung) {
         return out;
     }
@@ -1556,6 +1649,64 @@ fn door_cut(p: &Project, o: &Opening, c: &CrossSection) -> Vec<Primitive> {
     out
 }
 
+/// Türzarge im Schnitt ([102]): Profil am Sturz (gleiches Profil wie im Grundriss, `x` nach unten)
+/// und Türblatt im Falz der Aufschlagseite.
+fn door_frame_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, df: &crate::opening_detail::DoorFrame) {
+    use crate::opening_detail as od;
+    let total = c.face_max - c.face_min;
+    let innen = od::aufschlag_innen(o);
+    let s_of = |d: f64| c.face_min + if innen { total - d } else { d };
+    let profile = od::door_frame_profile(df, total, innen);
+    let clear = od::profile_clear_x(&profile);
+    for (_, poly) in &profile {
+        let pts: Vec<Vec2> = poly.iter().map(|q| v2(c.u_at(s_of(q[1])), c.z_top - q[0])).collect();
+        let mut pr = if df.steel { polygon(pts, OPENING_INK, OPENING_INK, FRAME_MM, no_hatch_base()) } else { polygon(pts, "#ffffff", OPENING_INK, FRAME_MM, no_hatch_base()) };
+        if let Primitive::Polygon { opening_id, .. } = &mut pr {
+            *opening_id = Some(o.id.clone());
+        }
+        out.push(pr);
+    }
+    let (d0, d1) = od::leaf_band(df, total, innen);
+    let top = c.z_top - max(clear - df.falz_width, 0.0);
+    out.push(opening_poly(rect(c.u_at(s_of(d0)), c.u_at(s_of(d1)), c.z_bottom + 0.01, top), true, &o.id));
+}
+
+/// Anschlag im Schnitt ([102]/[94]): Wandnase oben (Sturz) und unten (Brüstung) über die Zone
+/// zwischen gewählter Fläche und Rahmen, je Wandschicht in deren Schnitt-Darstellung.
+fn rebate_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result<Vec<Primitive>, String> {
+    let mut out = Vec::new();
+    let Some(f) = crate::opening_detail::frame_of(p, o) else { return Ok(out) };
+    let wt = p.wall_type_or_fallback(wall);
+    let total = sum_thickness(&wt.layers);
+    let Some((z0, z1)) = f.rebate_zone(total) else { return Ok(out) };
+    let h = c.z_top - c.z_bottom;
+    let category = p.layer_category(&wall.category_code);
+    for (rd, top) in [(f.rebate.top, true), (if o.kind == ElementKind::Door { 0.0 } else { f.rebate.bottom }, false)] {
+        let rd = min(rd, h / 3.0);
+        if !(rd > 1e-4) {
+            continue;
+        }
+        let (v0, v1) = if top { (c.z_top - rd, c.z_top) } else { (c.z_bottom, c.z_bottom + rd) };
+        let mut l0 = 0.0;
+        for layer in &wt.layers {
+            let l1 = l0 + layer.thickness;
+            let (a, b) = (z0.max(l0), z1.min(l1));
+            l0 = l1;
+            if b - a <= 1e-6 {
+                continue;
+            }
+            let comp = p.component_or_fallback(&layer.component_id);
+            let (fill, hatch) = layer_style(p, comp, wall.hatch_id.as_deref(), wall.hatch_source, wall.foreground.as_deref(), wall.foreground_source, wall.background.as_deref(), wall.background_source, category, SECTION_WALL_AXIS_ANGLE_DEG)?;
+            let mut pr = polygon(rect(c.u_at(c.face_min + a), c.u_at(c.face_min + b), v0, v1), &fill, OPENING_INK, FRAME_MM, hatch);
+            if let Primitive::Polygon { opening_id, .. } = &mut pr {
+                *opening_id = Some(o.id.clone());
+            }
+            out.push(pr);
+        }
+    }
+    Ok(out)
+}
+
 /// `sectionOpeningPrimitives`.
 pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibility) -> Result<Vec<Primitive>, String> {
     let Some(plane) = level.plane() else { return Ok(Vec::new()) };
@@ -1581,7 +1732,8 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
             continue;
         }
         let Some(c) = cross_section(p, wall, o, p0, u)? else { continue };
-        let prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(p, o, &c) };
+        let mut prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(p, o, &c) };
+        prims.extend(rebate_cut(p, wall, o, &c)?);
         let greyed = vis.greyed(&o.category_code);
         for pr in prims {
             out.push(if greyed { pr.with_greyed(true) } else { pr });
@@ -2072,8 +2224,8 @@ mod ts_faelle {
         let w2 = p.walls.iter().find(|w| w.id == "W2").unwrap().clone();
         let w4 = p.walls.iter().find(|w| w.id == "W4").unwrap().clone();
         let u = (1.0, 0.0);
-        let b2 = split_wall_layers(&cp, &p, &layers, &w2, u).unwrap();
-        let b4 = split_wall_layers(&cp, &p, &layers, &w4, u).unwrap();
+        let b2 = split_wall_layers(&cp, &p, &layers, &w2, u, &Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] }).unwrap();
+        let b4 = split_wall_layers(&cp, &p, &layers, &w4, u, &Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] }).unwrap();
         // W4 (Aussenseite −x): layers[0] an uMin; W2 gespiegelt: layers[0] an uMax.
         assert_eq!(b4[0].component_id.as_deref(), Some(layers[0].component_id.as_str()));
         assert!(close(bbox(&b4[0].pts)[0], 0.0));
@@ -2081,7 +2233,7 @@ mod ts_faelle {
         // Override der Wand gilt für jede Schicht
         p.walls[1].background = Some("#123456".into());
         let w = p.walls[1].clone();
-        let bands = split_wall_layers(&cp, &p, &layers, &w, u).unwrap();
+        let bands = split_wall_layers(&cp, &p, &layers, &w, u, &Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] }).unwrap();
         assert!(bands.iter().all(|b| b.fill.as_deref() == Some("#123456")));
     }
 }
