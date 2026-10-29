@@ -75,7 +75,7 @@ describe("trucksolid-WASM", () => {
     const vols = back.map(volume).sort((a, b) => a - b);
     expect(vols[0]).toBeCloseTo((5 * 2.6 - 1.2 * 1.2) * 0.3, 1); // Wand
     expect(vols[1]).toBeCloseTo(Math.PI * 2, 1); // Zylinder
-  }, 30_000);
+  }, 120_000); // Einlesen (Tessellieren) dauert im --no-opt-WASM ~12 s; unter Last ein Vielfaches
 
   it("Kennwerte + Kollision (truck-meshalgo)", () => {
     const cub = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) => ({ kind: "cuboid", min: [x0, y0, z0], max: [x1, y1, z1] });

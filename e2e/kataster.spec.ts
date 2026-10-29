@@ -65,8 +65,13 @@ async function gripOffset(page: Page, dx: number, dy: number): Promise<number> {
 
 /** Ein gezeichneter Griff liegt (± 1 px) am Bildschirmort des Modellpunkts. */
 async function expectGripAt(page: Page, dx: number, dy: number): Promise<void> {
-  const d = await gripOffset(page, dx, dy);
-  expect(d, `Griff bei ${dx}/${dy}: nächster gezeichneter ${d.toFixed(2)} px entfernt`).toBeLessThan(1);
+  // Griffe werden nach Zoom/Pan neu gezeichnet: auf den Endzustand warten (±1 px bleibt die Aussage).
+  let d = Number.POSITIVE_INFINITY;
+  await expect
+    .poll(async () => (d = await gripOffset(page, dx, dy)), {
+      message: `Griff bei ${dx}/${dy}: nächster gezeichneter ${d.toFixed(2)} px entfernt`,
+    })
+    .toBeLessThan(1);
 }
 
 /** Breite des Ausschnitts in Metern (viewBox-Breite / 90). */
@@ -75,16 +80,40 @@ async function viewWidthM(page: Page): Promise<number> {
   return Number(vb!.split(/\s+/)[2]) / 90;
 }
 
-/** Mit dem Mausrad um den Modellpunkt hineinzoomen, bis der Ausschnitt höchstens `widthM` breit ist. */
+/** viewBox-Attribut, sobald es sich über zwei Abfragen im Abstand > Festschreibe-Pause nicht ändert. */
+async function settledViewBox(page: Page): Promise<string> {
+  const read = () => page.locator("svg.plan-svg").getAttribute("viewBox") as Promise<string>;
+  let last = await read();
+  let stable = 0;
+  // Rad-Zoom wird imperativ angewandt und erst nach 70 ms Ruhe festgeschrieben; unter Last
+  // dauert das länger — also auf beobachtbaren Zustand warten statt feste Pausen.
+  await expect
+    .poll(
+      async () => {
+        const now = await read();
+        stable = now === last ? stable + 1 : 0;
+        last = now;
+        return stable;
+      },
+      { timeout: 15_000, intervals: [120] },
+    )
+    .toBeGreaterThanOrEqual(2);
+  return last;
+}
+
+/**
+ * Mit dem Mausrad um den Modellpunkt hineinzoomen, bis der Ausschnitt höchstens `widthM` breit ist.
+ * Mehrere Rad-Ereignisse pro Runde (der Anker bleibt am selben Bildschirmpunkt), danach warten,
+ * bis die viewBox festgeschrieben ist — erst dann wird der Punkt neu berechnet.
+ */
 async function zoomTo(page: Page, dx: number, dy: number, widthM: number): Promise<void> {
-  for (let k = 0; k < 200 && (await viewWidthM(page)) > widthM; k++) {
+  for (let k = 0; k < 40 && (await viewWidthM(page)) > widthM; k++) {
     const p = await screenOf(page, dx, dy);
     await page.mouse.move(p.x, p.y);
-    await page.mouse.wheel(0, -400);
-    await page.waitForTimeout(100); // Rad-Zoom wird nach 70 ms Ruhe festgeschrieben
+    for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -400);
+    await settledViewBox(page);
   }
-  // Pan/Zoom wird imperativ angewandt und erst nach einer Pause festgeschrieben.
-  await page.waitForTimeout(400);
+  await settledViewBox(page);
   expect(await viewWidthM(page)).toBeLessThanOrEqual(widthM);
 }
 

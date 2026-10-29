@@ -80,16 +80,21 @@ describe("buildTerrainGrid", () => {
   });
 
   it("dezimiert das Raster gleichmässig, wenn es die Zellenzahl-Grenze überschreitet", { timeout: 60_000 }, () => {
-    // 700×700 = 490'000 Zellen > MAX_GRID_CELLS (400'000) -> muss dezimiert werden.
-    const lines: string[] = [];
-    for (let i = 0; i < 700; i++) {
-      for (let j = 0; j < 700; j++) lines.push(`${2600000 + i} ${1200000 + j} ${500 + i + j}`);
+    // 640×640 = 409'600 Zellen > MAX_GRID_CELLS (400'000) -> muss dezimiert werden.
+    // Kachel direkt gebaut (Parsen ist oben getestet; hier zählt nur buildTerrainGrid).
+    const points = new Map<string, number>();
+    const es: number[] = [];
+    const ns: number[] = [];
+    for (let i = 0; i < 640; i++) {
+      es.push(2600000 + i);
+      ns.push(1200000 + i);
+      for (let j = 0; j < 640; j++) points.set(`${2600000 + i},${1200000 + j}`, 500 + i + j);
     }
-    const tile = parseXyzPoints(lines.join("\n"));
+    const tile = { points, es, ns };
     const grid = buildTerrainGrid([tile], { e: 2600000, n: 1200000 }, [
       2599000, 1199000, 2601000, 1201000,
     ]);
     expect(grid).not.toBeNull();
-    expect(grid!.xs.length * grid!.ys.length).toBeLessThanOrEqual(490_000 / 4 + 1);
+    expect(grid!.xs.length * grid!.ys.length).toBeLessThanOrEqual(409_600 / 4 + 1);
   });
 });
