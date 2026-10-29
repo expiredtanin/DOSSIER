@@ -5,6 +5,7 @@
 import type { Vec2 } from "../../../model/types";
 import type { SnapResult, ToolDraft } from "../../../tools/types";
 import { hudSegments, type HudFieldsState } from "../../../tools/hudFormat";
+import { VbCircle } from "./vbCircle";
 
 /**
  * Zeichnet die Werkzeug-Vorschau: Vorschau-Formen (gestrichelte Akzentlinien /
@@ -58,7 +59,7 @@ export function DraftOverlay({
       {draft.vertices.map((v, i) => {
         const s = toScreen(v);
         return (
-          <circle
+          <VbCircle
             key={`v${i}`}
             className="tool-vertex"
             cx={s.x}
@@ -289,7 +290,7 @@ function SnapMarker({
         />
       )}
       {snap.kind === "grid" && (
-        <circle
+        <VbCircle
           className="snap-glyph snap-fill"
           cx={s.x}
           cy={s.y}
@@ -327,7 +328,7 @@ function SnapMarker({
         </>
       )}
       {(snap.kind === "center" || snap.kind === "quadrant") && (
-        <circle className="snap-glyph" cx={s.x} cy={s.y} r={r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
+        <VbCircle className="snap-glyph" cx={s.x} cy={s.y} r={r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
       )}
       {snap.kind === "onEdge" && (
         <polygon
@@ -352,7 +353,7 @@ function SnapMarker({
       {/* Tangente: kleiner Kreis (wie „center") plus eine kurze Berührlinie. */}
       {snap.kind === "tangent" && (
         <>
-          <circle className="snap-glyph" cx={s.x} cy={s.y} r={r * 0.7} style={glyphStyle} vectorEffect="non-scaling-stroke" />
+          <VbCircle className="snap-glyph" cx={s.x} cy={s.y} r={r * 0.7} style={glyphStyle} vectorEffect="non-scaling-stroke" />
           <line
             className="snap-glyph"
             x1={s.x - r}
@@ -372,7 +373,7 @@ function SnapMarker({
         </>
       )}
       {(snap.kind === "endpoint" || snap.kind === "ortho" || snap.kind === "extension") && (
-        <circle
+        <VbCircle
           className="snap-glyph"
           cx={s.x}
           cy={s.y}
