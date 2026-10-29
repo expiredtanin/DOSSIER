@@ -42,7 +42,7 @@ import {
 } from "./planView/primitives";
 import { DraftOverlay } from "./planView/overlays";
 import { visibleGripIndices } from "./planView/gripCull";
-import { VbCircle } from "./planView/vbCircle";
+import { localViewBoxAttr, makeToLocal, pickOverlayOrigin } from "./planView/overlayOrigin";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, indexedInRegion, regionContains, type Bounds } from "../../core";
@@ -925,6 +925,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // der Resize-Beobachter stets den aktuellen Stand lesen (Handle hat leere Deps).
   const viewRef = useRef(view);
   viewRef.current = view;
+  // Lokaler Ursprung des SVG-Overlays (viewBox-Einheiten, s. planView/overlayOrigin.ts): alles, was
+  // ins DOM geht, ist relativ dazu (f32-sicher auch bei LV95); `view`, Treffer und Fang bleiben
+  // absolut. Bleibt dasselbe Objekt, solange der Ausschnitt in der Nähe bleibt (Memos unten).
+  const overlayOriginRef = useRef<Vec2 | null>(null);
+  const overlayOrigin = pickOverlayOrigin(view, overlayOriginRef.current);
+  overlayOriginRef.current = overlayOrigin;
+  const toLocal = useMemo(() => makeToLocal(overlayOrigin), [overlayOrigin]);
   // Live-Massstab für bildschirmkonstante Overlays während Pan/Zoom (s. liveMeet.tsx).
   const meetStore = useMemo(() => createMeetStore(), []);
   // Live-Ausschnitt (Lineal) während Pan/Zoom.
@@ -1861,7 +1868,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       // Frame SCHARF neu gerastert (ein CSS-Transform würde die Ebene als Bitmap
       // strecken → verpixelt). Bildschirmkonstante Griffe skalieren dabei mit.
       svg.style.transform = "";
-      svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+      svg.setAttribute("viewBox", localViewBoxAttr(v, overlayOriginRef.current ?? { x: 0, y: 0 }));
       return;
     }
     // Schweres Overlay (z. B. riesiger Auswahlpfad): GPU-komponierter CSS-Transform.
@@ -2543,8 +2550,17 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const WHEEL_COMMIT_MS = 70;
 
+  // Seiten-Scroll/-Zoom des Browsers beim Rad über dem Plan unterdrücken: React hängt `onWheel`
+  // passiv an (dort `preventDefault` wirkungslos, Chromium meldet einen Konsolenfehler) — daher
+  // ein eigener, nicht-passiver Listener am SVG.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const stop = (e: WheelEvent) => e.preventDefault();
+    el.addEventListener("wheel", stop, { passive: false });
+    return () => el.removeEventListener("wheel", stop);
+  }, []);
   const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
-    e.preventDefault();
     if (useGpuRenderer) {
       // Aktueller (logischer) Ausschnitt: ein laufender imperativer Zoom/Pan gewinnt.
       const base = panPending.current ?? viewRef.current;
@@ -2724,26 +2740,24 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const parts: string[] = [];
     for (const p of highlightDrawPrims) {
       if (p.kind === "line") {
-        const a = toScreen(p.a), b = toScreen(p.b);
+        const a = toLocal(p.a), b = toLocal(p.b);
         parts.push(`M${a.x} ${a.y}L${b.x} ${b.y}`);
       } else if (p.pts.length > 1) {
-        const q = p.pts.map(toScreen);
+        const q = p.pts.map(toLocal);
         parts.push(`M${q.map((s) => `${s.x} ${s.y}`).join("L")}Z`);
       }
     }
     return parts.join("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightDrawPrims, nativeHighlight]);
+  }, [highlightDrawPrims, nativeHighlight, toLocal]);
   overlayHeavyRef.current = highlightDrawPath.length > 300_000;
   const highlightTextPath = useMemo(() => {
     const parts: string[] = [];
     for (const p of highlightTextFrames) {
-      const q = textFrameCorners(p).map(toScreen);
+      const q = textFrameCorners(p).map(toLocal);
       parts.push(`M${q.map((s) => `${s.x} ${s.y}`).join("L")}Z`);
     }
     return parts.join("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightTextFrames]);
+  }, [highlightTextFrames, toLocal]);
 
   // Hervorhebung der selektierten Decken: alle Polygone JEDER gewählten Decke
   // (Fläche + Umriss) mit Akzentkontur überzeichnen — analog zur Wand-Auswahl.
@@ -2976,14 +2990,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             key={i}
             p={p}
             index={i}
-            toScreen={toScreen}
+            toScreen={toLocal}
             hairline={!!hairline}
             paperScale={paperScale}
           />
         ),
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toScreen ist modulweit konstant
-    [culledIndexed, hairline, paperScale, editTextId],
+    [culledIndexed, hairline, paperScale, editTextId, toLocal],
   );
   const drawingRunEls = useMemo(
     () =>
@@ -2994,13 +3007,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             <DrawingRunShape
               key={`run-${i}`}
               run={run}
-              toScreen={toScreen}
+              toScreen={toLocal}
               hairline={!!hairline}
               paperScale={paperScale}
             />
           )),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toScreen ist modulweit konstant
-    [drawingRuns, hairline, paperScale, useGpuRenderer],
+    [drawingRuns, hairline, paperScale, useGpuRenderer, toLocal],
   );
 
   return (
@@ -3041,7 +3053,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       <svg
         ref={svgRef}
         className="plan-svg"
-        viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+        viewBox={localViewBoxAttr(view, overlayOrigin)}
+        data-origin-x={overlayOrigin.x}
+        data-origin-y={overlayOrigin.y}
         preserveAspectRatio="xMidYMid meet"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -3085,8 +3099,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           aktivem GL löscht die WebGL-Ebene das Blatt → hier transparent halten
           (bleibt aber Klick-/Pan-Trefferfläche für Leerraum). */}
       <rect
-        x={view.x}
-        y={view.y}
+        x={view.x - overlayOrigin.x}
+        y={view.y - overlayOrigin.y}
         width={view.w}
         height={view.h}
         className={useGpuRenderer ? undefined : "plan-bg"}
@@ -3098,6 +3112,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {showGrid && (
         <PlanGrid
           vb={{ x0: view.x, y0: view.y, w: view.w, h: view.h }}
+          origin={overlayOrigin}
           pxPerMeter={currentPxPerMeter()}
         />
       )}
@@ -3114,8 +3129,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           <image
             key={img.id}
             href={img.src}
-            x={img.min.x * PX_PER_M}
-            y={-img.max.y * PX_PER_M}
+            x={img.min.x * PX_PER_M - overlayOrigin.x}
+            y={-img.max.y * PX_PER_M - overlayOrigin.y}
             width={w}
             height={h}
             opacity={img.opacity}
@@ -3144,7 +3159,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           key={`sel-${i}`}
           className="plan-selected"
           points={poly.pts
-            .map(toScreen)
+            .map(toLocal)
             .map((s) => `${s.x},${s.y}`)
             .join(" ")}
           pointerEvents="none"
@@ -3156,7 +3171,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           key={`selc-${i}`}
           className="plan-selected"
           points={poly.pts
-            .map(toScreen)
+            .map(toLocal)
             .map((s) => `${s.x},${s.y}`)
             .join(" ")}
           pointerEvents="none"
@@ -3168,7 +3183,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           key={`selrm-${i}`}
           className="plan-selected"
           points={poly.pts
-            .map(toScreen)
+            .map(toLocal)
             .map((s) => `${s.x},${s.y}`)
             .join(" ")}
           pointerEvents="none"
@@ -3180,7 +3195,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           key={`selrf-${i}`}
           className="plan-selected"
           points={poly.pts
-            .map(toScreen)
+            .map(toLocal)
             .map((s) => `${s.x},${s.y}`)
             .join(" ")}
           pointerEvents="none"
@@ -3192,7 +3207,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           key={`selctx-${i}`}
           className="plan-selected"
           points={poly.pts
-            .map(toScreen)
+            .map(toLocal)
             .map((s) => `${s.x},${s.y}`)
             .join(" ")}
           pointerEvents="none"
@@ -3204,7 +3219,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           key={`selsl-${i}`}
           className="plan-selected"
           points={poly.pts
-            .map(toScreen)
+            .map(toLocal)
             .map((s) => `${s.x},${s.y}`)
             .join(" ")}
           pointerEvents="none"
@@ -3216,7 +3231,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           key={`selex-${i}`}
           className="plan-selected"
           points={poly.pts
-            .map(toScreen)
+            .map(toLocal)
             .map((s) => `${s.x},${s.y}`)
             .join(" ")}
           pointerEvents="none"
@@ -3228,7 +3243,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           key={`selcol-${i}`}
           className="plan-selected"
           points={poly.pts
-            .map(toScreen)
+            .map(toLocal)
             .map((s) => `${s.x},${s.y}`)
             .join(" ")}
           pointerEvents="none"
@@ -3240,20 +3255,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           <line
             key={`selo-${i}`}
             className="plan-sel-draw"
-            x1={toScreen(p.a).x}
-            y1={toScreen(p.a).y}
-            x2={toScreen(p.b).x}
-            y2={toScreen(p.b).y}
+            x1={toLocal(p.a).x}
+            y1={toLocal(p.a).y}
+            x2={toLocal(p.b).x}
+            y2={toLocal(p.b).y}
             pointerEvents="none"
           />
         ) : p.kind === "arc" ? (
           <line
             key={`selo-${i}`}
             className="plan-sel-draw"
-            x1={toScreen(p.from).x}
-            y1={toScreen(p.from).y}
-            x2={toScreen(p.to).x}
-            y2={toScreen(p.to).y}
+            x1={toLocal(p.from).x}
+            y1={toLocal(p.from).y}
+            x2={toLocal(p.to).x}
+            y2={toLocal(p.to).y}
             pointerEvents="none"
           />
         ) : (
@@ -3261,7 +3276,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             key={`selo-${i}`}
             className="plan-sel-draw"
             points={p.pts
-              .map(toScreen)
+              .map(toLocal)
               .map((s) => `${s.x},${s.y}`)
               .join(" ")}
             pointerEvents="none"
@@ -3274,10 +3289,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           <line
             key={`selst-${i}`}
             className="plan-sel-draw"
-            x1={toScreen(p.a).x}
-            y1={toScreen(p.a).y}
-            x2={toScreen(p.b).x}
-            y2={toScreen(p.b).y}
+            x1={toLocal(p.a).x}
+            y1={toLocal(p.a).y}
+            x2={toLocal(p.b).x}
+            y2={toLocal(p.b).y}
             pointerEvents="none"
           />
         ) : (
@@ -3285,7 +3300,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             key={`selst-${i}`}
             className="plan-selected"
             points={p.pts
-              .map(toScreen)
+              .map(toLocal)
               .map((s) => `${s.x},${s.y}`)
               .join(" ")}
             pointerEvents="none"
@@ -3308,10 +3323,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {/* Gruppen-Auswahl: nur eine Bounding-Box mit vier Eckpunkten (kein
           Umriss jedes einzelnen Mitglieds) — s. `groupBBox`. */}
       {groupBBox && (<LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>{(meet) => {
-        const c1 = toScreen({ x: groupBBox.minX, y: groupBBox.minY });
-        const c2 = toScreen({ x: groupBBox.maxX, y: groupBBox.minY });
-        const c3 = toScreen({ x: groupBBox.maxX, y: groupBBox.maxY });
-        const c4 = toScreen({ x: groupBBox.minX, y: groupBBox.maxY });
+        const c1 = toLocal({ x: groupBBox.minX, y: groupBBox.minY });
+        const c2 = toLocal({ x: groupBBox.maxX, y: groupBBox.minY });
+        const c3 = toLocal({ x: groupBBox.maxX, y: groupBBox.maxY });
+        const c4 = toLocal({ x: groupBBox.minX, y: groupBBox.maxY });
         const size = (4 * gripK(meet)) / meet;
         const corners = [c1, c2, c3, c4];
         return (
@@ -3322,7 +3337,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               pointerEvents="none"
             />
             {corners.map((s, i) => (
-              <VbCircle
+              <circle
                 key={`gbb-${i}`}
                 className="plan-grip plan-group-bbox-corner"
                 cx={s.x}
@@ -3340,16 +3355,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         <g className="plan-hover-pick" pointerEvents="none">
           {hoverPrims.map((p, i) => {
             const key = `hp-${i}`;
-            const pts = (list: Vec2[]) => list.map(toScreen).map((q) => `${q.x},${q.y}`).join(" ");
+            const pts = (list: Vec2[]) => list.map(toLocal).map((q) => `${q.x},${q.y}`).join(" ");
             switch (p.kind) {
               case "line":
-                return <line key={key} x1={toScreen(p.a).x} y1={toScreen(p.a).y} x2={toScreen(p.b).x} y2={toScreen(p.b).y} />;
+                return <line key={key} x1={toLocal(p.a).x} y1={toLocal(p.a).y} x2={toLocal(p.b).x} y2={toLocal(p.b).y} />;
               case "arc":
-                return <line key={key} x1={toScreen(p.from).x} y1={toScreen(p.from).y} x2={toScreen(p.to).x} y2={toScreen(p.to).y} />;
+                return <line key={key} x1={toLocal(p.from).x} y1={toLocal(p.from).y} x2={toLocal(p.to).x} y2={toLocal(p.to).y} />;
               case "polygon":
                 return <polygon key={key} className="plan-hover-fill" points={pts(p.pts)} />;
               case "drawingCircle": {
-                const c = toScreen(p.center);
+                const c = toLocal(p.center);
                 return <circle key={key} cx={c.x} cy={c.y} r={p.r * PX_PER_M} />;
               }
               case "drawingArc": {
@@ -3387,8 +3402,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               ? "plan-marquee plan-marquee-crossing"
               : "plan-marquee"
           }
-          x={marqueeRect.x}
-          y={marqueeRect.y}
+          x={marqueeRect.x - overlayOrigin.x}
+          y={marqueeRect.y - overlayOrigin.y}
           width={marqueeRect.w}
           height={marqueeRect.h}
           style={{ stroke: marqueeColor, fill: marqueeColor }}
@@ -3403,10 +3418,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           <line
             key={`gripline-${i}`}
             className="plan-grip-line"
-            x1={toScreen(l.a).x}
-            y1={toScreen(l.a).y}
-            x2={toScreen(l.b).x}
-            y2={toScreen(l.b).y}
+            x1={toLocal(l.a).x}
+            y1={toLocal(l.a).y}
+            x2={toLocal(l.b).x}
+            y2={toLocal(l.b).y}
             pointerEvents="none"
           />
         ))}
@@ -3419,10 +3434,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           {(meet) =>
             // Viele Griffe (Kataster): nur die sichtbaren zeichnen (gripCull.ts).
             (visibleGripIndices(grips!, toScreen, view, meet) ?? grips!.map((_, i) => i)).map((i) => {
-              const s = toScreen(grips![i]);
+              const s = toLocal(grips![i]);
               const size = (4.5 * gripK(meet)) / meet;
               return (
-                <VbCircle
+                <circle
                   key={`grip-${i}`}
                   className="plan-grip"
                   cx={s.x}
@@ -3440,7 +3455,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           Editor. Bildschirmkonstante Größe. */}
       {roomStamp && (
         <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>{(meet) => {
-          const s = toScreen(roomStamp.anchor);
+          const s = toLocal(roomStamp.anchor);
           const size = 4 / meet;
           const pts = [
             `${s.x},${s.y - size}`,
@@ -3466,7 +3481,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           {(s) =>
         (visibleGripIndices(edgeGrips!.map((g) => g.mid), toScreen, view, s) ?? edgeGrips!.map((_, i) => i)).map((i) => {
           const eg = edgeGrips![i];
-          const m = toScreen(eg.mid);
+          const m = toLocal(eg.mid);
           // Normale in den Bildschirmraum (Y spiegeln); auf Bildschirm-px-Größen.
           const sn = screenNormal(eg.normal);
           const hVb = (EDGE_GRIP_H_PX * gripK(s)) / s; // Dreieckshöhe (nach außen)
@@ -3501,7 +3516,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           {(meet) => (
             <DraftOverlay
               draft={toolHandlers.draft!}
-              toScreen={toScreen}
+              toScreen={toLocal}
               vbPerPx={1 / meet}
               snapColor={snapColor}
               hudFields={hudFields ?? null}
@@ -3524,9 +3539,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         return (
           <g className="plan-hover-divide" pointerEvents="none">
             {pts.map((pt, i) => {
-              const s = toScreen(pt);
+              const s = toLocal(pt);
               return (
-                <VbCircle
+                <circle
                   key={i}
                   cx={s.x}
                   cy={s.y}
@@ -3651,7 +3666,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         return (
           <svg
             className="plan-ruler-overlay"
-            viewBox={`${vb.x0} ${vb.y0} ${vb.w} ${vb.h}`}
+            viewBox={`${vb.x0 - overlayOrigin.x} ${vb.y0 - overlayOrigin.y} ${vb.w} ${vb.h}`}
             preserveAspectRatio="none"
             style={{
               position: "absolute",
@@ -3664,6 +3679,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           >
             <LiveRulers
               vb={vb}
+              origin={overlayOrigin}
               vbPerPx={1 / scale}
               pxPerMeter={scale * PX_PER_M}
               store={rulerCursor}

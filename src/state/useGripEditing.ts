@@ -11,6 +11,7 @@ import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from ".
 import { wallTypeThickness } from "../model/types";
 import { drawingVertices } from "./projectSlice";
 import { gripDrawingIdsFor } from "./gripLimits";
+import { openEdges, polylineEdgeGrips, ringEdges } from "./edgeGrips";
 import { areaMovePreview } from "../tools/transform";
 import { mvGeom } from "../core";
 import { drawingPreviewShapes } from "../tools/drawingPreview";
@@ -371,45 +372,7 @@ export function useGripEditing(opts: {
   //    Ecken wandern mit, die Nachbar-Segmente dehnen sich nach (Parallel-
   //    Verschieben EINER Kante einer komplexen Polylinie, §Task B).
   const edgeGrips: EdgeGrip[] = (() => {
-    // Geschlossener Ring aus Vertices → Kanten-Griffe mit Außennormale.
-    const ringEdges = (verts: Vec2[], owner: { drawingId?: string; wallId?: string }): EdgeGrip[] => {
-      const n = verts.length;
-      if (n < 3) return [];
-      // Schwerpunkt (Mittel der Eckpunkte) als Innenbezug.
-      let cx = 0, cy = 0;
-      for (const v of verts) { cx += v.x; cy += v.y; }
-      const centroid: Vec2 = { x: cx / n, y: cy / n };
-      const out: EdgeGrip[] = [];
-      for (let i = 0; i < n; i++) {
-        const a = verts[i];
-        const b = verts[(i + 1) % n];
-        const mid: Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const edge = sub(b, a);
-        let nrm = normalize(leftNormal(edge));
-        // Nach außen orientieren: Normale soll von centroid → mid weisen.
-        const outward = sub(mid, centroid);
-        if (nrm.x * outward.x + nrm.y * outward.y < 0) nrm = scale(nrm, -1);
-        out.push({ mid, normal: nrm, aIndex: i, bIndex: (i + 1) % n, owner });
-      }
-      return out;
-    };
-    // Offene Kette (Linie/offene Polylinie) → ein Griff je Segment, OHNE
-    // Schlusskante. `normal` dient nur der Griff-Darstellung (leftNormal der
-    // Kante); die Bewegung ist frei (volles Delta), nicht auf die Normale
-    // beschränkt — daher `free: true`.
-    const openEdges = (verts: Vec2[], owner: { drawingId?: string; wallId?: string }): EdgeGrip[] => {
-      const n = verts.length;
-      if (n < 2) return [];
-      const out: EdgeGrip[] = [];
-      for (let i = 0; i < n - 1; i++) {
-        const a = verts[i];
-        const b = verts[i + 1];
-        const mid: Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const nrm = normalize(leftNormal(sub(b, a)));
-        out.push({ mid, normal: nrm, aIndex: i, bIndex: i + 1, free: true, owner });
-      }
-      return out;
-    };
+    // ringEdges/openEdges/polylineEdgeGrips: s. edgeGrips.ts.
     // Decke: geschlossener Ring aus dem Umriss (Auswahl exklusiv, wie bei grips).
     if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       return ringEdges(selectedCeiling.outline, {});
@@ -432,8 +395,7 @@ export function useGripEditing(opts: {
       const g = d.geom;
       const owner = { drawingId: id };
       if (g.shape === "rect" || g.shape === "image") out.push(...ringEdges(verts, owner));
-      else if (g.shape === "polyline" && g.closed) out.push(...ringEdges(verts, owner));
-      else if (g.shape === "polyline" && !g.closed) out.push(...openEdges(verts, owner));
+      else if (g.shape === "polyline") out.push(...polylineEdgeGrips(g, owner));
       else if (g.shape === "spline" && g.closed) out.push(...ringEdges(verts, owner));
       else if (g.shape === "spline" && !g.closed) out.push(...openEdges(verts, owner));
       else if (g.shape === "line") out.push(...openEdges(verts, owner));

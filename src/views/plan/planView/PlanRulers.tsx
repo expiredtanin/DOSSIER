@@ -26,12 +26,18 @@ export function rulerStep(pxPerMeter: number): number {
  */
 export function PlanRulers({
   vb,
+  origin = { x: 0, y: 0 },
   vbPerPx,
   pxPerMeter,
   cursor,
 }: {
-  /** Sichtbarer Ausschnitt in viewBox-Einheiten. */
+  /** Sichtbarer Ausschnitt in (absoluten) viewBox-Einheiten. */
   vb: { x0: number; y0: number; w: number; h: number };
+  /**
+   * Lokaler Ursprung (viewBox-Einheiten, s. `overlayOrigin.ts`): gezeichnet wird relativ dazu,
+   * damit bei Landeskoordinaten keine Werte über f32/CSS-Längen-Grenzen ins DOM gehen.
+   */
+  origin?: Vec2;
   vbPerPx: number;
   pxPerMeter: number;
   cursor: Vec2 | null;
@@ -49,21 +55,22 @@ export function PlanRulers({
   const myTop = -vb.y0 / PX_PER_M;
   const myBottom = -(vb.y0 + vb.h) / PX_PER_M;
 
+  // Ticks über den ganzzahligen Index k (Wert k · minor, Hauptstrich bei k mod 5 = 0): ein
+  // aufsummiertes `v += minor` driftet bei Landeskoordinaten (≈ 2.6e6 m) und verliert Hauptstriche.
+  // Positionen lokal (minus Ursprung), Beschriftung absolut.
   const xTicks: { vbX: number; model: number; major: boolean }[] = [];
-  const startX = Math.floor(mx0 / minor) * minor;
-  for (let v = startX; v <= mx1 + 1e-9; v += minor) {
-    const major = Math.abs(v / step - Math.round(v / step)) < 1e-6;
-    xTicks.push({ vbX: v * PX_PER_M, model: v, major });
+  for (let k = Math.floor(mx0 / minor); k * minor <= mx1 + 1e-9; k++) {
+    const v = k * minor;
+    xTicks.push({ vbX: v * PX_PER_M - origin.x, model: v, major: k % 5 === 0 });
   }
   const yTicks: { vbY: number; model: number; major: boolean }[] = [];
-  const startY = Math.floor(myBottom / minor) * minor;
-  for (let v = startY; v <= myTop + 1e-9; v += minor) {
-    const major = Math.abs(v / step - Math.round(v / step)) < 1e-6;
-    yTicks.push({ vbY: -v * PX_PER_M, model: v, major });
+  for (let k = Math.floor(myBottom / minor); k * minor <= myTop + 1e-9; k++) {
+    const v = k * minor;
+    yTicks.push({ vbY: -v * PX_PER_M - origin.y, model: v, major: k % 5 === 0 });
   }
 
-  const x0 = vb.x0;
-  const y0 = vb.y0;
+  const x0 = vb.x0 - origin.x;
+  const y0 = vb.y0 - origin.y;
   return (
     <g className="plan-ruler" pointerEvents="none">
       {/* Leisten + Trennlinien. */}
@@ -120,7 +127,7 @@ export function PlanRulers({
         <>
           <rect
             className="plan-ruler-cursor"
-            x={cursor.x * PX_PER_M - 1 * vbPerPx}
+            x={cursor.x * PX_PER_M - origin.x - 1 * vbPerPx}
             y={y0}
             width={2 * vbPerPx}
             height={TH}
@@ -128,7 +135,7 @@ export function PlanRulers({
           <rect
             className="plan-ruler-cursor"
             x={x0}
-            y={-cursor.y * PX_PER_M - 1 * vbPerPx}
+            y={-cursor.y * PX_PER_M - origin.y - 1 * vbPerPx}
             width={TH}
             height={2 * vbPerPx}
           />
