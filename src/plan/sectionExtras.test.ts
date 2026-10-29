@@ -1,11 +1,10 @@
-// Gelände und freie Körper im Schnitt ([G1]): echter Lauf über computeSection (render3d- und
-// truck-WASM aus src/engine/pkg*).
+// Gelände und freie Körper im Schnitt ([G1]): echter Lauf über computeSection/generateSectionPlan
+// (Kern, truck-WASM aus src/engine/pkgTruck).
 import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setWasmBytesProvider } from "../engine/wasmSource";
-import { computeSection } from "./toSection";
-import { generateSectionPlan } from "./generatePlan";
+import { computeSection, generateSectionPlan } from "./toSection";
 import { sampleProject } from "../model/sampleProject";
 import type { ExtrudedSolid, Project, TerrainMesh } from "../model/types";
 
@@ -34,15 +33,16 @@ function terrain(): TerrainMesh {
 describe("Schnitt: Gelände und freie Körper", () => {
   it("Geländelinie als Linienzug im Schnitt, auf den Gebäudebereich begrenzt", async () => {
     const p: Project = { ...sampleProject, context: [...(sampleProject.context ?? []), terrain()] };
-    const out = (await computeSection(p, section))!;
-    expect(out.profiles?.length).toBeGreaterThan(0);
-    const pts = out.profiles!.flatMap((x) => x.pts);
+    const plan = generateSectionPlan((await computeSection(p, section))!);
+    const terrainLines = plan.primitives.filter((q) => q.kind === "line" && q.cls === "section-terrain");
+    expect(terrainLines.length).toBeGreaterThan(0);
+    const us = terrainLines.flatMap((q) => (q.kind === "line" ? [q.a.x, q.b.x] : []));
     // Begrenzung: nicht über das ganze 40-m-Gelände, sondern Inhalt ± Rand
-    const us = out.cutPolygons.flatMap((c) => c.pts.map((q) => q[0]));
-    expect(Math.min(...pts.map((q) => q[0]))).toBeGreaterThanOrEqual(Math.min(...us) - 6.01);
-    expect(Math.max(...pts.map((q) => q[0]))).toBeLessThanOrEqual(Math.max(...us) + 6.01);
-    const plan = generateSectionPlan(out);
-    expect(plan.primitives.some((q) => q.kind === "line" && q.cls === "section-terrain")).toBe(true);
+    const cut = plan.primitives.flatMap((q) =>
+      q.kind === "polygon" ? q.pts.map((r) => r.x) : q.kind === "line" && q.cls === "section-visible" ? [q.a.x, q.b.x] : [],
+    );
+    expect(Math.min(...us)).toBeGreaterThanOrEqual(Math.min(...cut) - 6.01);
+    expect(Math.max(...us)).toBeLessThanOrEqual(Math.max(...cut) + 6.01);
   }, 30_000);
 
   it("Kugel (B-Rep) wird als Schnittfläche gefüllt, wenn die Ebene sie trifft", async () => {
@@ -55,11 +55,7 @@ describe("Schnitt: Gelände und freie Körper", () => {
       brep: { spec: { kind: "sphere", center: [px, pz, 1], r: 1 }, origin: { x: px - 1, y: pz - 1 } },
     };
     const p: Project = { ...sampleProject, extrudedSolids: [...(sampleProject.extrudedSolids ?? []), sphere] };
-    const out = (await computeSection(p, section))!;
-    const body = out.cutPolygons.filter((c) => c.component.kind === "body");
-    expect(body.length).toBeGreaterThan(0);
-    expect(body[0].sourceId).toBe("ball");
-    const plan = generateSectionPlan(out);
-    expect(plan.primitives.some((q) => q.kind === "polygon" && q.extrudedSolidId === "ball")).toBe(true);
+    const plan = generateSectionPlan((await computeSection(p, section))!);
+    expect(plan.primitives.some((q) => q.kind === "polygon" && q.extrudedSolidId === "ball" && q.fill === "#d9dde2")).toBe(true);
   }, 30_000);
 });

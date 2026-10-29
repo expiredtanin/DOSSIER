@@ -1392,12 +1392,12 @@ describe("Per-Schicht-Decken-Dominanz Wand/Decke (3D-Entsprechung der Schnitt-Bo
   //   render-int  x=4.8350  (INNEN)       -> überdeckt -> Decken-z-Schnitt
   // Die Decke schneidet ein Band also nur dort, wo ihre Outline die Footprint-
   // Mittellinie DIESES Bandes überdeckt (geometrischer Überlapp wie
-  // toSection.ts::subtractDominantBands) — NICHT mehr per wandweitem BBox-Test.
+  // Schnitt-Dominanz im Kern (plan_section.rs)) — NICHT mehr per wandweitem BBox-Test.
   // (Frühere Tests erwarteten hier „ALLE Schichten geschnitten"; das kodierte das
   // falsche BBox-Verhalten und ist die Ursache des 3D-Kranzes. Korrigiert.)
   it("Decke schneidet nur die von ihrer Outline überdeckten (inneren) Bänder; Dämmung/Aussenputz laufen durch; Beton spaltet den Backstein PER SCHICHT", () => {
     const w2 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W2");
-    // PER-SCHICHT-Decken-Dominanz (identisch zu toSection.ts::subtractDominantBands):
+    // PER-SCHICHT-Decken-Dominanz (identisch zu Schnitt-Dominanz im Kern (plan_section.rs)):
     // jede Deckenschicht (screed 30 / insulation 20 / concrete 100) schneidet nur
     // Wandbänder mit STRIKT niedrigerer Priorität in IHREM z-Band. Der Backstein (50)
     // wird also NUR von der Beton-Schicht (100, z-Band [2.3,2.5]) gekappt und läuft
@@ -1949,7 +1949,7 @@ describe("Wand-Joins im 3D (L-/T-Stösse, identisch zum 2D-Grundriss/Schnitt)", 
   it("Joins wirken NUR im layered-3D-Pfad, nicht im Schnitt-Pfad (layered=false unverändert)", () => {
     // Der Schnitt-Pfad (computeSection, layeredWalls:false) darf KEINE Join-Cuts
     // bekommen: W2 bleibt eine Voll-Box über die ganze Dicke, ungehrt (Achse
-    // 0..4), damit toSection.ts::subtractDominantBands seine eigene Dominanz auf
+    // 0..4), damit Schnitt-Dominanz im Kern (plan_section.rs) seine eigene Dominanz auf
     // Rohgeometrie anwendet.
     const w2 = projectToWalls3d(sampleProject, false).filter((w) => w.wallId === "W2");
     expect(w2.length).toBe(1); // Voll-Box, keine Schicht-Bänder

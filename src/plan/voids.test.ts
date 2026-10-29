@@ -3,7 +3,7 @@ import type { Pair } from "../geometry/polygonBool";
 import { generatePlan } from "./generatePlan";
 import { sampleProject } from "../model/sampleProject";
 import type { ExtrudedSolid, Project } from "../model/types";
-import { keyhole, segmentOutside, subtractRings, subtractVoidsInSection, voidPrisms, voidSectionRects } from "./voids";
+import { segmentOutside, subtractRings } from "./voids";
 
 const sq = (x0: number, y0: number, x1: number, y1: number): Pair[] => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
 const area = (r: Pair[]) => Math.abs(r.reduce((s, p, i) => s + p[0] * r[(i + 1) % r.length][1] - r[(i + 1) % r.length][0] * p[1], 0) / 2);
@@ -40,10 +40,6 @@ describe("Abzugskoerper — Polygon-Kern", () => {
     const edges = r[0].noStrokeEdges.map((i) => [r[0].pts[i], r[0].pts[(i + 1) % r[0].pts.length]]);
     expect(edges.every(([a, b]) => a[0] === 4 && b[0] === 4)).toBe(true);
   });
-  it("keyhole haengt mehrere Loecher ein", () => {
-    const k = keyhole([sq(0, 0, 10, 2), sq(1, 0.5, 2, 1.5).reverse(), sq(5, 0.5, 6, 1.5).reverse()]);
-    expect(k.bridges).toHaveLength(4);
-  });
   it("segmentOutside: Linie durch Quadrat in zwei Teile", () => {
     const parts = segmentOutside({ x: 0, y: 0.5 }, { x: 4, y: 0.5 }, [sq(1, 0, 2, 1)]);
     expect(parts.map(([a, b]) => [a, b])).toEqual([[0, 0.25], [0.5, 1]]);
@@ -76,17 +72,5 @@ describe("Abzugskoerper — Grundriss und Schnitt", () => {
   it("Koerper ueber der Schnitthoehe aendert den Grundriss nicht", () => {
     const p = withVoid(sampleProject, { points: box, baseOffset: 1.5, height: 0.5 });
     expect(wallPolys(p).length).toBe(wallPolys(sampleProject).length);
-  });
-  it("Schnitt: Rechtecke aus Grundflaeche x Hoehenbereich, Abzug aus Cut-Polygonen", () => {
-    const p = withVoid(sampleProject, { points: box, baseOffset: 0.5, height: 1 });
-    const [v] = voidPrisms(p);
-    const rects = voidSectionRects(v, { x: 0, y: my }, { x: 1, y: 0 });
-    expect(rects).toHaveLength(1);
-    expect(rects[0][0][0]).toBeCloseTo(mx - 0.3, 9);
-    expect(rects[0][2][1]).toBeCloseTo(v.z1, 9);
-    const cuts = [{ pts: sq(mx - 2, 0, mx + 2, 2.5) as Array<[number, number]> }];
-    const out = subtractVoidsInSection(cuts, p, { x: 0, y: my }, { x: 1, y: 0 });
-    expect(out).toHaveLength(1);
-    expect(area(out[0].pts)).toBeCloseTo(4 * 2.5 - 0.6 * 1, 6);
   });
 });

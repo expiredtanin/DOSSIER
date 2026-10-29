@@ -110,12 +110,8 @@ export function roofMeshes(project: Project, onlyRoofId?: string): RMesh[] {
 /**
  * Optionen für {@link projectToModel3d}. `layeredWalls` steuert, ob eine
  * mehrschichtige Wand als eigene Box je Materiallage (Default, 3D-Viewer) oder
- * als EINE Voll-Box über die ganze Dicke emittiert wird. Der Schnitt-Pfad
- * (`computeSection`) setzt `false`, damit die Cut-Polygone 1:1 zur Wand liegen
- * (die Schicht-Zerlegung macht dort `splitWallLayers` TS-seitig) — sonst
- * verschöben die per-Lage vervielfachten Boxen die `ComponentRef.index`
- * gegenüber `wallSegmentOwners` und die materialspezifische Schnitt-Schraffur
- * ginge verloren.
+ * als EINE Voll-Box über die ganze Dicke emittiert wird (so rechnen auch Schnitt
+ * und Ansicht im Kern, `core/src/plan/{section,elevation}.rs`).
  */
 export interface Model3dOptions {
   layeredWalls?: boolean;

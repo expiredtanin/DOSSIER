@@ -316,60 +316,6 @@ fn frame_band(o: &mut Out, w: &WallRef, position: f64, width: f64, frame_width: 
 
 // ── Fenster-Symbol als Einzelaufruf (für die Fassade `windowSymbol`, z. B. im Schnitt) ──────────
 
-/// Eingabe `[sx, sy, ex, ey, dicke, refOff, position, breite, glasAnzahl, altFluegel (NaN = 1),
-/// detail, hatTyp, profilbreite, rahmentiefe (NaN), einzug (NaN), einzugInnen, nFluegel,
-/// (pfosten, auto, breite, pfostenbreite, oeffenbar) × n]`; Ausgabe
-/// `[1, Rahmen(4 Punkte), nGlas, 4 Zahlen × n, nPfosten, 4 × n, nFluegelRahmen, (nPts, pts…) × n,
-/// nStoss, (nPts, pts…) × n, nLaibung, (nPts, pts…) × n]` oder leer.
-pub fn window_symbol_flat(buf: &[f64]) -> Vec<f64> {
-    (|| {
-        let mut r = Reader::new(buf);
-        let (sx, sy, ex, ey, total, ref_off, position, width) =
-            (r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?);
-        let glass = r.num()?;
-        let wings = r.num()?;
-        let detail = match r.num()? as i64 {
-            0 => Detail::Grob,
-            1 => Detail::Mittel,
-            _ => Detail::Fein,
-        };
-        let has_type = r.num()? != 0.0;
-        let (fw, fd, inset) = (r.num()?, r.num()?, r.num()?);
-        let inner = r.num()? != 0.0;
-        let n = r.count()?;
-        let mut sashes = Vec::with_capacity(n);
-        for _ in 0..n {
-            sashes.push(Sash { post: r.num()? != 0.0, auto_width: r.num()? != 0.0, width: r.num()?, post_width: r.num()?, operable: r.num()? != 0.0 });
-        }
-        if ![sx, sy, ex, ey, total, ref_off, position, width].iter().all(|x| x.is_finite()) {
-            return None;
-        }
-        let w = WallRef { start: v(sx, sy), end: v(ex, ey), total, ref_off };
-        let spec = if has_type { Some(WindowSpec { sashes, frame_width: fw, frame_depth: fd, inset_from_face: inset, inset_inner: inner }) } else { None };
-        let s = window_symbol(&w, position, width, glass, spec.as_ref(), wings, detail)?;
-        let mut out = vec![1.0];
-        for p in &s.frame {
-            out.extend([p.x, p.y]);
-        }
-        for list in [&s.glass_lines, &s.mullion_lines] {
-            out.push(list.len() as f64);
-            for (a, b) in list.iter() {
-                out.extend([a.x, a.y, b.x, b.y]);
-            }
-        }
-        for rings in [&s.sash_frames, &s.meeting_marks, &s.jamb_marks] {
-            out.push(rings.len() as f64);
-            for pts in rings.iter() {
-                out.push(pts.len() as f64);
-                for p in pts {
-                    out.extend([p.x, p.y]);
-                }
-            }
-        }
-        Some(out)
-    })()
-    .unwrap_or_default()
-}
 
 #[cfg(test)]
 mod tests {
@@ -433,7 +379,6 @@ mod tests {
         let mut c = input(true, 1.0, false, &[]);
         c[0] = f64::NAN;
         assert!(plan_opening(&c).is_empty());
-        assert!(window_symbol_flat(&[]).is_empty());
     }
 
     #[test]

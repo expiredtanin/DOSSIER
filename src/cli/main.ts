@@ -7,7 +7,7 @@
 //   dossier-cli <projekt.obp> migrate [--out neu.obp]
 //   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--format svg|json] [--out eg.svg]
 //                                                  json = render2d-Szene (planToRenderScene)
-//   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
+//   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (--format json: render2d-Szene)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
@@ -797,7 +797,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         await time("planToSvgString", () => planToSvgString(plan, { scaleDenominator: scale }));
       }
       await time("projectToModel3d", () => projectToModel3d(project));
-      if (sec) await time("computeSection", () => computeSection(project, sec), Math.max(3, runs / 2));
+      if (sec) await time("Schnitt (Kern)", async () => generateSectionPlan((await computeSection(project, sec))!, false, { visibleCodes: allCodes }), Math.max(3, runs / 2));
       if (elev) await time("generateElevationPlan", () => generateElevationPlan(project, elev), Math.max(3, runs / 2));
       if (project.walls.length) {
         const moved = { ...project, walls: [{ ...project.walls[0], height: (project.walls[0].height ?? 2.6) + 0.1 }, ...project.walls.slice(1)] };

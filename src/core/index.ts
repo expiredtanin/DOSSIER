@@ -294,11 +294,8 @@ export {
 
 export {
   type ElevationOptions,
-  type SectionOutput,
-  computeSection,
   generateElevationPlan,
-  generateSectionPlan,
-} from "../plan/sectionCore";
+} from "../plan/toElevation";
 
 export {
   planSceneBin,
@@ -306,6 +303,9 @@ export {
 } from "../plan/toRenderScene";
 
 export {
+  type SectionOutput,
+  computeSection,
+  generateSectionPlan,
   sameSectionInputs,
   sameSectionLine,
   sectionPlaneFromLevel,

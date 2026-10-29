@@ -4,7 +4,7 @@
 // waagrecht gedreht, die Blickrichtung zeigt im Blatt nach OBEN (Betrachter
 // steht unten, die gesehene Fassade liegt an der Unterkante des Grundrisses),
 // und die u-Achse stimmt exakt mit der des Schnitts/der Ansicht überein
-// (`sectionUAxisModel` / `elevationFrame`): ein Punkt im Grundriss liegt also
+// (`sectionUAxisModel`, im Kern `Plane::u_model` bzw. der Ansichts-Rahmen): ein Punkt im Grundriss liegt also
 // senkrecht unter seiner Projektion im Schnitt.
 //
 // Reine Starrkörper-Abbildung (Drehung + Verschiebung, keine Spiegelung) —

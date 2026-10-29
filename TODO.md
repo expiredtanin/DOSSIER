@@ -105,14 +105,14 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Offen: `drawing2d.ts` (950 Zeilen) ist nach diesen Schritten Stil-Auflösung und Verteiler über Formen (Bemassung, Kote,
     Detailverweis, Massstabsbalken, Block über `scaleGeom`); der Rechenanteil liegt in Rust. Der Verteiler zieht mit dem Modell
     nach Rust [K4] — vorher würde ein Rust-`Drawing2D` doppelt gepflegt. Danach: [K3c] Schnitt/Ansicht, [K3d] Aufräumen.
-  - ◐ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
+  - ✅ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format (29.10.).
     ✅ Schnitt-Bänder: Dominanz-Subtraktion, Verschmelzung, Rechteck-Vereinigung (`plan_section.rs`, 28.10.).
     ✅ Ansicht: Verdeckungs-Clipping, Punkt-Verdeckung, Schlagschatten, XOR-Umriss (`plan_elevation.rs`, 28.10.).
     ✅ Ansicht: Flächen (Wand-Quader, Decken-Prismen, Dach/Giebel) projizieren + Rückseiten-Culling, Eck-Verlängerung, Öffnungen (Rahmen, Glasfelder, Sprossen, Sims, SIA-Symbol) (`plan_elevation.rs`).
     ✅ Netz-Ebenenschnitt (Körper/Gelände) + Ringe→Flächen (`mesh_section.rs`; behebt nebenbei: rückwärts geschlossene Ringe gingen verloren).
     ✅ Dach-Schnittspur (Cyrus–Beck, lineare Oberkante, Verschmelzen) in `plan_section.rs`.
     ✅ Abzugskörper-Geometrie (`voids.rs`: Polygon minus Schneider mit Schlüsselloch-Stegen, Strecke ausserhalb, Schnitt-Rechtecke); behebt: bei mehreren getrennten Aussparungen wurde nichts abgezogen.
-    ◐ (29.10.) Schnitt und Ansicht als Kern-Abfragen `sectionPlan`/`elevationPlan` (`core/src/plan/{section,elevation}.rs`) auf dem
+    ✅ (29.10.) Schnitt und Ansicht als Kern-Abfragen `sectionPlan`/`elevationPlan` (`core/src/plan/{section,elevation}.rs`) auf dem
     Dokument, Ausgabe Plan-Puffer v2 mit Pick-Ids (lazy gelesen wie `generatePlan`): Besitzer-Zuordnung, Schicht-Bänder, Stil,
     Decken-Terminierung, Dominanz, Treppen, Monolith, Abzugskörper, Gelände, Schnitt-Tiefe, geschnittene Fenster/Türen
     (`sectionOpenings`), Ansicht mit Eck-Verlängerung, Verdeckung, Schatten, Painter. Der Prismen-Schnitt läuft über
@@ -134,9 +134,15 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Der Kern merkt sich die zuletzt vorbereiteten Schnitte (Schlüssel je `computeSection`): Schwarz-Weiss/Sichtbarkeit
     umschalten 8×8 ~1 ms statt Neurechnen. Offen: Szene mit vielen verdeckten (gestrichelten) Kanten bleibt teuer
     (16×16 mit verdeckten Kanten ~2,5 s, Strichmuster-Zerlegung in `plan_scene`).
-    Rest in TS (28.10.): Stil-Auflösung (Bauteil, Schraffur, Farbe, Linienstil, Pick-IDs, Painter-Reihenfolge) in `generatePlan*.ts`,
-    `toSection.ts` (Besitzer-Zuordnung, Schichtbänder), `toElevation.ts` (Orchestrierung), `sectionOpenings.ts`, `planUnderlay.ts`,
-    `drawing2d.ts`. Das ist kein Rechenanteil mehr, sondern liest das Modell; es zieht mit [K4] um.
+    TS-Fassung gelöscht (29.10.): `toSection.ts`/`toElevation.ts` sind dünne Fassaden (Ebene, Sichtbarkeit, truck-Körper →
+    Abfrage), `sectionOpenings.ts`, `sectionExtras.ts`, `meshSection.ts`, `generateSectionPlan`/`resolve*SectionStyle` in
+    `generatePlan.ts`, `windowSymbol` (opening.ts), `keyhole`/`voidSectionRects`/`subtractVoidsInSection` (voids.ts) und ihre
+    Bindungen entfernt; die Fälle der alten TS-Einzeltests laufen als Rust-Tests (`plan/section.rs`, `plan_section.rs`,
+    `plan_elevation.rs`, `mesh_section.rs`), die übrigen TS-Tests (Ansicht, Öffnungen, Gelände/Körper, Golden-SVG) gegen den
+    neuen Weg; der Gleichheitstest ist wieder entfernt. Nicht in der Tauri-App angesehen; pkg3d (3D-Live-Schnitt, gleiche
+    render3d-Verdeckung) nicht neu gebaut.
+    Bleibt in TS: `planUnderlay.ts` (legt den TS-Grundriss unter Schnitt/Ansicht; zieht mit `generatePlan`/`drawing2d.ts` um),
+    Bodenhöhen-Koten (`levelMarkers.ts`), das Bauen der truck-Körper (asynchron, eigenes WASM).
   - ◐ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
     typisierte Modell (Bauteil-Typen, Schraffuren, Linienstile, Kategorien) und einen Plan-Puffer v2 mit Pick-IDs + vollem `Primitive`-Umfang
     (Text, Schraffur-Optionen, Zickzack/Motiv); die Verbraucher von `Primitive[]` (SVG/PDF/DXF, Auswahl, Overlay) lesen dann den Puffer.

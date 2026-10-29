@@ -5,9 +5,8 @@
 // 3D-Meshes, sondern direkt aus den Parametern (Wandachsen, Schichtaufbau,
 // Öffnungen) — exakt, schnell, sauber.
 //
-// Diese Datei ist nur noch der ORCHESTRATOR: `generatePlan()`/
-// `generateSectionPlan()` sowie die `resolve*SectionStyle`-Helfer (für den
-// Schnitt-Pfad, `toSection.ts`). Die Bauteil-Domänen (Decken, Dächer, Räume,
+// Diese Datei ist nur noch der ORCHESTRATOR `generatePlan()` (Schnitt und Ansicht:
+// `toSection.ts`/`toElevation.ts`, im Kern). Die Bauteil-Domänen (Decken, Dächer, Räume,
 // Wände mit Öffnungen, Treppen, Stützen, Extrusionen, Kontext, Schnittführung)
 // rechnet der Rust-Kern auf dem Projekt-Dokument (`src-tauri/core/src/plan/`,
 // Abfrage `planDomains`, [K3d]) und liefert fertige `Primitive`. In TS bleiben
@@ -17,8 +16,6 @@
 // leben in `generatePlan/shared.ts`.
 
 import type {
-  Ceiling,
-  Component,
   ContextImage,
   ContextObject,
   Drawing2D,
@@ -26,19 +23,11 @@ import type {
   OverrideActions,
   Project,
   Vec2,
-  Wall,
 } from "../model/types";
-import {
-  flattenCategories,
-  getCeilingType,
-  getComponent,
-  getLayerCategory,
-  getWallType,
-} from "../model/types";
+import { flattenCategories } from "../model/types";
 import { documentFor } from "../core/document";
 import { decodePlanBuf, type DecodedPlanBuf } from "./planBuf";
 import { effectiveOverrides, hasOverrides } from "../overrides/engine";
-import type { SectionOutput } from "./toSection";
 import {
   HATCH_INK,
   HATCH_PAPER,
@@ -73,91 +62,6 @@ import { layersStyleSig } from "./generatePlan/layerSig";
 // weiterhin ausschliesslich von hier, unverändert zur Zeit vor dem Domänen-Split.
 export { HATCH_INK, HATCH_PAPER, resolveBackground, resolveForeground, resolveHatch, resolveHatchId };
 export type { CategoryDisplayResolver, DetailLevel, HatchRender, Primitive };
-
-/**
- * Füllfarbe + Schraffur eines aufgelösten Bauteils, fertig für eine Cut-Poché.
- */
-export interface SectionCutStyle {
-  fill: string;
-  hatch: HatchRender;
-}
-
-/**
- * Löst das tragende Bauteil (höchste `joinPriority`) einer Wand auf und liefert
- * dessen Poché-Füllung + echte Schraffur für die Schnitt-Poché (mittel/fein).
- * Die grobe Grundriss-Poché (1:100) folgt dieser Bauteil-Regel NICHT mehr —
- * sie ist immer vollschwarz, unabhängig vom Bauteil-Pattern (SIA 400 Fig. 36,
- * s. `addWallPoche`). `null`, wenn Wandtyp oder Bauteil nicht auflösbar sind
- * (z. B. verwaistes `wallTypeId`); der Aufrufer fällt dann auf die generische
- * Schnitt-Schraffur zurück.
- */
-export function resolveWallSectionStyle(project: Project, wall: Wall): SectionCutStyle | null {
-  try {
-    const wt = getWallType(project, wall);
-    let best: Component | null = null;
-    for (const layer of wt.layers) {
-      const comp = getComponent(project, layer.componentId);
-      if (!best || comp.joinPriority > best.joinPriority) best = comp;
-    }
-    if (!best) return null;
-    const category = getLayerCategory(project, wall.categoryCode);
-    const wallAngleDeg =
-      (Math.atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) * 180) / Math.PI;
-    const hatchId = resolveHatchId(wall.hatchId, wall.hatchSource, category, best.hatchId) ?? best.hatchId;
-    const hatch = resolveHatch(
-      project,
-      hatchId,
-      wallAngleDeg,
-      resolveForeground(best, wall.foreground, category, wall.foregroundSource),
-    );
-    // Poché-Hintergrund neutral (Papier) statt Bauteil-Albedo; Vollmuster → Tinte
-    // (unabhängig von `hatch.color`, das jetzt den aufgelösten Vordergrund tragen
-    // kann, s. {@link resolveHatch}).
-    const solid = hatch.pattern === "solid";
-    return {
-      fill: solid ? HATCH_INK : HATCH_PAPER,
-      hatch,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Löst das erste Bauteil des Deckentyps einer Decke auf — dieselbe Regel wie
- * `addCeilingPoche` für die normale Deckenpoché — und liefert dessen
- * Füllfarbe + echte Schraffur für die Schnitt-Poché. `null`, wenn Deckentyp
- * oder Bauteil nicht auflösbar sind bzw. der Deckentyp keine Schicht trägt.
- */
-export function resolveCeilingSectionStyle(
-  project: Project,
-  ceiling: Ceiling,
-): SectionCutStyle | null {
-  try {
-    const wt = getCeilingType(project, ceiling);
-    if (wt.layers.length === 0) return null;
-    const comp = getComponent(project, wt.layers[0].componentId);
-    const category = getLayerCategory(project, ceiling.categoryCode);
-    const hatchId =
-      resolveHatchId(ceiling.hatchId, ceiling.hatchSource, category, comp.hatchId) ?? comp.hatchId;
-    const hatch = resolveHatch(
-      project,
-      hatchId,
-      undefined,
-      resolveForeground(comp, ceiling.foreground, category, ceiling.foregroundSource),
-    );
-    // Poché-Hintergrund neutral (Papier) statt Bauteil-Albedo; Vollmuster → Tinte
-    // — dieselbe Neutralisierung wie {@link resolveWallSectionStyle}, damit die
-    // geschnittene Decke nicht als andersfarbige Fläche gegenüber der Wand auffällt.
-    const solid = hatch.pattern === "solid";
-    return {
-      fill: solid ? HATCH_INK : HATCH_PAPER,
-      hatch,
-    };
-  } catch {
-    return null;
-  }
-}
 
 /** Ein georeferenziertes Hintergrund-Rasterbild (Luftbild) im Grundriss —
  *  Modell-Meter-Rechteck [min..max], das die interaktive Ansicht UNTER der
@@ -674,201 +578,6 @@ export function generateVisibleLevelsPlan(
     },
     pieces,
   );
-}
-
-// ── Schnitt/Ansicht (abgeleitete Projektion aus render3d::section) ──────────────
-// Die Rohdaten (Cut-Polygone + sichtbare/verdeckte projizierte Kanten) liefert
-// der WASM-Extraktor (plan/toSection.ts → section.rs). Hier werden sie 1:1 in
-// die BESTEHENDEN Plan-Primitive übersetzt — kein neues Primitiv nötig:
-//   • Cut-Polygon  → `polygon` (kräftige Poché-Umrisslinie + Schnitt-Schraffur),
-//   • sichtbare Kante → `line` (durchgezogen),
-//   • verdeckte Kante → `line` (gestrichelt).
-// Damit rendern PlanView (SVG) UND toRenderScene (Engine/WASM-2D) den Schnitt
-// ohne jede Sonderbehandlung, mit voller Papier-mm-/Parität-Infrastruktur.
-
-/** Tinte der Schnitt-Poché-Umrisslinie + Schraffur (dunkles Grau). */
-const SECTION_INK = "#1f242c";
-/** Tinte der sichtbaren Ansichtskanten. */
-const SECTION_VISIBLE_INK = "#2b3039";
-/** Tinte der verdeckten (gestrichelten) Ansichtskanten (etwas heller). */
-const SECTION_HIDDEN_INK = "#8a929c";
-/** Strichstärke der Cut-Poché-Umrisslinie (mm Papier, kräftig wie eine Wand). */
-const SECTION_CUT_OUTLINE_MM = 0.35;
-/** Strichstärke sichtbarer Ansichtskanten (mm Papier). */
-const SECTION_VISIBLE_MM = 0.18;
-/** Strichstärke der Bodenlinie unter dem Schnitt (mm Papier, wie in der Ansicht). */
-const SECTION_GROUND_MM = 0.5;
-/** Strichstärke verdeckter Ansichtskanten (mm Papier, dünner). */
-const SECTION_HIDDEN_MM = 0.13;
-/** Strichmuster verdeckter Kanten (mm Papier). */
-const SECTION_HIDDEN_DASH: number[] = [0.12, 0.08];
-
-/**
- * Schnitt-Schraffur der Cut-Flächen (diagonale Poché wie ein Wandschnitt) —
- * Fallback, wenn `toSection.ts` das Quell-Bauteil einer Cut-Fläche NICHT
- * auflösen konnte (siehe `attachCutStyles`). Vordergrund fest `HATCH_INK`,
- * damit auch der Fallback monochrom bleibt statt der rohen 3D-Albedo-Farbe.
- */
-const SECTION_HATCH: HatchRender = {
-  pattern: "diagonal",
-  scale: 1,
-  angle: 45,
-  color: HATCH_INK,
-  lineWeight: 0.13,
-  dash: null,
-};
-
-/**
- * Baut aus einem {@link SectionOutput} (render3d::section, (u, v)-Meter) den
- * Plan eines Schnitts/einer Ansicht. `u` wird zur Plan-X, `v` (absolute Höhe)
- * zur Plan-Y — die PlanView zeigt Y nach oben, also erscheint der Schnitt
- * aufrecht. Rein darstellend; kennt das Projekt NICHT direkt — `visibleCodes`/
- * `categoryDisplay` (optional) filtern/dimmen jedes Cut-Band trotzdem über
- * `cp.categoryCode` (von `toSection.ts::attachCutStyles` aufgelöst), damit das
- * Ebenen-Panel auch im Schnitt/in der Ansicht wirkt, wie im Grundriss. Ein
- * Band ohne `categoryCode` (unauflösbares Bauteil) bleibt immer sichtbar.
- */
-export function generateSectionPlan(
-  output: SectionOutput,
-  mono = false,
-  opts: {
-    hiddenLines?: boolean;
-    visibleCodes?: Set<string>;
-    categoryDisplay?: CategoryDisplayResolver;
-  } = {},
-): Plan {
-  const primitives: Primitive[] = [];
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity;
-  const acc = (x: number, y: number) => {
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-  };
-  const catDisplay = opts.categoryDisplay ?? SHOW_ALL;
-
-  // Cut-Polygone: gefüllte Poché-Fläche + Schnitt-Schraffur + kräftige
-  // Umrisslinie — wie eine geschnittene Wand im Grundriss. `toSection.ts`
-  // (computeSection) löst je Cut-Polygon bereits das Quell-Bauteil auf und
-  // hängt dessen echte Füllfarbe/Schraffur an (`cp.fill`/`cp.hatch`); fehlt
-  // diese Auflösung (Fallback, z. B. verwaistes Bauteil), greift die generische
-  // Schnitt-Schraffur (`SECTION_HATCH`, HATCH_PAPER-Hintergrund) — NICHT die rohe
-  // Albedo-Farbe aus dem 3D-Modell (Nutzer-Vorgabe 2026-07-04: einheitlich
-  // monochrom, auch im Fallback-Fall).
-  for (const cp of output.cutPolygons) {
-    if (cp.pts.length < 3) continue;
-    // Ebenen-Panel-Sichtbarkeit: nur wenn das Quell-Bauteil aufgelöst werden
-    // konnte (categoryCode gesetzt) — sonst (Fallback) immer zeichnen.
-    if (cp.categoryCode !== undefined) {
-      if (opts.visibleCodes && !opts.visibleCodes.has(cp.categoryCode)) continue;
-      if (!catDisplay(cp.categoryCode).render) continue;
-    }
-    const pts: Vec2[] = cp.pts.map(([u, v]) => {
-      acc(u, v);
-      return { x: u, y: v };
-    });
-    const fill = cp.fill ?? HATCH_PAPER;
-    const hatch = cp.hatch ?? SECTION_HATCH;
-    // Mono: neutrale Poché — Papier statt Bauteilfarbe, Schraffur-Musterlinien →
-    // Tinte. Eine dunkle SIA-Vollpoché ("solid") BLEIBT jedoch dunkel
-    // (Tinte bleibt Tinte, Papier bleibt Papier).
-    const solid = hatch.pattern === "solid";
-    const monoFill = solid ? HATCH_INK : HATCH_PAPER;
-    const monoHatch =
-      solid ? hatch : hatch.pattern !== "none" ? { ...hatch, color: SECTION_INK } : hatch;
-    // Auswahl im Schnitt: das QUELL-Element (via cp.sourceId + component.kind) als
-    // wallId/ceilingId/roofId ans Polygon hängen — so wählt ein Klick auf das
-    // geschnittene Bauteil im Schnitt exakt jene Wand/Decke/Dach im Modell, und
-    // die bestehende PlanView-Pick-/Highlight-Logik greift ohne Sonderfall.
-    const kind = cp.component.kind;
-    const sourceId = cp.sourceId;
-    primitives.push({
-      kind: "polygon",
-      pts,
-      fill: mono ? monoFill : fill,
-      stroke: SECTION_INK,
-      strokeWidthMm: SECTION_CUT_OUTLINE_MM,
-      hatch: mono ? monoHatch : hatch,
-      wallId: kind === "wall" ? sourceId : undefined,
-      ceilingId: kind === "slab" && !cp.stairId ? sourceId : undefined,
-      roofId: kind === "roof" ? sourceId : undefined,
-      stairId: cp.stairId,
-      extrudedSolidId: kind === "body" ? sourceId : undefined,
-      noStrokeEdges: cp.noStrokeEdges,
-      greyed: cp.categoryCode !== undefined && catDisplay(cp.categoryCode).greyed,
-    });
-  }
-
-  // Geländelinie(n): kräftige Linie, über Kategorie filterbar.
-  for (const pr of output.profiles ?? []) {
-    if (pr.categoryCode !== undefined) {
-      if (opts.visibleCodes && !opts.visibleCodes.has(pr.categoryCode)) continue;
-      if (!catDisplay(pr.categoryCode).render) continue;
-    }
-    for (let i = 0; i + 1 < pr.pts.length; i++) {
-      const [a, b] = [pr.pts[i], pr.pts[i + 1]];
-      acc(a[0], a[1]);
-      acc(b[0], b[1]);
-      primitives.push({
-        kind: "line",
-        a: { x: a[0], y: a[1] },
-        b: { x: b[0], y: b[1] },
-        cls: "section-terrain",
-        weightMm: SECTION_GROUND_MM,
-        color: SECTION_INK,
-      });
-    }
-  }
-
-  // Verdeckte Kanten zuerst (liegen unter den sichtbaren), gestrichelt —
-  // Standard AUS (VW-üblich): sie legen sich sonst als blasses Liniengewirr
-  // über Poché und Ansichtskanten. Zuschaltbar je Schnitt-/Ansichts-Ebene.
-  for (const e of opts.hiddenLines ? output.hiddenEdges : []) {
-    acc(e.a[0], e.a[1]);
-    acc(e.b[0], e.b[1]);
-    primitives.push({
-      kind: "line",
-      a: { x: e.a[0], y: e.a[1] },
-      b: { x: e.b[0], y: e.b[1] },
-      cls: "section-hidden",
-      weightMm: SECTION_HIDDEN_MM,
-      dash: SECTION_HIDDEN_DASH,
-      color: SECTION_HIDDEN_INK,
-    });
-  }
-
-  // Sichtbare Ansichtskanten, durchgezogen.
-  for (const e of output.visibleEdges) {
-    acc(e.a[0], e.a[1]);
-    acc(e.b[0], e.b[1]);
-    primitives.push({
-      kind: "line",
-      a: { x: e.a[0], y: e.a[1] },
-      b: { x: e.b[0], y: e.b[1] },
-      cls: "section-visible",
-      weightMm: SECTION_VISIBLE_MM,
-      color: SECTION_VISIBLE_INK,
-    });
-  }
-
-  // Bodenlinie wie in der Ansicht (toElevation.ts): kräftige Linie über die
-  // volle Breite an der untersten Kante — ohne sie "schwebte" der Schnitt.
-  if (isFinite(minX) && maxX > minX) {
-    primitives.push({
-      kind: "line",
-      a: { x: minX, y: minY },
-      b: { x: maxX, y: minY },
-      cls: "section-ground",
-      weightMm: SECTION_GROUND_MM,
-      color: SECTION_INK,
-    });
-  }
-
-  if (!isFinite(minX)) return { primitives, bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
-  return { primitives, bounds: { minX, minY, maxX, maxY } };
 }
 
 /**

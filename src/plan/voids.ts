@@ -4,7 +4,8 @@
 //
 //  • Grundriss: Poché-Polygone der getroffenen Bauteile minus Körper-Grundfläche, sofern der
 //    Körper die Schnitthöhe (Wände/Stützen) bzw. die Platte (Decken) durchdringt.
-//  • Schnitt:   Cut-Polygone minus Körper-Schnitt (Grundfläche ∩ Schnittspur × Höhenbereich).
+//  • Schnitt:   Cut-Polygone minus Körper-Schnitt (Grundfläche ∩ Schnittspur × Höhenbereich), im Kern
+//               (`core/src/plan/section.rs`).
 //  • 3D/STEP:   Boolean-Differenz (truck, Mesh-CSG-Fallback), s. `toWalls3d/voids3d.ts`
 //               bzw. `exportStep.ts`.
 //
@@ -72,21 +73,6 @@ function encodeRings(rings: Pair[][]): Float64Array {
     for (const p of r) b.push(p[0], p[1]);
   }
   return Float64Array.from(b);
-}
-
-/**
- * Löcher per Steg in den Aussenring einhängen (Schlüsselloch). Liefert die Punkte und die
- * Indizes der Stegkanten (Kante i = pts[i] → pts[i+1]).
- */
-export function keyhole(poly: Pair[][]): { pts: Pair[]; bridges: number[] } {
-  const f = core().voids_keyhole_flat(encodeRings(poly));
-  const n = f[0];
-  const pts = new Array<Pair>(n);
-  for (let i = 0; i < n; i++) pts[i] = [f[1 + 2 * i], f[2 + 2 * i]];
-  const nb = f[1 + 2 * n];
-  const bridges = new Array<number>(nb);
-  for (let i = 0; i < nb; i++) bridges[i] = f[2 + 2 * n + i];
-  return { pts, bridges };
 }
 
 /**
@@ -200,62 +186,6 @@ export function subtractVoidsInPlan(prims: Primitive[], project: Project, cutZ: 
   prims.length = 0;
   for (const p of out) prims.push(p);
   return true;
-}
-
-// ── Schnitt ──────────────────────────────────────────────────────────────────
-
-/**
- * Schnitt-Rechtecke (u, v) eines Abzugskörpers mit der senkrechten Ebene durch `base` in
- * Richtung `uDir` (Einheitsvektor; u = Abstand entlang uDir ab `base`).
- */
-export function voidSectionRects(v: VoidPrism, base: Vec2, uDir: Vec2): Pair[][] {
-  const f = core().voids_section_rects_flat(
-    Float64Array.from([v.pts.length, ...v.pts.flatMap((p) => [p.x, p.y])]),
-    Float64Array.from([base.x, base.y, uDir.x, uDir.y]),
-  );
-  const rects: Pair[][] = [];
-  for (let k = 0; k < (f[0] ?? 0); k++) {
-    const u0 = f[1 + 2 * k];
-    const u1 = f[2 + 2 * k];
-    rects.push([
-      [u0, v.z0],
-      [u1, v.z0],
-      [u1, v.z1],
-      [u0, v.z1],
-    ]);
-  }
-  return rects;
-}
-
-/** Minimal-Form eines Schnitt-Polygons (s. `SectionCutPolygon` in toSection.ts). */
-interface CutPolyLike {
-  pts: Array<[number, number]>;
-  noStrokeEdges?: number[];
-}
-
-/** Zieht die Abzugskörper von den Cut-Polygonen eines Schnitts ab (neue Liste). */
-export function subtractVoidsInSection<T extends CutPolyLike>(
-  cuts: T[],
-  project: Project,
-  base: Vec2,
-  uDir: Vec2,
-): T[] {
-  const voids = voidPrisms(project);
-  if (voids.length === 0) return cuts;
-  const rects = voids.flatMap((v) => voidSectionRects(v, base, uDir));
-  if (rects.length === 0) return cuts;
-  const out: T[] = [];
-  for (const cp of cuts) {
-    const rest = subtractRings(cp.pts as Pair[], rects, cp.noStrokeEdges ?? []);
-    if (rest === null) {
-      out.push(cp);
-      continue;
-    }
-    for (const r of rest) {
-      out.push({ ...cp, pts: r.pts as Array<[number, number]>, noStrokeEdges: r.noStrokeEdges.length ? r.noStrokeEdges : undefined });
-    }
-  }
-  return out;
 }
 
 // ── 3D / B-Rep ───────────────────────────────────────────────────────────────

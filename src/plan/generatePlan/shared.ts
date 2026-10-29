@@ -1,5 +1,5 @@
 // Gemeinsame Grundlage des Grundriss-Generators: das `Primitive`-Vokabular
-// (das EINZIGE Austauschformat zwischen `generatePlan()`/`generateSectionPlan()`
+// (das EINZIGE Austauschformat zwischen `generatePlan()`, Schnitt/Ansicht
 // und den Domänen — unter `generatePlan/` in TS, die meisten im Rust-Kern mit
 // derselben JSON-Form, `src-tauri/core/src/plan/prim.rs`), die By-Layer/By-Object-
 // Attribut-Auflösung (`resolve*`) sowie die Papier-mm-/Tinten-Konstanten, die
