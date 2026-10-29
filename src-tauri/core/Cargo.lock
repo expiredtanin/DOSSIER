@@ -36,6 +36,7 @@ dependencies = [
  "serde_json",
  "ts-rs",
  "wasm-bindgen",
+ "zmij",
 ]
 
 [[package]]

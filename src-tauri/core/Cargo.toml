@@ -24,6 +24,8 @@ serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 kernel2d = { path = "../kernel2d" }
 # Analytischer Schnitt-Extraktor (`section::cut_section`, GPU-frei, nur serde) für Schnitt/Ansicht im Kern ([K3c]).
 render3d = { path = "../render3d", default-features = false }
+# Kürzeste Dezimaldarstellung wie serde_json (Zahlen, die früher über JSON reisten, bitgleich nachbilden).
+zmij = "1"
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 # TS-Typen aus dem Rust-Modell ([K4] S4): `src/model/types.generated.ts`, s. `model/ts_export.rs`.

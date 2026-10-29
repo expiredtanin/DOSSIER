@@ -65,6 +65,7 @@ pub mod snap;
 pub mod plan_svg;
 pub mod plan_dxf;
 pub mod plan_print_svg;
+pub mod ugrid;
 
 #[cfg(feature = "web")]
 mod web;

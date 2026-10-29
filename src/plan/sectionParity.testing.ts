@@ -171,3 +171,21 @@ export function bigSectionProject(n: number): Project {
   ];
   return { ...p, drawingLevels: [...p.drawingLevels, ...levels] };
 }
+
+/** Kachelt ein Projekt n × n (Wände, Öffnungen, Decken, Dächer, Treppen, Körper), für grosse Zufallsfälle. */
+export function tileProject(s: Project, n: number, pitch = 9): Project {
+  const sh = (p: { x: number; y: number }, dx: number, dy: number) => ({ x: p.x + dx, y: p.y + dy });
+  const out: Project = { ...s, walls: [], openings: [], ceilings: [], roofs: [], stairs: [], extrudedSolids: [] };
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const [dx, dy, sfx] = [i * pitch, j * pitch, `_${i}_${j}`];
+      for (const w of s.walls) out.walls.push({ ...w, id: w.id + sfx, start: sh(w.start, dx, dy), end: sh(w.end, dx, dy) });
+      for (const o of s.openings ?? []) out.openings!.push({ ...o, id: o.id + sfx, hostWallId: o.hostWallId + sfx });
+      for (const c of s.ceilings ?? []) out.ceilings!.push({ ...c, id: c.id + sfx, outline: c.outline.map((p) => sh(p, dx, dy)) });
+      for (const r of s.roofs ?? []) out.roofs!.push({ ...r, id: r.id + sfx, outline: r.outline.map((p) => sh(p, dx, dy)) });
+      for (const st of s.stairs ?? []) out.stairs!.push({ ...st, id: st.id + sfx, start: sh(st.start, dx, dy) });
+      for (const x of s.extrudedSolids ?? []) out.extrudedSolids!.push({ ...x, id: x.id + sfx, points: x.points.map((p) => sh(p, dx, dy)) });
+    }
+  }
+  return out;
+}

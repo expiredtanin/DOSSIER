@@ -792,15 +792,14 @@ fn subtract_from_unit(blocked: &[(f32, f32)]) -> Vec<(f32, f32)> {
     visible
 }
 
-/// Fuer eine projizierte Kante (u0,v0)->(u1,v1) bei Tiefen (d0,d1): die
-/// Teilbereiche (t in [0,1]), die durch `bounds` verdeckt werden (Vereinigung
-/// ueber alle Blocker). `exclude` (falls gesetzt) nimmt EIN Bauteil von der
-/// Verdeckungspruefung aus — fuer die eigenen Oeffnungs-Rahmenkanten eines
-/// Bauteils, die sich nicht selbst verdecken koennen (siehe Moduldoc
-/// "Oeffnungen"). Jeder Blocker mit `opening_voids` (Fenster/Tueren) gibt an
-/// diesen Stellen NICHTS zur Verdeckung bei ("Durchblick").
+/// Verdeckter Anteil (t in [0,1]) einer projizierten Kante (u0,v0)->(u1,v1) bei Tiefen (d0,d1)
+/// durch EIN Prisma `b` (vor dem Vereinigen ueber alle Blocker, s. `merge_intervals`). `exclude`
+/// (falls gesetzt) nimmt EIN Bauteil von der Verdeckungspruefung aus — fuer die eigenen
+/// Oeffnungs-Rahmenkanten eines Bauteils, die sich nicht selbst verdecken koennen (siehe Moduldoc
+/// "Oeffnungen"). Ein Blocker mit `opening_voids` (Fenster/Tueren) gibt an diesen Stellen NICHTS
+/// zur Verdeckung bei ("Durchblick").
 #[allow(clippy::too_many_arguments)]
-fn blocked_intervals(
+fn block_pieces(
     u0: f32,
     u1: f32,
     v0: f32,
@@ -808,51 +807,68 @@ fn blocked_intervals(
     d0: f32,
     d1: f32,
     bias: HeightBias,
-    bounds: &[PrismBounds],
+    b: &PrismBounds,
     exclude: Option<ComponentRef>,
     owner: (ComponentRef, Option<&str>),
-) -> Vec<(f32, f32)> {
-    let mut ivs = Vec::new();
+    ivs: &mut Vec<(f32, f32)>,
+) -> bool {
     let (owner_ref, owner_group) = owner;
-    for b in bounds {
-        if let Some(ex) = exclude {
-            if ex.kind == b.kind && ex.index == b.index {
-                continue;
-            }
+    if let Some(ex) = exclude {
+        if ex.kind == b.kind && ex.index == b.index {
+            return false;
         }
-        // Komplett VOR der Schnittebene (hinter dem Betrachter, weggeschnitten):
-        // verdeckt nichts. Vorher zaehlte z. B. die Fassade zwischen Betrachter
-        // und Schnittlinie als Verdecker und versteckte jede Ansichtskante
-        // dahinter (Rueckwand, Fenster, Innenwaende) — der Schnitt zeigte fast
-        // nur noch Poché.
-        if b.depth_max <= EPS {
-            continue;
-        }
-        let ru = height_in_range(u0, u1, b.u_min, b.u_max, HeightBias::Vertical);
-        let rv = height_in_range(v0, v1, b.z0, b.z1, bias);
-        // Gleiche Monolith-Gruppe (z. B. Tritte EINER Treppe), anderes Prisma:
-        // verdeckt auch bei GLEICHER Tiefe — die Naht zwischen zwei Tritten auf
-        // derselben Seitenflaeche ist keine sichtbare Kante (sonst "gestapelte
-        // Kistchen" statt Saegezahn im Schnitt).
-        let same_group = owner_group.is_some()
-            && b.monolith.as_deref() == owner_group
-            && !(b.kind == owner_ref.kind && b.index == owner_ref.index);
-        let threshold = if same_group { b.depth_min - EPS } else { b.depth_min + EPS };
-        let rd = linear_greater_than(d0, d1, threshold);
-        let Some(solid) = intersect_ranges(intersect_ranges(ru, rv), rd) else {
-            continue;
-        };
-        let mut pieces = vec![solid];
-        for &(vu0, vu1, vz0, vz1) in &b.opening_voids {
-            let vru = height_in_range(u0, u1, vu0, vu1, HeightBias::Vertical);
-            let vrv = height_in_range(v0, v1, vz0, vz1, HeightBias::Vertical);
-            if let Some(void_range) = intersect_ranges(vru, vrv) {
-                pieces = subtract_range(pieces, void_range);
-            }
-        }
-        ivs.extend(pieces);
     }
-    merge_intervals(ivs)
+    // Komplett VOR der Schnittebene (hinter dem Betrachter, weggeschnitten):
+    // verdeckt nichts. Vorher zaehlte z. B. die Fassade zwischen Betrachter
+    // und Schnittlinie als Verdecker und versteckte jede Ansichtskante
+    // dahinter (Rueckwand, Fenster, Innenwaende) — der Schnitt zeigte fast
+    // nur noch Poché.
+    if b.depth_max <= EPS {
+        return false;
+    }
+    // Schnelle Absage (konservativ, weit ausserhalb aller Toleranzen der genauen Pruefung):
+    // Prisma liegt ganz ueber/unter der Kante oder nicht naeher als ihr fernster Punkt.
+    let (v_lo, v_hi) = (v0.min(v1), v0.max(v1));
+    let mv = 1e-3 * (1.0 + (v1 - v0).abs());
+    if b.z0 > v_hi + mv || b.z1 < v_lo - mv {
+        return false;
+    }
+    if b.depth_min - EPS > d0.max(d1) + 1e-3 * (1.0 + (d1 - d0).abs()) {
+        return false;
+    }
+    let ru = height_in_range(u0, u1, b.u_min, b.u_max, HeightBias::Vertical);
+    let rv = height_in_range(v0, v1, b.z0, b.z1, bias);
+    // Gleiche Monolith-Gruppe (z. B. Tritte EINER Treppe), anderes Prisma:
+    // verdeckt auch bei GLEICHER Tiefe — die Naht zwischen zwei Tritten auf
+    // derselben Seitenflaeche ist keine sichtbare Kante (sonst "gestapelte
+    // Kistchen" statt Saegezahn im Schnitt).
+    let same_group = owner_group.is_some()
+        && b.monolith.as_deref() == owner_group
+        && !(b.kind == owner_ref.kind && b.index == owner_ref.index);
+    let threshold = if same_group { b.depth_min - EPS } else { b.depth_min + EPS };
+    let rd = linear_greater_than(d0, d1, threshold);
+    let Some(solid) = intersect_ranges(intersect_ranges(ru, rv), rd) else { return false };
+    if b.opening_voids.is_empty() {
+        // Haeufigster Fall ohne Zuteilung: ein Stueck; genau [0,1] verdeckt die Kante ganz.
+        if solid == (0.0, 1.0) {
+            return true;
+        }
+        ivs.push(solid);
+        return false;
+    }
+    let mut pieces = vec![solid];
+    for &(vu0, vu1, vz0, vz1) in &b.opening_voids {
+        let vru = height_in_range(u0, u1, vu0, vu1, HeightBias::Vertical);
+        let vrv = height_in_range(v0, v1, vz0, vz1, HeightBias::Vertical);
+        if let Some(void_range) = intersect_ranges(vru, vrv) {
+            pieces = subtract_range(pieces, void_range);
+        }
+    }
+    if pieces.len() == 1 && pieces[0] == (0.0, 1.0) {
+        return true;
+    }
+    ivs.extend(pieces);
+    false
 }
 
 fn lerp_uv(u0: f32, v0: f32, u1: f32, v1: f32, t: f32) -> [f32; 2] {
@@ -921,11 +937,124 @@ fn opening_wire_edges(prism: &Prism) -> Vec<([f32; 3], [f32; 3], HeightBias)> {
     edges
 }
 
+/// Verdecker-Raster ueber u; je Zelle nach der naechsten Tiefe (`depth_min`) sortiert. Je Kante
+/// werden nur Prismen besucht, deren u-Bereich (mit grosszuegigem Rand) die Kante erreichen kann,
+/// je Zelle von nah nach fern und nur bis zum fernsten Punkt der Kante (fernere verdecken nie).
+/// Die genaue Pruefung bleibt `block_pieces`. Das Ergebnis haengt nicht von der Besuchsreihenfolge
+/// ab (`merge_intervals` sortiert und vereinigt); verdeckt ein Prisma die Kante ganz (Teilstueck
+/// genau [0,1]), ist die Vereinigung [0,1], egal was folgt — darum darf die Suche dort abbrechen.
+/// Zelleneintrag: was die Vorauswahl braucht, ohne das Prisma selbst anzufassen (Cache).
+#[derive(Clone, Copy)]
+struct Entry {
+    depth_min: f32,
+    u_min: f32,
+    u_max: f32,
+    z0: f32,
+    z1: f32,
+    /// Erste Zelle des Prismas: in einer Abfrage zaehlt es nur in der ersten ueberdeckten Zelle
+    /// (statt einer Merkliste gegen Doppelte).
+    first: u32,
+    index: u32,
+}
+
+struct OccGrid {
+    u0: f64,
+    inv_u: f64,
+    /// Zellen, nach `depth_min` sortiert.
+    cells: Vec<Vec<Entry>>,
+    /// Prismen mit nicht endlichen Grenzen: immer Kandidaten.
+    always: Vec<u32>,
+}
+
+/// Rand der Vorauswahl in u bzw. Tiefe: deckt die Toleranzen der genauen Pruefung (EPS absolut
+/// bzw. in t, also EPS mal Kantenlaenge) und die f32-Rundung reichlich ab.
+fn grid_margin(len: f64) -> f64 {
+    1e-2 + 1e-3 * len
+}
+
+impl OccGrid {
+    fn new(bounds: &[PrismBounds]) -> OccGrid {
+        let mut always = Vec::new();
+        let mut active = Vec::new();
+        let (mut ulo, mut uhi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for (i, b) in bounds.iter().enumerate() {
+            if b.depth_max <= EPS {
+                continue; // verdeckt nie etwas (s. `block_pieces`)
+            }
+            if !(b.u_min.is_finite() && b.u_max.is_finite() && b.depth_min.is_finite()) {
+                always.push(i as u32);
+                continue;
+            }
+            active.push(i);
+            ulo = ulo.min(b.u_min as f64);
+            uhi = uhi.max(b.u_max as f64);
+        }
+        let nu = if uhi > ulo { ((active.len() as f64).sqrt().ceil() as usize * 2).clamp(1, 1 << 14) } else { 1 };
+        let mut g = OccGrid { u0: ulo, inv_u: if nu > 1 { nu as f64 / (uhi - ulo) } else { 0.0 }, cells: vec![Vec::new(); nu], always };
+        for i in active {
+            let b = &bounds[i];
+            let (a, c) = (g.u_cell(b.u_min as f64 - grid_margin(0.0)), g.u_cell(b.u_max as f64 + grid_margin(0.0)));
+            let e = Entry { depth_min: b.depth_min, u_min: b.u_min, u_max: b.u_max, z0: b.z0, z1: b.z1, first: a as u32, index: i as u32 };
+            for ui in a..=c {
+                g.cells[ui].push(e);
+            }
+        }
+        for cell in &mut g.cells {
+            cell.sort_by(|x, y| x.depth_min.total_cmp(&y.depth_min).then(x.index.cmp(&y.index)));
+        }
+        g
+    }
+
+    fn u_cell(&self, u: f64) -> usize {
+        if self.inv_u == 0.0 {
+            return 0;
+        }
+        let c = ((u - self.u0) * self.inv_u).floor();
+        if c.is_nan() { 0 } else { c.clamp(0.0, (self.cells.len() - 1) as f64) as usize }
+    }
+
+    /// Besucht die Kandidaten einer Kante (u-Bereich [lo, hi], Hoehenbereich [vlo, vhi] samt Rand,
+    /// fernster Punkt samt Rand `dmax`) je einmal; `visit` liefert `true` zum Abbrechen.
+    #[allow(clippy::too_many_arguments)]
+    fn visit(&self, bounds: &[PrismBounds], lo: f64, hi: f64, vlo: f32, vhi: f32, dmax: f64, mut visit: impl FnMut(&PrismBounds) -> bool) {
+        for &i in &self.always {
+            if visit(&bounds[i as usize]) {
+                return;
+            }
+        }
+        let finite = lo.is_finite() && hi.is_finite();
+        let m = if finite { grid_margin(hi - lo) } else { 0.0 };
+        let (a, c) = if finite { (self.u_cell(lo - m), self.u_cell(hi + m)) } else { (0, self.cells.len() - 1) };
+        for ui in a..=c {
+            for e in &self.cells[ui] {
+                if dmax.is_finite() && e.depth_min as f64 > dmax {
+                    break; // nach Tiefe sortiert: alle weiteren liegen ferner
+                }
+                // nur in der ersten ueberdeckten Zelle der Abfrage (sonst doppelt)
+                if (e.first as usize).max(a) != ui {
+                    continue;
+                }
+                if finite && !((e.u_min as f64) <= hi + m && (e.u_max as f64) >= lo - m) {
+                    continue;
+                }
+                // Hoehe: dieselbe konservative Absage wie in `block_pieces`
+                if e.z0 > vhi || e.z1 < vlo {
+                    continue;
+                }
+                if visit(&bounds[e.index as usize]) {
+                    return;
+                }
+            }
+        }
+    }
+}
+
 fn compute_view_edges(
     plane: &SectionPlane,
     prisms: &[Prism],
 ) -> (Vec<SectionEdge>, Vec<SectionEdge>) {
     let bounds: Vec<PrismBounds> = prisms.iter().map(|p| prism_bounds(plane, p)).collect();
+    let grid = OccGrid::new(&bounds);
     let mut visible = Vec::new();
     let mut hidden = Vec::new();
 
@@ -976,18 +1105,17 @@ fn compute_view_edges(
             let d1 = plane.depth(cb);
 
             let exclude = if self_exclude { Some(cref) } else { None };
-            let blocked = blocked_intervals(
-                u0,
-                u1,
-                v0,
-                v1,
-                d0,
-                d1,
-                bias,
-                &bounds,
-                exclude,
-                (cref, prism.monolith.as_deref()),
-            );
+            let owner = (cref, prism.monolith.as_deref());
+            let mut ivs: Vec<(f32, f32)> = Vec::new();
+            let mut full = false;
+            // Fernster Punkt samt Rand der schnellen Absage in `block_pieces` (reichlich).
+            let dmax = d0.max(d1) as f64 + 2e-3 * (1.0 + (d1 - d0).abs() as f64) + 1e-3;
+            let mv = 1e-3 * (1.0 + (v1 - v0).abs());
+            grid.visit(&bounds, u0.min(u1) as f64, u0.max(u1) as f64, v0.min(v1) - mv, v0.max(v1) + mv, dmax, |b| {
+                full = block_pieces(u0, u1, v0, v1, d0, d1, bias, b, exclude, owner, &mut ivs);
+                full
+            });
+            let blocked = if full { vec![(0.0, 1.0)] } else { merge_intervals(ivs) };
             for &(s, e) in &blocked {
                 hidden.push(SectionEdge {
                     component: cref,

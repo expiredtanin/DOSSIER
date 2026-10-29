@@ -388,11 +388,11 @@ fn wall_ref(p: &Project, w: &Wall) -> WallRef {
 }
 
 /// Öffnungs-Intervall und vertikale Lage aller Öffnungen einer Wand.
-fn wall_openings(p: &Project, w: &Wall, with_recess: bool) -> Vec<OpeningIn> {
+fn wall_openings(p: &Project, w: &Wall, openings: &[&Opening], with_recess: bool) -> Vec<OpeningIn> {
     let wr = wall_ref(p, w);
     let (zb, zt) = p.wall_vertical_extent(w);
     let mut out = Vec::new();
-    for o in p.openings_of_wall(&w.id) {
+    for &o in openings {
         let Some((from, to)) = opening_geom::opening_interval(&wr, o.position, o.width) else { continue };
         let o_bottom = zb + o.sill_height.max(0.0);
         let o_top = zt.min(o_bottom + o.height);
@@ -500,6 +500,7 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
     let mut contexts: HashMap<&str, FloorContext> = HashMap::new();
     let empty = FloorContext::default();
     let mut out = Vec::new();
+    let by_wall = p.openings_by_wall();
     for wall in &p.walls {
         let (bands, stacked) = resolve_wall_bands(p, &maps, wall, layered);
         let (z_bottom, z_top) = p.wall_vertical_extent(wall);
@@ -523,7 +524,7 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
                 _ => Termination::Both,
             },
             bands: bands.iter().map(|b| BandIn { thickness: b.thickness, priority: b.priority }).collect(),
-            openings: wall_openings(p, wall, true),
+            openings: wall_openings(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), true),
             cuts: if layered { joins.as_ref().and_then(|j| j.get(&wall.id)).cloned().unwrap_or_default() } else { WallCuts::default() },
         };
         let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);

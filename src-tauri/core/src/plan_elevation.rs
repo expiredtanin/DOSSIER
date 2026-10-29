@@ -51,6 +51,7 @@
 
 use crate::jsmath::{hypot, hypot2};
 use crate::jsnum::{max, min, round};
+use crate::ugrid::Grid1;
 use std::collections::HashMap;
 
 const OCC_MARGIN: f64 = 2e-3;
@@ -164,23 +165,76 @@ fn segment_inside_poly_interval(a: P, b: P, poly: &[P]) -> Option<(f64, f64)> {
     (t0 <= t1).then_some((t0, t1))
 }
 
-fn clip_segment_visible(a: P, b: P, depth: f64, occ: &[Occ]) -> Vec<(P, P)> {
+fn occ_grid(occ: &[Occ]) -> Grid1 {
+    Grid1::new(&occ.iter().map(|o| (o.bbox[0], o.bbox[1])).collect::<Vec<_>>())
+}
+
+/// Verdecker je u-Zelle, nach Tiefe sortiert (nah zuerst), mit Rahmen im Eintrag: Linien prüfen nur
+/// Verdecker vor sich, je einmal (in der ersten überdeckten Zelle der Abfrage), und hören auf, sobald
+/// einer die Linie ganz deckt. Die Teilstücke hängen nicht von der Reihenfolge der Schnitte ab
+/// (sortiert und vereinigt); ein ganzer Schnitt [0, 1] lässt nichts übrig.
+struct OccCells {
+    lo: f64,
+    inv: f64,
+    cells: Vec<Vec<(f64, [f64; 4], u32, u32)>>,
+}
+
+impl OccCells {
+    fn new(occ: &[Occ]) -> OccCells {
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for o in occ {
+            lo = lo.min(o.bbox[0]);
+            hi = hi.max(o.bbox[1]);
+        }
+        let n = if hi > lo { ((occ.len() as f64).sqrt().ceil() as usize * 2).clamp(1, 1 << 14) } else { 1 };
+        let mut g = OccCells { lo, inv: if n > 1 { n as f64 / (hi - lo) } else { 0.0 }, cells: vec![Vec::new(); n] };
+        for (i, o) in occ.iter().enumerate() {
+            let (a, c) = (g.cell(o.bbox[0]), g.cell(o.bbox[1]));
+            for k in a..=c {
+                g.cells[k].push((o.depth, o.bbox, a as u32, i as u32));
+            }
+        }
+        for c in &mut g.cells {
+            c.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.3.cmp(&y.3)));
+        }
+        g
+    }
+
+    fn cell(&self, u: f64) -> usize {
+        if self.inv == 0.0 {
+            return 0;
+        }
+        let c = ((u - self.lo) * self.inv).floor();
+        if c.is_nan() { 0 } else { c.clamp(0.0, (self.cells.len() - 1) as f64) as usize }
+    }
+}
+
+fn clip_segment_visible(a: P, b: P, depth: f64, occ: &[Occ], grid: &OccCells) -> Vec<(P, P)> {
     let mut cuts: Vec<(f64, f64)> = Vec::new();
     let seg_min = (min(a.0, b.0), min(a.1, b.1));
     let seg_max = (max(a.0, b.0), max(a.1, b.1));
-    for o in occ {
-        if o.depth >= depth - OCC_MARGIN {
-            continue;
-        }
-        if o.bbox[1] < seg_min.0 || o.bbox[0] > seg_max.0 {
-            continue;
-        }
-        if o.bbox[3] < seg_min.1 || o.bbox[2] > seg_max.1 {
-            continue;
-        }
-        if let Some(iv) = segment_inside_poly_interval(a, b, &o.poly) {
-            if iv.1 - iv.0 > 1e-6 {
-                cuts.push(iv);
+    let (c0, c1) = (grid.cell(seg_min.0), grid.cell(seg_max.0));
+    for ci in c0..=c1 {
+        for &(od, bb, first, oi) in &grid.cells[ci] {
+            if od >= depth - OCC_MARGIN {
+                break; // nach Tiefe sortiert: alle weiteren liegen nicht davor
+            }
+            if (first as usize).max(c0) != ci {
+                continue; // in einer früheren Zelle dieser Abfrage schon geprüft
+            }
+            if bb[1] < seg_min.0 || bb[0] > seg_max.0 {
+                continue;
+            }
+            if bb[3] < seg_min.1 || bb[2] > seg_max.1 {
+                continue;
+            }
+            if let Some(iv) = segment_inside_poly_interval(a, b, &occ[oi as usize].poly) {
+                if iv.1 - iv.0 > 1e-6 {
+                    if iv.0 == 0.0 && iv.1 == 1.0 {
+                        return Vec::new(); // ganz verdeckt
+                    }
+                    cuts.push(iv);
+                }
             }
         }
     }
@@ -213,9 +267,10 @@ pub fn clip_segments(occ: &[f64], segs: &[f64]) -> Vec<f64> {
     }
     let m = segs[0] as usize;
     let mut f = vec![m as f64];
+    let grid = OccCells::new(&occ);
     for k in 0..m {
         let s = &segs[1 + 5 * k..6 + 5 * k];
-        let parts = clip_segment_visible((s[0], s[1]), (s[2], s[3]), s[4], &occ);
+        let parts = clip_segment_visible((s[0], s[1]), (s[2], s[3]), s[4], &occ, &grid);
         f.push(parts.len() as f64);
         for (a, b) in parts {
             f.extend([a.0, a.1, b.0, b.1]);
@@ -245,9 +300,12 @@ pub fn occluded_points(occ: &[f64], pts: &[f64]) -> Vec<f64> {
     }
     let m = pts[0] as usize;
     let mut f = vec![m as f64];
+    let grid = occ_grid(&occ);
+    let mut cand = Vec::new();
     for k in 0..m {
         let (u, v, depth) = (pts[1 + 3 * k], pts[2 + 3 * k], pts[3 + 3 * k]);
-        let hit = occ.iter().any(|o| {
+        grid.query(u, u, &mut cand);
+        let hit = cand.iter().map(|&i| &occ[i as usize]).any(|o| {
             o.depth < depth - OCC_MARGIN
                 && !(u < o.bbox[0] || u > o.bbox[1] || v < o.bbox[2] || v > o.bbox[3])
                 && point_in_poly((u, v), &o.poly)
@@ -300,10 +358,15 @@ pub fn shadows(walls: &[f64], slabs: &[f64]) -> Vec<f64> {
         return Vec::new();
     };
     let mut res: Vec<(f64, Vec<P>)> = Vec::new();
+    let wboxes: Vec<[f64; 4]> = walls.iter().map(|(_, w)| bbox_of(w)).collect();
+    let grid = Grid1::new(&wboxes.iter().map(|b| (b[0], b[1])).collect::<Vec<_>>());
+    let mut cand = Vec::new();
     for (sh, spts) in &slabs {
         let so = bbox_of(spts);
-        for (wh, wpts) in &walls {
-            let wo = bbox_of(wpts);
+        grid.query(so[0], so[1], &mut cand);
+        for &wi in &cand {
+            let (wh, _) = &walls[wi as usize];
+            let wo = wboxes[wi as usize];
             let delta = wh[0] - sh[1];
             if delta <= EPS || delta > MAX_SHADOW_DELTA {
                 continue;
@@ -702,11 +765,23 @@ pub fn wall_extensions(inp: &[f64]) -> Vec<f64> {
     }
     let w = |k: usize| &inp[1 + 6 * k..7 + 6 * k];
     let mut f = vec![n as f64];
+    // Ausdehnung in x je Wand (Achse ± halbe Dicke, mit Rand für die Toleranzen von `body_contains`).
+    let xr: Vec<(f64, f64)> = (0..n)
+        .map(|k| {
+            let q = w(k);
+            let r = q[5].abs() + 1e-3;
+            (q[1].min(q[3]) - r, q[1].max(q[3]) + r)
+        })
+        .collect();
+    let grid = Grid1::new(&xr);
+    let mut cand = Vec::new();
     for k in 0..n {
         let me = w(k);
-        let ext_at = |p: P| -> f64 {
+        let mut ext_at = |p: P| -> f64 {
             let mut max_other = 0.0;
-            for o in 0..n {
+            grid.query(p.0, p.0, &mut cand);
+            for &o in cand.iter() {
+                let o = o as usize;
                 let other = w(o);
                 if o == k || other[0] != me[0] {
                     continue;
@@ -1058,5 +1133,34 @@ mod tests {
         assert!(clip_segments(&[f64::NAN], &[0.0]).is_empty());
         assert!(shadows(&[1.0], &[0.0]).is_empty());
         assert!(xor_outline(&[1.0, 5.0, 0.0]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tests_ts {
+    use super::*;
+
+    // Früher `toElevation.test.ts` (buildShadows): Überstand vor der Fassade wirft Schatten.
+    #[test]
+    fn ueberstand_wirft_schatten_nur_bei_ueberlapp() {
+        // Wandfläche u 1..5, v 0..3, Tiefe 1.9; Überstand näher (Tiefe 1.4, depthMin 1.4), unten v 2.8.
+        let wall = [1.0, 1.9, 1.9, 4.0, 1.0, 0.0, 5.0, 0.0, 5.0, 3.0, 1.0, 3.0];
+        let slab = |u0: f64, u1: f64| vec![1.0, 1.4, 1.4, 4.0, u0, 2.8, u1, 2.8, u1, 3.0, u0, 3.0];
+        let f = shadows(&wall, &slab(1.0, 5.0));
+        assert_eq!(f[0], 1.0);
+        assert_eq!(f[1], 1.9);
+        assert_eq!(shadows(&wall, &slab(20.0, 24.0)), vec![0.0]);
+    }
+
+    #[test]
+    fn verdeckte_punkte_ueber_das_raster_wie_ohne() {
+        // Viele Verdecker nebeneinander; Punkt in einem davon und vor/hinter.
+        let mut occ = vec![50.0];
+        for k in 0..50 {
+            let u0 = k as f64;
+            occ.extend([1.0, 4.0, u0, 0.0, u0 + 1.0, 0.0, u0 + 1.0, 1.0, u0, 1.0]);
+        }
+        let f = occluded_points(&occ, &[3.0, 10.5, 0.5, 5.0, 10.5, 0.5, 0.5, 99.0, 0.5, 5.0]);
+        assert_eq!(f, vec![3.0, 1.0, 0.0, 0.0]);
     }
 }

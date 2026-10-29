@@ -37,7 +37,7 @@ it.skipIf(!process.env.BENCH)("Messung Schnitt/Ansicht alt gegen neu", async () 
   for (const [name, p] of cases) {
     const codes = new Set(flattenCategories(p.layers).map((c) => c.code));
     const levels = p.drawingLevels.filter((l) => (l.kind === "section" || l.kind === "elevation") && l.linePoints) as DrawingLevel[];
-    const runs = name === "big16" ? 1 : name === "Beispiel" ? 20 : 5;
+    const runs = Number(process.env.BENCH_RUNS ?? (name === "big16" ? 1 : name === "Beispiel" ? 20 : 5));
     for (const l of levels) {
       if (l.kind === "section") {
         const oldP = async () => {
@@ -46,16 +46,18 @@ it.skipIf(!process.env.BENCH)("Messung Schnitt/Ansicht alt gegen neu", async () 
           return { ...pl, primitives: [...pl.primitives, ...sectionOpeningPrimitives(p, l, codes)] };
         };
         const newP = async () => newGen((await newCompute(p, l))!, false, { hiddenLines: l.hiddenLines, visibleCodes: codes, openings: true });
-        const a = await time(oldP, runs);
+        const skipOld = !!process.env.BENCH_NEW_ONLY;
+        const a = skipOld ? ([NaN, NaN] as [number, number]) : await time(oldP, runs);
         const b = await time(newP, runs);
-        const c = await time(async () => planToRenderScene(await oldP(), 100), runs);
+        const c = skipOld ? ([NaN, NaN] as [number, number]) : await time(async () => planToRenderScene(await oldP(), 100), runs);
         const d = await time(async () => planToRenderScene(await newP(), 100), runs);
         rows.push(`${name} | ${l.id} Schnitt | ${fmt(a)} | ${fmt(b)} | ${fmt(c)} | ${fmt(d)}`);
         process.stderr.write(rows[rows.length - 1] + "\n");
       } else {
-        const a = await time(() => oldElev(p, l), runs);
+        const skipOld = !!process.env.BENCH_NEW_ONLY;
+        const a = skipOld ? ([NaN, NaN] as [number, number]) : await time(() => oldElev(p, l), runs);
         const b = await time(() => newElev(p, l), runs);
-        const c = await time(() => planToRenderScene(oldElev(p, l)!, 100), runs);
+        const c = skipOld ? ([NaN, NaN] as [number, number]) : await time(() => planToRenderScene(oldElev(p, l)!, 100), runs);
         const d = await time(() => planToRenderScene(newElev(p, l)!, 100), runs);
         rows.push(`${name} | ${l.id} Ansicht | ${fmt(a)} | ${fmt(b)} | ${fmt(c)} | ${fmt(d)}`);
         process.stderr.write(rows[rows.length - 1] + "\n");

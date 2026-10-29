@@ -236,9 +236,10 @@ fn sash_kind(k: OpeningKind) -> f64 {
 fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
     let mut b = vec![0.0];
     let mut ids: Vec<&str> = Vec::new();
+    let by_wall = p.openings_by_wall();
     for wall in &p.walls {
         let thickness = p.wall_type(wall).map_or(0.2, |t| t.layers.iter().fold(0.0, |s, l| s + l.thickness));
-        for op in p.openings_of_wall(&wall.id) {
+        for &op in by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()) {
             let axis = hypot2(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
             let from = max(0.0, min(op.position, axis));
             let to = max(from, min(op.position + op.width, axis));

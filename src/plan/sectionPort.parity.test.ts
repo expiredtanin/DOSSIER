@@ -15,7 +15,7 @@ import type { DrawingLevel, Project } from "../model/types";
 import type { CategoryDisplayResolver, Plan, Primitive } from "./generatePlan";
 import { planToRenderScene } from "./toRenderScene";
 import { planToSvgString } from "../export/planToSvgString";
-import { bigSectionProject, randomSectionProject, rng, sectionLevels } from "./sectionParity.testing";
+import { bigSectionProject, randomSectionProject, rng, sectionLevels, tileProject } from "./sectionParity.testing";
 
 beforeAll(() => {
   setWasmBytesProvider(async (name) =>
@@ -187,6 +187,13 @@ describe("Schnitt und Ansicht: Kern gleich alter TS-Fassung", () => {
       await check(p, sectionLevels(p, seed, 12), `Saat ${seed}`, seed);
     }
     console.log("Gleichheit:", stats);
+  }, 3_600_000);
+
+  it("Gekachelte Zufallsprojekte (4×4)", async () => {
+    for (let seed = 101; seed <= 100 + Number(process.env.PARITY_TILES ?? 6); seed++) {
+      const p = tileProject(randomSectionProject(seed), 4);
+      await check(p, sectionLevels(p, seed, 6), `Kacheln ${seed}`, seed);
+    }
   }, 3_600_000);
 
   it("Grosses Projekt (6×6)", async () => {

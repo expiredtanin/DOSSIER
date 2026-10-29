@@ -125,6 +125,12 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Decken-/Treppen-Bändern als Plan-Schraffur durch (GPU: Diagonale, SVG: keine) — jetzt die vorgesehene
     Rückfall-Schraffur. Ursache bleibt offen: `slabSegmentOwners` zählt Decken, das Schnitt-Modell emittiert je
     Deckenschicht und Treppentritt eine Platte (Index-Versatz; mehrschichtige Decken im Schnitt falsch geschichtet).
+    Leistung (29.10., Ausgabe bitgleich, Gleichheitstest nach jedem Schritt): render3d-Verdeckung über ein u-Raster mit nach
+    Tiefe sortierten Zellen und Abbruch bei ganz verdeckter Kante (vorher jede Kante gegen jedes Prisma); Ansicht: Verdecker,
+    Schatten, Eck-Verlängerung über Raster (`ugrid.rs`), Linien-Clipping nah→fern mit Abbruch; Schnitt-Dominanz nur gegen
+    treffende Schneider, Verschmelzen ohne Neustart über alle Paare, Monolith-Umriss per Bereichs-Malen; Öffnungen je Wand
+    einmal indiziert; Zahlen-Nachbildung mit Schnellweg. Messung (Node/WASM, Min., Kacheln des Beispielhauses mit Treppen):
+    Schnitt 6×6 10,2 s → 0,10 s, 8×8 33 s → 0,19 s, 16×16 0,8 s (alt nicht messbar, > 1 min); Ansicht 8×8 107 → 29 ms.
     Rest in TS (28.10.): Stil-Auflösung (Bauteil, Schraffur, Farbe, Linienstil, Pick-IDs, Painter-Reihenfolge) in `generatePlan*.ts`,
     `toSection.ts` (Besitzer-Zuordnung, Schichtbänder), `toElevation.ts` (Orchestrierung), `sectionOpenings.ts`, `planUnderlay.ts`,
     `drawing2d.ts`. Das ist kein Rechenanteil mehr, sondern liest das Modell; es zieht mit [K4] um.

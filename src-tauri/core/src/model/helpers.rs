@@ -5,6 +5,7 @@
 //! Rückfall ein.
 
 use super::*;
+use std::collections::HashMap;
 use crate::roof::{MansardType, RoofParams, Shape};
 use crate::roof_skeleton::Axis;
 
@@ -46,6 +47,16 @@ impl Project {
 
     pub fn openings_of_wall<'a>(&'a self, wall_id: &'a str) -> impl Iterator<Item = &'a Opening> + 'a {
         self.openings.as_deref().unwrap_or(&[]).iter().filter(move |o| o.host_wall_id == wall_id)
+    }
+
+    /// Öffnungen je Wand-id in Projekt-Reihenfolge (wie [`Self::openings_of_wall`], aber einmal für
+    /// alle Wände statt je Wand über alle Öffnungen).
+    pub fn openings_by_wall(&self) -> HashMap<&str, Vec<&Opening>> {
+        let mut m: HashMap<&str, Vec<&Opening>> = HashMap::new();
+        for o in self.openings.as_deref().unwrap_or(&[]) {
+            m.entry(o.host_wall_id.as_str()).or_default().push(o);
+        }
+        m
     }
 
     /// Alle Kategorien flach (Reihenfolge wie `flattenCategories`).

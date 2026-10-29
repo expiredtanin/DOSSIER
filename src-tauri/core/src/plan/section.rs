@@ -225,7 +225,7 @@ fn js_f32(x: f32) -> f64 {
         return 0.0; // JSON `null` → 0 in der Arithmetik
     }
     // serde_json schrieb f32 mit der kürzesten Darstellung (Gleichstand → gerade Ziffer), JS las sie.
-    serde_json::to_string(&x).ok().and_then(|t| t.parse::<f64>().ok()).unwrap_or(0.0)
+    zmij::Buffer::new().format_finite(x).parse::<f64>().unwrap_or(0.0)
 }
 
 fn kind_of(k: render3d::ComponentKind) -> Kind {
@@ -254,9 +254,28 @@ fn json_f32(x: f64) -> f32 {
     if x.fract() == 0.0 && x.abs() < 1e21 {
         return x as f32; // JS schreibt eine Ganzzahl, serde liest u64/i64
     }
-    // Ziffern und Exponent der kürzesten Darstellung (wie JS: Gleichstand → gerade Ziffer).
-    let s = serde_json::to_string(&x.abs()).unwrap_or_default();
-    let (mant, exp) = s.split_once(['e', 'E']).unwrap_or((&s, "0"));
+    // Schnellweg: im Bereich 1e-6..1e14 liegt die Lesung (≤ 17 Ziffern, Zehnerpotenz exakt) höchstens
+    // wenige f64-Stellen neben `x`. Liegt `x` weit genug von jeder f32-Rundungsgrenze, rundet sie
+    // genau wie `x` selbst.
+    let ax = x.abs();
+    let y = x as f32;
+    if y.is_finite() && (1e-6..1e14).contains(&ax) {
+        let yf = y as f64;
+        let room = if x >= yf { (y.next_up() as f64 - yf) / 2.0 - (x - yf) } else { (yf - y.next_down() as f64) / 2.0 - (yf - x) };
+        if room > 1e-13 * ax {
+            return y;
+        }
+    }
+    json_f32_read(x)
+}
+
+/// Die eigentliche Lesung (ohne Schnellweg).
+fn json_f32_read(x: f64) -> f32 {
+    // Ziffern und Exponent der kürzesten Darstellung (wie JS: Gleichstand → gerade Ziffer; zmij wie
+    // in serde_json).
+    let mut buf = zmij::Buffer::new();
+    let s = buf.format_finite(x.abs());
+    let (mant, exp) = s.split_once(['e', 'E']).unwrap_or((s, "0"));
     let (int_part, frac_part) = mant.split_once('.').unwrap_or((mant, ""));
     let digits = format!("{int_part}{frac_part}");
     let mut exponent: i32 = exp.parse::<i32>().unwrap_or(0) - frac_part.len() as i32;
@@ -351,6 +370,7 @@ fn opening_interval(w: &Wall, o: &Opening) -> Option<(f64, f64)> {
 /// Je emittiertem Wand-Teilquader die Quellwand (`wallSegmentOwners`).
 pub fn wall_segment_owners(p: &Project) -> Vec<&Wall> {
     let mut owners = Vec::new();
+    let by_wall = p.openings_by_wall();
     for wall in &p.walls {
         let (z_bottom, z_top) = p.wall_vertical_extent(wall);
         let axis_len = hypot2(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
@@ -364,7 +384,7 @@ pub fn wall_segment_owners(p: &Project) -> Vec<&Wall> {
             owners.push(wall);
         };
         let mut cutouts: Vec<(f64, f64, f64, f64)> = Vec::new();
-        for op in p.openings_of_wall(&wall.id) {
+        for &op in by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()) {
             let Some((from, to)) = opening_interval(wall, op) else { continue };
             let (ob, ot) = opening_extent(p, wall, op);
             cutouts.push((from, to, ob, ot));
@@ -1152,17 +1172,20 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let rp = render3d::SectionPlane::new(fr(plane.point), fr(plane.normal));
     let raw = render3d::cut_section(&rp, &wi, &si, &ri);
 
+    // Gleiche f32 kommen oft vor (gemeinsame Ecken, Höhen): Umwandlung je Wert nur einmal.
+    let mut conv: HashMap<u32, f64> = HashMap::new();
+    let mut jf = |x: f32| -> f64 { *conv.entry(x.to_bits()).or_insert_with(|| js_f32(x)) };
     let mut cut_owners: HashSet<(Kind, usize)> = HashSet::new();
     let mut cuts: Vec<Cut> = Vec::with_capacity(raw.cut_polygons.len());
     for cp in &raw.cut_polygons {
         let kind = kind_of(cp.component.kind);
         cut_owners.insert((kind, cp.component.index));
-        cuts.push(Cut::new(kind, cp.component.index, cp.pts.iter().map(|q| [js_f32(q[0]), js_f32(q[1])]).collect()));
+        cuts.push(Cut::new(kind, cp.component.index, cp.pts.iter().map(|q| [jf(q[0]), jf(q[1])]).collect()));
     }
-    let edge = |e: &render3d::SectionEdge| Edge { kind: kind_of(e.component.kind), index: e.component.index, a: [js_f32(e.a[0]), js_f32(e.a[1])], b: [js_f32(e.b[0]), js_f32(e.b[1])] };
+    let mut edge = |e: &render3d::SectionEdge| Edge { kind: kind_of(e.component.kind), index: e.component.index, a: [jf(e.a[0]), jf(e.a[1])], b: [jf(e.b[0]), jf(e.b[1])] };
     let not_cut = |e: &&render3d::SectionEdge| !cut_owners.contains(&(kind_of(e.component.kind), e.component.index));
-    let visible: Vec<Edge> = raw.visible_edges.iter().filter(not_cut).map(edge).collect();
-    let hidden: Vec<Edge> = raw.hidden_edges.iter().filter(not_cut).map(edge).collect();
+    let visible: Vec<Edge> = raw.visible_edges.iter().filter(not_cut).map(&mut edge).collect();
+    let hidden: Vec<Edge> = raw.hidden_edges.iter().filter(not_cut).map(&mut edge).collect();
 
     append_roof_sections(&mut cuts, p, &plane);
     let walls = wall_segment_owners(p);
@@ -1603,6 +1626,15 @@ mod tests {
         assert_eq!(json_f32(1e-9), 1e-9f32);
         // Gleichstand der kürzesten Darstellung → gerade Ziffer (wie serde_json beim Schreiben).
         assert_eq!(js_f32(5.00390625f32), 5.0039062f64);
+        // Schnellweg = Lesung (gerechnete Zahlen mit 16–17 Ziffern, Rundungsgrenzen)
+        let mut x = 0.123456789f64;
+        for i in 0..200_000 {
+            x = (x * 1.6180339887 + 0.37).fract() * [1e-5, 0.3, 7.0, 123.0, 4567.0, 1e9][i % 6];
+            let v = if i % 7 == 0 { -x } else { x };
+            assert_eq!(json_f32(v).to_bits(), json_f32_read(v).to_bits(), "{v}");
+            let mid = ((v as f32) as f64 + ((v as f32).next_up() as f64)) / 2.0;
+            assert_eq!(json_f32(mid).to_bits(), json_f32_read(mid).to_bits(), "{mid}");
+        }
     }
 
     #[test]
@@ -1679,5 +1711,231 @@ mod bench {
                 l.id, l.kind, t_walls, t_rest, t_conv, t_cut, raw.cut_polygons.len(), raw.visible_edges.len() + raw.hidden_edges.len(), t_all, buf.len()
             );
         }
+    }
+}
+
+/// Fälle der früheren TS-Tests (`toSection.boolean/monolith/termination/depth/roof/layerOverride/
+/// orientation`, `generateSectionPlan.category/select`), jetzt gegen die Kern-Fassung.
+#[cfg(test)]
+mod ts_faelle {
+    use super::*;
+
+    fn band(u0: f64, u1: f64, v0: f64, v1: f64, jp: Option<f64>, tag: &str) -> Cut {
+        let mut c = Cut::new(Kind::Wall, 0, vec![[u0, v1], [u1, v1], [u1, v0], [u0, v0]]);
+        c.fill = Some(tag.into());
+        c.join_priority = jp;
+        c
+    }
+
+    fn cband(u0: f64, u1: f64, v0: f64, v1: f64, jp: f64, comp: &str, tag: &str) -> Cut {
+        Cut { component_id: Some(comp.into()), ..band(u0, u1, v0, v1, Some(jp), tag) }
+    }
+
+    fn area(items: &[&Cut]) -> f64 {
+        items.iter().map(|c| {
+            let b = bbox(&c.pts);
+            (b[1] - b[0]) * (b[3] - b[2])
+        }).sum()
+    }
+
+    fn by<'a>(out: &'a [Cut], tag: &str) -> Vec<&'a Cut> {
+        out.iter().filter(|c| c.fill.as_deref() == Some(tag)).collect()
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn dominanz_stärkere_schicht_schneidet_schwächere() {
+        let out = subtract_dominant_bands(vec![band(0.0, 2.0, 0.0, 3.0, Some(10.0), "putz"), band(0.0, 2.0, 2.0, 4.0, Some(100.0), "beton")]);
+        assert_eq!(bbox(&by(&out, "beton")[0].pts), [0.0, 2.0, 2.0, 4.0]);
+        let putz = by(&out, "putz");
+        assert_eq!(putz.len(), 1);
+        assert_eq!(bbox(&putz[0].pts), [0.0, 2.0, 0.0, 2.0]);
+    }
+
+    #[test]
+    fn dominanz_gestaffelte_kette() {
+        let out = subtract_dominant_bands(vec![
+            band(0.0, 1.0, 3.0, 4.0, Some(100.0), "beton"),
+            band(0.0, 1.0, 2.5, 3.5, Some(50.0), "backstein"),
+            band(0.0, 1.0, 2.0, 3.0, Some(20.0), "daemmung"),
+            band(0.0, 1.0, 0.0, 3.2, Some(10.0), "putz"),
+        ]);
+        assert!(close(area(&by(&out, "beton")), 1.0));
+        assert!(close(area(&by(&out, "backstein")), 0.5));
+        assert!(close(area(&by(&out, "daemmung")), 0.5));
+        assert!(close(area(&by(&out, "putz")), 2.0));
+    }
+
+    #[test]
+    fn dominanz_gleiche_prioritaet_und_ohne_prioritaet_koexistieren() {
+        let out = subtract_dominant_bands(vec![band(0.0, 1.0, 0.0, 3.0, Some(100.0), "wand"), band(0.0, 1.0, 2.0, 4.0, Some(100.0), "decke")]);
+        assert!(close(area(&by(&out, "wand")), 3.0) && close(area(&by(&out, "decke")), 2.0));
+        let out = subtract_dominant_bands(vec![band(0.0, 2.0, 0.0, 2.0, Some(100.0), "stark"), band(0.0, 2.0, 0.0, 2.0, None, "ohne")]);
+        assert!(close(area(&by(&out, "stark")), 4.0) && close(area(&by(&out, "ohne")), 4.0));
+        let out = subtract_dominant_bands(vec![band(0.0, 3.0, 0.0, 3.0, Some(100.0), "stark"), band(1.0, 2.0, 1.0, 2.0, Some(10.0), "schwach")]);
+        assert!(by(&out, "schwach").is_empty());
+    }
+
+    #[test]
+    fn verschmelzen_gleicher_komponente() {
+        let out = subtract_dominant_bands(vec![cband(0.0, 1.0, 0.0, 3.0, 100.0, "beton", "wand"), cband(0.0, 1.0, 2.0, 4.0, 100.0, "beton", "decke")]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(bbox(&out[0].pts), [0.0, 1.0, 0.0, 4.0]);
+        let out = subtract_dominant_bands(vec![cband(0.0, 1.0, 0.0, 3.0, 100.0, "b", "u"), cband(0.0, 1.0, 3.0, 5.0, 100.0, "b", "o")]);
+        assert_eq!(out.len(), 1);
+        let out = subtract_dominant_bands(vec![cband(0.0, 1.0, 0.0, 3.0, 100.0, "w", "wand"), cband(0.0, 1.0, 2.0, 4.0, 100.0, "d", "decke")]);
+        assert_eq!(out.len(), 2);
+        let out = subtract_dominant_bands(vec![cband(0.0, 1.0, 0.0, 2.0, 10.0, "putz", "pu"), cband(0.0, 1.0, 2.0, 4.0, 10.0, "putz", "po"), cband(0.0, 1.0, 3.0, 5.0, 100.0, "beton", "beton")]);
+        let putz: Vec<&Cut> = out.iter().filter(|c| c.component_id.as_deref() == Some("putz")).collect();
+        assert_eq!(putz.len(), 1);
+        assert_eq!(bbox(&putz[0].pts), [0.0, 1.0, 0.0, 3.0]);
+        let out = subtract_dominant_bands(vec![cband(0.0, 2.0, 0.0, 2.0, 100.0, "x", "a"), cband(1.0, 3.0, 1.0, 3.0, 100.0, "x", "b")]);
+        assert_eq!(out.len(), 2, "Eck-Überlapp verschmilzt nicht");
+    }
+
+    #[test]
+    fn monolith_tritte_zu_einem_saegezahn() {
+        let rings = union_rect_outlines(&[[0.0, 1.0, 0.0, 0.2], [0.3, 1.0, 0.0, 0.4], [0.6, 1.0, 0.0, 0.6]]);
+        assert_eq!(rings.len(), 1);
+        assert!(rings[0].len() >= 8);
+        assert_eq!(union_rect_outlines(&[[0.0, 1.0, 0.0, 1.0], [2.0, 3.0, 0.0, 1.0]]).len(), 2);
+        let slab = |m: Option<&str>| RSlab { outline: vec![], z_bottom: 0.0, z_top: 1.0, color: [0.0; 3], ceiling_id: String::new(), hatch: None, cut: None, monolith: m.map(String::from) };
+        let slabs = vec![slab(None), slab(Some("ST1")), slab(Some("ST1"))];
+        let mk = |i: usize, u0: f64| Cut::new(Kind::Slab, i, vec![[u0, 0.0], [u0 + 1.0, 0.0], [u0 + 1.0, 1.0], [u0, 1.0]]);
+        let out = merge_monolith_cuts(vec![mk(0, 0.0), mk(1, 0.0), mk(2, 0.5)], &slabs);
+        assert_eq!(out.len(), 2, "nur Bänder derselben Gruppe werden vereint");
+    }
+
+    fn wall(term: Option<SliceTermination>) -> Wall {
+        Wall { id: "W".into(), slice_termination: term, ..Default::default() }
+    }
+
+    fn slab_band(u0: f64, u1: f64, v0: f64, v1: f64, jp: f64) -> Cut {
+        Cut { kind: Kind::Slab, ..band(u0, u1, v0, v1, Some(jp), "decke") }
+    }
+
+    #[test]
+    fn terminierung_unter_und_ueber_der_decke() {
+        let below = wall(Some(SliceTermination::Below));
+        let above = wall(Some(SliceTermination::Above));
+        let both = wall(None);
+        let run = |w: &Wall, wb: Cut, sb: Cut| apply_wall_termination(vec![wb, sb], &[w]);
+        let out = run(&below, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 2.6, 2.9, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 2.6]);
+        let out = run(&above, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 0.0, 0.3, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.3, 3.0]);
+        let out = run(&both, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 2.6, 2.9, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 3.0]);
+        // nur strikt dominante Decken; ohne u-Überlapp (über 5 cm Anschluss hinaus) keine Terminierung
+        let out = run(&below, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 2.6, 2.9, 10.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 3.0]);
+        let out = run(&below, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(1.0, 4.0, 2.6, 2.9, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 3.0]);
+        // ohne joinPriority unangetastet
+        let out = run(&below, band(0.0, 0.3, 0.0, 3.0, None, "w"), slab_band(-1.0, 4.0, 2.6, 2.9, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 3.0]);
+    }
+
+    #[test]
+    fn tiefe_blendet_ferne_kanten_aus() {
+        let mut p = Project::default();
+        p.walls = vec![
+            Wall { id: "nah".into(), start: Vec2 { x: 0.0, y: 1.0 }, end: Vec2 { x: 4.0, y: 1.0 }, ..Default::default() },
+            Wall { id: "fern".into(), start: Vec2 { x: 0.0, y: 9.0 }, end: Vec2 { x: 4.0, y: 9.0 }, ..Default::default() },
+        ];
+        let walls: Vec<&Wall> = p.walls.iter().collect();
+        let plane = Plane { point: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0] };
+        let e = |i: usize| Edge { kind: Kind::Wall, index: i, a: [0.0, 0.0], b: [1.0, 0.0] };
+        let mut out = Output { visible: vec![e(0), e(1)], hidden: vec![e(1)], ..Default::default() };
+        filter_by_depth(&mut out, &p, &plane, 3.0, &walls, &[]);
+        assert_eq!(out.visible.len(), 1);
+        assert_eq!(out.visible[0].index, 0);
+        assert!(out.hidden.is_empty());
+        let mut all = Output { visible: vec![e(0), e(1)], ..Default::default() };
+        filter_by_depth(&mut all, &p, &plane, 0.0, &walls, &[]);
+        assert_eq!(all.visible.len(), 2, "Tiefe 0 ist kein Filter");
+    }
+
+    #[test]
+    fn primitive_pick_ids_und_kategorien() {
+        let mut w = band(0.0, 1.0, 0.0, 1.0, None, "#fff");
+        w.source_id = Some("W1".into());
+        w.category = Some("20".into());
+        let mut s = Cut { kind: Kind::Slab, ..band(0.0, 1.0, 1.0, 2.0, None, "#fff") };
+        s.source_id = Some("C1".into());
+        let mut st = s.clone();
+        st.stair_id = Some("ST1".into());
+        let mut r = Cut { kind: Kind::Roof, ..band(0.0, 1.0, 2.0, 3.0, None, "#fff") };
+        r.source_id = Some("R1".into());
+        r.category = Some("31".into());
+        let anon = band(2.0, 3.0, 0.0, 1.0, None, "#fff");
+        let out = Output { cuts: vec![w, s, st, r, anon], ..Default::default() };
+        let (prims, _) = section_primitives(&out, false, false, &Visibility::default());
+        let json = serde_json::to_value(&prims).unwrap();
+        assert_eq!(json[0]["wallId"], "W1");
+        assert_eq!(json[1]["ceilingId"], "C1");
+        assert!(json[2].get("ceilingId").is_none() && json[2]["stairId"] == "ST1");
+        assert_eq!(json[3]["roofId"], "R1");
+        assert!(json[4].get("wallId").is_none());
+        // ausgeblendet, nicht gezeichnet, gedimmt; ohne Kategorie immer sichtbar
+        let vis = Visibility { has_vis: true, invisible: ["20".to_string()].into(), norender: ["31".to_string()].into(), ..Default::default() };
+        let (prims, _) = section_primitives(&out, false, false, &vis);
+        assert_eq!(prims.iter().filter(|p| matches!(p, Primitive::Polygon { .. })).count(), 3);
+        let grey = Visibility { grey: ["20".to_string()].into(), ..Default::default() };
+        let (prims, _) = section_primitives(&out, false, false, &grey);
+        assert!(matches!(&prims[0], Primitive::Polygon { greyed: Some(true), .. }));
+        assert!(matches!(&prims[4], Primitive::Polygon { greyed: Some(false), .. }));
+    }
+
+    #[test]
+    fn dach_schnitt_flach_und_sattel() {
+        let mut p: Project = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+        let roof = p.roofs.as_mut().unwrap().get_mut(0).unwrap();
+        roof.shape = RoofShape::Flach;
+        roof.overhang = 0.0;
+        roof.base_elevation = Some(5.0);
+        roof.roof_type_id = None;
+        roof.thickness = 0.3;
+        let plane = LevelSpec { line: Some([Vec2 { x: -1.0, y: 2.0 }, Vec2 { x: 6.0, y: 2.0 }]), ..Default::default() }.plane().unwrap();
+        let mut cuts = Vec::new();
+        append_roof_sections(&mut cuts, &p, &plane);
+        assert_eq!(cuts.len(), 1);
+        let b = bbox(&cuts[0].pts);
+        assert!(close(b[3], 5.0) && close(b[3] - b[2], 0.3) && close(b[1] - b[0], 5.0), "{b:?}");
+        // Sattel quer zum First: zwei Bänder; Spur ausserhalb: keine
+        p.roofs.as_mut().unwrap()[0].shape = RoofShape::Sattel;
+        let cross = LevelSpec { line: Some([Vec2 { x: 2.0, y: -1.0 }, Vec2 { x: 2.0, y: 5.0 }]), ..Default::default() }.plane().unwrap();
+        let mut cuts = Vec::new();
+        append_roof_sections(&mut cuts, &p, &cross);
+        assert_eq!(cuts.len(), 2);
+        let outside = LevelSpec { line: Some([Vec2 { x: -1.0, y: 9.0 }, Vec2 { x: 6.0, y: 9.0 }]), ..Default::default() }.plane().unwrap();
+        let mut cuts = Vec::new();
+        append_roof_sections(&mut cuts, &p, &outside);
+        assert!(cuts.is_empty());
+    }
+
+    #[test]
+    fn schichten_aussen_aussen_und_override_auf_allen_schichten() {
+        let mut p: Project = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+        let layers = p.wall_types.iter().find(|t| t.id == "aw").unwrap().layers.clone();
+        assert!(layers.len() > 1);
+        let cp = Cut::new(Kind::Wall, 0, vec![[0.0, 2.6], [0.345, 2.6], [0.345, 0.0], [0.0, 0.0]]);
+        let w2 = p.walls.iter().find(|w| w.id == "W2").unwrap().clone();
+        let w4 = p.walls.iter().find(|w| w.id == "W4").unwrap().clone();
+        let u = (1.0, 0.0);
+        let b2 = split_wall_layers(&cp, &p, &layers, &w2, u).unwrap();
+        let b4 = split_wall_layers(&cp, &p, &layers, &w4, u).unwrap();
+        // W4 (Aussenseite −x): layers[0] an uMin; W2 gespiegelt: layers[0] an uMax.
+        assert_eq!(b4[0].component_id.as_deref(), Some(layers[0].component_id.as_str()));
+        assert!(close(bbox(&b4[0].pts)[0], 0.0));
+        assert_eq!(b2.last().unwrap().component_id.as_deref(), Some(layers[0].component_id.as_str()));
+        // Override der Wand gilt für jede Schicht
+        p.walls[1].background = Some("#123456".into());
+        let w = p.walls[1].clone();
+        let bands = split_wall_layers(&cp, &p, &layers, &w, u).unwrap();
+        assert!(bands.iter().all(|b| b.fill.as_deref() == Some("#123456")));
     }
 }
