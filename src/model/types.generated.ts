@@ -917,7 +917,7 @@ export type DrawingLevel = {
   /**
    * Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
    * Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
-   * linie waagrecht, Blickrichtung nach oben, s. `plan/planUnderlay.ts`).
+   * linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
    * Fehlt ⇒ keine Unterlage.
    */
   planUnderlayId?: string;

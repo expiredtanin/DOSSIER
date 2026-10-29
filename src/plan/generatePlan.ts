@@ -20,6 +20,8 @@ import type {
   ContextImage,
   ContextObject,
   Drawing2D,
+  DrawingLevel,
+  DrawingLevelKind,
   Project,
   Vec2,
 } from "../model/types";
@@ -446,6 +448,74 @@ const MAX_CHUNK_STORES = 16;
 
 const DETAIL_CODE: Record<DetailLevel, number> = { grob: 0, mittel: 1, fein: 2 };
 
+/** Argumente der Kern-Abfrage `planDomains` (auch `planUnderlay`). */
+function planDomainsArgs(
+  floorId: string,
+  visibleCodes: Set<string>,
+  categoryDisplay: CategoryDisplayResolver,
+  referenceLines: boolean,
+  global: boolean,
+  scale: number,
+  forPrint: boolean,
+  compact: boolean,
+  mono: boolean,
+  sunWhen: number,
+): Record<string, unknown> {
+  // Sichtbar und gezeichnet bzw. gedimmt: über die sichtbaren Codes (wenige), nicht über alle
+  // Elemente — der Kern zeichnet ein Element genau dann, wenn sein Code in `show` steht.
+  const show: string[] = [];
+  const grey: string[] = [];
+  for (const c of visibleCodes) {
+    const d = categoryDisplay(c);
+    if (!d.render) continue;
+    show.push(c);
+    if (d.greyed) grey.push(c);
+  }
+  return { floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact, mono, sunWhen: Number.isNaN(sunWhen) ? null : sunWhen };
+}
+
+/**
+ * Grundriss-Unterlage in Schnitt/Ansicht aus dem Kern (`plan/underlay.rs`, früher `planUnderlay.ts`):
+ * der Grundriss des Geschosses `floorId` (wie `generatePlan` ohne projektglobale Zutaten, aus den
+ * Plan-Caches) AUSGERICHTET unter die Schnitt-/Ansichtsfläche gelegt, deren tiefste Kante bei
+ * `sectionMinY` liegt — Schnittlinie waagrecht, Blickrichtung im Blatt nach oben, u-Achse wie im
+ * Schnitt. Gedimmt, ohne Auswahl-Ids (fremde Projektion), plus die Schnittlinie (strichpunktiert).
+ */
+export function planUnderlayPrimitives(
+  project: Project,
+  level: DrawingLevel,
+  floorId: string,
+  sectionMinY: number,
+  visibleCodes: Set<string>,
+  categoryDisplay: CategoryDisplayResolver = SHOW_ALL,
+  detail: DetailLevel = "mittel",
+  showReferenceLines = false,
+  mono = false,
+  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
+): Primitive[] {
+  const args = planDomainsArgs(floorId, visibleCodes, categoryDisplay, showReferenceLines, false, scaleDenominator, false, false, mono, NaN);
+  const text = JSON.stringify({ ...args, level: { kind: level.kind, linePoints: level.linePoints, directionSign: level.directionSign }, minY: sectionMinY });
+  return decodePlanBuf(documentFor(project).queryBin("planUnderlay", [DETAIL_CODE[detail] ?? 1], text)).prims;
+}
+
+/**
+ * Welche Fremd-Art-Ebene darf als Unterlage in welcher aktiven Ebene erscheinen?
+ * Massgebend ist der Koordinatenraum: Geschoss und freie Zeichnung teilen X/Y,
+ * Schnitte/Ansichten messen dagegen Länge×Höhe entlang IHRER Linie. Ein Schnitt
+ * im Grundriss (oder ein Grundriss/eine andere Ansicht im Schnitt) lag darum
+ * nur zufällig irgendwo und überdeckte den eigentlichen Plan (Nutzer-Report
+ * 2026-10-20: Fenster der Ansicht im EG-Grundriss, Raumstempel im Schnitt).
+ *  • freie Zeichnung: alles (Kalkierpapier zum Abzeichnen, Nutzer-Wunsch).
+ *  • Geschoss: nur freie Zeichnungen (gleicher X/Y-Raum).
+ *  • Schnitt/Ansicht: nichts — ein Grundriss kommt dort ausgerichtet über
+ *    `DrawingLevel.planUnderlayId` dazu (s. {@link planUnderlayPrimitives}).
+ */
+export function crossKindOverlayAllowed(active: DrawingLevelKind, other: DrawingLevelKind): boolean {
+  if (active === "drawing") return true;
+  if (active === "floor") return other === "drawing";
+  return false;
+}
+
 /**
  * Der Grundriss eines Geschosses aus dem Kern: Decken, Dächer, Räume, Wände mit Öffnungen, Treppen,
  * Stützen, 2D-Zeichnungen, Extrusions-Umrisse und (mit `global`) Schatten, Baurecht, Kontext-Konturen
@@ -468,17 +538,7 @@ function planDomains(
   /** Zeitpunkt der Schattenstudie (Unix-ms, NaN = keiner). */
   sunWhen: number,
 ): DomainPrims {
-  // Sichtbar und gezeichnet bzw. gedimmt: über die sichtbaren Codes (wenige), nicht über alle
-  // Elemente — der Kern zeichnet ein Element genau dann, wenn sein Code in `show` steht.
-  const show: string[] = [];
-  const grey: string[] = [];
-  for (const c of visibleCodes) {
-    const d = categoryDisplay(c);
-    if (!d.render) continue;
-    show.push(c);
-    if (d.greyed) grey.push(c);
-  }
-  const args = JSON.stringify({ floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact, mono, sunWhen: Number.isNaN(sunWhen) ? null : sunWhen });
+  const args = JSON.stringify(planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, global, scale, forPrint, compact, mono, sunWhen));
   const held = chunkStores.get(args);
   const query = held && held.size ? `${args.slice(0, -1)},"have":[${[...held.keys()].join(",")}]}` : args;
   const res = readPlanMulti(documentFor(project).queryBin("planDomains", [DETAIL_CODE[detail] ?? 1], query), held);

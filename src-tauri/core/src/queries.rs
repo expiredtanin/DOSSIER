@@ -153,6 +153,14 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             w.group(&drawings::level_markers(p, [args[0], args[1], args[2], args[3]]));
             Ok(w.finish())
         }
+        // Grundriss-Unterlage unter Schnitt/Ansicht: `planDomains`-Argumente + `level`, `minY`.
+        ("planUnderlay", 1) => {
+            let a = domains::PlanArgs::parse(args[0], text)?;
+            let (line, sign, min_y) = crate::plan::underlay::parse_args(text)?;
+            let bytes = domains::plan_domains_buf(p, &a)?;
+            let prims = crate::plan_buf::View::parse(&bytes).and_then(|v| v.prims()).ok_or("planUnderlay: Plan-Puffer unlesbar")?;
+            Ok(crate::plan::underlay::underlay_buf(&crate::plan::underlay::underlay_primitives(line, sign, prims, min_y)))
+        }
         ("sectionPlan", _) => crate::plan::section::section_plan_buf(p, args, text),
         ("elevationPlan", _) => crate::plan::elevation::elevation_plan_buf(p, args, text),
         _ => Err(format!("Unbekannte Abfrage: {name}")),
@@ -171,6 +179,15 @@ pub fn run_bin_doc(d: &mut crate::document::Document, name: &str, args: &[f64], 
             .unwrap_or_default();
         let (p, revs, cache) = d.project_cached().map_err(model_err)?;
         return crate::plan::domains::plan_domains_cached(p, revs, cache, &a, &have).map(|o| o.encode());
+    }
+    if name == "planUnderlay" && args.len() == 1 {
+        // Der Grundriss kommt aus den Plan-Caches (wie `generatePlan` desselben Geschosses).
+        let a = crate::plan::domains::PlanArgs::parse(args[0], text)?;
+        let (line, sign, min_y) = crate::plan::underlay::parse_args(text)?;
+        let (p, revs, cache) = d.project_cached().map_err(model_err)?;
+        let out = crate::plan::domains::plan_domains_cached(p, revs, cache, &a, &Default::default())?;
+        let prims = crate::plan::underlay::plan_out_primitives(&out)?;
+        return Ok(crate::plan::underlay::underlay_buf(&crate::plan::underlay::underlay_primitives(line, sign, prims, min_y)));
     }
     run_bin(d.project().map_err(model_err)?, name, args, text)
 }

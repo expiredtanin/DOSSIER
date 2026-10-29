@@ -1120,7 +1120,7 @@ function SectionPlanView({
   const rawPlan = isElevation ? elevationPlan : sectionPlan;
   // Grundriss-Unterlage (Nutzer-Wunsch: "in der Ansicht auch mal einen
   // Grundriss zeigen können"): das in `level.planUnderlayId` gewählte Geschoss
-  // AUSGERICHTET unter dem Schnitt/der Ansicht (s. plan/planUnderlay.ts) —
+  // AUSGERICHTET unter dem Schnitt/der Ansicht (Kern `plan/underlay.rs`) —
   // nicht mehr jede sichtbare Ebene lose übereinander (die lag in einem
   // fremden Koordinatenraum und verdeckte den Schnitt).
   const underlayFloor = project.drawingLevels.find(
@@ -1129,18 +1129,19 @@ function SectionPlanView({
   const sectionMinY = rawPlan?.bounds.minY;
   const overlayPrimitives = useMemo(() => {
     if (!underlayFloor || sectionMinY === undefined) return [];
-    const floorPlan = generatePlan(
+    // Der Kern legt den Grundriss (aus seinen Plan-Caches) gedimmt und ohne Auswahl-Ids darunter.
+    return planUnderlayPrimitives(
       project,
+      level,
       underlayFloor.id,
+      sectionMinY,
       visibleCodes,
       categoryDisplay,
       detail,
       referenceLines,
       mono,
-      false,
       scaleDenominator,
     );
-    return planUnderlayPrimitives(level, floorPlan.primitives, sectionMinY).map(stripSelectableIds);
   }, [underlayFloor, sectionMinY, project, level, visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator]);
   // Eigene 2D-Elemente des Schnitts/der Ansicht (Bemassung, Höhenkoten,
   // Beschriftung, Ergänzungslinien …): liegen in `drawings2d` mit

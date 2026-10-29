@@ -162,6 +162,13 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     render3d-Verdeckung) nicht neu gebaut.
     Bleibt in TS: `planUnderlay.ts` (legt den TS-Grundriss unter Schnitt/Ansicht; zieht mit `generatePlan`/`drawing2d.ts` um),
     das Bauen der truck-Körper (asynchron, eigenes WASM).
+    ✅ (29.10.) Grundriss-Unterlage im Kern: `plan/underlay.rs`, Abfrage `planUnderlay` (Argumente wie `planDomains` + Ebene +
+    `minY`) liest den Grundriss aus den Plan-Caches (Haupt-Puffer + Zeichnungs-Stücke), bildet ab (Drehung/Verschiebung,
+    Schraffurwinkel, Bilder nur ohne Drehung), dimmt, entfernt die Auswahl-Ids und hängt die Schnittlinie an; TS-Fassade
+    `planUnderlayPrimitives(project, level, floorId, minY, …)` in `generatePlan.ts` (dort auch `crossKindOverlayAllowed`).
+    `planUnderlay.ts` gelöscht, seine Tests als Rust-Tests. Gleichheit gegen die TS-Fassung (Object.is, inkl. Strip der Ids):
+    456 Fälle / 142 405 Primitive (9 Projekte inkl. 2D-Zeichnungen, Schnitt-/Ansichtslinien + schräg/senkrecht/beide
+    Blickrichtungen, Mono/Detail/Massstab). Nicht in der App angesehen (e2e grün).
     (Die automatischen Höhenkoten `levelMarkers.ts` rechnet seit 29.10. der Kern, Abfrage `levelMarkers`.)
   - ◐ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
     typisierte Modell (Bauteil-Typen, Schraffuren, Linienstile, Kategorien) und einen Plan-Puffer v2 mit Pick-IDs + vollem `Primitive`-Umfang

@@ -1298,7 +1298,7 @@ pub struct DrawingLevel {
     pub hidden_lines: Option<bool>,
     /// Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
     /// Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
-    /// linie waagrecht, Blickrichtung nach oben, s. `plan/planUnderlay.ts`).
+    /// linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
     /// Fehlt ⇒ keine Unterlage.
     #[serde(rename = "planUnderlayId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
