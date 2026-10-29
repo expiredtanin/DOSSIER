@@ -41,6 +41,7 @@ pub mod pdf_object;
 pub mod pdf_vector;
 pub mod pdf_geom;
 pub mod sheet_import;
+pub mod sheet_map;
 #[cfg(feature = "web")]
 mod web_sheet;
 #[cfg(feature = "web")]

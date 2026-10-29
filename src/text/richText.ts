@@ -1,6 +1,7 @@
 // Rich-Text-Dokumentmodell — die wiederverwendbare Grundlage für TextEntity-
 // Annotationen (Text-/Stempel-Bauteil). Bewusst frei von App-Store und React:
-// ein reines Datenmodell + Operationen, unit-getestet.
+// ein reines Datenmodell + Operationen, unit-getestet. Konstruktoren und Reintext stehen hier; die
+// Bearbeitung (Marks, Normalisieren, Serialisieren, Stile) rechnet der Rust-Kern (`rich_text.rs`).
 //
 // Aufbau (an DOSSIERs text_editor.py angelehnt: Runs mit text/font/bold/italic/
 // underline/strike/sup/sub/color, Grössen in Punkt):
@@ -19,6 +20,7 @@
 
 // Die Datentypen (RichTextDoc, Paragraph, TextRun, Marks, Align, TextStylePreset) gehören zum
 // Projektmodell und kommen aus dem Rust-Modell ([K4] S4, `model/types.generated.ts`).
+import { core } from "../engine/coreWasm";
 import type { Align, Marks, Paragraph, RichTextDoc, TextRun, TextStylePreset } from "../model/types.generated";
 export type { Align, Marks, Paragraph, RichTextDoc, TextRun, TextStylePreset };
 
@@ -72,143 +74,19 @@ export function docLength(doc: RichTextDoc): number {
   return plainText(doc).length;
 }
 
-// ── Marks-Vergleich / Normalisierung ───────────────────────────────────────
+// ── Bearbeiten: rechnet der Kern (`core/src/rich_text.rs`, Dokument als JSON) ──────────────────────────
+// Offsets sind lineare UTF-16-Positionen über alle Absätze (Umbruch = 1 Zeichen). Kaputte Eingaben
+// liefern das Eingabedokument unverändert zurück.
 
-const MARK_KEYS: (keyof Marks)[] = [
-  "bold",
-  "italic",
-  "underline",
-  "strike",
-  "super",
-  "sub",
-  "font",
-  "sizePt",
-  "color",
-];
-
-/** Normalisiert Marks: entfernt „falsy"/leere Einträge, damit Vergleiche stabil sind. */
-export function normalizeMarks(marks: Marks): Marks {
-  const out: Marks = {};
-  for (const key of MARK_KEYS) {
-    const value = marks[key];
-    if (value === undefined || value === false || value === null) continue;
-    if ((key === "font" || key === "color") && value === "") continue;
-    // super und sub sind exklusiv — sub gewinnt nicht über super, wir behalten beide
-    // Werte nur wenn true; Auflösung geschieht bei toggleMark.
-    (out as Record<string, unknown>)[key] = value;
-  }
-  return out;
-}
-
-/** Strukturvergleich zweier Marks-Objekte (nach Normalisierung). */
-export function marksEqual(a: Marks, b: Marks): boolean {
-  const na = normalizeMarks(a);
-  const nb = normalizeMarks(b);
-  for (const key of MARK_KEYS) {
-    if ((na as Record<string, unknown>)[key] !== (nb as Record<string, unknown>)[key]) {
-      return false;
-    }
-  }
-  return true;
-}
+const parseDoc = (json: string, fallback: RichTextDoc): RichTextDoc => (json === "" ? fallback : (JSON.parse(json) as RichTextDoc));
 
 /**
  * Führt benachbarte Runs mit gleichen Marks zusammen und entfernt leere Runs.
  * Idempotent; hält das Dokument nach Editieroperationen kompakt.
  */
 export function normalizeDoc(doc: RichTextDoc): RichTextDoc {
-  const paragraphs: Paragraph[] = doc.paragraphs.map((p) => {
-    const merged: TextRun[] = [];
-    for (const run of p.runs) {
-      if (run.text.length === 0) continue;
-      const norm = { text: run.text, marks: normalizeMarks(run.marks) };
-      const last = merged[merged.length - 1];
-      if (last && marksEqual(last.marks, norm.marks)) {
-        last.text += norm.text;
-      } else {
-        merged.push(norm);
-      }
-    }
-    const out: Paragraph = { runs: merged };
-    if (p.align && p.align !== "left") out.align = p.align;
-    return out;
-  });
-  if (paragraphs.length === 0) paragraphs.push({ runs: [] });
-  return { version: 1, paragraphs };
+  return parseDoc(core().rich_normalize(JSON.stringify(doc)), doc);
 }
-
-// ── Bereichs-Adressierung (linearer Offset ↔ Absatz/Run) ────────────────────
-
-interface ParaSpan {
-  index: number;
-  /** Start-Offset dieses Absatzes im linearen Dokument. */
-  start: number;
-  /** End-Offset (exklusive Umbruch) = start + Reintextlänge des Absatzes. */
-  end: number;
-}
-
-/** Berechnet Start/End-Offsets je Absatz. */
-function paragraphSpans(doc: RichTextDoc): ParaSpan[] {
-  const spans: ParaSpan[] = [];
-  let cursor = 0;
-  doc.paragraphs.forEach((p, index) => {
-    const len = p.runs.reduce((n, r) => n + r.text.length, 0);
-    spans.push({ index, start: cursor, end: cursor + len });
-    cursor += len + 1; // +1 für den Absatzumbruch
-  });
-  return spans;
-}
-
-/**
- * Wendet `fn` auf jeden Run an, der (ganz oder teilweise) im Bereich [start,end)
- * liegt; teilt Runs an den Bereichsgrenzen auf. Gibt ein neues, normalisiertes
- * Dokument zurück. Die Callback bekommt die aktuellen Marks des Teil-Runs und
- * liefert die neuen Marks.
- */
-export function mapRunsInRange(
-  doc: RichTextDoc,
-  range: TextRange,
-  fn: (marks: Marks) => Marks,
-): RichTextDoc {
-  const start = Math.max(0, Math.min(range.start, range.end));
-  const end = Math.max(range.start, range.end);
-  if (start === end) return normalizeDoc(doc);
-
-  const spans = paragraphSpans(doc);
-  const paragraphs: Paragraph[] = doc.paragraphs.map((p, pIdx) => {
-    const span = spans[pIdx];
-    // Absatz komplett ausserhalb des Bereichs?
-    if (span.end <= start || span.start >= end) return p;
-
-    const newRuns: TextRun[] = [];
-    let runStart = span.start;
-    for (const run of p.runs) {
-      const runEnd = runStart + run.text.length;
-      const selStart = Math.max(start, runStart);
-      const selEnd = Math.min(end, runEnd);
-      if (selEnd <= selStart) {
-        // Run ausserhalb — unverändert übernehmen.
-        newRuns.push(run);
-      } else {
-        const relStart = selStart - runStart;
-        const relEnd = selEnd - runStart;
-        if (relStart > 0) {
-          newRuns.push(makeRun(run.text.slice(0, relStart), run.marks));
-        }
-        newRuns.push(makeRun(run.text.slice(relStart, relEnd), fn(run.marks)));
-        if (relEnd < run.text.length) {
-          newRuns.push(makeRun(run.text.slice(relEnd), run.marks));
-        }
-      }
-      runStart = runEnd;
-    }
-    return { ...p, runs: newRuns };
-  });
-
-  return normalizeDoc({ version: 1, paragraphs });
-}
-
-// ── Mark-Operationen ───────────────────────────────────────────────────────
 
 /**
  * Setzt ein Mark auf einen Bereich. `value` bei boolschen Marks true/false;
@@ -221,118 +99,35 @@ export function applyMark<K extends keyof Marks>(
   mark: K,
   value: Marks[K] | undefined,
 ): RichTextDoc {
-  return mapRunsInRange(doc, range, (marks) => {
-    const next: Marks = { ...marks };
-    if (value === undefined || value === false) {
-      delete next[mark];
-    } else {
-      (next as Record<string, unknown>)[mark] = value;
-      if (mark === "super" && value) delete next.sub;
-      if (mark === "sub" && value) delete next.super;
-    }
-    return next;
-  });
+  return parseDoc(core().rich_apply_mark(JSON.stringify(doc), range.start, range.end, mark, JSON.stringify(value ?? null)), doc);
 }
 
-/**
- * Ist ein boolsches Mark über den GESAMTEN Bereich aktiv? (Für den
- * Toolbar-Zustand: „Fett"-Knopf gedrückt, wenn die ganze Auswahl fett ist.)
- */
+/** Ist ein boolsches Mark über den GESAMTEN Bereich aktiv? (Toolbar: „Fett"-Knopf.) */
 export function isMarkActive(doc: RichTextDoc, range: TextRange, mark: BoolMark): boolean {
-  const start = Math.max(0, Math.min(range.start, range.end));
-  const end = Math.max(range.start, range.end);
-  if (start === end) return false;
-  const spans = paragraphSpans(doc);
-  let sawAny = false;
-
-  for (let pIdx = 0; pIdx < doc.paragraphs.length; pIdx++) {
-    const span = spans[pIdx];
-    if (span.end <= start || span.start >= end) continue;
-    let runStart = span.start;
-    for (const run of doc.paragraphs[pIdx].runs) {
-      const runEnd = runStart + run.text.length;
-      const selStart = Math.max(start, runStart);
-      const selEnd = Math.min(end, runEnd);
-      if (selEnd > selStart) {
-        sawAny = true;
-        if (!run.marks[mark]) return false;
-      }
-      runStart = runEnd;
-    }
-  }
-  return sawAny;
+  return core().rich_is_mark_active(JSON.stringify(doc), range.start, range.end, mark);
 }
 
-/**
- * Schaltet ein boolsches Mark über den Bereich um: ist es überall aktiv →
- * entfernen, sonst überall setzen.
- */
+/** Schaltet ein boolsches Mark über den Bereich um: überall aktiv → entfernen, sonst überall setzen. */
 export function toggleMark(doc: RichTextDoc, range: TextRange, mark: BoolMark): RichTextDoc {
-  const active = isMarkActive(doc, range, mark);
-  return applyMark(doc, range, mark, active ? undefined : true);
+  return parseDoc(core().rich_toggle_mark(JSON.stringify(doc), range.start, range.end, mark), doc);
 }
 
 /**
- * Liefert den gemeinsamen Wert eines Nicht-Bool-Marks über den Bereich, oder
- * undefined wenn uneinheitlich/leer. (Für Toolbar-Anzeige von Grösse/Farbe/Font.)
+ * Gemeinsamer Wert eines Nicht-Bool-Marks über den Bereich, oder undefined wenn
+ * uneinheitlich/leer. (Toolbar-Anzeige von Grösse/Farbe/Font.)
  */
 export function commonMarkValue<K extends "font" | "sizePt" | "color">(
   doc: RichTextDoc,
   range: TextRange,
   mark: K,
 ): Marks[K] | undefined {
-  const start = Math.max(0, Math.min(range.start, range.end));
-  const end = Math.max(range.start, range.end);
-  if (start === end) return undefined;
-  const spans = paragraphSpans(doc);
-  let value: Marks[K] | undefined;
-  let first = true;
-
-  for (let pIdx = 0; pIdx < doc.paragraphs.length; pIdx++) {
-    const span = spans[pIdx];
-    if (span.end <= start || span.start >= end) continue;
-    let runStart = span.start;
-    for (const run of doc.paragraphs[pIdx].runs) {
-      const runEnd = runStart + run.text.length;
-      const selStart = Math.max(start, runStart);
-      const selEnd = Math.min(end, runEnd);
-      if (selEnd > selStart) {
-        const v = run.marks[mark];
-        if (first) {
-          value = v;
-          first = false;
-        } else if (v !== value) {
-          return undefined;
-        }
-      }
-      runStart = runEnd;
-    }
-  }
-  return value;
+  const v = JSON.parse(core().rich_common_mark_value(JSON.stringify(doc), range.start, range.end, mark)) as Marks[K] | null;
+  return v ?? undefined;
 }
 
-// ── Serialisierung (stabiles JSON) ─────────────────────────────────────────
-
-/**
- * Stabile JSON-Serialisierung: Schlüssel in fester Reihenfolge, damit gleiche
- * Dokumente denselben String ergeben (Diff-/Test-freundlich).
- */
+/** Stabile JSON-Serialisierung (normalisiert, feste Schlüsselreihenfolge): gleiche Dokumente, gleicher String. */
 export function serialize(doc: RichTextDoc): string {
-  const norm = normalizeDoc(doc);
-  const paragraphs = norm.paragraphs.map((p) => {
-    const runs = p.runs.map((r) => {
-      const marks: Record<string, unknown> = {};
-      for (const key of MARK_KEYS) {
-        const v = (r.marks as Record<string, unknown>)[key];
-        if (v !== undefined) marks[key] = v;
-      }
-      return { text: r.text, marks };
-    });
-    const obj: Record<string, unknown> = { runs };
-    if (p.align && p.align !== "left") obj.align = p.align;
-    return obj;
-  });
-  return JSON.stringify({ version: 1, paragraphs });
+  return core().rich_serialize(JSON.stringify(doc));
 }
 
 // ── Style-Presets ──────────────────────────────────────────────────────────
@@ -357,14 +152,5 @@ export function applyPreset(
   range: TextRange,
   preset: TextStylePreset,
 ): RichTextDoc {
-  const full: TextRange =
-    range.start === range.end ? { start: 0, end: Math.max(1, docLength(doc)) } : range;
-  let out = doc;
-  for (const key of MARK_KEYS) {
-    const v = (preset.marks as Record<string, unknown>)[key];
-    if (v !== undefined) {
-      out = applyMark(out, full, key as keyof Marks, v as Marks[keyof Marks]);
-    }
-  }
-  return out;
+  return parseDoc(core().rich_apply_preset(JSON.stringify(doc), range.start, range.end, JSON.stringify(preset)), doc);
 }

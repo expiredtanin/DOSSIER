@@ -41,6 +41,9 @@ mod project_refs;
 mod commands;
 mod import;
 mod cmd_create;
+mod area_report;
+mod rich_text;
+mod geo_mesh;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

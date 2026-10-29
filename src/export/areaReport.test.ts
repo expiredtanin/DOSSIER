@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { sampleProject } from "../model/sampleProject";
 import type { Project, Room, Wall } from "../model/types";
 import { computeAreaTable, computeIvhb } from "../analysis/areaTable";
-import { areaReportToCsv, areaReportToSvg, buildAreaReport, buildAreaReportPdf, cellText, layoutAreaReport, parseAreaReportCsv } from "./areaReport";
+import { areaReportToCsv, areaReportToSvg, buildAreaReport, buildAreaReportPdf, layoutAreaReport, parseAreaReportCsv } from "./areaReport";
 
 // Einfaches Haus: Achsen 10 × 8 m, Wände 0.3 m, EG-Räume innen 9.7 × 7.7 m (Handrechnung siehe flaechen.rs).
 function house(): Project {
@@ -83,7 +83,7 @@ describe("Bericht", () => {
         r.cells.forEach((c, k) => {
           const got = back.sections[i]!.rows[j]![k];
           if (typeof c === "string") expect(got).toBe(c);
-          else expect(got).toBe(c.n === null ? null : Number(cellText(c)));
+          else expect(got).toBe(c.n === null ? null : Number(c.n.toFixed(c.d)));
         });
       });
     });

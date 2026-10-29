@@ -9,8 +9,7 @@
 //               (`core/src/plan/section.rs`).
 //  • 3D:        Boolean-Differenz (truck, Mesh-CSG-Fallback); welche Bauteile getroffen sind und
 //               ihre Spezifikation rechnet der Kern (`core/src/solid_specs.rs`), s. `toWalls3d/voids3d.ts`.
-//  • STEP:      `exportStep.ts` mit den Helfern unten (gleiche Regeln wie `solid_specs.rs`; fallen,
-//               wenn der STEP-Sammler die Kern-Spezifikationen liest).
+//  • STEP:      `exportStep.ts` liest dieselben Kern-Spezifikationen (`model3dParts` mit Abzugskörpern).
 //
 // Abzugskörper sind senkrechte Prismen (Profil × Höhe, ohne Verjüngung/B-Rep) — damit bleiben
 // Grundriss und Schnitt exakt analytisch (ein Prisma schneidet eine waagrechte Ebene in seiner
@@ -21,44 +20,6 @@
 
 import type { Pair } from "../geometry/polygonBool";
 import { core } from "../engine/coreWasm";
-import type { ExtrudedSolid, Project, Vec2 } from "../model/types";
-import { getFloor } from "../model/types";
-import type { SolidSpec } from "../engine/truckSolid";
-import type { RWall } from "./toWalls3d/shared";
-
-export interface VoidPrism {
-  id: string;
-  pts: Vec2[];
-  z0: number;
-  z1: number;
-}
-
-/** Ob ein Körper als Abzugskörper wirkt (Prisma mit gültigem Profil). */
-export function isVoidSolid(s: ExtrudedSolid): boolean {
-  return s.operation === "subtract" && !s.brep && (s.taper ?? 0) < 1e-6 && s.points.length >= 3 && s.height > 0;
-}
-
-/** UK des Körpers (Geschoss-UK + `baseOffset`). */
-export function solidBaseZ(project: Project, s: ExtrudedSolid): number {
-  let base = 0;
-  try {
-    base = getFloor(project, s.levelId).baseElevation ?? 0;
-  } catch {
-    base = 0;
-  }
-  return base + (s.baseOffset ?? 0);
-}
-
-/** Alle Abzugskörper des Projekts (Welt-Höhen). */
-export function voidPrisms(project: Project): VoidPrism[] {
-  const out: VoidPrism[] = [];
-  for (const s of project.extrudedSolids ?? []) {
-    if (!isVoidSolid(s)) continue;
-    const z0 = solidBaseZ(project, s);
-    out.push({ id: s.id, pts: s.points, z0, z1: z0 + s.height });
-  }
-  return out;
-}
 
 // ── Polygon-Booleans (Rust-Kern, `voids.rs`) ─────────────────────────────────
 
@@ -103,46 +64,3 @@ export function subtractRings(
   }
   return out;
 }
-
-// ── 3D / B-Rep ───────────────────────────────────────────────────────────────
-
-export type Box2 = { x0: number; y0: number; x1: number; y1: number };
-export const bbox = (pts: Array<{ x: number; y: number }>): Box2 => ({
-  x0: Math.min(...pts.map((p) => p.x)),
-  y0: Math.min(...pts.map((p) => p.y)),
-  x1: Math.max(...pts.map((p) => p.x)),
-  y1: Math.max(...pts.map((p) => p.y)),
-});
-const boxHit = (a: Box2, b: Box2) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-
-export function wallCorners(w: RWall): Array<{ x: number; y: number }> {
-  const dx = w.end[0] - w.start[0];
-  const dy = w.end[1] - w.start[1];
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = (-dy / len) * (w.thickness / 2);
-  const ny = (dx / len) * (w.thickness / 2);
-  return [
-    { x: w.start[0] + nx, y: w.start[1] + ny },
-    { x: w.end[0] + nx, y: w.end[1] + ny },
-    { x: w.end[0] - nx, y: w.end[1] - ny },
-    { x: w.start[0] - nx, y: w.start[1] - ny },
-  ];
-}
-
-const voidSpec = (v: VoidPrism): SolidSpec => ({
-  kind: "extrude",
-  points: v.pts.flatMap((p) => [p.x, p.y]),
-  height: v.z1 - v.z0,
-  z0: v.z0,
-});
-
-/** Bauteil minus alle Körper (verkettete Differenzen). */
-export function subtractSpec(base: SolidSpec, voids: VoidPrism[]): SolidSpec {
-  return voids.reduce<SolidSpec>((acc, v) => ({ kind: "boolean", op: "difference", a: acc, b: voidSpec(v) }), base);
-}
-
-/** Abzugskörper, die ein Prisma (Grundriss-Hülle + Höhenbereich) treffen. */
-export function hittingVoids(voids: VoidPrism[], foot: Box2, z0: number, z1: number): VoidPrism[] {
-  return voids.filter((v) => v.z0 < z1 - 1e-6 && v.z1 > z0 + 1e-6 && boxHit(bbox(v.pts), foot));
-}
-

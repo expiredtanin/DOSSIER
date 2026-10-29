@@ -15,14 +15,14 @@
 
 import type { Project } from "../model/types";
 import { getFloor, roofLayers } from "../model/types";
-import { projectToModel3d } from "../plan/toWalls3d";
+import { documentFor } from "../core/document";
+import type { RSlab, RWall } from "../plan/toWalls3d/shared";
+import type { VoidCuts } from "../plan/toWalls3d/voids3d";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { exportStepSolids } from "../engine/truckSolid";
 import { extrudedSolidSpec } from "../plan/extrudedSolidSpec";
 import type { SolidSpec } from "../engine/truckSolid";
 import { wallSpec } from "../plan/wallSpec";
-import { bbox, hittingVoids, subtractSpec, voidPrisms, wallCorners } from "../plan/voids";
-import type { Box2 } from "../plan/voids";
 
 export { wallProfile, wallSpec } from "../plan/wallSpec";
 
@@ -39,31 +39,32 @@ const VOID_FALLBACK = new WeakMap<SolidSpec, SolidSpec>();
 /** Alle Bauteile des Projekts als B-Rep-Spezifikationen (reiner Kern, kein WASM). */
 export function projectSolidSpecs(project: Project): SolidSpec[] {
   const out: SolidSpec[] = [];
-  const model = projectToModel3d(project, { layeredWalls: true });
-  const voids = voidPrisms(project);
-  const withVoids = (base: SolidSpec, foot: Box2, z0: number, z1: number): SolidSpec => {
-    const hits = hittingVoids(voids, foot, z0, z1);
-    if (hits.length === 0) return base;
-    const spec = subtractSpec(base, hits);
-    VOID_FALLBACK.set(spec, base);
-    return spec;
+  // Wände und Decken samt „Bauteil − Abzugskörper" aus dem Kern (`solid_specs.rs`, Abfrage `model3dParts` mit
+  // Abzugskörpern): Detail „fein" (2), geschichtete Wände.
+  const model = documentFor(project).query<{ walls: RWall[]; slabs: RSlab[]; voidCuts?: VoidCuts }>("model3dParts", [1, 2, 0, 1]);
+  const wallCut = new Map(model.voidCuts?.walls ?? []);
+  const slabCut = new Map(model.voidCuts?.slabs ?? []);
+  const withCut = (base: SolidSpec, cut: SolidSpec | undefined): SolidSpec => {
+    if (!cut) return base;
+    VOID_FALLBACK.set(cut, base);
+    return cut;
   };
 
-  for (const w of model.walls) {
+  model.walls.forEach((w, i) => {
     const s = wallSpec(w);
-    if (s) out.push(withVoids(s, bbox(wallCorners(w)), w.baseElevation, w.baseElevation + w.height));
-  }
+    if (s) out.push(withCut(s, wallCut.get(i)));
+  });
 
-  for (const s of model.slabs) {
-    if (s.outline.length < 3 || s.zTop - s.zBottom < MIN_THICKNESS) continue;
+  model.slabs.forEach((s, i) => {
+    if (s.outline.length < 3 || s.zTop - s.zBottom < MIN_THICKNESS) return;
     const base: SolidSpec = {
       kind: "extrude",
       points: s.outline.flatMap((p) => [p[0], p[1]]),
       height: s.zTop - s.zBottom,
       z0: s.zBottom,
     };
-    out.push(withVoids(base, bbox(s.outline.map((p) => ({ x: p[0], y: p[1] }))), s.zBottom, s.zTop));
-  }
+    out.push(withCut(base, slabCut.get(i)));
+  });
 
   for (const roof of project.roofs ?? []) {
     const total = roofLayers(project, roof).reduce((sum, l) => sum + Math.max(0, l.thickness), 0);

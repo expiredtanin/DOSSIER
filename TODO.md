@@ -763,6 +763,37 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Polylinie offen/geschlossen/ohne `closed`/mit Bögen, Rechteck, Kreis, Text; zwei Geschosse) Ops gleich bis auf die
     ids; 9000 Segment-Löschen (3047 mit Löschen) gleiche Geometrie bzw. gleiche Ops, Element = Original mit neuer
     Geometrie. Nicht in der Tauri-App geprüft.
+    ✅ (29.10.) **Raumprogramm-Import im Kern** ([61]/[K4]): `fileio/src/sheet_map.rs` (Kopfzeile, Spalten-Vorschlag de/en/fr,
+    Zeilen → Programmzeilen, Summen-/Zwischentitel, Flächenart, Zellentext), Bindungen in `web_sheet.rs`; `io/roomProgramImport.ts`
+    nur noch Fassade (JSON, Signaturen gleich) + `roomProgramOps`. Gleichheit (einmalig, Test gelöscht): 400 Zufallstabellen alt/neu
+    gleich. Bekannte Abweichung: Akzente über feste Tabelle statt Unicode-NFD (exotische Zeichen).
+    ✅ (29.10.) **Flächen-Nachweis-Ausgabe im Kern** ([70]/[K4]): `core/src/area_report.rs` (CSV schreiben/lesen, Seitenaufteilung
+    in Papier-mm, SVG; Bericht reist als JSON, Zahlen über `js_fmt`), Bindungen `web/area_report.rs`; `export/areaReport.ts`
+    behält Aufbau mit `t()` und jsPDF-Zeichnen (`buildAreaReportPdf`), der Rest ist Fassade mit gleichen Signaturen
+    (`cellText` gelöscht). Gleichheit (einmalig, Test gelöscht): 300 Zufallsberichte × Trenner × Seitenformate alt/neu
+    gleich (CSV byteweise, Rückleser, Seiten, SVG; Layout bis auf `bold:false`/`align:"left"` statt fehlend).
+    ✅ (29.10.) **Rich-Text-Bearbeitung im Kern** ([K4]): `core/src/rich_text.rs` (Marks setzen/umschalten, `isMarkActive`,
+    `commonMarkValue`, Normalisieren, stabile Serialisierung, Stile anwenden; Offsets in UTF-16 wie TS), Bindungen
+    `web/rich_text.rs`; `text/richText.ts` behält Konstruktoren/Reintext/`DEFAULT_PRESETS` und ist sonst Fassade mit gleichen
+    Signaturen (gelöscht: `mapRunsInRange`, `marksEqual`, `normalizeMarks`, kein Aufrufer). Gleichheit (einmalig,
+    Test gelöscht): 500 Zufallsdokumente × alle Operationen alt/neu gleich. Abweichung: Bereich mitten in einem Surrogatpaar
+    ergibt U+FFFD (im Editor nicht erreichbar). Nicht in der Tauri-App geprüft.
+    ✅ (29.10.) **Gebäude-Mesh-Aufbereitung im Kern** ([K4]): `core/src/geo_mesh.rs` (Zuschnitt auf Bounding-Box, Zerlegen in
+    zusammenhängende Gebäude per Verschweissen + Union-Find, Dachüberstand-Untersichten entfernen), Bindungen
+    `web/geo_mesh.rs` (flache Puffer); `io/swissBuildings3d.ts` behält Abrufe (STAC/`netFetch`), Verschieben um die Origin und
+    `concatMeshes` (reine Kopier-/Versatz-Schleifen) sowie die Metadaten (Id, Name, Ebene). Gleichheit (einmalig, Test
+    gelöscht): 400 Zufallsmeshes (mehrere Gebäude, geteilte Ecken, Rest-Dreieck) × Zuschnitt/Soffiten/3 Verschweiss-Toleranzen
+    alt/neu gleich. Offen: Netz-Abrufe bleiben TS (`netFetch`). Nicht an echten Kacheln geprüft.
+    ✅ (29.10.) **Footprint-Extrusion im Kern** ([K4]): `geo_mesh::extrude_rings` (Ring säubern, Wände, Deckel/Boden über
+    Delaunay mit Schwerpunkt-Filter, Fächer als Rückfall; vorher `extrudeRing`/`triangulateRing`/`pointInRing` in
+    `io/geoContext.ts`), Bindung `geo_extrude_footprints`; `buildingsToMesh` bleibt als Fassade (Höhe/Name/Id), die
+    Kontextobjekt-Erzeugung (`featuresToContextObjects`) bleibt TS (Modellobjekte mit Ids und Beschriftung). Gleichheit
+    (einmalig, Test gelöscht): 400 Zufallsfolgen von Footprints (Kreis, Stern, unregelmässig, geschlossen, entartet, offen,
+    Höhen inkl. ungültig) Positionen und Indizes identisch.
+    ✅ (29.10.) **STEP-Export liest die Kern-Spezifikationen** ([K4]): `export/exportStep.ts` holt Wände/Decken samt
+    „Bauteil − Abzugskörper" aus `model3dParts` (`solid_specs.rs`); gelöscht: `voidPrisms`, `hittingVoids`, `subtractSpec`,
+    `bbox`, `wallCorners`, `isVoidSolid`, `solidBaseZ` aus `plan/voids.ts`. Gleichheit (einmalig, Test gelöscht): Spezifikationen
+    des Beispielprojekts und von 6 Projekten mit Abzugskörper JSON-gleich alt/neu.
     ✅ (29.10.) **Fang-Kandidaten aus dem Modell im Kern** ([K4] S3/[K3d]): `snap_model.rs` sammelt je Dokument-Stand,
     Geschoss und sichtbaren Ebenen (vorher `baseSegments`/`collectCircles`/`roomAnchors`/`ellipseCenters` in
     `tools/snapping.ts`): Wandachsen + Schichtgrenzen, Raum-/Decken- (mit Aussparungen)/Dach-/Treppen-/Stützen-Umrisse,
