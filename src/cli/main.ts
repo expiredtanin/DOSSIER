@@ -596,6 +596,10 @@ async function execute(project: Project, file: string, command: string, rest: st
         plan = generateElevationPlan(project, lvl);
         if (!plan) fail("keine gültige Ansichtslinie");
       }
+      if (args.flags.get("format") === "json") {
+        out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
+        return 0;
+      }
       out(args, planToSvgString(plan, { scaleDenominator: scale }), `${lvl.name}.svg`);
       return 0;
     }

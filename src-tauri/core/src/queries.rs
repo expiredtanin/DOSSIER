@@ -49,6 +49,8 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
 pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
     match (name, args.len()) {
         ("planDomains", 1) => crate::plan::domains::plan_domains_buf(p, &crate::plan::domains::PlanArgs::parse(args[0], text)?),
+        ("sectionPlan", _) => crate::plan::section::section_plan_buf(p, args, text),
+        ("elevationPlan", _) => crate::plan::elevation::elevation_plan_buf(p, args, text),
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }
 }

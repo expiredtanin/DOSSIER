@@ -112,6 +112,19 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     ✅ Netz-Ebenenschnitt (Körper/Gelände) + Ringe→Flächen (`mesh_section.rs`; behebt nebenbei: rückwärts geschlossene Ringe gingen verloren).
     ✅ Dach-Schnittspur (Cyrus–Beck, lineare Oberkante, Verschmelzen) in `plan_section.rs`.
     ✅ Abzugskörper-Geometrie (`voids.rs`: Polygon minus Schneider mit Schlüsselloch-Stegen, Strecke ausserhalb, Schnitt-Rechtecke); behebt: bei mehreren getrennten Aussparungen wurde nichts abgezogen.
+    ◐ (29.10.) Schnitt und Ansicht als Kern-Abfragen `sectionPlan`/`elevationPlan` (`core/src/plan/{section,elevation}.rs`) auf dem
+    Dokument, Ausgabe Plan-Puffer v2 mit Pick-Ids (lazy gelesen wie `generatePlan`): Besitzer-Zuordnung, Schicht-Bänder, Stil,
+    Decken-Terminierung, Dominanz, Treppen, Monolith, Abzugskörper, Gelände, Schnitt-Tiefe, geschnittene Fenster/Türen
+    (`sectionOpenings`), Ansicht mit Eck-Verlängerung, Verdeckung, Schatten, Painter. Der Prismen-Schnitt läuft über
+    `render3d::section::cut_section` (Kern hängt an render3d ohne Features); Zahlen, die früher über JSON in render3d
+    reisten, werden bitgleich nachgebildet (kürzeste Darstellung, serde_json ohne `float_roundtrip`). Aus TS kommen nur
+    noch die truck-Körper (flach, `Float64Array`). Gleichheit: Primitive (Object.is, auch −0), Ausmass, render2d-Szene und
+    SVG gegen die TS-Fassung — Beispiel (40 Linien), 60 Zufallsprojekte (Dächer aller Formen, Treppentypen, Öffnungen,
+    Abzugskörper, Gelände, Overrides, Terminierung, Tiefe) × 3 Optionssätze, gekacheltes Projekt 6×6; CLI-SVG byte-gleich.
+    Ausnahme (Fehler der alten Fassung): eine render3d-interne Schraffur (Muster als Zahl) sickerte bei nicht zuordenbaren
+    Decken-/Treppen-Bändern als Plan-Schraffur durch (GPU: Diagonale, SVG: keine) — jetzt die vorgesehene
+    Rückfall-Schraffur. Ursache bleibt offen: `slabSegmentOwners` zählt Decken, das Schnitt-Modell emittiert je
+    Deckenschicht und Treppentritt eine Platte (Index-Versatz; mehrschichtige Decken im Schnitt falsch geschichtet).
     Rest in TS (28.10.): Stil-Auflösung (Bauteil, Schraffur, Farbe, Linienstil, Pick-IDs, Painter-Reihenfolge) in `generatePlan*.ts`,
     `toSection.ts` (Besitzer-Zuordnung, Schichtbänder), `toElevation.ts` (Orchestrierung), `sectionOpenings.ts`, `planUnderlay.ts`,
     `drawing2d.ts`. Das ist kein Rechenanteil mehr, sondern liest das Modell; es zieht mit [K4] um.

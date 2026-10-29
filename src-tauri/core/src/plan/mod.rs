@@ -8,3 +8,5 @@ pub mod domains;
 pub mod walls;
 pub mod stairs;
 pub mod context;
+pub mod section;
+pub mod elevation;

@@ -23,13 +23,12 @@ import { categoryNameForPick } from "../core";
 import type { PickKind } from "../core";
 import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../core";
 import { planWithExtra } from "../core";
-import type { CategoryDisplayResolver, Plan, Primitive } from "../core";
+import type { CategoryDisplayResolver, Primitive } from "../core";
 import type { RichTextDoc } from "../text/richText";
 import { computeSection, sameSectionInputs, sameSectionLine } from "../core";
 import type { SectionOutput } from "../core";
 import { generateElevationPlan } from "../core";
 import { crossKindOverlayAllowed, planUnderlayPrimitives } from "../core";
-import { sectionOpeningPrimitives } from "../core";
 import { levelMarkerPrimitives, levelMarksEnabled } from "../core";
 import { setSheetOwnerOutlines, setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
@@ -923,24 +922,12 @@ function LevelPlanView({
 }
 
 /**
- * Geschnittene Fenster/Türen in den Schnitt-Plan einsetzen: nach den Cut-
- * Polygonen (liegen in deren Aussparung), vor den Ansichtskanten — die Reihen-
- * folge spielt kaum eine Rolle, da sie sich nicht überdecken.
- */
-function withSectionOpenings(plan: Plan, openings: Primitive[]): Plan {
-  if (openings.length === 0) return plan;
-  return { ...plan, primitives: [...plan.primitives, ...openings] };
-}
-
-/**
- * Schnitt-/Ansichts-Ebene: der render3d-Schnitt-Extraktor (WASM, plan/toSection)
- * durchschneidet das Modell entlang der Schnittlinie der Ebene und übersetzt das
- * Ergebnis (Cut-Polygone + sichtbare/verdeckte Kanten) über generateSectionPlan
- * in Plan-Primitive, die dieselbe PlanView wie ein Grundriss zeichnet.
+ * Schnitt-/Ansichts-Ebene: der Kern rechnet Schnitt bzw. Ansicht entlang der Schnittlinie der
+ * Ebene (`generateSectionPlan`/`generateElevationPlan`, Plan-Puffer v2 mit Pick-Ids, samt den
+ * geschnittenen Fenstern/Türen), die dieselbe PlanView wie ein Grundriss zeichnet.
  *
- * Die Berechnung ist asynchron (WASM lazy geladen); bis das Ergebnis da ist,
- * bzw. wenn die Ebene keine Schnittlinie trägt oder das WASM-Modul den Export
- * (noch) nicht kennt, wird ein Hinweis eingeblendet.
+ * Der Schnitt ist asynchron (die freien Körper baut truck); bis das Ergebnis da ist bzw. wenn
+ * die Ebene keine Schnittlinie trägt, wird ein Hinweis eingeblendet.
  */
 function SectionPlanView({
   project,
@@ -1052,9 +1039,8 @@ function SectionPlanView({
   selectedDrawingIds?: string[];
   gripHandlers: GripHandlers;
 }) {
-  // Die Ansicht (kind "elevation") läuft NICHT über den WASM-Schnitt, sondern
-  // über den rein TS-seitigen Flächen-Generator (Painter, toElevation.ts) —
-  // synchron, kein Lazy-Load. Nur der echte Schnitt braucht die WASM-Pipeline.
+  // Die Ansicht (kind "elevation") ist synchron (Kern, Painter); nur der Schnitt wartet auf die
+  // truck-Körper.
   const isElevation = level.kind === "elevation";
   const [output, setOutput] = useState<SectionOutput | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">(
@@ -1122,14 +1108,12 @@ function SectionPlanView({
   const sectionPlan = useMemo(
     () =>
       !isElevation && output
-        ? withSectionOpenings(
-            generateSectionPlan(output, mono, {
-              hiddenLines: level.hiddenLines,
-              visibleCodes,
-              categoryDisplay,
-            }),
-            sectionOpeningPrimitives(inputs.project, inputs.level, visibleCodes, categoryDisplay),
-          )
+        ? generateSectionPlan(output, mono, {
+            hiddenLines: level.hiddenLines,
+            visibleCodes,
+            categoryDisplay,
+            openings: true,
+          })
         : null,
     [isElevation, output, mono, level.hiddenLines, visibleCodes, categoryDisplay, inputs],
   );

@@ -36,6 +36,8 @@ export type QueryName =
   | "pickGeometry"
   | "model3dParts"
   | "planDomains"
+  | "sectionPlan"
+  | "elevationPlan"
   | "modelJson";
 
 export class ProjectDocument {
@@ -99,9 +101,9 @@ export class ProjectDocument {
    * Abfrage mit binärer Antwort (`queries.rs::run_bin`, z. B. `planDomains` als Plan-Puffer v2,
    * s. `plan/planBuf.ts`). Fehler kommen als Fehlerpuffer (`decodePlanBuf` wirft die Meldung).
    */
-  queryBin(name: QueryName, args: number[] = [], text = ""): Uint8Array {
+  queryBin(name: QueryName, args: number[] | Float64Array = [], text = ""): Uint8Array {
     if (!this.handle) throw new Error(`Kern-Abfrage „${name}": Dokument nicht offen`);
-    return core().doc_query_bin(this.handle, name, Float64Array.from(args), text);
+    return core().doc_query_bin(this.handle, name, args instanceof Float64Array ? args : Float64Array.from(args), text);
   }
 
   /** Datei-Text des Projekts (Formatversion vorn, Einrückung 2). */
