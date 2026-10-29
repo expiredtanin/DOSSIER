@@ -4,7 +4,6 @@
 import { describe, it, expect } from "vitest";
 import type { Drawing2D, Project } from "../../model/types";
 import { generatePlan, materializeUnderlay } from "../generatePlan";
-import { marqueeHitDrawings } from "./geometry";
 import { PlanPickIndex } from "./planPick";
 import { buildDrawingIndex, marqueeHitUnderlay, nearestInDrawings } from "./underlayAccess";
 
@@ -63,13 +62,14 @@ describe("underlayAccess == Primitiv-Varianten", () => {
     }
   });
 
-  it("Marquee (crossing + window) == marqueeHitDrawings über die Primitive", () => {
+  it("Marquee (crossing + window) == Rahmen-Auswahl im Kern über die Primitive", () => {
+    const matIx = new PlanPickIndex(mat);
     for (const crossing of [true, false]) {
       for (let k = 0; k < 40; k++) {
         const x = rnd() * 450, y = rnd() * 450, w = 5 + rnd() * 120, h = 5 + rnd() * 120;
         const rect = { minX: x, minY: y, maxX: x + w, maxY: y + h };
         const a = new Set(marqueeHitUnderlay(under, rect, crossing));
-        const b = new Set(marqueeHitDrawings(mat.primitives, rect, crossing));
+        const b = new Set(matIx.marqueeDrawings(rect, crossing));
         expect([...a].sort()).toEqual([...b].sort());
       }
     }

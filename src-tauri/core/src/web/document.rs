@@ -11,7 +11,7 @@ thread_local! {
     static DOCS: RefCell<Vec<Option<Document>>> = const { RefCell::new(Vec::new()) };
 }
 
-fn with_doc<R>(h: u32, f: impl FnOnce(&mut Document) -> R) -> Option<R> {
+pub(crate) fn with_doc<R>(h: u32, f: impl FnOnce(&mut Document) -> R) -> Option<R> {
     DOCS.with(|d| d.borrow_mut().get_mut((h as usize).checked_sub(1)?)?.as_mut().map(f))
 }
 

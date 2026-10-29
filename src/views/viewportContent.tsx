@@ -22,6 +22,7 @@ import type {
 import { categoryNameForPick } from "../core";
 import type { PickKind } from "../core";
 import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../core";
+import { planWithExtra } from "../core";
 import type { CategoryDisplayResolver, Plan, Primitive } from "../core";
 import type { RichTextDoc } from "../text/richText";
 import { computeSection, sameSectionInputs, sameSectionLine } from "../core";
@@ -818,10 +819,8 @@ function LevelPlanView({
       // handhabbar; PlanView materialisiert sie, wo echte Primitive nötig sind.
       true,
     );
-    const withOverlay =
-      overlayPrimitives.length === 0
-        ? p
-        : { ...p, primitives: [...p.primitives, ...overlayPrimitives] };
+    // Überlagerung anhängen, ohne die Primitive des Plans zu lesen (lazy, [K3d]).
+    const withOverlay = overlayPrimitives.length === 0 ? p : planWithExtra(p, [], overlayPrimitives);
     // Gruppen-Isolation ("Gruppe betreten"): alles ausserhalb der aktiven
     // Gruppe gedimmt, s. state/groupActions.ts::applyGroupDimmingToPlan (die
     // kompakte Linien-Unterlage bleibt dabei kompakt).

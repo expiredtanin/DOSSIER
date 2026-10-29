@@ -17,6 +17,7 @@ import type { Primitive } from "../../core";
 import { NativeGl, type NativeInvoke } from './nativeGl';
 import { readCssColor } from './cssColor';
 import { NativeTextSync } from "../../core";
+import { planTextEntries } from "../../core";
 
 /** Läuft die App in einer Tauri-Webview? */
 const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -89,7 +90,8 @@ export function useNativePlanRenderer(
   const pushTexts = useCallback((plan: Plan | null) => {
     const invoke = invokeRef.current;
     if (!invoke || !plan || textsDisabled.current) return;
-    const { upsert, remove } = textSync.current.delta(plan.primitives, excludedText.current);
+    // Nur die Text-Einträge (`planTextEntries`, [K3d]) — nicht alle Primitive.
+    const { upsert, remove } = textSync.current.delta(planTextEntries(plan).map((e) => e.p), excludedText.current);
     if (upsert.length === 0 && remove.length === 0) return;
     void invoke('native2d_texts', { upsert, remove })
       .then((ok) => {

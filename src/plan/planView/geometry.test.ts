@@ -1,13 +1,24 @@
 /**
- * `marqueeHitDrawings` — Rahmenauswahl von 2D-Zeichenelementen. Vorher fehlten
+ * Rahmenauswahl von 2D-Zeichenelementen (`PlanPickIndex.marqueeDrawings`). Vorher fehlten
  * drawingCircle/drawingArc/drawingText/drawingImage komplett (nur line/polygon
  * abgedeckt) — Regressionsschutz für den Nachzieh-Fix (2D-Vervollständigung,
  * Fund A).
  */
 
 import { describe, it, expect } from "vitest";
-import { marqueeHitDrawings, type ModelRect } from "./geometry";
+import type { ModelRect } from "./geometry";
 import type { Primitive } from "../generatePlan";
+import { PlanPickIndex } from "./planPick";
+
+/** Rahmen-Auswahl über 2D-Zeichnungen im Kern ([K3d], `PlanPickIndex.marqueeDrawings`). */
+function marqueeHitDrawings(prims: Primitive[], rect: ModelRect, crossing: boolean): string[] {
+  const ix = new PlanPickIndex({ primitives: prims, bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } });
+  try {
+    return ix.marqueeDrawings(rect, crossing);
+  } finally {
+    ix.release();
+  }
+}
 
 const encloseRect: ModelRect = { minX: -10, minY: -10, maxX: 10, maxY: 10 };
 const missRect: ModelRect = { minX: 20, minY: 20, maxX: 30, maxY: 30 };

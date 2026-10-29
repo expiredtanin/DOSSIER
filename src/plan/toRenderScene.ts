@@ -19,6 +19,7 @@ import { docToLines, wrapDocToLines } from "../text/renderHtml";
 import { docFromText } from "../text/richText";
 import { core } from "../engine/coreWasm";
 import { greyedFlat, planParts, withPlanParts } from "./planParts";
+import { planTextEntries } from "./planLazy";
 
 export type RPoint = [number, number];
 export type RRgba = [number, number, number, number];
@@ -194,9 +195,8 @@ export function planSceneTexts(plan: Plan, paperScaleN: number = STAMP_DEFAULT_N
   const texts: RText[] = [];
   const images: RImage[] = [];
   const ranges = plan.greyedRanges;
-  const prims = plan.primitives;
-  for (let i = 0; i < prims.length; i++) {
-    const p = prims[i];
+  // Nur die Text-/Bild-Einträge ([K3d], aus den Typ-Kennungen des Plan-Puffers).
+  for (const { i, p } of planTextEntries(plan)) {
     if (p.kind === "text") {
       const greyed = p.greyed || inGreyedRange(ranges, i);
       const defCol = greyedColor(toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1], greyed);

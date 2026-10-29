@@ -3,7 +3,6 @@
 // Keine JSX, kein Komponenten-/Closure-Zugriff — pure Funktionen + Konstanten.
 
 import type { Vec2 } from "../../model/types";
-import type { Primitive } from "../generatePlan";
 
 /** Rechteckiger Ausschnitt in SVG-Benutzerkoordinaten (viewBox-Einheiten). */
 export interface ViewBox {
@@ -231,142 +230,9 @@ export interface ModelRect {
   maxY: number;
 }
 
-/**
- * Bestimmt die vom Auswahl-Rechteck getroffenen Wand-IDs nach CAD-Konvention:
- *   • crossing = false (links→rechts): nur Wände, deren Polygone VOLLSTÄNDIG im
- *     Rechteck liegen (jeder Eckpunkt enthalten).
- *   • crossing = true  (rechts→links): zusätzlich Wände, die das Rechteck nur
- *     BERÜHREN/kreuzen (Überlappung der Polygone mit dem Rechteck).
- * Getestet wird je Wand über ALLE ihre Polygon-Bänder; ein Treffer eines Bandes
- * genügt. Liefert eindeutige IDs in Auftreten-Reihenfolge.
- */
-export function marqueeHit(
-  prims: Primitive[],
-  rect: ModelRect,
-  crossing: boolean,
-): string[] {
-  return marqueeHitByField(prims, "wallId", rect, crossing);
-}
-
-/**
- * Generische Variante von {@link marqueeHit} für ein beliebiges Polygon-ID-
- * Feld (`ceilingId`/`roomId`/`stairId`/`columnId`/`roofId`/…) — dieselbe
- * window/crossing-Konvention, nur auf ein anderes Element bezogen. Deckt
- * Nutzer-Report: „Auswahlrahmen kann Decken/Räume/Treppen nicht anwählen"
- * (bisher nur Wände über `marqueeHit`, alles andere fehlte komplett).
- */
-function marqueeHitByField(
-  prims: Primitive[],
-  field: "wallId" | "ceilingId" | "roomId" | "stairId" | "columnId" | "roofId",
-  rect: ModelRect,
-  crossing: boolean,
-): string[] {
-  const byId = new Map<string, Vec2[][]>();
-  for (const p of prims) {
-    if (p.kind !== "polygon") continue;
-    const id = p[field];
-    if (id == null) continue;
-    const list = byId.get(id);
-    if (list) list.push(p.pts);
-    else byId.set(id, [p.pts]);
-  }
-  const out: string[] = [];
-  for (const [id, polys] of byId) {
-    const hit = crossing
-      ? polys.some((poly) => polyTouchesRect(poly, rect))
-      : polys.every((poly) => polyEnclosedByRect(poly, rect));
-    if (hit) out.push(id);
-  }
-  return out;
-}
-
-/** Vom Auswahl-Rechteck getroffene Decken-IDs (gleiche Konvention wie {@link marqueeHit}). */
-export function marqueeHitCeilings(prims: Primitive[], rect: ModelRect, crossing: boolean): string[] {
-  return marqueeHitByField(prims, "ceilingId", rect, crossing);
-}
-
-/** Vom Auswahl-Rechteck getroffene Raum-IDs (gleiche Konvention wie {@link marqueeHit}). */
-export function marqueeHitRooms(prims: Primitive[], rect: ModelRect, crossing: boolean): string[] {
-  return marqueeHitByField(prims, "roomId", rect, crossing);
-}
-
-/** Vom Auswahl-Rechteck getroffene Treppen-IDs (gleiche Konvention wie {@link marqueeHit}). */
-export function marqueeHitStairs(prims: Primitive[], rect: ModelRect, crossing: boolean): string[] {
-  return marqueeHitByField(prims, "stairId", rect, crossing);
-}
-
-/**
- * Vom Auswahl-Rechteck getroffene 2D-Zeichenelement-IDs (gleiche window/crossing-
- * Konvention wie {@link marqueeHit}). Sammelt je Drawing2D ALLE seine Punkte aus
- * den Linien-/Polygon-Primitiven; crossing = irgendein Punkt/Kante im Rechteck,
- * window = alle Punkte vollständig eingeschlossen.
- */
-/** Punkte auf einem Kreis-/Bogen-Ring (Modell-Meter), für Marquee-Zwecke abgetastet. */
-function ringSamplePoints(center: Vec2, r: number, a0?: number, a1?: number): Vec2[] {
-  const TAU = Math.PI * 2;
-  const full = a0 === undefined || a1 === undefined;
-  const start = full ? 0 : a0;
-  const sweep = full ? TAU : (((a1 - a0) % TAU) + TAU) % TAU || TAU;
-  const steps = full ? 32 : Math.max(4, Math.round((sweep / TAU) * 32));
-  const pts: Vec2[] = [];
-  for (let i = 0; i <= steps; i++) {
-    const a = start + (sweep * i) / steps;
-    pts.push({ x: center.x + r * Math.cos(a), y: center.y + r * Math.sin(a) });
-  }
-  return pts;
-}
-
-/** Bounding-Box-Eckpunkte eines `drawingText`-Primitivs, analog zur Einzelklick-Bbox in PlanView.tsx. */
-function drawingTextBboxPoints(p: Extract<Primitive, { kind: "drawingText" }>): Vec2[] {
-  const singleW = Math.max(1, p.text.length) * p.heightM * 0.6;
-  const w = p.wrapWidth && p.wrapWidth > 0 ? p.wrapWidth : singleW;
-  const lines = p.wrapWidth && p.wrapWidth > 0 ? Math.max(1, Math.ceil(singleW / p.wrapWidth)) : 1;
-  const pad = p.heightM * 0.6;
-  const minX = p.at.x - pad;
-  const maxX = p.at.x + w + pad;
-  const minY = p.at.y - lines * p.heightM * 1.25 - pad;
-  const maxY = p.at.y + p.heightM * 0.4 + pad;
-  return [{ x: minX, y: minY }, { x: maxX, y: minY }, { x: maxX, y: maxY }, { x: minX, y: maxY }];
-}
-
-export function marqueeHitDrawings(
-  prims: Primitive[],
-  rect: ModelRect,
-  crossing: boolean,
-  /** Zeichnungen, die der Aufrufer selbst prüft (kompakte Unterlage) — hier überspringen. */
-  skipIds?: ReadonlyMap<string, unknown>,
-): string[] {
-  const byDrawing = new Map<string, Vec2[]>();
-  const collect = (id: string, pts: Vec2[]) => {
-    const list = byDrawing.get(id);
-    if (list) list.push(...pts);
-    else byDrawing.set(id, [...pts]);
-  };
-  for (const p of prims) {
-    if (skipIds && "drawingId" in p && p.drawingId && skipIds.has(p.drawingId)) continue;
-    if (p.kind === "line" && p.drawingId) collect(p.drawingId, [p.a, p.b]);
-    else if (p.kind === "polygon" && p.drawingId) collect(p.drawingId, p.pts);
-    else if (p.kind === "drawingCircle" && p.drawingId) collect(p.drawingId, ringSamplePoints(p.center, p.r));
-    else if (p.kind === "drawingArc" && p.drawingId) collect(p.drawingId, ringSamplePoints(p.center, p.r, p.a0, p.a1));
-    else if (p.kind === "drawingText" && p.drawingId) collect(p.drawingId, drawingTextBboxPoints(p));
-    else if (p.kind === "drawingImage" && p.drawingId) {
-      collect(p.drawingId, [
-        p.min,
-        { x: p.max.x, y: p.min.y },
-        p.max,
-        { x: p.min.x, y: p.max.y },
-      ]);
-    }
-  }
-  const out: string[] = [];
-  for (const [id, pts] of byDrawing) {
-    const hit = crossing
-      ? polyTouchesRect(pts, rect)
-      : polyEnclosedByRect(pts, rect);
-    if (hit) out.push(id);
-  }
-  return out;
-}
+// Rahmen-Auswahl über Plan-Primitive (Wände, Decken, Räume, Treppen, 2D-Zeichnungen) läuft im
+// Kern ([K3d], `PlanPickIndex.marquee`/`marqueeDrawings`, `plan_pick.rs`); hier bleiben die
+// Rechteck-Tests für die kompakte Unterlage (`underlayAccess.ts`).
 
 /** Orientierung des Tripels (a,b,c): >0 CCW, <0 CW, 0 kollinear. */
 function cross3(a: Vec2, b: Vec2, c: Vec2): number {

@@ -3,7 +3,7 @@
 //! (`pick_index_release`); er hält seine Puffer selbst, Verdrängen im Puffer-Speicher stört ihn
 //! nicht. Unbekannter Index oder kaputte Eingabe → leeres Ergebnis bzw. −1, nie Panic.
 
-use crate::plan_pick::{ClientMap, PickIndex};
+use crate::plan_pick::{ClientMap, PickIndex, Rect};
 use std::cell::RefCell;
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -73,4 +73,44 @@ pub fn pick_rings_near(id: u32, x: f64, y: f64, px_per_m: f64, tol_px: f64) -> V
 pub fn pick_owned_by(id: u32, kind: u32, ids: &str) -> Vec<u32> {
     let list: Vec<&str> = ids.split('\0').skip(1).collect();
     with(id, |ix| ix.owned_by(kind, &list)).unwrap_or_default()
+}
+
+/// Erster Einzeltext (`drawingText` mit `drawingId`) unter dem Punkt oder −1.
+#[wasm_bindgen]
+pub fn pick_drawing_text(id: u32, x: f64, y: f64) -> f64 {
+    with(id, |ix| ix.drawing_text_at(x, y)).flatten().map_or(-1.0, |i| i as f64)
+}
+
+/// Oberstes Bild (`drawingImage` mit `drawingId`) unter dem Punkt oder −1.
+#[wasm_bindgen]
+pub fn pick_drawing_image(id: u32, x: f64, y: f64) -> f64 {
+    with(id, |ix| ix.drawing_image_at(x, y)).flatten().map_or(-1.0, |i| i as f64)
+}
+
+/// Typ-Kennung des ersten formgebenden Eintrags der Zeichnung `drawing` oder 0.
+#[wasm_bindgen]
+pub fn pick_drawing_kind(id: u32, drawing: &str) -> u32 {
+    with(id, |ix| ix.drawing_kind(drawing)).flatten().unwrap_or(0)
+}
+
+fn rect_of(r: &[f64]) -> Option<Rect> {
+    let [min_x, min_y, max_x, max_y] = <[f64; 4]>::try_from(r).ok()?;
+    Some(Rect { min_x, min_y, max_x, max_y })
+}
+
+/// Rahmen-Auswahl über Polygone der Pick-Art `kind` (`rect` = `[minX, minY, maxX, maxY]`):
+/// Ids, jede mit `\0` davor.
+#[wasm_bindgen]
+pub fn pick_marquee_polygons(id: u32, kind: u32, rect: &[f64], crossing: bool) -> String {
+    let Some(r) = rect_of(rect) else { return String::new() };
+    with(id, |ix| ix.marquee_polygons(kind, r, crossing)).unwrap_or_default().iter().map(|s| format!("\0{s}")).collect()
+}
+
+/// Rahmen-Auswahl über 2D-Zeichnungen; `skip` = Ids (jede mit `\0` davor), die der Aufrufer
+/// selbst prüft. Ergebnis wie [`pick_marquee_polygons`].
+#[wasm_bindgen]
+pub fn pick_marquee_drawings(id: u32, rect: &[f64], crossing: bool, skip: &str) -> String {
+    let Some(r) = rect_of(rect) else { return String::new() };
+    let skip: Vec<&str> = skip.split('\0').skip(1).collect();
+    with(id, |ix| ix.marquee_drawings(r, crossing, &skip)).unwrap_or_default().iter().map(|s| format!("\0{s}")).collect()
 }
