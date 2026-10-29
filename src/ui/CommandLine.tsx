@@ -48,8 +48,15 @@ export interface CommandLineProps {
   onOption: (id: string) => void;
   /** Tab im Feld-Modus: nächstes Feld aktivieren. */
   onCycleField: () => void;
-  /** Esc: laufenden Befehl abbrechen. */
+  /** Esc: einen Schritt zurück bzw. (Esc-Esc schnell) laufenden Befehl abbrechen ([99]). */
   onCancel: () => void;
+  /**
+   * Läuft nach Esc noch ein Befehl? Dann behält das Feld den Fokus (nächstes Esc = nächster
+   * Schritt zurück); sonst gibt es ihn ab. Fehlt die Funktion: immer abgeben.
+   */
+  stillActive?: () => boolean;
+  /** Schritte, die Esc zurücknehmen kann (als `data-steps`, für E2E). */
+  steps?: number;
   /**
    * Live-Echo des Eingabetexts (bei jeder Änderung, inkl. Leeren nach Submit/
    * Esc) — speist das Cursor-HUD, das den getippten Wert im aktiven Feld
@@ -81,7 +88,7 @@ export interface CommandLineHandle {
 
 export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
   function CommandLine(
-    { active, promptKey, options, fields, onSubmit, onOption, onCycleField, onCancel, suggest, onTextChange, units = MODEL_UNITS },
+    { active, promptKey, options, fields, onSubmit, onOption, onCycleField, onCancel, stillActive, steps, suggest, onTextChange, units = MODEL_UNITS },
     ref,
   ) {
     const [text, setTextRaw] = useState("");
@@ -131,14 +138,22 @@ export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
         }
       }
       // Tasten NICHT zum globalen App-Handler durchreichen (eigener Eingabefokus).
-      if (e.key === "Enter") {
+      // Gehaltene Esc/Enter zählen nicht (sonst Esc-Esc-Abbruch bzw. Befehl-Wiederholung in Serie).
+      if ((e.key === "Enter" || e.key === "Escape") && e.repeat) {
+        e.preventDefault();
+      } else if (e.key === "Enter") {
         e.preventDefault();
         submit(text);
       } else if (e.key === "Escape") {
         e.preventDefault();
+        // [99] Getippter Text: Esc leert erst das Feld (ein Schritt). Sonst ein Schritt zurück im
+        // Befehl (Esc-Esc schnell: Abbruch); das Feld behält den Fokus, solange er noch läuft.
+        if (text !== "") {
+          setText("");
+          return;
+        }
         if (active) onCancel();
-        setText("");
-        inputRef.current?.blur();
+        if (!active || !stillActive?.()) inputRef.current?.blur();
       } else if (e.key === "Tab") {
         if (hasFields) {
           // Feld-Modus (§2.7): Tab zyklt die Felder. Steht eine getippte Zahl im
@@ -160,7 +175,7 @@ export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
       : t("cmd.idle.prompt");
 
     return (
-      <div className="cmdline" role="group" aria-label={t("cmd.aria")}>
+      <div className="cmdline" role="group" aria-label={t("cmd.aria")} data-steps={steps ?? 0}>
         {suggestions.length > 0 && (
           <ul className="cmdline-suggest" role="listbox">
             {suggestions.map((s) => (

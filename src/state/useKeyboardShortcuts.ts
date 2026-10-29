@@ -698,6 +698,8 @@ export function useTransformShortcuts(
         } else if (k === "p") {
           requestCopyCount("distribute");
         } else if (e.key === "Escape") {
+          // [99] Esc der Transformation läuft über den zentralen Verteiler (commandKeys.ts).
+          if (e.defaultPrevented) return;
           setActiveTransform(null);
           setDraft(null);
         } else return;
