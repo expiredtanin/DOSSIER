@@ -56,7 +56,8 @@ pub fn ensure_context_categories<'a>(layers: &mut Vec<Value>, codes: impl IntoIt
         return false;
     }
     let nested: Vec<Value> = NESTED.iter().filter(|d| missing.contains(d.code)).map(category).collect();
-    if !nested.is_empty() {
+    let added_nested = !nested.is_empty();
+    if added_nested {
         match layers.iter().position(|l| l.get("code").and_then(Value::as_str) == Some(CONTEXT_PARENT.code)) {
             Some(i) => {
                 let mut l = layers[i].as_object().cloned().unwrap_or_default();
@@ -72,10 +73,11 @@ pub fn ensure_context_categories<'a>(layers: &mut Vec<Value>, codes: impl IntoIt
             }
         }
     }
-    if missing.contains(IMPORTED_ROOF.code) {
+    let roof = missing.contains(IMPORTED_ROOF.code);
+    if roof {
         layers.push(category(&IMPORTED_ROOF));
     }
-    true
+    added_nested || roof
 }
 
 /// Ops: Kontext-Objekte anhängen (fehlt die Liste, wird sie gesetzt) und fehlende Kontext-Kategorien ergänzen.
@@ -405,6 +407,25 @@ pub fn decode_mesh(f: &[f64], strings: &[String]) -> Result<(Vec<MeshObject>, Va
         "objects": objects.len(),
     });
     Ok((objects, report))
+}
+
+/// Ausdehnung aller Objekte (Meter, Modell-Achsen; Anzeige im Dialog); `None` ohne Punkte.
+pub fn mesh_extent(objects: &[MeshObject]) -> Option<[f64; 3]> {
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for o in objects {
+        for p in o.positions.chunks_exact(3) {
+            for a in 0..3 {
+                if p[a] < lo[a] {
+                    lo[a] = p[a];
+                }
+                if p[a] > hi[a] {
+                    hi[a] = p[a];
+                }
+            }
+        }
+    }
+    lo[0].is_finite().then(|| [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]])
 }
 
 /// Verschiebung (x, y, z) je nach Platzierung (`meshShift`): `"center"` = Grundriss-Mitte auf den

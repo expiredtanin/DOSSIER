@@ -9,17 +9,15 @@ import type { ImportedMesh, Project, Wall } from "../model/types";
 import {
   MESH_UNIT_SCALE,
   NO_FACES_PREFIX,
-  decodeMesh,
   formatMeshReport,
   handleMeshWorkerRequest,
   isMeshFile,
-  meshColorHex,
-  meshObjectsToImportedMeshes,
-  meshShift,
+  meshReport,
   readMesh,
-  type MeshObject,
+  type MeshReadOptions,
   type MeshWorkerRequest,
 } from "./meshImport";
+import { importMeshInto } from "./importView.testutil";
 
 function baseProject(): Project {
   return {
@@ -73,7 +71,13 @@ function project(): Project {
 
 const enc = new TextEncoder();
 
-function bbox(objs: MeshObject[]): { lo: number[]; hi: number[] } {
+/** Objekte einer Datei als Kontext-Meshes (je Objekt, Datei-Koordinaten) über den Kern. */
+async function objectsOf(bytes: Uint8Array, name: string, opts: MeshReadOptions = {}) {
+  const r = await importMeshInto(baseProject(), bytes, name, { ...opts, placement: "original", group: "object" });
+  return { objects: r.meshes, report: r.read.report };
+}
+
+function bbox(objs: ImportedMesh[]): { lo: number[]; hi: number[] } {
   const lo = [Infinity, Infinity, Infinity];
   const hi = [-Infinity, -Infinity, -Infinity];
   for (const o of objs) {
@@ -87,12 +91,12 @@ function bbox(objs: MeshObject[]): { lo: number[]; hi: number[] } {
   return { lo, hi };
 }
 
-const tris = (objs: MeshObject[]) => objs.reduce((n, o) => n + o.indices.length / 3, 0);
+const tris = (objs: ImportedMesh[]) => objs.reduce((n, o) => n + o.indices.length / 3, 0);
 
 describe("Mesh-Import: Rundreise mit dem eigenen Export", () => {
   it("GLB: Objekte, Dreieckszahl, Lage und Farbe bleiben erhalten", async () => {
     const p = project();
-    const { objects, report } = await readMesh(exportGlb(p), "m.glb");
+    const { objects, report } = await objectsOf(exportGlb(p), "m.glb");
     expect(report.format).toBe("gltf");
     expect(report.up).toBe("y");
     expect(objects.length).toBeGreaterThanOrEqual(2);
@@ -107,7 +111,7 @@ describe("Mesh-Import: Rundreise mit dem eigenen Export", () => {
     expect(b.hi[1]).toBeCloseTo(36, 4);
     expect(b.hi[2]).toBeCloseTo(9, 4);
     // Farbe #ff8000 (sRGB → linear → sRGB).
-    expect(meshColorHex(nachbar!.color)).toBe("#ff8000");
+    expect(nachbar!.color).toBe("#ff8000");
     // Wand: 0..5 in x, Höhe 2,6.
     const wall = objects.find((o) => o.name.startsWith("Wand_"))!;
     const bw = bbox([wall]);
@@ -118,10 +122,10 @@ describe("Mesh-Import: Rundreise mit dem eigenen Export", () => {
 
   it("glTF (eingebettet), OBJ und STL ergeben dieselbe Dreieckszahl und Ausdehnung wie GLB", async () => {
     const p = project();
-    const glb = await readMesh(exportGlb(p), "m.glb");
-    const gltf = await readMesh(enc.encode(exportGltf(p)), "m.gltf");
-    const obj = await readMesh(enc.encode(exportObj(p)), "m.obj");
-    const stl = await readMesh(enc.encode(exportStl(p)), "m.stl");
+    const glb = await objectsOf(exportGlb(p), "m.glb");
+    const gltf = await objectsOf(enc.encode(exportGltf(p)), "m.gltf");
+    const obj = await objectsOf(enc.encode(exportObj(p)), "m.obj");
+    const stl = await objectsOf(enc.encode(exportStl(p)), "m.stl");
     const n = tris(glb.objects);
     expect(tris(gltf.objects)).toBe(n);
     expect(tris(obj.objects)).toBe(n);
@@ -142,8 +146,8 @@ describe("Mesh-Import: Rundreise mit dem eigenen Export", () => {
 
   it("OBJ: Einheit und erzwungene Achse", async () => {
     const p = project();
-    const mm = await readMesh(enc.encode(exportObj(p)), "m.obj", { unit: "mm" });
-    const m = await readMesh(enc.encode(exportObj(p)), "m.obj");
+    const mm = await objectsOf(enc.encode(exportObj(p)), "m.obj", { unit: "mm" });
+    const m = await objectsOf(enc.encode(exportObj(p)), "m.obj");
     expect(bbox(mm.objects).hi[0]).toBeCloseTo(bbox(m.objects).hi[0] * MESH_UNIT_SCALE.mm, 6);
     const z = await readMesh(enc.encode(exportObj(p)), "m.obj", { up: "z" });
     expect(z.report.up).toBe("z");
@@ -154,15 +158,14 @@ describe("Mesh-Import: Rundreise mit dem eigenen Export", () => {
 describe("Mesh-Import: Abbildung auf Kontext-Meshes", () => {
   it("Farbe ins Feld color, Gruppe als Ebene, Platzierung Mitte/Original", async () => {
     const p = project();
-    const { objects } = await readMesh(exportGlb(p), "Haus.glb");
-    const orig = meshObjectsToImportedMeshes(objects, "Haus.glb", { placement: "original" });
+    const orig = (await importMeshInto(baseProject(), exportGlb(p), "Haus.glb", { placement: "original" })).meshes;
     const nachbar = orig.find((m) => m.name.startsWith("Kontext_"))!;
     expect(nachbar.type).toBe("importedMesh");
     expect(nachbar.color).toBe("#ff8000");
     expect(nachbar.positions.length).toBe(24);
     expect(Math.min(...nachbar.positions.filter((_, i) => i % 3 === 0))).toBeCloseTo(20, 4);
     // Mitte: Grundriss-Mitte aller Objekte auf (0, 0), Unterkante auf z = 0.
-    const centered = meshObjectsToImportedMeshes(objects, "Haus.glb", { placement: "center" });
+    const centered = (await importMeshInto(baseProject(), exportGlb(p), "Haus.glb", { placement: "center" })).meshes;
     const xs = centered.flatMap((m) => m.positions.filter((_, i) => i % 3 === 0));
     const ys = centered.flatMap((m) => m.positions.filter((_, i) => i % 3 === 1));
     const zs = centered.flatMap((m) => m.positions.filter((_, i) => i % 3 === 2));
@@ -171,31 +174,16 @@ describe("Mesh-Import: Abbildung auf Kontext-Meshes", () => {
     expect(Math.min(...zs)).toBeCloseTo(0, 6);
   });
 
-  it("Landeskoordinaten werden bei Original-Platzierung auf den Modell-Nullpunkt geschoben", () => {
-    const o: MeshObject = {
-      name: "N",
-      group: "",
-      color: null,
-      positions: new Float64Array([2600010, 1200010, 0, 2600020, 1200010, 0, 2600020, 1200020, 5]),
-      indices: new Uint32Array([0, 1, 2]),
-    };
-    const shift = meshShift([o], { placement: "original", geoOrigin: { e: 2600000, n: 1200000 } });
-    expect(shift).toEqual([-2600000, -1200000, 0]);
-    expect(meshShift([o], { placement: "original", geoOrigin: null })).toEqual([0, 0, 0]);
-  });
-
-  it("viele Objekte werden je Gruppe und Farbe zusammengelegt", () => {
-    const objs: MeshObject[] = Array.from({ length: 2100 }, (_, i) => ({
-      name: `O${i}`,
-      group: i % 2 ? "A" : "B",
-      color: [1, 0, 0, 1],
-      positions: new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-      indices: new Uint32Array([0, 1, 2]),
-    }));
-    const m = meshObjectsToImportedMeshes(objs, "x.obj", { placement: "original" });
-    expect(m).toHaveLength(2);
-    expect(m[0].indices.length / 3).toBe(1050);
-    expect(m[0].color).toBe("#ff0000");
+  it("Landeskoordinaten werden bei Original-Platzierung auf den Modell-Nullpunkt geschoben", async () => {
+    const ply = enc.encode(
+      "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n" +
+        "2600010 1200010 0\n2600020 1200010 0\n2600020 1200020 5\n3 0 1 2\n",
+    );
+    const geo: Project = { ...baseProject(), geoAnchor: { lv95: { e: 2600000, n: 1200000 }, model: { x: 0, y: 0 } } };
+    const [m] = (await importMeshInto(geo, ply, "n.ply", { up: "z", placement: "original" })).meshes;
+    expect(m.positions.slice(0, 3)).toEqual([10, 10, 0]);
+    const [n] = (await importMeshInto(baseProject(), ply, "n.ply", { up: "z", placement: "original" })).meshes;
+    expect(n.positions[0]).toBeCloseTo(2600010, 3);
   });
 
   it("Bericht als Text", async () => {
@@ -236,8 +224,8 @@ describe("Mesh-Import: Fehler", () => {
     expect(report.triangles).toBe(1);
   });
 
-  it("decodeMesh verwirft beschädigte Puffer", () => {
-    expect(() => decodeMesh({ flat: new Float64Array([9, 0]), strings: [] })).toThrow();
+  it("beschädigte Puffer: Meldung des Kerns", () => {
+    expect(() => meshReport({ flat: new Float64Array([9, 0]), strings: [] })).toThrow();
   });
 
   it("Worker-Protokoll: Antwort und Fehler", async () => {

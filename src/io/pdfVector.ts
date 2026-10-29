@@ -1,20 +1,19 @@
 // Vektor-PDF-Import ([76] Vektorfang auf PDF): dünne Fassade über das Rust-Format-Modul
 // (`src-tauri/fileio/src/pdf_vector.rs`, WASM `pkgFileIo`). Rust liest Pfade und Texte einer Seite in
-// PDF-Punkten (angezeigte Seite: Ursprung links unten, /Rotate angewendet); hier wird daraus mit dem
-// Massstab dieselbe Form wie beim DXF-Import (`DxfImportResult`), damit Import-Dialog und
-// `dxfToDrawings.ts` unverändert weiterarbeiten. Die übernommenen Linien sind normale 2D-Zeichnungen
+// PDF-Punkten (angezeigte Seite: Ursprung links unten, /Rotate angewendet); den Puffer wandelt der Kern
+// beim Import mit dem Massstab um wie einen DXF-Import (`core/src/import_drawing.rs`); hier wird er nur für
+// Vorschau und Kalibrierung dekodiert. Die übernommenen Linien sind normale 2D-Zeichnungen
 // und damit auch Fangziele (anders als die gerasterte PDF-Unterlage aus `pdfImport.ts`, die bleibt).
 //
 // Ebenen: gruppiert nach Strichstärke (Papier-mm) und Farbe, z. B. „PDF 0.35 #000000"; gestrichelte
 // Linien mit Muster in Papier-mm, z. B. „PDF 0.18 #ff0000 (Strich 0.9/0.6)" (daraus wird beim Import
-// ein Linienstil, s. `pdfLineStyles.ts`); Flächen als „PDF Fläche #rrggbb" (Füllfarbe), Texte als
+// ein Linienstil); Flächen als „PDF Fläche #rrggbb" (Füllfarbe), Texte als
 // „PDF Text #rrggbb". Kreise/Bögen aus Bézier-Folgen kommen als echte Kurven (`Contour.curve`) an.
 // Massstab: 1 pt = 25.4/72 mm Papier; Modell-Meter = pt × 25.4/72/1000 × Massstabszahl.
 
-import type { Contour, ContourSet, ImportedText } from "../model/types";
-import { GENERIC_IMPORT_CATEGORY } from "../model/contextCategories";
 import { fileioLoaded } from "../engine/fileioWasm";
-import type { DxfImportResult } from "./dxfParser";
+import { core } from "../engine/coreWasm";
+import { parsedImport, type ImportChunk, type ParsedImport } from "./importSource";
 
 /** Papier-Millimeter je PDF-Punkt. */
 export const PT_TO_MM = 25.4 / 72;
@@ -90,18 +89,6 @@ export function isPdfFile(name: string, bytes?: Uint8Array): boolean {
   return head.includes("%PDF-");
 }
 
-/** Liest Seite `pageIndex` (0-basiert). Wirft bei unlesbaren/verschlüsselten Dateien (Meldung aus Rust). */
-export function readPdfVectorPage(bytes: Uint8Array, pageIndex = 0): PdfVectorPage {
-  const m = fileioLoaded();
-  if (!m) throw new Error("Format-Modul nicht geladen: loadFileio() muss vor dem Import laufen.");
-  const res = m.pdf_read_page(bytes, pageIndex);
-  try {
-    return decodePdfPage(res.geom(), res.strings());
-  } finally {
-    res.free();
-  }
-}
-
 /** Dekodiert den Puffer aus `pdf_vector.rs::encode` (Aufbau dort beschrieben). */
 export function decodePdfPage(geom: Float64Array, strings: readonly string[]): PdfVectorPage {
   let i = 0;
@@ -155,161 +142,36 @@ export function decodePdfPage(geom: Float64Array, strings: readonly string[]): P
   return { pageCount, pageIndex, width, height, mediaBox, cropBox, rotate, truncated, images, paths, texts };
 }
 
-/** Modell-Meter je PDF-Punkt bei Massstab 1:`scale`. */
-export function pdfMetersPerPt(scale: number): number {
-  return (PT_TO_MM / 1000) * scale;
+/** Gelesene Seite: Puffer des Format-Moduls (für den Kern) und dekodierte Seite (Vorschau, Kalibrierung). */
+export interface PdfRead {
+  chunk: ImportChunk;
+  page: PdfVectorPage;
 }
 
-/** Strichstärke in Papier-mm, auf 0.01 mm gerundet (Haarlinie = 0). */
-export function pdfLineWeightMm(lineWidthPt: number): number {
-  return Math.round(lineWidthPt * PT_TO_MM * 100) / 100;
-}
-
-/** Strichmuster in Papier-mm (an/aus/an/aus …), auf 0.05 mm gerundet; Punkte (an = 0) bleiben 0. */
-export function pdfDashMm(dashPt: readonly number[]): number[] {
-  return dashPt.map((d) => Math.round((d * PT_TO_MM) / 0.05) * 0.05).map((d) => Math.round(d * 100) / 100);
-}
-
-/** Kurzschrift eines Strichmusters für Ebenen-/Stilnamen: „0.9/0.6". */
-export function pdfDashLabel(dashMm: readonly number[]): string {
-  return dashMm.map((d) => String(Math.round(d * 100) / 100)).join("/");
-}
-
-/** Ebenenname einer gestrichenen Linie (Stärke + Farbe, ggf. Strichmuster in Papier-mm). */
-export function pdfStrokeLayer(p: Pick<PdfVectorPath, "lineWidth" | "stroke" | "dash">): string {
-  const lw = pdfLineWeightMm(p.lineWidth).toFixed(2);
-  const dash = p.dash.length ? ` (Strich ${pdfDashLabel(pdfDashMm(p.dash))})` : "";
-  return `PDF ${lw} ${p.stroke ?? "#000000"}${dash}`;
-}
-
-export interface PdfImportOptions {
-  /** Texte übernehmen (Standard: ja). */
-  texts?: boolean;
+/** Liest Seite `pageIndex` (0-basiert) samt Puffer. Wirft bei unlesbaren/verschlüsselten Dateien. */
+export function readPdfVector(bytes: Uint8Array, pageIndex = 0): PdfRead {
+  const m = fileioLoaded();
+  if (!m) throw new Error("Format-Modul nicht geladen: loadFileio() muss vor dem Import laufen.");
+  const res = m.pdf_read_page(bytes, pageIndex);
+  try {
+    const chunk = { geom: res.geom(), strings: res.strings() };
+    return { chunk, page: decodePdfPage(chunk.geom, chunk.strings) };
+  } finally {
+    res.free();
+  }
 }
 
 /**
- * Seite → DXF-Import-Form (Konturen, Texte, Ebenenfarben/-stärken, Flächenfarben) bei Massstab
- * 1:`scale`. Die linke untere Seitenecke liegt im Nullpunkt. Gefüllte und gestrichene Pfade ergeben
- * zwei Konturen (Fläche auf der Flächen-Ebene, Umriss auf der Linien-Ebene); weisse Hintergrund-
- * Flächen, die mehr als die halbe Seite bedecken, werden weggelassen.
+ * Seite als Import bei Massstab 1:`scale` (Dialog-Zustand). Die Umwandlung — Ebenen nach Strichstärke/Farbe
+ * bzw. Strichmuster, Flächen, Texte, Linienstile der Strichmuster — macht der Kern (`import_drawing.rs`).
  */
-export function pdfPageToImport(page: PdfVectorPage, scale: number, opts: PdfImportOptions = {}): DxfImportResult {
-  const k = pdfMetersPerPt(scale);
-  const layerColors: Record<string, string> = {};
-  const layerLineWeights: Record<string, number> = {};
-  const layerFillColors: Record<string, string> = {};
-  const layerDashes: Record<string, number[]> = {};
-  const contours: Contour[] = [];
-  const pageArea = page.width * page.height;
-  const counts: Record<string, number> = {};
-  const toM = (pts: { x: number; y: number }[]) => pts.map((p) => ({ x: p.x * k, y: p.y * k }));
-  for (const p of page.paths) {
-    if (p.fill && p.closed && !(p.fill === "#ffffff" && !p.stroke && polygonArea(p.pts) > 0.5 * pageArea)) {
-      const layer = `PDF Fläche ${p.fill}`;
-      layerColors[layer] = p.fill;
-      layerFillColors[layer] = p.fill;
-      layerLineWeights[layer] ??= 0.05;
-      contours.push({ z: 0, pts: toM(p.pts), closed: true, filled: true, layer });
-      counts.fill = (counts.fill ?? 0) + 1;
-    }
-    if (p.stroke) {
-      const layer = pdfStrokeLayer(p);
-      layerColors[layer] = p.stroke;
-      layerLineWeights[layer] = Math.max(0.05, pdfLineWeightMm(p.lineWidth));
-      if (p.dash.length) layerDashes[layer] ??= pdfDashMm(p.dash);
-      const contour: Contour = { z: 0, pts: toM(p.pts), closed: p.closed, layer };
-      if (p.curve) {
-        const c = p.curve;
-        contour.curve = { kind: c.kind, cx: c.cx * k, cy: c.cy * k, r: c.r * k, a0: c.a0, a1: c.a1 };
-      }
-      contours.push(contour);
-      counts.stroke = (counts.stroke ?? 0) + 1;
-    }
-  }
-  const texts: ImportedText[] = [];
-  if (opts.texts !== false) {
-    for (const t of page.texts) {
-      const layer = `PDF Text ${t.color}`;
-      layerColors[layer] = t.color;
-      texts.push({ at: { x: t.x * k, y: t.y * k }, text: t.text, height: t.size * k, angle: t.angle, layer });
-    }
-  }
-  const sets: ContourSet[] = contours.length
-    ? [
-        {
-          id: `pdf-contours-${Date.now()}-${page.pageIndex}`,
-          type: "contourSet",
-          name: "PDF-Konturen",
-          categoryCode: GENERIC_IMPORT_CATEGORY.code,
-          contours,
-        },
-      ]
-    : [];
-  return {
-    meshes: [],
-    contours: sets,
-    texts,
-    layerColors,
-    layerLineWeights,
-    layerFillColors,
-    layerDashes,
-    diagnostics: {
-      entityCounts: { PATH: counts.stroke ?? 0, FILL: counts.fill ?? 0, TEXT: texts.length, IMAGE: page.images },
-      total: page.paths.length + page.texts.length,
-    },
-    unitScale: k,
-    recovered: page.truncated,
-  };
+export function pdfImport(read: PdfRead, scale: number, opts: { texts?: boolean } = {}): ParsedImport {
+  return parsedImport([read.chunk], { kind: "pdf", scale, ...(opts.texts === false ? { texts: false } : {}) });
 }
 
-function polygonArea(pts: { x: number; y: number }[]): number {
-  let a = 0;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
-  return Math.abs(a / 2);
-}
-
-/** Kurzbericht einer Seite (CLI `pdf-info`): Zahlen und Umriss der Geometrie in pt und Papier-mm. */
-export function pdfPageInfo(page: PdfVectorPage) {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  let points = 0;
-  const grow = (x: number, y: number) => {
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-  };
-  for (const p of page.paths) {
-    points += p.pts.length;
-    for (const q of p.pts) grow(q.x, q.y);
-  }
-  for (const t of page.texts) grow(t.x, t.y);
-  const layers: Record<string, number> = {};
-  for (const p of page.paths) {
-    if (p.stroke) {
-      const l = pdfStrokeLayer(p);
-      layers[l] = (layers[l] ?? 0) + 1;
-    }
-    if (p.fill) {
-      const l = `PDF Fläche ${p.fill}`;
-      layers[l] = (layers[l] ?? 0) + 1;
-    }
-  }
-  const r = (v: number) => Math.round(v * 100) / 100;
-  return {
-    pages: page.pageCount,
-    page: page.pageIndex + 1,
-    sizePt: [r(page.width), r(page.height)],
-    sizeMm: [r(page.width * PT_TO_MM), r(page.height * PT_TO_MM)],
-    rotate: page.rotate,
-    paths: page.paths.length,
-    points,
-    texts: page.texts.length,
-    images: page.images,
-    truncated: page.truncated,
-    bboxPt: Number.isFinite(minX) ? [r(minX), r(minY), r(maxX), r(maxY)] : null,
-    layers,
-  };
+/** Kurzbericht einer Seite (CLI `pdf-info`, Kern): Zahlen, Ebenen und Umriss in pt und Papier-mm. */
+export function pdfPageInfo(read: PdfRead): Record<string, unknown> {
+  const out = core().pdf_page_info(read.chunk.geom, JSON.stringify(read.chunk.strings));
+  if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+  return JSON.parse(out) as Record<string, unknown>;
 }

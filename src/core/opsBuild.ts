@@ -102,6 +102,16 @@ export function addItems<K extends EntityCollection>(collection: K, items: reado
   return [op];
 }
 
+/** Die Elemente, die `ops` in die Liste `collection` einfügen (`add`, bzw. `setField` der ganzen Liste). */
+export function addedItems(ops: readonly CoreOp[], collection: string): unknown[] {
+  const out: unknown[] = [];
+  for (const op of ops) {
+    if (op.kind === "add" && op.collection === collection) out.push(...op.items);
+    else if (op.kind === "setField" && op.key === collection && Array.isArray(op.value)) out.push(...(op.value as unknown[]));
+  }
+  return out;
+}
+
 /** Entfernt die Elemente aus `ids` (bzw. für die `ids(e)` wahr ist), die es gibt; leer, wenn keines trifft. */
 export function removeItems<K extends EntityCollection>(
   p: Project,

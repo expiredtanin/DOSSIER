@@ -4,16 +4,15 @@
 // Grosse ASCII-DXF werden zusätzlich PARALLEL gelesen (Nutzer-Report 09.10.): ein Split-Worker
 // sucht sichere Schnittstellen in der ENTITIES-Sektion (Rust `split.rs`), jedes Stück
 // (Präambel + Entities + Abschluss) läuft in einem eigenen Worker, danach werden die Teilergebnisse
-// zusammengeführt. Schlägt Aufteilung oder ein Stück fehl, wird die ganze Datei einmal am Stück
+// im Kern zusammengeführt. Schlägt Aufteilung oder ein Stück fehl, wird die ganze Datei einmal am Stück
 // gelesen — Korrektheit (amtliche Vermessungsdaten!) vor Geschwindigkeit. Binär-DXF und DWG werden
 // nicht geteilt.
 //
 // Ohne `Worker` (Node: CLI, Tests) wird direkt im aufrufenden Thread gelesen.
 
-import type { ContourSet, ImportedMesh, ImportedText } from "../model/types";
 import { loadFileio } from "../engine/fileioWasm";
-import { decodeImport, parseDxf } from "./dxfParser";
-import type { DxfImportResult, ImportDiagnostics } from "./dxfParser";
+import { parseDxf } from "./dxfParser";
+import { parsedImport, type ImportChunk, type ParsedImport } from "./importSource";
 import type { DxfWorkerRequest, DxfWorkerResponse } from "./dxfParser.worker";
 
 /**
@@ -43,45 +42,10 @@ function runWorker(req: DxfWorkerRequest, transfer: Transferable[] = []): Promis
   });
 }
 
-async function runParseWorker(
-  data: ArrayBuffer,
-  idPrefix: string,
-  transfer: boolean,
-  layout?: string,
-): Promise<DxfImportResult> {
+async function runParseWorker(data: ArrayBuffer, transfer: boolean, layout?: string): Promise<ImportChunk> {
   const res = await runWorker({ type: "parse", data, layout }, transfer ? [data] : []);
-  if (res.type === "result") return decodeImport(res.geom, res.strings, idPrefix);
+  if (res.type === "result") return { geom: res.geom, strings: res.strings };
   throw new Error(res.type === "error" ? res.message : "Unerwartete Worker-Antwort");
-}
-
-/** Führt die Teilergebnisse mehrerer Stücke zusammen. */
-function mergeResults(results: DxfImportResult[]): DxfImportResult {
-  const meshes: ImportedMesh[] = [];
-  const contours: ContourSet[] = [];
-  const texts: ImportedText[] = [];
-  const layerColors: Record<string, string> = {};
-  const diagnostics: ImportDiagnostics = { entityCounts: {}, total: 0 };
-  for (const r of results) {
-    for (const m of r.meshes) meshes.push(m);
-    for (const c of r.contours) contours.push(c);
-    for (const t of r.texts ?? []) texts.push(t);
-    // Jedes Stück trägt dieselbe Präambel (inkl. LAYER-Tabelle) — Vereinigung reicht.
-    Object.assign(layerColors, r.layerColors);
-    for (const [k, n] of Object.entries(r.diagnostics?.entityCounts ?? {})) {
-      diagnostics.entityCounts[k] = (diagnostics.entityCounts[k] ?? 0) + n;
-    }
-    diagnostics.total += r.diagnostics?.total ?? 0;
-  }
-  return {
-    meshes,
-    contours,
-    texts,
-    layerColors,
-    diagnostics,
-    insUnits: results[0]?.insUnits,
-    unitScale: results[0]?.unitScale,
-    layouts: results[0]?.layouts,
-  };
 }
 
 function toArrayBuffer(data: string | ArrayBuffer): ArrayBuffer {
@@ -114,10 +78,10 @@ export async function parseDxfAsync(
   data: string | ArrayBuffer,
   onProgress?: (phase: string) => void,
   layout?: string,
-): Promise<DxfImportResult> {
+): Promise<ParsedImport> {
   if (typeof Worker === "undefined") {
     await loadFileio();
-    return parseDxf(data, "", layout);
+    return parseDxf(data, layout);
   }
   const buf = toArrayBuffer(data);
   const chunkCount = Math.min(
@@ -141,12 +105,12 @@ export async function parseDxfAsync(
     const chunks = buildChunks(new Uint8Array(buf), offsets);
     try {
       onProgress?.(`parse-parallel:${chunks.length}`);
-      const results = await Promise.all(chunks.map((c, i) => runParseWorker(c, `c${i}-`, true)));
-      return mergeResults(results);
+      // Die Stücke führt der Kern zusammen (`import_drawing::merge`).
+      return parsedImport(await Promise.all(chunks.map((c) => runParseWorker(c, true))));
     } catch {
       // Ein Stück ist fehlgeschlagen → einmal am Stück lesen (garantiert korrekt).
     }
   }
   onProgress?.("parse-single");
-  return runParseWorker(buf, "", false, layout);
+  return parsedImport([await runParseWorker(buf, false, layout)]);
 }

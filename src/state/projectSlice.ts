@@ -11,7 +11,7 @@
 import { applyOps } from "../core/ops";
 import type { CoreOp } from "../core/ops";
 import type { ProjectMutation } from "../core";
-import type { LoadFileResult } from "../core/document";
+import type { LoadFileResult, ProjectDocument } from "../core/document";
 import {
   addItems,
   fieldOps,
@@ -92,6 +92,13 @@ export interface ProjectSlice {
   /** Die zuletzt angewendeten Ops (JSON-serialisierbar), jüngste zuletzt. */
   recentOps: () => CoreOp[][];
   /**
+   * Import im Kern ([K4] S4): `run` rechnet die Ops auf dem Store-Dokument und wendet sie an (EIN Undo-Schritt,
+   * z. B. `doc.importDrawing`). Ergebnis mit den angewendeten Ops, `null` = zurückgewiesen (gemeldet).
+   */
+  commitImport: <R extends object>(
+    run: (doc: ProjectDocument, base: Project, now: number) => ({ project: Project; ops: CoreOp[] } & R) | { problems: string[] },
+  ) => ({ ops: CoreOp[] } & R) | null;
+  /**
    * Ein anderes Projekt übernehmen (Neu, Musterhaus; [K4] S4): lädt es als Ganzes ins Kern-Dokument
    * und leert den Verlauf (Rückgängig führt nicht ins vorherige Projekt).
    */
@@ -112,13 +119,6 @@ export interface ProjectSlice {
   addSection: () => void;
   /** Legt eine neue Ansichts-Zeichnungsebene (kind:"elevation") als Platzhalter an. */
   addElevation: () => void;
-  /**
-   * Legt eine neue freie Zeichnungsebene (kind:"drawing") mit dem gegebenen
-   * Namen an und liefert ihre ID zurück (z. B. als Ziel eines DXF-Imports).
-   */
-  addDrawingLevel: (name: string) => string;
-  /** Hängt fertige Drawing2D-Elemente an (z. B. aus einem DXF-Import). */
-  importDrawings: (drawings: import("../model/types").Drawing2D[]) => void;
   patchLevel: (id: string, patch: Partial<DrawingLevel>) => void;
   duplicateLevel: (id: string) => void;
   deleteLevel: (id: string) => void;
@@ -563,6 +563,27 @@ export function createProjectSlice(
     applyChange,
     recentOps: () => opLog.slice(),
 
+    commitImport: (run) => {
+      let out: ReturnType<typeof run> | null = null;
+      set((s) => {
+        const doc = storeDocument(s.project);
+        const res = run(doc, s.project, Date.now());
+        out = res;
+        if ("problems" in res) {
+          const problems = res.problems;
+          console.warn("Import verworfen:", problems);
+          queueMicrotask(() => get().notify(`${t("project.change.rejected")} ${problems[0]}`, "error"));
+          return {};
+        }
+        if (res.ops.length === 0) return {};
+        opLog.push(res.ops);
+        if (opLog.length > OP_LOG_LIMIT) opLog.shift();
+        return { project: res.project, ...historyPatch(doc) };
+      });
+      const r = out as ReturnType<typeof run> | null;
+      return r && !("problems" in r) ? r : null;
+    },
+
     loadProject: (next) => {
       const doc = storeDocument(get().project);
       doc.load(next);
@@ -648,27 +669,6 @@ export function createProjectSlice(
         };
         return addItems("drawingLevels", [elevation]);
       }),
-
-    // Neue freie Zeichnungsebene mit explizitem Namen anlegen und ihre ID
-    // zurückgeben (Ziel-Ebene eines DXF-Imports). Der Name kommt vom Aufrufer
-    // (Dialog); leere Eingabe fällt auf den Default-Namen zurück.
-    addDrawingLevel: (name) => {
-      const id = `drawing-${Date.now()}`;
-      applyChange((p) => {
-        const n = p.drawingLevels.filter((z) => z.kind === "drawing").length + 1;
-        const drawing: DrawingLevel = {
-          id,
-          name: name.trim() || t("default.drawingName", { n }),
-          kind: "drawing",
-          visible: true,
-          locked: false,
-        };
-        return addItems("drawingLevels", [drawing]);
-      });
-      return id;
-    },
-
-    importDrawings: (drawings) => applyChange(addItems("drawings2d", drawings)),
 
     patchLevel: (id, patch) =>
       applyChange((p) =>

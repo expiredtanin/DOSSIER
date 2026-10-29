@@ -14,15 +14,11 @@ import type { AutosaveRecovery } from "./autosave";
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { t } from "../i18n";
-import type { DxfImportResult } from "../io/dxfParser";
 import { parseDxfAsync } from "../io/dxfParserAsync";
-import { beginBusy } from "./busyStore";
-import { buildDrawings } from "../ui/ImportDialog";
-import { distinctImportLayers, planImportCategories } from "../io/dxfToDrawings";
+import { emptyImport, type ParsedImport } from "../io/importSource";
+import { beginBusy, endBusy } from "./busyStore";
 import type { ImportDecision, PdfImportOptions } from "../ui/ImportDialog";
-import { isPdfFile, pdfPageToImport, readPdfVectorPage } from "../io/pdfVector";
-import { planDashLineStyles } from "../io/pdfLineStyles";
-import type { PdfVectorPage } from "../io/pdfVector";
+import { isPdfFile, pdfImport, readPdfVector, type PdfRead } from "../io/pdfVector";
 import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf, type IfcExportOptions } from "../export/exportIfc";
 import { loadFileio } from "../engine/fileioWasm";
@@ -43,90 +39,14 @@ import {
 import type { LockInfo } from "../native/projectFile";
 import { addRecentProject, removeRecentProject } from "./recentProjects";
 import { emptyProject, sampleProject } from "../model/sampleProject";
-import { flattenCategories } from "../model/types";
-import { addItems, fieldOps } from "../core";
-import type { CoreOp } from "../core/ops";
-import type { ContextObject, Drawing2D, Project, Vec2 } from "../model/types";
+import type { Project } from "../model/types";
 import type { PlanViewHandle } from "../views/plan/PlanView";
-
-/** Umriss (bbox) aller Drawing2D-Geometrien in Modell-Metern (null = leer). */
-function drawingsBBox(
-  drawings: Drawing2D[],
-): { minX: number; minY: number; maxX: number; maxY: number } | null {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  const acc = (x: number, y: number) => {
-    minX = Math.min(minX, x); minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
-  };
-  for (const d of drawings) {
-    const g = d.geom;
-    if (g.shape === "line" || g.shape === "xline" || g.shape === "ray") { acc(g.a.x, g.a.y); acc(g.b.x, g.b.y); }
-    else if (g.shape === "polyline") for (const p of g.pts) acc(p.x, p.y);
-    else if (g.shape === "rect") { acc(g.min.x, g.min.y); acc(g.max.x, g.max.y); }
-    else if (g.shape === "circle" || g.shape === "arc") {
-      acc(g.center.x - g.r, g.center.y - g.r);
-      acc(g.center.x + g.r, g.center.y + g.r);
-    } else if (g.shape === "ellipse") {
-      acc(g.center.x - g.rx, g.center.y - g.ry);
-      acc(g.center.x + g.rx, g.center.y + g.ry);
-    } else if (g.shape === "bezier" || g.shape === "spline") {
-      for (const p of g.pts) acc(p.x, p.y);
-    } else if (g.shape === "dimension") {
-      for (const p of g.pts) acc(p.x, p.y);
-    } else if (g.shape === "kote") acc(g.at.x, g.at.y);
-    else if (g.shape === "detailref") acc(g.at.x, g.at.y);
-    else if (g.shape === "scalebar") {
-      acc(g.at.x, g.at.y);
-      acc(g.at.x + g.segmentLength * g.segments, g.at.y);
-    }
-    else if (g.shape === "pointmarker") acc(g.at.x, g.at.y);
-    else if (g.shape === "text") acc(g.at.x, g.at.y);
-    else if (g.shape === "block") acc(g.at.x, g.at.y);
-  }
-  return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
-}
-
-/** Ein Drawing2D um (dx,dy) in Modell-Metern verschieben (alle Formen). */
-function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
-  const mv = (p: Vec2): Vec2 => ({ x: p.x + dx, y: p.y + dy });
-  const g = d.geom;
-  switch (g.shape) {
-    case "line": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
-    case "xline": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
-    case "ray": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
-    case "polyline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
-    case "rect": return { ...d, geom: { ...g, min: mv(g.min), max: mv(g.max) } };
-    case "circle": return { ...d, geom: { ...g, center: mv(g.center) } };
-    case "arc": return { ...d, geom: { ...g, center: mv(g.center) } };
-    case "ellipse": return { ...d, geom: { ...g, center: mv(g.center) } };
-    case "bezier": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
-    case "spline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
-    case "dimension": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
-    case "kote": return { ...d, geom: { ...g, at: mv(g.at) } };
-    case "detailref": return { ...d, geom: { ...g, at: mv(g.at) } };
-    case "scalebar": return { ...d, geom: { ...g, at: mv(g.at) } };
-    case "pointmarker": return { ...d, geom: { ...g, at: mv(g.at) } };
-    case "text":
-      return {
-        ...d,
-        geom: {
-          ...g,
-          at: mv(g.at),
-          ...(g.leaderTarget ? { leaderTarget: mv(g.leaderTarget) } : {}),
-          ...(g.leaderBendPoints ? { leaderBendPoints: g.leaderBendPoints.map(mv) } : {}),
-          ...(g.pathPts ? { pathPts: g.pathPts.map(mv) } : {}),
-        },
-      };
-    case "block": return { ...d, geom: { ...g, at: mv(g.at) } };
-    default: return d;
-  }
-}
 
 /** Modaler Import-Dialog-Zustand (DXF/DWG) — dieselbe Form wie in useDialogState. */
 export type ImportDialogState = {
   fileName: string;
   isDwg: boolean;
-  parsed: DxfImportResult | null;
+  parsed: ParsedImport | null;
   loading?: boolean;
   /** Grober Phasenname während `loading` (DXF via `parseDxfAsync`'s
    *  `onProgress`) — rein informativ, s. `ImportDialog.tsx`. */
@@ -158,13 +78,9 @@ function openProjectOrReport(content: string, notify: (msg: string, kind?: Notif
 
 export function useProjectFileActions(
   project: Project,
-  applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[])) => void,
   setImportState: (next: ImportDialogState) => void,
   setExportSaveFormat: (format: ExportSaveFormat | null) => void,
   activeCategoryCode: string,
-  addDrawingLevel: (name: string) => string,
-  importDrawings: (drawings: Drawing2D[]) => void,
-  addContextObjects: (objs: ContextObject[]) => void,
   setActiveLevelId: (id: string) => void,
   planViewRef: RefObject<PlanViewHandle | null>,
 ) {
@@ -279,7 +195,7 @@ export function useProjectFileActions(
         setImportState({
           fileName: src.fileName,
           isDwg: false,
-          parsed: { meshes: [], contours: [] },
+          parsed: emptyImport(),
           loading: false,
           error: errorText(err),
         });
@@ -288,12 +204,14 @@ export function useProjectFileActions(
 
   // Vektor-PDF ([76]): Bytes und zuletzt gelesene Seite — Massstabswechsel rechnet nur um, ein
   // Seitenwechsel liest die Seite neu (Rust, synchron; das Format-Modul ist dann schon geladen).
-  const pdfSourceRef = useRef<{ fileName: string; bytes: Uint8Array; page: PdfVectorPage } | null>(null);
+  const pdfSourceRef = useRef<{ fileName: string; bytes: Uint8Array; read: PdfRead } | null>(null);
 
-  const pdfImportState = (fileName: string, page: PdfVectorPage, scale: number): ImportDialogState => ({
+  const pdfImportState = (fileName: string, read: PdfRead, scale: number): ImportDialogState => {
+    const page = read.page;
+    return {
     fileName,
     isDwg: false,
-    parsed: pdfPageToImport(page, scale),
+    parsed: pdfImport(read, scale),
     loading: false,
     pdf: {
       pageCount: page.pageCount,
@@ -304,7 +222,8 @@ export function useProjectFileActions(
       images: page.images,
       preview: page,
     },
-  });
+    };
+  };
 
   const openPdfImport = (file: File) => {
     pdfSourceRef.current = null;
@@ -312,13 +231,13 @@ export function useProjectFileActions(
     void Promise.all([file.arrayBuffer(), loadFileio()])
       .then(([buf]) => {
         const bytes = new Uint8Array(buf);
-        const page = readPdfVectorPage(bytes, 0);
-        pdfSourceRef.current = { fileName: file.name, bytes, page };
-        setImportState(pdfImportState(file.name, page, 100));
+        const read = readPdfVector(bytes, 0);
+        pdfSourceRef.current = { fileName: file.name, bytes, read };
+        setImportState(pdfImportState(file.name, read, 100));
       })
       .catch((err) => {
         console.error("PDF-Import fehlgeschlagen:", err);
-        setImportState({ fileName: file.name, isDwg: false, parsed: { meshes: [], contours: [] }, loading: false, error: errorText(err) });
+        setImportState({ fileName: file.name, isDwg: false, parsed: emptyImport(), loading: false, error: errorText(err) });
       });
   };
 
@@ -327,10 +246,10 @@ export function useProjectFileActions(
     const src = pdfSourceRef.current;
     if (!src || !(scale > 0)) return;
     try {
-      if (pageIndex !== src.page.pageIndex) src.page = readPdfVectorPage(src.bytes, pageIndex);
-      setImportState(pdfImportState(src.fileName, src.page, scale));
+      if (pageIndex !== src.read.page.pageIndex) src.read = readPdfVector(src.bytes, pageIndex);
+      setImportState(pdfImportState(src.fileName, src.read, scale));
     } catch (err) {
-      setImportState({ fileName: src.fileName, isDwg: false, parsed: { meshes: [], contours: [] }, loading: false, error: errorText(err) });
+      setImportState({ fileName: src.fileName, isDwg: false, parsed: emptyImport(), loading: false, error: errorText(err) });
     }
   };
 
@@ -408,7 +327,7 @@ export function useProjectFileActions(
         })
         .catch((err) => {
           console.error("DXF-Import fehlgeschlagen:", err);
-          const parsed: DxfImportResult = { meshes: [], contours: [] };
+          const parsed = emptyImport();
           setImportState({ fileName: file.name, isDwg: false, parsed, loading: false, error: errorText(err) });
         });
     };
@@ -654,73 +573,41 @@ export function useProjectFileActions(
   const importParentName = (decision: ImportDecision): string =>
     decision.target.kind === "new" ? decision.target.name : "DXF";
 
-  // Bestätigte Import-Entscheidung ausführen: ggf. neue Zeichnung anlegen, die
-  // 2D-Konturen als Drawing2D anhängen, optional die Meshes als Kontext
-  // übernehmen. Reihenfolge: erst Ebene (echte ID), dann Drawings/Kontext.
-  // Alles als Ops in EINER Gruppe ([K4] S3): ein Import = ein Undo-Schritt.
+  // Bestätigte Import-Entscheidung ausführen: der Kern legt ggf. die neue Zeichnung an, ergänzt Kategorien
+  // je Layer und Linienstile (PDF-Strichmuster), hängt die 2D-Zeichnungen und optional die Meshes als
+  // Kontext an — als EIN Undo-Schritt ([K4] S4, `ProjectDocument.importDrawing`).
   const runImport = (decision: ImportDecision) => {
     // Hinweis bleibt, bis PlanView den neuen Plan gezeichnet hat (endBusyAfterPaint):
     // der Aufbau nach dem Einhängen blockiert noch einmal mehrere Sekunden.
     beginBusy(t("busy.import"));
-    getState().groupChanges(() => runImportSteps(decision));
-    setImportState(null);
-  };
-  const runImportSteps = (decision: ImportDecision) => {
-    const levelId =
-      decision.target.kind === "new"
-        ? addDrawingLevel(decision.target.name)
-        : decision.target.levelId;
-    // „DXF-Layer als Kategorien": fehlende Layer als Unterkategorien einer neuen
-    // Elternkategorie anlegen (vorher fielen sie ALLE auf die aktive Kategorie,
-    // bei Kataster-Importen „Wände"). Die Kategorien müssen VOR den Drawings im
-    // Projekt stehen, damit deren `categoryCode` auf etwas zeigt.
-    let codeByLayer: Map<string, string> | undefined;
-    if (decision.categoryMode === "byLayer") {
-      const plan = planImportCategories(
-        distinctImportLayers(decision.parsed.contours, decision.parsed.texts ?? []),
-        flattenCategories(project.layers),
-        t("import.layers.parentName", { name: importParentName(decision) }),
-        decision.parsed.layerColors,
-        decision.parsed.layerLineWeights,
+    const center = decision.placement === "viewCenter" ? planViewRef.current?.viewCenterModel() : undefined;
+    let r: { levelId: string } | null = null;
+    try {
+      r = getState().commitImport((doc, base, now) =>
+        doc.importDrawing(
+          base,
+          decision.parsed.src,
+          {
+            target: decision.target,
+            categoryMode: decision.categoryMode,
+            activeCategoryCode,
+            importMeshes: decision.importMeshes,
+            ...(center ? { viewCenter: [center.x, center.y] as [number, number] } : {}),
+            levelNameTemplate: t("default.drawingName", { n: "{n}" }),
+            parentName: t("import.layers.parentName", { name: importParentName(decision) }),
+            dashStyleTemplate: t("import.pdf.dashStyleName", { pattern: "{pattern}" }),
+          },
+          now,
+        ),
       );
-      codeByLayer = plan.codeByLayer;
-      if (plan.parent) {
-        const parent = plan.parent;
-        applyChange((p) => fieldOps(p, "layers", [...p.layers, parent]));
-      }
+    } catch (err) {
+      // Kaputter Puffer o. Ä. (Meldung des Kerns).
+      notify(`${t("import.failed")}: ${errorText(err)}`, "error");
     }
-    // PDF-Strichmuster ([76]): passenden Linienstil nehmen oder Strichmuster-Stil anlegen (vor den Zeichnungen).
-    const dashPlan = planDashLineStyles(decision.parsed.layerDashes, project.lineStyles);
-    if (dashPlan.created.length) {
-      const created = dashPlan.created;
-      applyChange((p) => addItems("lineStyles", created.filter((c) => !p.lineStyles.some((l) => l.id === c.id))));
-    }
-    let drawings = buildDrawings(
-      decision,
-      levelId,
-      project,
-      activeCategoryCode,
-      codeByLayer,
-      dashPlan.styleByLayer,
-    );
-    // Platzierung „viewCenter": den Gesamt-Umriss so verschieben, dass seine
-    // Mitte auf die Mitte des aktuellen Ausschnitts fällt (sonst bleibt alles an
-    // den DXF-Koordinaten relativ zum Nullpunkt).
-    if (decision.placement === "viewCenter" && drawings.length) {
-      const center = planViewRef.current?.viewCenterModel();
-      const bb = drawingsBBox(drawings);
-      if (center && bb) {
-        const dx = center.x - (bb.minX + bb.maxX) / 2;
-        const dy = center.y - (bb.minY + bb.maxY) / 2;
-        drawings = drawings.map((d) => translateDrawing(d, dx, dy));
-      }
-    }
-    if (drawings.length) importDrawings(drawings);
-    if (decision.importMeshes && decision.parsed.meshes.length) {
-      addContextObjects(decision.parsed.meshes);
-    }
-    // Auf die Ziel-Ebene wechseln, damit die importierte Geometrie sichtbar ist.
-    setActiveLevelId(levelId);
+    setImportState(null);
+    // Auf die Ziel-Ebene wechseln, damit die importierte Geometrie sichtbar ist (zurückgewiesen: Hinweis weg).
+    if (r) setActiveLevelId(r.levelId);
+    else endBusy();
   };
 
   return {

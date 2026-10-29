@@ -9,8 +9,8 @@
 //   → { type: "split", data: ArrayBuffer, chunkCount: number }
 //   ← { type: "splitOffsets", offsets: number[] } | { type: "error", message }
 //
-// Zurück geht der flache Puffer (übertragen, nicht kopiert); `dxfParser.ts::decodeImport` baut
-// daraus im Haupt-Thread das `DxfImportResult`. `"split"` sucht die sicheren Schnittstellen einer
+// Zurück geht der flache Puffer (übertragen, nicht kopiert); im Haupt-Thread liest ihn der Kern
+// (Zusammenfassung für den Dialog, beim Bestätigen die Ops, `io/importSource.ts`). `"split"` sucht die sicheren Schnittstellen einer
 // grossen ASCII-DXF (Rust `split.rs`) — der Scan allein dauert bei 400 MB spürbar und gehört
 // daher ebenfalls in einen Worker.
 

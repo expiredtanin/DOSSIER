@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildPlanDwg, buildPlanDxf, buildPlanDxfBinary, collectPlanDrawing } from "./exportDxf";
 import { countByType, libreDwgReader, readDxf } from "./cadReadBack.testutil";
-import { parseDxf } from "../io/dxfParser";
+import { inspectDxf } from "../io/importView.testutil";
 import { sampleProject } from "../model/sampleProject";
 import { generatePlan } from "../plan/generatePlan";
 import { flattenCategories } from "../model/types";
@@ -232,7 +232,7 @@ describe("Fachplaner-Export: DWG (libredwg) und eigener Import", () => {
   });
 
   it("DXF-Import: Masszahlen, Möbelgeometrie und Türgeometrie kommen wieder an", () => {
-    const imp = parseDxf(buildPlanDxf(plan, project));
+    const imp = inspectDxf(buildPlanDxf(plan, project));
     const texts = (imp.texts ?? []).map((t) => t.text);
     expect(texts).toContain("2.00");
     expect(texts).toContain("3.00");
@@ -246,6 +246,6 @@ describe("Fachplaner-Export: DWG (libredwg) und eigener Import", () => {
   it("DXF-Import: Papierbereich wird als Layout erkannt", () => {
     // Das Layout hat nur ein Ansichtsfenster (kein eigener Inhalt) und steht darum nicht in der Liste, ist aber lesbar.
     const dxf = buildPlanDxf(plan, project, { paperLayout: true });
-    expect(() => parseDxf(dxf, "", "Plan_1-100")).not.toThrow();
+    expect(() => inspectDxf(dxf, "Plan_1-100")).not.toThrow();
   });
 });

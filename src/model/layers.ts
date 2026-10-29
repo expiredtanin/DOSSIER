@@ -100,21 +100,6 @@ export const insertAfterCode = (cats: LayerCategory[], code: string, clone: Laye
 /** Entfernt die Kategorie mit `code` (samt Kindern) aus dem Baum. */
 export const removeCategoryByCode = (cats: LayerCategory[], code: string): LayerCategory[] => call("remove", cats, code);
 
-/** Neue Kategorien für Import-Layer ohne gleichnamige Kategorie (s. `planImportCategories`, `io/dxfToDrawings.ts`). */
-export function planImportLayers(
-  layerNames: readonly string[],
-  existing: readonly LayerCategory[],
-  colors: Readonly<Record<string, string>>,
-  weights: Readonly<Record<string, number>>,
-): { children: LayerCategory[]; parentCode: string; codeByLayer: Map<string, string> } {
-  const r = call<{ children: LayerCategory[]; parentCode: string; codeByLayer: [string, string][] }>("planImport", existing as LayerCategory[], {
-    names: layerNames,
-    colors,
-    weights,
-  });
-  return { children: r.children, parentCode: r.parentCode, codeByLayer: new Map(r.codeByLayer) };
-}
-
 /** Auswahl nach Elementart (ids je Art, wie `selectionLockMembers` in App.tsx). */
 export interface SelectionMembers {
   wallIds?: readonly string[];

@@ -14,7 +14,9 @@ beforeEach(() => {
 describe("aktive Ebene nach Undo/Redo", () => {
   it("fällt nach Undo einer neuen Zeichnungsebene auf die zuvor aktive Ebene zurück", () => {
     getState().setActiveLevelId("og");
-    const id = getState().addDrawingLevel("Blatt");
+    const before = new Set(getState().project.drawingLevels.map((l) => l.id));
+    getState().addDrawing();
+    const id = getState().project.drawingLevels.find((l) => !before.has(l.id))!.id;
     getState().setActiveLevelId(id);
     const depth = getState().undoDepth;
     getState().undo();

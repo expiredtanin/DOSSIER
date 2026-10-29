@@ -155,11 +155,15 @@ fn strings_of(json: &str) -> Result<Vec<String>, String> {
     serde_json::from_str(json).map_err(|e| format!("Import-Texte: {e}"))
 }
 
-/// Bericht eines gelesenen Mesh-Imports (Format, Achse, Einheit, Dreiecke, Hinweise) für den Dialog.
+/// Bericht eines gelesenen Mesh-Imports (Format, Achse, Einheit, Dreiecke, Hinweise) und Ausdehnung
+/// (`[dx, dy, dz]` in Metern, `null` ohne Punkte) für den Dialog: `{"report":{…},"extent":…}`.
 #[wasm_bindgen]
 pub fn mesh_import_report(flat: &[f64], strings_json: &str) -> String {
     match strings_of(strings_json).and_then(|s| crate::import_context::decode_mesh(flat, &s)) {
-        Ok((_, report)) => report.to_string(),
+        Ok((objects, report)) => {
+            let extent = crate::import_context::mesh_extent(&objects).map_or(Value::Null, |e| json!(e));
+            json!({"report": report, "extent": extent}).to_string()
+        }
         Err(e) => err(e),
     }
 }

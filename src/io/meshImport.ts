@@ -1,7 +1,8 @@
 // Allgemeiner Mesh-Import als Kontext-Meshes ([B3]/[C11]): OBJ (+ MTL), STL, glTF/GLB, PLY mit Flächen —
 // Nachbargebäude und Umgebungsmodelle aus SketchUp/Blender/Rhino, Möbel. Dünne Fassade über den Rust-Leser
-// (`src-tauri/fileio/src/mesh_import.rs`, Modul `pkgFileIo`); hier nur Aufruf, Dekodierung der flachen Puffer
-// und die Abbildung auf `ImportedMesh` (wie `ifcImport.ts`, Farbe im Feld `color`).
+// (`src-tauri/fileio/src/mesh_import.rs`, Modul `pkgFileIo`); hier nur der Aufruf. Bericht und Abbildung auf
+// `ImportedMesh` (Farbe im Feld `color`, Platzierung, Gruppierung) liest der Kern aus den flachen Puffern
+// (`core/src/import_context.rs`; Übernahme als EIN Undo-Schritt über `ProjectDocument.importMesh`, [K4] S4).
 //
 // Laden im Web-Worker (`meshImport.worker.ts`), Rückfall im aufrufenden Thread (Node: CLI, Tests).
 //
@@ -11,9 +12,7 @@
 // Standort-Bezug: auf den Modell-Nullpunkt zurückgeschoben, wie beim IFC-Import).
 
 import { loadFileio } from "../engine/fileioWasm";
-import { GENERIC_IMPORT_CATEGORY } from "../model/contextCategories";
-import type { ImportedMesh } from "../model/types";
-import { rgbToHex } from "../model/color";
+import { core } from "../engine/coreWasm";
 
 export type MeshUnit = "mm" | "cm" | "m" | "inch" | "foot";
 export type MeshUp = "auto" | "z" | "y";
@@ -26,14 +25,10 @@ export const MESH_UNITS: readonly MeshUnit[] = ["mm", "cm", "m", "inch", "foot"]
 /** Endungen der Hauptdateien (Menü, Drag & Drop); `mtl`/`bin` sind Begleitdateien. */
 export const MESH_EXTENSIONS = ["obj", "stl", "gltf", "glb", "ply"] as const;
 export const MESH_SIDECAR_EXTENSIONS = ["mtl", "bin"] as const;
-/** Ab so vielen Objekten wird je Gruppe + Farbe zusammengelegt (Projektdatei, Kontext-Panel). */
-export const MAX_SINGLE = 2000;
 /** Präfix des Rust-Fehlers für PLY ohne Flächen. */
 export const NO_FACES_PREFIX = "[punktwolke]";
 /** Präfix des Rust-Fehlers für fehlende externe glTF-Puffer. */
 export const MISSING_EXTERNAL_PREFIX = "[extern]";
-
-const FORMATS: readonly MeshFormat[] = ["obj", "stl", "gltf", "ply"];
 
 export function isMeshFile(name: string): boolean {
   const ext = name.toLowerCase().split(".").pop() ?? "";
@@ -52,16 +47,6 @@ export interface MeshReadOptions {
   maxTriangles?: number;
   /** Begleitdateien (`.mtl`, `.bin`). */
   files?: { name: string; bytes: Uint8Array }[];
-}
-
-/** Ein gelesenes Objekt (Modell-Meter, Z = Höhe). */
-export interface MeshObject {
-  name: string;
-  group: string;
-  /** sRGB 0..1 mit Alpha, falls die Datei eine Farbe hat. */
-  color: [number, number, number, number] | null;
-  positions: Float64Array;
-  indices: Uint32Array;
 }
 
 export interface MeshImportReport {
@@ -99,51 +84,11 @@ export type MeshWorkerRequest = {
 };
 export type MeshWorkerResponse = { type: "result"; flat: MeshFlat } | { type: "error"; message: string };
 
-const FLAT_VERSION = 1;
-const HEAD = 12;
-
-/** Flache Puffer → Objekte + Bericht (Aufbau: Kopf von `mesh_import.rs`). */
-export function decodeMesh(r: MeshFlat): { objects: MeshObject[]; report: MeshImportReport } {
-  const f = r.flat;
-  if (f.length < HEAD || f[0] !== FLAT_VERSION) throw new Error("Mesh-Import: unbekannte Kodierung");
-  const nWarn = f[10];
-  const nObj = f[11];
-  let at = HEAD;
-  const warnings: string[] = [];
-  for (let i = 0; i < nWarn; i++) warnings.push(r.strings[f[at++]] ?? "");
-  const objects: MeshObject[] = [];
-  for (let k = 0; k < nObj; k++) {
-    const name = r.strings[f[at]] ?? "";
-    const group = f[at + 1] >= 0 ? (r.strings[f[at + 1]] ?? "") : "";
-    const color: MeshObject["color"] = f[at + 2] === 1 ? [f[at + 3], f[at + 4], f[at + 5], f[at + 6]] : null;
-    const np = f[at + 7];
-    const ni = f[at + 8];
-    at += 9;
-    if (!Number.isInteger(np) || !Number.isInteger(ni) || np < 0 || ni < 0 || at + np + ni > f.length) {
-      throw new Error("Mesh-Import: Puffer beschädigt");
-    }
-    const positions = f.slice(at, at + np);
-    at += np;
-    const idx = f.subarray(at, at + ni);
-    const indices = new Uint32Array(ni);
-    for (let i = 0; i < ni; i++) indices[i] = idx[i];
-    at += ni;
-    objects.push({ name, group, color, positions, indices });
-  }
-  const report: MeshImportReport = {
-    format: FORMATS[f[1]] ?? "obj",
-    up: f[2] === 1 ? "y" : "z",
-    upAuto: f[3] === 1,
-    upCertain: f[4] === 1,
-    unitScale: f[5],
-    triangles: f[6],
-    degenerate: f[7],
-    badFaces: f[8],
-    truncated: f[9] === 1,
-    warnings,
-    objects: objects.length,
-  };
-  return { objects, report };
+/** Bericht und Ausdehnung (Meter; `null` ohne Punkte) eines gelesenen Modells — der Kern liest den Puffer. */
+export function meshReport(r: MeshFlat): { report: MeshImportReport; extent: [number, number, number] | null } {
+  const out = core().mesh_import_report(r.flat, JSON.stringify(r.strings));
+  if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+  return JSON.parse(out) as { report: MeshImportReport; extent: [number, number, number] | null };
 }
 
 /** Liest Mesh-Bytes mit dem geladenen Format-Modul (Worker oder aufrufender Thread). */
@@ -236,114 +181,17 @@ export async function readMeshFlat(bytes: Uint8Array, name: string, opts?: MeshR
   return (await readInWorker(bytes, name, o)) ?? (await importMeshFlat(bytes, name, o));
 }
 
+/** Gelesene Mesh-Datei: Puffer (für den Import im Kern), Bericht, Ausdehnung. */
+export interface MeshRead {
+  flat: MeshFlat;
+  report: MeshImportReport;
+  extent: [number, number, number] | null;
+}
+
 /** Liest eine Mesh-Datei. Wirft mit der Meldung aus Rust bei unlesbaren Dateien. */
-export async function readMesh(
-  bytes: Uint8Array,
-  name: string,
-  opts?: MeshReadOptions,
-): Promise<{ objects: MeshObject[]; report: MeshImportReport }> {
-  return decodeMesh(await readMeshFlat(bytes, name, opts));
-}
-
-// ── Abbildung auf Kontext-Meshes ────────────────────────────────────────────
-
-export interface MeshToContextOptions {
-  placement?: MeshPlacement;
-  /** LV95-Ursprung des Projekts (`projectGeoOrigin`), sonst null (nur bei "original"). */
-  geoOrigin?: { e: number; n: number } | null;
-  /** "object" = je Objekt, "merge" = je Gruppe + Farbe, "auto" (Standard) nach `MAX_SINGLE`. */
-  group?: "object" | "merge" | "auto";
-}
-
-/** Verschiebung (x, y, z) je nach Platzierung. */
-export function meshShift(objects: readonly MeshObject[], opts: MeshToContextOptions = {}): [number, number, number] {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  let minZ = Infinity;
-  for (const o of objects) {
-    const p = o.positions;
-    for (let i = 0; i + 2 < p.length; i += 3) {
-      if (p[i] < minX) minX = p[i];
-      if (p[i] > maxX) maxX = p[i];
-      if (p[i + 1] < minY) minY = p[i + 1];
-      if (p[i + 1] > maxY) maxY = p[i + 1];
-      if (p[i + 2] < minZ) minZ = p[i + 2];
-    }
-  }
-  if (!Number.isFinite(minX)) return [0, 0, 0];
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  if ((opts.placement ?? "center") === "center") return [-cx, -cy, -minZ];
-  const origin = opts.geoOrigin;
-  if (origin && Math.hypot(cx - origin.e, cy - origin.n) < Math.hypot(cx, cy)) return [-origin.e, -origin.n, 0];
-  return [0, 0, 0];
-}
-
-/** sRGB 0..1 → `#rrggbb` (Alpha entfällt). */
-export function meshColorHex(c: readonly number[] | null | undefined): string | undefined {
-  if (!c || c.length < 3 || !c.slice(0, 3).every((v) => Number.isFinite(v))) return undefined;
-  return rgbToHex({ r: c[0] * 255, g: c[1] * 255, b: c[2] * 255 });
-}
-
-let counter = 0;
-
-/** Objekte → Kontext-Meshes (Kategorie „Situation" wie IFC/STEP; `layer` = Gruppe, sonst Dateiname). */
-export function meshObjectsToImportedMeshes(objects: readonly MeshObject[], fileName: string, opts: MeshToContextOptions = {}): ImportedMesh[] {
-  const base = fileName.replace(/\.[^.]+$/, "") || "Mesh";
-  const [dx, dy, dz] = meshShift(objects, opts);
-  const stamp = Date.now().toString(36);
-  const group = opts.group ?? "auto";
-  const merge = group === "merge" || (group === "auto" && objects.length > MAX_SINGLE);
-
-  const toArrays = (parts: readonly MeshObject[]): { positions: number[]; indices: number[] } => {
-    const positions: number[] = [];
-    const indices: number[] = [];
-    for (const p of parts) {
-      const off = positions.length / 3;
-      for (let i = 0; i + 2 < p.positions.length; i += 3) {
-        positions.push(p.positions[i] + dx, p.positions[i + 1] + dy, p.positions[i + 2] + dz);
-      }
-      for (let i = 0; i < p.indices.length; i++) indices.push(p.indices[i] + off);
-    }
-    return { positions, indices };
-  };
-
-  if (!merge) {
-    return objects.map((o, i) => {
-      const color = meshColorHex(o.color);
-      return {
-        id: `imported-mesh-${stamp}-${counter++}`,
-        type: "importedMesh" as const,
-        name: o.name || `${base} ${i + 1}`,
-        layer: o.group || base,
-        categoryCode: GENERIC_IMPORT_CATEGORY.code,
-        ...(color ? { color } : {}),
-        ...toArrays([o]),
-      };
-    });
-  }
-  const groups = new Map<string, MeshObject[]>();
-  for (const o of objects) {
-    const key = `${o.group}\u0000${meshColorHex(o.color) ?? ""}`;
-    const g = groups.get(key);
-    if (g) g.push(o);
-    else groups.set(key, [o]);
-  }
-  return [...groups.values()].map((parts) => {
-    const color = meshColorHex(parts[0].color);
-    const g = parts[0].group;
-    return {
-      id: `imported-mesh-${stamp}-${counter++}`,
-      type: "importedMesh" as const,
-      name: `${base}${g ? `: ${g}` : ""} (${parts.length})`,
-      layer: g || base,
-      categoryCode: GENERIC_IMPORT_CATEGORY.code,
-      ...(color ? { color } : {}),
-      ...toArrays(parts),
-    };
-  });
+export async function readMesh(bytes: Uint8Array, name: string, opts?: MeshReadOptions): Promise<MeshRead> {
+  const flat = await readMeshFlat(bytes, name, opts);
+  return { flat, ...meshReport(flat) };
 }
 
 /** Bericht als kurzer Text; `tr` übersetzt (Kern kennt kein i18n, die Hülle reicht `t` herein). */

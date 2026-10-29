@@ -804,11 +804,36 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     wie vorher bis auf erzeugte ids. Messung (vitest/Node, `--no-opt`-WASM, Container unter Last, bigSample(20),
     2,6 MB, 3600 Wände): Öffnen 106–115 ms (alter Weg ohne den Kern-Parse ≈ 210–260 ms: JSON zurück, Differenz,
     Commit), Speichern im Kern 32 ms (vorher Kopie des Baums ≈ 80 ms; `JSON.stringify` in JS 17–19 ms).
-    ◐ **Import-Umwandlung im Kern (29.10.):** Format-Modul liest, der Kern wandelt und wendet als EIN Undo-Schritt an
-    (`core/src/import_drawing.rs`, `import_ifc.rs`, `import_context.rs`, Bindungen `web/import.rs`, TS
-    `ProjectDocument.importDrawing/importIfc/importMesh`). Schritt 1: Kern-Fassung + vorübergehende Paritätstests
-    (`io/importParity.test.ts`, Fixtures über `DOSSIER_PARITY_FX`) neben der alten TS-Fassung; offen: Aufrufer umstellen,
-    TS-Umwandlung löschen.
+    **Import-Umwandlung im Kern (29.10.):** Das Format-Modul (`fileio`, eigenes WASM) liest wie bisher in flache
+    Puffer; der Kern wandelt sie und wendet das Ergebnis als EINEN Undo-Schritt an: `core/src/import_drawing.rs`
+    (DXF/DWG-Puffer v3 dekodieren, Stücke des parallelen Lesens zusammenführen, PDF-Seite mit Massstab →
+    Ebenen nach Stärke/Farbe/Strichmuster, Zusammenfassung für den Dialog, Ops: neue Zeichnungsebene, Kategorien
+    je Layer `layers::plan_import`, Linienstile der PDF-Strichmuster, 2D-Zeichnungen mit Bulge-Vorzeichen
+    Modell = − DXF, Platzierung „Ausschnittsmitte", Meshes als Kontext), `import_ifc.rs` ([B4] Bauteile: Geschosse,
+    Wand-/Deckentypen, Materialien, Öffnungen, Stützen, Räume), `import_context.rs` ([B3]/[C11] Kontext-Meshes aus
+    IFC und OBJ/STL/glTF/PLY, `ensureContextCategories`, LV95-Rückschub). Bindungen `web/import.rs`
+    (`doc_import_drawing/ifc/mesh`, `import_drawing_summary`, `import_drawing_meshes`, `mesh_import_report`,
+    `pdf_page_info`, Leseansicht `import_drawing_view` für Tests). TS: `ProjectDocument.importDrawing/importIfc/
+    importMesh`, Store `commitImport`; Dialoge halten nur Puffer + Zusammenfassung (`io/importSource.ts`).
+    Gelöscht: `io/dxfToDrawings.ts`, `io/pdfLineStyles.ts`, `io/ifcElements.ts`, `decodeImport`, `decodeIfc`,
+    `ifcToImportedMeshes`, `decodeMesh`/`meshObjectsToImportedMeshes`, `pdfPageToImport`/`pdfPageInfo` (TS),
+    `buildDrawings`, `planImportLayers`, Store `addDrawingLevel`/`importDrawings`; `ensureContextCategories` ist
+    Fassade über den Kern. Gleichheit (einmalig, Paritätstest gegen die TS-Fassung, Stand `65e7f3a`): 23 DXF/DWG
+    (Fixtures `kataster.dxf`, `klein.dxf`, `layouts.dxf` + Layout, `tile*` DXF/Binär-DXF/DWG R13–2018, synthetischer
+    Kataster 3000) × 2 Projekte × 3 Entscheidungen (neue Ebene/Layer-Kategorien/Meshes, aktive Kategorie +
+    Ausschnittsmitte, bestehende Ebene); synthetischer Kataster 150 000 Entities in 4 parallel gelesenen Stücken;
+    2 PDF × 4 Massstäbe × mit/ohne Text × 2 Projekte × 3 Entscheidungen + vorhandener Linienstil; 5 IFC (Demo-Haus,
+    2 Testdaten, 2 mit ifcopenshell erzeugt: 3 Geschosse, Schichten, Stützen, Räume, eBKP-H, einmal in LV95) × 4
+    Projekte (leer, Beispiel, mit LV95-Bezug, ohne Listen) × 3 Gruppierungen, Bauteile und Meshes; 6 Meshes
+    (OBJ+MTL, STL, GLB, glTF, PLY in LV95) × 3 Einheit/Achse × 3 Projekte × 2 Platzierungen × 3 Gruppierungen →
+    Projekt (bis auf erzeugte ids), Zusammenfassung, Berichte, `pdf-info` gleich. CLI (`convert`, `import-ifc`
+    auch `--elements`/`--group class`, `import-mesh`, `pdf-info`; 133 Ausgaben): 130 gleich, die 3 PDF-`convert`
+    bekommen jetzt wie die App Linienstile für Strichmuster (vorher im CLI nicht). Messung Kataster 150 000
+    Entities (vitest/Node, `--no-opt`-WASM, Container unter Last): App-Weg ohne Lesen alt 3,2–4,3 s (TS dekodieren +
+    umwandeln + Commit im Kern), neu 2,0–2,7 s (Kern: Zusammenfassung ≈ 0,1 s, Import ≈ 1,7–2,0 s, `JSON.parse` der
+    Ops ≈ 0,6 s); CLI `convert` (inkl. Lesen und 78 MB Schreiben) alt ≈ 9,4 s, neu ≈ 9,6–11,9 s (das alte CLI ging
+    am Kern-Dokument vorbei). Offen: Ops-Rückgabe als JSON (42 MB beim 150k-Kataster) — die Leseansicht könnte
+    die Elemente billiger bekommen; STEP-Import (truck) unverändert in TS; nicht in Tauri/macOS geprüft.
   Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
   React-Store (TS-Spiegel bleibt bis S3), Befehls-Zustandsautomaten sind viel Code (`src/commands/cmds/*`).
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.

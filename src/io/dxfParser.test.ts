@@ -4,8 +4,9 @@
 import { beforeAll, describe, it, expect } from "vitest";
 import { parseDxf } from "./dxfParser";
 import { loadFileioForTests } from "../engine/fileioWasm.testing";
-import { contoursToDrawings, textsToDrawings } from "./dxfToDrawings";
-import type { Contour, ContourSet, Vec2 } from "../model/types";
+import { importInto, inspectDxf, type ViewContour } from "./importView.testutil";
+import { emptyProject } from "../model/sampleProject";
+import type { Vec2 } from "../model/types";
 
 /** Minimales DXF aus Gruppencode/Wert-Paaren; nur eine ENTITIES-Sektion. */
 function dxf(...entities: string[][]): string {
@@ -46,8 +47,8 @@ beforeAll(loadFileioForTests);
 const dist = (p: Vec2, cx: number, cy: number) => Math.hypot(p.x - cx, p.y - cy);
 
 /** Einzige Kontur des Imports (Test-Bequemlichkeit). */
-function onlyContour(text: string): Contour {
-  const res = parseDxf(text);
+function onlyContour(text: string): ViewContour {
+  const res = inspectDxf(text);
   expect(res.contours).toHaveLength(1);
   expect(res.contours[0].contours).toHaveLength(1);
   return res.contours[0].contours[0];
@@ -118,7 +119,7 @@ function ellipse2Dxf(): string {
 
 describe("parseDxf — gemischt", () => {
   it("liest mehrere Kurven-Entities in EINEN Konturensatz", () => {
-    const res = parseDxf(dxf(circle(0, 0, 0, 1), arc(0, 0, 2, 0, 90)));
+    const res = inspectDxf(dxf(circle(0, 0, 0, 1), arc(0, 0, 2, 0, 90)));
     expect(res.contours).toHaveLength(1);
     expect(res.contours[0].contours).toHaveLength(2);
   });
@@ -262,7 +263,7 @@ describe("parseDxf — INSERT", () => {
   });
 
   it("expandiert ein 2×1-Array zu zwei Konturen", () => {
-    const res = parseDxf(
+    const res = inspectDxf(
       dxfFull([block("seg", 0, 0, line(0, 0, 1, 0))], [insert("seg", 0, 0, { nc: 2, dc: 10 })]),
     );
     const cs = res.contours[0].contours;
@@ -408,7 +409,7 @@ describe("parseDxf — HATCH", () => {
       "10", "3", "20", "3", "10", "7", "20", "3", "10", "7", "20", "7", "10", "3", "20", "7",
       "97", "0",
     ];
-    const res = parseDxf(dxf(g));
+    const res = inspectDxf(dxf(g));
     expect(res.contours[0].contours).toHaveLength(2);
     expect(res.contours[0].contours.every((c) => c.filled && c.closed)).toBe(true);
   });
@@ -428,7 +429,7 @@ function mtextEnt(x: number, y: number, h: number, s: string): string[] {
 
 describe("parseDxf — TEXT/MTEXT", () => {
   it("TEXT → ImportedText mit Position/Höhe/Winkel (Grad→Radiant)", () => {
-    const res = parseDxf(dxf(textEnt(5, 3, 0.5, 90, "Hallo")));
+    const res = inspectDxf(dxf(textEnt(5, 3, 0.5, 90, "Hallo")));
     expect(res.texts).toHaveLength(1);
     const t0 = res.texts![0];
     expect(t0.at.x).toBeCloseTo(5, 9);
@@ -439,7 +440,7 @@ describe("parseDxf — TEXT/MTEXT", () => {
   });
 
   it("MTEXT → Formatcodes gesäubert, \\P = neue Zeile (je Zeile ein Text, oben links verankert)", () => {
-    const res = parseDxf(dxf(mtextEnt(1, 2, 0.3, "Welt\\Pzeile2")));
+    const res = inspectDxf(dxf(mtextEnt(1, 2, 0.3, "Welt\\Pzeile2")));
     expect(res.texts!.map((t) => t.text)).toEqual(["Welt", "zeile2"]);
     expect(res.texts![0].at.x).toBeCloseTo(1, 9);
     expect(res.texts![0].at.y).toBeCloseTo(2 - 0.3, 9);
@@ -448,37 +449,38 @@ describe("parseDxf — TEXT/MTEXT", () => {
   });
 
   it("MTEXT: Schriftcodes, Stapel, \\~ und Sonderzeichen", () => {
-    const res = parseDxf(dxf(mtextEnt(0, 0, 0.2, "{\\fArial|b1;Fett}\\~\\H2x;gross \\S1/2; 12%%d")));
+    const res = inspectDxf(dxf(mtextEnt(0, 0, 0.2, "{\\fArial|b1;Fett}\\~\\H2x;gross \\S1/2; 12%%d")));
     expect(res.texts!.map((t) => t.text)).toEqual(["Fett gross 1/2 12°"]);
   });
 
   it("TEXT zentriert: Anker ist der Ausrichtpunkt, Text beginnt links davon", () => {
     const g = ["0", "TEXT", "8", "0", "10", "0", "20", "0", "30", "0", "40", "1", "72", "1", "11", "10", "21", "5", "31", "0", "1", "Mitte"];
-    const t = parseDxf(dxf(g)).texts![0];
+    const t = inspectDxf(dxf(g)).texts![0];
     expect(t.at.x).toBeLessThan(10);
     expect(t.at.x).toBeGreaterThan(10 - 6);
     expect(t.at.y).toBeCloseTo(5, 9);
   });
 
   it("leerer Text wird übersprungen", () => {
-    const res = parseDxf(dxf(textEnt(0, 0, 0.2, 0, "")));
+    const res = inspectDxf(dxf(textEnt(0, 0, 0.2, 0, "")));
     expect(res.texts ?? []).toHaveLength(0);
   });
 
   it("fehlende Höhe → positiver Default", () => {
     const g = ["0", "TEXT", "8", "0", "10", "0", "20", "0", "30", "0", "1", "X"];
-    const res = parseDxf(dxf(g));
+    const res = inspectDxf(dxf(g));
     expect(res.texts![0].height).toBeGreaterThan(0);
   });
 });
 
-describe("textsToDrawings", () => {
-  it("ImportedText → Drawing2D {shape:\"text\"}", () => {
-    const drawings = textsToDrawings(
-      [{ at: { x: 1, y: 2 }, text: "Hi", height: 0.4, angle: 0, layer: "L" }],
-      "lvl", "active", "CODE", (s) => s,
-    );
+/** DXF über den Kern ins leere Projekt importieren → die Zeichnungen der neuen Ebene. */
+const drawingsOf = (text: string) => importInto(emptyProject, parseDxf(text), { categoryMode: "active", activeCategoryCode: "CODE" }).drawings;
+
+describe("Import: Text → Zeichnung", () => {
+  it("TEXT → Drawing2D {shape:\"text\"}", () => {
+    const drawings = drawingsOf(dxf(textEnt(1, 2, 0.4, 0, "Hi")));
     expect(drawings).toHaveLength(1);
+    expect(drawings[0].categoryCode).toBe("CODE");
     const g = drawings[0].geom;
     expect(g.shape).toBe("text");
     if (g.shape === "text") {
@@ -507,13 +509,9 @@ describe("parseDxf — Kurven behalten echte Geometrie (curve)", () => {
   });
 });
 
-describe("contoursToDrawings — Kurven → glatte Formen", () => {
-  it("curve circle → {shape:\"circle\"}", () => {
-    const set: ContourSet = {
-      id: "s", type: "contourSet", name: "c",
-      contours: [{ z: 0, closed: true, pts: [{ x: 0, y: 0 }], curve: { kind: "circle", cx: 1, cy: 2, r: 3, a0: 0, a1: Math.PI * 2 } }],
-    };
-    const [d] = contoursToDrawings([set], "lvl", "active", "C", (s) => s);
+describe("Import: Kurven → glatte Formen", () => {
+  it("CIRCLE → {shape:\"circle\"}", () => {
+    const [d] = drawingsOf(dxf(circle(1, 2, 0, 3)));
     expect(d.geom.shape).toBe("circle");
     if (d.geom.shape === "circle") {
       expect(d.geom.r).toBeCloseTo(3, 9);
@@ -521,12 +519,8 @@ describe("contoursToDrawings — Kurven → glatte Formen", () => {
     }
   });
 
-  it("curve arc → {shape:\"arc\"}", () => {
-    const set: ContourSet = {
-      id: "s", type: "contourSet", name: "c",
-      contours: [{ z: 0, closed: false, pts: [{ x: 0, y: 0 }], curve: { kind: "arc", cx: 0, cy: 0, r: 5, a0: 0, a1: 1 } }],
-    };
-    const [d] = contoursToDrawings([set], "lvl", "active", "C", (s) => s);
+  it("ARC → {shape:\"arc\"}", () => {
+    const [d] = drawingsOf(dxf(arc(0, 0, 5, 0, 57.29577951308232)));
     expect(d.geom.shape).toBe("arc");
     if (d.geom.shape === "arc") {
       expect(d.geom.r).toBeCloseTo(5, 9);
@@ -535,23 +529,16 @@ describe("contoursToDrawings — Kurven → glatte Formen", () => {
   });
 });
 
-describe("contoursToDrawings — HATCH-Füllung", () => {
+describe("Import: HATCH-Füllung", () => {
   it("gefüllte Kontur → Drawing2D mit fillColor und polyline-Form", () => {
-    const set: ContourSet = {
-      id: "s", type: "contourSet", name: "h",
-      contours: [{ z: 0, closed: true, filled: true, pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }] }],
-    };
-    const [d] = contoursToDrawings([set], "lvl", "active", "CODE", (s) => s);
+    const [d] = drawingsOf(dxf(hatchPoly([[0, 0], [1, 0], [1, 1]])));
     expect(d.geom.shape).toBe("polyline");
-    expect(d.fillColor).toBeTruthy();
+    expect(d.fillColor).toBe("#c8c8c8");
   });
 
   it("ungefüllte Kontur → Drawing2D ohne fillColor", () => {
-    const set: ContourSet = {
-      id: "s", type: "contourSet", name: "h",
-      contours: [{ z: 0, closed: true, pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }] }],
-    };
-    const [d] = contoursToDrawings([set], "lvl", "active", "CODE", (s) => s);
+    const [d] = drawingsOf(dxf(["0", "LWPOLYLINE", "8", "0", "90", "3", "70", "1", "10", "0", "20", "0", "10", "1", "20", "0", "10", "1", "20", "1"]));
+    expect(d.geom.shape).toBe("polyline");
     expect(d.fillColor).toBeUndefined();
   });
 });
@@ -575,7 +562,7 @@ describe("parseDxf — Polyface-Mesh (POLYLINE Flag 64, swissBUILDINGS3D-Format)
       "0", "SEQEND",
       "0", "ENDSEC", "0", "EOF",
     ];
-    const res = parseDxf(lines.join("\n"));
+    const res = inspectDxf(lines.join("\n"));
     expect(res.meshes).toHaveLength(1);
     expect(res.meshes[0].positions.length / 3).toBe(3);
     expect(res.meshes[0].indices).toEqual([0, 1, 2]);
@@ -594,7 +581,7 @@ describe("parseDxf — Polyface-Mesh (POLYLINE Flag 64, swissBUILDINGS3D-Format)
       "0", "SEQEND",
       "0", "ENDSEC", "0", "EOF",
     ];
-    const res = parseDxf(lines.join("\n"));
+    const res = inspectDxf(lines.join("\n"));
     expect(res.meshes).toHaveLength(1);
     expect(res.meshes[0].positions.length / 3).toBe(4);
     expect(res.meshes[0].indices.length / 3).toBe(2);
@@ -612,7 +599,7 @@ describe("parseDxf — Polyface-Mesh (POLYLINE Flag 64, swissBUILDINGS3D-Format)
       "0", "SEQEND",
       "0", "ENDSEC", "0", "EOF",
     ];
-    const res = parseDxf(lines.join("\n"));
+    const res = inspectDxf(lines.join("\n"));
     expect(res.meshes).toHaveLength(1);
     expect(res.meshes[0].indices).toEqual([0, 1, 2]);
   });
@@ -630,7 +617,7 @@ describe("parseDxf — $INSUNITS", () => {
   };
 
   it("Millimeter → Meter (Koordinaten, Texthöhe), unitScale 0.001", () => {
-    const res = parseDxf(withUnits(4));
+    const res = inspectDxf(withUnits(4));
     expect(res.insUnits).toBe(4);
     expect(res.unitScale).toBe(0.001);
     const c = res.contours[0].contours[0];
@@ -643,13 +630,13 @@ describe("parseDxf — $INSUNITS", () => {
   });
 
   it("Zentimeter und Zoll", () => {
-    expect(parseDxf(withUnits(5)).contours[0].contours[0].pts[1].x).toBeCloseTo(30, 12);
-    expect(parseDxf(withUnits(1)).contours[0].contours[0].pts[0].x).toBeCloseTo(25.4, 12);
+    expect(inspectDxf(withUnits(5)).contours[0].contours[0].pts[1].x).toBeCloseTo(30, 12);
+    expect(inspectDxf(withUnits(1)).contours[0].contours[0].pts[0].x).toBeCloseTo(25.4, 12);
   });
 
   it("Meter, ohne Einheit (0), unbekannt und fehlend bleiben 1:1", () => {
     for (const u of [6, 0, 77, null]) {
-      const res = parseDxf(withUnits(u));
+      const res = inspectDxf(withUnits(u));
       expect(res.unitScale, `${u}`).toBe(1);
       expect(res.contours[0].contours[0].pts[0].x, `${u}`).toBe(1000);
     }
@@ -658,14 +645,12 @@ describe("parseDxf — $INSUNITS", () => {
 
 describe("parseDxf — SOLID/TRACE", () => {
   it("SOLID (Eckenfolge 1,2,4,3) → gefüllte geschlossene Kontur → Drawing2D mit Füllung", () => {
-    const res = parseDxf(
-      dxf(["0", "SOLID", "8", "S", "10", "0", "20", "0", "30", "0", "11", "2", "21", "0", "31", "0", "12", "0", "22", "1", "32", "0", "13", "2", "23", "1", "33", "0"]),
-    );
-    const c = res.contours[0].contours[0];
+    const text = dxf(["0", "SOLID", "8", "S", "10", "0", "20", "0", "30", "0", "11", "2", "21", "0", "31", "0", "12", "0", "22", "1", "32", "0", "13", "2", "23", "1", "33", "0"]);
+    const c = inspectDxf(text).contours[0].contours[0];
     expect(c.filled).toBe(true);
     expect(c.closed).toBe(true);
     expect(c.pts).toEqual([{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 }]);
-    const [d] = contoursToDrawings(res.contours, "L", "active", "01", () => "01");
+    const [d] = drawingsOf(text);
     expect(d.fillColor).toBeDefined();
   });
 
@@ -689,26 +674,26 @@ describe("parseDxf — Papierbereich-Layouts und beschädigte Dateien", () => {
   };
 
   it("ohne Layouts: leere Liste, Modellraum, nicht wiederhergestellt", () => {
-    const res = parseDxf(withLayout());
+    const res = inspectDxf(withLayout());
     expect(res.layouts).toEqual([]);
     expect(res.layout).toBeUndefined();
     expect(res.recovered).toBe(false);
   });
 
   it("unbekanntes Layout → Fehler mit Meldung", () => {
-    expect(() => parseDxf(withLayout(), "", "Gibt es nicht")).toThrow(/nicht gefunden/);
+    expect(() => inspectDxf(withLayout(), "Gibt es nicht")).toThrow(/nicht gefunden/);
   });
 
   it("leere/fremde Datei → verständliche Fehlermeldung statt Absturz", () => {
-    expect(() => parseDxf(new Uint8Array(0))).toThrow(/leer/);
-    expect(() => parseDxf("Dies ist ein Brief.\nMit Gruessen")).toThrow(/Keine DXF/);
+    expect(() => inspectDxf(new Uint8Array(0))).toThrow(/leer/);
+    expect(() => inspectDxf("Dies ist ein Brief.\nMit Gruessen")).toThrow(/Keine DXF/);
   });
 
   it("abgeschnittene Datei → teilweise gelesen (recovered) oder Fehlermeldung, nie ein Absturz", () => {
     const full = dxf(circle(1, 1, 0, 1), circle(2, 2, 0, 1), circle(3, 3, 0, 1));
     const cut = full.slice(0, full.indexOf("EOF") - 30);
     try {
-      const res = parseDxf(cut);
+      const res = inspectDxf(cut);
       expect(res.contours[0].contours.length).toBeGreaterThan(0);
     } catch (e) {
       expect(String(e)).toMatch(/\S/);

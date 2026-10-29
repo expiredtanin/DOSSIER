@@ -2,11 +2,11 @@
 // Achse und Platzierung. Einmal in App eingehängt (`MeshImportHost`); geöffnet über Menü
 // (`openMeshFileDialog`) oder Drag & Drop (`requestMeshImport`). Die Datei wird beim Öffnen und bei jeder
 // Änderung von Einheit/Achse im Web-Worker gelesen (`readMesh`); der Dialog zeigt die erkannte Achse und die
-// Ausdehnung, „Importieren" übernimmt das zuletzt gelesene Ergebnis (kein zweites Lesen).
+// Ausdehnung (beides aus dem Kern), „Importieren" übernimmt das zuletzt gelesene Ergebnis (kein zweites Lesen).
 //
 // Muster: PointCloudImportDialog (abgedunkeltes Overlay, Esc/Hintergrund schliessen).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { Dropdown } from "./Dropdown";
 import {
@@ -15,38 +15,20 @@ import {
   MESH_UNITS,
   MISSING_EXTERNAL_PREFIX,
   NO_FACES_PREFIX,
-  meshObjectsToImportedMeshes,
   readMesh,
 } from "../io/meshImport";
-import type { MeshImportReport, MeshObject, MeshPlacement, MeshUnit, MeshUp } from "../io/meshImport";
+import type { MeshPlacement, MeshRead, MeshUnit, MeshUp } from "../io/meshImport";
 import { closeMeshImport, registerMeshFileInput, requestMeshImport, splitMeshFiles, useMeshImportRequest } from "../state/meshImportStore";
 import type { MeshImportRequest } from "../state/meshImportStore";
 import { requestPointCloudImport } from "../state/pointCloudStore";
-import { projectGeoOrigin } from "../core";
-import type { ImportedMesh, Project } from "../model/types";
 
 export interface MeshImportHostProps {
-  project: Project;
-  onImport: (meshes: ImportedMesh[], report: MeshImportReport) => void;
+  /** Übernehmen: der Kern macht aus dem gelesenen Modell Kontext-Meshes (`ProjectDocument.importMesh`). */
+  onImport: (read: MeshRead, fileName: string, placement: MeshPlacement) => void;
   notify: (message: string, kind?: "info" | "warning" | "error") => void;
 }
 
 const fmt = (n: number) => (Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(1));
-
-/** Ausdehnung aller Objekte (Meter, Modell-Achsen). */
-function extent(objects: readonly MeshObject[]): [number, number, number] {
-  const lo = [Infinity, Infinity, Infinity];
-  const hi = [-Infinity, -Infinity, -Infinity];
-  for (const o of objects) {
-    for (let i = 0; i + 2 < o.positions.length; i += 3) {
-      for (let a = 0; a < 3; a++) {
-        if (o.positions[i + a] < lo[a]) lo[a] = o.positions[i + a];
-        if (o.positions[i + a] > hi[a]) hi[a] = o.positions[i + a];
-      }
-    }
-  }
-  return [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
-}
 
 /** Namen der fehlenden Begleitdateien aus der Rust-Meldung. */
 function missingList(message: string): string {
@@ -58,7 +40,7 @@ async function bytesOf(f: File): Promise<Uint8Array> {
   return new Uint8Array(await f.arrayBuffer());
 }
 
-function MeshImportDialog({ req, project, onImport, notify }: { req: MeshImportRequest } & MeshImportHostProps) {
+function MeshImportDialog({ req, onImport, notify }: { req: MeshImportRequest } & MeshImportHostProps) {
   const { file, sidecars } = req;
   const isGltf = /\.(gltf|glb)$/i.test(file.name);
   const [unit, setUnit] = useState<MeshUnit>("m");
@@ -66,7 +48,7 @@ function MeshImportDialog({ req, project, onImport, notify }: { req: MeshImportR
   const [placement, setPlacement] = useState<MeshPlacement>("center");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ objects: MeshObject[]; report: MeshImportReport } | null>(null);
+  const [result, setResult] = useState<MeshRead | null>(null);
   const seq = useRef(0);
   // Dateiinhalt einmal laden, nicht bei jeder Änderung.
   const cache = useRef<{ main: Uint8Array; files: { name: string; bytes: Uint8Array }[] } | null>(null);
@@ -114,14 +96,13 @@ function MeshImportDialog({ req, project, onImport, notify }: { req: MeshImportR
     })();
   }, [file, sidecars, unit, up]);
 
-  const dims = useMemo(() => (result ? extent(result.objects) : null), [result]);
+  const dims = result?.extent ?? null;
   const r = result?.report;
 
   const onDo = () => {
     if (!result) return;
-    const meshes = meshObjectsToImportedMeshes(result.objects, file.name, { placement, geoOrigin: projectGeoOrigin(project) });
     closeMeshImport();
-    onImport(meshes, result.report);
+    onImport(result, file.name, placement);
   };
 
   return (

@@ -1,4 +1,4 @@
-// IFC-Import zu echten Bauteilen ([B4]): Rundreise eigener Export → Import als Bauteile → gleiche
+// IFC-Import zu echten Bauteilen ([B4], Umwandlung im Kern `import_ifc.rs`): Rundreise eigener Export → Import als Bauteile → gleiche
 // Wände/Öffnungen/Decken/Räume (Lage, Dicke, Höhe, Typ) wie das Original (Demo-Haus); dazu Farbe und
 // GlobalId am Kontext-Mesh ([B3]-Nachtrag) und die Speichern/Laden-Rundreise.
 
@@ -12,8 +12,8 @@ import { exportIfcSpf } from "../export/exportIfc";
 import { emptyProject, sampleProject } from "../model/sampleProject";
 import type { Column, Opening, Project, Vec2, Wall } from "../model/types";
 import { wallTypeThickness } from "../model/types";
-import { formatIfcElementsSummary, ifcElementsToProject, readIfcElements } from "./ifcElements";
-import { ifcToImportedMeshes, readIfc, type IfcProduct } from "./ifcImport";
+import { formatIfcElementsSummary, type IfcElementsSummary } from "./ifcImport";
+import { importIfcInto } from "./importView.testutil";
 import { parseProjectFile, serializeProject } from "./projectFormat";
 
 const bytesOf = (s: string) => new TextEncoder().encode(s);
@@ -24,9 +24,8 @@ const symmetric = (p: Project, wallTypeId: string) => {
 };
 
 async function importInto(base: Project, src: Project) {
-  const { products, report, elements } = await readIfcElements(bytesOf(exportIfcSpf(src)));
-  const r = ifcElementsToProject(base, products, elements, { fileName: "haus.ifc" });
-  return { ...r, report, elements, products };
+  const r = await importIfcInto(base, bytesOf(exportIfcSpf(src)), { elements: true });
+  return { ...r, summary: r.summary as IfcElementsSummary };
 }
 
 describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
@@ -178,32 +177,11 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
 });
 
 describe("Kontext-Mesh: Farbe und GlobalId", () => {
-  const product = (color: IfcProduct["color"], globalId = "2O2Fr$t4X7Zf8NOew3FLOH"): IfcProduct => ({
-    globalId,
-    ifcClass: "IfcWall",
-    name: "Wand",
-    storey: "EG",
-    color,
-    positions: new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
-    indices: new Uint32Array([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3]),
-  });
-
-  it("Farbe als #rrggbb, GlobalId als Feld, Name ohne GlobalId", () => {
-    const [m] = ifcToImportedMeshes([product([1, 0.5, 0, 0.8])], "x.ifc", { group: "product" });
-    expect(m.color).toBe("#ff8000");
-    expect(m.ifcGlobalId).toBe("2O2Fr$t4X7Zf8NOew3FLOH");
-    expect(m.name).toBe("EG: Wand");
-    const [n] = ifcToImportedMeshes([product(null, "")], "x.ifc", { group: "product" });
-    expect(n.color).toBeUndefined();
-    expect(n.ifcGlobalId).toBeUndefined();
-    // Zusammengelegt: gemeinsame Farbe nur, wenn alle gleich.
-    expect(ifcToImportedMeshes([product([1, 0, 0, 1]), product([1, 0, 0, 1])], "x.ifc", { group: "class" })[0].color).toBe("#ff0000");
-    expect(ifcToImportedMeshes([product([1, 0, 0, 1]), product([0, 0, 1, 1])], "x.ifc", { group: "class" })[0].color).toBeUndefined();
-  });
-
+  // Benennung, Farbe (#rrggbb, gemeinsame Farbe beim Zusammenlegen) und GlobalId prüft der Kern-Test
+  // `import_drawing_tests.rs::ifc_meshes_farbe_und_globalid`; hier die Rundreise aus einer Datei.
   it("Farbe aus der Datei (IfcStyledItem) kommt am Mesh an und übersteht Speichern/Laden", async () => {
-    const { products } = await readIfc(new Uint8Array(readFileSync(new URL("./testdata/ifc-geometry-cases.ifc", import.meta.url))));
-    const meshes = ifcToImportedMeshes(products, "cases.ifc");
+    const { meshes } = await importIfcInto(emptyProject, new Uint8Array(readFileSync(new URL("./testdata/ifc-geometry-cases.ifc", import.meta.url))), { fileName: "cases.ifc" });
+    expect(meshes.length).toBeGreaterThan(0);
     expect(meshes.every((m) => m.ifcGlobalId && !m.name.includes("["))).toBe(true);
     const withColor = { ...meshes[0], color: "#336699" };
     const proj: Project = { ...emptyProject, context: [withColor] };
@@ -228,8 +206,7 @@ describe.skipIf(!samples || !existsSync(samples))("IFC-Import als Bauteile: Beis
     walk(samples!);
     const rows: string[] = [];
     for (const f of files) {
-      const { products, elements } = await readIfcElements(new Uint8Array(readFileSync(f)));
-      const { project, summary } = ifcElementsToProject(emptyProject, products, elements, { fileName: f });
+      const { project, summary } = await importIfcInto(emptyProject, new Uint8Array(readFileSync(f)), { fileName: f, elements: true });
       expect(validateProject(project), f).toEqual([]);
       rows.push(`${f.slice(samples!.length + 1)}: ${JSON.stringify(summary)}`);
     }

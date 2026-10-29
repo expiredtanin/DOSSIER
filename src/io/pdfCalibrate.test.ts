@@ -1,7 +1,6 @@
 // [76] Zwei-Punkt-Kalibrierung und Fangindex des PDF-Imports sowie Strichmuster → Linienstil.
 
 import { describe, expect, it } from "vitest";
-import type { LineStyle } from "../model/types";
 import {
   buildSnapIndex,
   collectSnapPoints,
@@ -10,7 +9,6 @@ import {
   pdfPaperMm,
   pdfScaleFromDistance,
 } from "./pdfCalibrate";
-import { planDashLineStyles, sameDash } from "./pdfLineStyles";
 import { PT_TO_MM, type PdfVectorPage, type PdfVectorPath } from "./pdfVector";
 
 const path = (pts: [number, number][], extra: Partial<PdfVectorPath> = {}): PdfVectorPath => ({
@@ -94,34 +92,5 @@ describe("Fangindex", () => {
     const out = buildSnapIndex(page([path([[-50, -50], [900, 900]])]));
     expect(out.nearest(-49, -49, 5)).toEqual({ x: -50, y: -50 });
     expect(out.nearest(899, 901, 5)).toEqual({ x: 900, y: 900 });
-  });
-});
-
-describe("Strichmuster → Linienstil", () => {
-  const solid: LineStyle = { id: "thin", name: "Volllinie", weight: 0.13, color: "#111", dash: null };
-  const dashed: LineStyle = { id: "d", name: "Strich", weight: 0.02, color: "#111", dash: [1, 0.7] };
-
-  it("vergleicht mit Toleranz", () => {
-    expect(sameDash([1.05, 0.7], [1, 0.7])).toBe(true);
-    expect(sameDash([3, 1], [1, 3])).toBe(false);
-    expect(sameDash([1, 1], [1, 1, 1, 1])).toBe(false);
-  });
-
-  it("nimmt vorhandenen Stil mit gleichem Muster, legt sonst genau einen neuen an", () => {
-    const plan = planDashLineStyles(
-      { a: [1.05, 0.7], b: [2.8, 1.4], c: [2.8, 1.4], d: [0.05, 0.7, 2.8, 0.7] },
-      [solid, dashed],
-    );
-    expect(plan.styleByLayer.get("a")).toBe("d");
-    expect(plan.created).toHaveLength(2);
-    expect(plan.styleByLayer.get("b")).toBe(plan.styleByLayer.get("c"));
-    const made = plan.created[0];
-    expect(made).toMatchObject({ dash: [2.8, 1.4], weight: 0.02 });
-    expect(made.id).toBe("pdf-dash-2_8_1_4");
-    expect(plan.created[1].dash).toEqual([0.05, 0.7, 2.8, 0.7]);
-  });
-
-  it("ohne Muster nichts", () => {
-    expect(planDashLineStyles(undefined, [solid])).toEqual({ created: [], styleByLayer: new Map() });
   });
 });

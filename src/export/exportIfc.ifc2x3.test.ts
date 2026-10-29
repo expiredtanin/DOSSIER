@@ -1,7 +1,7 @@
 // IFC2x3-Export (Coordination View 2.0, [B5] 28.10.): Schema-Option des IFC-Exports.
 //
 //  - Text: Kopf, Entitäten des Schemas (keine IFC4-Entitäten), gleiche GlobalIds wie IFC4.
-//  - Eigener Import (`src/io/ifcImport.ts`, `ifcElements.ts`): liest die 2x3-Datei als Meshes und als
+//  - Eigener Import (`src/io/ifcImport.ts`, Kern `import_ifc.rs`): liest die 2x3-Datei als Meshes und als
 //    Bauteile mit demselben Ergebnis wie die IFC4-Datei.
 //  - ifcopenshell (nur mit Python/ifcopenshell): Schema-Prüfung der 2x3-Datei ohne Befunde, Volumen und
 //    Lage je Bauteil gleich der IFC4-Ausgabe.
@@ -13,8 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf } from "./exportIfc";
-import { ifcElementsToProject, readIfcElements } from "../io/ifcElements";
-import { readIfc } from "../io/ifcImport";
+import { importIfcInto, inspectIfc } from "../io/importView.testutil";
 import { emptyProject, sampleProject } from "../model/sampleProject";
 import type { Project } from "../model/types";
 
@@ -140,13 +139,13 @@ describe("IFC2x3-Export: eigener Import liest dasselbe wie bei IFC4", () => {
   const b = v3(sampleProject);
 
   it("Meshes: gleiche Körper (GlobalId, Volumen), Schema IFC2X3 erkannt", async () => {
-    const r4 = await readIfc(bytesOf(a));
-    const r3 = await readIfc(bytesOf(b));
-    expect(r4.report.schema).toBe("IFC4");
-    expect(r3.report.schema).toBe("IFC2X3");
-    expect(r3.report.parseErrors).toBe(0);
-    expect(r3.report.skippedItems).toEqual({});
-    expect(r3.report.productsWithoutGeometry).toBe(0);
+    const r4 = await inspectIfc(bytesOf(a));
+    const r3 = await inspectIfc(bytesOf(b));
+    expect(r4.meta.schema).toBe("IFC4");
+    expect(r3.meta.schema).toBe("IFC2X3");
+    expect(r3.meta.parseErrors).toBe(0);
+    expect(r3.meta.skippedItems).toEqual({});
+    expect(r3.meta.productsWithoutGeometry).toBe(0);
     expect(r3.products.length).toBe(r4.products.length);
     const vol = (p: { positions: ArrayLike<number>; indices: ArrayLike<number> }) => {
       let v = 0;
@@ -169,11 +168,9 @@ describe("IFC2x3-Export: eigener Import liest dasselbe wie bei IFC4", () => {
   });
 
   it("Bauteile: gleiche Wände, Öffnungen, Decken, Räume", async () => {
-    const e4 = await readIfcElements(bytesOf(a));
-    const e3 = await readIfcElements(bytesOf(b));
-    expect(e3.report.parseErrors).toBe(0);
-    const p4 = ifcElementsToProject(emptyProject, e4.products, e4.elements, { fileName: "haus.ifc" });
-    const p3 = ifcElementsToProject(emptyProject, e3.products, e3.elements, { fileName: "haus.ifc" });
+    const p4 = await importIfcInto(emptyProject, bytesOf(a), { elements: true });
+    const p3 = await importIfcInto(emptyProject, bytesOf(b), { elements: true });
+    expect(p3.report.parseErrors).toBe(0);
     expect(p3.summary).toEqual(p4.summary);
     for (const key of ["walls", "openings", "ceilings", "rooms", "wallTypes"] as const) {
       expect(normIds(p3.project[key]), key).toEqual(normIds(p4.project[key]));

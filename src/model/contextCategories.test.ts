@@ -16,6 +16,7 @@ import {
   TERRAIN_CATEGORY,
   IMPORTED_ROOF_CATEGORY,
   CONTEXT_PARENT_CATEGORY,
+  GENERIC_IMPORT_CATEGORY,
 } from "./contextCategories";
 import type { LayerCategory } from "./types";
 
@@ -106,5 +107,12 @@ describe("ensureContextCategories", () => {
   it("ignoriert unbekannte Codes (kein Eintrag in den bekannten Definitionen) statt zu crashen", () => {
     const out = ensureContextCategories([], ["zz-unknown"]);
     expect(out).toEqual([]);
+  });
+
+  it("Tabelle im Kern = Definitionen hier (alle Codes)", () => {
+    const nested = [TERRAIN_CATEGORY, IMAGE_CATEGORY, GENERIC_IMPORT_CATEGORY, ...Object.values(GEO_CATEGORY_DEFS)];
+    const cat = (c: { code: string; name: string; color: string; lw: number }) => ({ code: c.code, name: c.name, color: c.color, lw: c.lw, visible: true, locked: false });
+    const out = ensureContextCategories([], [...nested.map((c) => c.code), IMPORTED_ROOF_CATEGORY.code]);
+    expect(out).toEqual([{ ...cat(CONTEXT_PARENT_CATEGORY), children: nested.map(cat) }, cat(IMPORTED_ROOF_CATEGORY)]);
   });
 });

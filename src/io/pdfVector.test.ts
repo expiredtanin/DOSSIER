@@ -1,17 +1,15 @@
-// [76] Vektor-PDF → DXF-Import-Form → 2D-Zeichnung: Massstab, Ebenen nach Farbe/Strichstärke,
+// [76] Vektor-PDF → Import-Form (Kern) → 2D-Zeichnung: Massstab, Ebenen nach Farbe/Strichstärke,
 // Flächenfarben, Texte; kaputte Dateien werfen, ohne das WASM-Modul lahmzulegen.
 
 import { beforeAll, describe, expect, it } from "vitest";
 import { loadFileioForTests } from "../engine/fileioWasm.testing";
-import {
-  isPdfFile,
-  pdfLineWeightMm,
-  pdfMetersPerPt,
-  pdfPageInfo,
-  pdfPageToImport,
-  readPdfVectorPage,
-} from "./pdfVector";
-import { contoursToDrawings, distinctImportLayers, planImportCategories, textsToDrawings } from "./dxfToDrawings";
+import { isPdfFile, pdfImport, pdfPageInfo, readPdfVector, PT_TO_MM } from "./pdfVector";
+import { importInto, viewImport } from "./importView.testutil";
+import { emptyProject } from "../model/sampleProject";
+
+const readPdfVectorPage = (bytes: Uint8Array, page = 0) => readPdfVector(bytes, page).page;
+/** Modell-Meter je pt bei 1:`scale`. */
+const pdfMetersPerPt = (scale: number) => (PT_TO_MM / 1000) * scale;
 
 /** Minimales einseitiges PDF (A4 hoch) mit Inhalt `content`, Schrift F1 = Helvetica. */
 function makePdf(content: string, pageExtra = ""): Uint8Array {
@@ -46,7 +44,8 @@ beforeAll(loadFileioForTests);
 
 describe("Vektor-PDF-Import", () => {
   it("liest Pfade, Farben, Strichstärken und Text in pt", () => {
-    const page = readPdfVectorPage(makePdf(PLAN));
+    const read = readPdfVector(makePdf(PLAN));
+    const page = read.page;
     expect(page.pageCount).toBe(1);
     expect([page.width, page.height]).toEqual([595, 842]);
     expect(page.paths).toHaveLength(4);
@@ -57,27 +56,33 @@ describe("Vektor-PDF-Import", () => {
     expect(page.texts).toEqual([
       { text: "Wohnen", font: "Helvetica", x: 72, y: 300, size: 10, angle: 0, color: "#000000" },
     ]);
-    const info = pdfPageInfo(page);
+    const info = pdfPageInfo(read);
     expect(info).toMatchObject({ pages: 1, page: 1, paths: 4, texts: 1, bboxPt: [0, 0, 595, 842] });
   });
 
   it("Massstab 1:100 und Ebenen nach Strichstärke/Farbe → 2D-Zeichnung", () => {
-    const page = readPdfVectorPage(makePdf(PLAN));
-    const res = pdfPageToImport(page, 100);
+    const parsed = pdfImport(readPdfVector(makePdf(PLAN)), 100);
+    const res = viewImport(parsed.src);
     const k = pdfMetersPerPt(100);
     expect(k).toBeCloseTo(0.0352778, 6);
-    const layers = distinctImportLayers(res.contours, res.texts ?? []).sort();
-    expect(layers).toEqual(["PDF 0.18 #ff0000 (Strich 1.05/0.7)", "PDF 0.50 #000000", "PDF Fläche #808080", "PDF Text #000000"]);
-    expect(res.layerLineWeights?.["PDF 0.50 #000000"]).toBe(0.5);
-    expect(pdfLineWeightMm(0.5)).toBe(0.18);
+    expect(parsed.summary.unitScale).toBeCloseTo(k, 12);
+    expect(res.layerLineWeights["PDF 0.50 #000000"]).toBe(0.5);
+    expect(res.layerLineWeights["PDF 0.18 #ff0000 (Strich 1.05/0.7)"]).toBe(0.18);
+    expect(res.layerDashes["PDF 0.18 #ff0000 (Strich 1.05/0.7)"]).toEqual([1.05, 0.7]);
 
-    const plan = planImportCategories(layers, [], "Import plan.pdf", res.layerColors, res.layerLineWeights);
-    const cat = plan.parent?.children?.find((c) => c.name === "PDF 0.18 #ff0000 (Strich 1.05/0.7)");
+    const r = importInto(emptyProject, parsed, { parentName: "Import plan.pdf" });
+    const parent = r.project.layers.find((c) => c.name === "Import plan.pdf");
+    expect((parent?.children ?? []).map((c) => c.name).sort()).toEqual([
+      "PDF 0.18 #ff0000 (Strich 1.05/0.7)",
+      "PDF 0.50 #000000",
+      "PDF Fläche #808080",
+      "PDF Text #000000",
+    ]);
+    const cat = parent?.children?.find((c) => c.name === "PDF 0.18 #ff0000 (Strich 1.05/0.7)");
     expect(cat).toMatchObject({ color: "#ff0000", lw: 0.18 });
-    const code = (l: string) => plan.codeByLayer.get(l) ?? "00";
-    const drawings = contoursToDrawings(res.contours, "eg", "byLayer", "00", code, (l) => res.layerFillColors?.[l]);
-    // Linie, gestrichelte Linie, Fläche + Umriss (Hintergrund weggelassen).
-    expect(drawings).toHaveLength(4);
+    // Linie, gestrichelte Linie, Fläche + Umriss (Hintergrund weggelassen), Text.
+    const drawings = r.drawings;
+    expect(drawings).toHaveLength(5);
     const line = drawings[0].geom;
     expect(line.shape).toBe("line");
     if (line.shape === "line") {
@@ -85,16 +90,23 @@ describe("Vektor-PDF-Import", () => {
       expect(line.b.x - line.a.x).toBeCloseTo(3.527778, 5); // 100 pt = 35.28 mm Papier = 3.53 m bei 1:100
     }
     // Strichmuster → Linienstil: nur die gestrichelte Ebene bekommt eine lineStyleId.
-    const styled = contoursToDrawings(res.contours, "eg", "byLayer", "00", code, undefined, (l) =>
-      res.layerDashes?.[l] ? "pdf-dash" : undefined,
-    );
-    expect(styled.filter((d) => d.lineStyleId === "pdf-dash")).toHaveLength(1);
-    expect(res.layerDashes?.["PDF 0.18 #ff0000 (Strich 1.05/0.7)"]).toEqual([1.05, 0.7]);
-    const fill = drawings.find((d) => d.fillColor);
-    expect(fill?.fillColor).toBe("#808080");
-    const texts = textsToDrawings(res.texts ?? [], "eg", "byLayer", "00", code);
-    expect(texts[0].geom).toMatchObject({ shape: "text", text: "Wohnen" });
-    if (texts[0].geom.shape === "text") expect(texts[0].geom.height).toBeCloseTo(10 * k, 9);
+    const styled = drawings.filter((d) => d.lineStyleId);
+    expect(styled).toHaveLength(1);
+    const style = r.project.lineStyles.find((l) => l.id === styled[0].lineStyleId);
+    expect(style).toMatchObject({ name: "PDF-Strich 1.05/0.7 mm", dash: [1.05, 0.7] });
+    expect(drawings.find((d) => d.fillColor)?.fillColor).toBe("#808080");
+    const text = drawings.find((d) => d.geom.shape === "text")!;
+    expect(text.geom).toMatchObject({ shape: "text", text: "Wohnen" });
+    if (text.geom.shape === "text") expect(text.geom.height).toBeCloseTo(10 * k, 9);
+    // Ohne Texte.
+    expect(pdfImport(readPdfVector(makePdf(PLAN)), 100, { texts: false }).summary.texts).toBe(0);
+  });
+
+  it("vorhandener Linienstil mit gleichem Muster wird wiederverwendet", () => {
+    const base = { ...emptyProject, lineStyles: [...emptyProject.lineStyles, { id: "eigen", name: "eigen", weight: 0.1, color: "#000", dash: [1.1, 0.7] }] };
+    const r = importInto(base, pdfImport(readPdfVector(makePdf(PLAN)), 100));
+    expect(r.project.lineStyles).toHaveLength(base.lineStyles.length);
+    expect(r.drawings.filter((d) => d.lineStyleId === "eigen")).toHaveLength(1);
   });
 
   it("Rotate 90 dreht die Seite (Breite/Höhe getauscht)", () => {
@@ -138,24 +150,23 @@ describe("Vektor-PDF-Import", () => {
     expect(page.paths[1].curve).toMatchObject({ kind: "arc" });
     expect(page.paths[1].curve?.a1).toBeCloseTo(Math.PI / 2, 3);
 
-    const res = pdfPageToImport(page, 100);
+    const parsed = pdfImport(readPdfVector(makePdf(circle + arc)), 100);
     const m = pdfMetersPerPt(100);
-    const contours = res.contours[0].contours;
+    const contours = viewImport(parsed.src).contours[0].contours;
     expect(contours[0].curve).toMatchObject({ kind: "circle" });
     expect(contours[0].curve?.cx).toBeCloseTo(cx * m, 9);
     expect(contours[0].curve?.r).toBeCloseTo(r * m, 9);
-    const drawings = contoursToDrawings(res.contours, "eg", "active", "00", () => "00");
+    const drawings = importInto(emptyProject, parsed, { categoryMode: "active", activeCategoryCode: "00" }).drawings;
     expect(drawings[0].geom).toMatchObject({ shape: "circle" });
     expect(drawings[1].geom).toMatchObject({ shape: "arc" });
   });
 
   it("Strichmuster: Muster in Papier-mm je Ebene, Clip-Rechteck beschneidet", () => {
-    const page = readPdfVectorPage(
-      makePdf("50 50 100 100 re W n 1 0 0 RG [8 4] 0 d 0 100 m 300 100 l S"),
-    );
+    const read = readPdfVector(makePdf("50 50 100 100 re W n 1 0 0 RG [8 4] 0 d 0 100 m 300 100 l S"));
+    const page = read.page;
     expect(page.paths).toHaveLength(1);
     expect(page.paths[0].pts).toEqual([{ x: 50, y: 100 }, { x: 150, y: 100 }]);
-    const res = pdfPageToImport(page, 50);
+    const res = viewImport(pdfImport(read, 50).src);
     const layer = Object.keys(res.layerDashes ?? {})[0];
     expect(layer).toMatch(/Strich 2\.8\/1\.4/);
     expect(res.layerDashes?.[layer]).toEqual([2.8, 1.4]);

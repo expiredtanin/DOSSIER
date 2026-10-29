@@ -51,10 +51,6 @@ pub fn layers_call(name: &str, layers_json: &str, arg_json: &str, now_ms: f64) -
         "insertAfter" => Value::Array(layers::insert_after(&cats, text(&arg["code"]), &arg["clone"])),
         "remove" => Value::Array(layers::remove(&cats, text(&arg))),
         "nextFreeCode" => Value::String(layers::next_free_code(&cats, if now_ms.is_finite() { now_ms } else { 0.0 })),
-        "planImport" => {
-            let plan = layers::plan_import(&strings(&arg["names"]), &cats, &obj(&arg["colors"]), &obj(&arg["weights"]));
-            json!({"children": plan.children, "parentCode": plan.parent_code, "codeByLayer": plan.code_by_layer})
-        }
         // Fehlende Kontext-Kategorien ergänzen (`ensureContextCategories`); `null` = nichts fehlt.
         "ensureContext" => {
             let mut cats = cats;

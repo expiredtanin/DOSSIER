@@ -12,6 +12,8 @@ import type { CoreOp } from "./ops";
 import { fieldOps } from "./opsBuild";
 import { opsMutation } from "./opsBuild";
 import type { ProjectMutation } from "./opsBuild";
+import type { IfcImportResult } from "../io/ifcImport";
+import type { MeshImportReport } from "../io/meshImport";
 
 /**
  * Gelesene Zeichnungs-Datei für den Kern ([K4] S4): Puffer des Format-Moduls, je Stück (paralleles Lesen
@@ -373,14 +375,14 @@ export class ProjectDocument {
 
   /** IFC-Import ([B3]/[B4], [K4] S4): Kontext-Meshes bzw. (`opts.elements`) Bauteile, ein Undo-Schritt. */
   importIfc(base: Project, flat: IfcFlatInput, opts: { fileName: string; group?: string; elements?: boolean }, now: number) {
-    return this.commitCore<{ report: Record<string, unknown>; summary: Record<string, number> | null; kept: Record<string, number>; contextObjects: number }>(base, (h) =>
+    return this.commitCore<IfcImportResult>(base, (h) =>
       core().doc_import_ifc(h, flat.meta, flat.positions, flat.indices, flat.elementData ?? new Float64Array(0), JSON.stringify(opts), "", now),
     );
   }
 
   /** Mesh-Import (OBJ/STL/glTF/PLY, [C11], [K4] S4): Kontext-Meshes, ein Undo-Schritt. */
   importMesh(base: Project, flat: { flat: Float64Array; strings: string[] }, opts: { fileName: string; placement?: string; group?: string }, now: number) {
-    return this.commitCore<{ report: Record<string, unknown>; contextObjects: number }>(base, (h) =>
+    return this.commitCore<{ report: MeshImportReport; contextObjects: number }>(base, (h) =>
       core().doc_import_mesh(h, flat.flat, JSON.stringify(flat.strings), JSON.stringify(opts), "", now),
     );
   }

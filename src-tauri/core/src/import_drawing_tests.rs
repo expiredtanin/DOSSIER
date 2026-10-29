@@ -1,5 +1,5 @@
 use super::*;
-use crate::import_context::{ensure_context_categories, mesh_objects_to_meshes, stamp36, MeshObject};
+use crate::import_context::{classification_suffix, ensure_context_categories, ifc_meshes, mesh_objects_to_meshes, stamp36, IfcProduct, MeshObject};
 
 /// DXF-Puffer (Version 3) wie `fileio/src/import.rs::encode`: Layer „A" (rot) und „B", eine Linie,
 /// eine Polylinie mit Bogen, ein Kreis, eine Schraffur, ein Text, ein Mesh auf „0".
@@ -143,6 +143,62 @@ fn pdf_mit_strichmuster() {
 }
 
 #[test]
+fn strichmuster_zu_linienstilen() {
+    assert!(same_dash(&[1.05, 0.7], &[1.0, 0.7]));
+    assert!(!same_dash(&[3.0, 1.0], &[1.0, 3.0]));
+    assert!(!same_dash(&[1.0, 1.0], &[1.0, 1.0, 1.0, 1.0]));
+    let solid = json!({"id": "thin", "name": "Volllinie", "weight": 0.13, "color": "#111", "dash": null});
+    let dashed = json!({"id": "d", "name": "Strich", "weight": 0.02, "color": "#111", "dash": [1, 0.7]});
+    let dashes: Vec<(String, Vec<f64>)> =
+        vec![("a".into(), vec![1.05, 0.7]), ("b".into(), vec![2.8, 1.4]), ("c".into(), vec![2.8, 1.4]), ("d".into(), vec![0.05, 0.7, 2.8, 0.7])];
+    let (created, by_layer) = plan_dash_styles(&dashes, &[solid.clone(), dashed], "S {pattern}");
+    assert_eq!(by_layer["a"], "d");
+    assert_eq!(created.len(), 2);
+    assert_eq!(by_layer["b"], by_layer["c"]);
+    assert_eq!(created[0], json!({"id": "pdf-dash-2_8_1_4", "name": "S 2.8/1.4", "weight": 0.02, "color": "#1a1a1a", "dash": [2.8, 1.4]}));
+    assert_eq!(created[1]["dash"], json!([0.05, 0.7, 2.8, 0.7]));
+    // Gleiche id schon vergeben → Zähler.
+    let taken = json!({"id": "pdf-dash-2_8_1_4", "kind": "dot", "dash": [2.8, 1.4]});
+    let (created, _) = plan_dash_styles(&dashes[1..2], &[taken], "{pattern}");
+    assert_eq!(created[0]["id"], json!("pdf-dash-2_8_1_4-2"));
+    assert!(plan_dash_styles(&[], &[solid], "").0.is_empty());
+}
+
+#[test]
+fn ifc_meshes_farbe_und_globalid() {
+    let pos = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+    let idx = [0.0, 2.0, 1.0, 0.0, 1.0, 3.0];
+    let product = |color: Option<Vec<f64>>, gid: &str| IfcProduct {
+        global_id: gid.into(),
+        ifc_class: "IfcWall".into(),
+        name: Some("Wand".into()),
+        storey: Some("EG".into()),
+        color,
+        classifications: vec![],
+        positions: &pos,
+        indices: &idx,
+    };
+    let m = ifc_meshes(&[product(Some(vec![1.0, 0.5, 0.0, 0.8]), "2O2Fr$t4X7Zf8NOew3FLOH")], "x.ifc", "product", [0.0, 0.0], 0.0);
+    assert_eq!(m[0]["color"], json!("#ff8000"));
+    assert_eq!(m[0]["ifcGlobalId"], json!("2O2Fr$t4X7Zf8NOew3FLOH"));
+    assert_eq!(m[0]["name"], json!("EG: Wand"));
+    assert_eq!(m[0]["layer"], json!("IfcWall"));
+    let n = ifc_meshes(&[product(None, "")], "x.ifc", "product", [0.0, 0.0], 0.0);
+    assert!(n[0].get("color").is_none() && n[0].get("ifcGlobalId").is_none());
+    // Zusammengelegt: gemeinsame Farbe nur, wenn alle gleich; Indizes versetzt.
+    let red = || Some(vec![1.0, 0.0, 0.0, 1.0]);
+    let g = ifc_meshes(&[product(red(), "a"), product(red(), "b")], "x.ifc", "class", [10.0, 0.0], 0.0);
+    assert_eq!(g[0]["color"], json!("#ff0000"));
+    assert_eq!(g[0]["name"], json!("x: EG IfcWall (2)"));
+    assert_eq!(g[0]["indices"].as_array().unwrap()[6], json!(4));
+    assert_eq!(g[0]["positions"][0], json!(10));
+    let h = ifc_meshes(&[product(red(), "a"), product(Some(vec![0.0, 0.0, 1.0, 1.0]), "b")], "x.ifc", "class", [0.0, 0.0], 0.0);
+    assert!(h[0].get("color").is_none());
+    assert_eq!(classification_suffix(&[]), "");
+    assert_eq!(classification_suffix(&[json!({"system": "", "code": "214", "name": null})]), " [214]");
+}
+
+#[test]
 fn kontext_kategorien() {
     let mut l = vec![json!({"code": "20"})];
     assert!(ensure_context_categories(&mut l, ["10", "31", "20"]));
@@ -167,6 +223,12 @@ fn meshes_mitte_und_gruppen() {
     assert_eq!(m.len(), 1);
     assert_eq!(m[0]["name"], json!("haus: g (2)"));
     assert_eq!(m[0]["indices"], json!([0, 1, 0, 2, 3, 2]));
+    // Viele Objekte („auto"): je Gruppe + Farbe zusammengelegt.
+    let many: Vec<MeshObject> = (0..2100).map(|i| obj(if i % 2 == 1 { "A" } else { "B" }, 0.0)).collect();
+    let m = mesh_objects_to_meshes(&many, "x.obj", "original", None, "auto", 0.0);
+    assert_eq!(m.len(), 2);
+    assert_eq!(m[0]["indices"].as_array().unwrap().len(), 1050 * 3);
+    assert_eq!(m[0]["color"], json!("#ff8000"));
 }
 
 /// Zeitmessung (nativ, von Hand): `IMPORT_BENCH=<geom-Datei>` mit `<geom>.strings.json` daneben.
