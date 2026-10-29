@@ -55,6 +55,11 @@ export function docFromText(text: string, marks: Marks = {}): RichTextDoc {
   return { version: 1, paragraphs };
 }
 
+/** Erzeugt einen Run (defensive Kopie der Marks). */
+export function makeRun(text: string, marks: Marks = {}): TextRun {
+  return { text, marks: { ...marks } };
+}
+
 // ── Extraktion ─────────────────────────────────────────────────────────────
 
 /** Reintext des Dokuments; Absätze werden mit "\n" verbunden. */

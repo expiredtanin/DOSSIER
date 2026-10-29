@@ -775,7 +775,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     ✅ (29.10.) **Rich-Text-Bearbeitung im Kern** ([K4]): `core/src/rich_text.rs` (Marks setzen/umschalten, `isMarkActive`,
     `commonMarkValue`, Normalisieren, stabile Serialisierung, Stile anwenden; Offsets in UTF-16 wie TS), Bindungen
     `web/rich_text.rs`; `text/richText.ts` behält Konstruktoren/Reintext/`DEFAULT_PRESETS` und ist sonst Fassade mit gleichen
-    Signaturen (gelöscht: `mapRunsInRange`, `marksEqual`, `normalizeMarks`, `makeRun`, kein Aufrufer). Gleichheit (einmalig,
+    Signaturen (gelöscht: `mapRunsInRange`, `marksEqual`, `normalizeMarks`, kein Aufrufer). Gleichheit (einmalig,
     Test gelöscht): 500 Zufallsdokumente × alle Operationen alt/neu gleich. Abweichung: Bereich mitten in einem Surrogatpaar
     ergibt U+FFFD (im Editor nicht erreichbar). Nicht in der Tauri-App geprüft.
     ✅ (29.10.) **Gebäude-Mesh-Aufbereitung im Kern** ([K4]): `core/src/geo_mesh.rs` (Zuschnitt auf Bounding-Box, Zerlegen in
@@ -790,6 +790,10 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Kontextobjekt-Erzeugung (`featuresToContextObjects`) bleibt TS (Modellobjekte mit Ids und Beschriftung). Gleichheit
     (einmalig, Test gelöscht): 400 Zufallsfolgen von Footprints (Kreis, Stern, unregelmässig, geschlossen, entartet, offen,
     Höhen inkl. ungültig) Positionen und Indizes identisch.
+    ✅ (29.10.) **STEP-Export liest die Kern-Spezifikationen** ([K4]): `export/exportStep.ts` holt Wände/Decken samt
+    „Bauteil − Abzugskörper" aus `model3dParts` (`solid_specs.rs`); gelöscht: `voidPrisms`, `hittingVoids`, `subtractSpec`,
+    `bbox`, `wallCorners`, `isVoidSolid`, `solidBaseZ` aus `plan/voids.ts`. Gleichheit (einmalig, Test gelöscht): Spezifikationen
+    des Beispielprojekts und von 6 Projekten mit Abzugskörper JSON-gleich alt/neu.
     ✅ (29.10.) **Fang-Kandidaten aus dem Modell im Kern** ([K4] S3/[K3d]): `snap_model.rs` sammelt je Dokument-Stand,
     Geschoss und sichtbaren Ebenen (vorher `baseSegments`/`collectCircles`/`roomAnchors`/`ellipseCenters` in
     `tools/snapping.ts`): Wandachsen + Schichtgrenzen, Raum-/Decken- (mit Aussparungen)/Dach-/Treppen-/Stützen-Umrisse,
