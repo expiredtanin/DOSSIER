@@ -753,6 +753,11 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Zeilen → Programmzeilen, Summen-/Zwischentitel, Flächenart, Zellentext), Bindungen in `web_sheet.rs`; `io/roomProgramImport.ts`
     nur noch Fassade (JSON, Signaturen gleich) + `roomProgramOps`. Gleichheit (einmalig, Test gelöscht): 400 Zufallstabellen alt/neu
     gleich. Bekannte Abweichung: Akzente über feste Tabelle statt Unicode-NFD (exotische Zeichen).
+    ✅ (29.10.) **Flächen-Nachweis-Ausgabe im Kern** ([70]/[K4]): `core/src/area_report.rs` (CSV schreiben/lesen, Seitenaufteilung
+    in Papier-mm, SVG; Bericht reist als JSON, Zahlen über `js_fmt`), Bindungen `web/area_report.rs`; `export/areaReport.ts`
+    behält Aufbau mit `t()` und jsPDF-Zeichnen (`buildAreaReportPdf`), der Rest ist Fassade mit gleichen Signaturen
+    (`cellText` gelöscht). Gleichheit (einmalig, Test gelöscht): 300 Zufallsberichte × Trenner × Seitenformate alt/neu
+    gleich (CSV byteweise, Rückleser, Seiten, SVG; Layout bis auf `bold:false`/`align:"left"` statt fehlend).
     ✅ (29.10.) **Fang-Kandidaten aus dem Modell im Kern** ([K4] S3/[K3d]): `snap_model.rs` sammelt je Dokument-Stand,
     Geschoss und sichtbaren Ebenen (vorher `baseSegments`/`collectCircles`/`roomAnchors`/`ellipseCenters` in
     `tools/snapping.ts`): Wandachsen + Schichtgrenzen, Raum-/Decken- (mit Aussparungen)/Dach-/Treppen-/Stützen-Umrisse,

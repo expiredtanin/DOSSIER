@@ -17,6 +17,7 @@ pub mod auto_dimensions;
 pub mod kennzahlen;
 pub mod flaechen;
 pub mod room_program;
+pub mod area_report;
 pub mod bulge;
 pub mod stair;
 pub mod joins;

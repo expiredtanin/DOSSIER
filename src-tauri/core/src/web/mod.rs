@@ -41,6 +41,7 @@ mod project_refs;
 mod commands;
 mod import;
 mod cmd_create;
+mod area_report;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
