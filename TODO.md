@@ -595,7 +595,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[G7] Robuste Booleans bei bündigen Flächen** — wächst mit jeder Phase. · L (laufend)
 - ✅ **[G8] Abzugskörper (senkrechte Prismen)** — Grundriss, Schnitt, 3D, STEP. Offen: Ansicht,
   Schraffur-Deckel im 3D-Live-Schnitt.
-- ○ **[G10] render2d-Punkte f32** (Fund aus [K3b], geprüft 27.10.): `render2d::types::Scene` speichert Punkte
+- ◐ **[G10] render2d-Punkte f32** (Fund aus [K3b], geprüft 27.10.): `render2d::types::Scene` speichert Punkte
   als f32 (~0.25 m Auflösung bei ~2.6e6 m). **Real betroffen:** DXF/DWG-Import mit Platzierung „origin"
   (Vorgabe im Import-Dialog, `ImportDialog.tsx`) behält die Landeskoordinaten → im Browser-/Electron-Pfad
   (WASM-render2d, `useWasmPlanRenderer.ts`) wackeln/verschmelzen Linien eines Katasterplans. **Nicht
@@ -610,6 +610,17 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Hover-Kreis einer Kreis-Zeichnung, HUD-Kasten. Lösung: Overlay relativ zu einem Ursprung (viewBox und
   `toScreen` in PlanView minus Ursprung). Auch die CLI-SVG (`plan --out`) schreibt Landeskoordinaten
   (senkrechte Linien fehlten im Chromium-Screenshot eines LV95-Plans).
+  29.10. **SVG-Overlay erledigt:** lokaler Ursprung nahe dem Ausschnitt (`views/plan/planView/overlayOrigin.ts`,
+  bleibt stehen bis der Ausschnitt > 64 Ausschnitt-Grössen entfernt ist; lokale Projekte: (0, 0) wie bisher).
+  viewBox, Griffe, Kanten-Griffe, Fang, Hervorhebung, Vorschau, Texte, Raster, Lineal, HUD, Marquee, Luftbilder
+  zeichnen relativ dazu; Ausschnitt, Treffer, Fang bleiben absolut in f64. `vbCircle` wieder entfernt (lokal
+  passen `<circle>`-Werte in die CSS-Längen). Gemessen Chromium, Kataster-Ecke: vorher 1.6 px (Übersicht 80 m),
+  5.0 px (10 m), 31 px (1 m); nachher ≤ 0.003 px. Lineal: Ticks über ganzzahligen Index (aufsummiert drifteten
+  sie bei LV95). Plan-Rad: eigener nicht-passiver Listener (React-`onWheel` ist passiv, `preventDefault` warf
+  in Chromium Konsolenfehler). e2e `kataster.spec.ts` (Griffe ± 1 px bei 80/10/1 m, Lineal, Vorschau-Kreis).
+  Nicht in Tauri/WKWebView geprüft. Offen: CLI-SVG; render2d meldet headless beim schnellen Rad-Zoom
+  „recursive use of an object … unsafe aliasing" (`render`/`set_scene_bin` überlappen, auch vor der Änderung;
+  Plan bleibt danach teils leer) — prüfen.
 - ✅ **[G9] Dach-Gehrung an Walm-/Zeltspitzen** (neu 27.10.): an Punkten mit ≥ 3 Dachflächen trifft die
   paarweise Gehrung der Unterseite nicht exakt (Restlücke < 0.01 m²); solche Dächer gehen als nicht
   geschlossenes Face-Set ins IFC. · S–M
@@ -1148,7 +1159,11 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
     = − DXF-Bulge** (Modell: Scheitel links der Sehne, DXF: Gegenuhrzeigersinn). Tests: Rust, vitest,
     e2e `kataster.spec.ts` (Fixture `e2e/fixtures/kataster.dxf`, LV95: Klick, Griffe auf den Ecken, Ziehen,
     Rückgängig). Synthetischer Kataster (6750 Elemente, DXF und DWG) nur im Browser-Build (Chromium) geprüft,
-    nicht in Tauri/macOS. Offen: f32-Versatz des SVG-Overlays bei LV95, s. [G10].
+    nicht in Tauri/macOS. Offen: f32-Versatz des SVG-Overlays bei LV95, s. [G10] (29.10. erledigt, Vieleck
+    wieder `<circle>`).
+  - ✅ **Kanten-Griffe einer Polylinie** (29.10.): liefen auch über die angehängten Bogen-Mitten-Griffe von
+    `drawingVertices` → Dreiecke quer im Innern jeder Polylinie. Jetzt nur über die Eckpunkte und nur an
+    geraden Segmenten (Bogen: eigener Mitten-Griff), `state/edgeGrips.ts` + vitest, e2e.
 - ✅ **[C2] DXF als eigenes Rust-Crate** (Lesen und Schreiben über acadrust, 28.10.)
   28.10. **DXF-Export in Rust:** statt eigenem Writer über acadrust (`fileio/src/export.rs`), **R2018 ASCII
   (UTF-8)** statt des alten AC1015-Kopfs mit UTF-8-Inhalt. `buildPlanDxf` (gleiche Signatur) sammelt nur noch

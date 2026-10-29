@@ -3,7 +3,8 @@
 // (`fixtures/kataster.dxf`: Parzellen als geschlossene LWPOLYLINE teils mit Bögen, Grenzpunkte als
 // INSERT mit ATTRIB, Nummern als TEXT/MTEXT, Gebäude mit HATCH, Strassenparzelle mit Bögen).
 // Gewählt wird per Klick in den Plan (das Picken läuft im Kern auf dem Plan-Puffer, headless ok);
-// Bildschirm-Punkte aus der viewBox-Abbildung des SVG-Overlays (`toScreen`: x·90, −y·90).
+// Bildschirm-Punkte aus der viewBox-Abbildung des SVG-Overlays (`toScreen`: x·90, −y·90, minus
+// lokalem Ursprung `data-origin-x/y`, s. `planView/overlayOrigin.ts`).
 import { readFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { blurFocus, expect, fileMenu, startNewProject, test } from "./app";
@@ -32,11 +33,13 @@ async function screenOf(page: Page, dx: number, dy: number): Promise<{ x: number
   return page.locator("svg.plan-svg").evaluate(
     (el, [x, y]) => {
       const [vx, vy, vw, vh] = el.getAttribute("viewBox")!.split(/\s+/).map(Number);
+      const ox = Number(el.getAttribute("data-origin-x") ?? 0);
+      const oy = Number(el.getAttribute("data-origin-y") ?? 0);
       const r = el.getBoundingClientRect();
       const s = Math.min(r.width / vw, r.height / vh);
       return {
-        x: r.left + (r.width - vw * s) / 2 + (x * 90 - vx) * s,
-        y: r.top + (r.height - vh * s) / 2 + (-y * 90 - vy) * s,
+        x: r.left + (r.width - vw * s) / 2 + (x * 90 - ox - vx) * s,
+        y: r.top + (r.height - vh * s) / 2 + (-y * 90 - oy - vy) * s,
       };
     },
     [E0 + dx, N0 + dy],
@@ -48,8 +51,8 @@ async function clickModel(page: Page, dx: number, dy: number): Promise<void> {
   await page.mouse.click(p.x, p.y);
 }
 
-/** Ein gezeichneter Griff liegt (± 3 px) am Bildschirmort des Modellpunkts. */
-async function expectGripAt(page: Page, dx: number, dy: number): Promise<void> {
+/** Abstand (px) des nächsten gezeichneten Griffs zum Bildschirmort des Modellpunkts. */
+async function gripOffset(page: Page, dx: number, dy: number): Promise<number> {
   const want = await screenOf(page, dx, dy);
   const boxes = await page.locator(".plan-grip").evaluateAll((els) =>
     els.map((e) => {
@@ -57,8 +60,32 @@ async function expectGripAt(page: Page, dx: number, dy: number): Promise<void> {
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     }),
   );
-  const d = Math.min(...boxes.map((b) => Math.hypot(b.x - want.x, b.y - want.y)));
-  expect(d, `Griff bei ${dx}/${dy}: nächster gezeichneter ${d.toFixed(1)} px entfernt`).toBeLessThan(3);
+  return Math.min(...boxes.map((b) => Math.hypot(b.x - want.x, b.y - want.y)));
+}
+
+/** Ein gezeichneter Griff liegt (± 1 px) am Bildschirmort des Modellpunkts. */
+async function expectGripAt(page: Page, dx: number, dy: number): Promise<void> {
+  const d = await gripOffset(page, dx, dy);
+  expect(d, `Griff bei ${dx}/${dy}: nächster gezeichneter ${d.toFixed(2)} px entfernt`).toBeLessThan(1);
+}
+
+/** Breite des Ausschnitts in Metern (viewBox-Breite / 90). */
+async function viewWidthM(page: Page): Promise<number> {
+  const vb = await page.locator("svg.plan-svg").getAttribute("viewBox");
+  return Number(vb!.split(/\s+/)[2]) / 90;
+}
+
+/** Mit dem Mausrad um den Modellpunkt hineinzoomen, bis der Ausschnitt höchstens `widthM` breit ist. */
+async function zoomTo(page: Page, dx: number, dy: number, widthM: number): Promise<void> {
+  for (let k = 0; k < 200 && (await viewWidthM(page)) > widthM; k++) {
+    const p = await screenOf(page, dx, dy);
+    await page.mouse.move(p.x, p.y);
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(100); // Rad-Zoom wird nach 70 ms Ruhe festgeschrieben
+  }
+  // Pan/Zoom wird imperativ angewandt und erst nach einer Pause festgeschrieben.
+  await page.waitForTimeout(400);
+  expect(await viewWidthM(page)).toBeLessThanOrEqual(widthM);
 }
 
 const widthField = (page: Page) => page.locator(".objinfo-field").filter({ hasText: "Breite" }).locator("input");
@@ -76,6 +103,7 @@ test("Kataster-DXF in LV95: Parzelle anklicken, Eckgriff ziehen, Rückgängig", 
   // Browser als CSS-Länge auf ±33.5 Mio. geklemmt → weit ausserhalb des Bildes).
   await expectGripAt(page, 68, 68);
   await expectGripAt(page, 38, 38);
+  await expectGripAt(page, 38, 68);
 
   // Ecke oben rechts 5 m nach rechts ziehen → 35 m breit. Der Griff bleibt nach dem Loslassen
   // „bewaffnet" und folgt dem Cursor; abgeschlossen wird mit einem zweiten Klick.
@@ -124,4 +152,94 @@ test("Kataster: einzeln gewähltes Element mit über 600 Stützpunkten bekommt G
   await expect.poll(() => grips.count()).toBeGreaterThan(50);
   // Gezeichnet werden nur die sichtbaren, je Bildschirmzelle einer (gripCull.ts) — nie alle 1400.
   expect(await grips.count()).toBeLessThanOrEqual(1400);
+});
+
+test("Kataster in LV95: Griffe auf den Ecken auch stark hineingezoomt, Lineal stimmt", async ({ page }) => {
+  await startNewProject(page);
+  await importDxf(page, "kataster.dxf", await readFile(KATASTER_DXF, "utf8"));
+  await clickModel(page, 38, 53);
+  await expect(page.locator(".plan-grip")).toHaveCount(4);
+  await expectGripAt(page, 68, 68);
+
+  // Bisher (Overlay in absoluten viewBox-Einheiten, Browser rechnet f32): ~6 px bei 11 m,
+  // ~80 px bei 1.5 m Ausschnitt.
+  await zoomTo(page, 68, 68, 11);
+  await expectGripAt(page, 68, 68);
+  await zoomTo(page, 68, 68, 1);
+  await expectGripAt(page, 68, 68);
+
+  // Lineal (`<rect>`/Ticks, früher als CSS-Länge geklemmt → unsichtbar): Leiste über die ganze
+  // Breite, Beschriftung oben an der richtigen Stelle (Text beginnt 3 px rechts vom Tick).
+  const strip = await page.locator(".plan-ruler-strip").first().boundingBox();
+  const svgBox = await page.locator("svg.plan-svg").boundingBox();
+  expect(strip!.width).toBeGreaterThan(svgBox!.width - 2);
+  expect(strip!.x).toBeGreaterThanOrEqual(svgBox!.x - 1);
+  const labels = await page
+    .locator(".plan-ruler-text:not([transform])")
+    .evaluateAll((els) => els.map((e) => ({ text: e.textContent ?? "", left: e.getBoundingClientRect().left })));
+  expect(labels.length).toBeGreaterThan(1);
+  for (const l of labels) {
+    const m = Number.parseFloat(l.text);
+    expect(m).toBeGreaterThan(E0 + 66);
+    expect(m).toBeLessThan(E0 + 70);
+    const want = await screenOf(page, m - E0, 0);
+    expect(Math.abs(l.left - (want.x + 3)), `Lineal ${l.text}`).toBeLessThan(2);
+  }
+});
+
+test("Kataster: geschlossene Bogen-Polylinie hat keine Kanten-Griffe im Innern", async ({ page }) => {
+  await startNewProject(page);
+  await importDxf(page, "kataster.dxf", await readFile(KATASTER_DXF, "utf8"));
+  // Strassenparzelle: jedes Segment ein Bogen → Bogen-Mitten-Griffe, keine Kanten-Dreiecke
+  // (früher liefen die Kanten-Griffe auch über die Bogen-Mitten: Dreiecke quer durchs Innere).
+  await clickModel(page, -6 + 3 * 8, -3);
+  await expect(page.locator(".plan-grip")).toHaveCount(44);
+  await expect(page.locator(".plan-edge-grip")).toHaveCount(0);
+  // Parzelle mit geraden Kanten: genau 4 Kanten-Griffe, je auf der Kantenmitte.
+  await clickModel(page, 38, 53);
+  await expect(page.locator(".plan-grip")).toHaveCount(4);
+  await expect(page.locator(".plan-edge-grip")).toHaveCount(4);
+  // Parzelle 0..30 m mit zwei Bogen- und zwei geraden Seiten: 4 Ecken + 2 Bogen-Mitten,
+  // Kanten-Griffe nur an den geraden Seiten (rechts bei x = 30, links bei x = 0).
+  await clickModel(page, 30, 15);
+  await expect(page.locator(".plan-grip")).toHaveCount(6);
+  const edges = page.locator(".plan-edge-grip");
+  await expect(edges).toHaveCount(2);
+  const right = await screenOf(page, 30, 15);
+  const left = await screenOf(page, 0, 15);
+  const centres = await edges.evaluateAll((els) =>
+    els.map((e) => {
+      const r = e.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }),
+  );
+  for (const c of centres) {
+    const d = Math.min(Math.hypot(c.x - right.x, c.y - right.y), Math.hypot(c.x - left.x, c.y - left.y));
+    expect(d, "Kanten-Griff auf einer geraden Seite").toBeLessThan(12);
+  }
+});
+
+test("Kataster: Vorschau-Kreis eines Grenzpunkts (Liste beim Strg-Klick) sitzt in LV95 am Ort", async ({ page }) => {
+  await startNewProject(page);
+  await importDxf(page, "kataster.dxf", await readFile(KATASTER_DXF, "utf8"));
+  await zoomTo(page, 30, 0, 4);
+  // Grenzpunkt (Kreis r = 0.25 m um 30/0) auf dem Rand anklicken, mit Strg: Liste der Objekte.
+  const at = await screenOf(page, 30.25, 0);
+  await page.keyboard.down("Control");
+  await page.mouse.click(at.x, at.y);
+  await page.keyboard.up("Control");
+  const list = page.locator(".pick-list");
+  await expect(list).toBeVisible();
+  // Eintrag „Kreis" überfahren → Vorschau-Kreis im Plan (`<circle>`: cx/cy/r sind CSS-Längen,
+  // früher bei LV95 auf ±33.5 Mio. geklemmt und damit ausserhalb des Bildes).
+  await list.getByRole("option", { name: /Kreis/ }).hover();
+  const circle = page.locator(".plan-hover-pick circle");
+  await expect(circle).toHaveCount(1);
+  const box = (await circle.boundingBox())!;
+  const c = await screenOf(page, 30, 0);
+  const e = await screenOf(page, 30.25, 0);
+  const rPx = e.x - c.x;
+  expect(Math.abs(box.x + box.width / 2 - c.x)).toBeLessThan(1);
+  expect(Math.abs(box.y + box.height / 2 - c.y)).toBeLessThan(1);
+  expect(Math.abs(box.width / 2 - rPx)).toBeLessThan(3); // Box mit Strich (≈ 4 px)
 });
