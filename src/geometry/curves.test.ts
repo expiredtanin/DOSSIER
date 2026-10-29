@@ -1,30 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ellipsePts, sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "./curves";
-
-describe("ellipsePts", () => {
-  it("liegt auf der Ellipse (rotation 0): Ost/Nord-Punkte bei rx/ry", () => {
-    const pts = ellipsePts({ x: 0, y: 0 }, 4, 2, 0, 4);
-    // t=0 → Ost (rx,0); t=π/2 → Nord (0,ry)
-    expect(pts[0].x).toBeCloseTo(4, 6);
-    expect(pts[0].y).toBeCloseTo(0, 6);
-    expect(pts[1].x).toBeCloseTo(0, 6);
-    expect(pts[1].y).toBeCloseTo(2, 6);
-  });
-
-  it("Drehung um 90° vertauscht die Achsen", () => {
-    const pts = ellipsePts({ x: 0, y: 0 }, 4, 2, Math.PI / 2, 4);
-    // Der ehemalige Ost-Punkt (rx,0) liegt jetzt bei (0, rx).
-    expect(pts[0].x).toBeCloseTo(0, 6);
-    expect(pts[0].y).toBeCloseTo(4, 6);
-  });
-
-  it("Mittelpunkt-Verschiebung wird respektiert", () => {
-    const pts = ellipsePts({ x: 10, y: 5 }, 3, 3, 0, 8);
-    for (const p of pts) {
-      expect(Math.hypot(p.x - 10, p.y - 5)).toBeCloseTo(3, 6);
-    }
-  });
-});
+import { sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "./curves";
 
 describe("sampleBezierChain", () => {
   it("weniger als 4 Punkte: Rohpunkte unverändert (Gummiband-Vorschau)", () => {

@@ -19,9 +19,7 @@
 // dafür keine Felder (separate, grössere Erweiterung, analog wie circle/arc
 // getrennte Shapes sind statt einer gemeinsamen mit optionaler Spanne).
 
-import type { Drawing2D } from "../../model/types";
-import { segmentHud, uniqueId } from "../../tools/types";
-import { ellipsePts } from "../../core";
+import { segmentHud } from "../../tools/types";
 import type {
   CmdOption,
   Command,
@@ -29,13 +27,11 @@ import type {
   CommandField,
   CommandResult,
   CommandState,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview, type CreatePreview } from "../createCore";
 
 const EPS = 1e-6;
 
@@ -100,29 +96,27 @@ type EllipseState =
   | EllipseAxisMajor
   | EllipseAxisMinor;
 
-/** Zentrum + Halbachsen aus zwei gegenüberliegenden Bounding-Box-Ecken. */
-function ellipseFromCorners(p0: Vec2, p1: Vec2): { center: Vec2; rx: number; ry: number } {
-  return {
-    center: { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 },
-    rx: Math.abs(p1.x - p0.x) / 2,
-    ry: Math.abs(p1.y - p0.y) / 2,
-  };
-}
+/**
+ * Ellipse im Kern (`cmd_draw.rs`): box (`[p0, p1]` → Mitte, Halbachsen achsparallel) oder axis
+ * (`[Mitte, Hauptachse, Nebenachsen-Punkt]`); `info = [cx, cy, rx, ry]`.
+ */
+const ellipseAt = (ctx: CommandContext, method: EllipseMethod, pts: Vec2[]): CreatePreview =>
+  createPreview(ctx, { cmd: "ellipse", method }, pts);
 
 // ── Vorschau ─────────────────────────────────────────────────────────────────
 
-function ellipseDraft(center: Vec2, rx: number, ry: number, rotation: number, at: Vec2 | null): ToolDraft {
+function ellipseDraft(pv: CreatePreview, at: Vec2 | null): ToolDraft {
+  const [cx, cy, rx, ry] = pv.info;
+  const center = { x: cx, y: cy };
   if (rx < EPS || ry < EPS) return { preview: [], vertices: [center] };
-  const preview: DraftShape[] = [{ kind: "poly", pts: ellipsePts(center, rx, ry, rotation), closed: true }];
-  const draft: ToolDraft = { preview, vertices: [center] };
+  const draft: ToolDraft = { preview: pv.shapes, vertices: [center] };
   if (at) draft.hud = { at, text: `${(rx * 2).toFixed(3)}×${(ry * 2).toFixed(3)}m` };
   return draft;
 }
 
-function boxDraft(p0: Vec2, cursor: Vec2 | null): ToolDraft {
+function boxDraft(ctx: CommandContext, p0: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [], vertices: [p0] };
-  const { center, rx, ry } = ellipseFromCorners(p0, cursor);
-  return ellipseDraft(center, rx, ry, 0, cursor);
+  return ellipseDraft(ellipseAt(ctx, "box", [p0, cursor]), cursor);
 }
 
 function axisMajorDraft(center: Vec2, cursor: Vec2 | null): ToolDraft {
@@ -130,31 +124,16 @@ function axisMajorDraft(center: Vec2, cursor: Vec2 | null): ToolDraft {
   return { preview: [{ kind: "line", a: center, b: cursor }], vertices: [center], hud: segmentHud(center, cursor) };
 }
 
-function axisMinorDraft(center: Vec2, major: Vec2, cursor: Vec2 | null): ToolDraft {
-  const rx = dist(center, major);
-  if (!cursor) return ellipseDraft(center, rx, 0, angleOf(center, major), null);
-  const ry = Math.abs(perpDist(center, major, cursor));
-  return ellipseDraft(center, rx, ry, angleOf(center, major), cursor);
+function axisMinorDraft(ctx: CommandContext, center: Vec2, major: Vec2, cursor: Vec2 | null): ToolDraft {
+  if (!cursor) return ellipseDraft(ellipseAt(ctx, "axis", [center, major]), null);
+  return ellipseDraft(ellipseAt(ctx, "axis", [center, major, cursor]), cursor);
 }
 
 // ── Commit ───────────────────────────────────────────────────────────────────
 
-function appendEllipse(center: Vec2,
-  rx: number,
-  ry: number,
-  rotation: number,
-  ctx: CommandContext,
-): CoreOp[] {
-  if (rx < EPS || ry < EPS) return [];
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "ellipse", center, rx, ry, rotation },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): Ellipse aus den Punkten (entartet → nichts). */
+const appendEllipse = (ctx: CommandContext, method: EllipseMethod, pts: Vec2[]) =>
+  createMutation(ctx, { cmd: "ellipse", method, pts });
 
 const idle = (method: EllipseMethod): [CommandState, CommandResult] => [
   (method === "box" ? { phase: "corner1", method } : { phase: "center", method }) as EllipseState,
@@ -197,10 +176,9 @@ export const ellipseCommand: Command = {
     if (s.method === "box") {
       if (s.phase !== "corner2") {
         const ns: EllipseBoxP2 = { phase: "corner2", method: "box", p0: pt, cursor: pt, lastPoint: pt };
-        return [ns, { draft: boxDraft(pt, pt) }];
+        return [ns, { draft: boxDraft(ctx, pt, pt) }];
       }
-      const { center, rx, ry } = ellipseFromCorners(s.p0, pt);
-      return [idle("box")[0], { draft: null, done: true, commit: opsMutation(() => appendEllipse(center, rx, ry, 0, ctx)) }];
+      return [idle("box")[0], { draft: null, done: true, commit: appendEllipse(ctx, "box", [s.p0, pt]) }];
     }
 
     // axis
@@ -211,25 +189,18 @@ export const ellipseCommand: Command = {
     if (s.phase === "major") {
       if (dist(s.center, pt) < EPS) return [s, { draft: null }];
       const ns: EllipseAxisMinor = { phase: "minor", method: "axis", center: s.center, major: pt, cursor: pt, lastPoint: pt };
-      return [ns, { draft: axisMinorDraft(s.center, pt, null) }];
+      return [ns, { draft: axisMinorDraft(ctx, s.center, pt, null) }];
     }
     // phase "minor" → committen.
-    const { center, major } = s;
-    const rx = dist(center, major);
-    const ry = Math.abs(perpDist(center, major, pt));
-    const rotation = angleOf(center, major);
-    return [
-      idle("axis")[0],
-      { draft: null, done: true, commit: opsMutation(() => appendEllipse(center, rx, ry, rotation, ctx)) },
-    ];
+    return [idle("axis")[0], { draft: null, done: true, commit: appendEllipse(ctx, "axis", [s.center, s.major, pt]) }];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as EllipseState;
     if (s.method === "box") {
       if (s.phase !== "corner2") return [s, { draft: null }];
       const ns: EllipseBoxP2 = { ...s, cursor: point };
-      return [ns, { draft: boxDraft(s.p0, point) }];
+      return [ns, { draft: boxDraft(ctx, s.p0, point) }];
     }
     if (s.phase === "major") {
       const ns: EllipseAxisMajor = { ...s, cursor: point };
@@ -237,7 +208,7 @@ export const ellipseCommand: Command = {
     }
     if (s.phase === "minor") {
       const ns: EllipseAxisMinor = { ...s, cursor: point };
-      return [ns, { draft: axisMinorDraft(s.center, s.major, point) }];
+      return [ns, { draft: axisMinorDraft(ctx, s.center, s.major, point) }];
     }
     return [s, { draft: null }];
   },

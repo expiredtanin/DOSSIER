@@ -12,6 +12,7 @@ import { bulgeArc } from "../../geometry/bulge";
 import type { CommandContext, CommandState, Project, Vec2 } from "../types";
 
 const ctx = {
+  project: sampleProject,
   level: sampleProject.drawingLevels[0],
   defaultCategoryCode: sampleProject.layers[0].code,
 } as CommandContext;

@@ -32,24 +32,3 @@ pub fn bulge_from_sagitta_point(ax: f64, ay: f64, bx: f64, by: f64, px: f64, py:
 pub fn bulge_point_at(ax: f64, ay: f64, bx: f64, by: f64, bulge: f64, t: f64) -> Vec<f64> {
     b::point_at(ax, ay, bx, by, bulge, t)
 }
-
-#[wasm_bindgen]
-pub fn bulge_through_point(ax: f64, ay: f64, tx: f64, ty: f64, bx: f64, by: f64) -> f64 {
-    b::through_point(ax, ay, tx, ty, bx, by)
-}
-
-/// `[cx, cy, r, a0, a1]` (CCW) oder leer.
-#[wasm_bindgen]
-pub fn arc_through_points(ax: f64, ay: f64, tx: f64, ty: f64, bx: f64, by: f64) -> Vec<f64> {
-    b::arc_through_points(ax, ay, tx, ty, bx, by)
-}
-
-#[wasm_bindgen]
-pub fn arc_from_start_end_radius(ax: f64, ay: f64, bx: f64, by: f64, r: f64, nx: f64, ny: f64) -> Vec<f64> {
-    b::arc_from_start_end_radius(ax, ay, bx, by, r, nx, ny)
-}
-
-#[wasm_bindgen]
-pub fn arc_from_start_end_direction(ax: f64, ay: f64, bx: f64, by: f64, dx: f64, dy: f64) -> Vec<f64> {
-    b::arc_from_start_end_direction(ax, ay, bx, by, dx, dy)
-}

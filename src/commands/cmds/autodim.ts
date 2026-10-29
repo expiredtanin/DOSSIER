@@ -1,12 +1,11 @@
 // Aussenbemassung ([81]) — Sofort-Befehl ohne Punkt-Eingabe: erzeugt für das aktive Geschoss
 // die Massketten (Öffnungen, Vor-/Rücksprünge, Gesamtmass) je Gebäudeseite
-// (`geometry/autoDimensions.ts`). Ein erneuter Aufruf ersetzt die zuvor automatisch erzeugten
+// (Kern: `auto_dimensions.rs`, Elemente `cmd_draw.rs`). Ein erneuter Aufruf ersetzt die zuvor automatisch erzeugten
 // Ketten DIESES Geschosses (feste IDs), von Hand gezeichnete Bemassungen bleiben.
 
-import { addItems, autoExteriorDimensions, opsMutation, removeItems } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 import type { Command, CommandContext, CommandResult, CommandState } from "../types";
 
-const PREFIX = "autodim";
 
 const done = (): [CommandState, CommandResult] => [
   { phase: "idle", lastPoint: null },
@@ -23,19 +22,9 @@ export const autodimCommand: Command = {
 
   autoRun: (ctx: CommandContext): CommandResult => {
     if (ctx.level.kind !== "floor") return { draft: null, done: true };
-    const floorId = ctx.level.id;
-    const dims = autoExteriorDimensions(ctx.project, floorId, ctx.defaultCategoryCode, 100, PREFIX);
-    if (dims.length === 0) return { draft: null, done: true };
-    const own = `${PREFIX}-${floorId}-`;
-    return {
-      draft: null,
-      done: true,
-      // Frühere Ketten dieses Geschosses raus, neue hinten dran.
-      commit: opsMutation((p) => [
-        ...removeItems(p, "drawings2d", (d) => d.id.startsWith(own)),
-        ...addItems("drawings2d", dims.map((d) => d.drawing)),
-      ]),
-    };
+    // Ketten im Kern (`cmd_draw.rs`, `auto_dimensions.rs`); ohne Ketten (keine Wände) kein Commit.
+    if (!createPreview(ctx, { cmd: "autodim" }, []).ok) return { draft: null, done: true };
+    return { draft: null, done: true, commit: createMutation(ctx, { cmd: "autodim" }) };
   },
 
   onInput: (): [CommandState, CommandResult] => done(),

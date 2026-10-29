@@ -3,7 +3,15 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { sampleProject } from "../model/sampleProject";
-import { combineSolids } from "../commands/cmds/solidbool";
+import { documentFor } from "../core/document";
+
+/** Boolesche Verknüpfung zweier Körper über den Befehl im Kern (`cmd_solid.rs`); null = kein Körper. */
+function combineSolids(project: typeof sampleProject, a: ExtrudedSolid, b: ExtrudedSolid, op: string): ExtrudedSolid | null {
+  const p = { ...project, extrudedSolids: [a, b] };
+  const ops = documentFor(p).cmdOps({ cmd: "solidbool", a: a.id, b: b.id, op, stamp: "t", ctx: { level: "eg" } });
+  const add = ops.find((o) => o.kind === "add");
+  return add && add.kind === "add" ? (add.items[0] as unknown as ExtrudedSolid) : null;
+}
 import { extrudedSolidSpec } from "../plan/extrudedSolidSpec";
 import type { ExtrudedSolid } from "../model/types";
 

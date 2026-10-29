@@ -2,7 +2,7 @@
 // Kantenliste rechnet der Kern, Test in `state/selectionInfo.test.ts`).
 import { describe, expect, it } from "vitest";
 import type { Roof, Vec2 } from "../model/types";
-import { addRoofHole, removeRoofHole, roofHoleWorks, setRoofEdge } from "./roofEdges";
+import { removeRoofHole, setRoofEdge } from "./roofEdges";
 
 const rect = (x: number, y: number, w: number, h: number): Vec2[] => [
   { x, y },
@@ -45,14 +45,6 @@ describe("setRoofEdge", () => {
 });
 
 describe("Höfe", () => {
-  it("Hof hinzufügen: Ring bleibt, ungültige (ausserhalb, Pult) wirken nicht", () => {
-    const r = roof();
-    expect(roofHoleWorks(r, court)).toBe(true);
-    expect(roofHoleWorks(r, rect(10, 2, 4, 4))).toBe(false);
-    expect(roofHoleWorks(roof({ shape: "pult" }), court)).toBe(false);
-    const p = addRoofHole(r, court);
-    expect(p.holes).toEqual([court]);
-  });
 
   it("Hof entfernen nimmt seine Kantenneigungen mit; Indizes der übrigen Höfe rücken nach", () => {
     const h2 = rect(1, 1, 1, 1);

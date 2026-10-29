@@ -12,17 +12,17 @@
 //       1) „Startpunkt:"        → Punkt
 //       2) „Durchgangspunkt:"   → Punkt (nur Vorschau-Linie, noch kein Bogen)
 //       3) „Endpunkt:"          → Punkt → commit (Kreis durch alle drei Punkte,
-//          s. `geometry/bulge.ts` `arcThroughPoints`)
+//          s. `kernel2d::arc_through_points`, Kern `cmd_draw.rs`)
 //   • Start-Ende-Radius: Start + Ende + Radius (getippt ODER als Punkt — Abstand
 //     von der Sehnen-Mitte, wie bei `fillet.ts`s Radius-Schritt). Der Bogen
 //     wölbt sich zur Seite, auf der der Cursor/Radius-Punkt steht (immer der
-//     kleinere der beiden möglichen Bögen, s. `arcFromStartEndRadius`).
+//     kleinere der beiden möglichen Bögen, s. `kernel2d::arc_from_start_end_radius`).
 //       1) „Startpunkt:"  → Punkt
 //       2) „Endpunkt:"    → Punkt
 //       3) „Radius:"      → Punkt ODER Zahl → commit
 //   • Start-Ende-Richtung: Start + Ende + Tangentenrichtung bei Start (klassische
 //     dritte AutoCAD-ARC-Methode). Eindeutig bestimmt (kein Seiten-Wahl nötig),
-//     s. `arcFromStartEndDirection`.
+//     s. `kernel2d::arc_from_start_end_direction`.
 //       1) „Startpunkt:"        → Punkt
 //       2) „Endpunkt:"          → Punkt
 //       3) „Richtung:"          → Punkt (Tangentenrichtung bei Start) → commit
@@ -31,9 +31,6 @@
 // Rendering in PlanView). In generatePlan/PlanView als glatter SVG-Bogen
 // (`drawingArc`) gerendert.
 
-import type { Drawing2D } from "../../model/types";
-import { uniqueId } from "../../tools/types";
-import { arcFromStartEndDirection, arcFromStartEndRadius, arcThroughPoints } from "../../core";
 import type {
   Command,
   CommandContext,
@@ -41,13 +38,11 @@ import type {
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview, type CreatePreview } from "../createCore";
 
 const EPS = 1e-6;
 
@@ -83,8 +78,8 @@ interface ArcCenterPhase3 extends CommandState {
   phase: "end";
   method: "center";
   center: Vec2;
-  r: number;
-  a0: number;
+  /** Startpunkt (setzt Radius und Startwinkel). */
+  start: Vec2;
   cursor: Vec2 | null;
 }
 interface ArcThreePhase1 extends CommandState {
@@ -153,48 +148,24 @@ type ArcState =
   | ArcThreePhase3;
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
-const angle = (c: Vec2, p: Vec2): number => Math.atan2(p.y - c.y, p.x - c.x);
 const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
-/** CCW-Spanne von a0 nach a1, normiert auf (0, 2π]. */
-function sweepOf(a0: number, a1: number): number {
-  const TAU = Math.PI * 2;
-  const s = ((a1 - a0) % TAU + TAU) % TAU;
-  return s < EPS ? TAU : s;
-}
-
-/** Punkte eines Bogens (CCW a0→a1) für die Vorschau. */
-function arcPts(center: Vec2, r: number, a0: number, a1: number): Vec2[] {
-  const sweep = sweepOf(a0, a1);
-  const N = Math.max(2, Math.ceil(sweep / (Math.PI / 32)));
-  const pts: Vec2[] = [];
-  for (let i = 0; i <= N; i++) {
-    const t = a0 + (sweep * i) / N;
-    pts.push({ x: center.x + r * Math.cos(t), y: center.y + r * Math.sin(t) });
-  }
-  return pts;
-}
-
-/** Punkte einer vollen Kreis-Approximation (Radius-Vorschau im „start"-Schritt). */
-function circlePts(center: Vec2, r: number): Vec2[] {
-  const N = 48;
-  const pts: Vec2[] = [];
-  for (let i = 0; i < N; i++) {
-    const t = (i / N) * Math.PI * 2;
-    pts.push({ x: center.x + r * Math.cos(t), y: center.y + r * Math.sin(t) });
-  }
-  return pts;
-}
+/**
+ * Bogen im Kern (`cmd_draw.rs`) je Methode aus den Punkten: Mittelpunkt (Mitte, Start, Ende), 3-Punkt,
+ * Start-Ende-Radius (Radius = Abstand des dritten Punkts von der Sehnenmitte oder getippt),
+ * Start-Ende-Richtung; `ok` = bestimmt, `info = [cx, cy, r, Spanne°]`. `full`: voller Kreis um den
+ * Mittelpunkt durch den Cursor (Radius-Vorschau im „start"-Schritt).
+ */
+const arcAt = (ctx: CommandContext, req: Record<string, unknown>, pts: Vec2[]): CreatePreview =>
+  createPreview(ctx, { cmd: "arc", ...req }, pts);
 
 /** Vorschau (offener Bogen) + HUD (Radius als L, Spanne als W — L/W-Kästchen). */
-function arcDraft(center: Vec2, r: number, a0: number, a1: number, at: Vec2 | null): ToolDraft {
+function arcDraft(pv: CreatePreview, at: Vec2 | null): ToolDraft {
+  const [cx, cy, r, deg] = pv.info;
+  const center = { x: cx, y: cy };
   if (r < EPS) return { preview: [], vertices: [center] };
-  const preview: DraftShape[] = [{ kind: "poly", pts: arcPts(center, r, a0, a1), closed: false }];
-  const draft: ToolDraft = { preview, vertices: [center] };
-  if (at) {
-    const deg = (sweepOf(a0, a1) * 180) / Math.PI;
-    draft.hud = { at, length: r, angleDeg: deg };
-  }
+  const draft: ToolDraft = { preview: pv.shapes, vertices: [center] };
+  if (at) draft.hud = { at, length: r, angleDeg: deg };
   return draft;
 }
 
@@ -203,17 +174,8 @@ function lineDraft(a: Vec2, b: Vec2): ToolDraft {
   return { preview: [{ kind: "line", a, b }], vertices: [a] };
 }
 
-function appendArc(center: Vec2, r: number, a0: number, a1: number, ctx: CommandContext): CoreOp[] {
-  if (r < EPS) return [];
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "arc", center, r, a0, a1 },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): Bogen aus der Anfrage (entartet r < EPS → nichts). */
+const appendArc = (ctx: CommandContext, req: Record<string, unknown>) => createMutation(ctx, { cmd: "arc", ...req });
 
 const idle = (method: ArcMethod): [CommandState, CommandResult] => [
   (method === "center" ? { phase: "center", method } : { phase: "p1", method }) as ArcState,
@@ -265,12 +227,9 @@ export const arcCommand: Command = {
     // zuletzt bekannten Cursor (wie beim Tab-Feld-Controller sonst auch).
     if (input.kind === "number" && s.method === "ser" && s.phase === "radius") {
       const near = s.cursor ?? { x: s.b.x, y: s.b.y };
-      const arc = arcFromStartEndRadius(s.a, s.b, input.value, near);
-      if (!arc) return [s, { draft: null }];
-      return [
-        idle("ser")[0],
-        { draft: null, done: true, commit: opsMutation(() => appendArc(arc.center, arc.r, arc.a0, arc.a1, ctx)) },
-      ];
+      const req = { method: "ser", pts: [s.a, s.b, near], r: input.value };
+      if (!arcAt(ctx, req, [s.a, s.b, near]).ok) return [s, { draft: null }];
+      return [idle("ser")[0], { draft: null, done: true, commit: appendArc(ctx, req) }];
     }
     if (input.kind !== "point") return [s, { draft: null }];
     const pt = input.point;
@@ -281,18 +240,15 @@ export const arcCommand: Command = {
         return [ns, { draft: { preview: [], vertices: [pt] } }];
       }
       if (s.phase === "start") {
-        const r = dist(s.center, pt);
-        if (r < EPS) return [s, { draft: null }];
-        const a0 = angle(s.center, pt);
-        const ns: ArcCenterPhase3 = { phase: "end", method: "center", center: s.center, r, a0, cursor: pt, lastPoint: pt };
-        return [ns, { draft: arcDraft(s.center, r, a0, a0, pt) }];
+        const pv = arcAt(ctx, { method: "center" }, [s.center, pt, pt]);
+        if (pv.info[2] < EPS) return [s, { draft: null }];
+        const ns: ArcCenterPhase3 = { phase: "end", method: "center", center: s.center, start: pt, cursor: pt, lastPoint: pt };
+        return [ns, { draft: arcDraft(pv, pt) }];
       }
       // Endpunkt: Endwinkel setzen, Bogen committen.
-      const a1 = angle(s.center, pt);
-      const { center, r, a0 } = s;
       return [
         idle("center")[0],
-        { draft: null, done: true, commit: opsMutation(() => appendArc(center, r, a0, a1, ctx)) },
+        { draft: null, done: true, commit: appendArc(ctx, { method: "center", pts: [s.center, s.start, pt] }) },
       ];
     }
 
@@ -308,12 +264,9 @@ export const arcCommand: Command = {
         return [ns, { draft: lineDraft(s.a, pt) }];
       }
       // phase "p3": Endpunkt → Kreis durch alle drei Punkte, committen.
-      const arc = arcThroughPoints(s.a, s.through, pt);
-      if (!arc) return [s, { draft: lineDraft(s.a, pt) }]; // kollinear — Punkt ignorieren, weiter warten
-      return [
-        idle("three")[0],
-        { draft: null, done: true, commit: opsMutation(() => appendArc(arc.center, arc.r, arc.a0, arc.a1, ctx)) },
-      ];
+      const req = { method: "three", pts: [s.a, s.through, pt] };
+      if (!arcAt(ctx, req, [s.a, s.through, pt]).ok) return [s, { draft: lineDraft(s.a, pt) }]; // kollinear — Punkt ignorieren, weiter warten
+      return [idle("three")[0], { draft: null, done: true, commit: appendArc(ctx, req) }];
     }
 
     // Methode „ser" (Start-Ende-Radius).
@@ -328,12 +281,9 @@ export const arcCommand: Command = {
         return [ns, { draft: lineDraft(s.a, pt) }];
       }
       // phase "radius": Radius-Punkt → committen (Seite = dieser Punkt).
-      const arc = arcFromStartEndRadius(s.a, s.b, dist(mid(s.a, s.b), pt), pt);
-      if (!arc) return [s, { draft: lineDraft(s.a, s.b) }]; // Radius zu klein — weiter warten
-      return [
-        idle("ser")[0],
-        { draft: null, done: true, commit: opsMutation(() => appendArc(arc.center, arc.r, arc.a0, arc.a1, ctx)) },
-      ];
+      const req = { method: "ser", pts: [s.a, s.b, pt] };
+      if (!arcAt(ctx, req, [s.a, s.b, pt]).ok) return [s, { draft: lineDraft(s.a, s.b) }]; // Radius zu klein — weiter warten
+      return [idle("ser")[0], { draft: null, done: true, commit: appendArc(ctx, req) }];
     }
 
     // Methode „sed" (Start-Ende-Richtung).
@@ -347,35 +297,31 @@ export const arcCommand: Command = {
       return [ns, { draft: lineDraft(s.a, pt) }];
     }
     // phase "direction": Richtungspunkt → committen.
-    const sedArc = arcFromStartEndDirection(s.a, s.b, pt);
-    if (!sedArc) return [s, { draft: lineDraft(s.a, s.b) }]; // entartete Richtung — weiter warten
-    return [
-      idle("sed")[0],
-      { draft: null, done: true, commit: opsMutation(() => appendArc(sedArc.center, sedArc.r, sedArc.a0, sedArc.a1, ctx)) },
-    ];
+    const req = { method: "sed", pts: [s.a, s.b, pt] };
+    if (!arcAt(ctx, req, [s.a, s.b, pt]).ok) return [s, { draft: lineDraft(s.a, s.b) }]; // entartete Richtung — weiter warten
+    return [idle("sed")[0], { draft: null, done: true, commit: appendArc(ctx, req) }];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as ArcState;
     if (s.method === "center") {
       if (s.phase === "start") {
-        const r = dist(s.center, point);
+        const pv = arcAt(ctx, { full: true }, [s.center, point]);
         const ns: ArcCenterPhase2 = { ...s, cursor: point };
         return [
           ns,
           {
             draft: {
-              preview: [{ kind: "poly", pts: circlePts(s.center, r), closed: true }],
+              preview: pv.shapes,
               vertices: [s.center],
-              hud: { at: point, text: `R: ${r.toFixed(3)}m` },
+              hud: { at: point, text: `R: ${pv.info[2].toFixed(3)}m` },
             },
           },
         ];
       }
       if (s.phase === "end") {
-        const a1 = angle(s.center, point);
         const ns: ArcCenterPhase3 = { ...s, cursor: point };
-        return [ns, { draft: arcDraft(s.center, s.r, s.a0, a1, point) }];
+        return [ns, { draft: arcDraft(arcAt(ctx, { method: "center" }, [s.center, s.start, point]), point) }];
       }
       return [s, { draft: null }];
     }
@@ -387,18 +333,18 @@ export const arcCommand: Command = {
     }
     if (s.phase === "p3") {
       const ns: ArcThreePhase3 = { ...s, cursor: point };
-      const arc = arcThroughPoints(s.a, s.through, point);
-      return [ns, { draft: arc ? arcDraft(arc.center, arc.r, arc.a0, arc.a1, point) : lineDraft(s.a, point) }];
+      const pv = arcAt(ctx, { method: "three" }, [s.a, s.through, point]);
+      return [ns, { draft: pv.ok ? arcDraft(pv, point) : lineDraft(s.a, point) }];
     }
     if (s.phase === "radius") {
       const ns: ArcSerPhase3 = { ...s, cursor: point };
-      const arc = arcFromStartEndRadius(s.a, s.b, dist(mid(s.a, s.b), point), point);
-      return [ns, { draft: arc ? arcDraft(arc.center, arc.r, arc.a0, arc.a1, point) : lineDraft(s.a, s.b) }];
+      const pv = arcAt(ctx, { method: "ser" }, [s.a, s.b, point]);
+      return [ns, { draft: pv.ok ? arcDraft(pv, point) : lineDraft(s.a, s.b) }];
     }
     if (s.phase === "direction") {
       const ns: ArcSedPhase3 = { ...s, cursor: point };
-      const arc = arcFromStartEndDirection(s.a, s.b, point);
-      return [ns, { draft: arc ? arcDraft(arc.center, arc.r, arc.a0, arc.a1, point) : lineDraft(s.a, s.b) }];
+      const pv = arcAt(ctx, { method: "sed" }, [s.a, s.b, point]);
+      return [ns, { draft: pv.ok ? arcDraft(pv, point) : lineDraft(s.a, s.b) }];
     }
     return [s, { draft: null }];
   },

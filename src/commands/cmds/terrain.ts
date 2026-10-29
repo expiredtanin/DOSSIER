@@ -11,33 +11,14 @@
 //
 // Bezeichner englisch, sichtbarer Text via t() (Namespace `cmd.terrain.*`).
 
-import { generateTerrainFromContours } from "../../model/terrain";
-import type { ContextObject } from "../../model/types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
-import type {
-  Command,
-  CommandResult,
-  CommandState,
-  Project,
-} from "../types";
+import { createMutation } from "../createCore";
+import type { Command, CommandContext, CommandResult, CommandState } from "../types";
 
-/** Ops: hängt ein aus dem ersten ContourSet abgeleitetes TIN an `context` an. */
-function terrainOps(p: Project): CoreOp[] {
-  const context: ContextObject[] = p.context ?? [];
-  const set = context.find((o) => o.type === "contourSet");
-  if (!set || set.type !== "contourSet") return [];
-  const terrain = generateTerrainFromContours(set.contours);
-  if (terrain.indices.length === 0) return []; // kein sinnvolles TIN
-  return addItems("context", [terrain]);
-}
-
-/** Ergebnis, das den Befehl sofort beendet und das TIN committet. */
-const COMMIT_DONE: CommandResult = {
-  draft: null,
-  done: true,
-  commit: opsMutation(terrainOps),
-};
+/**
+ * Ergebnis, das den Befehl sofort beendet und das TIN committet (Kern, `cmd_solid.rs`: erstes
+ * ContourSet aus `context` → Delaunay-TIN; ohne sinnvolles TIN nichts).
+ */
+const commitDone = (ctx: CommandContext): CommandResult => ({ draft: null, done: true, commit: createMutation(ctx, { cmd: "terrain" }) });
 
 const IDLE: CommandState = { phase: "idle", lastPoint: null };
 
@@ -51,10 +32,10 @@ export const terrainCommand: Command = {
   init: () => ({ ...IDLE }),
 
   // Jeglicher Input beendet den Befehl mit dem Commit (es gibt keine Schritte).
-  onInput: (): [CommandState, CommandResult] => [{ ...IDLE }, COMMIT_DONE],
+  onInput: (_s, _i, ctx): [CommandState, CommandResult] => [{ ...IDLE }, commitDone(ctx)],
   onMove: (state): [CommandState, CommandResult] => [state, { draft: null }],
   // Enter/Space/Rechtsklick: Gelände erzeugen + beenden.
-  onConfirm: (): [CommandState, CommandResult] => [{ ...IDLE }, COMMIT_DONE],
+  onConfirm: (_s, ctx): [CommandState, CommandResult] => [{ ...IDLE }, commitDone(ctx)],
   onCancel: (): [CommandState, CommandResult] => [
     { ...IDLE },
     { draft: null, done: true },

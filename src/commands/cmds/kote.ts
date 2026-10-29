@@ -5,21 +5,17 @@
 //      commit. „Art" (Option, zyklisch: OK fertig/UK fertig/OK roh/UK roh)
 //      wechselt VOR dem Tippen die Dreieck-Variante (Default OK fertig).
 
-import type { Drawing2D } from "../../model/types";
-import { uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 
 type KoteKind = "okFertig" | "ukFertig" | "okRoh" | "ukRoh";
 const KIND_ORDER: KoteKind[] = ["okFertig", "ukFertig", "okRoh", "ukRoh"];
@@ -30,19 +26,6 @@ const KIND_LABEL: Record<KoteKind, TranslationKey> = {
   okRoh: "cmd.kote.kind.okRoh",
   ukRoh: "cmd.kote.kind.ukRoh",
 };
-
-const TRI_SIZE = 0.15; // Modell-Meter, Vorschau-Grösse (Rendering: KOTE_… in plan/drawings.rs)
-const HALF_W = TRI_SIZE * 0.6;
-
-/** Dreieck-Punkte für die Vorschau: `at` = Spitze; OK zeigt nach unten, UK nach oben. */
-function triPts(at: Vec2, kind: KoteKind): Vec2[] {
-  const up = kind === "okFertig" || kind === "okRoh" ? 1 : -1; // Basis liegt in +up-Richtung von `at`
-  return [
-    at,
-    { x: at.x - HALF_W, y: at.y + up * TRI_SIZE },
-    { x: at.x + HALF_W, y: at.y + up * TRI_SIZE },
-  ];
-}
 
 interface KotePoint extends CommandState {
   phase: "point";
@@ -58,21 +41,14 @@ function kindOption(kind: KoteKind): CmdOption {
   return { id: "kind", labelKey: KIND_LABEL[kind], value: kind };
 }
 
-function valueDraft(at: Vec2, kind: KoteKind): ToolDraft {
-  const preview: DraftShape[] = [{ kind: "poly", pts: triPts(at, kind), closed: true }];
-  return { preview, vertices: [at] };
+/** Vorschau (Kern, `cmd_draw.rs`): Kote-Dreieck (Spitze am Punkt, Basis oben für OK, unten für UK). */
+function valueDraft(ctx: CommandContext, at: Vec2, kind: KoteKind): ToolDraft {
+  return { preview: createPreview(ctx, { cmd: "kote", kind }, [at]).shapes, vertices: [at] };
 }
 
-function appendKote(at: Vec2, value: number, kind: KoteKind, ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "kote", at, value, kind, rotation: 0 },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): Höhenkote am Punkt mit getipptem Wert. */
+const appendKote = (at: Vec2, value: number, kind: KoteKind, ctx: CommandContext) =>
+  createMutation(ctx, { cmd: "kote", at, value, kind });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "point", lastPoint: null },
@@ -92,17 +68,17 @@ export const koteCommand: Command = {
     if (s.phase === "point") {
       if (input.kind !== "point") return [s, { draft: null }];
       const ns: KoteValue = { phase: "value", at: input.point, kind: "okFertig", lastPoint: input.point };
-      return [ns, { draft: valueDraft(input.point, "okFertig") }];
+      return [ns, { draft: valueDraft(ctx, input.point, "okFertig") }];
     }
     if (input.kind === "option" && input.id === "kind") {
       const ns: KoteValue = { ...s, kind: nextKind(s.kind) };
-      return [ns, { draft: valueDraft(s.at, ns.kind) }];
+      return [ns, { draft: valueDraft(ctx, s.at, ns.kind) }];
     }
-    if (input.kind !== "number") return [s, { draft: valueDraft(s.at, s.kind) }];
+    if (input.kind !== "number") return [s, { draft: valueDraft(ctx, s.at, s.kind) }];
     const { at, kind } = s;
     return [
       { phase: "point", lastPoint: null },
-      { draft: null, done: true, commit: opsMutation(() => appendKote(at, input.value, kind, ctx)) },
+      { draft: null, done: true, commit: appendKote(at, input.value, kind, ctx) },
     ];
   },
 

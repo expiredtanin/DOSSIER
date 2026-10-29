@@ -719,13 +719,44 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (Minimum, im Rauschen; die Kosten liegen beim Klonen der JSON-Elemente im Kern statt beim JSON-Lesen).
     Abweichung (gewollt): Griff-Vorschau „Element verschieben“ zeigt bei Formen ohne Primitive die einfachen
     Ersatz-Formen wie die Transformations-Vorschau. Nicht in der Tauri-App geprüft.
-    **Offen (S3, Befehle):** Zeichenbefehle (Wand, Decke, Raum, Treppe, Öffnung, Dach, Stütze, Extrusion, alle
+    **Offen (S3, Befehle):** ~~Zeichenbefehle (Wand, Decke, Raum, Treppe, Öffnung, Dach, Stütze, Extrusion, alle
     2D-Formen, Bemassung, autodim, sectionline, solid/solidbool/voidbox/terrain, ceilingOpening) und die
     Werkzeug-Commits in `tools/tools.ts` bauen ihre Elemente noch in TS (meist ein Objekt-Literal aus den
-    Klickpunkten); Einfügen (`pasteElementClipboard`), Gruppen-Zuordnung (`activeGroupOps`); Split/Segment
+    Klickpunkten)~~ (erledigt 29.10., s. unten); Einfügen (`pasteElementClipboard`), ~~Gruppen-Zuordnung
+    (`activeGroupOps`)~~; Split/Segment
     löschen (`editors/splitJoin.ts`, App) — dort ersetzt `cutSegment` per `replace` mit NEUER id (hängt an statt
     zu ersetzen; beim Port prüfen); Fang-Kandidaten aus dem Modell (`tools/snapping.ts`: `baseSegments`,
     Kreise, Raum-Anker; Nahmodus ab 2000 Zeichnungen) → `snap.rs`.
+    **Zeichenbefehle im Kern (29.10.):** alle Erzeuge-Befehle bauen ihre Elemente im Kern (`cmd_create.rs`:
+    Wand, Decke, Raum, Treppe, Öffnung/Fenster/Tür, Dach, Stütze, Extrusion; `cmd_draw.rs`: Linie, xline, ray,
+    Polylinie, Rechteck, Kreis, Bogen, Ellipse, Polygon, Spline, Bézier, Revisionswolke, Wipeout, Multilinie,
+    Texte, Hinweis, Kote, Detailverweis, Massstab, Punkt, Block, Bemassung, autodim; `cmd_solid.rs`: solid,
+    solidbool, voidbox, terrain, Deckenöffnung, Dachhof, Schnittlinie/Ansichtslinie): Vorgaben aus Typen/Stilen,
+    abgeleitete Felder, ids und Gruppen-Zuordnung (`group` im Request, ersetzt `activeGroupOps`). TS hält nur
+    die Zustandsautomaten (`commands/createCore.ts`: `createMutation`, `createPreview` mit zwischengespeichertem
+    Request → `doc_create_preview_again` ohne JSON je Mausschritt, `createQuery` für Wand-/Profil-/Körper-Wahl).
+    Vorschauen mit Rechnung (Wand, Treppe, Öffnung, Raum innen, Stütze, Kreis/Bogen/Ellipse/Polygon, Multilinie,
+    Bemassung, autodim, Körper, Schnittlinie) aus dem Kern; reine Echo-Vorschauen (Gummiband, Linie, Punktlisten)
+    und HUD-Texte/Feld-Helfer bleiben TS. `tools/tools.ts`: alte Wand/Decke/Linie/Polylinie/Rechteck-Werkzeuge
+    entfernt. Gelöscht (TS): `geometry/ceiling.ts`, `opening.ts`, `autoDimensions.ts`, `revisionCloud.ts`,
+    Fassaden `arcThroughPoints`/`arcFromStartEnd*`/`bulgeThroughPoint`, `polylineEdges`/`pointSegmentDistance`/
+    `signedArea`/`isCCW`/`offsetSegment`/`tangentCircleCenters`/`filletCorner`, `stairGeometry`/`stairCut`/
+    `defaultStepCount`, `ellipsePts`, `roofHoleWorks`/`addRoofHole`, `roomFromPointInside(Faces)`,
+    `activeGroupOps`; `extrudedSolidSpec` und `generateTerrainFromContours` sind Fassaden über den Kern.
+    Gleichheit alt (TS) ↔ Kern mit zeitweiligen Zufallstests (Ops gleich bis auf ids, Vorschauen bitgleich mit
+    −0 ≡ 0, danach gelöscht): Wand 1000 Folgen/39677 Vorschauen/2136 Commits, Decke 1941, Raum 937, Treppe 11287,
+    Öffnung 1531/Fenster 738/Tür 1502, Dach 9224, Stütze 15833, Extrusion 438; Linie 9643, xline 5430, ray 5387,
+    Polylinie 67647 Vorschauen/3699 Commits, Rechteck 15293, Kreis 16408, Bogen 9751, Ellipse 10530, Polygon
+    10846, Spline 3561, Bézier 829, Wolke 3519, Wipeout 1280, Multilinie 6449, Text 7258, Textbox 5055, Textpfad
+    1096, Hinweis 2019, Kote 435, Detail 7329, Massstab 12068, Punkt 7247, Block 3570, Bemassung 2466 (68378
+    Vorschauen), autodim 1066; solid 9348, solidbool 302, voidbox 1764, terrain 7805 (+2000 Höhenlinien-Sätze,
+    38617 Dreiecke), Deckenöffnung 1558, Dachhof 288, Schnittlinie 11162, Ansichtslinie 5538, extrudedSolidSpec
+    20000; Gruppen-Ops = altes `activeGroupOps`. Messung Wand-Vorschau je Mausschritt (vitest/WASM `--no-opt`,
+    3000 Wände, Minimum aus 7): nur Vorschau 1/4/12 Punkte 0,5/1,3/3,8 → 2,9/3,8/3,2 µs; ganzer Mausschritt
+    (Fang + Vorschau) 70,6/70,0/75,5 → 75,0/75,3/73,1 µs (Rauschen ±10 µs, Fang dominiert). Abweichungen
+    (gewollt): ids `präfix-stamp-k` (Schnittlinien-Geschoss `section-stamp-1` statt `section-<Datum>`);
+    nicht-endliche Zahlen/−0 wie im Dokument gespeichert. `bulgePolylinePoints` bleibt (DXF-Import-Test).
+    Nicht in der Tauri-App geprüft.
     **Leistung nach der Zusammenführung (29.10.)** — erledigt damit die Offen-Punkte der Griffe/Objekt-Info:
     (a) **id-Suche indiziert:** der Positions-Index des Dokuments (`PosCache`) wird ab der ersten Suche gebaut (Listen
     ≥ 32), überlebt `add` am Ende und ist über `Lookup` (`Document::lookup`) auch für die Wurzel-Abfragen da — Griffe

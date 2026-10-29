@@ -8,33 +8,18 @@
 //   1) „Erste Ecke der Aussparung:"  → Punkt
 //   2) „Gegenecke:"                  → Live-Rechteck-Vorschau; Klick committet.
 
-import { opsMutation, patchItem, pointInOutline } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 import type {
   Command,
   CommandContext,
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
 
 /** Vier Eckpunkte eines Rechtecks aus zwei Gegenecken (CCW). */
-function rectCorners(a: Vec2, b: Vec2): Vec2[] {
-  const x0 = Math.min(a.x, b.x);
-  const x1 = Math.max(a.x, b.x);
-  const y0 = Math.min(a.y, b.y);
-  const y1 = Math.max(a.y, b.y);
-  return [
-    { x: x0, y: y0 },
-    { x: x1, y: y0 },
-    { x: x1, y: y1 },
-    { x: x0, y: y1 },
-  ];
-}
-
 interface HoleIdle extends CommandState {
   phase: "start";
 }
@@ -46,9 +31,9 @@ interface HoleRect extends CommandState {
 type HoleState = HoleIdle | HoleRect;
 
 /** Vorschau: aufgezogenes Rechteck + Masse im HUD. */
-function holeDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
-  const pts = cursor ? rectCorners(a, cursor) : [a];
-  const preview: DraftShape[] = [{ kind: "poly", pts, closed: !!cursor }];
+function holeDraft(ctx: CommandContext, a: Vec2, cursor: Vec2 | null): ToolDraft {
+  // Aufgezogenes Rechteck im Kern (`cmd_create.rs`).
+  const preview: DraftShape[] = cursor ? createPreview(ctx, { cmd: "rect4" }, [a, cursor]).shapes : [{ kind: "poly", pts: [a], closed: false }];
   const draft: ToolDraft = { preview, vertices: [a] };
   if (cursor) {
     draft.hud = {
@@ -64,20 +49,11 @@ function holeDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
  * Rechteck vollständig enthält (alle 4 Ecken im Umriss). Entartete Rechtecke
  * und Rechtecke ausserhalb jeder Decke werden verworfen (Projekt unverändert).
  */
-function ceilingOpeningOps(p: Project, a: Vec2, b: Vec2, ctx: CommandContext): CoreOp[] {
-  const w = Math.abs(b.x - a.x);
-  const d = Math.abs(b.y - a.y);
-  if (w < 0.05 || d < 0.05) return [];
-  const corners = rectCorners(a, b);
-  const host = (p.ceilings ?? []).find(
-    (c) =>
-      c.floorId === ctx.level.id &&
-      c.outline.length >= 3 &&
-      corners.every((pt) => pointInOutline(pt, c.outline)),
-  );
-  if (!host) return [];
-  return patchItem(p, "ceilings", host.id, (c) => ({ ...c, openings: [...(c.openings ?? []), corners] }));
-}
+/**
+ * Commit (Kern, `cmd_solid.rs`): rechteckige Aussparung (≥ 5 cm je Seite) in die Decke des Geschosses,
+ * die alle vier Ecken enthält; keine solche Decke → nichts.
+ */
+const ceilingOpening = (a: Vec2, b: Vec2, ctx: CommandContext) => createMutation(ctx, { cmd: "ceilingOpening", a, b });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "start", lastPoint: null } as HoleIdle,
@@ -97,7 +73,7 @@ export const ceilingOpeningCommand: Command = {
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as HoleState;
     if (input.kind !== "point") {
-      return [s, { draft: s.phase === "corner" ? holeDraft(s.a, s.cursor) : null }];
+      return [s, { draft: s.phase === "corner" ? holeDraft(ctx, s.a, s.cursor) : null }];
     }
     if (s.phase !== "corner") {
       const ns: HoleRect = {
@@ -106,22 +82,22 @@ export const ceilingOpeningCommand: Command = {
         cursor: input.point,
         lastPoint: input.point,
       };
-      return [ns, { draft: holeDraft(input.point, input.point) }];
+      return [ns, { draft: holeDraft(ctx, input.point, input.point) }];
     }
     // Zweite Ecke → committen.
     const a = s.a;
     const b = input.point;
     return [
       { phase: "start", lastPoint: null } as HoleIdle,
-      { draft: null, done: true, commit: opsMutation((p) => ceilingOpeningOps(p, a, b, ctx)) },
+      { draft: null, done: true, commit: ceilingOpening(a, b, ctx) },
     ];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as HoleState;
     if (s.phase !== "corner") return [s, { draft: null }];
     const ns: HoleRect = { ...s, cursor: point };
-    return [ns, { draft: holeDraft(s.a, point) }];
+    return [ns, { draft: holeDraft(ctx, s.a, point) }];
   },
 
   onConfirm: (): [CommandState, CommandResult] => idle(),

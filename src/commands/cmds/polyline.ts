@@ -18,9 +18,7 @@
 //     sich dann zwangsläufig aus dem Vorgänger. Das erste Segment hat keine
 //     Tangenten-Referenz und bleibt gerade.
 
-import type { Drawing2D } from "../../model/types";
-import { bulgePolylinePoints, bulgeThroughPoint } from "../../core";
-import { segmentHud, uniqueId } from "../../tools/types";
+import { segmentHud } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -28,12 +26,10 @@ import type {
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -58,43 +54,11 @@ function polyNextFromFields(last: Vec2, locks: Record<string, number>, cursor: V
 }
 
 /**
- * Bulge eines Bogens, der in `a` TANGENTIAL an die Richtung `dir` anschliesst
- * und in `b` endet. Nach dem Sehnen-Tangenten-Satz ist der Winkel θ VON DER
- * SEHNE ZUR TANGENTE die halbe Zentriwinkel-Spanne (θ = Δ/2), und
- * `bulge = tan(Δ/4)` — also `tan(θ/2)`. Die Richtung der Winkelmessung ist
- * wesentlich: von der Sehne zur Tangente, passend zur Vorzeichenkonvention
- * von `bulge` (positiv = Ausbauchung LINKS von a→b). Andersherum gemessen
- * läge die Tangente am falschen Bogenende. Ohne Richtung (erstes Segment)
- * oder bei entarteter Sehne bleibt es gerade (0).
+ * Art eines Segments (Index = Segment `points[i] → points[i+1]`): gerade (`0`), Bogen tangential an den
+ * Vorgänger (`1`) oder Drei-Punkt-Bogen durch einen Durchgangspunkt. Die Bulges (`tan(Δ/4)`, tangential
+ * aus der Endrichtung des Vorgängers) rechnet der Kern (`cmd_draw.rs`) der Reihe nach.
  */
-function tangentBulge(a: Vec2, b: Vec2, dir: Vec2 | null): number {
-  if (!dir) return 0;
-  const cx = b.x - a.x, cy = b.y - a.y;
-  const len = Math.hypot(cx, cy);
-  const dl = Math.hypot(dir.x, dir.y);
-  if (len < EPS || dl < EPS) return 0;
-  const ux = cx / len, uy = cy / len;
-  const dx = dir.x / dl, dy = dir.y / dl;
-  const theta = Math.atan2(ux * dy - uy * dx, ux * dx + uy * dy);
-  return Math.tan(theta / 2);
-}
-
-/** Richtung, in der das zuletzt gelegte Segment endet (Tangente für den nächsten Bogen). */
-function lastDirection(points: Vec2[], bulges: number[]): Vec2 | null {
-  const n = points.length;
-  if (n < 2) return null;
-  const a = points[n - 2];
-  const b = points[n - 1];
-  const bulge = bulges[n - 2] ?? 0;
-  const chord = { x: b.x - a.x, y: b.y - a.y };
-  if (Math.abs(bulge) < EPS) return chord;
-  // Austritts-Tangente eines Bogens: die Sehne um den halben Zentriwinkel
-  // gedreht (Δ/2 = 2·atan(bulge)) — am ENDE mit umgekehrtem Vorzeichen wie am
-  // Anfang (der Bogen ist symmetrisch zur Sehne).
-  const ang = -2 * Math.atan(bulge);
-  const c = Math.cos(ang), si = Math.sin(ang);
-  return { x: chord.x * c - chord.y * si, y: chord.x * si + chord.y * c };
-}
+type Seg = 0 | 1 | Vec2;
 
 interface PolyIdle extends CommandState {
   phase: "start";
@@ -108,8 +72,8 @@ interface PolyIdle extends CommandState {
 interface PolyDrawing extends CommandState {
   phase: "next";
   points: Vec2[];
-  /** Bulge je Segment (Index = Segment `points[i] → points[i+1]`), 0 = gerade. */
-  bulges: number[];
+  /** Art je Segment (s. {@link Seg}). */
+  segs: Seg[];
   cursor: Vec2 | null;
   /** Soll der committete Zug als Ring (geschlossen) gelten? Default: offen. */
   closed: boolean;
@@ -124,21 +88,12 @@ interface PolyDrawing extends CommandState {
 type PolyState = PolyIdle | PolyDrawing;
 
 /**
- * Bulge des SCHLUSS-Segments (letzter Punkt → Start), wenn ein Ring ohne
- * weiteren Klick geschlossen wird (Option „close" bzw. Ring-Toggle + Enter).
- * Ein bereits gesetzter Drei-Punkt-Durchgangspunkt gilt dann für DIESES
- * Segment; sonst tangential an den Vorgänger, wie bei jedem anderen Bogen.
- * Ohne diesen Eintrag liest der Plan (`plan/drawings.rs`) dort einen fehlenden Bulge (Index
- * ausserhalb des Arrays) und zeichnet die Schlusskante immer gerade.
+ * Art des SCHLUSS-Segments (letzter Punkt → Start), wenn ein Ring ohne weiteren Klick geschlossen wird
+ * (Option „close" bzw. Ring-Toggle + Enter): ein bereits gesetzter Drei-Punkt-Durchgangspunkt gilt dann
+ * für DIESES Segment; sonst im Bogen-Modus tangential an den Vorgänger. Ohne diesen Eintrag läse der
+ * Plan dort einen fehlenden Bulge und zeichnete die Schlusskante immer gerade.
  */
-function closingBulge(s: PolyDrawing): number {
-  if (!s.arc) return 0;
-  const prev = s.points[s.points.length - 1];
-  const start = s.points[0];
-  return s.pendingThrough
-    ? bulgeThroughPoint(prev, s.pendingThrough, start)
-    : tangentBulge(prev, start, lastDirection(s.points, s.bulges));
-}
+const closingSeg = (s: PolyDrawing): Seg => (!s.arc ? 0 : (s.pendingThrough ?? 1));
 
 /** Sofort-schließen-Aktion (nur ≥3 Punkte): committet als Ring und beendet. */
 const CLOSE: CmdOption = { id: "close", labelKey: "cmd.polyline.close" };
@@ -169,8 +124,9 @@ const tangentOption = (on: boolean): CmdOption => ({
  * exakte `bulge` (s. `appendPolyline`).
  */
 function polyDraft(
+  ctx: CommandContext,
   points: Vec2[],
-  bulges: number[],
+  segs: Seg[],
   cursor: Vec2 | null,
   closed = false,
   arcMode = false,
@@ -178,48 +134,26 @@ function polyDraft(
   pendingThrough: Vec2 | null = null,
 ): ToolDraft {
   const all = cursor ? [...points, cursor] : points;
+  const req = { cmd: "polyline", segs, closed, arc: arcMode, tangent, through: pendingThrough, cursor: !!cursor };
+  const draft: ToolDraft = { preview: createPreview(ctx, req, all).shapes, vertices: points };
   const last = points[points.length - 1];
-  // Vorschau-Bulge des Gummiband-Segments: Drei-Punkt (sobald der
-  // Durchgangspunkt gesetzt ist), sonst tangential — oder gerade.
-  const previewBulge =
-    !cursor || !last || !arcMode
-      ? 0
-      : pendingThrough
-        ? bulgeThroughPoint(last, pendingThrough, cursor)
-        : tangent
-          ? tangentBulge(last, cursor, lastDirection(points, bulges))
-          : 0;
-  const allBulges = cursor ? [...bulges, previewBulge] : bulges;
-  // Bogen-Segmente für die Vorschau ausrollen.
-  const pts = bulgePolylinePoints(all, allBulges, false);
-  // Ring nur ab 3 Punkten zeigen; darunter bleibt die Vorschau offen.
-  const showClosed = closed && all.length >= 3;
-  const preview: DraftShape[] = [{ kind: "poly", pts, closed: showClosed }];
-  const draft: ToolDraft = { preview, vertices: points };
   if (cursor && last && segLen(last, cursor) >= EPS) draft.hud = segmentHud(last, cursor);
   return draft;
 }
 
-/** Hängt eine 2D-Polylinie ans Projekt (immutabel). Farbe/Strich erbt die Kategorie. */
-function appendPolyline(pts: Vec2[],
-  bulges: number[],
+/**
+ * Commit (Kern): 2D-Polylinie aus Punkten und Segment-Arten; `closing` = Art des Schluss-Segments
+ * (geschlossen), `closingEnd` = sein Endpunkt, falls ein Klick nahe dem Start schloss. Farbe/Strich erbt
+ * die Kategorie.
+ */
+const appendPolyline = (
+  pts: Vec2[],
+  segs: Seg[],
+  closing: Seg | null,
   closed: boolean,
   ctx: CommandContext,
-): CoreOp[] {
-  // `bulge` nur mitschreiben, wenn wirklich ein Bogen dabei ist — ein reiner
-  // Geradenzug bleibt damit bitgleich zu vorher (additives Feld).
-  const hasArc = bulges.some((b) => Math.abs(b) > EPS);
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: hasArc
-      ? { shape: "polyline", pts, closed, bulge: bulges.slice(0, closed ? pts.length : pts.length - 1) }
-      : { shape: "polyline", pts, closed },
-  };
-  return addItems("drawings2d", [d]);
-}
+  closingEnd: Vec2 | null = null,
+) => createMutation(ctx, { cmd: "polyline", pts, segs, closing, closingEnd, closed });
 
 /** Ruhezustand; behält den zuletzt gewählten Schließ-Modus bei. */
 const idle = (closed = false, arc = false, tangent = false): [CommandState, CommandResult] => [
@@ -273,7 +207,7 @@ export const polylineCommand: Command = {
           {
             draft:
               s.phase === "next"
-                ? polyDraft(s.points, s.bulges, s.cursor, ns.closed, ns.arc, ns.tangent, null)
+                ? polyDraft(ctx, s.points, s.segs, s.cursor, ns.closed, ns.arc, ns.tangent, null)
                 : null,
           },
         ];
@@ -283,10 +217,10 @@ export const polylineCommand: Command = {
         // Wartet ein Durchgangspunkt, nimmt „Zurück" zuerst diesen zurück.
         if (s.pendingThrough) {
           const ns: PolyDrawing = { ...s, pendingThrough: null };
-          return [ns, { draft: polyDraft(s.points, s.bulges, s.cursor, s.closed, s.arc, s.tangent, null) }];
+          return [ns, { draft: polyDraft(ctx, s.points, s.segs, s.cursor, s.closed, s.arc, s.tangent, null) }];
         }
         const pts = s.points.slice(0, -1);
-        const bulges = s.bulges.slice(0, Math.max(0, pts.length - 1));
+        const segs = s.segs.slice(0, Math.max(0, pts.length - 1));
         if (pts.length === 0)
           return [
             { phase: "start", lastPoint: null, closed: s.closed, arc: s.arc, tangent: s.tangent } as PolyIdle,
@@ -295,7 +229,7 @@ export const polylineCommand: Command = {
         const ns: PolyDrawing = {
           phase: "next",
           points: pts,
-          bulges,
+          segs,
           cursor: s.cursor,
           lastPoint: pts[pts.length - 1],
           closed: s.closed,
@@ -303,20 +237,21 @@ export const polylineCommand: Command = {
           tangent: s.tangent,
           pendingThrough: null,
         };
-        return [ns, { draft: polyDraft(pts, bulges, s.cursor, s.closed, s.arc, s.tangent, null) }];
+        return [ns, { draft: polyDraft(ctx, pts, segs, s.cursor, s.closed, s.arc, s.tangent, null) }];
       }
       // Sofort schließen: committet als Ring (unabhängig vom Toggle-Zustand).
       if (input.id === "close" && s.points.length >= 3) {
         const pts = s.points;
-        const bl = [...s.bulges, closingBulge(s)];
+        const segs = s.segs;
+        const closing = closingSeg(s);
         return [
           { phase: "start", lastPoint: null, closed: s.closed, arc: s.arc, tangent: s.tangent } as PolyIdle,
-          { draft: null, done: true, commit: opsMutation(() => appendPolyline(pts, bl, true, ctx)) },
+          { draft: null, done: true, commit: appendPolyline(pts, segs, closing, true, ctx) },
         ];
       }
       return [
         s,
-        { draft: polyDraft(s.points, s.bulges, s.cursor, s.closed, s.arc, s.tangent, s.pendingThrough) },
+        { draft: polyDraft(ctx, s.points, s.segs, s.cursor, s.closed, s.arc, s.tangent, s.pendingThrough) },
       ];
     }
 
@@ -326,7 +261,7 @@ export const polylineCommand: Command = {
         {
           draft:
             s.phase === "next"
-              ? polyDraft(s.points, s.bulges, s.cursor, s.closed, s.arc, s.tangent, s.pendingThrough)
+              ? polyDraft(ctx, s.points, s.segs, s.cursor, s.closed, s.arc, s.tangent, s.pendingThrough)
               : null,
         },
       ];
@@ -336,7 +271,7 @@ export const polylineCommand: Command = {
       const ns: PolyDrawing = {
         phase: "next",
         points: [pt],
-        bulges: [],
+        segs: [],
         cursor: pt,
         lastPoint: pt,
         closed: s.closed,
@@ -344,22 +279,17 @@ export const polylineCommand: Command = {
         tangent: s.tangent,
         pendingThrough: null,
       };
-      return [ns, { draft: polyDraft([pt], [], pt, s.closed, s.arc, s.tangent, null) }];
+      return [ns, { draft: polyDraft(ctx, [pt], [], pt, s.closed, s.arc, s.tangent, null) }];
     }
     // Drei-Punkt-Bogen: der ERSTE Klick setzt nur den Durchgangspunkt; das
     // Segment entsteht erst mit dem zweiten Klick (Endpunkt).
     if (s.arc && !s.tangent && !s.pendingThrough) {
       const ns: PolyDrawing = { ...s, pendingThrough: pt, cursor: pt };
-      return [ns, { draft: polyDraft(s.points, s.bulges, pt, s.closed, s.arc, s.tangent, pt) }];
+      return [ns, { draft: polyDraft(ctx, s.points, s.segs, pt, s.closed, s.arc, s.tangent, pt) }];
     }
     // Bulge des neuen Segments: Drei-Punkt (über den gesetzten Durchgangspunkt)
     // oder tangential an den Vorgänger.
-    const prev = s.points[s.points.length - 1];
-    const newBulge = !s.arc
-      ? 0
-      : s.pendingThrough
-        ? bulgeThroughPoint(prev, s.pendingThrough, pt)
-        : tangentBulge(prev, pt, lastDirection(s.points, s.bulges));
+    const newSeg: Seg = !s.arc ? 0 : (s.pendingThrough ?? 1);
     // Klick nahe Startpunkt → schließen (committet als Ring). `newBulge` ist
     // bereits die korrekte Krümmung des Schluss-Segments (prev→pt, genau wie
     // die Vorschau in `polyDraft` sie zeigt) — MUSS mit angehängt werden,
@@ -367,18 +297,18 @@ export const polylineCommand: Command = {
     // schliesst immer gerade, obwohl die Vorschau eben noch den Bogen zeigte.
     if (s.points.length >= 3 && segLen(s.points[0], pt) < CLOSE_HIT) {
       const pts = s.points;
-      const bl = [...s.bulges, newBulge];
+      const segs = s.segs;
       return [
         { phase: "start", lastPoint: null, closed: s.closed, arc: s.arc, tangent: s.tangent } as PolyIdle,
-        { draft: null, done: true, commit: opsMutation(() => appendPolyline(pts, bl, true, ctx)) },
+        { draft: null, done: true, commit: appendPolyline(pts, segs, newSeg, true, ctx, pt) },
       ];
     }
     const points = [...s.points, pt];
-    const bulges = [...s.bulges, newBulge];
+    const segs = [...s.segs, newSeg];
     const ns: PolyDrawing = {
       phase: "next",
       points,
-      bulges,
+      segs,
       cursor: pt,
       lastPoint: pt,
       closed: s.closed,
@@ -386,16 +316,16 @@ export const polylineCommand: Command = {
       tangent: s.tangent,
       pendingThrough: null,
     };
-    return [ns, { draft: polyDraft(points, bulges, pt, s.closed, s.arc, s.tangent, null) }];
+    return [ns, { draft: polyDraft(ctx, points, segs, pt, s.closed, s.arc, s.tangent, null) }];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as PolyState;
     if (s.phase !== "next") return [s, { draft: null }];
     const ns: PolyDrawing = { ...s, cursor: point };
     return [
       ns,
-      { draft: polyDraft(s.points, s.bulges, point, s.closed, s.arc, s.tangent, s.pendingThrough) },
+      { draft: polyDraft(ctx, s.points, s.segs, point, s.closed, s.arc, s.tangent, s.pendingThrough) },
     ];
   },
 
@@ -407,10 +337,10 @@ export const polylineCommand: Command = {
     if (s.phase === "next" && s.points.length >= 2) {
       const pts = s.points;
       const close = s.closed && pts.length >= 3;
-      const bl = close ? [...s.bulges, closingBulge(s)] : s.bulges;
+      const closing = close ? closingSeg(s) : null;
       return [
         { phase: "start", lastPoint: null, closed: s.closed, arc: s.arc, tangent: s.tangent } as PolyIdle,
-        { draft: null, done: true, commit: opsMutation(() => appendPolyline(pts, bl, close, ctx)) },
+        { draft: null, done: true, commit: appendPolyline(pts, s.segs, closing, close, ctx) },
       ];
     }
     return idle(s.closed, s.arc, s.tangent);

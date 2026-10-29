@@ -23,7 +23,7 @@
 //          dasselbe Element wie Schritt 1 wird ignoriert)
 //       3) „Radius:" → Punkt (Abstand zum ERSTEN Klickpunkt aus Schritt 1)
 //          ODER getippte Zahl → commit. Die eigentliche Geometrie steckt in
-//          `geometry/kernel2d.ts::tangentCircleCenters` (Apollonius-
+//          `kernel2d::tangent_circle_centers` (Kern, `cmd_draw.rs`) (Apollonius-
 //          Spezialfall mit bekanntem Radius): pro Tangentialobjekt wird der
 //          geometrische Ort aller passenden Mittelpunkte gebildet (Gerade:
 //          zwei Parallelen im Abstand r; Kreis: äussere/innere Berührung),
@@ -35,10 +35,6 @@
 // Maus-Punkt (Abstand) als auch eine getippte nackte Zahl. Der Kreis wird in
 // generatePlan als geschlossene Polygon-Approximation gerendert.
 
-import type { Drawing2D, Drawing2DGeom } from "../../model/types";
-import { uniqueId } from "../../tools/types";
-import { arcThroughPoints } from "../../core";
-import { pointSegmentDistance, polylineEdges, tangentCircleCenters, type TangentTarget } from "../../core";
 import type {
   CmdOption,
   Command,
@@ -46,14 +42,14 @@ import type {
   CommandField,
   CommandResult,
   CommandState,
-  DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview, createQuery, xy, type CreatePreview } from "../createCore";
+
+/** Tangenten-Objekt (Gerade oder Kreis), wie der Kern es beim Picken liefert. */
+type TangentTarget = Record<string, unknown>;
 
 const EPS = 1e-6;
 
@@ -141,11 +137,8 @@ type CircleState =
   | CircleTtrRadius;
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
-const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
-// ── TTR: Hit-Testing auf bestehende Linien/Kreise ───────────────────────────
-
-const TTR_HIT_TOL = 0.3; // Modell-Meter: Pick-Toleranz für die Tangentenobjekt-Wahl
+// ── TTR: Hit-Testing auf bestehende Linien/Kreise (Kern) ─────────────────────
 
 interface TangentPick {
   target: TangentTarget;
@@ -153,75 +146,14 @@ interface TangentPick {
   drawingId: string;
 }
 
-/** Winkel `ang` (rad) liegt innerhalb des Bogenspanns [a0, a1) (CCW, mit Wraparound). */
-function inArcSpan(a0: number, a1: number, ang: number): boolean {
-  const TAU = Math.PI * 2;
-  const norm = (x: number) => ((x % TAU) + TAU) % TAU;
-  const sweep = norm(a1 - a0) || TAU;
-  return norm(ang - a0) <= sweep + 1e-6;
-}
-
-/** Gerade Kanten einer Form (line/polyline ohne Bogen-Segmente/rect) für den TTR-Hit-Test. */
-function straightEdgesOf(g: Drawing2DGeom): [Vec2, Vec2][] {
-  if (g.shape === "line") return [[g.a, g.b]];
-  if (g.shape === "rect") {
-    const pts = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-    return polylineEdges(pts, true);
-  }
-  if (g.shape === "polyline") {
-    const edges = polylineEdges(g.pts, g.closed);
-    // Bogen-Segmente (bulge) sind hier keine Geraden — von der Tangenten-Wahl
-    // ausgenommen (dieselbe Vereinfachung wie bei fillet.ts::geomToCurve).
-    return edges.filter((_, i) => Math.abs(g.bulge?.[i] ?? 0) <= EPS);
-  }
-  return [];
-}
-
-/** Nächstes tangentenfähiges Element (Gerade ODER Kreis/Bogen) zum Klickpunkt, oder null. */
-function pickTangentTarget(project: Project, levelId: string, pt: Vec2): TangentPick | null {
-  let best: TangentPick | null = null;
-  let bestD = TTR_HIT_TOL;
-  for (const d of project.drawings2d) {
-    if (d.levelId !== levelId) continue;
-    const g = d.geom;
-    if (g.shape === "circle") {
-      const dd = Math.abs(dist(pt, g.center) - g.r);
-      if (dd < bestD) {
-        bestD = dd;
-        best = { target: { kind: "circle", center: g.center, r: g.r }, near: pt, drawingId: d.id };
-      }
-    } else if (g.shape === "arc") {
-      const dd = Math.abs(dist(pt, g.center) - g.r);
-      const ang = Math.atan2(pt.y - g.center.y, pt.x - g.center.x);
-      if (dd < bestD && inArcSpan(g.a0, g.a1, ang)) {
-        bestD = dd;
-        best = { target: { kind: "circle", center: g.center, r: g.r }, near: pt, drawingId: d.id };
-      }
-    } else {
-      for (const [a, b] of straightEdgesOf(g)) {
-        const dd = pointSegmentDistance(pt, a, b);
-        if (dd < bestD) {
-          bestD = dd;
-          best = { target: { kind: "line", a, b }, near: pt, drawingId: d.id };
-        }
-      }
-    }
-  }
-  return best;
-}
-
-/** Von mehreren Mittelpunkt-Kandidaten den zu (near1, near2) nächstgelegenen wählen. */
-function nearestCandidate(cands: Vec2[], near1: Vec2, near2: Vec2): Vec2 | null {
-  let best: Vec2 | null = null;
-  let bestD = Infinity;
-  for (const c of cands) {
-    const dd = dist(c, near1) + dist(c, near2);
-    if (dd < bestD) {
-      bestD = dd;
-      best = c;
-    }
-  }
-  return best;
+/** Nächstes tangentenfähiges Element (Gerade ODER Kreis/Bogen) zum Klickpunkt (Toleranz 0.3 m), oder null. */
+function pickTangentTarget(ctx: CommandContext, pt: Vec2): TangentPick | null {
+  const r = createQuery<{ hit: { target: TangentTarget; id: string } | null }>(ctx.project, {
+    q: "pickTangent",
+    level: ctx.level.id,
+    pt: xy(pt),
+  });
+  return r.hit ? { target: r.hit.target, near: pt, drawingId: r.hit.id } : null;
 }
 
 /** Tab-Feld des Radius-Schritts (nur Methode „center"): der Radius selbst. */
@@ -242,22 +174,19 @@ function circlePointFromFields(center: Vec2, locks: Record<string, number>, curs
   return { x: center.x + r, y: center.y };
 }
 
-/** Punkte einer Kreis-Approximation (für die Vorschau). */
-function circlePts(center: Vec2, r: number): Vec2[] {
-  const N = 48;
-  const pts: Vec2[] = [];
-  for (let i = 0; i < N; i++) {
-    const t = (i / N) * Math.PI * 2;
-    pts.push({ x: center.x + r * Math.cos(t), y: center.y + r * Math.sin(t) });
-  }
-  return pts;
-}
+/**
+ * Kreis im Kern (`cmd_draw.rs`): Mittelpunkt + Radius je Methode (2-Punkt: Durchmesser, 3-Punkt:
+ * Umkreis, TTR: tangential an zwei Objekte, nächster Kandidat zu den Klickpunkten); `ok` = bestimmt.
+ */
+const circleAt = (ctx: CommandContext, req: Record<string, unknown>, pts: Vec2[]): CreatePreview =>
+  createPreview(ctx, { cmd: "circle", ...req }, pts);
 
-/** Vorschau (Kreis) + HUD (Radius). */
-function circleDraft(center: Vec2, r: number, at: Vec2 | null): ToolDraft {
+/** Vorschau (Kreis, 48-Eck) + HUD (Radius). */
+function circleDraft(pv: CreatePreview, at: Vec2 | null): ToolDraft {
+  const [cx, cy, r] = pv.info;
+  const center = { x: cx, y: cy };
   if (r < EPS) return { preview: [], vertices: [center] };
-  const preview: DraftShape[] = [{ kind: "poly", pts: circlePts(center, r), closed: true }];
-  const draft: ToolDraft = { preview, vertices: [center] };
+  const draft: ToolDraft = { preview: pv.shapes, vertices: [center] };
   if (at) draft.hud = { at, text: `R: ${r.toFixed(3)}m` };
   return draft;
 }
@@ -267,17 +196,8 @@ function lineDraft(a: Vec2, b: Vec2): ToolDraft {
   return { preview: [{ kind: "line", a, b }], vertices: [a] };
 }
 
-function appendCircle(center: Vec2, r: number, ctx: CommandContext): CoreOp[] {
-  if (r < EPS) return [];
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "circle", center, r },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): Kreis aus der Anfrage (entartet r < EPS → nichts). */
+const appendCircle = (ctx: CommandContext, req: Record<string, unknown>) => createMutation(ctx, { cmd: "circle", ...req });
 
 const idle = (method: CircleMethod): [CommandState, CommandResult] => [
   (method === "center"
@@ -331,27 +251,25 @@ export const circleCommand: Command = {
       if (s.phase !== "radius") {
         if (input.kind !== "point") return [s, { draft: null }];
         const ns: CircleCenterP2 = { phase: "radius", method: "center", center: input.point, cursor: input.point, lastPoint: input.point };
-        return [ns, { draft: circleDraft(input.point, 0, null) }];
+        return [ns, { draft: { preview: [], vertices: [input.point] } }];
       }
-      let r: number;
-      if (input.kind === "number") r = input.value;
-      else r = dist(s.center, input.point);
-      const center = s.center;
-      return [idle("center")[0], { draft: null, done: true, commit: opsMutation(() => appendCircle(center, r, ctx)) }];
+      const req =
+        input.kind === "number"
+          ? { method: "center", pts: [s.center], r: input.value }
+          : { method: "center", pts: [s.center, input.point] };
+      return [idle("center")[0], { draft: null, done: true, commit: appendCircle(ctx, req) }];
     }
 
     if (s.method === "ttr") {
       if (s.phase === "radius") {
-        let r: number;
-        if (input.kind === "number") r = input.value;
-        else r = dist(s.near1, input.point);
-        const center = r > EPS ? nearestCandidate(tangentCircleCenters(s.t1, s.t2, r), s.near1, s.near2) : null;
+        const req = { method: "ttr", t1: s.t1, t2: s.t2, near1: s.near1, near2: s.near2 };
+        const full = input.kind === "number" ? { ...req, r: input.value } : { ...req, pts: [input.point] };
         // Kein Kandidat (z. B. Radius geometrisch unpassend) — ignorieren, weiter warten.
-        if (!center) return [s, { draft: null }];
-        return [idle("ttr")[0], { draft: null, done: true, commit: opsMutation(() => appendCircle(center, r, ctx)) }];
+        if (!circleAt(ctx, full, input.kind === "number" ? [] : [input.point]).ok) return [s, { draft: null }];
+        return [idle("ttr")[0], { draft: null, done: true, commit: appendCircle(ctx, full) }];
       }
       if (input.kind !== "point") return [s, { draft: null }];
-      const pick = pickTangentTarget(ctx.project, ctx.level.id, input.point);
+      const pick = pickTangentTarget(ctx, input.point);
       if (!pick) return [s, { draft: null }]; // kein Treffer auf Linie/Kreis — ignorieren, weiter warten
       if (s.phase === "t1") {
         const ns: CircleTtrT2 = {
@@ -387,9 +305,7 @@ export const circleCommand: Command = {
         const ns: CircleTwoP2 = { phase: "p2", method: "twoPoint", a: pt, cursor: pt, lastPoint: pt };
         return [ns, { draft: { preview: [], vertices: [pt] } }];
       }
-      const center = mid(s.a, pt);
-      const r = dist(s.a, pt) / 2;
-      return [idle("twoPoint")[0], { draft: null, done: true, commit: opsMutation(() => appendCircle(center, r, ctx)) }];
+      return [idle("twoPoint")[0], { draft: null, done: true, commit: appendCircle(ctx, { method: "twoPoint", pts: [s.a, pt] }) }];
     }
 
     // threePoint
@@ -403,26 +319,22 @@ export const circleCommand: Command = {
       return [ns, { draft: lineDraft(s.a, pt) }];
     }
     // phase p3: dritter Punkt → Umkreis, committen.
-    const circ = arcThroughPoints(s.a, s.b, pt); // a0/a1 hier irrelevant, nur center+r zählen
-    if (!circ) return [s, { draft: lineDraft(s.a, pt) }]; // kollinear — ignorieren, weiter warten
-    return [
-      idle("threePoint")[0],
-      { draft: null, done: true, commit: opsMutation(() => appendCircle(circ.center, circ.r, ctx)) },
-    ];
+    const req = { method: "threePoint", pts: [s.a, s.b, pt] };
+    if (!circleAt(ctx, req, [s.a, s.b, pt]).ok) return [s, { draft: lineDraft(s.a, pt) }]; // kollinear — ignorieren, weiter warten
+    return [idle("threePoint")[0], { draft: null, done: true, commit: appendCircle(ctx, req) }];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as CircleState;
     if (s.method === "center") {
       if (s.phase !== "radius") return [s, { draft: null }];
-      const r = dist(s.center, point);
       const ns: CircleCenterP2 = { ...s, cursor: point };
-      return [ns, { draft: circleDraft(s.center, r, point) }];
+      return [ns, { draft: circleDraft(circleAt(ctx, { method: "center" }, [s.center, point]), point) }];
     }
     if (s.method === "twoPoint") {
       if (s.phase !== "p2") return [s, { draft: null }];
       const ns: CircleTwoP2 = { ...s, cursor: point };
-      return [ns, { draft: circleDraft(mid(s.a, point), dist(s.a, point) / 2, point) }];
+      return [ns, { draft: circleDraft(circleAt(ctx, { method: "twoPoint" }, [s.a, point]), point) }];
     }
     // threePoint
     if (s.phase === "p2") {
@@ -431,15 +343,14 @@ export const circleCommand: Command = {
     }
     if (s.phase === "p3") {
       const ns: CircleThreeP3 = { ...s, cursor: point };
-      const circ = arcThroughPoints(s.a, s.b, point);
-      return [ns, { draft: circ ? circleDraft(circ.center, circ.r, point) : lineDraft(s.a, point) }];
+      const pv = circleAt(ctx, { method: "threePoint" }, [s.a, s.b, point]);
+      return [ns, { draft: pv.ok ? circleDraft(pv, point) : lineDraft(s.a, point) }];
     }
     if (s.method === "ttr" && s.phase === "radius") {
-      const r = dist(s.near1, point);
       const ns: CircleTtrRadius = { ...s, cursor: point };
-      if (r < EPS) return [ns, { draft: null }];
-      const center = nearestCandidate(tangentCircleCenters(s.t1, s.t2, r), s.near1, s.near2);
-      return [ns, { draft: center ? circleDraft(center, r, point) : lineDraft(s.near1, s.near2) }];
+      const pv = circleAt(ctx, { method: "ttr", t1: s.t1, t2: s.t2, near1: s.near1, near2: s.near2 }, [point]);
+      if (pv.info[2] < EPS) return [ns, { draft: null }];
+      return [ns, { draft: pv.ok ? circleDraft(pv, point) : lineDraft(s.near1, s.near2) }];
     }
     return [s, { draft: null }];
   },

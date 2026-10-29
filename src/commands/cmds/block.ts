@@ -14,8 +14,7 @@
 // wie bei `circle.ts`s Radius-Punkt). Kein separater dritter Klick-Schritt
 // nötig — Nutzer-Wunsch „Skalierung beim Einfügen" bei minimaler UX-Änderung.
 
-import type { Drawing2D } from "../../model/types";
-import { segmentHud, uniqueId } from "../../tools/types";
+import { segmentHud } from "../../tools/types";
 import type {
   CmdOption,
   Command,
@@ -24,8 +23,7 @@ import type {
   CommandState,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation } from "../createCore";
 
 const EPS = 1e-6;
 
@@ -52,28 +50,12 @@ function readDefs(ctx: CommandContext): { ids: string[]; names: string[] } {
   return { ids: defs.map((d) => d.id), names: defs.map((d) => d.name) };
 }
 
-function appendInstance(blockDefId: string,
-  at: Vec2,
-  rotation: number,
-  scale: number,
-  ctx: CommandContext,
-): CoreOp[] {
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "block", blockDefId, at, rotation, scale },
-  };
-  return addItems("drawings2d", [d]);
-}
-
-/** Drehwinkel + Skalierungsfaktor aus DEMSELBEN Punkt: Klick auf `at` = (0, 1). */
-function rotationAndScaleFrom(at: Vec2, pt: Vec2): { rotation: number; scale: number } {
-  const d = Math.hypot(pt.x - at.x, pt.y - at.y);
-  if (d < EPS) return { rotation: 0, scale: 1 };
-  return { rotation: Math.atan2(pt.y - at.y, pt.x - at.x), scale: d };
-}
+/**
+ * Commit (Kern, `cmd_draw.rs`): Block-Instanz am Einfügepunkt; der zweite Punkt gibt Drehung (Richtung)
+ * und Massstab (Abstand) — derselbe Punkt: unskaliert, ungedreht.
+ */
+const appendInstance = (blockDefId: string, at: Vec2, pt: Vec2, ctx: CommandContext) =>
+  createMutation(ctx, { cmd: "block", def: blockDefId, at, pt });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "point", lastPoint: null, defIds: [], defNames: [] } as BlockPoint,
@@ -113,11 +95,7 @@ export const blockCommand: Command = {
     const blockDefId = s.defIds[lastDefIndex % s.defIds.length];
     const { at } = s;
     const pt = input.point;
-    const { rotation, scale } = rotationAndScaleFrom(at, pt);
-    return [
-      idle()[0],
-      { draft: null, done: true, commit: opsMutation(() => appendInstance(blockDefId, at, rotation, scale, ctx)) },
-    ];
+    return [idle()[0], { draft: null, done: true, commit: appendInstance(blockDefId, at, pt, ctx) }];
   },
 
   onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {

@@ -91,6 +91,9 @@ pub mod project_refs;
 pub mod commands;
 pub mod cmd_transform;
 pub mod cmd_edit;
+pub mod cmd_create;
+pub mod cmd_draw;
+pub mod cmd_solid;
 pub mod polyline_vertex;
 
 #[cfg(feature = "web")]

@@ -1,6 +1,6 @@
 // Dachhof — Innenhof/Lichthof im Dach als Engine-Befehl: eine Kontur wird per Klicks gezeichnet und
 // dem ERSTEN Dach des aktiven Geschosses hinzugefügt, in dem sie wirkt (ganz im Umriss, ohne
-// Überschneidung, nicht bei Pultdach — das entscheidet der Rust-Kern, s. `roofHoleWorks`).
+// Überschneidung, nicht bei Pultdach — das entscheidet der Rust-Kern, s. `cmd_solid.rs`).
 //
 // Warum Zeichnen statt „aus gewählter Kontur": die Auswahl kennt immer nur ein Objekt, mit dem
 // Dach gewählt wäre keine zweite Kontur wählbar; gezeichnet gibt es Fang auf Wände und Umriss,
@@ -11,9 +11,8 @@
 //   2) „Nächster Punkt ( Schliessen Zurück ):" → Punkt … Schliessen per Klick auf den Startpunkt,
 //      Option „Schliessen" oder Enter (≥ 3 Punkte; bei genau 2 Punkten: Rechteck aus den Ecken).
 
-import { addRoofHole, opsMutation, patchItem, pointInOutline, roofHoleWorks } from "../../core";
-import type { CoreOp } from "../../core";
-import type { Command, CommandContext, CommandResult, CommandState, CmdOption, DraftShape, Project, ToolDraft, Vec2 } from "../types";
+import type { Command, CommandContext, CommandResult, CommandState, CmdOption, DraftShape, ToolDraft, Vec2 } from "../types";
+import { createMutation } from "../createCore";
 
 const EPS = 1e-6;
 const CLOSE_HIT = 0.08; // Modell-Meter: Klick nahe Startpunkt schliesst die Kontur
@@ -21,19 +20,6 @@ const CLOSE_HIT = 0.08; // Modell-Meter: Klick nahe Startpunkt schliesst die Kon
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
 
 /** Vier Ecken eines Rechtecks aus zwei Gegenecken. */
-function rectCorners(a: Vec2, b: Vec2): Vec2[] {
-  const x0 = Math.min(a.x, b.x);
-  const x1 = Math.max(a.x, b.x);
-  const y0 = Math.min(a.y, b.y);
-  const y1 = Math.max(a.y, b.y);
-  return [
-    { x: x0, y: y0 },
-    { x: x1, y: y0 },
-    { x: x1, y: y1 },
-    { x: x0, y: y1 },
-  ];
-}
-
 interface HoleIdle extends CommandState {
   phase: "start";
 }
@@ -58,33 +44,17 @@ function holeDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
 }
 
 /** Aus den Klickpunkten die Hof-Kontur: ≥ 3 Punkte = Polygon, genau 2 = Rechteck. */
-function ringOf(points: Vec2[]): Vec2[] | null {
-  if (points.length >= 3) return points;
-  if (points.length === 2) {
-    const [a, b] = points;
-    if (Math.abs(a.x - b.x) < 0.05 || Math.abs(a.y - b.y) < 0.05) return null;
-    return rectCorners(a, b);
-  }
-  return null;
-}
-
 /**
- * Hängt den Hof an das erste Dach des aktiven Geschosses, in dem er wirkt. Ohne passendes Dach
- * (Hof ausserhalb, schneidet den Umriss, Pultdach) bleibt das Projekt unverändert.
+ * Commit (Kern, `cmd_solid.rs`): Hof-Ring (≥ 3 Punkte wie gezeichnet, 2 Punkte als Rechteck) in das Dach
+ * des Geschosses, das ihn ganz enthält und dessen Skelett ihn zulässt; sonst nichts.
  */
-function roofHoleOps(p: Project, points: Vec2[], ctx: CommandContext): CoreOp[] {
-  const ring = ringOf(points);
-  if (!ring) return [];
-  const host = (p.roofs ?? []).find((r) => r.floorId === ctx.level.id && r.outline.length >= 3 && ring.every((pt) => pointInOutline(pt, r.outline)) && roofHoleWorks(r, ring));
-  if (!host) return [];
-  return patchItem(p, "roofs", host.id, (r) => ({ ...r, ...addRoofHole(r, ring) }));
-}
+const roofHoleOps = (points: Vec2[], ctx: CommandContext) => createMutation(ctx, { cmd: "roofHole", pts: points });
 
 const idle = (): [CommandState, CommandResult] => [{ phase: "start", lastPoint: null } as HoleIdle, { draft: null, done: true }];
 
 const finish = (points: Vec2[], ctx: CommandContext): [CommandState, CommandResult] => [
   { phase: "start", lastPoint: null } as HoleIdle,
-  { draft: null, done: true, commit: opsMutation((p) => roofHoleOps(p, points, ctx)) },
+  { draft: null, done: true, commit: roofHoleOps(points, ctx) },
 ];
 
 export const roofHoleCommand: Command = {

@@ -21,8 +21,7 @@
 // Attribute-Panel wie bei jeder anderen Fläche nachträglich änderbar (kein
 // Sonderfall, nur ein sinnvoller Default).
 
-import type { Drawing2D } from "../../model/types";
-import { segmentHud, uniqueId } from "../../tools/types";
+import { segmentHud } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -32,12 +31,10 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation } from "../createCore";
 
 const EPS = 1e-6;
 const CLOSE_HIT = 0.15; // Modell-Meter: Klick nahe Startpunkt schliesst den Zug
-const MASK_COLOR = "#ffffff"; // Deckt wie Papier ab — Fläche UND Rand (unsichtbare Kontur)
 
 const segLen = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
 
@@ -60,18 +57,8 @@ function wipeoutDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendWipeout(points: Vec2[], ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "polyline", pts: points, closed: true },
-    background: MASK_COLOR,
-    color: MASK_COLOR,
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): geschlossene Polylinie, Fläche und Rand weiss (deckt wie Papier ab). */
+const appendWipeout = (points: Vec2[], ctx: CommandContext) => createMutation(ctx, { cmd: "wipeout", pts: points });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "start", lastPoint: null } as WipeoutIdle,
@@ -101,7 +88,7 @@ export const wipeoutCommand: Command = {
     // Klick nahe Startpunkt (≥3 Punkte) → schliessen (committet).
     if (s.points.length >= 3 && segLen(s.points[0], pt) < CLOSE_HIT) {
       const pts = s.points;
-      return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendWipeout(pts, ctx)) }];
+      return [idle()[0], { draft: null, done: true, commit: appendWipeout(pts, ctx) }];
     }
     const points = [...s.points, pt];
     const ns: WipeoutDrawing = { phase: "next", points, cursor: pt, lastPoint: pt };
@@ -121,7 +108,7 @@ export const wipeoutCommand: Command = {
     const s = state as WipeoutState;
     if (s.phase === "next" && s.points.length >= 3) {
       const pts = s.points;
-      return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendWipeout(pts, ctx)) }];
+      return [idle()[0], { draft: null, done: true, commit: appendWipeout(pts, ctx) }];
     }
     return idle();
   },

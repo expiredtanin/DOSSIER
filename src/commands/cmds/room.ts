@@ -3,7 +3,7 @@
 //
 //   1) „innen" (Default) — EIN Klick IN einen von Wänden umschlossenen Bereich.
 //      Der Umriss wird über den reinen Rechenkern (geometry/roomBoundary,
-//      `roomFromPointInside`) aus den Wänden des aktiven Geschosses automatisch
+//      `room_from_point_inside`, Kern `cmd_create.rs`) aus den Wänden des aktiven Geschosses automatisch
 //      als lichte Innenkontur erkannt. Findet der Klick keine geschlossene Zelle,
 //      passiert nichts (der Nutzer kann in den Manuell-Modus wechseln).
 //
@@ -17,12 +17,6 @@
 //
 // Bezeichner englisch, sichtbarer Text via t() (CONVENTIONS.md). Einheit: METER.
 
-import type { Room } from "../../model/types";
-import { wallTypeThickness } from "../../model/types";
-import { roomFromPointInside, type WallSegment } from "../../core";
-import { polygonArea, centroid } from "../../core";
-import { docFromText } from "../../text/richText";
-import { uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -34,112 +28,21 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview, xy } from "../createCore";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
 const CLOSE_HIT = 0.08; // Modell-Meter: Klick nahe Startpunkt schließt den Umriss
-/** Default-Ebene (Kategorie) für Räume: „60" Räume (Fallback: aktive). */
-const ROOM_CATEGORY = "60";
-/** Default-Raumfarbe (falls Kategorie nicht auflösbar). */
-const ROOM_COLOR = "#5a7a9a";
-
 const segLen = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
 const segAngleDeg = (a: Vec2, b: Vec2): number =>
   (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
 
-/** Existiert die Raum-Kategorie („45")? Sonst Fallback auf die aktive Kategorie. */
-function roomCategory(ctx: CommandContext): string {
-  const flat: { code: string }[] = [];
-  const walk = (list: { code: string; children?: unknown[] }[]) => {
-    for (const c of list) {
-      flat.push({ code: c.code });
-      if (c.children) walk(c.children as { code: string; children?: unknown[] }[]);
-    }
-  };
-  walk(ctx.project.layers as { code: string; children?: unknown[] }[]);
-  return flat.some((c) => c.code === ROOM_CATEGORY)
-    ? ROOM_CATEGORY
-    : ctx.defaultCategoryCode;
-}
-
-/** Farbe der Raum-Kategorie (Ebene) — sonst Default. */
-function roomColor(ctx: CommandContext, code: string): string {
-  const flat: { code: string; color?: string; children?: unknown[] }[] = [];
-  const walk = (list: { code: string; color?: string; children?: unknown[] }[]) => {
-    for (const c of list) {
-      flat.push(c);
-      if (c.children)
-        walk(
-          c.children as {
-            code: string;
-            color?: string;
-            children?: unknown[];
-          }[],
-        );
-    }
-  };
-  walk(
-    ctx.project.layers as {
-      code: string;
-      color?: string;
-      children?: unknown[];
-    }[],
-  );
-  return flat.find((c) => c.code === code)?.color ?? ROOM_COLOR;
-}
-
 /**
- * Wände des aktiven Geschosses in die vom Rechenkern erwartete Form bringen:
- * Mittellinie (start→end) + Gesamtdicke des Wandtyps. Grafik-2D-Geometrie und
- * andere Geschosse bleiben außen vor.
+ * Commit eines Raums (Kern, `cmd_create.rs`): Umriss `pts` (manuell) bzw. die lichte Zelle um `at`
+ * (innen, aus den Wänden des Geschosses); SIA HNF, Name „Raum N“, Ebene „60“ samt Farbe, Stempel-Anker
+ * im Schwerpunkt und zentrierter Stempel-Text. Entartete Umrisse ergeben nichts.
  */
-function wallsOfFloor(ctx: CommandContext): WallSegment[] {
-  const { project, level } = ctx;
-  const out: WallSegment[] = [];
-  for (const w of project.walls) {
-    if (w.floorId !== level.id) continue;
-    const wt = project.wallTypes.find((t) => t.id === w.wallTypeId);
-    const thickness = wt ? wallTypeThickness(wt) : 0.2;
-    out.push({ a: w.start, b: w.end, thickness });
-  }
-  return out;
-}
-
-/** Baut einen Raum aus einem fertigen Umriss (immutabel; keine abgeleiteten Felder). */
-function buildRoom(ctx: CommandContext, boundary: Vec2[]): Room {
-  const code = roomCategory(ctx);
-  const name = defaultRoomName(ctx);
-  return {
-    id: uniqueId("RM"),
-    type: "room",
-    floorId: ctx.level.id,
-    categoryCode: code,
-    siaCategory: "HNF",
-    name,
-    boundary,
-    color: roomColor(ctx, code),
-    // Stempel-Anker EINMALIG auf den Zentroid setzen (danach frei verschiebbar,
-    // bleibt beim Ändern der Kontur an seiner Stelle).
-    stampAnchor: centroid(boundary),
-    // Frei editierbarer Stempel-Text: ein zentrierter Absatz mit dem Raumnamen.
-    stampDoc: { ...docFromText(name), paragraphs: docFromText(name).paragraphs.map((p) => ({ ...p, align: "center" as const })) },
-  };
-}
-
-/** Fortlaufender Default-Name „Raum N" (N = Anzahl vorhandener Räume + 1). */
-function defaultRoomName(ctx: CommandContext): string {
-  const n = (ctx.project.rooms ?? []).length + 1;
-  return `Raum ${n}`;
-}
-
-/** Hängt einen Raum ans Projekt (immutabel); entartete Umrisse werden verworfen. */
-function appendRoom(boundary: Vec2[], ctx: CommandContext): CoreOp[] {
-  if (boundary.length < 3 || polygonArea(boundary) < 1e-4) return [];
-  const room = buildRoom(ctx, boundary);
-  return addItems("rooms", [room]);
-}
+const appendRoom = (boundary: Vec2[], ctx: CommandContext) => createMutation(ctx, { cmd: "room", pts: boundary.map(xy) });
 
 // ── Zustand ──────────────────────────────────────────────────────────────────
 
@@ -254,7 +157,7 @@ export const roomCommand: Command = {
         const pts = s.points;
         return [
           { phase: "start", lastPoint: null, mode: s.mode } as RoomIdle,
-          { draft: null, done: true, commit: opsMutation(() => appendRoom(pts, ctx)) },
+          { draft: null, done: true, commit: appendRoom(pts, ctx) },
         ];
       }
       return [s, { draft: s.phase === "draw" ? manualDraft(s.points, s.cursor) : null }];
@@ -271,11 +174,10 @@ export const roomCommand: Command = {
 
     // ── Modus „innen": ein Klick → Umriss automatisch erkennen + committen ──
     if (s.mode === "inside" && s.phase !== "draw") {
-      const boundary = roomFromPointInside(pt, wallsOfFloor(ctx));
-      if (boundary && boundary.length >= 3) {
+      if (createPreview(ctx, { cmd: "roomInside" }, [pt]).ok) {
         return [
           { phase: "start", lastPoint: null, mode: "inside" } as RoomIdle,
-          { draft: null, done: true, commit: opsMutation(() => appendRoom(boundary, ctx)) },
+          { draft: null, done: true, commit: createMutation(ctx, { cmd: "room", at: xy(pt) }) },
         ];
       }
       // Kein umschlossener Bereich getroffen → im Werkzeug bleiben (kein Commit).
@@ -298,7 +200,7 @@ export const roomCommand: Command = {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null, mode: s.mode } as RoomIdle,
-        { draft: null, done: true, commit: opsMutation(() => appendRoom(pts, ctx)) },
+        { draft: null, done: true, commit: appendRoom(pts, ctx) },
       ];
     }
     const last = s.points[s.points.length - 1];
@@ -329,7 +231,7 @@ export const roomCommand: Command = {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null, mode: s.mode } as RoomIdle,
-        { draft: null, done: true, commit: opsMutation(() => appendRoom(pts, ctx)) },
+        { draft: null, done: true, commit: appendRoom(pts, ctx) },
       ];
     }
     return idle(s.mode);

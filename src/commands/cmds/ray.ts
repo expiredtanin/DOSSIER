@@ -5,8 +5,7 @@
 //   1) „Anker:"           → Punkt
 //   2) „Richtungspunkt:" → Punkt (Tab-Felder Länge/Winkel wie bei Line) → commit
 
-import type { Drawing2D } from "../../model/types";
-import { segmentHud, uniqueId } from "../../tools/types";
+import { segmentHud } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -17,12 +16,10 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
-const RAY_PREVIEW_EXT_M = 30; // nur für die Live-Vorschau — echte Länge kommt aus generatePlan
 const segLen = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
 const segAngleDeg = (a: Vec2, b: Vec2): number =>
   (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
@@ -51,33 +48,16 @@ interface RayDrawing extends CommandState {
 type RayState = RayIdle | RayDrawing;
 
 /** Vorschau: kurzes Segment PLUS Verlängerung NUR über den Cursor hinaus (Anker bleibt fest). */
-function rayDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
-  const preview: DraftShape[] = [];
-  if (cursor && segLen(a, cursor) >= EPS) {
-    const len = segLen(a, cursor);
-    const ux = (cursor.x - a.x) / len;
-    const uy = (cursor.y - a.y) / len;
-    preview.push({
-      kind: "line",
-      a,
-      b: { x: cursor.x + ux * RAY_PREVIEW_EXT_M, y: cursor.y + uy * RAY_PREVIEW_EXT_M },
-    });
-  }
+function rayDraft(ctx: CommandContext, a: Vec2, cursor: Vec2 | null): ToolDraft {
+  // Vorschau (Kern): einseitig um 30 m verlängert — die echte Länge kommt aus der Plan-Ableitung.
+  const preview: DraftShape[] = cursor ? createPreview(ctx, { cmd: "ray" }, [a, cursor]).shapes : [];
   const draft: ToolDraft = { preview, vertices: [a] };
   if (cursor && segLen(a, cursor) >= EPS) draft.hud = segmentHud(a, cursor);
   return draft;
 }
 
-function appendRay(a: Vec2, b: Vec2, ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "ray", a, b },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern, `cmd_draw.rs`): Strahl durch a, b. */
+const appendRay = (a: Vec2, b: Vec2, ctx: CommandContext) => createMutation(ctx, { cmd: "ray", a, b });
 
 export const rayCommand: Command = {
   name: "ray",
@@ -89,11 +69,11 @@ export const rayCommand: Command = {
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as RayState;
-    if (input.kind !== "point") return [s, { draft: s.phase === "end" ? rayDraft(s.a, s.cursor) : null }];
+    if (input.kind !== "point") return [s, { draft: s.phase === "end" ? rayDraft(ctx, s.a, s.cursor) : null }];
     const pt = input.point;
     if (s.phase !== "end") {
       const next: RayDrawing = { phase: "end", a: pt, cursor: pt, lastPoint: pt };
-      return [next, { draft: rayDraft(pt, pt) }];
+      return [next, { draft: rayDraft(ctx, pt, pt) }];
     }
     if (segLen(s.a, pt) < EPS) {
       return [{ phase: "start", lastPoint: null }, { draft: null, done: true }];
@@ -101,15 +81,15 @@ export const rayCommand: Command = {
     const a = s.a;
     return [
       { phase: "start", lastPoint: null },
-      { draft: null, done: true, commit: opsMutation(() => appendRay(a, pt, ctx)) },
+      { draft: null, done: true, commit: appendRay(a, pt, ctx) },
     ];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as RayState;
     if (s.phase !== "end") return [s, { draft: null }];
     const next: RayDrawing = { ...s, cursor: point };
-    return [next, { draft: rayDraft(s.a, point) }];
+    return [next, { draft: rayDraft(ctx, s.a, point) }];
   },
 
   onConfirm: (): [CommandState, CommandResult] => [

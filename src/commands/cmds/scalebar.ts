@@ -4,20 +4,16 @@
 //      `lastSides` bei `polygon.ts`).
 // Segmentlänge + Anzahl per Option (zyklisch, tippbar als „l"/„n").
 
-import type { Drawing2D } from "../../model/types";
-import { uniqueId } from "../../tools/types";
 import type {
   CmdOption,
   Command,
   CommandContext,
   CommandResult,
   CommandState,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 
 const LENGTH_PRESETS = [0.5, 1, 2, 5, 10, 20, 50];
 let lastLength = 1;
@@ -36,40 +32,18 @@ interface ScalebarIdle extends CommandState {
 type ScalebarState = ScalebarIdle;
 
 /** Vorschau: abwechselnd gefüllte/leere Rechtecke, wie das Rendering (grob, ohne Beschriftung). */
-function pointDraft(at: Vec2): ToolDraft {
-  const h = lastLength * 0.06; // rein optische Balkenhöhe für die Vorschau
-  const preview: DraftShape[] = [];
-  for (let i = 0; i < lastSegments; i++) {
-    const x0 = at.x + i * lastLength;
-    const x1 = x0 + lastLength;
-    preview.push({
-      kind: "poly",
-      pts: [
-        { x: x0, y: at.y },
-        { x: x1, y: at.y },
-        { x: x1, y: at.y + h },
-        { x: x0, y: at.y + h },
-      ],
-      closed: true,
-    });
-  }
+/** Vorschau (Kern, `cmd_draw.rs`): Segment-Balken am Cursor + HUD (Länge × Anzahl). */
+function pointDraft(ctx: CommandContext, at: Vec2): ToolDraft {
   return {
-    preview,
+    preview: createPreview(ctx, { cmd: "scalebar", length: lastLength, segments: lastSegments }, [at]).shapes,
     vertices: [at],
     hud: { at, text: `${lastLength}m × ${lastSegments} = ${(lastLength * lastSegments).toFixed(1)}m` },
   };
 }
 
-function appendScalebar(at: Vec2, ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "scalebar", at, segmentLength: lastLength, segments: lastSegments },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): Massstabsbalken mit Segmentlänge und -anzahl. */
+const appendScalebar = (at: Vec2, ctx: CommandContext) =>
+  createMutation(ctx, { cmd: "scalebar", at, length: lastLength, segments: lastSegments });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "point", lastPoint: null } as ScalebarIdle,
@@ -97,10 +71,10 @@ export const scalebarCommand: Command = {
       return [s, { draft: null }];
     }
     if (input.kind !== "point") return [s, { draft: null }];
-    return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendScalebar(input.point, ctx)) }];
+    return [idle()[0], { draft: null, done: true, commit: appendScalebar(input.point, ctx) }];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => [state, { draft: pointDraft(point) }],
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => [state, { draft: pointDraft(ctx, point) }],
   onConfirm: (): [CommandState, CommandResult] => idle(),
   onCancel: (): [CommandState, CommandResult] => idle(),
 };

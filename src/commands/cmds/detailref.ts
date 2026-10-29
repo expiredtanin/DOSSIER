@@ -6,22 +6,16 @@
 //      Position, Feinheiten hinterher) — kein Tipp-Schritt beim Platzieren
 //      nötig, das Symbol landet sofort selektiert-editierbar im Plan.
 
-import type { Drawing2D } from "../../model/types";
-import { uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
   CommandResult,
   CommandState,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 
-const PREVIEW_RADIUS = 0.3; // Modell-Meter, deckt sich mit DETAILREF_RADIUS_M (plan/drawings.rs)
-const DEFAULT_LABEL = "A";
 
 interface DetailRefIdle extends CommandState {
   phase: "point";
@@ -29,27 +23,13 @@ interface DetailRefIdle extends CommandState {
 type DetailRefState = DetailRefIdle;
 
 /** Kreis-Vorschau (Vollkreis-Approximation, wie andere Symbol-Vorschauen). */
-function pointDraft(at: Vec2): ToolDraft {
-  const N = 32;
-  const pts: Vec2[] = [];
-  for (let i = 0; i < N; i++) {
-    const t = (i / N) * Math.PI * 2;
-    pts.push({ x: at.x + PREVIEW_RADIUS * Math.cos(t), y: at.y + PREVIEW_RADIUS * Math.sin(t) });
-  }
-  const preview: DraftShape[] = [{ kind: "poly", pts, closed: true }];
-  return { preview, vertices: [at] };
+/** Vorschau (Kern, `cmd_draw.rs`): Verweisblase (Kreis r = 0.3 m) am Cursor. */
+function pointDraft(ctx: CommandContext, at: Vec2): ToolDraft {
+  return { preview: createPreview(ctx, { cmd: "detailref" }, [at]).shapes, vertices: [at] };
 }
 
-function appendDetailRef(at: Vec2, ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "detailref", at, label: DEFAULT_LABEL },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): Verweis „A“ am Punkt (Label/Blatt danach im Attribut-Panel). */
+const appendDetailRef = (at: Vec2, ctx: CommandContext) => createMutation(ctx, { cmd: "detailref", at });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "point", lastPoint: null } as DetailRefIdle,
@@ -69,11 +49,11 @@ export const detailrefCommand: Command = {
     if (input.kind !== "point") return [s, { draft: null }];
     return [
       { phase: "point", lastPoint: null } as DetailRefIdle,
-      { draft: null, done: true, commit: opsMutation(() => appendDetailRef(input.point, ctx)) },
+      { draft: null, done: true, commit: appendDetailRef(input.point, ctx) },
     ];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => [state, { draft: pointDraft(point) }],
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => [state, { draft: pointDraft(ctx, point) }],
   onConfirm: (): [CommandState, CommandResult] => idle(),
   onCancel: (): [CommandState, CommandResult] => idle(),
 };

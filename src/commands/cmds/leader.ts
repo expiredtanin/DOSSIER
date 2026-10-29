@@ -13,7 +13,6 @@
 //   Inline-Editor-Infrastruktur wie beim `text`-Befehl (kein neuer Shape,
 //   s. `Drawing2DGeom["text"].leaderTarget`/`.leaderBendPoints`).
 
-import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
 import type {
   CmdOption,
@@ -26,10 +25,8 @@ import type {
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation } from "../createCore";
 
-const DEFAULT_TEXT_HEIGHT_M = 0.25;
 const MAX_BENDS = 4;
 
 /** Persistente Knick-Anzahl über Aufrufe hinweg (wie `lastCount` bei Array). */
@@ -54,29 +51,9 @@ interface LeaderAnchor extends CommandState {
 }
 type LeaderState = LeaderTarget | LeaderBend | LeaderAnchor;
 
-function appendLeaderText(id: string,
-  at: Vec2,
-  target: Vec2,
-  bends: Vec2[],
-  ctx: CommandContext,
-): CoreOp[] {
-  const d: Drawing2D = {
-    id,
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: {
-      shape: "text",
-      at,
-      text: "",
-      height: DEFAULT_TEXT_HEIGHT_M,
-      angle: 0,
-      leaderTarget: target,
-      ...(bends.length > 0 ? { leaderBendPoints: bends } : {}),
-    },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern, `cmd_draw.rs`): leerer Text am Anker mit Hinweislinie zum Ziel (Knickpunkte, falls gesetzt). */
+const appendLeaderText = (id: string, at: Vec2, target: Vec2, bends: Vec2[], ctx: CommandContext) =>
+  createMutation(ctx, { cmd: "leader", id, at, target, bends });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "target", lastPoint: null } as LeaderTarget,
@@ -142,7 +119,7 @@ export const leaderCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: opsMutation(() => appendLeaderText(id, pt, target, bends, ctx)),
+        commit: appendLeaderText(id, pt, target, bends, ctx),
         focusDrawingId: id,
       },
     ];

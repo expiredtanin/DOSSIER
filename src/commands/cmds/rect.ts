@@ -29,10 +29,7 @@
 // s. `model/types.ts`). Radius wird auf die halbe kürzere Kantenlänge
 // geklammert (sonst würden sich benachbarte Fillets überlappen).
 
-import type { Drawing2D } from "../../model/types";
-import { deltaHud, segmentHud, uniqueId } from "../../tools/types";
-import { filletCorner } from "../../core";
-import { bulgePolylinePoints, bulgeThroughPoint } from "../../core";
+import { deltaHud, segmentHud } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -40,13 +37,11 @@ import type {
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 
 const EPS = 1e-6;
 
@@ -119,25 +114,6 @@ function baseFromFields(a: Vec2, locks: Record<string, number>, cursor: Vec2 | n
   return { x: a.x + Math.cos(ang) * length, y: a.y + Math.sin(ang) * length };
 }
 
-/**
- * Vier Ecken des gedrehten Rechtecks aus Basiskante (a→b) und einem dritten
- * Punkt `p`: die Höhe ist der vorzeichenbehaftete senkrechte Abstand von `p` zur
- * Basislinie; das Rechteck wird zu dieser Seite hin aufgespannt.
- */
-function rotatedCorners(a: Vec2, b: Vec2, p: Vec2): Vec2[] {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = Math.hypot(dx, dy);
-  if (len < EPS) return [a, b, b, a];
-  // Einheits-Normale (links der Basisrichtung).
-  const nx = -dy / len;
-  const ny = dx / len;
-  const h = (p.x - a.x) * nx + (p.y - a.y) * ny; // signierte Höhe
-  const c3 = { x: b.x + nx * h, y: b.y + ny * h };
-  const c4 = { x: a.x + nx * h, y: a.y + ny * h };
-  return [a, b, c3, c4];
-}
-
 /** Senkrechter (signierter) Abstand eines Punktes zur Basislinie a→b. */
 function riseFrom(a: Vec2, b: Vec2, p: Vec2): number {
   const dx = b.x - a.x;
@@ -162,16 +138,6 @@ function riseToPoint(a: Vec2, b: Vec2, height: number, cursor: Vec2 | null): Vec
 }
 
 // ── Zentrum: Ecke aus Mittelpunkt ────────────────────────────────────────────
-
-/** Achsparallele Ecken aus Zentrum + einer Ecke. */
-function centerGeom(center: Vec2, corner: Vec2): { min: Vec2; max: Vec2 } {
-  const hx = Math.abs(corner.x - center.x);
-  const hy = Math.abs(corner.y - center.y);
-  return {
-    min: { x: center.x - hx, y: center.y - hy },
-    max: { x: center.x + hx, y: center.y + hy },
-  };
-}
 
 /** Ecke aus Zentrum + gelockten Halbmaßen (width/height als volle Kantenmaße). */
 function centerCornerFromFields(
@@ -210,87 +176,36 @@ interface RectRise extends CommandState {
 }
 type RectState = RectIdle | RectCorner2 | RectRise;
 
-function rectGeom(a: Vec2, b: Vec2): { min: Vec2; max: Vec2 } {
-  return {
-    min: { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },
-    max: { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
-  };
-}
-
-// ── Eck-Radius ───────────────────────────────────────────────────────────────
-
-/**
- * Rundet die 4 Ecken eines Rechtecks (beliebige Umlaufreihenfolge/Ausrichtung
- * — arbeitet rein über die tatsächliche Punkt-Geometrie, keine Achsparallel-
- * Annahme) mit Radius `r`, geklammert auf die halbe kürzeste Kantenlänge
- * (sonst würden sich benachbarte Fillets überlappen). `null` bei `r<=0` oder
- * wenn selbst der geklammerte Radius nicht mehr passt (entartetes Rechteck).
- */
-function roundedRectPts(corners: Vec2[], r: number): { pts: Vec2[]; bulge: number[] } | null {
-  if (r < EPS) return null;
-  const n = corners.length;
-  let maxR = Infinity;
-  for (let i = 0; i < n; i++) {
-    maxR = Math.min(maxR, segLen(corners[i], corners[(i + 1) % n]) / 2);
-  }
-  const rr = Math.min(r, maxR - EPS);
-  if (rr < EPS) return null;
-
-  const pts: Vec2[] = [];
-  const bulge: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const prev = corners[(i - 1 + n) % n];
-    const cur = corners[i];
-    const next = corners[(i + 1) % n];
-    const f = filletCorner(cur, prev, next, rr);
-    if (!f) return null; // (nahezu) kollineare Ecke — sollte bei einem Rechteck nicht vorkommen
-    // Bogen-Mittelpunkt: auf dem Fillet-Kreis, in Richtung der ursprünglichen
-    // (jetzt weggerundeten) Ecke vom Bogen-Zentrum aus gesehen.
-    const dx = cur.x - f.center.x;
-    const dy = cur.y - f.center.y;
-    const dl = Math.hypot(dx, dy) || 1;
-    const mid: Vec2 = { x: f.center.x + (dx / dl) * rr, y: f.center.y + (dy / dl) * rr };
-    pts.push(f.tangentA, f.tangentB);
-    bulge.push(bulgeThroughPoint(f.tangentA, mid, f.tangentB), 0);
-  }
-  return { pts, bulge };
-}
-
-/** Tessellierte Punkte einer gerundeten geschlossenen Kontur — für die Live-Vorschau. */
-function tessellateRounded(pts: Vec2[], bulge: number[]): Vec2[] {
-  return bulgePolylinePoints(pts, bulge, true);
-}
-
 // ── Vorschau ─────────────────────────────────────────────────────────────────
 
-function corners4Draft(pts: Vec2[], hud: ToolDraft["hud"] | null): ToolDraft {
-  const rounded = roundedRectPts(pts, lastRadius);
-  const previewPts = rounded ? tessellateRounded(rounded.pts, rounded.bulge) : pts;
-  const preview: DraftShape[] = [{ kind: "poly", pts: previewPts, closed: true }];
-  const draft: ToolDraft = { preview, vertices: [pts[0]] };
+/**
+ * Vorschau eines Rechtecks im Kern (`cmd_draw.rs`): Ecken (bei Eck-Radius > 0 gerundet tesselliert);
+ * der erste Stützpunkt ist die erste Ecke der Kontur.
+ */
+function cornersDraft(ctx: CommandContext, method: RectMethod, pts: Vec2[], hud: ToolDraft["hud"] | null): { draft: ToolDraft; height: number } {
+  const pv = createPreview(ctx, { cmd: "rect", method, radius: lastRadius }, pts);
+  const draft: ToolDraft = { preview: pv.shapes, vertices: [{ x: pv.info[0], y: pv.info[1] }] };
   if (hud) draft.hud = hud;
-  return draft;
+  return { draft, height: pv.info[2] };
 }
 
 /** Vorschau des 2-Punkt-Rechtecks (achsparallel) — HUD zeigt die Diagonale a→cursor. */
-function cornerDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
+function cornerDraft(ctx: CommandContext, a: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [], vertices: [a] };
-  const g = rectGeom(a, cursor);
-  const pts: Vec2[] = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-  return corners4Draft(pts, segLen(a, cursor) >= EPS ? deltaHud(a, cursor) : null);
+  return cornersDraft(ctx, "corner", [a, cursor], segLen(a, cursor) >= EPS ? deltaHud(a, cursor) : null).draft;
 }
 
 /** Vorschau des Zentrum-Rechtecks (achsparallel) — HUD zeigt die Diagonale center→cursor. */
-function centerDraft(center: Vec2, cursor: Vec2 | null): ToolDraft {
+function centerDraft(ctx: CommandContext, center: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [], vertices: [center] };
-  const g = centerGeom(center, cursor);
-  const pts: Vec2[] = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-  return corners4Draft(
-    pts,
+  return cornersDraft(
+    ctx,
+    "center",
+    [center, cursor],
     segLen(center, cursor) >= EPS
       ? { at: cursor, dx: 2 * (cursor.x - center.x), dy: 2 * (cursor.y - center.y) }
       : null,
-  );
+  ).draft;
 }
 
 /** Vorschau der Basiskante (3-Punkt, erster Teil). */
@@ -300,69 +215,23 @@ function baseDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
 }
 
 /** Vorschau des gedrehten Rechtecks (3-Punkt, zweiter Teil) — HUD: Basisbreite + Höhe am Cursor. */
-function riseDraft(a: Vec2, b: Vec2, cursor: Vec2 | null): ToolDraft {
+function riseDraft(ctx: CommandContext, a: Vec2, b: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [{ kind: "line", a, b }], vertices: [a] };
-  const pts = rotatedCorners(a, b, cursor);
+  const r = cornersDraft(ctx, "three", [a, b, cursor], null);
   const w = segLen(a, b);
-  const h = Math.abs(riseFrom(a, b, cursor));
-  return corners4Draft(pts, { at: cursor, text: `B: ${w.toFixed(3)}m    H: ${h.toFixed(3)}m` });
+  r.draft.hud = { at: cursor, text: `B: ${w.toFixed(3)}m    H: ${r.height.toFixed(3)}m` };
+  return r.draft;
 }
 
 // ── Commit ───────────────────────────────────────────────────────────────────
 
-/** Achsparalleles Rechteck als `shape:"rect"` (geschlossen behandelt). */
-function appendRect(min: Vec2, max: Vec2, ctx: CommandContext): CoreOp[] {
-  if (max.x - min.x < EPS || max.y - min.y < EPS) return []; // Null-Rechteck
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "rect", min, max },
-  };
-  return addItems("drawings2d", [d]);
-}
-
 /**
- * Gedrehtes Rechteck als geschlossene Polylinie (`shape:"polyline", closed:true`)
- * — `shape:"rect"` kann nur achsparallel, deshalb hier ein Ring aus vier Ecken.
- * Downstream (Füllung/Offset) behandelt einen geschlossenen Polygonzug als Ring.
+ * Commit (Kern, `cmd_draw.rs`): 2-Punkt/Zentrum achsparallel als `shape:"rect"`, 3-Punkt als
+ * geschlossene Polylinie; mit Eck-Radius > 0 (geklammert auf die halbe kürzeste Kante) als geschlossene
+ * Polylinie mit Bögen. Entartete Rechtecke ergeben nichts.
  */
-function appendRotated(pts: Vec2[], ctx: CommandContext): CoreOp[] {
-  // Fläche prüfen: entartete Rechtecke verwerfen.
-  const w = segLen(pts[0], pts[1]);
-  const h = segLen(pts[1], pts[2]);
-  if (w < EPS || h < EPS) return [];
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "polyline", pts, closed: true },
-  };
-  return addItems("drawings2d", [d]);
-}
-
-/**
- * Gerundetes Rechteck (Eck-Radius > 0) als geschlossene `polyline` MIT
- * `bulge` — ersetzt `appendRect`/`appendRotated`, wenn `lastRadius` > 0 ist,
- * unabhängig von der Konstruktionsmethode (`corners` sind die 4 scharfen
- * Ecken, egal ob achsparallel oder gedreht). No-Op, wenn der Radius nicht
- * passt (`roundedRectPts` liefert dann `null`, z. B. bei einem entarteten
- * Rechteck).
- */
-function appendRectRounded(corners: Vec2[], ctx: CommandContext): CoreOp[] {
-  const rr = roundedRectPts(corners, lastRadius);
-  if (!rr) return [];
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "polyline", pts: rr.pts, closed: true, bulge: rr.bulge },
-  };
-  return addItems("drawings2d", [d]);
-}
+const appendRect = (ctx: CommandContext, method: RectMethod, a: Vec2, b: Vec2, c: Vec2 | null = null) =>
+  createMutation(ctx, { cmd: "rect", method, a, b, c, radius: lastRadius });
 
 const idle = (method: RectMethod): [CommandState, CommandResult] => [
   { phase: "corner1", lastPoint: null, method } as RectIdle,
@@ -404,13 +273,13 @@ export const rectCommand: Command = {
         // Konstruktion NICHT verworfen, nur die Vorschau aktualisiert (der
         // Radius wirkt erst beim Commit, betrifft also keine Punkt-Historie).
         lastRadius = nextRadius();
-        return [s, { draft: draftFor(s) }];
+        return [s, { draft: draftFor(ctx, s) }];
       }
       return [s, { draft: null }];
     }
 
     if (input.kind !== "point") {
-      return [s, { draft: draftFor(s) }];
+      return [s, { draft: draftFor(ctx, s) }];
     }
     const pt = input.point;
 
@@ -420,7 +289,7 @@ export const rectCommand: Command = {
         return [ns, { draft: baseDraft(pt, pt) }];
       }
       const ns: RectCorner2 = { phase: "corner2", method: s.method, a: pt, cursor: pt, lastPoint: pt };
-      return [ns, { draft: draftFor(ns) }];
+      return [ns, { draft: draftFor(ctx, ns) }];
     }
 
     if (s.phase === "corner2") {
@@ -428,7 +297,7 @@ export const rectCommand: Command = {
         // Basiskante gesetzt → dritter Punkt bestimmt Höhe.
         if (segLen(s.a, pt) < EPS) return [s, { draft: baseDraft(s.a, s.cursor) }];
         const ns: RectRise = { phase: "rise", method: "three", a: s.a, b: pt, cursor: pt, lastPoint: pt };
-        return [ns, { draft: riseDraft(s.a, pt, pt) }];
+        return [ns, { draft: riseDraft(ctx, s.a, pt, pt) }];
       }
       const a = s.a;
       const method = s.method;
@@ -437,14 +306,7 @@ export const rectCommand: Command = {
         {
           draft: null,
           done: true,
-          commit: opsMutation(() => {
-            const g = method === "center" ? centerGeom(a, pt) : rectGeom(a, pt);
-            if (lastRadius >= EPS) {
-              const corners = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-              return appendRectRounded(corners, ctx);
-            }
-            return appendRect(g.min, g.max, ctx);
-          }),
+          commit: appendRect(ctx, method, a, pt),
         },
       ];
     }
@@ -457,19 +319,16 @@ export const rectCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: opsMutation(() => {
-          const corners = rotatedCorners(a, b, pt);
-          return lastRadius >= EPS ? appendRectRounded(corners, ctx) : appendRotated(corners, ctx);
-        }),
+        commit: appendRect(ctx, "three", a, b, pt),
       },
     ];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as RectState;
     if (s.phase === "corner1") return [s, { draft: null }];
     const ns = { ...s, cursor: point } as RectState;
-    return [ns, { draft: draftFor(ns) }];
+    return [ns, { draft: draftFor(ctx, ns) }];
   },
 
   onConfirm: (state): [CommandState, CommandResult] => idle((state as RectState).method),
@@ -514,12 +373,12 @@ export const rectCommand: Command = {
 };
 
 /** Vorschau passend zum Zustand. */
-function draftFor(s: RectState): ToolDraft {
+function draftFor(ctx: CommandContext, s: RectState): ToolDraft {
   if (s.phase === "corner2") {
     if (s.method === "three") return baseDraft(s.a, s.cursor);
-    if (s.method === "center") return centerDraft(s.a, s.cursor);
-    return cornerDraft(s.a, s.cursor);
+    if (s.method === "center") return centerDraft(ctx, s.a, s.cursor);
+    return cornerDraft(ctx, s.a, s.cursor);
   }
-  if (s.phase === "rise") return riseDraft(s.a, s.b, s.cursor);
+  if (s.phase === "rise") return riseDraft(ctx, s.a, s.b, s.cursor);
   return { preview: [], vertices: [] };
 }

@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getState, setState } from "./appStore";
 import type { Project, Roof } from "../model/types";
-import { addRoofHole, removeRoofHole, roofGeometry, setRoofEdge } from "../core";
+import { removeRoofHole, roofGeometry, setRoofEdge } from "../core";
 import { parseProjectFile, serializeProject } from "../io/projectFormat";
 import { sampleProject } from "../model/sampleProject";
 
@@ -81,7 +81,7 @@ describe("Kantenneigung über Ops", () => {
 
 describe("Innenhöfe über Ops", () => {
   it("Hof hinzufügen und entfernen: je ein Undo-Schritt, Dach spart den Hof aus", () => {
-    getState().updateRoof("RF1", addRoofHole(current(), court));
+    getState().updateRoof("RF1", { holes: [...(current().holes ?? []), court] });
     expect(current().holes).toEqual([court]);
     expect(roofGeometry(current(), 0).eavesHoles).toHaveLength(1);
     expect(getState().undoDepth).toBe(1);

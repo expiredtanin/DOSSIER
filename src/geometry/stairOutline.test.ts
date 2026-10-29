@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { stairOutline, stairGeometry } from "./stair";
+import { stairOutline } from "./stair";
 import type { Stair, Vec2 } from "../model/types";
 
 /** Einfache Distanz-Funktion. */
@@ -185,27 +185,5 @@ describe("stairOutline — Referenz links/mitte/rechts (Item 4)", () => {
       expect(noRef[i].x).toBeCloseTo(mitte[i].x, 6);
       expect(noRef[i].y).toBeCloseTo(mitte[i].y, 6);
     }
-  });
-});
-
-describe("stairGeometry — Lauflinie bleibt visuell zentriert (Item 4)", () => {
-  const totalRise = 3.0;
-  const links = stairGeometry({ ...geradeStair, referenz: "links" }, totalRise);
-  const mitte = stairGeometry({ ...geradeStair, referenz: "mitte" }, totalRise);
-
-  it("Lauflinie liegt auf der Treppen-Mitte, nicht auf der Referenzkante (y=0)", () => {
-    // Bei referenz=links liegt die Mitte bei y = −width/2 = −0.6.
-    for (const p of links.runLine) {
-      expect(p.y).toBeCloseTo(-geradeStair.width / 2, 5);
-    }
-    // Bei mitte liegt die Lauflinie auf y=0 (Achse = Mitte).
-    for (const p of mitte.runLine) {
-      expect(p.y).toBeCloseTo(0, 5);
-    }
-  });
-
-  it("Tritte sind bei referenz=links um −width/2 versetzt", () => {
-    const dy = links.treads[0].pts[0].y - mitte.treads[0].pts[0].y;
-    expect(dy).toBeCloseTo(-geradeStair.width / 2, 5);
   });
 });

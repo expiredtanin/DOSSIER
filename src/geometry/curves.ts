@@ -22,17 +22,6 @@ function toFlat(pts: Vec2[]): Float64Array {
   return f;
 }
 
-/** Punkte einer (ggf. gedrehten) Ellipse, N gleichverteilte Parameterschritte. */
-export function ellipsePts(
-  center: Vec2,
-  rx: number,
-  ry: number,
-  rotation: number,
-  n = 64,
-): Vec2[] {
-  return toPoints(core().curves_ellipse_flat(center.x, center.y, rx, ry, rotation, n));
-}
-
 /**
  * Tessellierte Punkte einer kubischen Bezier-Kette. `pts` folgt dem Muster
  * Anker·Griff·Griff·Anker·… (`pts.length` ≡ 1 mod 3). Mit weniger als 4

@@ -25,8 +25,7 @@
 //              2) „Zweiter Kantenpunkt:" → Punkt → commit.
 // Ecken-Zahl/Modus/Konstruktion per Option.
 
-import type { Drawing2D } from "../../model/types";
-import { segmentHud, uniqueId } from "../../tools/types";
+import { segmentHud } from "../../tools/types";
 import type {
   CmdOption,
   Command,
@@ -34,13 +33,11 @@ import type {
   CommandField,
   CommandResult,
   CommandState,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 
 const EPS = 1e-6;
 const MIN_SIDES = 3;
@@ -95,83 +92,34 @@ const MODE_OPTION: CmdOption = { id: "mode", labelKey: "cmd.polygon.mode" };
  * eingegebene Radius das Apothema (Zentrum→Kantenmitte) — der tatsächliche
  * Eckpunkt-Radius ist grösser, `apothem / cos(π/n)`.
  */
-function vertexRadius(r: number, sides: number, mode: PolygonMode): number {
-  return mode === "circumscribed" ? r / Math.cos(Math.PI / sides) : r;
-}
-
-/** Eckpunkte des regelmässigen Vielecks (erste Ecke Richtung `dir`), `r` = eingegebener Radius (Modus-abhängig). */
-function polygonPts(center: Vec2, r: number, sides: number, mode: PolygonMode, dir: Vec2 | null): Vec2[] {
-  const rv = vertexRadius(r, sides, mode);
-  const t0 = dir && dist(center, dir) > EPS ? Math.atan2(dir.y - center.y, dir.x - center.x) : 0;
-  const pts: Vec2[] = [];
-  for (let i = 0; i < sides; i++) {
-    const t = t0 + (i / sides) * Math.PI * 2;
-    pts.push({ x: center.x + rv * Math.cos(t), y: center.y + rv * Math.sin(t) });
-  }
-  return pts;
-}
+/** Optionen des Vielecks für den Kern (`cmd_draw.rs`). */
+const polyReq = (method: PolygonMethod) => ({ cmd: "polygon", method, sides: lastSides, mode: lastMode });
 
 /**
- * Eckpunkte des regelmässigen Vielecks aus einer EINZELNEN Kante `a→b`: die
- * Kantenlänge/Richtung legt die Grösse/Drehung eindeutig fest. Läuft von `b`
- * aus nach LINKS abbiegend weiter (Aussenwinkel 2π/n je Ecke) — ein
- * konvexes, CCW aufgebautes Vieleck auf der linken Seite von a→b.
+ * Vorschau (Kern): Vieleck um `center` durch den Cursor (Radius = Abstand, erste Ecke in Cursor-Richtung;
+ * umschrieben: Eckradius r / cos(π/n)) + HUD (Radius × Ecken).
  */
-function polygonFromEdge(a: Vec2, b: Vec2, sides: number): Vec2[] {
-  const edgeLen = dist(a, b);
-  const ext = (2 * Math.PI) / sides;
-  const pts: Vec2[] = [a, b];
-  let cur = b;
-  let dir = Math.atan2(b.y - a.y, b.x - a.x);
-  for (let i = 2; i < sides; i++) {
-    dir += ext;
-    const next: Vec2 = { x: cur.x + edgeLen * Math.cos(dir), y: cur.y + edgeLen * Math.sin(dir) };
-    pts.push(next);
-    cur = next;
-  }
-  return pts;
-}
-
-function polygonDraft(center: Vec2, r: number, dir: Vec2 | null, at: Vec2 | null): ToolDraft {
+function polygonDraft(ctx: CommandContext, center: Vec2, cursor: Vec2 | null): ToolDraft {
+  const pv = createPreview(ctx, polyReq("center"), cursor ? [center, cursor] : [center]);
+  const r = pv.info[0];
   if (r < EPS) return { preview: [], vertices: [center] };
-  const preview: DraftShape[] = [
-    { kind: "poly", pts: polygonPts(center, r, lastSides, lastMode, dir), closed: true },
-  ];
-  const draft: ToolDraft = { preview, vertices: [center] };
-  if (at) draft.hud = { at, text: `R: ${r.toFixed(3)}m × ${lastSides}` };
+  const draft: ToolDraft = { preview: pv.shapes, vertices: [center] };
+  if (cursor) draft.hud = { at: cursor, text: `R: ${r.toFixed(3)}m × ${lastSides}` };
   return draft;
 }
 
-/** Vorschau der Kanten-Konstruktion — zeigt das VOLLE Vieleck, sobald die Kante eine Länge hat. */
-function edgeDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
+/** Vorschau (Kern) des Vielecks über der Kante a→Cursor (gegen den Uhrzeigersinn). */
+function edgeDraft(ctx: CommandContext, a: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor || dist(a, cursor) < EPS) return { preview: [{ kind: "line", a, b: a }], vertices: [a] };
-  const pts = polygonFromEdge(a, cursor, lastSides);
-  return { preview: [{ kind: "poly", pts, closed: true }], vertices: [a], hud: segmentHud(a, cursor) };
+  return { preview: createPreview(ctx, polyReq("edge"), [a, cursor]).shapes, vertices: [a], hud: segmentHud(a, cursor) };
 }
 
-function appendPolygon(center: Vec2, r: number, dir: Vec2 | null, ctx: CommandContext): CoreOp[] {
-  if (r < EPS) return [];
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "polyline", pts: polygonPts(center, r, lastSides, lastMode, dir), closed: true },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): Vieleck um `center`; Radius getippt oder Abstand zu `dir` (entartet → nichts). */
+const appendPolygon = (center: Vec2, r: number | null, dir: Vec2 | null, ctx: CommandContext) =>
+  createMutation(ctx, { ...polyReq("center"), center, r, dir });
 
-function appendPolygonFromEdge(a: Vec2, b: Vec2, ctx: CommandContext): CoreOp[] {
-  if (dist(a, b) < EPS) return [];
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "polyline", pts: polygonFromEdge(a, b, lastSides), closed: true },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): Vieleck über der Kante a→b. */
+const appendPolygonFromEdge = (a: Vec2, b: Vec2, ctx: CommandContext) => createMutation(ctx, { ...polyReq("edge"), a, b });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "p1", method: lastMethod, lastPoint: null } as PolyP1,
@@ -218,16 +166,14 @@ export const polygonCommand: Command = {
       if (input.id === "sides") {
         lastSides = lastSides >= MAX_SIDES ? MIN_SIDES : lastSides + 1;
         if (s.phase === "radius") {
-          const r = s.cursor ? dist(s.center, s.cursor) : 0;
-          return [s, { draft: polygonDraft(s.center, r, s.cursor, s.cursor) }];
+          return [s, { draft: polygonDraft(ctx, s.center, s.cursor) }];
         }
-        if (s.phase === "edge2") return [s, { draft: edgeDraft(s.a, s.cursor) }];
+        if (s.phase === "edge2") return [s, { draft: edgeDraft(ctx, s.a, s.cursor) }];
         return [s, { draft: null }];
       }
       if (input.id === "mode" && s.phase === "radius") {
         lastMode = nextMode(lastMode);
-        const r = s.cursor ? dist(s.center, s.cursor) : 0;
-        return [s, { draft: polygonDraft(s.center, r, s.cursor, s.cursor) }];
+        return [s, { draft: polygonDraft(ctx, s.center, s.cursor) }];
       }
       return [s, { draft: null }];
     }
@@ -236,51 +182,49 @@ export const polygonCommand: Command = {
       if (input.kind !== "point") return [s, { draft: null }];
       if (s.method === "edge") {
         const ns: PolyEdge2 = { phase: "edge2", method: "edge", a: input.point, cursor: input.point, lastPoint: input.point };
-        return [ns, { draft: edgeDraft(input.point, input.point) }];
+        return [ns, { draft: edgeDraft(ctx, input.point, input.point) }];
       }
       const ns: PolyRadius = { phase: "radius", method: "center", center: input.point, cursor: input.point, lastPoint: input.point };
-      return [ns, { draft: polygonDraft(input.point, 0, null, null) }];
+      return [ns, { draft: polygonDraft(ctx, input.point, null) }];
     }
 
     if (s.phase === "edge2") {
       if (input.kind !== "point" || dist(s.a, input.point) < EPS) {
-        return [s, { draft: edgeDraft(s.a, s.cursor) }];
+        return [s, { draft: edgeDraft(ctx, s.a, s.cursor) }];
       }
       const a = s.a;
       const b = input.point;
-      return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendPolygonFromEdge(a, b, ctx)) }];
+      return [idle()[0], { draft: null, done: true, commit: appendPolygonFromEdge(a, b, ctx) }];
     }
 
     // phase "radius"
-    let r: number;
+    let r: number | null;
     let dir: Vec2 | null;
     if (input.kind === "number") {
       r = input.value;
       dir = s.cursor;
     } else if (input.kind === "point") {
-      r = dist(s.center, input.point);
+      r = null;
       dir = input.point;
     } else {
-      const rr = s.cursor ? dist(s.center, s.cursor) : 0;
-      return [s, { draft: polygonDraft(s.center, rr, s.cursor, s.cursor) }];
+      return [s, { draft: polygonDraft(ctx, s.center, s.cursor) }];
     }
     const center = s.center;
     return [
       idle()[0],
-      { draft: null, done: true, commit: opsMutation(() => appendPolygon(center, r, dir, ctx)) },
+      { draft: null, done: true, commit: appendPolygon(center, r, dir, ctx) },
     ];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as PolyState;
     if (s.phase === "radius") {
-      const r = dist(s.center, point);
       const ns: PolyRadius = { ...s, cursor: point };
-      return [ns, { draft: polygonDraft(s.center, r, point, point) }];
+      return [ns, { draft: polygonDraft(ctx, s.center, point) }];
     }
     if (s.phase === "edge2") {
       const ns: PolyEdge2 = { ...s, cursor: point };
-      return [ns, { draft: edgeDraft(s.a, point) }];
+      return [ns, { draft: edgeDraft(ctx, s.a, point) }];
     }
     return [s, { draft: null }];
   },

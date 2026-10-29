@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Vec2 } from "../model/types";
-import { detectRooms, roomFromPointInside, roomFromPointInsideFaces, type WallSegment } from "./roomBoundary";
+import { detectRooms, type WallSegment } from "./roomBoundary";
 
 const P = (x: number, y: number): Vec2 => ({ x, y });
 const area = (pts: Vec2[]): number => {
@@ -56,26 +56,5 @@ describe("detectRooms", () => {
     bad[1] = { a: P(Number.NaN, 0), b: P(5, 4), thickness: 0.2 };
     expect(detectRooms(bad)).toEqual([]);
     expect(detectRooms(box(5, 4), { gapTol: Number.NaN })).toEqual([]);
-  });
-});
-
-describe("roomFromPointInside", () => {
-  const walls = [...box(6, 4), { a: P(3, 0), b: P(3, 4), thickness: 0.2 }];
-
-  it("liefert die kleinste umgebende Zelle", () => {
-    const r = roomFromPointInside(P(1.5, 2), walls);
-    expect(r).not.toBeNull();
-    expect(area(r!)).toBeCloseTo(2.8 * 3.8, 9);
-  });
-
-  it("ausserhalb: null", () => {
-    expect(roomFromPointInside(P(10, 10), walls)).toBeNull();
-    expect(roomFromPointInside(P(Number.NaN, 1), walls)).toBeNull();
-  });
-
-  it("auf Wandflächen: ohne Offset", () => {
-    const faces = box(4, 3).map(({ a, b }) => ({ a, b }));
-    expect(area(roomFromPointInsideFaces(P(2, 1), faces)!)).toBeCloseTo(12, 9);
-    expect(roomFromPointInsideFaces(P(9, 9), faces)).toBeNull();
   });
 });

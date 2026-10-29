@@ -3,7 +3,7 @@
 //! - `Math.min/max` liefern bei NaN NaN (Rust `f64::min/max` ignorieren NaN).
 //! - `Math.round` rundet halbe Werte Richtung +∞ (Rust `round` weg von 0).
 //! - `x | 0` ist ToInt32 (Rest modulo 2³², Rust `as i32` sättigt).
-//! - `Math.pow` (`x ** 3`) und Trigonometrie: im Web-Build (wasm32 + Feature "web") ruft der Kern `Math.cos/sin/tan/atan2/acos`
+//! - `Math.pow` (`x ** 3`) und Trigonometrie: im Web-Build (wasm32 + Feature "web") ruft der Kern `Math.cos/sin/tan/atan/atan2/acos`
 //!   der laufenden JS-Engine. Nur so sind die Werte bitgleich zur bisherigen TS-Fassung — V8
 //!   (glibc-abgeleitete sin/cos), JavaScriptCore (System-libm von macOS) und Rusts libm (musl)
 //!   unterscheiden sich in einzelnen Fällen in der letzten Stelle. Nativ (`cargo test`, Tauri)
@@ -27,6 +27,12 @@ mod trig {
         fn js_pow(x: f64, y: f64) -> f64;
         #[wasm_bindgen(js_namespace = Math, js_name = tan)]
         fn js_tan(x: f64) -> f64;
+        #[wasm_bindgen(js_namespace = Math, js_name = atan)]
+        fn js_atan(x: f64) -> f64;
+    }
+    #[inline]
+    pub fn atan(x: f64) -> f64 {
+        js_atan(x)
     }
     #[inline]
     pub fn tan(x: f64) -> f64 {
@@ -81,9 +87,13 @@ mod trig {
     pub fn tan(x: f64) -> f64 {
         x.tan()
     }
+    #[inline]
+    pub fn atan(x: f64) -> f64 {
+        x.atan()
+    }
 }
 
-pub use trig::{acos, atan2, cos, pow, sin, tan};
+pub use trig::{acos, atan, atan2, cos, pow, sin, tan};
 
 /// Endliche Zahl oder 0 (NaN/±∞ → 0; Summen der Kennzahlen/Flächen).
 #[inline]

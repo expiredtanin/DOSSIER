@@ -316,6 +316,24 @@ export class ProjectDocument {
     return fromMarkedJson<T>(out);
   }
 
+  /**
+   * Vorschau eines Zeichenbefehls (`doc_create_preview`, `cmd_create.rs`): `reqJson` = Optionen (mit
+   * Nicht-endlich-Marken; `null` = dieselben wie beim letzten Aufruf), `pts` flach; Antwort
+   * `[ok, nInfo, info…, Formen…]`.
+   */
+  createPreview(reqJson: string | null, pts: Float64Array): Float64Array {
+    if (!this.handle) return new Float64Array(0);
+    return reqJson === null ? core().doc_create_preview_again(this.handle, pts) : core().doc_create_preview(this.handle, reqJson, pts);
+  }
+
+  /** Treffer-Abfrage eines Zeichenbefehls (`doc_create_query`), JSON-Antwort. */
+  createQuery<T>(req: object): T {
+    if (!this.handle) throw new Error("Kern-Abfrage „createQuery“: Dokument nicht offen");
+    const out = core().doc_create_query(this.handle, toMarkedJson(req));
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    return fromMarkedJson<T>(out);
+  }
+
   /** Vorschau-Formen eines Befehls (`doc_cmd_preview`): flach je Form `[art, n, x0, y0, …]`. */
   cmdPreview(req: object): Float64Array {
     return this.handle ? core().doc_cmd_preview(this.handle, toMarkedJson(req)) : new Float64Array(0);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sampleProject } from "../../model/sampleProject";
 import type { CommandContext } from "../types";
-import { solidCommand, solidFromInputs } from "./solid";
+import { solidCommand } from "./solid";
 
 const ctx = { project: sampleProject, level: { id: "eg" } } as unknown as CommandContext;
 
@@ -47,14 +47,15 @@ describe("solid-Befehl", () => {
       { kind: "number", value: 3 },
     ])!;
     expect(q.extrudedSolids![0].brep!.spec).toMatchObject({ kind: "cuboid", min: [0, 0, 0], max: [4, 2, 3] });
-    expect(solidFromInputs("torus", { x: 0, y: 0 }, null, [0.3, 0.5])).toBeNull();
-    expect(solidFromInputs("torus", { x: 0, y: 0 }, null, [2, 0.5])?.height).toBeCloseTo(1, 9);
+    // Torus: Hauptradius ≤ Rohrradius ergibt keinen Körper.
+    expect(run("torus", [{ kind: "point", point: { x: 0, y: 0 } }, { kind: "number", value: 0.3 }, { kind: "number", value: 0.5 }])!.extrudedSolids).toHaveLength(0);
+    expect(run("torus", [{ kind: "point", point: { x: 0, y: 0 } }, { kind: "number", value: 2 }, { kind: "number", value: 0.5 }])!.extrudedSolids![0].height).toBeCloseTo(1, 9);
   });
 
   it("Kegelstumpf: Revolve-Profil aus Radius, Oberradius, Hoehe", () => {
-    const b = solidFromInputs("frustum", { x: 1, y: 2 }, null, [2, 1, 3]);
-    expect(b?.height).toBe(3);
-    expect(b?.spec).toMatchObject({ kind: "revolve", cx: 1, cy: 2, profile: [0, 0, 2, 0, 1, 3, 0, 3] });
-    expect(solidFromInputs("frustum", { x: 0, y: 0 }, null, [2, 0, 3])).toBeNull();
+    const p = run("frustum", [{ kind: "point", point: { x: 1, y: 2 } }, { kind: "number", value: 2 }, { kind: "number", value: 1 }, { kind: "number", value: 3 }])!;
+    const b = p.extrudedSolids![0];
+    expect(b.height).toBe(3);
+    expect(b.brep!.spec).toMatchObject({ kind: "revolve", cx: 1, cy: 2, profile: [0, 0, 2, 0, 1, 3, 0, 3] });
   });
 });

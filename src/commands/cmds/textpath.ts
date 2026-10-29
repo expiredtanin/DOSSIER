@@ -6,7 +6,6 @@
 //   1) „Pfadpunkt:" → Punkt
 //   2) „Nächster Pfadpunkt ( Fertig ):" → Punkt … Enter beendet (≥2 Punkte nötig)
 
-import type { Drawing2D } from "../../model/types";
 import { segmentHud, uniqueId } from "../../tools/types";
 import type {
   Command,
@@ -18,12 +17,10 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation } from "../createCore";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
-const DEFAULT_TEXT_HEIGHT_M = 0.25;
 const segLen = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
 const segAngleDeg = (a: Vec2, b: Vec2): number =>
   (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
@@ -60,16 +57,8 @@ function pathDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendEmptyTextPath(id: string, pts: Vec2[], ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id,
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "text", at: pts[0], text: "", height: DEFAULT_TEXT_HEIGHT_M, angle: 0, pathPts: pts },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern, `cmd_draw.rs`): leerer Text entlang des Pfads (Anker = erster Pfadpunkt), vorab vergebene id. */
+const appendEmptyTextPath = (id: string, pts: Vec2[], ctx: CommandContext) => createMutation(ctx, { cmd: "textpath", id, pts });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "start", lastPoint: null } as TpIdle,
@@ -78,7 +67,7 @@ const idle = (): [CommandState, CommandResult] => [
 
 function commitPath(pts: Vec2[], ctx: CommandContext): CommandResult {
   const id = uniqueId("dr2d");
-  return { draft: null, done: true, commit: opsMutation(() => appendEmptyTextPath(id, pts, ctx)), focusDrawingId: id };
+  return { draft: null, done: true, commit: appendEmptyTextPath(id, pts, ctx), focusDrawingId: id };
 }
 
 export const textpathCommand: Command = {

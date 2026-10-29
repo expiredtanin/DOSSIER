@@ -7,11 +7,8 @@
 // fertig. Die Operation wählt man als Inline-Option (Default Vereinigung); bei Differenz wird
 // der ZWEITE vom ERSTEN abgezogen. Beide Quellkörper werden durch das Ergebnis ersetzt.
 
-import type { ExtrudedSolid, Vec2 } from "../../model/types";
-import { getFloor } from "../../model/types";
-import { uniqueId } from "../../tools/types";
-import { addItems, extrudedSolidSpec, opsMutation, removeItems } from "../../core";
-import type { Command, CommandResult, CommandState, CmdOption, Project, ToolDraft } from "../types";
+import type { Command, CommandContext, CommandResult, CommandState, CmdOption, ToolDraft } from "../types";
+import { createMutation, createPreview, createQuery, xy } from "../createCore";
 
 export type SolidBoolOp = "union" | "difference" | "intersection";
 
@@ -30,110 +27,18 @@ interface BoolState extends CommandState {
   firstId: string | null;
 }
 
-function pointInPolygon(p: Vec2, poly: Vec2[]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[i];
-    const b = poly[j];
-    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y || 1e-12) + a.x) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function bbox(pts: Vec2[]): { x0: number; y0: number; x1: number; y1: number } {
-  return {
-    x0: Math.min(...pts.map((p) => p.x)),
-    y0: Math.min(...pts.map((p) => p.y)),
-    x1: Math.max(...pts.map((p) => p.x)),
-    y1: Math.max(...pts.map((p) => p.y)),
-  };
-}
-
-const rect = (b: { x0: number; y0: number; x1: number; y1: number }): Vec2[] => [
-  { x: b.x0, y: b.y0 },
-  { x: b.x1, y: b.y0 },
-  { x: b.x1, y: b.y1 },
-  { x: b.x0, y: b.y1 },
-];
-
-/** Körper auf der aktiven Ebene, dessen Grundfläche den Punkt enthält (der kleinste gewinnt). */
-function pickSolid(project: Project, levelId: string, pt: Vec2): ExtrudedSolid | null {
-  let best: ExtrudedSolid | null = null;
-  let bestArea = Infinity;
-  for (const s of project.extrudedSolids ?? []) {
-    if (s.levelId !== levelId || !pointInPolygon(pt, s.points)) continue;
-    const b = bbox(s.points);
-    const area = (b.x1 - b.x0) * (b.y1 - b.y0);
-    if (area < bestArea) {
-      best = s;
-      bestArea = area;
-    }
-  }
-  return best;
-}
-
-/** Ergebnis-Körper aus zwei Operanden (reiner Kern, getestet). `null`, wenn ein Operand keine B-Rep-Beschreibung hat. */
-export function combineSolids(
-  project: Project,
-  a: ExtrudedSolid,
-  b: ExtrudedSolid,
-  op: SolidBoolOp,
-): ExtrudedSolid | null {
-  let baseZ = 0;
-  try {
-    baseZ = getFloor(project, a.levelId).baseElevation ?? 0;
-  } catch {
-    baseZ = 0;
-  }
-  // Operanden mit UK 0 beschreiben (lokales Z ab Geschoss-UK), Verschiebung ist eingebacken.
-  const sa = extrudedSolidSpec(a, 0);
-  const sb = extrudedSolidSpec(b, 0);
-  void baseZ;
-  if (!sa || !sb) return null;
-  const ba = bbox(a.points);
-  const bb = bbox(b.points);
-  let points: Vec2[];
-  let height: number;
-  let label: string;
-  if (op === "union") {
-    points = rect({ x0: Math.min(ba.x0, bb.x0), y0: Math.min(ba.y0, bb.y0), x1: Math.max(ba.x1, bb.x1), y1: Math.max(ba.y1, bb.y1) });
-    height = Math.max(a.height, b.height);
-    label = "Vereinigung";
-  } else if (op === "difference") {
-    points = a.points.map((p) => ({ ...p }));
-    height = a.height;
-    label = "Differenz";
-  } else {
-    const x0 = Math.max(ba.x0, bb.x0);
-    const y0 = Math.max(ba.y0, bb.y0);
-    const x1 = Math.min(ba.x1, bb.x1);
-    const y1 = Math.min(ba.y1, bb.y1);
-    if (x1 - x0 < 1e-6 || y1 - y0 < 1e-6) return null;
-    points = rect({ x0, y0, x1, y1 });
-    height = Math.min(a.height, b.height);
-    label = "Durchschnitt";
-  }
-  return {
-    id: uniqueId("body"),
-    type: "extrudedSolid",
-    levelId: a.levelId,
-    points,
-    height,
-    brep: {
-      spec: { kind: "boolean", op, a: sa, b: sb } as unknown as Record<string, unknown>,
-      origin: points[0],
-      label,
-    },
-  };
+/** Kleinster Körper der Ebene, dessen Grundriss den Punkt enthält (Kern), oder null. */
+function pickSolid(ctx: CommandContext, pt: { x: number; y: number }): string | null {
+  return createQuery<{ hit: string | null }>(ctx.project, { q: "pickSolid", level: ctx.level.id, pt: xy(pt) }).hit;
 }
 
 const reset = (op: SolidBoolOp): BoolState => ({ phase: "first", op, firstId: null, lastPoint: null });
 
-function highlight(project: Project, id: string | null): ToolDraft | null {
-  const s = id ? (project.extrudedSolids ?? []).find((x) => x.id === id) : null;
-  return s ? { preview: [{ kind: "poly", pts: s.points, closed: true }], vertices: [] } : null;
+/** Hervorhebung des ersten gewählten Körpers (Grundriss aus dem Kern). */
+function highlight(ctx: CommandContext, id: string | null): ToolDraft | null {
+  if (!id) return null;
+  const pv = createPreview(ctx, { cmd: "solidOutline", id }, []);
+  return pv.ok ? { preview: pv.shapes, vertices: [] } : null;
 }
 
 export const solidBoolCommand: Command = {
@@ -150,16 +55,16 @@ export const solidBoolCommand: Command = {
     if (input.kind === "option" && OP_IDS.has(input.id)) {
       lastOp = input.id as SolidBoolOp;
       const ns: BoolState = { ...s, op: lastOp };
-      return [ns, { draft: highlight(ctx.project, s.firstId) }];
+      return [ns, { draft: highlight(ctx, s.firstId) }];
     }
-    if (input.kind !== "point") return [s, { draft: highlight(ctx.project, s.firstId) }];
-    const hit = pickSolid(ctx.project, ctx.level.id, input.point);
-    if (!hit) return [s, { draft: highlight(ctx.project, s.firstId) }];
+    if (input.kind !== "point") return [s, { draft: highlight(ctx, s.firstId) }];
+    const hit = pickSolid(ctx, input.point);
+    if (!hit) return [s, { draft: highlight(ctx, s.firstId) }];
     if (s.phase === "first") {
-      const ns: BoolState = { ...s, phase: "second", firstId: hit.id, lastPoint: input.point };
-      return [ns, { draft: highlight(ctx.project, hit.id) }];
+      const ns: BoolState = { ...s, phase: "second", firstId: hit, lastPoint: input.point };
+      return [ns, { draft: highlight(ctx, hit) }];
     }
-    if (hit.id === s.firstId) return [s, { draft: highlight(ctx.project, s.firstId) }];
+    if (hit === s.firstId) return [s, { draft: highlight(ctx, s.firstId) }];
     const firstId = s.firstId!;
     const op = s.op;
     return [
@@ -167,15 +72,8 @@ export const solidBoolCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: opsMutation((p) => {
-          const a = (p.extrudedSolids ?? []).find((x) => x.id === firstId);
-          const b = (p.extrudedSolids ?? []).find((x) => x.id === hit.id);
-          if (!a || !b) return [];
-          const merged = combineSolids(p, a, b, op);
-          if (!merged) return [];
-          // Beide Körper raus, das Ergebnis hinten dran.
-          return [...removeItems(p, "extrudedSolids", [a.id, b.id]), ...addItems("extrudedSolids", [merged])];
-        }),
+        // Verknüpfung im Kern (`cmd_solid.rs`): Grundriss, Höhe, B-Rep `boolean` beider Körper.
+        commit: createMutation(ctx, { cmd: "solidbool", a: firstId, b: hit, op }),
       },
     ];
   },
