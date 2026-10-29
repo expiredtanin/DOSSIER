@@ -231,7 +231,21 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     ([B5]/[C11]: IFC2x3, Basismengen, Öffnungen, Zonen, Klassifikation, glTF …). Behalten ist die `fileio`-Fassung; die
     Kern-Duplikate `export_ifc.rs`, `export_mesh.rs`, `geo_rebase.rs`, `web/export_ifc.rs`, `doc_export_ifc` und die
     Abfragen `objFile`/`stlFile` sind gelöscht. Die Exporte holen ihre 3D-Teile über `export/model3dParts.ts` aus dem
-    Dokument (`queries.rs`). Offen: `fileio`-Schreiber direkt aus dem Dokument füttern statt über den TS-Sammler.
+    Dokument (`queries.rs`). ~~Offen: `fileio`-Schreiber direkt aus dem Dokument füttern statt über den TS-Sammler.~~
+    **Export-Sammler im Kern (29.10.):** Der Kern erzeugt den flachen Puffer der `fileio`-Schreiber selbst (Abfragen
+    `ifcExportData`/`meshExportData` über `queryBin`, Byte-Hülle `export_flat.rs`); TS gibt nur Optionen + Zeitstempel
+    weiter und reicht die Bytes an `fileio` (zwei WASM-Module). Neu: `ifc_data.rs`, `ifc_quantities.rs`,
+    `ifc_stairs.rs`, `mesh_data.rs`, `export_flat.rs` (Puffer, `orient_outward`, Volumen), `geo_rebase.rs`
+    (LV95-Verschiebung, `lv95_to_wgs84`). Gelöscht: TS-Sammler in `exportIfc.ts`/`exportMesh.ts`, `ifcQuantities`,
+    `ifcStairs`, `ifcClassification`, `ifcOpenings`, `meshOrient`, `model3dParts`, `plan/wallMeshCut` samt Bindungen.
+    Gleichheit: 1396 Ausgaben (alle Exporte der Test-Suite aufgezeichnet und mit Varianten wiederholt, Beispielprojekt
+    IFC4/IFC2x3 × eBKP-H × Ebenen, mit Georeferenz, 80 Zufallsprojekte mit allen Bauteilarten, bigSample(3)) vorher/
+    nachher zeichengleich (mit festem Zeitstempel), auch die Fehlermeldungen; `validate-ifc.py` über 110 Dateien
+    0 Befunde, glTF-Validator über 390 GLB/glTF 0 Fehler (nach [C11]-Korrektur der leeren Szene). Messung (Node,
+    Linux-Container, `--no-opt`-WASM, bigSample(20)): IFC 82,5 s → 2,4 s, GLB 212 s → 1,9 s; Beispielprojekt IFC
+    11 → 4 ms, GLB 15 → 2,5 ms (vorher je Bauteil ein eigenes Kern-Dokument aus dem ganzen Projekt-JSON). Nicht in
+    der Tauri-App geprüft (e2e im Browser: IFC-Export grün). Bleibt: DXF-Sammler (`exportDxf.ts`), STEP (truck) und
+    die Modell-Verschiebung `translateProject` in TS (Befehl „Neuer Bezugspunkt“, DXF).
     Nächste: Export (Schedule/CSV, STL/OBJ, STEP), Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation) — hängt an Plan-Puffer v2.
     Grundriss (28.10.): Decken, Dächer, Räume, Wände+Öffnungen, Treppen, Stützen, Extrusionen, Kontext und Schnittlinien
     kommen über `planDomains` aus dem Dokument ([K3d]); übrig in `generatePlan`: 2D-Zeichnungen, Schatten/Baurecht, Abzugskörper.
@@ -907,6 +921,11 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     Netz-Wände/Dächer als Brep sind grösser als IfcTriangulatedFaceSet (ein Punkt je Ecke, drei Entitäten je Dreieck). · M
   - Geprüft nur im Linux-Container (vitest + ifcopenshell 0.9: 0 Befunde, Volumen), nicht in
     Solibri/BIMcollab und nicht in der Tauri-App.
+  - ✅ Sammler nach Rust (29.10., [K4]): Mengen, Treppen-Teile, Füllungs-Parameter, Klassifikation/Zonen,
+    Geschoss-Kennwerte und Georeferenz rechnet der Kern (`core/src/ifc_data.rs`, `ifc_quantities.rs`,
+    `ifc_stairs.rs`, `geo_rebase.rs`) direkt aus dem Dokument; `exportIfc.ts` ist Fassade (Optionen, Zeitstempel,
+    Bytes an `fileio`). Ausgabe zeichengleich (s. [K4] S2). Dabei gefunden und behoben: Innenhöfe der Dächer
+    (`Roof.holes`) wanderten bei Georeferenz nicht mit (auch `translateProject` in TS).
 - ◐ **[BCF] BCF 2.1/3.0 (BIM Collaboration Format).** (28.10.) Koordinations-Themen mit Solibri, BIMcollab,
   Revit, ArchiCAD austauschen. Rust `src-tauri/fileio/src/bcf.rs` (+ `bcf_read`/`bcf_write` im pkgFileIo,
   JSON an der Grenze, Snapshots Base64): .bcfzip lesen/schreiben (Themen mit Typ/Status/Priorität/Zuständig/
@@ -1143,6 +1162,9 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   truck-Extrusionen (nur Prisma-Näherung) nicht wie im 3D; Dreieckszahl nicht gegen die GPU-Puffer von render3d gemessen
   (Wand-Löcher und Decken aus denselben Ableitungen, Dächer/Stützen/Treppen/Öffnungen identisch); nicht in
   Blender/Twinmotion/Enscape geöffnet, nur Validator; nicht in der Tauri-App getestet. · S
+  **Sammler nach Rust (29.10., [K4]):** Szene (Knoten, Teil-Netze je Material, Materialtabelle, `orientOutward`)
+  baut der Kern aus dem Dokument (`core/src/mesh_data.rs`); `exportMesh.ts` ist Fassade. Ausgabe zeichengleich
+  (s. [K4] S2); leere Szene jetzt ohne leere `nodes`-Liste (Validator EMPTY_ENTITY bei leerem Projekt).
 - ◐ **[C12] Allgemeiner Mesh-Import als Kontext-Meshes** (Gegenstück zu [C11], 28.10.): Nachbargebäude, Möbel und
   Umgebungsmodelle aus SketchUp/Blender/Rhino. Eigener Code in `src-tauri/fileio/src/mesh_import.rs` (OBJ + MTL, STL,
   PLY mit Flächen) und `mesh_import_gltf.rs` (glTF 2.0/GLB mit kleinem JSON-Leser, keine neue Abhängigkeit; earcutr
