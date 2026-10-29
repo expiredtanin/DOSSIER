@@ -26,6 +26,7 @@ import { Fragment } from "react";
 import type { ReactNode } from "react";
 import { t } from "../i18n";
 import { formatM, wallTypeLabel } from "../model/types";
+import { fmtLength, unitsForLevel } from "../tools/displayUnits";
 import { PEN_WEIGHTS } from "../model/types";
 import type { AttributeSource } from "../model/types";
 import { usePanelHost } from "./host";
@@ -124,6 +125,8 @@ export function AttributesPanel() {
   }
 
   const isDrawing = sel.kind === "drawing2d";
+  const sheetUnits = unitsForLevel(host.project.drawingLevels.find((z) => z.id === sel.floorId));
+  const sizeText = (m: number): string => (sheetUnits.perMeter === 1 ? formatM(m) : `${fmtLength(sheetUnits, m).replace(/mm$/, "")} mm`);
   // Strichstärke: Wand/Decke/Stütze/Drawing2D tragen einen eigenen Override
   // (`strokeWeight`/`weightMm`) + Quellen-Dropdown; andere Elementarten erben
   // stets aus der Kategorie (kein Setter im Kontrakt → nicht editierbar).
@@ -760,9 +763,7 @@ export function AttributesPanel() {
           </>
         )}
 
-        {/* ── Masse (informativ, aus der bbox) — bei einer Layout-Annotation
-            in Papier-mm statt Modell-Metern geführt (`formatM` passt nicht),
-            daher hier weggelassen; Grösse steht bereits im Blatt-HUD. */}
+        {/* ── Masse (informativ, aus der bbox) — auf einem Layout-Blatt in Papier-mm ([93]). */}
         {/* Bauteile: die bbox ist der GRUNDRISS-Umriss (X/Y), keine Höhe — als
             „Ausdehnung X/Y" beschriften (Nutzer-Report: Fenster zeigte „Höhe
             0.34 m" = Wanddicke). Öffnungen tragen Breite/Höhe im eigenen
@@ -771,9 +772,9 @@ export function AttributesPanel() {
           <>
             <div className="attr-section-label">{t("attr.size")}</div>
             <span className="attr-key">{t(isModelElement ? "attr.extentX" : "attr.width")}</span>
-            <span className="attr-val attr-readonly">{formatM(bboxW)}</span>
+            <span className="attr-val attr-readonly">{sizeText(bboxW)}</span>
             <span className="attr-key">{t(isModelElement ? "attr.extentY" : "attr.height")}</span>
-            <span className="attr-val attr-readonly">{formatM(bboxH)}</span>
+            <span className="attr-val attr-readonly">{sizeText(bboxH)}</span>
           </>
         )}
       </div>

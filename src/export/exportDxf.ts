@@ -50,8 +50,13 @@ export interface ExportDxfOptions {
   scaleDenominator?: number;
   /** Einheit der Masszahl: Meter (Default, wie im Plan „3.25") oder Zentimeter („325"). */
   dimUnit?: "m" | "cm";
-  /** Zusätzlich ein Layout (Papierbereich) mit Ansichtsfenster im Planmassstab anlegen. */
+  /**
+   * Zusätzlich ein Layout (Papierbereich) mit Ansichtsfenster im Planmassstab anlegen — und je
+   * Projekt-Layout einen Papierbereich mit der Blatt-Zeichnung und den Ansichtsfenstern auf `levelId`.
+   */
   paperLayout?: boolean;
+  /** Exportierte Ebene (für die Ansichtsfenster der Projekt-Layouts im Papierbereich). */
+  levelId?: string;
 }
 
 /** Ausgabeformat des Modell-Space-Exports. */
@@ -133,7 +138,7 @@ export function collectPlanDrawing(
   const o = Float64Array.of(scale, (opts.includeHatches ?? true) ? 1 : 0, opts.dimUnit === "cm" ? 1 : 0, opts.paperLayout ? 1 : 0, b.minX, b.minY, b.maxX, b.maxY);
   const doc = documentFor(project).id;
   // Eigener Puffer mit Schraffur-JSON (Verlauf-Schraffuren brauchen ihre Farben).
-  const bytes = withPlanParts(planParts(plan, true), (segs) => core().plan_dxf_flat(doc, segs, o));
+  const bytes = withPlanParts(planParts(plan, true), (segs) => core().plan_dxf_flat(doc, segs, o, opts.levelId ?? ""));
   return decodeFlat(bytes);
 }
 

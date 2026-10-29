@@ -841,9 +841,9 @@ fn textbox_frame(a: V, b: V, text_height: f64) -> (V, f64, f64) {
     ((mn.0, mx.1 - text_height), width, height)
 }
 
-fn kote_tri(at: V, kind: &str) -> [V; 3] {
+fn kote_tri(at: V, kind: &str, f: f64) -> [V; 3] {
     let up = if kind == "okFertig" || kind == "okRoh" { 1.0 } else { -1.0 };
-    let (size, half) = (0.15, 0.15 * 0.6);
+    let (size, half) = (0.15 * f, 0.15 * 0.6 * f);
     [at, (at.0 - half, at.1 + up * size), (at.0 + half, at.1 + up * size)]
 }
 
@@ -1168,19 +1168,20 @@ pub fn preview(root: &Map<String, Value>, v: &Value, ctx: &Ctx, pts: &[V], p: &m
         }
         "kote" => {
             if let Some(at) = pts.first() {
-                p.shapes.poly(&kote_tri(*at, s_of(v, "kind")));
+                p.shapes.poly(&kote_tri(*at, s_of(v, "kind"), ctx.symbol));
             }
         }
         "detailref" => {
             if let Some(at) = pts.first() {
-                p.shapes.poly(&circle_pts(*at, 0.3, 32));
+                p.shapes.poly(&circle_pts(*at, 0.3 * ctx.symbol, 32));
             }
         }
         "pointmarker" => {
             if let Some(at) = pts.first() {
-                p.shapes.poly(&circle_pts(*at, 0.08, 32));
-                p.shapes.line((at.0 - 0.12, at.1), (at.0 + 0.12, at.1));
-                p.shapes.line((at.0, at.1 - 0.12), (at.0, at.1 + 0.12));
+                let (r, c) = (0.08 * ctx.symbol, 0.12 * ctx.symbol);
+                p.shapes.poly(&circle_pts(*at, r, 32));
+                p.shapes.line((at.0 - c, at.1), (at.0 + c, at.1));
+                p.shapes.line((at.0, at.1 - c), (at.0, at.1 + c));
             }
         }
         "scalebar" => {
@@ -1233,7 +1234,7 @@ mod tests {
     use super::*;
 
     fn ctx() -> Ctx<'static> {
-        Ctx { level: "L", floor_height: None, cat: "20", wall_type: "", text_height: crate::cmd_create::DEFAULT_TEXT_HEIGHT }
+        Ctx { level: "L", floor_height: None, cat: "20", wall_type: "", text_height: crate::cmd_create::DEFAULT_TEXT_HEIGHT, symbol: 1.0 }
     }
 
     #[test]

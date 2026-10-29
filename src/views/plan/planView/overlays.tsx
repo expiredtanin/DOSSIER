@@ -5,6 +5,7 @@
 import type { Vec2 } from "../../../model/types";
 import type { SnapResult, ToolDraft } from "../../../tools/types";
 import { hudSegments, type HudFieldsState } from "../../../tools/hudFormat";
+import { MODEL_UNITS, type DisplayUnits } from "../../../tools/displayUnits";
 
 /**
  * Zeichnet die Werkzeug-Vorschau: Vorschau-Formen (gestrichelte Akzentlinien /
@@ -22,12 +23,15 @@ export function DraftOverlay({
   vbPerPx,
   snapColor,
   hudFields = null,
+  units = MODEL_UNITS,
 }: {
   draft: ToolDraft;
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
   snapColor: string;
   hudFields?: HudFieldsState | null;
+  /** Anzeige-Einheiten des HUDs (Layout-Blatt: Papier-mm). */
+  units?: DisplayUnits;
 }) {
   const vertSize = 4.5 * vbPerPx; // halbe Kantenlänge eines Stützpunkt-Quadrats (klein + einheitlich)
   const markSize = 4.75 * vbPerPx; // halbe Kantenlänge des Snap-Markers (klein + fein)
@@ -84,7 +88,7 @@ export function DraftOverlay({
         <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} color={snapColor} />
       )}
       {/* Maß-/Winkel-HUD am Cursor (VW-Stil `L: … W: …`, oder einfacher Text). */}
-      {draft.hud && <DraftHud hud={draft.hud} toScreen={toScreen} vbPerPx={vbPerPx} hudFields={hudFields} />}
+      {draft.hud && <DraftHud hud={draft.hud} toScreen={toScreen} vbPerPx={vbPerPx} hudFields={hudFields} units={units} />}
     </g>
   );
 }
@@ -101,15 +105,17 @@ function DraftHud({
   toScreen,
   vbPerPx,
   hudFields = null,
+  units,
 }: {
   hud: NonNullable<ToolDraft["hud"]>;
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
   hudFields?: HudFieldsState | null;
+  units: DisplayUnits;
 }) {
   // Segmente: gemeinsame Formatierung mit dem 3D-Pendant (Wasm3DViewport.tsx),
   // s. `tools/hudFormat.ts`.
-  const segs = hudSegments(hud, hudFields);
+  const segs = hudSegments(hud, hudFields, units);
   if (segs.length === 0) return null;
 
   const p = toScreen(hud.at);
@@ -276,7 +282,7 @@ function SnapMarker({
   const helperStyle = { stroke: color };
   const fillStyle = { stroke: color, fill: color };
   return (
-    <g className="snap-marker">
+    <g className="snap-marker" data-snap-kind={snap.kind}>
       {(snap.kind === "ortho" || snap.kind === "extension") && snap.refA && (
         <line
           className="snap-helper-line"

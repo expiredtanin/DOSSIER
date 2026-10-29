@@ -16,6 +16,8 @@
 // fünf DOSSIER-Modi): das Zeichnungsebenen-Panel steuert das 3D, das
 // Ebenen-Panel die Kategorie-Darstellung in Grundriss UND 3D.
 
+import { lengthFromDisplay, unitsForLevel } from "./tools/displayUnits";
+import { NON_LENGTH_FIELDS } from "./commands/parseInput";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   collectVisibleCodes,
@@ -600,6 +602,8 @@ export default function App() {
     project.drawingLevels[0];
   // Massstab der Arbeitsebene: auf einem Blatt Papier 1:1, sonst der gewählte Plan-Massstab.
   const planScale = isSheetLevel(activeLevel) ? SHEET_SCALE_DENOMINATOR : scaleDenominator;
+  // Anzeige-Einheiten (Lineale, Statusleiste, HUD, Befehlszeile): auf einem Blatt Papier-mm ([93]).
+  const displayUnits = unitsForLevel(activeLevel);
 
   // Sichtbare Kategorie-Codes — Basisfilter für Grundriss & 3D.
   const visibleCodes = useMemo(
@@ -938,6 +942,8 @@ export default function App() {
         cmdLatest.current.setProject(group && mutate.coreReq ? cmdMutation({ ...mutate.coreReq, group }) : mutate);
       },
       isFloor: () => cmdLatest.current.activeLevel.kind === "floor",
+      // Getippte Werte auf einem Layout-Blatt in Papier-mm, y nach unten ([93]).
+      inputUnits: () => unitsForLevel(cmdLatest.current.activeLevel),
       // Frisch über `text`/`textbox` erzeugtes Element sofort inline editieren
       // (kein Lookup nötig — der Commit hat es bereits angehängt, s. engine.ts
       // applyResult-Reihenfolge commit→focusDrawing). Auswahl-Löschen wie
@@ -3611,6 +3617,7 @@ export default function App() {
             Prompt + klickbare Inline-Optionen + Texteingabe + Autocomplete. */}
         <CommandLine
           ref={commandLineRef}
+          units={displayUnits}
           // (c) Während eines Vertex- ODER Kanten-Griff-Drags belegt der Feld-
           // Controller das Befehlsfeld (Länge/Winkel bzw. Abstand). Läuft eine
           // Auswahl-Transformation (Drehen etc.), belegt sie Prompt + U/I/O/P +
@@ -3660,8 +3667,22 @@ export default function App() {
               : engineView.fields
           }
           onSubmit={(text) => {
+            // Feld-Controller (Griff, Kante, Transformation): getippte Länge in Anzeige-Einheiten
+            // (Blatt: Papier-mm) → Meter; Winkel/Anzahl bleiben.
+            const ctlFields = gripEdit
+              ? gripEditFields()
+              : edgeEdit
+              ? edgeEditFields()
+              : activeTransform
+              ? transformFields()
+              : [];
+            const ctlActive = ctlFields.find((f) => f.active)?.id;
+            const typed = (raw: string): number => {
+              const n = parseFloat(raw.replace(",", "."));
+              return ctlActive && !NON_LENGTH_FIELDS.has(ctlActive) ? lengthFromDisplay(displayUnits, n) : n;
+            };
             if (gripEdit) {
-              const v = parseFloat(text.replace(",", "."));
+              const v = typed(text);
               if (isFinite(v)) submitGripEditValue(v);
               // Leere Eingabe: kein neuer Wert zu locken — Enter bestätigt
               // stattdessen die aktuelle Position (Maus- oder bereits
@@ -3671,7 +3692,7 @@ export default function App() {
               return;
             }
             if (edgeEdit) {
-              const v = parseFloat(text.replace(",", "."));
+              const v = typed(text);
               if (isFinite(v)) submitEdgeEditValue(v);
               else planViewRef.current?.confirmEdgeEdit();
               return;
@@ -3686,7 +3707,7 @@ export default function App() {
               return;
             }
             if (activeTransform) {
-              const v = parseFloat(text.replace(",", "."));
+              const v = typed(text);
               if (isFinite(v)) submitTransformValue(v);
               return;
             }
@@ -3804,6 +3825,7 @@ export default function App() {
         hint={toolHint}
         showCursor={planActive}
         unit="m"
+        units={displayUnits}
         referenceLines={referenceLines}
         onReferenceLines={setReferenceLines}
         referenceLinesEnabled={planActive}

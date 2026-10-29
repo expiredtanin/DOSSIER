@@ -119,8 +119,24 @@ fn pts_attr(p: &[V2]) -> String {
     p.iter().map(|q| format!("{},{}", r3(q.x), r3(q.y))).collect::<Vec<_>>().join(" ")
 }
 
+/// `#rrggbbaa` (Raumfüllung) → `#rrggbb` + Deckkraft: svg2pdf (Layout-PDF, [93]) kennt keine
+/// 8-stellige Hex-Farbe und füllte deckend dunkel (Raumstempel darunter verschwanden).
+fn split_alpha(color: &str) -> (String, Option<String>) {
+    let b = color.as_bytes();
+    if b.len() == 9 && b[0] == b'#' && b[1..].iter().all(|c| c.is_ascii_hexdigit()) {
+        if let Ok(a) = u8::from_str_radix(&color[7..9], 16) {
+            return (color[..7].to_string(), Some(js_number(crate::jsnum::round(a as f64 / 255.0 * 1000.0) / 1000.0)));
+        }
+    }
+    (color.to_string(), None)
+}
+
 fn poly_node(pts: &str, fill: &str, stroke: &str, stroke_mm: f64) -> Vec<(&'static str, String)> {
-    let mut a = vec![("points", pts.to_string()), ("fill", fill.to_string())];
+    let (fill, fill_opacity) = split_alpha(fill);
+    let mut a = vec![("points", pts.to_string()), ("fill", fill)];
+    if let Some(o) = fill_opacity {
+        a.push(("fill-opacity", o));
+    }
     if stroke != "none" && stroke_mm > 0.0 {
         a.push(("stroke", stroke.to_string()));
         a.push(("stroke-width", js_number(stroke_mm)));
@@ -575,6 +591,15 @@ pub fn print_svg_ops(parts: &mut [Part], o: &PrintOptions) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raumfuellung_mit_alpha_als_deckkraft() {
+        let a = poly_node("0,0 1,0 1,1", "#4a6fa526", "none", 0.0);
+        assert!(a.contains(&("fill", "#4a6fa5".to_string())));
+        assert!(a.contains(&("fill-opacity", "0.149".to_string())));
+        let b = poly_node("0,0 1,0 1,1", "#ffffff", "none", 0.0);
+        assert!(b.iter().all(|e| e.0 != "fill-opacity"));
+    }
 
     #[test]
     fn stift_stufen_und_runden() {

@@ -193,10 +193,21 @@ pub fn translate(root: &Map<String, Value>, dx: f64, dy: f64) -> Option<Vec<(&'s
     if dx == 0.0 && dy == 0.0 {
         return None;
     }
+    // Zeichnungen auf Layout-Blättern ([93]) liegen in Papier-Metern, nicht im Modell: sie wandern nicht mit.
+    let sheets: Vec<&str> = root
+        .get("drawingLevels")
+        .and_then(Value::as_array)
+        .map(|ls| ls.iter().filter(|l| l.get("layoutId").and_then(Value::as_str).is_some_and(|s| !s.is_empty())).filter_map(|l| l.get("id").and_then(Value::as_str)).collect())
+        .unwrap_or_default();
+    let on_sheet = |key: &str, e: &Value| key == "drawings2d" && !sheets.is_empty() && e.get("levelId").and_then(Value::as_str).is_some_and(|l| sheets.contains(&l));
     Some(
         TRANSLATED_LISTS
             .iter()
-            .filter_map(|key| root.get(*key).and_then(Value::as_array).map(|a| (*key, a.iter().map(|e| shift_element(key, e, dx, dy)).collect())))
+            .filter_map(|key| {
+                root.get(*key)
+                    .and_then(Value::as_array)
+                    .map(|a| (*key, a.iter().map(|e| if on_sheet(key, e) { (e.clone(), false) } else { shift_element(key, e, dx, dy) }).collect()))
+            })
             .collect(),
     )
 }
@@ -245,6 +256,20 @@ mod tests {
 
     fn root(v: Value) -> Map<String, Value> {
         v.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn blatt_zeichnungen_bleiben_beim_verschieben() {
+        let root = json!({
+            "drawingLevels": [{"id": "eg", "kind": "floor"}, {"id": "sh", "kind": "drawing", "layoutId": "L"}],
+            "drawings2d": [
+                {"id": "a", "levelId": "eg", "geom": {"shape": "line", "a": {"x": 0, "y": 0}, "b": {"x": 1, "y": 0}}},
+                {"id": "b", "levelId": "sh", "geom": {"shape": "line", "a": {"x": 0.01, "y": -0.01}, "b": {"x": 0.1, "y": -0.01}}}
+            ]
+        });
+        let patch = project_patch(root.as_object().unwrap(), 10.0, 20.0);
+        assert_eq!(patch["drawings2d"][0]["geom"]["a"], json!({"x": 10.0, "y": 20.0}));
+        assert_eq!(patch["drawings2d"][1], root["drawings2d"][1]);
     }
 
     #[test]

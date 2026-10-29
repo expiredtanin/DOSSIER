@@ -136,6 +136,7 @@ export function useExportHandlers(opts: {
         scaleDenominator: decision.scaleDenominator,
         dimUnit: decision.dimUnit,
         paperLayout: decision.paperLayout,
+        levelId: activeLevelId,
         fileName: `${project.name}-${activeLevelName}`,
       });
     } catch (err) {

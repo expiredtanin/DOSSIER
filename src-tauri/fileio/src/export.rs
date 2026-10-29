@@ -99,6 +99,12 @@ pub const REC_BLOCK: f64 = 16.0;
 pub const REC_BLOCK_END: f64 = 17.0;
 pub const REC_INSERT: f64 = 18.0;
 pub const REC_LAYOUT: f64 = 19.0;
+/// Papierbereich eines Projekt-Layouts ([93]): `[Name, Papierbreite, Papierhöhe]` (mm).
+pub const REC_SHEET: f64 = 20.0;
+/// Ansichtsfenster in einem Papierbereich: `[Name, Mitte x, y, Breite, Höhe (Papier-mm), Bildmitte x, y (m), Massstabsnenner]`.
+pub const REC_SHEET_VP: f64 = 21.0;
+/// Blockeinfügung in einem Papierbereich (Blatt-Zeichnung): `[Name, Block, x, y (mm), Faktor]`.
+pub const REC_SHEET_INSERT: f64 = 22.0;
 
 /// DXF-Ausgabeversion (s. Kopf).
 pub const DXF_VERSION: DxfVersion = DxfVersion::AC1032;
@@ -301,7 +307,12 @@ struct BlockDef {
 /// Papierhöhe, Mittelpunkt (x, y) und Grösse (b, h) des Fensters auf dem Papier (mm), Mittelpunkt des
 /// Bildausschnitts im Modell (m), Massstabsnenner. Massstab: 1 m Modell = 1000/Nenner mm Papier.
 fn add_layout_with_viewport(doc: &mut CadDocument, name: &str, v: &[f64]) -> Result<(), String> {
-    let (pw, ph, cx, cy, vw, vh) = (v[0], v[1], v[2], v[3], v[4], v[5]);
+    add_sheet(doc, name, v[0], v[1])?;
+    add_viewport(doc, name, 2, &[v[2], v[3], v[4], v[5], v[6], v[7], v[8]])
+}
+
+/// Leerer Papierbereich (Layout in mm, Blattviewport über das ganze Papier).
+fn add_sheet(doc: &mut CadDocument, name: &str, pw: f64, ph: f64) -> Result<(), String> {
     let layout_handle = doc.add_layout(name).map_err(|e| format!("Layout {name}: {e}"))?;
     // Papiergrösse und Grenzen im Layout-Objekt; Blattviewport (ID 1) deckt das Papier.
     let mut overall = Handle::NULL;
@@ -321,15 +332,22 @@ fn add_layout_with_viewport(doc: &mut CadDocument, name: &str, v: &[f64]) -> Res
         vp.view_center = Vector3::new(pw / 2.0, ph / 2.0, 0.0);
         vp.view_height = ph;
     }
+    Ok(())
+}
+
+/// Ansichtsfenster `id` (≥ 2) im Papierbereich `name`: `v` = Mitte x, y und Grösse b, h auf dem Papier
+/// (mm), Mitte des Bildausschnitts im Modell (m), Massstabsnenner.
+fn add_viewport(doc: &mut CadDocument, name: &str, id: i16, v: &[f64]) -> Result<(), String> {
+    let (cx, cy, vw, vh) = (v[0], v[1], v[2], v[3]);
     let mut vp = Viewport::new();
-    vp.id = 2;
+    vp.id = id;
     vp.status = acadrust::entities::ViewportStatusFlags::default_on();
     vp.center = Vector3::new(cx, cy, 0.0);
     vp.width = vw;
     vp.height = vh;
-    vp.view_center = Vector3::new(v[6], v[7], 0.0);
-    vp.view_target = Vector3::new(v[6], v[7], 0.0);
-    vp.set_scale(1000.0 / v[8]);
+    vp.view_center = Vector3::new(v[4], v[5], 0.0);
+    vp.view_target = Vector3::new(v[4], v[5], 0.0);
+    vp.set_scale(1000.0 / v[6]);
     vp.common.layer = "0".to_string();
     doc.add_entity_to_layout(EntityType::Viewport(Box::new(vp)), name)
         .map_err(|e| format!("Ansichtsfenster {name}: {e}"))?;
@@ -358,6 +376,8 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
     let mut styles: Vec<String> = Vec::new();
     let mut dimstyles: Vec<DimStyleDef> = Vec::new();
     let mut blocks: std::collections::HashMap<String, BlockDef> = std::collections::HashMap::new();
+    // Papierbereiche der Projekt-Layouts ([93]): Name → nächste Ansichtsfenster-Nummer.
+    let mut sheets: std::collections::HashMap<String, i16> = std::collections::HashMap::new();
     let mut cur_ltype = String::new();
     let mut cur_block: Option<Handle> = None;
     let mut dim_counter = 0usize;
@@ -551,6 +571,36 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             // Papier ≥ 10 mm, Ansichtsfenster ≥ 1 mm, Massstab > 0; sonst bleibt der Papierbereich weg.
             if all_finite(v) && v[0] >= 10.0 && v[1] >= 10.0 && v[4] >= 1.0 && v[5] >= 1.0 && v[8] > 0.0 && cur_block.is_none() {
                 add_layout_with_viewport(&mut doc, &name, v)?;
+            }
+            continue;
+        }
+        if tag == REC_SHEET {
+            let name = sanitize_layer_name(str_at(r.idx()?)?);
+            let v = r.take(2)?;
+            if all_finite(v) && v[0] >= 10.0 && v[1] >= 10.0 && cur_block.is_none() && !sheets.contains_key(&name) {
+                add_sheet(&mut doc, &name, v[0], v[1])?;
+                sheets.insert(name, 2);
+            }
+            continue;
+        }
+        if tag == REC_SHEET_VP {
+            let name = sanitize_layer_name(str_at(r.idx()?)?);
+            let v = r.take(7)?;
+            if let Some(next) = sheets.get_mut(&name).filter(|_| all_finite(v) && v[2] >= 1.0 && v[3] >= 1.0 && v[6] > 0.0) {
+                let id = *next;
+                *next = next.saturating_add(1);
+                add_viewport(&mut doc, &name, id, v)?;
+            }
+            continue;
+        }
+        if tag == REC_SHEET_INSERT {
+            let name = sanitize_layer_name(str_at(r.idx()?)?);
+            let block = sanitize_block_name(str_at(r.idx()?)?);
+            let v = r.take(3)?;
+            if sheets.contains_key(&name) && blocks.contains_key(&block) && all_finite(v) && v[2].abs() > 1e-12 {
+                let mut ins = Insert::new(block, Vector3::new(v[0], v[1], 0.0)).with_scale(v[2], v[2], 1.0);
+                ins.common.layer = "0".to_string();
+                doc.add_entity_to_layout(EntityType::Insert(ins), &name).map_err(|e| format!("Blatt {name}: {e}"))?;
             }
             continue;
         }
@@ -1361,6 +1411,39 @@ mod tests {
         let (flat, strings) = layout_flat();
         check_layout(&read_dxf(export_dxf(&flat, &strings).unwrap()));
         check_layout(&read_dwg(export_dwg(&flat, &strings).unwrap()));
+    }
+
+    /// [93] Projekt-Layout als Papierbereich: Blatt, Ansichtsfenster und die Blatt-Zeichnung als Block
+    /// (Papier-Meter, Faktor 1000 → mm), eingefügt im Papierbereich.
+    #[test]
+    fn projekt_blatt_mit_zeichnung_und_ansichtsfenster() {
+        let flat = vec![
+            FLAT_VERSION,
+            REC_LAYER, 0.0, -1.0, 25.0,
+            REC_LINE, 0.0, 0.0, 0.0, 10.0, 0.0,
+            REC_BLOCK, 2.0, -1.0, 0.0,
+            REC_LINE, 0.0, 0.02, -0.02, 0.1, -0.02,
+            REC_BLOCK_END,
+            REC_SHEET, 1.0, 420.0, 297.0,
+            REC_SHEET_VP, 1.0, 200.0, 150.0, 200.0, 100.0, 5.0, 0.0, 100.0,
+            REC_SHEET_INSERT, 1.0, 2.0, 0.0, 297.0, 1000.0,
+            // unbekanntes Blatt: übersprungen
+            REC_SHEET_INSERT, 3.0, 2.0, 0.0, 297.0, 1000.0,
+        ];
+        let strings = "P\0Blatt 1\0SHEET_1\0Fehlt".to_string();
+        for doc in [read_dxf(export_dxf(&flat, &strings).unwrap()), read_dwg(export_dwg(&flat, &strings).unwrap())] {
+            let layout = doc
+                .objects
+                .values()
+                .find_map(|o| if let acadrust::objects::ObjectType::Layout(l) = o { l.name.starts_with("Blatt").then_some(l) } else { None })
+                .expect("Layout");
+            assert!((layout.paper_width - 420.0).abs() < 1e-9);
+            let vp = doc.entities().find_map(|e| if let EntityType::Viewport(v) = e { (v.id == 2).then_some(v) } else { None }).expect("Fenster");
+            assert!((vp.width - 200.0).abs() < 1e-9 && (vp.view_center.x - 5.0).abs() < 1e-9);
+            let ins: Vec<&Insert> = doc.entities().filter_map(|e| if let EntityType::Insert(i) = e { Some(i) } else { None }).collect();
+            assert_eq!(ins.len(), 1);
+            assert!((ins[0].x_scale() - 1000.0).abs() < 1e-9 && (ins[0].insert_point.y - 297.0).abs() < 1e-9);
+        }
     }
 
     #[test]

@@ -16,7 +16,8 @@
 import type { Vec2 } from "../model/types";
 import type { SnapResult, ToolDraft } from "../tools/types";
 import type { ProjectMutation } from "../core";
-import { parseInput, resolvePoint } from "./parseInput";
+import { NON_LENGTH_FIELDS, parseInput, resolvePoint, toModelInput } from "./parseInput";
+import { MODEL_UNITS, type DisplayUnits } from "../tools/displayUnits";
 import { getCommand, resolveCommand, autocomplete } from "./registry";
 import type {
   Command,
@@ -59,6 +60,11 @@ export interface EngineHost {
    * Inline-Text-Editor zu öffnen). Fehlt der Host-Handler, ist das ein No-op.
    */
   focusDrawing?(drawingId: string, minHeightM?: number): void;
+  /**
+   * Optional: Einheiten getippter Werte ([93]): auf einem Layout-Blatt Papier-mm mit y nach unten
+   * (s. `tools/displayUnits.ts`). Fehlt der Handler, gelten Meter.
+   */
+  inputUnits?(): DisplayUnits;
 }
 
 /** Öffentlicher Schnappschuss für die Command-Line-UI (rein lesend). */
@@ -228,6 +234,12 @@ export class CommandEngine {
    * sofort den daraus gebildeten Punkt — so commitet ein Ein-Feld-Befehl (Kreis:
    * Radius) direkt und ein Zwei-Feld-Befehl (Linie) nach dem zweiten Wert.
    */
+  /** Art des aktiven Tab-Felds für getippte Werte: Länge, Δy („height“) oder ohne Umrechnung. */
+  private activeFieldUnit(): "length" | "dy" | "none" {
+    const f = this.currentFields()[this.activeFieldIndex];
+    return !f || NON_LENGTH_FIELDS.has(f.id) ? "none" : f.id === "height" ? "dy" : "length";
+  }
+
   private lockActiveField(value: number): void {
     this.syncFields();
     const defs = this.currentFields();
@@ -361,7 +373,13 @@ export class CommandEngine {
       return;
     }
 
-    const parsed = parseInput(text);
+    const parsed = toModelInput(
+      parseInput(text),
+      this.host.inputUnits?.() ?? MODEL_UNITS,
+      // Nackte Zahl: Länge im Längen-Feld bzw. als Distanz-Lock eines Punkt-Schritts; reine Zahl-Schritte
+      // (Anzahl, Faktor, Winkel …) bleiben ohne Umrechnung.
+      this.hasFields() ? this.activeFieldUnit() : accepts.includes("point") ? "length" : "none",
+    );
 
     // Tab-Feld-Modus (§2.7): eine nackte Zahl LOCKT das aktive Feld (statt als
     // distance/number durchzureichen) und rückt aufs nächste Feld vor. Absolute/

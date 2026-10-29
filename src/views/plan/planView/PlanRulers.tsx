@@ -2,6 +2,7 @@
 
 import type { Vec2 } from "../../../model/types";
 import { PX_PER_M } from "../../../core";
+import { MODEL_UNITS, rulerLabel, type DisplayUnits } from "../../../tools/displayUnits";
 
 /**
  * Schrittweite (Meter) fürs Lineal: 1/2/5·10^n, sodass Major-Ticks ≥ ~64 px
@@ -30,6 +31,7 @@ export function PlanRulers({
   vbPerPx,
   pxPerMeter,
   cursor,
+  units = MODEL_UNITS,
 }: {
   /** Sichtbarer Ausschnitt in (absoluten) viewBox-Einheiten. */
   vb: { x0: number; y0: number; w: number; h: number };
@@ -41,13 +43,15 @@ export function PlanRulers({
   vbPerPx: number;
   pxPerMeter: number;
   cursor: Vec2 | null;
+  /** Beschriftung: Meter (Modell) oder Papier-mm mit y nach unten (Layout-Blatt, [93]). */
+  units?: DisplayUnits;
 }) {
   const TH = 20 * vbPerPx; // Leisten-Dicke (screen-px → viewBox)
   const step = rulerStep(pxPerMeter);
   const minor = step / 5;
   const font = 9 * vbPerPx;
   // Negative Null vermeiden („−0.000m" bei Startwerten knapp unter 0).
-  const label = (v: number): string => `${(Math.abs(v) < 1e-9 ? 0 : v).toFixed(3)}m`;
+  const label = (axis: "x" | "y", v: number): string => rulerLabel(units, axis, v);
 
   // Sichtbarer Modellbereich (Plan-Y nach oben: vbY = −y·PX_PER_M).
   const mx0 = vb.x0 / PX_PER_M;
@@ -91,7 +95,7 @@ export function PlanRulers({
             />
             {t.major && (
               <text className="plan-ruler-text" x={t.vbX + 3 * vbPerPx} y={y0 + TH * 0.42} fontSize={font}>
-                {label(t.model)}
+                {label("x", t.model)}
               </text>
             )}
           </g>
@@ -116,7 +120,7 @@ export function PlanRulers({
                 fontSize={font}
                 transform={`rotate(-90 ${x0 + TH * 0.42} ${t.vbY - 3 * vbPerPx})`}
               >
-                {label(t.model)}
+                {label("y", t.model)}
               </text>
             )}
           </g>

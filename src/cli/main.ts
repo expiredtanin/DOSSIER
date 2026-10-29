@@ -594,7 +594,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       await loadFileio();
       // --scale N (Massstabsnenner, Default 100): Bemassungsstil, Linientypen, Raumstempel, Ansichtsfenster.
       // --dim-unit cm: Masszahlen in Zentimetern; --layout: zusätzlich Papierbereich mit Ansichtsfenster.
-      const cad = { scaleDenominator: scale, dimUnit: args.flags.get("dim-unit") === "cm" ? ("cm" as const) : ("m" as const), paperLayout: args.flags.has("layout") };
+      const cad = { scaleDenominator: scale, dimUnit: args.flags.get("dim-unit") === "cm" ? ("cm" as const) : ("m" as const), paperLayout: args.flags.has("layout"), levelId: lvl.id };
       if (command === "dxf" && args.flags.has("binary")) out(args, buildPlanDxfBinary(plan, world, cad), `${lvl.name}.dxf`);
       else if (command === "dxf") out(args, buildPlanDxf(plan, world, cad), `${lvl.name}.dxf`);
       else out(args, buildPlanDwg(plan, world, cad), `${lvl.name}.dwg`);

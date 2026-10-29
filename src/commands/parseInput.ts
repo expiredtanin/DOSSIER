@@ -17,6 +17,7 @@
 // (passend zur Y-flip-freien Modellkonvention: +Y ist „oben").
 
 import type { Vec2 } from "../model/types";
+import { lengthFromDisplay, pointFromDisplay, yFromDisplay, type DisplayUnits } from "../tools/displayUnits";
 
 /** Geparste, noch nicht aufgelöste Eingabe. */
 export type ParsedInput =
@@ -104,6 +105,31 @@ export function parseInput(raw: string): ParsedInput {
 
   // ── sonst: Text (Befehl/Option) ───────────────────────────────────────────
   return { kind: "text", text: s };
+}
+
+/** Tab-Felder ohne Länge (keine Einheiten-Umrechnung getippter Werte). */
+export const NON_LENGTH_FIELDS: ReadonlySet<string> = new Set(["angle", "count", "steps", "segments", "sides", "bends"]);
+
+/**
+ * Getippte Eingabe in Anzeige-Einheiten → Modell ([93], Layout-Blatt: Papier-mm, y nach unten).
+ * `distance`: eine nackte Zahl ist eine Länge (Längen-Feld, Distanz-Lock), ein Δy (Feld „height“: auf
+ * dem Papier nach unten) oder bleibt, wie sie ist (Winkel, Anzahl, Faktor).
+ */
+export function toModelInput(p: ParsedInput, u: DisplayUnits, distance: "length" | "dy" | "none"): ParsedInput {
+  if (u.perMeter === 1 && !u.flipY) return p;
+  switch (p.kind) {
+    case "absolute":
+      return { kind: "absolute", point: pointFromDisplay(u, p.point) };
+    case "relative":
+      return { kind: "relative", delta: { x: lengthFromDisplay(u, p.delta.x), y: yFromDisplay(u, p.delta.y) } };
+    case "polar":
+      return { kind: "polar", dist: lengthFromDisplay(u, p.dist), angleDeg: p.angleDeg };
+    case "distance":
+      if (distance === "none") return p;
+      return { kind: "distance", value: distance === "dy" ? yFromDisplay(u, p.value) : lengthFromDisplay(u, p.value) };
+    default:
+      return p;
+  }
 }
 
 /** Punkt aus polarer Form (Distanz/Winkel) relativ zu einem Basispunkt. */

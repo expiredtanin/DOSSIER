@@ -4,7 +4,7 @@
 // Griffen und einem Undo-Schritt je Element. Bildschirm-Punkte aus der viewBox-Abbildung des
 // SVG-Overlays (x·90, −y·90 minus lokalem Ursprung, s. `planView/overlayOrigin.ts`).
 import type { Page } from "@playwright/test";
-import { blurFocus, expect, openTab, startNewProject, test } from "./app";
+import { blurFocus, expect, openSample, openTab, startNewProject, test, typeCommand } from "./app";
 
 type Pt = { x: number; y: number };
 
@@ -208,3 +208,85 @@ for (const where of ["Grundriss", "Layout-Blatt"] as const) {
     await undoEach(page, base, 4);
   });
 }
+
+/** Blatt-Punkt (Papier-mm, y nach unten) → Client-Pixel über die viewBox der Plan-Ansicht. */
+async function clientOfMm(page: Page, xMm: number, yMm: number): Promise<Pt> {
+  return page.locator("svg.plan-svg").evaluate(
+    (el, [x, y]) => {
+      const [vx, vy, vw, vh] = el.getAttribute("viewBox")!.split(/\s+/).map(Number);
+      const ox = Number(el.getAttribute("data-origin-x") ?? 0);
+      const oy = Number(el.getAttribute("data-origin-y") ?? 0);
+      const r = el.getBoundingClientRect();
+      const s = Math.min(r.width / vw, r.height / vh);
+      // Blatt (x/1000, −y/1000) m → viewBox (x·90, −y·90).
+      return { x: r.left + (r.width - vw * s) / 2 + ((x / 1000) * 90 - ox - vx) * s, y: r.top + (r.height - vh * s) / 2 + ((y / 1000) * 90 - oy - vy) * s };
+    },
+    [xMm, yMm],
+  );
+}
+
+// [93] Auf dem Blatt zeigen Lineale und Objekt-Info Papier-mm (y nach unten wie auf dem Papier),
+// getippte Koordinaten gelten in Papier-mm.
+test("Blatt: Lineale/Objekt-Info in Papier-mm, getippte Koordinaten in mm", async ({ page }) => {
+  await startNewProject(page);
+  await openNewLayout(page);
+  await pickTool(page, "Linie", /Startpunkt/);
+  await typeCommand(page, "20,30");
+  await typeCommand(page, "120,30");
+  await finish(page);
+  // Lineale: Papier-mm ohne „m" (negativ nur ausserhalb des Blatts).
+  const labels = await page.locator(".plan-ruler-text").allTextContents();
+  expect(labels.length).toBeGreaterThan(4);
+  for (const l of labels) expect(l).toMatch(/^-?\d+(\.\d)?$/);
+  // Linie wählen (Mitte bei 70 / 30 mm) → Objekt-Info in mm.
+  await page.getByRole("button", { name: "Auswahl", exact: true }).click();
+  await blurFocus(page);
+  const mid = await clientOfMm(page, 70, 30);
+  await page.mouse.click(mid.x, mid.y);
+  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  await openTab(page, "Objekt-Info");
+  const field = (label: string) => page.locator("label.objinfo-field").filter({ has: page.locator(".objinfo-flabel", { hasText: new RegExp(`^${label}$`) }) }).locator("input");
+  await expect(field("Breite")).toHaveValue("100.0");
+  await expect(field("X")).toHaveValue("70.0");
+  await expect(field("Y")).toHaveValue("30.0");
+  await expect(page.locator("label.objinfo-field .objinfo-unit").first()).toHaveText("mm");
+  // Y in mm setzen (nach unten) → die Linie wandert auf dem Papier nach unten.
+  await field("Y").fill("50");
+  await field("Y").press("Enter");
+  await expect(field("Y")).toHaveValue("50.0");
+});
+
+// [93] Fang auf Viewport-Inhalt: auf einem Blatt ohne eigene Zeichnung fängt das Linienwerkzeug an den
+// Kanten des Grundrisses, den ein platzierter Viewport zeigt (Kern-Fang, `sheet_viewports.rs`).
+test("Blatt: Fang auf Viewport-Inhalt", async ({ page }) => {
+  await startNewProject(page);
+  await openSample(page);
+  await openTab(page, "Ausschnitte");
+  await page.getByTitle("Ausschnitt speichern").first().click();
+  await page.getByPlaceholder("Ausschnitt speichern als:").fill("EG");
+  await page.keyboard.press("Enter");
+  await openNewLayout(page);
+  const paper = await paperBox(page);
+  await page.getByRole("button", { name: /Viewport aufziehen/ }).click();
+  const a = { x: paper.x + paper.width * 0.1, y: paper.y + paper.height * 0.1 };
+  const b = { x: paper.x + paper.width * 0.9, y: paper.y + paper.height * 0.6 };
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 6 });
+  await page.mouse.up();
+  const bind = page.locator(".layout-sheet-bind select");
+  if (await bind.isVisible().catch(() => false)) await bind.selectOption({ label: "EG" });
+  await expect(page.locator("[data-viewport-id] svg").first()).toBeAttached();
+  await pickTool(page, "Linie", /Startpunkt/);
+  // Raster über den Viewport: irgendwo fängt die Marke an einer Grundriss-Kante/-Ecke.
+  const kinds = new Set<string>();
+  for (let i = 1; i < 16 && kinds.size === 0; i++) {
+    for (let j = 1; j < 10; j++) {
+      await page.mouse.move(a.x + ((b.x - a.x) * i) / 16, a.y + ((b.y - a.y) * j) / 10);
+      const k = await page.locator(".snap-marker").first().getAttribute("data-snap-kind", { timeout: 150 }).catch(() => null);
+      if (k && k !== "grid") kinds.add(k);
+    }
+  }
+  expect([...kinds].some((k) => ["endpoint", "onEdge", "midpoint", "intersection", "perpendicular"].includes(k))).toBe(true);
+  await page.screenshot({ path: "test-results/layout-sheet-viewport-snap.png" });
+});
