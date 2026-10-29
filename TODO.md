@@ -292,6 +292,13 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Kern lesen); Fassade `wrapDocToLines` ungemerkt ~7 → ~28 µs je Aufruf (JSON hin, flache Zeilen zurück), gemerkt < 1 µs.
     Gefunden, bewusst unverändert: im Druck-SVG (Layout-Viewports) tragen die Runs der Einzeltexte `font-size` = Höhe in
     Metern statt Papier-mm (alte TS-Formel `basePt · unitPerPt`); offen als eigener Fehler.
+    ✅ (30.10.) behoben: Basisgrösse der Einzeltexte im Druck-SVG = Höhe × mm je Meter (wie die Plan-Ansicht beim
+    Massstab; betraf auch Masszahlen, Höhenkoten, Schnittlinien-Bezeichner — alles `drawingText`, im Layout 1:50 20-mal
+    zu klein). Raumstempel fehlten im Druck-SVG ganz (Eintrag `text` übergangen): jetzt als Block wie die Plan-Ansicht im
+    Druckmodus (`stamp_block`, 10 pt Papier). Test `planToPrintSvg.text.test.ts` (Layout-Viewport 1:50: Einzeltext,
+    Rich-Text mit Spalte, Masszahl 4 mm, Kote, Raumstempel) + Rust-Tests; Druck-SVG vorher/nachher in Chromium angesehen.
+    Offen: Run-eigene `sizePt` in Einzeltexten bedeuten in SVG-Ansicht und Druck Modell-pt, in der Render-Szene (GPU)
+    Papier-pt bei 1:100 — uneinheitlich (Editor setzt sie relativ zu 12 pt); Text entlang Pfad fehlt im Druck-SVG.
     Nicht in der Tauri-App angesehen (nativer Text-Pfad `nativeText.ts` unverändert).
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
