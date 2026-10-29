@@ -10,9 +10,8 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Opening, Project, Vec2, Wall } from "../model/types";
-import { getWallType, wallTypeThickness } from "../model/types";
-import { add, along, leftNormal, normalize, scale, sub } from "../model/geometry";
-import { wallReferenceOffset, wallVerticalExtent } from "../model/wall";
+import { along, leftNormal, normalize, sub } from "../model/geometry";
+import { wallVerticalExtent } from "../model/wall";
 
 /** Achslänge einer Wand (Meter). */
 export function wallAxisLength(wall: Wall): number {
@@ -69,28 +68,6 @@ export function openingJambs(
     jambStart: along(wall.start, wall.end, iv.from),
     jambEnd: along(wall.start, wall.end, iv.to),
   };
-}
-
-/**
- * Die Lücken-Rechteck-Ecken (über die volle Wanddicke), z. B. um im Plan die
- * Öffnung als Aussparung zu markieren (Auswahl-Highlight). Reihenfolge:
- * jambStart(+n/2) → jambEnd(+n/2) → jambEnd(−n/2) → jambStart(−n/2).
- */
-export function openingGapQuad(project: Project, wall: Wall, o: Opening): Vec2[] | null {
-  const jambs = openingJambs(wall, o);
-  if (!jambs) return null;
-  const { n } = wallAxisFrame(wall);
-  const total = wallTypeThickness(getWallType(project, wall));
-  const refOff = wallReferenceOffset(wall, total);
-  const outer = refOff + total / 2;
-  const inner = refOff - total / 2;
-  const { jambStart, jambEnd } = jambs;
-  return [
-    add(jambStart, scale(n, outer)),
-    add(jambEnd, scale(n, outer)),
-    add(jambEnd, scale(n, inner)),
-    add(jambStart, scale(n, inner)),
-  ];
 }
 
 /** Mittelpunkt einer Öffnung im Grundriss (Achse) — für HUD/Auswahl-Anker. */

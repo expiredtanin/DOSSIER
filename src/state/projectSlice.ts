@@ -57,22 +57,12 @@ import {
   PEN_FALLBACK_COLOR,
   PEN_FALLBACK_WEIGHT,
 } from "../model/penSets";
-import { lineIntersect } from "../model/geometry";
 import { reorderByIds } from "../model/reorder";
 import { transformOps } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
-import { centroid as roomCentroid } from "../core";
-import { bulgeArc, bulgeBetweenAngles, bulgeFromSagittaPoint, bulgePointAt, pointOnCircle } from "../core";
-import {
-  DEFAULT_SCALE_DENOMINATOR,
-  DIM_DEFAULTS_MM,
-  dimTextOffsetFromPoint,
-  dimTextPos,
-  mmToModel,
-  modelToMm,
-} from "../model/dimension";
-import { textFrameCorners } from "../text/textFrame";
+import { gripPt, type GripRequest } from "../core";
+import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { DEFAULT_PRESETS, type TextStylePreset } from "../text/richText";
 import { t } from "../i18n";
 import type { StoreApi } from "./store";
@@ -519,6 +509,28 @@ export function createProjectSlice(
     ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]),
     coalesceKey?: string,
   ) => set((s) => commitOps(s, typeof ops === "function" ? ops(s.project) : ops, coalesceKey));
+
+  // Griff-Änderung ([K4] S3): der Kern rechnet sie auf dem Dokument und wendet sie im selben Aufruf an
+  // (`grips.rs`, ein WASM-Aufruf je Mausschritt); Prüfung, Verlauf und Meldungen wie `commitOps`.
+  const applyGrip = (req: GripRequest, coalesceKey?: string) => {
+    let notice: string | undefined;
+    set((s) => {
+      const doc = storeDocument(s.project);
+      const res = doc.commitGrip(s.project, req, coalesceKey, Date.now());
+      if ("problems" in res) {
+        const problems = res.problems;
+        console.warn("Projektänderung verworfen:", problems);
+        queueMicrotask(() => get().notify(`${t("project.change.rejected")} ${problems[0]}`, "error"));
+        return {};
+      }
+      notice = res.notice;
+      if (res.ops.length === 0) return {};
+      opLog.push(res.ops);
+      if (opLog.length > OP_LOG_LIMIT) opLog.shift();
+      return { project: res.project, ...historyPatch(doc) };
+    });
+    if (notice) get().notify(t(notice as Parameters<typeof t>[0]), "warning");
+  };
 
   return {
     ...history,
@@ -1022,34 +1034,7 @@ export function createProjectSlice(
       applyChange((p) => [setField("builtinPaletteBanks", { ...p.builtinPaletteBanks, [bank]: visible })]),
 
     insertDrawingPoint: (drawingId, segIndex, pt) =>
-      applyChange((p) =>
-        patchItem(p, "drawings2d", drawingId, (d) => {
-          if (d.geom.shape !== "polyline") return d;
-          const g = d.geom;
-          const n = g.pts.length;
-          const last = segIndex === n - 1;
-          if (segIndex < 0 || segIndex >= n || (last && !g.closed)) return d;
-          const a = g.pts[segIndex];
-          const b = last ? g.pts[0] : g.pts[segIndex + 1];
-          // Bogen: exakt über die Kreisgeometrie in der Winkel-Mitte teilen —
-          // dieselbe Technik, mit der kernel2d Bogen-Segmente zuschneidet
-          // (`bulgeBetweenAngles`). Eine Näherung über tessellierte Punkte
-          // (`bulgePointAt`) wäre hier zu ungenau, weil sie auf Stützstellen
-          // rundet und der Sagitta-Rückschluss den Fehler verstärkt.
-          const arc = bulgeArc(a, b, g.bulge?.[segIndex] ?? 0);
-          const aMid = arc ? arc.a0 + arc.sweep / 2 : 0;
-          const insertPt = arc ? pointOnCircle(arc.center, arc.r, aMid) : pt;
-          const sweepSign: 1 | -1 = arc && arc.sweep < 0 ? -1 : 1;
-          const b1 = arc ? bulgeBetweenAngles(arc.center, arc.r, arc.a0, aMid, sweepSign) : 0;
-          const b2 = arc ? bulgeBetweenAngles(arc.center, arc.r, aMid, arc.a1, sweepSign) : 0;
-          const pts = [...g.pts.slice(0, segIndex + 1), insertPt, ...g.pts.slice(segIndex + 1)];
-          // Bulge-Array nur mitführen, wenn es eines gab (additiv bleiben).
-          const nextBulge = g.bulge
-            ? [...g.bulge.slice(0, segIndex), b1, b2, ...g.bulge.slice(segIndex + 1)]
-            : undefined;
-          return { ...d, geom: { ...g, pts, ...(nextBulge ? { bulge: nextBulge } : {}) } };
-        }),
-      ),
+      applyGrip({ op: "insertPoint", id: drawingId, seg: segIndex, pt: gripPt(pt) }),
 
     setPolylineVertexType: (drawingId, index, type) =>
       applyChange((p) =>
@@ -1062,44 +1047,24 @@ export function createProjectSlice(
         }),
       ),
 
-    deleteDrawingPoint: (drawingId, index) =>
-      applyChange((p) => {
-        const d = p.drawings2d.find((x) => x.id === drawingId);
-        if (!d || d.geom.shape !== "polyline") return [];
-        const g = d.geom;
-        const min = g.closed ? 4 : 3;
-        if (g.pts.length < min) {
-          get().notify(t("alert.polylineMinPoints"), "warning");
-          return [];
-        }
-        if (index < 0 || index >= g.pts.length) return [];
-        const pts = g.pts.filter((_, i) => i !== index);
-        // Zwei Segmente werden zu einem: der Bulge des ENTFERNTEN Segments
-        // fällt weg, das verbleibende behält seinen Wert (die exakte
-        // Bogenform lässt sich nicht erhalten, wenn ihr Stützpunkt entfällt).
-        const bulge = g.bulge ? g.bulge.filter((_, i) => i !== index) : undefined;
-        return patchItem(p, "drawings2d", drawingId, (x) => ({ ...x, geom: { ...g, pts, ...(bulge ? { bulge } : {}) } }));
-      }),
+    deleteDrawingPoint: (drawingId, index) => applyGrip({ op: "deletePoint", id: drawingId, index }),
 
     // ── Editier-Griffe ─────────────────────────────────────────────────────
     // Diese Aktionen laufen AD-HOC bei jedem Maus-Move-Schritt eines Drags
     // (kein Draft/Commit-Muster wie bei den Zeichenwerkzeugen) — daher mit
     // coalesceKey, damit EIN Drag EINEN Undo-Schritt erzeugt statt vieler.
-    moveGripOf: (drawingId, wallId, index, pt, scaleDenominator) =>
-      applyChange(
-        (p) => moveGrip(p, drawingId, wallId, index, pt, scaleDenominator),
+    moveGripOf: (drawingId, wallId, index, pt, scaleDenominator = DEFAULT_SCALE_DENOMINATOR) =>
+      applyGrip(
+        { op: "moveGrip", drawingId, wallId, index, pt: gripPt(pt), scale: scaleDenominator },
         `moveGripOf:${drawingId ?? ""}:${wallId ?? ""}:${index}`,
       ),
 
     moveElementByOf: (drawingId, wallId, delta) =>
-      applyChange(
-        (p) => moveElementBy(p, drawingId, wallId, delta),
-        `moveElementByOf:${drawingId ?? ""}:${wallId ?? ""}`,
-      ),
+      applyGrip({ op: "moveBy", drawingId, wallId, delta: gripPt(delta) }, `moveElementByOf:${drawingId ?? ""}:${wallId ?? ""}`),
 
     moveEdgeOf: (drawingId, wallId, aIndex, bIndex, delta) =>
-      applyChange(
-        (p) => moveEdge(p, drawingId, wallId, aIndex, bIndex, delta),
+      applyGrip(
+        { op: "moveEdge", drawingId, wallId, a: aIndex, b: bIndex, delta: gripPt(delta) },
         `moveEdgeOf:${drawingId ?? ""}:${wallId ?? ""}:${aIndex}:${bIndex}`,
       ),
 
@@ -1153,8 +1118,7 @@ export function createProjectSlice(
       applyChange((p) => fieldOps(p, "drawingLevels", reorderByIds(p.drawingLevels, ids, op))),
 
     // ── Größe (Resize um Anker) ────────────────────────────────────────────
-    resizeElement: (kind, id, w, h, anchor) =>
-      applyChange((p) => resizeElement(p, kind, id, w, h, anchor)),
+    resizeElement: (kind, id, w, h, anchor) => applyGrip({ op: "resize", kind, id, w, h, fx: anchor.fx, fy: anchor.fy }),
 
     // ── Transformation ─────────────────────────────────────────────────────
     commitTransformOn: (sel, op, points, copyMode, count) =>
@@ -1163,44 +1127,43 @@ export function createProjectSlice(
     // ── Wand-Attribute ─────────────────────────────────────────────────────
     updateWall: (id, patch, coalesceKey) => applyChange((p) => patchItem(p, "walls", id, patch), coalesceKey),
 
+    // Dicke einer einschichtigen Wand (Kern `grips.rs`); id und Name eines ggf. neuen Wandtyps kommen von hier.
     setWallThickness: (wallId, thickness) =>
-      applyChange((p) => setWallThickness(p, wallId, thickness)),
+      applyGrip({
+        op: "wallThickness",
+        id: wallId,
+        thickness,
+        newId: `wt-${Date.now()}`,
+        newName: t("default.wallTypeSingle", { thickness: thickness.toFixed(2) }),
+      }),
 
     // ── Decken-Editieren ──────────────────────────────────────────────────
     // (coalesceKey: siehe Kommentar bei moveGripOf — auch hier läuft die
     // Mutation bei jedem Maus-Move-Schritt eines Drags.)
     moveCeilingGrip: (ceilingId, index, pt) =>
-      applyChange(
-        (p) => mapCeiling(p, ceilingId, (c) => ({
-          ...c,
-          outline: c.outline.map((v, i) => (i === index ? pt : v)),
-        })),
-        `moveCeilingGrip:${ceilingId}:${index}`,
-      ),
+      applyGrip({ op: "ceilingGrip", id: ceilingId, index, pt: gripPt(pt) }, `moveCeilingGrip:${ceilingId}:${index}`),
 
     moveCeilingBy: (ceilingId, delta) =>
-      applyChange(
-        (p) => mapCeiling(p, ceilingId, (c) => ({
-          ...c,
-          outline: c.outline.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
-        })),
-        `moveCeilingBy:${ceilingId}`,
-      ),
+      applyGrip({ op: "ceilingBy", id: ceilingId, delta: gripPt(delta) }, `moveCeilingBy:${ceilingId}`),
 
     moveCeilingEdge: (ceilingId, aIndex, bIndex, delta) =>
-      applyChange(
-        (p) => mapCeiling(p, ceilingId, (c) => ({
-          ...c,
-          outline: movePolygonEdge(c.outline, aIndex, bIndex, delta, true),
-        })),
+      applyGrip(
+        { op: "ceilingEdge", id: ceilingId, a: aIndex, b: bIndex, delta: gripPt(delta) },
         `moveCeilingEdge:${ceilingId}:${aIndex}:${bIndex}`,
       ),
 
     updateCeiling: (id, patch) =>
       applyChange((p) => mapCeiling(p, id, (c) => ({ ...c, ...patch }))),
 
+    // Dicke einer einschichtigen Decke (Kern `grips.rs`), analog zur Wand.
     setCeilingThickness: (ceilingId, thickness) =>
-      applyChange((p) => setCeilingThickness(p, ceilingId, thickness)),
+      applyGrip({
+        op: "ceilingThickness",
+        id: ceilingId,
+        thickness,
+        newId: `ct-${Date.now()}`,
+        newName: t("default.ceilingTypeSingle", { thickness: thickness.toFixed(2) }),
+      }),
 
     // ── Öffnungs-Editieren ────────────────────────────────────────────────
     updateOpening: (id, patch) => applyChange((p) => patchItem(p, "openings", id, patch)),
@@ -1212,110 +1175,35 @@ export function createProjectSlice(
     // die GEGENÜBERLIEGENDE Ecke bleibt fix → der Umriss bleibt ein achsparalleles
     // Rechteck (die Dach-Geometrie rechnet ohnehin auf der Bounding-Box).
     moveRoofGrip: (roofId, index, pt) =>
-      applyChange(
-        (p) =>
-          patchItem(p, "roofs", roofId, (r) => {
-            if (r.outline.length < 4) return r;
-            const opp = r.outline[(index + 2) % r.outline.length];
-            const x0 = Math.min(pt.x, opp.x);
-            const x1 = Math.max(pt.x, opp.x);
-            const y0 = Math.min(pt.y, opp.y);
-            const y1 = Math.max(pt.y, opp.y);
-            return {
-              ...r,
-              outline: [
-                { x: x0, y: y0 },
-                { x: x1, y: y0 },
-                { x: x1, y: y1 },
-                { x: x0, y: y1 },
-              ],
-            };
-          }),
-        `moveRoofGrip:${roofId}`,
-      ),
+      applyGrip({ op: "roofGrip", id: roofId, index, pt: gripPt(pt) }, `moveRoofGrip:${roofId}`),
 
     // Dach als Ganzes verschieben (Verschiebe-Griff).
-    moveRoofBy: (roofId, delta) =>
-      applyChange(
-        (p) =>
-          patchItem(p, "roofs", roofId, (r) => ({
-            ...r,
-            outline: r.outline.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
-          })),
-        `moveRoofBy:${roofId}`,
-      ),
+    moveRoofBy: (roofId, delta) => applyGrip({ op: "roofBy", id: roofId, delta: gripPt(delta) }, `moveRoofBy:${roofId}`),
 
     // ── Treppen-Editieren ──────────────────────────────────────────────────
     // (coalesceKey: siehe Kommentar bei moveGripOf.)
-    moveStairBy: (stairId, delta) =>
-      applyChange(
-        (p) =>
-          mapStair(p, stairId, (s) => ({
-            ...s,
-            start: { x: s.start.x + delta.x, y: s.start.y + delta.y },
-            ...(s.center
-              ? { center: { x: s.center.x + delta.x, y: s.center.y + delta.y } }
-              : {}),
-          })),
-        `moveStairBy:${stairId}`,
-      ),
+    moveStairBy: (stairId, delta) => applyGrip({ op: "stairBy", id: stairId, delta: gripPt(delta) }, `moveStairBy:${stairId}`),
 
     updateStair: (id, patch) =>
       applyChange((p) => mapStair(p, id, (s) => ({ ...s, ...patch }))),
 
     // ── Raum-Editieren ──────────────────────────────────────────────────────
     // (coalesceKey: siehe Kommentar bei moveGripOf.)
-    moveRoomBy: (roomId, delta) =>
-      applyChange(
-        (p) =>
-          mapRoom(p, roomId, (r) => ({
-            ...r,
-            boundary: r.boundary.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
-            ...(r.stampAnchor
-              ? {
-                  stampAnchor: {
-                    x: r.stampAnchor.x + delta.x,
-                    y: r.stampAnchor.y + delta.y,
-                  },
-                }
-              : {}),
-          })),
-        `moveRoomBy:${roomId}`,
-      ),
+    moveRoomBy: (roomId, delta) => applyGrip({ op: "roomBy", id: roomId, delta: gripPt(delta) }, `moveRoomBy:${roomId}`),
 
     moveRoomGrip: (roomId, index, pt) =>
-      applyChange(
-        (p) =>
-          mapRoom(p, roomId, (r) => ({
-            ...r,
-            boundary: r.boundary.map((v, i) => (i === index ? pt : v)),
-          })),
-        `moveRoomGrip:${roomId}:${index}`,
-      ),
+      applyGrip({ op: "roomGrip", id: roomId, index, pt: gripPt(pt) }, `moveRoomGrip:${roomId}:${index}`),
 
     moveRoomEdge: (roomId, aIndex, bIndex, delta) =>
-      applyChange(
-        (p) =>
-          mapRoom(p, roomId, (r) => ({
-            ...r,
-            boundary: movePolygonEdge(r.boundary, aIndex, bIndex, delta, true),
-          })),
+      applyGrip(
+        { op: "roomEdge", id: roomId, a: aIndex, b: bIndex, delta: gripPt(delta) },
         `moveRoomEdge:${roomId}:${aIndex}:${bIndex}`,
       ),
 
     updateRoom: (id, patch) =>
       applyChange((p) => mapRoom(p, id, (r) => ({ ...r, ...patch }))),
 
-    moveRoomStamp: (roomId, delta) =>
-      applyChange((p) =>
-        mapRoom(p, roomId, (r) => {
-          const base = r.stampAnchor ?? roomCentroid(r.boundary);
-          return {
-            ...r,
-            stampAnchor: { x: base.x + delta.x, y: base.y + delta.y },
-          };
-        }),
-      ),
+    moveRoomStamp: (roomId, delta) => applyGrip({ op: "roomStamp", id: roomId, delta: gripPt(delta) }),
 
     setRoomStampAnchor: (roomId, anchor) =>
       applyChange((p) => mapRoom(p, roomId, (r) => ({ ...r, stampAnchor: anchor }))),
@@ -1380,422 +1268,6 @@ function mapCeiling(
 }
 
 /**
- * Setzt die Gesamtdicke einer einschichtigen Wand über ihre Wandtyp-Schicht.
- * Wenn der Wandtyp einschichtig ist UND nur von dieser Wand genutzt wird, wird
- * er direkt editiert. Sonst wird ein dedizierter einschichtiger Wandtyp (Klon
- * der ersten Schicht des aktuellen Typs) erzeugt und der Wand zugewiesen.
- */
-function setWallThickness(
-  project: Project,
-  wallId: string,
-  thickness: number,
-): CoreOp[] {
-  if (!isFinite(thickness) || thickness <= 0) return [];
-  const wall = project.walls.find((w) => w.id === wallId);
-  if (!wall) return [];
-  const wt = project.wallTypes.find((t) => t.id === wall.wallTypeId);
-  if (!wt || wt.layers.length === 0) return [];
-
-  const single = wt.layers.length === 1;
-  const usedByOthers = project.walls.some(
-    (w) => w.id !== wallId && w.wallTypeId === wt.id,
-  );
-
-  if (single && !usedByOthers) {
-    // Direkt die Schichtdicke des (exklusiven, einschichtigen) Wandtyps setzen.
-    return patchItem(project, "wallTypes", wt.id, (t) => ({ ...t, layers: [{ ...t.layers[0], thickness }] }));
-  }
-
-  // Dedizierten einschichtigen Wandtyp erzeugen (erste Schicht klonen) und der
-  // Wand zuweisen — damit die Dicke nur diese Wand betrifft.
-  const id = `wt-${Date.now()}`;
-  const clone = {
-    id,
-    name: t("default.wallTypeSingle", { thickness: thickness.toFixed(2) }),
-    layers: [{ ...wt.layers[0], thickness }],
-  };
-  return [...addItems("wallTypes", [clone]), ...patchItem(project, "walls", wallId, { wallTypeId: id })];
-}
-
-/**
- * Setzt die Gesamtdicke einer einschichtigen Decke über ihre Deckentyp-Schicht
- * — analog `setWallThickness`. Wenn der aktive Aufbau-Typ einschichtig UND ein
- * DEDIZIERTER Deckentyp (`ceilingTypeId`) ist, der nur von dieser Decke genutzt
- * wird, wird er direkt editiert. Sonst wird ein neuer, dedizierter
- * einschichtiger Deckentyp (Klon der ersten Schicht des aktuellen Aufbaus)
- * erzeugt und der Decke zugewiesen. Der geteilte LEGACY-Wandtyp
- * (`Ceiling.wallTypeId`) wird dabei NIE mutiert — er gehört den Wänden.
- */
-function setCeilingThickness(
-  project: Project,
-  ceilingId: string,
-  thickness: number,
-): CoreOp[] {
-  if (!isFinite(thickness) || thickness <= 0) return [];
-  const ceiling = (project.ceilings ?? []).find((c) => c.id === ceilingId);
-  if (!ceiling) return [];
-  const activeId = ceiling.ceilingTypeId ?? ceiling.wallTypeId;
-  const ct =
-    (project.ceilingTypes ?? []).find((t) => t.id === ceiling.ceilingTypeId) ??
-    project.wallTypes.find((t) => t.id === ceiling.wallTypeId);
-  if (!ct || ct.layers.length === 0) return [];
-
-  const single = ct.layers.length === 1;
-  const usedByOthers = (project.ceilings ?? []).some(
-    (c) => c.id !== ceilingId && (c.ceilingTypeId ?? c.wallTypeId) === activeId,
-  );
-
-  if (single && !usedByOthers && ceiling.ceilingTypeId) {
-    // Direkt die Schichtdicke des (exklusiven, einschichtigen) Deckentyps setzen.
-    return patchItem(project, "ceilingTypes", ct.id, (t) => ({ ...t, layers: [{ ...t.layers[0], thickness }] }));
-  }
-
-  // Dedizierten einschichtigen Deckentyp erzeugen (erste Schicht klonen) und
-  // der Decke zuweisen — damit die Dicke nur diese Decke betrifft.
-  const id = `ct-${Date.now()}`;
-  const clone = {
-    id,
-    name: t("default.ceilingTypeSingle", { thickness: thickness.toFixed(2) }),
-    layers: [{ ...ct.layers[0], thickness }],
-  };
-  return [
-    ...addItems("ceilingTypes", [clone]),
-    ...patchItem(project, "ceilings", ceilingId, (c) => ({ ...c, ceilingTypeId: id, thickness: undefined })),
-  ];
-}
-
-// ── Resize (Skalierung auf Zielmaß um einen Anker) ───────────────────────────
-
-/**
- * Skaliert ein Element auf Zielbreite `w` × -höhe `h` (Meter) um einen
- * Ankerpunkt. `anchor.fx/fy ∈ [0,1]` liegen relativ zur aktuellen bbox
- * (0,0 = oben-links, 1,1 = unten-rechts). Der Ankerpunkt bleibt fix; alle
- * übrigen Punkte werden um die Skalierungsfaktoren um ihn herum gestreckt.
- */
-function resizeElement(
-  project: Project,
-  kind: "wall" | "drawing2d",
-  id: string,
-  w: number,
-  h: number,
-  anchor: { fx: number; fy: number },
-): CoreOp[] {
-  if (kind === "drawing2d") {
-    return patchItem(project, "drawings2d", id, (d) => ({ ...d, geom: resizeGeom(d.geom, w, h, anchor) }));
-  }
-  return patchItem(project, "walls", id, (wall) => {
-      const box = bbox2([wall.start, wall.end]);
-      const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
-      const apply = (p: Vec2): Vec2 => ({
-        x: ax + (p.x - ax) * sx,
-        y: ay + (p.y - ay) * sy,
-      });
-    return { ...wall, start: apply(wall.start), end: apply(wall.end) };
-  });
-}
-
-/** bbox einer Punktliste. */
-function bbox2(pts: Vec2[]): { minX: number; minY: number; maxX: number; maxY: number } {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const p of pts) {
-    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
-  }
-  if (!isFinite(minX)) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-  return { minX, minY, maxX, maxY };
-}
-
-/**
- * Liefert Ankerpunkt (ax,ay) und Skalierungsfaktoren (sx,sy), um eine bbox auf
- * Zielbreite `w` × -höhe `h` zu bringen. Bei Null-Ausdehnung in einer Achse
- * bleibt der Faktor 1 (keine Division durch 0, keine Verschiebung).
- */
-function scaleAround(
-  box: { minX: number; minY: number; maxX: number; maxY: number },
-  w: number,
-  h: number,
-  anchor: { fx: number; fy: number },
-): { ax: number; ay: number; sx: number; sy: number } {
-  const bw = box.maxX - box.minX;
-  const bh = box.maxY - box.minY;
-  const ax = box.minX + anchor.fx * bw;
-  const ay = box.minY + anchor.fy * bh;
-  const sx = bw > 1e-9 ? w / bw : 1;
-  const sy = bh > 1e-9 ? h / bh : 1;
-  return { ax, ay, sx, sy };
-}
-
-/**
- * Skaliert eine 2D-Form auf Zielmaß um den Anker.
- *  • line/polyline/rect: jeder Punkt um den Anker skaliert (B/H aus bbox).
- *  • circle: Radius = halbe Zielbreite (min/Mittelwert wäre auch denkbar; Breite
- *    ist eindeutig), Mittelpunkt um den Anker verschoben.
- *  • arc: wie circle (Radius aus Zielbreite), Winkel unverändert.
- *  • text: nur die Einfügeposition wird um den Anker verschoben; die Schrifthöhe
- *    bleibt (Text skaliert über `height`, nicht über bbox — bewusst unverändert).
- */
-function resizeGeom(
-  g: import("../model/types").Drawing2DGeom,
-  w: number,
-  h: number,
-  anchor: { fx: number; fy: number },
-): import("../model/types").Drawing2DGeom {
-  switch (g.shape) {
-    case "line":
-    case "xline":
-    case "ray": {
-      const { ax, ay, sx, sy } = scaleAround(bbox2([g.a, g.b]), w, h, anchor);
-      const f = (p: Vec2): Vec2 => ({ x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy });
-      return { ...g, a: f(g.a), b: f(g.b) };
-    }
-    case "polyline": {
-      const { ax, ay, sx, sy } = scaleAround(bbox2(g.pts), w, h, anchor);
-      const f = (p: Vec2): Vec2 => ({ x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy });
-      return { ...g, pts: g.pts.map(f) };
-    }
-    case "rect": {
-      const box = bbox2([g.min, g.max]);
-      const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
-      const f = (p: Vec2): Vec2 => ({ x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy });
-      const a = f(g.min);
-      const b = f(g.max);
-      return {
-        ...g,
-        min: { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },
-        max: { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
-      };
-    }
-    case "circle":
-    case "arc": {
-      // bbox eines Kreises ist 2r×2r; der Anker liegt relativ dazu.
-      const box = {
-        minX: g.center.x - g.r,
-        minY: g.center.y - g.r,
-        maxX: g.center.x + g.r,
-        maxY: g.center.y + g.r,
-      };
-      const ax = box.minX + anchor.fx * (2 * g.r);
-      const ay = box.minY + anchor.fy * (2 * g.r);
-      const r = Math.max(w, h) / 2 > 0 ? Math.max(w, h) / 2 : g.r;
-      const sx = g.r > 1e-9 ? (w / 2) / g.r : 1;
-      const sy = g.r > 1e-9 ? (h / 2) / g.r : 1;
-      // Mittelpunkt anhand der nicht-uniformen Skalierung um den Anker schieben,
-      // den Radius aber als skalaren Kreis (max der Zielmaße/2) setzen.
-      const center: Vec2 = {
-        x: ax + (g.center.x - ax) * sx,
-        y: ay + (g.center.y - ay) * sy,
-      };
-      return { ...g, center, r };
-    }
-    case "ellipse": {
-      // bbox: rotation=0 angenommen (das Werkzeug erzeugt nur achsparallele
-      // Ellipsen); rx/ry unabhängig skaliert, Mittelpunkt um den Anker verschoben.
-      const box = {
-        minX: g.center.x - g.rx,
-        minY: g.center.y - g.ry,
-        maxX: g.center.x + g.rx,
-        maxY: g.center.y + g.ry,
-      };
-      const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
-      const center: Vec2 = {
-        x: ax + (g.center.x - ax) * sx,
-        y: ay + (g.center.y - ay) * sy,
-      };
-      return { ...g, center, rx: Math.max(1e-3, g.rx * sx), ry: Math.max(1e-3, g.ry * sy) };
-    }
-    case "bezier":
-    case "spline": {
-      const { ax, ay, sx, sy } = scaleAround(bbox2(g.pts), w, h, anchor);
-      const f = (p: Vec2): Vec2 => ({ x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy });
-      return { ...g, pts: g.pts.map(f) };
-    }
-    case "text": {
-      // Text: nur die Einfügeposition um den Anker schieben (Höhe bleibt).
-      const box = { minX: g.at.x, minY: g.at.y, maxX: g.at.x, maxY: g.at.y };
-      const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
-      return { ...g, at: { x: ax + (g.at.x - ax) * sx, y: ay + (g.at.y - ay) * sy } };
-    }
-    case "block": {
-      // Wie Text: nur der Einfügepunkt wandert (kein Skalierungsfaktor am
-      // Symbol selbst in v1).
-      const box = { minX: g.at.x, minY: g.at.y, maxX: g.at.x, maxY: g.at.y };
-      const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
-      return { ...g, at: { x: ax + (g.at.x - ax) * sx, y: ay + (g.at.y - ay) * sy } };
-    }
-    case "image": {
-      const box = bbox2([g.min, g.max]);
-      const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
-      const f = (p: Vec2): Vec2 => ({ x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy });
-      const a = f(g.min);
-      const b = f(g.max);
-      return {
-        ...g,
-        min: { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },
-        max: { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
-      };
-    }
-    default:
-      return g;
-  }
-}
-
-/**
- * Kreis, solange rx≈ry (relative Toleranz 0.5%) — sonst Ellipse (rotation 0).
- * Trägt den Kreis-zu-Ellipse-Formwandel beim Griff-Ziehen (Nutzer-Wunsch:
- * „Kreis wird wie bisher erstellt, kann beim Bearbeiten zur Ellipse werden");
- * symmetrisch nutzbar auch für die Rückrichtung (Ellipse → Kreis, wenn man
- * die Halbachsen wieder aneinander annähert).
- */
-function ellipseOrCircle(
-  center: Vec2,
-  rx: number,
-  ry: number,
-): import("../model/types").Drawing2DGeom {
-  if (Math.abs(rx - ry) <= 0.005 * Math.max(rx, ry)) {
-    return { shape: "circle", center, r: (rx + ry) / 2 };
-  }
-  return { shape: "ellipse", center, rx, ry, rotation: 0 };
-}
-
-// ── Editier-Griffe (verschoben aus App.tsx, 1:1) ─────────────────────────────
-
-/**
- * Editier-Griffe (Eckpunkte) eines 2D-Zeichenelements in Modell-Metern.
- * line/polyline/rect: Eckpunkte. circle: EIN Radius-Griff (Ost, Index 0).
- * arc: Start-/End-Winkel-Griff (Index 0/1, ändern a0/a1) + ein Radius-Griff
- * auf halbem Bogen (Index 2, ändert r) — siehe {@link moveGrip}.
- */
-export function drawingVertices(
-  d: import("../model/types").Drawing2D,
-  /** Papier-Massstab (1:N) — nur für die Bemassungs-Griffe, deren Lage von
-   *  der in Papier-mm angegebenen Schrifthöhe abhängt. */
-  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
-): Vec2[] {
-  const g = d.geom;
-  if (g.shape === "line" || g.shape === "xline" || g.shape === "ray") return [g.a, g.b];
-  // Polylinie: Eckpunkt-Griffe (Index 0..n-1) PLUS ein Bulge-Griff je Segment
-  // (Index n..; Apex des aktuellen Bogens, oder Sehnen-Mitte bei bulge=0) —
-  // senkrecht zur Sehne ziehen krümmt genau dieses Segment (s. moveGrip).
-  if (g.shape === "polyline") {
-    const n = g.pts.length;
-    const closeSeg = g.closed && n > 2;
-    const segCount = Math.max(0, n - 1) + (closeSeg ? 1 : 0);
-    const bulgeGrips: Vec2[] = [];
-    for (let i = 0; i < segCount; i++) {
-      const a = g.pts[i];
-      const b = i === n - 1 ? g.pts[0] : g.pts[i + 1];
-      bulgeGrips.push(bulgePointAt(a, b, g.bulge?.[i] ?? 0, 0.5));
-    }
-    return [...g.pts, ...bulgeGrips];
-  }
-  if (g.shape === "rect" || g.shape === "image") {
-    return [
-      g.min,
-      { x: g.max.x, y: g.min.y },
-      g.max,
-      { x: g.min.x, y: g.max.y },
-    ];
-  }
-  // Kreis: zwei Griffe (Ost/Nord, wie bei der Ellipse) — zieht man EINEN der
-  // beiden unabhängig, wird der Kreis zur Ellipse (s. `moveGrip`). So bleibt
-  // ein Kreis ein Kreis, solange man ihn nicht gezielt verzerrt (Nutzer-
-  // Wunsch: „Kreis erstellen wie bisher, beim Bearbeiten kann er zur Ellipse
-  // werden").
-  if (g.shape === "circle") {
-    return [
-      { x: g.center.x + g.r, y: g.center.y },
-      { x: g.center.x, y: g.center.y + g.r },
-    ];
-  }
-  if (g.shape === "arc") {
-    const mid = (g.a0 + g.a1) / 2;
-    return [
-      { x: g.center.x + g.r * Math.cos(g.a0), y: g.center.y + g.r * Math.sin(g.a0) },
-      { x: g.center.x + g.r * Math.cos(g.a1), y: g.center.y + g.r * Math.sin(g.a1) },
-      { x: g.center.x + g.r * Math.cos(mid), y: g.center.y + g.r * Math.sin(mid) },
-    ];
-  }
-  // Ellipse: zwei Griffe (Index 0 = rx-Achse, Index 1 = ry-Achse), gedreht um
-  // `rotation` (0 beim heutigen Werkzeug) — siehe `moveGrip`.
-  if (g.shape === "ellipse") {
-    const c = Math.cos(g.rotation), s = Math.sin(g.rotation);
-    return [
-      { x: g.center.x + g.rx * c, y: g.center.y + g.rx * s },
-      { x: g.center.x - g.ry * s, y: g.center.y + g.ry * c },
-    ];
-  }
-  // Bezier/Spline: alle Kontroll-/Wegpunkte als Griffe (wie polyline).
-  if (g.shape === "bezier" || g.shape === "spline") return [...g.pts];
-  // Bemassung: Griff 0..N-1 = jeder Punkt der Kette (wie polyline); EIN
-  // zusätzlicher Griff (Index N) sitzt AUF der Masslinie (Mitte der Kette) —
-  // ihn zu ziehen ändert nur `offset`, nicht die Punkte (s. moveGrip).
-  if (g.shape === "dimension") {
-    const a = g.pts[0], b = g.pts[g.pts.length - 1];
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = (-dy / len) * g.offset, ny = (dx / len) * g.offset;
-    const mid: Vec2 = { x: (a.x + b.x) / 2 + nx, y: (a.y + b.y) / 2 + ny };
-    // Reihenfolge: Kettenpunkte · Offset-Griff · JE SEGMENT ein Masszahl-Griff
-    // (verschiebt nur die Zahl, s. moveGrip) — dieselbe Ordnung erwartet
-    // moveGrip beim Auflösen des Index.
-    const heightM = mmToModel(g.textHeightMm ?? DIM_DEFAULTS_MM.textHeight, scaleDenominator);
-    const textGrips = g.pts.slice(0, -1).map((p0, i) => {
-      const off = g.textOffsetsMm?.[i];
-      return dimTextPos(
-        p0,
-        g.pts[i + 1],
-        g.offset,
-        heightM,
-        off
-          ? { along: mmToModel(off.along, scaleDenominator), perp: mmToModel(off.perp, scaleDenominator) }
-          : undefined,
-      );
-    });
-    return [...g.pts, mid, ...textGrips];
-  }
-  // Kote: EIN Griff an der Dreieck-Spitze (zum Verschieben; siehe moveGrip).
-  if (g.shape === "kote") return [g.at];
-  // Detail-/Schnitt-Verweis: EIN Griff am Kreis-Zentrum (zum Verschieben).
-  if (g.shape === "detailref") return [g.at];
-  // Massstabsbalken: EIN Griff an der linken unteren Ecke (zum Verschieben).
-  if (g.shape === "scalebar") return [g.at];
-  // Punkt-/Knotenmarker: EIN Griff am Zentrum (zum Verschieben).
-  if (g.shape === "pointmarker") return [g.at];
-  // Text: Griff 0 am Ankerpunkt; trägt der Text einen Leader, zusätzlich ein
-  // Griff je Knickpunkt (`leaderBendPoints`, falls gesetzt) und ein
-  // ABSCHLIESSENDER Griff an der Spitze (Pfeilspitze unabhängig verschiebbar;
-  // s. moveGrip) — Reihenfolge Anker→Knicke→Spitze, wie der Pfad gerendert wird.
-  // Text-entlang-Pfad: die Pfadpunkte SELBST sind die Griffe (wie polyline),
-  // ersetzt das Anker/Leader-Griffmodell komplett (schliessen sich aus).
-  // Textspalte (`width` gesetzt, kein Leader/Pfad): VIER Rahmen-Eckpunkte als
-  // Griffe (Nutzer-Wunsch: "nicht nur ein Griff unten links bei der ersten
-  // Glyphe") — Ziehen ändert NUR die Spaltenbreite (InDesign-Verhalten,
-  // Nutzer-Entscheidung), s. `moveGrip`. Dieselbe Rahmen-Berechnung wie der
-  // Auswahl-Rahmen im Grundriss (`text/textFrame.ts`), damit Griffe und
-  // sichtbarer Rahmen immer übereinstimmen.
-  if (g.shape === "text") {
-    if (g.pathPts) return [...g.pathPts];
-    if (g.leaderTarget) return [g.at, ...(g.leaderBendPoints ?? []), g.leaderTarget];
-    if (g.width && g.width > 0) {
-      return textFrameCorners({
-        at: g.at,
-        text: g.text,
-        heightM: g.height,
-        angle: g.angle,
-        marks: g.marks,
-        doc: g.doc,
-        wrapWidth: g.width,
-      });
-    }
-    return [g.at];
-  }
-  // Block-Instanz: EIN Griff am Einfügepunkt (Rotation läuft über move/mirror,
-  // kein eigener Rotations-Griff in v1; s. moveGrip).
-  if (g.shape === "block") return [g.at];
-  return [];
-}
-
-/**
  * Fügt ein Bild-Zeichenelement (eingebettete Data-URL, z. B. Foto/Logo oder
  * gerasterte PDF-Seite) achsparallel bei `[at .. at+size]` an — analog zu den
  * Zeichenwerkzeugen, aber ohne Command (Datei-Auswahl ist async, s. App.tsx
@@ -1822,394 +1294,4 @@ export function imageDrawing2d(
       src,
     },
   };
-}
-
-/**
- * Verschiebt den Griff `index` des selektierten Elements (2D-Element ODER Wand)
- * auf `pt` (immutabel). Beim Rechteck bleibt die Achsparallelität erhalten.
- */
-function moveGrip(
-  project: Project,
-  drawingId: string | null,
-  wallId: string | null,
-  index: number,
-  pt: Vec2,
-  /** Papier-Massstab (1:N) — nur für den Masszahl-Griff, s. `drawingVertices`. */
-  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
-): CoreOp[] {
-  // Objekt-Sperre: gesperrte Elemente lassen sich anwählen, aber nicht
-  // ziehen (s. Kommentar bei `onPlanSelect` in useMouseSelectionHandlers.ts).
-  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return [];
-  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return [];
-  if (drawingId) {
-    return patchItem(project, "drawings2d", drawingId, (d) => {
-        const g = d.geom;
-        if (g.shape === "line" || g.shape === "xline" || g.shape === "ray") {
-          return { ...d, geom: index === 0 ? { ...g, a: pt } : { ...g, b: pt } };
-        }
-        if (g.shape === "polyline") {
-          const n = g.pts.length;
-          if (index < n) {
-            const pts = g.pts.map((p, i) => (i === index ? pt : p));
-            return { ...d, geom: { ...g, pts } };
-          }
-          // Bulge-Griff (Index ≥ n): Segment-Mitte senkrecht zur Sehne gezogen
-          // → neuer Bogen-Faktor für GENAU dieses Segment (s. drawingVertices).
-          const segIndex = index - n;
-          const a = g.pts[segIndex];
-          const b = segIndex === n - 1 ? g.pts[0] : g.pts[segIndex + 1];
-          const bulgeVal = bulgeFromSagittaPoint(a, b, pt);
-          const bulge = [...(g.bulge ?? [])];
-          while (bulge.length <= segIndex) bulge.push(0);
-          bulge[segIndex] = bulgeVal;
-          return { ...d, geom: { ...g, bulge } };
-        }
-        if (g.shape === "bezier" || g.shape === "spline") {
-          const pts = g.pts.map((p, i) => (i === index ? pt : p));
-          return { ...d, geom: { ...g, pts } };
-        }
-        // Bemassung: Griff 0..N-1 verschiebt den jeweiligen Kettenpunkt
-        // (Masszahlen folgen automatisch, s. Rendering); der LETZTE Griff
-        // (auf der Masslinie) ändert nur `offset` — Normalabstand von `pt`
-        // zur (unveränderten) Punktreihe.
-        if (g.shape === "dimension") {
-          if (index < g.pts.length) {
-            const pts = g.pts.map((p, i) => (i === index ? pt : p));
-            return { ...d, geom: { ...g, pts } };
-          }
-          if (index === g.pts.length) {
-            const a = g.pts[0], b = g.pts[g.pts.length - 1];
-            const dx = b.x - a.x, dy = b.y - a.y;
-            const len = Math.hypot(dx, dy) || 1;
-            const nx = -dy / len, ny = dx / len;
-            const offset = (pt.x - a.x) * nx + (pt.y - a.y) * ny;
-            return { ...d, geom: { ...g, offset } };
-          }
-          // Masszahl-Griff: verschiebt NUR die Zahl des betroffenen Segments
-          // (Geometrie bleibt unangetastet) und rastet nahe der Standardlage
-          // ein, s. `model/dimension.ts::dimTextOffsetFromPoint`.
-          const seg = index - g.pts.length - 1;
-          if (seg < 0 || seg >= g.pts.length - 1) return d;
-          const height = mmToModel(g.textHeightMm ?? DIM_DEFAULTS_MM.textHeight, scaleDenominator);
-          const m = dimTextOffsetFromPoint(g.pts[seg], g.pts[seg + 1], g.offset, height, pt);
-          // Zurück in Papier-mm speichern (Einheit des Modells).
-          const next = {
-            along: modelToMm(m.along, scaleDenominator),
-            perp: modelToMm(m.perp, scaleDenominator),
-          };
-          const textOffsetsMm = Array.from({ length: g.pts.length - 1 }, (_, i) =>
-            i === seg ? next : (g.textOffsetsMm?.[i] ?? { along: 0, perp: 0 }),
-          );
-          return { ...d, geom: { ...g, textOffsetsMm } };
-        }
-        if (g.shape === "rect" || g.shape === "image") {
-          const corners = [
-            g.min,
-            { x: g.max.x, y: g.min.y },
-            g.max,
-            { x: g.min.x, y: g.max.y },
-          ];
-          const opp = corners[(index + 2) % 4];
-          const min = { x: Math.min(pt.x, opp.x), y: Math.min(pt.y, opp.y) };
-          const max = { x: Math.max(pt.x, opp.x), y: Math.max(pt.y, opp.y) };
-          return { ...d, geom: { ...g, min, max } };
-        }
-        // Text: Griff 0 = Ankerpunkt; bei Leader zusätzlich ein Griff je
-        // Knickpunkt UND ein ABSCHLIESSENDER Griff am Zielpunkt (Reihenfolge
-        // wie `drawingVertices`: Anker→Knicke→Spitze); trägt der Text einen
-        // Pfad, adressiert der Index einen Pfadpunkt; Textspalte (kein
-        // Leader/Pfad, `width` gesetzt) hat 4 Rahmen-Eck-Griffe (s.
-        // drawingVertices) — dieselbe Reihenfolge (pathPts > leaderTarget >
-        // Breiten-Ecken > einzelner Anker) MUSS hier gespiegelt werden, sonst
-        // adressiert ein Griff-Index das falsche Verhalten.
-        if (g.shape === "text") {
-          if (g.pathPts) {
-            const pathPts = g.pathPts.map((pp, i) => (i === index ? pt : pp));
-            return { ...d, geom: { ...g, pathPts } };
-          }
-          if (g.leaderTarget) {
-            const bends = g.leaderBendPoints ?? [];
-            const tipIndex = bends.length + 1;
-            if (index === 0) return { ...d, geom: { ...g, at: pt } };
-            if (index === tipIndex) return { ...d, geom: { ...g, leaderTarget: pt } };
-            if (index > 0 && index < tipIndex) {
-              const leaderBendPoints = bends.map((bp, i) => (i === index - 1 ? pt : bp));
-              return { ...d, geom: { ...g, leaderBendPoints } };
-            }
-            return d;
-          }
-          if (g.width && g.width > 0 && index >= 0 && index < 4) {
-            // Nur die Breite ändert sich (InDesign-Textrahmen-Verhalten,
-            // Nutzer-Entscheidung) — Höhe bleibt inhaltsgetrieben. Ziehen wird
-            // auf die LOKALE x-Achse projiziert (rotationsfest): linke Ecken
-            // (Index 0/3, s. textFrameCorners-Reihenfolge oben-links/oben-
-            // rechts/unten-rechts/unten-links) verschieben zusätzlich `at`,
-            // damit die RECHTE Kante fest bleibt; rechte Ecken (1/2) lassen
-            // `at`/die linke Kante fest.
-            const cos = Math.cos(g.angle);
-            const sin = Math.sin(g.angle);
-            const dx = pt.x - g.at.x;
-            const dy = pt.y - g.at.y;
-            const localX = dx * cos + dy * sin;
-            const MIN_WIDTH = 0.1;
-            const isLeft = index === 0 || index === 3;
-            if (isLeft) {
-              const width = Math.max(MIN_WIDTH, g.width - localX);
-              const at = { x: g.at.x + localX * cos, y: g.at.y + localX * sin };
-              return { ...d, geom: { ...g, at, width } };
-            }
-            const width = Math.max(MIN_WIDTH, localX);
-            return { ...d, geom: { ...g, width } };
-          }
-          return { ...d, geom: { ...g, at: pt } };
-        }
-        // Kote: der einzige Griff (Index 0) sitzt an der Dreieck-Spitze.
-        if (g.shape === "kote") return { ...d, geom: { ...g, at: pt } };
-        // Detail-/Schnitt-Verweis: der einzige Griff (Index 0) sitzt am Kreis-Zentrum.
-        if (g.shape === "detailref") return { ...d, geom: { ...g, at: pt } };
-        // Massstabsbalken: der einzige Griff (Index 0) sitzt an der linken unteren Ecke.
-        if (g.shape === "scalebar") return { ...d, geom: { ...g, at: pt } };
-        // Punkt-/Knotenmarker: der einzige Griff (Index 0) sitzt am Zentrum.
-        if (g.shape === "pointmarker") return { ...d, geom: { ...g, at: pt } };
-        // Block-Instanz: der einzige Griff (Index 0) sitzt am Einfügepunkt.
-        if (g.shape === "block") return { ...d, geom: { ...g, at: pt } };
-        // Kreis: Griff 0 (Ost) bzw. 1 (Nord) — zieht man die beiden Achsen
-        // unabhängig auseinander, wird der Kreis zur Ellipse (rotation 0);
-        // bleiben rx/ry (fast) gleich, bleibt es ein Kreis (s. `ellipseOrCircle`).
-        if (g.shape === "circle") {
-          const dx = pt.x - g.center.x, dy = pt.y - g.center.y;
-          const rx = index === 0 ? Math.max(1e-3, Math.abs(dx)) : g.r;
-          const ry = index === 0 ? g.r : Math.max(1e-3, Math.abs(dy));
-          return { ...d, geom: ellipseOrCircle(g.center, rx, ry) };
-        }
-        // Bogen: Griff 0/1 (Start-/End-Winkel, s. drawingVertices) ändert a0/a1;
-        // Griff 2 (Bogenmitte) ändert nur den Radius (Winkel bleiben fest).
-        if (g.shape === "arc") {
-          if (index === 2) {
-            const r = Math.max(1e-3, Math.hypot(pt.x - g.center.x, pt.y - g.center.y));
-            return { ...d, geom: { ...g, r } };
-          }
-          const ang = Math.atan2(pt.y - g.center.y, pt.x - g.center.x);
-          return { ...d, geom: index === 0 ? { ...g, a0: ang } : { ...g, a1: ang } };
-        }
-        // Ellipse: Griff 0 (rx-Achse) bzw. 1 (ry-Achse) — der gezogene Punkt wird
-        // ins lokale (gedrehte) Achsensystem projiziert, nur die jeweils
-        // betroffene Halbachse ändert sich.
-        if (g.shape === "ellipse") {
-          const c = Math.cos(g.rotation), s = Math.sin(g.rotation);
-          const dx = pt.x - g.center.x, dy = pt.y - g.center.y;
-          const lx = dx * c + dy * s;
-          const ly = -dx * s + dy * c;
-          const rx = index === 0 ? Math.max(1e-3, Math.abs(lx)) : g.rx;
-          const ry = index === 0 ? g.ry : Math.max(1e-3, Math.abs(ly));
-          // Nur bei rotation 0 kann eine (fast) gleichseitige Ellipse wieder
-          // zum Kreis kollabieren — eine gedrehte Ellipse mit rx≈ry ist optisch
-          // bereits ein Kreis, „Drehung" wäre dann aber wieder bedeutungslos.
-          if (g.rotation === 0) return { ...d, geom: ellipseOrCircle(g.center, rx, ry) };
-          return { ...d, geom: { ...g, rx, ry } };
-        }
-        return d;
-    });
-  }
-  if (wallId) {
-    return patchItem(project, "walls", wallId, (w) => ({ ...w, ...(index === 0 ? { start: pt } : { end: pt }) }));
-  }
-  return [];
-}
-
-/** Verschiebt das selektierte Element (2D-Element ODER Wand) um `delta` (parallel). */
-function moveElementBy(
-  project: Project,
-  drawingId: string | null,
-  wallId: string | null,
-  delta: Vec2,
-): CoreOp[] {
-  // Objekt-Sperre: s. Kommentar in `moveGrip` oben.
-  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return [];
-  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return [];
-  const mv = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
-  if (drawingId) {
-    return patchItem(project, "drawings2d", drawingId, (d) => {
-        const g = d.geom;
-        switch (g.shape) {
-          case "line":
-            return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
-          case "polyline":
-            return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
-          case "rect":
-          case "image":
-            return { ...d, geom: { ...g, min: mv(g.min), max: mv(g.max) } };
-          case "circle":
-          case "arc":
-          case "ellipse":
-            return { ...d, geom: { ...g, center: mv(g.center) } };
-          case "bezier":
-          case "spline":
-          case "dimension":
-            return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
-          case "kote":
-            return { ...d, geom: { ...g, at: mv(g.at) } };
-          case "detailref":
-            return { ...d, geom: { ...g, at: mv(g.at) } };
-          case "scalebar":
-            return { ...d, geom: { ...g, at: mv(g.at) } };
-          case "pointmarker":
-            return { ...d, geom: { ...g, at: mv(g.at) } };
-          case "text":
-            return { ...d, geom: { ...g, at: mv(g.at) } };
-          default:
-            return d;
-        }
-    });
-  }
-  if (wallId) {
-    return patchItem(project, "walls", wallId, (w) => ({ ...w, start: mv(w.start), end: mv(w.end) }));
-  }
-  return [];
-}
-
-/**
- * Neue Position eines Eckpunkts, dessen EINE Kante parallel um `delta`
- * verschoben wird: der Punkt bleibt NICHT einfach delta-verschoben, sondern
- * wandert entlang seiner ANDEREN (unverschobenen) Nachbarkante — deren
- * Richtung bleibt exakt erhalten (nur ihre Länge ändert sich), statt sich mit
- * zu drehen. Nutzer-Report: bei Vielecken mit mehr als 4/5 Ecken (nicht
- * rechtwinklige Anschlüsse) kippten die Nachbarkanten bisher im Winkel, weil
- * der Eckpunkt stur um `delta` versetzt wurde (korrekt nur bei rechtwinkligen
- * Anschlüssen — Zufall bei Rechtecken, da rect ohnehin nur achsparallele
- * Ecken kennt). Berechnet als Schnittpunkt der verschobenen Kanten-Linie mit
- * der (unendlich verlängerten) Nachbarkanten-Linie durch den fixen
- * Nachbarpunkt — dasselbe Prinzip wie die Wandstoß-Gehrung in `model/
- * joins.ts`. Fällt bei fehlendem Nachbarn (offenes Kettenende) oder (fast)
- * paralleler Nachbarkante (kein/instabiler Schnittpunkt) auf die einfache
- * Delta-Verschiebung zurück.
- */
-function edgeMoveVertex(
-  vertexOrig: Vec2,
-  neighborFixed: Vec2 | null,
-  shiftedLinePoint: Vec2,
-  edgeDir: Vec2,
-  delta: Vec2,
-): Vec2 {
-  const fallback: Vec2 = { x: vertexOrig.x + delta.x, y: vertexOrig.y + delta.y };
-  if (!neighborFixed) return fallback;
-  const neighborDir: Vec2 = {
-    x: vertexOrig.x - neighborFixed.x,
-    y: vertexOrig.y - neighborFixed.y,
-  };
-  if (Math.hypot(neighborDir.x, neighborDir.y) < 1e-9) return fallback; // entartete Nachbarkante
-  return lineIntersect(neighborFixed, neighborDir, shiftedLinePoint, edgeDir) ?? fallback;
-}
-
-/**
- * Nachbar-Index in einem Vertex-Ring/einer -Kette in Richtung `dir`. `null`,
- * wenn `i` am offenen Ende liegt und `closed` falsch ist (kein Nachbar dort)
- * ODER der Nachbar auf die andere Kanten-Ecke selbst fiele (entartetes
- * 2-Punkt-„Polygon" — kein sinnvoller dritter Bezugspunkt).
- */
-function ringNeighbor(
-  i: number,
-  n: number,
-  closed: boolean,
-  dir: 1 | -1,
-  excluding: number,
-): number | null {
-  const j = i + dir;
-  const k = j >= 0 && j < n ? j : closed ? ((j % n) + n) % n : null;
-  return k !== null && k !== excluding ? k : null;
-}
-
-/**
- * Verschiebt die Kante (aIndex,bIndex) eines Vertex-Rings/einer -Kette um
- * `delta`, winkeltreu an den beiden Nachbar-Ecken (s. `edgeMoveVertex`).
- * `closed`: Ring (Raum/Decke/geschlossene Polylinie) oder offene Kette
- * (offene Polylinie).
- */
-function movePolygonEdge(
-  pts: Vec2[],
-  aIndex: number,
-  bIndex: number,
-  delta: Vec2,
-  closed: boolean,
-): Vec2[] {
-  const n = pts.length;
-  const A = pts[aIndex];
-  const B = pts[bIndex];
-  const shiftedA: Vec2 = { x: A.x + delta.x, y: A.y + delta.y };
-  const edgeDir: Vec2 = { x: B.x - A.x, y: B.y - A.y };
-  const prevOfA = ringNeighbor(aIndex, n, closed, -1, bIndex);
-  const nextOfB = ringNeighbor(bIndex, n, closed, 1, aIndex);
-  return pts.map((p, i) => {
-    if (i === aIndex) {
-      return edgeMoveVertex(A, prevOfA != null ? pts[prevOfA] : null, shiftedA, edgeDir, delta);
-    }
-    if (i === bIndex) {
-      return edgeMoveVertex(B, nextOfB != null ? pts[nextOfB] : null, shiftedA, edgeDir, delta);
-    }
-    return p;
-  });
-}
-
-/**
- * Verschiebt eine SEITE (Kante) des selektierten Elements: beide Vertices der
- * Kante um `delta` (immutabel), winkeltreu an den Nachbarkanten (s. o.). Für
- * 2D-Elemente:
- *  • rect: die zwei betroffenen Ecken (per Index) verschieben und min/max neu
- *    normalisieren — so wächst/schrumpft das Rechteck an genau dieser Seite
- *    (immer rechtwinklig, `movePolygonEdge` nicht nötig).
- *  • polyline: die zwei Vertices `aIndex`/`bIndex` um `delta` verschieben,
- *    winkeltreu über `movePolygonEdge`.
- *  • line: beide Endpunkte verschieben (das gesamte Segment senkrecht).
- * Für die Wand: start+end gemeinsam (die ganze Wand senkrecht zur Achse).
- */
-function moveEdge(
-  project: Project,
-  drawingId: string | null,
-  wallId: string | null,
-  aIndex: number,
-  bIndex: number,
-  delta: Vec2,
-): CoreOp[] {
-  // Objekt-Sperre: s. Kommentar in `moveGrip` oben.
-  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return [];
-  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return [];
-  const mv = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
-  if (drawingId) {
-    return patchItem(project, "drawings2d", drawingId, (d) => {
-        const g = d.geom;
-        if (g.shape === "line") {
-          // Linie hat nur eine Kante [0,1] → das ganze Segment verschieben.
-          return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
-        }
-        if (g.shape === "polyline" || g.shape === "spline") {
-          const pts = movePolygonEdge(g.pts, aIndex, bIndex, delta, !!g.closed);
-          return { ...d, geom: { ...g, pts } };
-        }
-        if (g.shape === "rect" || g.shape === "image") {
-          // Ecken in derselben Reihenfolge wie drawingVertices, die zwei Kanten-
-          // Ecken verschieben, dann bbox neu bilden (achsparallel halten).
-          const corners = [
-            g.min,
-            { x: g.max.x, y: g.min.y },
-            g.max,
-            { x: g.min.x, y: g.max.y },
-          ];
-          const moved = corners.map((c, i) =>
-            i === aIndex || i === bIndex ? mv(c) : c,
-          );
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          for (const c of moved) {
-            minX = Math.min(minX, c.x); minY = Math.min(minY, c.y);
-            maxX = Math.max(maxX, c.x); maxY = Math.max(maxY, c.y);
-          }
-          return { ...d, geom: { ...g, min: { x: minX, y: minY }, max: { x: maxX, y: maxY } } };
-        }
-        return d;
-    });
-  }
-  if (wallId) {
-    // Wand: beide Enden gemeinsam → ganze Wand senkrecht verschieben.
-    return patchItem(project, "walls", wallId, (w) => ({ ...w, start: mv(w.start), end: mv(w.end) }));
-  }
-  return [];
 }

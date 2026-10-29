@@ -9,9 +9,9 @@ import { useRef, useState, type RefObject } from "react";
 import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
-import { drawingVertices } from "./projectSlice";
+import { drawingVertices } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
-import { openEdges, polylineEdgeGrips, ringEdges } from "./edgeGrips";
+import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
 import { areaMovePreview } from "../tools/transform";
 import { mvGeom } from "../core";
 import { drawingPreviewShapes } from "../tools/drawingPreview";
@@ -372,7 +372,7 @@ export function useGripEditing(opts: {
   //    Ecken wandern mit, die Nachbar-Segmente dehnen sich nach (Parallel-
   //    Verschieben EINER Kante einer komplexen Polylinie, §Task B).
   const edgeGrips: EdgeGrip[] = (() => {
-    // ringEdges/openEdges/polylineEdgeGrips: s. edgeGrips.ts.
+    // ringEdges/openEdges/polylineEdgeGrips: Kern (`geometry/grips.ts`, `grips.rs`).
     // Decke: geschlossener Ring aus dem Umriss (Auswahl exklusiv, wie bei grips).
     if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       return ringEdges(selectedCeiling.outline, {});

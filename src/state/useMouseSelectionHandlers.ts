@@ -256,7 +256,7 @@ export function useMouseSelectionHandlers(opts: {
     // Kontextmenü-„Entsperren", sobald die Selektion einmal woanders hin
     // wechselt — Sackgasse). Ein gesperrtes Element bleibt anwähl-/
     // inspizierbar; blockiert wird die MODIFIKATION direkt an den
-    // Mutations-Stellen (`moveGrip`/`moveElementBy` in projectSlice.ts,
+    // Mutations-Stellen (`moveGrip`/`moveElementBy` im Kern, `grips.rs`,
     // `deleteSelection` in App.tsx) — dieselbe Semantik wie AutoCADs
     // Layer-„Lock" (weiterhin wählbar, nicht editierbar).
     // Shift+Klick: Mehrfach-Auswahl — getroffenes Element zu-/abschalten, den

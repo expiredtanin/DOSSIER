@@ -20,7 +20,6 @@ export {
 export {
   ceilingArea,
   normalizeOutline,
-  outlineBBox,
   pointInOutline,
 } from "../geometry/ceiling";
 
@@ -98,7 +97,6 @@ export {
 } from "../geometry/lineSegments";
 
 export {
-  openingGapQuad,
   openingVerticalExtent,
 } from "../geometry/opening";
 export { autoExteriorDimensions } from "../geometry/autoDimensions";
@@ -122,7 +120,6 @@ export {
 } from "../geometry/revisionCloud";
 
 export {
-  roofBBox,
   roofBaseElevation,
   roofGeometry,
 } from "../geometry/roof";
@@ -130,7 +127,6 @@ export {
 export {
   addRoofHole,
   removeRoofHole,
-  roofEdgeList,
   roofHoleWorks,
   setRoofEdge,
 } from "../geometry/roofEdges";
@@ -155,7 +151,6 @@ export {
   IDEAL_TREAD,
   MIN_STEPS,
   defaultStepCount,
-  stairBBox,
   stairGeometry,
   stairOutline,
 } from "../geometry/stair";

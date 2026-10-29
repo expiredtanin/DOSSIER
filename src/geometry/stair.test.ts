@@ -3,7 +3,7 @@
  * Referenz, Schnitt, Rahmen und Unsinn-Eingaben (Rust-Tests decken die Mathematik je Fall ab).
  */
 import { describe, it, expect } from "vitest";
-import { defaultStepCount, stairBBox, stairCut, stairGeometry, stairOutline } from "./stair";
+import { defaultStepCount, stairCut, stairGeometry, stairOutline } from "./stair";
 import type { Stair } from "../model/types";
 
 const base: Stair = {
@@ -51,11 +51,10 @@ describe("stairGeometry", () => {
     expect(stairGeometry(base, NaN).treads).toEqual([]);
     expect(stairGeometry({ ...base, stepCount: 0 }, 2.8).treads).toHaveLength(2);
     expect(stairOutline({ ...base, runLength: NaN }, 0)).toEqual({ polygon: null, spiral: null });
-    expect(stairBBox(stairGeometry(base, NaN))).toEqual({ minX: 0, minY: 0, maxX: 0, maxY: 0 });
   });
 });
 
-describe("stairCut / stairBBox / defaultStepCount", () => {
+describe("stairCut / defaultStepCount", () => {
   it("Schnitt teilt die Tritte und legt eine Doppel-Bruchlinie", () => {
     const g = stairGeometry(base, 2.8);
     const c = stairCut(g, 1.0);
@@ -64,12 +63,6 @@ describe("stairCut / stairBBox / defaultStepCount", () => {
     expect(c.breakLine).toHaveLength(2);
     expect(stairCut(g, 99).breakLine).toBeNull();
     expect(stairCut(stairGeometry(base, NaN), 1)).toEqual({ belowIndices: [], aboveIndices: [], breakLine: null });
-  });
-
-  it("BBox über Tritte", () => {
-    const b = stairBBox(stairGeometry(base, 2.8));
-    expect(b.maxX).toBeCloseTo(3, 12);
-    expect(b.minY).toBeCloseTo(-0.6, 12);
   });
 
   it("Vorgabe-Stufenzahl: Steighöhe 0.17, gedeckelt durch die Lauflänge, mind. 2", () => {

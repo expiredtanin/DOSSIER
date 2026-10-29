@@ -39,21 +39,6 @@ export interface RoofGeometry {
   ridgeHeight: number;
 }
 
-/** Bounding-Box eines Umrisses. */
-export function roofBBox(outline: Vec2[]): { x0: number; y0: number; x1: number; y1: number } {
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
-  for (const p of outline) {
-    if (p.x < x0) x0 = p.x;
-    if (p.y < y0) y0 = p.y;
-    if (p.x > x1) x1 = p.x;
-    if (p.y > y1) y1 = p.y;
-  }
-  return { x0, y0, x1, y1 };
-}
-
 /**
  * Traufhöhe (absolutes Z) eines Dachs: `baseElevation`, sonst die OBERKANTE des
  * zugehörigen Geschosses (baseElevation + floorHeight) — das Dach sitzt also

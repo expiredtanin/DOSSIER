@@ -7,6 +7,7 @@
 import type { Project } from "../model/types";
 import { core } from "../engine/coreWasm";
 import { applyOps, opsToJson } from "./ops";
+import { fromMarkedJson, toMarkedJson } from "./ops";
 import type { CoreOp } from "./ops";
 import { fieldOps } from "./opsBuild";
 
@@ -238,6 +239,44 @@ export class ProjectDocument {
     return { project };
   }
 
+  /**
+   * Griff-Änderung ([K4] S3, `grips.rs`): der Kern rechnet `req` (s. `GripRequest`) auf seinem Stand
+   * von `base` und wendet das Ergebnis wie {@link commit} an — ein Aufruf je Mausschritt. Ergebnis:
+   * neues Projekt und die angewendeten Ops (leer = nichts zu tun, dann `project === base`), ein
+   * Hinweis-Schlüssel (i18n) oder die Meldungen der Prüfung (dann bleibt alles unverändert).
+   */
+  commitGrip(base: Project, req: object, coalesceKey: string | undefined, now: number): { project: Project; ops: CoreOp[]; notice?: string } | { problems: string[] } {
+    this.ensure(base);
+    if (!this.handle) return { problems: ["Projekt-Dokument im Kern nicht offen."] };
+    const out = core().doc_grip_commit(this.handle, gripJson(req), coalesceKey ?? "", now);
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    const r = fromMarkedJson<{ ops: CoreOp[]; notice?: string } | { problems: string[] }>(out);
+    if ("problems" in r) return r;
+    if (r.ops.length === 0) return { project: base, ops: r.ops, notice: r.notice };
+    const project = applyOps(base, r.ops);
+    this.mirror = project;
+    return { project, ops: r.ops, notice: r.notice };
+  }
+
+  /**
+   * Wie {@link queryRoot} für Abfragen, deren Antwort nicht endliche Zahlen als Marken trägt
+   * (`selectionInfo`, `drawingBBoxes`); die Marken werden wieder Zahlen.
+   */
+  queryRootMarked<T>(name: "selectionInfo" | "drawingBBoxes" | "verticalExtents", text = ""): T {
+    if (!this.handle) throw new Error(`Kern-Abfrage „${name}": Dokument nicht offen`);
+    const out = core().doc_query_root(this.handle, name, text);
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    return fromMarkedJson<T>(out);
+  }
+
+  /** Wie {@link commitGrip}, aber nur rechnen (ohne Anwenden): die Ops und ggf. der Hinweis. */
+  gripOps(req: object): { ops: CoreOp[]; notice?: string } {
+    if (!this.handle) throw new Error("Kern-Abfrage „gripOps“: Dokument nicht offen");
+    const out = core().doc_query_root(this.handle, "gripOps", gripJson(req));
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    return fromMarkedJson(out);
+  }
+
   /** Einen Schritt zurück auf `base` (= aktuelles Projekt); `null` = nichts rückgängig zu machen. */
   undo(base: Project): Project | null {
     return this.jump(base, "doc_undo");
@@ -293,6 +332,15 @@ export class ProjectDocument {
   endGroup(): void {
     if (this.handle) core().doc_group_end(this.handle);
   }
+}
+
+/** Griff-Anfrage als JSON; Marken nur bei nicht endlichen Zahlen (der Ersetzer kostet je Wert einen Aufruf). */
+function gripJson(req: object): string {
+  for (const v of Object.values(req)) {
+    const bad = typeof v === "number" ? !Number.isFinite(v) : Array.isArray(v) && v.some((x) => typeof x === "number" && !Number.isFinite(x));
+    if (bad) return toMarkedJson(req);
+  }
+  return JSON.stringify(req);
 }
 
 let shared: ProjectDocument | null = null;

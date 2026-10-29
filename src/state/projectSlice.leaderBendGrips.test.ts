@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { getState, setState } from "./appStore";
 import { sampleProject } from "../model/sampleProject";
-import { drawingVertices } from "./projectSlice";
+import { drawingVertices } from "../core";
 import type { Drawing2D } from "../model/types";
 
 const leaderNoBends: Drawing2D = {

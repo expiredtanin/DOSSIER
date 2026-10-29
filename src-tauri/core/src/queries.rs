@@ -98,6 +98,27 @@ pub fn run_root(root: &serde_json::Map<String, serde_json::Value>, name: &str, t
             let m: crate::groups::Membership = serde_json::from_str(text).map_err(|e| format!("selectionFilterPatch: {e}"))?;
             json(&crate::selection_filter::filter_patch(root, &m))
         }
+        // Griff-Änderungen ([K4] S3, `grips.rs`): `text` = JSON der Anfrage; Antwort `{ops, notice}` (ohne Commit).
+        "gripOps" => {
+            let req: crate::grips::Request = serde_json::from_str(text).map_err(|e| format!("gripOps: {e}"))?;
+            Ok(crate::grips::result_json(&crate::grips::run(root, &req)?))
+        }
+        // Objekt-Info der Auswahl ([K4] S3, `selection_info.rs`): `text` = JSON der gewählten ids je Art; Antwort
+        // `Selection` (TS) oder null, Zahlen mit Nicht-endlich-Marken.
+        "selectionInfo" => {
+            let a: crate::selection_info::SelArgs = serde_json::from_str(text).map_err(|e| format!("selectionInfo: {e}"))?;
+            crate::selection_info::derive(root, &a).map(crate::selection_info::J::into_string)
+        }
+        // Bounding-Boxen von Zeichnungen (Ausrichten/Verteilen): `text` = JSON der ids.
+        "drawingBBoxes" => {
+            let ids: Vec<String> = serde_json::from_str(text).map_err(|e| format!("drawingBBoxes: {e}"))?;
+            Ok(crate::selection_info::drawing_bboxes(root, &ids).into_string())
+        }
+        // UK/OK von Wänden und Decken (3D-Griffe): `text` = `{walls: […], ceilings: […]}` (ganze Elemente).
+        "verticalExtents" => {
+            let a: crate::selection_info::ExtentArgs = serde_json::from_str(text).map_err(|e| format!("verticalExtents: {e}"))?;
+            Ok(crate::selection_info::vertical_extents(root, &a).into_string())
+        }
         _ => Err(format!("Unbekannte Wurzel-Abfrage: {name}")),
     }
 }

@@ -1,7 +1,8 @@
-// Kanten und Höfe eines Dachs ([26]): Liste, Änderung der Kantenneigung, Hof hinzufügen/entfernen.
+// Kanten und Höfe eines Dachs ([26]): Änderung der Kantenneigung, Hof hinzufügen/entfernen (die
+// Kantenliste rechnet der Kern, Test in `state/selectionInfo.test.ts`).
 import { describe, expect, it } from "vitest";
 import type { Roof, Vec2 } from "../model/types";
-import { addRoofHole, removeRoofHole, roofEdgeList, roofHoleWorks, setRoofEdge } from "./roofEdges";
+import { addRoofHole, removeRoofHole, roofHoleWorks, setRoofEdge } from "./roofEdges";
 
 const rect = (x: number, y: number, w: number, h: number): Vec2[] => [
   { x, y },
@@ -25,27 +26,6 @@ const roof = (extra: Partial<Roof> = {}): Roof => ({
 });
 
 const court = rect(4, 2, 4, 4);
-
-describe("roofEdgeList", () => {
-  it("Umrisskanten, dann Hofkanten; Standard ohne Feld", () => {
-    const list = roofEdgeList(roof({ holes: [court] }));
-    expect(list).toHaveLength(8);
-    expect(list.map((e) => e.ring)).toEqual([0, 0, 0, 0, 1, 1, 1, 1]);
-    expect(list[0]).toMatchObject({ index: 0, spec: { kind: "default" }, length: 12 });
-    expect(list[5].index).toBe(5);
-  });
-
-  it("liest Giebel, Neigung und negativ = Standard; Sattel: Giebelregel zeigt sich als Vorgabe", () => {
-    const list = roofEdgeList(roof({ edgePitchDeg: [20, null, -1] }));
-    expect(list[0].spec).toEqual({ kind: "pitch", deg: 20 });
-    expect(list[1].spec).toEqual({ kind: "gable" });
-    expect(list[2].spec).toEqual({ kind: "default" });
-    expect(list[3].spec).toEqual({ kind: "default" });
-    const sattel = roofEdgeList(roof({ shape: "sattel" }));
-    expect(sattel.map((e) => e.defaultGable)).toEqual([false, true, false, true]);
-    expect(roofEdgeList(roof()).every((e) => !e.defaultGable)).toBe(true);
-  });
-});
 
 describe("setRoofEdge", () => {
   it("setzt Neigung/Giebel, füllt mit Standard auf, entfernt das Feld wenn alles Standard", () => {

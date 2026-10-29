@@ -15,6 +15,30 @@ pub fn to_fixed(x: f64, d: usize) -> String {
     if ax >= 1e21 {
         return format!("{}{}", if neg { "-" } else { "" }, ax);
     }
+    // Schnellweg: Rust rundet `{:.N}` korrekt (zum geraden Nachbarn nur bei exakten Halbwerten); ohne
+    // exakten Halbwert ist das Ergebnis dasselbe wie in JS, nur ohne die teure lange Formatierung.
+    if !exact_half(ax, d) {
+        let s = format!("{:.*}", d, ax);
+        return if neg { format!("-{s}") } else { s };
+    }
+    to_fixed_wide(ax, d, neg)
+}
+
+/// Ob `ax` (endlich, ≥ 0) bei `d` Nachkommastellen genau auf der Mitte zwischen zwei Ergebnissen liegt:
+/// `ax · 10^d · 2` ist eine ungerade ganze Zahl, d. h. das niedrigste gesetzte Bit von `ax` ist 2^-(d+1).
+fn exact_half(ax: f64, d: usize) -> bool {
+    if ax == 0.0 {
+        return false;
+    }
+    let bits = ax.to_bits();
+    let exp = ((bits >> 52) & 0x7ff) as i64;
+    let frac = bits & ((1u64 << 52) - 1);
+    let (m, e) = if exp == 0 { (frac, -1074) } else { (frac | (1u64 << 52), exp - 1075) };
+    e + m.trailing_zeros() as i64 + d as i64 + 1 == 0
+}
+
+/// Langsamer, exakter Weg (für exakte Halbwerte): Ziffern mit 25 Stellen Reserve, dann aufrunden.
+fn to_fixed_wide(ax: f64, d: usize, neg: bool) -> String {
     // 25 Stellen mehr als nötig: ein exakter Halbwert zeigt sich als '5' gefolgt von Nullen.
     let wide = format!("{:.*}", d + 25, ax);
     let (int_part, frac) = wide.split_once('.').expect("Nachkommastellen");
@@ -119,5 +143,30 @@ mod tests {
         assert_eq!(to_fixed(123.456, 2), "123.46");
         assert_eq!(to_fixed(2.675, 2), "2.67"); // 2.675 ist binär 2.67499999… — JS: "2.67"
         assert_eq!(to_fixed(1e-9, 6), "0.000000");
+        assert_eq!(to_fixed(0.25, 1), "0.3");
+        assert_eq!(to_fixed(-0.25, 1), "-0.3");
+        assert_eq!(to_fixed(-0.0, 2), "0.00");
+    }
+
+    #[test]
+    fn schnellweg_gleich_dem_genauen_weg() {
+        let mut x: u64 = 0x2545_f491_4f6c_dd1d;
+        for i in 0..200_000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let v = match i % 4 {
+                0 => (x % 1_000_000) as f64 / 1000.0,
+                1 => f64::from_bits(x) % 1e6,
+                2 => (x % 4096) as f64 / 64.0,
+                _ => (x as f64 / u64::MAX as f64 - 0.5) * 100.0,
+            };
+            if !v.is_finite() {
+                continue;
+            }
+            for d in 0..8 {
+                assert_eq!(to_fixed(v, d), to_fixed_wide(v.abs(), d, v < 0.0), "{v} {d}");
+            }
+        }
     }
 }

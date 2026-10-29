@@ -21,12 +21,6 @@ pub fn stair_cut_flat(geometry: &[f64], cut_rise: f64) -> Vec<f64> {
     s::cut(geometry, cut_rise)
 }
 
-/// `[minX, minY, maxX, maxY]` aller Tritte + Podest.
-#[wasm_bindgen]
-pub fn stair_bbox_flat(geometry: &[f64]) -> Vec<f64> {
-    s::bbox(geometry)
-}
-
 /// Vorgabe-Stufenzahl aus Steighöhe und Lauflänge.
 #[wasm_bindgen]
 pub fn stair_default_step_count(total_rise: f64, run_length: f64) -> u32 {

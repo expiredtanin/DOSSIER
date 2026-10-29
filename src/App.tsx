@@ -1254,7 +1254,7 @@ export default function App() {
       for (const id of selectedSectionLineIds) patchLevel(id, { linePoints: undefined });
     }
     // Objekt-Sperre: gesperrte Elemente aus der Löschung ausnehmen (s.
-    // `moveGrip`/`moveElementBy` in projectSlice.ts für dieselbe Prüfung
+    // `moveGrip`/`moveElementBy` im Kern, `grips.rs`, für dieselbe Prüfung
     // beim Ziehen). ExtrudedSolid/Kontext-Objekte haben kein `locked`-Feld
     // (s. deren Typdefinitionen) — bleiben ungefiltert.
     const notLocked = (kind: MemberKind, ids: string[]) =>

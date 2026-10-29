@@ -1,4 +1,4 @@
-// Kanten und Höfe eines Dachs ([26]): die Kantenliste fürs Objekt-Info (Neigung je Kante, Giebel),
+// Kanten und Höfe eines Dachs ([26]): Typen der Kantenliste (gerechnet im Kern, `selection_info.rs`),
 // Änderungen als Teilobjekt (`Partial<Roof>`, für `updateRoof`/`patchItem` — ein Undo-Schritt) und
 // die Prüfung, ob ein Hof wirkt. Die Geometrie selbst rechnet der Rust-Kern (`roof.rs`).
 //
@@ -31,46 +31,6 @@ export interface RoofEdge {
 
 const MAX_PITCH = 89;
 
-/** Die Vorgabe aus einem Eintrag von `edgePitchDeg`. */
-function specOf(v: number | null | undefined): EdgeSpec {
-  if (v === null) return { kind: "gable" };
-  if (v === undefined || !Number.isFinite(v) || v < 0) return { kind: "default" };
-  return { kind: "pitch", deg: v };
-}
-
-/** Giebelt der Standard dieser Dachform die Kante a→b (quer zur Firstrichtung)? */
-function defaultGableEdge(roof: Roof, a: Vec2, b: Vec2): boolean {
-  const gabled = roof.shape === "sattel" || (roof.shape === "mansarde" && (roof.mansardType ?? "giebel") === "giebel");
-  if (!gabled) return false;
-  const dx = Math.abs(b.x - a.x);
-  const dy = Math.abs(b.y - a.y);
-  return roof.ridgeAxis === "y" ? dy < dx : dx < dy;
-}
-
-/** Alle Kanten des Dachs (Umriss, dann Höfe) mit ihrer Vorgabe. */
-export function roofEdgeList(roof: Roof): RoofEdge[] {
-  const rings: Vec2[][] = [roof.outline, ...(roof.holes ?? [])];
-  const out: RoofEdge[] = [];
-  let index = 0;
-  rings.forEach((ring, r) => {
-    ring.forEach((a, edge) => {
-      const b = ring[(edge + 1) % ring.length];
-      out.push({
-        index,
-        ring: r,
-        edge,
-        a,
-        b,
-        length: Math.hypot(b.x - a.x, b.y - a.y),
-        spec: specOf(roof.edgePitchDeg?.[index]),
-        defaultGable: defaultGableEdge(roof, a, b),
-      });
-      index++;
-    });
-  });
-  return out;
-}
-
 /** `edgePitchDeg` ohne Standard-Einträge am Ende; alles Standard ⇒ `undefined` (Feld entfällt). */
 function normalized(values: (number | null)[]): (number | null)[] | undefined {
   const v = values.slice();
@@ -80,7 +40,7 @@ function normalized(values: (number | null)[]): (number | null)[] | undefined {
 
 /** Teilobjekt für `updateRoof`: Kante `index` auf `spec` setzen. */
 export function setRoofEdge(roof: Roof, index: number, spec: EdgeSpec): Pick<Roof, "edgePitchDeg"> {
-  const total = roofEdgeList(roof).length;
+  const total = roof.outline.length + (roof.holes ?? []).reduce((n, h) => n + h.length, 0);
   const values: (number | null)[] = Array.from({ length: total }, (_, i) => {
     const v = roof.edgePitchDeg?.[i];
     return v === undefined ? -1 : v;
