@@ -1,8 +1,8 @@
 // Raum-Erkennung — geschlossene Raum-Umrisse aus Wandsegmenten ableiten.
 //
 // Fassade über den Rust-Kern (`src-tauri/core/src/room_boundary.rs`, Bindungen `web/room_boundary.rs`;
-// die Rechnung steht in `kernel2d`: `detect_rooms`, `room_from_point_inside`,
-// `room_from_point_inside_faces`). Wände gehen flach hinüber, Umrisse kommen flach zurück.
+// die Rechnung steht in `kernel2d`: `detect_rooms`). Wände gehen flach hinüber, Umrisse kommen flach
+// zurück. Der Klick-in-Raum des Raum-Befehls rechnet direkt im Kern (`cmd_create.rs`).
 //
 // Verfahren (Rust): planare Anordnung der Wand-MITTELLINIEN (Schnitte an Kreuzungen, Lücken ≤ `gapTol`
 // per Endpunkt-Snapping geschlossen), minimale Maschen über „next edge counter-clockwise"
@@ -13,8 +13,6 @@
 // als geschlossen modelliert werden.
 //
 //   detectRooms(walls)                    alle Räume (lichte Innenkonturen, CCW)
-//   roomFromPointInside(point, walls)     Klick-in-Raum: kleinste Masche um den Punkt, oder null
-//   roomFromPointInsideFaces(point, faces) dasselbe auf fertigen Wand-Innenflächen (ohne Offset)
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md). Einheit: METER.
 
@@ -43,31 +41,12 @@ export interface DetectRoomsOptions {
   offsetToInner?: boolean;
 }
 
-/** Eine Wand-Innenfläche (Face) als gerichtete/ungerichtete Strecke. */
-export interface WallFace {
-  a: Vec2;
-  b: Vec2;
-}
-
 /** `[n, (ax, ay, bx, by, dicke)…]`. */
 function encodeWalls(walls: WallSegment[]): Float64Array {
   const out = new Float64Array(1 + 5 * walls.length);
   out[0] = walls.length;
   walls.forEach((w, i) => out.set([w.a.x, w.a.y, w.b.x, w.b.y, w.thickness], 1 + 5 * i));
   return out;
-}
-
-/** `[n, (ax, ay, bx, by)…]`. */
-function encodeFaces(faces: WallFace[]): Float64Array {
-  const out = new Float64Array(1 + 4 * faces.length);
-  out[0] = faces.length;
-  faces.forEach((f, i) => out.set([f.a.x, f.a.y, f.b.x, f.b.y], 1 + 4 * i));
-  return out;
-}
-
-/** `[nPkt, x, y, …]` → Umriss, leer → null. */
-function decodeRing(buf: Float64Array): Vec2[] | null {
-  return buf.length ? new FlatReader(buf).ring() : null;
 }
 
 /**
@@ -86,28 +65,4 @@ export function detectRooms(walls: WallSegment[], options: DetectRoomsOptions = 
   const rooms: Vec2[][] = [];
   for (let n = r.count(); n > 0; n--) rooms.push(r.ring());
   return rooms;
-}
-
-/**
- * Klick-in-Raum-Fallback: findet die Masche, die den Saatpunkt einschliesst, und
- * gibt ihren lichten Innen-Umriss zurück (oder null, wenn der Punkt in keiner
- * geschlossenen Zelle liegt). Wählt die Masche mit kleinster Fläche, die den Punkt
- * enthält (die unmittelbar umgebende Zelle statt einer grösseren umschliessenden).
- */
-export function roomFromPointInside(
-  point: Vec2,
-  walls: WallSegment[],
-  options: DetectRoomsOptions = {},
-): Vec2[] | null {
-  return decodeRing(
-    core().room_from_point(point.x, point.y, encodeWalls(walls), options.gapTol ?? 0.05, options.offsetToInner ?? true),
-  );
-}
-
-/**
- * Variante des Klick-Tracers auf bereits berechneten Wand-INNENFLÄCHEN: die Strecken
- * bilden schon die lichten Wandseiten, kein Innen-Offset.
- */
-export function roomFromPointInsideFaces(point: Vec2, wallFaces: WallFace[], gapTol = 0.05): Vec2[] | null {
-  return decodeRing(core().room_from_point_faces(point.x, point.y, encodeFaces(wallFaces), gapTol));
 }

@@ -13,9 +13,6 @@
 // (emitExtrudedSolids); dieser Befehl legt nur die Rohdaten (Punkte + Höhe +
 // Verjüngung) im Projekt ab.
 
-import type { Drawing2D, ExtrudedSolid } from "../../model/types";
-import { uniqueId } from "../../tools/types";
-import { polylineEdges, pointSegmentDistance } from "../../core";
 import type {
   Command,
   CommandContext,
@@ -25,108 +22,40 @@ import type {
   Project,
   Vec2,
 } from "../types";
-import { addItems, opsMutation, removeItems } from "../../core";
-import type { CoreOp } from "../../core";
-
-const HIT_TOL = 0.25; // Modell-Meter: Pick-Toleranz für die Profil-Wahl
+import { createMutation, createQuery, xy } from "../createCore";
 
 /** Persistente Extrusionshöhe über Aufrufe hinweg (Default: Geschosshöhe). */
 let lastHeight = 2.6;
 /** Persistente Verjüngung über Aufrufe hinweg (Default: Prisma, kein Kegel/Pyramide). */
 let lastTaper = 0;
 
-// ── Profil-Abstraktion: geschlossene polyline/rect/circle → Punktliste ─────
+// ── Profil (Kern, `cmd_create.rs`): geschlossene polyline/rect/circle → Punktliste ─
 
-/** Kreis-Tessellierung für Footprint/Auswahl/bbox (48-Eck, wie circle.ts). */
-function circlePts(center: Vec2, r: number): Vec2[] {
-  const N = 48;
-  const pts: Vec2[] = [];
-  for (let i = 0; i < N; i++) {
-    const t = (i / N) * Math.PI * 2;
-    pts.push({ x: center.x + r * Math.cos(t), y: center.y + r * Math.sin(t) });
-  }
-  return pts;
-}
-
-/** Ein extrudierfähiges Profil: Tessellierung + optional die echte Kreis-Geometrie. */
+/** Profil eines extrudierbaren 2D-Elements (Kreis: 48-Eck + Mittelpunkt/Radius). */
 interface Profile {
   pts: Vec2[];
   circle?: { center: Vec2; r: number };
 }
 
-/** Wandelt ein extrudierfähiges (geschlossenes) Drawing2D in ein Profil. */
-function geomToProfile(d: Drawing2D): Profile | null {
-  const g = d.geom;
-  if (g.shape === "polyline" && g.closed && g.pts.length >= 3) return { pts: g.pts };
-  if (g.shape === "rect") {
-    return { pts: [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }] };
-  }
-  if (g.shape === "circle") {
-    return { pts: circlePts(g.center, g.r), circle: { center: g.center, r: g.r } };
-  }
-  return null;
+type ProfileHit = { id: string } & Profile;
+
+function profileQuery(project: Project, req: { q: string } & Record<string, unknown>): ProfileHit | null {
+  return createQuery<{ hit: (ProfileHit & { circle: Profile["circle"] | null }) | null }>(project, req).hit ?? null;
 }
 
-/** Genau ein passendes Drawing2D vorselektiert? Dann liefere sein Profil. */
-function singleSelectedProfile(
-  project: Project,
-  sel: CommandSelection,
-): ({ d: Drawing2D } & Profile) | null {
+/** Genau EIN geeignetes Profil vorgewählt (sonst null). */
+function singleSelectedProfile(project: Project, sel: CommandSelection): ProfileHit | null {
   if (!sel.drawingId || sel.wallIds.length > 0) return null;
-  const d = project.drawings2d.find((x) => x.id === sel.drawingId);
-  if (!d) return null;
-  const profile = geomToProfile(d);
-  return profile ? { d, ...profile } : null;
+  return profileQuery(project, { q: "profile", id: sel.drawingId });
 }
 
-/** Nächstes extrudierfähige Drawing2D zum Klickpunkt (innerhalb Toleranz). */
-function pickProfileAt(
-  project: Project,
-  levelId: string,
-  pt: Vec2,
-): ({ d: Drawing2D } & Profile) | null {
-  let best: ({ d: Drawing2D } & Profile) | null = null;
-  let bestD = HIT_TOL;
-  for (const d of project.drawings2d) {
-    if (d.levelId !== levelId) continue;
-    const profile = geomToProfile(d);
-    if (!profile) continue;
-    for (const [a, b] of polylineEdges(profile.pts, true)) {
-      const dd = pointSegmentDistance(pt, a, b);
-      if (dd < bestD) {
-        bestD = dd;
-        best = { d, ...profile };
-      }
-    }
-  }
-  return best;
-}
+/** Nächstes Profil der Ebene am Klickpunkt (Kanten-Abstand < 0.25 m). */
+const pickProfileAt = (project: Project, levelId: string, pt: Vec2): ProfileHit | null =>
+  profileQuery(project, { q: "pickProfile", level: levelId, pt: xy(pt) });
 
-/**
- * Hängt den neuen Körper an UND entfernt das Quell-Profil (`sourceId`) aus
- * `drawings2d` — die Polylinie/das Rechteck WIRD zur Extrusion, sie bleibt
- * nicht als unabhängiges Duplikat liegen (sonst zwei Objekte am selben Ort,
- * eines davon im Grundriss unsichtbar verwaist).
- */
-function appendExtrudedSolid(
-  p: Project,
-  profile: Profile,
-  height: number,
-  taper: number,
-  sourceId: string,
-  ctx: CommandContext,
-): CoreOp[] {
-  const solid: ExtrudedSolid = {
-    id: uniqueId("extrude"),
-    type: "extrudedSolid",
-    levelId: ctx.level.id,
-    points: profile.pts,
-    height,
-    circle: profile.circle,
-    ...(taper > 0 ? { taper } : {}),
-  };
-  return [...removeItems(p, "drawings2d", [sourceId]), ...addItems("extrudedSolids", [solid])];
-}
+/** Commit (Kern): Quelle entfernen, Körper (Punkte + Höhe + Verjüngung) anlegen. */
+const appendExtrudedSolid = (height: number, taper: number, sourceId: string, ctx: CommandContext) =>
+  createMutation(ctx, { cmd: "extrude", source: sourceId, height, taper });
 
 // ── Zustand ───────────────────────────────────────────────────────────────────
 
@@ -168,14 +97,13 @@ const enterTaperPhase = (
 ];
 
 const commitTaper = (
-  profile: Profile,
   height: number,
   taper: number,
   sourceId: string,
   ctx: CommandContext,
 ): [CommandState, CommandResult] => [
   { phase: "done", lastPoint: null } as ExDone,
-  { draft: null, done: true, commit: opsMutation((p) => appendExtrudedSolid(p, profile, height, taper, sourceId, ctx)) },
+  { draft: null, done: true, commit: appendExtrudedSolid(height, taper, sourceId, ctx) },
 ];
 
 export const extrudeCommand: Command = {
@@ -207,16 +135,16 @@ export const extrudeCommand: Command = {
           const h = Math.abs(input.value);
           if (h < 1e-6) return [s, { draft: null }];
           lastHeight = h;
-          return enterTaperPhase(pre, h, pre.d.id);
+          return enterTaperPhase(pre, h, pre.id);
         }
         // Punkt im vorselektierten Fall: Höhen-Schritt betreten (HUD zeigt Default).
-        const ns: ExHeight = { phase: "height", profile: pre, sourceId: pre.d.id, cursor: null, lastPoint: null };
+        const ns: ExHeight = { phase: "height", profile: pre, sourceId: pre.id, cursor: null, lastPoint: null };
         return [ns, { draft: null }];
       }
       if (input.kind === "point") {
         const hit = pickProfileAt(ctx.project, ctx.level.id, input.point);
         if (!hit) return [s, { draft: null }];
-        const ns: ExHeight = { phase: "height", profile: hit, sourceId: hit.d.id, cursor: null, lastPoint: null };
+        const ns: ExHeight = { phase: "height", profile: hit, sourceId: hit.id, cursor: null, lastPoint: null };
         return [ns, { draft: null }];
       }
       return [s, { draft: null }];
@@ -237,7 +165,7 @@ export const extrudeCommand: Command = {
     if (input.kind === "number") {
       const t = Math.min(1, Math.max(0, input.value));
       lastTaper = t;
-      return commitTaper(ts.profile, ts.height, t, ts.sourceId, ctx);
+      return commitTaper(ts.height, t, ts.sourceId, ctx);
     }
     return [ts, { draft: null }];
   },
@@ -278,7 +206,7 @@ export const extrudeCommand: Command = {
   onConfirm: (state, ctx): [CommandState, CommandResult] => {
     const s = state as ExState;
     if (s.phase === "height") return enterTaperPhase(s.profile, lastHeight, s.sourceId);
-    if (s.phase === "taper") return commitTaper(s.profile, s.height, lastTaper, s.sourceId, ctx);
+    if (s.phase === "taper") return commitTaper(s.height, lastTaper, s.sourceId, ctx);
     return finish();
   },
   onCancel: (): [CommandState, CommandResult] => finish(),

@@ -24,8 +24,7 @@
 // getippte Koordinaten — das ist die Kern-Vereinheitlichung gegenüber dem alten
 // Tool. Live-Vorschau + HUD (Länge/Winkel) wie die bestehenden Tools.
 
-import type { Drawing2D } from "../../model/types";
-import { segmentHud, uniqueId } from "../../tools/types";
+import { segmentHud } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -36,8 +35,7 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation } from "../createCore";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -82,17 +80,8 @@ function lineDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-/** Hängt eine 2D-Linie ans Projekt (immutabel). Farbe/Strich erbt die Kategorie. */
-function appendLine(a: Vec2, b: Vec2, ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "line", a, b },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern, `cmd_draw.rs`): 2D-Linie a→b; Farbe/Strich erbt die Kategorie. */
+const appendLine = (a: Vec2, b: Vec2, ctx: CommandContext) => createMutation(ctx, { cmd: "line", a, b });
 
 export const lineCommand: Command = {
   name: "line",
@@ -119,7 +108,7 @@ export const lineCommand: Command = {
     }
     const a = s.a;
     const next: LineDrawing = { phase: "end", a: pt, cursor: pt, lastPoint: pt };
-    return [next, { draft: lineDraft(pt, pt), commit: opsMutation(() => appendLine(a, pt, ctx)) }];
+    return [next, { draft: lineDraft(pt, pt), commit: appendLine(a, pt, ctx) }];
   },
 
   onMove: (state, point): [CommandState, CommandResult] => {

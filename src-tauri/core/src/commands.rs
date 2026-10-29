@@ -15,10 +15,22 @@ fn parse<T: serde::de::DeserializeOwned>(v: &Value, what: &str) -> Result<T, Str
 /// Ops eines Befehls (`text` = JSON `{cmd, …}`, Zahlen dürfen Nicht-endlich-Marken sein).
 pub fn ops(root: &Map<String, Value>, text: &str) -> Result<Vec<Op>, String> {
     let v: Value = serde_json::from_str(text).map_err(|e| format!("cmdOps: {e}"))?;
+    // Zeichnen in einer betretenen Gruppe: neue Elemente werden ihr Mitglied (`cmd_create::group_ops`).
+    if let Some(group) = v.get("group").and_then(Value::as_str) {
+        let mut inner = v.clone();
+        inner.as_object_mut().map(|m| m.remove("group"));
+        let mut out = ops(root, &inner.to_string())?;
+        let extra = crate::cmd_create::group_ops(root, &out, group);
+        out.extend(extra);
+        return Ok(out);
+    }
     let cmd = v.get("cmd").and_then(Value::as_str).unwrap_or("");
     let ids = |k: &str| -> Vec<String> { v.get(k).and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default() };
     let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     if let Some(ops) = crate::cmd_edit::ops(root, &v) {
+        return Ok(ops);
+    }
+    if let Some(ops) = crate::cmd_create::ops(root, &v) {
         return Ok(ops);
     }
     Ok(match cmd {

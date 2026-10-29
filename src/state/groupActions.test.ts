@@ -7,7 +7,6 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  activeGroupOps,
   applyGroupDimming,
   applyGroupDimmingToPlan,
   containingGroupId,
@@ -22,7 +21,7 @@ import { materializeUnderlay, type Plan } from "../plan/generatePlan";
 import type { Drawing2D, Group, Project } from "../model/types";
 import { applyOps } from "../core/ops";
 import type { CoreOp } from "../core/ops";
-import { addItems, replaceItem } from "../core/opsBuild";
+import { documentFor } from "../core/document";
 
 const EMPTY_MEM = {
   wallIds: [] as string[],
@@ -214,45 +213,48 @@ describe("applyGroupDimmingToPlan", () => {
   });
 });
 
-describe("activeGroupOps ([K4] S3: neue Elemente in die aktive Gruppe, als Ops)", () => {
+describe("Zeichnen in der aktiven Gruppe ([K4] S3: Gruppen-Zuordnung im Kern, `cmd_create::group_ops`)", () => {
   const g1: Group = { id: "g1", wallIds: ["w1"], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] };
   const line = (id: string) =>
     ({ id, type: "drawing2d", levelId: "eg", categoryCode: "20", geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } } }) as Project["drawings2d"][number];
-  /** Wendet `ops` plus die Gruppen-Ops an (wie `EngineHost.commit` in App.tsx). */
-  const commit = (before: Project, ops: CoreOp[], path: string[]) => applyOps(before, [...ops, ...activeGroupOps(before, ops, path)]);
+  const ctx = { level: "eg", cat: "20" };
+  /** Befehl im Kern rechnen (mit `group` wie `EngineHost.commit` in App.tsx) und anwenden. */
+  const ops = (before: Project, req: object, group?: string): CoreOp[] =>
+    documentFor(before).cmdOps({ ...req, ctx, stamp: "t", ...(group ? { group } : {}) });
+  const commit = (before: Project, req: object, group?: string) => applyOps(before, ops(before, req, group));
+  const lineReq = { cmd: "line", a: [0, 0], b: [2, 0] };
 
   it("neu gezeichnetes Element wird Mitglied der aktiven (innersten) Gruppe", () => {
-    const result = commit(project([g1]), addItems("drawings2d", [line("d1")]), ["g1"]);
+    const result = commit(project([g1]), lineReq, "g1");
     const g = result.groups!.find((x) => x.id === "g1")!;
-    expect(g.drawingIds).toEqual(["d1"]);
+    expect(g.drawingIds).toEqual(["dr2d-t-1"]);
     expect(g.wallIds).toEqual(["w1"]); // bestehende Mitgliedschaft bleibt
   });
 
-  it("ohne aktive Gruppe (groupPath leer) keine zusätzlichen Ops", () => {
-    expect(activeGroupOps(project([g1]), addItems("drawings2d", [line("d1")]), [])).toEqual([]);
+  it("ohne aktive Gruppe keine zusätzlichen Ops", () => {
+    expect(ops(project([g1]), lineReq)).toHaveLength(1);
   });
 
   it("ohne neue Elemente (nur Ersetzen) keine zusätzlichen Ops", () => {
     const p: Project = { ...project([g1]), drawings2d: [line("d0")] };
-    expect(activeGroupOps(p, [replaceItem("drawings2d", { ...line("d0"), color: "#f00" })], ["g1"])).toEqual([]);
-    expect(activeGroupOps(p, [], ["g1"])).toEqual([]);
+    const move = { cmd: "transform", sel: { drawingIds: ["d0"] }, op: "move", pts: [[0, 0], [1, 0]], mode: "move", count: 1 };
+    expect(ops(p, move, "g1").map((o) => o.kind)).toEqual(["replace"]);
   });
 
   it("unbekannte aktive Gruppe: keine zusätzlichen Ops", () => {
-    expect(activeGroupOps(project([g1]), addItems("drawings2d", [line("d1")]), ["gx"])).toEqual([]);
+    expect(ops(project([g1]), lineReq, "gx")).toHaveLength(1);
   });
 
-  it("mehrere neue Elemente auf einmal (z. B. Feld/Array) werden alle Mitglied", () => {
-    const result = commit(project([g1]), addItems("drawings2d", [line("d1"), line("d2"), line("d3")]), ["g1"]);
-    const g = result.groups!.find((x) => x.id === "g1")!;
-    expect(g.drawingIds.sort()).toEqual(["d1", "d2", "d3"]);
+  it("mehrere neue Elemente auf einmal (Mehrfachlinie) werden alle Mitglied", () => {
+    const result = commit(project([g1]), { cmd: "multiline", a: [0, 0], b: [4, 0], spacing: 0.3, sign: 1, count: 3 }, "g1");
+    expect(result.groups!.find((x) => x.id === "g1")!.drawingIds).toEqual(["dr2d-t-1", "dr2d-t-2", "dr2d-t-3"]);
   });
 
   it("verschachtelt: neues Element landet in der INNERSTEN (aktiven) Gruppe, nicht der äusseren", () => {
     const inner: Group = { id: "g1", wallIds: [], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] };
     const outer: Group = { id: "g2", wallIds: [], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: ["g1"] };
-    const result = commit(project([inner, outer]), addItems("drawings2d", [line("d1")]), ["g2", "g1"]);
-    expect(result.groups!.find((x) => x.id === "g1")!.drawingIds).toEqual(["d1"]);
+    const result = commit(project([inner, outer]), lineReq, "g1");
+    expect(result.groups!.find((x) => x.id === "g1")!.drawingIds).toEqual(["dr2d-t-1"]);
     expect(result.groups!.find((x) => x.id === "g2")!.drawingIds).toEqual([]);
   });
 });

@@ -11,23 +11,17 @@
 //   • floorId     ← ctx.level.id (aktives Geschoss)
 //   • categoryCode← "35" (Ebene „Dächer"; Fallback ctx.defaultCategoryCode)
 
-import type { Roof, RoofShape } from "../../model/types";
-import { uniqueId } from "../../tools/types";
+import type { RoofShape } from "../../model/types";
 import type {
   Command,
   CommandContext,
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
-
-/** Default-Ebene (Kategorie) für Dächer („31 Dächer"). */
-const ROOF_CATEGORY = "31";
+import { createMutation, createPreview, xy } from "../createCore";
 
 /** Wählbare Dachformen (Inline-Optionen der Befehlszeile). */
 const SHAPE_OPTIONS: CmdOption[] = [
@@ -40,33 +34,6 @@ const SHAPE_OPTIONS: CmdOption[] = [
 ];
 const SHAPE_IDS = new Set(SHAPE_OPTIONS.map((o) => o.id));
 
-/** Existiert die Dach-Kategorie („35")? Sonst Fallback auf die aktive Kategorie. */
-function roofCategory(ctx: CommandContext): string {
-  const flat: string[] = [];
-  const walk = (list: { code: string; children?: unknown[] }[]) => {
-    for (const c of list) {
-      flat.push(c.code);
-      if (c.children) walk(c.children as { code: string; children?: unknown[] }[]);
-    }
-  };
-  walk(ctx.project.layers as { code: string; children?: unknown[] }[]);
-  return flat.includes(ROOF_CATEGORY) ? ROOF_CATEGORY : ctx.defaultCategoryCode;
-}
-
-/** Vier Eckpunkte eines Rechtecks aus zwei Gegenecken (CCW). */
-function rectCorners(a: Vec2, b: Vec2): Vec2[] {
-  const x0 = Math.min(a.x, b.x);
-  const x1 = Math.max(a.x, b.x);
-  const y0 = Math.min(a.y, b.y);
-  const y1 = Math.max(a.y, b.y);
-  return [
-    { x: x0, y: y0 },
-    { x: x1, y: y0 },
-    { x: x1, y: y1 },
-    { x: x0, y: y1 },
-  ];
-}
-
 interface RoofIdle extends CommandState {
   phase: "start";
   shape: RoofShape;
@@ -74,46 +41,27 @@ interface RoofIdle extends CommandState {
 interface RoofRect extends CommandState {
   phase: "corner";
   a: Vec2;
-  cursor: Vec2 | null;
+  cursor: Vec2;
   shape: RoofShape;
 }
 type RoofState = RoofIdle | RoofRect;
 
-/** Vorschau: aufgezogenes Rechteck + Masse im HUD. */
-function roofDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
-  const pts = cursor ? rectCorners(a, cursor) : [a];
-  const preview: DraftShape[] = [{ kind: "poly", pts, closed: !!cursor }];
-  const draft: ToolDraft = { preview, vertices: [a] };
-  if (cursor) {
-    draft.hud = {
-      at: cursor,
-      text: `${Math.abs(cursor.x - a.x).toFixed(2)} × ${Math.abs(cursor.y - a.y).toFixed(2)} m`,
-    };
-  }
+/** Vorschau: aufgezogenes Rechteck (Kern) + Masse im HUD. */
+function roofDraft(ctx: CommandContext, a: Vec2, cursor: Vec2): ToolDraft {
+  const draft: ToolDraft = { preview: createPreview(ctx, { cmd: "rect4" }, [a, cursor]).shapes, vertices: [a] };
+  draft.hud = {
+    at: cursor,
+    text: `${Math.abs(cursor.x - a.x).toFixed(2)} × ${Math.abs(cursor.y - a.y).toFixed(2)} m`,
+  };
   return draft;
 }
 
-/** Hängt ein Dach ans Projekt (immutabel). Entartete Rechtecke werden verworfen. */
-function appendRoof(a: Vec2, b: Vec2, shape: RoofShape, ctx: CommandContext): CoreOp[] {
-  const w = Math.abs(b.x - a.x);
-  const d = Math.abs(b.y - a.y);
-  if (w < 0.1 || d < 0.1) return [];
-  const roof: Roof = {
-    id: uniqueId("RF"),
-    type: "roof",
-    floorId: ctx.level.id,
-    categoryCode: roofCategory(ctx),
-    outline: rectCorners(a, b),
-    shape,
-    // Flach/Pult brauchen keine „Firsthöhe"; Sattel/Walm/Mansarde/Zelt ~30°.
-    pitchDeg: shape === "flach" ? 0 : 30,
-    overhang: 0.4,
-    // First entlang der längeren Seite (Standard).
-    ridgeAxis: w >= d ? "x" : "y",
-    thickness: 0.2,
-  };
-  return addItems("roofs", [roof]);
-}
+/**
+ * Commit (Kern, `cmd_create.rs`): Dach über dem Rechteck (entartet < 0.1 m → nichts), Ebene „31“,
+ * Neigung 30° (flach 0°), Vorsprung 0.4 m, First entlang der längeren Seite, Dicke 0.2 m.
+ */
+const appendRoof = (a: Vec2, b: Vec2, shape: RoofShape, ctx: CommandContext) =>
+  createMutation(ctx, { cmd: "roof", a: xy(a), b: xy(b), shape });
 
 const idle = (shape: RoofShape = "sattel"): [CommandState, CommandResult] => [
   { phase: "start", shape, lastPoint: null } as RoofIdle,
@@ -135,11 +83,11 @@ export const roofCommand: Command = {
     // Dachform-Option: aktualisiert die Form, Phase/Rechteck bleiben.
     if (input.kind === "option" && SHAPE_IDS.has(input.id)) {
       const ns = { ...s, shape: input.id as RoofShape } as RoofState;
-      const draft = ns.phase === "corner" ? roofDraft(ns.a, ns.cursor) : null;
+      const draft = ns.phase === "corner" ? roofDraft(ctx, ns.a, ns.cursor) : null;
       return [ns, { draft }];
     }
     if (input.kind !== "point") {
-      return [s, { draft: s.phase === "corner" ? roofDraft(s.a, s.cursor) : null }];
+      return [s, { draft: s.phase === "corner" ? roofDraft(ctx, s.a, s.cursor) : null }];
     }
     if (s.phase !== "corner") {
       const ns: RoofRect = {
@@ -149,7 +97,7 @@ export const roofCommand: Command = {
         shape: s.shape,
         lastPoint: input.point,
       };
-      return [ns, { draft: roofDraft(input.point, input.point) }];
+      return [ns, { draft: roofDraft(ctx, input.point, input.point) }];
     }
     // Zweite Ecke → committen.
     const a = s.a;
@@ -157,15 +105,15 @@ export const roofCommand: Command = {
     const shape = s.shape;
     return [
       { phase: "start", shape, lastPoint: null } as RoofIdle,
-      { draft: null, done: true, commit: opsMutation(() => appendRoof(a, b, shape, ctx)) },
+      { draft: null, done: true, commit: appendRoof(a, b, shape, ctx) },
     ];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as RoofState;
     if (s.phase !== "corner") return [s, { draft: null }];
     const ns: RoofRect = { ...s, cursor: point };
-    return [ns, { draft: roofDraft(s.a, point) }];
+    return [ns, { draft: roofDraft(ctx, s.a, point) }];
   },
 
   onConfirm: (): [CommandState, CommandResult] => idle(),

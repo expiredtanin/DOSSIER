@@ -12,18 +12,16 @@
 //   Quader     Ecke → Gegenecke → Höhe
 // Der Körper steht auf der Geschoss-UK (Z = 0 lokal).
 
-import type { ExtrudedSolid } from "../../model/types";
-import { addItems, opsMutation } from "../../core";
-import { uniqueId } from "../../tools/types";
 import type {
   Command,
+  CommandContext,
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
+import { createMutation, createPreview } from "../createCore";
 
 export type SolidShape = "sphere" | "cylinder" | "cone" | "frustum" | "torus" | "cuboid";
 
@@ -75,104 +73,22 @@ interface SolidState extends CommandState {
 /** Persistente Defaults über Aufrufe hinweg (Enter übernimmt sie). */
 let lastShape: SolidShape = "sphere";
 
-const circlePts = (c: Vec2, r: number): Vec2[] =>
-  Array.from({ length: 48 }, (_, i) => {
-    const t = (i / 48) * Math.PI * 2;
-    return { x: c.x + r * Math.cos(t), y: c.y + r * Math.sin(t) };
-  });
-
-const rectPts = (a: Vec2, b: Vec2): Vec2[] => {
-  const [x0, x1] = [Math.min(a.x, b.x), Math.max(a.x, b.x)];
-  const [y0, y1] = [Math.min(a.y, b.y), Math.max(a.y, b.y)];
-  return [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
-};
-
-/** Grundriss-Fläche, Körperhöhe und B-Rep-Spezifikation (lokales Z ab 0) einer Form. */
-export function solidFromInputs(
-  shape: SolidShape,
-  p0: Vec2,
-  p1: Vec2 | null,
-  nums: number[],
-): { points: Vec2[]; height: number; spec: Record<string, unknown>; label: string } | null {
-  const fmt = (v: number) => v.toFixed(2);
-  switch (shape) {
-    case "sphere": {
-      const r = nums[0];
-      if (!(r > 1e-6)) return null;
-      return {
-        points: circlePts(p0, r),
-        height: 2 * r,
-        spec: { kind: "sphere", center: [p0.x, p0.y, r], r },
-        label: `Kugel r=${fmt(r)}`,
-      };
-    }
-    case "cylinder":
-    case "cone": {
-      const [r, h] = nums;
-      if (!(r > 1e-6) || !(h > 1e-6)) return null;
-      return {
-        points: circlePts(p0, r),
-        height: h,
-        spec: { kind: shape, cx: p0.x, cy: p0.y, z0: 0, r, height: h },
-        label: `${shape === "cone" ? "Kegel" : "Zylinder"} r=${fmt(r)} h=${fmt(h)}`,
-      };
-    }
-    case "frustum": {
-      const [r, rt, h] = nums;
-      if (!(r > 1e-6) || !(rt > 1e-6) || !(h > 1e-6)) return null;
-      return {
-        points: circlePts(p0, Math.max(r, rt)),
-        height: h,
-        spec: { kind: "revolve", cx: p0.x, cy: p0.y, profile: [0, 0, r, 0, rt, h, 0, h] },
-        label: `Kegelstumpf r=${fmt(r)}/${fmt(rt)} h=${fmt(h)}`,
-      };
-    }
-    case "torus": {
-      const [major, minor] = nums;
-      if (!(minor > 1e-6) || !(major > minor)) return null;
-      return {
-        points: circlePts(p0, major + minor),
-        height: 2 * minor,
-        spec: { kind: "torus", center: [p0.x, p0.y, minor], major, minor },
-        label: `Torus R=${fmt(major)} r=${fmt(minor)}`,
-      };
-    }
-    case "cuboid": {
-      const h = nums[0];
-      if (!p1 || !(h > 1e-6)) return null;
-      const pts = rectPts(p0, p1);
-      const [w, d] = [Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y)];
-      if (w < 1e-6 || d < 1e-6) return null;
-      return {
-        points: pts,
-        height: h,
-        spec: { kind: "cuboid", min: [pts[0].x, pts[0].y, 0], max: [pts[2].x, pts[2].y, h] },
-        label: `Quader ${fmt(w)}×${fmt(d)}×${fmt(h)}`,
-      };
-    }
-  }
-}
-
-function draftOf(s: SolidState): ToolDraft | null {
+/**
+ * Vorschau (Kern, `cmd_draw.rs`/`cmd_solid.rs`): Grundriss des Körpers je Schritt (Kreise bzw. Rechteck)
+ * + HUD (aktuelles Mass).
+ */
+function draftOf(ctx: CommandContext, s: SolidState): ToolDraft | null {
   if (!s.p0) return null;
   const step = STEPS[s.shape][s.stepIdx];
-  const preview: DraftShape[] = [];
-  let hud: string | undefined;
   const cur = s.cursor ?? s.p0;
+  const pts = [s.p0, ...(s.p1 ? [s.p1] : []), ...(s.cursor ? [s.cursor] : [])];
+  const preview = createPreview(ctx, { cmd: "solid", shape: s.shape, step, nums: s.nums, p1: !!s.p1, cursor: !!s.cursor }, pts).shapes;
   const dist = Math.hypot(cur.x - s.p0.x, cur.y - s.p0.y);
+  let hud: string;
   if (s.shape === "cuboid") {
     const b = s.p1 ?? cur;
-    preview.push({ kind: "poly", pts: rectPts(s.p0, b), closed: true });
     hud = s.p1 ? `h = ${(s.nums[0] ?? 0).toFixed(2)} m` : `${Math.abs(b.x - s.p0.x).toFixed(2)} × ${Math.abs(b.y - s.p0.y).toFixed(2)} m`;
   } else {
-    const r = step === "radius" || step === "major" ? dist : (s.nums[0] ?? dist);
-    if (s.shape === "frustum" && step !== "radius") {
-      preview.push({ kind: "poly", pts: circlePts(s.p0, Math.max(step === "topRadius" ? dist : (s.nums[1] ?? dist), 0.01)), closed: true });
-    }
-    preview.push({ kind: "poly", pts: circlePts(s.p0, Math.max(r, 0.01)), closed: true });
-    if (s.shape === "torus" && step === "minor") {
-      preview.push({ kind: "poly", pts: circlePts(s.p0, (s.nums[0] ?? 0) + dist), closed: true });
-    }
     hud = `${step === "height" ? "h" : step === "topRadius" ? "r2" : "r"} = ${dist.toFixed(2)} m`;
   }
   return { preview, vertices: [s.p0], hud: { at: cur, text: hud } };
@@ -207,16 +123,16 @@ export const solidCommand: Command = {
       lastShape = input.id as SolidShape;
       // Form-Wechsel setzt die Schritte zurück (der Mittelpunkt bleibt, falls schon gesetzt).
       const ns: SolidState = { ...reset(lastShape), p0: s.p0, stepIdx: s.p0 ? 1 : 0, cursor: s.cursor };
-      return [ns, { draft: draftOf(ns) }];
+      return [ns, { draft: draftOf(ctx, ns) }];
     }
     const steps = STEPS[s.shape];
     const step = steps[s.stepIdx];
 
     // 1) Mittelpunkt / erste Ecke
     if (step === "center") {
-      if (input.kind !== "point") return [s, { draft: draftOf(s) }];
+      if (input.kind !== "point") return [s, { draft: draftOf(ctx, s) }];
       const ns: SolidState = { ...s, p0: input.point, stepIdx: 1, cursor: input.point, lastPoint: input.point };
-      return [ns, { draft: draftOf(ns) }];
+      return [ns, { draft: draftOf(ctx, ns) }];
     }
 
     // Wert des aktuellen Schritts: getippte Zahl oder Klick-Abstand zum Mittelpunkt.
@@ -228,45 +144,29 @@ export const solidCommand: Command = {
 
     // Quader: Gegenecke als Punkt
     if (step === "corner2") {
-      if (input.kind !== "point") return [s, { draft: draftOf(s) }];
+      if (input.kind !== "point") return [s, { draft: draftOf(ctx, s) }];
       const ns: SolidState = { ...s, p1: input.point, stepIdx: s.stepIdx + 1, cursor: input.point };
-      return [ns, { draft: draftOf(ns) }];
+      return [ns, { draft: draftOf(ctx, ns) }];
     }
-    if (value === null || !(value > 1e-6)) return [s, { draft: draftOf(s) }];
+    if (value === null || !(value > 1e-6)) return [s, { draft: draftOf(ctx, s) }];
 
     const nums = [...s.nums, value];
     if (s.stepIdx + 1 < steps.length) {
       const ns: SolidState = { ...s, nums, stepIdx: s.stepIdx + 1 };
-      return [ns, { draft: draftOf(ns) }];
+      return [ns, { draft: draftOf(ctx, ns) }];
     }
     // Letzter Schritt → committen.
-    const built = solidFromInputs(s.shape, s.p0!, s.p1, nums);
-    const levelId = ctx.level.id;
+    // Körper im Kern (`cmd_solid.rs`): Grundriss, Höhe, B-Rep-Beschreibung (truck) und Label.
     return [
       reset(s.shape),
-      {
-        draft: null,
-        done: true,
-        commit: opsMutation(() => {
-          if (!built) return [];
-          const solid: ExtrudedSolid = {
-            id: uniqueId("body"),
-            type: "extrudedSolid",
-            levelId,
-            points: built.points,
-            height: built.height,
-            brep: { spec: built.spec, origin: built.points[0], label: built.label },
-          };
-          return addItems("extrudedSolids", [solid]);
-        }),
-      },
+      { draft: null, done: true, commit: createMutation(ctx, { cmd: "solid", shape: s.shape, p0: s.p0, p1: s.p1, nums }) },
     ];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as SolidState;
     const ns: SolidState = { ...s, cursor: point };
-    return [ns, { draft: draftOf(ns) }];
+    return [ns, { draft: draftOf(ctx, ns) }];
   },
 
   onConfirm: (state): [CommandState, CommandResult] => [reset((state as SolidState).shape), { draft: null, done: true }],

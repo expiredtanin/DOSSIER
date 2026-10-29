@@ -8,30 +8,18 @@
 //   Wortumbruch-Textfeld). Bleibt der Editor leer, verwirft `commitTextEdit`
 //   (App.tsx) das Element wieder.
 
-import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
 import type { Command, CommandContext, CommandResult, CommandState, Vec2 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation } from "../createCore";
 
-/** Default-Schrifthöhe eines frei platzierten Texts in Modell-Metern. */
-const DEFAULT_TEXT_HEIGHT_M = 0.25;
 
 interface TextIdle extends CommandState {
   phase: "point";
 }
 type TextState = TextIdle;
 
-function appendEmptyText(id: string, at: Vec2, ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id,
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "text", at, text: "", height: DEFAULT_TEXT_HEIGHT_M, angle: 0 },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern, `cmd_draw.rs`): leere Textzeile am Anker (Höhe 0.25 m), mit vorab vergebener id. */
+const appendEmptyText = (id: string, at: Vec2, ctx: CommandContext) => createMutation(ctx, { cmd: "text", id, at });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "point", lastPoint: null } as TextIdle,
@@ -56,7 +44,7 @@ export const textCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: opsMutation(() => appendEmptyText(id, at, ctx)),
+        commit: appendEmptyText(id, at, ctx),
         focusDrawingId: id,
       },
     ];

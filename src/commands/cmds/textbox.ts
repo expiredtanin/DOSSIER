@@ -19,7 +19,6 @@
 // Wortumbruch) — die Höhe bleibt reine Editor-Startgrösse (PlanView-lokal,
 // s. focusMinHeightM), die Textmenge bestimmt die tatsächliche Höhe.
 
-import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
 import type {
   Command,
@@ -29,13 +28,8 @@ import type {
   DraftShape,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 
-/** Default-Schrifthöhe einer Textspalte in Modell-Metern (= Baseline-Versatz vom Rahmen-Top). */
-const DEFAULT_TEXT_HEIGHT_M = 0.25;
-/** Kleinste sinnvolle Rahmen-Breite/-Höhe (Meter). */
-const MIN_SIZE_M = 0.2;
 
 interface TbFirst extends CommandState {
   phase: "first";
@@ -48,53 +42,23 @@ interface TbSecond extends CommandState {
 type TbState = TbFirst | TbSecond;
 
 /** Normalisiertes Rechteck aus zwei diagonalen Punkten (beliebige Zugrichtung). */
-function rectOf(a: Vec2, b: Vec2): { minX: number; maxX: number; minY: number; maxY: number } {
+/**
+ * Textrahmen im Kern (`cmd_draw.rs`): Rechteck aus zwei Ecken, Breite/Höhe mindestens 0.2 m
+ * (`info = [Breite, Höhe]`), Anker oben links eine Zeilenhöhe tief.
+ */
+function frameDraft(ctx: CommandContext, a: Vec2, cursor: Vec2): { preview: DraftShape[]; vertices: Vec2[]; hud: { at: Vec2; text: string } } {
+  const pv = createPreview(ctx, { cmd: "textbox" }, [a, cursor]);
+  const [w, h] = pv.info;
   return {
-    minX: Math.min(a.x, b.x),
-    maxX: Math.max(a.x, b.x),
-    minY: Math.min(a.y, b.y),
-    maxY: Math.max(a.y, b.y),
-  };
-}
-
-/** Breite/Höhe (geklemmt auf MIN_SIZE_M) + die Textanker-Position (oben-links, als Baseline). */
-function frameOf(a: Vec2, b: Vec2): { at: Vec2; width: number; heightM: number } {
-  const r = rectOf(a, b);
-  const width = Math.max(MIN_SIZE_M, r.maxX - r.minX);
-  const heightM = Math.max(MIN_SIZE_M, r.maxY - r.minY);
-  // `at` ist die Baseline-links der ERSTEN Zeile (s. plan/drawings.rs/primitives.tsx);
-  // die Rahmen-Oberkante liegt eine Zeilenhöhe darüber → at.y = Rahmen-Top − Zeilenhöhe.
-  return { at: { x: r.minX, y: r.maxY - DEFAULT_TEXT_HEIGHT_M }, width, heightM };
-}
-
-/** Vorschau: Rahmen-Rechteck zwischen den beiden Ecken. */
-function frameDraft(a: Vec2, cursor: Vec2): { preview: DraftShape[]; vertices: Vec2[]; hud: { at: Vec2; text: string } } {
-  const r = rectOf(a, cursor);
-  const pts: Vec2[] = [
-    { x: r.minX, y: r.minY },
-    { x: r.maxX, y: r.minY },
-    { x: r.maxX, y: r.maxY },
-    { x: r.minX, y: r.maxY },
-  ];
-  const w = Math.max(MIN_SIZE_M, r.maxX - r.minX);
-  const h = Math.max(MIN_SIZE_M, r.maxY - r.minY);
-  return {
-    preview: [{ kind: "poly", pts, closed: true }],
+    preview: pv.shapes,
     vertices: [a, cursor],
     hud: { at: cursor, text: `${w.toFixed(2)} × ${h.toFixed(2)} m` },
   };
 }
 
-function appendEmptyTextbox(id: string, at: Vec2, width: number, ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id,
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "text", at, text: "", height: DEFAULT_TEXT_HEIGHT_M, angle: 0, width },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): leere Textspalte (Breite des Rahmens), mit vorab vergebener id. */
+const appendEmptyTextbox = (id: string, a: Vec2, b: Vec2, ctx: CommandContext) =>
+  createMutation(ctx, { cmd: "textbox", id, a, b });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "first", lastPoint: null } as TbFirst,
@@ -117,25 +81,25 @@ export const textboxCommand: Command = {
       return [ns, { draft: { preview: [], vertices: [input.point] } }];
     }
     // phase === "second"
-    const { at, width, heightM } = frameOf(s.a, input.point);
+    const heightM = createPreview(ctx, { cmd: "textbox" }, [s.a, input.point]).info[1];
     const id = uniqueId("dr2d");
     return [
       { phase: "first", lastPoint: null } as TbFirst,
       {
         draft: null,
         done: true,
-        commit: opsMutation(() => appendEmptyTextbox(id, at, width, ctx)),
+        commit: appendEmptyTextbox(id, s.a, input.point, ctx),
         focusDrawingId: id,
         focusMinHeightM: heightM,
       },
     ];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as TbState;
     if (s.phase !== "second") return [s, { draft: null }];
     const ns: TbSecond = { ...s, cursor: point };
-    return [ns, { draft: frameDraft(s.a, point) }];
+    return [ns, { draft: frameDraft(ctx, s.a, point) }];
   },
 
   onConfirm: (): [CommandState, CommandResult] => idle(),

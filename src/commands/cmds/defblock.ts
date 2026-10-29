@@ -10,9 +10,7 @@
 // verschachtelten Blöcke, v1 — s. `BlockDef`-Kopfkommentar in model/types.ts).
 // Leere/rein-block-Auswahl → No-Op (kein Commit).
 
-import { opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
-import { documentFor } from "../../core/document";
+import { cmdMutation } from "../../core/document";
 import { uniqueStamp } from "../../tools/types";
 import type {
   Command,
@@ -20,7 +18,6 @@ import type {
   CommandResult,
   CommandSelection,
   CommandState,
-  Project,
   Vec2,
 } from "../types";
 
@@ -30,8 +27,8 @@ function selectedDrawingIds(sel: CommandSelection): string[] {
 }
 
 /** Definition anhängen, Quellen raus, Instanz hinten dran — rechnet der Kern (`cmd_transform::defblock_ops`). */
-function defineOps(p: Project, ids: string[], at: Vec2, ctx: CommandContext): CoreOp[] {
-  return documentFor(p).cmdOps({
+function defineMutation(ids: string[], at: Vec2, ctx: CommandContext) {
+  return cmdMutation({
     cmd: "defblock",
     ids,
     at: [at.x, at.y],
@@ -63,7 +60,7 @@ export const defblockCommand: Command = {
     const ids = selectedDrawingIds(ctx.selection);
     if (ids.length === 0) return idle();
     const at = input.point;
-    return [idle()[0], { draft: null, done: true, commit: opsMutation((p) => defineOps(p, ids, at, ctx)) }];
+    return [idle()[0], { draft: null, done: true, commit: defineMutation(ids, at, ctx) }];
   },
 
   onMove: (state): [CommandState, CommandResult] => [state, { draft: null }],

@@ -15,9 +15,6 @@
 //   • floorId     ← ctx.level.id (aktives Geschoss)
 //   • categoryCode← "30" (Ebene „Decken"; Fallback ctx.defaultCategoryCode)
 
-import type { Ceiling } from "../../model/types";
-import { normalizeOutline, ceilingArea } from "../../core";
-import { uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -29,14 +26,11 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, xy } from "../createCore";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
 const CLOSE_HIT = 0.08; // Modell-Meter: Klick nahe Startpunkt schließt den Umriss
-/** Default-Ebene (Kategorie) für Decken. */
-const CEILING_CATEGORY = "30";
 
 const segLen = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
 const segAngleDeg = (a: Vec2, b: Vec2): number =>
@@ -59,29 +53,6 @@ function nextFromFields(
   const angleDeg = "angle" in locks ? locks.angle : segAngleDeg(last, ref);
   const ang = angleDeg * DEG;
   return { x: last.x + Math.cos(ang) * length, y: last.y + Math.sin(ang) * length };
-}
-
-/** Aktiver Aufbau-Typ-ID; Fallback auf den ersten Projekt-Wandtyp. */
-function activeTypeId(ctx: CommandContext): string {
-  const wt =
-    ctx.project.wallTypes.find((t) => t.id === ctx.activeWallTypeId) ??
-    ctx.project.wallTypes[0];
-  return wt ? wt.id : ctx.activeWallTypeId;
-}
-
-/** Existiert die Decken-Kategorie („30")? Sonst Fallback auf die aktive Kategorie. */
-function ceilingCategory(ctx: CommandContext): string {
-  const flat: { code: string }[] = [];
-  const walk = (list: { code: string; children?: unknown[] }[]) => {
-    for (const c of list) {
-      flat.push({ code: c.code });
-      if (c.children) walk(c.children as { code: string; children?: unknown[] }[]);
-    }
-  };
-  walk(ctx.project.layers as { code: string; children?: unknown[] }[]);
-  return flat.some((c) => c.code === CEILING_CATEGORY)
-    ? CEILING_CATEGORY
-    : ctx.defaultCategoryCode;
 }
 
 interface CeilIdle extends CommandState {
@@ -115,20 +86,11 @@ function ceilingDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-/** Hängt eine Decke ans Projekt (immutabel). Entartete Umrisse werden verworfen. */
-function appendCeiling(pts: Vec2[], ctx: CommandContext): CoreOp[] {
-  const outline = normalizeOutline(pts);
-  if (!outline || ceilingArea(outline) < 1e-4) return [];
-  const ceiling: Ceiling = {
-    id: uniqueId("C"),
-    type: "ceiling",
-    floorId: ctx.level.id,
-    categoryCode: ceilingCategory(ctx),
-    outline,
-    wallTypeId: activeTypeId(ctx),
-  };
-  return addItems("ceilings", [ceiling]);
-}
+/**
+ * Commit: Decke aus dem Umriss (normalisiert, CCW; entartet → nichts), Typ = aktiver Aufbau, Ebene
+ * „30“ falls vorhanden — im Kern (`cmd_create.rs`).
+ */
+const appendCeiling = (pts: Vec2[], ctx: CommandContext) => createMutation(ctx, { cmd: "ceiling", pts: pts.map(xy) });
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "start", lastPoint: null } as CeilIdle,
@@ -175,7 +137,7 @@ export const ceilingCommand: Command = {
         const pts = s.points;
         return [
           { phase: "start", lastPoint: null } as CeilIdle,
-          { draft: null, done: true, commit: opsMutation(() => appendCeiling(pts, ctx)) },
+          { draft: null, done: true, commit: appendCeiling(pts, ctx) },
         ];
       }
       return [s, { draft: ceilingDraft(s.points, s.cursor) }];
@@ -197,7 +159,7 @@ export const ceilingCommand: Command = {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null } as CeilIdle,
-        { draft: null, done: true, commit: opsMutation(() => appendCeiling(pts, ctx)) },
+        { draft: null, done: true, commit: appendCeiling(pts, ctx) },
       ];
     }
     // Null-Strecke (Klick auf denselben Punkt) ignorieren.
@@ -224,7 +186,7 @@ export const ceilingCommand: Command = {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null } as CeilIdle,
-        { draft: null, done: true, commit: opsMutation(() => appendCeiling(pts, ctx)) },
+        { draft: null, done: true, commit: appendCeiling(pts, ctx) },
       ];
     }
     return idle();

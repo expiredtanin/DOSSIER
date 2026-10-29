@@ -2,12 +2,6 @@
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
-/// Punkte einer (gedrehten) Ellipse, `n` gleichverteilte Parameterschritte.
-#[wasm_bindgen]
-pub fn curves_ellipse_flat(cx: f64, cy: f64, rx: f64, ry: f64, rotation: f64, n: f64) -> Vec<f64> {
-    crate::curves::ellipse(cx, cy, rx, ry, rotation, n)
-}
-
 /// Kubische Bezier-Kette (Anker·Griff·Griff·Anker …); unter 4 Punkten unverändert.
 #[wasm_bindgen]
 pub fn curves_bezier_chain_flat(pts: &[f64], segs_per_curve: f64) -> Vec<f64> {

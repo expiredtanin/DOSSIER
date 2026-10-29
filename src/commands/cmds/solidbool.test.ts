@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { sampleProject } from "../../model/sampleProject";
 import type { ExtrudedSolid } from "../../model/types";
-import { combineSolids } from "./solidbool";
+import { documentFor } from "../../core/document";
+
+/** Boolesche Verknüpfung zweier Körper über den Befehl im Kern (`cmd_solid.rs`); null = kein Körper. */
+function combineSolids(project: typeof sampleProject, a: ExtrudedSolid, b: ExtrudedSolid, op: string): ExtrudedSolid | null {
+  const p = { ...project, extrudedSolids: [a, b] };
+  const ops = documentFor(p).cmdOps({ cmd: "solidbool", a: a.id, b: b.id, op, stamp: "t", ctx: { level: "eg" } });
+  const add = ops.find((o) => o.kind === "add");
+  return add && add.kind === "add" ? (add.items[0] as unknown as ExtrudedSolid) : null;
+}
 
 const box = (id: string, x0: number, y0: number, x1: number, y1: number, h: number): ExtrudedSolid => ({
   id,

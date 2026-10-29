@@ -19,9 +19,8 @@
 //
 // Bezeichner englisch, sichtbarer Text via t() (CONVENTIONS.md).
 
-import type { Stair, StairShape, Vec2 as MVec2 } from "../../model/types";
-import { stairGeometry, defaultStepCount, IDEAL_TREAD, MIN_STEPS } from "../../core";
-import { uniqueId } from "../../tools/types";
+import type { StairShape } from "../../model/types";
+import { IDEAL_TREAD, MIN_STEPS } from "../../core";
 import type {
   Command,
   CommandContext,
@@ -29,18 +28,13 @@ import type {
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview, xy } from "../createCore";
 
-/** Default-Ebene (Kategorie) für Treppen: „40" Treppen (Fallback: aktive). */
-const STAIR_CATEGORY = "40";
 /** Default-Laufbreite (Meter). */
 const DEF_WIDTH = 1.0;
-const EPS = 1e-6;
 
 // ── Trittmass-Modus ──────────────────────────────────────────────────────────
 /** Trittmass-Modus: „with" = Soll-Auftritt vorgegeben, Stufen abgeleitet;
@@ -73,44 +67,6 @@ const stairDefaults: {
 // ── Vektor-Helfer ─────────────────────────────────────────────────────────────
 const sub = (a: Vec2, b: Vec2): Vec2 => ({ x: a.x - b.x, y: a.y - b.y });
 const lenOf = (a: Vec2): number => Math.hypot(a.x, a.y);
-const normv = (a: Vec2): Vec2 => {
-  const l = lenOf(a) || 1e-9;
-  return { x: a.x / l, y: a.y / l };
-};
-
-/** Existiert die Treppen-Kategorie („40")? Sonst Fallback auf die aktive. */
-function stairCategory(ctx: CommandContext): string {
-  const flat: { code: string }[] = [];
-  const walk = (list: { code: string; children?: unknown[] }[]) => {
-    for (const c of list) {
-      flat.push({ code: c.code });
-      if (c.children) walk(c.children as { code: string; children?: unknown[] }[]);
-    }
-  };
-  walk(ctx.project.layers as { code: string; children?: unknown[] }[]);
-  return flat.some((c) => c.code === STAIR_CATEGORY)
-    ? STAIR_CATEGORY
-    : ctx.defaultCategoryCode;
-}
-
-/** Geschosshöhe als Default-Steighöhe (Fallback 2.6 m). */
-function floorRise(ctx: CommandContext): number {
-  return ctx.level.floorHeight && ctx.level.floorHeight > 0 ? ctx.level.floorHeight : 2.6;
-}
-
-// ── Trittmass-Ableitung ───────────────────────────────────────────────────────
-/**
- * Leitet die Stufenzahl aus Auftritt (Soll-Trittmass) + Lauflänge ab.
- * Klemmt auf [MIN_STEPS, maxByRun] (mind. 0.24 m Auftrittstiefe).
- * Entspricht dem `target_a`-Modus im Rhino-Plugin (_make_treppe_preview_handler).
- */
-export function stepsFromTread(auftritt: number, runLength: number): number {
-  const a = Math.max(0.05, auftritt);
-  const raw = Math.round(runLength / a);
-  // Auftrittstiefe aus Stufenzahl darf nicht unter 0.24 m sinken.
-  const maxByRun = runLength > 0 ? Math.max(MIN_STEPS, Math.floor(runLength / 0.24) + 1) : raw;
-  return Math.max(MIN_STEPS, Math.min(raw, maxByRun));
-}
 
 // ── Felder (Tab-Zyklus) ───────────────────────────────────────────────────────
 /** Tab-Feld: Breite (immer, ab idle). */
@@ -173,78 +129,38 @@ function initState(override?: Partial<typeof stairDefaults>): StairIdle {
 }
 
 /**
- * Baut aus dem Laufzustand ein konkretes `Stair`-Objekt (aufgelöste Felder). Die
- * Richtung/Länge folgen aus start→cursor; bei L bricht der zweite Lauf um 90°
- * (links) ab, bei Wendel wird der Cursorabstand zum Radius.
- *
- * Im Trittmass-Modus „mit" wird die Stufenzahl aus dem Soll-Auftritt + der
- * aktuellen Lauflänge abgeleitet (stepsFromTread), kein freies steps-Feld.
+ * Anfrage an den Kern (`cmd_create.rs`): aus dem Laufzustand entsteht dort die Treppe — Richtung/Länge
+ * aus start→cursor, bei L ein symmetrischer zweiter Lauf, bei Wendel der Cursorabstand als Radius;
+ * Stufenzahl im Trittmass-Modus „mit“ aus Soll-Auftritt + Lauflänge, sonst gesetzt oder Vorgabe;
+ * Steighöhe = Geschosshöhe, falls nicht gesetzt; Ebene „40“.
  */
-function buildStair(s: StairRun, ctx: CommandContext): Stair {
-  const rise = s.rise ?? floorRise(ctx);
-  const d = sub(s.cursor, s.start);
-  const dist = Math.max(0.1, lenOf(d));
-  const dir = dist > EPS ? normv(d) : ({ x: 1, y: 0 } as MVec2);
-  const runLength = s.shape === "spiral" ? Math.max(0.5, dist) : dist;
+const stairReq = (s: StairRun) => ({
+  cmd: "stair",
+  shape: s.shape,
+  up: s.up,
+  width: s.width,
+  referenz: s.referenz,
+  treadMode: s.treadMode,
+  auftritt: s.auftritt,
+  steps: s.steps,
+  rise: s.rise,
+  start: xy(s.start),
+  cursor: xy(s.cursor),
+});
 
-  // Stufenzahl je Trittmass-Modus:
-  //   „mit Trittmass" → aus Auftritt + Lauflänge ableiten (Soll-Schrittmass).
-  //   „ohne Trittmass" → manuell oder defaultStepCount (heutiges Verhalten).
-  const steps =
-    s.treadMode === "with"
-      ? stepsFromTread(s.auftritt, runLength)
-      : (s.steps ?? defaultStepCount(rise, runLength));
-
-  const base: Stair = {
-    id: uniqueId("ST"),
-    type: "stair",
-    floorId: ctx.level.id,
-    categoryCode: stairCategory(ctx),
-    shape: s.shape,
-    start: s.start,
-    dir,
-    runLength,
-    width: s.width,
-    referenz: s.referenz,
-    totalRise: rise,
-    stepCount: steps,
-    up: s.up,
-  };
-  if (s.shape === "L") {
-    base.run2Length = runLength; // symmetrischer zweiter Lauf
-    base.turn = 1;
-  } else if (s.shape === "spiral") {
-    base.center = s.start;
-    base.radius = dist;
-    base.sweep = 270;
-    // Startpunkt am äußeren Rand: Lauflinie beginnt hier.
-    base.start = s.cursor;
-    base.dir = dir;
-  }
-  return base;
-}
-
-/** Vorschau: Tritt-Linien + Lauflinie + HUD (Länge · Stufenanzahl). */
+/** Vorschau: Tritt-Linien + Podest + Lauflinie (Kern) + HUD (Länge · Stufenanzahl). */
 function runDraft(s: StairRun, ctx: CommandContext): ToolDraft {
-  const stair = buildStair(s, ctx);
-  const rise = stair.totalRise ?? floorRise(ctx);
-  const geo = stairGeometry(stair, rise);
-  const preview: DraftShape[] = [];
-  for (const tr of geo.treads) preview.push({ kind: "poly", pts: tr.pts, closed: true });
-  if (geo.landing) preview.push({ kind: "poly", pts: geo.landing, closed: true });
-  if (geo.runLine.length >= 2) preview.push({ kind: "poly", pts: geo.runLine, closed: false });
-  const draft: ToolDraft = { preview, vertices: [s.start] };
+  const pv = createPreview(ctx, stairReq(s), []);
+  const draft: ToolDraft = { preview: pv.shapes, vertices: [s.start] };
   draft.hud = {
     at: s.cursor,
-    text: `${lenOf(sub(s.cursor, s.start)).toFixed(2)} m · ${stair.stepCount} STG`,
+    text: `${lenOf(sub(s.cursor, s.start)).toFixed(2)} m · ${pv.info[0]} STG`,
   };
   return draft;
 }
 
-/** Hängt eine Treppe ans Projekt (immutabel) und aktualisiert die Defaults. */
-function appendStair(s: StairRun, ctx: CommandContext): CoreOp[] {
-  const stair = buildStair(s, ctx);
-  // Zuletzt genutzte Einstellungen für die nächste Treppe merken.
+/** Commit der Treppe (Kern) und die Einstellungen für die nächste Treppe merken. */
+function appendStair(s: StairRun, ctx: CommandContext) {
   stairDefaults.shape = s.shape;
   stairDefaults.up = s.up;
   stairDefaults.width = s.width;
@@ -253,7 +169,7 @@ function appendStair(s: StairRun, ctx: CommandContext): CoreOp[] {
   stairDefaults.auftritt = s.auftritt;
   stairDefaults.steps = s.steps;
   stairDefaults.rise = s.rise;
-  return addItems("stairs", [stair]);
+  return createMutation(ctx, stairReq(s));
 }
 
 const idle = (from?: StairCmdState): [CommandState, CommandResult] => [
@@ -348,7 +264,7 @@ export const stairCommand: Command = {
     const ns: StairRun = { ...s, cursor: pt };
     return [
       idle(s)[0],
-      { draft: null, done: true, commit: opsMutation(() => appendStair(ns, ctx)) },
+      { draft: null, done: true, commit: appendStair(ns, ctx) },
     ];
   },
 
@@ -365,7 +281,7 @@ export const stairCommand: Command = {
       const ns = s;
       return [
         idle(s)[0],
-        { draft: null, done: true, commit: opsMutation(() => appendStair(ns, ctx)) },
+        { draft: null, done: true, commit: appendStair(ns, ctx) },
       ];
     }
     return idle(s);

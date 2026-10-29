@@ -155,8 +155,8 @@ import { useGripEditing } from "./state/useGripEditing";
 import { usePanelHostBase } from "./state/usePanelHostBase";
 import { useDockDragState } from "./state/useDockDragState";
 import { useMouseSelectionHandlers } from "./state/useMouseSelectionHandlers";
-import { activeGroupOps, containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
-import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, setFieldIfChanged } from "./core";
+import { containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
+import { addItems, cmdMutation, fieldOps, opsMutation, patchItem, patchItems, removeItems, setFieldIfChanged } from "./core";
 import type { GroupMembership, MemberKind } from "./state/groupActions";
 import { isLocked, lockMembersOps } from "./state/objectLock";
 import { useProjectFileActions } from "./state/useProjectFileActions";
@@ -931,16 +931,13 @@ export default function App() {
       // Zeichnet man WÄHREND man eine Gruppe betreten hat (Isolation), wird
       // das neue Element automatisch Mitglied dieser Gruppe (Nutzer-Wunsch:
       // „wenn man etwas neu zeichnet ... zeichnet man in der Gruppe"). [K4] S3:
-      // Befehle tragen ihre Ops mit (`opsMutation`); die Gruppen-Zuordnung kommt
-      // als weitere Ops dazu (`activeGroupOps`).
+      // Befehle tragen ihre Kern-Anfrage mit (`cmdMutation`); die Gruppen-Zuordnung
+      // rechnet der Kern im selben Commit (`group`, `cmd_create::group_ops`).
       commit: (mutate) => {
         const groupPath = cmdLatest.current.groupPath;
-        cmdLatest.current.setProject(
-          opsMutation((p) => {
-            const ops = mutate.toOps(p);
-            return [...ops, ...activeGroupOps(p, ops, groupPath)];
-          }),
-        );
+        const group = groupPath[groupPath.length - 1];
+        // Befehle ohne Kern-Anfrage (Georeferenz, Ausrichten) legen keine Elemente an.
+        cmdLatest.current.setProject(group && mutate.coreReq ? cmdMutation({ ...mutate.coreReq, group }) : mutate);
       },
       isFloor: () => cmdLatest.current.activeLevel.kind === "floor",
       // Frisch über `text`/`textbox` erzeugtes Element sofort inline editieren

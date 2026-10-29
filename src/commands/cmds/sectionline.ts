@@ -16,17 +16,13 @@
 // „elevation"). Bezeichner englisch, sichtbarer Text via t().
 
 import { t } from "../../i18n";
-import type { DrawingLevel, DrawingLevelKind } from "../../model/types";
-import { leftNormal, normalize, sub } from "../../model/geometry";
-import { addItems, opsMutation, patchItem } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 import type {
   Command,
+  CommandContext,
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
@@ -42,42 +38,12 @@ const KIND_OPTIONS: CmdOption[] = [
 const KIND_IDS = new Set(KIND_OPTIONS.map((o) => o.id));
 
 /**
- * Richtungspfeil-Vorschau: kurze Linie vom Mittelpunkt der Schnittlinie entlang
- * der Blicknormalen (leftNormal der Linie, per directionSign gedreht) plus zwei
- * Flügel-Segmente — zeigt, wohin der Schnitt „blickt".
+ * Vorschau: Schnittlinie + Richtungspfeil (Kern, `cmd_solid.rs`: vom Mittelpunkt entlang der
+ * Blicknormalen, zwei Flügel) + Länge im HUD.
  */
-function directionArrow(a: Vec2, b: Vec2, sign: 1 | -1): DraftShape[] {
-  const dir = sub(b, a);
-  const len = Math.hypot(dir.x, dir.y);
-  if (len < 1e-6) return [];
-  const u = normalize(dir);
-  const n = leftNormal(u); // (-uy, ux)
-  const nx = n.x * sign;
-  const ny = n.y * sign;
-  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  // Pfeillänge ~ min(1 m, Viertel der Linienlänge), damit die Vorschau lesbar bleibt.
-  const arrowLen = Math.min(1, len / 4);
-  const tip = { x: mid.x + nx * arrowLen, y: mid.y + ny * arrowLen };
-  const wing = arrowLen * 0.35;
-  // Flügel: vom Spitzenpunkt zurück, je halb entlang −u und +u geneigt.
-  const back = { x: tip.x - nx * wing * 2, y: tip.y - ny * wing * 2 };
-  const w1 = { x: back.x + u.x * wing, y: back.y + u.y * wing };
-  const w2 = { x: back.x - u.x * wing, y: back.y - u.y * wing };
-  return [
-    { kind: "line", a: mid, b: tip },
-    { kind: "line", a: tip, b: w1 },
-    { kind: "line", a: tip, b: w2 },
-  ];
-}
-
-/** Vorschau: Schnittlinie + Richtungspfeil + Länge im HUD. */
-function lineDraft(a: Vec2, cursor: Vec2 | null, sign: 1 | -1): ToolDraft {
+function lineDraft(ctx: CommandContext, a: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [{ kind: "poly", pts: [a] }], vertices: [a] };
-  const preview: DraftShape[] = [
-    { kind: "line", a, b: cursor },
-    ...directionArrow(a, cursor, sign),
-  ];
-  const draft: ToolDraft = { preview, vertices: [a] };
+  const draft: ToolDraft = { preview: createPreview(ctx, { cmd: "sectionline" }, [a, cursor]).shapes, vertices: [a] };
   draft.hud = {
     at: cursor,
     text: `${Math.hypot(cursor.x - a.x, cursor.y - a.y).toFixed(2)} m`,
@@ -85,42 +51,13 @@ function lineDraft(a: Vec2, cursor: Vec2 | null, sign: 1 | -1): ToolDraft {
   return draft;
 }
 
-/** Nächster freier Ebenen-Name der Art (A, B, C … über die Anzahl bestehender). */
-function nextLevelName(p: Project, kind: LineKind): string {
-  const count = p.drawingLevels.filter((z) => z.kind === kind).length;
-  // Buchstaben-Suffix (A, B, …, Z, dann AA…) — klassische Schnitt-Benennung.
-  let n = count;
-  let letters = "";
-  do {
-    letters = String.fromCharCode(65 + (n % 26)) + letters;
-    n = Math.floor(n / 26) - 1;
-  } while (n >= 0);
-  const key = kind === "section" ? "cmd.sectionline.newSection" : "cmd.sectionline.newElevation";
-  return t(key, { letter: letters });
-}
-
 /**
- * Setzt die Schnittlinie [a, b] auf die Ziel-Ebene (immutabel). Existiert GENAU
- * EINE Ebene der Art ohne Linie, wird sie belegt; sonst wird eine neue angelegt.
- * Entartete (zu kurze) Linien werden verworfen.
+ * Commit (Kern): Linie [a, b] auf die EINE Ebene der Art ohne Linie, sonst eine neue Ebene (Name aus der
+ * Vorlage, Buchstaben A, B, … nach Anzahl der Ebenen dieser Art); zu kurze Linien (< 0.1 m) → nichts.
  */
-function lineOps(p: Project, a: Vec2, b: Vec2, kind: LineKind): CoreOp[] {
-  if (Math.hypot(b.x - a.x, b.y - a.y) < 0.1) return [];
-  const line: [Vec2, Vec2] = [a, b];
-  const orphans = p.drawingLevels.filter((z) => z.kind === kind && !z.linePoints);
-  if (orphans.length === 1) {
-    return patchItem(p, "drawingLevels", orphans[0].id, (z) => ({ ...z, linePoints: line, directionSign: z.directionSign ?? 1 }));
-  }
-  const level: DrawingLevel = {
-    id: `${kind}-${Date.now()}`,
-    name: nextLevelName(p, kind),
-    kind: kind as DrawingLevelKind,
-    visible: true,
-    locked: false,
-    linePoints: line,
-    directionSign: 1,
-  };
-  return addItems("drawingLevels", [level]);
+function lineMutation(ctx: CommandContext, a: Vec2, b: Vec2, kind: LineKind) {
+  const key = kind === "section" ? "cmd.sectionline.newSection" : "cmd.sectionline.newElevation";
+  return createMutation(ctx, { cmd: "sectionline", a, b, kind, name: t(key, { letter: "\u0001" }) });
 }
 
 interface LineIdle extends CommandState {
@@ -134,8 +71,6 @@ interface LineEnd extends CommandState {
   kind: LineKind;
 }
 type LineState = LineIdle | LineEnd;
-
-const DIRECTION_SIGN: 1 = 1;
 
 function makeCommand(name: string, startKind: LineKind): Command {
   const idle = (kind: LineKind): [CommandState, CommandResult] => [
@@ -155,18 +90,18 @@ function makeCommand(name: string, startKind: LineKind): Command {
     options: () => KIND_OPTIONS,
     init: (): LineIdle => ({ phase: "start", kind: startKind, lastPoint: null }),
 
-    onInput: (state, input): [CommandState, CommandResult] => {
+    onInput: (state, input, ctx): [CommandState, CommandResult] => {
       const s = state as LineState;
       if (input.kind === "option" && KIND_IDS.has(input.id)) {
         const ns = { ...s, kind: input.id as LineKind } as LineState;
         const draft =
-          ns.phase === "end" ? lineDraft(ns.a, ns.cursor, DIRECTION_SIGN) : null;
+          ns.phase === "end" ? lineDraft(ctx, ns.a, ns.cursor) : null;
         return [ns, { draft }];
       }
       if (input.kind !== "point") {
         return [
           s,
-          { draft: s.phase === "end" ? lineDraft(s.a, s.cursor, DIRECTION_SIGN) : null },
+          { draft: s.phase === "end" ? lineDraft(ctx, s.a, s.cursor) : null },
         ];
       }
       if (s.phase !== "end") {
@@ -177,22 +112,22 @@ function makeCommand(name: string, startKind: LineKind): Command {
           kind: s.kind,
           lastPoint: input.point,
         };
-        return [ns, { draft: lineDraft(input.point, input.point, DIRECTION_SIGN) }];
+        return [ns, { draft: lineDraft(ctx, input.point, input.point) }];
       }
       const a = s.a;
       const b = input.point;
       const kind = s.kind;
       return [
         { phase: "start", kind, lastPoint: null } as LineIdle,
-        { draft: null, done: true, commit: opsMutation((p) => lineOps(p, a, b, kind)) },
+        { draft: null, done: true, commit: lineMutation(ctx, a, b, kind) },
       ];
     },
 
-    onMove: (state, point): [CommandState, CommandResult] => {
+    onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
       const s = state as LineState;
       if (s.phase !== "end") return [s, { draft: null }];
       const ns: LineEnd = { ...s, cursor: point };
-      return [ns, { draft: lineDraft(s.a, point, DIRECTION_SIGN) }];
+      return [ns, { draft: lineDraft(ctx, s.a, point) }];
     },
 
     onConfirm: (state): [CommandState, CommandResult] => idle((state as LineState).kind),
@@ -206,4 +141,3 @@ export const sectionLineCommand: Command = makeCommand("sectionline", "section")
 export const viewLineCommand: Command = makeCommand("viewline", "elevation");
 
 // Für Tests: die reinen Datenpfad-Helfer.
-export const _test = { lineOps, nextLevelName, directionArrow };

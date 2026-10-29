@@ -13,9 +13,6 @@
 //
 // Bezeichner englisch, sichtbarer Text via t() (CONVENTIONS.md).
 
-import type { Column, ColumnProfile } from "../../model/types";
-import { uniqueId } from "../../tools/types";
-import { columnFootprint } from "../../core";
 import type {
   Command,
   CommandContext,
@@ -24,15 +21,10 @@ import type {
   CmdOption,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview, xy } from "../createCore";
 
-/** Default-Ebene (Kategorie) für Stützen: „50" Tragwerk (Fallback: aktive). */
-const COLUMN_CATEGORY = "50";
 /** Default-Kantenlänge eines Rechteckprofils (Meter). */
 const DEF_SIZE = 0.3;
-/** Fallback-Höhe, falls das Geschoss keine floorHeight trägt (Meter). */
-const DEF_HEIGHT = 2.6;
 
 // ── Persistente Defaults (modulweit, leben über Befehls-Instanzen hinweg) ────
 const columnDefaults: { kind: "rect" | "round"; size: number } = {
@@ -40,34 +32,15 @@ const columnDefaults: { kind: "rect" | "round"; size: number } = {
   size: DEF_SIZE,
 };
 
-/** Baut das aktuelle Default-Profil aus `columnDefaults`. */
-function currentProfile(): ColumnProfile {
-  if (columnDefaults.kind === "round") {
-    return { kind: "round", radius: columnDefaults.size / 2 };
-  }
-  return { kind: "rect", width: columnDefaults.size, depth: columnDefaults.size };
-}
+/** Profil-Optionen der Anfrage (Kern baut daraus das Profil: rund Ø `size`, sonst quadratisch). */
+const profileReq = () => ({ kind: columnDefaults.kind, size: columnDefaults.size });
 
-/** Fügt die Stütze immutabel an `project.columns` an. */
-function appendColumn(position: Vec2,
-  ctx: CommandContext,
-): CoreOp[] {
-  const height =
-    ctx.level.floorHeight != null && ctx.level.floorHeight > 0
-      ? ctx.level.floorHeight
-      : DEF_HEIGHT;
-  const column: Column = {
-    id: uniqueId("column"),
-    type: "column",
-    floorId: ctx.level.id,
-    categoryCode: COLUMN_CATEGORY,
-    position,
-    profile: currentProfile(),
-    rotation: 0,
-    height,
-  };
-  return addItems("columns", [column]);
-}
+/**
+ * Commit (Kern, `cmd_create.rs`): Stütze am Punkt, Ebene „50“, Höhe = Geschosshöhe (sonst 2.6 m),
+ * Profil aus den Vorgaben.
+ */
+const appendColumn = (position: Vec2, ctx: CommandContext) =>
+  createMutation(ctx, { cmd: "column", at: xy(position), ...profileReq() });
 
 interface ColState extends CommandState {
   phase: "place" | "done";
@@ -78,25 +51,15 @@ const finish = (): [CommandState, CommandResult] => [
   { draft: null, done: true },
 ];
 
-/** Footprint-Vorschau des aktuellen Default-Profils am Cursor. */
-function previewAt(pt: Vec2): CommandResult {
-  const ghost: Column = {
-    id: "_preview",
-    type: "column",
-    floorId: "",
-    categoryCode: COLUMN_CATEGORY,
-    position: pt,
-    profile: currentProfile(),
-    rotation: 0,
-    height: 0,
-  };
+/** Footprint-Vorschau des aktuellen Default-Profils am Cursor (Kern). */
+function previewAt(pt: Vec2, ctx: CommandContext): CommandResult {
   const size =
     columnDefaults.kind === "round"
       ? `Ø${(columnDefaults.size * 100).toFixed(0)}`
       : `${(columnDefaults.size * 100).toFixed(0)}×${(columnDefaults.size * 100).toFixed(0)}`;
   return {
     draft: {
-      preview: [{ kind: "poly", pts: columnFootprint(ghost), closed: true }],
+      preview: createPreview(ctx, { cmd: "column", ...profileReq() }, [pt]).shapes,
       vertices: [],
       hud: { at: pt, text: size },
     },
@@ -134,16 +97,16 @@ export const columnCommand: Command = {
     if (input.kind === "point") {
       return [
         { phase: "done", lastPoint: null } as ColState,
-        { draft: null, done: true, commit: opsMutation(() => appendColumn(input.point, ctx)) },
+        { draft: null, done: true, commit: appendColumn(input.point, ctx) },
       ];
     }
     return [s, { draft: null }];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as ColState;
     if (s.phase !== "place") return [s, { draft: null }];
-    return [s, previewAt(point)];
+    return [s, previewAt(point, ctx)];
   },
 
   onConfirm: (): [CommandState, CommandResult] => finish(),

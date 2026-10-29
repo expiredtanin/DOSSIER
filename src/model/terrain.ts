@@ -9,6 +9,7 @@
 // Gelände ist NICHT semantisch — es ist Kontext-Geometrie (Project.context).
 
 import { core } from "../engine/coreWasm";
+import { toMarkedJson } from "../core/ops";
 import type { Contour, TerrainMesh } from "./types";
 import { TERRAIN_CATEGORY } from "./contextCategories";
 
@@ -18,92 +19,14 @@ let terrainSeq = 0;
 export const TERRAIN_LAYER = "Terrain";
 
 /**
- * Erzeugt ein TIN aus Konturen.
- *
- * Algorithmus:
- *  1. Sampling: jeder Stützpunkt jeder Kontur wird ein 3D-Vertex (x, y, z) mit
- *     z = Kontur-Höhe. Es wird KEIN zusätzliches Resampling betrieben — die
- *     Kontur-Vertices selbst sind die Breaklines.
- *  2. Delaunay: 2D-Triangulation über die (x,y)-Projektion aller Vertices
- *     (Rust-Kern, `delaunay.rs`). Die Z-Höhe je Vertex bleibt erhalten → echtes Gelände-TIN.
- *  3. Degenerate-Filter: Dreiecke mit (nahezu) null Fläche in der (x,y)-Ebene
- *     bzw. mit nicht-endlichen Koordinaten werden verworfen.
- *
- * Robustheit:
- *  • offene UND geschlossene Konturen werden gleich behandelt (nur die Punkte
- *    zählen; closed/offen beeinflusst die TIN-Fläche nicht).
- *  • leere/zu kleine Eingabe (< 3 Punkte) → leeres Mesh (kein Crash).
- *  • NaN/Infinity-Punkte werden vor der Triangulation aussortiert.
+ * Erzeugt ein TIN aus Konturen (Rust-Kern, `cmd_solid.rs::terrain_from_contours`): alle endlichen
+ * Stützpunkte der Konturen als Vertices (Z = Kontur-Höhe, nicht endlich → 0), 2D-Delaunay über die
+ * (x, y)-Projektion (`delaunay.rs`), Dreiecke mit (nahezu) null Fläche verworfen. Offene und
+ * geschlossene Konturen gleich; unter 3 Punkten ein leeres Mesh.
  */
 export function generateTerrainFromContours(contours: Contour[]): TerrainMesh {
   const id = `terrain-${Date.now()}-${terrainSeq++}`;
-  const name = "Gelände";
-
-  // 1. Sampling: alle Kontur-Stützpunkte als (x,y,z)-Vertices sammeln, ungültige
-  //    (nicht-endliche) Punkte überspringen.
-  const xs: number[] = [];
-  const ys: number[] = [];
-  const zs: number[] = [];
-  for (const c of contours) {
-    const z = Number.isFinite(c.z) ? c.z : 0;
-    for (const p of c.pts) {
-      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
-      xs.push(p.x);
-      ys.push(p.y);
-      zs.push(z);
-    }
-  }
-
-  // Zu wenige Punkte für ein Dreieck → triviales leeres Mesh.
-  if (xs.length < 3) {
-    return { id, type: "terrainMesh", name, categoryCode: TERRAIN_CATEGORY.code, positions: [], indices: [] };
-  }
-
-  // 2. Delaunay über die (x,y)-Projektion. der Kern erwartet ein flaches
-  //    [x0,y0, x1,y1, …]-Koordinatenarray.
-  const coords2d = new Float64Array(xs.length * 2);
-  for (let i = 0; i < xs.length; i++) {
-    coords2d[i * 2] = xs[i];
-    coords2d[i * 2 + 1] = ys[i];
-  }
-  // Der Kern (`delaunay.rs`, Port von delaunator) liefert bei kollinearen Punkten eine leere
-  // Triangulation — das ist korrekt.
-  const triangles = core().delaunay_flat(coords2d);
-
-  // 3. positions (x,y,z) aufbauen; Z aus zs je Vertex.
-  const positions: number[] = new Array(xs.length * 3);
-  for (let i = 0; i < xs.length; i++) {
-    positions[i * 3] = xs[i];
-    positions[i * 3 + 1] = ys[i];
-    positions[i * 3 + 2] = zs[i];
-  }
-
-  // Degenerierte Dreiecke (Null-Fläche in (x,y)) herausfiltern, damit das TIN
-  // keine entarteten Faces enthält.
-  const indices: number[] = [];
-  const EPS_AREA = 1e-9;
-  for (let t = 0; t < triangles.length; t += 3) {
-    const a = triangles[t];
-    const b = triangles[t + 1];
-    const c = triangles[t + 2];
-    const ax = xs[a], ay = ys[a];
-    const bx = xs[b], by = ys[b];
-    const cx = xs[c], cy = ys[c];
-    // doppelte Dreiecksfläche (Kreuzprodukt) in der (x,y)-Ebene.
-    const area2 = Math.abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay));
-    if (area2 <= EPS_AREA) continue;
-    indices.push(a, b, c);
-  }
-
-  return {
-    id,
-    type: "terrainMesh",
-    name,
-    layer: TERRAIN_LAYER,
-    categoryCode: TERRAIN_CATEGORY.code,
-    positions,
-    indices,
-  };
+  return JSON.parse(core().terrain_from_contours_json(toMarkedJson(contours), id)) as TerrainMesh;
 }
 
 /**

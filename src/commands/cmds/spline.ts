@@ -15,21 +15,17 @@
 //     Kein Gewicht pro Kontrollpunkt (NURBS) — bewusst auf den unbewichteten
 //     Fall beschränkt, s. PENDENZEN.md.
 
-import type { Drawing2D } from "../../model/types";
-import { segmentHud, uniqueId } from "../../tools/types";
-import { sampleCatmullRom, sampleUniformBSpline } from "../../core";
+import { segmentHud } from "../../tools/types";
 import type {
   Command,
   CommandContext,
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview } from "../createCore";
 
 const EPS = 1e-6;
 const CLOSE_HIT = 0.08; // Modell-Meter: Klick nahe Startpunkt schließt den Zug
@@ -65,32 +61,19 @@ const curveModeOption = (mode: CurveMode): CmdOption => ({
 });
 
 /** Kurvenpunkte je nach Modus (fit = interpolierend, control = B-Spline-Kontrollnetz). */
-function sampleCurve(pts: Vec2[], closed: boolean, mode: CurveMode): Vec2[] {
-  return mode === "control" ? sampleUniformBSpline(pts, closed) : sampleCatmullRom(pts, closed);
-}
-
-/** Vorschau (geglätteter Zug + Gummiband zum Cursor) + HUD. */
-function splineDraft(points: Vec2[], cursor: Vec2 | null, closed: boolean, mode: CurveMode): ToolDraft {
+function splineDraft(ctx: CommandContext, points: Vec2[], cursor: Vec2 | null, closed: boolean, mode: CurveMode): ToolDraft {
+  // Kurve im Kern (`cmd_draw.rs`): Catmull-Rom durch die Punkte bzw. B-Spline über dem Kontrollnetz,
+  // geschlossen ab 3 Punkten.
   const pts = cursor ? [...points, cursor] : points;
-  const showClosed = closed && pts.length >= 3;
-  const curve = sampleCurve(pts, showClosed, mode);
-  const preview: DraftShape[] = [{ kind: "poly", pts: curve, closed: showClosed }];
-  const draft: ToolDraft = { preview, vertices: points };
+  const draft: ToolDraft = { preview: createPreview(ctx, { cmd: "spline", closed, mode }, pts).shapes, vertices: points };
   const last = points[points.length - 1];
   if (cursor && last && segLen(last, cursor) >= EPS) draft.hud = segmentHud(last, cursor);
   return draft;
 }
 
-function appendSpline(pts: Vec2[], closed: boolean, mode: CurveMode, ctx: CommandContext): CoreOp[] {
-  const d: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
-    levelId: ctx.level.id,
-    categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "spline", pts, closed, mode },
-  };
-  return addItems("drawings2d", [d]);
-}
+/** Commit (Kern): Spline-Zeichnung aus den Punkten. */
+const appendSpline = (pts: Vec2[], closed: boolean, mode: CurveMode, ctx: CommandContext) =>
+  createMutation(ctx, { cmd: "spline", pts, closed, mode });
 
 const idle = (closed = false, curveMode: CurveMode = "fit"): [CommandState, CommandResult] => [
   { phase: "start", lastPoint: null, closed, curveMode } as SplineIdle,
@@ -116,11 +99,11 @@ export const splineCommand: Command = {
     if (input.kind === "option") {
       if (input.id === "mode") {
         const ns = { ...s, closed: !s.closed } as SplineState;
-        return [ns, { draft: s.phase === "next" ? splineDraft(s.points, s.cursor, ns.closed, s.curveMode) : null }];
+        return [ns, { draft: s.phase === "next" ? splineDraft(ctx, s.points, s.cursor, ns.closed, s.curveMode) : null }];
       }
       if (input.id === "curveMode") {
         const ns = { ...s, curveMode: s.curveMode === "control" ? "fit" : "control" } as SplineState;
-        return [ns, { draft: s.phase === "next" ? splineDraft(s.points, s.cursor, s.closed, ns.curveMode) : null }];
+        return [ns, { draft: s.phase === "next" ? splineDraft(ctx, s.points, s.cursor, s.closed, ns.curveMode) : null }];
       }
       if (s.phase !== "next") return [s, { draft: null }];
       if (input.id === "undo") {
@@ -138,20 +121,20 @@ export const splineCommand: Command = {
           closed: s.closed,
           curveMode: s.curveMode,
         };
-        return [ns, { draft: splineDraft(pts, s.cursor, s.closed, s.curveMode) }];
+        return [ns, { draft: splineDraft(ctx, pts, s.cursor, s.closed, s.curveMode) }];
       }
       if (input.id === "close" && s.points.length >= 3) {
         const pts = s.points;
         return [
           { phase: "start", lastPoint: null, closed: s.closed, curveMode: s.curveMode } as SplineIdle,
-          { draft: null, done: true, commit: opsMutation(() => appendSpline(pts, true, s.curveMode, ctx)) },
+          { draft: null, done: true, commit: appendSpline(pts, true, s.curveMode, ctx) },
         ];
       }
-      return [s, { draft: splineDraft(s.points, s.cursor, s.closed, s.curveMode) }];
+      return [s, { draft: splineDraft(ctx, s.points, s.cursor, s.closed, s.curveMode) }];
     }
 
     if (input.kind !== "point") {
-      return [s, { draft: s.phase === "next" ? splineDraft(s.points, s.cursor, s.closed, s.curveMode) : null }];
+      return [s, { draft: s.phase === "next" ? splineDraft(ctx, s.points, s.cursor, s.closed, s.curveMode) : null }];
     }
     const pt = input.point;
     if (s.phase !== "next") {
@@ -163,13 +146,13 @@ export const splineCommand: Command = {
         closed: s.closed,
         curveMode: s.curveMode,
       };
-      return [ns, { draft: splineDraft([pt], pt, s.closed, s.curveMode) }];
+      return [ns, { draft: splineDraft(ctx, [pt], pt, s.closed, s.curveMode) }];
     }
     if (s.points.length >= 3 && segLen(s.points[0], pt) < CLOSE_HIT) {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null, closed: s.closed, curveMode: s.curveMode } as SplineIdle,
-        { draft: null, done: true, commit: opsMutation(() => appendSpline(pts, true, s.curveMode, ctx)) },
+        { draft: null, done: true, commit: appendSpline(pts, true, s.curveMode, ctx) },
       ];
     }
     const points = [...s.points, pt];
@@ -181,14 +164,14 @@ export const splineCommand: Command = {
       closed: s.closed,
       curveMode: s.curveMode,
     };
-    return [ns, { draft: splineDraft(points, pt, s.closed, s.curveMode) }];
+    return [ns, { draft: splineDraft(ctx, points, pt, s.closed, s.curveMode) }];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as SplineState;
     if (s.phase !== "next") return [s, { draft: null }];
     const ns: SplineDrawing = { ...s, cursor: point };
-    return [ns, { draft: splineDraft(s.points, point, s.closed, s.curveMode) }];
+    return [ns, { draft: splineDraft(ctx, s.points, point, s.closed, s.curveMode) }];
   },
 
   onConfirm: (state, ctx): [CommandState, CommandResult] => {
@@ -198,7 +181,7 @@ export const splineCommand: Command = {
       const close = s.closed && pts.length >= 3;
       return [
         { phase: "start", lastPoint: null, closed: s.closed, curveMode: s.curveMode } as SplineIdle,
-        { draft: null, done: true, commit: opsMutation(() => appendSpline(pts, close, s.curveMode, ctx)) },
+        { draft: null, done: true, commit: appendSpline(pts, close, s.curveMode, ctx) },
       ];
     }
     return idle(s.closed, s.curveMode);

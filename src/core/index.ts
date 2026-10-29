@@ -3,31 +3,20 @@
 // Erzeugt mit scripts/core-facade.py — neue Einträge von Hand ergänzen.
 
 export {
-  arcFromStartEndDirection,
-  arcFromStartEndRadius,
-  arcThroughPoints,
   bulgeArc,
   bulgeArcPoints,
   bulgePolylinePoints,
   bulgeFromSagittaPoint,
   bulgePointAt,
-  bulgeThroughPoint,
   hasRealBulge,
   pointOnCircle,
 } from "../geometry/bulge";
-
-export {
-  ceilingArea,
-  normalizeOutline,
-  pointInOutline,
-} from "../geometry/ceiling";
 
 export {
   columnFootprint,
 } from "../geometry/column";
 
 export {
-  ellipsePts,
   sampleBezierChain,
   sampleCatmullRom,
   sampleUniformBSpline,
@@ -49,13 +38,6 @@ export {
 } from "../geometry/modelSnap";
 
 export {
-  type Fillet,
-  type TangentTarget,
-  filletCorner,
-  offsetSegment,
-  pointSegmentDistance,
-  polylineEdges,
-  tangentCircleCenters,
   vecEqual,
 } from "../geometry/kernel2d";
 
@@ -70,11 +52,7 @@ export {
   segmentsToDash,
 } from "../geometry/lineSegments";
 
-export {
-} from "../geometry/opening";
-export { autoExteriorDimensions } from "../geometry/autoDimensions";
 export * as polygonBool from "../geometry/polygonBool";
-export type { AutoDimension } from "../geometry/autoDimensions";
 
 export {
   nearestPolylineTarget,
@@ -88,18 +66,12 @@ export {
 } from "../geometry/polylineVertexType";
 
 export {
-  revisionCloudPts,
-} from "../geometry/revisionCloud";
-
-export {
   roofBaseElevation,
   roofGeometry,
 } from "../geometry/roof";
 
 export {
-  addRoofHole,
   removeRoofHole,
-  roofHoleWorks,
   setRoofEdge,
 } from "../geometry/roofEdges";
 export type { EdgeSpec, RoofEdge } from "../geometry/roofEdges";
@@ -116,14 +88,11 @@ export {
 
 export {
   type WallSegment,
-  roomFromPointInside,
 } from "../geometry/roomBoundary";
 
 export {
   IDEAL_TREAD,
   MIN_STEPS,
-  defaultStepCount,
-  stairGeometry,
 } from "../geometry/stair";
 
 export {

@@ -1,13 +1,26 @@
-// Schnittlinien-Befehl: der reine Datenpfad (commitLine/nextLevelName) — setzt
-// die Grundriss-Schnittlinie auf die richtige Ziel-Ebene bzw. legt eine neue an.
+// Schnittlinien-Befehl: der Datenpfad über den Befehl (Kern, `cmd_solid.rs`) — setzt die
+// Grundriss-Schnittlinie auf die richtige Ziel-Ebene bzw. legt eine neue an.
 
 import { describe, it, expect } from "vitest";
-import { _test } from "./sectionline";
+import { sectionLineCommand } from "./sectionline";
 import type { DrawingLevel, Project, Vec2 } from "../../model/types";
+import type { CommandContext } from "../types";
 import { applyOps } from "../../core/ops";
 
-const { lineOps, nextLevelName } = _test;
-const commitLine = (p: Project, a: Vec2, b: Vec2, kind: "section" | "elevation") => applyOps(p, lineOps(p, a, b, kind));
+/** Linie a→b mit dem Befehl setzen (Art per Option), Ops auf `p` anwenden. */
+function commitLine(p: Project, a: Vec2, b: Vec2, kind: "section" | "elevation"): Project {
+  const ctx = { project: p, level: { id: "eg", kind: "floor" }, defaultCategoryCode: "20", activeWallTypeId: "", selection: { wallIds: [], drawingId: null } } as unknown as CommandContext;
+  let s = sectionLineCommand.init();
+  [s] = sectionLineCommand.onInput(s, { kind: "option", id: kind }, ctx);
+  [s] = sectionLineCommand.onInput(s, { kind: "point", point: a }, ctx);
+  const [, res] = sectionLineCommand.onInput(s, { kind: "point", point: b }, ctx);
+  const ops = res.commit!.toOps(p);
+  return ops.length ? applyOps(p, ops) : p;
+}
+
+/** Name der Ebene, die eine neue Linie dieser Art anlegt. */
+const nextLevelName = (p: Project, kind: "section" | "elevation"): string =>
+  commitLine(p, a, b, kind).drawingLevels.at(-1)!.name;
 
 function projectWith(levels: DrawingLevel[]): Project {
   return {
@@ -90,12 +103,12 @@ describe("sectionline — commitLine", () => {
   });
 });
 
-describe("sectionline — nextLevelName", () => {
+describe("sectionline — Name der neuen Ebene", () => {
   it("zählt Buchstaben je Art hoch (A, B, C …)", () => {
     const p0 = projectWith([]);
     expect(nextLevelName(p0, "section")).toContain("A");
     const p1 = projectWith([
-      { id: "s1", name: "Schnitt A", kind: "section", visible: true, locked: false },
+      { id: "s1", name: "Schnitt A", kind: "section", visible: true, locked: false, linePoints: [{ x: 0, y: 0 }, { x: 1, y: 0 }] },
     ]);
     expect(nextLevelName(p1, "section")).toContain("B");
   });

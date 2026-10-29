@@ -89,51 +89,7 @@ export function bulgePointAt(a: Vec2, b: Vec2, bulge: number, t: number): Vec2 {
   return { x: r[0], y: r[1] };
 }
 
-/**
- * Bulge eines Kreisbogens, der von `a` über `through` nach `b` läuft — der klassische
- * Drei-Punkt-Bogen, nur von diesen drei Punkten abhängig (nicht vom vorherigen Segment).
- * Liegen die Punkte (nahezu) auf einer Geraden, gibt es keinen Kreis — dann 0.
- */
-export function bulgeThroughPoint(a: Vec2, through: Vec2, b: Vec2): number {
-  return core().bulge_through_point(a.x, a.y, through.x, through.y, b.x, b.y);
-}
-
 /** Punkt auf einem Kreis (center, r) beim Winkel `a` (Radiant). */
 export function pointOnCircle(center: Vec2, r: number, a: number): Vec2 {
   return { x: center.x + r * Math.cos(a), y: center.y + r * Math.sin(a) };
-}
-
-type ArcParams = { center: Vec2; r: number; a0: number; a1: number };
-
-function toArcParams(r: Float64Array): ArcParams | null {
-  if (r.length < 5) return null;
-  return { center: { x: r[0], y: r[1] }, r: r[2], a0: r[3], a1: r[4] };
-}
-
-/**
- * Kreisbogen-Parameter durch drei Punkte `a`→`through`→`b`, direkt als `{center,r,a0,a1}`
- * für Werkzeuge, die einen eigenständigen `{shape:"arc"}` erzeugen (`commands/cmds/arc.ts`).
- * `a0`/`a1` sind IMMER so geordnet, dass der Bogen CCW von a0 nach a1 läuft. `null` bei
- * (nahezu) kollinearen Punkten.
- */
-export function arcThroughPoints(a: Vec2, through: Vec2, b: Vec2): ArcParams | null {
-  return toArcParams(core().arc_through_points(a.x, a.y, through.x, through.y, b.x, b.y));
-}
-
-/**
- * Kreisbogen durch zwei Endpunkte `a`→`b` mit vorgegebenem Radius `r` (Methode „Start-Ende-
- * Radius"). `near` (typischerweise der Cursor) wählt die Seite der Sehne; es entsteht immer der
- * KLEINERE der beiden möglichen Bögen (Sehnenwinkel ≤ 180°). `null`, wenn `r` kleiner als die
- * halbe Sehnenlänge ist oder die Sehne entartet.
- */
-export function arcFromStartEndRadius(a: Vec2, b: Vec2, r: number, near: Vec2): ArcParams | null {
-  return toArcParams(core().arc_from_start_end_radius(a.x, a.y, b.x, b.y, r, near.x, near.y));
-}
-
-/**
- * Kreisbogen durch `a`→`b`, bei `a` tangential zur Richtung `dir` (ein Punkt AUF dem
- * Tangentenstrahl). `null` bei entarteter Tangente oder wenn sie entlang der Sehne a-b zeigt.
- */
-export function arcFromStartEndDirection(a: Vec2, b: Vec2, dir: Vec2): ArcParams | null {
-  return toArcParams(core().arc_from_start_end_direction(a.x, a.y, b.x, b.y, dir.x, dir.y));
 }

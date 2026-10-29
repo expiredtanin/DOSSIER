@@ -8,7 +8,6 @@ mod polygon;
 mod roof;
 mod sun;
 mod site_rules;
-mod auto_dimensions;
 mod kennzahlen;
 mod bulge;
 mod stair;
@@ -41,6 +40,7 @@ mod grips;
 mod project_refs;
 mod commands;
 mod import;
+mod cmd_create;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

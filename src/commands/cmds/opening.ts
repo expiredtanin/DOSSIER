@@ -12,8 +12,6 @@
 //
 // Bezeichner englisch, sichtbarer Text via t() (CONVENTIONS.md).
 
-import type { Opening } from "../../model/types";
-import { uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -21,69 +19,25 @@ import type {
   CommandResult,
   CommandState,
   CmdOption,
-  DraftShape,
   ToolDraft,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { createMutation, createPreview, createQuery, xy } from "../createCore";
 
-/** Default-Ebene (Kategorie) für Öffnungen: „21" Türen/Fenster (Fallback: aktive). */
-const OPENING_CATEGORY = "21";
-/** Toleranz (Modell-Meter) für das Picken einer Host-Wand per Klick. */
-const WALL_PICK_DIST = 0.6;
 /** Default-Maße (Meter). */
 const DEF_WINDOW = { width: 1.2, height: 1.2, sill: 0.9 };
 const DEF_DOOR = { width: 0.9, height: 2.1, sill: 0 };
 
-const sub = (a: Vec2, b: Vec2): Vec2 => ({ x: a.x - b.x, y: a.y - b.y });
-const dot = (a: Vec2, b: Vec2): number => a.x * b.x + a.y * b.y;
-const add = (a: Vec2, b: Vec2): Vec2 => ({ x: a.x + b.x, y: a.y + b.y });
-const scale = (a: Vec2, s: number): Vec2 => ({ x: a.x * s, y: a.y * s });
-
-/** Existiert die Öffnungs-Kategorie („21")? Sonst Fallback auf die aktive. */
-function openingCategory(ctx: CommandContext): string {
-  const flat: { code: string }[] = [];
-  const walk = (list: { code: string; children?: unknown[] }[]) => {
-    for (const c of list) {
-      flat.push({ code: c.code });
-      if (c.children) walk(c.children as { code: string; children?: unknown[] }[]);
-    }
-  };
-  walk(ctx.project.layers as { code: string; children?: unknown[] }[]);
-  return flat.some((c) => c.code === OPENING_CATEGORY)
-    ? OPENING_CATEGORY
-    : ctx.defaultCategoryCode;
-}
-
-/** Auf die Wandachse projizierter Fußpunkt + Parameter t (0..len) + Distanz. */
-function projectOntoWall(
-  wall: { start: Vec2; end: Vec2 },
-  p: Vec2,
-): { t: number; foot: Vec2; dist: number } {
-  const ax = sub(wall.end, wall.start);
-  const len2 = dot(ax, ax) || 1e-9;
-  const raw = dot(sub(p, wall.start), ax) / len2; // 0..1
-  const t = Math.max(0, Math.min(1, raw));
-  const foot = add(wall.start, scale(ax, t));
-  const dist = Math.hypot(p.x - foot.x, p.y - foot.y);
-  return { t: t * Math.sqrt(len2), foot, dist };
-}
-
-/** Nächste Wand auf dem aktiven Geschoss zum Klickpunkt (innerhalb Toleranz). */
-function pickWall(
-  ctx: CommandContext,
-  p: Vec2,
-): { id: string; start: Vec2; end: Vec2 } | null {
-  let best: { id: string; start: Vec2; end: Vec2; d: number } | null = null;
-  for (const w of ctx.project.walls) {
-    if (w.floorId !== ctx.level.id) continue;
-    const { dist } = projectOntoWall(w, p);
-    if (dist <= WALL_PICK_DIST && (!best || dist < best.d)) {
-      best = { id: w.id, start: w.start, end: w.end, d: dist };
-    }
-  }
-  return best ? { id: best.id, start: best.start, end: best.end } : null;
+/** Nächste Wand des Geschosses zum Klickpunkt (Kern): id, Achse und Abstand des Fusspunkts vom Anfang. */
+function pickWall(ctx: CommandContext, p: Vec2): { id: string; start: Vec2; end: Vec2; t: number } | null {
+  const r = createQuery<{ hit: { id: string; start: [number, number]; end: [number, number]; t: number } | null }>(ctx.project, {
+    q: "pickWall",
+    level: ctx.level.id,
+    pt: xy(p),
+  });
+  if (!r.hit) return null;
+  const { id, start, end, t } = r.hit;
+  return { id, start: { x: start[0], y: start[1] }, end: { x: end[0], y: end[1] }, t };
 }
 
 /** Tab-Felder im Positionsschritt: Breite/Höhe/Brüstung (+ Winkel bei Tür). */
@@ -144,73 +98,44 @@ function initState(kind: "window" | "door" = "window"): OpIdle {
   };
 }
 
-/** Vorschau: Lücken-Balken entlang der Wand + Positionsmarke. */
-function posDraft(s: OpPos): ToolDraft {
-  const ax = sub(s.end, s.start);
-  const len = Math.hypot(ax.x, ax.y) || 1e-9;
-  const u = { x: ax.x / len, y: ax.y / len };
-  const n = { x: -u.y, y: u.x };
-  const from = Math.max(0, Math.min(s.posAlong, len));
-  const to = Math.max(from, Math.min(from + s.width, len));
-  const a = add(s.start, scale(u, from));
-  const b = add(s.start, scale(u, to));
-  const half = 0.15; // Vorschau-Balken quer zur Wand
-  const quad: Vec2[] = [
-    add(a, scale(n, half)),
-    add(b, scale(n, half)),
-    add(b, scale(n, -half)),
-    add(a, scale(n, -half)),
-  ];
-  const preview: DraftShape[] = [{ kind: "poly", pts: quad, closed: true }];
-  // Symbol-Andeutung: Fenster = Mittellinie, Tür = Blatt-Linie in Schwenkrichtung.
-  if (s.kind === "window") {
-    preview.push({ kind: "line", a, b });
-  } else {
-    const swingSign = s.side === "left" ? 1 : -1;
-    const dirSign = s.dir === "in" ? 1 : -1;
-    const hinge = s.hinge === "start" ? a : b;
-    const leafEnd = add(hinge, scale(n, swingSign * dirSign * s.width));
-    preview.push({ kind: "line", a: hinge, b: leafEnd });
-  }
-  const draft: ToolDraft = { preview, vertices: [a, b] };
-  const mid = add(a, scale(u, (to - from) / 2));
+/** Anfrage an den Kern (`cmd_create.rs`); `pos` = null → Position aus dem Cursor projiziert. */
+const openingReq = (s: OpPos, pos: number | null) => ({
+  cmd: "opening",
+  wall: s.wallId,
+  start: xy(s.start),
+  end: xy(s.end),
+  kind: s.kind,
+  hinge: s.hinge,
+  side: s.side,
+  dir: s.dir,
+  width: s.width,
+  height: s.height,
+  sill: s.sill,
+  swingAngle: s.swingAngle,
+  pos,
+});
+
+/**
+ * Vorschau (Kern): Lücken-Balken entlang der Wand + Symbol (Fenster = Mittellinie, Tür = Blatt in
+ * Schwenkrichtung); `pos` = null projiziert `at` auf die Achse. Liefert dazu die Position.
+ */
+function posDraftAt(s: OpPos, ctx: CommandContext, pos: number | null, at: Vec2 | null): { draft: ToolDraft; pos: number } {
+  const pv = createPreview(ctx, openingReq(s, pos), at ? [at] : []);
+  const [p, from, ax, ay, bx, by, mx, my] = pv.info;
+  const draft: ToolDraft = { preview: pv.shapes, vertices: [{ x: ax, y: ay }, { x: bx, y: by }] };
   draft.hud = {
-    at: s.cursor ?? mid,
+    at: s.cursor ?? { x: mx, y: my },
     text: `${from.toFixed(2)} m · ${s.kind === "door" ? "Tür" : "Fenster"} ${(
       s.width * 100
     ).toFixed(0)}×${(s.height * 100).toFixed(0)}`,
   };
-  return draft;
+  return { draft, pos: p };
 }
 
-/** Hängt eine Öffnung ans Projekt (immutabel). */
-function appendOpening(s: OpPos, ctx: CommandContext): CoreOp[] {
-  const len = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y);
-  const width = Math.max(0.1, Math.min(s.width, len));
-  const position = Math.max(0, Math.min(s.posAlong, Math.max(0, len - width)));
-  // Standard-Bauteiltyp zuweisen (erster Tür-/Fenstertyp der Bibliothek), damit
-  // frisch platzierte Öffnungen SOFORT die volle Rahmen-/Laibungs-Darstellung
-  // (2D + 3D) bekommen — ohne Typ blieben sie ein blosses Loch mit flacher
-  // Scheibe. Fehlt eine Bibliothek, bleibt es beim Inline-Verhalten (kein Typ).
-  const typeId =
-    s.kind === "door" ? ctx.project.doorTypes?.[0]?.id : ctx.project.windowTypes?.[0]?.id;
-  const opening: Opening = {
-    id: uniqueId("O"),
-    type: "opening",
-    hostWallId: s.wallId,
-    categoryCode: openingCategory(ctx),
-    kind: s.kind,
-    position,
-    width,
-    height: s.height,
-    sillHeight: s.kind === "door" ? 0 : s.sill,
-    ...(typeId ? { typeId } : {}),
-    ...(s.kind === "door"
-      ? { hinge: s.hinge, swing: s.side, openingDir: s.dir, swingAngle: s.swingAngle }
-      : {}),
-  };
-  return addItems("openings", [opening]);
-}
+const posDraft = (s: OpPos, ctx: CommandContext): ToolDraft => posDraftAt(s, ctx, s.posAlong, null).draft;
+
+/** Commit (Kern): Öffnung in die Host-Wand, Breite/Position auf die Wand geklemmt, Standard-Typ der Bibliothek. */
+const appendOpening = (s: OpPos, ctx: CommandContext) => createMutation(ctx, openingReq(s, s.posAlong));
 
 const idle = (from?: OpState): [CommandState, CommandResult] => [
   initState(from?.kind ?? "window"),
@@ -261,27 +186,26 @@ export const openingCommand: Command = {
       } else if (input.id === "dir") {
         next.dir = s.dir === "in" ? "out" : "in";
       }
-      return [next, { draft: next.phase === "pos" ? posDraft(next as OpPos) : null }];
+      return [next, { draft: next.phase === "pos" ? posDraft(next as OpPos, ctx) : null }];
     }
 
     if (input.kind === "number") {
       // Im Positionsschritt: getippte Zahl = Abstand vom Wandanfang (Meter).
       if (s.phase === "pos") {
         const ns: OpPos = { ...s, posAlong: input.value };
-        return [ns, { draft: posDraft(ns) }];
+        return [ns, { draft: posDraft(ns, ctx) }];
       }
       return [s, { draft: null }];
     }
 
     if (input.kind !== "point") {
-      return [s, { draft: s.phase === "pos" ? posDraft(s as OpPos) : null }];
+      return [s, { draft: s.phase === "pos" ? posDraft(s as OpPos, ctx) : null }];
     }
 
     const pt = input.point;
     if (s.phase === "wall") {
       const w = pickWall(ctx, pt);
       if (!w) return [s, { draft: null }]; // kein Treffer: Schritt wiederholen
-      const proj = projectOntoWall(w, pt);
       const ns: OpPos = {
         phase: "pos",
         lastPoint: pt,
@@ -289,7 +213,7 @@ export const openingCommand: Command = {
         start: w.start,
         end: w.end,
         cursor: pt,
-        posAlong: proj.t,
+        posAlong: w.t,
         kind: s.kind,
         hinge: s.hinge,
         side: s.side,
@@ -299,24 +223,23 @@ export const openingCommand: Command = {
         sill: s.sill,
         swingAngle: s.swingAngle,
       };
-      return [ns, { draft: posDraft(ns) }];
+      return [ns, { draft: posDraft(ns, ctx) }];
     }
 
     // Positionsschritt: Klick projiziert auf die Achse → committen.
-    const proj = projectOntoWall(s, pt);
-    const ns: OpPos = { ...s, posAlong: proj.t, cursor: pt };
+    const ns: OpPos = { ...s, posAlong: posDraftAt(s, ctx, null, pt).pos, cursor: pt };
     return [
       idle(s)[0],
-      { draft: null, done: true, commit: opsMutation(() => appendOpening(ns, ctx)) },
+      { draft: null, done: true, commit: appendOpening(ns, ctx) },
     ];
   },
 
-  onMove: (state, point): [CommandState, CommandResult] => {
+  onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as OpState;
     if (s.phase !== "pos") return [s, { draft: null }];
-    const proj = projectOntoWall(s, point);
-    const ns: OpPos = { ...s, posAlong: proj.t, cursor: point };
-    return [ns, { draft: posDraft(ns) }];
+    const at = posDraftAt({ ...s, cursor: point }, ctx, null, point);
+    const ns: OpPos = { ...s, posAlong: at.pos, cursor: point };
+    return [ns, { draft: at.draft }];
   },
 
   onConfirm: (state, ctx): [CommandState, CommandResult] => {
@@ -325,7 +248,7 @@ export const openingCommand: Command = {
       const ns = s;
       return [
         idle(s)[0],
-        { draft: null, done: true, commit: opsMutation(() => appendOpening(ns, ctx)) },
+        { draft: null, done: true, commit: appendOpening(ns, ctx) },
       ];
     }
     return idle(s);

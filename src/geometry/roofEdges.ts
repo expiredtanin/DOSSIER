@@ -1,13 +1,12 @@
 // Kanten und Höfe eines Dachs ([26]): Typen der Kantenliste (gerechnet im Kern, `selection_info.rs`),
-// Änderungen als Teilobjekt (`Partial<Roof>`, für `updateRoof`/`patchItem` — ein Undo-Schritt) und
-// die Prüfung, ob ein Hof wirkt. Die Geometrie selbst rechnet der Rust-Kern (`roof.rs`).
+// Änderungen als Teilobjekt (`Partial<Roof>`, für `updateRoof`/`patchItem` — ein Undo-Schritt). Höfe
+// legt der Befehl im Kern an (`cmd_solid.rs`, samt Prüfung am Skelett); die Geometrie rechnet `roof.rs`.
 //
 // Kantennummerierung wie `Roof.edgePitchDeg`: erst die Kanten von `outline` (Kante i = Punkt i →
 // i+1), dann die der `holes` Ring für Ring. Eintrag `null` = Giebel, Zahl ≥ 0 = Neigung, negativ
 // (oder fehlend) = Standard.
 
 import type { Roof, Vec2 } from "../model/types";
-import { roofGeometry } from "./roof";
 
 /** Vorgabe einer Kante. */
 export type EdgeSpec = { kind: "default" } | { kind: "gable" } | { kind: "pitch"; deg: number };
@@ -48,19 +47,6 @@ export function setRoofEdge(roof: Roof, index: number, spec: EdgeSpec): Pick<Roo
   if (index < 0 || index >= total) return { edgePitchDeg: roof.edgePitchDeg };
   values[index] = spec.kind === "gable" ? null : spec.kind === "pitch" ? Math.max(0, Math.min(MAX_PITCH, spec.deg)) : -1;
   return { edgePitchDeg: normalized(values) };
-}
-
-/** Wirkt ein Hof `ring` an diesem Dach? Der Kern verwirft Höfe, die nicht ganz im Umriss liegen, sich
- *  schneiden oder bei einer Dachform ohne Höfe (Pult) — dann liefert er keinen Hof-Traufring. */
-export function roofHoleWorks(roof: Roof, ring: Vec2[]): boolean {
-  if (ring.length < 3) return false;
-  const probe: Roof = { ...roof, holes: [...(roof.holes ?? []), ring] };
-  return roofGeometry(probe, 0).eavesHoles.length === (probe.holes?.length ?? 0);
-}
-
-/** Teilobjekt für `updateRoof`: Hof anhängen (seine Kanten folgen mit Standard-Neigung). */
-export function addRoofHole(roof: Roof, ring: Vec2[]): Pick<Roof, "holes"> {
-  return { holes: [...(roof.holes ?? []), ring.map((p) => ({ x: p.x, y: p.y }))] };
 }
 
 /** Teilobjekt für `updateRoof`: Hof `k` entfernen samt seinen Kantenneigungen. */
