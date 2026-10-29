@@ -49,3 +49,22 @@ pub fn geo_mesh_split(pos: &[f64], idx: &[f64], weld_mm: f64) -> Vec<f64> {
     }
     out
 }
+
+/// Footprints extrudieren: `[nGebäude, (Höhe, nPunkte, x, y, …)*]` → `[nPos, pos…, idx…]`.
+#[wasm_bindgen]
+pub fn geo_extrude_footprints(data: &[f64]) -> Vec<f64> {
+    let mut rings: Vec<(f64, Vec<[f64; 2]>)> = Vec::new();
+    let mut at = 1;
+    let n = data.first().copied().unwrap_or(0.0);
+    if !(n >= 0.0) {
+        return Vec::new();
+    }
+    for _ in 0..n as usize {
+        let (Some(&h), Some(&np)) = (data.get(at), data.get(at + 1)) else { return Vec::new() };
+        let np = np as usize;
+        let Some(pts) = data.get(at + 2..at + 2 + np * 2) else { return Vec::new() };
+        rings.push((h, pts.chunks_exact(2).map(|c| [c[0], c[1]]).collect()));
+        at += 2 + np * 2;
+    }
+    encode(&gm::extrude_rings(&rings))
+}

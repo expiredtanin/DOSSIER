@@ -770,6 +770,12 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     `concatMeshes` (reine Kopier-/Versatz-Schleifen) sowie die Metadaten (Id, Name, Ebene). Gleichheit (einmalig, Test
     gelöscht): 400 Zufallsmeshes (mehrere Gebäude, geteilte Ecken, Rest-Dreieck) × Zuschnitt/Soffiten/3 Verschweiss-Toleranzen
     alt/neu gleich. Offen: Netz-Abrufe bleiben TS (`netFetch`). Nicht an echten Kacheln geprüft.
+    ✅ (29.10.) **Footprint-Extrusion im Kern** ([K4]): `geo_mesh::extrude_rings` (Ring säubern, Wände, Deckel/Boden über
+    Delaunay mit Schwerpunkt-Filter, Fächer als Rückfall; vorher `extrudeRing`/`triangulateRing`/`pointInRing` in
+    `io/geoContext.ts`), Bindung `geo_extrude_footprints`; `buildingsToMesh` bleibt als Fassade (Höhe/Name/Id), die
+    Kontextobjekt-Erzeugung (`featuresToContextObjects`) bleibt TS (Modellobjekte mit Ids und Beschriftung). Gleichheit
+    (einmalig, Test gelöscht): 400 Zufallsfolgen von Footprints (Kreis, Stern, unregelmässig, geschlossen, entartet, offen,
+    Höhen inkl. ungültig) Positionen und Indizes identisch.
     ✅ (29.10.) **Fang-Kandidaten aus dem Modell im Kern** ([K4] S3/[K3d]): `snap_model.rs` sammelt je Dokument-Stand,
     Geschoss und sichtbaren Ebenen (vorher `baseSegments`/`collectCircles`/`roomAnchors`/`ellipseCenters` in
     `tools/snapping.ts`): Wandachsen + Schichtgrenzen, Raum-/Decken- (mit Aussparungen)/Dach-/Treppen-/Stützen-Umrisse,

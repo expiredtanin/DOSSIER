@@ -173,8 +173,114 @@ pub fn split_components(pos: &[f64], idx: &[f64], weld_mm: f64) -> Vec<Mesh> {
     groups.iter().map(|g| compact(pos, g.chunks_exact(3).map(|c| [c[0], c[1], c[2]]))).collect()
 }
 
+// ── Footprints extrudieren (früher `buildingsToMesh` in `src/io/geoContext.ts`) ──────────────────────
+
+/// Point-in-Polygon (Ray-Casting) in der (x,y)-Ebene.
+fn point_in_ring(x: f64, y: f64, ring: &[[f64; 2]]) -> bool {
+    let mut inside = false;
+    let mut j = ring.len() - 1;
+    for i in 0..ring.len() {
+        let (xi, yi) = (ring[i][0], ring[i][1]);
+        let (xj, yj) = (ring[j][0], ring[j][1]);
+        if (yi > y) != (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Dreiecks-Indizes eines einfachen (evtl. konkaven) Rings: Delaunay über die Punkte, nur Dreiecke mit
+/// Schwerpunkt im Polygon; sonst Fächer ab Ecke 0.
+fn triangulate_ring(ring: &[[f64; 2]]) -> Vec<usize> {
+    let n = ring.len();
+    if n < 3 {
+        return Vec::new();
+    }
+    if n == 3 {
+        return vec![0, 1, 2];
+    }
+    let coords: Vec<f64> = ring.iter().flat_map(|p| [p[0], p[1]]).collect();
+    let tri = crate::delaunay::triangulate(&coords);
+    let mut out = Vec::new();
+    for t in tri.chunks_exact(3) {
+        let (a, b, c) = (t[0] as usize, t[1] as usize, t[2] as usize);
+        let cx = (ring[a][0] + ring[b][0] + ring[c][0]) / 3.0;
+        let cy = (ring[a][1] + ring[b][1] + ring[c][1]) / 3.0;
+        if point_in_ring(cx, cy, ring) {
+            out.extend_from_slice(&[a, b, c]);
+        }
+    }
+    if out.len() >= 3 {
+        out
+    } else {
+        (1..n - 1).flat_map(|i| [0, i, i + 1]).collect()
+    }
+}
+
+/// Extrudiert geschlossene Footprints (je `(Höhe, Ring)`) zu Prismen `[0, Höhe]`: n Boden-, n Deckel-Ecken, Seitenwände,
+/// Deckel und Boden. Entartete Ringe (< 3 Punkte oder Fläche ≈ 0) werden übersprungen.
+pub fn extrude_rings(rings: &[(f64, Vec<[f64; 2]>)]) -> Mesh {
+    let mut m = Mesh::default();
+    for (height, ring_in) in rings {
+        let mut ring = ring_in.clone();
+        if ring.len() > 1 {
+            let (f, l) = (ring[0], ring[ring.len() - 1]);
+            if (f[0] - l[0]).abs() < 1e-6 && (f[1] - l[1]).abs() < 1e-6 {
+                ring.pop();
+            }
+        }
+        let n = ring.len();
+        if n < 3 {
+            continue;
+        }
+        let mut a2 = 0.0;
+        for i in 0..n {
+            let (p, q) = (ring[i], ring[(i + 1) % n]);
+            a2 += p[0] * q[1] - q[0] * p[1];
+        }
+        if !(a2.abs() > 1e-6) {
+            continue;
+        }
+        let base = m.pos.len() / 3;
+        for p in &ring {
+            m.pos.extend_from_slice(&[p[0], p[1], 0.0]);
+        }
+        for p in &ring {
+            m.pos.extend_from_slice(&[p[0], p[1], *height]);
+        }
+        let ix = |k: usize| k as f64;
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let (b0, b1, t0, t1) = (base + i, base + j, base + n + i, base + n + j);
+            m.idx.extend_from_slice(&[ix(b0), ix(b1), ix(t1), ix(b0), ix(t1), ix(t0)]);
+        }
+        let tris = triangulate_ring(&ring);
+        for t in tris.chunks_exact(3) {
+            let (a, b, c) = (t[0], t[1], t[2]);
+            m.idx.extend_from_slice(&[ix(base + n + a), ix(base + n + b), ix(base + n + c)]);
+            m.idx.extend_from_slice(&[ix(base + a), ix(base + c), ix(base + b)]);
+        }
+    }
+    m
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn extrusion_quadrat_und_konkav() {
+        let sq = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]];
+        let m = super::extrude_rings(&[(12.0, sq)]);
+        assert_eq!(m.pos.len(), 8 * 3);
+        assert_eq!(m.pos[2], 0.0);
+        assert_eq!(m.pos[4 * 3 + 2], 12.0);
+        let l = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [4.0, 4.0], [4.0, 10.0], [0.0, 10.0]];
+        let m = super::extrude_rings(&[(5.0, l)]);
+        // 6 Wand-Quads (12 Dreiecke) + 4 Deckel- + 4 Boden-Dreiecke
+        assert_eq!(m.idx.len(), (12 + 4 + 4) * 3);
+        assert!(super::extrude_rings(&[(5.0, vec![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])]).idx.is_empty());
+    }
+
     use super::*;
 
     #[test]
