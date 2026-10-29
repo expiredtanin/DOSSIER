@@ -4,12 +4,17 @@
 // nativen Fenster geteilt; hier liegt nur die Canvas-/WebGPU-Anbindung + die
 // wasm-bindgen-Fassade.
 //
-// Ablauf im Frontend (siehe src/plan/useWasmPlanRenderer.ts):
+// Ablauf im Frontend (siehe src/views/plan/wasmRendererSession.ts, einziger Aufrufer; baut
+// nach Geraeteverlust `is_lost()`/`set_lost_callback` einen neuen Renderer):
 //   const r = await WebPlanRenderer.new(canvas, undefined);
 //   r.set_scene_bin(encodeRenderScene(planToRenderScene(plan)));
 //   r.set_view_box(x, y, w, h); r.resize(px_w, px_h); r.render();
 //
 // Szenenformat = Binaerpuffer (`scene_bin.rs`), dekodiert zu render2d::types::Scene. Pan/Zoom aendern nur die ViewBox (kein Re-Tess).
+
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -24,6 +29,26 @@ use crate::types::ViewBox;
 /// den tatsaechlichen Namen automatisch.
 const INTER_TTF: &[u8] = include_bytes!("../assets/Inter.ttf");
 
+// Geraeteverlust (`device.lost`): wgpu verlangt einen `Send`-Rueckruf, eine JS-Funktion ist
+// das nicht. Der Rueckruf traegt daher nur die Renderer-Nummer; die JS-Funktion liegt hier
+// (WASM ist einfaedig, der Rueckruf laeuft im Ereignis-Takt des Browsers).
+thread_local! {
+    static LOST_CALLBACKS: RefCell<Vec<(u32, js_sys::Function)>> = const { RefCell::new(Vec::new()) };
+}
+static NEXT_RENDERER_ID: AtomicU32 = AtomicU32::new(1);
+
+fn notify_lost(id: u32) {
+    // Funktion zuerst herausnehmen: ein Rueckruf darf selbst wieder Renderer anlegen.
+    let f = LOST_CALLBACKS.with(|c| {
+        let mut c = c.borrow_mut();
+        let pos = c.iter().position(|(i, _)| *i == id)?;
+        Some(c.swap_remove(pos).1)
+    });
+    if let Some(f) = f {
+        let _ = f.call0(&JsValue::NULL);
+    }
+}
+
 /// Der Browser-Renderer: haelt Surface + Device/Queue + den geteilten `Renderer`
 /// und die aktuelle ViewBox. Wird per `WebPlanRenderer.new(canvas)` aus JS erzeugt.
 #[wasm_bindgen]
@@ -34,6 +59,19 @@ pub struct WebPlanRenderer {
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
     view_box: ViewBox,
+    /// Nummer fuer den Rueckruf bei Geraeteverlust.
+    id: u32,
+    /// Gesetzt aus `device.lost`. Danach ruft KEINE Methode mehr wgpu auf: auf einem
+    /// verlorenen Geraet wirft z. B. `createBuffer(mappedAtCreation)` (auch in glyphon),
+    /// wgpu macht daraus einen Panic, und das Objekt bliebe fuer immer gesperrt.
+    lost: Arc<AtomicBool>,
+}
+
+impl Drop for WebPlanRenderer {
+    fn drop(&mut self) {
+        let id = self.id;
+        LOST_CALLBACKS.with(|c| c.borrow_mut().retain(|(i, _)| *i != id));
+    }
 }
 
 #[wasm_bindgen]
@@ -113,6 +151,24 @@ impl WebPlanRenderer {
         };
         surface.configure(&device, &config);
 
+        // Geraeteverlust merken (und JS melden, s. `set_lost_callback`).
+        let id = NEXT_RENDERER_ID.fetch_add(1, Ordering::Relaxed);
+        let lost = Arc::new(AtomicBool::new(false));
+        {
+            let lost = lost.clone();
+            device.set_device_lost_callback(move |reason, msg| {
+                lost.store(true, Ordering::SeqCst);
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "render2d: WebGPU-Geraet verloren ({reason:?}): {msg}"
+                )));
+                notify_lost(id);
+            });
+        }
+        // Validierungsfehler melden statt paniken (wgpus Vorgabe-Handler paniert).
+        device.on_uncaptured_error(Arc::new(|e: wgpu::Error| {
+            web_sys::console::warn_1(&JsValue::from_str(&format!("render2d WebGPU-Fehler: {e}")));
+        }));
+
         let mut renderer = Renderer::new(&device, format);
         // Font einspielen: uebergebene Bytes ODER die eingebettete Inter-Schrift.
         renderer.load_font(font_bytes.unwrap_or_else(|| INTER_TTF.to_vec()));
@@ -130,7 +186,25 @@ impl WebPlanRenderer {
             renderer,
             // Platzhalter bis set_view_box; verhindert Division durch 0.
             view_box: ViewBox::new(0.0, 0.0, width as f32, height as f32),
+            id,
+            lost,
         })
+    }
+
+    /// true, sobald das WebGPU-Geraet verloren ist: dann zeichnet dieser Renderer nichts
+    /// mehr, der Aufrufer baut einen neuen (`src/views/plan/wasmRendererSession.ts`).
+    pub fn is_lost(&self) -> bool {
+        self.lost.load(Ordering::SeqCst)
+    }
+
+    /// JS-Funktion, die beim Geraeteverlust (einmal) gerufen wird.
+    pub fn set_lost_callback(&self, f: js_sys::Function) {
+        let id = self.id;
+        LOST_CALLBACKS.with(|c| {
+            let mut c = c.borrow_mut();
+            c.retain(|(i, _)| *i != id);
+            c.push((id, f));
+        });
     }
 
     /// Setzt die zu zeichnende Szene aus dem Binaerformat von `scene_bin.rs` (Schreiber:
@@ -138,7 +212,10 @@ impl WebPlanRenderer {
     /// Szene bleibt. Re-tesselliert + laedt die GPU-Puffer; ruft NICHT selbst `render`.
     pub fn set_scene_bin(&mut self, bytes: &[u8]) -> Result<(), JsValue> {
         let scene = decode_scene(bytes).map_err(|e| JsValue::from_str(&format!("Szene lesen: {e}")))?;
-        self.renderer.upload_scene(&self.device, &scene);
+        if self.is_lost() {
+            return Ok(());
+        }
+        self.renderer.upload_scene_queued(&self.device, &self.queue, &scene);
         Ok(())
     }
 
@@ -166,7 +243,7 @@ impl WebPlanRenderer {
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).
     pub fn resize(&mut self, width: u32, height: u32) {
         let (w, h) = (width.max(1), height.max(1));
-        if self.config.width == w && self.config.height == h {
+        if self.is_lost() || (self.config.width == w && self.config.height == h) {
             return;
         }
         self.config.width = w;
@@ -176,6 +253,9 @@ impl WebPlanRenderer {
 
     /// Zeichnet EINEN Frame in die Surface-Textur.
     pub fn render(&mut self) {
+        if self.is_lost() {
+            return;
+        }
         // wgpu 29: `get_current_texture` liefert ein Enum statt eines Results —
         // Suboptimal ist weiterhin praesentierbar, Lost/Outdated -> rekonfigurieren.
         let frame = match self.surface.get_current_texture() {
