@@ -59,7 +59,7 @@ import {
 } from "./layoutSheetMath";
 import { RichTextEditor } from "../editors/RichTextEditor";
 import { docFromText } from "../text/richText";
-import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
+import { annotationTextLines } from "../text/renderHtml";
 import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../text/fontMetrics";
 import { readImageFile, defaultImageSizeMm } from "../io/imageAsset";
 import { rasterizePdfPages } from "../io/pdfImport";
@@ -1490,31 +1490,14 @@ function AnnotationSvg({
   }
   // Text: reiches Doc (mehrere Absätze/gemischte Formatierung) hat Vorrang vor
   // dem einfachen String — bricht bei gesetzter Rahmenbreite (`widthMm`)
-  // wortweise um (Run-Grenzen bleiben erhalten, s. `wrapDocToLines`).
+  // wortweise um (Run-Grenzen bleiben erhalten); Zeilen samt Lage aus dem Kern (`layoutText`).
   if (ann.doc) {
-    const lineHeight = ann.heightMm * 1.25;
-    const lines: SvgLine[] = wrapDocToLines(ann.doc, {
-      x: 0,
-      y: 0,
-      lineHeight,
-      unitPerPt: 25.4 / 72,
-      basePt: (ann.heightMm / 25.4) * 72,
-      color: ann.color ?? "#111111",
-      ...(ann.widthMm && ann.widthMm > 0 ? { wrapWidthUnits: ann.widthMm } : {}),
-    });
-    let y = ann.yMm;
+    const lines = annotationTextLines(ann, ann.doc);
     return (
       <text opacity={opacity}>
         {lines.map((line, k) => {
-          if (k > 0) y += line.lineHeight;
-          const anchor = line.align === "center" ? "middle" : line.align === "right" ? "end" : "start";
-          const x =
-            !ann.widthMm ? ann.xMm
-              : line.align === "center" ? ann.xMm + ann.widthMm / 2
-              : line.align === "right" ? ann.xMm + ann.widthMm
-              : ann.xMm;
           return (
-            <tspan key={k} x={x} y={y} textAnchor={anchor}>
+            <tspan key={k} x={line.x} y={line.y} textAnchor={line.anchor}>
               {line.tspans.length === 0
                 ? "​"
                 : line.tspans.map((ts, j) => (

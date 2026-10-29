@@ -44,6 +44,14 @@ impl LineAlign {
             _ => LineAlign::Left,
         }
     }
+    /// SVG-`text-anchor` der Zeile.
+    pub fn anchor(self) -> &'static str {
+        match self {
+            LineAlign::Left => "start",
+            LineAlign::Center => "middle",
+            LineAlign::Right => "end",
+        }
+    }
     /// 0 links · 1 Mitte · 2 rechts (render2d, DXF).
     pub fn code(self) -> u32 {
         match self {
@@ -346,6 +354,30 @@ pub fn wrap_doc_to_lines(doc: &RichTextDoc, o: &LayoutOpts, wrap: Option<f64>) -
     lines_of(doc, layout_refs(doc, o, wrap), o)
 }
 
+/// Lage der Zeilen eines Textblocks (früher je Verbraucher in TS: SVG-Rückfall der Plan-Ansicht,
+/// Layout-Blatt, Layout-PDF, Druck-SVG): `rows` = (Ausrichtung, Vorschub) je Zeile → (x, Grundlinie
+/// y) je Zeile. Die erste Grundlinie liegt bei `y`, jede weitere um ihren Vorschub tiefer (`y` wächst
+/// nach unten); x am Anker bzw. mit Spaltenbreite `col` Mitte/rechts in der Spalte (0/NaN = keine
+/// Spalte, wie `!width` in TS).
+pub fn place_lines(rows: impl IntoIterator<Item = (LineAlign, f64)>, x: f64, y: f64, col: Option<f64>) -> Vec<(f64, f64)> {
+    let col = col.filter(|w| *w != 0.0 && !w.is_nan());
+    let mut y = y;
+    rows.into_iter()
+        .enumerate()
+        .map(|(n, (align, lh))| {
+            if n > 0 {
+                y += lh;
+            }
+            let x = match (align, col) {
+                (LineAlign::Center, Some(w)) => x + w / 2.0,
+                (LineAlign::Right, Some(w)) => x + w,
+                _ => x,
+            };
+            (x, y)
+        })
+        .collect()
+}
+
 /// Eine gesetzte Zeile mit ihrer Grundlinie (`y`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Placed {
@@ -537,6 +569,19 @@ mod tests {
 
     fn texts(lines: &[Line]) -> Vec<String> {
         lines.iter().map(Line::content).collect()
+    }
+
+    #[test]
+    fn zeilen_lage_am_anker_und_in_der_spalte() {
+        let rows = [(LineAlign::Left, 9.0), (LineAlign::Center, 2.5), (LineAlign::Right, 4.0)];
+        // Erste Grundlinie am Anker, jede weitere um ihren Vorschub tiefer.
+        assert_eq!(place_lines(rows, 1.0, 10.0, None), [(1.0, 10.0), (1.0, 12.5), (1.0, 16.5)]);
+        // Spalte: Mitte/rechts in der Spalte; 0/NaN wie keine, negativ zählt (wie `!width` in TS).
+        assert_eq!(place_lines(rows, 1.0, 10.0, Some(6.0)), [(1.0, 10.0), (4.0, 12.5), (7.0, 16.5)]);
+        assert_eq!(place_lines(rows, 1.0, 10.0, Some(0.0)), place_lines(rows, 1.0, 10.0, None));
+        assert_eq!(place_lines(rows, 1.0, 10.0, Some(f64::NAN)), place_lines(rows, 1.0, 10.0, None));
+        assert_eq!(place_lines(rows, 1.0, 10.0, Some(-2.0))[2], (-1.0, 16.5));
+        assert_eq!([LineAlign::Left, LineAlign::Center, LineAlign::Right].map(LineAlign::anchor), ["start", "middle", "end"]);
     }
 
     #[test]

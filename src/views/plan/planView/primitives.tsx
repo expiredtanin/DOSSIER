@@ -5,7 +5,7 @@
 
 import type { HatchRender, Primitive } from "../../../core";
 import { NO_HATCH } from "../../../core";
-import { stampBlockLines, wrapDocToLines, wrapPlainText, type SvgLine } from "../../../text/renderHtml";
+import { layoutText, stampBlockLines, wrapPlainText } from "../../../text/renderHtml";
 import type { Vec2 } from "../../../model/types";
 import { quantizePen } from "../../../export/sceneToPrintSvg";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../../../core";
@@ -709,23 +709,17 @@ export function renderPrimitive(
       const unitPerPt = (1 / 72) * 0.0254 * nRef * PX_PER_M;
       // Rich-Text-Zeilen (Stempel-Doc) + LIVE-Zusatzzeilen (Fläche/SIA) darunter, Block vertikal
       // um den Anker zentriert (Kern `stamp_block`, absatzeigene Zeilenhöhen inbegriffen).
-      const lines = stampBlockLines(p, unitPerPt, c.y);
+      const lines = stampBlockLines(p, unitPerPt, c.x, c.y);
       if (lines.length === 0) return null;
       return (
         <text style={{ pointerEvents: "none", userSelect: "none" }}>
           {lines.map((line, k) => {
-            const anchor =
-              line.align === "center"
-                ? "middle"
-                : line.align === "right"
-                ? "end"
-                : "start";
             return (
               <tspan
                 key={k}
-                x={c.x}
+                x={line.x}
                 y={line.y}
-                textAnchor={anchor}
+                textAnchor={line.anchor}
               >
                 {line.tspans.map((ts, j) => (
                   <tspan
@@ -776,30 +770,20 @@ export function renderPrimitive(
       // Reiches Textfeld (InDesign-artig, mehrere Absätze/gemischte Formatierung):
       // hat Vorrang vor dem Alt-Pfad (einfacher String + einheitliche `marks`)
       // weiter unten. Bricht bei gesetzter Spaltenbreite wortweise um (Run-Grenzen
-      // bleiben erhalten, s. `wrapDocToLines`).
+      // bleiben erhalten); Zeilen samt Lage aus dem Kern (`layoutText`).
       if (p.doc) {
-        const unitPerPt = (0.0254 / 72) * PX_PER_M;
-        const basePt = (p.heightM / 0.0254) * 72;
-        const lineHeight = fontSize * 1.25;
         const wrapWidthUnits = p.wrapWidth && p.wrapWidth > 0 ? p.wrapWidth * PX_PER_M : undefined;
-        const docLines: SvgLine[] = wrapDocToLines(p.doc, {
-          x: 0,
-          y: 0,
-          lineHeight,
-          unitPerPt,
-          basePt,
+        const docLines = layoutText(p.doc, {
+          x: c.x,
+          y: c.y,
+          lineHeight: fontSize * 1.25,
+          unitPerPt: (0.0254 / 72) * PX_PER_M,
+          basePt: (p.heightM / 0.0254) * 72,
           color: p.color,
-          ...(wrapWidthUnits ? { wrapWidthUnits } : {}),
+          wrapWidthUnits,
+          columnWidth: wrapWidthUnits,
         });
         if (docLines.length === 0) return null;
-        const lineYs: number[] = [];
-        {
-          let y = c.y;
-          docLines.forEach((line, k) => {
-            if (k > 0) y += line.lineHeight;
-            lineYs.push(y);
-          });
-        }
         return (
           <text
             opacity={p.greyed ? 0.45 : undefined}
@@ -807,17 +791,8 @@ export function renderPrimitive(
             style={{ pointerEvents: "none", userSelect: "none" }}
           >
             {docLines.map((line, k) => {
-              const anchor =
-                line.align === "center" ? "middle" : line.align === "right" ? "end" : "start";
-              const x = !wrapWidthUnits
-                ? c.x
-                : line.align === "center"
-                ? c.x + wrapWidthUnits / 2
-                : line.align === "right"
-                ? c.x + wrapWidthUnits
-                : c.x;
               return (
-                <tspan key={k} x={x} y={lineYs[k]} textAnchor={anchor}>
+                <tspan key={k} x={line.x} y={line.y} textAnchor={line.anchor}>
                   {line.tspans.length === 0
                     ? "​"
                     : line.tspans.map((ts, j) => (

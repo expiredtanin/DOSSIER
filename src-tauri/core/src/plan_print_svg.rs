@@ -27,7 +27,7 @@ use crate::jsnum;
 use crate::plan_buf::{whole, Rec, View, F_COLOR, F_DASH_NULL, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT};
 use crate::plan_parts::{greyed_of, Part};
 use crate::plan_text::{SingleText, StampText};
-use crate::text_layout::{stamp_block, wrap_doc_to_lines, Line, LayoutOpts, LineAlign, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
+use crate::text_layout::{place_lines, stamp_block, wrap_doc_to_lines, Line, LayoutOpts, LineAlign, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use std::f64::consts::PI;
 
 /// Optionen: Massstab-Nenner, Blatt (mm) und Ausmass des Plans (`Plan.bounds`).
@@ -494,28 +494,16 @@ fn text_node(out: &mut Out, t: &SingleText, m: Map, opacity: String) {
         attrs.push(("opacity", opacity));
     }
     out.tagged(&["X"], &attrs);
-    // `!wrapWidthUnits`: 0/NaN zählen wie keine Spalte.
-    let col = wrap.filter(|w| *w != 0.0 && !w.is_nan());
-    let mut y = c.y;
-    for (n, line) in lines.iter().enumerate() {
-        if n > 0 {
-            y += line.line_height;
-        }
-        let (anchor, x) = match (line.align, col) {
-            (LineAlign::Center, Some(w)) => ("middle", c.x + w / 2.0),
-            (LineAlign::Right, Some(w)) => ("end", c.x + w),
-            (LineAlign::Center, None) => ("middle", c.x),
-            (LineAlign::Right, None) => ("end", c.x),
-            (LineAlign::Left, _) => ("start", c.x),
-        };
+    let at = place_lines(lines.iter().map(|l| (l.align, l.line_height)), c.x, c.y, wrap);
+    for (line, (x, y)) in lines.iter().zip(at) {
         let content = if line.tspans.is_empty() { "\u{200b}" } else { "" };
-        line_node(out, line, content, x, y, anchor);
+        line_node(out, line, content, x, y);
     }
 }
 
 /// Zeilen-`<tspan>` mit je einem Run-`<tspan>`.
-fn line_node(out: &mut Out, line: &Line, content: &str, x: f64, y: f64, anchor: &str) {
-    out.tagged(&["L", content], &[("x", r3(x)), ("y", r3(y)), ("text-anchor", anchor.to_string())]);
+fn line_node(out: &mut Out, line: &Line, content: &str, x: f64, y: f64) {
+    out.tagged(&["L", content], &[("x", r3(x)), ("y", r3(y)), ("text-anchor", line.align.anchor().to_string())]);
     for ts in &line.tspans {
         let mut a: Vec<(&str, String)> = vec![("font-size", r3(ts.font_size)), ("fill", ts.fill.clone())];
         if let Some(w) = ts.font_weight() {
@@ -545,12 +533,7 @@ fn stamp_node(out: &mut Out, t: &StampText, m: Map, opacity: String) {
     let attrs: Vec<(&str, String)> = if opacity.is_empty() { Vec::new() } else { vec![("opacity", opacity)] };
     out.tagged(&["X"], &attrs);
     for p in &placed {
-        let anchor = match p.line.align {
-            LineAlign::Center => "middle",
-            LineAlign::Right => "end",
-            LineAlign::Left => "start",
-        };
-        line_node(out, &p.line, "", c.x, p.y, anchor);
+        line_node(out, &p.line, "", c.x, p.y);
     }
 }
 
