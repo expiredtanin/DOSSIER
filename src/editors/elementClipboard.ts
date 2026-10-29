@@ -30,8 +30,8 @@ import type {
   Stair,
   Wall,
 } from "../model/types";
-import { uniqueId } from "../tools/types";
-import { addItems } from "../core";
+import { uniqueStamp } from "../tools/types";
+import { documentFor } from "../core/document";
 import type { CoreOp } from "../core";
 
 /** Auswahl-IDs je Bauteil-Art, wie sie die 9 Auswahl-Kanäle des Stores liefern. */
@@ -144,94 +144,47 @@ export interface PastedIds {
   columnIds: string[];
 }
 
+/** Projekt-Liste → Feld in {@link PastedIds}. */
+const PASTED_KEY: Record<string, keyof PastedIds> = {
+  walls: "wallIds",
+  drawings2d: "drawingIds",
+  ceilings: "ceilingIds",
+  roofs: "roofIds",
+  openings: "openingIds",
+  stairs: "stairIds",
+  rooms: "roomIds",
+  extrudedSolids: "extrudedSolidIds",
+  columns: "columnIds",
+};
+
 /**
- * Fügt eine Zwischenablage ins Projekt ein: Klone mit neuen IDs auf dem
- * AKTIVEN Geschoss (`activeLevelId`), an denselben Modell-Koordinaten. Liefert
- * die Ops (Anhängen je Liste) + die neuen IDs (für die Nachauswahl).
+ * Fügt eine Zwischenablage ins Projekt ein ([K4] S3: gerechnet im Kern, `cmd_paste.rs`): Klone mit
+ * neuen IDs auf dem AKTIVEN Geschoss (`activeLevelId`), an denselben Modell-Koordinaten; Öffnungen
+ * an die mitkopierte Wirtswand umgehängt. Liefert die Ops (Anhängen je Liste) + die neuen IDs (für
+ * die Nachauswahl). `project` bestimmt nur das Kern-Dokument der Anfrage.
  */
 export function pasteElementClipboard(
+  project: Project,
   clip: ElementClipboard,
   activeLevelId: string,
 ): { ops: CoreOp[]; pastedIds: PastedIds } {
-  const wallIdMap = new Map<string, string>();
-  const newWalls: Wall[] = clip.walls.map((w) => {
-    const id = uniqueId("W");
-    wallIdMap.set(w.id, id);
-    return { ...w, id, floorId: activeLevelId };
-  });
-  const newDrawings: Drawing2D[] = clip.drawings.map((d) => ({
-    ...d,
-    id: uniqueId("dr2d"),
-    levelId: activeLevelId,
-  }));
-  const newCeilings: Ceiling[] = clip.ceilings.map((c) => ({
-    ...c,
-    id: uniqueId("C"),
-    floorId: activeLevelId,
-  }));
-  const newRoofs: Roof[] = clip.roofs.map((r) => ({
-    ...r,
-    id: uniqueId("RF"),
-    floorId: activeLevelId,
-  }));
-  // Nur Öffnungen mit einer erfolgreich mitkopierten Wirtswand ergeben eine
-  // gültige neue Öffnung (sollte durch `collectElementClipboard` immer
-  // gegeben sein — Map-Miss defensiv übersprungen statt eine kaputte
-  // Öffnung ohne Wirt zu erzeugen).
-  const newOpenings: Opening[] = [];
-  for (const o of clip.openings) {
-    const hostWallId = wallIdMap.get(o.hostWallId);
-    if (!hostWallId) continue;
-    newOpenings.push({ ...o, id: uniqueId("O"), hostWallId });
-  }
-  const newStairs: Stair[] = clip.stairs.map((s) => ({
-    ...s,
-    id: uniqueId("ST"),
-    floorId: activeLevelId,
-  }));
-  const newRooms: Room[] = clip.rooms.map((r) => ({
-    ...r,
-    id: uniqueId("RM"),
-    floorId: activeLevelId,
-  }));
-  const newExtrudedSolids: ExtrudedSolid[] = clip.extrudedSolids.map((s) => ({
-    ...s,
-    id: uniqueId("extrude"),
-    levelId: activeLevelId,
-  }));
-  const newColumns: Column[] = clip.columns.map((c) => ({
-    ...c,
-    id: uniqueId("column"),
-    floorId: activeLevelId,
-  }));
-
-  // Wände vor Öffnungen (Wirtswand zuerst), sonst Reihenfolge der Projekt-Listen.
-  const ops: CoreOp[] = [
-    ...addItems("walls", newWalls),
-    ...addItems("drawings2d", newDrawings),
-    ...addItems("ceilings", newCeilings),
-    ...addItems("roofs", newRoofs),
-    ...addItems("openings", newOpenings),
-    ...addItems("stairs", newStairs),
-    ...addItems("rooms", newRooms),
-    ...addItems("extrudedSolids", newExtrudedSolids),
-    ...addItems("columns", newColumns),
-  ];
-
-  return {
-    ops,
-    pastedIds: {
-      wallIds: newWalls.map((w) => w.id),
-      drawingIds: newDrawings.map((d) => d.id),
-      ceilingIds: newCeilings.map((c) => c.id),
-      roofIds: newRoofs.map((r) => r.id),
-      openingIds: newOpenings.map((o) => o.id),
-      stairIds: newStairs.map((s) => s.id),
-      roomIds: newRooms.map((r) => r.id),
-      extrudedSolidIds: newExtrudedSolids.map((s) => s.id),
-      columnIds: newColumns.map((c) => c.id),
-    },
+  const ops = documentFor(project).cmdOps({ cmd: "paste", clip, levelId: activeLevelId, stamp: uniqueStamp() });
+  const pastedIds: PastedIds = {
+    wallIds: [],
+    drawingIds: [],
+    ceilingIds: [],
+    roofIds: [],
+    openingIds: [],
+    stairIds: [],
+    roomIds: [],
+    extrudedSolidIds: [],
+    columnIds: [],
   };
+  for (const op of ops) {
+    const key = op.kind === "add" ? PASTED_KEY[op.collection] : undefined;
+    if (op.kind === "add" && key) for (const e of op.items) pastedIds[key].push((e as { id: string }).id);
+  }
+  return { ops, pastedIds };
 }
 
 export { EMPTY_CLIPBOARD };

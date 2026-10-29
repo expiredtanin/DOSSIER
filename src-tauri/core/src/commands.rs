@@ -26,6 +26,7 @@ pub fn ops(root: &Map<String, Value>, text: &str) -> Result<Vec<Op>, String> {
         "align" => crate::cmd_transform::align_ops(root, &ids("ids"), &s("mode")),
         "distribute" => crate::cmd_transform::distribute_ops(root, &ids("ids"), &s("axis")),
         "defblock" => crate::cmd_transform::defblock_ops(root, &parse(&v, cmd)?),
+        "paste" => crate::cmd_paste::paste_ops(v.get("clip").unwrap_or(&Value::Null), &s("levelId"), &s("stamp")),
         other => return Err(format!("Unbekannter Befehl: {other}")),
     })
 }

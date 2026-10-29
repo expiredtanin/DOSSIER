@@ -726,6 +726,14 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     löschen (`editors/splitJoin.ts`, App) — dort ersetzt `cutSegment` per `replace` mit NEUER id (hängt an statt
     zu ersetzen; beim Port prüfen); Fang-Kandidaten aus dem Modell (`tools/snapping.ts`: `baseSegments`,
     Kreise, Raum-Anker; Nahmodus ab 2000 Zeichnungen) → `snap.rs`.
+    ✅ (29.10.) **Einfügen im Kern** ([K4] S3): `cmd_paste.rs` (`{cmd: "paste", clip, levelId, stamp}`): Klone mit neuen
+    ids `prefix-stamp-k` auf dem aktiven Geschoss, an denselben Koordinaten; Öffnungen an die mitkopierte Wirtswand
+    umgehängt (ohne sie weggelassen); Rechnung auf rohem JSON (unbekannte Felder, Schlüsselreihenfolge bleiben). Die
+    Zwischenablage (Sammeln, Text-Format, Speicher) bleibt in TS; `pasteElementClipboard(project, clip, level)` ist
+    Fassade (neue ids für die Nachauswahl aus den `add`-Ops), die Tastatur ruft sie in `applyChange((p) => …)`.
+    Gleichheit (einmalig, Test gelöscht): 400 Zufallsprojekte × Zufallsauswahl, Ops gleich bis auf die ids (Verweise
+    Öffnung → Wand konsistent). Offen (gab es auch vorher nicht): Versatz beim wiederholten Einfügen, Gruppen
+    mitkopieren, Einfügen in die aktive Gruppe (`activeGroupOps`). Nicht in der Tauri-App geprüft.
     **Leistung nach der Zusammenführung (29.10.)** — erledigt damit die Offen-Punkte der Griffe/Objekt-Info:
     (a) **id-Suche indiziert:** der Positions-Index des Dokuments (`PosCache`) wird ab der ersten Suche gebaut (Listen
     ≥ 32), überlebt `add` am Ende und ist über `Lookup` (`Document::lookup`) auch für die Wurzel-Abfragen da — Griffe
