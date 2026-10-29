@@ -205,6 +205,36 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (`exportDxf.ts`, 1000 Zeilen Stil/Layer-Logik) und `planToPrintSvg.ts` (Layout-PDF/LayoutSheet; nicht auf `sceneToPrintSvg`
     umgestellt, weil die Ausgabe dann nicht mehr byte-gleich wäre). `generatePlan` dekodiert den Kern-Puffer weiter vollständig
     (für diese Verbraucher); fällt, wenn sie den Puffer lesen bzw. das Modell nach Rust zieht [K4].
+    ✅ (29.10.) **Letzte Verbraucher lesen den Puffer, `generatePlan` liest lazy.**
+    - Lazy Plan (`src/plan/planLazy.ts`): `generatePlan`, `generateVisibleLevelsPlan`, `materializeUnderlay` und
+      `planWithExtra` (Überlagerungen in `viewportContent`) setzen den Plan aus Stücken zusammen (Kern-Abschnitte +
+      TS-Listen); `plan.primitives` entsteht erst beim ersten Zugriff. `decodePlanBuf` liest Einträge, Texte und
+      Schraffur-JSON bei Bedarf (`prim(i)`, `tag(i)`); `planPrimAt` (ein Eintrag), `planTextEntries` (nur Texte/Bilder,
+      aus den Typ-Kennungen), `planCount`. `planParts` nimmt die Stücke direkt (keine Identitätsprüfung). Abzugskörper,
+      Mono und Strichstärken-Massstab bleiben auf der Liste (sie ändern Primitive).
+    - Auswahl (`plan_pick.rs`): Rahmen-Auswahl über Polygone je Pick-Art und über 2D-Zeichnungen (Linien, Polygone,
+      abgetastete Kreise/Bögen, Text-/Bild-Rahmen, Unterlage ausgenommen), Einzeltext-/Bild-Treffer, Form einer
+      Zeichnung (`drawingLabel`). `marqueeHit*`/`marqueeHitDrawings` in TS gelöscht.
+    - PlanView: Einzelzugriffe über `planPrimAt`; mit GPU kommen SVG-Kandidaten/Culling nur aus den Text-Einträgen
+      (Culling selbst bleibt TS über diese wenigen); `planSceneTexts` und die native Text-Sync lesen nur Text-Einträge.
+    - DXF/DWG (`plan_dxf.rs`): Sammler (Ebenen, Linientypen, Textstile, DIMENSION, BLOCK/INSERT/ATTRIB, HATCH, Verlauf,
+      Zufallsstriche, Papierbereich) im Kern aus Puffer + Projekt-Dokument; TS liefert nur das Text-Layout flach mit und
+      gibt die flache Zeichnung an fileio. `FlatDrawing`-Klasse und `dxfCadParts` (ausser `fontNameOf`) gelöscht.
+    - Druck-SVG/Layout-Viewport (`plan_print_svg.rs`): Knoten als Anweisungsliste, TS legt sie als DOM an (Rahmen,
+      Bild-`<pattern>`, Einzeltexte bleiben TS). Nicht auf `sceneToPrintSvg` umgestellt (Ausgabe bliebe nicht gleich) —
+      nicht nötig, der Puffer-Weg ist gleich.
+    Gleichheit (temporäre Paritätstests gegen die alten TS-Fassungen, danach entfernt): Rahmen-/Text-Treffer 53 870
+    Abfragen (200 Zufallspläne, Beispiel EG/OG/UG, Überlagerung, bigSample(6)); DXF-Zeichnung Zahl für Zahl in 451 Fällen
+    (Beispiel + Fachplaner-Projekt × Geschosse × Detailgrade × mono × Optionen, 300 Zufallspläne, bigSample(8)), DXF/
+    Binär byte-gleich, CLI `dxf`/`dwg` (--binary, --scale, --dim-unit cm, --layout) 36 Dateien byte-gleich zur CLI des
+    Hauptstands; Druck-SVG 475 Pläne gleich (DOM serialisiert). Bleibende Tests: `planLazy.test.ts` (Kern-Verbraucher
+    lesen nicht), Marquee-/Text-Tests über den Kern, Rust-Tests für Rechteck-Treffer, Linientypen, Papier, blocklokal.
+    Messung (Node, Linux-Container, `--no-opt`, Min/Median, alt und neu im selben Lauf): `generatePlan` Beispiel-EG
+    0,38–0,42/0,43–0,65 → 0,30–0,33/0,35–0,40 ms; grosses Projekt (bigSampleProject 20×20) 228–241/285–294 →
+    158–160/166–176 ms; mit Render-Szene (`planSceneBin`, WASM-Ansicht) 396–472 → 324–352 ms.
+    Bleibt: der native macOS-Pfad (`useNativePlanRenderer`/`GpuChunkCache`) liest die Liste weiter (nicht in der Tauri-App
+    geprüft); SVG-Rückfall ohne GPU, Geschoss-Überlagerung mit gedimmten Ebenen (`materializeGreyed`), Gruppen-Isolation,
+    Schnitt/Ansicht-Overlays in `viewportContent` und Abzugskörper/Mono/Massstab lesen die Liste (dann wie bisher).
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
 - ◐ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
@@ -240,6 +270,8 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     noch die dekodierten `Primitive[]`.
     Nachtrag 28.10.: render2d-Szene, Auswahl, Fang und SVG-Text-Export lesen den Puffer im Kern ([K3d]); Overlay/Texte, DXF und
     Layout-PDF noch über `Primitive[]`.
+    Nachtrag 29.10.: auch Rahmen-Auswahl, Text-/Bild-Treffer, Overlay-Texte, DXF/DWG und Druck-SVG lesen den Puffer im
+    Kern; `generatePlan` liest die Kern-Primitive nur noch bei Bedarf ([K3d]).
   - ◐ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
     **Erste Etappe (28.10.): Ops, Prüfung, Undo/Redo im Kern.** `core/src/ops.rs` (Op, Prüfung bitgleich zur TS-Fassung — gleiche
