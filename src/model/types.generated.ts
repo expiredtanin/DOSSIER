@@ -329,6 +329,26 @@ export type Component = {
   abbrev?: string;
   /** Verschneidungs-Rang: höher läuft am Stoß durch (Backbone). */
   joinPriority: number;
+  /** Wärmeleitfähigkeit λ in W/(m·K) (Bemessungswert, z. B. SIA 381/1, Herstellerangabe). */
+  lambda?: number;
+  /** Rohdichte in kg/m³. */
+  density?: number;
+  /**
+   * Brandverhalten nach VKF (Brandschutzrichtlinie 13-15): "RF1" (kein Brandbeitrag), "RF2"
+   * (geringer), "RF3" (zulässiger), "RF4" (unzulässig). Freitext, damit auch Zusätze („RF1 (cr)") gehen.
+   */
+  fireClass?: string;
+  /** Flächenfarbe in der Ansicht (Fassade/Dachaufsicht). Fehlt sie, gilt die bisherige Farbe. */
+  elevationColor?: string;
+  /**
+   * Ansichtsschraffur ([100]): Oberflächenmuster, das auf sichtbaren Flächen dieses Bauteils gezeichnet
+   * wird (Ansicht, Dachaufsicht im Grundriss). Masse in Metern am Bau, Ausrichtung am Element.
+   */
+  surfacePattern?: SurfacePattern;
+  /**
+   * Herkunft: Kennung des Standard-Eintrags ([100], „Standards laden"), damit erneutes Laden nichts verdoppelt.
+   */
+  standardId?: string;
 };
 
 /**
@@ -2233,6 +2253,16 @@ export type Roof = {
   color?: string;
   /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
   colorPenId?: string;
+  /**
+   * Ansichtsschraffur ([100]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
+   * Ausrichtung am Element (Default 0).
+   */
+  surfacePatternAngle?: number;
+  /**
+   * Ansichtsschraffur ([100]): Versatz (m) des Musterursprungs (x entlang, y quer/aufwärts) gegenüber
+   * der Elementkante.
+   */
+  surfacePatternOffset?: Vec2;
 };
 
 /**
@@ -2608,6 +2638,27 @@ export type SunStudy = {
   show: boolean;
 };
 
+/**
+ * Ansichtsschraffur eines Bauteils ([100]): Muster auf sichtbaren Flächen, im Kern zu Linien gerechnet
+ * (`surface_pattern.rs`). Masse in Metern am Bau; Ursprung an der Elementkante (Wandanfang/UK, Traufe).
+ */
+export type SurfacePattern = {
+  kind: "lines" | "boardBatten" | "runningBond" | "shingles" | "trapezoid" | "polygonal" | "grid";
+  direction?: "vertical" | "horizontal";
+  /** Hauptabstand (m): Linien-/Rippenabstand, Steinlänge, Plattenbreite. */
+  spacing: number;
+  /** Lagen-/Plattenhöhe (m; Läuferverband, Schindeln, Raster). Fehlt sie, gilt `spacing`. */
+  height?: number;
+  /** Breite (m) der Deckleiste bzw. des Trapez-Obergurts. */
+  width?: number;
+  /** Grunddrehung (Grad) zusätzlich zur Richtung. */
+  angle?: number;
+  /** Strichstärke (Papier-mm); Default 0.1. */
+  weightMm?: number;
+  /** Linienfarbe; Default Vordergrund des Bauteils bzw. Dunkelgrau. */
+  color?: string;
+};
+
 /** Schwenkrichtung der Tür relativ zur Wandachse. */
 export type SwingSide = "left" | "right";
 
@@ -2879,6 +2930,16 @@ export type Wall = {
    * Additiv; Alt-Projekte laden unverändert (Default = "both").
    */
   sliceTermination?: SliceTermination;
+  /**
+   * Ansichtsschraffur ([100]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
+   * Ausrichtung am Element (Default 0).
+   */
+  surfacePatternAngle?: number;
+  /**
+   * Ansichtsschraffur ([100]): Versatz (m) des Musterursprungs (x entlang, y quer/aufwärts) gegenüber
+   * der Elementkante.
+   */
+  surfacePatternOffset?: Vec2;
 };
 
 /**

@@ -787,6 +787,10 @@ export function usePanelHostBase(opts: {
         if (selection?.kind === "wall")
           updateWall(selection.id, { referenceOffset: offset ?? undefined });
       },
+      onSetSurfacePatternPlacement: (patch) => {
+        if (selection?.kind === "wall") updateWall(selection.id, patch, "surface-pattern");
+        else if (selection?.kind === "roof") updateRoof(selection.id, patch, "surface-pattern");
+      },
       onSetWallSliceTermination: (termination) => {
         if (selection?.kind === "wall")
           // "both" ist der Default ⇒ als undefined speichern (Alt-Projekt-Parität).

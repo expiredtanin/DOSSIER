@@ -22,6 +22,8 @@ export interface ElevationOptions {
    */
   visibleCodes?: Set<string>;
   categoryDisplay?: CategoryDisplayResolver;
+  /** Massstabsnenner (1:N) für die Ausdünnung der Ansichtsschraffur ([100]); Default 100. */
+  scaleDenominator?: number;
 }
 
 /**
@@ -32,7 +34,7 @@ export function generateElevationPlan(project: Project, level: DrawingLevel, opt
   if (!hasLine(level)) return null;
   const shadows = opts.shadows ?? level.shadows ?? false;
   const text = JSON.stringify({ level: levelArg(level), ...visibilityArgs(project, opts.visibleCodes, opts.categoryDisplay) });
-  const buf = decodePlanBuf(documentFor(project).queryBin("elevationPlan", [opts.mono ? 1 : 0, shadows ? 1 : 0], text));
+  const buf = decodePlanBuf(documentFor(project).queryBin("elevationPlan", [opts.mono ? 1 : 0, shadows ? 1 : 0, opts.scaleDenominator ?? 100], text));
   if (buf.groups.length === 0) return null;
   const b = buf.bounds ?? [0, 0, 1, 1];
   return lazyPlan(

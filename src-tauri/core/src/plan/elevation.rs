@@ -401,7 +401,10 @@ struct Item {
 }
 
 enum Pending {
-    Line { a: Pt, b: Pt, depth: f64 },
+    /// `style`: Index in die Ansichtsschraffur-Stile (Strichstärke, Farbe); ohne = Kante.
+    /// `paint`: Tiefe für die Maler-Reihenfolge, wenn sie von der Verdeckungstiefe abweicht (Muster-
+    /// linien liegen knapp vor IHRER Fläche, auch wo sie tiefer liegen als deren Mittel).
+    Line { a: Pt, b: Pt, depth: f64, style: Option<usize>, paint: Option<f64> },
     Item { depth: f64, rank: Option<f64>, prim: Primitive },
 }
 
@@ -441,7 +444,7 @@ fn poly_prim(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, opening: Option<&
 }
 
 /// `generateElevationPlan`: Primitive und Ausmass; `None` ohne Ansichtslinie.
-pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
+pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
     let frame = frame_of(&plane);
     let mut walls = model3d::emit_walls(p, false)?;
@@ -479,6 +482,8 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     }
     let greyed = |f: &Face| vis.has_display && category(f).is_some_and(|c| vis.greyed(c));
 
+    // Ansichtsfarbe und -schraffur ([100]) der sichtbaren Bauteilseite.
+    let (pattern_lines, pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
     let openings = collect_openings(p, &frame);
     let mut occ = vec![(faces.len() + openings.len()) as f64];
     for f in &faces {
@@ -560,7 +565,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
                 if coplanar_seam(fi, a, b) {
                     continue;
                 }
-                pending.push(Pending::Line { a, b, depth: f.depth_min - EPS * 5.0 });
+                pending.push(Pending::Line { a, b, depth: f.depth_min - EPS * 5.0, style: None, paint: None });
             }
         }
         let mut prim = polygon(pts, &fill_for(f.fill), "none", 0.0, no_hatch());
@@ -593,14 +598,17 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         let e = crate::plan_elevation::xor_outline(&b);
         for k in 0..e.first().copied().unwrap_or(0.0) as usize {
             let i = 1 + 4 * k;
-            pending.push(Pending::Line { a: [e[i], e[i + 1]], b: [e[i + 2], e[i + 3]], depth: depth - EPS * 5.0 });
+            pending.push(Pending::Line { a: [e[i], e[i + 1]], b: [e[i + 2], e[i + 3]], depth: depth - EPS * 5.0, style: None, paint: None });
         }
+    }
+    for (a, b, depth, paint, k) in pattern_lines {
+        pending.push(Pending::Line { a, b, depth, style: Some(k), paint: Some(paint) });
     }
     // Linien gebündelt gegen die Verdecker clippen (`flushPending`).
     {
         let mut q = vec![0.0];
         for pd in &pending {
-            if let Pending::Line { a, b, depth } = pd {
+            if let Pending::Line { a, b, depth, .. } = pd {
                 q.extend([a[0], a[1], b[0], b[1], *depth]);
                 q[0] += 1.0;
             }
@@ -613,7 +621,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
                     items.push(Item { depth, seq, rank, prim });
                     seq += 1;
                 }
-                Pending::Line { a, b, depth } => {
+                Pending::Line { a, b, depth, style, paint } => {
                     let c = if r.is_empty() {
                         1
                     } else {
@@ -630,7 +638,11 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
                         };
                         acc.add(sa[0], sa[1]);
                         acc.add(sb[0], sb[1]);
-                        items.push(Item { depth, seq, rank: None, prim: outline_line(sa, sb) });
+                        let prim = match style.and_then(|k| pattern_styles.get(k)) {
+                            Some((w, c)) => line(v2(sa[0], sa[1]), v2(sb[0], sb[1]), "elevation-surface-pattern", *w, c),
+                            None => outline_line(sa, sb),
+                        };
+                        items.push(Item { depth: paint.unwrap_or(depth), seq, rank: None, prim });
                         seq += 1;
                     }
                 }
@@ -737,6 +749,152 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     Ok(Some((prims, acc.bounds())))
 }
 
+/// Bauteil der sichtbaren Wandseite: rechts der Achse (Anfang → Ende) liegt die äusserste Schicht
+/// (`layers[0]`), links die innerste; Stirnseiten haben keine.
+fn wall_side_component<'a>(p: &'a Project, wall: &Wall, normal: [f64; 3]) -> Option<&'a Component> {
+    let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+    let len = hypot2(dx, dy);
+    if !(len > 1e-9) {
+        return None;
+    }
+    // Plan (x, y) → Welt (x, Höhe, y); rechte Normale (dy, −dx).
+    let side = (dy * normal[0] - dx * normal[2]) / len;
+    let layers = &p.wall_type(wall)?.layers;
+    let l = if side > 0.7 {
+        layers.first()
+    } else if side < -0.7 {
+        layers.last()
+    } else {
+        None
+    }?;
+    p.component(&l.component_id)
+}
+
+/// Strichstärke und Farbe einer Ansichtsschraffur.
+fn pattern_style(sp: &SurfacePattern, comp: &Component) -> (f64, String) {
+    let w = sp.weight_mm.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(0.1);
+    let c = sp.color.clone().or_else(|| comp.foreground.clone()).filter(|c| !c.trim().is_empty()).unwrap_or_else(|| PATTERN_INK.into());
+    (w, c)
+}
+
+const PATTERN_INK: &str = "#3a3f47";
+
+/// Linie der Ansichtsschraffur: Endpunkte, Verdeckungstiefe, Maler-Tiefe, Stil-Index.
+type PatternLine = (Pt, Pt, f64, f64, usize);
+
+/// Ansichtsfarbe (`Component.elevationColor`) der sichtbaren Seite auf die Flächen legen und die
+/// Ansichtsschraffur ([100]) als Linien liefern: Wände in Wand-Koordinaten (x ab Wandanfang, y ab UK),
+/// Dachflächen traufparallel/in Falllinie (`surface_pattern::segments_3d`). Tiefe je Linie = nächster
+/// Endpunkt (knapp vor der Fläche), damit die Verdeckung wie bei den Kanten greift.
+fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9], scale: f64, mono: bool) -> (Vec<PatternLine>, Vec<(f64, String)>) {
+    use crate::surface_pattern as sp;
+    let mut lines: Vec<PatternLine> = Vec::new();
+    let mut styles: Vec<(f64, String)> = Vec::new();
+    let (pp, nn, uu) = ([frame[0], frame[1], frame[2]], [frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
+    let proj = |w: [f64; 3]| -> (f64, f64, f64) {
+        let r = [w[0] - pp[0], w[1] - pp[1], w[2] - pp[2]];
+        (r[0] * uu[0] + r[1] * uu[1] + r[2] * uu[2], w[1], r[0] * nn[0] + r[1] * nn[1] + r[2] * nn[2])
+    };
+    let mut walls: HashMap<&str, &Wall> = HashMap::new();
+    for w in &p.walls {
+        walls.entry(w.id.as_str()).or_insert(w);
+    }
+    for f in faces.iter_mut() {
+        if f.role != Role::Wall || f.id.is_empty() || f.pts.len() < 3 {
+            continue;
+        }
+        let Some(wall) = walls.get(f.id.as_str()).copied() else { continue };
+        let Some(comp) = wall_side_component(p, wall, f.normal) else { continue };
+        if !mono {
+            if let Some(c) = comp.elevation_color.as_deref().filter(|c| !c.trim().is_empty()) {
+                f.fill = hex_to_rgb(c, f.fill);
+            }
+        }
+        let Some(pat) = comp.surface_pattern.as_ref() else { continue };
+        let Some(spec) = sp::spec_of(pat, wall.surface_pattern_angle.unwrap_or(0.0)) else { continue };
+        let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+        let len = hypot2(dx, dy);
+        let t = [dx / len, 0.0, dy / len];
+        let k = t[0] * uu[0] + t[2] * uu[2];
+        if k.abs() < 0.05 {
+            continue; // fast von der Seite gesehen
+        }
+        let kd = (t[0] * nn[0] + t[2] * nn[2]) / k; // Tiefe je u entlang der Fläche
+        let mean_u = f.pts.iter().map(|q| q[0]).sum::<f64>() / f.pts.len() as f64;
+        let depth_at = |u: f64| f.depth + (u - mean_u) * kd;
+        let z0 = p.wall_vertical_extent(wall).0;
+        let (u0, _, _) = proj([wall.start.x, 0.0, wall.start.y]);
+        let local: Vec<sp::P> = f.pts.iter().map(|q| [(q[0] - u0) / k, q[1] - z0]).collect();
+        let off = wall.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
+        let segs = sp::segments(&local, &spec, off, scale);
+        if segs.is_empty() {
+            continue;
+        }
+        styles.push(pattern_style(pat, comp));
+        let si = styles.len() - 1;
+        for (s0, s1) in segs {
+            let (qa, qb) = ([u0 + k * s0[0], s0[1] + z0], [u0 + k * s1[0], s1[1] + z0]);
+            let d = min(depth_at(qa[0]), depth_at(qb[0])) - EPS * 5.0;
+            lines.push((qa, qb, d, f.depth - EPS * 5.0, si));
+        }
+    }
+    // Dachflächen: äusserste Schicht (Eindeckung).
+    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+        let Some(comp) = p.roof_layers(roof).first().filter(|l| !l.component_id.is_empty()).and_then(|l| p.component(&l.component_id)) else { continue };
+        if !mono && roof.color.as_deref().is_none_or(|c| c.is_empty()) {
+            if let Some(c) = comp.elevation_color.as_deref().filter(|c| !c.trim().is_empty()) {
+                for f in faces.iter_mut().filter(|f| f.role == Role::Roof && f.id == roof.id) {
+                    f.fill = hex_to_rgb(c, f.fill);
+                }
+            }
+        }
+        let Some(pat) = comp.surface_pattern.as_ref() else { continue };
+        let Some(spec) = sp::spec_of(pat, roof.surface_pattern_angle.unwrap_or(0.0)) else { continue };
+        let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+        let off = roof.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
+        let mut si: Option<usize> = None;
+        for plane in &g.planes {
+            if plane.len() < 3 {
+                continue;
+            }
+            // Flächennormale (Plan-Koordinaten, aufwärts); sichtbar, wenn sie zum Betrachter zeigt.
+            let mut n = [0.0; 3];
+            for i in 0..plane.len() {
+                let (a, b) = (plane[i], plane[(i + 1) % plane.len()]);
+                n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+                n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+                n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+            }
+            if n[2] < 0.0 {
+                n = [-n[0], -n[1], -n[2]];
+            }
+            if nn[0] * n[0] + nn[1] * n[2] + nn[2] * n[1] >= -1e-9 {
+                continue;
+            }
+            // Maler-Tiefe der Fläche wie `project_face`: Mittel der Eckentiefen.
+            let face_depth = plane.iter().map(|q| proj([q[0], q[2], q[1]]).2).sum::<f64>() / plane.len() as f64;
+            for (a, b) in sp::segments_3d(plane, &spec, off, scale) {
+                let (ua, va, da) = proj([a[0], a[2], a[1]]);
+                let (ub, vb, db) = proj([b[0], b[2], b[1]]);
+                if da <= EPS || db <= EPS {
+                    continue;
+                }
+                let k = *si.get_or_insert_with(|| {
+                    styles.push(pattern_style(pat, comp));
+                    styles.len() - 1
+                });
+                lines.push(([ua, va], [ub, vb], min(da, db) - EPS * 5.0, face_depth - EPS * 5.0, k));
+            }
+        }
+    }
+    if mono {
+        for s in &mut styles {
+            s.1 = PATTERN_INK.into();
+        }
+    }
+    (lines, styles)
+}
+
 /// Abfrage `elevationPlan`: `args` = `[mono, shadows]`, `text` = `{"level": {...}, "hasVis", "invisible",
 /// "hasDisplay", "norender", "grey"}`. Puffer mit einer Gruppe und Ausmass; ohne Ansichtslinie ohne Gruppen.
 pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
@@ -745,8 +903,10 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     let vis = Visibility::from_json(&v);
     let mono = args.first().is_some_and(|&x| x != 0.0);
     let shadows = args.get(1).is_some_and(|&x| x != 0.0);
+    // Massstab für die Ausdünnung der Ansichtsschraffur (fehlt er: 1:100).
+    let scale = args.get(2).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0);
     let mut w = crate::plan_buf::Writer::new(true);
-    if let Some((prims, bounds)) = elevation_primitives(p, &level, shadows, mono, &vis)? {
+    if let Some((prims, bounds)) = elevation_primitives(p, &level, shadows, mono, &vis, scale)? {
         w.group(&prims);
         w.bounds = Some(bounds);
     }
@@ -774,12 +934,36 @@ mod tests {
         let p = sample();
         let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
         let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
-        let (prims, b) = elevation_primitives(&p, &level, true, false, &Visibility::default()).unwrap().unwrap();
+        let (prims, b) = elevation_primitives(&p, &level, true, false, &Visibility::default(), 100.0).unwrap().unwrap();
         let json = serde_json::to_string(&prims).unwrap();
         assert!(json.contains("\"wallId\":\"W1\"") && json.contains("\"openingId\":\"O1\"") && json.contains("elevation-ground"), "{json}");
         assert!(json.contains("#8f959e"), "Schlagschatten fehlt");
         assert!(b[2] > b[0]);
         // Painter: die Bodenlinie zuletzt
         assert!(matches!(prims.last(), Some(Primitive::Line { cls, .. }) if cls == "elevation-ground"));
+    }
+
+    fn render(p: &Project, scale: f64) -> String {
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let (prims, _) = elevation_primitives(p, &level, false, false, &Visibility::default(), scale).unwrap().unwrap();
+        serde_json::to_string(&prims).unwrap()
+    }
+
+    #[test]
+    fn ansichtsschraffur_und_ansichtsfarbe_der_aussenschicht() {
+        let mut p = sample();
+        assert!(!render(&p, 50.0).contains("elevation-surface-pattern"), "ohne Muster keine Linien");
+        let outer = p.wall_types.iter().find(|t| t.id == "aw").unwrap().layers[0].component_id.clone();
+        let c = p.components.iter_mut().find(|c| c.id == outer).unwrap();
+        c.elevation_color = Some("#123456".into());
+        c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Lines, spacing: 0.1, ..Default::default() });
+        let fine = render(&p, 50.0);
+        let n_fine = fine.matches("elevation-surface-pattern").count();
+        assert!(n_fine > 20, "{n_fine}");
+        assert!(fine.contains("#123456"), "Ansichtsfarbe der Aussenschicht");
+        let n_mid = render(&p, 200.0).matches("elevation-surface-pattern").count();
+        assert!(n_mid < n_fine && n_mid > 0, "{n_mid} vs {n_fine}");
+        assert_eq!(render(&p, 2000.0).matches("elevation-surface-pattern").count(), 0, "grob: weggelassen");
     }
 }

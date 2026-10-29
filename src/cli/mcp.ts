@@ -111,7 +111,7 @@ export async function callTool(file: string, name: string, args: Record<string, 
         if (!o) return text("keine gültige Schnittlinie", true);
         return text(planToSvgString(generateSectionPlan(o, false, { visibleCodes: codes }), { scaleDenominator: scale }));
       }
-      const plan = generateElevationPlan(project, lvl);
+      const plan = generateElevationPlan(project, lvl, { scaleDenominator: scale });
       return plan ? text(planToSvgString(plan, { scaleDenominator: scale })) : text("keine gültige Ansichtslinie", true);
     }
     case "apply_ops": {

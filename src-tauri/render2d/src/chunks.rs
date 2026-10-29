@@ -159,6 +159,9 @@ struct Globals {
     viewport_px: [f32; 2],
     stroke_px: f32,
     stroke_scale: f32,
+    /// Faktor auf die Strichmuster-Laengen (`N / 100`, wie `gpu::Globals::dash_scale`) ([96]).
+    dash_scale: f32,
+    _pad: [f32; 3],
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -625,7 +628,7 @@ impl ChunkRenderer {
             let proj = projection(bounds, g.origin);
             for b in &g.fill_batches {
                 let c = if g.greyed { [1.0, 1.0, 1.0, b.color[3]] } else { b.color };
-                blocks.push(Globals { view_proj: proj, color: c, viewport_px: vp, stroke_px: 0.0, stroke_scale: 1.0 });
+                blocks.push(Globals { view_proj: proj, color: c, viewport_px: vp, stroke_px: 0.0, stroke_scale: 1.0, dash_scale: 1.0, _pad: [0.0; 3] });
             }
         }
         // Striche (Linien + gestrichelte) je Chunk in Maler-Reihenfolge (`stroke_order`).
@@ -641,7 +644,7 @@ impl ChunkRenderer {
                     (b.color, b.stroke_mm, if b.device_px { 1.0 } else if b.screen_px { meet as f32 } else { mm_px as f32 })
                 };
                 let c = if g.greyed { [GREY, GREY, GREY, color[3]] } else { color };
-                blocks.push(Globals { view_proj: proj, color: c, viewport_px: vp, stroke_px: stroke_mm, stroke_scale: scale });
+                blocks.push(Globals { view_proj: proj, color: c, viewport_px: vp, stroke_px: stroke_mm, stroke_scale: scale, dash_scale: if paper_scale_n > 0.0 && paper_scale_n.is_finite() { (paper_scale_n / 100.0) as f32 } else { 1.0 }, _pad: [0.0; 3] });
             }
         }
 
@@ -656,6 +659,8 @@ impl ChunkRenderer {
                 viewport_px: vp,
                 stroke_px: 0.0,
                 stroke_scale: 1.0,
+                dash_scale: 1.0,
+                _pad: [0.0; 3],
             });
             // Glyphen-Mesh-Puffer neu aufbauen, wenn neue Glyphen dazukamen.
             if let Some(font) = self.font.as_mut() {

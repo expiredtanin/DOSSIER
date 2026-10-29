@@ -702,8 +702,9 @@ impl Compiler {
 /// Strichmuster (Papier-mm) → Zyklus in Modell-Metern wie `split_dash` in render2d: negative Werte
 /// zu 0, Nullen weg, ungerade Länge verdoppelt. `None` = kein gültiges Muster (durchgezogen).
 fn dash_cycle_m(dash: &[f64]) -> Option<Vec<f64>> {
-    let pat: Vec<f64> = dash.iter().map(|&d| jsnum::max(0.0, d) * LINE_DASH_MM_TO_M).filter(|&d| d > 0.0).collect();
-    if pat.is_empty() {
+    // Nullen bleiben stehen ([96]): AN = 0 ist ein Punkt (rund, wie im Szenen-Pfad `render2d`).
+    let pat: Vec<f64> = dash.iter().map(|&d| if d.is_finite() { jsnum::max(0.0, d) * LINE_DASH_MM_TO_M } else { 0.0 }).collect();
+    if pat.iter().all(|&d| d <= 0.0) {
         return None;
     }
     let cycle: Vec<f64> = if pat.len() % 2 == 0 { pat } else { [pat.as_slice(), pat.as_slice()].concat() };
@@ -1028,6 +1029,16 @@ mod tests {
         cw.reverse();
         assert_eq!(triangulate(&cw).len(), 12);
         assert!(triangulate(&sq[..2]).is_empty());
+    }
+
+    #[test]
+    fn punkte_bleiben_im_strichmuster() {
+        // [96] Strichpunktlinie: Strich, Lücke, Punkt (0), Lücke — vier Einträge, AN/AUS nicht verschoben.
+        let c = dash_cycle_m(&[12.0, 1.5, 0.0, 1.5]).unwrap();
+        assert_eq!(c, vec![12.0 * LINE_DASH_MM_TO_M, 1.5 * LINE_DASH_MM_TO_M, 0.0, 1.5 * LINE_DASH_MM_TO_M]);
+        assert_eq!(dash_cycle_m(&[0.0, 1.0]).unwrap().len(), 2, "Punktlinie");
+        assert!(dash_cycle_m(&[0.0, 0.0]).is_none());
+        assert!(dash_cycle_m(&[f64::NAN]).is_none());
     }
 
     #[test]
