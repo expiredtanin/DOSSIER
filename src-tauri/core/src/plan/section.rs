@@ -1,0 +1,2080 @@
+//! Schnitt auf dem Dokument ([K3c]): Rust-Gegenstück zu `src/plan/toSection.ts` (Besitzer-Zuordnung,
+//! Schicht-Bänder, Stil-Auflösung, Decken-Terminierung, Dominanz, Treppen, Monolith-Vereinigung,
+//! Abzugskörper, Körper, Gelände, Schnitt-Tiefe), `generateSectionPlan` (Primitive mit Pick-Ids) und
+//! `sectionOpenings.ts` (geschnittene Fenster/Türen). Der analytische Prismen-Schnitt läuft über
+//! `render3d::section::cut_section` (dieselbe Rechnung wie früher im render3d-WASM). Rechenreihenfolge
+//! und Zahlsemantik wie in TS (`jsnum`, `jsmath`), damit die Ausgabe bitgleich bleibt.
+//!
+//! Einheiten: Meter; Ausgabe in (u, v) = (entlang der Ebene, absolute Höhe).
+
+use super::prim::{HatchRender, Primitive};
+use super::style::*;
+use crate::jsmath::hypot2;
+use crate::jsnum::{atan2, max, min, round};
+use crate::model::*;
+use crate::model3d::{self, RRoofLayer, RSlab, RWall};
+use std::collections::{HashMap, HashSet};
+
+/// Tinte der Schnitt-Poché-Umrisslinie (dunkles Grau).
+const SECTION_INK: &str = "#1f242c";
+const SECTION_VISIBLE_INK: &str = "#2b3039";
+const SECTION_HIDDEN_INK: &str = "#8a929c";
+const SECTION_CUT_OUTLINE_MM: f64 = 0.35;
+const SECTION_VISIBLE_MM: f64 = 0.18;
+const SECTION_GROUND_MM: f64 = 0.5;
+const SECTION_HIDDEN_MM: f64 = 0.13;
+const SECTION_HIDDEN_DASH: [f64; 2] = [0.12, 0.08];
+const OWNER_EPS: f64 = 1e-4;
+/// Achswinkel geschnittener Wände/Decken für wandrelative Muster (s. `toSection.ts`).
+const SECTION_WALL_AXIS_ANGLE_DEG: f64 = 90.0;
+const SECTION_SLAB_AXIS_ANGLE_DEG: f64 = 90.0;
+/// Seitenrand (m) der Geländelinie um den Inhalt des Schnitts.
+const TERRAIN_MARGIN: f64 = 6.0;
+/// Neutrale Füllung geschnittener freier Körper.
+const BODY_FILL: &str = "#d9dde2";
+
+/// Rückfall-Schraffur der Cut-Flächen ohne auflösbares Bauteil.
+fn section_hatch() -> HatchRender {
+    HatchRender { pattern: HatchPattern::Diagonal, scale: 1.0, angle: 45.0, color: HATCH_INK.into(), line_weight: 0.13, ..no_hatch_base() }
+}
+
+fn no_hatch_base() -> HatchRender {
+    HatchRender { dash: None, ..no_hatch() }
+}
+
+// ── Ebene ─────────────────────────────────────────────────────────────────────
+
+/// Schnitt-/Ansichtsebene einer Zeichnungsebene (`sectionPlaneFromLevel`): Punkt (x, 0, y) und
+/// horizontale Normale (Blickrichtung).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Plane {
+    pub point: [f64; 3],
+    pub normal: [f64; 3],
+}
+
+impl Plane {
+    /// u-Achse in Grundriss-Koordinaten (`sectionUAxisModel`): Blickrichtungs-RECHTS.
+    pub fn u_model(&self) -> (f64, f64) {
+        (self.normal[2], -self.normal[0])
+    }
+    pub fn base(&self) -> (f64, f64) {
+        (self.point[0], self.point[2])
+    }
+}
+
+/// Die Felder einer Schnitt-/Ansichtsebene, die die Projektion bestimmen (aus dem Aufruf).
+#[derive(Clone, Debug, Default)]
+pub struct LevelSpec {
+    pub kind: String,
+    pub line: Option<[Vec2; 2]>,
+    pub direction_sign: Option<f64>,
+    pub depth: Option<f64>,
+    pub shadows: bool,
+}
+
+impl LevelSpec {
+    pub fn from_json(v: &serde_json::Value) -> LevelSpec {
+        let num = |k: &str| v.get(k).and_then(|x| x.as_f64());
+        let pt = |q: &serde_json::Value| -> Option<Vec2> { Some(Vec2 { x: q.get("x")?.as_f64()?, y: q.get("y")?.as_f64()? }) };
+        let line = v.get("linePoints").and_then(|l| l.as_array()).and_then(|a| Some([pt(a.first()?)?, pt(a.get(1)?)?]));
+        LevelSpec {
+            kind: v.get("kind").and_then(|k| k.as_str()).unwrap_or_default().to_string(),
+            line,
+            direction_sign: num("directionSign"),
+            depth: num("depth"),
+            shadows: v.get("shadows").and_then(|b| b.as_bool()).unwrap_or(false),
+        }
+    }
+
+    pub fn plane(&self) -> Option<Plane> {
+        let [p0, p1] = self.line?;
+        let dx = p1.x - p0.x;
+        let dy = p1.y - p0.y;
+        let len = hypot2(dx, dy);
+        if len < 1e-9 {
+            return None;
+        }
+        let ux = dx / len;
+        let uy = dy / len;
+        let sign = self.direction_sign.unwrap_or(1.0);
+        Some(Plane { point: [p0.x, 0.0, p0.y], normal: [-uy * sign, 0.0, ux * sign] })
+    }
+}
+
+/// Sichtbarkeit der Kategorien (UI-Zustand des Aufrufers): `vis` = Codes, die in `visibleCodes`
+/// fehlen (nur mit `has_vis`), `norender`/`grey` aus dem Darstellungsmodus (nur mit `has_display`).
+#[derive(Clone, Debug, Default)]
+pub struct Visibility {
+    pub has_vis: bool,
+    pub invisible: HashSet<String>,
+    pub has_display: bool,
+    pub norender: HashSet<String>,
+    pub grey: HashSet<String>,
+}
+
+impl Visibility {
+    pub fn from_json(v: &serde_json::Value) -> Visibility {
+        let set = |k: &str| -> HashSet<String> { v.get(k).and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_default() };
+        Visibility {
+            has_vis: v.get("hasVis").and_then(|b| b.as_bool()).unwrap_or(false),
+            invisible: set("invisible"),
+            has_display: v.get("hasDisplay").and_then(|b| b.as_bool()).unwrap_or(false),
+            norender: set("norender"),
+            grey: set("grey"),
+        }
+    }
+    /// `visibleCodes.has(code)` (ohne `visibleCodes`: wahr).
+    pub fn visible(&self, code: &str) -> bool {
+        !self.has_vis || !self.invisible.contains(code)
+    }
+    /// `categoryDisplay(code).render` (Rückfall SHOW_ALL).
+    pub fn render(&self, code: &str) -> bool {
+        !self.norender.contains(code)
+    }
+    pub fn greyed(&self, code: &str) -> bool {
+        self.grey.contains(code)
+    }
+}
+
+// ── Cut-Bänder ────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Kind {
+    Wall,
+    Slab,
+    Roof,
+    Body,
+}
+
+/// Ein geschnittenes Band (`SectionCutPolygon`).
+#[derive(Clone, Debug)]
+pub struct Cut {
+    pub kind: Kind,
+    pub index: usize,
+    pub pts: Vec<[f64; 2]>,
+    pub nse: Option<Vec<f64>>,
+    pub fill: Option<String>,
+    pub hatch: Option<HatchRender>,
+    pub join_priority: Option<f64>,
+    pub component_id: Option<String>,
+    pub source_id: Option<String>,
+    pub category: Option<String>,
+    pub stair_id: Option<String>,
+}
+
+impl Cut {
+    fn new(kind: Kind, index: usize, pts: Vec<[f64; 2]>) -> Cut {
+        Cut { kind, index, pts, nse: None, fill: None, hatch: None, join_priority: None, component_id: None, source_id: None, category: None, stair_id: None }
+    }
+}
+
+/// Eine projizierte Kante (`SectionEdge`).
+#[derive(Clone, Copy, Debug)]
+pub struct Edge {
+    pub kind: Kind,
+    pub index: usize,
+    pub a: [f64; 2],
+    pub b: [f64; 2],
+}
+
+/// Geländelinie.
+#[derive(Clone, Debug)]
+pub struct Profile {
+    pub category: Option<String>,
+    pub pts: Vec<[f64; 2]>,
+}
+
+/// Ergebnis eines Schnitts (`SectionOutput`).
+#[derive(Clone, Debug, Default)]
+pub struct Output {
+    pub cuts: Vec<Cut>,
+    pub visible: Vec<Edge>,
+    pub hidden: Vec<Edge>,
+    pub profiles: Vec<Profile>,
+}
+
+/// Ein truck-Körper (aus TS, asynchron gebaut): Index in `extrudedSolids` + Netz.
+pub struct BodyMesh {
+    pub index: usize,
+    pub positions: Vec<f64>,
+    pub indices: Vec<f64>,
+}
+
+/// Liest `[n, (index, nPos, pos…, nIdx, idx…) × n]`; Unsinn → `None`.
+pub fn read_bodies(buf: &[f64]) -> Option<Vec<BodyMesh>> {
+    if buf.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut r = crate::flat_read::Reader::new(buf);
+    let n = r.count()?;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let index = r.count()?;
+        let np = r.count()?;
+        let positions = (0..np).map(|_| r.num()).collect::<Option<Vec<f64>>>()?;
+        let ni = r.count()?;
+        let indices = (0..ni).map(|_| r.num()).collect::<Option<Vec<f64>>>()?;
+        out.push(BodyMesh { index, positions, indices });
+    }
+    Some(out)
+}
+
+/// f32 aus render3d wie über JSON gereist: kürzeste Dezimaldarstellung, als f64 gelesen.
+fn js_f32(x: f32) -> f64 {
+    if !x.is_finite() {
+        return 0.0; // JSON `null` → 0 in der Arithmetik
+    }
+    // serde_json schrieb f32 mit der kürzesten Darstellung (Gleichstand → gerade Ziffer), JS las sie.
+    zmij::Buffer::new().format_finite(x).parse::<f64>().unwrap_or(0.0)
+}
+
+fn kind_of(k: render3d::ComponentKind) -> Kind {
+    match k {
+        render3d::ComponentKind::Wall => Kind::Wall,
+        render3d::ComponentKind::Slab => Kind::Slab,
+        render3d::ComponentKind::Roof => Kind::Roof,
+    }
+}
+
+/// Zehnerpotenzen wie `POW10` in serde_json (Literale `1e0` … `1e308`).
+fn pow10(k: usize) -> f64 {
+    use std::sync::OnceLock;
+    static T: OnceLock<Vec<f64>> = OnceLock::new();
+    T.get_or_init(|| (0..=308).map(|i| format!("1e{i}").parse::<f64>().unwrap_or(f64::INFINITY)).collect())[k]
+}
+
+/// Zahl, wie sie früher über JSON in den render3d-Schnitt reiste: JS schreibt die kürzeste
+/// Dezimaldarstellung, serde_json (dort ohne `float_roundtrip`) liest sie als Ganzzahl-Mantisse
+/// mal Zehnerpotenz und rundet dann auf f32. Bitgleich zur alten Eingabe (auch wo die Lesung
+/// um eine Stelle daneben liegt).
+fn json_f32(x: f64) -> f32 {
+    if x == 0.0 || !x.is_finite() {
+        return 0.0;
+    }
+    if x.fract() == 0.0 && x.abs() < 1e21 {
+        return x as f32; // JS schreibt eine Ganzzahl, serde liest u64/i64
+    }
+    // Schnellweg: im Bereich 1e-6..1e14 liegt die Lesung (≤ 17 Ziffern, Zehnerpotenz exakt) höchstens
+    // wenige f64-Stellen neben `x`. Liegt `x` weit genug von jeder f32-Rundungsgrenze, rundet sie
+    // genau wie `x` selbst.
+    let ax = x.abs();
+    let y = x as f32;
+    if y.is_finite() && (1e-6..1e14).contains(&ax) {
+        let yf = y as f64;
+        let room = if x >= yf { (y.next_up() as f64 - yf) / 2.0 - (x - yf) } else { (yf - y.next_down() as f64) / 2.0 - (yf - x) };
+        if room > 1e-13 * ax {
+            return y;
+        }
+    }
+    json_f32_read(x)
+}
+
+/// Die eigentliche Lesung (ohne Schnellweg).
+fn json_f32_read(x: f64) -> f32 {
+    // Ziffern und Exponent der kürzesten Darstellung (wie JS: Gleichstand → gerade Ziffer; zmij wie
+    // in serde_json).
+    let mut buf = zmij::Buffer::new();
+    let s = buf.format_finite(x.abs());
+    let (mant, exp) = s.split_once(['e', 'E']).unwrap_or((s, "0"));
+    let (int_part, frac_part) = mant.split_once('.').unwrap_or((mant, ""));
+    let digits = format!("{int_part}{frac_part}");
+    let mut exponent: i32 = exp.parse::<i32>().unwrap_or(0) - frac_part.len() as i32;
+    let sig: u64 = digits.parse().unwrap_or(0);
+    let mut f = sig as f64;
+    loop {
+        let k = exponent.unsigned_abs() as usize;
+        if k <= 308 {
+            if exponent >= 0 {
+                f *= pow10(k);
+            } else {
+                f /= pow10(k);
+            }
+            break;
+        }
+        if f == 0.0 || exponent >= 0 {
+            break;
+        }
+        f /= 1e308;
+        exponent += 308;
+    }
+    (if x < 0.0 { -f } else { f }) as f32
+}
+
+fn f32s2(v: [f64; 2]) -> [f32; 2] {
+    [json_f32(v[0]), json_f32(v[1])]
+}
+
+fn f32s3(v: [f64; 3]) -> [f32; 3] {
+    [json_f32(v[0]), json_f32(v[1]), json_f32(v[2])]
+}
+
+fn wall_input(w: &RWall) -> render3d::WallInput {
+    render3d::WallInput {
+        start: f32s2(w.start),
+        end: f32s2(w.end),
+        thickness: json_f32(w.thickness),
+        height: json_f32(w.height),
+        base_elevation: json_f32(w.base_elevation),
+        top_drop: w.top_drop.map_or([0.0, 0.0], f32s2),
+        color: f32s3(w.color),
+        openings: Vec::new(),
+        layers: Some(Vec::new()),
+        holes: w
+            .holes
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|h| render3d::types::Hole { from: json_f32(h.from), to: json_f32(h.to), z_bottom: json_f32(h.z_bottom), z_top: json_f32(h.z_top) })
+            .collect(),
+        material_index: None,
+        hatch: None,
+        cut: None,
+    }
+}
+
+fn slab_input(s: &RSlab) -> render3d::SlabInput {
+    render3d::SlabInput {
+        outline: s.outline.iter().map(|q| f32s2(*q)).collect(),
+        z_bottom: json_f32(s.z_bottom),
+        z_top: json_f32(s.z_top),
+        color: f32s3(s.color),
+        hatch: None,
+        cut: None,
+        monolith: s.monolith.clone(),
+    }
+}
+
+fn roof_input(r: &RRoofLayer) -> render3d::types::RoofLayerInput {
+    render3d::types::RoofLayerInput { polygon: r.polygon.iter().map(|q| f32s3(*q)).collect(), normal: f32s3(r.normal), thickness: json_f32(r.thickness), color: f32s3(r.color), hatch: None, cut: None }
+}
+
+// ── Besitzer (Emissions-Reihenfolge des Schnitt-Modells) ─────────────────────
+
+fn opening_extent(p: &Project, w: &Wall, o: &Opening) -> (f64, f64) {
+    let (zb, zt) = p.wall_vertical_extent(w);
+    let sill = max(0.0, o.sill_height);
+    let ob = zb + sill;
+    (ob, min(zt, ob + o.height))
+}
+
+fn opening_interval(w: &Wall, o: &Opening) -> Option<(f64, f64)> {
+    let axis = hypot2(w.end.x - w.start.x, w.end.y - w.start.y);
+    let from = max(0.0, min(o.position, axis));
+    let to = max(from, min(o.position + o.width, axis));
+    if to - from < 1e-4 {
+        return None;
+    }
+    Some((from, to))
+}
+
+/// Je emittiertem Wand-Teilquader die Quellwand (`wallSegmentOwners`).
+pub fn wall_segment_owners(p: &Project) -> Vec<&Wall> {
+    let mut owners = Vec::new();
+    let by_wall = p.openings_by_wall();
+    for wall in &p.walls {
+        let (z_bottom, z_top) = p.wall_vertical_extent(wall);
+        let axis_len = hypot2(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+        if axis_len < 1e-9 || z_top - z_bottom <= OWNER_EPS {
+            continue;
+        }
+        let mut push = |from: f64, to: f64, zb: f64, zt: f64| {
+            if to - from <= OWNER_EPS || zt - zb <= OWNER_EPS {
+                return;
+            }
+            owners.push(wall);
+        };
+        let mut cutouts: Vec<(f64, f64, f64, f64)> = Vec::new();
+        for &op in by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()) {
+            let Some((from, to)) = opening_interval(wall, op) else { continue };
+            let (ob, ot) = opening_extent(p, wall, op);
+            cutouts.push((from, to, ob, ot));
+        }
+        // `Array.sort` mit `a.from - b.from` (stabil).
+        cutouts.sort_by(|a, b| cmp_num(a.0 - b.0));
+        if cutouts.is_empty() {
+            push(0.0, axis_len, z_bottom, z_top);
+            continue;
+        }
+        let mut cursor = 0.0;
+        for &(from, to, ob, ot) in &cutouts {
+            let seg_from = max(cursor, from);
+            if from > cursor {
+                push(cursor, from, z_bottom, z_top);
+            }
+            if to > seg_from {
+                if ob > z_bottom + OWNER_EPS {
+                    push(seg_from, to, z_bottom, ob);
+                }
+                if ot < z_top - OWNER_EPS {
+                    push(seg_from, to, ot, z_top);
+                }
+            }
+            cursor = max(cursor, to);
+        }
+        if cursor < axis_len {
+            push(cursor, axis_len, z_bottom, z_top);
+        }
+    }
+    owners
+}
+
+/// Ordnung eines JS-Vergleichs `(a, b) => d` (NaN/0 = gleich).
+pub fn cmp_num(d: f64) -> std::cmp::Ordering {
+    if d < 0.0 {
+        std::cmp::Ordering::Less
+    } else if d > 0.0 {
+        std::cmp::Ordering::Greater
+    } else {
+        std::cmp::Ordering::Equal
+    }
+}
+
+/// Je emittierter Deckenplatte die Quelldecke (`slabSegmentOwners`).
+pub fn slab_segment_owners(p: &Project) -> Vec<&Ceiling> {
+    let mut owners = Vec::new();
+    for c in p.ceilings.as_deref().unwrap_or(&[]) {
+        if c.outline.len() < 3 {
+            continue;
+        }
+        let (zb, zt) = p.ceiling_vertical_extent(c);
+        if zt - zb <= OWNER_EPS {
+            continue;
+        }
+        owners.push(c);
+    }
+    owners
+}
+
+// ── Stil-Auflösung ────────────────────────────────────────────────────────────
+
+fn sum_thickness(layers: &[Layer]) -> f64 {
+    layers.iter().fold(0.0, |s, l| s + l.thickness)
+}
+
+fn ceiling_layers<'a>(p: &'a Project, c: &Ceiling) -> Option<&'a [Layer]> {
+    model3d::ceiling_type_ref(p, c).map(|t| t.2)
+}
+
+/// `resolveWallSectionStyle`.
+fn wall_section_style(p: &Project, wall: &Wall) -> Option<(String, HatchRender)> {
+    let wt = p.wall_type(wall)?;
+    let mut best: Option<&Component> = None;
+    for layer in &wt.layers {
+        let comp = p.component(&layer.component_id)?;
+        if best.is_none_or(|b| comp.join_priority > b.join_priority) {
+            best = Some(comp);
+        }
+    }
+    let best = best?;
+    let category = p.layer_category(&wall.category_code);
+    let angle = atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) * 180.0 / std::f64::consts::PI;
+    let hatch_id = resolve_hatch_id(wall.hatch_id.as_deref(), wall.hatch_source, category, Some(&best.hatch_id)).unwrap_or(&best.hatch_id);
+    let hatch = resolve_hatch(p, hatch_id, Some(angle), resolve_foreground(best, wall.foreground.as_deref(), category, wall.foreground_source), None)?;
+    Some((poche_fill(hatch.pattern).to_string(), hatch))
+}
+
+/// `resolveCeilingSectionStyle`.
+fn ceiling_section_style(p: &Project, c: &Ceiling) -> Option<(String, HatchRender)> {
+    let layers = ceiling_layers(p, c)?;
+    let first = layers.first()?;
+    let comp = p.component(&first.component_id)?;
+    let category = p.layer_category(&c.category_code);
+    let hatch_id = resolve_hatch_id(c.hatch_id.as_deref(), c.hatch_source, category, Some(&comp.hatch_id)).unwrap_or(&comp.hatch_id);
+    let hatch = resolve_hatch(p, hatch_id, None, resolve_foreground(comp, c.foreground.as_deref(), category, c.foreground_source), None)?;
+    Some((poche_fill(hatch.pattern).to_string(), hatch))
+}
+
+fn wall_representative_priority(p: &Project, wall: &Wall) -> Option<f64> {
+    let wt = p.wall_type(wall)?;
+    let mut best: Option<f64> = None;
+    for layer in &wt.layers {
+        let jp = p.component(&layer.component_id)?.join_priority;
+        if best.is_none_or(|b| jp > b) {
+            best = Some(jp);
+        }
+    }
+    best
+}
+
+fn wall_representative_component_id(p: &Project, wall: &Wall) -> Option<String> {
+    let wt = p.wall_type(wall)?;
+    let mut best: Option<&str> = None;
+    let mut best_prio = f64::NEG_INFINITY;
+    for layer in &wt.layers {
+        let jp = p.component(&layer.component_id)?.join_priority;
+        if best.is_none() || jp > best_prio {
+            best = Some(&layer.component_id);
+            best_prio = jp;
+        }
+    }
+    best.map(String::from)
+}
+
+fn ceiling_representative_component_id(p: &Project, c: &Ceiling) -> Option<String> {
+    ceiling_layers(p, c)?.first().map(|l| l.component_id.clone())
+}
+
+fn ceiling_representative_priority(p: &Project, c: &Ceiling) -> Option<f64> {
+    let first = ceiling_layers(p, c)?.first()?;
+    Some(p.component(&first.component_id)?.join_priority)
+}
+
+/// Bounding-Box `[uMin, uMax, vMin, vMax]` über `Math.min(...)`/`Math.max(...)`.
+fn bbox(pts: &[[f64; 2]]) -> [f64; 4] {
+    let mut b = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
+    for q in pts {
+        b[0] = min(b[0], q[0]);
+        b[1] = max(b[1], q[0]);
+        b[2] = min(b[2], q[1]);
+        b[3] = max(b[3], q[1]);
+    }
+    b
+}
+
+fn rect_of_band(c: &Cut) -> Option<[f64; 4]> {
+    (c.pts.len() >= 3).then(|| bbox(&c.pts))
+}
+
+fn missing(what: &str, id: &str) -> String {
+    format!("{what}: {id}")
+}
+
+/// Bauteil-Stil einer Schicht (Füllung, Schraffur) mit dem Override des Elements (`split*Layers`).
+#[allow(clippy::too_many_arguments)]
+fn layer_style(
+    p: &Project,
+    comp: &Component,
+    hatch_id: Option<&str>,
+    hatch_source: Option<AttributeSource>,
+    fg: Option<&str>,
+    fg_source: Option<AttributeSource>,
+    bg: Option<&str>,
+    bg_source: Option<AttributeSource>,
+    category: Option<&LayerCategory>,
+    angle: f64,
+) -> Result<(String, HatchRender), String> {
+    let hid = resolve_hatch_id(hatch_id, hatch_source, category, Some(&comp.hatch_id)).unwrap_or(&comp.hatch_id);
+    let hatch = resolve_hatch(p, hid, Some(angle), resolve_foreground(comp, fg, category, fg_source), None).ok_or_else(|| missing("Unbekannte Schraffur", hid))?;
+    let bg = resolve_background(comp, bg, category, bg_source);
+    let fill = bg.map(String::from).unwrap_or_else(|| poche_fill(hatch.pattern).to_string());
+    Ok((fill, hatch))
+}
+
+/// `splitSlabLayers`: liegende Teil-Rechtecke je Schicht (oben → unten).
+fn split_slab_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Ceiling) -> Result<Vec<Cut>, String> {
+    let total = sum_thickness(layers);
+    let [u_min, u_max, v_min, v_max] = bbox(&cp.pts);
+    let v_span = v_max - v_min;
+    if total <= 1e-9 || v_span <= 1e-9 {
+        return Ok(vec![cp.clone()]);
+    }
+    let scale = v_span / total;
+    let category = p.layer_category(&owner.category_code);
+    let mut out = Vec::with_capacity(layers.len());
+    let mut acc = 0.0;
+    for layer in layers {
+        let comp = p.component(&layer.component_id).ok_or_else(|| missing("Unbekanntes Bauteil-Material", &layer.component_id))?;
+        let (fill, hatch) = layer_style(p, comp, owner.hatch_id.as_deref(), owner.hatch_source, owner.foreground.as_deref(), owner.foreground_source, owner.background.as_deref(), owner.background_source, category, SECTION_SLAB_AXIS_ANGLE_DEG)?;
+        let v_top = v_max - acc * scale;
+        acc += layer.thickness;
+        let v_bottom = v_max - acc * scale;
+        let mut c = Cut::new(cp.kind, cp.index, vec![[u_min, v_top], [u_max, v_top], [u_max, v_bottom], [u_min, v_bottom]]);
+        c.fill = Some(fill);
+        c.hatch = Some(hatch);
+        c.join_priority = Some(comp.join_priority);
+        c.component_id = Some(comp.id.clone());
+        c.source_id = cp.source_id.clone();
+        c.category = cp.category.clone();
+        out.push(c);
+    }
+    Ok(out)
+}
+
+/// `wallLayersReversedInU`.
+fn wall_layers_reversed_in_u(w: &Wall, u: (f64, f64)) -> bool {
+    let (ax, ay) = (w.end.x - w.start.x, w.end.y - w.start.y);
+    if hypot2(ax, ay) < 1e-9 {
+        return false;
+    }
+    let l = hypot2(ax, ay);
+    let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };
+    let (nx, ny) = (ax / l, ay / l);
+    let (bx, by) = (-ny, nx);
+    bx * u.0 + by * u.1 < 0.0
+}
+
+/// `splitWallLayers`: stehende Teil-Rechtecke je Schicht quer zur Dicke (u).
+fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_world: (f64, f64)) -> Result<Vec<Cut>, String> {
+    let total = sum_thickness(layers);
+    let [u_min, u_max, v_min, v_max] = bbox(&cp.pts);
+    let u_span = u_max - u_min;
+    if total <= 1e-9 || u_span <= 1e-9 {
+        return Ok(vec![cp.clone()]);
+    }
+    let scale = u_span / total;
+    let ordered: Vec<&Layer> = if wall_layers_reversed_in_u(owner, u_world) { layers.iter().rev().collect() } else { layers.iter().collect() };
+    let category = p.layer_category(&owner.category_code);
+    let mut out = Vec::with_capacity(layers.len());
+    let mut acc = 0.0;
+    for layer in ordered {
+        let comp = p.component(&layer.component_id).ok_or_else(|| missing("Unbekanntes Bauteil-Material", &layer.component_id))?;
+        let (fill, hatch) = layer_style(p, comp, owner.hatch_id.as_deref(), owner.hatch_source, owner.foreground.as_deref(), owner.foreground_source, owner.background.as_deref(), owner.background_source, category, SECTION_WALL_AXIS_ANGLE_DEG)?;
+        let u_left = u_min + acc * scale;
+        acc += layer.thickness;
+        let u_right = u_min + acc * scale;
+        let mut c = Cut::new(cp.kind, cp.index, vec![[u_left, v_max], [u_right, v_max], [u_right, v_min], [u_left, v_min]]);
+        c.fill = Some(fill);
+        c.hatch = Some(hatch);
+        c.join_priority = Some(comp.join_priority);
+        c.component_id = Some(comp.id.clone());
+        c.source_id = cp.source_id.clone();
+        c.category = cp.category.clone();
+        out.push(c);
+    }
+    Ok(out)
+}
+
+/// `attachCutStyles`: Stil, Herkunft, Schicht-Bänder, Terminierung, Dominanz.
+fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[&Wall], slabs: &[&Ceiling]) -> Result<Vec<Cut>, String> {
+    if cuts.is_empty() {
+        return Ok(cuts);
+    }
+    let u_world = plane.u_model();
+    let roofs = p.roofs.as_deref().unwrap_or(&[]);
+    let mut bands: Vec<Cut> = Vec::with_capacity(cuts.len());
+    for mut cp in cuts {
+        match cp.kind {
+            Kind::Roof => {
+                let owner = roofs.get(cp.index);
+                cp.source_id = owner.map(|o| o.id.clone());
+                cp.category = owner.map(|o| o.category_code.clone());
+                bands.push(cp);
+            }
+            Kind::Wall => {
+                let owner = walls.get(cp.index).copied();
+                cp.source_id = owner.map(|o| o.id.clone());
+                cp.category = owner.map(|o| o.category_code.clone());
+                if let Some(o) = owner {
+                    let wt = p.wall_type(o).ok_or_else(|| missing("Unbekannter Wandtyp", &o.wall_type_id))?;
+                    if wt.layers.len() > 1 {
+                        bands.extend(split_wall_layers(&cp, p, &wt.layers, o, u_world)?);
+                        continue;
+                    }
+                }
+                if let Some((fill, hatch)) = owner.and_then(|o| wall_section_style(p, o)) {
+                    cp.fill = Some(fill);
+                    cp.hatch = Some(hatch);
+                }
+                cp.join_priority = owner.and_then(|o| wall_representative_priority(p, o));
+                cp.component_id = owner.and_then(|o| wall_representative_component_id(p, o));
+                bands.push(cp);
+            }
+            _ => {
+                let owner = slabs.get(cp.index).copied();
+                cp.source_id = owner.map(|o| o.id.clone());
+                cp.category = owner.map(|o| o.category_code.clone());
+                if let Some(o) = owner {
+                    let layers = ceiling_layers(p, o).ok_or_else(|| missing("Unbekannter Deckentyp", o.ceiling_type_id.as_deref().unwrap_or(&o.wall_type_id)))?;
+                    if layers.len() > 1 {
+                        bands.extend(split_slab_layers(&cp, p, layers, o)?);
+                        continue;
+                    }
+                    if let Some((fill, hatch)) = ceiling_section_style(p, o) {
+                        cp.fill = Some(fill);
+                        cp.hatch = Some(hatch);
+                    }
+                    cp.join_priority = ceiling_representative_priority(p, o);
+                    cp.component_id = ceiling_representative_component_id(p, o);
+                }
+                bands.push(cp);
+            }
+        }
+    }
+    let terminated = apply_wall_termination(bands, walls);
+    Ok(subtract_dominant_bands(terminated))
+}
+
+/// `applyWallTermination`: Wände mit `sliceTermination` "below"/"above" enden an der Decke.
+fn apply_wall_termination(bands: Vec<Cut>, walls: &[&Wall]) -> Vec<Cut> {
+    const EPS_T: f64 = 1e-9;
+    const TOUCH: f64 = 0.05;
+    let slab_bands: Vec<([f64; 4], f64)> = bands.iter().filter(|b| b.kind == Kind::Slab).filter_map(|b| b.join_priority.map(|jp| (bbox(&b.pts), jp))).collect();
+    if slab_bands.is_empty() {
+        return bands;
+    }
+    let mut out = Vec::with_capacity(bands.len());
+    for b in bands {
+        if b.kind != Kind::Wall {
+            out.push(b);
+            continue;
+        }
+        let term = walls.get(b.index).and_then(|w| w.slice_termination);
+        let (Some(term @ (SliceTermination::Below | SliceTermination::Above)), Some(jp)) = (term, b.join_priority) else {
+            out.push(b);
+            continue;
+        };
+        let wb = bbox(&b.pts);
+        let cutters: Vec<&([f64; 4], f64)> = slab_bands.iter().filter(|(sb, sjp)| *sjp > jp && sb[1] > wb[0] - TOUCH && sb[0] < wb[1] + TOUCH).collect();
+        if cutters.is_empty() {
+            out.push(b);
+            continue;
+        }
+        if term == SliceTermination::Below {
+            let mut clip_top = f64::INFINITY;
+            for c in &cutters {
+                clip_top = min(clip_top, c.0[2]);
+            }
+            let top = min(clip_top, wb[3]);
+            if top > wb[2] + EPS_T {
+                out.push(Cut { pts: vec![[wb[0], top], [wb[1], top], [wb[1], wb[2]], [wb[0], wb[2]]], ..b });
+            }
+            continue;
+        }
+        let mut clip_bottom = f64::NEG_INFINITY;
+        for c in &cutters {
+            clip_bottom = max(clip_bottom, c.0[3]);
+        }
+        let bottom = max(clip_bottom, wb[2]);
+        if bottom < wb[3] - EPS_T {
+            out.push(Cut { pts: vec![[wb[0], wb[3]], [wb[1], wb[3]], [wb[1], bottom], [wb[0], bottom]], ..b });
+        }
+    }
+    out
+}
+
+/// `subtractDominantBands` (Rechnung: `plan_section::dominant_bands`).
+fn subtract_dominant_bands(bands: Vec<Cut>) -> Vec<Cut> {
+    let mut ids: HashMap<&str, usize> = HashMap::new();
+    let mut b: Vec<f64> = Vec::with_capacity(1 + 7 * bands.len());
+    b.push(bands.len() as f64);
+    for band in &bands {
+        let r = rect_of_band(band);
+        let mut comp = -1.0;
+        if let Some(id) = band.component_id.as_deref() {
+            let n = ids.len();
+            let k = *ids.entry(id).or_insert(n);
+            comp = k as f64;
+        }
+        let r4 = r.unwrap_or([0.0; 4]);
+        b.extend([if r.is_some() { 1.0 } else { 0.0 }, r4[0], r4[1], r4[2], r4[3], band.join_priority.unwrap_or(f64::NAN), comp]);
+    }
+    let f = crate::plan_section::dominant_bands(&b);
+    let mut out = Vec::new();
+    let Some(&n) = f.first() else { return out };
+    let mut i = 1;
+    for _ in 0..n as usize {
+        let src = &bands[f[i] as usize];
+        if f[i + 1] == 0.0 {
+            out.push(src.clone());
+        } else {
+            let mut c = Cut::new(src.kind, src.index, vec![[f[i + 2], f[i + 5]], [f[i + 3], f[i + 5]], [f[i + 3], f[i + 4]], [f[i + 2], f[i + 4]]]);
+            c.fill = src.fill.clone();
+            c.hatch = src.hatch.clone();
+            c.join_priority = src.join_priority;
+            c.component_id = src.component_id.clone();
+            c.source_id = src.source_id.clone();
+            out.push(c);
+        }
+        i += 6;
+    }
+    out
+}
+
+// ── Dächer ────────────────────────────────────────────────────────────────────
+
+/// `appendRoofSections`: Schnittspur der Dachflächen, je Schicht ein Band.
+fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
+    let roofs = p.roofs.as_deref().unwrap_or(&[]);
+    if roofs.is_empty() {
+        return;
+    }
+    let (bx, by) = plane.base();
+    let (ux, uy) = plane.u_model();
+    for (index, roof) in roofs.iter().enumerate() {
+        let eaves = p.roof_base_elevation(roof);
+        let geo = crate::roof::roof_geometry(&roof.params(), eaves);
+        let layers = p.roof_layers(roof);
+        let total = layers.iter().fold(0.0, |s, l| s + max(0.0, l.thickness));
+        if total <= 1e-9 {
+            continue;
+        }
+        let mut pl: Vec<f64> = vec![geo.planes.len() as f64];
+        for plane in &geo.planes {
+            pl.push(plane.len() as f64);
+            for q in plane {
+                pl.extend([q[0], q[1], q[2]]);
+            }
+        }
+        let sg = crate::plan_section::roof_segments(bx, by, ux, uy, &pl);
+        let n = sg.first().copied().unwrap_or(0.0) as usize;
+        for k in 0..n {
+            let o = 1 + 5 * k;
+            let (t_lo, t_hi, z0, z1, cos_t) = (sg[o], sg[o + 1], sg[o + 2], sg[o + 3], sg[o + 4]);
+            let mut prefix = 0.0;
+            for layer in &layers {
+                let t = max(0.0, layer.thickness);
+                if t <= 1e-9 {
+                    continue;
+                }
+                let vt = t / max(cos_t, 1e-6);
+                let top0 = z0 - prefix;
+                let top1 = z1 - prefix;
+                prefix += vt;
+                let mut c = Cut::new(Kind::Roof, index, vec![[t_lo, top0], [t_hi, top1], [t_hi, top1 - vt], [t_lo, top0 - vt]]);
+                if !layer.component_id.is_empty() {
+                    if let Some(h) = p.component(&layer.component_id).and_then(|comp| resolve_hatch(p, &comp.hatch_id, None, None, None)) {
+                        c.fill = Some(poche_fill(h.pattern).to_string());
+                        c.hatch = Some(h);
+                    }
+                }
+                cuts.push(c);
+            }
+        }
+    }
+}
+
+// ── Monolith, Abzugskörper, Körper, Gelände, Tiefe ───────────────────────────
+
+/// `unionRectOutlines` (Rechnung: `plan_section::union_outlines`).
+fn union_rect_outlines(rects: &[[f64; 4]]) -> Vec<Vec<[f64; 2]>> {
+    let mut b = vec![rects.len() as f64];
+    for r in rects {
+        b.extend(r);
+    }
+    let f = crate::plan_section::union_outlines(&b);
+    let mut rings = Vec::new();
+    let mut i = 1;
+    for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
+        let count = f[i] as usize;
+        i += 1;
+        rings.push((0..count).map(|j| [f[i + 2 * j], f[i + 2 * j + 1]]).collect());
+        i += 2 * count;
+    }
+    rings
+}
+
+/// `mergeMonolithCuts`.
+fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab]) -> Vec<Cut> {
+    let mut order: Vec<String> = Vec::new();
+    let mut groups: HashMap<String, Vec<Cut>> = HashMap::new();
+    let mut out = Vec::new();
+    for cp in cuts {
+        let g = if cp.kind == Kind::Slab { slabs.get(cp.index).and_then(|s| s.monolith.clone()).filter(|g| !g.is_empty()) } else { None };
+        match g {
+            None => out.push(cp),
+            Some(g) => {
+                if !groups.contains_key(&g) {
+                    order.push(g.clone());
+                }
+                groups.entry(g).or_default().push(cp);
+            }
+        }
+    }
+    for g in order {
+        let list = groups.remove(&g).unwrap_or_default();
+        if list.len() == 1 {
+            out.extend(list);
+            continue;
+        }
+        let rects: Vec<[f64; 4]> = list.iter().filter_map(rect_of_band).collect();
+        if rects.len() != list.len() {
+            out.extend(list);
+            continue;
+        }
+        for ring in union_rect_outlines(&rects) {
+            out.push(Cut { pts: ring, ..list[0].clone() });
+        }
+    }
+    out
+}
+
+fn is_void_solid(s: &ExtrudedSolid) -> bool {
+    s.operation.as_deref() == Some("subtract") && s.brep.is_none() && s.taper.unwrap_or(0.0) < 1e-6 && s.points.len() >= 3 && s.height > 0.0
+}
+
+fn encode_rings(rings: &[&[[f64; 2]]]) -> Vec<f64> {
+    let mut b = vec![rings.len() as f64];
+    for r in rings {
+        b.push(r.len() as f64);
+        for q in *r {
+            b.extend(q);
+        }
+    }
+    b
+}
+
+/// `subtractVoidsInSection`.
+fn subtract_voids_in_section(cuts: Vec<Cut>, p: &Project, base: (f64, f64), u: (f64, f64)) -> Vec<Cut> {
+    let mut rects: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut any = false;
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        if !is_void_solid(s) {
+            continue;
+        }
+        any = true;
+        let z0 = p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0)) + s.base_offset.unwrap_or(0.0);
+        let z1 = z0 + s.height;
+        let mut pts = vec![s.points.len() as f64];
+        for q in &s.points {
+            pts.extend([q.x, q.y]);
+        }
+        let f = crate::voids::section_rects_flat(&pts, &[base.0, base.1, u.0, u.1]);
+        for k in 0..f.first().copied().unwrap_or(0.0) as usize {
+            let (u0, u1) = (f[1 + 2 * k], f[2 + 2 * k]);
+            rects.push(vec![[u0, z0], [u1, z0], [u1, z1], [u0, z1]]);
+        }
+    }
+    if !any || rects.is_empty() {
+        return cuts;
+    }
+    let refs: Vec<&[[f64; 2]]> = rects.iter().map(|r| r.as_slice()).collect();
+    let cutters = encode_rings(&refs);
+    let mut out = Vec::with_capacity(cuts.len());
+    for cp in cuts {
+        if cp.pts.len() < 3 {
+            out.push(cp);
+            continue;
+        }
+        let ring = &encode_rings(&[cp.pts.as_slice()])[1..];
+        let nse = cp.nse.as_deref().unwrap_or(&[]);
+        let mut ns = vec![nse.len() as f64];
+        ns.extend(nse);
+        let f = crate::voids::subtract_rings_flat(ring, &cutters, &ns);
+        if f.is_empty() || f[0] < 0.0 {
+            out.push(cp);
+            continue;
+        }
+        let mut i = 1;
+        for _ in 0..f[0] as usize {
+            let n = f[i] as usize;
+            i += 1;
+            let pts: Vec<[f64; 2]> = (0..n).map(|j| [f[i + 2 * j], f[i + 2 * j + 1]]).collect();
+            i += 2 * n;
+            let m = f[i] as usize;
+            i += 1;
+            let nse: Vec<f64> = f[i..i + m].to_vec();
+            i += m;
+            out.push(Cut { pts, nse: (!nse.is_empty()).then_some(nse), ..cp.clone() });
+        }
+    }
+    out
+}
+
+/// Liest `[n, (k, u, v …) × n]` ab `i`.
+fn read_rings(f: &[f64], i: &mut usize) -> Vec<Vec<[f64; 2]>> {
+    let mut out = Vec::new();
+    let n = f[*i] as usize;
+    *i += 1;
+    for _ in 0..n {
+        let k = f[*i] as usize;
+        *i += 1;
+        out.push((0..k).map(|j| [f[*i + 2 * j], f[*i + 2 * j + 1]]).collect());
+        *i += 2 * k;
+    }
+    out
+}
+
+/// `cutMeshWithPlane` (senkrecht): (Ringe, Linienzüge).
+fn cut_mesh(positions: &[f64], indices: &[f64], base: (f64, f64), u: (f64, f64)) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>) {
+    let f = crate::mesh_section::cut(positions, indices, &[0.0, base.0, base.1, u.0, u.1]);
+    if f.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let mut i = 0;
+    let rings = read_rings(&f, &mut i);
+    let lines = read_rings(&f, &mut i);
+    (rings, lines)
+}
+
+/// `ringsToPolygons`.
+fn rings_to_polygons(rings: &[Vec<[f64; 2]>]) -> Vec<Vec<Vec<[f64; 2]>>> {
+    let refs: Vec<&[[f64; 2]]> = rings.iter().map(|r| r.as_slice()).collect();
+    let f = crate::mesh_section::rings_to_polygons(&encode_rings(&refs));
+    if f.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut i = 1;
+    for _ in 0..f[0] as usize {
+        let nr = f[i] as usize;
+        i += 1;
+        let mut set = Vec::with_capacity(nr);
+        for _ in 0..nr {
+            let count = f[i] as usize;
+            i += 1;
+            set.push((0..count).map(|j| [f[i + 2 * j], f[i + 2 * j + 1]]).collect());
+            i += 2 * count;
+        }
+        out.push(set);
+    }
+    out
+}
+
+/// `keyhole` (Rechnung: `voids::keyhole_flat`).
+fn keyhole(poly: &[Vec<[f64; 2]>]) -> (Vec<[f64; 2]>, Vec<f64>) {
+    let refs: Vec<&[[f64; 2]]> = poly.iter().map(|r| r.as_slice()).collect();
+    let f = crate::voids::keyhole_flat(&encode_rings(&refs));
+    let n = f.first().copied().unwrap_or(0.0) as usize;
+    let pts = (0..n).map(|i| [f[1 + 2 * i], f[2 + 2 * i]]).collect();
+    let nb = f.get(1 + 2 * n).copied().unwrap_or(0.0) as usize;
+    let bridges = (0..nb).map(|i| f[2 + 2 * n + i]).collect();
+    (pts, bridges)
+}
+
+/// `appendBodySections` + `attachBodyOwners`: geschnittene freie Körper.
+fn append_body_sections(cuts: &mut Vec<Cut>, p: &Project, bodies: &[BodyMesh], base: (f64, f64), u: (f64, f64)) {
+    let solids = p.extruded_solids.as_deref().unwrap_or(&[]);
+    for b in bodies {
+        let (rings, _) = cut_mesh(&b.positions, &b.indices, base, u);
+        for poly in rings_to_polygons(&rings) {
+            let (pts, nse) = if poly.len() > 1 {
+                let (pts, bridges) = keyhole(&poly);
+                let n = pts.len() as f64;
+                (pts, Some(bridges.into_iter().filter(|&i| i < n).collect()))
+            } else {
+                (poly[0].clone(), None)
+            };
+            let mut c = Cut::new(Kind::Body, b.index, pts);
+            c.fill = Some(BODY_FILL.into());
+            c.nse = nse;
+            c.source_id = solids.get(b.index).map(|s| s.id.clone());
+            cuts.push(c);
+        }
+    }
+}
+
+/// `clipLineToU`.
+fn clip_line_to_u(pts: &[[f64; 2]], lo: f64, hi: f64) -> Vec<Vec<[f64; 2]>> {
+    let mut out = Vec::new();
+    let mut cur: Vec<[f64; 2]> = Vec::new();
+    fn flush(cur: &mut Vec<[f64; 2]>, out: &mut Vec<Vec<[f64; 2]>>) {
+        if cur.len() >= 2 {
+            out.push(std::mem::take(cur));
+        }
+        cur.clear();
+    }
+    for i in 0..pts.len().saturating_sub(1) {
+        let a = pts[i];
+        let b = pts[i + 1];
+        let (u0, u1) = (a[0], b[0]);
+        if (u0 < lo && u1 < lo) || (u0 > hi && u1 > hi) {
+            flush(&mut cur, &mut out);
+            continue;
+        }
+        let at = |u: f64| -> [f64; 2] {
+            let t = if u1 == u0 { 0.0 } else { (u - u0) / (u1 - u0) };
+            [u, a[1] + (b[1] - a[1]) * t]
+        };
+        let pa = if u0 < lo { at(lo) } else if u0 > hi { at(hi) } else { a };
+        let pb = if u1 < lo { at(lo) } else if u1 > hi { at(hi) } else { b };
+        if cur.is_empty() {
+            cur.push(pa);
+        }
+        cur.push(pb);
+        if u1 < lo || u1 > hi {
+            flush(&mut cur, &mut out);
+        }
+    }
+    flush(&mut cur, &mut out);
+    out
+}
+
+/// `appendTerrainProfiles`.
+fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) {
+    let terrains: Vec<&TerrainMesh> = p.context.as_deref().unwrap_or(&[]).iter().filter_map(|c| if let ContextObject::TerrainMesh(t) = c { Some(t) } else { None }).collect();
+    if terrains.is_empty() {
+        return;
+    }
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for cp in &out.cuts {
+        for q in &cp.pts {
+            lo = min(lo, q[0]);
+            hi = max(hi, q[0]);
+        }
+    }
+    for e in out.visible.iter().chain(out.hidden.iter()) {
+        lo = min(min(lo, e.a[0]), e.b[0]);
+        hi = max(max(hi, e.a[0]), e.b[0]);
+    }
+    let range = lo.is_finite().then_some((lo, hi));
+    for t in terrains {
+        if t.positions.len() < 9 {
+            continue;
+        }
+        let (_, lines) = cut_mesh(&t.positions, &t.indices, base, u);
+        for line in lines {
+            let parts = match range {
+                Some((lo, hi)) => clip_line_to_u(&line, lo - TERRAIN_MARGIN, hi + TERRAIN_MARGIN),
+                None => vec![line],
+            };
+            for pts in parts {
+                out.profiles.push(Profile { category: t.category_code.clone(), pts });
+            }
+        }
+    }
+}
+
+fn centroid(pts: &[Vec2]) -> Option<(f64, f64)> {
+    if pts.is_empty() {
+        return None;
+    }
+    let (mut x, mut y) = (0.0, 0.0);
+    for q in pts {
+        x += q.x;
+        y += q.y;
+    }
+    let n = pts.len() as f64;
+    Some((x / n, y / n))
+}
+
+/// `filterByDepth`: Ansichtskanten weiter als `depth` hinter der Ebene ausblenden.
+fn filter_by_depth(out: &mut Output, p: &Project, plane: &Plane, depth: f64, walls: &[&Wall], slabs: &[&Ceiling]) {
+    if !(depth > 0.0) {
+        return;
+    }
+    let (nx, ny) = (plane.normal[0], plane.normal[2]);
+    let l = hypot2(nx, ny);
+    let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };
+    let blick = (nx / l, ny / l);
+    let origin = plane.base();
+    let roofs = p.roofs.as_deref().unwrap_or(&[]);
+    let owner_point = |e: &Edge| -> Option<(f64, f64)> {
+        match e.kind {
+            Kind::Wall => walls.get(e.index).map(|w| ((w.start.x + w.end.x) / 2.0, (w.start.y + w.end.y) / 2.0)),
+            Kind::Slab => slabs.get(e.index).and_then(|c| centroid(&c.outline)),
+            _ => roofs.get(e.index).and_then(|r| centroid(&r.outline)),
+        }
+    };
+    let keep = |e: &Edge| -> bool {
+        match owner_point(e) {
+            None => true,
+            Some(q) => (q.0 - origin.0) * blick.0 + (q.1 - origin.1) * blick.1 <= depth + 1e-6,
+        }
+    };
+    out.visible.retain(keep);
+    out.hidden.retain(keep);
+}
+
+// ── Schnitt ───────────────────────────────────────────────────────────────────
+
+/// `computeSection` (ohne den asynchronen Teil: die Körper-Netze kommen fertig aus TS).
+pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> Result<Option<Output>, String> {
+    let Some(plane) = level.plane() else { return Ok(None) };
+    let walls_r = model3d::emit_walls(p, false)?;
+    let mut slabs_r = model3d::emit_slabs(p);
+    slabs_r.extend(model3d::emit_stairs(p, true));
+    let roofs_r = model3d::emit_roof_cut_layers(p)?;
+    let wi: Vec<render3d::WallInput> = walls_r.iter().map(wall_input).collect();
+    let si: Vec<render3d::SlabInput> = slabs_r.iter().map(slab_input).collect();
+    let ri: Vec<render3d::types::RoofLayerInput> = roofs_r.iter().map(roof_input).collect();
+    // Die Ebene ging als Zahl-Argument (wasm-bindgen, `Math.fround`) hinein, nicht über JSON.
+    let fr = |v: [f64; 3]| [v[0] as f32, v[1] as f32, v[2] as f32];
+    let rp = render3d::SectionPlane::new(fr(plane.point), fr(plane.normal));
+    let raw = render3d::cut_section(&rp, &wi, &si, &ri);
+
+    // Gleiche f32 kommen oft vor (gemeinsame Ecken, Höhen): Umwandlung je Wert nur einmal.
+    let mut conv: HashMap<u32, f64> = HashMap::new();
+    let mut jf = |x: f32| -> f64 { *conv.entry(x.to_bits()).or_insert_with(|| js_f32(x)) };
+    let mut cut_owners: HashSet<(Kind, usize)> = HashSet::new();
+    let mut cuts: Vec<Cut> = Vec::with_capacity(raw.cut_polygons.len());
+    for cp in &raw.cut_polygons {
+        let kind = kind_of(cp.component.kind);
+        cut_owners.insert((kind, cp.component.index));
+        cuts.push(Cut::new(kind, cp.component.index, cp.pts.iter().map(|q| [jf(q[0]), jf(q[1])]).collect()));
+    }
+    let mut edge = |e: &render3d::SectionEdge| Edge { kind: kind_of(e.component.kind), index: e.component.index, a: [jf(e.a[0]), jf(e.a[1])], b: [jf(e.b[0]), jf(e.b[1])] };
+    let not_cut = |e: &&render3d::SectionEdge| !cut_owners.contains(&(kind_of(e.component.kind), e.component.index));
+    let visible: Vec<Edge> = raw.visible_edges.iter().filter(not_cut).map(&mut edge).collect();
+    let hidden: Vec<Edge> = raw.hidden_edges.iter().filter(not_cut).map(&mut edge).collect();
+
+    append_roof_sections(&mut cuts, p, &plane);
+    let walls = wall_segment_owners(p);
+    let slabs = slab_segment_owners(p);
+    let mut cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
+    // Treppen-Prismen: Herkunft + Kategorie (bei doppelten ids gewinnt die letzte, wie `new Map`).
+    let mut stairs_by_id: HashMap<&str, &Stair> = HashMap::new();
+    for st in p.stairs.as_deref().unwrap_or(&[]) {
+        stairs_by_id.insert(st.id.as_str(), st);
+    }
+    for cp in cuts.iter_mut() {
+        if cp.kind != Kind::Slab {
+            continue;
+        }
+        let id = slabs_r.get(cp.index).map_or("", |s| s.ceiling_id.as_str());
+        if let Some(st) = stairs_by_id.get(id) {
+            cp.stair_id = Some(st.id.clone());
+            cp.category = Some(st.category_code.clone());
+        }
+    }
+    let cuts = merge_monolith_cuts(cuts, &slabs_r);
+    let base = plane.base();
+    let u = plane.u_model();
+    let mut cuts = subtract_voids_in_section(cuts, p, base, u);
+    append_body_sections(&mut cuts, p, bodies, base, u);
+    let mut out = Output { cuts, visible, hidden, profiles: Vec::new() };
+    append_terrain_profiles(&mut out, p, base, u);
+    if let Some(d) = level.depth {
+        filter_by_depth(&mut out, p, &plane, d, &walls, &slabs);
+    }
+    Ok(Some(out))
+}
+
+// ── Primitive ─────────────────────────────────────────────────────────────────
+
+pub(crate) fn polygon(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, hatch: HatchRender) -> Primitive {
+    Primitive::Polygon {
+        pts,
+        fill: fill.into(),
+        stroke: stroke.into(),
+        stroke_width_mm: w,
+        hatch,
+        greyed: None,
+        opacity: None,
+        no_stroke_edges: None,
+        wall_id: None,
+        drawing_id: None,
+        ceiling_id: None,
+        opening_id: None,
+        stair_id: None,
+        room_id: None,
+        extruded_solid_id: None,
+        context_object_id: None,
+        column_id: None,
+        roof_id: None,
+        section_line_id: None,
+    }
+}
+
+pub(crate) fn line(a: Vec2, b: Vec2, cls: &str, w: f64, color: &str) -> Primitive {
+    Primitive::Line { a, b, cls: cls.into(), weight_mm: w, dash: None, zigzag: None, motif: None, color: Some(color.into()), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None }
+}
+
+pub(crate) fn v2(x: f64, y: f64) -> Vec2 {
+    Vec2 { x, y }
+}
+
+/// Ausmass wie `acc` in TS (`<`/`>`-Vergleiche, NaN bleibt draussen).
+#[derive(Clone, Copy)]
+pub(crate) struct Acc {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+}
+
+impl Acc {
+    pub fn new() -> Acc {
+        Acc { min_x: f64::INFINITY, min_y: f64::INFINITY, max_x: f64::NEG_INFINITY, max_y: f64::NEG_INFINITY }
+    }
+    pub fn add(&mut self, x: f64, y: f64) {
+        if x < self.min_x {
+            self.min_x = x;
+        }
+        if y < self.min_y {
+            self.min_y = y;
+        }
+        if x > self.max_x {
+            self.max_x = x;
+        }
+        if y > self.max_y {
+            self.max_y = y;
+        }
+    }
+    pub fn bounds(&self) -> [f64; 4] {
+        if !self.min_x.is_finite() {
+            [0.0, 0.0, 1.0, 1.0]
+        } else {
+            [self.min_x, self.min_y, self.max_x, self.max_y]
+        }
+    }
+}
+
+/// `generateSectionPlan`: Primitive (u → x, Höhe → y) und Ausmass.
+pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility) -> (Vec<Primitive>, [f64; 4]) {
+    let mut prims = Vec::new();
+    let mut acc = Acc::new();
+    let shown = |code: &str| vis.visible(code) && vis.render(code);
+    for cp in &out.cuts {
+        if cp.pts.len() < 3 {
+            continue;
+        }
+        if let Some(code) = cp.category.as_deref() {
+            if !shown(code) {
+                continue;
+            }
+        }
+        let pts: Vec<Vec2> = cp
+            .pts
+            .iter()
+            .map(|q| {
+                acc.add(q[0], q[1]);
+                v2(q[0], q[1])
+            })
+            .collect();
+        let fill = cp.fill.as_deref().unwrap_or(HATCH_PAPER);
+        let hatch = cp.hatch.clone().unwrap_or_else(section_hatch);
+        let solid = hatch.pattern == HatchPattern::Solid;
+        let (fill, hatch) = if mono {
+            let mono_fill = if solid { HATCH_INK } else { HATCH_PAPER };
+            let mono_hatch = if !solid && hatch.pattern != HatchPattern::None { HatchRender { color: SECTION_INK.into(), ..hatch } } else { hatch };
+            (mono_fill.to_string(), mono_hatch)
+        } else {
+            (fill.to_string(), hatch)
+        };
+        let src = cp.source_id.clone();
+        let mut pr = polygon(pts, &fill, SECTION_INK, SECTION_CUT_OUTLINE_MM, hatch);
+        if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, no_stroke_edges, greyed, .. } = &mut pr {
+            *wall_id = if cp.kind == Kind::Wall { src.clone() } else { None };
+            *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() { src.clone() } else { None };
+            *roof_id = if cp.kind == Kind::Roof { src.clone() } else { None };
+            *stair_id = cp.stair_id.clone();
+            *extruded_solid_id = if cp.kind == Kind::Body { src } else { None };
+            *no_stroke_edges = cp.nse.clone();
+            *greyed = Some(cp.category.as_deref().is_some_and(|c| vis.greyed(c)));
+        }
+        prims.push(pr);
+    }
+    for pr in &out.profiles {
+        if let Some(code) = pr.category.as_deref() {
+            if !shown(code) {
+                continue;
+            }
+        }
+        for w in pr.pts.windows(2) {
+            acc.add(w[0][0], w[0][1]);
+            acc.add(w[1][0], w[1][1]);
+            prims.push(line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), "section-terrain", SECTION_GROUND_MM, SECTION_INK));
+        }
+    }
+    if hidden_lines {
+        for e in &out.hidden {
+            acc.add(e.a[0], e.a[1]);
+            acc.add(e.b[0], e.b[1]);
+            let mut l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "section-hidden", SECTION_HIDDEN_MM, SECTION_HIDDEN_INK);
+            if let Primitive::Line { dash, .. } = &mut l {
+                *dash = Some(Some(SECTION_HIDDEN_DASH.to_vec()));
+            }
+            prims.push(l);
+        }
+    }
+    for e in &out.visible {
+        acc.add(e.a[0], e.a[1]);
+        acc.add(e.b[0], e.b[1]);
+        prims.push(line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "section-visible", SECTION_VISIBLE_MM, SECTION_VISIBLE_INK));
+    }
+    if acc.min_x.is_finite() && acc.max_x > acc.min_x {
+        prims.push(line(v2(acc.min_x, acc.min_y), v2(acc.max_x, acc.min_y), "section-ground", SECTION_GROUND_MM, SECTION_INK));
+    }
+    (prims, acc.bounds())
+}
+
+// ── Geschnittene Fenster/Türen (`sectionOpenings.ts`) ────────────────────────
+
+const OPENING_INK: &str = "#1f242c";
+const FRAME_MM: f64 = 0.25;
+const GLASS_MM: f64 = 0.13;
+const DEFAULT_FRAME_DEPTH: f64 = 0.07;
+const DEFAULT_FRAME_WIDTH: f64 = 0.06;
+const DOOR_LEAF_THICKNESS: f64 = 0.04;
+const MIN_CROSS: f64 = 0.15;
+
+fn rect(u0: f64, u1: f64, v0: f64, v1: f64) -> Vec<Vec2> {
+    vec![v2(min(u0, u1), v0), v2(max(u0, u1), v0), v2(max(u0, u1), v1), v2(min(u0, u1), v1)]
+}
+
+fn opening_poly(pts: Vec<Vec2>, profile: bool, id: &str) -> Primitive {
+    let mut pr = if profile { polygon(pts, "#ffffff", OPENING_INK, FRAME_MM, no_hatch_base()) } else { polygon(pts, "none", "none", 0.0, no_hatch_base()) };
+    if let Primitive::Polygon { opening_id, .. } = &mut pr {
+        *opening_id = Some(id.into());
+    }
+    pr
+}
+
+struct CrossSection {
+    n0: f64,
+    un: f64,
+    z_bottom: f64,
+    z_top: f64,
+    face_min: f64,
+    face_max: f64,
+}
+
+impl CrossSection {
+    fn u_at(&self, s: f64) -> f64 {
+        (s - self.n0) / self.un
+    }
+}
+
+fn axis_frame(w: &Wall) -> ((f64, f64), (f64, f64)) {
+    let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
+    let l = hypot2(dx, dy);
+    let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };
+    let u = (dx / l, dy / l);
+    (u, (-u.1, u.0))
+}
+
+fn cross_section(p: &Project, wall: &Wall, o: &Opening, p0: (f64, f64), u: (f64, f64)) -> Result<Option<CrossSection>, String> {
+    let Some((from, to)) = opening_interval(wall, o) else { return Ok(None) };
+    let (a, n) = axis_frame(wall);
+    let un = u.0 * n.0 + u.1 * n.1;
+    if un.abs() < MIN_CROSS {
+        return Ok(None);
+    }
+    let rel = (p0.0 - wall.start.x, p0.1 - wall.start.y);
+    let n0 = rel.0 * n.0 + rel.1 * n.1;
+    let a0 = rel.0 * a.0 + rel.1 * a.1;
+    let ua = u.0 * a.0 + u.1 * a.1;
+    let wt = p.wall_type(wall).ok_or_else(|| missing("Unbekannter Wandtyp", &wall.wall_type_id))?;
+    let total = sum_thickness(&wt.layers);
+    let ref_off = crate::joins::reference_offset(model3d::wall_reference(wall), total);
+    let along = a0 + ((ref_off - n0) / un) * ua;
+    if along < from + 1e-4 || along > to - 1e-4 {
+        return Ok(None);
+    }
+    let (z_bottom, z_top) = opening_extent(p, wall, o);
+    if z_top - z_bottom < 1e-3 {
+        return Ok(None);
+    }
+    Ok(Some(CrossSection { n0, un, z_bottom, z_top, face_min: ref_off - total / 2.0, face_max: ref_off + total / 2.0 }))
+}
+
+/// Sash-Liste eines Fenstertyps (`sashesOfWindowType`) für das Fenster-Symbol.
+pub(crate) fn sashes_of_window_type(wt: &WindowType) -> Vec<crate::opening_geom::Sash> {
+    if let Some(s) = wt.sashes.as_deref().filter(|s| !s.is_empty()) {
+        return s
+            .iter()
+            .map(|s| crate::opening_geom::Sash {
+                post: s.kind == SashDefKind::Pfosten,
+                auto_width: s.auto_width != Some(false),
+                width: s.width.unwrap_or(f64::NAN),
+                post_width: s.post_width.unwrap_or(f64::NAN),
+                operable: s.opening.is_some_and(|o| o != OpeningKind::Fest),
+            })
+            .collect();
+    }
+    let wc = if wt.wing_count == 0.0 || wt.wing_count.is_nan() { 1.0 } else { wt.wing_count };
+    let n = max(1.0, round(wc)) as usize;
+    let operable = wt.kind != OpeningKind::Fest;
+    (0..n).map(|_| crate::opening_geom::Sash { post: false, auto_width: true, width: f64::NAN, post_width: f64::NAN, operable }).collect()
+}
+
+fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result<Vec<Primitive>, String> {
+    let wt = p.window_type(o);
+    let fw = max(0.02, wt.and_then(|t| t.frame_width).unwrap_or(DEFAULT_FRAME_WIDTH));
+    let (_, n) = axis_frame(wall);
+    let off_of = |q: crate::opening_geom::V| (q.x - wall.start.x) * n.0 + (q.y - wall.start.y) * n.1;
+    let mut f_min = (c.face_min + c.face_max) / 2.0 - DEFAULT_FRAME_DEPTH / 2.0;
+    let mut f_max = f_min + DEFAULT_FRAME_DEPTH;
+    let mut glass: Vec<f64> = vec![(f_min + f_max) / 2.0];
+    // `windowSymbol(project, wall, o, 1, spec, "mittel")`.
+    let total = sum_thickness(&p.wall_type(wall).ok_or_else(|| missing("Unbekannter Wandtyp", &wall.wall_type_id))?.layers);
+    let ref_off = crate::joins::reference_offset(model3d::wall_reference(wall), total);
+    let spec = wt.map(|t| crate::opening_geom::WindowSpec {
+        sashes: sashes_of_window_type(t),
+        frame_width: t.frame_width.unwrap_or(DEFAULT_FRAME_WIDTH),
+        frame_depth: t.frame_depth.unwrap_or(f64::NAN),
+        inset_from_face: t.inset_from_face.unwrap_or(f64::NAN),
+        inset_inner: t.inset_face == Some(WindowTypeInsetFace::Innen),
+    });
+    let finite = [wall.start.x, wall.start.y, wall.end.x, wall.end.y, total, ref_off, o.position, o.width].iter().all(|x| x.is_finite());
+    let sym = if finite {
+        let wr = crate::opening_geom::WallRef { start: crate::opening_geom::v(wall.start.x, wall.start.y), end: crate::opening_geom::v(wall.end.x, wall.end.y), total, ref_off };
+        crate::opening_geom::window_symbol(&wr, o.position, o.width, 1.0, spec.as_ref(), o.wing_count.unwrap_or(f64::NAN), crate::opening_geom::Detail::Mittel)
+    } else {
+        None
+    };
+    if let (Some(sym), true) = (sym, spec.is_some()) {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for q in &sym.frame {
+            let s = off_of(*q);
+            lo = min(lo, s);
+            hi = max(hi, s);
+        }
+        f_min = lo;
+        f_max = hi;
+        if !sym.glass_lines.is_empty() {
+            let mut seen: Vec<f64> = Vec::new();
+            for (q, _) in &sym.glass_lines {
+                let x = round(off_of(*q) * 1e6) / 1e6;
+                // `new Set` (SameValueZero: 0 = -0, NaN = NaN).
+                if !seen.iter().any(|&s| s == x || (s.is_nan() && x.is_nan())) {
+                    seen.push(x);
+                }
+            }
+            glass = seen;
+        }
+    }
+    let u0 = c.u_at(f_min);
+    let u1 = c.u_at(f_max);
+    let h = c.z_top - c.z_bottom;
+    let fwv = min(fw, h / 3.0);
+    let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
+    out.push(opening_poly(rect(u0, u1, c.z_bottom, c.z_bottom + fwv), true, &o.id));
+    out.push(opening_poly(rect(u0, u1, c.z_top - fwv, c.z_top), true, &o.id));
+    for s in glass {
+        let u = c.u_at(s);
+        let mut l = line(v2(u, c.z_bottom + fwv), v2(u, c.z_top - fwv), "section-window-glass", GLASS_MM, OPENING_INK);
+        if let Primitive::Line { opening_id, .. } = &mut l {
+            *opening_id = Some(o.id.clone());
+        }
+        out.push(l);
+    }
+    Ok(out)
+}
+
+fn door_cut(o: &Opening, c: &CrossSection) -> Vec<Primitive> {
+    let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
+    if o.door_type == Some(OpeningDoorType::Wandoeffnung) {
+        return out;
+    }
+    let mid = (c.face_min + c.face_max) / 2.0;
+    let fw = min(DEFAULT_FRAME_WIDTH, (c.z_top - c.z_bottom) / 4.0);
+    out.push(opening_poly(rect(c.u_at(mid - DEFAULT_FRAME_DEPTH / 2.0), c.u_at(mid + DEFAULT_FRAME_DEPTH / 2.0), c.z_top - fw, c.z_top), true, &o.id));
+    out.push(opening_poly(rect(c.u_at(mid - DOOR_LEAF_THICKNESS / 2.0), c.u_at(mid + DOOR_LEAF_THICKNESS / 2.0), c.z_bottom + 0.01, c.z_top - fw), true, &o.id));
+    out
+}
+
+/// `sectionOpeningPrimitives`.
+pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibility) -> Result<Vec<Primitive>, String> {
+    let Some(plane) = level.plane() else { return Ok(Vec::new()) };
+    if level.kind != "section" {
+        return Ok(Vec::new());
+    }
+    let u_raw = plane.u_model();
+    let l = hypot2(u_raw.0, u_raw.1);
+    let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };
+    let u = (u_raw.0 / l, u_raw.1 / l);
+    let p0 = plane.base();
+    let mut walls_by_id: HashMap<&str, &Wall> = HashMap::new();
+    for w in &p.walls {
+        walls_by_id.insert(w.id.as_str(), w);
+    }
+    let mut out = Vec::new();
+    for o in p.openings.as_deref().unwrap_or(&[]) {
+        if !vis.visible(&o.category_code) || !vis.render(&o.category_code) {
+            continue;
+        }
+        let Some(wall) = walls_by_id.get(o.host_wall_id.as_str()).copied() else { continue };
+        if !vis.visible(&wall.category_code) {
+            continue;
+        }
+        let Some(c) = cross_section(p, wall, o, p0, u)? else { continue };
+        let prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(o, &c) };
+        let greyed = vis.greyed(&o.category_code);
+        for pr in prims {
+            out.push(if greyed { pr.with_greyed(true) } else { pr });
+        }
+    }
+    Ok(out)
+}
+
+// ── Abfrage ───────────────────────────────────────────────────────────────────
+
+/// Zuletzt berechnete Schnitte je Schlüssel (> 0), wenige, älteste fallen weg.
+const CACHE_SLOTS: usize = 6;
+
+thread_local! {
+    static CACHE: std::cell::RefCell<Vec<(f64, std::rc::Rc<Output>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn cache_get(key: f64) -> Option<std::rc::Rc<Output>> {
+    if !(key > 0.0) {
+        return None;
+    }
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        let i = c.iter().position(|e| e.0 == key)?;
+        let e = c.remove(i);
+        let o = e.1.clone();
+        c.push(e);
+        Some(o)
+    })
+}
+
+fn cache_put(key: f64, o: std::rc::Rc<Output>) {
+    if !(key > 0.0) {
+        return;
+    }
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.retain(|e| e.0 != key);
+        if c.len() >= CACHE_SLOTS {
+            c.remove(0);
+        }
+        c.push((key, o));
+    });
+}
+
+/// Abfrage `sectionPlan`: `args` = `[mono, openings, key, bodies…]` (Körper s. [`read_bodies`]; `key` > 0
+/// = Schlüssel des vorbereiteten Schnitts, s. Cache unten, 0 = immer rechnen),
+/// `text` = `{"level": {...}, "hiddenLines", "hasVis", "invisible", "hasDisplay", "norender", "grey"}`.
+/// Puffer: Gruppe 0 Schnitt, Gruppe 1 geschnittene Öffnungen; Ausmass ohne die Öffnungen.
+/// Ohne gültige Schnittlinie: leerer Puffer ohne Gruppen.
+pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
+    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("Schnitt-Argumente: {e}"))?;
+    let level = LevelSpec::from_json(v.get("level").unwrap_or(&serde_json::Value::Null));
+    let vis = Visibility::from_json(&v);
+    let mono = args.first().is_some_and(|&x| x != 0.0);
+    let openings = args.get(1).is_some_and(|&x| x != 0.0);
+    let key = args.get(2).copied().unwrap_or(0.0);
+    let mut w = crate::plan_buf::Writer::new(true);
+    // Der Schnitt selbst hängt nur am Projektstand, an der Ebene und den Körpern (= ein Aufruf von
+    // `computeSection` in TS, Schlüssel `key`); Schwarz-Weiss, Sichtbarkeit und verdeckte Kanten nur an
+    // der Darstellung. Darum die zuletzt berechneten Schnitte merken (Umschalten ohne Neurechnen).
+    let out = match cache_get(key) {
+        Some(o) => o,
+        None => {
+            let bodies = read_bodies(args.get(3..).unwrap_or(&[])).ok_or("Schnitt: Körper-Netze unlesbar")?;
+            let Some(o) = compute_section(p, &level, &bodies)? else { return Ok(w.finish()) };
+            let o = std::rc::Rc::new(o);
+            cache_put(key, o.clone());
+            o
+        }
+    };
+    let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
+    let (prims, bounds) = section_primitives(&out, mono, hidden, &vis);
+    w.group(&prims);
+    let ops = if openings { section_opening_primitives(p, &level, &vis)? } else { Vec::new() };
+    w.group(&ops);
+    w.bounds = Some(bounds);
+    Ok(w.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> Project {
+        serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap()
+    }
+
+    fn level(p: &Project, id: &str) -> LevelSpec {
+        let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
+        LevelSpec::from_json(&serde_json::to_value(l).unwrap())
+    }
+
+    #[test]
+    fn ebene_wie_section_plane_from_level() {
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: -1.0, y: 2.0 }, Vec2 { x: 6.0, y: 2.0 }]), ..Default::default() };
+        let pl = l.plane().unwrap();
+        assert_eq!(pl.point, [-1.0, 0.0, 2.0]);
+        assert_eq!(pl.normal, [-0.0, 0.0, 1.0]);
+        assert_eq!(pl.u_model(), (1.0, 0.0));
+        let l0 = LevelSpec { line: Some([Vec2 { x: 1.0, y: 1.0 }, Vec2 { x: 1.0, y: 1.0 }]), ..Default::default() };
+        assert!(l0.plane().is_none());
+    }
+
+    #[test]
+    fn json_zahlen_wie_frueher() {
+        // JS schreibt die kürzeste Darstellung, serde_json (ohne float_roundtrip) liest Mantisse/10^k.
+        assert_eq!(json_f32(2.6), 2.6f32);
+        assert_eq!(json_f32(-0.0), 0.0f32);
+        assert_eq!(json_f32(3.0), 3.0f32);
+        assert_eq!(json_f32(1e-9), 1e-9f32);
+        // Gleichstand der kürzesten Darstellung → gerade Ziffer (wie serde_json beim Schreiben).
+        assert_eq!(js_f32(5.00390625f32), 5.0039062f64);
+        // Schnellweg = Lesung (gerechnete Zahlen mit 16–17 Ziffern, Rundungsgrenzen)
+        let mut x = 0.123456789f64;
+        for i in 0..200_000 {
+            x = (x * 1.6180339887 + 0.37).fract() * [1e-5, 0.3, 7.0, 123.0, 4567.0, 1e9][i % 6];
+            let v = if i % 7 == 0 { -x } else { x };
+            assert_eq!(json_f32(v).to_bits(), json_f32_read(v).to_bits(), "{v}");
+            let mid = ((v as f32) as f64 + ((v as f32).next_up() as f64)) / 2.0;
+            assert_eq!(json_f32(mid).to_bits(), json_f32_read(mid).to_bits(), "{mid}");
+        }
+    }
+
+    #[test]
+    fn beispiel_schnitt_mit_pick_ids() {
+        let p = sample();
+        let l = level(&p, "schnitt-a");
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let (prims, b) = section_primitives(&out, false, false, &Visibility::default());
+        let json = serde_json::to_string(&prims).unwrap();
+        assert!(json.contains("\"wallId\":\"W2\"") && json.contains("\"roofId\":\"RF1\""), "{json}");
+        assert!(json.contains("section-ground"));
+        assert!(b[2] > b[0] && b[3] > b[1]);
+        // Kategorie ausgeblendet → keine Dach-Schnittflächen mehr. (Von der Dominanz beschnittene
+        // Wand-/Deckenbänder verlieren ihre Kategorie und bleiben sichtbar — wie in der TS-Fassung.)
+        let vis = Visibility { has_vis: true, invisible: ["31".to_string()].into_iter().collect(), ..Default::default() };
+        let (hidden, _) = section_primitives(&out, false, false, &vis);
+        assert!(!serde_json::to_string(&hidden).unwrap().contains("\"roofId\""));
+    }
+
+    #[test]
+    fn puffer_hat_zwei_gruppen() {
+        let p = sample();
+        let text = serde_json::json!({ "level": serde_json::to_value(p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap()).unwrap() }).to_string();
+        let buf = section_plan_buf(&p, &[0.0, 1.0, 0.0, 0.0], &text).unwrap();
+        let (prims, groups, bounds) = crate::plan_buf::decode(&buf).unwrap();
+        assert_eq!(groups.len(), 2);
+        assert!(bounds.is_some() && !prims.is_empty());
+        // Ohne Schnittlinie: leerer Puffer ohne Gruppen.
+        let none = section_plan_buf(&p, &[0.0, 0.0], r#"{"level":{"kind":"section"}}"#).unwrap();
+        assert!(crate::plan_buf::decode(&none).unwrap().1.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use std::time::Instant;
+
+    /// Messung je Stufe (nativ): `SECTION_BENCH_FILE=projekt.obp cargo test --release --lib section::bench -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn stufen() {
+        let Ok(path) = std::env::var("SECTION_BENCH_FILE") else { return };
+        let p: Project = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        for l in p.drawing_levels.iter().filter(|l| l.line_points.is_some()) {
+            let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+            let t = Instant::now();
+            let walls = model3d::emit_walls(&p, false).unwrap();
+            let t_walls = t.elapsed();
+            let t = Instant::now();
+            let mut slabs = model3d::emit_slabs(&p);
+            slabs.extend(model3d::emit_stairs(&p, true));
+            let roofs = model3d::emit_roof_cut_layers(&p).unwrap();
+            let t_rest = t.elapsed();
+            let t = Instant::now();
+            let wi: Vec<render3d::WallInput> = walls.iter().map(wall_input).collect();
+            let si: Vec<render3d::SlabInput> = slabs.iter().map(slab_input).collect();
+            let ri: Vec<render3d::types::RoofLayerInput> = roofs.iter().map(roof_input).collect();
+            let t_conv = t.elapsed();
+            let pl = level.plane().unwrap();
+            let fr = |v: [f64; 3]| [v[0] as f32, v[1] as f32, v[2] as f32];
+            let t = Instant::now();
+            let raw = render3d::cut_section(&render3d::SectionPlane::new(fr(pl.point), fr(pl.normal)), &wi, &si, &ri);
+            let t_cut = t.elapsed();
+            let t = Instant::now();
+            let buf = if l.kind == DrawingLevelKind::Section {
+                section_plan_buf(&p, &[0.0, 1.0, 0.0, 0.0], &serde_json::json!({ "level": serde_json::to_value(l).unwrap() }).to_string()).unwrap()
+            } else {
+                crate::plan::elevation::elevation_plan_buf(&p, &[0.0, 0.0], &serde_json::json!({ "level": serde_json::to_value(l).unwrap() }).to_string()).unwrap()
+            };
+            let t_all = t.elapsed();
+            println!(
+                "{} {:?}: Wände {:?} Platten/Dach {:?} Umwandlung {:?} cut_section {:?} ({} Cut, {} Kanten) | gesamt {:?} ({} Bytes)",
+                l.id, l.kind, t_walls, t_rest, t_conv, t_cut, raw.cut_polygons.len(), raw.visible_edges.len() + raw.hidden_edges.len(), t_all, buf.len()
+            );
+        }
+    }
+}
+
+/// Fälle der früheren TS-Tests (`toSection.boolean/monolith/termination/depth/roof/layerOverride/
+/// orientation`, `generateSectionPlan.category/select`), jetzt gegen die Kern-Fassung.
+#[cfg(test)]
+mod ts_faelle {
+    use super::*;
+
+    fn band(u0: f64, u1: f64, v0: f64, v1: f64, jp: Option<f64>, tag: &str) -> Cut {
+        let mut c = Cut::new(Kind::Wall, 0, vec![[u0, v1], [u1, v1], [u1, v0], [u0, v0]]);
+        c.fill = Some(tag.into());
+        c.join_priority = jp;
+        c
+    }
+
+    fn cband(u0: f64, u1: f64, v0: f64, v1: f64, jp: f64, comp: &str, tag: &str) -> Cut {
+        Cut { component_id: Some(comp.into()), ..band(u0, u1, v0, v1, Some(jp), tag) }
+    }
+
+    fn area(items: &[&Cut]) -> f64 {
+        items.iter().map(|c| {
+            let b = bbox(&c.pts);
+            (b[1] - b[0]) * (b[3] - b[2])
+        }).sum()
+    }
+
+    fn by<'a>(out: &'a [Cut], tag: &str) -> Vec<&'a Cut> {
+        out.iter().filter(|c| c.fill.as_deref() == Some(tag)).collect()
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn dominanz_stärkere_schicht_schneidet_schwächere() {
+        let out = subtract_dominant_bands(vec![band(0.0, 2.0, 0.0, 3.0, Some(10.0), "putz"), band(0.0, 2.0, 2.0, 4.0, Some(100.0), "beton")]);
+        assert_eq!(bbox(&by(&out, "beton")[0].pts), [0.0, 2.0, 2.0, 4.0]);
+        let putz = by(&out, "putz");
+        assert_eq!(putz.len(), 1);
+        assert_eq!(bbox(&putz[0].pts), [0.0, 2.0, 0.0, 2.0]);
+    }
+
+    #[test]
+    fn dominanz_gestaffelte_kette() {
+        let out = subtract_dominant_bands(vec![
+            band(0.0, 1.0, 3.0, 4.0, Some(100.0), "beton"),
+            band(0.0, 1.0, 2.5, 3.5, Some(50.0), "backstein"),
+            band(0.0, 1.0, 2.0, 3.0, Some(20.0), "daemmung"),
+            band(0.0, 1.0, 0.0, 3.2, Some(10.0), "putz"),
+        ]);
+        assert!(close(area(&by(&out, "beton")), 1.0));
+        assert!(close(area(&by(&out, "backstein")), 0.5));
+        assert!(close(area(&by(&out, "daemmung")), 0.5));
+        assert!(close(area(&by(&out, "putz")), 2.0));
+    }
+
+    #[test]
+    fn dominanz_gleiche_prioritaet_und_ohne_prioritaet_koexistieren() {
+        let out = subtract_dominant_bands(vec![band(0.0, 1.0, 0.0, 3.0, Some(100.0), "wand"), band(0.0, 1.0, 2.0, 4.0, Some(100.0), "decke")]);
+        assert!(close(area(&by(&out, "wand")), 3.0) && close(area(&by(&out, "decke")), 2.0));
+        let out = subtract_dominant_bands(vec![band(0.0, 2.0, 0.0, 2.0, Some(100.0), "stark"), band(0.0, 2.0, 0.0, 2.0, None, "ohne")]);
+        assert!(close(area(&by(&out, "stark")), 4.0) && close(area(&by(&out, "ohne")), 4.0));
+        let out = subtract_dominant_bands(vec![band(0.0, 3.0, 0.0, 3.0, Some(100.0), "stark"), band(1.0, 2.0, 1.0, 2.0, Some(10.0), "schwach")]);
+        assert!(by(&out, "schwach").is_empty());
+    }
+
+    #[test]
+    fn verschmelzen_gleicher_komponente() {
+        let out = subtract_dominant_bands(vec![cband(0.0, 1.0, 0.0, 3.0, 100.0, "beton", "wand"), cband(0.0, 1.0, 2.0, 4.0, 100.0, "beton", "decke")]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(bbox(&out[0].pts), [0.0, 1.0, 0.0, 4.0]);
+        let out = subtract_dominant_bands(vec![cband(0.0, 1.0, 0.0, 3.0, 100.0, "b", "u"), cband(0.0, 1.0, 3.0, 5.0, 100.0, "b", "o")]);
+        assert_eq!(out.len(), 1);
+        let out = subtract_dominant_bands(vec![cband(0.0, 1.0, 0.0, 3.0, 100.0, "w", "wand"), cband(0.0, 1.0, 2.0, 4.0, 100.0, "d", "decke")]);
+        assert_eq!(out.len(), 2);
+        let out = subtract_dominant_bands(vec![cband(0.0, 1.0, 0.0, 2.0, 10.0, "putz", "pu"), cband(0.0, 1.0, 2.0, 4.0, 10.0, "putz", "po"), cband(0.0, 1.0, 3.0, 5.0, 100.0, "beton", "beton")]);
+        let putz: Vec<&Cut> = out.iter().filter(|c| c.component_id.as_deref() == Some("putz")).collect();
+        assert_eq!(putz.len(), 1);
+        assert_eq!(bbox(&putz[0].pts), [0.0, 1.0, 0.0, 3.0]);
+        let out = subtract_dominant_bands(vec![cband(0.0, 2.0, 0.0, 2.0, 100.0, "x", "a"), cband(1.0, 3.0, 1.0, 3.0, 100.0, "x", "b")]);
+        assert_eq!(out.len(), 2, "Eck-Überlapp verschmilzt nicht");
+    }
+
+    #[test]
+    fn monolith_tritte_zu_einem_saegezahn() {
+        let rings = union_rect_outlines(&[[0.0, 1.0, 0.0, 0.2], [0.3, 1.0, 0.0, 0.4], [0.6, 1.0, 0.0, 0.6]]);
+        assert_eq!(rings.len(), 1);
+        assert!(rings[0].len() >= 8);
+        assert_eq!(union_rect_outlines(&[[0.0, 1.0, 0.0, 1.0], [2.0, 3.0, 0.0, 1.0]]).len(), 2);
+        let slab = |m: Option<&str>| RSlab { outline: vec![], z_bottom: 0.0, z_top: 1.0, color: [0.0; 3], ceiling_id: String::new(), hatch: None, cut: None, monolith: m.map(String::from) };
+        let slabs = vec![slab(None), slab(Some("ST1")), slab(Some("ST1"))];
+        let mk = |i: usize, u0: f64| Cut::new(Kind::Slab, i, vec![[u0, 0.0], [u0 + 1.0, 0.0], [u0 + 1.0, 1.0], [u0, 1.0]]);
+        let out = merge_monolith_cuts(vec![mk(0, 0.0), mk(1, 0.0), mk(2, 0.5)], &slabs);
+        assert_eq!(out.len(), 2, "nur Bänder derselben Gruppe werden vereint");
+    }
+
+    fn wall(term: Option<SliceTermination>) -> Wall {
+        Wall { id: "W".into(), slice_termination: term, ..Default::default() }
+    }
+
+    fn slab_band(u0: f64, u1: f64, v0: f64, v1: f64, jp: f64) -> Cut {
+        Cut { kind: Kind::Slab, ..band(u0, u1, v0, v1, Some(jp), "decke") }
+    }
+
+    #[test]
+    fn terminierung_unter_und_ueber_der_decke() {
+        let below = wall(Some(SliceTermination::Below));
+        let above = wall(Some(SliceTermination::Above));
+        let both = wall(None);
+        let run = |w: &Wall, wb: Cut, sb: Cut| apply_wall_termination(vec![wb, sb], &[w]);
+        let out = run(&below, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 2.6, 2.9, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 2.6]);
+        let out = run(&above, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 0.0, 0.3, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.3, 3.0]);
+        let out = run(&both, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 2.6, 2.9, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 3.0]);
+        // nur strikt dominante Decken; ohne u-Überlapp (über 5 cm Anschluss hinaus) keine Terminierung
+        let out = run(&below, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 2.6, 2.9, 10.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 3.0]);
+        let out = run(&below, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(1.0, 4.0, 2.6, 2.9, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 3.0]);
+        // ohne joinPriority unangetastet
+        let out = run(&below, band(0.0, 0.3, 0.0, 3.0, None, "w"), slab_band(-1.0, 4.0, 2.6, 2.9, 100.0));
+        assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 3.0]);
+    }
+
+    #[test]
+    fn tiefe_blendet_ferne_kanten_aus() {
+        let mut p = Project::default();
+        p.walls = vec![
+            Wall { id: "nah".into(), start: Vec2 { x: 0.0, y: 1.0 }, end: Vec2 { x: 4.0, y: 1.0 }, ..Default::default() },
+            Wall { id: "fern".into(), start: Vec2 { x: 0.0, y: 9.0 }, end: Vec2 { x: 4.0, y: 9.0 }, ..Default::default() },
+        ];
+        let walls: Vec<&Wall> = p.walls.iter().collect();
+        let plane = Plane { point: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0] };
+        let e = |i: usize| Edge { kind: Kind::Wall, index: i, a: [0.0, 0.0], b: [1.0, 0.0] };
+        let mut out = Output { visible: vec![e(0), e(1)], hidden: vec![e(1)], ..Default::default() };
+        filter_by_depth(&mut out, &p, &plane, 3.0, &walls, &[]);
+        assert_eq!(out.visible.len(), 1);
+        assert_eq!(out.visible[0].index, 0);
+        assert!(out.hidden.is_empty());
+        let mut all = Output { visible: vec![e(0), e(1)], ..Default::default() };
+        filter_by_depth(&mut all, &p, &plane, 0.0, &walls, &[]);
+        assert_eq!(all.visible.len(), 2, "Tiefe 0 ist kein Filter");
+    }
+
+    #[test]
+    fn primitive_pick_ids_und_kategorien() {
+        let mut w = band(0.0, 1.0, 0.0, 1.0, None, "#fff");
+        w.source_id = Some("W1".into());
+        w.category = Some("20".into());
+        let mut s = Cut { kind: Kind::Slab, ..band(0.0, 1.0, 1.0, 2.0, None, "#fff") };
+        s.source_id = Some("C1".into());
+        let mut st = s.clone();
+        st.stair_id = Some("ST1".into());
+        let mut r = Cut { kind: Kind::Roof, ..band(0.0, 1.0, 2.0, 3.0, None, "#fff") };
+        r.source_id = Some("R1".into());
+        r.category = Some("31".into());
+        let anon = band(2.0, 3.0, 0.0, 1.0, None, "#fff");
+        let out = Output { cuts: vec![w, s, st, r, anon], ..Default::default() };
+        let (prims, _) = section_primitives(&out, false, false, &Visibility::default());
+        let json = serde_json::to_value(&prims).unwrap();
+        assert_eq!(json[0]["wallId"], "W1");
+        assert_eq!(json[1]["ceilingId"], "C1");
+        assert!(json[2].get("ceilingId").is_none() && json[2]["stairId"] == "ST1");
+        assert_eq!(json[3]["roofId"], "R1");
+        assert!(json[4].get("wallId").is_none());
+        // ausgeblendet, nicht gezeichnet, gedimmt; ohne Kategorie immer sichtbar
+        let vis = Visibility { has_vis: true, invisible: ["20".to_string()].into(), norender: ["31".to_string()].into(), ..Default::default() };
+        let (prims, _) = section_primitives(&out, false, false, &vis);
+        assert_eq!(prims.iter().filter(|p| matches!(p, Primitive::Polygon { .. })).count(), 3);
+        let grey = Visibility { grey: ["20".to_string()].into(), ..Default::default() };
+        let (prims, _) = section_primitives(&out, false, false, &grey);
+        assert!(matches!(&prims[0], Primitive::Polygon { greyed: Some(true), .. }));
+        assert!(matches!(&prims[4], Primitive::Polygon { greyed: Some(false), .. }));
+    }
+
+    #[test]
+    fn dach_schnitt_flach_und_sattel() {
+        let mut p: Project = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+        let roof = p.roofs.as_mut().unwrap().get_mut(0).unwrap();
+        roof.shape = RoofShape::Flach;
+        roof.overhang = 0.0;
+        roof.base_elevation = Some(5.0);
+        roof.roof_type_id = None;
+        roof.thickness = 0.3;
+        let plane = LevelSpec { line: Some([Vec2 { x: -1.0, y: 2.0 }, Vec2 { x: 6.0, y: 2.0 }]), ..Default::default() }.plane().unwrap();
+        let mut cuts = Vec::new();
+        append_roof_sections(&mut cuts, &p, &plane);
+        assert_eq!(cuts.len(), 1);
+        let b = bbox(&cuts[0].pts);
+        assert!(close(b[3], 5.0) && close(b[3] - b[2], 0.3) && close(b[1] - b[0], 5.0), "{b:?}");
+        // Sattel quer zum First: zwei Bänder; Spur ausserhalb: keine
+        p.roofs.as_mut().unwrap()[0].shape = RoofShape::Sattel;
+        let cross = LevelSpec { line: Some([Vec2 { x: 2.0, y: -1.0 }, Vec2 { x: 2.0, y: 5.0 }]), ..Default::default() }.plane().unwrap();
+        let mut cuts = Vec::new();
+        append_roof_sections(&mut cuts, &p, &cross);
+        assert_eq!(cuts.len(), 2);
+        let outside = LevelSpec { line: Some([Vec2 { x: -1.0, y: 9.0 }, Vec2 { x: 6.0, y: 9.0 }]), ..Default::default() }.plane().unwrap();
+        let mut cuts = Vec::new();
+        append_roof_sections(&mut cuts, &p, &outside);
+        assert!(cuts.is_empty());
+    }
+
+    #[test]
+    fn schichten_aussen_aussen_und_override_auf_allen_schichten() {
+        let mut p: Project = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+        let layers = p.wall_types.iter().find(|t| t.id == "aw").unwrap().layers.clone();
+        assert!(layers.len() > 1);
+        let cp = Cut::new(Kind::Wall, 0, vec![[0.0, 2.6], [0.345, 2.6], [0.345, 0.0], [0.0, 0.0]]);
+        let w2 = p.walls.iter().find(|w| w.id == "W2").unwrap().clone();
+        let w4 = p.walls.iter().find(|w| w.id == "W4").unwrap().clone();
+        let u = (1.0, 0.0);
+        let b2 = split_wall_layers(&cp, &p, &layers, &w2, u).unwrap();
+        let b4 = split_wall_layers(&cp, &p, &layers, &w4, u).unwrap();
+        // W4 (Aussenseite −x): layers[0] an uMin; W2 gespiegelt: layers[0] an uMax.
+        assert_eq!(b4[0].component_id.as_deref(), Some(layers[0].component_id.as_str()));
+        assert!(close(bbox(&b4[0].pts)[0], 0.0));
+        assert_eq!(b2.last().unwrap().component_id.as_deref(), Some(layers[0].component_id.as_str()));
+        // Override der Wand gilt für jede Schicht
+        p.walls[1].background = Some("#123456".into());
+        let w = p.walls[1].clone();
+        let bands = split_wall_layers(&cp, &p, &layers, &w, u).unwrap();
+        assert!(bands.iter().all(|b| b.fill.as_deref() == Some("#123456")));
+    }
+}
+
+/// Früher `toSection.roof.test.ts` (mehrschichtiges Dach, Nähte deckungsgleicher Teilflächen).
+#[cfg(test)]
+mod dach_faelle {
+    use super::*;
+
+    fn project(roof: serde_json::Value, extra: serde_json::Value) -> Project {
+        let mut v = serde_json::json!({
+            "id": "t", "name": "T", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [],
+            "drawingLevels": [], "layers": [], "walls": [], "roofs": [roof]
+        });
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    fn roof(over: serde_json::Value) -> serde_json::Value {
+        let mut r = serde_json::json!({
+            "id": "R1", "type": "roof", "floorId": "eg", "categoryCode": "35",
+            "outline": [{"x": -3, "y": 0}, {"x": 3, "y": 0}, {"x": 3, "y": 4}, {"x": -3, "y": 4}],
+            "shape": "sattel", "pitchDeg": 30, "overhang": 0, "ridgeAxis": "x", "baseElevation": 5, "thickness": 0.3
+        });
+        for (k, x) in over.as_object().unwrap() {
+            r[k] = x.clone();
+        }
+        r
+    }
+
+    fn plane(point: [f64; 3], normal: [f64; 3]) -> Plane {
+        Plane { point, normal }
+    }
+
+    #[test]
+    fn mehrschichtiges_dach_je_schicht_ein_band_aussen_oben() {
+        let p = project(
+            roof(serde_json::json!({ "shape": "flach", "pitchDeg": 0, "roofTypeId": "rt1" })),
+            serde_json::json!({
+                "hatches": [{ "id": "h1", "name": "H", "pattern": "diagonal", "scale": 1, "angle": 45, "color": "#111111" }],
+                "components": [
+                    { "id": "tile", "name": "Ziegel", "color": "#a03a2a", "hatchId": "h1", "joinPriority": 1 },
+                    { "id": "ins", "name": "Dämmung", "color": "#ffffff", "hatchId": "h1", "joinPriority": 2 }
+                ],
+                "roofTypes": [{ "id": "rt1", "name": "Aufbau", "layers": [{ "componentId": "tile", "thickness": 0.05 }, { "componentId": "ins", "thickness": 0.25 }] }]
+            }),
+        );
+        let mut cuts = Vec::new();
+        append_roof_sections(&mut cuts, &p, &plane([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]));
+        assert_eq!(cuts.len(), 2);
+        let tops: Vec<f64> = cuts.iter().map(|c| bbox(&c.pts)[3]).collect();
+        assert!((tops[0] - 5.0).abs() < 1e-6 && (tops[1] - 4.95).abs() < 1e-6, "{tops:?}");
+        assert!(cuts.iter().all(|c| c.hatch.as_ref().is_some_and(|h| h.pattern == HatchPattern::Diagonal)));
+    }
+
+    #[test]
+    fn l_walmdach_deckungsgleiche_teilflaechen_ein_band() {
+        let l = serde_json::json!([{"x": 0, "y": 0}, {"x": 11, "y": 0}, {"x": 11, "y": 4}, {"x": 8, "y": 4}, {"x": 8, "y": 6}, {"x": 0, "y": 6}]);
+        for y in [1.0, 2.0] {
+            let p = project(roof(serde_json::json!({ "outline": l, "shape": "walm" })), serde_json::json!({}));
+            let mut cuts = Vec::new();
+            append_roof_sections(&mut cuts, &p, &plane([0.0, 0.0, y], [0.0, 0.0, 1.0]));
+            assert_eq!(cuts.len(), 3, "Schnitt bei y = {y}");
+        }
+    }
+}
+
+/// Früher `voids.test.ts` (Schnitt): Abzugskörper = Grundfläche × Höhenbereich, aus den Cut-Bändern
+/// abgezogen.
+#[cfg(test)]
+mod abzug_faelle {
+    use super::*;
+
+    #[test]
+    fn abzugskoerper_wird_aus_dem_schnittband_gezogen() {
+        let mut p: Project = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+        let (mx, my) = (2.5, 0.0);
+        let solid: ExtrudedSolid = serde_json::from_value(serde_json::json!({
+            "id": "void1", "type": "extrudedSolid", "levelId": "eg", "operation": "subtract", "height": 1.0, "baseOffset": 0.5,
+            "points": [{"x": mx - 0.3, "y": my - 1.0}, {"x": mx + 0.3, "y": my - 1.0}, {"x": mx + 0.3, "y": my + 1.0}, {"x": mx - 0.3, "y": my + 1.0}]
+        }))
+        .unwrap();
+        p.extruded_solids = Some(vec![solid]);
+        let band = Cut::new(Kind::Wall, 0, vec![[mx - 2.0, 0.0], [mx + 2.0, 0.0], [mx + 2.0, 2.5], [mx - 2.0, 2.5]]);
+        let out = subtract_voids_in_section(vec![band], &p, (0.0, my), (1.0, 0.0));
+        assert_eq!(out.len(), 1);
+        let pts: Vec<(f64, f64)> = out[0].pts.iter().map(|q| (q[0], q[1])).collect();
+        let area = (0..pts.len()).map(|i| { let (a, b) = (pts[i], pts[(i + 1) % pts.len()]); a.0 * b.1 - b.0 * a.1 }).sum::<f64>().abs() / 2.0;
+        assert!((area - (4.0 * 2.5 - 0.6 * 1.0)).abs() < 1e-6, "{area}");
+        assert_eq!(out[0].nse.as_ref().map(|n| n.len()), Some(2), "Schlüsselloch-Stege ungestrichen");
+    }
+}

@@ -151,6 +151,8 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             w.group(&drawings::level_markers(p, [args[0], args[1], args[2], args[3]]));
             Ok(w.finish())
         }
+        ("sectionPlan", _) => crate::plan::section::section_plan_buf(p, args, text),
+        ("elevationPlan", _) => crate::plan::elevation::elevation_plan_buf(p, args, text),
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }
 }

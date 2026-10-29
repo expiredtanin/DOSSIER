@@ -297,3 +297,63 @@ mod tests {
         assert_eq!(&f[..3], &[1.0, 2.0, 4.0]);
     }
 }
+
+#[cfg(test)]
+mod tests_ts {
+    use super::*;
+
+    fn ring_area(f: &[f64], at: usize) -> f64 {
+        let n = f[at] as usize;
+        let pt = |i: usize| (f[at + 1 + 2 * (i % n)], f[at + 2 + 2 * (i % n)]);
+        (0..n).map(|i| { let (a, b) = (pt(i), pt(i + 1)); a.0 * b.1 - b.0 * a.1 }).sum::<f64>() / 2.0
+    }
+
+    fn quader(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> (Vec<f64>, Vec<f64>) {
+        let p = vec![x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1];
+        let f = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7];
+        (p, f.iter().map(|&i| i as f64).collect())
+    }
+
+    // Früher `meshSection.test.ts`.
+    #[test]
+    fn senkrechter_schnitt_durch_einen_quader() {
+        let (p, f) = quader(0.0, 0.0, 0.0, 4.0, 2.0, 3.0);
+        let r = cut(&p, &f, &[0.0, 0.0, 1.0, 1.0, 0.0]);
+        assert_eq!(r[0], 1.0);
+        assert!((ring_area(&r, 1).abs() - 12.0).abs() < 1e-9);
+        let n = r[1] as usize;
+        assert_eq!(r[2 + 2 * n], 0.0, "keine Linienzüge");
+        // Ebene genau auf den Seitenflächen: keine offenen Linien
+        for y in [0.0, 2.0] {
+            let r = cut(&p, &f, &[0.0, 0.0, y, 1.0, 0.0]);
+            let mut i = 1;
+            for _ in 0..r[0] as usize {
+                i += 1 + 2 * r[i] as usize;
+            }
+            assert_eq!(r[i], 0.0);
+        }
+    }
+
+    #[test]
+    fn schraeger_schnitt() {
+        let (p, f) = quader(0.0, 0.0, 0.0, 2.0, 2.0, 2.0);
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let r = cut(&p, &f, &[0.0, 0.0, 0.0, s, s]);
+        assert_eq!(r[0], 1.0);
+        assert!((ring_area(&r, 1).abs() - 2.0 * std::f64::consts::SQRT_2 * 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn offenes_netz_ergibt_linienzug() {
+        // Geneigte Fläche z = x über x 0..4, y 0..4.
+        let p = [0.0, 0.0, 0.0, 4.0, 0.0, 4.0, 4.0, 4.0, 4.0, 0.0, 4.0, 0.0];
+        let f = [0.0, 1.0, 2.0, 0.0, 2.0, 3.0];
+        let r = cut(&p, &f, &[0.0, 0.0, 2.0, 1.0, 0.0]);
+        assert_eq!(r[0], 0.0);
+        assert_eq!(r[1], 1.0);
+        let n = r[2] as usize;
+        for j in 0..n {
+            assert!((r[3 + 2 * j] - r[4 + 2 * j]).abs() < 1e-9, "v = u");
+        }
+    }
+}

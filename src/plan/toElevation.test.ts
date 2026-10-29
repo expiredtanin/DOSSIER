@@ -1,87 +1,16 @@
 /**
- * Unit-Tests für den Ansichts-Generator (toElevation.ts): Projektion einer
- * bekannten Fläche auf (u, v)+Tiefe, Rückseiten-Culling, Painter-Reihenfolge
- * (nähere Fassade NACH der ferneren) und Schlagschatten (nur mit shadows=true).
- * Alles rein geometrisch auf synthetischen RWall/RSlab-Fixtures bzw. einem
- * Minimalprojekt — KEIN WASM.
+ * Tests für den Ansichts-Generator (toElevation.ts → Kern `plan/elevation.rs`): Painter-Reihenfolge
+ * (nähere Fassade NACH der ferneren), Schlagschatten (nur mit shadows=true), Sichtbarkeit,
+ * Durchsicht-Clipping, Öffnungen und Dächer — auf Minimalprojekten. Projektion, Culling und
+ * Schatten-Geometrie prüft der Kern selbst (`plan_elevation.rs`).
  */
 
 import { describe, it, expect } from "vitest";
 import type { Project, Wall } from "../model/types";
-import type { RModel3d, RSlab, RWall } from "./toWalls3d";
-import type { SectionPlaneSpec } from "./toSection";
 import type { CategoryDisplayResolver } from "./generatePlan";
-import {
-  buildShadows,
-  collectElevationFaces,
-  elevationFrame,
-  generateElevationPlan,
-} from "./toElevation";
-
-// Betrachter im Süden (world z = −2), Blick nach +Z (in die Szene). Damit liegt
-// eine Wand bei z ≈ 0 HINTER der Ebene (depth > 0) und ihre Süd-Langseite zeigt
-// zum Betrachter (front-facing).
-const PLANE_SOUTH: SectionPlaneSpec = { point: [-1, 0, -2], normal: [0, 0, 1] };
-
-function wall(over: Partial<RWall> = {}): RWall {
-  return {
-    start: [0, 0],
-    end: [4, 0],
-    thickness: 0.2,
-    height: 3,
-    baseElevation: 0,
-    color: [0.8, 0.8, 0.8],
-    layers: [],
-    wallId: "W",
-    ...over,
-  };
-}
-
-describe("toElevation — Projektion + Culling", () => {
-  it("Süd-Langseite einer Wand: erwartetes (u, v)-Rechteck + Tiefe, Rückseite gecullt", () => {
-    const frame = elevationFrame(PLANE_SOUTH);
-    const model: RModel3d = { walls: [wall()], slabs: [], meshes: [], roofLayers: [] };
-    const visible = collectElevationFaces(model, frame);
-    // Genau EINE sichtbare Fläche (die Süd-Langseite); alle anderen sind
-    // Rückseiten oder streifend (Deckel/Boden/Stirnkappen).
-    expect(visible.length).toBe(1);
-    const face = visible[0];
-    expect(face.wallId).toBe("W");
-    const us = face.pts.map((p) => p[0]);
-    const vs = face.pts.map((p) => p[1]);
-    // U (entspiegelt, Blick +z ⇒ rechts = +x) = [1, 0, 0], P.x = −1.
-    expect(Math.min(...us)).toBeCloseTo(1, 6); // x=0 → u=1
-    expect(Math.max(...us)).toBeCloseTo(5, 6); // x=4 → u=5
-    expect(Math.min(...vs)).toBeCloseTo(0, 6);
-    expect(Math.max(...vs)).toBeCloseTo(3, 6);
-    expect(face.depth).toBeCloseTo(1.9, 6); // z ≈ −0.1 − (−2)
-  });
-
-  it("Rückseiten-Culling: eine Wand hinter dem Betrachter erscheint nicht", () => {
-    const frame = elevationFrame(PLANE_SOUTH);
-    const model: RModel3d = { walls: [wall({ start: [0, -5], end: [4, -5] })], slabs: [], meshes: [], roofLayers: [] };
-    expect(collectElevationFaces(model, frame)).toEqual([]);
-  });
-});
+import { generateElevationPlan } from "./toElevation";
 
 describe("toElevation — Painter-Reihenfolge", () => {
-  it("nähere Fassade wird NACH der ferneren emittiert", () => {
-    const frame = elevationFrame(PLANE_SOUTH);
-    const model: RModel3d = {
-      walls: [
-        wall({ wallId: "NEAR", start: [0, 0], end: [4, 0] }), // z ≈ 0 → näher
-        wall({ wallId: "FAR", start: [0, 3], end: [4, 3] }), // z ≈ 3 → ferner
-      ],
-      slabs: [],
-      meshes: [],
-      roofLayers: [],
-    };
-    const faces = collectElevationFaces(model, frame);
-    const near = faces.find((f) => f.wallId === "NEAR")!;
-    const far = faces.find((f) => f.wallId === "FAR")!;
-    expect(near.depth).toBeLessThan(far.depth);
-  });
-
   it("im Plan: nähere Wand-Fläche hat einen höheren Primitiv-Index", () => {
     const project = elevationProject({ overhang: false });
     const plan = generateElevationPlan(project, project.drawingLevels[1])!;
@@ -99,61 +28,6 @@ describe("toElevation — Painter-Reihenfolge", () => {
 });
 
 describe("toElevation — Schlagschatten", () => {
-  it("buildShadows: Überstand vor einer Fassade wirft ein Schatten-Polygon", () => {
-    const frame = elevationFrame(PLANE_SOUTH);
-    // Wandfläche (Fassade) hinter dem Überstand.
-    const wallFaces = collectElevationFaces(
-      { walls: [wall()], slabs: [], meshes: [], roofLayers: [] },
-      frame,
-    );
-    // Überstand-Slab, der VOR der Wand (näher, z < −0.1) liegt und sie u-seitig
-    // überdeckt.
-    const slab: RSlab = {
-      outline: [
-        [0, -0.6],
-        [4, -0.6],
-        [4, 0.2],
-        [0, 0.2],
-      ],
-      zBottom: 2.8,
-      zTop: 3,
-      color: [0.9, 0.9, 0.9],
-      ceilingId: "R",
-    };
-    const slabFaces = collectElevationFaces(
-      { walls: [], slabs: [slab], meshes: [], roofLayers: [] },
-      frame,
-    );
-    const shadows = buildShadows(wallFaces, slabFaces);
-    expect(shadows.length).toBeGreaterThan(0);
-  });
-
-  it("buildShadows: kein Überlapp → keine Schatten", () => {
-    const frame = elevationFrame(PLANE_SOUTH);
-    const wallFaces = collectElevationFaces(
-      { walls: [wall({ start: [0, 0], end: [4, 0] })], slabs: [], meshes: [], roofLayers: [] },
-      frame,
-    );
-    // Slab weit seitlich versetzt (u außerhalb der Wand).
-    const slab: RSlab = {
-      outline: [
-        [20, -0.6],
-        [24, -0.6],
-        [24, 0.2],
-        [20, 0.2],
-      ],
-      zBottom: 2.8,
-      zTop: 3,
-      color: [0.9, 0.9, 0.9],
-      ceilingId: "R",
-    };
-    const slabFaces = collectElevationFaces(
-      { walls: [], slabs: [slab], meshes: [], roofLayers: [] },
-      frame,
-    );
-    expect(buildShadows(wallFaces, slabFaces).length).toBe(0);
-  });
-
   it("im Plan: shadows=true erzeugt zusätzliche Schatten-Primitive, false exakt keine", () => {
     const project = elevationProject({ overhang: true });
     const level = project.drawingLevels[1];

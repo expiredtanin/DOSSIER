@@ -172,7 +172,6 @@ export {
   type PlanImage,
   type UnderlayGroup,
   generatePlan,
-  generateSectionPlan,
   generateVisibleLevelsPlan,
   materializeGreyed,
   materializeUnderlay,
@@ -290,10 +289,7 @@ export {
 } from "../plan/planView/underlayAccess";
 
 export {
-  sectionOpeningPrimitives,
-} from "../plan/sectionOpenings";
-
-export {
+  type ElevationOptions,
   generateElevationPlan,
 } from "../plan/toElevation";
 
@@ -305,6 +301,7 @@ export {
 export {
   type SectionOutput,
   computeSection,
+  generateSectionPlan,
   sameSectionInputs,
   sameSectionLine,
   sectionPlaneFromLevel,

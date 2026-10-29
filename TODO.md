@@ -104,17 +104,45 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     `jsnum::pow` (= `Math.pow` im Web-Build) für `x ** 3`.
     ✅ (29.10.) 2D-Zeichnungen: `drawing2d.ts` (Stil-Auflösung und Verteiler über alle Formen) ist nach `core/src/plan/drawings.rs`
     gezogen und gelöscht, s. [K3d] „2D-Zeichnungen im Kern“. Danach: [K3c] Schnitt/Ansicht, [K3d] Aufräumen.
-  - ◐ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
+  - ✅ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format (29.10.).
     ✅ Schnitt-Bänder: Dominanz-Subtraktion, Verschmelzung, Rechteck-Vereinigung (`plan_section.rs`, 28.10.).
     ✅ Ansicht: Verdeckungs-Clipping, Punkt-Verdeckung, Schlagschatten, XOR-Umriss (`plan_elevation.rs`, 28.10.).
     ✅ Ansicht: Flächen (Wand-Quader, Decken-Prismen, Dach/Giebel) projizieren + Rückseiten-Culling, Eck-Verlängerung, Öffnungen (Rahmen, Glasfelder, Sprossen, Sims, SIA-Symbol) (`plan_elevation.rs`).
     ✅ Netz-Ebenenschnitt (Körper/Gelände) + Ringe→Flächen (`mesh_section.rs`; behebt nebenbei: rückwärts geschlossene Ringe gingen verloren).
     ✅ Dach-Schnittspur (Cyrus–Beck, lineare Oberkante, Verschmelzen) in `plan_section.rs`.
     ✅ Abzugskörper-Geometrie (`voids.rs`: Polygon minus Schneider mit Schlüsselloch-Stegen, Strecke ausserhalb, Schnitt-Rechtecke); behebt: bei mehreren getrennten Aussparungen wurde nichts abgezogen.
-    Rest in TS (28.10.): Stil-Auflösung (Bauteil, Schraffur, Farbe, Linienstil, Pick-IDs, Painter-Reihenfolge) in `generatePlan*.ts`,
-    `toSection.ts` (Besitzer-Zuordnung, Schichtbänder), `toElevation.ts` (Orchestrierung), `sectionOpenings.ts`, `planUnderlay.ts`.
-    Das ist kein Rechenanteil mehr, sondern liest das Modell; es zieht mit [K4] um. (Die automatischen Höhenkoten
-    `levelMarkers.ts` rechnet seit 29.10. der Kern, Abfrage `levelMarkers`.)
+    ✅ (29.10.) Schnitt und Ansicht als Kern-Abfragen `sectionPlan`/`elevationPlan` (`core/src/plan/{section,elevation}.rs`) auf dem
+    Dokument, Ausgabe Plan-Puffer v2 mit Pick-Ids (lazy gelesen wie `generatePlan`): Besitzer-Zuordnung, Schicht-Bänder, Stil,
+    Decken-Terminierung, Dominanz, Treppen, Monolith, Abzugskörper, Gelände, Schnitt-Tiefe, geschnittene Fenster/Türen
+    (`sectionOpenings`), Ansicht mit Eck-Verlängerung, Verdeckung, Schatten, Painter. Der Prismen-Schnitt läuft über
+    `render3d::section::cut_section` (Kern hängt an render3d ohne Features); Zahlen, die früher über JSON in render3d
+    reisten, werden bitgleich nachgebildet (kürzeste Darstellung, serde_json ohne `float_roundtrip`). Aus TS kommen nur
+    noch die truck-Körper (flach, `Float64Array`). Gleichheit: Primitive (Object.is, auch −0), Ausmass, render2d-Szene und
+    SVG gegen die TS-Fassung — Beispiel (40 Linien), 60 Zufallsprojekte (Dächer aller Formen, Treppentypen, Öffnungen,
+    Abzugskörper, Gelände, Overrides, Terminierung, Tiefe) × 3 Optionssätze, gekacheltes Projekt 6×6; CLI-SVG byte-gleich.
+    Ausnahme (Fehler der alten Fassung): eine render3d-interne Schraffur (Muster als Zahl) sickerte bei nicht zuordenbaren
+    Decken-/Treppen-Bändern als Plan-Schraffur durch (GPU: Diagonale, SVG: keine) — jetzt die vorgesehene
+    Rückfall-Schraffur. Ursache bleibt offen: `slabSegmentOwners` zählt Decken, das Schnitt-Modell emittiert je
+    Deckenschicht und Treppentritt eine Platte (Index-Versatz; mehrschichtige Decken im Schnitt falsch geschichtet).
+    Leistung (29.10., Ausgabe bitgleich, Gleichheitstest nach jedem Schritt): render3d-Verdeckung über ein u-Raster mit nach
+    Tiefe sortierten Zellen und Abbruch bei ganz verdeckter Kante (vorher jede Kante gegen jedes Prisma); Ansicht: Verdecker,
+    Schatten, Eck-Verlängerung über Raster (`ugrid.rs`), Linien-Clipping nah→fern mit Abbruch; Schnitt-Dominanz nur gegen
+    treffende Schneider, Verschmelzen ohne Neustart über alle Paare, Monolith-Umriss per Bereichs-Malen; Öffnungen je Wand
+    einmal indiziert; Zahlen-Nachbildung mit Schnellweg. Messung (Node/WASM, Min., Kacheln des Beispielhauses mit Treppen):
+    Schnitt 6×6 10,2 s → 0,10 s, 8×8 33 s → 0,19 s, 16×16 0,8 s (alt nicht messbar, > 1 min); Ansicht 8×8 107 → 29 ms.
+    Der Kern merkt sich die zuletzt vorbereiteten Schnitte (Schlüssel je `computeSection`): Schwarz-Weiss/Sichtbarkeit
+    umschalten 8×8 ~1 ms statt Neurechnen. Offen: Szene mit vielen verdeckten (gestrichelten) Kanten bleibt teuer
+    (16×16 mit verdeckten Kanten ~2,5 s, Strichmuster-Zerlegung in `plan_scene`).
+    TS-Fassung gelöscht (29.10.): `toSection.ts`/`toElevation.ts` sind dünne Fassaden (Ebene, Sichtbarkeit, truck-Körper →
+    Abfrage), `sectionOpenings.ts`, `sectionExtras.ts`, `meshSection.ts`, `generateSectionPlan`/`resolve*SectionStyle` in
+    `generatePlan.ts`, `windowSymbol` (opening.ts), `keyhole`/`voidSectionRects`/`subtractVoidsInSection` (voids.ts) und ihre
+    Bindungen entfernt; die Fälle der alten TS-Einzeltests laufen als Rust-Tests (`plan/section.rs`, `plan_section.rs`,
+    `plan_elevation.rs`, `mesh_section.rs`), die übrigen TS-Tests (Ansicht, Öffnungen, Gelände/Körper, Golden-SVG) gegen den
+    neuen Weg; der Gleichheitstest ist wieder entfernt. Nicht in der Tauri-App angesehen; pkg3d (3D-Live-Schnitt, gleiche
+    render3d-Verdeckung) nicht neu gebaut.
+    Bleibt in TS: `planUnderlay.ts` (legt den TS-Grundriss unter Schnitt/Ansicht; zieht mit `generatePlan`/`drawing2d.ts` um),
+    das Bauen der truck-Körper (asynchron, eigenes WASM).
+    (Die automatischen Höhenkoten `levelMarkers.ts` rechnet seit 29.10. der Kern, Abfrage `levelMarkers`.)
   - ◐ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
     typisierte Modell (Bauteil-Typen, Schraffuren, Linienstile, Kategorien) und einen Plan-Puffer v2 mit Pick-IDs + vollem `Primitive`-Umfang
     (Text, Schraffur-Optionen, Zickzack/Motiv); die Verbraucher von `Primitive[]` (SVG/PDF/DXF, Auswahl, Overlay) lesen dann den Puffer.

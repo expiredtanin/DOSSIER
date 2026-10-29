@@ -19,6 +19,7 @@
 //! `union_outlines(in)` mit `in = [n, (uMin, uMax, vMin, vMax) × n]` → `[r, (k, x, y × k) × r]`.
 
 use crate::jsnum::{max, min};
+use crate::ugrid::Grid1;
 use std::collections::HashMap;
 
 const RECT_EPS: f64 = 1e-6;
@@ -89,7 +90,66 @@ fn rect_union_if_rect(a: Rect, b: Rect) -> Option<Rect> {
     None
 }
 
+/// Verschmilzt Rechtecke gleicher Komponente und Priorität. Ergebnis wie die schlichte Fassung
+/// ([`merge_same_component_naive`]: immer das lexikographisch kleinste verschmelzbare Paar (i, j),
+/// dann von vorn), aber ohne den Neustart über alle Paare: Nach dem Verschmelzen von (p, b) können
+/// nur Paare mit dem geänderten Eintrag p neu passen; davor liegende Einträge hatten sonst keinen
+/// Partner. Kandidaten nur aus derselben Gruppe (Komponente, Priorität).
 fn merge_same_component(bands: &[Band], list: Vec<Out>) -> Vec<Out> {
+    let n = list.len();
+    let mut rects: Vec<Option<Rect>> = list.iter().map(|o| o.rect.or(bands[o.src].rect)).collect();
+    let mut changed = vec![false; n];
+    let mut alive = vec![true; n];
+    // Gruppe je Eintrag (nur verschmelzbare: Komponente + Priorität + Rechteck).
+    let mut groups: HashMap<(i64, u64), Vec<usize>> = HashMap::new();
+    let mut group_of: Vec<Option<(i64, u64)>> = vec![None; n];
+    for (k, o) in list.iter().enumerate() {
+        let b = bands[o.src];
+        if let (Some(c), Some(pr), Some(_)) = (b.comp, b.prio, rects[k]) {
+            let key = (c, if pr == 0.0 { 0 } else { pr.to_bits() });
+            groups.entry(key).or_default().push(k);
+            group_of[k] = Some(key);
+        }
+    }
+    let ok = |rects: &[Option<Rect>], a: usize, b: usize| -> Option<Rect> { rect_union_if_rect(rects[a]?, rects[b]?) };
+    let mut p = 0;
+    while p < n {
+        let Some(key) = group_of[p].filter(|_| alive[p]) else {
+            p += 1;
+            continue;
+        };
+        let members = &groups[&key];
+        // kleinster Partner b > p
+        let hit = members.iter().copied().filter(|&b| b > p && alive[b]).find_map(|b| ok(&rects, p, b).map(|u| (b, u)));
+        let Some((b, u)) = hit else {
+            p += 1;
+            continue;
+        };
+        rects[p] = Some(u);
+        changed[p] = true;
+        alive[b] = false;
+        // Rückwärts: kleinster a < p, der jetzt mit dem geänderten Eintrag verschmilzt (Kette).
+        let mut cur = p;
+        loop {
+            let members = &groups[&key];
+            let back = members.iter().copied().filter(|&a| a < cur && alive[a]).find_map(|a| ok(&rects, a, cur).map(|u| (a, u)));
+            let Some((a, u)) = back else { break };
+            rects[a] = Some(u);
+            changed[a] = true;
+            alive[cur] = false;
+            cur = a;
+        }
+        p = cur;
+    }
+    list.into_iter()
+        .enumerate()
+        .filter(|(k, _)| alive[*k])
+        .map(|(k, o)| Out { src: o.src, rect: if changed[k] { rects[k] } else { o.rect } })
+        .collect()
+}
+
+#[cfg(test)]
+fn merge_same_component_naive(bands: &[Band], list: Vec<Out>) -> Vec<Out> {
     let mut out = list;
     let mut merged = true;
     while merged {
@@ -150,6 +210,11 @@ pub fn dominant_bands(inp: &[f64]) -> Vec<f64> {
         })
         .collect();
     let mut out: Vec<Out> = Vec::new();
+    // Vorauswahl der Schneider über u (aufsteigend wie die volle Schleife): ein Schneider, der das
+    // Grundrechteck nicht trifft, lässt alle Teilstücke unverändert (`subtract_rect`).
+    let cutters: Vec<usize> = (0..n).filter(|&j| bands[j].rect.is_some() && bands[j].prio.is_some()).collect();
+    let grid = Grid1::new(&cutters.iter().map(|&j| bands[j].rect.map_or((0.0, 0.0), |r| (r.u_min, r.u_max))).collect::<Vec<_>>());
+    let mut cand = Vec::new();
     for i in 0..n {
         let (base, prio) = match (bands[i].rect, bands[i].prio) {
             (Some(r), Some(p)) => (r, p),
@@ -159,7 +224,9 @@ pub fn dominant_bands(inp: &[f64]) -> Vec<f64> {
             }
         };
         let mut pieces = vec![base];
-        for j in 0..n {
+        grid.query(base.u_min, base.u_max, &mut cand);
+        for &c in &cand {
+            let j = cutters[c as usize];
             if pieces.is_empty() {
                 break;
             }
@@ -211,6 +278,40 @@ fn sorted_unique(mut v: Vec<f64>) -> Vec<f64> {
     v
 }
 
+/// Zelle belegt, wenn ihr Mittelpunkt streng in einem Rechteck liegt. Die Mittelpunkte steigen
+/// streng an, darum deckt jedes Rechteck einen zusammenhängenden Zellbereich (statt je Zelle alle
+/// Rechtecke zu prüfen, s. [`occupancy_naive`]).
+fn occupancy(rects: &[Rect], xs: &[f64], ys: &[f64]) -> Vec<Vec<bool>> {
+    let (nx, ny) = (xs.len() - 1, ys.len() - 1);
+    let cxs: Vec<f64> = (0..nx).map(|i| (xs[i] + xs[i + 1]) / 2.0).collect();
+    let cys: Vec<f64> = (0..ny).map(|j| (ys[j] + ys[j + 1]) / 2.0).collect();
+    let mut cell = vec![vec![false; ny]; nx];
+    for r in rects {
+        let (i0, i1) = (cxs.partition_point(|&c| c <= r.u_min), cxs.partition_point(|&c| c < r.u_max));
+        let (j0, j1) = (cys.partition_point(|&c| c <= r.v_min), cys.partition_point(|&c| c < r.v_max));
+        for col in cell.iter_mut().take(i1).skip(i0) {
+            for c in col.iter_mut().take(j1).skip(j0) {
+                *c = true;
+            }
+        }
+    }
+    cell
+}
+
+#[cfg(test)]
+fn occupancy_naive(rects: &[Rect], xs: &[f64], ys: &[f64]) -> Vec<Vec<bool>> {
+    let (nx, ny) = (xs.len() - 1, ys.len() - 1);
+    let mut cell = vec![vec![false; ny]; nx];
+    for i in 0..nx {
+        for j in 0..ny {
+            let cx = (xs[i] + xs[i + 1]) / 2.0;
+            let cy = (ys[j] + ys[j + 1]) / 2.0;
+            cell[i][j] = rects.iter().any(|r| cx > r.u_min && cx < r.u_max && cy > r.v_min && cy < r.v_max);
+        }
+    }
+    cell
+}
+
 pub fn union_outlines(inp: &[f64]) -> Vec<f64> {
     if inp.is_empty() || !inp[0].is_finite() || inp[0] < 0.0 {
         return Vec::new();
@@ -229,14 +330,7 @@ pub fn union_outlines(inp: &[f64]) -> Vec<f64> {
     }
     let nx = xs.len() - 1;
     let ny = ys.len() - 1;
-    let mut cell = vec![vec![false; ny]; nx];
-    for i in 0..nx {
-        for j in 0..ny {
-            let cx = (xs[i] + xs[i + 1]) / 2.0;
-            let cy = (ys[j] + ys[j + 1]) / 2.0;
-            cell[i][j] = rects.iter().any(|r| cx > r.u_min && cx < r.u_max && cy > r.v_min && cy < r.v_max);
-        }
-    }
+    let cell = occupancy(&rects, &xs, &ys);
     let at = |i: isize, j: isize| i >= 0 && j >= 0 && (i as usize) < nx && (j as usize) < ny && cell[i as usize][j as usize];
     // Gerichtete Randkanten in Einfügereihenfolge (wie `Map`: erneutes `set` behält die Position).
     let mut keys: Vec<(usize, usize)> = Vec::new();
@@ -495,5 +589,88 @@ mod tests {
         assert!(dominant_bands(&[f64::NAN]).is_empty());
         assert!(dominant_bands(&[2.0, 1.0]).is_empty());
         assert!(union_outlines(&[1.0, f64::NAN, 1.0, 0.0, 1.0]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tests_schnell {
+    use super::*;
+
+    /// Die schnelle Verschmelzung und die Vorauswahl der Schneider liefern dasselbe wie die schlichte
+    /// Fassung (Zufalls-Rechtecke auf einem groben Raster, viele Berührungen und gleiche Komponenten).
+    #[test]
+    fn schnell_gleich_schlicht() {
+        let mut x: u64 = 12345;
+        let mut rnd = |m: u64| {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (x >> 33) % m
+        };
+        for _ in 0..300 {
+            let n = 1 + rnd(40) as usize;
+            let mut inp = vec![n as f64];
+            for _ in 0..n {
+                let u0 = rnd(10) as f64 * 0.5;
+                let v0 = rnd(10) as f64 * 0.5;
+                let (w, h) = (0.5 * (1 + rnd(4)) as f64, 0.5 * (1 + rnd(4)) as f64);
+                let prio = [10.0, 50.0, 100.0, f64::NAN][rnd(4) as usize];
+                let comp = rnd(4) as f64 - 1.0;
+                inp.extend([if rnd(10) == 0 { 0.0 } else { 1.0 }, u0, u0 + w, v0, v0 + h, prio, comp]);
+            }
+            let fast = dominant_bands(&inp);
+            // schlicht: alle Schneider, schlichte Verschmelzung
+            let bands: Vec<Band> = (0..n)
+                .map(|k| {
+                    let b = &inp[1 + 7 * k..8 + 7 * k];
+                    Band { rect: (b[0] != 0.0).then_some(Rect { u_min: b[1], u_max: b[2], v_min: b[3], v_max: b[4] }), prio: (!b[5].is_nan()).then_some(b[5]), comp: (b[6] >= 0.0).then_some(b[6] as i64) }
+                })
+                .collect();
+            let mut out = Vec::new();
+            for i in 0..n {
+                let (Some(base), Some(prio)) = (bands[i].rect, bands[i].prio) else {
+                    out.push(Out { src: i, rect: None });
+                    continue;
+                };
+                let mut pieces = vec![base];
+                for j in 0..n {
+                    let (Some(c), Some(o)) = (bands[j].rect, bands[j].prio) else { continue };
+                    if j == i || o <= prio {
+                        continue;
+                    }
+                    pieces = pieces.into_iter().flat_map(|p| subtract_rect(p, c)).collect();
+                }
+                out.extend(pieces.into_iter().map(|p| Out { src: i, rect: Some(p) }));
+            }
+            let slow = merge_same_component_naive(&bands, out);
+            let mut f = vec![slow.len() as f64];
+            for o in &slow {
+                match o.rect {
+                    Some(r) => f.extend([o.src as f64, 1.0, r.u_min, r.u_max, r.v_min, r.v_max]),
+                    None => f.extend([o.src as f64, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                }
+            }
+            assert_eq!(fast, f);
+        }
+    }
+
+    /// Belegung der Umriss-Zellen: Bereichs-Malen = Prüfung je Zelle gegen alle Rechtecke.
+    #[test]
+    fn umriss_belegung_wie_je_zelle() {
+        let mut x: u64 = 777;
+        let mut rnd = |m: u64| {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (x >> 33) % m
+        };
+        for _ in 0..500 {
+            let n = 1 + rnd(12) as usize;
+            let rects: Vec<Rect> = (0..n)
+                .map(|_| {
+                    let (u0, v0) = (rnd(8) as f64 * 0.3, rnd(8) as f64 * 0.3);
+                    Rect { u_min: u0, u_max: u0 + 0.3 * (1 + rnd(5)) as f64, v_min: v0, v_max: v0 + 0.3 * (1 + rnd(5)) as f64 }
+                })
+                .collect();
+            let xs = sorted_unique(rects.iter().flat_map(|r| [r.u_min, r.u_max]).collect());
+            let ys = sorted_unique(rects.iter().flat_map(|r| [r.v_min, r.v_max]).collect());
+            assert_eq!(occupancy(&rects, &xs, &ys), occupancy_naive(&rects, &xs, &ys));
+        }
     }
 }
