@@ -18,6 +18,7 @@ pub mod kennzahlen;
 pub mod flaechen;
 pub mod room_program;
 pub mod area_report;
+pub mod rich_text;
 pub mod bulge;
 pub mod stair;
 pub mod joins;

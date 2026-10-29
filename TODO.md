@@ -758,6 +758,12 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     behält Aufbau mit `t()` und jsPDF-Zeichnen (`buildAreaReportPdf`), der Rest ist Fassade mit gleichen Signaturen
     (`cellText` gelöscht). Gleichheit (einmalig, Test gelöscht): 300 Zufallsberichte × Trenner × Seitenformate alt/neu
     gleich (CSV byteweise, Rückleser, Seiten, SVG; Layout bis auf `bold:false`/`align:"left"` statt fehlend).
+    ✅ (29.10.) **Rich-Text-Bearbeitung im Kern** ([K4]): `core/src/rich_text.rs` (Marks setzen/umschalten, `isMarkActive`,
+    `commonMarkValue`, Normalisieren, stabile Serialisierung, Stile anwenden; Offsets in UTF-16 wie TS), Bindungen
+    `web/rich_text.rs`; `text/richText.ts` behält Konstruktoren/Reintext/`DEFAULT_PRESETS` und ist sonst Fassade mit gleichen
+    Signaturen (gelöscht: `mapRunsInRange`, `marksEqual`, `normalizeMarks`, `makeRun`, kein Aufrufer). Gleichheit (einmalig,
+    Test gelöscht): 500 Zufallsdokumente × alle Operationen alt/neu gleich. Abweichung: Bereich mitten in einem Surrogatpaar
+    ergibt U+FFFD (im Editor nicht erreichbar). Nicht in der Tauri-App geprüft.
     ✅ (29.10.) **Fang-Kandidaten aus dem Modell im Kern** ([K4] S3/[K3d]): `snap_model.rs` sammelt je Dokument-Stand,
     Geschoss und sichtbaren Ebenen (vorher `baseSegments`/`collectCircles`/`roomAnchors`/`ellipseCenters` in
     `tools/snapping.ts`): Wandachsen + Schichtgrenzen, Raum-/Decken- (mit Aussparungen)/Dach-/Treppen-/Stützen-Umrisse,

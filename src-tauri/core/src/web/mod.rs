@@ -42,6 +42,7 @@ mod commands;
 mod import;
 mod cmd_create;
 mod area_report;
+mod rich_text;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
