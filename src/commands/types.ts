@@ -194,7 +194,10 @@ export interface Command {
   ): [CommandState, CommandResult];
   /** Enter/Space/Rechtsklick: Schritt bestätigen / mehrteilig beenden. */
   onConfirm(state: CommandState, ctx: CommandContext): [CommandState, CommandResult];
-  /** Esc: Entwurf verwerfen, Befehl beenden. */
+  /**
+   * Abbruch (Esc-Esc bzw. Esc ohne Schritt): Entwurf verwerfen, Befehl beenden, nichts committen.
+   * Den Schritt zurück bei einfachem Esc führt die Engine selbst (Schritt-Verlauf, [99]).
+   */
   onCancel(state: CommandState): [CommandState, CommandResult];
 
   /**

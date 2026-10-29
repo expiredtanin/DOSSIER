@@ -1343,6 +1343,21 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Papier-mm; feste Modellgrössen anderer Befehle (Kote, Detailverweis, Punktmarke) nicht ans Papier angepasst; kein
   Fang auf Viewport-Inhalt; Layout-DXF (`--layout`) ohne Blatt-Zeichnung; PDF-Export der Blatt-Zeichnung nicht
   angesehen; nicht in der Tauri-App/macOS geprüft. · M
+- ✅ **[99] Esc/Enter in jedem Befehl gleich.** (29.10., Maintainer-Report „Esc bricht nicht immer ab, Enter
+  beendet nicht immer") Ursachen: Esc/Enter erreichten die Befehls-Engine NUR über das fokussierte Befehlsfeld —
+  nach Klick auf Zeichenfläche/Panel/Knopf gingen sie verloren (`useActiveToolKeys` schweigt bei laufendem Befehl),
+  Enter löste stattdessen den fokussierten Knopf aus (Werkzeug-Knopf → Befehl aus); Esc brach immer den ganzen Befehl ab
+  (kein Schritt zurück); gehaltene Tasten feuerten in Serie; die Transformation (Drehen) kannte kein Enter.
+  Jetzt: EIN Verteiler (`state/commandKeys.ts`, auf `document`, nach React-Handlern, vor den `window`-Handlern):
+  Fokus in Eingabefeld/Dialog → Feld gehört die Taste; Befehlsfeld behandelt Esc/Enter selbst mit denselben Aktionen;
+  sonst Esc = `engine.escape()`, Enter = `engine.confirm()`, Knopf-Aktion unterdrückt, Wiederholung geschluckt.
+  Engine: Schritt-Verlauf (Zustand vor jeder Eingabe, die den Schritt ändert); Esc = getippten Feldwert lösen bzw. einen
+  Schritt zurück, ohne Schritt Ende; Esc-Esc ≤ `ESC_DOUBLE_MS` (300 ms) = Abbruch ohne Commit. Ein Commit mitten im
+  Befehl ist eine Grenze (bleibt; Esc danach beendet). Im Befehlsfeld leert Esc zuerst getippten Text. Transformation:
+  Esc = letzten Punkt zurück, Enter = Klick an der letzten Mausposition. Griff-Drags unverändert (Esc bricht ab).
+  Tests: `commands/engine.keys.test.ts` (jeder Befehl), `state/commandKeys.test.ts`, e2e `commandKeys.spec.ts` (jeder
+  registrierte Befehl: Punkte, Esc, Esc-Esc, Enter; Fokus Befehlsfeld/Fläche/Panel-Knopf; Wandzug in allen drei).
+  Offen: 3D-Ansicht und Layout-Blatt nur über den gemeinsamen Verteiler, nicht eigens per e2e; nicht auf dem Mac geprüft. · S
 - ○ **[80] PDF mit Ebenen.** · M
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.

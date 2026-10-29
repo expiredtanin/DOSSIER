@@ -85,6 +85,25 @@ export interface EngineView {
     locked: boolean;
     active: boolean;
   }[];
+  /** Schritte, die Esc zurücknehmen kann ([99]; für Anzeige/E2E). */
+  steps?: number;
+}
+
+/**
+ * Zwei Esc innerhalb dieser Zeit (ms) = ganzen Befehl abbrechen; langsamer = je ein Schritt
+ * zurück ([99], Vorgabe Maintainer: Esc-Verhalten in jedem Befehl gleich).
+ */
+export const ESC_DOUBLE_MS = 300;
+
+/** Zwei Befehls-Zustände gleich (ohne Maus-`cursor`)? Dann war die Eingabe kein Schritt. */
+function sameStep(a: CommandState, b: CommandState): boolean {
+  if (a === b) return true;
+  try {
+    const strip = (k: string, v: unknown) => (k === "cursor" || k === "hover" ? undefined : v);
+    return JSON.stringify(a, strip) === JSON.stringify(b, strip);
+  } catch {
+    return false;
+  }
 }
 
 export class CommandEngine {
@@ -101,6 +120,13 @@ export class CommandEngine {
   /** Identität des Schritts, für den der Feld-Zustand gilt (Reset bei Wechsel). */
   private fieldPhaseKey: string | null = null;
   private listeners = new Set<() => void>();
+  /**
+   * Schritt-Verlauf des laufenden Befehls ([99]): Zustand VOR jeder Eingabe, die den Schritt
+   * änderte. Esc holt den letzten zurück. Ein Commit ist eine Grenze (Committetes bleibt).
+   */
+  private steps: CommandState[] = [];
+  /** Zeitpunkt des letzten Esc (für Esc-Esc = Abbruch). */
+  private lastEscAt = -Infinity;
   /** Nutzer-Kürzel-Übersteuerungen (s. `state/commandAliasOverrides.ts`); leer bis gesetzt. */
   private aliasOverrides: Record<string, string> = {};
 
@@ -161,6 +187,7 @@ export class CommandEngine {
       options: this.command.options(this.state),
       commandName: this.command.name,
       fields,
+      steps: this.steps.length,
     };
   }
 
@@ -278,6 +305,7 @@ export class CommandEngine {
     this.state = cmd.init();
     this.lastCommandName = cmd.name;
     this.lastCursor = null;
+    this.steps = [];
     this.resetFields();
     this.host.setDraft(null);
     // Sofort-Befehl (Join/Split u. Ä.): direkt ausführen, ohne auf einen Pick zu
@@ -306,9 +334,67 @@ export class CommandEngine {
     }
     this.command = null;
     this.state = null;
+    this.steps = [];
     this.resetFields();
     this.host.setDraft(null);
     this.emit();
+  }
+
+  /** Anzahl Schritte, die Esc zurücknehmen kann (Test/Anzeige). */
+  stepDepth(): number {
+    return this.command ? this.steps.length : 0;
+  }
+
+  /**
+   * Esc ([99]): einmal = ein Schritt zurück (`back`), zweimal innerhalb `ESC_DOUBLE_MS` =
+   * ganzen Befehl abbrechen. `now` nur für Tests; sonst die Uhr.
+   */
+  escape(now: number = Date.now()): void {
+    if (!this.command) return;
+    const quick = now - this.lastEscAt <= ESC_DOUBLE_MS;
+    this.lastEscAt = now;
+    if (quick) this.cancel();
+    else this.back();
+  }
+
+  /**
+   * Ein Schritt zurück: zuerst ein getippter Feldwert (Lock), sonst der letzte gesetzte Punkt/
+   * gewählte Schritt. Ohne Schritt endet der Befehl (wie Abbruch).
+   */
+  back(): void {
+    if (!this.command || !this.state) return;
+    if (Object.keys(this.locks).length > 0) {
+      this.locks = {};
+      this.activeFieldIndex = 0;
+      this.redraw();
+      this.emit();
+      return;
+    }
+    const prev = this.steps.pop();
+    if (!prev) {
+      this.cancel();
+      return;
+    }
+    this.state = prev;
+    this.resetFields();
+    this.redraw();
+    this.emit();
+  }
+
+  /** Vorschau des aktuellen Zustands neu zeichnen (nach einem Schritt zurück). */
+  private redraw(): void {
+    if (!this.command || !this.state) return;
+    if (!this.lastCursor) {
+      this.host.setDraft(null);
+      return;
+    }
+    try {
+      const [st, res] = this.command.onMove(this.state, this.lastCursor, null, this.context());
+      this.state = st;
+      this.host.setDraft(res.draft ?? null);
+    } catch {
+      this.host.setDraft(null);
+    }
   }
 
   // ── Eingabe-Routing ────────────────────────────────────────────────────────
@@ -464,8 +550,11 @@ export class CommandEngine {
       }
     }
     const ctx = this.context();
+    const before = this.state;
     const [st, res] = this.command.onConfirm(this.state, ctx);
     this.state = st;
+    if (res.commit) this.steps = [];
+    else if (!res.done && !sameStep(before, st)) this.steps.push(before);
     this.applyResult(res);
   }
 
@@ -483,8 +572,13 @@ export class CommandEngine {
     if (!this.command || !this.state) return;
     if (input.kind === "point") this.lastCursor = input.point;
     const ctx = this.context();
+    const before = this.state;
     const [st, res] = this.command.onInput(this.state, input, ctx);
     this.state = st;
+    // Schritt-Verlauf: die befehlseigene Option „Zurück" nimmt selbst einen Schritt zurück.
+    if (input.kind === "option" && input.id === "undo") this.steps.pop();
+    else if (!res.commit && !res.done && !sameStep(before, st)) this.steps.push(before);
+    if (res.commit) this.steps = [];
     this.applyResult(res);
   }
 
@@ -496,6 +590,7 @@ export class CommandEngine {
     if (res.done) {
       this.command = null;
       this.state = null;
+      this.steps = [];
       this.resetFields();
     }
     this.emit();

@@ -175,6 +175,8 @@ import {
   useTransformShortcuts,
   useUndoRedoShortcut,
 } from "./state/useKeyboardShortcuts";
+import { useCommandKeys, type CommandKeyTarget } from "./state/commandKeys";
+import { ESC_DOUBLE_MS } from "./commands/engine";
 import { useFileDropImport, useImageImportHandling } from "./state/useImportHandling";
 import { useExportHandlers } from "./state/useExportHandlers";
 import { useThemeModeState } from "./theme/useThemeMode";
@@ -962,6 +964,9 @@ export default function App() {
     engineRef.current = new CommandEngine(host);
   }
   const engine = engineRef.current;
+  // [99] Esc/Enter eines laufenden Befehls unabhängig vom Fokus (ein Verteiler, s. commandKeys.ts).
+  const transformKeysRef = useRef<CommandKeyTarget | null>(null);
+  useCommandKeys(engineRef, transformKeysRef);
 
   // Nutzer-Kürzel-Übersteuerungen (Einstellungen → Remap) — aus localStorage
   // geladen, bei jeder Änderung sofort an die Engine gereicht (s. `commands/
@@ -3007,6 +3012,30 @@ export default function App() {
     setDraft(null);
     transformDragInfoRef.current = null;
   };
+  // [99] Esc in der Transformation wie in jedem Befehl: einmal = letzten Punkt zurück (ohne
+  // Punkt: Ende), Esc-Esc schnell = abbrechen.
+  const transformEscAtRef = useRef(-Infinity);
+  const escapeTransform = () => {
+    const now = Date.now();
+    const quick = now - transformEscAtRef.current <= ESC_DOUBLE_MS;
+    transformEscAtRef.current = now;
+    if (!activeTransform || quick || activeTransform.points.length === 0) cancelTransform();
+    else {
+      setActiveTransform({ ...activeTransform, points: activeTransform.points.slice(0, -1) });
+      setDraft(null);
+      transformDragInfoRef.current = null;
+    }
+  };
+  // Enter = Klick auf die letzte (gesnappte) Mausposition: setzt den nächsten Punkt bzw. schliesst ab.
+  const confirmTransform = () => {
+    const cursor = transformDragInfoRef.current?.cursor;
+    if (activeTransform && cursor) transformClick(cursor, 1, { shift: false, ctrl: true, alt: false });
+  };
+  transformKeysRef.current = {
+    active: () => !!activeTransform,
+    escape: escapeTransform,
+    confirm: confirmTransform,
+  };
 
 
   // Maus-Schema: Auswahl + Kontextmenü aus Grundriss / 3D — siehe
@@ -3688,6 +3717,7 @@ export default function App() {
             if (activeTransform) {
               const v = parseFloat(text.replace(",", "."));
               if (isFinite(v)) submitTransformValue(v);
+              else confirmTransform();
               return;
             }
             // Getipptes „rotate"/„drehen" startet die interaktive Drehung (U/I/O/P),
@@ -3721,9 +3751,11 @@ export default function App() {
               : grip3dEdit
               ? setGrip3dEdit(null)
               : activeTransform
-              ? cancelTransform()
-              : engine.cancel()
+              ? escapeTransform()
+              : engine.escape()
           }
+          stillActive={() => engine.isActive()}
+          steps={gripEdit || edgeEdit || grip3dEdit ? 0 : activeTransform ? activeTransform.points.length : engineView.steps}
           suggest={(prefix) => engine.suggest(prefix)}
           onTextChange={setCmdTyped}
         />
