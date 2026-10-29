@@ -82,11 +82,18 @@ async function oldPlan(project: Project, level: DrawingLevel, o: Opts): Promise<
 }
 
 async function newPlan(project: Project, level: DrawingLevel, o: Opts): Promise<{ prims: Primitive[]; bounds: Plan["bounds"]; plan: Plan } | null> {
-  const out = await newCompute(project, level);
+  // Ein vorbereiteter Schnitt je Ebene für alle Optionssätze: prüft auch den Kern-Cache (Umschalten).
+  let out = prepared.get(level);
+  if (out === undefined || out?.project !== project) {
+    out = await newCompute(project, level);
+    prepared.set(level, out);
+  }
   if (!out) return null;
   const plan = newGen(out, o.mono, o);
   return { prims: plan.primitives, bounds: plan.bounds, plan };
 }
+
+const prepared = new WeakMap<DrawingLevel, Awaited<ReturnType<typeof newCompute>>>();
 
 /** Szene (render2d) und SVG wie die Verbraucher: alt als gewöhnlicher Plan, neu aus dem Puffer. */
 function outputsDiffer(a: { prims: Primitive[]; raw: Primitive[]; bounds: Plan["bounds"] }, b: Plan): string | null {

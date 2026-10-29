@@ -131,6 +131,9 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     treffende Schneider, Verschmelzen ohne Neustart über alle Paare, Monolith-Umriss per Bereichs-Malen; Öffnungen je Wand
     einmal indiziert; Zahlen-Nachbildung mit Schnellweg. Messung (Node/WASM, Min., Kacheln des Beispielhauses mit Treppen):
     Schnitt 6×6 10,2 s → 0,10 s, 8×8 33 s → 0,19 s, 16×16 0,8 s (alt nicht messbar, > 1 min); Ansicht 8×8 107 → 29 ms.
+    Der Kern merkt sich die zuletzt vorbereiteten Schnitte (Schlüssel je `computeSection`): Schwarz-Weiss/Sichtbarkeit
+    umschalten 8×8 ~1 ms statt Neurechnen. Offen: Szene mit vielen verdeckten (gestrichelten) Kanten bleibt teuer
+    (16×16 mit verdeckten Kanten ~2,5 s, Strichmuster-Zerlegung in `plan_scene`).
     Rest in TS (28.10.): Stil-Auflösung (Bauteil, Schraffur, Farbe, Linienstil, Pick-IDs, Painter-Reihenfolge) in `generatePlan*.ts`,
     `toSection.ts` (Besitzer-Zuordnung, Schichtbänder), `toElevation.ts` (Orchestrierung), `sectionOpenings.ts`, `planUnderlay.ts`,
     `drawing2d.ts`. Das ist kein Rechenanteil mehr, sondern liest das Modell; es zieht mit [K4] um.

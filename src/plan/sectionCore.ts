@@ -16,10 +16,14 @@ import type { CategoryDisplayResolver, Plan } from "./generatePlan";
 export interface SectionOutput {
   project: Project;
   level: DrawingLevel;
-  /** `[mono, openings, n, (index, nPos, pos…, nIdx, idx…) × n]`: Platz für die zwei Schalter, dann die
-   *  geschnittenen freien Körper. */
+  /** `[mono, openings, key, n, (index, nPos, pos…, nIdx, idx…) × n]`: Platz für die zwei Schalter, der
+   *  Schlüssel dieses Schnitts (der Kern merkt sich die zuletzt berechneten, Umschalten von Darstellung
+   *  oder Sichtbarkeit rechnet nicht neu), dann die geschnittenen freien Körper. */
   bodies: Float64Array;
 }
+
+/** Schlüssel der vorbereiteten Schnitte (s. `SectionOutput.bodies`). */
+let sectionKey = 0;
 
 /** Ob die Ebene eine gültige Schnittlinie trägt (wie `sectionPlaneFromLevel`). */
 function hasLine(level: DrawingLevel): boolean {
@@ -39,7 +43,7 @@ function isVoid(s: NonNullable<Project["extrudedSolids"]>[number]): boolean {
  */
 export async function computeSection(project: Project, level: DrawingLevel): Promise<SectionOutput | null> {
   if (!hasLine(level)) return null;
-  const bodies: number[] = [0, 0, 0];
+  const bodies: number[] = [0, 0, ++sectionKey, 0];
   const solids = project.extrudedSolids ?? [];
   for (let index = 0; index < solids.length; index++) {
     const solid = solids[index];
@@ -62,7 +66,7 @@ export async function computeSection(project: Project, level: DrawingLevel): Pro
     for (let i = 0; i < mesh.positions.length; i++) bodies.push(mesh.positions[i]);
     bodies.push(mesh.indices.length);
     for (let i = 0; i < mesh.indices.length; i++) bodies.push(mesh.indices[i]);
-    bodies[2]++;
+    bodies[3]++;
   }
   return { project, level, bodies: Float64Array.from(bodies) };
 }

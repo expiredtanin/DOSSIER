@@ -51,7 +51,11 @@ it.skipIf(!process.env.BENCH)("Messung Schnitt/Ansicht alt gegen neu", async () 
         const b = await time(newP, runs);
         const c = skipOld ? ([NaN, NaN] as [number, number]) : await time(async () => planToRenderScene(await oldP(), 100), runs);
         const d = await time(async () => planToRenderScene(await newP(), 100), runs);
-        rows.push(`${name} | ${l.id} Schnitt | ${fmt(a)} | ${fmt(b)} | ${fmt(c)} | ${fmt(d)}`);
+        // Umschalten (Schwarz-Weiss) auf einem vorbereiteten Schnitt: der Kern rechnet nicht neu.
+        const prepared = (await newCompute(p, l))!;
+        let flip = false;
+        const e = await time(() => newGen(prepared, (flip = !flip), { hiddenLines: l.hiddenLines, visibleCodes: codes, openings: true }), runs);
+        rows.push(`${name} | ${l.id} Schnitt | ${fmt(a)} | ${fmt(b)} | ${fmt(c)} | ${fmt(d)} | Umschalten ${fmt(e)}`);
         process.stderr.write(rows[rows.length - 1] + "\n");
       } else {
         const skipOld = !!process.env.BENCH_NEW_ONLY;

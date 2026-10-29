@@ -1571,7 +1571,43 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
 
 // ── Abfrage ───────────────────────────────────────────────────────────────────
 
-/// Abfrage `sectionPlan`: `args` = `[mono, openings, bodies…]` (Körper s. [`read_bodies`]),
+/// Zuletzt berechnete Schnitte je Schlüssel (> 0), wenige, älteste fallen weg.
+const CACHE_SLOTS: usize = 6;
+
+thread_local! {
+    static CACHE: std::cell::RefCell<Vec<(f64, std::rc::Rc<Output>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn cache_get(key: f64) -> Option<std::rc::Rc<Output>> {
+    if !(key > 0.0) {
+        return None;
+    }
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        let i = c.iter().position(|e| e.0 == key)?;
+        let e = c.remove(i);
+        let o = e.1.clone();
+        c.push(e);
+        Some(o)
+    })
+}
+
+fn cache_put(key: f64, o: std::rc::Rc<Output>) {
+    if !(key > 0.0) {
+        return;
+    }
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.retain(|e| e.0 != key);
+        if c.len() >= CACHE_SLOTS {
+            c.remove(0);
+        }
+        c.push((key, o));
+    });
+}
+
+/// Abfrage `sectionPlan`: `args` = `[mono, openings, key, bodies…]` (Körper s. [`read_bodies`]; `key` > 0
+/// = Schlüssel des vorbereiteten Schnitts, s. Cache unten, 0 = immer rechnen),
 /// `text` = `{"level": {...}, "hiddenLines", "hasVis", "invisible", "hasDisplay", "norender", "grey"}`.
 /// Puffer: Gruppe 0 Schnitt, Gruppe 1 geschnittene Öffnungen; Ausmass ohne die Öffnungen.
 /// Ohne gültige Schnittlinie: leerer Puffer ohne Gruppen.
@@ -1581,9 +1617,21 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let vis = Visibility::from_json(&v);
     let mono = args.first().is_some_and(|&x| x != 0.0);
     let openings = args.get(1).is_some_and(|&x| x != 0.0);
-    let bodies = read_bodies(args.get(2..).unwrap_or(&[])).ok_or("Schnitt: Körper-Netze unlesbar")?;
+    let key = args.get(2).copied().unwrap_or(0.0);
     let mut w = crate::plan_buf::Writer::new(true);
-    let Some(out) = compute_section(p, &level, &bodies)? else { return Ok(w.finish()) };
+    // Der Schnitt selbst hängt nur am Projektstand, an der Ebene und den Körpern (= ein Aufruf von
+    // `computeSection` in TS, Schlüssel `key`); Schwarz-Weiss, Sichtbarkeit und verdeckte Kanten nur an
+    // der Darstellung. Darum die zuletzt berechneten Schnitte merken (Umschalten ohne Neurechnen).
+    let out = match cache_get(key) {
+        Some(o) => o,
+        None => {
+            let bodies = read_bodies(args.get(3..).unwrap_or(&[])).ok_or("Schnitt: Körper-Netze unlesbar")?;
+            let Some(o) = compute_section(p, &level, &bodies)? else { return Ok(w.finish()) };
+            let o = std::rc::Rc::new(o);
+            cache_put(key, o.clone());
+            o
+        }
+    };
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let (prims, bounds) = section_primitives(&out, mono, hidden, &vis);
     w.group(&prims);
@@ -1658,7 +1706,7 @@ mod tests {
     fn puffer_hat_zwei_gruppen() {
         let p = sample();
         let text = serde_json::json!({ "level": serde_json::to_value(p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap()).unwrap() }).to_string();
-        let buf = section_plan_buf(&p, &[0.0, 1.0, 0.0], &text).unwrap();
+        let buf = section_plan_buf(&p, &[0.0, 1.0, 0.0, 0.0], &text).unwrap();
         let (prims, groups, bounds) = crate::plan_buf::decode(&buf).unwrap();
         assert_eq!(groups.len(), 2);
         assert!(bounds.is_some() && !prims.is_empty());
@@ -1701,7 +1749,7 @@ mod bench {
             let t_cut = t.elapsed();
             let t = Instant::now();
             let buf = if l.kind == DrawingLevelKind::Section {
-                section_plan_buf(&p, &[0.0, 1.0, 0.0], &serde_json::json!({ "level": serde_json::to_value(l).unwrap() }).to_string()).unwrap()
+                section_plan_buf(&p, &[0.0, 1.0, 0.0, 0.0], &serde_json::json!({ "level": serde_json::to_value(l).unwrap() }).to_string()).unwrap()
             } else {
                 crate::plan::elevation::elevation_plan_buf(&p, &[0.0, 0.0], &serde_json::json!({ "level": serde_json::to_value(l).unwrap() }).to_string()).unwrap()
             };
