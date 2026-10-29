@@ -77,6 +77,7 @@ pub mod levels;
 pub mod pens;
 pub mod folder_tree;
 pub mod layout_model;
+pub mod parametric_walls;
 
 #[cfg(feature = "web")]
 mod web;

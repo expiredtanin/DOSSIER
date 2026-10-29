@@ -417,7 +417,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (`insertAfterCode`) ging in TS verloren (die Ebene mit dem Ziel wurde übersprungen), jetzt steht es hinter dem Original.
     Offen: vertikale Ausdehnungen (`model/wall.ts`: `wallVerticalExtent` …, Kern hat `model/helpers.rs` schon — Aufrufer in
     `toSection`/`voids`/`geometry/opening`/Viewport fallen mit dem Plan-Port bzw. brauchen eine Abfrage je Bauteil),
-    Parametrik-Regeln (`parametricWalls.ts`); Undo-Verlauf als Liste in der UI [84].
+    Undo-Verlauf als Liste in der UI [84].
     **Stiftsätze im Kern (29.10.):** `pens.rs` (Standardpalette mit 255 Stiften, Freie-Farbe-Palette, `hsl_to_hex`, Neu-Backen
     der Stift-Farben/-Strichstärken `rebake_ops`, Standardsatz anlegen `seed_standard_ops`, Stift löschen samt Verweisen in
     Bauteilen und im Kategorien-Baum `delete_pen_ops`). Rechnung auf der rohen Projekt-Wurzel (`serde_json`, verlustfrei) und
@@ -443,6 +443,15 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Eltern) für alle drei Bäume, 6000 Ordner-Blätter, 8000 Löschen/Nachfahren/Verschieben (je Layout, Master, Ausschnitt),
     3000 Blattgrössen, 6000 Titelblöcke (Unicode-Leerraum, Massstäbe 0/1e21/1e-7, doppelte Layout-ids), 4000 Ordner-PDF-Seiten.
     Abweichung (gewollt): kaputte `parentId`-Ketten (Kreis, Selbstverweis) in `collectFolderLayouts` enden jetzt (TS: Stapelüberlauf).
+    **Parametrische Wände im Kern (29.10.):** `parametric_walls.rs` (Raster-, Modul-, bedingte-Dicke-, Referenzlinien- und
+    Sequenz-Regel, Duplikat-Entfernung, `exterior`/`interior`/`bearing`) auf `serde_json::Value` (vorhandene Wände behalten
+    unbekannte Felder), `Math.round/min/max/atan2` über `jsnum`; zustandslose Bindung `parametric_call`
+    (`web/parametric_walls.rs`), `model/parametricWalls.ts` ist Fassade mit gleichen Signaturen und hält nur den Zähler der
+    Wand-ids. Die App ruft die Engine noch nirgends auf (nur Tests): die Regel-UI fehlt weiterhin. Gleichheit (einmalig, Test
+    gelöscht): 3000 Zufallsregelwerke (verschachtelte Sequenzen, Raster mit/ohne gridId, Grenzpolygone mit 1–5 Punkten, Referenzwand
+    vorhanden/fehlend, fehlende/negative/0-Abstände, Toleranz 0/0,01/0,5) und 4000 Einzel-Regeln/Bedingungen/Duplikat-Listen,
+    Wand-ids samt Zähler gleich, Ergebnis zeichengleich bis auf die Schlüsselreihenfolge von Wänden mit `wallTypeId: undefined`.
+    Abweichung (gewollt): Achsen je Aufruf auf 1 000 000 begrenzt (TS rechnete bei absurd kleinem Abstand endlos).
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

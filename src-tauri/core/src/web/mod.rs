@@ -40,6 +40,7 @@ mod drawings;
 mod layers;
 mod pens;
 mod layout_model;
+mod parametric_walls;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
