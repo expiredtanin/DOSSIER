@@ -7,6 +7,7 @@
 pub mod generated;
 pub mod helpers;
 pub mod items;
+pub mod lenient;
 pub mod manual;
 #[cfg(test)]
 pub(crate) mod ts_export;

@@ -153,6 +153,23 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     SVG/PDF/DXF unberührt. Offen: Kern-Seite bleibt (big16 S2: Schnitt-Primitive 0,37 s, `planSceneBin` 0,45 s); der
     Chunk-Pfad (`gpu_compile.rs`, WebGL/nativ-Chunks) zeichnet Striche weiterhin durchgezogen. Nicht in der Tauri-App/Metal und
     nicht im Browser-WebGPU angesehen (nur lavapipe/Vulkan headless).
+    ✅ (29.10.) Strichmuster auch im Chunk-Pfad (nativer macOS-Renderer `useNativePlanRenderer` → `GpuChunkCache` →
+    `render2d/chunks.rs`). Befund: KEINE Regression des Shader-Merges — der Chunk-Pfad hat Linien-Strichmuster nie
+    gezeichnet (schon die TS-Fassung `glPlanCompile.ts` vor [K3b] ignorierte `dash`, nur Schraffur-Striche wurden zerlegt;
+    `0516253` hat `core/gpu_compile.rs` nicht berührt) — auf dem Mac waren verdeckte Kanten, Achsen, gestrichelte
+    Zeichnungen seit jeher durchgezogen. Jetzt: die GPU-Sicht des Plan-Puffers trägt `dash` (Linie/Bogen/Kreis/2D-Bogen),
+    `gpu_compile` gibt gestrichelte Züge als Instanzen im render2d-Format aus (16 f32: Segment, Lauflänge, Zug, Muster;
+    Phase über verkettete Linien, Länge Papier-mm × 0,1 wie der Szenen-Pfad, > 8 Einträge zerlegt die CPU), der
+    Chunk-Renderer zeichnet sie mit DEMSELBEN `DASH_LINE_WGSL`, in Maler-Reihenfolge mit den Linien verzahnt (`lineAt`;
+    sonst lagen graue verdeckte Kanten über den Schnittkanten). Flaches Format/`NativeChunkLayout` additiv (`dash_inst`,
+    `dash_batches`, serde-Vorgaben). Tests: Kern (Instanzen, Phase, Muster-Rückfälle, Maler-Reihenfolge, Deckung auf der
+    Achse = `apply_dash_runs`-Zerlegung, 150 Zufallsfälle), render2d (Reihenfolge; Chunk-Renderer headless zeichnet
+    Strich/Lücke), TS-Fassade. Bilder (lavapipe, neu `render_png --chunks/--bounds`): Schnitt mit 752 verdeckten Kanten,
+    Grundriss, gestrichelte Zeichnungen — Chunk-Pfad vs. Szenen-Pfad 0,00 % abweichend in den Schnitt-Ausschnitten,
+    Rest = Texte (zeichnet der Chunk-Pfad nicht) und vorbestehende Unterschiede; alt (durchgezogen) sichtbar anders.
+    Nicht kompiliert: `cad-tauri` mit `native2d` für macOS (Linux-Container: cc kann kein `-arch arm64` für
+    objc2-exception-helper) — `native_embed.rs` ist unverändert, `render2d` (`window`) für `aarch64-apple-darwin`
+    per `cargo check` geprüft. Nicht auf Metal/in der Tauri-App angesehen.
     TS-Fassung gelöscht (29.10.): `toSection.ts`/`toElevation.ts` sind dünne Fassaden (Ebene, Sichtbarkeit, truck-Körper →
     Abfrage), `sectionOpenings.ts`, `sectionExtras.ts`, `meshSection.ts`, `generateSectionPlan`/`resolve*SectionStyle` in
     `generatePlan.ts`, `windowSymbol` (opening.ts), `keyhole`/`voidSectionRects`/`subtractVoidsInSection` (voids.ts) und ihre
@@ -765,6 +782,25 @@ Frage: WebGPU weiterführen oder wie BIMCraft CPU + native GPU?
 - ◐ **[14] „Never crash".** TS-Wächter `guarded()` um das truck-WASM (Trap → neu instanziieren, einmal
   wiederholen). Rust-Kern: Bindungen verwerfen Unsinn statt zu paniken. Offen: Wächter für
   render3d/render2d/Kern, Rust-Lints `unwrap_used`/`expect_used`/`panic` auf `deny`, Obergrenzen. · M
+  - ✅ (29.10.) Kaputte Projekte (Datei/Import) bringen keine Abfrage mehr zum Werfen. Fuzz-Test
+    `src/core/robustness.test.ts`: Beispiel, „alle Element-Arten", 7 Zufallsprojekte, gekacheltes Projekt × 21
+    Verderbnisse (hängende Wand-/Decken-/Dach-/Tür-/Treppentypen, Bauteile, Geschosse, Öffnungs-Wand, Schraffur/
+    Linienstil/Stift/Stiftsatz, Block, Layout-Master/-Ausschnitt; Gruppen/Ordner, die sich selbst enthalten; leere und
+    Ein-Punkt-Polygone; NaN/±∞/negativ; fehlende Felder; doppelte ids; falsche Typen; kaputte Schnittlinien/Baurecht/
+    Sonne) gegen jede Fassade (Plan aller Ebenen + sichtbare Geschosse, Schnitt, Ansicht, Szene/SVG/DXF je Plan, 3D,
+    Pick, IFC, OBJ/STL/GLB, Liste, Kennzahlen, Raumprogramm, Flächen/IVHB, Baurecht, Sonne, Layouts, Prüfung,
+    Speichern/Laden). Vorher u. a. 158 Würfe allein am Beispiel. Ursachen behoben: (1) Kern-Ableitungen fallen bei
+    hängenden Verweisen auf Vorgaben zurück statt `Err` (`wall_type_or_fallback`/`component_or_fallback`: eine Schicht
+    0,2 m, neutrales Grau; fehlende Schraffur → ohne Muster; hängender Linienstil einer Schraffur → 0,13 durchgezogen;
+    Deckentyp → Rückfall-Schicht; Verschneidung mit Rückfall-Werten; Plan, Schnitt, Ansicht, 3D, IFC, Mesh). (2) Typisierte
+    Sicht tolerant (`model/lenient.rs`): EIN Wert, der nicht passt (`null` statt Zahl — NaN überlebt JSON nicht —,
+    Zeichenkette statt Punkt), legte das ganze Dokument lahm; jetzt fällt nur er auf die Vorgabe zurück (Pflichtfelder wie
+    `Vec2` → 0), nicht lesbare Listenelemente entfallen, die JSON-Wurzel bleibt unverändert. (3) Mesh-Export: gebrochene
+    Indizes/NaN-Ecken aus Importen sprengten den `fileio`-Leser. (4) TS `visibleCodesFromSnapshot`/`resolveTitleBlock`
+    ohne `layerVisibility`/`viewports`. `projectWarnings` (Kern `project_refs.rs`) listet hängende Verweise, Zyklen und
+    ersetzte Werte; `dossier-cli validate` (und MCP `validate`) gibt sie als „Warnung: …" aus (Exit 0, solange keine
+    Fehler). Kein Panic gefunden. Offen: Hülle (Panels/Editoren) nicht geprüft; Kategorie-Codes ohne Kategorie werden
+    nicht gewarnt (bewusst, häufig bei Importen).
 - ✅ **[16] Befehle mit Unsinn füttern.** 27.10.: `commands/hostile.test.ts` füttert alle Befehle; fand
   1 Speicher-Explosion (revisionCloud), behoben. · S
 - ✅ **[22] Fester Check vor Abschluss.** `npm run check` (tsc, vitest, cargo test aller 6 Crates,

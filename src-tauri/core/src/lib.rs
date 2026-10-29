@@ -87,6 +87,7 @@ pub mod text_layout;
 pub mod plan_text;
 pub mod grips;
 pub mod selection_info;
+pub mod project_refs;
 
 #[cfg(feature = "web")]
 mod web;

@@ -165,6 +165,7 @@ function disposeGeometry(gl: BufferGl, g: GpuGeometry): void {
   gl.deleteBuffer(g.fill.indexBuffer);
   gl.deleteBuffer(g.line.vertexBuffer);
   gl.deleteBuffer(g.line.indexBuffer);
+  if (g.dash) gl.deleteBuffer(g.dash.instanceBuffer);
 }
 
 export interface ChunkStats {

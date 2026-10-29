@@ -237,6 +237,7 @@ export function useNativePlanRenderer(
         gl.deleteBuffer(old.fill.indexBuffer);
         gl.deleteBuffer(old.line.vertexBuffer);
         gl.deleteBuffer(old.line.indexBuffer);
+        if (old.dash) gl.deleteBuffer(old.dash.instanceBuffer);
         highlightGeom.current = null;
       }
       if (prims.length) {

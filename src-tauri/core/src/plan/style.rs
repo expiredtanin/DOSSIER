@@ -84,13 +84,11 @@ pub fn poche_fill(p: HatchPattern) -> &'static str {
     }
 }
 
-/// `resolveHatch`: `None`, wenn Schraffur oder ihr Linienstil fehlen (TS wirft dort — Aufrufer fängt).
+/// `resolveHatch`: `None`, wenn die Schraffur fehlt. Ein hängender Linienstil der Schraffur
+/// (Datei/Import) zählt wie keiner (Vorgabe-Strichstärke 0.13, durchgezogen).
 pub fn resolve_hatch(p: &Project, hatch_id: &str, wall_angle_deg: Option<f64>, foreground: Option<&str>, placement: Option<(Option<f64>, Option<f64>, Option<Vec2>)>) -> Option<HatchRender> {
     let h = p.hatch(hatch_id)?;
-    let ls = match h.line_style_id.as_deref().filter(|s| !s.is_empty()) {
-        Some(id) => Some(p.line_style(id)?),
-        None => None,
-    };
+    let ls = h.line_style_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.line_style(id));
     let (p_angle, p_scale, p_origin) = placement.unwrap_or((None, None, None));
     let base_angle = p_angle.unwrap_or(h.angle);
     let angle = match wall_angle_deg {

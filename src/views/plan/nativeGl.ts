@@ -24,6 +24,9 @@ export interface NativeChunkLayout {
   line_vtx: number | null;
   line_idx: number | null;
   line_batches: { start: number; count: number; color: number[]; stroke_mm: number; screen_px: boolean; device_px?: boolean }[];
+  /** Strich-Instanzen (gestrichelte Segmente, `DASH_LINE_WGSL`), s. `GpuGeometry.dash`. */
+  dash_inst?: number | null;
+  dash_batches?: { start: number; count: number; color: number[]; stroke_mm: number; line_at: number }[];
   origin: [number, number];
   greyed: boolean;
 }
@@ -192,6 +195,14 @@ export class NativeGl implements BufferGl {
         color: b.color,
         stroke_mm: b.strokeMm,
         screen_px: !!b.screenPx,
+      })),
+      dash_inst: id(g.dash?.instanceBuffer ?? null),
+      dash_batches: (g.dash?.batches ?? []).map((b) => ({
+        start: b.startInstance,
+        count: b.instanceCount,
+        color: b.color,
+        stroke_mm: b.strokeMm,
+        line_at: b.lineAt,
       })),
       origin: [g.origin?.x ?? 0, g.origin?.y ?? 0] as [number, number],
       greyed: !!g.greyed,

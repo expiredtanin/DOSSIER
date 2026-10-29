@@ -162,6 +162,8 @@ pub enum Prim {
         chain: bool,
         zigzag: Option<(f64, f64)>,
         motif: Option<Motif>,
+        /// Strichmuster (Papier-mm, wie im Puffer); `None` = durchgezogen.
+        dash: Option<Vec<f64>>,
     },
     Arc {
         style: Style,
@@ -171,6 +173,7 @@ pub enum Prim {
         from: V2,
         to: V2,
         r: f64,
+        dash: Option<Vec<f64>>,
     },
     Circle {
         style: Style,
@@ -179,6 +182,7 @@ pub enum Prim {
         weight_mm: f64,
         center: V2,
         r: f64,
+        dash: Option<Vec<f64>>,
     },
     DrawingArc {
         style: Style,
@@ -188,6 +192,7 @@ pub enum Prim {
         r: f64,
         a0: f64,
         a1: f64,
+        dash: Option<Vec<f64>>,
     },
 }
 
@@ -747,6 +752,10 @@ impl<'a> View<'a> {
             let rec = self.rec(i)?;
             let greyed = rec.flags & F_GREYED != 0;
             let f = &rec.f;
+            let dash = match rec.dash {
+                Some((o, n)) => Some(self.pool(o, n)?),
+                None => None,
+            };
             let p = match rec.tag {
                 T_POLYGON => {
                     let style = Style { greyed, opacity: opt(rec.flags, F_OPACITY, f[4]) };
@@ -793,23 +802,24 @@ impl<'a> View<'a> {
                         chain: i > from && rec.flags & F_CHAIN != 0,
                         zigzag: rec.zigzag,
                         motif,
+                        dash,
                     }
                 }
                 T_ARC => {
                     let style = Style { greyed, opacity: opt(rec.flags, F_OPACITY, f[3]) };
                     let c = color(&mut out, f[1])?;
-                    Prim::Arc { style, color: c, weight_mm: f[2], center: V2 { x: f[4], y: f[5] }, from: V2 { x: f[6], y: f[7] }, to: V2 { x: f[8], y: f[9] }, r: f[10] }
+                    Prim::Arc { style, color: c, weight_mm: f[2], center: V2 { x: f[4], y: f[5] }, from: V2 { x: f[6], y: f[7] }, to: V2 { x: f[8], y: f[9] }, r: f[10], dash }
                 }
                 T_CIRCLE => {
                     let style = Style { greyed, opacity: opt(rec.flags, F_OPACITY, f[3]) };
                     let fill = color(&mut out, f[0])?;
                     let stroke = color(&mut out, f[1])?;
-                    Prim::Circle { style, fill, stroke, weight_mm: f[2], center: V2 { x: f[4], y: f[5] }, r: f[6] }
+                    Prim::Circle { style, fill, stroke, weight_mm: f[2], center: V2 { x: f[4], y: f[5] }, r: f[6], dash }
                 }
                 T_DRAWING_ARC => {
                     let style = Style { greyed, opacity: opt(rec.flags, F_OPACITY, f[2]) };
                     let stroke = color(&mut out, f[0])?;
-                    Prim::DrawingArc { style, stroke, weight_mm: f[1], center: V2 { x: f[3], y: f[4] }, r: f[5], a0: f[6], a1: f[7] }
+                    Prim::DrawingArc { style, stroke, weight_mm: f[1], center: V2 { x: f[3], y: f[4] }, r: f[5], a0: f[6], a1: f[7], dash }
                 }
                 _ => Prim::Placeholder,
             };

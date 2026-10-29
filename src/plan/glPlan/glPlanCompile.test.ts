@@ -57,6 +57,25 @@ describe('compilePrimitivesToGpu: zusammenhängende Linien-Segmente', () => {
   });
 });
 
+describe('compilePrimitivesToGpu: Strichmuster (Shader-Instanzen wie der Szenen-Pfad)', () => {
+  it('gestrichelte Linie wird EINE Strich-Instanz statt durchgezogener Striche', () => {
+    const uploads: ArrayBufferView[] = [];
+    const gl = { ...glStub, bufferData: (_t: number, d: ArrayBufferView) => uploads.push(d) } as unknown as WebGL2RenderingContext;
+    const dashed = { ...seg(0, 0, 2, 0, 'a'), dash: [3, 1] } as Primitive;
+    const g = compilePrimitivesToGpu(gl, [seg(0, 1, 1, 1, 'b'), dashed], 90);
+    expect(g.dash?.batches).toEqual([{ startInstance: 0, instanceCount: 1, color: [0, 0, 0, 1], strokeMm: 0.18, lineAt: g.line.batches[0].indexCount }]);
+    const inst = uploads[uploads.length - 1] as Float32Array;
+    expect(inst.length).toBe(16);
+    // Lauflänge des Zugs (Bildschirm-Einheiten) und Muster 3/1 mm × 0.1 m/mm × 90.
+    expect(inst[5]).toBeCloseTo(180, 4);
+    expect(Array.from(inst.slice(7, 10)).map((v) => +v.toFixed(4))).toEqual([2, 27, 9]);
+  });
+
+  it('ohne Strichmuster keine Strich-Geometrie', () => {
+    expect(compilePrimitivesToGpu(glStub, [seg(0, 0, 1, 0, 'a')], 90).dash).toBeUndefined();
+  });
+});
+
 /** Summierte Dreiecksfläche (Betrag) aus Indizes über pts. */
 function triArea(pts: Vec2[], idx: number[]): number {
   let area = 0;

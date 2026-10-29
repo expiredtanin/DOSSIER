@@ -433,19 +433,19 @@ fn compute_joins_by_floor(p: &Project) -> Result<HashMap<String, WallCuts>, Stri
         let mut jw: Vec<JoinWall> = Vec::with_capacity(walls.len());
         let mut finite = true;
         for w in walls {
-            let layers = p.wall_type(w).map(|wt| {
-                wt.layers
+            // Hängende Wandtypen/Bauteile (Datei/Import) verschneiden mit den Rückfall-Werten.
+            let layers = Some(
+                p.wall_type_or_fallback(w)
+                    .layers
                     .iter()
                     .map(|l| {
-                        let comp = p.component(&l.component_id);
-                        let idx = comp.map(|c| {
-                            let n = comp_index.len() as u32;
-                            *comp_index.entry(c.id.as_str()).or_insert(n)
-                        });
-                        JoinLayer { thickness: l.thickness, component: idx, priority: comp.map_or(f64::NAN, |c| c.join_priority) }
+                        let comp = p.component_or_fallback(&l.component_id);
+                        let n = comp_index.len() as u32;
+                        let idx = *comp_index.entry(comp.id.as_str()).or_insert(n);
+                        JoinLayer { thickness: l.thickness, component: Some(idx), priority: comp.join_priority }
                     })
-                    .collect::<Vec<_>>()
-            });
+                    .collect::<Vec<_>>(),
+            );
             let reference = wall_reference(w);
             finite &= [w.start.x, w.start.y, w.end.x, w.end.y].iter().all(|v| v.is_finite())
                 && !matches!(reference, Reference::Offset(v) if !v.is_finite())
@@ -464,11 +464,11 @@ fn compute_joins_by_floor(p: &Project) -> Result<HashMap<String, WallCuts>, Stri
                     merged.insert(w.id.clone(), c);
                 }
             }
-            Err(joins::JoinError::UnknownWallType(i)) => return Err(format!("Unbekannter Wandtyp: {}", walls[i].wall_type_id)),
-            Err(joins::JoinError::UnknownComponent(i)) => {
-                let bad = walls[i];
-                let missing = p.wall_type(bad).and_then(|t| t.layers.iter().find(|l| p.component(&l.component_id).is_none())).map(|l| l.component_id.clone()).unwrap_or_default();
-                return Err(format!("Unbekanntes Bauteil-Material: {missing}"));
+            // Mit den Rückfällen oben nicht mehr erwartet: dann eben ohne Verschneidung.
+            Err(_) => {
+                for w in walls {
+                    merged.insert(w.id.clone(), WallCuts::default());
+                }
             }
         }
     }
@@ -1145,7 +1145,8 @@ fn roof_color(p: &Project, override_color: Option<Rgb>, component_id: &str) -> R
     if component_id.is_empty() {
         return Ok(ROOF_RGB);
     }
-    p.component(component_id).map(|c| hex_to_rgb(&c.color, ROOF_RGB)).ok_or_else(|| format!("Unbekanntes Bauteil-Material: {component_id}"))
+    // Hängendes Bauteil (Datei/Import): Dach-Vorgabefarbe.
+    Ok(p.component(component_id).map_or(ROOF_RGB, |c| hex_to_rgb(&c.color, ROOF_RGB)))
 }
 
 /// Dächer als geschlossene, geschichtete Dreiecks-Meshes (`emitRoofs`).
@@ -1444,7 +1445,7 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
         let wr = wall_ref(p, wall);
         let Some((jamb_start, jamb_end)) = opening_geom::opening_jambs(&wr, o.position, o.width) else { continue };
-        let thickness = p.wall_type(wall).map(|t| Project::type_thickness(&t.layers)).ok_or_else(|| format!("Unbekannter Wandtyp: {}", wall.wall_type_id))?;
+        let thickness = Project::type_thickness(&p.wall_type_or_fallback(wall).layers);
         let (zb, zt) = p.wall_vertical_extent(wall);
         let o_bottom = zb + o.sill_height.max(0.0);
         let o_top = zt.min(o_bottom + o.height);

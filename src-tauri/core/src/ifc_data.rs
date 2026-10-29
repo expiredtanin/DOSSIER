@@ -487,24 +487,6 @@ fn sia_label(key: &str) -> &'static str {
 
 const SIA_CATEGORIES: [SiaCategory; 6] = [SiaCategory::HNF, SiaCategory::NNF, SiaCategory::VF, SiaCategory::FF, SiaCategory::KGF, SiaCategory::AGF];
 
-/// Gleiche Fehlermeldung wie die Pick-Geometrie des 3D (`pickGeometry`): eine Öffnung in einer Wand
-/// mit unbekanntem Wandtyp bricht ab, bevor die Wände gerechnet werden.
-pub(crate) fn pick_opening_check(p: &Project) -> Result<(), String> {
-    for o in p.openings.as_deref().unwrap_or(&[]) {
-        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
-        let axis = hypot2(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
-        let from = max(0.0, min(o.position, axis));
-        let to = max(from, min(o.position + o.width, axis));
-        if to - from < 1e-4 {
-            continue;
-        }
-        if p.wall_type(wall).is_none() {
-            return Err(format!("Unbekannter Wandtyp: {}", wall.wall_type_id));
-        }
-    }
-    Ok(())
-}
-
 /// Der flache IFC-Puffer aus dem Projekt (s. Modulkopf).
 pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> {
     // Georeferenziert: die ganze Geometrie auf die echten LV95-Koordinaten (ohne Bezug unverändert).
@@ -550,7 +532,6 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     let component_name = |p: &Project, id: &str| -> String { p.component(id).map_or_else(|| id.to_string(), |c| c.name.clone()) };
 
     // ── Wände ──────────────────────────────────────────────────────────────
-    pick_opening_check(&p)?;
     let all_bands = model3d::emit_walls(&p, true)?;
     let mut bands_by_wall: HashMap<&str, Vec<&RWall>> = HashMap::new();
     for b in &all_bands {
@@ -1053,9 +1034,11 @@ mod tests {
         let mut p = Project { id: "leer".into(), ..Default::default() };
         let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
         assert_eq!(f.nums.last(), Some(&REC_END_COLUMNS));
+        // Hängender Wandtyp (Datei/Import): Export mit dem Rückfall-Typ statt Abbruch.
         p = sample();
         p.walls[0].wall_type_id = "fehlt".into();
-        assert_eq!(ifc_export_data(&p, &IfcOptions::default()).unwrap_err(), "Unbekannter Wandtyp: fehlt");
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        assert_eq!(f.nums.last(), Some(&REC_END_COLUMNS));
     }
 
     #[test]

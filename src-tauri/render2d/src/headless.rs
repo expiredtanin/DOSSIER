@@ -17,6 +17,7 @@
 
 use image::ImageEncoder;
 
+use crate::chunks::{ChunkGeom, ChunkRenderer, DashBatch, FillBatch, LineBatch, View};
 use crate::gpu::Renderer;
 use crate::types::{Scene, ViewBox};
 
@@ -156,6 +157,39 @@ impl HeadlessRenderer {
         }
     }
 
+    /// Rendert GPU-Chunks (je Eintrag die flache Ausgabe der Kern-Kompilierung
+    /// `gpu_compile_flat`, gepackte Linien-Vertices) ueber den Chunk-Renderer, den der
+    /// native macOS-Pfad benutzt (`chunks.rs`: dieselben Shader und dieselbe
+    /// Zeichenreihenfolge, nur ohne Metal-Flaeche). `view` in Bildschirm-Einheiten.
+    /// Fuer Headless-Vergleiche Chunk-Pfad gegen Szenen-Pfad.
+    pub fn render_chunks_to_image(&self, chunks: &[Vec<u32>], width: u32, height: u32, view: View, paper_scale_n: f64) -> Result<RgbaImage, String> {
+        let (width, height) = (width.max(1), height.max(1));
+        let mut cr = ChunkRenderer::new(&self.device, COLOR_FORMAT, 4);
+        let mut layout = Vec::new();
+        let mut next_id = 1u32;
+        for words in chunks {
+            let (geom, bufs) = chunk_from_flat(words, &mut next_id).ok_or("Chunk-Ausgabe unlesbar")?;
+            for (id, bytes) in bufs {
+                cr.upload(&self.device, id, &bytes);
+            }
+            layout.push(geom);
+        }
+        cr.set_layout(layout);
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("headless.chunks.target"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: COLOR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let tv = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        cr.render(&self.device, &self.queue, &tv, view, (width, height), paper_scale_n);
+        Ok(RgbaImage { width, height, pixels: self.read_pixels(&texture, width, height) })
+    }
+
     /// Texture -> gepolsterter Buffer -> straff gepacktes Pixel-Array (Row-
     /// Alignment-Falle, siehe Modul-Kopf).
     fn read_pixels(&self, texture: &wgpu::Texture, width: u32, height: u32) -> Vec<u8> {
@@ -234,4 +268,143 @@ fn align_up(value: u32, align: u32) -> u32 {
         return value;
     }
     ((value + align - 1) / align) * align
+}
+
+/// Modell-Ausmass (minX, minY, maxX, maxY, Meter) einer flachen Chunk-Ausgabe (`gpu_compile_flat`).
+pub fn chunk_flat_bounds(words: &[u32]) -> Option<[f64; 4]> {
+    let meta = flat_meta(words)?;
+    (meta.len() >= 6).then(|| [meta[2], meta[3], meta[4], meta[5]])
+}
+
+fn flat_meta(words: &[u32]) -> Option<Vec<f64>> {
+    let m = *words.first()? as usize;
+    if words.len() < 2 + 2 * m {
+        return None;
+    }
+    Some((0..m).map(|i| f64::from_bits(words[2 + 2 * i] as u64 | ((words[3 + 2 * i] as u64) << 32))).collect())
+}
+
+/// Flache Kern-Ausgabe (Layout s. `core/src/gpu_compile.rs`, gepackt) → Layout-Eintrag + Puffer
+/// (ID, Bytes) wie sie die Webview an den nativen Renderer schickt (`nativeGl.ts`).
+pub fn chunk_from_flat(words: &[u32], next_id: &mut u32) -> Option<(ChunkGeom, Vec<(u32, Vec<u8>)>)> {
+    let meta = flat_meta(words)?;
+    if meta.len() < 12 {
+        return None;
+    }
+    let n = |v: f64| -> Option<usize> { (v >= 0.0 && v.fract() == 0.0).then_some(v as usize) };
+    let (nfp, nfi, nlv, nli, nf, nl) = (n(meta[6])?, n(meta[7])?, n(meta[8])?, n(meta[9])?, n(meta[10])?, n(meta[11])?);
+    let mut k = 12;
+    let rgba = |m: &[f64]| [m[0] as f32, m[1] as f32, m[2] as f32, m[3] as f32];
+    let mut fill_batches = Vec::new();
+    for _ in 0..nf {
+        let b = meta.get(k..k + 6)?;
+        fill_batches.push(FillBatch { start: b[0] as u32, count: b[1] as u32, color: rgba(&b[2..6]) });
+        k += 6;
+    }
+    let mut line_batches = Vec::new();
+    for _ in 0..nl {
+        let b = meta.get(k..k + 8)?;
+        line_batches.push(LineBatch { start: b[0] as u32, count: b[1] as u32, color: rgba(&b[2..6]), stroke_mm: b[6] as f32, screen_px: b[7] == 1.0, device_px: false });
+        k += 8;
+    }
+    let (nd, ndb) = (meta.get(k).copied().map(n).unwrap_or(Some(0))?, meta.get(k + 1).copied().map(n).unwrap_or(Some(0))?);
+    k += 2;
+    let mut dash_batches = Vec::new();
+    for _ in 0..ndb {
+        let b = meta.get(k..k + 8)?;
+        dash_batches.push(DashBatch { start: b[0] as u32, count: b[1] as u32, color: rgba(&b[2..6]), stroke_mm: b[6] as f32, line_at: b[7] as u32 });
+        k += 8;
+    }
+    let mut off = 2 + 2 * meta.len();
+    let mut bufs = Vec::new();
+    let mut take = |len: usize, off: &mut usize| -> Option<Option<u32>> {
+        let w = words.get(*off..*off + len)?;
+        *off += len;
+        if len == 0 {
+            return Some(None);
+        }
+        let id = *next_id;
+        *next_id += 1;
+        bufs.push((id, w.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()));
+        Some(Some(id))
+    };
+    let fill_pos = take(nfp, &mut off)?;
+    let fill_idx = take(nfi, &mut off)?;
+    let line_vtx = take(nlv, &mut off)?;
+    let line_idx = take(nli, &mut off)?;
+    let dash_inst = take(nd * 16, &mut off)?;
+    let geom = ChunkGeom {
+        fill_pos,
+        fill_idx,
+        fill_batches,
+        line_vtx,
+        line_idx,
+        line_batches,
+        dash_inst,
+        dash_batches,
+        origin: [meta[0], meta[1]],
+        greyed: false,
+    };
+    Some((geom, bufs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Flache Ausgabe wie `gpu_compile_flat` mit EINER gestrichelten Linie (Instanz) von
+    /// (0,0) nach (L,0) Bildschirm-Einheiten, Muster an/aus = `on`/`off`.
+    fn dashed_chunk(len: f32, on: f32, off: f32, stroke_mm: f64) -> Vec<u32> {
+        let mut meta: Vec<f64> = vec![0.0, 0.0, 0.0, 0.0, len as f64 / 90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        meta.extend_from_slice(&[1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, stroke_mm, 0.0]);
+        let mut out = vec![meta.len() as u32, 0];
+        for m in &meta {
+            let b = m.to_bits();
+            out.push(b as u32);
+            out.push((b >> 32) as u32);
+        }
+        let inst = [0.0, 0.0, len, 0.0, 0.0, len, on + off, 2.0, on, off, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0f32];
+        out.extend(inst.iter().map(|v| v.to_bits()));
+        out
+    }
+
+    /// Der Chunk-Renderer (nativer macOS-Pfad, hier ueber Vulkan/lavapipe) zeichnet Striche
+    /// und Luecken: entlang der Achse wechseln gedeckte und freie Pixel im Muster-Takt.
+    #[test]
+    fn chunk_renderer_zeichnet_striche_und_luecken() {
+        let r = match HeadlessRenderer::new() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("uebersprungen, kein Headless-Adapter: {e}");
+                return;
+            }
+        };
+        // 200 Einheiten lang, Muster 20 an / 20 aus; Ansicht 1:1 auf 200x40 px.
+        let chunk = dashed_chunk(200.0, 20.0, 20.0, 0.05);
+        let img = r
+            .render_chunks_to_image(&[chunk], 200, 40, View { x: 0.0, y: -20.0, w: 200.0, h: 40.0 }, 1000.0)
+            .expect("rendern");
+        let px = |x: u32| {
+            let i = ((20 * img.width + x) * 4) as usize;
+            img.pixels[i] // Rot-Kanal: Linie schwarz -> 0, Hintergrund weiss -> 255
+        };
+        // Strich-Mitten (10, 50, 90 …) dunkel, Luecken-Mitten (30, 70, 110 …) hell.
+        for c in [10u32, 50, 90, 130, 170] {
+            assert!(px(c) < 80, "Strich bei x={c}: {}", px(c));
+        }
+        for c in [30u32, 70, 110, 150] {
+            assert!(px(c) > 200, "Luecke bei x={c}: {}", px(c));
+        }
+    }
+
+    #[test]
+    fn flache_ausgabe_wird_gelesen() {
+        let mut id = 1;
+        let (g, bufs) = chunk_from_flat(&dashed_chunk(100.0, 5.0, 5.0, 0.35), &mut id).unwrap();
+        assert_eq!(g.dash_inst, Some(1));
+        assert_eq!(g.dash_batches.len(), 1);
+        assert_eq!(bufs[0].1.len(), 64);
+        assert!(g.line_vtx.is_none() && g.fill_pos.is_none());
+        assert!(chunk_from_flat(&[5, 0, 1], &mut id).is_none());
+    }
 }
