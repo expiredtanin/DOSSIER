@@ -690,7 +690,6 @@ pub fn export_step_core(specs: &[SolidSpec], header: &StepHeader) -> Res<String>
 }
 
 /// Ein eingelesener STEP-Körper (Shell) als Mesh.
-#[derive(Serialize)]
 pub struct StepMesh {
     pub positions: Vec<f32>,
     pub indices: Vec<u32>,
@@ -818,6 +817,18 @@ pub fn step_length_unit_in_m(text: &str) -> f64 {
         }
     }
     1.0
+}
+
+/// STEP-Körper als flacher Puffer `[1, n, (np, ni, Positionen…, Indizes…) je Körper]` (Grenze zum Kern).
+pub fn step_meshes_flat(meshes: &[StepMesh]) -> Vec<f64> {
+    let mut f = vec![1.0, meshes.len() as f64];
+    for m in meshes {
+        f.push(m.positions.len() as f64);
+        f.push(m.indices.len() as f64);
+        f.extend(m.positions.iter().map(|&x| x as f64));
+        f.extend(m.indices.iter().map(|&i| i as f64));
+    }
+    f
 }
 
 /// Liest eine STEP-Datei und tesselliert alle Shells (relative Toleranz `rel_tol` der

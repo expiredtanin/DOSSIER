@@ -388,6 +388,11 @@ export class ProjectDocument {
     );
   }
 
+  /** STEP-Import (truck → Kern, [K4] S4): ein Kontext-Mesh je Körper, ein Undo-Schritt. */
+  importStep(base: Project, flat: Float64Array, opts: { fileName: string }, now: number) {
+    return this.commitCore<{ contextObjects: number }>(base, (h) => core().doc_import_step(h, flat, JSON.stringify(opts), "", now));
+  }
+
   /** Abfrage eines Befehls zwischen den Schritten (`doc_cmd_query`: Treffer, Vorschau-Formen), JSON-Antwort. */
   cmdQuery<T>(req: object): T {
     if (!this.handle) throw new Error("Kern-Abfrage „cmdQuery“: Dokument nicht offen");

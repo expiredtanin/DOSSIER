@@ -440,11 +440,12 @@ mod web {
     }
 
     /// Liest STEP-Text und tesselliert alle Körper (`relTol` = Toleranz relativ zur
-    /// Bounding-Box-Diagonale, Default 0.001). Output JSON: `[{positions, indices}, …]`.
+    /// Bounding-Box-Diagonale, Default 0.001). Flacher Puffer für den Kern (`import_step.rs`):
+    /// `[1, n, (np, ni, Positionen…, Indizes…) je Körper]`, Positionen als f32 in f64 geweitet.
     #[wasm_bindgen]
-    pub fn import_step(text: &str, rel_tol: f64) -> std::result::Result<String, JsError> {
+    pub fn import_step_flat(text: &str, rel_tol: f64) -> std::result::Result<Vec<f64>, JsError> {
         let meshes = brep::import_step_core(text, rel_tol).map_err(|e| JsError::new(&e))?;
-        serde_json::to_string(&meshes).map_err(|e| JsError::new(&e.to_string()))
+        Ok(brep::step_meshes_flat(&meshes))
     }
 
     /// Boolesche Operation zwischen zwei Dreiecks-Meshes (Mesh-Ebenen-CSG via

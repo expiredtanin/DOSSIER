@@ -498,3 +498,98 @@ pub fn mesh_objects_to_meshes(objects: &[MeshObject], file_name: &str, placement
         })
         .collect()
 }
+
+// ── STEP ([K4] S4, vorher `io/stepImport.ts`) ────────────────────────────────
+
+/// Körper aus dem flachen Puffer von truck (`trucksolid::brep::step_meshes_flat`):
+/// `[1, n, (np, ni, Positionen…, Indizes…) je Körper]`, Positionen f32 in f64 geweitet.
+pub fn decode_step(f: &[f64]) -> Result<Vec<(Vec<f32>, Vec<f64>)>, String> {
+    let bad = || "STEP-Import: Puffer beschädigt".to_string();
+    if f.len() < 2 || f[0] != 1.0 || !(f[1] >= 0.0 && f[1].fract() == 0.0) {
+        return Err("STEP-Import: unbekannte Kodierung".into());
+    }
+    let mut at = 2;
+    let mut out = Vec::new();
+    let mut k = 0.0;
+    while k < f[1] {
+        let h = f.get(at..at + 2).ok_or_else(bad)?;
+        let (np, ni) = (h[0], h[1]);
+        at += 2;
+        if !(np.fract() == 0.0 && ni.fract() == 0.0 && np >= 0.0 && ni >= 0.0) || at + np as usize + ni as usize > f.len() {
+            return Err(bad());
+        }
+        let positions = f[at..at + np as usize].iter().map(|&x| x as f32).collect();
+        at += np as usize;
+        let indices = f[at..at + ni as usize].to_vec();
+        at += ni as usize;
+        out.push((positions, indices));
+        k += 1.0;
+    }
+    Ok(out)
+}
+
+/// STEP-Körper → Kontext-Meshes der Kategorie „Import“, Koordinaten unverändert (Meter, Z = Höhe), ohne
+/// `layer`. Zahlen wie vorher über JSON: die f32-Positionen mit ihrer kürzesten Dezimaldarstellung.
+pub fn step_meshes(bodies: &[(Vec<f32>, Vec<f64>)], file_name: &str, now: f64) -> Vec<Value> {
+    let base = base_name(file_name, "STEP");
+    let stamp = stamp36(now);
+    let n = bodies.len();
+    bodies
+        .iter()
+        .enumerate()
+        .map(|(i, (pos, idx))| {
+            let mut o = Map::new();
+            o.insert("id".into(), format!("imported-step-{stamp}-{}", next_seq()).into());
+            o.insert("type".into(), "importedMesh".into());
+            o.insert("name".into(), if n > 1 { format!("{base} ({}/{n})", i + 1) } else { base.clone() }.into());
+            o.insert("categoryCode".into(), GENERIC_IMPORT_CODE.into());
+            o.insert("positions".into(), Value::Array(pos.iter().map(|&x| js_num(x.to_string().parse().unwrap_or(f64::from(x)))).collect()));
+            o.insert("indices".into(), Value::Array(idx.iter().map(|&k| js_num(k)).collect()));
+            Value::Object(o)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod step_tests {
+    use super::*;
+
+    fn flat() -> Vec<f64> {
+        // zwei Körper: Dreieck mit 0.1f32 (nicht exakt in f64), Dreieck mit ganzen Zahlen
+        let mut f = vec![1.0, 2.0, 9.0, 3.0];
+        f.extend([0.1f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, -0.0].iter().map(|&x| x as f64));
+        f.extend([0.0, 1.0, 2.0, 9.0, 3.0]);
+        f.extend([5.0, 0.0, 0.0, 6.0, 0.0, 0.0, 5.0, 1.0, 0.0]);
+        f.extend([0.0, 1.0, 2.0]);
+        f
+    }
+
+    #[test]
+    fn koerper_werden_kontext_meshes() {
+        let bodies = decode_step(&flat()).unwrap();
+        let m = step_meshes(&bodies, "haus.stp", 1.0e12);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0]["name"], "haus (1/2)");
+        assert_eq!(m[1]["name"], "haus (2/2)");
+        assert_eq!(m[0]["categoryCode"], "10");
+        assert!(m[0].get("layer").is_none());
+        assert_eq!(m[0]["positions"][0], json!(0.1));
+        assert_eq!(m[1]["indices"], json!([0, 1, 2]));
+        assert!(m[0]["id"].as_str().unwrap().starts_with("imported-step-"));
+    }
+
+    #[test]
+    fn ein_koerper_traegt_den_dateinamen_ohne_nummer() {
+        let f = vec![1.0, 1.0, 3.0, 3.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let m = step_meshes(&decode_step(&f).unwrap(), ".step", 1.0);
+        assert_eq!(m[0]["name"], "STEP");
+    }
+
+    #[test]
+    fn kaputte_puffer_werden_verworfen() {
+        assert!(decode_step(&[]).is_err());
+        assert!(decode_step(&[2.0, 0.0]).is_err());
+        assert!(decode_step(&[1.0, 1.0, 9.0, 3.0, 0.0]).is_err());
+        assert!(decode_step(&[1.0, f64::NAN]).is_err());
+    }
+}

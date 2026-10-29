@@ -54,7 +54,7 @@ import { UnsavedChangesDialog } from "./ui/UnsavedChangesDialog";
 import { RecoverAutosaveDialog } from "./ui/RecoverAutosaveDialog";
 import { Toast } from "./ui/Toast";
 import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./native/projectFile";
-import { stepTextToImportedMeshes } from "./io/stepImport";
+import { readStepFlat } from "./engine/truckSolid";
 import { formatIfcElementsSummary, formatIfcReport, readIfcFlat } from "./io/ifcImport";
 import { IfcImportDialog, type IfcImportMode } from "./ui/IfcImportDialog";
 import { MeshImportHost } from "./ui/MeshImportDialog";
@@ -3288,8 +3288,12 @@ export default function App() {
           if (!f) return;
           void f
             .text()
-            .then((text) => stepTextToImportedMeshes(text, f.name))
-            .then((objs) => addContextObjectsAndFit(objs))
+            .then((text) => readStepFlat(text))
+            .then((flat) => {
+              // Der Kern macht je Körper ein Kontext-Mesh und übernimmt sie als EINEN Undo-Schritt ([K4] S4).
+              const r = getState().commitImport((doc, base, now) => doc.importStep(base, flat, { fileName: f.name }, now));
+              if (r) fitToContextObjects(addedItems(r.ops, "context") as ContextObject[]);
+            })
             .catch((err) =>
               notify(`${t("step.import.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"),
             );

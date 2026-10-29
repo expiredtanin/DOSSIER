@@ -3,6 +3,19 @@ import { readFileSync } from "node:fs";
 import { sampleProject } from "../model/sampleProject";
 import { projectSolidSpecs, wallProfile } from "./exportStep";
 
+/** Flacher STEP-Puffer von truck (`[1, n, (np, ni, Positionen…, Indizes…)…]`) → Körper. */
+function stepBodies(f: Float64Array): Array<{ positions: number[]; indices: number[] }> {
+  const out: Array<{ positions: number[]; indices: number[] }> = [];
+  let at = 2;
+  for (let k = 0; k < f[1]; k++) {
+    const [np, ni] = [f[at], f[at + 1]];
+    at += 2;
+    out.push({ positions: Array.from(f.subarray(at, at + np)), indices: Array.from(f.subarray(at + np, at + np + ni)) });
+    at += np + ni;
+  }
+  return out;
+}
+
 describe("wallProfile", () => {
   it("Fenster im Inneren wird zum Loch, Tür am Wandfuss zur Kerbe im Aussenring", () => {
     const p = wallProfile(5, 2.6, [
@@ -46,7 +59,7 @@ describe("STEP-Export Ende-zu-Ende (truck-WASM)", () => {
     const specs = projectSolidSpecs(sampleProject);
     const step: string = mod.export_step(JSON.stringify({ solids: specs, fileName: "demo.stp" }));
     expect(step.startsWith("ISO-10303-21;")).toBe(true);
-    const back = JSON.parse(mod.import_step(step, 0.002)) as Array<{ positions: number[]; indices: number[] }>;
+    const back = stepBodies(mod.import_step_flat(step, 0.002));
     expect(back.length).toBeGreaterThan(5);
     expect(back.every((m) => m.indices.length >= 12)).toBe(true);
   }, 60_000);
