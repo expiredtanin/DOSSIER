@@ -11,6 +11,7 @@ import { fromMarkedJson, toMarkedJson } from "./ops";
 import type { CoreOp } from "./ops";
 import { fieldOps } from "./opsBuild";
 import { opsMutation } from "./opsBuild";
+import { StepStates } from "./stepStates";
 import type { ProjectMutation } from "./opsBuild";
 import type { IfcImportResult } from "../io/ifcImport";
 import type { MeshImportReport } from "../io/meshImport";
@@ -108,6 +109,8 @@ export class ProjectDocument {
   private mirror: Project;
   /** Verlaufsgrenzen (Schritte, Bytes), beim Neuöffnen wieder gesetzt. */
   private limits: [number, number] | null = null;
+  /** Stände grosser Verlaufsschritte (Undo/Redo ohne Ops-Rückgabe, s. `stepStates.ts`). */
+  private steps = new StepStates();
 
   constructor(project: Project) {
     this.mirror = project;
@@ -197,6 +200,7 @@ export class ProjectDocument {
    */
   load(project: Project): void {
     this.mirror = project;
+    this.steps.clear();
     if (!this.handle || !core().doc_load_json(this.handle, JSON.stringify(project))) this.reopen(project);
   }
 
@@ -276,6 +280,7 @@ export class ProjectDocument {
     }
     const project = applyOps(base, ops, core().doc_last_hits(this.handle));
     this.mirror = project;
+    this.rememberCommit(base, project, ops);
     return { project };
   }
 
@@ -360,6 +365,7 @@ export class ProjectDocument {
     if ("problems" in r) return r;
     const project = r.ops.length ? applyOps(base, r.ops) : base;
     this.mirror = project;
+    this.rememberCommit(base, project, r.ops);
     return { ...r, project };
   }
 
@@ -434,11 +440,36 @@ export class ProjectDocument {
       this.ensure(base);
       return null;
     }
+    const undo = fn === "doc_undo";
+    const top = this.historySeqs()[undo ? 0 : 1];
+    // Grosser Schritt, dessen Stände TS noch hält: der Kern wendet ihn an, ohne Ops zurückzugeben.
+    if (this.steps.has(top)) {
+      if (!core().doc_jump_quiet(this.handle, !undo)) return null;
+      const project = this.steps.jump(top, base, undo, this.historySeqs()[undo ? 1 : 0]);
+      this.mirror = project;
+      return project;
+    }
     const json = core()[fn](this.handle);
     if (!json) return null;
-    const project = applyOps(base, JSON.parse(json) as CoreOp[], core().doc_last_hits(this.handle));
+    const ops = JSON.parse(json) as CoreOp[];
+    const project = applyOps(base, ops, core().doc_last_hits(this.handle));
     this.mirror = project;
+    // Gegenschritt (neu oben auf dem anderen Stapel) führt zwischen denselben Ständen.
+    const next = this.historySeqs()[undo ? 1 : 0];
+    if (undo) this.steps.remember(next, project, base, ops);
+    else this.steps.remember(next, base, project, ops);
     return project;
+  }
+
+  /** Laufnummern der obersten Verlaufsschritte `[Undo, Redo, letzte Aufzeichnung verschmolzen]`. */
+  private historySeqs(): number[] {
+    return this.handle ? Array.from(core().doc_history_seq(this.handle)) : [0, 0, 0];
+  }
+
+  /** Nach einer angenommenen Änderung: grossen, eigenen (nicht verschmolzenen) Schritt merken. */
+  private rememberCommit(base: Project, project: Project, ops: readonly CoreOp[]): void {
+    const [seq, , merged] = this.historySeqs();
+    if (!merged) this.steps.remember(seq, base, project, ops);
   }
 
   /** Verlaufsstand: Undo-/Redo-Tiefe und geschätzter Speicher (Bytes). */
@@ -448,6 +479,7 @@ export class ProjectDocument {
   }
 
   clearHistory(): void {
+    this.steps.clear();
     if (this.handle) core().doc_history_clear(this.handle);
   }
 

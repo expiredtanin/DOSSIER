@@ -465,6 +465,9 @@ impl Document {
     /// Liste — ein Drag-Schritt kostet nur das Suchen des Elements; das neue Element geht ohne Kopie
     /// ins Dokument, das alte in die inverse Op.
     fn apply_recorded(&mut self, op: Op, pos: &mut PosCache) -> (Vec<Op>, Option<usize>) {
+        if matches!(op, Op::Remove { .. }) && self.root.get(op.key()).is_some_and(Value::is_array) {
+            return (self.remove_moving(op, pos), None);
+        }
         let key = op.key();
         let old = self.root.get(key);
         let snapshot = || {
@@ -523,6 +526,40 @@ impl Document {
         };
         let hit = self.apply_raw(op, pos);
         (inverse, hit)
+    }
+
+    /// `remove` auf einer vorhandenen Liste: die entfernten Elemente wandern ohne Kopie in die
+    /// inverse Op (`add` an den alten Positionen, zusammenhängende Läufe als eine Op) — beim Undo eines
+    /// grossen Imports kostete das Kopieren und spätere Freigeben von 10⁵ Elementen Sekunden.
+    fn remove_moving(&mut self, op: Op, pos: &mut PosCache) -> Vec<Op> {
+        let Op::Remove { collection, ids } = op else { unreachable!("nur remove") };
+        pos.forget(&collection);
+        let drop: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let list = std::mem::take(self.list_mut(&collection));
+        let before = list.len();
+        let tracked = self.revs.items.contains_key(collection.as_str());
+        let mut keep_mask: Vec<bool> = Vec::with_capacity(if tracked { before } else { 0 });
+        let mut kept: Vec<Value> = Vec::with_capacity(before);
+        let mut runs: Vec<Op> = Vec::new();
+        let mut prev: Option<usize> = None;
+        for (i, e) in list.into_iter().enumerate() {
+            let gone = id_of(&e).is_some_and(|x| drop.contains(x));
+            if tracked {
+                keep_mask.push(!gone);
+            }
+            if !gone {
+                kept.push(e);
+                continue;
+            }
+            match runs.last_mut() {
+                Some(Op::Add { items, .. }) if prev.is_some_and(|p| p + 1 == i) => items.push(e),
+                _ => runs.push(Op::Add { collection: collection.clone(), items: vec![e], at: Some(i) }),
+            }
+            prev = Some(i);
+        }
+        *self.list_mut(&collection) = kept;
+        self.revs.item_op(&collection, Shape::Remove, before, tracked.then_some(&keep_mask[..]), None);
+        runs
     }
 
     /// Wendet `ops` an und liefert die inversen Ops (Anwendungsreihenfolge), ohne Prüfung (Undo/Redo:
@@ -630,20 +667,35 @@ impl Document {
     /// Einen Schritt zurück; liefert die angewendeten Ops (für die TS-Leseansicht), `None` = nichts.
     /// Die dabei entstehenden Inversen sind der Redo-Schritt.
     pub fn undo(&mut self) -> Option<Vec<Op>> {
-        let ops = self.history.pop_undo()?.ops;
-        let applied = ops.clone();
-        let redo = self.apply_inverting(ops);
-        self.history.push_redo(Step::new(redo));
-        Some(applied)
+        let mut applied = None;
+        self.undo_with(|ops| applied = Some(ops.to_vec()));
+        applied
     }
 
     /// Einen Schritt vor; liefert die angewendeten Ops, `None` = nichts.
     pub fn redo(&mut self) -> Option<Vec<Op>> {
-        let ops = self.history.pop_redo()?.ops;
-        let applied = ops.clone();
-        let undo = self.apply_inverting(ops);
+        let mut applied = None;
+        self.redo_with(|ops| applied = Some(ops.to_vec()));
+        applied
+    }
+
+    /// Wie [`Document::undo`] ohne Kopie der Ops: `emit` sieht sie vor dem Anwenden (z. B. als JSON
+    /// schreiben, oder gar nicht, wenn TS den Schritt selbst kennt). `false` = nichts rückgängig zu machen.
+    pub fn undo_with(&mut self, emit: impl FnOnce(&[Op])) -> bool {
+        let Some(step) = self.history.pop_undo() else { return false };
+        emit(&step.ops);
+        let redo = self.apply_inverting(step.ops);
+        self.history.push_redo(Step::new(redo));
+        true
+    }
+
+    /// Wie [`Document::redo`] ohne Kopie der Ops (s. [`Document::undo_with`]).
+    pub fn redo_with(&mut self, emit: impl FnOnce(&[Op])) -> bool {
+        let Some(step) = self.history.pop_redo() else { return false };
+        emit(&step.ops);
+        let undo = self.apply_inverting(step.ops);
         self.history.push_undo(Step::new(undo));
-        Some(applied)
+        true
     }
 
     pub fn history(&self) -> &History {
@@ -1052,5 +1104,69 @@ mod tests {
             redo.as_secs_f64() * 1e6 / n as f64,
             d.history().bytes() / 1024
         );
+    }
+}
+
+#[cfg(test)]
+mod big_steps {
+    use super::*;
+    use serde_json::json;
+
+    fn ops(v: Value) -> Vec<Op> {
+        crate::ops::ops_from_json(&v).unwrap()
+    }
+
+    #[test]
+    fn schritt_laufnummern_und_verschmelzen() {
+        let mut d = Document::from_json(r#"{"id":"p","walls":[{"id":"a"},{"id":"b"},{"id":"c"},{"id":"d"}]}"#).unwrap();
+        assert_eq!(d.history().top_seqs(), (0, 0));
+        d.commit(ops(json!([{"kind":"remove","collection":"walls","ids":["b","c"]}])), None, 0.0, false).unwrap();
+        let (s1, _) = d.history().top_seqs();
+        assert!(s1 > 0 && !d.history().last_merged());
+        d.commit(ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"a","x":1}}])), Some("k"), 10.0, false).unwrap();
+        let (s2, _) = d.history().top_seqs();
+        assert!(s2 != s1 && !d.history().last_merged());
+        d.commit(ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"a","x":2}}])), Some("k"), 20.0, false).unwrap();
+        let (s3, _) = d.history().top_seqs();
+        assert!(s3 != s2 && d.history().last_merged(), "verschmolzen = neuer Schritt, neue Nummer");
+        // Undo ohne Ops-Rückgabe; die Gegenrichtung bekommt eine neue Nummer.
+        assert!(d.undo_with(|_| ()));
+        let (u, r) = d.history().top_seqs();
+        assert!(u == s1 && r > s3);
+        // Undo des `remove`: Elemente an den alten Positionen zurück (ohne Kopie verschoben).
+        let mut seen = String::new();
+        assert!(d.undo_with(|o| seen = crate::ops::ops_to_json(o)));
+        assert_eq!(seen, r#"[{"kind":"add","collection":"walls","items":[{"id":"b"},{"id":"c"}],"at":1}]"#);
+        assert_eq!(d.to_json(), r#"{"id":"p","walls":[{"id":"a"},{"id":"b"},{"id":"c"},{"id":"d"}]}"#);
+        assert!(!d.undo_with(|_| panic!("leer")));
+        assert!(d.redo_with(|_| ()) && d.redo_with(|_| ()));
+        assert_eq!(d.to_json(), r#"{"id":"p","walls":[{"id":"a","x":2},{"id":"d"}]}"#);
+    }
+
+    /// Messung (nativ): grosser Import (150 000 Zeichnungen) committen, Undo, Redo. `cargo test --release -- --ignored`.
+    #[test]
+    #[ignore]
+    fn import_150k() {
+        let mut d = Document::from_json(r#"{"id":"p","drawings2d":[]}"#).unwrap();
+        let items: Vec<Value> = (0..150_000)
+            .map(|i| json!({"id": format!("dxf2d-1-{i}"), "type":"drawing2d","levelId":"drawing-1","categoryCode":"105",
+                "geom":{"shape":"polyline","points":[{"x":2601258.0+i as f64,"y":1204834.5},{"x":2601278.0,"y":1204834.0},{"x":2601278.0,"y":1204854.0}],"closed":true,"bulges":[0,0.25,0]}}))
+            .collect();
+        let t = std::time::Instant::now();
+        d.commit(vec![Op::Add { collection: "drawings2d".into(), items, at: None }], None, 0.0, false).unwrap();
+        eprintln!("commit {:?}", t.elapsed());
+        for _ in 0..2 {
+            let t = std::time::Instant::now();
+            let mut n = 0;
+            d.undo_with(|o| n = crate::ops::ops_to_json(o).len());
+            eprintln!("undo+json {:?} {n}", t.elapsed());
+            let t = std::time::Instant::now();
+            d.redo_with(|o| n = crate::ops::ops_to_json(o).len());
+            eprintln!("redo+json {:?} {n}", t.elapsed());
+            let t = std::time::Instant::now();
+            d.undo_with(|_| ());
+            d.redo_with(|_| ());
+            eprintln!("undo+redo quiet {:?}", t.elapsed());
+        }
     }
 }

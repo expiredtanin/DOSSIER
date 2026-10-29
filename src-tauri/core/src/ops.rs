@@ -139,7 +139,53 @@ pub fn ops_from_json(v: &Value) -> Result<Vec<Op>, String> {
 
 /// Op-Liste als JSON-Text.
 pub fn ops_to_json(ops: &[Op]) -> String {
-    Value::Array(ops.iter().map(Op::to_json).collect()).to_string()
+    let mut out = Vec::new();
+    write_ops(&mut out, ops);
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// Op-Liste als JSON wie [`Op::to_json`], ohne die Elemente zu kopieren (grosse Importe und ihr
+/// Undo/Redo: 10⁵ Zeichnungen).
+pub fn write_ops(out: &mut Vec<u8>, ops: &[Op]) {
+    fn head(out: &mut Vec<u8>, kind: &str, collection: &str) {
+        out.extend_from_slice(b"{\"kind\":\"");
+        out.extend_from_slice(kind.as_bytes());
+        out.extend_from_slice(b"\",\"collection\":");
+        let _ = serde_json::to_writer(&mut *out, collection);
+    }
+    out.push(b'[');
+    for (i, op) in ops.iter().enumerate() {
+        if i > 0 {
+            out.push(b',');
+        }
+        match op {
+            Op::Add { collection, items, at } => {
+                head(out, "add", collection);
+                out.extend_from_slice(b",\"items\":[");
+                for (k, it) in items.iter().enumerate() {
+                    if k > 0 {
+                        out.push(b',');
+                    }
+                    let _ = serde_json::to_writer(&mut *out, it);
+                }
+                out.push(b']');
+                if let Some(a) = at {
+                    out.extend_from_slice(format!(",\"at\":{a}").as_bytes());
+                }
+                out.push(b'}');
+            }
+            Op::Replace { collection, entity } => {
+                head(out, "replace", collection);
+                out.extend_from_slice(b",\"entity\":");
+                let _ = serde_json::to_writer(&mut *out, entity);
+                out.push(b'}');
+            }
+            op => {
+                let _ = serde_json::to_writer(&mut *out, &op.to_json());
+            }
+        }
+    }
+    out.push(b']');
 }
 
 // ── Listen-Hilfen ────────────────────────────────────────────────────────────
@@ -293,12 +339,20 @@ pub fn validate_project(root: &Map<String, Value>) -> Vec<String> {
 pub struct Step {
     pub ops: Vec<Op>,
     bytes: usize,
+    /// Laufnummer (nie 0; jeder neu gebaute Schritt bekommt eine neue, auch beim Verschmelzen und beim
+    /// Wechsel zwischen Undo- und Redo-Stapel): TS erkennt daran einen Schritt wieder, dessen Stände es
+    /// selbst noch hält (`ProjectDocument`: Undo/Redo grosser Importe ohne Ops-Rückgabe).
+    pub seq: u64,
 }
+
+/// Zähler der Schritt-Laufnummern (prozessweit, von allen Dokumenten geteilt).
+static STEP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl Step {
     pub fn new(ops: Vec<Op>) -> Step {
         let bytes = ops_bytes(&ops);
-        Step { ops, bytes }
+        let seq = STEP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        Step { ops, bytes, seq }
     }
 }
 
@@ -383,6 +437,8 @@ pub struct History {
     group_at: f64,
     /// Die offene Gruppe hat etwas aufgezeichnet.
     group_recorded: bool,
+    /// Die letzte Aufzeichnung ist mit dem vorigen Schritt verschmolzen (Koaleszenz, Gruppe).
+    merged: bool,
     bytes: usize,
     pub max_steps: usize,
     pub max_bytes: usize,
@@ -400,6 +456,7 @@ impl Default for History {
             group_key: None,
             group_at: 0.0,
             group_recorded: false,
+            merged: false,
             bytes: 0,
             max_steps: 100,
             max_bytes: 256 << 20,
@@ -417,6 +474,14 @@ impl History {
     /// Geschätzter Speicher aller Schritte (Bytes).
     pub fn bytes(&self) -> usize {
         self.bytes
+    }
+    /// Laufnummern der obersten Schritte `(Undo, Redo)`, 0 = Stapel leer.
+    pub fn top_seqs(&self) -> (u64, u64) {
+        (self.undo.back().map_or(0, |s| s.seq), self.redo.last().map_or(0, |s| s.seq))
+    }
+    /// Die letzte Aufzeichnung ist mit dem vorigen Schritt verschmolzen (kein eigener Schritt).
+    pub fn last_merged(&self) -> bool {
+        self.merged
     }
 
     pub fn clear(&mut self) {
@@ -475,6 +540,7 @@ impl History {
             self.group_recorded = true;
         }
         let merge = if self.group_depth > 0 { std::mem::replace(&mut self.group_started, true) } else { coalesced };
+        self.merged = merge && !self.undo.is_empty();
         match self.undo.back_mut().filter(|_| merge) {
             Some(top) => {
                 self.bytes -= top.bytes;
