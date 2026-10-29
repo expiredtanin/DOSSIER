@@ -10,10 +10,10 @@
 // verschachtelten Blöcke, v1 — s. `BlockDef`-Kopfkommentar in model/types.ts).
 // Leere/rein-block-Auswahl → No-Op (kein Commit).
 
-import type { BlockDef, Drawing2D } from "../../model/types";
-import { addItems, mvGeom, opsMutation, removeItems } from "../../core";
+import { opsMutation } from "../../core";
 import type { CoreOp } from "../../core";
-import { uniqueId } from "../../tools/types";
+import { documentFor } from "../../core/document";
+import { uniqueStamp } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -29,34 +29,16 @@ function selectedDrawingIds(sel: CommandSelection): string[] {
   return sel.drawingId ? [sel.drawingId] : [];
 }
 
-function nextBlockName(p: Project): string {
-  return `Block ${(p.blockDefs?.length ?? 0) + 1}`;
-}
-
+/** Definition anhängen, Quellen raus, Instanz hinten dran — rechnet der Kern (`cmd_transform::defblock_ops`). */
 function defineOps(p: Project, ids: string[], at: Vec2, ctx: CommandContext): CoreOp[] {
-  const idSet = new Set(ids);
-  // Block-Instanzen als Quelle ausschliessen (keine verschachtelten Blöcke).
-  const srcs = p.drawings2d.filter((d) => idSet.has(d.id) && d.geom.shape !== "block");
-  if (srcs.length === 0) return [];
-  const toLocal = (pt: Vec2): Vec2 => ({ x: pt.x - at.x, y: pt.y - at.y });
-  const def: BlockDef = {
-    id: uniqueId("blk"),
-    name: nextBlockName(p),
-    geom2d: srcs.map((d) => mvGeom(d.geom, toLocal)),
-  };
-  const instance: Drawing2D = {
-    id: uniqueId("dr2d"),
-    type: "drawing2d",
+  return documentFor(p).cmdOps({
+    cmd: "defblock",
+    ids,
+    at: [at.x, at.y],
     levelId: ctx.level.id,
     categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "block", blockDefId: def.id, at, rotation: 0 },
-  };
-  // Definition anhängen, Quellen raus, Instanz hinten dran.
-  return [
-    ...addItems("blockDefs", [def]),
-    ...removeItems(p, "drawings2d", srcs.map((d) => d.id)),
-    ...addItems("drawings2d", [instance]),
-  ];
+    stamp: uniqueStamp(),
+  });
 }
 
 interface DefblockState extends CommandState {

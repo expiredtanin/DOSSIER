@@ -1,11 +1,19 @@
 /**
- * `joinDrawings` — Bogen-Segmente (bulge) müssen beim Verbinden erhalten
- * bleiben (nicht mehr stillschweigend zu Geraden entarten, s. Kopfkommentar
- * bei `toPolyFormAllowBulge`).
+ * Verbinden (Join, Kern `cmd_edit.rs::join_ops`) — Bogen-Segmente (bulge) müssen beim Verbinden
+ * erhalten bleiben (nicht mehr stillschweigend zu Geraden entarten).
  */
 import { describe, it, expect } from "vitest";
-import { cutSegment, joinDrawings, nearestEdgeIndex } from "./splitJoin";
-import type { Drawing2D } from "../model/types";
+import { cutSegment, nearestEdgeIndex } from "./splitJoin";
+import type { Drawing2D, Project } from "../model/types";
+import { documentFor } from "../core/document";
+import { applyOps } from "../core/ops";
+import { sampleProject } from "../model/sampleProject";
+
+/** Join der Elemente über den Kern: die neue Menge der Zeichnungen. */
+function joinDrawings(srcs: Drawing2D[]): Drawing2D[] {
+  const p = { ...sampleProject, drawings2d: srcs } as Project;
+  return applyOps(p, documentFor(p).cmdOps({ cmd: "join", ids: srcs.map((d) => d.id), stamp: "t" })).drawings2d;
+}
 
 function poly(id: string, pts: { x: number; y: number }[], bulge?: number[]): Drawing2D {
   return {
@@ -17,7 +25,7 @@ function poly(id: string, pts: { x: number; y: number }[], bulge?: number[]): Dr
   };
 }
 
-describe("joinDrawings — bulge-Erhalt", () => {
+describe("Join — bulge-Erhalt", () => {
   it("zwei offene Ketten (eine mit Bogen) werden verbunden, der Bogen bleibt erhalten", () => {
     const a = poly("a", [{ x: -1, y: 0 }, { x: 1, y: 0 }], [1]); // Halbkreis
     const b = poly("b", [{ x: 1, y: 0 }, { x: 3, y: 0 }]); // gerade, schliesst an a's Ende an

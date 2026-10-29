@@ -1,4 +1,4 @@
-// Editier-Operationen Split / Join / Segment-Löschen für 2D-Zeichenelemente
+// Editier-Operationen Split / Segment-Löschen für 2D-Zeichenelemente (Join: Kern `cmd_edit.rs`)
 // (Drawing2D). Wandeln Drawing2D ↔ {pts, closed}, rufen den reinen Geometrie-
 // Kernel (`../geometry/kernel2d`) und liefern neue Drawing2D-Listen. Stil-,
 // Kategorie- und Level-Attribute der Quelle werden geerbt.
@@ -6,7 +6,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Drawing2D, Drawing2DGeom, Vec2 } from "../model/types";
-import { joinChainsWithBulge, removeSegment, removeSegmentWithBulge, splitAtIntersections, splitClosedByChord, splitPolylineAtParam, vecEqual } from "../core";
+import { removeSegment, removeSegmentWithBulge, splitAtIntersections, splitClosedByChord, splitPolylineAtParam, vecEqual } from "../core";
 import { bulgeArcPoints, hasRealBulge } from "../core";
 
 /** Eine Polylinien-Darstellung eines Drawing2D (für die Kernel-Funktionen). */
@@ -48,9 +48,8 @@ export function toPolyForm(geom: Drawing2DGeom): PolyForm | null {
 }
 
 /**
- * Wie {@link toPolyForm}, aber lässt Bogen-Segmente (bulge) durch — nur für
- * Join (`joinDrawings`), das die Kette per {@link joinChainsWithBulge} bulge-
- * erhaltend verkettet statt sie geometrisch neu aufzubauen.
+ * Wie {@link toPolyForm}, aber lässt Bogen-Segmente (bulge) durch — für Segment-Löschen
+ * (`cutSegment`/`nearestEdgeIndex`), das den bulge an seinem Punktepaar mitträgt.
  */
 function toPolyFormAllowBulge(geom: Drawing2DGeom): PolyForm | null {
   if (geom.shape === "polyline") return { pts: geom.pts.slice(), closed: geom.closed, bulge: geom.bulge };
@@ -206,31 +205,6 @@ function chordSplit(
 
 const dist = (a: Vec2, b: Vec2): number =>
   Math.hypot(a.x - b.x, a.y - b.y);
-
-/**
- * Join: verbindet mehrere Drawing2D an koinzidenten Endpunkten zu Polylinien
- * (geschlossen, wenn sich eine Kette schließt). Nicht-polyline Elemente
- * (circle/arc/text) werden unverändert durchgereicht. Liefert die NEUE Menge
- * der Drawing2D, die die Eingabe-Elemente ersetzt. Attribute werden vom ersten
- * verbundenen Quell-Element geerbt.
- */
-export function joinDrawings(srcs: Drawing2D[]): Drawing2D[] {
-  const joinable: { form: PolyForm; src: Drawing2D }[] = [];
-  const passthrough: Drawing2D[] = [];
-  for (const d of srcs) {
-    const form = toPolyFormAllowBulge(d.geom);
-    if (form) joinable.push({ form, src: d });
-    else passthrough.push(d);
-  }
-  if (joinable.length === 0) return srcs;
-
-  const chains = joinChainsWithBulge(joinable.map((j) => j.form));
-  const template = joinable[0].src;
-  const joined = chains.map((c) =>
-    inherit(template, fromPolyForm({ pts: c.pts, closed: c.closed, bulge: c.bulge })),
-  );
-  return [...joined, ...passthrough];
-}
 
 /**
  * Segment-Löschen (Schere): entfernt das Segment `edgeIndex` aus einem

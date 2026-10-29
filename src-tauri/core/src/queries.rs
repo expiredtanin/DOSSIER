@@ -99,6 +99,8 @@ pub fn run_root(root: &serde_json::Map<String, serde_json::Value>, name: &str, t
             json(&crate::selection_filter::filter_patch(root, &m))
         }
         // Griff-Änderungen ([K4] S3, `grips.rs`): `text` = JSON der Anfrage; Antwort `{ops, notice}` (ohne Commit).
+        // Befehle ([K4] S3, `commands.rs`): `text` = JSON `{cmd, …}`; Antwort `{ops}`.
+        "cmdOps" => crate::commands::ops_json(root, text),
         "gripOps" => {
             let req: crate::grips::Request = serde_json::from_str(text).map_err(|e| format!("gripOps: {e}"))?;
             Ok(crate::grips::result_json(&crate::grips::run(root, &req)?))

@@ -53,25 +53,9 @@ export {
 } from "../geometry/snapSegments";
 
 export {
-  mvGeom,
-  reversesOrientation,
-  scaleFactor,
-  scaleGeom,
-} from "../geometry/geomTransform";
-
-export {
-  type Chamfer,
   type Fillet,
   type TangentTarget,
-  breakCurve,
-  chamferCorner,
-  extendBulgeSegment,
-  extendSegment,
   filletCorner,
-  joinChainsWithBulge,
-  nearestOnPolyline,
-  offsetPolyline,
-  offsetPolylineWithBulge,
   offsetSegment,
   pointSegmentDistance,
   polylineEdges,
@@ -81,7 +65,6 @@ export {
   splitClosedByChord,
   splitPolylineAtParam,
   tangentCircleCenters,
-  trimPolylineWithBulge,
   vecEqual,
 } from "../geometry/kernel2d";
 
@@ -157,7 +140,6 @@ export {
 
 export {
   extrudedSolidSpec,
-  transformSolid,
 } from "../plan/extrudedSolidSpec";
 
 export {

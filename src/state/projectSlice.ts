@@ -58,7 +58,7 @@ import {
   PEN_FALLBACK_WEIGHT,
 } from "../model/penSets";
 import { reorderByIds } from "../model/reorder";
-import { transformOps } from "../tools/transform";
+import { transformMutation } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
 import { gripPt, type GripRequest } from "../core";
@@ -502,7 +502,25 @@ export function createProjectSlice(
   // rufen ohne Key auf und pushen damit IMMER diskret. Das Projekt ändert sich NUR über Ops: der Kern
   // prüft (NaN, doppelte ids), wendet an und zeichnet den Undo-Schritt auf ([K4] S3).
   const setProject = (next: ProjectMutation, coalesceKey?: string) =>
-    set((s) => commitOps(s, next.toOps(s.project), coalesceKey));
+    next.coreReq ? applyCmd(next.coreReq, coalesceKey) : set((s) => commitOps(s, next.toOps(s.project), coalesceKey));
+
+  // Befehl ([K4] S3, `commands.rs`): der Kern rechnet ihn auf dem Dokument und wendet ihn im selben
+  // Aufruf an (`cmdMutation`); Prüfung, Verlauf und Meldungen wie `commitOps`.
+  const applyCmd = (req: object, coalesceKey?: string) =>
+    set((s) => {
+      const doc = storeDocument(s.project);
+      const res = doc.commitCmd(s.project, req, coalesceKey, Date.now());
+      if ("problems" in res) {
+        const problems = res.problems;
+        console.warn("Projektänderung verworfen:", problems);
+        queueMicrotask(() => get().notify(`${t("project.change.rejected")} ${problems[0]}`, "error"));
+        return {};
+      }
+      if (res.ops.length === 0) return {};
+      opLog.push(res.ops);
+      if (opLog.length > OP_LOG_LIMIT) opLog.shift();
+      return { project: res.project, ...historyPatch(doc) };
+    });
 
   // Änderung direkt als Ops (ohne Differenz), s. `ProjectSlice.applyChange`.
   const applyChange = (
@@ -1121,8 +1139,7 @@ export function createProjectSlice(
     resizeElement: (kind, id, w, h, anchor) => applyGrip({ op: "resize", kind, id, w, h, fx: anchor.fx, fy: anchor.fy }),
 
     // ── Transformation ─────────────────────────────────────────────────────
-    commitTransformOn: (sel, op, points, copyMode, count) =>
-      applyChange((p) => transformOps(p, sel, op, points, copyMode, count)),
+    commitTransformOn: (sel, op, points, copyMode, count) => setProject(transformMutation(sel, op, points, copyMode, count)),
 
     // ── Wand-Attribute ─────────────────────────────────────────────────────
     updateWall: (id, patch, coalesceKey) => applyChange((p) => patchItem(p, "walls", id, patch), coalesceKey),

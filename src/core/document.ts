@@ -10,6 +10,8 @@ import { applyOps, opsToJson } from "./ops";
 import { fromMarkedJson, toMarkedJson } from "./ops";
 import type { CoreOp } from "./ops";
 import { fieldOps } from "./opsBuild";
+import { opsMutation } from "./opsBuild";
+import type { ProjectMutation } from "./opsBuild";
 
 /** Ergebnis des Ladens einer Projektdatei ({@link ProjectDocument.loadFile}). */
 export type LoadFileResult =
@@ -277,6 +279,48 @@ export class ProjectDocument {
     return fromMarkedJson(out);
   }
 
+  /**
+   * Ops eines Befehls ([K4] S3, `commands.rs`): `req` = `{cmd, …}` (Zahlen dürfen NaN/±∞ sein), gerechnet
+   * auf dem Stand des Dokuments (ohne Anwenden). Nicht endliche Ergebnisse kommen als Zahlen zurück.
+   */
+  cmdOps(req: object): CoreOp[] {
+    if (!this.handle) throw new Error("Kern-Abfrage „cmdOps“: Dokument nicht offen");
+    const out = core().doc_query_root(this.handle, "cmdOps", toMarkedJson(req));
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    return fromMarkedJson<{ ops: CoreOp[] }>(out).ops;
+  }
+
+  /**
+   * Befehl rechnen und anwenden ([K4] S3, `doc_cmd_commit`): wie {@link commitGrip} — ein Kern-Aufruf
+   * statt Ops hin (Rechnung) und zurück (Commit). Ergebnis: neues Projekt und die angewendeten Ops (leer
+   * = nichts zu tun, dann `project === base`) oder die Meldungen der Prüfung.
+   */
+  commitCmd(base: Project, req: object, coalesceKey: string | undefined, now: number): { project: Project; ops: CoreOp[] } | { problems: string[] } {
+    this.ensure(base);
+    if (!this.handle) return { problems: ["Projekt-Dokument im Kern nicht offen."] };
+    const out = core().doc_cmd_commit(this.handle, toMarkedJson(req), coalesceKey ?? "", now);
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    const r = fromMarkedJson<{ ops: CoreOp[] } | { problems: string[] }>(out);
+    if ("problems" in r) return r;
+    if (r.ops.length === 0) return { project: base, ops: r.ops };
+    const project = applyOps(base, r.ops);
+    this.mirror = project;
+    return { project, ops: r.ops };
+  }
+
+  /** Abfrage eines Befehls zwischen den Schritten (`doc_cmd_query`: Treffer, Vorschau-Formen), JSON-Antwort. */
+  cmdQuery<T>(req: object): T {
+    if (!this.handle) throw new Error("Kern-Abfrage „cmdQuery“: Dokument nicht offen");
+    const out = core().doc_cmd_query(this.handle, toMarkedJson(req));
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    return fromMarkedJson<T>(out);
+  }
+
+  /** Vorschau-Formen eines Befehls (`doc_cmd_preview`): flach je Form `[art, n, x0, y0, …]`. */
+  cmdPreview(req: object): Float64Array {
+    return this.handle ? core().doc_cmd_preview(this.handle, toMarkedJson(req)) : new Float64Array(0);
+  }
+
   /** Einen Schritt zurück auf `base` (= aktuelles Projekt); `null` = nichts rückgängig zu machen. */
   undo(base: Project): Project | null {
     return this.jump(base, "doc_undo");
@@ -371,4 +415,12 @@ export function documentFor(project: Project): ProjectDocument {
   if (!shared) shared = new ProjectDocument(project);
   else shared.sync(project);
   return shared;
+}
+
+/**
+ * Änderung als Befehls-Anfrage an den Kern ([K4] S3, `commands.rs`): `toOps` rechnet die Ops auf dem
+ * Dokument des Projekts; der Store wendet `coreReq` direkt im Kern an (`ProjectDocument.commitCmd`).
+ */
+export function cmdMutation(req: object): ProjectMutation {
+  return Object.assign(opsMutation((p) => documentFor(p).cmdOps(req)), { coreReq: req });
 }

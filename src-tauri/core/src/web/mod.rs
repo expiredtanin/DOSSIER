@@ -39,6 +39,7 @@ mod parametric_walls;
 mod reorder;
 mod text_layout;
 mod grips;
+mod commands;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

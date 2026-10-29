@@ -676,6 +676,39 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     zusammenlegen); `wallCorners` (Plan-Treffer `planHitTest`, Werkzeug-Vorschau, Griff-Vorschau, `voids`, STEP-Export — ein
     Kern-Aufruf je Wand wäre teurer als die vier Punkte) und `wallReferenceOffset` (Fang, `geometry/opening.ts`). Nicht in
     der Tauri-App geprüft (3D-Griffe nur über e2e im Browser).
+    **Befehle im Kern (29.10.)** — Transformation und 2D-Editier-Befehle: `commands.rs` (Anfrage `{cmd, …}` →
+    Ops; Wurzel-Abfrage `cmdOps`, `doc_cmd_commit` rechnet UND wendet in einem Kern-Aufruf an, `doc_cmd_query` für
+    Treffer/Vorschau zwischen den Schritten), `cmd_transform.rs` (Verschieben/Drehen/Spiegeln/Skalieren mit
+    Kopie/Reihe/Verteilen für alle Elementarten inkl. B-Rep-Körper, Ausrichten/Verteilen, Block definieren,
+    Vorschau-Formen je Mausschritt `doc_cmd_preview` inkl. Zeichnungs-Primitive und Text-Rahmen),
+    `cmd_edit.rs` (Trim, Extend, Verrunden, Fasen, Bruch, Offset, Join, Auflösen: Treffer, Vorschau, Ops). Die
+    Abbildung reist als affine Beschreibung (`Xf`: Verschiebung/Drehung/Skalierung/Spiegelung — keine allgemeine
+    Matrix, weil sonst die Rechenreihenfolge und damit die Bits nicht mehr der TS-Fassung entsprächen). TS:
+    Zustandsautomaten bleiben, `cmdMutation(req)` (`core/document.ts`) trägt die Anfrage; `setProject` wendet sie
+    über `commitCmd` direkt im Kern an. Neue ids `prefix-Zeit-Zähler-k` (`uniqueStamp`). Gelöscht:
+    `geometry/geomTransform.ts` (`mvGeom`/`scaleGeom`/`scaleFactor`/`reversesOrientation`),
+    `tools/drawingPreview.ts`, `transformSolid`, die TS-Rechnung in `tools/transform.ts`, `editors/align.ts`,
+    `editors/explode.ts`, `defblock`, `trim`/`extend`/`fillet`/`chamfer`/`break`/`offset`/`join`,
+    `joinDrawings`, die nicht mehr benutzten Kernel-Fassaden (`trimPolyline(WithBulge)`, `extend(Bulge)Segment`,
+    `chamferCorner`, `breakCurve`, `nearestOnPolyline`, `offsetPolyline(WithBulge)`, `joinChainsWithBulge`) samt
+    Bindungen und TS-Tests (die Rust-Tests in `kernel2d` und die Befehls-Tests decken sie). Gleichheit (temporäre
+    Tests, gelöscht): 2400 Transformationen über 600 Zufallsprojekte (alle Bauteilarten, 18 Zeichnungs-Formen,
+    Sperren, Dächer bei Drehen/Spiegeln, B-Rep, NaN-Punkte, LV95) — Ops zeichengleich (bis auf ids), 219 000
+    Vorschau-Formen bitgleich, Griff-Vorschauen; 4500 Ausrichten/Verteilen/Block; Editier-Befehle über 500
+    Zufallsprojekte mit denselben Eingabe-Folgen (Entwürfe je Mausschritt und Commits bitgleich): 2213 Trim,
+    1460 Extend, 219 Verrunden, 227 Fasen, 605 Bruch, 1241 Offset, 423 Join, 486 Auflösen. Messung (vitest/WASM
+    `--no-opt`, Container unter starker Last, Werte schwanken ±50 %): Vorschau 300 Zeichnungen verschieben
+    22 → 6 ms, drehen 22 → 8 ms; 300 Wände 0,4–0,9 → 0,5 ms (gleich); Store „300 Wände verschieben“ 8,5 → 10,9 ms
+    (Minimum, im Rauschen; die Kosten liegen beim Klonen der JSON-Elemente im Kern statt beim JSON-Lesen).
+    Abweichung (gewollt): Griff-Vorschau „Element verschieben“ zeigt bei Formen ohne Primitive die einfachen
+    Ersatz-Formen wie die Transformations-Vorschau. Nicht in der Tauri-App geprüft.
+    **Offen (S3, Befehle):** Zeichenbefehle (Wand, Decke, Raum, Treppe, Öffnung, Dach, Stütze, Extrusion, alle
+    2D-Formen, Bemassung, autodim, sectionline, solid/solidbool/voidbox/terrain, ceilingOpening) und die
+    Werkzeug-Commits in `tools/tools.ts` bauen ihre Elemente noch in TS (meist ein Objekt-Literal aus den
+    Klickpunkten); Einfügen (`pasteElementClipboard`), Gruppen-Zuordnung (`activeGroupOps`); Split/Segment
+    löschen (`editors/splitJoin.ts`, App) — dort ersetzt `cutSegment` per `replace` mit NEUER id (hängt an statt
+    zu ersetzen; beim Port prüfen); Fang-Kandidaten aus dem Modell (`tools/snapping.ts`: `baseSegments`,
+    Kreise, Raum-Anker; Nahmodus ab 2000 Zeichnungen) → `snap.rs`.
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

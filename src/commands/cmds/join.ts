@@ -4,34 +4,18 @@
 // und getipptes „join" EIN Pfad (§Task C).
 //
 // Wände werden nicht verbunden (2D-Editier-Operation); nicht-polyline Formen
-// (circle/arc/text) reicht `joinDrawings` unverändert durch.
+// (circle/arc/text) bleiben unverändert und rücken hinter das Ergebnis. Rechnet der
+// Kern (`src-tauri/core/src/cmd_edit.rs::join_ops`, [K4] S3): die gewählten Quell-
+// Drawings raus, das Ergebnis hinten dran (ab zwei Elementen).
 
-import { joinDrawings } from "../../editors/splitJoin";
-import type { Drawing2D } from "../../model/types";
-import { addItems, opsMutation, removeItems } from "../../core";
-import type { CoreOp } from "../../core";
-import type {
-  Command,
-  CommandContext,
-  CommandResult,
-  CommandSelection,
-  CommandState,
-  Project,
-} from "../types";
+import { cmdMutation } from "../../core";
+import { uniqueStamp } from "../../tools/types";
+import type { Command, CommandContext, CommandResult, CommandSelection, CommandState } from "../types";
 
 /** Alle gewählten 2D-Element-IDs (Mehrfachauswahl mit Fallback aufs Einzelelement). */
 function selectedDrawingIds(sel: CommandSelection): string[] {
   if (sel.drawingIds && sel.drawingIds.length) return sel.drawingIds;
   return sel.drawingId ? [sel.drawingId] : [];
-}
-
-/** Ops: die gewählten Quell-Drawings raus, das Join-Ergebnis hinten dran. */
-function joinOps(project: Project, ids: string[]): CoreOp[] {
-  const idSet = new Set(ids);
-  const srcs = project.drawings2d.filter((d) => idSet.has(d.id));
-  if (srcs.length < 2) return []; // <2 → nichts zu verbinden
-  const joined: Drawing2D[] = joinDrawings(srcs);
-  return [...removeItems(project, "drawings2d", idSet), ...addItems("drawings2d", joined)];
 }
 
 interface JoinState extends CommandState {
@@ -55,7 +39,7 @@ export const joinCommand: Command = {
   autoRun: (ctx: CommandContext): CommandResult => {
     const ids = selectedDrawingIds(ctx.selection);
     if (ids.length < 2) return { draft: null, done: true };
-    return { draft: null, done: true, commit: opsMutation((p) => joinOps(p, ids)) };
+    return { draft: null, done: true, commit: cmdMutation({ cmd: "join", ids, stamp: uniqueStamp() }) };
   },
 
   onInput: (): [CommandState, CommandResult] => done(),

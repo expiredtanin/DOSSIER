@@ -75,29 +75,3 @@ export function extrudedSolidSpec(solid: ExtrudedSolid, floorZ: number): SolidSp
   }
   return null;
 }
-
-/**
- * Wendet eine Grundriss-Abbildung `fn` (Drehung/Skalierung/Spiegelung/Verschiebung, um Z)
- * auf einen Körper an. B-Rep-Körper erhalten ihre Spezifikation als `transform` um die
- * bisherige Verschiebung gewickelt (Z bleibt erhalten); der Ursprung wandert auf den
- * neuen ersten Umrisspunkt, damit die Verschiebung wieder 0 ist.
- */
-export function transformSolid(
-  solid: ExtrudedSolid,
-  fn: (p: { x: number; y: number }) => { x: number; y: number },
-  scale = 1,
-): ExtrudedSolid {
-  const points = solid.points.map(fn);
-  const circle = solid.circle ? { ...solid.circle, center: fn(solid.circle.center), r: solid.circle.r * scale } : undefined;
-  const base: ExtrudedSolid = { ...solid, points, circle };
-  if (!solid.brep) return base;
-  const o = fn({ x: 0, y: 0 });
-  const ex = fn({ x: 1, y: 0 });
-  const ey = fn({ x: 0, y: 1 });
-  const p0 = solid.points[0];
-  const d: [number, number, number] = [p0 ? p0.x - solid.brep.origin.x : 0, p0 ? p0.y - solid.brep.origin.y : 0, 0];
-  const inner = { kind: "translate", v: d, solid: solid.brep.spec };
-  const m = [ex.x - o.x, ey.x - o.x, 0, o.x, ex.y - o.y, ey.y - o.y, 0, o.y, 0, 0, scale, 0];
-  // z-Skalierung gleich der Grundriss-Skalierung (gleichmässig); Spiegelung/Drehung lassen Z.
-  return { ...base, height: solid.height * scale, brep: { ...solid.brep, spec: { kind: "transform", m, solid: inner }, origin: points[0] ?? solid.brep.origin } };
-}

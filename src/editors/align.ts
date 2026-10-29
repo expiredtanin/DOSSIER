@@ -1,14 +1,13 @@
-// Ausrichten und Verteilen der 2D-Auswahl — reine Modell-Funktionen (wie
-// `editors/explode.ts`), damit sie ohne UI testbar bleiben.
+// Ausrichten und Verteilen der 2D-Auswahl — Fassade über den Kern ([K4] S3,
+// `src-tauri/core/src/cmd_transform.rs::align_ops`/`distribute_ops`).
 //
 // Beides arbeitet auf den BOUNDING-BOXEN der Elemente (dieselbe Herleitung wie
-// im Attribut-Panel: Kern `selection_info.rs::geom_bbox`, Abfrage `drawingBBoxes`) und verschiebt sie anschliessend als
+// im Attribut-Panel: Kern `selection_info.rs::geom_bbox`) und verschiebt sie anschliessend als
 // Ganzes. Die Form selbst bleibt unangetastet — es wird nur verschoben, nie
 // skaliert oder verzerrt.
 
-import type { Drawing2D, Project, Vec2 } from "../model/types";
+import type { Project } from "../model/types";
 import { documentFor } from "../core/document";
-import { mvGeom, patchItems } from "../core";
 import type { CoreOp } from "../core";
 
 /** Ausrichtungskante bzw. -achse. */
@@ -16,34 +15,6 @@ export type AlignMode = "left" | "right" | "centerX" | "top" | "bottom" | "cente
 
 /** Verteilungsachse: gleiche Abstände der Mittelpunkte entlang X bzw. Y. */
 export type DistributeAxis = "x" | "y";
-
-interface Boxed {
-  d: Drawing2D;
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
-
-function boxesOf(project: Project, ids: string[]): Boxed[] {
-  const wanted = new Set(ids);
-  const list = project.drawings2d.filter((d) => wanted.has(d.id));
-  if (list.length === 0) return [];
-  // Je Element `[id, minX, minY, maxX, maxY]`, in Listen-Reihenfolge wie `list`.
-  const b = documentFor(project).queryRootMarked<[string, number, number, number, number][]>("drawingBBoxes", JSON.stringify(ids));
-  return list.map((d, i) => ({ d, minX: b[i][1], minY: b[i][2], maxX: b[i][3], maxY: b[i][4] }));
-}
-
-/** Ops: verschiebt die genannten Elemente um je einen eigenen Vektor. */
-function moveBy(project: Project, deltas: Map<string, Vec2>): CoreOp[] {
-  if (deltas.size === 0) return [];
-  return patchItems(project, "drawings2d", (d) => deltas.has(d.id), (d) => {
-    const delta = deltas.get(d.id)!;
-    if (delta.x === 0 && delta.y === 0) return d;
-    const fn = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
-    return { ...d, geom: mvGeom(d.geom, fn) };
-  });
-}
 
 /**
  * Richtet die Elemente an der gemeinsamen Kante bzw. Mittelachse aus. Bezug
@@ -54,43 +25,7 @@ function moveBy(project: Project, deltas: Map<string, Vec2>): CoreOp[] {
  * ausrichten könnte) — das Projekt bleibt unverändert.
  */
 export function alignOps(project: Project, ids: string[], mode: AlignMode): CoreOp[] {
-  const boxes = boxesOf(project, ids);
-  if (boxes.length < 2) return [];
-
-  const minX = Math.min(...boxes.map((b) => b.minX));
-  const maxX = Math.max(...boxes.map((b) => b.maxX));
-  const minY = Math.min(...boxes.map((b) => b.minY));
-  const maxY = Math.max(...boxes.map((b) => b.maxY));
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-
-  const deltas = new Map<string, Vec2>();
-  for (const b of boxes) {
-    let dx = 0;
-    let dy = 0;
-    switch (mode) {
-      case "left":
-        dx = minX - b.minX;
-        break;
-      case "right":
-        dx = maxX - b.maxX;
-        break;
-      case "centerX":
-        dx = cx - (b.minX + b.maxX) / 2;
-        break;
-      case "top":
-        dy = maxY - b.maxY;
-        break;
-      case "bottom":
-        dy = minY - b.minY;
-        break;
-      case "centerY":
-        dy = cy - (b.minY + b.maxY) / 2;
-        break;
-    }
-    deltas.set(b.d.id, { x: dx, y: dy });
-  }
-  return moveBy(project, deltas);
+  return documentFor(project).cmdOps({ cmd: "align", ids, mode });
 }
 
 /**
@@ -102,22 +37,5 @@ export function alignOps(project: Project, ids: string[], mode: AlignMode): Core
  * ohnehin stehen) — das Projekt bleibt unverändert.
  */
 export function distributeOps(project: Project, ids: string[], axis: DistributeAxis): CoreOp[] {
-  const boxes = boxesOf(project, ids);
-  if (boxes.length < 3) return [];
-
-  const center = (b: Boxed) => (axis === "x" ? (b.minX + b.maxX) / 2 : (b.minY + b.maxY) / 2);
-  const sorted = [...boxes].sort((a, b) => center(a) - center(b));
-  const first = center(sorted[0]);
-  const last = center(sorted[sorted.length - 1]);
-  const step = (last - first) / (sorted.length - 1);
-
-  const deltas = new Map<string, Vec2>();
-  sorted.forEach((b, i) => {
-    // Erstes und letztes Element bleiben unangetastet (sie definieren den Bereich).
-    if (i === 0 || i === sorted.length - 1) return;
-    const target = first + step * i;
-    const shift = target - center(b);
-    deltas.set(b.d.id, axis === "x" ? { x: shift, y: 0 } : { x: 0, y: shift });
-  });
-  return moveBy(project, deltas);
+  return documentFor(project).cmdOps({ cmd: "distribute", ids, axis });
 }

@@ -12,9 +12,7 @@ import { wallTypeThickness } from "../model/types";
 import { drawingVertices } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
 import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
-import { areaMovePreview } from "../tools/transform";
-import { mvGeom } from "../core";
-import { drawingPreviewShapes } from "../tools/drawingPreview";
+import { areaMovePreview, drawingMovePreview } from "../tools/transform";
 import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
 import { applyAngleConstraint, computeSnap } from "../tools/snapping";
 import { useCommandTabShortcut } from "./useKeyboardShortcuts";
@@ -993,8 +991,7 @@ export function useGripEditing(opts: {
     const d = deferrableDrawing(pend.drawingId);
     if (!d) return [];
     const { x: tx, y: ty } = pend.total;
-    const moved = { ...d, geom: mvGeom(d.geom, (q: Vec2) => ({ x: q.x + tx, y: q.y + ty })) };
-    return drawingPreviewShapes(project, moved, scaleDenominator);
+    return drawingMovePreview(project, d.id, { x: tx, y: ty }, scaleDenominator);
   };
 
   /** Vorschau eines aufgeschobenen Kanten-Zugs (beide Kanten-Ecken um das Delta versetzt). */

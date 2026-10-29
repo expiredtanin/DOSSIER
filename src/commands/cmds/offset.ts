@@ -13,11 +13,13 @@
 // Vorzeichen der zuletzt gewählten Seite (Default links/+), bzw. ihr eigenes
 // Vorzeichen, wenn negativ getippt.
 
-import type { Drawing2D, Drawing2DGeom } from "../../model/types";
-import { bulgePolylinePoints, hasRealBulge } from "../../core";
-import { uniqueId } from "../../tools/types";
-import { leftNormal, normalize, sub } from "../../model/geometry";
-import { offsetPolyline, offsetPolylineWithBulge, offsetSegment, pointSegmentDistance, polylineEdges } from "../../core";
+//
+// Treffer, Seite, versetzte Geometrie und Vorschau rechnet der Kern (`src-tauri/core/src/cmd_edit.rs`,
+// [K4] S3, Geometrie `offsetSegment`/`offsetPolyline`/`offsetPolylineWithBulge` in `kernel2d`; Bögen
+// bleiben konzentrisch); hier der Zustandsautomat und die persistente Distanz/Seite.
+
+import type { Drawing2D } from "../../model/types";
+import { uniqueStamp } from "../../tools/types";
 import type {
   CmdInput,
   Command,
@@ -25,15 +27,13 @@ import type {
   CommandResult,
   CommandSelection,
   CommandState,
-  DraftShape,
   Project,
   Vec2,
 } from "../types";
-import { addItems, opsMutation } from "../../core";
-import type { CoreOp } from "../../core";
+import { cmdMutation } from "../../core";
+import { cmdQuery, decodeShapes, pair } from "../../tools/coreCmd";
 
 const EPS = 1e-6;
-const HIT_TOL = 0.25; // Modell-Meter: Pick-Toleranz für die Kurvenwahl
 
 /**
  * Persistente Offset-Distanz über Aufrufe hinweg (§2.4/§3.6 — Nutzer erwarten,
@@ -43,34 +43,6 @@ const HIT_TOL = 0.25; // Modell-Meter: Pick-Toleranz für die Kurvenwahl
 let lastDistance = 0.5;
 /** Zuletzt gewählte Seite als Vorzeichen (+1 = links, −1 = rechts). */
 let lastSign = 1;
-
-// ── Kurven-Abstraktion: line/polyline/rect → Punktliste + closed ──────────────
-
-interface Curve {
-  pts: Vec2[];
-  closed: boolean;
-  /** Bogen-Segmente (DXF-bulge, s. `geometry/bulge.ts`) — nur bei polyline. */
-  bulge?: number[];
-}
-
-/** Wandelt eine offset-fähige 2D-Form in eine Punktliste (+closed[/bulge]) oder null. */
-function geomToCurve(g: Drawing2DGeom): Curve | null {
-  if (g.shape === "line") return { pts: [g.a, g.b], closed: false };
-  if (g.shape === "polyline") return { pts: g.pts, closed: g.closed, bulge: g.bulge };
-  if (g.shape === "rect") {
-    // Rechteck als geschlossene 4-Punkt-Polylinie offsetten (Task).
-    return {
-      pts: [
-        g.min,
-        { x: g.max.x, y: g.min.y },
-        g.max,
-        { x: g.min.x, y: g.max.y },
-      ],
-      closed: true,
-    };
-  }
-  return null; // circle/arc/text: hier nicht offset-fähig
-}
 
 /** Ist diese Form offset-fähig (line/polyline/rect)? */
 function isOffsetable(d: Drawing2D): boolean {
@@ -86,111 +58,19 @@ function singleSelectedCurve(project: Project, sel: CommandSelection): Drawing2D
   return null;
 }
 
-/**
- * Kanten für Klick-Trefftests/Vorschau: bei Bogen-Segmenten (bulge) wird die
- * Kurve zu Geradenstücken tesselliert (`bulgePolylinePoints`), damit Klick-/Seiten-
- * Tests entlang der TATSÄCHLICHEN (runden) Kontur funktionieren statt entlang
- * der geraden Sehne. Die eigentliche Offset-Geometrie bleibt exakt (bulge-
- * erhaltend, s. `offsetPolylineWithBulge`) — nur diese Hilfsfunktion approximiert.
- */
-function curveHitEdges(curve: Curve): [Vec2, Vec2][] {
-  if (!hasRealBulge(curve.bulge)) return polylineEdges(curve.pts, curve.closed);
-  const chain = bulgePolylinePoints(curve.pts, curve.bulge, curve.closed);
-  if (curve.closed) chain.push(curve.pts[0]); // Schlusskante mit-tesselliert, Kette endet am Start
-  return polylineEdges(chain, false); // Schlusskante (falls closed) ist bereits mit-tesselliert
+/** Gibt es die Kurve noch (Side-Zustand)? */
+function hasCurve(project: Project, drawingId: string): boolean {
+  const src = project.drawings2d.find((x) => x.id === drawingId);
+  return !!src && isOffsetable(src);
 }
 
-/** Nächstes offset-fähiges Drawing2D zum Klickpunkt (innerhalb Toleranz). */
-function pickCurveAt(project: Project, levelId: string, pt: Vec2): Drawing2D | null {
-  let best: Drawing2D | null = null;
-  let bestD = HIT_TOL;
-  for (const d of project.drawings2d) {
-    if (d.levelId !== levelId) continue;
-    const curve = geomToCurve(d.geom);
-    if (!curve) continue;
-    for (const [a, b] of curveHitEdges(curve)) {
-      const dd = pointSegmentDistance(pt, a, b);
-      if (dd < bestD) {
-        bestD = dd;
-        best = d;
-      }
-    }
-  }
-  return best;
+/** Seite (+1 links / −1 rechts) des Punkts zur Kurve und ggf. die Vorschau mit Betrag `dist` (Kern). */
+function sideOf(project: Project, drawingId: string, pt: Vec2, dist?: number): { sign: number; shapes: number[] } {
+  return cmdQuery<{ sign: number; shapes: number[] }>(project, { q: "offset", id: drawingId, pt: pair(pt), lastSign, ...(dist !== undefined ? { dist } : {}) });
 }
 
-/**
- * Vorzeichen (+links / −rechts) für einen Klickpunkt relativ zur Kurve: die
- * nächste Kante bestimmen, dann das Vorzeichen der Skalarprojektion von
- * (klick − Kantenmitte) auf die LINKS-Normale der Kante. So zeigt das Resultat
- * auf die angeklickte Seite (Konvention `+d = links`).
- */
-function sideSign(curve: Curve, pt: Vec2): number {
-  let bestD = Infinity;
-  let sign = lastSign;
-  for (const [a, b] of curveHitEdges(curve)) {
-    const mid: Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const dd = pointSegmentDistance(pt, a, b);
-    if (dd < bestD) {
-      bestD = dd;
-      const u = normalize(sub(b, a));
-      const n = leftNormal(u);
-      const rel = sub(pt, mid);
-      const s = rel.x * n.x + rel.y * n.y;
-      sign = s >= 0 ? 1 : -1;
-    }
-  }
-  return sign;
-}
-
-/** Offset einer Kurve um die vorzeichenbehaftete Distanz `d` → neue Geometrie (bulge-erhaltend). */
-function offsetCurveGeom(curve: Curve, d: number): { pts: Vec2[]; bulge?: number[] } {
-  if (!curve.closed && curve.pts.length === 2 && !hasRealBulge(curve.bulge)) {
-    const [a, b] = offsetSegment(curve.pts[0], curve.pts[1], d);
-    return { pts: [a, b] };
-  }
-  if (hasRealBulge(curve.bulge)) {
-    return offsetPolylineWithBulge(curve.pts, curve.bulge, d, curve.closed);
-  }
-  return { pts: offsetPolyline(curve.pts, d, curve.closed) };
-}
-
-/** Versetzte Form als neues Drawing2D (gleiche Attribute, neue ID/Geometrie). */
-function offsetGeom(src: Drawing2D, d: number): Drawing2DGeom | null {
-  const curve = geomToCurve(src.geom);
-  if (!curve) return null;
-  const { pts, bulge } = offsetCurveGeom(curve, d);
-  if (src.geom.shape === "line" && pts.length === 2) {
-    return { shape: "line", a: pts[0], b: pts[1] };
-  }
-  const geom: Drawing2DGeom = { shape: "polyline", pts, closed: curve.closed };
-  if (bulge && hasRealBulge(bulge)) geom.bulge = bulge;
-  return geom;
-}
-
-/** Vorschau-Formen der versetzten Kurve (für den Draft — tesselliert, s. `DraftShape`). */
-function offsetDraftShapes(curve: Curve, d: number): DraftShape[] {
-  const { pts, bulge } = offsetCurveGeom(curve, d);
-  if (pts.length < 2) return [];
-  if (!curve.closed && pts.length === 2 && !hasRealBulge(bulge)) {
-    return [{ kind: "line", a: pts[0], b: pts[1] }];
-  }
-  const tess = hasRealBulge(bulge)
-    ? curveHitEdges({ pts, closed: curve.closed, bulge }).reduce<Vec2[]>((out, [a, b], i) => {
-        if (i === 0) out.push(a);
-        out.push(b);
-        return out;
-      }, [])
-    : pts;
-  return [{ kind: "poly", pts: tess, closed: curve.closed }];
-}
-
-function appendOffset(src: Drawing2D, d: number): CoreOp[] {
-  const geom = offsetGeom(src, d);
-  if (!geom) return [];
-  const copy: Drawing2D = { ...src, id: uniqueId("dr2d"), geom };
-  return addItems("drawings2d", [copy]);
-}
+/** Versetzte Kopie der Kurve um die vorzeichenbehaftete Distanz `d` anhängen. */
+const appendOffset = (drawingId: string, d: number) => cmdMutation({ cmd: "offset", id: drawingId, d, stamp: uniqueStamp() });
 
 // ── Zustand ───────────────────────────────────────────────────────────────────
 
@@ -213,15 +93,6 @@ const finish = (): [CommandState, CommandResult] => [
   { phase: "done", lastPoint: null } as OffDone,
   { draft: null, done: true },
 ];
-
-/** Aktuelle Kurve aus dem Side-Zustand (oder null, wenn weg). */
-function curveOf(project: Project, drawingId: string): { src: Drawing2D; curve: Curve } | null {
-  const src = project.drawings2d.find((x) => x.id === drawingId);
-  if (!src) return null;
-  const curve = geomToCurve(src.geom);
-  if (!curve) return null;
-  return { src, curve };
-}
 
 export const offsetCommand: Command = {
   name: "offset",
@@ -260,9 +131,9 @@ export const offsetCommand: Command = {
       }
       // Keine Vorselektion → Kurve per Klick wählen.
       if (input.kind === "point") {
-        const hit = pickCurveAt(ctx.project, ctx.level.id, input.point);
+        const hit = cmdQuery<{ hit: string | null }>(ctx.project, { q: "pickCurve", level: ctx.level.id, pt: pair(input.point) }).hit;
         if (!hit) return [s, { draft: null }];
-        const ns: OffSide = { phase: "side", drawingId: hit.id, cursor: null, lastPoint: null };
+        const ns: OffSide = { phase: "side", drawingId: hit, cursor: null, lastPoint: null };
         return [ns, { draft: null }];
       }
       return [s, { draft: null }];
@@ -302,9 +173,7 @@ function offsetSideInput(
   input: CmdInput,
   ctx: CommandContext,
 ): [CommandState, CommandResult] {
-  const cc = curveOf(ctx.project, s.drawingId);
-  if (!cc) return finish();
-  const { src, curve } = cc;
+  if (!hasCurve(ctx.project, s.drawingId)) return finish();
 
   if (input.kind === "number") {
     // Getippte Distanz: Betrag merken; Vorzeichen aus der zuletzt gewählten
@@ -318,18 +187,18 @@ function offsetSideInput(
     const d = sign * mag;
     return [
       { phase: "done", lastPoint: null } as OffDone,
-      { draft: null, done: true, commit: opsMutation(() => appendOffset(src, d)) },
+      { draft: null, done: true, commit: appendOffset(s.drawingId, d) },
     ];
   }
 
   if (input.kind === "point") {
     // Seite per Klick: Vorzeichen aus der Klickseite, Betrag = letzte Distanz.
-    const sign = sideSign(curve, input.point);
+    const sign = sideOf(ctx.project, s.drawingId, input.point).sign;
     lastSign = sign;
     const d = sign * lastDistance;
     return [
       { phase: "done", lastPoint: null } as OffDone,
-      { draft: null, done: true, commit: opsMutation(() => appendOffset(src, d)) },
+      { draft: null, done: true, commit: appendOffset(s.drawingId, d) },
     ];
   }
 
@@ -342,12 +211,8 @@ function offsetSideMove(
   point: Vec2,
   ctx: CommandContext,
 ): [CommandState, CommandResult] {
-  const cc = curveOf(ctx.project, s.drawingId);
-  if (!cc) return [s, { draft: null }];
-  const { curve } = cc;
-  const sign = sideSign(curve, point);
-  const d = sign * lastDistance;
-  const preview = offsetDraftShapes(curve, d);
+  if (!hasCurve(ctx.project, s.drawingId)) return [s, { draft: null }];
+  const preview = decodeShapes(sideOf(ctx.project, s.drawingId, point, lastDistance).shapes);
   const ns: OffSide = { ...s, cursor: point };
   return [
     ns,

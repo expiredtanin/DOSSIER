@@ -169,7 +169,11 @@ function idTest<E>(ids: ReadonlySet<string> | readonly string[] | ((e: E) => boo
 // ── Projekt → Projekt mit mitgeführten Ops ─────────────────────────────────
 
 /** Projekt → Projekt-Funktion, die ihre Ops mitträgt (s. {@link opsMutation}). */
-export type ProjectMutation = ((p: Project) => Project) & { readonly toOps: (p: Project) => CoreOp[] };
+export type ProjectMutation = ((p: Project) => Project) & {
+  readonly toOps: (p: Project) => CoreOp[];
+  /** Befehls-Anfrage an den Kern (`cmdMutation`): der Store rechnet und wendet sie in einem Kern-Aufruf an. */
+  readonly coreReq?: object;
+};
 
 /**
  * Verpackt einen Op-Bauer als Projekt → Projekt-Funktion (für Schnittstellen wie
