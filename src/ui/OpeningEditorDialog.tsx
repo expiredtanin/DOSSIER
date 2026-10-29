@@ -291,6 +291,8 @@ const DOOR_KIND_OPTS = (): { value: DoorKind; label: string }[] => [
   { value: "dreh", label: t("oed.kind.dreh") },
   { value: "schiebe", label: t("oed.kind.schiebe") },
   { value: "wandoeffnung", label: t("oed.door.wandoeffnung") },
+  { value: "hebeschiebe", label: t("oed.door.hebeschiebe") },
+  { value: "pendel", label: t("oed.door.pendel") },
 ];
 
 function BasisPanel({
@@ -341,6 +343,7 @@ function BasisPanel({
           options={[
             { value: "aussen", label: t("oed.insetFace.aussen") },
             { value: "innen", label: t("oed.insetFace.innen") },
+            { value: "mitte", label: t("oed.insetFace.mitte") },
           ]}
           onChange={(v) => patchWt({ insetFace: v })}
         />
@@ -460,6 +463,34 @@ function RahmenPanel({
           options={cornerJoinOptions()}
           onChange={(v) => patchDt({ frameCornerJoin: v })}
         />
+        <SelField
+          label={t("oed.f.insetFace")}
+          value={dt.insetFace ?? "aussen"}
+          options={[
+            { value: "aussen", label: t("oed.insetFace.aussen") },
+            { value: "innen", label: t("oed.insetFace.innen") },
+            { value: "mitte", label: t("oed.insetFace.mitte") },
+          ]}
+          onChange={(v) => patchDt({ insetFace: v })}
+        />
+        <NumField
+          label={t("oed.f.insetFromFace")}
+          value={dt.insetFromFace ?? 0}
+          min={0}
+          onCommit={(n) => patchDt({ insetFromFace: n })}
+        />
+        <NumField
+          label={t("oed.f.rebateDepth")}
+          value={dt.rebateDepth ?? 0}
+          min={0}
+          onCommit={(n) => patchDt({ rebateDepth: n || undefined })}
+        />
+        <NumField
+          label={t("oed.f.lintelHeight")}
+          value={dt.lintelHeight ?? 0}
+          min={0}
+          onCommit={(n) => patchDt({ lintelHeight: n || undefined })}
+        />
       </>
     );
   }
@@ -490,6 +521,29 @@ function RahmenPanel({
           options={cornerJoinOptions()}
           onChange={(v) => patchWt({ frameCornerJoin: v })}
         />
+        <NumField
+          label={t("oed.f.rebateDepth")}
+          value={wt.rebateDepth ?? 0}
+          min={0}
+          onCommit={(n) => patchWt({ rebateDepth: n || undefined })}
+        />
+        <NumField
+          label={t("oed.f.lintelHeight")}
+          value={wt.lintelHeight ?? 0}
+          min={0}
+          onCommit={(n) => patchWt({ lintelHeight: n || undefined })}
+        />
+        <SelField
+          label={t("oed.f.sillBoard")}
+          value={wt.sillBoard ?? "aussen"}
+          options={[
+            { value: "keine", label: t("resources.sillBoard.keine") },
+            { value: "aussen", label: t("resources.sillBoard.aussen") },
+            { value: "innen", label: t("resources.sillBoard.innen") },
+            { value: "beide", label: t("resources.sillBoard.beide") },
+          ]}
+          onChange={(v) => patchWt({ sillBoard: v })}
+        />
       </>
     );
   }
@@ -503,6 +557,23 @@ function cornerJoinOptions(): { value: FrameCornerJoin; label: string }[] {
     { value: "horizontal", label: t("oed.cornerJoin.horizontal") },
     { value: "gehrung", label: t("oed.cornerJoin.gehrung") },
   ];
+}
+
+/** Oberlicht-Einteilung ([95]): Anzahl Felder und Öffnungsart des ersten Felds. */
+function transomFields(wt: WindowType): { count: number; opening: OpeningKind } {
+  const fields = (wt.transomSashes ?? []).filter((s) => s.kind === "fluegel");
+  return { count: Math.max(1, fields.length), opening: fields[0]?.opening ?? "fest" };
+}
+
+/** Gleichmässige Oberlicht-Einteilung: `count` Felder, dazwischen Pfosten; ein festes Feld = keine Liste. */
+function transomSashes(count: number, opening: OpeningKind): SashDef[] | undefined {
+  if (count <= 1 && opening === "fest") return undefined;
+  const out: SashDef[] = [];
+  for (let i = 0; i < count; i++) {
+    if (i > 0) out.push({ kind: "pfosten", postWidth: 0.06 });
+    out.push({ kind: "fluegel", autoWidth: true, opening, hingeSide: i % 2 === 0 ? "left" : "right" });
+  }
+  return out;
 }
 
 /** Flügeleinteilung: Tabelle mit Flügel/Pfosten, Öffnungsart + Anschlag je Zeile. */
@@ -537,6 +608,27 @@ function FluegelPanel({
         min={0}
         onCommit={(n) => patchWt({ transomHeight: n || undefined })}
       />
+      {(wt.transomHeight ?? 0) > 0 && (
+        <>
+          <NumField
+            label={t("oed.f.transomFields")}
+            value={transomFields(wt).count}
+            step={1}
+            min={1}
+            onCommit={(n) => patchWt({ transomSashes: transomSashes(Math.max(1, Math.min(6, Math.round(n))), transomFields(wt).opening) })}
+          />
+          <SelField<OpeningKind>
+            label={t("oed.f.transomOpening")}
+            value={transomFields(wt).opening}
+            options={[
+              { value: "fest", label: t("oed.kind.fest") },
+              { value: "kipp", label: t("oed.kind.kipp") },
+              { value: "dreh", label: t("oed.kind.dreh") },
+            ]}
+            onChange={(v) => patchWt({ transomSashes: transomSashes(transomFields(wt).count, v) })}
+          />
+        </>
+      )}
       <NumField
         label={t("oed.f.mullionRows")}
         value={wt.mullionRows ?? 1}
@@ -680,6 +772,15 @@ function SonnenschutzPanel({
             onChange={(v) =>
               set({ kind: v as NonNullable<WindowType["shading"]>["kind"] })
             }
+          />
+          <SelField
+            label={t("oed.shading.mount")}
+            value={sh.mount ?? "vorgesetzt"}
+            options={[
+              { value: "vorgesetzt", label: t("oed.shading.vorgesetzt") },
+              { value: "sturz", label: t("oed.shading.sturz") },
+            ]}
+            onChange={(v) => set({ mount: v })}
           />
           <NumField
             label={t("oed.shading.boxHeight")}

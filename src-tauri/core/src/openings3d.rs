@@ -44,6 +44,8 @@ pub enum Part {
     Sill = 3,
     Symbol = 4,
     DoorLeaf = 5,
+    /// Maueranschlag (Wandnase in der Leibung, [94]).
+    Rebate = 6,
 }
 
 /// Ein Quader: Bauteil-Klasse und 8 Ecken (x, y, z), Ecken-Bits wie `OPENING_BOX_TRIS`.
@@ -133,6 +135,12 @@ pub struct DoorTypeIn {
     pub zarge: bool,
     pub panel_cols: f64,
     pub panel_rows: f64,
+    /// Türart ([95]): 0 Dreh, 1 Schiebe (vor der Wand), 2 Hebeschiebe, 3 Pendel.
+    pub kind: f64,
+    /// Schiebetür: Seite des Blatts (+1 = +n, aussen; −1 innen).
+    pub slide_side: f64,
+    /// Bandseite am Ende (Hebeschiebe: festes Feld dort).
+    pub hinge_end: bool,
 }
 
 /// Fenster-spezifische Typwerte (NaN = fehlt).
@@ -151,6 +159,12 @@ pub struct WindowTypeIn {
     pub default_opening: SashOpening,
     /// Rollladenkasten (Breite, Höhe, Tiefe), nur bei `shading.create`.
     pub shading: Option<[f64; 3]>,
+    /// Einteilung des Oberlichts (Pfosten/Riegel, [95]); leer ⇒ ein festes Feld.
+    pub transom_sashes: Vec<SashIn>,
+    /// Kasten im Sturz (verdeckt, kein Quader) statt vorgesetzt.
+    pub shading_sturz: bool,
+    /// Führungsschienen in der Leibung (Kasten im Sturz, nicht Markise).
+    pub shading_rails: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -166,6 +180,10 @@ pub struct TypeIn {
     pub inset_from_face: f64,
     /// `(insetFace ?? "aussen") === "innen"`.
     pub inset_inner: bool,
+    /// `insetFace === "mitte"`: Rahmen symmetrisch um die Wandmitte.
+    pub inset_mid: bool,
+    /// Maueranschlag je Seite und oben (Meter), NaN/0 = keiner.
+    pub rebate_depth: f64,
     pub corner_join: CornerJoin,
     pub frame_width: f64,
     pub transom_height: f64,
@@ -389,6 +407,7 @@ struct FrameParams<'a> {
     glazing_panes: f64,
     glazed_fraction: f64,
     sashes: std::borrow::Cow<'a, [SashIn]>,
+    transom_sashes: &'a [SashIn],
     half_thickness: f64,
     draw_sill: bool,
     draw_interior_sill: bool,
@@ -398,6 +417,9 @@ struct FrameParams<'a> {
     panel_cols: f64,
     panel_rows: f64,
     corner_join: CornerJoin,
+    door_kind: f64,
+    slide_side: f64,
+    hinge_end: bool,
 }
 
 /// Rahmentiefe quer zur Wand: `frame_depth` (> EPS) oder Default, auf die Wanddicke geklemmt.
@@ -408,10 +430,9 @@ fn across_wall_depth(frame_depth: f64, wall_thickness: f64) -> f64 {
 
 /// Quer-Versatz `[n_min, n_max]` des Rahmenkörpers: Vorderkante bündig mit der gewählten
 /// Wandfläche (minus Schichteinzug), `depth` zur Wandmitte hin, auf die halbe Dicke geklemmt.
-fn frame_normal_range(half: f64, depth: f64, inset: f64, inner: bool) -> (f64, f64) {
+fn frame_normal_range(half: f64, depth: f64, inset: f64, inner: bool, mid: bool) -> (f64, f64) {
     let sign = if inner { -1.0 } else { 1.0 };
-    let front = sign * (half - inset);
-    let back = front - sign * depth;
+    let (front, back) = if mid { (depth / 2.0, -depth / 2.0) } else { (sign * (half - inset), sign * (half - inset) - sign * depth) };
     let a = clamp_range(front, -half, half);
     let b = clamp_range(back, -half, half);
     (jmin(a, b), jmax(a, b))
@@ -421,7 +442,7 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
     let ty = o.ty.as_ref()?;
     let half = o.wall_thickness / 2.0;
     let depth = across_wall_depth(ty.frame_depth, o.wall_thickness);
-    let (n_min, n_max) = frame_normal_range(half, depth, or(ty.inset_from_face, 0.0), ty.inset_inner);
+    let (n_min, n_max) = frame_normal_range(half, depth, or(ty.inset_from_face, 0.0), ty.inset_inner, ty.inset_mid);
     let frame_width = or(ty.frame_width, DEFAULT_FRAME_WIDTH);
     let transom_height = jmax(0.0, or(ty.transom_height, 0.0));
     Some(match &ty.kind {
@@ -435,10 +456,12 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
             wing_count: jmax(1.0, js_round(or(d.leaf_count, 1.0))),
             mullion_rows: 1.0,
             mullion_cols: 1.0,
-            glazed: d.leaf_style == LeafStyle::Glass,
+            // Schiebe-/Hebeschiebeflügel zeichnet `door_leaf` selbst (eigene Lage bzw. Glasfelder).
+            glazed: d.leaf_style == LeafStyle::Glass && d.kind != 1.0 && d.kind != 2.0,
             glazing_panes: 1.0,
             glazed_fraction: jmax(0.05, jmin(1.0, or(d.glazing_ratio, 1.0))),
             sashes: std::borrow::Cow::Borrowed(&[]),
+            transom_sashes: &[],
             half_thickness: half,
             draw_sill: false,
             draw_interior_sill: false,
@@ -447,6 +470,9 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
             panelled: d.leaf_style == LeafStyle::Panelled,
             panel_cols: jmax(1.0, js_round(or(d.panel_cols, 2.0))),
             panel_rows: jmax(1.0, js_round(or(d.panel_rows, 3.0))),
+            door_kind: d.kind,
+            slide_side: d.slide_side,
+            hinge_end: d.hinge_end,
         },
         KindIn::Window(w) => {
             // Flügeltabelle: explizite gewinnt; sonst gleichmässig aus der effektiven Flügelzahl.
@@ -484,6 +510,7 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
                 glazing_panes: w.glazing_panes,
                 glazed_fraction: 1.0,
                 sashes,
+                transom_sashes: &w.transom_sashes,
                 half_thickness: half,
                 draw_sill: w.sill_board != SillBoard::None && w.sill_board != SillBoard::Inner,
                 draw_interior_sill: w.sill_board == SillBoard::Inner || w.sill_board == SillBoard::Both,
@@ -492,9 +519,29 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
                 panelled: false,
                 panel_cols: 1.0,
                 panel_rows: 1.0,
+                door_kind: 0.0,
+                slide_side: 1.0,
+                hinge_end: false,
             }
         }
     })
+}
+
+/// Maueranschlag: Wandnasen links, rechts und oben in der Zone zwischen der Anschlag-Fläche und
+/// der Rahmen-Vorderkante (aussen bzw. bei `insetFace: "innen"` innen; mittig: aussen).
+fn rebate_boxes(em: &mut Emitter, o: &OpeningIn, ty: &TypeIn, p: &FrameParams) {
+    let rd = jmin(or(ty.rebate_depth, 0.0), (o.to - o.from) / 2.0 - 0.01);
+    if !(rd > EPS) {
+        return;
+    }
+    let half = p.half_thickness;
+    let (n0, n1) = if ty.inset_inner && !ty.inset_mid { (-half, p.n_min) } else { (p.n_max, half) };
+    if n1 - n0 <= EPS {
+        return;
+    }
+    em.axis_box(o.from, o.from + rd, o.z_bottom, o.z_top, n0, n1, Part::Rebate);
+    em.axis_box(o.to - rd, o.to, o.z_bottom, o.z_top, n0, n1, Part::Rebate);
+    em.axis_box(o.from + rd, o.to - rd, o.z_top - rd, o.z_top, n0, n1, Part::Rebate);
 }
 
 /// Flügeleinteilung auf `[from, to]`: feste Breiten exakt, der Rest gleichmässig.
@@ -551,10 +598,21 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
     let sash_to = to0 - fw;
     let sash_bottom = zb0 + if p.has_sill { fw } else { 0.0 };
     let mut sash_top = zt0 - fw;
+    // Oberlicht-Band (über dem Riegel) für dessen Einteilung.
+    let mut transom_band: Option<(f64, f64)> = None;
     if p.transom_height > EPS {
         let split_z = clamp_range(zt0 - p.transom_height, sash_bottom, sash_top);
         em.axis_box(sash_from, sash_to, split_z - fw / 2.0, split_z + fw / 2.0, p.n_min, p.n_max, Part::Frame);
+        transom_band = Some((split_z + fw / 2.0, sash_top));
         sash_top = split_z - fw / 2.0;
+    }
+    // Pfosten im Oberlicht (mittel/fein).
+    if let (true, Some((tb, tt))) = (sashes_on, transom_band) {
+        for (s, cf, ct) in sash_spans(p.transom_sashes, sash_from, sash_to) {
+            if s.kind == SashKind::Post {
+                em.axis_box(cf, ct, tb, tt, p.n_min, p.n_max, Part::Frame);
+            }
+        }
     }
     if fine {
         // Senkrechte Teiler laufen durch, waagrechte Kämpfer-Zeilen dazwischen unterbrochen.
@@ -597,60 +655,66 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
         }
     }
     // Flügelrahmen je öffenbarem Flügel (zurückgesetztes, flacheres Quer-Band) + SIA-Symbole.
-    if sashes_on && !p.sashes.is_empty() && sash_to - sash_from > EPS && sash_top - sash_bottom > EPS {
-        let segs = sash_spans(&p.sashes, sash_from, sash_to);
-        let sfw = fw * 0.7;
-        let sash_front_n = p.n_max - 0.005;
-        let sash_back_n = jmax(p.n_min, p.n_max - 0.055);
-        let glass_front_n = p.n_max - 0.02;
-        let sym_back_n = glass_front_n;
-        let sym_front_n = glass_front_n + 0.003;
-        let symbol = |em: &mut Emitter, u0: f64, h0: f64, u1: f64, h1: f64| {
-            em.plane_box(u0, h0, u1, h1, SYMBOL_HALF_WIDTH, sym_front_n, sym_back_n, Part::Symbol);
-        };
-        for (s, cf, ct) in segs {
-            if s.kind != SashKind::Sash || s.opening == SashOpening::None || s.opening == SashOpening::Fixed {
-                continue;
-            }
-            let bz = sash_bottom;
-            let tz = sash_top;
-            if ct - cf <= EPS || tz - bz <= EPS {
-                continue;
-            }
-            for q in frame_ring_quads(cf, ct, bz, tz, sfw, p.corner_join, true) {
-                em.plane_quad(&q, sash_back_n, sash_front_n, Part::Frame);
-            }
-            if !fine {
-                continue;
-            }
-            let g_a = cf + sfw;
-            let g_b = ct - sfw;
-            let gbz = bz + sfw;
-            let gtz = tz - sfw;
-            if g_b - g_a <= EPS || gtz - gbz <= EPS {
-                continue;
-            }
-            let kind = s.opening;
-            if kind == SashOpening::Turn || kind == SashOpening::TurnTilt {
-                let apex_u = if s.hinge_left { g_a } else { g_b };
-                let apex_h = (gbz + gtz) / 2.0;
-                let far_u = if s.hinge_left { g_b } else { g_a };
-                symbol(em, far_u, gbz, apex_u, apex_h);
-                symbol(em, far_u, gtz, apex_u, apex_h);
-            }
-            if kind == SashOpening::Tilt || kind == SashOpening::TurnTilt {
-                let apex_u = (g_a + g_b) / 2.0;
-                symbol(em, g_a, gbz, apex_u, gtz);
-                symbol(em, g_b, gbz, apex_u, gtz);
-            }
-            if kind == SashOpening::Slide {
-                let zc = (gbz + gtz) / 2.0;
-                let tail = if s.hinge_left { g_a } else { g_b };
-                let head = if s.hinge_left { g_b } else { g_a };
-                let barb = (head - tail) * 0.22;
-                symbol(em, tail, zc, head, zc);
-                symbol(em, head - barb, gbz + (gtz - gbz) * 0.32, head, zc);
-                symbol(em, head - barb, gbz + (gtz - gbz) * 0.68, head, zc);
+    let mut bands: Vec<(&[SashIn], f64, f64)> = vec![(&p.sashes, sash_bottom, sash_top)];
+    if let Some((tb, tt)) = transom_band {
+        bands.push((p.transom_sashes, tb, tt));
+    }
+    for (band_sashes, band_bottom, band_top) in bands {
+        if sashes_on && !band_sashes.is_empty() && sash_to - sash_from > EPS && band_top - band_bottom > EPS {
+            let segs = sash_spans(band_sashes, sash_from, sash_to);
+            let sfw = fw * 0.7;
+            let sash_front_n = p.n_max - 0.005;
+            let sash_back_n = jmax(p.n_min, p.n_max - 0.055);
+            let glass_front_n = p.n_max - 0.02;
+            let sym_back_n = glass_front_n;
+            let sym_front_n = glass_front_n + 0.003;
+            let symbol = |em: &mut Emitter, u0: f64, h0: f64, u1: f64, h1: f64| {
+                em.plane_box(u0, h0, u1, h1, SYMBOL_HALF_WIDTH, sym_front_n, sym_back_n, Part::Symbol);
+            };
+            for (s, cf, ct) in segs {
+                if s.kind != SashKind::Sash || s.opening == SashOpening::None || s.opening == SashOpening::Fixed {
+                    continue;
+                }
+                let bz = band_bottom;
+                let tz = band_top;
+                if ct - cf <= EPS || tz - bz <= EPS {
+                    continue;
+                }
+                for q in frame_ring_quads(cf, ct, bz, tz, sfw, p.corner_join, true) {
+                    em.plane_quad(&q, sash_back_n, sash_front_n, Part::Frame);
+                }
+                if !fine {
+                    continue;
+                }
+                let g_a = cf + sfw;
+                let g_b = ct - sfw;
+                let gbz = bz + sfw;
+                let gtz = tz - sfw;
+                if g_b - g_a <= EPS || gtz - gbz <= EPS {
+                    continue;
+                }
+                let kind = s.opening;
+                if kind == SashOpening::Turn || kind == SashOpening::TurnTilt {
+                    let apex_u = if s.hinge_left { g_a } else { g_b };
+                    let apex_h = (gbz + gtz) / 2.0;
+                    let far_u = if s.hinge_left { g_b } else { g_a };
+                    symbol(em, far_u, gbz, apex_u, apex_h);
+                    symbol(em, far_u, gtz, apex_u, apex_h);
+                }
+                if kind == SashOpening::Tilt || kind == SashOpening::TurnTilt {
+                    let apex_u = (g_a + g_b) / 2.0;
+                    symbol(em, g_a, gbz, apex_u, gtz);
+                    symbol(em, g_b, gbz, apex_u, gtz);
+                }
+                if kind == SashOpening::Slide {
+                    let zc = (gbz + gtz) / 2.0;
+                    let tail = if s.hinge_left { g_a } else { g_b };
+                    let head = if s.hinge_left { g_b } else { g_a };
+                    let barb = (head - tail) * 0.22;
+                    symbol(em, tail, zc, head, zc);
+                    symbol(em, head - barb, gbz + (gtz - gbz) * 0.32, head, zc);
+                    symbol(em, head - barb, gbz + (gtz - gbz) * 0.68, head, zc);
+                }
             }
         }
     }
@@ -736,9 +800,20 @@ fn door_leaf(em: &mut Emitter, o: &OpeningIn, p: &FrameParams) {
         let split_z = clamp_range(o.z_top - p.transom_height, leaf_bottom, field_top);
         field_top = split_z - fw / 2.0;
     }
+    if p.door_kind == 2.0 {
+        lift_slide_sashes(em, leaf_from, leaf_to, leaf_bottom, field_top, p);
+        return;
+    }
     let frac = if p.glazed { jmax(0.05, jmin(1.0, p.glazed_fraction)) } else { 0.0 };
     let leaf_top = field_top - frac * (field_top - leaf_bottom);
     if leaf_top - leaf_bottom <= EPS || leaf_to - leaf_from <= EPS {
+        return;
+    }
+    if p.door_kind == 1.0 {
+        // Schiebetür vor der Wand: Blatt in Schliessstellung vor der Fläche, beidseitig 5 cm über die Lichte.
+        let side = if p.slide_side < 0.0 { -1.0 } else { 1.0 };
+        let (a, b) = (side * (p.half_thickness + 0.01), side * (p.half_thickness + 0.01 + DOOR_LEAF_THICK));
+        em.axis_box(o.from - 0.05, o.to + 0.05, o.z_bottom, leaf_top, jmin(a, b), jmax(a, b), Part::DoorLeaf);
         return;
     }
     let n1 = p.n_max - 0.02 + DOOR_LEAF_THICK / 2.0;
@@ -748,6 +823,30 @@ fn door_leaf(em: &mut Emitter, o: &OpeningIn, p: &FrameParams) {
         return;
     }
     em.axis_box(leaf_from, leaf_to, leaf_bottom, leaf_top, n0, n1, Part::DoorLeaf);
+}
+
+/// Hebeschiebetür: festes Feld (Bandseite, aussen) und Schiebefeld (innen) auf versetzten Gleisen,
+/// je Flügelrahmen + Glas, in der Mitte überlappend.
+fn lift_slide_sashes(em: &mut Emitter, from: f64, to: f64, bottom: f64, top: f64, p: &FrameParams) {
+    let span = p.n_max - p.n_min;
+    if to - from <= EPS || top - bottom <= EPS || span <= EPS {
+        return;
+    }
+    let ts = jmin(0.05, span / 2.5);
+    let gap = (span - 2.0 * ts) / 3.0;
+    let outer = (p.n_max - gap - ts, p.n_max - gap);
+    let inner = (p.n_min + gap, p.n_min + gap + ts);
+    let mid = (from + to) / 2.0;
+    let ov = 0.03;
+    let (fixed, slide) = if p.hinge_end { ((mid - ov, to), (from, mid + ov)) } else { ((from, mid + ov), (mid - ov, to)) };
+    let sfw = jmin(p.frame_width, (to - from) / 6.0);
+    for ((u0, u1), (n0, n1)) in [(fixed, outer), (slide, inner)] {
+        for q in frame_ring_quads(u0, u1, bottom, top, sfw, p.corner_join, true) {
+            em.plane_quad(&q, n0, n1, Part::Frame);
+        }
+        let c = (n0 + n1) / 2.0;
+        em.axis_box(u0 + sfw, u1 - sfw, bottom + sfw, top - sfw, c - GLASS_HALF_THICK, c + GLASS_HALF_THICK, Part::Glass);
+    }
 }
 
 /// Kassettentür-Blatt: Rahmen + Trennstege in voller Blattdicke, Felder dünner und vertieft.
@@ -822,6 +921,9 @@ pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
                 door_leaf(&mut em, o, &p);
                 glass_panes(&mut em, o, &p);
             }
+            if let (Some(ty), Some(p)) = (&o.ty, resolve_frame(o)) {
+                rebate_boxes(&mut em, o, ty, &p);
+            }
         }
     }
     if detail == Detail::Coarse {
@@ -841,6 +943,18 @@ pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
             let Some(TypeIn { kind: KindIn::Window(wt), .. }) = &o.ty else { continue };
             let Some([bw, bh, bd]) = wt.shading else { continue };
             let Some(p) = resolve_frame(o) else { continue };
+            if wt.shading_sturz {
+                // Storenkasten im Sturz: verdeckt; sichtbar sind nur die Führungsschienen vor dem Rahmen.
+                if wt.shading_rails {
+                    let (rail_u, rail_n) = (0.03, 0.04);
+                    let (n0, n1) = if o.ty.as_ref().is_some_and(|t| t.inset_inner) { (p.n_min - 0.005 - rail_n, p.n_min - 0.005) } else { (p.n_max + 0.005, p.n_max + 0.005 + rail_n) };
+                    // Neben dem Anschlag (Wandnase) in der Leibung.
+                    let rd = o.ty.as_ref().map_or(0.0, |t| jmax(0.0, jmin(or(t.rebate_depth, 0.0), (o.to - o.from) / 2.0 - 0.01)));
+                    em.axis_box(o.from + rd, o.from + rd + rail_u, o.z_bottom, o.z_top, n0, n1, Part::Shading);
+                    em.axis_box(o.to - rd - rail_u, o.to - rd, o.z_bottom, o.z_top, n0, n1, Part::Shading);
+                }
+                continue;
+            }
             let h = jmax(0.0, bh);
             let d = jmax(0.0, bd);
             if h <= EPS || d <= EPS {
@@ -862,13 +976,14 @@ pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
 // Eingabe: `[detail (0 grob, 1 mittel, 2 fein, sonst andere), nWände, Wand…]`
 //   Wand = `sx, sy, ex, ey, nÖffnungen, Öffnung…`
 //   Öffnung = `from, to, zBottom, zTop, istTür, Wanddicke, typisiert (0/1)[, Typ]`
-//   Typ = `frameDepth, insetFromFace, insetInnen, Eckstoss (0 vertikal, 1 horizontal, 2 Gehrung),
-//          frameWidth, transomHeight,` dann
+//   Typ = `frameDepth, insetFromFace, einzugSeite (0 aussen, 1 innen, 2 mitte), Eckstoss (0 vertikal,
+//          1 horizontal, 2 Gehrung), frameWidth, transomHeight, Anschlag,` dann
 //     Tür: `threshold, leafCount, leafStyle (0 glatt, 1 glas, 2 kassette), glazingRatio, zarge,
-//           panelCols, panelRows`
+//           panelCols, panelRows, Türart (0 Dreh, 1 Schiebe, 2 Hebeschiebe, 3 Pendel), Schiebeseite (±1),
+//           BandEnde`
 //     Fenster: `glazingPanes, mullionRows, mullionCols, sillBoard (0 aussen/fehlt, 1 keine,
-//           2 innen, 3 beide), Rollladen (0/1), Breite, Höhe, Tiefe, Flügelzahl-Default,
-//           Öffnungsart-Default, nFlügel, Flügel…`
+//           2 innen, 3 beide), Rollladen (0/1), Breite, Höhe, Tiefe, imSturz, Schienen, Flügelzahl-Default,
+//           Öffnungsart-Default, nFlügel, Flügel…, nOberlicht, Flügel… ([95])`
 //     Flügel = `Art (0 Flügel, 1 Pfosten, 2 andere), festeBreite, width, postWidth, Öffnungsart,
 //           BandLinks`
 //   Öffnungsart: 0 fehlt, 1 dreh, 2 kipp, 3 drehkipp, 4 fest, 5 schiebe, 6 andere. NaN = fehlt.
@@ -894,7 +1009,8 @@ fn flag(r: &mut Reader) -> Option<bool> {
 fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
     let frame_depth = r.num()?;
     let inset_from_face = r.num()?;
-    let inset_inner = flag(r)?;
+    let inset_side = r.num()?;
+    let (inset_inner, inset_mid) = (inset_side == 1.0, inset_side == 2.0);
     let corner_join = match r.num()? as i64 {
         1 => CornerJoin::Horizontal,
         2 => CornerJoin::Mitre,
@@ -902,6 +1018,7 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
     };
     let frame_width = r.num()?;
     let transom_height = r.num()?;
+    let rebate_depth = r.num()?;
     let kind = if door {
         KindIn::Door(DoorTypeIn {
             threshold: flag(r)?,
@@ -915,6 +1032,9 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
             zarge: flag(r)?,
             panel_cols: r.num()?,
             panel_rows: r.num()?,
+            kind: r.num()?,
+            slide_side: r.num()?,
+            hinge_end: flag(r)?,
         })
     } else {
         let glazing_panes = r.num()?;
@@ -928,8 +1048,31 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
         };
         let create = flag(r)?;
         let shading_box = [r.num()?, r.num()?, r.num()?];
+        let shading_sturz = flag(r)?;
+        let shading_rails = flag(r)?;
         let default_wing_count = r.num()?;
         let default_opening = opening_kind(r.num()?);
+        let sashes = decode_sashes(r)?;
+        let transom_sashes = decode_sashes(r)?;
+        KindIn::Window(WindowTypeIn {
+            glazing_panes,
+            mullion_rows,
+            mullion_cols,
+            sill_board,
+            sashes,
+            transom_sashes,
+            default_wing_count,
+            default_opening,
+            shading: if create { Some(shading_box) } else { None },
+            shading_sturz,
+            shading_rails,
+        })
+    };
+    Some(TypeIn { frame_depth, inset_from_face, inset_inner, inset_mid, rebate_depth, corner_join, frame_width, transom_height, kind })
+}
+
+/// Flügelliste `[n, Flügel × n]`.
+fn decode_sashes(r: &mut Reader) -> Option<Vec<SashIn>> {
         let n = r.count()?;
         let mut sashes = Vec::with_capacity(n.min(1024));
         for _ in 0..n {
@@ -946,18 +1089,7 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
                 hinge_left: flag(r)?,
             });
         }
-        KindIn::Window(WindowTypeIn {
-            glazing_panes,
-            mullion_rows,
-            mullion_cols,
-            sill_board,
-            sashes,
-            default_wing_count,
-            default_opening,
-            shading: if create { Some(shading_box) } else { None },
-        })
-    };
-    Some(TypeIn { frame_depth, inset_from_face, inset_inner, corner_join, frame_width, transom_height, kind })
+        Some(sashes)
 }
 
 fn decode(buf: &[f64]) -> Option<(Vec<WallIn>, Detail)> {
@@ -1019,6 +1151,8 @@ mod tests {
             frame_depth: f64::NAN,
             inset_from_face: f64::NAN,
             inset_inner: false,
+            inset_mid: false,
+            rebate_depth: f64::NAN,
             corner_join: CornerJoin::Vertical,
             frame_width: f64::NAN,
             transom_height: f64::NAN,
@@ -1028,9 +1162,12 @@ mod tests {
                 mullion_cols: f64::NAN,
                 sill_board: sill,
                 sashes: vec![],
+                transom_sashes: vec![],
                 default_wing_count: 1.0,
                 default_opening: SashOpening::TurnTilt,
                 shading: None,
+                shading_sturz: false,
+                shading_rails: false,
             }),
         }
     }
@@ -1040,6 +1177,8 @@ mod tests {
             frame_depth: f64::NAN,
             inset_from_face: f64::NAN,
             inset_inner: false,
+            inset_mid: false,
+            rebate_depth: f64::NAN,
             corner_join: CornerJoin::Vertical,
             frame_width: f64::NAN,
             transom_height: f64::NAN,
@@ -1051,6 +1190,9 @@ mod tests {
                 zarge: true,
                 panel_cols: f64::NAN,
                 panel_rows: f64::NAN,
+                kind: 0.0,
+                slide_side: 1.0,
+                hinge_end: false,
             }),
         }
     }
@@ -1189,9 +1331,13 @@ mod tests {
         assert!(jmin(0.0, -0.0).is_sign_negative());
         assert!(jmax(1.0, f64::NAN).is_nan());
         assert_eq!(clamp_range(5.0, 0.0, 1.0), 1.0);
-        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, false);
+        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, false, false);
         assert!(close(a, 0.08) && close(b, 0.15));
-        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, true);
+        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, true, false);
+        assert!(close(a, -0.15) && close(b, -0.08));
+        let (a, b) = frame_normal_range(0.15, 0.08, 0.1, true, true);
+        assert!(close(a, -0.04) && close(b, 0.04));
+        let (a, b) = frame_normal_range(0.15, 0.07, 0.0, true, false);
         assert!(close(a, -0.15) && close(b, -0.08));
     }
 
@@ -1225,5 +1371,65 @@ mod tests {
         big.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1e12, 2.0, f64::NAN, 1.0, 1e12, 1e12]);
         assert!(opening_meshes_flat(&big)[0] >= 0.0);
         let _ = frame_ring_quads(f64::NAN, f64::INFINITY, -1.0, 1.0, -3.0, CornerJoin::Mitre, false);
+    }
+
+    #[test]
+    fn anschlag_und_storenschienen() {
+        let mut ty = window_type(SillBoard::None);
+        ty.inset_from_face = 0.12;
+        ty.frame_depth = 0.08;
+        ty.rebate_depth = 0.05;
+        let parts = |ty: &TypeIn, d: Detail| -> Vec<Part> { opening_meshes(&[wall(op(false, Some(ty.clone())))], d).into_iter().map(|m| m.part).collect() };
+        let n = |v: &[Part], p: Part| v.iter().filter(|x| **x == p).count();
+        assert_eq!(n(&parts(&ty, Detail::Coarse), Part::Rebate), 3);
+        // Mittig: Anschlag-Zone aussen bis zur Rahmen-Vorderkante.
+        ty.inset_mid = true;
+        assert_eq!(n(&parts(&ty, Detail::Fine), Part::Rebate), 3);
+        ty.inset_mid = false;
+        ty.rebate_depth = f64::NAN;
+        assert_eq!(n(&parts(&ty, Detail::Fine), Part::Rebate), 0);
+        if let KindIn::Window(w) = &mut ty.kind {
+            w.shading = Some([0.0, 0.25, 0.2]);
+        }
+        assert_eq!(n(&parts(&ty, Detail::Fine), Part::Shading), 1);
+        if let KindIn::Window(w) = &mut ty.kind {
+            w.shading_sturz = true;
+            w.shading_rails = true;
+        }
+        assert_eq!(n(&parts(&ty, Detail::Fine), Part::Shading), 2, "im Sturz: nur zwei Führungsschienen");
+    }
+
+    /// [95] Oberlicht-Einteilung (Pfosten + Kippflügel) und Türarten in 3D.
+    #[test]
+    fn oberlicht_einteilung_und_tuerarten() {
+        let count = |ty: &TypeIn, door: bool, part: Part| opening_meshes(&[wall(op(door, Some(ty.clone())))], Detail::Fine).iter().filter(|m| m.part == part).count();
+        let mut ty = window_type(SillBoard::None);
+        ty.transom_height = 0.4;
+        let base = count(&ty, false, Part::Frame);
+        let sash = |kind: SashKind, opening: SashOpening| SashIn { kind, fixed_width: false, width: f64::NAN, post_width: f64::NAN, opening, hinge_left: true };
+        if let KindIn::Window(w) = &mut ty.kind {
+            w.transom_sashes = vec![sash(SashKind::Sash, SashOpening::Tilt), sash(SashKind::Post, SashOpening::None), sash(SashKind::Sash, SashOpening::Fixed)];
+        }
+        // + Pfosten + Flügelrahmen (4 Profile) des Kippflügels.
+        assert_eq!(count(&ty, false, Part::Frame), base + 1 + 4);
+        assert!(count(&ty, false, Part::Symbol) >= 2 + 2);
+
+        let mut d = door_type(LeafStyle::Glass);
+        if let KindIn::Door(k) = &mut d.kind {
+            k.kind = 2.0;
+        }
+        assert_eq!(count(&d, true, Part::DoorLeaf), 0);
+        assert_eq!(count(&d, true, Part::Glass), 2, "Hebeschiebe: zwei Glasfelder");
+        if let KindIn::Door(k) = &mut d.kind {
+            k.kind = 1.0;
+            k.slide_side = -1.0;
+        }
+        let m = opening_meshes(&[wall(op(true, Some(d.clone())))], Detail::Fine);
+        let leaf = m.iter().find(|m| m.part == Part::DoorLeaf).expect("Schiebeblatt");
+        // Vor der Innenfläche (y > 0.15 bei Wand entlang +x, rechte Normale −y) und breiter als die Lichte.
+        let ys: Vec<f64> = (0..8).map(|i| leaf.positions[i * 3 + 1]).collect();
+        assert!(ys.iter().all(|y| *y > 0.15), "{ys:?}");
+        let xs: Vec<f64> = (0..8).map(|i| leaf.positions[i * 3]).collect();
+        assert!(xs.iter().cloned().fold(f64::INFINITY, f64::min) < 1.0 && xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max) > 2.2);
     }
 }

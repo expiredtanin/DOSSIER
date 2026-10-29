@@ -122,6 +122,8 @@ pub enum DoorKind {
     Swing,
     Sliding,
     WallOpening,
+    /// Pendeltür (schlägt nach beiden Seiten auf).
+    DoubleSwing,
 }
 
 /// Parameter einer Füllung aus dem Modell (TS `fillParams`); fehlende Typwerte als `None`.
@@ -387,6 +389,14 @@ pub fn fill_geometry(p: &FillParams) -> FillGeometry {
         } else {
             "SLIDING_TO_RIGHT"
         }
+    } else if p.door_kind == DoorKind::DoubleSwing {
+        if p.leaf_count >= 2.0 {
+            "DOUBLE_DOOR_DOUBLE_SWING"
+        } else if left {
+            "DOUBLE_SWING_LEFT"
+        } else {
+            "DOUBLE_SWING_RIGHT"
+        }
     } else if p.leaf_count >= 2.0 {
         "DOUBLE_DOOR_SINGLE_SWING"
     } else if left {
@@ -556,6 +566,7 @@ mod tests {
         assert_eq!(kind(FillParams { swing_sign: -1.0, ..door() }), Some("SINGLE_SWING_LEFT"));
         assert_eq!(kind(FillParams { door_kind: DoorKind::Sliding, ..door() }), Some("SLIDING_TO_RIGHT"));
         assert_eq!(kind(FillParams { door_kind: DoorKind::Sliding, leaf_count: 2.0, ..door() }), Some("DOUBLE_DOOR_SLIDING"));
+        assert_eq!(kind(FillParams { door_kind: DoorKind::DoubleSwing, leaf_count: 2.0, ..door() }), Some("DOUBLE_DOOR_DOUBLE_SWING"));
         let g = fill_geometry(&door());
         assert_eq!(g.origin, (1.5, 0.0));
         assert!(close(g.u.0, 1.0) && close(g.u.1, 0.0));

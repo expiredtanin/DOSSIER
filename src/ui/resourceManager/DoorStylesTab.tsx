@@ -6,6 +6,7 @@ import { t } from "../../i18n";
 import { FieldRow, NumberField, Segmented, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
 import { ElevationPreview } from "../ElevationPreview";
+import { openingTypePresets } from "../../model/openingPresets";
 
 /**
  * Synthetische Öffnungs-Instanz NUR für die Vorschau — s. WindowStylesTab.
@@ -30,6 +31,8 @@ const DOOR_KIND_OPTIONS: { value: DoorType["kind"]; labelKey: string }[] = [
   { value: "dreh", labelKey: "resources.doorKind.dreh" },
   { value: "schiebe", labelKey: "resources.doorKind.schiebe" },
   { value: "wandoeffnung", labelKey: "resources.doorKind.wandoeffnung" },
+  { value: "hebeschiebe", labelKey: "resources.doorKind.hebeschiebe" },
+  { value: "pendel", labelKey: "resources.doorKind.pendel" },
 ];
 
 const DOOR_LEAF_STYLE_OPTIONS: { value: DoorType["leafStyle"]; labelKey: string }[] = [
@@ -50,7 +53,7 @@ export function DoorStylesTab({
   onDeleteDoorType,
 }: {
   project: Project;
-  onAddDoorType?: () => void;
+  onAddDoorType?: (preset?: DoorType) => void;
   onPatchDoorType?: (id: string, patch: Partial<DoorType>) => void;
   onDeleteDoorType?: (id: string) => void;
 }) {
@@ -61,7 +64,12 @@ export function DoorStylesTab({
       emptyKey="resources.doorTypes.empty"
       placeholderKey="resources.doorTypes.placeholder"
       deleteKeyPrefix="resources.delete.doorType"
-      onAdd={onAddDoorType}
+      onAdd={() => onAddDoorType?.()}
+      presets={openingTypePresets().doorTypes.map((p) => ({ id: p.id, label: t(`preset.${p.id}`) }))}
+      onAddPreset={(id) => {
+        const p = openingTypePresets().doorTypes.find((x) => x.id === id);
+        if (p) onAddDoorType?.({ ...p, name: t(`preset.${p.id}`) });
+      }}
       onPatch={onPatchDoorType}
       onDelete={onDeleteDoorType}
       renderFields={(door, patch) => (

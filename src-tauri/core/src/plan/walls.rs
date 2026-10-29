@@ -184,12 +184,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
         if let Some(s) = styles.get(&li) {
             return Ok(s.clone());
         }
-        let layer = wt.layers.get(li).ok_or("Schicht fehlt")?;
-        let comp = p.component_or_fallback(&layer.component_id);
-        let hid = resolve_hatch_id(w.hatch_id.as_deref(), w.hatch_source, category, Some(&comp.hatch_id)).unwrap_or(&comp.hatch_id);
-        let hatch = super::domains::resolve_hatch_or_none(p, hid, Some(angle), resolve_foreground(comp, w.foreground.as_deref(), category, w.foreground_source));
-        let bg = resolve_background(comp, w.background.as_deref(), category, w.background_source);
-        let fill = bg.unwrap_or(if hatch.pattern == HatchPattern::Solid { HATCH_INK } else { HATCH_PAPER }).to_string();
+        let (hatch, fill) = layer_style(p, w, wt, li, category, angle)?;
         styles.insert(li, (hatch.clone(), fill.clone()));
         Ok((hatch, fill))
     };
@@ -249,6 +244,17 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     Ok(())
 }
 
+/// Schraffur und Füllung der Schicht `li` im Wandschnitt (Bauteil, Wand- und Kategorie-Übersteuerung).
+fn layer_style(p: &Project, w: &Wall, wt: &WallType, li: usize, category: Option<&LayerCategory>, angle: f64) -> Result<(HatchRender, String), String> {
+    let layer = wt.layers.get(li).ok_or("Schicht fehlt")?;
+    let comp = p.component_or_fallback(&layer.component_id);
+    let hid = resolve_hatch_id(w.hatch_id.as_deref(), w.hatch_source, category, Some(&comp.hatch_id)).unwrap_or(&comp.hatch_id);
+    let hatch = super::domains::resolve_hatch_or_none(p, hid, Some(angle), resolve_foreground(comp, w.foreground.as_deref(), category, w.foreground_source));
+    let bg = resolve_background(comp, w.background.as_deref(), category, w.background_source);
+    let fill = bg.unwrap_or(if hatch.pattern == HatchPattern::Solid { HATCH_INK } else { HATCH_PAPER }).to_string();
+    Ok((hatch, fill))
+}
+
 /// Sashes eines Fenstertyps (`sashesOfWindowType`): fehlend → aus `wingCount` gleichmässig.
 fn sashes(wt: &WindowType) -> Vec<SashDef> {
     if let Some(s) = wt.sashes.as_ref().filter(|s| !s.is_empty()) {
@@ -272,7 +278,7 @@ fn window_type<'a>(p: &'a Project, o: &Opening) -> Option<&'a WindowType> {
 
 /// Öffnungs-Symbol (`addOpeningSymbol`).
 #[allow(clippy::too_many_arguments)]
-fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, color: Option<&str>, greyed: bool, detail: Detail, lw: f64) -> Result<(), String> {
+fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, color: Option<&str>, greyed: bool, detail: Detail, lw: f64, wall_line: (&str, f64)) -> Result<(), String> {
     let p = c.p;
     let total = thickness(&wall_type(p, w)?.layers);
     let ref_off = joins::reference_offset(crate::model3d::wall_reference(w), total);
@@ -305,7 +311,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     b.push(b01(o.opening_dir.is_some_and(|s| s != OpeningOpeningDir::In)));
     b.push(b01(o.hinge.is_some_and(|s| s != OpeningHinge::Start)));
     b.push(o.swing_angle.unwrap_or(f64::NAN));
-    b.push(b01(o.door_type == Some(OpeningDoorType::Wandoeffnung)));
+    b.push(b01(o.door_type == Some(OpeningDoorType::Wandoeffnung) || (door && door_type(p, o).is_some_and(|t| t.kind == DoorTypeKind::Wandoeffnung))));
     b.push(if door { crate::jsnum::max(1.0, round(door_type(p, o).map_or(1.0, |t| t.leaf_count))) } else { 1.0 });
     b.push(match o.lintel_lines.unwrap_or(OpeningLintelLines::Beide) {
         OpeningLintelLines::Keine => 0.0,
@@ -321,7 +327,11 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             t.frame_width.unwrap_or(0.06),
             b01(t.frame_kind == Some(DoorTypeFrameKind::Blockrahmen)),
             t.inset_from_face.unwrap_or(0.0),
-            b01(t.inset_face == Some(DoorTypeInsetFace::Innen)),
+            match t.inset_face {
+                Some(DoorTypeInsetFace::Innen) => 1.0,
+                Some(DoorTypeInsetFace::Mitte) => 2.0,
+                _ => 0.0,
+            },
         ]),
         None => b.extend([0.0, 0.0, 0.0, 0.0, 0.0]),
     }
@@ -330,7 +340,11 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     b.push(wt.map_or(0.0, |t| t.frame_width.unwrap_or(0.06)));
     b.push(wt.and_then(|t| t.frame_depth).unwrap_or(f64::NAN));
     b.push(wt.and_then(|t| t.inset_from_face).unwrap_or(f64::NAN));
-    b.push(b01(wt.and_then(|t| t.inset_face) == Some(WindowTypeInsetFace::Innen)));
+    b.push(match wt.and_then(|t| t.inset_face) {
+        Some(WindowTypeInsetFace::Innen) => 1.0,
+        Some(WindowTypeInsetFace::Mitte) => 2.0,
+        _ => 0.0,
+    });
     b.push(o.wing_count.unwrap_or(f64::NAN));
     b.push(if detail == Detail::Fein { 2.0 } else { 1.0 });
     let sill = wt.and_then(|t| t.sill_line.as_ref());
@@ -351,6 +365,28 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     b.push(frame_view_weight);
     b.push(o.sash_line.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_HAIRLINE_MM));
     b.push(o.sill_line_style.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_HAIRLINE_MM));
+    // Details ([94]): Anschlag, Fensterbank, Storenkasten.
+    b.push(if door { dt.and_then(|t| t.rebate_depth) } else { wt.and_then(|t| t.rebate_depth) }.unwrap_or(0.0));
+    b.push(match wt.and_then(|t| t.sill_board) {
+        Some(WindowTypeSillBoard::Keine) => 1.0,
+        Some(WindowTypeSillBoard::Innen) => 2.0,
+        Some(WindowTypeSillBoard::Beide) => 3.0,
+        Some(WindowTypeSillBoard::Aussen) => 4.0,
+        _ => 0.0,
+    });
+    b.push(b01(shading.is_some_and(|s| s.mount == Some(WindowShadingMount::Sturz))));
+    b.push(shading.map_or(0.0, |s| s.r#box.depth));
+    b.push(match shading.map(|s| s.kind) {
+        Some(WindowShadingKind::Raffstore) => 1.0,
+        Some(WindowShadingKind::Markise) => 2.0,
+        _ => 0.0,
+    });
+    b.push(match dt.map(|t| t.kind) {
+        Some(DoorTypeKind::Schiebe) => 1.0,
+        Some(DoorTypeKind::Hebeschiebe) => 2.0,
+        Some(DoorTypeKind::Pendel) => 3.0,
+        _ => 0.0,
+    });
     b.push(sash_list.len() as f64);
     for s in &sash_list {
         b.extend([
@@ -374,6 +410,34 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             let count = f[i + 4] as usize;
             let pts: Vec<Vec2> = (0..count).map(|j| v2(f[i + 5 + 2 * j], f[i + 6 + 2 * j])).collect();
             let frame = f[i + 1] == 1.0;
+            if f[i + 1] == 2.0 {
+                // Anschlag: Wandnase, je Wandschicht (aussen → innen) in deren Schnitt-Darstellung.
+                i += 5 + 2 * count;
+                if pts.len() != 4 {
+                    continue;
+                }
+                let wtype = wall_type(p, w)?;
+                let category = c.cat(&w.category_code);
+                let angle = atan2(w.end.y - w.start.y, w.end.x - w.start.x) * 180.0 / std::f64::consts::PI;
+                let (_, n) = crate::opening_geom::WallRef { start: crate::opening_geom::v(w.start.x, w.start.y), end: crate::opening_geom::v(w.end.x, w.end.y), total, ref_off }.frame();
+                let off = |q: &Vec2| (q.x - w.start.x) * n.x + (q.y - w.start.y) * n.y;
+                let (lo, hi) = (off(&pts[0]), off(&pts[2]));
+                let a = v2(pts[0].x - n.x * lo, pts[0].y - n.y * lo);
+                let bq = v2(pts[1].x - n.x * lo, pts[1].y - n.y * lo);
+                let at = |q: Vec2, d: f64| v2(q.x + n.x * d, q.y + n.y * d);
+                let mut l0 = ref_off - total / 2.0;
+                for (li, layer) in wtype.layers.iter().enumerate() {
+                    let l1 = l0 + layer.thickness;
+                    let (s0, s1) = (lo.max(l0), hi.min(l1));
+                    l0 = l1;
+                    if s1 - s0 <= 1e-6 {
+                        continue;
+                    }
+                    let (hatch, fill) = layer_style(p, w, wtype, li, category, angle)?;
+                    out.push(wall_polygon(vec![at(a, s0), at(bq, s0), at(bq, s1), at(a, s1)], &fill, wall_line.0, wall_line.1, hatch, greyed, None, Some(&w.id), id));
+                }
+                continue;
+            }
             out.push(wall_polygon(pts, "none", if frame { slot(f[i + 3]) } else { "none" }, f[i + 2], no_hatch(), greyed, None, None, id));
             i += 5 + 2 * count;
         } else if f[i] == 2.0 {
@@ -460,7 +524,8 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 Some(DetailLevel::Fein) => Detail::Fein,
                 _ => c.a.detail,
             };
-            opening_symbol(c, out, w, o, color, c.greyed(&o.category_code), detail, olw)?;
+            let wall_line = (e.color.as_deref().unwrap_or(POCHE_STROKE), lw * c.a.detail.outline_factor());
+            opening_symbol(c, out, w, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?;
         }
     }
     Ok(())

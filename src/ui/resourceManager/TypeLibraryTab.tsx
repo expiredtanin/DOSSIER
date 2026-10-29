@@ -13,9 +13,10 @@ import { DeleteButton } from "./fields";
 
 // Bezugsfläche des Schichteinzugs — von aussen oder innen gemessen. Für Tür UND
 // Fenster genutzt (gleiche Semantik).
-export const INSET_FACE_OPTIONS: { value: "aussen" | "innen"; labelKey: string }[] = [
+export const INSET_FACE_OPTIONS: { value: "aussen" | "innen" | "mitte"; labelKey: string }[] = [
   { value: "aussen", labelKey: "resources.insetFace.aussen" },
   { value: "innen", labelKey: "resources.insetFace.innen" },
+  { value: "mitte", labelKey: "resources.insetFace.mitte" },
 ];
 
 export function TypeLibraryTab<T extends { id: string; name: string }>({
@@ -25,6 +26,8 @@ export function TypeLibraryTab<T extends { id: string; name: string }>({
   placeholderKey,
   deleteKeyPrefix,
   onAdd,
+  presets,
+  onAddPreset,
   onPatch,
   onDelete,
   renderFields,
@@ -35,6 +38,9 @@ export function TypeLibraryTab<T extends { id: string; name: string }>({
   placeholderKey: string;
   deleteKeyPrefix: string;
   onAdd?: () => void;
+  /** Vorlagen aus der Typen-Bibliothek ([95]); Auswahl legt eine Kopie an. */
+  presets?: { id: string; label: string }[];
+  onAddPreset?: (presetId: string) => void;
   onPatch?: (id: string, patch: Partial<T>) => void;
   onDelete?: (id: string) => void;
   renderFields: (item: T, onPatch: (patch: Partial<T>) => void) => React.ReactNode;
@@ -63,6 +69,21 @@ export function TypeLibraryTab<T extends { id: string; name: string }>({
             <button className="res-add" onClick={() => onAdd?.()}>
               <span className="res-add-plus">+</span> {t("resources.add")}
             </button>
+            {presets && presets.length > 0 && onAddPreset && (
+              <select
+                className="res-input res-add-preset"
+                value=""
+                title={t("resources.addPreset.hint")}
+                onChange={(e) => e.target.value && onAddPreset(e.target.value)}
+              >
+                <option value="">{t("resources.addPreset")}</option>
+                {presets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
         <div className="res-md-detail">

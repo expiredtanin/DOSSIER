@@ -362,7 +362,7 @@ struct FillParams {
     wing_count: f64,
     panes: f64,
     sashes: Vec<FillSash>,
-    /// Tür: 0 Dreh, 1 Schiebe, 2 reine Wandöffnung.
+    /// Tür: 0 Dreh, 1 Schiebe (auch Hebeschiebe), 2 reine Wandöffnung, 3 Pendel.
     door_kind: f64,
     leaf_count: f64,
     /// +1 Aufschlag links der Achse, −1 rechts; Richtung +1 innen, −1 aussen.
@@ -404,7 +404,8 @@ fn fill_params(p: &Project, o: &Opening) -> FillParams {
             .collect(),
         // Türart: Typ vor Öffnung.
         door_kind: match dt.map(|t| t.kind) {
-            Some(DoorTypeKind::Schiebe) => 1.0,
+            Some(DoorTypeKind::Schiebe | DoorTypeKind::Hebeschiebe) => 1.0,
+            Some(DoorTypeKind::Pendel) => 3.0,
             Some(DoorTypeKind::Wandoeffnung) => 2.0,
             Some(_) => 0.0,
             None if o.door_type == Some(OpeningDoorType::Wandoeffnung) => 2.0,

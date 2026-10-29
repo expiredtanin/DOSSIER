@@ -267,11 +267,24 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
                 if dt.is_some_and(|d| d.leaf_style == DoorTypeLeafStyle::Glas) { 1.0 } else { 0.0 },
                 dt.and_then(|d| d.glazing_ratio).unwrap_or(f64::NAN),
                 wt.and_then(|t| t.frame_width).unwrap_or(0.06),
-                wt.and_then(|t| t.transom_height).unwrap_or(0.0),
+                if door { dt.and_then(|t| t.transom_height) } else { wt.and_then(|t| t.transom_height) }.unwrap_or(0.0),
                 wt.and_then(|t| t.mullion_rows).unwrap_or(f64::NAN),
                 wt.and_then(|t| t.mullion_cols).unwrap_or(f64::NAN),
                 if matches!(wt.and_then(|t| t.sill_board), Some(WindowTypeSillBoard::Keine | WindowTypeSillBoard::Innen)) { 0.0 } else { 1.0 },
                 wt.map_or(0.0, |t| sash_kind(t.kind)),
+                // Anschlag nur mit Leibung (Einzug > 0 oder mittig), sonst gibt es keine Wandnase.
+                match (dt, wt) {
+                    (Some(t), _) if t.inset_face == Some(DoorTypeInsetFace::Mitte) || t.inset_from_face.unwrap_or(0.0) > 1e-4 => t.rebate_depth.unwrap_or(0.0),
+                    (_, Some(t)) if t.inset_face == Some(WindowTypeInsetFace::Mitte) || t.inset_from_face.unwrap_or(0.0) > 1e-4 => t.rebate_depth.unwrap_or(0.0),
+                    _ => 0.0,
+                },
+                if (door && dt.and_then(|t| t.inset_face) == Some(DoorTypeInsetFace::Innen)) || (!door && wt.and_then(|t| t.inset_face) == Some(WindowTypeInsetFace::Innen)) { -1.0 } else { 1.0 },
+                match dt.map(|t| t.kind) {
+                    Some(DoorTypeKind::Schiebe) => 1.0,
+                    Some(DoorTypeKind::Hebeschiebe) => 2.0,
+                    Some(DoorTypeKind::Pendel) => 3.0,
+                    _ => 0.0,
+                },
             ]);
             // Flügel: (pfosten, postWidth, autoWidth, width, opening, hingeLeft).
             let mut sashes: Vec<[f64; 6]> = Vec::new();
@@ -304,6 +317,19 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
             b.push(sashes.len() as f64);
             for s in &sashes {
                 b.extend(s);
+            }
+            // Oberlicht-Einteilung (Pfosten/Riegel, [95]).
+            let transom = if door { &[][..] } else { wt.and_then(|t| t.transom_sashes.as_deref()).unwrap_or(&[]) };
+            b.push(transom.len() as f64);
+            for s in transom {
+                b.extend([
+                    if s.kind == SashDefKind::Pfosten { 1.0 } else { 0.0 },
+                    s.post_width.unwrap_or(f64::NAN),
+                    if s.auto_width == Some(false) { 0.0 } else { 1.0 },
+                    s.width.unwrap_or(f64::NAN),
+                    s.opening.map_or(0.0, sash_kind),
+                    if s.hinge_side.unwrap_or(SashDefHingeSide::Left) == SashDefHingeSide::Left { 1.0 } else { 0.0 },
+                ]);
             }
             ids.push(&op.id);
             b[0] += 1.0;

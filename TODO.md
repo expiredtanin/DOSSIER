@@ -1422,6 +1422,30 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Tabelle noch nicht als Element auf dem Layout-Blatt (Layout-Blatt hat keinen Tabellen-Baustein); Typ-Vorgaben
   (Brand/Schall/U am Tür-/Fenstertyp) fehlen — die Werte liegen je Öffnung; Nummern nicht stabil bei
   Umordnung (automatisch nach Dokumentreihenfolge); nicht in der Tauri-App getestet.
+- ◐ **[94] Fenster/Türen: Konstruktionsdetails.** (29.10., Wunsch Maintainer vor den Lukarnen) Neue Typ-Felder (Fenster- und
+  Türtyp, optional, ohne sie bleibt alles wie bisher): Leibung `insetFace: "mitte"` (neben aussen/innen + `insetFromFace`
+  = Mass), Anschlag `rebateDepth` (Wandnase zwischen Anschlag-Fläche und Rahmen-Vorderkante; Grundriss je Wandschicht in
+  deren Schraffur, 3D Teil „Anschlag", Ansicht von der Anschlag-Seite mit kleinerer Rahmenfläche), Sturz `lintelHeight`
+  (Schnitt: eigener Querschnitt, neben einem Storenkasten nur über die Restdicke), Fensterbank nach `sillBoard` (Grundriss
+  fein: aussen bis 4 cm vor die Fassade, innen bis 2 cm vor die Innenfläche; Schnitt nur bei ausdrücklicher Wahl, aussen
+  mit Gefälle), Storenkasten `shading.mount: "sturz"` (Schweizer Lamellenstoren: Kasten im Sturz verdeckt — Grundriss
+  Überkopf-Rechteck ab Aussenfläche, fein Führungsschienen neben dem Anschlag; Schnitt Kasten + Lamellenpaket, vorgesetzter
+  Kasten jetzt auch im Schnitt; 3D nur Schienen). UI: „Fenster bearbeiten" (Rahmen/Sonnenschutz). Geprüft: Rust-Tests,
+  CLI-Grundriss/-Schnitt/-Ansicht als PNG angesehen (Linux). Offen: Anschlag im Schnitt (Sturz-Nase), Brüstung als
+  eigenes Bauteil, Anschlag/Leibung in den Ressourcen-Tabs (nur im Bearbeiten-Dialog).
+- ◐ **[95] Fenster/Türen: mehr Bauarten und Typen-Bibliothek.** (29.10.) Türtyp `kind` neu `hebeschiebe` und `pendel`;
+  `schiebe` wird jetzt auch gezeichnet: Grundriss nach SIA (Schiebetür: Blatt-Rechteck vor der Wand auf der Aufschlagseite +
+  Pfeil zur Parkseite, zweiflügelig zwei Pfeile; Hebeschiebe: zwei Flügel auf versetzten Gleisen im Rahmen mit Glaslinien
+  und Pfeil; Pendel: Blatt + gepunktetes Gegenblatt, Bögen beidseitig), Schnitt (Blatt vor der Fläche bzw. zwei Flügel),
+  Ansicht (Pfeil, zwei Glasfelder), 3D (Blatt vor der Wand, Hebeschiebe mit Flügelrahmen und Glas), IFC-OperationType
+  (Pendel → DOUBLE_SWING_*, Hebeschiebe → SLIDING_*). Türtyp `kind: "wandoeffnung"` wirkt jetzt auch im Grundriss/Schnitt.
+  Tür-Oberlicht (`transomHeight`) jetzt auch in der Ansicht. Fenster `transomSashes` (Pfosten/Riegel: Einteilung des
+  Oberlichts, je Feld fest/kipp/dreh): Ansicht und 3D (Pfosten, Flügelrahmen, Symbole). Zweiflügelige Türen gab es schon
+  (`leafCount`). Bibliothek: `opening_presets.rs` (6 Fenster-, 7 Türvorlagen, Namen über `preset.<id>`), Ressourcen-Tabs
+  „Aus Bibliothek…“; Dialog „Fenster bearbeiten“: Türarten, Oberlicht-Felder/-Öffnung. Geprüft: Rust-/vitest-Tests,
+  CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux). Offen: Taschen-Schiebetür (in der Wand), Ansicht zeigt bei
+  zweiflügeliger Schiebetür nur einen Pfeil, 3D/Ansicht ohne Hebeschiebe-Bandseite in der Ansicht, Brüstungs-/Riegel-
+  Einteilung unten (nur Oberlicht), nicht in der Tauri-App geprüft.
 
 ## Priorität 4 — später
 
