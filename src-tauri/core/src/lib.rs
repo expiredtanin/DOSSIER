@@ -93,6 +93,7 @@ pub mod cmd_transform;
 pub mod cmd_edit;
 pub mod polyline_vertex;
 pub mod cmd_paste;
+pub mod cmd_split;
 
 #[cfg(feature = "web")]
 mod web;

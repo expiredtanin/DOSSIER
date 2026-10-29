@@ -157,7 +157,7 @@ import { usePanelHostBase } from "./state/usePanelHostBase";
 import { useDockDragState } from "./state/useDockDragState";
 import { useMouseSelectionHandlers } from "./state/useMouseSelectionHandlers";
 import { activeGroupOps, containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
-import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, replaceItem, replaceWithMany, setFieldIfChanged } from "./core";
+import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, setFieldIfChanged } from "./core";
 import type { GroupMembership, MemberKind } from "./state/groupActions";
 import { isLocked, lockMembersOps } from "./state/objectLock";
 import { useProjectFileActions } from "./state/useProjectFileActions";
@@ -188,13 +188,7 @@ import {
 import type { EngineHost, EngineMods } from "./commands/engine";
 import type { CommandContext } from "./commands/types";
 import { t, useT } from "./i18n";
-import {
-  cutSegment,
-  nearestEdgeIndex,
-  splitDrawing,
-  toPolyForm,
-} from "./editors/splitJoin";
-import type { PolyForm } from "./editors/splitJoin";
+import { cutSegmentOps, splitOps } from "./editors/splitJoin";
 import {
   countClosedAreas,
   differenceDrawings,
@@ -1325,25 +1319,11 @@ export default function App() {
   // Ergebnis; neue Elemente werden ausgewählt. Wände sind ausgenommen (no-op).
   const runSplit = (ids: string[]) => {
     if (ids.length === 0) return;
-    const idSet = new Set(ids);
-    const newIds: string[] = [];
+    let newIds: string[] = [];
     applyChange((p) => {
-      newIds.length = 0;
-      const replacements = new Map<string, Drawing2D[]>();
-      for (const d of p.drawings2d) {
-        if (!idSet.has(d.id)) continue;
-        const others: PolyForm[] = [];
-        for (const o of p.drawings2d) {
-          if (o.id === d.id || o.levelId !== d.levelId) continue;
-          const f = toPolyForm(o.geom);
-          if (f) others.push(f);
-        }
-        const pieces = splitDrawing(d, others);
-        for (const piece of pieces) newIds.push(piece.id);
-        replacements.set(d.id, pieces);
-      }
-      // Jedes Quell-Drawing wird an derselben Stelle durch seine Teile ersetzt.
-      return replaceWithMany(p, "drawings2d", replacements);
+      const r = splitOps(p, ids);
+      newIds = r.selectIds;
+      return r.ops;
     });
     setSelectedDrawingIds(newIds);
     setSelectedWallIds([]);
@@ -1541,24 +1521,14 @@ export default function App() {
 
   // Alt+Klick im Grundriss = Segment löschen (Schere): PlanView meldet das
   // getroffene Drawing2D + den Modellpunkt; App ermittelt daraus die nächst-
-  // gelegene Kante (nearestEdgeIndex) und entfernt sie. Geschlossene Form →
+  // gelegene Kante (Kern `cmd_split.rs`) und entfernt sie. Geschlossene Form →
   // offene Polylinie; bleiben <2 Punkte übrig, wird das Element gelöscht.
   const onSegmentCut = (drawingId: string, model: Vec2) => {
-    const src = project.drawings2d.find((d) => d.id === drawingId);
-    if (!src) return;
-    const edgeIndex = nearestEdgeIndex(src.geom, model);
-    if (edgeIndex === null) return;
     let removed = false;
     applyChange((p) => {
-      removed = false;
-      const d = p.drawings2d.find((x) => x.id === drawingId);
-      if (!d) return [];
-      const next = cutSegment(d, edgeIndex);
-      if (next === null) {
-        removed = true;
-        return removeItems(p, "drawings2d", [drawingId]);
-      }
-      return [replaceItem("drawings2d", next)];
+      const r = cutSegmentOps(p, drawingId, model);
+      removed = r.removed;
+      return r.ops;
     });
     if (removed) setSelectedDrawingIds([]);
   };

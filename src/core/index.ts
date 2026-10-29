@@ -58,11 +58,6 @@ export {
   offsetSegment,
   pointSegmentDistance,
   polylineEdges,
-  removeSegment,
-  removeSegmentWithBulge,
-  splitAtIntersections,
-  splitClosedByChord,
-  splitPolylineAtParam,
   tangentCircleCenters,
   vecEqual,
 } from "../geometry/kernel2d";

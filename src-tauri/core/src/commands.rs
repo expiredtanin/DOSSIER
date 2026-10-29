@@ -27,6 +27,8 @@ pub fn ops(root: &Map<String, Value>, text: &str) -> Result<Vec<Op>, String> {
         "distribute" => crate::cmd_transform::distribute_ops(root, &ids("ids"), &s("axis")),
         "defblock" => crate::cmd_transform::defblock_ops(root, &parse(&v, cmd)?),
         "paste" => crate::cmd_paste::paste_ops(v.get("clip").unwrap_or(&Value::Null), &s("levelId"), &s("stamp")),
+        "split" => crate::cmd_split::split_ops(root, &ids("ids"), &s("stamp")),
+        "cutSegment" => crate::cmd_split::cut_segment_ops(root, &s("id"), crate::cmd_split::point_arg(&v, "at")),
         other => return Err(format!("Unbekannter Befehl: {other}")),
     })
 }

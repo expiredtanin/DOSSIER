@@ -734,6 +734,20 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Gleichheit (einmalig, Test gelöscht): 400 Zufallsprojekte × Zufallsauswahl, Ops gleich bis auf die ids (Verweise
     Öffnung → Wand konsistent). Offen (gab es auch vorher nicht): Versatz beim wiederholten Einfügen, Gruppen
     mitkopieren, Einfügen in die aktive Gruppe (`activeGroupOps`). Nicht in der Tauri-App geprüft.
+    ✅ (29.10.) **Split / Segment löschen im Kern** ([K4] S3): `cmd_split.rs` (`{cmd: "split", ids, stamp}`,
+    `{cmd: "cutSegment", id, at}`), vorher `editors/splitJoin.ts` + `App.tsx`. Split wie bisher (Schnittpunkte mit den
+    übrigen Zeichnungen des Geschosses, sonst Mitte; Stücke an der Stelle des Originals, Stil geerbt); Segment löschen
+    sucht die nächste Kante (Bögen gegen die Kurve) und entfernt sie im Kern. **Fehler behoben:** `cutSegment` gab ein
+    Element mit NEUER id als `replace` zurück — das traf nichts, der Kern hängte es an und das Original blieb stehen
+    (Alt+Klick verdoppelte die Zeichnung statt sie zu kürzen; Test zuerst rot: 2 statt 1 Element). Jetzt behält das
+    Element id und alle Attribute (Gruppen, Sperre, Deckkraft …), nur `geom` ist neu; Füllung/Schraffur fallen wie
+    vorher weg (Ergebnis offen). `splitJoin.ts` ist Fassade (`splitOps`, `cutSegmentOps`); `toPolyForm` lebt nur noch
+    in `booleanOps.ts`. Gelöscht: TS-Rechnung (`splitDrawing`, `cutSegment`, `nearestEdgeIndex`, `fromPolyForm` …),
+    Fassaden `splitAtIntersections`/`splitClosedByChord`/`splitPolylineAtParam`/`removeSegment(WithBulge)` samt
+    Bindungen `k2_*`. Gleichheit (einmalig, Test gelöscht): 2808 Split-Fälle über 3000 Zufallszeichnungs-Sätze (Linie,
+    Polylinie offen/geschlossen/ohne `closed`/mit Bögen, Rechteck, Kreis, Text; zwei Geschosse) Ops gleich bis auf die
+    ids; 9000 Segment-Löschen (3047 mit Löschen) gleiche Geometrie bzw. gleiche Ops, Element = Original mit neuer
+    Geometrie. Nicht in der Tauri-App geprüft.
     **Leistung nach der Zusammenführung (29.10.)** — erledigt damit die Offen-Punkte der Griffe/Objekt-Info:
     (a) **id-Suche indiziert:** der Positions-Index des Dokuments (`PosCache`) wird ab der ersten Suche gebaut (Listen
     ≥ 32), überlebt `add` am Ende und ist über `Lookup` (`Document::lookup`) auch für die Wurzel-Abfragen da — Griffe
