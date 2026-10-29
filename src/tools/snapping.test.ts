@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { computeSnap, snapCommonAngle, wallLayerBoundarySegments } from "./snapping";
+import { computeSnap, snapCommonAngle } from "./snapping";
 import { DEFAULT_SNAP } from "./types";
 import type { Ceiling, Column, Drawing2D, Project, Roof, Room, Stair, Vec2, Wall } from "../model/types";
 
@@ -70,43 +70,48 @@ function wall(id: string, start: Vec2, end: Vec2, referenceLine?: Wall["referenc
   };
 }
 
-describe("wallLayerBoundarySegments", () => {
-  it("liefert layers.length+1 Grenzlinien mit kumulierten Offsets (referenceLine=center)", () => {
-    const w = wall("W1", { x: 0, y: 0 }, { x: 4, y: 0 });
-    const segs = wallLayerBoundarySegments(wallProject(w), w);
-    expect(segs).toHaveLength(4); // 3 Schichten → 4 Grenzlinien
-    // Achse horizontal → leftNormal = (0,1); Offset erscheint als y-Koordinate.
-    const offsets = segs.map(([a]) => a.y);
-    expect(offsets[0]).toBeCloseTo(-0.225, 9); // −T/2 (Aussenfläche)
-    expect(offsets[1]).toBeCloseTo(-0.125, 9); // −T/2 + 0.10
-    expect(offsets[2]).toBeCloseTo(0.025, 9); // −T/2 + 0.10 + 0.15
-    expect(offsets[3]).toBeCloseTo(0.225, 9); // +T/2 (Aussenfläche, innen)
-    // Jede Grenzlinie läuft parallel zur Achse über die volle Wandlänge.
-    for (const [a, b] of segs) {
-      expect(a.y).toBeCloseTo(b.y, 9);
-      expect(a.x).toBeCloseTo(0, 9);
-      expect(b.x).toBeCloseTo(4, 9);
-    }
+/** Fang an `raw` auf dem Wand-Projekt (nur Objekt-Fang, kein Raster/Winkel). */
+function snapWall(w: Wall, raw: Vec2) {
+  return computeSnap({
+    raw,
+    project: wallProject(w),
+    levelId: "eg",
+    visibleCodes: new Set(["20"]),
+    settings: { ...DEFAULT_SNAP, grid: false, commonAngles: false, ortho: false },
+    draftPoints: [],
+    lastPoint: null,
+    pxPerMeter: 100,
+    shift: false,
+    ctrl: false,
   });
+}
 
-  it("verschiebt die Offsets um wallReferenceOffset bei referenceLine=left/right", () => {
-    const wLeft = wall("W1", { x: 0, y: 0 }, { x: 4, y: 0 }, "left");
-    const offLeft = wallLayerBoundarySegments(wallProject(wLeft), wLeft).map(([a]) => a.y);
-    // refOff = +T/2 = 0.225 → Offsets laufen von 0 bis T (0.45).
-    expect(offLeft[0]).toBeCloseTo(0, 9);
-    expect(offLeft[3]).toBeCloseTo(0.45, 9);
+describe("Wand-Schichtgrenzen als Fang-Strecken (Kern `snap_model.rs`)", () => {
+  // Achse horizontal → leftNormal = (0,1); die Grenzen liegen bei y = Offset, jede über die volle Länge.
+  const cases: [Wall["referenceLine"], number[]][] = [
+    ["center", [-0.225, -0.125, 0.025, 0.225]], // −T/2, −T/2 + 0.10, … +T/2
+    ["left", [0, 0.1, 0.25, 0.45]], // refOff = +T/2
+    ["right", [-0.45, -0.35, -0.2, 0]], // refOff = −T/2
+  ];
+  for (const [ref, offsets] of cases) {
+    it(`fängt die Endpunkte aller layers.length+1 Grenzlinien (referenceLine=${ref})`, () => {
+      const w = wall("W1", { x: 0, y: 0 }, { x: 4, y: 0 }, ref);
+      for (const o of offsets) {
+        for (const x of [0, 4]) {
+          const r = snapWall(w, { x: x + 0.004, y: o + 0.004 });
+          expect(r?.kind).toBe("endpoint");
+          expect(r!.point.x).toBeCloseTo(x, 9);
+          expect(r!.point.y).toBeCloseTo(o, 9);
+        }
+      }
+    });
+  }
 
-    const wRight = wall("W1", { x: 0, y: 0 }, { x: 4, y: 0 }, "right");
-    const offRight = wallLayerBoundarySegments(wallProject(wRight), wRight).map(([a]) => a.y);
-    // refOff = −T/2 = −0.225 → Offsets laufen von −0.45 bis 0.
-    expect(offRight[0]).toBeCloseTo(-0.45, 9);
-    expect(offRight[3]).toBeCloseTo(0, 9);
-  });
-
-  it("liefert eine leere Liste bei unbekanntem Wandtyp (kein Crash im Snap-Pfad)", () => {
+  it("unbekannter Wandtyp: nur die Achse, keine Grenzlinien (kein Crash im Snap-Pfad)", () => {
     const w = wall("W1", { x: 0, y: 0 }, { x: 4, y: 0 });
     w.wallTypeId = "unknown";
-    expect(wallLayerBoundarySegments(wallProject(w), w)).toEqual([]);
+    expect(snapWall(w, { x: 4.004, y: -0.13 })).toBeNull();
+    expect(snapWall(w, { x: 4.004, y: 0.004 })?.point).toEqual({ x: 4, y: 0 });
   });
 });
 

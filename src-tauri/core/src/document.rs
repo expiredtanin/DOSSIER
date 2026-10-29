@@ -56,7 +56,11 @@ impl Revs {
     }
 
     fn reset(&mut self) {
-        self.epoch = self.next();
+        // Epoche über alle Dokumente eindeutig: Caches ausserhalb eines Dokuments (Fang, `snap_model.rs`)
+        // erkennen so auch ein neu geöffnetes Dokument unter derselben Nummer.
+        static EPOCHS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        self.next();
+        self.epoch = EPOCHS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         self.field.clear();
         self.items.clear();
     }
@@ -251,7 +255,11 @@ impl<'a> Lookup<'a> {
 impl Document {
     pub fn from_json(text: &str) -> Result<Document, String> {
         match serde_json::from_str::<Value>(text) {
-            Ok(Value::Object(root)) => Ok(Document { root, ..Default::default() }),
+            Ok(Value::Object(root)) => {
+                let mut d = Document { root, ..Default::default() };
+                d.revs.reset();
+                Ok(d)
+            }
             Ok(_) => Err("Projekt ist kein JSON-Objekt".into()),
             Err(e) => Err(e.to_string()),
         }

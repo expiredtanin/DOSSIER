@@ -94,6 +94,7 @@ pub mod cmd_edit;
 pub mod polyline_vertex;
 pub mod cmd_paste;
 pub mod cmd_split;
+pub mod snap_model;
 
 #[cfg(feature = "web")]
 mod web;

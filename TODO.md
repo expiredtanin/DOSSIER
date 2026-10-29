@@ -748,6 +748,37 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Polylinie offen/geschlossen/ohne `closed`/mit Bögen, Rechteck, Kreis, Text; zwei Geschosse) Ops gleich bis auf die
     ids; 9000 Segment-Löschen (3047 mit Löschen) gleiche Geometrie bzw. gleiche Ops, Element = Original mit neuer
     Geometrie. Nicht in der Tauri-App geprüft.
+    ✅ (29.10.) **Fang-Kandidaten aus dem Modell im Kern** ([K4] S3/[K3d]): `snap_model.rs` sammelt je Dokument-Stand,
+    Geschoss und sichtbaren Ebenen (vorher `baseSegments`/`collectCircles`/`roomAnchors`/`ellipseCenters` in
+    `tools/snapping.ts`): Wandachsen + Schichtgrenzen, Raum-/Decken- (mit Aussparungen)/Dach-/Treppen-/Stützen-Umrisse,
+    2D-Zeichnungen (Konstruktionslinie/Strahl verlängert, Bezier/Spline tesselliert), Kreise/Bögen (Zeichnungen, runde
+    Stützen, Wendeltreppe), Raum-Anker, Ellipsen-Mittelpunkte — in zwei Teilen (Modell / Zeichnungen), Schlüssel
+    Epoche + Feld-Stände (`Revs`): eine Wand-Änderung sammelt die Zeichnungen nicht neu und umgekehrt; ein
+    unverändertes Dokument liefert dieselbe Nummer (`doc_snap_hold`). Je Mausbewegung EIN Aufruf `snap_query`
+    (Strecken-Fang wie bisher in `snap.rs`, jetzt über beide Teile; Nahmodus > 2000 Zeichnungen im Kern: Strecken bis
+    6·Toleranz über den Raster-Index, nach Abstand sortiert, Schnitt unter den 64 nächsten; dazu Raum-Anker und
+    Kreis-Block mit Mittelpunkt/Quadranten/Bogen-Endpunkten/Tangente). TS behält Toleranz in Pixeln, Teilpunkte/
+    Verweilen, Parallele, Entwurfspunkte, Blatt-Geometrie (Vorauswahl), Raster/Winkel. Neue Fassade
+    `geometry/modelSnap.ts`; gelöscht: TS-Sammlung, `wallLayerBoundarySegments`, `model/wall.ts`
+    (`wallReferenceOffset`, kein Aufrufer mehr), `geometry/snapSegments.ts` samt Bindungen `snap_segs_hold`/
+    `snap_segs_release`/`snap_eval`, `isIndexable`, Fassaden-Exporte `drawingsNear`/`stairOutline`. Epochen der
+    Dokumente sind jetzt über alle Dokumente eindeutig (auch `Document::from_json`), damit Caches ausserhalb des
+    Dokuments ein neu geöffnetes Dokument unter derselben Nummer erkennen.
+    Gleichheit (einmalig, Test gelöscht): 20 100 `computeSnap`-Abfragen alt/neu JSON-gleich (Beispielprojekt,
+    300 Zufallsprojekte mit allen Bauteilarten, je 6 Projekte mit 1500 bzw. 2500 Zeichnungen (Nahmodus) aus Linien,
+    Polylinien, Kreisen, Bögen, Rechtecken, Konstruktionslinien, Ellipsen auf zwei Geschossen, bigSample(3); zufällige
+    Fang-Einstellungen, Toleranzen, Massstäbe, letzter Punkt/Entwurf, Ebenen-Sichtbarkeit, Verweilen 0 ms (Teilpunkte,
+    Parallele)): 0 Abweichungen, alle Fang-Arten getroffen. Bleibende Tests: `geometry/modelSnap.test.ts` (Kern gegen
+    Suche über alle Strecken/Paare, Nummer stabil), `tools/snapping.test.ts` (Schichtgrenzen über `computeSnap`),
+    Rust `snap_model::tests`, Messung `tools/snapping.perf.test.ts`.
+    Messung (vitest/Store, `--no-opt`-WASM, Container unter Last, je Mausbewegung = Mittel über 400 Positionen,
+    kleinster aus 3 Läufen; Plan vorher erzeugt wie in der App; alt → neu): 3000 Wände + 20 000 Zeichnungen
+    (Nahmodus) 9,7 ms → 23 µs, erster Fang 188 → 25 ms, nach Wand-Änderung 7,5 → 2,6 ms, nach Zeichnungs-Änderung
+    52 → 11 ms; 3000 Wände + 1500 Zeichnungen 232 → 180 µs (im selben Lauf abwechselnd: 340–450 → 290–300 µs), nach
+    Wand-Änderung 11 → 2,5 ms; Kataster 150 000 Zeichnungen 39 → 15 µs, erster Fang 334 → 136 ms, nach
+    Zeichnungs-Änderung 195 → 93 ms (nativ: Strecken 36 ms + Index ~100 ms für 450 000 Strecken; ohne vorher gebaute
+    typisierte Sicht kommen ~470 ms dazu). Nicht in der Tauri-App geprüft. Offen: Blatt-Geometrie (Schnitt/Ansicht,
+    `sheetSnapGeometry.ts`) wird weiter in TS je Mausbewegung vorausgewählt.
     **Leistung nach der Zusammenführung (29.10.)** — erledigt damit die Offen-Punkte der Griffe/Objekt-Info:
     (a) **id-Suche indiziert:** der Positions-Index des Dokuments (`PosCache`) wird ab der ersten Suche gebaut (Listen
     ≥ 32), überlebt `add` am Ende und ist über `Lookup` (`Document::lookup`) auch für die Wurzel-Abfragen da — Griffe

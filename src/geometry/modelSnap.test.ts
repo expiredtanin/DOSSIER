@@ -1,10 +1,11 @@
-// Objektfang auf Strecken im Kern ([K3d], `core/src/snap.rs`): gleiche Wahl wie die einfache
-// Suche über alle Strecken/Paare (Raster-Vorauswahl und Geraden-Filter für Schnittpunkte dürfen
-// nichts ändern). (Gleichheit zur früheren TS-Fassung von computeSnap: 2600 Abfragen, s. TODO [K3d].)
+// Objektfang aus dem Modell im Kern ([K4] S3, `core/src/snap_model.rs` + `snap.rs`): gleiche Wahl wie
+// die einfache Suche über alle Strecken/Paare (Raster-Vorauswahl und Geraden-Filter für Schnittpunkte
+// dürfen nichts ändern), gleiche Nummer solange das Dokument gleich bleibt.
 
 import { describe, expect, it } from "vitest";
-import { holdSnapSegments, releaseSnapSegments, snapOnSegments, type SnapSeg } from "./snapSegments";
-import type { Vec2 } from "../model/types";
+import { holdModelSnap, queryModelSnap, type SnapSeg } from "./modelSnap";
+import { sampleProject } from "../model/sampleProject";
+import type { Drawing2D, Project, Vec2 } from "../model/types";
 
 const PRIORITY: Record<string, number> = { perpendicular: 1, endpoint: 7, midpoint: 3, intersection: 5, onEdge: 0 };
 
@@ -55,10 +56,21 @@ function brute(segs: SnapSeg[], raw: Vec2, tolM: number, pxPerM: number, last: V
   return { a: a.get(), b: b.get() };
 }
 
-describe("snapOnSegments (Kern)", () => {
+const LEVEL = sampleProject.drawingLevels[0].id;
+const CODE = "01";
+
+function lineProject(segs: SnapSeg[]): Project {
+  const drawings: Drawing2D[] = segs.map(([a, b], i) => ({ id: `l${i}`, type: "drawing2d", levelId: LEVEL, categoryCode: CODE, geom: { shape: "line", a, b } }));
+  return { ...sampleProject, walls: [], rooms: [], ceilings: [], roofs: [], stairs: [], columns: [], drawings2d: drawings };
+}
+
+const flags = { segs: true, perpendicular: true, endpoint: true, midpoint: true, intersection: true, onEdge: true, center: false, tangent: false };
+
+describe("Objektfang aus dem Modell (Kern)", () => {
   it("gleich wie die Suche über alle Strecken und Paare (Zufallsdaten)", () => {
     let seed = 3;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const codes = new Set([CODE]);
     for (let run = 0; run < 8; run++) {
       const segs: SnapSeg[] = [];
       for (let i = 0; i < 300; i++) {
@@ -67,36 +79,31 @@ describe("snapOnSegments (Kern)", () => {
         const k = rnd();
         segs.push(k < 0.4 ? [{ x, y }, { x: x + rnd() * 5, y }] : k < 0.8 ? [{ x, y }, { x, y: y + rnd() * 5 }] : [{ x, y }, { x: x + rnd() * 30 - 15, y: y + rnd() * 30 - 15 }]);
       }
-      const base = segs.slice(0, 250);
-      const extra = segs.slice(250);
-      const h = holdSnapSegments(base);
+      const p = lineProject(segs.slice(0, 250));
+      const draft = segs.slice(250);
+      const h = holdModelSnap(p, LEVEL, codes);
+      expect(holdModelSnap(p, LEVEL, codes)).toBe(h);
       for (let q = 0; q < 25; q++) {
         const raw = { x: rnd() * 20, y: rnd() * 20 };
         const tolM = 0.05 + rnd() * 0.5;
         const last = rnd() < 0.5 ? { x: rnd() * 20, y: rnd() * 20 } : null;
-        const r = snapOnSegments(h, extra, null, { raw, tolM, pxPerMeter: 100, perpendicular: true, endpoint: true, midpoint: true, intersection: true, onEdge: true, lastPoint: last })!;
+        const r = queryModelSnap(h, draft, [], { raw, tolM, pxPerMeter: 100, lastPoint: last, ...flags })!;
         const e = brute(segs, raw, tolM, 100, last);
         expect(r.a).toEqual(e.a);
         expect(r.b).toEqual(e.b);
       }
-      releaseSnapSegments(h);
-      expect(snapOnSegments(h, [], null, { raw: { x: 0, y: 0 }, tolM: 1, pxPerMeter: 1, perpendicular: false, endpoint: true, midpoint: false, intersection: false, onEdge: false, lastPoint: null })).toBeNull();
     }
-    }, 60_000);
+    expect(queryModelSnap(987654, [], [], { raw: { x: 0, y: 0 }, tolM: 1, pxPerMeter: 1, lastPoint: null, ...flags })).toBeNull();
+  }, 60_000);
 
   it("nächste Strecke für das Verweilen", () => {
-    const r = snapOnSegments(0, [[{ x: 0, y: 0 }, { x: 10, y: 0 }], [{ x: 5, y: -5 }, { x: 5, y: 5 }]], null, {
-      raw: { x: 5.05, y: 0.02 },
-      tolM: 0.2,
-      pxPerMeter: 100,
-      perpendicular: false,
-      endpoint: true,
-      midpoint: true,
-      intersection: true,
-      onEdge: true,
-      lastPoint: null,
-    })!;
+    const p = lineProject([[{ x: 0, y: 0 }, { x: 10, y: 0 }]]);
+    const h = holdModelSnap(p, LEVEL, new Set([CODE]));
+    const r = queryModelSnap(h, [[{ x: 5, y: -5 }, { x: 5, y: 5 }]], [], { raw: { x: 5.05, y: 0.02 }, tolM: 0.2, pxPerMeter: 100, lastPoint: null, ...flags })!;
     expect(r.nearest).toEqual([{ x: 0, y: 0 }, { x: 10, y: 0 }]);
     expect(r.b?.kind).toBe("intersection");
+    // Ohne sichtbare Ebene: keine Strecken.
+    const h2 = holdModelSnap(p, LEVEL, new Set(["xx"]));
+    expect(queryModelSnap(h2, [], [], { raw: { x: 5.05, y: 0.02 }, tolM: 0.2, pxPerMeter: 100, lastPoint: null, ...flags })!.nearest).toBeNull();
   });
 });

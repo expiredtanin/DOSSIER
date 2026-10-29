@@ -1,33 +1,24 @@
-//! Bindungen des Objektfangs (`crate::snap`). Die Fang-Strecken eines Projekt-Geschosses legt TS
-//! einmal ab (`snap_segs_hold`) und gibt sie frei, wenn es sie ersetzt (`snap_segs_release`).
-//! Je Mausbewegung `snap_eval`; unbekannte Nummer oder kaputte Eingabe → leeres Ergebnis.
+//! Bindungen des Objektfangs ([K4] S3, `crate::snap_model`): die Kandidaten eines Geschosses sammelt
+//! der Kern aus dem Dokument (`doc_snap_hold`, gleiche Nummer solange sich die betroffenen Felder
+//! nicht ändern); je Mausbewegung `snap_query`. Unbekannte Nummer oder kaputte Eingabe → leeres
+//! Ergebnis (TS sammelt dann neu).
 
-use crate::snap::{segs_from, snap_segments, Cand, SnapQuery, SnapSet};
+use crate::snap::{segs_from, Cand};
+use crate::snap_model::{query, ModelQuery, SnapCache};
+use super::document::with_doc;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 thread_local! {
-    static SETS: RefCell<(u32, Vec<(u32, SnapSet)>)> = const { RefCell::new((0, Vec::new())) };
+    static CACHE: RefCell<SnapCache> = RefCell::new(SnapCache::default());
 }
 
-/// Strecken `[ax, ay, bx, by, …]` ablegen; Nummer ≥ 1 (0 = kaputte Eingabe).
+/// Kandidaten des Geschosses `level` mit den sichtbaren Ebenen `codes` (durch `\n` getrennt) im
+/// Dokument `h`; Nummer ≥ 1 für [`snap_query`] (0 = Dokument nicht offen).
 #[wasm_bindgen]
-pub fn snap_segs_hold(flat: &[f64]) -> u32 {
-    if flat.len() % 4 != 0 {
-        return 0;
-    }
-    SETS.with(|h| {
-        let mut h = h.borrow_mut();
-        h.0 = h.0.wrapping_add(1).max(1);
-        let id = h.0;
-        h.1.push((id, SnapSet::new(segs_from(flat))));
-        id
-    })
-}
-
-#[wasm_bindgen]
-pub fn snap_segs_release(id: u32) {
-    SETS.with(|h| h.borrow_mut().1.retain(|e| e.0 != id));
+pub fn doc_snap_hold(h: u32, level: &str, codes: &str) -> u32 {
+    let codes: Vec<String> = if codes.is_empty() { Vec::new() } else { codes.split('\n').map(str::to_owned).collect() };
+    with_doc(h, |d| CACHE.with(|c| c.borrow_mut().hold(h, d, level, &codes))).unwrap_or(0)
 }
 
 fn push(out: &mut Vec<f64>, c: Option<Cand>) {
@@ -37,44 +28,40 @@ fn push(out: &mut Vec<f64>, c: Option<Cand>) {
     }
 }
 
-/// Fang über abgelegte (`held`, 0 = keine) + Zusatz-Strecken. `int_mode` 1: Schnittpunkte nur
-/// aus `int_segs`, sonst aus denselben Strecken. `flags` s. `snap::F_*`; letzter Punkt NaN =
-/// keiner. Ergebnis: `[nächste Strecke (−1), ax, ay, bx, by, Block A (x, y, Art, distPx,
-/// Punktzahl), Block B (…)]` (NaN = kein Kandidat); leer = Fehler (Nummer unbekannt).
+/// Fang je Mausbewegung über das abgelegte Geschoss `held` plus Entwurfs- und Blatt-Strecken
+/// (`[ax, ay, bx, by, …]`). `flags`: `snap::F_*` und `snap_model::F_*`; letzter Punkt NaN = keiner.
+/// Ergebnis (25 Zahlen): `[nächste Strecke (1|−1), ax, ay, bx, by]`, dann je Block `[x, y, Art,
+/// distPx, Punktzahl]` (NaN = kein Kandidat): A (Lot, Endpunkte), Raum-Anker, B (Mitte, Schnitt,
+/// Kante), C (Kreise, Ellipsen). Leer = Nummer unbekannt bzw. kaputte Eingabe.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
-pub fn snap_eval(held: u32, extra: &[f64], int_mode: u32, int_segs: &[f64], rx: f64, ry: f64, tol_m: f64, px_per_m: f64, flags: u32, lx: f64, ly: f64) -> Vec<f64> {
-    if extra.len() % 4 != 0 || int_segs.len() % 4 != 0 {
+pub fn snap_query(held: u32, draft: &[f64], sheet: &[f64], rx: f64, ry: f64, tol_m: f64, px_per_m: f64, flags: u32, lx: f64, ly: f64) -> Vec<f64> {
+    if draft.len() % 4 != 0 || sheet.len() % 4 != 0 {
         return Vec::new();
     }
-    let extra = segs_from(extra);
-    let ints = segs_from(int_segs);
-    let run = |base: &SnapSet| -> Vec<f64> {
-        let q = SnapQuery {
-            base,
-            extra: &extra,
-            int_segs: (int_mode == 1).then_some(&ints[..]),
+    let (draft, sheet) = (segs_from(draft), segs_from(sheet));
+    CACHE.with(|c| {
+        let c = c.borrow();
+        let Some(ls) = c.get(held) else { return Vec::new() };
+        let q = ModelQuery {
+            draft: &draft,
+            sheet: &sheet,
             raw: (rx, ry),
             tol_m,
             px_per_m,
             flags,
             last: (!lx.is_nan() && !ly.is_nan()).then_some((lx, ly)),
         };
-        let o = snap_segments(&q);
-        let mut out = Vec::with_capacity(15);
+        let o = query(ls, &q);
+        let mut out = Vec::with_capacity(25);
         match o.dwell {
-            Some(i) => {
-                let s = if i < base.segs.len() { base.segs[i] } else { extra[i - base.segs.len()] };
-                out.extend_from_slice(&[i as f64, s[0], s[1], s[2], s[3]]);
-            }
+            Some(s) => out.extend_from_slice(&[1.0, s[0], s[1], s[2], s[3]]),
             None => out.extend_from_slice(&[-1.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN]),
         }
         push(&mut out, o.a);
+        push(&mut out, o.anchors);
         push(&mut out, o.b);
+        push(&mut out, o.c);
         out
-    };
-    if held == 0 {
-        return run(&SnapSet::default());
-    }
-    SETS.with(|h| h.borrow().1.iter().find(|e| e.0 == held).map(|e| run(&e.1))).unwrap_or_default()
+    })
 }
