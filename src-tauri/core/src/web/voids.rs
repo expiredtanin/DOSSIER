@@ -7,3 +7,9 @@ use wasm_bindgen::prelude::wasm_bindgen;
 pub fn voids_subtract_rings_flat(pts: &[f64], cutters: &[f64], no_stroke: &[f64]) -> Vec<f64> {
     crate::voids::subtract_rings_flat(pts, cutters, no_stroke)
 }
+
+/// Wand als truck-Spezifikation (`solid_specs::wall_spec_flat`): JSON oder leer (entartet/kaputt).
+#[wasm_bindgen]
+pub fn wall_spec_flat(f: &[f64]) -> String {
+    crate::solid_specs::wall_spec_flat(f)
+}

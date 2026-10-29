@@ -40,7 +40,18 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("scheduleCsv", 1) => Ok(export_schedule::export_schedule_csv(p, text, args[0] != 0.0)),
         ("pickGeometry", _) => json(&model3d::pick_geometry(p)?),
         ("modelJson", _) => crate::model::to_value_typed_only(p).map(|v| v.to_string()).map_err(|e| e.to_string()),
-        ("model3dParts", 3) => json(&model3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0)?),
+        // Mit Abzugskörpern (`args[3]` ≠ 0) zusätzlich `voidCuts`: die getroffenen Wände/Decken als
+        // truck-Spezifikationen (`solid_specs.rs`).
+        ("model3dParts", n) if n >= 3 => {
+            let parts = model3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0)?;
+            if args.get(3).is_some_and(|v| *v != 0.0) {
+                let cuts = crate::solid_specs::void_cuts(p, &parts.walls, &parts.slabs);
+                let mut v = serde_json::to_value(&parts).map_err(|e| e.to_string())?;
+                v["voidCuts"] = serde_json::to_value(&cuts).map_err(|e| e.to_string())?;
+                return Ok(v.to_string());
+            }
+            json(&parts)
+        }
         // Gruppen ([K4] S3, `groups.rs`): `text` = Gruppen-id bzw. JSON der Argumente.
         ("groupMembership", _) => json(&crate::groups::transitive_membership(p, text)),
         ("containingGroup", _) => {
@@ -185,6 +196,11 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             let bytes = domains::plan_domains_buf(p, &a)?;
             let prims = crate::plan_buf::View::parse(&bytes).and_then(|v| v.prims()).ok_or("planUnderlay: Plan-Puffer unlesbar")?;
             Ok(crate::plan::underlay::underlay_buf(&crate::plan::underlay::underlay_primitives(line, sign, prims, min_y)))
+        }
+        // Umriss-Linien der 3D-Auswahl (`highlight3d.rs`): `text` = JSON der ids je Art + `rgb`; Antwort f32-LE.
+        ("selectionHighlight", _) => {
+            let a: crate::highlight3d::Args = serde_json::from_str(text).map_err(|e| format!("selectionHighlight: {e}"))?;
+            Ok(crate::highlight3d::selection_highlight_lines(p, &a)?.iter().flat_map(|v| v.to_le_bytes()).collect())
         }
         ("sectionPlan", _) => crate::plan::section::section_plan_buf(p, args, text),
         ("elevationPlan", _) => crate::plan::elevation::elevation_plan_buf(p, args, text),

@@ -1423,23 +1423,8 @@ pub struct PickGeometry {
     pub drawings: Vec<PickDrawingSeg>,
 }
 
-/// Geometrie für den 3D-Raycast (`pickGeometry`).
-pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
-    // Dächer: Flächen + Giebel als Welt-Dreiecke (Fächer ab Punkt 0), Modell [x, y, h] → Welt [x, h, y].
-    let mut roofs = Vec::new();
-    for roof in p.roofs.as_deref().unwrap_or(&[]) {
-        let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
-        let to_world = |q: &V3| -> V3 { [q[0], q[2], q[1]] };
-        let mut tris: Vec<Tri> = Vec::new();
-        for poly in g.planes.iter().chain(g.gables.iter()) {
-            for i in 1..poly.len().saturating_sub(1) {
-                tris.push([to_world(&poly[0]), to_world(&poly[i]), to_world(&poly[i + 1])]);
-            }
-        }
-        if !tris.is_empty() {
-            roofs.push(PickRoof { tris, roof_id: roof.id.clone() });
-        }
-    }
+/// Öffnungen als Quader (Laibung zu Laibung, Wanddicke, Brüstung bis Sturz) für Pick und Hervorhebung.
+pub fn pick_openings(p: &Project) -> Vec<PickBox> {
     let mut openings = Vec::new();
     for o in p.openings.as_deref().unwrap_or(&[]) {
         let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
@@ -1461,6 +1446,11 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
             opening_id: o.id.clone(),
         });
     }
+    openings
+}
+
+/// Treppen als achsparallele Hülle (UK bis OK) für Pick und Hervorhebung.
+pub fn pick_stairs(p: &Project) -> Vec<PickStair> {
     let mut stairs = Vec::new();
     for st in p.stairs.as_deref().unwrap_or(&[]) {
         let (z_bottom, z_top) = p.stair_vertical_extent(st);
@@ -1473,6 +1463,28 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         let (min_x, min_y, max_x, max_y) = if b.len() >= 4 { (b[0], b[1], b[2], b[3]) } else { (0.0, 0.0, 0.0, 0.0) };
         stairs.push(PickStair { outline: [[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y]], z_bottom, z_top, stair_id: st.id.clone() });
     }
+    stairs
+}
+
+/// Geometrie für den 3D-Raycast (`pickGeometry`).
+pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
+    // Dächer: Flächen + Giebel als Welt-Dreiecke (Fächer ab Punkt 0), Modell [x, y, h] → Welt [x, h, y].
+    let mut roofs = Vec::new();
+    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+        let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+        let to_world = |q: &V3| -> V3 { [q[0], q[2], q[1]] };
+        let mut tris: Vec<Tri> = Vec::new();
+        for poly in g.planes.iter().chain(g.gables.iter()) {
+            for i in 1..poly.len().saturating_sub(1) {
+                tris.push([to_world(&poly[0]), to_world(&poly[i]), to_world(&poly[i + 1])]);
+            }
+        }
+        if !tris.is_empty() {
+            roofs.push(PickRoof { tris, roof_id: roof.id.clone() });
+        }
+    }
+    let openings = pick_openings(p);
+    let stairs = pick_stairs(p);
     // Kontext-Meshes: rohe Welt-Dreiecke, Modell (x, y, z) → Welt (x, z, −y).
     let mut context_meshes = Vec::new();
     for obj in p.context.as_deref().unwrap_or(&[]) {

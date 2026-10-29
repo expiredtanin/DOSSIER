@@ -158,3 +158,68 @@ pub fn resolve_stroke_weight(override_: Option<f64>, source: Option<AttributeSou
     }
     fallback
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    const SAMPLE: &str = include_str!("../../tests/fixtures/sample_project.json");
+
+    /// Bauteil mit Vorder-/Hintergrund und Kategorie mit Farbe, Schraffur, Strichstärke (früher `shared.resolve.test.ts`).
+    fn comp_cat() -> (Component, LayerCategory) {
+        let p: Project = serde_json::from_str(SAMPLE).unwrap();
+        let mut comp = p.components.first().cloned().expect("Bauteil");
+        comp.foreground = Some("#112233".into());
+        comp.background = Some("#445566".into());
+        let mut cat = p.flat_categories().first().map(|c| (*c).clone()).expect("Kategorie");
+        cat.color = "#abcdef".into();
+        cat.hatch = Some("sia-wall".into());
+        cat.lw = 0.5;
+        (comp, cat)
+    }
+
+    #[test]
+    fn vorder_hintergrund_default_nach_bauteil() {
+        let (comp, cat) = comp_cat();
+        for src in [None, Some(AttributeSource::Object)] {
+            assert_eq!(resolve_foreground(&comp, None, Some(&cat), src), Some("#112233"));
+            assert_eq!(resolve_background(&comp, None, Some(&cat), src), Some("#445566"));
+        }
+        assert_eq!(resolve_foreground(&comp, None, Some(&cat), Some(AttributeSource::Layer)), Some("#abcdef"));
+        assert_eq!(resolve_background(&comp, None, Some(&cat), Some(AttributeSource::Layer)), Some("#abcdef"));
+        assert_eq!(resolve_foreground(&comp, Some("#ff00ff"), Some(&cat), Some(AttributeSource::Layer)), Some("#ff00ff"));
+        assert_eq!(resolve_foreground(&comp, Some("#ff00ff"), Some(&cat), None), Some("#ff00ff"));
+    }
+
+    #[test]
+    fn schraffur_und_strichstaerke_nach_ebene() {
+        let (_, cat) = comp_cat();
+        assert_eq!(resolve_hatch_id(None, None, Some(&cat), Some("eigene")), Some("eigene"));
+        assert_eq!(resolve_hatch_id(None, Some(AttributeSource::Layer), Some(&cat), Some("eigene")), Some("sia-wall"));
+        assert_eq!(resolve_stroke_weight(None, None, Some(&cat), 0.13), 0.13);
+        assert_eq!(resolve_stroke_weight(None, Some(AttributeSource::Layer), Some(&cat), 0.13), 0.5);
+    }
+
+    #[test]
+    fn motiv_und_verlauf_unveraendert_durchgereicht() {
+        let mut v: serde_json::Value = serde_json::from_str(SAMPLE).unwrap();
+        v["hatches"] = json!([
+            {"id": "h-custom", "name": "Motiv", "pattern": "custom", "scale": 1, "angle": 0, "color": "#000",
+             "motif": {"points": [{"x": 0, "y": 0}, {"x": 2, "y": 1}, {"x": 4, "y": 0}], "length": 4}},
+            {"id": "h-grad", "name": "Verlauf", "kind": "gradient", "pattern": "diagonal", "scale": 1, "angle": 0, "color": "#000",
+             "gradient": {"color1": "#ffffff", "color2": "#000000", "angle": 45, "type": "radial"}},
+            {"id": "h-diag", "name": "Diagonal", "pattern": "diagonal", "scale": 1, "angle": 30, "color": "#000", "relativeToWall": true}
+        ]);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let m = resolve_hatch(&p, "h-custom", None, None, None).unwrap();
+        assert_eq!(serde_json::to_value(&m.motif).unwrap()["length"], json!(4.0));
+        let g = resolve_hatch(&p, "h-grad", None, None, None).unwrap();
+        assert!(g.gradient.is_some() && g.kind.is_some());
+        let d = resolve_hatch(&p, "h-diag", Some(90.0), None, None).unwrap();
+        assert!(d.motif.is_none() && d.gradient.is_none());
+        assert_eq!(d.angle, -60.0);
+        assert_eq!(resolve_hatch(&p, "h-diag", None, None, None).unwrap().angle, 30.0);
+        assert_eq!(d.color, HATCH_INK);
+    }
+}

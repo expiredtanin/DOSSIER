@@ -7,8 +7,10 @@
 //    Kern (`core/src/plan/extras.rs::subtract_voids`).
 //  • Schnitt:   Cut-Polygone minus Körper-Schnitt (Grundfläche ∩ Schnittspur × Höhenbereich), im Kern
 //               (`core/src/plan/section.rs`).
-//  • 3D/STEP:   Boolean-Differenz (truck, Mesh-CSG-Fallback), s. `toWalls3d/voids3d.ts`
-//               bzw. `exportStep.ts`.
+//  • 3D:        Boolean-Differenz (truck, Mesh-CSG-Fallback); welche Bauteile getroffen sind und
+//               ihre Spezifikation rechnet der Kern (`core/src/solid_specs.rs`), s. `toWalls3d/voids3d.ts`.
+//  • STEP:      `exportStep.ts` mit den Helfern unten (gleiche Regeln wie `solid_specs.rs`; fallen,
+//               wenn der STEP-Sammler die Kern-Spezifikationen liest).
 //
 // Abzugskörper sind senkrechte Prismen (Profil × Höhe, ohne Verjüngung/B-Rep) — damit bleiben
 // Grundriss und Schnitt exakt analytisch (ein Prisma schneidet eine waagrechte Ebene in seiner

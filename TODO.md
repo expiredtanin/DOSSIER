@@ -476,6 +476,20 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Vorschau je Mausschritt, Ausrichten, Block definieren, Griffe) bilden mit Funktionen ab, die zwar affin sind, aber je Element
     und Frame aufgerufen werden; über die Grenze müsste jede Zeichnungsform (18 Varianten) flach hin und zurück — das lohnt erst,
     wenn die Werkzeuge selbst im Kern laufen ([K4] S3). Der Kern hat seine Fassung für Blöcke (`plan/drawings.rs::mv_geom`).
+    ✅ (29.10.) **3D-Reste im Kern** ([K3d]/[K4]): Umriss-Linien der 3D-Auswahl (`selectionHighlightLines`) rechnet
+    `core/src/highlight3d.rs` (Abfrage `selectionHighlight`, f32-Linienliste; nur die gewählten Arten werden abgeleitet, vorher
+    immer die ganze Pick-Geometrie samt Zeichnungs-Segmenten); Abzugskörper im 3D: welche Wände/Decken getroffen sind und ihre
+    truck-Spezifikation (Bauteil − Körper) liefert `core/src/solid_specs.rs` mit `model3dParts` (4. Argument), TS (`voids3d.ts`)
+    tesselliert nur noch asynchron über truck; `wallSpec`/`wallProfile` sind Fassaden über `wall_spec_flat`. Gelöscht: TS-
+    `resolveHatch`/`resolveForeground`/`resolveBackground`/`resolveHatchId`/`resolveStrokeWeight`, `HATCH_INK`/`HATCH_PAPER`
+    (tot, Kern `plan/style.rs`; Tests dorthin). Gleichheit (temporärer Test, gelöscht): 328 Hervorhebungen (Beispiel, bigSample,
+    80 Zufallsprojekte, Zufallsauswahl inkl. Dächer/Kontext) Wert für Wert, 4805 Wand-Spezifikationen und 543 Abzugs-Schnitte
+    gleich der alten TS-Fassung; CLI byte-gleich (`plan` SVG/JSON, `section`, `elevation`, `model3d` für 3 Projekte).
+    Bleibt bewusst in TS: `cullPrimitives` (Auswahl der SVG-Overlay-Objekte, die React ohnehin als Objekte rendert),
+    `planView/geometry.ts` (Ansichts-Transformationen), `GpuChunkCache`/Chunk-Grenzen (GPU-Ressourcen), `draftWorldLines`
+    (Werkzeug-Vorschau aus dem UI-Zustand); `planPick`, `glPlanHatch`, `glPlanCompile`, `toRenderScene` sind schon Fassaden.
+    Offen: STEP-Sammler (`exportStep.ts`) nutzt noch die TS-Helfer `voidPrisms`/`hittingVoids`/`subtractSpec`/`bbox`/
+    `wallCorners` (`plan/voids.ts`) — auf die Kern-Spezifikationen umstellen, dann löschen. Nicht in der Tauri-App angesehen.
   - ◐ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
     **Erste Etappe (28.10.): Ops, Prüfung, Undo/Redo im Kern.** `core/src/ops.rs` (Op, Prüfung bitgleich zur TS-Fassung — gleiche
