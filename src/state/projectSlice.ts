@@ -58,6 +58,7 @@ import {
   PEN_FALLBACK_WEIGHT,
 } from "../model/penSets";
 import { lineIntersect } from "../model/geometry";
+import { reorderByIds } from "../model/reorder";
 import { transformOps } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
@@ -1146,10 +1147,10 @@ export function createProjectSlice(
     updateDrawing2D: (id, patch) => applyChange((p) => patchItem(p, "drawings2d", id, patch)),
 
     reorderDrawings: (ids, op) =>
-      applyChange((p) => fieldOps(p, "drawings2d", reorderDrawings2D(p.drawings2d, ids, op))),
+      applyChange((p) => fieldOps(p, "drawings2d", reorderByIds(p.drawings2d, ids, op))),
 
     reorderDrawingLevels: (ids, op) =>
-      applyChange((p) => fieldOps(p, "drawingLevels", reorderDrawingLevelsArr(p.drawingLevels, ids, op))),
+      applyChange((p) => fieldOps(p, "drawingLevels", reorderByIds(p.drawingLevels, ids, op))),
 
     // ── Größe (Resize um Anker) ────────────────────────────────────────────
     resizeElement: (kind, id, w, h, anchor) =>
@@ -1368,89 +1369,6 @@ function setOverrideField(
   if (kind === "wall") return patchItem(project, "walls", id, apply);
   if (kind === "ceiling") return patchItem(project, "ceilings", id, apply);
   return patchItem(project, "drawings2d", id, apply);
-}
-
-/**
- * Z-Anordnen im Grundriss: `drawings2d` IST die Zeichenreihenfolge (spätere
- * Position = weiter oben, siehe `generatePlan.ts`). Unbekannte IDs werden
- * ignoriert; reine, immutable Umsortierung.
- *
- * - "front"/"back": die gewählten Elemente wandern gesammelt ans Ende/an den
- *   Anfang des Arrays, ihre relative Reihenfolge untereinander bleibt erhalten.
- * - "forward"/"backward": jedes gewählte Element rückt einzeln um eine
- *   Position Richtung Ende/Anfang vor. Bei "forward" von hinten nach vorn
- *   iteriert (sonst würde ein vorderes Element ein gerade verschobenes
- *   sofort wieder überholen); bei "backward" entsprechend von vorn nach
- *   hinten. Über die Array-Grenzen hinaus passiert nichts (kein Wrap).
- */
-function reorderDrawings2D(
-  drawings: Drawing2D[],
-  ids: string[],
-  op: "front" | "back" | "forward" | "backward",
-): Drawing2D[] {
-  const selected = new Set(ids.filter((id) => drawings.some((d) => d.id === id)));
-  if (selected.size === 0) return drawings;
-
-  if (op === "front" || op === "back") {
-    const picked = drawings.filter((d) => selected.has(d.id));
-    const rest = drawings.filter((d) => !selected.has(d.id));
-    return op === "front" ? [...rest, ...picked] : [...picked, ...rest];
-  }
-
-  // "forward" / "backward": jedes gewählte Element um genau eine Position
-  // tauschen — Iterationsrichtung verhindert, dass mehrfach-selektierte
-  // Nachbarn sich gegenseitig überholen.
-  const arr = drawings.slice();
-  if (op === "forward") {
-    for (let i = arr.length - 2; i >= 0; i--) {
-      if (selected.has(arr[i].id) && !selected.has(arr[i + 1].id)) {
-        [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
-      }
-    }
-  } else {
-    for (let i = 1; i < arr.length; i++) {
-      if (selected.has(arr[i].id) && !selected.has(arr[i - 1].id)) {
-        [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]];
-      }
-    }
-  }
-  return arr;
-}
-
-/**
- * Wie `reorderDrawings2D`, nur für `DrawingLevel[]` (Zeichnungsebenen statt
- * Drawing2D-Elemente) — identische "front"/"back"/"forward"/"backward"-Logik,
- * bewusst dupliziert statt genericisiert (zwei kleine, unabhängige Domänen).
- */
-function reorderDrawingLevelsArr(
-  levels: DrawingLevel[],
-  ids: string[],
-  op: "front" | "back" | "forward" | "backward",
-): DrawingLevel[] {
-  const selected = new Set(ids.filter((id) => levels.some((l) => l.id === id)));
-  if (selected.size === 0) return levels;
-
-  if (op === "front" || op === "back") {
-    const picked = levels.filter((l) => selected.has(l.id));
-    const rest = levels.filter((l) => !selected.has(l.id));
-    return op === "front" ? [...rest, ...picked] : [...picked, ...rest];
-  }
-
-  const arr = levels.slice();
-  if (op === "forward") {
-    for (let i = arr.length - 2; i >= 0; i--) {
-      if (selected.has(arr[i].id) && !selected.has(arr[i + 1].id)) {
-        [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
-      }
-    }
-  } else {
-    for (let i = 1; i < arr.length; i++) {
-      if (selected.has(arr[i].id) && !selected.has(arr[i - 1].id)) {
-        [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]];
-      }
-    }
-  }
-  return arr;
 }
 
 function mapCeiling(

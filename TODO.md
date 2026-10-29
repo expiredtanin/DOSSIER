@@ -460,6 +460,18 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Gleichheit (einmalig, Test gelöscht): 3000 Zufallsprojekte mit allen Elementarten, allen 18 Zeichnungs-Formen, Kontext
     (Mesh/Terrain/Bild/Konturen mit Bogen), Geo-Anker, Verschiebung (0,0) — Projekt, Ops und Welt-Koordinaten
     zeichengleich; 5000 Auswahl-Filter (doppelte ids, fehlende Listen).
+    **Z-Anordnen im Kern (29.10.):** `reorder.rs` (front/back/forward/backward für `drawings2d` und `drawingLevels`, vorher
+    zweimal kopiert in `projectSlice.ts`), Bindung `reorder_call`, Fassade `model/reorder.ts` (`reorderByIds`, Objekt-Identität
+    bleibt); 10000 Zufallsfälle gleich der alten Fassung (einmalig, Test gelöscht).
+    **Übrig in TS (Stand 29.10., bewusst nicht portiert):** (1) Lese-Auflösungen je Render/Klick (`resolvePenColor/Weight`,
+    `isLocked`, `findMaster/findSnapshot`, `projectGeoOrigin`, `visibleCodesFromSnapshot`, `moveLayoutToFolder`/Viewport-/
+    Annotations-CRUD, Fabriken) — Einzeiler, ein Kern-Aufruf je Zugriff wäre teurer als die Rechnung; (2) Op-Bauer mit
+    `t()`/`Date.now()` (`setWallThickness`, `setCeilingThickness`, `addPenSet`, Layout-/Ordner-Anlage); (3) Griff-/Resize-Geometrie
+    in `projectSlice.ts` (`moveGrip`, `resizeGeom`, `drawingVertices`, `moveEdge` …, ~800 Zeilen) und `state/edgeGrips.ts` —
+    gehört zu „Befehle/Griffe im Kern“; (4) `selectionInfo.ts` (`deriveSelection`, 1350 Zeilen Objekt-Info für die Panels);
+    (5) `model/wall.ts` (vertikale Ausdehnungen, Aufrufer in `toSection`/`voids`/Viewport — fallen mit dem Plan-Port);
+    (6) `model/geometry.ts` (`wallBand`/`wallCorners`/`clippedBand`, Aufrufer in Werkzeugen/Fang), `model/color.ts`
+    (Farbraum-Umrechnung der UI), `state/viewSnapshots.ts`/`visibilitySets.ts` (UI-Zustand, localStorage).
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

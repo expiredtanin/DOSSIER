@@ -80,6 +80,7 @@ pub mod layout_model;
 pub mod parametric_walls;
 pub mod geo_translate;
 pub mod selection_filter;
+pub mod reorder;
 
 #[cfg(feature = "web")]
 mod web;

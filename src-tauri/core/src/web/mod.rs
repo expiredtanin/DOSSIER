@@ -41,6 +41,7 @@ mod layers;
 mod pens;
 mod layout_model;
 mod parametric_walls;
+mod reorder;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
