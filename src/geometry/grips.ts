@@ -7,7 +7,8 @@
 // Bewusst TS: die Rahmen-Ecken einer Textspalte (`textFrameCorners` braucht die Schrift-Metrik der
 // Hülle) — der Kern meldet dafür nur „Textspalte".
 
-import type { Drawing2D, Drawing2DGeom, EdgeGrip, Vec2 } from "../model/types";
+import type { Ceiling, Drawing2D, Drawing2DGeom, EdgeGrip, Project, Vec2, Wall } from "../model/types";
+import { documentFor } from "../core/document";
 import { core } from "../engine/coreWasm";
 import { toMarkedJson } from "../core/ops";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
@@ -102,4 +103,26 @@ export function openEdges(verts: readonly Vec2[], owner: Owner): EdgeGrip[] {
  */
 export function polylineEdgeGrips(g: Extract<Drawing2DGeom, { shape: "polyline" }>, owner: Owner): EdgeGrip[] {
   return edges(g.pts, !!g.closed, g.bulge ?? [], owner);
+}
+
+/** Unter-/Oberkante (absolutes Z, Meter) eines Bauteils. */
+export interface VerticalExtent {
+  zBottom: number;
+  zTop: number;
+}
+
+/**
+ * UK/OK von Wänden und Decken aus dem Kern (`selection_info.rs::vertical_extents`, Regeln wie
+ * `wallVerticalExtent`/`ceilingVerticalExtent`): Geschoss-Bindungen und Deckentypen aus `project`, die
+ * Elemente selbst als ganze Fassung (auch gerade gezogene, noch nicht übernommene — 3D-Griffe).
+ */
+export function verticalExtents(
+  project: Project,
+  walls: readonly Wall[],
+  ceilings: readonly Ceiling[] = [],
+): { walls: VerticalExtent[]; ceilings: VerticalExtent[] } {
+  if (walls.length === 0 && ceilings.length === 0) return { walls: [], ceilings: [] };
+  const f = documentFor(project).queryRootMarked<number[]>("verticalExtents", toMarkedJson({ walls, ceilings }));
+  const at = (i: number): VerticalExtent => ({ zBottom: f[2 * i], zTop: f[2 * i + 1] });
+  return { walls: walls.map((_, i) => at(i)), ceilings: ceilings.map((_, i) => at(walls.length + i)) };
 }

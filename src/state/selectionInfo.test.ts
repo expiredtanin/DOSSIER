@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { deriveSelection } from "./selectionInfo";
 import { sampleProject } from "../model/sampleProject";
-import type { Project } from "../model/types";
+import type { Project, Roof } from "../model/types";
 
 const base = (): Project => structuredClone(sampleProject);
 
@@ -59,5 +59,31 @@ describe("deriveSelection (Kern)", () => {
     expect(Object.keys(sel.extrudedSolid!)).toEqual([
       "height", "taper", "cornerRadius", "chamfer", "area", "spec", "subtract", "canSubtract", "baseOffset", "floorId", "floorName",
     ]);
+  });
+
+  it("Dach: Kantenliste (Umriss, dann Hof), Vorgaben je Kante und Giebel-Standard", () => {
+    const p = base();
+    const rect = (x: number, y: number, w: number, h: number) => [
+      { x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h },
+    ];
+    const roof = (extra: Partial<Roof>): Roof => ({
+      id: "R", type: "roof", floorId: p.drawingLevels.find((z) => z.kind === "floor")!.id, categoryCode: "31",
+      outline: rect(0, 0, 12, 8), shape: "walm", pitchDeg: 35, overhang: 0, ridgeAxis: "x", thickness: 0.2, ...extra,
+    });
+    const edges = (r: Roof) => {
+      // Neues Projekt-Objekt je Fall: der Kern gleicht über Referenzen ab.
+      return deriveSelection({ ...p, roofs: [r] }, [], null, null, null, null, null, null, null, "R")!.roof!.edges;
+    };
+    const list = edges(roof({ holes: [rect(4, 2, 4, 4)] }));
+    expect(list).toHaveLength(8);
+    expect(list.map((e) => e.ring)).toEqual([0, 0, 0, 0, 1, 1, 1, 1]);
+    expect(list[0]).toMatchObject({ index: 0, spec: { kind: "default" }, length: 12 });
+    expect(list[5].index).toBe(5);
+    const specs = edges(roof({ edgePitchDeg: [20, null, -1] }));
+    expect(specs.map((e) => e.spec)).toEqual([
+      { kind: "pitch", deg: 20 }, { kind: "gable" }, { kind: "default" }, { kind: "default" },
+    ]);
+    expect(edges(roof({ shape: "sattel" })).map((e) => e.defaultGable)).toEqual([false, true, false, true]);
+    expect(edges(roof({})).every((e) => !e.defaultGable)).toBe(true);
   });
 });

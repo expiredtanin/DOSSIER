@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { roofGeometry, roofBBox, roofUndersideAt } from "./roof";
+import { roofGeometry, roofUndersideAt } from "./roof";
 import type { Roof, Vec2 } from "../model/types";
+
+/** Bounding-Box eines Umrisses (Prüfhilfe). */
+function roofBBox(outline: Vec2[]): { x0: number; y0: number; x1: number; y1: number } {
+  const xs = outline.map((p) => p.x);
+  const ys = outline.map((p) => p.y);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
 
 // Rechteck 6×4 (x:0..6, y:0..4), Neigung 45° (tan=1), Traufhöhe 10, kein Überstand.
 const RECT: Vec2[] = [
@@ -34,12 +41,6 @@ function allZ(g: ReturnType<typeof roofGeometry>): number[] {
   for (const gp of g.gables) for (const p of gp) zs.push(p[2]);
   return zs;
 }
-
-describe("roofBBox", () => {
-  it("liefert die Bounding-Box", () => {
-    expect(roofBBox(RECT)).toEqual({ x0: 0, y0: 0, x1: 6, y1: 4 });
-  });
-});
 
 describe("roofGeometry — Formen (6×4, 45°, First entlang X)", () => {
   it("flach: eine waagrechte Fläche auf Traufhöhe, kein First", () => {

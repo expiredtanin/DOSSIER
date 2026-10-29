@@ -259,7 +259,7 @@ export class ProjectDocument {
    * Wie {@link queryRoot} für Abfragen, deren Antwort nicht endliche Zahlen als Marken trägt
    * (`selectionInfo`, `drawingBBoxes`); die Marken werden wieder Zahlen.
    */
-  queryRootMarked<T>(name: "selectionInfo" | "drawingBBoxes", text = ""): T {
+  queryRootMarked<T>(name: "selectionInfo" | "drawingBBoxes" | "verticalExtents", text = ""): T {
     if (!this.handle) throw new Error(`Kern-Abfrage „${name}": Dokument nicht offen`);
     const out = core().doc_query_root(this.handle, name, text);
     if (out.startsWith("\u0001")) throw new Error(out.slice(1));

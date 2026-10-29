@@ -152,8 +152,8 @@ function encodeGeometry(g: StairGeometry): Float64Array {
 
 /**
  * Leitet die vollständige Geometrie einer Treppe ab. `totalRise` MUSS vom
- * Aufrufer aufgelöst übergeben werden (Geschosshöhe-Default liegt in
- * `stairVerticalExtent`), damit dieses Modul modellfrei bleibt.
+ * Aufrufer aufgelöst übergeben werden (Geschosshöhe-Default liegt im Kern,
+ * `stair_vertical_extent` in `model/helpers.rs`), damit dieses Modul modellfrei bleibt.
  */
 export function stairGeometry(stair: Stair, totalRise: number): StairGeometry {
   return decodeGeometry(core().stair_geometry_flat(encodeStair(stair), totalRise));
@@ -197,18 +197,6 @@ export function stairCut(geo: StairGeometry, cutRise: number): StairCut {
     for (let k = 0; k < nBreak; k++, i += 4) breakLine.push([pt(f, i), pt(f, i + 2)]);
   }
   return { belowIndices, aboveIndices, breakLine };
-}
-
-/** Achsparallele Bounding-Box aller Tritte (+ Podest) einer Treppengeometrie. */
-export function stairBBox(geo: StairGeometry): {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-} {
-  const f = core().stair_bbox_flat(encodeGeometry(geo));
-  if (f.length < 4) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-  return { minX: f[0], minY: f[1], maxX: f[2], maxY: f[3] };
 }
 
 /**

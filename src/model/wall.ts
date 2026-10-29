@@ -5,7 +5,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { Ceiling, Column, Project, Stair, VerticalAnchor, Wall } from "./types";
+import type { Ceiling, Column, Project, VerticalAnchor, Wall } from "./types";
 import { ceilingThickness, getFloor } from "./types";
 
 /**
@@ -104,37 +104,6 @@ export function ceilingVerticalExtent(
 }
 
 /**
- * Vertikale Ausdehnung einer Treppe (absolute Z-Werte in Metern).
- *   • zBottom: OKFF (baseElevation) des zugehörigen Geschosses.
- *   • zTop:    zBottom + Gesamt-Steighöhe. Fehlt `stair.totalRise`, gilt die
- *     Geschosshöhe (floorHeight) des Geschosses — so steigt die Treppe genau ins
- *     nächste Geschoss (OKFF → OKFF).
- * Fehlt das Geschoss, dient 0 als sicherer Rückfall für die Unterkante.
- */
-export function stairVerticalExtent(
-  project: Project,
-  stair: Stair,
-): { zBottom: number; zTop: number } {
-  let base = 0;
-  let floorHeight = 0;
-  try {
-    const floor = getFloor(project, stair.floorId);
-    base = floor.baseElevation ?? 0;
-    floorHeight = floor.floorHeight ?? 0;
-  } catch {
-    base = 0;
-    floorHeight = 0;
-  }
-  const rise =
-    stair.totalRise != null && stair.totalRise > 0
-      ? stair.totalRise
-      : floorHeight > 0
-        ? floorHeight
-        : 2.6;
-  return { zBottom: base, zTop: base + rise };
-}
-
-/**
  * Vertikale Ausdehnung einer Stütze (absolute Z-Werte in Metern) — dieselbe
  * Regel wie {@link wallVerticalExtent}:
  *   • zBottom: aus `column.bottom`, sonst baseElevation des Geschosses.
@@ -154,20 +123,4 @@ export function columnVerticalExtent(
   const zBottom = resolveAnchor(project, column.bottom) ?? floorBase;
   const zTop = resolveAnchor(project, column.top) ?? zBottom + column.height;
   return { zBottom, zTop };
-}
-
-/**
- * Das Geschoss DIREKT ÜBER dem Wand-Geschoss (in Dokumentreihenfolge der
- * "floor"-Ebenen) oder `undefined`, wenn die Wand im obersten Geschoss liegt.
- * Dient der „Verknüpfung zum oberen Geschoss" (OK an nächstes Geschoss binden).
- */
-export function nextFloorAbove(
-  project: Project,
-  wall: Wall,
-): { id: string; name: string } | undefined {
-  const floors = project.drawingLevels.filter((z) => z.kind === "floor");
-  const idx = floors.findIndex((z) => z.id === wall.floorId);
-  if (idx < 0) return undefined;
-  const above = floors[idx + 1];
-  return above ? { id: above.id, name: above.name } : undefined;
 }

@@ -43,30 +43,6 @@ export function ceilingArea(pts: Vec2[]): number {
   return Math.abs(signedArea(pts));
 }
 
-/**
- * Achsparallele Bounding-Box eines Umrisses (Modell-Meter). Leerer/entarteter
- * Umriss → Null-Box.
- */
-export function outlineBBox(pts: Vec2[]): {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-} {
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity;
-  for (const p of pts) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-  }
-  if (!isFinite(minX)) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-  return { minX, minY, maxX, maxY };
-}
-
 /** Schwerpunkt (Zentroid) des Umriss-Polygons (für HUD/Beschriftung). */
 export function outlineCentroid(pts: Vec2[]): Vec2 {
   const a = signedArea(pts);

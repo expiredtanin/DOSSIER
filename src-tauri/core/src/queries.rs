@@ -114,6 +114,11 @@ pub fn run_root(root: &serde_json::Map<String, serde_json::Value>, name: &str, t
             let ids: Vec<String> = serde_json::from_str(text).map_err(|e| format!("drawingBBoxes: {e}"))?;
             Ok(crate::selection_info::drawing_bboxes(root, &ids).into_string())
         }
+        // UK/OK von Wänden und Decken (3D-Griffe): `text` = `{walls: […], ceilings: […]}` (ganze Elemente).
+        "verticalExtents" => {
+            let a: crate::selection_info::ExtentArgs = serde_json::from_str(text).map_err(|e| format!("verticalExtents: {e}"))?;
+            Ok(crate::selection_info::vertical_extents(root, &a).into_string())
+        }
         _ => Err(format!("Unbekannte Wurzel-Abfrage: {name}")),
     }
 }

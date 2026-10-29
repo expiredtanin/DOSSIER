@@ -520,6 +520,20 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     96–138 µs, Zeichnung (Position 10 000) 150–300 → 160–390 µs, Dach 5 → 30–60 µs (TS merkte sich die Dachgeometrie je
     Objekt; im Kern ist sie für die letzten 16 Dächer gemerkt, der Rest ist die JSON-Übergabe), Griff-Schritt samt Objekt-Info
     1,6–2,6 ms → 1,5–2,4 ms; je Darstellung also ~0,05 ms mehr. Nicht in der Tauri-App geprüft.
+    **Höhen und Wand-Bänder (29.10.)** — zu (5)/(6): die 3D-Griffe (`Wasm3DViewport`: Griff-Lagen, Arbeitsebene beim Ziehen)
+    holen UK/OK von Wänden und Decken über die Wurzel-Abfrage `verticalExtents` (`selection_info.rs`, dieselbe Rechnung wie die
+    Objekt-Info; Fassade `verticalExtents` in `geometry/grips.ts`, ganze Elemente, auch gerade gezogene Fassungen). Gleichheit
+    (einmalig, Test gelöscht): 480 000 Höhen über 20 000 Zufallsfälle (Bindungen UK/OK, fehlende Geschosse/Typen, NaN/±∞/null
+    in den Elementen) gleich `wallVerticalExtent`/`ceilingVerticalExtent` (−0 kommt als 0). Gelöscht, weil ohne Aufrufer:
+    `lineIntersect`/`clippedBand`/`Line`/`wallBand` (`model/geometry.ts`, `wallCorners` rechnet das Band selbst),
+    `stairVerticalExtent`/`nextFloorAbove` (`model/wall.ts`), `openingGapQuad`, `roofBBox`, `stairBBox` samt Bindung
+    `stair_bbox_flat`, `outlineBBox`, `localToLv95`, `roofEdgeList` (Kantenliste nur noch im Kern; Test über `deriveSelection`;
+    `setRoofEdge` zählt die Kanten direkt). Bleibt in TS: `wallVerticalExtent`/`ceilingVerticalExtent`/`columnVerticalExtent`/
+    `openingVerticalExtent` nur noch für die Plan-Ableitung (`toSection`, `voids`, `sectionOpenings`, `toElevation` — fallen mit
+    deren Port; im Kern gibt es die Regeln doppelt: roh in `selection_info.rs`, typisiert in `model/helpers.rs`, beim Plan-Port
+    zusammenlegen); `wallCorners` (Plan-Treffer `planHitTest`, Werkzeug-Vorschau, Griff-Vorschau, `voids`, STEP-Export — ein
+    Kern-Aufruf je Wand wäre teurer als die vier Punkte) und `wallReferenceOffset` (Fang, `geometry/opening.ts`). Nicht in
+    der Tauri-App geprüft (3D-Griffe nur über e2e im Browser).
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

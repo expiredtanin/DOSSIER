@@ -44,8 +44,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
-import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
-import { roofBaseElevation, roofGeometry } from "../core";
+import { roofBaseElevation, roofGeometry, verticalExtents } from "../core";
 import { projectToModel3d, pickGeometry, draftWorldLines, TRUCK_MESH_READY_EVENT } from "../core";
 import type { DetailLevel, RenderMode, View3d } from "../model/viewTypes";
 import type { ToolDraft } from "../tools/types";
@@ -146,8 +145,9 @@ function computeGrips(
   drawingElevation: number,
 ): Grip[] {
   const out: Grip[] = [];
-  for (const w of walls) {
-    const { zBottom, zTop } = wallVerticalExtent(project, w);
+  const ext = verticalExtents(project, walls, ceilings);
+  walls.forEach((w, wi) => {
+    const { zBottom, zTop } = ext.walls[wi];
     const target = { wallId: w.id };
     out.push({ kind: "vertex", target, index: 0, pos: [w.start.x, zBottom, w.start.y] });
     out.push({ kind: "vertex", target, index: 1, pos: [w.end.x, zBottom, w.end.y] });
@@ -155,7 +155,7 @@ function computeGrips(
     const midY = (w.start.y + w.end.y) / 2;
     out.push({ kind: "height", target, index: -1, pos: [midX, zTop, midY] });
     out.push({ kind: "move", target, index: -1, pos: [midX, zBottom + 0.05, midY] });
-  }
+  });
   for (const d of drawings) {
     const verts = drawingGripVertices(d);
     const target = { drawingId: d.id };
@@ -167,12 +167,12 @@ function computeGrips(
   // Decken: Eckpunkt-Griffe (Umriss) + je Seite ein Kanten-Mittelpunkt-Griff
   // (Nutzer-Wunsch „an allen seiten auch ein punkt … wie an den eckpunkten") +
   // ein Verschiebe-Griff im Schwerpunkt. Griffe sitzen auf der Deckenoberkante.
-  for (const c of ceilings) {
+  ceilings.forEach((c, ci) => {
     const pts = c.outline;
     const n = pts.length;
-    if (n < 2) continue;
+    if (n < 2) return;
     const target = { ceilingId: c.id };
-    const y = ceilingVerticalExtent(project, c).zTop + 0.02;
+    const y = ext.ceilings[ci].zTop + 0.02;
     let sx = 0;
     let sy = 0;
     pts.forEach((p, i) => {
@@ -189,7 +189,7 @@ function computeGrips(
       sy += p.y;
     });
     out.push({ kind: "move", target, index: -1, pos: [sx / n, y + 0.03, sy / n] });
-  }
+  });
   // Dächer: Eckpunkt-Griffe (Umriss = Traufe-Grundriss, resize) + Verschiebe-Griff
   // + ein FIRST-/Neigungs-Griff am höchsten Punkt (vertikal ziehen ändert die
   // Neigung). Eckpunkte auf Traufhöhe.
@@ -927,11 +927,11 @@ export function Wasm3DViewport({
   const gripPlaneY = (target: GripTarget): number | null => {
     if (target.wallId) {
       const wall = editWallsRef.current.find((w) => w.id === target.wallId);
-      return wall ? wallVerticalExtent(projectRef.current, wall).zBottom : null;
+      return wall ? verticalExtents(projectRef.current, [wall]).walls[0].zBottom : null;
     }
     if (target.ceilingId) {
       const c = editCeilingsRef.current.find((x) => x.id === target.ceilingId);
-      return c ? ceilingVerticalExtent(projectRef.current, c).zTop : null;
+      return c ? verticalExtents(projectRef.current, [], [c]).ceilings[0].zTop : null;
     }
     if (target.roofId) {
       const r = editRoofsRef.current.find((x) => x.id === target.roofId);

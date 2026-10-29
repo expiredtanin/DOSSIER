@@ -120,15 +120,6 @@ export function lv95ToLocal(pt: LV95, origin: GeoOrigin): { x: number; y: number
   return { x: pt.e - origin.e, y: pt.n - origin.n };
 }
 
-/** Lokale Modell-Meter → LV95 (Umkehrung von {@link lv95ToLocal}). */
-export function localToLv95(
-  x: number,
-  y: number,
-  origin: GeoOrigin,
-): LV95 {
-  return { e: x + origin.e, n: y + origin.n };
-}
-
 /**
  * WGS84 → lokale Modell-Meter (über LV95 und die Origin). Praktisch für
  * OSM-Punkte (lon/lat), die zuerst nach LV95 projiziert und dann verschoben

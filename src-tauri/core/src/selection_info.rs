@@ -337,6 +337,35 @@ fn vertical_extent(root: &Map<String, Value>, el: &Value) -> (f64, f64) {
     (zb, zt)
 }
 
+/// (UK, OK) einer Decke (`ceilingVerticalExtent`): OK aus `top` sonst Geschoss-Oberkante (Basis + Höhe), UK aus
+/// `bottom` sonst OK − `thickness` (die Decke wächst nach unten).
+fn ceiling_extent(root: &Map<String, Value>, c: &Value, thickness: f64) -> (f64, f64) {
+    let floor_top = level(root, field(c, "floorId")).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0) + num_or(field(f, "floorHeight"), 0.0));
+    let zt = anchor(root, field(c, "top")).unwrap_or(floor_top);
+    let zb = anchor(root, field(c, "bottom")).unwrap_or(zt - thickness);
+    (zb, zt)
+}
+
+/// Anfrage `verticalExtents`: Wände und Decken als ganze Elemente (die 3D-Griffe zeigen auch gerade gezogene,
+/// noch nicht übernommene Fassungen).
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+pub struct ExtentArgs {
+    pub walls: Vec<Value>,
+    pub ceilings: Vec<Value>,
+}
+
+/// (UK, OK) der Wände, dann der Decken, flach: `[zb, zt, zb, zt, …]`.
+pub fn vertical_extents(root: &Map<String, Value>, a: &ExtentArgs) -> J {
+    let walls = a.walls.iter().map(|w| vertical_extent(root, w));
+    let ceilings = a.ceilings.iter().map(|c| ceiling_extent(root, c, ceiling_thickness(root, c)));
+    J::arr(walls.chain(ceilings).flat_map(|(zb, zt)| [zb, zt]).map(|x| {
+        let mut out = Vec::new();
+        js_num(x).emit(&mut out);
+        J(out)
+    }))
+}
+
 /// Aufbau-Typ einer Decke (`getCeilingType`): eigener Deckentyp, sonst Alt-Wandtyp, sonst Fehler.
 fn ceiling_type<'a>(root: &'a Map<String, Value>, c: &Value) -> Result<&'a Value, String> {
     if truthy(field(c, "ceilingTypeId")) {
@@ -546,9 +575,7 @@ fn ceiling_selection(root: &Map<String, Value>, c: &Value) -> Result<J, String> 
     let outer = component(root, arr(field(wt, "layers")).first().and_then(|l| field(l, "componentId")))?;
     let (fg, bg, hatch) = effective(c, Some(outer), cat);
     let floor = level(root, field(c, "floorId"));
-    let floor_top = floor.map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0) + num_or(field(f, "floorHeight"), 0.0));
-    let zt = anchor(root, field(c, "top")).unwrap_or(floor_top);
-    let zb = anchor(root, field(c, "bottom")).unwrap_or(zt - thickness);
+    let (zb, zt) = ceiling_extent(root, c, thickness);
     let area = ceiling_area(field(c, "outline"));
     let openings: Vec<J> = arr(field(c, "openings"))
         .iter()
@@ -1213,6 +1240,21 @@ mod tests {
         let mut bad = r.clone();
         bad["walls"][0]["wallTypeId"] = json!("x");
         assert_eq!(sel(&bad, json!({"wallIds": ["w"]})).unwrap_err(), "Unbekannter Wandtyp: x");
+    }
+
+    #[test]
+    fn hoehen_von_waenden_und_decken() {
+        let r = root(json!({
+            "wallTypes": [{"id": "t", "layers": [{"componentId": "a", "thickness": 0.3}]}],
+            "drawingLevels": [{"id": "eg", "kind": "floor", "baseElevation": 1, "floorHeight": 3}, {"id": "og", "kind": "floor", "baseElevation": 4}],
+        }));
+        let a: ExtentArgs = serde_json::from_value(json!({
+            "walls": [{"floorId": "eg", "height": 2.5}, {"floorId": "eg", "height": 2.5, "top": {"mode": "floor", "floorId": "og", "offset": -0.2}}, {"floorId": "x"}],
+            "ceilings": [{"floorId": "eg", "wallTypeId": "t"}, {"floorId": "eg", "thickness": 0.25, "bottom": {"mode": "custom", "z": 3}}, {"floorId": "x", "ceilingTypeId": "fehlt"}],
+        }))
+        .unwrap();
+        let v: Value = serde_json::from_str(&vertical_extents(&r, &a).into_string()).unwrap();
+        assert_eq!(v, json!([1, 3.5, 1, 3.8, 0, "\u{1}NaN", 3.7, 4, 3, 4, -0.2, 0]));
     }
 
     #[test]
