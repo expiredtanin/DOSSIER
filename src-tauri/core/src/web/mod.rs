@@ -36,6 +36,7 @@ mod plan_scene;
 mod plan_pick;
 mod snap;
 mod plan_svg;
+mod plan_dxf;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

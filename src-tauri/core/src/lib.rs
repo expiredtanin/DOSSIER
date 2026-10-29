@@ -63,6 +63,7 @@ pub mod plan_scene;
 pub mod plan_pick;
 pub mod snap;
 pub mod plan_svg;
+pub mod plan_dxf;
 
 #[cfg(feature = "web")]
 mod web;

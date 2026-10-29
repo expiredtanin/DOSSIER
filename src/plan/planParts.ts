@@ -59,7 +59,7 @@ const cache = new WeakMap<object, { text: PlanParts | null; noText: PlanParts | 
 
 /**
  * Abschnitte eines Plans; einmal je Plan (lazy, s. `planLazy.ts`) bzw. je `plan.primitives` (und
- * Modus) gebaut. `texts`: der eigene Puffer trägt Texte/Bilder mit JSON (SVG-Export, Auswahl) —
+ * Modus) gebaut. `texts`: der eigene Puffer trägt Texte/Bilder und Schraffuren mit JSON (SVG-/DXF-Export, Auswahl) —
  * sonst nur deren Typ (Szene). Ein lazy Plan wird dabei nicht gelesen.
  */
 export function planParts(plan: Plan, texts = false): PlanParts {
@@ -82,7 +82,7 @@ export function planParts(plan: Plan, texts = false): PlanParts {
 function partsFromPieces(pieces: readonly PlanPiece[], texts: boolean): PlanParts {
   const rest: Primitive[] = [];
   for (const pc of pieces) if (!isBufPiece(pc)) for (const p of pc) rest.push(p);
-  const own: HoldableBuf | null = rest.length ? { bytes: encodePlanBuf(rest, { textJson: texts, hatchJson: false }), hold: 0 } : null;
+  const own: HoldableBuf | null = rest.length ? { bytes: encodePlanBuf(rest, { textJson: texts, hatchJson: texts }), hold: 0 } : null;
   const bufs: HoldableBuf[] = [];
   const segs: number[] = [];
   let ownAt = 0;
@@ -133,7 +133,7 @@ function partsFromRuns(plan: Plan, texts: boolean): PlanParts {
     at = r.end;
   }
   gap(prims.length);
-  const own: HoldableBuf | null = rest.length ? { bytes: encodePlanBuf(rest, { textJson: texts, hatchJson: false }), hold: 0 } : null;
+  const own: HoldableBuf | null = rest.length ? { bytes: encodePlanBuf(rest, { textJson: texts, hatchJson: texts }), hold: 0 } : null;
   const segs: number[] = [];
   let gi = 0;
   let ri = 0;
