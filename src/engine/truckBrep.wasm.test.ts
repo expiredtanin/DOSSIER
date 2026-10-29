@@ -15,6 +15,19 @@ function combineSolids(project: typeof sampleProject, a: ExtrudedSolid, b: Extru
 import { extrudedSolidSpec } from "../plan/extrudedSolidSpec";
 import type { ExtrudedSolid } from "../model/types";
 
+/** Flacher STEP-Puffer von truck (`[1, n, (np, ni, Positionen…, Indizes…)…]`) → Körper. */
+function stepBodies(f: Float64Array): Array<{ positions: number[]; indices: number[] }> {
+  const out: Array<{ positions: number[]; indices: number[] }> = [];
+  let at = 2;
+  for (let k = 0; k < f[1]; k++) {
+    const [np, ni] = [f[at], f[at + 1]];
+    at += 2;
+    out.push({ positions: Array.from(f.subarray(at, at + np)), indices: Array.from(f.subarray(at + np, at + np + ni)) });
+    at += np + ni;
+  }
+  return out;
+}
+
 let mod: any;
 beforeAll(async () => {
   mod = await import("./pkgTruck/trucksolid.js");
@@ -78,7 +91,7 @@ describe("trucksolid-WASM", () => {
     const wall = { kind: "extrudePlane", points: [0, 0, 5, 0, 5, 2.6, 0, 2.6], holes: [[1, 0.9, 2.2, 0.9, 2.2, 2.1, 1, 2.1]], origin: [0, 0, 0], uAxis: [1, 0, 0], vAxis: [0, 0, 1], depth: -0.3 };
     const cyl = { kind: "cylinder", cx: 10, cy: 0, z0: 0, r: 1, height: 2 };
     const step: string = mod.export_step(JSON.stringify({ solids: [wall, cyl], fileName: "t.stp" }));
-    const back = JSON.parse(mod.import_step(step, 0.0005)) as Array<{ positions: number[]; indices: number[] }>;
+    const back = stepBodies(mod.import_step_flat(step, 0.0005));
     expect(back).toHaveLength(2);
     const vols = back.map(volume).sort((a, b) => a - b);
     expect(vols[0]).toBeCloseTo((5 * 2.6 - 1.2 * 1.2) * 0.3, 1); // Wand

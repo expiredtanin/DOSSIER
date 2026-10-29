@@ -359,7 +359,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
 - ✅ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
   **Abschluss (29.10.):** Rechnung liegt im Kern; TS hält Oberfläche, Zustandsautomaten der Befehle, Netz-Abrufe,
   DOM-/jsPDF-Aufbau und dünne Fassaden. Bewusst in TS: `model/color.ts` (Farbmischer der UI), Sicht-Culling/Ansichts-
-  Transformation/GPU-Cache der Plan-Ansicht, Werkzeug-Vorschau aus UI-Zustand. Rest-Pendenzen: STEP-Import (truck),
+  Transformation/GPU-Cache der Plan-Ansicht, Werkzeug-Vorschau aus UI-Zustand. Rest-Pendenzen:
   Import-Ops als JSON zurück (42 MB beim 150k-Kataster), Undo-Liste in der UI [84]. Nicht auf dem Mac getestet.
   Ziel (Entscheid 28.10., Maintainer): nur die UI bleibt TS, alles andere Rust. Vorgehen in Stufen, jede verdrahtet und mit
   Gleichheitstest gegen die TS-Fassung, die im selben Schritt verschwindet:
@@ -966,7 +966,15 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     umwandeln + Commit im Kern), neu 2,0–2,7 s (Kern: Zusammenfassung ≈ 0,1 s, Import ≈ 1,7–2,0 s, `JSON.parse` der
     Ops ≈ 0,6 s); CLI `convert` (inkl. Lesen und 78 MB Schreiben) alt ≈ 9,4 s, neu ≈ 9,6–11,9 s (das alte CLI ging
     am Kern-Dokument vorbei). Offen: Ops-Rückgabe als JSON (42 MB beim 150k-Kataster) — die Leseansicht könnte
-    die Elemente billiger bekommen; STEP-Import (truck) unverändert in TS; nicht in Tauri/macOS geprüft.
+    die Elemente billiger bekommen; nicht in Tauri/macOS geprüft.
+    **STEP-Import im Kern (29.10.):** truck (`trucksolid`, eigenes WASM) liest und tesselliert wie bisher, liefert aber
+    einen flachen `Float64Array` (`import_step_flat`, Aufbau `brep::step_meshes_flat`; JSON-`import_step` entfällt);
+    der Kern (`import_context.rs::decode_step/step_meshes`, Bindung `doc_import_step`, TS `ProjectDocument.importStep`,
+    App: `readStepFlat` → `commitImport`) macht je Körper ein Kontext-Mesh („Import“, Kategorie 10) als EIN Undo-Schritt.
+    Gelöscht: `io/stepImport.ts`. Gleichheit (einmalig gegen die alte TS-Fassung): Demo-Haus-, Wand+Zylinder- und
+    Quader-STEP aus dem eigenen Export → Meshes (Namen, Positionen f32-genau wie über JSON, Indizes, Schlüsselfolge)
+    zeichengleich bis auf ids. CLI importiert kein STEP (nur Export). Bleibend: `io/stepImport.test.ts`, Rust
+    `step_tests`. Nur im Linux-Container geprüft, nicht in Tauri/macOS.
   Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
   React-Store (TS-Spiegel bleibt bis S3), Befehls-Zustandsautomaten sind viel Code (`src/commands/cmds/*`).
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.

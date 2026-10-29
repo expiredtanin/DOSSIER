@@ -204,6 +204,31 @@ pub fn doc_import_mesh(h: u32, flat: &[f64], strings_json: &str, opts_json: &str
     .unwrap_or_else(|| err("Dokument nicht offen"))
 }
 
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct StepOptions {
+    file_name: String,
+}
+
+/// Gelesenes STEP (flacher Puffer von truck) als Kontext-Meshes ins Dokument `h`, ein Undo-Schritt.
+/// Antwort: `{"ops":[…],"contextObjects":n}`.
+#[wasm_bindgen]
+pub fn doc_import_step(h: u32, flat: &[f64], opts_json: &str, key: &str, now_ms: f64) -> String {
+    let now = now_of(now_ms);
+    let opts: StepOptions = serde_json::from_str(opts_json).unwrap_or_default();
+    let bodies = match crate::import_context::decode_step(flat) {
+        Ok(b) => b,
+        Err(e) => return err(e),
+    };
+    with_doc(h, |doc| {
+        let meshes = crate::import_context::step_meshes(&bodies, &opts.file_name, now);
+        let n = meshes.len();
+        let ops = crate::import_context::context_ops(doc.root(), meshes);
+        commit(doc, ops, &[("contextObjects", n.into())], key, now)
+    })
+    .unwrap_or_else(|| err("Dokument nicht offen"))
+}
+
 /// Kurzbericht einer gelesenen PDF-Seite (CLI `pdf-info`): Zahlen, Ebenen, Umriss.
 #[wasm_bindgen]
 pub fn pdf_page_info(geom: &[f64], strings_json: &str) -> String {

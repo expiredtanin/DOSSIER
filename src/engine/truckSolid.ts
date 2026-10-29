@@ -163,7 +163,10 @@ export async function exportStepSolids(
   return guarded((m) => m.export_step(JSON.stringify({ solids, fileName, organizationSystem: "dossier" })));
 }
 
-/** Liest STEP-Text und liefert je Körper ein Dreiecks-Mesh (`relTol` relativ zur Diagonale). */
-export async function importStepMeshes(text: string, relTol = 0.0005): Promise<ExtrudedMesh[]> {
-  return JSON.parse(await guarded((m) => m.import_step(text, relTol))) as ExtrudedMesh[];
+/**
+ * Liest STEP-Text und liefert die tessellierten Körper als flachen Puffer für den Kern
+ * (`ProjectDocument.importStep`; Aufbau `trucksolid::brep::step_meshes_flat`). `relTol` relativ zur Diagonale.
+ */
+export async function readStepFlat(text: string, relTol = 0.0005): Promise<Float64Array> {
+  return guarded((m) => m.import_step_flat(text, relTol));
 }
