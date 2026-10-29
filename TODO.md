@@ -491,13 +491,35 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Leseansicht). Abweichungen (gewollt): ein Griff-Index ohne Punkt (negativ, gebrochen, zu gross) ändert nichts (TS warf beim
     Lesen von `undefined`, 38 000 der Zufallsfälle); gerechnet wird auf dem Dokument — ein dort als `null` gespeichertes NaN
     rechnet wie `null` in JS (0) und kommt als `null` in die Leseansicht (vorher blieb dort NaN); Griff-Listen liefern −0 als 0.
-    Messung (vitest, 3000 Wände + 2000 Polylinien, alt/neu abwechselnd, Median, Container unter Last): Wand-Griff an Position
-    10/1500/2990 39–43/198–218/324–348 µs → 40–44/192–193/318–337 µs (dominiert von der linearen id-Suche), Polylinien-Griff
-    97–122 → 102–122 µs, Polylinien-Kante 108–138 → 109 µs, Wand verschieben 146–200 → 149–206 µs (gleich im Rahmen der
-    Streuung), Griff an einer 5000-Punkte-Polylinie 16–18 → 13–14 ms; Griff-Liste der 5000-Punkte-Polylinie 2,7 → 1,1 ms
-    (kleine Polylinie 2 → 4,5 µs). Nicht in der Tauri-App geprüft (vitest/Linux, e2e im Browser). Offen: `setPolylineVertexType`
+    Messung (vitest, Store, 3000 Wände + 2000 Polylinien, alt/neu abwechselnd, kleinster Wert aus drei Läufen, Container unter
+    Last; Stand nach dem Nachtrag unten): Wand-Griff an Position 10/1500/2990 32/150/315 µs → 28/116/262 µs (dominiert von der
+    linearen id-Suche), Polylinien-Griff 78 → 58 µs, Polylinien-Kante 72 → 57 µs, Wand verschieben 131 → 115 µs, Griff an einer
+    5000-Punkte-Polylinie 13,7 → 9,1 ms; Griff-Liste der 5000-Punkte-Polylinie 2,7 → 1,1 ms (kleine Polylinie 2 µs, gleich).
+    Nicht in der Tauri-App geprüft (vitest/Linux, e2e im Browser). Offen: `setPolylineVertexType`
     (rechnet in `geometry/polylineVertexType.ts`), die lineare id-Suche je Mausschritt (im Kern beim Rechnen und beim Commit,
-    in TS in `applyOps`) und der Commit grosser Polylinien (~12 ms bei 5000 Punkten: Verlauf/Prüfung in `document.rs`/`ops.rs`).
+    in TS in `applyOps`) und der Commit grosser Polylinien (~9 ms bei 5000 Punkten: Verlauf/Prüfung in `document.rs`/`ops.rs`).
+    **Objekt-Info im Kern (29.10.)** — erledigt damit (4): `selection_info.rs` (vorher `deriveSelection` in `state/selectionInfo.ts`,
+    ~800 Zeilen Rechnung) liefert als Wurzel-Abfrage `selectionInfo` den Kontrakt `Selection` für das erste gewählte Element
+    (Vorrang wie bisher): effektive Farbe/Strichstärke/Schraffur/Vorder-/Hintergrund (Element → Linienstil → Ebene → Bauteil),
+    bbox, Wand (Referenzlinie, Fugen der Schichten, Typ-Liste mit `wallTypeLabel`, Geschosse, Geschoss darüber, UK/OK, Länge,
+    Brutto-/Öffnungs-/Nettovolumen), Decke (Typ, Fläche, Volumen, Aussparungen), Dach (Firsthöhe aus `roof.rs`, Kantenliste
+    `roofEdgeList`, Höfe), Öffnung (Lücke `opening_geom`, UK/OK), Treppe (`stair.rs`), Raum, Extrusion, Stütze, Kontext-Objekt
+    (LV95-Mitte), Detailverweis; `geomBBox` (auch für Ausrichten/Verteilen: Abfrage `drawingBBoxes`, `editors/align.ts`). Rechnung
+    auf der rohen Wurzel (verlustfrei, Schlüsselreihenfolge wie die früheren Objekt-Literale, keine typisierte Sicht des ganzen
+    Projekts); nur Dach/Treppe/Stütze werden für die schon typisierte Geometrie einzeln gelesen. Die Antwort wird direkt als Text
+    geschrieben; Felder kleiner Objekte linear gesucht statt über den SipHash der `IndexMap` (`grips::field`, auch in den Griffen);
+    die Fassade gibt die Lage des Elements aus der Leseansicht mit (spart dem Kern die lineare Suche). `state/selectionInfo.ts`
+    hält den Kontrakt (Typen) und die Fassade; die B-Rep-Beschreibung einer Extrusion (`spec`, truck) setzt sie aus
+    `extrudedSolidSpec`. `js_fmt::to_fixed` hat einen Schnellweg (nur exakte Halbwerte gehen den langen, genauen Weg; Test
+    gegen den genauen Weg über 1,6 Mio. Werte). Gelöscht: die TS-Rechnung, `geomBBox`. Gleichheit (einmalig, Test gelöscht):
+    174 360 Auswahlen über 10 000 Zufallsprojekte (alle Bauteilarten, fehlende/null-Felder, Bindungen UK/OK, unbekannte
+    Typen/Bauteile, LV95, mehrere Arten gleichzeitig) zeichengleich zur alten Fassung (JSON mit NaN-Marken), 20 489 Fälle mit
+    derselben Fehlermeldung; Beispielprojekt alle Elemente; 24 000 Ausrichten/Verteilen-Fälle gleich. Abweichung (gewollt): ein
+    Element, das das Kern-Modell nicht lesen kann (Dach/Treppe/Stütze mit kaputten Pflichtfeldern), ergibt `null` mit Warnung
+    statt eines Werts. Messung (vitest, Store mit 3000 Wänden und 20 000 Zeichnungen, Container unter Last): Wand 36–67 →
+    96–138 µs, Zeichnung (Position 10 000) 150–300 → 160–390 µs, Dach 5 → 30–60 µs (TS merkte sich die Dachgeometrie je
+    Objekt; im Kern ist sie für die letzten 16 Dächer gemerkt, der Rest ist die JSON-Übergabe), Griff-Schritt samt Objekt-Info
+    1,6–2,6 ms → 1,5–2,4 ms; je Darstellung also ~0,05 ms mehr. Nicht in der Tauri-App geprüft.
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

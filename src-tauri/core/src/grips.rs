@@ -21,6 +21,18 @@ use serde_json::{Map, Value};
 
 // ── JS-Zahlen in JSON ────────────────────────────────────────────────────────
 
+/// Feld `k` eines Objekts. Kleine Objekte (Punkte, Elemente) werden linear durchsucht: das ist deutlich
+/// billiger als der Hash (SipHash) der `IndexMap` je Zugriff — die Griff- und Objekt-Info-Rechnung liest
+/// Dutzende Felder je Aufruf.
+#[inline]
+pub fn field<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
+    match v {
+        Value::Object(m) if m.len() <= 32 => m.iter().find(|(kk, _)| kk.as_str() == k).map(|(_, x)| x),
+        Value::Object(m) => m.get(k),
+        _ => None,
+    }
+}
+
 /// Zahl als JSON-Wert wie nach `JSON.stringify` → `serde_json`: ganze Zahlen als Ganzzahl, sonst f64;
 /// NaN/±∞ als Marke (`"\u{1}NaN"` …), −0 als 0.
 pub fn js_num(x: f64) -> Value {
@@ -90,7 +102,7 @@ pub fn pt(x: f64, y: f64) -> Value {
 
 /// `(x, y)` eines Punkt-Werts (fehlende Koordinaten NaN).
 pub fn xy(v: &Value) -> (f64, f64) {
-    (num_of(v.get("x")), num_of(v.get("y")))
+    (num_of(field(v, "x")), num_of(field(v, "y")))
 }
 
 /// `{...v, key: val}` (vorhandener Schlüssel behält seine Stelle). Der ersetzte Wert wird nicht kopiert
@@ -189,20 +201,103 @@ fn with_geom(d: &Value, g: Value) -> Value {
 
 // ── Anfrage ──────────────────────────────────────────────────────────────────
 
-/// Eine Änderung aus den Griff-Aktionen des Stores (JSON, Zahlen mit Nicht-endlich-Marken).
-pub struct Request<'a>(&'a Value);
+/// Zahl der Anfrage: Zahl oder Nicht-endlich-Marke, `null` = 0 (wie `num_of`), fehlend = NaN.
+#[derive(Clone, Copy, Debug)]
+pub struct N(pub f64);
 
-impl<'a> Request<'a> {
-    fn n(&self, k: &str) -> f64 {
-        num_of(self.0.get(k))
+impl Default for N {
+    fn default() -> Self {
+        N(f64::NAN)
     }
-    fn s(&self, k: &str) -> Option<&'a str> {
-        self.0.get(k).and_then(Value::as_str).filter(|s| !s.is_empty())
+}
+
+impl<'de> serde::Deserialize<'de> for N {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl serde::de::Visitor<'_> for V {
+            type Value = N;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("Zahl")
+            }
+            fn visit_f64<E>(self, v: f64) -> Result<N, E> {
+                Ok(N(v))
+            }
+            fn visit_i64<E>(self, v: i64) -> Result<N, E> {
+                Ok(N(v as f64))
+            }
+            fn visit_u64<E>(self, v: u64) -> Result<N, E> {
+                Ok(N(v as f64))
+            }
+            fn visit_str<E>(self, v: &str) -> Result<N, E> {
+                Ok(N(num_of(Some(&Value::String(v.to_owned())))))
+            }
+            fn visit_unit<E>(self) -> Result<N, E> {
+                Ok(N(0.0))
+            }
+            fn visit_bool<E>(self, _: bool) -> Result<N, E> {
+                Ok(N(f64::NAN))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+/// Eine Änderung aus den Griff-Aktionen des Stores (`GripRequest` in `geometry/grips.ts`); Zahlen dürfen
+/// Nicht-endlich-Marken sein. Typisiert gelesen (je Mausschritt billiger als ein JSON-Baum).
+#[derive(serde::Deserialize, Default, Debug)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Request {
+    pub op: String,
+    drawing_id: Option<String>,
+    wall_id: Option<String>,
+    id: Option<String>,
+    kind: Option<String>,
+    new_id: Option<String>,
+    new_name: Value,
+    index: N,
+    a: N,
+    b: N,
+    seg: N,
+    scale: N,
+    w: N,
+    h: N,
+    fx: N,
+    fy: N,
+    thickness: N,
+    pt: [N; 2],
+    delta: [N; 2],
+}
+
+impl Request {
+    fn n(&self, k: &str) -> f64 {
+        match k {
+            "index" => self.index.0,
+            "a" => self.a.0,
+            "b" => self.b.0,
+            "seg" => self.seg.0,
+            "scale" => self.scale.0,
+            "w" => self.w.0,
+            "h" => self.h.0,
+            "fx" => self.fx.0,
+            "fy" => self.fy.0,
+            _ => self.thickness.0,
+        }
+    }
+    /// Text-Feld; leer = fehlend (JS-Wahrheitswert der ids).
+    fn s(&self, k: &str) -> Option<&str> {
+        let v = match k {
+            "drawingId" => &self.drawing_id,
+            "wallId" => &self.wall_id,
+            "kind" => &self.kind,
+            "newId" => &self.new_id,
+            _ => &self.id,
+        };
+        v.as_deref().filter(|s| !s.is_empty())
     }
     /// Punkt als `[x, y]`.
     fn p(&self, k: &str) -> (f64, f64) {
-        let a = arr(self.0.get(k));
-        (num_of(a.first()), num_of(a.get(1)))
+        let [x, y] = if k == "pt" { self.pt } else { self.delta };
+        (x.0, y.0)
     }
 }
 
@@ -221,35 +316,37 @@ impl From<Vec<Op>> for GripResult {
 
 /// Antwort-JSON `{"ops": […], "notice": …}` (Ops wie `CoreOp` in TS; `replace` ohne Kopie des Elements).
 pub fn result_json(r: &GripResult) -> String {
-    let mut out = String::from("{\"ops\":[");
+    // Direkt in einen Puffer (`to_writer`; `to_string` ginge über `fmt::Display` und wäre langsamer).
+    let mut out: Vec<u8> = b"{\"ops\":[".to_vec();
     for (i, op) in r.ops.iter().enumerate() {
         if i > 0 {
-            out.push(',');
+            out.push(b',');
         }
-        match op {
+        let _ = match op {
             Op::Replace { collection, entity } => {
-                out.push_str("{\"kind\":\"replace\",\"collection\":");
-                out.push_str(&Value::from(collection.as_str()).to_string());
-                out.push_str(",\"entity\":");
-                out.push_str(&entity.to_string());
-                out.push('}');
+                out.extend_from_slice(b"{\"kind\":\"replace\",\"collection\":");
+                let _ = serde_json::to_writer(&mut out, collection);
+                out.extend_from_slice(b",\"entity\":");
+                let w = serde_json::to_writer(&mut out, entity);
+                out.push(b'}');
+                w
             }
-            op => out.push_str(&op.to_json().to_string()),
-        }
+            op => serde_json::to_writer(&mut out, &op.to_json()),
+        };
     }
-    out.push(']');
+    out.push(b']');
     if let Some(n) = r.notice {
-        out.push_str(",\"notice\":");
-        out.push_str(&Value::from(n).to_string());
+        out.extend_from_slice(b",\"notice\":");
+        let _ = serde_json::to_writer(&mut out, n);
     }
-    out.push('}');
-    out
+    out.push(b'}');
+    String::from_utf8(out).unwrap_or_default()
 }
 
 /// Führt eine Griff-Änderung aus (`req.op` wählt die Art, s. `src/state/gripOps.ts`).
-pub fn run(root: &Map<String, Value>, req: &Value) -> Result<GripResult, String> {
-    let r = Request(req);
-    let op = req.get("op").and_then(Value::as_str).unwrap_or("");
+pub fn run(root: &Map<String, Value>, req: &Request) -> Result<GripResult, String> {
+    let r = req;
+    let op = req.op.as_str();
     let patch = |coll: &str, id: Option<&str>, f: &dyn Fn(&Value) -> Option<Value>| -> Vec<Op> {
         id.and_then(|id| find(root, coll, id)).and_then(f).map(|e| vec![replace(coll, e)]).unwrap_or_default()
     };
@@ -260,7 +357,7 @@ pub fn run(root: &Map<String, Value>, req: &Value) -> Result<GripResult, String>
             let d = did.and_then(|i| find(root, "drawings2d", i));
             let w = wid.and_then(|i| find(root, "walls", i));
             // Objekt-Sperre: gesperrte Elemente lassen sich anwählen, aber nicht ziehen.
-            if d.is_some_and(|d| truthy(d.get("locked"))) || w.is_some_and(|w| truthy(w.get("locked"))) {
+            if d.is_some_and(|d| truthy(field(d, "locked"))) || w.is_some_and(|w| truthy(field(w, "locked"))) {
                 return Ok(GripResult::default());
             }
             let f: Box<dyn Fn(&Value, bool) -> Option<Value>> = match op {
@@ -284,11 +381,11 @@ pub fn run(root: &Map<String, Value>, req: &Value) -> Result<GripResult, String>
         "resize" => {
             let (w, h, fx, fy) = (r.n("w"), r.n("h"), r.n("fx"), r.n("fy"));
             if r.s("kind") == Some("drawing2d") {
-                patch("drawings2d", r.s("id"), &|d| resize_geom(d.get("geom")?, w, h, fx, fy).map(|g| with_geom(d, g))).into()
+                patch("drawings2d", r.s("id"), &|d| resize_geom(field(d, "geom")?, w, h, fx, fy).map(|g| with_geom(d, g))).into()
             } else {
                 patch("walls", r.s("id"), &|wall| {
-                    let s = xy(wall.get("start").unwrap_or(&Value::Null));
-                    let e = xy(wall.get("end").unwrap_or(&Value::Null));
+                    let s = xy(field(wall, "start").unwrap_or(&Value::Null));
+                    let e = xy(field(wall, "end").unwrap_or(&Value::Null));
                     let (ax, ay, sx, sy) = scale_around(bbox(&[s, e]), w, h, fx, fy);
                     let f = |p: (f64, f64)| pt(ax + (p.0 - ax) * sx, ay + (p.1 - ay) * sy);
                     Some(with_all(wall, vec![("start", f(s)), ("end", f(e))]))
@@ -304,7 +401,7 @@ pub fn run(root: &Map<String, Value>, req: &Value) -> Result<GripResult, String>
         "ceilingBy" | "roofBy" => {
             let coll = if op == "ceilingBy" { "ceilings" } else { "roofs" };
             let (dx, dy) = r.p("delta");
-            patch(coll, r.s("id"), &|e| Some(with(e, "outline", moved_all(e.get("outline")?.as_array()?, dx, dy)))).into()
+            patch(coll, r.s("id"), &|e| Some(with(e, "outline", moved_all(field(e, "outline")?.as_array()?, dx, dy)))).into()
         }
         "ceilingEdge" | "roomEdge" => {
             let (coll, field) = if op == "ceilingEdge" { ("ceilings", "outline") } else { ("rooms", "boundary") };
@@ -318,8 +415,8 @@ pub fn run(root: &Map<String, Value>, req: &Value) -> Result<GripResult, String>
         "stairBy" => {
             let (dx, dy) = r.p("delta");
             patch("stairs", r.s("id"), &|s| {
-                let mut out = with(s, "start", moved(s.get("start").unwrap_or(&Value::Null), dx, dy));
-                if truthy(s.get("center")) {
+                let mut out = with(s, "start", moved(field(s, "start").unwrap_or(&Value::Null), dx, dy));
+                if truthy(field(s, "center")) {
                     out = with(&out, "center", moved(&s["center"], dx, dy));
                 }
                 Some(out)
@@ -329,8 +426,8 @@ pub fn run(root: &Map<String, Value>, req: &Value) -> Result<GripResult, String>
         "roomBy" => {
             let (dx, dy) = r.p("delta");
             patch("rooms", r.s("id"), &|rm| {
-                let mut out = with(rm, "boundary", moved_all(rm.get("boundary")?.as_array()?, dx, dy));
-                if truthy(rm.get("stampAnchor")) {
+                let mut out = with(rm, "boundary", moved_all(field(rm, "boundary")?.as_array()?, dx, dy));
+                if truthy(field(rm, "stampAnchor")) {
                     out = with(&out, "stampAnchor", moved(&rm["stampAnchor"], dx, dy));
                 }
                 Some(out)
@@ -340,10 +437,10 @@ pub fn run(root: &Map<String, Value>, req: &Value) -> Result<GripResult, String>
         "roomStamp" => {
             let (dx, dy) = r.p("delta");
             patch("rooms", r.s("id"), &|rm| {
-                let base = match rm.get("stampAnchor") {
+                let base = match field(rm, "stampAnchor") {
                     Some(a) if !a.is_null() => xy(a),
                     _ => {
-                        let ring: Vec<[f64; 2]> = arr(rm.get("boundary")).iter().map(|p| xy(p).into()).collect();
+                        let ring: Vec<[f64; 2]> = arr(field(rm, "boundary")).iter().map(|p| xy(p).into()).collect();
                         let c = crate::room_area::evaluate(&ring, 0.0).centroid;
                         (c[0], c[1])
                     }
@@ -359,12 +456,12 @@ pub fn run(root: &Map<String, Value>, req: &Value) -> Result<GripResult, String>
         "deletePoint" => {
             let index = r.n("index");
             let Some(d) = r.s("id").and_then(|i| find(root, "drawings2d", i)) else { return Ok(GripResult::default()) };
-            let g = d.get("geom").unwrap_or(&Value::Null);
-            if g.get("shape").and_then(Value::as_str) != Some("polyline") {
+            let g = field(d, "geom").unwrap_or(&Value::Null);
+            if field(g, "shape").and_then(Value::as_str) != Some("polyline") {
                 return Ok(GripResult::default());
             }
-            let pts = arr(g.get("pts"));
-            let min = if truthy(g.get("closed")) { 4 } else { 3 };
+            let pts = arr(field(g, "pts"));
+            let min = if truthy(field(g, "closed")) { 4 } else { 3 };
             if pts.len() < min {
                 return Ok(GripResult { ops: vec![], notice: Some("alert.polylineMinPoints") });
             }
@@ -373,13 +470,13 @@ pub fn run(root: &Map<String, Value>, req: &Value) -> Result<GripResult, String>
             // seinen (die genaue Bogenform lässt sich ohne den Stützpunkt nicht erhalten).
             let drop = |l: &[Value]| Value::Array(l.iter().enumerate().filter(|(i, _)| *i != k).map(|(_, v)| v.clone()).collect());
             let mut fields = vec![("pts", drop(pts))];
-            if truthy(g.get("bulge")) {
-                fields.push(("bulge", drop(arr(g.get("bulge")))));
+            if truthy(field(g, "bulge")) {
+                fields.push(("bulge", drop(arr(field(g, "bulge")))));
             }
             vec![replace("drawings2d", with_geom(d, with_all(g, fields)))].into()
         }
-        "wallThickness" => wall_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.get("newName").cloned().unwrap_or(Value::Null)).into(),
-        "ceilingThickness" => ceiling_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.get("newName").cloned().unwrap_or(Value::Null)).into(),
+        "wallThickness" => wall_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.new_name.clone()).into(),
+        "ceilingThickness" => ceiling_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.new_name.clone()).into(),
         other => return Err(format!("Unbekannte Griff-Änderung: {other}")),
     })
 }
@@ -391,15 +488,15 @@ fn wall_grip(w: &Value, index: f64, x: f64, y: f64) -> Value {
 }
 
 fn wall_moved(w: &Value, dx: f64, dy: f64) -> Value {
-    let s = moved(w.get("start").unwrap_or(&Value::Null), dx, dy);
-    let e = moved(w.get("end").unwrap_or(&Value::Null), dx, dy);
+    let s = moved(field(w, "start").unwrap_or(&Value::Null), dx, dy);
+    let e = moved(field(w, "end").unwrap_or(&Value::Null), dx, dy);
     with_all(w, vec![("start", s), ("end", e)])
 }
 
 // ── 2D-Zeichnungen ───────────────────────────────────────────────────────────
 
 fn shape(g: &Value) -> &str {
-    g.get("shape").and_then(Value::as_str).unwrap_or("")
+    field(g, "shape").and_then(Value::as_str).unwrap_or("")
 }
 
 /// Kreis, solange rx≈ry (relative Toleranz 0.5 %) — sonst Ellipse (rotation 0). Neues Objekt (weitere
@@ -456,18 +553,18 @@ fn dim_text_pos(a: (f64, f64), b: (f64, f64), offset: f64, h: f64, along: f64, p
 
 /// Schrifthöhe der Masszahl in Modell-Metern.
 fn dim_height(g: &Value, scale: f64) -> f64 {
-    mm_to_model(num_or(g.get("textHeightMm"), DIM_TEXT_HEIGHT_MM), scale)
+    mm_to_model(num_or(field(g, "textHeightMm"), DIM_TEXT_HEIGHT_MM), scale)
 }
 
 /// Griff `index` einer 2D-Zeichnung auf (x, y) (`moveGrip`); `None` = keine Änderung.
 fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Value> {
-    let g = d.get("geom")?;
+    let g = field(d, "geom")?;
     let p = pt(x, y);
     let set = |k: &str, v: Value| Some(with_geom(d, with(g, k, v)));
     match shape(g) {
         "line" | "xline" | "ray" => set(if index == 0.0 { "a" } else { "b" }, p),
         "polyline" => {
-            let pts = arr(g.get("pts"));
+            let pts = arr(field(g, "pts"));
             let n = pts.len();
             if index < n as f64 {
                 return set("pts", replace_at(pts, index, &p));
@@ -478,16 +575,16 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
             let a = xy(&pts[k]);
             let b = xy(if k == n - 1 { &pts[0] } else { &pts[k + 1] });
             let val = crate::bulge::from_sagitta_point(a.0, a.1, b.0, b.1, x, y);
-            let mut bulge: Vec<Value> = arr(g.get("bulge")).to_vec();
+            let mut bulge: Vec<Value> = arr(field(g, "bulge")).to_vec();
             while bulge.len() <= k {
                 bulge.push(Value::from(0u64));
             }
             bulge[k] = js_num(val);
             set("bulge", Value::Array(bulge))
         }
-        "bezier" | "spline" => set("pts", replace_at(arr(g.get("pts")), index, &p)),
+        "bezier" | "spline" => set("pts", replace_at(arr(field(g, "pts")), index, &p)),
         "dimension" => {
-            let pts = arr(g.get("pts"));
+            let pts = arr(field(g, "pts"));
             let n = pts.len();
             if index < n as f64 {
                 return set("pts", replace_at(pts, index, &p));
@@ -507,7 +604,7 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
             }
             let k = index_in(seg, n)?;
             let h = dim_height(g, scale);
-            let (base, read, up) = dim_frame(xy(&pts[k]), xy(&pts[k + 1]), num_of(g.get("offset")), h);
+            let (base, read, up) = dim_frame(xy(&pts[k]), xy(&pts[k + 1]), num_of(field(g, "offset")), h);
             let (vx, vy) = (x - base.0, y - base.1);
             let snap = h * 0.5;
             let along = vx * read.0 + vy * read.1;
@@ -517,7 +614,7 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
             let mut next = Map::new();
             next.insert("along".into(), js_num(model_to_mm(along, scale)));
             next.insert("perp".into(), js_num(model_to_mm(perp, scale)));
-            let old = arr(g.get("textOffsetsMm"));
+            let old = arr(field(g, "textOffsetsMm"));
             let offs: Vec<Value> = (0..n - 1)
                 .map(|i| {
                     if i == k {
@@ -541,11 +638,11 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
             Some(with_geom(d, with_all(g, vec![("min", min), ("max", max)])))
         }
         "text" => {
-            if truthy(g.get("pathPts")) {
-                return set("pathPts", replace_at(arr(g.get("pathPts")), index, &p));
+            if truthy(field(g, "pathPts")) {
+                return set("pathPts", replace_at(arr(field(g, "pathPts")), index, &p));
             }
-            if truthy(g.get("leaderTarget")) {
-                let bends = arr(g.get("leaderBendPoints"));
+            if truthy(field(g, "leaderTarget")) {
+                let bends = arr(field(g, "leaderBendPoints"));
                 let tip = bends.len() as f64 + 1.0;
                 if index == 0.0 {
                     return set("at", p);
@@ -559,12 +656,12 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
                 }
                 return None;
             }
-            let width = num_of(g.get("width"));
-            if truthy(g.get("width")) && width > 0.0 && index >= 0.0 && index < 4.0 {
+            let width = num_of(field(g, "width"));
+            if truthy(field(g, "width")) && width > 0.0 && index >= 0.0 && index < 4.0 {
                 // Nur die Spaltenbreite ändert sich (InDesign-Textrahmen); Zug auf die lokale x-Achse.
-                let angle = num_of(g.get("angle"));
+                let angle = num_of(field(g, "angle"));
                 let (cos, sin) = (jsnum::cos(angle), jsnum::sin(angle));
-                let (ax, ay) = xy(g.get("at").unwrap_or(&Value::Null));
+                let (ax, ay) = xy(field(g, "at").unwrap_or(&Value::Null));
                 let local_x = (x - ax) * cos + (y - ay) * sin;
                 const MIN_WIDTH: f64 = 0.1;
                 if index == 0.0 || index == 3.0 {
@@ -578,30 +675,30 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
         }
         "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => set("at", p),
         "circle" => {
-            let (cx, cy) = xy(g.get("center").unwrap_or(&Value::Null));
-            let r = pass(g.get("r"));
+            let (cx, cy) = xy(field(g, "center").unwrap_or(&Value::Null));
+            let r = pass(field(g, "r"));
             let (rx, ry) = if index == 0.0 { (calc(jsnum::max(1e-3, (x - cx).abs())), r) } else { (r, calc(jsnum::max(1e-3, (y - cy).abs()))) };
-            Some(with_geom(d, ellipse_or_circle(g.get("center"), rx, ry)))
+            Some(with_geom(d, ellipse_or_circle(field(g, "center"), rx, ry)))
         }
         "arc" => {
-            let (cx, cy) = xy(g.get("center").unwrap_or(&Value::Null));
+            let (cx, cy) = xy(field(g, "center").unwrap_or(&Value::Null));
             if index == 2.0 {
                 return set("r", js_num(jsnum::max(1e-3, hypot2(x - cx, y - cy))));
             }
             set(if index == 0.0 { "a0" } else { "a1" }, js_num(jsnum::atan2(y - cy, x - cx)))
         }
         "ellipse" => {
-            let rot = num_of(g.get("rotation"));
+            let rot = num_of(field(g, "rotation"));
             let (c, s) = (jsnum::cos(rot), jsnum::sin(rot));
-            let (cx, cy) = xy(g.get("center").unwrap_or(&Value::Null));
+            let (cx, cy) = xy(field(g, "center").unwrap_or(&Value::Null));
             let (dx, dy) = (x - cx, y - cy);
             let lx = dx * c + dy * s;
             let ly = -dx * s + dy * c;
-            let rx = if index == 0.0 { calc(jsnum::max(1e-3, lx.abs())) } else { pass(g.get("rx")) };
-            let ry = if index == 0.0 { pass(g.get("ry")) } else { calc(jsnum::max(1e-3, ly.abs())) };
+            let rx = if index == 0.0 { calc(jsnum::max(1e-3, lx.abs())) } else { pass(field(g, "rx")) };
+            let ry = if index == 0.0 { pass(field(g, "ry")) } else { calc(jsnum::max(1e-3, ly.abs())) };
             // Nur ungedreht (`rotation === 0`) kann eine (fast) gleichseitige Ellipse wieder zum Kreis werden.
-            if g.get("rotation").and_then(Value::as_f64) == Some(0.0) {
-                return Some(with_geom(d, ellipse_or_circle(g.get("center"), rx, ry)));
+            if field(g, "rotation").and_then(Value::as_f64) == Some(0.0) {
+                return Some(with_geom(d, ellipse_or_circle(field(g, "center"), rx, ry)));
             }
             Some(with_geom(d, with_opt(g, vec![("rx", rx.v), ("ry", ry.v)])))
         }
@@ -620,18 +717,18 @@ fn or1(l: f64) -> f64 {
 
 /// Ecken eines Rechtecks/Bilds in Griff-Reihenfolge: min, (max.x, min.y), max, (min.x, max.y).
 fn rect_corners(g: &Value) -> [(f64, f64); 4] {
-    let mn = xy(g.get("min").unwrap_or(&Value::Null));
-    let mx = xy(g.get("max").unwrap_or(&Value::Null));
+    let mn = xy(field(g, "min").unwrap_or(&Value::Null));
+    let mx = xy(field(g, "max").unwrap_or(&Value::Null));
     [mn, (mx.0, mn.1), mx, (mn.0, mx.1)]
 }
 
 /// Ganze 2D-Zeichnung verschieben (`moveElementBy`); `None` = Form ohne Verschiebung.
 fn drawing_moved(d: &Value, dx: f64, dy: f64) -> Option<Value> {
-    let g = d.get("geom")?;
+    let g = field(d, "geom")?;
     let mv = |k: &str| moved(g.get(k).unwrap_or(&Value::Null), dx, dy);
     let ng = match shape(g) {
         "line" => with_all(g, vec![("a", mv("a")), ("b", mv("b"))]),
-        "polyline" | "bezier" | "spline" | "dimension" => with(g, "pts", moved_all(arr(g.get("pts")), dx, dy)),
+        "polyline" | "bezier" | "spline" | "dimension" => with(g, "pts", moved_all(arr(field(g, "pts")), dx, dy)),
         "rect" | "image" => with_all(g, vec![("min", mv("min")), ("max", mv("max"))]),
         "circle" | "arc" | "ellipse" => with(g, "center", mv("center")),
         "kote" | "detailref" | "scalebar" | "pointmarker" | "text" => with(g, "at", mv("at")),
@@ -642,10 +739,10 @@ fn drawing_moved(d: &Value, dx: f64, dy: f64) -> Option<Value> {
 
 /// Kante (a, b) einer 2D-Zeichnung verschieben (`moveEdge`); `None` = keine Änderung.
 fn drawing_edge(d: &Value, a: f64, b: f64, dx: f64, dy: f64) -> Option<Value> {
-    let g = d.get("geom")?;
+    let g = field(d, "geom")?;
     let ng = match shape(g) {
-        "line" => with_all(g, vec![("a", moved(g.get("a").unwrap_or(&Value::Null), dx, dy)), ("b", moved(g.get("b").unwrap_or(&Value::Null), dx, dy))]),
-        "polyline" | "spline" => with(g, "pts", move_polygon_edge(arr(g.get("pts")), a, b, dx, dy, truthy(g.get("closed")))?),
+        "line" => with_all(g, vec![("a", moved(field(g, "a").unwrap_or(&Value::Null), dx, dy)), ("b", moved(field(g, "b").unwrap_or(&Value::Null), dx, dy))]),
+        "polyline" | "spline" => with(g, "pts", move_polygon_edge(arr(field(g, "pts")), a, b, dx, dy, truthy(field(g, "closed")))?),
         "rect" | "image" => {
             // Die zwei Kanten-Ecken verschieben, dann die bbox neu bilden (achsparallel).
             let corners = rect_corners(g);
@@ -786,18 +883,18 @@ fn resize_geom(g: &Value, w: f64, h: f64, fx: f64, fy: f64) -> Option<Value> {
         "circle" | "arc" => {
             // bbox eines Kreises ist 2r × 2r; Radius = grössere Zielhälfte, Mitte nicht-uniform um den Anker.
             let c = p("center");
-            let r = num_of(g.get("r"));
+            let r = num_of(field(g, "r"));
             let ax = (c.0 - r) + fx * (2.0 * r);
             let ay = (c.1 - r) + fy * (2.0 * r);
             let half = jsnum::max(w, h) / 2.0;
-            let nr = if half > 0.0 { Some(js_num(half)) } else { g.get("r").cloned() };
+            let nr = if half > 0.0 { Some(js_num(half)) } else { field(g, "r").cloned() };
             let sx = if r > 1e-9 { (w / 2.0) / r } else { 1.0 };
             let sy = if r > 1e-9 { (h / 2.0) / r } else { 1.0 };
             with_opt(g, vec![("center", Some(pt(ax + (c.0 - ax) * sx, ay + (c.1 - ay) * sy))), ("r", nr)])
         }
         "ellipse" => {
             let c = p("center");
-            let (rx, ry) = (num_of(g.get("rx")), num_of(g.get("ry")));
+            let (rx, ry) = (num_of(field(g, "rx")), num_of(field(g, "ry")));
             let (ax, ay, sx, sy) = scale_around((c.0 - rx, c.1 - ry, c.0 + rx, c.1 + ry), w, h, fx, fy);
             with_all(g, vec![("center", pt(ax + (c.0 - ax) * sx, ay + (c.1 - ay) * sy)), ("rx", js_num(jsnum::max(1e-3, rx * sx))), ("ry", js_num(jsnum::max(1e-3, ry * sy)))])
         }
@@ -815,7 +912,7 @@ fn resize_geom(g: &Value, w: f64, h: f64, fx: f64, fy: f64) -> Option<Value> {
 
 /// Dach-Eckgriff: die gegenüberliegende Ecke bleibt fix, der Umriss bleibt ein achsparalleles Rechteck.
 fn roof_grip(r: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
-    let outline = r.get("outline")?.as_array()?;
+    let outline = field(r, "outline")?.as_array()?;
     let n = outline.len();
     if n < 4 {
         return None;
@@ -831,20 +928,20 @@ fn roof_grip(r: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
 /// Winkel-Mitte geteilt (wie `kernel2d` Bogen-Segmente zuschneidet); eine Näherung über tessellierte
 /// Punkte wäre zu ungenau. Die Bulge-Liste wird nur mitgeführt, wenn es eine gab.
 fn insert_point(d: &Value, seg: f64, x: f64, y: f64) -> Option<Value> {
-    let g = d.get("geom")?;
+    let g = field(d, "geom")?;
     if shape(g) != "polyline" {
         return None;
     }
-    let pts = arr(g.get("pts"));
+    let pts = arr(field(g, "pts"));
     let n = pts.len();
     let k = index_in(seg, n)?;
     let last = k == n - 1;
-    if last && !truthy(g.get("closed")) {
+    if last && !truthy(field(g, "closed")) {
         return None;
     }
     let a = xy(&pts[k]);
     let b = xy(if last { &pts[0] } else { &pts[k + 1] });
-    let bulge = num_or(arr(g.get("bulge")).get(k), 0.0);
+    let bulge = num_or(arr(field(g, "bulge")).get(k), 0.0);
     // `bulgeArc` der Fassade: gerade (|bulge| < 1e-9 oder NaN) ohne Bogen.
     let arc = if bulge.abs() >= 1e-9 { crate::bulge::arc(a.0, a.1, b.0, b.1, bulge) } else { vec![] };
     let (insert, b1, b2) = if arc.len() >= 6 {
@@ -863,8 +960,8 @@ fn insert_point(d: &Value, seg: f64, x: f64, y: f64) -> Option<Value> {
     np.push(insert);
     np.extend_from_slice(&pts[k + 1..]);
     let mut fields = vec![("pts", Value::Array(np))];
-    if truthy(g.get("bulge")) {
-        let old = arr(g.get("bulge"));
+    if truthy(field(g, "bulge")) {
+        let old = arr(field(g, "bulge"));
         let mut nb: Vec<Value> = old.iter().take(k).cloned().collect();
         nb.push(js_num(b1));
         nb.push(js_num(b2));
@@ -899,17 +996,17 @@ fn wall_thickness(root: &Map<String, Value>, wall_id: &str, thickness: f64, new_
         return vec![];
     }
     let Some(wall) = find(root, "walls", wall_id) else { return vec![] };
-    let wt_id = wall.get("wallTypeId");
-    let Some(wt) = arr(root.get("wallTypes")).iter().find(|t| t.get("id") == wt_id) else { return vec![] };
-    let layers = arr(wt.get("layers"));
+    let wt_id = field(wall, "wallTypeId");
+    let Some(wt) = arr(root.get("wallTypes")).iter().find(|t| field(t, "id") == wt_id) else { return vec![] };
+    let layers = arr(field(wt, "layers"));
     if layers.is_empty() {
         return vec![];
     }
-    let wt_idv = wt.get("id");
-    let used_by_others = arr(root.get("walls")).iter().any(|w| id_of(w) != Some(wall_id) && w.get("wallTypeId") == wt_idv);
+    let wt_idv = field(wt, "id");
+    let used_by_others = arr(root.get("walls")).iter().any(|w| id_of(w) != Some(wall_id) && field(w, "wallTypeId") == wt_idv);
     if layers.len() == 1 && !used_by_others {
         let tid = id_of(wt).unwrap_or("");
-        return find(root, "wallTypes", tid).map(|t| vec![replace("wallTypes", with(t, "layers", single_layer(arr(t.get("layers")), thickness)))]).unwrap_or_default();
+        return find(root, "wallTypes", tid).map(|t| vec![replace("wallTypes", with(t, "layers", single_layer(arr(field(t, "layers")), thickness)))]).unwrap_or_default();
     }
     vec![add("wallTypes", new_type(new_id, new_name, layers, thickness)), replace("walls", with(wall, "wallTypeId", new_id.into()))]
 }
@@ -922,20 +1019,20 @@ fn ceiling_thickness(root: &Map<String, Value>, ceiling_id: &str, thickness: f64
     }
     let Some(c) = find(root, "ceilings", ceiling_id) else { return vec![] };
     let active = |c: &Value| -> Option<Value> {
-        let v = c.get("ceilingTypeId");
-        if nullish(v) { c.get("wallTypeId").cloned() } else { v.cloned() }
+        let v = field(c, "ceilingTypeId");
+        if nullish(v) { field(c, "wallTypeId").cloned() } else { v.cloned() }
     };
     let active_id = active(c);
-    let by_id = |coll: &str, id: Option<&Value>| arr(root.get(coll)).iter().find(|t| t.get("id") == id).cloned();
-    let Some(ct) = by_id("ceilingTypes", c.get("ceilingTypeId")).or_else(|| by_id("wallTypes", c.get("wallTypeId"))) else { return vec![] };
-    let layers = arr(ct.get("layers"));
+    let by_id = |coll: &str, id: Option<&Value>| arr(root.get(coll)).iter().find(|t| field(t, "id") == id).cloned();
+    let Some(ct) = by_id("ceilingTypes", field(c, "ceilingTypeId")).or_else(|| by_id("wallTypes", field(c, "wallTypeId"))) else { return vec![] };
+    let layers = arr(field(&ct, "layers"));
     if layers.is_empty() {
         return vec![];
     }
     let used_by_others = arr(root.get("ceilings")).iter().any(|o| id_of(o) != Some(ceiling_id) && active(o) == active_id);
-    if layers.len() == 1 && !used_by_others && truthy(c.get("ceilingTypeId")) {
+    if layers.len() == 1 && !used_by_others && truthy(field(c, "ceilingTypeId")) {
         let tid = id_of(&ct).unwrap_or("");
-        return find(root, "ceilingTypes", tid).map(|t| vec![replace("ceilingTypes", with(t, "layers", single_layer(arr(t.get("layers")), thickness)))]).unwrap_or_default();
+        return find(root, "ceilingTypes", tid).map(|t| vec![replace("ceilingTypes", with(t, "layers", single_layer(arr(field(t, "layers")), thickness)))]).unwrap_or_default();
     }
     let mut nc = with(c, "ceilingTypeId", new_id.into());
     if let Value::Object(m) = &mut nc {
@@ -957,25 +1054,25 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
     Some(match shape(g) {
         "line" | "xline" | "ray" => vec![p("a"), p("b")],
         "polyline" => {
-            let bulge = arr(g.get("bulge"));
-            polyline_vertices(pts("pts"), truthy(g.get("closed")), |i| num_or(bulge.get(i), 0.0))
+            let bulge = arr(field(g, "bulge"));
+            polyline_vertices(pts("pts"), truthy(field(g, "closed")), |i| num_or(bulge.get(i), 0.0))
         }
         "rect" | "image" => rect_corners(g).to_vec(),
         "circle" => {
-            let (c, r) = (p("center"), num_of(g.get("r")));
+            let (c, r) = (p("center"), num_of(field(g, "r")));
             vec![(c.0 + r, c.1), (c.0, c.1 + r)]
         }
         "arc" => {
-            let (c, r) = (p("center"), num_of(g.get("r")));
-            let (a0, a1) = (num_of(g.get("a0")), num_of(g.get("a1")));
+            let (c, r) = (p("center"), num_of(field(g, "r")));
+            let (a0, a1) = (num_of(field(g, "a0")), num_of(field(g, "a1")));
             let mid = (a0 + a1) / 2.0;
             [a0, a1, mid].iter().map(|a| (c.0 + r * jsnum::cos(*a), c.1 + r * jsnum::sin(*a))).collect()
         }
         "ellipse" => {
-            let rot = num_of(g.get("rotation"));
+            let rot = num_of(field(g, "rotation"));
             let (c, s) = (jsnum::cos(rot), jsnum::sin(rot));
             let ctr = p("center");
-            let (rx, ry) = (num_of(g.get("rx")), num_of(g.get("ry")));
+            let (rx, ry) = (num_of(field(g, "rx")), num_of(field(g, "ry")));
             vec![(ctr.0 + rx * c, ctr.1 + rx * s), (ctr.0 - ry * s, ctr.1 + ry * c)]
         }
         "bezier" | "spline" => pts("pts"),
@@ -986,14 +1083,14 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
             let (a, b) = (out.first().copied().unwrap_or(nan), out.last().copied().unwrap_or(nan));
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
             let len = or1(hypot2(dx, dy));
-            let offset = num_of(g.get("offset"));
+            let offset = num_of(field(g, "offset"));
             let (nx, ny) = ((-dy / len) * offset, (dx / len) * offset);
             out.push(((a.0 + b.0) / 2.0 + nx, (a.1 + b.1) / 2.0 + ny));
             let h = dim_height(g, scale);
-            let offs = arr(g.get("textOffsetsMm"));
+            let offs = arr(field(g, "textOffsetsMm"));
             for i in 0..n.saturating_sub(1) {
                 let (along, perp) = match offs.get(i) {
-                    Some(o) if truthy(Some(o)) => (mm_to_model(num_of(o.get("along")), scale), mm_to_model(num_of(o.get("perp")), scale)),
+                    Some(o) if truthy(Some(o)) => (mm_to_model(num_of(field(o, "along")), scale), mm_to_model(num_of(field(o, "perp")), scale)),
                     _ => (0.0, 0.0),
                 };
                 out.push(dim_text_pos(out[i], out[i + 1], offset, h, along, perp));
@@ -1002,14 +1099,14 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
         }
         "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => vec![p("at")],
         "text" => {
-            if truthy(g.get("pathPts")) {
+            if truthy(field(g, "pathPts")) {
                 pts("pathPts")
-            } else if truthy(g.get("leaderTarget")) {
+            } else if truthy(field(g, "leaderTarget")) {
                 let mut out = vec![p("at")];
                 out.extend(pts("leaderBendPoints"));
                 out.push(p("leaderTarget"));
                 out
-            } else if truthy(g.get("width")) && num_of(g.get("width")) > 0.0 {
+            } else if truthy(field(g, "width")) && num_of(field(g, "width")) > 0.0 {
                 return None;
             } else {
                 vec![p("at")]
@@ -1080,6 +1177,10 @@ mod tests {
         v.as_object().unwrap().clone()
     }
 
+    fn rq(v: Value) -> Request {
+        serde_json::from_value(v).unwrap()
+    }
+
     fn entity(r: &GripResult) -> &Value {
         match &r.ops[0] {
             Op::Replace { entity, .. } => entity,
@@ -1103,18 +1204,18 @@ mod tests {
     #[test]
     fn wand_griff_und_sperre() {
         let r = root(json!({"walls": [{"id": "w", "start": {"x": 0, "y": 0}, "end": {"x": 1, "y": 0}, "extra": 1}]}));
-        let res = run(&r, &json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [2, 3]})).unwrap();
+        let res = run(&r, &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [2, 3]}))).unwrap();
         assert_eq!(entity(&res).to_string(), r#"{"id":"w","start":{"x":0,"y":0},"end":{"x":2,"y":3},"extra":1}"#);
         let locked = root(json!({"walls": [{"id": "w", "locked": true, "start": {"x": 0, "y": 0}, "end": {"x": 1, "y": 0}}]}));
-        assert!(run(&locked, &json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [2, 3]})).unwrap().ops.is_empty());
+        assert!(run(&locked, &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [2, 3]}))).unwrap().ops.is_empty());
         // Fehlendes Element: keine Op.
-        assert!(run(&r, &json!({"op": "moveGrip", "wallId": "x", "index": 1, "pt": [2, 3]})).unwrap().ops.is_empty());
+        assert!(run(&r, &rq(json!({"op": "moveGrip", "wallId": "x", "index": 1, "pt": [2, 3]}))).unwrap().ops.is_empty());
     }
 
     #[test]
     fn kreis_wird_ellipse() {
         let r = root(json!({"drawings2d": [{"id": "d", "geom": {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 1}}]}));
-        let res = run(&r, &json!({"op": "moveGrip", "drawingId": "d", "index": 0, "pt": [2, 0]})).unwrap();
+        let res = run(&r, &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 0, "pt": [2, 0]}))).unwrap();
         assert_eq!(entity(&res)["geom"].to_string(), r#"{"shape":"ellipse","center":{"x":0,"y":0},"rx":2,"ry":1,"rotation":0}"#);
     }
 
@@ -1130,14 +1231,14 @@ mod tests {
     #[test]
     fn nan_als_marke() {
         let r = root(json!({"walls": [{"id": "w", "start": {"x": 0, "y": 0}, "end": {"x": 1, "y": 0}}]}));
-        let res = run(&r, &json!({"op": "moveBy", "wallId": "w", "delta": ["\u{1}NaN", 0]})).unwrap();
+        let res = run(&r, &rq(json!({"op": "moveBy", "wallId": "w", "delta": ["\u{1}NaN", 0]}))).unwrap();
         assert_eq!(entity(&res)["start"]["x"], json!("\u{1}NaN"));
     }
 
     #[test]
     fn punkt_loeschen_mindestzahl() {
         let r = root(json!({"drawings2d": [{"id": "d", "geom": {"shape": "polyline", "closed": false, "pts": [{"x": 0, "y": 0}, {"x": 1, "y": 0}]}}]}));
-        let res = run(&r, &json!({"op": "deletePoint", "id": "d", "index": 0})).unwrap();
+        let res = run(&r, &rq(json!({"op": "deletePoint", "id": "d", "index": 0}))).unwrap();
         assert_eq!(res.notice, Some("alert.polylineMinPoints"));
         assert!(res.ops.is_empty());
     }
@@ -1148,7 +1249,7 @@ mod tests {
             "wallTypes": [{"id": "wt", "name": "W", "layers": [{"componentId": "c", "thickness": 0.2}]}],
             "ceilings": [{"id": "c1", "wallTypeId": "wt", "thickness": 0.3}, {"id": "c2", "wallTypeId": "wt"}],
         }));
-        let ops = run(&r, &json!({"op": "ceilingThickness", "id": "c1", "thickness": 0.25, "newId": "ct-1", "newName": "Decke"})).unwrap().ops;
+        let ops = run(&r, &rq(json!({"op": "ceilingThickness", "id": "c1", "thickness": 0.25, "newId": "ct-1", "newName": "Decke"}))).unwrap().ops;
         assert_eq!(crate::ops::ops_to_json(&ops), r#"[{"kind":"add","collection":"ceilingTypes","items":[{"id":"ct-1","name":"Decke","layers":[{"componentId":"c","thickness":0.25}]}]},{"kind":"replace","collection":"ceilings","entity":{"id":"c1","wallTypeId":"wt","ceilingTypeId":"ct-1"}}]"#);
     }
 

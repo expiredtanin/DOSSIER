@@ -2,12 +2,12 @@
 // `editors/explode.ts`), damit sie ohne UI testbar bleiben.
 //
 // Beides arbeitet auf den BOUNDING-BOXEN der Elemente (dieselbe Herleitung wie
-// im Attribut-Panel, s. `geomBBox`) und verschiebt sie anschliessend als
+// im Attribut-Panel: Kern `selection_info.rs::geom_bbox`, Abfrage `drawingBBoxes`) und verschiebt sie anschliessend als
 // Ganzes. Die Form selbst bleibt unangetastet — es wird nur verschoben, nie
 // skaliert oder verzerrt.
 
 import type { Drawing2D, Project, Vec2 } from "../model/types";
-import { geomBBox } from "../state/selectionInfo";
+import { documentFor } from "../core/document";
 import { mvGeom, patchItems } from "../core";
 import type { CoreOp } from "../core";
 
@@ -27,9 +27,11 @@ interface Boxed {
 
 function boxesOf(project: Project, ids: string[]): Boxed[] {
   const wanted = new Set(ids);
-  return project.drawings2d
-    .filter((d) => wanted.has(d.id))
-    .map((d) => ({ d, ...geomBBox(d.geom) }));
+  const list = project.drawings2d.filter((d) => wanted.has(d.id));
+  if (list.length === 0) return [];
+  // Je Element `[id, minX, minY, maxX, maxY]`, in Listen-Reihenfolge wie `list`.
+  const b = documentFor(project).queryRootMarked<[string, number, number, number, number][]>("drawingBBoxes", JSON.stringify(ids));
+  return list.map((d, i) => ({ d, minX: b[i][1], minY: b[i][2], maxX: b[i][3], maxY: b[i][4] }));
 }
 
 /** Ops: verschiebt die genannten Elemente um je einen eigenen Vektor. */

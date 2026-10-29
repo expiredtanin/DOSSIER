@@ -12,7 +12,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 /// (zurückgewiesen, Dokument unverändert); Fehler als Text mit vorangestelltem `\u{1}`.
 #[wasm_bindgen]
 pub fn doc_grip_commit(h: u32, req_json: &str, key: &str, now_ms: f64) -> String {
-    let req: Value = match serde_json::from_str(req_json) {
+    let req: crate::grips::Request = match serde_json::from_str(req_json) {
         Ok(v) => v,
         Err(e) => return format!("\u{1}Griff-Anfrage: {e}"),
     };

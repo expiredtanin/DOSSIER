@@ -82,6 +82,7 @@ pub mod geo_translate;
 pub mod selection_filter;
 pub mod reorder;
 pub mod grips;
+pub mod selection_info;
 
 #[cfg(feature = "web")]
 mod web;
