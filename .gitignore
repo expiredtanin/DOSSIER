@@ -59,3 +59,4 @@ src-tauri/assets/native3d_walls.json
 # Playwright-Suite ([49])
 test-results/
 playwright-report/
+src-tauri/target-*/
