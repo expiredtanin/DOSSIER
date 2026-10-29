@@ -64,6 +64,90 @@ pub struct ArcInstanceData {
     pub dash_total: f32,
 }
 
+/// Hoechstzahl Eintraege eines Linien-Strichmusters (nach Verdoppeln ungerader Muster), die der
+/// Strich-Shader (`DASH_LINE_WGSL`) rechnet; laengere Muster zerlegt die CPU wie frueher.
+pub const MAX_LINE_DASH: usize = 8;
+
+/// EIN Segment eines gestrichelten Linienzugs fuer die Strich-Pipeline (eine Instanz, das Quad
+/// spannt der Vertex-Shader auf). Statt den Zug entlang des Musters in Hunderte Teilstuecke mit
+/// runden Kappen zu zerlegen (`split_dash`: bei verdeckten Kanten grosser Schnitte zig Millionen
+/// Vertices, > 256 MB Puffer), traegt jedes Segment seine Lauflaenge; der Fragment-Shader setzt
+/// Striche, Luecken und runde Strich-Enden je Pixel (gleiche Semantik, s. [`dash_coverage`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DashSegment {
+    /// Segment-Anfang/-Ende in Bildschirm-Raum (`to_screen`).
+    pub a: Point,
+    pub b: Point,
+    /// Lauflaenge des Zugs bei `a` (Bildschirm-Einheiten, Phase laeuft ueber Ecken durch).
+    pub s0: f32,
+    /// Laenge des ganzen Zugs (Bildschirm-Einheiten): hinter dem Ende beginnt kein Strich mehr.
+    pub run_len: f32,
+    /// Zykluslaenge (Bildschirm-Einheiten).
+    pub total: f32,
+    /// Gueltige Eintraege in `dash` (gerade Indizes = Strich, ungerade = Luecke).
+    pub count: u32,
+    /// An/Aus-Laengen (Bildschirm-Einheiten).
+    pub dash: [f32; MAX_LINE_DASH],
+}
+
+/// Ein Batch gestrichelter Segmente (Instanz-Bereich) mit Farbe + Strichbreite.
+#[derive(Debug, Clone)]
+pub struct DashBatch {
+    pub start: u32,
+    pub count: u32,
+    pub color: Rgba,
+    pub stroke_mm: f32,
+    pub width_screen: bool,
+}
+
+/// Strichmuster (Papier-mm) → Zyklus in Modell-Metern wie in `split_dash`: negative Werte zu 0,
+/// Nullen weg, ungerade Laenge verdoppelt. `None` = kein gueltiges Muster (durchgezogen).
+fn dash_cycle_m(dash: &[f32]) -> Option<Vec<f32>> {
+    let pat: Vec<f32> = dash.iter().copied().map(|d| d.max(0.0) * DASH_MM_TO_M).filter(|d| *d > 0.0).collect();
+    if pat.is_empty() {
+        return None;
+    }
+    let cycle: Vec<f32> = if pat.len() % 2 == 0 { pat } else { [pat.as_slice(), pat.as_slice()].concat() };
+    let total: f32 = cycle.iter().sum();
+    (total > 1e-9).then_some(cycle)
+}
+
+/// Deckung eines Pixels durch einen gestrichelten Zug — CPU-Spiegel des Fragment-Shaders
+/// (`DASH_LINE_WGSL`, gleiche Rechenschritte), fuer Tests. Alles in Geraete-px: `s` Lauflaenge
+/// des Pixels (auch vor/hinter dem Segment, im Kappen-Bereich), `y` Abstand quer zur Achse,
+/// `seg` = (Anfang, Ende des Segments, Laenge des Zugs, halbe Strichbreite), `total`/`cyc` das
+/// Muster. Liefert den Abstand zum naechsten Strich (0 = auf einem Strich), den der Shader mit
+/// der halben Breite vergleicht (runde Strich-Enden wie die frueheren Rund-Kappen).
+pub fn dash_coverage(s: f32, y: f32, seg: [f32; 4], total: f32, cyc: &[f32]) -> f32 {
+    let sc = s.clamp(seg[0], seg[1]);
+    let e_out = (s - sc).abs();
+    let mut e_in = 0.0f32;
+    if !cyc.is_empty() && total > 1e-6 {
+        let k = (sc / total).floor();
+        let m = sc - k * total;
+        let mut acc = 0.0f32;
+        let mut on = true;
+        let mut prev_end = 0.0f32;
+        let mut next_start = 0.0f32;
+        for (i, &d) in cyc.iter().enumerate() {
+            if m >= acc && m < acc + d {
+                on = i % 2 == 0;
+                prev_end = acc;
+                next_start = acc + d;
+            }
+            acc += d;
+        }
+        if !on {
+            let base = k * total;
+            let pe = sc - (base + prev_end);
+            let ne = if base + next_start > seg[2] { f32::INFINITY } else { base + next_start - sc };
+            e_in = pe.min(ne).max(0.0);
+        }
+    }
+    let e = e_in + e_out;
+    (e * e + y * y).sqrt()
+}
+
 /// Bildschirm-Raum-Parameter eines Bogens: Mittelpunkt + Radius (Bildschirm-
 /// Einheiten) sowie Start- und Sweep-Winkel IM BILDSCHIRM-RAUM. Der Sweep ist der
 /// KUERZERE Bogen (|sweep| <= pi) — exakt die Winkel-Normalisierung der frueheren
@@ -223,13 +307,19 @@ fn stroke_dashed_or_solid(
     bounds: &mut Bounds,
 ) {
     match dash {
-        Some(d) if !d.is_empty() => {
-            for piece in split_dash(pts, d) {
-                if piece.len() >= 2 {
-                    geo.stroke_polyline(&piece, false, color, stroke_mm, width_screen, bounds);
+        Some(d) if !d.is_empty() => match dash_cycle_m(d) {
+            // Strichmuster im Shader: je Segment eine Instanz mit Lauflaenge.
+            Some(cycle) if cycle.len() <= MAX_LINE_DASH => geo.stroke_dashed(pts, &cycle, color, stroke_mm, width_screen, bounds),
+            // Ungueltiges Muster: ein offener Zug (wie `split_dash` → ein Stueck); sehr lange
+            // Muster zerlegt weiter die CPU.
+            _ => {
+                for piece in split_dash(pts, d) {
+                    if piece.len() >= 2 {
+                        geo.stroke_polyline(&piece, false, color, stroke_mm, width_screen, bounds);
+                    }
                 }
             }
-        }
+        },
         _ => geo.stroke_polyline(pts, closed, color, stroke_mm, width_screen, bounds),
     }
 }
@@ -360,6 +450,8 @@ pub fn triangulate(pts: &[Point]) -> Vec<u32> {
 pub enum BatchKind {
     Fill,
     Line,
+    /// Gestrichelte Segmente (`GpuGeometry::dash_batches`, Strich-Pipeline).
+    Dash,
 }
 
 /// Ein zusammenhaengender Zeichen-Batch (Index-Bereich) mit einer Farbe.
@@ -403,6 +495,9 @@ pub struct GpuGeometry {
     /// Analytisch gezeichnete Boegen (je EINE Instanz, kein Segment-Mesh mehr):
     /// die GPU rendert sie pro Frame exakt rund per SDF-Fragment-Shader.
     pub arcs: Vec<ArcInstanceData>,
+    /// Segmente gestrichelter Zuege (je EINE Instanz, Muster im Fragment-Shader).
+    pub dash_segments: Vec<DashSegment>,
+    pub dash_batches: Vec<DashBatch>,
     /// Maler-Reihenfolge ueber BEIDE Batch-Arten hinweg: (Art, Index in
     /// `fill_batches` bzw. `line_batches`). Der Renderer zeichnet exakt in dieser
     /// Reihenfolge (Pipeline-Wechsel pro Eintrag) — nur so deckt eine spaetere
@@ -465,6 +560,66 @@ impl GpuGeometry {
         });
         self.draw_sequence
             .push((BatchKind::Line, (self.line_batches.len() - 1) as u32));
+    }
+
+    fn add_dash_batch(&mut self, count: u32, color: Rgba, stroke_mm: f32, width_screen: bool) {
+        let last_idx = self.dash_batches.len().wrapping_sub(1) as u32;
+        if self.draw_sequence.last() == Some(&(BatchKind::Dash, last_idx)) {
+            if let Some(last) = self.dash_batches.last_mut() {
+                if last.stroke_mm == stroke_mm && last.width_screen == width_screen && same_rgba(last.color, color) {
+                    last.count += count;
+                    return;
+                }
+            }
+        }
+        self.dash_batches.push(DashBatch { start: self.dash_segments.len() as u32 - count, count, color, stroke_mm, width_screen });
+        self.draw_sequence.push((BatchKind::Dash, (self.dash_batches.len() - 1) as u32));
+    }
+
+    /// Gestrichelter Linienzug (Modell-Meter) mit gueltigem Muster `cycle_m` (Modell-Meter, gerade
+    /// Laenge): je Segment eine Instanz mit Lauflaenge — Phase wie `split_dash` ueber den ganzen Zug,
+    /// Segmente kuerzer als 1e-12 m entfallen; ein geschlossener Umriss bleibt offen (wie frueher).
+    fn stroke_dashed(&mut self, pts: &[Point], cycle_m: &[f32], color: Rgba, stroke_mm: f32, width_screen: bool, bounds: &mut Bounds) {
+        if pts.len() < 2 {
+            return;
+        }
+        let mut lens: Vec<f32> = Vec::with_capacity(pts.len() - 1);
+        let mut run = 0.0f32;
+        for w in pts.windows(2) {
+            let l = ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt();
+            lens.push(l);
+            if l >= 1e-12 {
+                run += l;
+            }
+        }
+        let mut dash = [0.0f32; MAX_LINE_DASH];
+        for (d, c) in dash.iter_mut().zip(cycle_m) {
+            *d = c * PX_PER_M;
+        }
+        let total: f32 = cycle_m.iter().sum::<f32>() * PX_PER_M;
+        let before = self.dash_segments.len();
+        let mut s0 = 0.0f32;
+        for (w, &l) in pts.windows(2).zip(&lens) {
+            if l < 1e-12 {
+                continue;
+            }
+            bounds.track(w[0]);
+            bounds.track(w[1]);
+            self.dash_segments.push(DashSegment {
+                a: to_screen(w[0]),
+                b: to_screen(w[1]),
+                s0: s0 * PX_PER_M,
+                run_len: run * PX_PER_M,
+                total,
+                count: cycle_m.len() as u32,
+                dash,
+            });
+            s0 += l;
+        }
+        let n = (self.dash_segments.len() - before) as u32;
+        if n > 0 {
+            self.add_dash_batch(n, color, stroke_mm, width_screen);
+        }
     }
 
     /// Zeichnet einen zusammenhaengenden Linienzug (Modell-Meter) mit ECHTEN
@@ -902,6 +1057,114 @@ mod tests {
         assert_eq!(prepare_arc_dash(Some(&[])).1, 0);
     }
 
+    // --- Strichmuster im Shader (DashSegment, dash_coverage) -------------------
+
+    fn dashed_line(a: Point, b: Point, dash: Vec<f32>) -> Scene {
+        Scene { lines: vec![Line { a, b, color: [0.2, 0.2, 0.2, 1.0], width_mm: 0.13, dash: Some(dash), z: 0 }], ..Scene::default() }
+    }
+
+    #[test]
+    fn gestrichelte_linie_eine_instanz_statt_zerlegung() {
+        let geo = compile_scene(&dashed_line([0.0, 0.0], [3.0, 0.0], vec![0.12, 0.08]));
+        assert!(geo.line_verts.is_empty() && geo.line_idx.is_empty(), "keine Teilstuecke mehr");
+        assert_eq!(geo.dash_segments.len(), 1);
+        assert_eq!(geo.draw_sequence, vec![(BatchKind::Dash, 0)]);
+        let d = &geo.dash_segments[0];
+        assert_eq!(d.a, [0.0, 0.0]);
+        assert_eq!(d.b, [3.0 * PX_PER_M, 0.0]);
+        assert_eq!((d.s0, d.run_len, d.count), (0.0, 3.0 * PX_PER_M, 2));
+        assert!((d.dash[0] - 0.012 * PX_PER_M).abs() < 1e-5 && (d.dash[1] - 0.008 * PX_PER_M).abs() < 1e-5);
+        assert!((d.total - 0.02 * PX_PER_M).abs() < 1e-5);
+        assert_eq!(geo.dash_batches[0].count, 1);
+        assert_eq!(geo.dash_batches[0].stroke_mm, 0.13);
+    }
+
+    #[test]
+    fn gestrichelter_zug_phase_ueber_ecken_und_offener_umriss() {
+        let pts = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 2.0]];
+        let scene = Scene {
+            polylines: vec![crate::types::Polyline { pts: pts.clone(), color: [0.0, 0.0, 0.0, 1.0], width_mm: 0.25, dash: Some(vec![1.0]), z: 0, width_screen: false }],
+            outlines: vec![Outline { pts: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], color: [0.0, 0.0, 0.0, 1.0], width_mm: 0.25, dash: Some(vec![1.0]), z: 1 }],
+            ..Scene::default()
+        };
+        let geo = compile_scene(&scene);
+        // Polylinie: Nullsegment entfaellt, Phase laeuft weiter; Umriss bleibt offen (2 statt 3 Kanten).
+        assert_eq!(geo.dash_segments.len(), 4);
+        assert_eq!(geo.dash_segments[1].s0, 1.0 * PX_PER_M);
+        assert_eq!(geo.dash_segments[1].run_len, 3.0 * PX_PER_M);
+        assert_eq!(geo.dash_segments[1].count, 2, "ungerades Muster verdoppelt");
+        // gleiche Farbe/Breite, aufeinanderfolgend → ein Batch
+        assert_eq!(geo.dash_batches.len(), 1);
+        assert_eq!(geo.dash_batches[0].count, 4);
+    }
+
+    #[test]
+    fn ungueltiges_oder_langes_muster_wie_bisher() {
+        // nur Nullen → durchgezogen (ein offener Zug)
+        let geo = compile_scene(&dashed_line([0.0, 0.0], [1.0, 0.0], vec![0.0, 0.0]));
+        assert!(geo.dash_segments.is_empty() && !geo.line_idx.is_empty());
+        // 9 Eintraege → verdoppelt 18 > MAX_LINE_DASH: CPU-Zerlegung
+        let geo = compile_scene(&dashed_line([0.0, 0.0], [1.0, 0.0], vec![1.0; 9]));
+        assert!(geo.dash_segments.is_empty() && !geo.line_idx.is_empty());
+    }
+
+    /// Der Shader-Spiegel deckt genau die Pixel, die die frueheren Teilstuecke samt runden Kappen
+    /// deckten: Abstand zum naechsten `split_dash`-Stueck (Geraete-px) == `dash_coverage`.
+    #[test]
+    fn deckung_wie_zerlegung_mit_rundkappen() {
+        let mut seed = 12345u32;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        for case in 0..200 {
+            let len_m = 0.05 + rnd() * 3.0;
+            let n = 1 + (rnd() * 4.0) as usize;
+            let pat: Vec<f32> = (0..n).map(|_| 0.02 + rnd() * 0.6).collect();
+            let pps = 0.5 + rnd() * 4.0; // Geraete-px je Bildschirm-Einheit
+            let hw = 0.5 + rnd() * 3.0;
+            let to_px = |m: f32| m * PX_PER_M * pps;
+            // gerade Strecke, in 1–3 kollineare Segmente geteilt
+            let cuts: Vec<f32> = match case % 3 {
+                0 => vec![0.0, len_m],
+                1 => vec![0.0, len_m * 0.37, len_m],
+                _ => vec![0.0, len_m * 0.2, len_m * 0.71, len_m],
+            };
+            let pts: Vec<Point> = cuts.iter().map(|&x| [x, 0.0]).collect();
+            let geo = compile_scene(&Scene {
+                polylines: vec![crate::types::Polyline { pts: pts.clone(), color: [0.0; 4], width_mm: 0.2, dash: Some(pat.clone()), z: 0, width_screen: false }],
+                ..Scene::default()
+            });
+            let pieces = split_dash(&pts, &pat);
+            for _ in 0..200 {
+                let s = to_px(-0.1 + rnd() * (len_m + 0.2));
+                let y = (rnd() * 2.0 - 1.0) * hw * 1.5;
+                let old = pieces
+                    .iter()
+                    .map(|p| {
+                        let (p0, p1) = (to_px(p[0][0]), to_px(p[p.len() - 1][0]));
+                        let e = (p0 - s).max(s - p1).max(0.0);
+                        (e * e + y * y).sqrt()
+                    })
+                    .fold(f32::INFINITY, f32::min);
+                // jedes Segment deckt seinen Bereich samt halber Breite davor/dahinter
+                let new = geo
+                    .dash_segments
+                    .iter()
+                    .map(|d| {
+                        let s0 = d.s0 * pps;
+                        let s1 = s0 + (d.b[0] - d.a[0]) * pps;
+                        let cyc: Vec<f32> = d.dash[..d.count as usize].iter().map(|v| v * pps).collect();
+                        dash_coverage(s, y, [s0, s1, d.run_len * pps, hw], d.total * pps, &cyc)
+                    })
+                    .fold(f32::INFINITY, f32::min);
+                // Gleiche Entscheidung (gedeckt ja/nein) bis auf Rundung an der Kante.
+                let tol = 2e-3 * (1.0 + s.abs());
+                assert!((old <= hw) == (new <= hw) || (old - hw).abs() < tol || (new - hw).abs() < tol, "Fall {case}: s={s} y={y} alt {old} neu {new} hw {hw}");
+            }
+        }
+    }
+
     // --- split_dash: geometrische Strichmuster-Zerlegung ---------------------
 
     #[test]
@@ -958,7 +1221,7 @@ mod tests {
     }
 
     #[test]
-    fn dash_reduziert_indexanzahl_gegenueber_durchgezogenem_umriss() {
+    fn gestrichelter_umriss_als_shader_instanzen() {
         let ring = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
         let solid = Scene {
             outlines: vec![Outline {
@@ -983,12 +1246,9 @@ mod tests {
         let geo_solid = compile_scene(&solid);
         let geo_dashed = compile_scene(&dashed);
         assert!(!geo_solid.line_idx.is_empty());
-        assert!(!geo_dashed.line_idx.is_empty());
-        assert_ne!(
-            geo_solid.line_idx.len(),
-            geo_dashed.line_idx.len(),
-            "gestrichelter Umriss sollte eine andere (geringere) Indexanzahl als der durchgezogene ergeben"
-        );
+        // Gestrichelt: keine Strich-Dreiecke, je Kante eine Shader-Instanz (Umriss offen wie bisher).
+        assert!(geo_dashed.line_idx.is_empty());
+        assert_eq!(geo_dashed.dash_segments.len(), 3);
     }
 
     #[test]
@@ -1019,5 +1279,35 @@ mod tests {
         // Sweep = Viertelkreis (Betrag pi/2), Radius exakt.
         assert!((a.sweep.abs() - std::f32::consts::FRAC_PI_2).abs() < 1e-4);
         assert!((a.r_screen - PX_PER_M).abs() < 1e-3);
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use std::time::Instant;
+
+    /// Messung: `SCENE_BENCH_FILE=szene.bin cargo test --release --lib tessellate::bench -- --ignored --nocapture`
+    /// (Szene-Bytes wie für `set_scene_bin`).
+    #[test]
+    #[ignore]
+    fn szene_kompilieren() {
+        let Ok(path) = std::env::var("SCENE_BENCH_FILE") else { return };
+        let bytes = std::fs::read(path).unwrap();
+        for _ in 0..3 {
+            let t = Instant::now();
+            let scene = crate::scene_bin::decode_scene(&bytes).unwrap();
+            let t_dec = t.elapsed();
+            let t = Instant::now();
+            let geo = compile_scene(&scene);
+            println!(
+                "decode {:?}  compile {:?}  lineVerts {} lineIdx {} fillIdx {}",
+                t_dec,
+                t.elapsed(),
+                geo.line_verts.len() / 6,
+                geo.line_idx.len(),
+                geo.fill_idx.len()
+            );
+        }
     }
 }

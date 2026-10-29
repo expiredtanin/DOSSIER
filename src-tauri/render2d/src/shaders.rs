@@ -262,3 +262,131 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(in.color.rgb, a);
 }
 "#;
+
+/// Strich-Pipeline fuer GESTRICHELTE Linien: je Segment EINE Instanz (Quad aus `vertex_index`),
+/// das Strichmuster rechnet der Fragment-Shader aus der Lauflaenge (frueher zerlegte die CPU jeden
+/// Zug in seine Striche, je mit runden Kappen — bei grossen Schnitten mit verdeckten Kanten
+/// Hunderte Millionen Indizes). Gleiche Semantik wie damals (`tessellate::dash_coverage` ist der
+/// CPU-Spiegel dieses Shaders): Phase ab Zuganfang ueber Ecken durch, Striche mit runden Enden
+/// (Radius = halbe Strichbreite), hinter dem Zugende kein neuer Strich.
+///
+/// Das Quad liegt um das Segment, an beiden Enden um die halbe Breite verlaengert (Kappen/Ecken).
+/// Breite wie `LINE_WGSL`: `max(1, stroke_px * stroke_scale)` Geraete-px. Alles im Fragment in
+/// Geraete-px: `sy` = (Lauflaenge, Querabstand), `seg` = (Segment-Anfang, -Ende, Zuglaenge, halbe
+/// Breite), Muster in `d0`/`d1` (bis 8 Eintraege, gerade = Strich).
+///
+/// Instanz-Layout: @location(0) ab = (a.x, a.y, b.x, b.y) Bildschirm-Raum,
+///                 @location(1) run = (s0, run_len, total, count) Bildschirm-Einheiten,
+///                 @location(2) d0, @location(3) d1 = Muster (Bildschirm-Einheiten).
+pub const DASH_LINE_WGSL: &str = r#"
+struct Globals {
+    view_proj    : mat4x4<f32>,
+    color        : vec4<f32>,
+    viewport_px  : vec2<f32>,
+    stroke_px    : f32,
+    stroke_scale : f32,
+};
+@group(0) @binding(0) var<uniform> globals : Globals;
+
+struct VsOut {
+    @builtin(position) pos : vec4<f32>,
+    @location(0)                    sy  : vec2<f32>,
+    @location(1) @interpolate(flat) seg : vec4<f32>,
+    @location(2) @interpolate(flat) pat : vec2<f32>,
+    @location(3) @interpolate(flat) d0  : vec4<f32>,
+    @location(4) @interpolate(flat) d1  : vec4<f32>,
+};
+
+@vertex
+fn vs_main(
+    @builtin(vertex_index) vidx : u32,
+    @location(0) ab  : vec4<f32>,
+    @location(1) run : vec4<f32>,
+    @location(2) d0  : vec4<f32>,
+    @location(3) d1  : vec4<f32>,
+) -> VsOut {
+    // (u, v): u = 0 Segment-Anfang, 1 Ende; v = Seite (-1/+1).
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(0.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0),
+    );
+    let c = corners[vidx];
+    let half_vp = globals.viewport_px * 0.5;
+    let ca = globals.view_proj * vec4<f32>(ab.xy, 0.0, 1.0);
+    let cb = globals.view_proj * vec4<f32>(ab.zw, 0.0, 1.0);
+    // Geraete-px je Bildschirm-Einheit (Ortho, gleichmaessig skaliert).
+    let cx = globals.view_proj * vec4<f32>(ab.xy + vec2<f32>(1.0, 0.0), 0.0, 1.0);
+    let pps = length((cx.xy - ca.xy) * half_vp);
+
+    let seg_v = (cb.xy - ca.xy) * half_vp;
+    let seg_px = length(seg_v);
+    var t = vec2<f32>(1.0, 0.0);
+    if (seg_px > 1e-6) {
+        t = seg_v / seg_px;
+    }
+    let nrm = vec2<f32>(-t.y, t.x);
+    let hw = 0.5 * max(1.0, globals.stroke_px * globals.stroke_scale);
+    let ext = select(-hw, hw, c.x > 0.5);
+    let base = select(ca, cb, c.x > 0.5);
+    let off_px = t * ext + nrm * (c.y * hw);
+
+    var out : VsOut;
+    out.pos = vec4<f32>(base.xy + off_px / half_vp, base.z, base.w);
+    let s0 = run.x * pps;
+    out.sy = vec2<f32>(s0 + c.x * seg_px + ext, c.y * hw);
+    out.seg = vec4<f32>(s0, s0 + seg_px, run.y * pps, hw);
+    out.pat = vec2<f32>(run.z * pps, run.w);
+    out.d0 = d0 * pps;
+    out.d1 = d1 * pps;
+    return out;
+}
+
+@fragment
+fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
+    let s = in.sy.x;
+    let y = in.sy.y;
+    let hw = in.seg.w;
+    let sc = clamp(s, in.seg.x, in.seg.y);
+    let e_out = abs(s - sc);
+    let total = in.pat.x;
+    let n = i32(in.pat.y + 0.5);
+    var e_in = 0.0;
+    if (n > 0 && total > 1e-6) {
+        let k = floor(sc / total);
+        let m = sc - k * total;
+        var cyc = array<f32, 8>(in.d0.x, in.d0.y, in.d0.z, in.d0.w, in.d1.x, in.d1.y, in.d1.z, in.d1.w);
+        var acc = 0.0;
+        var on = true;
+        var prev_end = 0.0;
+        var next_start = 0.0;
+        for (var i = 0; i < 8; i = i + 1) {
+            if (i >= n) { break; }
+            let d = cyc[i];
+            if (m >= acc && m < acc + d) {
+                on = (i % 2) == 0;
+                prev_end = acc;
+                next_start = acc + d;
+            }
+            acc = acc + d;
+        }
+        if (!on) {
+            let b = k * total;
+            let pe = sc - (b + prev_end);
+            var ne = b + next_start - sc;
+            if (b + next_start > in.seg.z) { ne = 1e30; }
+            e_in = max(min(pe, ne), 0.0);
+        }
+    }
+    let e = e_in + e_out;
+    var a = globals.color.a;
+    if (e > 0.0) {
+        // Rundes Strich-Ende (Abstand zum Strich), Kante ~1 px weich wie die Boegen.
+        let d = sqrt(e * e + y * y);
+        a = a * (1.0 - smoothstep(hw - 0.5, hw + 0.5, d));
+    }
+    if (a <= 0.002) {
+        discard;
+    }
+    return vec4<f32>(globals.color.rgb, a);
+}
+"#;

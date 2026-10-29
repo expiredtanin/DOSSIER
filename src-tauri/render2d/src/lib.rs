@@ -44,8 +44,8 @@ pub mod headless;
 pub use demo::{demo_scene, initial_view_box};
 pub use ortho::{compute_ortho_matrix, meet_scale, mm_to_device_px, Mat4};
 pub use tessellate::{
-    arc_screen_params, compile_scene, prepare_arc_dash, triangulate, ArcInstanceData, BatchKind,
-    GpuGeometry, MAX_ARC_DASH, PX_PER_M,
+    arc_screen_params, compile_scene, dash_coverage, prepare_arc_dash, triangulate, ArcInstanceData, BatchKind, DashBatch, DashSegment,
+    GpuGeometry, MAX_ARC_DASH, MAX_LINE_DASH, PX_PER_M,
 };
 pub use types::{Arc, FillPolygon, Line, Outline, Point, Rgba, Scene, Text, TextAlign, ViewBox};
 

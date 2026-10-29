@@ -141,6 +141,18 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Der Kern merkt sich die zuletzt vorbereiteten Schnitte (Schlüssel je `computeSection`): Schwarz-Weiss/Sichtbarkeit
     umschalten 8×8 ~1 ms statt Neurechnen. Offen: Szene mit vielen verdeckten (gestrichelten) Kanten bleibt teuer
     (16×16 mit verdeckten Kanten ~2,5 s, Strichmuster-Zerlegung in `plan_scene`).
+    ✅ (29.10.) Strichmuster im render2d-Shader statt CPU-Zerlegung: gestrichelte Linien/Züge/Umrisse gehen je Segment als
+    EINE Instanz (`DashSegment`: Lauflänge, Zuglänge, Muster bis 8 Einträge) an die neue Strich-Pipeline (`DASH_LINE_WGSL`); der
+    Fragment-Shader setzt Striche, Lücken und runde Strich-Enden je Pixel (Semantik wie `split_dash`, CPU-Spiegel
+    `dash_coverage` gegen die alte Zerlegung getestet; längere Muster zerlegt weiter die CPU). Die Zerlegung lag in
+    `render2d::tessellate` (nicht `plan_scene`) und war das eigentliche Problem: big16-Schnitt S2 (385 000 verdeckte Kanten)
+    173 Mio. Linien-Vertices/409 Mio. Indizes, `compile_scene` 9 s nativ — und schon 6×6 überschritt die WebGPU-Puffergrenze
+    (256 MB, „Buffer size … greater than the maximum“), der Schnitt wurde gar nicht gezeichnet. Jetzt 0,36 Mio. Vertices +
+    25 MB Instanzen, `compile_scene` ~0,1–0,9 s (Container unter Last). Bilder (Headless, lavapipe, `render_png --scene`):
+    13 Ausschnitte Schnitt/Plan alt vs. neu ≤ 0,09 % Pixel abweichend (Kanten-AA), Strich-Enden rund wie vorher.
+    SVG/PDF/DXF unberührt. Offen: Kern-Seite bleibt (big16 S2: Schnitt-Primitive 0,37 s, `planSceneBin` 0,45 s); der
+    Chunk-Pfad (`gpu_compile.rs`, WebGL/nativ-Chunks) zeichnet Striche weiterhin durchgezogen. Nicht in der Tauri-App/Metal und
+    nicht im Browser-WebGPU angesehen (nur lavapipe/Vulkan headless).
     TS-Fassung gelöscht (29.10.): `toSection.ts`/`toElevation.ts` sind dünne Fassaden (Ebene, Sichtbarkeit, truck-Körper →
     Abfrage), `sectionOpenings.ts`, `sectionExtras.ts`, `meshSection.ts`, `generateSectionPlan`/`resolve*SectionStyle` in
     `generatePlan.ts`, `windowSymbol` (opening.ts), `keyhole`/`voidSectionRects`/`subtractVoidsInSection` (voids.ts) und ihre

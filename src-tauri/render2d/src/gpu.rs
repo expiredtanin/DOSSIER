@@ -18,8 +18,8 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::ortho::{compute_ortho_matrix, corrected_view_box, meet_scale, mm_to_device_px, Mat4};
-use crate::shaders::{ARC_WGSL, FILL_WGSL, LINE_WGSL};
-use crate::tessellate::{compile_scene, to_screen, ArcInstanceData, BatchKind, GpuGeometry, MAX_ARC_DASH};
+use crate::shaders::{ARC_WGSL, DASH_LINE_WGSL, FILL_WGSL, LINE_WGSL};
+use crate::tessellate::{compile_scene, to_screen, ArcInstanceData, BatchKind, DashSegment, GpuGeometry, MAX_ARC_DASH, MAX_LINE_DASH};
 use crate::types::{Scene, Text, TextAlign, ViewBox};
 
 /// MSAA-Faktor: 4x Multisampling fuer glatte Linien-/Fuellkanten (wie im Browser).
@@ -92,6 +92,25 @@ impl ArcInstance {
     }
 }
 
+/// EIN gestricheltes Segment fuer die GPU (Instanz der Strich-Pipeline, 1:1 zu `DASH_LINE_WGSL`):
+/// 16 f32 = 64 Byte.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct DashInstance {
+    /// (a.x, a.y, b.x, b.y) Bildschirm-Raum
+    ab: [f32; 4],
+    /// (s0, run_len, total, count) Bildschirm-Einheiten
+    run: [f32; 4],
+    dash: [f32; 8],
+}
+
+impl DashInstance {
+    fn from_segment(d: &DashSegment) -> Self {
+        const _: () = assert!(MAX_LINE_DASH == 8);
+        Self { ab: [d.a[0], d.a[1], d.b[0], d.b[1]], run: [d.s0, d.run_len, d.total, d.count as f32], dash: d.dash }
+    }
+}
+
 /// Puffer ungemappt anlegen und ueber die Queue befuellen (Groesse auf die
 /// Kopier-Ausrichtung von 4 Byte aufgerundet, `write_buffer` verlangt das).
 /// Siehe [`Renderer::upload_scene_queued`].
@@ -142,6 +161,8 @@ struct SceneBuffers {
     arc_vbo: Option<wgpu::Buffer>,
     /// Anzahl Bogen-Instanzen (Draw: 6 Vertices je Instanz).
     arc_count: u32,
+    /// Instanz-Puffer der gestrichelten Segmente; None wenn leer.
+    dash_vbo: Option<wgpu::Buffer>,
     geo: GpuGeometry,
     /// Textzeilen der Szene (Modell-Anker + Papier-mm-Groesse). Werden nicht
     /// tesselliert, sondern pro Frame ueber den Glyphen-Atlas gesetzt (die
@@ -173,6 +194,8 @@ const DEFAULT_TEXT_FAMILY: &str = "Inter";
 pub struct Renderer {
     fill_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
+    /// Gestrichelte Linien (Muster im Fragment-Shader, `DASH_LINE_WGSL`), gleiche Globals.
+    dash_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     /// Analytische Bogen-Pipeline (exakter Kreis-Shader, `ARC_WGSL`).
     arc_pipeline: wgpu::RenderPipeline,
@@ -339,6 +362,38 @@ impl Renderer {
             cache: None,
         });
 
+        // ── Gestrichelte Linien: je Segment eine Instanz, Quad aus vertex_index ──
+        let dash_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("dash.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(DASH_LINE_WGSL.into()),
+        });
+        let dash_instance_layout = wgpu::VertexBufferLayout {
+            array_stride: 16 * 4,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4],
+        };
+        let dash_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("dash.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &dash_module,
+                entry_point: Some("vs_main"),
+                buffers: &[dash_instance_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &dash_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState { format: color_format, blend, write_mask: wgpu::ColorWrites::ALL })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, mask: !0, alpha_to_coverage_enabled: false },
+            multiview_mask: None,
+            cache: None,
+        });
+
         // ── Analytische Bogen-Pipeline (exakter Kreis-Shader) ─────────────────
         let arc_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("arc.wgsl"),
@@ -431,6 +486,7 @@ impl Renderer {
         Self {
             fill_pipeline,
             line_pipeline,
+            dash_pipeline,
             bind_group_layout,
             arc_pipeline,
             arc_uniform,
@@ -520,6 +576,13 @@ impl Renderer {
             ))
         };
 
+        let dash_instances: Vec<DashInstance> = geo.dash_segments.iter().map(DashInstance::from_segment).collect();
+        let dash_vbo = if dash_instances.is_empty() {
+            None
+        } else {
+            Some(make(bytemuck::cast_slice(&dash_instances), "dash.instances", wgpu::BufferUsages::VERTEX))
+        };
+
         self.scene = Some(SceneBuffers {
             fill_vbo: mk_vbo(&geo.fill_pos, "fill.vbo"),
             fill_ibo: mk_ibo(&geo.fill_idx, "fill.ibo"),
@@ -527,6 +590,7 @@ impl Renderer {
             line_ibo: mk_ibo(&geo.line_idx, "line.ibo"),
             arc_vbo,
             arc_count,
+            dash_vbo,
             geo,
             texts: scene.texts.clone(),
         });
@@ -702,6 +766,16 @@ impl Renderer {
                             viewport_px: [vw, vh],
                             stroke_px: 0.0,
                             stroke_scale: mm_px,
+                        });
+                    }
+                    BatchKind::Dash => {
+                        let b = &scene.geo.dash_batches[idx as usize];
+                        blocks.push(Globals {
+                            view_proj: proj,
+                            color: b.color,
+                            viewport_px: [vw, vh],
+                            stroke_px: b.stroke_mm,
+                            stroke_scale: if b.width_screen { px_per_screen } else { mm_px },
                         });
                     }
                     BatchKind::Line => {
@@ -917,6 +991,19 @@ impl Renderer {
                             pass.set_bind_group(0, &u.bind_group, &[block as u32 * stride]);
                             let start = b.start_index;
                             pass.draw_indexed(start..start + b.index_count, 0, 0..1);
+                        }
+                        BatchKind::Dash => {
+                            let Some(vbo) = &scene.dash_vbo else {
+                                continue;
+                            };
+                            if bound != Some(BatchKind::Dash) {
+                                pass.set_pipeline(&self.dash_pipeline);
+                                pass.set_vertex_buffer(0, vbo.slice(..));
+                                bound = Some(BatchKind::Dash);
+                            }
+                            let b = &scene.geo.dash_batches[idx as usize];
+                            pass.set_bind_group(0, &u.bind_group, &[block as u32 * stride]);
+                            pass.draw(0..6, b.start..b.start + b.count);
                         }
                         BatchKind::Line => {
                             let (Some(vbo), Some(ibo)) = (&scene.line_vbo, &scene.line_ibo)
