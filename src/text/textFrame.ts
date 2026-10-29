@@ -1,7 +1,7 @@
 // Geschätzter Rahmen (Modell-Meter) eines gezeichneten Textes — EINE Quelle
 // für sowohl die visuelle Anzeige (PlanView.tsx Auswahl-Rahmen/Inline-Editor-
-// Anker) als auch die Eckpunkt-Griffe (state/projectSlice.ts drawingVertices/
-// moveGrip). Reines Modul: kein React, kein DOM zwingend nötig
+// Anker) als auch die Eckpunkt-Griffe der Textspalte (`geometry/grips.ts`
+// drawingVertices). Reines Modul: kein React, kein DOM zwingend nötig
 // (`contentFontBaselineFromTop` fällt ohne Canvas sicher auf einen
 // Näherungswert zurück, s. dort) — darf daher auch aus dem Store-Slice
 // heraus aufgerufen werden.

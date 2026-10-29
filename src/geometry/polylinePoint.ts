@@ -6,7 +6,7 @@
 //
 // Bogen-Segmente (`bulge`) werden bewusst über ihre SEHNE gemessen: für die
 // Frage „welches Segment ist gemeint" reicht das, und der eingefügte Punkt
-// landet ohnehin exakt auf dem Bogen (s. `projectSlice.insertDrawingPoint`).
+// landet ohnehin exakt auf dem Bogen (s. `insert_point` im Kern, `grips.rs`).
 
 import type { Vec2 } from "../model/types";
 

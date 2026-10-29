@@ -154,6 +154,23 @@ export function opsToJson(ops: readonly CoreOp[]): string {
   return JSON.stringify(ops, markNonFinite);
 }
 
+/** Wert als JSON mit Nicht-endlich-Marken (wie {@link opsToJson}), z. B. Anfragen an den Kern. */
+export function toMarkedJson(v: unknown): string {
+  return JSON.stringify(v, markNonFinite);
+}
+
+/** Nicht-endlich-Marken des Kerns (`"\u0001NaN"` …) zurück in Zahlen. */
+function reviveNonFinite(_key: string, v: unknown): unknown {
+  if (typeof v !== "string" || v.charCodeAt(0) !== 1) return v;
+  const t = v.slice(1);
+  return t === "NaN" ? NaN : t === "Infinity" ? Infinity : t === "-Infinity" ? -Infinity : v;
+}
+
+/** JSON des Kerns lesen; Nicht-endlich-Marken werden wieder Zahlen (nur wenn welche vorkommen). */
+export function fromMarkedJson<T>(text: string): T {
+  return (text.includes("\\u0001") ? JSON.parse(text, reviveNonFinite) : JSON.parse(text)) as T;
+}
+
 // ── Validierung ([7]) — im Kern (`ops.rs`) ───────────────────────────────────
 
 function problemsOf(json: string): string[] {

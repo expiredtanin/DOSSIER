@@ -36,12 +36,12 @@ mod snap;
 mod plan_svg;
 mod plan_dxf;
 mod plan_print_svg;
-mod drawings;
 mod layers;
 mod pens;
 mod layout_model;
 mod parametric_walls;
 mod reorder;
+mod grips;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

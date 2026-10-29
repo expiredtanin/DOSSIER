@@ -473,6 +473,31 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (5) `model/wall.ts` (vertikale Ausdehnungen, Aufrufer in `toSection`/`voids`/Viewport — fallen mit dem Plan-Port);
     (6) `model/geometry.ts` (`wallBand`/`wallCorners`/`clippedBand`, Aufrufer in Werkzeugen/Fang), `model/color.ts`
     (Farbraum-Umrechnung der UI), `state/viewSnapshots.ts`/`visibilitySets.ts` (UI-Zustand, localStorage).
+    **Griffe im Kern (29.10.)** — erledigt damit (3) und aus (2) die Dicken: `grips.rs` (vorher ~800 Zeilen in `projectSlice.ts`
+    und `state/edgeGrips.ts`): Eckpunkt-Griff (`moveGrip`: Wand, alle 2D-Formen inkl. Bogen-Mitten-Griff der Polylinie,
+    Masslinien-Offset und Masszahl mit Einrasten, Textpfad/Hinweislinie/Spaltenbreite, Kreis↔Ellipse), Verschieben, Kante
+    winkeltreu (`movePolygonEdge`), Grösse um einen Anker (`resizeGeom`), Decke/Dach/Treppe/Raum (Griff, Verschieben, Kante,
+    Stempel), Polylinien-Punkt einfügen/löschen, Dicke einschichtiger Wände/Decken (id und Name eines neuen Typs gibt die
+    Hülle mit: `Date.now()`, `t()`). Rechnung auf der rohen Wurzel (unbekannte Felder, Schlüsselreihenfolge bleiben). Die
+    Store-Aktionen behalten ihre Signatur; je Mausschritt EIN Kern-Aufruf `doc_grip_commit` (rechnen, prüfen, Verlauf —
+    `ProjectDocument.commitGrip`), TS führt die Leseansicht mit den gelieferten Ops nach (NaN-Marken werden wieder Zahlen,
+    `fromMarkedJson`); die Wurzel-Abfrage `gripOps` rechnet ohne Anwenden. Griff-Listen (`drawingVertices`, `ringEdges`/
+    `openEdges`/`polylineEdgeGrips`) über die Fassade `geometry/grips.ts` (Polylinie als flacher Puffer, sonst Element-JSON);
+    die Rahmen-Ecken einer Textspalte bleiben in TS (Schrift-Metrik, `textFrameCorners`). Gelöscht: die TS-Rechnung,
+    `state/edgeGrips.ts`, `dimTextFrame`/`dimTextPos`/`dimTextOffsetFromPoint`/`mmToModel`/`modelToMm` (`model/dimension.ts` hält
+    nur noch die Konstanten) und die Bindung `dim_text_frame`. Gleichheit (einmalig, Test gelöscht): 790 000 Zufalls-Änderungen
+    über 15 000 Projekte (alle Formen, entartete Geometrie, NaN/±∞ in den Eingaben, Bögen, LV95) — Ops zeichengleich zur alten
+    Fassung; 19 800 Griff-Listen samt Kanten-Griffen bitgleich; 11 000 Store-Schritte (Leseansicht, Undo-Tiefe, Kern ==
+    Leseansicht). Abweichungen (gewollt): ein Griff-Index ohne Punkt (negativ, gebrochen, zu gross) ändert nichts (TS warf beim
+    Lesen von `undefined`, 38 000 der Zufallsfälle); gerechnet wird auf dem Dokument — ein dort als `null` gespeichertes NaN
+    rechnet wie `null` in JS (0) und kommt als `null` in die Leseansicht (vorher blieb dort NaN); Griff-Listen liefern −0 als 0.
+    Messung (vitest, 3000 Wände + 2000 Polylinien, alt/neu abwechselnd, Median, Container unter Last): Wand-Griff an Position
+    10/1500/2990 39–43/198–218/324–348 µs → 40–44/192–193/318–337 µs (dominiert von der linearen id-Suche), Polylinien-Griff
+    97–122 → 102–122 µs, Polylinien-Kante 108–138 → 109 µs, Wand verschieben 146–200 → 149–206 µs (gleich im Rahmen der
+    Streuung), Griff an einer 5000-Punkte-Polylinie 16–18 → 13–14 ms; Griff-Liste der 5000-Punkte-Polylinie 2,7 → 1,1 ms
+    (kleine Polylinie 2 → 4,5 µs). Nicht in der Tauri-App geprüft (vitest/Linux, e2e im Browser). Offen: `setPolylineVertexType`
+    (rechnet in `geometry/polylineVertexType.ts`), die lineare id-Suche je Mausschritt (im Kern beim Rechnen und beim Commit,
+    in TS in `applyOps`) und der Commit grosser Polylinien (~12 ms bei 5000 Punkten: Verlauf/Prüfung in `document.rs`/`ops.rs`).
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

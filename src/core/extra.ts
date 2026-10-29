@@ -53,3 +53,5 @@ export { addItems, fieldOps, findItem, itemsOf, opsMutation, patchItem, patchIte
 export type { EntityCollection, EntityOf, ProjectMutation } from "./opsBuild";
 export { EMPTY_MEMBERSHIP, containingGroupId, expandToGroups, isInsideActiveGroup, transitiveMembership } from "../model/groups";
 export type { GroupMembership, MemberKind } from "../model/groups";
+export { drawingVertices, gripPt, openEdges, polylineEdgeGrips, ringEdges } from "../geometry/grips";
+export type { GripRequest } from "../geometry/grips";
