@@ -155,6 +155,11 @@ impl Document {
         Ok(self.typed.as_ref().expect("gerade gesetzt"))
     }
 
+    /// Die Projekt-Wurzel als JSON (für Abfragen, die auf dem rohen Baum rechnen, s. `queries::run_root`).
+    pub fn root(&self) -> &Map<String, Value> {
+        &self.root
+    }
+
     pub fn field(&self, key: &str) -> Option<&Value> {
         self.root.get(key)
     }

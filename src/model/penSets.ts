@@ -1,139 +1,50 @@
-// Stiftsatz-Auflösung (ArchiCAD-Stiftsatz-Muster) — reine Funktionen, keine
-// Modell-Mutation. Der Trick, der jeden bestehenden Farb-/Strichstärke-Leser
-// (2D-Plan, beide 3D-Renderer, DXF-Export, Vorschau-Swatches) UNVERÄNDERT
-// lässt: `Component.color`/`.foreground`/`.background`, `LayerCategory.color`/
-// `.lw` bzw. die Element-Felder (`color`/`strokeWeight`/`weightMm`) bleiben
-// IMMER die eine gültige, aufgelöste Farbe/Strichstärke. Ein Stift-Verweis
-// (`xxxPenId`) schreibt diese Felder nur bei Gelegenheit (Stiftsatz-Wechsel,
-// Stift-Änderung, neue Zuweisung) per `rebakePenColors` aus dem aktiven
-// Stiftsatz NEU — kein Leser muss je einen Stift auflösen.
+// Stiftsatz-Auflösung (ArchiCAD-Stiftsatz-Muster) im Rust-Kern ([K4] S3, `src-tauri/core/src/pens.rs`).
+// Der Trick, der jeden bestehenden Farb-/Strichstärke-Leser (2D-Plan, beide 3D-Renderer, DXF-Export,
+// Vorschau-Swatches) UNVERÄNDERT lässt: `Component.color`/`.foreground`/`.background`,
+// `LayerCategory.color`/`.lw` bzw. die Element-Felder (`color`/`strokeWeight`/`weightMm`) bleiben
+// IMMER die eine gültige, aufgelöste Farbe/Strichstärke. Ein Stift-Verweis (`xxxPenId`) schreibt diese
+// Felder nur bei Gelegenheit (Stiftsatz-Wechsel, Stift-Änderung, neue Zuweisung) per `rebakePenOps` aus
+// dem aktiven Stiftsatz NEU — kein Leser muss je einen Stift auflösen.
 //
-// Ein Stift (`PenStyle`) trägt Farbe UND Strichstärke zusammen (wie ein
-// echter ArchiCAD-/AutoCAD-Stift) — beide wandern gemeinsam, wenn ein
-// Element/eine Ebene auf „Stift" statt „Frei" gestellt wird.
+// Ein Stift (`PenStyle`) trägt Farbe UND Strichstärke zusammen (wie ein echter ArchiCAD-/AutoCAD-Stift).
 //
-// Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
+// Im Kern: Standardpalette (255 Stifte, rein prozedural per HSL, keine externe Bibliothek, Stifte 1–9 und
+// 250–255 wie `ACI_PALETTE` in `export/exportDxf.ts`), Freie-Farbe-Palette, Neu-Backen und das Entfernen
+// von Stift-Verweisen. Hier bleiben nur die Lese-Auflösung einzelner Stifte (O(1), je Swatch im Render) und
+// dünne Fassaden, die die Ops des Kerns liefern (`documentFor(project)`: das Kern-Dokument folgt dem Projekt).
+//
+// Bewusst NICHT abgedeckt: Layout-Annotationen (`Layout.annotations[]`) und `Tür`/`ExtrudedSolid`/Kontext-
+// Objekte — kein `colorPenId`-Feld dort (Scope-Entscheid, s. PENDENZEN.md).
 
-import type { ColorPen, Component, LayerCategory, PenSet, PenStyle, Project } from "./types";
-import { applyOps } from "../core/ops";
+import type { PenStyle, Project } from "./types";
 import type { CoreOp } from "../core/ops";
-import { addItems, fieldOps, patchItems, setFieldIfChanged } from "../core/opsBuild";
+import { documentFor } from "../core/document";
+import { core } from "../engine/coreWasm";
 
 /** Farbe eines Stifts, der im aktiven Stiftsatz (noch) keinen Eintrag hat. */
 export const PEN_FALLBACK_COLOR = "#9aa0a6";
 /** Strichstärke (mm) eines Stifts, der im aktiven Stiftsatz (noch) keinen Eintrag hat. */
 export const PEN_FALLBACK_WEIGHT = 0.18;
 
-/** HSL (h in Grad 0..360, s/l in 0..1) → "#rrggbb". Reine Konvertierung, keine Bibliothek nötig. */
-export function hslToHex(h: number, s: number, l: number): string {
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const hp = (((h % 360) + 360) % 360) / 60;
-  const x = c * (1 - Math.abs((hp % 2) - 1));
-  const [r1, g1, b1] =
-    hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x] : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
-  const m = l - c / 2;
-  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
-  return `#${toHex(r1)}${toHex(g1)}${toHex(b1)}`;
+let freePalette: string[] | null = null;
+
+/**
+ * Feste Freie-Farbe-Palette für den Palette-Popover (`ui/PenColorField.tsx`): 8 Graustufen (Schwarz→Weiss)
+ * + 8 Farbtöne × 5 Helligkeitsstufen = 48 Swatches. Aus dem Kern (erst nach `initCore()` lesbar, daher
+ * eine Funktion, kein Modul-Wert); jeder Aufruf liefert dieselbe Liste.
+ */
+export function freeColorPalette(): string[] {
+  if (!freePalette) freePalette = JSON.parse(core().pens_call("freePalette", "")) as string[];
+  return freePalette;
 }
 
 /**
- * Feste Freie-Farbe-Palette für den Palette-Popover (`ui/PenColorField.tsx`):
- * 8 Graustufen (Schwarz→Weiss) + 8 Farbtöne × 5 Helligkeitsstufen = 48
- * Swatches. Rein prozedural (HSL), dieselbe Begründung wie
- * `generateStandardPenPalette` — kein externes Farbschema.
- */
-export const FREE_COLOR_PALETTE: string[] = (() => {
-  const out: string[] = [];
-  for (let i = 0; i < 8; i++) {
-    const v = Math.round((i / 7) * 255);
-    out.push(`#${v.toString(16).padStart(2, "0").repeat(3)}`);
-  }
-  for (let hue = 0; hue < 8; hue++) {
-    for (let level = 0; level < 5; level++) {
-      out.push(hslToHex(hue * 45, 0.75, 0.75 - level * 0.14));
-    }
-  }
-  return out;
-})();
-
-/**
- * Generiert 255 Stifte + einen passenden Stiftsatz nach klassischer CAD-
- * Nummerierungs-Konvention (AutoCAD Color Index / ArchiCAD-Stiftsätze): Stifte
- * 1–9 die Grundfarben (Rot/Gelb/Grün/Cyan/Blau/Magenta/Schwarz/zwei Grautöne —
- * dieselben Werte wie die bestehende `ACI_PALETTE` in `export/exportDxf.ts`,
- * damit beide Stellen konsistent bleiben), 10–249 24 Farbtöne × 10 Helligkeits-/
- * Sättigungsstufen (prozedural per HSL erzeugt), 250–255 ein Graustufen-Keil
- * (identische Werte wie `ACI_PALETTE`s 250–255). **Keine externe Bibliothek
- * oder ein konkretes lizenziertes Farbschema** — reine Mathematik (HSL-Kreis),
- * daher lizenzfrei; strukturell an die altbekannte 255-Stift-Konvention aus
- * AutoCAD/ArchiCAD angelehnt, nicht Pixel-für-Pixel identisch mit deren
- * (proprietärer) Originaltabelle. Strichstärke einheitlich `PEN_FALLBACK_WEIGHT`
- * (0.18 mm) — im Stiftsatz-Tab pro Stift frei änderbar.
- */
-export function generateStandardPenPalette(): { pens: ColorPen[]; styles: Record<string, PenStyle> } {
-  const pens: ColorPen[] = [];
-  const styles: Record<string, PenStyle> = {};
-  const add = (id: number, name: string, color: string) => {
-    pens.push({ id: String(id), name });
-    styles[String(id)] = { color, weight: PEN_FALLBACK_WEIGHT };
-  };
-
-  // 1–9: Grundfarben (wie ACI_PALETTE in exportDxf.ts).
-  add(1, "Rot", "#ff0000");
-  add(2, "Gelb", "#ffff00");
-  add(3, "Grün", "#00ff00");
-  add(4, "Cyan", "#00ffff");
-  add(5, "Blau", "#0000ff");
-  add(6, "Magenta", "#ff00ff");
-  add(7, "Schwarz", "#000000");
-  add(8, "Dunkelgrau", "#414141");
-  add(9, "Grau", "#808080");
-
-  // 10–249: 24 Farbtöne (15°-Schritte) × 10 Stufen (5 gesättigt hell→dunkel,
-  // 5 entsättigt hell→dunkel) — 240 Stifte.
-  let id = 10;
-  for (let hue = 0; hue < 24; hue++) {
-    const h = hue * 15;
-    for (let step = 0; step < 10; step++) {
-      const saturated = step < 5;
-      const level = step % 5; // 0..4
-      const l = 0.75 - level * 0.14; // 0.75 → 0.19
-      const s = saturated ? 0.85 : 0.4;
-      add(id, `Stift ${id}`, hslToHex(h, s, l));
-      id++;
-    }
-  }
-
-  // 250–255: Graustufen-Keil (wie ACI_PALETTE).
-  const greys: [number, string][] = [
-    [250, "#333333"],
-    [251, "#5b5b5b"],
-    [252, "#848484"],
-    [253, "#adadad"],
-    [254, "#d6d6d6"],
-    [255, "#ffffff"],
-  ];
-  for (const [gid, color] of greys) add(gid, `Grau ${gid}`, color);
-
-  return { pens, styles };
-}
-
-/**
- * Setzt `Project.pens`/`penSets` auf die generierte 255er-Standardpalette
- * (s. {@link generateStandardPenPalette}) — ERSETZT bestehende `pens`/den neu
- * angelegten Satz vollständig (kein Merge), gedacht für den Erststart, bevor
- * eigene Stifte/Sätze existieren. Der neue Satz wird aktiv, wenn noch KEIN
- * Stiftsatz aktiv war (dieselbe Konvention wie `addPenSet`).
+ * Setzt `Project.pens`/`penSets` auf die generierte 255er-Standardpalette — ERSETZT bestehende `pens`
+ * vollständig (kein Merge), gedacht für den Erststart. Der neue Satz wird aktiv, wenn noch KEIN Stiftsatz
+ * aktiv war.
  */
 export function seedStandardPenSetOps(project: Project): CoreOp[] {
-  const { pens, styles } = generateStandardPenPalette();
-  const penSet: PenSet = { id: `penset-${Date.now()}`, name: "Standard (CAD-Palette)", pens: styles };
-  const stateOps = [
-    ...fieldOps(project, "pens", pens),
-    ...addItems("penSets", [penSet]),
-    ...setFieldIfChanged(project, "activePenSetId", project.activePenSetId ?? penSet.id),
-  ];
-  return [...stateOps, ...rebakePenOps(applyOps(project, stateOps))];
+  return documentFor(project).queryRoot<CoreOp[]>("penSeedOps", JSON.stringify({ id: `penset-${Date.now()}`, name: "Standard (CAD-Palette)" }));
 }
 
 /** Der aktuell aktive Stiftsatz, oder `undefined` (kein Stiftsatz angelegt/aktiviert). */
@@ -156,102 +67,20 @@ export function resolvePenWeight(project: Project, penId: string): number {
   return resolvePenStyle(project, penId)?.weight ?? PEN_FALLBACK_WEIGHT;
 }
 
-/** Bäckt die Stift-Farbe(n) EINES Bauteils neu (reine Funktion, unverändert wenn kein Stift gesetzt). */
-function bakeComponent(project: Project, c: Component): Component {
-  if (!c.colorPenId && !c.foregroundPenId && !c.backgroundPenId) return c;
-  return {
-    ...c,
-    ...(c.colorPenId ? { color: resolvePenColor(project, c.colorPenId) } : {}),
-    ...(c.foregroundPenId ? { foreground: resolvePenColor(project, c.foregroundPenId) } : {}),
-    ...(c.backgroundPenId ? { background: resolvePenColor(project, c.backgroundPenId) } : {}),
-  };
-}
-
-/** Bäckt Farbe UND Strichstärke (`.lw`) EINER Ebenen-Kategorie neu (rekursiv über `children`). */
-function bakeCategory(project: Project, cat: LayerCategory): LayerCategory {
-  const next: LayerCategory = cat.colorPenId
-    ? { ...cat, color: resolvePenColor(project, cat.colorPenId), lw: resolvePenWeight(project, cat.colorPenId) }
-    : cat;
-  if (!cat.children) return next;
-  const children = cat.children.map((c) => bakeCategory(project, c));
-  return children === cat.children ? next : { ...next, children };
-}
-
 /**
- * Bäckt die eigene `color`-Stift-Kopplung EINES Modell-Elements neu (nur
- * Farbe — für Elementarten ohne eigenes Strichstärke-Override-Feld: Dach,
- * Öffnung, Treppe, Raum). Unverändert (referenzgleich), wenn kein Stift
- * gesetzt ist.
- */
-function bakeElementColor<T extends { colorPenId?: string; color?: string }>(
-  project: Project,
-  x: T,
-): T {
-  return x.colorPenId ? { ...x, color: resolvePenColor(project, x.colorPenId) } : x;
-}
-
-/**
- * Wie {@link bakeElementColor}, zusätzlich (a) die Strichstärke unter
- * `weightKey` (Wand/Decke/Stütze: `strokeWeight`; Drawing2D: `weightMm`) —
- * nur über `colorPenId` gekoppelt (ein Stift trägt Farbe UND Strichstärke
- * zusammen; Vordergrund/Hintergrund sind reine Musterfarben ohne
- * Strichstärke-Aspekt) — und (b) die Attribut-Override-Farben `foreground`/
- * `background` DIESER Element-Instanz, unabhängig über `foregroundPenId`/
- * `backgroundPenId` (analog `Component.foregroundPenId`/`backgroundPenId`,
- * nur eben am Element statt am Bauteil). Für Elementarten MIT eigenem
- * Strichstärke- UND Vordergrund/Hintergrund-Override-Feld (Wand/Decke/
- * Stütze/Drawing2D — exakt dieselben vier wie bei der Strichstärke).
- */
-function bakeElementColorAndWeight<
-  T extends {
-    colorPenId?: string;
-    color?: string;
-    foregroundPenId?: string;
-    foreground?: string;
-    backgroundPenId?: string;
-    background?: string;
-  },
-  K extends string,
->(project: Project, x: T & Partial<Record<K, number>>, weightKey: K): T {
-  if (!x.colorPenId && !x.foregroundPenId && !x.backgroundPenId) return x;
-  return {
-    ...x,
-    ...(x.colorPenId
-      ? { color: resolvePenColor(project, x.colorPenId), [weightKey]: resolvePenWeight(project, x.colorPenId) }
-      : {}),
-    ...(x.foregroundPenId ? { foreground: resolvePenColor(project, x.foregroundPenId) } : {}),
-    ...(x.backgroundPenId ? { background: resolvePenColor(project, x.backgroundPenId) } : {}),
-  };
-}
-
-/**
- * Schreibt für JEDES Bauteil/JEDE Ebenen-Kategorie/JEDES Modell-Element mit
- * gesetztem Stift die Farbe (+ ggf. Strichstärke) des AKTIVEN Stiftsatzes in
- * `color`/`foreground`/`background`/`lw`/`strokeWeight`/`weightMm` — reine
- * Funktion, liefert ein neues `Project` (unveränderte Teile bleiben
- * referenzgleich). Aufzurufen nach: Stiftsatz-Wechsel, Änderung EINES Stifts
- * im aktiven Satz, oder Neuzuweisung eines Stifts an ein Bauteil/eine Ebene
- * (dort reicht meist ein direkter Patch, s. `resolvePenColor`/
- * `resolvePenWeight` — diese Funktion ist für die FLÄCHIGEN Fälle, die viele
- * Objekte auf einmal betreffen).
- *
- * Bewusst NICHT abgedeckt: Layout-Annotationen (`Layout.annotations[]`,
- * verschachtelt in `Project.layouts`) und `Tür`/`ExtrudedSolid`/Kontext-
- * Objekte — kein `colorPenId`-Feld dort (Scope-Entscheid, s. PENDENZEN.md).
+ * Ops, die für JEDES Bauteil/JEDE Ebenen-Kategorie/JEDES Modell-Element mit gesetztem Stift die Farbe
+ * (+ ggf. Strichstärke) des AKTIVEN Stiftsatzes in `color`/`foreground`/`background`/`lw`/`strokeWeight`/
+ * `weightMm` schreiben; nur wirklich geänderte Elemente. Aufzurufen nach: Stiftsatz-Wechsel, Änderung EINES
+ * Stifts im aktiven Satz oder Neuzuweisung eines Stifts (dort reicht meist ein direkter Patch).
  */
 export function rebakePenOps(project: Project): CoreOp[] {
-  const all = () => true;
-  const layers = project.layers.map((cat) => bakeCategory(project, cat));
-  return [
-    ...patchItems(project, "components", all, (c) => bakeComponent(project, c)),
-    ...(layers.every((c, i) => c === project.layers[i]) ? [] : fieldOps(project, "layers", layers)),
-    ...patchItems(project, "walls", all, (w) => bakeElementColorAndWeight(project, w, "strokeWeight")),
-    ...patchItems(project, "drawings2d", all, (d) => bakeElementColorAndWeight(project, d, "weightMm")),
-    ...patchItems(project, "ceilings", all, (c) => bakeElementColorAndWeight(project, c, "strokeWeight")),
-    ...patchItems(project, "columns", all, (c) => bakeElementColorAndWeight(project, c, "strokeWeight")),
-    ...patchItems(project, "roofs", all, (r) => bakeElementColor(project, r)),
-    ...patchItems(project, "openings", all, (o) => bakeElementColor(project, o)),
-    ...patchItems(project, "stairs", all, (s) => bakeElementColor(project, s)),
-    ...patchItems(project, "rooms", all, (r) => bakeElementColor(project, r)),
-  ];
+  return documentFor(project).queryRoot<CoreOp[]>("penRebakeOps");
+}
+
+/**
+ * Ops zum Löschen des Stifts `penId`: aus `pens` und allen Stiftsätzen entfernen und die Verweise
+ * (`colorPenId`/`foregroundPenId`/`backgroundPenId`) in Bauteilen und im Kategorien-Baum löschen.
+ */
+export function deletePenOps(project: Project, penId: string): CoreOp[] {
+  return documentFor(project).queryRoot<CoreOp[]>("penDeleteOps", penId);
 }

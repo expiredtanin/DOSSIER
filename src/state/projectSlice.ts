@@ -51,6 +51,7 @@ import type {
 } from "../model/types";
 import {
   activePenSet,
+  deletePenOps,
   rebakePenOps,
   seedStandardPenSetOps,
   PEN_FALLBACK_COLOR,
@@ -920,31 +921,7 @@ export function createProjectSlice(
 
     renamePen: (id, name) => applyChange((p) => patchItem(p, "pens", id, { name })),
 
-    deletePen: (id) =>
-      applyChange((p) => {
-        const clearPenRefs = <T extends { colorPenId?: string; foregroundPenId?: string; backgroundPenId?: string }>(x: T): T =>
-          x.colorPenId === id || x.foregroundPenId === id || x.backgroundPenId === id
-            ? {
-                ...x,
-                colorPenId: x.colorPenId === id ? undefined : x.colorPenId,
-                foregroundPenId: x.foregroundPenId === id ? undefined : x.foregroundPenId,
-                backgroundPenId: x.backgroundPenId === id ? undefined : x.backgroundPenId,
-              }
-            : x;
-        const clearCategoryPenRefs = (cat: LayerCategory): LayerCategory => ({
-          ...(cat.colorPenId === id ? { ...cat, colorPenId: undefined } : cat),
-          ...(cat.children ? { children: cat.children.map(clearCategoryPenRefs) } : {}),
-        });
-        return [
-          ...removeItems(p, "pens", [id]),
-          ...patchItems(p, "penSets", () => true, (s) => {
-            const { [id]: _removed, ...rest } = s.pens;
-            return { ...s, pens: rest };
-          }),
-          ...patchItems(p, "components", () => true, clearPenRefs),
-          ...fieldOps(p, "layers", p.layers.map(clearCategoryPenRefs)),
-        ];
-      }),
+    deletePen: (id) => applyChange((p) => deletePenOps(p, id)),
 
     addPenSet: () =>
       applyChange((p) => {

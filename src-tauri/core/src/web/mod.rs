@@ -38,6 +38,7 @@ mod plan_dxf;
 mod plan_print_svg;
 mod drawings;
 mod layers;
+mod pens;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

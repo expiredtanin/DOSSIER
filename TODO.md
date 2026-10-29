@@ -417,8 +417,19 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (`insertAfterCode`) ging in TS verloren (die Ebene mit dem Ziel wurde übersprungen), jetzt steht es hinter dem Original.
     Offen: vertikale Ausdehnungen (`model/wall.ts`: `wallVerticalExtent` …, Kern hat `model/helpers.rs` schon — Aufrufer in
     `toSection`/`voids`/`geometry/opening`/Viewport fallen mit dem Plan-Port bzw. brauchen eine Abfrage je Bauteil),
-    Stift-Referenzen im Kategorien-Baum beim Löschen eines Stifts (`projectSlice`, Stiftsatz-Logik), Layout-/Ordnerbäume
-    (`layoutModel.ts`), Parametrik-Regeln (`parametricWalls.ts`), Stiftsätze (`penSets.ts`); Undo-Verlauf als Liste in der UI [84].
+    Layout-/Ordnerbäume (`layoutModel.ts`), Parametrik-Regeln (`parametricWalls.ts`); Undo-Verlauf als Liste in der UI [84].
+    **Stiftsätze im Kern (29.10.):** `pens.rs` (Standardpalette mit 255 Stiften, Freie-Farbe-Palette, `hsl_to_hex`, Neu-Backen
+    der Stift-Farben/-Strichstärken `rebake_ops`, Standardsatz anlegen `seed_standard_ops`, Stift löschen samt Verweisen in
+    Bauteilen und im Kategorien-Baum `delete_pen_ops`). Rechnung auf der rohen Projekt-Wurzel (`serde_json`, verlustfrei) und
+    Ergebnis als Ops; neu: Wurzel-Abfragen (`queries::run_root`, `doc_query_root`, TS `ProjectDocument.queryRoot`) neben den
+    typisierten Abfragen. `model/penSets.ts` ist Fassade (Lese-Auflösung `resolvePenColor/Weight` einzeln je Swatch bleibt in TS,
+    `freeColorPalette()` statt Modul-Konstante, weil der Kern erst nach `initCore()` lesbar ist); `deletePen` in
+    `projectSlice` ruft `deletePenOps`. Gleichheit (einmalig, Test gelöscht): 4000 Zufallsprojekte Neu-Backen, 1500 Standardsatz,
+    3000 Stift-löschen (doppelte/fehlende Stift-ids, `constructor`/`__proto__` als Stift-id, fehlende Listen, verschachtelte
+    Kategorien), 20000 `hslToHex` — Ergebnis nach `applyOps` zeichengleich (auch Schlüsselreihenfolge). Abweichungen
+    (gewollt): Ebenen werden nur noch geschrieben, wenn sich etwas ändert (vorher immer ein `setField layers`), die Stifte
+    des Standardsatzes als ein `setField` statt Listen-Differenz (gleiches Ergebnis), unveränderte Ebenen-Kategorien
+    behalten nach dem Neu-Backen nicht mehr ihre Objekt-Identität.
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

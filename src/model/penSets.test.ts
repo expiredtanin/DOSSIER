@@ -4,7 +4,8 @@ import {
   resolvePenColor,
   resolvePenWeight,
   rebakePenOps,
-  generateStandardPenPalette,
+  freeColorPalette,
+  deletePenOps,
   seedStandardPenSetOps,
   PEN_FALLBACK_COLOR,
   PEN_FALLBACK_WEIGHT,
@@ -146,7 +147,7 @@ describe("rebakePenColors — Ebenen (Farbe UND Strichstärke, inkl. verschachte
     expect(out.layers[0].lw).toBe(0.7);
   });
 
-  it("bäckt eine verschachtelte Kategorie (children) und lässt Geschwister ohne Stift unverändert", () => {
+  it("bäckt eine verschachtelte Kategorie (children) und lässt Geschwister ohne Stift inhaltlich unverändert", () => {
     const child = cat({ code: "21", colorPenId: "2" });
     const untouchedChild = cat({ code: "22", color: "#untouched" });
     const parent = cat({ code: "20", children: [child, untouchedChild] });
@@ -157,7 +158,7 @@ describe("rebakePenColors — Ebenen (Farbe UND Strichstärke, inkl. verschachte
     });
     const out = rebakePenColors(p);
     expect(out.layers[0].children?.[0].color).toBe("#00ff00");
-    expect(out.layers[0].children?.[1]).toBe(untouchedChild); // referenzgleich, unangetastet
+    expect(out.layers[0].children?.[1]).toEqual(untouchedChild);
   });
 
   it("lässt eine Kategorie OHNE Stift-Verweis referenzgleich", () => {
@@ -298,8 +299,10 @@ describe("rebakePenColors — Elemente OHNE Strichstärke-Feld (Raum), Robusthei
   });
 });
 
-describe("generateStandardPenPalette", () => {
-  const { pens, styles } = generateStandardPenPalette();
+describe("Standardpalette (Kern)", () => {
+  const seeded = seedStandardPenSet(baseProject());
+  const pens = seeded.pens!;
+  const styles = seeded.penSets![0].pens;
 
   it("liefert genau 255 Stifte mit IDs '1'..'255', je Farbe+Strichstärke", () => {
     expect(pens.length).toBe(255);
@@ -351,5 +354,34 @@ describe("seedStandardPenSet", () => {
     const p = baseProject({ components: [comp({ colorPenId: "3" })] });
     const out = seedStandardPenSet(p);
     expect(out.components[0].color).toBe("#00ff00");
+  });
+});
+
+describe("freeColorPalette", () => {
+  it("liefert 8 Graustufen und 8 × 5 Farbtöne als #rrggbb", () => {
+    const pal = freeColorPalette();
+    expect(pal).toHaveLength(48);
+    expect(pal[0]).toBe("#000000");
+    expect(pal[7]).toBe("#ffffff");
+    for (const c of pal) expect(c).toMatch(/^#[0-9a-f]{6}$/);
+    expect(freeColorPalette()).toBe(pal);
+  });
+});
+
+describe("deletePenOps", () => {
+  it("entfernt Stift, Satz-Einträge und alle Verweise (Bauteile, verschachtelte Kategorien)", () => {
+    const p = baseProject({
+      pens: [{ id: "1", name: "a" }, { id: "2", name: "b" }],
+      penSets: [{ id: "s", name: "S", pens: { "1": ps("#111111"), "2": ps("#222222") } }],
+      components: [comp({ colorPenId: "1", foregroundPenId: "2" })],
+      layers: [{ code: "20", name: "x", color: "#000", visible: true, lw: 1, children: [{ code: "21", name: "y", color: "#000", visible: true, lw: 1, colorPenId: "1" }] } as LayerCategory],
+    });
+    const out = applyOps(p, deletePenOps(p, "1"));
+    expect(out.pens!.map((x) => x.id)).toEqual(["2"]);
+    expect(Object.keys(out.penSets![0].pens)).toEqual(["2"]);
+    expect(out.components[0].colorPenId).toBeUndefined();
+    expect(out.components[0].foregroundPenId).toBe("2");
+    expect(out.layers[0].children![0].colorPenId).toBeUndefined();
+    expect(deletePenOps(out, "1")).toEqual([]);
   });
 });

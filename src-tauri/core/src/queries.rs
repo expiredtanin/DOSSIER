@@ -61,6 +61,20 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
     }
 }
 
+/// Abfragen auf der rohen Projekt-Wurzel (JSON-Baum, verlustfrei; Antwort JSON). `text`: Argument als Text/JSON.
+pub fn run_root(root: &serde_json::Map<String, serde_json::Value>, name: &str, text: &str) -> Result<String, String> {
+    match name {
+        // Stiftsätze ([K4] S3, `pens.rs`): Ops statt Projekt-Kopien.
+        "penRebakeOps" => json(&crate::pens::rebake_ops(root)),
+        "penDeleteOps" => json(&crate::pens::delete_pen_ops(root, text)),
+        "penSeedOps" => {
+            let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("penSeedOps: {e}"))?;
+            json(&crate::pens::seed_standard_ops(root, a["id"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or("")))
+        }
+        _ => Err(format!("Unbekannte Wurzel-Abfrage: {name}")),
+    }
+}
+
 /// Argumente der Gruppen-Abfragen (`containingGroup`: kind/id/path, `expandToGroups`: raw/path).
 #[derive(serde::Deserialize, Default)]
 #[serde(default)]

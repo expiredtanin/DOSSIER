@@ -15,6 +15,9 @@ export type LoadFileResult =
   | { ok: true; project: Project; warnings: string[]; migratedFrom: number | null }
   | { ok: false; error: string };
 
+/** Wurzel-Abfragen des Kerns (`queries.rs::run_root`). */
+export type RootQueryName = "penRebakeOps" | "penDeleteOps" | "penSeedOps";
+
 /** Abfragen des Kerns (`queries.rs`). */
 export type QueryName =
   | "kennzahlen"
@@ -122,6 +125,17 @@ export class ProjectDocument {
     const out = core().doc_query_args(this.handle, name, Float64Array.from(args), text);
     if (out.startsWith("\u0001")) throw new Error(out.slice(1));
     return out;
+  }
+
+  /**
+   * Abfrage auf dem rohen Projekt-JSON des Kerns (`queries.rs::run_root`): rechnet verlustfrei auf dem
+   * Baum (unbekannte Felder, Schlüsselreihenfolge) und liefert meist Ops. `text`: Argument (Text/JSON).
+   */
+  queryRoot<T>(name: RootQueryName, text = ""): T {
+    if (!this.handle) throw new Error(`Kern-Abfrage „${name}": Dokument nicht offen`);
+    const out = core().doc_query_root(this.handle, name, text);
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    return JSON.parse(out) as T;
   }
 
   /**
