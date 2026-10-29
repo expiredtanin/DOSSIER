@@ -685,11 +685,46 @@ describe("[B5] Pset_*Common mit den Werten aus dem Modell", () => {
     expect(psetOf(spf, line(spf, "IFCDOOR"), "Pset_DoorCommon")).toEqual({
       Reference: "IFCIDENTIFIER('Glast\\X2\\00FC\\X0\\r')",
       GlazingAreaFraction: "IFCPOSITIVERATIOMEASURE(0.6)",
+      IsExternal: "IFCBOOLEAN(.T.)",
     });
-    expect(psetOf(spf, line(spf, "IFCWINDOW"), "Pset_WindowCommon")).toEqual({ Reference: "IFCIDENTIFIER('Holz-Metall IV')" });
+    expect(psetOf(spf, line(spf, "IFCWINDOW"), "Pset_WindowCommon")).toMatchObject({ Reference: "IFCIDENTIFIER('Holz-Metall IV')" });
     // Ohne Typ kein leeres Pset.
     const plain = exportIfcSpf(fixtureProject());
     expect(psetOf(plain, line(plain, "IFCDOOR"), "Pset_DoorCommon")).toBeNull();
+  });
+  it("[98] Tür/Fenster: Brand-, Schallschutz, U-Wert, Einbruchhemmung, Nummer und aussen/innen aus dem Modell", () => {
+    const base = project();
+    const spf = exportIfcSpf({
+      ...base,
+      openings: [
+        { ...base.openings![0], mark: "T1.01", fireRating: "EI30", soundClass: "Rw 32 dB", uValue: 1.3, burglaryClass: "RC2", isExternal: false },
+        { ...base.openings![1], uValue: 0.9, isExternal: true },
+      ],
+    });
+    expect(psetOf(spf, line(spf, "IFCDOOR"), "Pset_DoorCommon")).toEqual({
+      Reference: "IFCIDENTIFIER('T1.01')",
+      GlazingAreaFraction: "IFCPOSITIVERATIOMEASURE(0.6)",
+      IsExternal: "IFCBOOLEAN(.F.)",
+      FireRating: "IFCLABEL('EI30')",
+      AcousticRating: "IFCLABEL('Rw 32 dB')",
+      ThermalTransmittance: "IFCTHERMALTRANSMITTANCEMEASURE(1.3)",
+      SecurityRating: "IFCLABEL('RC2')",
+    });
+    expect(psetOf(spf, line(spf, "IFCWINDOW"), "Pset_WindowCommon")).toEqual({
+      Reference: "IFCIDENTIFIER('Holz-Metall IV')",
+      IsExternal: "IFCBOOLEAN(.T.)",
+      ThermalTransmittance: "IFCTHERMALTRANSMITTANCEMEASURE(0.9)",
+    });
+  });
+  it("[98] Wand/Decke: IsExternal und LoadBearing nur mit Angabe im Modell", () => {
+    const base = project();
+    const spf = exportIfcSpf({
+      ...base,
+      walls: base.walls.map((w, i) => (i === 0 ? { ...w, isExternal: true, loadBearing: true } : w)),
+      ceilings: base.ceilings!.map((c) => ({ ...c, isExternal: false, loadBearing: true })),
+    });
+    expect(psetOf(spf, line(spf, "IFCWALL"), "Pset_WallCommon")).toEqual({ Reference: "IFCIDENTIFIER('Aussenwand')", IsExternal: "IFCBOOLEAN(.T.)", LoadBearing: "IFCBOOLEAN(.T.)" });
+    expect(psetOf(spf, line(spf, "IFCSLAB"), "Pset_SlabCommon")).toEqual({ Reference: "IFCIDENTIFIER('Betondecke')", IsExternal: "IFCBOOLEAN(.F.)", LoadBearing: "IFCBOOLEAN(.T.)" });
   });
   it("Raum: Reference = Raumnummer, IsExternal aus SIA 416 (AGF = Aussengeschossfläche)", () => {
     const spf = exportIfcSpf(project());

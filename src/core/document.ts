@@ -80,6 +80,7 @@ export type QueryName =
   | "stairRailings"
   | "roofMeshes"
   | "roofCutLayers"
+  | "openingSchedule"
   | "scheduleRows"
   | "scheduleCsv"
   | "pickGeometry"

@@ -85,6 +85,16 @@ describe("dossier-cli", () => {
     }
   });
 
+  it("schedule --openings: Fenster- und Türliste als CSV und JSON", async () => {
+    const out = join(dir, "fenster.csv");
+    expect(await call("schedule", "--openings", "--out", out)).toBe(0);
+    expect(readFileSync(out, "utf8")).toContain("Nr.;Typ;Geschoss");
+    const json = join(dir, "fenster.json");
+    expect(await call("schedule", "--openings", "--format", "json", "--out", json)).toBe(0);
+    expect(JSON.parse(readFileSync(json, "utf8")).length).toBeGreaterThan(0);
+    await expect(call("schedule", "--openings", "--format", "xls", "--out", out)).rejects.toThrow("--format");
+  });
+
   it("IFC mit --schema: 4 (Standard) und 2x3 (Coordination View 2.0), anderes ist ein Fehler", async () => {
     const out = join(dir, "schema.ifc");
     expect(await call("ifc", "--out", out)).toBe(0);

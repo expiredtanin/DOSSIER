@@ -18,7 +18,8 @@
 //              n_layers, (component_id, component_name, thickness) × n_layers
 //   PSETS    = n, (name, n_props, (prop_name, kind, value) × n_props) × n
 //              kind 0 = IfcIdentifier (value = Zeichenketten-Index), 1 = IfcBoolean (0/1),
-//              2 = IfcPositiveRatioMeasure (value = Zahl),
+//              2 = IfcPositiveRatioMeasure (value = Zahl), 6 = IfcLabel (Zeichenketten-Index),
+//              7 = IfcThermalTransmittanceMeasure (Zahl),
 //              3 = IfcQuantityLength, 4 = IfcQuantityArea, 5 = IfcQuantityVolume (value = Zahl, ≥ 0).
 //              Heisst der Satz `Qto_…`, entsteht je Bauteil ein eigener IfcElementQuantity (Basismengen,
 //              nie geteilt); sonst ein IfcPropertySet (gleicher Inhalt = ein Pset für alle Bauteile).
@@ -592,6 +593,8 @@ impl<'a> Reader<'a> {
                     0 => PropVal::Ident(self.string()?),
                     1 => PropVal::Bool(self.flag()?),
                     2 => PropVal::Ratio(self.f()?),
+                    6 => PropVal::Label(self.string()?),
+                    7 => PropVal::Thermal(self.f()?),
                     3 => PropVal::Length(self.f()?),
                     4 => PropVal::Area(self.f()?),
                     5 => PropVal::Volume(self.f()?),
@@ -722,6 +725,8 @@ enum PropVal {
     Ident(String),
     Bool(bool),
     Ratio(f64),
+    Label(String),
+    Thermal(f64),
     /// Basismengen (`Qto_…`): Länge, Fläche, Volumen.
     Length(f64),
     Area(f64),
@@ -735,6 +740,8 @@ impl PropVal {
             PropVal::Ident(s) => format!("IFCIDENTIFIER({})", ifc_string(s)),
             PropVal::Bool(b) => format!("IFCBOOLEAN({})", if *b { ".T." } else { ".F." }),
             PropVal::Ratio(r) => format!("IFCPOSITIVERATIOMEASURE({})", fmt_real(*r)),
+            PropVal::Label(s) => format!("IFCLABEL({})", ifc_string(s)),
+            PropVal::Thermal(u) => format!("IFCTHERMALTRANSMITTANCEMEASURE({})", fmt_real(*u)),
             PropVal::Length(_) | PropVal::Area(_) | PropVal::Volume(_) => String::new(),
         }
     }

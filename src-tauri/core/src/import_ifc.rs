@@ -45,6 +45,21 @@ struct Info {
     type_name: Option<String>,
     layers: Vec<MatLayer>,
     classified: bool,
+    /// Eigenschaften aus `Pset_*Common` (Text).
+    common: Map<String, Value>,
+}
+
+impl Info {
+    fn flag(&self, key: &str) -> Option<bool> {
+        match self.common.get(key).and_then(Value::as_str) {
+            Some("true") => Some(true),
+            Some("false") => Some(false),
+            _ => None,
+        }
+    }
+    fn text(&self, key: &str) -> Option<String> {
+        self.common.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+    }
 }
 
 struct WallData {
@@ -137,6 +152,7 @@ fn info_of(e: &Value) -> Info {
         type_name: s_of(e.get("typeName")),
         layers,
         classified: e.get("classifications").and_then(Value::as_array).is_some_and(|a| !a.is_empty()),
+        common: e.get("common").and_then(Value::as_object).cloned().unwrap_or_default(),
     }
 }
 
@@ -515,6 +531,12 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
         if bottom.abs() > LEVEL_TOL {
             o["bottom"] = json!({"mode": "floor", "floorId": fid, "offset": js_num(bottom)});
         }
+        if let Some(b) = w.info.flag("IsExternal") {
+            o["isExternal"] = b.into();
+        }
+        if let Some(b) = w.info.flag("LoadBearing") {
+            o["loadBearing"] = b.into();
+        }
         walls.push(o);
     }
     let door_types = root.get("doorTypes").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -575,6 +597,19 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
                 v.insert("wingCount".into(), js_num(w));
             }
         }
+        if o.kind != "hole" {
+            if let Some(b) = o.info.flag("IsExternal") {
+                v.insert("isExternal".into(), b.into());
+            }
+            for (key, field) in [("FireRating", "fireRating"), ("AcousticRating", "soundClass"), ("SecurityRating", "burglaryClass")] {
+                if let Some(t) = o.info.text(key) {
+                    v.insert(field.into(), t.into());
+                }
+            }
+            if let Some(u) = o.info.common.get("ThermalTransmittance").and_then(Value::as_str).and_then(|t| t.parse::<f64>().ok()).filter(|u| *u > 0.0) {
+                v.insert("uValue".into(), js_num(u));
+            }
+        }
         openings.push(Value::Object(v));
     }
 
@@ -598,6 +633,12 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
         v.insert("wallTypeId".into(), wt.into());
         let ct = type_for(&mut ctx, &mut ceiling_types, &s.info, t, "ceilingtype", "ceilingTypes");
         v.insert("ceilingTypeId".into(), ct.into());
+        if let Some(b) = s.info.flag("IsExternal") {
+            v.insert("isExternal".into(), b.into());
+        }
+        if let Some(b) = s.info.flag("LoadBearing") {
+            v.insert("loadBearing".into(), b.into());
+        }
         if (s.z1 - floor_top).abs() > LEVEL_TOL {
             v.insert("top".into(), json!({"mode": "floor", "floorId": fid, "offset": js_num(anchor_offset(s.z1, base))}));
         }

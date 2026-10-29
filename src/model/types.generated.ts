@@ -69,6 +69,10 @@ export type Ceiling = {
   categoryCode: string;
   /** Objekt-Sperre, analog `Wall.locked`. */
   locked?: boolean;
+  /** Aussen (true) / innen (false); fehlt = nicht angegeben (IFC `IsExternal`). */
+  isExternal?: boolean;
+  /** Tragend (IFC `LoadBearing`); fehlt = nicht angegeben. */
+  loadBearing?: boolean;
   /**
    * Geschlossener Umriss im Grundriss (Meter). Der Schlusspunkt wird NICHT
    * dupliziert (die letzte Kante läuft von outline[n-1] zu outline[0]).
@@ -1525,6 +1529,20 @@ export type Opening = {
   categoryCode: string;
   /** Objekt-Sperre, analog `Wall.locked`. */
   locked?: boolean;
+  /** Bauteilnummer (Fenster-/Türliste); leer = automatisch je Geschoss nummeriert. */
+  mark?: string;
+  /** Feuerwiderstand (z. B. "EI30", "EI60"); Türliste, IFC `FireRating`. */
+  fireRating?: string;
+  /** Schallschutz (z. B. "Rw 32 dB"); IFC `AcousticRating`. */
+  soundClass?: string;
+  /** Wärmedurchgang U in W/(m²K); IFC `ThermalTransmittance`. */
+  uValue?: number;
+  /** Einbruchhemmung (z. B. "RC2"); IFC `SecurityRating`. */
+  burglaryClass?: string;
+  /** Bemerkung (Fenster-/Türliste). */
+  notes?: string;
+  /** Aussen (true) / innen (false); fehlt = aus der Wand und den Räumen abgeleitet. */
+  isExternal?: boolean;
   /** Fenster oder Tür. */
   kind: "window" | "door";
   /** Abstand des ersten Pfostens vom Wand-Startpunkt entlang der Achse (Meter). */
@@ -2636,6 +2654,10 @@ export type Wall = {
    *  Geschoss-Sperrmodus (`DisplayMode`) ist das hier persistiert.
    */
   locked?: boolean;
+  /** Aussen (true) / innen (false); fehlt = nicht angegeben (IFC `IsExternal`). */
+  isExternal?: boolean;
+  /** Tragend (IFC `LoadBearing`); fehlt = nicht angegeben. */
+  loadBearing?: boolean;
   /** Achs-Startpunkt im Grundriss (Meter). */
   start: Vec2;
   /** Achs-Endpunkt im Grundriss (Meter). */
