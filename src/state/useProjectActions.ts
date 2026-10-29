@@ -12,6 +12,7 @@ import { useStore } from "./appStore";
 import { addItems, fieldOps, patchItem, removeItems } from "../core";
 import type { CoreOp } from "../core";
 import { t } from "../i18n";
+import { uniqueId } from "../tools/types";
 import type {
   CeilingType,
   ContextObject,
@@ -139,7 +140,7 @@ export function useProjectActions(
     applyChange((p) => {
       const componentId = p.components[0]?.id ?? "";
       const wallType: WallType = {
-        id: `wt-${Date.now()}`,
+        id: uniqueId("wt"),
         name: t("default.wallTypeName"),
         layers: [{ componentId, thickness: 0.2 }],
       };
@@ -161,7 +162,7 @@ export function useProjectActions(
     applyChange((p) => {
       const componentId = p.components[0]?.id ?? "";
       const ceilingType: CeilingType = {
-        id: `ct-${Date.now()}`,
+        id: uniqueId("ct"),
         name: t("default.ceilingTypeName"),
         layers: [{ componentId, thickness: 0.15 }],
       };
@@ -185,7 +186,7 @@ export function useProjectActions(
     applyChange((p) => {
       const componentId = p.components[0]?.id ?? "";
       const roofType: RoofType = {
-        id: `rt-${Date.now()}`,
+        id: uniqueId("rt"),
         name: t("default.roofTypeName"),
         layers: [{ componentId, thickness: 0.2 }],
       };
@@ -210,7 +211,7 @@ export function useProjectActions(
   const addDoorType = () =>
     applyChange(() => {
       const dt: DoorType = {
-        id: `dt-${Date.now()}`,
+        id: uniqueId("dt"),
         name: t("default.doorTypeName"),
         kind: "dreh",
         leafCount: 1,
@@ -236,7 +237,7 @@ export function useProjectActions(
   const addWindowType = () =>
     applyChange(() => {
       const wt: WindowType = {
-        id: `ft-${Date.now()}`,
+        id: uniqueId("ft"),
         name: t("default.windowTypeName"),
         kind: "drehkipp",
         wingCount: 1,
@@ -270,9 +271,9 @@ export function useProjectActions(
       if (o.kind === "door") {
         const base = (p.doorTypes ?? []).find((d) => d.id === o.typeId);
         const nt: DoorType = base
-          ? { ...base, id: `dt-${Date.now()}`, name }
+          ? { ...base, id: uniqueId("dt"), name }
           : {
-              id: `dt-${Date.now()}`,
+              id: uniqueId("dt"),
               name,
               kind: "dreh",
               leafCount: 1,
@@ -285,9 +286,9 @@ export function useProjectActions(
       }
       const base = (p.windowTypes ?? []).find((w) => w.id === o.typeId);
       const nt: WindowType = base
-        ? { ...base, id: `ft-${Date.now()}`, name }
+        ? { ...base, id: uniqueId("ft"), name }
         : {
-            id: `ft-${Date.now()}`,
+            id: uniqueId("ft"),
             name,
             kind: "drehkipp",
             wingCount: 1,
@@ -302,7 +303,7 @@ export function useProjectActions(
   const addStairType = () =>
     applyChange(() => {
       const st: StairType = {
-        id: `st-${Date.now()}`,
+        id: uniqueId("st"),
         name: t("default.stairTypeName"),
         structure: "massiv",
         closedRisers: true,
