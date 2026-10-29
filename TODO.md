@@ -124,6 +124,14 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Decken-/Treppen-Bändern als Plan-Schraffur durch (GPU: Diagonale, SVG: keine) — jetzt die vorgesehene
     Rückfall-Schraffur. Ursache bleibt offen: `slabSegmentOwners` zählt Decken, das Schnitt-Modell emittiert je
     Deckenschicht und Treppentritt eine Platte (Index-Versatz; mehrschichtige Decken im Schnitt falsch geschichtet).
+    ✅ Behoben (29.10.): Besitzer kommen aus dem Schnitt-Modell statt aus Zählungen — `RSlab::source` (Decke + Schicht bzw.
+    Treppe), Wände über `RWall::wall_id`; `wall_segment_owners`/`slab_segment_owners`/`split_slab_layers` gelöscht. Jede
+    Deckenschicht ist ihr eigenes Band mit ihrem Bauteil (vorher wurde jede Schicht-Platte nochmals in alle Schichten geteilt,
+    ein Teil fiel auf die Rückfall-Schraffur); Treppentritte tragen Treppe/Kategorie, auch für die Tiefe (Mitte des Tritts).
+    Dächer gehen nicht mehr zusätzlich durch render3d (ungestylte Doppel-Bänder je Schicht × Fläche unter den gestylten,
+    Besitzer per Index falsch); von der Dominanz beschnittene Stücke behalten Kategorie und Treppe (Ebene aus → weg).
+    Gewollte Ausgabe-Änderung: nur Schnitte (CLI byte-gleich für Plan/Ansicht auf 9 Projekten, 18 Schnitte geändert,
+    angesehen: Beispiel, mehrschichtige Decken 4/2/1 Schichten mit Aussparung, 2 Treppen, 2 Dächer); Golden `schnitt.svg` neu.
     Leistung (29.10., Ausgabe bitgleich, Gleichheitstest nach jedem Schritt): render3d-Verdeckung über ein u-Raster mit nach
     Tiefe sortierten Zellen und Abbruch bei ganz verdeckter Kante (vorher jede Kante gegen jedes Prisma); Ansicht: Verdecker,
     Schatten, Eck-Verlängerung über Raster (`ugrid.rs`), Linien-Clipping nah→fern mit Abbruch; Schnitt-Dominanz nur gegen

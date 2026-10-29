@@ -12,7 +12,7 @@ use super::style::*;
 use crate::jsmath::hypot2;
 use crate::jsnum::{atan2, max, min, round};
 use crate::model::*;
-use crate::model3d::{self, RRoofLayer, RSlab, RWall};
+use crate::model3d::{self, RSlab, RWall, SlabSource};
 use std::collections::{HashMap, HashSet};
 
 /// Tinte der Schnitt-Poché-Umrisslinie (dunkles Grau).
@@ -24,7 +24,6 @@ const SECTION_VISIBLE_MM: f64 = 0.18;
 const SECTION_GROUND_MM: f64 = 0.5;
 const SECTION_HIDDEN_MM: f64 = 0.13;
 const SECTION_HIDDEN_DASH: [f64; 2] = [0.12, 0.08];
-const OWNER_EPS: f64 = 1e-4;
 /// Achswinkel geschnittener Wände/Decken für wandrelative Muster (s. `toSection.ts`).
 const SECTION_WALL_AXIS_ANGLE_DEG: f64 = 90.0;
 const SECTION_SLAB_AXIS_ANGLE_DEG: f64 = 90.0;
@@ -344,12 +343,9 @@ fn slab_input(s: &RSlab) -> render3d::SlabInput {
     }
 }
 
-fn roof_input(r: &RRoofLayer) -> render3d::types::RoofLayerInput {
-    render3d::types::RoofLayerInput { polygon: r.polygon.iter().map(|q| f32s3(*q)).collect(), normal: f32s3(r.normal), thickness: json_f32(r.thickness), color: f32s3(r.color), hatch: None, cut: None }
-}
+// ── Besitzer (Herkunft, die das Schnitt-Modell mitführt) ─────────────────────
 
-// ── Besitzer (Emissions-Reihenfolge des Schnitt-Modells) ─────────────────────
-
+// Öffnungs-Lage in der Wand (für die geschnittenen Fenster/Türen).
 fn opening_extent(p: &Project, w: &Wall, o: &Opening) -> (f64, f64) {
     let (zb, zt) = p.wall_vertical_extent(w);
     let sill = max(0.0, o.sill_height);
@@ -367,55 +363,36 @@ fn opening_interval(w: &Wall, o: &Opening) -> Option<(f64, f64)> {
     Some((from, to))
 }
 
-/// Je emittiertem Wand-Teilquader die Quellwand (`wallSegmentOwners`).
-pub fn wall_segment_owners(p: &Project) -> Vec<&Wall> {
-    let mut owners = Vec::new();
-    let by_wall = p.openings_by_wall();
-    for wall in &p.walls {
-        let (z_bottom, z_top) = p.wall_vertical_extent(wall);
-        let axis_len = hypot2(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
-        if axis_len < 1e-9 || z_top - z_bottom <= OWNER_EPS {
-            continue;
-        }
-        let mut push = |from: f64, to: f64, zb: f64, zt: f64| {
-            if to - from <= OWNER_EPS || zt - zb <= OWNER_EPS {
-                return;
-            }
-            owners.push(wall);
-        };
-        let mut cutouts: Vec<(f64, f64, f64, f64)> = Vec::new();
-        for &op in by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()) {
-            let Some((from, to)) = opening_interval(wall, op) else { continue };
-            let (ob, ot) = opening_extent(p, wall, op);
-            cutouts.push((from, to, ob, ot));
-        }
-        // `Array.sort` mit `a.from - b.from` (stabil).
-        cutouts.sort_by(|a, b| cmp_num(a.0 - b.0));
-        if cutouts.is_empty() {
-            push(0.0, axis_len, z_bottom, z_top);
-            continue;
-        }
-        let mut cursor = 0.0;
-        for &(from, to, ob, ot) in &cutouts {
-            let seg_from = max(cursor, from);
-            if from > cursor {
-                push(cursor, from, z_bottom, z_top);
-            }
-            if to > seg_from {
-                if ob > z_bottom + OWNER_EPS {
-                    push(seg_from, to, z_bottom, ob);
-                }
-                if ot < z_top - OWNER_EPS {
-                    push(seg_from, to, ot, z_top);
-                }
-            }
-            cursor = max(cursor, to);
-        }
-        if cursor < axis_len {
-            push(cursor, axis_len, z_bottom, z_top);
-        }
+
+/// Je emittiertem Wand-Teilquader die Quellwand (über `RWall::wall_id`).
+fn wall_owners<'a>(p: &'a Project, walls: &[RWall]) -> Vec<Option<&'a Wall>> {
+    let mut by_id: HashMap<&str, &Wall> = HashMap::with_capacity(p.walls.len());
+    for w in &p.walls {
+        by_id.entry(w.id.as_str()).or_insert(w);
     }
-    owners
+    walls.iter().map(|w| by_id.get(w.wall_id.as_str()).copied()).collect()
+}
+
+/// Herkunft eines Platten-Bandes: Decke (mit Schicht des Deckentyps) oder Treppe.
+#[derive(Clone, Copy, Debug)]
+pub enum SlabOwner<'a> {
+    None,
+    Ceiling(&'a Ceiling, Option<usize>),
+    Stair(&'a Stair),
+}
+
+/// Je emittierter Platte (Deckenschicht, Treppentritt, Podest) ihre Herkunft (`RSlab::source`).
+pub fn slab_owners<'a>(p: &'a Project, slabs: &[RSlab]) -> Vec<SlabOwner<'a>> {
+    let ceilings = p.ceilings.as_deref().unwrap_or(&[]);
+    let stairs = p.stairs.as_deref().unwrap_or(&[]);
+    slabs
+        .iter()
+        .map(|s| match s.source {
+            SlabSource::Ceiling { index, layer } => ceilings.get(index).map_or(SlabOwner::None, |c| SlabOwner::Ceiling(c, layer)),
+            SlabSource::Stair { index } => stairs.get(index).map_or(SlabOwner::None, SlabOwner::Stair),
+            SlabSource::None => SlabOwner::None,
+        })
+        .collect()
 }
 
 /// Ordnung eines JS-Vergleichs `(a, b) => d` (NaN/0 = gleich).
@@ -427,22 +404,6 @@ pub fn cmp_num(d: f64) -> std::cmp::Ordering {
     } else {
         std::cmp::Ordering::Equal
     }
-}
-
-/// Je emittierter Deckenplatte die Quelldecke (`slabSegmentOwners`).
-pub fn slab_segment_owners(p: &Project) -> Vec<&Ceiling> {
-    let mut owners = Vec::new();
-    for c in p.ceilings.as_deref().unwrap_or(&[]) {
-        if c.outline.len() < 3 {
-            continue;
-        }
-        let (zb, zt) = p.ceiling_vertical_extent(c);
-        if zt - zb <= OWNER_EPS {
-            continue;
-        }
-        owners.push(c);
-    }
-    owners
 }
 
 // ── Stil-Auflösung ────────────────────────────────────────────────────────────
@@ -560,34 +521,17 @@ fn layer_style(
     Ok((fill, hatch))
 }
 
-/// `splitSlabLayers`: liegende Teil-Rechtecke je Schicht (oben → unten).
-fn split_slab_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Ceiling) -> Result<Vec<Cut>, String> {
-    let total = sum_thickness(layers);
-    let [u_min, u_max, v_min, v_max] = bbox(&cp.pts);
-    let v_span = v_max - v_min;
-    if total <= 1e-9 || v_span <= 1e-9 {
-        return Ok(vec![cp.clone()]);
-    }
-    let scale = v_span / total;
+/// Stil einer geschnittenen Deckenschicht (Füllung, Schraffur, Verschneidung) mit dem Override der Decke.
+/// Jede Schicht ist im Schnitt-Modell eine eigene Platte; ihr Band trägt so genau ihr Bauteil.
+fn style_slab_layer(cp: &mut Cut, p: &Project, layer: &Layer, owner: &Ceiling) -> Result<(), String> {
     let category = p.layer_category(&owner.category_code);
-    let mut out = Vec::with_capacity(layers.len());
-    let mut acc = 0.0;
-    for layer in layers {
-        let comp = p.component(&layer.component_id).ok_or_else(|| missing("Unbekanntes Bauteil-Material", &layer.component_id))?;
-        let (fill, hatch) = layer_style(p, comp, owner.hatch_id.as_deref(), owner.hatch_source, owner.foreground.as_deref(), owner.foreground_source, owner.background.as_deref(), owner.background_source, category, SECTION_SLAB_AXIS_ANGLE_DEG)?;
-        let v_top = v_max - acc * scale;
-        acc += layer.thickness;
-        let v_bottom = v_max - acc * scale;
-        let mut c = Cut::new(cp.kind, cp.index, vec![[u_min, v_top], [u_max, v_top], [u_max, v_bottom], [u_min, v_bottom]]);
-        c.fill = Some(fill);
-        c.hatch = Some(hatch);
-        c.join_priority = Some(comp.join_priority);
-        c.component_id = Some(comp.id.clone());
-        c.source_id = cp.source_id.clone();
-        c.category = cp.category.clone();
-        out.push(c);
-    }
-    Ok(out)
+    let comp = p.component(&layer.component_id).ok_or_else(|| missing("Unbekanntes Bauteil-Material", &layer.component_id))?;
+    let (fill, hatch) = layer_style(p, comp, owner.hatch_id.as_deref(), owner.hatch_source, owner.foreground.as_deref(), owner.foreground_source, owner.background.as_deref(), owner.background_source, category, SECTION_SLAB_AXIS_ANGLE_DEG)?;
+    cp.fill = Some(fill);
+    cp.hatch = Some(hatch);
+    cp.join_priority = Some(comp.join_priority);
+    cp.component_id = Some(comp.id.clone());
+    Ok(())
 }
 
 /// `wallLayersReversedInU`.
@@ -635,7 +579,7 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
 }
 
 /// `attachCutStyles`: Stil, Herkunft, Schicht-Bänder, Terminierung, Dominanz.
-fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[&Wall], slabs: &[&Ceiling]) -> Result<Vec<Cut>, String> {
+fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option<&Wall>], slabs: &[SlabOwner]) -> Result<Vec<Cut>, String> {
     if cuts.is_empty() {
         return Ok(cuts);
     }
@@ -651,7 +595,7 @@ fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[&Wall]
                 bands.push(cp);
             }
             Kind::Wall => {
-                let owner = walls.get(cp.index).copied();
+                let owner = walls.get(cp.index).copied().flatten();
                 cp.source_id = owner.map(|o| o.id.clone());
                 cp.category = owner.map(|o| o.category_code.clone());
                 if let Some(o) = owner {
@@ -670,21 +614,31 @@ fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[&Wall]
                 bands.push(cp);
             }
             _ => {
-                let owner = slabs.get(cp.index).copied();
-                cp.source_id = owner.map(|o| o.id.clone());
-                cp.category = owner.map(|o| o.category_code.clone());
-                if let Some(o) = owner {
-                    let layers = ceiling_layers(p, o).ok_or_else(|| missing("Unbekannter Deckentyp", o.ceiling_type_id.as_deref().unwrap_or(&o.wall_type_id)))?;
-                    if layers.len() > 1 {
-                        bands.extend(split_slab_layers(&cp, p, layers, o)?);
-                        continue;
+                match slabs.get(cp.index).copied().unwrap_or(SlabOwner::None) {
+                    SlabOwner::Ceiling(o, layer) => {
+                        cp.source_id = Some(o.id.clone());
+                        cp.category = Some(o.category_code.clone());
+                        let layers = ceiling_layers(p, o).ok_or_else(|| missing("Unbekannter Deckentyp", o.ceiling_type_id.as_deref().unwrap_or(&o.wall_type_id)))?;
+                        if layers.len() > 1 {
+                            // Schicht-Platte: Stil genau dieser Schicht; ohne Schicht (Dicke 0) ohne Stil.
+                            if let Some(l) = layer.and_then(|i| layers.get(i)) {
+                                style_slab_layer(&mut cp, p, l, o)?;
+                            }
+                        } else {
+                            if let Some((fill, hatch)) = ceiling_section_style(p, o) {
+                                cp.fill = Some(fill);
+                                cp.hatch = Some(hatch);
+                            }
+                            cp.join_priority = ceiling_representative_priority(p, o);
+                            cp.component_id = ceiling_representative_component_id(p, o);
+                        }
                     }
-                    if let Some((fill, hatch)) = ceiling_section_style(p, o) {
-                        cp.fill = Some(fill);
-                        cp.hatch = Some(hatch);
+                    // Treppen-Prismen: Herkunft + Kategorie; Stil = Rückfall-Schraffur (Treppen haben kein Bauteil).
+                    SlabOwner::Stair(st) => {
+                        cp.stair_id = Some(st.id.clone());
+                        cp.category = Some(st.category_code.clone());
                     }
-                    cp.join_priority = ceiling_representative_priority(p, o);
-                    cp.component_id = ceiling_representative_component_id(p, o);
+                    SlabOwner::None => {}
                 }
                 bands.push(cp);
             }
@@ -695,7 +649,7 @@ fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[&Wall]
 }
 
 /// `applyWallTermination`: Wände mit `sliceTermination` "below"/"above" enden an der Decke.
-fn apply_wall_termination(bands: Vec<Cut>, walls: &[&Wall]) -> Vec<Cut> {
+fn apply_wall_termination(bands: Vec<Cut>, walls: &[Option<&Wall>]) -> Vec<Cut> {
     const EPS_T: f64 = 1e-9;
     const TOUCH: f64 = 0.05;
     let slab_bands: Vec<([f64; 4], f64)> = bands.iter().filter(|b| b.kind == Kind::Slab).filter_map(|b| b.join_priority.map(|jp| (bbox(&b.pts), jp))).collect();
@@ -708,7 +662,7 @@ fn apply_wall_termination(bands: Vec<Cut>, walls: &[&Wall]) -> Vec<Cut> {
             out.push(b);
             continue;
         }
-        let term = walls.get(b.index).and_then(|w| w.slice_termination);
+        let term = walls.get(b.index).copied().flatten().and_then(|w| w.slice_termination);
         let (Some(term @ (SliceTermination::Below | SliceTermination::Above)), Some(jp)) = (term, b.join_priority) else {
             out.push(b);
             continue;
@@ -773,6 +727,9 @@ fn subtract_dominant_bands(bands: Vec<Cut>) -> Vec<Cut> {
             c.join_priority = src.join_priority;
             c.component_id = src.component_id.clone();
             c.source_id = src.source_id.clone();
+            // Herkunft bleibt am Stück (Ebenen-Sichtbarkeit, Treppen-Pick).
+            c.category = src.category.clone();
+            c.stair_id = src.stair_id.clone();
             out.push(c);
         }
         i += 6;
@@ -1128,7 +1085,7 @@ fn centroid(pts: &[Vec2]) -> Option<(f64, f64)> {
 }
 
 /// `filterByDepth`: Ansichtskanten weiter als `depth` hinter der Ebene ausblenden.
-fn filter_by_depth(out: &mut Output, p: &Project, plane: &Plane, depth: f64, walls: &[&Wall], slabs: &[&Ceiling]) {
+fn filter_by_depth(out: &mut Output, p: &Project, plane: &Plane, depth: f64, walls: &[Option<&Wall>], slabs: &[SlabOwner], slabs_r: &[RSlab]) {
     if !(depth > 0.0) {
         return;
     }
@@ -1140,8 +1097,13 @@ fn filter_by_depth(out: &mut Output, p: &Project, plane: &Plane, depth: f64, wal
     let roofs = p.roofs.as_deref().unwrap_or(&[]);
     let owner_point = |e: &Edge| -> Option<(f64, f64)> {
         match e.kind {
-            Kind::Wall => walls.get(e.index).map(|w| ((w.start.x + w.end.x) / 2.0, (w.start.y + w.end.y) / 2.0)),
-            Kind::Slab => slabs.get(e.index).and_then(|c| centroid(&c.outline)),
+            Kind::Wall => walls.get(e.index).copied().flatten().map(|w| ((w.start.x + w.end.x) / 2.0, (w.start.y + w.end.y) / 2.0)),
+            Kind::Slab => match slabs.get(e.index) {
+                Some(SlabOwner::Ceiling(c, _)) => centroid(&c.outline),
+                // Treppe: Mitte des Tritts bzw. Podests selbst.
+                Some(SlabOwner::Stair(_)) => slabs_r.get(e.index).and_then(|s| centroid(&s.outline.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect::<Vec<_>>())),
+                _ => None,
+            },
             _ => roofs.get(e.index).and_then(|r| centroid(&r.outline)),
         }
     };
@@ -1163,14 +1125,14 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let walls_r = model3d::emit_walls(p, false)?;
     let mut slabs_r = model3d::emit_slabs(p);
     slabs_r.extend(model3d::emit_stairs(p, true));
-    let roofs_r = model3d::emit_roof_cut_layers(p)?;
     let wi: Vec<render3d::WallInput> = walls_r.iter().map(wall_input).collect();
     let si: Vec<render3d::SlabInput> = slabs_r.iter().map(slab_input).collect();
-    let ri: Vec<render3d::types::RoofLayerInput> = roofs_r.iter().map(roof_input).collect();
     // Die Ebene ging als Zahl-Argument (wasm-bindgen, `Math.fround`) hinein, nicht über JSON.
     let fr = |v: [f64; 3]| [v[0] as f32, v[1] as f32, v[2] as f32];
     let rp = render3d::SectionPlane::new(fr(plane.point), fr(plane.normal));
-    let raw = render3d::cut_section(&rp, &wi, &si, &ri);
+    // Dächer nicht durch render3d: deren Bänder (je Schicht × Dachfläche, ohne Stil) lagen unter den
+    // gestylten aus `append_roof_sections` (doppelte Kontur, Rückfall-Schraffur, Besitzer per Index falsch).
+    let raw = render3d::cut_section(&rp, &wi, &si, &[]);
 
     // Gleiche f32 kommen oft vor (gemeinsame Ecken, Höhen): Umwandlung je Wert nur einmal.
     let mut conv: HashMap<u32, f64> = HashMap::new();
@@ -1188,24 +1150,9 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let hidden: Vec<Edge> = raw.hidden_edges.iter().filter(not_cut).map(&mut edge).collect();
 
     append_roof_sections(&mut cuts, p, &plane);
-    let walls = wall_segment_owners(p);
-    let slabs = slab_segment_owners(p);
-    let mut cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
-    // Treppen-Prismen: Herkunft + Kategorie (bei doppelten ids gewinnt die letzte, wie `new Map`).
-    let mut stairs_by_id: HashMap<&str, &Stair> = HashMap::new();
-    for st in p.stairs.as_deref().unwrap_or(&[]) {
-        stairs_by_id.insert(st.id.as_str(), st);
-    }
-    for cp in cuts.iter_mut() {
-        if cp.kind != Kind::Slab {
-            continue;
-        }
-        let id = slabs_r.get(cp.index).map_or("", |s| s.ceiling_id.as_str());
-        if let Some(st) = stairs_by_id.get(id) {
-            cp.stair_id = Some(st.id.clone());
-            cp.category = Some(st.category_code.clone());
-        }
-    }
+    let walls = wall_owners(p, &walls_r);
+    let slabs = slab_owners(p, &slabs_r);
+    let cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
     let cuts = merge_monolith_cuts(cuts, &slabs_r);
     let base = plane.base();
     let u = plane.u_model();
@@ -1214,7 +1161,7 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new() };
     append_terrain_profiles(&mut out, p, base, u);
     if let Some(d) = level.depth {
-        filter_by_depth(&mut out, p, &plane, d, &walls, &slabs);
+        filter_by_depth(&mut out, p, &plane, d, &walls, &slabs, &slabs_r);
     }
     Ok(Some(out))
 }
@@ -1695,11 +1642,60 @@ mod tests {
         assert!(json.contains("\"wallId\":\"W2\"") && json.contains("\"roofId\":\"RF1\""), "{json}");
         assert!(json.contains("section-ground"));
         assert!(b[2] > b[0] && b[3] > b[1]);
-        // Kategorie ausgeblendet → keine Dach-Schnittflächen mehr. (Von der Dominanz beschnittene
-        // Wand-/Deckenbänder verlieren ihre Kategorie und bleiben sichtbar — wie in der TS-Fassung.)
+        // Kategorie ausgeblendet → keine Dach-Schnittflächen mehr.
         let vis = Visibility { has_vis: true, invisible: ["31".to_string()].into_iter().collect(), ..Default::default() };
         let (hidden, _) = section_primitives(&out, false, false, &vis);
         assert!(!serde_json::to_string(&hidden).unwrap().contains("\"roofId\""));
+    }
+
+    #[test]
+    fn beschnittene_baender_behalten_ihre_ebene() {
+        // Von der Dominanz beschnittene Wand-/Deckenstücke tragen ihre Kategorie weiter: Ebene aus → weg.
+        let p = sample();
+        let out = compute_section(&p, &level(&p, "schnitt-a"), &[]).unwrap().unwrap();
+        assert!(out.cuts.iter().filter(|c| c.kind != Kind::Body).all(|c| c.category.is_some()), "{:#?}", out.cuts);
+        let codes: Vec<String> = out.cuts.iter().filter_map(|c| c.category.clone()).collect();
+        let vis = Visibility { has_vis: true, invisible: codes.into_iter().collect(), ..Default::default() };
+        let (prims, _) = section_primitives(&out, false, false, &vis);
+        assert!(prims.iter().all(|p| !matches!(p, Primitive::Polygon { .. })));
+    }
+
+    /// Mehrschichtige Decke + Treppe im Schnitt: je Deckenschicht genau ein Band mit ihrem Bauteil und
+    /// ihrer Dicke (nicht jedes Schicht-Prisma nochmals in alle Schichten geteilt), Treppen-Tritte ohne
+    /// Decken-Besitzer (früher: Besitzer per Zählung, Index-Versatz).
+    #[test]
+    fn mehrschichtige_decke_und_treppe_im_schnitt() {
+        let p = sample();
+        let l = level(&p, "schnitt-a");
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let slab: Vec<&Cut> = out.cuts.iter().filter(|c| c.kind == Kind::Slab && c.stair_id.is_none()).collect();
+        // Je Schicht ein Band (von stärkeren Wandschichten in Stücke geteilt): Bauteil + Höhenlage.
+        let mut layers: Vec<(&str, f64, f64)> = Vec::new();
+        for c in &slab {
+            let b = bbox(&c.pts);
+            let comp = c.component_id.as_deref().expect("Schicht-Bauteil");
+            match layers.iter().find(|l| l.0 == comp) {
+                Some(l) => assert!((l.1 - b[2]).abs() < 1e-5 && (l.2 - b[3]).abs() < 1e-5, "{comp}: {b:?} statt {l:?}"),
+                None => layers.push((comp, b[2], b[3])),
+            }
+        }
+        assert!(slab.iter().all(|c| c.source_id.as_deref() == Some("C1") && c.category.as_deref() == Some("30")));
+        layers.sort_by(|a, b| b.2.total_cmp(&a.2));
+        let names: Vec<&str> = layers.iter().map(|l| l.0).collect();
+        assert_eq!(names, ["screed", "insulation", "concrete"], "{slab:#?}");
+        // Schichtdicken 0.06 / 0.04 / 0.20 von oben nach unten, aneinander anschliessend.
+        for (l, t) in layers.iter().zip([0.06, 0.04, 0.2]) {
+            assert!((l.2 - l.1 - t).abs() < 1e-5, "{layers:?}");
+        }
+        assert!((layers[0].1 - layers[1].2).abs() < 1e-5 && (layers[1].1 - layers[2].2).abs() < 1e-5, "{layers:?}");
+        // Stil der Schicht (Füllung + Schraffur des Bauteils), nicht die Rückfall-Schraffur ohne Füllung.
+        assert!(slab.iter().all(|c| c.fill.is_some() && c.hatch.is_some() && c.join_priority.is_some()), "{slab:#?}");
+        // Treppe: alle Tritt-Bänder mit Treppen-Herkunft, ohne Decken-Bauteil.
+        let stair: Vec<&Cut> = out.cuts.iter().filter(|c| c.kind == Kind::Slab && c.stair_id.is_some()).collect();
+        assert!(!stair.is_empty());
+        assert!(stair.iter().all(|c| c.stair_id.as_deref() == Some("ST1") && c.category.as_deref() == Some("40") && c.component_id.is_none()), "{stair:#?}");
+        // Kein Decken-/Treppenband bleibt ohne Herkunft.
+        assert!(out.cuts.iter().filter(|c| c.kind == Kind::Slab).all(|c| c.source_id.is_some() || c.stair_id.is_some()));
     }
 
     #[test]
@@ -1735,17 +1731,15 @@ mod bench {
             let t = Instant::now();
             let mut slabs = model3d::emit_slabs(&p);
             slabs.extend(model3d::emit_stairs(&p, true));
-            let roofs = model3d::emit_roof_cut_layers(&p).unwrap();
             let t_rest = t.elapsed();
             let t = Instant::now();
             let wi: Vec<render3d::WallInput> = walls.iter().map(wall_input).collect();
             let si: Vec<render3d::SlabInput> = slabs.iter().map(slab_input).collect();
-            let ri: Vec<render3d::types::RoofLayerInput> = roofs.iter().map(roof_input).collect();
             let t_conv = t.elapsed();
             let pl = level.plane().unwrap();
             let fr = |v: [f64; 3]| [v[0] as f32, v[1] as f32, v[2] as f32];
             let t = Instant::now();
-            let raw = render3d::cut_section(&render3d::SectionPlane::new(fr(pl.point), fr(pl.normal)), &wi, &si, &ri);
+            let raw = render3d::cut_section(&render3d::SectionPlane::new(fr(pl.point), fr(pl.normal)), &wi, &si, &[]);
             let t_cut = t.elapsed();
             let t = Instant::now();
             let buf = if l.kind == DrawingLevelKind::Section {
@@ -1850,7 +1844,7 @@ mod ts_faelle {
         assert_eq!(rings.len(), 1);
         assert!(rings[0].len() >= 8);
         assert_eq!(union_rect_outlines(&[[0.0, 1.0, 0.0, 1.0], [2.0, 3.0, 0.0, 1.0]]).len(), 2);
-        let slab = |m: Option<&str>| RSlab { outline: vec![], z_bottom: 0.0, z_top: 1.0, color: [0.0; 3], ceiling_id: String::new(), hatch: None, cut: None, monolith: m.map(String::from) };
+        let slab = |m: Option<&str>| RSlab { outline: vec![], z_bottom: 0.0, z_top: 1.0, color: [0.0; 3], ceiling_id: String::new(), hatch: None, cut: None, monolith: m.map(String::from), source: SlabSource::None };
         let slabs = vec![slab(None), slab(Some("ST1")), slab(Some("ST1"))];
         let mk = |i: usize, u0: f64| Cut::new(Kind::Slab, i, vec![[u0, 0.0], [u0 + 1.0, 0.0], [u0 + 1.0, 1.0], [u0, 1.0]]);
         let out = merge_monolith_cuts(vec![mk(0, 0.0), mk(1, 0.0), mk(2, 0.5)], &slabs);
@@ -1870,7 +1864,7 @@ mod ts_faelle {
         let below = wall(Some(SliceTermination::Below));
         let above = wall(Some(SliceTermination::Above));
         let both = wall(None);
-        let run = |w: &Wall, wb: Cut, sb: Cut| apply_wall_termination(vec![wb, sb], &[w]);
+        let run = |w: &Wall, wb: Cut, sb: Cut| apply_wall_termination(vec![wb, sb], &[Some(w)]);
         let out = run(&below, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 2.6, 2.9, 100.0));
         assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 2.6]);
         let out = run(&above, band(0.0, 0.3, 0.0, 3.0, Some(10.0), "w"), slab_band(-1.0, 4.0, 0.0, 0.3, 100.0));
@@ -1894,16 +1888,16 @@ mod ts_faelle {
             Wall { id: "nah".into(), start: Vec2 { x: 0.0, y: 1.0 }, end: Vec2 { x: 4.0, y: 1.0 }, ..Default::default() },
             Wall { id: "fern".into(), start: Vec2 { x: 0.0, y: 9.0 }, end: Vec2 { x: 4.0, y: 9.0 }, ..Default::default() },
         ];
-        let walls: Vec<&Wall> = p.walls.iter().collect();
+        let walls: Vec<Option<&Wall>> = p.walls.iter().map(Some).collect();
         let plane = Plane { point: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0] };
         let e = |i: usize| Edge { kind: Kind::Wall, index: i, a: [0.0, 0.0], b: [1.0, 0.0] };
         let mut out = Output { visible: vec![e(0), e(1)], hidden: vec![e(1)], ..Default::default() };
-        filter_by_depth(&mut out, &p, &plane, 3.0, &walls, &[]);
+        filter_by_depth(&mut out, &p, &plane, 3.0, &walls, &[], &[]);
         assert_eq!(out.visible.len(), 1);
         assert_eq!(out.visible[0].index, 0);
         assert!(out.hidden.is_empty());
         let mut all = Output { visible: vec![e(0), e(1)], ..Default::default() };
-        filter_by_depth(&mut all, &p, &plane, 0.0, &walls, &[]);
+        filter_by_depth(&mut all, &p, &plane, 0.0, &walls, &[], &[]);
         assert_eq!(all.visible.len(), 2, "Tiefe 0 ist kein Filter");
     }
 
