@@ -254,11 +254,6 @@ export {
   type ViewBox as ViewBox__plan_planView_geometry,
   clamp,
   fitBoxFor,
-  marqueeHit,
-  marqueeHitCeilings,
-  marqueeHitDrawings,
-  marqueeHitRooms,
-  marqueeHitStairs,
   meetScale,
   mmToPx,
   pointInPolygon,
@@ -276,6 +271,14 @@ export {
   type OwnerField,
   PlanPickIndex,
 } from "../plan/planView/planPick";
+
+export {
+  planCount,
+  planPrimAt,
+  planTextEntries,
+  planWithExtra,
+  type TextEntryPrim,
+} from "../plan/planLazy";
 
 export {
   marqueeHitUnderlay,

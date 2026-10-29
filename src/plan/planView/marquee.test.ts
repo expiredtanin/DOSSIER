@@ -1,5 +1,5 @@
 /**
- * `marqueeHitCeilings`/`marqueeHitRooms`/`marqueeHitStairs` — Nutzer-Report:
+ * Rahmen-Auswahl über Decken/Räume/Treppen (`PlanPickIndex.marquee`) — Nutzer-Report:
  * "Auswahlrahmen kann nicht alle Elemente anwählen, z.B. Decken, Räume und
  * Treppen nicht". Vorher las das Auswahl-Rechteck nur `wallId`/`drawingId`
  * aus den Polygon-Primitiven; die anderen ID-Felder (die dieselben
@@ -7,8 +7,24 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { marqueeHit, marqueeHitCeilings, marqueeHitRooms, marqueeHitStairs } from "./geometry";
 import type { Primitive } from "../generatePlan";
+import type { ModelRect } from "./geometry";
+import { PlanPickIndex } from "./planPick";
+
+// Rahmen-Auswahl im Kern ([K3d], `plan_pick.rs`) über einen Plan aus diesen Primitiven.
+type Field = "wallId" | "ceilingId" | "roomId" | "stairId";
+const hit = (field: Field) => (prims: Primitive[], rect: ModelRect, crossing: boolean): string[] => {
+  const ix = new PlanPickIndex({ primitives: prims, bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } });
+  try {
+    return ix.marquee(field, rect, crossing);
+  } finally {
+    ix.release();
+  }
+};
+const marqueeHit = hit("wallId");
+const marqueeHitCeilings = hit("ceilingId");
+const marqueeHitRooms = hit("roomId");
+const marqueeHitStairs = hit("stairId");
 
 const NO_HATCH = { pattern: "none" as const, color: "#000" };
 

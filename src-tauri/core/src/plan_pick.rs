@@ -19,8 +19,9 @@
 
 use crate::jsmath::hypot;
 use crate::jsnum;
-use crate::plan_buf::{whole, View, F_IDS, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_LINE, T_POLYGON};
+use crate::plan_buf::{whole, View, F_IDS, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT_PATH};
 use crate::plan_parts::pick_ids;
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -294,6 +295,31 @@ pub struct PickIndex {
     /// (Art, Id) → Indizes aufsteigend.
     owners: HashMap<(u32, u32), Vec<u32>>,
     interned: HashMap<String, u32>,
+    /// Einträge mit nicht-leerer `drawingId` (Linie, Polygon, Kreis, Bogen, Text, Textpfad, Bild):
+    /// (Index, Typ, Id-Nummer) in Plan-Reihenfolge — Rahmen-Auswahl und Text-/Bild-Treffer.
+    draw_items: Vec<(u32, u32, u32)>,
+    /// Rahmen von `drawingText`/`drawingImage` mit `drawingId` (aus dem Text-JSON, bei Bedarf).
+    text_boxes: OnceCell<Vec<TextBox>>,
+}
+
+/// Rahmen eines Einzeltexts (wie die Einzelklick-Box in PlanView) bzw. eines Bilds.
+#[derive(Clone, Copy)]
+struct TextBox {
+    gi: u32,
+    image: bool,
+    min_x: f64,
+    min_y: f64,
+    max_x: f64,
+    max_y: f64,
+}
+
+/// Achsenparalleles Rechteck (Modell-Meter) der Rahmen-Auswahl.
+#[derive(Clone, Copy)]
+pub struct Rect {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub max_x: f64,
+    pub max_y: f64,
 }
 
 /// Bounding-Box, NaN ausgelassen (wie `f64::min`).
@@ -328,6 +354,8 @@ impl PickIndex {
             ring_ix: BoxIndex::default(),
             owners: HashMap::new(),
             interned: HashMap::new(),
+            draw_items: Vec::new(),
+            text_boxes: OnceCell::new(),
         };
         // Segment-Raster wie `buildSegmentIndex` (Ausmass mit Math.min/max, NaN steckt an).
         let mut seg_boxes: Vec<(u32, f64, f64, f64, f64)> = Vec::new();
@@ -392,6 +420,11 @@ impl PickIndex {
                         for (kind, id) in owned {
                             ix.owners.entry((kind, id)).or_default().push(g);
                         }
+                    }
+                }
+                if let Some(id) = drawing {
+                    if mask & (1 << 2) != 0 && matches!(tag, T_LINE | T_POLYGON | T_CIRCLE | T_DRAWING_ARC | T_DRAWING_TEXT | T_TEXT_PATH | T_IMAGE) {
+                        ix.draw_items.push((g, tag, id));
                     }
                 }
                 let f = |k: usize| view.word(at + 4 + k);
@@ -676,6 +709,249 @@ impl PickIndex {
         hits.sort_unstable();
         hits
     }
+
+    /// Text-JSON eines Eintrags (Texte, Textpfade, Bilder); `None` ohne JSON oder kaputt.
+    fn json(&self, gi: u32) -> Option<serde_json::Value> {
+        let (v, i) = self.locate(gi)?;
+        let si = v.word(v.rec_at(i)? + 4)?;
+        serde_json::from_str(&v.string(whole(si)?)?).ok()
+    }
+
+    /// Text-/Bild-Rahmen (einmal je Index, beim ersten Gebrauch aus dem JSON gelesen).
+    fn boxes(&self) -> &[TextBox] {
+        self.text_boxes.get_or_init(|| {
+            let mut out = Vec::new();
+            for &(gi, tag, _) in &self.draw_items {
+                if tag != T_DRAWING_TEXT && tag != T_IMAGE {
+                    continue;
+                }
+                let Some(j) = self.json(gi) else { continue };
+                let num = |o: &serde_json::Value, k: &str| o.get(k).and_then(|x| x.as_f64()).unwrap_or(f64::NAN);
+                let pt = |k: &str| j.get(k).map_or((f64::NAN, f64::NAN), |o| (num(o, "x"), num(o, "y")));
+                if tag == T_IMAGE {
+                    let (a, b) = pt("min");
+                    let (c, d) = pt("max");
+                    out.push(TextBox { gi, image: true, min_x: a, min_y: b, max_x: c, max_y: d });
+                } else {
+                    let (ax, ay) = pt("at");
+                    let h = num(&j, "heightM");
+                    let len = j.get("text").and_then(|t| t.as_str()).map_or(0, |t| t.encode_utf16().count()) as f64;
+                    // `p.wrapWidth && p.wrapWidth > 0` (fehlend/0/NaN → keine Spalte).
+                    let wrap = j.get("wrapWidth").and_then(|x| x.as_f64()).filter(|w| *w > 0.0);
+                    let single_w = jsnum::max(1.0, len) * h * 0.6;
+                    let w = wrap.unwrap_or(single_w);
+                    let lines = match wrap {
+                        Some(ww) => jsnum::max(1.0, (single_w / ww).ceil()),
+                        None => 1.0,
+                    };
+                    let pad = h * 0.6;
+                    out.push(TextBox {
+                        gi,
+                        image: false,
+                        min_x: ax - pad,
+                        min_y: ay - lines * h * 1.25 - pad,
+                        max_x: ax + w + pad,
+                        max_y: ay + h * 0.4 + pad,
+                    });
+                }
+            }
+            out
+        })
+    }
+
+    /// Erster `drawingText` (mit `drawingId`) in Plan-Reihenfolge, dessen Rahmen `(x, y)` enthält
+    /// (wie `pickDrawingText` in PlanView).
+    pub fn drawing_text_at(&self, x: f64, y: f64) -> Option<u32> {
+        self.boxes().iter().find(|b| !b.image && x >= b.min_x && x <= b.max_x && y >= b.min_y && y <= b.max_y).map(|b| b.gi)
+    }
+
+    /// Oberstes (zuletzt gezeichnetes) Bild mit `drawingId`, das `(x, y)` enthält.
+    pub fn drawing_image_at(&self, x: f64, y: f64) -> Option<u32> {
+        self.boxes().iter().rev().find(|b| b.image && x >= b.min_x && x <= b.max_x && y >= b.min_y && y <= b.max_y).map(|b| b.gi)
+    }
+
+    /// Typ des ersten Eintrags einer Zeichnung, der eine Form benennt (Linie, Polygon, Text,
+    /// Textpfad, Kreis, Bogen, Bild — wie `drawingLabel`); `None` ohne solchen.
+    pub fn drawing_kind(&self, id: &str) -> Option<u32> {
+        let n = self.interned.get(id)?;
+        for &gi in self.owners.get(&(2, *n))? {
+            let (v, i) = self.locate(gi)?;
+            let tag = whole(v.word(v.rec_at(i)?)?)? as u32;
+            if matches!(tag, T_LINE | T_POLYGON | T_DRAWING_TEXT | T_TEXT_PATH | T_CIRCLE | T_DRAWING_ARC | T_IMAGE) {
+                return Some(tag);
+            }
+        }
+        None
+    }
+
+    /// Rahmen-Auswahl über Polygone mit einer Id der Pick-Art `kind` (wie `marqueeHitByField`):
+    /// `crossing` = ein Band berührt das Rechteck, sonst alle Bänder ganz darin. Ids in der
+    /// Reihenfolge ihres ersten Auftretens.
+    pub fn marquee_polygons(&self, kind: u32, rect: Rect, crossing: bool) -> Vec<String> {
+        let mut order: Vec<(String, bool)> = Vec::new();
+        let mut at: HashMap<String, usize> = HashMap::new();
+        for p in &self.polys {
+            let Some((v, i)) = self.locate(p.gi) else { continue };
+            let Some(rec) = v.rec(i) else { continue };
+            let Some(ids) = pick_ids(&v, &rec) else { continue };
+            let Some(&(_, si)) = ids.iter().find(|e| e.0 == kind) else { continue };
+            let Some(id) = whole(si).and_then(|k| v.string(k)) else { continue };
+            let Some(pts) = self.polygon_pts(p.gi) else { continue };
+            let hit = if crossing { poly_touches_rect(&pts, rect) } else { poly_enclosed_by_rect(&pts, rect) };
+            match at.get(&id) {
+                // crossing: irgendein Band; Fenster: alle Bänder.
+                Some(&k) => order[k].1 = if crossing { order[k].1 || hit } else { order[k].1 && hit },
+                None => {
+                    at.insert(id.clone(), order.len());
+                    order.push((id, hit));
+                }
+            }
+        }
+        order.into_iter().filter(|e| e.1).map(|e| e.0).collect()
+    }
+
+    /// Rahmen-Auswahl über 2D-Zeichnungen (wie `marqueeHitDrawings`): je Zeichnung alle Punkte
+    /// (Linien-Enden, Polygon-Ecken, abgetastete Kreise/Bögen, Text-/Bild-Rahmen); `skip` =
+    /// Zeichnungen, die der Aufrufer selbst prüft. Ids in der Reihenfolge ihres ersten Auftretens.
+    pub fn marquee_drawings(&self, rect: Rect, crossing: bool, skip: &[&str]) -> Vec<String> {
+        let skip_n: Vec<u32> = skip.iter().filter_map(|s| self.interned.get(*s).copied()).collect();
+        let names: HashMap<u32, &str> = self.interned.iter().map(|(k, v)| (*v, k.as_str())).collect();
+        let boxes: HashMap<u32, TextBox> = if self.draw_items.iter().any(|e| e.1 == T_DRAWING_TEXT || e.1 == T_IMAGE) {
+            self.boxes().iter().map(|b| (b.gi, *b)).collect()
+        } else {
+            HashMap::new()
+        };
+        let mut order: Vec<(u32, Vec<f64>)> = Vec::new();
+        let mut at: HashMap<u32, usize> = HashMap::new();
+        for &(gi, tag, id) in &self.draw_items {
+            if skip_n.contains(&id) {
+                continue;
+            }
+            let pts: Vec<f64> = match tag {
+                T_LINE => match self.line(gi) {
+                    Some(l) => l.to_vec(),
+                    None => continue,
+                },
+                T_POLYGON => match self.polygon_pts(gi) {
+                    Some(p) => p,
+                    None => continue,
+                },
+                T_CIRCLE => match self.fields::<3>(gi, 4) {
+                    Some([cx, cy, r]) => ring_sample_points(cx, cy, r, None),
+                    None => continue,
+                },
+                T_DRAWING_ARC => match self.fields::<5>(gi, 3) {
+                    Some([cx, cy, r, a0, a1]) => ring_sample_points(cx, cy, r, Some((a0, a1))),
+                    None => continue,
+                },
+                // Bild: min, (max.x, min.y), max, (min.x, max.y) — Text: dieselbe Umlaufrichtung.
+                T_DRAWING_TEXT | T_IMAGE => match boxes.get(&gi) {
+                    Some(b) => vec![b.min_x, b.min_y, b.max_x, b.min_y, b.max_x, b.max_y, b.min_x, b.max_y],
+                    None => continue,
+                },
+                _ => continue,
+            };
+            match at.get(&id) {
+                Some(&k) => order[k].1.extend_from_slice(&pts),
+                None => {
+                    at.insert(id, order.len());
+                    order.push((id, pts));
+                }
+            }
+        }
+        order
+            .into_iter()
+            .filter(|(_, pts)| if crossing { poly_touches_rect(pts, rect) } else { poly_enclosed_by_rect(pts, rect) })
+            .filter_map(|(id, _)| names.get(&id).map(|s| s.to_string()))
+            .collect()
+    }
+}
+
+/// Punkte auf einem Kreis-/Bogen-Ring (wie `ringSamplePoints`): Vollkreis 32 Schritte, Bogen
+/// anteilig (mindestens 4), Endpunkt inklusive.
+fn ring_sample_points(cx: f64, cy: f64, r: f64, arc: Option<(f64, f64)>) -> Vec<f64> {
+    let tau = std::f64::consts::PI * 2.0;
+    let (start, sweep, steps) = match arc {
+        None => (0.0, tau, 32.0),
+        Some((a0, a1)) => {
+            let mut sw = (((a1 - a0) % tau) + tau) % tau;
+            if sw == 0.0 || sw.is_nan() {
+                sw = tau;
+            }
+            (a0, sw, jsnum::max(4.0, jsnum::round((sw / tau) * 32.0)))
+        }
+    };
+    let mut out = Vec::new();
+    let mut i = 0.0;
+    while i <= steps {
+        let a = start + (sweep * i) / steps;
+        out.push(cx + r * jsnum::cos(a));
+        out.push(cy + r * jsnum::sin(a));
+        i += 1.0;
+    }
+    out
+}
+
+/// Alle Ecken im Rechteck (`polyEnclosedByRect`); leer → nein.
+fn poly_enclosed_by_rect(poly: &[f64], r: Rect) -> bool {
+    if poly.len() < 2 {
+        return false;
+    }
+    poly.chunks_exact(2).all(|p| p[0] >= r.min_x && p[0] <= r.max_x && p[1] >= r.min_y && p[1] <= r.max_y)
+}
+
+/// Orientierung (b − a) × (c − a) (`cross3`).
+fn cross3(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> f64 {
+    (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+}
+
+/// `onSegment` bei kollinearen Punkten.
+fn on_segment(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> bool {
+    jsnum::min(a.0, b.0) <= p.0 && p.0 <= jsnum::max(a.0, b.0) && jsnum::min(a.1, b.1) <= p.1 && p.1 <= jsnum::max(a.1, b.1)
+}
+
+/// `segmentsIntersect` (inkl. Berührung).
+fn segments_intersect(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> bool {
+    let d1 = cross3(c, d, a);
+    let d2 = cross3(c, d, b);
+    let d3 = cross3(a, b, c);
+    let d4 = cross3(a, b, d);
+    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) {
+        return true;
+    }
+    (d1 == 0.0 && on_segment(c, d, a)) || (d2 == 0.0 && on_segment(c, d, b)) || (d3 == 0.0 && on_segment(a, b, c)) || (d4 == 0.0 && on_segment(a, b, d))
+}
+
+/// Polygon und Rechteck berühren sich (`polyTouchesRect`): Ecke im Rechteck, Rechteck-Ecke im
+/// Polygon oder Kantenschnitt.
+fn poly_touches_rect(poly: &[f64], r: Rect) -> bool {
+    for p in poly.chunks_exact(2) {
+        if p[0] >= r.min_x && p[0] <= r.max_x && p[1] >= r.min_y && p[1] <= r.max_y {
+            return true;
+        }
+    }
+    let corners = [(r.min_x, r.min_y), (r.max_x, r.min_y), (r.max_x, r.max_y), (r.min_x, r.max_y)];
+    for c in corners {
+        if point_in_polygon(c.0, c.1, poly) {
+            return true;
+        }
+    }
+    let n = poly.len() / 2;
+    if n == 0 {
+        return false;
+    }
+    let mut j = n - 1;
+    for i in 0..n {
+        let a = (poly[2 * j], poly[2 * j + 1]);
+        let b = (poly[2 * i], poly[2 * i + 1]);
+        for k in 0..4 {
+            if segments_intersect(a, b, corners[k], corners[(k + 1) % 4]) {
+                return true;
+            }
+        }
+        j = i;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -689,5 +965,29 @@ mod tests {
         assert!(!point_in_polygon(1.5, 0.5, &sq));
         assert_eq!(point_seg_dist(0.5, 1.0, 0.0, 0.0, 1.0, 0.0), 1.0);
         assert_eq!(point_seg_dist_px(3.0, 4.0, 0.0, 0.0, 0.0, 0.0), 5.0);
+    }
+
+    #[test]
+    fn rechteck_beruehrt_und_umschliesst() {
+        let r = Rect { min_x: 0.0, min_y: 0.0, max_x: 2.0, max_y: 2.0 };
+        let inner = [0.5, 0.5, 1.5, 0.5, 1.5, 1.5];
+        let around = [-1.0, -1.0, 3.0, -1.0, 3.0, 3.0, -1.0, 3.0];
+        let crossing = [-1.0, 1.0, 3.0, 1.0];
+        assert!(poly_enclosed_by_rect(&inner, r) && poly_touches_rect(&inner, r));
+        // Rechteck ganz im Polygon: Ecke im Polygon.
+        assert!(!poly_enclosed_by_rect(&around, r) && poly_touches_rect(&around, r));
+        // Strecke quer durch: nur Kantenschnitt.
+        assert!(poly_touches_rect(&crossing, r));
+        assert!(!poly_touches_rect(&[5.0, 5.0, 6.0, 6.0], r));
+        assert!(!poly_enclosed_by_rect(&[], r));
+    }
+
+    #[test]
+    fn ring_abtastung_vollkreis_und_bogen() {
+        assert_eq!(ring_sample_points(0.0, 0.0, 1.0, None).len(), 2 * 33);
+        // Viertelbogen: 8 Schritte, Endpunkt inklusive.
+        let q = ring_sample_points(0.0, 0.0, 2.0, Some((0.0, std::f64::consts::FRAC_PI_2)));
+        assert_eq!(q.len(), 2 * 9);
+        assert!(q.chunks_exact(2).all(|p| p[0] >= -1e-12 && p[1] >= -1e-12));
     }
 }

@@ -10,7 +10,9 @@
 import type { Vec2 } from "../../model/types";
 import type { Plan, Primitive } from "../generatePlan";
 import { heldSegs, planParts } from "../planParts";
+import { planPrimAt } from "../planLazy";
 import { core } from "../../engine/coreWasm";
+import type { ModelRect } from "./geometry";
 
 /** Pick-Felder eines Primitivs (Besitzer-Ids). */
 export const OWNER_FIELDS = [
@@ -57,19 +59,37 @@ export interface ClientMap {
   scale: number;
 }
 
+/** Typ-Kennung im Plan-Puffer → `kind` (s. `plan_buf.rs`). */
+const TAG_KIND: Record<number, Primitive["kind"]> = {
+  1: "polygon",
+  2: "line",
+  3: "arc",
+  4: "drawingCircle",
+  5: "drawingArc",
+  6: "text",
+  7: "drawingText",
+  8: "drawingTextPath",
+  9: "drawingImage",
+};
+
+/** Ids aus einer Kern-Antwort (jede mit `\0` davor). */
+const splitIds = (s: string): string[] => (s ? s.split("\0").slice(1) : []);
+
 export class PlanPickIndex {
   private id = 0;
-  readonly prims: readonly Primitive[];
 
-  constructor(private readonly plan: Plan) {
-    this.prims = plan.primitives;
+  constructor(readonly plan: Plan) {}
+
+  /** Primitiv `i` des Plans (bei einem lazy Plan nur dieser Eintrag gelesen). */
+  prim(i: number): Primitive | undefined {
+    return planPrimAt(this.plan, i);
   }
 
-  /** Kern-Index (lazy beim ersten Abfragen gebaut). */
+  /** Kern-Index (lazy beim ersten Abfragen gebaut). Texte/Bilder mit JSON (Rahmen-Treffer). */
   private ix(): number {
     if (this.id) return this.id;
     const c = core();
-    const parts = planParts(this.plan);
+    const parts = planParts(this.plan, true);
     this.id = c.pick_index_build(heldSegs(parts, false));
     if (!this.id) this.id = c.pick_index_build(heldSegs(parts, true));
     return this.id;
@@ -144,6 +164,42 @@ export class PlanPickIndex {
     const list = [...ids];
     if (list.length === 0) return [];
     const hits = core().pick_owned_by(this.ix(), KIND[field], list.map((s) => "\u0000" + s).join(""));
-    return Array.from(hits, (i) => this.prims[i]);
+    return Array.from(hits, (i) => planPrimAt(this.plan, i)!);
+  }
+
+  /** Erster Einzeltext (`drawingText` mit `drawingId`), dessen Rahmen `m` enthält, oder null. */
+  drawingTextAt(m: Vec2): number | null {
+    const i = core().pick_drawing_text(this.ix(), m.x, m.y);
+    return i >= 0 ? i : null;
+  }
+
+  /** Oberstes Bild (`drawingImage` mit `drawingId`) unter `m` oder null. */
+  drawingImageAt(m: Vec2): number | null {
+    const i = core().pick_drawing_image(this.ix(), m.x, m.y);
+    return i >= 0 ? i : null;
+  }
+
+  /** Art des ersten formgebenden Primitivs einer Zeichnung (Linie, Polygon, Text, …) oder null. */
+  drawingKind(drawingId: string): Primitive["kind"] | null {
+    return TAG_KIND[core().pick_drawing_kind(this.ix(), drawingId)] ?? null;
+  }
+
+  /**
+   * Rahmen-Auswahl über Polygone mit Id im Feld `field` (CAD-Konvention): `crossing` = ein Band
+   * berührt das Rechteck, sonst liegen alle Bänder ganz darin. Ids in Auftreten-Reihenfolge.
+   */
+  marquee(field: "wallId" | "ceilingId" | "roomId" | "stairId" | "columnId" | "roofId", rect: ModelRect, crossing: boolean): string[] {
+    const r = Float64Array.of(rect.minX, rect.minY, rect.maxX, rect.maxY);
+    return splitIds(core().pick_marquee_polygons(this.ix(), KIND[field], r, crossing));
+  }
+
+  /**
+   * Rahmen-Auswahl über 2D-Zeichnungen (alle Punkte je Zeichnung: Linien, Polygone, abgetastete
+   * Kreise/Bögen, Text-/Bild-Rahmen); `skipIds` prüft der Aufrufer selbst (kompakte Unterlage).
+   */
+  marqueeDrawings(rect: ModelRect, crossing: boolean, skipIds?: Iterable<string>): string[] {
+    const r = Float64Array.of(rect.minX, rect.minY, rect.maxX, rect.maxY);
+    const skip = skipIds ? [...skipIds].map((s) => "\0" + s).join("") : "";
+    return splitIds(core().pick_marquee_drawings(this.ix(), r, crossing, skip));
   }
 }

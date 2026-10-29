@@ -31,7 +31,7 @@ import { isGpuText } from "../../core";
 import { LiveMeet, LiveValue, createMeetStore, createValueStore } from "./planView/liveMeet";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../../theme/accents";
-import { type ViewBox__plan_planView_geometry as ViewBox, PX_PER_M, PAD, toScreen, clamp, meetScale, scaleFromView, viewForScale, viewForCamera, fitBoxFor, marqueeHit, marqueeHitDrawings, type ModelRect, marqueeHitCeilings, marqueeHitRooms, marqueeHitStairs } from "../../core";
+import { type ViewBox__plan_planView_geometry as ViewBox, PX_PER_M, PAD, toScreen, clamp, meetScale, scaleFromView, viewForScale, viewForCamera, fitBoxFor, type ModelRect } from "../../core";
 import {
   polyUsesPattern,
   HatchPattern,
@@ -45,6 +45,7 @@ import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, indexedInRegion, regionContains, type Bounds } from "../../core";
 import { PlanPickIndex, type ClientMap, type OwnerField } from "../../core";
+import { planPrimAt, planTextEntries } from "../../core";
 import { buildDrawingIndex, drawingsWithinDistance, marqueeHitUnderlay, nearestInDrawings, type DrawingIndex } from "../../core";
 import { endBusyAfterPaint } from "../../state/busyStore";
 import { createCursorStore, useCursorValue, type CursorStore } from "../../state/cursorStore";
@@ -765,7 +766,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const pickIndexRef = useRef<PlanPickIndex | null>(null);
   const getPick = (): PlanPickIndex => {
     const cached = pickIndexRef.current;
-    if (cached && cached.prims === plan.primitives) return cached;
+    if (cached && cached.plan === plan) return cached;
     cached?.release();
     const ix = new PlanPickIndex(plan);
     pickIndexRef.current = ix;
@@ -813,9 +814,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Primitiv in render2d, s. toRenderScene.ts `RImage`-Kommentar) — dieselbe
   // SVG-Fallback-Regel wie bei georeferenzierten Luftbildern.
   // useMemo: lief sonst bei JEDEM Render über alle Primitive (3,7 Mio. bei Kataster).
+  // Texte/Bilder aus den Typ-Kennungen des Plan-Puffers (`planTextEntries`), ohne alle Primitive zu lesen.
   const hasDrawingImages = useMemo(
-    () => planRaw.primitives.some((p) => p.kind === "drawingImage"),
-    [planRaw.primitives],
+    () => planTextEntries(planRaw).some((e) => e.p.kind === "drawingImage"),
+    [planRaw],
   );
   // Engine WIRKLICH aktiv? Steuert das Umschalten SVG↔GPU: bei false rendert der
   // volle SVG-Pfad (Fallback), bei true übernimmt die GPU-Ebene + Text-Overlay.
@@ -832,18 +834,6 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const lines = !useGpuRenderer || wantWasm;
     return materializeGreyed(lines ? materializeUnderlay(planRaw) : planRaw, lines);
   }, [planRaw, useGpuRenderer, wantWasm]);
-  // Einzeltexte und Bilder (eigene Bbox-Treffer): einmal je Plan gesammelt statt bei jeder
-  // Mausbewegung über alle Primitive zu laufen.
-  const textImageIdx = useMemo(() => {
-    const texts: number[] = [];
-    const images: number[] = [];
-    plan.primitives.forEach((p, i) => {
-      if (p.kind === "drawingText") texts.push(i);
-      else if (p.kind === "drawingImage") images.push(i);
-    });
-    return { texts, images };
-  }, [plan.primitives]);
-
   // Kompakte Linien-Unterlage (nur im reinen WebGL-Modus noch als `plan.underlay`
   // vorhanden): Hover/Pick/Marquee/Hervorhebung greifen direkt auf die Zeichnungen
   // zu, Strukturen entstehen LAZY je Plan (s. planView/underlayAccess.ts).
@@ -885,11 +875,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // bei jedem Render über ALLE Primitive — bei einem Kataster-Import 3,7 Mio.
   // GL-Linien, von denen das SVG keine einzige zeichnet (gemessen: 120–170 ms
   // je Zoom-Schritt allein fürs Culling, für am Ende ~500 sichtbare Texte).
+  // Mit GPU zeichnet das SVG nur Texte: dann kommen die Kandidaten aus den Text-Einträgen des
+  // Plan-Puffers (`planTextEntries`, [K3d]) — die übrigen Primitive werden nicht gelesen.
   const svgCandidates = useMemo(() => {
     const out: Array<{ p: Primitive; i: number }> = [];
-    const prims = plan.primitives;
-    for (let i = 0; i < prims.length; i++) {
-      const p = prims[i];
+    const items: ReadonlyArray<{ p: Primitive; i: number }> = useGpuRenderer ? planTextEntries(plan) : plan.primitives.map((p, i) => ({ p, i }));
+    for (const { p, i } of items) {
       const drawnElsewhere = useGpuRenderer
         ? wantWasm
           ? p.kind !== "drawingText"
@@ -900,7 +891,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (!drawnElsewhere) out.push({ p, i });
     }
     return out;
-  }, [plan.primitives, useGpuRenderer, wantWasm, wantNative, nativeHook.gpuTexts]);
+  }, [plan, useGpuRenderer, wantWasm, wantNative, nativeHook.gpuTexts]);
   const needsCull = svgCandidates.length > CULL_THRESHOLD;
   const [cullState, setCullState] = useState<CullState | null>(() => {
     if (!needsCull) return null;
@@ -1116,7 +1107,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       },
       fitSelection: () => {
         const sel = selectedRef.current;
-        const prim = sel !== null ? planRef.current.primitives[sel] : undefined;
+        const prim = sel !== null ? planPrimAt(planRef.current, sel) : undefined;
         if (prim && prim.kind === "polygon") {
           setView(fitBoxFor(prim.pts, toScreenRef.current));
         } else {
@@ -1439,8 +1430,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const anyGroupableHit = (clientX: number, clientY: number): GroupableHit | null => {
     const idx = hitTest(clientX, clientY);
     if (idx !== null) {
-      const p = plan.primitives[idx];
-      if (p.kind === "polygon") {
+      const p = planPrimAt(plan, idx);
+      if (p?.kind === "polygon") {
         if (p.wallId) return { wallId: p.wallId };
         if (p.ceilingId) return { ceilingId: p.ceilingId };
         if (p.roomId) return { roomId: p.roomId };
@@ -1464,7 +1455,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const m = rawModelAt(clientX, clientY);
     const seg = pick.nearestSegment(m, LINE_PICK_PX / pxPerM);
     if (seg) {
-      bestId = (plan.primitives[seg.i] as Extract<Primitive, { kind: "line" }>).drawingId!;
+      bestId = (planPrimAt(plan, seg.i) as Extract<Primitive, { kind: "line" }>).drawingId!;
       bestDist = seg.dist * pxPerM;
     }
     const uIndex = getUnderlayIndex();
@@ -1479,7 +1470,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     for (const { i, dpx } of pick.ringsNear(m, pxPerM, LINE_PICK_PX)) {
       if (dpx < bestDist) {
         bestDist = dpx;
-        bestId = (plan.primitives[i] as Extract<Primitive, { kind: "drawingCircle" | "drawingArc" }>).drawingId!;
+        bestId = (planPrimAt(plan, i) as Extract<Primitive, { kind: "drawingCircle" | "drawingArc" }>).drawingId!;
       }
     }
     if (bestId) return bestId;
@@ -1500,7 +1491,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     let bestDist = maxDist;
     const seg = getPick().nearestSegment(m, maxDist);
     if (seg) {
-      const p = plan.primitives[seg.i] as Extract<Primitive, { kind: "line" }>;
+      const p = planPrimAt(plan, seg.i) as Extract<Primitive, { kind: "line" }>;
       best = { a: p.a, b: p.b };
       bestDist = seg.dist;
     }
@@ -1513,44 +1504,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   };
 
   // Trifft der Klick ein Text-2D-Element (kind "drawingText")? Grosszügige Modell-
-  // Bounding-Box um den Ankerpunkt (Text hat keine Linien-Geometrie zum Anfassen);
-  // Winkel wird vernachlässigt (meist waagrecht). Liefert die drawingId oder null.
+  // Bounding-Box um den Ankerpunkt (Text hat keine Linien-Geometrie zum Anfassen; Winkel
+  // vernachlässigt) — im Kern (`plan_pick.rs`). Liefert die drawingId oder null.
   const pickDrawingText = (clientX: number, clientY: number): string | null => {
-    const m = rawModelAt(clientX, clientY);
-    for (const i of textImageIdx.texts) {
-      const p = plan.primitives[i];
-      if (p.kind !== "drawingText" || !p.drawingId) continue;
-      const singleW = Math.max(1, p.text.length) * p.heightM * 0.6;
-      // Textspalte: Breite = wrapWidth, Höhe = geschätzte Zeilenzahl · Zeilenhöhe.
-      const w = p.wrapWidth && p.wrapWidth > 0 ? p.wrapWidth : singleW;
-      const lines =
-        p.wrapWidth && p.wrapWidth > 0 ? Math.max(1, Math.ceil(singleW / p.wrapWidth)) : 1;
-      const pad = p.heightM * 0.6;
-      const minX = p.at.x - pad;
-      const maxX = p.at.x + w + pad;
-      // Baseline am Anker; Text läuft nach unten (Zeilen) und etwas nach oben (Oberlängen).
-      const minY = p.at.y - lines * p.heightM * 1.25 - pad;
-      const maxY = p.at.y + p.heightM * 0.4 + pad;
-      if (m.x >= minX && m.x <= maxX && m.y >= minY && m.y <= maxY) {
-        return p.drawingId;
-      }
-    }
-    return null;
+    const pick = getPick();
+    const i = pick.drawingTextAt(rawModelAt(clientX, clientY));
+    return i === null ? null : ((pick.prim(i) as { drawingId?: string }).drawingId ?? null);
   };
 
-  // Trifft der Klick ein Bild-2D-Element (kind "drawingImage")? Reine
-  // Bounding-Box-Prüfung (achsparallel, keine Rotation). Liefert die drawingId
-  // oder null.
+  // Trifft der Klick ein Bild-2D-Element (kind "drawingImage")? Reine Bounding-Box-Prüfung
+  // (achsparallel, oberstes zuerst). Liefert die drawingId oder null.
   const pickDrawingImage = (clientX: number, clientY: number): string | null => {
-    const m = rawModelAt(clientX, clientY);
-    for (let k = textImageIdx.images.length - 1; k >= 0; k--) {
-      const p = plan.primitives[textImageIdx.images[k]];
-      if (p.kind !== "drawingImage" || !p.drawingId) continue;
-      if (m.x >= p.min.x && m.x <= p.max.x && m.y >= p.min.y && m.y <= p.max.y) {
-        return p.drawingId;
-      }
-    }
-    return null;
+    const pick = getPick();
+    const i = pick.drawingImageAt(rawModelAt(clientX, clientY));
+    return i === null ? null : ((pick.prim(i) as { drawingId?: string }).drawingId ?? null);
   };
 
   // Nächstgelegene Öffnung (Fenster/Tür) zum Cursor: Linien-/Bogen-Primitive mit
@@ -1562,9 +1529,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const pick = getPick();
     // Getroffener Rahmen (das zuerst gezeichnete Polygon) hat Vorrang vor Symbol-Linien.
     const hit = pick.bottomPolygon(m, "openingId");
-    if (hit !== null) return (plan.primitives[hit] as { openingId?: string }).openingId!;
+    if (hit !== null) return (planPrimAt(plan, hit) as { openingId?: string }).openingId!;
     const i = pick.nearestSymbolPx(["openingId"], ["openingId"], clientMap(), { x: clientX, y: clientY }, LINE_PICK_PX);
-    return i === null ? null : (plan.primitives[i] as { openingId?: string }).openingId!;
+    return i === null ? null : (planPrimAt(plan, i) as { openingId?: string }).openingId!;
   };
 
   // Nächstgelegene Treppe zum Cursor: getroffenes Tritt-/Podest-Polygon (per
@@ -1574,9 +1541,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const m = viewToModel(v.x, v.y);
     const pick = getPick();
     const hit = pick.bottomPolygon(m, "stairId");
-    if (hit !== null) return (plan.primitives[hit] as { stairId?: string }).stairId!;
+    if (hit !== null) return (planPrimAt(plan, hit) as { stairId?: string }).stairId!;
     const i = pick.nearestSymbolPx(["stairId"], [], clientMap(), { x: clientX, y: clientY }, LINE_PICK_PX);
-    return i === null ? null : (plan.primitives[i] as { stairId?: string }).stairId!;
+    return i === null ? null : (planPrimAt(plan, i) as { stairId?: string }).stairId!;
   };
 
   // Getroffener Raum: die Raum-Fläche (Polygon mit `roomId`) per Punkt-in-Polygon.
@@ -1584,7 +1551,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const pickRoom = (clientX: number, clientY: number): string | null => {
     const v = clientToView(clientX, clientY, view);
     const i = getPick().topPolygon(viewToModel(v.x, v.y), "roomId");
-    return i === null ? null : (plan.primitives[i] as { roomId?: string }).roomId!;
+    return i === null ? null : (planPrimAt(plan, i) as { roomId?: string }).roomId!;
   };
 
   // Getroffenes Dach: das unsichtbare Traufe-Pick-Polygon per Punkt-in-Polygon
@@ -1592,7 +1559,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const pickRoof = (clientX: number, clientY: number): string | null => {
     const v = clientToView(clientX, clientY, view);
     const i = getPick().topPolygon(viewToModel(v.x, v.y), "roofId");
-    return i === null ? null : (plan.primitives[i] as { roofId?: string }).roofId!;
+    return i === null ? null : (planPrimAt(plan, i) as { roofId?: string }).roofId!;
   };
 
   // Getroffene Schnitt-/Ansichtslinie: ihr schmales, unsichtbares Pick-Band
@@ -1600,7 +1567,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const pickSectionLine = (clientX: number, clientY: number): string | null => {
     const v = clientToView(clientX, clientY, view);
     const i = getPick().topPolygon(viewToModel(v.x, v.y), "sectionLineId");
-    return i === null ? null : (plan.primitives[i] as { sectionLineId?: string }).sectionLineId!;
+    return i === null ? null : (planPrimAt(plan, i) as { sectionLineId?: string }).sectionLineId!;
   };
 
   // Getroffenes Kontext-Objekt (importiertes Gebäude/Terrain): sein unsichtbares
@@ -1610,7 +1577,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const pickContextObject = (clientX: number, clientY: number): string | null => {
     const v = clientToView(clientX, clientY, view);
     const i = getPick().topPolygon(viewToModel(v.x, v.y), "contextObjectId");
-    return i === null ? null : (plan.primitives[i] as { contextObjectId?: string }).contextObjectId!;
+    return i === null ? null : (planPrimAt(plan, i) as { contextObjectId?: string }).contextObjectId!;
   };
 
   // Getroffener extrudierter Körper (truck-Integration): der Footprint-Umriss
@@ -1619,7 +1586,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const pickExtrudedSolid = (clientX: number, clientY: number): string | null => {
     const v = clientToView(clientX, clientY, view);
     const i = getPick().topPolygon(viewToModel(v.x, v.y), "extrudedSolidId");
-    return i === null ? null : (plan.primitives[i] as { extrudedSolidId?: string }).extrudedSolidId!;
+    return i === null ? null : (planPrimAt(plan, i) as { extrudedSolidId?: string }).extrudedSolidId!;
   };
 
   // Getroffene Stütze (Tragwerk): ihr Querschnitt ist eine gefüllte Poché
@@ -1627,7 +1594,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const pickColumn = (clientX: number, clientY: number): string | null => {
     const v = clientToView(clientX, clientY, view);
     const i = getPick().topPolygon(viewToModel(v.x, v.y), "columnId");
-    return i === null ? null : (plan.primitives[i] as { columnId?: string }).columnId!;
+    return i === null ? null : (planPrimAt(plan, i) as { columnId?: string }).columnId!;
   };
 
   // Liegt der Cursor auf dem KÖRPER eines GEWÄHLTEN Elements (Wand-Poché bzw.
@@ -1642,7 +1609,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // der Wirtswand, die im Blatt dahinter liegt).
     if (sheetBodies) {
       const hi = hitTest(clientX, clientY);
-      const p = hi !== null ? plan.primitives[hi] : null;
+      const p = hi !== null ? planPrimAt(plan, hi) ?? null : null;
       if (p && "openingId" in p && p.openingId && selectedOpeningIds?.includes(p.openingId)) {
         return { openingId: p.openingId };
       }
@@ -1657,8 +1624,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (selWalls.size) {
       const hi = hitTest(clientX, clientY);
       if (hi !== null) {
-        const p = plan.primitives[hi];
-        if (p.kind === "polygon" && p.wallId && selWalls.has(p.wallId)) {
+        const p = planPrimAt(plan, hi);
+        if (p?.kind === "polygon" && p.wallId && selWalls.has(p.wallId)) {
           return { wallId: p.wallId };
         }
       }
@@ -1679,7 +1646,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Polygon-Punkte allein sonst ein anderes Ergebnis lieferten) + Unterlage.
   const marqueeHitAll = (rect: ModelRect, crossing: boolean): string[] => {
     const ids = getUnderlayIds();
-    const fromPrims = marqueeHitDrawings(plan.primitives, rect, crossing, ids ?? undefined);
+    const fromPrims = getPick().marqueeDrawings(rect, crossing, ids?.keys());
     const u = getUnderlay();
     return u ? [...fromPrims, ...marqueeHitUnderlay(u.drawings, rect, crossing)] : fromPrims;
   };
@@ -2096,7 +2063,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Kontext). Liefert nur die Ids + Polygon-Index; `model`/`shift` ergänzt der Aufrufer.
   const defaultPick = (clientX: number, clientY: number): PickIds => {
     const hitIndex = hitTest(clientX, clientY);
-    const hit = hitIndex !== null ? plan.primitives[hitIndex] : undefined;
+    const hit = hitIndex !== null ? planPrimAt(plan, hitIndex) : undefined;
     // Öffnung (Fenster/Tür) zuerst: ihr Symbol sitzt in der ausgesparten Lücke
     // bzw. schlägt über die Wand — ein Klick nahe am Symbol wählt die Öffnung.
     // Schnitt-/Ansichtslinie zuerst: ihr schmales Band liegt über allem, ein
@@ -2195,7 +2162,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const cycleRef = useRef<{
     x: number;
     y: number;
-    prims: readonly Primitive[];
+    plan: Plan;
     items: PickCandidate[];
     idx: number;
     model: Vec2;
@@ -2232,9 +2199,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           ? t("pick.shape.area")
           : t("pick.shape.polyline");
     }
-    for (const p of plan.primitives) {
-      if (!("drawingId" in p) || p.drawingId !== id) continue;
-      switch (p.kind) {
+    switch (getPick().drawingKind(id)) {
         case "line": return t("pick.shape.line");
         case "polygon": return t("pick.shape.area");
         case "drawingText":
@@ -2242,10 +2207,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         case "drawingCircle": return t("pick.shape.circle");
         case "drawingArc": return t("pick.shape.arc");
         case "drawingImage": return t("pick.shape.image");
-        default: break;
-      }
+        default: return t("pick.kind.drawing");
     }
-    return t("pick.kind.drawing");
   };
 
   /** IDs ALLER 2D-Elemente nahe am Cursor (nächste zuerst). */
@@ -2256,13 +2219,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const found: Array<{ id: string; d: number }> = [];
     const pick = getPick();
     for (const { i, dist } of pick.segmentsNear(m, tol)) {
-      const id = (plan.primitives[i] as Extract<Primitive, { kind: "line" }>).drawingId;
+      const id = (planPrimAt(plan, i) as Extract<Primitive, { kind: "line" }>).drawingId;
       if (id) found.push({ id, d: dist });
     }
     const uIdx = getUnderlayIndex();
     if (uIdx) for (const h of drawingsWithinDistance(uIdx, m, tol)) found.push({ id: h.drawing.id, d: h.dist });
     for (const { i, dpx } of pick.ringsNear(m, pxPerM, LINE_PICK_PX)) {
-      found.push({ id: (plan.primitives[i] as Extract<Primitive, { kind: "drawingCircle" | "drawingArc" }>).drawingId!, d: dpx / pxPerM });
+      found.push({ id: (planPrimAt(plan, i) as Extract<Primitive, { kind: "drawingCircle" | "drawingArc" }>).drawingId!, d: dpx / pxPerM });
     }
     const textId = pickDrawingText(clientX, clientY);
     if (textId) found.push({ id: textId, d: tol * 2 });
@@ -2306,8 +2269,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (out.length > before) rest.push(out.pop()!);
     };
     for (const idx of hitTestAll(clientX, clientY)) {
-      const p = plan.primitives[idx];
-      if (p.kind !== "polygon") continue;
+      const p = planPrimAt(plan, idx);
+      if (p?.kind !== "polygon") continue;
       addRest("opening", p.openingId, idx);
       addRest("wall", p.wallId, idx);
       addRest("column", p.columnId, idx);
@@ -2373,7 +2336,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const prev = cycleRef.current;
     const same =
       prev &&
-      prev.prims === plan.primitives &&
+      prev.plan === plan &&
       Math.hypot(e.clientX - prev.x, e.clientY - prev.y) <= 5;
     let items: PickCandidate[];
     let idx: number;
@@ -2396,7 +2359,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     cycleRef.current = {
       x: e.clientX,
       y: e.clientY,
-      prims: plan.primitives,
+      plan,
       items,
       idx,
       model,
@@ -2511,11 +2474,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         };
         if (onMarquee) {
           onMarquee({
-            wallIds: marqueeHit(plan.primitives, rect, crossing),
+            wallIds: getPick().marquee("wallId", rect, crossing),
             drawingIds: marqueeHitAll(rect, crossing),
-            ceilingIds: marqueeHitCeilings(plan.primitives, rect, crossing),
-            roomIds: marqueeHitRooms(plan.primitives, rect, crossing),
-            stairIds: marqueeHitStairs(plan.primitives, rect, crossing),
+            ceilingIds: getPick().marquee("ceilingId", rect, crossing),
+            roomIds: getPick().marquee("roomId", rect, crossing),
+            stairIds: getPick().marquee("stairId", rect, crossing),
             crossing,
           });
         }
@@ -2689,7 +2652,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       return primsOwnedBy("wallId", selectedWallIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
     }
     if (selected !== null) {
-      const p = plan.primitives[selected];
+      const p = planPrimAt(plan, selected);
       if (p && p.kind === "polygon") return [p];
     }
     return [];
@@ -2955,8 +2918,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // sonst weiterhin in der ORIGINAL-Bauteilfarbe erscheinen.
   const hatched = useMemo(() => {
     const list: HatchedPoly[] = [];
-    // Im WebGL-Modus zeichnet das SVG nur Texte (keine Polygone → keine Muster).
-    if (useGpuRenderer && !wantWasm) return list;
+    // Mit GPU (nativ oder WASM) zeichnet das SVG nur Texte (keine Polygone → keine Muster).
+    if (useGpuRenderer) return list;
     plan.primitives.forEach((p, i) => {
       if (p.kind === "polygon" && polyUsesPattern(p.hatch)) {
         // Verlauf-Schraffuren tragen ihre eigentliche Farbe in `gradient.color1/
@@ -3596,10 +3559,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           Layout stimmt. */}
       {editTextId &&
         (() => {
-          const prim = plan.primitives.find(
-            (p): p is Extract<Primitive, { kind: "drawingText" }> =>
-              p.kind === "drawingText" && p.drawingId === editTextId,
-          );
+          const prim = planTextEntries(plan)
+            .map((e) => e.p)
+            .find((p): p is Extract<Primitive, { kind: "drawingText" }> => p.kind === "drawingText" && p.drawingId === editTextId);
           if (!prim) return null;
           const doc = prim.doc ?? docFromText(prim.text, prim.marks ?? {});
           // WYSIWYG: Position, Breite, Feldhöhe UND Schriftgrösse folgen alle dem
