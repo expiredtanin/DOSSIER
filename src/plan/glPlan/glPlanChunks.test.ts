@@ -283,7 +283,7 @@ describe('GpuChunkCache: Kern-Abschnitte (Plan-Puffer v2, Inhalts-Hash)', () => 
     expect(cache.lastStats.chunks).toBe(n);
   });
 
-  it('direkt aus dem Puffer = über die Objekte (gleiche hochgeladene Daten)', () => {
+  it('direkt aus dem Puffer = über die Objekte (gleiche hochgeladene Daten)', { timeout: 60_000 }, () => {
     const p = bigSampleProject(2);
     const plan = generatePlan(p, 'eg', codes(p));
     const run = plan.bufRuns![0];

@@ -10,7 +10,7 @@ import { expect, test as base, type Page } from "@playwright/test";
 const ALLOWED_CONSOLE_ERRORS: { re: RegExp; why: string }[] = [
   {
     re: /createBuffer failed|wgpu-.*webgpu\.rs/,
-    why: "render2d/render3d: SwiftShader erlaubt grosse Puffer nicht, wgpu paniert (nur headless). Der Plan fällt dann aus, das Modell/die UI nicht.",
+    why: "render2d/render3d: SwiftShader verliert das WebGPU-Gerät beim Präsentieren, createBuffer(mappedAtCreation) wirft, wgpu paniert (nur headless). render2d baut dann neu auf bzw. fällt auf SVG zurück (planEngine.spec.ts).",
   },
 ];
 

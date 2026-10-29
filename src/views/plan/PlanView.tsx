@@ -3056,6 +3056,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         viewBox={localViewBoxAttr(view, overlayOrigin)}
         data-origin-x={overlayOrigin.x}
         data-origin-y={overlayOrigin.y}
+        data-engine={useGpuRenderer ? (wantNative ? "native" : "wasm") : "svg"}
         preserveAspectRatio="xMidYMid meet"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

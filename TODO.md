@@ -618,9 +618,20 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   5.0 px (10 m), 31 px (1 m); nachher ≤ 0.003 px. Lineal: Ticks über ganzzahligen Index (aufsummiert drifteten
   sie bei LV95). Plan-Rad: eigener nicht-passiver Listener (React-`onWheel` ist passiv, `preventDefault` warf
   in Chromium Konsolenfehler). e2e `kataster.spec.ts` (Griffe ± 1 px bei 80/10/1 m, Lineal, Vorschau-Kreis).
-  Nicht in Tauri/WKWebView geprüft. Offen: CLI-SVG; render2d meldet headless beim schnellen Rad-Zoom
-  „recursive use of an object … unsafe aliasing" (`render`/`set_scene_bin` überlappen, auch vor der Änderung;
-  Plan bleibt danach teils leer) — prüfen.
+  Nicht in Tauri/WKWebView geprüft. Offen: CLI-SVG.
+  29.10. **„recursive use of an object … unsafe aliasing" erledigt:** keine Überlappung (alle Aufrufe synchron),
+  sondern Geräteverlust: headless SwiftShader verliert das WebGPU-Gerät beim ersten Präsentieren (auch in
+  reinem JS nachgestellt; real: Treiber-Reset/GPU-Prozess), `createBuffer(mappedAtCreation)` wirft, wgpu
+  paniert mitten in `set_scene_bin` → die wasm-bindgen-Sperre bleibt gesetzt, jeder weitere Aufruf scheitert,
+  der GPU-Pfad bleibt aber „bereit" und das SVG zeichnet keine Geometrie (leerer Plan). Behoben: render2d
+  merkt den Verlust (`is_lost`, `set_lost_callback`, danach keine wgpu-Aufrufe), Szene ungemappt über die
+  Queue hochladen, Validierungsfehler melden statt paniken; `views/plan/wasmRendererSession.ts` ist der
+  einzige Aufrufer (letzte Szene gewinnt, gleicher Plan nicht neu hochgeladen, verschachtelte Aufrufe
+  nachgeholt, Neuaufbau nach Ausfall mit erneuter Szene, höchstens 3 je 60 s, sonst SVG-Rückfall).
+  Tests: vitest mit Schein-Renderer, e2e `planEngine.spec.ts` (scheitert ohne die Änderung). Headless nur
+  der Ausfall-/Rückfall-Weg prüfbar (Gerät stirbt immer); echtes WebGPU-Zeichnen nicht geprüft. Nativer
+  macOS-Pfad gelesen: Frames zusammengefasst, Zustand hinter `Mutex` — kein solches Sperr-Problem, aber
+  `lock().unwrap()` in `native_embed.rs` vergiftet nach einem Panic dauerhaft (offen, nicht geändert).
 - ✅ **[G9] Dach-Gehrung an Walm-/Zeltspitzen** (neu 27.10.): an Punkten mit ≥ 3 Dachflächen trifft die
   paarweise Gehrung der Unterseite nicht exakt (Restlücke < 0.01 m²); solche Dächer gehen als nicht
   geschlossenes Face-Set ins IFC. · S–M

@@ -92,6 +92,38 @@ impl ArcInstance {
     }
 }
 
+/// Puffer ungemappt anlegen und ueber die Queue befuellen (Groesse auf die
+/// Kopier-Ausrichtung von 4 Byte aufgerundet, `write_buffer` verlangt das).
+/// Siehe [`Renderer::upload_scene_queued`].
+pub(crate) fn buffer_via_queue(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    contents: &[u8],
+    label: &str,
+    usage: wgpu::BufferUsages,
+) -> wgpu::Buffer {
+    let size = queued_buffer_size(contents.len());
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size,
+        usage: usage | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    if contents.len() as u64 == size {
+        queue.write_buffer(&buffer, 0, contents);
+    } else {
+        let mut padded = contents.to_vec();
+        padded.resize(size as usize, 0);
+        queue.write_buffer(&buffer, 0, &padded);
+    }
+    buffer
+}
+
+/// Puffergroesse fuer [`buffer_via_queue`]: auf `COPY_BUFFER_ALIGNMENT` aufgerundet, mindestens 4.
+fn queued_buffer_size(len: usize) -> u64 {
+    align_up((len as u64).max(1), wgpu::COPY_BUFFER_ALIGNMENT)
+}
+
 /// Rundet `size` auf das naechste Vielfache von `align` (>=1) auf.
 fn align_up(size: u64, align: u64) -> u64 {
     if align <= 1 {
@@ -429,28 +461,49 @@ impl Renderer {
     /// im Shader auf Geraete-px abgebildet. Daher KEIN Zoom-Parameter und keine
     /// Neu-Tessellierung bei Zoomaenderung mehr (der frueher noetige Bogen-Re-Tess-
     /// Trigger entfaellt: der Kreis-Shader rendert bei jeder Skala exakt rund).
+    ///
+    /// Puffer werden „mapped at creation" befuellt (nativ der kuerzeste Weg). Im
+    /// Browser stattdessen [`Self::upload_scene_queued`] nehmen.
     pub fn upload_scene(&mut self, device: &wgpu::Device, scene: &Scene) {
+        self.upload_scene_with(scene, |contents, label, usage| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage,
+            })
+        });
+    }
+
+    /// Wie [`Self::upload_scene`], aber Puffer ungemappt anlegen und ueber die Queue
+    /// befuellen. Fuer WebGPU: dort wirft `createBuffer(mappedAtCreation)` bei
+    /// verlorenem Geraet synchron, und wgpu macht daraus einen Panic (WASM bricht
+    /// mitten im `&mut self`-Aufruf ab, das wasm-bindgen-Objekt bleibt gesperrt:
+    /// „recursive use of an object …"). Ungemappt + `writeBuffer` wird bei
+    /// verlorenem Geraet laut WebGPU-Spezifikation still ignoriert.
+    pub fn upload_scene_queued(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene) {
+        self.upload_scene_with(scene, |contents, label, usage| {
+            buffer_via_queue(device, queue, contents, label, usage)
+        });
+    }
+
+    fn upload_scene_with(
+        &mut self,
+        scene: &Scene,
+        make: impl Fn(&[u8], &str, wgpu::BufferUsages) -> wgpu::Buffer,
+    ) {
         let geo = compile_scene(scene);
 
         let mk_vbo = |data: &[f32], label: &str| -> Option<wgpu::Buffer> {
             if data.is_empty() {
                 return None;
             }
-            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: bytemuck::cast_slice(data),
-                usage: wgpu::BufferUsages::VERTEX,
-            }))
+            Some(make(bytemuck::cast_slice(data), label, wgpu::BufferUsages::VERTEX))
         };
         let mk_ibo = |data: &[u32], label: &str| -> Option<wgpu::Buffer> {
             if data.is_empty() {
                 return None;
             }
-            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: bytemuck::cast_slice(data),
-                usage: wgpu::BufferUsages::INDEX,
-            }))
+            Some(make(bytemuck::cast_slice(data), label, wgpu::BufferUsages::INDEX))
         };
 
         // Bogen-Instanzen (je Bogen EINE) in einen Instanz-Vertexpuffer packen.
@@ -460,11 +513,11 @@ impl Renderer {
         let arc_vbo = if arc_instances.is_empty() {
             None
         } else {
-            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("arc.instances"),
-                contents: bytemuck::cast_slice(&arc_instances),
-                usage: wgpu::BufferUsages::VERTEX,
-            }))
+            Some(make(
+                bytemuck::cast_slice(&arc_instances),
+                "arc.instances",
+                wgpu::BufferUsages::VERTEX,
+            ))
         };
 
         self.scene = Some(SceneBuffers {
@@ -909,5 +962,20 @@ impl Renderer {
             }
         }
         queue.submit(std::iter::once(encoder.finish()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::queued_buffer_size;
+
+    #[test]
+    fn queued_buffer_size_ist_auf_kopier_ausrichtung_gerundet() {
+        // `write_buffer` verlangt Vielfache von 4 Byte; leere Daten ergeben trotzdem einen Puffer.
+        assert_eq!(queued_buffer_size(0), 4);
+        assert_eq!(queued_buffer_size(1), 4);
+        assert_eq!(queued_buffer_size(4), 4);
+        assert_eq!(queued_buffer_size(6), 8);
+        assert_eq!(queued_buffer_size(120), 120);
     }
 }
