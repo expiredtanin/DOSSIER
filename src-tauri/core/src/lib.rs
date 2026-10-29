@@ -5,6 +5,7 @@
 //! Datenübergabe: flache `f64`-Puffer (s. [`flat`]), kein JSON — schnell und ohne Serde-Kosten.
 
 pub mod export_schedule;
+pub mod opening_schedule;
 pub mod flat;
 pub mod flat_write;
 pub mod polygon_bool;

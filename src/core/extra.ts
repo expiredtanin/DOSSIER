@@ -31,6 +31,8 @@ export type { RoomProgramCompare, RoomProgramLayout, CompareRow, CompareSum, Lig
 export { readSheetFile, suggestMapping, mapRows, importedRows, applyRoomProgram, roomProgramOps, cellNumber, cellText, detectHeaderRow, parseKind, PROGRAM_FIELDS } from "../io/roomProgramImport";
 export type { SheetData, SheetCell, Mapping, ColumnMap, ProgramField, ImportLine, ImportMode, SkipReason } from "../io/roomProgramImport";
 export { buildProgramReport } from "../export/programReport";
+export { openingSchedule, buildOpeningReport, roomsText, externalText, swingText } from "../export/openingSchedule";
+export type { OpeningScheduleRow } from "../export/openingSchedule";
 export { computeAreaTable, computeIvhb } from "../analysis/areaTable";
 export type { AreaTable, AreaRow, Ivhb, IvhbOptions, AgfBasis } from "../analysis/areaTable";
 export { buildAreaReport, areaReportToCsv, parseAreaReportCsv, areaReportToSvg, buildAreaReportPdf } from "../export/areaReport";

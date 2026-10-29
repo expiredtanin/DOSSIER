@@ -8592,3 +8592,22 @@ body {
 .history-row.future {
   opacity: 0.45;
 }
+
+/* Fenster- und Türliste im Flächenbilanz-Panel ([97]). */
+.opening-input {
+  width: 100%;
+  min-width: 70px;
+  box-sizing: border-box;
+}
+.opening-input.opening-short {
+  min-width: 52px;
+  width: 64px;
+}
+.opening-input.opening-mark {
+  min-width: 56px;
+  width: 64px;
+}
+.opening-table td.opening-select {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}

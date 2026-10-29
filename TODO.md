@@ -1378,10 +1378,22 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Zuständigkeitsbereich); Kanten-/Hof-Griffe im Grundriss; Mansarde mit Hof UND verschieden geneigten
   Kanten: zweite Dachschicht (Versatz > Knickbreite) nicht geschlossen; Schattenwurf (`sun.rs`) nimmt
   weiter die Hülle der Dachpunkte (Hof wirft Schatten).
+- ✅ **[97] Fenster- und Türliste** (= Teil von [29]). (29.10.) Kern `opening_schedule.rs` (Abfrage
+  `openingSchedule`): je Öffnung Nummer (eingetragen oder automatisch `F1.01`/`T1.01` je Geschoss und Art),
+  Typ, Geschoss, Räume beidseits der Wand (aus den Raum-Umrissen), Rohbau- und lichtes Mass (Tür: minus
+  Rahmen), Brüstung, Band/Aufschlag/Richtung, Brandschutz (EI30), Schallschutz, U-Wert, Einbruchhemmung (RC),
+  aussen/innen (eigene Angabe > Wand > Raumlage), Bemerkung. Neue optionale Modellfelder (nur Rust-Modell):
+  `Opening.mark/fireRating/soundClass/uValue/burglaryClass/notes/isExternal`, `Wall`/`Ceiling` `isExternal`/
+  `loadBearing`. Anzeige editierbar in der Flächenbilanz (`OpeningScheduleSection`), Export CSV/SVG/PDF über das
+  Berichtsmodell des Flächennachweises, CLI `schedule --openings [--format json|csv|svg|pdf]`.
+  Offen: Wand/Decke `isExternal`/`loadBearing` ohne UI (nur über Ops/IFC-Import setzbar; Objekt-Info fehlt);
+  Tabelle noch nicht als Element auf dem Layout-Blatt (Layout-Blatt hat keinen Tabellen-Baustein); Typ-Vorgaben
+  (Brand/Schall/U am Tür-/Fenstertyp) fehlen — die Werte liegen je Öffnung; Nummern nicht stabil bei
+  Umordnung (automatisch nach Dokumentreihenfolge); nicht in der Tauri-App getestet.
 
 ## Priorität 4 — später
 
-Alle ○: [27] Punktwolken (Leser ✅ [B9], Anzeige ◐ s. u., Modell offen) · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden) · [43] Verknüpfte
+Alle ○: [27] Punktwolken (Leser ✅ [B9], Anzeige ◐ s. u., Modell offen) · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden; Fenster-/Türliste ✅ [97]) · [43] Verknüpfte
 Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (= [T6]) · [71] U-Werte ·
 [72] Graue Energie KBOB · [73] eBKP-H · [74] SIA 500 · [75] Fluchtwege VKF · [83] Befehlspalette ·
 [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker

@@ -1551,6 +1551,14 @@ pub struct Wall {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub locked: Option<bool>,
+    /// Aussen (true) / innen (false); fehlt = nicht angegeben (IFC `IsExternal`).
+    #[serde(rename = "isExternal", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub is_external: Option<bool>,
+    /// Tragend (IFC `LoadBearing`); fehlt = nicht angegeben.
+    #[serde(rename = "loadBearing", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub load_bearing: Option<bool>,
     /// Achs-Startpunkt im Grundriss (Meter).
     pub start: Vec2,
     /// Achs-Endpunkt im Grundriss (Meter).
@@ -1694,6 +1702,14 @@ pub struct Ceiling {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub locked: Option<bool>,
+    /// Aussen (true) / innen (false); fehlt = nicht angegeben (IFC `IsExternal`).
+    #[serde(rename = "isExternal", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub is_external: Option<bool>,
+    /// Tragend (IFC `LoadBearing`); fehlt = nicht angegeben.
+    #[serde(rename = "loadBearing", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub load_bearing: Option<bool>,
     /// Geschlossener Umriss im Grundriss (Meter). Der Schlusspunkt wird NICHT
     /// dupliziert (die letzte Kante läuft von outline[n-1] zu outline[0]).
     pub outline: Vec<Vec2>,
@@ -2092,6 +2108,34 @@ pub struct Opening {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub locked: Option<bool>,
+    /// Bauteilnummer (Fenster-/Türliste); leer = automatisch je Geschoss nummeriert.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mark: Option<String>,
+    /// Feuerwiderstand (z. B. "EI30", "EI60"); Türliste, IFC `FireRating`.
+    #[serde(rename = "fireRating", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fire_rating: Option<String>,
+    /// Schallschutz (z. B. "Rw 32 dB"); IFC `AcousticRating`.
+    #[serde(rename = "soundClass", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sound_class: Option<String>,
+    /// Wärmedurchgang U in W/(m²K); IFC `ThermalTransmittance`.
+    #[serde(rename = "uValue", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub u_value: Option<f64>,
+    /// Einbruchhemmung (z. B. "RC2"); IFC `SecurityRating`.
+    #[serde(rename = "burglaryClass", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub burglary_class: Option<String>,
+    /// Bemerkung (Fenster-/Türliste).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub notes: Option<String>,
+    /// Aussen (true) / innen (false); fehlt = aus der Wand und den Räumen abgeleitet.
+    #[serde(rename = "isExternal", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub is_external: Option<bool>,
     /// Fenster oder Tür.
     #[ts(inline)]
     pub kind: ElementKind,

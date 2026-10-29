@@ -11,7 +11,7 @@
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
-//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
 //                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
@@ -61,6 +61,8 @@ import {
   computeAreaTable,
   computeIvhb,
   buildAreaReport,
+  buildOpeningReport,
+  openingSchedule,
   areaReportToCsv,
   areaReportToSvg,
   buildAreaReportPdf,
@@ -714,9 +716,24 @@ async function execute(project: Project, file: string, command: string, rest: st
       out(args, JSON.stringify({ when: when.toISOString(), lat, lon, sun, shadows: shadowPolygons(project, sun) }, null, 2), `${project.name || "projekt"}-sonne.json`);
       return 0;
     }
-    case "schedule":
+    case "schedule": {
+      // --openings: Fenster- und Türliste statt Bauteilliste [--format json|csv|svg|pdf] (Default csv)
+      if (args.flags.has("openings")) {
+        const format = args.flags.get("format") ?? "csv";
+        const stem = `${project.name || "projekt"}-fenster-tueren`;
+        if (format === "json") out(args, JSON.stringify(openingSchedule(project), null, 2), `${stem}.json`);
+        else {
+          const report = buildOpeningReport(project);
+          if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
+          else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
+          else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);
+          else throw new Error("--format: json, csv, svg oder pdf");
+        }
+        return 0;
+      }
       out(args, exportScheduleCsv(project), `${project.name || "projekt"}-liste.csv`);
       return 0;
+    }
     case "step": {
       const r = await exportProjectStep(project, project.name || "projekt");
       if (r.skipped.length) process.stderr.write(`${r.skipped.length} Körper übersprungen/ungeschnitten.\n`);

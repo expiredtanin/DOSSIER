@@ -14,6 +14,7 @@ import type { Room } from "../model/types";
 import { roomDisplayName } from "../model/roomStamp";
 import { KennzahlenSection } from "./KennzahlenSection";
 import { AreaTableSection } from "./AreaTableSection";
+import { OpeningScheduleSection } from "./OpeningScheduleSection";
 import { downloadCsv } from "./downloadFile";
 
 /** Löst je Raum die anrechenbare (Netto-)Fläche + Kategorie auf. */
@@ -42,6 +43,7 @@ export function RoomBalancePanel() {
       <div className="balance-panel">
         <KennzahlenSection />
         <AreaTableSection />
+        <OpeningScheduleSection />
         <div className="balance-empty">{t("balance.empty")}</div>
       </div>
     );
@@ -76,6 +78,9 @@ export function RoomBalancePanel() {
 
       {/* Flächentabelle und IVHB-Kennziffern. */}
       <AreaTableSection />
+
+      {/* Fenster- und Türliste. */}
+      <OpeningScheduleSection />
 
       {/* Raumliste (je Raum: Name · Geschoss · SIA · Fläche). */}
       <div className="balance-section-label">{t("balance.rooms")}</div>
