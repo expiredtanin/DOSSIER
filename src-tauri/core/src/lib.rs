@@ -83,6 +83,8 @@ pub mod selection_filter;
 pub mod reorder;
 pub mod ugrid;
 pub mod wasm_alloc;
+pub mod text_layout;
+pub mod plan_text;
 
 #[cfg(feature = "web")]
 mod web;

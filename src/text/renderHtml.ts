@@ -3,8 +3,12 @@
 // nach SVG-<tspan> (für den vektoriellen Grundriss-/Print-Renderer). Beide Wege
 // bilden dieselbe Mark→Stil-Zuordnung ab, damit Editor-Vorschau und gezeichneter
 // Text identisch aussehen. Reines Modul: keine React-/App-Abhängigkeit.
+//
+// Das Zeilen-Layout (`docToLines`/`wrapDocToLines`: Run→Tspan, Wortumbruch) rechnet der Rust-Kern
+// (`src-tauri/core/src/text_layout.rs`, Bindung `text_lines`); hier nur die Fassade.
 
 import type { Marks, Paragraph, RichTextDoc, TextRun } from "./richText";
+import { core } from "../engine/coreWasm";
 
 // ── Text-Escaping ───────────────────────────────────────────────────────────
 
@@ -172,116 +176,123 @@ export interface SvgTextOptions {
   color?: string;
 }
 
-/**
- * Zerlegt das Dokument in Zeilen/Tspans mit bereits in Benutzereinheiten
- * umgerechneten Grössen. Der Aufrufer positioniert die Zeilen selbst (Baseline
- * der Zeile i = `y + Σ lineHeight[0..i-1]`).
- */
-export function docToLines(doc: RichTextDoc, opts: SvgTextOptions): SvgLine[] {
-  const basePt = opts.basePt ?? 12;
-  const color = opts.color ?? "#000000";
-  const baseUnit = basePt * opts.unitPerPt;
-  return doc.paragraphs.map((p) => ({
-    align: p.align ?? "left",
-    lineHeight: p.lineHeight != null ? baseUnit * p.lineHeight : opts.lineHeight,
-    tspans: p.runs
-      .filter((r) => r.text.length > 0)
-      .map((r) => runToTspan(r, basePt, opts.unitPerPt, color)),
-  }));
+const ALIGNS = ["left", "center", "right"] as const;
+
+/** UTF-16-Einheiten `f[at…at+n)` als Text. */
+function unitsText(f: Float64Array, at: number, n: number): string {
+  let s = "";
+  for (let j = 0; j < n; j += 4096) s += String.fromCharCode.apply(null, Array.from(f.subarray(at + j, at + Math.min(n, j + 4096))));
+  return s;
 }
 
-/** Geschätzte Zeichenbreite als Vielfaches der Schriftgrösse (gleiche Heuristik
- * wie der bisherige Wortumbruch für einheitlich formatierten Text, s.
- * PlanView.tsx `case "drawingText"`) — kein echtes Font-Metrics-Messen, aber
- * für die Platzierung von Zeilenumbrüchen ausreichend. */
-const CHAR_WIDTH_FACTOR = 0.55;
+/**
+ * Flache Zeilen des Kerns (Format s. `src-tauri/core/src/web/text_layout.rs`) → `SvgLine[]`, mit
+ * `withY` samt Grundlinie `y`. Die Tspan-Texte sind Ausschnitte der Eingabe (`text(Absatz, Run)`).
+ * Feldreihenfolge der Tspans wie früher in TS.
+ */
+function decodeLines(f: Float64Array, text: (para: number, run: number) => string, withY: true): PlacedLine[];
+function decodeLines(f: Float64Array, text: (para: number, run: number) => string, withY: false): SvgLine[];
+function decodeLines(f: Float64Array, text: (para: number, run: number) => string, withY: boolean): Array<SvgLine | PlacedLine> {
+  if (f.length < 2) return [];
+  let k = 2;
+  const styles: Array<Omit<SvgTspan, "text">> = [];
+  for (let i = 0; i < f[1]; i++) {
+    const [fontSize, bits, shift, nFill, nFam] = [f[k], f[k + 1], f[k + 2], f[k + 3], f[k + 4]];
+    k += 5;
+    const fill = unitsText(f, k, nFill);
+    k += nFill;
+    const st: Omit<SvgTspan, "text"> = { fontSize, fill };
+    if (bits & 1) st.fontWeight = "700";
+    if (bits & 2) st.fontStyle = "italic";
+    if (nFam >= 0) {
+      st.fontFamily = unitsText(f, k, nFam);
+      k += nFam;
+    }
+    const deco = bits & 12;
+    if (deco) st.textDecoration = deco === 4 ? "underline" : deco === 8 ? "line-through" : "underline line-through";
+    if (bits & 16) st.baselineShift = shift;
+    styles.push(st);
+  }
+  const out: Array<SvgLine | PlacedLine> = new Array(f[0]);
+  for (let i = 0; i < f[0]; i++) {
+    const align = ALIGNS[f[k]] ?? "left";
+    const lineHeight = f[k + 1];
+    const y = f[k + 2];
+    const n = f[k + 3];
+    k += 4;
+    const tspans: SvgTspan[] = new Array(n);
+    for (let j = 0; j < n; j++, k += 5) {
+      const src = text(f[k + 1], f[k + 2]);
+      tspans[j] = { text: f[k + 3] === 0 && f[k + 4] === src.length ? src : src.slice(f[k + 3], f[k + 4]), ...styles[f[k]] };
+    }
+    out[i] = withY ? { tspans, align, lineHeight, y } : { tspans, align, lineHeight };
+  }
+  return out;
+}
+
+/** Zuletzt gesetzte Zeilen je Dokument-Objekt und Optionen (Neuzeichnen beim Zoomen/Verschieben). */
+const memo = new WeakMap<RichTextDoc, Map<string, SvgLine[]>>();
+
+/** Zeilen aus dem Kern (`text_lines`); kaputte Eingabe → keine Zeilen. Ergebnis nicht verändern (geteilt). */
+function kernelLines(doc: RichTextDoc, opts: SvgTextOptions, wrap: number | undefined): SvgLine[] {
+  const key = `${opts.lineHeight}|${opts.unitPerPt}|${opts.basePt}|${wrap}|${opts.color}`;
+  let byOpts = memo.get(doc);
+  const hit = byOpts?.get(key);
+  if (hit) return hit;
+  const o = Float64Array.of(opts.lineHeight, opts.unitPerPt, opts.basePt == null ? 0 : 1, opts.basePt ?? 0, wrap ?? NaN);
+  const lines = decodeLines(core().text_lines(JSON.stringify(doc), o, opts.color ?? undefined), (p, r) => doc.paragraphs[p].runs[r].text, false);
+  if (!byOpts) memo.set(doc, (byOpts = new Map()));
+  if (byOpts.size > 8) byOpts.clear();
+  byOpts.set(key, lines);
+  return lines;
+}
+
+/**
+ * Zerlegt das Dokument in Zeilen/Tspans mit bereits in Benutzereinheiten
+ * umgerechneten Grössen (eine Zeile je Absatz). Der Aufrufer positioniert die Zeilen selbst
+ * (Baseline der Zeile i = `y + Σ lineHeight[0..i-1]`).
+ */
+export function docToLines(doc: RichTextDoc, opts: SvgTextOptions): SvgLine[] {
+  return kernelLines(doc, opts, undefined);
+}
 
 /**
  * Wie {@link docToLines}, bricht aber zusätzlich wortweise auf `wrapWidthUnits`
  * um (in denselben Benutzereinheiten wie `SvgTextOptions.x`) — für Textfelder/
- * -rahmen mit fester Breite (InDesign-artig). Ohne `wrapWidthUnits` identisch
- * zu `docToLines` (eine Zeile je Absatz). Respektiert Run-Grenzen: ein Wort
- * behält die Formatierung seines Runs, auch wenn die Zeile mehrere Runs mischt.
+ * -rahmen mit fester Breite (InDesign-artig). Wortbreite geschätzt (UTF-16-Länge ×
+ * Schriftgrösse × 0.55, kein Font-Messen). Ohne `wrapWidthUnits` identisch zu `docToLines`.
+ * Respektiert Run-Grenzen: ein Wort behält die Formatierung seines Runs.
  */
 export function wrapDocToLines(
   doc: RichTextDoc,
   opts: SvgTextOptions & { wrapWidthUnits?: number },
 ): SvgLine[] {
-  if (!opts.wrapWidthUnits || opts.wrapWidthUnits <= 0) return docToLines(doc, opts);
-  const basePt = opts.basePt ?? 12;
-  const color = opts.color ?? "#000000";
-  const baseUnit = basePt * opts.unitPerPt;
-  const maxWidth = opts.wrapWidthUnits;
-
-  interface Token {
-    tspan: SvgTspan;
-    widthUnits: number;
-    isSpace: boolean;
-  }
-
-  const lines: SvgLine[] = [];
-  for (const p of doc.paragraphs) {
-    const lineHeight = p.lineHeight != null ? baseUnit * p.lineHeight : opts.lineHeight;
-    const align = p.align ?? "left";
-
-    const tokens: Token[] = [];
-    for (const run of p.runs) {
-      if (run.text.length === 0) continue;
-      const base = runToTspan(run, basePt, opts.unitPerPt, color);
-      for (const part of run.text.split(/(\s+)/).filter((s) => s.length > 0)) {
-        const isSpace = /^\s/.test(part);
-        tokens.push({
-          tspan: { ...base, text: part },
-          widthUnits: part.length * base.fontSize * CHAR_WIDTH_FACTOR,
-          isSpace,
-        });
-      }
-    }
-
-    if (tokens.length === 0) {
-      lines.push({ tspans: [], align, lineHeight });
-      continue;
-    }
-
-    let current: Token[] = [];
-    let currentWidth = 0;
-    const flush = () => {
-      while (current.length && current[current.length - 1].isSpace) current.pop();
-      lines.push({ tspans: current.map((t) => t.tspan), align, lineHeight });
-      current = [];
-      currentWidth = 0;
-    };
-    for (const tok of tokens) {
-      if (current.length === 0 && tok.isSpace) continue;
-      if (current.length > 0 && currentWidth + tok.widthUnits > maxWidth) {
-        flush();
-        if (tok.isSpace) continue;
-      }
-      current.push(tok);
-      currentWidth += tok.widthUnits;
-    }
-    flush();
-  }
-  return lines;
+  return kernelLines(doc, opts, opts.wrapWidthUnits);
 }
 
-function runToTspan(run: TextRun, basePt: number, unitPerPt: number, color: string): SvgTspan {
-  const m = run.marks;
-  const script = m.super || m.sub;
-  const sizePt = (m.sizePt ?? basePt) * (script ? SCRIPT_SCALE : 1);
-  const fontSize = sizePt * unitPerPt;
-  const tspan: SvgTspan = {
-    text: run.text,
-    fontSize: round(fontSize),
-    fill: m.color ?? color,
-  };
-  if (m.bold) tspan.fontWeight = "700";
-  if (m.italic) tspan.fontStyle = "italic";
-  if (m.font) tspan.fontFamily = m.font;
-  const deco = textDecoration(m);
-  if (deco) tspan.textDecoration = deco;
-  if (m.super) tspan.baselineShift = round(fontSize * 0.35);
-  if (m.sub) tspan.baselineShift = round(-fontSize * 0.2);
-  return tspan;
+/** Eine gesetzte Zeile mit ihrer Grundlinie `y` (Bildschirm: nach unten wachsend). */
+export type PlacedLine = SvgLine & { y: number };
+
+/**
+ * Raumstempel-Block (Kern `stamp_block`): Rich-Text-Zeilen (Vorschub 1.3 × Basisgrösse bzw. die
+ * Absatz-Zeilenhöhe) und darunter die Live-Zeilen (0.8 × Basisgrösse), vertikal um `y0` zentriert.
+ * `stamp` ist das Plan-Primitiv `text`.
+ */
+export function stampBlockLines(
+  stamp: { at: { x: number; y: number }; doc: RichTextDoc; extraLines: ReadonlyArray<{ text: string; align: string }>; basePt: number; color?: string },
+  unitPerPt: number,
+  y0: number,
+): PlacedLine[] {
+  const n = stamp.doc.paragraphs.length;
+  const text = (p: number, r: number): string => (p < n ? stamp.doc.paragraphs[p].runs[r].text : stamp.extraLines[p - n].text);
+  return decodeLines(core().text_stamp_block(JSON.stringify(stamp), unitPerPt, y0), text, true);
 }
 
+/**
+ * Einfacher Text (ohne Rich-Dokument) auf die Spalte `wrap` umbrochen: Absätze an `\n`, Wörter mit
+ * einem Leerzeichen verbunden, geschätzte Zeichenbreite 0.55 × `fontSize` (gleiche Einheiten).
+ */
+export function wrapPlainText(text: string, wrap: number, fontSize: number): string[] {
+  const json = core().text_wrap_plain(text, wrap, fontSize);
+  return json ? (JSON.parse(json) as string[]) : [text];
+}

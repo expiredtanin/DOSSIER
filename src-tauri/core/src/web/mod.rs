@@ -38,6 +38,7 @@ mod pens;
 mod layout_model;
 mod parametric_walls;
 mod reorder;
+mod text_layout;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

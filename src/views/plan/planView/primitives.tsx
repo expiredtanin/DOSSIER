@@ -5,7 +5,7 @@
 
 import type { HatchRender, Primitive } from "../../../core";
 import { NO_HATCH } from "../../../core";
-import { docToLines, wrapDocToLines, type SvgLine } from "../../../text/renderHtml";
+import { stampBlockLines, wrapDocToLines, wrapPlainText, type SvgLine } from "../../../text/renderHtml";
 import type { Vec2 } from "../../../model/types";
 import { quantizePen } from "../../../export/sceneToPrintSvg";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../../../core";
@@ -707,37 +707,10 @@ export function renderPrimitive(
       // verankert). unitPerPt bildet 1 pt auf viewBox-Einheiten ab.
       const nRef = print ? paperScale! : 100;
       const unitPerPt = (1 / 72) * 0.0254 * nRef * PX_PER_M;
-      const baseFs = p.basePt * unitPerPt;
-      const lineGap = baseFs * 1.3;
-      // Rich-Text-Zeilen (Stempel-Doc) + LIVE-Zusatzzeilen (Fläche/SIA) darunter.
-      const docLines: SvgLine[] = docToLines(p.doc, {
-        x: 0,
-        y: 0,
-        lineHeight: lineGap,
-        unitPerPt,
-        basePt: p.basePt,
-        color: p.color,
-      });
-      const extra: SvgLine[] = p.extraLines.map((line) => ({
-        align: line.align,
-        lineHeight: lineGap,
-        tspans: [{ text: line.text, fontSize: baseFs * 0.8, fill: p.color }],
-      }));
-      const lines = [...docLines, ...extra];
+      // Rich-Text-Zeilen (Stempel-Doc) + LIVE-Zusatzzeilen (Fläche/SIA) darunter, Block vertikal
+      // um den Anker zentriert (Kern `stamp_block`, absatzeigene Zeilenhöhen inbegriffen).
+      const lines = stampBlockLines(p, unitPerPt, c.y);
       if (lines.length === 0) return null;
-      // Block vertikal um den Anker zentrieren. Absätze können eine eigene
-      // Zeilenhöhe tragen (Text-Gruppe, Zeilenhöhe-Regler) — darum kumulierte
-      // Vorschübe statt eines einzigen festen lineGap.
-      const totalH = baseFs + lines.slice(1).reduce((sum, l) => sum + l.lineHeight, 0);
-      const startY = c.y - totalH / 2 + baseFs * 0.8;
-      const lineYs: number[] = [];
-      {
-        let y = startY;
-        lines.forEach((line, k) => {
-          if (k > 0) y += line.lineHeight;
-          lineYs.push(y);
-        });
-      }
       return (
         <text style={{ pointerEvents: "none", userSelect: "none" }}>
           {lines.map((line, k) => {
@@ -751,7 +724,7 @@ export function renderPrimitive(
               <tspan
                 key={k}
                 x={c.x}
-                y={lineYs[k]}
+                y={line.y}
                 textAnchor={anchor}
               >
                 {line.tspans.map((ts, j) => (
@@ -870,25 +843,9 @@ export function renderPrimitive(
       // Alt-Pfad: einfacher String + einheitliche `marks` (Text-Werkzeug/DXF-Import
       // ohne Rich-Doc) — unverändert.
       // Spaltentext: bei gesetzter `wrapWidth` den Text wortweise auf die Breite
-      // umbrechen (Zeichenbreite ≈ 0.55·fontSize geschätzt), sonst eine Zeile.
+      // umbrechen (Kern `wrap_plain`, Zeichenbreite ≈ 0.55·fontSize geschätzt), sonst eine Zeile.
       const lineH = fontSize * 1.25;
-      const lines: string[] = [];
-      if (p.wrapWidth && p.wrapWidth > 0) {
-        const maxPx = p.wrapWidth * PX_PER_M;
-        const charPx = fontSize * 0.55;
-        const maxChars = Math.max(1, Math.floor(maxPx / charPx));
-        for (const paragraph of p.text.split("\n")) {
-          let line = "";
-          for (const word of paragraph.split(/\s+/)) {
-            if (line === "") line = word;
-            else if ((line.length + 1 + word.length) <= maxChars) line += " " + word;
-            else { lines.push(line); line = word; }
-          }
-          lines.push(line);
-        }
-      } else {
-        lines.push(p.text);
-      }
+      const lines: string[] = p.wrapWidth && p.wrapWidth > 0 ? wrapPlainText(p.text, p.wrapWidth * PX_PER_M, fontSize) : [p.text];
       // Einheitliche Formatierung (Text-Werkzeug + Oberleisten-Formatier-Gruppe):
       // Schriftfamilie/fett/kursiv/Unterstreichung aus `marks`; Grösse bleibt über
       // heightM (Modell-Meter). Farbe steckt bereits in p.color (marks.color-Vorrang

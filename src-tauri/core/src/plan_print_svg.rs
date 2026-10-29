@@ -5,21 +5,29 @@
 //! `String(Math.round(v * 1000) / 1000)`). Schraffuren als geklippte Vektorlinien, Zickzack/Motiv als
 //! Polylinie, Bögen als `<path>`.
 //!
-//! In TS bleiben: der `<svg>`-Rahmen und das weisse Blatt, die Bild-Schraffur-`<pattern>` (laufende
-//! Ids im Dokument) und die Einzeltexte (Text-Layout `wrapDocToLines`). Dafür stehen Anweisungen in
-//! der Liste.
+//! In TS bleiben: der `<svg>`-Rahmen und das weisse Blatt und die Bild-Schraffur-`<pattern>`
+//! (laufende Ids im Dokument). Die Einzeltexte setzt der Kern (`crate::text_layout`, Zeilen als
+//! `<tspan>` je Zeile mit je einem `<tspan>` je Run/Wort).
 //!
 //! Format: Datensätze getrennt durch `\x1e`, Felder durch `\x1f`:
 //! - `E`, Ebene (0 = ins `<svg>`, 1 = in die offene Gruppe), Tag, dann Name/Wert-Paare;
 //! - `G`, Deckkraft (leer = keine) — öffnet eine `<g>`; `g` schliesst sie (hängt sie ans `<svg>`);
 //! - `I`, Punkte-Attribut, Bild-JSON — Bild-Schraffur: `<pattern>` anlegen und ein Polygon damit füllen;
-//! - `T`, Plan-Index, Deckkraft — Einzeltext an dieser Stelle.
+//! - `X`, Name/Wert-Paare — `<text>` ins `<svg>` (wird der offene Text);
+//! - `L`, Inhalt (leer = keiner), Name/Wert-Paare — Zeilen-`<tspan>` in den offenen Text (wird die
+//!   offene Zeile);
+//! - `R`, Inhalt, Name/Wert-Paare — Run-`<tspan>` in die offene Zeile.
+//!
+//! Texte, die selbst `\x1e`/`\x1f` enthalten, zerfallen dabei (Steuerzeichen kommen in Plantexten
+//! nicht vor).
 
 use crate::hatch::{self, Hatch, Motif, Pattern, V2};
 use crate::js_fmt::js_number;
 use crate::jsnum;
 use crate::plan_buf::{whole, Rec, View, F_COLOR, F_DASH_NULL, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON};
 use crate::plan_parts::{greyed_of, Part};
+use crate::plan_text::SingleText;
+use crate::text_layout::{wrap_doc_to_lines, LayoutOpts, LineAlign, TEXT_LINE_HEIGHT_MULT};
 use std::f64::consts::PI;
 
 /// Optionen: Massstab-Nenner, Blatt (mm) und Ausmass des Plans (`Plan.bounds`).
@@ -68,6 +76,16 @@ impl Out {
         }
         self.first = false;
         self.s.push_str(&fields.join("\u{1f}"));
+    }
+
+    /// Datensatz aus festen Feldern und Name/Wert-Paaren.
+    fn tagged(&mut self, head: &[&str], attrs: &[(&str, String)]) {
+        let mut f: Vec<&str> = head.to_vec();
+        for (k, v) in attrs {
+            f.push(k);
+            f.push(v);
+        }
+        self.rec(&f);
     }
 
     fn el(&mut self, depth: u8, tag: &str, attrs: &[(&str, String)]) {
@@ -243,7 +261,7 @@ fn opacity_of(greyed: bool, obj: f64) -> String {
 }
 
 /// Ein Eintrag als Knoten.
-fn entry(out: &mut Out, view: &View, i: usize, gi: usize, hatches: &[(i32, Hatch, i32)], m: Map) -> Option<()> {
+fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m: Map) -> Option<()> {
     let rec: Rec = view.rec(i)?;
     let f = &rec.f;
     let k = m.k;
@@ -397,11 +415,14 @@ fn entry(out: &mut Out, view: &View, i: usize, gi: usize, hatches: &[(i32, Hatch
             out.el(0, "path", &attrs);
         }
         T_DRAWING_TEXT | T_IMAGE => {
-            let j: serde_json::Value = serde_json::from_str(&view.string(whole(f[0])?)?).ok()?;
+            let js = view.string(whole(f[0])?)?;
+            let j: serde_json::Value = serde_json::from_str(&js).ok()?;
             let jg = j.get("greyed").and_then(|g| g.as_bool()).unwrap_or(false);
             if rec.tag == T_DRAWING_TEXT {
                 let obj = j.get("opacity").and_then(|o| o.as_f64()).unwrap_or(1.0);
-                out.rec(&["T", &gi.to_string(), &opacity_of(jg, obj)]);
+                if let Ok(t) = serde_json::from_str::<SingleText>(&js) {
+                    text_node(out, &t, m, opacity_of(jg, obj));
+                }
             } else {
                 let (min, max) = (j.get("min")?, j.get("max")?);
                 let (x0, y0, x1, y1) = (num(min, "x"), num(min, "y"), num(max, "x"), num(max, "y"));
@@ -437,6 +458,62 @@ fn entry(out: &mut Out, view: &View, i: usize, gi: usize, hatches: &[(i32, Hatch
     Some(())
 }
 
+/// Einzeltext (Text-Werkzeug/DXF-Import) als `<text>` mit `<tspan>`-Zeilen (früher
+/// `drawingTextNode` in `planToPrintSvg.ts`): Grösse in Papier-mm, bei Spaltenbreite wortweise
+/// umbrochen (Run-Grenzen bleiben), gedreht um den Anker.
+fn text_node(out: &mut Out, t: &SingleText, m: Map, opacity: String) {
+    let k = m.k;
+    let c = m.at(t.at.x, t.at.y);
+    let unit_per_pt = (0.0254 / 72.0) * k;
+    let base_pt = if unit_per_pt > 0.0 { t.height_m / unit_per_pt } else { 0.0 };
+    let wrap = t.wrap().map(|w| w * k);
+    let o = LayoutOpts { line_height: t.height_m * k * TEXT_LINE_HEIGHT_MULT, unit_per_pt, base_pt, color: t.color.as_deref().unwrap_or("#000000") };
+    let lines = wrap_doc_to_lines(&t.doc(), &o, wrap);
+    if lines.is_empty() {
+        return;
+    }
+    let mut attrs: Vec<(&str, String)> = Vec::new();
+    let deg = -(t.angle * 180.0) / PI;
+    if deg != 0.0 && !deg.is_nan() {
+        attrs.push(("transform", format!("rotate({} {} {})", r3(deg), r3(c.x), r3(c.y))));
+    }
+    if !opacity.is_empty() {
+        attrs.push(("opacity", opacity));
+    }
+    out.tagged(&["X"], &attrs);
+    // `!wrapWidthUnits`: 0/NaN zählen wie keine Spalte.
+    let col = wrap.filter(|w| *w != 0.0 && !w.is_nan());
+    let mut y = c.y;
+    for (n, line) in lines.iter().enumerate() {
+        if n > 0 {
+            y += line.line_height;
+        }
+        let (anchor, x) = match (line.align, col) {
+            (LineAlign::Center, Some(w)) => ("middle", c.x + w / 2.0),
+            (LineAlign::Right, Some(w)) => ("end", c.x + w),
+            (LineAlign::Center, None) => ("middle", c.x),
+            (LineAlign::Right, None) => ("end", c.x),
+            (LineAlign::Left, _) => ("start", c.x),
+        };
+        let content = if line.tspans.is_empty() { "\u{200b}" } else { "" };
+        out.tagged(&["L", content], &[("x", r3(x)), ("y", r3(y)), ("text-anchor", anchor.to_string())]);
+        for ts in &line.tspans {
+            let mut a: Vec<(&str, String)> = vec![("font-size", r3(ts.font_size)), ("fill", ts.fill.clone())];
+            if let Some(w) = ts.font_weight() {
+                a.push(("font-weight", w.to_string()));
+            }
+            if let Some(st) = ts.font_style() {
+                a.push(("font-style", st.to_string()));
+            }
+            a.push(("font-family", ts.font_family.clone().unwrap_or_else(|| "Helvetica, Arial, sans-serif".to_string())));
+            if let Some(d) = ts.text_decoration {
+                a.push(("text-decoration", d.to_string()));
+            }
+            out.tagged(&["R", &ts.text], &a);
+        }
+    }
+}
+
 fn empty_hatch() -> Hatch {
     Hatch {
         pattern: Pattern::None,
@@ -463,12 +540,10 @@ pub fn print_svg_ops(parts: &mut [Part], o: &PrintOptions) -> Option<String> {
     let content_h = (max_y - min_y) * k;
     let m = Map { off_x: (o.page_w - content_w) / 2.0, off_y: (o.page_h - content_h) / 2.0, min_x, max_y, k };
     let mut out = Out { s: String::new(), first: true };
-    let mut gi = 0usize;
     for part in parts.iter_mut() {
         let hatches = part.view.hatch_table()?;
         for i in part.from..part.to {
-            entry(&mut out, &part.view, i, gi, &hatches, m)?;
-            gi += 1;
+            entry(&mut out, &part.view, i, &hatches, m)?;
         }
     }
     Some(out.s)
@@ -486,6 +561,23 @@ mod tests {
         assert_eq!(r3(1.23456), "1.235");
         assert_eq!(r3(-0.0001), "0");
         assert_eq!(dash_attr(&[2.0, 0.5]), "2 0.5");
+    }
+
+    #[test]
+    fn einzeltext_als_zeilen_und_runs() {
+        let js = "{\"kind\":\"drawingText\",\"at\":{\"x\":1,\"y\":2},\"text\":\"aa bb\",\"heightM\":0.5,\"angle\":0.5,\"color\":\"#123\",\"wrapWidth\":0.6,\"marks\":{\"bold\":true}}";
+        let t: SingleText = serde_json::from_str(js).unwrap();
+        let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
+        let mut out = Out { s: String::new(), first: true };
+        text_node(&mut out, &t, m, "0.5".into());
+        let recs: Vec<Vec<&str>> = out.s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
+        // Drehung um den Anker (10, 80 mm), eine Zeile (Spalte 6 mm), je Wort/Leerraum ein Run.
+        assert_eq!(recs[0], ["X", "transform", "rotate(-28.648 10 80)", "opacity", "0.5"]);
+        assert_eq!(recs[1], ["L", "", "x", "10", "y", "80", "text-anchor", "start"]);
+        // Run-Grösse = heightM (wie die frühere TS-Fassung: `basePt · unitPerPt` mit `unitPerPt` in
+        // pt→mm, also Meter statt Papier-mm — bekannte Abweichung, bewusst unverändert übernommen).
+        assert_eq!(recs[2], ["R", "aa", "font-size", "0.5", "fill", "#123", "font-weight", "700", "font-family", "Helvetica, Arial, sans-serif"]);
+        assert_eq!((recs[3][1], recs[4][1], recs.len()), (" ", "bb", 5));
     }
 
     #[test]

@@ -264,6 +264,35 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Bleibt: der native macOS-Pfad (`useNativePlanRenderer`/`GpuChunkCache`) liest die Liste weiter (nicht in der Tauri-App
     geprüft); SVG-Rückfall ohne GPU, Geschoss-Überlagerung mit gedimmten Ebenen (`materializeGreyed`), Gruppen-Isolation,
     Schnitt/Ansicht-Overlays in `viewportContent` und Abzugskörper/Mono/Massstab lesen die Liste (dann wie bisher).
+    ✅ (29.10.) **Text-Layout im Kern** ([K3d]/[K4]): `core/src/text_layout.rs` (Rich-Text → Zeilen/Tspans, Run-Stile inkl.
+    Hoch-/Tiefstellung, Wortumbruch auf Spaltenbreite, Raumstempel-Block, einfacher Umbruch, Text-Rahmen, `fontNameOf`) und
+    `core/src/plan_text.rs` (Raumstempel/Einzeltexte aus dem Text-JSON des Plan-Puffers). Die Kern-Verbraucher setzen die Texte
+    selbst beim Massstab der Ausgabe: Render-Szene (`plan_scene_bin(segs, greyed, N)`, neu `plan_scene_texts` für
+    `planToRenderScene`), DXF/DWG (`plan_dxf_flat` ohne Text-Eingabe, Standard-Schrift aus den Projekt-Textstilen), Druck-SVG
+    (Einzeltexte als Anweisungen `X`/`L`/`R` statt `T` + TS-Layout). TS übergibt kein Layout mehr; gelöscht: `planSceneTexts`,
+    `stampLines`/`textInput` (DXF), `drawingTextNode` (Druck-SVG), `runToTspan`/Umbruch in `renderHtml.ts`, die Schätzung in
+    `textFrame.ts`, `dxfCadParts.ts` (+ Test, `fontNameOf` → Rust), `texts_from` (Szene, DXF). `renderHtml.ts`
+    (`docToLines`/`wrapDocToLines`/`stampBlockLines`/`wrapPlainText`) und `textFrame.ts` sind dünne Fassaden (Ergebnis flach,
+    Tspan-Texte als Ausschnitte der Eingabe, je Dokument-Objekt gemerkt) für SVG-Rückfall der PlanView, Layout-Blatt,
+    Layout-PDF und Griffe. Der eigene Plan-Puffer trägt Text-JSON jetzt immer (auch für die Szene).
+    Glyphen-Metrik: es gibt keine — wie bisher geschätzt (UTF-16-Länge × Grösse × 0.55); keine Schriftdateien, kein
+    Canvas-Messen im Layout (nur `fontMetrics.ts` misst für die Inline-Editoren Grundlinie → Oberkante, bleibt TS).
+    Gleichheit (temporäre Tests alt gegen neu, danach entfernt; alter Stand = Kern + TS des Hauptstands im selben Lauf):
+    288 Pläne × Szene (Texte + Binär-md5), DXF-Zahlen und -Zeichenketten, Druck-SVG (DOM serialisiert) — 6 Projekte mit
+    Raumstempeln aller Varianten (Feldmodell mit Nummer/Zeile 2/Flächen-Präfix/Nutzung/Ausrichtungen/Personen/Rundung,
+    `stampDoc`, Name) und 60 Einzeltexten (Rich-Text mit gemischten Stilen, Hoch-/Tiefstellung, Absatz-Zeilenhöhen,
+    Spalten, Drehungen, Umlaute/Emoji/CJK/NBSP/U+0085/BOM, `\r\n`) × EG/OG × 1:50/1:100/mono × Ausgabe 1:50/100/200,
+    dazu 60 Zufallspläne mit Text-Primitiven (gedimmt, Deckkraft, gedimmte Bereiche): 57 527 Szenen-Zeilen, 9 741 Druck-Texte
+    gleich; 600 Dokumente `docToLines`/`wrapDocToLines` + 600 Text-Rahmen gleich; 3000 Raumstempel-Blöcke und einfache
+    Umbrüche der PlanView gleich; CLI `plan` (svg/json), `dxf` (1:50/100/200, `--binary --layout --dim-unit cm`), `dwg` für
+    Beispiel, Kataster- und Klein-DXF-Import sowie zwei Rich-Text-Projekte: 230 Dateien byte-gleich. Einzige Abweichung:
+    `−0` in TS-erzeugten Text-Primitiven (nicht aus dem Kern-Puffer) wird über JSON zu `0` (nur DXF-Zahlen, nur Zufallspläne).
+    Messung (Node, `--no-opt`, Linux-Container unter Last; 3000 Einzeltexte + 400 Raumstempel): `planSceneBin` 44–70 →
+    47–66 ms (gleich), DXF-Sammler 67–91 → 42–58 ms, `planToRenderScene` (nur Export) 20–36 → 56–78 ms (JSON der Texte im
+    Kern lesen); Fassade `wrapDocToLines` ungemerkt ~7 → ~28 µs je Aufruf (JSON hin, flache Zeilen zurück), gemerkt < 1 µs.
+    Gefunden, bewusst unverändert: im Druck-SVG (Layout-Viewports) tragen die Runs der Einzeltexte `font-size` = Höhe in
+    Metern statt Papier-mm (alte TS-Formel `basePt · unitPerPt`); offen als eigener Fehler.
+    Nicht in der Tauri-App angesehen (nativer Text-Pfad `nativeText.ts` unverändert).
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
 - ◐ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
