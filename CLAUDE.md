@@ -34,11 +34,13 @@ Der ganze Kern wandert nach Rust (`src-tauri/core`, Crate `dossier-core`); die U
   Panic legt das ganze WASM-Modul lahm.
 - **Laden:** einmal, dann synchron über `core()` (`src/engine/coreWasm.ts`): App `initCore()` vor dem
   ersten Render (`src/main.tsx`), CLI über den Byte-Provider, Vitest per `src/engine/coreWasm.setup.ts`.
-- **Modell bleibt vorerst TS** ([K4] kommt zuletzt): TS sammelt aus dem `Project` die Geometrie und gibt
-  sie flach an Rust.
+- **Dokument im Kern** ([K4]): Der Kern hält das Projekt-Dokument, prüft Ops und führt Undo/Redo; Ableitungen
+  (Plan, Schnitt, Ansicht, 3D, Exporte, Griffe, Objekt-Info, Befehle) fragen das Dokument ab (`doc_query*`,
+  Wurzel-Abfragen). TS hält nur eine Leseansicht, die mit den angenommenen Ops nachgeführt wird (`applyOps`).
+  Ausnahme zur JSON-Regel: Wurzel-Abfragen, Griffe und Befehle tauschen ganze Elemente als JSON.
 - **truck** (`src-tauri/trucksolid`, 3D-B-Rep) bleibt eigenes WASM-Modul (Panic-Isolation, `guarded()`).
   2D-Flächen-Booleans laufen über den Kern (i_overlay), 3D-Körper über truck — nicht vermischen.
-- **Bitgleich zu TS:** JS-Zahlsemantik über `jsnum.rs` (`Math.min/max/round`, ToInt32; `sin/cos/atan2/acos`
+- **Bitgleich zu TS:** JS-Zahlsemantik über `jsnum.rs` (`Math.min/max/round`, ToInt32; `sin/cos/tan/atan2/acos/pow`
   im Web-Build über `Math` der JS-Engine) und `jsmath.rs` (`Math.hypot`); Rechenreihenfolge wie in TS.
 - **Genauigkeit:** i_overlay rechnet auf einem Ganzzahlraster (≈ Ausdehnung/2³⁰); Tests mit 1e-6 m statt 1e-9.
 
@@ -88,10 +90,10 @@ aus dem Hauptcheckout kopieren (beide gitignored).
 
 | Ort | Inhalt |
 |---|---|
-| `src/model` | Typen (`types.ts`), Wand/Decke/Dach-Logik, Verbindungen, Ansichts-Typen (`viewTypes.ts`) |
+| `src/model` | Typen (`types.ts`, generiert aus Rust), dünne Fassaden über Kern-Logik, Ansichts-Typen (`viewTypes.ts`) |
 | `src/geometry` | reine Geometrie: `kernel2d.ts` (Fassade über den Rust-2D-Kern), Treppen, Räume, Polygon-Booleans (`polygonBool.ts`), Aussenbemassung; `roof.ts` = Hülle um die Rust-Dachgeometrie |
 | `src/analysis` | Kennzahlen/Raumprogramm, Sonnenstand/Schatten, Baurecht, Kollision |
-| `src/plan` | Ableitung: `generatePlan`, `toSection`, `toElevation`, `toWalls3d`, `toRenderScene`, `voids.ts` |
+| `src/plan` | dünne Fassaden über Kern-Abfragen (`generatePlan`, `toSection`, `toElevation`), Plan-Puffer lesen (`planBuf`, `planLazy`), `toRenderScene` |
 | `src/views/plan` | React-Plan-Ansicht, Renderer-Hooks (native Metal / WASM-WebGPU) |
 | `src/viewport` | 3D-Viewport (`Wasm3DViewport`), Raycast, Griffe |
 | `src/panels` | Dock-Panels (Lage mit Schatten/Baurecht, Flächenbilanz mit Kennzahlen …) |
@@ -101,7 +103,7 @@ aus dem Hauptcheckout kopieren (beide gitignored).
 | `src/native` | Tauri-Adapter (Dateien, Fenster, Menü, Farbprofile) |
 | `src/net` | einziges Tor ins Netz (`netFetch`, Offline-Modus, Host-Liste) |
 | `src/engine` | WASM-Lader (`coreWasm.ts`, `engine3d.ts`, `truckSolid.ts`, `wasmSource.ts`) |
-| `src-tauri/core` | Rust-Kern (`dossier-core`): Polygon-Booleans, 2D-Kern (`kernel2d`), Bögen, Dächer, Treppen, Wand-Joins/-Bänder, 3D-Ableitung Decken/Stützen/Treppen/2D-Spuren, Schatten, Baurecht, Bemassung, Kennzahlen — wächst etappenweise |
+| `src-tauri/core` | Rust-Kern (`dossier-core`): Dokument, Ops, Verlauf, Projektdatei; Plan/Schnitt/Ansicht (`plan/`), 3D-Modell, Export-Sammler, Text-Layout, Griffe, Objekt-Info, Befehle (`commands.rs`), Ebenen/Gruppen/Stifte/Layouts; Geometrie (Booleans, Dächer, Treppen, Wand-Joins, Schatten, Baurecht, Kennzahlen) |
 | `src-tauri/render2d, render3d` | die zwei Anzeige-Engines (Rust → WASM/Metal) |
 | `src-tauri/trucksolid` | B-Rep (truck 0.6): Körper, Booleans, STEP, Kennwerte, Kollision |
 | `src-tauri/kernel2d` | 2D-Geometrie (Offset/Trim/Fillet/Split/Join, in `core` eingebunden) |
