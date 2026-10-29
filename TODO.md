@@ -983,6 +983,21 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Quader-STEP aus dem eigenen Export → Meshes (Namen, Positionen f32-genau wie über JSON, Indizes, Schlüsselfolge)
     zeichengleich bis auf ids. CLI importiert kein STEP (nur Export). Bleibend: `io/stepImport.test.ts`, Rust
     `step_tests`. Nur im Linux-Container geprüft, nicht in Tauri/macOS.
+    am Kern-Dokument vorbei). Offen: STEP-Import (truck) unverändert in TS; nicht in Tauri/macOS geprüft.
+    **Rückweg grosser Schritte (29.10.):** Undo/Redo eines Imports holte alle Elemente als JSON aus dem Kern
+    (Redo 34 MB) und baute sie neu (Identität weg). Jetzt merkt sich `ProjectDocument` für Schritte mit ≥ 1000
+    berührten Elementen (`core/stepStates.ts`) je berührtem Feld den Wert davor/danach (nur Verweise) unter der
+    Laufnummer des Kern-Schritts (`Step::seq`, `doc_history_seq`: oberste Nummern + „verschmolzen"); steht der
+    Schritt oben, wendet der Kern ihn ohne Rückgabe an (`doc_jump_quiet`) und TS setzt die Felder zurück — Redo
+    bringt dieselben Objekte zurück (Plan-/3D-Caches treffen). Exakt, weil der Verlauf linear ist; verschmolzene
+    Schritte bekommen eine neue Nummer (dann wieder JSON-Weg), höchstens 8 gemerkt. Im Kern: `remove` verschiebt
+    die Elemente in die inverse Op statt sie zu kopieren (`remove_moving`), Undo/Redo schreiben JSON ohne Kopie
+    (`ops::write_ops`, `undo_with`/`redo_with`). Verworfen: binäre Kodierung der Elemente (Prototyp mit
+    Formen-Tabelle nur ≈ 20–40 % schneller als `JSON.parse`, mehr Code) und faule Leseansicht (Proxies brechen
+    Identität/Iteration der UI). Der Import selbst parst die Elemente weiter einmal (≈ 0,7 s). Messung 150 000
+    Entities (vitest, `--no-opt`, Container unter Last, `document.importBench.test.ts` mit `DOSSIER_BENCH=1`):
+    Import 3,2–5,4 s → 2,3–2,6 s (Kern 1,6 s, `JSON.parse` 0,7 s), Undo 1,6–2,1 s → 0,2 s, Redo 3,3–5,4 s → 0,14 s;
+    nativ Undo 2,2 s → 0,2 s. Offen: Prüfung im Kern-Commit ≈ 0,5 s nativ (Hash-Sets über 150 000 ids).
   Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
   React-Store (TS-Spiegel bleibt bis S3), Befehls-Zustandsautomaten sind viel Code (`src/commands/cmds/*`).
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.

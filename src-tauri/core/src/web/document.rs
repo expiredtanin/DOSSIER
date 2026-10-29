@@ -2,7 +2,7 @@
 //! Projekt nicht bei jedem Aufruf neu übergeben muss.
 
 use crate::document::{Document, Op};
-use crate::ops::{ops_from_json, ops_to_json};
+use crate::ops::ops_from_json;
 use serde_json::Value;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -109,13 +109,43 @@ pub fn doc_commit(h: u32, ops_json: &str, key: &str, now_ms: f64) -> String {
 /// Einen Schritt zurück: die angewendeten Ops als JSON-Array (für die TS-Leseansicht), leer = nichts.
 #[wasm_bindgen]
 pub fn doc_undo(h: u32) -> String {
-    with_doc(h, |d| d.undo().map(|ops| ops_to_json(&ops))).flatten().unwrap_or_default()
+    jump_json(h, false)
 }
 
 /// Einen Schritt vor: die angewendeten Ops als JSON-Array, leer = nichts.
 #[wasm_bindgen]
 pub fn doc_redo(h: u32) -> String {
-    with_doc(h, |d| d.redo().map(|ops| ops_to_json(&ops))).flatten().unwrap_or_default()
+    jump_json(h, true)
+}
+
+/// Undo/Redo mit den angewendeten Ops als JSON (vor dem Anwenden geschrieben, ohne Kopie).
+fn jump_json(h: u32, redo: bool) -> String {
+    with_doc(h, |d| {
+        let mut out: Vec<u8> = Vec::new();
+        let emit = |ops: &[crate::ops::Op]| crate::ops::write_ops(&mut out, ops);
+        let done = if redo { d.redo_with(emit) } else { d.undo_with(emit) };
+        if done { String::from_utf8(out).unwrap_or_default() } else { String::new() }
+    })
+    .unwrap_or_default()
+}
+
+/// Undo (`redo` = false) bzw. Redo ohne Ops-Rückgabe: TS kennt den Schritt (Laufnummer aus
+/// [`doc_history_seq`]) und setzt seine Leseansicht selbst auf den gemerkten Stand. `false` = nichts.
+#[wasm_bindgen]
+pub fn doc_jump_quiet(h: u32, redo: bool) -> bool {
+    with_doc(h, |d| if redo { d.redo_with(|_| ()) } else { d.undo_with(|_| ()) }).unwrap_or(false)
+}
+
+/// Laufnummern der obersten Verlaufsschritte `[Undo, Redo, letzte Aufzeichnung verschmolzen 0|1]`
+/// (0 = Stapel leer; leer, wenn nicht offen).
+#[wasm_bindgen]
+pub fn doc_history_seq(h: u32) -> Vec<f64> {
+    with_doc(h, |d| {
+        let hi = d.history();
+        let (u, r) = hi.top_seqs();
+        vec![u as f64, r as f64, if hi.last_merged() { 1.0 } else { 0.0 }]
+    })
+    .unwrap_or_default()
 }
 
 /// Verlaufsstand `[Undo-Tiefe, Redo-Tiefe, geschätzte Bytes]` (leer, wenn nicht offen).
@@ -148,7 +178,15 @@ pub fn doc_history_labels(h: u32) -> String {
 /// JSON-Array (für die TS-Leseansicht, `doc_last_hits` passend dazu), leer = nichts.
 #[wasm_bindgen]
 pub fn doc_history_jump(h: u32, target: u32) -> String {
-    with_doc(h, |d| d.history_jump(target as usize).map(|ops| ops_to_json(&ops))).flatten().unwrap_or_default()
+    with_doc(h, |d| {
+        d.history_jump(target as usize).map(|ops| {
+            let mut out = Vec::new();
+            crate::ops::write_ops(&mut out, &ops);
+            String::from_utf8(out).unwrap_or_default()
+        })
+    })
+    .flatten()
+    .unwrap_or_default()
 }
 
 /// Verlauf leeren (z. B. nach einer Änderung am Projekt vorbei an den Ops).

@@ -20,42 +20,10 @@ fn now_of(now_ms: f64) -> f64 {
     if now_ms.is_finite() { now_ms } else { 0.0 }
 }
 
-/// Ops als JSON-Liste, ohne die Elemente zu kopieren (grosse Importe: 10⁵ Zeichnungen).
-pub(crate) fn write_ops(out: &mut Vec<u8>, ops: &[Op]) {
-    out.push(b'[');
-    for (i, op) in ops.iter().enumerate() {
-        if i > 0 {
-            out.push(b',');
-        }
-        match op {
-            Op::Add { collection, items, at } => {
-                out.extend_from_slice(b"{\"kind\":\"add\",\"collection\":");
-                let _ = serde_json::to_writer(&mut *out, collection);
-                out.extend_from_slice(b",\"items\":[");
-                for (k, it) in items.iter().enumerate() {
-                    if k > 0 {
-                        out.push(b',');
-                    }
-                    let _ = serde_json::to_writer(&mut *out, it);
-                }
-                out.push(b']');
-                if let Some(a) = at {
-                    out.extend_from_slice(format!(",\"at\":{a}").as_bytes());
-                }
-                out.push(b'}');
-            }
-            op => {
-                let _ = serde_json::to_writer(&mut *out, &op.to_json());
-            }
-        }
-    }
-    out.push(b']');
-}
-
 /// Ops als Benutzer-Änderung anwenden; Antwort `{"ops":[…], …extra}` bzw. `{"problems":[…]}`.
 fn commit(d: &mut Document, ops: Vec<Op>, extra: &[(&str, Value)], key: &str, now: f64) -> String {
     let mut out: Vec<u8> = b"{\"ops\":".to_vec();
-    write_ops(&mut out, &ops);
+    crate::ops::write_ops(&mut out, &ops);
     for (k, v) in extra {
         out.push(b',');
         let _ = serde_json::to_writer(&mut out, k);
