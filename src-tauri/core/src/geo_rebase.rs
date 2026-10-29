@@ -74,8 +74,7 @@ fn shift_positions(pos: &mut [f64], dx: f64, dy: f64) {
     }
 }
 
-/// Verschiebt sämtliche Modell-Koordinaten (`translateProject`). Wie dort bleiben die Innenhöfe der
-/// Dächer (`Roof.holes`) liegen.
+/// Verschiebt sämtliche Modell-Koordinaten (`translateProject`), auch die Innenhöfe der Dächer.
 pub fn translate_project(p: &Project, dx: f64, dy: f64) -> Project {
     if dx == 0.0 && dy == 0.0 {
         return p.clone();
@@ -93,6 +92,9 @@ pub fn translate_project(p: &Project, dx: f64, dy: f64) -> Project {
     }
     for r in out.roofs.iter_mut().flatten() {
         shift_all(&mut r.outline, dx, dy);
+        for h in r.holes.iter_mut().flatten() {
+            shift_all(h, dx, dy);
+        }
     }
     for s in out.stairs.iter_mut().flatten() {
         s.start = shift(s.start, dx, dy);
@@ -169,6 +171,17 @@ mod tests {
         // Der Anker wandert mit: das verschobene Modell liegt bereits in Landeskoordinaten (Ursprung 0, 0).
         assert_eq!(project_geo_origin(&w), Some((0.0, 0.0)));
         assert_eq!(project_to_world_coords(&Project { geo_anchor: None, ..p.clone() }), Project { geo_anchor: None, ..p });
+    }
+
+    #[test]
+    fn dach_innenhoefe_wandern_mit() {
+        let mut p: Project = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        let roofs = p.roofs.as_mut().unwrap();
+        roofs[0].holes = Some(vec![vec![Vec2 { x: 1.0, y: 1.0 }, Vec2 { x: 2.0, y: 1.0 }, Vec2 { x: 2.0, y: 2.0 }]]);
+        let t = translate_project(&p, 10.0, -5.0);
+        let r = &t.roofs.as_ref().unwrap()[0];
+        assert_eq!(r.outline[0], Vec2 { x: p.roofs.as_ref().unwrap()[0].outline[0].x + 10.0, y: p.roofs.as_ref().unwrap()[0].outline[0].y - 5.0 });
+        assert_eq!(r.holes.as_ref().unwrap()[0][2], Vec2 { x: 12.0, y: -3.0 });
     }
 
     #[test]
