@@ -7,22 +7,22 @@
 //
 // Rechnung im Rust-Kern ([K4] S3, `src-tauri/core/src/layout_model.rs`, `folder_tree.rs`): Blattgrössen,
 // Ordner-Bäume (Aufbau, Blätter eines Ordners, Löschen, Nachfahren-Test), Seitenplanung des Ordner-PDF und
-// Titelblock. Hier bleiben Fabriken, einfache Listen-Änderungen (Viewports, Annotationen, Blatt verschieben)
+// Titelblock. Hier bleiben Fabriken, einfache Listen-Änderungen (Viewports, Blatt verschieben), die Blatt-Ebene
 // und Nachschlagen; die Baum-Fassaden setzen die Knoten aus den Indizes des Kerns mit den Original-Objekten
 // zusammen (Objekt-Identität bleibt).
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type {
+  DrawingLevel,
   Layout,
-  LayoutAnnotation,
-  LayoutAnnotationPatch,
   LayoutFolder,
   LayoutOrientation,
   LayoutPaperFormat,
   LayoutViewport,
   MasterLayout,
   Project,
+  Vec2,
   ViewSnapshot,
 } from "./types";
 import { core } from "../engine/coreWasm";
@@ -413,102 +413,39 @@ export function patchViewport(
   };
 }
 
-// ── Fabrik + immutable CRUD (Annotationen auf einem Layout) ─────────────────
-// Analog zu Viewports: Linie/Rechteck/Text als vom Viewport-Baum unabhängige
-// Markup-Schicht in Papier-mm. `annotations ?? []` ist überall die Basis, damit
-// Alt-Layouts (ohne das Feld) unverändert bleiben (additiv).
+// ── Blatt-Ebene (2D-Zeichnung auf dem Blatt) ─────────────────────────────────
+// Was auf einem Blatt gezeichnet wird, sind gewöhnliche `drawings2d` auf der Blatt-Ebene des Layouts
+// (`DrawingLevel.layoutId`, Art "drawing"): dieselben Werkzeuge, Fang, Griffe, Auswahl und dasselbe
+// Rendering wie im Grundriss. Koordinaten = Papier 1:1 in Metern, Ursprung oben links, Papier-y nach
+// unten = −y (s. {@link sheetMmToModel}).
 
-/**
- * Neue Annotation mit Default-Geometrie je Art (Linie/Rechteck: sichtbare
- * Mindestgrösse; Text: 3.5 mm Zeilenhöhe, wie im Attribute-Editor üblich).
- * `init` überschreibt einzelne Felder — der Aufrufer (Editor) übergibt i. d. R.
- * die vollständige, aus dem Zeichnen gewonnene Geometrie.
- */
-export function createAnnotation(
-  id: string,
-  kind: LayoutAnnotation["kind"],
-  init: LayoutAnnotationPatch = {},
-): LayoutAnnotation {
-  const colorPatch = init.color !== undefined ? { color: init.color } : {};
-  if (kind === "line") {
-    return {
-      id,
-      kind: "line",
-      x1Mm: init.x1Mm ?? 20,
-      y1Mm: init.y1Mm ?? 20,
-      x2Mm: init.x2Mm ?? 80,
-      y2Mm: init.y2Mm ?? 20,
-      ...colorPatch,
-      ...(init.weightMm !== undefined ? { weightMm: init.weightMm } : {}),
-    };
-  }
-  if (kind === "rect") {
-    return {
-      id,
-      kind: "rect",
-      xMm: init.xMm ?? 20,
-      yMm: init.yMm ?? 20,
-      widthMm: init.widthMm ?? 40,
-      heightMm: init.heightMm ?? 30,
-      ...colorPatch,
-      ...(init.weightMm !== undefined ? { weightMm: init.weightMm } : {}),
-    };
-  }
-  if (kind === "image") {
-    return {
-      id,
-      kind: "image",
-      xMm: init.xMm ?? 20,
-      yMm: init.yMm ?? 20,
-      widthMm: init.widthMm ?? 60,
-      heightMm: init.heightMm ?? 40,
-      src: init.src ?? "",
-      ...(init.opacity !== undefined ? { opacity: init.opacity } : {}),
-    };
-  }
-  return {
-    id,
-    kind: "text",
-    xMm: init.xMm ?? 20,
-    yMm: init.yMm ?? 20,
-    text: init.text ?? "",
-    heightMm: init.heightMm ?? 3.5,
-    ...colorPatch,
-    ...(init.doc !== undefined ? { doc: init.doc } : {}),
-    ...(init.widthMm !== undefined ? { widthMm: init.widthMm } : {}),
-  };
+/** Ist die Ebene die Blatt-Ebene eines Layouts (nicht im Navigator, nur bei offenem Blatt sichtbar)? */
+export function isSheetLevel(level: Pick<DrawingLevel, "layoutId"> | undefined | null): boolean {
+  return !!level?.layoutId;
 }
 
-/** Fügt eine Annotation an (immutabel). */
-export function addAnnotation(layout: Layout, annotation: LayoutAnnotation): Layout {
-  return { ...layout, annotations: [...(layout.annotations ?? []), annotation] };
+/** Die Blatt-Ebene des Layouts `layoutId`, falls vorhanden. */
+export function sheetLevelOf(project: Project, layoutId: string): DrawingLevel | undefined {
+  return project.drawingLevels.find((l) => l.layoutId === layoutId);
 }
 
-/** Entfernt eine Annotation per Id (immutabel). */
-export function removeAnnotation(layout: Layout, annotationId: string): Layout {
-  return {
-    ...layout,
-    annotations: (layout.annotations ?? []).filter((a) => a.id !== annotationId),
-  };
+/** Neue (leere) Blatt-Ebene für `layout`. */
+export function createSheetLevel(id: string, layout: Pick<Layout, "id" | "name">): DrawingLevel {
+  return { id, name: layout.name, kind: "drawing", visible: true, locked: false, layoutId: layout.id };
 }
 
-/**
- * Ändert Felder einer Annotation (immutabel). No-op, wenn die Id fehlt. Der
- * Patch ist bewusst art-unabhängig ({@link LayoutAnnotationPatch}) — es werden
- * nur die tatsächlich übergebenen Felder gemergt.
- */
-export function patchAnnotation(
-  layout: Layout,
-  annotationId: string,
-  patch: LayoutAnnotationPatch,
-): Layout {
-  return {
-    ...layout,
-    annotations: (layout.annotations ?? []).map((a) =>
-      a.id === annotationId ? ({ ...a, ...patch } as LayoutAnnotation) : a,
-    ),
-  };
+/** Papier-mm (x nach rechts, y nach unten) → Blatt-Ebene (Meter, y nach oben). */
+export function sheetMmToModel(xMm: number, yMm: number): Vec2 {
+  return { x: xMm / 1000, y: -yMm / 1000 };
 }
+
+/** Blatt-Ebene (Meter) → Papier-mm. */
+export function sheetModelToMm(p: Vec2): { xMm: number; yMm: number } {
+  return { xMm: p.x * 1000, yMm: -p.y * 1000 };
+}
+
+/** Massstab der Blatt-Ebene: Papier 1:1. */
+export const SHEET_SCALE_DENOMINATOR = 1;
 
 // ── Auflösungen ──────────────────────────────────────────────────────────────
 

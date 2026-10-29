@@ -819,7 +819,7 @@ mod tests {
         assert_eq!(d.project().unwrap().walls.len(), 0);
         assert_eq!(d.field("openings").unwrap()[0]["kind"], "door");
         assert!(d.undo().is_none());
-        assert!(d.serialize().starts_with("{\n  \"formatVersion\": 2,\n  \"id\": \"q\""));
+        assert!(d.serialize().starts_with("{\n  \"formatVersion\": 3,\n  \"id\": \"q\""));
     }
 
     #[test]

@@ -927,6 +927,14 @@ export type DrawingLevel = {
    * Fehlt ⇒ an; `false` ⇒ aus.
    */
   levelMarks?: boolean;
+  /**
+   * Blatt-Ebene (nur kind "drawing"): gehört zum Layout mit dieser ID und trägt dessen
+   * 2D-Zeichnung (Linien, Texte, Bilder …) als gewöhnliche `drawings2d`. Koordinaten = Papier
+   * im Massstab 1:1 in Metern, Ursprung oben links am Blatt, Papier-y nach unten = −y
+   * (Papier-mm (x, y) ↔ Modell (x/1000, −y/1000)). Nicht im Navigator; nur sichtbar, wenn das
+   * Blatt offen ist. Fehlt ⇒ gewöhnliche Ebene.
+   */
+  layoutId?: string;
 };
 
 /**
@@ -1275,64 +1283,12 @@ export type Layout = {
   customWidthMm?: number;
   /** Freie Blatthöhe in mm (siehe {@link Layout.customWidthMm}). */
   customHeightMm?: number;
-  viewports: Array<LayoutViewport>;
   /**
-   * 2D-Markups direkt auf dem Blatt (Linie/Rechteck/Text), siehe
-   * {@link LayoutAnnotation}. Additiv — Alt-Layouts ohne dieses Feld laden
-   * unverändert (Editor/CRUD behandeln ein fehlendes Array wie ein leeres).
+   * Die 2D-Zeichnung auf dem Blatt liegt auf der Blatt-Ebene ({@link DrawingLevel.layoutId}),
+   * nicht im Layout (bis Format 2: `annotations`, s. `project_format::migrate_layout_annotations`).
    */
-  annotations?: Array<LayoutAnnotation>;
+  viewports: Array<LayoutViewport>;
 };
-
-/** Layout-Beschriftung (Tag `kind`). */
-export type LayoutAnnotation =
-  | {
-    kind: "line";
-    id: string;
-    x1Mm: number;
-    y1Mm: number;
-    x2Mm: number;
-    y2Mm: number;
-    color?: string;
-    weightMm?: number;
-  }
-  | {
-    kind: "rect";
-    id: string;
-    xMm: number;
-    yMm: number;
-    widthMm: number;
-    heightMm: number;
-    color?: string;
-    weightMm?: number;
-  }
-  | {
-    kind: "text";
-    id: string;
-    xMm: number;
-    yMm: number;
-    text: string;
-    heightMm: number;
-    color?: string;
-    /**
-     * Reiches Textfeld (mehrere Absätze, gemischte Formatierung) — Vorrang vor
-     * `text`, s. gleichnamiges Feld bei `Drawing2DGeom["text"]`.
-     */
-    doc?: RichTextDoc;
-    /** Optionale Rahmenbreite (mm) — bricht `doc` wortweise um; fehlt sie: einzeilig. */
-    widthMm?: number;
-  }
-  | {
-    kind: "image";
-    id: string;
-    xMm: number;
-    yMm: number;
-    widthMm: number;
-    heightMm: number;
-    /** Bildquelle als Data-URL (PNG/JPEG) — eingebettet, keine externe Datei. */
-    src: string;
-    opacity?: number;
-  };
 
 /**
  * Ein Ordner im Layouts-Baum (DOSSIER A3). Layouts verweisen per `folderId` auf

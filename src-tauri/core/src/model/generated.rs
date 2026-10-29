@@ -1309,6 +1309,14 @@ pub struct DrawingLevel {
     #[serde(rename = "levelMarks", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub level_marks: Option<bool>,
+    /// Blatt-Ebene (nur kind "drawing"): gehört zum Layout mit dieser ID und trägt dessen
+    /// 2D-Zeichnung (Linien, Texte, Bilder …) als gewöhnliche `drawings2d`. Koordinaten = Papier
+    /// im Massstab 1:1 in Metern, Ursprung oben links am Blatt, Papier-y nach unten = −y
+    /// (Papier-mm (x, y) ↔ Modell (x/1000, −y/1000)). Nicht im Navigator; nur sichtbar, wenn das
+    /// Blatt offen ist. Fehlt ⇒ gewöhnliche Ebene.
+    #[serde(rename = "layoutId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layout_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3367,13 +3375,9 @@ pub struct Layout {
     #[serde(rename = "customHeightMm", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub custom_height_mm: Option<f64>,
+    /// Die 2D-Zeichnung auf dem Blatt liegt auf der Blatt-Ebene ({@link DrawingLevel.layoutId}),
+    /// nicht im Layout (bis Format 2: `annotations`, s. `project_format::migrate_layout_annotations`).
     pub viewports: Vec<LayoutViewport>,
-    /// 2D-Markups direkt auf dem Blatt (Linie/Rechteck/Text), siehe
-    /// {@link LayoutAnnotation}. Additiv — Alt-Layouts ohne dieses Feld laden
-    /// unverändert (Editor/CRUD behandeln ein fehlendes Array wie ein leeres).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub annotations: Option<Vec<LayoutAnnotation>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

@@ -433,8 +433,6 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.kind.column": "Column",
   "objinfo.kind.roof": "Roof",
   "objinfo.kind.contextObject": "Context object",
-  "objinfo.kind.layoutAnnotation": "Sheet markup",
-  "objinfo.layoutAnnotationHint": "Edit position/size in mm directly on the frame on the sheet (grips or the fields there).",
   // ── Context object attributes (object info panel) ───────────────────────
   "objinfo.contextObject.section": "Georeferencing",
   "objinfo.contextObject.type": "Type",
@@ -2414,7 +2412,6 @@ export const en: Record<TranslationKey, string> = {
   // Editor
   "layouts.editorTitle": "Layout editor",
   "layouts.fit": "Fit",
-  "layouts.zoom100": "True size (100%, 1:1 on screen)",
   "layouts.addViewport": "Add viewport",
   "layouts.pickSnapshot": "Pick a view …",
   "layouts.noSnapshots": "No views available. Save a view first.",
@@ -2433,22 +2430,8 @@ export const en: Record<TranslationKey, string> = {
   "layouts.placeViewport": "Draw viewport",
   "layouts.placeHint": "Drag a rectangle on the sheet, then bind a snapshot.",
   "layouts.bindSnapshot": "Bind snapshot",
-  "layouts.emptyViewports":
-    "No viewports yet. Choose “Draw viewport” and drag a rectangle on the sheet.",
   // Annotations (line/rect/text/image) drawn directly on the sheet — with the
   // same tools as the plan (left tools panel), no layout-only tool.
-  "layouts.annotTextTitle": "Text",
-  "layouts.annotTextLabel": "Text content:",
-  "layouts.annotEditText": "Edit text",
-  "layouts.annotRemove": "Remove annotation",
-  "layouts.annotX": "X (mm)",
-  "layouts.annotY": "Y (mm)",
-  "layouts.annotWidth": "Width (mm)",
-  "layouts.annotHeight": "Height (mm)",
-  "layouts.annot.line": "Line",
-  "layouts.annot.rect": "Rectangle",
-  "layouts.annot.text": "Text",
-  "layouts.annot.image": "Image",
   // Tree / “＋” menu / folders
   "layouts.add": "New …",
   "layouts.addFolder": "Create folder",

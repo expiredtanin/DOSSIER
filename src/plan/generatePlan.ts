@@ -241,6 +241,9 @@ export function generatePlan(
   compactUnderlay = false,
 ): Plan {
   const compact = compactUnderlay && !mono && !forPrint;
+  // Blatt-Ebene eines Layouts (Papier 1:1): ohne projektglobale Zutaten (Kontext, Luftbilder,
+  // Schnittlinien, Schatten, Baurecht) — die gehören zum Modell, nicht aufs Papier.
+  if (project.drawingLevels.some((l) => l.id === floorId && l.layoutId)) includeGlobal = false;
   // Den ganzen Grundriss rechnet der Kern auf dem Dokument ([K3d]/[K4], `plan/{domains,walls,stairs,
   // drawings,extras}.rs`): Schattenstudie und Baurecht zuunterst, Decken, Dächer, Räume, Wände mit
   // Öffnungen, Treppen, Stützen, 2D-Zeichnungen, Extrusions-Umrisse, Kontext und Schnittführung,

@@ -18,10 +18,9 @@ export interface FontMetricRatios {
 }
 
 /** Zeilenabstand-Vielfaches für gezeichneten Text, EINE Quelle für alle
- *  Verbraucher (primitives.tsx "drawingText" fontSize*1.25, PlanView.tsx/
- *  LayoutSheet.tsx Inline-Editor-Anker UND deren CSS `line-height` in
- *  styles.css `.planview-inline-text .rt-surface`/`.layout-sheet-inline-text
- *  .rt-surface` — alle MÜSSEN denselben Wert verwenden, sonst driften
+ *  Verbraucher (primitives.tsx "drawingText" fontSize*1.25, PlanView.tsx
+ *  Inline-Editor-Anker UND dessen CSS `line-height` in styles.css
+ *  `.planview-inline-text .rt-surface` — alle MÜSSEN denselben Wert verwenden, sonst driften
  *  Editor-Position und späteres Rendering wieder auseinander). */
 export const TEXT_LINE_HEIGHT_MULT = 1.25;
 

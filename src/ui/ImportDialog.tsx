@@ -432,7 +432,7 @@ export function ImportDialog({
                       value={existingLevelId}
                       onChange={(v) => setExistingLevelId(v)}
                       title={t("import.target.existing")}
-                      options={project.drawingLevels.map((z) => ({
+                      options={project.drawingLevels.filter((z) => !z.layoutId).map((z) => ({
                         value: z.id,
                         label: `${z.name} · ${t(kindBadgeKey(z.kind))}`,
                       }))}

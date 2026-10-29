@@ -9,7 +9,7 @@
 use serde_json::{Map, Value};
 
 /// Aktuelle Version des Dateiformats. Bei jeder Formatänderung erhöhen + Migration anhängen.
-pub const PROJECT_FORMAT_VERSION: u64 = 2;
+pub const PROJECT_FORMAT_VERSION: u64 = 3;
 
 const REQUIRED_ARRAYS: [&str; 3] = ["walls", "layers", "drawingLevels"];
 const DEFAULT_ARRAYS: [&str; 5] = ["lineStyles", "hatches", "components", "wallTypes", "drawings2d"];
@@ -86,6 +86,144 @@ fn migrate_doors(mut raw: Map<String, Value>) -> Map<String, Value> {
     raw
 }
 
+/// Kategorie für Blatt-Zeichnungen aus der Migration: „50" (Text), sonst die erste Kategorie.
+fn sheet_category(raw: &Map<String, Value>) -> String {
+    fn walk(v: &Value, out: &mut Vec<String>) {
+        for c in v.as_array().into_iter().flatten() {
+            if let Some(code) = c.get("code").and_then(Value::as_str) {
+                out.push(code.to_string());
+            }
+            if let Some(ch) = c.get("children") {
+                walk(ch, out);
+            }
+        }
+    }
+    let mut codes = Vec::new();
+    if let Some(l) = raw.get("layers") {
+        walk(l, &mut codes);
+    }
+    if codes.iter().any(|c| c == "50") {
+        return "50".into();
+    }
+    codes.into_iter().next().unwrap_or_else(|| "50".into())
+}
+
+/// Papier-mm (x, y nach unten) → Blatt-Ebene (Meter, y nach oben), s. `DrawingLevel.layoutId`.
+fn sheet_pt(x_mm: f64, y_mm: f64) -> Value {
+    serde_json::json!({"x": x_mm / 1000.0, "y": -y_mm / 1000.0})
+}
+
+/// Eine Alt-Annotation (Papier-mm) als `geom` + Zusatzfelder einer 2D-Zeichnung; `None` = unlesbar.
+fn annotation_geom(a: &Value) -> Option<(Value, Vec<(&'static str, Value)>)> {
+    let n = |k: &str| a.get(k).and_then(Value::as_f64).filter(|v| v.is_finite());
+    let mut extra: Vec<(&'static str, Value)> = Vec::new();
+    let color = a.get("color").and_then(Value::as_str).unwrap_or("#111111").to_string();
+    let kind = a.get("kind").and_then(Value::as_str)?;
+    let geom = match kind {
+        "line" => {
+            extra.push(("color", Value::String(color)));
+            extra.push(("weightMm", n("weightMm").unwrap_or(0.25).into()));
+            serde_json::json!({"shape": "line", "a": sheet_pt(n("x1Mm")?, n("y1Mm")?), "b": sheet_pt(n("x2Mm")?, n("y2Mm")?)})
+        }
+        "rect" | "image" => {
+            let (x, y, w, h) = (n("xMm")?, n("yMm")?, n("widthMm")?, n("heightMm")?);
+            let (x0, x1) = (x.min(x + w), x.max(x + w));
+            let (y0, y1) = (y.min(y + h), y.max(y + h));
+            let (min, max) = (sheet_pt(x0, y1), sheet_pt(x1, y0));
+            if kind == "rect" {
+                extra.push(("color", Value::String(color)));
+                extra.push(("weightMm", n("weightMm").unwrap_or(0.25).into()));
+                serde_json::json!({"shape": "rect", "min": min, "max": max})
+            } else {
+                let mut g = serde_json::json!({"shape": "image", "min": min, "max": max, "src": a.get("src").and_then(Value::as_str)?});
+                if let Some(o) = n("opacity") {
+                    g["opacity"] = o.into();
+                }
+                g
+            }
+        }
+        "text" => {
+            extra.push(("color", Value::String(color)));
+            let mut g = serde_json::json!({
+                "shape": "text",
+                "at": sheet_pt(n("xMm")?, n("yMm")?),
+                "text": a.get("text").and_then(Value::as_str).unwrap_or_default(),
+                "height": n("heightMm")? / 1000.0,
+                "angle": 0,
+            });
+            if let Some(w) = n("widthMm").filter(|w| *w > 0.0) {
+                g["width"] = (w / 1000.0).into();
+            }
+            if let Some(d) = a.get("doc").filter(|d| d.is_object()) {
+                g["doc"] = d.clone();
+            }
+            g
+        }
+        _ => return None,
+    };
+    Some((geom, extra))
+}
+
+/// 2 → 3: Blatt-Zeichnungen sind gewöhnliche 2D-Zeichnungen auf einer Blatt-Ebene
+/// (`DrawingLevel.layoutId`) statt eigener `Layout.annotations` in Papier-mm. Jedes Layout bekommt
+/// seine Blatt-Ebene; Linie/Rechteck/Text/Bild werden zu `line`/`rect`/`text`/`image`.
+fn migrate_layout_annotations(mut raw: Map<String, Value>) -> Map<String, Value> {
+    let Some(Value::Array(mut layouts)) = raw.get("layouts").cloned() else { return raw };
+    let mut levels: Vec<Value> = raw.get("drawingLevels").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut drawings: Vec<Value> = raw.get("drawings2d").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut level_ids: std::collections::HashSet<String> =
+        levels.iter().filter_map(|l| l.get("id").and_then(Value::as_str).map(str::to_owned)).collect();
+    let mut drawing_ids: std::collections::HashSet<String> =
+        drawings.iter().filter_map(|d| d.get("id").and_then(Value::as_str).map(str::to_owned)).collect();
+    let cat = sheet_category(&raw);
+    for lay in layouts.iter_mut() {
+        let Some(lay) = lay.as_object_mut() else { continue };
+        let annotations = lay.shift_remove("annotations");
+        let Some(layout_id) = lay.get("id").and_then(Value::as_str).map(str::to_owned) else { continue };
+        let existing = levels
+            .iter()
+            .find(|l| l.get("layoutId").and_then(Value::as_str) == Some(layout_id.as_str()))
+            .and_then(|l| l.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let level_id = match existing {
+            Some(id) => id,
+            None => {
+                let mut id = format!("sheet-{layout_id}");
+                while level_ids.contains(&id) {
+                    id.push_str("-s");
+                }
+                level_ids.insert(id.clone());
+                let name = lay.get("name").and_then(Value::as_str).unwrap_or_default();
+                levels.push(serde_json::json!({"id": id, "name": name, "kind": "drawing", "visible": true, "locked": false, "layoutId": layout_id}));
+                id
+            }
+        };
+        for a in annotations.as_ref().and_then(Value::as_array).into_iter().flatten() {
+            let Some((geom, extra)) = annotation_geom(a) else { continue };
+            let mut id = a.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or("ann").to_string();
+            while drawing_ids.contains(&id) {
+                id.push_str("-a");
+            }
+            drawing_ids.insert(id.clone());
+            let mut d = Map::new();
+            d.insert("id".into(), Value::String(id));
+            d.insert("type".into(), "drawing2d".into());
+            d.insert("levelId".into(), Value::String(level_id.clone()));
+            d.insert("categoryCode".into(), Value::String(cat.clone()));
+            d.insert("geom".into(), geom);
+            for (k, v) in extra {
+                d.insert(k.into(), v);
+            }
+            drawings.push(Value::Object(d));
+        }
+    }
+    raw.insert("layouts".into(), Value::Array(layouts));
+    raw.insert("drawingLevels".into(), Value::Array(levels));
+    raw.insert("drawings2d".into(), Value::Array(drawings));
+    raw
+}
+
 /// Liest eine Projektdatei (Text) tolerant ein, migriert und prüft sie. `now_ms`: Zeitpunkt für
 /// eine Ersatz-ID, falls die Datei keine trägt.
 pub fn parse_project_file(text: &str, now_ms: f64) -> Parsed {
@@ -128,6 +266,7 @@ pub fn parse_project_object(raw: Value, now_ms: f64) -> Parsed {
     for i in version..PROJECT_FORMAT_VERSION {
         obj = match i {
             1 => migrate_doors(obj),
+            2 => migrate_layout_annotations(obj),
             _ => obj, // 0 → 1: Einführung von `formatVersion`; Inhalt unverändert.
         };
     }
@@ -321,7 +460,7 @@ mod tests {
     fn alte_datei_wird_migriert_und_ergaenzt() {
         let Parsed::Ok { project, warnings, migrated_from } = parse_project_object(minimal(), 0.0) else { panic!() };
         assert_eq!(migrated_from, Some(0));
-        assert_eq!(project["formatVersion"], 2);
+        assert_eq!(project["formatVersion"], 3);
         assert_eq!(project["lineStyles"], json!([]));
         assert!(warnings.is_empty());
     }
@@ -360,6 +499,51 @@ mod tests {
         assert_eq!(o[1]["kind"], "door");
         assert_eq!(o[1]["typeId"], "dt");
         assert_eq!(o[2]["id"], "O1-t");
+    }
+
+    #[test]
+    fn layout_annotationen_werden_blatt_zeichnungen() {
+        let mut v = minimal();
+        v["formatVersion"] = json!(2);
+        v["layers"] = json!([{"code": "20", "children": [{"code": "50"}]}]);
+        v["drawings2d"] = json!([{"id": "a1", "levelId": "eg"}]);
+        v["layouts"] = json!([
+            {"id": "L1", "name": "Blatt 1", "paper": "a3", "orientation": "landscape", "viewports": [], "annotations": [
+                {"kind": "line", "id": "a1", "x1Mm": 10, "y1Mm": 20, "x2Mm": 110, "y2Mm": 20, "weightMm": 0.5},
+                {"kind": "rect", "id": "a2", "xMm": 10, "yMm": 20, "widthMm": 50, "heightMm": 30, "color": "#ff0000"},
+                {"kind": "text", "id": "a3", "xMm": 5, "yMm": 7, "text": "Hallo", "heightMm": 3.5, "widthMm": 40},
+                {"kind": "image", "id": "a4", "xMm": 0, "yMm": 0, "widthMm": 20, "heightMm": 10, "src": "data:image/png;base64,AA", "opacity": 0.5},
+                {"kind": "line", "id": "kaputt", "x1Mm": "x"}
+            ]},
+            {"id": "L2", "name": "Blatt 2", "paper": "a4", "orientation": "portrait", "viewports": []}
+        ]);
+        let Parsed::Ok { project, migrated_from, .. } = parse_project_object(v, 0.0) else { panic!() };
+        assert_eq!(migrated_from, Some(2));
+        assert!(project["layouts"][0].get("annotations").is_none());
+        let levels = project["drawingLevels"].as_array().unwrap();
+        assert_eq!(levels.len(), 2, "jedes Layout bekommt seine Blatt-Ebene");
+        assert_eq!(levels[0], json!({"id": "sheet-L1", "name": "Blatt 1", "kind": "drawing", "visible": true, "locked": false, "layoutId": "L1"}));
+        assert_eq!(levels[1]["layoutId"], "L2");
+        let d = project["drawings2d"].as_array().unwrap();
+        assert_eq!(d.len(), 5, "kaputte Annotation fällt weg");
+        assert_eq!(d[1]["id"], "a1-a", "ID-Kollision mit bestehender Zeichnung");
+        assert_eq!(d[1]["levelId"], "sheet-L1");
+        assert_eq!(d[1]["categoryCode"], "50");
+        assert_eq!(d[1]["geom"], json!({"shape": "line", "a": {"x": 0.01, "y": -0.02}, "b": {"x": 0.11, "y": -0.02}}));
+        assert_eq!(d[1]["weightMm"], 0.5);
+        assert_eq!(d[2]["geom"], json!({"shape": "rect", "min": {"x": 0.01, "y": -0.05}, "max": {"x": 0.06, "y": -0.02}}));
+        assert_eq!(d[2]["color"], "#ff0000");
+        assert_eq!(d[3]["geom"]["at"], json!({"x": 0.005, "y": -0.007}));
+        assert_eq!(d[3]["geom"]["height"], 0.0035);
+        assert_eq!(d[3]["geom"]["width"], 0.04);
+        assert_eq!(d[4]["geom"]["src"], "data:image/png;base64,AA");
+        assert_eq!(d[4]["geom"]["max"]["x"], 0.02);
+        assert_eq!(d[4]["geom"]["min"]["y"], -0.01);
+        // Schon migriert: ein zweiter Lauf ändert nichts mehr.
+        let mut again = project.clone();
+        again.insert("formatVersion".into(), json!(2));
+        let Parsed::Ok { project: p2, .. } = parse_project_object(Value::Object(again), 0.0) else { panic!() };
+        assert_eq!(p2, project);
     }
 
     #[test]
@@ -420,6 +604,6 @@ mod tests {
     fn serialisierung_setzt_version_nach_vorn() {
         let Value::Object(m) = minimal() else { panic!() };
         let s = serialize_project(&m);
-        assert!(s.starts_with("{\n  \"formatVersion\": 2,\n  \"id\": \"p\""));
+        assert!(s.starts_with("{\n  \"formatVersion\": 3,\n  \"id\": \"p\""));
     }
 }

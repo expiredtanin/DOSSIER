@@ -18,13 +18,17 @@ export interface CreatePreview {
   info: number[];
 }
 
-/** Kontext der Anfrage: aktive Ebene/Geschoss, Kategorie, Wandtyp. */
+/** Schrifthöhe neuer Texte auf einem Layout-Blatt (Papier 1:1): 3.5 mm. */
+export const SHEET_TEXT_HEIGHT_M = 0.0035;
+
+/** Kontext der Anfrage: aktive Ebene/Geschoss, Kategorie, Wandtyp (auf einem Blatt: Papier-Schrifthöhe). */
 function ctxReq(ctx: CommandContext): object {
   return {
     level: ctx.level.id,
     floorHeight: ctx.level.floorHeight ?? null,
     cat: ctx.defaultCategoryCode,
     wallType: ctx.activeWallTypeId,
+    ...(ctx.level.layoutId ? { textHeight: SHEET_TEXT_HEIGHT_M } : {}),
   };
 }
 

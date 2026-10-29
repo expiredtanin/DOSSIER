@@ -168,16 +168,7 @@ export function ObjectInfoPanel() {
 
       <div className="objinfo-sep" />
 
-      {/* Bezugspunkt/X-Y/Maße sind MODELL-Meter (Grundriss) — für eine Layout-
-          Annotation (Papier-Millimeter, eigenes Koordinatensystem) gibt es
-          keinen sinnvollen Bezugspunkt hier; Position/Grösse editiert man
-          direkt am Rahmen auf dem Blatt (Greifpunkte + das dortige HUD in
-          mm — `layout-sheet-hud` in LayoutSheet.tsx). Sonst zeigte dieses
-          Panel für sie fest 0/0 (Selection.bbox ist für sie ein Platzhalter,
-          s. App.tsx) — verwirrend statt nur „nicht anwendbar". */}
-      {sel.kind === "layoutAnnotation" ? (
-        <div className="objinfo-empty">{t("objinfo.layoutAnnotationHint")}</div>
-      ) : (
+      {(
         <>
           {/* Bezugspunkt-Würfel (3×3, immer quadratisch) links, X/Y/Z als Spalte
               rechts daneben (Nutzer-Wunsch). */}

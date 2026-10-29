@@ -12,17 +12,19 @@
 
 import { jsPDF } from "jspdf";
 import "svg2pdf.js";
-import type { Layout, LayoutAnnotation, MasterLayout, Project } from "../model/types";
+import type { Layout, MasterLayout, Project } from "../model/types";
 import { generatePlan } from "../plan/generatePlan";
 import { planToPrintSvg } from "./planToPrintSvg";
-import { annotationTextLines } from "../text/renderHtml";
-import { docFromText } from "../text/richText";
+import { collectVisibleCodes } from "../model/types";
 import {
   findMaster,
   findSnapshot,
   folderPdfPages,
   resolveTitleBlock,
   resolveViewportScale,
+  SHEET_SCALE_DENOMINATOR,
+  sheetLevelOf,
+  sheetMmToModel,
   visibleCodesFromSnapshot,
   type FolderPdfPage,
   type ResolvedTitleBlock,
@@ -79,110 +81,36 @@ function clip(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
-/** "#rrggbb"/"#rgb" → [r,g,b] (0..255); ungültige Eingabe fällt auf Tinte zurück. */
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "").trim();
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  const n = parseInt(full, 16);
-  if (full.length !== 6 || !Number.isFinite(n)) return [17, 17, 17];
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-/** Bildformat aus dem MIME-Teil der Data-URL ableiten (jsPDF `addImage` braucht es explizit). */
-function imageFormatFromDataUrl(src: string): string {
-  const ext = (/^data:image\/(\w+)/i.exec(src)?.[1] ?? "png").toLowerCase();
-  if (ext === "jpg" || ext === "jpeg") return "JPEG";
-  if (ext === "webp") return "WEBP";
-  return "PNG";
-}
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-
 /**
- * Baut EIN Mini-SVG (Blattgrösse) mit allen Text-Markups einer Seite — reiche
- * Docs (mehrere Absätze/gemischte Formatierung) + Wortumbruch bei gesetzter
- * Rahmenbreite, exakt wie `LayoutSheet.tsx`s `AnnotationSvg`. Ein gemeinsamer
- * `doc.svg()`-Aufruf statt einem je Annotation (einfacher, ein Layout-Pass).
- * `null`, wenn die Seite keine Text-Markups trägt.
+ * Die 2D-Zeichnung des Blatts (Blatt-Ebene, `DrawingLevel.layoutId`) über Viewports und Master:
+ * derselbe Plan wie am Bildschirm (`generatePlan`, Massstab 1:1, Export-Modus), über
+ * `planToPrintSvg` fest aufs Papier gelegt (Ursprung oben links), ohne eigenes weisses Blatt.
  */
-function buildAnnotationTextsSvg(
-  annotations: LayoutAnnotation[],
-  sheetW: number,
-  sheetH: number,
-): SVGSVGElement | null {
-  const texts = annotations.filter(
-    (a): a is Extract<LayoutAnnotation, { kind: "text" }> => a.kind === "text",
+async function renderSheetDrawing(doc: jsPDF, project: Project, layout: Layout, widthMm: number, heightMm: number): Promise<void> {
+  const level = sheetLevelOf(project, layout.id);
+  if (!level || !project.drawings2d.some((d) => d.levelId === level.id)) return;
+  const a = sheetMmToModel(0, heightMm);
+  const b = sheetMmToModel(widthMm, 0);
+  const plan = generatePlan(
+    project,
+    level.id,
+    collectVisibleCodes(project.layers),
+    undefined,
+    "fein",
+    false,
+    false,
+    false,
+    SHEET_SCALE_DENOMINATOR,
+    true,
   );
-  if (texts.length === 0) return null;
-
-  const svg = document.createElementNS(SVG_NS, "svg") as SVGSVGElement;
-  svg.setAttribute("xmlns", SVG_NS);
-  svg.setAttribute("width", String(sheetW));
-  svg.setAttribute("height", String(sheetH));
-  svg.setAttribute("viewBox", `0 0 ${sheetW} ${sheetH}`);
-
-  for (const ann of texts) {
-    const el = document.createElementNS(SVG_NS, "text");
-    for (const line of annotationTextLines(ann, ann.doc ?? docFromText(ann.text))) {
-      const lineTspan = document.createElementNS(SVG_NS, "tspan");
-      lineTspan.setAttribute("x", String(line.x));
-      lineTspan.setAttribute("y", String(line.y));
-      lineTspan.setAttribute("text-anchor", line.anchor);
-      if (line.tspans.length === 0) {
-        lineTspan.textContent = "​";
-      } else {
-        for (const ts of line.tspans) {
-          const run = document.createElementNS(SVG_NS, "tspan");
-          run.setAttribute("font-size", String(ts.fontSize));
-          run.setAttribute("fill", ts.fill);
-          if (ts.fontWeight) run.setAttribute("font-weight", ts.fontWeight);
-          if (ts.fontStyle) run.setAttribute("font-style", ts.fontStyle);
-          run.setAttribute("font-family", ts.fontFamily ?? "Helvetica, Arial, sans-serif");
-          if (ts.textDecoration) run.setAttribute("text-decoration", ts.textDecoration);
-          run.textContent = ts.text;
-          lineTspan.appendChild(run);
-        }
-      }
-      el.appendChild(lineTspan);
-    }
-    svg.appendChild(el);
-  }
-  return svg;
-}
-
-/**
- * Zeichnet die 2D-Markups (Linie/Rechteck/Bild) EINER Seite direkt via jsPDF-
- * Vektorprimitive — dieselbe Schicht wie `LayoutSheet.tsx`s Annotations-SVG,
- * hier aber ÜBER Viewports UND Master gezeichnet (Aufrufreihenfolge in
- * `renderPage`), analog zur Zeichenreihenfolge im In-Viewport-Editor.
- */
-function drawAnnotationShapes(doc: jsPDF, layout: Layout): void {
-  for (const ann of layout.annotations ?? []) {
-    if (ann.kind === "line") {
-      const [r, g, b] = hexToRgb(ann.color ?? "#111111");
-      doc.setDrawColor(r, g, b);
-      doc.setLineWidth(ann.weightMm ?? 0.25);
-      doc.line(ann.x1Mm, ann.y1Mm, ann.x2Mm, ann.y2Mm);
-    } else if (ann.kind === "rect") {
-      const [r, g, b] = hexToRgb(ann.color ?? "#111111");
-      doc.setDrawColor(r, g, b);
-      doc.setLineWidth(ann.weightMm ?? 0.25);
-      doc.rect(ann.xMm, ann.yMm, ann.widthMm, ann.heightMm);
-    } else if (ann.kind === "image" && ann.widthMm > 0 && ann.heightMm > 0 && ann.src) {
-      try {
-        doc.addImage(
-          ann.src,
-          imageFormatFromDataUrl(ann.src),
-          ann.xMm,
-          ann.yMm,
-          ann.widthMm,
-          ann.heightMm,
-        );
-      } catch {
-        // Defekte/leere Data-URL überspringt nur dieses Bild, nicht die Seite.
-      }
-    }
-  }
+  const print = planToPrintSvg(plan, {
+    scaleDenominator: SHEET_SCALE_DENOMINATOR,
+    pageWidthMm: widthMm,
+    pageHeightMm: heightMm,
+    bounds: { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y },
+    transparent: true,
+  });
+  await doc.svg(print.svg, { x: 0, y: 0, width: widthMm, height: heightMm });
 }
 
 /** Zeichnet die Viewports + Master-Elemente EINER Seite in das jsPDF-Dokument. */
@@ -242,16 +170,11 @@ async function renderPage(
     drawTitleBlock(doc, widthMm, heightMm, tb, layout.paper, layout.orientation);
   }
 
-  // 2D-Markups (Linie/Rechteck/Bild/Text) — ÜBER Viewports + Master, wie im
-  // In-Viewport-Editor (LayoutSheet.tsx). Fehlte bisher komplett im Export.
-  drawAnnotationShapes(doc, layout);
-  const textsSvg = buildAnnotationTextsSvg(layout.annotations ?? [], widthMm, heightMm);
-  if (textsSvg) {
-    try {
-      await doc.svg(textsSvg, { x: 0, y: 0, width: widthMm, height: heightMm });
-    } catch {
-      // Rich-Text-Rendering eines Markups darf die Seite nicht killen.
-    }
+  // 2D-Zeichnung des Blatts — ÜBER Viewports + Master, wie am Bildschirm.
+  try {
+    await renderSheetDrawing(doc, project, layout, widthMm, heightMm);
+  } catch {
+    // Eine Blatt-Zeichnung, die nicht rendert, darf die Seite nicht killen.
   }
 }
 

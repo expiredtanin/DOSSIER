@@ -394,8 +394,10 @@ impl Post {
 }
 
 /// Nachbearbeitung eines Plans: Schwarz-Weiss und Strichstärken-Faktor; `None`, wenn sie nichts tut.
+/// Auf einer Blatt-Ebene (`layoutId`) gelten die Strichstärken unverändert (Papier 1:1).
 pub fn post_for(p: &Project, a: &super::domains::PlanArgs) -> Option<Post> {
-    Some(Post { mono: a.mono, lw: line_weight_factor(p, a.scale) }).filter(Post::active)
+    let sheet = p.floor(&a.floor).is_some_and(|l| l.layout_id.is_some());
+    Some(Post { mono: a.mono, lw: if sheet { 1.0 } else { line_weight_factor(p, a.scale) } }).filter(Post::active)
 }
 
 // ── Ausmass ─────────────────────────────────────────────────────────────────────────────────────
@@ -477,6 +479,20 @@ mod tests {
         assert_eq!(line_weight_factor(&on, 100000.0), 0.5);
         assert_eq!(line_weight_factor(&sample(), 200.0), 1.0);
         assert_eq!(line_weight_factor(&on, f64::NAN), 1.0);
+    }
+
+    #[test]
+    fn blatt_ebene_ohne_strichstaerken_faktor() {
+        let mut p = sample();
+        p.scale_line_weights = Some(true);
+        let mut sheet = p.drawing_levels[0].clone();
+        sheet.id = "blatt".into();
+        sheet.kind = crate::model::DrawingLevelKind::Drawing;
+        sheet.layout_id = Some("L1".into());
+        p.drawing_levels.push(sheet);
+        let args = |floor: &str| super::super::domains::PlanArgs::parse(1.0, &serde_json::json!({"floor": floor, "scale": 1}).to_string()).unwrap();
+        assert_eq!(post_for(&p, &args("blatt")), None, "Papier 1:1: Stärken unverändert");
+        assert!(post_for(&p, &args("eg")).is_some_and(|q| q.lw > 1.0));
     }
 
     #[test]

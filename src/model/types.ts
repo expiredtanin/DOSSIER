@@ -26,7 +26,6 @@ import type {
   LineStyle,
   Opening,
   Project,
-  RichTextDoc,
   Roof,
   SashDef,
   Vec2,
@@ -83,29 +82,6 @@ export interface ImportedText {
   /** Ursprünglicher DXF-Layer-Name (für die Kategorisierung beim 2D-Import). */
   layer?: string;
 }
-
-/**
- * Flaches Patch-Objekt für {@link LayoutAnnotation} — alle Felder ALLER Arten
- * optional (statt eines pro Art unterscheidenden Unions), damit CRUD/Handler
- * unabhängig von der konkreten `kind` bleiben (der Aufrufer setzt ohnehin nur
- * die zur gewählten Annotation passenden Felder).
- */
-export type LayoutAnnotationPatch = Partial<{
-  x1Mm: number;
-  y1Mm: number;
-  x2Mm: number;
-  y2Mm: number;
-  xMm: number;
-  yMm: number;
-  widthMm: number;
-  heightMm: number;
-  text: string;
-  color: string;
-  weightMm: number;
-  doc: RichTextDoc;
-  src: string;
-  opacity: number;
-}>;
 
 // ── Helfer ───────────────────────────────────────────────────────────────
 

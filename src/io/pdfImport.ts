@@ -2,7 +2,7 @@
 // (pdfjs-dist, reine Browser-/Webview-API — kein Tauri-fs nötig) und als
 // Data-URL zurückgegeben. Kein eigener PDF-Rendering-Pfad im Plan/Layout —
 // eine importierte PDF-Seite ist danach ein ganz normales Bild-Element
-// (Drawing2D `{shape:"image"}` bzw. LayoutAnnotation `kind:"image"`).
+// (Drawing2D `{shape:"image"}`, auch auf einem Layout-Blatt).
 
 import * as pdfjsLib from "pdfjs-dist";
 import type { LoadedImageAsset } from "./imageAsset";
