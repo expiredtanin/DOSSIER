@@ -18,7 +18,6 @@ import type {
   BuiltinPaletteBanks,
   Ceiling,
   CeilingType,
-  Column,
   Component,
   DoorType,
   DrawingLevel,
@@ -30,8 +29,6 @@ import type {
   RichTextDoc,
   Roof,
   SashDef,
-  Stair,
-  StairType,
   Vec2,
   Wall,
   WallType,
@@ -202,35 +199,6 @@ export const sashesOfWindowType = (wt: WindowType): SashDef[] => {
 export const glazingPanesOf = (wt: WindowType): 1 | 2 | 3 => {
   if (wt.glazingPanes) return wt.glazingPanes;
   return wt.glazing === "dreifach" ? 3 : wt.glazing === "zweifach" ? 2 : 1;
-};
-
-/** Löst den {@link StairType} einer Treppe auf, oder `undefined`. */
-export const getStairType = (project: Project, stair: Stair): StairType | undefined =>
-  stair.typeId ? (project.stairTypes ?? []).find((t) => t.id === stair.typeId) : undefined;
-
-/** Alle Öffnungen einer Wand (leere Liste, wenn keine oder `openings` fehlt). */
-export const openingsOfWall = (project: Project, wallId: string): Opening[] =>
-  (project.openings ?? []).filter((o) => o.hostWallId === wallId);
-
-/** Menschenlesbarer Standardname einer Öffnung (Fenster/Tür + Breite×Höhe). */
-export const openingLabel = (o: Opening): string =>
-  `${o.kind === "door" ? "Tür" : "Fenster"} ${(o.width * 100).toFixed(0)}×${(
-    o.height * 100
-  ).toFixed(0)}`;
-
-/** Menschenlesbarer Standardname einer Stütze (Profil + Masse in cm). */
-export const columnLabel = (c: Column): string => {
-  if (c.profile.kind === "round") {
-    return `Stütze Ø${(c.profile.radius * 200).toFixed(0)}`;
-  }
-  return `Stütze ${(c.profile.width * 100).toFixed(0)}×${(c.profile.depth * 100).toFixed(0)}`;
-};
-
-/** Liefert ein Bauteil-Material (Component) per ID oder wirft. */
-export const getComponent = (project: Project, id: string): Component => {
-  const c = project.components.find((co) => co.id === id);
-  if (!c) throw new Error(`Unbekanntes Bauteil-Material: ${id}`);
-  return c;
 };
 
 /** Liefert eine Schraffur (HatchStyle) per ID oder wirft. */

@@ -243,10 +243,6 @@ export interface RModel3d {
 
 /** Warmer, neutraler Wand-Grundton (wie render3d default). */
 export const WALL_RGB: RRgb = [0.82, 0.8, 0.76];
-/** Etwas hellerer, kühlerer Ton für Deckenplatten (heben sich von Wänden ab). */
-export const SLAB_RGB: RRgb = [0.86, 0.86, 0.88];
-/** Fallback-Farbe für 2D-Zeichnungen ohne color/lineStyle/Kategorie (wie drawing2DColor in Viewport3D.tsx, "#888888"). */
-export const DRAWING_LINE_FALLBACK_RGB: RRgb = [0x88 / 255, 0x88 / 255, 0x88 / 255];
 
 /** Ignoriere entartete vertikale Ausschnitte (Rundungsrauschen). */
 export const EPS = 1e-4;

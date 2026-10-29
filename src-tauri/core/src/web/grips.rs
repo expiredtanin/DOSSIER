@@ -19,7 +19,7 @@ pub fn doc_grip_commit(h: u32, req_json: &str, key: &str, now_ms: f64) -> String
     let key = (!key.is_empty()).then_some(key);
     let now = if now_ms.is_finite() { now_ms } else { 0.0 };
     let out = with_doc(h, |d| -> Result<String, String> {
-        let res = crate::grips::run(d.root(), &req)?;
+        let res = crate::grips::run(&d.lookup(), &req)?;
         let text = crate::grips::result_json(&res);
         if res.ops.is_empty() {
             return Ok(text);
@@ -78,4 +78,17 @@ pub fn edge_grips(pts: &[f64], closed: bool, bulge: &[f64], use_bulge: bool) -> 
         out.extend([a as f64, b as f64, m.0, m.1, n.0, n.1]);
     }
     out
+}
+
+/// Punkttyp am Punkt `index` einer Polylinie (`crate::polyline_vertex`; `pts = [x0, y0, …]`, `bulge` je
+/// Segment): `[typ, ecke, bogen, spline]` mit typ −1 = gemischt bzw. kein Punkt, 0 Ecke, 1 Bogen,
+/// 2 Spline; danach je Typ 1/0, ob er sich setzen lässt.
+#[wasm_bindgen]
+pub fn polyline_vertex_info(pts: &[f64], bulge: &[f64], closed: bool, index: f64) -> Vec<f64> {
+    use crate::polyline_vertex::{can_set, index_of, type_of, Poly, VertexType};
+    let verts: Vec<(f64, f64)> = pts.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+    let g = Poly { pts: &verts, closed, bulge };
+    let Some(i) = index_of(index, verts.len()) else { return vec![-1.0, 0.0, 0.0, 0.0] };
+    let can = |t| if can_set(&g, i, t) { 1.0 } else { 0.0 };
+    vec![type_of(&g, i).map_or(-1.0, VertexType::code), can(VertexType::Corner), can(VertexType::Arc), can(VertexType::Spline)]
 }

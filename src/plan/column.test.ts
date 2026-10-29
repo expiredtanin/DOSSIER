@@ -5,13 +5,12 @@
  *    Querschnitt.
  *  • 3D (projectToModel3d/emitColumns): eine Stütze wird zu einem Prisma-Mesh
  *    (Rechteck-Box bzw. Kreis-Prisma) mit der erwarteten vertikalen Ausdehnung.
- *  • Vertikale Lage (columnVerticalExtent): Geschoss-Default sowie UK/OK-Anker.
+ *  (Vertikale Lage: Rust-Tests `model/helpers.rs::heights`.)
  */
 
 import { describe, it, expect } from "vitest";
 import { generatePlan } from "./generatePlan";
 import { projectToModel3d } from "./toWalls3d";
-import { columnVerticalExtent } from "../model/wall";
 import { columnFootprint } from "../geometry/column";
 import type { Column, Project } from "../model/types";
 
@@ -122,28 +121,6 @@ describe("Stütze — 3D (projectToModel3d / emitColumns)", () => {
     if (!mesh) throw new Error("kein Prisma-Mesh");
     // 32-Eck × (unten + oben) = 64 Vertices.
     expect(mesh.positions.length).toBe(64 * 3);
-  });
-});
-
-describe("Stütze — vertikale Lage (columnVerticalExtent)", () => {
-  it("nutzt Geschoss-UK + Höhe als Default", () => {
-    const { zBottom, zTop } = columnVerticalExtent(
-      projectWithColumn(rectColumn),
-      rectColumn,
-    );
-    expect(zBottom).toBeCloseTo(0, 6);
-    expect(zTop).toBeCloseTo(3, 6);
-  });
-
-  it("bindet UK/OK an Anker (custom + floor)", () => {
-    const anchored: Column = {
-      ...rectColumn,
-      bottom: { mode: "custom", z: 0.5 },
-      top: { mode: "floor", floorId: "og" }, // baseElevation OG = 3
-    };
-    const { zBottom, zTop } = columnVerticalExtent(projectWithColumn(anchored), anchored);
-    expect(zBottom).toBeCloseTo(0.5, 6);
-    expect(zTop).toBeCloseTo(3, 6);
   });
 });
 

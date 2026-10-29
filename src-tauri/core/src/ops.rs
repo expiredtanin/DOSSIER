@@ -203,21 +203,6 @@ pub fn sanitize_non_finite(v: &mut Value) {
     }
 }
 
-fn op_values_mut(op: &mut Op) -> Vec<&mut Value> {
-    match op {
-        Op::Add { items, .. } => items.iter_mut().collect(),
-        Op::Replace { entity, .. } => vec![entity],
-        Op::SetField { value: Some(v), .. } => vec![v],
-        _ => vec![],
-    }
-}
-
-pub fn sanitize_ops(ops: &mut [Op]) {
-    for op in ops {
-        op_values_mut(op).into_iter().for_each(sanitize_non_finite);
-    }
-}
-
 // ── Validierung ([7]) ────────────────────────────────────────────────────────
 
 /// Prüft eine angewendete Op-Folge (bitgleich zur früheren TS-Fassung `validateOps`): nicht
@@ -228,39 +213,49 @@ pub fn validate(after: &Map<String, Value>, ops: &[Op], had_dup: &dyn Fn(&str) -
     let mut problems = Vec::new();
     let mut dup_checked: HashSet<&str> = HashSet::new();
     for op in ops {
-        match op {
-            Op::Add { collection, .. } | Op::Replace { collection, .. } => {
-                let ents: &[Value] = match op {
-                    Op::Add { items, .. } => items,
-                    Op::Replace { entity, .. } => std::slice::from_ref(entity),
-                    _ => unreachable!(),
-                };
-                for e in ents {
-                    if let Some(bad) = find_non_finite(e, 0) {
-                        problems.push(format!("„{collection}\" {}: {bad} ist nicht endlich.", id_of(e).unwrap_or("undefined")));
-                    }
-                }
-                if matches!(op, Op::Add { .. }) && dup_checked.insert(collection) {
-                    if let Some(list) = after.get(collection) {
-                        if is_id_list(list) && !unique_ids(list.as_array().unwrap()) && !had_dup(collection) {
-                            problems.push(format!("Doppelte ids in „{collection}\"."));
-                        }
-                    }
-                }
+        value_problems(op, had_dup, &mut problems);
+        if let Op::Add { collection, .. } = op {
+            if dup_checked.insert(collection) {
+                problems.extend(add_dup_problem(after, collection, had_dup));
             }
-            Op::SetField { key, value, .. } => {
-                if let Some(bad) = value.as_ref().and_then(non_finite_mark) {
-                    problems.push(format!("Feld „{key}\": {bad} ist nicht endlich."));
-                } else if let Some(v) = value {
-                    if is_entity_list(v) && !unique_ids(v.as_array().unwrap()) && !had_dup(key) {
-                        problems.push(format!("Doppelte ids in „{key}\"."));
-                    }
-                }
-            }
-            _ => {}
         }
     }
     problems
+}
+
+/// Der Teil von [`validate`], der nur die Op selbst liest (vor dem Anwenden prüfbar): nicht endliche
+/// Zahlen in Elementen und Feldwerten, doppelte ids in einer gesetzten Liste.
+pub fn value_problems(op: &Op, had_dup: &dyn Fn(&str) -> bool, problems: &mut Vec<String>) {
+    match op {
+        Op::Add { collection, .. } | Op::Replace { collection, .. } => {
+            let ents: &[Value] = match op {
+                Op::Add { items, .. } => items,
+                Op::Replace { entity, .. } => std::slice::from_ref(entity),
+                _ => unreachable!(),
+            };
+            for e in ents {
+                if let Some(bad) = find_non_finite(e, 0) {
+                    problems.push(format!("„{collection}\" {}: {bad} ist nicht endlich.", id_of(e).unwrap_or("undefined")));
+                }
+            }
+        }
+        Op::SetField { key, value, .. } => {
+            if let Some(bad) = value.as_ref().and_then(non_finite_mark) {
+                problems.push(format!("Feld „{key}\": {bad} ist nicht endlich."));
+            } else if let Some(v) = value {
+                if is_entity_list(v) && !unique_ids(v.as_array().unwrap()) && !had_dup(key) {
+                    problems.push(format!("Doppelte ids in „{key}\"."));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Der Teil von [`validate`] nach dem Anwenden: doppelte ids in der Liste `collection` nach einem `add`.
+pub fn add_dup_problem(after: &Map<String, Value>, collection: &str, had_dup: &dyn Fn(&str) -> bool) -> Option<String> {
+    let list = after.get(collection)?;
+    (is_id_list(list) && !unique_ids(list.as_array().unwrap()) && !had_dup(collection)).then(|| format!("Doppelte ids in „{collection}\"."))
 }
 
 /// Wie [`validate`] mit dem Projekt vor den Ops (für die TS-Fassade `validateOps`).
@@ -291,12 +286,20 @@ pub fn validate_project(root: &Map<String, Value>) -> Vec<String> {
 
 // ── Verlauf ([8]) ────────────────────────────────────────────────────────────
 
-/// Ein Undo-Schritt: Vorwärts-Ops (Redo) und inverse Ops (Undo), beide in Anwendungsreihenfolge.
+/// Ein Schritt des Verlaufs: die Ops, die ihn anwenden (Undo-Stapel: die inversen Ops der Änderung,
+/// Redo-Stapel: die Änderung), in Anwendungsreihenfolge. Die Gegenrichtung entsteht beim Anwenden
+/// (`Document::undo`/`redo`: die Inverse der Inversen) — so hält der Verlauf jedes Element nur einmal.
 #[derive(Clone, Debug, Default)]
 pub struct Step {
-    pub forward: Vec<Op>,
-    pub inverse: Vec<Op>,
+    pub ops: Vec<Op>,
     bytes: usize,
+}
+
+impl Step {
+    pub fn new(ops: Vec<Op>) -> Step {
+        let bytes = ops_bytes(&ops);
+        Step { ops, bytes }
+    }
 }
 
 /// Geschätzter Speicherbedarf eines JSON-Werts (Bytes).
@@ -460,8 +463,8 @@ impl History {
         }
     }
 
-    /// Zeichnet eine angewendete Änderung auf.
-    pub fn record(&mut self, forward: Vec<Op>, inverse: Vec<Op>, key: Option<&str>, now: f64) {
+    /// Zeichnet eine angewendete Änderung auf (`inverse` = die Ops, die sie zurücknehmen).
+    pub fn record(&mut self, inverse: Vec<Op>, key: Option<&str>, now: f64) {
         for s in self.redo.drain(..) {
             self.bytes -= s.bytes;
         }
@@ -475,19 +478,15 @@ impl History {
         match self.undo.back_mut().filter(|_| merge) {
             Some(top) => {
                 self.bytes -= top.bytes;
-                let mut fwd = std::mem::take(&mut top.forward);
-                fwd.extend(forward);
-                top.forward = compact(fwd);
                 let mut inv = inverse;
-                inv.append(&mut top.inverse);
-                top.inverse = compact(inv);
-                top.bytes = ops_bytes(&top.forward) + ops_bytes(&top.inverse);
+                inv.append(&mut top.ops);
+                *top = Step::new(compact(inv));
                 self.bytes += top.bytes;
             }
             None => {
-                let bytes = ops_bytes(&forward) + ops_bytes(&inverse);
-                self.bytes += bytes;
-                self.undo.push_back(Step { forward, inverse, bytes });
+                let s = Step::new(inverse);
+                self.bytes += s.bytes;
+                self.undo.push_back(s);
             }
         }
         while self.undo.len() > self.max_steps || (self.bytes > self.max_bytes && self.undo.len() > 1) {
@@ -611,21 +610,20 @@ mod tests {
     fn verlauf_koalesziert_und_begrenzt() {
         let mut h = History { max_steps: 3, ..Default::default() };
         let op = |n: i32| ops(json!([{"kind":"setField","key":"s","value":n}]));
-        h.record(op(1), op(0), Some("k"), 0.0);
-        h.record(op(2), op(1), Some("k"), 100.0);
+        h.record(op(0), Some("k"), 0.0);
+        h.record(op(1), Some("k"), 100.0);
         assert_eq!(h.undo_depth(), 1);
-        h.record(op(3), op(2), Some("k"), 600.0);
+        h.record(op(2), Some("k"), 600.0);
         assert_eq!(h.undo_depth(), 2);
-        h.record(op(4), op(3), None, 700.0);
-        h.record(op(5), op(4), None, 800.0);
+        h.record(op(3), None, 700.0);
+        h.record(op(4), None, 800.0);
         assert_eq!(h.undo_depth(), 3);
         h.begin_group();
-        h.record(op(6), op(5), None, 900.0);
-        h.record(op(7), op(6), Some("x"), 901.0);
+        h.record(op(5), None, 900.0);
+        h.record(op(6), Some("x"), 901.0);
         h.end_group();
         assert_eq!(h.undo_depth(), 3);
         let s = h.pop_undo().unwrap();
-        assert_eq!(s.inverse, op(5));
-        assert_eq!(s.forward, op(7));
+        assert_eq!(s.ops, op(5));
     }
 }

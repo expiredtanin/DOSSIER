@@ -1,7 +1,7 @@
 // Geometrie-Helfer für Öffnungen (Fenster/Türen) — reine Funktionen, die eine
 // `Opening` relativ zu ihrer Wirts-Wand in konkrete Welt-Geometrie auflösen:
-//   • die Öffnungs-Lücke entlang der Wandachse (from/to in Metern),
-//   • die vertikale Lage (UK/OK der Öffnung, absolut in Metern).
+//   • die Öffnungs-Lücke entlang der Wandachse (from/to in Metern), die Pfosten.
+//   (Die vertikale Lage rechnet der Kern: `model3d.rs`/`plan/section.rs`, UK/OK der Wand: `model/helpers.rs::heights`.)
 //
 // Da JEDE Größe aus der aktuellen Wandachse (`wall.start`/`wall.end`) abgeleitet
 // wird, folgt eine Öffnung ihrer Wand automatisch, sobald die Wand bewegt wird —
@@ -9,9 +9,8 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { Opening, Project, Vec2, Wall } from "../model/types";
-import { along, leftNormal, normalize, sub } from "../model/geometry";
-import { wallVerticalExtent } from "../model/wall";
+import type { Opening, Vec2, Wall } from "../model/types";
+import { along } from "../model/geometry";
 
 /** Achslänge einer Wand (Meter). */
 export function wallAxisLength(wall: Wall): number {
@@ -34,29 +33,6 @@ export function openingInterval(
   return { from, to };
 }
 
-/**
- * Vertikale Lage einer Öffnung (absolute Z-Werte in Metern) relativ zur Wand-UK.
- * Türen sitzen am Boden (sillHeight 0); Fenster ab Brüstung. Die OK wird auf die
- * Wand-OK geklemmt, damit die Öffnung nie über den Wandkopf hinausragt.
- */
-export function openingVerticalExtent(
-  project: Project,
-  wall: Wall,
-  o: Opening,
-): { zBottom: number; zTop: number } {
-  const { zBottom, zTop } = wallVerticalExtent(project, wall);
-  const sill = Math.max(0, o.sillHeight);
-  const oBottom = zBottom + sill;
-  const oTop = Math.min(zTop, oBottom + o.height);
-  return { zBottom: oBottom, zTop: oTop };
-}
-
-/** Einheits-Laufrichtung (u) und linke Normale (n) der Wandachse. */
-export function wallAxisFrame(wall: Wall): { u: Vec2; n: Vec2 } {
-  const u = normalize(sub(wall.end, wall.start));
-  return { u, n: leftNormal(u) };
-}
-
 /** Die beiden Pfosten-Punkte (auf der Achse) einer Öffnung im Grundriss. */
 export function openingJambs(
   wall: Wall,
@@ -70,9 +46,3 @@ export function openingJambs(
   };
 }
 
-/** Mittelpunkt einer Öffnung im Grundriss (Achse) — für HUD/Auswahl-Anker. */
-export function openingCenter(wall: Wall, o: Opening): Vec2 | null {
-  const iv = openingInterval(wall, o);
-  if (!iv) return null;
-  return along(wall.start, wall.end, (iv.from + iv.to) / 2);
-}

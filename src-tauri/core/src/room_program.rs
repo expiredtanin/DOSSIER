@@ -30,13 +30,7 @@ use crate::model::{Project, SiaCategory};
 
 pub const DEFAULT_TOLERANCE: f64 = 0.05;
 
-fn finite(v: f64) -> f64 {
-    if v.is_finite() {
-        v
-    } else {
-        0.0
-    }
-}
+use crate::jsnum::or_zero as finite;
 
 fn cat_name(c: SiaCategory) -> &'static str {
     match c {

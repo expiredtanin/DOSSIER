@@ -12,16 +12,7 @@ pub const PEN_FALLBACK_COLOR: &str = "#9aa0a6";
 /// Strichstärke (mm) eines Stifts ohne Eintrag.
 pub const PEN_FALLBACK_WEIGHT: f64 = 0.18;
 
-/// JS-Wahrheitswert (`if (x.colorPenId)`).
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0 && !f.is_nan()),
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(_) => true,
-    }
-}
+use crate::grips::truthy;
 
 /// Schlüssel des Stifts als Objekt-Schlüssel (JS: `pens[penId]`, eine Zahl wird zu Text).
 fn key_of(v: &Value) -> Option<String> {

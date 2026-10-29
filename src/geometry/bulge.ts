@@ -121,21 +121,6 @@ export function arcThroughPoints(a: Vec2, through: Vec2, b: Vec2): ArcParams | n
 }
 
 /**
- * Bulge-Wert für den Teilbogen desselben Kreises (center, r) von Winkel `aFrom` zu `aTo`, in der
- * durch `sweepSign` vorgegebenen Schwenkrichtung (+1 = CCW, −1 = CW), z. B. beim Zuschneiden/
- * Offsetten eines Bogen-Segments.
- */
-export function bulgeBetweenAngles(
-  center: Vec2,
-  r: number,
-  aFrom: number,
-  aTo: number,
-  sweepSign: 1 | -1,
-): number {
-  return core().bulge_between_angles(center.x, center.y, r, aFrom, aTo, sweepSign);
-}
-
-/**
  * Kreisbogen durch zwei Endpunkte `a`→`b` mit vorgegebenem Radius `r` (Methode „Start-Ende-
  * Radius"). `near` (typischerweise der Cursor) wählt die Seite der Sehne; es entsteht immer der
  * KLEINERE der beiden möglichen Bögen (Sehnenwinkel ≤ 180°). `null`, wenn `r` kleiner als die

@@ -19,8 +19,6 @@
 import type { Stair, Vec2 } from "../model/types";
 import { core } from "../engine/coreWasm";
 
-/** SIA-nahe Schrittregel: gute Steigungshöhe ≈ 0.17 m, Auftritt ≈ 0.29 m. */
-export const IDEAL_RISER = 0.17;
 export const IDEAL_TREAD = 0.29;
 export const MIN_STEPS = 2;
 

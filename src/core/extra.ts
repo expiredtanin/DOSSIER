@@ -18,7 +18,7 @@ export { exportObj, exportStl, exportGlb, exportGltf } from "../export/exportMes
 export { exportProjectStep } from "../export/exportStep";
 export { planToSvgString } from "../export/planToSvgString";
 export { setWasmBytesProvider } from "../engine/wasmSource";
-export { initCore, coreReady } from "../engine/coreWasm";
+export { initCore } from "../engine/coreWasm";
 export { applyOps, validateProject, validateOps } from "./ops";
 export { projectWarnings } from "./ops";
 export type { CoreOp } from "./ops";

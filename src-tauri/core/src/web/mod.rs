@@ -15,7 +15,6 @@ mod stair;
 mod room_area;
 mod room_boundary;
 mod polygon_holes;
-mod drawing2d_3d;
 mod plan_buf;
 mod project_format;
 mod gpu_compile;
@@ -47,10 +46,4 @@ use wasm_bindgen::prelude::wasm_bindgen;
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
-}
-
-/// Version des Kern-Moduls (für Diagnose/Startprotokoll).
-#[wasm_bindgen]
-pub fn core_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
 }

@@ -70,37 +70,6 @@ export async function extrudeCircle(
   return JSON.parse(json) as ExtrudedMesh;
 }
 
-export type BooleanOp = "union" | "difference" | "intersection";
-
-export interface BooleanMeshResult {
-  positions: number[];
-  indices: number[];
-  empty: boolean;
-}
-
-/** Boolesche Operation zweier Dreiecks-Meshes (Mesh-Ebenen-CSG via csgrs,
- *  truck-Integration Phase 4). Beide Meshes müssen konsistent nach außen
- *  gewundene Dreiecke haben (Rechte-Hand-Regel) — sonst liefert csgrs ein
- *  falsches Ergebnis, ohne das zu erkennen. */
-export async function booleanMesh(
-  a: ExtrudedMesh,
-  b: ExtrudedMesh,
-  op: BooleanOp,
-): Promise<BooleanMeshResult> {
-  const json = await guarded((m) =>
-    m.boolean_mesh(
-      JSON.stringify({
-        a_positions: a.positions,
-        a_indices: a.indices,
-        b_positions: b.positions,
-        b_indices: b.indices,
-        op,
-      }),
-    ),
-  );
-  return JSON.parse(json) as BooleanMeshResult;
-}
-
 // ── B-Rep-Körper (truck 0.6): Spezifikation → Mesh / STEP ────────────────────
 
 /** Ein Loft-Schnitt: Höhe + geschlossener Ring [x0,y0,x1,y1,…]. */

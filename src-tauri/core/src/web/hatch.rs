@@ -75,16 +75,3 @@ pub fn hatch_line_family_flat(poly: &[f64], angle_rad: f64, spacing_m: f64, offs
     segs_out(&hatch::hatch_line_family(&pts(poly), angle_rad, spacing_m, offset_m, v2(ax, ay)))
 }
 
-/// `len_min`/`len_max` NaN = nicht gesetzt.
-#[wasm_bindgen]
-pub fn scatter_strokes_flat(
-    poly: &[f64],
-    cell: f64,
-    base_angle_rad: f64,
-    seed: f64,
-    stroke_len: f64,
-    len_min: f64,
-    len_max: f64,
-) -> Vec<f64> {
-    runs_out(&hatch::scatter_strokes(&pts(poly), cell, base_angle_rad, seed, stroke_len, opt(len_min), opt(len_max)))
-}

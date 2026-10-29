@@ -109,6 +109,19 @@ pub fn js_number(x: f64) -> String {
     format!("{sign}{body}")
 }
 
+/// JS-`String(v)` eines JSON-Werts (Meldungen, Anzeige-Texte).
+pub fn js_string(v: &serde_json::Value) -> String {
+    use serde_json::Value;
+    match v {
+        Value::Null => "null".into(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.as_f64().map_or(n.to_string(), js_number),
+        Value::String(s) => s.clone(),
+        Value::Array(a) => a.iter().map(|x| if x.is_null() { String::new() } else { js_string(x) }).collect::<Vec<_>>().join(","),
+        Value::Object(_) => "[object Object]".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

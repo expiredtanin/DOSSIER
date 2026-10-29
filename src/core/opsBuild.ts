@@ -9,7 +9,7 @@
 // {@link opsMutation} die Ops mit — `setProject` nimmt dann die Ops ohne Differenz.
 
 import type { Project } from "../model/types";
-import { applyOps } from "./ops";
+import { applyOps, indexOfId } from "./ops";
 import type { CoreOp } from "./ops";
 
 /** Projekt-Felder, die Listen von Elementen mit `id` sind (walls, drawings2d, rooms, …). */
@@ -34,7 +34,9 @@ export function itemsOf<K extends EntityCollection>(p: Project, collection: K): 
 
 /** Element `id` aus `collection` (erstes Vorkommen). */
 export function findItem<K extends EntityCollection>(p: Project, collection: K, id: string): EntityOf<K> | undefined {
-  return itemsOf(p, collection).find((e) => (e as { id: string }).id === id);
+  const list = itemsOf(p, collection);
+  const i = indexOfId(list, id);
+  return i < 0 ? undefined : list[i];
 }
 
 /** Ersetzt ein Element (gleiche id, Position bleibt). */

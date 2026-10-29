@@ -11,13 +11,7 @@ use crate::flat_read::signed_area;
 /// Anzahl der SIA-416-Blattkategorien (Reihenfolge: `room_area::CATEGORIES`).
 pub const CATEGORIES: usize = crate::room_area::CATEGORIES.len();
 
-fn finite(v: f64) -> f64 {
-    if v.is_finite() {
-        v
-    } else {
-        0.0
-    }
-}
+use crate::jsnum::or_zero as finite;
 
 /// Volumen (m³): Grundfläche (Polygon `points` oder Kreis mit Radius `circle_r`, NaN = kein
 /// Kreis), Höhe, Verjüngung `taper` (0 = Prisma, 1 = Spitze; ausserhalb geklemmt, NaN = 0).

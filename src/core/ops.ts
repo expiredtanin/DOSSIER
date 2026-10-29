@@ -37,25 +37,79 @@ export type CoreOp =
 
 /**
  * Wendet eine Op-Folge rein an (kein Zugriff auf Store/UI). Unberührte Listen und Elemente behalten
- * ihre Identität. Innerhalb eines Aufrufs wird jede Liste höchstens einmal kopiert und für
- * `replace`-Serien (Auswahl verschieben: hunderte Elemente) über einen id-Index angesprochen —
- * Ergebnis gleich der einfachen Fassung (Test `ops.apply.test.ts`).
+ * ihre Identität. Innerhalb eines Aufrufs wird jede Liste höchstens einmal kopiert. `replace` findet
+ * sein Element über `hits` (je Op die Position, die der Kern beim Anwenden getroffen hat,
+ * `ProjectDocument`; wird nachgeprüft) oder sonst über {@link indexOfId} — ein Griff-Schritt an einer
+ * grossen Liste sucht so nicht linear. Ergebnis gleich der einfachen Fassung (Test `ops.apply.test.ts`).
  */
-export function applyOps(project: Project, ops: readonly CoreOp[]): Project {
+export function applyOps(project: Project, ops: readonly CoreOp[], hits?: ArrayLike<number>): Project {
   if (ops.length === 0) return project;
-  const st: ApplyState = { cur: { ...(project as unknown as Record<string, unknown>) }, owned: new Set(), index: new Map() };
-  for (const op of ops) applyOne(st, op);
+  const st: ApplyState = { cur: { ...(project as unknown as Record<string, unknown>) }, owned: new Set(), hit: -1 };
+  for (let k = 0; k < ops.length; k++) {
+    st.hit = hits?.[k] ?? -1;
+    applyOne(st, ops[k]);
+  }
   return st.cur as unknown as Project;
 }
 
 /** Zustand eines `applyOps`-Aufrufs: `cur` ist eine eigene Kopie der obersten Ebene; Listen in
- *  `owned` wurden in diesem Aufruf neu angelegt (dürfen verändert werden), `index` = id → Position
- *  (erstes Vorkommen) solcher Listen. */
+ *  `owned` wurden in diesem Aufruf neu angelegt (dürfen verändert werden); `hit` = vermutete Position
+ *  des Elements der laufenden `replace`-Op (−1 = keine). */
 interface ApplyState {
   cur: Record<string, unknown>;
   owned: Set<string>;
-  /** `null` = einmal linear gesucht, der Index wird bei der nächsten Suche gebaut. */
-  index: Map<string, Map<string, number> | null>;
+  hit: number;
+}
+
+// ── id-Index der Listen ──────────────────────────────────────────────────────
+
+/**
+ * id → Position (erstes Vorkommen) je Liste, für Suchen ohne Positions-Hinweis des Kerns (Op-Bauer,
+ * `findItem`). Listen der Leseansicht ändern sich nie (jede Änderung legt eine neue an); eine Kopie mit
+ * denselben Positionen (`replace`, `add` am Ende) übernimmt den Index der Vorlage samt der neuen ids.
+ * Teilen sich so mehrere Listen einen Index, enthält er die ids jeder von ihnen; ein Treffer wird an
+ * der Liste nachgeprüft (sonst lineare Suche), kein Eintrag heisst „nicht enthalten". Der Index kostet
+ * in V8 etwa das Zwanzigfache einer linearen Suche (20 000 Elemente ≈ 6 ms): gebaut wird er erst bei
+ * der zweiten Suche in derselben Listen-Linie (`null` = einmal linear gesucht).
+ */
+const ID_INDEX = new WeakMap<readonly unknown[], Map<unknown, number> | null>();
+
+/** Ab dieser Länge wird ein Index gebaut (darunter ist die lineare Suche billiger). */
+const INDEX_MIN_LEN = 32;
+
+/** Position des ersten Elements mit `id` in `list` (−1 = keins); Index je Listen-Linie gemerkt. */
+export function indexOfId(list: readonly unknown[], id: unknown): number {
+  const linear = () => list.findIndex((e) => (e as Entity | null)?.id === id);
+  if (list.length < INDEX_MIN_LEN) return linear();
+  let idx = ID_INDEX.get(list);
+  if (idx === undefined) {
+    ID_INDEX.set(list, null);
+    return linear();
+  }
+  if (idx === null) {
+    idx = new Map();
+    for (let i = 0; i < list.length; i++) {
+      const k = (list[i] as Entity | null)?.id;
+      if (!idx.has(k)) idx.set(k, i);
+    }
+    ID_INDEX.set(list, idx);
+  }
+  const i = idx.get(id);
+  if (i === undefined) return -1;
+  return (list[i] as Entity | null)?.id === id ? i : linear();
+}
+
+/** `copy` hat dieselben Positionen wie `src` (plus Elemente am Ende): Index (bzw. Such-Marke) übernehmen. */
+function shareIndex(src: readonly unknown[], copy: readonly unknown[]): void {
+  const idx = ID_INDEX.get(src);
+  if (idx === undefined) return;
+  if (idx !== null) {
+    for (let i = src.length; i < copy.length; i++) {
+      const k = (copy[i] as Entity | null)?.id;
+      if (!idx.has(k)) idx.set(k, i);
+    }
+  }
+  ID_INDEX.set(copy, idx);
 }
 
 function listOf(cur: Record<string, unknown>, collection: string): Entity[] {
@@ -63,11 +117,10 @@ function listOf(cur: Record<string, unknown>, collection: string): Entity[] {
   return Array.isArray(v) ? (v as Entity[]) : [];
 }
 
-/** Setzt `collection` auf eine neue (eigene) Liste; ein vorhandener Index verfällt. */
+/** Setzt `collection` auf eine neue (eigene) Liste. */
 function putList(st: ApplyState, collection: string, list: Entity[]): void {
   st.cur[collection] = list;
   st.owned.add(collection);
-  st.index.delete(collection);
 }
 
 function applyOne(st: ApplyState, op: CoreOp): void {
@@ -76,7 +129,6 @@ function applyOne(st: ApplyState, op: CoreOp): void {
     case "setField": {
       // Der Wert gehört dem Aufrufer: nie verändern.
       st.owned.delete(op.key);
-      st.index.delete(op.key);
       if (op.value !== undefined && op.at !== undefined && !(op.key in cur)) {
         // Neues Feld an Position `at` (wie `shift_insert` im Kern).
         const entries = Object.entries(cur);
@@ -91,7 +143,9 @@ function applyOne(st: ApplyState, op: CoreOp): void {
     case "add": {
       const list = listOf(cur, op.collection);
       const at = op.at === undefined ? list.length : Math.max(0, Math.min(list.length, op.at));
-      putList(st, op.collection, [...list.slice(0, at), ...op.items, ...list.slice(at)]);
+      const next = [...list.slice(0, at), ...op.items, ...list.slice(at)];
+      if (at === list.length) shareIndex(list, next);
+      putList(st, op.collection, next);
       return;
     }
     case "replace": {
@@ -99,30 +153,17 @@ function applyOne(st: ApplyState, op: CoreOp): void {
       let list: Entity[];
       if (st.owned.has(c)) list = cur[c] as Entity[];
       else {
-        list = listOf(cur, c).slice();
+        const src = listOf(cur, c);
+        list = src.slice();
+        shareIndex(src, list);
         putList(st, c, list);
       }
-      // Erste Suche in dieser Liste linear (ein Drag-Schritt), ab der zweiten über den Index.
-      let idx = st.index.get(c);
-      let at: number | undefined;
-      if (idx === undefined) {
-        st.index.set(c, null);
-        const i = list.findIndex((e) => e?.id === op.entity.id);
-        at = i < 0 ? undefined : i;
-      } else {
-        if (idx === null) {
-          idx = new Map();
-          for (let i = 0; i < list.length; i++) {
-            const id = list[i]?.id;
-            if (!idx.has(id)) idx.set(id, i);
-          }
-          st.index.set(c, idx);
-        }
-        at = idx.get(op.entity.id);
-      }
-      if (at === undefined) {
-        idx?.set(op.entity.id, list.length);
+      const h = st.hit;
+      const at = h >= 0 && h < list.length && list[h]?.id === op.entity.id ? h : indexOfId(list, op.entity.id);
+      if (at < 0) {
         list.push(op.entity);
+        const idx = ID_INDEX.get(list);
+        if (idx && !idx.has(op.entity.id)) idx.set(op.entity.id, list.length - 1);
       } else list[at] = op.entity;
       return;
     }

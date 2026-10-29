@@ -654,9 +654,9 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Last; Stand nach dem Nachtrag unten): Wand-Griff an Position 10/1500/2990 32/150/315 µs → 28/116/262 µs (dominiert von der
     linearen id-Suche), Polylinien-Griff 78 → 58 µs, Polylinien-Kante 72 → 57 µs, Wand verschieben 131 → 115 µs, Griff an einer
     5000-Punkte-Polylinie 13,7 → 9,1 ms; Griff-Liste der 5000-Punkte-Polylinie 2,7 → 1,1 ms (kleine Polylinie 2 µs, gleich).
-    Nicht in der Tauri-App geprüft (vitest/Linux, e2e im Browser). Offen: `setPolylineVertexType`
+    Nicht in der Tauri-App geprüft (vitest/Linux, e2e im Browser). ~~Offen: `setPolylineVertexType`
     (rechnet in `geometry/polylineVertexType.ts`), die lineare id-Suche je Mausschritt (im Kern beim Rechnen und beim Commit,
-    in TS in `applyOps`) und der Commit grosser Polylinien (~9 ms bei 5000 Punkten: Verlauf/Prüfung in `document.rs`/`ops.rs`).
+    in TS in `applyOps`) und der Commit grosser Polylinien (~9 ms bei 5000 Punkten: Verlauf/Prüfung in `document.rs`/`ops.rs`).~~ Erledigt 29.10., s. „Leistung nach der Zusammenführung“.
     **Objekt-Info im Kern (29.10.)** — erledigt damit (4): `selection_info.rs` (vorher `deriveSelection` in `state/selectionInfo.ts`,
     ~800 Zeilen Rechnung) liefert als Wurzel-Abfrage `selectionInfo` den Kontrakt `Selection` für das erste gewählte Element
     (Vorrang wie bisher): effektive Farbe/Strichstärke/Schraffur/Vorder-/Hintergrund (Element → Linienstil → Ebene → Bauteil),
@@ -726,6 +726,50 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     löschen (`editors/splitJoin.ts`, App) — dort ersetzt `cutSegment` per `replace` mit NEUER id (hängt an statt
     zu ersetzen; beim Port prüfen); Fang-Kandidaten aus dem Modell (`tools/snapping.ts`: `baseSegments`,
     Kreise, Raum-Anker; Nahmodus ab 2000 Zeichnungen) → `snap.rs`.
+    **Leistung nach der Zusammenführung (29.10.)** — erledigt damit die Offen-Punkte der Griffe/Objekt-Info:
+    (a) **id-Suche indiziert:** der Positions-Index des Dokuments (`PosCache`) wird ab der ersten Suche gebaut (Listen
+    ≥ 32), überlebt `add` am Ende und ist über `Lookup` (`Document::lookup`) auch für die Wurzel-Abfragen da — Griffe
+    (`grips::run`) und Objekt-Info (`selection_info::derive`) suchen nicht mehr linear; die Fassade schickt keine
+    Lage-Hinweise mehr (`at` entfällt, TS-`findIndex` je Darstellung weg). TS-`applyOps` bekommt je Op die vom Kern
+    getroffene Position (`doc_last_hits` nach Commit/Griff/Undo/Redo, nachgeprüft) und sucht nicht mehr; ohne Hinweis
+    (`findItem`) hilft `indexOfId` (Index je Listen-Linie, ab der zweiten Suche — ein `Map` über 20 000 ids kostet in
+    V8 ~6 ms, das 20-fache einer linearen Suche). (b) **Commit ohne Kopie:** die Ops gehen ins Dokument über (Prüfung
+    der Werte vor, der doppelten ids nach dem Anwenden, `ops::value_problems`/`add_dup_problem`); der Verlauf hält nur
+    noch die inversen Ops, den Redo-Schritt liefert das Rückgängigmachen selbst (Inverse der Inversen) — halber
+    Verlaufsspeicher, keine Vorwärts-Kopie/-Verdichtung je Mausschritt. Nativ: Commit einer 5000-Punkte-Polylinie
+    4,1 → 1,5 ms (`messung_grosse_polylinie`). (c) **Dach-Firsthöhe** nach Inhalt gemerkt (Hash + Vergleich, bis 4096
+    Einträge) statt der letzten 16 Dächer. (d) **`setPolylineVertexType` im Kern:** `polyline_vertex.rs` (Ecke/Bogen/
+    Spline, `tan` neu in `jsnum`), Griff-Änderung `vertexType`, Kontextmenü über `polyline_vertex_info`; TS-Rechnung
+    gelöscht (`withVertexType`). Gleichheit (einmalig, Test gelöscht): 143 880 Fälle (offene/geschlossene Polylinien,
+    doppelte/kollineare Punkte, fehlende Bögen, Massstäbe 1e-4…1e5) bitgleich, `vertexTypeOf`/`canSetVertexType` gleich.
+    Abweichung (gewollt): keine Änderung → keine Op (vorher ein leerer Undo-Schritt), ein Index ohne Punkt ändert nichts.
+    Messung (vitest/Store, 3000 Wände + 20 000 Zeichnungen + 40 Dächer, `objectInfo.perf.test.ts`, alt/neu abwechselnd,
+    Container stark unter Last — Werte streuen ±50 %): Objekt-Info Zeichnung (Pos. 10 000) 257–304 → 10–15 µs, Wand
+    91–316 → 36–209 µs (ruhig gemessen: 47 µs, davon Kern 36 µs), Dach (40 im Wechsel) 44–109 → 40–102 µs; Griff an
+    Zeichnung 15 000 1,9–4,9 ms → 0,19–0,34 ms, Wand an Pos. 1500/2990 129–418 → 55–122 µs; Griff 5000-Punkte-Polylinie
+    14–16 → 6,6–10 ms (Rest: JSON 200 KB hin und Parse in TS ≈ 2 ms, neue Polylinie im Kern); Punkttyp kleine Polylinie
+    ~1 ms → 0,2–0,5 ms, 5000 Punkte 18–22 → 9–16 ms; Auswahl (300 Wände) verschieben unverändert (5–11 ms). Bleibt:
+    die Kopie der Liste in TS je Änderung (`slice` von 20 000 Elementen ≈ 0,14 ms) — Preis der unveränderlichen
+    Leseansicht. Nicht in der Tauri-App geprüft.
+    **Aufräumen nach den parallelen Ports (29.10.):** Suche nach toten Exporten (Skript über alle `src/**/*.ts`:
+    Export ohne Nutzer ausser Tests/Fassade) und toten Bindungen (`#[wasm_bindgen]` ohne TS-Aufrufer), dazu
+    `cargo clippy` (dead_code, auch Web-Build). Gelöscht (TS): `wallVerticalExtent`/`ceilingVerticalExtent`/
+    `columnVerticalExtent` (`model/wall.ts`, Aufrufer `toSection`/`voids`/`sectionOpenings`/`toElevation` gab es
+    nicht mehr; Tests über die Kern-Abfrage `verticalExtents` bzw. Rust-Tests), `openingVerticalExtent`/
+    `wallAxisFrame`/`openingCenter` (`geometry/opening.ts`), `isValidOutline`/`outlineCentroid`, `getStairType`/
+    `openingsOfWall`/`openingLabel`/`columnLabel`/`getComponent` (`types.ts`), `MONO_INK`/`WALL_FALLBACK_MM`,
+    `scatterStrokes`, `ShaderProgram`, `SLAB_RGB`/`DRAWING_LINE_FALLBACK_RGB`, `booleanMesh` samt Typen,
+    `meshBytesToImportedMeshes`, `IDEAL_RISER`, `bulgeBetweenAngles`, `pointSegDistPx`, `coreReady`. Bindungen:
+    `doc_query`, `core_version`, `drawing3d_line_verts`/`drawing3d_pick_segs` (`web/drawing2d_3d.rs`),
+    `bulge_between_angles`, `scatter_strokes_flat`. Rust zusammengelegt: Höhenregeln (UK/OK von Wand/Stütze/Decke,
+    Geschoss-Bindung) einmal in `model/helpers.rs::heights` für typisierte Sicht und rohe Wurzel (`selection_info.rs`);
+    JS-Wahrheitswert `truthy` (vorher je eine Kopie in `geo_translate`/`layers`/`pens`) aus `grips`; `finite` →
+    `jsnum::or_zero` (Kopien in `kennzahlen`/`flaechen`/`room_program`); JS-`String(v)` einmal in
+    `js_fmt::js_string` (vorher `project_format` und `selection_info`, letztere ohne Listen); `arr` aus `grips`.
+    Bleibt bewusst: TS-Fassaden,
+    die nur Tests nutzen (`solidVolume`, `withoutHoles`, `straightSkeleton`, `stairCut`, `triangulate`,
+    Schraffur-Clipping in `glPlanHatch.ts`, `subtractRings` — prüfen Kern-Bindungen von TS aus), mehrere
+    `signed_area`/`bbox`-Varianten in Rust (verschiedene Punkt-Typen, teils mit JS-Semantik `jsnum::min`).
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

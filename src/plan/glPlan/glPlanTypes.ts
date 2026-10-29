@@ -16,30 +16,6 @@
 /** RGBA-Farbe, Komponenten in [0,1]. */
 export type Rgba = [number, number, number, number];
 
-/** Shader-Programm mit kompiliertem Programm + Attribut-/Uniform-Orten. */
-export interface ShaderProgram {
-  program: WebGLProgram;
-  attribs: {
-    position?: GLint;
-    /** Bildschirm-Raum-Miter-Bisektor (Einheits-Versatzrichtung) für Linien. */
-    normal?: GLint;
-    /** Seite der Linie: +1 oder -1. */
-    side?: GLint;
-    /** Miter-Längenfaktor 1/cos(θ/2) (1 = gerade). */
-    miter?: GLint;
-  };
-  uniforms: {
-    viewProj?: WebGLUniformLocation | null;
-    color?: WebGLUniformLocation | null;
-    /** Basis-Strichbreite in Geräte-Pixeln (bei strokeScale=1). */
-    strokePx?: WebGLUniformLocation | null;
-    /** Zoom-Skalierung der Strichbreite (>1 = reingezoomt → dicker, Papier). */
-    strokeScale?: WebGLUniformLocation | null;
-    /** Zeichenpuffer-Größe in Geräte-Pixeln [w,h] (px→Clip-Umrechnung). */
-    viewportPx?: WebGLUniformLocation | null;
-  };
-}
-
 /** Ein Zeichen-Batch: zusammenhängender Index-Bereich mit einer Farbe. */
 export interface FillBatch {
   startIndex: number;

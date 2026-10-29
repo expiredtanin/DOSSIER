@@ -14,6 +14,7 @@
 //! Abweichung (gewollt): Ein Griff-Index, unter dem kein Punkt liegt (negativ, gebrochen, zu gross), ist
 //! keine Änderung — TS warf dort beim Lesen von `undefined` einen Fehler.
 
+pub use crate::document::Lookup;
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::ops::{id_of, Op};
@@ -160,7 +161,7 @@ fn calc(f: f64) -> Pass {
     Pass { f, v: Some(js_num(f)) }
 }
 
-pub(crate) fn arr(v: Option<&Value>) -> &[Value] {
+pub fn arr(v: Option<&Value>) -> &[Value] {
     v.and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
 }
 
@@ -266,6 +267,8 @@ pub struct Request {
     thickness: N,
     pt: [N; 2],
     delta: [N; 2],
+    /// Punkttyp der Polylinie (`vertexType`: "corner" | "arc" | "spline").
+    vertex_type: Option<String>,
 }
 
 impl Request {
@@ -343,19 +346,21 @@ pub fn result_json(r: &GripResult) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
-/// Führt eine Griff-Änderung aus (`req.op` wählt die Art, s. `src/state/gripOps.ts`).
-pub fn run(root: &Map<String, Value>, req: &Request) -> Result<GripResult, String> {
+/// Führt eine Griff-Änderung aus (`req.op` wählt die Art, s. `src/state/gripOps.ts`). Das Element
+/// sucht `lk` (im Dokument über den Positions-Index, je Mausschritt keine lineare Suche).
+pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
+    let root = lk.root;
     let r = req;
     let op = req.op.as_str();
     let patch = |coll: &str, id: Option<&str>, f: &dyn Fn(&Value) -> Option<Value>| -> Vec<Op> {
-        id.and_then(|id| find(root, coll, id)).and_then(f).map(|e| vec![replace(coll, e)]).unwrap_or_default()
+        id.and_then(|id| lk.find(coll, id)).and_then(f).map(|e| vec![replace(coll, e)]).unwrap_or_default()
     };
     Ok(match op {
         "moveGrip" | "moveBy" | "moveEdge" => {
             let (did, wid) = (r.s("drawingId"), r.s("wallId"));
-            // Jedes Element nur einmal suchen (lineare Suche, je Mausschritt).
-            let d = did.and_then(|i| find(root, "drawings2d", i));
-            let w = wid.and_then(|i| find(root, "walls", i));
+            // Jedes Element nur einmal suchen.
+            let d = did.and_then(|i| lk.find("drawings2d", i));
+            let w = wid.and_then(|i| lk.find("walls", i));
             // Objekt-Sperre: gesperrte Elemente lassen sich anwählen, aber nicht ziehen.
             if d.is_some_and(|d| truthy(field(d, "locked"))) || w.is_some_and(|w| truthy(field(w, "locked"))) {
                 return Ok(GripResult::default());
@@ -453,9 +458,16 @@ pub fn run(root: &Map<String, Value>, req: &Request) -> Result<GripResult, Strin
             let (seg, (x, y)) = (r.n("seg"), r.p("pt"));
             patch("drawings2d", r.s("id"), &|d| insert_point(d, seg, x, y)).into()
         }
+        "vertexType" => {
+            let Some(t) = req.vertex_type.as_deref().and_then(crate::polyline_vertex::VertexType::parse) else {
+                return Ok(GripResult::default());
+            };
+            let index = r.n("index");
+            patch("drawings2d", r.s("id"), &|d| vertex_type(d, index, t)).into()
+        }
         "deletePoint" => {
             let index = r.n("index");
-            let Some(d) = r.s("id").and_then(|i| find(root, "drawings2d", i)) else { return Ok(GripResult::default()) };
+            let Some(d) = r.s("id").and_then(|i| lk.find("drawings2d", i)) else { return Ok(GripResult::default()) };
             let g = field(d, "geom").unwrap_or(&Value::Null);
             if field(g, "shape").and_then(Value::as_str) != Some("polyline") {
                 return Ok(GripResult::default());
@@ -927,6 +939,42 @@ fn roof_grip(r: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
 /// Punkt in Segment `seg` einer Polylinie einfügen. Ein Bogen wird exakt über die Kreisgeometrie in der
 /// Winkel-Mitte geteilt (wie `kernel2d` Bogen-Segmente zuschneidet); eine Näherung über tessellierte
 /// Punkte wäre zu ungenau. Die Bulge-Liste wird nur mitgeführt, wenn es eine gab.
+/// Punkttyp `t` am Punkt `index` einer Polylinie (`setPolylineVertexType`, `polyline_vertex.rs`): die
+/// Bulges der beiden anliegenden Segmente; `bulge` steht danach am Ende der Geometrie und fällt weg,
+/// wenn alle Segmente gerade sind. Gesperrt, keine Polylinie, Index ohne Punkt oder keine Änderung →
+/// None (kein leerer Undo-Schritt).
+fn vertex_type(d: &Value, index: f64, t: crate::polyline_vertex::VertexType) -> Option<Value> {
+    use crate::polyline_vertex::{index_of, with_type, Poly};
+    if truthy(field(d, "locked")) {
+        return None;
+    }
+    let g = field(d, "geom")?;
+    if shape(g) != "polyline" {
+        return None;
+    }
+    let pts: Vec<(f64, f64)> = arr(field(g, "pts")).iter().map(xy).collect();
+    let i = index_of(index, pts.len())?;
+    // `g.bulge?.[k] ?? 0`
+    let bulge: Vec<f64> = arr(field(g, "bulge")).iter().map(|b| if b.is_null() { 0.0 } else { num_of(Some(b)) }).collect();
+    let nb = with_type(&Poly { pts: &pts, closed: truthy(field(g, "closed")), bulge: &bulge }, i, t);
+    let new_bulge = nb.iter().any(|b| *b != 0.0).then(|| Value::Array(nb.into_iter().map(js_num).collect()));
+    // Unverändert (ohne die grosse Geometrie zu vergleichen): gleiche Bögen, `bulge` steht schon am Ende.
+    let last_key = g.as_object().and_then(|m| m.keys().last()).map(String::as_str);
+    let same = match (field(g, "bulge"), &new_bulge) {
+        (None, None) => true,
+        (Some(old), Some(new)) => old == new && last_key == Some("bulge"),
+        _ => false,
+    };
+    if same {
+        return None;
+    }
+    let mut geom = with_opt(g, vec![("bulge", None)]);
+    if let (Value::Object(m), Some(b)) = (&mut geom, new_bulge) {
+        m.insert("bulge".into(), b);
+    }
+    Some(with_geom(d, geom))
+}
+
 fn insert_point(d: &Value, seg: f64, x: f64, y: f64) -> Option<Value> {
     let g = field(d, "geom")?;
     if shape(g) != "polyline" {
@@ -1204,18 +1252,18 @@ mod tests {
     #[test]
     fn wand_griff_und_sperre() {
         let r = root(json!({"walls": [{"id": "w", "start": {"x": 0, "y": 0}, "end": {"x": 1, "y": 0}, "extra": 1}]}));
-        let res = run(&r, &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [2, 3]}))).unwrap();
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [2, 3]}))).unwrap();
         assert_eq!(entity(&res).to_string(), r#"{"id":"w","start":{"x":0,"y":0},"end":{"x":2,"y":3},"extra":1}"#);
         let locked = root(json!({"walls": [{"id": "w", "locked": true, "start": {"x": 0, "y": 0}, "end": {"x": 1, "y": 0}}]}));
-        assert!(run(&locked, &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [2, 3]}))).unwrap().ops.is_empty());
+        assert!(run(&Lookup::plain(&locked), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [2, 3]}))).unwrap().ops.is_empty());
         // Fehlendes Element: keine Op.
-        assert!(run(&r, &rq(json!({"op": "moveGrip", "wallId": "x", "index": 1, "pt": [2, 3]}))).unwrap().ops.is_empty());
+        assert!(run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "x", "index": 1, "pt": [2, 3]}))).unwrap().ops.is_empty());
     }
 
     #[test]
     fn kreis_wird_ellipse() {
         let r = root(json!({"drawings2d": [{"id": "d", "geom": {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 1}}]}));
-        let res = run(&r, &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 0, "pt": [2, 0]}))).unwrap();
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 0, "pt": [2, 0]}))).unwrap();
         assert_eq!(entity(&res)["geom"].to_string(), r#"{"shape":"ellipse","center":{"x":0,"y":0},"rx":2,"ry":1,"rotation":0}"#);
     }
 
@@ -1231,14 +1279,14 @@ mod tests {
     #[test]
     fn nan_als_marke() {
         let r = root(json!({"walls": [{"id": "w", "start": {"x": 0, "y": 0}, "end": {"x": 1, "y": 0}}]}));
-        let res = run(&r, &rq(json!({"op": "moveBy", "wallId": "w", "delta": ["\u{1}NaN", 0]}))).unwrap();
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveBy", "wallId": "w", "delta": ["\u{1}NaN", 0]}))).unwrap();
         assert_eq!(entity(&res)["start"]["x"], json!("\u{1}NaN"));
     }
 
     #[test]
     fn punkt_loeschen_mindestzahl() {
         let r = root(json!({"drawings2d": [{"id": "d", "geom": {"shape": "polyline", "closed": false, "pts": [{"x": 0, "y": 0}, {"x": 1, "y": 0}]}}]}));
-        let res = run(&r, &rq(json!({"op": "deletePoint", "id": "d", "index": 0}))).unwrap();
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "deletePoint", "id": "d", "index": 0}))).unwrap();
         assert_eq!(res.notice, Some("alert.polylineMinPoints"));
         assert!(res.ops.is_empty());
     }
@@ -1249,7 +1297,7 @@ mod tests {
             "wallTypes": [{"id": "wt", "name": "W", "layers": [{"componentId": "c", "thickness": 0.2}]}],
             "ceilings": [{"id": "c1", "wallTypeId": "wt", "thickness": 0.3}, {"id": "c2", "wallTypeId": "wt"}],
         }));
-        let ops = run(&r, &rq(json!({"op": "ceilingThickness", "id": "c1", "thickness": 0.25, "newId": "ct-1", "newName": "Decke"}))).unwrap().ops;
+        let ops = run(&Lookup::plain(&r), &rq(json!({"op": "ceilingThickness", "id": "c1", "thickness": 0.25, "newId": "ct-1", "newName": "Decke"}))).unwrap().ops;
         assert_eq!(crate::ops::ops_to_json(&ops), r#"[{"kind":"add","collection":"ceilingTypes","items":[{"id":"ct-1","name":"Decke","layers":[{"componentId":"c","thickness":0.25}]}]},{"kind":"replace","collection":"ceilings","entity":{"id":"c1","wallTypeId":"wt","ceilingTypeId":"ct-1"}}]"#);
     }
 

@@ -24,10 +24,6 @@ export function initCoreSync(bytes: BufferSource): void {
   ready = true;
 }
 
-export function coreReady(): boolean {
-  return ready;
-}
-
 /** Der geladene Kern; wirft, wenn `initCore()` noch nicht gelaufen ist (Programmierfehler). */
 export function core(): CoreModule {
   if (!ready) throw new Error("Rust-Kern nicht geladen: initCore() muss vor der ersten Kern-Funktion laufen.");

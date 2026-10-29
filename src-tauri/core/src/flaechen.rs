@@ -81,13 +81,7 @@ fn area_kind(r: &Room) -> usize {
     kennzahlen::category_index(r.sia_category)
 }
 
-fn finite(v: f64) -> f64 {
-    if v.is_finite() {
-        v
-    } else {
-        0.0
-    }
-}
+use crate::jsnum::or_zero as finite;
 
 /// Woher das Gebäudevolumen kommt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

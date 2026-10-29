@@ -20,15 +20,7 @@ fn shift_all(v: Option<&Value>, dx: f64, dy: f64) -> Value {
     Value::Array(v.and_then(Value::as_array).map(|a| a.iter().map(|p| shift(p, dx, dy)).collect()).unwrap_or_default())
 }
 
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0 && !f.is_nan()),
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(_) => true,
-    }
-}
+use crate::grips::truthy;
 
 /// `{...m, key: v}` — ein vorhandener Schlüssel behält seine Stelle; `None` = `undefined` (Feld entfällt).
 fn set(m: &mut Map<String, Value>, key: &str, v: Option<Value>) {

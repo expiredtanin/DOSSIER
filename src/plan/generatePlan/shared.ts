@@ -42,9 +42,6 @@ export type DetailLevel = "grob" | "mittel" | "fein";
 /** Stroke-Farbe der Schicht-Polygone (neutrales Schwarz, geteilte Tinte mit der Schraffur). */
 export const POCHE_STROKE = "#1a1a1a";
 
-/** Tinte für den Schwarz-Weiss-Modus: einheitliches Dunkel für alle Striche. */
-export const MONO_INK = "#111111";
-
 // ── Linienstärken in PAPIER-Millimeter (vgl. docs/design/plans-output.md §3.2) ──
 // Alle Stricharten sind in mm Papier definiert; die PlanView rechnet sie über
 // dpi = 96 in konstante Bildschirm-Pixel um (non-scaling-stroke), damit Linien
@@ -58,7 +55,6 @@ export const LAYER_LINE_MM = 0.02;
 // seit [K3d] im Kern (`src-tauri/core/src/plan/style.rs`).
 /** Default-Umrandungs-Strichstärke (mm), falls die Kategorie keine lw trägt
    (Grundeinstellung für „normale Elemente"). */
-export const WALL_FALLBACK_MM = 0.18;
 
 /**
  * Aufgelöste Schraffur eines Polygons — alle Werte stammen aus einer

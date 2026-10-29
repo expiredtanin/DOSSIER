@@ -147,7 +147,7 @@ impl Project {
             VerticalAnchor::Custom { z } => Some(*z),
             VerticalAnchor::Floor { floor_id, offset } => {
                 let f = self.floor(floor_id)?;
-                Some(f.base_elevation.unwrap_or(0.0) + offset.unwrap_or(0.0))
+                Some(heights::floor_anchor(f.base_elevation.unwrap_or(0.0), offset.unwrap_or(0.0)))
             }
         }
     }
@@ -155,16 +155,12 @@ impl Project {
     /// (UK, OK) einer Wand in Metern (`wallVerticalExtent`).
     pub fn wall_vertical_extent(&self, w: &Wall) -> (f64, f64) {
         let floor_base = self.floor(&w.floor_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
-        let bottom = self.resolve_anchor(w.bottom.as_ref()).unwrap_or(floor_base);
-        let top = self.resolve_anchor(w.top.as_ref()).unwrap_or(bottom + w.height);
-        (bottom, top)
+        heights::element(floor_base, self.resolve_anchor(w.bottom.as_ref()), self.resolve_anchor(w.top.as_ref()), w.height)
     }
 
     pub fn ceiling_vertical_extent(&self, c: &Ceiling) -> (f64, f64) {
         let floor_top = self.floor(&c.floor_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0) + f.floor_height.unwrap_or(0.0));
-        let top = self.resolve_anchor(c.top.as_ref()).unwrap_or(floor_top);
-        let bottom = self.resolve_anchor(c.bottom.as_ref()).unwrap_or(top - self.ceiling_thickness(c));
-        (bottom, top)
+        heights::ceiling(floor_top, self.resolve_anchor(c.bottom.as_ref()), self.resolve_anchor(c.top.as_ref()), || self.ceiling_thickness(c))
     }
 
     pub fn stair_vertical_extent(&self, s: &Stair) -> (f64, f64) {
@@ -179,9 +175,7 @@ impl Project {
 
     pub fn column_vertical_extent(&self, c: &Column) -> (f64, f64) {
         let floor_base = self.floor(&c.floor_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
-        let bottom = self.resolve_anchor(c.bottom.as_ref()).unwrap_or(floor_base);
-        let top = self.resolve_anchor(c.top.as_ref()).unwrap_or(bottom + c.height);
-        (bottom, top)
+        heights::element(floor_base, self.resolve_anchor(c.bottom.as_ref()), self.resolve_anchor(c.top.as_ref()), c.height)
     }
 
     /// Traufhöhe (absolutes Z): `baseElevation`, sonst Oberkante des Geschosses (`roofBaseElevation`).
@@ -254,5 +248,45 @@ impl Stair {
                 _ => 0.0,
             },
         ]
+    }
+}
+
+/// Höhenregeln (UK/OK) — eine Fassung für die typisierte Sicht (oben) und die rohe Projekt-Wurzel
+/// (`selection_info.rs`: Objekt-Info, 3D-Griffe); die Aufrufer lösen nur ihre Eingaben auf.
+pub mod heights {
+    /// Bindung „Geschoss“: Basis des Geschosses + Versatz.
+    pub fn floor_anchor(base: f64, offset: f64) -> f64 {
+        base + offset
+    }
+
+    /// Wand/Stütze: UK aus der Bindung `bottom`, sonst Geschoss-Basis; OK aus `top`, sonst UK + Höhe.
+    pub fn element(floor_base: f64, bottom: Option<f64>, top: Option<f64>, height: f64) -> (f64, f64) {
+        let zb = bottom.unwrap_or(floor_base);
+        (zb, top.unwrap_or(zb + height))
+    }
+
+    /// Decke: OK aus `top`, sonst Geschoss-Oberkante; UK aus `bottom`, sonst OK − Dicke (die Decke wächst
+    /// nach unten; die Dicke wird nur dann bestimmt).
+    pub fn ceiling(floor_top: f64, bottom: Option<f64>, top: Option<f64>, thickness: impl FnOnce() -> f64) -> (f64, f64) {
+        let zt = top.unwrap_or(floor_top);
+        (bottom.unwrap_or_else(|| zt - thickness()), zt)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn wand_stuetze_und_decke() {
+            // Geschoss-Basis + Höhe; Bindungen übersteuern UK/OK unabhängig.
+            assert_eq!(element(0.0, None, None, 3.0), (0.0, 3.0));
+            assert_eq!(element(0.0, Some(0.5), Some(floor_anchor(3.0, 0.0)), 3.0), (0.5, 3.0));
+            assert_eq!(element(2.8, Some(1.0), None, 2.0), (1.0, 3.0));
+            // Decke: OK = Geschoss-Oberkante, UK = OK − Dicke; die Dicke nur ohne UK-Bindung.
+            assert_eq!(ceiling(2.6, None, None, || 0.25), (2.35, 2.6));
+            assert_eq!(ceiling(2.6, Some(2.2), None, || panic!("Dicke nicht gebraucht")), (2.2, 2.6));
+            assert_eq!(ceiling(2.6, None, Some(3.0), || 0.2), (2.8, 3.0));
+            assert_eq!(floor_anchor(2.8, 0.1), 2.8 + 0.1);
+        }
     }
 }

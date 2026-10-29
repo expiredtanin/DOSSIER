@@ -87,7 +87,7 @@ fn problems_text(r: Option<Result<(), Vec<String>>>, parsed_err: Option<String>)
 pub fn doc_apply(h: u32, ops_json: &str) -> String {
     match parse_ops(ops_json) {
         Err(e) => problems_text(None, Some(e)),
-        Ok(ops) => problems_text(with_doc(h, |d| d.apply_marked(&ops, may_have_marks(ops_json))), None),
+        Ok(ops) => problems_text(with_doc(h, |d| d.apply_marked(ops, may_have_marks(ops_json))), None),
     }
 }
 
@@ -174,15 +174,9 @@ pub fn doc_json(h: u32) -> String {
     with_doc(h, |d| d.to_json()).unwrap_or_default()
 }
 
-/// Abfrage auf dem typisierten Projekt; Ergebnis als JSON. Fehler (Dokument nicht offen, Modell
-/// passt nicht, unbekannte Abfrage, Rechenfehler) kommen als Text mit vorangestelltem `\u{1}`.
-/// Abfragen s. `crate::queries`.
-#[wasm_bindgen]
-pub fn doc_query(h: u32, name: &str) -> String {
-    doc_query_args(h, name, &[], "")
-}
-
-/// Wie [`doc_query`] mit Zahlen- und Textargument.
+/// Abfrage auf dem typisierten Projekt mit Zahlen- und Textargument; Ergebnis als JSON. Fehler (Dokument
+/// nicht offen, Modell passt nicht, unbekannte Abfrage, Rechenfehler) kommen als Text mit vorangestelltem
+/// `\u{1}`. Abfragen s. `crate::queries`.
 #[wasm_bindgen]
 pub fn doc_query_args(h: u32, name: &str, args: &[f64], text: &str) -> String {
     let result = with_doc(h, |d| {
@@ -196,10 +190,10 @@ pub fn doc_query_args(h: u32, name: &str, args: &[f64], text: &str) -> String {
     }
 }
 
-/// Abfrage auf der rohen Projekt-Wurzel (`crate::queries::run_root`); Fehler wie bei [`doc_query`].
+/// Abfrage auf der rohen Projekt-Wurzel (`crate::queries::run_root`); Fehler wie bei [`doc_query_args`].
 #[wasm_bindgen]
 pub fn doc_query_root(h: u32, name: &str, text: &str) -> String {
-    let result = with_doc(h, |d| crate::queries::run_root(d.root(), name, text)).unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
+    let result = with_doc(h, |d| crate::queries::run_root(&d.lookup(), name, text)).unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
     match result {
         Ok(json) => json,
         Err(e) => format!("\u{1}{e}"),
@@ -225,4 +219,12 @@ pub fn doc_serialize(h: u32) -> String {
 pub fn doc_query_bin(h: u32, name: &str, args: &[f64], text: &str) -> Vec<u8> {
     let result = with_doc(h, |d| crate::queries::run_bin_doc(d, name, args, text)).unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
     result.unwrap_or_else(|e| crate::plan_buf::encode_error(&e))
+}
+
+/// Je Op der zuletzt angewendeten Folge (`doc_commit`, `doc_apply`, `doc_grip_commit`, `doc_undo`,
+/// `doc_redo`) die Position des von `replace` getroffenen Elements, −1 = keine (TS führt die
+/// Leseansicht damit ohne Suche nach, `applyOps`).
+#[wasm_bindgen]
+pub fn doc_last_hits(h: u32) -> Vec<f64> {
+    with_doc(h, |d| d.last_hits().iter().map(|p| p.map_or(-1.0, |i| i as f64)).collect()).unwrap_or_default()
 }

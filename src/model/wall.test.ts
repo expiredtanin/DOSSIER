@@ -1,8 +1,9 @@
-// Unit-Tests für die Wand-/Decken-Resolver (wallVerticalExtent /
-// ceilingVerticalExtent): reine Datenschicht, kein React/Store.
+// Unit-Tests für die Wand-/Decken-Resolver: Referenzlinie (`wallReferenceOffset`) und die UK/OK der
+// Decken über den Kern (`verticalExtents`, Regeln `model/helpers.rs::heights`).
 
 import { describe, it, expect } from "vitest";
-import { ceilingVerticalExtent, wallReferenceOffset } from "./wall";
+import { wallReferenceOffset } from "./wall";
+import { verticalExtents } from "../geometry/grips";
 import type { Ceiling, Project, Wall } from "./types";
 
 /** Minimalprojekt mit einem Geschoss (baseElevation 0, floorHeight 2.6) und
@@ -68,7 +69,10 @@ function makeCeiling(overrides?: Partial<Ceiling>): Ceiling {
   };
 }
 
-describe("ceilingVerticalExtent", () => {
+/** UK/OK einer Decke (Kern-Abfrage). */
+const ceilingVerticalExtent = (p: Project, c: Ceiling) => verticalExtents(p, [], [c]).ceilings[0];
+
+describe("UK/OK einer Decke", () => {
   it("ohne top/bottom: OK = Geschoss-Oberkante, UK = OK − Dicke (heutiges Verhalten)", () => {
     const project = makeProject();
     const ceiling = makeCeiling();

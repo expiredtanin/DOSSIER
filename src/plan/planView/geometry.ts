@@ -207,21 +207,6 @@ export function pointInPolygon(pt: Vec2, poly: Vec2[]): boolean {
   return inside;
 }
 
-/** Abstand Punkt→Strecke (alle in denselben Koordinaten, hier Client-Pixel). */
-export function pointSegDistPx(
-  p: { x: number; y: number },
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  if (len2 < 1e-9) return Math.hypot(p.x - a.x, p.y - a.y);
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
-}
-
 /** Achsenparalleles Rechteck in Modell-Metern (Auswahl-Marquee). */
 export interface ModelRect {
   minX: number;
