@@ -11,15 +11,14 @@ import type {
   ViewSnapshot,
 } from "./types";
 import {
-  addAnnotation,
   addViewport,
   buildLayoutTree,
   buildMasterTree,
   collectFolderLayouts,
-  createAnnotation,
   createLayout,
   createLayoutFolder,
   createMasterLayout,
+  createSheetLevel,
   createViewport,
   deleteFolder,
   deleteMasterFolder,
@@ -28,15 +27,18 @@ import {
   findSnapshot,
   folderPdfPages,
   isDescendant,
+  isSheetLevel,
   moveFolderToFolder,
   moveLayoutToFolder,
   PAPER_FORMATS,
-  patchAnnotation,
   patchViewport,
-  removeAnnotation,
   removeViewport,
   resolveTitleBlock,
   resolveViewportScale,
+  SHEET_SCALE_DENOMINATOR,
+  sheetLevelOf,
+  sheetMmToModel,
+  sheetModelToMm,
   sheetSizeMm,
   visibleCodesFromSnapshot,
 } from "./layoutModel";
@@ -139,91 +141,29 @@ describe("Viewport-CRUD (immutabel)", () => {
   });
 });
 
-// ── Annotationen (Linie/Rechteck/Text) ───────────────────────────────────────
+// ── Blatt-Ebene (2D-Zeichnung auf dem Blatt) ────────────────────────────────
 
-describe("createAnnotation — Defaults je Art", () => {
-  it("line: Default-Geometrie ohne Farbe/Strichstärke", () => {
-    const a = createAnnotation("a1", "line");
-    expect(a).toEqual({ id: "a1", kind: "line", x1Mm: 20, y1Mm: 20, x2Mm: 80, y2Mm: 20 });
-  });
-  it("line: init überschreibt einzelne Felder + optionale Farbe/Strichstärke", () => {
-    const a = createAnnotation("a1", "line", { x1Mm: 5, color: "#f00", weightMm: 0.5 });
-    expect(a).toMatchObject({ x1Mm: 5, y1Mm: 20, color: "#f00", weightMm: 0.5 });
-  });
-  it("rect: Default-Grösse", () => {
-    const a = createAnnotation("a2", "rect");
-    expect(a).toEqual({ id: "a2", kind: "rect", xMm: 20, yMm: 20, widthMm: 40, heightMm: 30 });
-  });
-  it("text: Default-Zeilenhöhe 3.5mm, leerer Text", () => {
-    const a = createAnnotation("a3", "text");
-    expect(a).toEqual({ id: "a3", kind: "text", xMm: 20, yMm: 20, text: "", heightMm: 3.5 });
-  });
-  it("text: init setzt Inhalt + Höhe", () => {
-    const a = createAnnotation("a3", "text", { text: "EG", heightMm: 5 });
-    expect(a).toMatchObject({ text: "EG", heightMm: 5 });
-  });
-  it("text: init mit doc/widthMm (Rich-Text-Frame) wird übernommen", () => {
-    const doc = { version: 1 as const, paragraphs: [{ runs: [{ text: "Hi", marks: {} }] }] };
-    const a = createAnnotation("a3", "text", { doc, widthMm: 50 });
-    expect(a).toMatchObject({ doc, widthMm: 50 });
-  });
-  it("image: Default-Grösse, leere Quelle", () => {
-    const a = createAnnotation("a4", "image");
-    expect(a).toEqual({ id: "a4", kind: "image", xMm: 20, yMm: 20, widthMm: 60, heightMm: 40, src: "" });
-  });
-  it("image: init setzt Quelle + Grösse + Deckkraft", () => {
-    const a = createAnnotation("a4", "image", { src: "data:image/png;base64,x", widthMm: 30, heightMm: 20, opacity: 0.5 });
-    expect(a).toMatchObject({ src: "data:image/png;base64,x", widthMm: 30, heightMm: 20, opacity: 0.5 });
-  });
-});
+describe("Blatt-Ebene", () => {
+  const lay = createLayout("l1", "Blatt 1", "a3", "landscape");
+  const sheet = createSheetLevel("sheet-l1", lay);
 
-describe("Annotations-CRUD (immutabel)", () => {
-  const base = createLayout("l1", "L", "a4", "portrait");
-
-  it("addAnnotation verändert das Original nicht", () => {
-    const after = addAnnotation(base, createAnnotation("a1", "line"));
-    expect(base.annotations).toBeUndefined();
-    expect(after.annotations).toHaveLength(1);
-    expect(after).not.toBe(base);
+  it("ist eine Zeichnungsebene mit Layout-Bezug", () => {
+    expect(sheet).toEqual({ id: "sheet-l1", name: "Blatt 1", kind: "drawing", visible: true, locked: false, layoutId: "l1" });
+    expect(isSheetLevel(sheet)).toBe(true);
+    expect(isSheetLevel({ layoutId: undefined })).toBe(false);
+    expect(isSheetLevel(undefined)).toBe(false);
   });
 
-  it("addAnnotation baut auf einer fehlenden `annotations`-Liste auf (Alt-Layout)", () => {
-    const legacy: Layout = { id: "old", name: "Alt", paper: "a4", orientation: "portrait", viewports: [] };
-    const after = addAnnotation(legacy, createAnnotation("a1", "rect"));
-    expect(after.annotations).toHaveLength(1);
-    expect(legacy.annotations).toBeUndefined();
+  it("wird über das Layout gefunden", () => {
+    const p = { drawingLevels: [{ id: "eg", name: "EG", kind: "floor", visible: true, locked: false }, sheet] } as unknown as Project;
+    expect(sheetLevelOf(p, "l1")).toBe(sheet);
+    expect(sheetLevelOf(p, "nope")).toBeUndefined();
   });
 
-  it("removeAnnotation entfernt per Id", () => {
-    let l = addAnnotation(base, createAnnotation("a1", "line"));
-    l = addAnnotation(l, createAnnotation("a2", "rect"));
-    const removed = removeAnnotation(l, "a1");
-    expect(removed.annotations!.map((a) => a.id)).toEqual(["a2"]);
-  });
-
-  it("removeAnnotation auf Alt-Layout ohne `annotations` bleibt heil (No-op)", () => {
-    const legacy: Layout = { id: "old", name: "Alt", paper: "a4", orientation: "portrait", viewports: [] };
-    const r = removeAnnotation(legacy, "nope");
-    expect(r.annotations).toEqual([]);
-  });
-
-  it("patchAnnotation ändert nur das Ziel, immutabel", () => {
-    const l = addAnnotation(base, createAnnotation("a1", "line", { color: "#111" }));
-    const patched = patchAnnotation(l, "a1", { x1Mm: 42, color: "#0f0" });
-    expect(patched.annotations![0]).toMatchObject({ x1Mm: 42, color: "#0f0" });
-    expect((l.annotations![0] as { color?: string }).color).toBe("#111");
-  });
-
-  it("patchAnnotation: unbekannte Id → No-op (gleiche Werte, neue Liste)", () => {
-    const l = addAnnotation(base, createAnnotation("a1", "line"));
-    const noop = patchAnnotation(l, "nope", { x1Mm: 1 });
-    expect((noop.annotations![0] as { x1Mm: number }).x1Mm).toBe(20);
-  });
-
-  it("patchAnnotation auf einer Text-Annotation ändert den Inhalt", () => {
-    const l = addAnnotation(base, createAnnotation("t1", "text", { text: "EG" }));
-    const patched = patchAnnotation(l, "t1", { text: "1. OG" });
-    expect(patched.annotations![0]).toMatchObject({ text: "1. OG" });
+  it("Papier-mm ↔ Meter (1:1, y nach unten = −y), hin und zurück", () => {
+    expect(sheetMmToModel(420, 297)).toEqual({ x: 0.42, y: -0.297 });
+    expect(sheetModelToMm({ x: 0.42, y: -0.297 })).toEqual({ xMm: 420, yMm: 297 });
+    expect(SHEET_SCALE_DENOMINATOR).toBe(1);
   });
 });
 

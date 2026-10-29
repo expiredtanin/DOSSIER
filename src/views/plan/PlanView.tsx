@@ -14,7 +14,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ComponentProps, CSSProperties } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import type { HatchRender, Plan, PlanImage, Primitive } from "../../core";
 import { materializeGreyed, materializeUnderlay, type UnderlayGroup } from "../../core";
 import type { Drawing2D, EdgeGrip, Vec2 } from "../../model/types";
@@ -580,6 +580,15 @@ export interface PlanViewProps {
    * (`SnapSettings.hoverDivideCount`); Default 2.
    */
   hoverDivideCount?: number;
+  /**
+   * Hintergrund unter der Zeichnung (z. B. das Layout-Blatt: Papier, Master, Viewports), gezeichnet
+   * im SVG zwischen Raster und Geometrie. `origin` = Ursprung des Overlays (viewBox-Einheiten, s.
+   * planView/overlayOrigin.ts), `pxPerMeter` = aktueller Zoom. Mit Hintergrund zeichnet der SVG-Pfad
+   * (wie bei Luftbildern), damit er sichtbar bleibt.
+   */
+  backdrop?: (origin: Vec2, pxPerMeter: number) => ReactNode;
+  /** Einpass-Bereich (Modell-Meter) statt der Plan-Grenzen — z. B. das Blatt. */
+  fitBounds?: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
 /** Treiber für das Ziehen von Editier-Griffen (von App bereitgestellt). */
@@ -705,6 +714,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       snapColor = DEFAULT_SNAP_COLOR,
       hoverDivideDelayMs = 300,
       hoverDivideCount = 2,
+      backdrop,
+      fitBounds,
     },
     ref,
   ) {
@@ -720,14 +731,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // toScreen-Abbildung. Reset-/Einpassen-Ziel + Bezug für die Zoom-Grenzen; wird
   // NICHT automatisch angewandt (nur bei resetKey-Wechsel und „Einpassen").
   const defaultView = useMemo<ViewBox>(() => {
-    const { minX, minY, maxX, maxY } = planRaw.bounds;
+    const { minX, minY, maxX, maxY } = fitBounds ?? planRaw.bounds;
+    // Fester Einpass-Bereich (Blatt): Rand relativ zu seiner Grösse statt der festen Modell-Marge.
+    const pad = fitBounds ? Math.max(maxX - minX, maxY - minY) * PX_PER_M * 0.04 : PAD;
     return {
-      x: minX * PX_PER_M - PAD,
-      y: -maxY * PX_PER_M - PAD,
-      w: (maxX - minX) * PX_PER_M + PAD * 2,
-      h: (maxY - minY) * PX_PER_M + PAD * 2,
+      x: minX * PX_PER_M - pad,
+      y: -maxY * PX_PER_M - pad,
+      w: (maxX - minX) * PX_PER_M + pad * 2,
+      h: (maxY - minY) * PX_PER_M + pad * 2,
     };
-  }, [planRaw]);
+  }, [planRaw, fitBounds]);
 
   // Aktueller Ausschnitt; treibt die viewBox des SVG. Initial = eingepasst.
   const [view, setView] = useState<ViewBox>(defaultView);
@@ -823,7 +836,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   );
   // Engine WIRKLICH aktiv? Steuert das Umschalten SVG↔GPU: bei false rendert der
   // volle SVG-Pfad (Fallback), bei true übernimmt die GPU-Ebene + Text-Overlay.
-  const useGpuRenderer = wantGpu && glReady && !hasBgImages && !hasDrawingImages;
+  const useGpuRenderer = wantGpu && glReady && !hasBgImages && !hasDrawingImages && !backdrop;
 
   // `planRaw.greyedRanges` (andere Ebenen als gedimmte Referenz) ohne Klonen der
   // Primitive: der WebGL-Pfad dimmt selbst beim Zeichnen (nur planRaw), alle
@@ -3035,7 +3048,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           glReady bleibt false → Deadlock). Bei WebGL-Fehler bleibt es leer hinten
           und der volle SVG-Pfad übernimmt sichtbar. NICHT montiert, wenn ein
           Luftbild aktiv ist — dann rendert der SVG-Pfad alles inkl. Bild-Ebene. */}
-      {wantGpu && !hasBgImages && (
+      {wantGpu && !hasBgImages && !backdrop && (
         <canvas
           ref={canvasRef}
           style={{
@@ -3117,6 +3130,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           pxPerMeter={currentPxPerMeter()}
         />
       )}
+      {backdrop?.(overlayOrigin, currentPxPerMeter())}
       {/* Georeferenzierte Luftbilder ZWISCHEN Blatt-Hintergrund und Geometrie:
           Modell-Meter × PX_PER_M mit negierter y-Achse (s. toScreen) → Bild-Norden
           (max.y) oben bei y=−max.y·PX; das Bild zeichnet natürlich von oben (kein

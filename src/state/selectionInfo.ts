@@ -352,15 +352,8 @@ export interface Selection {
     | "extrudedSolid"
     | "column"
     | "roof"
-    | "contextObject"
-    | "layoutAnnotation";
+    | "contextObject";
   id: string;
-  /**
-   * Konkrete Art der Layout-Annotation (nur `kind === "layoutAnnotation"`) —
-   * steuert z. B., ob die Strichstärke editierbar ist (Linie/Rechteck ja,
-   * Text/Bild nein).
-   */
-  annotKind?: "line" | "rect" | "text" | "image";
   /** Grafik-Kategorie (Ebene) des Elements. */
   categoryCode: string;
   /**

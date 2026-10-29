@@ -9,11 +9,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { t } from "../i18n";
+import { LayoutSheetPane, type LayoutSheetHandlers, type SheetPlanProps } from "../ui/LayoutSheet";
+import { SHEET_SCALE_DENOMINATOR } from "../model/layoutModel";
 import type {
   Ceiling,
   Drawing2D,
   DrawingLevel,
   EdgeGrip,
+  Layout,
   Project,
   Roof,
   Vec2,
@@ -141,7 +144,14 @@ export function Content({
   onEdit3dGroup,
   onGrip3dEditTab,
   onGrip3dEditCancel,
+  sheet,
 }: {
+  /**
+   * Offenes Layout-Blatt: `level` ist dann dessen Blatt-Ebene (`layoutId`). Gezeichnet wird in
+   * derselben Plan-Ansicht wie auf jeder Zeichnungsebene; das Blatt liefert nur den Hintergrund
+   * (Papier, Master, Viewports) und das Platzieren der Viewports (ui/LayoutSheet.tsx).
+   */
+  sheet?: { layout: Layout; handlers: LayoutSheetHandlers } | null;
   project: Project;
   level: DrawingLevel;
   viewType: ViewType;
@@ -372,10 +382,11 @@ export function Content({
   // 3D-Umschaltung — eine Zeichnung hat keine Höhe/3D. So sind importierte
   // DXF-Polylinien hier sofort sichtbar und mit den 2D-Werkzeugen bearbeitbar.
   if (level.kind === "drawing") {
-    return (
-      <main className="content">
-        <DrawingTabs project={project} handlers={viewSnapshotTabs} />
+    // Blatt-Ebene eines offenen Layouts: Papier 1:1 (Massstab 1), Hintergrund + Viewports vom Blatt.
+    const plan = (sheetPlan?: SheetPlanProps) => (
         <LevelPlanView
+          backdrop={sheetPlan?.backdrop}
+          fitBounds={sheetPlan?.fitBounds}
           project={project}
           level={level}
           visibleCodes={visibleCodes}
@@ -383,7 +394,7 @@ export function Content({
           floorDisplay={floorDisplay}
           detail={detail}
           referenceLines={referenceLines}
-          scaleDenominator={scaleDenominator}
+          scaleDenominator={sheetPlan ? SHEET_SCALE_DENOMINATOR : scaleDenominator}
           hairline={hairline}
           showGrid={showGrid}
           marqueeColor={marqueeColor}
@@ -417,7 +428,7 @@ export function Content({
           onCommitTextEdit={onCommitTextEdit}
           onCloseTextEdit={onCloseTextEdit}
           onOpenSectionLevel={onSelectLevel}
-          onPlanSelect={onPlanSelect}
+          onPlanSelect={sheetPlan?.onPlanSelect ?? onPlanSelect}
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
           onPlanContextMenu={onPlanContextMenu}
@@ -432,6 +443,27 @@ export function Content({
           selectedDrawingIds={selectedDrawingIds}
           gripHandlers={gripHandlers}
         />
+    );
+    if (level.layoutId && sheet && sheet.layout.id === level.layoutId) {
+      return (
+        <main className="content">
+          <LayoutSheetPane
+            project={project}
+            layout={sheet.layout}
+            handlers={sheet.handlers}
+            toolInputActive={toolInputActive}
+            onPlanSelect={onPlanSelect}
+            planViewRef={planViewRef}
+          >
+            {plan}
+          </LayoutSheetPane>
+        </main>
+      );
+    }
+    return (
+      <main className="content">
+        <DrawingTabs project={project} handlers={viewSnapshotTabs} />
+        {plan()}
       </main>
     );
   }
@@ -663,6 +695,8 @@ function useCrossKindOverlay(
 
 /** Abgeleiteter Grundriss eines Geschosses. */
 function LevelPlanView({
+  backdrop,
+  fitBounds,
   project,
   level,
   visibleCodes,
@@ -719,6 +753,10 @@ function LevelPlanView({
   selectedDrawingIds,
   gripHandlers,
 }: {
+  /** Hintergrund unter der Zeichnung (Layout-Blatt), s. `PlanView.backdrop`. */
+  backdrop?: SheetPlanProps["backdrop"];
+  /** Einpass-Bereich statt der Plan-Grenzen (Layout-Blatt). */
+  fitBounds?: SheetPlanProps["fitBounds"];
   project: Project;
   level: DrawingLevel;
   visibleCodes: Set<string>;
@@ -913,6 +951,8 @@ function LevelPlanView({
         selectedDrawingId={selectedDrawingId}
         selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}
+        backdrop={backdrop}
+        fitBounds={fitBounds}
       />
       {/* NACH PlanView gerendert (nicht als box-shadow auf .pane), damit der
           Isolations-Rahmen über der PlanView-SVG sichtbar bleibt. */}

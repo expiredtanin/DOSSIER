@@ -11,7 +11,7 @@ import { applyFillMode } from "./fillMode";
 import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, removeRoofHole, setFieldIfChanged, setRoofEdge } from "../core";
 import type { CoreOp, ProjectMutation } from "../core";
 import { useMemo, type RefObject } from "react";
-import type { DrawingLevel, Layout, Project } from "../model/types";
+import type { DrawingLevel, Project } from "../model/types";
 import { resolvePenColor } from "../model/penSets";
 import type { ToolId } from "../tools/types";
 import type { ViewType } from "../model/viewTypes";
@@ -52,7 +52,7 @@ import {
   deleteMasterFolder,
   moveLayoutToFolder,
   moveFolderToFolder,
-  patchAnnotation as patchAnnotationInLayout,
+  createSheetLevel,
 } from "../model/layoutModel";
 import { folderPdfBytes } from "../export/layoutPdf";
 import { saveBinaryFile } from "../native/saveFile";
@@ -124,8 +124,6 @@ export function usePanelHostBase(opts: {
   openSettings: () => void;
   onOpenStampEditor: (roomId: string) => void;
   openResources: (tab?: ResourceTabId) => void;
-  activeLayout: Layout | undefined;
-  patchOpenLayout: (id: string, fn: (l: Layout) => Layout) => void;
   dxfInputRef: RefObject<HTMLInputElement | null>;
   planViewRef: RefObject<PlanViewHandle | null>;
   selection: Selection | null;
@@ -244,8 +242,6 @@ export function usePanelHostBase(opts: {
     openSettings,
     onOpenStampEditor,
     openResources,
-    activeLayout,
-    patchOpenLayout,
     dxfInputRef,
     planViewRef,
     selection,
@@ -422,15 +418,9 @@ export function usePanelHostBase(opts: {
           updateStair(selection.id, { color });
         else if (selection.kind === "room")
           updateRoom(selection.id, { color });
-        else if (selection.kind === "layoutAnnotation" && activeLayout)
-          patchOpenLayout(activeLayout.id, (l) =>
-            patchAnnotationInLayout(l, selection.id, { color }),
-          );
       },
       // Stift-Kopplung der Farbe oben (s. `Selection.colorPenId`-Doku) —
-      // dieselben Selektionsarten wie `onSetSelectionColor`, MINUS Layout-
-      // Annotation (kein `colorPenId`-Feld dort, bewusster Scope-Schnitt s.
-      // PENDENZEN.md). `penId` gesetzt ⇒ Farbe sofort aus dem aktiven
+      // dieselben Selektionsarten wie `onSetSelectionColor`. `penId` gesetzt ⇒ Farbe sofort aus dem aktiven
       // Stiftsatz backen; `undefined` ⇒ nur die Kopplung lösen, letzter
       // gebackener Wert bleibt als freie Farbe stehen.
       onSetSelectionColorPen: (penId) => {
@@ -445,15 +435,10 @@ export function usePanelHostBase(opts: {
         else if (selection.kind === "room") updateRoom(selection.id, patch);
       },
       onSetSelectionWeight: (weightMm) => {
-        // Strichstärke-Override: Wand/Decke (`strokeWeight`) oder Drawing2D/
-        // Layout-Annotation (`weightMm`, Alt-Feldname bleibt).
+        // Strichstärke-Override: Wand/Decke (`strokeWeight`) oder Drawing2D (`weightMm`).
         if (selection?.kind === "wall") updateWall(selection.id, { strokeWeight: weightMm });
         else if (selection?.kind === "ceiling")
           updateCeiling(selection.id, { strokeWeight: weightMm });
-        else if (selection?.kind === "layoutAnnotation" && activeLayout)
-          patchOpenLayout(activeLayout.id, (l) =>
-            patchAnnotationInLayout(l, selection.id, { weightMm }),
-          );
         else if (selection?.kind === "drawing2d")
           setElementWeight(selection.id, weightMm);
       },
@@ -506,10 +491,6 @@ export function usePanelHostBase(opts: {
                 d.geom.shape === "image" ? { ...d, geom: { ...d.geom, opacity } } : { ...d, opacity },
               ),
             ),
-          );
-        else if (selection?.kind === "layoutAnnotation" && activeLayout)
-          patchOpenLayout(activeLayout.id, (l) =>
-            patchAnnotationInLayout(l, selection.id, { opacity }),
           );
         else if (selection?.kind === "contextObject")
           applyChange((p) =>
@@ -1324,14 +1305,24 @@ export function usePanelHostBase(opts: {
       // Anlegen öffnet es direkt; Löschen schliesst es, falls es das offene trifft.
       onAddLayout: (name, paper, orientation) => {
         const lay = createLayout(`lay-${Date.now()}`, name, paper, orientation);
-        applyChange(addItems("layouts", [lay]));
+        // Jedes Blatt trägt seine Blatt-Ebene (2D-Zeichnung auf dem Blatt, s. layoutModel).
+        applyChange([...addItems("layouts", [lay]), ...addItems("drawingLevels", [createSheetLevel(`sheet-${lay.id}`, lay)])]);
         setActiveLayoutId(lay.id);
       },
       onRenameLayout: (id, name) => {
         applyChange((p) => patchItem(p, "layouts", id, { name }));
       },
       onDeleteLayout: (id) => {
-        applyChange((p) => removeItems(p, "layouts", [id]));
+        // Mit dem Layout gehen seine Blatt-Ebene und deren Zeichnungen (ein Undo-Schritt).
+        applyChange((p) => {
+          const levels = p.drawingLevels.filter((l) => l.layoutId === id).map((l) => l.id);
+          const drawings = p.drawings2d.filter((d) => levels.includes(d.levelId)).map((d) => d.id);
+          return [
+            ...removeItems(p, "drawings2d", drawings),
+            ...removeItems(p, "drawingLevels", levels),
+            ...removeItems(p, "layouts", [id]),
+          ];
+        });
         setActiveLayoutId((cur) => (cur === id ? null : cur));
       },
       onOpenLayout: (id) => setActiveLayoutId(id),
@@ -1413,7 +1404,7 @@ export function usePanelHostBase(opts: {
             ? { customWidthMm, customHeightMm }
             : {}),
         };
-        applyChange(addItems("layouts", [full]));
+        applyChange([...addItems("layouts", [full]), ...addItems("drawingLevels", [createSheetLevel(`sheet-${id}`, full)])]);
         return id;
       },
       onCreateMasterLayout: (opts) => {

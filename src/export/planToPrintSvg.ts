@@ -100,6 +100,13 @@ export interface PrintSvgOptions {
   pageHeightMm: number;
   /** Rand um den Plan-Inhalt in mm (weisser Blattrand). */
   marginMm?: number;
+  /**
+   * Fester Modell-Bereich, der das Blatt füllt (statt den Inhalt zu zentrieren) — die Blatt-Ebene
+   * eines Layouts liegt so genau auf dem Papier (Ursprung oben links, s. `DrawingLevel.layoutId`).
+   */
+  bounds?: { minX: number; minY: number; maxX: number; maxY: number };
+  /** Ohne weisses Blatt dahinter (als Schicht über anderem Inhalt). */
+  transparent?: boolean;
 }
 
 /** Modell-Meter → Papier-Millimeter im Massstab 1:N. */
@@ -120,7 +127,7 @@ export function planToPrintSvg(plan: Plan, opts: PrintSvgOptions): PrintSvg {
   // bewusst, ohne ihn aktuell für einen Versatz zu nutzen (zentrierte Lage).
   void (opts.marginMm ?? 10);
 
-  const b = plan.bounds;
+  const b = opts.bounds ?? plan.bounds;
   // Inhalts-Maße in mm (massstäblich), unverschoben.
   const contentWmm = (b.maxX - b.minX) * k;
   const contentHmm = (b.maxY - b.minY) * k;
@@ -151,7 +158,7 @@ export function planToPrintSvg(plan: Plan, opts: PrintSvgOptions): PrintSvg {
   bg.setAttribute("width", String(opts.pageWidthMm));
   bg.setAttribute("height", String(opts.pageHeightMm));
   bg.setAttribute("fill", "#ffffff");
-  svg.appendChild(bg);
+  if (!opts.transparent) svg.appendChild(bg);
 
   // Jedes Primitiv in mm-Knoten übersetzen (Kern, Anweisungsliste s. `plan_print_svg.rs`).
   const o = Float64Array.of(n, opts.pageWidthMm, opts.pageHeightMm, b.minX, b.minY, b.maxX, b.maxY);

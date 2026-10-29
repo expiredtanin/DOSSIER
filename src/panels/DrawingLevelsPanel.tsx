@@ -77,7 +77,8 @@ export function DrawingLevelsPanel() {
   };
 
   // Oberstes Geschoss zuoberst (wie DOSSIER): Anzeige umkehren.
-  const levelsTopDown = [...project.drawingLevels].reverse();
+  // Blatt-Ebenen (Layout-Zeichnung) gehören zum Blatt, nicht in den Navigator.
+  const levelsTopDown = project.drawingLevels.filter((z) => !z.layoutId).reverse();
 
   // Klick aufs Auge in „Alle anzeigen"/„Nur aktive" schaltet automatisch auf
   // „Ausgewählte" (DOSSIER-Regel), damit das Sichtbarkeits-Flag sofort greift.

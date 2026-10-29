@@ -3,7 +3,7 @@
 // Genutzt von der Modell-Rundreise und dem Robustheitstest des Kerns.
 
 import { sampleProject } from "./sampleProject";
-import type { Drawing2DGeom, LayoutAnnotation, ParametricRule, Project, RichTextDoc } from "./types";
+import type { Drawing2DGeom, ParametricRule, Project, RichTextDoc } from "./types";
 
 export const plain = (p: unknown): unknown => JSON.parse(JSON.stringify(p));
 
@@ -47,19 +47,14 @@ const rules: ParametricRule[] = [
   { type: "sequence", rules: [{ type: "reference-line", referenceLine: "right", target: "exterior" }], stopOnMatch: true },
 ];
 
-const annotations: LayoutAnnotation[] = [
-  { kind: "line", id: "a1", x1Mm: 0, y1Mm: 0, x2Mm: 10, y2Mm: 10, color: "#000000", weightMm: 0.25 },
-  { kind: "rect", id: "a2", xMm: 1, yMm: 2, widthMm: 30, heightMm: 20 },
-  { kind: "text", id: "a3", xMm: 1, yMm: 2, text: "Titel", heightMm: 5, doc, widthMm: 40 },
-  { kind: "image", id: "a4", xMm: 1, yMm: 2, widthMm: 30, heightMm: 20, src: "data:image/png;base64,AAAA", opacity: 1 },
-];
-
 /** Beispielprojekt, ergänzt um alle Element-Arten, die es selbst nicht enthält. */
 export function richProject(): Project {
   const lvl = sampleProject.drawingLevels[0].id;
   return {
     ...sampleProject,
-    formatVersion: 2,
+    formatVersion: 3,
+    // Blatt-Ebene des Layouts „lay1" (2D-Zeichnung auf dem Blatt).
+    drawingLevels: [...sampleProject.drawingLevels, { id: "sheet-lay1", name: "Blatt 1", kind: "drawing", visible: true, locked: false, layoutId: "lay1" }],
     textStyles: [{ id: "ts1", label: "Titel", marks: { bold: true, font: "Helvetica", sizePt: 14 } }],
     blockDefs: [{ id: "blk1", name: "Nordpfeil", geom2d: geoms.slice(0, 4) }],
     pens: [{ id: "pen1", name: "Kontur" }],
@@ -111,7 +106,7 @@ export function richProject(): Project {
       layerVisibility: { "10": true, "20": false }, drawingVisibility: { [lvl]: true }, enabledOverrideRuleIds: ["or1"], cameraCenter: { x: 1, y: 2 }, cameraPxPerMeter: 40,
     }],
     viewSnapshotFolders: [{ id: "vf1", name: "Pläne" }, { id: "vf2", name: "Unter", parentId: "vf1" }],
-    layouts: [{ id: "lay1", name: "Blatt 1", paper: "a3", orientation: "landscape", planNumber: "A-12", masterId: "m1", folderId: "lf1", viewports: [{ id: "vp1", snapshotId: "vs1", xMm: 10, yMm: 10, widthMm: 200, heightMm: 150, scaleDenominator: 50 }], annotations }],
+    layouts: [{ id: "lay1", name: "Blatt 1", paper: "a3", orientation: "landscape", planNumber: "A-12", masterId: "m1", folderId: "lf1", viewports: [{ id: "vp1", snapshotId: "vs1", xMm: 10, yMm: 10, widthMm: 200, heightMm: 150, scaleDenominator: 50 }] }],
     masterLayouts: [{ id: "m1", name: "Master", paper: "a3", orientation: "landscape", titleBlock: { projectName: "P", sheetName: "S", scale: "1:100", date: "28.10.", author: "K" }, border: true }],
     layoutFolders: [{ id: "lf1", name: "Pläne", kind: "layout" }],
     referenceElevationMasl: 432.1,

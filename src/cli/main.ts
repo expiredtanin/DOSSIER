@@ -170,7 +170,7 @@ function loadProject(path: string): Project {
 }
 
 function findLevel(project: Project, kinds: string[], name: string | undefined) {
-  const levels = project.drawingLevels.filter((l) => kinds.includes(l.kind));
+  const levels = project.drawingLevels.filter((l) => kinds.includes(l.kind) && !l.layoutId);
   if (!name) return levels[0];
   const n = name.toLowerCase();
   return levels.find((l) => l.id.toLowerCase() === n || l.name.toLowerCase() === n);

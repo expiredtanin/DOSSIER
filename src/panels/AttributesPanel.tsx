@@ -124,21 +124,14 @@ export function AttributesPanel() {
   }
 
   const isDrawing = sel.kind === "drawing2d";
-  // Layout-Annotation (Linie/Rechteck/Text/Bild auf einem Blatt) — kein
-  // Projekt-Bauteil, daher ohne Ebene/Bauteil-Vererbung: Farbe/Strichstärke
-  // sind IMMER ein eigener Wert (kein 3-Quellen-Dropdown, keine Füllung/
-  // Schraffur/Masse — s. Ausblendungen weiter unten).
-  const isAnnotation = sel.kind === "layoutAnnotation";
   // Strichstärke: Wand/Decke/Stütze/Drawing2D tragen einen eigenen Override
   // (`strokeWeight`/`weightMm`) + Quellen-Dropdown; andere Elementarten erben
-  // stets aus der Kategorie (kein Setter im Kontrakt → nicht editierbar). Bei
-  // Annotationen nur Linie/Rechteck (Text/Bild kennen keine Strichstärke).
+  // stets aus der Kategorie (kein Setter im Kontrakt → nicht editierbar).
   const weightEditable =
     sel.kind === "wall" ||
     sel.kind === "ceiling" ||
     sel.kind === "column" ||
-    isDrawing ||
-    (isAnnotation && (sel.annotKind === "line" || sel.annotKind === "rect"));
+    isDrawing;
   // Schraffur: Wand/Decke/Stütze (Schnitt-/Ansichts-Schraffur) oder
   // geschlossene 2D-Form.
   const fillEditable =
@@ -312,29 +305,7 @@ export function AttributesPanel() {
             GESPERRT und zeigt die Strichstärke DES STIFTS (ein Stift trägt
             beides zusammen, s. model/penSets.ts) statt des sonst aufgelösten
             `weightMm`. */}
-        {isAnnotation ? (
-          weightEditable && (
-            <>
-              <span className="attr-key">{t("attr.weight")}</span>
-              <span className="attr-val">
-                <input
-                  className="attr-num"
-                  style={{ width: 72 }}
-                  type="number"
-                  step={0.01}
-                  min={0}
-                  list="attr-pen-weights"
-                  value={sel.weightMm}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (Number.isFinite(v)) host.onSetSelectionWeight(v);
-                  }}
-                />
-              </span>
-            </>
-          )
-        ) : (
-          sourceRow(
+        {sourceRow(
             "attr.weight",
             weightEditable && !sel.colorPenId,
             weightUi,
@@ -360,8 +331,7 @@ export function AttributesPanel() {
                 ))}
               </datalist>
             </>,
-          )
-        )}
+          )}
 
         {/* Deckkraft (0..1) — bei BILDERN deren eigene Bild-Deckkraft, bei
             allen übrigen 2D-Formen die Objekt-Transparenz (wirkt auf Strich
@@ -429,7 +399,7 @@ export function AttributesPanel() {
 
         {/* Linienstil — nur Drawing2D trägt ihn (Wand/Decke/Annotation etc.
             read-only), Rest wie gehabt. */}
-        {!isAnnotation && (
+        {(
           <>
             <span className="attr-key">{t("attr.lineStyle")}</span>
             <span className="attr-val">
@@ -608,7 +578,7 @@ export function AttributesPanel() {
             Nach Bauteil (erbt vom Component-Manager, Default) / eigener Wert.
             Eine Layout-Annotation kennt keine Füllung (nur Umriss) — Sektion
             entfällt komplett statt drei bedeutungslose Dropdowns zu zeigen. */}
-        {!isAnnotation && (
+        {(
           <>
             <div className="attr-section-label">{t("attr.fill")}</div>
 
@@ -797,7 +767,7 @@ export function AttributesPanel() {
             „Ausdehnung X/Y" beschriften (Nutzer-Report: Fenster zeigte „Höhe
             0.34 m" = Wanddicke). Öffnungen tragen Breite/Höhe im eigenen
             Abschnitt, dort entfällt die bbox ganz. */}
-        {!isAnnotation && !sel.opening && (
+        {!sel.opening && (
           <>
             <div className="attr-section-label">{t("attr.size")}</div>
             <span className="attr-key">{t(isModelElement ? "attr.extentX" : "attr.width")}</span>

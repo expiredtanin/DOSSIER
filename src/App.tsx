@@ -27,6 +27,7 @@ import type {
   Drawing2D,
   DrawingLevel,
   Layout,
+  LayoutViewport,
   Project,
   Roof,
   Vec2,
@@ -78,16 +79,18 @@ import {
 } from "./viewport/grip3dHud";
 import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers, TabId as ResourceTabId } from "./ui/ResourceManager";
-import { LayoutSheetView } from "./ui/LayoutSheet";
 import {
   createViewport,
-  createAnnotation,
+  createSheetLevel,
+  effectiveSheetSizeMm,
+  findMaster,
+  isSheetLevel,
+  sheetMmToModel,
+  sheetLevelOf,
+  SHEET_SCALE_DENOMINATOR,
   addViewport as addViewportToLayout,
   removeViewport as removeViewportFromLayout,
   patchViewport as patchViewportInLayout,
-  addAnnotation as addAnnotationToLayout,
-  removeAnnotation as removeAnnotationFromLayout,
-  patchAnnotation as patchAnnotationInLayout,
 } from "./model/layoutModel";
 import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar, ViewRibbonTab } from "./ui/TopBar";
@@ -511,13 +514,6 @@ export default function App() {
     setEditTextMinHeightM,
   } = useContextMenuState();
 
-  // Gewählte Annotation auf einem offenen Layout-Blatt (Linie/Rechteck/Text/
-  // Bild) — gehoben aus LayoutSheetView, damit die Attribute-Palette (rechtes
-  // Panel) dieselbe Auswahl sieht wie ein Drawing2D im Grundriss.
-  const [selectedLayoutAnnotationId, setSelectedLayoutAnnotationId] = useState<string | null>(
-    null,
-  );
-
   // Beim Geschosswechsel die Wand-Auswahl + offene Overlays zurücksetzen (die
   // Wände eines anderen Geschosses sind eine andere Menge). Der Ansichtswechsel
   // (Grundriss ↔ 3D) lässt die Auswahl bestehen — dieselbe wallId gilt in
@@ -602,6 +598,8 @@ export default function App() {
   const activeLevel =
     project.drawingLevels.find((z) => z.id === activeLevelId) ??
     project.drawingLevels[0];
+  // Massstab der Arbeitsebene: auf einem Blatt Papier 1:1, sonst der gewählte Plan-Massstab.
+  const planScale = isSheetLevel(activeLevel) ? SHEET_SCALE_DENOMINATOR : scaleDenominator;
 
   // Sichtbare Kategorie-Codes — Basisfilter für Grundriss & 3D.
   const visibleCodes = useMemo(
@@ -1041,24 +1039,10 @@ export default function App() {
   // Ein Klick auf ein gekoppeltes Zeichen-Werkzeug (Wand/Linie/Rechteck/Polylinie)
   // STARTET den passenden Befehl in der Engine und fokussiert das Befehlsfeld
   // („Dialog drin"). „Auswahl" beendet einen laufenden Befehl (Auswahl-Modus).
-  // Zeichenwerkzeuge, die auf einem offenen Layout-Blatt sinnvoll sind (Markups
-  // in Papier-mm, s. LayoutSheet.tsx `annotToolFromGlobal`) — dieselben Tool-IDs
-  // wie im Grundriss, KEIN eigenes Werkzeug nur fürs Layout (Nutzer-Feedback).
-  const LAYOUT_ANNOT_TOOLS: ToolId[] = ["line", "rect", "text", "textbox", "image"];
-
   const onSelectTool = (id: ToolId) => {
     // Erneuter Klick auf das bereits AKTIVE Werkzeug schaltet zurück auf
     // „Auswahl" (Nutzer-Wunsch) — statt das Werkzeug einfach neu zu starten.
     if (id !== "select" && id === activeTool) id = "select";
-    if (activeLayout) {
-      // Ein Layout-Blatt ist offen: PlanView/die Befehls-Engine haben keinen
-      // sichtbaren Canvas (LayoutSheetView ersetzt die Mitte) — Zeichenwerkzeuge
-      // wertet dort `activeTool` direkt aus (Klick + ggf. Datei-Dialog fürs
-      // Bild), alles andere (Wand/Raum/… — auf dem Blatt ohne Bedeutung) fällt
-      // auf „Auswahl" zurück statt eine Befehls-Engine ohne Canvas zu starten.
-      setActiveTool(LAYOUT_ANNOT_TOOLS.includes(id) ? id : "select");
-      return;
-    }
     if (id === "image") {
       // Datei-Auswahl ist async (Dateidialog) — kein Klick-Platzieren wie bei
       // den übrigen Zeichen-Werkzeugen, daher hier abgefangen statt über die
@@ -1753,7 +1737,7 @@ export default function App() {
     modelEditable: activeLevel.kind !== "section" && activeLevel.kind !== "elevation",
     sheet: sectionSheet,
     visibleCodes,
-    scaleDenominator,
+    scaleDenominator: planScale,
     snap,
     setDraft,
     snapFor,
@@ -1864,16 +1848,6 @@ export default function App() {
     planViewRef,
   );
 
-  // Gewählte Layout-Annotation als echtes Objekt (statt nur ihrer Id) — liegt
-  // in `Layout.annotations` (Papier-mm), NICHT im Modell, daher separat von
-  // `deriveSelection` (die nur Projekt-Bauteile kennt) aufgelöst. Muss VOR
-  // `textTarget`/`selection` stehen (beide lesen sie synchron im selben Render).
-  const selectedLayoutAnnotation = useMemo(() => {
-    if (activeLayoutId === null || !selectedLayoutAnnotationId) return null;
-    const layout = (project.layouts ?? []).find((l) => l.id === activeLayoutId);
-    return layout?.annotations?.find((a) => a.id === selectedLayoutAnnotationId) ?? null;
-  }, [project.layouts, activeLayoutId, selectedLayoutAnnotationId]);
-
   // Text-Ziel der Oberleisten-Text-Gruppe: der Stempel-Text des (einzeln)
   // gewählten Raums. Ohne aktive Editor-Auswahl wirkt Formatierung auf das ganze
   // Doc (range: null). Ist kein Raum gewählt → null (Controls setzen nur
@@ -1914,21 +1888,6 @@ export default function App() {
         };
       }
     }
-    // Ausgewähltes Text-Markup auf einem offenen Layout-Blatt: wie Raum-Stempel
-    // OHNE Grössen-Kopplung ans Modell (Papier-mm-Kontext, `heightMm` ist bereits
-    // der Basiswert für Runs ohne eigene `sizePt`) — die Oberleisten-Grösse
-    // wirkt hier also normal, anders als bei freiem Grundriss-Text oben.
-    if (selectedLayoutAnnotation && selectedLayoutAnnotation.kind === "text" && activeLayoutId !== null) {
-      const ann = selectedLayoutAnnotation;
-      return {
-        doc: ann.doc ?? docFromText(ann.text),
-        range: null,
-        apply: (newDoc: RichTextDoc) =>
-          patchOpenLayout(activeLayoutId, (l) =>
-            patchAnnotationInLayout(l, ann.id, { doc: newDoc, text: plainText(newDoc) }),
-          ),
-      };
-    }
     return null;
   }, [
     selectedRoom,
@@ -1936,8 +1895,6 @@ export default function App() {
     selectedDrawingId,
     project.drawings2d,
     updateDrawing2D,
-    selectedLayoutAnnotation,
-    activeLayoutId,
   ]);
 
   // ── 3D-Editier-Griffe (direkt im Viewport3D) ──────────────────────────────
@@ -2287,26 +2244,7 @@ export default function App() {
 
   // ── Selektions-Attribut-Kontrakt (Attributes-/Object-Info-Paletten) ───────
   // Normalisierte, effektiv aufgelöste Sicht auf das erste selektierte Element.
-  // Eine gewählte Layout-Annotation hat Vorrang (eigener, minimaler Zweig —
-  // sie ist kein Projekt-Bauteil, `deriveSelection` kennt sie nicht): Farbe
-  // (Linie/Rechteck/Text) + Strichstärke (nur Linie/Rechteck, s. `annotKind`-
-  // Prüfung in AttributesPanel) landen so in DERSELBEN Palette wie ein
-  // Drawing2D im Grundriss (Nutzer-Feedback).
   const selection = useMemo((): Selection | null => {
-    if (selectedLayoutAnnotation) {
-      const a = selectedLayoutAnnotation;
-      return {
-        kind: "layoutAnnotation",
-        annotKind: a.kind,
-        id: a.id,
-        categoryCode: "",
-        color: ("color" in a ? a.color : undefined) ?? "#111111",
-        weightMm: ("weightMm" in a ? a.weightMm : undefined) ?? 0.25,
-        isImage: a.kind === "image",
-        opacity: a.kind === "image" ? a.opacity ?? 1 : undefined,
-        bbox: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
-      };
-    }
     return deriveSelection(
       project,
       selectedWallIds,
@@ -2321,7 +2259,6 @@ export default function App() {
       selectedContextObjectIds.length === 1 ? selectedContextObjectIds[0] : null,
     );
   }, [
-      selectedLayoutAnnotation,
       project,
       selectedWallIds,
       selectedDrawingId,
@@ -2643,6 +2580,60 @@ export default function App() {
   const patchOpenLayout = (id: string, fn: (l: Layout) => Layout, coalesceKey?: string) =>
     applyChange((p) => patchItem(p, "layouts", id, fn), coalesceKey);
 
+  // Ein offenes Blatt IST eine Zeichnungsebene: seine Blatt-Ebene (`layoutId`) wird die aktive Ebene,
+  // damit Werkzeuge, Befehle, Fang, Griffe, Auswahl und Undo genau wie im Grundriss wirken. Beim
+  // Schliessen kehrt die vorige Ebene zurück; wählt man im Navigator eine andere Ebene, schliesst
+  // das Blatt.
+  const sheetLevel = activeLayout ? sheetLevelOf(project, activeLayout.id) : undefined;
+  const levelBeforeSheetRef = useRef<string | null>(null);
+  const enteredSheetRef = useRef<string | null>(null);
+  useEffect(() => {
+    const current = project.drawingLevels.find((l) => l.id === activeLevelId);
+    if (activeLayout) {
+      if (!sheetLevel) {
+        // Layout ohne Blatt-Ebene (z. B. per CLI angelegt): einmal nachtragen.
+        applyChange(addItems("drawingLevels", [createSheetLevel(`sheet-${activeLayout.id}`, activeLayout)]));
+        return;
+      }
+      if (activeLevelId === sheetLevel.id) {
+        enteredSheetRef.current = activeLayout.id;
+        return;
+      }
+      if (enteredSheetRef.current === activeLayout.id) {
+        enteredSheetRef.current = null;
+        setActiveLayoutId(null);
+        return;
+      }
+      if (current && !isSheetLevel(current)) levelBeforeSheetRef.current = current.id;
+      setActiveLevelId(sheetLevel.id);
+      return;
+    }
+    enteredSheetRef.current = null;
+    if (current && !isSheetLevel(current)) return;
+    const back =
+      project.drawingLevels.find((l) => l.id === levelBeforeSheetRef.current && !isSheetLevel(l)) ??
+      project.drawingLevels.find((l) => !isSheetLevel(l));
+    if (back && back.id !== activeLevelId) setActiveLevelId(back.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLayout?.id, sheetLevel?.id, activeLevelId]);
+  const sheetPane =
+    activeLayout && sheetLevel && activeLevelId === sheetLevel.id
+      ? {
+          layout: activeLayout,
+          handlers: {
+            onBack: () => setActiveLayoutId(null),
+            onPatchViewport: (viewportId: string, patch: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) =>
+              patchOpenLayout(activeLayout.id, (l) => patchViewportInLayout(l, viewportId, patch)),
+            onRemoveViewport: (viewportId: string) =>
+              patchOpenLayout(activeLayout.id, (l) => removeViewportFromLayout(l, viewportId)),
+            onAddViewport: (snapshotId: string, init: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) =>
+              patchOpenLayout(activeLayout.id, (l) =>
+                addViewportToLayout(l, createViewport(`vp-${Date.now()}`, snapshotId, init)),
+              ),
+          },
+        }
+      : null;
+
   // ── Effektive Darstellung für die Hauptansicht ────────────────────────────
   // 3D: Geschosse nach dem Modus des Zeichnungsebenen-Panels, Kategorien nach
   // dem Modus des Ebenen-Panels. Grundriss: Kategorien nach dem Ebenen-Panel.
@@ -2665,8 +2656,13 @@ export default function App() {
     const visible = new Map(
       project.drawingLevels.map((z) => [z.id, z.visible]),
     );
+    // Blatt-Ebenen stehen für sich: nur sichtbar, wenn ihr Blatt offen ist, und dann allein.
+    const sheets = new Set(project.drawingLevels.filter(isSheetLevel).map((z) => z.id));
+    const onSheet = sheets.has(activeLevelId);
     return (id) =>
-      itemDisplay(drawingLevelsMode, id === activeLevelId, visible.get(id) ?? false);
+      onSheet || sheets.has(id)
+        ? { render: id === activeLevelId, greyed: false, locked: false }
+        : itemDisplay(drawingLevelsMode, id === activeLevelId, visible.get(id) ?? false);
   }, [project.drawingLevels, drawingLevelsMode, activeLevelId]);
 
   // Resolver: je Kategorie-Code die Render-Entscheidung. „Aktiv" = die per
@@ -2767,7 +2763,7 @@ export default function App() {
   // bewusst nicht mitgenommen).
   useDrawingLevelsWindowHost(
     {
-      drawingLevels: project.drawingLevels,
+      drawingLevels: project.drawingLevels.filter((z) => !z.layoutId),
       activeLevelId,
       displayMode: drawingLevelsMode,
     },
@@ -3066,6 +3062,14 @@ export default function App() {
   const { onImageOrPdfFileChosen } = useImageImportHandling({
     activeLevelId: activeLevel.id,
     activeCategoryCode,
+    // Auf einem Blatt: 60 mm breit, mitten aufs Papier.
+    imagePlacement: sheetPane
+      ? (() => {
+          const m = findMaster(project, sheetPane.layout);
+          const size = effectiveSheetSizeMm(m ?? sheetPane.layout);
+          return { widthM: 0.06, center: sheetMmToModel(size.w / 2, size.h / 2) };
+        })()
+      : undefined,
     applyChange,
     notify,
     setSelectedDrawingId,
@@ -3113,8 +3117,6 @@ export default function App() {
     openSettings,
     onOpenStampEditor,
     openResources,
-    activeLayout,
-    patchOpenLayout,
     dxfInputRef,
     planViewRef,
     selection,
@@ -3499,69 +3501,13 @@ export default function App() {
             Befehlszeile nur so breit wie der Viewport (nicht die ganze App),
             und die Docks nehmen die volle Body-Höhe ein (inkl. der Zeile). */}
         <div className="center-col">
-        {activeLayout ? (
-          /* Layout-Modus (Phase 2b): das Blatt füllt den Haupt-Viewport (statt
-             Grundriss/3D) und ist direkt mit der Maus editierbar — platzieren/
-             verschieben/skalieren/löschen der Viewports, Pan/Zoom, mm↔Bildschirm.
-             Die Befehlszeile entfällt (kein Zeichnen auf dem Blatt). */
-          <LayoutSheetView
-            project={project}
-            layout={activeLayout}
-            activeTool={activeTool}
-            onToolChange={onSelectTool}
-            selectedAnnotId={selectedLayoutAnnotationId}
-            onSelectAnnot={setSelectedLayoutAnnotationId}
-            handlers={{
-              onBack: () => {
-                setActiveLayoutId(null);
-                setSelectedLayoutAnnotationId(null);
-                // Ein auf dem Blatt armiertes Zeichenwerkzeug (line/rect/text/
-                // image) hat im Grundriss KEINEN laufenden Befehl in der Engine
-                // (der wird für ein offenes Layout bewusst nicht gestartet, s.
-                // `onSelectTool`) — zurück auf „Auswahl", sonst zeigt das
-                // Werkzeugpanel ein „aktives" Werkzeug ohne echten Befehl dahinter.
-                setActiveTool("select");
-              },
-              onPatchViewport: (viewportId, patch) =>
-                patchOpenLayout(activeLayout.id, (l) =>
-                  patchViewportInLayout(l, viewportId, patch),
-                ),
-              onRemoveViewport: (viewportId) =>
-                patchOpenLayout(activeLayout.id, (l) =>
-                  removeViewportFromLayout(l, viewportId),
-                ),
-              onAddViewport: (snapshotId, init) =>
-                patchOpenLayout(activeLayout.id, (l) =>
-                  addViewportToLayout(
-                    l,
-                    createViewport(`vp-${Date.now()}`, snapshotId, init),
-                  ),
-                ),
-              onAddAnnotation: (kind, init) => {
-                const id = `ann-${Date.now()}`;
-                patchOpenLayout(activeLayout.id, (l) =>
-                  addAnnotationToLayout(l, createAnnotation(id, kind, init)),
-                );
-                return id;
-              },
-              onPatchAnnotation: (annotationId, patch, coalesceKey) =>
-                patchOpenLayout(
-                  activeLayout.id,
-                  (l) => patchAnnotationInLayout(l, annotationId, patch),
-                  coalesceKey,
-                ),
-              onRemoveAnnotation: (annotationId) =>
-                patchOpenLayout(activeLayout.id, (l) =>
-                  removeAnnotationFromLayout(l, annotationId),
-                ),
-            }}
-          />
-        ) : (
+        {(
         <>
         {/* Hauptansicht (Mitte) — füllt den verbleibenden Platz. Die Plan-
             Ansicht meldet Cursor + Zoom an die Status-/Oberleiste und nimmt
             das Zoom-Handle entgegen. */}
         <Content
+          sheet={sheetPane}
           project={project}
           level={activeLevel}
           viewType={viewType}

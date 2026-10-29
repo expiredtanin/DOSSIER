@@ -265,27 +265,6 @@ export function layoutText(doc: RichTextDoc, opts: SvgTextOptions): SvgLine[] {
 }
 
 /**
- * Zeilen eines Text-Markups auf dem Layout-Blatt (Papier-mm; Layout-Blatt und Layout-PDF): Höhe
- * `heightMm` als Basisgrösse, Vorschub 1.25 × Höhe, erste Grundlinie bei `yMm`; mit Rahmenbreite
- * (`widthMm` > 0) wortweise umbrochen, Mitte/rechts im Rahmen (jede Breite ≠ 0 zählt dafür, wie früher).
- */
-export function annotationTextLines(
-  ann: { xMm: number; yMm: number; heightMm: number; widthMm?: number; color?: string },
-  doc: RichTextDoc,
-): SvgLine[] {
-  return layoutText(doc, {
-    x: ann.xMm,
-    y: ann.yMm,
-    lineHeight: ann.heightMm * 1.25,
-    unitPerPt: 25.4 / 72,
-    basePt: (ann.heightMm / 25.4) * 72,
-    color: ann.color ?? "#111111",
-    wrapWidthUnits: ann.widthMm && ann.widthMm > 0 ? ann.widthMm : undefined,
-    columnWidth: ann.widthMm,
-  });
-}
-
-/**
  * Raumstempel-Block (Kern `stamp_block`): Rich-Text-Zeilen (Vorschub 1.3 × Basisgrösse bzw. die
  * Absatz-Zeilenhöhe) und darunter die Live-Zeilen (0.8 × Basisgrösse), vertikal um `y0` zentriert,
  * alle bei `x0`. `stamp` ist das Plan-Primitiv `text`.

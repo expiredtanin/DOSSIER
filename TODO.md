@@ -1298,6 +1298,25 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ✅ **[78] Autotext im Plankopf.** Titelblock löst Projekt/Blatt/Massstab/Datum auf; Plannummer laufend
   oder `Layout.planNumber` (27.10.).
 - ○ **[79] Publikationssätze.** · M
+- ✅ **[89] Zeichnen auf dem Layout-Blatt = Zeichnen im Grundriss.** (29.10., Wartungs-Feedback „soll sich genau
+  gleich anfühlen") Vorher eigener Pfad: `Layout.annotations` (Linie/Rechteck/Text/Bild in Papier-mm) mit eigenen
+  Werkzeug-Zuständen, Klick-Logik, Griffen, Inline-Editor und DOM-Rendering in `LayoutSheet.tsx`, ohne Fang,
+  Befehlszeile/HUD, Tab-Felder, Bearbeiten-Befehle, Polylinie/Kreis/Bemassung …; eigene Auswahlart
+  `layoutAnnotation`, eigenes Pan/Zoom, eigener PDF-Zweig. Jetzt: jedes Layout hat seine Blatt-Ebene
+  (`DrawingLevel.layoutId`, Art „drawing", Papier 1:1 in Metern, Ursprung oben links, Papier-y = −y); ein offenes
+  Blatt macht sie zur aktiven Ebene und zeigt sie in derselben PlanView — gleiche Befehle, Fang, Griffe, Vorschau/HUD,
+  Auswahl, Undo (ein Schritt je Element) und dasselbe Rendering; das Blatt liefert nur den Hintergrund
+  (`PlanView.backdrop`: Papier, Master, Viewports) und Platzieren/Verschieben/Skalieren der Viewports. Format 3:
+  Migration `annotations` → `drawings2d` auf der Blatt-Ebene (jedes Layout bekommt seine Ebene); Blatt-Ebenen
+  ohne Strichstärken-Faktor und ohne projektglobale Zutaten, Schrifthöhe neuer Texte 3.5 mm (`textHeight` im
+  Befehls-Kontext), Bild einfügen 60 mm mitten aufs Blatt; Layout-PDF legt die Blatt-Ebene über `planToPrintSvg`
+  (fester Bereich, ohne Blatt) aufs Papier. Gelöscht: Annotations-Typen/-CRUD/-Mathe/-Rendering/-CSS, `annotationTextLines`.
+  e2e `layoutSheet.spec.ts` (Linie, Polylinie, Rechteck, Fang auf Endpunkt, Griff ziehen + Undo, ein Undo-Schritt je
+  Element — identisch im Grundriss und auf dem Blatt). Offen: Blatt rendert über den SVG-Pfad der PlanView (wegen des
+  Hintergrunds, wie bei Luftbildern), nicht über render2d; Lineale/Objekt-Info zeigen Meter (y negativ) statt
+  Papier-mm; feste Modellgrössen anderer Befehle (Kote, Detailverweis, Punktmarke) nicht ans Papier angepasst; kein
+  Fang auf Viewport-Inhalt; Layout-DXF (`--layout`) ohne Blatt-Zeichnung; PDF-Export der Blatt-Zeichnung nicht
+  angesehen; nicht in der Tauri-App/macOS geprüft. · M
 - ○ **[80] PDF mit Ebenen.** · M
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.

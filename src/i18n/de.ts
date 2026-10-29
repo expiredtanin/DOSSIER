@@ -435,8 +435,6 @@ export const de = {
   "objinfo.kind.column": "Stütze",
   "objinfo.kind.roof": "Dach",
   "objinfo.kind.contextObject": "Kontext-Objekt",
-  "objinfo.kind.layoutAnnotation": "Blatt-Markup",
-  "objinfo.layoutAnnotationHint": "Position/Grösse in mm direkt am Rahmen auf dem Blatt bearbeiten (Greifpunkte oder die Felder dort).",
   // ── Kontext-Objekt-Attribute (Object-Info-Panel) ────────────────────────
   "objinfo.contextObject.section": "Georeferenzierung",
   "objinfo.contextObject.type": "Art",
@@ -2427,7 +2425,6 @@ export const de = {
   // Editor
   "layouts.editorTitle": "Layout-Editor",
   "layouts.fit": "Einpassen",
-  "layouts.zoom100": "Echte Grösse (100 %, 1:1 auf dem Bildschirm)",
   "layouts.addViewport": "Viewport hinzufügen",
   "layouts.pickSnapshot": "Ausschnitt wählen …",
   "layouts.noSnapshots": "Keine Ausschnitte vorhanden. Zuerst einen Ausschnitt speichern.",
@@ -2446,23 +2443,9 @@ export const de = {
   "layouts.placeViewport": "Viewport aufziehen",
   "layouts.placeHint": "Rechteck auf dem Blatt aufziehen, dann Ausschnitt binden.",
   "layouts.bindSnapshot": "Ausschnitt binden",
-  "layouts.emptyViewports":
-    "Noch keine Viewports. „Viewport aufziehen\" wählen und ein Rechteck auf dem Blatt ziehen.",
   // Annotationen (Linie/Rechteck/Text/Bild) direkt auf dem Blatt — gezeichnet
   // mit denselben Werkzeugen wie im Grundriss (linkes Werkzeugpanel), kein
   // eigenes Werkzeug nur fürs Layout.
-  "layouts.annotTextTitle": "Text",
-  "layouts.annotTextLabel": "Textinhalt:",
-  "layouts.annotEditText": "Text ändern",
-  "layouts.annotRemove": "Annotation entfernen",
-  "layouts.annotX": "X (mm)",
-  "layouts.annotY": "Y (mm)",
-  "layouts.annotWidth": "Breite (mm)",
-  "layouts.annotHeight": "Höhe (mm)",
-  "layouts.annot.line": "Linie",
-  "layouts.annot.rect": "Rechteck",
-  "layouts.annot.text": "Text",
-  "layouts.annot.image": "Bild",
   // Baum / „＋"-Menü / Ordner
   "layouts.add": "Neu …",
   "layouts.addFolder": "Ordner erstellen",

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { docFromText, makeRun, type RichTextDoc } from "./richText";
-import { annotationTextLines, docToHtml, layoutText, runCssProps } from "./renderHtml";
+import { docToHtml, layoutText, runCssProps } from "./renderHtml";
 
 const OPTS = { x: 0, y: 0, lineHeight: 10, unitPerPt: 1, basePt: 10, color: "#000000" };
 
@@ -27,16 +27,6 @@ describe("layoutText", () => {
     expect(at({})).toEqual([[5, 7, "start"], [5, 27, "middle"], [5, 37, "end"]]);
     expect(at({ columnWidth: 40 })).toEqual([[5, 7, "start"], [25, 27, "middle"], [45, 37, "end"]]);
     expect(at({ columnWidth: NaN })).toEqual(at({}));
-  });
-
-  it("Layout-Markup: Basis = Höhe in mm, Vorschub 1.25 × Höhe, Rahmen nur bei Breite > 0 umbrochen", () => {
-    const doc = docFromText("eins zwei drei");
-    const l = annotationTextLines({ xMm: 10, yMm: 20, heightMm: 4, widthMm: 15 }, doc);
-    expect(l.map((x) => x.y)).toEqual([20, 25, 30]);
-    expect(l[0].tspans[0]).toMatchObject({ fontSize: 4, fill: "#111111" });
-    // Negative Breite: kein Umbruch, aber (wie früher) Spalte für die Lage.
-    const r = annotationTextLines({ xMm: 10, yMm: 20, heightMm: 4, widthMm: -6 }, { version: 1, paragraphs: [{ runs: [makeRun("x")], align: "right" }] });
-    expect([r.length, r[0].x]).toEqual([1, 4]);
   });
 
   it("bricht lange Absätze wortweise auf mehrere Zeilen um", () => {

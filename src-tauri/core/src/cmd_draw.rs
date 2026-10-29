@@ -823,21 +823,22 @@ fn multiline_preview(v: &Value, pts: &[V], p: &mut Preview) {
     }
 }
 
-const TEXT_HEIGHT: f64 = 0.25;
-const TEXTBOX_MIN: f64 = 0.2;
+/// Mindestgrösse eines Textrahmens als Vielfaches der Schrifthöhe (0.2 m bei 0.25 m Schrift).
+const TEXTBOX_MIN_PER_HEIGHT: f64 = 0.8;
 
-fn text_geom(at: Value, extra: Vec<(&str, Value)>) -> Value {
-    let mut f = vec![("shape", s("text")), ("at", at), ("text", s("")), ("height", js_num(TEXT_HEIGHT)), ("angle", js_num(0.0))];
+fn text_geom(ctx: &Ctx, at: Value, extra: Vec<(&str, Value)>) -> Value {
+    let mut f = vec![("shape", s("text")), ("at", at), ("text", s("")), ("height", js_num(ctx.text_height)), ("angle", js_num(0.0))];
     f.extend(extra);
     obj(f)
 }
 
 /// Textrahmen aus zwei Ecken: Anker oben links (eine Zeile tief), Breite, Mindesthöhe.
-fn textbox_frame(a: V, b: V) -> (V, f64, f64) {
+fn textbox_frame(a: V, b: V, text_height: f64) -> (V, f64, f64) {
     let (mn, mx) = rect_geom(a, b);
-    let width = jsnum::max(TEXTBOX_MIN, mx.0 - mn.0);
-    let height = jsnum::max(TEXTBOX_MIN, mx.1 - mn.1);
-    ((mn.0, mx.1 - TEXT_HEIGHT), width, height)
+    let min = TEXTBOX_MIN_PER_HEIGHT * text_height;
+    let width = jsnum::max(min, mx.0 - mn.0);
+    let height = jsnum::max(min, mx.1 - mn.1);
+    ((mn.0, mx.1 - text_height), width, height)
 }
 
 fn kote_tri(at: V, kind: &str) -> [V; 3] {
@@ -1091,15 +1092,15 @@ pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> 
             add_op("drawings2d", vec![d])
         }
         "multiline" => multiline_ops(v, ctx, ids),
-        "text" => add_drawing(v, ctx, ids, text_geom(pt_val(v, "at"), vec![])),
+        "text" => add_drawing(v, ctx, ids, text_geom(ctx, pt_val(v, "at"), vec![])),
         "textbox" => {
-            let (at, width, _) = textbox_frame(p_of(v, "a"), p_of(v, "b"));
-            add_drawing(v, ctx, ids, text_geom(pv(at), vec![("width", js_num(width))]))
+            let (at, width, _) = textbox_frame(p_of(v, "a"), p_of(v, "b"), ctx.text_height);
+            add_drawing(v, ctx, ids, text_geom(ctx, pv(at), vec![("width", js_num(width))]))
         }
         "textpath" => {
             let pts = pts_val(v, "pts");
             let at = pts.get(0).cloned().unwrap_or(Value::Null);
-            add_drawing(v, ctx, ids, text_geom(at, vec![("pathPts", pts)]))
+            add_drawing(v, ctx, ids, text_geom(ctx, at, vec![("pathPts", pts)]))
         }
         "leader" => {
             let mut extra = vec![("leaderTarget", pt_val(v, "target"))];
@@ -1107,7 +1108,7 @@ pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> 
             if bends.as_array().is_some_and(|b| !b.is_empty()) {
                 extra.push(("leaderBendPoints", bends));
             }
-            add_drawing(v, ctx, ids, text_geom(pt_val(v, "at"), extra))
+            add_drawing(v, ctx, ids, text_geom(ctx, pt_val(v, "at"), extra))
         }
         "kote" => add_drawing(
             v,
@@ -1160,7 +1161,7 @@ pub fn preview(root: &Map<String, Value>, v: &Value, ctx: &Ctx, pts: &[V], p: &m
         "textbox" => {
             if let [a, b] = pts {
                 let (mn, mx) = rect_geom(*a, *b);
-                let (_, w, h) = textbox_frame(*a, *b);
+                let (_, w, h) = textbox_frame(*a, *b, ctx.text_height);
                 p.info.extend([w, h]);
                 p.shapes.poly(&corners_of(mn, mx));
             }
@@ -1232,7 +1233,23 @@ mod tests {
     use super::*;
 
     fn ctx() -> Ctx<'static> {
-        Ctx { level: "L", floor_height: None, cat: "20", wall_type: "" }
+        Ctx { level: "L", floor_height: None, cat: "20", wall_type: "", text_height: crate::cmd_create::DEFAULT_TEXT_HEIGHT }
+    }
+
+    #[test]
+    fn schrifthoehe_aus_dem_kontext() {
+        // Grundriss: Vorgabe 0.25 m; Layout-Blatt (Papier 1:1): die Papierhöhe aus `textHeight`.
+        let v = json!({"cmd": "text", "at": {"x": 0.1, "y": -0.1}, "ctx": {"level": "blatt", "cat": "20", "textHeight": 0.0035}});
+        let c = crate::cmd_create::ctx_of(&v);
+        assert_eq!(c.text_height, 0.0035);
+        let o = ops(&Map::new(), &v, &c, &mut IdGen::new("s")).unwrap();
+        assert_eq!(o[0].to_json()["items"][0]["geom"]["height"], 0.0035);
+        let plain = json!({"ctx": {"level": "eg", "textHeight": -1}});
+        assert_eq!(crate::cmd_create::ctx_of(&plain).text_height, crate::cmd_create::DEFAULT_TEXT_HEIGHT);
+        // Textrahmen: Mindestgrösse folgt der Schrifthöhe, Anker eine Zeile unter der Oberkante.
+        let (at, w, h) = textbox_frame((0.0, 0.0), (0.0001, -0.0001), 0.0035);
+        assert!((w - 0.0028).abs() < 1e-12 && (h - 0.0028).abs() < 1e-12);
+        assert!((at.1 - (0.0 - 0.0035)).abs() < 1e-12);
     }
 
     #[test]

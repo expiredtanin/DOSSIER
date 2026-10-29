@@ -27,6 +27,11 @@ import type { Vec2 } from "../model/types";
 export function useImageImportHandling(opts: {
   activeLevelId: string;
   activeCategoryCode: string;
+  /**
+   * Einfügen auf einem Layout-Blatt (Papier 1:1 in Metern): Bildbreite und Mitte des Bilds
+   * (sonst 2 m breit am Modell-Nullpunkt).
+   */
+  imagePlacement?: { widthM: number; center: Vec2 };
   /** Änderung als Ops (Store `applyChange`): alle Bilder eines Einfügens = ein Undo-Schritt. */
   applyChange: (ops: readonly CoreOp[]) => void;
   notify: (message: string, kind?: NotifyKind) => void;
@@ -48,6 +53,7 @@ export function useImageImportHandling(opts: {
   const {
     activeLevelId,
     activeCategoryCode,
+    imagePlacement,
     applyChange,
     notify,
     setSelectedDrawingId,
@@ -67,9 +73,10 @@ export function useImageImportHandling(opts: {
     assets: { src: string; naturalWidth: number; naturalHeight: number }[],
   ) => {
     const drawings = assets.map((a, i) => {
-      const { widthM, heightM } = defaultImageSizeM(a.naturalWidth, a.naturalHeight);
-      const cascade = i * 0.3;
-      const at: Vec2 = { x: -widthM / 2 + cascade, y: -heightM / 2 - cascade };
+      const { widthM, heightM } = defaultImageSizeM(a.naturalWidth, a.naturalHeight, imagePlacement?.widthM);
+      const cascade = i * 0.15 * widthM;
+      const c = imagePlacement?.center ?? { x: 0, y: 0 };
+      const at: Vec2 = { x: c.x - widthM / 2 + cascade, y: c.y - heightM / 2 - cascade };
       return imageDrawing2d(activeLevelId, activeCategoryCode, a.src, at, widthM, heightM);
     });
     applyChange(addItems("drawings2d", drawings));
