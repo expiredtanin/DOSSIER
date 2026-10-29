@@ -749,6 +749,10 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Polylinie offen/geschlossen/ohne `closed`/mit Bögen, Rechteck, Kreis, Text; zwei Geschosse) Ops gleich bis auf die
     ids; 9000 Segment-Löschen (3047 mit Löschen) gleiche Geometrie bzw. gleiche Ops, Element = Original mit neuer
     Geometrie. Nicht in der Tauri-App geprüft.
+    ✅ (29.10.) **Raumprogramm-Import im Kern** ([61]/[K4]): `fileio/src/sheet_map.rs` (Kopfzeile, Spalten-Vorschlag de/en/fr,
+    Zeilen → Programmzeilen, Summen-/Zwischentitel, Flächenart, Zellentext), Bindungen in `web_sheet.rs`; `io/roomProgramImport.ts`
+    nur noch Fassade (JSON, Signaturen gleich) + `roomProgramOps`. Gleichheit (einmalig, Test gelöscht): 400 Zufallstabellen alt/neu
+    gleich. Bekannte Abweichung: Akzente über feste Tabelle statt Unicode-NFD (exotische Zeichen).
     ✅ (29.10.) **Fang-Kandidaten aus dem Modell im Kern** ([K4] S3/[K3d]): `snap_model.rs` sammelt je Dokument-Stand,
     Geschoss und sichtbaren Ebenen (vorher `baseSegments`/`collectCircles`/`roomAnchors`/`ellipseCenters` in
     `tools/snapping.ts`): Wandachsen + Schichtgrenzen, Raum-/Decken- (mit Aussparungen)/Dach-/Treppen-/Stützen-Umrisse,
