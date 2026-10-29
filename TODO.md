@@ -32,6 +32,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
 - ✅ **Mac-Test 27.10.** (Maintainer): App startet mit dem Rust-Kern, Darstellung sieht gut aus — Stand `5b72069`
   (K0–K2, render2d binär); zweiter Test mit GPU-Kompilierung [K3b] (`7a8af4f`) ebenfalls bestanden.
 - ✅ **Mac-Test 29.10.** (Maintainer): Stand master 29.10. (Kern-Port [K3d]/[K4] S3–S4, Undo im Kern, Plan-Puffer v2, Raumprogramm, Dächer mit Höfen) — „clean“, keine Auffälligkeiten gemeldet.
+- ✅ **Mac-Test 29.10. abends** (Maintainer): Stand master `44e17ee` (Rust-Port abgeschlossen [K3]/[K4], Verlauf-Panel [84], Layout-Blatt [93], STEP-Import im Kern, grosse Importe) — „läuft alles“.
 - ✅ **[K2] Geometrie-Ableitungen.** (27.10.) Dachgeometrie in Rust (`roof.rs`, `roof_skeleton.rs`;
   `roofSkeleton.ts` gelöscht, ~2× schneller, Ergebnis bitgleich). Treppen in Rust (`stair_geometry`,
   `stair_outline`, `stair_cut`; `stair.ts` Fassade, 27.10.). Räume (27.10.): `room_area.rs` (Flächen,
