@@ -35,6 +35,7 @@ import type {
 import { activePenSet, resolvePenColor, resolvePenWeight } from "./model/penSets";
 import { PenColorField } from "./ui/PenColorField";
 import { generatePlan, computeKennzahlen, checkRoomProgram } from "./core";
+import { addedItems } from "./core";
 import { programStatusLabel } from "./panels/KennzahlenSection";
 import type { CategoryDisplayResolver, ProjectMutation } from "./core";
 import { sectionPlaneFromLevel, sectionUAxisModel } from "./core";
@@ -54,13 +55,11 @@ import { RecoverAutosaveDialog } from "./ui/RecoverAutosaveDialog";
 import { Toast } from "./ui/Toast";
 import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./native/projectFile";
 import { stepTextToImportedMeshes } from "./io/stepImport";
-import { formatIfcReport, ifcBytesToImportedMeshes } from "./io/ifcImport";
-import { formatIfcElementsSummary, ifcElementsToProject, readIfcElements } from "./io/ifcElements";
+import { formatIfcElementsSummary, formatIfcReport, readIfcFlat } from "./io/ifcImport";
 import { IfcImportDialog, type IfcImportMode } from "./ui/IfcImportDialog";
 import { MeshImportHost } from "./ui/MeshImportDialog";
 import { openMeshFileDialog, requestMeshImport, splitMeshFiles } from "./state/meshImportStore";
 import { formatMeshReport, isMeshFile } from "./io/meshImport";
-import { projectGeoOrigin } from "./model/geoRebase";
 import { clashMarkerOps, runClashCheck } from "./analysis/clash";
 import { checkForUpdate } from "./update/checkForUpdate";
 import type { PlanViewHandle } from "./views/plan/PlanView";
@@ -205,7 +204,7 @@ import type { BooleanResult } from "./editors/booleanOps";
 import { applyDrawingStyleOps, readDrawingStyle } from "./editors/matchProps";
 
 // Globaler Store (Slices: project/selection/view/layout).
-import { useStore } from "./state/appStore";
+import { getState, useStore } from "./state/appStore";
 import { categoryLabel, findCategory } from "./model/layers";
 import { reconcileLayout } from "./state/layoutSlice";
 
@@ -556,7 +555,7 @@ export default function App() {
 
   // Verstecktes Datei-Input für den DXF-Import (Site-Panel/„import"-Befehl).
   // Der Klick auf „DXF importieren" triggert .click() dieses Inputs; onChange
-  // liest die Datei als Text und reicht sie durch parseDxf → addContextObjects.
+  // öffnet den Import-Dialog; übernommen wird im Kern (`ProjectDocument.importDrawing`).
   const dxfInputRef = useRef<HTMLInputElement>(null);
   // Verstecktes Datei-Input für den STEP-Import (Menü Datei, STEP importieren).
   const stepInputRef = useRef<HTMLInputElement>(null);
@@ -1597,8 +1596,6 @@ export default function App() {
     addDrawing,
     addSection,
     addElevation,
-    addDrawingLevel,
-    importDrawings,
     addCategory,
     patchCategory,
     addSubCategory,
@@ -1666,8 +1663,8 @@ export default function App() {
     deleteStairType,
     importLineStyles,
     importHatches,
-    addContextObjects,
     addContextObjectsAndFit,
+    fitToContextObjects,
     removeContextObject,
     removeContextObjects,
     generateTerrain,
@@ -1704,44 +1701,29 @@ export default function App() {
     setRoomStamp,
   } = useProjectActions(applyChange, notify, planViewRef);
 
-  // IFC-Import: erst die Wahl Mesh/Bauteile (`IfcImportDialog`), dann [B3] Kontext-Meshes
-  // (`io/ifcImport.ts`) oder [B4] echte Bauteile (`io/ifcElements.ts`, übernommen als Ops).
+  // IFC-Import: erst die Wahl Mesh/Bauteile (`IfcImportDialog`), dann liest das Format-Modul (Web-Worker) und der
+  // Kern übernimmt [B3] Kontext-Meshes oder [B4] echte Bauteile als EINEN Undo-Schritt ([K4] S4, `importIfc`).
   const [pendingIfc, setPendingIfc] = useState<File | null>(null);
   const importIfcFile = (f: File) => setPendingIfc(f);
   const runIfcImport = (f: File, mode: IfcImportMode) => {
-    if (mode === "elements") {
-      void f
-        .arrayBuffer()
-        .then((buf) => readIfcElements(new Uint8Array(buf)))
-        .then(({ products, report, elements }) => {
-          let summary: ReturnType<typeof ifcElementsToProject>["summary"] | null = null;
-          let bounds: { x: number; y: number }[] = [];
-          // Als Ops in einem Schritt ([K4] S3): ein IFC-Import = ein Undo-Schritt.
-          applyChange((p) => {
-            const r = ifcElementsToProject(p, products, elements, { fileName: f.name, geoOrigin: projectGeoOrigin(p) });
-            summary = r.summary;
-            const added = new Set(p.walls.map((w) => w.id));
-            bounds = r.project.walls.filter((w) => !added.has(w.id)).flatMap((w) => [w.start, w.end]);
-            return r.ops;
-          });
-          if (bounds.length) planViewRef.current?.fitBounds(bounds);
-          if (summary) {
-            const s: ReturnType<typeof ifcElementsToProject>["summary"] = summary;
-            const empty = s.walls + s.ceilings + s.columns + s.rooms + s.meshes === 0;
-            notify(formatIfcElementsSummary(s, report, t), empty || report.truncated ? "warning" : "info");
-          }
-        })
-        .catch((err) =>
-          notify(`${t("ifc.import.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"),
-        );
-      return;
-    }
+    const elements = mode === "elements";
     void f
       .arrayBuffer()
-      .then((buf) => ifcBytesToImportedMeshes(new Uint8Array(buf), f.name, { geoOrigin: projectGeoOrigin(project) }))
-      .then(({ meshes, report }) => {
-        if (meshes.length) addContextObjectsAndFit(meshes);
-        const warn = meshes.length === 0 || report.truncated || report.productsWithoutGeometry > 0;
+      .then((buf) => readIfcFlat(new Uint8Array(buf), elements))
+      .then((flat) => {
+        const r = getState().commitImport((doc, base, now) => doc.importIfc(base, flat, { fileName: f.name, elements }, now));
+        if (!r) return;
+        const report = r.report;
+        if (elements && r.summary) {
+          const bounds = addedItems(r.ops, "walls").flatMap((w) => [(w as Wall).start, (w as Wall).end]);
+          if (bounds.length) planViewRef.current?.fitBounds(bounds);
+          const s = r.summary;
+          const empty = s.walls + s.ceilings + s.columns + s.rooms + s.meshes === 0;
+          notify(formatIfcElementsSummary(s, report, t), empty || report.truncated ? "warning" : "info");
+          return;
+        }
+        fitToContextObjects(addedItems(r.ops, "context") as ContextObject[]);
+        const warn = r.contextObjects === 0 || report.truncated || report.productsWithoutGeometry > 0;
         notify(formatIfcReport(report, t), warn ? "warning" : "info");
       })
       .catch((err) =>
@@ -1908,13 +1890,9 @@ export default function App() {
     runImport,
   } = useProjectFileActions(
     project,
-    applyChange,
     setImportState,
     setExportSaveFormat,
     activeCategoryCode,
-    addDrawingLevel,
-    importDrawings,
-    addContextObjects,
     setActiveLevelId,
     planViewRef,
   );
@@ -3354,11 +3332,13 @@ export default function App() {
       <PointCloudImportHost project={project} />
       {/* 3D-Modell-Import (OBJ/STL/glTF/GLB/PLY): verstecktes Datei-Feld + Dialog. */}
       <MeshImportHost
-        project={project}
         notify={notify}
-        onImport={(meshes, report) => {
-          if (meshes.length) addContextObjectsAndFit(meshes);
-          notify(formatMeshReport(report, t), meshes.length === 0 || report.truncated ? "warning" : "info");
+        onImport={(read, fileName, placement) => {
+          // Der Kern macht die Kontext-Meshes und übernimmt sie als EINEN Undo-Schritt ([K4] S4).
+          const r = getState().commitImport((doc, base, now) => doc.importMesh(base, read.flat, { fileName, placement }, now));
+          if (!r) return;
+          fitToContextObjects(addedItems(r.ops, "context") as ContextObject[]);
+          notify(formatMeshReport(read.report, t), r.contextObjects === 0 || read.report.truncated ? "warning" : "info");
         }}
       />
       {/* Verstecktes IFC-Datei-Input (Menü Datei, IFC importieren). */}

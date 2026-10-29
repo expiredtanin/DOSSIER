@@ -17,7 +17,9 @@ import { sampleProject } from "../model/sampleProject";
 import { verticalExtents } from "../geometry/grips";
 import { polygonArea } from "../geometry/roomArea";
 import { wallMeshVolumes } from "../export/meshScene.testutil";
-import { formatIfcReport, handleIfcWorkerRequest, ifcToImportedMeshes, readIfc, type IfcProduct, type IfcWorkerRequest } from "./ifcImport";
+import { formatIfcReport, handleIfcWorkerRequest, type IfcWorkerRequest } from "./ifcImport";
+import { importIfcInto, inspectIfc, type IfcProductView as IfcProduct } from "./importView.testutil";
+import type { Project } from "../model/types";
 
 function volume(pos: ArrayLike<number>, idx: ArrayLike<number>): number {
   let v = 0;
@@ -52,7 +54,7 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
   const ifc = exportIfcSpf(sampleProject);
 
   it("gleiche Bauteilzahl je Klasse, Räume ausgelassen", async () => {
-    const { products, report } = await readIfc(bytesOf(ifc));
+    const { products, report } = await inspectIfc(bytesOf(ifc));
     expect(report.schema).toBe("IFC4");
     expect(report.parseErrors).toBe(0);
     expect(report.productsWithoutGeometry).toBe(0);
@@ -72,7 +74,7 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
   });
 
   it("Volumen je Wand = Volumen der Wand-Netze, je Decke = Fläche × Dicke", async () => {
-    const { products, report } = await readIfc(bytesOf(ifc));
+    const { products, report } = await inspectIfc(bytesOf(ifc));
     // Wände: dieselben Ausschnitt-Netze wie der Export (Bänder je Wand). [B5] schreibt einfache Wände als
     // ungeschnittene Extrusion + IfcOpeningElement, der Import zieht die Öffnungen ab ([B3]) → bei allen
     // Wänden das ausgeschnittene Volumen.
@@ -110,42 +112,34 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
   });
 
   it("Kontext-Meshes: je Bauteil, Klasse als Ebene; Rückschub auf den Modell-Nullpunkt bei Georeferenz", async () => {
-    const { products, report } = await readIfc(bytesOf(ifc));
-    const meshes = ifcToImportedMeshes(products, "haus.ifc");
+    const { products, report } = await inspectIfc(bytesOf(ifc));
+    const meshes = (await importIfcInto(sampleProject, bytesOf(ifc))).meshes;
     expect(meshes.length).toBe(products.length);
     expect(new Set(meshes.map((m) => m.id)).size).toBe(meshes.length);
     expect(meshes.every((m) => m.type === "importedMesh" && m.positions.length >= 9 && m.indices.length >= 3)).toBe(true);
     expect(meshes.find((m) => m.layer === "IfcWall")).toBeTruthy();
-    const grouped = ifcToImportedMeshes(products, "haus.ifc", { group: "class" });
+    const grouped = (await importIfcInto(sampleProject, bytesOf(ifc), { group: "class" })).meshes;
     expect(grouped.length).toBeLessThan(meshes.length);
     expect(grouped.reduce((s, m) => s + m.indices.length, 0)).toBe(meshes.reduce((s, m) => s + m.indices.length, 0));
     // Datei in LV95 (Export mit Standort-Bezug) → zurück auf die lokalen Koordinaten.
-    const origin = { e: 2_600_000, n: 1_200_000 };
-    const shifted = products.map((p) => {
-      const pos = new Float64Array(p.positions);
-      for (let i = 0; i < pos.length; i += 3) {
-        pos[i] += origin.e;
-        pos[i + 1] += origin.n;
-      }
-      return { ...p, positions: pos };
-    });
-    const back = ifcToImportedMeshes(shifted, "haus.ifc", { geoOrigin: origin });
+    const geo: Project = { ...sampleProject, geoAnchor: { lv95: { e: 2_600_000, n: 1_200_000 }, model: { x: 0, y: 0 } } };
+    const back = (await importIfcInto(geo, bytesOf(exportIfcSpf(geo)))).meshes;
     expect(back[0].positions[0]).toBeCloseTo(meshes[0].positions[0], 6);
     // Ohne Bezug in der Datei (lokal) bleibt alles, auch wenn das Projekt einen hat.
-    const local = ifcToImportedMeshes(products, "haus.ifc", { geoOrigin: origin });
+    const local = (await importIfcInto(geo, bytesOf(ifc))).meshes;
     expect(local[0].positions[0]).toBeCloseTo(meshes[0].positions[0], 9);
     const text = formatIfcReport(report, (k, v) => `${k}${JSON.stringify(v ?? {})}`);
     expect(text).toContain("ifc.import.done");
   });
 
   it("Unsinn ergibt einen Fehler, keinen Absturz des Moduls", async () => {
-    await expect(readIfc(new Uint8Array())).rejects.toBeTruthy();
-    await expect(readIfc(bytesOf("kein IFC"))).rejects.toBeTruthy();
+    await expect(inspectIfc(new Uint8Array())).rejects.toBeTruthy();
+    await expect(inspectIfc(bytesOf("kein IFC"))).rejects.toBeTruthy();
     const broken = ifc.slice(0, Math.floor(ifc.length / 2));
-    const r = await readIfc(bytesOf(broken));
+    const r = await inspectIfc(bytesOf(broken));
     expect(r.products.length).toBeGreaterThanOrEqual(0);
     // Modul lebt noch.
-    expect((await readIfc(bytesOf(ifc))).products.length).toBeGreaterThan(0);
+    expect((await inspectIfc(bytesOf(ifc))).products.length).toBeGreaterThan(0);
   });
 });
 
@@ -160,7 +154,7 @@ const freeformFile = new URL("./testdata/ifc-freeform-cases.ifc", import.meta.ur
 
 describe("IFC-Import: Öffnungen, Boolesche Körper, Rotation, Sweeps", () => {
   it("alle Fälle gelesen, Volumen von Hand", async () => {
-    const { products, report } = await readIfc(new Uint8Array(readFileSync(casesFile)));
+    const { products, report } = await inspectIfc(new Uint8Array(readFileSync(casesFile)));
     expect(report.skippedItems).toEqual({});
     expect(report.simplifiedBooleans).toBe(0);
     expect(report.voidsApplied).toBe(2);
@@ -193,7 +187,7 @@ describe("IFC-Import: Öffnungen, Boolesche Körper, Rotation, Sweeps", () => {
   });
 
   it("Freiform-Fälle: alle gelesen, Volumen von Hand", async () => {
-    const { products, report } = await readIfc(new Uint8Array(readFileSync(freeformFile)));
+    const { products, report } = await inspectIfc(new Uint8Array(readFileSync(freeformFile)));
     expect(report.skippedItems).toEqual({});
     const pi = Math.PI;
     const want: Array<[string, number]> = [
@@ -236,12 +230,12 @@ describe("IFC-Import: Öffnungen, Boolesche Körper, Rotation, Sweeps", () => {
       vi.stubGlobal("Worker", FakeWorker);
       const bytes = new Uint8Array(readFileSync(casesFile));
       const before = FakeWorker.started;
-      const { products, report } = await readIfc(bytes);
+      const { products, report } = await inspectIfc(bytes);
       expect(FakeWorker.started).toBe(before + 1);
       expect(products.length).toBe(15);
       expect(report.voidsApplied).toBe(2);
       expect(bytes.byteLength).toBeGreaterThan(0);
-      await expect(readIfc(bytesOf("kein IFC"))).rejects.toThrow();
+      await expect(inspectIfc(bytesOf("kein IFC"))).rejects.toThrow();
       const bad = await handleIfcWorkerRequest({ type: "nonsense" } as unknown as IfcWorkerRequest);
       expect(bad.res.type).toBe("error");
     });
@@ -257,7 +251,7 @@ describe("IFC-Import: Öffnungen, Boolesche Körper, Rotation, Sweeps", () => {
           terminate() {}
         },
       );
-      const { products } = await readIfc(new Uint8Array(readFileSync(casesFile)));
+      const { products } = await inspectIfc(new Uint8Array(readFileSync(casesFile)));
       expect(products.length).toBe(15);
     });
   });
@@ -280,7 +274,7 @@ function ifcopenshellProducts(file: string): Record<string, OsProduct> {
 /** Vergleich je GlobalId; liefert Abweichungen als Text (leer = gleich). */
 async function compare(file: string, rel: (p: IfcProduct) => number): Promise<string[]> {
   const ref = ifcopenshellProducts(file);
-  const { products, report } = await readIfc(new Uint8Array(readFileSync(file)));
+  const { products, report } = await inspectIfc(new Uint8Array(readFileSync(file)));
   // ifcopenshell 0.9 liefert bei manchen Dateien in mm (z. B. buildingSMART
   // „wall-with-opening-and-window.ifc", IfcSIUnit MILLI) die Geometrie unskaliert in Dateieinheiten,
   // obwohl `convert-back-units` aus ist; unser Import rechnet dort richtig in m (Rust-Test mit mm).

@@ -8,8 +8,8 @@
 // Muster wie ResourceManager: abgedunkeltes Overlay, Klick auf den Hintergrund
 // und Esc schließen. Diese Komponente HÄLT nur Formular-Zustand und liefert beim
 // Bestätigen eine strukturierte Entscheidung (`ImportDecision`) nach oben; die
-// eigentlichen Store-Mutationen (Ebene anlegen, Drawings anhängen, Kontext)
-// führt App in der richtigen Reihenfolge aus.
+// eigentliche Umwandlung (Ebene anlegen, Kategorien, Zeichnungen, Kontext) macht
+// der Kern als EIN Undo-Schritt (`ProjectDocument.importDrawing`, [K4] S4).
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
@@ -17,16 +17,8 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
-import type { DrawingLevelKind, ImportedMesh, Project } from "../model/types";
-import { flattenCategories } from "../model/types";
-import type { DxfImportResult, ImportDiagnostics } from "../io/dxfParser";
-import {
-  contoursToDrawings,
-  textsToDrawings,
-  countContours,
-  distinctLayers,
-} from "../io/dxfToDrawings";
-import type { CategoryMode } from "../io/dxfToDrawings";
+import type { DrawingLevelKind, Project } from "../model/types";
+import type { ImportDiagnostics, ParsedImport } from "../io/importSource";
 import { Dropdown } from "./Dropdown";
 import { PDF_SCALES, PT_TO_MM } from "../io/pdfVector";
 import type { PdfVectorPage } from "../io/pdfVector";
@@ -48,6 +40,9 @@ export interface PdfImportOptions {
   preview: PdfVectorPage;
 }
 
+/** Wie Layer auf Kategorien abgebildet werden: je Layer eine Kategorie oder alles auf die aktive. */
+export type CategoryMode = "active" | "byLayer";
+
 /** Strukturierte Import-Entscheidung, die der Dialog beim Bestätigen liefert. */
 export interface ImportDecision {
   /** Ziel: bestehende Ebene (id) ODER neue Zeichnung (name). */
@@ -62,8 +57,8 @@ export interface ImportDecision {
    * des aktuellen Ausschnitts geschoben.
    */
   placement: "origin" | "viewCenter";
-  /** Die geparsten Konturen-Sätze (für die spätere 2D-Konvertierung). */
-  parsed: DxfImportResult;
+  /** Die gelesene Datei (Puffer für den Kern, `ProjectDocument.importDrawing`). */
+  parsed: ParsedImport;
 }
 
 /**
@@ -131,7 +126,7 @@ export interface ImportDialogProps {
   /** Wählt ein Papierbereich-Layout (Name) oder den Modellraum (`null`) zum Import; liest neu. */
   onSelectLayout?: (layout: string | null) => void;
   /** Geparstes Ergebnis (null während Laden / bei DWG-Parse-Fehler). */
-  parsed: DxfImportResult | null;
+  parsed: ParsedImport | null;
   /** Vektor-PDF ([76]): Seite/Massstab; `onPdfChange` liest neu bzw. rechnet um. */
   pdf?: PdfImportOptions;
   onPdfChange?: (page: number, scale: number) => void;
@@ -165,14 +160,13 @@ export function ImportDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const contourSets = parsed?.contours ?? [];
-  const meshes: ImportedMesh[] = parsed?.meshes ?? [];
-  const texts = parsed?.texts ?? [];
-  const contourCount = countContours(contourSets);
-  const textCount = texts.length;
-  const layers = distinctLayers(contourSets);
+  const summary = parsed?.summary;
+  const contourCount = summary?.contours ?? 0;
+  const textCount = summary?.texts ?? 0;
+  const meshCount = summary?.meshes ?? 0;
+  const layers = summary?.layers ?? [];
   const hasDrawings = contourCount > 0 || textCount > 0;
-  const hasMeshes = meshes.length > 0;
+  const hasMeshes = meshCount > 0;
 
   // ── Formular-Zustand ──────────────────────────────────────────────────────
   const firstLevelId = project.drawingLevels[0]?.id ?? "";
@@ -299,14 +293,14 @@ export function ImportDialog({
                   {textCount > 0 && (
                     <li>{t("import.summary.texts", { n: textCount })}</li>
                   )}
-                  <li>{t("import.summary.meshes", { n: meshes.length })}</li>
+                  <li>{t("import.summary.meshes", { n: meshCount })}</li>
                   <li>
                     {layers.length > 0
                       ? t("import.summary.layers", { layers: layers.join(", ") })
                       : t("import.summary.noLayers")}
                   </li>
                 </ul>
-                {parsed?.recovered && <div className="imp-warn">{t("import.summary.recovered")}</div>}
+                {summary?.recovered && <div className="imp-warn">{t("import.summary.recovered")}</div>}
                 {!hasDrawings && !hasMeshes && (
                   <div className="imp-warn">
                     {error ?? t("import.summary.empty")}
@@ -315,9 +309,9 @@ export function ImportDialog({
                         Abdeckungslücke (z. B. „500 ARC, 200 INSERT"). Entity-Typ-
                         Codes + Zahlen sind technische DWG-Bezeichner (Daten,
                         keine übersetzbare Prosa). */}
-                    {parsed?.diagnostics && (
+                    {summary?.diagnostics && (
                       <div className="imp-diag">
-                        {formatDiagnostics(parsed.diagnostics)}
+                        {formatDiagnostics(summary.diagnostics)}
                       </div>
                     )}
                   </div>
@@ -391,17 +385,17 @@ export function ImportDialog({
               )}
 
               {/* Papierbereich: Layouts der Datei (Bericht) und, wenn möglich, eines statt des Modellraums lesen. */}
-              {parsed?.layouts && parsed.layouts.length > 0 && (
+              {summary?.layouts && summary.layouts.length > 0 && (
                 <section className="imp-section">
                   <div className="imp-section-title">{t("import.layouts.heading")}</div>
                   {onSelectLayout ? (
                     <Dropdown
-                      value={parsed.layout ?? ""}
+                      value={summary.layout ?? ""}
                       onChange={(v) => onSelectLayout(v === "" ? null : v)}
                       title={t("import.layouts.heading")}
                       options={[
                         { value: "", label: t("import.layouts.model") },
-                        ...parsed.layouts.map((l) => ({
+                        ...summary.layouts.map((l) => ({
                           value: l.name,
                           label: `${l.name} · ${t("import.layouts.entities", { n: l.entities })}`,
                         })),
@@ -409,7 +403,7 @@ export function ImportDialog({
                     />
                   ) : (
                     <ul className="imp-summary">
-                      {parsed.layouts.map((l) => (
+                      {summary.layouts.map((l) => (
                         <li key={l.name}>{`${l.name} · ${t("import.layouts.entities", { n: l.entities })}`}</li>
                       ))}
                     </ul>
@@ -560,55 +554,4 @@ export function ImportDialog({
       </div>
     </div>
   );
-}
-
-/**
- * Baut aus einer Import-Entscheidung die fertigen Drawing2D-Elemente für die
- * Ziel-Ebene `levelId`. `byLayer` mappt jeden DXF-Layer-Namen deterministisch
- * auf einen Kategorie-Code: existiert eine Kategorie mit passendem Namen, wird
- * deren Code genutzt; sonst fällt der Layer auf den aktiven Code zurück.
- *
- * (Die App ruft diese Funktion, NACHDEM sie ggf. die neue Ebene angelegt hat —
- * sie braucht die echte Ziel-`levelId`.)
- */
-export function buildDrawings(
-  decision: ImportDecision,
-  levelId: string,
-  project: Project,
-  activeCategoryCode: string,
-  codeByLayer?: ReadonlyMap<string, string>,
-  lineStyleByLayer?: ReadonlyMap<string, string>,
-) {
-  // Layer-Name → Kategorie-Code: bevorzugt eine Kategorie mit demselben Namen
-  // (case-insensitiv), sonst der aktive Code. Identifier bleiben so stabil.
-  // `flattenCategories`, NICHT `project.layers` direkt: manche Kategorien
-  // (z. B. „Gebäude"/„Situation") liegen als KINDER unter „05 Kontext" (s.
-  // sampleProject.ts) — ein flacher Scan hätte sie beim Namensabgleich
-  // übersehen (Regression, beim Verschachteln der Kontext-Kategorien
-  // gefunden).
-  const byName = new Map<string, string>();
-  for (const c of flattenCategories(project.layers)) byName.set(c.name.toLowerCase(), c.code);
-  // `codeByLayer` (aus `planImportCategories`) hat Vorrang: dort sind auch die
-  // beim Import NEU angelegten Kategorien enthalten, die `project` hier (Stand
-  // vor dem Import) noch nicht kennt.
-  const layerToCode = (layerName: string): string =>
-    codeByLayer?.get(layerName) ?? byName.get(layerName.toLowerCase()) ?? activeCategoryCode;
-  const fillColors = decision.parsed.layerFillColors;
-  const fromContours = contoursToDrawings(
-    decision.parsed.contours,
-    levelId,
-    decision.categoryMode,
-    activeCategoryCode,
-    layerToCode,
-    fillColors ? (layer) => fillColors[layer] : undefined,
-    lineStyleByLayer ? (layer) => lineStyleByLayer.get(layer) : undefined,
-  );
-  const fromTexts = textsToDrawings(
-    decision.parsed.texts ?? [],
-    levelId,
-    decision.categoryMode,
-    activeCategoryCode,
-    layerToCode,
-  );
-  return [...fromContours, ...fromTexts];
 }

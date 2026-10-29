@@ -23,6 +23,7 @@
 
 import type { GeoCategory } from "../io/geoContext";
 import { flattenCategories } from "./layers";
+import { core } from "../engine/coreWasm";
 import type { LayerCategory } from "./types";
 
 /** Eine Kategorie-Definition (Code + Default-Name/Farbe/Strichstärke). */
@@ -102,65 +103,27 @@ export const GEO_CATEGORY_DEFS: Record<GeoCategory, ContextCategoryDef> = {
   green: { code: "18", name: "Grünflächen", color: "#70b070", lw: 0.13 },
 };
 
-/** Kategorien, die als KINDER von {@link CONTEXT_PARENT_CATEGORY} gruppiert
- *  werden (alles ausser der Top-Level-Ausnahme „31 Dächer"). */
-const NESTED_CONTEXT_CATEGORIES: ContextCategoryDef[] = [
-  TERRAIN_CATEGORY,
-  IMAGE_CATEGORY,
-  GENERIC_IMPORT_CATEGORY,
-  ...Object.values(GEO_CATEGORY_DEFS),
-];
-
-const toLayerCategory = (c: ContextCategoryDef): LayerCategory => ({
-  code: c.code,
-  name: c.name,
-  color: c.color,
-  lw: c.lw,
-  visible: true,
-  locked: false,
-});
-
 /**
  * Ergänzt `layers` um jede fehlende Kontext-Kategorie aus `codes` — bereits
  * vorhandene Codes (auch vom Nutzer umbenannte, egal auf welcher Baumtiefe)
  * bleiben unverändert, nur wirklich fehlende werden mit ihrem Default-Namen/
- * -Farbe ergänzt. Fehlende {@link NESTED_CONTEXT_CATEGORIES} landen als
- * KINDER von {@link CONTEXT_PARENT_CATEGORY} (legt „05 Kontext" bei Bedarf
- * selbst an); die Top-Level-Ausnahme „31 Dächer" bleibt Top-Level (s.
+ * -Farbe ergänzt. Fehlende Kinder (alles ausser „31 Dächer") landen unter
+ * {@link CONTEXT_PARENT_CATEGORY} (legt „05 Kontext" bei Bedarf selbst an);
+ * die Top-Level-Ausnahme „31 Dächer" bleibt Top-Level (s.
  * {@link IMPORTED_ROOF_CATEGORY}-Moduldoc). Reiner No-op, wenn nichts fehlt
  * (liefert dieselbe Referenz zurück, spart eine unnötige `project`-Neuanlage).
+ * Rechnung im Kern (`core/src/import_context.rs`, auch für Importe; Tabelle der
+ * Kategorien dort, Gleichheit mit den Definitionen hier prüft `contextCategories.test.ts`).
  */
 export function ensureContextCategories(
   layers: LayerCategory[],
   codes: Iterable<string>,
 ): LayerCategory[] {
   const existing = new Set(flattenCategories(layers).map((c) => c.code));
-  const missing = new Set<string>();
-  for (const code of codes) {
-    if (!existing.has(code)) missing.add(code);
-  }
-  if (missing.size === 0) return layers;
-
-  const missingNested = NESTED_CONTEXT_CATEGORIES.filter((c) => missing.has(c.code)).map(
-    toLayerCategory,
-  );
-  const missingTopLevel = missing.has(IMPORTED_ROOF_CATEGORY.code)
-    ? [toLayerCategory(IMPORTED_ROOF_CATEGORY)]
-    : [];
-
-  let out = layers;
-  if (missingNested.length > 0) {
-    const parentIdx = out.findIndex((l) => l.code === CONTEXT_PARENT_CATEGORY.code);
-    if (parentIdx >= 0) {
-      out = out.map((l, i) =>
-        i === parentIdx ? { ...l, children: [...(l.children ?? []), ...missingNested] } : l,
-      );
-    } else {
-      out = [...out, { ...toLayerCategory(CONTEXT_PARENT_CATEGORY), children: missingNested }];
-    }
-  }
-  if (missingTopLevel.length > 0) {
-    out = [...out, ...missingTopLevel];
-  }
-  return out;
+  const missing = [...codes].filter((c) => !existing.has(c));
+  if (missing.length === 0) return layers;
+  const out = core().layers_call("ensureContext", JSON.stringify(layers), JSON.stringify(missing), Date.now());
+  if (out === "") throw new Error("Kern: Kontext-Kategorien fehlgeschlagen");
+  const next = JSON.parse(out) as LayerCategory[] | null;
+  return next ?? layers;
 }

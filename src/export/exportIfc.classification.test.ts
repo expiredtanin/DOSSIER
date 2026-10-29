@@ -8,8 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf } from "./exportIfc";
-import { readIfcElements } from "../io/ifcElements";
-import { classificationSuffix, ifcToImportedMeshes, readIfc } from "../io/ifcImport";
+import { importIfcInto, inspectIfc } from "../io/importView.testutil";
 import { sampleProject } from "../model/sampleProject";
 import type { Project, Room } from "../model/types";
 
@@ -98,29 +97,34 @@ describe("Rundreise Export → Import", () => {
   it("Klassifikation kommt an Bauteilen und am Mesh-Rest wieder an", async () => {
     const ifc = exportIfcSpf(houseWithRooms(), { ebkph: true, layerCodes: true });
     const bytes = new TextEncoder().encode(ifc);
-    const { products, elements } = await readIfcElements(bytes);
-    const wall = elements.walls[0];
+    const { products, raw } = await inspectIfc(bytes, true);
+    const wall = raw.filter((e) => e.kind === "wall")[0];
     expect(wall.classifications?.map((c) => `${c.system}:${c.code}`).sort()).toEqual(["Dossier-Ebenen:20", "eBKP-H:C"]);
     expect(wall.classifications?.find((c) => c.system === "eBKP-H")?.name).toBe("Konstruktion Gebäude");
-    const window = elements.openings.find((o) => o.kind === "window")!;
+    const window = raw.find((o) => o.kind === "opening" && o.openingKind === "window")!;
     expect(window.classifications?.map((c) => `${c.system}:${c.code}`).sort()).toEqual(["Dossier-Ebenen:21", "eBKP-H:E"]);
-    const door = elements.openings.find((o) => o.kind === "door")!;
+    const door = raw.find((o) => o.kind === "opening" && o.openingKind === "door")!;
     expect(door.classifications?.map((c) => c.system)).toEqual(["Dossier-Ebenen"]);
     // Dach bleibt Mesh, trägt aber seine Klassifikation.
     const roof = products.find((p) => p.ifcClass === "IfcRoof")!;
     expect(roof.classifications?.map((c) => c.code).sort()).toEqual(["31", "F"]);
     // Räume: Kategorie bleibt (auch über die Zone).
-    expect(elements.spaces.map((s) => s.sia).sort()).toEqual(["HNF", "HNF", "NNF", "VF"]);
+    expect(raw.filter((e) => e.kind === "space").map((s) => s.sia).sort()).toEqual(["HNF", "HNF", "NNF", "VF"]);
+    // Übernahme als Bauteile: Klassifikation gezählt (Wand/Decke/Raum haben kein Feld dafür).
+    const r = await importIfcInto(sampleProject, bytes, { elements: true });
+    expect(r.summary?.classified).toBeGreaterThan(0);
   });
 
   it("Mesh-Import: Klassifikation im Namen des Kontext-Objekts", async () => {
     const ifc = exportIfcSpf(sampleProject, { ebkph: true });
-    const { products } = await readIfc(new TextEncoder().encode(ifc));
+    const bytes = new TextEncoder().encode(ifc);
+    const { products } = await inspectIfc(bytes);
     expect(products.find((p) => p.ifcClass === "IfcRoof")?.classifications?.[0]).toMatchObject({ system: "eBKP-H", code: "F" });
-    const roof = ifcToImportedMeshes(products, "haus.ifc", { group: "product" }).find((m) => m.layer === "IfcRoof")!;
+    const r = await importIfcInto(sampleProject, bytes, { group: "product" });
+    const roof = r.meshes.find((m) => m.layer === "IfcRoof")!;
     expect(roof.name).toMatch(/ \[eBKP-H F\]$/);
-    expect(classificationSuffix(undefined)).toBe("");
-    expect(classificationSuffix([{ system: "", code: "214", name: null }])).toBe(" [214]");
+    // Ohne Klassifikation kein Zusatz.
+    expect(r.meshes.find((m) => m.layer === "IfcStairFlight")?.name).not.toMatch(/\[/);
   });
 });
 

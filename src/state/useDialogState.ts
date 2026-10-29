@@ -9,7 +9,7 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useState } from "react";
-import type { DxfImportResult } from "../io/dxfParser";
+import type { ParsedImport } from "../io/importSource";
 import type { ExportSaveFormat } from "../ui/ExportSaveDialog";
 import type { PdfImportOptions } from "../ui/ImportDialog";
 import type { TabId as ResourceTabId } from "../ui/ResourceManager";
@@ -38,7 +38,7 @@ export function useDialogState() {
   const [importState, setImportState] = useState<{
     fileName: string;
     isDwg: boolean;
-    parsed: DxfImportResult | null;
+    parsed: ParsedImport | null;
     // true, solange DWG noch geparst wird (WASM lädt/läuft).
     loading?: boolean;
     // Grober Phasenname während `loading` (nur DXF), s. ImportDialog.tsx.

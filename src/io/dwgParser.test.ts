@@ -8,8 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseDwg } from "./dwgParser";
-import { parseDxf } from "./dxfParser";
-import type { DxfImportResult } from "./dxfParser";
+import { inspectDxf, viewImport, type ImportView } from "./importView.testutil";
 import { loadFileioForTests } from "../engine/fileioWasm.testing";
 
 beforeAll(loadFileioForTests);
@@ -18,14 +17,14 @@ const fixture = (name: string): Uint8Array =>
   new Uint8Array(readFileSync(fileURLToPath(new URL(`./testdata/${name}`, import.meta.url))));
 const asBuffer = (b: Uint8Array): ArrayBuffer => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
 
-function meshByLayer(res: DxfImportResult, layer: string) {
+function meshByLayer(res: ImportView, layer: string) {
   const m = res.meshes.find((x) => x.layer === layer);
   expect(m, `Mesh auf Ebene ${layer}`).toBeDefined();
   return m!;
 }
 
 /** Gemeinsame Erwartungen für alle Varianten der Kachel. */
-function checkTile(res: DxfImportResult) {
+function checkTile(res: ImportView) {
   expect(res.meshes.map((m) => m.layer).sort()).toEqual(["Roof", "Wall"]);
   const roof = meshByLayer(res, "Roof");
   // 3 Punkte, je um die INSERT-Einfügung verschoben (Skalierung 1, Drehung 0).
@@ -50,13 +49,13 @@ function checkTile(res: DxfImportResult) {
 
 describe("parseDwg (acadrust)", () => {
   it("liest Polyface-Meshes aus Blöcken nach Ebene gruppiert, mit INSERT-Verschiebung (R2018)", async () => {
-    const res = await parseDwg(asBuffer(fixture("tile-r2018.dwg")));
+    const res = viewImport((await parseDwg(asBuffer(fixture("tile-r2018.dwg")))).src);
     checkTile(res);
     expect(res.meshes.map((m) => m.name).sort()).toEqual(["DWG-Mesh (Roof)", "DWG-Mesh (Wall)"]);
   });
 
   it("liest dieselbe Kachel als R2000-DWG", async () => {
-    checkTile(await parseDwg(asBuffer(fixture("tile-r2000.dwg"))));
+    checkTile(viewImport((await parseDwg(asBuffer(fixture("tile-r2000.dwg")))).src));
   });
 
   it("wirft bei kaputter DWG-Datei statt abzustürzen", async () => {
@@ -71,17 +70,17 @@ describe("parseDwg (acadrust)", () => {
 
 describe("parseDxf — Binär-DXF und Code-Seite", () => {
   it("liest Binär-DXF gleich wie die ASCII-Quelle", () => {
-    checkTile(parseDxf(fixture("tile-r2000-bin.dxf")));
+    checkTile(inspectDxf(fixture("tile-r2000-bin.dxf")));
   });
 
   it("ASCII-Quelle in cp1252 ($DWGCODEPAGE fehlt) — Umlaute bleiben erhalten", () => {
-    checkTile(parseDxf(fixture("tile.dxf")));
+    checkTile(inspectDxf(fixture("tile.dxf")));
   });
 });
 
 describe("parseDxf — Papierbereich-Layouts (Datei mit ezdxf erzeugt)", () => {
   it("listet Layouts mit Inhalt im Bericht; Modellraum bleibt Vorgabe", () => {
-    const res = parseDxf(fixture("layouts.dxf"));
+    const res = inspectDxf(fixture("layouts.dxf"));
     expect(res.layouts).toEqual([{ name: "A3 Grundriss", entities: 2 }]);
     expect(res.layout).toBeUndefined();
     expect(res.recovered).toBe(false);
@@ -90,7 +89,7 @@ describe("parseDxf — Papierbereich-Layouts (Datei mit ezdxf erzeugt)", () => {
   });
 
   it("liest ein Layout statt des Modellraums (Papier in mm → Meter)", () => {
-    const res = parseDxf(fixture("layouts.dxf"), "", "A3 Grundriss");
+    const res = inspectDxf(fixture("layouts.dxf"), "A3 Grundriss");
     expect(res.layout).toBe("A3 Grundriss");
     const c = res.contours[0].contours[0];
     expect(c.pts[1].x).toBeCloseTo(0.42, 9);

@@ -1670,6 +1670,7 @@ export const en: Record<TranslationKey, string> = {
 
   // Import dialog.
   "import.title": "Import DXF",
+  "import.failed": "Import failed",
   "import.close": "Close",
   "import.file": "File",
   "import.summary.heading": "Contents",

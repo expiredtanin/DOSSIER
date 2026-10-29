@@ -4,7 +4,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { parseDxf } from "./dxfParser";
 import { loadFileioForTests } from "../engine/fileioWasm.testing";
-import { contoursToDrawings } from "./dxfToDrawings";
+import { importInto, inspectDxf } from "./importView.testutil";
+import { emptyProject } from "../model/sampleProject";
 import { bulgePolylinePoints } from "../geometry/bulge";
 import type { Vec2 } from "../model/types";
 
@@ -26,7 +27,7 @@ const PARZELLE = [
   "10", "2600000", "20", "1200030",
 ];
 
-const toDrawings = (src: string) => contoursToDrawings(parseDxf(src).contours, "L", "active", "01", () => "01");
+const toDrawings = (src: string) => importInto(emptyProject, parseDxf(src), { categoryMode: "active", activeCategoryCode: "01" }).drawings;
 
 describe("DXF-Import: Polylinien mit Bögen", () => {
   it("bleiben eine Polylinie mit den DXF-Stützpunkten und Bulges", () => {
@@ -45,7 +46,7 @@ describe("DXF-Import: Polylinien mit Bögen", () => {
   });
 
   it("gleiche Bogen-Seite wie die Tessellierung des Imports (Vorzeichen DXF ↔ Modell)", () => {
-    const contour = parseDxf(dxf(PARZELLE)).contours[0].contours[0];
+    const contour = inspectDxf(dxf(PARZELLE)).contours[0].contours[0];
     const [d] = toDrawings(dxf(PARZELLE));
     if (d.geom.shape !== "polyline") throw new Error("Polylinie erwartet");
     const ours = bulgePolylinePoints(d.geom.pts, d.geom.bulge, true);

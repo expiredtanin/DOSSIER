@@ -40,6 +40,7 @@ mod text_layout;
 mod grips;
 mod project_refs;
 mod commands;
+mod import;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

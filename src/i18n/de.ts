@@ -1682,6 +1682,7 @@ export const de = {
 
   // ── Import-Dialog (ImportDialog) ─────────────────────────────────────────
   "import.title": "DXF importieren",
+  "import.failed": "Import fehlgeschlagen",
   "import.close": "Schließen",
   "import.file": "Datei",
   "import.summary.heading": "Inhalt",

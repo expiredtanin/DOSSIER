@@ -76,8 +76,6 @@ export function useProjectActions(
   const addDrawing = useStore((s) => s.addDrawing);
   const addSection = useStore((s) => s.addSection);
   const addElevation = useStore((s) => s.addElevation);
-  const addDrawingLevel = useStore((s) => s.addDrawingLevel);
-  const importDrawings = useStore((s) => s.importDrawings);
   const addCategory = useStore((s) => s.addCategory);
   const patchCategory = useStore((s) => s.patchCategory);
   const addSubCategory = useStore((s) => s.addSubCategory);
@@ -336,7 +334,11 @@ export function useProjectActions(
   // sonst muss man nach Standort-/Geo-Import manuell zur Geometrie suchen.
   const addContextObjectsAndFit = (objs: ContextObject[]) => {
     addContextObjects(objs);
-    const pts = contextObjectsBounds(objs);
+    fitToContextObjects(objs);
+  };
+  /** Plan-Ansicht auf schon übernommene Kontext-Objekte einpassen (Importe im Kern, [K4] S4). */
+  const fitToContextObjects = (objs: readonly ContextObject[]) => {
+    const pts = contextObjectsBounds(objs as ContextObject[]);
     if (pts) planViewRef.current?.fitBounds(pts);
   };
   const removeContextObject = useStore((s) => s.removeContextObject);
@@ -381,8 +383,6 @@ export function useProjectActions(
     addDrawing,
     addSection,
     addElevation,
-    addDrawingLevel,
-    importDrawings,
     addCategory,
     patchCategory,
     addSubCategory,
@@ -452,6 +452,7 @@ export function useProjectActions(
     importHatches,
     addContextObjects,
     addContextObjectsAndFit,
+    fitToContextObjects,
     removeContextObject,
     removeContextObjects,
     generateTerrain,

@@ -11,7 +11,6 @@ import {
   insertAfterCode,
   nextFreeCode,
   patchCategoryByCode,
-  planImportLayers,
   recomputeFloorElevations,
   removeCategoryByCode,
   toggleCategoryByCode,
@@ -52,14 +51,6 @@ describe("Kategorie-Baum (Kern)", () => {
   it("nächster freier Code", () => {
     expect(nextFreeCode([])).toBe("01");
     expect(nextFreeCode(tree())).toBe("102");
-  });
-
-  it("Import-Layer: bestehende Namen (case-insensitiv) behalten ihren Code", () => {
-    const r = planImportLayers(["wände", "Neu", "NEU"], tree(), { Neu: "#123" }, {});
-    expect(r.children).toHaveLength(1);
-    expect(r.children[0]).toMatchObject({ code: "102", name: "Neu", color: "#123", lw: 0.18 });
-    expect(r.parentCode).toBe("103");
-    expect([...r.codeByLayer]).toEqual([["wände", "20"], ["Neu", "102"], ["NEU", "102"]]);
   });
 });
 

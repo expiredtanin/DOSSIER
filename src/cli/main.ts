@@ -43,19 +43,14 @@ import {
   buildPlanDxfBinary,
   loadFileio,
   readPointCloudFlat,
-  readPdfVectorPage,
-  pdfPageToImport,
+  readPdfVector,
+  pdfImport,
   pdfPageInfo,
-  readIfc,
-  readIfcElements,
-  ifcElementsToProject,
-  ifcToImportedMeshes,
+  readIfcFlat,
   readMesh,
-  meshObjectsToImportedMeshes,
   isMeshFile,
   MESH_UNITS,
-  projectGeoOrigin,
-  ensureContextCategories,
+  sharedDocument,
   projectToWorldCoords,
   computeSection,
   exportIfcSpf,
@@ -88,15 +83,9 @@ import {
   exportGlb,
   exportGltf,
   parseDxf,
-  contoursToDrawings,
-  textsToDrawings,
-  planImportCategories,
-  distinctImportLayers,
   emptyProject,
   generateElevationPlan,
   applyOps,
-  addItems,
-  fieldOps,
   patchItem,
   generatePlan,
   generateSectionPlan,
@@ -113,7 +102,7 @@ import {
   projectWarnings,
   sampleProject,
 } from "../core";
-import type { CoreOp, Project } from "../core";
+import type { Project } from "../core";
 import { serveStdio } from "./mcp";
 
 type Args = { positional: string[]; flags: Map<string, string>; cmds: string[] };
@@ -245,6 +234,7 @@ async function runPdfInfo(args: Args, path: string | undefined): Promise<number>
     return readFileSync(join(wasmDir(), rel));
   });
   await loadFileio();
+  await initCore();
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(readFileSync(path));
@@ -252,14 +242,14 @@ async function runPdfInfo(args: Args, path: string | undefined): Promise<number>
     fail(`Datei nicht lesbar: ${path} (${e instanceof Error ? e.message : String(e)})`);
   }
   const t0 = performance.now();
-  let page;
+  let read;
   try {
-    page = readPdfVectorPage(bytes, pageArg(args));
+    read = readPdfVector(bytes, pageArg(args));
   } catch (e) {
     fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
   const ms = Math.round(performance.now() - t0);
-  process.stdout.write(JSON.stringify({ file: path, bytes: bytes.byteLength, ms, ...pdfPageInfo(page) }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({ file: path, bytes: bytes.byteLength, ms, ...pdfPageInfo(read) }, null, 2) + "\n");
   return 0;
 }
 
@@ -350,9 +340,14 @@ async function runCmds(project: Project, file: string, args: Args): Promise<numb
   return 0;
 }
 
-/** Alle Kategorien inkl. verschachtelter (flach). */
-function flattenAllCategories(ls: Project["layers"]): Project["layers"] {
-  return ls.flatMap((l) => [l, ...(l.children ? flattenAllCategories(l.children) : [])]);
+/**
+ * Dokument für einen Import ([K4] S4): das gemeinsame Abfrage-Dokument mit `project` geladen — danach spiegelt
+ * es das Ergebnis, Speichern und Abfragen darauf brauchen keinen neuen Abgleich (grosse Kataster-Importe).
+ */
+function importDoc(project: Project) {
+  const doc = sharedDocument();
+  doc.load(project);
+  return doc;
 }
 
 /** Liest Eingabe nach Endung in ein Projekt: obp direkt, dxf/dwg als 2D-Zeichnung + Meshes, ifc als Kontext-Meshes (`--elements`: Bauteile). */
@@ -372,38 +367,35 @@ async function importAny(path: string, args: Args): Promise<Project> {
   if (ext === "dxf" || ext === "dwg" || ext === "pdf") {
     await loadFileio();
     let parsed;
-    if (ext === "pdf") {
+    try {
       // Vektor-PDF ([76]): Massstab 1:--scale (Standard 100), Seite --page (Standard 1).
-      const scale = Number(args.flags.get("scale") ?? 100);
-      if (!Number.isFinite(scale) || scale <= 0) return fail("--scale: Massstabszahl > 0, z. B. 100 für 1:100");
-      try {
-        parsed = pdfPageToImport(readPdfVectorPage(bytes, pageArg(args)), scale, { texts: !args.flags.has("no-text") });
-      } catch (e) {
-        return fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    } else parsed = parseDxf(bytes);
+      if (ext === "pdf") {
+        const scale = Number(args.flags.get("scale") ?? 100);
+        if (!Number.isFinite(scale) || scale <= 0) return fail("--scale: Massstabszahl > 0, z. B. 100 für 1:100");
+        parsed = pdfImport(readPdfVector(bytes, pageArg(args)), scale, { texts: !args.flags.has("no-text") });
+      } else parsed = parseDxf(bytes);
+    } catch (e) {
+      return fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+    }
     const level = base.drawingLevels.find((l) => l.kind === "floor");
     if (!level) return fail("kein Geschoss für den Import");
-    // Wie die App („DXF-Layer als Kategorien"): fehlende Layer als Unterkategorien einer neuen Elternkategorie.
-    const plan = planImportCategories(
-      distinctImportLayers(parsed.contours, parsed.texts ?? []),
-      flattenAllCategories(base.layers),
-      `Import ${fileName}`,
-      parsed.layerColors,
-      parsed.layerLineWeights,
+    // Wie die App („Layer als Kategorien", ein Undo-Schritt im Kern): fehlende Layer als Unterkategorien einer
+    // neuen Elternkategorie, Linienstile der PDF-Strichmuster, Meshes als Kontext.
+    const r = importDoc(base).importDrawing(
+      base,
+      parsed.src,
+      {
+        target: { kind: "existing", levelId: level.id },
+        categoryMode: "byLayer",
+        activeCategoryCode: base.layers[0].code,
+        importMeshes: true,
+        parentName: `Import ${fileName}`,
+        dashStyleTemplate: "PDF-Strich {pattern} mm",
+      },
+      Date.now(),
     );
-    const layers = plan.parent ? [...base.layers, plan.parent] : base.layers;
-    const fallback = base.layers[0].code;
-    const toCode = (layer: string): string => plan.codeByLayer.get(layer) ?? fallback;
-    const drawings = [
-      ...contoursToDrawings(parsed.contours, level.id, "byLayer", fallback, toCode, (l) => parsed.layerFillColors?.[l]),
-      ...textsToDrawings(parsed.texts ?? [], level.id, "byLayer", fallback, toCode),
-    ];
-    return applyOps(base, [
-      ...fieldOps(base, "layers", layers),
-      ...fieldOps(base, "drawings2d", drawings),
-      ...fieldOps(base, "context", [...parsed.meshes]),
-    ]);
+    if ("problems" in r) return fail(`${path}: ${r.problems.join("; ")}`);
+    return r.project;
   }
   return fail(`Eingabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc, pdf, obj, stl, gltf, glb, ply)`);
 }
@@ -443,33 +435,18 @@ async function convert(input: string | undefined, output: string | undefined, ar
   return code === 0 ? runCmds(project, input, args) : code;
 }
 
-/** Ops: Kontext-Meshes anhängen und — wie in der App (siteSlice) — fehlende Kontext-Kategorien als Ebene ergänzen. */
-function contextOps(project: Project, meshes: NonNullable<Project["context"]>): CoreOp[] {
-  return [
-    ...(project.context ? addItems("context", meshes) : fieldOps(project, "context", meshes)),
-    ...fieldOps(project, "layers", ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : [])))),
-  ];
-}
-
-/** IFC in ein Projekt übernehmen (Kontext-Meshes, mit `--elements` als Bauteile); `report` = Bericht für `import-ifc`. */
+/** IFC in ein Projekt übernehmen (Kontext-Meshes, mit `--elements` als Bauteile; Kern, ein Schritt); `report` = Bericht für `import-ifc`. */
 async function ifcInto(project: Project, bytes: Uint8Array, fileName: string, args: Args): Promise<{ next: Project; report: unknown }> {
   const group = args.flags.get("group");
   const grouping = group === "product" || group === "class" ? group : "auto";
-  if (args.flags.has("elements")) {
-    const { products, report, elements } = await readIfcElements(bytes);
-    const r = ifcElementsToProject(project, products, elements, { fileName, geoOrigin: projectGeoOrigin(project), group: grouping });
-    return {
-      next: r.project,
-      report: { ...report, products: undefined, elements: r.summary, kept: elements.kept },
-    };
-  }
-  const { products, report } = await readIfc(bytes);
-  const meshes = ifcToImportedMeshes(products, fileName, { geoOrigin: projectGeoOrigin(project), group: grouping });
-  const byClass: Record<string, number> = {};
-  for (const p of products) byClass[p.ifcClass] = (byClass[p.ifcClass] ?? 0) + 1;
-  const triangles = products.reduce((s, p) => s + p.indices.length / 3, 0);
-  const next = applyOps(project, contextOps(project, meshes));
-  return { next, report: { ...report, byClass, triangles, contextObjects: meshes.length } };
+  const elements = args.flags.has("elements");
+  const flat = await readIfcFlat(bytes, elements);
+  const r = importDoc(project).importIfc(project, flat, { fileName, group: grouping, elements }, Date.now());
+  if ("problems" in r) return fail(`${fileName}: ${r.problems.join("; ")}`);
+  const report = elements
+    ? { ...r.report, products: undefined, byClass: undefined, triangles: undefined, kept: r.kept }
+    : { ...r.report, contextObjects: r.contextObjects };
+  return { next: r.project, report };
 }
 
 /** Begleitdateien eines Mesh-Modells aus demselben Verzeichnis: `.mtl` (OBJ `mtllib`), externe `.bin` (glTF). */
@@ -514,9 +491,9 @@ async function meshInto(project: Project, bytes: Uint8Array, path: string, args:
   } catch (e) {
     return fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const meshes = meshObjectsToImportedMeshes(read.objects, fileName, { placement, geoOrigin: projectGeoOrigin(project) });
-  const next = applyOps(project, contextOps(project, meshes));
-  return { next, report: { ...read.report, contextObjects: meshes.length } };
+  const r = importDoc(project).importMesh(project, read.flat, { fileName, placement }, Date.now());
+  if ("problems" in r) return fail(`${path}: ${r.problems.join("; ")}`);
+  return { next: r.project, report: { ...read.report, contextObjects: r.contextObjects } };
 }
 
 /** Führt EINEN Befehl gegen ein geladenes Projekt aus (Rückgabe = Exit-Code). */

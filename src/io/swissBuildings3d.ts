@@ -35,6 +35,7 @@ import { bboxAround, lv95BboxToWgs84, makeOrigin } from "./lv95";
 import type { GeoOrigin, LV95 } from "./lv95";
 import { stacQuery, pickAsset, downloadAssetText, downloadAssetBinary } from "./stacApi";
 import { parseDxfAsync } from "./dxfParserAsync";
+import { importMeshes } from "./importSource";
 import type { ImportedMesh } from "../model/types";
 import { GEO_CATEGORY_DEFS, IMPORTED_ROOF_CATEGORY } from "../model/contextCategories";
 
@@ -409,14 +410,14 @@ export async function fetchBuildings3d(
             continue;
           }
           const { parseDwg } = await import("./dwgParser");
-          rawMeshes = (await parseDwg(buf)).meshes;
+          rawMeshes = importMeshes((await parseDwg(buf)).src);
         } else {
           const text = await downloadAssetText(asset, [".dxf"]);
           if (!text) {
             skipped++;
             continue;
           }
-          rawMeshes = (await parseDxfAsync(text)).meshes;
+          rawMeshes = importMeshes((await parseDxfAsync(text)).src);
         }
       } catch (err) {
         // `parseDwg`/`parseDxf` werfen bei fatalen Parse-Fehlern BEWUSST (s.

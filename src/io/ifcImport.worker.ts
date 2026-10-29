@@ -1,6 +1,6 @@
 // Web-Worker für den IFC-Import ([B3]): liest die Datei mit dem Format-Modul (`engine/fileioWasm.ts`)
 // AUSSERHALB des Haupt-Threads, damit grosse Modelle die UI nicht einfrieren. Ein Worker je Aufruf,
-// danach beendet (s. `ifcImport.ts::readIfc`).
+// danach beendet (s. `ifcImport.ts::readIfcFlat`).
 //
 //   → { type: "parse", data: ArrayBuffer }
 //   ← { type: "result", flat: { meta, positions, indices } } | { type: "error", message }

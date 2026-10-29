@@ -1,5 +1,5 @@
 // Auswahl beim IFC-Import ([B3]/[B4]): als Kontext-Meshes (Standard, wie bisher) oder als echte
-// Bauteile (`io/ifcElements.ts`). Overlay-Muster wie `UnsavedChangesDialog` (kein `window.confirm`).
+// Bauteile (Kern `import_ifc.rs`). Overlay-Muster wie `UnsavedChangesDialog` (kein `window.confirm`).
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
