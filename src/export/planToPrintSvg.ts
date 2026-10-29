@@ -19,14 +19,20 @@
 // Pattern oft nicht sauber), sondern als echte, auf das Polygon geklippte
 // Vektorlinien direkt ins SVG. So bleibt das PDF rein vektoriell und scharf.
 //
+// Seit [K3d] (29.10.) rechnet der Kern die Knoten aus den Plan-Puffern
+// (`src-tauri/core/src/plan_print_svg.rs`, Anweisungsliste); hier bleiben der
+// <svg>-Rahmen, die Bild-<pattern> (laufende Ids) und die Einzeltexte
+// (Text-Layout `wrapDocToLines`). Ausgabe unverändert (gleiche Knoten/Attribute).
+//
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { HatchRender, Plan, Primitive } from "../plan/generatePlan";
 import type { Vec2 } from "../model/types";
-import { buildRandomHatchRuns, zigzagPoints, motifPoints } from "../plan/glPlan/glPlanHatch";
-import { dashHasDot } from "../geometry/lineSegments";
 import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
 import { docFromText } from "../text/richText";
+import { core } from "../engine/coreWasm";
+import { planParts, withPlanParts } from "../plan/planParts";
+import { planPrimAt } from "../plan/planLazy";
 
 /** SVG-Namespace für die programmatisch erzeugten Knoten. */
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -75,41 +81,6 @@ function ensureImagePattern(
   pattern.appendChild(img);
   ensureDefs(svg).appendChild(pattern);
   return id;
-}
-
-/** `<polyline>`-Knoten (mm-Koordinaten) — für Zickzack-Linien/-Läufe. */
-function polylineNode(
-  pts: Vec2[],
-  color: string,
-  strokeMm: number,
-  dash: number[] | null | undefined,
-): SVGElement {
-  const el = document.createElementNS(SVG_NS, "polyline");
-  el.setAttribute("points", pts.map((p) => `${round(p.x)},${round(p.y)}`).join(" "));
-  el.setAttribute("fill", "none");
-  el.setAttribute("stroke", color);
-  el.setAttribute("stroke-width", String(strokeMm));
-  el.setAttribute("stroke-linecap", "round");
-  el.setAttribute("stroke-linejoin", "round");
-  if (dash && dash.length) el.setAttribute("stroke-dasharray", dash.map((d) => round(d)).join(" "));
-  return el;
-}
-
-/**
- * Standard-Stift-Stufen (mm). Beliebige Kategorie-Strichstärken werden auf die
- * NÄCHSTHÖHERE dieser ISO-nahen Stufen gequantelt, damit der Plan saubere,
- * unterscheidbare Linienstärken trägt (dünne Hilfslinien ≠ dicke Umrisse).
- */
-const PEN_STEPS = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0] as const;
-
-/** Untergrenze einer sichtbaren Druck-Strichstärke (mm) — vermeidet 0-Linien. */
-const MIN_PEN_MM = 0.13;
-
-/** Quantelt eine mm-Strichstärke auf die nächste Stift-Stufe (≥ MIN_PEN_MM). */
-function quantizePen(mm: number): number {
-  const w = Math.max(MIN_PEN_MM, mm);
-  for (const step of PEN_STEPS) if (w <= step + 1e-6) return step;
-  return PEN_STEPS[PEN_STEPS.length - 1];
 }
 
 /** Ergebnis des Print-SVG-Aufbaus: das Element + Blattmasse (mm). */
@@ -200,10 +171,11 @@ export function planToPrintSvg(plan: Plan, opts: PrintSvgOptions): PrintSvg {
   bg.setAttribute("fill", "#ffffff");
   svg.appendChild(bg);
 
-  // Jedes Primitiv in mm-Knoten übersetzen.
-  for (const p of plan.primitives) {
-    appendPrimitive(svg, p, map, k);
-  }
+  // Jedes Primitiv in mm-Knoten übersetzen (Kern, Anweisungsliste s. `plan_print_svg.rs`).
+  const o = Float64Array.of(n, opts.pageWidthMm, opts.pageHeightMm, b.minX, b.minY, b.maxX, b.maxY);
+  const ops = withPlanParts(planParts(plan, true), (segs) => core().plan_print_svg_ops(segs, o));
+  if (!ops) throw new Error("Druck-SVG: Plan im Kern unlesbar");
+  applyOps(svg, ops.slice(1), plan, map, k);
 
   return {
     svg,
@@ -213,93 +185,50 @@ export function planToPrintSvg(plan: Plan, opts: PrintSvgOptions): PrintSvg {
   };
 }
 
-/** Schreibt ein einzelnes Primitiv (mit ggf. Schraffur) in das SVG. */
-function appendPrimitive(
-  svg: SVGSVGElement,
-  p: Primitive,
-  map: Mapper,
-  mmPerM: number,
-): void {
-  // Gedimmt (0.3) und Objekt-Transparenz multiplizieren sich; Bilder tragen
-  // ihre eigene Deckkraft separat (s. dortiger Zweig).
-  const objOpacity = p.kind === "drawingImage" ? 1 : (p.opacity ?? 1);
-  const dim = p.greyed ? 0.3 : 1;
-  const combined = dim * Math.max(0, objOpacity);
-  const opacity = combined < 1 ? String(combined) : undefined;
-  switch (p.kind) {
-    case "polygon":
-      appendPolygon(svg, p, map, mmPerM, opacity);
-      break;
-    case "line": {
-      const a = map(p.a);
-      const b = map(p.b);
-      // Zickzack-Linie (amplitude/wavelength sind Papier-mm = mm-Zielraum) →
-      // Polylinie; sonst gerade (ggf. gestrichelte) Linie wie bisher.
-      // Zickzack/Custom-Motiv sind in Papier-mm definiert = mm-Zielraum (scale 1).
-      const ln = p.zigzag
-        ? polylineNode(
-            zigzagPoints(a, b, p.zigzag.amplitude, p.zigzag.wavelength),
-            p.color ?? "#111111",
-            quantizePen(p.weightMm),
-            p.dash,
-          )
-        : p.motif
-          ? polylineNode(
-              motifPoints(a, b, p.motif),
-              p.color ?? "#111111",
-              quantizePen(p.weightMm),
-              p.dash,
-            )
-          : lineNode(a, b, p.color ?? "#111111", quantizePen(p.weightMm), p.dash, mmPerM);
-      if (opacity) ln.setAttribute("opacity", opacity);
-      svg.appendChild(ln);
-      break;
-    }
-    case "arc": {
-      const node = arcNode(p, map, mmPerM);
-      if (opacity) node.setAttribute("opacity", opacity);
-      svg.appendChild(node);
-      break;
-    }
-    case "drawingCircle": {
-      const c = map(p.center);
-      const el = document.createElementNS(SVG_NS, "circle");
-      el.setAttribute("cx", String(round(c.x)));
-      el.setAttribute("cy", String(round(c.y)));
-      el.setAttribute("r", String(round(p.r * mmPerM)));
-      el.setAttribute("fill", p.fill && p.fill !== "none" ? p.fill : "none");
-      el.setAttribute("stroke", p.stroke);
-      el.setAttribute("stroke-width", String(quantizePen(p.weightMm)));
-      if (p.dash && p.dash.length) {
-        el.setAttribute("stroke-dasharray", p.dash.map((x) => round(x)).join(" "));
-        if (dashHasDot(p.dash)) el.setAttribute("stroke-linecap", "round");
+/**
+ * Legt die Knoten der Kern-Anweisungsliste an (Format s. `plan_print_svg.rs`): Elemente mit ihren
+ * Attributen in Reihenfolge, Gruppen, Bild-Schraffuren (`<pattern>` hier) und Einzeltexte (Layout hier).
+ */
+function applyOps(svg: SVGSVGElement, ops: string, plan: Plan, map: Mapper, mmPerM: number): void {
+  if (!ops) return;
+  let g: SVGElement | null = null;
+  for (const rec of ops.split("\u001e")) {
+    const f = rec.split("\u001f");
+    switch (f[0]) {
+      case "E": {
+        const el = document.createElementNS(SVG_NS, f[2]) as SVGElement;
+        for (let i = 3; i + 1 < f.length; i += 2) el.setAttribute(f[i], f[i + 1]);
+        (f[1] === "1" && g ? g : svg).appendChild(el);
+        break;
       }
-      if (opacity) el.setAttribute("opacity", opacity);
-      svg.appendChild(el);
-      break;
-    }
-    case "drawingArc": {
-      const node = drawingArcNode(p, map, mmPerM);
-      if (opacity) node.setAttribute("opacity", opacity);
-      svg.appendChild(node);
-      break;
-    }
-    case "drawingText": {
-      const node = drawingTextNode(p, map, mmPerM);
-      if (node) {
-        if (opacity) node.setAttribute("opacity", opacity);
-        svg.appendChild(node);
+      case "G":
+        g = document.createElementNS(SVG_NS, "g") as SVGElement;
+        if (f[1]) g.setAttribute("opacity", f[1]);
+        break;
+      case "g":
+        if (g) svg.appendChild(g);
+        g = null;
+        break;
+      case "I": {
+        // Bild-Schraffur: gekacheltes <pattern> über die Fläche.
+        const patId = ensureImagePattern(svg, JSON.parse(f[2]) as NonNullable<HatchRender["image"]>);
+        const el = document.createElementNS(SVG_NS, "polygon");
+        el.setAttribute("points", f[1]);
+        el.setAttribute("fill", `url(#${patId})`);
+        el.setAttribute("stroke", "none");
+        g?.appendChild(el);
+        break;
       }
-      break;
-    }
-    case "drawingImage": {
-      const node = drawingImageNode(p, map, mmPerM);
-      if (node) {
-        if (p.opacity < 1) node.setAttribute("opacity", String(p.opacity * (p.greyed ? 0.45 : 1)));
-        else if (opacity) node.setAttribute("opacity", opacity);
-        svg.appendChild(node);
+      case "T": {
+        const p = planPrimAt(plan, Number(f[1]));
+        if (p?.kind !== "drawingText") break;
+        const node = drawingTextNode(p, map, mmPerM);
+        if (node) {
+          if (f[2]) node.setAttribute("opacity", f[2]);
+          svg.appendChild(node);
+        }
+        break;
       }
-      break;
     }
   }
 }
@@ -371,309 +300,7 @@ function drawingTextNode(
   return el;
 }
 
-/** Eingebettetes Rasterbild (Data-URL) als achsparalleles `<image>`. */
-function drawingImageNode(
-  p: Extract<Primitive, { kind: "drawingImage" }>,
-  map: Mapper,
-  mmPerM: number,
-): SVGImageElement | null {
-  const w = (p.max.x - p.min.x) * mmPerM;
-  const h = (p.max.y - p.min.y) * mmPerM;
-  if (w <= 0 || h <= 0) return null;
-  const topLeft = map({ x: p.min.x, y: p.max.y });
-  const el = document.createElementNS(SVG_NS, "image");
-  el.setAttribute("href", p.src);
-  el.setAttribute("x", String(round(topLeft.x)));
-  el.setAttribute("y", String(round(topLeft.y)));
-  el.setAttribute("width", String(round(w)));
-  el.setAttribute("height", String(round(h)));
-  el.setAttribute("preserveAspectRatio", "none");
-  return el;
-}
-
-/**
- * Polygon mit Füllung/Umriss/Schraffur. Reihenfolge wie in der PlanView:
- *  • pattern "none"   → reine Füllung (oder „none") + Umriss.
- *  • pattern "solid"  → Vollfüllung in der Hatch-Farbe + Umriss.
- *  • Linien/Kreuz/Dämmung → Grundfüllung, dann geklippte Schraffurlinien, dann Umriss.
- */
-function appendPolygon(
-  svg: SVGSVGElement,
-  p: Extract<Primitive, { kind: "polygon" }>,
-  map: Mapper,
-  mmPerM: number,
-  opacity: string | undefined,
-): void {
-  const ptsMm = p.pts.map(map);
-  const ptsAttr = ptsMm.map((s) => `${round(s.x)},${round(s.y)}`).join(" ");
-  const strokeMm = p.strokeWidthMm > 0 ? quantizePen(p.strokeWidthMm) : 0;
-
-  const g = document.createElementNS(SVG_NS, "g");
-  if (opacity) g.setAttribute("opacity", opacity);
-
-  const pattern = p.hatch.pattern;
-  if (p.hatch.kind === "image" && p.hatch.image) {
-    // Bild-Schraffur: gekacheltes <pattern> mit <image> (scaleX/scaleY/rotation)
-    // über die Fläche, unabhängig vom `pattern`-Feld. Grundfüllung darunter,
-    // Umriss obenauf.
-    if (p.fill !== "none") g.appendChild(polyNode(ptsAttr, p.fill, "none", 0));
-    const patId = ensureImagePattern(svg, p.hatch.image);
-    g.appendChild(polyNode(ptsAttr, `url(#${patId})`, "none", 0));
-    if (strokeMm > 0) g.appendChild(polyNode(ptsAttr, "none", p.stroke, strokeMm));
-  } else if (pattern === "none") {
-    g.appendChild(polyNode(ptsAttr, p.fill, p.stroke, strokeMm));
-  } else if (pattern === "solid") {
-    g.appendChild(polyNode(ptsAttr, p.hatch.color, p.stroke, strokeMm));
-  } else {
-    // Grundfüllung (ohne Umriss), dann die geklippten Schraffurlinien, dann der
-    // Umriss obenauf (separat, damit er die Schraffur-Enden überdeckt).
-    if (p.fill !== "none") {
-      g.appendChild(polyNode(ptsAttr, p.fill, "none", 0));
-    }
-    if (p.hatch.lines === "random") {
-      // Random-Vektor (Kies/Splitt): deterministische Streu-Striche. Wird im
-      // MODELL-Raum erzeugt (identischer Seed/Geometrie wie Bildschirm/GL/PDF)
-      // und dann nach Papier-mm abgebildet.
-      for (const run of buildRandomHatchRuns(p.pts, p.hatch)) {
-        if (run.length < 2) continue;
-        g.appendChild(
-          lineNode(
-            map(run[0]),
-            map(run[run.length - 1]),
-            p.hatch.color,
-            quantizePen(p.hatch.lineWeight),
-            null,
-            mmPerM,
-          ),
-        );
-      }
-    } else {
-      for (const seg of hatchLines(ptsMm, p.hatch, mmPerM)) {
-        g.appendChild(
-          lineNode(
-            seg.a,
-            seg.b,
-            p.hatch.color,
-            quantizePen(p.hatch.lineWeight),
-            p.hatch.dash,
-            mmPerM,
-          ),
-        );
-      }
-    }
-    if (strokeMm > 0) {
-      g.appendChild(polyNode(ptsAttr, "none", p.stroke, strokeMm));
-    }
-  }
-
-  svg.appendChild(g);
-}
-
-/** Erzeugt einen <polygon>-Knoten (mm-Koordinaten als Attribut-String). */
-function polyNode(
-  ptsAttr: string,
-  fill: string,
-  stroke: string,
-  strokeMm: number,
-): SVGElement {
-  const el = document.createElementNS(SVG_NS, "polygon");
-  el.setAttribute("points", ptsAttr);
-  el.setAttribute("fill", fill);
-  if (stroke !== "none" && strokeMm > 0) {
-    el.setAttribute("stroke", stroke);
-    el.setAttribute("stroke-width", String(strokeMm));
-    el.setAttribute("stroke-linejoin", "round");
-  } else {
-    el.setAttribute("stroke", "none");
-  }
-  return el;
-}
-
-/** Erzeugt einen <line>-Knoten in mm; Strichmuster (mm Welt → mm Papier). */
-function lineNode(
-  a: Vec2,
-  b: Vec2,
-  color: string,
-  strokeMm: number,
-  dash: number[] | null | undefined,
-  _mmPerM: number,
-): SVGElement {
-  const el = document.createElementNS(SVG_NS, "line");
-  el.setAttribute("x1", String(round(a.x)));
-  el.setAttribute("y1", String(round(a.y)));
-  el.setAttribute("x2", String(round(b.x)));
-  el.setAttribute("y2", String(round(b.y)));
-  el.setAttribute("stroke", color);
-  el.setAttribute("stroke-width", String(strokeMm));
-  el.setAttribute("stroke-linecap", "round");
-  if (dash && dash.length) {
-    // Strichmuster ist in mm Papier definiert (wie weightMm), daher direkt.
-    el.setAttribute("stroke-dasharray", dash.map((d) => round(d)).join(" "));
-  }
-  return el;
-}
-
-/**
- * Erzeugt einen Bogen als <path> (A-Kommando). Der Bogen-Radius ist in Metern →
- * Papier-mm. Drehrichtung aus dem Kreuzprodukt im Papier-Raum (Y nach unten).
- */
-function arcNode(
-  p: Extract<Primitive, { kind: "arc" }>,
-  map: Mapper,
-  mmPerM: number,
-): SVGElement {
-  const c = map(p.center);
-  const from = map(p.from);
-  const to = map(p.to);
-  const r = p.r * mmPerM;
-  const v1 = { x: from.x - c.x, y: from.y - c.y };
-  const v2 = { x: to.x - c.x, y: to.y - c.y };
-  const cross = v1.x * v2.y - v1.y * v2.x;
-  const sweep = cross > 0 ? 1 : 0;
-  const d = `M ${round(from.x)} ${round(from.y)} A ${round(r)} ${round(r)} 0 0 ${sweep} ${round(to.x)} ${round(to.y)}`;
-  const el = document.createElementNS(SVG_NS, "path");
-  el.setAttribute("d", d);
-  el.setAttribute("fill", "none");
-  el.setAttribute("stroke", "#111111");
-  el.setAttribute("stroke-width", String(quantizePen(p.weightMm)));
-  if (p.dash && p.dash.length) {
-    el.setAttribute("stroke-dasharray", p.dash.map((x) => round(x)).join(" "));
-    // Punktmuster (dash enthält eine 0): runde Kappe → Dots am Bogen.
-    if (dashHasDot(p.dash)) el.setAttribute("stroke-linecap", "round");
-  }
-  return el;
-}
-
-/**
- * `drawingArc` → glatter SVG-Bogen. Konvention wie im Bildschirm-Renderer
- * (`planView/primitives.tsx`): die Winkel laufen im MODELL immer gegen den
- * Uhrzeigersinn von `a0` nach `a1`; da die Ziel-Y-Achse gespiegelt ist, wird
- * daraus am Papier ein Uhrzeigersinn-Bogen (sweep-flag 1). `large-arc` aus
- * der normierten Spannweite.
- */
-function drawingArcNode(
-  p: Extract<Primitive, { kind: "drawingArc" }>,
-  map: Mapper,
-  mmPerM: number,
-): SVGElement {
-  const TAU = Math.PI * 2;
-  const from = map({ x: p.center.x + p.r * Math.cos(p.a0), y: p.center.y + p.r * Math.sin(p.a0) });
-  const to = map({ x: p.center.x + p.r * Math.cos(p.a1), y: p.center.y + p.r * Math.sin(p.a1) });
-  const r = p.r * mmPerM;
-  const sweep = (((p.a1 - p.a0) % TAU) + TAU) % TAU;
-  const largeArc = sweep > Math.PI ? 1 : 0;
-  const el = document.createElementNS(SVG_NS, "path");
-  el.setAttribute(
-    "d",
-    `M ${round(from.x)} ${round(from.y)} A ${round(r)} ${round(r)} 0 ${largeArc} 1 ${round(to.x)} ${round(to.y)}`,
-  );
-  el.setAttribute("fill", "none");
-  el.setAttribute("stroke", p.stroke);
-  el.setAttribute("stroke-width", String(quantizePen(p.weightMm)));
-  if (p.dash && p.dash.length) {
-    el.setAttribute("stroke-dasharray", p.dash.map((x) => round(x)).join(" "));
-    if (dashHasDot(p.dash)) el.setAttribute("stroke-linecap", "round");
-  }
-  return el;
-}
-
 /** Auf 3 Nachkommastellen runden (kompaktes, exaktes SVG). */
 function round(v: number): number {
   return Math.round(v * 1000) / 1000;
-}
-
-// ── Schraffur als geklippte Vektorlinien ─────────────────────────────────────
-
-interface Seg {
-  a: Vec2;
-  b: Vec2;
-}
-
-/**
- * Erzeugt die Schraffurlinien eines Polygons (in Papier-mm), auf das Polygon
- * geklippt. Die Kachelgrösse der Bildschirm-PlanView (8 px bzw. 14 px bei
- * „insulation", × Maßstab) wird hier in einen mm-Linienabstand übersetzt, damit
- * der Druck der Bildschirm-Dichte nahekommt:
- *   • diagonal/crosshatch: parallele Linienscharen im Winkel `angle`.
- *   • crosshatch: zusätzlich die um 90° gedrehte Schar.
- *   • insulation: vereinfacht als eine dichtere diagonale Schar (echte Wellen-
- *     linie wäre als Pfad möglich; eine Linienschar liest sich im Druck sauber
- *     und bleibt rein vektoriell — offener Punkt im Report).
- */
-function hatchLines(polyMm: Vec2[], hatch: HatchRender, mmPerM: number): Seg[] {
-  // Kachel der PlanView: 8 viewBox-Einheiten (= px bei dpi-Bezug) × scale. In der
-  // PlanView ist 1 viewBox-Einheit = 1/PX_PER_M m = 1/90 m. Auf Papier sind das
-  // (1/90)·mmPerM mm. So bleibt die Strich-Dichte massstäblich konsistent.
-  const unitMm = (1 / 90) * mmPerM;
-  const tileMm = (hatch.pattern === "insulation" ? 10 : 8) * hatch.scale * unitMm;
-  const spacing = Math.max(0.5, tileMm); // Mindestabstand, sonst zu dicht
-
-  const angle = (hatch.angle * Math.PI) / 180;
-  const segs: Seg[] = [];
-  fillParallel(polyMm, angle, spacing, segs);
-  if (hatch.pattern === "crosshatch") {
-    fillParallel(polyMm, angle + Math.PI / 2, spacing, segs);
-  }
-  if (hatch.pattern === "insulation") {
-    // Zweite, gegenläufige Schar deutet die Dämmungs-Textur an (dichter Filz).
-    fillParallel(polyMm, angle - Math.PI / 4, spacing, segs);
-  }
-  return segs;
-}
-
-/**
- * Füllt das Polygon mit parallelen Linien im gegebenen Winkel/Abstand und klippt
- * jede Linie auf das Polygon (Scanline über die Polygon-Schnittpunkte). Robust
- * für konvexe wie konkave (einfache) Polygone.
- */
-function fillParallel(
-  poly: Vec2[],
-  angle: number,
-  spacing: number,
-  out: Seg[],
-): void {
-  if (poly.length < 3 || spacing <= 0) return;
-  // Linienrichtung d und Normale nrm (Projektionsachse).
-  const dir = { x: Math.cos(angle), y: Math.sin(angle) };
-  const nrm = { x: -dir.y, y: dir.x };
-
-  // Projektion der Polygonpunkte auf die Normale → [tMin, tMax]-Band der Linien.
-  let tMin = Infinity;
-  let tMax = -Infinity;
-  for (const p of poly) {
-    const t = p.x * nrm.x + p.y * nrm.y;
-    if (t < tMin) tMin = t;
-    if (t > tMax) tMax = t;
-  }
-  // Linien an t = tMin + i·spacing; für jede die Schnitt-Intervalle ermitteln.
-  const start = Math.ceil(tMin / spacing) * spacing;
-  for (let t = start; t <= tMax; t += spacing) {
-    const xs: number[] = []; // Parameter entlang dir der Schnittpunkte
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const a = poly[j];
-      const b = poly[i];
-      const ta = a.x * nrm.x + a.y * nrm.y;
-      const tb = b.x * nrm.x + b.y * nrm.y;
-      // Schneidet die Kante das Niveau t?
-      if (ta === tb) continue;
-      const f = (t - ta) / (tb - ta);
-      if (f < 0 || f > 1) continue;
-      const px = a.x + (b.x - a.x) * f;
-      const py = a.y + (b.y - a.y) * f;
-      xs.push(px * dir.x + py * dir.y); // Position entlang dir
-    }
-    if (xs.length < 2) continue;
-    xs.sort((u, v) => u - v);
-    // Paarweise Intervalle = Polygon-Inneres entlang der Linie.
-    for (let k = 0; k + 1 < xs.length; k += 2) {
-      const u0 = xs[k];
-      const u1 = xs[k + 1];
-      if (u1 - u0 < 1e-6) continue;
-      // Punkt = t·nrm + u·dir.
-      out.push({
-        a: { x: nrm.x * t + dir.x * u0, y: nrm.y * t + dir.y * u0 },
-        b: { x: nrm.x * t + dir.x * u1, y: nrm.y * t + dir.y * u1 },
-      });
-    }
-  }
 }

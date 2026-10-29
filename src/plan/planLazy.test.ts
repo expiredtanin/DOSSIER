@@ -1,5 +1,5 @@
 // Lazy Plan ([K3d], `planLazy.ts`): `generatePlan` liest die Kern-Primitive erst bei Bedarf; die
-// Verbraucher im Kern (Szene, Auswahl, SVG) und die Text-Einträge kommen ohne aus.
+// Verbraucher im Kern (Szene, Auswahl, SVG, DXF, Druck-SVG) und die Text-Einträge kommen ohne aus.
 
 import { describe, expect, it } from "vitest";
 import { generatePlan, generateVisibleLevelsPlan, materializeUnderlay, type Primitive } from "./generatePlan";
@@ -7,6 +7,8 @@ import { isLazyUnread, planCount, planPrimAt, planTextEntries, planWithExtra } f
 import { planSceneBin, planToRenderScene } from "./toRenderScene";
 import { planToSvgString } from "../export/planToSvgString";
 import { PlanPickIndex } from "./planView/planPick";
+import { collectPlanDrawing } from "../export/exportDxf";
+import { planToPrintSvg } from "../export/planToPrintSvg";
 import { sampleProject } from "../model/sampleProject";
 import { flattenCategories, type Project } from "../model/types";
 
@@ -31,8 +33,19 @@ describe("lazy Plan", () => {
     const ix = new PlanPickIndex(plan);
     ix.topPolygon({ x: 2, y: 2 });
     ix.marquee("wallId", { minX: -100, minY: -100, maxX: 100, maxY: 100 }, false);
-    ix.drawingTextAt({ x: 1.2, y: 2 });
+    expect(ix.drawingTextAt({ x: 1.2, y: 2 })).not.toBeNull();
     ix.release();
+    expect(collectPlanDrawing(plan, withText).stats().model.TEXT).toBeGreaterThan(0);
+    // Druck-SVG mit minimalem DOM-Ersatz (Node ohne DOM).
+    const el = (): Record<string, unknown> => ({ setAttribute() {}, appendChild: (c: unknown) => c, insertBefore: (c: unknown) => c, querySelector: () => null, firstChild: null });
+    const g = globalThis as { document?: unknown };
+    const prev = g.document;
+    g.document = { createElementNS: () => el() };
+    try {
+      planToPrintSvg(plan, { scaleDenominator: 100, pageWidthMm: 420, pageHeightMm: 297 });
+    } finally {
+      g.document = prev;
+    }
     expect(planTextEntries(plan).length).toBeGreaterThan(0);
     expect(planPrimAt(plan, 0)).toBeDefined();
     expect(isLazyUnread(plan)).toBe(true);
