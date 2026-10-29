@@ -292,13 +292,20 @@ pub fn validate_project(root: &Map<String, Value>) -> Vec<String> {
 #[derive(Clone, Debug, Default)]
 pub struct Step {
     pub ops: Vec<Op>,
+    /// Kurze Beschriftung für die Verlaufsliste (i18n-Schlüssel oder Text; leer = Standard der UI).
+    pub label: String,
     bytes: usize,
 }
 
 impl Step {
     pub fn new(ops: Vec<Op>) -> Step {
         let bytes = ops_bytes(&ops);
-        Step { ops, bytes }
+        Step { ops, label: String::new(), bytes }
+    }
+    pub fn labeled(mut self, label: String) -> Step {
+        self.bytes += label.len();
+        self.label = label;
+        self
     }
 }
 
@@ -383,6 +390,8 @@ pub struct History {
     group_at: f64,
     /// Die offene Gruppe hat etwas aufgezeichnet.
     group_recorded: bool,
+    /// Beschriftung für den nächsten neu angelegten Schritt ([`History::set_label`]).
+    pending_label: String,
     bytes: usize,
     pub max_steps: usize,
     pub max_bytes: usize,
@@ -400,6 +409,7 @@ impl Default for History {
             group_key: None,
             group_at: 0.0,
             group_recorded: false,
+            pending_label: String::new(),
             bytes: 0,
             max_steps: 100,
             max_bytes: 256 << 20,
@@ -419,7 +429,23 @@ impl History {
         self.bytes
     }
 
+    /// Beschriftung des Schritts, den die nächste aufgezeichnete Änderung neu anlegt (Koaleszenz
+    /// und Gruppen-Folgeänderungen behalten die des ersten). Wird von `record` verbraucht; leer = keine.
+    pub fn set_label(&mut self, label: &str) {
+        self.pending_label.clear();
+        self.pending_label.extend(label.chars().take(120));
+    }
+
+    /// Beschriftungen `(Undo: ältester zuerst, Redo: nächster zuerst)`.
+    pub fn labels(&self) -> (Vec<String>, Vec<String>) {
+        (
+            self.undo.iter().map(|s| s.label.clone()).collect(),
+            self.redo.iter().rev().map(|s| s.label.clone()).collect(),
+        )
+    }
+
     pub fn clear(&mut self) {
+        self.pending_label.clear();
         self.undo.clear();
         self.redo.clear();
         self.bytes = 0;
@@ -474,17 +500,18 @@ impl History {
         if self.group_depth > 0 {
             self.group_recorded = true;
         }
+        let label = std::mem::take(&mut self.pending_label);
         let merge = if self.group_depth > 0 { std::mem::replace(&mut self.group_started, true) } else { coalesced };
         match self.undo.back_mut().filter(|_| merge) {
             Some(top) => {
                 self.bytes -= top.bytes;
                 let mut inv = inverse;
                 inv.append(&mut top.ops);
-                *top = Step::new(compact(inv));
+                *top = Step::new(compact(inv)).labeled(std::mem::take(&mut top.label));
                 self.bytes += top.bytes;
             }
             None => {
-                let s = Step::new(inverse);
+                let s = Step::new(inverse).labeled(label);
                 self.bytes += s.bytes;
                 self.undo.push_back(s);
             }

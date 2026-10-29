@@ -360,7 +360,13 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
   **Abschluss (29.10.):** Rechnung liegt im Kern; TS hält Oberfläche, Zustandsautomaten der Befehle, Netz-Abrufe,
   DOM-/jsPDF-Aufbau und dünne Fassaden. Bewusst in TS: `model/color.ts` (Farbmischer der UI), Sicht-Culling/Ansichts-
   Transformation/GPU-Cache der Plan-Ansicht, Werkzeug-Vorschau aus UI-Zustand. Rest-Pendenzen: STEP-Import (truck),
-  Import-Ops als JSON zurück (42 MB beim 150k-Kataster), Undo-Liste in der UI [84]. Nicht auf dem Mac getestet.
+  Import-Ops als JSON zurück (42 MB beim 150k-Kataster). Nicht auf dem Mac getestet.
+  **[84] Undo-Verlauf als Liste ✅ (29.10.):** Schritte tragen eine Beschriftung im Kern (`Step.label`, `History::set_label` für den
+  nächsten neuen Schritt; Koaleszenz/Gruppen behalten die des ersten; `doc_history_label/labels/jump`, `Document::history_jump` =
+  mehrere Schritte in einem Aufruf). TS: `withHistoryLabel`/`labelCommit` (`historySlice.ts`), Standard aus Befehl (`history.cmd.<cmd>`),
+  Griff, Import oder den Ops (`history.op.<art>:<liste>`); Anzeige `historyLabelText`. Panel `HistoryPanel` (Bearbeiten > Verlauf,
+  nicht im Standard-Layout), jüngster oben, Wiederholen-Schritte gedimmt, Klick = `jumpHistory`. Offen: Beschriftungen für
+  Eigenschafts-Änderungen aus Panels sind nur „X ändern" (kein Feldname); kein Tastenkürzel; nicht auf dem Mac getestet.
   Ziel (Entscheid 28.10., Maintainer): nur die UI bleibt TS, alles andere Rust. Vorgehen in Stufen, jede verdrahtet und mit
   Gleichheitstest gegen die TS-Fassung, die im selben Schritt verschwindet:
   - ✅ **S1 Dokument im Kern** (28.10.): `document.rs` hält das Projekt als JSON-Baum, `core/document.ts` spiegelt jede
@@ -1333,7 +1339,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 Alle ○: [27] Punktwolken (Leser ✅ [B9], Anzeige ◐ s. u., Modell offen) · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden) · [43] Verknüpfte
 Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (= [T6]) · [71] U-Werte ·
 [72] Graue Energie KBOB · [73] eBKP-H · [74] SIA 500 · [75] Fluchtwege VKF · [83] Befehlspalette ·
-[84] Undo-Verlauf · [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
+[85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
 (◐, DXF-Parser, IFC-Import) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
 Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
 

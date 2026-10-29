@@ -51,6 +51,8 @@ export interface AppMenuBarProps {
   onOpenSettings: () => void;
   /** BCF-Themen-Panel öffnen (`revealPanel`); ohne diese Funktion entfällt der Menüpunkt. */
   onOpenBcf?: () => void;
+  /** Verlauf-Panel öffnen ([84]). */
+  onOpenHistory?: () => void;
 }
 
 /** Menüleiste (Bearbeiten/Ansicht/Fenster) — sitzt in der TopBar neben der Wortmarke. */
@@ -83,6 +85,7 @@ export function AppMenuBar({
   onToggleResources,
   onOpenSettings,
   onOpenBcf,
+  onOpenHistory,
 }: AppMenuBarProps) {
   const fileItems: DropdownItem[] = [
     { label: t("file.new"), onSelect: onNewProject },
@@ -105,6 +108,7 @@ export function AppMenuBar({
   const editItems: DropdownItem[] = [
     { label: t("menu.edit.undo"), onSelect: onUndo, disabled: !canUndo },
     { label: t("menu.edit.redo"), onSelect: onRedo, disabled: !canRedo },
+    ...(onOpenHistory ? [{ label: t("nav.history"), onSelect: onOpenHistory }] : []),
     { divider: true },
     {
       label: t("menu.edit.delete"),

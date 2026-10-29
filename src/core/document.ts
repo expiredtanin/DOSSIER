@@ -441,6 +441,30 @@ export class ProjectDocument {
     return project;
   }
 
+  /** Springt im Verlauf auf Undo-Tiefe `target` (mehrere Schritte, ein Kern-Aufruf); `null` = schon dort/ausserhalb. */
+  jumpTo(base: Project, target: number): Project | null {
+    if (base !== this.mirror || !this.handle) {
+      this.ensure(base);
+      return null;
+    }
+    const json = core().doc_history_jump(this.handle, target);
+    if (!json) return null;
+    const project = applyOps(base, JSON.parse(json) as CoreOp[], core().doc_last_hits(this.handle));
+    this.mirror = project;
+    return project;
+  }
+
+  /** Beschriftung (i18n-Schlüssel oder Text) für den nächsten neu angelegten Undo-Schritt; leer = keine. */
+  setHistoryLabel(label: string): void {
+    if (this.handle) core().doc_history_label(this.handle, label);
+  }
+
+  /** Beschriftungen der Verlaufsschritte: Undo (ältester zuerst) und Redo (nächster zuerst). */
+  historyLabels(): { undo: string[]; redo: string[] } {
+    const json = this.handle ? core().doc_history_labels(this.handle) : "";
+    return json ? (JSON.parse(json) as { undo: string[]; redo: string[] }) : { undo: [], redo: [] };
+  }
+
   /** Verlaufsstand: Undo-/Redo-Tiefe und geschätzter Speicher (Bytes). */
   historyState(): { undo: number; redo: number; bytes: number } {
     const s = this.handle ? core().doc_history_state(this.handle) : new Float64Array(0);

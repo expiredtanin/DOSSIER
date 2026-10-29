@@ -630,20 +630,39 @@ impl Document {
     /// Einen Schritt zurück; liefert die angewendeten Ops (für die TS-Leseansicht), `None` = nichts.
     /// Die dabei entstehenden Inversen sind der Redo-Schritt.
     pub fn undo(&mut self) -> Option<Vec<Op>> {
-        let ops = self.history.pop_undo()?.ops;
-        let applied = ops.clone();
-        let redo = self.apply_inverting(ops);
-        self.history.push_redo(Step::new(redo));
+        let step = self.history.pop_undo()?;
+        let applied = step.ops.clone();
+        let redo = self.apply_inverting(step.ops);
+        self.history.push_redo(Step::new(redo).labeled(step.label));
         Some(applied)
     }
 
     /// Einen Schritt vor; liefert die angewendeten Ops, `None` = nichts.
     pub fn redo(&mut self) -> Option<Vec<Op>> {
-        let ops = self.history.pop_redo()?.ops;
-        let applied = ops.clone();
-        let undo = self.apply_inverting(ops);
-        self.history.push_undo(Step::new(undo));
+        let step = self.history.pop_redo()?;
+        let applied = step.ops.clone();
+        let undo = self.apply_inverting(step.ops);
+        self.history.push_undo(Step::new(undo).labeled(step.label));
         Some(applied)
+    }
+
+    /// Springt im Verlauf auf Undo-Tiefe `target` (0 = Anfang, `undo_depth + redo_depth` = Ende):
+    /// mehrere Schritte in einem Aufruf. Liefert alle angewendeten Ops in Reihenfolge (die
+    /// [`Document::last_hits`] gelten für diese Folge); `None` = schon dort oder ausserhalb.
+    pub fn history_jump(&mut self, target: usize) -> Option<Vec<Op>> {
+        let (u, r) = (self.history.undo_depth(), self.history.redo_depth());
+        if target == u || target > u + r {
+            return None;
+        }
+        let mut all = Vec::new();
+        let mut hits = Vec::new();
+        for _ in 0..u.abs_diff(target) {
+            let ops = if target < u { self.undo() } else { self.redo() }?;
+            all.extend(ops);
+            hits.extend_from_slice(&self.last_hits);
+        }
+        self.last_hits = hits;
+        Some(all)
     }
 
     pub fn history(&self) -> &History {
@@ -885,6 +904,59 @@ mod tests {
             batch.redo().unwrap();
             assert_eq!(batch.to_json(), single.to_json());
         }
+    }
+
+    fn set_name(d: &mut Document, v: &str, label: &str, key: Option<&str>, now: f64) {
+        d.history_mut().set_label(label);
+        d.commit(ops(json!([{"kind":"setField","key":"name","value":v}])), key, now, false).unwrap();
+    }
+
+    #[test]
+    fn schritt_beschriftungen_ueberleben_koaleszenz_gruppen_undo() {
+        let mut d = doc();
+        set_name(&mut d, "A", "Eins", None, 0.0);
+        // Koaleszenz: der Schritt behält die Beschriftung des ersten Eintrags.
+        set_name(&mut d, "B", "Zwei", Some("drag"), 10.0);
+        set_name(&mut d, "C", "Drei", Some("drag"), 20.0);
+        // Gruppe: erste Beschriftung gilt; ohne Beschriftung bleibt sie leer (= Standard in der UI).
+        d.history_mut().begin_group();
+        set_name(&mut d, "D", "Gruppe", None, 30.0);
+        set_name(&mut d, "E", "", None, 31.0);
+        d.history_mut().end_group();
+        set_name(&mut d, "F", "", None, 40.0);
+        assert_eq!(d.history().labels(), (vec!["Eins".to_string(), "Zwei".into(), "Gruppe".into(), "".into()], vec![]));
+        d.undo().unwrap();
+        d.undo().unwrap();
+        let (u, r) = d.history().labels();
+        assert_eq!(u, vec!["Eins", "Zwei"]);
+        // Redo: nächster Schritt zuerst.
+        assert_eq!(r, vec!["Gruppe", ""]);
+        d.redo().unwrap();
+        assert_eq!(d.history().labels().0.last().unwrap(), "Gruppe");
+    }
+
+    #[test]
+    fn sprung_zu_schritt_n() {
+        let mut d = doc();
+        let mut states = vec![d.to_json()];
+        for (i, v) in ["A", "B", "C", "D"].iter().enumerate() {
+            set_name(&mut d, v, "x", None, i as f64 * 1000.0);
+            states.push(d.to_json());
+        }
+        assert_eq!(d.history().undo_depth(), 4);
+        let ops1 = d.history_jump(1).unwrap();
+        assert_eq!(d.to_json(), states[1]);
+        assert_eq!((d.history().undo_depth(), d.history().redo_depth()), (1, 3));
+        assert_eq!(d.last_hits().len(), ops1.len());
+        d.history_jump(4).unwrap();
+        assert_eq!(d.to_json(), states[4]);
+        d.history_jump(0).unwrap();
+        assert_eq!(d.to_json(), states[0]);
+        assert!(d.history_jump(0).is_none(), "schon dort");
+        assert!(d.history_jump(9).is_none(), "ausserhalb");
+        assert_eq!(d.to_json(), states[0]);
+        d.history_jump(2).unwrap();
+        assert_eq!(d.to_json(), states[2]);
     }
 
     #[test]

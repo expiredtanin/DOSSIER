@@ -599,6 +599,7 @@ export function useProjectFileActions(
           },
           now,
         ),
+        "history.import.drawing",
       );
     } catch (err) {
       // Kaputter Puffer o. Ä. (Meldung des Kerns).
