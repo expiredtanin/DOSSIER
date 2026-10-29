@@ -365,7 +365,16 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (`load`, Verlauf leer). Tests erzeugen Zufallsänderungen über `core/projectDiff.testutil.ts` (nur Tests).
     e2e: Öffnen leert den Verlauf, DXF-Import = ein Undo-Schritt. Nicht in der Tauri-App geprüft (natives Öffnen mit
     Sperre, Ressourcen-Fenster).
-    Offen: Ebenen-/Gruppen-Logik (`groupActions.ts`) nach Rust; Undo-Verlauf als Liste in der UI [84].
+    **Gruppen-Logik im Kern (29.10.):** `groups.rs` (transitive Mitgliedschaft mit Zyklenschutz, sichtbare Gruppe
+    im Isolations-Kontext, Auswahl um Gruppen erweitern; Abfragen `groupMembership`/`containingGroup`/
+    `expandToGroups`), Fassade `model/groups.ts` (letzte Mitgliedschaft gemerkt: Rahmen-Filter fragt je Element).
+    TS-Rechnung gelöscht (`transitiveMembership`, `topLevelGroups`, `containingGroupId`, `isInsideActiveGroup`,
+    `expandToGroups`); in `state/groupActions.ts` bleiben die Op-Bauer (`groupSelection`, `ungroup`,
+    `activeGroupOps`), das Dimmen der Plan-Primitive und `mergeMembership` für Auswahl-Mengen. Gleichheit (einmalig):
+    400 Zufallsprojekte × 10 Abfragen (Zyklen, doppelte Gruppen-ids, fehlende Gruppen, Pfade mit unbekannter
+    Gruppe), 16000 Vergleiche gleich der alten TS-Fassung. Ebenen-Logik (Kategorien-Baum, `recomputeFloorElevations`)
+    noch TS.
+    Offen: Ebenen-Logik nach Rust; Undo-Verlauf als Liste in der UI [84].
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

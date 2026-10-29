@@ -14,7 +14,6 @@ import {
   expandToGroups,
   groupSelection,
   isInsideActiveGroup,
-  topLevelGroups,
   transitiveMembership,
   ungroup,
 } from "./groupActions";
@@ -94,14 +93,10 @@ describe("transitiveMembership", () => {
   });
 });
 
-describe("topLevelGroups / containingGroupId", () => {
+describe("containingGroupId (Kern)", () => {
   const inner: Group = { id: "g1", wallIds: ["w1"], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] };
   const outer: Group = { id: "g2", wallIds: ["w2"], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: ["g1"] };
   const p = project([inner, outer]);
-
-  it("topLevelGroups schliesst verschachtelte Untergruppen aus", () => {
-    expect(topLevelGroups(p).map((g) => g.id)).toEqual(["g2"]);
-  });
 
   it("ohne Isolation (groupPath leer): findet nur die ÄUSSERE Gruppe für ein Element in g1", () => {
     expect(containingGroupId(p, "wallIds", "w1", [])).toBe("g2");

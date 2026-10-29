@@ -43,7 +43,10 @@ export type QueryName =
   | "planDomains"
   | "ifcExportData"
   | "meshExportData"
-  | "modelJson";
+  | "modelJson"
+  | "groupMembership"
+  | "containingGroup"
+  | "expandToGroups";
 
 export class ProjectDocument {
   private handle = 0;

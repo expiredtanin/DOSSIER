@@ -1,7 +1,7 @@
-// Gruppen (Vectorworks-artig, s. `model/types.ts::Group`): reine Funktionen
-// über Mitgliedschaft/Verschachtelung + Erzeugen/Auflösen. Keine React-/Store-
-// Abhängigkeit — testbar ohne Mock, wird von `useGroupHandlers.ts` (Klick-/
-// Tastatur-Verdrahtung) und `PlanView.tsx` (Dimm-Rendering) konsumiert.
+// Gruppen (Vectorworks-artig, s. `model/types.ts::Group`): Erzeugen/Auflösen und Zuordnen als Ops,
+// Dimmen der Plan-Primitive bei Isolation. Die Mitgliedschafts-Logik (transitiv, sichtbare Gruppe,
+// Auswahl erweitern) rechnet der Rust-Kern (`src-tauri/core/src/groups.rs`, Fassade `model/groups.ts`,
+// [K4] S3); hier re-exportiert. Keine React-/Store-Abhängigkeit.
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
@@ -13,31 +13,11 @@ import { applyOps } from "../core";
 import type { CoreOp } from "../core";
 import { addItems, itemsOf, patchItem, removeItems } from "../core";
 import type { EntityCollection } from "../core";
+import { EMPTY_MEMBERSHIP, transitiveMembership } from "../core";
+import type { GroupMembership, MemberKind } from "../core";
 
-/** Mitglieds-IDs je Elementart — dieselbe Form wie `Group`, ohne `id`/`name`/`groupIds`. */
-export interface GroupMembership {
-  wallIds: string[];
-  drawingIds: string[];
-  ceilingIds: string[];
-  roomIds: string[];
-  stairIds: string[];
-  columnIds: string[];
-  roofIds: string[];
-  openingIds: string[];
-}
-
-export type MemberKind = keyof GroupMembership;
-
-export const EMPTY_MEMBERSHIP: GroupMembership = {
-  wallIds: [],
-  drawingIds: [],
-  ceilingIds: [],
-  roomIds: [],
-  stairIds: [],
-  columnIds: [],
-  roofIds: [],
-  openingIds: [],
-};
+export type { GroupMembership, MemberKind } from "../core";
+export { EMPTY_MEMBERSHIP, containingGroupId, expandToGroups, isInsideActiveGroup, transitiveMembership } from "../core";
 
 const KEYS: MemberKind[] = [
   "wallIds",
@@ -50,133 +30,11 @@ const KEYS: MemberKind[] = [
   "openingIds",
 ];
 
+/** Vereinigung je Art (erste Vorkommen in Reihenfolge) — für Auswahl-Mengen in der Hülle. */
 export function mergeMembership(a: GroupMembership, b: GroupMembership): GroupMembership {
   const out = { ...a };
   for (const k of KEYS) out[k] = [...new Set([...a[k], ...b[k]])];
   return out;
-}
-
-/**
- * Transitive Mitgliedschaft einer Gruppe: löst verschachtelte Gruppen
- * (`groupIds`) rekursiv auf und vereinigt alle Mitglieds-IDs. Zyklenschutz
- * über `seen` (sollte nie vorkommen — `groupSelection` verhindert das beim
- * Erzeugen —, ist aber billig und schützt gegen manuell kaputte Projekte).
- */
-export function transitiveMembership(
-  project: Project,
-  groupId: string,
-  seen: Set<string> = new Set(),
-): GroupMembership {
-  if (seen.has(groupId)) return EMPTY_MEMBERSHIP;
-  seen.add(groupId);
-  const g = (project.groups ?? []).find((x) => x.id === groupId);
-  if (!g) return EMPTY_MEMBERSHIP;
-  let out: GroupMembership = {
-    wallIds: [...g.wallIds],
-    drawingIds: [...g.drawingIds],
-    ceilingIds: [...g.ceilingIds],
-    roomIds: [...g.roomIds],
-    stairIds: [...g.stairIds],
-    columnIds: [...g.columnIds],
-    roofIds: [...g.roofIds],
-    openingIds: [...g.openingIds],
-  };
-  for (const sub of g.groupIds) out = mergeMembership(out, transitiveMembership(project, sub, seen));
-  return out;
-}
-
-/** IDs aller Gruppen, die als Untergruppe in irgendeiner ANDEREN Gruppe stehen. */
-function nestedGroupIds(project: Project): Set<string> {
-  const s = new Set<string>();
-  for (const g of project.groups ?? []) for (const id of g.groupIds) s.add(id);
-  return s;
-}
-
-/** Top-Level-Gruppen (nicht Untergruppe einer anderen Gruppe) — Kandidaten ausserhalb jeder Isolation. */
-export function topLevelGroups(project: Project): Group[] {
-  const nested = nestedGroupIds(project);
-  return (project.groups ?? []).filter((g) => !nested.has(g.id));
-}
-
-/**
- * Die „sichtbare" Gruppe, die ein Element enthält, relativ zum aktuellen
- * Isolations-Kontext `groupPath` (leer = nicht isoliert):
- *  • nicht isoliert: sucht unter den TOP-LEVEL-Gruppen (verschachtelte
- *    Untergruppen sind dabei „unsichtbar", man sieht nur die äusserste Hülle).
- *  • isoliert (aktive Gruppe = letztes Element von `groupPath`): sucht NUR
- *    unter den DIREKTEN Untergruppen der aktiven Gruppe — direkte Mitglieder
- *    der aktiven Gruppe selbst zählen NICHT als „von einer Gruppe enthalten"
- *    (die sind ja gerade einzeln bearbeitbar, weil man in der Gruppe ist).
- * `null` = das Element gehört zu keiner (in diesem Kontext sichtbaren) Gruppe.
- */
-export function containingGroupId(
-  project: Project,
-  kind: MemberKind,
-  id: string,
-  groupPath: string[],
-): string | null {
-  let candidates: Group[];
-  if (groupPath.length === 0) {
-    candidates = topLevelGroups(project);
-  } else {
-    const active = (project.groups ?? []).find((g) => g.id === groupPath[groupPath.length - 1]);
-    if (!active) return null;
-    candidates = active.groupIds
-      .map((gid) => (project.groups ?? []).find((g) => g.id === gid))
-      .filter((g): g is Group => !!g);
-  }
-  for (const g of candidates) {
-    if (transitiveMembership(project, g.id)[kind].includes(id)) return g.id;
-  }
-  return null;
-}
-
-/**
- * Ob ein Element im aktuellen Isolations-Kontext editierbar ist: ohne aktive
- * Gruppe (`groupPath` leer) immer `true`; isoliert nur, wenn das Element
- * TRANSITIV zur aktiven (innersten) Gruppe gehört — alles andere ist „grau
- * und gesperrt", analog zum bestehenden Ebenen-Sperren-Modus.
- */
-export function isInsideActiveGroup(
-  project: Project,
-  kind: MemberKind,
-  id: string,
-  groupPath: string[],
-): boolean {
-  if (groupPath.length === 0) return true;
-  const active = groupPath[groupPath.length - 1];
-  return transitiveMembership(project, active)[kind].includes(id);
-}
-
-/**
- * Erweitert eine rohe Treffer-Mitgliedschaft (aus Einzelklick ODER Marquee,
- * beliebig viele IDs je Art) um Gruppen: jede ID, die zu einer im aktuellen
- * Isolations-Kontext (`groupPath`) SICHTBAREN Gruppe gehört (s.
- * `containingGroupId`), wird durch die TRANSITIVE Mitgliedschaft dieser
- * Gruppe ersetzt; IDs ohne Gruppe bleiben einzeln. Liefert zusätzlich die
- * Menge der dabei „getroffenen" Gruppen-IDs (für `selectedGroupIds`/die
- * Bounding-Box-Anzeige). Deckt Einzelklick (eine ID) UND Marquee (viele IDs
- * über mehrere Arten) mit derselben Logik ab.
- */
-export function expandToGroups(
-  project: Project,
-  raw: GroupMembership,
-  groupPath: string[],
-): { expanded: GroupMembership; groupIds: string[] } {
-  let expanded: GroupMembership = { ...EMPTY_MEMBERSHIP };
-  const groupIds = new Set<string>();
-  for (const k of KEYS) {
-    for (const id of raw[k]) {
-      const gid = containingGroupId(project, k, id, groupPath);
-      if (gid) {
-        groupIds.add(gid);
-        expanded = mergeMembership(expanded, transitiveMembership(project, gid));
-      } else {
-        expanded = mergeMembership(expanded, { ...EMPTY_MEMBERSHIP, [k]: [id] });
-      }
-    }
-  }
-  return { expanded, groupIds: [...groupIds] };
 }
 
 /** Primitiv-ID-Feld → zugehörige `MemberKind` (Reihenfolge irrelevant). */

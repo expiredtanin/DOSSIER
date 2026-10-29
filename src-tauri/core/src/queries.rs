@@ -41,8 +41,29 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("pickGeometry", _) => json(&model3d::pick_geometry(p)?),
         ("modelJson", _) => crate::model::to_value_typed_only(p).map(|v| v.to_string()).map_err(|e| e.to_string()),
         ("model3dParts", 3) => json(&model3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0)?),
+        // Gruppen ([K4] S3, `groups.rs`): `text` = Gruppen-id bzw. JSON der Argumente.
+        ("groupMembership", _) => json(&crate::groups::transitive_membership(p, text)),
+        ("containingGroup", _) => {
+            let a: GroupArgs = serde_json::from_str(text).map_err(|e| format!("containingGroup: {e}"))?;
+            json(&crate::groups::containing_group_id(p, &a.kind, &a.id, &a.path))
+        }
+        ("expandToGroups", _) => {
+            let a: GroupArgs = serde_json::from_str(text).map_err(|e| format!("expandToGroups: {e}"))?;
+            let (expanded, group_ids) = crate::groups::expand_to_groups(p, &a.raw, &a.path);
+            json(&serde_json::json!({"expanded": expanded, "groupIds": group_ids}))
+        }
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }
+}
+
+/// Argumente der Gruppen-Abfragen (`containingGroup`: kind/id/path, `expandToGroups`: raw/path).
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct GroupArgs {
+    kind: String,
+    id: String,
+    path: Vec<String>,
+    raw: crate::groups::Membership,
 }
 
 /// Abfragen mit binärer Antwort (Plan-Puffer v2, s. `plan_buf.rs`).

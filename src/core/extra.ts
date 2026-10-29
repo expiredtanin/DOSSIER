@@ -51,3 +51,5 @@ export { readMesh, meshObjectsToImportedMeshes, formatMeshReport, isMeshFile, ME
 export type { MeshObject, MeshImportReport, MeshUnit, MeshUp, MeshPlacement } from "../io/meshImport";
 export { addItems, fieldOps, findItem, itemsOf, opsMutation, patchItem, patchItems, removeItems, replaceItem, replaceWithMany, setField, setFieldIfChanged } from "./opsBuild";
 export type { EntityCollection, EntityOf, ProjectMutation } from "./opsBuild";
+export { EMPTY_MEMBERSHIP, containingGroupId, expandToGroups, isInsideActiveGroup, transitiveMembership } from "../model/groups";
+export type { GroupMembership, MemberKind } from "../model/groups";
