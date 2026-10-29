@@ -1,10 +1,10 @@
-// Unit-Tests für die Wand-/Decken-Resolver: Referenzlinie (`wallReferenceOffset`) und die UK/OK der
-// Decken über den Kern (`verticalExtents`, Regeln `model/helpers.rs::heights`).
+// Unit-Tests für die UK/OK der Decken über den Kern (`verticalExtents`, Regeln
+// `model/helpers.rs::heights`). Die Referenzlinie der Wand rechnet der Kern (`joins.rs::reference_offset`,
+// Fang: `snap_model.rs::wall_layer_segments`).
 
 import { describe, it, expect } from "vitest";
-import { wallReferenceOffset } from "./wall";
 import { verticalExtents } from "../geometry/grips";
-import type { Ceiling, Project, Wall } from "./types";
+import type { Ceiling, Project } from "./types";
 
 /** Minimalprojekt mit einem Geschoss (baseElevation 0, floorHeight 2.6) und
  *  einem einschichtigen Wandtyp (0.2 m), den die Decke als Aufbau nutzt. */
@@ -114,26 +114,5 @@ describe("UK/OK einer Decke", () => {
     const { zBottom, zTop } = ceilingVerticalExtent(project, ceiling);
     expect(zTop).toBeCloseTo(2.6);
     expect(zBottom).toBeCloseTo(2.9); // baseElevation(og)=2.8 + offset(0.1)
-  });
-});
-
-describe("wallReferenceOffset", () => {
-  const w = (extra: Partial<Wall>): Wall => ({ referenceLine: "center", ...extra } as Wall);
-  const T = 0.4; // Gesamtdicke → half = 0.2
-
-  it("bildet die benannten Linien ab (aussen/mitte/innen)", () => {
-    expect(wallReferenceOffset(w({ referenceLine: "left" }), T)).toBeCloseTo(0.2, 6);
-    expect(wallReferenceOffset(w({ referenceLine: "center" }), T)).toBeCloseTo(0, 6);
-    expect(wallReferenceOffset(w({ referenceLine: "right" }), T)).toBeCloseTo(-0.2, 6);
-  });
-
-  it("übersteuert die Referenzlinie mit einem freien Fugen-Versatz", () => {
-    // Fuge z. B. nach einer 0.05-Aussenschale: offset = half − 0.05 = 0.15.
-    expect(wallReferenceOffset(w({ referenceLine: "left", referenceOffset: 0.15 }), T)).toBeCloseTo(0.15, 6);
-  });
-
-  it("klemmt den Fugen-Versatz auf ±halbe Dicke", () => {
-    expect(wallReferenceOffset(w({ referenceOffset: 5 }), T)).toBeCloseTo(0.2, 6);
-    expect(wallReferenceOffset(w({ referenceOffset: -5 }), T)).toBeCloseTo(-0.2, 6);
   });
 });

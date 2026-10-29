@@ -1,5 +1,5 @@
 // 2D-Boolean-Operationen (Union / Subtract / Intersect) für GESCHLOSSENE
-// 2D-Zeichenelemente (Drawing2D). Ergänzt Split/Join (`splitJoin.ts`). Wandelt
+// 2D-Zeichenelemente (Drawing2D). Ergänzt Split/Join (Kern `cmd_split.rs`/`cmd_edit.rs`). Wandelt
 // Drawing2D ↔ Ring-/Polygon-Format der Polygon-Booleans des Rust-Kerns (`polygonBool`, i_overlay) und liefert
 // neue Drawing2D-Listen. Stil-, Kategorie- und Level-Attribute werden geerbt
 // (vom ersten bzw. Basis-Element).
@@ -21,8 +21,34 @@ type MultiPolygon = polygonClipping.MultiPolygon;
 type Polygon = polygonClipping.Polygon;
 type Ring = polygonClipping.Ring;
 import type { Drawing2D, Drawing2DGeom, Vec2 } from "../model/types";
-import { toPolyForm } from "./splitJoin";
-import type { PolyForm } from "./splitJoin";
+import { hasRealBulge } from "../core";
+
+/** Polylinien-Darstellung einer geschlossenen Zeichnung (Stützpunkte). */
+interface PolyForm {
+  pts: Vec2[];
+  closed: boolean;
+}
+
+/**
+ * Stützpunkte einer Zeichnung: Linie, Polylinie ohne Bögen, Rechteck; sonst `null` (Kreis, Bogen,
+ * Text …; Polylinien mit Bögen würden zu Sehnen entarten).
+ */
+function toPolyForm(geom: Drawing2DGeom): PolyForm | null {
+  switch (geom.shape) {
+    case "line":
+      return { pts: [geom.a, geom.b], closed: false };
+    case "polyline":
+      if (hasRealBulge(geom.bulge)) return null;
+      return { pts: geom.pts.slice(), closed: geom.closed };
+    case "rect":
+      return {
+        pts: [geom.min, { x: geom.max.x, y: geom.min.y }, geom.max, { x: geom.min.x, y: geom.max.y }],
+        closed: true,
+      };
+    default:
+      return null;
+  }
+}
 
 /** Ist die Geometrie eines Drawing2D eine GESCHLOSSENE Fläche (für Boolean)? */
 export function isClosedArea(geom: Drawing2DGeom): boolean {
@@ -33,7 +59,7 @@ export function isClosedArea(geom: Drawing2DGeom): boolean {
 
 /**
  * Wandelt ein geschlossenes Drawing2D in ein Kern-`Polygon`
- * (Ring-Liste). Reuse: `toPolyForm` aus splitJoin liefert die Stützpunkte. Der
+ * (Ring-Liste). `toPolyForm` liefert die Stützpunkte. Der
  * Ring wird als `[x,y]`-Paare gebildet; der Kern schließt selbst
  * (erster==letzter ist nicht erforderlich, aber unschädlich). Liefert `null`,
  * wenn die Form nicht geschlossen ist oder zu wenige Punkte hat.

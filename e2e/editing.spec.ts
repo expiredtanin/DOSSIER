@@ -47,3 +47,20 @@ test("Geschoss wechseln", async ({ page }) => {
   await page.getByText("Erdgeschoss", { exact: true }).first().click();
   await expect(statusFloor).toContainText("Erdgeschoss");
 });
+
+test("Kopieren/Einfügen einer Wand (Kern `cmd_paste.rs`): Kopie im Baum, ein Undo-Schritt", async ({ page }) => {
+  await startNewProject(page);
+  await openSample(page);
+  await openTab(page, "Elemente");
+  // Die Kopie bekommt eine neue id `W-Stempel-k` (Zeit-Zähler-k; im Baum gekürzt „W-17…44-1-1“).
+  const pasted = elementRows(page).filter({ hasText: /W-\d+…\d*-\d+-\d+/ });
+  await expect(pasted).toHaveCount(0);
+  await selectW1(page);
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+c");
+  await page.keyboard.press("ControlOrMeta+v");
+  await expect(pasted).toHaveCount(1);
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(pasted).toHaveCount(0);
+});

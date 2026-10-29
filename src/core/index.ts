@@ -36,20 +36,17 @@ export {
 export {
   type DrawingIndex,
   buildDrawingIndex,
-  drawingsNear,
   drawingsWithinDistance,
-  isIndexable,
   nearestInDrawings,
   pointSegDist as pointSegDist__geometry_drawingIndex,
 } from "../geometry/drawingIndex";
 
 export {
-  type SegSnapCand,
-  type SegSnapResult,
-  holdSnapSegments,
-  releaseSnapSegments,
-  snapOnSegments,
-} from "../geometry/snapSegments";
+  type ModelSnapCand,
+  type ModelSnapResult,
+  holdModelSnap,
+  queryModelSnap,
+} from "../geometry/modelSnap";
 
 export {
   type Fillet,
@@ -58,11 +55,6 @@ export {
   offsetSegment,
   pointSegmentDistance,
   polylineEdges,
-  removeSegment,
-  removeSegmentWithBulge,
-  splitAtIntersections,
-  splitClosedByChord,
-  splitPolylineAtParam,
   tangentCircleCenters,
   vecEqual,
 } from "../geometry/kernel2d";
@@ -132,7 +124,6 @@ export {
   MIN_STEPS,
   defaultStepCount,
   stairGeometry,
-  stairOutline,
 } from "../geometry/stair";
 
 export {

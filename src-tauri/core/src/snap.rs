@@ -1,9 +1,8 @@
 //! Objektfang auf Strecken ([K3d], früher die Schleifen in `src/tools/snapping.ts`): Lotfusspunkt
 //! vom letzten Punkt, Endpunkte, Mittelpunkte, Schnittpunkte (unendliche Geraden) und Punkt auf
-//! der Kante, dazu die nächste Strecke für die Verweil-Erkennung ("divide"). TS sammelt die
-//! Strecken (Wandachsen, Schichtgrenzen, Umrisse, 2D-Zeichnung) einmal je Projekt/Geschoss und
-//! legt sie hier ab; je Mausbewegung kommen nur Cursor, Toleranz und die wenigen Zusatzstrecken
-//! (Entwurf, Blatt-Geometrie) dazu.
+//! der Kante, dazu die nächste Strecke für die Verweil-Erkennung ("divide"). Die Strecken eines
+//! Geschosses sammelt `snap_model.rs` einmal je Dokument-Stand aus dem Modell; je Mausbewegung
+//! kommen nur Cursor, Toleranz und die wenigen Zusatzstrecken (Entwurf, Blatt-Geometrie) dazu.
 //!
 //! Bewertung wie in TS: Kandidat nur bis `tol_m` Abstand, Punktzahl `distPx − Priorität`, der
 //! erste mit der kleinsten Punktzahl gewinnt. Ergebnis in zwei Blöcken (die Reihenfolge in TS ist
@@ -25,6 +24,9 @@ pub const K_ENDPOINT: f64 = 1.0;
 pub const K_MIDPOINT: f64 = 2.0;
 pub const K_INTERSECTION: f64 = 3.0;
 pub const K_ON_EDGE: f64 = 4.0;
+pub const K_CENTER: f64 = 5.0;
+pub const K_QUADRANT: f64 = 6.0;
+pub const K_TANGENT: f64 = 7.0;
 
 /// Prioritäts-Bonus in Pixeln (wie `PRIORITY` in snapping.ts).
 fn priority(kind: f64) -> f64 {
@@ -33,6 +35,8 @@ fn priority(kind: f64) -> f64 {
         1 => 7.0,
         2 => 3.0,
         3 => 5.0,
+        5 | 6 => 3.0,
+        7 => 1.0,
         _ => 0.0,
     }
 }
@@ -53,21 +57,22 @@ pub struct Cand {
     pub score: f64,
 }
 
-struct Best {
+/// Bester Kandidat einer Folge (`consider` in snapping.ts): der erste mit der kleinsten Punktzahl.
+pub struct Best {
     raw: (f64, f64),
     tol_m: f64,
     px_per_m: f64,
-    best: Option<Cand>,
+    pub best: Option<Cand>,
     best_score: f64,
 }
 
 impl Best {
-    fn new(raw: (f64, f64), tol_m: f64, px_per_m: f64) -> Best {
+    pub fn new(raw: (f64, f64), tol_m: f64, px_per_m: f64) -> Best {
         Best { raw, tol_m, px_per_m, best: None, best_score: f64::INFINITY }
     }
 
     #[inline]
-    fn consider(&mut self, x: f64, y: f64, kind: f64) {
+    pub fn consider(&mut self, x: f64, y: f64, kind: f64) {
         let dx = x - self.raw.0;
         let dy = y - self.raw.1;
         // Schnell verwerfen (hypot ≥ max(|dx|, |dy|)); NaN fällt durch wie in TS.
@@ -151,7 +156,7 @@ impl SnapSet {
     /// Strecken, die näher als `r` an `(x, y)` liegen können (aufsteigend). Alle Strecken-Fänge
     /// (Endpunkt, Mitte, Lot, Kante, Verweilen) liegen auf der Strecke und höchstens `tol_m` vom
     /// Cursor — die übrigen tragen nichts bei.
-    fn near(&self, x: f64, y: f64, r: f64) -> Vec<u32> {
+    pub fn near(&self, x: f64, y: f64, r: f64) -> Vec<u32> {
         if x.is_finite() && y.is_finite() && r.is_finite() && r >= 0.0 {
             self.ix.candidates(x, y, r * (1.0 + 1e-6) + pad(&[x, y]))
         } else {
@@ -162,10 +167,10 @@ impl SnapSet {
 
 /// Eingabe einer Fang-Abfrage.
 pub struct SnapQuery<'a> {
-    /// Strecken in Fang-Reihenfolge: abgelegte, dann Zusatz.
-    pub base: &'a SnapSet,
+    /// Strecken in Fang-Reihenfolge: abgelegte Teile (der Reihe nach), dann Zusatz.
+    pub bases: &'a [&'a SnapSet],
     pub extra: &'a [[f64; 4]],
-    /// Strecken für Schnittpunkte; `None` = dieselben wie `base` + `extra`.
+    /// Strecken für Schnittpunkte; `None` = dieselben wie `bases` + `extra`.
     pub int_segs: Option<&'a [[f64; 4]]>,
     pub raw: (f64, f64),
     pub tol_m: f64,
@@ -176,23 +181,21 @@ pub struct SnapQuery<'a> {
 
 /// Ergebnis: nächste Strecke (Verweilen), Block A (Lot, Endpunkte), Block B (Mitte, Schnitt, Kante).
 pub struct SnapOut {
-    pub dwell: Option<usize>,
+    pub dwell: Option<[f64; 4]>,
     pub a: Option<Cand>,
     pub b: Option<Cand>,
 }
 
 pub fn snap_segments(q: &SnapQuery) -> SnapOut {
     let (rx, ry) = q.raw;
-    let near_base = q.base.near(rx, ry, q.tol_m);
-    let nb = q.base.segs.len();
-    // Strecken in Fang-Reihenfolge (Index im Ganzen, Strecke): nahe abgelegte, dann Zusatz.
-    let segs = || {
-        near_base.iter().map(|&k| (k as usize, &q.base.segs[k as usize])).chain(q.extra.iter().enumerate().map(move |(k, s)| (nb + k, s)))
-    };
+    let near_base: Vec<&[f64; 4]> =
+        q.bases.iter().flat_map(|b| b.near(rx, ry, q.tol_m).into_iter().map(move |k| &b.segs[k as usize])).collect();
+    // Strecken in Fang-Reihenfolge: nahe abgelegte, dann Zusatz.
+    let segs = || near_base.iter().copied().chain(q.extra.iter()).map(|s| ((), s));
     // Nächste Strecke für die Verweil-Erkennung (`nearestSegment` in snapping.ts).
     let mut dwell = None;
     let mut best_d = q.tol_m;
-    for (i, s) in segs() {
+    for (_, s) in segs() {
         let (fx, fy) = perp_foot(rx, ry, s);
         let (dx, dy) = (fx - rx, fy - ry);
         if dx.abs() >= best_d || dy.abs() >= best_d {
@@ -201,7 +204,7 @@ pub fn snap_segments(q: &SnapQuery) -> SnapOut {
         let d = hypot(&[dx, dy]);
         if d < best_d {
             best_d = d;
-            dwell = Some(i);
+            dwell = Some(*s);
         }
     }
     let mut a = Best::new(q.raw, q.tol_m, q.px_per_m);
@@ -228,7 +231,7 @@ pub fn snap_segments(q: &SnapQuery) -> SnapOut {
     if q.flags & F_INTERSECTION != 0 {
         let near: Vec<&[f64; 4]> = match q.int_segs {
             Some(l) => l.iter().filter(|s| line_near(s, q.raw, q.tol_m)).collect(),
-            None => q.base.segs.iter().chain(q.extra.iter()).filter(|s| line_near(s, q.raw, q.tol_m)).collect(),
+            None => q.bases.iter().flat_map(|b| b.segs.iter()).chain(q.extra.iter()).filter(|s| line_near(s, q.raw, q.tol_m)).collect(),
         };
         for i in 0..near.len() {
             for j in i + 1..near.len() {
@@ -260,9 +263,9 @@ mod tests {
     fn endpunkt_vor_kante_schnitt_nur_nahe_geraden() {
         let segs = segs_from(&[0.0, 0.0, 10.0, 0.0, 5.0, -5.0, 5.0, 5.0, 100.0, 50.0, 200.0, 50.0]);
         let base = SnapSet::new(segs[..1].to_vec());
-        let q = SnapQuery { base: &base, extra: &segs[1..], int_segs: None, raw: (5.05, 0.02), tol_m: 0.2, px_per_m: 100.0, flags: 31, last: None };
+        let q = SnapQuery { bases: &[&base], extra: &segs[1..], int_segs: None, raw: (5.05, 0.02), tol_m: 0.2, px_per_m: 100.0, flags: 31, last: None };
         let o = snap_segments(&q);
-        assert_eq!(o.dwell, Some(0));
+        assert_eq!(o.dwell, Some(segs[0]));
         assert_eq!(o.a, None);
         let b = o.b.unwrap();
         assert_eq!((b.x, b.y, b.kind), (5.0, 0.0, K_INTERSECTION));

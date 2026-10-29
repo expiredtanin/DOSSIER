@@ -1,8 +1,8 @@
 // Raster-Index über die Bounding-Boxen von Linien-/Polylinien-Zeichnungen
 // (Drawing2D). Abfragen prüfen nur die Zeichnungen in Cursornähe statt alle —
 // bei einem Kataster-Import ~10^5 Zeichnungen / 3,7 Mio. Strecken. Genutzt für
-// Hover/Pick/Marquee (plan/planView/underlayAccess.ts) und den Objektfang
-// (tools/snapping.ts).
+// Hover/Pick/Marquee (plan/planView/underlayAccess.ts); der Objektfang hat seinen
+// eigenen Index im Kern (`snap_model.rs`). `pointSegDist` nutzt der Fang für die Blatt-Geometrie.
 
 import type { Drawing2D, Vec2 } from "../model/types";
 import { drawingBox } from "./drawingBounds";
@@ -46,10 +46,6 @@ export interface DrawingIndex {
 const TARGET_PER_CELL = 4;
 const MAX_CELLS = 2_000_000;
 const MAX_CELLS_PER_DRAWING = 256;
-
-/** Ob eine Zeichnung vom Index erfasst wird (Linie/Polylinie mit Punkten). */
-export const isIndexable = (d: Drawing2D): boolean =>
-  d.geom.shape === "line" || d.geom.shape === "polyline";
 
 export function buildDrawingIndex(drawings: readonly Drawing2D[]): DrawingIndex | null {
   if (drawings.length === 0) return null;
@@ -104,7 +100,7 @@ export function buildDrawingIndex(drawings: readonly Drawing2D[]): DrawingIndex 
  * Indizes der Zeichnungen, deren Bounding-Box (um `r` erweitert) den Punkt `m`
  * enthält — Kandidaten, jede höchstens einmal.
  */
-export function drawingsNear(index: DrawingIndex, m: Vec2, r: number): number[] {
+function drawingsNear(index: DrawingIndex, m: Vec2, r: number): number[] {
   const { minX, minY, cell, cols, rows, cellStart, items, long, drawings } = index;
   const out: number[] = [];
   const seen = new Set<number>();

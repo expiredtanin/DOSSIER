@@ -28,7 +28,7 @@ import {
   isClipboardEmpty,
   pasteElementClipboard,
 } from "../editors/elementClipboard";
-import type { ElementClipboard, ElementSelectionIds } from "../editors/elementClipboard";
+import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editors/elementClipboard";
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
 import { matchesShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
 
@@ -549,7 +549,7 @@ export function useElementClipboardShortcut(
   setElementClipboard: (c: ElementClipboard | null) => void,
   activeLevelId: string,
   project: Project,
-  applyChange: (ops: readonly CoreOp[]) => void,
+  applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[])) => void,
   setSelected: {
     wallIds: (ids: string[]) => void;
     drawingIds: (ids: string[]) => void;
@@ -588,8 +588,15 @@ export function useElementClipboardShortcut(
       e.preventDefault();
       const paste = (clip: ElementClipboard | null) => {
         if (!clip || isClipboardEmpty(clip)) return;
-        const { ops, pastedIds } = pasteElementClipboard(clip, activeLevelId);
-        applyChange(ops);
+        // Kern rechnet auf dem aktuellen Store-Projekt; die neuen ids für die Nachauswahl.
+        const out: { ids?: PastedIds } = {};
+        applyChange((p) => {
+          const r = pasteElementClipboard(p, clip, activeLevelId);
+          out.ids = r.pastedIds;
+          return r.ops;
+        });
+        const pastedIds = out.ids;
+        if (!pastedIds) return;
         setSelected.wallIds(pastedIds.wallIds);
         setSelected.drawingIds(pastedIds.drawingIds);
         setSelected.ceilingIds(pastedIds.ceilingIds);
