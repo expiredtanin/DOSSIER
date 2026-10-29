@@ -80,6 +80,13 @@ pub struct Contour {
     pub closed: bool,
     pub filled: bool,
     pub curve: Option<Curve>,
+    /// Polylinie mit Bögen (LWPOLYLINE/POLYLINE, Schraffur-Rand aus einer Polylinie): die Stützpunkte
+    /// `[x, y, bulge]` (abgebildet, in Metern), damit die 2D-Zeichnung echte Bogen-Segmente bekommt
+    /// statt des fein zerlegten Linienzugs (`pts` bleibt tesselliert für Kontext und Fang). Nur wenn
+    /// mindestens ein Segment ein Bogen ist und die Abbildung Kreise erhält (gleichmässig skaliert,
+    /// gedreht, ggf. gespiegelt — dann mit umgekehrtem Vorzeichen). Kataster-Fund 29.10.: Strassen-
+    /// parzellen hatten nach dem Zerlegen über 600 Stützpunkte und keine Griffe mehr.
+    pub bulge_verts: Option<Vec<[f64; 3]>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -343,6 +350,22 @@ impl Xf {
         }
         Some((s, self.m10.atan2(self.m00)))
     }
+    /// Winkeltreue Abbildung (gleichmässig skaliert und gedreht, ggf. gespiegelt)? `Some(true)` =
+    /// gespiegelt (Bögen laufen andersherum), `None` = verzerrt (aus Kreisen werden Ellipsen).
+    fn conformal(&self) -> Option<bool> {
+        let det = self.m00 * self.m11 - self.m01 * self.m10;
+        if !(det.is_finite() && det != 0.0) {
+            return None;
+        }
+        let tol = 1e-9 * det.abs().sqrt().max(1.0);
+        if det > 0.0 && (self.m00 - self.m11).abs() <= tol && (self.m01 + self.m10).abs() <= tol {
+            return Some(false);
+        }
+        if det < 0.0 && (self.m00 + self.m11).abs() <= tol && (self.m01 - self.m10).abs() <= tol {
+            return Some(true);
+        }
+        None
+    }
     /// Längenmassstab (für Texthöhen): Wurzel der Determinante.
     fn scale(&self) -> f64 {
         (self.m00 * self.m11 - self.m01 * self.m10).abs().sqrt()
@@ -559,7 +582,30 @@ impl<'a> Mapper<'a> {
             return;
         }
         let pts = if xf.is_identity() { pts } else { pts.iter().map(|p| xf.xy(p[0], p[1])).collect() };
-        self.contours.push(Contour { layer: layer.to_string(), z: xf.z(z), pts, closed, filled: false, curve: None });
+        self.contours.push(Contour {
+            layer: layer.to_string(),
+            z: xf.z(z),
+            pts,
+            closed,
+            filled: false,
+            curve: None,
+            bulge_verts: None,
+        });
+    }
+
+    /// Polylinie mit Bulges: tesselliert wie bisher, dazu (wenn sinnvoll) die Stützpunkte mit Bulge
+    /// ([`Contour::bulge_verts`]).
+    fn push_bulged(&mut self, layer: &str, z: f64, verts: &[(Vector3, f64)], closed: bool, xf: &Xf) {
+        let before = self.contours.len();
+        self.push_contour(layer, z, bulge_points(verts, closed), closed, xf);
+        if self.contours.len() == before {
+            return;
+        }
+        if let Some(bv) = bulge_vertices(verts, xf) {
+            if let Some(c) = self.contours.last_mut() {
+                c.bulge_verts = Some(bv);
+            }
+        }
     }
 
     /// Eine Entity unter einer Abbildung. `inherit` = Ebene der umgebenden Referenz (Ebene „0"
@@ -597,8 +643,7 @@ impl<'a> Mapper<'a> {
                     _ => fz(p.elevation),
                 };
                 let closed = p.flags.is_closed();
-                let pts = bulge_points(&verts, closed);
-                self.push_contour(layer, z, pts, closed, xf);
+                self.push_bulged(layer, z, &verts, closed, xf);
             }
             EntityType::Polyline3D(p) => {
                 let verts: Vec<(Vector3, f64)> =
@@ -666,8 +711,7 @@ impl<'a> Mapper<'a> {
             .iter()
             .map(|v| (Vector3::new(v.location.x, v.location.y, 0.0), v.bulge))
             .collect();
-        let pts = bulge_points(&verts, p.is_closed);
-        self.push_contour(layer, fz(p.elevation), pts, p.is_closed, xf);
+        self.push_bulged(layer, fz(p.elevation), &verts, p.is_closed, xf);
     }
 
     fn arc(&mut self, c: Vector3, r: f64, start: f64, end: f64, layer: &str, xf: &Xf) {
@@ -769,8 +813,18 @@ impl<'a> Mapper<'a> {
             let before = self.contours.len();
             self.push_contour(layer, z, pts, true, xf);
             if self.contours.len() > before {
+                // Rand aus genau einer Polylinie mit Bögen: Stützpunkte mit Bulge behalten.
+                let bv = match path.edges.as_slice() {
+                    [BoundaryEdge::Polyline(pl)] => {
+                        let verts: Vec<(Vector3, f64)> =
+                            pl.vertices.iter().map(|v| (Vector3::new(v.x, v.y, 0.0), v.z)).collect();
+                        bulge_vertices(&verts, xf)
+                    }
+                    _ => None,
+                };
                 if let Some(c) = self.contours.last_mut() {
                     c.filled = true;
+                    c.bulge_verts = bv;
                 }
             }
         }
@@ -1576,6 +1630,29 @@ fn bulge_points(verts: &[(Vector3, f64)], closed: bool) -> Vec<[f64; 2]> {
     out
 }
 
+/// Stützpunkte `[x, y, bulge]` unter der Abbildung `xf` (nicht endliche Punkte weggelassen wie in
+/// [`bulge_points`]), oder `None`, wenn kein Segment ein Bogen ist oder `xf` Kreise verzerrt.
+fn bulge_vertices(verts: &[(Vector3, f64)], xf: &Xf) -> Option<Vec<[f64; 3]>> {
+    let vs: Vec<([f64; 2], f64)> = verts
+        .iter()
+        .filter(|(v, _)| finite2(v))
+        .map(|(v, b)| ([v.x, v.y], if b.is_finite() { *b } else { 0.0 }))
+        .collect();
+    if vs.len() < 2 || !vs.iter().any(|(_, b)| b.abs() >= 1e-12) {
+        return None;
+    }
+    let mirrored = if xf.is_identity() { false } else { xf.conformal()? };
+    let sign = if mirrored { -1.0 } else { 1.0 };
+    Some(
+        vs.iter()
+            .map(|(p, b)| {
+                let [x, y] = xf.xy(p[0], p[1]);
+                [x, y, if b.abs() < 1e-12 { 0.0 } else { sign * b }]
+            })
+            .collect(),
+    )
+}
+
 /// Zwischenpunkte (ohne Anfang und Ende) des Bulge-Bogens von `p` nach `q`.
 fn arc_between(out: &mut Vec<[f64; 2]>, p: [f64; 2], q: [f64; 2], bulge: f64) {
     let dx = q[0] - p[0];
@@ -1795,12 +1872,14 @@ fn edge_params(s: f64, e: f64, ccw: bool) -> Vec<f64> {
 /// [3 (Version), kind (0 DXF, 1 DWG), insUnits, total,
 ///  nLayerColors, (layer, rgb)…,
 ///  nCounts, (type, count)…,
-///  nContours, (layer, flags, z, [kind, cx, cy, r, a0, a1 wenn flags&4], nPts, x, y …)…,
+///  nContours, (layer, flags, z, [kind, cx, cy, r, a0, a1 wenn flags&4], nPts, x, y …,
+///              [nVerts, (x, y, bulge)… wenn flags&8])…,
 ///  nTexts, (layer, text, x, y, height, angle)…,
 ///  nMeshes, (layer, nPos, nIdx, positions…, indices…)…,
 ///  nLayouts, (name, entities)…, recovered (0/1), layoutName (String-Index, −1 = Modellraum)]
 /// ```
-/// `flags`: 1 = geschlossen, 2 = gefüllt, 4 = Kurve (kind 0 Bogen, 1 Kreis).
+/// `flags`: 1 = geschlossen, 2 = gefüllt, 4 = Kurve (kind 0 Bogen, 1 Kreis), 8 = Stützpunkte mit
+/// Bulge ([`Contour::bulge_verts`]).
 pub fn encode(data: &ImportData) -> (Vec<f64>, Vec<String>) {
     let mut strings: Vec<String> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -1834,7 +1913,10 @@ pub fn encode(data: &ImportData) -> (Vec<f64>, Vec<String>) {
     g.push(data.contours.len() as f64);
     for c in &data.contours {
         g.push(s(&c.layer));
-        let flags = u8::from(c.closed) | (u8::from(c.filled) << 1) | (u8::from(c.curve.is_some()) << 2);
+        let flags = u8::from(c.closed)
+            | (u8::from(c.filled) << 1)
+            | (u8::from(c.curve.is_some()) << 2)
+            | (u8::from(c.bulge_verts.is_some()) << 3);
         g.push(f64::from(flags));
         g.push(c.z);
         if let Some(cv) = c.curve {
@@ -1844,6 +1926,12 @@ pub fn encode(data: &ImportData) -> (Vec<f64>, Vec<String>) {
         for p in &c.pts {
             g.push(p[0]);
             g.push(p[1]);
+        }
+        if let Some(bv) = &c.bulge_verts {
+            g.push(bv.len() as f64);
+            for v in bv {
+                g.extend_from_slice(v);
+            }
         }
     }
     g.push(data.texts.len() as f64);

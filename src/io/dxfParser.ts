@@ -17,7 +17,7 @@
 // `parseDxf` ist synchron und verlangt das geladene Modul (`loadFileio()`); die App ruft es im
 // Web-Worker (`dxfParserAsync.ts`), Tests laden es per `loadFileioForTests()`.
 
-import type { Contour, ContourSet, ImportedMesh, ImportedText } from "../model/types";
+import type { Contour, ContourSet, ImportedMesh, ImportedText, Vec2 } from "../model/types";
 import { GENERIC_IMPORT_CATEGORY } from "../model/contextCategories";
 import { fileioLoaded } from "../engine/fileioWasm";
 
@@ -63,6 +63,16 @@ export interface DxfImportResult {
   layout?: string;
   /** Die Datei war beschädigt/abgeschnitten und wurde nur teilweise gelesen. */
   recovered?: boolean;
+}
+
+/**
+ * Kontur aus dem DXF/DWG-Import. Polylinien mit Bögen (LWPOLYLINE/POLYLINE, Schraffur-Rand aus einer
+ * Polylinie) tragen zusätzlich ihre Stützpunkte mit Bulge (DXF-Konvention = `Drawing2DGeom` polyline
+ * `bulge`): die 2D-Zeichnung bekommt echte Bögen statt des tessellierten `pts` (Kataster-Fund 29.10.:
+ * Strassenparzellen mit hunderten Zerlegungspunkten). Nur beim Import gebraucht, nicht im Modell.
+ */
+export interface ImportContour extends Contour {
+  bulgePolyline?: { pts: Vec2[]; bulge: number[] };
 }
 
 let importSeq = 0;
@@ -141,6 +151,17 @@ export function decodeImport(geom: Float64Array, strings: readonly string[], idP
     for (let p = 0; p < np; p++) pts[p] = { x: geom[i + 2 * p], y: geom[i + 2 * p + 1] };
     i += 2 * np;
     c.pts = pts;
+    if (flags & 8) {
+      const nv = num();
+      const vpts: Vec2[] = new Array(nv);
+      const bulge: number[] = new Array(nv);
+      for (let v = 0; v < nv; v++) {
+        vpts[v] = { x: geom[i + 3 * v], y: geom[i + 3 * v + 1] };
+        bulge[v] = geom[i + 3 * v + 2];
+      }
+      i += 3 * nv;
+      (c as ImportContour).bulgePolyline = { pts: vpts, bulge };
+    }
     contours.push(c);
   }
 
