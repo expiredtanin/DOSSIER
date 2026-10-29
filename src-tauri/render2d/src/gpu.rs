@@ -35,6 +35,10 @@ struct Globals {
     viewport_px: [f32; 2],
     stroke_px: f32,
     stroke_scale: f32,
+    /// Faktor auf die Strichmuster-Laengen ([96]): Muster sind bei 1:100 kompiliert, auf dem Papier
+    /// gelten sie in mm — bei 1:N also `N / 100` (Papier-mm-Batches), sonst 1.
+    dash_scale: f32,
+    _pad: [f32; 3],
 }
 
 impl Default for Globals {
@@ -45,6 +49,8 @@ impl Default for Globals {
             viewport_px: [1.0, 1.0],
             stroke_px: 0.0,
             stroke_scale: 1.0,
+            dash_scale: 1.0,
+            _pad: [0.0; 3],
         }
     }
 }
@@ -60,6 +66,9 @@ struct ArcGlobals {
     viewport_px: [f32; 2],
     px_per_screen: f32,
     stroke_scale: f32,
+    /// Faktor auf die Strichmuster-Laengen (`N / 100`, s. `Globals::dash_scale`).
+    dash_scale: f32,
+    _pad: [f32; 3],
 }
 
 /// EINE Bogen-Instanz fuer die GPU (Vertex-Puffer, step_mode Instance), 1:1 zum
@@ -738,6 +747,8 @@ impl Renderer {
         // beides: px_per_screen fuer Radial-/Kappen-/Dash-AA, stroke_scale fuer die
         // Papier-mm-Breite (identisch zu den Linien).
         let px_per_screen = meet_scale(view_box, vw, vh);
+        // Strichmuster sind in Modell-Metern bei 1:100 kompiliert; auf dem Papier gelten sie in mm ([96]).
+        let dash_scale = if self.paper_scale_n > 0.0 && self.paper_scale_n.is_finite() { self.paper_scale_n / 100.0 } else { 1.0 };
 
         // Frame-Uniform der Bogen-Pipeline schreiben (ein Block fuer ALLE Boegen).
         queue.write_buffer(
@@ -748,6 +759,8 @@ impl Renderer {
                 viewport_px: [vw, vh],
                 px_per_screen,
                 stroke_scale: mm_px,
+                dash_scale,
+                _pad: [0.0; 3],
             }),
         );
 
@@ -766,6 +779,7 @@ impl Renderer {
                             viewport_px: [vw, vh],
                             stroke_px: 0.0,
                             stroke_scale: mm_px,
+                            ..Globals::default()
                         });
                     }
                     BatchKind::Dash => {
@@ -776,6 +790,8 @@ impl Renderer {
                             viewport_px: [vw, vh],
                             stroke_px: b.stroke_mm,
                             stroke_scale: if b.width_screen { px_per_screen } else { mm_px },
+                            dash_scale: if b.width_screen { 1.0 } else { dash_scale },
+                            _pad: [0.0; 3],
                         });
                     }
                     BatchKind::Line => {
@@ -790,6 +806,7 @@ impl Renderer {
                             // zoom-skalierend wie der SVG-`<pattern>`-Strich) —
                             // Geraete-px = Breite * meet-Skala statt * mm->px.
                             stroke_scale: if b.width_screen { px_per_screen } else { mm_px },
+                            ..Globals::default()
                         });
                     }
                 }

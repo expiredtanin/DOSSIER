@@ -39,6 +39,7 @@ import {
 import type { LockInfo } from "../native/projectFile";
 import { addRecentProject, removeRecentProject } from "./recentProjects";
 import { emptyProject, sampleProject } from "../model/sampleProject";
+import { withStandards } from "../model/standards";
 import type { Project } from "../model/types";
 import type { PlanViewHandle } from "../views/plan/PlanView";
 
@@ -366,8 +367,10 @@ export function useProjectFileActions(
   // `guardDiscard`: bei ungespeicherten Änderungen erst der Dialog, s. o.
   const onNewProject = () => guardDiscard(() => {
     releaseCurrentProjectLock();
-    getState().loadProject(emptyProject);
-    lastSavedProjectRef.current = emptyProject;
+    // Neue Projekte bringen die SIA-400-Standards mit ([100]–[102]).
+    const next = withStandards(emptyProject);
+    getState().loadProject(next);
+    lastSavedProjectRef.current = next;
   });
 
   // Übernimmt ein neues, noch UNGESPEICHERTES Projekt aus Vorlagen-Inhalt
@@ -390,7 +393,7 @@ export function useProjectFileActions(
   // Startzustand, s. state/projectSlice.ts).
   const onNewProjectFromSample = () => guardDiscard(() => {
     releaseCurrentProjectLock();
-    const next = structuredClone(sampleProject);
+    const next = withStandards(structuredClone(sampleProject));
     getState().loadProject(next);
     lastSavedProjectRef.current = next;
   });

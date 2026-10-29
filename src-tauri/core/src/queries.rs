@@ -81,6 +81,8 @@ pub fn run_root(lk: &crate::document::Lookup, name: &str, text: &str) -> Result<
         // Stiftsätze ([K4] S3, `pens.rs`): Ops statt Projekt-Kopien.
         "penRebakeOps" => json(&crate::pens::rebake_ops(root)),
         "penDeleteOps" => json(&crate::pens::delete_pen_ops(root, text)),
+        // Standard-Bibliothek ([100]–[102], `standards.rs`): fehlende Standard-Ressourcen als Ops.
+        "standardsMergeOps" => json(&crate::standards::merge_ops(root)),
         "penSeedOps" => {
             let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("penSeedOps: {e}"))?;
             json(&crate::pens::seed_standard_ops(root, a["id"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or("")))

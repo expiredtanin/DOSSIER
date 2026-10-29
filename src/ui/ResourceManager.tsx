@@ -151,6 +151,8 @@ export interface ResourceManagerHandlers {
   onPatchPenSetWeight?: (setId: string, penId: string, weight: number) => void;
   /** Ersetzt `pens`/legt einen neuen Satz mit der 255er-CAD-Standardpalette an. */
   onSeedStandardPenSet?: () => void;
+  /** Ergänzt die fehlenden SIA-400-Standards ([100]–[102], „Standards laden"). */
+  onLoadStandards?: () => void;
   /**
    * Farbpaletten (Tab „Paletten"): eigene Paletten verwalten + Sichtbarkeit
    * der Bänke im Farbwahl-Popover. Optional wie die Stift-Handler.
@@ -318,6 +320,16 @@ export function ResourceManager({
             </span>
             {t("resources.title")}
           </div>
+          {handlers.onLoadStandards && (
+            <button
+              className="res-add res-load-standards"
+              title={t("resources.loadStandards.hint")}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => handlers.onLoadStandards?.()}
+            >
+              {t("resources.loadStandards")}
+            </button>
+          )}
           {!windowed && (
             <button
               className="res-close"

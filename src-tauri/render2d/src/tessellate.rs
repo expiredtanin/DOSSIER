@@ -100,11 +100,13 @@ pub struct DashBatch {
     pub width_screen: bool,
 }
 
-/// Strichmuster (Papier-mm) → Zyklus in Modell-Metern wie in `split_dash`: negative Werte zu 0,
-/// Nullen weg, ungerade Laenge verdoppelt. `None` = kein gueltiges Muster (durchgezogen).
+/// Strichmuster (Papier-mm) → Zyklus in Modell-Metern: negative Werte zu 0, ungerade Laenge verdoppelt.
+/// Nullen bleiben stehen ([96]): ein AN-Wert 0 ist ein PUNKT (der Shader zeichnet ihn mit runden
+/// Enden, wie SVG mit `stroke-linecap: round`); frueher fielen sie weg und verschoben AN/AUS (eine
+/// Strichpunktlinie wurde zur Strichlinie mit ungleichen Luecken). `None` = kein gueltiges Muster.
 fn dash_cycle_m(dash: &[f32]) -> Option<Vec<f32>> {
-    let pat: Vec<f32> = dash.iter().copied().map(|d| d.max(0.0) * DASH_MM_TO_M).filter(|d| *d > 0.0).collect();
-    if pat.is_empty() {
+    let pat: Vec<f32> = dash.iter().copied().map(|d| if d.is_finite() { d.max(0.0) * DASH_MM_TO_M } else { 0.0 }).collect();
+    if pat.iter().all(|d| *d <= 0.0) {
         return None;
     }
     let cycle: Vec<f32> = if pat.len() % 2 == 0 { pat } else { [pat.as_slice(), pat.as_slice()].concat() };
@@ -952,6 +954,22 @@ fn compile_arc(geo: &mut GpuGeometry, a: &Arc, bounds: &mut Bounds) {
     if sweep.abs() < 1e-6 {
         return;
     }
+    // Muster mit Punkten oder mehr Eintraegen, als der Bogen-Shader fasst (Strich-Zweipunktlinie):
+    // als feiner Polygonzug ueber den Linien-Strichpfad (Punkte rund, Phase durchgehend) ([96]).
+    if let Some(cycle) = a.dash.as_deref().filter(|d| !d.is_empty()).and_then(dash_cycle_m) {
+        if cycle.len() > MAX_ARC_DASH || cycle.iter().step_by(2).any(|d| *d <= 0.0) {
+            // Modell-Winkel = gespiegelte Bildschirm-Winkel (`to_screen` negiert Y).
+            let n = ((sweep.abs() / 0.03).ceil() as usize).clamp(8, 4096);
+            let pts: Vec<Point> = (0..=n)
+                .map(|i| {
+                    let t = -(a0 + sweep * i as f32 / n as f32);
+                    [a.center[0] + a.r * t.cos(), a.center[1] + a.r * t.sin()]
+                })
+                .collect();
+            stroke_dashed_or_solid(geo, &pts, false, a.color, a.width_mm, false, a.dash.as_deref(), bounds);
+            return;
+        }
+    }
     let (dash, dash_count, dash_total) = prepare_arc_dash(a.dash.as_deref());
     geo.arcs.push(ArcInstanceData {
         center,
@@ -1106,6 +1124,41 @@ mod tests {
         // 9 Eintraege → verdoppelt 18 > MAX_LINE_DASH: CPU-Zerlegung
         let geo = compile_scene(&dashed_line([0.0, 0.0], [1.0, 0.0], vec![1.0; 9]));
         assert!(geo.dash_segments.is_empty() && !geo.line_idx.is_empty());
+    }
+
+    /// [96] Punkte (AN = 0) bleiben im Zyklus: Strichpunktlinie [12, 1.5, 0, 1.5] behaelt vier
+    /// Eintraege (Strich, Luecke, Punkt, Luecke) statt zu [12, 1.5, 1.5] zusammenzufallen.
+    #[test]
+    fn punkte_bleiben_im_muster() {
+        let c = dash_cycle_m(&[12.0, 1.5, 0.0, 1.5]).unwrap();
+        assert_eq!(c.len(), 4);
+        assert_eq!(c[2], 0.0);
+        assert!((c[0] - 12.0 * DASH_MM_TO_M).abs() < 1e-6);
+        let geo = compile_scene(&dashed_line([0.0, 0.0], [5.0, 0.0], vec![12.0, 1.5, 0.0, 1.5]));
+        assert_eq!(geo.dash_segments.len(), 1);
+        assert_eq!(geo.dash_segments[0].count, 4);
+        // Deckung: der Punkt liegt bei 13.5 mm (Muster-Raum) und ist rund sichtbar, die Luecken nicht.
+        let px = PX_PER_M; // 1 Bildschirm-Einheit = 1 px
+        let cyc: Vec<f32> = c.iter().map(|d| d * px).collect();
+        let total: f32 = cyc.iter().sum();
+        let seg = [0.0, 5.0 * px, 5.0 * px, 0.5];
+        let dot = (12.0 + 1.5) * DASH_MM_TO_M * px;
+        assert!(dash_coverage(dot, 0.0, seg, total, &cyc) < 0.01);
+        assert!(dash_coverage(dot - 0.7 * DASH_MM_TO_M * px, 0.0, seg, total, &cyc) > 0.5);
+    }
+
+    /// [96] Boegen mit Punkten/langen Mustern laufen ueber den Linien-Strichpfad.
+    #[test]
+    fn bogen_mit_punktmuster_als_strichzug() {
+        let scene = Scene {
+            arcs: vec![Arc { center: [0.0, 0.0], from: [1.0, 0.0], to: [0.0, 1.0], r: 1.0, color: [0.0, 0.0, 0.0, 1.0], width_mm: 0.25, dash: Some(vec![12.0, 1.5, 0.0, 1.5, 0.0, 1.5]) }],
+            ..Default::default()
+        };
+        let geo = compile_scene(&scene);
+        assert!(geo.arcs.is_empty());
+        assert!(!geo.dash_segments.is_empty());
+        let plain = Scene { arcs: vec![Arc { dash: Some(vec![0.06, 0.04]), ..scene.arcs[0].clone() }], ..Default::default() };
+        assert_eq!(compile_scene(&plain).arcs.len(), 1);
     }
 
     /// Der Shader-Spiegel deckt genau die Pixel, die die frueheren Teilstuecke samt runden Kappen
