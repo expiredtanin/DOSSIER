@@ -179,12 +179,8 @@ export {
 } from "../plan/generatePlan";
 
 export {
-  addDrawing2D,
-} from "../plan/generatePlan/drawing2d";
-
-export {
-  END_MARK_DEFAULT_SIZE_MM,
-} from "../plan/generatePlan/endMarks";
+  drawingPrimitives,
+} from "../plan/generatePlan";
 
 export {
   NO_HATCH,

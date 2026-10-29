@@ -62,7 +62,7 @@ function frameOf(a: Vec2, b: Vec2): { at: Vec2; width: number; heightM: number }
   const r = rectOf(a, b);
   const width = Math.max(MIN_SIZE_M, r.maxX - r.minX);
   const heightM = Math.max(MIN_SIZE_M, r.maxY - r.minY);
-  // `at` ist die Baseline-links der ERSTEN Zeile (s. drawing2d.ts/primitives.tsx);
+  // `at` ist die Baseline-links der ERSTEN Zeile (s. plan/drawings.rs/primitives.tsx);
   // die Rahmen-Oberkante liegt eine Zeilenhöhe darüber → at.y = Rahmen-Top − Zeilenhöhe.
   return { at: { x: r.minX, y: r.maxY - DEFAULT_TEXT_HEIGHT_M }, width, heightM };
 }

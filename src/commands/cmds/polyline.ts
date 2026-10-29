@@ -128,7 +128,7 @@ type PolyState = PolyIdle | PolyDrawing;
  * weiteren Klick geschlossen wird (Option „close" bzw. Ring-Toggle + Enter).
  * Ein bereits gesetzter Drei-Punkt-Durchgangspunkt gilt dann für DIESES
  * Segment; sonst tangential an den Vorgänger, wie bei jedem anderen Bogen.
- * Ohne diesen Eintrag liest `drawing2d.ts` dort einen fehlenden Bulge (Index
+ * Ohne diesen Eintrag liest der Plan (`plan/drawings.rs`) dort einen fehlenden Bulge (Index
  * ausserhalb des Arrays) und zeichnet die Schlusskante immer gerade.
  */
 function closingBulge(s: PolyDrawing): number {
@@ -363,7 +363,7 @@ export const polylineCommand: Command = {
     // Klick nahe Startpunkt → schließen (committet als Ring). `newBulge` ist
     // bereits die korrekte Krümmung des Schluss-Segments (prev→pt, genau wie
     // die Vorschau in `polyDraft` sie zeigt) — MUSS mit angehängt werden,
-    // sonst liest `drawing2d.ts` dort einen fehlenden Bulge-Eintrag und
+    // sonst liest der Plan (`plan/drawings.rs`) dort einen fehlenden Bulge-Eintrag und
     // schliesst immer gerade, obwohl die Vorschau eben noch den Bogen zeigte.
     if (s.points.length >= 3 && segLen(s.points[0], pt) < CLOSE_HIT) {
       const pts = s.points;

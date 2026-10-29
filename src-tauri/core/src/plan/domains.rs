@@ -37,11 +37,17 @@ pub struct PlanArgs {
     pub reference_lines: bool,
     /// Projektglobale Zutaten (Kontext, Schnittlinien) — nur der aktive Aufruf einer Überlagerung.
     pub global: bool,
+    /// Papier-Massstab 1:N (Bemassung, Linienenden, Massstabsbalken in Papier-mm).
+    pub scale: f64,
+    /// Export: Zeichnungen mit `noPrint` entfallen.
+    pub for_print: bool,
+    /// Kompakte Linien-Unterlage: Linien der einfachen Zeichnungen entstehen bei Bedarf (`drawings.rs`).
+    pub compact: bool,
 }
 
 impl PlanArgs {
     /// `detail`: 0 grob, 1 mittel, 2 fein; `text`: `{"floor": id, "show": [code…], "grey": [code…],
-    /// "referenceLines": bool, "global": bool}`.
+    /// "referenceLines": bool, "global": bool, "scale": N, "forPrint": bool, "compact": bool}`.
     pub fn parse(detail: f64, text: &str) -> Result<PlanArgs, String> {
         let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("Plan-Argumente: {e}"))?;
         let set = |k: &str| -> HashSet<String> { v.get(k).and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_default() };
@@ -56,6 +62,9 @@ impl PlanArgs {
             grey: set("grey"),
             reference_lines: v.get("referenceLines").and_then(|b| b.as_bool()).unwrap_or(false),
             global: v.get("global").and_then(|b| b.as_bool()).unwrap_or(false),
+            scale: v.get("scale").and_then(|b| b.as_f64()).unwrap_or(super::drawings::DEFAULT_SCALE_DENOMINATOR),
+            for_print: v.get("forPrint").and_then(|b| b.as_bool()).unwrap_or(false),
+            compact: v.get("compact").and_then(|b| b.as_bool()).unwrap_or(false),
         })
     }
 }
@@ -111,6 +120,8 @@ pub struct DomainPrims {
     pub roofs: Vec<Primitive>,
     pub rooms: Vec<Primitive>,
     pub columns: Vec<Primitive>,
+    /// 2D-Zeichnungen (`drawings.rs`) samt Strichmuster-Kennungen für den Linienzug im Puffer.
+    pub drawings: super::drawings::Out,
     pub solids: Vec<Primitive>,
     /// `[minX, minY, maxX, maxY]`; fehlt ohne Punkte.
     pub bounds: Option<[f64; 4]>,
@@ -119,7 +130,7 @@ pub struct DomainPrims {
 pub struct Bounds([f64; 4]);
 
 impl Bounds {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Bounds([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY])
     }
     pub fn acc(&mut self, x: f64, y: f64) {
@@ -504,38 +515,63 @@ fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
     }
 }
 
-/// Abfrage `planDomains`.
+/// Abfrage `planDomains`: Domänen als Listen (Tests); die 2D-Zeichnungen in `drawings`.
 pub fn plan_domains(p: &Project, a: &PlanArgs) -> Result<DomainPrims, String> {
     let c = Ctx::new(p, a);
     let mut out = DomainPrims::default();
     let mut bounds = Bounds::new();
-    ceilings(&c, &mut out.ceilings, &mut bounds)?;
-    roofs(&c, &mut out.roofs, &mut bounds);
-    rooms(&c, &mut out.rooms, &mut bounds);
-    super::walls::plan_walls(&c, a.reference_lines, &mut out.walls, &mut bounds)?;
-    super::stairs::plan_stairs(&c, &mut out.stairs, &mut bounds);
-    columns(&c, &mut out.columns);
-    solids(&c, &mut out.solids);
-    if a.global {
-        super::context::plan_context(&c, &mut out.context);
-        super::context::plan_section_lines(&c, &mut out.sections);
-    }
+    domains_before(&c, &mut out, &mut bounds)?;
+    let mut drawings = super::drawings::Out::default();
+    super::drawings::plan_drawings(&c, &mut super::drawings::Sink::new(super::drawings::Target::Vec(&mut drawings), super::drawings::Keep::All), &mut bounds)?;
+    out.drawings = drawings;
+    domains_after(&c, &mut out);
     out.bounds = bounds.get();
     Ok(out)
 }
 
+/// Decken bis Extrusionen (alles vor den 2D-Zeichnungen gerechnet).
+fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result<(), String> {
+    ceilings(c, &mut out.ceilings, bounds)?;
+    roofs(c, &mut out.roofs, bounds);
+    rooms(c, &mut out.rooms, bounds);
+    super::walls::plan_walls(c, c.a.reference_lines, &mut out.walls, bounds)?;
+    super::stairs::plan_stairs(c, &mut out.stairs, bounds);
+    columns(c, &mut out.columns);
+    solids(c, &mut out.solids);
+    Ok(())
+}
+
+/// Kontext und Schnittlinien (projektglobal, nur mit `global`).
+fn domains_after(c: &Ctx, out: &mut DomainPrims) {
+    if c.a.global {
+        super::context::plan_context(c, &mut out.context);
+        super::context::plan_section_lines(c, &mut out.sections);
+    }
+}
+
 /// Reihenfolge der Gruppen im Plan-Puffer der Abfrage `planDomains`.
-pub const GROUPS: [&str; 9] = ["ceilings", "roofs", "rooms", "walls", "stairs", "columns", "solids", "context", "sections"];
+pub const GROUPS: [&str; 10] = ["ceilings", "roofs", "rooms", "walls", "stairs", "columns", "drawings", "solids", "context", "sections"];
 
 /// Abfrage `planDomains` als Plan-Puffer v2 (s. `plan_buf.rs`): eine Gruppe je Domäne in der
-/// Reihenfolge [`GROUPS`], Ausmass im Kopf, Inhalts-Hashes für den GPU-Chunk-Cache.
+/// Reihenfolge [`GROUPS`], Ausmass im Kopf, Inhalts-Hashes für den GPU-Chunk-Cache. Die
+/// 2D-Zeichnungen schreiben direkt in den Puffer (keine Primitiv-Liste dazwischen).
 pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
-    let d = plan_domains(p, a)?;
+    let c = Ctx::new(p, a);
+    let mut d = DomainPrims::default();
+    let mut bounds = Bounds::new();
+    domains_before(&c, &mut d, &mut bounds)?;
     let mut w = crate::plan_buf::Writer::new(true);
-    for g in [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections] {
+    for g in [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns] {
         w.group(g);
     }
-    w.bounds = d.bounds;
+    let start = w.begin_group();
+    super::drawings::plan_drawings(&c, &mut super::drawings::Sink::new(super::drawings::Target::Buf(&mut w), super::drawings::Keep::All), &mut bounds)?;
+    w.end_group(start);
+    domains_after(&c, &mut d);
+    for g in [&d.solids, &d.context, &d.sections] {
+        w.group(g);
+    }
+    w.bounds = bounds.get();
     Ok(w.finish())
 }
 
@@ -575,7 +611,7 @@ mod tests {
         let buf = plan_domains_buf(&p, &a).unwrap();
         let (prims, groups, bounds) = crate::plan_buf::decode(&buf).unwrap();
         assert_eq!(groups.len(), GROUPS.len());
-        let lists = [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections];
+        let lists = [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.drawings.prims, &d.solids, &d.context, &d.sections];
         for ((a, b), l) in groups.iter().zip(lists) {
             assert_eq!(serde_json::to_string(&prims[*a..*b]).unwrap(), serde_json::to_string(l).unwrap());
         }
@@ -668,13 +704,13 @@ mod tests {
         let d = plan_domains(&p, &a).unwrap();
         time("Puffer schreiben", &mut || {
             let mut w = crate::plan_buf::Writer::new(true);
-            for g in [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections] {
+            for g in [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.drawings.prims, &d.solids, &d.context, &d.sections] {
                 w.group(g);
             }
             w.finish();
         });
         time("JSON (früher)", &mut || {
-            serde_json::to_string(&(&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections)).unwrap();
+            serde_json::to_string(&(&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.drawings.prims, &d.solids, &d.context, &d.sections)).unwrap();
         });
     }
 }

@@ -1223,7 +1223,7 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
     : undefined;
   const cat = findCategory(project.layers, d.categoryCode);
   const color = d.color ?? ls?.color ?? cat?.color ?? DRAW_FALLBACK_COLOR;
-  // Effektive Strichstärke, dieselbe Kette wie generatePlan/addDrawing2D
+  // Effektive Strichstärke, dieselbe Kette wie der Plan (`plan/drawings.rs`)
   // (resolveStrokeWeight): Override zuerst, Source ≠ "object" (also "layer"
   // ODER fehlend, s. AttributeSource-Default) erzwingt die Kategorie (umgeht
   // das LineStyle-Gewicht), sonst die LineStyle-/Kategorie-Kette.

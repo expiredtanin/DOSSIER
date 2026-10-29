@@ -149,7 +149,7 @@ export type Primitive =
       /**
        * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
        * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
-       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * im Kern (`plan/drawings.rs`) EINMAL auf alle erzeugten Primitive gestempelt, statt an
        * jeder Push-Stelle mitgeführt zu werden.
        */
       opacity?: number;
@@ -249,7 +249,7 @@ export type Primitive =
       /**
        * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
        * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
-       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * im Kern (`plan/drawings.rs`) EINMAL auf alle erzeugten Primitive gestempelt, statt an
        * jeder Push-Stelle mitgeführt zu werden.
        */
       opacity?: number;
@@ -273,7 +273,7 @@ export type Primitive =
       /**
        * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
        * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
-       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * im Kern (`plan/drawings.rs`) EINMAL auf alle erzeugten Primitive gestempelt, statt an
        * jeder Push-Stelle mitgeführt zu werden.
        */
       opacity?: number;
@@ -303,7 +303,7 @@ export type Primitive =
       /**
        * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
        * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
-       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * im Kern (`plan/drawings.rs`) EINMAL auf alle erzeugten Primitive gestempelt, statt an
        * jeder Push-Stelle mitgeführt zu werden.
        */
       opacity?: number;
@@ -341,7 +341,7 @@ export type Primitive =
       /**
        * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
        * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
-       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * im Kern (`plan/drawings.rs`) EINMAL auf alle erzeugten Primitive gestempelt, statt an
        * jeder Push-Stelle mitgeführt zu werden.
        */
       opacity?: number;
@@ -362,7 +362,7 @@ export type Primitive =
       /**
        * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
        * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
-       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * im Kern (`plan/drawings.rs`) EINMAL auf alle erzeugten Primitive gestempelt, statt an
        * jeder Push-Stelle mitgeführt zu werden.
        */
       opacity?: number;
@@ -396,7 +396,7 @@ export type Primitive =
       /**
        * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
        * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
-       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * im Kern (`plan/drawings.rs`) EINMAL auf alle erzeugten Primitive gestempelt, statt an
        * jeder Push-Stelle mitgeführt zu werden.
        */
       opacity?: number;
@@ -417,7 +417,7 @@ export type Primitive =
       /**
        * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
        * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
-       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * im Kern (`plan/drawings.rs`) EINMAL auf alle erzeugten Primitive gestempelt, statt an
        * jeder Push-Stelle mitgeführt zu werden.
        */
       opacity?: number;

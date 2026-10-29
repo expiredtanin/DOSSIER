@@ -102,9 +102,8 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     noch Stil-Glue um schon in Rust berechnete Geometrie (kein Rechenanteil) — bleiben bis [K4] in TS.
     ✅ Kurven (Ellipse, Bezier, Catmull-Rom, B-Spline): `curves.rs`, `geometry/curves.ts` ist Fassade; bitgleich (500 Zufallsfälle).
     `jsnum::pow` (= `Math.pow` im Web-Build) für `x ** 3`.
-    Offen: `drawing2d.ts` (950 Zeilen) ist nach diesen Schritten Stil-Auflösung und Verteiler über Formen (Bemassung, Kote,
-    Detailverweis, Massstabsbalken, Block über `scaleGeom`); der Rechenanteil liegt in Rust. Der Verteiler zieht mit dem Modell
-    nach Rust [K4] — vorher würde ein Rust-`Drawing2D` doppelt gepflegt. Danach: [K3c] Schnitt/Ansicht, [K3d] Aufräumen.
+    ✅ (29.10.) 2D-Zeichnungen: `drawing2d.ts` (Stil-Auflösung und Verteiler über alle Formen) ist nach `core/src/plan/drawings.rs`
+    gezogen und gelöscht, s. [K3d] „2D-Zeichnungen im Kern“. Danach: [K3c] Schnitt/Ansicht, [K3d] Aufräumen.
   - ◐ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
     ✅ Schnitt-Bänder: Dominanz-Subtraktion, Verschmelzung, Rechteck-Vereinigung (`plan_section.rs`, 28.10.).
     ✅ Ansicht: Verdeckungs-Clipping, Punkt-Verdeckung, Schlagschatten, XOR-Umriss (`plan_elevation.rs`, 28.10.).
@@ -113,8 +112,9 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     ✅ Dach-Schnittspur (Cyrus–Beck, lineare Oberkante, Verschmelzen) in `plan_section.rs`.
     ✅ Abzugskörper-Geometrie (`voids.rs`: Polygon minus Schneider mit Schlüsselloch-Stegen, Strecke ausserhalb, Schnitt-Rechtecke); behebt: bei mehreren getrennten Aussparungen wurde nichts abgezogen.
     Rest in TS (28.10.): Stil-Auflösung (Bauteil, Schraffur, Farbe, Linienstil, Pick-IDs, Painter-Reihenfolge) in `generatePlan*.ts`,
-    `toSection.ts` (Besitzer-Zuordnung, Schichtbänder), `toElevation.ts` (Orchestrierung), `sectionOpenings.ts`, `planUnderlay.ts`,
-    `drawing2d.ts`. Das ist kein Rechenanteil mehr, sondern liest das Modell; es zieht mit [K4] um.
+    `toSection.ts` (Besitzer-Zuordnung, Schichtbänder), `toElevation.ts` (Orchestrierung), `sectionOpenings.ts`, `planUnderlay.ts`.
+    Das ist kein Rechenanteil mehr, sondern liest das Modell; es zieht mit [K4] um. (Die automatischen Höhenkoten
+    `levelMarkers.ts` rechnet seit 29.10. der Kern, Abfrage `levelMarkers`.)
   - ◐ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
     typisierte Modell (Bauteil-Typen, Schraffuren, Linienstile, Kategorien) und einen Plan-Puffer v2 mit Pick-IDs + vollem `Primitive`-Umfang
     (Text, Schraffur-Optionen, Zickzack/Motiv); die Verbraucher von `Primitive[]` (SVG/PDF/DXF, Auswahl, Overlay) lesen dann den Puffer.
@@ -142,7 +142,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Wände, 400 Decken/Räume/Treppen, 1600 Stützen) EG 320–340 → 355–370 ms, also ~10 % langsamer. Die Rechnung selbst ist schneller,
     aber die Antwort ist ~14 MB JSON (Wände 9,3 MB, Treppen 3,7 MB): Abfrage inkl. Serialisierung ~160–210 ms, `JSON.parse` ~145–225 ms.
     Die JSON-Form ist damit der Engpass → Plan-Puffer v2.
-    Offen: `drawing2d.ts` (Verteiler), Schatten/Baurecht (dünner Stil-Glue um `analysis/`, Datum/Sonnenstand in TS), Abzugskörper
+    Offen: Schatten/Baurecht (dünner Stil-Glue um `analysis/`, Datum/Sonnenstand in TS), Abzugskörper
     (`voids.ts`), Mono, Strichstärken-Massstab und `generateVisibleLevelsPlan` bleiben TS; die Override-Engine in TS bedient nur noch 2D-Zeichnungen. Plan-Puffer v2
     s. nächster Punkt (28.10. erledigt).
     ✅ (28.10.) **Plan-Puffer v2**: `planDomains` antwortet binär statt mit ~15 MB JSON (`doc_query_bin` → `queries.rs::run_bin` →
@@ -278,7 +278,8 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     die Modell-Verschiebung `translateProject` in TS (Befehl „Neuer Bezugspunkt“, DXF).
     Nächste: Export (Schedule/CSV, STL/OBJ, STEP), Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation) — hängt an Plan-Puffer v2.
     Grundriss (28.10.): Decken, Dächer, Räume, Wände+Öffnungen, Treppen, Stützen, Extrusionen, Kontext und Schnittlinien
-    kommen über `planDomains` aus dem Dokument ([K3d]); übrig in `generatePlan`: 2D-Zeichnungen, Schatten/Baurecht, Abzugskörper.
+    kommen über `planDomains` aus dem Dokument ([K3d]); seit 29.10. auch die 2D-Zeichnungen (`plan/drawings.rs`); übrig in
+    `generatePlan`: Schatten/Baurecht, Abzugskörper, Mono, Strichstärken-Massstab.
     Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
     ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
     Stand 28.10.: Plan-Puffer v2 steht ([K3d]) — `planDomains` liefert binär, GPU liest ihn direkt; Export/Auswahl/Overlay lesen
@@ -287,6 +288,35 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Layout-PDF noch über `Primitive[]`.
     Nachtrag 29.10.: auch Rahmen-Auswahl, Text-/Bild-Treffer, Overlay-Texte, DXF/DWG und Druck-SVG lesen den Puffer im
     Kern; `generatePlan` liest die Kern-Primitive nur noch bei Bedarf ([K3d]).
+    ✅ (29.10.) **2D-Zeichnungen im Kern** ([K3a]/[K3d]): `core/src/plan/drawings.rs` erzeugt alle Formen (Linie, Konstruktionslinie,
+    Strahl, Polylinie mit Bögen, Rechteck, Kreis, Bogen, Ellipse, Bezier, Spline, Bemassung, Kote, Detailverweis, Massstabsbalken,
+    Punktmarke, Text/Textpfad/Hinweislinie, Block über `scale_geom` rekursiv, Bild) samt Filter (Geschoss, Sichtbarkeit, `noPrint`),
+    Override-Regeln, Stil-Auflösung (Element → Linienstil → Ebene, LTSCALE, Zickzack/Motiv, Schraffur mit Platzierung, Linienenden),
+    Transparenz und Ausmass; die Domäne ist Gruppe 6 von `planDomains` (zwischen Stützen und Extrusionen, wie bisher) und schreibt
+    direkt in den Plan-Puffer (`Writer::line_ref`, keine Primitiv-Liste dazwischen). Linienzug-Flag: Strichmuster-Kennung je Linie
+    (`push_ref`) bildet die TS-Array-Referenz nach. Kompakte Unterlage: `compact` lässt die Linien einfacher Zeichnungen weg,
+    `drawingUnderlay` liefert die Gruppen (Indizes), `drawingLines` die Linien einer Teilmenge — `UnderlayGroup.buildBuf` gibt sie als
+    Puffer weiter (`materializeUnderlay` hängt Kern-Abschnitte an statt Objekte, der WASM-Weg kodiert nichts mehr in TS). Vorschau
+    (`drawingPreview.ts`) über `drawingPrims`, Höhenkoten im Schnitt über `levelMarkers`, Masszahl-Lage (`dimTextFrame`, Griff) über
+    die Bindung `dim_text_frame`. Gelöscht: `generatePlan/drawing2d.ts`, `endMarks.ts`, Bindung `end_mark_flat`; Tests
+    (`drawing2d.test.ts` → `plan/drawings.test.ts`, Primitiv-Cache → Inhalts-Hashes) laufen über den Kern. `ProjectDocument.sync`
+    öffnet bei > 2000 Ops neu (das Entfernen von 10⁵ Zeichnungen einzeln war quadratisch).
+    Gleichheit (temporärer Test, danach gelöscht): 1,74 Mio. Primitive Feld für Feld (Zahlen per `Object.is`) gleich der alten
+    TS-Fassung, dazu Linienzug-Flags (636 000), Ausmass und Unterlage (Gruppen, Linien, Teilmengen): 60 Zufallsprojekte
+    (alle Formen, Stile, Blöcke verschachtelt, Overrides) × 4 Varianten (alle/kompakt 1:50/gedimmt+ausgeblendet 1:200/Druck),
+    Beispielprojekt alle Ebenen, LV95-Koordinaten, Kataster 150 000 Linien/Polylinien (kompakt und voll), bigSample, 8 CAD-/DXF-
+    Importe und gespeicherte Projekte, 3000 Einzel-Zeichnungen (Vorschau), 300 Koten-Sätze, 2000 Masszahl-Lagen. CLI byte-gleich
+    (128 Dateien: `plan` SVG 1:100/1:50 und JSON-Szene, `dxf`, `section`, `elevation` für 10 Projekte inkl. Kataster-Importe).
+    Messung (Linux-Container unter Last, Median): `generatePlan` allein (CLI `bench`, alter Stand mit Primitiv-Cache je Zeichnung)
+    katbig 10k Zeichnungen 13 → 41 ms, 20k Linien 22 → 38 ms, Beispiel/CAD/Schule ~gleich (1–2 ms); Plan + Zerlegung für den
+    WASM-Renderer nach einer Änderung: 10k 58 → 64 ms, 20k 65 → 71 ms, Kataster 150k 2,5 → 1,0 s; Export-Plan (Zerlegung mit
+    Texten) 10k 54 → 36–43 ms, Kataster 150k 1,9 → 0,6 s. Nicht in der Tauri-App/im nativen macOS-Renderer angesehen (dort baut
+    der GPU-Chunk-Cache die Unterlage weiter über `build` als Objekte).
+    Offen: `geometry/geomTransform.ts` (`mvGeom`/`scaleGeom`) bleibt für die Werkzeuge in TS (beliebige Abbildungsfunktion), der Kern
+    hat eine eigene Fassung für Blöcke — zusammenführen, wenn die Werkzeuge nach Rust ziehen (S3). Die WASM-Ansicht könnte ganz ohne
+    kompakte Unterlage arbeiten (Linien bleiben im Puffer; `viewportContent` fordert sie heute immer an). Das erste Öffnen eines
+    sehr grossen Dokuments ist im WASM langsam (200 000 Zeichnungen ~20 s, Speicherwachstum; vorher genauso, betrifft jetzt aber
+    auch reine Zeichnungsprojekte in CLI/Tests, die vorher kein Dokument brauchten).
   - ◐ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
     **Erste Etappe (28.10.): Ops, Prüfung, Undo/Redo im Kern.** `core/src/ops.rs` (Op, Prüfung bitgleich zur TS-Fassung — gleiche

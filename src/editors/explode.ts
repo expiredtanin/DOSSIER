@@ -5,7 +5,7 @@
 // Was zerlegt wird:
 //   • Block-Instanz → die Teilgeometrien der Definition, mit Drehung und
 //     Einfügepunkt der Instanz verrechnet (dieselbe Transformation, mit der
-//     `generatePlan/drawing2d.ts` sie zeichnet).
+//     der Kern (`plan/drawings.rs`) sie zeichnet).
 //   • Polylinie   → ein Element je Segment: Gerade zu `line`, ein Bogen-Segment
 //     (`bulge`) zu einem ECHTEN `arc` — der Bogen darf beim Auflösen nicht zur
 //     Sehne zusammenfallen.

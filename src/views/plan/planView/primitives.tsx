@@ -468,7 +468,7 @@ export function PrimitiveShape({
   // Gedimmte Elemente werden auf den festen Grauton umgefärbt (Strich, Füllung
   // UND Schraffur) — deutlich erkennbar unabhängig von Papierfarbe/Linienstärke.
   const shape = renderPrimitive(p.greyed ? greyedCopy(p) : p, index, toScreen, hairline, paperScale);
-  // Objekt-Transparenz (Drawing2D.opacity, in addDrawing2D aufgestempelt) als
+  // Objekt-Transparenz (Drawing2D.opacity, im Kern aufgestempelt, `plan/drawings.rs`) als
   // eine Hülle darüber — so muss sie nicht in jeden Primitiv-Zweig eingebaut
   // werden und wirkt gleichermassen auf Strich, Füllung und Schraffur.
   const op = p.kind === "drawingImage" ? undefined : p.opacity;

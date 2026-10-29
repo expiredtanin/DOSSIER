@@ -43,10 +43,17 @@ export type QueryName =
   | "planDomains"
   | "ifcExportData"
   | "meshExportData"
-  | "modelJson"
   | "groupMembership"
   | "containingGroup"
-  | "expandToGroups";
+  | "expandToGroups"
+  | "drawingUnderlay"
+  | "drawingLines"
+  | "drawingPrims"
+  | "levelMarkers"
+  | "modelJson";
+
+/** Ab so vielen Ops öffnet `sync` das Dokument neu, statt sie einzeln anzuwenden. */
+const SYNC_REOPEN_OPS = 2000;
 
 export class ProjectDocument {
   private handle = 0;
@@ -86,7 +93,9 @@ export class ProjectDocument {
     }
     this.mirror = next;
     if (ops.length === 0) return;
-    if (!this.handle) {
+    // Ganz anderes Projekt (Tests, Laden): neu öffnen statt Tausender Einzel-Ops — das Entfernen
+    // vieler Elemente einzeln wäre quadratisch (Kataster-Importe mit 10⁵ Zeichnungen).
+    if (!this.handle || ops.length > SYNC_REOPEN_OPS) {
       this.reopen(next);
       return;
     }

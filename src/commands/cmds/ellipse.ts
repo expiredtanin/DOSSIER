@@ -8,7 +8,7 @@
 //       2) „Gegenüberliegende Ecke:" → Punkt → commit
 //   • Achse (gedreht): Zentrum + Hauptachse + Nebenachse — beliebig gedrehte
 //     Ellipse. `rotation` existiert im Modell seit Langem (Rendering +
-//     Griff-Editieren lesen es bereits, s. `plan/generatePlan/drawing2d.ts`
+//     Griff-Editieren lesen es bereits, s. `plan/drawings.rs` im Kern
 //     Z. 448 bzw. `projectSlice.ts` `drawingVertices`), nur die Erzeugung
 //     setzte es bisher immer auf 0.
 //       1) „Zentrum:"       → Punkt

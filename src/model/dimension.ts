@@ -1,8 +1,8 @@
 // Gemeinsame Geometrie der Bemassung (SIA 400 B.5.3) — von BEIDEN Seiten
-// genutzt: vom Rendering (`plan/generatePlan/drawing2d.ts`) und von den
-// Griffen (`state/projectSlice.ts`). Bewusst hier statt doppelt gerechnet:
-// sonst driften Masszahl-Position und Masszahl-Griff auseinander, sobald eine
-// der beiden Stellen angepasst wird.
+// genutzt: vom Rendering (Rust-Kern, `plan/drawings.rs`) und von den Griffen
+// (`state/projectSlice.ts`). Die Lage der Masszahl (`dimTextFrame`) rechnet nur
+// der Kern (Bindung `dim_text_frame`): sonst driften Masszahl-Position und
+// Masszahl-Griff auseinander, sobald eine der beiden Stellen angepasst wird.
 //
 // EINHEITEN: die Bemassungs-Feinheiten sind PAPIER-MILLIMETER (so denkt die
 // Zeichnungsnorm: „Überstand 2 mm", unabhängig vom Massstab). Umgerechnet
@@ -13,6 +13,7 @@
 // bekannt und eindeutig.
 
 import type { Vec2 } from "./types";
+import { core } from "../engine/coreWasm";
 
 /**
  * Defaults in PAPIER-MILLIMETERN (übliche Zeichnungswerte; entsprechen bei
@@ -24,6 +25,9 @@ export const DIM_DEFAULTS_MM = {
   tickLen: 3,
   textHeight: 4,
 } as const;
+
+/** Default-Grösse der Linienenden (Pfeil, Punkt, …) in Papier-Millimetern (wie im Kern). */
+export const END_MARK_DEFAULT_SIZE_MM = 3;
 
 /** Standard-Massstab, wenn ein Aufrufer keinen mitgibt (1:100, üblichster Planmassstab). */
 export const DEFAULT_SCALE_DENOMINATOR = 100;
@@ -51,25 +55,9 @@ export function dimTextFrame(
   offset: number,
   textHeight: number,
 ): { base: Vec2; read: Vec2; up: Vec2; angle: number } {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = -dy / len;
-  const ny = dx / len;
-  const mid: Vec2 = {
-    x: (a.x + b.x) / 2 + nx * offset,
-    y: (a.y + b.y) / 2 + ny * offset,
-  };
-  let angle = Math.atan2(dy, dx);
-  if (Math.cos(angle) < 0) angle += Math.PI;
-  const read: Vec2 = { x: Math.cos(angle), y: Math.sin(angle) };
-  const up: Vec2 = { x: -Math.sin(angle), y: Math.cos(angle) };
-  return {
-    base: { x: mid.x + up.x * textHeight * 0.6, y: mid.y + up.y * textHeight * 0.6 },
-    read,
-    up,
-    angle,
-  };
+  const f = core().dim_text_frame(a.x, a.y, b.x, b.y, offset, textHeight);
+  if (f.length < 7) return { base: { x: NaN, y: NaN }, read: { x: NaN, y: NaN }, up: { x: NaN, y: NaN }, angle: NaN };
+  return { base: { x: f[0], y: f[1] }, read: { x: f[2], y: f[3] }, up: { x: f[4], y: f[5] }, angle: f[6] };
 }
 
 /** Endgültige Position der Masszahl inkl. Nutzer-Versatz. */

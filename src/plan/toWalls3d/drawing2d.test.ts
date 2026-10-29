@@ -179,7 +179,8 @@ describe("emitDrawingLineVerts — WORLD-Abbildung und Puffergrösse", () => {
   });
 });
 
-describe("Chargen an den Rust-Kern (Kataster-Grössenordnung)", () => {
+// Grosse Eingaben: unter Last (parallele Läufe) länger als die 5-s-Vorgabe.
+describe("Chargen an den Rust-Kern (Kataster-Grössenordnung)", { timeout: 60_000 }, () => {
   const line = (i: number) => ({
     id: `D${i}`,
     type: "drawing2d",

@@ -1,9 +1,10 @@
-// Der Primitiv-Cache je Drawing2D-Objekt (drawing2d.ts) darf nur dann
-// Primitive wiederverwenden, wenn sich nichts geändert hat, was ihre Ausgabe
-// bestimmt — und nie in Modi, die Primitive in place verändern (mono).
+// Die 2D-Zeichnungen kommen aus dem Kern-Puffer ([K3d], `plan/drawings.rs`): der GPU-Chunk-Cache
+// erkennt Unverändertes am Inhalts-Hash je Primitiv. Er darf nur dann gleich bleiben, wenn sich
+// nichts geändert hat, was die Ausgabe bestimmt — und Mono (färbt Primitive in place um) darf den
+// normalen Plan nicht verändern.
 
 import { describe, it, expect } from "vitest";
-import { generatePlan } from "./generatePlan";
+import { generatePlan, type Plan } from "./generatePlan";
 import type { Drawing2D, Project } from "../model/types";
 
 const draw = (id: string, ax: number): Drawing2D => ({
@@ -14,7 +15,6 @@ const draw = (id: string, ax: number): Drawing2D => ({
   geom: { shape: "polyline", pts: [{ x: ax, y: 0 }, { x: ax + 1, y: 0 }, { x: ax + 2, y: 1 }], closed: false },
 });
 
-// Wie im echten Projekt: unveränderte Teile sind dieselben Objekte (Structural Sharing).
 const SHARED = {
   lineStyles: [] as Project["lineStyles"],
   hatches: [{ id: "none", name: "Ohne", pattern: "none", scale: 1, angle: 0, color: "#111" }] as Project["hatches"],
@@ -44,48 +44,57 @@ function project(drawings: Drawing2D[]): Project {
 }
 
 const visible = new Set(["60"]);
-const lines = (p: ReturnType<typeof generatePlan>, id: string) =>
-  p.primitives.filter((pr) => pr.kind === "line" && pr.drawingId === id);
+const lines = (p: Plan, id: string) => p.primitives.filter((pr) => pr.kind === "line" && pr.drawingId === id);
+/** Inhalts-Hashes der Linien einer Zeichnung (aus den Kern-Abschnitten des Plans). */
+function hashes(p: Plan, id: string): number[] {
+  const out: number[] = [];
+  for (const r of p.bufRuns ?? []) {
+    for (let i = r.from; i < r.to; i++) {
+      const q = r.buf.prim(i);
+      if (q.kind === "line" && q.drawingId === id) out.push(r.buf.hashes![i]);
+    }
+  }
+  return out;
+}
 
-describe("Primitiv-Cache je Drawing2D", () => {
-  it("liefert für unveränderte Zeichnungen dieselben Primitiv-OBJEKTE, auch wenn andere sich ändern", () => {
+describe("Inhalts-Hashes der 2D-Zeichnungen (GPU-Chunk-Cache)", () => {
+  it("bleiben für unveränderte Zeichnungen gleich, auch wenn andere sich ändern", () => {
     const a = draw("A", 0), b = draw("B", 10);
     const p1 = generatePlan(project([a, b]), "eg", visible);
-    const b2 = draw("B", 20); // B geändert (neues Objekt), A bleibt dasselbe Objekt
-    const p2 = generatePlan(project([a, b2]), "eg", visible);
-    const la1 = lines(p1, "A"), la2 = lines(p2, "A");
-    expect(la1.length).toBeGreaterThan(0);
-    expect(la2.every((pr, i) => pr === la1[i])).toBe(true);
-    // B wurde neu erzeugt und zeigt die NEUE Geometrie.
-    expect((lines(p2, "B")[0] as any).a.x).toBe(20);
+    const p2 = generatePlan(project([a, draw("B", 20)]), "eg", visible);
+    expect(hashes(p1, "A").length).toBe(2);
+    expect(hashes(p2, "A")).toEqual(hashes(p1, "A"));
+    expect(hashes(p2, "B")).not.toEqual(hashes(p1, "B"));
+    // B zeigt die NEUE Geometrie.
+    expect((lines(p2, "B")[0] as { a: { x: number } }).a.x).toBe(20);
   });
 
-  it("verwirft den Cache, wenn sich der Kontext ändert (Ebenen → Farbe)", () => {
-    const a = draw("A", 0);
-    const base = project([a]);
+  it("ändern sich mit dem Kontext (Ebenen → Farbe)", () => {
+    const base = project([draw("A", 0)]);
     const p1 = generatePlan(base, "eg", visible);
     const recolored = { ...base, layers: [{ ...base.layers[0], color: "#ff0000" }] };
     const p2 = generatePlan(recolored, "eg", visible);
-    expect((lines(p1, "A")[0] as any).color).toBe("#0a0a0a");
-    expect((lines(p2, "A")[0] as any).color).toBe("#ff0000");
+    expect((lines(p1, "A")[0] as { color: string }).color).toBe("#0a0a0a");
+    expect((lines(p2, "A")[0] as { color: string }).color).toBe("#ff0000");
+    expect(hashes(p2, "A")).not.toEqual(hashes(p1, "A"));
   });
 
-  it("mono verändert Primitive in place, ohne den normalen Cache zu vergiften", () => {
-    const a = draw("A", 0);
-    const proj = project([a]);
+  it("mono verändert Primitive in place, ohne den normalen Plan zu vergiften", () => {
+    const proj = project([draw("A", 0)]);
     const normal1 = generatePlan(proj, "eg", visible);
     generatePlan(proj, "eg", visible, undefined, "mittel", false, true);
     const normal2 = generatePlan(proj, "eg", visible);
-    expect((lines(normal1, "A")[0] as any).color).toBe("#0a0a0a");
-    expect((lines(normal2, "A")[0] as any).color).toBe("#0a0a0a");
+    expect((lines(normal1, "A")[0] as { color: string }).color).toBe("#0a0a0a");
+    expect((lines(normal2, "A")[0] as { color: string }).color).toBe("#0a0a0a");
+    expect(hashes(normal2, "A")).toEqual(hashes(normal1, "A"));
   });
 
-  it("greyed ist Teil des Schlüssels", () => {
-    const a = draw("A", 0);
-    const proj = project([a]);
+  it("gedimmt ist Teil des Inhalts", () => {
+    const proj = project([draw("A", 0)]);
     const normal = generatePlan(proj, "eg", visible);
     const dimmed = generatePlan(proj, "eg", visible, () => ({ render: true, greyed: true, locked: false }));
-    expect((lines(normal, "A")[0] as any).greyed).toBeFalsy();
-    expect((lines(dimmed, "A")[0] as any).greyed).toBe(true);
+    expect((lines(normal, "A")[0] as { greyed?: boolean }).greyed).toBeFalsy();
+    expect((lines(dimmed, "A")[0] as { greyed?: boolean }).greyed).toBe(true);
+    expect(hashes(dimmed, "A")).not.toEqual(hashes(normal, "A"));
   });
 });

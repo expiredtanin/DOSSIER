@@ -1,6 +1,6 @@
 /**
  * `generatePlan` — Rendering des Punkt-/Knotenmarkers (`shape:"pointmarker"`):
- * Kreuz-in-Kreis, fixe Modell-Meter-Grösse (s. `drawing2d.ts`).
+ * Kreuz-in-Kreis, fixe Modell-Meter-Grösse (s. `plan/drawings.rs` im Kern).
  */
 
 import { describe, it, expect } from "vitest";

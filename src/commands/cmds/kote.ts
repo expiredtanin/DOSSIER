@@ -31,7 +31,7 @@ const KIND_LABEL: Record<KoteKind, TranslationKey> = {
   ukRoh: "cmd.kote.kind.ukRoh",
 };
 
-const TRI_SIZE = 0.15; // Modell-Meter, Vorschau-Grösse (Rendering: DIM_… in drawing2d.ts)
+const TRI_SIZE = 0.15; // Modell-Meter, Vorschau-Grösse (Rendering: KOTE_… in plan/drawings.rs)
 const HALF_W = TRI_SIZE * 0.6;
 
 /** Dreieck-Punkte für die Vorschau: `at` = Spitze; OK zeigt nach unten, UK nach oben. */

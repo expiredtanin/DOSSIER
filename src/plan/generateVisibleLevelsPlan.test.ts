@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import { generateVisibleLevelsPlan, inGreyedRange, materializeGreyed } from "./generatePlan";
 import type { CategoryDisplayResolver } from "./generatePlan";
 import type { DrawingLevel, Project, Wall } from "../model/types";
+import { documentFor } from "../core/document";
 
 const visible = new Set(["20", "90"]);
 const SHOW_ALL: CategoryDisplayResolver = () => ({ render: true, greyed: false, locked: false });
@@ -180,7 +181,11 @@ describe("generateVisibleLevelsPlan", () => {
     expect(() =>
       generateVisibleLevelsPlan(p, "eg", visibleWide, SHOW_ALL, "mittel", false, false, SHOW_ALL),
     ).not.toThrow();
-  });
+    // Das gemeinsame Kern-Dokument gleich wieder auf ein kleines Projekt bringen (der Wechsel kostet
+    // bei 200 000 Zeichnungen Sekunden — sonst zahlt ihn der nächste Test).
+    documentFor(baseProject([floor("eg", "EG")], []));
+    // Mehr Zeit: der Kern bekommt das ganze Projekt (200 000 Zeichnungen) als Dokument.
+  }, 120_000);
 
   it("Schnitt/Ansicht-Ebenen bleiben Einzel-Pane (kein Stapeln über kind-Grenze)", () => {
     const p = baseProject(

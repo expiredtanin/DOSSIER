@@ -20,7 +20,7 @@ import type {
 import { addItems, opsMutation } from "../../core";
 import type { CoreOp } from "../../core";
 
-const PREVIEW_RADIUS = 0.3; // Modell-Meter, deckt sich mit DETAILREF_RADIUS_M (drawing2d.ts)
+const PREVIEW_RADIUS = 0.3; // Modell-Meter, deckt sich mit DETAILREF_RADIUS_M (plan/drawings.rs)
 const DEFAULT_LABEL = "A";
 
 interface DetailRefIdle extends CommandState {
