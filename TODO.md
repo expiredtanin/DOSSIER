@@ -274,8 +274,8 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     0 Befunde, glTF-Validator über 390 GLB/glTF 0 Fehler (nach [C11]-Korrektur der leeren Szene). Messung (Node,
     Linux-Container, `--no-opt`-WASM, bigSample(20)): IFC 82,5 s → 2,4 s, GLB 212 s → 1,9 s; Beispielprojekt IFC
     11 → 4 ms, GLB 15 → 2,5 ms (vorher je Bauteil ein eigenes Kern-Dokument aus dem ganzen Projekt-JSON). Nicht in
-    der Tauri-App geprüft (e2e im Browser: IFC-Export grün). Bleibt: DXF-Sammler (`exportDxf.ts`), STEP (truck) und
-    die Modell-Verschiebung `translateProject` in TS (Befehl „Neuer Bezugspunkt“, DXF).
+    der Tauri-App geprüft (e2e im Browser: IFC-Export grün). Bleibt: DXF-Sammler (`exportDxf.ts`) und STEP (truck);
+    die Modell-Verschiebung `translateProject` liegt seit 29.10. im Kern (s. S3).
     Nächste: Export (Schedule/CSV, STL/OBJ, STEP), Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation) — hängt an Plan-Puffer v2.
     Grundriss (28.10.): Decken, Dächer, Räume, Wände+Öffnungen, Treppen, Stützen, Extrusionen, Kontext und Schnittlinien
     kommen über `planDomains` aus dem Dokument ([K3d]); seit 29.10. auch die 2D-Zeichnungen (`plan/drawings.rs`); übrig in
@@ -452,6 +452,14 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     vorhanden/fehlend, fehlende/negative/0-Abstände, Toleranz 0/0,01/0,5) und 4000 Einzel-Regeln/Bedingungen/Duplikat-Listen,
     Wand-ids samt Zähler gleich, Ergebnis zeichengleich bis auf die Schlüsselreihenfolge von Wänden mit `wallTypeId: undefined`.
     Abweichung (gewollt): Achsen je Aufruf auf 1 000 000 begrenzt (TS rechnete bei absurd kleinem Abstand endlos).
+    **Projekt-Verschiebung und Auswahl-Export im Kern (29.10.):** `geo_translate.rs` (`translateProject`/`translateOps` aus
+    `model/geoRebase.ts`: Translation aller Modell-Koordinaten inkl. Kontext, Zeichnungen, Geo-Anker; Befehl „Neuer
+    Bezugspunkt“, `projectToWorldCoords` für DXF/IFC-Welt-Koordinaten) und `selection_filter.rs` (`filterProjectToSelection`
+    aus `state/exportScope.ts`: Export „nur Auswahl“), beide als Wurzel-Abfragen (`translatePatch`/`translateOps`/
+    `selectionFilterPatch`); die Fassaden setzen `{...project, ...patch}` zusammen, `projectGeoOrigin` (Einzeiler) bleibt in TS.
+    Gleichheit (einmalig, Test gelöscht): 3000 Zufallsprojekte mit allen Elementarten, allen 18 Zeichnungs-Formen, Kontext
+    (Mesh/Terrain/Bild/Konturen mit Bogen), Geo-Anker, Verschiebung (0,0) — Projekt, Ops und Welt-Koordinaten
+    zeichengleich; 5000 Auswahl-Filter (doppelte ids, fehlende Listen).
   - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
     **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur

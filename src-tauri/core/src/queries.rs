@@ -83,6 +83,21 @@ pub fn run_root(root: &serde_json::Map<String, serde_json::Value>, name: &str, t
             let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("layoutTitleBlock: {e}"))?;
             json(&crate::layout_model::resolve_title_block(root, &a["layout"], &a["master"], a["today"].as_str().unwrap_or("")))
         }
+        // Verschiebung des Projekts ([K4] S3, `geo_translate.rs`): `text` = JSON `[dx, dy]`; `translatePatch` liefert
+        // die verschobenen Listen + Geo-Anker (für `{...project, ...patch}`), `translateOps` die Ops dazu.
+        "translatePatch" | "translateOps" => {
+            let [dx, dy]: [f64; 2] = serde_json::from_str(text).map_err(|e| format!("{name}: {e}"))?;
+            if name == "translatePatch" {
+                json(&crate::geo_translate::project_patch(root, dx, dy))
+            } else {
+                json(&crate::geo_translate::translate_ops(root, dx, dy))
+            }
+        }
+        // Export-Scope „nur Auswahl" ([K4] S3, `selection_filter.rs`): `text` = JSON der ids je Art (`GroupMembership`).
+        "selectionFilterPatch" => {
+            let m: crate::groups::Membership = serde_json::from_str(text).map_err(|e| format!("selectionFilterPatch: {e}"))?;
+            json(&crate::selection_filter::filter_patch(root, &m))
+        }
         _ => Err(format!("Unbekannte Wurzel-Abfrage: {name}")),
     }
 }

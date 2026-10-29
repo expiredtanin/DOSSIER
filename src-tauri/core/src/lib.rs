@@ -78,6 +78,8 @@ pub mod pens;
 pub mod folder_tree;
 pub mod layout_model;
 pub mod parametric_walls;
+pub mod geo_translate;
+pub mod selection_filter;
 
 #[cfg(feature = "web")]
 mod web;
