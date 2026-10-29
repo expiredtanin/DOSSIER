@@ -491,6 +491,9 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   vorher: Zelt 7×5 m 1.1e-3 m², Walm/Zelt auf L 0.77–1.2 m², Mansard-Walm auf L 0.93 m² Lücke; jetzt jede
   Schicht geschlossen (Test `g9_dachschichten_geschlossen`: Rechteck/L/U/konkav/schief × alle
   Skelett-Formen × First x/y × zwei Schichten). Nicht in der App/IFC-Prüfung angesehen.
+  (29.10.) Verschieden geneigte Flächen ([26] Kantenneigung): an Graten mit zwei Flächen und je einer
+  Traufkante gehen die Seitenebenen auseinander — `Mitre::at` nimmt dort den Mittelpunkt beider Eckpunkte
+  (bei gleicher Neigung identisch, unverändert).
 
 ## truck [T]
 
@@ -609,6 +612,23 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Umrisskante (null = Giebel; ersetzt dann die Giebel-Regel „quer zur Firstachse"). Satteldach auf
   schiefem Umriss bleibt bei der Bounding-Box (Umstellung auf den Skeleton würde bestehende Dächer
   ändern — Entscheid Maintainer).
+  (29.10.) Felder umgesetzt (Entscheid Maintainer): `Roof.holes?: Vec2[][]` (Ringe, Drehsinn egal) und
+  `Roof.edgePitchDeg?: (number | null)[]` (erst Umrisskanten in gespeicherter Reihenfolge, dann Hofkanten
+  Ring für Ring; `null` = Giebel, Zahl ≥ 0 = Neigung der Kante, NEGATIV oder fehlender Eintrag =
+  Standard = `pitchDeg`, am Sattel/Mansard-Satteldach Giebel quer zum First; Feld fehlt = wie bisher).
+  Wirkt bei Sattel/Walm/Mansarde/Zelt (Höfe auch Flach); Pult ignoriert beide. `roof.rs::custom_roof` →
+  `weighted_roof` über alle Ringe, Überstand je Kante (Giebel = Ortgang), Hofringe schrumpfen; ungültige
+  Höfe (nicht im Umriss, Schnitt, vom Überstand geschlossen) → Dach wie ohne. Dächer ohne die Felder
+  bitgleich (CLI-Plan/Ansicht/Schnitt/IFC vorher/nachher gleich). Plan: Hof = Loch der Dachfläche + Hof-
+  Traufe (`plan/domains.rs`); 3D/Schnitt/Ansicht/IFC über die Flächen; `Mitre` (model3d) mittelt die
+  Ecke an Graten zwischen verschieden geneigten Flächen (Dachschichten bleiben geschlossen). UI:
+  Objekt-Info → Kantenliste (Neigung leer = Standard, Giebel-Schalter, „Alle Kanten auf Standard"),
+  Hofliste mit Entfernen, Befehl `dachhof`/`lichthof` (Klicks, ≥ 3 Punkte Polygon, 2 Punkte + Enter
+  Rechteck; „aus gewählter Kontur" geht nicht, weil nur ein Objekt wählbar ist). Breite/Tiefe im
+  Objekt-Info nur noch für Vierecke ohne Höfe. Offen: Kante im Grundriss hervorheben (PlanView, anderer
+  Zuständigkeitsbereich); Kanten-/Hof-Griffe im Grundriss; Mansarde mit Hof UND verschieden geneigten
+  Kanten: zweite Dachschicht (Versatz > Knickbreite) nicht geschlossen; Schattenwurf (`sun.rs`) nimmt
+  weiter die Hülle der Dachpunkte (Hof wirft Schatten).
 
 ## Priorität 4 — später
 
@@ -682,7 +702,7 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   einspringenden Ecke (jetzt Giebelwand bis zur tieferen Fläche), Linien zwischen zwei Flächen derselben
   Ebene (T-Stoss) entfallen; konkave Sterne: in ~37 % stieg das alte Dach über den Randabstand (Fünfeck:
   First 6.49 statt 3.50 m). Ohne Snap auf 1e-6: gemeinsame Ecken jetzt exakt. CLI-Plan/Ansicht (L, U, U
-  Sattel, Fünfeck, T Mansarde, Zelt) angesehen (Linux). Offen: Modellfelder für Höfe/Neigung je Kante [26].
+  Sattel, Fünfeck, T Mansarde, Zelt) angesehen (Linux). (29.10.) Modellfelder für Höfe/Neigung je Kante gibt es jetzt, s. [26].
 - ✅ **[B3] IFC-Import als Mesh** (erste Stufe von [25]). (28.10.) Eigener Code in `src-tauri/fileio`
   (`ifc_step.rs` STEP-Leser inkl. `\X2\`/`\X4\`, `ifc_import.rs` Geometrie), Fassade `io/ifcImport.ts`:
   je IfcProduct ein Kontext-Mesh (Ebene = IFC-Klasse; > 2000 Bauteile je Klasse+Geschoss), Menü „IFC
