@@ -48,7 +48,7 @@ fn pattern_id(p: HatchPattern) -> f64 {
 }
 
 /// Aufgelöste Schraffur (Kern von `resolveHatch`): Muster, Massstab, Endwinkel, Musterlinien-Stärke.
-/// `None`, wenn Schraffur oder ihr Linienstil fehlen (TS wirft dort).
+/// `None`, wenn die Schraffur fehlt; ein hängender Linienstil zählt wie keiner (0.13).
 pub struct HatchCore {
     pub pattern: HatchPattern,
     pub scale: f64,
@@ -58,10 +58,7 @@ pub struct HatchCore {
 
 pub fn resolve_hatch_core(p: &Project, hatch_id: &str, wall_angle_deg: Option<f64>) -> Option<HatchCore> {
     let h = p.hatch(hatch_id)?;
-    let ls = match h.line_style_id.as_deref().filter(|s| !s.is_empty()) {
-        Some(id) => Some(p.line_style(id)?),
-        None => None,
-    };
+    let ls = h.line_style_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.line_style(id));
     let base = h.angle;
     let angle = match wall_angle_deg {
         Some(w) if h.relative_to_wall == Some(true) => base - w,

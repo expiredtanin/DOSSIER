@@ -16,6 +16,7 @@ import {
   serializeProject,
   validateOps,
   validateProject,
+  projectWarnings,
 } from "../core";
 import type { CoreOp, Project } from "../core";
 
@@ -124,7 +125,8 @@ export async function callTool(file: string, name: string, args: Record<string, 
     }
     case "validate": {
       const problems = validateProject(project);
-      return text(problems.length ? problems.join("\n") : "ok", problems.length > 0);
+      const warnings = projectWarnings(project).map((w) => `Warnung: ${w}`);
+      return text([...problems, ...warnings].join("\n") || "ok", problems.length > 0);
     }
     default:
       return text(`unbekanntes Werkzeug: ${name}`, true);

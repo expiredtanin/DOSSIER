@@ -568,7 +568,7 @@ export function resolveTitleBlock(
   today: string = new Date().toISOString().slice(0, 10),
 ): ResolvedTitleBlock {
   const arg = {
-    layout: { id: layout.id, name: layout.name, planNumber: layout.planNumber, viewports: layout.viewports.slice(0, 1) },
+    layout: { id: layout.id, name: layout.name, planNumber: layout.planNumber, viewports: (layout.viewports ?? []).slice(0, 1) },
     master: master ? { titleBlock: master.titleBlock } : null,
     today,
   };
@@ -581,7 +581,8 @@ export function resolveTitleBlock(
  */
 export function visibleCodesFromSnapshot(snap: ViewSnapshot): Set<string> {
   const out = new Set<string>();
-  for (const [code, visible] of Object.entries(snap.layerVisibility)) {
+  // Fehlt die Map (Datei/Import), ist nichts sichtbar — kein Absturz.
+  for (const [code, visible] of Object.entries(snap.layerVisibility ?? {})) {
     if (visible) out.add(code);
   }
   return out;

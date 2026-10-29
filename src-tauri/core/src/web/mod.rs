@@ -39,6 +39,7 @@ mod layout_model;
 mod parametric_walls;
 mod reorder;
 mod text_layout;
+mod project_refs;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

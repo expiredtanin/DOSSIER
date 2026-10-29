@@ -38,6 +38,20 @@ describe("dossier-cli", () => {
     expect(JSON.parse(readFileSync(out, "utf8")).formatVersion).toBeGreaterThanOrEqual(1);
   });
 
+  it("validate meldet hängende Verweise als Warnung, Plan rechnet trotzdem", async () => {
+    const broken = join(dir, "haengend.obp");
+    const p = { ...sampleProject, walls: sampleProject.walls.map((w, i) => (i === 0 ? { ...w, wallTypeId: "nope" } : w)) };
+    writeFileSync(broken, serializeProject(p));
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      expect(await run([broken, "validate"])).toBe(0);
+      expect(err.mock.calls.map((c) => String(c[0])).join("")).toContain(`Warnung: Wand „${sampleProject.walls[0].id}": Wandtyp „nope" fehlt.`);
+    } finally {
+      err.mockRestore();
+    }
+    expect(await run([broken, "plan", "--out", join(dir, "haengend.svg")])).toBe(0);
+  });
+
   it("Plan als SVG", async () => {
     const out = join(dir, "eg.svg");
     expect(await call("plan", "--out", out)).toBe(0);

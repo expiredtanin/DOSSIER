@@ -34,8 +34,9 @@ pub fn opening_label(o: &Opening) -> String {
     format!("{} {}×{}", if o.kind == ElementKind::Door { "Tür" } else { "Fenster" }, to_fixed(o.width * 100.0, 0), to_fixed(o.height * 100.0, 0))
 }
 
+/// Wandtyp; hängender Verweis (Datei/Import) → Rückfall-Typ, nie ein Fehler.
 fn wall_type<'a>(p: &'a Project, w: &Wall) -> Result<&'a WallType, String> {
-    p.wall_type(w).ok_or_else(|| format!("Unbekannter Wandtyp: {}", w.wall_type_id))
+    Ok(p.wall_type_or_fallback(w))
 }
 
 /// Verschneidung der gezeichneten Wände (`computeJoins` in TS, gleicher Puffer). Fehler wie die
@@ -52,33 +53,18 @@ fn plan_joins(p: &Project, walls: &[EffWall]) -> Result<Vec<WallCuts>, String> {
             (None, Some(WallReferenceLine::Right)) => buf.extend([2.0, 0.0]),
             _ => buf.extend([0.0, 0.0]),
         }
-        let Some(wt) = p.wall_type(w) else {
-            buf.extend([0.0, 0.0]);
-            continue;
-        };
+        // Hängende Wandtypen/Bauteile (Datei/Import) verschneiden mit den Rückfall-Werten.
+        let wt = p.wall_type_or_fallback(w);
         buf.extend([1.0, wt.layers.len() as f64]);
         for l in &wt.layers {
-            let comp = p.component(&l.component_id);
-            let idx = match comp {
-                Some(c) => {
-                    let n = comp_index.len();
-                    *comp_index.entry(c.id.as_str()).or_insert(n) as f64
-                }
-                None => -1.0,
-            };
-            buf.extend([l.thickness, idx, comp.map_or(f64::NAN, |c| c.join_priority)]);
+            let comp = p.component_or_fallback(&l.component_id);
+            let n = comp_index.len();
+            let idx = *comp_index.entry(comp.id.as_str()).or_insert(n) as f64;
+            buf.extend([l.thickness, idx, comp.join_priority]);
         }
     }
     let out = joins::compute_joins_flat(&buf);
-    if out.first() == Some(&1.0) {
-        let bad = out.get(1).and_then(|i| walls.get(*i as usize));
-        if let Some(e) = bad {
-            for l in &wall_type(p, e.w)?.layers {
-                p.component(&l.component_id).ok_or_else(|| format!("Unbekanntes Bauteil-Material: {}", l.component_id))?;
-            }
-        }
-        return Err("computeJoins: unbekannter Wandtyp oder Bauteil".into());
-    }
+    // Fehler der Verschneidung (mit den Rückfällen oben nicht mehr erwartet): Wände ohne Verschneidung.
     if out.first() != Some(&0.0) {
         return Ok(vec![WallCuts::default(); walls.len()]);
     }
@@ -199,9 +185,9 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             return Ok(s.clone());
         }
         let layer = wt.layers.get(li).ok_or("Schicht fehlt")?;
-        let comp = p.component(&layer.component_id).ok_or_else(|| format!("Unbekanntes Bauteil-Material: {}", layer.component_id))?;
+        let comp = p.component_or_fallback(&layer.component_id);
         let hid = resolve_hatch_id(w.hatch_id.as_deref(), w.hatch_source, category, Some(&comp.hatch_id)).unwrap_or(&comp.hatch_id);
-        let hatch = super::domains::resolve_hatch_or_err(p, hid, Some(angle), resolve_foreground(comp, w.foreground.as_deref(), category, w.foreground_source))?;
+        let hatch = super::domains::resolve_hatch_or_none(p, hid, Some(angle), resolve_foreground(comp, w.foreground.as_deref(), category, w.foreground_source));
         let bg = resolve_background(comp, w.background.as_deref(), category, w.background_source);
         let fill = bg.unwrap_or(if hatch.pattern == HatchPattern::Solid { HATCH_INK } else { HATCH_PAPER }).to_string();
         styles.insert(li, (hatch.clone(), fill.clone()));

@@ -9,7 +9,36 @@ use std::collections::HashMap;
 use crate::roof::{MansardType, RoofParams, Shape};
 use crate::roof_skeleton::Axis;
 
+/// Rückfall-Bauteil für hängende Verweise (Datei/Import nennt ein Bauteil, das fehlt): neutrales
+/// Grau, keine Schraffur, Verschneidungs-Priorität 0.
+static FALLBACK_COMPONENT: std::sync::LazyLock<Component> =
+    std::sync::LazyLock::new(|| Component { name: "?".into(), color: "#bfbfbf".into(), ..Default::default() });
+
+/// Rückfall-Wandtyp für hängende Verweise: eine Schicht 0.2 m (wie der Dicken-Rückfall in TS) aus
+/// dem [`FALLBACK_COMPONENT`].
+static FALLBACK_WALL_TYPE: std::sync::LazyLock<WallType> = std::sync::LazyLock::new(|| WallType {
+    name: "?".into(),
+    layers: vec![Layer { thickness: 0.2, ..Default::default() }],
+    ..Default::default()
+});
+
 impl Project {
+    /// Wandtyp oder — bei hängendem Verweis — der Rückfall-Typ (eine Schicht 0.2 m). Für alle
+    /// Ableitungen, die nicht an fehlenden Daten scheitern dürfen (Plan, Schnitt, 3D, Exporte).
+    pub fn wall_type_or_fallback(&self, w: &Wall) -> &WallType {
+        self.wall_type(w).unwrap_or(&FALLBACK_WALL_TYPE)
+    }
+
+    /// Bauteil oder — bei hängendem Verweis — das neutrale Rückfall-Bauteil.
+    pub fn component_or_fallback(&self, id: &str) -> &Component {
+        self.component(id).unwrap_or(&FALLBACK_COMPONENT)
+    }
+
+    /// Schichten des Rückfall-Wandtyps (auch für Decken mit hängendem Typ).
+    pub fn fallback_layers() -> &'static [Layer] {
+        &FALLBACK_WALL_TYPE.layers
+    }
+
     pub fn floor(&self, id: &str) -> Option<&DrawingLevel> {
         self.drawing_levels.iter().find(|l| l.id == id)
     }

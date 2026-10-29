@@ -704,6 +704,25 @@ Frage: WebGPU weiterführen oder wie BIMCraft CPU + native GPU?
 - ◐ **[14] „Never crash".** TS-Wächter `guarded()` um das truck-WASM (Trap → neu instanziieren, einmal
   wiederholen). Rust-Kern: Bindungen verwerfen Unsinn statt zu paniken. Offen: Wächter für
   render3d/render2d/Kern, Rust-Lints `unwrap_used`/`expect_used`/`panic` auf `deny`, Obergrenzen. · M
+  - ✅ (29.10.) Kaputte Projekte (Datei/Import) bringen keine Abfrage mehr zum Werfen. Fuzz-Test
+    `src/core/robustness.test.ts`: Beispiel, „alle Element-Arten", 7 Zufallsprojekte, gekacheltes Projekt × 21
+    Verderbnisse (hängende Wand-/Decken-/Dach-/Tür-/Treppentypen, Bauteile, Geschosse, Öffnungs-Wand, Schraffur/
+    Linienstil/Stift/Stiftsatz, Block, Layout-Master/-Ausschnitt; Gruppen/Ordner, die sich selbst enthalten; leere und
+    Ein-Punkt-Polygone; NaN/±∞/negativ; fehlende Felder; doppelte ids; falsche Typen; kaputte Schnittlinien/Baurecht/
+    Sonne) gegen jede Fassade (Plan aller Ebenen + sichtbare Geschosse, Schnitt, Ansicht, Szene/SVG/DXF je Plan, 3D,
+    Pick, IFC, OBJ/STL/GLB, Liste, Kennzahlen, Raumprogramm, Flächen/IVHB, Baurecht, Sonne, Layouts, Prüfung,
+    Speichern/Laden). Vorher u. a. 158 Würfe allein am Beispiel. Ursachen behoben: (1) Kern-Ableitungen fallen bei
+    hängenden Verweisen auf Vorgaben zurück statt `Err` (`wall_type_or_fallback`/`component_or_fallback`: eine Schicht
+    0,2 m, neutrales Grau; fehlende Schraffur → ohne Muster; hängender Linienstil einer Schraffur → 0,13 durchgezogen;
+    Deckentyp → Rückfall-Schicht; Verschneidung mit Rückfall-Werten; Plan, Schnitt, Ansicht, 3D, IFC, Mesh). (2) Typisierte
+    Sicht tolerant (`model/lenient.rs`): EIN Wert, der nicht passt (`null` statt Zahl — NaN überlebt JSON nicht —,
+    Zeichenkette statt Punkt), legte das ganze Dokument lahm; jetzt fällt nur er auf die Vorgabe zurück (Pflichtfelder wie
+    `Vec2` → 0), nicht lesbare Listenelemente entfallen, die JSON-Wurzel bleibt unverändert. (3) Mesh-Export: gebrochene
+    Indizes/NaN-Ecken aus Importen sprengten den `fileio`-Leser. (4) TS `visibleCodesFromSnapshot`/`resolveTitleBlock`
+    ohne `layerVisibility`/`viewports`. `projectWarnings` (Kern `project_refs.rs`) listet hängende Verweise, Zyklen und
+    ersetzte Werte; `dossier-cli validate` (und MCP `validate`) gibt sie als „Warnung: …" aus (Exit 0, solange keine
+    Fehler). Kein Panic gefunden. Offen: Hülle (Panels/Editoren) nicht geprüft; Kategorie-Codes ohne Kategorie werden
+    nicht gewarnt (bewusst, häufig bei Importen).
 - ✅ **[16] Befehle mit Unsinn füttern.** 27.10.: `commands/hostile.test.ts` füttert alle Befehle; fand
   1 Speicher-Explosion (revisionCloud), behoben. · S
 - ✅ **[22] Fester Check vor Abschluss.** `npm run check` (tsc, vitest, cargo test aller 6 Crates,

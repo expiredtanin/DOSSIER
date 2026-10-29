@@ -215,18 +215,15 @@ fn pv(p: [f64; 2]) -> Vec2 {
     Vec2 { x: p[0], y: p[1] }
 }
 
-/// `getComponent` (wirft in TS).
+/// `getComponent`; hängender Verweis (Datei/Import) → neutrales Rückfall-Bauteil statt Abbruch.
 fn component<'a>(p: &'a Project, id: &str) -> Result<&'a Component, String> {
-    p.component(id).ok_or_else(|| format!("Unbekanntes Bauteil-Material: {id}"))
+    Ok(p.component_or_fallback(id))
 }
 
-/// `resolveHatch` mit der Fehlermeldung von TS (`getHatch`/`getLineStyle` werfen).
-pub(super) fn resolve_hatch_or_err(p: &Project, hatch_id: &str, wall_angle_deg: Option<f64>, fg: Option<&str>) -> Result<HatchRender, String> {
-    let h = p.hatch(hatch_id).ok_or_else(|| format!("Unbekannte Schraffur: {hatch_id}"))?;
-    if let Some(ls) = h.line_style_id.as_deref().filter(|s| !s.is_empty()) {
-        p.line_style(ls).ok_or_else(|| format!("Unbekannter Linienstil: {ls}"))?;
-    }
-    resolve_hatch(p, hatch_id, wall_angle_deg, fg, None).ok_or_else(|| format!("Unbekannte Schraffur: {hatch_id}"))
+/// `resolveHatch`; hängende Schraffur (Datei/Import) → ohne Muster statt Abbruch (ein hängender
+/// Linienstil der Schraffur fällt in `resolve_hatch` auf die Vorgabe-Strichstärke zurück).
+pub(super) fn resolve_hatch_or_none(p: &Project, hatch_id: &str, wall_angle_deg: Option<f64>, fg: Option<&str>) -> HatchRender {
+    resolve_hatch(p, hatch_id, wall_angle_deg, fg, None).unwrap_or_else(no_hatch)
 }
 
 /// Footprints der gezeichneten Wände dieses Geschosses (`buildWallFootprints`).
@@ -251,7 +248,8 @@ fn ceiling_layers<'a>(p: &'a Project, c: &Ceiling) -> Result<&'a [Layer], String
             return Ok(&ct.layers);
         }
     }
-    p.wall_types.iter().find(|t| t.id == c.wall_type_id).map(|t| t.layers.as_slice()).ok_or_else(|| format!("Unbekannter Deckentyp: {}", c.ceiling_type_id.as_deref().unwrap_or(&c.wall_type_id)))
+    // Hängender Typ (Datei/Import): Rückfall-Schicht statt Abbruch.
+    Ok(p.wall_types.iter().find(|t| t.id == c.wall_type_id).map_or(Project::fallback_layers(), |t| t.layers.as_slice()))
 }
 
 /// Typname einer Decke für `object_name` (Maps in TS: letzter Eintrag je id gewinnt).
@@ -290,7 +288,7 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         let stroke = color.unwrap_or(POCHE_STROKE);
         let view_hatch_id = resolve_hatch_id(ce.hatch_id.as_deref(), ce.hatch_source, category, comp.and_then(|k| k.view_hatch_id.as_deref()));
         let hatch = match (c.a.detail != Detail::Grob, comp, view_hatch_id.filter(|s| !s.is_empty())) {
-            (true, Some(k), Some(id)) => resolve_hatch_or_err(p, id, None, resolve_foreground(k, ce.foreground.as_deref(), category, ce.foreground_source))?,
+            (true, Some(k), Some(id)) => resolve_hatch_or_none(p, id, None, resolve_foreground(k, ce.foreground.as_deref(), category, ce.foreground_source)),
             _ => no_hatch(),
         };
         let fill = match comp {

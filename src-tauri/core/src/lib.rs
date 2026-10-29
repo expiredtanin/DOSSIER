@@ -85,6 +85,7 @@ pub mod ugrid;
 pub mod wasm_alloc;
 pub mod text_layout;
 pub mod plan_text;
+pub mod project_refs;
 
 #[cfg(feature = "web")]
 mod web;

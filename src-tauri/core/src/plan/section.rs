@@ -496,10 +496,6 @@ fn rect_of_band(c: &Cut) -> Option<[f64; 4]> {
     (c.pts.len() >= 3).then(|| bbox(&c.pts))
 }
 
-fn missing(what: &str, id: &str) -> String {
-    format!("{what}: {id}")
-}
-
 /// Bauteil-Stil einer Schicht (Füllung, Schraffur) mit dem Override des Elements (`split*Layers`).
 #[allow(clippy::too_many_arguments)]
 fn layer_style(
@@ -515,7 +511,8 @@ fn layer_style(
     angle: f64,
 ) -> Result<(String, HatchRender), String> {
     let hid = resolve_hatch_id(hatch_id, hatch_source, category, Some(&comp.hatch_id)).unwrap_or(&comp.hatch_id);
-    let hatch = resolve_hatch(p, hid, Some(angle), resolve_foreground(comp, fg, category, fg_source), None).ok_or_else(|| missing("Unbekannte Schraffur", hid))?;
+    // Hängende Schraffur (Datei/Import): ohne Muster statt Abbruch.
+    let hatch = resolve_hatch(p, hid, Some(angle), resolve_foreground(comp, fg, category, fg_source), None).unwrap_or_else(no_hatch);
     let bg = resolve_background(comp, bg, category, bg_source);
     let fill = bg.map(String::from).unwrap_or_else(|| poche_fill(hatch.pattern).to_string());
     Ok((fill, hatch))
@@ -525,7 +522,7 @@ fn layer_style(
 /// Jede Schicht ist im Schnitt-Modell eine eigene Platte; ihr Band trägt so genau ihr Bauteil.
 fn style_slab_layer(cp: &mut Cut, p: &Project, layer: &Layer, owner: &Ceiling) -> Result<(), String> {
     let category = p.layer_category(&owner.category_code);
-    let comp = p.component(&layer.component_id).ok_or_else(|| missing("Unbekanntes Bauteil-Material", &layer.component_id))?;
+    let comp = p.component_or_fallback(&layer.component_id);
     let (fill, hatch) = layer_style(p, comp, owner.hatch_id.as_deref(), owner.hatch_source, owner.foreground.as_deref(), owner.foreground_source, owner.background.as_deref(), owner.background_source, category, SECTION_SLAB_AXIS_ANGLE_DEG)?;
     cp.fill = Some(fill);
     cp.hatch = Some(hatch);
@@ -561,7 +558,7 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
     let mut out = Vec::with_capacity(layers.len());
     let mut acc = 0.0;
     for layer in ordered {
-        let comp = p.component(&layer.component_id).ok_or_else(|| missing("Unbekanntes Bauteil-Material", &layer.component_id))?;
+        let comp = p.component_or_fallback(&layer.component_id);
         let (fill, hatch) = layer_style(p, comp, owner.hatch_id.as_deref(), owner.hatch_source, owner.foreground.as_deref(), owner.foreground_source, owner.background.as_deref(), owner.background_source, category, SECTION_WALL_AXIS_ANGLE_DEG)?;
         let u_left = u_min + acc * scale;
         acc += layer.thickness;
@@ -599,7 +596,7 @@ fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option
                 cp.source_id = owner.map(|o| o.id.clone());
                 cp.category = owner.map(|o| o.category_code.clone());
                 if let Some(o) = owner {
-                    let wt = p.wall_type(o).ok_or_else(|| missing("Unbekannter Wandtyp", &o.wall_type_id))?;
+                    let wt = p.wall_type_or_fallback(o);
                     if wt.layers.len() > 1 {
                         bands.extend(split_wall_layers(&cp, p, &wt.layers, o, u_world)?);
                         continue;
@@ -618,7 +615,7 @@ fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option
                     SlabOwner::Ceiling(o, layer) => {
                         cp.source_id = Some(o.id.clone());
                         cp.category = Some(o.category_code.clone());
-                        let layers = ceiling_layers(p, o).ok_or_else(|| missing("Unbekannter Deckentyp", o.ceiling_type_id.as_deref().unwrap_or(&o.wall_type_id)))?;
+                        let layers = ceiling_layers(p, o).unwrap_or(Project::fallback_layers());
                         if layers.len() > 1 {
                             // Schicht-Platte: Stil genau dieser Schicht; ohne Schicht (Dicke 0) ohne Stil.
                             if let Some(l) = layer.and_then(|i| layers.get(i)) {
@@ -1371,8 +1368,7 @@ fn cross_section(p: &Project, wall: &Wall, o: &Opening, p0: (f64, f64), u: (f64,
     let n0 = rel.0 * n.0 + rel.1 * n.1;
     let a0 = rel.0 * a.0 + rel.1 * a.1;
     let ua = u.0 * a.0 + u.1 * a.1;
-    let wt = p.wall_type(wall).ok_or_else(|| missing("Unbekannter Wandtyp", &wall.wall_type_id))?;
-    let total = sum_thickness(&wt.layers);
+    let total = sum_thickness(&p.wall_type_or_fallback(wall).layers);
     let ref_off = crate::joins::reference_offset(model3d::wall_reference(wall), total);
     let along = a0 + ((ref_off - n0) / un) * ua;
     if along < from + 1e-4 || along > to - 1e-4 {
@@ -1414,7 +1410,7 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
     let mut f_max = f_min + DEFAULT_FRAME_DEPTH;
     let mut glass: Vec<f64> = vec![(f_min + f_max) / 2.0];
     // `windowSymbol(project, wall, o, 1, spec, "mittel")`.
-    let total = sum_thickness(&p.wall_type(wall).ok_or_else(|| missing("Unbekannter Wandtyp", &wall.wall_type_id))?.layers);
+    let total = sum_thickness(&p.wall_type_or_fallback(wall).layers);
     let ref_off = crate::joins::reference_offset(model3d::wall_reference(wall), total);
     let spec = wt.map(|t| crate::opening_geom::WindowSpec {
         sashes: sashes_of_window_type(t),

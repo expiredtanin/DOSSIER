@@ -175,6 +175,16 @@ export function validateProject(p: Project): string[] {
 }
 
 /**
+ * Warnungen zu einem Projekt, das trotzdem geladen und gerechnet wird (Kern `project_refs.rs`):
+ * hängende Verweise (Wandtyp, Bauteil, Geschoss, Schraffur, Linienstil, Stift, Gruppe, Layout …),
+ * Gruppen/Ordner, die sich selbst enthalten, und Werte, die nicht zum Modell passen. Die
+ * Ableitungen setzen dort Vorgaben ein; `dossier-cli validate` meldet die Liste.
+ */
+export function projectWarnings(p: Project): string[] {
+  return problemsOf(core().project_warnings(JSON.stringify(p)));
+}
+
+/**
  * Prüft angewendete Ops (nur was sie anfassen, billig genug für jeden Drag-Schritt): nicht
  * endliche Zahlen in neuen/ersetzten Elementen und `setField`-Zahlen, NEUE doppelte ids in den
  * betroffenen Listen. Im Store läuft die Prüfung direkt im Kern-Dokument (`ProjectDocument.commit`).

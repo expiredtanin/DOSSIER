@@ -8,7 +8,7 @@
 //! Ein Block wird über `scale_geom` (Skalierung, Drehung, Verschiebung) rekursiv ausgegeben.
 //! Texte bleiben Daten (`drawingText`); das Text-Layout macht der Verbraucher.
 
-use super::domains::{resolve_hatch_or_err, Bounds, Ctx};
+use super::domains::{Bounds, Ctx};
 use super::overrides::Actions;
 use super::prim::{HatchRender, Primitive};
 use super::style::*;
@@ -585,10 +585,8 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
     // Gefüllte Fläche einer geschlossenen Form (Vollton-Füllung und/oder Schraffur), vor den Strichen.
     let fill_poly = |em: &mut Em, pts: Vec<Vec2>| -> Result<(), String> {
         let hatch = match hatch_id.filter(|s| !s.is_empty()) {
-            Some(h) => {
-                resolve_hatch_or_err(p, h, None, foreground)?;
-                resolve_hatch(p, h, None, foreground, Some((d.hatch_angle_deg, d.hatch_scale, d.hatch_origin))).ok_or_else(|| format!("Unbekannte Schraffur: {h}"))?
-            }
+            // Hängende Schraffur (Datei/Import): Fläche ohne Muster statt Abbruch.
+            Some(h) => resolve_hatch(p, h, None, foreground, Some((d.hatch_angle_deg, d.hatch_scale, d.hatch_origin))).unwrap_or_else(no_hatch),
             None => no_hatch(),
         };
         let pr = polygon(pts, fill_color, "none", 0.0, hatch, em.greyed, Some(em.id));

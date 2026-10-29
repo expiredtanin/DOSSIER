@@ -217,7 +217,13 @@ fn append_model_mesh(prim: &mut Prim, positions: &[f64], indices: &[f64], closed
         i += 3;
     }
     let nv = (pos.len() / 3) as f64;
-    let ok = |v: f64| v >= 0.0 && v < nv;
+    // Nur ganzzahlige Indizes auf endliche Ecken (Importe/Dateien können Unsinn tragen); die
+    // übrigen Ecken bleiben endlich (0), damit der Puffer lesbar bleibt.
+    let bad: Vec<bool> = pos.chunks_exact(3).map(|c| !c.iter().all(|v| v.is_finite())).collect();
+    for v in pos.iter_mut().filter(|v| !v.is_finite()) {
+        *v = 0.0;
+    }
+    let ok = |v: f64| v >= 0.0 && v < nv && v.fract() == 0.0 && !bad[v as usize];
     let mut tri: Vec<f64> = Vec::new();
     let mut i = 0;
     while i + 2 < indices.len() {
@@ -265,7 +271,6 @@ pub fn mesh_export_data(src: &Project, opt: &MeshOptions) -> Result<Flat, String
     let mut p = src.clone();
     let mut groups: Vec<Group> = Vec::new();
     let mut mats = Materials::default();
-    crate::ifc_data::pick_opening_check(&p)?;
     let walls = model3d::emit_walls(&p, true)?;
     let slabs = model3d::emit_slabs(&p);
     let levels: Vec<(String, String)> = p.drawing_levels.iter().filter(|l| l.kind == DrawingLevelKind::Floor).map(|l| (l.id.clone(), l.name.clone())).collect();
@@ -518,8 +523,20 @@ mod tests {
     #[test]
     fn kaputtes_kontext_netz_ohne_panik() {
         let mut p = Project { id: "k".into(), ..Default::default() };
-        p.context = Some(vec![ContextObject::ImportedMesh(ImportedMesh { id: "m".into(), positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, f64::NAN], indices: vec![0.0, 1.0, 9.0, 0.0, 1.0, 2.0, f64::NAN, 0.0, 1.0], ..Default::default() })]);
+        p.context = Some(vec![ContextObject::ImportedMesh(ImportedMesh { id: "m".into(), positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, f64::NAN], indices: vec![0.0, 1.0, 9.0, 0.0, 1.0, 2.0, f64::NAN, 0.0, 1.0], ..Default::default() })]);
         let f = mesh_export_data(&p, &MeshOptions::default()).unwrap();
         assert!(f.strings.iter().any(|s| s == "Kontext_m"));
+    }
+
+    /// Gebrochene Indizes und nicht endliche Ecken (Datei/Import) dürfen nicht in den Puffer: der
+    /// Leser (`fileio`) verlangt ganzzahlige Indizes und endliche Zahlen.
+    #[test]
+    fn nur_ganzzahlige_indizes_und_endliche_ecken() {
+        let mut g = Prim { material: 0.0, positions: Vec::new(), indices: Vec::new() };
+        let pos = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, f64::NAN];
+        append_model_mesh(&mut g, &pos, &[0.0, 1.0, 2.0, 0.0, 1.5, 2.0, 1.0, 2.0, 3.0], false);
+        assert_eq!(g.indices, vec![0.0, 2.0, 1.0], "nur das ganzzahlige Dreieck ohne NaN-Ecke");
+        assert!(g.positions.iter().all(|v| v.is_finite()));
+        assert_eq!(g.positions.len(), 12);
     }
 }

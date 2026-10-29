@@ -20,6 +20,7 @@ export { planToSvgString } from "../export/planToSvgString";
 export { setWasmBytesProvider } from "../engine/wasmSource";
 export { initCore, coreReady } from "../engine/coreWasm";
 export { applyOps, validateProject, validateOps } from "./ops";
+export { projectWarnings } from "./ops";
 export type { CoreOp } from "./ops";
 export type { Project, DrawingLevel } from "../model/types";
 export { computeKennzahlen, checkRoomProgram, solidVolume } from "../analysis/kennzahlen";

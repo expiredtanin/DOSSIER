@@ -703,10 +703,12 @@ describe("[B5] Pset_*Common mit den Werten aus dem Modell", () => {
 });
 
 describe("Sammler im Kern ([K4], 29.10.)", () => {
-  it("Fehler des Kerns kommen mit dessen Meldung (unbekannter Wandtyp)", () => {
+  it("hängender Wandtyp (Datei/Import): Export mit dem Rückfall-Typ statt Abbruch", () => {
     const p = fixtureProject();
     const broken: Project = { ...p, walls: p.walls.map((w, i) => (i === 0 ? { ...w, wallTypeId: "fehlt" } : w)) };
-    expect(() => exportIfcSpf(broken)).toThrow("Unbekannter Wandtyp: fehlt");
+    const spf = exportIfcSpf(broken);
+    expect(spf).toContain("IFCWALL");
+    expect(spf).toContain(p.walls[0].id);
   });
 
   it("zweimal exportieren gibt dieselbe Datei (bis auf den Zeitstempel)", () => {

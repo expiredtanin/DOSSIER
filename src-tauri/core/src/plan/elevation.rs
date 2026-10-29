@@ -150,7 +150,8 @@ fn collect_roof_faces(p: &Project, frame: &[f64; 9]) -> Result<Vec<Face>, String
         let fill = match roof.color.as_deref().filter(|c| !c.is_empty()) {
             Some(c) => hex_to_rgb(c, ROOF_RGB_FALLBACK),
             None => match outer.filter(|l| !l.component_id.is_empty()) {
-                Some(l) => hex_to_rgb(&p.component(&l.component_id).ok_or_else(|| format!("Unbekanntes Bauteil-Material: {}", l.component_id))?.color, ROOF_RGB_FALLBACK),
+                // Hängendes Bauteil (Datei/Import): Dach-Vorgabefarbe.
+                Some(l) => p.component(&l.component_id).map_or(ROOF_RGB_FALLBACK, |c| hex_to_rgb(&c.color, ROOF_RGB_FALLBACK)),
                 None => ROOF_RGB_FALLBACK,
             },
         };

@@ -230,21 +230,23 @@ impl Document {
     }
 
     /// Typisierte Sicht des Projekts (gecacht; nach Ops werden nur die berührten Felder neu gelesen).
-    /// Fehler = Feld, das dem Modell widerspricht (Meldung von serde).
+    /// Werte, die dem Modell widersprechen, fallen auf die Vorgabe zurück (`model::lenient`) — das
+    /// `Result` bleibt für die Aufrufer, ist aber stets `Ok`.
     pub fn project(&mut self) -> Result<&Project, String> {
         if self.typed.is_none() {
             // Die Map wird nur ausgeliehen: `Value::Object` braucht Besitz, daher temporär herausnehmen.
             let value = Value::Object(std::mem::take(&mut self.root));
-            let parsed = Project::deserialize(&value).map_err(|e| e.to_string());
+            let parsed = Project::deserialize(&value);
             if let Value::Object(m) = value {
                 self.root = m;
             }
-            self.typed = Some(parsed?);
+            // Passt ein Wert nicht zum Modell (Datei/Import: `null` statt Zahl, falscher Typ), fällt nur
+            // er auf die Vorgabe zurück statt das ganze Projekt (`model::lenient`).
+            self.typed = Some(parsed.unwrap_or_else(|_| crate::model::lenient::project_lenient(&self.root).0));
             self.dirty.clear();
             self.dirty_items.clear();
         } else if !self.dirty.is_empty() || !self.dirty_items.is_empty() {
             let mut dirty: Vec<String> = self.dirty.drain().collect();
-            let mut failed = None;
             if let Some(t) = self.typed.as_mut() {
                 // Einzelne Elemente (nach `replace`), ausser ihre Liste wird ohnehin ganz gelesen;
                 // geht es nicht (Liste ohne Element-Weg, Element passt nicht), die ganze Liste.
@@ -258,15 +260,8 @@ impl Document {
                     }
                 }
                 for key in &dirty {
-                    if let Err(e) = t.set_field(key, self.root.get(key).filter(|v| !v.is_null())) {
-                        failed = Some(e);
-                        break;
-                    }
+                    crate::model::lenient::set_field_lenient(t, key, self.root.get(key).filter(|v| !v.is_null()));
                 }
-            }
-            if let Some(e) = failed {
-                self.typed = None;
-                return Err(e);
             }
         }
         Ok(self.typed.as_ref().expect("gerade gesetzt"))

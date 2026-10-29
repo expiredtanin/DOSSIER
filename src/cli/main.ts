@@ -110,6 +110,7 @@ import {
   setWasmBytesProvider,
   initCore,
   validateProject,
+  projectWarnings,
   sampleProject,
 } from "../core";
 import type { CoreOp, Project } from "../core";
@@ -556,11 +557,14 @@ async function execute(project: Project, file: string, command: string, rest: st
     }
     case "validate": {
       const problems = validateProject(project);
+      // Hängende Verweise u. Ä.: das Projekt lässt sich rechnen (Vorgaben), aber es soll auffallen.
+      const warnings = projectWarnings(project);
+      if (warnings.length) process.stderr.write(warnings.map((w) => `Warnung: ${w}`).join("\n") + "\n");
       if (problems.length) {
         process.stderr.write(problems.join("\n") + "\n");
         return 1;
       }
-      process.stdout.write("ok\n");
+      process.stdout.write(warnings.length ? `ok (${warnings.length} Warnung${warnings.length === 1 ? "" : "en"})\n` : "ok\n");
       return 0;
     }
     case "migrate":
