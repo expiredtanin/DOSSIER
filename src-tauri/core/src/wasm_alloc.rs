@@ -24,7 +24,6 @@ mod imp {
 
     impl GrowAhead {
         /// Nach einem Wachstum (Seitenzahl gestiegen) den Vorrat anlegen und gleich freigeben.
-        #[inline]
         unsafe fn after(&self, before: usize) {
             let now = memory_size(0);
             if now == before {
@@ -39,22 +38,31 @@ mod imp {
         }
     }
 
+    // Nie in den Aufrufer einbetten: mit LTO wurde `dealloc` (std-dlmalloc samt `validate_size`, das den
+    // Chunk-Kopf VOR dem Zeiger liest) in Funktionen eingebettet, die den Block selbst angelegt hatten.
+    // LLVM wertet den Lesezugriff ausserhalb der frischen Allokation als undefiniert und machte aus der
+    // Prüfung eine bedingungslose Panik („psize >= size + min_overhead", z. B. in `roof::compute_canonical`
+    // je nach Code-Layout). Als eigener Aufruf ist die Allokator-Hülle für LLVM undurchsichtig.
     unsafe impl GlobalAlloc for GrowAhead {
+        #[inline(never)]
         unsafe fn alloc(&self, l: Layout) -> *mut u8 {
             let before = memory_size(0);
             let p = System.alloc(l);
             self.after(before);
             p
         }
+        #[inline(never)]
         unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
             let before = memory_size(0);
             let p = System.alloc_zeroed(l);
             self.after(before);
             p
         }
+        #[inline(never)]
         unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
             System.dealloc(p, l)
         }
+        #[inline(never)]
         unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
             let before = memory_size(0);
             let q = System.realloc(p, l, n);

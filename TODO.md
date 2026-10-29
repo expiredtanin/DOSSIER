@@ -361,6 +361,11 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     20k Linien 31 → 6 ms / 63 → 7 ms; Kataster 150k 533 → 59 ms / 862 → 39 ms; Plan + WASM-Renderer nach Änderung katbig 90 →
     38 ms, Kataster 1,8 → 0,6 s. Erstes Öffnen 200 000 Zeichnungen (`doc_open`) 9,6 → 1,8 s, Speicher 953 → 840 MB.
     Nicht in der Tauri-App/im nativen Renderer angesehen.
+    Behoben (29.10.): je nach Code-Layout brach der WASM-Kern mit „assertion failed: psize >= size + min_overhead“ (dlmalloc)
+    ab, z. B. bei jedem Dach (`roof::compute_canonical`). Ursache: LTO bettete `GrowAhead::dealloc` samt std-dlmalloc
+    (`validate_size` liest den Chunk-Kopf vor dem Zeiger) in Funktionen ein, die den Block selbst angelegt hatten; LLVM wertete den
+    Lesezugriff ausserhalb der frischen Allokation als undefiniert und erzeugte eine bedingungslose Panik (im `wasm-objdump` sichtbar).
+    Die Allokator-Hülle ist jetzt `#[inline(never)]`. Gefunden mit einem Kern, der nach einer harmlosen Änderung reproduzierbar kippte.
     ✅ (29.10.) **`generatePlan` ganz im Kern** ([K3a]/[K3d]/[K4]): `core/src/plan/extras.rs` rechnet Schattenstudie und Baurecht
     (unterste Gruppe; Verstösse zuoberst), Abzugskörper (aus Wand-/Stützen-/Decken-Poché, über dieselben flachen Funktionen wie
     vorher), Schwarz-Weiss und Strichstärken nach Massstab (beim Schreiben, `plan_buf::Writer::post`, auch für die kompakte
