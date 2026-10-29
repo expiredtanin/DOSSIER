@@ -8,7 +8,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf } from "./exportIfc";
-import { EBKPH_GROUPS, ebkphGroup, layerClassification } from "./ifcClassification";
 import { readIfcElements } from "../io/ifcElements";
 import { classificationSuffix, ifcToImportedMeshes, readIfc } from "../io/ifcImport";
 import { sampleProject } from "../model/sampleProject";
@@ -35,27 +34,7 @@ function houseWithRooms(): Project {
   };
 }
 
-describe("eBKP-H-Standardzuordnung", () => {
-  it("nur gesicherte Hauptgruppen, Tür und Raum bleiben unklassifiziert", () => {
-    expect(Object.keys(EBKPH_GROUPS)).toEqual(["C", "E", "F"]);
-    expect(ebkphGroup("wall")).toEqual({ code: "C", name: "Konstruktion Gebäude" });
-    expect(ebkphGroup("slab")?.code).toBe("C");
-    expect(ebkphGroup("column")?.code).toBe("C");
-    expect(ebkphGroup("stair")?.code).toBe("C");
-    expect(ebkphGroup("roof")).toEqual({ code: "F", name: "Bedachung Gebäude" });
-    expect(ebkphGroup("window")).toEqual({ code: "E", name: "Äussere Wandbekleidung Gebäude" });
-    expect(ebkphGroup("door")).toBeNull();
-    expect(ebkphGroup("space")).toBeNull();
-  });
-
-  it("Ebene: Name aus dem Ebenenbaum, unbekannter Code bleibt Code, ohne Code nichts", () => {
-    expect(layerClassification(sampleProject, "20")?.code).toBe("20");
-    expect(layerClassification(sampleProject, "25")?.name).toBe("Stützen"); // Unterkategorie
-    expect(layerClassification(sampleProject, "777")).toEqual({ code: "777", name: "777" });
-    expect(layerClassification(sampleProject, undefined)).toBeNull();
-    expect(layerClassification(sampleProject, " ")).toBeNull();
-  });
-});
+// Zuordnungstabelle eBKP-H und Ebenen-Auflösung: Rust-Tests in `src-tauri/core/src/ifc_data.rs`.
 
 describe("IFC-Export: Zonen und Geschoss-Kennwerte (SIA 416)", () => {
   it("je Kategorie eine IfcZone mit ihren Räumen, Kategorie und Fläche als Eigenschaft", () => {

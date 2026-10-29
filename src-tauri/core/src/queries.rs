@@ -49,6 +49,15 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
 pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
     match (name, args.len()) {
         ("planDomains", 1) => crate::plan::domains::plan_domains_buf(p, &crate::plan::domains::PlanArgs::parse(args[0], text)?),
+        // Export-Sammler ([K4], [B5], [C11]): flacher Puffer für `fileio` (Byte-Hülle `export_flat.rs`).
+        ("ifcExportData", 4) => {
+            let opt = crate::ifc_data::IfcOptions { now: args[0], ifc2x3: args[1] != 0.0, ebkph: args[2] != 0.0, layer_codes: args[3] != 0.0, iso: text.to_string() };
+            crate::ifc_data::ifc_export_data(p, &opt).map(|f| f.to_bytes())
+        }
+        ("meshExportData", 3) => {
+            let opt = crate::mesh_data::MeshOptions { opening_parts: args[0] != 0.0, context: args[1] != 0.0, by_level: args[2] != 0.0 };
+            crate::mesh_data::mesh_export_data(p, &opt).map(|f| f.to_bytes())
+        }
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }
 }

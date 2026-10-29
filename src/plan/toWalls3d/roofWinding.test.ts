@@ -3,7 +3,6 @@
 
 import { describe, expect, it } from "vitest";
 import { roofMeshes } from "../toWalls3d";
-import { isWatertight } from "../wallMeshCut";
 import { sampleProject } from "../../model/sampleProject";
 import type { Project, Roof, RoofShape } from "../../model/types";
 
@@ -42,7 +41,8 @@ describe("Dach-Meshes geschlossen und nach aussen gewunden", () => {
         for (const m of meshes) {
           const c = closure(m);
           expect(c.vol6).toBeGreaterThan(0);
-          if (exact.includes(shape)) expect(isWatertight(m, 1e-6)).toBe(true);
+          // Dicht (Gauss: ∮ n dA = 0, wie `is_watertight` im Kern), sonst kleine Restlücke.
+          if (exact.includes(shape)) expect(c.gap).toBeLessThan(1e-6);
           else expect(c.gap).toBeLessThan(0.01);
         }
       });

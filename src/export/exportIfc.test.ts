@@ -701,3 +701,17 @@ describe("[B5] Pset_*Common mit den Werten aus dem Modell", () => {
     expect(kueche).toContain(".INTERNAL.");
   });
 });
+
+describe("Sammler im Kern ([K4], 29.10.)", () => {
+  it("Fehler des Kerns kommen mit dessen Meldung (unbekannter Wandtyp)", () => {
+    const p = fixtureProject();
+    const broken: Project = { ...p, walls: p.walls.map((w, i) => (i === 0 ? { ...w, wallTypeId: "fehlt" } : w)) };
+    expect(() => exportIfcSpf(broken)).toThrow("Unbekannter Wandtyp: fehlt");
+  });
+
+  it("zweimal exportieren gibt dieselbe Datei (bis auf den Zeitstempel)", () => {
+    const strip = (s: string) => s.replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/g, "T").replace(/IFCOWNERHISTORY\([^;]*;/g, "");
+    const p = fixtureProject();
+    expect(strip(exportIfcSpf(p, { ebkph: true, layerCodes: true }))).toBe(strip(exportIfcSpf(p, { ebkph: true, layerCodes: true })));
+  });
+});

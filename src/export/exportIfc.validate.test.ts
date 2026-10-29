@@ -9,8 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf, ifcGuid } from "./exportIfc";
-import { pickGeometry } from "../plan/toWalls3d";
-import { wallCutMeshes } from "../plan/wallMeshCut";
+import { wallMeshVolumes } from "./meshScene.testutil";
 import { sampleProject } from "../model/sampleProject";
 import type { Project } from "../model/types";
 
@@ -202,17 +201,8 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", { timeout: 60
   });
   it("[B5] Demo-Haus: jede Wand hat nach ifcopenshell (Öffnungen abgezogen) das Volumen des 3D-Meshes", () => {
     const project = sampleProject;
-    const bands = pickGeometry(project).walls;
-    const meshVolume = new Map<string, number>();
-    wallCutMeshes(bands).forEach((m, i) => {
-      let v6 = 0;
-      for (let k = 0; k < m.indices.length; k += 3) {
-        const [a, b, c] = [m.indices[k], m.indices[k + 1], m.indices[k + 2]].map((j) => m.positions.slice(j * 3, j * 3 + 3));
-        v6 += a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
-      }
-      const id = bands[i].wallId;
-      meshVolume.set(id, (meshVolume.get(id) ?? 0) + Math.abs(v6) / 6);
-    });
+    // Vergleichswert: dieselben öffnungsgenauen Wand-Netze wie im 3D/OBJ (Kern, `mesh_data.rs`).
+    const meshVolume = wallMeshVolumes(project);
     const walls = wallVolumes("demo-volumen", exportIfcSpf(project));
     let swept = 0;
     for (const wall of project.walls) {

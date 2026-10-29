@@ -2,14 +2,14 @@
 //! aus EINEM Wandband (`RWall`: Achse, Dicke, UK, Höhe, rechteckige Löcher) entsteht das
 //! Dreiecksnetz mit ausgestanzten Öffnungen samt Laibungsflächen — dieselbe Zerlegung wie
 //! `render3d/src/mesh.rs::extrude_layer_segment_with_holes`, aber ohne Gehrung (die Bänder aus
-//! [`crate::wall_bands`] sind an den Enden schon gekürzt). Portiert aus `src/plan/wallMeshCut.ts`.
+//! [`crate::wall_bands`] sind an den Enden schon gekürzt). Portiert aus `src/plan/wallMeshCut.ts` (gelöscht);
+//! Verbraucher sind die Export-Sammler `ifc_data.rs` und `mesh_data.rs`.
 //!
 //! Achsen: Modell (x, y) → Welt (x, Höhe, y), Y-up. Jedes Dreieck hat drei eigene Ecken; die
 //! Indizes sind daher fortlaufend `0, 1, 2, …` und werden nicht übertragen.
 //!
 //! Bitgleich zur früheren TS-Fassung (gleiche Operationsreihenfolge, `Math.hypot` wie V8).
 
-use crate::flat_read::Reader;
 use crate::joins::js_hypot;
 use crate::openings3d::{jmax, jmin};
 use kernel2d::{add, left_normal, scale, Vec2};
@@ -259,51 +259,18 @@ pub fn is_watertight(positions: &[f64], indices: &[u32], eps: f64) -> bool {
     js_hypot3(ax, ay, az) < eps && vol6 > eps
 }
 
-// ── Flache Kodierung ─────────────────────────────────────────────────────────
-//
-// Eingabe: `[nBänder, (sx, sy, ex, ey, Dicke, UK, Höhe, nLöcher, (from, to, zb, zt)…)…]`.
-// Ausgabe: `[nBänder, (nZahlen, x, Höhe, y, …)…]` — je Band die Weltpunkte, drei je Dreiecksecke.
-// Kaputte Eingabe ⇒ `[0]`; ein Band mit NaN/∞ ⇒ leeres Mesh.
-
-fn decode(buf: &[f64]) -> Option<Vec<CutWall>> {
-    let mut r = Reader::new(buf);
-    let n = r.count()?;
-    let mut out = Vec::with_capacity(n.min(1 << 16));
-    for _ in 0..n {
-        let start = [r.num()?, r.num()?];
-        let end = [r.num()?, r.num()?];
-        let (thickness, base_elevation, height) = (r.num()?, r.num()?, r.num()?);
-        let nh = r.count()?;
-        let mut holes = Vec::with_capacity(nh.min(1024));
-        for _ in 0..nh {
-            holes.push([r.num()?, r.num()?, r.num()?, r.num()?]);
-        }
-        out.push(CutWall { start, end, thickness, base_elevation, height, holes });
-    }
-    Some(out)
-}
-
 fn finite(w: &CutWall) -> bool {
     [w.start[0], w.start[1], w.end[0], w.end[1], w.thickness, w.base_elevation, w.height].iter().all(|v| v.is_finite())
         && w.holes.iter().flatten().all(|v| v.is_finite())
 }
 
-/// Flache Bindung für viele Bänder auf einmal; nie ein Panic.
-pub fn wall_cut_meshes_flat(buf: &[f64]) -> Vec<f64> {
-    let Some(walls) = decode(buf) else { return vec![0.0] };
-    let mut out = vec![walls.len() as f64];
-    for w in &walls {
-        let m = if finite(w) { wall_cut_mesh(w) } else { Vec::new() };
-        out.push(m.len() as f64);
-        out.extend_from_slice(&m);
+/// [`wall_cut_mesh`] mit Eingabeprüfung (Export-Sammler `ifc_data`/`mesh_data`): NaN/∞ ⇒ leer.
+pub fn wall_cut_mesh_checked(w: &CutWall) -> Vec<f64> {
+    if finite(w) {
+        wall_cut_mesh(w)
+    } else {
+        Vec::new()
     }
-    out
-}
-
-/// Flache Bindung von [`solid_subrects`]: `holes` als `[from, to, zb, zt, …]`; Ausgabe ebenso.
-pub fn solid_subrects_flat(u_lo: f64, u_hi: f64, z_lo: f64, z_hi: f64, holes: &[f64]) -> Vec<f64> {
-    let hs: Vec<[f64; 4]> = holes.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
-    solid_subrects(u_lo, u_hi, z_lo, z_hi, &hs).into_iter().flatten().collect()
 }
 
 #[cfg(test)]
@@ -373,27 +340,23 @@ mod tests {
     }
 
     #[test]
-    fn flach_viele_baender() {
-        let buf = [2.0, 0.0, 0.0, 5.0, 0.0, 0.4, 0.0, 2.6, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0, 2.6, 1.0, 1.0, 2.0, 0.0, 2.0];
-        let out = wall_cut_meshes_flat(&buf);
-        assert_eq!(out[0], 2.0);
-        assert_eq!(out[1], 108.0);
-        assert_eq!(out[2 + 108], 0.0); // Nullwand ⇒ leer
-        assert_eq!(solid_subrects_flat(0.0, 5.0, 0.0, 2.6, &[2.0, 3.0, 0.0, 2.1, 9.0]).len(), 5 * 4);
+    fn tuer_am_boden_ohne_untere_laibung() {
+        // 5 Teilrechtecke × 2 Seiten + Deckel + 2 Boden-Stücke + 2 Kappen + 3 Laibungen = 18 Quads = 36 Dreiecke.
+        let tuer = wall_cut_mesh(&band(vec![[2.0, 3.0, 0.0, 2.1]]));
+        assert_eq!(tuer.len(), 36 * 9);
+        assert_eq!(wall_cut_mesh_checked(&band(vec![[2.0, 3.0, 0.0, 2.1]])), tuer);
+        let null = CutWall { end: [0.0, 0.0], ..band(vec![]) };
+        assert!(wall_cut_mesh_checked(&null).is_empty());
     }
 
     #[test]
     fn unsinn_ohne_panic() {
-        assert_eq!(wall_cut_meshes_flat(&[]), vec![0.0]);
-        assert_eq!(wall_cut_meshes_flat(&[f64::NAN]), vec![0.0]);
-        assert_eq!(wall_cut_meshes_flat(&[1e300]), vec![0.0]);
-        assert_eq!(wall_cut_meshes_flat(&[1.0, 0.0, 0.0, 5.0]), vec![0.0]);
-        let out = wall_cut_meshes_flat(&[1.0, 0.0, 0.0, f64::NAN, 0.0, 0.4, 0.0, 2.6, 0.0]);
-        assert_eq!(out, vec![1.0, 0.0]);
+        let w = CutWall { end: [f64::NAN, 0.0], ..band(vec![]) };
+        assert!(wall_cut_mesh_checked(&w).is_empty());
+        assert!(wall_cut_mesh_checked(&band(vec![[f64::INFINITY, 1.0, 0.0, 1.0]])).is_empty());
         // Löcher verkehrt herum, riesig, negativ.
         let w = band(vec![[3.0, 1.0, 2.0, 0.5], [-1e9, 1e9, -1e9, 1e9], [f64::NAN, 1.0, 0.0, 1.0]]);
         let _ = wall_cut_mesh(&w);
         let _ = solid_subrects(f64::NAN, 1.0, 0.0, f64::INFINITY, &[[f64::NAN; 4]]);
-        let _ = solid_subrects_flat(0.0, 1.0, 0.0, 1.0, &[1.0, 2.0]);
     }
 }

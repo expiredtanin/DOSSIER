@@ -16,8 +16,7 @@ import { exportIfcSpf, ifcGuid } from "../export/exportIfc";
 import { sampleProject } from "../model/sampleProject";
 import { ceilingVerticalExtent } from "../model/wall";
 import { polygonArea } from "../geometry/roomArea";
-import { pickGeometry } from "../plan/toWalls3d";
-import { wallCutMeshes } from "../plan/wallMeshCut";
+import { wallMeshVolumes } from "../export/meshScene.testutil";
 import { formatIfcReport, handleIfcWorkerRequest, ifcToImportedMeshes, readIfc, type IfcProduct, type IfcWorkerRequest } from "./ifcImport";
 
 function volume(pos: ArrayLike<number>, idx: ArrayLike<number>): number {
@@ -77,10 +76,7 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
     // Wände: dieselben Ausschnitt-Netze wie der Export (Bänder je Wand). [B5] schreibt einfache Wände als
     // ungeschnittene Extrusion + IfcOpeningElement, der Import zieht die Öffnungen ab ([B3]) → bei allen
     // Wänden das ausgeschnittene Volumen.
-    const bands = pickGeometry(sampleProject).walls;
-    const cut = new Map<string, number>();
-    const add = (m: Map<string, number>, id: string, v: number) => m.set(id, (m.get(id) ?? 0) + Math.abs(v));
-    wallCutMeshes(bands).forEach((m, i) => add(cut, bands[i].wallId, volume(m.positions, m.indices)));
+    const cut = wallMeshVolumes(sampleProject);
     const lines = new Map(ifc.split("\n").map((l) => [l.slice(0, l.indexOf("=")), l] as const));
     const wallsGot = products.filter((p) => p.ifcClass === "IfcWall");
     expect(wallsGot.length).toBe(sampleProject.walls.length);
