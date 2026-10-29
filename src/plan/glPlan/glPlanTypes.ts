@@ -99,8 +99,30 @@ export interface GpuGeometry {
     indexBuffer: WebGLBuffer | null;
     batches: LineBatch[];
   };
+  /**
+   * Gestrichelte Striche: je Segment EINE Instanz (16 × f32: ax, ay, bx, by, s0, runLen, total,
+   * count, dash0..7 in Bildschirm-Einheiten relativ zu `origin`); Striche/Lücken setzt der
+   * Fragment-Shader (`DASH_LINE_WGSL` in render2d). Fehlt bei Geometrie ohne Strichmuster.
+   */
+  dash?: {
+    instanceBuffer: WebGLBuffer | null;
+    batches: DashBatch[];
+  };
   /** Modell-Bounds (Meter) für Debug/Einpassen; nicht render-kritisch. */
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
+}
+
+/** Ein Strich-Batch: Instanz-Bereich mit Farbe + Papier-Strichbreite (mm). */
+export interface DashBatch {
+  startInstance: number;
+  instanceCount: number;
+  color: Rgba;
+  strokeMm: number;
+  /**
+   * Maler-Reihenfolge: Anzahl Linien-Indizes vor diesem Batch — gezeichnet vor dem ersten
+   * Linien-Batch mit `startIndex >= lineAt` (kein Linien-Batch überspannt diese Stelle).
+   */
+  lineAt: number;
 }
 
 /** Rechteckiger Ausschnitt in Bildschirm-Einheiten (viewBox). */

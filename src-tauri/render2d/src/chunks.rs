@@ -7,6 +7,12 @@
 //
 // Linien-Vertices kommen KOMPAKT (12 Byte, s. LINE_PACKED_WGSL).
 //
+// Gestrichelte Striche kommen als Instanzen (je Segment 16 x f32, Format wie
+// `DashSegment`/`gpu::DashInstance`) und laufen durch DIESELBE Strich-Pipeline wie
+// der Szenen-Pfad (`DASH_LINE_WGSL`: Striche, Luecken, runde Enden im Fragment-
+// Shader). Innerhalb eines Chunks in Maler-Reihenfolge mit den Linien verzahnt
+// (`DashBatch::line_at`), damit spaetere Striche fruehere gestrichelte decken.
+//
 // Die Webview kompiliert weiterhin (Cache/Chunk-Logik bleibt in TypeScript) und
 // schickt nur noch die Puffer-BYTES je Chunk einmalig; pro Frame geht nur der
 // Ausschnitt (viewBox) hierher. Rust haelt die Puffer — kein JSON, kein
@@ -17,7 +23,7 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::shaders::FILL_WGSL;
+use crate::shaders::{DASH_LINE_WGSL, FILL_WGSL};
 
 /// Graustufe fuer gedimmte Linien (== GREY_RGB in glPlanCompile.ts).
 const GREY: f32 = 0.549;
@@ -175,6 +181,40 @@ pub struct LineBatch {
     pub device_px: bool,
 }
 
+/// Instanz-Bereich gestrichelter Segmente (Strich-Pipeline) mit Farbe + Papier-mm.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct DashBatch {
+    pub start: u32,
+    pub count: u32,
+    pub color: [f32; 4],
+    pub stroke_mm: f32,
+    /// Maler-Reihenfolge: gezeichnet vor dem ersten Linien-Batch mit `start >= line_at`
+    /// (Linien-Index-Position beim Erzeugen; kein Linien-Batch ueberspannt sie).
+    #[serde(default)]
+    pub line_at: u32,
+}
+
+/// Zeichenfolge der Striche eines Chunks: (gestrichelt?, Batch-Index), Linien und
+/// gestrichelte Batches nach `line_at` verzahnt. Fehlen die Puffer einer Art, entfaellt sie.
+fn stroke_order(g: &ChunkGeom) -> Vec<(bool, usize)> {
+    let lines = if g.line_vtx.is_some() && g.line_idx.is_some() { g.line_batches.len() } else { 0 };
+    let dashes = if g.dash_inst.is_some() { g.dash_batches.len() } else { 0 };
+    let mut out = Vec::with_capacity(lines + dashes);
+    let mut j = 0;
+    for i in 0..lines {
+        while j < dashes && g.dash_batches[j].line_at <= g.line_batches[i].start {
+            out.push((true, j));
+            j += 1;
+        }
+        out.push((false, i));
+    }
+    out.extend((j..dashes).map(|k| (true, k)));
+    out
+}
+
+/// Bytes je Strich-Instanz (16 x f32: ab, run, dash[8]; wie `gpu::DashInstance`).
+pub const DASH_INSTANCE_BYTES: u64 = 16 * 4;
+
 /// Ein Chunk (== `GpuGeometry` der Webview): Puffer-IDs statt GL-Puffer.
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct ChunkGeom {
@@ -184,6 +224,11 @@ pub struct ChunkGeom {
     pub line_vtx: Option<u32>,
     pub line_idx: Option<u32>,
     pub line_batches: Vec<LineBatch>,
+    /// Puffer der Strich-Instanzen (gestrichelte Segmente); fehlt ohne Strichmuster.
+    #[serde(default)]
+    pub dash_inst: Option<u32>,
+    #[serde(default)]
+    pub dash_batches: Vec<DashBatch>,
     pub origin: [f64; 2],
     #[serde(default)]
     pub greyed: bool,
@@ -201,6 +246,7 @@ pub struct View {
 pub struct ChunkRenderer {
     fill_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
+    dash_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     uniform: Option<(wgpu::Buffer, wgpu::BindGroup, u64)>,
     buffers: HashMap<u32, wgpu::Buffer>,
@@ -338,6 +384,20 @@ impl ChunkRenderer {
             },
             "chunks.line.pipeline",
         );
+        // Gestrichelte Segmente: Instanz-Puffer, Quad aus `vertex_index` (wie gpu.rs).
+        let dash_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("chunks.dash"),
+            source: wgpu::ShaderSource::Wgsl(DASH_LINE_WGSL.into()),
+        });
+        let dash_pipeline = make(
+            &dash_module,
+            wgpu::VertexBufferLayout {
+                array_stride: DASH_INSTANCE_BYTES,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4],
+            },
+            "chunks.dash.pipeline",
+        );
         let text_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("chunks.text"),
             source: wgpu::ShaderSource::Wgsl(TEXT_WGSL.into()),
@@ -387,6 +447,7 @@ impl ChunkRenderer {
             inst_buf: None,
             fill_pipeline,
             line_pipeline,
+            dash_pipeline,
             bind_group_layout,
             uniform: None,
             buffers: HashMap::new(),
@@ -567,20 +628,20 @@ impl ChunkRenderer {
                 blocks.push(Globals { view_proj: proj, color: c, viewport_px: vp, stroke_px: 0.0, stroke_scale: 1.0 });
             }
         }
-        for g in self.layout.iter().chain(self.highlight.iter()) {
-            if g.line_vtx.is_none() || g.line_idx.is_none() {
-                continue;
-            }
+        // Striche (Linien + gestrichelte) je Chunk in Maler-Reihenfolge (`stroke_order`).
+        let orders: Vec<Vec<(bool, usize)>> = self.layout.iter().chain(self.highlight.iter()).map(stroke_order).collect();
+        for (g, order) in self.layout.iter().chain(self.highlight.iter()).zip(&orders) {
             let proj = projection(bounds, g.origin);
-            for b in &g.line_batches {
-                let c = if g.greyed { [GREY, GREY, GREY, b.color[3]] } else { b.color };
-                blocks.push(Globals {
-                    view_proj: proj,
-                    color: c,
-                    viewport_px: vp,
-                    stroke_px: b.stroke_mm,
-                    stroke_scale: if b.device_px { 1.0 } else if b.screen_px { meet as f32 } else { mm_px as f32 },
-                });
+            for &(dashed, k) in order {
+                let (color, stroke_mm, scale) = if dashed {
+                    let b = &g.dash_batches[k];
+                    (b.color, b.stroke_mm, mm_px as f32)
+                } else {
+                    let b = &g.line_batches[k];
+                    (b.color, b.stroke_mm, if b.device_px { 1.0 } else if b.screen_px { meet as f32 } else { mm_px as f32 })
+                };
+                let c = if g.greyed { [GREY, GREY, GREY, color[3]] } else { color };
+                blocks.push(Globals { view_proj: proj, color: c, viewport_px: vp, stroke_px: stroke_mm, stroke_scale: scale });
             }
         }
 
@@ -719,19 +780,55 @@ impl ChunkRenderer {
                     block += 1;
                 }
             }
-            pass.set_pipeline(&self.line_pipeline);
-            for g in self.layout.iter().chain(self.highlight.iter()) {
-                let (Some(p), Some(i)) = (g.line_vtx, g.line_idx) else { continue };
-                let (Some(pb), Some(ib)) = (self.buffers.get(&p), self.buffers.get(&i)) else {
-                    block += g.line_batches.len() as u32;
-                    continue;
+            // Striche je Chunk: Linien-Batches (indiziert) und gestrichelte Segmente (je
+            // Instanz ein Quad aus 6 Vertices) in Maler-Reihenfolge, Pipeline nur bei Wechsel.
+            let mut current: Option<bool> = None;
+            for (g, order) in self.layout.iter().chain(self.highlight.iter()).zip(&orders) {
+                let lines = match (g.line_vtx.and_then(|p| self.buffers.get(&p)), g.line_idx.and_then(|i| self.buffers.get(&i))) {
+                    (Some(pb), Some(ib)) => Some((pb, ib)),
+                    _ => None,
                 };
-                pass.set_vertex_buffer(0, pb.slice(..));
-                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                for b in &g.line_batches {
-                    pass.set_bind_group(0, ubind, &[block * stride as u32]);
-                    pass.draw_indexed(b.start..b.start + b.count, 0, 0..1);
+                let dash = g.dash_inst.and_then(|d| self.buffers.get(&d));
+                let mut bound_lines = false;
+                let mut bound_dash = false;
+                for &(dashed, k) in order {
+                    let this_block = block;
                     block += 1;
+                    if dashed {
+                        let Some(db) = dash else { continue };
+                        if current != Some(true) {
+                            pass.set_pipeline(&self.dash_pipeline);
+                            current = Some(true);
+                            bound_lines = false;
+                        }
+                        if !bound_dash {
+                            pass.set_vertex_buffer(0, db.slice(..));
+                            bound_dash = true;
+                        }
+                        let b = &g.dash_batches[k];
+                        // Bereich gegen die Puffergroesse klemmen (fremde Angaben → nie ausserhalb lesen).
+                        let n_inst = (db.size() / DASH_INSTANCE_BYTES) as u32;
+                        let end = b.start.saturating_add(b.count).min(n_inst);
+                        if b.start < end {
+                            pass.set_bind_group(0, ubind, &[this_block * stride as u32]);
+                            pass.draw(0..6, b.start..end);
+                        }
+                    } else {
+                        let Some((pb, ib)) = lines else { continue };
+                        if current != Some(false) {
+                            pass.set_pipeline(&self.line_pipeline);
+                            current = Some(false);
+                            bound_dash = false;
+                        }
+                        if !bound_lines {
+                            pass.set_vertex_buffer(0, pb.slice(..));
+                            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                            bound_lines = true;
+                        }
+                        let b = &g.line_batches[k];
+                        pass.set_bind_group(0, ubind, &[this_block * stride as u32]);
+                        pass.draw_indexed(b.start..b.start + b.count, 0, 0..1);
+                    }
                 }
             }
             // Text zuoberst.
@@ -761,6 +858,35 @@ impl ChunkRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lb(start: u32) -> LineBatch {
+        LineBatch { start, count: 6, color: [0.0; 4], stroke_mm: 0.1, screen_px: false, device_px: false }
+    }
+    fn db(line_at: u32) -> DashBatch {
+        DashBatch { start: 0, count: 1, color: [0.0; 4], stroke_mm: 0.1, line_at }
+    }
+
+    #[test]
+    fn striche_in_maler_reihenfolge() {
+        let g = ChunkGeom {
+            fill_pos: None,
+            fill_idx: None,
+            fill_batches: vec![],
+            line_vtx: Some(1),
+            line_idx: Some(2),
+            line_batches: vec![lb(0), lb(6), lb(12)],
+            dash_inst: Some(3),
+            dash_batches: vec![db(0), db(6), db(6), db(18)],
+            origin: [0.0, 0.0],
+            greyed: false,
+        };
+        assert_eq!(stroke_order(&g), vec![(true, 0), (false, 0), (true, 1), (true, 2), (false, 1), (false, 2), (true, 3)]);
+        // Ohne Strich-Puffer: nur Linien; ohne Linien-Puffer: nur gestrichelte.
+        let only_lines = ChunkGeom { dash_inst: None, ..g.clone() };
+        assert_eq!(stroke_order(&only_lines), vec![(false, 0), (false, 1), (false, 2)]);
+        let only_dash = ChunkGeom { line_idx: None, ..g };
+        assert_eq!(stroke_order(&only_dash), vec![(true, 0), (true, 1), (true, 2), (true, 3)]);
+    }
 
     #[test]
     fn projection_matches_ts_reference() {

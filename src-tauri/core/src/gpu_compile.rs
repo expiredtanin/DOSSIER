@@ -16,8 +16,18 @@
 //! meta = [originX, originY, minX, minY, maxX, maxY, nFillPos, nFillIdx, nLineVerts, nLineIdx,
 //!         nFillBatches, nLineBatches,
 //!         nFillBatches × (start, count, r, g, b, a),
-//!         nLineBatches × (start, count, r, g, b, a, strokeMm, screenPx)]
+//!         nLineBatches × (start, count, r, g, b, a, strokeMm, screenPx),
+//!         nDashInst, nDashBatches, nDashBatches × (start, count, r, g, b, a, strokeMm, lineAt)]
+//! danach (hinter lineIdx): dashInst = nDashInst × 16 f32-Bits
 //! ```
+//! Gestrichelte Striche (Linien, Bögen, Kreise mit Strichmuster) gehen wie im Szenen-Pfad von
+//! render2d (`DashSegment`, `DASH_LINE_WGSL`) je Segment als EINE Instanz an die Strich-Pipeline:
+//! `[ax, ay, bx, by, s0, runLen, total, count, dash0..dash7]` in Bildschirm-Einheiten (Punkte relativ
+//! zu `origin`), der Fragment-Shader setzt Striche/Lücken/runde Enden. Muster mit mehr als
+//! [`MAX_LINE_DASH`] Einträgen (nach Verdoppeln) zerlegt weiter die CPU (`apply_dash_runs`).
+//! Muster-Längen wie im Szenen-Pfad: Papier-mm × [`LINE_DASH_MM_TO_M`] (Referenz 1:100).
+//! `lineAt` = Anzahl Linien-Indizes vor dem Strich-Batch: der Renderer zeichnet ihn vor dem ersten
+//! Linien-Batch mit `start >= lineAt` (Maler-Reihenfolge; kein Linien-Batch überspannt ein `lineAt`).
 //! Linien-Vertices: 6 × f32 (x, y, nx, ny, side, miter=1) oder gepackt 3 Wörter (x, y als
 //! f32-Bits, dann snorm8 nx | ny | side | miter=127).
 //! Die Rechenreihenfolge folgt der TS-Fassung Operation für Operation: Vertex-Puffer bitgleich.
@@ -49,6 +59,31 @@ pub struct LineBatch {
     pub screen_px: bool,
 }
 
+/// Instanz-Bereich gestrichelter Segmente mit Farbe + Strichbreite (Papier-mm).
+pub struct DashBatch {
+    pub start: u32,
+    pub count: u32,
+    pub color: Rgba,
+    pub stroke_mm: f64,
+    /// Linien-Indizes vor diesem Batch (Maler-Reihenfolge, s. Modulkopf).
+    pub line_at: u32,
+}
+
+/// Höchstzahl Einträge eines Strichmusters im Shader (wie `render2d::MAX_LINE_DASH`).
+pub const MAX_LINE_DASH: usize = 8;
+/// f32 je Strich-Instanz (wie `DashInstance` in render2d: ab, run, dash[8]).
+pub const DASH_INST_FLOATS: usize = 16;
+/// Papier-mm → Modell-Meter für Linien-Strichmuster: `N/1000` bei der Referenz-Skala 1:100, wie der
+/// Szenen-Pfad (`render2d::tessellate`, `DASH_MM_TO_M` dort). Schraffur-Striche nehmen die an die
+/// Musterkachel gekoppelte `hatch::DASH_MM_TO_M`.
+pub const LINE_DASH_MM_TO_M: f64 = 100.0 / 1000.0;
+
+/// Strichmuster einer Linie so umgerechnet, dass `hatch::apply_dash_runs` (rechnet mit
+/// `hatch::DASH_MM_TO_M`) in [`LINE_DASH_MM_TO_M`] zerlegt.
+fn line_dash_for_runs(dash: &[f64]) -> Vec<f64> {
+    dash.iter().map(|d| d * (LINE_DASH_MM_TO_M / DASH_MM_TO_M)).collect()
+}
+
 /// Ergebnis der Kompilierung (Bildschirm-Raum relativ zu `origin`).
 pub struct GpuOut {
     pub fill_pos: Vec<f32>,
@@ -58,6 +93,9 @@ pub struct GpuOut {
     pub line_verts: Vec<u32>,
     pub line_idx: Vec<u32>,
     pub line_batches: Vec<LineBatch>,
+    /// Strich-Instanzen ([`DASH_INST_FLOATS`] je Segment), s. Modulkopf.
+    pub dash_inst: Vec<f32>,
+    pub dash_batches: Vec<DashBatch>,
     pub origin: (f64, f64),
     /// Modell-Bounds (Meter): (minX, minY, maxX, maxY), ±∞ wenn leer.
     pub bounds: (f64, f64, f64, f64),
@@ -271,6 +309,8 @@ struct Compiler {
     line_verts: Vec<u32>,
     line_idx: Vec<u32>,
     line_batches: Vec<LineBatch>,
+    dash_inst: Vec<f32>,
+    dash_batches: Vec<DashBatch>,
     origin_x: f64,
     origin_y: f64,
     origin_set: bool,
@@ -324,13 +364,106 @@ impl Compiler {
     }
 
     fn add_line_batch(&mut self, count: usize, color: Rgba, stroke_mm: f64, screen_px: bool) {
-        if let Some(last) = self.line_batches.last_mut() {
+        // Nicht über einen dazwischen gezeichneten Strich-Batch hinweg zusammenfassen.
+        let dash_after = self.dash_batches.last().map_or(0, |d| d.line_at);
+        if let Some(last) = self.line_batches.last_mut().filter(|l| dash_after <= l.start) {
             if last.stroke_mm == stroke_mm && last.screen_px == screen_px && same_rgba(&last.color, &color) {
                 last.count += count as u32;
                 return;
             }
         }
         self.line_batches.push(LineBatch { start: (self.line_idx.len() - count) as u32, count: count as u32, color, stroke_mm, screen_px });
+    }
+
+    fn add_dash_batch(&mut self, count: usize, color: Rgba, stroke_mm: f64) {
+        let line_at = self.line_idx.len() as u32;
+        if let Some(last) = self.dash_batches.last_mut() {
+            // Nur ohne Linien dazwischen (sonst ginge die Maler-Reihenfolge verloren).
+            if last.line_at == line_at && last.stroke_mm == stroke_mm && same_rgba(&last.color, &color) {
+                last.count += count as u32;
+                return;
+            }
+        }
+        let start = (self.dash_inst.len() / DASH_INST_FLOATS - count) as u32;
+        self.dash_batches.push(DashBatch { start, count: count as u32, color, stroke_mm, line_at });
+    }
+
+    /// Linienzug mit Strichmuster `dash` (Papier-mm): gültiges Muster bis [`MAX_LINE_DASH`]
+    /// Einträge → Shader-Instanzen; längeres → CPU-Zerlegung; ungültiges/fehlendes → durchgezogen.
+    fn stroke_styled(&mut self, pts_m: &[V2], closed: bool, dash: Option<&[f64]>, color: Rgba, stroke_mm: f64) {
+        let Some(d) = dash.filter(|d| !d.is_empty()) else {
+            return self.stroke_polyline(pts_m, closed, color, stroke_mm, false);
+        };
+        match dash_cycle_m(d) {
+            Some(cycle) if cycle.len() <= MAX_LINE_DASH => self.stroke_dashed(pts_m, closed, &cycle, color, stroke_mm),
+            Some(_) => {
+                let mut run = pts_m.to_vec();
+                if closed && pts_m.len() > 2 {
+                    run.push(pts_m[0]);
+                }
+                for piece in hatch::apply_dash_runs(vec![run], &line_dash_for_runs(d)) {
+                    self.stroke_polyline(&piece, false, color, stroke_mm, false);
+                }
+            }
+            None => self.stroke_polyline(pts_m, closed, color, stroke_mm, false),
+        }
+    }
+
+    /// Gestrichelter Linienzug (Modell-Meter) mit gültigem Zyklus `cycle_m` (Meter, gerade Länge):
+    /// je Segment eine Instanz mit Lauflänge, Phase über den ganzen Zug (wie `apply_dash_runs`);
+    /// Segmente kürzer als 1e-12 m entfallen. Ein geschlossener Zug wird um die Schlusskante ergänzt.
+    fn stroke_dashed(&mut self, pts_m: &[V2], closed: bool, cycle_m: &[f64], color: Rgba, stroke_mm: f64) {
+        if pts_m.len() < 2 {
+            return;
+        }
+        let close = closed && pts_m.len() > 2 && (pts_m[0].x != pts_m[pts_m.len() - 1].x || pts_m[0].y != pts_m[pts_m.len() - 1].y);
+        let n_seg = pts_m.len() - 1 + usize::from(close);
+        let seg = |i: usize| (pts_m[i], pts_m[(i + 1) % pts_m.len()]);
+        let mut run = 0.0f64;
+        for i in 0..n_seg {
+            let (a, b) = seg(i);
+            let l = hypot2(b.x - a.x, b.y - a.y);
+            if l >= 1e-12 {
+                run += l;
+            }
+        }
+        if !(run > 0.0) || !run.is_finite() {
+            return;
+        }
+        let mut dash = [0.0f32; MAX_LINE_DASH];
+        for (d, c) in dash.iter_mut().zip(cycle_m) {
+            *d = (c * PX_PER_M) as f32;
+        }
+        let total: f64 = cycle_m.iter().sum::<f64>() * PX_PER_M;
+        let before = self.dash_inst.len();
+        let mut s0 = 0.0f64;
+        for i in 0..n_seg {
+            let (a, b) = seg(i);
+            let l = hypot2(b.x - a.x, b.y - a.y);
+            if !(l >= 1e-12) {
+                continue;
+            }
+            let sa = self.scr(a);
+            let sb = self.scr(b);
+            self.track(a.x, a.y);
+            self.track(b.x, b.y);
+            self.dash_inst.extend_from_slice(&[
+                sa.x as f32,
+                sa.y as f32,
+                sb.x as f32,
+                sb.y as f32,
+                (s0 * PX_PER_M) as f32,
+                (run * PX_PER_M) as f32,
+                total as f32,
+                cycle_m.len() as f32,
+            ]);
+            self.dash_inst.extend_from_slice(&dash);
+            s0 += l;
+        }
+        let n = (self.dash_inst.len() - before) / DASH_INST_FLOATS;
+        if n > 0 {
+            self.add_dash_batch(n, color, stroke_mm);
+        }
     }
 
     #[inline]
@@ -566,6 +699,18 @@ impl Compiler {
     }
 }
 
+/// Strichmuster (Papier-mm) → Zyklus in Modell-Metern wie `split_dash` in render2d: negative Werte
+/// zu 0, Nullen weg, ungerade Länge verdoppelt. `None` = kein gültiges Muster (durchgezogen).
+fn dash_cycle_m(dash: &[f64]) -> Option<Vec<f64>> {
+    let pat: Vec<f64> = dash.iter().map(|&d| jsnum::max(0.0, d) * LINE_DASH_MM_TO_M).filter(|&d| d > 0.0).collect();
+    if pat.is_empty() {
+        return None;
+    }
+    let cycle: Vec<f64> = if pat.len() % 2 == 0 { pat } else { [pat.as_slice(), pat.as_slice()].concat() };
+    let total: f64 = cycle.iter().sum();
+    (total > 1e-9 && total.is_finite()).then_some(cycle)
+}
+
 /// Segmentzahl eines Bogens: Sagitta < ~0.5 px über `px_per_meter`, sonst fester Rückfall.
 fn arc_segments(r: f64, sweep_abs: f64, px_per_meter: f64, min_fallback: f64) -> f64 {
     if px_per_meter > 0.0 {
@@ -597,6 +742,8 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
         line_verts: Vec::new(),
         line_idx: Vec::new(),
         line_batches: Vec::new(),
+        dash_inst: Vec::new(),
+        dash_batches: Vec::new(),
         origin_x: 0.0,
         origin_y: 0.0,
         origin_set: false,
@@ -617,7 +764,7 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
     let mut pts: Vec<V2> = Vec::new();
     let mut i = 0;
     while i < prims.len() {
-        let Prim::Line { style, color, weight_mm, a, b, zigzag: None, motif: None, .. } = &prims[i] else {
+        let Prim::Line { style, color, weight_mm, a, b, zigzag: None, motif: None, dash, .. } = &prims[i] else {
             i += 1;
             continue;
         };
@@ -640,7 +787,7 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
         }
         if j - i > 1 {
             let col = dim(color_or_ink(plan, *color), style);
-            c.stroke_polyline(&pts, false, col, weight_or_default(*weight_mm), false);
+            c.stroke_styled(&pts, false, dash.as_deref(), col, weight_or_default(*weight_mm));
             for m in merged.iter_mut().take(j).skip(i) {
                 *m = true;
             }
@@ -677,7 +824,7 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
                     }
                 }
             }
-            Prim::Line { style, color, weight_mm, a, b, zigzag, motif, .. } => {
+            Prim::Line { style, color, weight_mm, a, b, zigzag, motif, dash, .. } => {
                 let col = dim(color_or_ink(plan, *color), style);
                 let w = weight_or_default(*weight_mm);
                 if let Some((amp, wav)) = zigzag {
@@ -687,10 +834,10 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
                     let mpts = hatch::motif_points(*a, *b, m, DASH_MM_TO_M);
                     c.stroke_polyline(&mpts, false, col, w, false);
                 } else {
-                    c.stroke_polyline(&[*a, *b], false, col, w, false);
+                    c.stroke_styled(&[*a, *b], false, dash.as_deref(), col, w);
                 }
             }
-            Prim::Arc { style, color, weight_mm, center, from, to, r, .. } => {
+            Prim::Arc { style, color, weight_mm, center, from, to, r, dash } => {
                 let col = dim(color_or_ink(plan, *color), style);
                 let stroke_mm = weight_or_default(*weight_mm);
                 let a0 = jsnum::atan2(from.y - center.y, from.x - center.x);
@@ -710,13 +857,13 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
                     arc_pts.push(v2(center.x + r * jsnum::cos(t), center.y + r * jsnum::sin(t)));
                     k += 1.0;
                 }
-                c.stroke_polyline(&arc_pts, false, col, stroke_mm, false);
+                c.stroke_styled(&arc_pts, false, dash.as_deref(), col, stroke_mm);
             }
-            Prim::Circle { style, fill, stroke, weight_mm, center, r, .. } => {
-                draw_circle_like(&mut c, plan, style, Some(*fill), *stroke, *weight_mm, *center, *r, None, px_per_meter);
+            Prim::Circle { style, fill, stroke, weight_mm, center, r, dash } => {
+                draw_circle_like(&mut c, plan, style, Some(*fill), *stroke, *weight_mm, *center, *r, None, px_per_meter, dash.as_deref());
             }
-            Prim::DrawingArc { style, stroke, weight_mm, center, r, a0, a1, .. } => {
-                draw_circle_like(&mut c, plan, style, None, *stroke, *weight_mm, *center, *r, Some((*a0, *a1)), px_per_meter);
+            Prim::DrawingArc { style, stroke, weight_mm, center, r, a0, a1, dash } => {
+                draw_circle_like(&mut c, plan, style, None, *stroke, *weight_mm, *center, *r, Some((*a0, *a1)), px_per_meter, dash.as_deref());
             }
         }
     }
@@ -728,6 +875,8 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
         line_verts: c.line_verts,
         line_idx: c.line_idx,
         line_batches: c.line_batches,
+        dash_inst: c.dash_inst,
+        dash_batches: c.dash_batches,
         origin: (c.origin_x, c.origin_y),
         bounds: (c.min_x, c.min_y, c.max_x, c.max_y),
     }
@@ -746,6 +895,7 @@ fn draw_circle_like(
     r: f64,
     arc: Option<(f64, f64)>,
     px_per_meter: f64,
+    dash: Option<&[f64]>,
 ) {
     let stroke_col = dim(color_or_ink(plan, stroke), style);
     let stroke_mm = weight_or_default(weight_mm);
@@ -776,7 +926,7 @@ fn draw_circle_like(
             }
         }
     }
-    c.stroke_polyline(&pts, fill.is_some(), stroke_col, stroke_mm, false);
+    c.stroke_styled(&pts, fill.is_some(), dash, stroke_col, stroke_mm);
 }
 
 /// Flache Ausgabe (s. Modulkopf) für die Primitive `[from, to)` eines Plan-Puffers (v2); leer bei
@@ -813,7 +963,12 @@ pub fn compile_flat(bytes: &[u8], from: usize, to: usize, px_per_meter: f64, pac
             if b.screen_px { 1.0 } else { 0.0 },
         ]);
     }
-    let mut out = Vec::with_capacity(2 + meta.len() * 2 + o.fill_pos.len() + o.fill_idx.len() + o.line_verts.len() + o.line_idx.len());
+    meta.push((o.dash_inst.len() / DASH_INST_FLOATS) as f64);
+    meta.push(o.dash_batches.len() as f64);
+    for b in &o.dash_batches {
+        meta.extend_from_slice(&[b.start as f64, b.count as f64, b.color[0], b.color[1], b.color[2], b.color[3], b.stroke_mm, b.line_at as f64]);
+    }
+    let mut out = Vec::with_capacity(2 + meta.len() * 2 + o.fill_pos.len() + o.fill_idx.len() + o.line_verts.len() + o.line_idx.len() + o.dash_inst.len());
     out.push(meta.len() as u32);
     out.push(0);
     for m in &meta {
@@ -825,6 +980,7 @@ pub fn compile_flat(bytes: &[u8], from: usize, to: usize, px_per_meter: f64, pac
     out.extend_from_slice(&o.fill_idx);
     out.extend_from_slice(&o.line_verts);
     out.extend_from_slice(&o.line_idx);
+    out.extend(o.dash_inst.iter().map(|v| v.to_bits()));
     out
 }
 
@@ -847,6 +1003,7 @@ mod tests {
             chain,
             zigzag: None,
             motif: None,
+            dash: None,
         }
     }
 
@@ -926,8 +1083,8 @@ mod tests {
     #[test]
     fn kreis_und_bogen() {
         let p = plan(vec![
-            Prim::Circle { style: st(), fill: 1, stroke: 0, weight_mm: 0.0, center: v2(1.0, 1.0), r: 1.0 },
-            Prim::DrawingArc { style: st(), stroke: 0, weight_mm: 0.5, center: v2(0.0, 0.0), r: 1.0, a0: 0.0, a1: 0.0 },
+            Prim::Circle { style: st(), fill: 1, stroke: 0, weight_mm: 0.0, center: v2(1.0, 1.0), r: 1.0, dash: None },
+            Prim::DrawingArc { style: st(), stroke: 0, weight_mm: 0.5, center: v2(0.0, 0.0), r: 1.0, a0: 0.0, a1: 0.0, dash: None },
             Prim::Placeholder,
         ]);
         let o = compile(&p, 0.0, false);
@@ -959,5 +1116,190 @@ mod tests {
         assert!(!compile_flat(&enc, 0, 1, 90.0, true).is_empty());
         assert!(compile_flat(&enc, 0, 2, 90.0, true).is_empty(), "Bereich ausserhalb");
         assert!(!compile_flat(&enc, 1, 1, 90.0, true).is_empty(), "leerer Bereich = leere Geometrie");
+    }
+    // --- Strichmuster im Shader (Chunk-Pfad, gleiche Instanzen wie render2d `DashSegment`) ---
+
+    fn dashed(ax: f64, bx: f64, chain: bool, dash: Vec<f64>) -> Prim {
+        Prim::Line { style: st(), color: 0, weight_mm: 0.25, a: v2(ax, 0.0), b: v2(bx, 0.0), chain, zigzag: None, motif: None, dash: Some(dash) }
+    }
+
+    /// Instanz `i` als (a, b, s0, run_len, total, count, dash[8]).
+    fn inst(o: &GpuOut, i: usize) -> &[f32] {
+        &o.dash_inst[i * DASH_INST_FLOATS..(i + 1) * DASH_INST_FLOATS]
+    }
+
+    #[test]
+    fn gestrichelte_linie_als_shader_instanz() {
+        let o = compile(&plan(vec![dashed(1.0, 4.0, false, vec![0.12, 0.08])]), 90.0, true);
+        assert!(o.line_idx.is_empty() && o.line_verts.is_empty(), "keine durchgezogenen Striche mehr");
+        assert_eq!(o.dash_inst.len(), DASH_INST_FLOATS);
+        let d = inst(&o, 0);
+        // Bildschirm-Raum relativ zum Ursprung (erster Punkt).
+        assert_eq!(o.origin, (90.0, -0.0));
+        assert_eq!(&d[..4], &[0.0, 0.0, 270.0, 0.0]);
+        assert_eq!((d[4], d[5], d[7]), (0.0, 270.0, 2.0));
+        let (on, off) = ((0.12 * LINE_DASH_MM_TO_M * PX_PER_M) as f32, (0.08 * LINE_DASH_MM_TO_M * PX_PER_M) as f32);
+        assert_eq!((d[8], d[9]), (on, off));
+        assert!((d[6] - (on + off)).abs() < 1e-4);
+        assert!(d[10..].iter().all(|&v| v == 0.0));
+        assert_eq!(o.dash_batches.len(), 1);
+        assert_eq!((o.dash_batches[0].start, o.dash_batches[0].count, o.dash_batches[0].stroke_mm), (0, 1, 0.25));
+        assert_eq!(o.bounds, (1.0, 0.0, 4.0, 0.0));
+    }
+
+    #[test]
+    fn gestrichelter_zug_phase_laeuft_durch() {
+        // Verkettete Linien: ein Zug, Phase über die Ecke, ungerades Muster verdoppelt.
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![1.0]), dashed(1.0, 3.0, true, vec![1.0])]), 90.0, true);
+        assert_eq!(o.dash_inst.len(), 2 * DASH_INST_FLOATS);
+        assert_eq!(inst(&o, 1)[4], 90.0);
+        assert_eq!(inst(&o, 1)[5], 270.0);
+        assert_eq!(inst(&o, 1)[7], 2.0);
+        assert_eq!(o.dash_batches.len(), 1);
+        assert_eq!(o.dash_batches[0].count, 2);
+        // Einzeln (nicht verkettet): jede Linie beginnt ihr Muster neu.
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![1.0]), dashed(1.0, 3.0, false, vec![1.0])]), 90.0, true);
+        assert_eq!(inst(&o, 1)[4], 0.0);
+        assert_eq!(inst(&o, 1)[5], 180.0);
+    }
+
+    #[test]
+    fn ungueltiges_muster_durchgezogen_langes_muster_zerlegt() {
+        let solid = compile(&plan(vec![line(0.0, 1.0, false)]), 90.0, true);
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![0.0, -1.0])]), 90.0, true);
+        assert!(o.dash_inst.is_empty());
+        assert_eq!(o.line_idx.len(), solid.line_idx.len(), "Nullmuster = durchgezogen");
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![])]), 90.0, true);
+        assert!(o.dash_inst.is_empty() && o.line_idx.len() == solid.line_idx.len());
+        // 9 Einträge → verdoppelt 18 > MAX_LINE_DASH: CPU-Zerlegung (mehrere Stücke).
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![1.0; 9])]), 90.0, true);
+        assert!(o.dash_inst.is_empty());
+        assert!(o.line_idx.len() > 2 * solid.line_idx.len());
+    }
+
+    #[test]
+    fn gestrichelte_boegen_und_kreise() {
+        let d = Some(vec![2.0, 1.0]);
+        let p = plan(vec![
+            Prim::Arc { style: st(), color: 0, weight_mm: 0.18, center: v2(0.0, 0.0), from: v2(1.0, 0.0), to: v2(0.0, 1.0), r: 1.0, dash: d.clone() },
+            Prim::Circle { style: st(), fill: 1, stroke: 0, weight_mm: 0.18, center: v2(3.0, 0.0), r: 1.0, dash: d.clone() },
+            Prim::DrawingArc { style: st(), stroke: 0, weight_mm: 0.18, center: v2(0.0, 0.0), r: 2.0, a0: 0.0, a1: 1.0, dash: d },
+        ]);
+        let o = compile(&p, 90.0, true);
+        assert!(o.line_idx.is_empty(), "alle Striche gestrichelt");
+        assert!(!o.fill_idx.is_empty(), "Kreisfüllung bleibt");
+        let n = o.dash_inst.len() / DASH_INST_FLOATS;
+        assert!(n > 20);
+        // Kreis: geschlossen, die Lauflänge reicht um den ganzen Umfang.
+        let circle_run = (0..n).map(|i| inst(&o, i)[5]).fold(0.0f32, f32::max);
+        assert!((circle_run as f64 - 2.0 * PI * PX_PER_M).abs() < 2.0, "Kreisumfang {circle_run}");
+        // gleiche Farbe/Breite → ein Batch
+        assert_eq!(o.dash_batches.len(), 1);
+        assert_eq!(o.dash_batches[0].count as usize, n);
+    }
+
+    /// Auf der Achse deckt eine Instanz genau die Stücke der CPU-Zerlegung (`apply_dash_runs`,
+    /// gleiche Semantik wie die frühere `split_dash`-Zerlegung in render2d): Spiegel des
+    /// Fragment-Shaders (`DASH_LINE_WGSL`) für y = 0 und Breite → 0.
+    #[test]
+    fn deckung_auf_der_achse_wie_zerlegung() {
+        let mut seed = 777u32;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 8) as f64 / (1u32 << 24) as f64
+        };
+        for case in 0..150 {
+            let n = 1 + (rnd() * 4.0) as usize;
+            let pat: Vec<f64> = (0..n).map(|_| 0.5 + rnd() * 8.0).collect();
+            // Zug aus 1–4 kollinearen Stücken entlang x.
+            let mut xs = vec![0.0];
+            for _ in 0..1 + case % 4 {
+                xs.push(xs[xs.len() - 1] + 0.05 + rnd() * 1.5);
+            }
+            let prims: Vec<Prim> = xs.windows(2).enumerate().map(|(i, w)| dashed(w[0], w[1], i > 0, pat.clone())).collect();
+            let o = compile(&plan(prims), 90.0, true);
+            let runs = hatch::apply_dash_runs(vec![xs.iter().map(|&x| v2(x, 0.0)).collect()], &line_dash_for_runs(&pat));
+            let total_len = xs[xs.len() - 1];
+            for _ in 0..300 {
+                let x = rnd() * total_len;
+                let old = runs.iter().any(|r| x >= r[0].x - 1e-9 && x <= r[r.len() - 1].x + 1e-9);
+                let new = (0..o.dash_inst.len() / DASH_INST_FLOATS).any(|i| {
+                    let d = inst(&o, i);
+                    let sx = (x * PX_PER_M) as f32 - (d[0] + o.origin.0 as f32);
+                    let (s0, s1) = (d[4], d[4] + (d[2] - d[0]));
+                    let s = d[4] + sx;
+                    if s < s0 || s > s1 {
+                        return false;
+                    }
+                    let (total, cnt) = (d[6], d[7] as usize);
+                    let k = (s / total).floor();
+                    let m = s - k * total;
+                    let mut acc = 0.0f32;
+                    let mut on = true;
+                    for (j, &len) in d[8..8 + cnt].iter().enumerate() {
+                        if m >= acc && m < acc + len {
+                            on = j % 2 == 0;
+                        }
+                        acc += len;
+                    }
+                    on
+                });
+                // An den Strichgrenzen entscheidet die Rundung — dort nicht vergleichen.
+                let near_edge = runs.iter().any(|r| (x - r[0].x).abs() < 1e-4 || (x - r[r.len() - 1].x).abs() < 1e-4);
+                assert!(old == new || near_edge, "Fall {case}: x={x} alt {old} neu {new}");
+            }
+        }
+    }
+
+    /// Maler-Reihenfolge: Linie, gestrichelte Linie, Linie (gleicher Stil) bleiben drei Batches in
+    /// dieser Folge — die zweite Linie deckt die gestrichelte (z. B. verdeckte Kante unter einer Wand).
+    #[test]
+    fn strich_batches_in_maler_reihenfolge() {
+        let o = compile(&plan(vec![line(0.0, 1.0, false), dashed(0.0, 1.0, false, vec![2.0, 1.0]), dashed(0.0, 2.0, false, vec![2.0, 1.0]), line(2.0, 3.0, false)]), 90.0, true);
+        assert_eq!(o.line_batches.len(), 2, "keine Zusammenfassung über den Strich-Batch hinweg");
+        assert_eq!(o.dash_batches.len(), 1, "zwei gestrichelte ohne Linie dazwischen = ein Batch");
+        assert_eq!(o.dash_batches[0].count, 2);
+        assert_eq!(o.dash_batches[0].line_at, o.line_batches[0].count);
+        assert_eq!(o.line_batches[1].start, o.dash_batches[0].line_at);
+        // Ohne Strich dazwischen werden gleich gestylte Linien weiter zusammengefasst.
+        let o = compile(&plan(vec![line(0.0, 1.0, false), line(2.0, 3.0, false)]), 90.0, true);
+        assert_eq!(o.line_batches.len(), 1);
+    }
+
+    #[test]
+    fn flache_ausgabe_traegt_strich_instanzen() {
+        let mut w = plan_buf::Writer::new(false);
+        w.push(&crate::plan::prim::Primitive::Line {
+            a: crate::model::Vec2 { x: 0.0, y: 0.0 },
+            b: crate::model::Vec2 { x: 2.0, y: 0.0 },
+            cls: "c".into(),
+            weight_mm: 0.35,
+            dash: Some(Some(vec![3.0, 1.0])),
+            zigzag: None,
+            motif: None,
+            color: Some("#ff0000".into()),
+            drawing_id: None,
+            opening_id: None,
+            stair_id: None,
+            greyed: None,
+            opacity: None,
+        });
+        let enc = w.finish();
+        let out = compile_flat(&enc, 0, 1, 90.0, true);
+        let m = out[0] as usize;
+        let meta: Vec<f64> = (0..m).map(|i| f64::from_bits(out[2 + 2 * i] as u64 | ((out[3 + 2 * i] as u64) << 32))).collect();
+        let (n_fill, n_line) = (meta[10] as usize, meta[11] as usize);
+        assert_eq!((n_fill, n_line), (0, 0));
+        let k = 12 + 6 * n_fill + 8 * n_line;
+        assert_eq!(meta[k], 1.0, "eine Instanz");
+        assert_eq!(meta[k + 1], 1.0, "ein Strich-Batch");
+        assert_eq!(&meta[k + 2..k + 10], &[0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.35, 0.0]);
+        assert_eq!(meta.len(), k + 10);
+        let data = &out[2 + 2 * m..];
+        let (nfp, nfi, nlv, nli) = (meta[6] as usize, meta[7] as usize, meta[8] as usize, meta[9] as usize);
+        let dash = &data[nfp + nfi + nlv + nli..];
+        assert_eq!(dash.len(), DASH_INST_FLOATS);
+        assert_eq!(f32::from_bits(dash[2]), 180.0);
+        assert_eq!(f32::from_bits(dash[7]), 2.0);
     }
 }

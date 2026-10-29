@@ -153,6 +153,23 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     SVG/PDF/DXF unberührt. Offen: Kern-Seite bleibt (big16 S2: Schnitt-Primitive 0,37 s, `planSceneBin` 0,45 s); der
     Chunk-Pfad (`gpu_compile.rs`, WebGL/nativ-Chunks) zeichnet Striche weiterhin durchgezogen. Nicht in der Tauri-App/Metal und
     nicht im Browser-WebGPU angesehen (nur lavapipe/Vulkan headless).
+    ✅ (29.10.) Strichmuster auch im Chunk-Pfad (nativer macOS-Renderer `useNativePlanRenderer` → `GpuChunkCache` →
+    `render2d/chunks.rs`). Befund: KEINE Regression des Shader-Merges — der Chunk-Pfad hat Linien-Strichmuster nie
+    gezeichnet (schon die TS-Fassung `glPlanCompile.ts` vor [K3b] ignorierte `dash`, nur Schraffur-Striche wurden zerlegt;
+    `0516253` hat `core/gpu_compile.rs` nicht berührt) — auf dem Mac waren verdeckte Kanten, Achsen, gestrichelte
+    Zeichnungen seit jeher durchgezogen. Jetzt: die GPU-Sicht des Plan-Puffers trägt `dash` (Linie/Bogen/Kreis/2D-Bogen),
+    `gpu_compile` gibt gestrichelte Züge als Instanzen im render2d-Format aus (16 f32: Segment, Lauflänge, Zug, Muster;
+    Phase über verkettete Linien, Länge Papier-mm × 0,1 wie der Szenen-Pfad, > 8 Einträge zerlegt die CPU), der
+    Chunk-Renderer zeichnet sie mit DEMSELBEN `DASH_LINE_WGSL`, in Maler-Reihenfolge mit den Linien verzahnt (`lineAt`;
+    sonst lagen graue verdeckte Kanten über den Schnittkanten). Flaches Format/`NativeChunkLayout` additiv (`dash_inst`,
+    `dash_batches`, serde-Vorgaben). Tests: Kern (Instanzen, Phase, Muster-Rückfälle, Maler-Reihenfolge, Deckung auf der
+    Achse = `apply_dash_runs`-Zerlegung, 150 Zufallsfälle), render2d (Reihenfolge; Chunk-Renderer headless zeichnet
+    Strich/Lücke), TS-Fassade. Bilder (lavapipe, neu `render_png --chunks/--bounds`): Schnitt mit 752 verdeckten Kanten,
+    Grundriss, gestrichelte Zeichnungen — Chunk-Pfad vs. Szenen-Pfad 0,00 % abweichend in den Schnitt-Ausschnitten,
+    Rest = Texte (zeichnet der Chunk-Pfad nicht) und vorbestehende Unterschiede; alt (durchgezogen) sichtbar anders.
+    Nicht kompiliert: `cad-tauri` mit `native2d` für macOS (Linux-Container: cc kann kein `-arch arm64` für
+    objc2-exception-helper) — `native_embed.rs` ist unverändert, `render2d` (`window`) für `aarch64-apple-darwin`
+    per `cargo check` geprüft. Nicht auf Metal/in der Tauri-App angesehen.
     TS-Fassung gelöscht (29.10.): `toSection.ts`/`toElevation.ts` sind dünne Fassaden (Ebene, Sichtbarkeit, truck-Körper →
     Abfrage), `sectionOpenings.ts`, `sectionExtras.ts`, `meshSection.ts`, `generateSectionPlan`/`resolve*SectionStyle` in
     `generatePlan.ts`, `windowSymbol` (opening.ts), `keyhole`/`voidSectionRects`/`subtractVoidsInSection` (voids.ts) und ihre

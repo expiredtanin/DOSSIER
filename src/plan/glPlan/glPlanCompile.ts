@@ -12,7 +12,7 @@
 
 import type { Primitive } from '../generatePlan';
 import type { Vec2 } from '../../model/types';
-import type { BufferGl, GpuGeometry, Rgba } from './glPlanTypes';
+import type { BufferGl, DashBatch, GpuGeometry, Rgba } from './glPlanTypes';
 import { encodePlanBuf, type DecodedPlanBuf } from '../planBuf';
 import { core } from '../../engine/coreWasm';
 
@@ -94,6 +94,20 @@ function uploadCompiled(gl: BufferGl, out: Uint32Array): GpuGeometry {
       screenPx: meta[k + 7] === 1,
     });
   }
+  // Strich-Instanzen (hinter den Linien-Batches; ältere Ausgaben ohne diesen Teil → keine).
+  const nDash = k < m ? meta[k] : 0;
+  const nDashBatches = k + 1 < m ? meta[k + 1] : 0;
+  k += 2;
+  const dashBatches: DashBatch[] = [];
+  for (let i = 0; i < nDashBatches; i++, k += 8) {
+    dashBatches.push({
+      startInstance: meta[k],
+      instanceCount: meta[k + 1],
+      color: [meta[k + 2], meta[k + 3], meta[k + 4], meta[k + 5]] as Rgba,
+      strokeMm: meta[k + 6],
+      lineAt: meta[k + 7],
+    });
+  }
   let off = out.byteOffset + 8 + m * 8;
   const fillPos = new Float32Array(out.buffer, off, nFillPos);
   off += nFillPos * 4;
@@ -103,6 +117,8 @@ function uploadCompiled(gl: BufferGl, out: Uint32Array): GpuGeometry {
   const lineVerts = new Uint32Array(out.buffer, off, nLineVerts);
   off += nLineVerts * 4;
   const lineIdx = new Uint32Array(out.buffer, off, nLineIdx);
+  off += nLineIdx * 4;
+  const dashInst = new Float32Array(out.buffer, off, nDash * 16);
 
   const upload = (target: number, data: ArrayBufferView & { length: number }): WebGLBuffer | null => {
     if (!data.length) return null;
@@ -123,6 +139,7 @@ function uploadCompiled(gl: BufferGl, out: Uint32Array): GpuGeometry {
       indexBuffer: upload(gl.ELEMENT_ARRAY_BUFFER, lineIdx),
       batches: lineBatches,
     },
+    ...(nDash > 0 ? { dash: { instanceBuffer: upload(gl.ARRAY_BUFFER, dashInst), batches: dashBatches } } : {}),
     origin: { x: originX, y: originY },
     bounds: {
       minX: isFinite(minX) ? minX : 0,
