@@ -1,18 +1,22 @@
-// Abzugskörper im 3D (s. `plan/voids.ts`): jede Wandschicht und Decke, die ein Abzugskörper
-// durchdringt, wird über truck als Boolean-Differenz gebaut (B-Rep, bei bündigen Flächen
-// automatisch Mesh-CSG) und statt des Prismas als Mesh gezeigt.
+// Abzugskörper im 3D: jede Wandschicht und Decke, die ein Abzugskörper durchdringt, bestimmt der
+// Kern samt Spezifikation (`solid_specs.rs`, Abfrage `model3dParts` mit `voids`); hier wird sie
+// über truck als Boolean-Differenz gebaut (B-Rep, bei bündigen Flächen automatisch Mesh-CSG) und
+// statt des Prismas als Mesh gezeigt.
 //
 // Wie die Extrusionen (`extrusions.ts`) asynchron mit modulweitem Cache: solange das Ergebnis
 // lädt, bleibt das ungeschnittene Prisma stehen; ist es fertig, feuert
 // `TRUCK_MESH_READY_EVENT` und der Viewer pusht das Modell neu.
 
-import type { Project } from "../../model/types";
 import { buildSolidMesh } from "../../engine/truckSolid";
 import type { SolidSpec } from "../../engine/truckSolid";
-import { wallSpec } from "../wallSpec";
-import { bbox, hittingVoids, subtractSpec, voidPrisms, wallCorners } from "../voids";
 import { TRUCK_MESH_READY_EVENT } from "./extrusions";
-import type { RMesh, RModel3d, RSlab, RVec2, RWall } from "./shared";
+import type { RMesh, RModel3d, RSlab, RWall } from "./shared";
+
+/** Vom Kern getroffene Bauteile: (Index in `walls` bzw. `slabs`, Bauteil − Körper). */
+export interface VoidCuts {
+  walls: Array<[number, SolidSpec]>;
+  slabs: Array<[number, SolidSpec]>;
+}
 
 interface Entry {
   signature: string;
@@ -45,23 +49,19 @@ function request(key: string, signature: string, spec: SolidSpec, make: (m: { po
  * Ersetzt in `model` die von Abzugskörpern getroffenen Wandschichten/Decken durch ihre
  * Boolean-Meshes (sobald geladen). Ohne `window` (Tests/Node) bleibt das Modell unverändert.
  */
-export function applyVoids3d(model: RModel3d, project: Project): void {
+export function applyVoids3d(model: RModel3d, cuts: VoidCuts): void {
   if (typeof window === "undefined") return;
-  const voids = voidPrisms(project);
-  if (voids.length === 0) return;
   const live = new Set<string>();
-
+  const wallCut = new Map(cuts.walls);
   const walls: RWall[] = [];
   model.walls.forEach((w, i) => {
-    const hits = hittingVoids(voids, bbox(wallCorners(w)), w.baseElevation, w.baseElevation + w.height);
-    const base = hits.length ? wallSpec(w) : null;
-    if (!base) {
+    const spec = wallCut.get(i);
+    if (!spec) {
       walls.push(w);
       return;
     }
     const key = `w:${w.wallId}:${i}`;
     live.add(key);
-    const spec = subtractSpec(base, hits);
     const e = request(key, JSON.stringify(spec), spec, (m) => ({
       positions: m.positions,
       indices: m.indices,
@@ -74,18 +74,16 @@ export function applyVoids3d(model: RModel3d, project: Project): void {
   });
   model.walls = walls;
 
+  const slabCut = new Map(cuts.slabs);
   const slabs: RSlab[] = [];
   model.slabs.forEach((s, i) => {
-    const foot = bbox(s.outline.map((p: RVec2) => ({ x: p[0], y: p[1] })));
-    const hits = s.outline.length >= 3 ? hittingVoids(voids, foot, s.zBottom, s.zTop) : [];
-    if (hits.length === 0) {
+    const spec = slabCut.get(i);
+    if (!spec) {
       slabs.push(s);
       return;
     }
     const key = `s:${s.ceilingId}:${i}`;
     live.add(key);
-    const base: SolidSpec = { kind: "extrude", points: s.outline.flatMap((p) => [p[0], p[1]]), height: s.zTop - s.zBottom, z0: s.zBottom };
-    const spec = subtractSpec(base, hits);
     const e = request(key, JSON.stringify(spec), spec, (m) => ({
       positions: m.positions,
       indices: m.indices,

@@ -42,11 +42,9 @@
 
 import type { Project, Vec2 } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
-import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { documentFor } from "../core/document";
 import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickDrawingSeg } from "./pickTypes";
 import {
-  EPS,
   type RMesh,
   type RModel3d,
   type RRgb,
@@ -55,7 +53,7 @@ import {
   type RWall,
 } from "./toWalls3d/shared";
 import { emitExtrudedSolids, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
-import { applyVoids3d } from "./toWalls3d/voids3d";
+import { applyVoids3d, type VoidCuts } from "./toWalls3d/voids3d";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (viewport/,
 // export/, toSection.ts, nativeSync.ts, …) importieren weiterhin
@@ -72,9 +70,6 @@ export type { RVec2, RRgb, RWall, RSlab, RModel3d };
 export function emitDrawingLineVerts(project: Project): Float32Array {
   return documentFor(project).drawingLineVerts();
 }
-
-/** Weltpunkt (x, elevation, y) — nur intern für Highlight-Kantengeometrie. */
-type RVec3 = [number, number, number];
 
 /**
  * Nur die Wände (Rückwärts-Kompatibilität / bestehende Aufrufer). Zerlegt Wände mit Öffnungen in
@@ -140,9 +135,11 @@ export interface Model3dOptions {
 export function projectToModel3d(project: Project, opts: Model3dOptions = {}): RModel3d {
   const layered = opts.layeredWalls ?? true;
   const detail = opts.detail ?? "fein";
+  // Mit `voids` liefert der Kern zusätzlich die getroffenen Wände/Decken als truck-Spezifikationen.
+  const voids = !!opts.voids && typeof window !== "undefined";
   const parts = documentFor(project).query<Model3dParts>(
     "model3dParts",
-    [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0],
+    [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0],
   );
   // Die truck-Körper (asynchron, mit Cache) kommen zwischen Kontext-Meshes und Stützen.
   const meshes: RMesh[] = [...parts.contextMeshes];
@@ -161,7 +158,7 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     meshes,
     roofLayers: parts.roofLayers,
   };
-  if (opts.voids) applyVoids3d(model, project);
+  if (parts.voidCuts) applyVoids3d(model, parts.voidCuts);
   return model;
 }
 
@@ -176,6 +173,8 @@ interface Model3dParts {
   stairRailings: RMesh[];
   roofMeshes: RMesh[];
   roofLayers: RModel3d["roofLayers"];
+  /** Nur mit Abzugskörpern: (Index im Modell, Bauteil − Körper) je getroffene Wand/Decke. */
+  voidCuts?: VoidCuts;
 }
 
 const DETAIL_CODE: Record<string, number> = { grob: 0, mittel: 1, fein: 2 };
@@ -212,6 +211,8 @@ export function pickGeometry(
  * (immer obenauf gezeichnete Akzent-Umrisslinie, s. useWasm3dRenderer). Leere
  * Auswahl → leeres Array (Highlight löschen).
  *
+ * Gerechnet im Kern (`src-tauri/core/src/highlight3d.rs`).
+ *
  * GEOMETRIE (dieselbe Welt-Konvention wie pickGeometry/raycast3d: model (x,y)
  * → world (x, elevation, y), Höhe entlang +Y):
  *  • Wand: derselbe orientierte Quader wie `rayWallBox` (raycast3d.ts) — Achse
@@ -241,136 +242,11 @@ export function selectionHighlightLines(
   roofIds: string[] = [],
   contextObjectIds: string[] = [],
 ): Float32Array {
-  if (
-    wallIds.length === 0 &&
-    ceilingIds.length === 0 &&
-    openingIds.length === 0 &&
-    stairIds.length === 0 &&
-    roofIds.length === 0 &&
-    contextObjectIds.length === 0
-  ) {
-    return new Float32Array(0);
-  }
-  const { walls, slabs, openings, stairs } = pickGeometry(project);
-  const wallSet = new Set(wallIds);
-  const ceilingSet = new Set(ceilingIds);
-  const openingSet = new Set(openingIds);
-  const stairSet = new Set(stairIds);
-  const roofSet = new Set(roofIds);
-  const contextObjSet = new Set(contextObjectIds);
-  const out: number[] = [];
-  const pushEdge = (a: RVec3, b: RVec3) => {
-    out.push(a[0], a[1], a[2], rgb[0], rgb[1], rgb[2]);
-    out.push(b[0], b[1], b[2], rgb[0], rgb[1], rgb[2]);
-  };
-  // 12 Kanten eines Quaders aus 8 Ecken (Ecken-Index-Bits: bit0=Achse,
-  // bit1=Höhe, bit2=Dicke — je zwei Ecken, die sich in genau einem Bit
-  // unterscheiden, bilden eine Kante).
-  const BOX_EDGES: Array<[number, number]> = [
-    [0, 1], [0, 2], [0, 4], [1, 3], [1, 5], [2, 3],
-    [2, 6], [3, 7], [4, 5], [4, 6], [5, 7], [6, 7],
-  ];
-  // Orientierter Quader (Wand ODER Öffnung: gleiche Felder start/end/thickness/
-  // height/baseElevation) → seine 12 Kanten.
-  const boxEdges = (b: {
-    start: readonly [number, number];
-    end: readonly [number, number];
-    thickness: number;
-    height: number;
-    baseElevation: number;
-  }) => {
-    const ax = b.end[0] - b.start[0];
-    const az = b.end[1] - b.start[1];
-    const len = Math.hypot(ax, az);
-    if (len < EPS || b.height <= EPS || b.thickness <= EPS) return;
-    const axis: RVec3 = [ax / len, 0, az / len];
-    const normal: RVec3 = [az / len, 0, -ax / len];
-    const halfLen = len / 2;
-    const halfHeight = b.height / 2;
-    const halfThick = b.thickness / 2;
-    const center: RVec3 = [
-      (b.start[0] + b.end[0]) / 2,
-      b.baseElevation + b.height / 2,
-      (b.start[1] + b.end[1]) / 2,
-    ];
-    const corners: RVec3[] = [];
-    for (let i = 0; i < 8; i++) {
-      const sL = i & 1 ? 1 : -1;
-      const sH = i & 2 ? 1 : -1;
-      const sT = i & 4 ? 1 : -1;
-      corners.push([
-        center[0] + sL * halfLen * axis[0] + sT * halfThick * normal[0],
-        center[1] + sH * halfHeight,
-        center[2] + sL * halfLen * axis[2] + sT * halfThick * normal[2],
-      ]);
-    }
-    for (const [i, j] of BOX_EDGES) pushEdge(corners[i], corners[j]);
-  };
-  // Vertikales Prisma (Decke ODER Treppen-Fussabdruck) → Umriss oben/unten + Ecken.
-  const prismEdges = (outline: ReadonlyArray<readonly [number, number]>, zBottom: number, zTop: number) => {
-    const n = outline.length;
-    if (n < 3 || zTop - zBottom <= EPS) return;
-    const bottom: RVec3[] = outline.map((p) => [p[0], zBottom, p[1]]);
-    const top: RVec3[] = outline.map((p) => [p[0], zTop, p[1]]);
-    for (let i = 0, j = n - 1; i < n; j = i++) {
-      pushEdge(bottom[j], bottom[i]);
-      pushEdge(top[j], top[i]);
-    }
-    for (let i = 0; i < n; i++) pushEdge(bottom[i], top[i]);
-  };
-  for (const w of walls) if (wallSet.has(w.wallId)) boxEdges(w);
-  for (const o of openings) if (openingSet.has(o.openingId)) boxEdges(o);
-  for (const s of slabs) if (ceilingSet.has(s.ceilingId)) prismEdges(s.outline, s.zBottom, s.zTop);
-  for (const st of stairs) if (stairSet.has(st.stairId)) prismEdges(st.outline, st.zBottom, st.zTop);
-  // Dach: die Kanten aller Dachflächen + Giebel als Draht-Umriss (roofGeometry
-  // liefert 3D-Polygone in MODELL-Koordinaten [x, y, z=Höhe]; world = [x, z, y]).
-  if (roofSet.size > 0) {
-    for (const roof of project.roofs ?? []) {
-      if (!roofSet.has(roof.id)) continue;
-      const g = roofGeometry(roof, roofBaseElevation(project, roof));
-      const polyEdges = (pts: readonly (readonly [number, number, number])[]) => {
-        const m = pts.length;
-        for (let i = 0, j = m - 1; i < m; j = i++) {
-          const a = pts[j];
-          const b = pts[i];
-          pushEdge([a[0], a[2], a[1]], [b[0], b[2], b[1]]);
-        }
-      };
-      for (const pl of g.planes) polyEdges(pl.pts);
-      for (const gab of g.gables) polyEdges(gab);
-    }
-  }
-  // Kontext-Objekt (importiertes Gebäude/Terrain): Umriss als achsenparallele
-  // Bounding-Box statt vollem Dreiecks-Wireframe — importierte Meshes haben oft
-  // tausende Dreiecke, deren Kanten einzeln zu zeichnen wäre unbrauchbar dicht.
-  if (contextObjSet.size > 0) {
-    for (const obj of project.context ?? []) {
-      if (obj.type === "contourSet" || obj.type === "image" || !contextObjSet.has(obj.id)) continue;
-      const pos = obj.positions;
-      let minX = Infinity, maxX = -Infinity;
-      let minY = Infinity, maxY = -Infinity;
-      let minH = Infinity, maxH = -Infinity;
-      for (let i = 0; i + 2 < pos.length; i += 3) {
-        const x = pos[i], y = pos[i + 1], h = pos[i + 2];
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-        if (h < minH) minH = h;
-        if (h > maxH) maxH = h;
-      }
-      if (!isFinite(minX)) continue;
-      const corners: RVec3[] = [];
-      for (let i = 0; i < 8; i++) {
-        const x = i & 1 ? maxX : minX;
-        const h = i & 2 ? maxH : minH;
-        const y = i & 4 ? maxY : minY;
-        corners.push([x, h, y]);
-      }
-      for (const [i, j] of BOX_EDGES) pushEdge(corners[i], corners[j]);
-    }
-  }
-  return new Float32Array(out);
+  const sel = { walls: wallIds, ceilings: ceilingIds, openings: openingIds, stairs: stairIds, roofs: roofIds, context: contextObjectIds };
+  if (Object.values(sel).every((l) => l.length === 0)) return new Float32Array(0);
+  // Gerechnet im Kern (`highlight3d.rs`); Antwort f32-LE.
+  const b = documentFor(project).queryBin("selectionHighlight", [], JSON.stringify({ ...sel, rgb }));
+  return new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
 }
 
 /** Blau-Akzent der Zeichnen-Vorschau — identisch zu `Viewport3D.tsx`s `draftLineMat` (0x2f8fff). */

@@ -97,6 +97,7 @@ export type QueryName =
   | "planUnderlay"
   | "sectionPlan"
   | "elevationPlan"
+  | "selectionHighlight"
   | "modelJson";
 
 /** Ab so vielen Ops öffnet `sync` das Dokument neu, statt sie einzeln anzuwenden. */
