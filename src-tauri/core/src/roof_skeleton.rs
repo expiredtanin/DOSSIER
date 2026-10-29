@@ -122,6 +122,8 @@ pub fn is_rectilinear_non_rect(outline: &[P2]) -> bool {
 pub enum Offset<'a> {
     Const(f64),
     PerEdge(&'a dyn Fn(P2, P2) -> f64),
+    /// Versatz je Kante nach Index (Kante i = Punkt i → i+1); fehlende Einträge = 0.
+    PerIndex(&'a [f64]),
 }
 
 /// Ring (CCW) nach aussen versetzen (Traufüberstand) — Gehrung an jeder Ecke (Schnitt der
@@ -143,6 +145,7 @@ pub fn offset_ring(ring: &[P2], dist: Offset) -> Vec<P2> {
             let d = match &dist {
                 Offset::Const(d) => *d,
                 Offset::PerEdge(f) => f(p, q),
+                Offset::PerIndex(v) => v.get(i).copied().unwrap_or(0.0),
             };
             ((q[1] - p[1]) / len, -(q[0] - p[0]) / len, d)
         })
@@ -190,7 +193,14 @@ pub fn is_skeleton_roofable(outline: &[P2]) -> bool {
     if n == 4 && (0..n).all(|i| axis_parallel(pts[i], pts[(i + 1) % n])) {
         return false; // Rechteck: Bounding-Box-Dach reicht
     }
-    if signed_area(&pts).abs() < 1e-6 {
+    is_simple_ring(&pts)
+}
+
+/// Ob der Ring ein einfaches Polygon ist: mindestens drei Punkte, nicht flächenlos, keine
+/// Selbstüberschneidung.
+pub fn is_simple_ring(pts: &[P2]) -> bool {
+    let n = pts.len();
+    if n < 3 || signed_area(pts).abs() < 1e-6 {
         return false;
     }
     for i in 0..n {
@@ -204,6 +214,26 @@ pub fn is_skeleton_roofable(outline: &[P2]) -> bool {
         }
     }
     true
+}
+
+/// Ob sich zwei Ringe (Kanten) echt schneiden.
+pub fn rings_cross(a: &[P2], b: &[P2]) -> bool {
+    (0..a.len()).any(|i| (0..b.len()).any(|j| segments_cross(a[i], a[(i + 1) % a.len()], b[j], b[(j + 1) % b.len()])))
+}
+
+/// Punkt im Ring (Ray-Casting).
+pub fn point_in_ring(p: P2, ring: &[P2]) -> bool {
+    let n = ring.len();
+    let mut inside = false;
+    let mut j = n.wrapping_sub(1);
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[j]);
+        if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0] {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }
 
 /// Konvexes Polygon gegen die Halbebene f(p) ≥ 0 schneiden (Sutherland–Hodgman).
@@ -238,7 +268,7 @@ struct Edge {
 }
 
 /// Ob die Kante a→b quer zur Firstrichtung liegt (Satteldach: senkrechter Giebel/Ortgang).
-fn is_gable_edge(a: P2, b: P2, ridge_axis: Option<Axis>) -> bool {
+pub fn is_gable_edge(a: P2, b: P2, ridge_axis: Option<Axis>) -> bool {
     match ridge_axis {
         None => false,
         Some(Axis::X) => (b[0] - a[0]).abs() < (b[1] - a[1]).abs(),

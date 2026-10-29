@@ -8,7 +8,7 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { applyFillMode } from "./fillMode";
-import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, setFieldIfChanged } from "../core";
+import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, removeRoofHole, setFieldIfChanged, setRoofEdge } from "../core";
 import type { CoreOp } from "../core";
 import { useMemo, type RefObject } from "react";
 import type { DrawingLevel, Layout, Project } from "../model/types";
@@ -929,8 +929,20 @@ export function usePanelHostBase(opts: {
       },
       onOpenOpeningEditor: (id) => setOpeningEditorId(id),
       // ── Dach-Attribute (nur bei selektiertem Dach) ─────────────────────────
-      onSetRoofPatch: (patch) => {
-        if (selection?.kind === "roof") updateRoof(selection.id, patch);
+      onSetRoofPatch: (patch, coalesceKey) => {
+        if (selection?.kind === "roof") updateRoof(selection.id, patch, coalesceKey);
+      },
+      onSetRoofEdge: (index, spec) => {
+        if (selection?.kind !== "roof") return;
+        const r = (project.roofs ?? []).find((x) => x.id === selection.id);
+        if (!r) return;
+        // Zahl tippen: gleicher Schlüssel je Kante ⇒ ein Undo-Schritt; Giebel-Schalter einzeln.
+        updateRoof(selection.id, setRoofEdge(r, index, spec), spec.kind === "pitch" ? `roof-edge-${selection.id}-${index}` : undefined);
+      },
+      onRemoveRoofHole: (k) => {
+        if (selection?.kind !== "roof") return;
+        const r = (project.roofs ?? []).find((x) => x.id === selection.id);
+        if (r) updateRoof(selection.id, removeRoofHole(r, k));
       },
       // ── Schnitt-/Ansichtslinie (nur bei selektierter Linie) ────────────────
       sectionLine,

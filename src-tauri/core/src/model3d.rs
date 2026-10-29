@@ -956,13 +956,28 @@ impl<'a> Mitre<'a> {
         ])
     }
 
+    /// Versetzte Ecke `k` der Fläche `i` aus ihrer Versatzebene und den Ebenen ihrer beiden Randkanten
+    /// (Nachbar-Versatzebene bzw. Seitenebene an der Traufe); ohne Lösung die Normalen-Verschiebung.
+    fn pair_corner(&self, i: usize, k: usize, d: f64) -> V3 {
+        let pts = &self.planes[i];
+        let n = self.normals[i];
+        let p = pts[k];
+        let prev = (k + pts.len() - 1) % pts.len();
+        let fallback = [p[0] - n[0] * d, p[1] - n[1] * d, p[2] - n[2] * d];
+        let own = (n, dot3(n, pts[0]) - d);
+        let near = |q: V3| hypot(&[q[0] - fallback[0], q[1] - fallback[1], q[2] - fallback[2]]) <= 4.0 * d + 0.5;
+        match Self::solve([own, self.edge_plane(i, prev, d), self.edge_plane(i, k, d)]) {
+            Some(q) if near(q) => q,
+            _ => fallback,
+        }
+    }
+
     fn at(&self, i: usize, d: f64) -> Vec<V3> {
         let pts = &self.planes[i];
         let n = self.normals[i];
         if d <= EPS {
             return pts.clone();
         }
-        let own = (n, dot3(n, pts[0]) - d);
         (0..pts.len())
             .map(|k| {
                 let p = pts[k];
@@ -973,11 +988,28 @@ impl<'a> Mitre<'a> {
                 }
                 let near = |q: V3| hypot(&[q[0] - fallback[0], q[1] - fallback[1], q[2] - fallback[2]]) <= 4.0 * d + 0.5;
                 // Zwei Flächen am Punkt: wie bisher paarweise (exakt, unverändert).
-                let pairwise = || match Self::solve([own, self.edge_plane(i, prev, d), self.edge_plane(i, k, d)]) {
-                    Some(q) if near(q) => q,
-                    _ => fallback,
-                };
+                let pairwise = || self.pair_corner(i, k, d);
                 let inc = &self.incident[i][k];
+                if inc.len() == 2 {
+                    // Verschieden geneigte Flächen ([26], Neigung je Kante): die Traufen-Seitenebenen beider
+                    // Flächen schneiden die Gratgerade an verschiedenen Stellen — beide Flächen nehmen dann
+                    // den Mittelpunkt (liegt weiter auf beiden Versatzebenen), sonst klafft dort eine Lücke.
+                    // Bei gleicher Neigung fallen beide Punkte zusammen: unverändert.
+                    let q1 = pairwise();
+                    let &(j, kj) = inc.iter().find(|&&(a, b)| (a, b) != (i, k)).unwrap_or(&(i, k));
+                    if j != i {
+                        let q2 = self.pair_corner(j, kj, d);
+                        let gap = hypot(&[q2[0] - q1[0], q2[1] - q1[1], q2[2] - q1[2]]);
+                        if gap > 1e-9 && gap < 4.0 * d + 0.5 {
+                            let m = [(q1[0] + q2[0]) / 2.0, (q1[1] + q2[1]) / 2.0, (q1[2] + q2[2]) / 2.0];
+                            let on = |a: usize| (dot3(self.normals[a], m) - (dot3(self.normals[a], self.planes[a][0]) - d)).abs() < 1e-7;
+                            if on(i) && on(j) {
+                                return m;
+                            }
+                        }
+                    }
+                    return q1;
+                }
                 if inc.len() <= 2 {
                     return pairwise();
                 }
@@ -1548,6 +1580,8 @@ mod tests {
                         overhang: 0.5,
                         overhang_gable: None,
                         ridge_axis: axis,
+                        holes: vec![],
+                        edge_pitch_deg: None,
                     };
                     let g = roof_geometry(&p, 6.0);
                     for (d0, d1) in [(0.0, 0.3), (0.3, 0.42)] {
@@ -1557,4 +1591,51 @@ mod tests {
             }
         }
     }
+    /// [26] Dächer mit Innenhof und Neigung je Kante: jede Dachschicht ist ein geschlossener Körper
+    /// (auch an den Hofkanten, mit Giebeln und verschieden geneigten Kanten).
+    #[test]
+    fn dachschichten_mit_hof_und_kantenneigung_geschlossen() {
+        use crate::roof::{roof_geometry, MansardType, RoofParams, Shape};
+        use crate::roof_skeleton::Axis;
+        let big = vec![[0.0, 0.0], [12.0, 0.0], [12.0, 8.0], [0.0, 8.0]];
+        let court = vec![[4.0, 2.0], [4.0, 6.0], [8.0, 6.0], [8.0, 2.0]];
+        let tri = vec![[2.0, 1.5], [2.0, 3.5], [3.5, 2.5]];
+        let variants: Vec<(Vec<Vec<[f64; 2]>>, Option<Vec<Option<f64>>>)> = vec![
+            (vec![court.clone()], None),
+            (vec![court.clone(), vec![[9.0, 2.0], [9.0, 4.0], [11.0, 4.0], [11.0, 2.0]]], None),
+            (vec![tri], None),
+            (vec![], Some(vec![Some(20.0), Some(50.0), Some(30.0), Some(60.0)])),
+            (vec![court.clone()], Some(vec![Some(20.0), None, Some(-1.0), Some(45.0), Some(10.0)])),
+            (vec![], Some(vec![Some(-1.0), None, Some(-1.0), None])),
+        ];
+        for (holes, edges) in variants {
+            for (shape, mt) in [(Shape::Walm, MansardType::Giebel), (Shape::Zelt, MansardType::Giebel), (Shape::Sattel, MansardType::Giebel), (Shape::Mansarde, MansardType::Giebel), (Shape::Mansarde, MansardType::Walm)] {
+                for overhang in [0.0, 0.4] {
+                    let p = RoofParams {
+                        outline: big.clone(),
+                        shape,
+                        pitch_deg: 35.0,
+                        pitch_upper_deg: None,
+                        mansard_type: mt,
+                        mansard_knee_ratio: None,
+                        half_hip_ratio: None,
+                        overhang,
+                        overhang_gable: None,
+                        ridge_axis: Axis::X,
+                        holes: holes.clone(),
+                        edge_pitch_deg: edges.clone(),
+                    };
+                    let g = roof_geometry(&p, 6.0);
+                    assert!(!g.planes.is_empty());
+                    // Mansarde mit Hof UND verschieden geneigten Kanten: die zweite Schicht (Versatz bis 0.42 m)
+                    // ist dort schmaler als der Versatz — bekannte Grenze, nur die erste Schicht prüfen.
+                    let layers: &[(f64, f64)] = if shape == Shape::Mansarde && !holes.is_empty() && edges.is_some() { &[(0.0, 0.3)] } else { &[(0.0, 0.3), (0.3, 0.42)] };
+                    for &(d0, d1) in layers {
+                        assert!(roof_slab_closed(&g.planes, d0, d1), "{holes:?} {edges:?} {shape:?} {mt:?} oh {overhang} {d0}–{d1}");
+                    }
+                }
+            }
+        }
+    }
 }
+

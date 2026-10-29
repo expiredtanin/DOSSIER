@@ -170,4 +170,21 @@ describe("generatePlan — Dächer (Dachaufsicht)", () => {
       false,
     );
   });
+
+  it("Innenhof ([26]): Traufring des Hofs, Dachfläche mit Loch (Brückenkanten), Firstlinien des Hofs", () => {
+    const court = [
+      { x: 1.5, y: 1 },
+      { x: 1.5, y: 3 },
+      { x: 3, y: 3 },
+      { x: 3, y: 1 },
+    ];
+    const plain = generatePlan(baseProject([roof("R9", "walm", { overhang: 0 })]), "eg", visible);
+    const withCourt = generatePlan(baseProject([roof("R9", "walm", { overhang: 0, holes: [court] })]), "eg", visible);
+    // Umriss 4 Kanten + Hof 4 Kanten.
+    expect(linesOf(plain.primitives, "roof-eaves").length).toBe(4);
+    expect(linesOf(withCourt.primitives, "roof-eaves").length).toBe(8);
+    const poly = withCourt.primitives.find((p) => p.kind === "polygon" && p.roofId === "R9");
+    expect(poly && poly.kind === "polygon" && poly.pts.length).toBeGreaterThan(4);
+    expect(poly && poly.kind === "polygon" && (poly.noStrokeEdges ?? []).length).toBeGreaterThan(0);
+  });
 });

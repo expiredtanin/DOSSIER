@@ -471,7 +471,11 @@ export interface PanelHostValue {
    * Immutable Änderung von Dach-Attributen (Form/Neigung/Überstand/Firstrichtung/
    * Dicke) — wirkt NUR auf das selektierte Dach.
    */
-  onSetRoofPatch: (patch: Partial<import("../model/types").Roof>) => void;
+  onSetRoofPatch: (patch: Partial<import("../model/types").Roof>, coalesceKey?: string) => void;
+  /** Neigung/Giebel der Dachkante `index` setzen ([26]); Tippen einer Zahl = ein Undo-Schritt je Kante. */
+  onSetRoofEdge: (index: number, spec: import("../core").EdgeSpec) => void;
+  /** Innenhof `k` (Index in `Roof.holes`) des gewählten Dachs entfernen, samt seinen Kantenneigungen. */
+  onRemoveRoofHole: (k: number) => void;
 
   // ── Schnitt-/Ansichtslinie (Object-Info-Panel; nur die selektierte Linie) ──
   /**
