@@ -106,9 +106,10 @@ pub fn emit_slabs(p: &Project) -> Vec<RSlab> {
         let (z_bottom, z_top) = p.ceiling_vertical_extent(c);
         let layers = ceiling_layers(p, c);
         w.ring(&c.outline);
-        let openings = c.openings.as_deref().unwrap_or(&[]);
+        // Aussparungen inkl. der Deckenöffnungen ([100]).
+        let openings = crate::opening_shape::ceiling_hole_rings(p, c);
         w.num(openings.len() as f64);
-        for o in openings {
+        for o in &openings {
             w.ring(o);
         }
         w.num(z_bottom).num(z_top).num(layers.map_or(0, |l| l.len()) as f64);
@@ -729,6 +730,7 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
 
 /// Öffnungs-Einbauteile als Quader-Meshes (`emitOpeningMeshes`); `detail`: 0 grob, 1 mittel, 2 fein.
 pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
+    let mut shaped: Vec<RMesh> = Vec::new();
     let mut w = FlatWriter::new();
     w.num(detail).num(p.walls.len() as f64);
     for wall in &p.walls {
@@ -743,6 +745,11 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
             let o_bottom = zb + op.sill_height.max(0.0);
             let o_top = zt.min(o_bottom + op.height);
             let t = *thickness.get_or_insert_with(|| p.wall_thickness(wall, 0.2));
+            // Formöffnung ([G3]): Füllkörper, Rahmen und Glas entlang des Umrisses statt der Quader-Teile.
+            if crate::opening_shape::is_shaped(op) {
+                shaped.extend(shaped_wall_opening_meshes(p, wall, &wr, op, [from, to, o_bottom, o_top]));
+                continue;
+            }
             w.nums(&[from, to, o_bottom, o_top, flag(op.kind != ElementKind::Window), t]);
             write_opening(&mut w, p, op);
             count += 1.0;
@@ -767,6 +774,87 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
             material_index: None,
         });
         i += 25;
+    }
+    out.extend(shaped);
+    // Dach-/Deckenfenster ([100]).
+    for op in p.openings.as_deref().unwrap_or(&[]) {
+        if let Some(f) = crate::opening_shape::host_frame(p, op) {
+            for (part, positions) in crate::opening_shape::surface_window_boxes(p, op, &f) {
+                out.push(box_mesh(positions, PART_RGB[part as usize]));
+            }
+        }
+    }
+    out
+}
+
+fn box_mesh(positions: [f64; 24], color: Rgb) -> RMesh {
+    RMesh { positions: positions.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color, vertex_colors: None, material_index: None }
+}
+
+/// Formöffnung in der Wand ([G3]) als Quader: Füllkörper (Wandfarbe, ganze Wanddicke) zwischen dem
+/// Rechteck-Loch und dem Umriss, Rahmen-Ring und Glas (bzw. Türblatt) entlang des Umrisses. Rahmenlage
+/// quer zur Wand wie bei den Rechteck-Öffnungen (`openings3d::frame_normal_range`). Nicht für Formen:
+/// Anschlag, Fensterbank, Storenkasten, Flügel-/Sprossenteilung (bleiben beim Rechteck).
+pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef, op: &Opening, [from, to, zb, zt]: [f64; 4]) -> Vec<RMesh> {
+    use crate::opening_shape as os;
+    let (w, h) = (to - from, zt - zb);
+    let Some(poly) = os::opening_outline(op, w, h) else { return Vec::new() };
+    let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+    let len = hypot2(dx, dy);
+    if len < 1e-9 {
+        return Vec::new();
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    // Quer-Achse wie `openings3d` (rechte Normale); die Wandmitte liegt bei −ref_off.
+    let shift = -wr.ref_off;
+    let map = |u: f64, v: f64, n: f64| -> [f64; 3] {
+        let (s, t) = (from + u, n + shift);
+        [wall.start.x + ux * s + uy * t, wall.start.y + uy * s - ux * t, zb + v]
+    };
+    let half = wr.total / 2.0;
+    let mut out = Vec::new();
+    let wall_rgb = resolve_wall_bands(p, &wall_material_color_maps(p), wall, false).0.first().map_or(WALL_RGB, |b| b.color);
+    for q in os::fill_quads(&poly, w, h) {
+        out.push(box_mesh(os::quad_box(&q, -half, half, &map), wall_rgb));
+    }
+    let door = op.kind == ElementKind::Door;
+    let ty = if door {
+        p.door_type(op).map(|t| (t.frame_depth, t.inset_from_face, t.inset_face == Some(DoorTypeInsetFace::Innen), t.inset_face == Some(DoorTypeInsetFace::Mitte), t.frame_width))
+    } else {
+        p.window_type(op).map(|t| (t.frame_depth, t.inset_from_face, t.inset_face == Some(WindowTypeInsetFace::Innen), t.inset_face == Some(WindowTypeInsetFace::Mitte), t.frame_width))
+    };
+    let glass = PART_RGB[0];
+    let Some((fd, inset_face, inner, mid, fw)) = ty else {
+        // Ohne Typ: eine Vollscheibe mittig (wie das Rechteck-Fenster ohne Typ).
+        if !door {
+            let g = crate::openings3d::GLASS_HALF_THICK;
+            for q in os::strip_quads(&poly) {
+                out.push(box_mesh(os::quad_box(&q, -g, g, &map), glass));
+            }
+        }
+        return out;
+    };
+    let depth = crate::openings3d::across_wall_depth(fd.unwrap_or(f64::NAN).max(0.0), wr.total);
+    let (n_min, n_max) = crate::openings3d::frame_normal_range(half, depth, inset_face.unwrap_or(0.0), inner, mid);
+    let fw = fw.filter(|v| *v > 0.0).unwrap_or(crate::openings3d::DEFAULT_FRAME_WIDTH).min(w.min(h) / 3.0);
+    let inner_poly = os::inset(&poly, fw);
+    for (k, q) in os::ring_quads(&poly, &inner_poly).into_iter().enumerate() {
+        // Tür: unten keine Schwelle (Kante 0 = Boden).
+        if door && k == 0 && op.shape != Some(OpeningShape::Rund) {
+            continue;
+        }
+        out.push(box_mesh(os::quad_box(&q, n_min, n_max, &map), PART_RGB[1]));
+    }
+    let (inner_glass, color) = if door {
+        let c = (n_min + n_max) / 2.0;
+        let t = crate::openings3d::DOOR_LEAF_THICK / 2.0;
+        ((c - t, c + t), PART_RGB[5])
+    } else {
+        let n1 = n_max - 0.02;
+        ((n1 - 2.0 * crate::openings3d::GLASS_HALF_THICK, n1), glass)
+    };
+    for q in os::strip_quads(&inner_poly) {
+        out.push(box_mesh(os::quad_box(&q, inner_glass.0, inner_glass.1, &map), color));
     }
     out
 }
@@ -901,7 +989,7 @@ fn push_fan_triangles(positions: &mut Vec<f64>, indices: &mut Vec<u32>, pts: &[V
 }
 
 /// Newell-Normale einer Dachfläche, nach oben orientiert (`planeNormalUp`).
-fn plane_normal_up(pts: &[V3]) -> V3 {
+pub(crate) fn plane_normal_up(pts: &[V3]) -> V3 {
     let (mut nx, mut ny, mut nz) = (0.0, 0.0, 0.0);
     for i in 0..pts.len() {
         let c = pts[i];
@@ -1175,6 +1263,139 @@ fn push_roof_slab_between(positions: &mut Vec<f64>, indices: &mut Vec<u32>, top:
     }
 }
 
+/// Dachfenster-Loch in einer Dachfläche ([100]): Ecken auf der Dach-Oberkante (Gegenuhrzeigersinn um
+/// `n`) und die Normale.
+pub(crate) struct RoofHoleRect {
+    pub corners: [V3; 4],
+    pub n: V3,
+}
+
+fn sub3(a: V3, b: V3) -> V3 {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+/// Schneidet aus einer ebenen, konvexen Fläche die Rechtecke `holes` (senkrecht zur Fläche) aus:
+/// konvexe Reststücke, gleicher Drehsinn wie `poly` (Sutherland-Hodgman je Rechteck-Kante).
+pub(crate) fn clip_plane_holes(poly: &[V3], holes: &[RoofHoleRect]) -> Vec<Vec<V3>> {
+    let Some(first) = holes.first() else { return vec![poly.to_vec()] };
+    let n = first.n;
+    let e1 = {
+        let d = sub3(first.corners[1], first.corners[0]);
+        let l = dot3(d, d).sqrt().max(1e-12);
+        [d[0] / l, d[1] / l, d[2] / l]
+    };
+    let e2 = cross3(n, e1);
+    let offs = poly.first().map_or(0.0, |q| dot3(*q, n));
+    let to2 = |q: V3| [dot3(q, e1), dot3(q, e2)];
+    let lift = |q: [f64; 2]| -> V3 { [e1[0] * q[0] + e2[0] * q[1] + n[0] * offs, e1[1] * q[0] + e2[1] * q[1] + n[1] * offs, e1[2] * q[0] + e2[2] * q[1] + n[2] * offs] };
+    let clip = |pts: &[[f64; 2]], a: [f64; 2], b: [f64; 2], keep_left: bool| -> Vec<[f64; 2]> {
+        let side = |p: [f64; 2]| {
+            let c = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+            if keep_left { c } else { -c }
+        };
+        let mut out = Vec::new();
+        for i in 0..pts.len() {
+            let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+            let (sp, sq) = (side(p), side(q));
+            if sp >= 0.0 {
+                out.push(p);
+            }
+            if (sp >= 0.0) != (sq >= 0.0) {
+                let t = sp / (sp - sq);
+                out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+            }
+        }
+        out
+    };
+    let area = |pts: &[[f64; 2]]| (0..pts.len()).map(|i| pts[i][0] * pts[(i + 1) % pts.len()][1] - pts[(i + 1) % pts.len()][0] * pts[i][1]).sum::<f64>().abs() / 2.0;
+    let mut pieces: Vec<Vec<[f64; 2]>> = vec![poly.iter().map(|q| to2(*q)).collect()];
+    for h in holes {
+        let r: Vec<[f64; 2]> = h.corners.iter().map(|q| to2(*q)).collect();
+        let mut next = Vec::new();
+        for piece in pieces {
+            let mut rest = piece;
+            for k in 0..4 {
+                let (a, b) = (r[k], r[(k + 1) % 4]);
+                let outside = clip(&rest, a, b, false);
+                if outside.len() >= 3 && area(&outside) > 1e-10 {
+                    next.push(outside);
+                }
+                rest = clip(&rest, a, b, true);
+                if rest.len() < 3 {
+                    break;
+                }
+            }
+        }
+        pieces = next;
+    }
+    pieces.into_iter().map(|pc| pc.into_iter().map(lift).collect()).collect()
+}
+
+/// Wie [`push_roof_slab_between`], mit Dachfenster-Löchern: Deck-/Bodenfläche als Reststücke, dazu je
+/// Loch vier Leibungen von `d0` bis `d1` unter der Dach-Oberkante.
+fn push_roof_slab_with_holes(positions: &mut Vec<f64>, indices: &mut Vec<u32>, top: &[V3], bottom: &[V3], shared: &[bool], holes: &[RoofHoleRect], d0: f64, d1: f64) {
+    let mut nz = 0.0;
+    for i in 0..top.len() {
+        let a = top[i];
+        let b = top[(i + 1) % top.len()];
+        nz += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    let ccw = nz > 0.0;
+    for pc in clip_plane_holes(top, holes) {
+        push_fan_triangles(positions, indices, &pc, !ccw);
+    }
+    for pc in clip_plane_holes(bottom, holes) {
+        push_fan_triangles(positions, indices, &pc, ccw);
+    }
+    for i in 0..top.len() {
+        if shared[i] {
+            continue;
+        }
+        let j = (i + 1) % top.len();
+        let base = (positions.len() / 3) as u32;
+        positions.extend(top[i]);
+        positions.extend(bottom[i]);
+        positions.extend(bottom[j]);
+        positions.extend(top[j]);
+        if ccw {
+            indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        } else {
+            indices.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
+        }
+    }
+    for h in holes {
+        let at = |q: V3, d: f64| [q[0] - h.n[0] * d, q[1] - h.n[1] * d, q[2] - h.n[2] * d];
+        let center = [0, 1, 2].map(|k| h.corners.iter().map(|c| c[k]).sum::<f64>() / 4.0);
+        for k in 0..4 {
+            let (a, b) = (h.corners[k], h.corners[(k + 1) % 4]);
+            let quad = [at(a, d0), at(b, d0), at(b, d1), at(a, d1)];
+            let nrm = cross3(sub3(quad[1], quad[0]), sub3(quad[3], quad[0]));
+            let mid = [0, 1, 2].map(|c| (a[c] + b[c]) / 2.0);
+            let inward = dot3(nrm, sub3(center, mid)) > 0.0;
+            let base = (positions.len() / 3) as u32;
+            for q in quad {
+                positions.extend(q);
+            }
+            if inward {
+                indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+            } else {
+                indices.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
+            }
+        }
+    }
+}
+
+/// Dachfenster-Löcher je Dachfläche eines Dachs (Index in `Project::roofs`).
+pub(crate) fn roof_holes_by_plane(p: &Project, roof_index: usize, planes: usize) -> Vec<Vec<RoofHoleRect>> {
+    let mut out: Vec<Vec<RoofHoleRect>> = (0..planes).map(|_| Vec::new()).collect();
+    for (o, f) in crate::opening_shape::roof_openings(p, roof_index) {
+        if let Some(list) = f.plane.and_then(|i| out.get_mut(i)) {
+            list.push(RoofHoleRect { corners: crate::opening_shape::host_rect_plan(&f, o.width, o.height), n: f.n });
+        }
+    }
+    out
+}
+
 fn roof_color(p: &Project, override_color: Option<Rgb>, component_id: &str) -> Result<Rgb, String> {
     if let Some(c) = override_color {
         return Ok(c);
@@ -1190,11 +1411,12 @@ fn roof_color(p: &Project, override_color: Option<Rgb>, component_id: &str) -> R
 pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, String> {
     let maps = material_color_maps(p, only_roof);
     let mut out = Vec::new();
-    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| only_roof.is_none_or(|id| r.id == id)) {
+    for (ri, roof) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().filter(|(_, r)| only_roof.is_none_or(|id| r.id == id)) {
         let eaves_z = p.roof_base_elevation(roof);
         let g = crate::roof::roof_geometry(&roof.params(), eaves_z);
         let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
         let mitre = Mitre::new(&g.planes);
+        let holes = roof_holes_by_plane(p, ri, g.planes.len());
         let mut offset_above = 0.0;
         for layer in p.roof_layers(roof) {
             let t = layer.thickness.max(0.0);
@@ -1210,7 +1432,11 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
                 }
                 let top = mitre.at(i, offset_above);
                 let bottom = mitre.at(i, offset_above + t);
-                push_roof_slab_between(&mut positions, &mut indices, &top, &bottom, &mitre.shared[i]);
+                if holes[i].is_empty() {
+                    push_roof_slab_between(&mut positions, &mut indices, &top, &bottom, &mitre.shared[i]);
+                } else {
+                    push_roof_slab_with_holes(&mut positions, &mut indices, &top, &bottom, &mitre.shared[i], &holes[i], offset_above, offset_above + t);
+                }
             }
             if !indices.is_empty() {
                 out.push(RMesh { positions, indices, kind: "extrusion", color, vertex_colors: None, material_index });
@@ -1224,10 +1450,11 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
 /// Dachschicht-Eingabe für den 3D-Live-Schnitt (`emitRoofCutLayers`).
 pub fn emit_roof_cut_layers(p: &Project) -> Result<Vec<RRoofLayer>, String> {
     let mut out = Vec::new();
-    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+    for (ri, roof) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate() {
         let eaves_z = p.roof_base_elevation(roof);
         let g = crate::roof::roof_geometry(&roof.params(), eaves_z);
         let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
+        let holes = roof_holes_by_plane(p, ri, g.planes.len());
         let mut offset_above = 0.0;
         for layer in p.roof_layers(roof) {
             let t = layer.thickness.max(0.0);
@@ -1237,10 +1464,13 @@ pub fn emit_roof_cut_layers(p: &Project) -> Result<Vec<RRoofLayer>, String> {
             let color = roof_color(p, override_color, &layer.component_id)?;
             let line = resolve_cut_line_style(p, layer.joint_line_style_id.as_deref());
             let cut = line.map(|(c, w)| RCutMeta { line_color: Some(c), line_weight: Some(w), ..Default::default() });
-            for plane in &g.planes {
+            for (i, plane) in g.planes.iter().enumerate() {
                 let nrm = plane_normal_up(plane);
-                let polygon = plane.iter().map(|q| [q[0] - nrm[0] * offset_above, q[1] - nrm[1] * offset_above, q[2] - nrm[2] * offset_above]).collect();
-                out.push(RRoofLayer { polygon, normal: nrm, thickness: t, color, cut: cut.clone() });
+                let polygon: Vec<V3> = plane.iter().map(|q| [q[0] - nrm[0] * offset_above, q[1] - nrm[1] * offset_above, q[2] - nrm[2] * offset_above]).collect();
+                // Dachfenster ([100]): Reststücke statt der ganzen Fläche (Loch im Live-Schnitt).
+                for polygon in clip_plane_holes(&polygon, &holes[i]) {
+                    out.push(RRoofLayer { polygon, normal: nrm, thickness: t, color, cut: cut.clone() });
+                }
             }
             offset_above += t;
         }
@@ -1591,6 +1821,74 @@ mod tests {
         assert!(a[2] < 7.061);
         assert_eq!(m.at(0, 0.0), planes[0]);
         assert!(m.at(0, 0.2)[0][2] < 5.2);
+    }
+
+    fn sample() -> Project {
+        serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap()
+    }
+
+    /// [G3] Rundbogen: Füllkörper in Wandfarbe zwischen Rechteck-Loch und Bogen, Rahmen und Glas entlang
+    /// des Umrisses; alle Quader innerhalb des Öffnungs-Rechtecks.
+    #[test]
+    fn formoeffnung_fuellkoerper_rahmen_glas() {
+        let mut p = sample();
+        let plain = emit_opening_meshes(&p, 2.0).len();
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.shape = Some(OpeningShape::Rundbogen);
+        }
+        let meshes = emit_opening_meshes(&p, 2.0);
+        assert_ne!(meshes.len(), plain);
+        let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap();
+        let wall_rgb = resolve_wall_bands(&p, &wall_material_color_maps(&p), w1, false).0[0].color;
+        let fills: Vec<&RMesh> = meshes.iter().filter(|m| m.color == wall_rgb).collect();
+        assert!(fills.len() >= 10, "Bogenzwickel als Streifen: {}", fills.len());
+        let (zb, _) = p.wall_vertical_extent(w1);
+        // O1: x 3…4 an der Wand y = 0, Brüstung 0,9, Höhe 1,2: Füllung nur über dem Kämpfer (0,7).
+        for m in &fills {
+            for c in m.positions.chunks_exact(3) {
+                assert!(c[0] > 3.0 - 1e-9 && c[0] < 4.0 + 1e-9 && c[2] >= zb + 0.9 + 0.7 - 1e-9 && c[2] <= zb + 2.1 + 1e-9, "{c:?}");
+            }
+        }
+        assert!(meshes.iter().any(|m| m.color == PART_RGB[0]) && meshes.iter().any(|m| m.color == PART_RGB[1]));
+    }
+
+    /// [100] Dachfenster: jede Dachschicht bleibt ein geschlossener Körper mit Loch; Fensterteile kommen dazu.
+    #[test]
+    fn dachfenster_schneidet_alle_schichten() {
+        let mut p = sample();
+        let before = emit_roofs(&p, None).unwrap();
+        p.openings.as_mut().unwrap().push(Opening {
+            id: "DF".into(),
+            kind: ElementKind::Window,
+            width: 0.78,
+            height: 1.18,
+            host_roof_id: Some("RF1".into()),
+            host_point: Some(Vec2 { x: 2.5, y: 1.0 }),
+            ..Default::default()
+        });
+        let after = emit_roofs(&p, None).unwrap();
+        assert_eq!(before.len(), after.len());
+        for m in &after {
+            assert!(crate::wall_mesh_cut::is_watertight(&m.positions, &m.indices, 1e-6), "Schicht dicht");
+        }
+        let vol = |ms: &[RMesh]| ms.iter().map(|m| crate::export_flat::mesh_volume(&m.positions, &m.indices)).sum::<f64>();
+        let removed = vol(&before) - vol(&after);
+        let t: f64 = p.roof_layers(&p.roofs.as_ref().unwrap()[0]).iter().map(|l| l.thickness).sum();
+        assert!((removed - 0.78 * 1.18 * t).abs() < 1e-6, "Loch = Fläche × Dicke: {removed}");
+        let parts = emit_opening_meshes(&p, 2.0).len() - emit_opening_meshes(&sample(), 2.0).len();
+        assert!(parts >= 9, "Rahmen, Glas, Eindeckrahmen: {parts}");
+        let layers = emit_roof_cut_layers(&p).unwrap().len();
+        assert!(layers > emit_roof_cut_layers(&sample()).unwrap().len());
+    }
+
+    /// [100] Deckenöffnung: Aussparung im Slab.
+    #[test]
+    fn deckenoeffnung_im_slab() {
+        let mut p = sample();
+        let n0: usize = emit_slabs(&p).iter().map(|s| s.outline.len()).sum();
+        p.openings.as_mut().unwrap().push(Opening { id: "DO".into(), kind: ElementKind::Window, width: 1.0, height: 1.0, host_ceiling_id: Some("C1".into()), host_point: Some(Vec2 { x: 2.0, y: 2.0 }), ..Default::default() });
+        let n1: usize = emit_slabs(&p).iter().map(|s| s.outline.len()).sum();
+        assert!(n1 > n0, "Loch-Ring eingebunden");
     }
 
     #[test]

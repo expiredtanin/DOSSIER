@@ -46,6 +46,7 @@ const REC_END_COLUMNS: f64 = 11.0;
 const REC_CLASSIFICATION: f64 = 12.0;
 const REC_ZONE: f64 = 13.0;
 const REC_ATTACH: f64 = 14.0;
+const REC_OPENING_SOLID: f64 = 15.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -423,6 +424,101 @@ fn fill_params(p: &Project, o: &Opening) -> FillParams {
 
 /// FILL schreiben: Wandachse, Achs-Intervall und Höhen der Öffnung, Querausdehnung der Wand
 /// (`host` = n_lo aussen, n_hi), dann die Parameter.
+/// Psets und Basismengen einer Tür/eines Fensters (Kennwerte nur mit Angabe im Modell).
+fn fill_psets(p: &Project, o: &Opening, width: f64, height: f64) -> Vec<Pset> {
+    let is_door = o.kind == ElementKind::Door;
+    let mut props: Vec<Prop> = Vec::new();
+    let pset_name = if is_door {
+        let dt = p.door_type(o);
+        if let Some(dt) = dt {
+            props.push(ident("Reference", &dt.name));
+            if dt.leaf_style == DoorTypeLeafStyle::Glas {
+                if let Some(ratio) = dt.glazing_ratio.filter(|r| *r > 0.0 && *r <= 1.0) {
+                    props.push(Prop::Ratio("GlazingAreaFraction", ratio));
+                }
+            }
+        }
+        "Pset_DoorCommon"
+    } else {
+        if let Some(wt) = p.window_type(o) {
+            props.push(ident("Reference", &wt.name));
+        }
+        "Pset_WindowCommon"
+    };
+    // Nummer ersetzt den Typnamen als Reference; Kennwerte nur mit Angabe im Modell.
+    if let Some(mark) = o.mark.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+        props.retain(|x| !matches!(x, Prop::Ident("Reference", _)));
+        props.insert(0, ident("Reference", mark));
+    }
+    if let Some(e) = crate::opening_schedule::opening_external(p, o) {
+        props.push(Prop::Bool("IsExternal", e));
+    }
+    let label = |name: &'static str, v: &Option<String>| v.as_deref().map(str::trim).filter(|x| !x.is_empty()).map(|x| Prop::Label(name, x.to_string()));
+    props.extend(label("FireRating", &o.fire_rating));
+    props.extend(label("AcousticRating", &o.sound_class));
+    props.extend(o.u_value.filter(|u| *u > 0.0).map(|u| Prop::Thermal("ThermalTransmittance", u)));
+    props.extend(label("SecurityRating", &o.burglary_class));
+    let mut psets = vec![Pset { name: pset_name, props }];
+    psets.extend(qto(if is_door { "Qto_DoorBaseQuantities" } else { "Qto_WindowBaseQuantities" }, qty::opening_quantities(width, height)));
+    psets
+}
+
+/// Öffnungskörper einer Form-/Dachöffnung ([G3]/[100]): Profil in (x, y) des Systems `origin`/`x_dir`/
+/// `z_dir`, entlang `z_dir` um `depth` extrudiert (Welt relativ zur Geschoss-UK).
+struct SolidOpening {
+    host: String,
+    profile: Vec<[f64; 2]>,
+    origin: [f64; 3],
+    x_dir: [f64; 3],
+    z_dir: [f64; 3],
+    depth: f64,
+}
+
+/// Dreiecke eines 8-Ecken-Quaders wie `model3d::OPENING_BOX_TRIS`.
+const BOX_TRIS: [u32; 36] = [0, 1, 3, 0, 3, 2, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 3, 7, 1, 7, 5];
+
+fn push_box(positions: &mut Vec<f64>, indices: &mut Vec<u32>, b: &[f64; 24], base: f64) {
+    let at = (positions.len() / 3) as u32;
+    for c in b.chunks_exact(3) {
+        positions.extend_from_slice(&[c[0], c[1], c[2] - base]);
+    }
+    indices.extend(BOX_TRIS.iter().map(|i| at + i));
+}
+
+/// Füllung (Rahmen, Glas/Blatt) einer Formöffnung als Netz, Z relativ zur Geschoss-UK.
+fn shaped_fill_mesh(p: &Project, wall: &Wall, o: &Opening, c: &Cutout, base: f64) -> (Vec<f64>, Vec<u32>) {
+    let total = p.wall_thickness(wall, 0.2);
+    let wr = crate::opening_geom::WallRef {
+        start: crate::opening_geom::v(wall.start.x, wall.start.y),
+        end: crate::opening_geom::v(wall.end.x, wall.end.y),
+        total,
+        ref_off: crate::joins::reference_offset(model3d::wall_reference(wall), total),
+    };
+    let wall_rgb = model3d::shaped_wall_opening_meshes(p, wall, &wr, o, [c.from, c.to, c.z_bottom, c.z_top]);
+    let (mut positions, mut indices) = (Vec::new(), Vec::new());
+    // Die Füllkörper (Wandfarbe) gehören zur Wand, nicht zur Füllung: die Öffnung schneidet sie ohnehin nicht.
+    let fills = crate::opening_shape::opening_outline(o, c.to - c.from, c.z_top - c.z_bottom).map_or(0, |poly| crate::opening_shape::fill_quads(&poly, c.to - c.from, c.z_top - c.z_bottom).len());
+    for m in wall_rgb.iter().skip(fills) {
+        if let Ok(b) = <[f64; 24]>::try_from(m.positions.as_slice()) {
+            push_box(&mut positions, &mut indices, &b, base);
+        }
+    }
+    (positions, indices)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn w_solid_opening(f: &mut Flat, s: &SolidOpening, structure: f64, o: &Opening, label: &str, (width, height): (f64, f64), psets: &[Pset], fill: &(Vec<f64>, Vec<u32>)) {
+    let (h, oid, lab) = (f.str(&s.host), f.str(&o.id), f.str(label));
+    f.nums(&[REC_OPENING_SOLID, h, structure, oid, if o.kind == ElementKind::Door { 1.0 } else { 0.0 }, lab]);
+    f.num(s.profile.len() as f64);
+    for q in &s.profile {
+        f.nums(q);
+    }
+    f.nums(&s.origin).nums(&s.x_dir).nums(&s.z_dir).nums(&[s.depth, height, width]);
+    w_psets(f, psets);
+    w_mesh(f, &fill.0, &fill.1, false);
+}
+
 fn w_fill(f: &mut Flat, wall: &Wall, c: &Cutout, host: (f64, f64), x: &FillParams) {
     let opt = |f: &mut Flat, v: Option<f64>| {
         f.nums(&[if v.is_some() { 1.0 } else { 0.0 }, v.unwrap_or(0.0)]);
@@ -667,6 +763,24 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 i += 3;
             }
         }
+        // Formöffnungen ([G3]): Füllkörper zwischen Rechteck-Loch und Umriss gehören zur Wand.
+        for &(k, c) in cutouts_by_wall.get(&wall.id).map_or(&[][..], |v| v.as_slice()) {
+            let o = &openings[k];
+            let Some(poly) = crate::opening_shape::opening_outline(o, c.to - c.from, c.z_top - c.z_bottom) else { continue };
+            let n = crate::opening_shape::fill_quads(&poly, c.to - c.from, c.z_top - c.z_bottom).len();
+            let total = p.wall_thickness(wall, 0.2);
+            let wr = crate::opening_geom::WallRef {
+                start: crate::opening_geom::v(wall.start.x, wall.start.y),
+                end: crate::opening_geom::v(wall.end.x, wall.end.y),
+                total,
+                ref_off: crate::joins::reference_offset(model3d::wall_reference(wall), total),
+            };
+            for m in model3d::shaped_wall_opening_meshes(&p, wall, &wr, o, [c.from, c.to, c.z_bottom, c.z_top]).iter().take(n) {
+                if let Ok(b) = <[f64; 24]>::try_from(m.positions.as_slice()) {
+                    push_box(&mut positions, &mut indices, &b, base);
+                }
+            }
+        }
         if indices.is_empty() {
             continue;
         }
@@ -711,7 +825,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             psets.push(Pset { name: "Pset_SlabCommon", props: slab_props });
         }
         // Aussparungen (wie im 3D) als innere Ringe des Profils; Netto zieht sie ab.
-        let inner: Vec<&[Vec2]> = c.openings.as_deref().unwrap_or(&[]).iter().filter(|r| r.len() >= 3).map(|r| r.as_slice()).collect();
+        let hole_rings = crate::opening_shape::ceiling_hole_rings(&p, c);
+        let inner: Vec<&[Vec2]> = hole_rings.iter().filter(|r| r.len() >= 3).map(|r| r.as_slice()).collect();
         psets.extend(qto("Qto_SlabBaseQuantities", qty::slab_quantities(&c.outline, &inner, z_top - z_bottom)));
         w_head(&mut f, REC_CEILING, structure, &c.id, &name);
         w_type(&mut f, ty.as_ref().map(|t| type_ref(t, 1.0, "FLOOR")).as_ref());
@@ -736,40 +851,25 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             }
             let is_door = o.kind == ElementKind::Door;
             classified.push((format!("fill/{}", o.id), if is_door { Kind::Door } else { Kind::Window }, o.category_code.clone()));
-            let mut props: Vec<Prop> = Vec::new();
-            let pset_name = if is_door {
-                let dt = p.door_type(o);
-                if let Some(dt) = dt {
-                    props.push(ident("Reference", &dt.name));
-                    if dt.leaf_style == DoorTypeLeafStyle::Glas {
-                        if let Some(ratio) = dt.glazing_ratio.filter(|r| *r > 0.0 && *r <= 1.0) {
-                            props.push(Prop::Ratio("GlazingAreaFraction", ratio));
-                        }
-                    }
-                }
-                "Pset_DoorCommon"
-            } else {
-                if let Some(wt) = p.window_type(o) {
-                    props.push(ident("Reference", &wt.name));
-                }
-                "Pset_WindowCommon"
-            };
-            // Nummer ersetzt den Typnamen als Reference; Kennwerte nur mit Angabe im Modell.
-            if let Some(mark) = o.mark.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
-                props.retain(|x| !matches!(x, Prop::Ident("Reference", _)));
-                props.insert(0, ident("Reference", mark));
-            }
-            if let Some(e) = crate::opening_schedule::opening_external(&p, o) {
-                props.push(Prop::Bool("IsExternal", e));
-            }
-            let label = |name: &'static str, v: &Option<String>| v.as_deref().map(str::trim).filter(|x| !x.is_empty()).map(|x| Prop::Label(name, x.to_string()));
-            props.extend(label("FireRating", &o.fire_rating));
-            props.extend(label("AcousticRating", &o.sound_class));
-            props.extend(o.u_value.filter(|u| *u > 0.0).map(|u| Prop::Thermal("ThermalTransmittance", u)));
-            props.extend(label("SecurityRating", &o.burglary_class));
-            let mut psets = vec![Pset { name: pset_name, props }];
-            psets.extend(qto(if is_door { "Qto_DoorBaseQuantities" } else { "Qto_WindowBaseQuantities" }, qty::opening_quantities(c.to - c.from, depth)));
+            let psets = fill_psets(&p, o, c.to - c.from, depth);
             let label = crate::plan::walls::opening_label(o);
+            // Formöffnung ([G3]): Öffnungskörper = Umriss quer durch die Wand, Füllung als Netz.
+            if let Some(poly) = crate::opening_shape::opening_outline(o, c.to - c.from, depth) {
+                let u = normalize(sub(wall.end, wall.start));
+                let ln = left_normal(u);
+                let at = add_scaled(add_scaled(wall.start, u, c.from), ln, host.1 + OPENING_OVERSHOOT);
+                let solid = SolidOpening {
+                    host: format!("wall/{}", wall.id),
+                    profile: poly,
+                    origin: [at.x, at.y, c.z_bottom - base_of(structure)],
+                    x_dir: [u.x, u.y, 0.0],
+                    z_dir: [-ln.x, -ln.y, 0.0],
+                    depth: host.1 - host.0 + 2.0 * OPENING_OVERSHOOT,
+                };
+                let fill = shaped_fill_mesh(&p, wall, o, &c, base_of(structure));
+                w_solid_opening(&mut f, &solid, structure, o, &label, (c.to - c.from, depth), &psets, &fill);
+                continue;
+            }
             let a = f.str(&wall.id);
             let oid = f.str(&o.id);
             let lab = f.str(&label);
@@ -945,6 +1045,40 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     }
     p.roofs = roofs;
 
+    // ── Dach-/Deckenfenster ([100]): IfcOpeningElement im Dach bzw. in der Decke, IfcWindow/IfcDoor darin ──
+    for o in openings.iter() {
+        let Some(fr) = crate::opening_shape::host_frame(&p, o) else { continue };
+        let (host_key, floor_id) = if fr.plane.is_some() {
+            let r = &p.roofs.as_deref().unwrap_or(&[])[fr.host];
+            (format!("roof/{}", r.id), r.floor_id.clone())
+        } else {
+            let c = &p.ceilings.as_deref().unwrap_or(&[])[fr.host];
+            (format!("slab/{}", c.id), c.floor_id.clone())
+        };
+        let structure = structure_of(&floor_id);
+        let base = base_of(structure);
+        let is_door = o.kind == ElementKind::Door;
+        classified.push((format!("fill/{}", o.id), if is_door { Kind::Door } else { Kind::Window }, o.category_code.clone()));
+        let (w, h) = (o.width, o.height);
+        // Profil-Y = Z × X = −eh: Ursprung an der oberen Ecke, das Profil läuft das Gefälle hinab.
+        let corner = fr.at(-w / 2.0, h / 2.0, -0.5);
+        let solid = SolidOpening {
+            host: host_key,
+            profile: vec![[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
+            origin: [corner[0], corner[1], corner[2] - base],
+            x_dir: fr.ew,
+            z_dir: [-fr.n[0], -fr.n[1], -fr.n[2]],
+            depth: fr.thickness + 1.0,
+        };
+        let (mut positions, mut indices) = (Vec::new(), Vec::new());
+        for (_, b) in crate::opening_shape::surface_window_boxes(&p, o, &fr) {
+            push_box(&mut positions, &mut indices, &b, base);
+        }
+        let psets = fill_psets(&p, o, w, h);
+        let label = crate::plan::walls::opening_label(o);
+        w_solid_opening(&mut f, &solid, structure, o, &label, (w, h), &psets, &(positions, indices));
+    }
+
     // ── Stützen → IfcColumn (Profil-Extrusion, Material = Bauteil) ──────────
     for col in p.columns.as_deref().unwrap_or(&[]) {
         let footprint = model3d::column_footprint(col);
@@ -1053,6 +1187,20 @@ mod tests {
     fn strings(f: &Flat) -> Vec<String> {
         let (_, text) = from_bytes(&f.to_bytes()).unwrap();
         text.split('\0').map(String::from).collect()
+    }
+
+    /// [G3]/[100] Formöffnung und Dachfenster als Öffnungskörper-Datensatz mit Wirt.
+    #[test]
+    fn formoeffnung_und_dachfenster() {
+        let mut p = sample();
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.shape = Some(OpeningShape::Spitzbogen);
+        }
+        p.openings.as_mut().unwrap().push(Opening { id: "DF".into(), kind: ElementKind::Window, width: 0.78, height: 1.18, host_roof_id: Some("RF1".into()), host_point: Some(Vec2 { x: 2.5, y: 1.0 }), ..Default::default() });
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        let s = strings(&f);
+        assert!(s.iter().any(|x| x == "wall/W1") && s.iter().any(|x| x == "roof/RF1"));
+        assert_eq!(f.nums.iter().filter(|v| **v == REC_OPENING_SOLID).count() >= 2, true);
     }
 
     #[test]

@@ -278,7 +278,7 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
             continue;
         }
         let pts: Vec<[f64; 2]> = ce.outline.iter().map(|v| [v.x, v.y]).collect();
-        let holes: Vec<Vec<[f64; 2]>> = ce.openings.as_deref().unwrap_or(&[]).iter().map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect();
+        let holes: Vec<Vec<[f64; 2]>> = crate::opening_shape::ceiling_hole_rings(p, ce).iter().map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect();
         let merged = crate::polygon_holes::merge_holes(&pts, &holes, 1e-4);
         let layers = ceiling_layers(p, ce)?;
         let comp = match layers.first() {
@@ -350,6 +350,35 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         }
         for l in &geo.breaks {
             out.push(line(pv(l[0]), pv(l[1]), "roof-break", ROOF_BREAK_MM, Some(Some(ROOF_BREAK_DASH.to_vec())), stroke, greyed));
+        }
+        roof_windows(c, out, roof);
+    }
+}
+
+/// Dachfenster ([100]) im Grundriss des Dach-Geschosses: Rahmen-Umriss und Glas als Projektion der
+/// Dachfläche, gestrichelt (über der Schnitthöhe); Pick über die Öffnungs-id.
+fn roof_windows(c: &Ctx, out: &mut Vec<Primitive>, roof: &Roof) {
+    let p = c.p;
+    let Some(ri) = p.roofs.as_deref().and_then(|r| r.iter().position(|x| x.id == roof.id)) else { return };
+    for (o, f) in crate::opening_shape::roof_openings(p, ri) {
+        if !c.shown(&o.category_code) {
+            continue;
+        }
+        let greyed = Some(c.greyed(&o.category_code));
+        let category = c.cat(&o.category_code);
+        let stroke = o.color.as_deref().or(category.map(|k| k.color.as_str())).unwrap_or(POCHE_STROKE);
+        let fw = crate::opening_shape::surface_frame_width(p, o);
+        for (inset, cls, w) in [(0.0, "roof-window-frame", ROOF_EAVES_MM), (fw, "roof-window-glass", ROOF_BREAK_MM)] {
+            let (hw, hh) = (o.width / 2.0 - inset, o.height / 2.0 - inset);
+            let r = [f.at(-hw, -hh, 0.0), f.at(hw, -hh, 0.0), f.at(hw, hh, 0.0), f.at(-hw, hh, 0.0)];
+            for k in 0..4 {
+                let (a, b) = (r[k], r[(k + 1) % 4]);
+                let mut l = line(Vec2 { x: a[0], y: a[1] }, Vec2 { x: b[0], y: b[1] }, cls, w, Some(Some(OVERHEAD_DASH.to_vec())), stroke, greyed);
+                if let Primitive::Line { opening_id, .. } = &mut l {
+                    *opening_id = Some(o.id.clone());
+                }
+                out.push(l);
+            }
         }
     }
 }

@@ -2085,6 +2085,29 @@ pub enum OpeningOpeningDir {
     Unknown,
 }
 
+/// Umrissform einer Öffnung ([G3]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum OpeningShape {
+    #[default]
+    #[serde(rename = "rechteck")]
+    Rechteck,
+    #[serde(rename = "rundbogen")]
+    Rundbogen,
+    #[serde(rename = "segmentbogen")]
+    Segmentbogen,
+    #[serde(rename = "spitzbogen")]
+    Spitzbogen,
+    #[serde(rename = "rund")]
+    Rund,
+    #[serde(rename = "schraeg")]
+    Schraeg,
+    #[serde(rename = "giebel")]
+    Giebel,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 pub enum OpeningLintelLines {
     #[default]
@@ -2300,6 +2323,40 @@ pub struct Opening {
     #[serde(rename = "sillLineStyle", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub sill_line_style: Option<LineStyleOverride>,
+    /// Umriss der Öffnung in der Wandebene ([G3]); fehlt ⇒ Rechteck. Bestimmt den Wandausschnitt
+    /// (Schnitt, Ansicht, 3D, IFC-Öffnungskörper); der Grundriss bleibt beim SIA-Symbol. Die
+    /// Öffnung füllt ihr Rechteck `width × height`; Bogen/Schräge liegen oben (Rund: Ellipse darin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, inline)]
+    pub shape: Option<OpeningShape>,
+    /// Stichhöhe der Form in Metern ([G3]): Segmentbogen = Bogenstich (Default Breite/6), Spitzbogen =
+    /// Höhe über dem Kämpfer (≥ Breite/2, Default gleichseitig), Giebel = Höhe des Dreiecks (Default
+    /// Breite/2), Schräg = Höhenunterschied links→rechts (> 0 rechts höher, Default Breite/2).
+    /// Rundbogen/Rund/Rechteck ignorieren es.
+    #[serde(rename = "shapeRise", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shape_rise: Option<f64>,
+    /// Wirt Dach ([100], Dachfenster): Öffnung in einer Dachfläche; `hostWallId` bleibt leer. Lage
+    /// über {@link hostPoint}; `width` quer zum Gefälle, `height` entlang des Gefälles (in der
+    /// Dachebene gemessen); `position`/`sillHeight` gelten nicht.
+    #[serde(rename = "hostRoofId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host_roof_id: Option<String>,
+    /// Wirt Decke ([100], Deckenöffnung mit Oberlicht): Öffnung in einer Decke, Lage über
+    /// {@link hostPoint}, `width` × `height` waagrecht (gedreht um {@link hostAngle}).
+    #[serde(rename = "hostCeilingId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host_ceiling_id: Option<String>,
+    /// Nur Dach-/Deckenwirt ([100]): Mittelpunkt der Öffnung im Grundriss (Meter).
+    #[serde(rename = "hostPoint", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host_point: Option<Vec2>,
+    /// Nur Dach-/Deckenwirt ([100]): Drehung der Breitenrichtung im Grundriss in Grad, wo die
+    /// Fläche waagrecht ist (Decke, Flachdach); geneigte Dachflächen richten die Breite längs der
+    /// Traufe aus. Fehlt ⇒ 0 (x-Achse).
+    #[serde(rename = "hostAngle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host_angle: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

@@ -1167,7 +1167,18 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Treppenuntersicht, Abzugskörper beliebiger Form im Schnitt. · L
 - ◐ **[G2] Wand an Dach.** 27.10.: schräge Oberkante (`topDrop`) in render3d statt 15-cm-Treppung. Offen:
   Schnitt, exakte Lösung über [B6]. · M–L
-- ○ **[G3] Öffnungen beliebiger Form** (Rundbogen, rund, schräg) als Abzugskörper. · M · nach [G1].
+- ◐ **[G3] Öffnungen beliebiger Form** (29.10.) `Opening.shape` (rundbogen, segmentbogen, spitzbogen, rund/oval,
+  schraeg, giebel) + `shapeRise` (Stich). Kern `opening_shape.rs`: konvexer Umriss im Öffnungsrechteck; die Wand
+  behält das Rechteck-Loch, der Rest zwischen Rechteck und Umriss kommt als Füllkörper (senkrechte Streifen =
+  8-Ecken-Quader, Wandfarbe) dazu — render3d, Wandbänder und Exporte bleiben unverändert. Schnitt: Wandband an der
+  Schnittstelle bis an den Umriss verlängert, Rahmen/Glas auf lichter Höhe; Ansicht: Rahmen als Umriss, Glas
+  eingerückt; 3D: Rahmen-Ring und Glas (bzw. Türblatt) entlang des Umrisses; IFC: Öffnungskörper als Profil quer
+  durch die Wand (neuer Datensatz OPENING_SOLID), Füllung als Netz; Netz-Wände bekommen die Füllkörper. Grundriss
+  bleibt SIA-Symbol. UI: „Fenster bearbeiten" → Grösse (Form, Stich). Für Formen abgeschaltet (Hinweis im Dialog):
+  Anschlag, Sturz-Querschnitt, Storenkasten, Flügel-/Sprossenteilung in Ansicht/3D; Fensterbank nur bei flachem
+  Boden. Geprüft: Rust-Tests, CLI-Schnitt/-Ansicht als PNG angesehen (Linux). Offen: Projektion hinter der
+  Schnittebene zeigt das Rechteck-Loch, Wand-Füllkörper einfarbig (nicht je Schicht), Abzugskörper beliebiger
+  Form, nicht in der Tauri-App/Metal geprüft. · M
 - ○ **[G4] Exakte Sichtbarkeit (HLR)** für Ansicht und Projektionsteil des Schnitts. · XL
 - ○ **[G5] Dächer untereinander, Gauben, Wand ↔ Decke** per Boolean. · L · nach [G1]/[G2].
 - ○ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M
@@ -1446,6 +1457,20 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux). Offen: Taschen-Schiebetür (in der Wand), Ansicht zeigt bei
   zweiflügeliger Schiebetür nur einen Pfeil, 3D/Ansicht ohne Hebeschiebe-Bandseite in der Ansicht, Brüstungs-/Riegel-
   Einteilung unten (nur Oberlicht), nicht in der Tauri-App geprüft.
+- ◐ **[100] Dachfenster und Öffnungen in Dach/Decke.** (29.10., Grundlage für Lukarnen) Wirt allgemein: `Opening`
+  neu `hostRoofId` | `hostCeilingId` (dann `hostWallId` leer), `hostPoint` (Mitte im Grundriss), `hostAngle`
+  (Breitenrichtung auf waagrechten Flächen). `width` quer zum Gefälle, `height` entlang des Gefälles, in der
+  Dachebene gemessen. Kern `opening_shape::host_frame` (Dachfläche über den Punkt, Normale, alle Schichten);
+  3D: Loch durch jede Dachschicht (Reststücke + Leibungen, Schichtkörper bleiben dicht), Rahmen/Glas/Eindeck-
+  rahmen (vereinfacht) als Quader, Live-Schnitt-Schichten mit Loch; Decke: Ring in die Aussparungen
+  (`ceiling_hole_rings`: 3D, Grundriss, IFC). Grundriss (Dach-Geschoss): Rahmen und Glas gestrichelt, Pick über
+  die Öffnung; Schnitt: Lücke in allen Dachschichten, Rahmen/Glas/Eindeckrahmen geschnitten; Ansicht: Rahmen +
+  Glas auf zugewandten Flächen; IFC: IfcOpeningElement im IfcRoof (bzw. IfcSlab) + IfcWindow (Netz). Befehl
+  „Dachfenster" (`roofwindow`, Alias dachfenster/oberlicht): ein Klick, 78 × 118 cm, Dach mit dem Punkt im
+  Umriss, sonst Decke des Geschosses. Geprüft: Rust-Tests, CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux).
+  Offen: Verschieben/Griffe und Objekt-Info für Dach-Öffnungen (Info zeigt Wand-Felder), Fenster-/Türliste
+  (Geschoss aus der Wand), Löschen des Dachs löscht die Fenster nicht mit (Prüfung meldet den fehlenden Wirt),
+  Eindeckrahmen nur als flacher Ring, Lukarnen, nicht in der Tauri-App geprüft. · M
 
 ## Priorität 4 — später
 

@@ -190,6 +190,15 @@ export function CommandIcon({ name }: { name: string }) {
           <rect x="6" y="6.5" width="4" height="3" strokeDasharray="1.4 1.2" />
         </svg>
       );
+    case "roofwindow":
+      // Dachfenster: Dachfläche mit Fensterrahmen und Glas.
+      return (
+        <svg {...common}>
+          <polygon points="2,12 5,4 11,4 14,12" />
+          <rect x="6.2" y="6" width="3.6" height="4" />
+          <line x1="6.2" y1="8" x2="9.8" y2="8" />
+        </svg>
+      );
     case "ceilingopening":
       // Deckenloch: Decken-Rechteck mit ausgespartem Innenrechteck.
       return (

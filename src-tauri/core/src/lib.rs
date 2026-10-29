@@ -48,6 +48,7 @@ pub mod gpu_compile;
 pub mod plan_stairs;
 pub mod plan_walls;
 pub mod opening_geom;
+pub mod opening_shape;
 pub mod plan_openings;
 pub mod delaunay;
 pub mod document;

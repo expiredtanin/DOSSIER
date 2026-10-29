@@ -403,6 +403,49 @@ fn ceiling_opening_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx) -> Vec<O
     vec![Op::Replace { collection: "ceilings".into(), entity: with(host, "openings", Value::Array(openings)) }]
 }
 
+/// Dachfenster / Deckenöffnung mit Oberlicht ([100]): ein Klick setzt die Öffnung (Mitte im Grundriss) in das
+/// Dach, dessen Umriss den Punkt enthält (Dächer des aktiven Geschosses zuerst), sonst in die Decke des
+/// Geschosses. Masse in der Dachebene (Standard 78 × 118 cm), Fenstertyp wie beim Fenster-Befehl.
+fn roof_window_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let at = p_of(v, "p");
+    if !(at.0.is_finite() && at.1.is_finite()) {
+        return Vec::new();
+    }
+    let contains = |e: &&Value| {
+        let ring = ring_of(e);
+        ring.len() >= 3 && point_in_polygon(at, &ring)
+    };
+    let on_level = |e: &&Value| crate::cmd_create::floor_of(e) == Some(ctx.level);
+    let roofs = arr(root.get("roofs"));
+    let host = roofs
+        .iter()
+        .filter(contains)
+        .find(on_level)
+        .or_else(|| roofs.iter().find(contains))
+        .map(|r| ("hostRoofId", id_of(r)))
+        .or_else(|| arr(root.get("ceilings")).iter().filter(contains).find(on_level).map(|c| ("hostCeilingId", id_of(c))));
+    let Some((key, Some(host_id))) = host else { return Vec::new() };
+    let width = num_or(field(v, "width"), 0.78).max(0.1);
+    let height = num_or(field(v, "height"), 1.18).max(0.1);
+    let mut f = vec![
+        ("id", s(&ids.next("O"))),
+        ("type", s("opening")),
+        ("hostWallId", s("")),
+        (key, s(host_id)),
+        ("hostPoint", pv(at)),
+        ("categoryCode", crate::cmd_create::category_or(root, "21", ctx)),
+        ("kind", s("window")),
+        ("position", js_num(0.0)),
+        ("width", js_num(width)),
+        ("height", js_num(height)),
+        ("sillHeight", js_num(0.0)),
+    ];
+    if let Some(t) = arr(root.get("windowTypes")).first().and_then(|t| field(t, "id")).filter(|id| truthy(Some(id))) {
+        f.push(("typeId", t.clone()));
+    }
+    add_op("openings", vec![obj(f)])
+}
+
 /// Hof-Ring des Dach-Hof-Befehls: ≥ 3 Punkte wie gezeichnet, 2 Punkte als Rechteck.
 fn hole_ring(points: &[V]) -> Option<Vec<V>> {
     match points {
@@ -529,6 +572,7 @@ pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> 
         "terrain" => terrain_ops(root, ids),
         "ceilingOpening" => ceiling_opening_ops(root, v, ctx),
         "roofHole" => roof_hole_ops(root, v, ctx),
+        "roofWindow" => roof_window_ops(root, v, ctx, ids),
         "sectionline" => sectionline_ops(root, v, ids),
         _ => return None,
     })
@@ -588,6 +632,29 @@ mod tests {
         assert_eq!(label, "Kegelstumpf r=2.00/1.00 h=3.00");
         let solid = json!({"points": [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 1, "y": 1}], "height": 2, "taper": 0.5});
         assert_eq!(extruded_solid_spec(&solid, 1.0).unwrap()["kind"], "loft");
+    }
+
+    /// [100] Dachfenster: Dach mit dem Punkt im Umriss (aktives Geschoss zuerst), sonst Decke, sonst nichts.
+    #[test]
+    fn dachfenster_befehl() {
+        let rect = json!([{"x": 0, "y": 0}, {"x": 5, "y": 0}, {"x": 5, "y": 4}, {"x": 0, "y": 4}]);
+        let root = json!({"roofs": [{"id": "R", "floorId": "og", "outline": rect}], "ceilings": [{"id": "C", "floorId": "eg", "outline": rect}], "windowTypes": [{"id": "wt"}]});
+        let root = root.as_object().unwrap();
+        let run = |level: &str, x: f64| {
+            let mut ids = IdGen::new("s");
+            let ctx = Ctx { level, floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
+            ops(root, &json!({"cmd": "roofWindow", "p": {"x": x, "y": 1.0}}), &ctx, &mut ids).unwrap()
+        };
+        let item = |o: &[Op]| match &o[0] {
+            Op::Add { items, .. } => items[0].clone(),
+            _ => panic!(),
+        };
+        let r = item(&run("og", 2.0));
+        assert_eq!((r["hostRoofId"].as_str(), r["hostWallId"].as_str(), r["width"].as_f64(), r["typeId"].as_str()), (Some("R"), Some(""), Some(0.78), Some("wt")));
+        assert_eq!(r["hostPoint"]["x"], 2.0);
+        // Dach liegt auf einem anderen Geschoss: trotzdem Dach (Dächer überdecken Geschosse).
+        assert_eq!(item(&run("eg", 2.0))["hostRoofId"], "R");
+        assert!(run("eg", 9.0).is_empty());
     }
 
     #[test]

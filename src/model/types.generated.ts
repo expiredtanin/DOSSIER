@@ -1647,6 +1647,38 @@ export type Opening = {
    * Fenstertyp dort eine Sims-Linie aktiviert hat.
    */
   sillLineStyle?: LineStyleOverride;
+  /**
+   * Umriss der Öffnung in der Wandebene ([G3]); fehlt ⇒ Rechteck. Bestimmt den Wandausschnitt
+   * (Schnitt, Ansicht, 3D, IFC-Öffnungskörper); der Grundriss bleibt beim SIA-Symbol. Die
+   * Öffnung füllt ihr Rechteck `width × height`; Bogen/Schräge liegen oben (Rund: Ellipse darin).
+   */
+  shape?: "rechteck" | "rundbogen" | "segmentbogen" | "spitzbogen" | "rund" | "schraeg" | "giebel";
+  /**
+   * Stichhöhe der Form in Metern ([G3]): Segmentbogen = Bogenstich (Default Breite/6), Spitzbogen =
+   * Höhe über dem Kämpfer (≥ Breite/2, Default gleichseitig), Giebel = Höhe des Dreiecks (Default
+   * Breite/2), Schräg = Höhenunterschied links→rechts (> 0 rechts höher, Default Breite/2).
+   * Rundbogen/Rund/Rechteck ignorieren es.
+   */
+  shapeRise?: number;
+  /**
+   * Wirt Dach ([100], Dachfenster): Öffnung in einer Dachfläche; `hostWallId` bleibt leer. Lage
+   * über {@link hostPoint}; `width` quer zum Gefälle, `height` entlang des Gefälles (in der
+   * Dachebene gemessen); `position`/`sillHeight` gelten nicht.
+   */
+  hostRoofId?: string;
+  /**
+   * Wirt Decke ([100], Deckenöffnung mit Oberlicht): Öffnung in einer Decke, Lage über
+   * {@link hostPoint}, `width` × `height` waagrecht (gedreht um {@link hostAngle}).
+   */
+  hostCeilingId?: string;
+  /** Nur Dach-/Deckenwirt ([100]): Mittelpunkt der Öffnung im Grundriss (Meter). */
+  hostPoint?: Vec2;
+  /**
+   * Nur Dach-/Deckenwirt ([100]): Drehung der Breitenrichtung im Grundriss in Grad, wo die
+   * Fläche waagrecht ist (Decke, Flachdach); geneigte Dachflächen richten die Breite längs der
+   * Traufe aus. Fehlt ⇒ 0 (x-Achse).
+   */
+  hostAngle?: number;
 };
 
 /**
