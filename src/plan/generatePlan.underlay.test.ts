@@ -147,15 +147,21 @@ describe("Ebenen ein-/ausblenden (Kataster-Performance)", () => {
     expect(b.underlay!.some((g) => g.drawings[0].categoryCode === "61")).toBe(false);
   });
 
-  it("Ebenen-Sichtbarkeit invalidiert den Primitiv-Cache NICHT; eine Farbänderung schon", () => {
+  it("Ebenen-Sichtbarkeit ändert die Inhalts-Hashes NICHT; eine Farbänderung schon", () => {
     const d = poly("A", "60", [[0, 0], [1, 0], [2, 1]], false);
     const p1 = project([d]);
     const hidden = { ...p1, layers: p1.layers.map((l) => ({ ...l, visible: false })) } as Project;
-    const first = generatePlan(p1, "L1", vis(["60"]));
-    const afterToggle = generatePlan(hidden, "L1", vis(["60"]));
-    const lineOf = (pl: ReturnType<typeof generatePlan>) => pl.primitives.find((q) => q.kind === "line")!;
-    expect(lineOf(afterToggle)).toBe(lineOf(first)); // dasselbe Objekt → GPU-Chunk bleibt gültig
+    // Inhalts-Hash der ersten Linie (Schlüssel des GPU-Chunk-Caches, [K3d]).
+    const lineHash = (pl: ReturnType<typeof generatePlan>) => {
+      for (const r of pl.bufRuns ?? []) {
+        for (let i = r.from; i < r.to; i++) if (r.buf.prim(i).kind === "line") return r.buf.hashes![i];
+      }
+      return undefined;
+    };
+    const first = lineHash(generatePlan(p1, "L1", vis(["60"])));
+    expect(first).toBeDefined();
+    expect(lineHash(generatePlan(hidden, "L1", vis(["60"])))).toBe(first); // GPU-Chunk bleibt gültig
     const recolored = { ...p1, layers: p1.layers.map((l) => ({ ...l, color: "#123456" })) } as Project;
-    expect(lineOf(generatePlan(recolored, "L1", vis(["60"])))).not.toBe(lineOf(first));
+    expect(lineHash(generatePlan(recolored, "L1", vis(["60"])))).not.toBe(first);
   });
 });

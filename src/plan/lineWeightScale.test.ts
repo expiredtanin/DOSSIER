@@ -40,19 +40,20 @@ describe("Strichstärken nach Massstab", () => {
     expect(scaled.length).toBe(base.length);
     scaled.forEach((w, i) => expect(w).toBeCloseTo(base[i] * 0.5 ** 0.25, 9));
   });
-  it("gleiche Eingabe → dieselben Primitiv-Objekte, wo der Plan sie wiederverwendet (GPU-Cache)", () => {
+  it("gleiche Eingabe → gleiche Inhalts-Hashes der Kern-Abschnitte (GPU-Cache); mit Massstab als Liste", () => {
     const line = {
       id: "z1", type: "drawing2d", levelId: "eg", categoryCode: sampleProject.drawings2d[0]?.categoryCode ?? sampleProject.layers[0].code,
       geom: { shape: "polyline", pts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }], closed: false },
     } as Project["drawings2d"][number];
-    const shared = (p: Project) => {
-      const a = generatePlan(p, "eg", ALL, undefined, "mittel", false, false, true, 200).primitives;
-      const b = generatePlan(p, "eg", ALL, undefined, "mittel", false, false, true, 200).primitives;
-      const inB = new Set(b);
-      return a.filter((q) => inB.has(q)).length;
+    const hashes = (p: Project) => {
+      const pl = generatePlan(p, "eg", ALL, undefined, "mittel", false, false, true, 200);
+      return (pl.bufRuns ?? []).flatMap((r) => Array.from(r.buf.hashes!.subarray(r.from, r.to)));
     };
-    const baseShared = shared({ ...sampleProject, drawings2d: [...sampleProject.drawings2d, line] });
-    expect(baseShared).toBeGreaterThan(0);
-    expect(shared({ ...on, drawings2d: [...sampleProject.drawings2d, line] })).toBe(baseShared);
+    const base = { ...sampleProject, drawings2d: [...sampleProject.drawings2d, line] };
+    const a = hashes(base);
+    expect(a.length).toBeGreaterThan(0);
+    expect(hashes(base)).toEqual(a);
+    // Strichstärken-Massstab ersetzt die Primitive: dann gilt der Puffer nicht mehr (Objekte, s. GpuChunkCache).
+    expect(hashes({ ...on, drawings2d: base.drawings2d })).toEqual([]);
   });
 });

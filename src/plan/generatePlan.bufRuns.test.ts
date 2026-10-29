@@ -23,9 +23,9 @@ function checkRuns(plan: Plan): number {
 }
 
 describe("Plan.bufRuns", () => {
-  it("Beispiel-EG: zwei Abschnitte, alle Kern-Primitive abgedeckt", () => {
+  it("Beispiel-EG: ein Abschnitt (auch die 2D-Zeichnungen kommen aus dem Kern), alle Kern-Primitive abgedeckt", () => {
     const plan = generatePlan(sampleProject, "eg", codes(sampleProject));
-    expect(plan.bufRuns?.length).toBe(2);
+    expect(plan.bufRuns?.length).toBe(1);
     const covered = checkRuns(plan);
     expect(covered).toBe(plan.bufRuns![0].buf.prims.length);
   });
@@ -54,7 +54,7 @@ describe("Plan.bufRuns", () => {
 
   it("Überlagerung mehrerer Geschosse und kompakte Unterlage verschieben die Abschnitte mit", () => {
     const plan = generateVisibleLevelsPlan(sampleProject, "og", codes(sampleProject), undefined, "mittel", false, false, undefined, 100, true);
-    expect((plan.bufRuns ?? []).length).toBeGreaterThanOrEqual(3);
+    expect((plan.bufRuns ?? []).length).toBeGreaterThanOrEqual(2);
     checkRuns(plan);
     checkRuns(materializeUnderlay(plan));
   });
@@ -63,6 +63,6 @@ describe("Plan.bufRuns", () => {
     expect(generatePlan(sampleProject, "eg", codes(sampleProject), undefined, "mittel", false, true).bufRuns).toBeUndefined();
     const scaled: Project = { ...sampleProject, scaleLineWeights: true };
     expect(generatePlan(scaled, "eg", codes(scaled), undefined, "mittel", false, false, true, 50).bufRuns).toBeUndefined();
-    expect(generatePlan(scaled, "eg", codes(scaled), undefined, "mittel", false, false, true, 100).bufRuns?.length).toBe(2);
+    expect(generatePlan(scaled, "eg", codes(scaled), undefined, "mittel", false, false, true, 100).bufRuns?.length).toBe(1);
   });
 });

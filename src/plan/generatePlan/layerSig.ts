@@ -1,5 +1,5 @@
 // Signatur der STILRELEVANTEN Ebenen-Eigenschaften (Farbe, Strichstärke,
-// Schraffur, Code). Die gecachten Primitive je Zeichnung (`drawing2d.ts`) und die
+// Schraffur, Code). Die
 // GPU-Chunks der Unterlage hängen davon ab — NICHT von `visible`/`locked`/`name`.
 // Mit der Array-Referenz als Schlüssel galt jedes Ein-/Ausblenden einer Ebene als
 // "Stil geändert": bei einem Kataster-Import wurde dadurch alles neu erzeugt.

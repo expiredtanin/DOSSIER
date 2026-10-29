@@ -196,7 +196,7 @@ describe("Polylinie — Ring schliessen im Bogen-Modus (REGRESSION: Schluss-Segm
   // Alle drei Wege, einen Ring zu schliessen, müssen dem SCHLUSS-Segment
   // (letzter Punkt → Start) denselben tangentenstetigen Bogen geben wie jedes
   // andere Segment — vorher committeten alle drei eine gerade Kante, weil das
-  // Bulge-Array einen Eintrag zu kurz war (`drawing2d.ts` liest den fehlenden
+  // Bulge-Array einen Eintrag zu kurz war (`plan/drawings.rs` liest den fehlenden
   // Index als `undefined` = gerade).
   const path: ({ pt: Vec2 } | { opt: string })[] = [
     { pt: { x: 0, y: 0 } },

@@ -51,7 +51,7 @@
 //! Schraffur-Winkel in Grad (SVG-Drehsinn). Fehlende Zahlen (TS `undefined`) werden NaN.
 //! Flag 8 (Linienzug) setzt der Schreiber: gleiches Element (`drawingId`), gleiche Farbe/Stärke/
 //! greyed/opacity, gleiches Strichmuster (TS: dieselbe Referenz; Kern: beide fehlend oder beide
-//! null) und Anfang = Ende der vorigen Linie. Der Leser ignoriert es am Anfang eines Bereichs.
+//! null, oder beide dieselbe Muster-Kennung, s. [`Writer::push_ref`]) und Anfang = Ende der vorigen Linie. Der Leser ignoriert es am Anfang eines Bereichs.
 //! Unbekannte Zusatzfelder von Zickzack/Motiv (Modell-`extra`) reisen nicht mit.
 //! Fehler einer Abfrage: `[ERR_MAGIC, nUnits]` + Meldung als UTF-16 ([`encode_error`]).
 
@@ -991,18 +991,33 @@ struct ChainKey {
     weight: f64,
     greyed: Option<bool>,
     opacity: Option<f64>,
-    /// 0 fehlt, 1 null, 2 Liste (Listen sind im Kern nie „dieselbe Referenz“).
+    /// 0 fehlt, 1 null, 2 Liste.
     dash: u8,
+    /// Kennung der Liste (0 = keine): gleiche Kennung = in TS dieselbe Array-Referenz.
+    dash_ref: u32,
     b: Vec2,
 }
 
-fn dash_state(d: &Dash) -> u8 {
-    match d {
-        None => 0,
-        Some(None) => 1,
-        Some(Some(_)) => 2,
-    }
+/// Eine Linie mit geliehenen Feldern (Felder wie `Primitive::Line`), s. [`Writer::line_ref`].
+pub struct LineRef<'a> {
+    pub a: Vec2,
+    pub b: Vec2,
+    pub cls: &'a str,
+    pub weight_mm: f64,
+    /// `None` fehlt, `Some(None)` null, sonst das Muster.
+    pub dash: Option<Option<&'a [f64]>>,
+    pub zigzag: Option<&'a LineStyleZigzag>,
+    pub motif: Option<&'a LineStyleMotif>,
+    pub color: Option<&'a str>,
+    pub drawing_id: Option<&'a str>,
+    pub opening_id: Option<&'a str>,
+    pub stair_id: Option<&'a str>,
+    pub greyed: Option<bool>,
+    pub opacity: Option<f64>,
 }
+
+/// Länge, bis zu der `Writer::intern` einen Text im Schnellweg merkt.
+const RECENT_MAX_LEN: usize = 64;
 
 /// Schreiber des Plan-Puffers aus Kern-Primitiven.
 pub struct Writer {
@@ -1010,6 +1025,9 @@ pub struct Writer {
     strings: Vec<(usize, usize)>,
     str_map: FastMap<String, usize>,
     str_hash: Vec<u64>,
+    /// Zuletzt nachgeschlagene kurze Texte (Bytes, Länge, Index, Hash), s. `intern`.
+    recent: [Option<([u8; RECENT_MAX_LEN], usize, usize, u64)>; 4],
+    recent_at: usize,
     hatch_words: Vec<f64>,
     hatch_map: FastMap<String, (usize, u64)>,
     /// Schnellweg vor dem JSON-Vergleich: Bit-Schlüssel → (Schraffur, Index, Hash).
@@ -1033,6 +1051,8 @@ impl Writer {
             strings: Vec::new(),
             str_map: FastMap::default(),
             str_hash: Vec::new(),
+            recent: Default::default(),
+            recent_at: 0,
             hatch_words: Vec::new(),
             hatch_map: FastMap::default(),
             hatch_fast: FastMap::default(),
@@ -1049,9 +1069,32 @@ impl Writer {
     }
 
     fn intern(&mut self, s: &str) -> (usize, u64) {
-        if let Some(&i) = self.str_map.get(s) {
-            return (i, self.str_hash[i]);
+        // Schnellweg: die zuletzt gesehenen kurzen Texte (Linien eines Elements: Klasse, Farbe, Id).
+        let short = s.len() <= RECENT_MAX_LEN;
+        if short {
+            if let Some(e) = self.recent.iter().flatten().find(|e| &e.0[..e.1] == s.as_bytes()) {
+                return (e.2, e.3);
+            }
         }
+        let r = match self.str_map.get(s) {
+            Some(&i) => (i, self.str_hash[i]),
+            None => {
+                let r = self.append_string(s);
+                self.str_map.insert(s.to_string(), r.0);
+                r
+            }
+        };
+        if short {
+            let mut b = [0u8; RECENT_MAX_LEN];
+            b[..s.len()].copy_from_slice(s.as_bytes());
+            self.recent[self.recent_at] = Some((b, s.len(), r.0, r.1));
+            self.recent_at = (self.recent_at + 1) % self.recent.len();
+        }
+        r
+    }
+
+    /// Text ohne Nachschlagen anhängen (JSON von Texten/Bildern: praktisch immer verschieden).
+    fn append_string(&mut self, s: &str) -> (usize, u64) {
         let off = self.units.len();
         let mut h = FNV_OFFSET;
         for u in s.encode_utf16() {
@@ -1061,7 +1104,6 @@ impl Writer {
         let i = self.strings.len();
         self.strings.push((off, self.units.len() - off));
         self.str_hash.push(h);
-        self.str_map.insert(s.to_string(), i);
         (i, h)
     }
 
@@ -1140,10 +1182,10 @@ impl Writer {
         (idx, jh)
     }
 
-    fn head(&mut self, tag: u32, flags: u32, ids: &[(u32, &Option<String>)]) -> Vec<(u32, String)> {
+    fn head(&mut self, tag: u32, flags: u32, ids: &[(u32, Option<&str>)]) -> Vec<(u32, String)> {
         self.offsets.push(self.recs.len() as f64);
         self.h = FNV_OFFSET;
-        let mut it = ids.iter().filter_map(|(k, s)| s.as_deref().map(|s| (*k, s)));
+        let mut it = ids.iter().filter_map(|(k, s)| s.map(|s| (*k, s)));
         let first = it.next();
         // Weitere Ids (selten) erst hier sammeln.
         let rest: Vec<(u32, String)> = it.map(|(k, s)| (k, s.to_string())).collect();
@@ -1212,16 +1254,24 @@ impl Writer {
         }
     }
 
-    fn json(&mut self, tag: u32, p: &Primitive, ids: &[(u32, &Option<String>)]) {
+    fn json(&mut self, tag: u32, p: &Primitive, ids: &[(u32, Option<&str>)]) {
         let rest = self.head(tag, 0, ids);
         let json = serde_json::to_string(p).unwrap_or_default();
-        self.str(Some(&json));
+        let (i, h) = self.append_string(&json);
+        self.recs.push(i as f64);
+        self.h = fnv(self.h, h);
         self.tail_ids(rest);
     }
 
     /// Ein Primitiv anhängen.
     pub fn push(&mut self, p: &Primitive) {
-        let mut next_prev: Option<ChainKey> = None;
+        self.push_ref(p, 0);
+    }
+
+    /// Wie [`Writer::push`]; `dash_ref` kennzeichnet das Strichmuster einer Linie (0 = keine
+    /// Kennung): zwei Linien mit Muster-Liste setzen einen Linienzug nur bei gleicher Kennung fort
+    /// (TS: dieselbe Array-Referenz), ohne Kennung nie.
+    pub fn push_ref(&mut self, p: &Primitive, dash_ref: u32) {
         match p {
             Primitive::Polygon {
                 pts,
@@ -1246,17 +1296,17 @@ impl Writer {
             } => {
                 let flags = Self::style_flags(*greyed, *opacity) | if no_stroke_edges.is_some() { F_NSE } else { 0 };
                 let ids = [
-                    (1, wall_id),
-                    (2, drawing_id),
-                    (3, ceiling_id),
-                    (4, opening_id),
-                    (5, stair_id),
-                    (6, room_id),
-                    (7, extruded_solid_id),
-                    (8, context_object_id),
-                    (9, column_id),
-                    (10, roof_id),
-                    (11, section_line_id),
+                    (1, wall_id.as_deref()),
+                    (2, drawing_id.as_deref()),
+                    (3, ceiling_id.as_deref()),
+                    (4, opening_id.as_deref()),
+                    (5, stair_id.as_deref()),
+                    (6, room_id.as_deref()),
+                    (7, extruded_solid_id.as_deref()),
+                    (8, context_object_id.as_deref()),
+                    (9, column_id.as_deref()),
+                    (10, roof_id.as_deref()),
+                    (11, section_line_id.as_deref()),
                 ];
                 let rest = self.head(T_POLYGON, flags, &ids);
                 self.str(Some(fill));
@@ -1273,53 +1323,27 @@ impl Writer {
                 self.tail_ids(rest);
             }
             Primitive::Line { a, b, cls, weight_mm, dash, zigzag, motif, color, drawing_id, opening_id, stair_id, greyed, opacity } => {
-                let plain = zigzag.is_none() && motif.is_none();
-                let di = drawing_id.as_deref().map(|s| self.intern(s).0);
-                let ci = color.as_deref().map(|s| self.intern(s).0);
-                let chain = plain
-                    && self.prev.as_ref().is_some_and(|q| {
-                        q.drawing == di
-                            && q.color == ci
-                            && q.weight == *weight_mm
-                            && q.greyed == *greyed
-                            && q.opacity == *opacity
-                            && q.dash == dash_state(dash)
-                            && q.dash != 2
-                            && a.x == q.b.x
-                            && a.y == q.b.y
-                    });
-                let flags = Self::style_flags(*greyed, *opacity)
-                    | Self::dash_flags(dash)
-                    | if chain { F_CHAIN } else { 0 }
-                    | if zigzag.is_some() { F_ZIGZAG } else { 0 }
-                    | if motif.is_some() { F_MOTIF } else { 0 }
-                    | if color.is_some() { F_COLOR } else { 0 };
-                let rest = self.head(T_LINE, flags, &[(2, drawing_id), (4, opening_id), (5, stair_id)]);
-                self.str(Some(cls));
-                self.str(color.as_deref());
-                self.num(*weight_mm);
-                self.num(opacity.unwrap_or(1.0));
-                self.num(a.x);
-                self.num(a.y);
-                self.num(b.x);
-                self.num(b.y);
-                self.dash_tail(dash);
-                if let Some(z) = zigzag {
-                    self.num(z.amplitude);
-                    self.num(z.wavelength);
-                }
-                if let Some(m) = motif {
-                    self.num(m.length);
-                    self.pts(&m.points);
-                }
-                self.tail_ids(rest);
-                if plain {
-                    next_prev = Some(ChainKey { drawing: di, color: ci, weight: *weight_mm, greyed: *greyed, opacity: *opacity, dash: dash_state(dash), b: b.clone() });
-                }
+                let line = LineRef {
+                    a: *a,
+                    b: *b,
+                    cls,
+                    weight_mm: *weight_mm,
+                    dash: dash.as_ref().map(|d| d.as_deref()),
+                    zigzag: zigzag.as_ref(),
+                    motif: motif.as_ref(),
+                    color: color.as_deref(),
+                    drawing_id: drawing_id.as_deref(),
+                    opening_id: opening_id.as_deref(),
+                    stair_id: stair_id.as_deref(),
+                    greyed: *greyed,
+                    opacity: *opacity,
+                };
+                self.line_ref(&line, dash_ref);
+                return;
             }
             Primitive::Arc { center, from, to, r, cls, weight_mm, dash, opening_id, stair_id, greyed, opacity } => {
                 let flags = Self::style_flags(*greyed, *opacity) | Self::dash_flags(dash);
-                let rest = self.head(T_ARC, flags, &[(4, opening_id), (5, stair_id)]);
+                let rest = self.head(T_ARC, flags, &[(4, opening_id.as_deref()), (5, stair_id.as_deref())]);
                 self.str(Some(cls));
                 self.str(None);
                 self.num(*weight_mm);
@@ -1332,7 +1356,7 @@ impl Writer {
             }
             Primitive::DrawingCircle { center, r, fill, stroke, weight_mm, dash, drawing_id, greyed, opacity } => {
                 let flags = Self::style_flags(*greyed, *opacity) | Self::dash_flags(dash);
-                let rest = self.head(T_CIRCLE, flags, &[(2, drawing_id)]);
+                let rest = self.head(T_CIRCLE, flags, &[(2, drawing_id.as_deref())]);
                 self.str(Some(fill));
                 self.str(Some(stroke));
                 self.num(*weight_mm);
@@ -1345,7 +1369,7 @@ impl Writer {
             }
             Primitive::DrawingArc { center, r, a0, a1, stroke, weight_mm, dash, drawing_id, greyed, opacity } => {
                 let flags = Self::style_flags(*greyed, *opacity) | Self::dash_flags(dash);
-                let rest = self.head(T_DRAWING_ARC, flags, &[(2, drawing_id)]);
+                let rest = self.head(T_DRAWING_ARC, flags, &[(2, drawing_id.as_deref())]);
                 self.str(Some(stroke));
                 self.num(*weight_mm);
                 self.num(opacity.unwrap_or(1.0));
@@ -1355,13 +1379,81 @@ impl Writer {
                 self.dash_tail(dash);
                 self.tail_ids(rest);
             }
-            Primitive::Text { room_id, .. } => self.json(T_TEXT, p, &[(6, room_id)]),
-            Primitive::DrawingText { drawing_id, .. } => self.json(T_DRAWING_TEXT, p, &[(2, drawing_id)]),
-            Primitive::DrawingTextPath { drawing_id, .. } => self.json(T_TEXT_PATH, p, &[(2, drawing_id)]),
-            Primitive::DrawingImage { drawing_id, .. } => self.json(T_IMAGE, p, &[(2, drawing_id)]),
+            Primitive::Text { room_id, .. } => self.json(T_TEXT, p, &[(6, room_id.as_deref())]),
+            Primitive::DrawingText { drawing_id, .. } => self.json(T_DRAWING_TEXT, p, &[(2, drawing_id.as_deref())]),
+            Primitive::DrawingTextPath { drawing_id, .. } => self.json(T_TEXT_PATH, p, &[(2, drawing_id.as_deref())]),
+            Primitive::DrawingImage { drawing_id, .. } => self.json(T_IMAGE, p, &[(2, drawing_id.as_deref())]),
         }
         self.end_prim();
-        self.prev = next_prev;
+        self.prev = None;
+    }
+
+    /// Eine Linie aus geliehenen Feldern anhängen (wie [`Writer::push_ref`] mit `Primitive::Line`,
+    /// ohne das Primitiv erst zu bauen — die 2D-Zeichnungen schreiben so direkt in den Puffer).
+    pub fn line_ref(&mut self, l: &LineRef, dash_ref: u32) {
+        let plain = l.zigzag.is_none() && l.motif.is_none();
+        let di = l.drawing_id.map(|s| self.intern(s).0);
+        let ci = l.color.map(|s| self.intern(s).0);
+        let ds = match l.dash {
+            None => 0,
+            Some(None) => 1,
+            Some(Some(_)) => 2,
+        };
+        let chain = plain
+            && self.prev.as_ref().is_some_and(|q| {
+                q.drawing == di
+                    && q.color == ci
+                    && q.weight == l.weight_mm
+                    && q.greyed == l.greyed
+                    && q.opacity == l.opacity
+                    && q.dash == ds
+                    && (q.dash != 2 || (dash_ref != 0 && q.dash_ref == dash_ref))
+                    && l.a.x == q.b.x
+                    && l.a.y == q.b.y
+            });
+        let flags = Self::style_flags(l.greyed, l.opacity)
+            | match ds {
+                1 => F_DASH_NULL,
+                2 => F_DASH_LIST,
+                _ => 0,
+            }
+            | if chain { F_CHAIN } else { 0 }
+            | if l.zigzag.is_some() { F_ZIGZAG } else { 0 }
+            | if l.motif.is_some() { F_MOTIF } else { 0 }
+            | if l.color.is_some() { F_COLOR } else { 0 };
+        let rest = self.head(T_LINE, flags, &[(2, l.drawing_id), (4, l.opening_id), (5, l.stair_id)]);
+        self.str(Some(l.cls));
+        self.str(l.color);
+        self.num(l.weight_mm);
+        self.num(l.opacity.unwrap_or(1.0));
+        self.num(l.a.x);
+        self.num(l.a.y);
+        self.num(l.b.x);
+        self.num(l.b.y);
+        if let Some(Some(d)) = l.dash {
+            self.list(d);
+        }
+        if let Some(z) = l.zigzag {
+            self.num(z.amplitude);
+            self.num(z.wavelength);
+        }
+        if let Some(m) = l.motif {
+            self.num(m.length);
+            self.pts(&m.points);
+        }
+        self.tail_ids(rest);
+        self.end_prim();
+        self.prev = plain.then_some(ChainKey { drawing: di, color: ci, weight: l.weight_mm, greyed: l.greyed, opacity: l.opacity, dash: ds, dash_ref, b: l.b });
+    }
+
+    /// Beginn einer Gruppe, deren Primitive einzeln folgen ([`Writer::end_group`]).
+    pub fn begin_group(&mut self) -> usize {
+        self.offsets.len()
+    }
+
+    /// Schliesst die bei `start` begonnene Gruppe.
+    pub fn end_group(&mut self, start: usize) {
+        self.groups.push((start, self.offsets.len()));
     }
 
     /// Eine Gruppe (Domäne) anhängen.
@@ -1426,11 +1518,12 @@ impl Writer {
                 put(*v);
             }
         }
-        for v in &self.recs {
-            put(*v);
-        }
-        for v in &self.pool {
-            put(*v);
+        for part in [&self.recs, &self.pool] {
+            let at = out.len();
+            out.resize(at + part.len() * 8, 0);
+            for (d, v) in out[at..].chunks_exact_mut(8).zip(part.iter()) {
+                d.copy_from_slice(&v.to_le_bytes());
+            }
         }
         for u in &self.units {
             out.extend_from_slice(&u.to_le_bytes());

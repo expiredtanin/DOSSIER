@@ -1,13 +1,13 @@
 /**
- * `addDrawing2D` — Rendering der neuen Freiform-Geometrien (ellipse/bezier/
- * spline): tessellierte Linien-/Polygon-Primitive wie bei polyline/rect,
- * kein eigenes SVG-Primitiv (s. `model/types.ts` Drawing2DGeom-Doku).
+ * Plan-Primitive der 2D-Zeichnungen aus dem Kern (`plan/drawings.rs`, über `drawingPrimitives`):
+ * Freiform-Geometrien (ellipse/bezier/spline) als tessellierte Linien-/Polygon-Primitive wie bei
+ * polyline/rect, Bemassung, Kote, Linienenden, Blöcke, Transparenz, Strichmuster.
  */
 
 import { describe, it, expect } from "vitest";
-import { addDrawing2D } from "./drawing2d";
-import type { Drawing2D, Project } from "../../model/types";
-import type { Primitive } from "./shared";
+import { drawingPrimitives } from "./generatePlan";
+import type { Drawing2D, Project } from "../model/types";
+import type { Primitive } from "./generatePlan/shared";
 
 function project(): Project {
   return {
@@ -29,11 +29,7 @@ function project(): Project {
   };
 }
 
-const lwByCode = new Map<string, number>();
-const colorByCode = new Map<string, string>();
-const catByCode = new Map<string, Project["layers"][number]>();
-
-describe("addDrawing2D — ellipse", () => {
+describe("2D-Zeichnung — ellipse", () => {
   it("gibt eine gefüllte Fläche + geschlossenen Linienzug (64 Segmente) aus", () => {
     const d: Drawing2D = {
       id: "e1",
@@ -43,7 +39,7 @@ describe("addDrawing2D — ellipse", () => {
       geom: { shape: "ellipse", center: { x: 0, y: 0 }, rx: 4, ry: 2, rotation: 0 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     const polys = out.filter((p) => p.kind === "polygon");
     const lines = out.filter((p) => p.kind === "line");
     expect(polys.length).toBe(1);
@@ -57,7 +53,7 @@ describe("addDrawing2D — ellipse", () => {
   });
 });
 
-describe("addDrawing2D — bezier", () => {
+describe("2D-Zeichnung — bezier", () => {
   it("ein Segment: tessellierte offene Linienkette, kein Füll-Polygon", () => {
     const d: Drawing2D = {
       id: "b1",
@@ -70,7 +66,7 @@ describe("addDrawing2D — bezier", () => {
       },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.every((p) => p.kind === "line")).toBe(true);
     expect(out.length).toBe(24); // segsPerCurve Default
     const lines = out.filter((p): p is Extract<Primitive, { kind: "line" }> => p.kind === "line");
@@ -81,7 +77,7 @@ describe("addDrawing2D — bezier", () => {
   });
 });
 
-describe("addDrawing2D — spline", () => {
+describe("2D-Zeichnung — spline", () => {
   it("offen: tessellierte Linienkette durch die Wegpunkte, kein Füll-Polygon", () => {
     const d: Drawing2D = {
       id: "s1",
@@ -91,7 +87,7 @@ describe("addDrawing2D — spline", () => {
       geom: { shape: "spline", pts: [{ x: 0, y: 0 }, { x: 2, y: 3 }, { x: 5, y: 1 }], closed: false },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.some((p) => p.kind === "polygon")).toBe(false);
     const lines = out.filter((p): p is Extract<Primitive, { kind: "line" }> => p.kind === "line");
     expect(lines[0].a).toEqual({ x: 0, y: 0 });
@@ -113,7 +109,7 @@ describe("addDrawing2D — spline", () => {
       },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.filter((p) => p.kind === "polygon").length).toBe(1);
     const lines = out.filter((p): p is Extract<Primitive, { kind: "line" }> => p.kind === "line");
     const last = lines[lines.length - 1];
@@ -134,7 +130,7 @@ describe("addDrawing2D — spline", () => {
       },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     const lines = out.filter((p): p is Extract<Primitive, { kind: "line" }> => p.kind === "line");
     expect(lines[0].a).toEqual({ x: 0, y: 0 }); // geklemmt: Start exakt getroffen
     const last = lines[lines.length - 1];
@@ -148,7 +144,7 @@ describe("addDrawing2D — spline", () => {
   });
 });
 
-describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
+describe("2D-Zeichnung — dimension (SIA 400 B.5.3)", () => {
   it("gibt 2 Masshilfslinien + 1 Masslinie (dünn) + 2 Massstriche (doppelte Stärke) + 1 Masszahl-Text aus", () => {
     const d: Drawing2D = {
       id: "dim1",
@@ -158,7 +154,7 @@ describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
       geom: { shape: "dimension", pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }], offset: 1 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     const lines = out.filter((p): p is Extract<Primitive, { kind: "line" }> => p.kind === "line");
     const texts = out.filter((p) => p.kind === "drawingText");
     expect(lines.length).toBe(5); // 2 Masshilfslinien + 1 Masslinie + 2 Massstriche
@@ -181,7 +177,7 @@ describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
       geom: { shape: "dimension", pts: [{ x: 0, y: 0 }, { x: 3, y: 4 }], offset: 0.5 }, // 3-4-5-Dreieck → 5m
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     const text = out.find((p) => p.kind === "drawingText");
     expect(text).toBeDefined();
     if (text?.kind === "drawingText") expect(text.text).toBe("5.00");
@@ -196,12 +192,12 @@ describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
       geom: { shape: "dimension", pts: [{ x: 2, y: 2 }, { x: 2, y: 2 }], offset: 1 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.length).toBe(0);
   });
 });
 
-describe("addDrawing2D — kote (SIA 400 B.5.4)", () => {
+describe("2D-Zeichnung — kote (SIA 400 B.5.4)", () => {
   it("OK fertig: hohles Dreieck (Spitze nach unten) + formatierte Zahl mit +", () => {
     const d: Drawing2D = {
       id: "k1",
@@ -211,7 +207,7 @@ describe("addDrawing2D — kote (SIA 400 B.5.4)", () => {
       geom: { shape: "kote", at: { x: 0, y: 0 }, value: 3.25, kind: "okFertig", rotation: 0 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     const poly = out.find((p) => p.kind === "polygon");
     const text = out.find((p) => p.kind === "drawingText");
     expect(poly).toBeDefined();
@@ -233,7 +229,7 @@ describe("addDrawing2D — kote (SIA 400 B.5.4)", () => {
       geom: { shape: "kote", at: { x: 0, y: 0 }, value: -0.1, kind: "ukRoh", rotation: 0 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     const poly = out.find((p) => p.kind === "polygon");
     const text = out.find((p) => p.kind === "drawingText");
     if (poly?.kind === "polygon") {
@@ -252,13 +248,13 @@ describe("addDrawing2D — kote (SIA 400 B.5.4)", () => {
       geom: { shape: "kote", at: { x: 0, y: 0 }, value: 0, kind: "okFertig", rotation: 0 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     const text = out.find((p) => p.kind === "drawingText");
     if (text?.kind === "drawingText") expect(text.text).toBe("±0.00");
   });
 });
 
-describe("addDrawing2D — xline (Konstruktionslinie)", () => {
+describe("2D-Zeichnung — xline (Konstruktionslinie)", () => {
   it("verlängert weit über a/b hinaus, in beide Richtungen entlang a→b", () => {
     const d: Drawing2D = {
       id: "x1",
@@ -268,7 +264,7 @@ describe("addDrawing2D — xline (Konstruktionslinie)", () => {
       geom: { shape: "xline", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.length).toBe(1);
     const l = out[0];
     if (l.kind === "line") {
@@ -292,12 +288,12 @@ describe("addDrawing2D — xline (Konstruktionslinie)", () => {
       geom: { shape: "xline", a: { x: 2, y: 2 }, b: { x: 2, y: 2 } },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.length).toBe(0);
   });
 });
 
-describe("addDrawing2D — ray (Strahl)", () => {
+describe("2D-Zeichnung — ray (Strahl)", () => {
   it("verlängert NUR über b hinaus — a bleibt der feste Anker", () => {
     const d: Drawing2D = {
       id: "r1",
@@ -307,7 +303,7 @@ describe("addDrawing2D — ray (Strahl)", () => {
       geom: { shape: "ray", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.length).toBe(1);
     const l = out[0];
     if (l.kind === "line") {
@@ -332,12 +328,12 @@ describe("addDrawing2D — ray (Strahl)", () => {
       geom: { shape: "ray", a: { x: 2, y: 2 }, b: { x: 2, y: 2 } },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.length).toBe(0);
   });
 });
 
-describe("addDrawing2D — polyline mit bulge (Bogen-Segmente)", () => {
+describe("2D-Zeichnung — polyline mit bulge (Bogen-Segmente)", () => {
   it("ohne bulge: unverändertes Verhalten (gerade Segmente, ein Primitiv je Segment)", () => {
     const d: Drawing2D = {
       id: "pl1",
@@ -347,7 +343,7 @@ describe("addDrawing2D — polyline mit bulge (Bogen-Segmente)", () => {
       geom: { shape: "polyline", pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }], closed: false },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     const lines = out.filter((p) => p.kind === "line");
     expect(lines.length).toBe(2);
   });
@@ -366,7 +362,7 @@ describe("addDrawing2D — polyline mit bulge (Bogen-Segmente)", () => {
       },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
 
     // Segment 0 (Halbkreis, bulge=1) → EIN Bogen-Primitiv; Segment 1 (gerade)
     // → EINE Linie. Früher war der Bogen in ~15 Geradenstücke tesselliert,
@@ -415,7 +411,7 @@ describe("addDrawing2D — polyline mit bulge (Bogen-Segmente)", () => {
       },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     const poly = out.find((p) => p.kind === "polygon");
     expect(poly).toBeDefined();
     if (poly?.kind === "polygon") {
@@ -425,7 +421,7 @@ describe("addDrawing2D — polyline mit bulge (Bogen-Segmente)", () => {
   });
 });
 
-describe("addDrawing2D — text mit pathPts (Text-entlang-Pfad)", () => {
+describe("2D-Zeichnung — text mit pathPts (Text-entlang-Pfad)", () => {
   it("gibt ein drawingTextPath-Primitiv statt drawingText aus, wenn pathPts ≥2 gesetzt ist", () => {
     const d: Drawing2D = {
       id: "tp1",
@@ -442,7 +438,7 @@ describe("addDrawing2D — text mit pathPts (Text-entlang-Pfad)", () => {
       },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.length).toBe(1);
     const p = out[0];
     expect(p.kind).toBe("drawingTextPath");
@@ -462,13 +458,13 @@ describe("addDrawing2D — text mit pathPts (Text-entlang-Pfad)", () => {
       geom: { shape: "text", at: { x: 0, y: 0 }, text: "Normal", height: 0.3, angle: 0 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.length).toBe(1);
     expect(out[0].kind).toBe("drawingText");
   });
 });
 
-describe("addDrawing2D — block (Symbol-Instanz)", () => {
+describe("2D-Zeichnung — block (Symbol-Instanz)", () => {
   it("expandiert die BlockDef-Geometrie rotiert+verschoben um at/rotation", () => {
     const proj = project();
     proj.blockDefs = [
@@ -482,7 +478,7 @@ describe("addDrawing2D — block (Symbol-Instanz)", () => {
       geom: { shape: "block", blockDefId: "blk1", at: { x: 5, y: 5 }, rotation: Math.PI / 2 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, proj, d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(proj, d));
     expect(out.length).toBe(1);
     const l = out[0];
     if (l.kind === "line") {
@@ -510,7 +506,7 @@ describe("addDrawing2D — block (Symbol-Instanz)", () => {
       geom: { shape: "block", blockDefId: "blk1", at: { x: 10, y: 10 }, rotation: 0, scale: 2 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, proj, d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(proj, d));
     expect(out.length).toBe(1);
     const c = out[0];
     if (c.kind === "drawingCircle") {
@@ -536,7 +532,7 @@ describe("addDrawing2D — block (Symbol-Instanz)", () => {
       geom: { shape: "block", blockDefId: "blk1", at: { x: 0, y: 0 }, rotation: 0 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, proj, d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(proj, d));
     const c = out[0];
     if (c.kind === "drawingCircle") expect(c.r).toBeCloseTo(1, 6);
     else throw new Error("expected a drawingCircle primitive");
@@ -551,12 +547,12 @@ describe("addDrawing2D — block (Symbol-Instanz)", () => {
       geom: { shape: "block", blockDefId: "ghost", at: { x: 0, y: 0 }, rotation: 0 },
     };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     expect(out.length).toBe(0);
   });
 });
 
-describe("addDrawing2D — Bemassung: Strichstärken je Bestandteil", () => {
+describe("2D-Zeichnung — Bemassung: Strichstärken je Bestandteil", () => {
   const dim = (extra: Record<string, unknown> = {}): Drawing2D => ({
     id: "dim1",
     type: "drawing2d",
@@ -568,7 +564,7 @@ describe("addDrawing2D — Bemassung: Strichstärken je Bestandteil", () => {
   /** Alle Linien-Primitive der Bemassung nach Strichstärke gruppiert. */
   const weights = (d: Drawing2D) => {
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    out.push(...drawingPrimitives(project(), d));
     return out.filter((p) => p.kind === "line").map((p) => (p.kind === "line" ? p.weightMm : 0));
   };
 
@@ -595,7 +591,7 @@ describe("addDrawing2D — Bemassung: Strichstärken je Bestandteil", () => {
   });
 });
 
-describe("addDrawing2D — Bemassung: Papier-mm statt Modellmass", () => {
+describe("2D-Zeichnung — Bemassung: Papier-mm statt Modellmass", () => {
   const dim: Drawing2D = {
     id: "dimS",
     type: "drawing2d",
@@ -612,7 +608,7 @@ describe("addDrawing2D — Bemassung: Papier-mm statt Modellmass", () => {
   /** Länge des ersten Massstrichs (Diagonale) im erzeugten Plan. */
   const tickLength = (scale: number) => {
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), dim, false, lwByCode, colorByCode, catByCode, scale);
+    out.push(...drawingPrimitives(project(), dim, scale));
     // Massstriche sind die kürzesten Linien (Diagonalen an den Enden).
     const lens = out
       .filter((p) => p.kind === "line")
@@ -633,7 +629,7 @@ describe("addDrawing2D — Bemassung: Papier-mm statt Modellmass", () => {
   it("ohne gesetzten Wert gilt der Default — ebenfalls massstabsabhängig", () => {
     const plain: Drawing2D = { ...dim, geom: { ...dim.geom, tickLenMm: undefined } as typeof dim.geom };
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), plain, false, lwByCode, colorByCode, catByCode, 50);
+    out.push(...drawingPrimitives(project(), plain, 50));
     const lens = out
       .filter((p) => p.kind === "line")
       .map((p) => (p.kind === "line" ? Math.hypot(p.b.x - p.a.x, p.b.y - p.a.y) : 0));
@@ -642,7 +638,7 @@ describe("addDrawing2D — Bemassung: Papier-mm statt Modellmass", () => {
   });
 });
 
-describe("addDrawing2D — Linienenden (Pfeilspitzen & Co.)", () => {
+describe("2D-Zeichnung — Linienenden (Pfeilspitzen & Co.)", () => {
   const line = (endMarks?: Drawing2D["endMarks"]): Drawing2D => ({
     id: "em1",
     type: "drawing2d",
@@ -653,7 +649,7 @@ describe("addDrawing2D — Linienenden (Pfeilspitzen & Co.)", () => {
   });
   const render = (d: Drawing2D, scale = 50) => {
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode, scale);
+    out.push(...drawingPrimitives(project(), d, scale));
     return out;
   };
 
@@ -751,7 +747,7 @@ describe("addDrawing2D — Linienenden (Pfeilspitzen & Co.)", () => {
   });
 });
 
-describe("addDrawing2D — Objekt-Transparenz", () => {
+describe("2D-Zeichnung — Objekt-Transparenz", () => {
   const poly = (opacity?: number): Drawing2D => ({
     id: "op1",
     type: "drawing2d",
@@ -768,7 +764,7 @@ describe("addDrawing2D — Objekt-Transparenz", () => {
   });
   const render = (d: Drawing2D) => {
     const out: Primitive[] = [];
-    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode, 50);
+    out.push(...drawingPrimitives(project(), d, 50));
     return out;
   };
 
@@ -794,7 +790,7 @@ describe("addDrawing2D — Objekt-Transparenz", () => {
   });
 });
 
-describe("addDrawing2D — Strichmuster-Massstab (LTSCALE je Objekt)", () => {
+describe("2D-Zeichnung — Strichmuster-Massstab (LTSCALE je Objekt)", () => {
   const dashed = (dashScale?: number): Drawing2D => ({
     id: "ds1",
     type: "drawing2d",
@@ -807,7 +803,7 @@ describe("addDrawing2D — Strichmuster-Massstab (LTSCALE je Objekt)", () => {
   const dashOf = (d: Drawing2D) => {
     const out: Primitive[] = [];
     const p = { ...project(), lineStyles: [{ id: "dash", name: "Strich", weight: 0.2, color: "#000", dash: [2, 1] }] };
-    addDrawing2D(out, p, d, false, lwByCode, colorByCode, catByCode, 50);
+    out.push(...drawingPrimitives(p, d, 50));
     const ln = out.find((x) => x.kind === "line");
     return ln?.kind === "line" ? ln.dash : undefined;
   };

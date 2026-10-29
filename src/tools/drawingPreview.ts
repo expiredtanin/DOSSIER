@@ -1,22 +1,18 @@
 // Vorschau-Formen eines (transformierten) 2D-Elements für Verschieben/Kopieren/
 // Drehen/Spiegeln/Skalieren: das Element läuft durch DIESELBE Primitiv-Erzeugung
-// wie der Plan (`addDrawing2D`), die Primitive werden in einfache Vorschau-Formen
+// wie der Plan (Kern, `drawingPrimitives`), die Primitive werden in einfache Vorschau-Formen
 // (Linien/Polygone) übersetzt. So hat JEDE Form eine Vorschau — Kreis, Bogen,
 // Spline, Text, Bemassung, Kote, Block, Polylinien-Bögen … (vorher nur Linie/
 // Polylinie/Rechteck/Bild, alles andere war beim Verschieben unsichtbar).
 
 import type { Drawing2D, Project, Vec2 } from "../model/types";
 import type { Primitive } from "../core";
-import { addDrawing2D } from "../core";
+import { drawingPrimitives } from "../core";
 import { textFrameCorners } from "../text/textFrame";
 import type { DraftShape } from "./types";
 
 /** Obergrenze je Element (Schraffur-Muster u. Ä. können sehr viele Linien erzeugen). */
 const MAX_SHAPES_PER_ITEM = 4000;
-
-const EMPTY_LW = new Map<string, number>();
-const EMPTY_COLOR = new Map<string, string>();
-const EMPTY_CAT = new Map();
 
 function ringLines(center: Vec2, r: number, a0: number, a1: number, out: DraftShape[]): void {
   const sweep = a1 - a0;
@@ -83,9 +79,9 @@ export function primitivesToDraftShapes(prims: readonly Primitive[]): DraftShape
 
 /** Vorschau-Formen eines 2D-Elements (Geometrie bereits transformiert). */
 export function drawingPreviewShapes(project: Project, d: Drawing2D, scaleDenominator?: number): DraftShape[] {
-  const prims: Primitive[] = [];
+  let prims: Primitive[];
   try {
-    addDrawing2D(prims, project, d, false, EMPTY_LW, EMPTY_COLOR, EMPTY_CAT, scaleDenominator);
+    prims = drawingPrimitives(project, d, scaleDenominator);
   } catch {
     return [];
   }

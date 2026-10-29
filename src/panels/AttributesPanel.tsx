@@ -32,8 +32,7 @@ import { usePanelHost } from "./host";
 import { Dropdown } from "../ui/Dropdown";
 import { PenColorField } from "../ui/PenColorField";
 import { activePenSet, resolvePenWeight } from "../model/penSets";
-import { DIM_DEFAULTS_MM } from "../model/dimension";
-import { END_MARK_DEFAULT_SIZE_MM } from "../core";
+import { DIM_DEFAULTS_MM, END_MARK_DEFAULT_SIZE_MM } from "../model/dimension";
 import type { EndMark } from "../model/types";
 
 /** Auswahl der Linienenden (Reihenfolge = Anzeige im Dropdown). */
@@ -615,7 +614,7 @@ export function AttributesPanel() {
 
             {/* Füllart: Keine / Vollfläche / Schraffur — die drei klaren Zustände einer
                 Fläche, statt sie nur indirekt über Hintergrundfarbe + Schraffur-Liste
-                zu erraten. Erkennung wie der Renderer (`addDrawing2D`: background →
+                zu erraten. Erkennung wie der Renderer (`plan/drawings.rs`: background →
                 Ebenenfarbe bei Quelle „Ebene" → fillColor). */}
             {isDrawing && sel.closed === true && (() => {
               const hatchActive = !!sel.effectiveHatchId && !hatchPatternIsNone;

@@ -47,8 +47,44 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
 
 /// Abfragen mit binärer Antwort (Plan-Puffer v2, s. `plan_buf.rs`).
 pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
+    use crate::plan::{domains, drawings};
     match (name, args.len()) {
-        ("planDomains", 1) => crate::plan::domains::plan_domains_buf(p, &crate::plan::domains::PlanArgs::parse(args[0], text)?),
+        ("planDomains", 1) => domains::plan_domains_buf(p, &domains::PlanArgs::parse(args[0], text)?),
+        // Gruppen der kompakten Linien-Unterlage (gleiche Argumente wie `planDomains`), als f64.
+        ("drawingUnderlay", 1) => {
+            let a = domains::PlanArgs::parse(args[0], text)?;
+            Ok(drawings::underlay_groups(&domains::Ctx::new(p, &a)).iter().flat_map(|v| v.to_le_bytes()).collect())
+        }
+        // Linien der Zeichnungen `[Massstab, gedimmt, Index…]` (Index in `drawings2d`), mit Override-Regeln.
+        ("drawingLines", n) if n >= 2 => {
+            let mut a = domains::PlanArgs::parse(1.0, "{}")?;
+            a.scale = args[0];
+            let c = domains::Ctx::new(p, &a);
+            buf_of(|sink| drawings::underlay_lines(&c, &args[2..], args[1] != 0.0, sink))
+        }
+        // Primitive einer Zeichnung (JSON in `text`, ohne Override-Regeln) beim Massstab `args[0]`.
+        ("drawingPrims", 1) => {
+            let d: crate::model::Drawing2D = serde_json::from_str(text).map_err(|e| format!("drawingPrims: {e}"))?;
+            let a = domains::PlanArgs::parse(1.0, "{}")?;
+            let c = domains::Ctx::new(p, &a);
+            buf_of(|sink| drawings::emit(&c, &d, drawings::Attrs::of(&c, &d), &d.geom, false, args[0], sink, 0))
+        }
+        // Automatische Höhenkoten im Schnitt/in der Ansicht für das Ausmass `[minX, minY, maxX, maxY]`.
+        ("levelMarkers", 4) => {
+            let mut w = crate::plan_buf::Writer::new(false);
+            w.group(&drawings::level_markers(p, [args[0], args[1], args[2], args[3]]));
+            Ok(w.finish())
+        }
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }
+}
+
+/// Plan-Puffer (eine Gruppe, ohne Inhalts-Hashes), in den `f` die Zeichnungs-Primitive schreibt.
+fn buf_of(f: impl FnOnce(&mut crate::plan::drawings::Sink) -> Result<(), String>) -> Result<Vec<u8>, String> {
+    use crate::plan::drawings::{Keep, Sink, Target};
+    let mut w = crate::plan_buf::Writer::new(false);
+    let start = w.begin_group();
+    f(&mut Sink::new(Target::Buf(&mut w), Keep::All))?;
+    w.end_group(start);
+    Ok(w.finish())
 }

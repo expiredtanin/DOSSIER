@@ -1,7 +1,7 @@
 /**
  * `generatePlan` — Rendering des Massstabsbalkens (`shape:"scalebar"`):
  * abwechselnd gefüllte/leere Segmente + Ticks/Beschriftung an jeder
- * Segmentgrenze (s. `drawing2d.ts`).
+ * Segmentgrenze (s. `plan/drawings.rs` im Kern).
  */
 
 import { describe, it, expect } from "vitest";

@@ -10,9 +10,9 @@
 // Schnitt-Pfad, `toSection.ts`). Die Bauteil-Domänen (Decken, Dächer, Räume,
 // Wände mit Öffnungen, Treppen, Stützen, Extrusionen, Kontext, Schnittführung)
 // rechnet der Rust-Kern auf dem Projekt-Dokument (`src-tauri/core/src/plan/`,
-// Abfrage `planDomains`, [K3d]) und liefert fertige `Primitive`. In TS bleiben
-// die freie 2D-Geometrie (`generatePlan/drawing2d.ts`), Schattenstudie und
-// Baurecht, die Abzugskörper (`voids.ts`), Mono und der Strichstärken-Massstab.
+// Abfrage `planDomains`, [K3d]) und liefert fertige `Primitive` — auch die freie
+// 2D-Geometrie (`plan/drawings.rs`). In TS bleiben Schattenstudie und Baurecht,
+// die Abzugskörper (`voids.ts`), Mono und der Strichstärken-Massstab.
 // Das `Primitive`-Vokabular und die Attribut-Auflösung für die übrigen TS-Pfade
 // leben in `generatePlan/shared.ts`.
 
@@ -22,14 +22,11 @@ import type {
   ContextImage,
   ContextObject,
   Drawing2D,
-  LayerCategory,
-  OverrideActions,
   Project,
   Vec2,
   Wall,
 } from "../model/types";
 import {
-  flattenCategories,
   getCeilingType,
   getComponent,
   getLayerCategory,
@@ -37,7 +34,6 @@ import {
 } from "../model/types";
 import { documentFor } from "../core/document";
 import { decodePlanBuf, type DecodedPlanBuf } from "./planBuf";
-import { effectiveOverrides, hasOverrides } from "../overrides/engine";
 import type { SectionOutput } from "./toSection";
 import {
   HATCH_INK,
@@ -59,13 +55,6 @@ import { addSunShadow } from "./generatePlan/sunShadow";
 import { addSiteRules, addSiteViolations } from "./generatePlan/siteRules";
 import { lineWeightFactor, scalePrimitiveWeights } from "./lineWeightScale";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
-import {
-  addDrawing2D,
-  addDrawing2DWithoutLines,
-  drawingLinePrims,
-  isCompactUnderlayEligible,
-} from "./generatePlan/drawing2d";
-import { drawingBox } from "../geometry/drawingBounds";
 import { layersStyleSig } from "./generatePlan/layerSig";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (Export-Pipeline,
@@ -230,6 +219,11 @@ export interface UnderlayGroup {
   ctx: readonly unknown[];
   /** Erzeugt die 'line'-Primitive der gegebenen Zeichnungen (Teilmenge dieser Gruppe). */
   build: (drawings: Drawing2D[]) => Primitive[];
+  /**
+   * Dieselben Linien als Plan-Puffer des Kerns (ohne sie als Objekte zu lesen) — fehlt, wenn die
+   * Linien in TS nachbearbeitet werden (Strichstärken-Massstab).
+   */
+  buildBuf?: (drawings: Drawing2D[]) => DecodedPlanBuf;
 }
 
 /**
@@ -240,27 +234,43 @@ export interface UnderlayGroup {
 export function materializeUnderlay(plan: Plan): Plan {
   const groups = plan.underlay;
   if (!groups || groups.length === 0) return plan;
-  const below: Primitive[] = [];
-  const above: Primitive[] = [];
+  // Stücke statt Kopie (s. `planLazy.ts`): die Primitive des Plans werden dabei nicht gelesen, die
+  // Linien der Unterlage bleiben (mit `buildBuf`) Abschnitte von Kern-Puffern.
+  const below: PlanPiece[] = [];
+  const above: PlanPiece[] = [];
+  let nBelow = 0;
+  let nAbove = 0;
   const belowGreyed: Array<[number, number]> = [];
   const aboveGreyed: Array<[number, number]> = [];
   for (const g of groups) {
-    const target = g.above ? above : below;
-    const from = target.length;
-    for (const pr of g.build(g.drawings)) target.push(pr);
-    if (g.tint && target.length > from) (g.above ? aboveGreyed : belowGreyed).push([from, target.length]);
+    let piece: PlanPiece;
+    let n: number;
+    if (g.buildBuf) {
+      const b = g.buildBuf(g.drawings);
+      piece = { buf: b, from: 0, to: b.count };
+      n = b.count;
+    } else {
+      const list = g.build(g.drawings);
+      piece = list;
+      n = list.length;
+    }
+    if (n === 0) continue;
+    const from = g.above ? nAbove : nBelow;
+    (g.above ? above : below).push(piece);
+    if (g.above) nAbove += n;
+    else nBelow += n;
+    if (g.tint) (g.above ? aboveGreyed : belowGreyed).push([from, from + n]);
   }
-  // Stücke statt Kopie (s. `planLazy.ts`): die Primitive des Plans werden dabei nicht gelesen.
   const n = planCount(plan);
-  const shifted = (plan.greyedRanges ?? []).map(([a, b]): [number, number] => [a + below.length, b + below.length]);
-  const aboveShift = below.length + n;
+  const shifted = (plan.greyedRanges ?? []).map(([a, b]): [number, number] => [a + nBelow, b + nBelow]);
+  const aboveShift = nBelow + n;
   const ranges = [
     ...belowGreyed,
     ...shifted,
     ...aboveGreyed.map(([a, b]): [number, number] => [a + aboveShift, b + aboveShift]),
   ];
   const { underlay: _u, greyedRanges: _g, ...fields } = planFields(plan);
-  return lazyPlan({ ...fields, ...(ranges.length ? { greyedRanges: ranges } : {}) }, [below, ...piecesOf(plan), above]);
+  return lazyPlan({ ...fields, ...(ranges.length ? { greyedRanges: ranges } : {}) }, [...below, ...piecesOf(plan), ...above]);
 }
 
 /** Ob Index `i` in einem der (sortierten, disjunkten) Bereiche liegt. */
@@ -344,61 +354,15 @@ export function generatePlan(
   const underlayCount = primitives.length;
   // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
   const floor = project.drawingLevels.find((z) => z.id === floorId);
-  // Code → Kategorie-Strichstärke (mm), damit die Wand-Umrisslinie aus dem
-  // Modell (Ebene) stammt statt aus einer Magie-Konstante.
-  const lwByCode = categoryLwMap(project.layers);
-  const colorByCode = categoryColorMap(project.layers);
-  // Code → volle LayerCategory, für die By-Layer-Attribut-Auflösung (Quelle
-  // "layer" von Vordergrund/Hintergrund/Strichstärke/Schraffur).
-  const catByCode = categoryMap(project.layers);
+  const compact = compactUnderlay && !mono && !forPrint;
 
-  // ── Grafische Overrides (Regel-Engine, src/overrides/engine.ts) ───────────
-  // Effektive Aktionen je Element als OBERSTE Schicht ÜBER der regulären
-  // By-Layer/By-Object-Auflösung: die Elemente werden hier — rein zur
-  // Renderzeit — mit den Regel-Ergebnissen dekoriert (flache Kopien; das
-  // Projekt bleibt unverändert, jederzeit reversibel). `layer_name` matcht
-  // Ebenen-Name ODER -Code, `object_name` den Element-/Typ-Namen.
-  const overrideFor = (
-    categoryCode: string,
-    objectName?: string,
-  ): OverrideActions =>
-    effectiveOverrides(project.overrideRules, {
-      layerName: catByCode.get(categoryCode)?.name,
-      layerCode: categoryCode,
-      objectName,
-    });
-  // Freie 2D-Zeichengeometrie dieses Geschosses (wie Wände nach sichtbaren
-  // Kategorien + Darstellungsmodus gefiltert). Wird über der Wand-Poché
-  // gezeichnet (am Ende angehängt).
-  const drawings = project.drawings2d
-    .filter(
-      (d) =>
-        d.levelId === floorId &&
-        visibleCodes.has(d.categoryCode) &&
-        categoryDisplay(d.categoryCode).render &&
-        (!forPrint || !d.noPrint),
-    )
-    .map((d) => {
-      // `object_name` matcht bei freier 2D-Geometrie den Formnamen
-      // (line/polyline/rect/circle/arc/text). Linienstil-Override nur hier —
-      // Drawing2D ist das einzige Element mit LineStyle-Referenz.
-      const ov = overrideFor(d.categoryCode, d.geom.shape);
-      if (!hasOverrides(ov)) return d;
-      return {
-        ...d,
-        color: ov.color ?? d.color,
-        weightMm: ov.lineweight ?? d.weightMm,
-        lineStyleId: ov.linetypeId ?? d.lineStyleId,
-      };
-    });
-
-  // Decken, Dächer, Räume, Wände mit Öffnungen, Treppen, Stützen und Extrusions-Umrisse rechnet der
-  // Kern auf dem Dokument ([K3d], `plan/{domains,walls,stairs}.rs`): Filter, Override-Regeln,
-  // Verschneidung, Stil und Raumstempel-Daten. Decken, Dächer und Räume liegen unter der Wand-Poché; Stützen folgen
-  // nach den Treppen, Extrusionen nach den 2D-Zeichnungen.
+  // Decken, Dächer, Räume, Wände mit Öffnungen, Treppen, Stützen, 2D-Zeichnungen und Extrusions-Umrisse
+  // rechnet der Kern auf dem Dokument ([K3d], `plan/{domains,walls,stairs,drawings}.rs`): Filter,
+  // Override-Regeln, Verschneidung, Stil und Raumstempel-Daten. Decken, Dächer und Räume liegen unter
+  // der Wand-Poché; Stützen folgen nach den Treppen, die 2D-Zeichnungen darüber, Extrusionen danach.
   // Der Kern liefert alles in EINEM Plan-Puffer (Gruppen in dieser Reihenfolge); die Abschnitte
   // merkt sich der Plan (`bufRuns`), damit die GPU sie direkt aus dem Puffer kompiliert.
-  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal);
+  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact);
   // Der Plan entsteht aus Stücken ([K3d], `planLazy.ts`): TS-Listen und Kern-Abschnitte; die
   // Kern-Primitive werden erst gelesen, wenn ein Verbraucher sie als Objekte braucht.
   const pieces: PlanPiece[] = [primitives];
@@ -409,58 +373,14 @@ export function generatePlan(
     if (to > from) pieces.push({ buf: dom.buf, from, to });
   };
   // Decken, Dächer, Räume; Wände (Poché, Referenzlinie) mit ihren Öffnungs-Symbolen, je Wand
-  // nacheinander; Treppen (Tritte + Lauflinie + Auf-/Abpfeil mit dem Grundriss-Schnitt, über der
-  // Wand-Poché); Stützen (Querschnitt-Poché).
-  pushGroups(G_CEILINGS, G_COLUMNS);
-
-  // 2D-Zeichengeometrie zuletzt (über der Poché).
-  const drawingPrims: Primitive[] = [];
-  pieces.push(drawingPrims);
-  const compact = compactUnderlay && !mono && !forPrint;
-  // Kompakte Unterlage PRO KATEGORIE gruppiert: das Ein-/Ausblenden einer Ebene
-  // entfernt dann nur deren Gruppe — die Chunks aller anderen Ebenen bleiben
-  // identisch und werden wiederverwendet (statt dass fast jeder Chunk eine der
-  // ausgeblendeten Zeichnungen enthielt und neu kompiliert werden musste).
-  const underGroups = new Map<string, { ds: Drawing2D[]; greyed: boolean }>();
-  for (const d of drawings) {
-    const greyed = categoryDisplay(d.categoryCode).greyed;
-    if (compact && isCompactUnderlayEligible(d)) {
-      addDrawing2DWithoutLines(drawingPrims, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
-      const key = `${greyed ? 1 : 0}:${d.categoryCode}`;
-      const grp = underGroups.get(key);
-      if (grp) grp.ds.push(d);
-      else underGroups.set(key, { ds: [d], greyed });
-    } else {
-      addDrawing2D(drawingPrims, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator, !mono);
-    }
-  }
-  const underlay: UnderlayGroup[] = [];
-  const mkGroup = (ds: Drawing2D[], catGreyed: boolean): UnderlayGroup => ({
-    drawings: ds,
-    catGreyed,
-    tint: false,
-    above: true,
-    // Alles, wovon `build` abhängt (s. drawingPrimCache): ändert sich eine davon,
-    // müssen die GPU-Chunks dieser Gruppe neu erzeugt werden.
-    ctx: [project.lineStyles, project.hatches, layersStyleSig(project.layers), scaleDenominator],
-    build: (list) => {
-      const out: Primitive[] = [];
-      for (const d of list) {
-        drawingLinePrims(out, project, d, catGreyed, lwByCode, colorByCode, catByCode, scaleDenominator);
-      }
-      return out;
-    },
-  });
-  for (const grp of underGroups.values()) underlay.push(mkGroup(grp.ds, grp.greyed));
-
-  // Extrudierte Körper: Footprint-Umriss (Quell-Profil wurde beim Extrudieren entfernt).
-  // Kontext-Konturen (Höhenlinien) als dezente Linien zeichnen — UNTER der
-  // Wand-Poché wäre ideal, aber da sie eine eigene gedämpfte Farbe tragen, ist
-  // die Reihenfolge unkritisch; wir hängen sie als Referenz an. Projektglobal
-  // (nicht je Geschoss) → nur beim aktiven Aufruf einer Mehrfach-Überlagerung.
-  // Schnittführungs-Symbole aller Schnitt-/Ansichtsebenen mit Linie — ebenfalls projektglobal,
-  // Sichtbarkeit über die Kategorie "90" (Referenzen).
-  pushGroups(G_SOLIDS, G_SECTIONS);
+  // nacheinander; Treppen; Stützen; 2D-Zeichnungen (über der Poché); extrudierte Körper
+  // (Footprint-Umriss); Kontext-Konturen und Schnittführungs-Symbole (projektglobal, nur beim
+  // aktiven Aufruf einer Mehrfach-Überlagerung).
+  pushGroups(G_CEILINGS, G_SECTIONS);
+  // Kompakte Linien-Unterlage (s. {@link UnderlayGroup}): die Linien einfacher Zeichnungen fehlen
+  // im Puffer und entstehen erst bei Bedarf, PRO KATEGORIE gruppiert — das Ein-/Ausblenden einer
+  // Ebene entfernt dann nur deren Gruppe, die Chunks aller anderen Ebenen bleiben gültig.
+  const underlay = compact ? underlayGroups(project, dom, scaleDenominator) : [];
 
   // Baurechts-Verstösse über allem (Signal, soll nicht unter der Wand-Poché verschwinden).
   const violations: Primitive[] = [];
@@ -493,9 +413,10 @@ export function generatePlan(
           ...g,
           ctx: [...g.ctx, lwf],
           build: (ds: Drawing2D[]) => g.build(ds).map((p) => scalePrimitiveWeights(p, lwf)),
+          buildBuf: undefined,
         }));
   const rest = {
-    bounds: computeBounds(project, drawings, dom.buf?.bounds, primitives.slice(0, underlayCount)),
+    bounds: computeBounds(project, dom.buf?.bounds, primitives.slice(0, underlayCount)),
     backgroundImages,
     ...(scaledUnderlay.length ? { underlay: scaledUnderlay } : {}),
   };
@@ -901,51 +822,27 @@ function toMono(primitives: Primitive[]): void {
   }
 }
 
-/** Baut eine Map Kategorie-Code → Strichstärke (mm) über den ganzen Baum. */
-function categoryLwMap(layers: LayerCategory[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const c of flattenCategories(layers)) map.set(c.code, c.lw);
-  return map;
-}
-
-/** Baut eine Map Kategorie-Code → Farbe über den ganzen Baum. */
-function categoryColorMap(layers: LayerCategory[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const c of flattenCategories(layers)) map.set(c.code, c.color);
-  return map;
-}
-
-/**
- * Baut eine Map Kategorie-Code → volle LayerCategory über den ganzen Baum, für
- * die By-Layer-Attribut-Auflösung (Quelle "layer" von Vordergrund/Hintergrund/
- * Strichstärke/Schraffur, siehe {@link resolveForeground} und Geschwister).
- */
-function categoryMap(layers: LayerCategory[]): Map<string, LayerCategory> {
-  const map = new Map<string, LayerCategory>();
-  for (const c of flattenCategories(layers)) map.set(c.code, c);
-  return map;
-}
-
 /** Primitive der Kern-Domänen (`planDomains` in `queries.rs`) als gelesener Plan-Puffer v2. */
 interface DomainPrims {
   /** Fehlt, wenn das Geschoss nichts für den Kern enthält. */
   buf?: DecodedPlanBuf;
+  /** Argumente der Abfrage (für `drawingUnderlay`). */
+  args?: string;
 }
 
 /** Gruppen des Puffers (`plan/domains.rs::GROUPS`). */
 const G_CEILINGS = 0;
-const G_COLUMNS = 5;
-const G_SOLIDS = 6;
-const G_SECTIONS = 8;
-const N_GROUPS = 9;
+const G_SECTIONS = 9;
+const N_GROUPS = 10;
 
 const NO_DOMAINS: DomainPrims = {};
 const DETAIL_CODE: Record<DetailLevel, number> = { grob: 0, mittel: 1, fein: 2 };
 
 /**
- * Decken, Dächer, Räume, Wände mit Öffnungen, Treppen, Stützen, Extrusions-Umrisse eines Geschosses
- * und (mit `global`) Kontext-Konturen und Schnittführungs-Symbole aus dem Kern. Sichtbarkeit und Darstellungsmodus (UI-Zustand) gehen als Code-Mengen mit: `show` =
- * sichtbar und gezeichnet, `grey` = gedimmt.
+ * Decken, Dächer, Räume, Wände mit Öffnungen, Treppen, Stützen, 2D-Zeichnungen, Extrusions-Umrisse
+ * eines Geschosses und (mit `global`) Kontext-Konturen und Schnittführungs-Symbole aus dem Kern.
+ * Sichtbarkeit und Darstellungsmodus (UI-Zustand) gehen als Code-Mengen mit: `show` = sichtbar und
+ * gezeichnet, `grey` = gedimmt.
  */
 function planDomains(
   project: Project,
@@ -955,6 +852,9 @@ function planDomains(
   detail: DetailLevel,
   referenceLines: boolean,
   global: boolean,
+  scale: number,
+  forPrint: boolean,
+  compact: boolean,
 ): DomainPrims {
   const codes = new Set<string>();
   let any = false;
@@ -971,6 +871,11 @@ function planDomains(
   take(project.columns);
   take(project.walls);
   take(project.stairs);
+  for (const d of project.drawings2d) {
+    if (d.levelId !== floorId) continue;
+    codes.add(d.categoryCode);
+    any = true;
+  }
   if (global) {
     // Kontext-Objekte ohne Kategorie sind immer sichtbar; Schnittlinien hängen an "90".
     for (const o of project.context ?? []) {
@@ -994,21 +899,67 @@ function planDomains(
     show.push(c);
     if (d.greyed) grey.push(c);
   }
-  const buf = decodePlanBuf(
-    documentFor(project).queryBin(
-      "planDomains",
-      [DETAIL_CODE[detail] ?? 1],
-      JSON.stringify({ floor: floorId, show, grey, referenceLines, global }),
-    ),
-  );
+  const args = JSON.stringify({ floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact });
+  const buf = decodePlanBuf(documentFor(project).queryBin("planDomains", [DETAIL_CODE[detail] ?? 1], args));
   if (buf.groups.length !== N_GROUPS) throw new Error("planDomains: unerwartete Gruppen im Plan-Puffer");
-  return { buf };
+  return { buf, args };
+}
+
+/**
+ * Gruppen der kompakten Linien-Unterlage aus dem Kern (`drawingUnderlay`, dieselbe Auswahl wie die
+ * Domäne der 2D-Zeichnungen): je (gedimmt, Ebene) die Zeichnungen, deren Linien der Plan-Puffer
+ * nicht enthält. `build` holt die Linien einer Teilmenge bei Bedarf (`drawingLines`).
+ */
+function underlayGroups(project: Project, dom: DomainPrims, scaleDenominator: number): UnderlayGroup[] {
+  if (!dom.args) return [];
+  const bytes = documentFor(project).queryBin("drawingUnderlay", [1], dom.args);
+  if (bytes.byteLength % 8 !== 0) throw new Error("drawingUnderlay: unerwartete Antwort");
+  const f = new Float64Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  const all = project.drawings2d;
+  // Zeichnung → Index in `drawings2d` (für `drawingLines`), erst beim ersten `build`.
+  let index: Map<Drawing2D, number> | null = null;
+  const indexOf = (d: Drawing2D): number | undefined => {
+    if (!index) {
+      index = new Map();
+      for (let i = 0; i < all.length; i++) index.set(all[i], i);
+    }
+    return index.get(d);
+  };
+  // Alles, wovon `build` abhängt: ändert sich eine davon, werden die GPU-Chunks neu erzeugt.
+  const ctx = [project.lineStyles, project.hatches, layersStyleSig(project.layers), scaleDenominator, project.overrideRules];
+  const out: UnderlayGroup[] = [];
+  let k = 1;
+  for (let g = 0; g < f[0]; g++) {
+    const catGreyed = f[k] === 1;
+    const n = f[k + 1];
+    const drawings: Drawing2D[] = new Array(n);
+    for (let i = 0; i < n; i++) drawings[i] = all[f[k + 2 + i]];
+    k += 2 + n;
+    const buildBuf = (list: Drawing2D[]): DecodedPlanBuf => {
+      const args = [scaleDenominator, catGreyed ? 1 : 0];
+      for (const d of list) {
+        const i = indexOf(d);
+        if (i !== undefined) args.push(i);
+      }
+      return decodePlanBuf(documentFor(project).queryBin("drawingLines", args));
+    };
+    out.push({ drawings, catGreyed, tint: false, above: true, ctx, build: (list) => buildBuf(list).prims, buildBuf });
+  }
+  return out;
+}
+
+/**
+ * Plan-Primitive EINER Zeichnung (auch einer, die nicht im Projekt steht, z. B. die transformierte
+ * Vorschau) aus dem Kern (`drawingPrims`, ohne Override-Regeln), beim Massstab 1:`scaleDenominator`.
+ * Blöcke, Linienstile, Schraffuren und Ebenen liest der Kern aus `project`.
+ */
+export function drawingPrimitives(project: Project, d: Drawing2D, scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR): Primitive[] {
+  return decodePlanBuf(documentFor(project).queryBin("drawingPrims", [scaleDenominator], JSON.stringify(d))).prims;
 }
 
 function computeBounds(
   project: Project,
-  drawings: Drawing2D[] = [],
-  /** Ausmass der Kern-Domänen (Wand-Ecken, Decken, Räume, Dach-Traufen, Treppen), s. `planDomains`. */
+  /** Ausmass der Kern-Domänen (Wand-Ecken, Decken, Räume, Dach-Traufen, Treppen, 2D-Zeichnungen), s. `planDomains`. */
   domainBox: [number, number, number, number] | undefined = undefined,
   /** Zusätzlich einzurahmende Primitive (Schatten, Parzelle), damit Druck/Einpassen sie ganz zeigen. */
   extra: Primitive[] = [],
@@ -1025,48 +976,6 @@ function computeBounds(
   for (const e of extra) {
     if (e.kind === "polygon") e.pts.forEach(acc);
     else if (e.kind === "line") { acc(e.a); acc(e.b); }
-  }
-  for (const d of drawings) {
-    const g = d.geom;
-    if (g.shape === "line" || g.shape === "polyline") {
-      // Box je Zeichnung gecacht (drawingBounds.ts) statt über alle Punkte.
-      const b = drawingBox(d);
-      if (isFinite(b.minX)) {
-        acc({ x: b.minX, y: b.minY });
-        acc({ x: b.maxX, y: b.maxY });
-      }
-    }
-    else if (g.shape === "rect") { acc(g.min); acc(g.max); }
-    else if (g.shape === "circle" || g.shape === "arc") {
-      acc({ x: g.center.x - g.r, y: g.center.y - g.r });
-      acc({ x: g.center.x + g.r, y: g.center.y + g.r });
-    } else if (g.shape === "ellipse") {
-      acc({ x: g.center.x - g.rx, y: g.center.y - g.ry });
-      acc({ x: g.center.x + g.rx, y: g.center.y + g.ry });
-    } else if (g.shape === "bezier" || g.shape === "spline") {
-      g.pts.forEach(acc);
-    } else if (g.shape === "dimension") {
-      g.pts.forEach(acc);
-      // Masslinie liegt um `offset` versetzt (linke Normale je Segment), die Masszahl noch etwas
-      // weiter aussen — beides mit einrahmen, sonst schneiden Druck/Einpassen die Kette ab.
-      const reach = g.offset * 1.4;
-      for (let i = 0; i + 1 < g.pts.length; i++) {
-        const a = g.pts[i], b = g.pts[i + 1];
-        const len = Math.hypot(b.x - a.x, b.y - a.y);
-        if (len < 1e-9) continue;
-        const nx = (-(b.y - a.y) / len) * reach, ny = ((b.x - a.x) / len) * reach;
-        acc({ x: a.x + nx, y: a.y + ny });
-        acc({ x: b.x + nx, y: b.y + ny });
-      }
-    } else if (g.shape === "kote") acc(g.at);
-    else if (g.shape === "detailref") acc(g.at);
-    else if (g.shape === "scalebar") {
-      acc(g.at);
-      acc({ x: g.at.x + g.segmentLength * g.segments, y: g.at.y });
-    }
-    else if (g.shape === "pointmarker") acc(g.at);
-    else if (g.shape === "text") acc(g.at);
-    else if (g.shape === "image") { acc(g.min); acc(g.max); }
   }
   // GESAMTE Kontext-Schicht (Konturen, importierte Gebäude/Terrain, Luftbild)
   // mit einrahmen, damit „Einpassen"/die Standard-Ansicht sie zeigt — sonst

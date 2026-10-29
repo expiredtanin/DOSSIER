@@ -26,7 +26,6 @@ mod document;
 mod ops;
 mod mesh_section;
 mod plan_elevation;
-mod plan_misc;
 mod plan_section;
 mod voids;
 mod curves;
@@ -38,6 +37,7 @@ mod snap;
 mod plan_svg;
 mod plan_dxf;
 mod plan_print_svg;
+mod drawings;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

@@ -1,6 +1,6 @@
 // Füllart eines geschlossenen 2D-Elements: Keine / Vollfläche / Schraffur.
 // Reine Umrechnung auf die vorhandenen Felder (`background`, `fillColor`, `hatchId`
-// samt Quellen) — der Renderer (`addDrawing2D`) braucht kein neues Feld.
+// samt Quellen) — der Renderer (`plan/drawings.rs`) braucht kein neues Feld.
 
 import type { Drawing2D, HatchStyle } from "../model/types";
 

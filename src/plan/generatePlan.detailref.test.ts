@@ -2,7 +2,7 @@
  * `generatePlan` — Rendering des Detail-/Schnitt-Verweis-Symbols
  * (`shape:"detailref"`): Kreis + waagrechte Trennlinie + Bezeichner oben +
  * Blattname unten (aufgelöst über `sheetLayoutId`, sonst manueller
- * `sheetLabel`-Platzhalter, s. `drawing2d.ts`).
+ * `sheetLabel`-Platzhalter, s. `plan/drawings.rs` im Kern).
  */
 
 import { describe, it, expect } from "vitest";

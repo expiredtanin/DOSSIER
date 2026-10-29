@@ -17,7 +17,7 @@ import type {
 import { addItems, opsMutation } from "../../core";
 import type { CoreOp } from "../../core";
 
-const PREVIEW_RADIUS = 0.08; // Modell-Meter, deckt sich mit POINTMARKER_RADIUS_M (drawing2d.ts)
+const PREVIEW_RADIUS = 0.08; // Modell-Meter, deckt sich mit POINTMARKER_RADIUS_M (plan/drawings.rs)
 const PREVIEW_CROSS = 0.12;
 
 interface PointMarkerIdle extends CommandState {
