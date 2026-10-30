@@ -39,26 +39,35 @@ async function savedWalls(page: Page): Promise<W[]> {
   return JSON.parse((await readFile(await dl.path())).toString("utf8")).walls as W[];
 }
 
-async function drawWall(page: Page, a: string, b: string): Promise<void> {
-  await page.getByRole("button", { name: "Wand", exact: true }).click();
-  await commandInput(page).focus();
-  await typeCommand(page, a);
-  await typeCommand(page, b);
-  await finishCommand(page);
+/** Einzelne Wände zeichnen (Muster `drawing.spec.ts`: das Werkzeug bleibt nach dem Befehl gewählt). */
+async function drawWalls(page: Page, walls: [string, string][]): Promise<void> {
+  for (const [a, b] of walls) {
+    await page.getByRole("button", { name: "Wand", exact: true }).click();
+    if (!(await page.locator(".cmdline-prompt").textContent())?.includes("Startpunkt")) {
+      await page.getByRole("button", { name: "Wand", exact: true }).click();
+    }
+    await expect(page.locator(".cmdline-prompt")).toHaveText("Startpunkt der Wand:");
+    await commandInput(page).focus();
+    await typeCommand(page, a);
+    await typeCommand(page, b);
+    await finishCommand(page);
+  }
 }
 
 test("Wand an Querwand stutzen, teilen, rückgängig", async ({ page }) => {
   await startNewProject(page);
   await openTab(page, "Elemente");
-  await drawWall(page, "0,0", "10,0");
-  await drawWall(page, "6,-3", "6,3");
+  await drawWalls(page, [
+    ["0,0", "10,0"],
+    ["6,-3", "6,3"],
+  ]);
   await blurFocus(page);
   await page.getByTitle("Auf Plan einpassen").click();
 
   // Stutzen: Klick auf den Überstand rechts der Querwand.
   await commandInput(page).focus();
   await typeCommand(page, "trim");
-  await expect(page.locator(".cmdline-prompt")).toHaveText(/wegschneiden/);
+  await expect(page.locator(".cmdline-prompt")).toHaveText(/Wegschneiden/);
   await clickModel(page, 8.5, 0);
   await commandInput(page).press("Enter");
   await expect.poll(async () => (await savedWalls(page)).some((w) => Math.abs(w.end.x - 6) < 1e-6 && Math.abs(w.start.x) < 1e-6)).toBe(true);
