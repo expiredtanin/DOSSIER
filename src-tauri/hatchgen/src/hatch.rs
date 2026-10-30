@@ -50,6 +50,7 @@ pub enum Pattern {
     Earth = 9,
     Gravel = 10,
     Stone = 11,
+    Dots = 12,
 }
 
 impl Pattern {
@@ -66,6 +67,7 @@ impl Pattern {
             9 => Pattern::Earth,
             10 => Pattern::Gravel,
             11 => Pattern::Stone,
+            12 => Pattern::Dots,
             _ => Pattern::Diagonal,
         }
     }
@@ -417,6 +419,7 @@ pub fn build_hatch_runs(poly: &[V2], hatch: &Hatch) -> Vec<Run> {
         Pattern::Timber => return timber_band_runs(poly, hatch, scale),
         Pattern::Earth => return earth_runs(poly, hatch, scale),
         Pattern::Gravel => return gravel_runs(poly, hatch, scale),
+        Pattern::Dots => return dots_runs(poly, hatch, scale),
         _ => {}
     }
     let spacing_m = 8.0 * scale * PX_TO_M;
@@ -655,6 +658,45 @@ fn gravel_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
             i += 1.0;
         }
         j += 1.0;
+    }
+    runs
+}
+
+/// Punktfeld (Putz, SIA 400): feine, ruhige Punkte im versetzten Raster, entlang der Schicht ausgerichtet
+/// (Schichtmuster: Laufrichtung = Schraffurwinkel, Bänder wie bei der Dämmung). Teilung entlang u = 0.05 m ·
+/// scale; die Reihen füllen die Schichtdicke gleichmässig (Reihenabstand ≈ 0.87 · Teilung, mindestens eine
+/// Reihe in der Schichtmitte, damit auch dünne Putzschichten Punkte bekommen). Jeder Punkt ein winziger
+/// Strich (30 % der Teilung); nur Punkte, die ganz in der Fläche liegen (ruhiger Rand).
+fn dots_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
+    let Some(b) = band_frame(poly, hatch, scale) else { return Vec::new() };
+    let pitch = (0.05 * scale).max(0.004);
+    let half_dot = 0.15 * pitch;
+    if (b.u1 - b.u0) / pitch > BAND_MAX_POINTS {
+        return Vec::new();
+    }
+    let mut runs = Vec::new();
+    for &(vc, half) in &b.rows {
+        let k = (2.0 * half / (0.87 * pitch)).round().max(1.0);
+        if k > 5_000.0 {
+            continue;
+        }
+        let step = 2.0 * half / k;
+        let mut r = 0.0;
+        while r < k {
+            let v = vc - half + (r + 0.5) * step;
+            let shift = if r.rem_euclid(2.0) == 0.0 { 0.0 } else { 0.5 };
+            let mut i = ((b.u0 - b.ua) / pitch).floor() - 1.0;
+            while b.ua + (i + shift) * pitch <= b.u1 + pitch {
+                let cu = b.ua + (i + shift) * pitch;
+                let (a, e) = (b.at(cu - half_dot, v), b.at(cu + half_dot, v));
+                let kept = clip_segment_to_polygon(a, e, poly);
+                if kept.len() == 1 && hypot2(kept[0].1.x - kept[0].0.x, kept[0].1.y - kept[0].0.y) > 1.9 * half_dot {
+                    runs.push(vec![a, e]);
+                }
+                i += 1.0;
+            }
+            r += 1.0;
+        }
     }
     runs
 }
@@ -1006,10 +1048,38 @@ mod tests {
         assert!((st / d - 2.0).abs() < 0.1, "{st} / {d}");
     }
 
+    /// Putz: ruhiges Punktfeld entlang der Schicht, nur ganze Punkte, stabil, versetzte Reihen; auch eine
+    /// dünne Putzschicht (1.5 cm) bekommt mindestens eine Reihe.
+    #[test]
+    fn putz_punktfeld() {
+        let mut h = hatch(Pattern::Dots);
+        h.angle = 0.0;
+        h.scale = 0.4; // Teilung 2 cm
+        let sq = band(1.0, 0.1);
+        let runs = build_hatch_runs(&sq, &h);
+        // 10 cm: 5 Reihen à ~50 Punkte
+        assert!((200..300).contains(&runs.len()), "{}", runs.len());
+        assert!(runs.iter().all(|r| r.len() == 2 && (r[1].x - r[0].x - 0.006).abs() < 1e-9 && r[0].y == r[1].y), "Punkte sind winzige Striche");
+        let (lo, hi) = extent(&runs, |p| p.x);
+        assert!(lo >= 0.0 && hi <= 1.0);
+        assert_eq!(runs, build_hatch_runs(&sq, &h));
+        let (ylo, yhi) = extent(&runs, |p| p.y);
+        assert!(ylo > 0.0 && yhi < 0.1);
+        // dünne Schicht
+        let thin = build_hatch_runs(&band(1.0, 0.015), &h);
+        assert!(thin.len() > 30, "{}", thin.len());
+        assert!(thin.iter().all(|r| r[0].y >= 0.0 && r[0].y <= 0.015));
+        // versetzte Reihen: mindestens zwei Phasen in x
+        let mut phases: Vec<i64> = runs.iter().map(|r| ((r[0].x / 0.02).rem_euclid(1.0) * 100.0).round() as i64 % 100).collect();
+        phases.sort();
+        phases.dedup();
+        assert!(phases.len() >= 2, "{phases:?}");
+    }
+
     #[test]
     fn schichtmuster_entartet_leer() {
         let p = vec![v2(0.0, 0.0), v2(f64::INFINITY, 0.0), v2(1.0, 1.0)];
-        for pat in [Pattern::InsulationHard, Pattern::InsulationWave, Pattern::Timber, Pattern::Earth, Pattern::Gravel, Pattern::Stone] {
+        for pat in [Pattern::InsulationHard, Pattern::InsulationWave, Pattern::Timber, Pattern::Earth, Pattern::Gravel, Pattern::Stone, Pattern::Dots] {
             assert!(build_hatch_runs(&p, &hatch(pat)).is_empty(), "{pat:?}");
         }
         // Linie ohne Dicke

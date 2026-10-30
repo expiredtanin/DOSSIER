@@ -104,6 +104,14 @@ pub fn hatches() -> Vec<Value> {
         // Holzfaser: Welle über die Dicke.
         layer("std-h-holzfaser", "SIA Dämmung Holzfaser", "insulationWave", 1.0),
         solid("std-h-gips", "SIA Gips", "#cfcfcf"),
+        // Putz (innen/aussen): feines, ruhiges Punktfeld entlang der Schicht (Teilung 2 cm). Eine Schraffur
+        // ohne Massstabsgrenze: in 1:100 und gröber wird sie ein feiner Grauton, wer Putz dort leer will,
+        // wählt „SIA Ohne Schraffur".
+        json!({"id": "std-h-putz", "name": "SIA Putz", "pattern": "dots", "scale": 0.4, "angle": 0, "relativeToWall": true, "color": INK, "lineWeight": 0.1}),
+        // Keramik (Fliesen, Platten): feines Kreuzraster 45°.
+        lines("std-h-keramik", "SIA Keramik", "crosshatch", 0.015, 45.0, false, 0.1, ""),
+        // Faserzement: dichte Diagonale 135° (Plattenwerkstoff, gegenläufig zu Backstein/Beton).
+        lines("std-h-faserzement", "SIA Faserzement", "diagonal", 0.02, 135.0, false, 0.1, ""),
         // Estrich/Überzug: feines Punktfeld (punktierte Diagonale).
         lines("std-h-estrich", "SIA Estrich", "diagonal", 0.025, 45.0, false, 0.1, "std-ls-schraffur-punkt"),
         solid("std-h-stahl", "SIA Stahl", INK),
@@ -166,12 +174,12 @@ pub fn components() -> Vec<Value> {
         Mat { id: "std-c-holzfaser", name: "Holzfaser", abbrev: "HF", fill: "#ffffff", elev: "#b08a5a", hatch: "std-h-holzfaser", lambda: Some(0.04), density: Some(140.0), rf: "RF3", tex: None, prio: 24.0, pattern: None },
         Mat { id: "std-c-trittschall", name: "Trittschalldämmung", abbrev: "TSD", fill: "#ffffff", elev: "#efe6a8", hatch: "std-h-daemmung-weich", lambda: Some(0.035), density: Some(100.0), rf: "RF1", tex: None, prio: 19.0, pattern: None },
         Mat { id: "std-c-gipskarton", name: "Gipskarton", abbrev: "GK", fill: "#cfcfcf", elev: "#f4f4f2", hatch: "std-h-gips", lambda: Some(0.25), density: Some(800.0), rf: "RF1", tex: Some(("Plaster001", 1.0)), prio: 12.0, pattern: None },
-        Mat { id: "std-c-innenputz", name: "Innenputz", abbrev: "IP", fill: "#ffffff", elev: "#f5f3ee", hatch: "std-h-ohne", lambda: Some(0.7), density: Some(1400.0), rf: "RF1", tex: Some(("Plaster001", 1.0)), prio: 10.0, pattern: None },
-        Mat { id: "std-c-aussenputz", name: "Aussenputz", abbrev: "AP", fill: "#ffffff", elev: "#e9e3d6", hatch: "std-h-ohne", lambda: Some(0.87), density: Some(1800.0), rf: "RF1", tex: Some(("Plaster001", 1.0)), prio: 10.0, pattern: None },
+        Mat { id: "std-c-innenputz", name: "Innenputz", abbrev: "IP", fill: "#ffffff", elev: "#f5f3ee", hatch: "std-h-putz", lambda: Some(0.7), density: Some(1400.0), rf: "RF1", tex: Some(("Plaster001", 1.0)), prio: 10.0, pattern: None },
+        Mat { id: "std-c-aussenputz", name: "Aussenputz", abbrev: "AP", fill: "#ffffff", elev: "#e9e3d6", hatch: "std-h-putz", lambda: Some(0.87), density: Some(1800.0), rf: "RF1", tex: Some(("Plaster001", 1.0)), prio: 10.0, pattern: None },
         Mat { id: "std-c-zementestrich", name: "Zementestrich", abbrev: "ZE", fill: "#ffffff", elev: "#cfcac0", hatch: "std-h-estrich", lambda: Some(1.4), density: Some(2000.0), rf: "RF1", tex: Some(("Concrete048", 2.0)), prio: 30.0, pattern: None },
         // Bodenbeläge ([100]): Muster im Grundriss (Oberseite der Decke) und im 3D.
         Mat { id: "std-c-parkett", name: "Parkett", abbrev: "PA", fill: "#ffffff", elev: "#c9a06b", hatch: "std-h-holz", lambda: Some(0.13), density: Some(650.0), rf: "RF3", tex: Some(("Wood095", 1.0)), prio: 8.0, pattern: sp("runningBond", None, 0.6, Some(0.1), None) },
-        Mat { id: "std-c-keramik", name: "Keramikplatten", abbrev: "KP", fill: "#ffffff", elev: "#d8d4cc", hatch: "std-h-ohne", lambda: Some(1.3), density: Some(2300.0), rf: "RF1", tex: None, prio: 9.0, pattern: sp("grid", None, 0.3, Some(0.3), None) },
+        Mat { id: "std-c-keramik", name: "Keramikplatten", abbrev: "KP", fill: "#ffffff", elev: "#d8d4cc", hatch: "std-h-keramik", lambda: Some(1.3), density: Some(2300.0), rf: "RF1", tex: None, prio: 9.0, pattern: sp("grid", None, 0.3, Some(0.3), None) },
         Mat { id: "std-c-glas", name: "Glas", abbrev: "GL", fill: "#d6ecf3", elev: "#a9c8d4", hatch: "std-h-ohne", lambda: Some(1.0), density: Some(2500.0), rf: "RF1", tex: None, prio: 70.0, pattern: None },
         Mat { id: "std-c-stahl", name: "Stahl", abbrev: "ST", fill: INK, elev: "#7d8287", hatch: "std-h-stahl", lambda: Some(50.0), density: Some(7850.0), rf: "RF1", tex: Some(("Metal063", 1.0)), prio: 110.0, pattern: None },
         Mat { id: "std-c-aluminium", name: "Aluminium", abbrev: "AL", fill: "#8c8c8c", elev: "#b9bcbf", hatch: "std-h-alu", lambda: Some(160.0), density: Some(2700.0), rf: "RF1", tex: Some(("Metal063", 1.0)), prio: 105.0, pattern: None },
@@ -185,7 +193,7 @@ pub fn components() -> Vec<Value> {
         Mat { id: "std-c-boden-deckel", name: "Holzschalung Boden-Deckel", abbrev: "BD", fill: "#ffffff", elev: "#a9824f", hatch: "std-h-holz", lambda: Some(0.13), density: Some(450.0), rf: "RF3", tex: Some(("WoodSiding008", 1.0)), prio: 41.0, pattern: sp("boardBatten", Some("vertical"), 0.2, None, Some(0.06)) },
         Mat { id: "std-c-schindeln", name: "Holzschindeln", abbrev: "SCH", fill: "#ffffff", elev: "#9c8566", hatch: "std-h-holz", lambda: Some(0.13), density: Some(450.0), rf: "RF3", tex: Some(("Wood095", 0.5)), prio: 41.0, pattern: sp("shingles", None, 0.1, Some(0.12), None) },
         Mat { id: "std-c-trapezblech", name: "Trapezblech", abbrev: "TB", fill: INK, elev: "#9aa1a6", hatch: "std-h-stahl", lambda: Some(50.0), density: Some(7850.0), rf: "RF1", tex: Some(("CorrugatedSteel005", 1.0)), prio: 108.0, pattern: sp("trapezoid", Some("vertical"), 0.2, None, Some(0.06)) },
-        Mat { id: "std-c-faserzement", name: "Faserzementplatten", abbrev: "FZ", fill: "#ffffff", elev: "#a6a8a6", hatch: "std-h-ohne", lambda: Some(0.6), density: Some(1800.0), rf: "RF1", tex: None, prio: 42.0, pattern: sp("grid", None, 1.25, Some(0.625), None) },
+        Mat { id: "std-c-faserzement", name: "Faserzementplatten", abbrev: "FZ", fill: "#ffffff", elev: "#a6a8a6", hatch: "std-h-faserzement", lambda: Some(0.6), density: Some(1800.0), rf: "RF1", tex: None, prio: 42.0, pattern: sp("grid", None, 1.25, Some(0.625), None) },
         Mat { id: "std-c-tonziegel", name: "Tonziegel", abbrev: "ZI", fill: "#ffffff", elev: "#b3583c", hatch: "std-h-backstein", lambda: Some(1.0), density: Some(1900.0), rf: "RF1", tex: Some(("RoofingTiles013A", 1.0)), prio: 15.0, pattern: sp("grid", Some("horizontal"), 0.21, Some(0.34), None) },
     ];
     list.iter()
@@ -263,6 +271,11 @@ fn remap(v: &mut Value, key: &str, ids: &HashMap<String, String>) {
 /// gleichem Namen (Gross-/Kleinschreibung egal); Verweise neuer Einträge (Schraffur → Linienstil, Bauteil →
 /// Schraffur, Aufbau → Bauteil/Fugen-Linienstil) zeigen dann auf den vorhandenen Eintrag.
 pub fn merge_ops(root: &Map<String, Value>) -> Vec<Value> {
+    merge_plan(root).0
+}
+
+/// Wie [`merge_ops`], dazu die Umleitung Standard-id → vorhandene id (gleichnamige Einträge).
+fn merge_plan(root: &Map<String, Value>) -> (Vec<Value>, HashMap<String, String>) {
     let mut ids: HashMap<String, String> = HashMap::new();
     let mut ops = Vec::new();
     for (key, items) in library() {
@@ -297,6 +310,175 @@ pub fn merge_ops(root: &Map<String, Value>) -> Vec<Value> {
             ops.push(json!({"kind": "add", "collection": key, "items": add}));
         } else {
             ops.push(json!({"kind": "setField", "key": key, "value": add}));
+        }
+    }
+    (ops, ids)
+}
+
+// ── „Standards aktualisieren" ([109]) ────────────────────────────────────────
+//
+// Projekte, die mit älteren Standards angelegt wurden, behalten deren Definitionen („Standards laden"
+// ergänzt nur). „Aktualisieren" gleicht Standard-Einträge (gleiche id wie ein Eintrag der Bibliothek) mit
+// der heutigen Definition ab. Regel:
+// - Verglichen werden nur die vom Standard geführten Felder (`managed`); Name und eigene Zusatzfelder
+//   bleiben unangetastet. Ein vom Standard geführtes Feld, das die neue Definition nicht mehr hat, wird
+//   entfernt (z. B. ein früherer `lineStyleId`).
+// - Ob jemand einen Standard-Eintrag selbst geändert hat, lässt sich nicht erkennen (frühere Fassungen sind
+//   nicht gespeichert). Darum nennt der Plan jede Abweichung einzeln; vorgewählt sind alle Einträge,
+//   deren Name noch dem Standard entspricht, umbenannte (`renamed`) sind abgewählt. Gewählt wird im Dialog.
+// - Verweise (Schraffur, Linienstil, Bauteil) werden nur gesetzt, wenn das Ziel im Projekt existiert bzw.
+//   gleichzeitig ergänzt wird; fehlende Standard-Einträge werden wie bei „Standards laden" angehängt.
+
+type Valid<'a> = HashMap<&'a str, std::collections::HashSet<String>>;
+
+/// Felder, die der Standard je Liste führt.
+fn managed(key: &str) -> &'static [&'static str] {
+    match key {
+        "lineStyles" => &["color", "dash", "kind", "zigzag"],
+        "hatches" => &[
+            "pattern", "scale", "angle", "color", "lineWeight", "relativeToWall", "lineStyleId", "kind", "lines", "density", "lengthMin", "lengthMax", "seed",
+        ],
+        "components" => &[
+            "color", "background", "hatchId", "viewHatchId", "joinPriority", "fireClass", "elevationColor", "standardId", "lambda", "density", "material", "surfacePattern",
+            "abbrev",
+        ],
+        _ => &["layers"],
+    }
+}
+
+/// Zahlen gleich nach Wert (1 == 1.0), sonst strukturell.
+fn same(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same(p, q)),
+        (Value::Object(x), Value::Object(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w))),
+        _ => a == b,
+    }
+}
+
+/// Ziel eines Verweises im Projekt (nach Umleitung gleichnamiger Einträge), sonst `None`.
+fn ref_target(ref_key: &str, id: &str, valid: &Valid, ids: &HashMap<String, String>) -> Option<String> {
+    let list = match ref_key {
+        "lineStyleId" | "jointLineStyleId" => "lineStyles",
+        "hatchId" | "viewHatchId" => "hatches",
+        _ => "components",
+    };
+    let id = ids.get(id).map(String::as_str).unwrap_or(id);
+    valid.get(list).is_some_and(|v| v.contains(id)).then(|| id.to_string())
+}
+
+/// Neue Fassung eines vorhandenen Standard-Eintrags (nur geführte Felder; Verweise auf fehlende Ziele
+/// bleiben wie sie sind) und die Namen der geänderten Felder.
+fn updated(key: &str, old: &Value, std: &Value, valid: &Valid, ids: &HashMap<String, String>) -> (Value, Vec<String>) {
+    let mut new = old.clone();
+    let mut fields = Vec::new();
+    for f in managed(key) {
+        let mut want = std.get(*f).cloned();
+        if let Some(Value::String(id)) = &want {
+            if matches!(*f, "lineStyleId" | "hatchId" | "viewHatchId") {
+                match ref_target(f, id, valid, ids) {
+                    Some(ok) => want = Some(json!(ok)),
+                    None => continue, // Ziel fehlt: Verweis bleibt
+                }
+            }
+        }
+        if *f == "layers" {
+            if let Some(Value::Array(ls)) = &mut want {
+                for l in ls {
+                    for rk in ["componentId", "jointLineStyleId"] {
+                        if let Some(id) = l[rk].as_str().map(String::from) {
+                            match ref_target(rk, &id, valid, ids) {
+                                Some(ok) => l[rk] = json!(ok),
+                                None => return (old.clone(), Vec::new()),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let have = old.get(*f);
+        let differs = match (&want, have) {
+            (Some(w), Some(h)) => !same(w, h),
+            (None, None) => false,
+            (None, Some(h)) => !h.is_null(),
+            (Some(w), None) => !w.is_null(),
+        };
+        if differs {
+            fields.push((*f).to_string());
+            match want {
+                Some(w) => new[*f] = w,
+                None => {
+                    if let Some(o) = new.as_object_mut() {
+                        o.remove(*f);
+                    }
+                }
+            }
+        }
+    }
+    (new, fields)
+}
+
+/// Eine Abweichung: (Liste, id, Name, geänderte Felder, umbenannt, neue Fassung).
+type Change = (String, String, String, Vec<String>, bool, Value);
+
+fn update_changes(root: &Map<String, Value>) -> (Vec<Change>, usize) {
+    let (merge, ids) = merge_plan(root);
+    let mut valid: Valid = HashMap::new();
+    let mut added = 0;
+    for (key, _) in library() {
+        let set = valid.entry(key).or_default();
+        if let Some(a) = root.get(key).and_then(Value::as_array) {
+            set.extend(a.iter().filter_map(|e| e["id"].as_str().map(String::from)));
+        }
+        for op in &merge {
+            let list = match op["kind"].as_str() {
+                Some("add") if op["collection"] == key => op["items"].as_array(),
+                Some("setField") if op["key"] == key => op["value"].as_array(),
+                _ => None,
+            };
+            for it in list.into_iter().flatten() {
+                added += 1;
+                if let Some(i) = it["id"].as_str() {
+                    set.insert(i.to_string());
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (key, items) in library() {
+        let Some(existing) = root.get(key).and_then(Value::as_array) else { continue };
+        for std in &items {
+            let Some(id) = std["id"].as_str() else { continue };
+            let Some(old) = existing.iter().find(|e| e["id"] == id) else { continue };
+            let (new, fields) = updated(key, old, std, &valid, &ids);
+            if fields.is_empty() {
+                continue;
+            }
+            let name = old["name"].as_str().unwrap_or(id).to_string();
+            let renamed = name_key(old) != name_key(std);
+            out.push((key.to_string(), id.to_string(), name, fields, renamed, new));
+        }
+    }
+    (out, added)
+}
+
+/// Abweichungen der Standard-Einträge im Projekt von der heutigen Bibliothek: je Eintrag
+/// `{collection, id, name, fields, renamed}`; dazu `added` = Anzahl fehlender Standard-Einträge.
+pub fn update_plan(root: &Map<String, Value>) -> Value {
+    let (changes, added) = update_changes(root);
+    json!({
+        "added": added,
+        "changes": changes.iter().map(|c| json!({"collection": c.0, "id": c.1, "name": c.2, "fields": c.3, "renamed": c.4})).collect::<Vec<_>>(),
+    })
+}
+
+/// Ops für „Standards aktualisieren": fehlende Standards anhängen und die gewählten Einträge (`selected` =
+/// `"<Liste>:<id>"`) ersetzen — ein Undo-Schritt. Unbekannte Auswahl wird ignoriert.
+pub fn update_ops(root: &Map<String, Value>, selected: &[String]) -> Vec<Value> {
+    let mut ops = merge_ops(root);
+    for (key, id, _, _, _, new) in update_changes(root).0 {
+        if selected.contains(&format!("{key}:{id}")) {
+            ops.push(json!({"kind": "replace", "collection": key, "entity": new}));
         }
     }
     ops
@@ -359,6 +541,104 @@ mod tests {
         for name in ["Volllinie", "Strichlinie", "Strichlinie lang", "Punktlinie", "Strichpunktlinie (Achse)", "Strich-Zweipunktlinie", "Grundstücksgrenze", "Bruchlinie (Zickzack)"] {
             assert!(p.line_styles.iter().any(|l| l.name == name), "{name}");
         }
+    }
+
+    #[test]
+    fn putz_keramik_faserzement_haben_schraffur() {
+        let r = apply(&empty_root(), &merge_ops(&empty_root()));
+        let p: Project = serde_json::from_value(Value::Object(r)).unwrap();
+        for (comp, hatch) in [("std-c-innenputz", "std-h-putz"), ("std-c-aussenputz", "std-h-putz"), ("std-c-keramik", "std-h-keramik"), ("std-c-faserzement", "std-h-faserzement")] {
+            assert_eq!(p.components.iter().find(|c| c.id == comp).unwrap().hatch_id, hatch);
+        }
+        assert_eq!(p.hatches.iter().find(|h| h.id == "std-h-putz").unwrap().pattern, crate::model::HatchPattern::Dots);
+    }
+
+    fn alt_projekt() -> Map<String, Value> {
+        // Projekt mit Standards vom 29.10.: alte EPS-Schraffur, Putz ohne Schraffur, eine umbenannte und
+        // eine eigene Schraffur.
+        let mut root = apply(&empty_root(), &merge_ops(&empty_root()));
+        let hs = root.get_mut("hatches").unwrap().as_array_mut().unwrap();
+        hs.retain(|h| h["id"] != "std-h-putz");
+        for h in hs.iter_mut() {
+            if h["id"] == "std-h-eps" {
+                h["pattern"] = json!("insulation");
+            }
+            if h["id"] == "std-h-xps" {
+                h["name"] = json!("Meine XPS");
+                h["pattern"] = json!("diagonal");
+            }
+        }
+        hs.push(json!({"id": "mine", "name": "Eigene", "pattern": "diagonal", "scale": 1, "angle": 0, "color": "#000"}));
+        for c in root.get_mut("components").unwrap().as_array_mut().unwrap() {
+            if c["id"] == "std-c-innenputz" {
+                c["hatchId"] = json!("std-h-ohne");
+            }
+        }
+        root
+    }
+
+    fn apply_all(root: &Map<String, Value>, ops: &[Value]) -> Map<String, Value> {
+        let mut r = root.clone();
+        for op in ops {
+            match op["kind"].as_str().unwrap() {
+                "add" => r.get_mut(op["collection"].as_str().unwrap()).unwrap().as_array_mut().unwrap().extend(op["items"].as_array().unwrap().iter().cloned()),
+                "setField" => {
+                    r.insert(op["key"].as_str().unwrap().into(), op["value"].clone());
+                }
+                "replace" => {
+                    let list = r.get_mut(op["collection"].as_str().unwrap()).unwrap().as_array_mut().unwrap();
+                    let i = list.iter().position(|e| e["id"] == op["entity"]["id"]).unwrap();
+                    list[i] = op["entity"].clone();
+                }
+                k => panic!("{k}"),
+            }
+        }
+        r
+    }
+
+    #[test]
+    fn aktualisieren_listet_abweichungen_und_ersetzt_gewaehlte() {
+        let root = alt_projekt();
+        let plan = update_plan(&root);
+        assert_eq!(plan["added"], 1, "Putz-Schraffur fehlt");
+        let ch = plan["changes"].as_array().unwrap();
+        let find = |id: &str| ch.iter().find(|c| c["id"] == id);
+        assert_eq!(find("std-h-eps").unwrap()["fields"], json!(["pattern"]));
+        assert_eq!(find("std-h-eps").unwrap()["renamed"], false);
+        assert_eq!(find("std-h-xps").unwrap()["renamed"], true, "umbenannt: abgewählt");
+        assert!(find("std-h-xps").unwrap()["fields"].as_array().unwrap().iter().any(|f| f == "pattern"));
+        assert_eq!(find("std-c-innenputz").unwrap()["fields"], json!(["hatchId"]), "Verweis zeigt künftig auf die ergänzte Putz-Schraffur");
+        assert!(find("mine").is_none() && find("std-h-beton").is_none(), "Eigenes und Unverändertes nicht");
+        let ops = update_ops(&root, &["hatches:std-h-eps".to_string(), "components:std-c-innenputz".to_string()]);
+        let after = apply_all(&root, &ops);
+        let get = |k: &str, id: &str| after[k].as_array().unwrap().iter().find(|e| e["id"] == id).unwrap().clone();
+        assert_eq!(get("hatches", "std-h-eps")["pattern"], "insulationHard");
+        assert_eq!(get("hatches", "std-h-xps")["pattern"], "diagonal", "nicht gewählt: bleibt");
+        assert_eq!(get("components", "std-c-innenputz")["hatchId"], "std-h-putz");
+        assert!(after["hatches"].as_array().unwrap().iter().any(|h| h["id"] == "std-h-putz"));
+        let left = update_plan(&after);
+        assert_eq!(left["added"], 0);
+        assert!(left["changes"].as_array().unwrap().iter().all(|c| c["id"] == "std-h-xps"));
+        let all: Vec<String> = left["changes"].as_array().unwrap().iter().map(|c| format!("{}:{}", c["collection"].as_str().unwrap(), c["id"].as_str().unwrap())).collect();
+        let done = apply_all(&after, &update_ops(&after, &all));
+        assert!(update_plan(&done)["changes"].as_array().unwrap().is_empty());
+        let p: Project = serde_json::from_value(Value::Object(done)).unwrap();
+        assert!(crate::project_refs::dangling_refs(&p).is_empty());
+    }
+
+    #[test]
+    fn aktualisieren_entfernt_nicht_mehr_gefuehrte_felder_und_laesst_zusatzfelder() {
+        let mut root = apply(&empty_root(), &merge_ops(&empty_root()));
+        for h in root.get_mut("hatches").unwrap().as_array_mut().unwrap() {
+            if h["id"] == "std-h-eps" {
+                h["lineStyleId"] = json!("std-ls-voll");
+                h["myNote"] = json!("bleibt");
+            }
+        }
+        let after = apply_all(&root, &update_ops(&root, &["hatches:std-h-eps".to_string()]));
+        let eps = after["hatches"].as_array().unwrap().iter().find(|h| h["id"] == "std-h-eps").unwrap();
+        assert!(eps.get("lineStyleId").is_none());
+        assert_eq!(eps["myNote"], "bleibt");
     }
 
     #[test]

@@ -37,3 +37,34 @@ export function standardsMergeCounts(ops: readonly CoreOp[]): StandardsMergeCoun
   }
   return out;
 }
+
+/** Ein Standard-Eintrag des Projekts, der von der heutigen Bibliothek abweicht („Standards aktualisieren"). */
+export interface StandardsChange {
+  /** Projekt-Liste (`hatches`, `components`, `wallTypes` …). */
+  collection: string;
+  id: string;
+  name: string;
+  /** Namen der Felder, die sich ändern würden. */
+  fields: string[];
+  /** Name weicht vom Standard ab: vermutlich selbst angepasst (im Dialog abgewählt). */
+  renamed: boolean;
+}
+
+export interface StandardsUpdatePlan {
+  /** Anzahl fehlender Standard-Einträge, die mit angehängt werden. */
+  added: number;
+  changes: StandardsChange[];
+}
+
+/** Schlüssel eines Eintrags in der Auswahl von {@link standardsUpdateOps}. */
+export const standardsChangeKey = (c: Pick<StandardsChange, "collection" | "id">): string => `${c.collection}:${c.id}`;
+
+/** Abweichungen der Standard-Einträge vom heutigen Standard (Regel s. `standards.rs`, „Standards aktualisieren"). */
+export function standardsUpdatePlan(project: Project): StandardsUpdatePlan {
+  return documentFor(project).queryRoot<StandardsUpdatePlan>("standardsUpdatePlan");
+}
+
+/** Ops: fehlende Standards anhängen und die gewählten Einträge (`standardsChangeKey`) auf den heutigen Stand bringen. */
+export function standardsUpdateOps(project: Project, selected: readonly string[]): CoreOp[] {
+  return documentFor(project).queryRoot<CoreOp[]>("standardsUpdateOps", JSON.stringify(selected));
+}

@@ -29,6 +29,7 @@ name = "dossier-core"
 version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
+ "dossier-hatch",
  "i_overlay",
  "kernel2d",
  "render3d",
@@ -37,6 +38,13 @@ dependencies = [
  "ts-rs",
  "wasm-bindgen",
  "zmij",
+]
+
+[[package]]
+name = "dossier-hatch"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -162,6 +170,7 @@ dependencies = [
 name = "render3d"
 version = "0.1.0"
 dependencies = [
+ "dossier-hatch",
  "serde",
 ]
 

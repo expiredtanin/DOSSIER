@@ -32,6 +32,7 @@ const PATTERN_OPTIONS: { value: HatchPattern; labelKey: string }[] = [
   { value: "stone", labelKey: "pattern.stone" },
   { value: "earth", labelKey: "pattern.earth" },
   { value: "gravel", labelKey: "pattern.gravel" },
+  { value: "dots", labelKey: "pattern.dots" },
   { value: "custom", labelKey: "pattern.custom" },
 ];
 

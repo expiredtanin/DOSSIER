@@ -84,6 +84,12 @@ pub fn run_root(lk: &crate::document::Lookup, name: &str, text: &str) -> Result<
         "penDeleteOps" => json(&crate::pens::delete_pen_ops(root, text)),
         // Standard-Bibliothek ([100]–[102], `standards.rs`): fehlende Standard-Ressourcen als Ops.
         "standardsMergeOps" => json(&crate::standards::merge_ops(root)),
+        // „Standards aktualisieren" ([109]): Abweichungen vom heutigen Standard / Ops für die gewählten (`text` = JSON-Liste `"<Liste>:<id>"`).
+        "standardsUpdatePlan" => json(&crate::standards::update_plan(root)),
+        "standardsUpdateOps" => {
+            let sel: Vec<String> = serde_json::from_str(text).map_err(|e| format!("standardsUpdateOps: {e}"))?;
+            json(&crate::standards::update_ops(root, &sel))
+        }
         "penSeedOps" => {
             let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("penSeedOps: {e}"))?;
             json(&crate::pens::seed_standard_ops(root, a["id"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or("")))

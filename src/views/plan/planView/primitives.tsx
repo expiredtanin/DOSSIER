@@ -8,7 +8,7 @@ import { NO_HATCH } from "../../../core";
 import { layoutText, stampBlockLines, wrapPlainText } from "../../../text/renderHtml";
 import type { Vec2 } from "../../../model/types";
 import { quantizePen } from "../../../export/sceneToPrintSvg";
-import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../../../core";
+import { buildHatchRuns, buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../../../core";
 import { dashHasDot } from "../../../core";
 import { HAIRLINE_PX, PX_PER_M, mmToPx, printStrokeVb, visibleEdgeRuns } from "../../../core";
 import { dashArrayCss, fitDashToPeriod, hatchDashVb, lineDashVb } from "../../../core";
@@ -19,10 +19,27 @@ const IMG_TILE_VB = 40;
 /** Lineare/Kreuz-Muster brauchen ein <pattern>; solid/none nicht. */
 export function needsPattern(pattern: HatchRender["pattern"]): boolean {
   return (
-    pattern === "insulation" ||
     pattern === "diagonal" ||
     pattern === "crosshatch" ||
     pattern === "custom"
+  );
+}
+
+/**
+ * Muster, die der Kern-Generator als Linien/Polylinien erzeugt ([109]: Dämmschlange, Zickzack, Welle, Holzkreuz,
+ * Naturstein, Erdreich, Kies, Punktfeld) — der SVG-Rückfall zeichnet sie wie GL/Druck-SVG aus
+ * `buildHatchRuns` (eine Implementierung) statt als `<pattern>`-Kachel.
+ */
+export function isGeneratedPattern(pattern: HatchRender["pattern"]): boolean {
+  return (
+    pattern === "insulation" ||
+    pattern === "insulationHard" ||
+    pattern === "insulationWave" ||
+    pattern === "timber" ||
+    pattern === "earth" ||
+    pattern === "gravel" ||
+    pattern === "stone" ||
+    pattern === "dots"
   );
 }
 
@@ -40,6 +57,7 @@ export function polyUsesPattern(h: HatchRender): boolean {
   if (h.kind === "image") return !!h.image;
   if (h.kind === "gradient") return !!h.gradient;
   if (h.lines === "random") return false;
+  if (isGeneratedPattern(h.pattern)) return false;
   return needsPattern(h.pattern);
 }
 
@@ -119,37 +137,6 @@ export function HatchPattern({
         <stop offset="0%" stopColor={g.color1} />
         <stop offset="100%" stopColor={g.color2} />
       </linearGradient>
-    );
-  }
-
-  if (hatch.pattern === "insulation") {
-    // Weiche Zickzack-/Wellenlinie (SIA-nah). Kachel 14×10 × Maßstab.
-    const w = 14 * hatch.scale;
-    const h = 10 * hatch.scale;
-    const my = 5 * hatch.scale;
-    const qy1 = -1 * hatch.scale;
-    const qy2 = 11 * hatch.scale;
-    const qx1 = 3.5 * hatch.scale;
-    const qx2 = 7 * hatch.scale;
-    const qx3 = 10.5 * hatch.scale;
-    return (
-      <pattern
-        id={id}
-        patternUnits="userSpaceOnUse"
-        width={w}
-        height={h}
-        patternTransform={`rotate(${hatch.angle})`}
-      >
-        <path
-          d={`M0 ${my} Q ${qx1} ${qy1} ${qx2} ${my} Q ${qx3} ${qy2} ${w} ${my}`}
-          fill="none"
-          stroke={hatch.color}
-          strokeWidth={sw}
-          style={dashStyle(w)}
-          strokeLinecap={dashCap}
-          vectorEffect={vfx}
-        />
-      </pattern>
     );
   }
 
@@ -570,9 +557,9 @@ export function renderPrimitive(
       // Random-Vektor-Schraffur (Kies/Splitt): Grundfüllung + deterministische
       // Streu-Striche (im MODELL-Raum erzeugt → toScreen; identischer Seed wie
       // GL/PDF) + Umriss. KEIN <pattern> (die Striche werden direkt gezeichnet).
-      if (p.hatch.kind !== "image" && p.hatch.lines === "random") {
+      if (p.hatch.kind !== "image" && (p.hatch.lines === "random" || isGeneratedPattern(p.hatch.pattern))) {
         const hsw = weight(p.hatch.lineWeight > 0 ? p.hatch.lineWeight : 0.13);
-        const runs = buildRandomHatchRuns(p.pts, p.hatch);
+        const runs = p.hatch.lines === "random" ? buildRandomHatchRuns(p.pts, p.hatch) : buildHatchRuns(p.pts, p.hatch);
         return (
           <g>
             <polygon points={pts} fill={p.fill} stroke="none" />

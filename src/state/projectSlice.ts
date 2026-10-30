@@ -57,7 +57,7 @@ import {
   PEN_FALLBACK_COLOR,
   PEN_FALLBACK_WEIGHT,
 } from "../model/penSets";
-import { standardsMergeCounts, standardsMergeOps } from "../model/standards";
+import { standardsMergeCounts, standardsMergeOps, standardsUpdateOps } from "../model/standards";
 import { reorderByIds } from "../model/reorder";
 import { transformMutation } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
@@ -185,6 +185,8 @@ export interface ProjectSlice {
   seedStandardPenSet: () => void;
   /** Ergänzt die fehlenden SIA-400-Standards (Baustoffe, Schraffuren, Linientypen, Aufbauten; [100]–[102]). */
   loadStandards: () => void;
+  /** „Standards aktualisieren" ([109]): ergänzt Fehlendes und bringt die gewählten Standard-Einträge (`"<Liste>:<id>"`) auf den heutigen Stand; ein Undo-Schritt. */
+  updateStandards: (selected: string[]) => void;
 
   // ── Benutzerdefinierte Farbpaletten (s. model/types.ts::CustomPalette) ────
   addCustomPalette: () => void;
@@ -1033,6 +1035,12 @@ export function createProjectSlice(
         .map((k) => t(`resources.loadStandards.n.${k}`, { n: c[k] }));
       if (ops.length) applyChange(ops);
       get().notify(parts.length ? t("resources.loadStandards.added", { list: parts.join(", ") }) : t("resources.loadStandards.none"), "info");
+    },
+
+    updateStandards: (selected) => {
+      const ops = standardsUpdateOps(get().project, selected);
+      if (ops.length) applyChange(ops);
+      get().notify(t("resources.updateStandards.done", { n: selected.length }), "info");
     },
 
     addCustomPalette: () =>

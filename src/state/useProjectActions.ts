@@ -114,6 +114,7 @@ export function useProjectActions(
   const patchPenSetWeight = useStore((s) => s.patchPenSetWeight);
   const seedStandardPenSet = useStore((s) => s.seedStandardPenSet);
   const loadStandards = useStore((s) => s.loadStandards);
+  const updateStandards = useStore((s) => s.updateStandards);
   const addCustomPalette = useStore((s) => s.addCustomPalette);
   const renameCustomPalette = useStore((s) => s.renameCustomPalette);
   const deleteCustomPalette = useStore((s) => s.deleteCustomPalette);
@@ -425,6 +426,7 @@ export function useProjectActions(
     patchPenSetWeight,
     seedStandardPenSet,
     loadStandards,
+    updateStandards,
     addCustomPalette,
     renameCustomPalette,
     deleteCustomPalette,

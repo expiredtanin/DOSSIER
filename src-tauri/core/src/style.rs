@@ -42,10 +42,15 @@ fn pattern_id(p: HatchPattern) -> f64 {
         HatchPattern::Solid => 1.0,
         HatchPattern::Diagonal => 2.0,
         HatchPattern::Crosshatch => 3.0,
-        HatchPattern::Insulation | HatchPattern::InsulationHard | HatchPattern::InsulationWave => 4.0,
-        // 3D-Schnittflächen (render3d) kennen nur die Grundmuster: nächstliegendes ([109]).
-        HatchPattern::Timber | HatchPattern::Earth => 3.0,
-        HatchPattern::Gravel | HatchPattern::Stone => 2.0,
+        // Ab 4: Muster-Code des Kern-Generators (render3d zeichnet die Linien selbst, [109]).
+        HatchPattern::Insulation => 4.0,
+        HatchPattern::InsulationHard => 6.0,
+        HatchPattern::InsulationWave => 7.0,
+        HatchPattern::Timber => 8.0,
+        HatchPattern::Earth => 9.0,
+        HatchPattern::Gravel => 10.0,
+        HatchPattern::Stone => 11.0,
+        HatchPattern::Dots => 12.0,
         _ => 0.0,
     }
 }

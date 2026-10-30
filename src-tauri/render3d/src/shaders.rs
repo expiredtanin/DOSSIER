@@ -374,7 +374,8 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 /// passend zur 2D-Schnittkonvention `HATCH_INK`): es variiert das MUSTER, nicht die
 /// Farbe. Muster-Ids: 0 = none (leer/weiss), 1 = solid (Vollton),
 /// 2 = diagonal (Linienschar, `angle` steuert die Neigung — 0° = horizontal, wie
-/// im 2D), 3 = crosshatch (Kreuz), 4 = insulation (Zickzack/Daemmung).
+/// im 2D), 3 = crosshatch (Kreuz); ab 4 (Daemmung, Holz, Naturstein, Erdreich, Kies, Putz) kommen die Musterlinien
+/// aus dem Kern-Generator (`dossier_hatch`, Ribbons in `section_fill`), der Shader zeichnet dort Papier.
 pub const CAP_WGSL: &str = r#"
 struct Globals {
     view_proj     : mat4x4<f32>,
@@ -459,10 +460,6 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let sv = dv / spacing;
     let fw_u = fwidth(su);
     let fw_v = fwidth(sv);
-    let cell = spacing * 2.0;
-    let tri = abs(fract(du / cell) - 0.5) * 2.0;   // 0..1 Dreieckswelle (Daemmung)
-    let fb = fract(dv / cell);
-    let fw_zig = fwidth(fb) + fwidth(tri);
 
     // none (0): leere (weisse) Schnittflaeche — wie „keine Schraffur" im 2D.
     if (pattern == 0) {
@@ -485,14 +482,9 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
             line_band(sv, half_s, fw_v),
             line_band(su, half_s, fw_u)
         );
-    } else {
-        // insulation (4, Daemmung): Zickzack. Die Quer-Position (dv) folgt einer
-        // Dreieckswelle entlang der Lauf-Achse (du) — ein durchgehender Zickzack.
-        let d = min(abs(fb - tri), min(abs(fb - tri + 1.0), abs(fb - tri - 1.0)));
-        let aa = max(fw_zig, 1e-5);
-        let hw = half / cell;
-        line = 1.0 - smoothstep(hw, hw + aa, d);
     }
+    // Ids ab 4 (Daemmung, Holz, Naturstein, Erdreich, Kies, Putz ...) zeichnet der Kern-Generator als
+    // Ribbons (section_fill::push_generated_hatch); der Shader laesst die Flaeche leer (Papier).
 
     let color = mix(paper, ink, clamp(line, 0.0, 1.0));
     return vec4<f32>(color, 1.0);
