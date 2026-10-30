@@ -30,7 +30,7 @@ fn shift_geom(g: &mut Drawing2DGeom, dx: f64, dy: f64) {
             *max = shift(*max, dx, dy);
         }
         Circle { center, .. } | Arc { center, .. } | Ellipse { center, .. } => *center = shift(*center, dx, dy),
-        Kote { at, .. } | Detailref { at, .. } | Scalebar { at, .. } | Pointmarker { at } | Block { at, .. } => *at = shift(*at, dx, dy),
+        Grid { origin: at, .. } | Kote { at, .. } | Detailref { at, .. } | Scalebar { at, .. } | Pointmarker { at } | Block { at, .. } => *at = shift(*at, dx, dy),
         Text { at, leader_target, leader_bend_points, path_pts, .. } => {
             *at = shift(*at, dx, dy);
             if let Some(t) = leader_target {

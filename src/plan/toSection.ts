@@ -118,12 +118,14 @@ export function levelArg(level: DrawingLevel) {
 export function generateSectionPlan(
   output: SectionOutput,
   mono = false,
-  opts: { hiddenLines?: boolean; visibleCodes?: Set<string>; categoryDisplay?: CategoryDisplayResolver; openings?: boolean } = {},
+  opts: { hiddenLines?: boolean; visibleCodes?: Set<string>; categoryDisplay?: CategoryDisplayResolver; openings?: boolean; scaleDenominator?: number } = {},
 ): Plan {
   const { project, level } = output;
   const text = JSON.stringify({
     level: levelArg(level),
     hiddenLines: !!opts.hiddenLines,
+    // Massstabsnenner für die Achsblasen des Rasters ([112]); Default 100.
+    scale: opts.scaleDenominator ?? 100,
     ...visibilityArgs(project, opts.visibleCodes, opts.categoryDisplay),
   });
   const args = output.bodies.slice();

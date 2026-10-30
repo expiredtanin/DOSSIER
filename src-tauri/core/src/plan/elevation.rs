@@ -1562,7 +1562,12 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     let mut w = crate::plan_buf::Writer::new(true);
     if let Some((prims, bounds)) = elevation_primitives(p, &level, shadows, mono, &vis, scale)? {
         w.group(&prims);
-        w.bounds = Some(bounds);
+        // Achsraster ([112]): Achsen quer zur Blickebene.
+        let grid = super::grid_view::grid_prims(p, &level, bounds, scale);
+        if !grid.is_empty() {
+            w.group(&grid);
+        }
+        w.bounds = Some(super::grid_view::union_bounds(bounds, &grid));
     }
     Ok(w.finish())
 }

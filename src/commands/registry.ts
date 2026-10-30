@@ -47,6 +47,8 @@ import { scaleCommand } from "./cmds/scale";
 import { explodeCommand } from "./cmds/explode";
 import { dimdetachCommand } from "./cmds/dimdetach";
 import { autodimCommand } from "./cmds/autodim";
+import { gridCommand } from "./cmds/grid";
+import { arcDimCommand, diameterDimCommand, radiusDimCommand } from "./cmds/dimround";
 import { alignCommand } from "./cmds/align";
 import { joinCommand } from "./cmds/join";
 import { copyCommand } from "./cmds/copy";
@@ -115,6 +117,10 @@ export const COMMANDS: Record<string, Command> = {
   explode: explodeCommand,
   dimdetach: dimdetachCommand,
   autodim: autodimCommand,
+  grid: gridCommand,
+  dimradius: radiusDimCommand,
+  dimdiameter: diameterDimCommand,
+  dimarc: arcDimCommand,
   align: alignCommand,
   join: joinCommand,
   copy: copyCommand,
@@ -236,6 +242,15 @@ export const ALIASES: Record<string, string> = {
   bml: "dimdetach",
   bemassungloesen: "dimdetach",
   ab: "autodim",
+  axes: "grid",
+  achsraster: "grid",
+  achsen: "grid",
+  rad: "dimradius",
+  radiusmass: "dimradius",
+  dm: "dimdiameter",
+  durchmessermass: "dimdiameter",
+  bogenl: "dimarc",
+  bogenlaenge: "dimarc",
   aussenbemassung: "autodim",
   al: "align",
   ausrichten: "align",

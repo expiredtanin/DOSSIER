@@ -297,6 +297,11 @@ export interface PanelHostValue {
     drawingId: string,
     patch: { start?: EndMark; end?: EndMark; sizeMm?: number },
   ) => void;
+  /** Achsraster ([112]): Blasenseite, Überstand (m), Blasen-Ø (Papier-mm), Geschosse (leer = alle). */
+  onSetGridProps: (
+    drawingId: string,
+    patch: { bubbles?: "start" | "end" | "both"; extend?: number; bubbleMm?: number; levels?: string[] | undefined; show3d?: boolean },
+  ) => void;
   onSetDimensionStyle: (
     drawingId: string,
     patch: {

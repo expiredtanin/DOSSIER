@@ -292,6 +292,7 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   scalebar: "scalebar",
   revcloud: "revcloud",
   pointmarker: "pointmarker",
+  grid: "grid",
   wipeout: "wipeout",
   text: "text",
   leader: "leader",

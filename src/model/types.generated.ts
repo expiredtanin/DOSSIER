@@ -521,7 +521,16 @@ export type CustomPalette = {
 export type DetailLevel = "grob" | "mittel" | "fein";
 
 /** Merkmal, an dem ein Bemassungspunkt hängt ([38], `dim_assoc.rs`). */
-export type DimFeature = "wall" | "opening" | "vertex" | "edge" | "center" | "intersection";
+export type DimFeature =
+  | "wall"
+  | "opening"
+  | "vertex"
+  | "edge"
+  | "center"
+  | "intersection"
+  | "axis"
+  | "axiscross"
+  | "rim";
 
 /** Bezug eines Bemassungspunkts auf ein Element ([38]). */
 export type DimRef = {
@@ -887,6 +896,11 @@ export type Drawing2DGeom =
      * wenn ein Bezug ungültig wird. Fehlt das Feld, ist die Bemassung frei wie bisher.
      */
     refs?: Array<DimRef | null>;
+    /**
+     * Art der Bemassung (fehlt = linear): Radius/Durchmesser (`pts` = Mittelpunkt, Punkt auf dem
+     * Kreis) und Bogenlänge (`pts` = Mittelpunkt, Bogenanfang, Bogenende).
+     */
+    kind?: "radius" | "diameter" | "arc";
   }
   | {
     shape: "kote";
@@ -921,6 +935,24 @@ export type Drawing2DGeom =
     segments: number;
   }
   | { shape: "pointmarker"; at: Vec2 }
+  | {
+    shape: "grid";
+    origin: Vec2;
+    angle: number;
+    radial?: boolean;
+    a: Array<GridAxis>;
+    b: Array<GridAxis>;
+    /** Überstand der Achsen über die äusserste Querachse (Meter, Standard 1.5). */
+    extend?: number;
+    /** Enden mit Achsblase (Standard Anfang und Ende). */
+    bubbles?: "start" | "end" | "both";
+    /** Blasen-Durchmesser in Papier-mm (Standard 8). */
+    bubbleMm?: number;
+    /** Geschosse, in denen das Raster gezeigt wird; fehlt oder leer = in allen. */
+    levels?: Array<string>;
+    /** Im 3D-Modell als dünne Linien zeigen. */
+    show3d?: boolean;
+  }
   | {
     shape: "text";
     at: Vec2;
@@ -1239,6 +1271,9 @@ export type FrameDetail = {
   /** Anschlag je Seite (Meter; übersteuert `rebateDepth`, 0 = kein Anschlag auf dieser Seite). */
   rebates?: OpeningSides;
 };
+
+/** Eine Achse des Achsrasters: Beschriftung und Lage (Abstand bzw. Winkel/Radius, s. `Grid`). */
+export type GridAxis = { label: string; pos: number };
 
 /**
  * Raster-Regel: generiert Wände entlang gleichmäßiger X-/Y-Achsen.

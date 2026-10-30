@@ -1135,6 +1135,16 @@ pub fn geom_bbox(g: &Value) -> [f64; 4] {
             }
         }
         Some("kote" | "text" | "block" | "detailref" | "pointmarker") => pts.push(p("at")),
+        Some("grid") => {
+            if let Some(spec) = serde_json::from_value::<crate::model::Drawing2DGeom>(g.clone()).ok().as_ref().and_then(crate::grid::Spec::of) {
+                for ax in spec.axes() {
+                    match ax.shape {
+                        crate::grid::Shape::Line { a, b } => pts.extend([a, b]),
+                        crate::grid::Shape::Arc { c, r, .. } => pts.extend([(c.0 - r, c.1 - r), (c.0 + r, c.1 + r)]),
+                    }
+                }
+            }
+        }
         Some("scalebar") => {
             let at = p("at");
             pts.extend([at, (at.0 + num_of(field(g, "segmentLength")) * num_of(field(g, "segments")), at.1)]);

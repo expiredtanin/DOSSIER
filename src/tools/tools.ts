@@ -346,6 +346,18 @@ const pointmarkerTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Achsraster ([112]): Platzhalter-Werkzeug, gekoppelt an den `grid`-Befehl (Ursprung + Feldweiten).
+const gridTool: Tool = {
+  id: "grid",
+  labelKey: "tool.grid",
+  hintKey: () => "tool.grid.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // Wipeout/Maskenregion: Platzhalter-Werkzeug, gekoppelt an den
 // `wipeout`-Befehl (Punktfolge, schliesst automatisch → weisse Maskenfläche).
 // Freies 2D-Element (nicht floorOnly).
@@ -456,6 +468,7 @@ const TOOLS: Record<ToolId, Tool> = {
   scalebar: scalebarTool,
   revcloud: revcloudTool,
   pointmarker: pointmarkerTool,
+  grid: gridTool,
   wipeout: wipeoutTool,
   text: textTool,
   leader: leaderTool,

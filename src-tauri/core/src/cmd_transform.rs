@@ -166,6 +166,21 @@ pub fn mv_geom(g: &Value, xf: &Xf) -> Option<Value> {
         "circle" | "arc" | "ellipse" => with(g, "center", p("center")),
         "bezier" | "spline" | "dimension" => with(g, "pts", ps("pts")),
         "kote" | "detailref" | "scalebar" | "pointmarker" => with(g, "at", p("at")),
+        "grid" => {
+            // Ursprung und Richtung über einen mit abgebildeten Richtungspunkt; eine Spiegelung kehrt die
+            // Querachsen um (rechtwinklig: Y-Lagen, radial: Strahlwinkel).
+            let (ox, oy) = xy(field(g, "origin").unwrap_or(&Value::Null));
+            let ang = num_of(field(g, "angle"));
+            let no = xf.apply(ox, oy);
+            let nt = xf.apply(ox + jsnum::cos(ang), oy + jsnum::sin(ang));
+            let mut f = vec![("origin", pt(no.0, no.1)), ("angle", js_num(jsnum::atan2(nt.1 - no.1, nt.0 - no.0)))];
+            if xf.reverses() {
+                let key = if field(g, "radial").and_then(Value::as_bool) == Some(true) { "a" } else { "b" };
+                let neg = Value::Array(arr(field(g, key)).iter().map(|x| with(x, "pos", js_num(-num_of(field(x, "pos"))))).collect());
+                f.push((key, neg));
+            }
+            with_all(g, f)
+        }
         "text" => {
             // Hinweis-Ziel, Knicke und Pfadpunkte wandern mit.
             let mut f = vec![("at", Some(p("at")))];
@@ -205,6 +220,18 @@ pub fn scale_geom(g: &Value, xf: &Xf, k: f64) -> Option<Value> {
         "circle" | "arc" => with(&g, "r", times("r")),
         "ellipse" => with_all(&g, vec![("rx", times("rx")), ("ry", times("ry"))]),
         "dimension" => with(&g, "offset", times("offset")),
+        "grid" => {
+            let scaled = |key: &str| Value::Array(arr(field(&g, key)).iter().map(|x| with(x, "pos", js_num(num_of(field(x, "pos")) * k))).collect());
+            let radial = field(&g, "radial").and_then(Value::as_bool) == Some(true);
+            let mut f = vec![("b", scaled("b"))];
+            if !radial {
+                f.push(("a", scaled("a")));
+            }
+            if field(&g, "extend").is_some() {
+                f.push(("extend", times("extend")));
+            }
+            with_all(&g, f)
+        }
         "text" => {
             let mut f = vec![("height", times("height"))];
             if field(&g, "width").is_some() {
