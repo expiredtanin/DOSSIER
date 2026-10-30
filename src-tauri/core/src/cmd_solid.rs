@@ -150,6 +150,130 @@ pub fn solid_from_inputs(shape: &str, p0: V, p1: Option<V>, nums: &[f64]) -> Opt
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Rotationskörper und Loft aus Plan-Profilen ([T7])
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Rotationskörper: das Plan-Profil (geschlossen, in der Zeichenebene) dreht sich um die Achse
+/// `a → b` (liegt waagrecht im Plan, auf Höhe des grössten Profilabstands, damit ein voller Körper auf
+/// der Geschoss-UK steht). Das Profil muss ganz auf einer Seite der Achse liegen; es wird als
+/// (r = Abstand, z = Lage entlang der Achse) an `revolve` von truck gegeben und per `transform` ins
+/// Modell gesetzt (lokal x → Querrichtung, y → oben, z → Achse). `angle_deg` in (0, 360]; positive
+/// Drehung hebt das Profil nach oben. Ergebnis: Grundriss-Rechteck, Höhe, B-Rep-Beschreibung, Label.
+pub fn revolve_from_profile(profile: &[V], a: V, b: V, angle_deg: f64) -> Option<(Vec<V>, f64, Value, String)> {
+    let len = hypot2(b.0 - a.0, b.1 - a.1);
+    if profile.len() < 3 || !(len > 1e-6) || !angle_deg.is_finite() || !(angle_deg > 0.0) {
+        return None;
+    }
+    let mut d = ((b.0 - a.0) / len, (b.1 - a.1) / len);
+    let side = |d: V, p: V| (p.0 - a.0) * -d.1 + (p.1 - a.1) * d.0;
+    let (lo, hi) = profile.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(side(d, *p)), hi.max(side(d, *p))));
+    if !(lo.is_finite() && hi.is_finite()) {
+        return None;
+    }
+    if lo < -1e-6 {
+        if hi > 1e-6 {
+            return None; // Profil überquert die Achse
+        }
+        d = (-d.0, -d.1); // Profil liegt rechts: Achse umdrehen, damit r >= 0
+    }
+    let n = (-d.1, d.0);
+    let ring: Vec<(f64, f64)> = profile.iter().map(|p| (side(d, *p).max(0.0), (p.0 - a.0) * d.0 + (p.1 - a.1) * d.1)).collect();
+    let r_max = ring.iter().fold(0.0_f64, |m, q| m.max(q.0));
+    if !(r_max > 1e-6) {
+        return None;
+    }
+    let (z_min, z_max) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.1), hi.max(q.1)));
+    if !(z_max - z_min > 1e-6) {
+        return None;
+    }
+    let angle = angle_deg.min(360.0);
+    let flat: Vec<Value> = ring.iter().flat_map(|q| [js_num(q.0), js_num(q.1)]).collect();
+    let inner = obj(vec![("kind", s("revolve")), ("profile", Value::Array(flat)), ("angleDeg", js_num(angle))]);
+    let m = [n.0, 0.0, d.0, a.0, n.1, 0.0, d.1, a.1, 0.0, 1.0, 0.0, r_max];
+    let spec = obj(vec![("kind", s("transform")), ("m", Value::Array(m.iter().map(|x| js_num(*x)).collect())), ("solid", inner)]);
+    let at = |along: f64, perp: f64| (a.0 + d.0 * along + n.0 * perp, a.1 + d.1 * along + n.1 * perp);
+    let pts = vec![at(z_min, -r_max), at(z_max, -r_max), at(z_max, r_max), at(z_min, r_max)];
+    Some((pts, 2.0 * r_max, spec, format!("Rotationskörper {}°", fixed2(angle))))
+}
+
+fn ring_area(r: &[V]) -> f64 {
+    let n = r.len();
+    (0..n).map(|i| r[i].0 * r[(i + 1) % n].1 - r[(i + 1) % n].0 * r[i].1).sum::<f64>() / 2.0
+}
+
+/// Gleiche Punktzahl für alle Ringe: kürzere Ringe teilen ihre längste Kante, bis sie so viele Punkte
+/// haben wie der längste (Ecken bleiben erhalten); alle gegen den Uhrzeigersinn.
+fn match_rings(rings: &[Vec<V>]) -> Vec<Vec<V>> {
+    let target = rings.iter().map(Vec::len).max().unwrap_or(0);
+    rings
+        .iter()
+        .map(|r| {
+            let mut r = r.clone();
+            if ring_area(&r) < 0.0 {
+                r.reverse();
+            }
+            while r.len() < target {
+                let n = r.len();
+                let len = |k: usize| hypot2(r[(k + 1) % n].0 - r[k].0, r[(k + 1) % n].1 - r[k].1);
+                let Some(i) = (0..n).max_by(|&i, &j| len(i).partial_cmp(&len(j)).unwrap_or(std::cmp::Ordering::Equal)) else { break };
+                let (p, q) = (r[i], r[(i + 1) % n]);
+                r.insert(i + 1, ((p.0 + q.0) / 2.0, (p.1 + q.1) / 2.0));
+            }
+            r
+        })
+        .collect()
+}
+
+/// Loft durch >= 2 Plan-Profile, gleichmässig über `height` verteilt (erstes Profil unten).
+pub fn loft_from_rings(rings: &[Vec<V>], height: f64) -> Option<(Vec<V>, f64, Value, String)> {
+    if rings.len() < 2 || !(height > 1e-6) || rings.iter().any(|r| r.len() < 3 || r.iter().any(|p| !(p.0.is_finite() && p.1.is_finite()))) {
+        return None;
+    }
+    let rings = match_rings(rings);
+    let last = (rings.len() - 1) as f64;
+    let sections: Vec<Value> = rings
+        .iter()
+        .enumerate()
+        .map(|(i, r)| obj(vec![("z", js_num(height * i as f64 / last)), ("points", Value::Array(r.iter().flat_map(|p| [js_num(p.0), js_num(p.1)]).collect()))]))
+        .collect();
+    let spec = obj(vec![("kind", s("loft")), ("sections", Value::Array(sections))]);
+    Some((rings[0].clone(), height, spec, format!("Loft {} Profile h={}", rings.len(), fixed2(height))))
+}
+
+fn profile_ring(root: &Map<String, Value>, id: &str) -> Option<Vec<V>> {
+    let (pts, _) = find(root, "drawings2d", id).and_then(crate::cmd_create::profile_of)?;
+    Some(pts.iter().map(xy).collect())
+}
+
+fn brep_solid_ops(root: &Map<String, Value>, ctx: &Ctx, ids: &mut IdGen, sources: &[&str], made: Option<(Vec<V>, f64, Value, String)>) -> Vec<Op> {
+    let Some((pts, height, spec, label)) = made else { return Vec::new() };
+    let solid = obj(vec![
+        ("id", s(&ids.next("body"))),
+        ("type", s("extrudedSolid")),
+        ("levelId", s(ctx.level)),
+        ("points", pvs(&pts)),
+        ("height", js_num(height)),
+        ("brep", obj(vec![("spec", spec), ("origin", pv(pts[0])), ("label", s(&label))])),
+    ]);
+    let mut ops = crate::cmd_create::remove_op(root, "drawings2d", sources);
+    ops.extend(add_op("extrudedSolids", vec![solid]));
+    ops
+}
+
+fn revolve_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let src = s_of(v, "source");
+    let made = profile_ring(root, src).and_then(|ring| revolve_from_profile(&ring, p_of(v, "a"), p_of(v, "b"), num_or(field(v, "angle"), 360.0)));
+    brep_solid_ops(root, ctx, ids, &[src], made)
+}
+
+fn loft_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let sources: Vec<&str> = arr(v.get("sources")).iter().filter_map(Value::as_str).collect();
+    let rings: Option<Vec<Vec<V>>> = sources.iter().map(|id| profile_ring(root, id)).collect();
+    let made = rings.and_then(|r| loft_from_rings(&r, n_of(v, "height")));
+    brep_solid_ops(root, ctx, ids, &sources, made)
+}
+
 fn solid_ops(v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let nums: Vec<f64> = arr(v.get("nums")).iter().map(|x| num_of(Some(x))).collect();
     let Some((pts, height, spec, label)) = solid_from_inputs(s_of(v, "shape"), p_of(v, "p0"), opt_p(v, "p1"), &nums) else {
@@ -645,6 +769,8 @@ fn direction_arrow(a: V, b: V, sign: f64, out: &mut Shapes) {
 pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Option<Vec<Op>> {
     Some(match s_of(v, "cmd") {
         "solid" => solid_ops(v, ctx, ids),
+        "revolve" => revolve_ops(root, v, ctx, ids),
+        "loft" => loft_ops(root, v, ctx, ids),
         "solidbool" => solidbool_ops(root, v, ids),
         "voidbox" => voidbox_ops(v, ctx, ids),
         "terrain" => terrain_ops(root, ids),
@@ -797,5 +923,58 @@ mod tests {
         assert!(t["indices"].as_array().unwrap().len() > 6);
         assert!(pos.iter().skip(2).step_by(3).all(|z| (1.0..=2.0).contains(&z.as_f64().unwrap())));
         assert!(terrain_from_contours(&[], "t")["indices"].as_array().unwrap().is_empty());
+    }
+
+    /// [T7] Rotationskörper: Achse waagrecht im Plan, Profil auf einer Seite, Matrix bildet lokal x → Quer, z → Achse ab.
+    #[test]
+    fn rotationskoerper_aus_profil() {
+        let prof = [(0.0, 0.0), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)];
+        let (pts, h, spec, label) = revolve_from_profile(&prof, (0.0, 0.0), (5.0, 0.0), 360.0).unwrap();
+        assert_eq!(h, 2.0);
+        assert_eq!(label, "Rotationskörper 360.00°");
+        assert_eq!(spec["kind"], "transform");
+        assert_eq!(spec["solid"]["profile"], json!([0, 0, 0, 2, 1, 2, 1, 0]));
+        let m: Vec<f64> = spec["m"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+        let w = |l: [f64; 3]| [m[0] * l[0] + m[1] * l[1] + m[2] * l[2] + m[3], m[4] * l[0] + m[5] * l[1] + m[6] * l[2] + m[7], m[8] * l[0] + m[9] * l[1] + m[10] * l[2] + m[11]];
+        assert_eq!(w([1.0, 0.0, 2.0]), [2.0, 1.0, 1.0]);
+        assert_eq!(w([0.0, 1.0, 0.0]), [0.0, 0.0, 2.0]);
+        assert_eq!(pts.len(), 4);
+        let rechts = [(0.0, 0.0), (2.0, 0.0), (2.0, -1.0), (0.0, -1.0)];
+        let (_, _, spec2, _) = revolve_from_profile(&rechts, (0.0, 0.0), (5.0, 0.0), 90.0).unwrap();
+        assert_eq!(spec2["solid"]["angleDeg"], 90.0);
+        assert!(revolve_from_profile(&[(0.0, -1.0), (2.0, -1.0), (2.0, 1.0), (0.0, 1.0)], (0.0, 0.0), (5.0, 0.0), 360.0).is_none());
+        assert!(revolve_from_profile(&prof, (0.0, 0.0), (0.0, 0.0), 360.0).is_none());
+        assert!(revolve_from_profile(&prof, (0.0, 0.0), (5.0, 0.0), f64::NAN).is_none());
+    }
+
+    /// [T7] Loft: gleiche Punktzahl (Kante teilen), Höhen gleichmässig, Ringe gegen den Uhrzeigersinn.
+    #[test]
+    fn loft_aus_profilen() {
+        let quad = vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)];
+        let tri_cw = vec![(0.5, 0.5), (0.5, 1.5), (1.5, 0.5)];
+        let (pts, h, spec, label) = loft_from_rings(&[quad.clone(), tri_cw, quad.clone()], 3.0).unwrap();
+        assert_eq!((pts.len(), h), (4, 3.0));
+        assert_eq!(label, "Loft 3 Profile h=3.00");
+        let secs = spec["sections"].as_array().unwrap();
+        assert_eq!(secs.len(), 3);
+        assert_eq!(secs[1]["z"], 1.5);
+        assert!(secs.iter().all(|s| s["points"].as_array().unwrap().len() == 8));
+        assert!(loft_from_rings(&[quad.clone()], 3.0).is_none());
+        assert!(loft_from_rings(&[quad.clone(), quad], 0.0).is_none());
+    }
+
+    #[test]
+    fn rotation_und_loft_befehle_legen_koerper_an_und_entfernen_quellen() {
+        let d = |id: &str, pts: Value| json!({"id": id, "type": "drawing2d", "levelId": "eg", "geom": {"shape": "polyline", "closed": true, "pts": pts}});
+        let sq = |x: f64, s: f64| json!([{"x": x, "y": 0}, {"x": x + s, "y": 0}, {"x": x + s, "y": s}, {"x": x, "y": s}]);
+        let root = json!({"drawings2d": [d("A", sq(0.0, 2.0)), d("B", sq(10.0, 1.0))]});
+        let root = root.as_object().unwrap();
+        let ctx = Ctx { level: "eg", floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
+        let mut ids = IdGen::new("t");
+        let ops = loft_ops(root, &json!({"sources": ["A", "B"], "height": 2.0}), &ctx, &mut ids);
+        assert_eq!(ops.len(), 2);
+        let ops = revolve_ops(root, &json!({"source": "A", "a": {"x": -1, "y": -1}, "b": {"x": 5, "y": -1}, "angle": 180}), &ctx, &mut ids);
+        assert_eq!(ops.len(), 2);
+        assert!(revolve_ops(root, &json!({"source": "ZZ", "a": {"x": 0, "y": 0}, "b": {"x": 1, "y": 0}}), &ctx, &mut ids).is_empty());
     }
 }

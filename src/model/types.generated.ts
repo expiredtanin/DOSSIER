@@ -2874,6 +2874,11 @@ export type Stair = {
    * Dreieck als SIA-Vollpfeil). Fehlt sie, gilt "line".
    */
   arrowStyle?: "line" | "filled";
+  /**
+   * Nur Wendel: Radius (Meter) der Mittelsäule (Spindel) im Zentrum. Fehlt er oder ist er
+   * ≤ 0, gibt es keine Säule.
+   */
+  centerColumn?: number;
 };
 
 /**

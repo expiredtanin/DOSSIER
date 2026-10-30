@@ -1461,6 +1461,13 @@ export function StairSection({
         value={stair.width}
         onCommit={(v) => host.onSetStairWidth(v)}
       />
+      {stair.shape === "spiral" && (
+        <DimensionField
+          label={t("objinfo.stair.column")}
+          value={stair.centerColumn ?? 0}
+          onCommit={(v) => host.onSetStairColumn(v)}
+        />
+      )}
       <DimensionField
         label={t("objinfo.stair.steps")}
         value={stair.stepCount}

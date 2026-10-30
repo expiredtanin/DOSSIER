@@ -26,6 +26,7 @@ import { ElementTreePanel, ElementsTabIcon } from "./ElementTreePanel";
 import { ViewSnapshotsPanel, ViewSnapshotsTabIcon } from "./ViewSnapshotsPanel";
 import { LayoutsPanel, LayoutsTabIcon } from "./LayoutsPanel";
 import { BcfPanel } from "./BcfPanel";
+import { ClashPanel } from "./ClashPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import {
   ToolsTabIcon,
@@ -52,6 +53,7 @@ export const BUILTIN_PANEL_IDS = {
   viewSnapshots: "view-snapshots",
   layouts: "layouts",
   bcf: "bcf",
+  clash: "clash",
   history: "history",
 } as const;
 
@@ -160,6 +162,16 @@ registerPanel({
   icon: <BcfTabIcon />,
   hasDisplayMode: false,
   render: () => <BcfPanel />,
+});
+
+// Kollisionen ([T8]) — Treffer der Kollisionsprüfung, Klick zoomt im 3D auf die Durchdringung. Nicht im
+// Standard-Layout; öffnet sich beim Prüflauf („Modell > Kollisionsprüfung") bzw. über „Fenster > Panels".
+registerPanel({
+  id: BUILTIN_PANEL_IDS.clash,
+  title: "nav.clash",
+  icon: <BcfTabIcon />,
+  hasDisplayMode: false,
+  render: () => <ClashPanel />,
 });
 
 // Verlauf ([84]) — Undo-Schritte als Liste, Klick springt zum Schritt. Nicht im Standard-Layout,
