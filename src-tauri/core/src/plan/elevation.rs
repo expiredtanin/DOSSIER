@@ -167,7 +167,20 @@ fn cull_under_roofs(p: &Project, frame: &[f64; 9], walls: &[RWall], faces: &mut 
             for q in g.planes.iter().flatten() {
                 b = [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])];
             }
-            RoofSheet { top, under, fascia: fascia_quads(&g.planes, total), bounds: b }
+            // Stirnflächen, die in einem anderen Dach stecken (Kehlen verschnittener Dächer), verdecken nicht.
+            let others: Vec<Vec<[f64; 3]>> = p
+                .roofs
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .filter(|o| o.id != r.id && o.floor_id == r.floor_id)
+                .flat_map(|o| crate::roof::roof_geometry(&o.params(), p.roof_base_elevation(o)).planes)
+                .collect();
+            let fascia = fascia_quads(&g.planes, total)
+                .into_iter()
+                .filter(|q| !others.iter().any(|o| crate::dormer::point_in_xy((q[0][0] + q[1][0]) / 2.0, (q[0][1] + q[1][1]) / 2.0, o)))
+                .collect();
+            RoofSheet { top, under, fascia, bounds: b }
         })
         .filter(|s| s.top.len() == s.under.len() && !s.top.is_empty())
         .collect();
@@ -430,7 +443,29 @@ fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall]) -> Result<
                     .collect()
             };
             // Wie die übrigen Dächer: Oberfläche der Eindeckung (Dach + Gaubendächer), dazu die Gaubenwände.
-            roofs.push(RoofIn { id: roof.id.clone(), fill, planes: crate::roof_assembly::planar_faces(&solids.top, &front(&solids.top)), gables: if floors.contains(roof.floor_id.as_str()) { Vec::new() } else { g.gables.clone() } });
+            // Wände reichen ans Dach ([G2]): Stirnflächen der Ränder, die nicht in einem anderen Dach stecken.
+            let gables = if floors.contains(roof.floor_id.as_str()) {
+                let total: f64 = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).sum();
+                let others: Vec<Vec<[f64; 3]>> = p
+                    .roofs
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter(|o| o.id != roof.id && o.floor_id == roof.floor_id)
+                    .flat_map(|o| crate::roof::roof_geometry(&o.params(), p.roof_base_elevation(o)).planes)
+                    .collect();
+                fascia_quads(&g.planes, total)
+                    .into_iter()
+                    .filter(|q| {
+                        let (mx, my) = ((q[0][0] + q[1][0]) / 2.0, (q[0][1] + q[1][1]) / 2.0);
+                        !others.iter().any(|o| crate::dormer::point_in_xy(mx, my, o))
+                    })
+                    .map(|q| q.to_vec())
+                    .collect()
+            } else {
+                g.gables.clone()
+            };
+            roofs.push(RoofIn { id: roof.id.clone(), fill, planes: crate::roof_assembly::planar_faces(&solids.top, &front(&solids.top)), gables });
             let wall_comp = solids.parts.iter().find(|pt| pt.role == crate::roof_assembly::Role::DormerWall && pt.layer == 0).and_then(|pt| p.component(&pt.component_id));
             let wf = wall_comp.map_or([0.85, 0.83, 0.8], |c| hex_to_rgb(&c.color, [0.85, 0.83, 0.8]));
             let wall_faces = crate::roof_assembly::planar_faces(&solids.walls, &front(&solids.walls));
