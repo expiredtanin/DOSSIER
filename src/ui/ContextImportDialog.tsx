@@ -22,7 +22,7 @@ import { fetchOsm } from "../io/osm";
 import type { OsmSelection } from "../io/osm";
 import { featuresToContextObjects } from "../io/geoContext";
 import type { GeoFeature } from "../io/geoContext";
-import { terrainMeshFromGrid } from "../model/terrain";
+import { smoothTerrainGrid, terrainMeshFromGrid } from "../model/terrain";
 import { makeOrigin } from "../io/lv95";
 import type { GeoOrigin, LV95 } from "../io/lv95";
 import type { ContextObject, TerrainMesh } from "../model/types";
@@ -125,6 +125,8 @@ export function ContextImportDialog({
   const [sources, setSources] = useState<Sources>(DEFAULT_SOURCES);
   // 2 m = Default (schneller/kleinere Kacheln); 0.5 m für Detailarbeit.
   const [terrainResolution, setTerrainResolution] = useState<TerrainResolution>("2");
+  // [T6] Glättung des swissALTI3D-Rasters vor dem Vernetzen: Durchgänge des Binomialfilters (0 = aus).
+  const [terrainSmooth, setTerrainSmooth] = useState(0);
 
   const [searching, setSearching] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -277,7 +279,7 @@ export function ContextImportDialog({
       // Gelände-Höhenraster (echtes swissALTI3D-XYZ, native Auflösung) → Terrain-Mesh.
       let terrain: TerrainMesh | null = null;
       if (terrainResult?.grid) {
-        const mesh = terrainMeshFromGrid(terrainResult.grid);
+        const mesh = terrainMeshFromGrid(smoothTerrainGrid(terrainResult.grid, terrainSmooth));
         if (mesh.positions.length >= 9) terrain = mesh;
       }
 
@@ -552,6 +554,18 @@ export function ContextImportDialog({
                 >
                   <option value="2">{t("ctxImport.terrain.res2")}</option>
                   <option value="0.5">{t("ctxImport.terrain.res05")}</option>
+                </select>
+                <select
+                  className="cim-input"
+                  value={terrainSmooth}
+                  disabled={!sources.swissTerrain}
+                  onChange={(e) => setTerrainSmooth(Number(e.target.value))}
+                  aria-label={t("ctxImport.terrain.smooth")}
+                  title={t("ctxImport.terrain.smooth")}
+                >
+                  <option value="0">{t("ctxImport.terrain.smooth0")}</option>
+                  <option value="1">{t("ctxImport.terrain.smooth1")}</option>
+                  <option value="3">{t("ctxImport.terrain.smooth3")}</option>
                 </select>
               </label>
               <label className="cim-check">

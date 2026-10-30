@@ -49,6 +49,7 @@ const REC_ATTACH: f64 = 14.0;
 const REC_OPENING_SOLID: f64 = 15.0;
 const REC_WALL_ARC: f64 = 16.0;
 const REC_WALL_ARC_SOLID: f64 = 17.0;
+const REC_GRID: f64 = 18.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -1329,6 +1330,30 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     }
     f.num(REC_END_COLUMNS);
 
+    // ── Achsraster ([112]) → IfcGrid (U-/V-Achsen als Linienzüge in Welt-XY) ──
+    for d in &p.drawings2d {
+        let Some(spec) = crate::grid::Spec::of(&d.geom) else { continue };
+        let Drawing2DGeom::Grid { levels, .. } = &d.geom else { continue };
+        // Ein Geschoss: dort enthalten; mehrere oder alle: am Gebäude.
+        let only = match levels.as_deref() {
+            Some([one]) => Some(one.as_str()),
+            _ => None,
+        };
+        let structure = only.map_or(-1.0, structure_of);
+        let axes = spec.axes();
+        if axes.is_empty() {
+            continue;
+        }
+        let (id, name) = (f.str(&d.id), f.str(&format!("Achsraster {}", d.id)));
+        f.nums(&[REC_GRID, structure, id, name, spec.a.len() as f64, (axes.len() - spec.a.len()) as f64]);
+        for ax in &axes {
+            let pts: Vec<Vec2> = crate::grid::polyline(ax).into_iter().map(|(x, y)| Vec2 { x, y }).collect();
+            let lab = f.str(&ax.label);
+            f.nums(&[lab]);
+            w_pts(&mut f, &pts);
+        }
+    }
+
     // ── Klassifikation (Optionen), am Ende: alle Bauteile sind geschrieben ──
     if opt.ebkph {
         let refs: Vec<(String, String, String)> =
@@ -1508,6 +1533,33 @@ mod tests {
         assert_eq!(f.nums[6], 400.0);
         assert!((f.nums[7] - 47.37).abs() < 0.1 && (f.nums[8] - 8.54).abs() < 0.1, "{} {}", f.nums[7], f.nums[8]);
         assert!(f.nums.iter().any(|v| *v > 2_683_000.0));
+    }
+
+    #[test]
+    fn achsraster_als_datensatz() {
+        let mut p = sample();
+        let a = |l: &str, pos: f64| GridAxis { label: l.into(), pos, ..Default::default() };
+        let geom = Drawing2DGeom::Grid {
+            origin: Vec2 { x: 0.0, y: 0.0 },
+            angle: 0.0,
+            radial: None,
+            a: vec![a("1", 0.0), a("2", 5.0)],
+            b: vec![a("A", 0.0)],
+            extend: None,
+            bubbles: None,
+            bubble_mm: None,
+            levels: None,
+            show_3d: None,
+        };
+        p.drawings2d.push(Drawing2D { id: "g".into(), r#type: "drawing2d".into(), level_id: p.drawing_levels[0].id.clone(), category_code: "00".into(), geom, ..Default::default() });
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        let at = f.nums.windows(2).position(|w| w == [REC_END_COLUMNS, REC_GRID]).map(|i| i + 1);
+        assert!(at.is_some(), "kein Rasterdatensatz");
+        // structure, id, name, n_u = 2, n_v = 1
+        let i = at.unwrap();
+        assert_eq!((f.nums[i + 4], f.nums[i + 5]), (2.0, 1.0));
+        // Ohne Raster kein Datensatz.
+        assert!(!ifc_export_data(&sample(), &IfcOptions::default()).unwrap().nums.windows(2).any(|w| w == [REC_END_COLUMNS, REC_GRID]));
     }
 
     #[test]

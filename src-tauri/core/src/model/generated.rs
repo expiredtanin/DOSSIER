@@ -5117,6 +5117,10 @@ pub struct TerrainMesh {
     #[serde(rename = "contourIndexEvery", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub contour_index_every: Option<f64>,
+    /// [T6] Tiefe des Erdreich-Bands im Schnitt unter dem Gelände in m (Default 1.5).
+    #[serde(rename = "earthDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub earth_depth: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5155,6 +5159,15 @@ pub struct Excavation {
     #[serde(rename = "bermHeight", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub berm_height: Option<f64>,
+    /// [68] Arbeitsraum in m: der Umriss gilt als Gebäude-Grundfläche, die Sohle liegt um dieses Mass
+    /// weiter aussen (Gehrung an den Ecken). Fehlt = 0 (Umriss = Sohle).
+    #[serde(rename = "workingSpace", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub working_space: Option<f64>,
+    /// [68] Senkrechter Verbau (Spundwand) je Kante (wie `edgeSlopes`): keine Böschung, Wand steht senkrecht.
+    #[serde(rename = "edgeShoring", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub edge_shoring: Option<Vec<bool>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

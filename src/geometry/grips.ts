@@ -26,6 +26,8 @@ export type GripRequest =
   | { op: "ceilingGrip" | "roomGrip" | "roofGrip"; id: string; index: number; pt: P }
   | { op: "ceilingBy" | "roofBy" | "stairBy" | "roomBy" | "roomStamp"; id: string; delta: P }
   | { op: "ceilingEdge" | "roomEdge"; id: string; a: number; b: number; delta: P }
+  | { op: "excavationGrip"; id: string; index: number; pt: P }
+  | { op: "excavationEdge"; id: string; a: number; b: number; delta: P }
   | { op: "insertPoint"; id: string; seg: number; pt: P }
   | { op: "deletePoint"; id: string; index: number }
   | { op: "vertexType"; id: string; index: number; vertexType: "corner" | "arc" | "spline" }

@@ -83,3 +83,10 @@ pub fn terrain_from_contours_opts_json(contours_json: &str, id: &str, smooth: f6
     };
     crate::cmd_solid::terrain_from_contours_with(c.as_array().map(Vec::as_slice).unwrap_or(&[]), id, o).to_string()
 }
+
+/// Höhenraster glätten ([T6], `crate::terrain::smooth_grid`): `z` zeilenweise (`nx` Spalten, NaN = kein Wert).
+#[wasm_bindgen]
+pub fn terrain_smooth_grid(z: &[f64], nx: f64, ny: f64, passes: f64) -> Vec<f64> {
+    let dim = |v: f64| if v.is_finite() && v >= 0.0 { v as usize } else { 0 };
+    crate::terrain::smooth_grid(z, dim(nx), dim(ny), if passes.is_finite() && passes > 0.0 { passes as u32 } else { 0 })
+}

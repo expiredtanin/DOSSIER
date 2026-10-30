@@ -23,6 +23,7 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             json(&room_program::layout(p, &opt))
         }
         ("siteCheck", _) => json(&site_rules::check_project(p)),
+        ("dormerStatus", _) => json(&crate::dormer::status(p)),
         ("excavationQuantities", _) => json(&crate::excavation::quantities(p)),
         ("buildingFootprint", _) => json(&site_rules::building_footprint(p)),
         ("modelTop", _) => json(&site_rules::model_top(p)),

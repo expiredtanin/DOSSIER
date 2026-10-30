@@ -371,6 +371,9 @@ export interface ProjectSlice {
   // ── Decken-Editieren ──────────────────────────────────────────────────────
   /** Verschiebt EINEN Umriss-Vertex (per Index) einer Decke. */
   moveCeilingGrip: (ceilingId: string, index: number, pt: Vec2) => void;
+  /** [68] Baugrube: Umriss-Ecke ziehen (Index = Ecke; Index = Eckenzahl: Sohlenhöhe). */
+  moveExcavationGrip: (id: string, index: number, pt: Vec2) => void;
+  moveExcavationEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   /** Verschiebt eine Decke (ganzer Umriss) um `delta`. */
   moveCeilingBy: (ceilingId: string, delta: Vec2) => void;
   /** Verschiebt eine Umriss-KANTE (beide Vertices) einer Decke um `delta`. */
@@ -1177,6 +1180,11 @@ export function createProjectSlice(
     // Mutation bei jedem Maus-Move-Schritt eines Drags.)
     moveCeilingGrip: (ceilingId, index, pt) =>
       applyGrip({ op: "ceilingGrip", id: ceilingId, index, pt: gripPt(pt) }, `moveCeilingGrip:${ceilingId}:${index}`),
+
+    moveExcavationGrip: (id, index, pt) => applyGrip({ op: "excavationGrip", id, index, pt: gripPt(pt) }, `moveExcavationGrip:${id}:${index}`),
+
+    moveExcavationEdge: (id, aIndex, bIndex, delta) =>
+      applyGrip({ op: "excavationEdge", id, a: aIndex, b: bIndex, delta: gripPt(delta) }, `moveExcavationEdge:${id}:${aIndex}:${bIndex}`),
 
     moveCeilingBy: (ceilingId, delta) =>
       applyGrip({ op: "ceilingBy", id: ceilingId, delta: gripPt(delta) }, `moveCeilingBy:${ceilingId}`),

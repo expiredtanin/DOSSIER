@@ -18,7 +18,8 @@ import { UValueRow } from "./UValueRow";
 import { lengthFromDisplay, lengthToDisplay, unitsForLevel, xToDisplay, yFromDisplay, yToDisplay } from "../tools/displayUnits";
 import { solidProps } from "../engine/truckSolid";
 import type { SolidProps, SolidSpec } from "../engine/truckSolid";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { dormerStatus } from "../analysis/dormerStatus";
 // Anzeige-Fallbacks für die Öffnungs-Linien-Übersteuerung (LineStyleRow) —
 // dieselben Werte wie POCHE_STROKE/SYMBOL_HAIRLINE_MM im Grundriss (Kern: plan/style.rs)
 // (reine UI-Default-Anzeige, kein Re-Export nötig).
@@ -967,6 +968,7 @@ function rectOutline(x0: number, y0: number, w: number, d: number) {
 /** Gauben ([G5]) des Dachs: Art, Masse, Neigung, Aufbau je Gaube; Hinzufügen über den Befehl „Gaube". */
 function DormersSection({ roof, host }: { roof: RoofInfo; host: ReturnType<typeof usePanelHost> }) {
   const dormers = roof.dormers ?? [];
+  const status = useMemo(() => dormerStatus(host.project), [host.project]);
   const patch = (i: number, p: Partial<Dormer>) =>
     host.onSetRoofPatch({ dormers: dormers.map((d, k) => (k === i ? { ...d, ...p } : d)) }, `dormer-${i}`);
   const num = (labelKey: TranslationKey, value: number, step: number, apply: (v: number) => void) => (
@@ -991,6 +993,15 @@ function DormersSection({ roof, host }: { roof: RoofInfo; host: ReturnType<typeo
       <div className="objinfo-section-label">{t("objinfo.dormer.section")}</div>
       {dormers.map((d, i) => (
         <div key={d.id} data-testid="objinfo-dormer">
+          {(() => {
+            const st = status.find((s) => s.dormerId === d.id);
+            if (!st || !(st.clamped || st.invalid)) return null;
+            return (
+              <div className="objinfo-warn" role="alert" data-testid="objinfo-dormer-warning">
+                {st.invalid ? t("objinfo.dormer.invalid") : t("objinfo.dormer.clamped", { height: st.effectiveHeight.toFixed(2) })}
+              </div>
+            );
+          })()}
           <div className="objinfo-field">
             <span className="objinfo-flabel">{t("objinfo.dormer.kind")}</span>
             <Dropdown

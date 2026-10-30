@@ -300,7 +300,16 @@ export interface PanelHostValue {
   /** Achsraster ([112]): Blasenseite, Überstand (m), Blasen-Ø (Papier-mm), Geschosse (leer = alle). */
   onSetGridProps: (
     drawingId: string,
-    patch: { bubbles?: "start" | "end" | "both"; extend?: number; bubbleMm?: number; levels?: string[] | undefined; show3d?: boolean },
+    patch: {
+      bubbles?: "start" | "end" | "both";
+      extend?: number;
+      bubbleMm?: number;
+      levels?: string[] | undefined;
+      show3d?: boolean;
+      /** Achsen (Beschriftung, Lage, Blasenseite je Achse): ganze Liste ersetzen. */
+      a?: import("../model/types").GridAxis[];
+      b?: import("../model/types").GridAxis[];
+    },
   ) => void;
   onSetDimensionStyle: (
     drawingId: string,

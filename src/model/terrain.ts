@@ -61,6 +61,21 @@ export interface TerrainGrid {
 }
 
 /**
+ * [T6] Glättet ein Höhenraster (Rust-Kern `terrain.rs::smooth_grid`): `passes` Durchgänge eines
+ * Binomialfilters je Achse (0 = unverändert). Zellen ohne Messwert (`null`) bleiben leer.
+ */
+export function smoothTerrainGrid(grid: TerrainGrid, passes: number): TerrainGrid {
+  if (!(passes > 0) || grid.xs.length === 0 || grid.ys.length === 0) return grid;
+  const nx = grid.xs.length;
+  const ny = grid.ys.length;
+  const flat = new Float64Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) flat[j * nx + i] = grid.z[j]?.[i] ?? Number.NaN;
+  const out = core().terrain_smooth_grid(flat, nx, ny, passes);
+  const z = grid.ys.map((_, j) => grid.xs.map((__, i) => (Number.isFinite(out[j * nx + i]) ? out[j * nx + i] : null)));
+  return { ...grid, z };
+}
+
+/**
  * Baut ein Terrain-Mesh aus einem regulären Höhenraster (Quad-Gitter → zwei
  * Dreiecke je Zelle). Fehlende Zellen (`null`) werden ausgelassen; eine Zelle
  * entsteht nur, wenn alle vier Ecken vorhanden sind. Rohes positions/indices-

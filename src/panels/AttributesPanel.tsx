@@ -502,6 +502,7 @@ export function AttributesPanel() {
             Standard zurück. Die Masszahl selbst wird direkt im Plan am
             eigenen Griff verschoben (rastet nahe der Standardlage ein). */}
         {drawing?.geom.shape === "grid" && (() => {
+          const fmtAxis = (v: number) => (Math.round(v * 100) / 100).toString();
           const geom = drawing.geom as Extract<typeof drawing.geom, { shape: "grid" }>;
           const here = geom.levels?.includes(drawing.levelId) && geom.levels.length === 1;
           return (
@@ -529,6 +530,42 @@ export function AttributesPanel() {
               <span className="attr-val">
                 <input type="checkbox" checked={geom.show3d === true} onChange={(e) => host.onSetGridProps(drawing.id, { show3d: e.target.checked })} />
               </span>
+              {(["a", "b"] as const).map((list) =>
+                geom[list].map((ax, i) => (
+                  <Fragment key={`${list}${i}`}>
+                    <span className="attr-key">{t(geom.radial ? (list === "a" ? "attr.grid.ray" : "attr.grid.ring") : "attr.grid.axis", { pos: fmtAxis(ax.pos) })}</span>
+                    <span className="attr-val" data-testid="grid-axis-row">
+                      <input
+                        className="attr-num"
+                        style={{ width: 56 }}
+                        type="text"
+                        aria-label={t("attr.grid.axisLabel")}
+                        value={ax.label}
+                        onChange={(e) => host.onSetGridProps(drawing.id, { [list]: geom[list].map((x, k) => (k === i ? { ...x, label: e.target.value } : x)) })}
+                      />
+                      <select
+                        aria-label={t("attr.grid.axisBubble")}
+                        value={ax.bubble ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value as "" | "start" | "end" | "both";
+                          host.onSetGridProps(drawing.id, {
+                            [list]: geom[list].map((x, k) => {
+                              if (k !== i) return x;
+                              const { bubble: _old, ...rest } = x;
+                              return v ? { ...rest, bubble: v } : rest;
+                            }),
+                          });
+                        }}
+                      >
+                        <option value="">{t("attr.grid.axisBubble.grid")}</option>
+                        <option value="both">{t("attr.grid.bubbles.both")}</option>
+                        <option value="start">{t("attr.grid.bubbles.start")}</option>
+                        <option value="end">{t("attr.grid.bubbles.end")}</option>
+                      </select>
+                    </span>
+                  </Fragment>
+                )),
+              )}
               <span className="attr-key">{t("attr.grid.levels")}</span>
               <span className="attr-val">
                 <select value={here ? "here" : "all"} onChange={(e) => host.onSetGridProps(drawing.id, { levels: e.target.value === "here" ? [drawing.levelId] : undefined })}>

@@ -214,6 +214,37 @@ pub fn geometry(p: &Project, roof: &Roof, d: &Dormer) -> Option<DormerGeom> {
     Some(g2)
 }
 
+/// Zustand einer Gaube für die Hülle ([G5]): am First gekappt (`clamped`, `effective_height` = tatsächliche
+/// Stirnhöhe) oder nicht herstellbar (`invalid`).
+#[derive(Debug, serde::Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DormerStatus {
+    pub roof_id: String,
+    pub dormer_id: String,
+    pub clamped: bool,
+    pub invalid: bool,
+    pub effective_height: f64,
+}
+
+/// Zustand aller Gauben des Projekts (nur solche, die gekappt oder ungültig sind, sind für die UI wichtig;
+/// hier alle, damit die Hülle auch „wieder in Ordnung" erkennt).
+pub fn status(p: &Project) -> Vec<DormerStatus> {
+    let mut out = Vec::new();
+    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+        for d in roof.dormers.as_deref().unwrap_or(&[]) {
+            let g = geometry(p, roof, d);
+            out.push(DormerStatus {
+                roof_id: roof.id.clone(),
+                dormer_id: d.id.clone(),
+                clamped: g.as_ref().is_some_and(|g| g.clamped),
+                invalid: g.is_none(),
+                effective_height: g.as_ref().map_or(0.0, |g| g.front_height),
+            });
+        }
+    }
+    out
+}
+
 fn geometry_raw(p: &Project, roof: &Roof, d: &Dormer) -> Option<DormerGeom> {
     let frame = frame(p, roof, d)?;
     if !(finite_pos(d.width) && d.width >= 0.4 && d.width <= 30.0 && finite_pos(d.front_height) && d.front_height <= 10.0) {
@@ -477,6 +508,18 @@ pub(crate) mod tests {
             }]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn status_meldet_gekappte_gauben() {
+        let mut p = gable_project();
+        let st = status(&p);
+        assert_eq!(st.len(), 1);
+        assert!(!st[0].clamped && !st[0].invalid && (st[0].effective_height - 1.6).abs() < 1e-9, "{st:?}");
+        p.roofs.as_mut().unwrap()[0].dormers.as_mut().unwrap()[0].front_height = 6.0;
+        let st = status(&p);
+        assert!(st[0].clamped && !st[0].invalid && st[0].effective_height < 6.0 && st[0].effective_height > 0.3, "{st:?}");
+        assert_eq!((st[0].roof_id.as_str(), st[0].dormer_id.as_str()), ("R1", "D1"));
     }
 
     #[test]

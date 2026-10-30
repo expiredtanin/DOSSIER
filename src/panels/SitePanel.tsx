@@ -319,6 +319,14 @@ export function SitePanel() {
                         placeholder="5"
                         onChange={patch(obj.id, "contourIndexEvery")}
                       />
+                      <NumField
+                        label={t("site.earthDepth")}
+                        value={obj.earthDepth}
+                        step={0.5}
+                        min={0.1}
+                        placeholder="1.5"
+                        onChange={patch(obj.id, "earthDepth")}
+                      />
                     </div>
                   )}
                   {obj.type === "excavation" && (
@@ -354,6 +362,33 @@ export function SitePanel() {
                         placeholder="—"
                         onChange={patch(obj.id, "bermHeight")}
                       />
+                      <NumField
+                        label={t("site.excavation.workingSpace")}
+                        value={obj.workingSpace}
+                        step={0.1}
+                        min={0}
+                        placeholder="0"
+                        onChange={patch(obj.id, "workingSpace")}
+                      />
+                      <div className="site-prop" title={t("site.excavation.shoringHint")}>
+                        <span>{t("site.excavation.shoring")}</span>
+                        <span>
+                          {obj.outline.map((_, i) => (
+                            <label key={i} style={{ marginRight: 6 }}>
+                              <input
+                                type="checkbox"
+                                data-testid={`excavation-shoring-${i}`}
+                                checked={obj.edgeShoring?.[i] === true}
+                                onChange={(e) => {
+                                  const next = obj.outline.map((__, k) => (k === i ? e.target.checked : obj.edgeShoring?.[k] === true));
+                                  host.onPatchContextObject(obj.id, { edgeShoring: next.some(Boolean) ? next : undefined }, `site-${obj.id}-edgeShoring`);
+                                }}
+                              />
+                              {i + 1}
+                            </label>
+                          ))}
+                        </span>
+                      </div>
                       <ExcavationQty q={quantities.find((x) => x.id === obj.id)} />
                     </div>
                   )}

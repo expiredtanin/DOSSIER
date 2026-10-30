@@ -1178,7 +1178,7 @@ pub fn mv_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2) -> Drawing2DGeom {
             let o = f(*origin);
             let ex = f(v(origin.x + angle.cos(), origin.y + angle.sin()));
             let flip = reverses_orientation(f);
-            let neg = |l: &Vec<GridAxis>| l.iter().map(|x| GridAxis { label: x.label.clone(), pos: -x.pos }).collect::<Vec<_>>();
+            let neg = |l: &Vec<GridAxis>| l.iter().map(|x| GridAxis { label: x.label.clone(), pos: -x.pos, bubble: x.bubble }).collect::<Vec<_>>();
             let ang = (ex.y - o.y).atan2(ex.x - o.x);
             let (a2, b2) = match (flip, radial == &Some(true)) {
                 (false, _) => (a.clone(), b.clone()),
