@@ -1201,7 +1201,34 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     Geprüft: Rust-Tests, CLI-Schnitt parallel vor einem Rundbogenfenster als PNG angesehen (Linux). Offen:
     Projektion bei schräg zur Ebene stehender Wand nur mit dem Umriss der zugewandten Fläche (Leibungskanten
     fehlen), Abzugskörper beliebiger Form, nicht in der Tauri-App/Metal geprüft.
-- ○ **[G4] Exakte Sichtbarkeit (HLR)** für Ansicht und Projektionsteil des Schnitts. · XL
+- ◐ **[G4] Exakte Sichtbarkeit (HLR)** für Ansicht und Projektionsteil des Schnitts. · XL
+  - (30.10.) Kern `hlr.rs`: ebene Flächen (Polygone/Dreiecke) in Ansichtskoordinaten → Kanten. Einordnung je
+    Kantenstück (an T-Stössen kollinearer Kanten zerlegt): deckungsgleiche Gegenflächen heben sich auf (Stoss
+    zweier Körper, Wandstücke um Öffnungen), koplanare Fortsetzung und Knicke unter 20° innerhalb einer
+    Glättungsgruppe (Bogenwand-Sehnen, Körper-Netze) fallen weg; gezeichnet werden Umriss, Rand, Silhouette und
+    Knick. Sichtbarkeit exakt: Bereiche der Kante im (geschlossenen) Verdecker-Polygon, darin lineare
+    Tiefendifferenz zur Verdecker-Ebene > ε (gleiche Tiefe verdeckt nie → kein Flackern an gemeinsamen Kanten;
+    Kante genau hinter Rand/Fuge näherer Flächen ist verdeckt). Beschleunigung: achsparallele Kanten über
+    Geraden-Schlüssel (sortiert, Bereichsabfrage), übrige über 3D-Raster; Verdecker im 2D-Raster nach Tiefe;
+    ohne verdeckte Kanten zeichnen ganz gedeckte Flächen nicht. **Ansicht:** Umriss-/Knickkanten aus den Flächen
+    (ersetzt XOR-Umriss, Koplanar-/Bogenfugen-Sonderfälle und das Clipping mit 2-mm-Rand), Öffnungen verdecken,
+    Kanten liegen über allen Füllungen; `hiddenLines` der Ebene (über `levelArg`) zeigt verdeckte Kanten
+    gestrichelt (`elevation-hidden`). **Schnitt-Projektion:** aus den 3D-Körpern (Wandnetz von render3d samt
+    Gehrung/Löchern je Wand, Platten/Treppen als Prismen, Dächer: Haut der verschnittenen bzw. Dachflächen
+    beidseitig, Körper als Netz), hinter der Ebene zugeschnitten; Schnittflächen verdecken in Tiefe 0
+    (render3d `cut_polygons` ohne die alte u-Raster-Verdeckung). Gewollte Unterschiede: Beispiel-/big8-Ansicht
+    zeigen dieselbe Linienmenge wie vorher (ohne Doppellinien); im Schnitt jetzt Dächer hinter der Ebene,
+    Fenster der Rückwände als Umriss statt Stossfugen der Wandstücke, keine Projektionslinien mehr über
+    Schnittflächen, Bogenwände vollständig; bei Gauben fehlen Kanten, die die alte Näherung durch davor liegende
+    Dachteile zeichnete. Zeiten (WASM-CLI, Rechner unter Last): big8 Ansicht ≈ 40 ms (vorher 40), big8 Schnitt
+    ≈ 110 ms (151), big16 Schnitt 450–600 ms (568), big16 Ansicht 210–320 ms (219). Geprüft: Rust-Tests (hlr:
+    Quader, T-Stoss, Fuge, schräge/durchstossende Verdecker, Zylinder-Facetten, Triangulation; Ansicht/Schnitt
+    am Beispiel), CLI-Ansichten/-Schnitte (Beispiel, Haus mit Bogenwand + Gauben + Gelände, Gauben-Projekt,
+    Bogenwände, big8) als PNG angesehen (Linux). **Offen:** Füllungen der Ansicht bleiben Maler-Ordnung (bei
+    Gauben kann eine Füllung über einer exakt verdeckten Kante liegen), Durchdringungslinien sich schneidender
+    Körper (keine Polygonkante) fehlen, Gelände/Kontext-Netze nicht in der Projektion, render3d `cut_section`
+    (nur noch WASM-Export `cut_section_json`, ohne TS-Aufrufer) rechnet die alte Näherung weiter, nicht in der
+    Tauri-App/Metal geprüft.
 - ◐ **[G5] Dächer untereinander, Gauben, Wand ↔ Decke** per Boolean. · L · nach [G1]/[G2].
   - (30.10.) **Dach ↔ Dach und Gauben** über Körper-Booleans ([107] Schritt 2, `solid_bool.rs`). Kern
     `roof_assembly.rs`: ein Dach ist „verschnitten", wenn sich sein Traufumriss mit einem anderen überdeckt

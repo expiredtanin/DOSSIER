@@ -63,6 +63,7 @@ pub mod model;
 pub mod model3d;
 pub mod style;
 pub mod plan_elevation;
+pub mod hlr;
 pub mod plan_misc;
 pub mod plan_section;
 pub mod voids;

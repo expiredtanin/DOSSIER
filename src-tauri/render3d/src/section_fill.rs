@@ -33,7 +33,7 @@
 //! werden in EINEM `draw` gezeichnet). Ein Cut-Polygon ist stets ein konvexes
 //! Rechteck (4 Ecken, siehe `section.rs`) — Fan-Triangulierung genuegt.
 
-use crate::section::{cut_section, CutPolygon, SectionPlane};
+use crate::section::{cut_polygons, CutPolygon, SectionPlane};
 use dossier_hatch::hatch::{build_hatch_runs, v2, Hatch as GenHatch, HatchKind, Pattern};
 use crate::section_boolean::subtract_dominant_bands;
 use crate::types::{RoofLayerInput, SlabInput, WallInput};
@@ -112,8 +112,7 @@ fn cut_cap_polys(
     slabs: &[SlabInput],
     roofs: &[RoofLayerInput],
 ) -> Vec<CutPolygon> {
-    let out = cut_section(plane, walls, slabs, roofs);
-    subtract_dominant_bands(out.cut_polygons)
+    subtract_dominant_bands(cut_polygons(plane, walls, slabs, roofs))
 }
 
 pub fn build_cut_caps(

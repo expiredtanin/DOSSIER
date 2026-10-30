@@ -1163,12 +1163,20 @@ fn push_quad(
 /// koennen. Berechnet zuerst die Eck-Gehrung ueber ALLE Waende (siehe
 /// `compute_wall_miters`) und extrudiert dann jede Wand mit ihren Gehrungen.
 pub fn build_walls_mesh(walls: &[WallInput]) -> Mesh {
+    build_walls_mesh_owned(walls).0
+}
+
+/// Wie `build_walls_mesh`, dazu je Wand das Ende ihrer Dreiecks-Indizes im Indexpuffer (Besitzer je
+/// Dreieck, z. B. fuer die exakte Sichtbarkeit im Schnitt).
+pub fn build_walls_mesh_owned(walls: &[WallInput]) -> (Mesh, Vec<usize>) {
     let mut mesh = Mesh::default();
     let miters = compute_wall_miters(walls);
+    let mut ends = Vec::with_capacity(walls.len());
     for (w, m) in walls.iter().zip(miters.iter()) {
         extrude_wall_with_miters(&mut mesh, w, *m);
+        ends.push(mesh.indices.len());
     }
-    mesh
+    (mesh, ends)
 }
 
 /// TEXTURIERTER Wand-Pfad (`RenderStyle::Textured`): liefert DIESELBE Geometrie wie
