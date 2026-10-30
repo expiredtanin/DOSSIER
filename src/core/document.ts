@@ -286,9 +286,10 @@ export class ProjectDocument {
       }
       return { problems };
     }
-    const project = applyOps(base, ops, core().doc_last_hits(this.handle));
+    const extra = this.lastExtra();
+    const project = this.withExtra(applyOps(base, ops, core().doc_last_hits(this.handle)), extra);
     this.mirror = project;
-    this.rememberCommit(base, project, ops);
+    this.rememberCommit(base, project, extra.length ? [...ops, ...extra] : ops);
     return { project };
   }
 
@@ -306,9 +307,10 @@ export class ProjectDocument {
     const r = fromMarkedJson<{ ops: CoreOp[]; notice?: string } | { problems: string[] }>(out);
     if ("problems" in r) return r;
     if (r.ops.length === 0) return { project: base, ops: r.ops, notice: r.notice };
-    const project = applyOps(base, r.ops, core().doc_last_hits(this.handle));
+    const extra = this.lastExtra();
+    const project = this.withExtra(applyOps(base, r.ops, core().doc_last_hits(this.handle)), extra);
     this.mirror = project;
-    return { project, ops: r.ops, notice: r.notice };
+    return { project, ops: extra.length ? [...r.ops, ...extra] : r.ops, notice: r.notice };
   }
 
   /**
@@ -354,9 +356,10 @@ export class ProjectDocument {
     const r = fromMarkedJson<{ ops: CoreOp[] } | { problems: string[] }>(out);
     if ("problems" in r) return r;
     if (r.ops.length === 0) return { project: base, ops: r.ops };
-    const project = applyOps(base, r.ops);
+    const extra = this.lastExtra();
+    const project = this.withExtra(applyOps(base, r.ops), extra);
     this.mirror = project;
-    return { project, ops: r.ops };
+    return { project, ops: extra.length ? [...r.ops, ...extra] : r.ops };
   }
 
   /**
@@ -371,10 +374,12 @@ export class ProjectDocument {
     if (out.startsWith("\u0001")) throw new Error(out.slice(1));
     const r = fromMarkedJson<({ ops: CoreOp[] } & R) | { problems: string[] }>(out);
     if ("problems" in r) return r;
-    const project = r.ops.length ? applyOps(base, r.ops) : base;
+    const extra = r.ops.length ? this.lastExtra() : [];
+    const project = r.ops.length ? this.withExtra(applyOps(base, r.ops), extra) : base;
     this.mirror = project;
-    this.rememberCommit(base, project, r.ops);
-    return { ...r, project };
+    const ops = extra.length ? [...r.ops, ...extra] : r.ops;
+    this.rememberCommit(base, project, ops);
+    return { ...r, ops, project };
   }
 
   /**
@@ -504,6 +509,19 @@ export class ProjectDocument {
   }
 
   /** Nach einer angenommenen Änderung: grossen, eigenen (nicht verschmolzenen) Schritt merken. */
+  /**
+   * Nachführ-Ops des letzten Commits ([38], assoziative Bemassung): der Kern hat sie im selben
+   * Undo-Schritt angewendet, die Leseansicht übernimmt sie hinter den eigenen Ops.
+   */
+  private lastExtra(): CoreOp[] {
+    const json = this.handle ? core().doc_last_extra(this.handle) : "";
+    return json ? (JSON.parse(json) as CoreOp[]) : [];
+  }
+
+  private withExtra(project: Project, extra: readonly CoreOp[]): Project {
+    return extra.length ? applyOps(project, extra) : project;
+  }
+
   private rememberCommit(base: Project, project: Project, ops: readonly CoreOp[]): void {
     const [seq, , merged] = this.historySeqs();
     if (!merged) this.steps.remember(seq, base, project, ops);

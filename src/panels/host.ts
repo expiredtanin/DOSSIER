@@ -285,6 +285,8 @@ export interface PanelHostValue {
   onSetDetailRefSheetLayout: (drawingId: string, sheetLayoutId: string | undefined) => void;
   /** Manueller Blattname-Platzhalter, nur relevant OHNE Blattverknüpfung. */
   onSetDetailRefSheetLabel: (drawingId: string, sheetLabel: string) => void;
+  /** „Bemassung lösen" ([38]): Bezüge der Bemassung entfernen, Punkte bleiben. */
+  onDetachDimension: (drawingId: string) => void;
   onSetHatchPlacement: (
     drawingId: string,
     patch: { angleDeg?: number | null; scale?: number | null; origin?: Vec2 | null },

@@ -45,6 +45,7 @@ import { mirrorCommand } from "./cmds/mirror";
 import { rotateCommand } from "./cmds/rotate";
 import { scaleCommand } from "./cmds/scale";
 import { explodeCommand } from "./cmds/explode";
+import { dimdetachCommand } from "./cmds/dimdetach";
 import { autodimCommand } from "./cmds/autodim";
 import { alignCommand } from "./cmds/align";
 import { joinCommand } from "./cmds/join";
@@ -111,6 +112,7 @@ export const COMMANDS: Record<string, Command> = {
   rotate: rotateCommand,
   scale: scaleCommand,
   explode: explodeCommand,
+  dimdetach: dimdetachCommand,
   autodim: autodimCommand,
   align: alignCommand,
   join: joinCommand,
@@ -229,6 +231,8 @@ export const ALIASES: Record<string, string> = {
   skalieren: "scale",
   x: "explode",
   aufloesen: "explode",
+  bml: "dimdetach",
+  bemassungloesen: "dimdetach",
   ab: "autodim",
   aussenbemassung: "autodim",
   al: "align",

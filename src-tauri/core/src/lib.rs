@@ -119,6 +119,7 @@ pub mod opening_presets;
 pub mod surface_pattern;
 pub mod surface_pattern3d;
 pub mod standards;
+pub mod dim_assoc;
 
 #[cfg(feature = "web")]
 mod web;

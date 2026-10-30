@@ -522,6 +522,21 @@ pub fn transform_ops(root: &Map<String, Value>, req: &TransformReq) -> Vec<Op> {
     let k_at = |t: f64| if scaling { scale_factor(&pts, t) } else { 1.0 };
     let geom_at = |g: &Value, xf: &Xf, t: f64| if scaling { scale_geom(g, xf, scale_factor(&pts, t)) } else { mv_geom(g, xf) };
     let mut ops = Vec::new();
+    // Assoziative Bemassung ([38]): Bezüge bleiben nur bei starren Bewegungen (Verschieben, Drehen)
+    // und nur auf Elemente, die mittransformiert werden (Öffnungen mit ihrer Wand).
+    let rigid = op == "move" || op == "rotate";
+    let moved: std::collections::HashSet<&str> = items.iter().filter_map(|(_, e)| id_of(e)).collect();
+    let moved_openings: std::collections::HashSet<&str> =
+        list(root, "openings").iter().filter(|o| field(o, "hostWallId").and_then(Value::as_str).is_some_and(|h| moved.contains(h))).filter_map(id_of).collect();
+    let fix_refs = |d: Value, map: &dyn Fn(&str) -> Option<String>| -> Value {
+        let Some(g) = field(&d, "geom") else { return d };
+        let keep = |id: &str| if rigid { map(id) } else { None };
+        match crate::dim_assoc::transformed_refs(g, &keep) {
+            Some(Some(r)) => with(&d, "geom", with(g, "refs", r)),
+            Some(None) => with(&d, "geom", crate::dim_assoc::without_ref(g, None)),
+            None => d,
+        }
+    };
 
     if req.mode == "move" {
         let xf = Xf::of(op, &pts, 1.0);
@@ -532,7 +547,8 @@ pub fn transform_ops(root: &Map<String, Value>, req: &TransformReq) -> Vec<Op> {
         patch("walls", &|w| walls.has(w) && !locked(w), &|w| mv_wall(w, &xf));
         let draw = Ids::of(sel.drawings());
         if !draw.is_empty() {
-            patch("drawings2d", &|d| draw.has(d) && !locked(d), &|d| with_geom(d, geom_at(field(d, "geom").unwrap_or(&Value::Null), &xf, 1.0)));
+            let same = |id: &str| (moved.contains(id) || moved_openings.contains(id)).then(|| id.to_owned());
+            patch("drawings2d", &|d| draw.has(d) && !locked(d), &|d| fix_refs(with_geom(d, geom_at(field(d, "geom").unwrap_or(&Value::Null), &xf, 1.0)), &same));
         }
         if let Some(id) = nonempty(&sel.extruded_solid_id) {
             patch("extrudedSolids", &|s| id_of(s) == Some(id), &|s| mv_solid(s, &xf, k_at(1.0)));
@@ -560,18 +576,34 @@ pub fn transform_ops(root: &Map<String, Value>, req: &TransformReq) -> Vec<Op> {
     let mut new: [Vec<Value>; 8] = Default::default();
     for t in copy_ts(op, &req.mode, req.count.0) {
         let xf = Xf::of(op, &pts, t);
-        for (kind, e) in &items {
-            let (slot, prefix, v) = match kind {
-                Kind::Wall => (0, "W", mv_wall(e, &xf)),
-                Kind::Drawing => (1, "dr2d", with_geom(e, geom_at(field(e, "geom").unwrap_or(&Value::Null), &xf, t))),
-                Kind::Solid => (2, "extrude", mv_solid(e, &xf, k_at(t))),
-                Kind::Column => (3, "column", mv_column(e, &xf)),
-                Kind::Ceiling => (4, "C", mv_ceiling(e, &xf)),
-                Kind::Roof => (5, "RF", mv_roof(e, &xf)),
-                Kind::Stair => (6, "ST", mv_stair(e, &xf, k_at(t))),
-                Kind::Room => (7, "RM", mv_room(e, &xf)),
+        let prefixes: Vec<&str> = items
+            .iter()
+            .map(|(k, _)| match k {
+                Kind::Wall => "W",
+                Kind::Drawing => "dr2d",
+                Kind::Solid => "extrude",
+                Kind::Column => "column",
+                Kind::Ceiling => "C",
+                Kind::Roof => "RF",
+                Kind::Stair => "ST",
+                Kind::Room => "RM",
+            })
+            .collect();
+        let new_ids: Vec<String> = prefixes.iter().map(|p| ids.next(p)).collect();
+        let copied: std::collections::HashMap<&str, &str> = items.iter().zip(&new_ids).filter_map(|((_, e), n)| Some((id_of(e)?, n.as_str()))).collect();
+        let to_copy = |id: &str| copied.get(id).map(|n| (*n).to_owned());
+        for ((kind, e), new_id) in items.iter().zip(&new_ids) {
+            let (slot, v) = match kind {
+                Kind::Wall => (0, mv_wall(e, &xf)),
+                Kind::Drawing => (1, fix_refs(with_geom(e, geom_at(field(e, "geom").unwrap_or(&Value::Null), &xf, t)), &to_copy)),
+                Kind::Solid => (2, mv_solid(e, &xf, k_at(t))),
+                Kind::Column => (3, mv_column(e, &xf)),
+                Kind::Ceiling => (4, mv_ceiling(e, &xf)),
+                Kind::Roof => (5, mv_roof(e, &xf)),
+                Kind::Stair => (6, mv_stair(e, &xf, k_at(t))),
+                Kind::Room => (7, mv_room(e, &xf)),
             };
-            new[slot].push(with(&v, "id", Value::String(ids.next(prefix))));
+            new[slot].push(with(&v, "id", Value::String(new_id.clone())));
         }
     }
     let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms"];

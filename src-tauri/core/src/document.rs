@@ -35,6 +35,9 @@ pub struct Document {
     /// Je Op der zuletzt angewendeten Folge (Commit, Abgleich, Undo/Redo) die Position des von `replace`
     /// getroffenen Elements: TS führt die Leseansicht damit ohne Suche nach ([`Document::last_hits`]).
     last_hits: Vec<Option<usize>>,
+    /// Nachführ-Ops der assoziativen Bemassung ([38], `dim_assoc`) des letzten Commits: im selben
+    /// Undo-Schritt angewendet; TS führt seine Leseansicht damit nach ([`Document::last_extra`]).
+    last_extra: Vec<Op>,
 }
 
 /// Änderungsstände ([K4], Caches der Ableitungen): ein globaler Zähler; jede Op vergibt ihrem Feld
@@ -345,6 +348,11 @@ impl Document {
     /// keine `replace`-Op oder kein Treffer); nach einer Zurückweisung leer.
     pub fn last_hits(&self) -> &[Option<usize>] {
         &self.last_hits
+    }
+
+    /// Zusatz-Ops des letzten Commits (assoziative Bemassung nachgeführt, [38]); leer = keine.
+    pub fn last_extra(&self) -> &[Op] {
+        &self.last_extra
     }
 
     /// Die Wurzel mit dem Positions-Index des Dokuments (Suche per id, s. [`Lookup`]).
@@ -659,7 +667,22 @@ impl Document {
     /// Dokument über; der Verlauf hält nur die inversen Ops (den Redo-Schritt liefert das Rückgängig-
     /// machen selbst: die Inverse der Inversen, s. [`Document::undo`]).
     pub fn commit(&mut self, ops: Vec<Op>, key: Option<&str>, now: f64, sanitize: bool) -> Result<(), Vec<String>> {
-        let inverse = self.apply_checked(ops, sanitize)?;
+        let touches = crate::dim_assoc::touches_sources(&ops);
+        let mut inverse = self.apply_checked(ops, sanitize)?;
+        self.last_extra.clear();
+        if touches {
+            // Assoziative Bemassung nachführen ([38]): gleicher Undo-Schritt, Treffer bleiben die der Benutzer-Ops.
+            let extra = crate::dim_assoc::sync_ops(&self.lookup());
+            if !extra.is_empty() {
+                let hits = std::mem::take(&mut self.last_hits);
+                if let Ok(mut inv) = self.apply_checked(extra.clone(), false) {
+                    inv.extend(inverse);
+                    inverse = inv;
+                    self.last_extra = extra;
+                }
+                self.last_hits = hits;
+            }
+        }
         self.history.record(inverse, key, now);
         Ok(())
     }

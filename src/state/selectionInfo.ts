@@ -19,6 +19,7 @@ import type { SolidSpec } from "../engine/truckSolid";
 import { documentFor } from "../core/document";
 import type {
   AttributeSource,
+  DimRef,
   ColumnProfile,
   ContextImage,
   ContextObject,
@@ -486,6 +487,11 @@ export interface Selection {
    * `geom.shape === "detailref"`).
    */
   detailRef?: DetailRefInfo;
+  /**
+   * Assoziative Bemassung ([38]): Bezug je Punkt der Kette (`null` = freier Punkt), nur bei
+   * `geom.shape === "dimension"` mit Bezügen.
+   */
+  dimRefs?: (DimRef | null)[];
 }
 
 /**

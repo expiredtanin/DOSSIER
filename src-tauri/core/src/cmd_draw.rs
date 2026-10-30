@@ -938,7 +938,20 @@ fn dimension_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGe
     if cleaned.len() < 2 {
         return Vec::new();
     }
-    let geom = obj(vec![("shape", s("dimension")), ("pts", Value::Array(cleaned)), ("offset", js_num(offset))]);
+    // Assoziativ ([38]): Punkte, die auf einem gefangenen Merkmal liegen, hängen daran; beim Ergänzen
+    // behalten die alten Punkte ihre Bezüge.
+    let chain: Vec<V> = cleaned.iter().map(pair).collect();
+    let snaps: Vec<V> = arr(v.get("snaps")).iter().map(pair).collect();
+    let old = v.get("editId").and_then(Value::as_str).and_then(|id| find(root, "drawings2d", id)).and_then(|d| field(d, "geom"));
+    let old_pts: Vec<V> = old.map(|g| arr(field(g, "pts")).iter().map(pair).collect()).unwrap_or_default();
+    let old_refs: Vec<Option<crate::model::DimRef>> = old.and_then(|g| field(g, "refs")).and_then(|r| serde_json::from_value(r.clone()).ok()).unwrap_or_default();
+    let keep = |q: V| old_pts.iter().position(|o| dist(*o, q) < 1e-9).and_then(|i| old_refs.get(i).cloned().flatten());
+    let refs = crate::dim_assoc::refs_for_chain(&crate::document::Lookup::plain(root), ctx.level, &chain, &snaps, &keep);
+    let mut fields = vec![("shape", s("dimension")), ("pts", Value::Array(cleaned)), ("offset", js_num(offset))];
+    if let Some(r) = refs {
+        fields.push(("refs", serde_json::to_value(r).unwrap_or(Value::Null)));
+    }
+    let geom = obj(fields);
     match v.get("editId").and_then(Value::as_str) {
         Some(id) => match find(root, "drawings2d", id) {
             Some(d) => vec![Op::Replace { collection: "drawings2d".into(), entity: with(d, "geom", geom) }],
@@ -1024,12 +1037,20 @@ fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> 
     }
     const SIDES: [&str; 4] = ["south", "east", "north", "west"];
     const CHAINS: [&str; 3] = ["openings", "steps", "total"];
+    let lk = crate::document::Lookup::plain(root);
     auto_exterior_dimensions(&win, &oin, scale)
         .into_iter()
         .map(|c| {
             let id = format!("{prefix}-{}-{}-{}", ctx.level, SIDES[c.side as usize], CHAINS[c.chain as usize]);
             let pts = Value::Array(c.pts.iter().map(|q| crate::grips::pt(q[0], q[1])).collect());
-            drawing(id, ctx, obj(vec![("shape", s("dimension")), ("pts", pts), ("offset", js_num(c.offset))]))
+            let mut fields = vec![("shape", s("dimension")), ("pts", pts), ("offset", js_num(c.offset))];
+            // Assoziativ ([38]): je Punkt das Merkmal (Ecke, Leibung), aus dem er stammt.
+            let chain: Vec<V> = c.pts.iter().map(|q| (q[0], q[1])).collect();
+            let src: Vec<V> = c.src.iter().map(|q| (q[0], q[1])).collect();
+            if let Some(r) = crate::dim_assoc::refs_for_chain(&lk, ctx.level, &chain, &src, &|_| None) {
+                fields.push(("refs", serde_json::to_value(r).unwrap_or(Value::Null)));
+            }
+            drawing(id, ctx, obj(fields))
         })
         .collect()
 }

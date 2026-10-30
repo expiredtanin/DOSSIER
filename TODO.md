@@ -1419,7 +1419,17 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (nur ausblenden), Dächer (nur ausblenden) und Extrusionen. Ohne Grenzen unverändert. CLI-Plan geprüft (Linux).
   Offen: Dach/Decke über/unter gestrichelt statt nur ausblenden, Schnitt/Ansicht, Raum/Fenster eigenständig. · M
 - ○ **[37] Beschriftung in Papiergrösse.** · M
-- ○ **[38] Assoziative Bemassung.** · L · nach [10].
+- ✅ **[38] Assoziative Bemassung.** (30.10.) Rust `dim_assoc.rs`: gefangene Bemassungspunkte tragen
+  `Dimension.refs` (je Punkt `DimRef`: Wand-Linie/-Ende, Wandecke = Schnitt zweier Wandlinien, Öffnungs-
+  Leibung/-Mitte, Stütze/Decke/Dach/Raum Ecke/Kante/Mitte, 2D-Eckpunkt/-Kante/-Mittelpunkt; Anhängen über
+  Deckungsgleichheit des Fangpunkts). `Document::commit` führt `pts` im selben Undo-Schritt nach
+  (`doc_last_extra` → TS-Leseansicht), Plan/DXF/Griffe lesen damit die aufgelöste Lage. Ungültiger Bezug →
+  Punkt bleibt, `lost` + rote Marke nur am Bildschirm, Objekt-Info listet die Punkte; „Bemassung lösen"
+  (Befehl `dimdetach`, Kürzel `bml`, Kontextmenü, Objekt-Info). Autodim [81] hängt an Ecken/Leibungen.
+  Transformieren: Bezüge bleiben bei Verschieben/Drehen zusammen mit den Elementen, sonst (allein, Spiegeln,
+  Skalieren) gelöst; Kopien hängen an mitkopierten Elementen; ein von Hand gezogener Punkt ist frei.
+  Offen: Bogenwände/Treppen nicht anhängbar, Achsraster fehlt im Modell; nur Linux/Chromium geprüft (Marke
+  am Bildschirm nicht auf macOS/Metal angesehen). · L
 - ○ **[39] Auswahl gehört zum Modell.** · M
 - ◐ **[40] Ansichten duplizieren.** Ebenen duplizieren vorhanden. · S
 - ◐ **[76] Vektorfang auf PDF.** (28.10.) Rust `fileio/pdf_object.rs` + `pdf_vector.rs` (eigener Leser:
@@ -1549,6 +1559,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[80] PDF mit Ebenen.** · M
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.
+  (30.10.) Ketten assoziativ [38] (Ecken/Leibungen, nur mittige Wände).
 - ○ **[82] Grafische Legenden.** · M
 - ○ **[65] Explosionsaxonometrie.** · S–M
 - ○ **[66] Präsentationspläne mit einem Klick.** · M

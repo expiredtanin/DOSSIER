@@ -102,6 +102,59 @@ pub enum ColumnProfile {
     Round { radius: f64 },
 }
 
+/// Merkmal, an dem ein Bemassungspunkt hängt ([38], `dim_assoc.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub enum DimFeature {
+    /// Punkt auf einer Wandlinie: `index` = Schichtgrenze (0 = erste Fläche, wie die Fanglinien;
+    /// fehlt = Achse), `t` = Anteil entlang Anfang→Ende (0/1 = Wandende).
+    #[serde(rename = "wall")]
+    Wall,
+    /// Öffnung: `index` 0 = Leibung Anfang, 1 = Leibung Ende, 2 = Mitte; `index2` = Schichtgrenze
+    /// der Wirtswand (fehlt = Achse).
+    #[serde(rename = "opening")]
+    Opening,
+    /// Eckpunkt `index` (Stützen-Umriss, Decken-/Dach-/Raum-Umriss, Punkte einer 2D-Zeichnung).
+    #[serde(rename = "vertex")]
+    Vertex,
+    /// Punkt auf Kante `index` (Anfang→nächster Eckpunkt) beim Anteil `t` (0.5 = Mitte).
+    #[serde(rename = "edge")]
+    Edge,
+    /// Mittelpunkt (Stütze, Kreis, Bogen, Ellipse).
+    #[serde(rename = "center")]
+    Center,
+    /// Schnittpunkt der Wandlinie (`id`, `index`) mit der Wandlinie (`id2`, `index2`) — Ecken.
+    #[serde(rename = "intersection")]
+    Intersection,
+}
+
+/// Bezug eines Bemassungspunkts auf ein Element ([38]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DimRef {
+    /// Element-id (Wand, Öffnung, Stütze, Decke, Dach, Raum oder 2D-Zeichnung).
+    pub id: String,
+    pub feature: DimFeature,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub index: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub t: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub id2: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub index2: Option<u32>,
+    /// Normalabstand Merkmal → Masslinie (Modell-Meter, links der Masslinie positiv); fehlt = 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub d: Option<f64>,
+    /// Bezug ungültig (Element/Punkt weg): der Punkt bleibt an der zuletzt gespeicherten Lage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lost: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct Offset2 {
     pub along: f64,
@@ -272,6 +325,13 @@ pub enum Drawing2DGeom {
         #[serde(rename = "textOffsetsMm", default, skip_serializing_if = "Option::is_none")]
         #[ts(optional, inline)]
         text_offsets_mm: Option<Vec<Offset2>>,
+        /// Assoziative Bemassung ([38]): je Punkt (Index wie `pts`) der Bezug auf ein Merkmal eines
+        /// Elements (`null` = freier Punkt). Der Kern führt `pts` nach jeder Änderung nach
+        /// (`dim_assoc.rs`); `pts` ist damit immer die zuletzt aufgelöste Lage und der Rückfall,
+        /// wenn ein Bezug ungültig wird. Fehlt das Feld, ist die Bemassung frei wie bisher.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        refs: Option<Vec<Option<DimRef>>>,
     },
     /// Höhenkote (SIA 400 B.5.4, Figur 18): Dreieck-Symbol + Höhenwert (Meter,
     /// ±0.00-Referenz frei wählbar, s. Norm) an einem Punkt. `kind` bestimmt

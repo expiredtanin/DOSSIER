@@ -292,6 +292,20 @@ pub fn doc_query_bin(h: u32, name: &str, args: &[f64], text: &str) -> Vec<u8> {
 /// Je Op der zuletzt angewendeten Folge (`doc_commit`, `doc_apply`, `doc_grip_commit`, `doc_undo`,
 /// `doc_redo`) die Position des von `replace` getroffenen Elements, −1 = keine (TS führt die
 /// Leseansicht damit ohne Suche nach, `applyOps`).
+/// Zusatz-Ops des letzten Commits (assoziative Bemassung nachgeführt, [38]) als JSON-Array; leer = keine.
+#[wasm_bindgen]
+pub fn doc_last_extra(h: u32) -> String {
+    with_doc(h, |d| {
+        if d.last_extra().is_empty() {
+            return String::new();
+        }
+        let mut out = Vec::new();
+        crate::ops::write_ops(&mut out, d.last_extra());
+        String::from_utf8(out).unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
 #[wasm_bindgen]
 pub fn doc_last_hits(h: u32) -> Vec<f64> {
     with_doc(h, |d| d.last_hits().iter().map(|p| p.map_or(-1.0, |i| i as f64)).collect()).unwrap_or_default()

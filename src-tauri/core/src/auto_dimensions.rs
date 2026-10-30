@@ -48,6 +48,9 @@ pub struct DimChain {
     pub pts: Vec<Vec2>,
     /// Abstand der Masslinie (Modell-Meter, positiv = aussen).
     pub offset: f64,
+    /// Je Punkt das Merkmal, aus dem er stammt (Grundriss-Ecke bzw. Leibung auf der Aussenfläche;
+    /// das äusserste bei gleicher Lage) — für die assoziative Bemassung ([38]).
+    pub src: Vec<Vec2>,
 }
 
 const EPS: f64 = 1e-6;
@@ -141,10 +144,13 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
         let u = [n[1], -n[0]];
         let (mut s_max, mut t_min, mut t_max) = (f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
         let mut corners = vec![];
+        // Merkmale (Lage entlang u, Punkt, Tiefe entlang n) für `src`.
+        let mut feats: Vec<(f64, Vec2, f64)> = vec![];
         // Kanten, die nach `n` schauen: Aussennormale (rechte Normale eines CCW-Rings) ≈ n.
         let mut faces: Vec<(f64, f64, f64)> = vec![];
         for ring in &rings {
             for &p in ring {
+                feats.push((dot(p, u), p, dot(p, n)));
                 s_max = s_max.max(dot(p, n));
                 t_min = t_min.min(dot(p, u));
                 t_max = t_max.max(dot(p, u));
@@ -190,6 +196,10 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
             if on_face {
                 jambs.push(ja);
                 jambs.push(jb);
+                for j in [o.jamb_start, o.jamb_end] {
+                    let k = outer_s - dot(j, n);
+                    feats.push((dot(j, u), [j[0] + n[0] * k, j[1] + n[1] * k], outer_s + 1.0));
+                }
             }
         }
 
@@ -209,8 +219,14 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
             if ts.len() < 2 {
                 continue;
             }
-            let pts = ts.iter().map(|&t| [u[0] * t + n[0] * s_max, u[1] * t + n[1] * s_max]).collect();
-            out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale });
+            let pts: Vec<Vec2> = ts.iter().map(|&t| [u[0] * t + n[0] * s_max, u[1] * t + n[1] * s_max]).collect();
+            // Leibungen vor Ecken (Tiefe + 1), sonst die äusserste Ecke gleicher Lage.
+            let src = ts
+                .iter()
+                .zip(&pts)
+                .map(|(&t, &p)| feats.iter().filter(|f| (f.0 - t).abs() <= 1e-3).max_by(|a, b| a.2.total_cmp(&b.2)).map_or(p, |f| f.1))
+                .collect();
+            out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale, src });
         }
     }
     out
