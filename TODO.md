@@ -1246,8 +1246,10 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     zeigen dieselbe Linienmenge wie vorher (ohne Doppellinien); im Schnitt jetzt Dächer hinter der Ebene,
     Fenster der Rückwände als Umriss statt Stossfugen der Wandstücke, keine Projektionslinien mehr über
     Schnittflächen, Bogenwände vollständig; bei Gauben fehlen Kanten, die die alte Näherung durch davor liegende
-    Dachteile zeichnete. Zeiten (WASM-CLI, Rechner unter Last): big8 Ansicht ≈ 40 ms (vorher 40), big8 Schnitt
-    ≈ 110 ms (151), big16 Schnitt 450–600 ms (568), big16 Ansicht 210–320 ms (219). Geprüft: Rust-Tests (hlr:
+    Dachteile zeichnete. Zeiten (WASM-CLI, Rechner unter Last): big8 Schnitt ≈ 90 ms (vorher ≈ 100), big16
+    Schnitt 450–600 ms (≈ 570–700); die Kantenrechnung der Ansicht braucht nativ ≈ 5 ms (big8) — die Ansicht von
+    big8 dauert seit dem Merge von [G2] (Dach-Scheiben verdecken Wände, `RoofSheet`) aber ≈ 4 s statt 40 ms,
+    auch ohne [G4]: dort nachsehen. Geprüft: Rust-Tests (hlr:
     Quader, T-Stoss, Fuge, schräge/durchstossende Verdecker, Zylinder-Facetten, Triangulation; Ansicht/Schnitt
     am Beispiel), CLI-Ansichten/-Schnitte (Beispiel, Haus mit Bogenwand + Gauben + Gelände, Gauben-Projekt,
     Bogenwände, big8) als PNG angesehen (Linux). **Offen:** Füllungen der Ansicht bleiben Maler-Ordnung (bei
