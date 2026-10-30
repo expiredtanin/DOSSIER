@@ -46,6 +46,9 @@ export type BlockDef = { id: string; name: string; geom2d: Array<Drawing2DGeom> 
  */
 export type BuiltinPaletteBanks = { simple?: boolean; tango?: boolean; material?: boolean; ral?: boolean };
 
+/** Bekleidung einer Tür ([105]): auf der Aufschlagseite, der Gegenseite, beidseitig oder keine. */
+export type CasingSides = "beide" | "aufschlag" | "gegen" | "keine";
+
 /**
  * Eine Decke (Slab) — ein geschossgebundenes, mehrschichtiges Flächenbauteil,
  * definiert über einen GESCHLOSSENEN Umriss (Polygon) im Grundriss und eine
@@ -517,6 +520,26 @@ export type CustomPalette = {
  */
 export type DetailLevel = "grob" | "mittel" | "fein";
 
+/** Masse einer Türzarge/eines Türrahmens ([105]); Bedeutung je `frameKind`. Fehlt ⇒ Vorgabe. */
+export type DoorFrameDetail = {
+  /** Falzbreite (parallel zur Wandfläche: Überdeckung Blatt/Rahmen), Vorgabe 0.015. */
+  falzWidth?: number;
+  /** Falztiefe (quer zur Wand, ≈ Blattdicke), Vorgabe 0.04. */
+  falzDepth?: number;
+  /** Spiegelbreite der Stahlzarge auf der Wandfläche, Vorgabe 0.05. */
+  spiegel?: number;
+  /** Blechdicke der Stahlzarge, Vorgabe 0.002. */
+  sheetThickness?: number;
+  /** Futterstärke (Brett in der Leibung), Vorgabe 0.025. */
+  liningThickness?: number;
+  /** Bekleidungsbreite, Vorgabe 0.07. */
+  casingWidth?: number;
+  /** Bekleidungsdicke, Vorgabe 0.012. */
+  casingThickness?: number;
+  /** Bekleidung auf welcher Seite (Vorgabe beide). */
+  casingSides?: CasingSides;
+};
+
 export type DoorType = {
   id: string;
   name: string;
@@ -547,7 +570,7 @@ export type DoorType = {
    *    der Laibung (typisch bei Aussentüren/älterem Bestand).
    * Fehlt es, gilt "zarge".
    */
-  frameKind?: "zarge" | "blockrahmen";
+  frameKind?: "zarge" | "blockrahmen" | "blendrahmen" | "umfassungszarge" | "eckzarge" | "blockzarge" | "futter";
   /**
    * Ansichtsbreite des Rahmenprofils (Meter) — die sichtbare Rahmen-Randbreite
    * in der Öffnungsebene (Elevation), NICHT die Tiefe quer zur Wand. Fehlt es,
@@ -594,6 +617,18 @@ export type DoorType = {
    * gezeichnet. 0/fehlt ⇒ kein eigener Sturz (bisher).
    */
   lintelHeight?: number;
+  /**
+   * Rahmen-Detail ([105]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
+   * Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
+   */
+  frameDetail?: FrameDetail;
+  /**
+   * Schichteinzug ([106]): wie die Wandschichten an Leibung, Sturz und Brüstung anschliessen.
+   * Fehlt ⇒ alle Schichten bündig (bzw. `innerLayerRecess`, veraltet).
+   */
+  layerReveals?: Array<LayerReveal>;
+  /** Masse der Türzarge/des Türrahmens ([105]): Falz, Spiegel, Futter, Bekleidung. */
+  doorFrame?: DoorFrameDetail;
 };
 
 /** Ein freies 2D-Zeichenelement auf einer Zeichnungsebene. */
@@ -1059,6 +1094,45 @@ export type ExtrudedSolid = {
 export type FrameCornerJoin = "vertikal" | "horizontal" | "gehrung";
 
 /**
+ * Rahmen-Detail eines Fenster-/Türtyps ([105]); an der Öffnung feldweise übersteuerbar
+ * (`Opening.frameDetail`). Alle Masse in Metern, fehlend ⇒ Typ-Wert bzw. bisheriges Verhalten.
+ */
+export type FrameDetail = {
+  /** Blendrahmen: Ansichtsbreite je Seite (fehlt ⇒ `frameWidth`). */
+  frameSides?: OpeningSides;
+  /** Blendrahmen-Tiefe quer zur Wand (übersteuert `frameDepth`). */
+  frameDepth?: number;
+  /**
+   * Lage: Abstand der Rahmen-Vorderkante von der Fläche `insetFace` (übersteuert `insetFromFace`).
+   */
+  insetFromFace?: number;
+  /** Bezugsfläche der Lage (übersteuert `insetFace`). */
+  insetFace?: "aussen" | "innen" | "mitte";
+  /** Flügelrahmen: Ansichtsbreite (fehlt ⇒ wie Blendrahmen). */
+  sashWidth?: number;
+  /** Flügelrahmen: Tiefe quer zur Wand (fehlt ⇒ Blendrahmen-Tiefe). */
+  sashDepth?: number;
+  /** Flügel-Überschlag: so weit überdeckt der Flügel den Blendrahmen (fehlt ⇒ 0). */
+  sashOverlap?: number;
+  /** Pfosten (senkrechte Teilung): Breite (fehlt ⇒ `postWidth` der Flügeltabelle). */
+  mullionWidth?: number;
+  /** Pfosten-Tiefe (fehlt ⇒ Blendrahmen-Tiefe). */
+  mullionDepth?: number;
+  /** Kämpfer (waagrechte Teilung, Riegel): Breite (fehlt ⇒ wie Blendrahmen). */
+  transomWidth?: number;
+  /** Kämpfer-Tiefe (fehlt ⇒ Blendrahmen-Tiefe). */
+  transomDepth?: number;
+  /** Verbreiterungsprofile je Seite (Ansichtsbreite, aussen am Blendrahmen angesetzt). */
+  extensionProfiles?: OpeningSides;
+  /** Fensterbank-Anschlussprofil unten (Höhe, unter dem Blendrahmen). */
+  sillProfile?: number;
+  /** Storen-/Rollladen-Anschlussprofil oben (Höhe, über dem Blendrahmen). */
+  shadingProfile?: number;
+  /** Anschlag je Seite (Meter; übersteuert `rebateDepth`, 0 = kein Anschlag auf dieser Seite). */
+  rebates?: OpeningSides;
+};
+
+/**
  * Raster-Regel: generiert Wände entlang gleichmäßiger X-/Y-Achsen.
  * Typischer Anwendungsfall: Tragwerks-Achsraster (z. B. 3 m Abstand).
  *
@@ -1305,6 +1379,21 @@ export type LayerCategory = {
   hatch?: string;
   /** Unterkategorien (Baum). */
   children?: Array<LayerCategory>;
+};
+
+/**
+ * Schichteinzug einer Wandschicht an der Öffnung ([106]): Regel für alle Seiten, je Seite
+ * übersteuerbar. `layer` zählt ab aussen (0 = äusserste Schicht); negativ ab innen (−1 = innerste),
+ * damit dieselbe Regel für verschiedene Wandtypen gilt.
+ */
+export type LayerReveal = {
+  layer: number;
+  mode: RevealMode;
+  amount?: number;
+  left?: RevealSide;
+  right?: RevealSide;
+  top?: RevealSide;
+  bottom?: RevealSide;
 };
 
 /**
@@ -1712,6 +1801,14 @@ export type Opening = {
    * Traufe aus. Fehlt ⇒ 0 (x-Achse).
    */
   hostAngle?: number;
+  /** Übersteuert das Rahmen-Detail des Typs feldweise für diese Öffnung ([105]). */
+  frameDetail?: FrameDetail;
+  /** Ersetzt den Schichteinzug des Typs für diese Öffnung ([106]). */
+  layerReveals?: Array<LayerReveal>;
+  /** Übersteuert die Rahmenart des Türtyps ([105]). */
+  doorFrameKind?: "zarge" | "blockrahmen" | "blendrahmen" | "umfassungszarge" | "eckzarge" | "blockzarge" | "futter";
+  /** Übersteuert die Zargen-/Rahmenmasse des Türtyps feldweise ([105]). */
+  doorFrame?: DoorFrameDetail;
 };
 
 /**
@@ -1722,6 +1819,12 @@ export type Opening = {
  * Öffnungsart eines einzelnen Flügels (bzw. des ganzen Fensters, alt).
  */
 export type OpeningKind = "dreh" | "kipp" | "drehkipp" | "fest" | "schiebe";
+
+/**
+ * Werte je Seite einer Öffnung (Meter). `left` = Leibung beim Wandanfang (kleineres Achsmass),
+ * `right` = beim Wandende, `top` = Sturz, `bottom` = Brüstung/Schwelle. Fehlt ⇒ Rückfallwert.
+ */
+export type OpeningSides = { left?: number; right?: number; top?: number; bottom?: number };
 
 /**
  * Aktionen einer Override-Regel — jede optional (Teilaktionen sind erlaubt;
@@ -2098,6 +2201,12 @@ export type ReferenceLineRule = {
    */
   target: "all" | "exterior" | string;
 };
+
+/** Wie eine Wandschicht an der Öffnung anschliesst ([106]). */
+export type RevealMode = "buendig" | "zurueck" | "leibung" | "ueberdaemmt";
+
+/** Abweichende Regel für eine Seite ([106]). */
+export type RevealSide = { mode: RevealMode; amount?: number };
 
 /** Das gesamte Rich-Text-Dokument. */
 export type RichTextDoc = { version: 1; paragraphs: Array<Paragraph> };
@@ -2973,6 +3082,7 @@ export type WindowType = {
    * Öffnung zurück, statt bündig mit den übrigen Schichten abzuschliessen —
    * anders als {@link insetFromFace} (der Rahmen-Position), ändert dies die
    * WAND-GEOMETRIE selbst an der Laibung. Default false (bündig, Alt-Verhalten).
+   * Veraltet ([106]): gilt nur ohne {@link layerReveals} (= innerste Schicht „zurück um Schichtdicke").
    */
   innerLayerRecess?: boolean;
   /**
@@ -3013,4 +3123,14 @@ export type WindowType = {
    * gezeichnet. 0/fehlt ⇒ kein eigener Sturz (bisher).
    */
   lintelHeight?: number;
+  /**
+   * Rahmen-Detail ([105]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
+   * Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
+   */
+  frameDetail?: FrameDetail;
+  /**
+   * Schichteinzug ([106]): wie die Wandschichten an Leibung, Sturz und Brüstung anschliessen.
+   * Fehlt ⇒ alle Schichten bündig (bzw. `innerLayerRecess`, veraltet).
+   */
+  layerReveals?: Array<LayerReveal>;
 };

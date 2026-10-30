@@ -268,6 +268,13 @@ pub fn doc_drawing_line_verts(h: u32) -> Vec<f32> {
     with_doc(h, |d| d.project().ok().map(|p| crate::model3d::drawing_line_verts(&p))).flatten().unwrap_or_default()
 }
 
+/// Ansichtsschraffur auf den Flächen für render3d (`surface_pattern3d`, je Linie `ax ay az bx by bz r g b
+/// maske`, Float32); leer bei Fehler oder ohne Muster.
+#[wasm_bindgen]
+pub fn doc_surface_pattern_lines(h: u32) -> Vec<f32> {
+    with_doc(h, |d| d.project().ok().map(|p| crate::surface_pattern3d::pattern_lines_3d(&p))).flatten().unwrap_or_default()
+}
+
 /// Das Projekt als Datei-Text (Formatversion vorn, Einrückung 2); leer, wenn das Dokument nicht offen ist.
 #[wasm_bindgen]
 pub fn doc_serialize(h: u32) -> String {

@@ -97,3 +97,39 @@ pub fn mm_to_device_px(view_box: ViewBox, viewport_w: f32, viewport_h: f32, pape
     let meet = meet_scale(view_box, viewport_w, viewport_h);
     (paper_scale_n / 1000.0) * PX_PER_M * meet
 }
+
+/// Faktor auf die bei 1:100 kompilierten Strichmuster (Papier-mm × 0.1 m): Muster gelten in Papier-mm
+/// im PLOT-Massstab `dash_scale_n` und liegen damit fest im Modell-Raum — Zoomen ändert den Rhythmus
+/// nicht, Bildschirm = Druckansicht. Ohne Plot-Massstab (≤ 0) der Strich-Massstab `paper_scale_n`
+/// (Altverhalten, z. B. native Fläche ohne Angabe).
+pub fn dash_scale(paper_scale_n: f32, dash_scale_n: f32) -> f32 {
+    let n = if dash_scale_n > 0.0 && dash_scale_n.is_finite() { dash_scale_n } else { paper_scale_n };
+    if n > 0.0 && n.is_finite() {
+        n / 100.0
+    } else {
+        1.0
+    }
+}
+
+/// Modell-Länge (m) eines Strichmuster-Eintrags `mm` (Papier-mm) auf dem Bildschirm.
+pub fn dash_model_len(mm: f32, paper_scale_n: f32, dash_scale_n: f32) -> f32 {
+    mm * (100.0 / 1000.0) * dash_scale(paper_scale_n, dash_scale_n)
+}
+
+#[cfg(test)]
+mod dash_tests {
+    use super::*;
+
+    #[test]
+    fn dash_rhythm_fixed_in_model_space_across_zoom() {
+        // Anzeige-Modus: der Strich-Massstab folgt dem Zoom (live N 32 bzw. 400), der Plot-Massstab bleibt 1:50.
+        let near = dash_model_len(6.0, 32.0, 50.0);
+        let far = dash_model_len(6.0, 400.0, 50.0);
+        assert!((near - far).abs() < 1e-7);
+        // Druck-SVG: 6 mm Papier bei 1:50 = 0.3 m Modell.
+        assert!((near - 6.0 * 50.0 / 1000.0).abs() < 1e-6);
+        // Ohne Plot-Massstab: Altverhalten (Strich-Massstab).
+        assert!((dash_model_len(6.0, 200.0, 0.0) - 1.2).abs() < 1e-6);
+        assert_eq!(dash_scale(f32::NAN, f32::NAN), 1.0);
+    }
+}

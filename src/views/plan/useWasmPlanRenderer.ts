@@ -13,7 +13,7 @@
  * „letzte Szene gewinnt" regelt `WasmPlanRendererSession` (wasmRendererSession.ts).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Plan } from "../../core";
 import { planSceneBin } from "../../core";
 import { type WebPlanRendererLike, WasmPlanRendererSession } from "./wasmRendererSession";
@@ -125,6 +125,11 @@ export function useWasmPlanRenderer(
    * Anzeigemodus, siehe PlanView.tsx `textScaleForGl`), während `paperScaleN`
    * weiter die echten Papier-mm-Strichbreiten der Geometrie treibt.
    */
+  // Plot-Massstab der Strichmuster (`setDashScale`), beim nächsten Frame übernommen.
+  const dashScaleRef = useRef(0);
+  const setDashScale = useCallback((n: number) => {
+    dashScaleRef.current = n > 0 && isFinite(n) ? n : 0;
+  }, []);
   const render = useCallback(
     (viewBox: ViewBox, paperScaleN = 100, textScaleN = 100) => {
       const canvas = canvasRef.current;
@@ -137,10 +142,10 @@ export function useWasmPlanRenderer(
         canvas.width = width;
         canvas.height = height;
       }
-      session.draw({ viewBox, paperScaleN, textScaleN, width, height });
+      session.draw({ viewBox, paperScaleN, textScaleN, dashScaleN: dashScaleRef.current, width, height });
     },
     [canvasRef, session],
   );
 
-  return { render, updateGeometry, ready };
+  return { render, updateGeometry, ready, setDashScale };
 }

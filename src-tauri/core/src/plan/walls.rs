@@ -97,7 +97,7 @@ fn line_buf(out: &mut Vec<f64>, l: Option<&joins::Line>) {
 
 /// Eingabe von `plan_walls::wall_poche` (wie `encodeWallPoche` in TS).
 #[allow(clippy::too_many_arguments)]
-fn encode_wall_poche(w: &Wall, layers: &[f64], total: f64, ref_off: f64, gaps: &[(f64, f64)], cuts: &WallCuts, grob: bool, view_only: bool) -> Vec<f64> {
+fn encode_wall_poche(w: &Wall, layers: &[f64], total: f64, ref_off: f64, gaps: &[(f64, f64)], cuts: &WallCuts, grob: bool, view_only: bool, reveals: &[f64]) -> Vec<f64> {
     let mut b = vec![w.start.x, w.start.y, w.end.x, w.end.y, total, ref_off, if grob { 1.0 } else { 0.0 }, if view_only { 1.0 } else { 0.0 }];
     b.push(layers.len() as f64);
     b.extend_from_slice(layers);
@@ -123,6 +123,10 @@ fn encode_wall_poche(w: &Wall, layers: &[f64], total: f64, ref_off: f64, gaps: &
     b.push(gaps.len() as f64);
     for g in gaps {
         b.extend([g.0, g.1]);
+    }
+    // [106] Schichteinzug an den Leibungen.
+    if reveals.first().is_some_and(|n| *n > 0.0) {
+        b.extend_from_slice(reveals);
     }
     b
 }
@@ -163,7 +167,7 @@ fn v2(x: f64, y: f64) -> Vec2 {
 
 /// Wand-Poché (`addWallPoche`).
 #[allow(clippy::too_many_arguments)]
-fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)], cuts: &WallCuts, greyed: bool, wall_lw: f64, category: Option<&LayerCategory>, view_only: bool) -> Result<(), String> {
+fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)], cuts: &WallCuts, greyed: bool, wall_lw: f64, category: Option<&LayerCategory>, view_only: bool, reveals: &[f64]) -> Result<(), String> {
     let p = c.p;
     let w = e.w;
     let detail = c.a.detail;
@@ -175,7 +179,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     let outline_mm = wall_lw * detail.outline_factor();
     let layer_mm = LAYER_LINE_MM * detail.layer_factor();
     let thick: Vec<f64> = wt.layers.iter().map(|l| l.thickness).collect();
-    let f = crate::plan_walls::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, detail == Detail::Grob, view_only));
+    let f = crate::plan_walls::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, detail == Detail::Grob, view_only, reveals));
     if f.is_empty() {
         return Ok(());
     }
@@ -305,7 +309,13 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         Detail::Mittel => 1.0,
         Detail::Fein => 2.0,
     };
-    let mut b: Vec<f64> = vec![w.start.x, w.start.y, w.end.x, w.end.y, total, ref_off, o.position, o.width, b01(door), detail_code];
+    // [105] Rahmen-Detail und Türzarge (eigene Zeichnung in `opening_detail_plan`).
+    let det = crate::opening_detail::frame_of(p, o).filter(|f| f.detailed);
+    let dframe = crate::opening_detail::door_frame_of(p, o);
+    // Verbreiterungsprofile: das Fenster-Element sitzt um sie eingerückt in der Rohbauöffnung.
+    let (ext_l, ext_r) = det.as_ref().filter(|_| !door).map_or((0.0, 0.0), |f| (f.ext.left, f.ext.right));
+    let (o_pos, o_wid) = if ext_l + ext_r > 1e-6 && o.width - ext_l - ext_r > 0.05 { (o.position + ext_l, o.width - ext_l - ext_r) } else { (o.position, o.width) };
+    let mut b: Vec<f64> = vec![w.start.x, w.start.y, w.end.x, w.end.y, total, ref_off, o_pos, o_wid, b01(door), detail_code];
     // Tür
     b.push(b01(o.swing.is_some_and(|s| s != SwingSide::Left)));
     b.push(b01(o.opening_dir.is_some_and(|s| s != OpeningOpeningDir::In)));
@@ -320,8 +330,8 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         OpeningLintelLines::Beide => 3.0,
         OpeningLintelLines::Unknown => f64::NAN,
     });
-    // Rahmenband (Tür mit Typ)
-    match dt {
+    // Rahmenband (Tür mit Typ; Zargen-Arten [105] zeichnet `opening_detail_plan`)
+    match dt.filter(|_| dframe.is_none()) {
         Some(t) => b.extend([
             1.0,
             t.frame_width.unwrap_or(0.06),
@@ -337,14 +347,29 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     }
     // Fenster
     b.push(b01(wt.is_some()));
-    b.push(wt.map_or(0.0, |t| t.frame_width.unwrap_or(0.06)));
-    b.push(wt.and_then(|t| t.frame_depth).unwrap_or(f64::NAN));
-    b.push(wt.and_then(|t| t.inset_from_face).unwrap_or(f64::NAN));
-    b.push(match wt.and_then(|t| t.inset_face) {
-        Some(WindowTypeInsetFace::Innen) => 1.0,
-        Some(WindowTypeInsetFace::Mitte) => 2.0,
-        _ => 0.0,
-    });
+    match det.as_ref().filter(|_| wt.is_some()) {
+        // [105]: Rahmen je Seite (links hier, rechts im Anhang), Tiefe/Lage übersteuert.
+        Some(f) => b.extend([
+            f.sides.left,
+            f.depth,
+            f.inset,
+            match f.face {
+                crate::opening_detail::Face::Innen => 1.0,
+                crate::opening_detail::Face::Mitte => 2.0,
+                crate::opening_detail::Face::Aussen => 0.0,
+            },
+        ]),
+        None => {
+            b.push(wt.map_or(0.0, |t| t.frame_width.unwrap_or(0.06)));
+            b.push(wt.and_then(|t| t.frame_depth).unwrap_or(f64::NAN));
+            b.push(wt.and_then(|t| t.inset_from_face).unwrap_or(f64::NAN));
+            b.push(match wt.and_then(|t| t.inset_face) {
+                Some(WindowTypeInsetFace::Innen) => 1.0,
+                Some(WindowTypeInsetFace::Mitte) => 2.0,
+                _ => 0.0,
+            });
+        }
+    }
     b.push(o.wing_count.unwrap_or(f64::NAN));
     b.push(if detail == Detail::Fein { 2.0 } else { 1.0 });
     let sill = wt.and_then(|t| t.sill_line.as_ref());
@@ -366,7 +391,13 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     b.push(o.sash_line.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_HAIRLINE_MM));
     b.push(o.sill_line_style.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_HAIRLINE_MM));
     // Details ([94]): Anschlag, Fensterbank, Storenkasten.
-    b.push(if door { dt.and_then(|t| t.rebate_depth) } else { wt.and_then(|t| t.rebate_depth) }.unwrap_or(0.0));
+    // Anschlag: je Seite verschieden ⇒ zeichnet `opening_detail_plan`.
+    let rebate_sides = det.as_ref().map(|f| f.rebate).filter(|r| (r.left - r.right).abs() > 1e-9 || dframe.is_some());
+    b.push(match (&det, rebate_sides) {
+        (_, Some(_)) => 0.0,
+        (Some(f), None) => f.rebate.left,
+        (None, None) => if door { dt.and_then(|t| t.rebate_depth) } else { wt.and_then(|t| t.rebate_depth) }.unwrap_or(0.0),
+    });
     b.push(match wt.and_then(|t| t.sill_board) {
         Some(WindowTypeSillBoard::Keine) => 1.0,
         Some(WindowTypeSillBoard::Innen) => 2.0,
@@ -396,6 +427,10 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             s.post_width.unwrap_or(f64::NAN),
             b01(s.opening.is_some_and(|k| k != OpeningKind::Fest)),
         ]);
+    }
+    // [105] Anhang: Rahmenbreite rechts (Fenster).
+    if let Some(f) = det.as_ref().filter(|f| wt.is_some() && (f.sides.right - f.sides.left).abs() > 1e-9) {
+        b.push(f.sides.right);
     }
     let f = crate::plan_openings::plan_opening(&b);
     if f.is_empty() {
@@ -462,6 +497,94 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             i += 9;
         }
     }
+    let ctx = DetailCtx { stroke: frame_color, weight: frame_weight, greyed, detail, wall_line };
+    opening_detail_plan(c, out, w, o, &ctx, rebate_sides, (ext_l, ext_r), dframe.as_ref())
+}
+
+/// Stil der Detail-Zeichnung einer Öffnung.
+struct DetailCtx<'a> {
+    stroke: &'a str,
+    weight: f64,
+    greyed: bool,
+    detail: Detail,
+    wall_line: (&'a str, f64),
+}
+
+/// Grundriss-Detail einer Öffnung ([105]): Anschlag je Seite (Wandnase in der Schicht-Schraffur),
+/// Verbreiterungsprofile neben dem Fensterrahmen und die Türzarge nach Art (Profil je Leibung,
+/// Stahl im feinen Detail gefüllt).
+#[allow(clippy::too_many_arguments)]
+fn opening_detail_plan(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, s: &DetailCtx, rebate: Option<crate::opening_detail::Sides>, ext: (f64, f64), dframe: Option<&crate::opening_detail::DoorFrame>) -> Result<(), String> {
+    use crate::opening_detail as od;
+    let p = c.p;
+    if rebate.is_none() && ext.0 + ext.1 <= 1e-6 && dframe.is_none() {
+        return Ok(());
+    }
+    let wtype = wall_type(p, w)?;
+    let total = thickness(&wtype.layers);
+    let ref_off = joins::reference_offset(crate::model3d::wall_reference(w), total);
+    let wr = crate::opening_geom::WallRef { start: crate::opening_geom::v(w.start.x, w.start.y), end: crate::opening_geom::v(w.end.x, w.end.y), total, ref_off };
+    let Some((js, je)) = crate::opening_geom::opening_jambs(&wr, o.position, o.width) else { return Ok(()) };
+    let (u, n) = wr.frame();
+    let face = ref_off - total / 2.0;
+    let width = ((je.x - js.x).powi(2) + (je.y - js.y).powi(2)).sqrt();
+    // Punkt: Leibung (0 links, 1 rechts), x in die Öffnung, o quer ab Aussenfläche.
+    let pt = |side: usize, x: f64, off: f64| {
+        let (base, dir) = if side == 0 { (js, 1.0) } else { (je, -1.0) };
+        v2(base.x + u.x * x * dir + n.x * (face + off), base.y + u.y * x * dir + n.y * (face + off))
+    };
+    let id = Some(o.id.as_str());
+    let frame = od::frame_of(p, o);
+    // Anschlag je Seite.
+    if let (Some(r), Some(f)) = (rebate, frame.as_ref()) {
+        if let Some((z0, z1)) = f.rebate_zone(total) {
+            let category = c.cat(&w.category_code);
+            let angle = atan2(w.end.y - w.start.y, w.end.x - w.start.x) * 180.0 / std::f64::consts::PI;
+            for (side, rd) in [(0usize, r.left), (1, r.right)] {
+                let rd = rd.min(width / 2.0 - 0.01);
+                if !(rd > 1e-4) {
+                    continue;
+                }
+                let mut l0 = 0.0;
+                for (li, layer) in wtype.layers.iter().enumerate() {
+                    let l1 = l0 + layer.thickness;
+                    let (a, b) = (z0.max(l0), z1.min(l1));
+                    l0 = l1;
+                    if b - a <= 1e-6 {
+                        continue;
+                    }
+                    let (hatch, fill) = layer_style(p, w, wtype, li, category, angle)?;
+                    out.push(wall_polygon(vec![pt(side, 0.0, a), pt(side, rd, a), pt(side, rd, b), pt(side, 0.0, b)], &fill, s.wall_line.0, s.wall_line.1, hatch, s.greyed, None, Some(&w.id), id));
+                }
+            }
+        }
+    }
+    // Verbreiterungsprofile (Fenster) in der Rahmenlage.
+    if let Some(f) = frame.as_ref().filter(|_| ext.0 + ext.1 > 1e-6 && s.detail != Detail::Grob) {
+        let (lo, hi) = f.range(total);
+        for (side, e) in [(0usize, ext.0), (1, ext.1)] {
+            if e > 1e-6 {
+                let pts = vec![pt(side, 0.0, lo), pt(side, e, lo), pt(side, e, hi), pt(side, 0.0, hi)];
+                out.push(wall_polygon(pts, "none", s.stroke, s.weight, no_hatch(), s.greyed, None, None, id));
+            }
+        }
+    }
+    // Türzarge.
+    if let Some(df) = dframe {
+        let innen = od::aufschlag_innen(o);
+        let off_of = |d: f64| if innen { total - d } else { d };
+        let fein = s.detail == Detail::Fein;
+        for (part, poly) in od::door_frame_profile(df, total, innen) {
+            if s.detail == Detail::Grob && part == od::FramePart::Casing {
+                continue;
+            }
+            let fill = if fein && df.steel { s.stroke } else { "none" };
+            for side in [0usize, 1] {
+                let pts: Vec<Vec2> = poly.iter().map(|q| pt(side, q[0], off_of(q[1]))).collect();
+                out.push(wall_polygon(pts, fill, s.stroke, s.weight, no_hatch(), s.greyed, None, None, id));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -507,7 +630,8 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         let cut = cut_by_id.get(w.id.as_str()).copied().unwrap_or(&empty);
         let (zb, zt) = p.wall_vertical_extent(w);
         let view_only = zt < cut_z || zb > cut_z;
-        wall_poche(c, out, e, &gaps, cut, greyed, lw, category, view_only)?;
+        let reveals = crate::opening_detail::plan_reveal_block(p, w, &openings);
+        wall_poche(c, out, e, &gaps, cut, greyed, lw, category, view_only, &reveals)?;
         if reference_lines {
             out.push(mk_line(w.start, w.end, "wall-axis", 0.13, Some(Some(vec![0.18, 0.06, 0.04, 0.06])), None, greyed, None));
         }

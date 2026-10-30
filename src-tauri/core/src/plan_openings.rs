@@ -130,6 +130,8 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             operable: r.num()? != 0.0,
         });
     }
+    // [105] Anhang (optional): Rahmenbreite rechts.
+    let frame_width_end = r.num().unwrap_or(f64::NAN);
     if ![sx, sy, ex, ey, total, ref_off, position, width].iter().all(|x| x.is_finite()) {
         return None;
     }
@@ -220,6 +222,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             inset_from_face: win_inset,
             inset_inner: win_inset_side == 1.0,
             inset_mid: win_inset_side == 2.0,
+            frame_width_end,
         })
     } else {
         None

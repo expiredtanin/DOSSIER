@@ -232,6 +232,12 @@ impl WebPlanRenderer {
         }
     }
 
+    /// Plot-Massstab-Nenner (1:N) der Strichmuster setzen: fest (nicht vom Zoom), damit der Rhythmus
+    /// auf dem Bildschirm der Druckansicht gleicht (`ortho::dash_scale`); 0 = wie `set_paper_scale`.
+    pub fn set_dash_scale(&mut self, n: f32) {
+        self.renderer.dash_scale_n = if n > 0.0 && n.is_finite() { n } else { 0.0 };
+    }
+
     /// Papier-Massstab-Nenner (1:N) NUR fuer die Text-Schriftgroesse setzen —
     /// entkoppelt von `set_paper_scale` (siehe `Renderer::text_scale_n`-Doku).
     pub fn set_text_scale(&mut self, n: f32) {

@@ -419,6 +419,33 @@ fn wall_openings(p: &Project, w: &Wall, openings: &[&Opening], with_recess: bool
     out
 }
 
+/// Schichteinzug der Öffnungen einer Wand für die Schichtbänder ([106]); Intervall und Höhe wie
+/// [`wall_openings`], damit `wall_bands` sie zuordnet.
+fn wall_reveals(p: &Project, w: &Wall, openings: &[&Opening], n_bands: usize) -> Vec<wall_bands::RevealIn> {
+    let (zb, zt) = p.wall_vertical_extent(w);
+    let mut out = Vec::new();
+    for &o in openings {
+        let Some(r) = crate::opening_detail::opening_reveal(p, w, o) else { continue };
+        if r.thick.len() != n_bands {
+            continue;
+        }
+        let o_bottom = zb + o.sill_height.max(0.0);
+        let o_top = zt.min(o_bottom + o.height);
+        let mut shifts = vec![[0.0; 4]; n_bands];
+        let mut pieces = Vec::new();
+        for (k, side) in r.sides.iter().enumerate() {
+            for a in side {
+                shifts[a.layer][k] = a.shift;
+                for pc in &a.pieces {
+                    pieces.push((a.layer, k, *pc));
+                }
+            }
+        }
+        out.push(wall_bands::RevealIn { from: r.from, to: r.to, z_bottom: o_bottom, z_top: o_top, shifts, pieces });
+    }
+    out
+}
+
 /// Verschneidung je Geschoss (`computeJoinsByFloor`); Fehler = unbekannter Wandtyp/Bauteil.
 fn compute_joins_by_floor(p: &Project) -> Result<HashMap<String, WallCuts>, String> {
     let mut groups: Vec<(String, Vec<&Wall>)> = Vec::new();
@@ -543,6 +570,7 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
             bands: bands.iter().map(|b| BandIn { thickness: b.thickness, priority: b.priority }).collect(),
             openings: wall_openings(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), true),
             cuts: if layered { joins.as_ref().and_then(|j| j.get(&wall.id)).cloned().unwrap_or_default() } else { WallCuts::default() },
+            reveals: if layered && stacked { wall_reveals(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), bands.len()) } else { Vec::new() },
         };
         let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
         for piece in wall_bands::wall_bands(&win, ctx) {
@@ -550,7 +578,7 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
             out.push(RWall {
                 start: [piece.start.x, piece.start.y],
                 end: [piece.end.x, piece.end.y],
-                thickness: b.thickness,
+                thickness: piece.thickness.unwrap_or(b.thickness),
                 height: piece.z_top - piece.z_bottom,
                 base_elevation: piece.z_bottom,
                 top_drop: piece.top_drop,
@@ -733,7 +761,11 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
     let mut shaped: Vec<RMesh> = Vec::new();
     let mut w = FlatWriter::new();
     w.num(detail).num(p.walls.len() as f64);
-    for wall in &p.walls {
+    // [105] Anhang: Rahmen-Detail je (Wand, Öffnung); Türzargen als eigene Quader.
+    let mut details: Vec<f64> = Vec::new();
+    let mut n_details = 0.0;
+    let mut zargen: Vec<RMesh> = Vec::new();
+    for (wi, wall) in p.walls.iter().enumerate() {
         w.nums(&[wall.start.x, wall.start.y, wall.end.x, wall.end.y]);
         let slot = w.slot();
         let mut count = 0.0;
@@ -752,10 +784,25 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
             }
             w.nums(&[from, to, o_bottom, o_top, flag(op.kind != ElementKind::Window), t]);
             write_opening(&mut w, p, op);
+            let dframe = crate::opening_detail::door_frame_of(p, op);
+            if let Some(f) = crate::opening_detail::frame_of(p, op).filter(|f| f.detailed || dframe.is_some()) {
+                let s4 = |s: crate::opening_detail::Sides| [s.left, s.right, s.top, s.bottom];
+                details.extend([wi as f64, count]);
+                details.extend(s4(f.sides));
+                details.extend(s4(f.ext));
+                details.extend(s4(f.rebate));
+                details.extend([f.sash_width, f.sash_depth, f.sash_overlap, f.mullion_width, f.transom_width, f.sill_profile, f.shading_profile, flag(dframe.is_some())]);
+                n_details += 1.0;
+            }
+            if let (Some(df), true) = (dframe.as_ref(), detail > 0.0) {
+                door_frame_boxes(&mut zargen, wall, &wr, op, df, (from, to, o_bottom, o_top));
+            }
             count += 1.0;
         }
         w.set(slot, count);
     }
+    w.num(n_details);
+    w.nums(&details);
     let buf = crate::openings3d::opening_meshes_flat(&w.done());
     let n = buf.first().copied().unwrap_or(0.0).max(0.0) as usize;
     let mut out = Vec::new();
@@ -775,6 +822,7 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
         });
         i += 25;
     }
+    out.extend(zargen);
     out.extend(shaped);
     // Dach-/Deckenfenster ([103]).
     for op in p.openings.as_deref().unwrap_or(&[]) {
@@ -857,6 +905,32 @@ pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef,
         out.push(box_mesh(os::quad_box(&q, inner_glass.0, inner_glass.1, &map), color));
     }
     out
+}
+
+/// Türzarge als Quader ([105]): Profil (Grundriss = Schnitt) an beiden Leibungen über die Höhe und
+/// am Sturz über die Breite; Ecken ohne Überlappung (Leibungsstück endet unter dem Sturzstück).
+fn door_frame_boxes(out: &mut Vec<RMesh>, wall: &Wall, wr: &WallRef, op: &Opening, df: &crate::opening_detail::DoorFrame, (from, to, zb, zt): (f64, f64, f64, f64)) {
+    use crate::opening_detail as od;
+    let (u, n) = wr.frame();
+    let face = wr.ref_off - wr.total / 2.0;
+    let innen = od::aufschlag_innen(op);
+    let off_of = |d: f64| face + if innen { wr.total - d } else { d };
+    let s = [wall.start.x, wall.start.y];
+    let (u, n) = ([u.x, u.y], [n.x, n.y]);
+    for (part, poly) in od::door_frame_profile(df, wr.total, innen) {
+        let rgb = if part == od::FramePart::Frame && df.steel { PART_RGB[4] } else { PART_RGB[1] };
+        for [x0, x1, d0, d1] in od::ortho_rects(&poly) {
+            let (o0, o1) = (off_of(d0).min(off_of(d1)), off_of(d0).max(off_of(d1)));
+            let boxes = [
+                od::axis_box(s, u, n, from + x0, from + x1, zb, zt - x1, o0, o1),
+                od::axis_box(s, u, n, to - x1, to - x0, zb, zt - x1, o0, o1),
+                od::axis_box(s, u, n, from + x0, to - x0, zt - x1, zt - x0, o0, o1),
+            ];
+            for b in boxes.into_iter().flatten() {
+                out.push(RMesh { positions: b.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color: rgb, vertex_colors: None, material_index: None });
+            }
+        }
+    }
 }
 
 // ── Treppen ─────────────────────────────────────────────────────────────────

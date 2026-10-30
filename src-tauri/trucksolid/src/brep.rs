@@ -9,7 +9,7 @@
 //
 // Boolesche B-Rep-Operationen sind upstream nur bei Körpern in allgemeiner Lage
 // robust: bündige/koinzidente Flächen liefern `None` (s. `bool_op`) — dafür bleibt
-// die Mesh-Ebenen-CSG (`boolean.rs`, csgrs) der Gebäude-Standardweg.
+// die Mesh-Ebenen-CSG (`boolean.rs`, Manifold) der Gebäude-Standardweg.
 
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
@@ -545,7 +545,7 @@ pub fn mesh_of_solid(solid: &Solid, tol: f64) -> MeshOutput {
 }
 
 /// Spezifikation → Mesh. Scheitert eine B-Rep-Boolean (koinzidente Flächen), wird die
-/// Operation auf Mesh-Ebene (csgrs, `boolean.rs`) wiederholt — das Ergebnis ist dann ein
+/// Operation auf Mesh-Ebene (Manifold, `boolean.rs`) wiederholt — das Ergebnis ist dann ein
 /// reines Dreiecks-Mesh (ohne exakte B-Rep-Flächen; der STEP-Export dieses Körpers entfällt).
 pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
     match spec {

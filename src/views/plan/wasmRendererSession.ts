@@ -28,6 +28,8 @@ export interface WebPlanRendererLike {
   set_view_box(x: number, y: number, w: number, h: number): void;
   set_paper_scale(n: number): void;
   set_text_scale(n: number): void;
+  /** Plot-Massstab der Strichmuster (fest im Modell-Raum; 0 = wie `set_paper_scale`). */
+  set_dash_scale?(n: number): void;
   resize(w: number, h: number): void;
   render(): void;
   /** true, sobald das WebGPU-Gerät verloren ist (dann zeichnet der Renderer nichts mehr). */
@@ -42,6 +44,8 @@ export interface PlanFrame {
   viewBox: { x: number; y: number; w: number; h: number };
   paperScaleN: number;
   textScaleN: number;
+  /** Plot-Massstab (1:N) der Strichmuster, unabhängig vom Zoom; 0/fehlend = wie `paperScaleN`. */
+  dashScaleN?: number;
   width: number;
   height: number;
 }
@@ -215,6 +219,7 @@ export class WasmPlanRendererSession<S> {
           r.resize(f.width, f.height);
           r.set_paper_scale(f.paperScaleN);
           r.set_text_scale(f.textScaleN);
+          r.set_dash_scale?.(f.dashScaleN ?? 0);
           r.set_view_box(f.viewBox.x, f.viewBox.y, f.viewBox.w, f.viewBox.h);
           r.render();
         }

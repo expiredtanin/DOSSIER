@@ -1181,8 +1181,50 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Form, nicht in der Tauri-App/Metal geprüft. · M
 - ○ **[G4] Exakte Sichtbarkeit (HLR)** für Ansicht und Projektionsteil des Schnitts. · XL
 - ○ **[G5] Dächer untereinander, Gauben, Wand ↔ Decke** per Boolean. · L · nach [G1]/[G2].
+  - (30.10.) Boolean-Werkzeug dafür: Manifold-Port `manifold-rust`, nicht truck — truck scheitert an Gaube und
+    L-Ecke (bündige Unterseiten), `manifold-rust` rechnet beide exakt und dicht. Details und Plan: [107].
 - ○ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M
 - ○ **[G7] Robuste Booleans bei bündigen Flächen** — wächst mit jeder Phase. · L (laufend)
+  - (30.10.) Messung in [107]: truck-B-Rep 3/14 Fälle, csgrs-Fallback Volumen stimmt, Netz aber offen
+    (T-Stösse) und langsam; `manifold-rust`/`boolmesh` 14/14 exakt (Volumenfehler ≤ 4e-14) und geschlossen.
+- ◐ **[107] Spike: Manifold für robuste Körper-Booleans** (30.10.). Frage: Manifold
+  (elalish, Apache-2.0) statt truck-Booleans für [G5]/[G7], Abzugskörper und als Ersatz für den
+  csgrs-Fallback (`trucksolid/src/boolean.rs`). truck bleibt für STEP und gekrümmte Grundkörper.
+  **Kandidaten:** (a) `manifold-rust` 0.19.1 (Lars Brubaker, Apache-2.0): reines Rust, Port von Manifold v3.5
+  mit f64-Pfad (`from_mesh_gl64`/`get_mesh_gl64`), dazu ein eigener „robuster" Modus mit exakter Arithmetik
+  für unsaubere Netze. Nur Rust-Abhängigkeiten (clipper2-rust, dashu), sehr aktiv (14 Versionen seit 07/2026).
+  (b) `boolmesh` 0.2.2 (MPL-2.0, Datei-Copyleft): eigene Rust-Neuschreibung nach Manifold, klein, nur `glam`.
+  (c) C++-Manifold über `manifold-csg` 0.4.1 (Apache/MIT): wasm32-unknown-unknown laut eigener Angabe nur
+  „provisorisch" (Shim statt libc++, kein Exception-Laufzeitsystem: STL-throw → abort), braucht LLVM ≥ 20
+  (Container: clang 18) und klont manifold/Clipper2 beim Bauen → **hier nicht gebaut**. `manifold-rs`
+  (cmake/C++) gibt es nicht für wasm32-unknown-unknown. → C++-Weg verworfen.
+  **Messung** (Linux-Container, nativ release; Prototyp nur im Scratchpad, nicht im Repo; 14 Fälle: Abzug
+  bündig mit 3 Flächen, Abzug am Wandende, bündige Vereinigung, Gaube ∪/− Satteldach mit bündiger Unterseite,
+  L-Ecke zweier Satteldächer mit gleicher Firsthöhe ∪/∩, Wand 20 m − 30 Öffnungen (bündig/überstehend),
+  200 Quader ∪ (Flächen bündig/überlappend), Splitter 1e-7 m und 1e-10 m, um 1e-6 rad verdrehter Abzug):
+  truck `bool_op` 3/14 (11 × `None`; 30 überstehende Öffnungen 1040 ms). csgrs 14/14 Volumen (rel ≤ 6e-8,
+  f32-Ausgabe), aber 12/14 Netze offen (T-Stösse), 30 Öffnungen 470–580 ms, 200 Quader 2.2–3.0 s.
+  `manifold-rust` (exakt) 14/14, Volumen rel ≤ 4e-14, Netze geschlossen; 30 Öffnungen 30 ms, 200 Quader
+  140–240 ms, Einzel-Boolean ≈ 0.2 ms. Robuster Modus ebenfalls 14/14, aber 10–25× langsamer (200 Quader 3–5 s):
+  nur für importierte Netze. `boolmesh` 14/14, gleich schnell (200 Quader 160 ms). Kaputte Eingaben (offen,
+  NaN, Index ausserhalb, leer): beide melden einen Fehler, keine Panik; **innen nach aussen** gedrehte Körper
+  werden still angenommen (falsches Ergebnis) → Orientierung (Volumen > 0) vorher prüfen.
+  **WASM** (wasm32-unknown-unknown, ohne emscripten, eine Boolean-Funktion, LTO): `manifold-rust` 550 KB
+  (176 KB gzip), `boolmesh` 255 KB (89 KB gzip), keine Importe; läuft in Node (Würfel − bündiger Würfel
+  0.7 ms bzw. 1.7 ms). Zum Vergleich `trucksolid_bg.wasm` 3.3 MB (724 KB gzip).
+  **Empfehlung: übernehmen, `manifold-rust`** (Apache-2.0, echter Manifold-Port, f64; `boolmesh` als Ersatz,
+  falls nötig). Schritte: (1) im Crate `trucksolid` den csgrs-Fallback ersetzen (`boolean_mesh_core`, Fallback in
+  `solid_mesh_core`) — dort schon hinter `guarded()` ([14]), damit eine Panik nur das truck-Modul trifft;
+  csgrs und die Git-Abhängigkeit fallen weg. (2) Für [G5]/Abzugskörper im Kern (`dossier-core`, neues Modul
+  `solid_bool.rs`, Mesh-Ein-/Ausgabe als flache `Float64Array`s): Ableitungen brauchen synchrone Antworten.
+  Risiko dort: auf wasm32-unknown-unknown gibt es kein `catch_unwind` — eine Panik legt den Kern lahm. Daher
+  erst nach (1) mit Fuzz-Tests (Fuzz-Muster `src/core/robustness.test.ts`), Eingaben vorher prüfen
+  (geschlossen, orientiert, endlich, Obergrenze Dreiecke), sonst wie truck als eigenes Modul. Einen
+  Ergebnis-Cache je Element vorsehen. Offen: Version pinnen (junges Crate, ein Maintainer), `NOTICE` ([51]),
+  Ebenen-Zusammenfassung der Ausgabe (exakter Modus liefert bei 200 überlappenden Quadern 2118 statt
+  920 Dreiecke → `simplify`), Schnittkanten für Plan/Schnitt ([G1]) aus dem Ergebnisnetz. Nicht geprüft:
+  Tauri-App/macOS, C++-Manifold selbst, gekrümmte Körper (Kugel/Zylinder als Netz). · S (Spike) / M (Einbau)
+  - (30.10.) Mesh-Fallback jetzt Manifold statt csgrs: [107].
 - ✅ **[G8] Abzugskörper (senkrechte Prismen)** — Grundriss, Schnitt, 3D, STEP. Offen: Ansicht,
   Schraffur-Deckel im 3D-Live-Schnitt.
 - ◐ **[G10] render2d-Punkte f32** (Fund aus [K3b], geprüft 27.10.): `render2d::types::Scene` speichert Punkte
@@ -1402,14 +1444,29 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Massstab als 3. Argument). Ansicht: sichtbare Wandseite (rechts der Achse = äusserste Schicht) mit Ansichtsfarbe
   + Muster, Dachflächen; verdeckt wie die Kanten, Maler-Tiefe der eigenen Fläche. Grundriss: Dachaufsicht je
   Dachfläche (`roof-surface-pattern`). Geprüft: Rust-Tests (Muster, Ausdünnung, Ansicht, Dachaufsicht,
-  Bibliothek), CLI-Ansicht 1:50/1:500 und Druck-SVG Grundriss/Schnitt angesehen (Linux-Container). Offen: 3D-
-  Linien (render3d) nicht umgesetzt; Decken-Untersicht/Bodenbeläge ohne Muster; Schnittschraffur-Strichmuster
-  (Beton unbewehrt, Estrich) im Schnitt-Druck durchgezogen; ambientCG-Kennungen CorrugatedSteel005, WoodSiding008,
-  Chipboard001 ohne Netz nicht geprüft; nicht in der Tauri-App/macOS geprüft. · M
+  Bibliothek), CLI-Ansicht 1:50/1:500 und Druck-SVG Grundriss/Schnitt angesehen (Linux-Container).
+  Nachtrag 30.10.: Schraffur-Strichmuster skalieren mit der Musterskala (`hatch::hatch_dash`, Strich/Lücke im
+  Verhältnis zum Linienabstand — vorher war der Strich bei Estrich 0.35 länger als die Linie in der 8-cm-Schicht
+  und wirkte durchgezogen), gleich in Szene, Chunk-Pfad, Druck-SVG (`plan_print_svg`, Papier-mm = Modell-Länge)
+  und DXF; SVG-Rückfall: Muster je Kachel auf ganze Perioden gestreckt. Bodenbeläge: Grundriss zeigt das Muster
+  der obersten Deckenschicht der Decke, auf der das Geschoss steht (`floor-finish-pattern`,
+  `surface_pattern3d::floor_finish_segments`); neue Standard-Baustoffe Parkett (Läuferverband 60×10) und
+  Keramikplatten (Raster 30×30). Dachaufsicht nur von oben: Ansichtsschraffur und -muster der Eindeckung
+  nur, wenn der First unter der Schnittebene liegt; Dächer tieferer Geschosse erscheinen in höheren Grundrissen
+  als Dachaufsicht (OG des Musterhauses: kein Ziegelraster mehr). 3D: Musterlinien auf Wandseiten, Dachflächen,
+  Deckenober- und -untersicht (`surface_pattern3d::pattern_lines_3d` → render3d `set_pattern_lines`) in den
+  Stilen „Verdeckt"/„Schattiert mit Kanten", Ausdünnung je Linie nach Abstand über eine Massstabs-Leiter
+  (`render3d::pattern_lines`). Geprüft: Rust-Tests, Schnitt-Szene 1:50 (Beton unbewehrt, Estrich) und OG-Grundriss
+  vorher/nachher angesehen (Linux). Offen: Untersicht nur im 3D (es gibt keinen Deckenspiegel; waagrechte Flächen
+  sind in Schnitt/Ansicht nicht sichtbar); Decken ohne `surfacePatternAngle/Offset` (Muster am Plan ausgerichtet);
+  Wandseiten im 3D ohne Rücksicht auf Eckverschnitt; 3D-Linien in der nativen macOS-Ansicht und im Browser
+  (WebGPU) nicht angesehen; ambientCG-Kennungen CorrugatedSteel005, WoodSiding008, Chipboard001 ohne Netz nicht
+  geprüft; nicht in der Tauri-App/macOS geprüft. · M
 - ◐ **[101] Standards in neuen Projekten, „Standards laden".** (29.10.) Neu/Neu aus Musterhaus bringen die
   Standards mit (`withStandards`, Kern-Abfrage `standardsMergeOps`); Ressourcen-Manager-Kopf: „Standards laden"
   ergänzt nur Fehlendes (gleiche id oder gleicher Name = vorhanden, Verweise neuer Aufbauten zeigen dann auf das
-  vorhandene Bauteil), ein Undo-Schritt. Offen: Rückmeldung (Anzahl) nach dem Laden. · S
+  vorhandene Bauteil), ein Undo-Schritt. Rückmeldung nach dem Laden über `notify()` (30.10.): „34 Baustoffe,
+  5 Aufbauten … hinzugefügt" bzw. „alles schon vorhanden" (`standardsMergeCounts`). · S
 - ◐ **[102] Linientypen nach SIA 400 / ISO 128.** (29.10.) Standard-Linienstile: Volllinie, Strichlinie fein/grob,
   Punktlinie, Strichpunktlinie (Achse), Strich-Zweipunktlinie, Grundstücksgrenze, Baulinie/Bauteilgrenze,
   Bruchlinie (Zickzack), Schraffurlinien. Fehler behoben: render2d warf Punkte (AN = 0) aus dem Muster und
@@ -1418,7 +1475,12 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   dem Bildschirm mit dem Massstab (`dash_scale` = N/100 in Linien-, Strich- und Bogen-Uniforms, vorher fest 1:100);
   SVG-Export setzt runde Kappen bei Punkten. DXF/DWG: LTYPE je Linienstil (Name, Punkt = 0) wie bisher. Geprüft:
   Rust-Tests (render2d, Kern), naga-Validierung der Shader, Druck-SVG (PDF-Pfad) mit allen Typen angesehen.
-  Offen: Bildschirm (WebGPU) nicht angesehen; CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
+  Nachtrag 30.10.: Strichrhythmus fest im Modell-Raum auch im Anzeigemodus — render2d trennt den Plot-Massstab
+  der Muster (`dash_scale_n`, `set_dash_scale`, `ortho::dash_scale`) vom zoomabhängigen Strich-Massstab; PlanView
+  gibt den stabilen Referenz-Massstab (wie Druckansicht) an WebGPU- und native Fläche (`native2d_frame`
+  `dashScale`); SVG-Rückfall: Linientypen in Papier-mm im Plot-Massstab, unter `non-scaling-stroke` über die
+  meet-Variable `--plan-dash-k` (`dashArrayCss`). Test: Modell-Periode bei zwei Zoomstufen gleich und = Druck-SVG.
+  Offen: Bildschirm (WebGPU/macOS) nicht angesehen; CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
 - ○ **[80] PDF mit Ebenen.** · M
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.
@@ -1529,6 +1591,35 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (Linux). Offen: 3D-Live-Schnitt (render3d) zeigt neue Muster vereinfacht (Zickzack/Kreuz/Diagonal);
   Projekte mit Standards vom 29.10. behalten die alten Schraffur-Definitionen (Standards laden ergänzt nur);
   Alt-Pfade `planToPrintSvg`/SVG-PlanView zeichnen neue Muster als Diagonale; nicht in der Tauri-App geprüft. · M
+- ◐ **[105] Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten.** (29.10., Wunsch Maintainer „so tief wie
+  ArchiCAD“) Neue optionale Modellfelder (nur Rust-Modell): `frameDetail` am Fenster-/Türtyp und feldweise an der Öffnung
+  (`Opening.frameDetail`): Blendrahmen-Breite je Seite, Tiefe/Lage, Flügelrahmen (Breite, Tiefe, Überschlag), Pfosten/
+  Kämpfer (Breite, Tiefe), Verbreiterungsprofile links/rechts, Fensterbank- und Storen-Anschlussprofil, Anschlag je Seite.
+  Türtyp `frameKind` neu `umfassungszarge`/`eckzarge`/`blockzarge`/`blendrahmen`/`futter` (Zarge und Blockrahmen behalten das bisherige Rahmenband), Masse
+  `doorFrame` (Falz, Spiegel, Blech, Futter, Bekleidung ein-/beidseitig), an der Öffnung `doorFrameKind`/`doorFrame`. Kern
+  `opening_detail.rs` (Auflösung Typ + Übersteuerung, Zargen-Profil je Art = Grundriss- und Sturzschnitt, Rechteck-Zerlegung
+  für 3D). Grundriss: Zargen-Profil an beiden Leibungen (fein: Stahl gefüllt), Blatt schlägt im Falz an, Rahmenbreite
+  rechts ≠ links, Verbreiterungsprofile, Anschlag je Seite in der Schicht-Schraffur. Schnitt: Rahmen oben/unten je Breite,
+  Anschlussprofile, Zarge am Sturz + Blatt im Falz, Anschlag oben/unten (Sturz-Nase, bisher offen aus [94]). 3D: Rahmenring
+  je Seite (`frame_ring_quads_sides`), Profile, Flügel/Pfosten/Kämpfer-Masse, Anschlag je Seite, Zargen als Quader.
+  Dialog „Fenster/Tür-Einstellungen“: Kategorien Rahmen-Detail, Anschlag, Zarge/Rahmenart, Schalter „Typ / nur diese
+  Öffnung“ (Übersteuerung, zurücksetzbar); Vorschau neu aus dem Kern (Grundriss fein, Schnitt, Ansicht der Öffnung als SVG,
+  Abfrage `openingPreview`, `src/plan/openingPreview.ts`). Testprojekt `scripts/gen-opening-test-project.ts`. Geprüft:
+  Rust-/vitest-Tests, CLI-Grundriss/-Schnitte/-Ansicht als PNG angesehen (Linux). Offen: Ansicht (`plan_elevation.rs`) zeigt
+  Rahmen je Seite, Profile und Zargenspiegel/Bekleidung noch nicht; Türblatt im 3D weiter mittig statt im Falz; Grundriss-
+  Türblatt an der Wandachse; Pfosten-Breite wirkt nur im 3D; Ressourcen-Tabs ohne die neuen Felder (nur im Dialog); nicht in
+  der Tauri-App geprüft.
+- ◐ **[106] Fenster/Türen: Schichteinzug je Wandschicht und Seite.** (29.10.) `layerReveals` am Typ bzw. an der Öffnung (ersetzt
+  dort den Typ): je Schicht (Index ab aussen, negativ ab innen) bündig / zurückspringend um Mass (Vorgabe Schichtdicke) / in
+  die Leibung bis an den Rahmen (Vorgabe ≤ 4 cm, vom Rahmen weg gestapelt) / Rahmen überdeckend um Mass (Vorgabe 3 cm), je
+  Seite (Leibung links/rechts, Sturz, Brüstung) übersteuerbar; Vorgaben (z. B. „Aussendämmung überdämmt Rahmen 3 cm,
+  Innenputz in Leibung“). `innerLayerRecess` gilt nur noch ohne Regeln (= innerste Schicht zurück), der Dialog/Ressourcen-Tab
+  schreibt beim Ändern `layerReveals` und löscht es. Geometrie im Kern: Grundriss-Poché je Schicht (`plan_walls.rs`, Umriss
+  und Fugen aus dem Teilflächen-Raster), Schnitt (Sturz/Brüstung je Schicht in `split_wall_layers`), 3D (`wall_bands.rs`:
+  Loch je Schicht geweitet, Zusatzstücke als eigene Körper) — damit auch IFC-Wandkörper/Netto-Volumen. Geprüft: Rust-Tests,
+  CLI-Grundriss/-Schnitt einer Aussenwand Putz/Dämmung/Backstein/Putz mit vier Varianten angesehen. Offen: Schnitt quer
+  durch eine Leibung (Ebene parallel zur Wand) ohne Rücksprung; Mengen (Leibungsflächen je Schicht) nicht in der Fenster-
+  liste; keine Rundbogen-/Dachfenster-Leibungen; nicht in der Tauri-App geprüft.
 
 ## Priorität 4 — später
 
@@ -1538,6 +1629,19 @@ Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugr
 [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
 (◐, DXF-Parser, IFC-Import) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
 Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
+
+- ◐ **[107] Manifold für Körper-Booleans (Schritt 1: trucksolid).** (30.10.) `manifold-rust` `=0.19.1` (Apache-2.0,
+  exakter Modus) ersetzt den csgrs-Fallback in `src-tauri/trucksolid/src/boolean.rs`; csgrs, die Git-Abhängigkeit
+  und nalgebra sind entfernt, `NOTICE` ergänzt. Reihenfolge unverändert: truck-B-Rep zuerst (exakte Flächen/STEP),
+  bei Fehler Mesh-Boolean (Manifold 14/14 Spike-Fälle, truck 3/14, aber kein B-Rep). Eingabeprüfung vor dem
+  Aufruf (`checked_mesh`): endlich, Indizes, geschlossen/mannigfaltig, Volumen ≠ 0, Orientierung (Volumen < 0 →
+  Dreiecke gedreht), Obergrenze 500 000 Dreiecke, Verschweissen gleicher Koordinaten; sonst Fehlertext, den TS wie
+  bisher behandelt. Ergebnis mit `simplify(0)` (koplanar zusammengefasst). Tests
+  `trucksolid/tests/manifold_cases.rs`: 14 Spike-Fälle (bündiger Abzug, Gaube, Dach-L-Ecke, 30 Öffnungen,
+  200 Quader, Splitter 1e-7/1e-10, 1e-6 rad) ok, geschlossen, Volumen rel < 1e-9; Orientierung, kaputte Eingaben.
+  **WASM:** `pkgTruck` 3.26 → 4.44 MB (gzip 745 → 1082 KB) — deutlich mehr als im Spike gemessen (Clipper2/dashu
+  kommen dazu). Offen: Schritt 2 (Kern-Modul `solid_bool.rs` für [G5]/Abzugskörper, Fuzz, Cache), Panik im WASM
+  (läuft hinter `guarded()`), Tauri/macOS nicht geprüft. · M
 
 - ◐ **[27] Punktwolken — Stufe 1: Anzeige im 3D.** (28.10.) render3d: eigene Punkt-Pipeline
   (`render3d/src/points.rs` GPU-frei: Puffer-Aufbau, Farbabbildung, WGSL; `gpu_points.rs`: Pipeline im

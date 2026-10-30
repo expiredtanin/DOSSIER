@@ -188,6 +188,60 @@ pub struct TypeIn {
     pub frame_width: f64,
     pub transom_height: f64,
     pub kind: KindIn,
+    /// Rahmen-Detail ([105]), aus dem Anhang der Kodierung; `None` = bisher.
+    pub detail: Option<Box<FrameDetailIn>>,
+}
+
+/// Rahmen-Detail einer Öffnung ([105]); Seiten in der Reihenfolge links, rechts, oben, unten,
+/// NaN = Vorgabe.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameDetailIn {
+    pub sides: [f64; 4],
+    pub ext: [f64; 4],
+    pub rebate: [f64; 4],
+    pub sash_width: f64,
+    pub sash_depth: f64,
+    pub sash_overlap: f64,
+    pub mullion_width: f64,
+    pub transom_width: f64,
+    pub sill_profile: f64,
+    pub shading_profile: f64,
+    /// Türzarge mit eigener Zeichnung: Blendrahmen-Ring und Zargen-Umgriff entfallen.
+    pub skip_frame: bool,
+}
+
+/// Anzahl Zahlen eines Anhang-Eintrags nach (Wand, Öffnung).
+pub const DETAIL_LEN: usize = 20;
+
+impl FrameDetailIn {
+    fn read(r: &mut Reader) -> Option<FrameDetailIn> {
+        let mut v = [0.0; DETAIL_LEN];
+        for x in v.iter_mut() {
+            *x = r.num()?;
+        }
+        Some(FrameDetailIn {
+            sides: [v[0], v[1], v[2], v[3]],
+            ext: [v[4], v[5], v[6], v[7]],
+            rebate: [v[8], v[9], v[10], v[11]],
+            sash_width: v[12],
+            sash_depth: v[13],
+            sash_overlap: v[14],
+            mullion_width: v[15],
+            transom_width: v[16],
+            sill_profile: v[17],
+            shading_profile: v[18],
+            skip_frame: v[19] != 0.0,
+        })
+    }
+}
+
+/// Wert oder Vorgabe (NaN/negativ ⇒ Vorgabe).
+fn dv(v: f64, d: f64) -> f64 {
+    if v.is_finite() && v >= 0.0 {
+        v
+    } else {
+        d
+    }
 }
 
 /// Eine Öffnung: Achs-Intervall (ab Wandstart), absolute Höhen, Tür/Fenster, Wanddicke und Typ.
@@ -356,37 +410,43 @@ impl Emitter<'_> {
 /// Rahmen-Ring über `[from,to] × [z_b,z_t]` mit Profilbreite `w` ohne überlappende Profile
 /// (`frameRingQuads`): `join` bestimmt, welche Glieder an den Ecken durchlaufen.
 pub fn frame_ring_quads(from: f64, to: f64, z_b: f64, z_t: f64, w: f64, join: CornerJoin, bottom: bool) -> Vec<Quad> {
+    frame_ring_quads_sides(from, to, z_b, z_t, [w, w, w, w], join, bottom)
+}
+
+/// Wie [`frame_ring_quads`], Profilbreite je Seite `[links, rechts, oben, unten]` ([105]).
+pub fn frame_ring_quads_sides(from: f64, to: f64, z_b: f64, z_t: f64, w: [f64; 4], join: CornerJoin, bottom: bool) -> Vec<Quad> {
+    let [wl, wr, wt, wb] = w;
     let bx = |u0: f64, u1: f64, h0: f64, h1: f64| -> Quad { [[u0, h0], [u1, h0], [u0, h1], [u1, h1]] };
     let mut out = Vec::with_capacity(4);
-    if to - from <= 2.0 * w + EPS || z_t - z_b <= (if bottom { 2.0 } else { 1.0 }) * w + EPS {
+    if to - from <= wl + wr + EPS || z_t - z_b <= (if bottom { wb + wt } else { wt }) + EPS {
         // Zu klein für einen Ring: ein Vollprofil.
         out.push(bx(from, to, z_b, z_t));
         return out;
     }
-    let bz = if bottom { z_b + w } else { z_b };
+    let bz = if bottom { z_b + wb } else { z_b };
     match join {
         CornerJoin::Horizontal => {
-            out.push(bx(from, to, z_t - w, z_t));
+            out.push(bx(from, to, z_t - wt, z_t));
             if bottom {
-                out.push(bx(from, to, z_b, z_b + w));
+                out.push(bx(from, to, z_b, z_b + wb));
             }
-            out.push(bx(from, from + w, bz, z_t - w));
-            out.push(bx(to - w, to, bz, z_t - w));
+            out.push(bx(from, from + wl, bz, z_t - wt));
+            out.push(bx(to - wr, to, bz, z_t - wt));
         }
         CornerJoin::Mitre => {
-            out.push([[from + w, z_t - w], [to - w, z_t - w], [from, z_t], [to, z_t]]);
+            out.push([[from + wl, z_t - wt], [to - wr, z_t - wt], [from, z_t], [to, z_t]]);
             if bottom {
-                out.push([[from, z_b], [to, z_b], [from + w, z_b + w], [to - w, z_b + w]]);
+                out.push([[from, z_b], [to, z_b], [from + wl, z_b + wb], [to - wr, z_b + wb]]);
             }
-            out.push([[from, z_b], [from + w, bz], [from, z_t], [from + w, z_t - w]]);
-            out.push([[to - w, bz], [to, z_b], [to - w, z_t - w], [to, z_t]]);
+            out.push([[from, z_b], [from + wl, bz], [from, z_t], [from + wl, z_t - wt]]);
+            out.push([[to - wr, bz], [to, z_b], [to - wr, z_t - wt], [to, z_t]]);
         }
         CornerJoin::Vertical => {
-            out.push(bx(from, from + w, z_b, z_t));
-            out.push(bx(to - w, to, z_b, z_t));
-            out.push(bx(from + w, to - w, z_t - w, z_t));
+            out.push(bx(from, from + wl, z_b, z_t));
+            out.push(bx(to - wr, to, z_b, z_t));
+            out.push(bx(from + wl, to - wr, z_t - wt, z_t));
             if bottom {
-                out.push(bx(from + w, to - w, z_b, z_b + w));
+                out.push(bx(from + wl, to - wr, z_b, z_b + wb));
             }
         }
     }
@@ -530,6 +590,10 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
 /// Maueranschlag: Wandnasen links, rechts und oben in der Zone zwischen der Anschlag-Fläche und
 /// der Rahmen-Vorderkante (aussen bzw. bei `insetFace: "innen"` innen; mittig: aussen).
 fn rebate_boxes(em: &mut Emitter, o: &OpeningIn, ty: &TypeIn, p: &FrameParams) {
+    if let Some(d) = ty.detail.as_deref() {
+        rebate_boxes_sides(em, o, ty, p, d);
+        return;
+    }
     let rd = jmin(or(ty.rebate_depth, 0.0), (o.to - o.from) / 2.0 - 0.01);
     if !(rd > EPS) {
         return;
@@ -542,6 +606,27 @@ fn rebate_boxes(em: &mut Emitter, o: &OpeningIn, ty: &TypeIn, p: &FrameParams) {
     em.axis_box(o.from, o.from + rd, o.z_bottom, o.z_top, n0, n1, Part::Rebate);
     em.axis_box(o.to - rd, o.to, o.z_bottom, o.z_top, n0, n1, Part::Rebate);
     em.axis_box(o.from + rd, o.to - rd, o.z_top - rd, o.z_top, n0, n1, Part::Rebate);
+}
+
+/// Anschlag je Seite ([105]): links, rechts, oben und (Fenster) unten.
+fn rebate_boxes_sides(em: &mut Emitter, o: &OpeningIn, ty: &TypeIn, p: &FrameParams, d: &FrameDetailIn) {
+    if !(ty.inset_mid || or(ty.inset_from_face, 0.0) > 1e-4) {
+        return;
+    }
+    let half = p.half_thickness;
+    let (n0, n1) = if ty.inset_inner && !ty.inset_mid { (-half, p.n_min) } else { (p.n_max, half) };
+    if n1 - n0 <= EPS {
+        return;
+    }
+    let lim = |v: f64, m: f64| jmax(0.0, jmin(dv(v, 0.0), m));
+    let wmax = (o.to - o.from) / 2.0 - 0.01;
+    let hmax = (o.z_top - o.z_bottom) / 3.0;
+    let (rl, rr, rt) = (lim(d.rebate[0], wmax), lim(d.rebate[1], wmax), lim(d.rebate[2], hmax));
+    let rb = if o.door { 0.0 } else { lim(d.rebate[3], hmax) };
+    em.axis_box(o.from, o.from + rl, o.z_bottom, o.z_top, n0, n1, Part::Rebate);
+    em.axis_box(o.to - rr, o.to, o.z_bottom, o.z_top, n0, n1, Part::Rebate);
+    em.axis_box(o.from + rl, o.to - rr, o.z_top - rt, o.z_top, n0, n1, Part::Rebate);
+    em.axis_box(o.from + rl, o.to - rr, o.z_bottom, o.z_bottom + rb, n0, n1, Part::Rebate);
 }
 
 /// Flügeleinteilung auf `[from, to]`: feste Breiten exakt, der Rest gleichmässig.
@@ -586,25 +671,40 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
     let detail_bodies = fine || medium;
     let fw = p.frame_width;
     let (from0, to0, zb0, zt0) = (o.from, o.to, o.z_bottom, o.z_top);
-    for q in frame_ring_quads(from0, to0, zb0, zt0, fw, p.corner_join, p.has_sill) {
-        em.plane_quad(&q, p.n_min, p.n_max, Part::Frame);
+    // [105] Rahmen je Seite, Verbreiterungs-/Anschlussprofile, Flügel, Pfosten, Kämpfer.
+    let dd = o.ty.as_ref().and_then(|t| t.detail.as_deref());
+    let [fl, fr, ft, fb] = dd.map_or([fw; 4], |d| d.sides.map(|v| dv(v, fw)));
+    let (rf0, rt0, rb0, rtop0) = dd.map_or((from0, to0, zb0, zt0), |d| (from0 + dv(d.ext[0], 0.0), to0 - dv(d.ext[1], 0.0), zb0 + dv(d.sill_profile, 0.0), zt0 - dv(d.shading_profile, 0.0)));
+    let mw = dd.map_or(fw, |d| dv(d.mullion_width, fw));
+    let tw = dd.map_or(fw, |d| dv(d.transom_width, fw));
+    if dd.is_some() {
+        // Profile in der Rahmenlage: Verbreiterung links/rechts (volle Höhe), Bank- und Storenanschluss.
+        em.axis_box(from0, rf0, zb0, zt0, p.n_min, p.n_max, Part::Frame);
+        em.axis_box(rt0, to0, zb0, zt0, p.n_min, p.n_max, Part::Frame);
+        em.axis_box(rf0, rt0, zb0, rb0, p.n_min, p.n_max, Part::Frame);
+        em.axis_box(rf0, rt0, rtop0, zt0, p.n_min, p.n_max, Part::Frame);
+    }
+    if !dd.is_some_and(|d| d.skip_frame) {
+        for q in frame_ring_quads_sides(rf0, rt0, rb0, rtop0, [fl, fr, ft, fb], p.corner_join, p.has_sill) {
+            em.plane_quad(&q, p.n_min, p.n_max, Part::Frame);
+        }
     }
     // Schwellenprofil über die ganze Wanddicke.
     if detail_bodies && p.draw_threshold_profile {
         let strip_h = 0.02;
         em.axis_box(from0 + fw, to0 - fw, zb0, zb0 + strip_h, -p.half_thickness, p.half_thickness, Part::Sill);
     }
-    let sash_from = from0 + fw;
-    let sash_to = to0 - fw;
-    let sash_bottom = zb0 + if p.has_sill { fw } else { 0.0 };
-    let mut sash_top = zt0 - fw;
+    let sash_from = rf0 + fl;
+    let sash_to = rt0 - fr;
+    let sash_bottom = rb0 + if p.has_sill { fb } else { 0.0 };
+    let mut sash_top = rtop0 - ft;
     // Oberlicht-Band (über dem Riegel) für dessen Einteilung.
     let mut transom_band: Option<(f64, f64)> = None;
     if p.transom_height > EPS {
         let split_z = clamp_range(zt0 - p.transom_height, sash_bottom, sash_top);
-        em.axis_box(sash_from, sash_to, split_z - fw / 2.0, split_z + fw / 2.0, p.n_min, p.n_max, Part::Frame);
-        transom_band = Some((split_z + fw / 2.0, sash_top));
-        sash_top = split_z - fw / 2.0;
+        em.axis_box(sash_from, sash_to, split_z - tw / 2.0, split_z + tw / 2.0, p.n_min, p.n_max, Part::Frame);
+        transom_band = Some((split_z + tw / 2.0, sash_top));
+        sash_top = split_z - tw / 2.0;
     }
     // Pfosten im Oberlicht (mittel/fein).
     if let (true, Some((tb, tt))) = (sashes_on, transom_band) {
@@ -635,7 +735,7 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
         add_posts(p.mullion_cols, &mut posts);
         posts.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
         for &center in &posts {
-            em.axis_box(center - fw / 2.0, center + fw / 2.0, sash_bottom, sash_top, p.n_min, p.n_max, Part::Frame);
+            em.axis_box(center - mw / 2.0, center + mw / 2.0, sash_bottom, sash_top, p.n_min, p.n_max, Part::Frame);
         }
         if p.mullion_rows > 1.0 && sash_top - sash_bottom > EPS {
             let cell = (sash_top - sash_bottom) / p.mullion_rows;
@@ -662,9 +762,10 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
     for (band_sashes, band_bottom, band_top) in bands {
         if sashes_on && !band_sashes.is_empty() && sash_to - sash_from > EPS && band_top - band_bottom > EPS {
             let segs = sash_spans(band_sashes, sash_from, sash_to);
-            let sfw = fw * 0.7;
+            let sfw = dd.map_or(fw * 0.7, |d| dv(d.sash_width, fw * 0.7));
             let sash_front_n = p.n_max - 0.005;
-            let sash_back_n = jmax(p.n_min, p.n_max - 0.055);
+            let sash_back_n = jmax(p.n_min, p.n_max - dd.map_or(0.055, |d| dv(d.sash_depth, 0.055)));
+            let sov = dd.map_or(0.0, |d| dv(d.sash_overlap, 0.0));
             let glass_front_n = p.n_max - 0.02;
             let sym_back_n = glass_front_n;
             let sym_front_n = glass_front_n + 0.003;
@@ -680,7 +781,7 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
                 if ct - cf <= EPS || tz - bz <= EPS {
                     continue;
                 }
-                for q in frame_ring_quads(cf, ct, bz, tz, sfw, p.corner_join, true) {
+                for q in frame_ring_quads(cf - sov, ct + sov, bz - sov, tz + sov, sfw + sov, p.corner_join, true) {
                     em.plane_quad(&q, sash_back_n, sash_front_n, Part::Frame);
                 }
                 if !fine {
@@ -736,7 +837,7 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
         em.axis_box(from0 - ov, to0 + ov, bank_bottom, bank_top, inner_n - proj, inner_n + under, Part::Sill);
     }
     // Tür-Zarge mit Umgriff vor beiden Wandflächen.
-    if detail_bodies && p.zarge_cladding {
+    if detail_bodies && p.zarge_cladding && !dd.is_some_and(|d| d.skip_frame) {
         let (proud, ext, cas_w) = (0.013, 0.02, fw);
         for sign in [1.0, -1.0] {
             let face_n = sign * p.half_thickness;
@@ -753,10 +854,13 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
 /// Aussenfläche, Mehrfachverglasung mit Luftraum nach innen (`glassPanesForOpening`).
 fn glass_panes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams) {
     let fw = p.frame_width;
-    let sash_from = o.from + fw;
-    let sash_to = o.to - fw;
-    let sash_bottom = o.z_bottom + if p.has_sill { fw } else { 0.0 };
-    let sash_top_full = o.z_top - fw;
+    let dd = o.ty.as_ref().and_then(|t| t.detail.as_deref());
+    let [fl, fr, ft, fb] = dd.map_or([fw; 4], |d| d.sides.map(|v| dv(v, fw)));
+    let (e_l, e_r, e_b, e_t) = dd.map_or((0.0, 0.0, 0.0, 0.0), |d| (dv(d.ext[0], 0.0), dv(d.ext[1], 0.0), dv(d.sill_profile, 0.0), dv(d.shading_profile, 0.0)));
+    let sash_from = o.from + e_l + fl;
+    let sash_to = o.to - e_r - fr;
+    let sash_bottom = o.z_bottom + e_b + if p.has_sill { fb } else { 0.0 };
+    let sash_top_full = o.z_top - e_t - ft;
     let glass_thick = GLASS_HALF_THICK * 2.0;
     let panes = jmax(1.0, jmin(3.0, js_round(p.glazing_panes)));
     let push = |em: &mut Emitter, z_bottom: f64, z_top: f64| {
@@ -1068,7 +1172,7 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
             shading_rails,
         })
     };
-    Some(TypeIn { frame_depth, inset_from_face, inset_inner, inset_mid, rebate_depth, corner_join, frame_width, transom_height, kind })
+    Some(TypeIn { frame_depth, inset_from_face, inset_inner, inset_mid, rebate_depth, corner_join, frame_width, transom_height, kind, detail: None })
 }
 
 /// Flügelliste `[n, Flügel × n]`.
@@ -1102,23 +1206,41 @@ fn decode(buf: &[f64]) -> Option<(Vec<WallIn>, Detail)> {
     };
     let n = r.count()?;
     let mut walls = Vec::with_capacity(n.min(1 << 16));
-    for _ in 0..n {
+    // (Wand, Öffnung) im Puffer → Lage in `walls` (für den Anhang [105]).
+    let mut slots: Vec<((usize, usize), (usize, usize))> = Vec::new();
+    for wi in 0..n {
         let start = [r.num()?, r.num()?];
         let end = [r.num()?, r.num()?];
         let n_ops = r.count()?;
         let mut openings = Vec::with_capacity(n_ops.min(1024));
-        for _ in 0..n_ops {
+        for oi in 0..n_ops {
             let (from, to, z_bottom, z_top) = (r.num()?, r.num()?, r.num()?, r.num()?);
             let door = flag(&mut r)?;
             let wall_thickness = r.num()?;
             let ty = if flag(&mut r)? { Some(decode_type(&mut r, door)?) } else { None };
             // Unsinn (NaN/∞ in Lage oder Wanddicke): Öffnung auslassen.
             if [from, to, z_bottom, z_top, wall_thickness].iter().all(|v| v.is_finite()) {
+                slots.push(((wi, oi), (walls.len(), openings.len())));
                 openings.push(OpeningIn { from, to, z_bottom, z_top, door, wall_thickness, ty });
             }
         }
         if [start[0], start[1], end[0], end[1]].iter().all(|v| v.is_finite()) {
             walls.push(WallIn { start, end, openings });
+        } else {
+            slots.retain(|s| s.0 .0 != wi);
+        }
+    }
+    // Anhang ([105], optional): `[n, (Wand, Öffnung, Detail × DETAIL_LEN) × n]`.
+    if let Some(nd) = r.count() {
+        for _ in 0..nd {
+            let (wi, oi) = (r.num()?, r.num()?);
+            let d = FrameDetailIn::read(&mut r)?;
+            let key = (wi as usize, oi as usize);
+            if let Some(&(_, (a, b))) = slots.iter().find(|s| s.0 == key) {
+                if let Some(ty) = walls.get_mut(a).and_then(|w| w.openings.get_mut(b)).and_then(|o| o.ty.as_mut()) {
+                    ty.detail = Some(Box::new(d));
+                }
+            }
         }
     }
     Some((walls, detail))
@@ -1169,6 +1291,7 @@ mod tests {
                 shading_sturz: false,
                 shading_rails: false,
             }),
+            detail: None,
         }
     }
 
@@ -1194,6 +1317,7 @@ mod tests {
                 slide_side: 1.0,
                 hinge_end: false,
             }),
+            detail: None,
         }
     }
 

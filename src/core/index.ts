@@ -199,6 +199,7 @@ export {
   viewForScale,
   visibleEdgeRuns,
 } from "../plan/planView/geometry";
+export { PLAN_DASH_VAR, dashArrayCss, fitDashToPeriod, hatchDashVb, lineDashVb } from "../plan/planView/dashVb";
 
 export {
   type ClientMap,
@@ -242,6 +243,7 @@ export {
   TRUCK_MESH_READY_EVENT,
   draftWorldLines,
   emitDrawingLineVerts,
+  emitSurfacePatternLines,
   pickGeometry,
   projectToModel3d,
   selectionHighlightLines,

@@ -61,3 +61,5 @@ export { drawingVertices, gripPt, openEdges, polylineEdgeGrips, ringEdges } from
 export { verticalExtents } from "../geometry/grips";
 export type { VerticalExtent } from "../geometry/grips";
 export type { GripRequest } from "../geometry/grips";
+export { openingPreviewProject, openingPreviewSvgs } from "../plan/openingPreview";
+export type { OpeningPreviewSvgs } from "../plan/openingPreview";

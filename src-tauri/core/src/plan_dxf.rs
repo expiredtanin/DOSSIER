@@ -920,7 +920,7 @@ impl Ctx<'_> {
                     if pattern == Pattern::Solid {
                         self.flat.add_hatch(b, hatch_layer, pts, true, rgb_or_null(&h.color), &[], &[]);
                     } else if pattern != Pattern::None && h.h.random {
-                        let cycle = dash_cycle_meters(&h.h.dash);
+                        let cycle = dash_cycle_meters(&hatch::hatch_dash(&h.h));
                         let segs: Vec<(V2, V2)> =
                             hatch::build_random_hatch_runs(pts, &h.h, None).into_iter().filter(|r| r.len() >= 2).map(|r| (r[0], r[r.len() - 1])).collect();
                         self.flat.set_pen(b, -1.0);
@@ -937,7 +937,7 @@ impl Ctx<'_> {
                     } else if is_curve_pattern(pattern) {
                         // Schicht-/Kurvenmuster ([109]: Dämmschlange, Zickzack, Welle, Holzkreuz, Erdreich,
                         // Kies, Naturstein) kennt DXF-HATCH nicht: als Polylinien aus dem Kern-Generator.
-                        let runs = hatch::apply_dash_runs(hatch::build_hatch_runs(pts, &h.h), &h.h.dash);
+                        let runs = hatch::apply_dash_runs(hatch::build_hatch_runs(pts, &h.h), &hatch::hatch_dash(&h.h));
                         self.flat.set_pen(b, -1.0);
                         for run in runs.iter().filter(|r| r.len() >= 2) {
                             self.flat.add_polyline(b, hatch_layer, run, false);
@@ -945,7 +945,7 @@ impl Ctx<'_> {
                     } else if pattern != Pattern::None {
                         let families = hatch_families(&h.h);
                         if !families.is_empty() {
-                            let dashes = dash_cycle_meters(&h.h.dash).unwrap_or_default();
+                            let dashes = dash_cycle_meters(&hatch::hatch_dash(&h.h)).unwrap_or_default();
                             self.flat.add_hatch(b, hatch_layer, pts, false, rgb_or_null(&h.color), &families, &dashes);
                         }
                     }

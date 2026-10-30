@@ -20,6 +20,10 @@ truck (https://github.com/ricosjp/truck, truck-meshalgo src/tessellation/triangu
   Nur das Verfahren (Rand in den Parameterraum projizieren, Rasterpunkte, eingeschränkte Delaunay-
   Triangulierung, Auswahl innen) als Vorbild; eigener Code in src-tauri/fileio/src/ifc_nurbs.rs.
 
+manifold-rust (https://github.com/larsbrubaker/manifold-rust), Apache-2.0 — Rust-Port von Manifold (elalish/manifold)
+  Abhängigkeit von src-tauri/trucksolid (Mesh-Booleans, Ersatz des früheren csgrs-Fallbacks, [107]), Version 0.19.1
+  fest gepinnt, unverändert. Bringt clipper2-rust (BSL-1.0) und dashu (MIT OR Apache-2.0) mit.
+
 csg.js (https://github.com/evanw/csg.js, Datei csg.js), Copyright (c) 2011 Evan Wallace, MIT License
   Verfahren (BSP-Bäume, Ebenen-Teilung, clipTo/invert, Vereinigung/Differenz/Schnitt) in Rust neu
   geschrieben und angepasst: src-tauri/fileio/src/csg.rs (IFC-Import: Öffnungen, Boolesche Körper).
