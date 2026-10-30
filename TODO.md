@@ -1802,6 +1802,23 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Tabellenbreite nur über das Zahlenfeld (kein Ziehgriff); keine Kopfzeilen-Füllung/Farben; Schrift im PDF nur
   Helvetica/Times/Courier (jsPDF-Grundschriften); DXF-Beschriftungen in der Sprache der Oberfläche beim Export;
   nicht in der Tauri-App getestet. · S
+- ◐ **[113] Wände bearbeiten: Trim, Extend, Teilen, Bruch, Verketten, Verrunden, Offset.** (30.10.) Die 2D-Editier-
+  befehle nehmen jetzt auch Wände (gerade und Bogen [T2]); Rechnung im Kern `cmd_wall_edit.rs` (Anschluss in
+  `cmd_edit.rs`: Treffer zählen Wände mit — Abstand zum Wandkörper —, Vorschau als Wand-Umriss, je Befehl eine
+  Undo-Stufe). Grenzen: Achsen (Option „Fläche": Aussenflächen) der übrigen Wände des Geschosses, 2D-Linien/
+  -Polylinien mit Bögen/-Rechtecke/-Kreise/-Bögen, Achsraster. **Trim** (Stück zwischen den nächsten Schnitten weg;
+  Trim auf eine Wandachse ergibt einen T-Stoss), **Extend** (Bogenwand auf demselben Kreis), **Teilen** (neuer Befehl
+  `split`, Kürzel `teilen`: am Klickpunkt, Option „Schnittpunkte"; auch offene 2D-Kurven), **Bruch** (Stück zwischen
+  zwei Punkten), **Verketten** (Auswahl: kollinear gleichläufig bzw. gleicher Kreis/Drehsinn, gleicher Wandtyp;
+  Lücken werden geschlossen), **Verrunden** (erster Klick auf eine Wand statt Ecke → zweite Wand: L-Ecke am
+  Achsschnittpunkt; getippter Radius → Bogenwand tangential dazwischen, nur gerade Wände), **Offset** (parallele/
+  konzentrische Kopie im Achsabstand). Öffnungen gehen an das Stück, in dem ihre Mitte liegt (Lage in Achs-/Bogenlänge
+  umgerechnet, ins Stück geklemmt; weggeschnitten → gelöscht). Bemassung [38]: Bezüge auf die Stücke umgehängt,
+  Wandenden folgen bei Trim/Extend/Verrunden dem neuen Ende, Punkte im weggeschnittenen Teil werden `lost`.
+  Anschlüsse (`joins.rs`) folgen geometrisch aus den Endpunkten. Tests: Rust je Operation (gerade/Bogen, Öffnungen,
+  Bemassung), vitest (`wallEdit.test.ts`), e2e (`wallEdit.spec.ts`); CLI-Grundriss vorher/nachher angesehen (Linux).
+  Offen: Verrunden mit Radius bei Bogenwänden, Verketten gegenläufiger Wände (Schichtseite/Anschlag kehren),
+  Extend/Trim von 2D-Kurven an Wänden, Fasen von Wänden; nicht in der Tauri-App geprüft. · M
 - ✅ **[112] Achsraster.** (30.10.) Neue 2D-Zeichnungsform `Drawing2DGeom::Grid` (`grid.rs`, Auswahl/Verschieben/Kopieren/
   Ebenen/DXF wie jede Zeichnung): rechtwinklig (`a` = Achsen 1, 2, 3 …, `b` = A, B, C …, unregelmässige Abstände, gedreht
   um `angle`) oder radial (Strahlen in Grad, Ringe als Bögen/Kreise), `extend` Überstand, `bubbles` Start/Ende/beide,

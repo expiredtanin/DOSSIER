@@ -12,7 +12,8 @@
 // Linie → wird gekürzt/aufgeteilt; Polylinie → der getroffene Abschnitt fällt
 // raus (kann die Polylinie in Stücke teilen). Treffer, Schneider, Rest-Ketten und
 // Vorschau rechnet der Kern (`src-tauri/core/src/cmd_edit.rs`, [K4] S3); hier nur
-// der Zustandsautomat. Wände sind ausgenommen (nur Drawing2D). Sowohl Ziel-Kurve
+// der Zustandsautomat. Wände (gerade und Bogen, [113]) gehen genauso: Klick auf den wegzuschneidenden
+// Teil; Schneider sind die anderen Wände (Achse/Fläche), 2D-Kurven und Achsraster. Sowohl Ziel-Kurve
 // als auch Schneider dürfen Bogen-Segmente (bulge) tragen.
 //
 // Bezeichner englisch, Kommentare/UI deutsch (CONVENTIONS.md).
@@ -20,7 +21,14 @@
 import { cmdMutation } from "../../core";
 import { uniqueStamp } from "../../tools/types";
 import { cmdQuery, decodeShapes, pair } from "../../tools/coreCmd";
-import type { Command, CommandResult, CommandState } from "../types";
+import type { CmdOption, Command, CommandResult, CommandState } from "../types";
+
+/**
+ * Wände ([113]): Grenze ist die Achse der anderen Wand (ergibt einen T-Stoss) oder — Option „Fläche" —
+ * ihre Aussenflächen. Die Wahl bleibt über Aufrufe erhalten.
+ */
+let toFace = false;
+const faceOption = (): CmdOption => ({ id: "face", labelKey: "cmd.wallEdit.faceOpt", value: toFace ? "on" : "off" });
 
 // ── Zustand ───────────────────────────────────────────────────────────────────
 // Einziger Schritt „pick": auf den wegzuschneidenden Abschnitt klicken;
@@ -42,14 +50,18 @@ export const trimCommand: Command = {
   name: "trim",
   labelKey: "cmd.trim.label",
   prompt: () => "cmd.trim.pick",
-  accepts: () => ["point"],
-  options: () => [],
+  accepts: () => ["point", "option"],
+  options: () => [faceOption()],
 
   init: (): TrimPick => ({ phase: "pick", lastPoint: null }),
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as TrimState;
     if (s.phase === "done") return finish();
+    if (input.kind === "option" && input.id === "face") {
+      toFace = !toFace;
+      return [s, { draft: null }];
+    }
     if (input.kind !== "point") return [s, { draft: null }];
     const { hit } = cmdQuery<{ hit: string | null }>(ctx.project, { q: "pickCurve", level: ctx.level.id, pt: pair(input.point) });
     if (!hit) {
@@ -57,13 +69,13 @@ export const trimCommand: Command = {
       return [s, { draft: null }];
     }
     // Wiederholend: NICHT done — nach dem Commit bleibt „pick" aktiv.
-    return [s, { draft: null, commit: cmdMutation({ cmd: "trim", id: hit, pt: pair(input.point), stamp: uniqueStamp() }) }];
+    return [s, { draft: null, commit: cmdMutation({ cmd: "trim", id: hit, pt: pair(input.point), face: toFace, stamp: uniqueStamp() }) }];
   },
 
   onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as TrimState;
     if (s.phase !== "pick") return [s, { draft: null }];
-    const r = cmdQuery<{ hit: boolean; shapes: number[] }>(ctx.project, { q: "trim", level: ctx.level.id, pt: pair(point) });
+    const r = cmdQuery<{ hit: boolean; shapes: number[] }>(ctx.project, { q: "trim", level: ctx.level.id, pt: pair(point), face: toFace });
     if (!r.hit) return [s, { draft: null }];
     const preview = decodeShapes(r.shapes);
     return [

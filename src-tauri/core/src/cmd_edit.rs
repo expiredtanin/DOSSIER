@@ -4,10 +4,15 @@
 //! `kernel2d` (Trim/Extend mit Bögen, Verrundung, Fasung, Bruch, Offset, Verketten); hier die
 //! Übersetzung Zeichnung ↔ Kurve, die Auswahl und die Elemente des Ergebnisses.
 //!
+//! Wände ([113]): Trim, Extend, Bruch, Offset und Join nehmen auch Wände (gerade und Bogen); dazu Teilen
+//! (`splitAt`/`splitInter`) und Verrunden zweier Wände (`filletWalls`). Die Wand-Rechnung steht in
+//! `cmd_wall_edit.rs`; hier nur Treffer (Wände zählen mit, Abstand zum Wandkörper) und Verteilung.
+//!
 //! Rechnung auf der rohen Projekt-Wurzel (Attribute der Quelle bleiben samt Schlüsselreihenfolge;
 //! unveränderte Punkte werden als dieselben JSON-Werte übernommen wie das Array-Spreizen in TS).
 
 use crate::cmd_transform::{IdGen, Shapes};
+use crate::cmd_wall_edit as wall_edit;
 use crate::grips::{arr, field, js_num, num_of, num_or, pt, truthy, with, with_all, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
@@ -195,7 +200,18 @@ fn pick_curve<'a>(root: &'a Map<String, Value>, level: &str, at: P, take: Take) 
             }
         }
     }
+    if take != Take::Corner {
+        if let Some((w, dd)) = wall_edit::pick_wall(root, level, at) {
+            if dd < best_d {
+                best = Some(w);
+            }
+        }
+    }
     best
+}
+
+fn is_wall(v: &Value) -> bool {
+    field(v, "type").and_then(Value::as_str) == Some("wall")
 }
 
 /// Kette → Zeichengeometrie (`chainToGeom`/`fromPolyForm`): zwei Punkte offen ohne Bogen = Linie.
@@ -286,8 +302,14 @@ pub fn trim_ops(root: &Map<String, Value>, id: &str, at: P, ids: &mut IdGen) -> 
 }
 
 /// Vorschau des Trims am Punkt: die verbleibenden Ketten der getroffenen Kurve.
-pub fn trim_preview(root: &Map<String, Value>, level: &str, at: P, out: &mut Shapes) -> bool {
+pub fn trim_preview(root: &Map<String, Value>, level: &str, at: P, face: bool, out: &mut Shapes) -> bool {
     let Some(target) = pick_curve(root, level, at, Take::Curve) else { return false };
+    if is_wall(target) {
+        if let Some(e) = wall_edit::trim(root, target, at, face) {
+            wall_edit::preview(root, &e, out);
+        }
+        return true;
+    }
     let Some((_, rest)) = trim_rest(root, target, at) else { return true };
     for r in rest.iter().filter(|r| r.pts.len() >= 2) {
         let pts = if real(&r.bulge) { chain_of(&hit_edges(&Curve::of_pts(r.pts.clone(), r.closed, Some(&r.bulge)))) } else { r.pts.clone() };
@@ -385,8 +407,14 @@ pub fn extend_ops(root: &Map<String, Value>, id: &str, at: P) -> Vec<Op> {
 }
 
 /// Vorschau der Verlängerung (Bögen tesselliert).
-pub fn extend_preview(root: &Map<String, Value>, level: &str, at: P, out: &mut Shapes) -> bool {
+pub fn extend_preview(root: &Map<String, Value>, level: &str, at: P, face: bool, out: &mut Shapes) -> bool {
     let Some(target) = pick_curve(root, level, at, Take::Open) else { return false };
+    if is_wall(target) {
+        if let Some(e) = wall_edit::extend(root, target, at, face) {
+            wall_edit::preview(root, &e, out);
+        }
+        return true;
+    }
     let Some(c) = curve(geom(target), Take::Open) else { return true };
     let Some(next) = extend_curve(&c, &extend_cutters(root, target), at) else { return true };
     let pts = if next.has_bulge() { chain_of(&hit_edges(&next)) } else { next.pts.clone() };
@@ -550,6 +578,9 @@ fn corner_preview(h: &Corner, fillet: bool, r: f64, out: &mut Shapes) {
 /// Offene, bogenfreie Kurve unter dem Punkt (die nächste Kurve muss es sein).
 pub fn pick_breakable<'a>(root: &'a Map<String, Value>, level: &str, at: P) -> Option<&'a Value> {
     let d = pick_curve(root, level, at, Take::Curve)?;
+    if is_wall(d) {
+        return Some(d);
+    }
     let c = curve(geom(d), Take::Curve)?;
     (!c.closed && !c.has_bulge()).then_some(d)
 }
@@ -572,6 +603,12 @@ pub fn break_ops(root: &Map<String, Value>, id: &str, p1: P, p2: P, ids: &mut Id
 }
 
 fn break_preview(root: &Map<String, Value>, id: &str, p1: P, p2: P, out: &mut Shapes) {
+    if let Some(w) = wall_edit::find_wall(root, id) {
+        if let Some(e) = wall_edit::break_at(w, p1, p2) {
+            wall_edit::preview(root, &e, out);
+        }
+        return;
+    }
     let Some((_, pieces)) = break_pieces(root, id, p1, p2) else { return };
     for pts in pieces.iter().filter(|p| p.len() >= 2) {
         if pts.len() == 2 {
@@ -860,6 +897,11 @@ pub fn ops(root: &Map<String, Value>, v: &Value) -> Option<Vec<Op>> {
     let cmd = s_arg(v, "cmd");
     let mut ids = IdGen::new(s_arg(v, "stamp"));
     let list = |k: &str| -> Vec<String> { v.get(k).and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default() };
+    if let Some(w) = wall_edit::find_wall(root, s_arg(v, "id")) {
+        if let Some(e) = wall_edit_of(root, w, v) {
+            return Some(e.map(|e| wall_edit::commit(root, &e, &mut ids)).unwrap_or_default());
+        }
+    }
     Some(match cmd {
         "trim" => trim_ops(root, s_arg(v, "id"), p_arg(v, "pt"), &mut ids),
         "extend" => extend_ops(root, s_arg(v, "id"), p_arg(v, "pt")),
@@ -867,9 +909,31 @@ pub fn ops(root: &Map<String, Value>, v: &Value) -> Option<Vec<Op>> {
         "chamfer" => chamfer_ops(root, s_arg(v, "id"), n_arg(v, "index"), n_arg(v, "d")),
         "break" => break_ops(root, s_arg(v, "id"), p_arg(v, "p1"), p_arg(v, "p2"), &mut ids),
         "offset" => offset_ops(root, s_arg(v, "id"), n_arg(v, "d"), &mut ids),
-        "join" => join_ops(root, &list("ids"), &mut ids),
+        "join" => {
+            let mut ops = join_ops(root, &list("ids"), &mut ids);
+            ops.extend(wall_edit::join_ops(root, &list("ids")));
+            ops
+        }
+        "splitAt" => break_ops(root, s_arg(v, "id"), p_arg(v, "pt"), p_arg(v, "pt"), &mut ids),
+        "splitInter" => crate::cmd_split::split_ops(root, &[s_arg(v, "id").to_string()], s_arg(v, "stamp")),
         "explode" => explode_ops(root, &list("ids"), &mut ids),
         "dimdetach" => crate::dim_assoc::detach_ops(root, &list("ids")),
+        _ => return None,
+    })
+}
+
+/// Wand-Änderung einer Anfrage an die Wand `w` (`None` = kein Wand-Befehl; `Some(None)` = Befehl ohne
+/// Ergebnis, z. B. keine Grenze getroffen).
+fn wall_edit_of<'a>(root: &'a Map<String, Value>, w: &'a Value, v: &Value) -> Option<Option<wall_edit::Edit<'a>>> {
+    let face = truthy(v.get("face"));
+    Some(match s_arg(v, "cmd") {
+        "trim" => wall_edit::trim(root, w, p_arg(v, "pt"), face),
+        "extend" => wall_edit::extend(root, w, p_arg(v, "pt"), face),
+        "break" => wall_edit::break_at(w, p_arg(v, "p1"), p_arg(v, "p2")),
+        "splitAt" => wall_edit::break_at(w, p_arg(v, "pt"), p_arg(v, "pt")),
+        "splitInter" => wall_edit::split_at_intersections(root, w),
+        "offset" => wall_edit::offset(w, n_arg(v, "d")),
+        "filletWalls" => wall_edit::find_wall(root, s_arg(v, "id2")).and_then(|w2| wall_edit::fillet(w, p_arg(v, "p1"), w2, p_arg(v, "p2"), n_arg(v, "r"))),
         _ => return None,
     })
 }
@@ -908,12 +972,53 @@ pub fn query(root: &Map<String, Value>, v: &Value) -> Result<Value, String> {
             json!({ "shapes": shapes(s) })
         }
         "trim" | "extend" => {
-            let hit = if q == "trim" { trim_preview(root, level, at, &mut s) } else { extend_preview(root, level, at, &mut s) };
+            let face = truthy(v.get("face"));
+            let hit = if q == "trim" { trim_preview(root, level, at, face, &mut s) } else { extend_preview(root, level, at, face, &mut s) };
             json!({ "hit": hit, "shapes": shapes(s) })
         }
         "break" => {
             break_preview(root, s_arg(v, "id"), p_arg(v, "p1"), at, &mut s);
             json!({ "shapes": shapes(s) })
+        }
+        "offset" if wall_edit::find_wall(root, s_arg(v, "id")).is_some() => {
+            let w = wall_edit::find_wall(root, s_arg(v, "id")).unwrap_or(&Value::Null);
+            let sign = wall_edit::side(w, at).unwrap_or(n_arg(v, "lastSign"));
+            let dist = n_arg(v, "dist");
+            if let Some(e) = wall_edit::offset(w, sign * dist) {
+                wall_edit::preview(root, &e, &mut s);
+            }
+            json!({ "hit": true, "sign": sign, "shapes": shapes(s) })
+        }
+        "pickWall" => json!({ "hit": hit_id(wall_edit::pick_wall(root, level, at).map(|w| w.0)) }),
+        "filletWalls" => {
+            let e = match (wall_edit::find_wall(root, s_arg(v, "id")), wall_edit::pick_wall(root, level, at)) {
+                (Some(w1), Some((w2, _))) => wall_edit::fillet(w1, p_arg(v, "p1"), w2, at, n_arg(v, "r")),
+                _ => None,
+            };
+            if let Some(e) = &e {
+                wall_edit::preview(root, e, &mut s);
+            }
+            json!({ "hit": e.is_some(), "shapes": shapes(s) })
+        }
+        "split" => {
+            let inter = truthy(v.get("inter"));
+            let target = if inter { pick_curve(root, level, at, Take::Curve) } else { pick_breakable(root, level, at) };
+            let mut hit = Value::Null;
+            if let Some(t) = target {
+                hit = hit_id(Some(t));
+                if is_wall(t) {
+                    let e = if inter { wall_edit::split_at_intersections(root, t) } else { wall_edit::break_at(t, at, at) };
+                    if let Some(e) = e {
+                        wall_edit::preview(root, &e, &mut s);
+                    }
+                } else if !inter {
+                    // Teilstelle der Zeichnung: kleines Kreuz.
+                    let d = 0.15;
+                    s.line((at.x - d, at.y - d), (at.x + d, at.y + d));
+                    s.line((at.x - d, at.y + d), (at.x + d, at.y - d));
+                }
+            }
+            json!({ "hit": hit, "shapes": shapes(s) })
         }
         "offset" => {
             let c = find(root, s_arg(v, "id")).and_then(|d| curve(geom(d), Take::Curve));
@@ -982,5 +1087,27 @@ mod tests {
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[1].to_json()["at"], 1);
         assert_eq!(ops[1].to_json()["items"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn wand_befehle_ueber_die_anfrage() {
+        let w = |id: &str, a: (f64, f64), b: (f64, f64)| json!({"id": id, "type": "wall", "floorId": "L", "start": {"x": a.0, "y": a.1}, "end": {"x": b.0, "y": b.1}, "wallTypeId": "t", "height": 2.5});
+        let r = root(json!({"wallTypes": [{"id": "t", "layers": [{"thickness": 0.2}]}], "walls": [w("a", (0.0, 0.0), (10.0, 0.0)), w("b", (6.0, -3.0), (6.0, 3.0))], "drawings2d": [], "openings": []}));
+        // Treffer: Klick in den Wandkörper trifft die Wand (auch für Bruch/Teilen).
+        assert_eq!(query(&r, &json!({"q": "pickCurve", "level": "L", "pt": [8.0, 0.05]})).unwrap()["hit"], "a");
+        assert_eq!(query(&r, &json!({"q": "pickBreakable", "level": "L", "pt": [8.0, 0.05]})).unwrap()["hit"], "a");
+        let pv = query(&r, &json!({"q": "trim", "level": "L", "pt": [8.0, 0.0]})).unwrap();
+        assert_eq!(pv["hit"], true);
+        assert!(!pv["shapes"].as_array().unwrap().is_empty());
+        let o = super::ops(&r, &json!({"cmd": "trim", "id": "a", "pt": [8.0, 0.0], "stamp": "s"})).unwrap();
+        assert_eq!(o[0].to_json()["entity"]["end"], json!({"x": 6, "y": 0}));
+        let o = super::ops(&r, &json!({"cmd": "splitAt", "id": "a", "pt": [2.0, 0.0], "stamp": "s"})).unwrap();
+        assert_eq!(o.len(), 2);
+        let o = super::ops(&r, &json!({"cmd": "splitInter", "id": "a", "stamp": "s"})).unwrap();
+        assert_eq!(o[1].to_json()["items"][0]["start"], json!({"x": 6, "y": 0}));
+        let o = super::ops(&r, &json!({"cmd": "offset", "id": "a", "d": -1.0, "stamp": "s"})).unwrap();
+        assert_eq!(o[0].to_json()["items"][0]["start"], json!({"x": 0, "y": -1}));
+        let pv = query(&r, &json!({"q": "filletWalls", "level": "L", "id": "a", "p1": [2.0, 0.0], "pt": [6.0, 2.0], "r": 0.5})).unwrap();
+        assert_eq!(pv["hit"], true);
     }
 }

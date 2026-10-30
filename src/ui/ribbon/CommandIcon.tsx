@@ -114,6 +114,14 @@ export function CommandIcon({ name }: { name: string }) {
           <circle cx="4" cy="5" r="2" />
         </svg>
       );
+    case "split":
+      // Linie mit Teilstelle (Querstrich) — Teilen ([113]).
+      return (
+        <svg {...common}>
+          <line x1="2.5" y1="9" x2="13.5" y2="9" />
+          <line x1="8" y1="4" x2="8" y2="12" />
+        </svg>
+      );
     case "break":
       // Linie mit Lücke in der Mitte (Unterbrechen) + zwei Marker an den Bruchstellen.
       return (
