@@ -34,29 +34,37 @@ fn material(id: &str, size_m: f64) -> Value {
 
 const INK: &str = "#1a1a1a";
 
-/// Linientypen (SIA 400 / ISO 128). Strichmuster in Papier-mm (AN/AUS, 0 = Punkt), unabhängig vom Massstab.
+/// Linientypen (SIA 400 / ISO 128): nur Muster und Farbe — die Strichstärke kommt vom Element, der
+/// Schraffur, der Schichtfuge bzw. Ebene/Stift ([110]). Strichmuster in Papier-mm (AN/AUS, 0 = Punkt),
+/// unabhängig vom Massstab.
 pub fn line_styles() -> Vec<Value> {
-    let dash = |id: &str, name: &str, w: f64, d: Value| json!({"id": id, "name": name, "weight": w, "color": INK, "dash": d});
+    let dash = |id: &str, name: &str, d: Value| json!({"id": id, "name": name, "color": INK, "dash": d});
     vec![
-        dash("std-ls-voll", "Volllinie", 0.25, Value::Null),
-        dash("std-ls-strich-fein", "Strichlinie fein", 0.18, json!([3, 1.5])),
-        dash("std-ls-strich-grob", "Strichlinie grob", 0.5, json!([6, 2])),
-        dash("std-ls-punkt", "Punktlinie", 0.25, json!([0, 1])),
-        dash("std-ls-strichpunkt", "Strichpunktlinie (Achse)", 0.18, json!([12, 1.5, 0, 1.5])),
-        dash("std-ls-strichzweipunkt", "Strich-Zweipunktlinie", 0.18, json!([12, 1.5, 0, 1.5, 0, 1.5])),
-        dash("std-ls-grundstueck", "Grundstücksgrenze", 0.5, json!([8, 1.5, 0, 1.5, 0, 1.5])),
-        dash("std-ls-bauteilgrenze", "Baulinie / Bauteilgrenze", 0.35, json!([8, 1.5, 0, 1.5])),
-        json!({"id": "std-ls-bruch", "name": "Bruchlinie (Zickzack)", "weight": 0.18, "color": INK, "dash": null,
+        dash("std-ls-voll", "Volllinie", Value::Null),
+        dash("std-ls-strich-fein", "Strichlinie", json!([3, 1.5])),
+        dash("std-ls-strich-grob", "Strichlinie lang", json!([6, 2])),
+        dash("std-ls-punkt", "Punktlinie", json!([0, 1])),
+        dash("std-ls-strichpunkt", "Strichpunktlinie (Achse)", json!([12, 1.5, 0, 1.5])),
+        dash("std-ls-strichzweipunkt", "Strich-Zweipunktlinie", json!([12, 1.5, 0, 1.5, 0, 1.5])),
+        dash("std-ls-grundstueck", "Grundstücksgrenze", json!([8, 1.5, 0, 1.5, 0, 1.5])),
+        dash("std-ls-bauteilgrenze", "Baulinie / Bauteilgrenze", json!([8, 1.5, 0, 1.5])),
+        json!({"id": "std-ls-bruch", "name": "Bruchlinie (Zickzack)", "color": INK, "dash": null,
                "kind": "zigzag", "zigzag": {"amplitude": 1.5, "wavelength": 4}}),
-        dash("std-ls-schraffur", "Schraffurlinie 0.10", 0.1, Value::Null),
-        dash("std-ls-schraffur-strich", "Schraffurlinie gestrichelt", 0.1, json!([1, 0.7])),
+        dash("std-ls-schraffur-strich", "Strichlinie kurz", json!([1, 0.7])),
+        dash("std-ls-schraffur-punkt", "Punktlinie kurz", json!([0.5, 1.6])),
     ]
 }
 
-/// Schnittschraffuren (SIA 400). Abstand im Modell (Kachel 8·scale/90 m), Winkel in Grad.
+/// Schnittschraffuren nach SIA 400 ([109]). Abstände im Modell (Linienschar: `spacing_m`, intern
+/// `scale = spacing_m · 90 / 8`), gewählt für 1:50 (≈ 1–2 mm Papier) und noch ruhig in 1:100; Winkel in
+/// Grad; Musterlinien 0.10 mm (dichte Muster) bzw. 0.13 mm (Dämmung, Holz, Backstein) — deutlich feiner als
+/// die Schnittkante (0.35–0.5 mm). Schicht-Muster (Dämmschlange, Zickzack, Welle, Holzkreuz) spannen über
+/// die ganze Schichtdicke und laufen entlang der Schicht (`relativeToWall`); `scale` streckt dort die
+/// Musterlänge relativ zur Dicke.
 pub fn hatches() -> Vec<Value> {
-    let h = |id: &str, name: &str, pattern: &str, scale: f64, angle: f64, rel: bool, ls: &str| {
-        let mut v = json!({"id": id, "name": name, "pattern": pattern, "scale": scale, "angle": angle, "color": INK});
+    let lines = |id: &str, name: &str, pattern: &str, spacing_m: f64, angle: f64, rel: bool, lw: f64, ls: &str| {
+        let scale = (spacing_m * 90.0 / 8.0 * 1e4).round() / 1e4;
+        let mut v = json!({"id": id, "name": name, "pattern": pattern, "scale": scale, "angle": angle, "color": INK, "lineWeight": lw});
         if rel {
             v["relativeToWall"] = json!(true);
         }
@@ -65,32 +73,47 @@ pub fn hatches() -> Vec<Value> {
         }
         v
     };
-    let solid = |id: &str, name: &str, color: &str| json!({"id": id, "name": name, "pattern": "solid", "scale": 1, "angle": 0, "color": color});
-    let random = |id: &str, name: &str, angle: f64, density: f64, lmin: f64, lmax: f64, seed: f64| {
-        json!({"id": id, "name": name, "kind": "vector", "lines": "random", "pattern": "diagonal", "scale": 1, "angle": angle,
-               "color": INK, "lineStyleId": "std-ls-schraffur", "density": density, "lengthMin": lmin, "lengthMax": lmax, "seed": seed})
+    let layer = |id: &str, name: &str, pattern: &str, scale: f64| {
+        json!({"id": id, "name": name, "pattern": pattern, "scale": scale, "angle": 0, "relativeToWall": true, "color": INK, "lineWeight": 0.13})
     };
+    let solid = |id: &str, name: &str, color: &str| json!({"id": id, "name": name, "pattern": "solid", "scale": 1, "angle": 0, "color": color});
     vec![
-        h("std-h-ohne", "SIA Ohne Schraffur", "none", 1.0, 0.0, false, ""),
-        h("std-h-stahlbeton", "SIA Stahlbeton", "crosshatch", 0.5, 45.0, false, "std-ls-schraffur"),
-        h("std-h-beton", "SIA Beton unbewehrt", "crosshatch", 0.6, 45.0, false, "std-ls-schraffur-strich"),
-        h("std-h-backstein", "SIA Backstein", "diagonal", 0.5, 45.0, true, "std-ls-schraffur"),
-        h("std-h-kalksandstein", "SIA Kalksandstein", "diagonal", 0.35, 135.0, true, "std-ls-schraffur"),
-        h("std-h-porenbeton", "SIA Porenbeton", "diagonal", 0.5, 45.0, true, "std-ls-schraffur-strich"),
-        h("std-h-holz", "SIA Holz (Querschnitt)", "crosshatch", 0.6, 0.0, true, "std-ls-schraffur"),
-        h("std-h-bsp", "SIA Brettsperrholz", "diagonal", 0.3, 90.0, true, "std-ls-schraffur"),
-        random("std-h-holzwerkstoff", "SIA Holzwerkstoff", 30.0, 1.4, 0.6, 1.5, 7.0),
-        h("std-h-daemmung-weich", "SIA Dämmung weich", "insulation", 1.0, 0.0, true, "std-ls-schraffur"),
-        h("std-h-eps", "SIA Dämmung EPS", "diagonal", 0.45, 0.0, true, "std-ls-schraffur"),
-        h("std-h-xps", "SIA Dämmung XPS", "crosshatch", 0.45, 0.0, true, "std-ls-schraffur"),
-        h("std-h-holzfaser", "SIA Dämmung Holzfaser", "insulation", 0.8, 0.0, true, "std-ls-schraffur-strich"),
+        json!({"id": "std-h-ohne", "name": "SIA Ohne Schraffur", "pattern": "none", "scale": 1, "angle": 0, "color": INK}),
+        // Stahlbeton: Kreuzschraffur 45°/135°, bildschirmfest.
+        lines("std-h-stahlbeton", "SIA Stahlbeton", "crosshatch", 0.07, 45.0, false, 0.1, ""),
+        // Beton unbewehrt: Diagonale 45°, unterbrochen.
+        lines("std-h-beton", "SIA Beton unbewehrt", "diagonal", 0.07, 45.0, false, 0.1, "std-ls-schraffur-strich"),
+        // Mauerwerk Backstein: Diagonale 45° zur Wand.
+        lines("std-h-backstein", "SIA Backstein", "diagonal", 0.06, 45.0, true, 0.13, ""),
+        // Kalksandstein: Diagonale gegenläufig (135°), enger.
+        lines("std-h-kalksandstein", "SIA Kalksandstein", "diagonal", 0.045, 135.0, true, 0.1, ""),
+        // Porenbeton: Diagonale 45°, weit, lange Striche.
+        lines("std-h-porenbeton", "SIA Porenbeton", "diagonal", 0.09, 45.0, true, 0.1, "std-ls-strich-fein"),
+        // Holz im Querschnitt: Diagonalkreuz je Feld über die Dicke.
+        layer("std-h-holz", "SIA Holz (Querschnitt)", "timber", 1.0),
+        // Brettsperrholz: Lamellenfugen längs der Schicht.
+        lines("std-h-bsp", "SIA Brettsperrholz", "diagonal", 0.04, 90.0, true, 0.1, ""),
+        // Holzwerkstoff (Span-/OSB-Platte): kurze, gestreute Späne.
+        json!({"id": "std-h-holzwerkstoff", "name": "SIA Holzwerkstoff", "kind": "vector", "lines": "random", "pattern": "diagonal", "scale": 1,
+               "angle": 30, "color": INK, "lineWeight": 0.1, "density": 2, "lengthMin": 0.15, "lengthMax": 0.3, "seed": 7}),
+        // Dämmung weich (Mineral-/Steinwolle, Trittschall): Dämmschlange über die ganze Dicke.
+        layer("std-h-daemmung-weich", "SIA Dämmung weich", "insulation", 1.0),
+        // Hartschaum: Zickzack über die Dicke; XPS dichter als EPS (SIA 400 unterscheidet sie nicht).
+        layer("std-h-eps", "SIA Dämmung EPS", "insulationHard", 1.0),
+        layer("std-h-xps", "SIA Dämmung XPS", "insulationHard", 0.7),
+        // Holzfaser: Welle über die Dicke.
+        layer("std-h-holzfaser", "SIA Dämmung Holzfaser", "insulationWave", 1.0),
         solid("std-h-gips", "SIA Gips", "#cfcfcf"),
-        h("std-h-estrich", "SIA Estrich", "diagonal", 0.35, 45.0, false, "std-ls-schraffur-strich"),
+        // Estrich/Überzug: feines Punktfeld (punktierte Diagonale).
+        lines("std-h-estrich", "SIA Estrich", "diagonal", 0.025, 45.0, false, 0.1, "std-ls-schraffur-punkt"),
         solid("std-h-stahl", "SIA Stahl", INK),
         solid("std-h-alu", "SIA Aluminium", "#8c8c8c"),
-        h("std-h-naturstein", "SIA Naturstein", "diagonal", 0.8, 45.0, false, "std-ls-voll"),
-        random("std-h-erdreich", "SIA Erdreich", 45.0, 0.8, 1.5, 4.0, 11.0),
-        random("std-h-kies", "SIA Kies / Sauberkeitsschicht", 60.0, 1.8, 0.4, 0.9, 13.0),
+        // Naturstein: Diagonale in Doppellinien.
+        lines("std-h-naturstein", "SIA Naturstein", "stone", 0.08, 45.0, false, 0.1, ""),
+        // Erdreich: Flechtmuster kurzer Striche ±45°.
+        lines("std-h-erdreich", "SIA Erdreich", "earth", 0.0889, 45.0, false, 0.1, ""),
+        // Kies/Sauberkeitsschicht: kleine Kreise gestreut.
+        lines("std-h-kies", "SIA Kies / Sauberkeitsschicht", "gravel", 0.0889, 0.0, false, 0.1, ""),
     ]
 }
 
@@ -333,7 +356,7 @@ mod tests {
         let tb = p.components.iter().find(|c| c.id == "std-c-trapezblech").unwrap().material.as_ref().unwrap();
         assert!(tb.color.is_none() && tb.library_id.as_deref() == Some("CorrugatedSteel005"));
         // Linientypen
-        for name in ["Volllinie", "Strichlinie fein", "Strichlinie grob", "Punktlinie", "Strichpunktlinie (Achse)", "Strich-Zweipunktlinie", "Grundstücksgrenze", "Bruchlinie (Zickzack)"] {
+        for name in ["Volllinie", "Strichlinie", "Strichlinie lang", "Punktlinie", "Strichpunktlinie (Achse)", "Strich-Zweipunktlinie", "Grundstücksgrenze", "Bruchlinie (Zickzack)"] {
             assert!(p.line_styles.iter().any(|l| l.name == name), "{name}");
         }
     }
@@ -348,14 +371,14 @@ mod tests {
     fn gleichnamige_bleiben_und_verweise_zeigen_darauf() {
         let mut root = empty_root();
         root.insert("components".into(), json!([{"id": "brick", "name": "backstein ", "color": "#8c5544", "hatchId": "x", "joinPriority": 50}]));
-        root.insert("lineStyles".into(), json!([{"id": "thin", "name": "Schraffurlinie 0.10", "weight": 0.1, "color": "#000", "dash": null}]));
+        root.insert("lineStyles".into(), json!([{"id": "thin", "name": "Strichlinie kurz", "color": "#000", "dash": [1, 0.7]}]));
         let r = apply(&root, &merge_ops(&root));
         let comps = r["components"].as_array().unwrap();
         assert_eq!(comps.iter().filter(|c| c["name"].as_str().unwrap().trim().eq_ignore_ascii_case("backstein")).count(), 1);
         assert_eq!(comps[0]["color"], "#8c5544", "vorhandenes Bauteil unverändert");
         let iw = r["wallTypes"].as_array().unwrap().iter().find(|t| t["id"] == "std-wt-iw-backstein").unwrap();
         assert_eq!(iw["layers"][1]["componentId"], "brick");
-        let bs = r["hatches"].as_array().unwrap().iter().find(|h| h["id"] == "std-h-backstein").unwrap();
-        assert_eq!(bs["lineStyleId"], "thin");
+        let pb = r["hatches"].as_array().unwrap().iter().find(|h| h["id"] == "std-h-beton").unwrap();
+        assert_eq!(pb["lineStyleId"], "thin");
     }
 }

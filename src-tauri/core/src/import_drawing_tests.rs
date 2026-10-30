@@ -136,7 +136,7 @@ fn pdf_mit_strichmuster() {
     let dec = decision(json!({"target": {"kind": "existing", "levelId": "eg"}, "categoryMode": "byLayer", "activeCategoryCode": "20", "dashStyleTemplate": "PDF-Strich {pattern}"}));
     let r = import_ops(&project(), &d, &dec, 0.0);
     let ops: Vec<Value> = r.ops.iter().map(Op::to_json).collect();
-    assert_eq!(ops[0]["items"][0], json!({"id": "pdf-dash-1_05_0_7", "name": "PDF-Strich 1.05/0.7", "weight": 0.02, "color": "#1a1a1a", "dash": [1.05, 0.7]}));
+    assert_eq!(ops[0]["items"][0], json!({"id": "pdf-dash-1_05_0_7", "name": "PDF-Strich 1.05/0.7", "color": "#1a1a1a", "dash": [1.05, 0.7]}));
     assert_eq!(ops[1]["items"][0]["lineStyleId"], json!("pdf-dash-1_05_0_7"));
     let info = pdf_page_info(&page);
     assert_eq!(info["layers"], json!({"PDF 0.18 #ff0000 (Strich 1.05/0.7)": 1, "PDF Fläche #ffffff": 1}));
@@ -147,15 +147,15 @@ fn strichmuster_zu_linienstilen() {
     assert!(same_dash(&[1.05, 0.7], &[1.0, 0.7]));
     assert!(!same_dash(&[3.0, 1.0], &[1.0, 3.0]));
     assert!(!same_dash(&[1.0, 1.0], &[1.0, 1.0, 1.0, 1.0]));
-    let solid = json!({"id": "thin", "name": "Volllinie", "weight": 0.13, "color": "#111", "dash": null});
-    let dashed = json!({"id": "d", "name": "Strich", "weight": 0.02, "color": "#111", "dash": [1, 0.7]});
+    let solid = json!({"id": "thin", "name": "Volllinie", "color": "#111", "dash": null});
+    let dashed = json!({"id": "d", "name": "Strich", "color": "#111", "dash": [1, 0.7]});
     let dashes: Vec<(String, Vec<f64>)> =
         vec![("a".into(), vec![1.05, 0.7]), ("b".into(), vec![2.8, 1.4]), ("c".into(), vec![2.8, 1.4]), ("d".into(), vec![0.05, 0.7, 2.8, 0.7])];
     let (created, by_layer) = plan_dash_styles(&dashes, &[solid.clone(), dashed], "S {pattern}");
     assert_eq!(by_layer["a"], "d");
     assert_eq!(created.len(), 2);
     assert_eq!(by_layer["b"], by_layer["c"]);
-    assert_eq!(created[0], json!({"id": "pdf-dash-2_8_1_4", "name": "S 2.8/1.4", "weight": 0.02, "color": "#1a1a1a", "dash": [2.8, 1.4]}));
+    assert_eq!(created[0], json!({"id": "pdf-dash-2_8_1_4", "name": "S 2.8/1.4", "color": "#1a1a1a", "dash": [2.8, 1.4]}));
     assert_eq!(created[1]["dash"], json!([0.05, 0.7, 2.8, 0.7]));
     // Gleiche id schon vergeben → Zähler.
     let taken = json!({"id": "pdf-dash-2_8_1_4", "kind": "dot", "dash": [2.8, 1.4]});

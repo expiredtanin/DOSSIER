@@ -12,7 +12,7 @@ import { selectionHighlightLines, projectToWalls3d, projectToModel3d, pickGeomet
 import { hexToRgb } from "./toWalls3d/shared";
 import type { ToolDraft } from "../tools/types";
 import { generatePlan } from "./generatePlan";
-import { getHatch, getLineStyle } from "../model/types";
+import { getHatch } from "../model/types";
 import { roofGeometry, roofBaseElevation } from "../geometry/roof";
 
 const RGB: [number, number, number] = [1, 0.5, 0.1];
@@ -1805,7 +1805,7 @@ describe("Schnitt-Schraffur-Orientierung: relativeToWall dreht bei Wand, nicht b
     const h = getHatch(p, id);
     return {
       angle: h.relativeToWall && wallAngleDeg != null ? h.angle - wallAngleDeg : h.angle,
-      lineWeight: (h.lineStyleId ? getLineStyle(p, h.lineStyleId) : null)?.weight ?? 0.13,
+      lineWeight: h.lineWeight ?? 0.13,
     };
   };
   // 2D-Referenz (verbindlich): splitWallLayers ruft resolveHatch(…, 90, …) (Wand
@@ -1844,9 +1844,9 @@ describe("Schnitt-Schraffur-Orientierung: relativeToWall dreht bei Wand, nicht b
     expect(brick.hatch?.angle).toBeCloseTo(resolveHatch(sampleProject, "sia-brick", 90).angle, 6);
   });
 
-  it("Musterlinien-Stärke kommt aus dem LineStyle des Hatch durch (2D-Parität)", () => {
-    // sia-insulation nutzt lineStyleId "hatch-hair" (0.02 mm). Der 3D-Hatch muss die
-    // resolveHatch-lineWeight (aus dem LineStyle) tragen — für Wand UND Decke gleich.
+  it("Musterlinien-Stärke kommt aus der Schraffur durch (2D-Parität)", () => {
+    // sia-insulation trägt lineWeight 0.02 mm ([110]). Der 3D-Hatch muss die
+    // resolveHatch-lineWeight (aus der Schraffur) tragen — für Wand UND Decke gleich.
     const expected = resolveHatch(sampleProject, "sia-insulation", 90).lineWeight;
     expect(wallInsul().hatch?.lineWeight).toBeCloseTo(expected, 6);
     expect(slabInsul().hatch?.lineWeight).toBeCloseTo(expected, 6);

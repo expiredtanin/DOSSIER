@@ -136,14 +136,14 @@ pub fn emit_slabs(p: &Project) -> Vec<RSlab> {
             let l = &layers[layer_idx as usize];
             let (color, cut) = match p.component(&l.component_id) {
                 Some(comp) => {
-                    let line = resolve_cut_line_style(p, l.joint_line_style_id.as_deref());
+                    let line = resolve_cut_line_style(p, l);
                     (
                         hex_to_rgb(&comp.color, style::WALL_RGB),
                         Some(RCutMeta {
                             join_priority: Some(comp.join_priority),
                             component_id: Some(comp.id.clone()),
-                            line_color: line.map(|x| x.0),
-                            line_weight: line.map(|x| x.1),
+                            line_color: line.0,
+                            line_weight: line.1,
                         }),
                     )
                 }
@@ -363,7 +363,7 @@ fn resolve_wall_bands(p: &Project, maps: &[String], wall: &Wall, layered: bool) 
     let mut bands = Vec::with_capacity(wt.layers.len());
     for l in &wt.layers {
         let Some(comp) = p.component(&l.component_id) else { return fallback() };
-        let line = resolve_cut_line_style(p, l.joint_line_style_id.as_deref());
+        let line = resolve_cut_line_style(p, l);
         bands.push(WallBand {
             thickness: l.thickness,
             color: hex_to_rgb(&comp.color, WALL_RGB),
@@ -371,8 +371,8 @@ fn resolve_wall_bands(p: &Project, maps: &[String], wall: &Wall, layered: bool) 
             material_index: material_layer(p, maps, &l.component_id),
             priority: Some(comp.join_priority),
             component_id: Some(comp.id.clone()),
-            cut_line_color: line.map(|x| x.0),
-            cut_line_weight: line.map(|x| x.1),
+            cut_line_color: line.0,
+            cut_line_weight: line.1,
         });
     }
     (bands, true)
@@ -1545,8 +1545,8 @@ pub fn emit_roof_cut_layers(p: &Project) -> Result<Vec<RRoofLayer>, String> {
                 continue;
             }
             let color = roof_color(p, override_color, &layer.component_id)?;
-            let line = resolve_cut_line_style(p, layer.joint_line_style_id.as_deref());
-            let cut = line.map(|(c, w)| RCutMeta { line_color: Some(c), line_weight: Some(w), ..Default::default() });
+            let line = resolve_cut_line_style(p, &layer);
+            let cut = (line.0.is_some() || line.1.is_some()).then(|| RCutMeta { line_color: line.0, line_weight: line.1, ..Default::default() });
             for (i, plane) in g.planes.iter().enumerate() {
                 let nrm = plane_normal_up(plane);
                 let polygon: Vec<V3> = plane.iter().map(|q| [q[0] - nrm[0] * offset_above, q[1] - nrm[1] * offset_above, q[2] - nrm[2] * offset_above]).collect();

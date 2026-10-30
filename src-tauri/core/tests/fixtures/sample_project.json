@@ -3,37 +3,14 @@
  "name": "Demo-Haus",
  "lineStyles": [
   {
-   "id": "hatch-hair",
-   "name": "Volllinie 0.02",
-   "weight": 0.02,
-   "color": "#1a1a1a",
-   "dash": null
-  },
-  {
    "id": "thin",
-   "name": "Volllinie 0.13",
-   "weight": 0.13,
+   "name": "Volllinie",
    "color": "#1a1a1a",
-   "dash": null
-  },
-  {
-   "id": "medium",
-   "name": "Volllinie 0.25",
-   "weight": 0.25,
-   "color": "#1a1a1a",
-   "dash": null
-  },
-  {
-   "id": "thick",
-   "name": "Volllinie 0.5",
-   "weight": 0.5,
-   "color": "#0a0a0a",
    "dash": null
   },
   {
    "id": "hatch-dash",
    "name": "Dämmungsstrich",
-   "weight": 0.02,
    "color": "#1a1a1a",
    "dash": [
     0.35,
@@ -57,7 +34,7 @@
    "scale": 1,
    "angle": 0,
    "color": "#1a1a1a",
-   "lineStyleId": "thin"
+   "lineWeight": 0.13
   },
   {
    "id": "diagonal",
@@ -66,7 +43,7 @@
    "scale": 1,
    "angle": 45,
    "color": "#1a1a1a",
-   "lineStyleId": "thin"
+   "lineWeight": 0.13
   },
   {
    "id": "crosshatch",
@@ -75,7 +52,7 @@
    "scale": 1,
    "angle": 0,
    "color": "#1a1a1a",
-   "lineStyleId": "thin"
+   "lineWeight": 0.13
   },
   {
    "id": "solid-concrete",
@@ -84,7 +61,7 @@
    "scale": 1,
    "angle": 0,
    "color": "#9aa0a6",
-   "lineStyleId": "thin"
+   "lineWeight": 0.13
   },
   {
    "id": "sia-concrete",
@@ -93,7 +70,7 @@
    "scale": 0.5,
    "angle": 45,
    "color": "#1a1a1a",
-   "lineStyleId": "hatch-hair"
+   "lineWeight": 0.02
   },
   {
    "id": "sia-brick",
@@ -103,7 +80,7 @@
    "angle": 45,
    "relativeToWall": true,
    "color": "#1a1a1a",
-   "lineStyleId": "hatch-hair"
+   "lineWeight": 0.02
   },
   {
    "id": "sia-insulation",
@@ -113,7 +90,7 @@
    "angle": 0,
    "relativeToWall": true,
    "color": "#1a1a1a",
-   "lineStyleId": "hatch-hair"
+   "lineWeight": 0.02
   }
  ],
  "components": [
@@ -222,7 +199,8 @@
     {
      "componentId": "insulation",
      "thickness": 0.16,
-     "jointLineStyleId": "thin"
+     "jointLineStyleId": "thin",
+     "jointWeightMm": 0.13
     },
     {
      "componentId": "brick",
@@ -265,7 +243,8 @@
     {
      "componentId": "insulation",
      "thickness": 0.04,
-     "jointLineStyleId": "thin"
+     "jointLineStyleId": "thin",
+     "jointWeightMm": 0.13
     },
     {
      "componentId": "concrete",
@@ -286,7 +265,8 @@
     {
      "componentId": "insulation",
      "thickness": 0.22,
-     "jointLineStyleId": "thin"
+     "jointLineStyleId": "thin",
+     "jointWeightMm": 0.13
     },
     {
      "componentId": "render-int",

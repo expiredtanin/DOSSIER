@@ -745,7 +745,7 @@ fn plan_dash_styles(dashes: &[(String, Vec<f64>)], existing: &[Value], name_temp
         }
         used.insert(id.clone());
         let name = name_template.replace("{pattern}", &label);
-        created.push(json!({"id": id, "name": name, "weight": 0.02, "color": "#1a1a1a", "dash": dash.iter().map(|&d| js_num(d)).collect::<Vec<_>>()}));
+        created.push(json!({"id": id, "name": name, "color": "#1a1a1a", "dash": dash.iter().map(|&d| js_num(d)).collect::<Vec<_>>()}));
         by_layer.insert(layer.clone(), id);
     }
     (created, by_layer)
@@ -897,6 +897,8 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
         o.insert("geom".into(), geom);
         if let Some(s) = style_by_layer.get(&c.layer).filter(|s| !s.is_empty()) {
             o.insert("lineStyleId".into(), s.clone().into());
+            // Strichlinien aus dem PDF als Haarlinie (die Stärke trägt das Element, nicht der Linienstil, [110]).
+            o.insert("weightMm".into(), json!(0.02));
         }
         if c.filled && is_polyline {
             let fill = d.layer_fill_colors.get(&c.layer).and_then(Value::as_str).unwrap_or(DXF_HATCH_FILL);

@@ -1,72 +1,48 @@
-// Live-SVG-Vorschau (Swatch) für Schraffuren und Linienstile — eigenständig.
+// Live-SVG-Vorschau (Swatch) für Schraffuren und Linienstile.
 //
-// Bewusst OHNE Rückgriff auf die Plan-Renderer (generatePlan/toRenderScene):
-// diese Datei zeichnet die Muster direkt aus den HatchStyle-/LineStyle-Parametern
-// als SVG nach, damit die Vorschau im Ressourcen-Manager auch dann konsistent
-// bleibt, während der Plan-Renderer separat umgebaut wird. Die Farbe kommt hier
-// bewusst NICHT vom (deprecated) HatchStyle.color, sondern über `currentColor`
-// aus dem umgebenden CSS (var(--ink)) — die echte Vordergrundfarbe stammt im Plan
-// vom Bauteil/Attribut. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
+// Vektor-Schraffuren zeichnet die Vorschau mit DEMSELBEN Kern-Generator wie Plan, Schnitt und Druck
+// (`buildHatchRuns`, [109]) — die Box wird als Fläche in Modell-Metern (`SWATCH_PX_PER_M`) übergeben,
+// Schicht-Muster (Dämmschlange, Zickzack …) spannen also über das Band wie im Plan. Bild/Verlauf als
+// SVG-Füllung. Die Farbe kommt bewusst NICHT vom (deprecated) HatchStyle.color, sondern über
+// `currentColor` aus dem umgebenden CSS (var(--ink)) — die echte Vordergrundfarbe stammt im Plan vom
+// Bauteil/Attribut. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useId } from "react";
 import type { HatchStyle, LineStyle } from "../model/types";
-import { dashHasDot } from "../core";
+import { buildHatchRuns, dashHasDot } from "../core";
 
-// ── Kleiner deterministischer PRNG (mulberry32) ────────────────────────────
-// Für „random"-Striche: stabil pro Seed, damit die Vorschau bei gleichem
-// Maßstab/Winkel nicht bei jedem Render „springt".
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/** Vorschau-Massstab: px je Modell-Meter (128 px ≈ 0.43 m, etwa 1:10 am Bildschirm). */
+const SWATCH_PX_PER_M = 300;
 
 /**
- * Parallele Linienschar über die Box (w×h) unter `angleDeg`, Abstand `spacing`
- * px senkrecht zur Linienrichtung. Liefert fertige <line>-Elemente, die die Box
- * komplett überdecken (Clip übernimmt der Aufrufer).
+ * Musterlinien einer Vektor-Schraffur für eine Box `w`×`h` (px) aus dem Kern-Generator. `wallAngleDeg`
+ * dreht wandbezogene Muster wie im Plan (Wand senkrecht = 90).
  */
-function parallelLines(
-  w: number,
-  h: number,
-  angleDeg: number,
-  spacing: number,
-  strokeWidth: number,
-  keyPrefix: string,
-): React.ReactNode[] {
-  const a = (angleDeg * Math.PI) / 180;
-  const cos = Math.cos(a);
-  const sin = Math.sin(a);
-  // Senkrechte zur Linienrichtung.
-  const px = -sin;
-  const py = cos;
-  const cx = w / 2;
-  const cy = h / 2;
-  const half = Math.hypot(w, h); // Linien lang genug, um die Box zu überdecken.
-  const step = Math.max(spacing, 1.2);
-  const n = Math.ceil(half / step) + 2;
-  const out: React.ReactNode[] = [];
-  for (let k = -n; k <= n; k++) {
-    const mx = cx + k * step * px;
-    const my = cy + k * step * py;
-    out.push(
-      <line
-        key={`${keyPrefix}${k}`}
-        x1={mx - cos * half}
-        y1={my - sin * half}
-        x2={mx + cos * half}
-        y2={my + sin * half}
-        stroke="currentColor"
-        strokeWidth={strokeWidth}
-      />,
-    );
-  }
-  return out;
+function vectorRuns(hatch: HatchStyle, w: number, h: number, wallAngleDeg: number | undefined): string[] {
+  const k = SWATCH_PX_PER_M;
+  const poly = [
+    { x: 0, y: 0 },
+    { x: w / k, y: 0 },
+    { x: w / k, y: h / k },
+    { x: 0, y: h / k },
+  ];
+  const angle = hatch.relativeToWall && wallAngleDeg != null ? hatch.angle - wallAngleDeg : hatch.angle;
+  const runs = buildHatchRuns(poly, {
+    pattern: hatch.pattern,
+    scale: hatch.scale,
+    angle,
+    color: "#000",
+    lineWeight: hatch.lineWeight ?? 0.13,
+    dash: null,
+    kind: hatch.kind,
+    lines: hatch.lines,
+    seed: hatch.seed,
+    density: hatch.density,
+    lengthMin: hatch.lengthMin,
+    lengthMax: hatch.lengthMax,
+    motif: hatch.motif,
+  });
+  return runs.map((r) => r.map((p, i) => `${i ? "L" : "M"}${(p.x * k).toFixed(1)} ${(h - p.y * k).toFixed(1)}`).join(""));
 }
 
 /**
@@ -76,13 +52,8 @@ function parallelLines(
  * Band DASSELBE Muster zeichnet. `uid` macht interne <pattern>-IDs eindeutig
  * (mehrere Bänder je SVG).
  */
-function hatchInner(hatch: HatchStyle, w: number, h: number, uid: string): React.ReactNode {
+function hatchInner(hatch: HatchStyle, w: number, h: number, uid: string, wallAngleDeg?: number): React.ReactNode {
   const patId = `hsp_${uid}`;
-
-  // Grundabstand der Musterlinien (px), über den Maßstab moduliert.
-  const scale = hatch.scale > 0 ? hatch.scale : 1;
-  const spacing = Math.max(3, 8 / Math.sqrt(scale));
-  const angle = hatch.angle || 0;
 
   let inner: React.ReactNode = null;
 
@@ -172,106 +143,11 @@ function hatchInner(hatch: HatchStyle, w: number, h: number, uid: string): React
     inner = <rect x={0} y={0} width={w} height={h} fill="currentColor" />;
   } else if (hatch.pattern === "none") {
     inner = null;
-  } else if (hatch.lines === "random") {
-    // Zufällig verteilte kurze Striche (deterministisch geseedet). Dichte, Länge
-    // und der explizite Seed spiegeln die Plan-Parameter (HatchStyle) — so ändert
-    // „Neu würfeln"/Dichte/Länge die Vorschau wie im Plan. Rein schematisch (px),
-    // NICHT deckungsgleich mit der Modell-Streuung, aber qualitativ konsistent.
-    const density = hatch.density != null && hatch.density > 0 ? hatch.density : 1;
-    const seed = (Math.round(scale * 1000) + Math.round(angle) + Math.round(hatch.seed ?? 0)) >>> 0;
-    const rnd = mulberry32(seed);
-    const count = Math.min(400, Math.max(4, Math.round((18 * Math.min(2, scale) + 6) * density)));
-    // mm-Papier → Vorschau-px (wie das Dash-Muster im LineSwatch: ·4).
-    const PX_PER_MM = 4;
-    const hasRange =
-      hatch.lengthMin != null && hatch.lengthMax != null &&
-      hatch.lengthMin > 0 && hatch.lengthMax >= hatch.lengthMin;
-    const baseLen = Math.max(3, 6 / Math.sqrt(scale));
-    const out: React.ReactNode[] = [];
-    for (let i = 0; i < count; i++) {
-      const cx = rnd() * w;
-      const cy = rnd() * h;
-      const ang = rnd() * Math.PI;
-      const lr = rnd();
-      const len = hasRange
-        ? (hatch.lengthMin! + lr * (hatch.lengthMax! - hatch.lengthMin!)) * PX_PER_MM
-        : baseLen;
-      const dx = (Math.cos(ang) * len) / 2;
-      const dy = (Math.sin(ang) * len) / 2;
-      out.push(
-        <line
-          key={i}
-          x1={cx - dx}
-          y1={cy - dy}
-          x2={cx + dx}
-          y2={cy + dy}
-          stroke="currentColor"
-          strokeWidth={0.9}
-          strokeLinecap="round"
-        />,
-      );
-    }
-    inner = out;
-  } else if (hatch.pattern === "crosshatch") {
-    inner = [
-      ...parallelLines(w, h, angle, spacing, 0.8, "a"),
-      ...parallelLines(w, h, angle + 90, spacing, 0.8, "b"),
-    ];
-  } else if (hatch.pattern === "insulation") {
-    // Dämmung: eine gewellte Schar quer über die Box (angenähert als Zickzack).
-    const rows = Math.max(2, Math.round(h / Math.max(6, spacing)));
-    const out: React.ReactNode[] = [];
-    for (let r = 0; r < rows; r++) {
-      const y = ((r + 0.5) / rows) * h;
-      const amp = Math.min(h / rows / 2, 3);
-      const waves = Math.max(2, Math.round(w / 6));
-      let d = `M 0 ${y}`;
-      for (let i = 1; i <= waves; i++) {
-        const x = (i / waves) * w;
-        const yy = y + (i % 2 === 0 ? -amp : amp);
-        d += ` L ${x.toFixed(1)} ${yy.toFixed(1)}`;
-      }
-      out.push(
-        <path key={r} d={d} fill="none" stroke="currentColor" strokeWidth={0.8} />,
-      );
-    }
-    inner = out;
-  } else if (hatch.pattern === "custom" && hatch.motif && hatch.motif.points.length >= 2 && hatch.motif.length > 1e-6) {
-    // Eigenes Motiv: EINE Wiederhollänge als <pattern>-Kachel (analog zur
-    // Bild-Schraffur oben) — motif.x (0..length) läuft entlang der Kachel-
-    // Höhe (wie die Musterlinie bei diagonal/crosshatch), motif.y (Versatz
-    // quer) entlang der Kachelbreite. Bewusst eigenständig tesseliert (KEIN
-    // Import aus glPlanHatch, s. Moduldoc oben) — schematisch/px, wie der
-    // übrige Swatch, nicht deckungsgleich mit dem Plan-Renderer.
-    const PX_PER_MM = 2;
-    const rowSpacing = Math.max(3, 8 / Math.sqrt(scale));
-    const period = Math.max(4, hatch.motif.length * scale * PX_PER_MM);
-    const d = hatch.motif.points
-      .map((p, i) => {
-        const x = (p.y * scale * PX_PER_MM).toFixed(1);
-        const y = (p.x * scale * PX_PER_MM).toFixed(1);
-        return `${i === 0 ? "M" : "L"} ${x} ${y}`;
-      })
-      .join(" ");
-    inner = (
-      <>
-        <defs>
-          <pattern
-            id={patId}
-            patternUnits="userSpaceOnUse"
-            width={rowSpacing}
-            height={period}
-            patternTransform={`rotate(${angle})`}
-          >
-            <path d={d} fill="none" stroke="currentColor" strokeWidth={0.8} />
-          </pattern>
-        </defs>
-        <rect x={0} y={0} width={w} height={h} fill={`url(#${patId})`} />
-      </>
-    );
   } else {
-    // "diagonal" (Default, auch "custom" ohne gesetztes Motiv): eine parallele Schar.
-    inner = parallelLines(w, h, angle, spacing, 0.8, "d");
+    // Vektor (parallel, Kreuz, Schicht-Muster, Motiv, gestreut): Kern-Generator.
+    inner = vectorRuns(hatch, w, h, wallAngleDeg).map((d, i) => (
+      <path key={i} d={d} fill="none" stroke="currentColor" strokeWidth={0.8} strokeLinejoin="round" />
+    ));
   }
 
   return inner;
@@ -412,7 +288,7 @@ export function WallTypeSwatch({
             transform={`translate(${b.bx.toFixed(2)},${b.by.toFixed(2)})`}
             clipPath={`url(#${clipId}_b${i})`}
           >
-            {b.hatch && hatchInner(b.hatch, b.bw, b.bh, `${rawId}_${i}`)}
+            {b.hatch && hatchInner(b.hatch, b.bw, b.bh, `${rawId}_${i}`, orientation === "wall" ? 90 : undefined)}
           </g>
         ))}
         {/* Fugen: dünne Trennlinie an jeder INNEREN Bandgrenze. */}
@@ -471,7 +347,8 @@ export function LineSwatch({
   width?: number;
   height?: number;
 }) {
-  const px = Math.max(1, Math.min(6, style.weight * 6));
+  // Linienstile tragen keine Stärke mehr ([110]): Vorschau mit einheitlicher Linie.
+  const px = 1.5;
   const midY = height / 2;
   const x0 = 4;
   const x1 = width - 4;

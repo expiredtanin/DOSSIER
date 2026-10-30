@@ -166,6 +166,16 @@ function LayeredStyleDetail({
                     />
                   )}
                 </FieldRow>
+                {!isInner && (
+                  <FieldRow label={t("resources.col.jointWeight")}>
+                    <NumberField
+                      value={layer.jointWeightMm ?? 0}
+                      onChange={(w) => patchLayer(i, { jointWeightMm: w > 0 ? w : undefined })}
+                      step={0.01}
+                      min={0}
+                    />
+                  </FieldRow>
+                )}
               </div>
               <DeleteButton
                 onClick={() => removeLayer(i)}

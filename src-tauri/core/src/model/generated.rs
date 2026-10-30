@@ -46,15 +46,14 @@ pub struct LineStyleMotif {
 pub struct LineStyle {
     pub id: String,
     pub name: String,
-    /// @deprecated Die Strichstärke gehört NICHT mehr in den Linienstil — es gibt nur
-    /// „Vollinie/Strich", die tatsächliche Dicke wird per Element-Attribut (bzw.
-    /// Ebene/Default) aufgelöst. Das Feld bleibt für die Backward-Compat-Auflösung
-    /// erhalten und dient den Renderern noch als Fallback für die Muster-/Fugen-Stärke
-    /// (siehe `resolveHatch` → `HatchRender.lineWeight`). Der Linien-Detail-Editor
-    /// zeigt es nicht mehr an; neue Linienstile bekommen einen Haarlinien-Default.
-    /// Die echte per-Element-Strichstärken-Auflösung (Attribut → Ebene → Default)
-    /// folgt separat mit dem By-Layer/By-Object-Refactor — NICHT hier.
-    pub weight: f64,
+    /// @deprecated Nur noch für die Migration alter Dateien gelesen ([110], Format 4): Ein Linienstil
+    /// legt nur das Muster (Volllinie, Strich, Punkt, Zickzack …) und die Farbe fest — die Strichstärke
+    /// kommt vom Element (`Drawing2D.weightMm`), der Schraffur (`HatchStyle.lineWeight`), der
+    /// Schichtfuge (`Layer.jointWeightMm`) bzw. Ebene/Stift. Die Migration trägt das alte Gewicht dort
+    /// ein und entfernt es hier; die Renderer werten es nicht mehr aus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub weight: Option<f64>,
     /// Farbe (hex).
     pub color: String,
     /// Strichmuster in Millimetern, alternierend AN/AUS (`[on, off, on, off, …]`),
@@ -233,6 +232,24 @@ pub enum HatchPattern {
     Crosshatch,
     #[serde(rename = "custom")]
     Custom,
+    /// Hartschaum (EPS/XPS, [109]): Zickzack über die ganze Schichtdicke.
+    #[serde(rename = "insulationHard")]
+    InsulationHard,
+    /// Holzfaser-Dämmung ([109]): Sinuswelle über die ganze Schichtdicke.
+    #[serde(rename = "insulationWave")]
+    InsulationWave,
+    /// Holz im Querschnitt ([109]): Diagonalkreuz je Querschnittsfeld über die Schichtdicke.
+    #[serde(rename = "timber")]
+    Timber,
+    /// Erdreich ([109]): Gruppen kurzer Striche, wechselnd ±45° (Flechtmuster).
+    #[serde(rename = "earth")]
+    Earth,
+    /// Kies/Geröll ([109]): kleine Kreise auf gestreutem Raster.
+    #[serde(rename = "gravel")]
+    Gravel,
+    /// Naturstein ([109]): Diagonale in Doppellinien.
+    #[serde(rename = "stone")]
+    Stone,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -315,10 +332,14 @@ pub struct HatchStyle {
     /// `plan/generatePlan.ts` → `resolveHatch`). Bei `pattern==="solid"` ist es die
     /// Vollfüllfarbe, bei `pattern==="none"` ungenutzt.
     pub color: String,
-    /// Optionaler Linienstil für die Musterlinien (Line Manager).
+    /// Optionaler Linienstil für die Musterlinien (Line Manager): nur Muster/Farbe.
     #[serde(rename = "lineStyleId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub line_style_id: Option<String>,
+    /// Strichstärke der Musterlinien in Papier-mm ([110]); fehlt sie, gilt 0.13.
+    #[serde(rename = "lineWeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line_weight: Option<f64>,
     /// Steuer-Parameter der Random-Vektor-Schraffur (`kind`/"vector" + `lines`===
     /// "random", z. B. Kies/Splitt). ALLE additiv & optional — fehlen sie, gilt das
     /// bestehende deterministische Streu-Verhalten (Seed aus der Flächen-Bounding-Box,
@@ -604,6 +625,10 @@ pub struct Layer {
     #[serde(rename = "jointLineStyleId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub joint_line_style_id: Option<String>,
+    /// Strichstärke der Schichtfuge in Papier-mm ([110]); fehlt sie, gilt die Standard-Fuge.
+    #[serde(rename = "jointWeightMm", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub joint_weight_mm: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3279,7 +3304,7 @@ pub struct Drawing2D {
     #[ts(optional)]
     pub fill_color: Option<String>,
     /// Optionale direkte Strichstärke-Übersteuerung in Millimetern; hat Vorrang
-    /// vor dem LineStyle-Gewicht und der Kategorie-Strichstärke.
+    /// vor der Kategorie-Strichstärke (Linienstile tragen keine Stärke, [110]).
     #[serde(rename = "weightMm", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub weight_mm: Option<f64>,
@@ -3295,8 +3320,8 @@ pub struct Drawing2D {
     #[ts(optional)]
     pub background_source: Option<AttributeSource>,
     /// Quelle der Strichstärke, wenn kein explizites `weightMm` gesetzt ist:
-    /// "layer" erzwingt `LayerCategory.lw` (unter Umgehung des LineStyle-Gewichts),
-    /// "object"/`undefined` (Default) = heutige Kette (LineStyle.weight ?? Kategorie).
+    /// "layer" erzwingt `LayerCategory.lw`,
+    /// "object"/`undefined` (Default) = Kategorie-Strichstärke.
     #[serde(rename = "strokeWeightSource", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub stroke_weight_source: Option<AttributeSource>,

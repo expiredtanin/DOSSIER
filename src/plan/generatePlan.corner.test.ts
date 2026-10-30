@@ -121,13 +121,14 @@ describe("generatePlan — Schichtfugen als stilisierbare Linien", () => {
         p.kind === "line" && p.cls === "layer-joint",
     );
 
-  it("zieht die innere Fuge als eigene Linie und übernimmt Gewicht/Farbe des LineStyle", () => {
+  it("zieht die innere Fuge als eigene Linie: Farbe/Muster vom LineStyle, Stärke von der Schicht ([110])", () => {
     const proj = cornerProject();
     proj.walls = [proj.walls[0]]; // nur W1, zwei Schichten → genau eine innere Fuge
-    proj.wallTypes[0].layers[0].jointLineStyleId = "thin"; // weight 0.13, color #111
+    proj.wallTypes[0].layers[0].jointLineStyleId = "thin"; // color #111
+    proj.wallTypes[0].layers[0].jointWeightMm = 0.13;
     const joints = jointLines(proj);
     expect(joints.length).toBe(1);
-    // LAYER_DETAIL_FACTOR["mittel"] == 1 → das LineStyle-Gewicht wirkt direkt.
+    // LAYER_DETAIL_FACTOR["mittel"] == 1 → die Fugen-Stärke der Schicht wirkt direkt.
     expect(joints[0].weightMm).toBeCloseTo(0.13, 6);
     expect(joints[0].color).toBe("#111");
     expect(joints[0].dash ?? null).toBeNull();

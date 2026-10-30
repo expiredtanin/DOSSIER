@@ -101,7 +101,7 @@ pub fn resolve_hatch(p: &Project, hatch_id: &str, wall_angle_deg: Option<f64>, f
         angle,
         origin: p_origin,
         color: foreground.unwrap_or(HATCH_INK).to_string(),
-        line_weight: ls.map_or(0.13, |l| l.weight),
+        line_weight: h.line_weight.unwrap_or(0.13),
         dash: ls.and_then(|l| l.dash.clone()),
         kind: h.kind,
         lines: h.lines,

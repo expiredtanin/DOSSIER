@@ -728,7 +728,7 @@ export type Drawing2D = {
   fillColor?: string;
   /**
    * Optionale direkte Strichstärke-Übersteuerung in Millimetern; hat Vorrang
-   * vor dem LineStyle-Gewicht und der Kategorie-Strichstärke.
+   * vor der Kategorie-Strichstärke (Linienstile tragen keine Stärke, [110]).
    */
   weightMm?: number;
   /**
@@ -742,8 +742,8 @@ export type Drawing2D = {
   backgroundSource?: AttributeSource;
   /**
    * Quelle der Strichstärke, wenn kein explizites `weightMm` gesetzt ist:
-   * "layer" erzwingt `LayerCategory.lw` (unter Umgehung des LineStyle-Gewichts),
-   * "object"/`undefined` (Default) = heutige Kette (LineStyle.weight ?? Kategorie).
+   * "layer" erzwingt `LayerCategory.lw`,
+   * "object"/`undefined` (Default) = Kategorie-Strichstärke.
    */
   strokeWeightSource?: AttributeSource;
   /**
@@ -1190,7 +1190,19 @@ export type Group = {
 };
 
 /** Mögliche Schraffur-Muster im Plan/Schnitt. */
-export type HatchPattern = "none" | "solid" | "insulation" | "diagonal" | "crosshatch" | "custom";
+export type HatchPattern =
+  | "none"
+  | "solid"
+  | "insulation"
+  | "diagonal"
+  | "crosshatch"
+  | "custom"
+  | "insulationHard"
+  | "insulationWave"
+  | "timber"
+  | "earth"
+  | "gravel"
+  | "stone";
 
 /** Eine wiederverwendbare Schraffur (Hatch Manager). */
 export type HatchStyle = {
@@ -1259,8 +1271,10 @@ export type HatchStyle = {
    * Vollfüllfarbe, bei `pattern==="none"` ungenutzt.
    */
   color: string;
-  /** Optionaler Linienstil für die Musterlinien (Line Manager). */
+  /** Optionaler Linienstil für die Musterlinien (Line Manager): nur Muster/Farbe. */
   lineStyleId?: string;
+  /** Strichstärke der Musterlinien in Papier-mm ([110]); fehlt sie, gilt 0.13. */
+  lineWeight?: number;
   /**
    * Steuer-Parameter der Random-Vektor-Schraffur (`kind`/"vector" + `lines`===
    * "random", z. B. Kies/Splitt). ALLE additiv & optional — fehlen sie, gilt das
@@ -1335,6 +1349,8 @@ export type Layer = {
    * Fehlt das Feld, wird die Standard-Haarlinie (0.02 mm) gezeichnet.
    */
   jointLineStyleId?: string;
+  /** Strichstärke der Schichtfuge in Papier-mm ([110]); fehlt sie, gilt die Standard-Fuge. */
+  jointWeightMm?: number;
 };
 
 /**
@@ -1490,16 +1506,13 @@ export type LineStyle = {
   id: string;
   name: string;
   /**
-   * @deprecated Die Strichstärke gehört NICHT mehr in den Linienstil — es gibt nur
-   * „Vollinie/Strich", die tatsächliche Dicke wird per Element-Attribut (bzw.
-   * Ebene/Default) aufgelöst. Das Feld bleibt für die Backward-Compat-Auflösung
-   * erhalten und dient den Renderern noch als Fallback für die Muster-/Fugen-Stärke
-   * (siehe `resolveHatch` → `HatchRender.lineWeight`). Der Linien-Detail-Editor
-   * zeigt es nicht mehr an; neue Linienstile bekommen einen Haarlinien-Default.
-   * Die echte per-Element-Strichstärken-Auflösung (Attribut → Ebene → Default)
-   * folgt separat mit dem By-Layer/By-Object-Refactor — NICHT hier.
+   * @deprecated Nur noch für die Migration alter Dateien gelesen ([110], Format 4): Ein Linienstil
+   * legt nur das Muster (Volllinie, Strich, Punkt, Zickzack …) und die Farbe fest — die Strichstärke
+   * kommt vom Element (`Drawing2D.weightMm`), der Schraffur (`HatchStyle.lineWeight`), der
+   * Schichtfuge (`Layer.jointWeightMm`) bzw. Ebene/Stift. Die Migration trägt das alte Gewicht dort
+   * ein und entfernt es hier; die Renderer werten es nicht mehr aus.
    */
-  weight: number;
+  weight?: number;
   /** Farbe (hex). */
   color: string;
   /**
