@@ -1515,6 +1515,20 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Aufbau: Fugen-Strichstärke). Geprüft: Rust-/vitest-Tests; CLI-Szenen (Grundriss 1:50/1:100, Schnitte) und
   DXF von Musterhaus und einem Format-3-Projekt mit allen Standards vor/nach der Migration bytegleich (Linux).
   Offen: nicht in der Tauri-App geprüft. · S
+- ◐ **[109] SIA-400-Schraffuren überarbeitet.** (30.10., Maintainer: „einige Schraffuren sehen trashy aus,
+  Dämmung ist ein spezieller Sinus") Kern-Generator (`hatch.rs`) kennt Schicht-Muster, die über die GANZE
+  Schichtdicke spannen und entlang der Schicht laufen (breite Flächen in Bänder à ~0.3 m geteilt): Dämmschlange
+  (`insulation`, Schlaufenlinie u = a·t + R·sin t, v = h·cos t, Steigung 0.45·Dicke), Hartschaum-Zickzack
+  (`insulationHard`), Holzfaser-Welle (`insulationWave`), Holz im Querschnitt als Diagonalkreuz je Feld
+  (`timber`); dazu Naturstein-Doppellinien (`stone`), Erdreich-Flechtmuster (`earth`), Kies-Kreise
+  (`gravel`). Standards neu abgestimmt (Abstände im Modell 0.025–0.09 m ≈ 0.5–1.8 mm Papier in 1:50/1:100;
+  Musterlinien 0.10/0.13 mm). Schnitt: Dachschichten-Muster folgen der Dachneigung, Deckenschichten liegen
+  (Achse 0°, vorher 90°), einschalige Wände wie Schicht-Bänder (vorher Grundriss-Winkel). DXF: Kurven-Muster
+  als Polylinien; Ressourcen-Vorschau zeichnet Vektor-Schraffuren mit dem Kern-Generator. Geprüft: Rust-
+  Tests, CLI-Grundriss 1:50/1:100 und Schnitte (Wand, Decke, Dach) aller Standard-Baustoffe angesehen
+  (Linux). Offen: 3D-Live-Schnitt (render3d) zeigt neue Muster vereinfacht (Zickzack/Kreuz/Diagonal);
+  Projekte mit Standards vom 29.10. behalten die alten Schraffur-Definitionen (Standards laden ergänzt nur);
+  Alt-Pfade `planToPrintSvg`/SVG-PlanView zeichnen neue Muster als Diagonale; nicht in der Tauri-App geprüft. · M
 
 ## Priorität 4 — später
 

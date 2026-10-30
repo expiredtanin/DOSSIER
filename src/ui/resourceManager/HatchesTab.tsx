@@ -26,6 +26,12 @@ const PATTERN_OPTIONS: { value: HatchPattern; labelKey: string }[] = [
   { value: "insulation", labelKey: "pattern.insulation" },
   { value: "diagonal", labelKey: "pattern.diagonal" },
   { value: "crosshatch", labelKey: "pattern.crosshatch" },
+  { value: "insulationHard", labelKey: "pattern.insulationHard" },
+  { value: "insulationWave", labelKey: "pattern.insulationWave" },
+  { value: "timber", labelKey: "pattern.timber" },
+  { value: "stone", labelKey: "pattern.stone" },
+  { value: "earth", labelKey: "pattern.earth" },
+  { value: "gravel", labelKey: "pattern.gravel" },
   { value: "custom", labelKey: "pattern.custom" },
 ];
 

@@ -1116,7 +1116,19 @@ export type Group = {
 };
 
 /** Mögliche Schraffur-Muster im Plan/Schnitt. */
-export type HatchPattern = "none" | "solid" | "insulation" | "diagonal" | "crosshatch" | "custom";
+export type HatchPattern =
+  | "none"
+  | "solid"
+  | "insulation"
+  | "diagonal"
+  | "crosshatch"
+  | "custom"
+  | "insulationHard"
+  | "insulationWave"
+  | "timber"
+  | "earth"
+  | "gravel"
+  | "stone";
 
 /** Eine wiederverwendbare Schraffur (Hatch Manager). */
 export type HatchStyle = {

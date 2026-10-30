@@ -1,6 +1,7 @@
 //! Schraffur- und Linienmuster-Geometrie des Grundrisses ([K3b], früher `glPlanHatch.ts`):
 //! Linie/Segment/Polylinie gegen ein (konkaves) Polygon clippen (even-odd, halb-offene Kanten),
-//! Geradenscharen (diagonal/kreuz/eigenes Motiv), Dämmungswelle, deterministische Random-
+//! Geradenscharen (diagonal/kreuz/Doppellinie/eigenes Motiv), Schicht-Muster über die ganze Dicke
+//! (Dämmschlange, Zickzack, Welle, Holzkreuz, [109]), Erdreich, Kies, deterministische Random-
 //! Schraffur (mulberry32, modellraum-stabil), Strichmuster (`apply_dash_runs`), Zickzack und
 //! Motiv-Kachelung entlang einer Strecke.
 //!
@@ -43,6 +44,12 @@ pub enum Pattern {
     Crosshatch = 3,
     Insulation = 4,
     Custom = 5,
+    InsulationHard = 6,
+    InsulationWave = 7,
+    Timber = 8,
+    Earth = 9,
+    Gravel = 10,
+    Stone = 11,
 }
 
 impl Pattern {
@@ -53,6 +60,12 @@ impl Pattern {
             3 => Pattern::Crosshatch,
             4 => Pattern::Insulation,
             5 => Pattern::Custom,
+            6 => Pattern::InsulationHard,
+            7 => Pattern::InsulationWave,
+            8 => Pattern::Timber,
+            9 => Pattern::Earth,
+            10 => Pattern::Gravel,
+            11 => Pattern::Stone,
             _ => Pattern::Diagonal,
         }
     }
@@ -388,8 +401,14 @@ pub fn build_hatch_runs(poly: &[V2], hatch: &Hatch) -> Vec<Run> {
     if hatch.kind == HatchKind::Vector && hatch.random {
         return build_random_hatch_runs(poly, hatch, Some(scale));
     }
-    if pattern == Pattern::Insulation {
-        return insulation_runs(poly, hatch, scale);
+    match pattern {
+        Pattern::Insulation => return insulation_runs(poly, hatch, scale),
+        Pattern::InsulationHard => return zigzag_band_runs(poly, hatch, scale),
+        Pattern::InsulationWave => return wave_band_runs(poly, hatch, scale),
+        Pattern::Timber => return timber_band_runs(poly, hatch, scale),
+        Pattern::Earth => return earth_runs(poly, hatch, scale),
+        Pattern::Gravel => return gravel_runs(poly, hatch, scale),
+        _ => {}
     }
     let spacing_m = 8.0 * scale * PX_TO_M;
     let rot = to_model_angle_rad(hatch.angle);
@@ -408,69 +427,225 @@ pub fn build_hatch_runs(poly: &[V2], hatch: &Hatch) -> Vec<Run> {
             runs.push(vec![a, b]);
         }
     }
+    // Naturstein: jede Musterlinie als Doppellinie (zweite um 18 % des Abstands versetzt).
+    if pattern == Pattern::Stone {
+        for (a, b) in hatch_line_family(poly, a1, spacing_m, 0.18 * spacing_m, anchor) {
+            runs.push(vec![a, b]);
+        }
+    }
     runs
 }
 
-/// Dämmungswelle (Kachel 14×10·scale px, zwei quadratische Béziers je Welle).
-fn insulation_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
+// ── Schicht-Muster (SIA 400, [109]) ──────────────────────────────────────────
+//
+// Dämmschlange, Zickzack, Welle und Holzkreuz spannen über die GANZE Schichtdicke: das Polygon wird
+// im Musterrahmen (u = Laufrichtung = Schraffurwinkel, bei Wänden wandbezogen also die Wandachse;
+// v quer dazu) vermessen, die Dicke ist seine Ausdehnung in v. Sehr breite Flächen (keine Schicht,
+// z. B. eine freie 2D-Fläche) werden in Bänder von etwa `BAND_ROW_M` geteilt.
+
+/// Bis zu dieser Dicke (m · scale) zeichnet ein Schichtmuster EINE Schlange über die ganze Dicke.
+const BAND_MAX_M: f64 = 0.6;
+/// Bandhöhe (m · scale) beim Teilen breiter Flächen.
+const BAND_ROW_M: f64 = 0.3;
+/// Kleinste Musterlänge (m): dünne Schichten werden nicht zu Brei.
+const BAND_MIN_PITCH_M: f64 = 0.012;
+/// Grenze der Stützpunkte je Muster (Schutz gegen entartete Eingaben).
+const BAND_MAX_POINTS: f64 = 400_000.0;
+
+/// Musterrahmen eines Polygons: Achsen, Ausdehnung in u, Bänder (Mitte v, halbe Höhe).
+struct Band {
+    u: V2,
+    v: V2,
+    u0: f64,
+    u1: f64,
+    /// Phase entlang u (Projektion des Ankers): benachbarte Flächen setzen gleich an.
+    ua: f64,
+    rows: Vec<(f64, f64)>,
+}
+
+impl Band {
+    fn at(&self, u: f64, v: f64) -> V2 {
+        v2(self.u.x * u + self.v.x * v, self.u.y * u + self.v.y * v)
+    }
+}
+
+fn band_frame(poly: &[V2], hatch: &Hatch, scale: f64) -> Option<Band> {
     let rot = to_model_angle_rad(hatch.angle);
-    let wavelength = 14.0 * scale * PX_TO_M;
-    let row_gap = 10.0 * scale * PX_TO_M;
-    let u_dir = rotate(v2(1.0, 0.0), rot);
-    let v_dir = rotate(v2(0.0, 1.0), rot);
-    let (mut u_min, mut u_max, mut v_min, mut v_max) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    let u = rotate(v2(1.0, 0.0), rot);
+    let v = rotate(v2(0.0, 1.0), rot);
+    let (mut u0, mut u1, mut v0, mut v1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
     for p in poly {
-        let u = p.x * u_dir.x + p.y * u_dir.y;
-        let v = p.x * v_dir.x + p.y * v_dir.y;
-        if u < u_min {
-            u_min = u;
-        }
-        if u > u_max {
-            u_max = u;
-        }
-        if v < v_min {
-            v_min = v;
-        }
-        if v > v_max {
-            v_max = v;
-        }
+        let pu = p.x * u.x + p.y * u.y;
+        let pv = p.x * v.x + p.y * v.y;
+        u0 = u0.min(pu);
+        u1 = u1.max(pu);
+        v0 = v0.min(pv);
+        v1 = v1.max(pv);
     }
-    if !(u_max > u_min) || !(v_max > v_min) {
+    let t = v1 - v0;
+    if !(u1 > u0) || !(t > 1e-6) || !(u1 - u0).is_finite() || !t.is_finite() {
+        return None;
+    }
+    let n = if t <= BAND_MAX_M * scale { 1.0 } else { (t / (BAND_ROW_M * scale)).ceil() };
+    if !(n.is_finite()) || n > 10_000.0 {
+        return None;
+    }
+    let h = t / n;
+    let rows = (0..n as usize).map(|i| (v0 + (i as f64 + 0.5) * h, h / 2.0)).collect();
+    let anchor = hatch.origin.unwrap_or(v2(0.0, 0.0));
+    Some(Band { u, v, u0, u1, ua: anchor.x * u.x + anchor.y * u.y, rows })
+}
+
+/// Linienzug aus `f(x) → (Δu, v)` über die Bandlänge, `x` in Schritten `dx`, geclippt.
+fn band_curve(poly: &[V2], b: &Band, vc: f64, margin: f64, dx: f64, f: impl Fn(f64) -> (f64, f64)) -> Vec<Run> {
+    let x0 = ((b.u0 - b.ua - margin) / dx).floor() * dx;
+    let x1 = b.u1 - b.ua + margin;
+    if !(dx > 1e-9) || (x1 - x0) / dx > BAND_MAX_POINTS {
         return Vec::new();
     }
-    const STEPS: f64 = 22.0;
-    let du = wavelength / STEPS;
-    let to_world = |u: f64, v: f64| v2(u_dir.x * u + v_dir.x * v, u_dir.y * u + v_dir.y * v);
-    let first_row = (v_min / row_gap - 0.5).floor() - 1.0;
-    let last_row = (v_max / row_gap - 0.5).ceil() + 1.0;
-    let u_start = ((u_min - wavelength) / du).floor() * du;
-    let u_end = u_max + wavelength;
-    if !(last_row - first_row).is_finite() || !(u_end - u_start).is_finite() {
-        return Vec::new();
+    let mut pts = Vec::new();
+    let mut x = x0;
+    while x <= x1 + 1e-12 {
+        let (du, dv) = f(x);
+        pts.push(b.at(b.ua + du, vc + dv));
+        x += dx;
     }
-    let half = wavelength / 2.0;
-    let wave_at = |u: f64| -> f64 {
-        let phase = ((u % wavelength) + wavelength) % wavelength;
-        let t = (phase % half) / half;
-        let mag = 12.0 * scale * PX_TO_M * t * (1.0 - t);
-        if phase < half {
-            mag
-        } else {
-            -mag
-        }
-    };
+    clip_polyline_to_polygon(&pts, poly)
+}
+
+/// Dämmschlange (SIA 400, weiche Dämmung): fortlaufende, sich überlappende Schlaufen über die
+/// ganze Schichtdicke — eine „Sinuslinie mit Schlaufen" (projizierte Schraubenlinie):
+/// `u = a·t + R·sin t`, `v = h·cos t`, Steigung `P = 2πa` ≈ 0.45 · Dicke, Schlaufenbreite `R` = ⅔ P.
+fn insulation_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
+    let Some(b) = band_frame(poly, hatch, scale) else { return Vec::new() };
     let mut runs = Vec::new();
-    let mut r = first_row;
-    while r <= last_row {
-        let v_base = (r + 0.5) * row_gap;
-        let mut wave_pts = Vec::new();
-        let mut u = u_start;
-        while u <= u_end + 1e-9 {
-            wave_pts.push(to_world(u, v_base + wave_at(u)));
-            u += du;
+    for &(vc, half) in &b.rows {
+        let pitch = (0.45 * 2.0 * half * scale).max(BAND_MIN_PITCH_M);
+        let a = pitch / (2.0 * PI);
+        let r = pitch * (2.0 / 3.0);
+        // Parameter t läuft gleichmässig; 36 Stützpunkte je Schlaufe.
+        let dt = 2.0 * PI / 36.0;
+        runs.extend(band_curve(poly, &b, vc, r + pitch, a * dt, |x| {
+            let t = x / a;
+            (a * t + r * jsnum::sin(t), half * jsnum::cos(t))
+        }));
+    }
+    runs
+}
+
+/// Hartschaum (EPS/XPS): Zickzack über die ganze Dicke, halbe Periode = 0.5 · Dicke · scale.
+fn zigzag_band_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
+    let Some(b) = band_frame(poly, hatch, scale) else { return Vec::new() };
+    let mut runs = Vec::new();
+    for &(vc, half) in &b.rows {
+        let hp = (0.5 * 2.0 * half * scale).max(BAND_MIN_PITCH_M);
+        runs.extend(band_curve(poly, &b, vc, hp, hp, |x| {
+            let k = jsnum::round(x / hp);
+            (x, if (k as i64).rem_euclid(2) == 0 { half } else { -half })
+        }));
+    }
+    runs
+}
+
+/// Holzfaser-Dämmung: Sinuswelle über die ganze Dicke, Periode = 1.2 · Dicke · scale.
+fn wave_band_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
+    let Some(b) = band_frame(poly, hatch, scale) else { return Vec::new() };
+    let mut runs = Vec::new();
+    for &(vc, half) in &b.rows {
+        let period = (1.2 * 2.0 * half * scale).max(BAND_MIN_PITCH_M);
+        let w = 2.0 * PI / period;
+        runs.extend(band_curve(poly, &b, vc, period, period / 32.0, |x| (x, half * jsnum::cos(w * x))));
+    }
+    runs
+}
+
+/// Holz im Querschnitt: Diagonalkreuz je quadratischem Feld (Seite = Dicke · scale) — zwei
+/// gegenläufige Zickzacks über die ganze Dicke.
+fn timber_band_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
+    let Some(b) = band_frame(poly, hatch, scale) else { return Vec::new() };
+    let mut runs = Vec::new();
+    for &(vc, half) in &b.rows {
+        let side = (2.0 * half * scale).max(BAND_MIN_PITCH_M);
+        for sign in [1.0, -1.0] {
+            runs.extend(band_curve(poly, &b, vc, side, side, |x| {
+                let k = jsnum::round(x / side);
+                (x, if (k as i64).rem_euclid(2) == 0 { sign * half } else { -sign * half })
+            }));
         }
-        runs.extend(clip_polyline_to_polygon(&wave_pts, poly));
-        r += 1.0;
+    }
+    runs
+}
+
+/// Rasterzellen (i, j) über das Polygon im Musterrahmen (Zellgrösse `cell`), mit Zellen-Grenze.
+fn cells_over(poly: &[V2], u: V2, v: V2, cell: f64) -> Option<(f64, f64, f64, f64)> {
+    let (mut u0, mut u1, mut v0, mut v1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    for p in poly {
+        let pu = p.x * u.x + p.y * u.y;
+        let pv = p.x * v.x + p.y * v.y;
+        u0 = u0.min(pu);
+        u1 = u1.max(pu);
+        v0 = v0.min(pv);
+        v1 = v1.max(pv);
+    }
+    let (i0, i1, j0, j1) = ((u0 / cell).floor(), (u1 / cell).floor(), (v0 / cell).floor(), (v1 / cell).floor());
+    let n = (i1 - i0 + 1.0) * (j1 - j0 + 1.0);
+    (n.is_finite() && n <= 250_000.0 && cell > 1e-9).then_some((i0, i1, j0, j1))
+}
+
+/// Erdreich: Flechtmuster — je Zelle drei kurze parallele Striche, von Zelle zu Zelle um 90°
+/// gewechselt (mit dem Schraffurwinkel gedreht, Standard 45°). Zelle 0.15 m · scale.
+fn earth_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
+    let rot = to_model_angle_rad(hatch.angle);
+    let (u, v) = (rotate(v2(1.0, 0.0), rot), rotate(v2(0.0, 1.0), rot));
+    let cell = 0.15 * scale;
+    let Some((i0, i1, j0, j1)) = cells_over(poly, u, v, cell) else { return Vec::new() };
+    let at = |a: f64, b: f64| v2(u.x * a + v.x * b, u.y * a + v.y * b);
+    let mut runs = Vec::new();
+    let mut j = j0;
+    while j <= j1 {
+        let mut i = i0;
+        while i <= i1 {
+            let along_u = (i + j).rem_euclid(2.0) == 0.0;
+            for k in [0.25, 0.5, 0.75] {
+                let (a, b) = if along_u {
+                    (at((i + 0.15) * cell, (j + k) * cell), at((i + 0.85) * cell, (j + k) * cell))
+                } else {
+                    (at((i + k) * cell, (j + 0.15) * cell), at((i + k) * cell, (j + 0.85) * cell))
+                };
+                for (sa, sb) in clip_segment_to_polygon(a, b, poly) {
+                    runs.push(vec![sa, sb]);
+                }
+            }
+            i += 1.0;
+        }
+        j += 1.0;
+    }
+    runs
+}
+
+/// Kies: kleine Kreise (Ø 25–55 % der Zelle) auf gestreutem Raster, modellraum-stabil.
+/// Zelle 0.05 m · scale.
+fn gravel_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
+    let cell = 0.05 * scale;
+    let Some((i0, i1, j0, j1)) = cells_over(poly, v2(1.0, 0.0), v2(0.0, 1.0), cell) else { return Vec::new() };
+    let seed = hatch.seed.unwrap_or(0.0);
+    let mut runs = Vec::new();
+    let mut j = j0;
+    while j <= j1 {
+        let mut i = i0;
+        while i <= i1 {
+            let mut rnd = Mulberry32 { a: hash_cell(i, j, seed) };
+            let r = cell * (0.125 + 0.15 * rnd.next());
+            let cx = (i + 0.5) * cell + (rnd.next() - 0.5) * (cell - 2.0 * r);
+            let cy = (j + 0.5) * cell + (rnd.next() - 0.5) * (cell - 2.0 * r);
+            let ring: Vec<V2> = (0..=12).map(|k| {
+                let a = k as f64 * PI / 6.0;
+                v2(cx + r * jsnum::cos(a), cy + r * jsnum::sin(a))
+            }).collect();
+            runs.extend(clip_polyline_to_polygon(&ring, poly));
+            i += 1.0;
+        }
+        j += 1.0;
     }
     runs
 }
@@ -750,6 +925,86 @@ mod tests {
         let p = vec![v2(0.0, 0.0), v2(f64::INFINITY, 0.0), v2(1.0, 1.0)];
         assert!(build_hatch_runs(&p, &hatch(Pattern::Diagonal)).is_empty());
         assert!(build_hatch_runs(&p, &hatch(Pattern::Insulation)).is_empty());
+    }
+
+    fn band(len: f64, t: f64) -> Vec<V2> {
+        vec![v2(0.0, 0.0), v2(len, 0.0), v2(len, t), v2(0.0, t)]
+    }
+
+    fn extent(runs: &[Run], f: impl Fn(&V2) -> f64) -> (f64, f64) {
+        runs.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(f(p)), hi.max(f(p))))
+    }
+
+    /// [109] Schicht-Muster spannen über die ganze Schichtdicke und laufen entlang der Schicht.
+    #[test]
+    fn schichtmuster_ueber_ganze_dicke() {
+        for pat in [Pattern::Insulation, Pattern::InsulationHard, Pattern::InsulationWave, Pattern::Timber] {
+            let mut h = hatch(pat);
+            h.angle = 0.0;
+            let runs = build_hatch_runs(&band(1.0, 0.16), &h);
+            assert!(!runs.is_empty(), "{pat:?}");
+            let (lo, hi) = extent(&runs, |p| p.y);
+            assert!(lo < 0.005 && hi > 0.155, "{pat:?}: {lo}..{hi}");
+            let (ulo, uhi) = extent(&runs, |p| p.x);
+            assert!(ulo < 0.02 && uhi > 0.98, "{pat:?}: {ulo}..{uhi}");
+            // Wand senkrecht (Winkel −90°): Muster läuft in y, spannt die Dicke in x.
+            h.angle = -90.0;
+            let vert: Vec<V2> = band(1.0, 0.16).iter().map(|p| v2(p.y, p.x)).collect();
+            let (xlo, xhi) = extent(&build_hatch_runs(&vert, &h), |p| p.x);
+            assert!(xlo < 0.005 && xhi > 0.155, "{pat:?} senkrecht: {xlo}..{xhi}");
+        }
+    }
+
+    /// Die Dämmschlange bildet Schlaufen (läuft stellenweise zurück), Steigung ≈ 0.45 · Dicke.
+    #[test]
+    fn daemmschlange_hat_schlaufen() {
+        let mut h = hatch(Pattern::Insulation);
+        h.angle = 0.0;
+        let runs = build_hatch_runs(&band(2.0, 0.2), &h);
+        let back = runs.iter().any(|r| r.windows(2).any(|w| w[1].x < w[0].x - 1e-6));
+        assert!(back, "Schlaufen fehlen");
+        // Scheitel oben: Anzahl Annäherungen an die Oberkante ≈ Länge / Steigung (2.0 / 0.09 ≈ 22).
+        let tops = runs.iter().flat_map(|r| r.windows(3)).filter(|w| w[1].y > w[0].y && w[1].y >= w[2].y && w[1].y > 0.199).count();
+        assert!((19..=25).contains(&tops), "{tops}");
+    }
+
+    /// Breite Flächen werden in Bänder geteilt (keine riesige Schlange).
+    #[test]
+    fn breite_flaeche_in_baender() {
+        let mut h = hatch(Pattern::InsulationHard);
+        h.angle = 0.0;
+        let runs = build_hatch_runs(&band(1.0, 1.2), &h);
+        let max_rise = runs.iter().flat_map(|r| r.windows(2)).map(|w| (w[1].y - w[0].y).abs()).fold(0.0, f64::max);
+        assert!(max_rise < 0.31 && max_rise > 0.29, "{max_rise}");
+    }
+
+    #[test]
+    fn erdreich_kies_naturstein() {
+        let sq = band(1.0, 1.0);
+        for pat in [Pattern::Earth, Pattern::Gravel, Pattern::Stone] {
+            let runs = build_hatch_runs(&sq, &hatch(pat));
+            assert!(!runs.is_empty(), "{pat:?}");
+            let (lo, hi) = extent(&runs, |p| p.x);
+            assert!(lo >= -1e-9 && hi <= 1.0 + 1e-9, "{pat:?} ausserhalb");
+        }
+        // Kies: geschlossene Kreise, gleiche Fläche → gleiche Steine (modellraum-stabil).
+        let a = build_hatch_runs(&sq, &hatch(Pattern::Gravel));
+        assert_eq!(a, build_hatch_runs(&sq, &hatch(Pattern::Gravel)));
+        assert!(a.iter().filter(|r| r.len() == 13 && r[0] == r[12]).count() > 300);
+        // Naturstein: doppelt so viele Linien wie Diagonal.
+        let d = build_hatch_runs(&sq, &hatch(Pattern::Diagonal)).len() as f64;
+        let st = build_hatch_runs(&sq, &hatch(Pattern::Stone)).len() as f64;
+        assert!((st / d - 2.0).abs() < 0.1, "{st} / {d}");
+    }
+
+    #[test]
+    fn schichtmuster_entartet_leer() {
+        let p = vec![v2(0.0, 0.0), v2(f64::INFINITY, 0.0), v2(1.0, 1.0)];
+        for pat in [Pattern::InsulationHard, Pattern::InsulationWave, Pattern::Timber, Pattern::Earth, Pattern::Gravel, Pattern::Stone] {
+            assert!(build_hatch_runs(&p, &hatch(pat)).is_empty(), "{pat:?}");
+        }
+        // Linie ohne Dicke
+        assert!(build_hatch_runs(&[v2(0.0, 0.0), v2(1.0, 0.0), v2(2.0, 0.0)], &hatch(Pattern::Insulation)).is_empty());
     }
 
     #[test]

@@ -136,7 +136,8 @@ export function applyDashRuns(runs: HatchRun[], dash: number[] | null): HatchRun
 
 /**
  * Schraffur eines Polygons als zusammenhängende Läufe (Modell-Meter): diagonal (eine Schar),
- * crosshatch (zwei Scharen), insulation (Welle), custom (Motiv je Musterlinie), Random-Untermodus
+ * crosshatch (zwei Scharen), Schicht-Muster über die Dicke (Dämmschlange, Zickzack, Welle, Holzkreuz),
+ * Naturstein, Erdreich, Kies, custom (Motiv je Musterlinie), Random-Untermodus
  * (gestreute Striche); solid/none sowie Bild/Verlauf liefern keine Linien-Geometrie des Musters.
  */
 export function buildHatchRuns(poly: Vec2[], hatch: HatchRender): HatchRun[] {

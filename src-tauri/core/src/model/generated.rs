@@ -232,6 +232,24 @@ pub enum HatchPattern {
     Crosshatch,
     #[serde(rename = "custom")]
     Custom,
+    /// Hartschaum (EPS/XPS, [109]): Zickzack über die ganze Schichtdicke.
+    #[serde(rename = "insulationHard")]
+    InsulationHard,
+    /// Holzfaser-Dämmung ([109]): Sinuswelle über die ganze Schichtdicke.
+    #[serde(rename = "insulationWave")]
+    InsulationWave,
+    /// Holz im Querschnitt ([109]): Diagonalkreuz je Querschnittsfeld über die Schichtdicke.
+    #[serde(rename = "timber")]
+    Timber,
+    /// Erdreich ([109]): Gruppen kurzer Striche, wechselnd ±45° (Flechtmuster).
+    #[serde(rename = "earth")]
+    Earth,
+    /// Kies/Geröll ([109]): kleine Kreise auf gestreutem Raster.
+    #[serde(rename = "gravel")]
+    Gravel,
+    /// Naturstein ([109]): Diagonale in Doppellinien.
+    #[serde(rename = "stone")]
+    Stone,
     #[serde(other)]
     #[ts(skip)]
     Unknown,

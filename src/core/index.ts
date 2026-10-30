@@ -131,6 +131,7 @@ export {
 export {
   DASH_MM_TO_M,
   buildRandomHatchRuns,
+  buildHatchRuns,
   motifPoints,
   zigzagPoints,
 } from "../plan/glPlan/glPlanHatch";
