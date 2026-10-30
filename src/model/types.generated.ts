@@ -3266,6 +3266,12 @@ export type Wall = {
    */
   sliceTermination?: SliceTermination;
   /**
+   * An Dach anschliessen ([G2]): `undefined` = automatisch (die Wand endet an der Dach-Unterkante,
+   * wo ihre Krone darüber liegt — je Schicht, Giebel/Traufe/Grat/Kehle/Gaube), `true` = zusätzlich bis
+   * unter das Dach verlängert, `false` = Dächer schneiden die Wand nicht.
+   */
+  roofAttach?: boolean;
+  /**
    * Ansichtsschraffur ([100]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
    * Ausrichtung am Element (Default 0).
    */

@@ -2055,6 +2055,23 @@ export function WallSection({
         />
       </div>
 
+      {/* An Dach anschliessen ([G2]): automatisch endet die Wand an der Dach-Unterkante, "Ja"
+          verlängert sie bis unter das Dach, "Nein" lässt die Dächer die Wand nicht schneiden. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.wall.roofAttach")}</span>
+        <Dropdown
+          value={wall.roofAttach}
+          onChange={(v) => host.onSetWallRoofAttach(v as "auto" | "on" | "off")}
+          options={[
+            { value: "auto", label: t("objinfo.wall.roofAttach.auto") },
+            { value: "on", label: t("objinfo.wall.roofAttach.on") },
+            { value: "off", label: t("objinfo.wall.roofAttach.off") },
+          ]}
+          title={t("objinfo.wall.roofAttach.tip")}
+          width={120}
+        />
+      </div>
+
       {/* Aufbau-Typ-Segment. */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.wall.buildup")}</span>

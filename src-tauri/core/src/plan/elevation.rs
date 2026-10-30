@@ -73,6 +73,229 @@ struct Face {
     normal: [f64; 3],
 }
 
+/// Stirnflächen der Dachscheibe an den freien Rändern der Dachflächen (Traufe, Ortgang): je Rand ein
+/// Viereck von der Oberkante senkrecht zur Fläche um die Dicke nach innen (wie die 3D-Schichten).
+fn fascia_quads(planes: &[Vec<[f64; 3]>], total: f64) -> Vec<[[f64; 3]; 4]> {
+    let mut out = Vec::new();
+    if !(total > 1e-6) {
+        return out;
+    }
+    let same = |a: [f64; 3], b: [f64; 3]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6 && (a[2] - b[2]).abs() < 1e-6;
+    for (i, pl) in planes.iter().enumerate() {
+        if pl.len() < 3 {
+            continue;
+        }
+        let n = model3d::plane_normal_up(pl);
+        if !(n[2] > 1e-3) {
+            continue;
+        }
+        for k in 0..pl.len() {
+            let (a, b) = (pl[k], pl[(k + 1) % pl.len()]);
+            let shared = planes.iter().enumerate().any(|(j, o)| j != i && (0..o.len()).any(|m| { let (c, d) = (o[m], o[(m + 1) % o.len()]); (same(a, c) && same(b, d)) || (same(a, d) && same(b, c)) }));
+            if shared || same(a, b) {
+                continue;
+            }
+            let off = |q: [f64; 3]| [q[0] - n[0] * total, q[1] - n[1] * total, q[2] - n[2] * total];
+            out.push([a, b, off(b), off(a)]);
+        }
+    }
+    out
+}
+
+/// Dach-Scheiben für die Verdeckung der Wände darunter ([G2]): je Dachfläche Ober- und Unterkante,
+/// dazu die Stirnflächen der Ränder.
+struct RoofSheet {
+    top: Vec<crate::wall_bands::RoofFacet>,
+    under: Vec<crate::wall_bands::RoofFacet>,
+    fascia: Vec<[[f64; 3]; 4]>,
+    bounds: [f64; 4],
+}
+
+/// Kreuzt die waagrechte Strecke `a → b` (Grundriss) auf Höhe `z` eine Stirnfläche (im Innern)?
+fn crosses_fascia(q: &[[f64; 3]; 4], a: (f64, f64), b: (f64, f64), z: f64) -> bool {
+    let e1 = [q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]];
+    let e2 = [q[3][0] - q[0][0], q[3][1] - q[0][1], q[3][2] - q[0][2]];
+    let m = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    let side = |x: f64, y: f64| m[0] * (x - q[0][0]) + m[1] * (y - q[0][1]) + m[2] * (z - q[0][2]);
+    let (s0, s1) = (side(a.0, a.1), side(b.0, b.1));
+    if !(s0 * s1 < 0.0) {
+        return false;
+    }
+    let t = s0 / (s0 - s1);
+    let x = [a.0 + (b.0 - a.0) * t - q[0][0], a.1 + (b.1 - a.1) * t - q[0][1], z - q[0][2]];
+    let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let (l1, l2) = (dot(e1, e1), dot(e2, e2));
+    if !(l1 > 1e-12 && l2 > 1e-12) {
+        return false;
+    }
+    let (al, be) = (dot(x, e1) / l1, dot(x, e2) / l2);
+    (0.0..=1.0).contains(&al) && be > 1e-6 && be < 1.0 - 1e-6
+}
+
+impl RoofSheet {
+    /// Oberkante minus `z` über dem Grundriss-Punkt (`None`: kein Dach), nur wo die Unterkante echt unter
+    /// `z` liegt oder die Oberkante darunter (Strahl über dem Dach).
+    fn above(&self, x: f64, y: f64, z: f64) -> Option<f64> {
+        let b = self.bounds;
+        if x < b[0] || x > b[2] || y < b[1] || y > b[3] {
+            return None;
+        }
+        self.top.iter().zip(&self.under).filter(|(t, _)| t.contains(x, y)).map(|(t, u)| if u.z(x, y) < z - 1e-4 { t.z(x, y) - z } else { -1.0 }).reduce(f64::max)
+    }
+}
+
+/// Wandflächen unter Dächern ([G2]) gegen die Dachscheiben vor ihnen: Ecken, deren Sichtstrahl (zum
+/// Betrachter) durch ein Dach läuft, sind verdeckt. Ganz verdeckte Flächen entfallen (Oberseiten,
+/// Laibungen und Stirnen innen unter dem Dach); bei senkrechten Kanten wird die Fläche auf die Höhe
+/// gekappt, ab der das Dach sie verdeckt (Traufe vor der Wand). Ersetzt keine HLR ([G4]).
+fn cull_under_roofs(p: &Project, frame: &[f64; 9], walls: &[RWall], faces: &mut Vec<Face>) {
+    let affected: std::collections::HashSet<&str> = walls.iter().filter(|w| w.top_plane.is_some() || w.joint != [false; 2]).map(|w| w.wall_id.as_str()).collect();
+    if affected.is_empty() {
+        return;
+    }
+    let sheets: Vec<RoofSheet> = p
+        .roofs
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|r| {
+            let g = crate::roof::roof_geometry(&r.params(), p.roof_base_elevation(r));
+            let total: f64 = p.roof_layers(r).iter().map(|l| l.thickness.max(0.0)).sum();
+            let top = crate::wall_bands::plane_facets(&g.planes, 0.0);
+            let under = crate::wall_bands::plane_facets(&g.planes, total);
+            let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+            for q in g.planes.iter().flatten() {
+                b = [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])];
+            }
+            // Stirnflächen, die in einem anderen Dach stecken (Kehlen verschnittener Dächer), verdecken nicht.
+            let others: Vec<Vec<[f64; 3]>> = p
+                .roofs
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .filter(|o| o.id != r.id && o.floor_id == r.floor_id)
+                .flat_map(|o| crate::roof::roof_geometry(&o.params(), p.roof_base_elevation(o)).planes)
+                .collect();
+            let fascia = fascia_quads(&g.planes, total)
+                .into_iter()
+                .filter(|q| !others.iter().any(|o| crate::dormer::point_in_xy((q[0][0] + q[1][0]) / 2.0, (q[0][1] + q[1][1]) / 2.0, o)))
+                .collect();
+            RoofSheet { top, under, fascia, bounds: b }
+        })
+        .filter(|s| s.top.len() == s.under.len() && !s.top.is_empty())
+        .collect();
+    if sheets.is_empty() {
+        return;
+    }
+    let (o, n, u) = ([frame[0], frame[2]], [frame[3], frame[5]], [frame[6], frame[8]]);
+    let reach = sheets.iter().map(|s| (s.bounds[2] - s.bounds[0]).max(s.bounds[3] - s.bounds[1])).fold(0.0, f64::max) + 1.0;
+    // Gaubenstirnen und -wangen als senkrechte Verdecker (lokal u, v; z von der Hauptdach-Unterkante bis
+    // zum Gaubendach).
+    let dormers: Vec<crate::dormer::DormerGeom> = p
+        .roofs
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .flat_map(|r| r.dormers.as_deref().unwrap_or(&[]).iter().filter_map(move |d| crate::dormer::geometry(p, r, d)))
+        .collect();
+    let dormer_hit = |a: (f64, f64), b: (f64, f64), z: f64| -> bool {
+        dormers.iter().any(|g| {
+            let (la, lb) = (g.frame.local(a.0, a.1), g.frame.local(b.0, b.1));
+            let hw = g.width / 2.0;
+            let z_ok = |u: f64, v: f64| z >= g.frame.main_top(v) - g.main_thickness * 2.0 && z <= g.under(u, v) + g.roof_vertical();
+            // Stirn (v = 0) oder Wange (|u| = hw) gekreuzt.
+            let front = (la[1] > 0.0) != (lb[1] > 0.0) && la[0].abs() <= hw && z_ok(la[0], 0.0);
+            let cheek = (la[0].abs() < hw) != (lb[0].abs() < hw) && la[1] >= 0.0 && la[1] <= g.hole_v(la[0]) && z_ok(la[0].clamp(-hw, hw), la[1]);
+            front || cheek
+        })
+    };
+    // Verdeckt: der Strahl zum Betrachter (−n im Grundriss) kreuzt die Dachoberfläche von unten nach
+    // oben gesehen (erst darunter, näher zum Betrachter darüber) oder eine Gaubenwand.
+    let hidden = |x: f64, y: f64, z: f64| -> bool {
+        let steps = ((reach / 0.04).ceil() as usize).min(5000);
+        let mut under = false;
+        let mut prev = (x, y);
+        let at = |t: f64| sheets.iter().filter_map(|s| s.above(x - n[0] * t, y - n[1] * t, z)).reduce(f64::max);
+        for i in 1..=steps {
+            let t = i as f64 * 0.04;
+            let q = (x - n[0] * t, y - n[1] * t);
+            if dormer_hit(prev, q, z) || sheets.iter().any(|s| s.fascia.iter().any(|f| crosses_fascia(f, prev, q, z))) {
+                return true;
+            }
+            prev = q;
+            match at(t) {
+                Some(d) if d >= 0.0 => under = true,
+                Some(_) if under => return true,
+                None if under => {
+                    // Aus der Scheibe heraus (Traufkante): Oberkante genau an der Kante unter z?
+                    let (mut lo, mut hi) = (t - 0.04, t);
+                    for _ in 0..30 {
+                        let m = (lo + hi) / 2.0;
+                        if at(m).is_some() {
+                            lo = m;
+                        } else {
+                            hi = m;
+                        }
+                    }
+                    if at(lo).is_some_and(|d| d < -1e-6) {
+                        return true;
+                    }
+                    under = false;
+                }
+                _ => {}
+            }
+        }
+        false
+    };
+    faces.retain_mut(|f| {
+        if f.role != Role::Wall || !affected.contains(f.id.as_str()) || f.pts.len() < 3 {
+            return true;
+        }
+        // Tiefe je Ecke aus der Flächenebene (Normale in Welt x, Höhe, Grundriss-y).
+        let k = f.normal[0] * n[0] + f.normal[2] * n[1];
+        if k.abs() < 1e-9 {
+            return true;
+        }
+        let m = f.pts.len() as f64;
+        let (cu, cv) = (f.pts.iter().map(|q| q[0]).sum::<f64>() / m, f.pts.iter().map(|q| q[1]).sum::<f64>() / m);
+        let nu = f.normal[0] * u[0] + f.normal[2] * u[1];
+        let world = |q: Pt| -> (f64, f64, f64) {
+            let d = f.depth + (nu * (cu - q[0]) + f.normal[1] * (cv - q[1])) / k;
+            (o[0] + u[0] * q[0] + n[0] * d, o[1] + u[1] * q[0] + n[1] * d, q[1])
+        };
+        let hid: Vec<bool> = f.pts.iter().map(|&q| {
+            let (x, y, z) = world(q);
+            hidden(x, y, z - 1e-6)
+        }).collect();
+        if hid.iter().all(|h| *h) {
+            return false;
+        }
+        if !hid.iter().any(|h| *h) {
+            return true;
+        }
+        // Verdeckte Ecke mit sichtbarer Ecke senkrecht darunter: auf die Verdeckungsgrenze senken.
+        let pts = f.pts.clone();
+        for i in 0..pts.len() {
+            if !hid[i] {
+                continue;
+            }
+            let Some(j) = (0..pts.len()).find(|&j| !hid[j] && (pts[j][0] - pts[i][0]).abs() < 1e-6 && pts[j][1] < pts[i][1]) else { continue };
+            let (x, y, _) = world(pts[i]);
+            let (mut lo, mut hi) = (pts[j][1], pts[i][1]);
+            for _ in 0..40 {
+                let mid = (lo + hi) / 2.0;
+                if hidden(x, y, mid) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            f.pts[i][1] = lo;
+        }
+        true
+    });
+}
+
 /// `elevationFrame` flach: `[P, N, U]`.
 fn frame_of(plane: &super::section::Plane) -> [f64; 9] {
     let [nx, ny, nz] = plane.normal;
@@ -97,12 +320,20 @@ struct RoofIn {
 fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[RoofIn]) -> Vec<Face> {
     let mut w = vec![walls.len() as f64];
     // Mit Schnittlinien (Bogen-Teilkörper, [T2]): die Ecken liegen auf der Gehrung statt rechtwinklig.
-    let cut = walls.iter().any(|x| x.start_cut.is_some() || x.end_cut.is_some() || x.joint != [false; 2]);
+    let planes = walls.iter().any(|x| x.top_plane.is_some());
+    let cut = planes || walls.iter().any(|x| x.start_cut.is_some() || x.end_cut.is_some() || x.joint != [false; 2]);
     for x in walls {
         w.extend([x.start[0], x.start[1], x.end[0], x.end[1], x.thickness, x.height, x.base_elevation]);
         if cut {
             w.extend(corner_shifts(x));
             w.extend([if x.joint[0] { 1.0 } else { 0.0 }, if x.joint[1] { 1.0 } else { 0.0 }]);
+        }
+        // Ebene Oberkante unter einem Dach ([G2]).
+        if planes {
+            match x.top_plane {
+                Some(c) => w.extend([1.0, c[0], c[1], c[2]]),
+                None => w.extend([0.0; 4]),
+            }
         }
     }
     let mut sl = vec![slabs.len() as f64];
@@ -175,7 +406,10 @@ pub(crate) fn corner_shifts(x: &RWall) -> [f64; 4] {
 }
 
 /// `collectRoofFaces`.
-fn collect_roof_faces(p: &Project, frame: &[f64; 9]) -> Result<Vec<Face>, String> {
+fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall]) -> Result<Vec<Face>, String> {
+    // Giebeldreiecke nur ohne Wand darunter ([G2]): sonst zeigt die Ansicht die Giebelwand selbst.
+    let reached: std::collections::HashSet<&str> = walls.iter().filter(|w| w.top_plane.is_some()).map(|w| w.wall_id.as_str()).collect();
+    let floors: std::collections::HashSet<&str> = p.walls.iter().filter(|w| reached.contains(w.id.as_str())).map(|w| w.floor_id.as_str()).collect();
     let mut roofs = Vec::new();
     for (ri, roof) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate() {
         let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
@@ -209,7 +443,29 @@ fn collect_roof_faces(p: &Project, frame: &[f64; 9]) -> Result<Vec<Face>, String
                     .collect()
             };
             // Wie die übrigen Dächer: Oberfläche der Eindeckung (Dach + Gaubendächer), dazu die Gaubenwände.
-            roofs.push(RoofIn { id: roof.id.clone(), fill, planes: crate::roof_assembly::planar_faces(&solids.top, &front(&solids.top)), gables: g.gables.clone() });
+            // Wände reichen ans Dach ([G2]): Stirnflächen der Ränder, die nicht in einem anderen Dach stecken.
+            let gables = if floors.contains(roof.floor_id.as_str()) {
+                let total: f64 = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).sum();
+                let others: Vec<Vec<[f64; 3]>> = p
+                    .roofs
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter(|o| o.id != roof.id && o.floor_id == roof.floor_id)
+                    .flat_map(|o| crate::roof::roof_geometry(&o.params(), p.roof_base_elevation(o)).planes)
+                    .collect();
+                fascia_quads(&g.planes, total)
+                    .into_iter()
+                    .filter(|q| {
+                        let (mx, my) = ((q[0][0] + q[1][0]) / 2.0, (q[0][1] + q[1][1]) / 2.0);
+                        !others.iter().any(|o| crate::dormer::point_in_xy(mx, my, o))
+                    })
+                    .map(|q| q.to_vec())
+                    .collect()
+            } else {
+                g.gables.clone()
+            };
+            roofs.push(RoofIn { id: roof.id.clone(), fill, planes: crate::roof_assembly::planar_faces(&solids.top, &front(&solids.top)), gables });
             let wall_comp = solids.parts.iter().find(|pt| pt.role == crate::roof_assembly::Role::DormerWall && pt.layer == 0).and_then(|pt| p.component(&pt.component_id));
             let wf = wall_comp.map_or([0.85, 0.83, 0.8], |c| hex_to_rgb(&c.color, [0.85, 0.83, 0.8]));
             let wall_faces = crate::roof_assembly::planar_faces(&solids.walls, &front(&solids.walls));
@@ -218,7 +474,14 @@ fn collect_roof_faces(p: &Project, frame: &[f64; 9]) -> Result<Vec<Face>, String
             }
             continue;
         }
-        roofs.push(RoofIn { id: roof.id.clone(), fill, planes: g.planes.clone(), gables: g.gables.clone() });
+        // Wände reichen ans Dach: statt der Giebeldreiecke die Stirnflächen der Dachscheibe (Traufe, Ortgang).
+        let gables = if floors.contains(roof.floor_id.as_str()) {
+            let total: f64 = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).sum();
+            fascia_quads(&g.planes, total).into_iter().map(|q| q.to_vec()).collect()
+        } else {
+            g.gables.clone()
+        };
+        roofs.push(RoofIn { id: roof.id.clone(), fill, planes: g.planes.clone(), gables });
     }
     Ok(project_faces(frame, &[], &[], &roofs))
 }
@@ -263,6 +526,10 @@ fn extend_wall_corners(p: &Project, rwalls: &mut [RWall], u: (f64, f64)) {
             if let Some(&i) = pieces.iter().find(|&&i| close(rwalls[i].start, w.start)) {
                 let s = rwalls[i].start;
                 rwalls[i].start = [s[0] - ux * e_start, s[1] - uz * e_start];
+                // Ebene Oberkante bezieht sich auf den Anfang ([G2]).
+                if let Some(c) = rwalls[i].top_plane.as_mut() {
+                    c[0] -= (c[1] * ux + c[2] * uz) * e_start;
+                }
             }
         }
         if e_end > EPS {
@@ -740,7 +1007,8 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     slabs.extend(model3d::emit_stairs(p, false));
     extend_wall_corners(p, &mut walls, (frame[6], frame[8]));
     let mut faces = project_faces(&frame, &walls, &slabs, &[]);
-    faces.extend(collect_roof_faces(p, &frame)?);
+    cull_under_roofs(p, &frame, &walls, &mut faces);
+    faces.extend(collect_roof_faces(p, &frame, &walls)?);
 
     // Kategorie einer Fläche (erstes Element mit der id, wie `find`).
     let mut wall_cat: HashMap<&str, &str> = HashMap::new();
@@ -915,7 +1183,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         // die Haarfugen zwischen ihnen.
         let fill = fill_for(f.fill);
         let seam = is_roof && assembled.contains(f.id.as_str());
-        let mut prim = if seam { polygon(pts, &fill, &fill, 0.05, no_hatch()) } else { polygon(pts, &fill, "none", 0.0, no_hatch()) };
+        let mut prim = if seam { polygon(pts, &fill, &fill, 0.15, no_hatch()) } else { polygon(pts, &fill, "none", 0.0, no_hatch()) };
         if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, .. } = &mut prim {
             *g = Some(greyed(f));
             if !f.id.is_empty() {
@@ -1336,6 +1604,55 @@ mod tests {
         serde_json::to_string(&prims).unwrap()
     }
 
+    /// [G2] Wände unter dem Dach: in der Traufansicht verdeckt das Dach Giebel- und Innenwände (keine
+    /// Wandfläche über der Traufkante), in der Giebelansicht steht die Giebelwand bis unter das Dach.
+    #[test]
+    fn waende_unter_dem_dach_in_der_ansicht() {
+        let p: Project = serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "drawings2d": [], "openings": [],
+            "drawingLevels": [
+                {"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0},
+                {"id": "s", "name": "S", "kind": "elevation", "visible": true, "locked": false, "linePoints": [{"x": -2, "y": -3}, {"x": 12, "y": -3}], "directionSign": 1},
+                {"id": "w", "name": "W", "kind": "elevation", "visible": true, "locked": false, "linePoints": [{"x": -3, "y": 10}, {"x": -3, "y": -2}], "directionSign": 1}
+            ],
+            "walls": [
+                {"id": "WS", "type": "wall", "floorId": "F", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 10, "y": 0}, "height": 3.5},
+                {"id": "WW", "type": "wall", "floorId": "F", "categoryCode": "20", "start": {"x": 0, "y": 8}, "end": {"x": 0, "y": 0}, "height": 9.0},
+                {"id": "WI", "type": "wall", "floorId": "F", "categoryCode": "20", "start": {"x": 5, "y": 0}, "end": {"x": 5, "y": 8}, "height": 9.0}
+            ],
+            "roofs": [{"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35",
+                "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}],
+                "shape": "sattel", "pitchDeg": 45, "overhang": 0.5, "overhangGable": 0.3, "ridgeAxis": "x", "thickness": 0.3}]
+        }))
+        .unwrap();
+        let view = |id: &str| {
+            let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
+            let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+            elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap().0
+        };
+        let wall_top = |prims: &[Primitive], id: &str| -> f64 {
+            prims
+                .iter()
+                .filter_map(|q| match q {
+                    Primitive::Polygon { pts, wall_id: Some(w), .. } if w == id => Some(pts.iter().map(|v| v.y).fold(f64::NEG_INFINITY, f64::max)),
+                    _ => None,
+                })
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        // Traufe: Oberkante der Dachfläche an der Vorderkante (tiefster Punkt der Dachflächen).
+        let r = &p.roofs.as_ref().unwrap()[0];
+        let eave = crate::roof::roof_geometry(&r.params(), p.roof_base_elevation(r)).planes.iter().flatten().map(|q| q[2]).fold(f64::INFINITY, f64::min);
+        let s = view("s");
+        // Sichtbar bis unter die Traufstirn (Dicke 0.3 senkrecht zur 45°-Fläche: 0.3·cos 45° tiefer).
+        let fascia = eave - 0.3 * 0.5f64.sqrt();
+        assert!(wall_top(&s, "WW") <= fascia + 1e-3 && wall_top(&s, "WI") <= fascia + 1e-3, "{} {} {fascia}", wall_top(&s, "WW"), wall_top(&s, "WI"));
+        assert!((wall_top(&s, "WS") - fascia).abs() < 1e-3, "Traufwand bis zur Traufstirn sichtbar: {}", wall_top(&s, "WS"));
+        // Giebel: First-Unterkante = Traufkante 3.0 + 4.5 (bei 45°) − 0.3·√2.
+        let w = view("w");
+        let ridge_under = 7.5 - 0.3 * 2f64.sqrt();
+        assert!((wall_top(&w, "WW") - ridge_under).abs() < 1e-6, "{}", wall_top(&w, "WW"));
+    }
+
     /// [T2] Bogenwand in der Ansicht: keine Facetten-Fugen der Sehnen-Teilkörper, Umriss bleibt.
     #[test]
     fn bogenwand_ohne_facettenfugen() {
@@ -1400,7 +1717,14 @@ mod tests {
         assert!(o1.len() == 2 && o1.iter().all(|n| *n >= 40), "Rahmen + Glas als Ellipse: {o1:?}");
         assert_eq!(polys("DF"), vec![4, 4], "Dachfenster: Rahmen + Glas");
         let first_df = prims.iter().position(|pr| matches!(pr, Primitive::Polygon { opening_id: Some(o), .. } if o == "DF")).unwrap();
-        let last_roof = prims.iter().rposition(|pr| matches!(pr, Primitive::Polygon { roof_id: Some(_), .. })).unwrap();
+        // Dachflächen, die das Dachfenster überdecken (die Traufstirn [G2] liegt davor, berührt es nicht).
+        let bb = |pts: &[Vec2]| pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q.x), b[1].min(q.y), b[2].max(q.x), b[3].max(q.y)]);
+        let Primitive::Polygon { pts: df_pts, .. } = &prims[first_df] else { unreachable!() };
+        let d = bb(df_pts);
+        let last_roof = prims
+            .iter()
+            .rposition(|pr| matches!(pr, Primitive::Polygon { roof_id: Some(_), pts, .. } if { let r = bb(pts); r[0] < d[2] && r[2] > d[0] && r[1] < d[3] && r[3] > d[1] }))
+            .unwrap();
         assert!(first_df > last_roof, "Dachfenster vor der Dachfläche gezeichnet");
     }
 

@@ -324,6 +324,7 @@ fn wall_input(w: &RWall) -> render3d::WallInput {
         height: json_f32(w.height),
         base_elevation: json_f32(w.base_elevation),
         top_drop: w.top_drop.map_or([0.0, 0.0], f32s2),
+        top_plane: w.top_plane.map(f32s3),
         color: f32s3(w.color),
         openings: Vec::new(),
         layers: Some(Vec::new()),
@@ -3008,5 +3009,86 @@ mod abzug_faelle {
         let area = (0..pts.len()).map(|i| { let (a, b) = (pts[i], pts[(i + 1) % pts.len()]); a.0 * b.1 - b.0 * a.1 }).sum::<f64>().abs() / 2.0;
         assert!((area - (4.0 * 2.5 - 0.6 * 1.0)).abs() < 1e-6, "{area}");
         assert_eq!(out[0].nse.as_ref().map(|n| n.len()), Some(2), "Schlüsselloch-Stege ungestrichen");
+    }
+}
+
+/// [G2] Wand an Dach: Schnitt und 3D-Körper der Wände unter einem Satteldach.
+#[cfg(test)]
+mod wand_an_dach {
+    use super::*;
+
+    fn haus() -> Project {
+        serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "drawings2d": [],
+            "drawingLevels": [
+                {"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0},
+                {"id": "q", "name": "Q", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": 2, "y": -2}, {"x": 2, "y": 10}], "directionSign": 1},
+                {"id": "l", "name": "L", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": -2, "y": 4}, {"x": 12, "y": 4}], "directionSign": 1}
+            ],
+            "walls": [
+                {"id": "WS", "type": "wall", "floorId": "F", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 10, "y": 0}, "height": 3.5},
+                {"id": "WW", "type": "wall", "floorId": "F", "categoryCode": "20", "start": {"x": 0, "y": 8}, "end": {"x": 0, "y": 0}, "height": 9.0},
+                {"id": "WB", "type": "wall", "floorId": "F", "categoryCode": "20", "start": {"x": 6, "y": 1}, "end": {"x": 6, "y": 7}, "height": 9.0, "bulge": 0.4}
+            ],
+            "openings": [{"id": "F1", "type": "opening", "hostWallId": "WW", "categoryCode": "21", "kind": "window", "position": 3.5, "width": 1.0, "height": 1.2, "sillHeight": 3.6}],
+            "roofs": [{"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35",
+                "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}],
+                "shape": "sattel", "pitchDeg": 45, "overhang": 0.5, "ridgeAxis": "x", "thickness": 0.3}]
+        }))
+        .unwrap()
+    }
+
+    /// Dach-Unterkante (Traufkante 3.0 bei y = −0.5, 45°, Dicke 0.3 senkrecht).
+    fn under(y: f64) -> f64 {
+        3.0 + (4.5 - (y - 4.0).abs()) - 0.3 * 2f64.sqrt()
+    }
+
+    #[test]
+    fn schnitt_endet_an_der_dachunterkante() {
+        let p = haus();
+        for id in ["q", "l"] {
+            let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
+            let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+            let out = compute_section(&p, &level, &[]).unwrap().unwrap();
+            let walls: Vec<&Cut> = out.cuts.iter().filter(|c| c.kind == Kind::Wall).collect();
+            assert!(!walls.is_empty());
+            let top = walls.iter().flat_map(|c| c.pts.iter().map(|q| q[1])).fold(f64::NEG_INFINITY, f64::max);
+            // Nie über der First-Unterkante.
+            assert!(top <= under(4.0) + 1e-4, "{id}: {top}");
+        }
+        // Querschnitt quer zum First: Traufwand mit schräger Krone.
+        let l = p.drawing_levels.iter().find(|l| l.id == "q").unwrap();
+        let out = compute_section(&p, &LevelSpec::from_json(&serde_json::to_value(l).unwrap()), &[]).unwrap().unwrap();
+        let sloped = out.cuts.iter().filter(|c| c.kind == Kind::Wall).any(|c| {
+            let ys: Vec<f64> = c.pts.iter().map(|q| q[1]).filter(|v| *v > 2.0).collect();
+            ys.len() >= 2 && (ys.iter().copied().fold(f64::NEG_INFINITY, f64::max) - ys.iter().copied().fold(f64::INFINITY, f64::min)) > 0.1
+        });
+        assert!(sloped, "Traufwand im Querschnitt mit schräger Krone");
+    }
+
+    #[test]
+    fn koerper_dicht_und_volumen_exakt() {
+        let p = haus();
+        let walls = model3d::emit_walls(&p, true).unwrap();
+        let ww: Vec<&RWall> = walls.iter().filter(|w| w.wall_id == "WW").collect();
+        let mut vol = 0.0;
+        for w in walls.iter().filter(|w| w.top_plane.is_some()) {
+            let m = model3d::wall_piece_mesh(w).unwrap();
+            assert!(m.is_closed(), "{w:?}");
+            assert!((m.volume().abs() - model3d::wall_piece_volume(w)).abs() < 1e-9);
+        }
+        for w in &ww {
+            assert!(w.holes.as_ref().is_none_or(|h| h.is_empty()), "Fenster unter dem Dach als Teilkörper: {w:?}");
+            vol += model3d::wall_piece_volume(w);
+        }
+        // Giebelwand: Fünfeck unter der Unterkante × Dicke, minus Fenster.
+        let t = p.wall_thickness(&p.walls[1], 0.2);
+        let area = |y0: f64, y1: f64| (y1 - y0) * (under(y0) + under(y1)) / 2.0;
+        let expect = t * (area(0.0, 4.0) + area(4.0, 8.0) - 1.2);
+        // Gehrungen an den Ecken ändern das Volumen nur an den Enden.
+        assert!((vol - expect).abs() < t * t * 7.0, "{vol} vs {expect}");
+        // Bogenwand ([T2]): Sehnen-Teilwände ebenfalls unter dem Dach.
+        let wb: Vec<&RWall> = walls.iter().filter(|w| w.wall_id == "WB").collect();
+        assert!(wb.len() > 4 && wb.iter().all(|w| w.base_elevation + w.height <= under(4.0) + 1e-6), "{}", wb.len());
     }
 }

@@ -342,6 +342,19 @@ struct Prism {
     cut: Option<CutBandMeta>,
     /// Monolith-Gruppe (siehe `SlabInput::monolith`); Waende: immer `None`.
     monolith: Option<String>,
+    /// Ebene Oberkante unter einer Dachfläche ([G2], `WallInput::top_plane`): Ursprung (Grundriss)
+    /// und `[z, dz/dx, dz/dy]`; `z1` ist dann der höchste Eckwert.
+    top: Option<(Point2, [f32; 3])>,
+}
+
+impl Prism {
+    /// Oberkante an einem Grundriss-Punkt.
+    fn top_at(&self, p: Point2) -> f32 {
+        match self.top {
+            Some((o, c)) => (c[0] + c[1] * (p[0] - o[0]) + c[2] * (p[1] - o[1])).clamp(self.z0, self.z1),
+            None => self.z1,
+        }
+    }
 }
 
 /// Wandachse + Oeffnungen, wie sie fuer die Oeffnungs-Zuordnung bei Cut-
@@ -433,6 +446,7 @@ fn wall_prism(index: usize, wall: &WallInput) -> Option<Prism> {
         }),
         cut: wall.cut.clone(),
         monolith: None,
+        top: wall.top_plane.map(|c| (wall.start, c)),
     })
 }
 
@@ -457,6 +471,7 @@ fn slab_prism(index: usize, slab: &SlabInput) -> Option<Prism> {
         wall_axis: None,
         cut: slab.cut.clone(),
         monolith: slab.monolith.clone(),
+        top: None,
     })
 }
 
@@ -884,7 +899,7 @@ fn prism_wireframe_edges(prism: &Prism) -> Vec<([f32; 3], [f32; 3], HeightBias)>
     for i in 0..n {
         edges.push((
             to_world(prism.footprint[i], prism.z0),
-            to_world(prism.footprint[i], prism.z1),
+            to_world(prism.footprint[i], prism.top_at(prism.footprint[i])),
             HeightBias::Vertical,
         ));
     }
@@ -892,7 +907,9 @@ fn prism_wireframe_edges(prism: &Prism) -> Vec<([f32; 3], [f32; 3], HeightBias)>
         let a = prism.footprint[i];
         let b = prism.footprint[(i + 1) % n];
         edges.push((to_world(a, prism.z0), to_world(b, prism.z0), HeightBias::BottomCap));
-        edges.push((to_world(a, prism.z1), to_world(b, prism.z1), HeightBias::TopCap));
+        // Schräge Deckelkante ([G2]): Höhe variiert, geschlossene Randbehandlung.
+        let bias = if prism.top.is_some() { HeightBias::Vertical } else { HeightBias::TopCap };
+        edges.push((to_world(a, prism.top_at(a)), to_world(b, prism.top_at(b)), bias));
     }
     edges
 }
@@ -1176,6 +1193,16 @@ pub fn cut_section(
         for (u0, u1) in footprint_u_intervals(plane, &prism.cut_footprint) {
             let (lo, hi) = (u0.min(u1), u0.max(u1));
             for (rlo, rhi, rz0, rz1) in wall_cut_rectangles(plane, prism, lo, hi) {
+                // Ebene Oberkante ([G2]): Deckelkante längs der Schnittlinie schräg.
+                let (za, zb) = if prism.top.is_some() && rz1 >= prism.z1 {
+                    let at = |u: f32| {
+                        let (p0, ua) = (plane.plan_point(), plane.plan_u_axis());
+                        prism.top_at([p0[0] + u * ua[0], p0[1] + u * ua[1]])
+                    };
+                    (at(rlo), at(rhi))
+                } else {
+                    (rz1, rz1)
+                };
                 cut_polygons.push(CutPolygon {
                     component: ComponentRef {
                         kind: prism.kind,
@@ -1183,7 +1210,7 @@ pub fn cut_section(
                     },
                     color: prism.color,
                     hatch: prism.hatch,
-                    pts: vec![[rlo, rz0], [rhi, rz0], [rhi, rz1], [rlo, rz1]],
+                    pts: vec![[rlo, rz0], [rhi, rz0], [rhi, zb], [rlo, za]],
                     cut: prism.cut.clone(),
                 });
             }
@@ -1227,6 +1254,7 @@ mod tests {
         let walls = vec![
             WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
                 start: [0.0, 0.0],
                 end: [0.0, 3.0],
                 thickness: 0.2,
@@ -1244,6 +1272,7 @@ mod tests {
             },
             WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
                 start: [0.0, 3.0],
                 end: [3.0, 3.0],
                 thickness: 0.2,
@@ -1322,6 +1351,7 @@ mod tests {
     fn wand_vor_der_ebene_verdeckt_nichts_dahinter() {
         let mk = |start: [f32; 2], end: [f32; 2]| WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start,
             end,
             thickness: 0.2,
@@ -1543,6 +1573,7 @@ mod tests {
     fn wall_with_window() -> WallInput {
         WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [4.0, 0.0],
             thickness: 0.2,
@@ -1563,6 +1594,25 @@ mod tests {
             start_cut: None,
             end_cut: None,
         }
+    }
+
+    #[test]
+    fn ebene_oberkante_schraeg_im_schnitt_und_in_der_projektion() {
+        // Traufwand längs x (y −0.1 … 0.1), Oberkante steigt quer zur Wand: z = 2.5 + 1·y.
+        let mut w = wall_with_window();
+        w.openings.clear();
+        w.height = 2.6;
+        w.top_plane = Some([2.5, 0.0, 1.0]);
+        // Schnitt quer zur Wand (Ebene x = 2, Blick +x): u längs −y.
+        let out = cut_section(&SectionPlane::looking_plus_x(2.0), &[w.clone()], &[], &[]);
+        let c = &out.cut_polygons[0];
+        let tops: Vec<f32> = c.pts.iter().map(|p| p[1]).filter(|v| *v > 1.0).collect();
+        assert_eq!(tops.len(), 2);
+        assert!((tops[0] - tops[1]).abs() > 0.19 && tops.iter().all(|v| (*v - 2.5).abs() <= 0.1 + 1e-5), "{:?}", c.pts);
+        // Mesh: jede Deckel-Ecke auf der Ebene.
+        let m = crate::mesh::build_walls_mesh(&[w]);
+        let ys: Vec<f32> = m.verts.chunks(9).filter(|p| p[1] > 1.0).map(|p| p[1] - (2.5 + p[2])).collect();
+        assert!(!ys.is_empty() && ys.iter().all(|d| d.abs() < 1e-5), "{ys:?}");
     }
 
     #[test]
@@ -1640,6 +1690,7 @@ mod tests {
         let w0 = wall_with_window();
         let w1 = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [2.0, 1.0],
             end: [4.0, 1.0],
             thickness: 0.2,
@@ -1761,6 +1812,7 @@ mod tests {
     fn cut_section_mit_wand_und_dach_liefert_beide_cut_polygone() {
         let wall = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [2.0, -1.0],
             end: [2.0, 1.0],
             thickness: 0.3,

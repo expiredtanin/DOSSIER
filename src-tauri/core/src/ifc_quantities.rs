@@ -115,8 +115,14 @@ pub fn wall_quantities(start: Vec2, end: Vec2, bands: &[&RWall], cutouts: &[Cuto
         z_min = min(z_min, b.base_elevation);
         z_max = max(z_max, b.base_elevation + b.height);
         let drop = b.top_drop.map_or(0.0, |d| (d[0] + d[1]) / 2.0);
-        if sloped_band(b) {
+        if sloped_band(b) || b.top_plane.is_some() {
             sloped = true;
+        }
+        if b.top_plane.is_some() {
+            // Ebene Oberkante unter einem Dach ([G2]): exakt über die Grundfläche.
+            gross += crate::model3d::wall_piece_volume(b);
+            tallest = max(tallest, b.height);
+            continue;
         }
         gross += l * b.thickness * (b.height - drop);
         tallest = max(tallest, b.height - drop);
@@ -235,6 +241,33 @@ pub fn roof_quantities(planes: &[Vec<[f64; 3]>]) -> Vec<Qty> {
     vec![area("GrossArea", sloped), area("NetArea", sloped), area("ProjectedArea", projected)]
 }
 
+/// Eine Gaube für die Mengen ([G5]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DormerIn {
+    pub width: f64,
+    pub front_height: f64,
+    /// Geneigte Fläche des Ausschnitts im Hauptdach.
+    pub opening_area: f64,
+    pub wall_volume: f64,
+    pub roof_volume: f64,
+}
+
+/// Gauben eines Dachs, summiert: Anzahl als Länge der Breiten (`Width`), grösste Stirnhöhe, Ausschnitt
+/// im Hauptdach, Volumen der Gaubenwände und -dächer. Leer ohne Gauben.
+pub fn dormer_quantities(d: &[DormerIn]) -> Vec<Qty> {
+    if d.is_empty() {
+        return Vec::new();
+    }
+    let sum = |f: fn(&DormerIn) -> f64| d.iter().map(f).sum::<f64>();
+    vec![
+        len("Width", sum(|x| x.width)),
+        len("FrontHeight", d.iter().map(|x| x.front_height).fold(0.0, f64::max)),
+        area("OpeningArea", sum(|x| x.opening_area)),
+        vol("WallVolume", sum(|x| x.wall_volume)),
+        vol("RoofVolume", sum(|x| x.roof_volume)),
+    ]
+}
+
 /// Stützen-Basismengen: Länge, Querschnitt, Mantel, Oberfläche und Volumen.
 pub fn column_quantities(footprint: &[Vec2], length: f64) -> Vec<Qty> {
     let cross = ring_area(footprint);
@@ -283,6 +316,7 @@ mod tests {
             height,
             base_elevation: base,
             top_drop: None,
+            top_plane: None,
             color: [0.5, 0.5, 0.5],
             layers: vec![],
             wall_id: "w".into(),

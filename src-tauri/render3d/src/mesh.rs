@@ -159,8 +159,9 @@ fn extrude_wall_with_miters(mesh: &mut Mesh, wall: &WallInput, miters: WallMiter
                 );
             } else {
                 let drop = if segments.len() == 1 { wall.top_drop } else { [0.0, 0.0] };
+                let plane = if segments.len() == 1 { wall.top_plane } else { None };
                 extrude_layer_segment(
-                    mesh, wall, n, length, a0, a1, y0, y1, drop, off_a, off_b, start_cut, end_cut,
+                    mesh, wall, n, length, a0, a1, y0, y1, drop, plane, off_a, off_b, start_cut, end_cut,
                     layer.color,
                 );
             }
@@ -240,6 +241,7 @@ fn extrude_layer_segment(
     y0: f32,
     y1: f32,
     top_drop: [f32; 2],
+    top_plane: Option<[f32; 3]>,
     off_a: f32,
     off_b: f32,
     start_cut: Option<MiterLine>,
@@ -285,14 +287,21 @@ fn extrude_layer_segment(
         top_drop[0] + (top_drop[1] - top_drop[0]) * t
     };
     let (ya, yb) = (y1 - drop_at(a0), y1 - drop_at(a1));
-    let t0 = w(g0, ya);
-    let t1 = w(g1, yb);
-    let t2 = w(g2, yb);
-    let t3 = w(g3, ya);
+    // Ebene Oberkante ([G2]): jede Ecke auf der Dach-Unterkante (auch quer über die Dicke).
+    let top_y = |g: Point2, fallback: f32| -> f32 {
+        match top_plane {
+            Some(p) => p[0] + p[1] * (g[0] - wall.start[0]) + p[2] * (g[1] - wall.start[1]),
+            None => fallback,
+        }
+    };
+    let t0 = w(g0, top_y(g0, ya));
+    let t1 = w(g1, top_y(g1, yb));
+    let t2 = w(g2, top_y(g2, yb));
+    let t3 = w(g3, top_y(g3, ya));
 
     // Sechs Seiten als Quads (Ecken CCW von aussen gesehen -> Normale zeigt raus).
     // Deckel oben (+Y): t0,t1,t2,t3 von oben CCW.
-    let top_normal = if ya == yb { [0.0, 1.0, 0.0] } else { quad_normal(t0, t1, t3) };
+    let top_normal = if ya == yb && top_plane.is_none() { [0.0, 1.0, 0.0] } else { quad_normal(t0, t1, t3) };
     push_quad(mesh, t0, t1, t2, t3, top_normal, color);
     // Boden unten (-Y): b0,b3,b2,b1 (von unten gesehen CCW).
     push_quad(mesh, b0, b3, b2, b1, [0.0, -1.0, 0.0], color);
@@ -1021,6 +1030,9 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
                 let dz = wall.end[1] - wall.start[1];
                 let len2 = (dx * dx + dz * dz).max(1e-12);
                 let y_at = |p: Point2| -> f32 {
+                    if let Some(q) = wall.top_plane {
+                        return q[0] + q[1] * (p[0] - wall.start[0]) + q[2] * (p[1] - wall.start[1]);
+                    }
                     let t = (((p[0] - wall.start[0]) * dx + (p[1] - wall.start[1]) * dz) / len2).clamp(0.0, 1.0);
                     y_top - (wall.top_drop[0] + (wall.top_drop[1] - wall.top_drop[0]) * t)
                 };
