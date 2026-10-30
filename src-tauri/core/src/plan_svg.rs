@@ -116,6 +116,35 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                     let pl = pts.iter().map(|q| format!("{},{}", xs(q.x), ys(q.y))).collect::<Vec<_>>().join(" ");
                     let fill = esc(part.str(f[0]).unwrap_or(""));
                     let stroke = esc(part.str(f[1]).unwrap_or(""));
+                    // Nicht gestrichene Kanten (Stossfugen, Lücken an Anschlüssen): Fläche ohne Strich,
+                    // die übrigen Kanten als offener Pfad — wie der GPU-Pfad (`stroke_polygon_outline`).
+                    let nse: Vec<usize> = match rec.nse {
+                        Some((o, len)) => part.view.pool(o, len)?.iter().filter(|e| e.is_finite() && **e >= 0.0).map(|e| *e as usize).collect(),
+                        None => Vec::new(),
+                    };
+                    if !nse.is_empty() && stroke != "none" && !stroke.is_empty() {
+                        let k = pts.len();
+                        let mut d = String::new();
+                        for e in 0..k {
+                            if nse.contains(&e) {
+                                continue;
+                            }
+                            if e == 0 || nse.contains(&(e - 1)) {
+                                d.push_str(&format!("M{},{}", xs(pts[e].x), ys(pts[e].y)));
+                            }
+                            let q = pts[(e + 1) % k];
+                            d.push_str(&format!(" L{},{}", xs(q.x), ys(q.y)));
+                        }
+                        out.push(format!("<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"none\"{}/>", op(greyed, opacity(4))));
+                        if !d.is_empty() {
+                            out.push(format!(
+                                "<path d=\"{d}\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{}\" stroke-linejoin=\"round\"{}/>",
+                                num(f[2] * mm_to_m),
+                                op(greyed, opacity(4))
+                            ));
+                        }
+                        continue;
+                    }
                     out.push(format!(
                         "<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\" stroke-linejoin=\"round\"{}/>",
                         num(f[2] * mm_to_m),

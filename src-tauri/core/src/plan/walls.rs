@@ -118,7 +118,7 @@ fn encode_wall_poche(w: &Wall, layers: &[f64], total: f64, ref_off: f64, gaps: &
     }
     b.push(cuts.span_cutouts.len() as f64);
     for c in &cuts.span_cutouts {
-        b.extend([c.from, c.to, c.off_a, c.off_b]);
+        b.extend([c.from, c.to, c.off_a, c.off_b, c.from_b, c.to_b]);
     }
     b.push(gaps.len() as f64);
     for g in gaps {

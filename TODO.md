@@ -1594,6 +1594,20 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   CLI-Grundriss/-Schnitt einer Aussenwand Putz/Dämmung/Backstein/Putz mit vier Varianten angesehen. Offen: Schnitt quer
   durch eine Leibung (Ebene parallel zur Wand) ohne Rücksprung; Mengen (Leibungsflächen je Schicht) nicht in der Fenster-
   liste; keine Rundbogen-/Dachfenster-Leibungen; nicht in der Tauri-App geprüft.
+- ◐ **[108] Schräge Wandanschlüsse exakt (T/L/X, ein- und mehrschichtig).** (30.10., Maintainer-Bug: schräger
+  T-Stoss) Die Nah-Putz-Aussparung der Durchgangswand (`joins::SpanCutout`) ist jetzt ein Parallelogramm
+  (`from/to` auf der Fläche, `from_b/to_b` auf der Rückgrat-Fläche) aus den echten Kern-Kanten des Abzweigs
+  — vorher Breite `Kern · sin θ` statt `/ sin θ` und versetzt (Lücke falsch, Schraffur ragte hinein, Fugen-
+  Linie quer durch die Lücke). Am Knoten-T bekommen beide Durchgangs-Hälften die Aussparung und eine nicht
+  gezeichnete Stossfuge; Kern ohne Nah-Putz (gleiches Bauteil) gibt eine flache Aussparung → Lücke in der
+  Flächenlinie. Grundriss (`plan_walls.rs`): Bänder/Fugen/Flächenlinie enden an den schrägen Lochseiten,
+  Fugen neben dem durchlaufenden Kern bis zur Rückgrat-Fläche. 3D (`wall_bands.rs`): Körper tragen
+  Schnittlinien (`Piece`/`RWall.startCut/endCut`), render3d verschneidet die Kanten damit statt
+  rechtwinklig an der Band-Mitte (Dreieck-Lücke weg); OBJ/STL/GLB (`mesh_data.rs`) und Live-Schnitt ebenso.
+  SVG-Export des Grundrisses beachtet jetzt `noStrokeEdges` (vorher Stossfugen/Gehrungen gestrichen).
+  Tests: Winkel 15°–165° ein-/mehrschichtig (Joins, Grundriss-Primitive, 3D-Rasterprüfung lückenlos/ohne
+  Doppelung für T, Knoten-T, L, X). Geprüft: cargo/vitest, CLI-Grundriss-SVG angesehen (Linux). Offen: 3D nur
+  per Rust-Test (kein Metal-Render), IFC/truck-Körper noch rechtwinklig, nicht in der Tauri-App geprüft. · S
 
 ## Priorität 4 — später
 

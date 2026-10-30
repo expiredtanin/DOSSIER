@@ -842,6 +842,17 @@ fn compute_wall_miters(walls: &[WallInput]) -> Vec<WallMiters> {
             apply_cut(&mut out, b, cut);
         }
     }
+    // Explizite Schnittlinien aus dem Kern (Gehrung, T-Stoss-Fläche, schräge Aussparungs-Seite)
+    // übersteuern die abgeleitete Gehrung — sie kennen auch Stösse ohne gemeinsamen Endpunkt.
+    let line = |c: [f32; 4]| MiterLine { point: [c[0], c[1]], dir: [c[2], c[3]] };
+    for (i, w) in walls.iter().enumerate() {
+        if let Some(c) = w.start_cut {
+            out[i].start = Some(line(c));
+        }
+        if let Some(c) = w.end_cut {
+            out[i].end = Some(line(c));
+        }
+    }
     out
 }
 
@@ -892,6 +903,15 @@ fn compute_free_wall_ends(walls: &[WallInput]) -> Vec<(bool, bool)> {
                     out[e.wall].1 = false;
                 }
             }
+        }
+    }
+    // Explizite Schnittlinie (Kern-Verschneidung): das Ende ist angeschlossen, nicht frei.
+    for (i, w) in walls.iter().enumerate() {
+        if w.start_cut.is_some() {
+            out[i].0 = false;
+        }
+        if w.end_cut.is_some() {
+            out[i].1 = false;
         }
     }
     out

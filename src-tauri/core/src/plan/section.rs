@@ -328,7 +328,13 @@ fn wall_input(w: &RWall) -> render3d::WallInput {
         material_index: None,
         hatch: None,
         cut: None,
+        start_cut: w.start_cut.map(f32s4),
+        end_cut: w.end_cut.map(f32s4),
     }
+}
+
+fn f32s4(v: [f64; 4]) -> [f32; 4] {
+    [json_f32(v[0]), json_f32(v[1]), json_f32(v[2]), json_f32(v[3])]
 }
 
 fn slab_input(s: &RSlab) -> render3d::SlabInput {

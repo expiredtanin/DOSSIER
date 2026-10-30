@@ -255,6 +255,8 @@ mod tests {
             hatch: None,
             material_index: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         }
     }
 

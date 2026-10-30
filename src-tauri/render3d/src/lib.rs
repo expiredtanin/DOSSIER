@@ -85,6 +85,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         }
     }
 
@@ -191,6 +193,28 @@ mod tests {
         assert!((max_idx as usize) < mesh.vertex_count());
     }
 
+    #[test]
+    fn explizite_schnittlinie_schraegt_das_wandende() {
+        // Schräger T-Stoss ([108]): der Anfang endet auf der Linie y = x (45°), nicht rechtwinklig.
+        let w = WallInput { start: [0.5, 0.0], end: [4.0, 0.0], start_cut: Some([0.0, 0.0, 1.0, 1.0]), ..wall_x(4.0, 0.2, 2.5) };
+        let mesh = build_walls_mesh(&[w.clone()]);
+        let mut on_line = 0;
+        for i in 0..mesh.vertex_count() {
+            let (p, _) = vert(&mesh, i);
+            assert!(p[0] >= -0.1 - 1e-5, "kein Punkt vor der Schnittlinie: {p:?}");
+            if p[0] < 0.2 {
+                assert!((p[0] - p[2]).abs() < 1e-5, "Anfangs-Ecke liegt auf y = x: {p:?}");
+                on_line += 1;
+            }
+        }
+        assert!(on_line > 0);
+        // Das geschnittene Ende ist angeschlossen: keine Schraffur-Kappe dort (nur am freien Ende).
+        let hatched = WallInput { hatch: Some(Hatch { pattern: 3, angle: 45.0, scale: 1.0, line_weight: 0.13, top_angle: None }), ..w };
+        let caps = build_free_wall_end_caps(&[hatched]);
+        let caps_free = build_free_wall_end_caps(&[WallInput { start_cut: None, ..wall_x_hatched(4.0, 0.2, 2.5) }]);
+        assert!(caps.len() < caps_free.len(), "angeschlossenes Ende ohne Kappe");
+    }
+
     /// `wall_x` mit gesetzter Bauteil-Schraffur (Voraussetzung fuer die Kappen).
     fn wall_x_hatched(len: f32, thickness: f32, height: f32) -> WallInput {
         WallInput {
@@ -293,6 +317,8 @@ mod tests {
                 material_index: None,
                 hatch: None,
                 cut: None,
+                start_cut: None,
+                end_cut: None,
             },
         ]);
         assert_eq!(mesh.vertex_count(), 2 * VERTS_PER_BOX);
@@ -376,6 +402,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         let mut mesh = Mesh::default();
         extrude_wall(&mut mesh, &w);
@@ -402,6 +430,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         let mesh = build_walls_mesh(&[w]);
         assert_eq!(mesh.vertex_count(), 0);
@@ -620,6 +650,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         let b = WallInput {
             top_drop: [0.0, 0.0],
@@ -635,6 +667,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         let mesh = build_walls_mesh(&[a, b]);
         assert_eq!(mesh.vertex_count(), 2 * VERTS_PER_BOX, "weiterhin zwei Quader");
@@ -699,6 +733,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         let walls = vec![
             mk([0.0, 0.0], [3.0, 0.0]),
@@ -732,6 +768,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         let walls = vec![
             mk([0.0, 0.0], [3.0, 0.0], 0.0),
@@ -825,6 +863,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         let mut b = a.clone();
         b.end = [0.0, 3.0];
