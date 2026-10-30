@@ -418,7 +418,7 @@ fn wall_openings(p: &Project, w: &Wall, openings: &[&Opening], with_recess: bool
     out
 }
 
-/// Schichteinzug der Öffnungen einer Wand für die Schichtbänder ([103]); Intervall und Höhe wie
+/// Schichteinzug der Öffnungen einer Wand für die Schichtbänder ([104]); Intervall und Höhe wie
 /// [`wall_openings`], damit `wall_bands` sie zuordnet.
 fn wall_reveals(p: &Project, w: &Wall, openings: &[&Opening], n_bands: usize) -> Vec<wall_bands::RevealIn> {
     let (zb, zt) = p.wall_vertical_extent(w);
@@ -759,7 +759,7 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
 pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
     let mut w = FlatWriter::new();
     w.num(detail).num(p.walls.len() as f64);
-    // [102] Anhang: Rahmen-Detail je (Wand, Öffnung); Türzargen als eigene Quader.
+    // [103] Anhang: Rahmen-Detail je (Wand, Öffnung); Türzargen als eigene Quader.
     let mut details: Vec<f64> = Vec::new();
     let mut n_details = 0.0;
     let mut zargen: Vec<RMesh> = Vec::new();
@@ -819,7 +819,7 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
     out
 }
 
-/// Türzarge als Quader ([102]): Profil (Grundriss = Schnitt) an beiden Leibungen über die Höhe und
+/// Türzarge als Quader ([103]): Profil (Grundriss = Schnitt) an beiden Leibungen über die Höhe und
 /// am Sturz über die Breite; Ecken ohne Überlappung (Leibungsstück endet unter dem Sturzstück).
 fn door_frame_boxes(out: &mut Vec<RMesh>, wall: &Wall, wr: &WallRef, op: &Opening, df: &crate::opening_detail::DoorFrame, (from, to, zb, zt): (f64, f64, f64, f64)) {
     use crate::opening_detail as od;

@@ -312,7 +312,7 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
     for _ in 0..n_gap {
         gaps.push((r.num()?, r.num()?));
     }
-    // [103] Schichteinzug (optional): je Leibung und Schicht Rücksprung und Zusatzstücke.
+    // [104] Schichteinzug (optional): je Leibung und Schicht Rücksprung und Zusatzstücke.
     let mut adj: Vec<Adj> = Vec::new();
     if let Some(n_adj) = r.count() {
         for _ in 0..n_adj {
@@ -483,7 +483,7 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
     Some(out)
 }
 
-// ── Schichteinzug an Leibungen ([103]) ──────────────────────────────────────
+// ── Schichteinzug an Leibungen ([104]) ──────────────────────────────────────
 
 /// Anschluss einer Schicht an einer Leibung: `jamb` Achsmass der Rohbaukante, `dir` > 0 ⇒ die
 /// Öffnung liegt bei grösserem Achsmass (Segment endet hier), < 0 ⇒ Segment beginnt hier;

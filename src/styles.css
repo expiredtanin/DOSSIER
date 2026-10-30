@@ -5895,7 +5895,7 @@ body {
 .oed-hint-warn {
   color: var(--ctx-danger);
 }
-/* [102]/[103] Detail-Panels und Kern-Vorschau im Fenster-/Tür-Dialog. */
+/* [103]/[104] Detail-Panels und Kern-Vorschau im Fenster-/Tür-Dialog. */
 .oed-group {
   display: flex;
   flex-direction: column;

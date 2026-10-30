@@ -91,7 +91,7 @@ export function OpeningEditorDialog({
         { id: "sonnenschutz", label: t("oed.cat.sonnenschutz") },
       ];
   const [cat, setCat] = useState<CatId>("basis");
-  // [102]/[103]: Detail-Panels wirken auf den Typ (alle Öffnungen) oder nur auf diese Öffnung.
+  // [103]/[104]: Detail-Panels wirken auf den Typ (alle Öffnungen) oder nur auf diese Öffnung.
   const [scope, setScope] = useState<"type" | "opening">(opening?.frameDetail || opening?.layerReveals || opening?.doorFrame || opening?.doorFrameKind ? "opening" : "type");
 
   useEffect(() => {

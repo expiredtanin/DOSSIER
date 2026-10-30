@@ -1,5 +1,5 @@
-// Fenster-/Tür-Dialog: Detail-Panels ([102] Rahmen je Seite, Flügel, Pfosten/Kämpfer, Profile,
-// Anschlag je Seite, Türzargen-Arten; [103] Schichteinzug je Wandschicht und Seite) und die Live-
+// Fenster-/Tür-Dialog: Detail-Panels ([103] Rahmen je Seite, Flügel, Pfosten/Kämpfer, Profile,
+// Anschlag je Seite, Türzargen-Arten; [104] Schichteinzug je Wandschicht und Seite) und die Live-
 // Vorschau aus dem Kern (Grundriss, Schnitt, Ansicht der Öffnung als SVG).
 // Jedes Panel bearbeitet entweder den Typ (alle Öffnungen) oder nur diese Öffnung (Übersteuerung).
 
@@ -162,7 +162,7 @@ export function DoorFramePanel({ kind, onKind, value, onChange }: { kind: DoorTy
         </select>
       </label>
       <div className="oed-hint">{t(`oed.df.hint.${k}`)}</div>
-      {k !== "zarge" && (
+      {k !== "zarge" && k !== "blockrahmen" && (
         <fieldset className="oed-group">
           <legend>{t("oed.df.falz")}</legend>
           <OptNum label={t("oed.df.falzWidth")} value={value?.falzWidth} onChange={(v) => set({ falzWidth: v })} placeholder="0.015" />

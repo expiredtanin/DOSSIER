@@ -1,4 +1,4 @@
-// Live-Vorschau einer Öffnung für den Fenster-/Tür-Dialog ([102]/[103]): Der Kern baut ein kleines
+// Live-Vorschau einer Öffnung für den Fenster-/Tür-Dialog ([103]/[104]): Der Kern baut ein kleines
 // Projekt (Abfrage `openingPreview`, `src-tauri/core/src/opening_preview.rs`: Wirtswand mit nur dieser
 // Öffnung, Schnitt quer durch die Mitte, Ansicht von aussen); Grundriss, Schnitt und Ansicht rechnen die
 // gewöhnlichen Kern-Fassaden, als SVG-Text (`planToSvgString`).

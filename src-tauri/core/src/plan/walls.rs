@@ -124,7 +124,7 @@ fn encode_wall_poche(w: &Wall, layers: &[f64], total: f64, ref_off: f64, gaps: &
     for g in gaps {
         b.extend([g.0, g.1]);
     }
-    // [103] Schichteinzug an den Leibungen.
+    // [104] Schichteinzug an den Leibungen.
     if reveals.first().is_some_and(|n| *n > 0.0) {
         b.extend_from_slice(reveals);
     }
@@ -309,7 +309,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         Detail::Mittel => 1.0,
         Detail::Fein => 2.0,
     };
-    // [102] Rahmen-Detail und Türzarge (eigene Zeichnung in `opening_detail_plan`).
+    // [103] Rahmen-Detail und Türzarge (eigene Zeichnung in `opening_detail_plan`).
     let det = crate::opening_detail::frame_of(p, o).filter(|f| f.detailed);
     let dframe = crate::opening_detail::door_frame_of(p, o);
     // Verbreiterungsprofile: das Fenster-Element sitzt um sie eingerückt in der Rohbauöffnung.
@@ -330,7 +330,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         OpeningLintelLines::Beide => 3.0,
         OpeningLintelLines::Unknown => f64::NAN,
     });
-    // Rahmenband (Tür mit Typ; Zargen-Arten [102] zeichnet `opening_detail_plan`)
+    // Rahmenband (Tür mit Typ; Zargen-Arten [103] zeichnet `opening_detail_plan`)
     match dt.filter(|_| dframe.is_none()) {
         Some(t) => b.extend([
             1.0,
@@ -348,7 +348,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     // Fenster
     b.push(b01(wt.is_some()));
     match det.as_ref().filter(|_| wt.is_some()) {
-        // [102]: Rahmen je Seite (links hier, rechts im Anhang), Tiefe/Lage übersteuert.
+        // [103]: Rahmen je Seite (links hier, rechts im Anhang), Tiefe/Lage übersteuert.
         Some(f) => b.extend([
             f.sides.left,
             f.depth,
@@ -428,7 +428,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             b01(s.opening.is_some_and(|k| k != OpeningKind::Fest)),
         ]);
     }
-    // [102] Anhang: Rahmenbreite rechts (Fenster).
+    // [103] Anhang: Rahmenbreite rechts (Fenster).
     if let Some(f) = det.as_ref().filter(|f| wt.is_some() && (f.sides.right - f.sides.left).abs() > 1e-9) {
         b.push(f.sides.right);
     }
@@ -510,7 +510,7 @@ struct DetailCtx<'a> {
     wall_line: (&'a str, f64),
 }
 
-/// Grundriss-Detail einer Öffnung ([102]): Anschlag je Seite (Wandnase in der Schicht-Schraffur),
+/// Grundriss-Detail einer Öffnung ([103]): Anschlag je Seite (Wandnase in der Schicht-Schraffur),
 /// Verbreiterungsprofile neben dem Fensterrahmen und die Türzarge nach Art (Profil je Leibung,
 /// Stahl im feinen Detail gefüllt).
 #[allow(clippy::too_many_arguments)]

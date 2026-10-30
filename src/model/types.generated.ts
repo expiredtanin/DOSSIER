@@ -46,7 +46,7 @@ export type BlockDef = { id: string; name: string; geom2d: Array<Drawing2DGeom> 
  */
 export type BuiltinPaletteBanks = { simple?: boolean; tango?: boolean; material?: boolean; ral?: boolean };
 
-/** Bekleidung einer Tür ([102]): auf der Aufschlagseite, der Gegenseite, beidseitig oder keine. */
+/** Bekleidung einer Tür ([103]): auf der Aufschlagseite, der Gegenseite, beidseitig oder keine. */
 export type CasingSides = "beide" | "aufschlag" | "gegen" | "keine";
 
 /**
@@ -520,7 +520,7 @@ export type CustomPalette = {
  */
 export type DetailLevel = "grob" | "mittel" | "fein";
 
-/** Masse einer Türzarge/eines Türrahmens ([102]); Bedeutung je `frameKind`. Fehlt ⇒ Vorgabe. */
+/** Masse einer Türzarge/eines Türrahmens ([103]); Bedeutung je `frameKind`. Fehlt ⇒ Vorgabe. */
 export type DoorFrameDetail = {
   /** Falzbreite (parallel zur Wandfläche: Überdeckung Blatt/Rahmen), Vorgabe 0.015. */
   falzWidth?: number;
@@ -618,16 +618,16 @@ export type DoorType = {
    */
   lintelHeight?: number;
   /**
-   * Rahmen-Detail ([102]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
+   * Rahmen-Detail ([103]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
    * Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
    */
   frameDetail?: FrameDetail;
   /**
-   * Schichteinzug ([103]): wie die Wandschichten an Leibung, Sturz und Brüstung anschliessen.
+   * Schichteinzug ([104]): wie die Wandschichten an Leibung, Sturz und Brüstung anschliessen.
    * Fehlt ⇒ alle Schichten bündig (bzw. `innerLayerRecess`, veraltet).
    */
   layerReveals?: Array<LayerReveal>;
-  /** Masse der Türzarge/des Türrahmens ([102]): Falz, Spiegel, Futter, Bekleidung. */
+  /** Masse der Türzarge/des Türrahmens ([103]): Falz, Spiegel, Futter, Bekleidung. */
   doorFrame?: DoorFrameDetail;
 };
 
@@ -1094,7 +1094,7 @@ export type ExtrudedSolid = {
 export type FrameCornerJoin = "vertikal" | "horizontal" | "gehrung";
 
 /**
- * Rahmen-Detail eines Fenster-/Türtyps ([102]); an der Öffnung feldweise übersteuerbar
+ * Rahmen-Detail eines Fenster-/Türtyps ([103]); an der Öffnung feldweise übersteuerbar
  * (`Opening.frameDetail`). Alle Masse in Metern, fehlend ⇒ Typ-Wert bzw. bisheriges Verhalten.
  */
 export type FrameDetail = {
@@ -1366,7 +1366,7 @@ export type LayerCategory = {
 };
 
 /**
- * Schichteinzug einer Wandschicht an der Öffnung ([103]): Regel für alle Seiten, je Seite
+ * Schichteinzug einer Wandschicht an der Öffnung ([104]): Regel für alle Seiten, je Seite
  * übersteuerbar. `layer` zählt ab aussen (0 = äusserste Schicht); negativ ab innen (−1 = innerste),
  * damit dieselbe Regel für verschiedene Wandtypen gilt.
  */
@@ -1756,13 +1756,13 @@ export type Opening = {
    * Fenstertyp dort eine Sims-Linie aktiviert hat.
    */
   sillLineStyle?: LineStyleOverride;
-  /** Übersteuert das Rahmen-Detail des Typs feldweise für diese Öffnung ([102]). */
+  /** Übersteuert das Rahmen-Detail des Typs feldweise für diese Öffnung ([103]). */
   frameDetail?: FrameDetail;
-  /** Ersetzt den Schichteinzug des Typs für diese Öffnung ([103]). */
+  /** Ersetzt den Schichteinzug des Typs für diese Öffnung ([104]). */
   layerReveals?: Array<LayerReveal>;
-  /** Übersteuert die Rahmenart des Türtyps ([102]). */
+  /** Übersteuert die Rahmenart des Türtyps ([103]). */
   doorFrameKind?: "zarge" | "blockrahmen" | "blendrahmen" | "umfassungszarge" | "eckzarge" | "blockzarge" | "futter";
-  /** Übersteuert die Zargen-/Rahmenmasse des Türtyps feldweise ([102]). */
+  /** Übersteuert die Zargen-/Rahmenmasse des Türtyps feldweise ([103]). */
   doorFrame?: DoorFrameDetail;
 };
 
@@ -2157,10 +2157,10 @@ export type ReferenceLineRule = {
   target: "all" | "exterior" | string;
 };
 
-/** Wie eine Wandschicht an der Öffnung anschliesst ([103]). */
+/** Wie eine Wandschicht an der Öffnung anschliesst ([104]). */
 export type RevealMode = "buendig" | "zurueck" | "leibung" | "ueberdaemmt";
 
-/** Abweichende Regel für eine Seite ([103]). */
+/** Abweichende Regel für eine Seite ([104]). */
 export type RevealSide = { mode: RevealMode; amount?: number };
 
 /** Das gesamte Rich-Text-Dokument. */
@@ -3037,7 +3037,7 @@ export type WindowType = {
    * Öffnung zurück, statt bündig mit den übrigen Schichten abzuschliessen —
    * anders als {@link insetFromFace} (der Rahmen-Position), ändert dies die
    * WAND-GEOMETRIE selbst an der Laibung. Default false (bündig, Alt-Verhalten).
-   * Veraltet ([103]): gilt nur ohne {@link layerReveals} (= innerste Schicht „zurück um Schichtdicke").
+   * Veraltet ([104]): gilt nur ohne {@link layerReveals} (= innerste Schicht „zurück um Schichtdicke").
    */
   innerLayerRecess?: boolean;
   /**
@@ -3079,12 +3079,12 @@ export type WindowType = {
    */
   lintelHeight?: number;
   /**
-   * Rahmen-Detail ([102]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
+   * Rahmen-Detail ([103]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
    * Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
    */
   frameDetail?: FrameDetail;
   /**
-   * Schichteinzug ([103]): wie die Wandschichten an Leibung, Sturz und Brüstung anschliessen.
+   * Schichteinzug ([104]): wie die Wandschichten an Leibung, Sturz und Brüstung anschliessen.
    * Fehlt ⇒ alle Schichten bündig (bzw. `innerLayerRecess`, veraltet).
    */
   layerReveals?: Array<LayerReveal>;

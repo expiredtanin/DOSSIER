@@ -1479,11 +1479,11 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux). Offen: Taschen-Schiebetür (in der Wand), Ansicht zeigt bei
   zweiflügeliger Schiebetür nur einen Pfeil, 3D/Ansicht ohne Hebeschiebe-Bandseite in der Ansicht, Brüstungs-/Riegel-
   Einteilung unten (nur Oberlicht), nicht in der Tauri-App geprüft.
-- ◐ **[102] Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten.** (29.10., Wunsch Maintainer „so tief wie
+- ◐ **[103] Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten.** (29.10., Wunsch Maintainer „so tief wie
   ArchiCAD“) Neue optionale Modellfelder (nur Rust-Modell): `frameDetail` am Fenster-/Türtyp und feldweise an der Öffnung
   (`Opening.frameDetail`): Blendrahmen-Breite je Seite, Tiefe/Lage, Flügelrahmen (Breite, Tiefe, Überschlag), Pfosten/
   Kämpfer (Breite, Tiefe), Verbreiterungsprofile links/rechts, Fensterbank- und Storen-Anschlussprofil, Anschlag je Seite.
-  Türtyp `frameKind` neu `umfassungszarge`/`eckzarge`/`blockzarge`/`blendrahmen`/`futter` (Blockrahmen neu gezeichnet), Masse
+  Türtyp `frameKind` neu `umfassungszarge`/`eckzarge`/`blockzarge`/`blendrahmen`/`futter` (Zarge und Blockrahmen behalten das bisherige Rahmenband), Masse
   `doorFrame` (Falz, Spiegel, Blech, Futter, Bekleidung ein-/beidseitig), an der Öffnung `doorFrameKind`/`doorFrame`. Kern
   `opening_detail.rs` (Auflösung Typ + Übersteuerung, Zargen-Profil je Art = Grundriss- und Sturzschnitt, Rechteck-Zerlegung
   für 3D). Grundriss: Zargen-Profil an beiden Leibungen (fein: Stahl gefüllt), Blatt schlägt im Falz an, Rahmenbreite
@@ -1497,7 +1497,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Rahmen je Seite, Profile und Zargenspiegel/Bekleidung noch nicht; Türblatt im 3D weiter mittig statt im Falz; Grundriss-
   Türblatt an der Wandachse; Pfosten-Breite wirkt nur im 3D; Ressourcen-Tabs ohne die neuen Felder (nur im Dialog); nicht in
   der Tauri-App geprüft.
-- ◐ **[103] Fenster/Türen: Schichteinzug je Wandschicht und Seite.** (29.10.) `layerReveals` am Typ bzw. an der Öffnung (ersetzt
+- ◐ **[104] Fenster/Türen: Schichteinzug je Wandschicht und Seite.** (29.10.) `layerReveals` am Typ bzw. an der Öffnung (ersetzt
   dort den Typ): je Schicht (Index ab aussen, negativ ab innen) bündig / zurückspringend um Mass (Vorgabe Schichtdicke) / in
   die Leibung bis an den Rahmen (Vorgabe ≤ 4 cm, vom Rahmen weg gestapelt) / Rahmen überdeckend um Mass (Vorgabe 3 cm), je
   Seite (Leibung links/rechts, Sturz, Brüstung) übersteuerbar; Vorgaben (z. B. „Aussendämmung überdämmt Rahmen 3 cm,

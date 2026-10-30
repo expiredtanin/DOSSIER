@@ -35,7 +35,7 @@ pub struct OpeningIn {
     pub recess_inner_layer: bool,
 }
 
-/// Schichteinzug einer Öffnung ([103], nur gestapelte Schichten): erkannt am gleichen Intervall/
+/// Schichteinzug einer Öffnung ([104], nur gestapelte Schichten): erkannt am gleichen Intervall/
 /// Höhe wie ihr [`OpeningIn`]; je Band Rücksprung links/rechts/oben/unten und Zusatzstücke
 /// `(band, seite 0 L | 1 R | 2 oben | 3 unten, [x0, x1, o0, o1])` mit x ab Rohbaukante in die
 /// Öffnung, o quer ab der Aussenfläche (Band 0 = aussen).
@@ -100,7 +100,7 @@ pub struct WallIn {
     pub bands: Vec<BandIn>,
     pub openings: Vec<OpeningIn>,
     pub cuts: WallCuts,
-    /// Schichteinzug ([103]); leer = alle Schichten bündig.
+    /// Schichteinzug ([104]); leer = alle Schichten bündig.
     pub reveals: Vec<RevealIn>,
 }
 
@@ -144,7 +144,7 @@ pub struct Piece {
     pub z_top: f64,
     pub top_drop: Option<[f64; 2]>,
     pub holes: Vec<[f64; 4]>,
-    /// Eigene Dicke (Schichteinzug-Stück, [103]); `None` = Banddicke.
+    /// Eigene Dicke (Schichteinzug-Stück, [104]); `None` = Banddicke.
     pub thickness: Option<f64>,
 }
 
@@ -636,7 +636,7 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
     em.out
 }
 
-/// Zusatzstücke des Schichteinzugs ([103]) als eigene Körper der Schicht: Leibungen über die
+/// Zusatzstücke des Schichteinzugs ([104]) als eigene Körper der Schicht: Leibungen über die
 /// Öffnungshöhe (ohne die Ecken der Sturz-/Brüstungsstücke derselben Schicht), Sturz/Brüstung
 /// über die ganze Öffnungsbreite.
 fn reveal_pieces(em: &mut Emitter, offsets: &[f64]) {
@@ -679,7 +679,7 @@ fn emit_band_piece(em: &mut Emitter, li: usize, off: f64, cutouts: &[OpeningIn],
         .filter(|h| h.z_top > zb + EPS && h.z_bottom < zt - EPS)
         .map(|h| {
             if let Some(s) = reveals.iter().find(|r| r.of(h)).and_then(|r| r.shifts.get(li)) {
-                // [103]: Schicht springt je Seite zurück.
+                // [104]: Schicht springt je Seite zurück.
                 [h.from - a - s[0], h.to - a + s[1], h.z_bottom - s[3], h.z_top + s[2]]
             } else if innermost && h.recess_inner_layer {
                 [h.from - a - recess, h.to - a + recess, h.z_bottom - recess, h.z_top + recess]

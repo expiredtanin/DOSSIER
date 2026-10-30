@@ -147,7 +147,7 @@ pub struct WindowSpec {
     pub inset_inner: bool,
     /// Rahmen mittig in der Wand (`insetFace: "mitte"`); hat Vorrang vor `inset_inner`/Einzug.
     pub inset_mid: bool,
-    /// Rahmenbreite an der Leibung beim Wandende ([102]); NaN = wie `frame_width`.
+    /// Rahmenbreite an der Leibung beim Wandende ([103]); NaN = wie `frame_width`.
     pub frame_width_end: f64,
 }
 

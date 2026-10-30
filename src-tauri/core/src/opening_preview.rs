@@ -1,4 +1,4 @@
-//! Vorschau-Projekt einer Öffnung für den Fenster-/Tür-Dialog ([102]/[103]): die Wirtswand (gleicher
+//! Vorschau-Projekt einer Öffnung für den Fenster-/Tür-Dialog ([103]/[104]): die Wirtswand (gleicher
 //! Wandtyp, gerade, Achse entlang x) mit NUR dieser Öffnung in der Mitte, ein Geschoss mit Schnitthöhe
 //! durch die Öffnung, ein Schnitt quer durch die Öffnungsmitte und eine Ansicht von aussen. Die TS-Seite
 //! rechnet daraus Grundriss, Schnitt und Ansicht wie für jedes Projekt (`src/plan/openingPreview.ts`).

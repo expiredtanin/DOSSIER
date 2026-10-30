@@ -557,7 +557,7 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
     let ordered: Vec<&Layer> = if reversed { layers.iter().rev().collect() } else { layers.iter().collect() };
     let category = p.layer_category(&owner.category_code);
     let mut out = Vec::with_capacity(layers.len());
-    // [103] Schichteinzug am Sturz (Stück liegt über der Öffnung) bzw. an der Brüstung (darunter).
+    // [104] Schichteinzug am Sturz (Stück liegt über der Öffnung) bzw. an der Brüstung (darunter).
     let (top, bottom) = section_reveal(p, owner, plane, v_min, v_max);
     let n = layers.len();
     let mut acc = 0.0;
@@ -1488,7 +1488,7 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
         inset_mid: t.inset_face == Some(WindowTypeInsetFace::Mitte),
         frame_width_end: f64::NAN,
     });
-    // [102] Rahmen-Detail: Lage/Tiefe übersteuert, Breite oben/unten, Anschlussprofile.
+    // [103] Rahmen-Detail: Lage/Tiefe übersteuert, Breite oben/unten, Anschlussprofile.
     let det = crate::opening_detail::frame_of(p, o).filter(|f| f.detailed);
     let spec = spec.map(|s| match &det {
         Some(f) => crate::opening_geom::WindowSpec {
@@ -1612,7 +1612,7 @@ fn door_cut(p: &Project, o: &Opening, c: &CrossSection) -> Vec<Primitive> {
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
     lintel_cut(&mut out, o, c, p.door_type(o).and_then(|t| t.lintel_height), 0.0);
     let kind = p.door_type(o).map(|t| t.kind);
-    // [102] Zargen-Arten: Sturz-Profil der Zarge und Blatt im Falz.
+    // [103] Zargen-Arten: Sturz-Profil der Zarge und Blatt im Falz.
     if let Some(df) = crate::opening_detail::door_frame_of(p, o).filter(|_| matches!(kind, Some(DoorTypeKind::Dreh | DoorTypeKind::Pendel | DoorTypeKind::Unknown))) {
         door_frame_cut(&mut out, o, c, &df);
         return out;
@@ -1649,7 +1649,7 @@ fn door_cut(p: &Project, o: &Opening, c: &CrossSection) -> Vec<Primitive> {
     out
 }
 
-/// Türzarge im Schnitt ([102]): Profil am Sturz (gleiches Profil wie im Grundriss, `x` nach unten)
+/// Türzarge im Schnitt ([103]): Profil am Sturz (gleiches Profil wie im Grundriss, `x` nach unten)
 /// und Türblatt im Falz der Aufschlagseite.
 fn door_frame_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, df: &crate::opening_detail::DoorFrame) {
     use crate::opening_detail as od;
@@ -1671,7 +1671,7 @@ fn door_frame_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, df: &
     out.push(opening_poly(rect(c.u_at(s_of(d0)), c.u_at(s_of(d1)), c.z_bottom + 0.01, top), true, &o.id));
 }
 
-/// Anschlag im Schnitt ([102]/[94]): Wandnase oben (Sturz) und unten (Brüstung) über die Zone
+/// Anschlag im Schnitt ([103]/[94]): Wandnase oben (Sturz) und unten (Brüstung) über die Zone
 /// zwischen gewählter Fläche und Rahmen, je Wandschicht in deren Schnitt-Darstellung.
 fn rebate_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result<Vec<Primitive>, String> {
     let mut out = Vec::new();

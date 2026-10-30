@@ -130,7 +130,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             operable: r.num()? != 0.0,
         });
     }
-    // [102] Anhang (optional): Rahmenbreite rechts.
+    // [103] Anhang (optional): Rahmenbreite rechts.
     let frame_width_end = r.num().unwrap_or(f64::NAN);
     if ![sx, sy, ex, ey, total, ref_off, position, width].iter().all(|x| x.is_finite()) {
         return None;

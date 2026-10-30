@@ -165,7 +165,7 @@ export function WindowStylesTab({
             </FieldRow>
           )}
           <FieldRow label={t("oed.cat.schichten")}>
-            {/* [103] Schichteinzug-Vorgabe (ersetzt „innerLayerRecess"; Details im Dialog „Fenster bearbeiten"). */}
+            {/* [104] Schichteinzug-Vorgabe (ersetzt „innerLayerRecess"; Details im Dialog „Fenster bearbeiten"). */}
             <select
               value={revealPresetOf(win.layerReveals ?? (win.innerLayerRecess ? [{ layer: -1, mode: "zurueck" }] : []))}
               onChange={(e) => {

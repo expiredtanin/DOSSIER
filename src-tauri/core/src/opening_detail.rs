@@ -1,5 +1,5 @@
-//! Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten ([102]) und Schichteinzug
-//! ([103]) — aus Typ und Öffnungs-Übersteuerung aufgelöst, dazu die gemeinsame Geometrie für
+//! Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten ([103]) und Schichteinzug
+//! ([104]) — aus Typ und Öffnungs-Übersteuerung aufgelöst, dazu die gemeinsame Geometrie für
 //! Grundriss (`plan/walls.rs`, `plan_walls.rs`), Schnitt (`plan/section.rs`) und 3D (`model3d.rs`,
 //! `wall_bands.rs`).
 //!
@@ -89,7 +89,7 @@ pub struct Frame {
     pub shading_profile: f64,
     /// Anschlag je Seite (0 = keiner).
     pub rebate: Sides,
-    /// Ein Detail-Feld ([102]) ist gesetzt (sonst gilt der bisherige Pfad unverändert).
+    /// Ein Detail-Feld ([103]) ist gesetzt (sonst gilt der bisherige Pfad unverändert).
     pub detailed: bool,
 }
 
@@ -204,7 +204,7 @@ impl Frame {
     }
 }
 
-// ── Schichteinzug ([103]) ───────────────────────────────────────────────────
+// ── Schichteinzug ([104]) ───────────────────────────────────────────────────
 
 /// Schichteinzug-Regeln einer Öffnung: Öffnung > Typ > veraltetes `innerLayerRecess`.
 pub fn reveal_rules(p: &Project, o: &Opening) -> Vec<LayerReveal> {
@@ -435,7 +435,7 @@ pub fn reveal_presets() -> Vec<(&'static str, Vec<LayerReveal>)> {
     ]
 }
 
-// ── Türzargen und -rahmen ([102]) ───────────────────────────────────────────
+// ── Türzargen und -rahmen ([103]) ───────────────────────────────────────────
 
 /// Bauteil eines Zargen-/Rahmenprofils.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -475,7 +475,8 @@ pub fn door_frame_of(p: &Project, o: &Opening) -> Option<DoorFrame> {
         return None;
     }
     let kind = o.door_frame_kind.or(t.frame_kind).unwrap_or_default();
-    if matches!(kind, DoorTypeFrameKind::Zarge | DoorTypeFrameKind::Unknown) {
+    // Zarge und Blockrahmen behalten das bisherige Rahmenband ([94]).
+    if matches!(kind, DoorTypeFrameKind::Zarge | DoorTypeFrameKind::Blockrahmen | DoorTypeFrameKind::Unknown) {
         return None;
     }
     let (a, b) = (t.door_frame.as_ref(), o.door_frame.as_ref());
@@ -756,7 +757,7 @@ mod tests {
         let mut p = Project::default();
         let mk = |k| DoorType { id: "d".into(), frame_kind: Some(k), frame_width: Some(0.06), ..Default::default() };
         let o = Opening { kind: ElementKind::Door, type_id: Some("d".into()), ..Default::default() };
-        for k in [DoorTypeFrameKind::Umfassungszarge, DoorTypeFrameKind::Eckzarge, DoorTypeFrameKind::Blockzarge, DoorTypeFrameKind::Blockrahmen, DoorTypeFrameKind::Blendrahmen, DoorTypeFrameKind::Futter] {
+        for k in [DoorTypeFrameKind::Umfassungszarge, DoorTypeFrameKind::Eckzarge, DoorTypeFrameKind::Blockzarge, DoorTypeFrameKind::Blendrahmen, DoorTypeFrameKind::Futter] {
             p.door_types = Some(vec![mk(k)]);
             let f = door_frame_of(&p, &o).unwrap();
             let prof = door_frame_profile(&f, 0.3, false);

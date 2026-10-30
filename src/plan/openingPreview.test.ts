@@ -3,7 +3,7 @@ import { sampleProject } from "../model/sampleProject";
 import type { Project } from "../model/types";
 import { openingPreviewProject, openingPreviewSvgs } from "./openingPreview";
 
-describe("openingPreview ([102]/[103])", () => {
+describe("openingPreview ([103]/[104])", () => {
   it("baut ein Vorschau-Projekt mit nur der Öffnung", () => {
     const mini = openingPreviewProject(sampleProject, "D1");
     expect(mini?.walls).toHaveLength(1);

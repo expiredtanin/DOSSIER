@@ -188,11 +188,11 @@ pub struct TypeIn {
     pub frame_width: f64,
     pub transom_height: f64,
     pub kind: KindIn,
-    /// Rahmen-Detail ([102]), aus dem Anhang der Kodierung; `None` = bisher.
+    /// Rahmen-Detail ([103]), aus dem Anhang der Kodierung; `None` = bisher.
     pub detail: Option<Box<FrameDetailIn>>,
 }
 
-/// Rahmen-Detail einer Öffnung ([102]); Seiten in der Reihenfolge links, rechts, oben, unten,
+/// Rahmen-Detail einer Öffnung ([103]); Seiten in der Reihenfolge links, rechts, oben, unten,
 /// NaN = Vorgabe.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameDetailIn {
@@ -413,7 +413,7 @@ pub fn frame_ring_quads(from: f64, to: f64, z_b: f64, z_t: f64, w: f64, join: Co
     frame_ring_quads_sides(from, to, z_b, z_t, [w, w, w, w], join, bottom)
 }
 
-/// Wie [`frame_ring_quads`], Profilbreite je Seite `[links, rechts, oben, unten]` ([102]).
+/// Wie [`frame_ring_quads`], Profilbreite je Seite `[links, rechts, oben, unten]` ([103]).
 pub fn frame_ring_quads_sides(from: f64, to: f64, z_b: f64, z_t: f64, w: [f64; 4], join: CornerJoin, bottom: bool) -> Vec<Quad> {
     let [wl, wr, wt, wb] = w;
     let bx = |u0: f64, u1: f64, h0: f64, h1: f64| -> Quad { [[u0, h0], [u1, h0], [u0, h1], [u1, h1]] };
@@ -608,7 +608,7 @@ fn rebate_boxes(em: &mut Emitter, o: &OpeningIn, ty: &TypeIn, p: &FrameParams) {
     em.axis_box(o.from + rd, o.to - rd, o.z_top - rd, o.z_top, n0, n1, Part::Rebate);
 }
 
-/// Anschlag je Seite ([102]): links, rechts, oben und (Fenster) unten.
+/// Anschlag je Seite ([103]): links, rechts, oben und (Fenster) unten.
 fn rebate_boxes_sides(em: &mut Emitter, o: &OpeningIn, ty: &TypeIn, p: &FrameParams, d: &FrameDetailIn) {
     if !(ty.inset_mid || or(ty.inset_from_face, 0.0) > 1e-4) {
         return;
@@ -671,7 +671,7 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
     let detail_bodies = fine || medium;
     let fw = p.frame_width;
     let (from0, to0, zb0, zt0) = (o.from, o.to, o.z_bottom, o.z_top);
-    // [102] Rahmen je Seite, Verbreiterungs-/Anschlussprofile, Flügel, Pfosten, Kämpfer.
+    // [103] Rahmen je Seite, Verbreiterungs-/Anschlussprofile, Flügel, Pfosten, Kämpfer.
     let dd = o.ty.as_ref().and_then(|t| t.detail.as_deref());
     let [fl, fr, ft, fb] = dd.map_or([fw; 4], |d| d.sides.map(|v| dv(v, fw)));
     let (rf0, rt0, rb0, rtop0) = dd.map_or((from0, to0, zb0, zt0), |d| (from0 + dv(d.ext[0], 0.0), to0 - dv(d.ext[1], 0.0), zb0 + dv(d.sill_profile, 0.0), zt0 - dv(d.shading_profile, 0.0)));
@@ -1206,7 +1206,7 @@ fn decode(buf: &[f64]) -> Option<(Vec<WallIn>, Detail)> {
     };
     let n = r.count()?;
     let mut walls = Vec::with_capacity(n.min(1 << 16));
-    // (Wand, Öffnung) im Puffer → Lage in `walls` (für den Anhang [102]).
+    // (Wand, Öffnung) im Puffer → Lage in `walls` (für den Anhang [103]).
     let mut slots: Vec<((usize, usize), (usize, usize))> = Vec::new();
     for wi in 0..n {
         let start = [r.num()?, r.num()?];
@@ -1230,7 +1230,7 @@ fn decode(buf: &[f64]) -> Option<(Vec<WallIn>, Detail)> {
             slots.retain(|s| s.0 .0 != wi);
         }
     }
-    // Anhang ([102], optional): `[n, (Wand, Öffnung, Detail × DETAIL_LEN) × n]`.
+    // Anhang ([103], optional): `[n, (Wand, Öffnung, Detail × DETAIL_LEN) × n]`.
     if let Some(nd) = r.count() {
         for _ in 0..nd {
             let (wi, oi) = (r.num()?, r.num()?);

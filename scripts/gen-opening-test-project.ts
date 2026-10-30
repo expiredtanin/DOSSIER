@@ -1,4 +1,4 @@
-// Testprojekt für Fenster-/Tür-Details ([102]/[103]): Aussenwand (Aussenputz, Dämmung, Backstein,
+// Testprojekt für Fenster-/Tür-Details ([103]/[104]): Aussenwand (Aussenputz, Dämmung, Backstein,
 // Innenputz) mit Fenstern in verschiedenen Schichteinzug-Varianten und eine Innenwand mit je einer Tür
 // pro Zargen-Art; dazu je Öffnung ein Schnitt (S-…) und eine Ansicht von aussen.
 // Aufruf: npx esbuild scripts/gen-opening-test-project.ts --bundle --platform=node --format=esm
