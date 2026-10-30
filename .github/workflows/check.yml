@@ -1,37 +1,88 @@
-# Tests bei jedem Push (lessons-bimcraft [57]). Braucht einen Actions-Runner mit
-# Docker/Node; ohne Runner passiert nichts. Die WASM-Pakete (src/engine/pkg*) sind nicht im
-# Repo und werden hier gebaut, weil Tests wie truckBrep.wasm.test.ts sie lesen.
+# Tests bei jedem Push/PR auf master ([57]). Die WASM-Pakete (src/engine/pkg*) sind nicht im Repo und
+# werden hier gebaut (Tests wie truckBrep.wasm.test.ts und die e2e-Suite lesen sie). Jedes Crate hat
+# sein eigenes target/ (core teilt sich nichts mit render2d/render3d); Swatinem/rust-cache cached sie.
 name: check
-on: [push, pull_request]
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: wasm32-unknown-unknown }
-      - run: cargo install wasm-pack --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri/core
+            src-tauri/render2d
+            src-tauri/render3d
+            src-tauri/kernel2d
+            src-tauri/trucksolid
+            src-tauri/fileio
+            src-tauri/hatchgen
+      - uses: taiki-e/install-action@v2
+        with: { tool: wasm-pack }
       - run: npm ci
       # IFC-Prüfung in exportIfc.validate.test.ts ([B1]); ohne ifcopenshell würde sie übersprungen.
       - run: pip install ifcopenshell pytest ezdxf
-      - run: npm run build:core && npm run build:truck && npm run build:engine3d && npm run build:engine && npm run build:fileio
+      - name: WASM-Pakete bauen
+        run: |
+          # Fällt das mitgelieferte wasm-opt um (alte Binaryen-Version, Table.grow), ohne Optimierung neu bauen.
+          for s in core truck engine3d engine fileio; do
+            npm run "build:$s" || { echo "build:$s mit wasm-opt fehlgeschlagen, neu mit --no-opt"; npm run "build:$s" -- --no-opt; }
+          done
       - run: npm run check
+      - run: npm run build:cli
   # UI-Suite ([49]): bedient die gebaute Web-App wie ein Mensch (Playwright, Chromium headless).
   # Eigener Job, damit `npm run check` schnell bleibt; läuft parallel dazu.
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: wasm32-unknown-unknown }
-      - run: cargo install wasm-pack --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri/core
+            src-tauri/render2d
+            src-tauri/render3d
+            src-tauri/trucksolid
+            src-tauri/fileio
+          shared-key: e2e
+      - uses: taiki-e/install-action@v2
+        with: { tool: wasm-pack }
       - run: npm ci
-      - run: npm run build:core && npm run build:truck && npm run build:engine3d && npm run build:engine && npm run build:fileio
+      - name: WASM-Pakete bauen
+        run: |
+          for s in core truck engine3d engine fileio; do
+            npm run "build:$s" || { echo "build:$s mit wasm-opt fehlgeschlagen, neu mit --no-opt"; npm run "build:$s" -- --no-opt; }
+          done
+      - name: Playwright-Version lesen
+        id: pw
+        run: echo "v=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pwcache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.v }}
       - run: npx playwright install --with-deps chromium
+        if: steps.pwcache.outputs.cache-hit != 'true'
+      - run: npx playwright install-deps chromium
+        if: steps.pwcache.outputs.cache-hit == 'true'
       # `npm run e2e` baut selbst nach dist-test und startet vite preview (playwright.config.ts).
       - run: npm run e2e
       # Bei Fehlern: Screenshots + Traces (test-results/) zum Ansehen mit `npx playwright show-trace`.
