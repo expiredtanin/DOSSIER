@@ -1182,12 +1182,12 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[G4] Exakte Sichtbarkeit (HLR)** für Ansicht und Projektionsteil des Schnitts. · XL
 - ○ **[G5] Dächer untereinander, Gauben, Wand ↔ Decke** per Boolean. · L · nach [G1]/[G2].
   - (30.10.) Boolean-Werkzeug dafür: Manifold-Port `manifold-rust`, nicht truck — truck scheitert an Gaube und
-    L-Ecke (bündige Unterseiten), `manifold-rust` rechnet beide exakt und dicht. Details und Plan: [103].
+    L-Ecke (bündige Unterseiten), `manifold-rust` rechnet beide exakt und dicht. Details und Plan: [107].
 - ○ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M
 - ○ **[G7] Robuste Booleans bei bündigen Flächen** — wächst mit jeder Phase. · L (laufend)
-  - (30.10.) Messung in [103]: truck-B-Rep 3/14 Fälle, csgrs-Fallback Volumen stimmt, Netz aber offen
+  - (30.10.) Messung in [107]: truck-B-Rep 3/14 Fälle, csgrs-Fallback Volumen stimmt, Netz aber offen
     (T-Stösse) und langsam; `manifold-rust`/`boolmesh` 14/14 exakt (Volumenfehler ≤ 4e-14) und geschlossen.
-- ◐ **[103] Spike: Manifold für robuste Körper-Booleans** (30.10.). Frage: Manifold
+- ◐ **[107] Spike: Manifold für robuste Körper-Booleans** (30.10.). Frage: Manifold
   (elalish, Apache-2.0) statt truck-Booleans für [G5]/[G7], Abzugskörper und als Ersatz für den
   csgrs-Fallback (`trucksolid/src/boolean.rs`). truck bleibt für STEP und gekrümmte Grundkörper.
   **Kandidaten:** (a) `manifold-rust` 0.19.1 (Lars Brubaker, Apache-2.0): reines Rust, Port von Manifold v3.5
