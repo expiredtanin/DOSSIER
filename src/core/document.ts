@@ -233,6 +233,11 @@ export class ProjectDocument {
     return this.handle ? core().doc_drawing_line_verts(this.handle) : new Float32Array(0);
   }
 
+  /** Ansichtsschraffur auf den Flächen (Wände, Decken, Dächer) für render3d `set_pattern_lines`. */
+  surfacePatternLines(): Float32Array {
+    return this.handle ? core().doc_surface_pattern_lines(this.handle) : new Float32Array(0);
+  }
+
   /** Das Dokument als JSON-Text (Test, Export). */
   json(): string {
     return this.handle ? core().doc_json(this.handle) : "";

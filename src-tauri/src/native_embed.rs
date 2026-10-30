@@ -199,10 +199,12 @@ pub fn set_layout(app: &AppHandle, layout: Vec<ChunkGeom>, delete: Vec<u32>) {
 }
 
 /// Ausschnitt (Pan/Zoom) setzen und zeichnen — der einzige Pro-Frame-Aufruf.
-pub fn frame(app: &AppHandle, view: View, paper_scale: f64, clear: Option<[f64; 3]>) {
+pub fn frame(app: &AppHandle, view: View, paper_scale: f64, clear: Option<[f64; 3]>, dash_scale: Option<f64>) {
     if let Some(e) = app.state::<EmbedState>().0.lock().unwrap().as_mut() {
         e.view = view;
         e.paper_scale = paper_scale;
+        // Strichmuster im Plot-Massstab (fest im Modell-Raum, s. `render2d::ortho::dash_scale`).
+        e.renderer.dash_scale_n = dash_scale.unwrap_or(0.0);
         if let Some(c) = clear {
             e.renderer.clear = c;
         }

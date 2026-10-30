@@ -234,6 +234,9 @@ pub struct Renderer {
     pub clear_color: wgpu::Color,
     /// Papier-Massstab-Nenner (1:N) fuer echte mm-Strichbreiten.
     pub paper_scale_n: f32,
+    /// Plot-Massstab-Nenner (1:N) NUR fuer die Strichmuster (`ortho::dash_scale`): fest, nicht vom Zoom
+    /// abgeleitet, damit der Rhythmus auf dem Bildschirm der Druckansicht gleicht; 0 = wie `paper_scale_n`.
+    pub dash_scale_n: f32,
     /// Papier-Massstab-Nenner (1:N) NUR fuer die Text-Schriftgroesse — bewusst
     /// vom geometrischen `paper_scale_n` ENTKOPPELT: der SVG-Referenzpfad haelt
     /// die Raumstempel-Schriftgroesse im normalen Anzeigemodus auf einer festen
@@ -517,6 +520,7 @@ impl Renderer {
                 a: 1.0,
             },
             paper_scale_n: 100.0,
+            dash_scale_n: 0.0,
             text_scale_n: 100.0,
         }
     }
@@ -748,7 +752,7 @@ impl Renderer {
         // Papier-mm-Breite (identisch zu den Linien).
         let px_per_screen = meet_scale(view_box, vw, vh);
         // Strichmuster sind in Modell-Metern bei 1:100 kompiliert; auf dem Papier gelten sie in mm ([96]).
-        let dash_scale = if self.paper_scale_n > 0.0 && self.paper_scale_n.is_finite() { self.paper_scale_n / 100.0 } else { 1.0 };
+        let dash_scale = crate::ortho::dash_scale(self.paper_scale_n, self.dash_scale_n);
 
         // Frame-Uniform der Bogen-Pipeline schreiben (ein Block fuer ALLE Boegen).
         queue.write_buffer(

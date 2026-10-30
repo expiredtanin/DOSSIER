@@ -1402,14 +1402,29 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Massstab als 3. Argument). Ansicht: sichtbare Wandseite (rechts der Achse = äusserste Schicht) mit Ansichtsfarbe
   + Muster, Dachflächen; verdeckt wie die Kanten, Maler-Tiefe der eigenen Fläche. Grundriss: Dachaufsicht je
   Dachfläche (`roof-surface-pattern`). Geprüft: Rust-Tests (Muster, Ausdünnung, Ansicht, Dachaufsicht,
-  Bibliothek), CLI-Ansicht 1:50/1:500 und Druck-SVG Grundriss/Schnitt angesehen (Linux-Container). Offen: 3D-
-  Linien (render3d) nicht umgesetzt; Decken-Untersicht/Bodenbeläge ohne Muster; Schnittschraffur-Strichmuster
-  (Beton unbewehrt, Estrich) im Schnitt-Druck durchgezogen; ambientCG-Kennungen CorrugatedSteel005, WoodSiding008,
-  Chipboard001 ohne Netz nicht geprüft; nicht in der Tauri-App/macOS geprüft. · M
+  Bibliothek), CLI-Ansicht 1:50/1:500 und Druck-SVG Grundriss/Schnitt angesehen (Linux-Container).
+  Nachtrag 30.10.: Schraffur-Strichmuster skalieren mit der Musterskala (`hatch::hatch_dash`, Strich/Lücke im
+  Verhältnis zum Linienabstand — vorher war der Strich bei Estrich 0.35 länger als die Linie in der 8-cm-Schicht
+  und wirkte durchgezogen), gleich in Szene, Chunk-Pfad, Druck-SVG (`plan_print_svg`, Papier-mm = Modell-Länge)
+  und DXF; SVG-Rückfall: Muster je Kachel auf ganze Perioden gestreckt. Bodenbeläge: Grundriss zeigt das Muster
+  der obersten Deckenschicht der Decke, auf der das Geschoss steht (`floor-finish-pattern`,
+  `surface_pattern3d::floor_finish_segments`); neue Standard-Baustoffe Parkett (Läuferverband 60×10) und
+  Keramikplatten (Raster 30×30). Dachaufsicht nur von oben: Ansichtsschraffur und -muster der Eindeckung
+  nur, wenn der First unter der Schnittebene liegt; Dächer tieferer Geschosse erscheinen in höheren Grundrissen
+  als Dachaufsicht (OG des Musterhauses: kein Ziegelraster mehr). 3D: Musterlinien auf Wandseiten, Dachflächen,
+  Deckenober- und -untersicht (`surface_pattern3d::pattern_lines_3d` → render3d `set_pattern_lines`) in den
+  Stilen „Verdeckt"/„Schattiert mit Kanten", Ausdünnung je Linie nach Abstand über eine Massstabs-Leiter
+  (`render3d::pattern_lines`). Geprüft: Rust-Tests, Schnitt-Szene 1:50 (Beton unbewehrt, Estrich) und OG-Grundriss
+  vorher/nachher angesehen (Linux). Offen: Untersicht nur im 3D (es gibt keinen Deckenspiegel; waagrechte Flächen
+  sind in Schnitt/Ansicht nicht sichtbar); Decken ohne `surfacePatternAngle/Offset` (Muster am Plan ausgerichtet);
+  Wandseiten im 3D ohne Rücksicht auf Eckverschnitt; 3D-Linien in der nativen macOS-Ansicht und im Browser
+  (WebGPU) nicht angesehen; ambientCG-Kennungen CorrugatedSteel005, WoodSiding008, Chipboard001 ohne Netz nicht
+  geprüft; nicht in der Tauri-App/macOS geprüft. · M
 - ◐ **[101] Standards in neuen Projekten, „Standards laden".** (29.10.) Neu/Neu aus Musterhaus bringen die
   Standards mit (`withStandards`, Kern-Abfrage `standardsMergeOps`); Ressourcen-Manager-Kopf: „Standards laden"
   ergänzt nur Fehlendes (gleiche id oder gleicher Name = vorhanden, Verweise neuer Aufbauten zeigen dann auf das
-  vorhandene Bauteil), ein Undo-Schritt. Offen: Rückmeldung (Anzahl) nach dem Laden. · S
+  vorhandene Bauteil), ein Undo-Schritt. Rückmeldung nach dem Laden über `notify()` (30.10.): „34 Baustoffe,
+  5 Aufbauten … hinzugefügt" bzw. „alles schon vorhanden" (`standardsMergeCounts`). · S
 - ◐ **[102] Linientypen nach SIA 400 / ISO 128.** (29.10.) Standard-Linienstile: Volllinie, Strichlinie fein/grob,
   Punktlinie, Strichpunktlinie (Achse), Strich-Zweipunktlinie, Grundstücksgrenze, Baulinie/Bauteilgrenze,
   Bruchlinie (Zickzack), Schraffurlinien. Fehler behoben: render2d warf Punkte (AN = 0) aus dem Muster und
@@ -1418,7 +1433,12 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   dem Bildschirm mit dem Massstab (`dash_scale` = N/100 in Linien-, Strich- und Bogen-Uniforms, vorher fest 1:100);
   SVG-Export setzt runde Kappen bei Punkten. DXF/DWG: LTYPE je Linienstil (Name, Punkt = 0) wie bisher. Geprüft:
   Rust-Tests (render2d, Kern), naga-Validierung der Shader, Druck-SVG (PDF-Pfad) mit allen Typen angesehen.
-  Offen: Bildschirm (WebGPU) nicht angesehen; CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
+  Nachtrag 30.10.: Strichrhythmus fest im Modell-Raum auch im Anzeigemodus — render2d trennt den Plot-Massstab
+  der Muster (`dash_scale_n`, `set_dash_scale`, `ortho::dash_scale`) vom zoomabhängigen Strich-Massstab; PlanView
+  gibt den stabilen Referenz-Massstab (wie Druckansicht) an WebGPU- und native Fläche (`native2d_frame`
+  `dashScale`); SVG-Rückfall: Linientypen in Papier-mm im Plot-Massstab, unter `non-scaling-stroke` über die
+  meet-Variable `--plan-dash-k` (`dashArrayCss`). Test: Modell-Periode bei zwei Zoomstufen gleich und = Druck-SVG.
+  Offen: Bildschirm (WebGPU/macOS) nicht angesehen; CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
 - ○ **[80] PDF mit Ebenen.** · M
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.

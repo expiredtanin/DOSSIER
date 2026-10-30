@@ -262,6 +262,12 @@ fn hatch_lines(poly_mm: &[V2], h: &Hatch, mm_per_m: f64) -> Vec<(V2, V2)> {
     segs
 }
 
+/// Strichmuster der Schraffurlinien in Papier-mm: dieselben Modell-Längen wie Szene/Chunk-Pfad
+/// (`hatch::hatch_dash` × `DASH_MM_TO_M`), nur auf das Blatt (`mm_per_m`) abgebildet.
+fn hatch_dash_paper(h: &Hatch, mm_per_m: f64) -> Vec<f64> {
+    hatch::hatch_dash(h).iter().map(|d| jsnum::max(0.0, *d) * hatch::DASH_MM_TO_M * mm_per_m).collect()
+}
+
 fn num(o: &serde_json::Value, k: &str) -> f64 {
     o.get(k).and_then(|x| x.as_f64()).unwrap_or(f64::NAN)
 }
@@ -336,18 +342,19 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                     out.el(1, "polygon", &poly_node(&attr, &fill, "none", 0.0));
                 }
                 let pen = quantize_pen(h.line_weight);
+                let hdash = hatch_dash_paper(&h, k);
                 if h.random {
                     for run in hatch::build_random_hatch_runs(&pts, &h, None) {
                         if run.len() < 2 {
                             continue;
                         }
                         let (a, b) = (run[0], run[run.len() - 1]);
-                        out.el(1, "line", &line_attrs(m.at(a.x, a.y), m.at(b.x, b.y), &hatch_color, pen, None));
+                        out.el(1, "line", &line_attrs(m.at(a.x, a.y), m.at(b.x, b.y), &hatch_color, pen, Some(&hdash)));
                     }
                 } else {
                     // Strichmuster der Schraffur (null und [] gleich: keins).
                     for (a, b) in hatch_lines(&pts_mm, &h, k) {
-                        out.el(1, "line", &line_attrs(a, b, &hatch_color, pen, Some(&h.dash)));
+                        out.el(1, "line", &line_attrs(a, b, &hatch_color, pen, Some(&hdash)));
                     }
                 }
                 if stroke_mm > 0.0 {
@@ -609,6 +616,13 @@ mod tests {
         assert_eq!(r3(1.23456), "1.235");
         assert_eq!(r3(-0.0001), "0");
         assert_eq!(dash_attr(&[2.0, 0.5]), "2 0.5");
+        // Schraffur-Strich im Druck = Modell-Länge der Szene auf dem Blatt (1:50 → 20 mm je m).
+        let mut h = empty_hatch();
+        h.scale = 0.35;
+        h.dash = vec![1.0, 0.7];
+        let d = hatch_dash_paper(&h, 20.0);
+        assert!((d[0] - 0.35 * hatch::DASH_MM_TO_M * 20.0).abs() < 1e-12);
+        assert!((d[1] / d[0] - 0.7).abs() < 1e-12);
     }
 
     #[test]

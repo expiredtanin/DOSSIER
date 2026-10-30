@@ -260,6 +260,8 @@ pub struct ChunkRenderer {
     format: wgpu::TextureFormat,
     samples: u32,
     pub clear: [f64; 3],
+    /// Plot-Massstab der Strichmuster (`ortho::dash_scale`), 0 = wie der Strich-Massstab.
+    pub dash_scale_n: f64,
     // --- Vektor-Text ---
     text_pipeline: wgpu::RenderPipeline,
     font: Option<crate::vtext::VectorFont>,
@@ -460,6 +462,7 @@ impl ChunkRenderer {
             format,
             samples,
             clear: [0.941, 0.941, 0.941],
+            dash_scale_n: 0.0,
         }
     }
 
@@ -644,7 +647,7 @@ impl ChunkRenderer {
                     (b.color, b.stroke_mm, if b.device_px { 1.0 } else if b.screen_px { meet as f32 } else { mm_px as f32 })
                 };
                 let c = if g.greyed { [GREY, GREY, GREY, color[3]] } else { color };
-                blocks.push(Globals { view_proj: proj, color: c, viewport_px: vp, stroke_px: stroke_mm, stroke_scale: scale, dash_scale: if paper_scale_n > 0.0 && paper_scale_n.is_finite() { (paper_scale_n / 100.0) as f32 } else { 1.0 }, _pad: [0.0; 3] });
+                blocks.push(Globals { view_proj: proj, color: c, viewport_px: vp, stroke_px: stroke_mm, stroke_scale: scale, dash_scale: crate::ortho::dash_scale(paper_scale_n as f32, self.dash_scale_n as f32), _pad: [0.0; 3] });
             }
         }
 

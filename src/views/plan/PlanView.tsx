@@ -10,6 +10,7 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,7 @@ import { isGpuText } from "../../core";
 import { LiveMeet, LiveValue, createMeetStore, createValueStore } from "./planView/liveMeet";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../../theme/accents";
+import { PLAN_DASH_VAR } from "../../core";
 import { type ViewBox__plan_planView_geometry as ViewBox, PX_PER_M, PAD, toScreen, clamp, meetScale, scaleFromView, viewForScale, viewForCamera, fitBoxFor, type ModelRect } from "../../core";
 import {
   polyUsesPattern,
@@ -938,6 +940,17 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const [paperScale, setPaperScale] = useState<number | null>(null);
   const paperScaleRef = useRef(paperScale);
   paperScaleRef.current = paperScale;
+  // Strichmuster (Linientypen) im PLOT-Massstab: fest im Modell-Raum, auch im Anzeigemodus, wo der
+  // Strich-Massstab dem Zoom folgt — so gleicht der Rhythmus bei jedem Zoom der Druckansicht.
+  activeEngine.setDashScale(paperScale ?? 0);
+  // SVG-Pfad: Strichmuster unter non-scaling-stroke über die meet-Variable im Modell-Raum halten
+  // (`dashArrayCss`); bei jedem festgeschriebenen Ausschnitt nachgeführt, ohne React-Neuaufbau.
+  const syncDashVar = (v: ViewBox) => {
+    const el = svgRef.current;
+    const m = meetScale(v, canvasRef.current ?? el);
+    if (el && m != null && m > 0) el.style.setProperty(PLAN_DASH_VAR, String(m));
+  };
+  useLayoutEffect(() => syncDashVar(view));
   // Frische Werte in Refs spiegeln, damit das (stabile) imperative Handle und
   // der Resize-Beobachter stets den aktuellen Stand lesen (Handle hat leere Deps).
   const viewRef = useRef(view);
@@ -1907,6 +1920,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (panPending.current !== v) return; // überholt oder bereits festgeschrieben
       applySvgTransform(v0, v); // SVG: echter viewBox (scharf) bzw. CSS-Transform
       meetStore.set(meetScale(v, canvasRef.current ?? svgRef.current));
+      syncDashVar(v);
       viewStore.set(v);
     };
     if (wantNative) {

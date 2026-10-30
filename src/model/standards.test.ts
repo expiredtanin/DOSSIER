@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyProject, sampleProject } from "./sampleProject";
-import { standardsMergeOps, withStandards } from "./standards";
+import { standardsMergeCounts, standardsMergeOps, withStandards } from "./standards";
 
 describe("Standard-Bibliothek ([100]–[102])", () => {
   it("bringt Baustoffe, Linientypen und Aufbauten in ein neues Projekt", () => {
@@ -26,5 +26,14 @@ describe("Standard-Bibliothek ([100]–[102])", () => {
     expect(iw.layers[1].componentId).toBe("brick");
     expect(p.components.length).toBeGreaterThan(sampleProject.components.length);
     expect(standardsMergeOps(p)).toEqual([]);
+  });
+
+  it("zählt, was „Standards laden“ hinzufügt (Rückmeldung)", () => {
+    const empty = { ...emptyProject, components: [], hatches: [], lineStyles: [], wallTypes: [], ceilingTypes: [], roofTypes: [] };
+    const c = standardsMergeCounts(standardsMergeOps(empty));
+    expect(c.components).toBe(34);
+    expect(c.lineStyles).toBeGreaterThan(5);
+    expect(c.wallTypes + c.ceilingTypes + c.roofTypes).toBe(5);
+    expect(standardsMergeCounts(standardsMergeOps(withStandards(empty)))).toEqual({ lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0 });
   });
 });

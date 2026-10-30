@@ -146,6 +146,9 @@ pub fn components() -> Vec<Value> {
         Mat { id: "std-c-innenputz", name: "Innenputz", abbrev: "IP", fill: "#ffffff", elev: "#f5f3ee", hatch: "std-h-ohne", lambda: Some(0.7), density: Some(1400.0), rf: "RF1", tex: Some(("Plaster001", 1.0)), prio: 10.0, pattern: None },
         Mat { id: "std-c-aussenputz", name: "Aussenputz", abbrev: "AP", fill: "#ffffff", elev: "#e9e3d6", hatch: "std-h-ohne", lambda: Some(0.87), density: Some(1800.0), rf: "RF1", tex: Some(("Plaster001", 1.0)), prio: 10.0, pattern: None },
         Mat { id: "std-c-zementestrich", name: "Zementestrich", abbrev: "ZE", fill: "#ffffff", elev: "#cfcac0", hatch: "std-h-estrich", lambda: Some(1.4), density: Some(2000.0), rf: "RF1", tex: Some(("Concrete048", 2.0)), prio: 30.0, pattern: None },
+        // Bodenbeläge ([100]): Muster im Grundriss (Oberseite der Decke) und im 3D.
+        Mat { id: "std-c-parkett", name: "Parkett", abbrev: "PA", fill: "#ffffff", elev: "#c9a06b", hatch: "std-h-holz", lambda: Some(0.13), density: Some(650.0), rf: "RF3", tex: Some(("Wood095", 1.0)), prio: 8.0, pattern: sp("runningBond", None, 0.6, Some(0.1), None) },
+        Mat { id: "std-c-keramik", name: "Keramikplatten", abbrev: "KP", fill: "#ffffff", elev: "#d8d4cc", hatch: "std-h-ohne", lambda: Some(1.3), density: Some(2300.0), rf: "RF1", tex: None, prio: 9.0, pattern: sp("grid", None, 0.3, Some(0.3), None) },
         Mat { id: "std-c-glas", name: "Glas", abbrev: "GL", fill: "#d6ecf3", elev: "#a9c8d4", hatch: "std-h-ohne", lambda: Some(1.0), density: Some(2500.0), rf: "RF1", tex: None, prio: 70.0, pattern: None },
         Mat { id: "std-c-stahl", name: "Stahl", abbrev: "ST", fill: INK, elev: "#7d8287", hatch: "std-h-stahl", lambda: Some(50.0), density: Some(7850.0), rf: "RF1", tex: Some(("Metal063", 1.0)), prio: 110.0, pattern: None },
         Mat { id: "std-c-aluminium", name: "Aluminium", abbrev: "AL", fill: "#8c8c8c", elev: "#b9bcbf", hatch: "std-h-alu", lambda: Some(160.0), density: Some(2700.0), rf: "RF1", tex: Some(("Metal063", 1.0)), prio: 105.0, pattern: None },
@@ -310,7 +313,7 @@ mod tests {
         for name in [
             "Beton", "Stahlbeton", "Backstein", "Kalksandstein", "Porenbeton", "Holz massiv", "Brettsperrholz", "Holzwerkstoff (OSB/Spanplatte)",
             "Mineralwolle", "Steinwolle", "EPS", "XPS", "Holzfaser", "Gipskarton", "Innenputz", "Aussenputz", "Zementestrich", "Glas", "Stahl",
-            "Aluminium", "Naturstein", "Erdreich", "Kies / Sauberkeitsschicht",
+            "Aluminium", "Naturstein", "Erdreich", "Kies / Sauberkeitsschicht", "Parkett", "Keramikplatten",
         ] {
             let c = p.components.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("{name} fehlt"));
             assert!(c.lambda.is_some() && c.density.is_some() && c.fire_class.as_deref().is_some_and(|f| f.starts_with("RF")), "{name}");

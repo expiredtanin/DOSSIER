@@ -258,8 +258,29 @@ fn ceiling_type_name<'a>(p: &'a Project, c: &Ceiling) -> Option<&'a str> {
     ct.map(|t| t.name.as_str()).or_else(|| p.wall_types.iter().rev().find(|t| t.id == c.wall_type_id).map(|t| t.name.as_str()))
 }
 
+/// Bodenbeläge ([100]): Ansichtsmuster der obersten Schicht der Decke, auf der das Geschoss steht (OK
+/// Decke zwischen 0.3 m unter dem Geschossboden und der Schnitthöhe) — von oben gesehen, unter Wänden
+/// und Räumen gezeichnet.
+fn floor_finishes(c: &Ctx, out: &mut Vec<Primitive>) {
+    let p = c.p;
+    let base = p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
+    let cut = super::extras::cut_z(p, &c.a.floor);
+    for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| c.shown(&x.category_code)) {
+        let top = p.ceiling_vertical_extent(ce).1;
+        if !(top >= base - 0.3 && top <= cut) {
+            continue;
+        }
+        let Some((segs, w, ink)) = crate::surface_pattern3d::floor_finish_segments(p, ce, c.a.scale) else { continue };
+        let greyed = Some(c.greyed(&ce.category_code));
+        for (a, b) in segs {
+            out.push(line(pv(a), pv(b), "floor-finish-pattern", w, None, &ink, greyed));
+        }
+    }
+}
+
 fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<(), String> {
     let p = c.p;
+    floor_finishes(c, out);
     let list: Vec<&Ceiling> = p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| x.floor_id == c.a.floor && c.shown(&x.category_code)).collect();
     if list.is_empty() {
         return Ok(());
@@ -308,13 +329,28 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
 
 // ── Dächer ──────────────────────────────────────────────────────────────────
 
+/// Dach im Grundriss von oben gesehen (Dachaufsicht): ganz unter der Schnittebene des Geschosses
+/// (First ≤ Schnitthöhe). Nur dann zeigt der Grundriss Ansichtsschraffur und Ansichtsmuster der
+/// Eindeckung; liegt das Dach darüber (z. B. Satteldach über dem OG-Schnitt), bleiben nur die Kanten.
+fn roof_seen_from_above(p: &Project, roof: &Roof, geo: &crate::roof::RoofGeometry, cut_z: f64) -> bool {
+    p.roof_base_elevation(roof) + max(0.0, geo.ridge_height) <= cut_z + 1e-6
+}
+
 fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     let p = c.p;
-    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.shown(&r.category_code)) {
+    let cut_z = super::extras::cut_z(p, &c.a.floor);
+    let floor_base = p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
+    let below = |r: &Roof| r.floor_id != c.a.floor && p.floor(&r.floor_id).is_some_and(|f| f.base_elevation.unwrap_or(0.0) < floor_base - 1e-6);
+    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| (r.floor_id == c.a.floor || below(r)) && c.shown(&r.category_code)) {
         let greyed = Some(c.greyed(&roof.category_code));
         let category = c.cat(&roof.category_code);
         let stroke = roof.color.as_deref().or(category.map(|k| k.color.as_str())).unwrap_or(POCHE_STROKE);
         let geo = crate::roof::roof_geometry(&roof.params(), 0.0);
+        let from_above = roof_seen_from_above(p, roof, &geo, cut_z);
+        // Dächer tieferer Geschosse nur als Dachaufsicht (ganz unter der Schnittebene).
+        if roof.floor_id != c.a.floor && !from_above {
+            continue;
+        }
         for q in &geo.eaves {
             bounds.acc(q[0], q[1]);
         }
@@ -325,6 +361,7 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             .filter(|l| !l.component_id.is_empty())
             .and_then(|l| p.component(&l.component_id))
             .and_then(|k| k.view_hatch_id.as_deref().filter(|s| !s.is_empty()))
+            .filter(|_| from_above)
             .and_then(|id| resolve_hatch(p, id, None, None, None))
             .unwrap_or_else(no_hatch);
         let eaves: Vec<Vec2> = geo.eaves.iter().map(|q| pv(*q)).collect();
@@ -336,7 +373,7 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             out.push(polygon(ring, "none", "none", 0.0, view_hatch, greyed, bridges, Pick::Roof(&roof.id)));
         }
         // Ansichtsschraffur ([100]) der Eindeckung je Dachfläche (traufparallel/Falllinie, verkürzt projiziert).
-        if let Some(comp) = layers.first().filter(|l| !l.component_id.is_empty()).and_then(|l| p.component(&l.component_id)) {
+        if let Some(comp) = layers.first().filter(|l| from_above && !l.component_id.is_empty()).and_then(|l| p.component(&l.component_id)) {
             if let Some((pat, spec)) = comp.surface_pattern.as_ref().and_then(|sp| Some((sp, crate::surface_pattern::spec_of(sp, roof.surface_pattern_angle.unwrap_or(0.0))?))) {
                 let off = roof.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
                 let w = pat.weight_mm.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(0.1);
@@ -852,17 +889,49 @@ mod tests {
         p.roofs.as_mut().unwrap()[0].roof_type_id = Some("roof-warm".into());
         let roof = p.roofs.as_ref().unwrap()[0].clone();
         let outer = p.roof_layers(&roof)[0].component_id.clone();
-        let count = |p: &Project, scale: f64| {
-            let t = serde_json::json!({ "floor": "og", "show": ["31"], "grey": [], "scale": scale }).to_string();
+        let count_on = |p: &Project, floor: &str, scale: f64| {
+            let t = serde_json::json!({ "floor": floor, "show": ["31"], "grey": [], "scale": scale }).to_string();
             let r = plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
             serde_json::to_string(&r.roofs).unwrap().matches("roof-surface-pattern").count()
         };
+        let count = |p: &Project, scale: f64| count_on(p, "og", scale);
         assert_eq!(count(&p, 100.0), 0);
         let c = p.components.iter_mut().find(|c| c.id == outer).unwrap();
         c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Lines, direction: Some(SurfacePatternDirection::Horizontal), spacing: 0.34, ..Default::default() });
+        // OG-Grundriss: Schnitt 1 m über OG-Boden, das Dach liegt darüber → keine Dachaufsicht (Muster, Ansichtsschraffur).
+        assert_eq!(count(&p, 100.0), 0);
+        let og = p.drawing_levels.iter_mut().find(|l| l.id == "og").unwrap();
+        og.cut_height = Some(9.0);
+        // Schnitt über dem First: Dach von oben gesehen.
         let n = count(&p, 100.0);
         assert!(n > 10, "{n}");
         assert_eq!(count(&p, 5000.0), 0);
+        // Geschoss über dem Dach: Dachaufsicht des tieferen Geschosses.
+        p.drawing_levels.iter_mut().find(|l| l.id == "og").unwrap().cut_height = None;
+        let mut dg = p.drawing_levels.iter().find(|l| l.id == "og").unwrap().clone();
+        dg.id = "dg".into();
+        dg.base_elevation = Some(5.2);
+        dg.cut_height = Some(3.0);
+        p.drawing_levels.push(dg);
+        assert!(count_on(&p, "dg", 100.0) > 10);
+        assert_eq!(count(&p, 100.0), 0);
+    }
+
+    #[test]
+    fn bodenbelag_im_og_grundriss() {
+        let mut p = sample();
+        let ce = p.ceilings.as_ref().unwrap()[0].clone();
+        let top = crate::model3d::ceiling_type_ref(&p, &ce).unwrap().2[0].component_id.clone();
+        let c = p.components.iter_mut().find(|c| c.id == top).unwrap();
+        c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Grid, spacing: 0.3, height: Some(0.3), ..Default::default() });
+        let count = |floor: &str| {
+            let t = serde_json::json!({ "floor": floor, "show": ["30"], "grey": [], "scale": 50 }).to_string();
+            let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            serde_json::to_string(&r.ceilings).unwrap().matches("floor-finish-pattern").count()
+        };
+        // Decke C1 (über dem EG) ist der Boden des OG: Belag im OG, nicht im EG.
+        assert!(count("og") > 10);
+        assert_eq!(count("eg"), 0);
     }
 
     #[test]

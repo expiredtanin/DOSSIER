@@ -205,14 +205,14 @@ fn native2d_texts(app: tauri::AppHandle, upsert: serde_json::Value, remove: Vec<
 }
 
 #[tauri::command]
-fn native2d_frame(app: tauri::AppHandle, view: serde_json::Value, paper_scale: f64, clear: Option<[f64; 3]>) -> Result<(), String> {
+fn native2d_frame(app: tauri::AppHandle, view: serde_json::Value, paper_scale: f64, clear: Option<[f64; 3]>, dash_scale: Option<f64>) -> Result<(), String> {
     #[cfg(all(feature = "native2d", target_os = "macos"))]
     {
         let view = serde_json::from_value(view).map_err(|e| e.to_string())?;
-        native_embed::frame(&app, view, paper_scale, clear);
+        native_embed::frame(&app, view, paper_scale, clear, dash_scale);
     }
     #[cfg(not(all(feature = "native2d", target_os = "macos")))]
-    let _ = (app, view, paper_scale, clear);
+    let _ = (app, view, paper_scale, clear, dash_scale);
     Ok(())
 }
 

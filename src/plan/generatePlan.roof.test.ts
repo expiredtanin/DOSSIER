@@ -139,10 +139,18 @@ describe("generatePlan — Dächer (Dachaufsicht)", () => {
       ],
       roofTypes: [{ id: "rt1", name: "Dach", layers: [{ componentId: "tile", thickness: 0.05 }] }],
     };
-    const polys = generatePlan(p, "eg", visible).primitives.filter(
-      (pr): pr is Extract<typeof pr, { kind: "polygon" }> =>
-        pr.kind === "polygon" && (pr as { roofId?: string }).roofId === "R9",
-    );
+    const roofPolys = (proj: Project) =>
+      generatePlan(proj, "eg", visible).primitives.filter(
+        (pr): pr is Extract<typeof pr, { kind: "polygon" }> =>
+          pr.kind === "polygon" && (pr as { roofId?: string }).roofId === "R9",
+      );
+    // Dach über der Schnittebene (Schnitt 1 m, Traufe 2.6 m): nicht von oben gesehen → ohne Schraffur.
+    const over = roofPolys(p);
+    expect(over.length).toBe(1);
+    expect(over[0].hatch.pattern).toBe("none");
+    // Schnitt über dem First: Dachaufsicht mit Ansichtsschraffur.
+    const seen = { ...p, drawingLevels: p.drawingLevels.map((l) => (l.id === "eg" ? { ...l, cutHeight: 20 } : l)) };
+    const polys = roofPolys(seen);
     expect(polys.length).toBe(1);
     expect(polys[0].hatch.pattern).toBe("diagonal");
 

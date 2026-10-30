@@ -297,6 +297,11 @@ export function useNativePlanRenderer(
     pushTexts(plan);
   }, [pushTexts, takeFullLayout]);
 
+  // Plot-Massstab der Strichmuster (`setDashScale`), mit jedem Frame gesendet.
+  const dashScaleRef = useRef(0);
+  const setDashScale = useCallback((n: number) => {
+    dashScaleRef.current = n > 0 && isFinite(n) ? n : 0;
+  }, []);
   const render = useCallback(
     (viewBox: ViewBox, paperScaleN = 100, _textScale?: number, onApplied?: () => void) => {
       const invoke = invokeRef.current;
@@ -310,6 +315,7 @@ export function useNativePlanRenderer(
         invoke('native2d_frame', {
           view: viewBox,
           paperScale: paperScaleN,
+          dashScale: dashScaleRef.current || null,
           clear: sheet ? [sheet[0], sheet[1], sheet[2]] : null,
         }).then(
           (r) => {
@@ -326,5 +332,5 @@ export function useNativePlanRenderer(
     [sendFrame, syncRect],
   );
 
-  return { render, updateGeometry, ready, gpuTexts, setExcludedText, setHighlight };
+  return { render, updateGeometry, ready, gpuTexts, setExcludedText, setHighlight, setDashScale };
 }

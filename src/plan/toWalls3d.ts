@@ -72,6 +72,14 @@ export function emitDrawingLineVerts(project: Project): Float32Array {
 }
 
 /**
+ * Ansichtsschraffur ([100]) auf den Flächen als Linien für render3d (`set_pattern_lines`): je Linie
+ * `ax ay az bx by bz r g b maske` (Welt-Meter); die Maske wählt die Ausdünnung nach Abstand.
+ */
+export function emitSurfacePatternLines(project: Project): Float32Array {
+  return documentFor(project).surfacePatternLines();
+}
+
+/**
  * Nur die Wände (Rückwärts-Kompatibilität / bestehende Aufrufer). Zerlegt Wände mit Öffnungen in
  * Teilquader bzw. (layered) in Schicht-Bänder. Rechnet der Kern auf dem Projekt-Dokument
  * (`model3d.rs`: Verschneidung je Geschoss, Bänder, Öffnungen, Decken-/Dach-Dominanz).
