@@ -488,6 +488,8 @@ export interface ResolvedTitleBlock {
   author: string;
   /** Plannummer: `Layout.planNumber`, sonst laufende Nummer des Blatts im Projekt ("01", "02" …). */
   planNumber: string;
+  /** Revisionsindex des Blatts (`Layout.revision`, [79]); fehlt = keiner. */
+  revision?: string;
 }
 
 /**
@@ -509,7 +511,8 @@ export function resolveTitleBlock(
     master: master ? { titleBlock: master.titleBlock } : null,
     today,
   };
-  return documentFor(project).queryRoot<ResolvedTitleBlock>("layoutTitleBlock", JSON.stringify(arg));
+  const tb = documentFor(project).queryRoot<ResolvedTitleBlock>("layoutTitleBlock", JSON.stringify(arg));
+  return layout.revision ? { ...tb, revision: layout.revision } : tb;
 }
 
 /**
