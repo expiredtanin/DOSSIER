@@ -1016,9 +1016,10 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
     }
     let (bx, by) = plane.base();
     let (ux, uy) = plane.u_model();
+    let nb = crate::roof_assembly::neighbors_rc(p);
     for (index, roof) in roofs.iter().enumerate() {
         // Verschnittene Dächer und Gauben ([G5]): Schnitt durch die Körper je Schicht.
-        if let Some(solids) = crate::roof_assembly::roof_solids(p, index) {
+        if let Some(solids) = crate::roof_assembly::roof_solids_with(p, index, &nb) {
             for part in &solids.parts {
                 let rings = crate::roof_assembly::section_rings(&part.mesh, (bx, by), (ux, uy));
                 if rings.is_empty() {

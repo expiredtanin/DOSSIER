@@ -1209,6 +1209,21 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     die fast parallel zur Achse schräg durchs Band laufen, nur genähert (seitliche Teilung an der Mitte);
     Fenster, das ins Dach ragt, verliert seinen Sturz; Dachgeometrie im 3D-Live-Schnitt unverändert; nicht in
     der Tauri-App/Metal geprüft.
+  - (30.10.) **Leistung der Ansicht** (Regression aus dem Verdeckungstest gegen die Dach-Scheiben): jeder
+    Sichtstrahl lief in 4-cm-Schritten gegen alle Dächer, Stirnen und Gauben, die Halbierung der Verdeckungsgrenze
+    40-mal je Ecke; dazu je Dach alle anderen Dachgeometrien neu (quadratisch). Jetzt (`cull_under_roofs`):
+    Dachgeometrie einmal, Verdecker per u-Raster (`ugrid.rs`) + Ausdehnung vorausgewählt, Strahl nur im Bereich
+    der Kandidaten, Abtastung je Grundriss-Punkt einmal (`Ray`: Facettenwerte, Stirnen in Reichweite, Traufkante
+    je Schritt) und je Höhe nur verglichen; `collect_roof_faces` mit Ausdehnungs-Vorauswahl; Dach-Nachbarn
+    einmal je Ableitung (`roof_assembly::neighbors_rc`, `*_with`; vorher je Dach alle Dächer gehasht) auch in
+    Schnitt und 3D, Überdeckungs-Boolean nur bei überlappender Ausdehnung. Nebenbei behoben: `planar_faces` und
+    `top_view_edges` hingen von der HashMap-Reihenfolge ab (Polygon-Startecke/Kantenfolge je Prozess
+    verschieden, Ansicht verschnittener Dächer nicht reproduzierbar). Messung (Linux, Container unter Last): big8
+    Ansicht nativ 3,2 s → 26–40 ms, WASM-CLI 4,7 s → ≈ 40 ms; big16 nativ 50,7 s → 0,12–0,27 s. Gleichheit:
+    alte gegen neue Verdeckung nativ (beide mit fester Reihenfolge) bitgleich auf 20 Ansichten (Beispiel, Haus mit
+    Gaube + T-Dach + „bis unters Dach", Haus 4×4, big8, je 4 Richtungen + Ansicht Süd); WASM-CLI Ansichten von
+    Beispiel und big8 sowie alle Schnitte und Pläne bitgleich (vor dem [G4]-Merge). Wächter: Test
+    `ansicht_gross_schnell` (8×8, Schranke 8 s), Messung `ansicht_gross_messen` (`--ignored`).
 - ◐ **[G3] Öffnungen beliebiger Form** (29.10.; Schnitt/IFC in Bogenwänden 30.10., s. [T2]) `Opening.shape` (rundbogen, segmentbogen, spitzbogen, rund/oval,
   schraeg, giebel) + `shapeRise` (Stich). Kern `opening_shape.rs`: konvexer Umriss im Öffnungsrechteck; die Wand
   behält das Rechteck-Loch, der Rest zwischen Rechteck und Umriss kommt als Füllkörper (senkrechte Streifen =
@@ -1248,8 +1263,8 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     Schnittflächen, Bogenwände vollständig; bei Gauben fehlen Kanten, die die alte Näherung durch davor liegende
     Dachteile zeichnete. Zeiten (WASM-CLI, Rechner unter Last): big8 Schnitt ≈ 90 ms (vorher ≈ 100), big16
     Schnitt 450–600 ms (≈ 570–700); die Kantenrechnung der Ansicht braucht nativ ≈ 5 ms (big8) — die Ansicht von
-    big8 dauert seit dem Merge von [G2] (Dach-Scheiben verdecken Wände, `RoofSheet`) aber ≈ 4 s statt 40 ms,
-    auch ohne [G4]: dort nachsehen. Geprüft: Rust-Tests (hlr:
+    big8 dauerte seit dem Merge von [G2] (Dach-Scheiben verdecken Wände, `RoofSheet`) ≈ 4 s statt 40 ms,
+    auch ohne [G4] — behoben 30.10., s. [G2] „Leistung der Ansicht". Geprüft: Rust-Tests (hlr:
     Quader, T-Stoss, Fuge, schräge/durchstossende Verdecker, Zylinder-Facetten, Triangulation; Ansicht/Schnitt
     am Beispiel), CLI-Ansichten/-Schnitte (Beispiel, Haus mit Bogenwand + Gauben + Gelände, Gauben-Projekt,
     Bogenwände, big8) als PNG angesehen (Linux). **Offen:** Füllungen der Ansicht bleiben Maler-Ordnung (bei
