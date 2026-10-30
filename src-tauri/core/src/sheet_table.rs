@@ -86,6 +86,15 @@ const ELEMENTS: &[Col] = &[
     c("ext", "openings.col.ext", 1.4, false, false),
 ];
 
+const EARTHWORKS: &[Col] = &[
+    c("name", "sheetTable.col.name", 2.4, false, true),
+    c("bottom", "sheetTable.col.bottom", 1.3, true, true),
+    c("area", "sheetTable.col.area", 1.3, true, true),
+    c("cut", "sheetTable.col.cut", 1.4, true, true),
+    c("fill", "sheetTable.col.fill", 1.4, true, true),
+    c("backfill", "sheetTable.col.backfill", 1.6, true, true),
+];
+
 /// Schlüssel der Werttexte (Art, aussen/innen, Aufschlag …).
 pub const VALUE_KEYS: &[&str] = &[
     "sheetTable.v.window",
@@ -111,6 +120,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
         LayoutTableSource::Areas => AREAS,
         LayoutTableSource::Rooms => ROOMS,
         LayoutTableSource::Elements => ELEMENTS,
+        LayoutTableSource::Earthworks => EARTHWORKS,
     }
 }
 
@@ -118,7 +128,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
 pub fn catalog_json() -> Value {
     let one = |s: &[Col]| s.iter().map(|k| json!({"id": k.id, "key": k.key, "numeric": k.numeric, "default": k.default})).collect::<Vec<_>>();
     json!({
-        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS)},
+        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS)},
         "valueKeys": VALUE_KEYS,
     })
 }
@@ -250,7 +260,20 @@ fn data_of(p: &Project, t: &LayoutTable, lb: &Labels) -> Data {
         LayoutTableSource::Areas => areas_data(p, lb),
         LayoutTableSource::Rooms => rooms_data(p),
         LayoutTableSource::Elements => elements_data(p, lb),
+        LayoutTableSource::Earthworks => earthworks_data(p, lb),
     }
+}
+
+/// [68] Erdarbeiten je Baugrube (m³ gegen das gewachsene Terrain) mit Summenzeile.
+fn earthworks_data(p: &Project, lb: &Labels) -> Data {
+    let q = crate::excavation::quantities(p);
+    let mut rows: Vec<Vec<Cell>> = q.iter().map(|e| vec![txt(e.name.clone()), num(e.bottom, 2), num(e.bottom_area, 1), num(e.cut, 1), num(e.fill, 1), num(e.backfill, 1)]).collect();
+    let total_last = q.len() > 1;
+    if total_last {
+        let s = |f: fn(&crate::excavation::ExQty) -> f64| q.iter().map(f).sum::<f64>();
+        rows.push(vec![txt(lb.get("sheetTable.v.total")), num(f64::NAN, 2), num(s(|e| e.bottom_area), 1), num(s(|e| e.cut), 1), num(s(|e| e.fill), 1), num(s(|e| e.backfill), 1)]);
+    }
+    Data { rows, total_last }
 }
 
 /// Gewählte Spalten als Indizes in den Katalog (unbekannte Kennungen fallen weg; leer ⇒ Standard).

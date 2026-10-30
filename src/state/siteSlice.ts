@@ -9,9 +9,9 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { generateTerrainFromContours } from "../model/terrain";
+import { generateTerrainFromContours, type TerrainOptions } from "../model/terrain";
 import type { ContextObject, Project } from "../model/types";
-import { addItems, fieldOps, removeItems } from "../core/opsBuild";
+import { addItems, fieldOps, patchItem, removeItems } from "../core/opsBuild";
 import type { CoreOp } from "../core/ops";
 import { ensureContextCategories } from "../model/contextCategories";
 import type { StoreApi } from "./store";
@@ -32,7 +32,9 @@ export interface SiteSlice {
    * weiteres Kontext-Objekt hinzu. Liefert die ID des neuen TerrainMesh, oder
    * null, wenn der ContourSet nicht existiert / kein Mesh entsteht.
    */
-  generateTerrain: (contourSetId: string) => string | null;
+  generateTerrain: (contourSetId: string, opts?: TerrainOptions) => string | null;
+  /** [T6]/[68] Ändert Felder eines Kontext-Objekts (Gelände, Baugrube) in einem Schritt; `coalesceKey` für Tippen. */
+  patchContextObject: (id: string, patch: Record<string, unknown>, coalesceKey?: string) => void;
   /** Leert die gesamte Kontext-Schicht. */
   clearContext: () => void;
 }
@@ -44,7 +46,7 @@ export interface SiteSlice {
  */
 type SiteSliceDeps = {
   project: Project;
-  applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[])) => void;
+  applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]), coalesceKey?: string) => void;
 };
 
 export function createSiteSlice(
@@ -81,13 +83,16 @@ export function createSiteSlice(
       get().applyChange((p) => removeItems(p, "context", ids));
     },
 
-    generateTerrain: (contourSetId) => {
+    patchContextObject: (id, patch, coalesceKey) =>
+      get().applyChange((p) => patchItem(p, "context", id, (o) => ({ ...o, ...patch }) as ContextObject), coalesceKey),
+
+    generateTerrain: (contourSetId, opts) => {
       const ctx = get().project.context ?? [];
       const set = ctx.find(
         (o) => o.id === contourSetId && o.type === "contourSet",
       );
       if (!set || set.type !== "contourSet") return null;
-      const terrain = generateTerrainFromContours(set.contours);
+      const terrain = generateTerrainFromContours(set.contours, opts);
       if (terrain.indices.length === 0) return null; // kein sinnvolles TIN
       addToContext([terrain]);
       return terrain.id;

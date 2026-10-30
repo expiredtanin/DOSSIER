@@ -168,6 +168,7 @@ export function usePanelHostBase(opts: {
     | "removeContextObject"
     | "removeContextObjects"
     | "generateTerrain"
+    | "patchContextObject"
     | "commitTransformOn"
     | "setElementColor"
     | "setElementWeight"
@@ -292,6 +293,7 @@ export function usePanelHostBase(opts: {
     removeContextObject,
     removeContextObjects,
     generateTerrain,
+    patchContextObject,
     commitTransformOn,
     setElementColor,
     setElementWeight,
@@ -1082,6 +1084,8 @@ export function usePanelHostBase(opts: {
       onRemoveContextObject: removeContextObject,
       onRemoveContextObjects: removeContextObjects,
       onGenerateTerrain: generateTerrain,
+      onPatchContextObject: patchContextObject,
+      onStartExcavation: () => onRunCommand("excavation"),
       onSetGeoAnchor: (anchor) => {
         applyChange((p) => setFieldIfChanged(p, "geoAnchor", anchor));
       },

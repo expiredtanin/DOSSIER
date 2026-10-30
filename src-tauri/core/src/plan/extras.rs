@@ -436,6 +436,11 @@ pub fn extra_bounds(p: &Project, extra: &[(Primitive, u32)]) -> Bounds {
             }
             ContextObject::ImportedMesh(m) => mesh_bounds(&m.positions, &mut b),
             ContextObject::TerrainMesh(m) => mesh_bounds(&m.positions, &mut b),
+            ContextObject::Excavation(e) => {
+                for q in &e.outline {
+                    b.acc(q.x, q.y);
+                }
+            }
         }
     }
     b

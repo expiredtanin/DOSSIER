@@ -57,6 +57,12 @@ export interface SiteCheck {
   violationArea: number;
   maxTop: number | null;
   heightExceeded: boolean;
+  /** [T6] Geländehöhen an der Fassade (gewachsen/gestaltet, Modellbezug); leer ohne Gelände. */
+  facadeTerrain: { x: number; y: number; natural: number | null; designed: number | null }[];
+  /** Tiefstes gewachsenes Terrain an der Fassade (massgebendes Terrain, vereinfacht). */
+  terrainMin: number | null;
+  /** Gesamthöhe über dem massgebenden Terrain; mit Gelände prüft die Höhe dagegen statt gegen ±0.00. */
+  heightAboveTerrain: number | null;
 }
 
 /** Prüft das Modell gegen `project.siteRules`; `null` ohne (gültiges) Baurecht. Rechnung im Rust-Kern (`site_rules.rs`). */

@@ -659,6 +659,78 @@ fn poly_prim(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, opening: Option<&
     pr
 }
 
+/// [T6] Obere Hüllkurve des Geländes (samt Baugruben) in der Ansicht: Dreiecke mit Tiefe in [0, `depth_max`]
+/// und u im Bereich `range`, abgetastet in ≤ 800 Spalten.
+fn terrain_silhouette(p: &Project, t: &TerrainMesh, frame: &[f64; 9], range: (f64, f64), depth_max: f64) -> Vec<Vec<[f64; 2]>> {
+    let (fp, fnrm, fu) = ([frame[0], frame[1], frame[2]], [frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
+    let (pos, idx, _) = crate::excavation::terrain_model_mesh(p, t);
+    let proj = |i: usize| -> (f64, f64, f64) {
+        let q = [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]];
+        let w = [q[0] - fp[0], q[2] - fp[1], q[1] - fp[2]];
+        (w[0] * fu[0] + w[1] * fu[1] + w[2] * fu[2], q[2], w[0] * fnrm[0] + w[1] * fnrm[1] + w[2] * fnrm[2])
+    };
+    let (u0, u1) = range;
+    if !(u1 > u0) {
+        return Vec::new();
+    }
+    let n = 800usize;
+    let du = (u1 - u0) / n as f64;
+    let mut env = vec![f64::NEG_INFINITY; n + 1];
+    let nv = pos.len() / 3;
+    for tr in idx.chunks_exact(3) {
+        if !tr.iter().all(|v| *v >= 0.0 && (*v as usize) < nv) {
+            continue;
+        }
+        let q = [proj(tr[0] as usize), proj(tr[1] as usize), proj(tr[2] as usize)];
+        if q.iter().all(|v| v.2 < 0.0) || q.iter().all(|v| v.2 > depth_max) {
+            continue;
+        }
+        let lo = q.iter().map(|v| v.0).fold(f64::INFINITY, f64::min).max(u0);
+        let hi = q.iter().map(|v| v.0).fold(f64::NEG_INFINITY, f64::max).min(u1);
+        if !(hi >= lo) {
+            continue;
+        }
+        let (k0, k1) = (((lo - u0) / du).ceil() as usize, (((hi - u0) / du).floor() as usize).min(n));
+        for (k, e) in env.iter_mut().enumerate().take(k1 + 1).skip(k0) {
+            let u = u0 + k as f64 * du;
+            for i in 0..3 {
+                let (a, b) = (q[i], q[(i + 1) % 3]);
+                if (a.0 - u) * (b.0 - u) <= 0.0 && a.0 != b.0 {
+                    let z = a.1 + (b.1 - a.1) * (u - a.0) / (b.0 - a.0);
+                    *e = e.max(z);
+                }
+            }
+        }
+    }
+    let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut cur: Vec<[f64; 2]> = Vec::new();
+    for (k, z) in env.iter().enumerate() {
+        if z.is_finite() {
+            cur.push([u0 + k as f64 * du, *z]);
+        } else if cur.len() > 1 {
+            out.push(std::mem::take(&mut cur));
+        } else {
+            cur.clear();
+        }
+    }
+    if cur.len() > 1 {
+        out.push(cur);
+    }
+    // Kollineare Zwischenpunkte weglassen (Raster), Form bleibt.
+    for l in &mut out {
+        let mut s: Vec<[f64; 2]> = vec![l[0]];
+        for i in 1..l.len() - 1 {
+            let (a, b, c) = (s[s.len() - 1], l[i], l[i + 1]);
+            if ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs() > 1e-9 {
+                s.push(b);
+            }
+        }
+        s.push(l[l.len() - 1]);
+        *l = s;
+    }
+    out
+}
+
 /// `generateElevationPlan`: Primitive und Ausmass; `None` ohne Ansichtslinie.
 pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
@@ -1031,7 +1103,33 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         a.seq.cmp(&b.seq)
     });
     let mut prims: Vec<Primitive> = items.into_iter().map(|it| it.prim).collect();
-    if acc.min_x.is_finite() && acc.min_y.is_finite() {
+    // [T6] Gelände-Silhouette (gestaltetes Terrain) zwischen Ansichtsebene und vorderster Gebäudefläche; was
+    // darunter liegt, verdeckt das Gelände (Papierfläche über dem Gebäude).
+    let depth_max = faces.iter().map(|f| f.depth_min).fold(f64::INFINITY, f64::min) + 0.3;
+    let mut has_terrain = false;
+    if acc.min_x.is_finite() && depth_max.is_finite() && !crate::excavation::terrains(p).is_empty() {
+        let terrain_shown = |c: Option<&str>| c.is_none_or(|c| !vis.has_vis || !vis.has_display || (vis.visible(c) && vis.render(c)));
+        for t in crate::excavation::terrains(p) {
+            if !terrain_shown(t.category_code.as_deref()) {
+                continue;
+            }
+            for l in terrain_silhouette(p, t, &frame, (acc.min_x - 6.0, acc.max_x + 6.0), depth_max) {
+                has_terrain = true;
+                let low = l.iter().map(|q| q[1]).fold(acc.min_y, f64::min) - 1.0;
+                let mut ring: Vec<Vec2> = l.iter().map(|q| v2(q[0], q[1])).collect();
+                ring.push(v2(l[l.len() - 1][0], low));
+                ring.push(v2(l[0][0], low));
+                prims.push(polygon(ring, "#ffffff", "none", 0.0, no_hatch()));
+                for w in l.windows(2) {
+                    acc.add(w[0][0], w[0][1]);
+                    acc.add(w[1][0], w[1][1]);
+                    prims.push(line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), "elevation-terrain", GROUND_MM, GROUND_INK));
+                }
+            }
+        }
+    }
+    // Mit Gelände ersetzt die Silhouette die Grundlinie ([T6]).
+    if acc.min_x.is_finite() && acc.min_y.is_finite() && !has_terrain {
         prims.push(line(v2(acc.min_x, acc.min_y), v2(acc.max_x, acc.min_y), "elevation-ground", GROUND_MM, GROUND_INK));
     }
     Ok(Some((prims, acc.bounds())))

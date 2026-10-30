@@ -70,3 +70,16 @@ pub fn terrain_from_contours_json(contours_json: &str, id: &str) -> String {
     let c: Value = serde_json::from_str(contours_json).unwrap_or(Value::Null);
     crate::cmd_solid::terrain_from_contours(c.as_array().map(Vec::as_slice).unwrap_or(&[]), id).to_string()
 }
+
+/// Wie [`terrain_from_contours_json`] mit Optionen ([T6]): `smooth` Glättungsstufen (0–4), `max_edge` grösste
+/// Kante in m (≤ 0 automatisch), `breaklines` ≠ 0 erzwingt die Konturen als Bruchkanten.
+#[wasm_bindgen]
+pub fn terrain_from_contours_opts_json(contours_json: &str, id: &str, smooth: f64, max_edge: f64, breaklines: f64) -> String {
+    let c: Value = serde_json::from_str(contours_json).unwrap_or(Value::Null);
+    let o = crate::terrain::TerrainOpts {
+        smooth: if smooth.is_finite() { smooth.clamp(0.0, 4.0) as u32 } else { 2 },
+        max_edge: if max_edge.is_finite() { max_edge } else { 0.0 },
+        breaklines: breaklines != 0.0,
+    };
+    crate::cmd_solid::terrain_from_contours_with(c.as_array().map(Vec::as_slice).unwrap_or(&[]), id, o).to_string()
+}
