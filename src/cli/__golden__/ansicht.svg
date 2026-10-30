@@ -16,8 +16,6 @@
 <polygon points="1,4.48564 6,4.48564 6,2.05885 1,2.05885" fill="#ffffff" stroke="none" stroke-width="0" stroke-linejoin="round"/>
 <polygon points="5.8275,4.48564 6.1725,4.48564 6.1725,1.88564 5.8275,1.88564" fill="#ffffff" stroke="none" stroke-width="0" stroke-linejoin="round"/>
 <polygon points="1.1725,4.48564 1.1725,1.88564 0.8275,1.88564 0.8275,4.48564" fill="#ffffff" stroke="none" stroke-width="0" stroke-linejoin="round"/>
-<line x1="6.1725" y1="4.48564" x2="6.1725" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="0.8275" y1="4.48564" x2="0.8275" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
 <polygon points="6,2.05885 6,2.28564 1,2.28564 1,2.05885" fill="#8f959e" stroke="none" stroke-width="0" stroke-linejoin="round"/>
 <polygon points="5.8275,1.88564 6.1725,1.88564 6.1725,2.28564 5.8275,2.28564" fill="#8f959e" stroke="none" stroke-width="0" stroke-linejoin="round"/>
 <polygon points="0.8275,1.88564 1.1725,1.88564 1.1725,2.28564 1,2.28564 0.8275,2.11314" fill="#8f959e" stroke="none" stroke-width="0" stroke-linejoin="round"/>
@@ -31,23 +29,6 @@
 <polygon points="4,4.98564 5,4.98564 5,4.48564 4,4.48564" fill="#ffffff" stroke="none" stroke-width="0" stroke-linejoin="round"/>
 <polygon points="5,7.08564 6.1725,7.08564 6.1725,4.48564 5,4.48564" fill="#ffffff" stroke="none" stroke-width="0" stroke-linejoin="round"/>
 <polygon points="1,4.48564 6,4.48564 6,2.05885 1,2.05885" fill="#ffffff" stroke="none" stroke-width="0" stroke-linejoin="round"/>
-<line x1="0.8275" y1="7.08564" x2="1.8" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="2.7" y1="7.08564" x2="4" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="4" y1="7.08564" x2="5" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="5" y1="7.08564" x2="6.1725" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="0.8275" y1="4.48564" x2="1" y2="4.48564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="6" y1="4.48564" x2="6.1725" y2="4.48564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="1.8" y1="4.98564" x2="2.7" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="4" y1="4.98564" x2="5" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="4" y1="6.18564" x2="5" y2="6.18564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="1.8" y1="7.08564" x2="1.8" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="0.8275" y1="7.08564" x2="0.8275" y2="4.48564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="2.7" y1="7.08564" x2="2.7" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="4" y1="6.18564" x2="4" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="5" y1="6.18564" x2="5" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="6.1725" y1="7.08564" x2="6.1725" y2="4.48564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="6" y1="4.48564" x2="6" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="1" y1="4.48564" x2="1" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
 <polygon points="6,2.05885 6,2.11314 1,2.11314 1,2.05885" fill="#8f959e" stroke="none" stroke-width="0" stroke-linejoin="round"/>
 <polygon points="1,2.05885 6,2.05885 6,2.28635 1,2.28635" fill="#8f959e" stroke="none" stroke-width="0" stroke-linejoin="round"/>
 <polygon points="1.8,7.08564 2.7,7.08564 2.7,4.98564 1.8,4.98564" fill="#d9d9d4" stroke="#2b3039" stroke-width="0.018" stroke-linejoin="round"/>
@@ -66,11 +47,29 @@
 <line x1="4.12" y1="6.06564" x2="4.5" y2="5.10564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18"/>
 <line x1="4.88" y1="6.06564" x2="4.5" y2="5.10564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18"/>
 <polygon points="0.6,1.88564 6.4,1.88564 6.4,2.05885 0.6,2.05885" fill="#b8735c" stroke="none" stroke-width="0" stroke-linejoin="round"/>
+<line x1="0.8275" y1="7.08564" x2="1.8" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="1.8" y1="7.08564" x2="1.8" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="1" y1="4.48564" x2="0.8275" y2="4.48564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="0.8275" y1="4.48564" x2="0.8275" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="1.8" y1="4.98564" x2="2.7" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="2.7" y1="7.08564" x2="4" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="4" y1="6.18564" x2="4" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="2.7" y1="4.98564" x2="2.7" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="4" y1="7.08564" x2="5" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="5" y1="6.18564" x2="4" y2="6.18564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="4" y1="4.98564" x2="5" y2="4.98564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="5" y1="7.08564" x2="6.1725" y2="7.08564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="6.1725" y1="7.08564" x2="6.1725" y2="4.48564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="6.1725" y1="4.48564" x2="6" y2="4.48564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="5" y1="4.98564" x2="5" y2="6.18564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="6" y1="4.48564" x2="6" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="1" y1="2.05885" x2="1" y2="4.48564" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="6.1725" y1="4.48564" x2="6.1725" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
+<line x1="0.8275" y1="2.05885" x2="0.8275" y2="4.48564" stroke="#2b3039" stroke-width="0.013"/>
 <line x1="0.6" y1="1.88564" x2="6.4" y2="1.88564" stroke="#2b3039" stroke-width="0.013"/>
 <line x1="6.4" y1="1.88564" x2="6.4" y2="0.5" stroke="#2b3039" stroke-width="0.013"/>
 <line x1="6.4" y1="0.5" x2="0.6" y2="0.5" stroke="#2b3039" stroke-width="0.013"/>
 <line x1="0.6" y1="0.5" x2="0.6" y2="1.88564" stroke="#2b3039" stroke-width="0.013"/>
-<line x1="0.6" y1="1.88564" x2="6.4" y2="1.88564" stroke="#2b3039" stroke-width="0.013"/>
 <line x1="6.4" y1="1.88564" x2="6.4" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
 <line x1="6.4" y1="2.05885" x2="0.6" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
 <line x1="0.6" y1="2.05885" x2="0.6" y2="1.88564" stroke="#2b3039" stroke-width="0.013"/>
