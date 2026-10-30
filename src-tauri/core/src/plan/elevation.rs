@@ -6,7 +6,6 @@
 use super::prim::Primitive;
 use super::section::{line, polygon, v2, Acc, LevelSpec, Visibility};
 use super::style::no_hatch;
-use crate::js_fmt::js_number;
 use crate::jsmath::{hypot, hypot2};
 use crate::jsnum::{max, min, round};
 use crate::model::*;
@@ -29,6 +28,9 @@ const DOOR_LEAF_FILL_COLOR: &str = "#ede6d9";
 const SYMBOL_INK: &str = "#7d858f";
 const ROOF_RGB_FALLBACK: [f64; 3] = [0.72, 0.45, 0.36];
 const EPS: f64 = 1e-6;
+const HIDDEN_INK: &str = "#8a929c";
+const HIDDEN_MM: f64 = 0.13;
+const HIDDEN_DASH: [f64; 2] = [0.12, 0.08];
 
 type Pt = [f64; 2];
 
@@ -64,6 +66,8 @@ enum Role {
 
 struct Face {
     pts: Vec<Pt>,
+    /// Tiefe je Ecke ([G4]).
+    pd: Vec<f64>,
     depth: f64,
     depth_min: f64,
     depth_max: f64,
@@ -353,26 +357,20 @@ fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[Ro
             }
         }
     }
-    let f = crate::plan_elevation::faces(frame, &w, &sl, &r);
     let mut out = Vec::new();
-    let n = f.first().copied().unwrap_or(0.0) as usize;
-    let mut i = 1;
-    for _ in 0..n {
-        let role = match f[i] as i64 {
+    for f in crate::plan_elevation::faces_full(frame, &w, &sl, &r).unwrap_or_default() {
+        let role = match f.role {
             0 => Role::Wall,
             1 => Role::Slab,
             _ => Role::Roof,
         };
-        let src = f[i + 1] as usize;
-        let count = f[i + 8] as usize;
-        let pts = (0..count).map(|j| [f[i + 9 + 2 * j], f[i + 10 + 2 * j]]).collect();
         let (id, fill) = match role {
-            Role::Wall => (walls[src].wall_id.clone(), walls[src].color),
-            Role::Slab => (slabs[src].ceiling_id.clone(), slabs[src].color),
-            Role::Roof => (roofs[src].id.clone(), roofs[src].fill),
+            Role::Wall => (walls[f.src].wall_id.clone(), walls[f.src].color),
+            Role::Slab => (slabs[f.src].ceiling_id.clone(), slabs[f.src].color),
+            Role::Roof => (roofs[f.src].id.clone(), roofs[f.src].fill),
         };
-        out.push(Face { pts, depth: f[i + 2], depth_min: f[i + 3], depth_max: f[i + 4], role, id, fill, normal: [f[i + 5], f[i + 6], f[i + 7]] });
-        i += 9 + 2 * count;
+        let pts = f.pts.iter().map(|q| [q.0, q.1]).collect();
+        out.push(Face { pts, pd: f.pd, depth: f.depth, depth_min: f.depth_min, depth_max: f.depth_max, role, id, fill, normal: f.normal });
     }
     out
 }
@@ -895,35 +893,44 @@ fn outline_line(a: Pt, b: Pt) -> Primitive {
     line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-outline", EDGE_MM, EDGE_INK)
 }
 
-/// Schlüssel einer Kante wie `edgeKey` (gerundet auf 0,1 mm, Endpunkte sortiert als Text).
-fn edge_key(a: Pt, b: Pt) -> String {
-    let r = |v: f64| js_number(round(v * 1e4));
-    let ka = format!("{},{}", r(a[0]), r(a[1]));
-    let kb = format!("{},{}", r(b[0]), r(b[1]));
-    if ka < kb {
-        format!("{ka}|{kb}")
-    } else {
-        format!("{kb}|{ka}")
-    }
-}
-
-/// Schlüssel einer `Map<number, …>` (SameValueZero).
-fn num_key(x: f64) -> u64 {
-    if x == 0.0 {
-        0
-    } else if x.is_nan() {
-        u64::MAX
-    } else {
-        x.to_bits()
-    }
-}
-
 fn poly_prim(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, opening: Option<&str>) -> Primitive {
     let mut pr = polygon(pts, fill, stroke, w, no_hatch());
     if let (Primitive::Polygon { opening_id, .. }, Some(id)) = (&mut pr, opening) {
         *opening_id = Some(id.into());
     }
     pr
+}
+
+/// Ein Kantenstück der Ansicht (Zeichenebene).
+struct EdgeSeg {
+    a: Pt,
+    b: Pt,
+    hidden: bool,
+}
+
+/// Exakte Sichtbarkeit ([G4]) der Flächenkanten: Flächen in Ansichtskoordinaten (u, Höhe, Tiefe),
+/// Öffnungen als ebene Verdecker in ihrer Tiefe (eigene Kanten zeichnen sie selbst).
+fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpening], frame: &[f64; 9], hidden: bool) -> Vec<EdgeSeg> {
+    let arc_ids: HashMap<&str, u32> = p.walls.iter().filter(|w| crate::wall_arc::WallArc::of_wall(w).is_some()).enumerate().map(|(i, w)| (w.id.as_str(), i as u32 + 1)).collect();
+    let (n, u) = ([frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
+    let mut hf: Vec<crate::hlr::Face> = Vec::with_capacity(faces.len() + openings.len());
+    for f in faces {
+        let pts = f.pts.iter().zip(&f.pd).map(|(q, &d)| [q[0], q[1], d]).collect();
+        let m = f.normal;
+        let normal = [m[0] * u[0] + m[1] * u[1] + m[2] * u[2], m[1], m[0] * n[0] + m[1] * n[1] + m[2] * n[2]];
+        let mut h = crate::hlr::Face::new(pts, normal, 0);
+        if f.role == Role::Wall {
+            h.smooth = arc_ids.get(f.id.as_str()).copied().unwrap_or(0);
+        }
+        hf.push(h);
+    }
+    for op in openings {
+        let mut h = crate::hlr::Face::new(op.pts.iter().map(|q| [q[0], q[1], op.depth]).collect(), [0.0, 0.0, -1.0], 0);
+        h.edges = false;
+        hf.push(h);
+    }
+    let opts = crate::hlr::Opts { hidden, ..crate::hlr::Opts::default() };
+    crate::hlr::hidden_lines(&hf, &opts).into_iter().map(|s| EdgeSeg { a: s.a, b: s.b, hidden: s.hidden }).collect()
 }
 
 /// [T6] Obere Hüllkurve des Geländes (samt Baugruben) in der Ansicht: Dreiecke mit Tiefe in [0, `depth_max`]
@@ -1071,84 +1078,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     let mut pending: Vec<Pending> = Vec::new();
 
     let assembled: std::collections::HashSet<&str> = p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().filter(|(i, _)| crate::roof_assembly::is_assembled(p, *i)).map(|(_, r)| r.id.as_str()).collect();
-    let mut roof_edges: HashMap<String, Vec<usize>> = HashMap::new();
-    for (fi, f) in faces.iter().enumerate() {
-        if f.role != Role::Roof || f.id.is_empty() {
-            continue;
-        }
-        for i in 0..f.pts.len() {
-            roof_edges.entry(edge_key(f.pts[i], f.pts[(i + 1) % f.pts.len()])).or_default().push(fi);
-        }
-    }
-    let coplanar_seam = |fi: usize, a: Pt, b: Pt| -> bool {
-        let f = &faces[fi];
-        if f.role != Role::Roof || f.id.is_empty() {
-            return false;
-        }
-        let same = |oi: usize| {
-            let o = &faces[oi];
-            oi != fi && o.id == f.id && f.normal[0] * o.normal[0] + f.normal[1] * o.normal[1] + f.normal[2] * o.normal[2] > 1.0 - 1e-7
-        };
-        if roof_edges.get(&edge_key(a, b)).is_some_and(|list| list.iter().any(|&oi| same(oi))) {
-            return true;
-        }
-        // Verschnittene Dächer ([G5]): Fugen zwischen Streifen derselben Fläche mit T-Stoss — die Kante
-        // liegt (an Stichproben) auf Kanten koplanarer Nachbarflächen.
-        if !assembled.contains(f.id.as_str()) {
-            return false;
-        }
-        let near = |s: Pt| {
-            faces.iter().enumerate().filter(|(oi, _)| same(*oi)).any(|(_, o)| {
-                (0..o.pts.len()).any(|k| {
-                    let (c, d) = (o.pts[k], o.pts[(k + 1) % o.pts.len()]);
-                    let (dx, dy) = (d[0] - c[0], d[1] - c[1]);
-                    let l2 = dx * dx + dy * dy;
-                    if l2 < 1e-18 {
-                        return false;
-                    }
-                    let t = ((s[0] - c[0]) * dx + (s[1] - c[1]) * dy) / l2;
-                    let (qx, qy) = (c[0] + dx * t, c[1] + dy * t);
-                    (-1e-9..=1.0 + 1e-9).contains(&t) && (s[0] - qx).powi(2) + (s[1] - qy).powi(2) < 1e-12
-                })
-            })
-        };
-        [0.1, 0.3, 0.5, 0.7, 0.9].iter().all(|&t| near([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]))
-    };
-    // [T2] Bogenwände: Stossfugen der Sehnen-Teilkörper nicht als Kante zeichnen (die Fläche wirkt
-    // gekrümmt statt facettiert). Eine senkrechte Kante gilt als Fuge, wenn eine andere Fläche derselben
-    // Wand mit fast gleicher Normale, gleicher Blickseite (nicht die Silhouette) dort ebenfalls eine
-    // senkrechte Kante hat (Toleranz 2 cm: die Teilquader enden rechtwinklig, nicht auf der Gehrung).
-    let arc_ids: std::collections::HashSet<&str> = p.walls.iter().filter(|w| crate::wall_arc::WallArc::of_wall(w).is_some()).map(|w| w.id.as_str()).collect();
-    let view_n = [frame[3], frame[4], frame[5]];
-    let facing = |f: &Face| f.normal[0] * view_n[0] + f.normal[1] * view_n[1] + f.normal[2] * view_n[2];
-    let mut arc_faces: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (fi, f) in faces.iter().enumerate() {
-        if f.role == Role::Wall && arc_ids.contains(f.id.as_str()) {
-            arc_faces.entry(f.id.as_str()).or_default().push(fi);
-        }
-    }
-    let smooth_seam = |fi: usize, a: Pt, b: Pt| -> bool {
-        let f = &faces[fi];
-        if f.role != Role::Wall || (a[0] - b[0]).abs() > 1e-6 {
-            return false;
-        }
-        let Some(list) = arc_faces.get(f.id.as_str()) else { return false };
-        let (lo, hi) = (a[1].min(b[1]), a[1].max(b[1]));
-        let side = facing(f);
-        list.iter().any(|&oi| {
-            let o = &faces[oi];
-            if oi == fi || f.normal[0] * o.normal[0] + f.normal[1] * o.normal[1] + f.normal[2] * o.normal[2] < 0.98 || facing(o) * side <= 0.0 {
-                return false;
-            }
-            (0..o.pts.len()).any(|i| {
-                let (c, d) = (o.pts[i], o.pts[(i + 1) % o.pts.len()]);
-                (c[0] - d[0]).abs() < 1e-6 && (c[0] - a[0]).abs() < 0.02 && c[1].min(d[1]) < hi - 1e-6 && c[1].max(d[1]) > lo + 1e-6
-            })
-        })
-    };
-    let mut group_order: Vec<u64> = Vec::new();
-    let mut groups: HashMap<u64, (Vec<usize>, f64)> = HashMap::new();
-    for (fi, f) in faces.iter().enumerate() {
+    for f in &faces {
         let pts: Vec<Vec2> = f
             .pts
             .iter()
@@ -1158,27 +1088,6 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             })
             .collect();
         let is_roof = f.role == Role::Roof;
-        let frontal = !is_roof && f.depth_max - f.depth_min < 1e-4;
-        if frontal {
-            let gk = num_key(round(f.depth * 1e4));
-            groups
-                .entry(gk)
-                .or_insert_with(|| {
-                    group_order.push(gk);
-                    (Vec::new(), f.depth)
-                })
-                .0
-                .push(fi);
-        } else {
-            for i in 0..f.pts.len() {
-                let a = f.pts[i];
-                let b = f.pts[(i + 1) % f.pts.len()];
-                if coplanar_seam(fi, a, b) || smooth_seam(fi, a, b) {
-                    continue;
-                }
-                pending.push(Pending::Line { a, b, depth: f.depth_min - EPS * 5.0, style: None, paint: None });
-            }
-        }
         // Verschnittene Dächer ([G5]) kommen teils als Dreiecke: ein Hauch Kontur in der Füllfarbe deckt
         // die Haarfugen zwischen ihnen.
         let fill = fill_for(f.fill);
@@ -1201,21 +1110,9 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         };
         pending.push(Pending::Item { depth: f.depth, rank: Some(rank), prim });
     }
-    for gk in &group_order {
-        let (list, depth) = &groups[gk];
-        let mut b = vec![list.len() as f64];
-        for &fi in list {
-            b.push(faces[fi].pts.len() as f64);
-            for q in &faces[fi].pts {
-                b.extend(q);
-            }
-        }
-        let e = crate::plan_elevation::xor_outline(&b);
-        for k in 0..e.first().copied().unwrap_or(0.0) as usize {
-            let i = 1 + 4 * k;
-            pending.push(Pending::Line { a: [e[i], e[i + 1]], b: [e[i + 2], e[i + 3]], depth: depth - EPS * 5.0, style: None, paint: None });
-        }
-    }
+    // Kanten exakt ([G4]): Umriss, Knicke und Silhouetten der Flächen, verdeckt durch Flächen und
+    // Öffnungen davor; Facetten-Fugen der Bogenwände ([T2]) fallen über die Glättungsgruppe weg.
+    let edges = elevation_edges(p, &faces, &openings, &frame, level.hidden_lines);
     for (a, b, depth, paint, k) in pattern_lines {
         pending.push(Pending::Line { a, b, depth, style: Some(k), paint: Some(paint) });
     }
@@ -1371,6 +1268,20 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         a.seq.cmp(&b.seq)
     });
     let mut prims: Vec<Primitive> = items.into_iter().map(|it| it.prim).collect();
+    // Exakt sichtbare Kanten liegen über allen Füllungen (die Füllungen bleiben Maler-Ordnung).
+    for e in &edges {
+        acc.add(e.a[0], e.a[1]);
+        acc.add(e.b[0], e.b[1]);
+        if e.hidden {
+            let mut l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "elevation-hidden", HIDDEN_MM, HIDDEN_INK);
+            if let Primitive::Line { dash, .. } = &mut l {
+                *dash = Some(Some(HIDDEN_DASH.to_vec()));
+            }
+            prims.push(l);
+        } else {
+            prims.push(outline_line(e.a, e.b));
+        }
+    }
     // [T6] Gelände-Silhouette (gestaltetes Terrain) zwischen Ansichtsebene und vorderster Gebäudefläche; was
     // darunter liegt, verdeckt das Gelände (Papierfläche über dem Gebäude).
     let depth_max = faces.iter().map(|f| f.depth_min).fold(f64::INFINITY, f64::min) + 0.3;
@@ -1600,6 +1511,34 @@ mod tests {
         assert!(b[2] > b[0]);
         // Painter: die Bodenlinie zuletzt
         assert!(matches!(prims.last(), Some(Primitive::Line { cls, .. }) if cls == "elevation-ground"));
+    }
+
+    /// [G4] Verdeckte Kanten der Ansicht gestrichelt nur mit `hiddenLines`; Kanten liegen über den
+    /// Füllungen (nach der letzten Fläche) und nie doppelt.
+    #[test]
+    fn verdeckte_kanten_auf_wunsch() {
+        let p = sample();
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let mut v = serde_json::to_value(l).unwrap();
+        let (prims, _) = elevation_primitives(&p, &LevelSpec::from_json(&v), false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        let json = serde_json::to_string(&prims).unwrap();
+        assert!(!json.contains("elevation-hidden"));
+        let last_fill = prims.iter().rposition(|x| matches!(x, Primitive::Polygon { wall_id: Some(_), .. })).unwrap();
+        let first_edge = prims.iter().position(|x| matches!(x, Primitive::Line { cls, .. } if cls == "elevation-outline")).unwrap();
+        assert!(first_edge > last_fill);
+        let mut seen = std::collections::HashSet::new();
+        for x in &prims {
+            if let Primitive::Line { a, b, cls, .. } = x {
+                if cls == "elevation-outline" {
+                    let k = |q: &Vec2| ((q.x * 1e4).round() as i64, (q.y * 1e4).round() as i64);
+                    let key = if k(a) < k(b) { (k(a), k(b)) } else { (k(b), k(a)) };
+                    assert!(seen.insert(key), "doppelt: {a:?} {b:?}");
+                }
+            }
+        }
+        v["hiddenLines"] = serde_json::Value::Bool(true);
+        let (prims, _) = elevation_primitives(&p, &LevelSpec::from_json(&v), false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        assert!(serde_json::to_string(&prims).unwrap().contains("elevation-hidden"));
     }
 
     fn render(p: &Project, scale: f64) -> String {

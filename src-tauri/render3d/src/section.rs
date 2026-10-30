@@ -1170,6 +1170,31 @@ pub fn cut_section(
     slabs: &[SlabInput],
     roofs: &[RoofLayerInput],
 ) -> SectionOutput {
+    let (cut_polygons, prisms) = cut_polygons_and_prisms(plane, walls, slabs, roofs);
+    let (visible_edges, hidden_edges) = compute_view_edges(plane, &prisms);
+    SectionOutput {
+        cut_polygons,
+        visible_edges,
+        hidden_edges,
+    }
+}
+
+/// Nur die Cut-Polygone von `cut_section` (ohne Ansichtskanten; die exakte Projektion rechnet der Kern).
+pub fn cut_polygons(
+    plane: &SectionPlane,
+    walls: &[WallInput],
+    slabs: &[SlabInput],
+    roofs: &[RoofLayerInput],
+) -> Vec<CutPolygon> {
+    cut_polygons_and_prisms(plane, walls, slabs, roofs).0
+}
+
+fn cut_polygons_and_prisms(
+    plane: &SectionPlane,
+    walls: &[WallInput],
+    slabs: &[SlabInput],
+    roofs: &[RoofLayerInput],
+) -> (Vec<CutPolygon>, Vec<Prism>) {
     let mut prisms: Vec<Prism> = Vec::new();
     // Gehrte Wand-Fussabdruecke einmalig ueber die gesamte Wandkonnektivitaet
     // (dieselbe Verschneidung wie das 3D-Mesh, siehe `mesh::wall_mitered_footprints`).
@@ -1225,13 +1250,7 @@ pub fn cut_section(
         }
     }
 
-    let (visible_edges, hidden_edges) = compute_view_edges(plane, &prisms);
-
-    SectionOutput {
-        cut_polygons,
-        visible_edges,
-        hidden_edges,
-    }
+    (cut_polygons, prisms)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -108,6 +108,7 @@ export function levelArg(level: DrawingLevel) {
     directionSign: level.directionSign,
     depth: level.depth,
     shadows: level.shadows,
+    hiddenLines: level.hiddenLines,
   };
 }
 

@@ -17,17 +17,15 @@
 //! `shadows(walls, slabs)`, je `[n, (tiefe, tiefeMin, k, u, v …) × n]` (Wände: tiefeMin ungenutzt) →
 //! `[r, (tiefe, k, u, v …) × r]`.
 //!
-//! ## XOR-Umriss
-//! `xor_outline(polys)` mit `[n, (k, u, v …) × n]` → `[e, (ax, ay, bx, by) × e]`.
-//!
 //! ## Flächen
-//! `faces(frame, walls, slabs, roofs)`; `frame = [Px,Py,Pz, Nx,Ny,Nz, Ux,Uy,Uz]` (Welt, Y oben).
+//! `faces_full(frame, walls, slabs, roofs)`; `frame = [Px,Py,Pz, Nx,Ny,Nz, Ux,Uy,Uz]` (Welt, Y oben).
 //! ```text
 //! walls  [n, (sx, sz, ex, ez, dicke, hoehe, basis) × n]
 //! slabs  [n, (zUnten, zOben, k, x, z …) × n]
 //! roofs  [n, (nFl, nGiebel, (k, x, y, z …) × nFl, (k, x, y, z …) × nGiebel) × n]   Modell [x, y, Höhe]
-//! → [m, (rolle 0 Wand|1 Decke|2 Dach, quelle, tiefe, tiefeMin, tiefeMax, nx, ny, nz, k, u, v …) × m]
+//! → Flächen (Rolle 0 Wand|1 Decke|2 Dach, Quelle, Tiefe Mittel/Min/Max, Normale, (u, v) und Tiefe je Ecke)
 //! ```
+//! Die Kanten der Ansicht rechnet `hlr.rs` exakt aus diesen Flächen ([G4]).
 //! Reihenfolge: Wände, Decken, Dächer (je Quelle in Modellreihenfolge); nur sichtbare Flächen
 //! (Rückseiten-Culling, Tiefe > 0).
 //!
@@ -53,7 +51,6 @@
 use crate::jsmath::{hypot, hypot2};
 use crate::jsnum::{max, min, round};
 use crate::ugrid::Grid1;
-use std::collections::HashMap;
 
 const OCC_MARGIN: f64 = 2e-3;
 const EPS: f64 = 1e-6;
@@ -399,75 +396,6 @@ pub fn shadows(walls: &[f64], slabs: &[f64]) -> Vec<f64> {
     f
 }
 
-pub fn xor_outline(polys: &[f64]) -> Vec<f64> {
-    let Some(polys) = read_polys(polys, 0) else { return Vec::new() };
-    const EPS_AX: f64 = 1e-6;
-    let key_of = |x: f64| round(x * 1e5);
-    // Gruppen in Einfügereihenfolge (wie `Map`; -0 und 0 sind derselbe Schlüssel).
-    let mut horiz: Vec<(f64, Vec<(f64, f64)>)> = Vec::new();
-    let mut vert: Vec<(f64, Vec<(f64, f64)>)> = Vec::new();
-    let mut hidx: HashMap<i64, usize> = HashMap::new();
-    let mut vidx: HashMap<i64, usize> = HashMap::new();
-    let mut out: Vec<(P, P)> = Vec::new();
-    fn add(list: &mut Vec<(f64, Vec<(f64, f64)>)>, idx: &mut HashMap<i64, usize>, k: f64, iv: (f64, f64)) {
-        let slot = *idx.entry(k as i64).or_insert_with(|| {
-            list.push((k, Vec::new()));
-            list.len() - 1
-        });
-        list[slot].1.push(iv);
-    }
-    for (_, poly) in &polys {
-        for i in 0..poly.len() {
-            let a = poly[i];
-            let b = poly[(i + 1) % poly.len()];
-            if (a.1 - b.1).abs() < EPS_AX {
-                add(&mut horiz, &mut hidx, key_of(a.1), (min(a.0, b.0), max(a.0, b.0)));
-            } else if (a.0 - b.0).abs() < EPS_AX {
-                add(&mut vert, &mut vidx, key_of(a.0), (min(a.1, b.1), max(a.1, b.1)));
-            } else {
-                out.push((a, b));
-            }
-        }
-    }
-    let sweep = |m: &Vec<(f64, Vec<(f64, f64)>)>, emit: &mut dyn FnMut(f64, f64, f64)| {
-        for (k, ivs) in m {
-            let mut evs: Vec<(f64, i32)> = Vec::new();
-            for &(s, e) in ivs {
-                if e - s < 1e-9 {
-                    continue;
-                }
-                evs.push((s, 1));
-                evs.push((e, -1));
-            }
-            evs.sort_by(|p, q| {
-                let d = p.0 - q.0;
-                let c = if d != 0.0 { d } else { (q.1 - p.1) as f64 };
-                c.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)
-            });
-            let mut count = 0i32;
-            let mut start = 0.0;
-            let coord = k / 1e5;
-            for (x, d) in evs {
-                let was_odd = count % 2 == 1;
-                count += d;
-                let is_odd = count % 2 == 1;
-                if !was_odd && is_odd {
-                    start = x;
-                } else if was_odd && !is_odd && x - start > 1e-9 {
-                    emit(coord, start, x);
-                }
-            }
-        }
-    };
-    sweep(&horiz, &mut |v, s, e| out.push(((s, v), (e, v))));
-    sweep(&vert, &mut |u, s, e| out.push(((u, s), (u, e))));
-    let mut f = vec![out.len() as f64];
-    for (a, b) in out {
-        f.extend([a.0, a.1, b.0, b.1]);
-    }
-    f
-}
-
 // ── Flächen ────────────────────────────────────────────────────────────────
 
 const FACING_EPS: f64 = 1e-4;
@@ -479,14 +407,16 @@ struct Frame {
     u: V3,
 }
 
-struct Projected {
-    role: u8,
-    src: usize,
-    depth: f64,
-    depth_min: f64,
-    depth_max: f64,
-    normal: V3,
-    pts: Vec<P>,
+pub(crate) struct Projected {
+    pub role: u8,
+    pub src: usize,
+    pub depth: f64,
+    pub depth_min: f64,
+    pub depth_max: f64,
+    pub normal: V3,
+    pub pts: Vec<P>,
+    /// Tiefe je Ecke (exakte Sichtbarkeit, [G4]).
+    pub pd: Vec<f64>,
 }
 
 fn normalize3(a: V3) -> V3 {
@@ -516,10 +446,12 @@ fn project_face(f: &Frame, poly: &[V3], normal: V3, role: u8, src: usize) -> Opt
         return None;
     }
     let mut pts = Vec::with_capacity(poly.len());
+    let mut pd = Vec::with_capacity(poly.len());
     let (mut sum, mut dmin, mut dmax) = (0.0, f64::INFINITY, f64::NEG_INFINITY);
     for &w in poly {
         let (u, v, d) = project_point(f, w);
         pts.push((u, v));
+        pd.push(d);
         sum += d;
         dmin = min(dmin, d);
         dmax = max(dmax, d);
@@ -528,7 +460,7 @@ fn project_face(f: &Frame, poly: &[V3], normal: V3, role: u8, src: usize) -> Opt
     if depth <= EPS {
         return None;
     }
-    Some(Projected { role, src, depth, depth_min: dmin, depth_max: dmax, normal, pts })
+    Some(Projected { role, src, depth, depth_min: dmin, depth_max: dmax, normal, pts, pd })
 }
 
 fn wall_faces(f: &Frame, w: &[f64], src: usize, out: &mut Vec<Projected>) {
@@ -712,9 +644,10 @@ fn counted(f: &[f64]) -> Option<usize> {
     (n >= 0.0 && n.fract() == 0.0 && f.iter().all(|v| v.is_finite())).then_some(n as usize)
 }
 
-pub fn faces(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64]) -> Vec<f64> {
+/// Sichtbare Flächen der Wände, Decken und Dächer mit der Tiefe je Ecke; `None` bei Unsinn.
+pub(crate) fn faces_full(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64]) -> Option<Vec<Projected>> {
     if frame.len() != 9 || frame.iter().any(|v| !v.is_finite()) {
-        return Vec::new();
+        return None;
     }
     let fr = Frame {
         p: [frame[0], frame[1], frame[2]],
@@ -722,7 +655,7 @@ pub fn faces(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64]) -> Vec<
         u: [frame[6], frame[7], frame[8]],
     };
     let (Some(nw), Some(ns), Some(nr)) = (counted(walls), counted(slabs), counted(roofs)) else {
-        return Vec::new();
+        return None;
     };
     // 7 Werte je Wand, oder 13 mit den Schnitt-Verschiebungen der Ecken und den inneren Stossfugen ([T2]).
     let stride = if walls.len() == 1 + 7 * nw {
@@ -733,7 +666,7 @@ pub fn faces(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64]) -> Vec<
         // + ebene Oberkante ([G2]): Kennung (1 = vorhanden), z am Anfang, dz/dx, dz/dy.
         17
     } else {
-        return Vec::new();
+        return None;
     };
     let mut out: Vec<Projected> = Vec::new();
     for k in 0..nw {
@@ -741,9 +674,9 @@ pub fn faces(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64]) -> Vec<
     }
     let mut i = 1;
     for k in 0..ns {
-        let Some(&kk) = slabs.get(i + 2) else { return Vec::new() };
+        let Some(&kk) = slabs.get(i + 2) else { return None };
         if kk < 0.0 || kk.fract() != 0.0 || i + 3 + 2 * kk as usize > slabs.len() {
-            return Vec::new();
+            return None;
         }
         let kk = kk as usize;
         let outline: Vec<P> = (0..kk).map(|j| (slabs[i + 3 + 2 * j], slabs[i + 4 + 2 * j])).collect();
@@ -751,41 +684,31 @@ pub fn faces(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64]) -> Vec<
         i += 3 + 2 * kk;
     }
     if i != slabs.len() {
-        return Vec::new();
+        return None;
     }
     let mut i = 1;
     for k in 0..nr {
-        let (Some(&nf), Some(&ng)) = (roofs.get(i), roofs.get(i + 1)) else { return Vec::new() };
+        let (Some(&nf), Some(&ng)) = (roofs.get(i), roofs.get(i + 1)) else { return None };
         if nf < 0.0 || ng < 0.0 || nf.fract() != 0.0 || ng.fract() != 0.0 {
-            return Vec::new();
+            return None;
         }
         i += 2;
         let mut planes = Vec::new();
         for _ in 0..nf as usize {
-            let Some(p) = read_world_poly(roofs, &mut i) else { return Vec::new() };
+            let Some(p) = read_world_poly(roofs, &mut i) else { return None };
             planes.push(p);
         }
         let mut gables = Vec::new();
         for _ in 0..ng as usize {
-            let Some(p) = read_world_poly(roofs, &mut i) else { return Vec::new() };
+            let Some(p) = read_world_poly(roofs, &mut i) else { return None };
             gables.push(p);
         }
         roof_faces(&fr, &planes, &gables, k, &mut out);
     }
     if i != roofs.len() {
-        return Vec::new();
+        return None;
     }
-    let mut f = vec![out.len() as f64];
-    for p in &out {
-        f.extend([
-            p.role as f64, p.src as f64, p.depth, p.depth_min, p.depth_max,
-            p.normal[0], p.normal[1], p.normal[2], p.pts.len() as f64,
-        ]);
-        for q in &p.pts {
-            f.extend([q.0, q.1]);
-        }
-    }
-    f
+    Some(out)
 }
 
 // ── Eck-Verlängerung ───────────────────────────────────────────────────────
@@ -1253,29 +1176,19 @@ mod tests {
     }
 
     #[test]
-    fn xor_hebt_innenkante_auf() {
-        let sq = |x0: f64, x1: f64| [4.0, x0, 0.0, x1, 0.0, x1, 1.0, x0, 1.0];
-        let mut inp = vec![2.0];
-        inp.extend(sq(0.0, 1.0));
-        inp.extend(sq(1.0, 2.0));
-        let f = xor_outline(&inp);
-        // Oben/unten je 2 Teilstücke (an der Naht nicht verschmolzen) + 2 senkrechte Aussenkanten;
-        // die Innenkante bei u=1 hebt sich auf.
-        assert_eq!(f[0], 6.0);
-    }
-
-    #[test]
     fn wand_sichtbar_nur_aus_der_sueden() {
         // Betrachter bei z = -2, Blick +z; Wand 4 m lang bei z = 0, 3 m hoch.
         let frame = [-1.0, 0.0, -2.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
         let walls = [1.0, 0.0, 0.0, 4.0, 0.0, 0.2, 3.0, 0.0];
-        let f = faces(&frame, &walls, &[0.0], &[0.0]);
-        assert_eq!(f[0], 1.0);
-        assert_eq!((f[1], f[2]), (0.0, 0.0)); // Rolle Wand, Quelle 0
-        assert!((f[3] - 1.9).abs() < 1e-9); // Südseite bei z = -0.1
+        let f = faces_full(&frame, &walls, &[0.0], &[0.0]).unwrap();
+        assert_eq!(f.len(), 1);
+        assert_eq!((f[0].role, f[0].src), (0, 0)); // Rolle Wand, Quelle 0
+        assert!((f[0].depth - 1.9).abs() < 1e-9); // Südseite bei z = -0.1
+        assert!(f[0].pd.iter().all(|d| (d - 1.9).abs() < 1e-9));
         // hinter dem Betrachter: nichts
         let walls = [1.0, 0.0, -5.0, 4.0, -5.0, 0.2, 3.0, 0.0];
-        assert_eq!(faces(&frame, &walls, &[0.0], &[0.0]), vec![0.0]);
+        assert!(faces_full(&frame, &walls, &[0.0], &[0.0]).unwrap().is_empty());
+        assert!(faces_full(&frame, &[f64::NAN], &[0.0], &[0.0]).is_none());
     }
 
     #[test]
@@ -1293,7 +1206,6 @@ mod tests {
     fn unsinn_ist_leer() {
         assert!(clip_segments(&[f64::NAN], &[0.0]).is_empty());
         assert!(shadows(&[1.0], &[0.0]).is_empty());
-        assert!(xor_outline(&[1.0, 5.0, 0.0]).is_empty());
     }
 }
 

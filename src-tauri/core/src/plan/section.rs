@@ -2,8 +2,9 @@
 //! Schicht-Bänder, Stil-Auflösung, Decken-Terminierung, Dominanz, Treppen, Monolith-Vereinigung,
 //! Abzugskörper, Körper, Gelände, Schnitt-Tiefe), `generateSectionPlan` (Primitive mit Pick-Ids) und
 //! `sectionOpenings.ts` (geschnittene Fenster/Türen). Der analytische Prismen-Schnitt läuft über
-//! `render3d::section::cut_section` (dieselbe Rechnung wie früher im render3d-WASM). Rechenreihenfolge
-//! und Zahlsemantik wie in TS (`jsnum`, `jsmath`), damit die Ausgabe bitgleich bleibt.
+//! `render3d::section::cut_polygons` (dieselbe Rechnung wie früher im render3d-WASM). Die Projektion
+//! hinter der Ebene rechnet `projection_edges` mit exakter Sichtbarkeit (`hlr.rs`, [G4]).
+//! Rechenreihenfolge und Zahlsemantik wie in TS (`jsnum`, `jsmath`), damit die Ausgabe bitgleich bleibt.
 //!
 //! Einheiten: Meter; Ausgabe in (u, v) = (entlang der Ebene, absolute Höhe).
 
@@ -74,6 +75,8 @@ pub struct LevelSpec {
     pub direction_sign: Option<f64>,
     pub depth: Option<f64>,
     pub shadows: bool,
+    /// Verdeckte Kanten gestrichelt zeigen ([G4], Ansicht; der Schnitt liest es aus dem Aufruf).
+    pub hidden_lines: bool,
 }
 
 impl LevelSpec {
@@ -87,6 +90,7 @@ impl LevelSpec {
             direction_sign: num("directionSign"),
             depth: num("depth"),
             shadows: v.get("shadows").and_then(|b| b.as_bool()).unwrap_or(false),
+            hidden_lines: v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false),
         }
     }
 
@@ -392,54 +396,6 @@ fn opening_interval(w: &Wall, o: &Opening) -> Option<(f64, f64)> {
     Some((from, to))
 }
 
-
-/// Senkrechte Kanten eines Bogen-Teilkörpers, die an einer inneren Stossfuge liegen (Ecken auf der
-/// Gehrung, in Schnitt-u projiziert), entfallen.
-fn drop_arc_seams(visible: Vec<Edge>, hidden: Vec<Edge>, walls_r: &[RWall], base: (f64, f64), u: (f64, f64)) -> (Vec<Edge>, Vec<Edge>) {
-    let ul = hypot2(u.0, u.1);
-    if !walls_r.iter().any(|r| r.joint != [false; 2]) || !(ul > 1e-12) {
-        return (visible, hidden);
-    }
-    let u = (u.0 / ul, u.1 / ul);
-    let seams: HashMap<usize, Vec<f64>> = walls_r
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| r.joint != [false; 2])
-        .map(|(i, r)| {
-            let (dx, dy) = (r.end[0] - r.start[0], r.end[1] - r.start[1]);
-            let l = hypot2(dx, dy).max(1e-12);
-            let (ax, ay) = (dx / l, dy / l);
-            let (nx, ny) = (ay, -ax);
-            let ht = r.thickness / 2.0;
-            let sh = super::elevation::corner_shifts(r);
-            let mut us = Vec::new();
-            for (k, (p, t, s)) in [(r.start, ht, sh[0]), (r.start, -ht, sh[1]), (r.end, ht, sh[2]), (r.end, -ht, sh[3])].into_iter().enumerate() {
-                if !r.joint[k / 2] {
-                    continue;
-                }
-                let (x, y) = (p[0] + nx * t + ax * s, p[1] + ny * t + ay * s);
-                us.push((x - base.0) * u.0 + (y - base.1) * u.1);
-            }
-            (i, us)
-        })
-        .collect();
-    // Umriss (Silhouette) bleibt: senkrechte Kanten am äussersten u der ganzen Wand.
-    let vertical = |e: &Edge| e.kind == Kind::Wall && (e.a[0] - e.b[0]).abs() < 1e-4 && seams.contains_key(&e.index);
-    let mut extent: HashMap<&str, (f64, f64)> = HashMap::new();
-    for e in visible.iter().chain(&hidden).filter(|e| vertical(e)) {
-        let Some(r) = walls_r.get(e.index) else { continue };
-        let x = extent.entry(r.wall_id.as_str()).or_insert((f64::INFINITY, f64::NEG_INFINITY));
-        *x = (x.0.min(e.a[0]), x.1.max(e.a[0]));
-    }
-    let keep = |e: &Edge| {
-        if !vertical(e) {
-            return true;
-        }
-        let silhouette = walls_r.get(e.index).and_then(|r| extent.get(r.wall_id.as_str())).is_some_and(|x| (e.a[0] - x.0).abs() < 1e-3 || (e.a[0] - x.1).abs() < 1e-3);
-        silhouette || !seams.get(&e.index).is_some_and(|us| us.iter().any(|x| (x - e.a[0]).abs() < 1e-2))
-    };
-    (visible.into_iter().filter(keep).collect(), hidden.into_iter().filter(keep).collect())
-}
 
 /// [T2] Schnitt durch eine Bogenwand: quert die Ebene eine innere Stossfuge der Sehnen-Teilkörper,
 /// liegt der Querschnitt in zwei Rechtecken nebeneinander — zu EINEM zusammenfassen, damit die
@@ -1664,6 +1620,186 @@ fn filter_by_depth(out: &mut Output, p: &Project, plane: &Plane, depth: f64, wal
 
 // ── Schnitt ───────────────────────────────────────────────────────────────────
 
+/// Viereck aus dem Dreieck `t` und dem folgenden Dreieck `next`, wenn beide dieselbe Normale haben und
+/// genau eine Kante teilen (die gemeinsame Diagonale entfällt).
+fn quad_of(t: &[[f64; 3]; 3], n: [f64; 3], next: &[u32], vert: &dyn Fn(u32) -> ([f64; 3], [f64; 3])) -> Option<[[f64; 3]; 4]> {
+    let (p0, n0) = vert(next[0]);
+    if n0 != n {
+        return None;
+    }
+    let u = [p0, vert(next[1]).0, vert(next[2]).0];
+    let shared: Vec<usize> = (0..3).filter(|&i| u.contains(&t[i])).collect();
+    let extra = u.iter().find(|q| !t.contains(q))?;
+    if shared.len() != 2 {
+        return None;
+    }
+    // Gemeinsame Kante (i, i+1) im Umlauf von t: das neue Eck dazwischen einsetzen.
+    let i = if shared == [0, 1] { 0 } else if shared == [1, 2] { 1 } else { 2 };
+    let mut q = [[0.0; 3]; 4];
+    for (k, slot) in q.iter_mut().enumerate() {
+        *slot = match k.cmp(&(i + 1)) {
+            std::cmp::Ordering::Less => t[k],
+            std::cmp::Ordering::Equal => *extra,
+            std::cmp::Ordering::Greater => t[k - 1],
+        };
+    }
+    Some(q)
+}
+
+/// Ansichtskanten hinter der Schnittebene mit exakter Sichtbarkeit ([G4], `hlr.rs`; verdeckte nur mit
+/// `hidden`, wie `hiddenLines` der Ebene): die Körper als
+/// Dreiecke (Wände samt Gehrung und Löchern wie im 3D-Modell, Platten, Treppen, Dächer, Körper),
+/// auf die Seite hinter der Ebene zugeschnitten; die Schnittflächen verdecken in Tiefe 0. Bogenwände,
+/// verschnittene Dächer und Körper glätten ihre Facetten (keine Fugen, nur Knicke und Silhouetten).
+fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[BodyMesh], cuts: &[Cut], hidden: bool) -> (Vec<Edge>, Vec<Edge>) {
+    use crate::hlr;
+    let nl = crate::jsmath::hypot(&plane.normal);
+    if !(nl > 1e-12) {
+        return (Vec::new(), Vec::new());
+    }
+    let n = [plane.normal[0] / nl, plane.normal[1] / nl, plane.normal[2] / nl];
+    let ul = hypot2(n[2], n[0]);
+    let u = if ul > 1e-12 { [n[2] / ul, 0.0, -n[0] / ul] } else { [1.0, 0.0, 0.0] };
+    let o = plane.point;
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let view = |w: [f64; 3]| {
+        let r = [w[0] - o[0], w[1] - o[1], w[2] - o[2]];
+        [dot(r, u), w[1], dot(r, n)]
+    };
+    let mut faces: Vec<hlr::Face> = Vec::new();
+    let mut owners: Vec<(Kind, usize)> = Vec::new();
+    // Fläche (Welt, Y oben) hinter die Ebene zuschneiden und anhängen.
+    let mut push = |faces: &mut Vec<hlr::Face>, world: &[[f64; 3]], normal: [f64; 3], owner: u32, smooth: u32, two_sided: bool| {
+        let pts: Vec<[f64; 3]> = world.iter().map(|&w| view(w)).collect();
+        if pts.iter().all(|q| q[2] <= 0.0) {
+            return;
+        }
+        let Some((pts, no_edge)) = hlr::clip_front(&pts) else { return };
+        let mut f = hlr::Face::new(pts, [dot(normal, u), normal[1], dot(normal, n)], owner);
+        f.no_edge = no_edge;
+        f.smooth = smooth;
+        f.two_sided = two_sided;
+        faces.push(f);
+    };
+    let tri_normal = |t: &[[f64; 3]; 3]| {
+        let (a, b) = ([t[1][0] - t[0][0], t[1][1] - t[0][1], t[1][2] - t[0][2]], [t[2][0] - t[0][0], t[2][1] - t[0][1], t[2][2] - t[0][2]]);
+        [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    };
+    // render3d-Netz (Welt, f32; Normale je Ecke).
+    let mesh_faces = |faces: &mut Vec<hlr::Face>, m: &render3d::Mesh, range: std::ops::Range<usize>, owner: u32, smooth: u32| {
+        let vert = |i: u32| {
+            let j = i as usize * render3d::FLOATS_PER_VERTEX;
+            let v = &m.verts[j..j + 6];
+            ([v[0] as f64, v[1] as f64, v[2] as f64], [v[3] as f64, v[4] as f64, v[5] as f64])
+        };
+        // Zwei aufeinanderfolgende Dreiecke einer Ebene mit gemeinsamer Kante (ein Viereck) als eine Fläche.
+        let tris: Vec<&[u32]> = m.indices[range].chunks_exact(3).collect();
+        let mut k = 0;
+        while k < tris.len() {
+            let (a, na) = vert(tris[k][0]);
+            let t = [a, vert(tris[k][1]).0, vert(tris[k][2]).0];
+            if let Some(q) = tris.get(k + 1).and_then(|n| quad_of(&t, na, n, &vert)) {
+                push(faces, &q, na, owner, smooth, false);
+                k += 2;
+                continue;
+            }
+            push(faces, &t, na, owner, smooth, false);
+            k += 1;
+        }
+    };
+    // Wände: Bogen-Teilkörper derselben Wand bilden eine Glättungsgruppe.
+    let wall_of = wall_owners(p, walls_r);
+    let (wmesh, ends) = render3d::mesh::build_walls_mesh_owned(wi);
+    let mut start = 0;
+    for (i, &end) in ends.iter().enumerate() {
+        let arc = wall_of.get(i).copied().flatten().filter(|w| crate::wall_arc::WallArc::of_wall(w).is_some());
+        let smooth = arc.and_then(|w| p.walls.iter().position(|x| std::ptr::eq(x, w))).map_or(0, |k| k as u32 + 1);
+        owners.push((Kind::Wall, i));
+        mesh_faces(&mut faces, &wmesh, start..end, owners.len() as u32 - 1, smooth);
+        start = end;
+    }
+    // Platten und Treppenstufen: Prismen (Deckel, Boden, Seiten) direkt aus dem Umriss.
+    for (i, s) in slabs_r.iter().enumerate() {
+        owners.push((Kind::Slab, i));
+        let owner = owners.len() as u32 - 1;
+        let (o, n) = (&s.outline, s.outline.len());
+        let (y0, y1) = (s.z_bottom.min(s.z_top), s.z_bottom.max(s.z_top));
+        if n < 3 || y1 - y0 < 1e-6 {
+            continue;
+        }
+        let area: f64 = (0..n).map(|k| o[k][0] * o[(k + 1) % n][1] - o[(k + 1) % n][0] * o[k][1]).sum();
+        let sign = if area >= 0.0 { 1.0 } else { -1.0 };
+        let top: Vec<[f64; 3]> = o.iter().map(|q| [q[0], y1, q[1]]).collect();
+        let bottom: Vec<[f64; 3]> = o.iter().rev().map(|q| [q[0], y0, q[1]]).collect();
+        push(&mut faces, &top, [0.0, 1.0, 0.0], owner, 0, false);
+        push(&mut faces, &bottom, [0.0, -1.0, 0.0], owner, 0, false);
+        for k in 0..n {
+            let (a, b) = (o[k], o[(k + 1) % n]);
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            if dx.abs() + dy.abs() < 1e-12 {
+                continue;
+            }
+            let side = [[a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]]];
+            push(&mut faces, &side, [dy * sign, 0.0, -dx * sign], owner, 0, false);
+        }
+    }
+    let mut group = p.walls.len() as u32 + 1;
+    // Modell [x, y, Höhe] → Welt [x, Höhe, y].
+    let model_tris = |faces: &mut Vec<hlr::Face>, pos: &[f64], idx: &mut dyn Iterator<Item = usize>, owner: u32, smooth: u32, push: &mut dyn FnMut(&mut Vec<hlr::Face>, &[[f64; 3]], [f64; 3], u32, u32, bool)| {
+        let q = |i: usize| -> Option<[f64; 3]> { Some([*pos.get(3 * i)?, *pos.get(3 * i + 2)?, *pos.get(3 * i + 1)?]) };
+        while let (Some(a), Some(b), Some(c)) = (idx.next(), idx.next(), idx.next()) {
+            let (Some(a), Some(b), Some(c)) = (q(a), q(b), q(c)) else { continue };
+            let t = [a, b, c];
+            // Spiegelung durch den Achsentausch: Umlauf umkehren, damit die Normale aussen bleibt.
+            let m = tri_normal(&t);
+            push(faces, &t, [-m[0], -m[1], -m[2]], owner, smooth, false);
+        }
+    };
+    for (ri, roof) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate() {
+        owners.push((Kind::Roof, ri));
+        let owner = owners.len() as u32 - 1;
+        if let Some(solids) = crate::roof_assembly::roof_solids(p, ri) {
+            model_tris(&mut faces, &solids.skin.positions, &mut solids.skin.indices.iter().map(|&i| i as usize), owner, 0, &mut push);
+            continue;
+        }
+        // Dachhaut ohne Dicke: beidseitig.
+        let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+        for poly in g.planes.iter().chain(&g.gables) {
+            let w: Vec<[f64; 3]> = poly.iter().map(|q| [q[0], q[2], q[1]]).collect();
+            if w.len() >= 3 {
+                push(&mut faces, &w, [0.0; 3], owner, 0, true);
+            }
+        }
+    }
+    for b in bodies {
+        owners.push((Kind::Body, b.index));
+        let owner = owners.len() as u32 - 1;
+        let mut idx = b.indices.iter().filter(|&&i| i >= 0.0 && i.fract() == 0.0).map(|&i| i as usize);
+        model_tris(&mut faces, &b.positions, &mut idx, owner, group, &mut push);
+        group += 1;
+    }
+    // Schnittflächen (Tiefe 0) verdecken nur.
+    for c in cuts {
+        if c.pts.len() >= 3 {
+            let mut f = hlr::Face::new(c.pts.iter().map(|q| [q[0], q[1], 0.0]).collect(), [0.0, 0.0, -1.0], 0);
+            f.edges = false;
+            faces.push(f);
+        }
+    }
+    let opts = hlr::Opts { tol: 1e-4, depth_eps: 1e-4, hidden, ..hlr::Opts::default() };
+    let (mut visible, mut hidden) = (Vec::new(), Vec::new());
+    for sg in hlr::hidden_lines(&faces, &opts) {
+        let (kind, index) = owners[sg.owner as usize];
+        let e = Edge { kind, index, a: sg.a, b: sg.b };
+        if sg.hidden {
+            hidden.push(e);
+        } else {
+            visible.push(e);
+        }
+    }
+    (visible, hidden)
+}
+
 /// `computeSection` (ohne den asynchronen Teil: die Körper-Netze kommen fertig aus TS).
 pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> Result<Option<Output>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
@@ -1677,29 +1813,17 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let rp = render3d::SectionPlane::new(fr(plane.point), fr(plane.normal));
     // Dächer nicht durch render3d: deren Bänder (je Schicht × Dachfläche, ohne Stil) lagen unter den
     // gestylten aus `append_roof_sections` (doppelte Kontur, Rückfall-Schraffur, Besitzer per Index falsch).
-    let raw = render3d::cut_section(&rp, &wi, &si, &[]);
+    let raw = render3d::section::cut_polygons(&rp, &wi, &si, &[]);
 
     // Gleiche f32 kommen oft vor (gemeinsame Ecken, Höhen): Umwandlung je Wert nur einmal.
     let mut conv: HashMap<u32, f64> = HashMap::new();
     let mut jf = |x: f32| -> f64 { *conv.entry(x.to_bits()).or_insert_with(|| js_f32(x)) };
-    let mut cut_owners: HashSet<(Kind, usize)> = HashSet::new();
-    let mut cuts: Vec<Cut> = Vec::with_capacity(raw.cut_polygons.len());
-    for cp in &raw.cut_polygons {
-        let kind = kind_of(cp.component.kind);
-        cut_owners.insert((kind, cp.component.index));
-        cuts.push(Cut::new(kind, cp.component.index, cp.pts.iter().map(|q| [jf(q[0]), jf(q[1])]).collect()));
+    let mut cuts: Vec<Cut> = Vec::with_capacity(raw.len());
+    for cp in &raw {
+        cuts.push(Cut::new(kind_of(cp.component.kind), cp.component.index, cp.pts.iter().map(|q| [jf(q[0]), jf(q[1])]).collect()));
     }
-    let mut edge = |e: &render3d::SectionEdge| Edge { kind: kind_of(e.component.kind), index: e.component.index, a: [jf(e.a[0]), jf(e.a[1])], b: [jf(e.b[0]), jf(e.b[1])] };
-    let not_cut = |e: &&render3d::SectionEdge| !cut_owners.contains(&(kind_of(e.component.kind), e.component.index));
-    let visible: Vec<Edge> = raw.visible_edges.iter().filter(not_cut).map(&mut edge).collect();
-    let hidden: Vec<Edge> = raw.hidden_edges.iter().filter(not_cut).map(&mut edge).collect();
-    // [T2] Bogenwände: senkrechte Kanten an den inneren Stossfugen der Sehnen-Teilkörper nicht zeigen.
-    let (visible, hidden) = drop_arc_seams(visible, hidden, &walls_r, plane.base(), plane.u_model());
-
     shaped_wall_cuts(&mut cuts, p, &walls_r, plane.base(), plane.u_model());
     let mut cuts = merge_arc_wall_cuts(cuts, p, &walls_r);
-    let mut visible = visible;
-    shaped_projection(&mut visible, p, &walls_r, &plane);
     append_roof_sections(&mut cuts, p, &plane);
     let owners = wall_owners(p, &walls_r);
     // Bogenwand ([T2]): Schichtfolge quer zum Schnitt aus der Richtung des Sehnen-Teilkörpers.
@@ -1719,6 +1843,9 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let cuts = subtract_voids_in_section(cuts, p, base, u);
     let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
     append_body_sections(&mut cuts, p, bodies, base, u);
+    // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
+    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, bodies, &cuts, level.hidden_lines);
+    shaped_projection(&mut visible, p, &walls_r, &plane);
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new() };
     append_terrain_profiles(&mut out, p, base, u);
     if let Some(d) = level.depth {
@@ -2612,6 +2739,31 @@ mod tests {
         assert!(seams <= 4, "senkrechte Kanten: {seams}");
     }
 
+    /// [G4] Projektion exakt: Dach hinter der Ebene sichtbar, keine Kante im Inneren einer Schnittfläche
+    /// (die Schnittflächen verdecken), Fenster der Rückwand als Umriss ohne die Stossfugen der
+    /// Wandstücke darunter, verdeckte Kanten nur mit `hiddenLines`.
+    #[test]
+    fn projektion_exakt_sichtbar() {
+        let p = sample();
+        let mut l = level(&p, "schnitt-a");
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        assert!(out.visible.iter().any(|e| e.kind == Kind::Roof), "Dach hinter der Ebene fehlt");
+        assert!(out.hidden.is_empty());
+        let inside = |c: &Cut, q: [f64; 2]| {
+            let b = bbox(&c.pts);
+            q[0] > b[0] + 1e-3 && q[0] < b[1] - 1e-3 && q[1] > b[2] + 1e-3 && q[1] < b[3] - 1e-3
+        };
+        for e in &out.visible {
+            let m = [(e.a[0] + e.b[0]) / 2.0, (e.a[1] + e.b[1]) / 2.0];
+            assert!(!out.cuts.iter().filter(|c| c.pts.len() == 4).any(|c| inside(c, m)), "Kante in einer Schnittfläche: {e:?}");
+        }
+        l.hidden_lines = true;
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        assert!(!out.hidden.is_empty());
+        let (prims, _) = section_primitives(&out, false, true, &Visibility::default());
+        assert!(serde_json::to_string(&prims).unwrap().contains("section-hidden"));
+    }
+
     /// [T6]/[68] Gelände mit Baugrube: gestaltetes + gewachsenes Terrain, Erdreich ohne Gebäude-Inneres;
     /// Fassaden-Geländehöhen fürs Baurecht.
     #[test]
@@ -2740,7 +2892,7 @@ mod bench {
             let pl = level.plane().unwrap();
             let fr = |v: [f64; 3]| [v[0] as f32, v[1] as f32, v[2] as f32];
             let t = Instant::now();
-            let raw = render3d::cut_section(&render3d::SectionPlane::new(fr(pl.point), fr(pl.normal)), &wi, &si, &[]);
+            let raw = render3d::section::cut_polygons(&render3d::SectionPlane::new(fr(pl.point), fr(pl.normal)), &wi, &si, &[]);
             let t_cut = t.elapsed();
             let t = Instant::now();
             let buf = if l.kind == DrawingLevelKind::Section {
@@ -2750,8 +2902,8 @@ mod bench {
             };
             let t_all = t.elapsed();
             println!(
-                "{} {:?}: Wände {:?} Platten/Dach {:?} Umwandlung {:?} cut_section {:?} ({} Cut, {} Kanten) | gesamt {:?} ({} Bytes)",
-                l.id, l.kind, t_walls, t_rest, t_conv, t_cut, raw.cut_polygons.len(), raw.visible_edges.len() + raw.hidden_edges.len(), t_all, buf.len()
+                "{} {:?}: Wände {:?} Platten/Dach {:?} Umwandlung {:?} cut_polygons {:?} ({} Cut) | gesamt {:?} ({} Bytes)",
+                l.id, l.kind, t_walls, t_rest, t_conv, t_cut, raw.len(), t_all, buf.len()
             );
         }
     }
