@@ -716,13 +716,14 @@ export function createProjectSlice(
         const removedWallIds = new Set(
           p.walls.filter((w) => w.floorId === id).map((w) => w.id),
         );
+        const removedCeilingIds = new Set((p.ceilings ?? []).filter((c) => c.floorId === id).map((c) => c.id));
         return [
           ...fieldOps(p, "drawingLevels", recomputeFloorElevations(p.drawingLevels.filter((z) => z.id !== id))),
           ...removeItems(p, "walls", removedWallIds),
           ...removeItems(p, "ceilings", (c) => c.floorId === id),
           ...removeItems(p, "stairs", (s) => s.floorId === id),
           ...removeItems(p, "rooms", (r) => r.floorId === id),
-          ...removeItems(p, "openings", (o) => removedWallIds.has(o.hostWallId)),
+          ...removeItems(p, "openings", (o) => removedWallIds.has(o.hostWallId) || (!!o.hostCeilingId && removedCeilingIds.has(o.hostCeilingId))),
         ];
       });
     },

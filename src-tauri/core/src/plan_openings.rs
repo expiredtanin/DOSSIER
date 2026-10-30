@@ -130,8 +130,10 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             operable: r.num()? != 0.0,
         });
     }
-    // [105] Anhang (optional): Rahmenbreite rechts.
+    // [105] Anhang (optional): Rahmenbreite rechts, Drehpunkt des Türblatts (Einzug ab Rohbaukante,
+    // Versatz quer zur Achse; NaN = an der Wandachse).
     let frame_width_end = r.num().unwrap_or(f64::NAN);
+    let (hinge_x, hinge_off) = (r.num().unwrap_or(f64::NAN), r.num().unwrap_or(f64::NAN));
     if ![sx, sy, ex, ey, total, ref_off, position, width].iter().all(|x| x.is_finite()) {
         return None;
     }
@@ -166,7 +168,19 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             };
             lift_slide(&mut o, jamb_start, jamb_end, wn, lo, hi, door.hinge_end, hair);
         } else {
-            for leaf in door_leaves(&w, position, width, &door, count) {
+            // [105] Blatt im Falz: Drehpunkt um den Einzug in die Öffnung und auf die Blattfläche versetzt.
+            let falz = hinge_x.is_finite() && hinge_off.is_finite() && width - 2.0 * hinge_x > 0.05;
+            let leaves = |p: &DoorParams| -> Vec<DoorLeaf> {
+                if !falz {
+                    return door_leaves(&w, position, width, p, count);
+                }
+                let sh = scale(wn, hinge_off);
+                door_leaves(&w, position + hinge_x, width - 2.0 * hinge_x, p, count)
+                    .into_iter()
+                    .map(|l| DoorLeaf { hinge: add(l.hinge, sh), open_end: add(l.open_end, sh), closed_end: add(l.closed_end, sh), radius: l.radius })
+                    .collect()
+            };
+            for leaf in leaves(&door) {
                 o.line(C_LEAF, hair, 0.0, 0.0, leaf.hinge, leaf.open_end);
                 if detail != Detail::Grob {
                     o.arc(hair, leaf.hinge, leaf.closed_end, leaf.open_end, leaf.radius);
@@ -175,7 +189,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             if door_kind == 3 {
                 // Pendeltür: schlägt auch zur Gegenseite auf (Blatt gepunktet, Bogen).
                 let other = DoorParams { swing_right: !door.swing_right, ..door };
-                for leaf in door_leaves(&w, position, width, &other, count) {
+                for leaf in leaves(&other) {
                     o.line(C_LEAF, hair, 0.0, 3.0, leaf.hinge, leaf.open_end);
                     if detail != Detail::Grob {
                         // Bögen laufen gegen den Uhrzeigersinn von `from` nach `to`: kurzen Bogen wählen.
@@ -707,5 +721,59 @@ mod tests {
         let f = plan_opening(&b);
         assert_eq!(arcs(&f), 0);
         assert_eq!(count_cls(&f, C_LEAF), 2);
+    }
+
+    /// [105] Türblatt im Falz: Drehpunkt um den Einzug in der Öffnung und quer versetzt; Bogenradius
+    /// = lichte Breite zwischen den Falzen.
+    #[test]
+    fn tuerblatt_dreht_im_falz() {
+        let mut b = input(true, 1.0, false, &[]);
+        let arc = |f: &[f64]| {
+            let (mut i, mut out) = (1, None);
+            for _ in 0..f[0] as usize {
+                match f[i] as i64 {
+                    1 => i += 5 + 2 * f[i + 4] as usize,
+                    3 => {
+                        out = Some((f[i + 2], f[i + 3], f[i + 8]));
+                        i += 9;
+                    }
+                    _ => i += 9,
+                }
+            }
+            out.unwrap()
+        };
+        let (cx, cy, r) = arc(&plan_opening(&b));
+        assert!((cx - 1.0).abs() < 1e-9 && cy.abs() < 1e-9 && (r - 0.9).abs() < 1e-9);
+        b.extend([NAN, 0.012, 0.15]);
+        let (cx, cy, r) = arc(&plan_opening(&b));
+        assert!((cx - 1.012).abs() < 1e-9 && (cy.abs() - 0.15).abs() < 1e-9 && (r - 0.876).abs() < 1e-9, "{cx} {cy} {r}");
+    }
+
+    /// [105] Pfosten mit eigener Breite: ein Rahmenblock über die Pfostenbreite (statt zwei Anschläge).
+    #[test]
+    fn pfosten_mit_breite_im_grundriss() {
+        let wing = [0.0, 1.0, NAN, NAN, 1.0];
+        let a = plan_opening(&input(false, 1.0, true, &[wing, wing]));
+        let b = plan_opening(&input(false, 1.0, true, &[wing, [1.0, 1.0, NAN, 0.1, 0.0], wing]));
+        // Längste waagrechte Rahmenblock-Kante (Stulp-Ring) in der Mitte.
+        let widest = |f: &[f64]| {
+            let (mut i, mut best) = (1, 0.0f64);
+            for _ in 0..f[0] as usize {
+                match f[i] as i64 {
+                    1 => i += 5 + 2 * f[i + 4] as usize,
+                    2 => {
+                        let (ax, ay, bx, by) = (f[i + 5], f[i + 6], f[i + 7], f[i + 8]);
+                        if f[i + 1] == C_STULP && (ay - by).abs() < 1e-9 && (ax + bx) / 2.0 > 1.3 && (ax + bx) / 2.0 < 1.6 {
+                            best = best.max((ax - bx).abs());
+                        }
+                        i += 9;
+                    }
+                    _ => i += 9,
+                }
+            }
+            best
+        };
+        assert!((widest(&b) - 0.1).abs() < 1e-9, "{}", widest(&b));
+        assert!(widest(&a) < 0.1);
     }
 }

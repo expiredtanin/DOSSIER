@@ -855,6 +855,68 @@ fn shaped_wall_cuts(cuts: &mut [Cut], p: &Project, walls_r: &[RWall], base: (f64
     }
 }
 
+/// Formöffnungen ([G3]) hinter der Schnittebene: die Wand trägt im Modell das Rechteck-Loch, die
+/// Projektion zeigt aber den Umriss — Kanten der Wand im Loch-Rechteck fallen weg, der Umriss auf der
+/// zugewandten Wandfläche kommt dazu.
+fn shaped_projection(visible: &mut Vec<Edge>, p: &Project, walls_r: &[RWall], plane: &Plane) {
+    let (base, u) = (plane.base(), plane.u_model());
+    let ul = hypot2(u.0, u.1);
+    if !(ul > 1e-12) {
+        return;
+    }
+    let u = (u.0 / ul, u.1 / ul);
+    let nrm = (plane.normal[0], plane.normal[2]);
+    for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| crate::opening_shape::is_shaped(o)) {
+        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
+        let owners: Vec<usize> = walls_r.iter().enumerate().filter(|(_, w)| w.wall_id == wall.id).map(|(i, _)| i).collect();
+        if owners.is_empty() || !visible.iter().any(|e| e.kind == Kind::Wall && owners.contains(&e.index)) {
+            continue;
+        }
+        let Some((from, to)) = opening_interval(wall, o) else { continue };
+        let (a, n) = axis_frame(wall);
+        if (a.0 * u.0 + a.1 * u.1).abs() < 0.05 {
+            continue;
+        }
+        let (zb, zt) = opening_extent(p, wall, o);
+        let Some(poly) = crate::opening_shape::opening_outline(o, to - from, zt - zb) else { continue };
+        let total = sum_thickness(&p.wall_type_or_fallback(wall).layers);
+        let ref_off = crate::joins::reference_offset(model3d::wall_reference(wall), total);
+        let at = |s: f64, off: f64| (wall.start.x + a.0 * s + n.0 * off, wall.start.y + a.1 * s + n.1 * off);
+        let uu = |q: (f64, f64)| (q.0 - base.0) * u.0 + (q.1 - base.1) * u.1;
+        let depth = |q: (f64, f64)| (q.0 - base.0) * nrm.0 + (q.1 - base.1) * nrm.1;
+        let faces = [ref_off - total / 2.0, ref_off + total / 2.0];
+        let us: Vec<f64> = faces.iter().flat_map(|&f| [uu(at(from, f)), uu(at(to, f))]).collect();
+        let (u_lo, u_hi) = us.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &x| (l.min(x), h.max(x)));
+        const TOL: f64 = 1e-3;
+        let inside = |q: [f64; 2]| q[0] >= u_lo - TOL && q[0] <= u_hi + TOL && q[1] >= zb - TOL && q[1] <= zt + TOL;
+        visible.retain(|e| !(e.kind == Kind::Wall && owners.contains(&e.index) && inside(e.a) && inside(e.b)));
+        // Senkrechte Stösse der Wandstücke neben dem Loch: der Teil auf Öffnungshöhe entfällt (dort
+        // liegt der Umriss bzw. die durchgehende Wand).
+        let mut split: Vec<Edge> = Vec::new();
+        for e in visible.iter_mut().filter(|e| e.kind == Kind::Wall && owners.contains(&e.index) && (e.a[0] - e.b[0]).abs() < TOL && e.a[0] >= u_lo - TOL && e.a[0] <= u_hi + TOL) {
+            let (lo, hi) = (e.a[1].min(e.b[1]), e.a[1].max(e.b[1]));
+            if hi <= zb + TOL || lo >= zt - TOL {
+                continue;
+            }
+            let x = e.a[0];
+            if hi > zt + TOL {
+                split.push(Edge { kind: e.kind, index: e.index, a: [x, zt], b: [x, hi] });
+            }
+            // Rest unten (oder leer: Länge 0 wird unten entfernt).
+            (e.a, e.b) = ([x, lo], [x, lo.max(zb.min(hi))]);
+        }
+        visible.retain(|e| (e.a[0] - e.b[0]).abs() + (e.a[1] - e.b[1]).abs() > 1e-9);
+        visible.extend(split);
+        // Zugewandte Fläche: kleinere Tiefe hinter der Ebene.
+        let mid = (from + to) / 2.0;
+        let near = if depth(at(mid, faces[0])) <= depth(at(mid, faces[1])) { faces[0] } else { faces[1] };
+        let pts: Vec<[f64; 2]> = poly.iter().map(|q| [uu(at(from + q[0], near)), zb + q[1]]).collect();
+        for i in 0..pts.len() {
+            visible.push(Edge { kind: Kind::Wall, index: owners[0], a: pts[i], b: pts[(i + 1) % pts.len()] });
+        }
+    }
+}
+
 fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
     let roofs = p.roofs.as_deref().unwrap_or(&[]);
     if roofs.is_empty() {
@@ -974,6 +1036,129 @@ fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab]) -> Vec<Cut> {
 
 fn is_void_solid(s: &ExtrudedSolid) -> bool {
     s.operation.as_deref() == Some("subtract") && s.brep.is_none() && s.taper.unwrap_or(0.0) < 1e-6 && s.points.len() >= 3 && s.height > 0.0
+}
+
+/// [106] Schnitt parallel zur Wand durch die Leibungen: Die geschnittene Schicht springt an den
+/// Öffnungen um ihren Rücksprung zurück (Loch geweitet), ihre Zusatzstücke (Leibungsdämmung, Putz,
+/// Überdämmung), die die Schnittebene quert, kommen als Schnittfläche im Stil der Schicht dazu.
+fn parallel_reveal_cuts(mut cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option<&Wall>]) -> Result<Vec<Cut>, String> {
+    use crate::opening_detail::SIDES;
+    let (base, u_raw) = (plane.base(), plane.u_model());
+    let l = hypot2(u_raw.0, u_raw.1);
+    if !(l > 1e-12) {
+        return Ok(cuts);
+    }
+    let u = (u_raw.0 / l, u_raw.1 / l);
+    let mut seen: Vec<&str> = Vec::new();
+    for w in walls.iter().flatten() {
+        if seen.contains(&w.id.as_str()) {
+            continue;
+        }
+        seen.push(&w.id);
+        let (a, n) = axis_frame(w);
+        let (un, ua) = (u.0 * n.0 + u.1 * n.1, u.0 * a.0 + u.1 * a.1);
+        if un.abs() > 0.05 || ua.abs() < 0.5 {
+            continue;
+        }
+        let Some(wt) = p.wall_type(w) else { continue };
+        let total = sum_thickness(&wt.layers);
+        let ref_off = crate::joins::reference_offset(model3d::wall_reference(w), total);
+        let rel = (base.0 - w.start.x, base.1 - w.start.y);
+        let d = rel.0 * n.0 + rel.1 * n.1 - (ref_off - total / 2.0);
+        if d <= 1e-6 || d >= total - 1e-6 {
+            continue;
+        }
+        let mut acc = 0.0;
+        let Some(li) = wt.layers.iter().position(|ly| {
+            acc += ly.thickness;
+            d < acc
+        }) else {
+            continue;
+        };
+        let a0 = rel.0 * a.0 + rel.1 * a.1;
+        let u_of = |s: f64| (s - a0) / ua;
+        let owners: Vec<usize> = walls.iter().enumerate().filter(|(_, x)| x.is_some_and(|x| x.id == w.id)).map(|(i, _)| i).collect();
+        let mut voids: Vec<Vec<[f64; 2]>> = Vec::new();
+        let mut pieces: Vec<Vec<[f64; 2]>> = Vec::new();
+        let rect = |s0: f64, s1: f64, z0: f64, z1: f64| {
+            let (ua, ub) = (u_of(s0).min(u_of(s1)), u_of(s0).max(u_of(s1)));
+            vec![[ua, z0], [ub, z0], [ub, z1], [ua, z1]]
+        };
+        for o in p.openings_of_wall(&w.id) {
+            let Some(r) = crate::opening_detail::opening_reveal(p, w, o) else { continue };
+            let (zb, zt) = opening_extent(p, w, o);
+            // Rücksprung je Seite dieser Schicht; die seitlichen reichen in die Ecken oben/unten.
+            let sh: Vec<f64> = (0..4).map(|k| r.sides[k].iter().filter(|x| x.layer == li).map(|x| x.shift).fold(0.0, f64::max)).collect();
+            for (k, side) in SIDES.iter().enumerate() {
+                for adj in r.sides[k].iter().filter(|x| x.layer == li) {
+                    let s = adj.shift;
+                    if s > 1e-6 {
+                        voids.push(match side {
+                            crate::opening_detail::Side::Left => rect(r.from - s, r.from, zb - sh[3], zt + sh[2]),
+                            crate::opening_detail::Side::Right => rect(r.to, r.to + s, zb - sh[3], zt + sh[2]),
+                            crate::opening_detail::Side::Top => rect(r.from, r.to, zt, zt + s),
+                            crate::opening_detail::Side::Bottom => rect(r.from, r.to, zb - s, zb),
+                        });
+                    }
+                    for pc in adj.pieces.iter().filter(|pc| d >= pc[2] - 1e-9 && d <= pc[3] + 1e-9 && pc[1] - pc[0] > 1e-6) {
+                        pieces.push(match side {
+                            crate::opening_detail::Side::Left => rect(r.from + pc[0], r.from + pc[1], zb, zt),
+                            crate::opening_detail::Side::Right => rect(r.to - pc[1], r.to - pc[0], zb, zt),
+                            crate::opening_detail::Side::Top => rect(r.from, r.to, zt - pc[1], zt - pc[0]),
+                            crate::opening_detail::Side::Bottom => rect(r.from, r.to, zb + pc[0], zb + pc[1]),
+                        });
+                    }
+                }
+            }
+        }
+        if voids.is_empty() && pieces.is_empty() {
+            continue;
+        }
+        if !voids.is_empty() {
+            let refs: Vec<&[[f64; 2]]> = voids.iter().map(|r| r.as_slice()).collect();
+            let cutters = encode_rings(&refs);
+            let mut out = Vec::with_capacity(cuts.len());
+            for cp in cuts {
+                if cp.kind != Kind::Wall || !owners.contains(&cp.index) || cp.pts.len() < 3 {
+                    out.push(cp);
+                    continue;
+                }
+                let ring = &encode_rings(&[cp.pts.as_slice()])[1..];
+                let f = crate::voids::subtract_rings_flat(ring, &cutters, &[0.0]);
+                if f.is_empty() || f[0] < 0.0 {
+                    out.push(cp);
+                    continue;
+                }
+                let mut i = 1;
+                for _ in 0..f[0] as usize {
+                    let k = f[i] as usize;
+                    i += 1;
+                    let pts: Vec<[f64; 2]> = (0..k).map(|j| [f[i + 2 * j], f[i + 2 * j + 1]]).collect();
+                    i += 2 * k;
+                    let m = f[i] as usize;
+                    i += 1 + m;
+                    out.push(Cut { pts, nse: None, ..cp.clone() });
+                }
+            }
+            cuts = out;
+        }
+        let Some(&idx) = owners.first() else { continue };
+        let layer = &wt.layers[li];
+        let comp = p.component_or_fallback(&layer.component_id);
+        let category = p.layer_category(&w.category_code);
+        let (fill, hatch) = layer_style(p, comp, w.hatch_id.as_deref(), w.hatch_source, w.foreground.as_deref(), w.foreground_source, w.background.as_deref(), w.background_source, category, SECTION_WALL_AXIS_ANGLE_DEG)?;
+        for pts in pieces {
+            let mut c = Cut::new(Kind::Wall, idx, pts);
+            c.fill = Some(fill.clone());
+            c.hatch = Some(hatch.clone());
+            c.join_priority = Some(comp.join_priority);
+            c.component_id = Some(comp.id.clone());
+            c.source_id = Some(w.id.clone());
+            c.category = Some(w.category_code.clone());
+            cuts.push(c);
+        }
+    }
+    Ok(cuts)
 }
 
 fn encode_rings(rings: &[&[[f64; 2]]]) -> Vec<f64> {
@@ -1277,6 +1462,8 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let hidden: Vec<Edge> = raw.hidden_edges.iter().filter(not_cut).map(&mut edge).collect();
 
     shaped_wall_cuts(&mut cuts, p, &walls_r, plane.base(), plane.u_model());
+    let mut visible = visible;
+    shaped_projection(&mut visible, p, &walls_r, &plane);
     append_roof_sections(&mut cuts, p, &plane);
     let walls = wall_owners(p, &walls_r);
     let slabs = slab_owners(p, &slabs_r);
@@ -1284,7 +1471,8 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let cuts = merge_monolith_cuts(cuts, &slabs_r);
     let base = plane.base();
     let u = plane.u_model();
-    let mut cuts = subtract_voids_in_section(cuts, p, base, u);
+    let cuts = subtract_voids_in_section(cuts, p, base, u);
+    let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
     append_body_sections(&mut cuts, p, bodies, base, u);
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new() };
     append_terrain_profiles(&mut out, p, base, u);
@@ -1624,6 +1812,28 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
             *opening_id = Some(o.id.clone());
         }
         out.push(l);
+    }
+    // [105] Kämpfer (Oberlicht) und waagrechte Sprossen-Riegel geschnitten, in ihrer Breite.
+    if let Some(t) = wt.filter(|_| !crate::opening_shape::is_shaped(o)) {
+        let (lo, hi) = (zb0 + fwb, zt0 - fwt);
+        let tw = det.as_ref().map(|f| f.transom_width).filter(|v| v.is_finite()).unwrap_or(fw);
+        let mw = det.as_ref().map(|f| f.mullion_width).filter(|v| v.is_finite()).unwrap_or(fw);
+        let mut bars: Vec<(f64, f64)> = Vec::new();
+        let mut top = hi;
+        let tr = t.transom_height.unwrap_or(0.0);
+        if tr > 1e-4 && c.z_top - tr > lo + tw && c.z_top - tr < hi - tw / 2.0 {
+            let z = c.z_top - tr;
+            bars.push((z - tw / 2.0, z + tw / 2.0));
+            top = z - tw / 2.0;
+        }
+        let rows = t.mullion_rows.unwrap_or(1.0).round().clamp(1.0, 20.0) as usize;
+        for r in 1..rows {
+            let z = lo + (top - lo) * r as f64 / rows as f64;
+            bars.push((z - mw / 2.0, z + mw / 2.0));
+        }
+        for (z0, z1) in bars {
+            out.push(opening_poly(rect(u0, u1, z0, z1), true, &o.id));
+        }
     }
     if let Some(t) = wt {
         // Formöffnung ([G3]): kein Sturz-Querschnitt, kein Storenkasten (Bogen/Schräge statt Sturz).
@@ -2016,6 +2226,32 @@ mod tests {
         let prims = section_opening_primitives(&p, &l, &Visibility::default()).unwrap();
         let ys: Vec<f64> = prims.iter().filter_map(|pr| if let Primitive::Polygon { pts, opening_id: Some(id), .. } = pr { (id == "O1").then(|| pts.iter().map(|q| q.y).fold(f64::NEG_INFINITY, f64::max)) } else { None }).collect();
         assert!(!ys.is_empty() && ys.iter().all(|y| *y < want + 5e-3), "kein Sturz/Kasten über dem Bogen: {ys:?}");
+    }
+
+    /// [G3] Projektion hinter der Schnittebene: Rundfenster zeigt den Umriss statt des Rechteck-Lochs.
+    #[test]
+    fn formoeffnung_in_der_projektion() {
+        let mut p = sample();
+        let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+        let w1 = p.walls.iter().find(|w| w.id == o1.host_wall_id).unwrap().clone();
+        let (u, n) = axis_frame(&w1);
+        let edges_of = |p: &Project, sign: f64| -> usize {
+            let (a, b) = ((w1.start.x + n.0 * sign * 1.5, w1.start.y + n.1 * sign * 1.5), (w1.end.x + n.0 * sign * 1.5, w1.end.y + n.1 * sign * 1.5));
+            let mut best = 0;
+            for (s, e) in [(a, b), (b, a)] {
+                let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: s.0 - u.0, y: s.1 - u.1 }, Vec2 { x: e.0 + u.0, y: e.1 + u.1 }]), ..Default::default() };
+                let out = compute_section(p, &l, &[]).unwrap().unwrap();
+                let (zb, zt) = opening_extent(p, &w1, &o1);
+                best = best.max(out.visible.iter().filter(|e| e.kind == Kind::Wall && e.a[1] > zb + 0.01 && e.a[1] < zt - 0.01 && e.b[1] > zb + 0.01 && e.b[1] < zt - 0.01).count());
+            }
+            best
+        };
+        let rect = edges_of(&p, 1.0).max(edges_of(&p, -1.0));
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.shape = Some(OpeningShape::Rund);
+        }
+        let round = edges_of(&p, 1.0).max(edges_of(&p, -1.0));
+        assert!(round >= rect + 20, "Umriss als Kantenzug: {rect} → {round}");
     }
 
     /// [103] Dachfenster: Lücke in allen Dachschichten, Rahmen/Glas geschnitten.

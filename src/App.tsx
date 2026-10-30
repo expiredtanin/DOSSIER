@@ -1264,8 +1264,8 @@ export default function App() {
         ...removeItems(p, "rooms", rmids),
         ...removeItems(p, "extrudedSolids", exids),
         ...removeItems(p, "columns", colids),
-        // Öffnungen: eigene Auswahl löschen UND alle, deren Host-Wand entfällt.
-        ...removeItems(p, "openings", (o) => oids.has(o.id) || wids.has(o.hostWallId)),
+        // Öffnungen: eigene Auswahl löschen UND alle, deren Wirt (Wand, Dach, Decke [103]) entfällt.
+        ...removeItems(p, "openings", (o) => oids.has(o.id) || wids.has(o.hostWallId) || (!!o.hostRoofId && rfids.has(o.hostRoofId)) || (!!o.hostCeilingId && cids.has(o.hostCeilingId))),
         ...removeItems(p, "context", ctxids),
       ]),
     );

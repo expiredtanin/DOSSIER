@@ -8683,3 +8683,21 @@ body {
   cursor: pointer;
   text-decoration: underline dotted;
 }
+/* [105] Ressourcen-Tabs Fenster-/Türtypen: Detail-Gruppen (Rahmen-Detail, Anschlag, Zarge) aufklappbar. */
+.rm-detail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--line);
+  padding: 6px 0;
+}
+.rm-detail-group > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  padding: 2px 0 6px;
+}
+.rm-detail-group[open] > summary ~ * {
+  margin-bottom: 6px;
+}

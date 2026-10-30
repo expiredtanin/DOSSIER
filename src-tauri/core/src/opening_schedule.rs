@@ -15,7 +15,10 @@ pub struct OpeningScheduleRow {
     /// "door" oder "window".
     pub kind: &'static str,
     pub id: String,
+    /// Wirt: Wand, bzw. Dach/Decke bei Dach-/Deckenfenstern ([103], dann `host_kind`).
     pub wall_id: String,
+    /// "wall", "roof" oder "ceiling".
+    pub host_kind: &'static str,
     /// Nummer: eingetragene oder automatische.
     pub mark: String,
     pub mark_auto: bool,
@@ -112,11 +115,60 @@ fn nz(s: &Option<String>) -> String {
     s.as_deref().map(str::trim).unwrap_or("").to_string()
 }
 
+/// Dach-/Deckenfenster ([103]): Geschoss und Raum vom Wirt (Raum unter dem Mittelpunkt), Dach = aussen.
+fn surface_row(p: &Project, o: &Opening) -> Option<OpeningScheduleRow> {
+    if !crate::opening_shape::is_surface_hosted(o) {
+        return None;
+    }
+    let hp = o.host_point?;
+    let (host_kind, host_id, floor_id, external) = if let Some(id) = o.host_roof_id.as_deref().filter(|s| !s.is_empty()) {
+        let r = p.roofs.as_deref()?.iter().find(|r| r.id == id)?;
+        ("roof", r.id.clone(), r.floor_id.clone(), Some(true))
+    } else {
+        let id = o.host_ceiling_id.as_deref()?;
+        let c = p.ceilings.as_deref()?.iter().find(|c| c.id == id)?;
+        ("ceiling", c.id.clone(), c.floor_id.clone(), c.is_external)
+    };
+    let is_door = o.kind != ElementKind::Window;
+    let type_name = if is_door { p.door_type(o).map(|t| t.name.clone()) } else { p.window_type(o).map(|t| t.name.clone()) }.unwrap_or_default();
+    Some(OpeningScheduleRow {
+        kind: if is_door { "door" } else { "window" },
+        id: o.id.clone(),
+        wall_id: host_id,
+        host_kind,
+        mark: nz(&o.mark),
+        mark_auto: false,
+        type_name,
+        floor: p.floor(&floor_id).map_or(floor_id.clone(), |f| f.name.clone()),
+        room_left: room_at(p, &floor_id, hp.x, hp.y),
+        room_right: None,
+        floor_id,
+        width: o.width,
+        height: o.height,
+        clear_width: o.width,
+        clear_height: o.height,
+        sill: 0.0,
+        hinge: None,
+        swing: None,
+        dir: None,
+        fire_rating: nz(&o.fire_rating),
+        sound_class: nz(&o.sound_class),
+        u_value: o.u_value.filter(|u| *u > 0.0),
+        burglary_class: nz(&o.burglary_class),
+        external: o.is_external.or(external),
+        notes: nz(&o.notes),
+    })
+}
+
 /// Alle Fenster und Türen als Tabelle: je Geschoss (Reihenfolge der Ebenen), Fenster vor Türen, dann
 /// Dokumentreihenfolge. Öffnungen ohne Wirtswand fehlen.
 pub fn opening_schedule(p: &Project) -> Vec<OpeningScheduleRow> {
     let mut rows = Vec::new();
     for o in p.openings.as_deref().unwrap_or(&[]) {
+        if let Some(r) = surface_row(p, o) {
+            rows.push(r);
+            continue;
+        }
         let Some(w) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
         let is_door = o.kind != ElementKind::Window;
         let rooms = rooms_beside(p, w, o.position + o.width / 2.0);
@@ -141,6 +193,7 @@ pub fn opening_schedule(p: &Project) -> Vec<OpeningScheduleRow> {
             kind: if is_door { "door" } else { "window" },
             id: o.id.clone(),
             wall_id: w.id.clone(),
+            host_kind: "wall",
             mark: nz(&o.mark),
             mark_auto: false,
             type_name,
@@ -173,8 +226,8 @@ pub fn opening_schedule(p: &Project) -> Vec<OpeningScheduleRow> {
         let n = count.entry((r.floor_id.clone(), r.kind)).or_insert(0);
         *n += 1;
         if r.mark.is_empty() {
-            let lv = level_index(&r.floor_id);
-            let lv = if lv == usize::MAX { 0 } else { lv + 1 };
+            // Geschoss-Nummer unter den Geschossen (Schnitte/Ansichten zählen nicht).
+            let lv = p.drawing_levels.iter().filter(|l| l.kind == DrawingLevelKind::Floor).position(|l| l.id == r.floor_id).map_or(0, |i| i + 1);
             r.mark = format!("{}{}.{:02}", if r.kind == "door" { "T" } else { "F" }, lv, n);
             r.mark_auto = true;
         }
@@ -252,5 +305,18 @@ mod tests {
     #[test]
     fn leeres_projekt() {
         assert!(opening_schedule(&Project::default()).is_empty());
+    }
+
+    /// [103] Dachfenster in der Liste: Wirt Dach, Geschoss des Dachs, aussen.
+    #[test]
+    fn dachfenster_in_der_liste() {
+        let mut p = Project::default();
+        p.drawing_levels.push(DrawingLevel { id: "dg".into(), name: "DG".into(), kind: DrawingLevelKind::Floor, ..Default::default() });
+        p.roofs = Some(vec![Roof { id: "r".into(), floor_id: "dg".into(), ..Default::default() }]);
+        p.openings = Some(vec![Opening { id: "df".into(), kind: ElementKind::Window, width: 0.78, height: 1.18, host_roof_id: Some("r".into()), host_point: Some(v(1.0, 1.0)), ..Default::default() }]);
+        let rows = opening_schedule(&p);
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!((r.host_kind, r.wall_id.as_str(), r.floor.as_str(), r.external, r.mark.as_str()), ("roof", "r", "DG", Some(true), "F1.01"));
     }
 }

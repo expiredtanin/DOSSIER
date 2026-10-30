@@ -12,7 +12,9 @@ import type { AreaReport, Cell, ReportRow, ReportSection } from "./areaReport";
 export interface OpeningScheduleRow {
   kind: "door" | "window";
   id: string;
+  /** Wirt: Wand, bei Dach-/Deckenfenstern ([103]) das Dach bzw. die Decke (s. `hostKind`). */
   wallId: string;
+  hostKind: "wall" | "roof" | "ceiling";
   /** Nummer: eingetragene oder automatische. */
   mark: string;
   markAuto: boolean;

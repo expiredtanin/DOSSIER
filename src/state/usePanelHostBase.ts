@@ -888,6 +888,9 @@ export function usePanelHostBase(opts: {
       onSetOpeningLintelLines: (lintelLines) => {
         if (selection?.kind === "opening") updateOpening(selection.id, { lintelLines });
       },
+      onSetOpeningHost: (patch) => {
+        if (selection?.kind === "opening") updateOpening(selection.id, patch);
+      },
       onSetOpeningDetailLevel: (detailLevel) => {
         if (selection?.kind === "opening") updateOpening(selection.id, { detailLevel });
       },

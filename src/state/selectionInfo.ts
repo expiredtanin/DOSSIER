@@ -225,6 +225,11 @@ export interface OpeningInfo {
   frameViewLine?: { color?: string; weight?: number };
   sashLine?: { color?: string; weight?: number };
   sillLineStyle?: { color?: string; weight?: number };
+  /** Dach-/Deckenfenster ([103]): Wirt und Lage (dann ohne Wirts-Wand). */
+  hostRoofId?: string;
+  hostCeilingId?: string;
+  hostPoint?: { x: number; y: number };
+  hostAngle?: number;
 }
 
 /**

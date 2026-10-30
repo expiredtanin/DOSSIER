@@ -266,8 +266,17 @@ pub fn window_symbol(
         sym.jamb_marks.push(frame_block(fw / 2.0, fw / 2.0));
         let fwe = if spec.frame_width_end.is_nan() { fw } else { max(0.01, spec.frame_width_end) };
         sym.jamb_marks.push(frame_block(axis_width - fwe / 2.0, fwe / 2.0));
+        for &(si, from, to) in &segs {
+            // Pfosten (fest, [105] Pfostenbreite): eigener Rahmenblock über seine Breite.
+            if spec.sashes[si].post && to - from > 1e-6 {
+                sym.meeting_marks.push(frame_block((from + to) / 2.0, (to - from) / 2.0));
+            }
+        }
         for i in 0..segs.len().saturating_sub(1) {
             let u_pos = segs[i].2;
+            if spec.sashes[segs[i].0].post || spec.sashes[segs[i + 1].0].post {
+                continue;
+            }
             if fein {
                 sym.meeting_marks.push(frame_block(u_pos - fw / 2.0, fw / 2.0));
                 sym.meeting_marks.push(frame_block(u_pos + fw / 2.0, fw / 2.0));

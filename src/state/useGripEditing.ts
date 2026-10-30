@@ -9,7 +9,7 @@ import { useRef, useState, type RefObject } from "react";
 import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
-import { drawingVertices } from "../core";
+import { drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
 import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
 import { areaMovePreview, drawingMovePreview } from "../tools/transform";
@@ -242,6 +242,14 @@ export function useGripEditing(opts: {
     }
     if (selectedOpeningId && modelEditable) {
       const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
+      // Dach-/Deckenfenster ([103]): Mitte (verschieben), Breite quer, Höhe im Gefälle.
+      if (op && (op.hostRoofId || op.hostCeilingId)) {
+        const info = surfaceOpeningInfo(project, op.id);
+        if (!info) return [];
+        const pts = surfaceOpeningGrips(info, op.width, op.height);
+        pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+        return pts;
+      }
       const w = op && project.walls.find((x) => x.id === op.hostWallId);
       if (op && w) {
         const axis = normalize(sub(w.end, w.start));
@@ -865,6 +873,12 @@ export function useGripEditing(opts: {
     // width/2 abziehen; auf [0, Wandlänge − Breite] klemmen (Öffnung bleibt drin).
     if (selectedOpeningId) {
       const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
+      if (op && (op.hostRoofId || op.hostCeilingId)) {
+        const info = op.locked ? null : surfaceOpeningInfo(project, op.id);
+        const patch = info && surfaceOpeningGripPatch(info, index, pt);
+        if (patch) updateOpening(op.id, patch);
+        return;
+      }
       const w = op && project.walls.find((x) => x.id === op.hostWallId);
       if (op && w) {
         const d = sub(w.end, w.start);

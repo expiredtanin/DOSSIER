@@ -832,4 +832,71 @@ mod tests {
         let area: f64 = r.iter().map(|q| (q[1] - q[0]) * (q[3] - q[2])).sum();
         assert!((area - 4.0).abs() < 1e-12);
     }
+
+    #[test]
+    fn tuerblatt_im_falz_der_zarge() {
+        // Aufschlag innen (Vorgabe links/innen): Blatt bündig an der Innenfläche, im Falz (Einzug > 0).
+        let p = wand_mit(None, Some(DoorType { id: "t".into(), frame_kind: Some(DoorTypeFrameKind::Umfassungszarge), frame_width: Some(0.06), ..Default::default() }));
+        let leaf_rgb = |p: &Project| {
+            let m = crate::model3d::emit_opening_meshes(p, 1.0);
+            let rgb = m.iter().map(|m| m.color).collect::<Vec<_>>();
+            (m, rgb)
+        };
+        let (m, _) = leaf_rgb(&p);
+        let total = 0.345;
+        let ys: Vec<f64> = m.iter().flat_map(|m| m.positions.chunks(3).map(|q| q[1]).collect::<Vec<_>>()).collect();
+        // Ein Quader (das Blatt) reicht genau an eine Wandfläche (±total/2), Dicke = Falztiefe 4 cm.
+        let leaf = m.iter().find(|m| {
+            let y: Vec<f64> = m.positions.chunks(3).map(|q| q[1]).collect();
+            let (lo, hi) = (y.iter().cloned().fold(f64::INFINITY, f64::min), y.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+            ((hi - total / 2.0).abs() < 1e-9 || (lo + total / 2.0).abs() < 1e-9) && ((hi - lo) - 0.04).abs() < 1e-9
+        });
+        assert!(leaf.is_some(), "{:?}", ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+        let x: Vec<f64> = leaf.unwrap().positions.chunks(3).map(|q| q[0]).collect();
+        let x0 = x.iter().cloned().fold(f64::INFINITY, f64::min);
+        // Einbaufuge 1 cm + Blech 2 mm: Blatt ab 1.012 (Öffnung ab 1.0).
+        assert!((x0 - 1.012).abs() < 1e-9, "{x0}");
+    }
+
+    /// [G3] Füllkörper einer Formöffnung je Wandschicht (vier Schichten ⇒ viermal so viele Körper).
+    #[test]
+    fn formoeffnung_fuellkoerper_je_schicht() {
+        let mut p = wand_mit(Some(WindowType { id: "t".into(), ..Default::default() }), None);
+        for (i, c) in p.components.iter_mut().enumerate() {
+            c.color = ["#ff0000", "#00ff00", "#0000ff", "#ffffff"][i].into();
+        }
+        p.openings.as_mut().unwrap()[0].shape = Some(OpeningShape::Rund);
+        let o = p.openings.as_ref().unwrap()[0].clone();
+        let poly = crate::opening_shape::opening_outline(&o, 1.2, 1.4).unwrap();
+        let quads = crate::opening_shape::fill_quads(&poly, 1.2, 1.4).len();
+        assert!(quads > 0);
+        assert_eq!(crate::model3d::shaped_fill_count(&p, &p.walls[0], &o, 1.2, 1.4), quads * 4);
+        let wr = crate::opening_geom::WallRef { start: crate::opening_geom::v(0.0, 0.0), end: crate::opening_geom::v(5.0, 0.0), total: 0.345, ref_off: 0.0 };
+        let m = crate::model3d::shaped_wall_opening_meshes(&p, &p.walls[0], &wr, &o, [1.0, 2.2, 0.9, 2.3]);
+        let mut colors: Vec<String> = m.iter().take(quads * 4).map(|m| format!("{:?}", m.color)).collect();
+        colors.sort();
+        colors.dedup();
+        assert_eq!(colors.len(), 4);
+    }
+
+    /// [106] Schnitt parallel zur Wand durch den Innenputz: Rücksprung 5 cm weitet das Loch je Seite,
+    /// die Schnittfläche wird um (2 × 1.5 + 2 × 1.2) × 0.05 m² kleiner (mit Ecken) (links, rechts, oben, unten).
+    #[test]
+    fn schnitt_parallel_durch_die_leibung() {
+        use crate::plan::section::{compute_section, Kind, LevelSpec};
+        let area = |p: &Project| -> f64 {
+            let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: -1.0, y: 0.165 }, Vec2 { x: 6.0, y: 0.165 }]), ..Default::default() };
+            let out = compute_section(p, &l, &[]).unwrap().unwrap();
+            out.cuts.iter().filter(|c| c.kind == Kind::Wall).map(|c| {
+                let n = c.pts.len();
+                (0..n).map(|i| c.pts[i][0] * c.pts[(i + 1) % n][1] - c.pts[(i + 1) % n][0] * c.pts[i][1]).sum::<f64>().abs() / 2.0
+            }).sum()
+        };
+        let plain = wand_mit(Some(WindowType { id: "t".into(), ..Default::default() }), None);
+        let reveals = vec![LayerReveal { layer: -1.0, mode: RevealMode::Zurueck, amount: Some(0.05), ..Default::default() }];
+        let recessed = wand_mit(Some(WindowType { id: "t".into(), layer_reveals: Some(reveals), ..Default::default() }), None);
+        let (a0, a1) = (area(&plain), area(&recessed));
+        assert!(a0 > 1.0, "{a0}");
+        assert!((a0 - a1 - (2.0 * 1.5 + 2.0 * 1.2) * 0.05).abs() < 1e-3, "{a0} {a1}");
+    }
 }

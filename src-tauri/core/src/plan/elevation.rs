@@ -223,6 +223,37 @@ struct ProjOpening {
     id: String,
     /// Formöffnung ([G3]): Rahmen-Umriss und Glas entlang des Umrisses statt der Rechtecke.
     shape: Option<(Vec<Pt>, Vec<Pt>, Vec<Vec<Pt>>, String)>,
+    /// [105] Rahmen-Umriss, wenn er über die Rohbauöffnung hinausgeht (Zargenspiegel, Bekleidung).
+    frame: Option<[Pt; 4]>,
+}
+
+/// Türzarge in der Ansicht ([105]) von der sichtbaren Seite: `outer` = über die Rohbaukante hinaus
+/// (Spiegel, Bekleidung, Blendrahmen), `clear` = lichte Kante der Zarge, `leaf` = Blatt-Einzug.
+struct DoorBand {
+    outer: f64,
+    clear: f64,
+    leaf: f64,
+}
+
+/// Sichtbare Wandseite: +1 = rechts der Achse (Aussenseite, `layers[0]`), −1 = innen.
+fn view_side(frame: &[f64; 9], wall: &Wall) -> f64 {
+    let (ax, az) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+    let len = hypot2(ax, az).max(1e-12);
+    if frame[3] * az / len - frame[5] * ax / len < 0.0 { 1.0 } else { -1.0 }
+}
+
+fn door_band(df: &crate::opening_detail::DoorFrame, total: f64, o: &Opening, side: f64) -> DoorBand {
+    use crate::opening_detail as od;
+    let innen = od::aufschlag_innen(o);
+    let prof = od::door_frame_profile(df, total, innen);
+    // Aufschlagfläche sichtbar? (Aufschlag innen ⇔ Innenseite −1).
+    let aufschlag = (side < 0.0) == innen;
+    let touches = |poly: &[[f64; 2]]| poly.iter().any(|q| if aufschlag { q[1] <= 1e-6 } else { q[1] >= total - 1e-6 });
+    let outer = prof.iter().filter(|(_, p)| touches(p)).flat_map(|(_, p)| p.iter().map(|q| -q[0])).fold(0.0, f64::max);
+    let clear = od::profile_clear_x(&prof);
+    // Von der Aufschlagseite liegt das Blatt vor dem Falz.
+    let leaf = if aufschlag { (clear - df.falz_width).max(0.0) } else { clear };
+    DoorBand { outer, clear, leaf }
 }
 
 /// Umriss einer Formöffnung in Anteilen (0…1) und das um die Rahmenbreite eingerückte Glas.
@@ -248,6 +279,7 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
     let mut b = vec![0.0];
     let mut ids: Vec<&str> = Vec::new();
     let mut shapes: Vec<Option<ShapeNorm>> = Vec::new();
+    let mut bands: Vec<Option<DoorBand>> = Vec::new();
     let by_wall = p.openings_by_wall();
     for wall in &p.walls {
         let thickness = p.wall_type(wall).map_or(0.2, |t| t.layers.iter().fold(0.0, |s, l| s + l.thickness));
@@ -297,6 +329,34 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
                     _ => 0.0,
                 },
             ]);
+            // [105] Rahmen-Detail je Seite, Anschlag je Seite, Profile, Türblatt-Einzug der Zarge.
+            let det = crate::opening_detail::frame_of(p, op).filter(|f| f.detailed);
+            let dframe = crate::opening_detail::door_frame_of(p, op);
+            let side = view_side(frame, wall);
+            let band = dframe.as_ref().map(|df| door_band(df, thickness, op, side));
+            let nan = f64::NAN;
+            match det.as_ref() {
+                Some(f) if !door => b.extend([f.sides.left, f.sides.right, f.sides.top, f.sides.bottom]),
+                _ => b.extend([nan; 4]),
+            }
+            match det.as_ref() {
+                Some(f) => b.extend([f.rebate.left, f.rebate.right, f.rebate.top]),
+                None => b.extend([nan; 3]),
+            }
+            match det.as_ref() {
+                Some(f) if !door => b.extend([f.ext.left, f.ext.right, f.sill_profile, f.shading_profile]),
+                _ => b.extend([nan; 4]),
+            }
+            match &band {
+                Some(bd) => b.extend([bd.leaf, bd.leaf]),
+                None => b.extend([nan; 2]),
+            }
+            if band.is_some() {
+                // Zargen ohne Wandnase: der Anschlag gehört zur Zarge.
+                let k = b.len() - 13 - 3;
+                b[k] = 0.0;
+            }
+            let mullion = det.as_ref().map_or(f64::NAN, |f| f.mullion_width);
             // Flügel: (pfosten, postWidth, autoWidth, width, opening, hingeLeft).
             let mut sashes: Vec<[f64; 6]> = Vec::new();
             if !door {
@@ -306,7 +366,7 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
                             for s in list {
                                 sashes.push([
                                     if s.kind == SashDefKind::Pfosten { 1.0 } else { 0.0 },
-                                    s.post_width.unwrap_or(f64::NAN),
+                                    s.post_width.unwrap_or(mullion),
                                     if s.auto_width == Some(false) { 0.0 } else { 1.0 },
                                     s.width.unwrap_or(f64::NAN),
                                     s.opening.map_or(-1.0, sash_kind),
@@ -318,6 +378,10 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
                             let wc = if t.wing_count == 0.0 || t.wing_count.is_nan() { 1.0 } else { t.wing_count };
                             let n = max(1.0, round(wc)) as usize;
                             for i in 0..n {
+                                // [105] Pfostenbreite gesetzt: Pfosten zwischen den Flügeln.
+                                if i > 0 && mullion.is_finite() && mullion > 1e-4 {
+                                    sashes.push([1.0, mullion, 1.0, f64::NAN, 0.0, 1.0]);
+                                }
                                 sashes.push([0.0, f64::NAN, 1.0, f64::NAN, sash_kind(t.kind), if i % 2 == 0 { 1.0 } else { 0.0 }]);
                             }
                         }
@@ -343,6 +407,7 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
                 ]);
             }
             ids.push(&op.id);
+            bands.push(band);
             shapes.push(crate::opening_shape::opening_outline(op, to - from, ot - ob).map(|poly| {
                 let (w, h) = (to - from, ot - ob);
                 let fw = if door { dt.and_then(|t| t.frame_width) } else { wt.and_then(|t| t.frame_width) }.unwrap_or(0.06).min(w.min(h) / 3.0);
@@ -399,10 +464,25 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
         if shape.is_some() {
             // Formöffnung ([G3]): ohne Flügel-/Sprossenteilung, Türblatt und Symbole (Rechteck-Raster).
             let round = p.openings.as_deref().unwrap_or(&[]).iter().any(|o| o.id == ids[k] && !crate::opening_shape::has_flat_bottom(o));
-            out.push(ProjOpening { pts, depth, glass: Vec::new(), door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: if round { Vec::new() } else { sill }, symbol: Vec::new(), id: ids[k].to_string(), shape });
+            out.push(ProjOpening { pts, depth, glass: Vec::new(), door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: if round { Vec::new() } else { sill }, symbol: Vec::new(), id: ids[k].to_string(), shape, frame: None });
             continue;
         }
-        out.push(ProjOpening { pts, depth, glass, door_leaf, divisions, sash_rects, sill, symbol, id: ids[k].to_string(), shape });
+        let mut sash_rects = sash_rects;
+        let mut pts_frame = None;
+        if let Some(bd) = &bands[k] {
+            // Zarge von dieser Seite: Spiegel/Bekleidung über die Rohbaukante hinaus, lichte Kante.
+            let (w, h) = (hypot2(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]).max(1e-6), hypot2(pts[3][0] - pts[0][0], pts[3][1] - pts[0][1]).max(1e-6));
+            let r = |a0: f64, a1: f64, z1: f64| [map_quad(&pts, a0, 0.0), map_quad(&pts, a1, 0.0), map_quad(&pts, a1, z1), map_quad(&pts, a0, z1)];
+            if bd.outer > 1e-4 {
+                pts_frame = Some(r(-bd.outer / w, 1.0 + bd.outer / w, 1.0 + bd.outer / h));
+                // Rohbaukante unter dem Spiegel/der Bekleidung.
+                sash_rects.push(r(0.0, 1.0, 1.0));
+            }
+            if bd.clear > 1e-4 && bd.clear < bd.leaf - 1e-4 {
+                sash_rects.push(r(bd.clear / w, 1.0 - bd.clear / w, 1.0 - bd.clear / h));
+            }
+        }
+        out.push(ProjOpening { pts, depth, glass, door_leaf, divisions, sash_rects, sill, symbol, id: ids[k].to_string(), shape, frame: pts_frame });
     }
     surface_openings(p, frame, &mut out);
     out
@@ -441,7 +521,7 @@ fn surface_openings(p: &Project, frame: &[f64; 9], out: &mut Vec<ProjOpening>) {
         });
         let depth = plane_depth.map_or(own, |d| d.min(own));
         let glass = if o.kind == ElementKind::Window { vec![quad(fw).0] } else { Vec::new() };
-        out.push(ProjOpening { pts, depth, glass, door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: Vec::new(), symbol: Vec::new(), id: o.id.clone(), shape: None });
+        out.push(ProjOpening { pts, depth, glass, door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: Vec::new(), symbol: Vec::new(), id: o.id.clone(), shape: None, frame: None });
     }
 }
 
@@ -764,7 +844,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             items.push(Item { depth: d, seq, rank: None, prim });
             seq += 1;
         };
-        let frame_pts = op.shape.as_ref().map_or(&op.pts[..], |(o, _, _, _)| &o[..]);
+        let frame_pts = op.shape.as_ref().map_or(op.frame.as_ref().map_or(&op.pts[..], |f| &f[..]), |(o, _, _, _)| &o[..]);
         push(poly_prim(to_vec(frame_pts), if mono { "#ffffff" } else { FRAME_FILL_COLOR }, EDGE_INK, FRAME_MM, id));
         if let Some((_, g, _, _)) = &op.shape {
             push(poly_prim(to_vec(g), if mono { GLASS_FILL_MONO } else { GLASS_FILL_COLOR }, EDGE_INK, EDGE_MM, id));
@@ -1063,5 +1143,36 @@ mod tests {
         let first_df = prims.iter().position(|pr| matches!(pr, Primitive::Polygon { opening_id: Some(o), .. } if o == "DF")).unwrap();
         let last_roof = prims.iter().rposition(|pr| matches!(pr, Primitive::Polygon { roof_id: Some(_), .. })).unwrap();
         assert!(first_df > last_roof, "Dachfenster vor der Dachfläche gezeichnet");
+    }
+
+    /// [105] Umfassungszarge in der Ansicht: Spiegel über die Rohbaukante hinaus (Rahmen breiter als
+    /// die Öffnung), Blatt um die Zarge eingerückt.
+    #[test]
+    fn zargenspiegel_in_der_ansicht() {
+        let mut p = sample();
+        let o1 = p.openings.iter().flatten().find(|o| o.id == "O1").unwrap().clone();
+        let frame_w = |p: &Project| -> f64 {
+            let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+            let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+            let (prims, _) = elevation_primitives(p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+            let pr = prims.iter().find(|pr| matches!(pr, Primitive::Polygon { opening_id: Some(o), .. } if o == "O1")).unwrap();
+            let Primitive::Polygon { pts, .. } = pr else { unreachable!() };
+            pts.iter().map(|q| q.x).fold(f64::NEG_INFINITY, f64::max) - pts.iter().map(|q| q.x).fold(f64::INFINITY, f64::min)
+        };
+        let door = |kind: Option<DoorTypeFrameKind>| {
+            let mut q = p.clone();
+            q.door_types = Some(vec![DoorType { id: "dt".into(), frame_kind: kind, ..Default::default() }]);
+            for o in q.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+                o.kind = ElementKind::Door;
+                o.type_id = Some("dt".into());
+                o.sill_height = 0.0;
+            }
+            q
+        };
+        let plain = frame_w(&door(None));
+        assert!((plain - o1.width).abs() < 1e-6, "{plain}");
+        let zarge = frame_w(&door(Some(DoorTypeFrameKind::Umfassungszarge)));
+        assert!((zarge - o1.width - 0.1).abs() < 1e-6, "{zarge}");
+        p.openings = None;
     }
 }

@@ -497,7 +497,7 @@ fn shaped_fill_mesh(p: &Project, wall: &Wall, o: &Opening, c: &Cutout, base: f64
     let wall_rgb = model3d::shaped_wall_opening_meshes(p, wall, &wr, o, [c.from, c.to, c.z_bottom, c.z_top]);
     let (mut positions, mut indices) = (Vec::new(), Vec::new());
     // Die Füllkörper (Wandfarbe) gehören zur Wand, nicht zur Füllung: die Öffnung schneidet sie ohnehin nicht.
-    let fills = crate::opening_shape::opening_outline(o, c.to - c.from, c.z_top - c.z_bottom).map_or(0, |poly| crate::opening_shape::fill_quads(&poly, c.to - c.from, c.z_top - c.z_bottom).len());
+    let fills = model3d::shaped_fill_count(p, wall, o, c.to - c.from, c.z_top - c.z_bottom);
     for m in wall_rgb.iter().skip(fills) {
         if let Ok(b) = <[f64; 24]>::try_from(m.positions.as_slice()) {
             push_box(&mut positions, &mut indices, &b, base);
@@ -766,8 +766,10 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         // Formöffnungen ([G3]): Füllkörper zwischen Rechteck-Loch und Umriss gehören zur Wand.
         for &(k, c) in cutouts_by_wall.get(&wall.id).map_or(&[][..], |v| v.as_slice()) {
             let o = &openings[k];
-            let Some(poly) = crate::opening_shape::opening_outline(o, c.to - c.from, c.z_top - c.z_bottom) else { continue };
-            let n = crate::opening_shape::fill_quads(&poly, c.to - c.from, c.z_top - c.z_bottom).len();
+            let n = model3d::shaped_fill_count(&p, wall, o, c.to - c.from, c.z_top - c.z_bottom);
+            if n == 0 {
+                continue;
+            }
             let total = p.wall_thickness(wall, 0.2);
             let wr = crate::opening_geom::WallRef {
                 start: crate::opening_geom::v(wall.start.x, wall.start.y),

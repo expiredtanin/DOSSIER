@@ -801,6 +801,7 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
                 details.extend(s4(f.ext));
                 details.extend(s4(f.rebate));
                 details.extend([f.sash_width, f.sash_depth, f.sash_overlap, f.mullion_width, f.transom_width, f.sill_profile, f.shading_profile, flag(dframe.is_some())]);
+                details.extend(dframe.as_ref().map_or([f64::NAN; 4], |df| door_leaf_in_falz(&wr, op, df)));
                 n_details += 1.0;
             }
             if let (Some(df), true) = (dframe.as_ref(), detail > 0.0) {
@@ -852,6 +853,25 @@ fn box_mesh(positions: [f64; 24], color: Rgb) -> RMesh {
 /// Rechteck-Loch und dem Umriss, Rahmen-Ring und Glas (bzw. Türblatt) entlang des Umrisses. Rahmenlage
 /// quer zur Wand wie bei den Rechteck-Öffnungen (`openings3d::frame_normal_range`). Nicht für Formen:
 /// Anschlag, Fensterbank, Storenkasten, Flügel-/Sprossenteilung (bleiben beim Rechteck).
+/// Schichten einer Wand für die Füllkörper einer Formöffnung ([G3]): Dicke (auf `total` skaliert)
+/// und Farbe, aussen zuerst; ohne Aufbau eine Schicht in Wandfarbe.
+fn shaped_fill_bands(p: &Project, wall: &Wall, total: f64) -> Vec<(f64, Rgb)> {
+    let (bands, _) = resolve_wall_bands(p, &wall_material_color_maps(p), wall, true);
+    let sum: f64 = bands.iter().map(|b| b.thickness.max(0.0)).sum();
+    let list: Vec<(f64, Rgb)> = bands.iter().filter(|b| b.thickness > 1e-9).map(|b| (b.thickness * total / sum, b.color)).collect();
+    if list.is_empty() || !(sum > 1e-9) {
+        return vec![(total, WALL_RGB)];
+    }
+    list
+}
+
+/// Anzahl der Füllkörper (je Schicht) einer Formöffnung — sie stehen in
+/// [`shaped_wall_opening_meshes`] vor Rahmen und Glas.
+pub(crate) fn shaped_fill_count(p: &Project, wall: &Wall, op: &Opening, w: f64, h: f64) -> usize {
+    let total = p.wall_thickness(wall, 0.2);
+    crate::opening_shape::opening_outline(op, w, h).map_or(0, |poly| crate::opening_shape::fill_quads(&poly, w, h).len() * shaped_fill_bands(p, wall, total).len())
+}
+
 pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef, op: &Opening, [from, to, zb, zt]: [f64; 4]) -> Vec<RMesh> {
     use crate::opening_shape as os;
     let (w, h) = (to - from, zt - zb);
@@ -870,9 +890,14 @@ pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef,
     };
     let half = wr.total / 2.0;
     let mut out = Vec::new();
-    let wall_rgb = resolve_wall_bands(p, &wall_material_color_maps(p), wall, false).0.first().map_or(WALL_RGB, |b| b.color);
+    // Füllkörper je Wandschicht (aussen = +half) in deren Farbe.
+    let bands = shaped_fill_bands(p, wall, wr.total);
     for q in os::fill_quads(&poly, w, h) {
-        out.push(box_mesh(os::quad_box(&q, -half, half, &map), wall_rgb));
+        let mut n_hi = half;
+        for &(t, rgb) in &bands {
+            out.push(box_mesh(os::quad_box(&q, n_hi - t, n_hi, &map), rgb));
+            n_hi -= t;
+        }
     }
     let door = op.kind == ElementKind::Door;
     let ty = if door {
@@ -918,6 +943,19 @@ pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef,
 
 /// Türzarge als Quader ([105]): Profil (Grundriss = Schnitt) an beiden Leibungen über die Höhe und
 /// am Sturz über die Breite; Ecken ohne Überlappung (Leibungsstück endet unter dem Sturzstück).
+/// Türblatt im Falz ([105]): Einzug ab Rohbaukante (seitlich, oben) und Lage quer zur Wand in der
+/// Normalen von `openings3d` (rechts der Achse, `t = −Versatz`).
+fn door_leaf_in_falz(wr: &WallRef, op: &Opening, df: &crate::opening_detail::DoorFrame) -> [f64; 4] {
+    use crate::opening_detail as od;
+    let innen = od::aufschlag_innen(op);
+    let clear = od::profile_clear_x(&od::door_frame_profile(df, wr.total, innen));
+    let x = (clear - df.falz_width).max(0.0);
+    let (d0, d1) = od::leaf_band(df, wr.total, innen);
+    let face = wr.ref_off - wr.total / 2.0;
+    let off_of = |d: f64| face + if innen { wr.total - d } else { d };
+    [x, x, -off_of(d0), -off_of(d1)]
+}
+
 fn door_frame_boxes(out: &mut Vec<RMesh>, wall: &Wall, wr: &WallRef, op: &Opening, df: &crate::opening_detail::DoorFrame, (from, to, zb, zt): (f64, f64, f64, f64)) {
     use crate::opening_detail as od;
     let (u, n) = wr.frame();
