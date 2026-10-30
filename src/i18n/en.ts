@@ -794,6 +794,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.stair.shape.L": "L-shaped",
   "objinfo.stair.shape.spiral": "Spiral",
   "objinfo.stair.width": "Run width",
+  "objinfo.stair.column": "Centre column (radius)",
   "objinfo.stair.steps": "Step count",
   "objinfo.stair.rise": "Total rise",
   "objinfo.stair.riser": "Riser height",

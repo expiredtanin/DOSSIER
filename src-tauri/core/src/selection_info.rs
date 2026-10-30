@@ -912,6 +912,7 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
         .v("up", Value::Bool(field(s, "up") != Some(&Value::Bool(false))))
         .raw("arrowStyle", s, "arrowStyle")
         .raw("referenz", s, "referenz")
+        .raw("centerColumn", s, "centerColumn")
         .raw("typeId", s, "typeId")
         .raw("floorId", s, "floorId")
         .o("floorName", floor_name(floor, field(s, "floorId")))

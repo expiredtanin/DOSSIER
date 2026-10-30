@@ -1353,7 +1353,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   der Tauri-App. Offen: Schichteinzug [106], Formöffnungen [G3] und Ansichtsschraffur im 3D ([100]) in Bogenwänden; Wände teilen/trimmen (fehlt
   auch für gerade); echte Polar-Schraffur; IFC-Körper als extrudiertes Bogenprofil statt Netz; Griff-Vorschau
   zeigt nur die Achse; automatische Aussenbemassung misst Bogenwände als Sehne.
-- ○ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M
+- ◐ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M — 30.10.: Ortbeton-Wendeltreppe mit echter Wendelfläche (Schraubenuntersicht, ebene Tritte, `stairs3d::spiral_mesh`), Handlauf als Schraubensweep samt Pfosten (links/rechts/beide nach Drehsinn), Mittelsäule `Stair.centerColumn` (Radius, Objekt-Info; als Block in 3D/Schnitt). Tests Rust (Volumen, Punkte auf der Schraube, Sweep-Radius, Säule). Plansymbol (Bögen, Schnittlinie, Pfeil) war schon da und im CLI-SVG geprüft; nicht in der Tauri-App. Offen: Säule im Grundriss, IFC/Mengen der Wendelfläche, Handlauf-Profil rund.
 - ○ **[T4] Import-Meshes glätten oder kantig** (`add_smooth_normals`). · S
 - ○ **[T5] Import reparieren** (`put_together_same_attrs`, Healing). · S
 - ○ **[T6] Glattes Gelände aus Höhenlinien** + Gelände-Prisma für Aushub (= [68]). · L

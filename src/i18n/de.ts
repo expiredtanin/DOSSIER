@@ -797,6 +797,7 @@ export const de = {
   "objinfo.stair.shape.L": "L-Treppe",
   "objinfo.stair.shape.spiral": "Wendel",
   "objinfo.stair.width": "Laufbreite",
+  "objinfo.stair.column": "Mittelsäule (Radius)",
   "objinfo.stair.steps": "Stufenanzahl",
   "objinfo.stair.rise": "Steighöhe (gesamt)",
   "objinfo.stair.riser": "Steigungshöhe",
