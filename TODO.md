@@ -1170,8 +1170,49 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[G3] Öffnungen beliebiger Form** (Rundbogen, rund, schräg) als Abzugskörper. · M · nach [G1].
 - ○ **[G4] Exakte Sichtbarkeit (HLR)** für Ansicht und Projektionsteil des Schnitts. · XL
 - ○ **[G5] Dächer untereinander, Gauben, Wand ↔ Decke** per Boolean. · L · nach [G1]/[G2].
+  - (30.10.) Boolean-Werkzeug dafür: Manifold-Port `manifold-rust`, nicht truck — truck scheitert an Gaube und
+    L-Ecke (bündige Unterseiten), `manifold-rust` rechnet beide exakt und dicht. Details und Plan: [103].
 - ○ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M
 - ○ **[G7] Robuste Booleans bei bündigen Flächen** — wächst mit jeder Phase. · L (laufend)
+  - (30.10.) Messung in [103]: truck-B-Rep 3/14 Fälle, csgrs-Fallback Volumen stimmt, Netz aber offen
+    (T-Stösse) und langsam; `manifold-rust`/`boolmesh` 14/14 exakt (Volumenfehler ≤ 4e-14) und geschlossen.
+- ◐ **[103] Spike: Manifold für robuste Körper-Booleans** (30.10.). Frage: Manifold
+  (elalish, Apache-2.0) statt truck-Booleans für [G5]/[G7], Abzugskörper und als Ersatz für den
+  csgrs-Fallback (`trucksolid/src/boolean.rs`). truck bleibt für STEP und gekrümmte Grundkörper.
+  **Kandidaten:** (a) `manifold-rust` 0.19.1 (Lars Brubaker, Apache-2.0): reines Rust, Port von Manifold v3.5
+  mit f64-Pfad (`from_mesh_gl64`/`get_mesh_gl64`), dazu ein eigener „robuster" Modus mit exakter Arithmetik
+  für unsaubere Netze. Nur Rust-Abhängigkeiten (clipper2-rust, dashu), sehr aktiv (14 Versionen seit 07/2026).
+  (b) `boolmesh` 0.2.2 (MPL-2.0, Datei-Copyleft): eigene Rust-Neuschreibung nach Manifold, klein, nur `glam`.
+  (c) C++-Manifold über `manifold-csg` 0.4.1 (Apache/MIT): wasm32-unknown-unknown laut eigener Angabe nur
+  „provisorisch" (Shim statt libc++, kein Exception-Laufzeitsystem: STL-throw → abort), braucht LLVM ≥ 20
+  (Container: clang 18) und klont manifold/Clipper2 beim Bauen → **hier nicht gebaut**. `manifold-rs`
+  (cmake/C++) gibt es nicht für wasm32-unknown-unknown. → C++-Weg verworfen.
+  **Messung** (Linux-Container, nativ release; Prototyp nur im Scratchpad, nicht im Repo; 14 Fälle: Abzug
+  bündig mit 3 Flächen, Abzug am Wandende, bündige Vereinigung, Gaube ∪/− Satteldach mit bündiger Unterseite,
+  L-Ecke zweier Satteldächer mit gleicher Firsthöhe ∪/∩, Wand 20 m − 30 Öffnungen (bündig/überstehend),
+  200 Quader ∪ (Flächen bündig/überlappend), Splitter 1e-7 m und 1e-10 m, um 1e-6 rad verdrehter Abzug):
+  truck `bool_op` 3/14 (11 × `None`; 30 überstehende Öffnungen 1040 ms). csgrs 14/14 Volumen (rel ≤ 6e-8,
+  f32-Ausgabe), aber 12/14 Netze offen (T-Stösse), 30 Öffnungen 470–580 ms, 200 Quader 2.2–3.0 s.
+  `manifold-rust` (exakt) 14/14, Volumen rel ≤ 4e-14, Netze geschlossen; 30 Öffnungen 30 ms, 200 Quader
+  140–240 ms, Einzel-Boolean ≈ 0.2 ms. Robuster Modus ebenfalls 14/14, aber 10–25× langsamer (200 Quader 3–5 s):
+  nur für importierte Netze. `boolmesh` 14/14, gleich schnell (200 Quader 160 ms). Kaputte Eingaben (offen,
+  NaN, Index ausserhalb, leer): beide melden einen Fehler, keine Panik; **innen nach aussen** gedrehte Körper
+  werden still angenommen (falsches Ergebnis) → Orientierung (Volumen > 0) vorher prüfen.
+  **WASM** (wasm32-unknown-unknown, ohne emscripten, eine Boolean-Funktion, LTO): `manifold-rust` 550 KB
+  (176 KB gzip), `boolmesh` 255 KB (89 KB gzip), keine Importe; läuft in Node (Würfel − bündiger Würfel
+  0.7 ms bzw. 1.7 ms). Zum Vergleich `trucksolid_bg.wasm` 3.3 MB (724 KB gzip).
+  **Empfehlung: übernehmen, `manifold-rust`** (Apache-2.0, echter Manifold-Port, f64; `boolmesh` als Ersatz,
+  falls nötig). Schritte: (1) im Crate `trucksolid` den csgrs-Fallback ersetzen (`boolean_mesh_core`, Fallback in
+  `solid_mesh_core`) — dort schon hinter `guarded()` ([14]), damit eine Panik nur das truck-Modul trifft;
+  csgrs und die Git-Abhängigkeit fallen weg. (2) Für [G5]/Abzugskörper im Kern (`dossier-core`, neues Modul
+  `solid_bool.rs`, Mesh-Ein-/Ausgabe als flache `Float64Array`s): Ableitungen brauchen synchrone Antworten.
+  Risiko dort: auf wasm32-unknown-unknown gibt es kein `catch_unwind` — eine Panik legt den Kern lahm. Daher
+  erst nach (1) mit Fuzz-Tests (Fuzz-Muster `src/core/robustness.test.ts`), Eingaben vorher prüfen
+  (geschlossen, orientiert, endlich, Obergrenze Dreiecke), sonst wie truck als eigenes Modul. Einen
+  Ergebnis-Cache je Element vorsehen. Offen: Version pinnen (junges Crate, ein Maintainer), `NOTICE` ([51]),
+  Ebenen-Zusammenfassung der Ausgabe (exakter Modus liefert bei 200 überlappenden Quadern 2118 statt
+  920 Dreiecke → `simplify`), Schnittkanten für Plan/Schnitt ([G1]) aus dem Ergebnisnetz. Nicht geprüft:
+  Tauri-App/macOS, C++-Manifold selbst, gekrümmte Körper (Kugel/Zylinder als Netz). · S (Spike) / M (Einbau)
 - ✅ **[G8] Abzugskörper (senkrechte Prismen)** — Grundriss, Schnitt, 3D, STEP. Offen: Ansicht,
   Schraffur-Deckel im 3D-Live-Schnitt.
 - ◐ **[G10] render2d-Punkte f32** (Fund aus [K3b], geprüft 27.10.): `render2d::types::Scene` speichert Punkte
