@@ -7,7 +7,7 @@ import { FieldRow, NumberField, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
 import { ElevationPreview } from "../ElevationPreview";
 import { openingTypePresets } from "../../model/openingPresets";
-import { REVEAL_PRESETS, revealPresetOf } from "../OpeningDetailPanels";
+import { FrameDetailPanel, REVEAL_PRESETS, RebatePanel, revealPresetOf } from "../OpeningDetailPanels";
 
 /**
  * Synthetische Öffnungs-Instanz NUR für die Vorschau: `ElevationPreview`
@@ -223,6 +223,12 @@ export function WindowStylesTab({
               options={WINDOW_SILL_BOARD_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
             />
           </FieldRow>
+          {/* [105] Rahmen-Detail und Anschlag je Seite — dieselben Felder wie im Dialog „Fenster bearbeiten“. */}
+          <details className="rm-detail-group" open={!!win.frameDetail}>
+            <summary>{t("oed.cat.rahmendetail")} · {t("oed.cat.anschlag")}</summary>
+            <FrameDetailPanel value={win.frameDetail} onChange={(frameDetail) => patch({ frameDetail })} isDoor={false} />
+            <RebatePanel value={win.frameDetail} onChange={(frameDetail) => patch({ frameDetail })} isDoor={false} />
+          </details>
         </>
       )}
     />

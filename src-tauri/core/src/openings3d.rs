@@ -208,10 +208,13 @@ pub struct FrameDetailIn {
     pub shading_profile: f64,
     /// Türzarge mit eigener Zeichnung: Blendrahmen-Ring und Zargen-Umgriff entfallen.
     pub skip_frame: bool,
+    /// Türblatt im Falz der Zarge: Einzug ab Rohbaukante seitlich/oben, Lage quer (`t0..t1` in der
+    /// Normalen dieser Achse); NaN = bisherige Lage.
+    pub leaf: [f64; 4],
 }
 
 /// Anzahl Zahlen eines Anhang-Eintrags nach (Wand, Öffnung).
-pub const DETAIL_LEN: usize = 20;
+pub const DETAIL_LEN: usize = 24;
 
 impl FrameDetailIn {
     fn read(r: &mut Reader) -> Option<FrameDetailIn> {
@@ -231,6 +234,7 @@ impl FrameDetailIn {
             sill_profile: v[17],
             shading_profile: v[18],
             skip_frame: v[19] != 0.0,
+            leaf: [v[20], v[21], v[22], v[23]],
         })
     }
 }
@@ -743,12 +747,12 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
             while i < p.mullion_rows.min(MAX_COUNT) {
                 let center = sash_bottom + i * cell;
                 let mut from = sash_from;
-                for post in posts.iter().copied().chain(std::iter::once(sash_to + fw / 2.0)) {
-                    let to = jmin(sash_to, post - fw / 2.0);
+                for post in posts.iter().copied().chain(std::iter::once(sash_to + mw / 2.0)) {
+                    let to = jmin(sash_to, post - mw / 2.0);
                     if to - from > EPS {
-                        em.axis_box(from, to, center - fw / 2.0, center + fw / 2.0, p.n_min, p.n_max, Part::Frame);
+                        em.axis_box(from, to, center - mw / 2.0, center + mw / 2.0, p.n_min, p.n_max, Part::Frame);
                     }
-                    from = post + fw / 2.0;
+                    from = post + mw / 2.0;
                 }
                 i += 1.0;
             }
@@ -896,10 +900,13 @@ fn glass_panes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams) {
 /// Türblatt im Hauptfeld (Vollblatt bzw. blinder Rest unter der Teilverglasung, `doorLeafPanels`).
 fn door_leaf(em: &mut Emitter, o: &OpeningIn, p: &FrameParams) {
     let fw = p.frame_width;
-    let leaf_from = o.from + fw;
-    let leaf_to = o.to - fw;
+    // [105] Blatt im Falz der Zarge (Dreh-/Pendeltür).
+    let falz = o.ty.as_ref().and_then(|t| t.detail.as_deref()).map(|d| d.leaf).filter(|l| l.iter().all(|v| v.is_finite()) && (p.door_kind == 0.0 || p.door_kind == 3.0));
+    let (lx, ltop) = falz.map_or((fw, fw), |l| (l[0], l[1]));
+    let leaf_from = o.from + lx;
+    let leaf_to = o.to - lx;
     let leaf_bottom = o.z_bottom + if p.has_sill { fw } else { 0.0 };
-    let mut field_top = o.z_top - fw;
+    let mut field_top = o.z_top - ltop;
     if p.transom_height > EPS {
         let split_z = clamp_range(o.z_top - p.transom_height, leaf_bottom, field_top);
         field_top = split_z - fw / 2.0;
@@ -920,8 +927,13 @@ fn door_leaf(em: &mut Emitter, o: &OpeningIn, p: &FrameParams) {
         em.axis_box(o.from - 0.05, o.to + 0.05, o.z_bottom, leaf_top, jmin(a, b), jmax(a, b), Part::DoorLeaf);
         return;
     }
-    let n1 = p.n_max - 0.02 + DOOR_LEAF_THICK / 2.0;
-    let n0 = jmax(p.n_min, n1 - DOOR_LEAF_THICK);
+    let (n0, n1) = match falz {
+        Some(l) => (jmin(l[2], l[3]), jmax(l[2], l[3])),
+        None => {
+            let n1 = p.n_max - 0.02 + DOOR_LEAF_THICK / 2.0;
+            (jmax(p.n_min, n1 - DOOR_LEAF_THICK), n1)
+        }
+    };
     if p.panelled {
         kassette(em, leaf_from, leaf_to, leaf_bottom, leaf_top, n0, n1, p);
         return;

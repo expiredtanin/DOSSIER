@@ -61,6 +61,7 @@ export type RootQueryName = "penRebakeOps" | "penDeleteOps" | "penSeedOps" | "st
 
 /** Abfragen des Kerns (`queries.rs`). */
 export type QueryName =
+  | "surfaceOpening"
   | "kennzahlen"
   | "areaTable"
   | "programCompare"

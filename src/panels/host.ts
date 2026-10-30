@@ -448,6 +448,8 @@ export interface PanelHostValue {
   onSetOpeningLintelLines: (lintelLines: "keine" | "innen" | "aussen" | "beide") => void;
   /** Übersteuert die Detailstufe dieser Öffnung; `undefined` = Ansichts-Detailstufe gilt. */
   onSetOpeningDetailLevel: (detailLevel: DetailLevel | undefined) => void;
+  /** Dach-/Deckenfenster ([103]): Lage in der Wirtsfläche (Mittelpunkt im Grundriss, Drehung). */
+  onSetOpeningHost?: (patch: { hostPoint?: { x: number; y: number }; hostAngle?: number }) => void;
   /** Übersteuert Farbe/Strichstärke der geschnittenen Laibungs-/Stulp-Blöcke. */
   onSetOpeningFrameLine: (v: { color?: string; weight?: number } | undefined) => void;
   /** Übersteuert Farbe/Strichstärke der durchlaufenden Rahmen-Kontur in Aufsicht. */
