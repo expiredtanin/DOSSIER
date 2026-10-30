@@ -39,6 +39,7 @@ import {
 import type { LockInfo } from "../native/projectFile";
 import { addRecentProject, removeRecentProject } from "./recentProjects";
 import { emptyProject, sampleProject } from "../model/sampleProject";
+import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { withStandards } from "../model/standards";
 import type { Project } from "../model/types";
 import type { PlanViewHandle } from "../views/plan/PlanView";
@@ -397,6 +398,14 @@ export function useProjectFileActions(
     getState().loadProject(next);
     lastSavedProjectRef.current = next;
   });
+  // „Neu aus Vorlage: Musterhaus (komplex)" — Zweifamilienhaus am Hang, in dem möglichst alle Funktionen
+  // vorkommen (model/sampleProjectComplex.ts); wird bei jedem Aufruf frisch erzeugt (Kern-Befehle).
+  const onNewProjectFromComplexSample = () => guardDiscard(() => {
+    releaseCurrentProjectLock();
+    const next = buildComplexSampleProject();
+    getState().loadProject(next);
+    lastSavedProjectRef.current = next;
+  });
   // „Neu aus Vorlage: Datei wählen…" — native `.obpt`-Dialog unter Tauri, sonst
   // das versteckte `<input type=file>` (projectTemplateFileInputRef).
   const onNewProjectFromTemplate = () => {
@@ -633,6 +642,7 @@ export function useProjectFileActions(
     onSaveProject,
     onNewProject,
     onNewProjectFromSample,
+    onNewProjectFromComplexSample,
     onNewProjectFromTemplate,
     onProjectTemplateFileChosen,
     releaseCurrentProjectLock,

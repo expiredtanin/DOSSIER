@@ -1870,6 +1870,7 @@ export default function App() {
     onSaveProject,
     onNewProject,
     onNewProjectFromSample,
+    onNewProjectFromComplexSample,
     onNewProjectFromTemplate,
     onProjectTemplateFileChosen,
     applyOpenedProjectFile,
@@ -2373,6 +2374,7 @@ export default function App() {
     {
       onNewProject,
       onNewProjectFromSample,
+      onNewProjectFromComplexSample,
       onNewProjectFromTemplate,
       onOpenProject,
       onSaveProject,
@@ -3498,6 +3500,7 @@ export default function App() {
             <AppMenuBar
               onNewProject={onNewProject}
               onNewProjectFromSample={onNewProjectFromSample}
+              onNewProjectFromComplexSample={onNewProjectFromComplexSample}
               onNewProjectFromTemplate={onNewProjectFromTemplate}
               onOpenProject={onOpenProject}
               onSaveProject={onSaveProject}

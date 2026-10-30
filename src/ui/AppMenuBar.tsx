@@ -15,6 +15,7 @@ export interface AppMenuBarProps {
   /** Datei: Neu/Neu aus Vorlage/Öffnen/Speichern/Importieren. */
   onNewProject: () => void;
   onNewProjectFromSample: () => void;
+  onNewProjectFromComplexSample: () => void;
   onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
@@ -59,6 +60,7 @@ export interface AppMenuBarProps {
 export function AppMenuBar({
   onNewProject,
   onNewProjectFromSample,
+  onNewProjectFromComplexSample,
   onNewProjectFromTemplate,
   onOpenProject,
   onSaveProject,
@@ -90,6 +92,7 @@ export function AppMenuBar({
   const fileItems: DropdownItem[] = [
     { label: t("file.new"), onSelect: onNewProject },
     { label: t("file.newFromSample"), onSelect: onNewProjectFromSample },
+    { label: t("file.newFromComplexSample"), onSelect: onNewProjectFromComplexSample },
     { label: t("file.newFromTemplateFile"), onSelect: onNewProjectFromTemplate },
     { divider: true },
     { label: t("file.open"), onSelect: onOpenProject },

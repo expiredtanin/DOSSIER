@@ -31,7 +31,8 @@
 //   dossier-cli mcp --app [--port 7979] [--token …] MCP-Brücke zur offenen App ([9], KI-Zugriff in den Einstellungen)
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
 //
-// Statt einer Datei nimmt `:beispiel` das eingebaute Demo-Haus (sampleProject).
+// Statt einer Datei nimmt `:beispiel` das eingebaute Demo-Haus (sampleProject), `:musterhaus-komplex` das
+// grosse Beispiel (model/sampleProjectComplex.ts; als Datei: `dossier-cli :musterhaus-komplex migrate --out mk.obp`).
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
 
@@ -107,6 +108,7 @@ import {
   validateProject,
   projectWarnings,
   sampleProject,
+  buildComplexSampleProject,
   AI_BRIDGE_DEFAULT_PORT,
 } from "../core";
 import type { Project } from "../core";
@@ -165,6 +167,7 @@ function fail(msg: string): never {
 
 function loadProject(path: string): Project {
   if (path === ":beispiel") return sampleProject;
+  if (path === ":musterhaus-komplex") return buildComplexSampleProject();
   let text: string;
   try {
     text = readFileSync(path, "utf8");
@@ -384,7 +387,7 @@ function importDoc(project: Project) {
 /** Liest Eingabe nach Endung in ein Projekt: obp direkt, dxf/dwg als 2D-Zeichnung + Meshes, ifc als Kontext-Meshes (`--elements`: Bauteile). */
 async function importAny(path: string, args: Args): Promise<Project> {
   const ext = extOf(path);
-  if (ext === "obp" || ext === "json" || path === ":beispiel") return loadProject(path);
+  if (ext === "obp" || ext === "json" || path === ":beispiel" || path === ":musterhaus-komplex") return loadProject(path);
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(readFileSync(path));
