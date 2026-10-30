@@ -58,13 +58,12 @@ pub struct HatchCore {
 
 pub fn resolve_hatch_core(p: &Project, hatch_id: &str, wall_angle_deg: Option<f64>) -> Option<HatchCore> {
     let h = p.hatch(hatch_id)?;
-    let ls = h.line_style_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.line_style(id));
     let base = h.angle;
     let angle = match wall_angle_deg {
         Some(w) if h.relative_to_wall == Some(true) => base - w,
         _ => base,
     };
-    Some(HatchCore { pattern: h.pattern, scale: h.scale * 1.0, angle, line_weight: ls.map_or(0.13, |l| l.weight) })
+    Some(HatchCore { pattern: h.pattern, scale: h.scale * 1.0, angle, line_weight: h.line_weight.unwrap_or(0.13) })
 }
 
 /// Schnitt-Schraffur eines Bauteils (`resolveComponentHatch`); `axis_angle_deg` 90 für Wand-Bänder,
@@ -113,8 +112,10 @@ pub fn dominant_layer_color(p: &Project, layers: &[crate::model::Layer], fallbac
     }
 }
 
-/// Stil der Schnitt-Umrisslinie einer Schicht (`resolveCutLineStyle`).
-pub fn resolve_cut_line_style(p: &Project, joint_line_style_id: Option<&str>) -> Option<(Rgb, f64)> {
-    let ls = p.line_styles.iter().find(|l| Some(l.id.as_str()) == joint_line_style_id.filter(|s| !s.is_empty()))?;
-    Some((hex_to_rgb(&ls.color, DRAWING_LINE_FALLBACK_RGB), ls.weight))
+/// Stil der Schnitt-Umrisslinie einer Schicht (`resolveCutLineStyle`): Farbe aus dem Linienstil der
+/// Fuge, Stärke aus der Schicht (`jointWeightMm`, [110]) — beide unabhängig optional.
+pub fn resolve_cut_line_style(p: &Project, layer: &crate::model::Layer) -> (Option<Rgb>, Option<f64>) {
+    let id = layer.joint_line_style_id.as_deref().filter(|s| !s.is_empty());
+    let ls = id.and_then(|id| p.line_styles.iter().find(|l| l.id == id));
+    (ls.map(|ls| hex_to_rgb(&ls.color, DRAWING_LINE_FALLBACK_RGB)), layer.joint_weight_mm.filter(|w| w.is_finite() && *w > 0.0))
 }

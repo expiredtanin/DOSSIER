@@ -9,7 +9,7 @@
 use serde_json::{Map, Value};
 
 /// Aktuelle Version des Dateiformats. Bei jeder Formatänderung erhöhen + Migration anhängen.
-pub const PROJECT_FORMAT_VERSION: u64 = 3;
+pub const PROJECT_FORMAT_VERSION: u64 = 4;
 
 const REQUIRED_ARRAYS: [&str; 3] = ["walls", "layers", "drawingLevels"];
 const DEFAULT_ARRAYS: [&str; 5] = ["lineStyles", "hatches", "components", "wallTypes", "drawings2d"];
@@ -236,6 +236,128 @@ pub fn parse_project_file(text: &str, now_ms: f64) -> Parsed {
     }
 }
 
+/// Name ohne angehängte Strichstärke („Volllinie 0.13" → „Volllinie", „Schraffurlinie 0.10 mm" →
+/// „Schraffurlinie"); sonst unverändert.
+fn strip_weight_suffix(name: &str) -> String {
+    let t = name.trim_end();
+    let t = t.strip_suffix("mm").map_or(t, str::trim_end);
+    let Some(pos) = t.rfind(' ') else { return name.to_string() };
+    let tail = &t[pos + 1..];
+    if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ',') && tail.chars().any(|c| c.is_ascii_digit()) {
+        t[..pos].trim_end().to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+/// 3 → 4 ([110]): Linienstile tragen keine Strichstärke mehr. Das alte `LineStyle.weight` wandert an
+/// die Verwender — Schraffur (`lineWeight`), Schichtfuge der Aufbauten (`jointWeightMm`), 2D-Element
+/// (`weightMm`, nur wo es vorher galt: kein eigenes `weightMm`, Quelle nicht „layer") und Override-
+/// Aktion (`lineweight`) —, damit Pläne gleich aussehen. Danach werden Stile, die sich nur in der
+/// Stärke unterschieden, zu einem zusammengeführt (erster gewinnt, Name ohne Stärke-Anhang).
+fn migrate_line_weights(mut raw: Map<String, Value>) -> Map<String, Value> {
+    let Some(Value::Array(styles)) = raw.get("lineStyles").cloned() else { return raw };
+    let mut weight: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    // Gruppen gleicher Stile ohne id/Name/Stärke → kanonische id.
+    let mut canon: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut by_key: Vec<(String, String)> = Vec::new();
+    let mut kept: Vec<Value> = Vec::new();
+    for st in styles {
+        let Value::Object(mut o) = st else {
+            kept.push(st);
+            continue;
+        };
+        let id = o.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+        if let Some(w) = o.get("weight").and_then(Value::as_f64).filter(|w| w.is_finite()) {
+            weight.insert(id.clone(), w);
+        }
+        o.shift_remove("weight");
+        let mut key_obj = o.clone();
+        key_obj.shift_remove("id");
+        key_obj.shift_remove("name");
+        if key_obj.get("dash").is_some_and(Value::is_null) {
+            key_obj.shift_remove("dash");
+        }
+        let key = Value::Object(key_obj).to_string();
+        if let Some((_, first)) = by_key.iter().find(|(k, _)| *k == key) {
+            if !id.is_empty() {
+                canon.insert(id, first.clone());
+            }
+            continue;
+        }
+        if let Some(n) = o.get("name").and_then(Value::as_str) {
+            // Ohne Stärke-Anhang, solange der Name dadurch nicht doppelt wird.
+            let stripped = strip_weight_suffix(n);
+            if !kept.iter().any(|k| k.get("name").and_then(Value::as_str) == Some(stripped.as_str())) {
+                o.insert("name".into(), stripped.into());
+            }
+        }
+        by_key.push((key, id));
+        kept.push(Value::Object(o));
+    }
+    raw.insert("lineStyles".into(), Value::Array(kept));
+    let canon_of = |id: &str| canon.get(id).cloned().unwrap_or_else(|| id.to_string());
+    let weight_of = |v: Option<&Value>| v.and_then(Value::as_str).filter(|s| !s.is_empty()).and_then(|id| weight.get(id).copied());
+    let num = |w: f64| serde_json::Number::from_f64(w).map(Value::Number);
+    let redirect = |o: &mut Map<String, Value>, key: &str| {
+        if let Some(Value::String(id)) = o.get(key) {
+            let c = canon_of(id);
+            o.insert(key.into(), c.into());
+        }
+    };
+    // Schraffuren.
+    if let Some(Value::Array(hs)) = raw.get_mut("hatches") {
+        for h in hs.iter_mut().filter_map(Value::as_object_mut) {
+            if !h.contains_key("lineWeight") {
+                if let Some(w) = weight_of(h.get("lineStyleId")).and_then(num) {
+                    h.insert("lineWeight".into(), w);
+                }
+            }
+            redirect(h, "lineStyleId");
+        }
+    }
+    // Schichtfugen der Aufbauten.
+    for key in ["wallTypes", "ceilingTypes", "roofTypes"] {
+        let Some(Value::Array(ts)) = raw.get_mut(key) else { continue };
+        for t in ts.iter_mut().filter_map(Value::as_object_mut) {
+            let Some(Value::Array(ls)) = t.get_mut("layers") else { continue };
+            for l in ls.iter_mut().filter_map(Value::as_object_mut) {
+                if !l.contains_key("jointWeightMm") {
+                    if let Some(w) = weight_of(l.get("jointLineStyleId")).and_then(num) {
+                        l.insert("jointWeightMm".into(), w);
+                    }
+                }
+                redirect(l, "jointLineStyleId");
+            }
+        }
+    }
+    // 2D-Elemente.
+    if let Some(Value::Array(ds)) = raw.get_mut("drawings2d") {
+        for d in ds.iter_mut().filter_map(Value::as_object_mut) {
+            let layer_src = d.get("strokeWeightSource").and_then(Value::as_str) == Some("layer");
+            if !layer_src && !d.get("weightMm").is_some_and(Value::is_number) {
+                if let Some(w) = weight_of(d.get("lineStyleId")).and_then(num) {
+                    d.insert("weightMm".into(), w);
+                }
+            }
+            redirect(d, "lineStyleId");
+        }
+    }
+    // Override-Regeln.
+    if let Some(Value::Array(rs)) = raw.get_mut("overrideRules") {
+        for r in rs.iter_mut().filter_map(Value::as_object_mut) {
+            let Some(Value::Object(a)) = r.get_mut("actions") else { continue };
+            if !a.get("lineweight").is_some_and(Value::is_number) {
+                if let Some(w) = weight_of(a.get("linetypeId")).and_then(num) {
+                    a.insert("lineweight".into(), w);
+                }
+            }
+            redirect(a, "linetypeId");
+        }
+    }
+    raw
+}
+
 /// Wie [`parse_project_file`], für ein bereits geparstes Objekt.
 pub fn parse_project_object(raw: Value, now_ms: f64) -> Parsed {
     let Value::Object(mut obj) = raw else { return Parsed::Err("Die Datei enthält kein Dossier-Projekt.".into()) };
@@ -267,6 +389,7 @@ pub fn parse_project_object(raw: Value, now_ms: f64) -> Parsed {
         obj = match i {
             1 => migrate_doors(obj),
             2 => migrate_layout_annotations(obj),
+            3 => migrate_line_weights(obj),
             _ => obj, // 0 → 1: Einführung von `formatVersion`; Inhalt unverändert.
         };
     }
@@ -456,11 +579,67 @@ mod tests {
         json!({"id":"p","name":"N","walls":[],"layers":[],"drawingLevels":[]})
     }
 
+    /// [110]: Stärke wandert vom Linienstil an Schraffur, Fuge, Element und Override; Stile, die sich
+    /// nur in der Stärke unterscheiden, werden eins.
+    #[test]
+    fn linienstaerke_wandert_an_die_verwender() {
+        let v = json!({"formatVersion": 3, "id":"p","name":"N","walls":[],"layers":[],"drawingLevels":[],
+            "lineStyles": [
+                {"id":"hair","name":"Volllinie 0.02","weight":0.02,"color":"#1a1a1a","dash":null},
+                {"id":"thin","name":"Volllinie 0.13","weight":0.13,"color":"#1a1a1a","dash":null},
+                {"id":"thick","name":"Volllinie 0.5 mm","weight":0.5,"color":"#1a1a1a"},
+                {"id":"dash","name":"Strich","weight":0.02,"color":"#1a1a1a","dash":[1,0.7]},
+                {"id":"dark","name":"Volllinie 0.5","weight":0.5,"color":"#0a0a0a","dash":null}
+            ],
+            "hatches": [
+                {"id":"h1","name":"A","pattern":"diagonal","scale":1,"angle":45,"color":"#000","lineStyleId":"hair"},
+                {"id":"h2","name":"B","pattern":"diagonal","scale":1,"angle":45,"color":"#000","lineStyleId":"thick","lineWeight":0.18},
+                {"id":"h3","name":"C","pattern":"diagonal","scale":1,"angle":45,"color":"#000"}
+            ],
+            "wallTypes": [{"id":"w","name":"W","layers":[{"componentId":"c","thickness":0.1,"jointLineStyleId":"thin"},{"componentId":"c","thickness":0.1}]}],
+            "roofTypes": [{"id":"r","name":"R","layers":[{"componentId":"c","thickness":0.1,"jointLineStyleId":"dash"}]}],
+            "drawings2d": [
+                {"id":"d1","lineStyleId":"thick"},
+                {"id":"d2","lineStyleId":"thick","weightMm":0.7},
+                {"id":"d3","lineStyleId":"thick","strokeWeightSource":"layer"}
+            ],
+            "overrideRules": [{"id":"o","actions":{"linetypeId":"thin"}}]
+        });
+        let Parsed::Ok { project: p, migrated_from, .. } = parse_project_object(v, 0.0) else { panic!() };
+        assert_eq!(migrated_from, Some(3));
+        assert_eq!(p["lineStyles"], json!([
+            {"id":"hair","name":"Volllinie","color":"#1a1a1a","dash":null},
+            {"id":"dash","name":"Strich","color":"#1a1a1a","dash":[1,0.7]},
+            {"id":"dark","name":"Volllinie 0.5","color":"#0a0a0a","dash":null}
+        ]));
+        assert_eq!(p["hatches"][0]["lineWeight"], json!(0.02));
+        assert_eq!(p["hatches"][1]["lineWeight"], json!(0.18));
+        assert_eq!(p["hatches"][1]["lineStyleId"], json!("hair"));
+        assert!(p["hatches"][2].get("lineWeight").is_none());
+        let wl = &p["wallTypes"][0]["layers"];
+        assert_eq!((wl[0]["jointWeightMm"].clone(), wl[0]["jointLineStyleId"].clone()), (json!(0.13), json!("hair")));
+        assert!(wl[1].get("jointWeightMm").is_none());
+        assert_eq!(p["roofTypes"][0]["layers"][0]["jointWeightMm"], json!(0.02));
+        let d = &p["drawings2d"];
+        assert_eq!((d[0]["weightMm"].clone(), d[0]["lineStyleId"].clone()), (json!(0.5), json!("hair")));
+        assert_eq!(d[1]["weightMm"], json!(0.7));
+        assert!(d[2].get("weightMm").is_none());
+        assert_eq!(p["overrideRules"][0]["actions"], json!({"linetypeId":"hair","lineweight":0.13}));
+    }
+
+    #[test]
+    fn staerke_anhang_im_namen() {
+        assert_eq!(strip_weight_suffix("Volllinie 0.13"), "Volllinie");
+        assert_eq!(strip_weight_suffix("Schraffurlinie 0.10 mm"), "Schraffurlinie");
+        assert_eq!(strip_weight_suffix("Strichlinie fein"), "Strichlinie fein");
+        assert_eq!(strip_weight_suffix("PDF-Strich 1.05/0.7"), "PDF-Strich 1.05/0.7");
+    }
+
     #[test]
     fn alte_datei_wird_migriert_und_ergaenzt() {
         let Parsed::Ok { project, warnings, migrated_from } = parse_project_object(minimal(), 0.0) else { panic!() };
         assert_eq!(migrated_from, Some(0));
-        assert_eq!(project["formatVersion"], 3);
+        assert_eq!(project["formatVersion"], 4);
         assert_eq!(project["lineStyles"], json!([]));
         assert!(warnings.is_empty());
     }
@@ -604,6 +783,6 @@ mod tests {
     fn serialisierung_setzt_version_nach_vorn() {
         let Value::Object(m) = minimal() else { panic!() };
         let s = serialize_project(&m);
-        assert!(s.starts_with("{\n  \"formatVersion\": 3,\n  \"id\": \"p\""));
+        assert!(s.starts_with("{\n  \"formatVersion\": 4,\n  \"id\": \"p\""));
     }
 }

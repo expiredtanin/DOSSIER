@@ -1504,6 +1504,17 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Offen: Verschieben/Griffe und Objekt-Info für Dach-Öffnungen (Info zeigt Wand-Felder), Fenster-/Türliste
   (Geschoss aus der Wand), Löschen des Dachs löscht die Fenster nicht mit (Prüfung meldet den fehlenden Wirt),
   Eindeckrahmen nur als flacher Ring, Lukarnen, nicht in der Tauri-App geprüft. · M
+- ◐ **[110] Linientyp ohne Strichstärke.** (30.10., Wunsch Maintainer: „Volllinie 0.5/0.35 soll es nicht
+  geben") Ein Linienstil ist nur Muster (Volllinie, Strich, Punkt, Zickzack, Motiv) + Farbe; die Stärke trägt
+  das Element (`Drawing2D.weightMm`, sonst Ebene), die Schraffur (neu `HatchStyle.lineWeight`, Default 0.13),
+  die Schichtfuge (neu `Layer.jointWeightMm`) bzw. Override (`lineweight`). `LineStyle.weight` nur noch für
+  die Migration gelesen (Format 4, `migrate_line_weights`): Stärke an die Verwender, Stile, die sich nur in
+  der Stärke unterscheiden, zusammengeführt („Volllinie 0.02/0.13/0.25/0.5" → „Volllinie"). Musterhaus,
+  Standards (keine „Schraffurlinie 0.10" mehr; „Strichlinie", „Strichlinie lang", „Strichlinie kurz"),
+  PDF-Import (Strichlinien als 0.02-Element), Ressourcen-Manager (Linien ohne Stärke; Schraffur: Strichstärke;
+  Aufbau: Fugen-Strichstärke). Geprüft: Rust-/vitest-Tests; CLI-Szenen (Grundriss 1:50/1:100, Schnitte) und
+  DXF von Musterhaus und einem Format-3-Projekt mit allen Standards vor/nach der Migration bytegleich (Linux).
+  Offen: nicht in der Tauri-App geprüft. · S
 
 ## Priorität 4 — später
 

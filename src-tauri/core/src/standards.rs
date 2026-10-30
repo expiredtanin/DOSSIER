@@ -34,22 +34,23 @@ fn material(id: &str, size_m: f64) -> Value {
 
 const INK: &str = "#1a1a1a";
 
-/// Linientypen (SIA 400 / ISO 128). Strichmuster in Papier-mm (AN/AUS, 0 = Punkt), unabhängig vom Massstab.
+/// Linientypen (SIA 400 / ISO 128): nur Muster und Farbe — die Strichstärke kommt vom Element, der
+/// Schraffur, der Schichtfuge bzw. Ebene/Stift ([110]). Strichmuster in Papier-mm (AN/AUS, 0 = Punkt),
+/// unabhängig vom Massstab.
 pub fn line_styles() -> Vec<Value> {
-    let dash = |id: &str, name: &str, w: f64, d: Value| json!({"id": id, "name": name, "weight": w, "color": INK, "dash": d});
+    let dash = |id: &str, name: &str, d: Value| json!({"id": id, "name": name, "color": INK, "dash": d});
     vec![
-        dash("std-ls-voll", "Volllinie", 0.25, Value::Null),
-        dash("std-ls-strich-fein", "Strichlinie fein", 0.18, json!([3, 1.5])),
-        dash("std-ls-strich-grob", "Strichlinie grob", 0.5, json!([6, 2])),
-        dash("std-ls-punkt", "Punktlinie", 0.25, json!([0, 1])),
-        dash("std-ls-strichpunkt", "Strichpunktlinie (Achse)", 0.18, json!([12, 1.5, 0, 1.5])),
-        dash("std-ls-strichzweipunkt", "Strich-Zweipunktlinie", 0.18, json!([12, 1.5, 0, 1.5, 0, 1.5])),
-        dash("std-ls-grundstueck", "Grundstücksgrenze", 0.5, json!([8, 1.5, 0, 1.5, 0, 1.5])),
-        dash("std-ls-bauteilgrenze", "Baulinie / Bauteilgrenze", 0.35, json!([8, 1.5, 0, 1.5])),
-        json!({"id": "std-ls-bruch", "name": "Bruchlinie (Zickzack)", "weight": 0.18, "color": INK, "dash": null,
+        dash("std-ls-voll", "Volllinie", Value::Null),
+        dash("std-ls-strich-fein", "Strichlinie", json!([3, 1.5])),
+        dash("std-ls-strich-grob", "Strichlinie lang", json!([6, 2])),
+        dash("std-ls-punkt", "Punktlinie", json!([0, 1])),
+        dash("std-ls-strichpunkt", "Strichpunktlinie (Achse)", json!([12, 1.5, 0, 1.5])),
+        dash("std-ls-strichzweipunkt", "Strich-Zweipunktlinie", json!([12, 1.5, 0, 1.5, 0, 1.5])),
+        dash("std-ls-grundstueck", "Grundstücksgrenze", json!([8, 1.5, 0, 1.5, 0, 1.5])),
+        dash("std-ls-bauteilgrenze", "Baulinie / Bauteilgrenze", json!([8, 1.5, 0, 1.5])),
+        json!({"id": "std-ls-bruch", "name": "Bruchlinie (Zickzack)", "color": INK, "dash": null,
                "kind": "zigzag", "zigzag": {"amplitude": 1.5, "wavelength": 4}}),
-        dash("std-ls-schraffur", "Schraffurlinie 0.10", 0.1, Value::Null),
-        dash("std-ls-schraffur-strich", "Schraffurlinie gestrichelt", 0.1, json!([1, 0.7])),
+        dash("std-ls-schraffur-strich", "Strichlinie kurz", json!([1, 0.7])),
     ]
 }
 
@@ -61,14 +62,19 @@ pub fn hatches() -> Vec<Value> {
             v["relativeToWall"] = json!(true);
         }
         if !ls.is_empty() {
-            v["lineStyleId"] = json!(ls);
+            v["lineWeight"] = json!(if ls == "std-ls-voll-025" { 0.25 } else { 0.1 });
+            if ls == "std-ls-voll-025" {
+                v["lineStyleId"] = json!("std-ls-voll");
+            } else if ls != "std-ls-schraffur" {
+                v["lineStyleId"] = json!(ls);
+            }
         }
         v
     };
     let solid = |id: &str, name: &str, color: &str| json!({"id": id, "name": name, "pattern": "solid", "scale": 1, "angle": 0, "color": color});
     let random = |id: &str, name: &str, angle: f64, density: f64, lmin: f64, lmax: f64, seed: f64| {
         json!({"id": id, "name": name, "kind": "vector", "lines": "random", "pattern": "diagonal", "scale": 1, "angle": angle,
-               "color": INK, "lineStyleId": "std-ls-schraffur", "density": density, "lengthMin": lmin, "lengthMax": lmax, "seed": seed})
+               "color": INK, "lineWeight": 0.1, "density": density, "lengthMin": lmin, "lengthMax": lmax, "seed": seed})
     };
     vec![
         h("std-h-ohne", "SIA Ohne Schraffur", "none", 1.0, 0.0, false, ""),
@@ -88,7 +94,7 @@ pub fn hatches() -> Vec<Value> {
         h("std-h-estrich", "SIA Estrich", "diagonal", 0.35, 45.0, false, "std-ls-schraffur-strich"),
         solid("std-h-stahl", "SIA Stahl", INK),
         solid("std-h-alu", "SIA Aluminium", "#8c8c8c"),
-        h("std-h-naturstein", "SIA Naturstein", "diagonal", 0.8, 45.0, false, "std-ls-voll"),
+        h("std-h-naturstein", "SIA Naturstein", "diagonal", 0.8, 45.0, false, "std-ls-voll-025"),
         random("std-h-erdreich", "SIA Erdreich", 45.0, 0.8, 1.5, 4.0, 11.0),
         random("std-h-kies", "SIA Kies / Sauberkeitsschicht", 60.0, 1.8, 0.4, 0.9, 13.0),
     ]
@@ -330,7 +336,7 @@ mod tests {
         let tb = p.components.iter().find(|c| c.id == "std-c-trapezblech").unwrap().material.as_ref().unwrap();
         assert!(tb.color.is_none() && tb.library_id.as_deref() == Some("CorrugatedSteel005"));
         // Linientypen
-        for name in ["Volllinie", "Strichlinie fein", "Strichlinie grob", "Punktlinie", "Strichpunktlinie (Achse)", "Strich-Zweipunktlinie", "Grundstücksgrenze", "Bruchlinie (Zickzack)"] {
+        for name in ["Volllinie", "Strichlinie", "Strichlinie lang", "Punktlinie", "Strichpunktlinie (Achse)", "Strich-Zweipunktlinie", "Grundstücksgrenze", "Bruchlinie (Zickzack)"] {
             assert!(p.line_styles.iter().any(|l| l.name == name), "{name}");
         }
     }
@@ -345,14 +351,14 @@ mod tests {
     fn gleichnamige_bleiben_und_verweise_zeigen_darauf() {
         let mut root = empty_root();
         root.insert("components".into(), json!([{"id": "brick", "name": "backstein ", "color": "#8c5544", "hatchId": "x", "joinPriority": 50}]));
-        root.insert("lineStyles".into(), json!([{"id": "thin", "name": "Schraffurlinie 0.10", "weight": 0.1, "color": "#000", "dash": null}]));
+        root.insert("lineStyles".into(), json!([{"id": "thin", "name": "Strichlinie kurz", "color": "#000", "dash": [1, 0.7]}]));
         let r = apply(&root, &merge_ops(&root));
         let comps = r["components"].as_array().unwrap();
         assert_eq!(comps.iter().filter(|c| c["name"].as_str().unwrap().trim().eq_ignore_ascii_case("backstein")).count(), 1);
         assert_eq!(comps[0]["color"], "#8c5544", "vorhandenes Bauteil unverändert");
         let iw = r["wallTypes"].as_array().unwrap().iter().find(|t| t["id"] == "std-wt-iw-backstein").unwrap();
         assert_eq!(iw["layers"][1]["componentId"], "brick");
-        let bs = r["hatches"].as_array().unwrap().iter().find(|h| h["id"] == "std-h-backstein").unwrap();
-        assert_eq!(bs["lineStyleId"], "thin");
+        let pb = r["hatches"].as_array().unwrap().iter().find(|h| h["id"] == "std-h-porenbeton").unwrap();
+        assert_eq!(pb["lineStyleId"], "thin");
     }
 }

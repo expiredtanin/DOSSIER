@@ -212,6 +212,14 @@ function HatchDetail({
                 options={lineOptions}
               />
             </FieldRow>
+            <FieldRow label={t("resources.col.hatchLineWeight")} hint={t("resources.col.hatchLineWeight.hint")}>
+              <NumberField
+                value={hatch.lineWeight ?? 0.13}
+                onChange={(w) => onPatch({ lineWeight: Math.max(0.01, w) })}
+                step={0.01}
+                min={0.01}
+              />
+            </FieldRow>
             {lines === "random" && (
               <>
                 <FieldRow label={t("resources.field.density")}>
@@ -327,8 +335,8 @@ function patToHatches(text: string): Omit<HatchStyle, "id">[] {
     scale: 1,
     angle: p.families[0]?.angle ?? 45,
     color: "#1a1a1a",
-    // Kanonische Volllinie 0.13 (früher "hatch-line", zusammengeführt auf "thin").
-    lineStyleId: "thin",
+    // Volllinie (Muster); die Stärke trägt die Schraffur ([110]).
+    lineWeight: 0.13,
   }));
 }
 

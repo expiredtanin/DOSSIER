@@ -1145,7 +1145,6 @@ fn drawing_selection(root: &Map<String, Value>, d: &Value) -> J {
     let cat_lw = cat.and_then(|c| nn(field(c, "lw")));
     let weight = nn(field(d, "weightMm"))
         .or_else(|| if str_of(field(d, "strokeWeightSource")) != Some("object") { cat_lw } else { None })
-        .or_else(|| ls.and_then(|l| nn(field(l, "weight"))))
         .or(cat_lw)
         .cloned()
         .unwrap_or_else(|| js_num(WALL_FALLBACK_MM));

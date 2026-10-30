@@ -471,7 +471,8 @@ export function LineSwatch({
   width?: number;
   height?: number;
 }) {
-  const px = Math.max(1, Math.min(6, style.weight * 6));
+  // Linienstile tragen keine Stärke mehr ([110]): Vorschau mit einheitlicher Linie.
+  const px = 1.5;
   const midY = height / 2;
   const x0 = 4;
   const x1 = width - 4;

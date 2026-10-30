@@ -575,7 +575,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
     let ls_idx = attrs.line_style_id.filter(|s| !s.is_empty()).and_then(|id| p.line_styles.iter().position(|l| l.id == id));
     let ls = ls_idx.map(|i| &p.line_styles[i]);
     let color = attrs.color.or(ls.map(|l| l.color.as_str())).or(category.map(|k| k.color.as_str())).unwrap_or(MONO_INK);
-    let weight = resolve_stroke_weight(attrs.weight, d.stroke_weight_source, category, ls.map(|l| l.weight).or(category.map(|k| k.lw)).unwrap_or(WALL_FALLBACK_MM));
+    let weight = resolve_stroke_weight(attrs.weight, d.stroke_weight_source, category, category.map(|k| k.lw).unwrap_or(WALL_FALLBACK_MM));
     let dash_scale = match d.dash_scale {
         Some(s) if s > 0.0 => s,
         _ => 1.0,

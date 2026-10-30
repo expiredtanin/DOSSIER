@@ -1115,6 +1115,9 @@ export const en: Record<TranslationKey, string> = {
   "resources.col.component": "Component",
   "resources.col.thickness": "Thickness (mm)",
   "resources.col.joint": "Joint",
+  "resources.col.jointWeight": "Joint line weight (mm, 0 = default)",
+  "resources.col.hatchLineWeight": "Line weight (mm)",
+  "resources.col.hatchLineWeight.hint": "Weight of the pattern lines on paper; the line style only sets the pattern.",
   "resources.joint.default": "— (hairline)",
   "resources.layer.add": "Add layer",
   "resources.layer.remove": "Remove layer",
@@ -1310,7 +1313,7 @@ export const en: Record<TranslationKey, string> = {
   "pattern.crosshatch": "Crosshatch",
   "pattern.custom": "Custom motif",
 
-  "resources.lines.hint": "Line weight in millimetres (paper space). Stroke: solid, dashed or dotted.",
+  "resources.lines.hint": "Line type = pattern (solid, dashed, dotted, zigzag …) and colour. The line weight is set by the element, the hatch, the layer joint or the layer.",
   "resources.lines.empty": "No line styles yet.",
   "resources.lines.placeholder": "Line style",
   "resources.col.weight": "Weight (mm)",

@@ -52,7 +52,7 @@ export function richProject(): Project {
   const lvl = sampleProject.drawingLevels[0].id;
   return {
     ...sampleProject,
-    formatVersion: 3,
+    formatVersion: 4,
     // Blatt-Ebene des Layouts „lay1" (2D-Zeichnung auf dem Blatt).
     drawingLevels: [...sampleProject.drawingLevels, { id: "sheet-lay1", name: "Blatt 1", kind: "drawing", visible: true, locked: false, layoutId: "lay1" }],
     textStyles: [{ id: "ts1", label: "Titel", marks: { bold: true, font: "Helvetica", sizePt: 14 } }],

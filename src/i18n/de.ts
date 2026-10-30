@@ -1121,6 +1121,9 @@ export const de = {
   "resources.col.component": "Bauteil",
   "resources.col.thickness": "Dicke (mm)",
   "resources.col.joint": "Fuge",
+  "resources.col.jointWeight": "Fugen-Strichstärke (mm, 0 = Standard)",
+  "resources.col.hatchLineWeight": "Strichstärke (mm)",
+  "resources.col.hatchLineWeight.hint": "Stärke der Musterlinien auf dem Papier; der Linienstil legt nur das Muster fest.",
   "resources.joint.default": "— (Haarlinie)",
   "resources.layer.add": "Schicht hinzufügen",
   "resources.layer.remove": "Schicht entfernen",
@@ -1320,7 +1323,7 @@ export const de = {
   "pattern.custom": "Eigenes Motiv",
 
   // Linien.
-  "resources.lines.hint": "Strichstärke in Millimetern (Paper-Space). Strichmuster: durchgezogen, gestrichelt oder gepunktet.",
+  "resources.lines.hint": "Linientyp = Muster (durchgezogen, gestrichelt, gepunktet, Zickzack …) und Farbe. Die Strichstärke legt das Element, die Schraffur, die Schichtfuge oder die Ebene fest.",
   "resources.lines.empty": "Noch keine Linienstile.",
   "resources.lines.placeholder": "Linienstil",
   "resources.col.weight": "Stärke (mm)",
