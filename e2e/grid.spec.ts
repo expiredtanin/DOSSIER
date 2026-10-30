@@ -73,7 +73,11 @@ test("Achsraster anlegen, zwischen zwei Achsen bemassen, Achse verschieben → M
   await page.mouse.click(to.x, to.y);
 
   await expect.poll(async () => (await numbers(page)).some((v) => Math.abs(Number(v) - 7.5) < 0.1)).toBe(true);
+  // Rückgängig (der Griff-Zug kann je nach Last in zwei Schritten ankommen): bis das alte Mass wieder steht.
   await blurFocus(page);
-  await page.keyboard.press("ControlOrMeta+z");
+  for (let i = 0; i < 3 && !(await numbers(page)).includes("6.00"); i++) {
+    await page.keyboard.press("ControlOrMeta+z");
+    await page.waitForTimeout(300);
+  }
   await expect.poll(() => numbers(page)).toContain("6.00");
 });
