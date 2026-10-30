@@ -70,7 +70,13 @@ pub struct RMesh {
     pub vertex_colors: Option<Vec<f64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub material_index: Option<f64>,
+    /// [T4] Glatt schattieren mit Knickwinkel (Grad), s. `render3d::types::MeshInput.creaseAngle`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crease_angle: Option<f64>,
 }
+
+/// [T4] Vorgabe-Knickwinkel (Grad) für glatt schattierte Import-Meshes.
+pub const DEFAULT_CREASE_DEG: f64 = 30.0;
 
 // ── Decken ──────────────────────────────────────────────────────────────────
 
@@ -219,7 +225,8 @@ pub fn emit_columns(p: &Project) -> Vec<RMesh> {
                 .as_deref()
                 .and_then(|id| p.component(id))
                 .map_or(COLUMN_RGB, |c| hex_to_rgb(&c.color, COLUMN_RGB));
-            RMesh { positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None }
+            RMesh {
+                crease_angle: None, positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None }
         })
         .collect()
 }
@@ -723,7 +730,7 @@ pub(crate) fn wall_piece_volume(w: &RWall) -> f64 {
 // ── Öffnungs-Einbauteile (Glas, Rahmen, Sprossen, Bank, Kasten) ─────────────
 
 /// Farbe je Bauteil-Klasse (Index = `Part` in `openings3d.rs`).
-const PART_RGB: [Rgb; 7] = [
+pub(crate) const PART_RGB: [Rgb; 7] = [
     [0.62, 0.76, 0.85],
     [0.85, 0.85, 0.83],
     [0.88, 0.88, 0.9],
@@ -895,7 +902,16 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
     for &i in &arcs {
         let Some((arc, v)) = crate::wall_arc::unrolled_wall(&p.walls[i]) else { continue };
         q.walls = vec![v];
-        q.openings = p.openings.as_ref().map(|o| o.iter().filter(|o| o.host_wall_id == p.walls[i].id).cloned().collect());
+        let own: Vec<Opening> = p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_wall_id == p.walls[i].id).cloned().collect();
+        // [106] Öffnungen mit Schichteinzug liegen gerade auf der Sehne über `reveal_zone` (wie die
+        // Teilwand mit dem Loch, `wall_arc::chord_walls`); die übrigen werden gebogen.
+        let zone = |o: &Opening| -> Option<(f64, f64)> {
+            let r = crate::opening_detail::opening_reveal(p, &p.walls[i], o)?;
+            let ms = r.sides[..2].iter().flatten().map(|a| a.shift).fold(0.0f64, f64::max);
+            Some(crate::wall_arc::reveal_zone(r.from, r.to, ms, arc.length()))
+        };
+        let (zoned, bent): (Vec<Opening>, Vec<Opening>) = own.into_iter().partition(|o| zone(o).is_some());
+        q.openings = Some(bent);
         for mut m in emit_opening_meshes_plain(&q, detail) {
             for c in m.positions.chunks_exact_mut(3) {
                 let w = arc.point(c[0], c[1]);
@@ -903,6 +919,20 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
                 c[1] = w.y;
             }
             out.push(m);
+        }
+        for o in zoned {
+            let Some((sa, sb)) = zone(&o) else { continue };
+            let (pa, u, chord) = crate::wall_arc::chord_of(&arc, sa, sb);
+            q.openings = Some(vec![o]);
+            for mut m in emit_opening_meshes_plain(&q, detail) {
+                for c in m.positions.chunks_exact_mut(3) {
+                    let t = (c[0] - sa) / (sb - sa) * chord;
+                    let (x, y) = (pa.x + u.x * t - u.y * c[1], pa.y + u.y * t + u.x * c[1]);
+                    c[0] = x;
+                    c[1] = y;
+                }
+                out.push(m);
+            }
         }
     }
     out
@@ -965,6 +995,7 @@ fn emit_opening_meshes_plain(p: &Project, detail: f64) -> Vec<RMesh> {
         }
         let part = buf[i] as usize;
         out.push(RMesh {
+            crease_angle: None,
             positions: buf[i + 1..i + 25].to_vec(),
             indices: OPENING_BOX_TRIS.to_vec(),
             kind: "extrusion",
@@ -988,7 +1019,7 @@ fn emit_opening_meshes_plain(p: &Project, detail: f64) -> Vec<RMesh> {
 }
 
 fn box_mesh(positions: [f64; 24], color: Rgb) -> RMesh {
-    RMesh { positions: positions.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color, vertex_colors: None, material_index: None }
+    RMesh { crease_angle: None, positions: positions.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color, vertex_colors: None, material_index: None }
 }
 
 /// Formöffnung in der Wand ([G3]) als Quader: Füllkörper (Wandfarbe, ganze Wanddicke) zwischen dem
@@ -1116,7 +1147,8 @@ fn door_frame_boxes(out: &mut Vec<RMesh>, wall: &Wall, wr: &WallRef, op: &Openin
                 od::axis_box(s, u, n, from + x0, to - x0, zt - x1, zt - x0, o0, o1),
             ];
             for b in boxes.into_iter().flatten() {
-                out.push(RMesh { positions: b.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color: rgb, vertex_colors: None, material_index: None });
+                out.push(RMesh {
+                    crease_angle: None, positions: b.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color: rgb, vertex_colors: None, material_index: None });
             }
         }
     }
@@ -1195,7 +1227,8 @@ pub fn emit_stairs(p: &Project, for_section: bool) -> Vec<RSlab> {
 }
 
 fn meshes_of(meshes: Vec<crate::mesh3d::Mesh>, color: Rgb) -> Vec<RMesh> {
-    meshes.into_iter().map(|m| RMesh { positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None }).collect()
+    meshes.into_iter().map(|m| RMesh {
+                    crease_angle: None, positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None }).collect()
 }
 
 /// Glatte Ortbeton-Laufplatten gerader Treppen und Wendelfläche (Schraubenfläche) von Wendeltreppen (`emitStairMeshes`).
@@ -1704,7 +1737,8 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
                 };
                 let material_index = if (wall || override_color.is_none()) && !part.component_id.is_empty() { material_layer(p, &maps, &part.component_id) } else { None };
                 let (positions, indices) = crate::roof_assembly::unshared(&part.mesh);
-                out.push(RMesh { positions, indices, kind: "extrusion", color, vertex_colors: None, material_index });
+                out.push(RMesh {
+                    crease_angle: None, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index });
             }
             continue;
         }
@@ -1734,7 +1768,8 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
                 }
             }
             if !indices.is_empty() {
-                out.push(RMesh { positions, indices, kind: "extrusion", color, vertex_colors: None, material_index });
+                out.push(RMesh {
+                    crease_angle: None, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index });
             }
             offset_above += t;
         }
@@ -1791,6 +1826,7 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
                 // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben nur ungeändert).
                 let (pos, idx, changed) = crate::excavation::terrain_model_mesh(p, m);
                 out.push(RMesh {
+                    crease_angle: None,
                     positions: pos.into_owned(),
                     indices: indices_u32(&idx),
                     kind: "terrain",
@@ -1806,6 +1842,7 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
                 color: IMPORTED_RGB,
                 vertex_colors: None,
                 material_index: None,
+                crease_angle: (m.smooth_shading == Some(true)).then(|| m.crease_angle.filter(|a| a.is_finite() && *a > 0.0).unwrap_or(DEFAULT_CREASE_DEG).min(180.0)),
             }),
             _ => {}
         }
@@ -2133,6 +2170,23 @@ mod tests {
 
     fn near(a: V3, b: V3) -> bool {
         hypot(&[a[0] - b[0], a[1] - b[1], a[2] - b[2]]) < 1e-6
+    }
+
+    /// [T4] Import-Mesh glatt: Knickwinkel geht ans 3D (Vorgabe 30°), kantig ohne; JSON `creaseAngle`.
+    #[test]
+    fn import_mesh_glatt_mit_knickwinkel() {
+        let mesh = |smooth: Option<bool>, crease: Option<f64>| {
+            let m = ImportedMesh { id: "m".into(), positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], smooth_shading: smooth, crease_angle: crease, ..Default::default() };
+            let p = Project { context: Some(vec![ContextObject::ImportedMesh(m)]), ..Default::default() };
+            emit_context_meshes(&p).remove(0)
+        };
+        assert_eq!(mesh(None, Some(45.0)).crease_angle, None);
+        assert_eq!(mesh(Some(true), None).crease_angle, Some(DEFAULT_CREASE_DEG));
+        assert_eq!(mesh(Some(true), Some(12.5)).crease_angle, Some(12.5));
+        assert_eq!(mesh(Some(true), Some(f64::NAN)).crease_angle, Some(DEFAULT_CREASE_DEG));
+        let js = serde_json::to_value(mesh(Some(true), Some(12.5))).unwrap();
+        assert_eq!(js["creaseAngle"], serde_json::json!(12.5));
+        assert!(serde_json::to_value(mesh(None, None)).unwrap().get("creaseAngle").is_none());
     }
 
     #[test]

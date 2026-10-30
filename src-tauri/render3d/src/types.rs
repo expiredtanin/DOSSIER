@@ -427,6 +427,11 @@ pub struct MeshInput {
     /// pro Vertex interpoliert (kein Textur-Sampler noetig).
     #[serde(default, rename = "vertexColors")]
     pub vertex_colors: Vec<f32>,
+    /// [T4] Glatt schattieren mit Knickwinkel (Grad): Normalen je Ecke aus den anschliessenden
+    /// Dreiecken, deren Normale höchstens so weit abweicht (geteilte Normalen an schärferen Kanten);
+    /// Punkte gleicher Lage gelten als verschweisst. Fehlt er: kantig (Flächennormale je Dreieck).
+    #[serde(default, rename = "creaseAngle")]
+    pub crease_angle: Option<f32>,
 }
 
 impl MeshInput {

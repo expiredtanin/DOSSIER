@@ -901,6 +901,13 @@ export type Drawing2DGeom =
      * Kreis) und Bogenlänge (`pts` = Mittelpunkt, Bogenanfang, Bogenende).
      */
     kind?: "radius" | "diameter" | "arc";
+    /**
+     * [T2] Bogenmass: Mittelpunkt des Kreises, auf dem `pts` liegen (z. B. Aussenfläche einer
+     * Bogenwand). Dann ist die Masslinie der Kreisbogen im Radius |pts − arcCenter| + `offset`
+     * (positiv = vom Mittelpunkt weg), die Masshilfslinien laufen radial, und jedes Segment misst
+     * die Bogenlänge auf dem Radius seiner Punkte (kürzerer Bogen). Fehlt es: lineare Bemassung.
+     */
+    arcCenter?: Vec2;
   }
   | {
     shape: "kote";
@@ -1476,6 +1483,10 @@ export type ImportedMesh = {
   color?: string;
   /** IFC-GlobalId des Quell-Bauteils (IFC-Import je Bauteil). */
   ifcGlobalId?: string;
+  /** [T4] Glatt schattieren (geteilte Normalen an Kanten über dem Knickwinkel); fehlt = kantig. */
+  smoothShading?: boolean;
+  /** [T4] Knickwinkel in Grad für das glatte Schattieren (Default 30°). */
+  creaseAngle?: number;
   positions: Array<number>;
   indices: Array<number>;
 };

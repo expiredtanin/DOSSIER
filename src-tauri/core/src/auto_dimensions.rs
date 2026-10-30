@@ -5,7 +5,9 @@
 //!   3. Gesamtmass.
 //! Grundlage ist die vereinigte Grundfläche der Wände des Geschosses (an verbundenen Enden um die
 //! halbe Dicke verlängert, damit Aussenecken voll sind). Nur achsparallele Kanten werden bemasst;
-//! schiefe Wände fehlen in den Ketten. TS liefert Wände (Achse + Dicke) und Öffnungs-Leibungen,
+//! schiefe Wände fehlen in den Ketten. Bogenwände ([T2]) gehen mit ihrem Kreisring in die Grundfläche
+//! ein; liegt ihre gewölbte Seite aussen, bekommen sie eine eigene Bogenmass-Kette (Ecken und
+//! Leibungen auf dieser Fläche, gemessen entlang des Bogens). TS liefert Wände (Achse + Dicke) und Öffnungs-Leibungen,
 //! baut aus den Ketten die Bemassungs-Objekte.
 
 use crate::flat::{Polygon, Ring};
@@ -23,9 +25,18 @@ pub struct WallIn {
     /// Versatz der Wandmitte von der Achse (links der Laufrichtung positiv): Wände mit Referenzlinie
     /// links/rechts oder -versatz liegen nicht mittig auf ihrer Achse.
     pub shift: f64,
+    /// Modell-Bulge der Achse (0 = gerade, [T2]).
+    pub bulge: f64,
 }
 
-/// Öffnung: Index der Wirtswand in der Wandliste, Leibungspunkte auf der Achse.
+impl WallIn {
+    pub fn arc(&self) -> Option<crate::wall_arc::WallArc> {
+        crate::wall_arc::WallArc::of(kernel2d::Vec2::new(self.start[0], self.start[1]), kernel2d::Vec2::new(self.end[0], self.end[1]), Some(self.bulge))
+    }
+}
+
+/// Öffnung: Index der Wirtswand in der Wandliste, Leibungspunkte auf der Achse (Bogenwand: auf dem
+/// Achsbogen).
 #[derive(Clone, Copy, Debug)]
 pub struct OpeningIn {
     pub wall: usize,
@@ -54,6 +65,8 @@ pub struct DimChain {
     /// Je Punkt das Merkmal, aus dem er stammt (Grundriss-Ecke bzw. Leibung auf der Aussenfläche;
     /// das äusserste bei gleicher Lage) — für die assoziative Bemassung ([38]).
     pub src: Vec<Vec2>,
+    /// [T2] Bogenmass-Kette einer Bogenwand: (Bogenmitte, Wand-Index); `side` ist dann ohne Bedeutung.
+    pub arc: Option<(Vec2, usize)>,
 }
 
 const EPS: f64 = 1e-6;
@@ -104,6 +117,14 @@ fn outer_rings(walls: &[WallIn]) -> Vec<Ring> {
         let t = if w.thickness.is_finite() && w.thickness > 0.0 { w.thickness } else { 0.3 };
         let es = if connected(w.start, i, walls) { t / 2.0 } else { 0.0 };
         let ee = if connected(w.end, i, walls) { t / 2.0 } else { 0.0 };
+        // Bogenwand: Kreisring-Sektor (Enden um die halbe Dicke entlang des Bogens verlängert).
+        if let Some(a) = w.arc() {
+            let st = a.stations(-es, a.length() + ee, a.r_max(-t / 2.0, t / 2.0));
+            let mut ring: Ring = st.iter().map(|&s| a.point(s, t / 2.0)).map(|q| [q.x, q.y]).collect();
+            ring.extend(st.iter().rev().map(|&s| a.point(s, -t / 2.0)).map(|q| [q.x, q.y]));
+            parts.push(vec![ring]);
+            continue;
+        }
         parts.push(vec![wall_rect(w, t, es, ee)]);
     }
     if parts.is_empty() {
@@ -182,7 +203,7 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
         // Öffnungen in Wänden, deren Aussenseite auf einer dieser Kanten liegt.
         let mut jambs = vec![];
         for o in openings {
-            let Some(w) = walls.get(o.wall) else { continue };
+            let Some(w) = walls.get(o.wall).filter(|w| w.arc().is_none()) else { continue };
             let (dx, dy) = (w.end[0] - w.start[0], w.end[1] - w.start[1]);
             let len = dx.hypot(dy);
             if !(len >= EPS) || dot([dx / len, dy / len], n).abs() > 1e-6 {
@@ -231,8 +252,48 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
                 .zip(&pts)
                 .map(|(&t, &p)| feats.iter().filter(|f| (f.0 - t).abs() <= 1e-3).max_by(|a, b| a.2.total_cmp(&b.2)).map_or(p, |f| f.1))
                 .collect();
-            out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale, src });
+            out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale, src, arc: None });
         }
+    }
+    out.extend(arc_chains(walls, openings, &rings, scale));
+    out
+}
+
+/// [T2] Bogenmass-Ketten: je Bogenwand, deren gewölbte (äussere) Fläche auf dem Umriss liegt — Ecken
+/// (äusserste Umriss-Punkte auf diesem Kreis) und Leibungen, gemessen entlang des Bogens.
+fn arc_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scale: f64) -> Vec<DimChain> {
+    let mut out = Vec::new();
+    for (wi, w) in walls.iter().enumerate() {
+        let Some(a) = w.arc() else { continue };
+        let t = if w.thickness.is_finite() && w.thickness > 0.0 { w.thickness } else { 0.3 };
+        // Gewölbte Seite = grösserer Radius.
+        let n_out = if a.radius_at(t / 2.0) > a.radius_at(-t / 2.0) { t / 2.0 } else { -t / 2.0 };
+        let r_out = a.radius_at(n_out);
+        let len = a.length();
+        let on_circle = |q: &Vec2| ((q[0] - a.center.x).hypot(q[1] - a.center.y) - r_out).abs() < 1e-4;
+        // Liegt die gewölbte Fläche auf dem Umriss (Ring-Punkte auf dem Kreis auch im mittleren Teil)?
+        let ss: Vec<f64> = rings.iter().flatten().filter(|q| on_circle(q)).map(|q| a.local(kernel2d::Vec2::new(q[0], q[1])).0).filter(|s| *s > -t && *s < len + t).collect();
+        let (lo, hi) = ss.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &s| (l.min(s), h.max(s)));
+        if !ss.iter().any(|s| *s > len / 4.0 && *s < 3.0 * len / 4.0) {
+            continue;
+        }
+        let mut st = vec![lo, hi];
+        for o in openings.iter().filter(|o| o.wall == wi) {
+            for j in [o.jamb_start, o.jamb_end] {
+                if finite2(j) {
+                    let s = a.local(kernel2d::Vec2::new(j[0], j[1])).0;
+                    if s > lo && s < hi {
+                        st.push(s);
+                    }
+                }
+            }
+        }
+        let st = unique_sorted(&st);
+        if st.len() < 2 {
+            continue;
+        }
+        let pts: Vec<Vec2> = st.iter().map(|&s| a.point(s, n_out)).map(|q| [q.x, q.y]).collect();
+        out.push(DimChain { side: 0, chain: CHAIN_OPENINGS, src: pts.clone(), pts, offset: CHAIN_MM[CHAIN_OPENINGS] / 1000.0 * scale, arc: Some(([a.center.x, a.center.y], wi)) });
     }
     out
 }
@@ -244,7 +305,7 @@ mod tests {
     /// L-förmiger Grundriss aus 0.3-m-Wänden (Achsen).
     fn l_walls() -> Vec<WallIn> {
         let axis = [[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [4.0, 6.0], [4.0, 9.0], [0.0, 9.0]];
-        (0..axis.len()).map(|i| WallIn { start: axis[i], end: axis[(i + 1) % axis.len()], thickness: 0.3, shift: 0.0 }).collect()
+        (0..axis.len()).map(|i| WallIn { start: axis[i], end: axis[(i + 1) % axis.len()], thickness: 0.3, shift: 0.0, bulge: 0.0 }).collect()
     }
     fn lengths(pts: &[Vec2]) -> Vec<f64> {
         pts.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).collect()
@@ -294,7 +355,7 @@ mod tests {
     #[test]
     fn nicht_mittige_wand_misst_die_echte_flaeche() {
         // Achse y = 0, Körper y 0 … 0.3 (shift +0.15), Öffnung 1 … 2 m.
-        let w = [WallIn { start: [0.0, 0.0], end: [5.0, 0.0], thickness: 0.3, shift: 0.15 }];
+        let w = [WallIn { start: [0.0, 0.0], end: [5.0, 0.0], thickness: 0.3, shift: 0.15, bulge: 0.0 }];
         let o = OpeningIn { wall: 0, jamb_start: [1.0, 0.0], jamb_end: [2.0, 0.0] };
         let dims = auto_exterior_dimensions(&w, &[o], 100.0);
         let south = dims.iter().find(|d| d.side == 0 && d.chain == CHAIN_TOTAL).unwrap();
@@ -309,17 +370,58 @@ mod tests {
         assert!(op.src.iter().all(|q| (q[1] - 0.3).abs() < 1e-6), "{:?}", op.src);
     }
 
+    /// [T2] Rechteck mit Bogenwand im Süden (nach aussen gewölbt): Gesamtmass schliesst den Bogen ein,
+    /// Bogenmass-Kette auf der Aussenfläche (Ecken + Leibungen) entlang des Bogens.
+    #[test]
+    fn bogenwand_bogenmass() {
+        let mut w = vec![
+            WallIn { start: [0.0, 0.0], end: [10.0, 0.0], thickness: 0.3, shift: 0.0, bulge: -0.4 },
+            WallIn { start: [10.0, 0.0], end: [10.0, 6.0], thickness: 0.3, shift: 0.0, bulge: 0.0 },
+            WallIn { start: [10.0, 6.0], end: [0.0, 6.0], thickness: 0.3, shift: 0.0, bulge: 0.0 },
+            WallIn { start: [0.0, 6.0], end: [0.0, 0.0], thickness: 0.3, shift: 0.0, bulge: 0.0 },
+        ];
+        let a = w[0].arc().unwrap();
+        let jamb = |s: f64| {
+            let q = a.point(s, 0.0);
+            [q.x, q.y]
+        };
+        let o = OpeningIn { wall: 0, jamb_start: jamb(4.0), jamb_end: jamb(5.5) };
+        let dims = auto_exterior_dimensions(&w, &[o], 100.0);
+        let arc: Vec<&DimChain> = dims.iter().filter(|d| d.arc.is_some()).collect();
+        assert_eq!(arc.len(), 1);
+        let d = arc[0];
+        let (c, wi) = d.arc.unwrap();
+        assert_eq!(wi, 0);
+        assert!((c[0] - a.center.x).abs() < 1e-9 && (c[1] - a.center.y).abs() < 1e-9);
+        assert_eq!(d.pts.len(), 4, "zwei Ecken, zwei Leibungen");
+        let r_out = a.radius_at(if a.radius_at(0.15) > a.radius_at(-0.15) { 0.15 } else { -0.15 });
+        assert!(d.pts.iter().all(|q| ((q[0] - c[0]).hypot(q[1] - c[1]) - r_out).abs() < 1e-6));
+        // Öffnung entlang der Aussenfläche: 1.5 m Achse · r_out / r.
+        let ang = |q: Vec2| (q[1] - c[1]).atan2(q[0] - c[0]);
+        let mut da = (ang(d.pts[2]) - ang(d.pts[1])).abs();
+        if da > std::f64::consts::PI {
+            da = 2.0 * std::f64::consts::PI - da;
+        }
+        assert!((da * r_out - 1.5 * r_out / a.r).abs() < 1e-6, "{}", da * r_out);
+        // Süd-Gesamtmass schliesst den Bogen ein (Scheitel unter y = 0).
+        let south = dims.iter().find(|d| d.arc.is_none() && d.side == 0 && d.chain == CHAIN_TOTAL).unwrap();
+        assert!(south.pts[0][1] < -1.0, "{:?}", south.pts);
+        // Nach innen gewölbt: keine Bogenmass-Kette.
+        w[0].bulge = 0.4;
+        assert!(auto_exterior_dimensions(&w, &[], 100.0).iter().all(|d| d.arc.is_none()));
+    }
+
     #[test]
     fn unsinn_ohne_panik() {
         assert!(auto_exterior_dimensions(&[], &[], 100.0).is_empty());
         let bad = [
-            WallIn { start: [f64::NAN, 0.0], end: [1.0, 0.0], thickness: 0.3, shift: 0.0 },
-            WallIn { start: [0.0, 0.0], end: [0.0, 0.0], thickness: 0.3, shift: 0.0 },
+            WallIn { start: [f64::NAN, 0.0], end: [1.0, 0.0], thickness: 0.3, shift: 0.0, bulge: 0.0 },
+            WallIn { start: [0.0, 0.0], end: [0.0, 0.0], thickness: 0.3, shift: 0.0, bulge: 0.0 },
         ];
         let o = OpeningIn { wall: 7, jamb_start: [0.0, 0.0], jamb_end: [1.0, 0.0] };
         assert!(auto_exterior_dimensions(&bad, &[o], f64::NAN).is_empty());
         // Dicke NaN → 0.3; Öffnung mit NaN-Leibung wird übergangen.
-        let w = [WallIn { start: [0.0, 0.0], end: [5.0, 0.0], thickness: f64::NAN, shift: 0.0 }];
+        let w = [WallIn { start: [0.0, 0.0], end: [5.0, 0.0], thickness: f64::NAN, shift: 0.0, bulge: 0.0 }];
         let o = OpeningIn { wall: 0, jamb_start: [f64::NAN, 0.0], jamb_end: [1.0, 0.0] };
         let dims = auto_exterior_dimensions(&w, &[o], 0.0);
         assert!(dims.iter().all(|d| d.chain != CHAIN_OPENINGS));

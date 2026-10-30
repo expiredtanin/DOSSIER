@@ -393,12 +393,33 @@ fn band_extent(w: &crate::wall_bands::WallIn) -> (f64, f64) {
     (off - total / 2.0, off + total / 2.0)
 }
 
+/// Zuschlag beidseits der Öffnung (über den grössten Rücksprung hinaus) für die Sehne einer Öffnung
+/// mit Schichteinzug ([106]).
+pub const REVEAL_MARGIN: f64 = 0.05;
+
+/// [106] Öffnung mit Schichteinzug in der Bogenwand: Bereich `[lo, hi]` (Bogenlänge) EINER geraden
+/// Sehnen-Teilwand über die Öffnung samt Rücksprung; Loch, Zusatzstücke und Einbauteile liegen gerade
+/// auf dieser Sehne (Entscheid: die Leibungen stehen dort senkrecht zur Sehne statt radial).
+pub fn reveal_zone(from: f64, to: f64, max_shift: f64, len: f64) -> (f64, f64) {
+    let m = max_shift.max(0.0) + REVEAL_MARGIN;
+    ((from - m).max(0.0), (to + m).min(len))
+}
+
+/// Gerade Sehne der Achse über `[sa, sb]`: Anfang, Einheitsrichtung, Länge. Bogenlänge `s` liegt auf
+/// der Sehne bei `(s − sa)·Länge/(sb − sa)`.
+pub fn chord_of(arc: &WallArc, sa: f64, sb: f64) -> (Vec2, Vec2, f64) {
+    let (pa, pb) = (arc.point(sa, 0.0), arc.point(sb, 0.0));
+    let l = (pb.x - pa.x).hypot(pb.y - pa.y);
+    let u = if l > 1e-12 { Vec2::new((pb.x - pa.x) / l, (pb.y - pa.y) / l) } else { arc.tangent(sa) };
+    (pa, u, l)
+}
+
 /// Sehnen-Zerlegung einer Bogenwand für die Schichtbänder: `w` trägt Öffnungen und Aussparungen in
 /// Bogenlänge, Schnitte in Weltkoordinaten (Start/Ende/Achse werden ignoriert). Ergebnis: gerade
 /// Teilwände (Sehnen der Achse) mit radialen Gehrungen dazwischen; Teilstellen auch an den
 /// Öffnungskanten (Laibungen radial), keine Teilstelle im Bereich der Anschluss-Schnitte. Teilwände
-/// innerhalb einer Öffnung werden zu Brüstung und Sturz (z-Bereich ohne Loch). Schichteinzug ([106])
-/// entfällt bei Bogenwänden.
+/// innerhalb einer Öffnung werden zu Brüstung und Sturz (z-Bereich ohne Loch). Öffnungen mit
+/// Schichteinzug ([106]) bekommen EINE gerade Teilwand über [`reveal_zone`], die Loch und Einzug trägt.
 pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::wall_bands::WallIn> {
     use crate::joins::{LayerCuts, SpanCutout, WallCuts};
     let len = arc.length();
@@ -430,7 +451,21 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
     let z0 = reach(starts, false) + 1e-3;
     let z1 = reach(ends, true) - 1e-3;
     st.retain(|&s| s <= 0.0 || s >= len || (s > z0 && s < z1));
-    for o in &w.openings {
+    // [106] Sehnen über Öffnungen mit Schichteinzug: (Bereich, Öffnung, Einzug).
+    let zones: Vec<((f64, f64), &crate::wall_bands::OpeningIn, &crate::wall_bands::RevealIn)> = w
+        .openings
+        .iter()
+        .filter_map(|o| {
+            let r = w.reveals.iter().find(|r| r.from == o.from && r.to == o.to && r.z_bottom == o.z_bottom && r.z_top == o.z_top)?;
+            let ms = r.shifts.iter().flat_map(|s| [s[0], s[1]]).fold(0.0f64, f64::max);
+            Some((reveal_zone(o.from, o.to, ms, len), o, r))
+        })
+        .collect();
+    st.retain(|&s| !zones.iter().any(|((a, b), _, _)| s > *a + 1e-6 && s < *b - 1e-6));
+    for ((a, b), _, _) in &zones {
+        st.extend([*a, *b].into_iter().filter(|s| *s > 1e-6 && *s < len - 1e-6));
+    }
+    for o in w.openings.iter().filter(|o| !zones.iter().any(|z| std::ptr::eq(z.1, *o))) {
         for s in [o.from, o.to] {
             if s > 1e-6 && s < len - 1e-6 {
                 st.push(s);
@@ -475,6 +510,14 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
             layer_cuts,
             span_cutouts,
         };
+        // [106] Teilwand über einer Öffnung mit Schichteinzug: Loch und Einzug auf der Sehne.
+        if let Some((_, o, r)) = zones.iter().find(|((a, b), _, _)| (a - sa).abs() < 1e-6 && (b - sb).abs() < 1e-6) {
+            let m = |s: f64| (s - sa) / (sb - sa) * chord;
+            let oi = crate::wall_bands::OpeningIn { from: m(o.from), to: m(o.to), ..**o };
+            let ri = crate::wall_bands::RevealIn { from: oi.from, to: oi.to, ..(*r).clone() };
+            out.push(crate::wall_bands::WallIn { start: pa, end: pb, openings: vec![oi], cuts, reveals: vec![ri], ..w.clone() });
+            continue;
+        }
         // z-Bereiche ohne die Öffnungen, die diese Teilwand ganz überdecken.
         let mut zs = vec![[w.z_bottom, w.z_top]];
         for o in w.openings.iter().filter(|o| o.from <= sa + 1e-6 && o.to >= sb - 1e-6) {

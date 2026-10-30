@@ -2013,6 +2013,8 @@ export const en: Record<TranslationKey, string> = {
   "site.excavation.hint": "Draw the outline of the pit bottom; slopes cut the terrain",
   "site.contourInterval": "Contour interval [m]",
   "site.contourIndexEvery": "Index contour every",
+  "site.smoothShading": "Smooth shading",
+  "site.creaseAngle": "Crease angle °",
   "site.excavation.bottom": "Bottom [m]",
   "site.excavation.slope": "Slope [°]",
   "site.excavation.fillSlope": "Fill slope [°]",

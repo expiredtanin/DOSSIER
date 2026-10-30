@@ -209,6 +209,9 @@ export interface RMesh {
    *  zeigt render3d das Fallback-Schachbrett. Matcht
    *  `render3d::types::MeshInput.materialIndex`. */
   materialIndex?: number;
+  /** [T4] Glatt schattieren mit Knickwinkel (Grad); fehlt = kantig. Matcht
+   *  `render3d::types::MeshInput.creaseAngle`. */
+  creaseAngle?: number;
 }
 
 /**

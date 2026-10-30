@@ -590,6 +590,7 @@ fn empty_hatch() -> Hatch {
         length_max: None,
         dash: Vec::new(),
         motif: None,
+        polar: None,
     }
 }
 

@@ -1145,7 +1145,7 @@ fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> 
                 (None, Some("right")) => -half,
                 _ => 0.0,
             };
-            WallIn { start: [a.0, a.1], end: [b.0, b.1], thickness: th, shift }
+            WallIn { start: [a.0, a.1], end: [b.0, b.1], thickness: th, shift, bulge: field(w, "bulge").and_then(Value::as_f64).unwrap_or(0.0) }
         })
         .collect();
     let mut oin = Vec::new();
@@ -1153,7 +1153,9 @@ fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> 
         let host = field(o, "hostWallId").and_then(Value::as_str);
         let Some(i) = walls.iter().position(|w| id_of(w) == host) else { continue };
         let (a, b) = (p(walls[i], "start"), p(walls[i], "end"));
-        let axis = dist(a, b);
+        // Bogenwand ([T2]): Lage = Bogenlänge, Leibungen auf dem Achsbogen.
+        let arc = win[i].arc();
+        let axis = arc.map_or_else(|| dist(a, b), |x| x.length());
         let (pos, width) = (num_of(field(o, "position")), num_of(field(o, "width")));
         let from = jsnum::max(0.0, jsnum::min(pos, axis));
         let to = jsnum::max(from, jsnum::min(pos + width, axis));
@@ -1161,7 +1163,13 @@ fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> 
             continue;
         }
         let u = normalize((b.0 - a.0, b.1 - a.1));
-        let at = |d: f64| [a.0 + u.0 * d, a.1 + u.1 * d];
+        let at = |d: f64| match arc {
+            Some(x) => {
+                let q = x.point(d, 0.0);
+                [q.x, q.y]
+            }
+            None => [a.0 + u.0 * d, a.1 + u.1 * d],
+        };
         oin.push(OpeningIn { wall: i, jamb_start: at(from), jamb_end: at(to) });
     }
     const SIDES: [&str; 4] = ["south", "east", "north", "west"];
@@ -1170,9 +1178,16 @@ fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> 
     auto_exterior_dimensions(&win, &oin, scale)
         .into_iter()
         .map(|c| {
-            let id = format!("{prefix}-{}-{}-{}", ctx.level, SIDES[c.side as usize], CHAINS[c.chain as usize]);
+            let id = match c.arc {
+                Some((_, wi)) => format!("{prefix}-{}-arc-{}", ctx.level, id_of(walls[wi]).unwrap_or("")),
+                None => format!("{prefix}-{}-{}-{}", ctx.level, SIDES[c.side as usize], CHAINS[c.chain as usize]),
+            };
             let pts = Value::Array(c.pts.iter().map(|q| crate::grips::pt(q[0], q[1])).collect());
             let mut fields = vec![("shape", s("dimension")), ("pts", pts), ("offset", js_num(c.offset))];
+            // Bogenmass ([T2]): Kette auf dem Kreis um die Bogenmitte.
+            if let Some((ctr, _)) = c.arc {
+                fields.push(("arcCenter", crate::grips::pt(ctr[0], ctr[1])));
+            }
             // Assoziativ ([38]): je Punkt das Merkmal (Ecke, Leibung), aus dem er stammt.
             let chain: Vec<V> = c.pts.iter().map(|q| (q[0], q[1])).collect();
             let src: Vec<V> = c.src.iter().map(|q| (q[0], q[1])).collect();

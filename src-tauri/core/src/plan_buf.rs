@@ -14,10 +14,12 @@
 //! Schraffuren nHatchWords Wörter, nHatches Einträge: [jsonStr, Hatch]
 //!             jsonStr = die volle `HatchRender` als JSON (TS liest sie einmal je Eintrag);
 //!             Hatch   = [pattern, kind, flags, scale, angle, colorStr, lineWeight, originX, originY,
-//!                        seed, density, lengthMin, lengthMax, nDash, dash…, (Motiv: length, nPts, x,y…)]
+//!                        seed, density, lengthMin, lengthMax, nDash, dash…, (Motiv: length, nPts, x,y…),
+//!                        (polar: cx, cy, r0)]
 //!             pattern 0 none · 1 solid · 2 diagonal (auch unbekannt) · 3 crosshatch · 4 insulation ·
 //!             5 custom; kind 0 vector · 1 image · 2 gradient; flags 1 random · 2 origin · 4 seed ·
-//!             8 density · 16 lengthMin · 32 lengthMax · 64 Motiv (Felder ohne Flag stehen auf 0).
+//!             8 density · 16 lengthMin · 32 lengthMax · 64 Motiv · 128 polar ([T2]) (Felder ohne Flag
+//!             stehen auf 0).
 //!             Dasselbe Hatch-Format (Farbe −1) nehmen die Einzel-Bindungen der Schraffur ([`decode_hatch`]).
 //! Gruppen     nGroups × [start, end)               (Primitiv-Bereiche, bei `planDomains` die Domänen
 //!                                                   Decken, Dächer, Räume, Wände, Treppen, Stützen,
@@ -122,6 +124,8 @@ const HF_DENSITY: u32 = 8;
 const HF_LEN_MIN: u32 = 16;
 const HF_LEN_MAX: u32 = 32;
 const HF_MOTIF: u32 = 64;
+/// [T2] Polare Schraffur: 3 Werte (Mitte x, y, Bezugsradius) nach dem Motiv.
+const HF_POLAR: u32 = 128;
 
 // ── GPU-Sicht: was die Kompilierung braucht (Farben geparst, Indizes in `colors`) ──────────────
 
@@ -428,6 +432,7 @@ fn read_hatch(r: &mut Reader) -> Option<(Hatch, i32)> {
     } else {
         None
     };
+    let polar = if flags & HF_POLAR != 0 { Some((r.v2()?, r.f()?)) } else { None };
     Some((
         Hatch {
             pattern,
@@ -443,6 +448,7 @@ fn read_hatch(r: &mut Reader) -> Option<(Hatch, i32)> {
             length_max: opt(flags, HF_LEN_MAX, length_max),
             dash,
             motif,
+            polar,
         },
         color,
     ))
@@ -2013,6 +2019,11 @@ fn hatch_bits_eq(a: &HatchRender, b: &HatchRender) -> bool {
         && opt_bits_eq(a.density, b.density)
         && opt_bits_eq(a.length_min, b.length_min)
         && opt_bits_eq(a.length_max, b.length_max)
+        && match (a.polar, b.polar) {
+            (None, None) => true,
+            (Some(x), Some(y)) => (0..3).all(|i| bits(x[i], y[i])),
+            _ => false,
+        }
 }
 
 /// Hatch-Datensatz aus einer `HatchRender` (Farbe = String-Index).
@@ -2038,6 +2049,9 @@ fn write_hatch_words(out: &mut Vec<f64>, h: &HatchRender, color: f64) {
     }
     if h.motif.is_some() {
         flags |= HF_MOTIF;
+    }
+    if h.polar.is_some() {
+        flags |= HF_POLAR;
     }
     let pattern = match h.pattern {
         HatchPattern::None => 0.0,
@@ -2086,6 +2100,9 @@ fn write_hatch_words(out: &mut Vec<f64>, h: &HatchRender, color: f64) {
             out.push(p.y);
         }
     }
+    if let Some(c) = h.polar {
+        out.extend_from_slice(&c);
+    }
 }
 
 /// Fehlerpuffer einer Abfrage (TS wirft die Meldung).
@@ -2129,6 +2146,7 @@ pub(crate) mod tests {
             length_min: Some(0.5),
             length_max: Some(2.0),
             motif: None,
+            polar: Some([1.0, 2.0, 3.0]),
         }
     }
 

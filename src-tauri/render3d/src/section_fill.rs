@@ -272,6 +272,7 @@ fn push_generated_hatch(
         length_max: None,
         dash: Vec::new(),
         motif: None,
+        polar: None,
     };
     let pts: Vec<_> = poly.pts.iter().map(|p| v2(p[0] as f64, p[1] as f64)).collect();
     let half_w = (h.line_weight.max(0.0) * CUT_LINE_MM_TO_WORLD * 0.5).max(1e-4);

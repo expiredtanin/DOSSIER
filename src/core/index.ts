@@ -8,6 +8,7 @@ export {
   bulgePolylinePoints,
   bulgeFromSagittaPoint,
   bulgePointAt,
+  wallArcBand,
   hasRealBulge,
   pointOnCircle,
 } from "../geometry/bulge";

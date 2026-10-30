@@ -374,6 +374,13 @@ pub enum Drawing2DGeom {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional, inline)]
         kind: Option<DimKind>,
+        /// [T2] Bogenmass: Mittelpunkt des Kreises, auf dem `pts` liegen (z. B. Aussenfläche einer
+        /// Bogenwand). Dann ist die Masslinie der Kreisbogen im Radius |pts − arcCenter| + `offset`
+        /// (positiv = vom Mittelpunkt weg), die Masshilfslinien laufen radial, und jedes Segment misst
+        /// die Bogenlänge auf dem Radius seiner Punkte (kürzerer Bogen). Fehlt es: lineare Bemassung.
+        #[serde(rename = "arcCenter", default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        arc_center: Option<Vec2>,
     },
     /// Höhenkote (SIA 400 B.5.4, Figur 18): Dreieck-Symbol + Höhenwert (Meter,
     /// ±0.00-Referenz frei wählbar, s. Norm) an einem Punkt. `kind` bestimmt

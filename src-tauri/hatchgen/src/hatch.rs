@@ -117,6 +117,10 @@ pub struct Hatch {
     /// Strichmuster der Musterlinien (mm); leer = durchgezogen.
     pub dash: Vec<f64>,
     pub motif: Option<Motif>,
+    /// Polare Schraffur ([T2] Bogenwand-Schicht): Bogenmitte und Bezugsradius. Das Muster entsteht
+    /// auf der Abwicklung (x = Bogenlänge auf dem Bezugsradius im Uhrzeigersinn, y = Radius) und wird
+    /// zurückgebogen — es folgt der Krümmung stetig; die Achse des Musters (Winkel 0) ist die Tangente.
+    pub polar: Option<(V2, f64)>,
 }
 
 // ── Clipping ────────────────────────────────────────────────────────────────
@@ -403,6 +407,9 @@ pub fn apply_dash_runs(runs: Vec<Run>, dash: &[f64]) -> Vec<Run> {
 pub fn build_hatch_runs(poly: &[V2], hatch: &Hatch) -> Vec<Run> {
     if poly.len() < 3 {
         return Vec::new();
+    }
+    if let Some((c, r0)) = hatch.polar {
+        return polar_runs(poly, hatch, c, r0, |q, h| build_hatch_runs(q, h));
     }
     let pattern = hatch.pattern;
     if pattern == Pattern::None || pattern == Pattern::Solid {
@@ -810,6 +817,9 @@ pub fn scatter_strokes(
 
 /// Random-Vektor-Schraffur (Kies/Splitt), Dichte/Strichlänge an die Kachel (8·scale px) gekoppelt.
 pub fn build_random_hatch_runs(poly: &[V2], hatch: &Hatch, scale: Option<f64>) -> Vec<Run> {
+    if let Some((c, r0)) = hatch.polar {
+        return polar_runs(poly, hatch, c, r0, |q, h| build_random_hatch_runs(q, h, scale));
+    }
     let s = scale.unwrap_or(if hatch.scale > 1e-6 { hatch.scale } else { 1.0 });
     let density = match hatch.density {
         Some(d) if d > 1e-6 => d,
@@ -822,6 +832,57 @@ pub fn build_random_hatch_runs(poly: &[V2], hatch: &Hatch, scale: Option<f64>) -
     let len_min = hatch.length_min.map(|v| v * DASH_MM_TO_M);
     let len_max = hatch.length_max.map(|v| v * DASH_MM_TO_M);
     scatter_strokes(poly, cell, base, seed as f64, stroke_len, len_min, len_max)
+}
+
+/// Grösster Winkelschritt beim Zurückbiegen polarer Läufe (2°).
+const POLAR_STEP: f64 = PI / 90.0;
+
+/// Polare Schraffur: Polygon abwickeln (x = −r0·Winkel stetig fortgesetzt, y = Radius — rechtshändig),
+/// dort gerade schraffieren, die Läufe zurückbiegen (Strecken in ≤ 2°-Stücke geteilt).
+fn polar_runs(poly: &[V2], hatch: &Hatch, c: V2, r0: f64, f: impl Fn(&[V2], &Hatch) -> Vec<Run>) -> Vec<Run> {
+    let flat = Hatch { polar: None, ..hatch.clone() };
+    if !(r0 > 1e-9 && r0.is_finite() && c.x.is_finite() && c.y.is_finite()) {
+        return f(poly, &flat);
+    }
+    let mut prev: Option<f64> = None;
+    let mut un = Vec::with_capacity(poly.len());
+    for p in poly {
+        let (dx, dy) = (p.x - c.x, p.y - c.y);
+        let mut a = jsnum::atan2(dy, dx);
+        if let Some(pa) = prev {
+            while a - pa > PI {
+                a -= 2.0 * PI;
+            }
+            while a - pa < -PI {
+                a += 2.0 * PI;
+            }
+        }
+        prev = Some(a);
+        un.push(v2(-r0 * a, hypot2(dx, dy)));
+    }
+    let map = |q: V2| {
+        let a = -q.x / r0;
+        v2(c.x + q.y * jsnum::cos(a), c.y + q.y * jsnum::sin(a))
+    };
+    let step = POLAR_STEP * r0;
+    f(&un, &flat)
+        .into_iter()
+        .map(|run| {
+            let mut out = Vec::with_capacity(run.len());
+            for (i, q) in run.iter().enumerate() {
+                if i > 0 {
+                    let p = run[i - 1];
+                    let n = ((q.x - p.x).abs() / step).ceil().clamp(1.0, 4096.0) as usize;
+                    for k in 1..n {
+                        let t = k as f64 / n as f64;
+                        out.push(map(v2(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t)));
+                    }
+                }
+                out.push(map(*q));
+            }
+            out
+        })
+        .collect()
 }
 
 // ── Zickzack / Motiv ────────────────────────────────────────────────────────
@@ -935,7 +996,47 @@ mod tests {
             length_max: None,
             dash: Vec::new(),
             motif: None,
+            polar: None,
         }
+    }
+
+    /// [T2] Polare Schraffur: Linien parallel zur Tangente (Winkel 0 ⇒ Linien entlang x der Abwicklung)
+    /// liegen im Kreisring auf konzentrischen Kreisen.
+    #[test]
+    fn polare_schraffur_folgt_dem_kreis() {
+        // Viertel-Kreisring r 2…3 um (1, 1).
+        let c = v2(1.0, 1.0);
+        let mut ring = Vec::new();
+        for i in 0..=30 {
+            let a = PI / 2.0 * i as f64 / 30.0;
+            ring.push(v2(c.x + 3.0 * a.cos(), c.y + 3.0 * a.sin()));
+        }
+        for i in (0..=30).rev() {
+            let a = PI / 2.0 * i as f64 / 30.0;
+            ring.push(v2(c.x + 2.0 * a.cos(), c.y + 2.0 * a.sin()));
+        }
+        // Musterlinien quer (Winkel so, dass sie entlang der Abwicklung laufen): jede Linie hat einen Radius.
+        let mut h = hatch(Pattern::Diagonal);
+        h.polar = Some((c, 2.5));
+        let mut best = 0usize;
+        for ang in [0.0, 45.0, 90.0, 135.0] {
+            h.angle = ang;
+            let runs = build_hatch_runs(&ring, &h);
+            assert!(!runs.is_empty());
+            // Alle Punkte im Ring.
+            for r in &runs {
+                for q in r {
+                    let d = hypot2(q.x - c.x, q.y - c.y);
+                    assert!(d > 2.0 - 1e-6 && d < 3.0 + 1e-6, "{d}");
+                }
+            }
+            let circles = runs.iter().filter(|r| r.len() > 10 && {
+                let d0 = hypot2(r[0].x - c.x, r[0].y - c.y);
+                r.iter().all(|q| (hypot2(q.x - c.x, q.y - c.y) - d0).abs() < 1e-9)
+            }).count();
+            best = best.max(circles);
+        }
+        assert!(best >= 3, "eine Richtung liefert konzentrische Bögen: {best}");
     }
 
     #[test]

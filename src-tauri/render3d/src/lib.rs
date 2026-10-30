@@ -1011,6 +1011,7 @@ mod tests {
     /// Ein flaches Dreieck auf Modell-Hoehe `z` (Modell x,y,z=Hoehe).
     fn flat_context_tri(z: f32, kind: MeshKind, color: Option<[f32; 3]>) -> MeshInput {
         MeshInput {
+            crease_angle: None,
             positions: vec![0.0, 0.0, z, 1.0, 0.0, z, 0.0, 1.0, z],
             indices: vec![0, 1, 2],
             kind,
@@ -1105,6 +1106,7 @@ mod tests {
         append_context_mesh(
             &mut mesh,
             &MeshInput {
+            crease_angle: None,
                 positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
                 indices: vec![0, 1, 2],
                 kind: MeshKind::Terrain,
@@ -1126,6 +1128,7 @@ mod tests {
         append_context_mesh(
             &mut mesh2,
             &MeshInput {
+            crease_angle: None,
                 positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
                 indices: vec![0, 1, 2],
                 kind: MeshKind::Terrain,
@@ -1147,6 +1150,7 @@ mod tests {
         // war er fuer ALLE Kontext-Meshes hart auf -1 (Schachbrett) gesetzt, der
         // Stil „Textured" konnte also nie eine echte Dachziegel-Textur zeigen.
         let m = MeshInput {
+            crease_angle: None,
             positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
             indices: vec![0, 1, 2],
             kind: MeshKind::Extrusion,
@@ -1171,6 +1175,7 @@ mod tests {
         append_context_mesh(
             &mut mesh,
             &MeshInput {
+            crease_angle: None,
                 positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
                 indices: vec![0, 1, 9],
                 kind: MeshKind::Imported,
@@ -1184,6 +1189,7 @@ mod tests {
         append_context_mesh(
             &mut mesh,
             &MeshInput {
+            crease_angle: None,
                 positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0],
                 indices: vec![0, 1, 2],
                 kind: MeshKind::Imported,

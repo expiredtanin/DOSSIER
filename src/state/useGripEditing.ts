@@ -9,7 +9,7 @@ import { useRef, useState, type RefObject } from "react";
 import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
-import { bulgeArcPoints, drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo } from "../core";
+import { bulgeArcPoints, drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo, wallArcBand } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
 import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
 import { areaMovePreview, drawingMovePreview } from "../tools/transform";
@@ -962,8 +962,12 @@ export function useGripEditing(opts: {
       const th = wt ? wallTypeThickness(wt) : 0.2;
       const a = pw.localIndex === 0 ? pw.pt : w.start;
       const b = pw.localIndex === 0 ? w.end : pw.pt;
-      // Bogenwand: der Bogen behält seinen Öffnungswinkel (Bulge), Vorschau als Achse.
-      if (w.bulge) return [{ kind: "poly", pts: bulgeArcPoints(a, b, w.bulge), closed: false }];
+      // Bogenwand: der Bogen behält seinen Öffnungswinkel (Bulge), Vorschau als Band samt Achse.
+      if (w.bulge) {
+        const arc = wallArcBand(a, b, w.bulge, th);
+        if (arc) return [{ kind: "poly", pts: arc.band, closed: true }, { kind: "poly", pts: arc.axis, closed: false }];
+        return [{ kind: "poly", pts: bulgeArcPoints(a, b, w.bulge), closed: false }];
+      }
       return [
         { kind: "poly", pts: wallCorners(a, b, th), closed: true },
         { kind: "line", a, b },

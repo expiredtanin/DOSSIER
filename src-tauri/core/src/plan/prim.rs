@@ -35,6 +35,9 @@ pub struct HatchRender {
     pub length_max: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub motif: Option<HatchStyleMotif>,
+    /// [T2] Polare Schraffur (Bogenwand-Schicht): `[Mitte x, Mitte y, Bezugsradius]`, s. `hatch::Hatch::polar`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polar: Option<[f64; 3]>,
 }
 
 /// Zeile unter dem Raum-Stempel.

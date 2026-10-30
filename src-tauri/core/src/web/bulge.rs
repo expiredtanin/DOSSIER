@@ -32,3 +32,16 @@ pub fn bulge_from_sagitta_point(ax: f64, ay: f64, bx: f64, by: f64, px: f64, py:
 pub fn bulge_point_at(ax: f64, ay: f64, bx: f64, by: f64, bulge: f64, t: f64) -> Vec<f64> {
     b::point_at(ax, ay, bx, by, bulge, t)
 }
+
+/// [T2] Band einer Bogenwand (Dicke `t` mittig) für Vorschauen: `[nBand, x, y…(Band), x, y…(Achse)]`;
+/// leer = gerade oder entartet.
+#[wasm_bindgen]
+pub fn wall_arc_band(ax: f64, ay: f64, bx: f64, by: f64, bulge: f64, t: f64) -> Vec<f64> {
+    if !t.is_finite() || t < 0.0 {
+        return Vec::new();
+    }
+    let Some((band, axis)) = crate::wall_arc::band_preview((ax, ay), (bx, by), Some(bulge), t) else { return Vec::new() };
+    let mut out = vec![band.len() as f64];
+    out.extend(band.iter().chain(&axis).flat_map(|q| [q.0, q.1]));
+    out
+}

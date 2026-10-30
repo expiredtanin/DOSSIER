@@ -130,6 +130,7 @@ function writeHatch(w: F64Writer, h: HatchRender, colorIdx: number): void {
   if (h.lengthMin != null) flags |= 16;
   if (h.lengthMax != null) flags |= 32;
   if (h.motif) flags |= 64;
+  if (h.polar) flags |= 128;
   const o = w.reserve(13);
   const b = w.buf;
   b[o] = PATTERN_CODE[h.pattern] ?? 2;
@@ -150,6 +151,7 @@ function writeHatch(w: F64Writer, h: HatchRender, colorIdx: number): void {
     w.push(h.motif.length);
     w.pts(h.motif.points);
   }
+  if (h.polar) for (const v of h.polar) w.push(v);
 }
 
 /** Einzelne Schraffur kodieren (Farbe −1) — Eingabe der Schraffur-Bindungen des Kerns. */
@@ -550,6 +552,7 @@ export function decodePlanBuf(input: Uint8Array): DecodedPlanBuf {
     const hf = f[k + 3];
     k += 15 + f[k + 14];
     if (hf & 64) k += 2 + 2 * f[k + 1];
+    if (hf & 128) k += 3; // [T2] polare Schraffur: Mitte, Bezugsradius
     if (!(k <= groupAt)) bad("Schraffuren");
   }
   if (k !== groupAt) bad("Schraffuren");
