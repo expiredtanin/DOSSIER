@@ -15,6 +15,7 @@ import "svg2pdf.js";
 import type { Layout, MasterLayout, Project } from "../model/types";
 import { generatePlan } from "../plan/generatePlan";
 import { planToPrintSvg } from "./planToPrintSvg";
+import { drawTablesPdf, sheetTables } from "./sheetTable";
 import { collectVisibleCodes } from "../model/types";
 import {
   findMaster,
@@ -168,6 +169,13 @@ async function renderPage(
     }
     const tb = resolveTitleBlock(project, layout, master);
     drawTitleBlock(doc, widthMm, heightMm, tb, layout.paper, layout.orientation);
+  }
+
+  // Lebendige Tabellen ([111]): Vektortext + Linien wie in der Blattansicht.
+  try {
+    drawTablesPdf(doc, sheetTables(project, layout.id));
+  } catch {
+    // Eine Tabelle, die nicht rechnet, darf die Seite nicht killen.
   }
 
   // 2D-Zeichnung des Blatts — ÜBER Viewports + Master, wie am Bildschirm.

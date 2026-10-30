@@ -8,9 +8,9 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 /// Flache Zeichnung (Format `plan_dxf::encode`). `opts` = `[Massstab, Schraffuren 0/1, cm 0/1,
 /// Papierbereich 0/1, minX, minY, maxX, maxY]`. Texte setzt der Kern aus dem Text-JSON der Puffer
-/// (`plan_text`), die Standard-Schrift kommt aus den Textstilen des Projekts.
+/// (`plan_text`); `table_labels` = Beschriftungen der Blatt-Tabellen als JSON; die Standard-Schrift kommt aus den Textstilen des Projekts.
 #[wasm_bindgen]
-pub fn plan_dxf_flat(doc: u32, segs: &[f64], opts: &[f64], floor: &str) -> Vec<u8> {
+pub fn plan_dxf_flat(doc: u32, segs: &[f64], opts: &[f64], floor: &str, table_labels: &str) -> Vec<u8> {
     let Ok([scale, hatches, cm, layout, min_x, min_y, max_x, max_y]) = <[f64; 8]>::try_from(opts) else { return Vec::new() };
     if !(scale.is_finite() && scale > 0.0) {
         return Vec::new();
@@ -27,6 +27,7 @@ pub fn plan_dxf_flat(doc: u32, segs: &[f64], opts: &[f64], floor: &str) -> Vec<u
             bounds: [min_x, min_y, max_x, max_y],
             default_font: crate::plan_text::default_font(p),
             floor: floor.to_string(),
+            table_labels: table_labels.to_string(),
         };
         collect(&mut parts, p, &o).map(|f| encode(&f))
     })

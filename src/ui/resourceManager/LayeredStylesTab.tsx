@@ -15,6 +15,7 @@
 import { useState } from "react";
 import type { CeilingType, Layer, Project, RoofType, WallType } from "../../model/types";
 import { WallTypeSwatch } from "../hatchPreview";
+import { UValueLine } from "../../panels/UValueRow";
 import type { SwatchLayer } from "../hatchPreview";
 import { t } from "../../i18n";
 import { DeleteButton, FieldRow, NumberField, SelectField } from "./fields";
@@ -42,6 +43,7 @@ function LayeredStyleDetail({
   style,
   project,
   orientation,
+  uKind,
   onPatch,
   onDelete,
   deleteTitle,
@@ -50,6 +52,8 @@ function LayeredStyleDetail({
   style: LayeredStyle;
   project: Project;
   orientation: "wall" | "ceiling";
+  /** Bauteilart für den U-Wert ([71]). */
+  uKind: "wall" | "ceiling" | "roof";
   onPatch: (patch: Partial<LayeredStyle>) => void;
   onDelete: () => void;
   deleteTitle: string;
@@ -98,6 +102,8 @@ function LayeredStyleDetail({
         />
         <DeleteButton onClick={onDelete} title={deleteTitle} />
       </div>
+
+      <UValueLine project={project} kind={uKind} layers={layers} />
 
       <div className="res-md-preview">
         <WallTypeSwatch
@@ -201,6 +207,7 @@ function LayeredStylesTab({
   project,
   types,
   orientation,
+  uKind,
   hintKey,
   emptyKey,
   placeholderKey,
@@ -212,6 +219,7 @@ function LayeredStylesTab({
   project: Project;
   types: LayeredStyle[];
   orientation: "wall" | "ceiling";
+  uKind: "wall" | "ceiling" | "roof";
   hintKey: string;
   emptyKey: string;
   placeholderKey: string;
@@ -261,6 +269,7 @@ function LayeredStylesTab({
               style={selected}
               project={project}
               orientation={orientation}
+              uKind={uKind}
               onPatch={(patch) => onPatch(selected.id, patch)}
               onDelete={() => onDelete(selected.id)}
               deleteTitle={t(deleteKeyPrefix, { name: selected.name })}
@@ -291,6 +300,7 @@ export function WallStylesTab({
       project={project}
       types={project.wallTypes}
       orientation="wall"
+      uKind="wall"
       hintKey="resources.wallStyles.hint"
       emptyKey="resources.wallStyles.empty"
       placeholderKey="resources.wallStyles.placeholder"
@@ -323,6 +333,7 @@ export function CeilingStylesTab({
       project={project}
       types={project.ceilingTypes ?? []}
       orientation="ceiling"
+      uKind="ceiling"
       hintKey="resources.ceilingStyles.hint"
       emptyKey="resources.ceilingStyles.empty"
       placeholderKey="resources.ceilingStyles.placeholder"
@@ -356,6 +367,7 @@ export function RoofStylesTab({
       project={project}
       types={project.roofTypes ?? []}
       orientation="ceiling"
+      uKind="roof"
       hintKey="resources.roofStyles.hint"
       emptyKey="resources.roofStyles.empty"
       placeholderKey="resources.roofStyles.placeholder"

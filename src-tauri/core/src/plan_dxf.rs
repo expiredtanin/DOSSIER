@@ -87,6 +87,8 @@ pub struct DxfOptions {
     /// Exportierte Ebene (Geschoss): Ansichtsfenster der Projekt-Layouts, die sie zeigen, kommen mit in
     /// den Papierbereich (`paper_layout`); leer = keine.
     pub floor: String,
+    /// Beschriftungen der Blatt-Tabellen ([111]) als JSON (Schlüssel → Text); leer = nur Kennungen.
+    pub table_labels: String,
 }
 
 /// Schrift eines Texts (Familie nach `font_name_of`, sonst Standard-Schrift).
@@ -1375,7 +1377,7 @@ fn sheets(cx: &mut Ctx, main: &mut Buf, layer_by_code: &HashMap<&str, String>) {
                     let mut parts = [Part::new(view, 0, len)?];
                     read_entries(&mut parts, 1.0, &cx.o.default_font)
                 }) {
-                    let o1 = DxfOptions { scale: 1.0, include_hatches: cx.o.include_hatches, dim_cm: cx.o.dim_cm, paper_layout: false, bounds: [0.0; 4], default_font: cx.o.default_font.clone(), floor: String::new() };
+                    let o1 = DxfOptions { scale: 1.0, include_hatches: cx.o.include_hatches, dim_cm: cx.o.dim_cm, paper_layout: false, bounds: [0.0; 4], default_font: cx.o.default_font.clone(), floor: String::new(), table_labels: String::new() };
                     let mut sub = Ctx { project: p, o: &o1, flat: std::mem::replace(&mut cx.flat, Flat::new()) };
                     let mut content = Buf::block();
                     emit_entries(&mut sub, &mut content, &entries, layer_by_code, false);
@@ -1394,6 +1396,32 @@ fn sheets(cx: &mut Ctx, main: &mut Buf, layer_by_code: &HashMap<&str, String>) {
         }
         if let Some(b) = block {
             let bs = cx.flat.str(&b);
+            cx.flat.push(main, &[REC_SHEET_INSERT, name_s, bs, 0.0, ph, 1000.0]);
+        }
+        // Blatt-Tabellen ([111]): Text und Linien als Block in Papier-Metern (wie die Blatt-Zeichnung).
+        let labels = crate::sheet_table::Labels::parse(&serde_json::from_str::<serde_json::Value>(&cx.o.table_labels).unwrap_or_default());
+        let tables = crate::sheet_table::render(p, layout, &labels);
+        if tables.iter().any(|t| !t.prims.is_empty()) {
+            let mut content = Buf::block();
+            for t in &tables {
+                for pr in &t.prims {
+                    match pr {
+                        crate::sheet_table::TPrim::Line { x1, y1, x2, y2, .. } => cx.flat.add_line(&mut content, "TABELLE", V2 { x: x1 / 1000.0, y: -y1 / 1000.0 }, V2 { x: x2 / 1000.0, y: -y2 / 1000.0 }),
+                        crate::sheet_table::TPrim::Text { x, y, s, size, bold, italic, font, align } => {
+                            let family = match *font {
+                                "serif" => "Times New Roman".to_string(),
+                                "mono" => "Courier New".to_string(),
+                                _ => cx.o.default_font.clone(),
+                            };
+                            let st = cx.flat.add_text_style(&format!("TABELLE_{font}{}{}", if *bold { "_B" } else { "" }, if *italic { "_I" } else { "" }), &family, *bold, *italic);
+                            cx.flat.add_text2(&mut content, "TABELLE", V2 { x: x / 1000.0, y: -y / 1000.0 }, size / 1000.0, 0.0, s, if *align == "r" { 2.0 } else { 0.0 }, st);
+                        }
+                    }
+                }
+            }
+            let bname = format!("SHEETTAB_{}", n + 1);
+            cx.flat.define_block(main, &bname, &name, &[], content);
+            let bs = cx.flat.str(&bname);
             cx.flat.push(main, &[REC_SHEET_INSERT, name_s, bs, 0.0, ph, 1000.0]);
         }
     }
@@ -1441,7 +1469,7 @@ mod tests {
         let view = View::parse(&buf).unwrap();
         let len = view.len();
         let mut parts = [Part::new(view, 0, len).unwrap()];
-        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: true, bounds: [0.0, 0.0, 10.0, 4.0], default_font: "Arial".into(), floor: "eg".into() };
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: true, bounds: [0.0, 0.0, 10.0, 4.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
         let f = collect(&mut parts, &p, &o).unwrap();
         let find = |rec: f64, n: usize| -> Vec<Vec<f64>> {
             f.nums.windows(n).filter(|w| w[0] == rec && f.strings.get(w[1] as usize).is_some_and(|s| s == "Blatt")).map(|w| w.to_vec()).collect()
@@ -1465,6 +1493,24 @@ mod tests {
         let mut parts = [Part::new(view, 0, len).unwrap()];
         let f2 = collect(&mut parts, &p, &o2).unwrap();
         assert!(!f2.nums.windows(2).any(|w| w[0] == REC_SHEET_VP && f2.strings.get(w[1] as usize).is_some_and(|s| s == "Blatt")));
+    }
+
+    /// [111] Blatt-Tabelle als Block mit Text und Linien, eingefügt oben links.
+    #[test]
+    fn blatt_tabelle_im_dxf() {
+        let mut v = crate::sheet_viewports::tests::json();
+        v["layouts"][0]["tables"] = serde_json::json!([{"id": "t", "source": "openings", "xMm": 10, "yMm": 20, "widthMm": 100}]);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let a = crate::plan::domains::PlanArgs::parse(1.0, r#"{"floor":"eg","show":["20"],"scale":100}"#).unwrap();
+        let buf = crate::plan::domains::plan_domains_buf(&p, &a).unwrap();
+        let view = View::parse(&buf).unwrap();
+        let len = view.len();
+        let mut parts = [Part::new(view, 0, len).unwrap()];
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: true, bounds: [0.0, 0.0, 10.0, 4.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: r#"{"openings.col.mark":"Nr."}"#.into() };
+        let f = collect(&mut parts, &p, &o).unwrap();
+        assert!(f.strings.iter().any(|s| s == "SHEETTAB_1"), "Tabellen-Block");
+        assert!(f.strings.iter().any(|s| s == "Nr."), "Kopf beschriftet");
+        assert!(f.nums.contains(&REC_TEXT2) && f.nums.contains(&REC_LINE));
     }
 
     #[test]

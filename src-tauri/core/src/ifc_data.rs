@@ -689,6 +689,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 let layers = wt.layers.iter().map(|l| (l.component_id.clone(), component_name(p, &l.component_id), l.thickness)).collect();
                 props.push(ident("Reference", &wt.name));
                 props.extend(structure_props(wall.is_external, wall.load_bearing));
+                props.extend(crate::u_value::wall_u_value(p, wall).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
                 let mut ps = vec![Pset { name: "Pset_WallCommon", props }];
                 ps.extend(q);
                 (wt.name.clone(), Some((wt.id.clone(), wt.name.clone(), layers)), ps)
@@ -857,6 +858,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             ty = Some((id.to_string(), tname.to_string(), layers.iter().map(|l| (l.component_id.clone(), component_name(&p, &l.component_id), l.thickness)).collect()));
             slab_props.push(ident("Reference", tname));
         }
+        slab_props.extend(crate::u_value::ceiling_u_value(&p, c).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
         slab_props.extend(structure_props(c.is_external, c.load_bearing));
         if !slab_props.is_empty() {
             psets.push(Pset { name: "Pset_SlabCommon", props: slab_props });
@@ -1080,6 +1082,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             props.push(ident("Reference", &t.name));
         }
         props.push(Prop::Bool("IsExternal", true));
+        props.extend(crate::u_value::roof_u_value(&p, roof).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
         let planes = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof)).planes;
         let mut psets = vec![Pset { name: "Pset_RoofCommon", props }];
         psets.extend(qto("Qto_RoofBaseQuantities", qty::roof_quantities(&planes)));
@@ -1260,6 +1263,25 @@ mod tests {
         let hit = f.nums.windows(6).any(|w| w[0] == 2.5 && w[1] == 0.0 && (w[2] - 2.5).abs() < 1e-12 && (w[3] - pi).abs() < 1e-12 && (w[4] + pi).abs() < 1e-12);
         assert!(hit, "Kreisachse fehlt");
         assert!(f.nums.contains(&REC_WALL_ARC));
+    }
+
+    /// [71] U-Wert aus dem Schichtaufbau landet als ThermalTransmittance in Pset_WallCommon (nur mit λ).
+    #[test]
+    fn u_wert_der_wand_im_pset() {
+        let count = |p: &Project| {
+            let f = ifc_export_data(p, &IfcOptions::default()).unwrap();
+            strings(&f).iter().filter(|x| *x == "ThermalTransmittance").count()
+        };
+        let mut p = sample();
+        for c in p.components.iter_mut() {
+            c.lambda = None;
+        }
+        p.openings = None;
+        let ohne = count(&p);
+        for c in p.components.iter_mut() {
+            c.lambda = Some(1.0);
+        }
+        assert!(count(&p) > ohne, "mit λ kommt der Wert dazu");
     }
 
     #[test]

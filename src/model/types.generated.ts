@@ -1515,6 +1515,8 @@ export type Layout = {
    * nicht im Layout (bis Format 2: `annotations`, s. `project_format::migrate_layout_annotations`).
    */
   viewports: Array<LayoutViewport>;
+  /** Lebendige Tabellen auf dem Blatt ([111]); fehlt = keine. */
+  tables?: Array<LayoutTable>;
 };
 
 /**
@@ -1559,6 +1561,45 @@ export type LayoutPaperFormat =
   | "b4"
   | "b5"
   | "b6";
+
+/**
+ * Eine lebendige Tabelle auf einem Layout-Blatt ([111]): zeigt eine Liste des Modells (Fenster/Türen,
+ * Flächen, Raumprogramm, Bauteile) im Rahmen `xMm`/`yMm`/`widthMm`/(`heightMm`). Ist `heightMm` gesetzt, zeigt
+ * die Tabelle nur so viele Zeilen, wie hineinpassen; `continues` verweist auf die vorige Tabelle, deren Rest sie zeigt.
+ */
+export type LayoutTable = {
+  id: string;
+  source: LayoutTableSource;
+  /** Linke Kante auf dem Blatt (mm, von links). */
+  xMm: number;
+  /** Obere Kante auf dem Blatt (mm, von oben). */
+  yMm: number;
+  /** Breite (mm). */
+  widthMm: number;
+  /** Höhe des Rahmens (mm); fehlt sie, zeigt die Tabelle alle Zeilen. */
+  heightMm?: number;
+  /**
+   * Gewählte Spalten (Kennungen der Quelle, in Reihenfolge); fehlt sie, gelten die Standard-Spalten.
+   */
+  columns?: Array<string>;
+  /** Einschränkung der Quelle: Öffnungen "window"/"door". */
+  filter?: string;
+  /** Textstil ({@link TextStylePreset.id}): Schrift, Grösse, fett. */
+  textStyleId?: string;
+  /** Schriftgrösse in pt (übersteuert den Textstil); Standard 8. */
+  fontSizePt?: number;
+  /** Zeilenhöhe in mm; Standard 1.9 × Schrifthöhe. */
+  rowHeightMm?: number;
+  /** Linien: "grid" (Standard), "rows" (nur waagrecht), "outer" (Rahmen + Kopflinie), "none". */
+  borders?: string;
+  /** Kopfzeile zeigen (Standard ja). */
+  header?: boolean;
+  /** Vorige Tabelle ({@link LayoutTable.id}), deren übrige Zeilen diese Tabelle zeigt. */
+  continues?: string;
+};
+
+/** Quelle einer Blatt-Tabelle ([111]). */
+export type LayoutTableSource = "openings" | "areas" | "rooms" | "elements";
 
 /**
  * Einfache Textfelder des Titelblocks (Master). Alle optional — leere Felder

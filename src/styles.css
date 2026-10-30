@@ -7653,6 +7653,34 @@ body {
   gap: 5px;
 }
 
+/* Tabellen-Eigenschaften ([111]): rechts oben, damit das Blatt links frei bleibt. */
+.layout-sheet-hud-table {
+  left: auto;
+  right: 12px;
+  top: 12px;
+  bottom: auto;
+  width: 260px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+}
+.layout-sheet-hud-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted, #6e6e6e);
+}
+.layout-sheet-hud-cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.layout-sheet-hud-cols label {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
 /* Leer-Hinweis (keine Ausschnitte / keine Viewports). */
 .layout-sheet-empty {
   position: absolute;
