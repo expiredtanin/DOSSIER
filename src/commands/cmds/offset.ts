@@ -1,4 +1,4 @@
-// Offset — DAS Architektur-Primitiv (docs §2.10/§3.4 Tier-1, §3.6 persistente
+// Offset — DAS Architektur-Primitiv (auch für Wände, [113]) (docs §2.10/§3.4 Tier-1, §3.6 persistente
 // Distanz). Erzeugt eine parallel versetzte Kopie einer 2D-Kurve (line/polyline/
 // rect). Schritte:
 //   1) Kurve bestimmen: ist genau EIN passendes Drawing2D (line/polyline/rect)
@@ -50,16 +50,24 @@ function isOffsetable(d: Drawing2D): boolean {
   return g.shape === "line" || g.shape === "polyline" || g.shape === "rect";
 }
 
-/** Genau ein passendes Drawing2D vorselektiert? Dann liefere es. */
-function singleSelectedCurve(project: Project, sel: CommandSelection): Drawing2D | null {
+/**
+ * Genau ein passendes Element vorselektiert? Dann liefere seine id: ein offset-fähiges Drawing2D oder
+ * genau eine Wand ([113]: parallele, bei Bogenwänden konzentrische Kopie im Achsabstand).
+ */
+function singleSelectedCurve(project: Project, sel: CommandSelection): { id: string } | null {
+  if (!sel.drawingId && sel.wallIds.length === 1) {
+    const w = project.walls.find((x) => x.id === sel.wallIds[0]);
+    return w && !w.locked ? { id: w.id } : null;
+  }
   if (!sel.drawingId || sel.wallIds.length > 0) return null;
   const d = project.drawings2d.find((x) => x.id === sel.drawingId);
   if (d && isOffsetable(d)) return d;
   return null;
 }
 
-/** Gibt es die Kurve noch (Side-Zustand)? */
+/** Gibt es die Kurve (oder Wand) noch (Side-Zustand)? */
 function hasCurve(project: Project, drawingId: string): boolean {
+  if (project.walls.some((w) => w.id === drawingId)) return true;
   const src = project.drawings2d.find((x) => x.id === drawingId);
   return !!src && isOffsetable(src);
 }

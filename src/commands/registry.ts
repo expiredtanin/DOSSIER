@@ -59,6 +59,7 @@ import { revolveCommand } from "./cmds/revolve";
 import { loftCommand } from "./cmds/loft";
 import { trimCommand } from "./cmds/trim";
 import { breakCommand } from "./cmds/break";
+import { splitCommand } from "./cmds/split";
 import { extendCommand } from "./cmds/extend";
 import { filletCommand } from "./cmds/fillet";
 import { chamferCommand } from "./cmds/chamfer";
@@ -133,6 +134,7 @@ export const COMMANDS: Record<string, Command> = {
   loft: loftCommand,
   trim: trimCommand,
   break: breakCommand,
+  split: splitCommand,
   extend: extendCommand,
   fillet: filletCommand,
   chamfer: chamferCommand,
@@ -271,6 +273,7 @@ export const ALIASES: Record<string, string> = {
   tr: "trim",
   br: "break",
   unterbrechen: "break",
+  teilen: "split",
   ext: "extend",
   verlaengern: "extend",
   verlängern: "extend",

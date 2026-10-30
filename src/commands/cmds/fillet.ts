@@ -5,6 +5,8 @@
 //   1) „Ecke wählen:" → Punkt (nächstgelegener Eckpunkt einer polyline/rect
 //      wird gewählt; ein einzelnes `line`-Element hat keine eigene Ecke)
 //   2) „Radius:"       → Punkt (Abstand von der Ecke) ODER getippte Zahl → commit
+//   Wände ([113]): trifft der erste Klick keine Ecke, aber eine Wand, folgt „Zweite Wand“ (Zahl =
+//   Radius, Vorgabe 0 = L-Ecke am Achsschnittpunkt; Radius nur bei geraden Wänden → Bogenwand).
 //
 // Die Verrundung wird als ECHTES Bogen-Segment gespeichert (`bulge`, s.
 // `geometry/bulge.ts`), nicht mehr tesselliert — editierbar wie jeder andere
@@ -26,6 +28,7 @@ import type {
   Vec2,
 } from "../types";
 import { cornerPreview, pickCorner } from "./cornerHit";
+import { cmdQuery, decodeShapes, pair } from "../../tools/coreCmd";
 import type { CornerHit } from "./cornerHit";
 
 const DEFAULT_RADIUS = 0.1; // m — Startwert, bis der Nutzer per Maus/Tab einen eigenen setzt
@@ -53,7 +56,25 @@ interface FilletRadius extends CommandState {
 interface FilletDone extends CommandState {
   phase: "done";
 }
-type FilletState = FilletPick | FilletRadius | FilletDone;
+/**
+ * Wände ([113]): erste Wand getroffen (statt einer Polylinien-Ecke), jetzt die zweite wählen. Beide
+ * werden bis zum Achsschnittpunkt gestutzt/verlängert (L-Ecke); mit Radius > 0 (nur gerade Wände)
+ * schliesst eine Bogenwand tangential an.
+ */
+interface FilletWall2 extends CommandState {
+  phase: "wall2";
+  wall: string;
+  p1: Vec2;
+}
+type FilletState = FilletPick | FilletRadius | FilletDone | FilletWall2;
+
+/** Radius der Wand-Verrundung (0 = scharfe L-Ecke), bleibt über Aufrufe. */
+let wallRadius = 0;
+
+function wallDraft(ctx: CommandContext, s: FilletWall2, point: Vec2): ToolDraft | null {
+  const r = cmdQuery<{ hit: boolean; shapes: number[] }>(ctx.project, { q: "filletWalls", level: ctx.level.id, id: s.wall, p1: pair(s.p1), pt: pair(point), r: wallRadius });
+  return { preview: decodeShapes(r.shapes), vertices: [s.p1], hud: { at: point, text: `R: ${wallRadius.toFixed(3)}m${r.hit ? "" : " ✗"}` } };
+}
 
 const finish = (): [CommandState, CommandResult] => [
   { phase: "done", lastPoint: null } as FilletDone,
@@ -63,8 +84,11 @@ const finish = (): [CommandState, CommandResult] => [
 export const filletCommand: Command = {
   name: "fillet",
   labelKey: "cmd.fillet.label",
-  prompt: (s) => ((s as FilletState).phase === "radius" ? "cmd.fillet.radius" : "cmd.fillet.pick"),
-  accepts: (s) => ((s as FilletState).phase === "radius" ? ["point", "number"] : ["point"]),
+  prompt: (s) => {
+    const ph = (s as FilletState).phase;
+    return ph === "radius" ? "cmd.fillet.radius" : ph === "wall2" ? "cmd.fillet.wall2" : "cmd.fillet.pick";
+  },
+  accepts: (s) => ((s as FilletState).phase === "radius" || (s as FilletState).phase === "wall2" ? ["point", "number"] : ["point"]),
   options: () => [],
   fields: (s) => ((s as FilletState).phase === "radius" ? RADIUS_FIELDS : []),
 
@@ -76,9 +100,27 @@ export const filletCommand: Command = {
     if (s.phase === "pick") {
       if (input.kind !== "point") return [s, { draft: null }];
       const { hit, preview } = pickCorner(ctx.project, ctx.level.id, input.point, "fillet", DEFAULT_RADIUS);
-      if (!hit) return [s, { draft: null }]; // daneben geklickt → aktiv bleiben
+      if (!hit) {
+        const wall = cmdQuery<{ hit: string | null }>(ctx.project, { q: "pickWall", level: ctx.level.id, pt: pair(input.point) }).hit;
+        if (!wall) return [s, { draft: null }]; // daneben geklickt → aktiv bleiben
+        const w2: FilletWall2 = { phase: "wall2", wall, p1: input.point, lastPoint: input.point };
+        return [w2, { draft: { preview: [], vertices: [input.point] } }];
+      }
       const next: FilletRadius = { phase: "radius", hit, radius: DEFAULT_RADIUS, lastPoint: input.point };
       return [next, { draft: filletDraft(hit, preview, next.radius, input.point) }];
+    }
+    if (s.phase === "wall2") {
+      if (input.kind === "number") {
+        wallRadius = Math.max(0, input.value);
+        return [s, { draft: null }];
+      }
+      if (input.kind !== "point") return [s, { draft: null }];
+      const id2 = cmdQuery<{ hit: string | null }>(ctx.project, { q: "pickWall", level: ctx.level.id, pt: pair(input.point) }).hit;
+      if (!id2 || id2 === s.wall) return [s, { draft: null }];
+      return [
+        { phase: "done", lastPoint: null } as FilletDone,
+        { draft: null, done: true, commit: cmdMutation({ cmd: "filletWalls", id: s.wall, p1: pair(s.p1), id2, p2: pair(input.point), r: wallRadius }) },
+      ];
     }
     // phase === "radius"
     let r = s.radius;
@@ -98,6 +140,7 @@ export const filletCommand: Command = {
       if (!hit) return [s, { draft: null }];
       return [s, { draft: filletDraft(hit, preview, DEFAULT_RADIUS, point) }];
     }
+    if (s.phase === "wall2") return [s, { draft: wallDraft(ctx, s, point) }];
     if (s.phase !== "radius") return [s, { draft: null }];
     const r = Math.max(0, dist(s.hit.corner, point));
     const ns: FilletRadius = { ...s, radius: r };

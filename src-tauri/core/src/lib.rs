@@ -119,6 +119,7 @@ pub mod import_context;
 pub mod import_ifc;
 pub mod cmd_paste;
 pub mod cmd_split;
+pub mod cmd_wall_edit;
 pub mod snap_model;
 pub mod solid_specs;
 pub mod highlight3d;

@@ -37,7 +37,8 @@ export const joinCommand: Command = {
 
   // Sofort auf der Auswahl ausführen (kein Pick nötig).
   autoRun: (ctx: CommandContext): CommandResult => {
-    const ids = selectedDrawingIds(ctx.selection);
+    // Wände ([113]): kollineare (gleiche Laufrichtung) bzw. Bögen auf demselben Kreis werden eine Wand.
+    const ids = [...selectedDrawingIds(ctx.selection), ...ctx.selection.wallIds];
     if (ids.length < 2) return { draft: null, done: true };
     return { draft: null, done: true, commit: cmdMutation({ cmd: "join", ids, stamp: uniqueStamp() }) };
   },

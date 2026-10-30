@@ -1893,6 +1893,11 @@ export const en: Record<TranslationKey, string> = {
   "cmd.fillet.label": "Fillet",
   "cmd.fillet.pick": "Select corner:",
   "cmd.fillet.radius": "Radius:",
+  "cmd.fillet.wall2": "Select second wall (number = radius):",
+  "cmd.wallEdit.faceOpt": "Face",
+  "cmd.split.label": "Split",
+  "cmd.split.pick": "Click the wall or line at the split point (Esc to finish):",
+  "cmd.split.interOpt": "Intersections",
   // Chamfer: corner bevel with a distance (mouse or typed) — like Fillet, no arc.
   "cmd.chamfer.label": "Chamfer",
   "cmd.chamfer.pick": "Select corner:",

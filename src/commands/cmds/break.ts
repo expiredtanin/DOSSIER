@@ -10,6 +10,8 @@
 //   2) „Zweiter Punkt:" → Punkt (Position auf DERSELBEN Kurve) → commit:
 //      der Abschnitt zwischen beiden Positionen (Klick-Reihenfolge egal)
 //      fällt weg, bis zu zwei Reststücke bleiben.
+//   Wände ([113], gerade und Bogen) ebenso: das Stück dazwischen entfällt, Öffnungen bleiben am
+//   richtigen Reststück (Lage umgerechnet), Bemassungs-Bezüge werden umgehängt.
 //
 // Bewusst NICHT unterstützt (Klick auf eine geschlossene Kurve oder eine mit
 // Bogen-Segmenten bricht NICHT ab, sondern bleibt im ersten Schritt — sonst

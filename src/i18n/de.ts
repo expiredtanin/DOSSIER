@@ -1905,6 +1905,11 @@ export const de = {
   "cmd.fillet.label": "Verrunden",
   "cmd.fillet.pick": "Ecke wählen:",
   "cmd.fillet.radius": "Radius:",
+  "cmd.fillet.wall2": "Zweite Wand wählen (Zahl = Radius):",
+  "cmd.wallEdit.faceOpt": "Fläche",
+  "cmd.split.label": "Teilen",
+  "cmd.split.pick": "Wand oder Linie an der Teilstelle anklicken (Esc beendet):",
+  "cmd.split.interOpt": "Schnittpunkte",
   // Chamfer: Eckpunkt-Fasung mit Distanz (Maus oder getippt) — wie Fillet, ohne Bogen.
   "cmd.chamfer.label": "Fasen",
   "cmd.chamfer.pick": "Ecke wählen:",
