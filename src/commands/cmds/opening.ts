@@ -29,15 +29,15 @@ const DEF_WINDOW = { width: 1.2, height: 1.2, sill: 0.9 };
 const DEF_DOOR = { width: 0.9, height: 2.1, sill: 0 };
 
 /** Nächste Wand des Geschosses zum Klickpunkt (Kern): id, Achse und Abstand des Fusspunkts vom Anfang. */
-function pickWall(ctx: CommandContext, p: Vec2): { id: string; start: Vec2; end: Vec2; t: number } | null {
-  const r = createQuery<{ hit: { id: string; start: [number, number]; end: [number, number]; t: number } | null }>(ctx.project, {
+function pickWall(ctx: CommandContext, p: Vec2): { id: string; start: Vec2; end: Vec2; t: number; bulge?: number } | null {
+  const r = createQuery<{ hit: { id: string; start: [number, number]; end: [number, number]; t: number; bulge?: number } | null }>(ctx.project, {
     q: "pickWall",
     level: ctx.level.id,
     pt: xy(p),
   });
   if (!r.hit) return null;
-  const { id, start, end, t } = r.hit;
-  return { id, start: { x: start[0], y: start[1] }, end: { x: end[0], y: end[1] }, t };
+  const { id, start, end, t, bulge } = r.hit;
+  return { id, start: { x: start[0], y: start[1] }, end: { x: end[0], y: end[1] }, t, bulge };
 }
 
 /** Tab-Felder im Positionsschritt: Breite/Höhe/Brüstung (+ Winkel bei Tür). */
@@ -69,6 +69,8 @@ interface OpPos extends CommandState {
   wallId: string;
   start: Vec2;
   end: Vec2;
+  /** Bogenwand ([T2]): Bulge der Host-Wand; die Position gilt dann als Bogenlänge. */
+  bulge?: number;
   cursor: Vec2 | null;
   posAlong: number; // Abstand vom Wandanfang (Meter)
   kind: "window" | "door";
@@ -104,6 +106,7 @@ const openingReq = (s: OpPos, pos: number | null) => ({
   wall: s.wallId,
   start: xy(s.start),
   end: xy(s.end),
+  bulge: s.bulge ?? null,
   kind: s.kind,
   hinge: s.hinge,
   side: s.side,
@@ -212,6 +215,7 @@ export const openingCommand: Command = {
         wallId: w.id,
         start: w.start,
         end: w.end,
+        bulge: w.bulge,
         cursor: pt,
         posAlong: w.t,
         kind: s.kind,

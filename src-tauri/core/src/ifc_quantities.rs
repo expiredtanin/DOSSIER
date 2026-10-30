@@ -149,6 +149,41 @@ pub fn wall_quantities(start: Vec2, end: Vec2, bands: &[&RWall], cutouts: &[Cuto
     out
 }
 
+/// Bogenwand-Basismengen ([T2]) exakt aus der Kreisgeometrie: Length = Bogenlänge der Achse, Width =
+/// Dicke, GrossSideArea = Länge × Höhe, GrossVolume = Kreisringsektor (Fläche ½·θ·(R_a² − R_i²) mit den
+/// Flächenradien) × Höhe; Öffnungen als Ringsektoren über ihre Bogenlänge auf der Achse. `n_lo`/`n_hi`:
+/// Querbereich der Schichten zur Achse; `net_volume` wie bei [`wall_quantities`].
+pub fn arc_wall_quantities(arc: &crate::wall_arc::WallArc, n_lo: f64, n_hi: f64, z_bottom: f64, z_top: f64, cutouts: &[Cutout], net_volume: Option<f64>) -> Vec<Qty> {
+    let length = arc.length();
+    let h = z_top - z_bottom;
+    let theta = arc.sweep.abs();
+    let (r1, r2) = (arc.radius_at(n_lo), arc.radius_at(n_hi));
+    // Ringfläche je Bogenlänge auf der Achse: ½·(R_a² − R_i²)/R.
+    let ring_per_s = (r1 * r1 - r2 * r2).abs() / 2.0 / arc.r;
+    let mut gross = theta * (r1 * r1 - r2 * r2).abs() / 2.0 * h;
+    let gross_side = length * h;
+    let mut cut_side = 0.0;
+    let mut cut_volume = 0.0;
+    for c in cutouts {
+        let z = overlap(c.z_bottom, c.z_top, z_bottom, z_top);
+        cut_side += (c.to - c.from) * z;
+        cut_volume += (c.to - c.from) * ring_per_s * z;
+    }
+    let net = net_volume.unwrap_or_else(|| max(0.0, gross - cut_volume));
+    gross = max(gross, net);
+    let mut out = vec![len("Length", length), len("Width", n_hi - n_lo)];
+    if h > 0.0 {
+        out.push(len("Height", h));
+    }
+    out.extend([
+        area("GrossSideArea", gross_side),
+        area("NetSideArea", max(0.0, gross_side - cut_side)),
+        vol("GrossVolume", gross),
+        vol("NetVolume", net),
+    ]);
+    out
+}
+
 /// Brutto-Volumen der Löcher in den Bändern (für Netz-Wände ohne dichtes Netz).
 pub fn hole_volume(bands: &[&RWall]) -> f64 {
     let mut v = 0.0;
@@ -257,6 +292,7 @@ mod tests {
             cut: None,
             start_cut: None,
             end_cut: None,
+            joint: [false; 2],
         }
     }
 
@@ -342,6 +378,21 @@ mod tests {
         assert!(get(&q, "Height").is_none());
         assert!(close(get(&q, "GrossSideArea"), 4.0 * 2.5));
         assert!(close(get(&q, "GrossVolume"), 4.0 * 0.3 * 2.5));
+    }
+
+    /// [T2] Bogenwand: Halbkreis R 5, Dicke 0.3, Höhe 2.5, eine Öffnung 1.2 × 1.0.
+    #[test]
+    fn bogenwand_mengen_exakt() {
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(0.0, 0.0), kernel2d::Vec2::new(10.0, 0.0), Some(1.0)).unwrap();
+        let q = arc_wall_quantities(&a, -0.15, 0.15, 0.0, 2.5, &[Cutout { from: 2.0, to: 3.2, z_bottom: 1.0, z_top: 2.0 }], None);
+        let pi = std::f64::consts::PI;
+        assert!(close(get(&q, "Length"), 5.0 * pi));
+        assert!(close(get(&q, "Width"), 0.3));
+        assert!(close(get(&q, "GrossSideArea"), 5.0 * pi * 2.5));
+        assert!(close(get(&q, "NetSideArea"), 5.0 * pi * 2.5 - 1.2));
+        // ½·π·(5.15² − 4.85²)·2.5 = π·5·0.3·2.5
+        assert!(close(get(&q, "GrossVolume"), pi * 5.0 * 0.3 * 2.5));
+        assert!(close(get(&q, "NetVolume"), pi * 5.0 * 0.3 * 2.5 - 1.2 * 0.3 * 1.0));
     }
 
     #[test]

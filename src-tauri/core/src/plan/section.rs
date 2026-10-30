@@ -610,6 +610,10 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
 #[allow(clippy::type_complexity)]
 fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f64) -> (Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>, Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>) {
     let (mut top, mut bottom) = (None, None);
+    // Bogenwände: kein Schichteinzug ([106] gilt nur gerade).
+    if crate::wall_arc::is_arc_bulge(wall.bulge) {
+        return (None, None);
+    }
     let u_raw = plane.u_model();
     let l = hypot2(u_raw.0, u_raw.1);
     if !(l > 1e-12) {
@@ -818,7 +822,8 @@ fn shaped_wall_cuts(cuts: &mut [Cut], p: &Project, walls_r: &[RWall], base: (f64
     }
     let u = (u.0 / ul, u.1 / ul);
     for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| crate::opening_shape::is_shaped(o)) {
-        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
+        // Formöffnungen in Bogenwänden bleiben im Schnitt rechteckig ([T2], offen).
+        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id && !crate::wall_arc::is_arc_bulge(w.bulge)) else { continue };
         let Some((from, to)) = opening_interval(wall, o) else { continue };
         let (a, _) = axis_frame(wall);
         let den = a.0 * u.1 - a.1 * u.0;
@@ -1272,7 +1277,16 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
 
     shaped_wall_cuts(&mut cuts, p, &walls_r, plane.base(), plane.u_model());
     append_roof_sections(&mut cuts, p, &plane);
-    let walls = wall_owners(p, &walls_r);
+    let owners = wall_owners(p, &walls_r);
+    // Bogenwand ([T2]): Schichtfolge quer zum Schnitt aus der Richtung des Sehnen-Teilkörpers.
+    let virt: Vec<Option<Wall>> = walls_r
+        .iter()
+        .zip(&owners)
+        .map(|(r, o)| {
+            o.filter(|w| crate::wall_arc::WallArc::of_wall(w).is_some()).map(|w| Wall { start: Vec2 { x: r.start[0], y: r.start[1] }, end: Vec2 { x: r.end[0], y: r.end[1] }, ..w.clone() })
+        })
+        .collect();
+    let walls: Vec<Option<&Wall>> = owners.iter().zip(&virt).map(|(o, v)| v.as_ref().or(*o)).collect();
     let slabs = slab_owners(p, &slabs_r);
     let cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
     let cuts = merge_monolith_cuts(cuts, &slabs_r);
@@ -1812,6 +1826,20 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
         if !vis.visible(&wall.category_code) {
             continue;
         }
+        // Bogenwand ([T2]): Öffnung auf der Sehne zwischen den Laibungen (gerades Einbauteil).
+        let chord = crate::wall_arc::WallArc::of_wall(wall).map(|a| {
+            let axis = a.length();
+            let from = max(0.0, min(o.position, axis));
+            let to = max(from, min(o.position + o.width, axis));
+            let (ps, pe) = (a.point(from, 0.0), a.point(to, 0.0));
+            let vw = Wall { start: Vec2 { x: ps.x, y: ps.y }, end: Vec2 { x: pe.x, y: pe.y }, bulge: None, ..wall.clone() };
+            let vo = Opening { position: 0.0, width: hypot2(pe.x - ps.x, pe.y - ps.y), ..o.clone() };
+            (vw, vo)
+        });
+        let (wall, o) = match &chord {
+            Some((vw, vo)) => (vw, vo),
+            None => (wall, o),
+        };
         let Some(c) = cross_section(p, wall, o, p0, u)? else { continue };
         let mut prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(p, o, &c) };
         prims.extend(rebate_cut(p, wall, o, &c)?);

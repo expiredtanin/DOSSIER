@@ -598,4 +598,78 @@ mod tests {
         assert!(g.positions.iter().all(|v| v.is_finite()));
         assert_eq!(g.positions.len(), 12);
     }
+
+    /// Körper einer Wandliste als (Volumen, alle dicht).
+    fn bodies(walls: &[RWall]) -> (f64, bool) {
+        let mut vol = 0.0;
+        let mut tight = true;
+        for w in walls {
+            let mut g = Prim { material: 0.0, positions: vec![], indices: vec![] };
+            push_wall_box(&mut g, w);
+            let idx: Vec<u32> = g.indices.iter().map(|&i| i as u32).collect();
+            tight &= crate::wall_mesh_cut::is_watertight(&g.positions, &idx, 1e-9);
+            vol += crate::export_flat::mesh_volume(&g.positions, &idx).abs();
+        }
+        (vol, tight)
+    }
+
+    fn arc_project() -> Project {
+        let mut p = sample();
+        p.openings = Some(vec![]);
+        p.ceilings = Some(vec![]);
+        p.roofs = Some(vec![]);
+        p.walls.retain(|w| w.id == "W1");
+        // Halbkreis (0,0)→(5,0), Scheitel oben: Achsradius 2.5.
+        p.walls[0].bulge = Some(1.0);
+        p
+    }
+
+    /// [T2] Bogenwand: Sehnen-Teilkörper sind je dicht, das Volumen trifft den Ringsektor.
+    #[test]
+    fn bogenwand_dicht_und_volumen_wie_ringsektor() {
+        let p = arc_project();
+        let (zb, zt) = p.wall_vertical_extent(&p.walls[0]);
+        let t = 0.345;
+        let exact = std::f64::consts::PI * 2.5 * t * (zt - zb);
+        let walls = model3d::emit_walls(&p, true).unwrap();
+        assert!(walls.len() >= 4 * 20, "Schichten × Sehnen: {}", walls.len());
+        let (vol, tight) = bodies(&walls);
+        assert!(tight);
+        assert!((vol - exact).abs() < exact * 1e-3, "{vol} ≠ {exact}");
+        // Schnitt-Eingabe (ungeschichtet) ebenso.
+        let (vol2, tight2) = bodies(&model3d::emit_walls(&p, false).unwrap());
+        assert!(tight2 && (vol2 - exact).abs() < exact * 1e-3, "{vol2}");
+    }
+
+    /// [T2] Öffnung in der Bogenwand: Laibungen radial, Loch = Ringsektor über die Öffnungshöhe.
+    #[test]
+    fn bogenwand_oeffnung_als_ringsektor() {
+        let mut p = arc_project();
+        let (vol0, _) = bodies(&model3d::emit_walls(&p, true).unwrap());
+        p.openings = Some(vec![Opening { id: "O".into(), host_wall_id: "W1".into(), kind: ElementKind::Window, position: 2.0, width: 1.5, height: 1.2, sill_height: 0.9, ..Default::default() }]);
+        let walls = model3d::emit_walls(&p, true).unwrap();
+        let (vol, tight) = bodies(&walls);
+        assert!(tight);
+        // Achsmass der Öffnung = Bogenlänge → Ringsektor-Volumen = Breite · Dicke · Höhe (Achse mittig).
+        let hole = 1.5 * 0.345 * 1.2;
+        assert!(((vol0 - vol) - hole).abs() < hole * 2e-3, "{} ≠ {hole}", vol0 - vol);
+    }
+
+    /// [T2] Bogenwand an zwei geraden Wänden (L an beiden Enden): alle Teilkörper dicht, Schnittlinien
+    /// an den Enden gesetzt.
+    #[test]
+    fn bogenwand_mit_l_anschluessen_dicht() {
+        let mut p = sample();
+        p.openings = Some(vec![]);
+        p.ceilings = Some(vec![]);
+        p.roofs = Some(vec![]);
+        p.walls.retain(|w| w.id == "W1" || w.id == "W2" || w.id == "W4");
+        // W1 (0,0)→(5,0) als flacher Bogen nach unten, W2/W4 stehen senkrecht darauf.
+        p.walls.iter_mut().find(|w| w.id == "W1").unwrap().bulge = Some(-0.3);
+        let walls = model3d::emit_walls(&p, true).unwrap();
+        let arc: Vec<&RWall> = walls.iter().filter(|w| w.wall_id == "W1").collect();
+        assert!(arc.iter().any(|w| w.start_cut.is_some()) && arc.iter().all(|w| w.end_cut.is_some() || w.start_cut.is_some()));
+        let (_, tight) = bodies(&walls);
+        assert!(tight);
+    }
 }

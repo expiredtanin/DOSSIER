@@ -11,6 +11,7 @@
 //! Die Rechenschritte folgen der TS-Fassung Operation für Operation (gleiche Term-Reihenfolge),
 //! damit das Ergebnis bitgleich bleibt.
 
+use crate::wall_arc::{curve_hits, nearest, Curve, WallArc};
 use kernel2d::{add, dot, left_normal, line_intersect, scale, sub, Vec2};
 use std::collections::HashMap;
 
@@ -52,6 +53,8 @@ pub struct JoinWall {
     pub end: Vec2,
     pub reference: Reference,
     pub layers: Option<Vec<JoinLayer>>,
+    /// Bogenwand ([T2], Modell-Bulge); `None` = gerade.
+    pub bulge: Option<f64>,
 }
 
 /// Unendliche Gerade (Stützpunkt + Richtung, nicht normiert).
@@ -242,6 +245,71 @@ fn dir_of(w: &JoinWall) -> Vec2 {
     normalize(sub(w.end, w.start))
 }
 
+// ── Bogenwände ([T2]) ───────────────────────────────────────────────────────
+//
+// Gerade Wände rechnen unverändert (bitgleich); sobald eine beteiligte Wand ein Bogen ist, werden
+// die Flächen als Versatzkurven (Gerade/Kreis) geschnitten und die Schnittlinie als Gerade durch
+// die exakten Flächen-Treffer gelegt (Aussen- und Innenecke exakt).
+
+fn arc_of(w: &JoinWall) -> Option<WallArc> {
+    WallArc::of(w.start, w.end, w.bulge)
+}
+
+fn is_arc(w: &JoinWall) -> bool {
+    arc_of(w).is_some()
+}
+
+/// Laufrichtung (start→end) am Ende `e`: Tangente bei Bögen.
+fn dir_at(w: &JoinWall, e: End) -> Vec2 {
+    match arc_of(w) {
+        None => dir_of(w),
+        Some(a) => match e {
+            End::Start => a.tangent(0.0),
+            End::End => a.tangent(a.length()),
+        },
+    }
+}
+
+/// Versatzkurve `off` (links der Laufrichtung) einer Wand.
+fn offset_curve(w: &JoinWall, off: f64) -> Curve {
+    match arc_of(w) {
+        None => {
+            let u = dir_of(w);
+            Curve::Line(Line { point: add(w.start, scale(left_normal(u), off)), dir: u })
+        }
+        Some(a) => Curve::Circle(a.center, a.radius_at(off)),
+    }
+}
+
+fn hit_near(a: &Curve, b: &Curve, near: Vec2) -> Option<Vec2> {
+    nearest(curve_hits(a, b), near)
+}
+
+/// (Achsmass, Querversatz) eines Punkts im Rahmen der Wand.
+fn local_of(w: &JoinWall, p: Vec2) -> (f64, f64) {
+    match arc_of(w) {
+        None => {
+            let u = dir_of(w);
+            (dot(sub(p, w.start), u), dot(sub(p, w.start), left_normal(u)))
+        }
+        Some(a) => a.local(p),
+    }
+}
+
+/// Gerade durch die Treffer der beiden Abzweig-Flächen (`bi`) mit der Versatzkurve `off` der
+/// Durchgangswand `ti`, nahe `near`; `None`, wenn eine Fläche sie nicht trifft.
+fn chord_cut(walls: &[JoinWall], bi: usize, ti: usize, off: f64, near: Vec2) -> R<Option<Line>> {
+    let tb = thickness(walls, bi)?;
+    let ob = reference_offset(walls[bi].reference, tb);
+    let face = offset_curve(&walls[ti], off);
+    let h1 = hit_near(&offset_curve(&walls[bi], ob + tb / 2.0), &face, near);
+    let h2 = hit_near(&offset_curve(&walls[bi], ob - tb / 2.0), &face, near);
+    Ok(match (h1, h2) {
+        (Some(a), Some(b)) if len(sub(b, a)) > 1e-9 => Some(Line { point: a, dir: sub(b, a) }),
+        _ => None,
+    })
+}
+
 fn set_cut(result: &mut [WallCuts], we: WallEnd, cut: Line) {
     let c = &mut result[we.wall];
     match we.end {
@@ -308,6 +376,9 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
 /// Aussen mit Aussen, Innen mit Innen — robust auch bei spitzen Winkeln). `None` bei kollinearen
 /// Achsen.
 fn miter_line(walls: &[JoinWall], ai: usize, a_end: End, bi: usize) -> R<Option<Line>> {
+    if is_arc(&walls[ai]) || is_arc(&walls[bi]) {
+        return miter_line_arc(walls, ai, a_end, bi);
+    }
     let (a, b) = (&walls[ai], &walls[bi]);
     let j = point_of(a, a_end);
     let t_a = thickness(walls, ai)?;
@@ -344,11 +415,52 @@ fn miter_line(walls: &[JoinWall], ai: usize, a_end: End, bi: usize) -> R<Option<
     Ok(Some(Line { point: c1, dir }))
 }
 
+/// [`miter_line`] mit Bogenwand: Tangenten für die Flächen-Paarung, Flächen als Versatzkurven.
+/// Bei tangentialem Übergang (Bogen setzt sich fort) eine radiale Stossfuge.
+fn miter_line_arc(walls: &[JoinWall], ai: usize, a_end: End, bi: usize) -> R<Option<Line>> {
+    let (a, b) = (&walls[ai], &walls[bi]);
+    let j = point_of(a, a_end);
+    let t_a = thickness(walls, ai)?;
+    let t_b = thickness(walls, bi)?;
+    let b_at_start = len(sub(b.start, j)) <= len(sub(b.end, j));
+    let b_end = if b_at_start { End::Start } else { End::End };
+    let u_a = dir_at(a, a_end);
+    let u_b = dir_at(b, b_end);
+    let n_a = left_normal(u_a);
+    let n_b = left_normal(u_b);
+    let off_a = reference_offset(a.reference, t_a);
+    let off_b = reference_offset(b.reference, t_b);
+    let d_a = if a_end == End::Start { u_a } else { scale(u_a, -1.0) };
+    let d_b = if b_at_start { u_b } else { scale(u_b, -1.0) };
+    if kernel2d::cross(u_a, u_b).abs() < 1e-6 {
+        // Tangentialer Übergang: rechtwinklig (radial) stossen, als Schnitt markiert (keine Fuge).
+        return Ok((dot(d_a, d_b) < 0.0).then_some(Line { point: j, dir: n_a }));
+    }
+    let (lb, rb) = (off_b + t_b / 2.0, off_b - t_b / 2.0);
+    let (b_outer, b_inner) = if dot(n_b, d_a) < 0.0 { (lb, rb) } else { (rb, lb) };
+    let a_left_is_outer = dot(n_a, d_b) < 0.0;
+    let (b_for_left, b_for_right) = if a_left_is_outer { (b_outer, b_inner) } else { (b_inner, b_outer) };
+    // Treffer nächst der Tangenten-Schätzung (sonst nächst dem Knoten).
+    let corner = |oa: f64, ob: f64| -> Option<Vec2> {
+        let guess = line_intersect(add(j, scale(n_a, oa)), u_a, add(j, scale(n_b, ob)), u_b).filter(|g| len(sub(*g, j)) < 10.0 * (t_a + t_b + 1.0)).unwrap_or(j);
+        hit_near(&offset_curve(a, oa), &offset_curve(b, ob), guess)
+    };
+    let (Some(c1), Some(c2)) = (corner(off_a + t_a / 2.0, b_for_left), corner(off_a - t_a / 2.0, b_for_right)) else {
+        return Ok(None);
+    };
+    let dir = sub(c2, c1);
+    if len(dir) < 1e-9 {
+        return Ok(None);
+    }
+    Ok(Some(Line { point: c1, dir }))
+}
+
 /// Fall 1 — T-Knoten: drei Enden im Knoten, zwei davon kollinear (Durchgang). Der Abzweig bekommt
 /// einen Schnitt an der ihm zugewandten Fläche der Durchgangswand; ohne kollineares Paar bleibt
 /// der Knoten rechtwinklig.
 fn apply_t_junction(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts]) -> R<()> {
-    let dirs: Vec<Vec2> = ends.iter().map(|e| dir_of(&walls[e.wall])).collect();
+    let arcs = ends.iter().any(|e| is_arc(&walls[e.wall]));
+    let dirs: Vec<Vec2> = ends.iter().map(|e| if arcs { dir_at(&walls[e.wall], e.end) } else { dir_of(&walls[e.wall]) }).collect();
     let mut through: Option<(usize, usize)> = None;
     'outer: for i in 0..3 {
         for k in i + 1..3 {
@@ -367,14 +479,20 @@ fn apply_t_junction(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts
 
     let j = point_of(through_wall, through_end.end);
     let t_t = thickness(walls, ti)?;
-    let u_t = dir_of(through_wall);
+    let u_t = if arcs { dir_at(through_wall, through_end.end) } else { dir_of(through_wall) };
     let n_t = left_normal(u_t);
     let off_t = reference_offset(through_wall.reference, t_t);
 
-    let d_branch = if branch_end.end == End::Start { dir_of(&walls[bi]) } else { scale(dir_of(&walls[bi]), -1.0) };
+    let u_branch = if arcs { dir_at(&walls[bi], branch_end.end) } else { dir_of(&walls[bi]) };
+    let d_branch = if branch_end.end == End::Start { u_branch } else { scale(u_branch, -1.0) };
     let sign = if dot(n_t, d_branch) >= 0.0 { 1.0 } else { -1.0 };
     let face_point = add(j, scale(n_t, off_t + sign * (t_t / 2.0)));
-    let face_cut = Line { point: face_point, dir: u_t };
+    let mut face_cut = Line { point: face_point, dir: u_t };
+    if arcs {
+        if let Some(c) = chord_cut(walls, bi, ti, off_t + sign * (t_t / 2.0), face_point)? {
+            face_cut = c;
+        }
+    }
 
     set_cut(result, branch_end, face_cut);
     // Die Durchgangs-Hälften stossen rechtwinklig aneinander; als Schnitt markiert, damit die
@@ -455,7 +573,14 @@ fn apply_layer_cuts(
     }
     let n_t = left_normal(through_dir);
     let merge_point = add(axis_point, scale(n_t, off_t + sign * (t_t / 2.0 - near_plaster)));
-    let merge_cut = Line { point: merge_point, dir: through_dir };
+    let mut merge_cut = Line { point: merge_point, dir: through_dir };
+    let arcs = is_arc(&walls[bi]) || is_arc(&walls[ti]) || other_half.is_some_and(|o| is_arc(&walls[o]));
+    if arcs {
+        if let Some(c) = chord_cut(walls, bi, ti, off_t + sign * (t_t / 2.0 - near_plaster), merge_point)? {
+            merge_cut = c;
+        }
+    }
+    let merge_point = merge_cut.point;
     let side_line = merge_cut;
 
     // Materialien des Nah-Putzes (Komponenten sind hier alle bekannt, s. Rückgrat-Suche).
@@ -492,7 +617,30 @@ fn apply_layer_cuts(
             }
             b_off += th;
         }
-        if core_hi > core_lo {
+        if core_hi > core_lo && arcs {
+            // Bogen: Kern-Kanten als Versatzkurven, Achsmass als Bogenlänge.
+            let bw = &walls[bi];
+            let edge_lo = offset_curve(bw, core_lo);
+            let edge_hi = offset_curve(bw, core_hi);
+            for wi in std::iter::once(ti).chain(other_half) {
+                let w = &walls[wi];
+                let off_a = local_of(w, face_cut.point).1;
+                let off_b = local_of(w, merge_point).1;
+                let along = |edge: &Curve, off: f64| -> Option<f64> {
+                    let hit = hit_near(edge, &offset_curve(w, off), axis_point)?;
+                    Some(local_of(w, hit).0)
+                };
+                let (Some(a_lo), Some(a_hi), Some(b_lo), Some(b_hi)) = (along(&edge_lo, off_a), along(&edge_hi, off_a), along(&edge_lo, off_b), along(&edge_hi, off_b)) else {
+                    continue;
+                };
+                let s = if a_lo <= a_hi {
+                    SpanCutout { from: a_lo, to: a_hi, off_a, off_b, from_b: b_lo, to_b: b_hi }
+                } else {
+                    SpanCutout { from: a_hi, to: a_lo, off_a, off_b, from_b: b_hi, to_b: b_lo }
+                };
+                result[wi].span_cutouts.push(s);
+            }
+        } else if core_hi > core_lo {
             let bw = &walls[bi];
             let n_branch = left_normal(dir_of(bw));
             let u_branch = dir_of(bw);
@@ -541,6 +689,21 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
         if wi == fi {
             continue;
         }
+        if let Some(a) = arc_of(w) {
+            let (dist_along, perp) = a.local(p);
+            if dist_along <= END_GAP || dist_along >= a.length() - END_GAP {
+                continue;
+            }
+            let tw = thickness(walls, wi)?;
+            let dist = perp.abs();
+            if dist > tw / 2.0 + TOL {
+                continue;
+            }
+            if best.map_or(true, |b| dist < b.2) {
+                best = Some((wi, perp, dist, dist_along));
+            }
+            continue;
+        }
         let u = dir_of(w);
         let w_len = len(sub(w.end, w.start));
         if w_len < 1e-9 {
@@ -562,6 +725,9 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
         }
     }
     let Some((wi, perp, _, dist_along)) = best else { return Ok(()) };
+    if is_arc(&walls[wi]) || is_arc(free_wall) {
+        return mid_span_tee_arc(walls, free, wi, perp, dist_along, result);
+    }
 
     let w = &walls[wi];
     let tw = thickness(walls, wi)?;
@@ -586,6 +752,39 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
 
     set_cut(result, free, face_cut);
     let axis_point = add(w.start, scale(u_w, dist_along));
+    apply_layer_cuts(walls, result, free, wi, None, face_cut, axis_point, u_w, sign)
+}
+
+/// [`apply_mid_span_tee`] mit Bogenwand (Durchgang oder freies Ende).
+fn mid_span_tee_arc(walls: &[JoinWall], free: WallEnd, wi: usize, perp: f64, dist_along: f64, result: &mut [WallCuts]) -> R<()> {
+    let w = &walls[wi];
+    let tw = thickness(walls, wi)?;
+    let (u_w, axis_point) = match arc_of(w) {
+        Some(a) => (a.tangent(dist_along), a.point(dist_along, 0.0)),
+        None => {
+            let u = dir_of(w);
+            (u, add(w.start, scale(u, dist_along)))
+        }
+    };
+    let n_w = left_normal(u_w);
+    let off_w = reference_offset(w.reference, tw);
+    let u_free = dir_at(&walls[free.wall], free.end);
+    let d_free = if free.end == End::Start { u_free } else { scale(u_free, -1.0) };
+    let facing = dot(n_w, d_free);
+    let sign = if facing.abs() > 1e-6 {
+        if facing >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        }
+    } else if perp >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let face_point = add(axis_point, scale(n_w, off_w + sign * (tw / 2.0)));
+    let face_cut = chord_cut(walls, free.wall, wi, off_w + sign * (tw / 2.0), face_point)?.unwrap_or(Line { point: face_point, dir: u_w });
+    set_cut(result, free, face_cut);
     apply_layer_cuts(walls, result, free, wi, None, face_cut, axis_point, u_w, sign)
 }
 
@@ -627,7 +826,7 @@ pub fn decode_walls(buf: &[f64]) -> Option<Vec<JoinWall>> {
             let priority = if component.is_some() { p } else { f64::NAN };
             layers.push(JoinLayer { thickness: t, component, priority });
         }
-        out.push(JoinWall { start: Vec2::new(sx, sy), end: Vec2::new(ex, ey), reference, layers: type_ok.then_some(layers) });
+        out.push(JoinWall { start: Vec2::new(sx, sy), end: Vec2::new(ex, ey), reference, layers: type_ok.then_some(layers), bulge: None });
     }
     Some(out)
 }
@@ -727,7 +926,7 @@ mod tests {
         JoinLayer { thickness: t, component: Some(c), priority: p }
     }
     fn wall(s: (f64, f64), e: (f64, f64), layers: Vec<JoinLayer>) -> JoinWall {
-        JoinWall { start: Vec2::new(s.0, s.1), end: Vec2::new(e.0, e.1), reference: Reference::Center, layers: Some(layers) }
+        JoinWall { start: Vec2::new(s.0, s.1), end: Vec2::new(e.0, e.1), reference: Reference::Center, layers: Some(layers), bulge: None }
     }
     fn mono(s: (f64, f64), e: (f64, f64), t: f64) -> JoinWall {
         wall(s, e, vec![layer(t, 0, 10.0)])
@@ -978,5 +1177,103 @@ mod tests {
             let mut r = crate::flat_read::Reader::new(&buf);
             assert_eq!(decode_cuts(&mut r), Some(c));
         }
+    }
+
+    // ── Bogenwände ([T2]) ──
+
+    fn arc_wall(s: (f64, f64), e: (f64, f64), b: f64, t: f64) -> JoinWall {
+        JoinWall { bulge: Some(b), ..mono(s, e, t) }
+    }
+    fn on_circle(p: Vec2, c: (f64, f64), r: f64) -> bool {
+        (len(sub(p, Vec2::new(c.0, c.1))) - r).abs() < 1e-9
+    }
+    fn ends(l: &Line) -> [Vec2; 2] {
+        [l.point, add(l.point, l.dir)]
+    }
+
+    #[test]
+    fn bogen_l_ecke_exakt_auf_flaechen() {
+        // Gerade (0,0)→(5,0), dann Halbkreis (5,0)→(10,0) mit Scheitel oben (Mitte (7.5,0), r 2.5).
+        let w = vec![mono((0.0, 0.0), (5.0, 0.0), 0.3), arc_wall((5.0, 0.0), (10.0, 0.0), 1.0, 0.3)];
+        let c = compute_joins(&w).unwrap();
+        let cut = c[0].end_cut.unwrap();
+        assert_eq!(Some(cut), c[1].start_cut);
+        for p in ends(&cut) {
+            assert!(close(p.y.abs(), 0.15), "{p:?}");
+            assert!(on_circle(p, (7.5, 0.0), 2.35) || on_circle(p, (7.5, 0.0), 2.65), "{p:?}");
+        }
+        // Aussenecke unten rechts, Innenecke oben links.
+        let [a, b] = ends(&cut);
+        let (lo, hi) = if a.y < b.y { (a, b) } else { (b, a) };
+        assert!(close(lo.x, 7.5 - (2.35f64 * 2.35 - 0.0225).sqrt()) && close(hi.x, 7.5 - (2.65f64 * 2.65 - 0.0225).sqrt()));
+    }
+
+    #[test]
+    fn bogen_ring_stoesst_radial_ohne_fuge() {
+        let w = vec![arc_wall((0.0, 0.0), (10.0, 0.0), 1.0, 0.3), arc_wall((10.0, 0.0), (0.0, 0.0), 1.0, 0.3)];
+        let c = compute_joins(&w).unwrap();
+        for cut in [c[0].start_cut, c[0].end_cut, c[1].start_cut, c[1].end_cut] {
+            let cut = cut.expect("radiale Stossfuge");
+            assert!(close(cut.dir.y, 0.0) && close(cut.point.y, 0.0));
+        }
+    }
+
+    #[test]
+    fn gerader_abzweig_auf_bogen_mittelspanne() {
+        // Halbkreis unten (CCW, Mitte (5,0), r 5); Abzweig vom tiefsten Punkt nach unten.
+        let w = vec![arc_wall((0.0, 0.0), (10.0, 0.0), -1.0, 0.3), mono((5.0, -5.0), (5.0, -9.0), 0.2)];
+        let c = compute_joins(&w).unwrap();
+        let cut = c[1].start_cut.unwrap();
+        for p in ends(&cut) {
+            assert!(on_circle(p, (5.0, 0.0), 5.15), "{p:?}");
+            assert!(close(p.x - 5.0, 0.1) || close(p.x - 5.0, -0.1));
+        }
+        assert!(c[0].start_cut.is_none() && c[0].end_cut.is_none());
+    }
+
+    #[test]
+    fn bogen_abzweig_auf_gerade_und_t_knoten() {
+        // Bogen-Abzweig trifft die Mittelspanne einer geraden Wand: Schnitt liegt auf deren Fläche.
+        let mid = vec![mono((0.0, 0.0), (10.0, 0.0), 0.3), arc_wall((5.0, 0.0), (8.0, 3.0), 0.4, 0.2)];
+        let node = vec![mono((0.0, 0.0), (5.0, 0.0), 0.3), mono((5.0, 0.0), (10.0, 0.0), 0.3), arc_wall((5.0, 0.0), (8.0, 3.0), 0.4, 0.2)];
+        for w in [mid, node] {
+            let bi = w.len() - 1;
+            let c = compute_joins(&w).unwrap();
+            let cut = c[bi].start_cut.unwrap();
+            let arc = WallArc::of(w[bi].start, w[bi].end, w[bi].bulge).unwrap();
+            for p in ends(&cut) {
+                assert!(close(p.y, 0.15), "{p:?}");
+                let (_, n) = arc.local(p);
+                assert!(close(n.abs(), 0.1), "{n}");
+            }
+        }
+    }
+
+    #[test]
+    fn bogen_bogen_ecke_auf_beiden_kreisen() {
+        // Zwei Viertelbögen, die sich im Punkt (5,0) unter einem Knick treffen.
+        let b = (std::f64::consts::PI / 8.0).tan();
+        let w = vec![arc_wall((0.0, 0.0), (5.0, 0.0), b, 0.25), arc_wall((5.0, 0.0), (8.0, 4.0), 0.2, 0.25)];
+        let c = compute_joins(&w).unwrap();
+        let cut = c[0].end_cut.unwrap();
+        let a0 = WallArc::of(w[0].start, w[0].end, w[0].bulge).unwrap();
+        let a1 = WallArc::of(w[1].start, w[1].end, w[1].bulge).unwrap();
+        for p in ends(&cut) {
+            assert!(close(a0.local(p).1.abs(), 0.125) && close(a1.local(p).1.abs(), 0.125), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn bogen_mehrschichtig_t_mit_nahputz() {
+        // Mehrschichtiger Bogen-Abzweig auf gerade Aussenwand: Kern läuft bis zur Rückgrat-Fläche,
+        // Aussparung in der Durchgangswand.
+        let w = vec![wall((0.0, 0.0), (10.0, 0.0), aw()), JoinWall { bulge: Some(0.3), ..wall((5.0, 0.0), (9.0, 4.0), aw()) }];
+        let c = compute_joins(&w).unwrap();
+        let lc = c[1].layer_cuts.as_ref().expect("Schicht-Cuts");
+        let merge = lc.start[2].unwrap();
+        assert!(close(merge.point.y, 0.345 / 2.0 - 0.015) && close(merge.dir.y, 0.0));
+        assert_eq!(c[0].span_cutouts.len(), 1);
+        let s = c[0].span_cutouts[0];
+        assert!(s.to > s.from && s.from > 4.5 && s.to < 6.0, "{s:?}");
     }
 }

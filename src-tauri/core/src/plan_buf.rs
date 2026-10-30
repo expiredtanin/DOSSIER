@@ -927,6 +927,7 @@ impl<'a> View<'a> {
                 cls: self.opt_string(f[0])?.unwrap_or_default(),
                 weight_mm: f[2],
                 dash,
+                color: if fl & F_COLOR != 0 { self.opt_string(f[1])? } else { None },
                 opening_id,
                 stair_id,
                 greyed,
@@ -1730,11 +1731,11 @@ impl Writer {
                 self.line_ref(&line, dash_ref);
                 return;
             }
-            Primitive::Arc { center, from, to, r, cls, weight_mm, dash, opening_id, stair_id, greyed, opacity } => {
-                let flags = Self::style_flags(*greyed, *opacity) | Self::dash_flags(dash);
+            Primitive::Arc { center, from, to, r, cls, weight_mm, dash, color, opening_id, stair_id, greyed, opacity } => {
+                let flags = Self::style_flags(*greyed, *opacity) | Self::dash_flags(dash) | if color.is_some() { F_COLOR } else { 0 };
                 let rest = self.head(T_ARC, flags, &[(4, opening_id.as_deref()), (5, stair_id.as_deref())]);
                 self.str(Some(cls));
-                self.str(None);
+                self.str(color.as_deref());
                 self.num(*weight_mm);
                 self.num(opacity.unwrap_or(1.0));
                 for v in [center.x, center.y, from.x, from.y, to.x, to.y, *r] {
@@ -2213,6 +2214,7 @@ pub(crate) mod tests {
                 cls: "door-swing".into(),
                 weight_mm: 0.13,
                 dash: Some(Some(vec![0.5])),
+                color: Some("#123456".into()),
                 opening_id: Some("D1".into()),
                 stair_id: None,
                 greyed: None,

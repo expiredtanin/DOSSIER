@@ -33,6 +33,10 @@
 //             und, bei usage = 1 und vorhandenem Typ, IfcMaterialLayerSetUsage (AXIS2, POSITIVE, `offset` =
 //             Abstand der ersten Schicht von der Achse entlang +Y). Ohne Rahmen: Placement ohne Drehung wie bisher.
 //   WALL_MESH   = 2, structure, id, name, TYPEREF, PSETS, MESH
+//   WALL_ARC    = 16 ([T2] Bogenwand), structure, id, name, TYPEREF, PSETS, cx, cy, r, a0, sweep, MESH
+//                 Körper als Netz (Sehnen-Zerlegung, Öffnungen ausgespart), dazu die Achse als
+//                 IfcTrimmedCurve auf einem IfcCircle (Welt-XY; a0/sweep im Bogenmass, sweep < 0 =
+//                 Uhrzeigersinn → SenseAgreement .F.).
 //   CEILING     = 3, structure, id, name, TYPEREF, PSETS, PTS, n_inner, PTS × n_inner, z_rel, depth
 //                 (innere Ringe = Deckenaussparungen, IfcArbitraryProfileDefWithVoids)
 //   OPENING     = 4, wall_id, structure, opening_id, is_door (0/1), fill_name, PTS (Öffnungskörper), z_rel,
@@ -126,6 +130,7 @@ pub const REC_CLASSIFICATION: f64 = 12.0;
 pub const REC_ZONE: f64 = 13.0;
 pub const REC_ATTACH: f64 = 14.0;
 pub const REC_OPENING_SOLID: f64 = 15.0;
+pub const REC_WALL_ARC: f64 = 16.0;
 
 // ── IFC-GUID (Kompression nach IfcOpenShell `guid.compress`) ────────────────
 
@@ -1066,6 +1071,40 @@ impl Builder {
         (placement, shape)
     }
 
+    /// Bogenwand ([T2]): Netz-Körper wie [`Self::emit_triangulated_product`] plus Achse als
+    /// IfcTrimmedCurve (IfcCircle, Parameter = Winkel im Bogenmass).
+    fn emit_arc_wall_product(&mut self, mesh: &Mesh, (cx, cy, r, a0, sweep): (f64, f64, f64, f64, f64), relative_to: usize) -> (usize, usize) {
+        let (item, rep_type) = if self.v2() { self.emit_face_brep(mesh) } else { (self.emit_face_set(mesh), "Tessellation") };
+        let body = self.add(
+            "IFCSHAPEREPRESENTATION",
+            format!("#{},{},{},{}", self.context, ifc_string("Body"), ifc_string(rep_type), refs(&[item])),
+        );
+        let c = self.add("IFCCARTESIANPOINT", list(&[fmt_real(cx), fmt_real(cy)]));
+        let pl = self.add("IFCAXIS2PLACEMENT2D", format!("#{c},$"));
+        let circle = self.add("IFCCIRCLE", format!("#{pl},{}", fmt_real(r)));
+        let tau = std::f64::consts::TAU;
+        let norm = |a: f64| ((a % tau) + tau) % tau;
+        let (t1, t2) = (norm(a0), norm(a0 + sweep));
+        let trimmed = self.add(
+            "IFCTRIMMEDCURVE",
+            format!(
+                "#{circle},(IFCPARAMETERVALUE({})),(IFCPARAMETERVALUE({})),{},{}",
+                fmt_real(t1),
+                fmt_real(t2),
+                if sweep > 0.0 { ".T." } else { ".F." },
+                enum_("PARAMETER")
+            ),
+        );
+        let axis_ctx = self.axis_context();
+        let axis = self.add(
+            "IFCSHAPEREPRESENTATION",
+            format!("#{axis_ctx},{},{},{}", ifc_string("Axis"), ifc_string("Curve2D"), refs(&[trimmed])),
+        );
+        let shape = self.add("IFCPRODUCTDEFINITIONSHAPE", format!("$,$,{}", refs(&[axis, body])));
+        let placement = self.emit_placement(0.0, relative_to);
+        (placement, shape)
+    }
+
     fn emit_face_set(&mut self, mesh: &Mesh) -> usize {
         let coords: Vec<String> = mesh
             .positions
@@ -1233,6 +1272,7 @@ fn rec_name(code: f64) -> &'static str {
     match code {
         c if c == REC_WALL_SOLIDS => "WALL_SOLIDS",
         c if c == REC_WALL_MESH => "WALL_MESH",
+        c if c == REC_WALL_ARC => "WALL_ARC",
         c if c == REC_CEILING => "CEILING",
         c if c == REC_OPENING => "OPENING",
         c if c == REC_OPENING_SOLID => "OPENING_SOLID",
@@ -1568,6 +1608,21 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let psets = r.psets()?;
                 let mesh = r.mesh()?;
                 let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
+                let entity = w.finish_typed("IFCWALL", format!("wall/{id}"), &name, &ty, &psets, structure, placement, shape, None, true);
+                w.walls.insert(id, (entity, placement, Frame::WORLD));
+            }
+            c if c == REC_WALL_ARC => {
+                let structure = r.structure(n_storeys)?;
+                let id = r.string()?;
+                let name = r.string()?;
+                let ty = r.type_ref()?;
+                let psets = r.psets()?;
+                let (cx, cy, rad, a0, sweep) = (r.f()?, r.f()?, r.f()?, r.f()?, r.f()?);
+                if !(rad > 0.0) || !(sweep.abs() > 1e-9) {
+                    return Err(format!("Bogenachse ungültig bei {}", r.pos - 1));
+                }
+                let mesh = r.mesh()?;
+                let (placement, shape) = w.emit_arc_wall_product(&mesh, (cx, cy, rad, a0, sweep), w.placement_of(structure));
                 let entity = w.finish_typed("IFCWALL", format!("wall/{id}"), &name, &ty, &psets, structure, placement, shape, None, true);
                 w.walls.insert(id, (entity, placement, Frame::WORLD));
             }
@@ -2720,6 +2775,36 @@ mod tests {
         b.str("2026-10-28T12:00:00");
         b.meta_tail(false, f64::NAN, 0.0);
         b
+    }
+
+    /// [T2] Bogenwand: Netz-Körper plus Achse als IfcTrimmedCurve auf IfcCircle (Uhrzeigersinn = .F.).
+    #[test]
+    fn bogenwand_mit_kreisachse() {
+        let mut b = mini();
+        b.n(&[REC_WALL_ARC, -1.0]);
+        b.str("WA");
+        b.str("Bogen");
+        b.no_type();
+        b.no_psets();
+        b.n(&[2.5, 0.0, 2.5, std::f64::consts::PI, -std::f64::consts::PI]);
+        b.mesh_tetra();
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        assert_eq!(count(&ifc, "IFCWALL"), 1);
+        assert_eq!(count(&ifc, "IFCCIRCLE"), 1);
+        let t = first_line(&ifc, "IFCTRIMMEDCURVE");
+        assert!(t.contains("(IFCPARAMETERVALUE(3.141593)),(IFCPARAMETERVALUE(0.0)),.F.,.PARAMETER.);"), "{t}");
+        assert!(ifc.contains("'Axis','Curve2D'"));
+        // Ungültiger Radius: Fehler statt Panik.
+        let mut b = mini();
+        b.n(&[REC_WALL_ARC, -1.0]);
+        b.str("WA");
+        b.str("Bogen");
+        b.no_type();
+        b.no_psets();
+        b.n(&[2.5, 0.0, 0.0, 0.0, 1.0]);
+        b.mesh_tetra();
+        assert!(build(&b).is_err());
     }
 
     #[test]

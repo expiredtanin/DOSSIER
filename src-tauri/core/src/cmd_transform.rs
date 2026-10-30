@@ -226,7 +226,11 @@ fn with_geom(d: &Value, g: Option<Value>) -> Value {
 // ── Bauteile ─────────────────────────────────────────────────────────────────
 
 fn mv_wall(w: &Value, xf: &Xf) -> Value {
-    with_all(w, vec![("start", xf.pt_of(field(w, "start"))), ("end", xf.pt_of(field(w, "end")))])
+    // Bogenwand ([T2]): eine Spiegelung kehrt den Bogen um (Bulge-Vorzeichen hängt an der Laufrichtung).
+    match field(w, "bulge").and_then(Value::as_f64) {
+        Some(b) if xf.reverses() => with_all(w, vec![("start", xf.pt_of(field(w, "start"))), ("end", xf.pt_of(field(w, "end"))), ("bulge", js_num(-b))]),
+        _ => with_all(w, vec![("start", xf.pt_of(field(w, "start"))), ("end", xf.pt_of(field(w, "end")))]),
+    }
 }
 
 /// Stütze: Einfügepunkt und Profil-Drehung (über einen mit abgebildeten Richtungspunkt).
@@ -856,6 +860,12 @@ fn item_preview(root: &Map<String, Value>, kind: Kind, e: &Value, xf: &Xf, out: 
             let (sx, sy) = pt("start");
             let (ex, ey) = pt("end");
             let (a, b) = (xf.apply(sx, sy), xf.apply(ex, ey));
+            let bulge = field(e, "bulge").and_then(Value::as_f64).map(|b| if xf.reverses() { -b } else { b });
+            if let Some((band, axis)) = crate::wall_arc::band_preview(a, b, bulge, th) {
+                s.poly(&band);
+                s.poly_open(&axis);
+                return;
+            }
             let v = |p: (f64, f64)| crate::model::Vec2 { x: p.0, y: p.1 };
             let c = crate::site_rules::wall_corners(v(a), v(b), th);
             s.poly(&[(c[0][0], c[0][1]), (c[1][0], c[1][1]), (c[2][0], c[2][1]), (c[3][0], c[3][1])]);
@@ -986,6 +996,19 @@ mod tests {
 
     fn root(v: Value) -> Map<String, Value> {
         v.as_object().unwrap().clone()
+    }
+
+    /// [T2] Bogenwand: Verschieben/Drehen behalten den Bulge, Spiegeln kehrt ihn um.
+    #[test]
+    fn bogenwand_spiegeln_kehrt_bulge() {
+        let r = root(json!({"walls":[{"id":"a","start":{"x":0,"y":0},"end":{"x":4,"y":0},"bulge":0.5}]}));
+        let run = |op: &str, pts: Value| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":["a"]},"op":op,"pts":pts,"mode":"move","count":1,"stamp":"s"})).unwrap();
+            transform_ops(&r, &req)[0].to_json()["entity"].clone()
+        };
+        assert_eq!(run("move", json!([[0, 0], [1, 1]]))["bulge"], json!(0.5));
+        assert_eq!(run("rotate", json!([[0, 0], [1, 0], [0, 1]]))["bulge"], json!(0.5));
+        assert_eq!(run("mirror", json!([[0, 0], [0, 1]]))["bulge"], json!(-0.5));
     }
 
     #[test]

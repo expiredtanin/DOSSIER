@@ -9,7 +9,7 @@ import { useRef, useState, type RefObject } from "react";
 import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
-import { drawingVertices } from "../core";
+import { bulgeArcPoints, drawingVertices } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
 import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
 import { areaMovePreview, drawingMovePreview } from "../tools/transform";
@@ -27,6 +27,12 @@ export interface GripEditFieldsState {
   value: number | null;
   locked: boolean;
   active: boolean;
+}
+
+/** Scheitel eines Bogens a→b (Modell-Bulge: Pfeilhöhe = halbe Sehne · bulge, links der Sehne). */
+function arcApex(a: Vec2, b: Vec2, bulge: number): Vec2 {
+  const h = Math.hypot(b.x - a.x, b.y - a.y) / 2;
+  return add(scale(add(a, b), 0.5), scale(normalize(leftNormal(sub(b, a))), h * bulge));
 }
 
 export function useGripEditing(opts: {
@@ -318,7 +324,8 @@ export function useGripEditing(opts: {
     if (modelEditable && effectiveDrawingIds.length === 0) {
       for (const id of selectedWallIds) {
         const w = project.walls.find((x) => x.id === id);
-        if (w) pushGroup([w.start, w.end], { wallId: id });
+        // Bogenwand ([T2]): dritter Griff im Bogenscheitel (zieht den Bogen durch den Punkt).
+        if (w) pushGroup(w.bulge ? [w.start, w.end, arcApex(w.start, w.end, w.bulge)] : [w.start, w.end], { wallId: id });
       }
     }
     return out;
@@ -941,6 +948,8 @@ export function useGripEditing(opts: {
       const th = wt ? wallTypeThickness(wt) : 0.2;
       const a = pw.localIndex === 0 ? pw.pt : w.start;
       const b = pw.localIndex === 0 ? w.end : pw.pt;
+      // Bogenwand: der Bogen behält seinen Öffnungswinkel (Bulge), Vorschau als Achse.
+      if (w.bulge) return [{ kind: "poly", pts: bulgeArcPoints(a, b, w.bulge), closed: false }];
       return [
         { kind: "poly", pts: wallCorners(a, b, th), closed: true },
         { kind: "line", a, b },

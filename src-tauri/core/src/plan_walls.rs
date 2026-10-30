@@ -903,7 +903,7 @@ mod tests {
     fn schraeger_t_stoss_grundriss_exakt_15_bis_165_grad() {
         use crate::joins::{compute_joins, JoinLayer, JoinWall, Reference};
         let lay = || vec![JoinLayer { thickness: 0.02, component: Some(0), priority: 10.0 }, JoinLayer { thickness: 0.16, component: Some(1), priority: 20.0 }, JoinLayer { thickness: 0.15, component: Some(2), priority: 50.0 }, JoinLayer { thickness: 0.015, component: Some(3), priority: 10.0 }];
-        let jw = |s: (f64, f64), e: (f64, f64)| JoinWall { start: kernel2d::Vec2::new(s.0, s.1), end: kernel2d::Vec2::new(e.0, e.1), reference: Reference::Center, layers: Some(lay()) };
+        let jw = |s: (f64, f64), e: (f64, f64)| JoinWall { start: kernel2d::Vec2::new(s.0, s.1), end: kernel2d::Vec2::new(e.0, e.1), reference: Reference::Center, layers: Some(lay()), bulge: None };
         let face = 0.345 / 2.0;
         let merge = face - 0.015;
         for deg in (15..=165).step_by(15) {

@@ -1283,7 +1283,29 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ✅ truck 0.6, B-Rep-Grundkörper, Booleans mit Mesh-Fallback, Transformation, STEP-Export und -Import,
   Kennwerte, Kollisionsprüfung, `mesh`-Spec.
 - ○ **[T1] Polyeder-Körper** (`try_attach_plane` → Shell → Solid). · M
-- ○ **[T2] Bogenwände** (`tsweep`/`rsweep` mit Kreisbögen). · L
+- ◐ **[T2] Bogenwände** (30.10., im eigenen Kern statt truck) · L
+  Modell `Wall.bulge` (optional; Modell-Bulge wie Polylinien: positiv = Scheitel links der Sehne). Kern
+  `wall_arc.rs`: Bogen, Abwicklung (`Unroll`), Sehnen-Zerlegung (Pfeil ≤ 1 mm, ≤ 7.5°). **Verschneidung**
+  (`joins.rs`): L/T/Knoten-T/Mittelspanne Bogen–Gerade und Bogen–Bogen über Kreis/Gerade-Schnitte, Schnittlinie
+  durch die exakten Flächen-Treffer, materialbewusst je Schicht ([108]: Nah-Putz-Aussparung in Bogenlänge);
+  tangentialer Übergang (Turm aus Halbkreisen) = radiale Stossfuge ohne Strich; gerade Wände bitgleich wie
+  bisher. **Grundriss**: die gerade Pipeline rechnet auf der abgewickelten Wand, die Ausgabe wird gebogen
+  (Punkte auf Schnittlinien rasten exakt ein); Umriss/Fugen als `arc`-Primitive (≤ 90°, `arc` trägt jetzt
+  `color`) → DXF ARC; Schichtbänder in Winkelstücke geteilt, Schraffur je Stück an der Tangente ausgerichtet
+  (Entscheid: folgt der Krümmung stückweise, Muster-Phase springt an den Stücken). **Öffnungen**: Lage =
+  Bogenlänge auf der Achse; Lücke radial durch alle Schichten, Plansymbol gebogen; Einbauteile (3D, Schnitt,
+  Ansicht, IFC-Füllung) gerade auf der Sehne zwischen den Laibungen (Entscheid). **3D/Schnitt/Ansicht/OBJ**:
+  Sehnen-Teilwände mit radialen Gehrungen (`chord_walls`, Teilstellen auch an den Laibungen, Teilwände in der
+  Öffnung = Brüstung/Sturz); Ansicht ohne Facetten-Fugen (Ecken auf der Gehrung, innere Stirnflächen
+  entfallen). **Mengen** exakt (Bogenlänge, Ringsektor; IFC Qto, Objekt-Info, Bauteilliste). **IFC**: Datensatz
+  `WALL_ARC` — Körper als Netz, Achse `IfcTrimmedCurve` auf `IfcCircle` (`validate-ifc.py` ohne Befund).
+  **Befehle**: Wand-Option „Bogen" (Drei-Punkt/Tangential wie Polylinie), Scheitel-Griff, Spiegeln kehrt den
+  Bulge, Öffnung am Bogen platzieren; Fang, Raum-Erkennung, Schatten, Baurecht, Flächen über den Sehnenzug.
+  Tests: Rust (Verschneidung, Ringsektor-Volumen/dicht, Grundriss im Kreisring, Ansicht ohne Fugen, IFC,
+  Befehle), vitest (Wand-Befehl). Geprüft im Linux-Container (CLI-SVG Grundriss/Schnitt/Ansicht, IFC), nicht in
+  der Tauri-App. Offen: Schichteinzug [106] und Formöffnungen [G3] in Bogenwänden; Wände teilen/trimmen (fehlt
+  auch für gerade); echte Polar-Schraffur; IFC-Körper als extrudiertes Bogenprofil statt Netz; Griff-Vorschau
+  zeigt nur die Achse.
 - ○ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M
 - ○ **[T4] Import-Meshes glätten oder kantig** (`add_smooth_normals`). · S
 - ○ **[T5] Import reparieren** (`put_together_same_attrs`, Healing). · S
@@ -1947,7 +1969,7 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   beim Speichern verloren; Panel in den Standard-Dock aufnehmen. · M
 - ○ **[B6] Wand unter Dach als Prismen zwischen Ebenen** (für [G2]). `walls.rs:413–472, 592–654`. · M
 - ○ **[B7] Dach-Verschneidung und Gauben in 2.5D** (für [G5]). · M · nach [B2]/[B6].
-- ○ **[B8] Bogenwände, schneller Weg** (für [T2]). · S/M–L
+- ✅ **[B8] Bogenwände, schneller Weg** (für [T2]). (30.10.) Sehnen-Zerlegung im Kern statt Sweep, s. [T2]. · S/M–L
 - ✅ **[B9] Punktwolken-Leser** (für [27]). (28.10.) `src-tauri/fileio/src/pointcloud*.rs` + `web_pointcloud.rs`,
   TS-Fassade `src/io/pointCloud.ts` (+ `pointCloud.worker.ts`, Web-Worker wie DWG), CLI `pointcloud-info`.
   Formate: LAS 1.0–1.4 (Punktformate 0–10, eigener Leser), LAZ (Crate `laz` 0.13, Apache-2.0), E57 (Crate

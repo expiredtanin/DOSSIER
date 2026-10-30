@@ -173,7 +173,12 @@ fn wall_polygons(p: &Project, level_id: &str) -> Vec<Polygon> {
         .walls
         .iter()
         .filter(|w| w.floor_id == level_id)
-        .map(|w| W { s: [w.start.x, w.start.y], e: [w.end.x, w.end.y], t: finite(p.wall_thickness(w, 0.2)).max(0.0) })
+        // Bogenwand ([T2]): als Sehnenzug.
+        .flat_map(|w| {
+            let t = finite(p.wall_thickness(w, 0.2)).max(0.0);
+            let pts = crate::wall_arc::axis_polyline((w.start.x, w.start.y), (w.end.x, w.end.y), w.bulge, 0.0, t);
+            pts.windows(2).map(|q| W { s: [q[0].0, q[0].1], e: [q[1].0, q[1].1], t }).collect::<Vec<_>>()
+        })
         .filter(|w| w.s.iter().chain(w.e.iter()).all(|v| v.is_finite()) && (w.e[0] - w.s[0]).hypot(w.e[1] - w.s[1]) > 1e-9)
         .collect();
     // Abstand eines Punktes zur Strecke.

@@ -393,7 +393,11 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
                     let e = xy(field(wall, "end").unwrap_or(&Value::Null));
                     let (ax, ay, sx, sy) = scale_around(bbox(&[s, e]), w, h, fx, fy);
                     let f = |p: (f64, f64)| pt(ax + (p.0 - ax) * sx, ay + (p.1 - ay) * sy);
-                    Some(with_all(wall, vec![("start", f(s)), ("end", f(e))]))
+                    // Bogenwand: negativer Massstab (Spiegelung) kehrt den Bogen um.
+                    match field(wall, "bulge").and_then(Value::as_f64) {
+                        Some(b) if sx * sy < 0.0 => Some(with_all(wall, vec![("start", f(s)), ("end", f(e)), ("bulge", js_num(-b))])),
+                        _ => Some(with_all(wall, vec![("start", f(s)), ("end", f(e))])),
+                    }
                 })
                 .into()
             }
@@ -496,6 +500,12 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
 // ── Wand ─────────────────────────────────────────────────────────────────────
 
 fn wall_grip(w: &Value, index: f64, x: f64, y: f64) -> Value {
+    // Bogenwand ([T2]): Griff 2 = Bogenscheitel; der Bogen geht durch den gezogenen Punkt.
+    if index == 2.0 {
+        let (s, e) = (xy(field(w, "start").unwrap_or(&Value::Null)), xy(field(w, "end").unwrap_or(&Value::Null)));
+        let b = crate::bulge::from_sagitta_point(s.0, s.1, e.0, e.1, x, y);
+        return with_opt(w, vec![("bulge", (b.is_finite() && b.abs() > 1e-9).then(|| js_num(b)))]);
+    }
     with(w, if index == 0.0 { "start" } else { "end" }, pt(x, y))
 }
 
@@ -1247,6 +1257,20 @@ mod tests {
         assert_eq!(num_of(Some(&json!("\u{1}Infinity"))), f64::INFINITY);
         assert_eq!(num_of(Some(&Value::Null)), 0.0);
         assert!(num_of(None).is_nan());
+    }
+
+    /// [T2] Bogenwand: Griff 2 setzt den Scheitel (Bulge), Endpunkt-Griffe behalten ihn; gerade
+    /// gezogen fällt der Bulge weg.
+    #[test]
+    fn bogenwand_scheitel_griff() {
+        let r = root(json!({"walls": [{"id": "w", "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "bulge": 0.5}]}));
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 2]}))).unwrap();
+        let e = res.ops[0].to_json()["entity"].clone();
+        assert!((e["bulge"].as_f64().unwrap() - 1.0).abs() < 1e-12, "{e}");
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [5, 0]}))).unwrap();
+        assert_eq!(res.ops[0].to_json()["entity"]["bulge"], json!(0.5));
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 0]}))).unwrap();
+        assert!(res.ops[0].to_json()["entity"].get("bulge").is_none());
     }
 
     #[test]

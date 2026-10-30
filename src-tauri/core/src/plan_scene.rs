@@ -569,7 +569,8 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                 T_ARC => {
                     b.flush();
                     let cls = part.str(f[0]).map(str::to_owned);
-                    let col = with_opacity(stroke_color_for(cls.as_deref(), None), cls.as_deref(), greyed);
+                    let col_s = if rec.flags & F_COLOR != 0 { part.str(f[1]).map(str::to_owned) } else { None };
+                    let col = with_opacity(stroke_color_for(cls.as_deref(), col_s.as_deref()), cls.as_deref(), greyed);
                     let dash = dash_of(part, &rec)?;
                     b.s.arcs.push(SArc { center: v2(f[4], f[5]), from: v2(f[6], f[7]), to: v2(f[8], f[9]), r: f[10], color: col, width_mm: f[2], dash });
                 }

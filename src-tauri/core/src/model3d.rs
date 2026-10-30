@@ -273,6 +273,10 @@ pub struct RWall {
     pub start_cut: Option<[f64; 4]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_cut: Option<[f64; 4]>,
+    /// Anfang/Ende liegt an einer inneren Stossfuge einer Bogenwand ([T2], Sehnen-Teilkörper): dort
+    /// keine sichtbare Stirnfläche (Ansicht).
+    #[serde(skip)]
+    pub joint: [bool; 2],
 }
 
 /// Textur-Karten-URLs der Bauteile in der Reihenfolge des ersten Auftretens: Wandtypen, dann
@@ -408,6 +412,10 @@ pub(crate) fn wall_reference(w: &Wall) -> Reference {
 
 fn wall_ref(p: &Project, w: &Wall) -> WallRef {
     let total = p.wall_thickness(w, 0.2);
+    // Bogenwand ([T2]): abgewickelt (Achsmass = Bogenlänge).
+    if let Some((_, v)) = crate::wall_arc::unrolled_wall(w) {
+        return WallRef { start: opening_geom::v(v.start.x, v.start.y), end: opening_geom::v(v.end.x, v.end.y), total, ref_off: joins::reference_offset(wall_reference(w), total) };
+    }
     WallRef { start: opening_geom::v(w.start.x, w.start.y), end: opening_geom::v(w.end.x, w.end.y), total, ref_off: joins::reference_offset(wall_reference(w), total) }
 }
 
@@ -485,7 +493,7 @@ fn compute_joins_by_floor(p: &Project) -> Result<HashMap<String, WallCuts>, Stri
             finite &= [w.start.x, w.start.y, w.end.x, w.end.y].iter().all(|v| v.is_finite())
                 && !matches!(reference, Reference::Offset(v) if !v.is_finite())
                 && layers.as_ref().is_none_or(|l| l.iter().all(|x| x.thickness.is_finite()));
-            jw.push(JoinWall { start: kv(w.start), end: kv(w.end), reference, layers });
+            jw.push(JoinWall { start: kv(w.start), end: kv(w.end), reference, layers, bulge: w.bulge });
         }
         if !finite {
             for w in walls {
@@ -543,6 +551,13 @@ fn floor_context(p: &Project, floor_id: &str) -> FloorContext {
     FloorContext::new(ceilings, roofs)
 }
 
+/// Liegt der Achspunkt `p` eines Bogen-Teilkörpers an einer inneren Stossfuge (nicht an Anfang, Ende
+/// oder einer Laibung)?
+fn inner_joint(a: &crate::wall_arc::WallArc, _w: &Wall, keep: &[f64], p: KVec) -> bool {
+    let (s, _) = a.local(p);
+    keep.iter().all(|k| (s - k).abs() > 0.01)
+}
+
 /// Wandkörper (`projectToWalls3d`): `layered` = ein Körper je Schicht mit Löchern (3D-Viewer),
 /// sonst Pfeiler/Brüstung/Sturz-Segmente (Schnitt-Eingabe).
 pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
@@ -579,9 +594,26 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
             cuts: if layered { joins.as_ref().and_then(|j| j.get(&wall.id)).cloned().unwrap_or_default() } else { WallCuts::default() },
             reveals: if layered && stacked { wall_reveals(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), bands.len()) } else { Vec::new() },
         };
-        let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
-        for piece in wall_bands::wall_bands(&win, ctx) {
+        // Bogenwand ([T2]): Sehnen-Teilwände mit radialen Gehrungen.
+        let arc = crate::wall_arc::WallArc::of_wall(wall);
+        // Echte Enden der Bogenwand: Anfang, Ende, Laibungen.
+        let keep: Vec<f64> = match arc {
+            Some(a) => [0.0, a.length()].into_iter().chain(win.openings.iter().flat_map(|o| [o.from, o.to])).collect(),
+            None => Vec::new(),
+        };
+        let wins = match arc {
+            Some(a) => crate::wall_arc::chord_walls(&win, &a),
+            None => vec![win],
+        };
+        for win in &wins {
+        let (dx, dy) = (win.end.x - win.start.x, win.end.y - win.start.y);
+        for mut piece in wall_bands::wall_bands(win, ctx) {
             let Some(b) = bands.get(piece.band) else { continue };
+            // Schnitt-Eingabe der Bogen-Teilwände: radiale Gehrungen auch ohne Schichtband-Pfad.
+            if arc.is_some() && !layered {
+                piece.start_cut = win.cuts.start_cut;
+                piece.end_cut = win.cuts.end_cut;
+            }
             out.push(RWall {
                 start: [piece.start.x, piece.start.y],
                 end: [piece.end.x, piece.end.y],
@@ -598,7 +630,9 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
                 cut: band_cut_meta(b),
                 start_cut: piece.start_cut.map(|l| [l.point.x, l.point.y, l.dir.x, l.dir.y]),
                 end_cut: piece.end_cut.map(|l| [l.point.x, l.point.y, l.dir.x, l.dir.y]),
+                joint: arc.map_or([false; 2], |a| [inner_joint(&a, wall, &keep, piece.start), inner_joint(&a, wall, &keep, piece.end)]),
             });
+        }
         }
     }
     let _ = hypot2;
@@ -766,7 +800,34 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
 }
 
 /// Öffnungs-Einbauteile als Quader-Meshes (`emitOpeningMeshes`); `detail`: 0 grob, 1 mittel, 2 fein.
+/// Bogenwände ([T2]): je Wand auf der abgewickelten Ersatzwand gerechnet und die Ecken gebogen — die
+/// Einbauteile bleiben gerade (Sehne zwischen den Laibungen), ihre Enden sitzen radial in der Laibung.
 pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
+    let arcs: Vec<usize> = p.walls.iter().enumerate().filter(|(_, w)| crate::wall_arc::WallArc::of_wall(w).is_some()).map(|(i, _)| i).collect();
+    if arcs.is_empty() {
+        return emit_opening_meshes_plain(p, detail);
+    }
+    let mut q = p.clone();
+    let arc_ids: std::collections::HashSet<&str> = arcs.iter().map(|&i| p.walls[i].id.as_str()).collect();
+    q.openings = p.openings.as_ref().map(|v| v.iter().filter(|o| !arc_ids.contains(o.host_wall_id.as_str())).cloned().collect());
+    let mut out = emit_opening_meshes_plain(&q, detail);
+    for &i in &arcs {
+        let Some((arc, v)) = crate::wall_arc::unrolled_wall(&p.walls[i]) else { continue };
+        q.walls = vec![v];
+        q.openings = p.openings.as_ref().map(|o| o.iter().filter(|o| o.host_wall_id == p.walls[i].id).cloned().collect());
+        for mut m in emit_opening_meshes_plain(&q, detail) {
+            for c in m.positions.chunks_exact_mut(3) {
+                let w = arc.point(c[0], c[1]);
+                c[0] = w.x;
+                c[1] = w.y;
+            }
+            out.push(m);
+        }
+    }
+    out
+}
+
+fn emit_opening_meshes_plain(p: &Project, detail: f64) -> Vec<RMesh> {
     let mut shaped: Vec<RMesh> = Vec::new();
     let mut w = FlatWriter::new();
     w.num(detail).num(p.walls.len() as f64);
@@ -1779,7 +1840,13 @@ pub fn pick_openings(p: &Project) -> Vec<PickBox> {
     for o in p.openings.as_deref().unwrap_or(&[]) {
         let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
         let wr = wall_ref(p, wall);
-        let Some((jamb_start, jamb_end)) = opening_geom::opening_jambs(&wr, o.position, o.width) else { continue };
+        let Some((mut jamb_start, mut jamb_end)) = opening_geom::opening_jambs(&wr, o.position, o.width) else { continue };
+        // Bogenwand ([T2]): Laibungen auf dem Bogen (Sehne als Pick-Quader).
+        if let Some(a) = crate::wall_arc::WallArc::of_wall(wall) {
+            let (ps, pe) = (a.point(jamb_start.x, 0.0), a.point(jamb_end.x, 0.0));
+            jamb_start = opening_geom::v(ps.x, ps.y);
+            jamb_end = opening_geom::v(pe.x, pe.y);
+        }
         let thickness = Project::type_thickness(&p.wall_type_or_fallback(wall).layers);
         let (zb, zt) = p.wall_vertical_extent(wall);
         let o_bottom = zb + o.sill_height.max(0.0);

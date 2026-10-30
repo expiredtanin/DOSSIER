@@ -1048,4 +1048,48 @@ mod tests {
             serde_json::to_string(&(&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.drawings.prims, &d.solids, &d.context, &d.sections)).unwrap();
         });
     }
+
+    /// [T2] Bogenwand im Grundriss: alle Poché-Punkte im Kreisring, Schichtflächen = Ringsektor,
+    /// Umriss als Bögen (DXF-tauglich).
+    #[test]
+    fn bogenwand_poche_im_kreisring() {
+        let mut p = sample();
+        p.walls.retain(|w| w.id == "W1");
+        p.openings = Some(vec![]);
+        p.ceilings = Some(vec![]);
+        p.rooms = Some(vec![]);
+        p.walls[0].bulge = Some(1.0); // Halbkreis (0,0)→(5,0), Mitte (2.5,0), r 2.5, Scheitel oben
+        let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": 50 }).to_string();
+        let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        let (r_in, r_out) = (2.5 - 0.345 / 2.0, 2.5 + 0.345 / 2.0);
+        let mut band_area = 0.0;
+        let mut arcs = 0;
+        for pr in &r.walls {
+            match pr {
+                Primitive::Polygon { pts, stroke, .. } => {
+                    for q in pts {
+                        let d = ((q.x - 2.5).powi(2) + q.y.powi(2)).sqrt();
+                        assert!(d > r_in - 1e-6 && d < r_out + 1e-6 && q.y > -1e-6, "{q:?} d={d}");
+                    }
+                    if stroke == "none" {
+                        let mut a = 0.0;
+                        for i in 0..pts.len() {
+                            let (u, v) = (pts[i], pts[(i + 1) % pts.len()]);
+                            a += u.x * v.y - v.x * u.y;
+                        }
+                        band_area += a.abs() / 2.0;
+                    }
+                }
+                Primitive::Arc { center, r: rr, .. } => {
+                    arcs += 1;
+                    assert!((center.x - 2.5).abs() < 1e-9 && center.y.abs() < 1e-9 && *rr > r_in - 1e-9 && *rr < r_out + 1e-9);
+                }
+                Primitive::Line { a, b, .. } => panic!("Gerade an der Bogenwand: {a:?} {b:?}"),
+                _ => {}
+            }
+        }
+        let exact = std::f64::consts::PI / 2.0 * (r_out * r_out - r_in * r_in);
+        assert!((band_area - exact).abs() < exact * 2e-3, "{band_area} ≠ {exact}");
+        assert!(arcs >= 2 * 2, "Umriss innen/aussen als Bögen (≤ 90° je Stück): {arcs}");
+    }
 }

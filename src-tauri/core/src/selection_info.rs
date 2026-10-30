@@ -447,7 +447,10 @@ fn wall_selection(root: &Map<String, Value>, w: &Value) -> Result<J, String> {
     let color = color_of(w, cat, WALL_FALLBACK_COLOR);
     let weight = lw_or(field(w, "strokeWeight"), cat, WALL_FALLBACK_MM);
     let (s, e) = (xy(field(w, "start").unwrap_or(&Value::Null)), xy(field(w, "end").unwrap_or(&Value::Null)));
-    let bb = [jsnum::min(s.0, e.0), jsnum::min(s.1, e.1), jsnum::max(s.0, e.0), jsnum::max(s.1, e.1)];
+    let mut bb = [jsnum::min(s.0, e.0), jsnum::min(s.1, e.1), jsnum::max(s.0, e.0), jsnum::max(s.1, e.1)];
+    for q in crate::wall_arc::axis_polyline(s, e, field(w, "bulge").and_then(Value::as_f64), 0.0, 0.0) {
+        bb = [bb[0].min(q.0), bb[1].min(q.1), bb[2].max(q.0), bb[3].max(q.1)];
+    }
     let wt = find_by(arr(root.get("wallTypes")), "id", field(w, "wallTypeId"))
         .ok_or_else(|| format!("Unbekannter Wandtyp: {}", field(w, "wallTypeId").map_or("undefined".into(), js_text)))?;
     let thickness = type_thickness(wt);
@@ -457,7 +460,9 @@ fn wall_selection(root: &Map<String, Value>, w: &Value) -> Result<J, String> {
     let floor = level(root, field(w, "floorId"));
     let (zb, zt) = vertical_extent(root, w);
     let above = next_floor_above(root, field(w, "floorId"));
-    let length = hypot2(e.0 - s.0, e.1 - s.1);
+    // Bogenwand ([T2]): Bogenlänge der Achse.
+    let bulge = field(w, "bulge").and_then(Value::as_f64);
+    let length = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(s.0, s.1), kernel2d::Vec2::new(e.0, e.1), bulge).map_or_else(|| hypot2(e.0 - s.0, e.1 - s.1), |a| a.length());
     let height = jsnum::max(0.0, zt - zb);
     let gross = length * thickness * height;
     let opening_volume = arr(root.get("openings"))

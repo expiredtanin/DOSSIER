@@ -293,6 +293,11 @@ pub fn shadow_polygons_project(p: &Project, sun: SunPosition) -> Vec<Polygon> {
     let mut prisms: Vec<Prism> = Vec::new();
     for w in &p.walls {
         let (z_bottom, z_top) = p.wall_vertical_extent(w);
+        // Bogenwand ([T2]): Kreisringsektor als Prisma.
+        if let Some(footprint) = crate::wall_arc::arc_footprint(w, p.wall_thickness(w, 0.2)) {
+            prisms.push(Prism { footprint, z_bottom, z_top });
+            continue;
+        }
         let dx = w.end.x - w.start.x;
         let dy = w.end.y - w.start.y;
         let len = hypot2(dx, dy);

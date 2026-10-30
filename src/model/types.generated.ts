@@ -2865,6 +2865,12 @@ export type Wall = {
   start: Vec2;
   /** Achs-Endpunkt im Grundriss (Meter). */
   end: Vec2;
+  /**
+   * Bogenwand ([T2]): Achse als Kreisbogen von `start` nach `end`, `bulge = tan(Öffnungswinkel/4)`;
+   * positiv = Scheitel links der Sehne (Modell-Konvention wie Polylinien, = −DXF-Bulge). Fehlt/0 =
+   * gerade Wand.
+   */
+  bulge?: number;
   /** Verweis auf den (mehrschichtigen) Wandtyp. */
   wallTypeId: string;
   /** Wandhöhe in Metern. */

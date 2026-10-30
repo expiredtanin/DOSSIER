@@ -144,7 +144,7 @@ fn seg_bulge(seg: &Value, prev: V, pt: V, points: &[V], bulges: &[f64]) -> f64 {
 }
 
 /// Bulges der gesetzten Segmente der Reihe nach (jeder Bogen kennt die Richtung seines Vorgängers).
-fn poly_bulges(points: &[V], segs: &[Value]) -> Vec<f64> {
+pub(crate) fn poly_bulges(points: &[V], segs: &[Value]) -> Vec<f64> {
     let mut bulges: Vec<f64> = Vec::new();
     for i in 1..points.len() {
         let seg = segs.get(i - 1).unwrap_or(&Value::Null);
@@ -176,8 +176,10 @@ fn polyline_ops(v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     add_drawing(v, ctx, ids, obj(g))
 }
 
-/// Polylinien-Vorschau: gesetzte Punkte + Cursor (letzter Punkt in `pts`, falls `cursor`), Bogen-Modus.
-fn polyline_preview(v: &Value, pts: &[V], out: &mut Shapes) {
+/// Bulges je Segment einer Vorschau (Polylinie, Wand): gesetzte Segmente aus `segs`, dazu das lebende
+/// Segment zum Cursor (letzter Punkt in `pts`, falls `cursor`) im Bogen-Modus (`arc`, `tangent`,
+/// `through`).
+pub(crate) fn preview_bulges(v: &Value, pts: &[V]) -> Vec<f64> {
     let has_cursor = b_of(v, "cursor");
     let points = if has_cursor && !pts.is_empty() { &pts[..pts.len() - 1] } else { pts };
     let bulges = poly_bulges(points, arr(v.get("segs")));
@@ -194,6 +196,12 @@ fn polyline_preview(v: &Value, pts: &[V], out: &mut Shapes) {
         };
         all_b.push(pb);
     }
+    all_b
+}
+
+/// Polylinien-Vorschau: gesetzte Punkte + Cursor (letzter Punkt in `pts`, falls `cursor`), Bogen-Modus.
+fn polyline_preview(v: &Value, pts: &[V], out: &mut Shapes) {
+    let all_b = preview_bulges(v, pts);
     let shown = bulge_points(pts, &all_b, false);
     if b_of(v, "closed") && pts.len() >= 3 {
         out.poly(&shown);

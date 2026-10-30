@@ -10,6 +10,7 @@ use super::domains::Ctx;
 use super::prim::{HatchRender, Primitive};
 use super::style::*;
 use crate::joins::{self, WallCuts};
+use crate::wall_arc::Unroll;
 use crate::js_fmt::to_fixed;
 use crate::jsnum::{atan2, round};
 use crate::model::*;
@@ -63,17 +64,15 @@ fn plan_joins(p: &Project, walls: &[EffWall]) -> Result<Vec<WallCuts>, String> {
             buf.extend([l.thickness, idx, comp.join_priority]);
         }
     }
-    let out = joins::compute_joins_flat(&buf);
     // Fehler der Verschneidung (mit den Rückfällen oben nicht mehr erwartet): Wände ohne Verschneidung.
-    if out.first() != Some(&0.0) {
+    let Some(mut jw) = joins::decode_walls(&buf) else {
         return Ok(vec![WallCuts::default(); walls.len()]);
+    };
+    // Bogenwände ([T2]) tragen ihren Bulge.
+    for (j, e) in jw.iter_mut().zip(walls) {
+        j.bulge = e.w.bulge;
     }
-    let mut r = crate::flat_read::Reader::new(&out[1..]);
-    let mut cuts = Vec::with_capacity(walls.len());
-    for _ in walls {
-        cuts.push(joins::decode_cuts(&mut r).unwrap_or_default());
-    }
-    Ok(cuts)
+    Ok(joins::compute_joins(&jw).unwrap_or_else(|_| vec![WallCuts::default(); walls.len()]))
 }
 
 /// Wand mit angewandten Override-Regeln (Farbe → Umriss/Fugen, Strichstärke).
@@ -167,7 +166,7 @@ fn v2(x: f64, y: f64) -> Vec2 {
 
 /// Wand-Poché (`addWallPoche`).
 #[allow(clippy::too_many_arguments)]
-fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)], cuts: &WallCuts, greyed: bool, wall_lw: f64, category: Option<&LayerCategory>, view_only: bool, reveals: &[f64]) -> Result<(), String> {
+fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)], cuts: &WallCuts, greyed: bool, wall_lw: f64, category: Option<&LayerCategory>, view_only: bool, reveals: &[f64], bend: Option<&Unroll>) -> Result<(), String> {
     let p = c.p;
     let w = e.w;
     let detail = c.a.detail;
@@ -203,6 +202,18 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             let q = i + 4 + n_no;
             let pts: Vec<Vec2> = (0..4).map(|j| v2(f[q + 2 * j], f[q + 2 * j + 1])).collect();
             i = q + 8;
+            if let (Some(u), true) = (bend, art == 2.0) {
+                // [T2] Bogenwand: Schichtband in Winkelstücke teilen, damit die Schraffur der
+                // Tangente folgt (gebogen wird danach in `bend_prims`).
+                for (piece, s_mid) in split_band(u, &pts) {
+                    let t = u.arc.tangent(s_mid);
+                    let local = atan2(t.y, t.x) * 180.0 / std::f64::consts::PI;
+                    let (hatch, fill) = layer_style(p, w, wt, li, category, local)?;
+                    let all: Vec<f64> = (0..piece.len()).map(|k| k as f64).collect();
+                    out.push(wall_polygon(piece, &fill, "none", 0.0, hatch, greyed, Some(all), Some(&w.id), None));
+                }
+                continue;
+            }
             if art == 2.0 {
                 let (hatch, fill) = style_of(li)?;
                 out.push(wall_polygon(pts, &fill, "none", 0.0, hatch, greyed, Some(no_stroke), Some(&w.id), None));
@@ -489,6 +500,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
                 cls: "door-swing".into(),
                 weight_mm: f[i + 1],
                 dash: None,
+                color: None,
                 opening_id: Some(o.id.clone()),
                 stair_id: None,
                 greyed: Some(greyed),
@@ -613,14 +625,19 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
     for e in &walls {
         let w = e.w;
         bounds_wall(p, w, bounds);
+        // Bogenwand ([T2]): die gerade Pipeline rechnet auf der abgewickelten Ersatzwand `wv`, die
+        // Ausgabe wird gebogen (`bend_prims`).
+        let arc_wall = crate::wall_arc::unrolled_wall(w);
+        let wv: &Wall = arc_wall.as_ref().map_or(w, |a| &a.1);
+        let ev = EffWall { w: wv, color: e.color.clone(), stroke_weight: e.stroke_weight };
         let greyed = c.greyed(&w.category_code);
         let category = c.cat(&w.category_code);
         let lw = resolve_stroke_weight(e.stroke_weight, w.stroke_weight_source, category, category.map_or(WALL_FALLBACK_MM, |k| k.lw));
         let openings: Vec<&Opening> = p.openings_of_wall(&w.id).collect();
         let wr_total = p.wall_thickness(w, 0.2);
         let wr = crate::opening_geom::WallRef {
-            start: crate::opening_geom::v(w.start.x, w.start.y),
-            end: crate::opening_geom::v(w.end.x, w.end.y),
+            start: crate::opening_geom::v(wv.start.x, wv.start.y),
+            end: crate::opening_geom::v(wv.end.x, wv.end.y),
             total: wr_total,
             ref_off: joins::reference_offset(crate::model3d::wall_reference(w), wr_total),
         };
@@ -630,10 +647,32 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         let cut = cut_by_id.get(w.id.as_str()).copied().unwrap_or(&empty);
         let (zb, zt) = p.wall_vertical_extent(w);
         let view_only = zt < cut_z || zb > cut_z;
-        let reveals = crate::opening_detail::plan_reveal_block(p, w, &openings);
-        wall_poche(c, out, e, &gaps, cut, greyed, lw, category, view_only, &reveals)?;
-        if reference_lines {
-            out.push(mk_line(w.start, w.end, "wall-axis", 0.13, Some(Some(vec![0.18, 0.06, 0.04, 0.06])), None, greyed, None));
+        let reveals = crate::opening_detail::plan_reveal_block(p, wv, &openings);
+        let (unroll, cut_u) = match &arc_wall {
+            Some((arc, _)) => {
+                let total = p.wall_thickness(w, 0.2);
+                let ro = joins::reference_offset(crate::model3d::wall_reference(w), total);
+                let mut u = Unroll::new(*arc);
+                let cu = unroll_cuts(&mut u, cut, ro - total / 2.0, ro + total / 2.0);
+                (Some(u), cu)
+            }
+            None => (None, WallCuts::default()),
+        };
+        match &unroll {
+            Some(u) => {
+                let mut tmp = Vec::new();
+                wall_poche(c, &mut tmp, &ev, &gaps, &cut_u, greyed, lw, category, view_only, &reveals, Some(u))?;
+                if reference_lines {
+                    tmp.push(mk_line(wv.start, wv.end, "wall-axis", 0.13, Some(Some(vec![0.18, 0.06, 0.04, 0.06])), None, greyed, None));
+                }
+                bend_prims(u, tmp, out);
+            }
+            None => {
+                wall_poche(c, out, e, &gaps, cut, greyed, lw, category, view_only, &reveals, None)?;
+                if reference_lines {
+                    out.push(mk_line(w.start, w.end, "wall-axis", 0.13, Some(Some(vec![0.18, 0.06, 0.04, 0.06])), None, greyed, None));
+                }
+            }
         }
         for o in openings {
             if !c.shown(&o.category_code) {
@@ -649,16 +688,171 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 _ => c.a.detail,
             };
             let wall_line = (e.color.as_deref().unwrap_or(POCHE_STROKE), lw * c.a.detail.outline_factor());
-            opening_symbol(c, out, w, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?;
+            match &unroll {
+                Some(u) => {
+                    let mut tmp = Vec::new();
+                    opening_symbol(c, &mut tmp, wv, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?;
+                    bend_prims(u, tmp, out);
+                }
+                None => opening_symbol(c, out, w, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?,
+            }
         }
     }
     Ok(())
+}
+
+/// Schnittlinien einer Bogenwand in den abgewickelten Rahmen ([T2]); Aussparungen sind schon in
+/// Bogenlänge. Nicht abwickelbare Linien fallen weg (Ende bleibt radial).
+fn unroll_cuts(u: &mut Unroll, c: &WallCuts, lo: f64, hi: f64) -> WallCuts {
+    let len = u.arc.length();
+    let mut one = |l: &Option<joins::Line>, s: f64| l.as_ref().and_then(|l| u.unroll_line(l, lo, hi, s));
+    let start_cut = one(&c.start_cut, 0.0);
+    let end_cut = one(&c.end_cut, len);
+    let layer_cuts = c.layer_cuts.as_ref().map(|lc| joins::LayerCuts {
+        start: lc.start.iter().map(|l| one(l, 0.0)).collect(),
+        end: lc.end.iter().map(|l| one(l, len)).collect(),
+        start_side: lc.start_side.iter().map(|l| one(l, 0.0)).collect(),
+        end_side: lc.end_side.iter().map(|l| one(l, len)).collect(),
+    });
+    WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone() }
+}
+
+/// Konvexes Viereck (abgewickelt) an den Zerlegungsstellen in Stücke teilen: (Stück, mittleres s).
+fn split_band(u: &Unroll, pts: &[Vec2]) -> Vec<(Vec<Vec2>, f64)> {
+    let (x0, x1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.x), b.max(q.x)));
+    if !(x1 > x0) {
+        return vec![];
+    }
+    let (n0, n1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.y), b.max(q.y)));
+    let st = u.arc.stations(x0, x1, u.arc.r_max(n0, n1));
+    let mut out = Vec::new();
+    for k in 0..st.len() - 1 {
+        let piece = clip_slab(pts, st[k], st[k + 1]);
+        if piece.len() >= 3 {
+            out.push((piece, (st[k] + st[k + 1]) / 2.0));
+        }
+    }
+    out
+}
+
+/// Polygon auf den Streifen a ≤ x ≤ b beschneiden (Sutherland–Hodgman).
+fn clip_slab(pts: &[Vec2], a: f64, b: f64) -> Vec<Vec2> {
+    let clip = |poly: Vec<Vec2>, keep: &dyn Fn(Vec2) -> bool, x: f64| -> Vec<Vec2> {
+        let n = poly.len();
+        let mut o = Vec::with_capacity(n + 2);
+        for i in 0..n {
+            let (p, q) = (poly[i], poly[(i + 1) % n]);
+            let (kp, kq) = (keep(p), keep(q));
+            if kp {
+                o.push(p);
+            }
+            if kp != kq && (q.x - p.x).abs() > 1e-15 {
+                let t = (x - p.x) / (q.x - p.x);
+                o.push(v2(x, p.y + (q.y - p.y) * t));
+            }
+        }
+        o
+    };
+    let p1 = clip(pts.to_vec(), &|q: Vec2| q.x >= a - 1e-12, a);
+    let mut p2 = clip(p1, &|q: Vec2| q.x <= b + 1e-12, b);
+    p2.dedup_by(|p, q| (p.x - q.x).abs() < 1e-12 && (p.y - q.y).abs() < 1e-12);
+    p2
+}
+
+fn kv(p: Vec2) -> kernel2d::Vec2 {
+    kernel2d::Vec2::new(p.x, p.y)
+}
+
+fn mv(p: kernel2d::Vec2) -> Vec2 {
+    v2(p.x, p.y)
+}
+
+fn bmap(u: &Unroll, p: Vec2) -> Vec2 {
+    mv(u.map(kv(p)))
+}
+
+fn bend_poly(u: &Unroll, pts: &[Vec2], ns: &[f64]) -> (Vec<Vec2>, Vec<f64>) {
+    let k: Vec<kernel2d::Vec2> = pts.iter().map(|q| kv(*q)).collect();
+    let (o, n) = u.polygon(&k, ns);
+    (o.into_iter().map(mv).collect(), n)
+}
+
+/// Grundriss-Primitive der abgewickelten Ersatzwand biegen ([T2]): Flächen über die Bogenkanten
+/// zerlegt, Linien mit konstantem Querversatz als Bögen (≤ 90° je Stück, Gegenuhrzeigersinn, wie
+/// es Bildschirm, SVG und DXF erwarten), übrige Linien gerade.
+fn bend_prims(u: &Unroll, prims: Vec<Primitive>, out: &mut Vec<Primitive>) {
+    for mut p in prims {
+        match &mut p {
+            Primitive::Polygon { pts, no_stroke_edges, .. } => {
+                let (bp, ns) = bend_poly(u, pts, no_stroke_edges.as_deref().unwrap_or(&[]));
+                *pts = bp;
+                if no_stroke_edges.is_some() {
+                    *no_stroke_edges = Some(ns);
+                }
+            }
+            Primitive::Line { a, b, cls, weight_mm, dash, color, opening_id, greyed, opacity, .. } => {
+                if u.is_arc_edge(kv(*a), kv(*b)) {
+                    let c = mv(u.arc.center);
+                    let r = u.arc.radius_at(a.y);
+                    let (pa, pb) = (bmap(u, *a), bmap(u, *b));
+                    let (fa, fb) = crate::wall_arc::arc_angles(kv(c), kv(pa), kv(pb));
+                    let est = u.arc.sigma() * (b.x - a.x) / u.arc.r;
+                    let mut d = (fb - fa) - est;
+                    d = d - (d / (2.0 * std::f64::consts::PI)).round() * 2.0 * std::f64::consts::PI;
+                    let sweep = est + d;
+                    let k = ((sweep.abs() / (std::f64::consts::PI / 2.0)).ceil() as usize).max(1);
+                    for i in 0..k {
+                        let t0 = fa + sweep * i as f64 / k as f64;
+                        let t1 = fa + sweep * (i + 1) as f64 / k as f64;
+                        let (lo, hi) = if t1 >= t0 { (t0, t1) } else { (t1, t0) };
+                        let at = |t: f64| v2(c.x + r * t.cos(), c.y + r * t.sin());
+                        // Exakte Endpunkte (eingerastet) an den Enden.
+                        let q0 = if (lo - fa).abs() < 1e-12 { pa } else if (lo - (fa + sweep)).abs() < 1e-12 { pb } else { at(lo) };
+                        let q1 = if (hi - fa).abs() < 1e-12 { pa } else if (hi - (fa + sweep)).abs() < 1e-12 { pb } else { at(hi) };
+                        out.push(Primitive::Arc {
+                            center: c,
+                            from: q0,
+                            to: q1,
+                            r,
+                            cls: cls.clone(),
+                            weight_mm: *weight_mm,
+                            dash: dash.clone(),
+                            color: color.clone(),
+                            opening_id: opening_id.clone(),
+                            stair_id: None,
+                            greyed: *greyed,
+                            opacity: *opacity,
+                        });
+                    }
+                    continue;
+                }
+                *a = bmap(u, *a);
+                *b = bmap(u, *b);
+            }
+            Primitive::Arc { center, from, to, .. } => {
+                *center = bmap(u, *center);
+                *from = bmap(u, *from);
+                *to = bmap(u, *to);
+            }
+            _ => {}
+        }
+        out.push(p);
+    }
 }
 
 /// Wand-Ecken (`wallCorners` mit Typ-Dicke) ins Ausmass.
 fn bounds_wall(p: &Project, w: &Wall, bounds: &mut super::domains::Bounds) {
     let Some(wt) = p.wall_type(w) else { return };
     let h = thickness(&wt.layers) / 2.0;
+    if let Some(a) = crate::wall_arc::WallArc::of_wall(w) {
+        for s in a.stations(0.0, a.length(), a.r + h) {
+            for off in [h, -h] {
+                let q = a.point(s, off);
+                bounds.acc(q.x, q.y);
+            }
+        }
+        return;
+    }
     let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
     let l = crate::jsmath::hypot2(dx, dy);
     let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };

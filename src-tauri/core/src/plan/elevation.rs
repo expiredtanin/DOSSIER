@@ -96,8 +96,14 @@ struct RoofIn {
 /// `projectFaces`.
 fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[RoofIn]) -> Vec<Face> {
     let mut w = vec![walls.len() as f64];
+    // Mit Schnittlinien (Bogen-Teilkörper, [T2]): die Ecken liegen auf der Gehrung statt rechtwinklig.
+    let cut = walls.iter().any(|x| x.start_cut.is_some() || x.end_cut.is_some() || x.joint != [false; 2]);
     for x in walls {
         w.extend([x.start[0], x.start[1], x.end[0], x.end[1], x.thickness, x.height, x.base_elevation]);
+        if cut {
+            w.extend(corner_shifts(x));
+            w.extend([if x.joint[0] { 1.0 } else { 0.0 }, if x.joint[1] { 1.0 } else { 0.0 }]);
+        }
     }
     let mut sl = vec![slabs.len() as f64];
     for x in slabs {
@@ -138,6 +144,34 @@ fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[Ro
         i += 9 + 2 * count;
     }
     out
+}
+
+/// Verschiebung der vier Wandecken längs der Achse bis auf die Schnittlinien (Anfang +n, Anfang −n,
+/// Ende +n, Ende −n; +n = rechte Normale wie in `plan_elevation::wall_faces`).
+fn corner_shifts(x: &RWall) -> [f64; 4] {
+    let (dx, dy) = (x.end[0] - x.start[0], x.end[1] - x.start[1]);
+    let l = hypot2(dx, dy);
+    if l < 1e-9 {
+        return [0.0; 4];
+    }
+    let (ax, ay) = (dx / l, dy / l);
+    let (nx, ny) = (ay, -ax);
+    let ht = x.thickness / 2.0;
+    let shift = |base: [f64; 2], t: f64, cut: Option<[f64; 4]>| -> f64 {
+        let Some([cx, cy, ux, uy]) = cut else { return 0.0 };
+        let (qx, qy) = (base[0] + nx * t, base[1] + ny * t);
+        let den = ax * uy - ay * ux;
+        if den.abs() < 1e-12 {
+            return 0.0;
+        }
+        let lam = ((cx - qx) * uy - (cy - qy) * ux) / den;
+        if lam.is_finite() && lam.abs() < l {
+            lam
+        } else {
+            0.0
+        }
+    };
+    [shift(x.start, ht, x.start_cut), shift(x.start, -ht, x.start_cut), shift(x.end, ht, x.end_cut), shift(x.end, -ht, x.end_cut)]
 }
 
 /// `collectRoofFaces`.
@@ -252,12 +286,21 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
     for wall in &p.walls {
         let thickness = p.wall_type(wall).map_or(0.2, |t| t.layers.iter().fold(0.0, |s, l| s + l.thickness));
         for &op in by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()) {
-            let axis = hypot2(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+            let arc = crate::wall_arc::WallArc::of_wall(wall);
+            let axis = arc.map_or_else(|| hypot2(wall.end.x - wall.start.x, wall.end.y - wall.start.y), |a| a.length());
             let from = max(0.0, min(op.position, axis));
             let to = max(from, min(op.position + op.width, axis));
             if to - from < 1e-4 {
                 continue;
             }
+            // [T2] Bogenwand: Öffnung als Sehne zwischen den Laibungen (Ersatzwand je Öffnung).
+            let (ws, we, from, to) = match arc {
+                Some(a) => {
+                    let (ps, pe) = (a.point(from, 0.0), a.point(to, 0.0));
+                    (Vec2 { x: ps.x, y: ps.y }, Vec2 { x: pe.x, y: pe.y }, 0.0, hypot2(pe.x - ps.x, pe.y - ps.y))
+                }
+                None => (wall.start, wall.end, from, to),
+            };
             let (zb, zt) = p.wall_vertical_extent(wall);
             let ob = zb + max(0.0, op.sill_height);
             let ot = min(zt, ob + op.height);
@@ -265,10 +308,10 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
             let dt = if door { p.door_type(op) } else { None };
             let wt = if door { None } else { p.window_type(op) };
             b.extend([
-                wall.start.x,
-                wall.start.y,
-                wall.end.x,
-                wall.end.y,
+                ws.x,
+                ws.y,
+                we.x,
+                we.y,
                 thickness,
                 from,
                 to,
@@ -599,6 +642,38 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             })
         })
     };
+    // [T2] Bogenwände: Stossfugen der Sehnen-Teilkörper nicht als Kante zeichnen (die Fläche wirkt
+    // gekrümmt statt facettiert). Eine senkrechte Kante gilt als Fuge, wenn eine andere Fläche derselben
+    // Wand mit fast gleicher Normale, gleicher Blickseite (nicht die Silhouette) dort ebenfalls eine
+    // senkrechte Kante hat (Toleranz 2 cm: die Teilquader enden rechtwinklig, nicht auf der Gehrung).
+    let arc_ids: std::collections::HashSet<&str> = p.walls.iter().filter(|w| crate::wall_arc::WallArc::of_wall(w).is_some()).map(|w| w.id.as_str()).collect();
+    let view_n = [frame[3], frame[4], frame[5]];
+    let facing = |f: &Face| f.normal[0] * view_n[0] + f.normal[1] * view_n[1] + f.normal[2] * view_n[2];
+    let mut arc_faces: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (fi, f) in faces.iter().enumerate() {
+        if f.role == Role::Wall && arc_ids.contains(f.id.as_str()) {
+            arc_faces.entry(f.id.as_str()).or_default().push(fi);
+        }
+    }
+    let smooth_seam = |fi: usize, a: Pt, b: Pt| -> bool {
+        let f = &faces[fi];
+        if f.role != Role::Wall || (a[0] - b[0]).abs() > 1e-6 {
+            return false;
+        }
+        let Some(list) = arc_faces.get(f.id.as_str()) else { return false };
+        let (lo, hi) = (a[1].min(b[1]), a[1].max(b[1]));
+        let side = facing(f);
+        list.iter().any(|&oi| {
+            let o = &faces[oi];
+            if oi == fi || f.normal[0] * o.normal[0] + f.normal[1] * o.normal[1] + f.normal[2] * o.normal[2] < 0.98 || facing(o) * side <= 0.0 {
+                return false;
+            }
+            (0..o.pts.len()).any(|i| {
+                let (c, d) = (o.pts[i], o.pts[(i + 1) % o.pts.len()]);
+                (c[0] - d[0]).abs() < 1e-6 && (c[0] - a[0]).abs() < 0.02 && c[1].min(d[1]) < hi - 1e-6 && c[1].max(d[1]) > lo + 1e-6
+            })
+        })
+    };
     let mut group_order: Vec<u64> = Vec::new();
     let mut groups: HashMap<u64, (Vec<usize>, f64)> = HashMap::new();
     for (fi, f) in faces.iter().enumerate() {
@@ -626,7 +701,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             for i in 0..f.pts.len() {
                 let a = f.pts[i];
                 let b = f.pts[(i + 1) % f.pts.len()];
-                if coplanar_seam(fi, a, b) {
+                if coplanar_seam(fi, a, b) || smooth_seam(fi, a, b) {
                     continue;
                 }
                 pending.push(Pending::Line { a, b, depth: f.depth_min - EPS * 5.0, style: None, paint: None });
@@ -1025,6 +1100,36 @@ mod tests {
         let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
         let (prims, _) = elevation_primitives(p, &level, false, false, &Visibility::default(), scale).unwrap().unwrap();
         serde_json::to_string(&prims).unwrap()
+    }
+
+    /// [T2] Bogenwand in der Ansicht: keine Facetten-Fugen der Sehnen-Teilkörper, Umriss bleibt.
+    #[test]
+    fn bogenwand_ohne_facettenfugen() {
+        let mut p = sample();
+        p.walls.retain(|w| w.id == "W1");
+        p.openings = Some(vec![]);
+        p.roofs = Some(vec![]);
+        p.ceilings = Some(vec![]);
+        p.stairs = Some(vec![]);
+        p.walls[0].bulge = Some(-0.5); // Bogen nach Süden, zur Ansicht hin (vor der Ansichtslinie y = −2)
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        let mut inner = Vec::new();
+        let mut all = 0;
+        for pr in &prims {
+            if let Primitive::Line { a, b, cls, .. } = pr {
+                if cls == "elevation-outline" && (a.x - b.x).abs() < 1e-6 {
+                    all += 1;
+                    // Ansichts-x = Welt-x + 1 (Ansichtslinie ab x = −1); die Wand reicht von 1 bis 6.
+                    if a.x > 1.3 && a.x < 5.7 {
+                        inner.push(a.x);
+                    }
+                }
+            }
+        }
+        assert!(all >= 2, "Silhouette fehlt");
+        assert!(inner.is_empty(), "Facetten-Fugen: {inner:?}");
     }
 
     #[test]

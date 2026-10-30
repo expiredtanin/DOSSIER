@@ -547,15 +547,40 @@ fn wall_faces(f: &Frame, w: &[f64], src: usize, out: &mut Vec<Projected>) {
     let corner = |s_along: f64, t_off: f64, y: f64| -> V3 {
         [sx + a_hat[0] * s_along + n_hat[0] * t_off, y, sz + a_hat[2] * s_along + n_hat[2] * t_off]
     };
+    // Schnitt-Verschiebungen der vier Ecken längs der Achse ([T2]: Gehrung der Bogen-Teilkörper):
+    // Anfang +n, Anfang −n, Ende +n, Ende −n; ohne Angabe 0 (rechtwinklig wie bisher).
+    let [sp, sm, ep, em] = if w.len() >= 11 { [w[7], w[8], w[9], w[10]] } else { [0.0; 4] };
+    // Innere Stossfuge (Bogen-Teilkörper): keine Stirnfläche, sie läge im Inneren der Wand.
+    let (cap_start, cap_end) = if w.len() >= 13 { (w[11] == 0.0, w[12] == 0.0) } else { (true, true) };
+    let (s_p, s_m, e_p, e_m) = (sp, sm, len + ep, len + em);
+    // Normale einer schrägen Stirnfläche (Grundriss-Senkrechte zur Kante, Richtung `toward`).
+    let cap_normal = |a: V3, b: V3, toward: V3, square: V3| -> V3 {
+        let (dx, dz) = (b[0] - a[0], b[2] - a[2]);
+        let l = hypot2(dx, dz);
+        if l < 1e-12 {
+            return square;
+        }
+        let n: V3 = [dz / l, 0.0, -dx / l];
+        if n[0] * toward[0] + n[2] * toward[2] >= 0.0 {
+            n
+        } else {
+            neg(n)
+        }
+    };
+    let start_n = if sp == 0.0 && sm == 0.0 { neg(a_hat) } else { cap_normal(corner(s_m, -ht, zb), corner(s_p, ht, zb), neg(a_hat), neg(a_hat)) };
+    let end_n = if ep == 0.0 && em == 0.0 { a_hat } else { cap_normal(corner(e_m, -ht, zb), corner(e_p, ht, zb), a_hat, a_hat) };
     let faces: [(V3, [V3; 4]); 6] = [
-        (n_hat, [corner(0.0, ht, zb), corner(len, ht, zb), corner(len, ht, zt), corner(0.0, ht, zt)]),
-        (neg(n_hat), [corner(0.0, -ht, zb), corner(0.0, -ht, zt), corner(len, -ht, zt), corner(len, -ht, zb)]),
-        (neg(a_hat), [corner(0.0, -ht, zb), corner(0.0, ht, zb), corner(0.0, ht, zt), corner(0.0, -ht, zt)]),
-        (a_hat, [corner(len, -ht, zb), corner(len, -ht, zt), corner(len, ht, zt), corner(len, ht, zb)]),
-        ([0.0, 1.0, 0.0], [corner(0.0, -ht, zt), corner(0.0, ht, zt), corner(len, ht, zt), corner(len, -ht, zt)]),
-        ([0.0, -1.0, 0.0], [corner(0.0, -ht, zb), corner(len, -ht, zb), corner(len, ht, zb), corner(0.0, ht, zb)]),
+        (n_hat, [corner(s_p, ht, zb), corner(e_p, ht, zb), corner(e_p, ht, zt), corner(s_p, ht, zt)]),
+        (neg(n_hat), [corner(s_m, -ht, zb), corner(s_m, -ht, zt), corner(e_m, -ht, zt), corner(e_m, -ht, zb)]),
+        (start_n, [corner(s_m, -ht, zb), corner(s_p, ht, zb), corner(s_p, ht, zt), corner(s_m, -ht, zt)]),
+        (end_n, [corner(e_m, -ht, zb), corner(e_m, -ht, zt), corner(e_p, ht, zt), corner(e_p, ht, zb)]),
+        ([0.0, 1.0, 0.0], [corner(s_m, -ht, zt), corner(s_p, ht, zt), corner(e_p, ht, zt), corner(e_m, -ht, zt)]),
+        ([0.0, -1.0, 0.0], [corner(s_m, -ht, zb), corner(e_m, -ht, zb), corner(e_p, ht, zb), corner(s_p, ht, zb)]),
     ];
-    for (normal, poly) in faces {
+    for (i, (normal, poly)) in faces.into_iter().enumerate() {
+        if (i == 2 && !cap_start) || (i == 3 && !cap_end) {
+            continue;
+        }
         if let Some(p) = project_face(f, &poly, normal, 0, src) {
             out.push(p);
         }
@@ -685,12 +710,17 @@ pub fn faces(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64]) -> Vec<
     let (Some(nw), Some(ns), Some(nr)) = (counted(walls), counted(slabs), counted(roofs)) else {
         return Vec::new();
     };
-    if walls.len() != 1 + 7 * nw {
+    // 7 Werte je Wand, oder 13 mit den Schnitt-Verschiebungen der Ecken und den inneren Stossfugen ([T2]).
+    let stride = if walls.len() == 1 + 7 * nw {
+        7
+    } else if walls.len() == 1 + 13 * nw {
+        13
+    } else {
         return Vec::new();
-    }
+    };
     let mut out: Vec<Projected> = Vec::new();
     for k in 0..nw {
-        wall_faces(&fr, &walls[1 + 7 * k..8 + 7 * k], k, &mut out);
+        wall_faces(&fr, &walls[1 + stride * k..1 + stride * (k + 1)], k, &mut out);
     }
     let mut i = 1;
     for k in 0..ns {
