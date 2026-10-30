@@ -1356,7 +1356,26 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ◐ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M — 30.10.: Ortbeton-Wendeltreppe mit echter Wendelfläche (Schraubenuntersicht, ebene Tritte, `stairs3d::spiral_mesh`), Handlauf als Schraubensweep samt Pfosten (links/rechts/beide nach Drehsinn), Mittelsäule `Stair.centerColumn` (Radius, Objekt-Info; als Block in 3D/Schnitt). Tests Rust (Volumen, Punkte auf der Schraube, Sweep-Radius, Säule). Plansymbol (Bögen, Schnittlinie, Pfeil) war schon da und im CLI-SVG geprüft; nicht in der Tauri-App. Offen: Säule im Grundriss, IFC/Mengen der Wendelfläche, Handlauf-Profil rund.
 - ○ **[T4] Import-Meshes glätten oder kantig** (`add_smooth_normals`). · S — Stand 30.10.: nicht begonnen. Braucht Renderer-Änderung (`render3d::append_context_mesh` rechnet nur Flächennormalen) + Feld an `ImportedMesh`/`RMesh`/`MeshInput` + WASM/Metal-Neubau; Verschweissen ([T5]) als Voraussetzung ist da.
 - ✅ **[T5] Import reparieren** (`put_together_same_attrs`, Healing). · S — 30.10.: `mesh_repair.rs` im Mesh-Import (`decode_mesh`): Ecken verschweissen (0.01 mm), entartete Dreiecke entfernen, Löcher bis 8 Randkanten in fast geschlossenen Netzen (Randanteil ≤ 5 %) per Fächer schliessen, Orientierung nach aussen; Zähler im Importbericht (`repaired`, Meldung). Tests Rust (Suppe, Entartete, Loch/Orientierung, offene Fläche bleibt, Bericht). Gilt für OBJ/STL/glTF/PLY, nicht für IFC/DXF/STEP. Nicht in der App getestet. Offen: Verschweissen über Zellgrenzen, Schalter/Schwellen im Import-Dialog, Normalen-Ausrichtung widersprüchlich orientierter Flächen.
-- ○ **[T6] Glattes Gelände aus Höhenlinien** + Gelände-Prisma für Aushub (= [68]). · L
+- ◐ **[T6] Glattes Gelände aus Höhenlinien** + Gelände-Prisma für Aushub (= [68]). (30.10.) Kern `terrain.rs`:
+  Konturen verdichtet und als Bruchkanten erzwungen (constrained Delaunay: Sloan-Kantentausch auf `delaunay.rs`,
+  danach Lawson nur an freien Kanten; konkave Ränder: lange Randsplitter weg), flache Dreiecke (Kuppen/Mulden/
+  Talböden) mit Schwerpunkt aus Eckgradienten, begrenzt auf ±0.45·Äquidistanz (keine neuen Höhenlinien); Glättung
+  durch adaptive Kantenteilung (rissfrei 1→2/3/4) mit Hermite-Mittelpunkt aus 1-Ring-Gradienten, ohne Überschwingen
+  (Mittelpunkt streng zwischen den Endhöhen, Kontur-Kanten exakt). Optionen `smooth`/`maxEdge`/`breaklines`
+  (`terrain_from_contours_opts_json`, Panel „Glätten"); Befehl `terrain` und Panel nutzen es (Standard: 2 Stufen).
+  Neue Felder `TerrainMesh.contourInterval`/`contourIndexEvery`: Grundriss zeichnet Höhenlinien aus dem Netz
+  (samt Baugruben) neu, Zähllinien dicker und beschriftet (2 mm Papier, lesbar gedreht); Rahmen wie bisher.
+  Schnitt: gestaltetes Terrain (Baugruben) ausgezogen, gewachsenes gestrichelt, SIA-Erdreich-Band 1.5 m darunter
+  ([109] `std-h-erdreich`) ohne Gebäude-Inneres; Grundlinie entfällt mit Gelände. Ansicht: Silhouette des Geländes
+  vor dem Gebäude (obere Hüllkurve), darunter verdeckt (Papierfläche). 3D/Export/Pick: geändertes Netz. Höhenbezug:
+  ist `referenceElevationMasl` gesetzt und liegt das Gelände in m ü. M., gilt Modell = roh − Referenz (3D, Schnitt,
+  Baurecht; Höhenlinien-Beschriftung roh). Gelände-Prisma (`terrain::prism`, dicht, Volumen per Divergenzsatz).
+  Tests: Rust (Bruchkanten, Kegelhügel ohne Überschwingen/flache Dreiecke, Prisma dicht, Unsinn), vitest.
+  Geprüft im Linux-Container (CLI-Grundriss/-Schnitt/-Ansicht eines Hügels mit Baugrube angesehen; Erdreich-Schraffur
+  über den Kern-Generator gerendert, das CLI-SVG zeigt keine Schraffuren), nicht in der Tauri-App.
+  Offen: swissALTI3D-Raster wird nicht geglättet (nur Äquidistanz 1 m gesetzt); Natural-Neighbour/Clough-Tocher statt
+  Hermite-Teilung; Höhenlinien unter der Beschriftung nicht unterbrochen; Luftbild-Farben fallen auf geändertem
+  Gelände weg; Erdreich-Band fest 1.5 m (nicht bis zur Planunterkante). · L
 - ✅ **[T7] Rotationskörper/Loft im UI** (API besteht). · S–M — 30.10.: Befehle `revolve` (Profil + Achse aus 2 Plan-Punkten + Winkel; Achse waagrecht auf Höhe r_max, Profil auf einer Seite) und `loft` (≥ 2 Profile der Reihe nach, gleichmässig über die Höhe; Punktzahl durch Kantenteilung angeglichen) in `cmd_solid.rs`/`cmds/{revolve,loft}.ts`, Körper als `ExtrudedSolid.brep` (Objekt-Info, STEP, Kennwerte wie die Grundkörper); Kürzel `rev`/`lf`, Werkzeugpalette 3D. Tests Rust (Spezifikation, Ops, truck-Volumen/STEP), vitest (Befehlsablauf). Nicht in der Tauri-App getestet. Offen: Achse senkrecht/beliebig im Raum, Loft mit Führungskurve, Profil-Startpunkt-Ausrichtung beim Loft.
 - ✅ **[T8] Kollisionsprüfung im 3D zeigen** (heute nur Marker im Grundriss). · S — 30.10.: Treffer in Sitzung (`panels/clashSession.ts`), Panel „Kollisionen" (`ClashPanel`: Liste, Klick wählt beide Bauteile und fährt die 3D-Kamera auf die Durchdringung, `cameraBridge.focusCamera`), im 3D rote Hüllquader aller Treffer (`clashHighlightLines` in `viewportContent`); Prüflauf öffnet das Panel, Marker im Grundriss bleiben. Tests vitest (Linien, Auswahl, Kamera-Fokus). Nicht im echten WebGPU-Viewport/Tauri geprüft. Offen: Hüllquader statt exakter Durchdringungsgeometrie, Panel-Name zeigt Ids statt Bauteilnamen, Wiederholung/Ignorieren einzelner Treffer.
 
@@ -1824,11 +1843,29 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 ## Priorität 4 — später
 
 Alle ○: [27] Punktwolken (Leser ✅ [B9], Anzeige ◐ s. u., Modell offen) · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden; Fenster-/Türliste ✅ [97]) · [43] Verknüpfte
-Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (= [T6]) · [71] U-Werte (✅ s. u.) ·
+Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (◐ s. u.) · [71] U-Werte (✅ s. u.) ·
 [72] Graue Energie KBOB · [73] eBKP-H · [74] SIA 500 · [75] Fluchtwege VKF · [83] Befehlspalette ·
 [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
 (◐, DXF-Parser, IFC-Import) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
 Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
+
+- ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
+  Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
+  (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
+  Umriss (Ecken als Kegel) — dasselbe Element schneidet ein (Abtrag) und schüttet auf (Auftrag, Planie am Hang).
+  Kern `excavation.rs`: Netz im Wirkbereich neu trianguliert (Raster mit exakter Höhe, Sohle und Böschungsoberkante
+  als Bruchkanten, aussen Original-TIN samt Kanten), zwischengespeichert je Netz. Mengen (Abfrage
+  `excavationQuantities`): Abtrag/Auftrag als Integral der exakten Funktion (Raster-Mittelpunkte), Hinterfüllung =
+  Abtrag ausserhalb der Gebäude-Grundfläche; Test gegen die analytische Formel (10×10×3 m, 45°: 508.27 m³, < 0.2 %)
+  und gegen die Prisma-Differenz des Netzes (< 2 %). Grundriss: Sohle, Böschungsoberkante, Böschungsschraffur
+  (lang/halb, an Ecken gefächert); Schnitt/Ansicht/3D über das geänderte Gelände. Befehl `excavation`
+  (Alias baugrube/aushub; Sohle = Geschoss − 0.30 m), Panel „Gelände & Kontext" (Sohle, Neigungen, Bermen, Mengen),
+  Layout-Tabelle „Erdarbeiten" ([111], Quelle `earthworks`), CLI `kennzahlen` → `erdarbeiten`.
+  Baurecht ([63]): Geländehöhen an der Fassade (gewachsen/gestaltet, Ecken + alle ≤ 2 m), massgebendes Terrain =
+  tiefster gewachsener Punkt an der Fassade (vereinfacht), Gesamthöhe dagegen geprüft (ohne Gelände wie bisher ±0.00).
+  Offen: Mengen je Baugrube gegen das gewachsene Terrain (Überlagerungen doppelt); Arbeitsraum als Abstand;
+  senkrechter Verbau (Spundwand) nur als 89.5°-Böschung; Griffe/Objekt-Info für den Umriss; IVHB-Terrain nach
+  kantonalem Recht (Lotrechte statt tiefster Fassadenpunkt); nicht in der Tauri-App geprüft.
 
 - ◐ **[107] Manifold für Körper-Booleans (Schritt 1: trucksolid).** (30.10.) `manifold-rust` `=0.19.1` (Apache-2.0,
   exakter Modus) ersetzt den csgrs-Fallback in `src-tauri/trucksolid/src/boolean.rs`; csgrs, die Git-Abhängigkeit

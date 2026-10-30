@@ -182,6 +182,15 @@ export function CommandIcon({ name }: { name: string }) {
           <line x1="8" y1="3" x2="8" y2="9" strokeDasharray="1.5 1.5" />
         </svg>
       );
+    case "excavation":
+      // Baugrube: Geländelinie mit Grube, Böschungen schräg.
+      return (
+        <svg {...common}>
+          <polyline points="1,5 4,5 6.5,11 9.5,11 12,5 15,5" />
+          <line x1="4.8" y1="6.5" x2="3.6" y2="6.5" />
+          <line x1="11.2" y1="6.5" x2="12.4" y2="6.5" />
+        </svg>
+      );
     case "roofhole":
       // Dachhof: Dach-Umriss mit ausgespartem Innenhof.
       return (

@@ -13,7 +13,7 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { usePanelHost } from "./host";
@@ -26,6 +26,7 @@ import { openContextImportWindowNative } from "../native/contextImportWindow";
 import { SunStudySection } from "./SunStudySection";
 import { SiteRulesSection } from "./SiteRulesSection";
 import { PointCloudSection } from "./PointCloudSection";
+import { excavationQuantities } from "../core";
 
 /** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */
 function typeBadgeKey(obj: ContextObject): TranslationKey {
@@ -38,6 +39,8 @@ function typeBadgeKey(obj: ContextObject): TranslationKey {
       return "site.type.terrain";
     case "image":
       return "site.type.image";
+    case "excavation":
+      return "site.type.excavation";
   }
 }
 
@@ -53,8 +56,41 @@ function layerOf(obj: ContextObject): string {
       return t("site.group.contours");
     case "image":
       return t("site.group.image");
+    case "excavation":
+      return t("site.group.terrain");
   }
 }
+
+/** Zahl-Eingabe für ein Feld eines Kontext-Objekts (leer = Standard, ungültig = keine Änderung). */
+function NumField(props: {
+  label: string;
+  value: number | undefined;
+  step: number;
+  min?: number;
+  placeholder?: string;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <label className="site-prop">
+      <span>{props.label}</span>
+      <input
+        type="number"
+        step={props.step}
+        min={props.min}
+        placeholder={props.placeholder}
+        value={props.value ?? ""}
+        onChange={(e) => {
+          const raw = e.target.value.trim();
+          if (raw === "") return props.onChange(undefined);
+          const v = Number(raw);
+          if (Number.isFinite(v)) props.onChange(v);
+        }}
+      />
+    </label>
+  );
+}
+
+const fmt1 = (v: number) => v.toLocaleString("de-CH", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
 /** Gruppiert Kontext-Objekte nach Ebene, Reihenfolge des ersten Auftretens. */
 function groupByLayer(objects: ContextObject[]): { layer: string; items: ContextObject[] }[] {
@@ -73,6 +109,15 @@ function groupByLayer(objects: ContextObject[]): { layer: string; items: Context
   return order.map((layer) => ({ layer, items: byLayer.get(layer)! }));
 }
 
+function ExcavationQty({ q }: { q: { cut: number; fill: number; backfill: number } | undefined }) {
+  if (!q) return <div className="site-qty">{t("site.excavation.noTerrain")}</div>;
+  return (
+    <div className="site-qty">
+      {t("site.excavation.qty", { cut: fmt1(q.cut), fill: fmt1(q.fill), backfill: fmt1(q.backfill) })}
+    </div>
+  );
+}
+
 export function SitePanel() {
   const host = usePanelHost();
   const notify = useStore((s) => s.notify);
@@ -89,9 +134,16 @@ export function SitePanel() {
       ? selectedSet
       : (contourSets[0]?.id ?? "");
 
+  // [T6] Glätten beim Erzeugen (Bruchkanten werden immer erzwungen).
+  const [smooth, setSmooth] = useState(true);
+  // [68] Mengen der Baugruben (Kern), nur neu, wenn sich das Projekt ändert.
+  const quantities = useMemo(() => excavationQuantities(host.project), [host.project]);
+  const patch = (id: string, field: string) => (v: number | undefined) =>
+    host.onPatchContextObject(id, { [field]: v }, `site-${id}-${field}`);
+
   const onGenerate = () => {
     if (!effectiveSet) return;
-    const id = host.onGenerateTerrain(effectiveSet);
+    const id = host.onGenerateTerrain(effectiveSet, { smooth: smooth ? 2 : 0 });
     if (id === null) {
       // Kein sinnvolles TIN — ruhiger Hinweis als Toast (keine harte Fehlerbox;
       // window.alert wäre im Tauri-WKWebView ohnehin wirkungslos).
@@ -153,8 +205,19 @@ export function SitePanel() {
               {contourSets[0].name}
             </span>
           )}
+          <label className="site-check" title={t("site.smooth.hint")}>
+            <input type="checkbox" checked={smooth} onChange={(e) => setSmooth(e.target.checked)} />
+            {t("site.smooth")}
+          </label>
           <button type="button" className="site-btn" onClick={onGenerate}>
             {t("site.generateTerrain")}
+          </button>
+        </div>
+      )}
+      {objects.some((o) => o.type === "terrainMesh") && (
+        <div className="site-actions">
+          <button type="button" className="site-btn" title={t("site.excavation.hint")} onClick={() => host.onStartExcavation()}>
+            {t("site.excavation.draw")}
           </button>
         </div>
       )}
@@ -213,6 +276,62 @@ export function SitePanel() {
                   >
                     ×
                   </button>
+                  {obj.type === "terrainMesh" && (
+                    <div className="site-props">
+                      <NumField
+                        label={t("site.contourInterval")}
+                        value={obj.contourInterval}
+                        step={0.5}
+                        min={0}
+                        placeholder="—"
+                        onChange={patch(obj.id, "contourInterval")}
+                      />
+                      <NumField
+                        label={t("site.contourIndexEvery")}
+                        value={obj.contourIndexEvery}
+                        step={1}
+                        min={1}
+                        placeholder="5"
+                        onChange={patch(obj.id, "contourIndexEvery")}
+                      />
+                    </div>
+                  )}
+                  {obj.type === "excavation" && (
+                    <div className="site-props">
+                      <NumField
+                        label={t("site.excavation.bottom")}
+                        value={obj.bottom}
+                        step={0.05}
+                        onChange={(v) => v !== undefined && patch(obj.id, "bottom")(v)}
+                      />
+                      <NumField label={t("site.excavation.slope")} value={obj.slope} step={5} min={5} placeholder="45" onChange={patch(obj.id, "slope")} />
+                      <NumField
+                        label={t("site.excavation.fillSlope")}
+                        value={obj.fillSlope}
+                        step={5}
+                        min={5}
+                        placeholder="33.7"
+                        onChange={patch(obj.id, "fillSlope")}
+                      />
+                      <NumField
+                        label={t("site.excavation.bermWidth")}
+                        value={obj.bermWidth}
+                        step={0.25}
+                        min={0}
+                        placeholder="—"
+                        onChange={patch(obj.id, "bermWidth")}
+                      />
+                      <NumField
+                        label={t("site.excavation.bermHeight")}
+                        value={obj.bermHeight}
+                        step={0.5}
+                        min={0}
+                        placeholder="—"
+                        onChange={patch(obj.id, "bermHeight")}
+                      />
+                      <ExcavationQty q={quantities.find((x) => x.id === obj.id)} />
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

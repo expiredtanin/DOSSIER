@@ -63,6 +63,7 @@ import { chamferCommand } from "./cmds/chamfer";
 import { multilineCommand } from "./cmds/multiline";
 import { importCommand } from "./cmds/import";
 import { terrainCommand } from "./cmds/terrain";
+import { excavationCommand } from "./cmds/excavation";
 import { measureCommand } from "./cmds/measure";
 import { sectionLineCommand, viewLineCommand } from "./cmds/sectionline";
 import { georefCommand } from "./cmds/georef";
@@ -132,6 +133,7 @@ export const COMMANDS: Record<string, Command> = {
   multiline: multilineCommand,
   import: importCommand,
   terrain: terrainCommand,
+  excavation: excavationCommand,
   measure: measureCommand,
   sectionline: sectionLineCommand,
   viewline: viewLineCommand,
@@ -265,6 +267,8 @@ export const ALIASES: Record<string, string> = {
   parallel: "multiline",
   imp: "import",
   ter: "terrain",
+  baugrube: "excavation",
+  aushub: "excavation",
   schnittlinie: "sectionline",
   ansichtslinie: "viewline",
   bezugspunkt: "georef",

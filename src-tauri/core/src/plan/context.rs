@@ -65,6 +65,7 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
             ContextObject::ContourSet(s) => s.category_code.as_deref(),
             ContextObject::TerrainMesh(t) => t.category_code.as_deref(),
             ContextObject::Image(i) => i.category_code.as_deref(),
+            ContextObject::Excavation(e) => e.category_code.as_deref(),
         };
         if code.is_some_and(|k| !c.shown(k)) {
             continue;
@@ -99,9 +100,106 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
                     }
                     out.push(pick_band(q, Some(&t.id), None));
                 }
+                terrain_contours(c, t, out);
             }
+            ContextObject::Excavation(e) => excavation_lines(c, e, out),
             ContextObject::Image(_) => {}
         }
+    }
+}
+
+const TERRAIN_INK: &str = "#7a5b3a";
+const EXCAVATION_INK: &str = "#1f242c";
+
+fn ink_line(a: Vec2, b: Vec2, w: f64, color: &str, dash: Option<Vec<f64>>) -> Primitive {
+    Primitive::Line { a, b, cls: "context-line".into(), weight_mm: w, dash: dash.map(Some), zigzag: None, motif: None, color: Some(color.into()), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None }
+}
+
+/// [T6] Höhenlinien aus dem Gelände-Netz (samt Baugruben) in der Äquidistanz `contourInterval`; jede
+/// `contourIndexEvery`-te ist Zähllinie (dicker, mit Höhenangabe, lesbar gedreht).
+fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>) {
+    let Some(iv) = t.contour_interval.filter(|v| v.is_finite() && *v > 0.0) else { return };
+    let every = t.contour_index_every.filter(|v| v.is_finite() && *v >= 1.0).map_or(5, |v| v.round() as i64);
+    let st = crate::excavation::site_terrain(c.p, t);
+    let text_h = 0.002 * c.a.scale.max(1.0);
+    for l in crate::terrain::isolines(st.current(), iv, 0.0) {
+        let k = (l.level / iv).round() as i64;
+        let index = k.rem_euclid(every) == 0;
+        let w = if index { 0.25 } else { 0.1 };
+        let n = l.pts.len();
+        let segs = if l.closed { n } else { n - 1 };
+        for i in 0..segs {
+            let (a, b) = (l.pts[i], l.pts[(i + 1) % n]);
+            out.push(ink_line(v2(a[0], a[1]), v2(b[0], b[1]), w, TERRAIN_INK, None));
+        }
+        if !index {
+            continue;
+        }
+        // Beschriftung in der Mitte der Linie (nur, wenn sie lang genug ist).
+        let len: f64 = (0..segs).map(|i| (l.pts[(i + 1) % n][0] - l.pts[i][0]).hypot(l.pts[(i + 1) % n][1] - l.pts[i][1])).sum();
+        if len < 12.0 * text_h {
+            continue;
+        }
+        let mut acc = 0.0;
+        for i in 0..segs {
+            let (a, b) = (l.pts[i], l.pts[(i + 1) % n]);
+            let d = (b[0] - a[0]).hypot(b[1] - a[1]);
+            if acc + d >= len / 2.0 && d > 0.0 {
+                let f = (len / 2.0 - acc) / d;
+                let mut ang = (b[1] - a[1]).atan2(b[0] - a[0]);
+                if ang > std::f64::consts::FRAC_PI_2 || ang <= -std::f64::consts::FRAC_PI_2 {
+                    ang += std::f64::consts::PI;
+                }
+                // Text mittig auf die Linie (Breite ≈ 0.6 · Höhe je Zeichen, Grundlinie ≈ −0.35 · Höhe).
+                let text = crate::js_fmt::to_fixed(l.level, if iv.fract() == 0.0 { 0 } else { 1 });
+                let half = 0.3 * text_h * text.chars().count() as f64;
+                let (c, s) = (ang.cos(), ang.sin());
+                let m = (a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
+                out.push(Primitive::DrawingText {
+                    at: v2(m.0 - c * half + s * 0.35 * text_h, m.1 - s * half - c * 0.35 * text_h),
+                    text,
+                    height_m: text_h,
+                    angle: ang,
+                    color: TERRAIN_INK.into(),
+                    marks: None,
+                    wrap_width: None,
+                    doc: None,
+                    drawing_id: None,
+                    greyed: None,
+                    opacity: None,
+                });
+                break;
+            }
+            acc += d;
+        }
+    }
+}
+
+/// [68] Baugrube im Grundriss: Sohle (Böschungsfuss) und Böschungsoberkante, Böschungsschraffur.
+fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>) {
+    let ring: Vec<Vec2> = e.outline.iter().copied().filter(|q| q.x.is_finite() && q.y.is_finite()).collect();
+    if ring.len() < 3 {
+        return;
+    }
+    for i in 0..ring.len() {
+        out.push(ink_line(ring[i], ring[(i + 1) % ring.len()], 0.25, EXCAVATION_INK, None));
+    }
+    out.push(pick_band(ring.clone(), Some(&e.id), None));
+    let spacing = (0.004 * c.a.scale.max(1.0)).max(0.2);
+    for t in crate::excavation::terrains(c.p) {
+        let st = crate::excavation::site_terrain(c.p, t);
+        let Some((_, spec, daylight)) = st.items.iter().find(|(id, ..)| *id == e.id) else { continue };
+        for l in daylight {
+            for w in l.windows(2) {
+                out.push(ink_line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), 0.18, EXCAVATION_INK, None));
+            }
+        }
+        if let Some(before) = crate::excavation::terrain_before(&st, &e.id) {
+            for (a, b) in crate::excavation::slope_hatch(&before, spec, spacing) {
+                out.push(ink_line(v2(a[0], a[1]), v2(b[0], b[1]), 0.1, EXCAVATION_INK, None));
+            }
+        }
+        break;
     }
 }
 
@@ -184,6 +282,36 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [T6]/[68] Höhenlinien (Zähllinien dicker + beschriftet) und Baugrube (Sohle, Oberkante, Schraffur).
+    #[test]
+    fn hoehenlinien_und_baugrube() {
+        // Ebene schräg: z = x/10 über 0..40 m → Linien bei x = 10, 20, 30 (Äquidistanz 1), Zähllinie bei 0/5 m.
+        let t = TerrainMesh {
+            id: "t".into(),
+            positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0],
+            indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+            category_code: Some("02".into()),
+            contour_interval: Some(1.0),
+            ..Default::default()
+        };
+        let pit = Excavation {
+            id: "bg".into(),
+            outline: vec![v2(20.0, 15.0), v2(30.0, 15.0), v2(30.0, 25.0), v2(20.0, 25.0)],
+            bottom: 1.0,
+            ..Default::default()
+        };
+        let p = Project { context: Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]), ..Default::default() };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "scale": 100}"#).unwrap();
+        let mut out = Vec::new();
+        plan_context(&Ctx::new(&p, &a), &mut out);
+        let w = |m: f64| out.iter().filter(|q| matches!(q, Primitive::Line { weight_mm, color: Some(c), .. } if *weight_mm == m && c == TERRAIN_INK)).count();
+        assert!(w(0.1) > 4 && w(0.25) > 0, "{} {}", w(0.1), w(0.25));
+        let labels: Vec<&str> = out.iter().filter_map(|q| if let Primitive::DrawingText { text, .. } = q { Some(text.as_str()) } else { None }).collect();
+        assert!(labels.contains(&"5"), "{labels:?}");
+        let ex = out.iter().filter(|q| matches!(q, Primitive::Line { color: Some(c), .. } if c == EXCAVATION_INK)).count();
+        assert!(ex > 20, "{ex}");
+    }
 
     #[test]
     fn label_tag_wie_ts() {

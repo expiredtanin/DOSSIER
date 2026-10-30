@@ -355,7 +355,7 @@ const TOOLS_2D: ToolId[] = [
   "image",
 ];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
-const COMMANDS_3D = ["column", "ceilingopening", "roof", "roofhole", "roofwindow", "dormer", "extrude", "revolve", "loft", "solid", "solidbool", "sectionline", "viewline", "autodim"];
+const COMMANDS_3D = ["column", "ceilingopening", "roof", "roofhole", "roofwindow", "dormer", "extrude", "revolve", "loft", "solid", "solidbool", "sectionline", "viewline", "autodim", "excavation"];
 const COMMANDS_EDIT = ["move", "copy", "array", "rotate", "mirror", "offset", "multiline", "trim", "break", "extend", "fillet", "chamfer", "join", "defblock", "measure"];
 
 type ToolsView = "list" | "icons";

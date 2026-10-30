@@ -451,44 +451,68 @@ fn voidbox_ops(v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
 /// Gelände-TIN aus Höhenlinien (`generateTerrainFromContours`): alle endlichen Stützpunkte, Delaunay
 /// über (x, y), Höhe der Kontur je Punkt; Null-Flächen-Dreiecke verworfen.
 pub fn terrain_from_contours(contours: &[Value], id: &str) -> Value {
-    let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
-    for c in contours {
-        let z = num_of(field(c, "z"));
-        let z = if z.is_finite() { z } else { 0.0 };
-        for p in arr(field(c, "pts")) {
-            let (x, y) = xy(p);
-            if !x.is_finite() || !y.is_finite() {
-                continue;
+    terrain_from_contours_with(contours, id, crate::terrain::TerrainOpts::default())
+}
+
+/// Gelände aus Höhenlinien ([T6], `terrain.rs`): Konturen als Bruchkanten (constrained Delaunay),
+/// flache Dreiecke behoben, adaptiv geglättet (ohne Überschwingen). Äquidistanz der Plan-Höhenlinien =
+/// kleinster Höhenabstand der Konturen. Unter drei Punkten ein leeres Netz.
+pub fn terrain_from_contours_with(contours: &[Value], id: &str, o: crate::terrain::TerrainOpts) -> Value {
+    let cs: Vec<crate::terrain::ContourIn> = contours
+        .iter()
+        .map(|c| {
+            let z = num_of(field(c, "z"));
+            crate::terrain::ContourIn {
+                z: if z.is_finite() { z } else { 0.0 },
+                pts: arr(field(c, "pts")).iter().map(xy).filter(|p| p.0.is_finite() && p.1.is_finite()).map(|p| [p.0, p.1]).collect(),
+                closed: truthy(field(c, "closed")),
             }
-            xs.push(x);
-            ys.push(y);
-            zs.push(z);
-        }
-    }
-    if xs.len() < 3 {
+        })
+        .collect();
+    let t = crate::terrain::terrain_from_contours(&cs, &[], o);
+    if t.tris.is_empty() {
         return json!({ "id": id, "type": "terrainMesh", "name": "Gelände", "categoryCode": "02", "positions": [], "indices": [] });
     }
-    let coords: Vec<f64> = xs.iter().zip(&ys).flat_map(|(x, y)| [*x, *y]).collect();
-    let tri = crate::delaunay::triangulate(&coords);
-    let positions: Vec<Value> = (0..xs.len()).flat_map(|i| [js_num(xs[i]), js_num(ys[i]), js_num(zs[i])]).collect();
-    let mut indices = Vec::new();
-    for t in tri.chunks_exact(3) {
-        let (a, b, c) = (t[0] as usize, t[1] as usize, t[2] as usize);
-        let area2 = ((xs[b] - xs[a]) * (ys[c] - ys[a]) - (xs[c] - xs[a]) * (ys[b] - ys[a])).abs();
-        if area2 <= 1e-9 {
-            continue;
-        }
-        indices.extend([Value::from(t[0]), Value::from(t[1]), Value::from(t[2])]);
-    }
+    let (pos, idx) = t.to_flat(0.0);
+    let iv = crate::terrain::interval_of(&cs.iter().map(|c| c.z).collect::<Vec<_>>());
     obj(vec![
         ("id", s(id)),
         ("type", s("terrainMesh")),
         ("name", s("Gelände")),
         ("layer", s("Terrain")),
         ("categoryCode", s("02")),
-        ("positions", Value::Array(positions)),
-        ("indices", Value::Array(indices)),
+        ("positions", Value::Array(pos.into_iter().map(js_num).collect())),
+        ("indices", Value::Array(idx.into_iter().map(Value::from).collect())),
+        ("contourInterval", js_num(iv)),
     ])
+}
+
+/// [68] Baugrube aus dem gezeichneten Umriss (≥ 3 Punkte; 2 Punkte = Rechteck). Sohle = Geschoss-
+/// Unterkante − 0.30 m (Magerbeton + Bodenplatte), Böschung 45°.
+fn excavation_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let mut pts: Vec<V> = pts_of(v, "pts").into_iter().filter(|p| p.0.is_finite() && p.1.is_finite()).collect();
+    if pts.len() == 2 {
+        pts = rect_corners(pts[0], pts[1]).to_vec();
+    }
+    let area2: f64 = (0..pts.len()).map(|i| pts[i].0 * pts[(i + 1) % pts.len()].1 - pts[(i + 1) % pts.len()].0 * pts[i].1).sum();
+    if pts.len() < 3 || area2.abs() < 0.02 {
+        return Vec::new();
+    }
+    let base = arr(root.get("floors")).iter().find(|f| field(f, "id").and_then(Value::as_str) == Some(ctx.level)).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0));
+    let n = arr(root.get("context")).iter().filter(|o| field(o, "type").and_then(Value::as_str) == Some("excavation")).count();
+    add_op(
+        "context",
+        vec![obj(vec![
+            ("id", s(&ids.next("excavation"))),
+            ("type", s("excavation")),
+            ("name", s(&format!("Baugrube {}", n + 1))),
+            ("layer", s("Terrain")),
+            ("categoryCode", s("02")),
+            ("outline", pvs(&pts)),
+            ("bottom", js_num(base - 0.3)),
+            ("slope", js_num(crate::excavation::DEFAULT_SLOPE)),
+        ])],
+    )
 }
 
 fn terrain_ops(root: &Map<String, Value>, ids: &mut IdGen) -> Vec<Op> {
@@ -750,6 +774,7 @@ pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> 
         "solidbool" => solidbool_ops(root, v, ids),
         "voidbox" => voidbox_ops(v, ctx, ids),
         "terrain" => terrain_ops(root, ids),
+        "excavation" => excavation_ops(root, v, ctx, ids),
         "ceilingOpening" => ceiling_opening_ops(root, v, ctx),
         "roofHole" => roof_hole_ops(root, v, ctx),
         "roofWindow" => roof_window_ops(root, v, ctx, ids),
@@ -867,12 +892,37 @@ mod tests {
         assert!(run("eg", 9.0).is_empty());
     }
 
+    /// [68] Baugrube: Umriss (2 Punkte = Rechteck), Sohle = Geschoss − 0.30, als Kontext-Objekt.
+    #[test]
+    fn baugrube_befehl() {
+        let root = json!({"floors": [{"id": "ug", "baseElevation": -3.0}]});
+        let root = root.as_object().unwrap();
+        let run = |pts: Value| {
+            let mut ids = IdGen::new("s");
+            let ctx = Ctx { level: "ug", floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
+            ops(root, &json!({"cmd": "excavation", "pts": pts}), &ctx, &mut ids).unwrap()
+        };
+        let o = run(json!([{"x": 0, "y": 0}, {"x": 10, "y": 8}]));
+        let Op::Add { collection, items, .. } = &o[0] else { panic!() };
+        assert_eq!(collection, "context");
+        assert_eq!((items[0]["type"].as_str(), items[0]["bottom"].as_f64()), (Some("excavation"), Some(-3.3)));
+        assert_eq!(items[0]["outline"].as_array().unwrap().len(), 4);
+        assert!(run(json!([{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 2, "y": 0}])).is_empty());
+    }
+
     #[test]
     fn gelaende_aus_hoehenlinien() {
         let c = json!([{"z": 1, "pts": [{"x": 0, "y": 0}, {"x": 4, "y": 0}]}, {"z": 2, "pts": [{"x": 0, "y": 3}, {"x": 4, "y": 3}]}]);
+        let raw = terrain_from_contours_with(c.as_array().unwrap(), "t", crate::terrain::TerrainOpts { smooth: 0, max_edge: 100.0, breaklines: true });
+        assert_eq!(raw["indices"].as_array().unwrap().len(), 6);
+        assert_eq!(raw["positions"][2], 1);
+        assert_eq!(raw["contourInterval"], 1);
+        // Standard: verdichtet und geglättet, Höhen bleiben im Bereich der Konturen.
         let t = terrain_from_contours(c.as_array().unwrap(), "t");
-        assert_eq!(t["indices"].as_array().unwrap().len(), 6);
-        assert_eq!(t["positions"][2], 1);
+        let pos = t["positions"].as_array().unwrap();
+        assert!(t["indices"].as_array().unwrap().len() > 6);
+        assert!(pos.iter().skip(2).step_by(3).all(|z| (1.0..=2.0).contains(&z.as_f64().unwrap())));
+        assert!(terrain_from_contours(&[], "t")["indices"].as_array().unwrap().is_empty());
     }
 
     /// [T7] Rotationskörper: Achse waagrecht im Plan, Profil auf einer Seite, Matrix bildet lokal x → Quer, z → Achse ab.

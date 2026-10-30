@@ -1713,14 +1713,18 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
     let mut out = Vec::new();
     for obj in p.context.as_deref().unwrap_or(&[]) {
         match obj {
-            ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => out.push(RMesh {
-                positions: m.positions.clone(),
-                indices: indices_u32(&m.indices),
-                kind: "terrain",
-                color: TERRAIN_RGB,
-                vertex_colors: m.vertex_colors.clone().filter(|v| !v.is_empty()),
-                material_index: None,
-            }),
+            ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => {
+                // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben nur ungeändert).
+                let (pos, idx, changed) = crate::excavation::terrain_model_mesh(p, m);
+                out.push(RMesh {
+                    positions: pos.into_owned(),
+                    indices: indices_u32(&idx),
+                    kind: "terrain",
+                    color: TERRAIN_RGB,
+                    vertex_colors: if changed { None } else { m.vertex_colors.clone().filter(|v| !v.is_empty()) },
+                    material_index: None,
+                })
+            }
             ContextObject::ImportedMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => out.push(RMesh {
                 positions: m.positions.clone(),
                 indices: indices_u32(&m.indices),
@@ -1983,10 +1987,14 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
     let mut context_meshes = Vec::new();
     for obj in p.context.as_deref().unwrap_or(&[]) {
         let (pos, idx, id) = match obj {
-            ContextObject::TerrainMesh(m) => (&m.positions, &m.indices, &m.id),
-            ContextObject::ImportedMesh(m) => (&m.positions, &m.indices, &m.id),
+            ContextObject::TerrainMesh(m) => {
+                let (pos, idx, _) = crate::excavation::terrain_model_mesh(p, m);
+                (pos, idx, &m.id)
+            }
+            ContextObject::ImportedMesh(m) => (std::borrow::Cow::Borrowed(m.positions.as_slice()), std::borrow::Cow::Borrowed(m.indices.as_slice()), &m.id),
             _ => continue,
         };
+        let (pos, idx) = (&*pos, &*idx);
         let vcount = pos.len() / 3;
         let at = |i: usize| -> V3 { [pos[i * 3], pos[i * 3 + 2], -pos[i * 3 + 1]] };
         let mut tris: Vec<Tri> = Vec::new();

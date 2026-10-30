@@ -4945,10 +4945,38 @@ body {
 }
 .site-panel .site-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 4px 6px;
   border-radius: 5px;
+}
+/* [T6]/[68] Felder von Gelände und Baugrube unter der Zeile. */
+.site-panel .site-props {
+  flex: 1 0 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  font-size: 11px;
+}
+.site-panel .site-prop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.site-panel .site-prop input {
+  width: 64px;
+}
+.site-panel .site-qty {
+  grid-column: 1 / -1;
+  color: var(--text-dim, inherit);
+}
+.site-panel .site-check {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
 }
 .site-panel .site-row:hover {
   background: var(--accent-dim);
