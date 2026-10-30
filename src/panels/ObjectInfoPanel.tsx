@@ -36,7 +36,7 @@ import type {
   VerticalAnchor,
   WallReferenceLine,
 } from "../model/types";
-import { SIA_CATEGORIES, siaLabelFull } from "../core";
+import { SIA_CATEGORIES, siaLabelFull, surfaceOpeningInfo } from "../core";
 import type { EdgeSpec, RoofEdge } from "../core";
 import { Dropdown } from "../ui/Dropdown";
 import type { DetailLevel } from "../model/viewTypes";
@@ -1373,6 +1373,9 @@ export function OpeningSection({
   host: ReturnType<typeof usePanelHost>;
 }) {
   const isDoor = opening.kind === "door";
+  if (opening.hostRoofId || opening.hostCeilingId) {
+    return <SurfaceOpeningSection opening={opening} host={host} />;
+  }
   return (
     <>
       <div className="objinfo-sep" />
@@ -1600,6 +1603,85 @@ export function OpeningSection({
         <span className="objinfo-flabel">{t("objinfo.opening.top")}</span>
         <span className="objinfo-fval">{formatM(opening.zTop)}</span>
       </div>
+    </>
+  );
+}
+
+// ── Dach-/Deckenfenster ([103]) ─────────────────────────────────────────────
+// Wirt (Dach/Decke + Geschoss), Breite quer und Höhe im Gefälle (in der Fläche gemessen), Lage des
+// Mittelpunkts im Grundriss, Drehung nur auf waagrechten Flächen; UK/OK und Neigung aus dem Kern.
+function SurfaceOpeningSection({
+  opening,
+  host,
+}: {
+  opening: OpeningInfo;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  const info = surfaceOpeningInfo(host.project, opening.id);
+  const roof = !!opening.hostRoofId;
+  const hp = opening.hostPoint ?? { x: 0, y: 0 };
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.opening.section")}</div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.opening.type")}</span>
+        <Dropdown
+          value={opening.typeId ?? ""}
+          onChange={(v) => host.onSetOpeningType(v)}
+          options={[
+            { value: "", label: t("objinfo.type.none") },
+            ...(host.project.windowTypes ?? []).map((ty) => ({ value: ty.id, label: ty.name })),
+          ]}
+          title={t("objinfo.opening.type")}
+          width={106}
+        />
+        <button
+          type="button"
+          className="objinfo-typebtn"
+          title={t("objinfo.opening.editType")}
+          aria-label={t("objinfo.opening.editType")}
+          onClick={() => host.onOpenOpeningEditor(opening.id)}
+        >
+          ⚙
+        </button>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t(roof ? "objinfo.opening.hostRoof" : "objinfo.opening.hostCeiling")}</span>
+        <span className="objinfo-fval">{info?.hostName ?? "–"}</span>
+      </div>
+      <DimensionField label={t("objinfo.opening.surfaceWidth")} value={opening.width} onCommit={(v) => host.onSetOpeningWidth(v)} />
+      <DimensionField label={t("objinfo.opening.surfaceHeight")} value={opening.height} onCommit={(v) => host.onSetOpeningHeight(v)} />
+      <DimensionField label={t("objinfo.opening.hostX")} value={hp.x} min={-1e9} onCommit={(x) => host.onSetOpeningHost?.({ hostPoint: { x, y: hp.y } })} />
+      <DimensionField label={t("objinfo.opening.hostY")} value={hp.y} min={-1e9} onCommit={(y) => host.onSetOpeningHost?.({ hostPoint: { x: hp.x, y } })} />
+      {!roof && (
+        <DimensionField
+          label={t("objinfo.opening.hostAngle")}
+          value={opening.hostAngle ?? 0}
+          min={-360}
+          unit="°"
+          step={1}
+          digits={1}
+          onCommit={(a) => host.onSetOpeningHost?.({ hostAngle: a })}
+        />
+      )}
+      {info && (
+        <>
+          <div className="objinfo-sep" />
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.opening.slope")}</span>
+            <span className="objinfo-fval">{info.slopeDeg.toFixed(1)}°</span>
+          </div>
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.opening.bottom")}</span>
+            <span className="objinfo-fval">{formatM(info.zBottom)}</span>
+          </div>
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.opening.top")}</span>
+            <span className="objinfo-fval">{formatM(info.zTop)}</span>
+          </div>
+        </>
+      )}
     </>
   );
 }

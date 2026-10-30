@@ -7,6 +7,7 @@ import { FieldRow, NumberField, Segmented, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
 import { ElevationPreview } from "../ElevationPreview";
 import { openingTypePresets } from "../../model/openingPresets";
+import { DoorFramePanel, FrameDetailPanel, RebatePanel } from "../OpeningDetailPanels";
 
 /**
  * Synthetische Öffnungs-Instanz NUR für die Vorschau — s. WindowStylesTab.
@@ -39,11 +40,6 @@ const DOOR_LEAF_STYLE_OPTIONS: { value: DoorType["leafStyle"]; labelKey: string 
   { value: "glatt", labelKey: "resources.leafStyle.glatt" },
   { value: "kassette", labelKey: "resources.leafStyle.kassette" },
   { value: "glas", labelKey: "resources.leafStyle.glas" },
-];
-
-const DOOR_FRAME_KIND_OPTIONS: { value: NonNullable<DoorType["frameKind"]>; labelKey: string }[] = [
-  { value: "zarge", labelKey: "resources.frameKind.zarge" },
-  { value: "blockrahmen", labelKey: "resources.frameKind.blockrahmen" },
 ];
 
 export function DoorStylesTab({
@@ -150,13 +146,6 @@ export function DoorStylesTab({
               min={0}
             />
           </FieldRow>
-          <FieldRow label={t("resources.field.frameKind")}>
-            <SelectField
-              value={door.frameKind ?? "zarge"}
-              onChange={(frameKind) => patch({ frameKind })}
-              options={DOOR_FRAME_KIND_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-            />
-          </FieldRow>
           <FieldRow label={t("resources.field.frameWidth")}>
             <NumberField
               value={door.frameWidth ?? 0.06}
@@ -213,6 +202,16 @@ export function DoorStylesTab({
               onChange={(e) => patch({ threshold: e.target.checked })}
             />
           </FieldRow>
+          {/* [105] Zarge/Rahmenart, Rahmen-Detail und Anschlag — dieselben Felder wie im Dialog „Tür bearbeiten“. */}
+          <details className="rm-detail-group" open={!!(door.frameKind && door.frameKind !== "zarge")}>
+            <summary>{t("oed.cat.zarge")}</summary>
+            <DoorFramePanel kind={door.frameKind} onKind={(frameKind) => patch({ frameKind })} value={door.doorFrame} onChange={(doorFrame) => patch({ doorFrame })} />
+          </details>
+          <details className="rm-detail-group" open={!!door.frameDetail}>
+            <summary>{t("oed.cat.rahmendetail")} · {t("oed.cat.anschlag")}</summary>
+            <FrameDetailPanel value={door.frameDetail} onChange={(frameDetail) => patch({ frameDetail })} isDoor />
+            <RebatePanel value={door.frameDetail} onChange={(frameDetail) => patch({ frameDetail })} isDoor />
+          </details>
         </>
       )}
     />

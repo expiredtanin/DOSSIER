@@ -467,6 +467,58 @@ pub fn surface_hole_box(o: &Opening, f: &HostFrame) -> [f64; 24] {
     quad_box(&[[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]], -0.5, f.thickness + 0.5, &|u, v, n| f.at(u - w / 2.0, v - h / 2.0, n))
 }
 
+/// Lage einer Dach-/Deckenöffnung für Griffe und Objekt-Info ([103], Abfrage `surfaceOpening`):
+/// Mittelpunkt, Achsen (Breite waagrecht, Höhe das Gefälle hinauf), Grundriss-Rechteck, UK/OK der
+/// Öffnung in der Fläche und der Wirt (Art, Name, Geschoss). `None` ohne Wirt.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SurfaceOpeningInfo {
+    pub host_kind: &'static str,
+    pub host_id: String,
+    pub host_name: String,
+    pub floor_id: String,
+    pub center: V3,
+    pub ew: V3,
+    pub eh: V3,
+    pub corners: Vec<[f64; 2]>,
+    pub z_bottom: f64,
+    pub z_top: f64,
+    /// Neigung der Fläche in Grad (0 = waagrecht).
+    pub slope_deg: f64,
+}
+
+pub fn surface_opening_info(p: &Project, id: &str) -> Option<SurfaceOpeningInfo> {
+    let o = p.openings.as_deref()?.iter().find(|o| o.id == id)?;
+    let f = host_frame(p, o)?;
+    let (host_kind, host_id, floor_id) = match f.plane {
+        Some(_) => {
+            let r = p.roofs.as_deref()?.get(f.host)?;
+            ("roof", r.id.clone(), r.floor_id.clone())
+        }
+        None => {
+            let c = p.ceilings.as_deref()?.get(f.host)?;
+            ("ceiling", c.id.clone(), c.floor_id.clone())
+        }
+    };
+    let host_name = p.floor(&floor_id).map_or(floor_id.clone(), |l| l.name.clone());
+    let rect = host_rect_plan(&f, o.width, o.height);
+    let zs = rect.iter().map(|q| q[2]);
+    let (z_bottom, z_top) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), z| (a.min(z), b.max(z)));
+    Some(SurfaceOpeningInfo {
+        host_kind,
+        host_id,
+        host_name,
+        floor_id,
+        center: f.c,
+        ew: f.ew,
+        eh: f.eh,
+        corners: rect.iter().map(|q| [q[0], q[1]]).collect(),
+        z_bottom,
+        z_top,
+        slope_deg: f.n[2].clamp(-1.0, 1.0).acos().to_degrees(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +634,20 @@ mod tests {
             ..Default::default()
         }]);
         p
+    }
+
+    /// Abfrage `surfaceOpening`: Wirt, Neigung, Grundriss-Rechteck (Höhe projiziert = cos 45°).
+    #[test]
+    fn lage_fuer_griffe_und_objekt_info() {
+        let p = roof_project();
+        let i = surface_opening_info(&p, "D").unwrap();
+        assert_eq!((i.host_kind, i.host_id.as_str()), ("roof", "R"));
+        assert!((i.slope_deg - 45.0).abs() < 1e-6, "{}", i.slope_deg);
+        assert!((i.z_top - i.z_bottom - 1.2 * 45f64.to_radians().sin()).abs() < 1e-9);
+        let ys: Vec<f64> = i.corners.iter().map(|c| c[1]).collect();
+        let span = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - ys.iter().cloned().fold(f64::INFINITY, f64::min);
+        assert!((span - 1.2 * 45f64.to_radians().cos()).abs() < 1e-9);
+        assert!(surface_opening_info(&p, "x").is_none());
     }
 
     #[test]

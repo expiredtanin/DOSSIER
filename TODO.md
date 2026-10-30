@@ -1179,6 +1179,12 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Boden. Geprüft: Rust-Tests, CLI-Schnitt/-Ansicht als PNG angesehen (Linux). Offen: Projektion hinter der
   Schnittebene zeigt das Rechteck-Loch, Wand-Füllkörper einfarbig (nicht je Schicht), Abzugskörper beliebiger
   Form, nicht in der Tauri-App/Metal geprüft. · M
+  - (30.10.) Projektion hinter der Schnittebene zeigt den Umriss (Wandkanten im Loch-Rechteck und die Stösse
+    der Wandstücke auf Öffnungshöhe entfallen, Umriss auf der zugewandten Wandfläche; `shaped_projection`).
+    Füllkörper je Wandschicht in deren Farbe (`shaped_fill_bands`; IFC zählt sie über `shaped_fill_count`).
+    Geprüft: Rust-Tests, CLI-Schnitt parallel vor einem Rundbogenfenster als PNG angesehen (Linux). Offen:
+    Projektion bei schräg zur Ebene stehender Wand nur mit dem Umriss der zugewandten Fläche (Leibungskanten
+    fehlen), Abzugskörper beliebiger Form, nicht in der Tauri-App/Metal geprüft.
 - ○ **[G4] Exakte Sichtbarkeit (HLR)** für Ansicht und Projektionsteil des Schnitts. · XL
 - ○ **[G5] Dächer untereinander, Gauben, Wand ↔ Decke** per Boolean. · L · nach [G1]/[G2].
   - (30.10.) Boolean-Werkzeug dafür: Manifold-Port `manifold-rust`, nicht truck — truck scheitert an Gaube und
@@ -1588,6 +1594,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Offen: Verschieben/Griffe und Objekt-Info für Dach-Öffnungen (Info zeigt Wand-Felder), Fenster-/Türliste
   (Geschoss aus der Wand), Löschen des Dachs löscht die Fenster nicht mit (Prüfung meldet den fehlenden Wirt),
   Eindeckrahmen nur als flacher Ring, Lukarnen, nicht in der Tauri-App geprüft. · M
+  - (30.10.) Griffe im Grundriss: Mitte (verschieben = `hostPoint`), Breite quer, Höhe im Gefälle (in der
+    Dachebene, Grundriss-Abstand / projizierte Höhenachse); Objekt-Info mit Dachfenster-Feldern (Wirt Dach/Decke +
+    Geschoss, Breite/Höhe, Lage X/Y, Drehung nur auf Decken, Neigung, UK/OK) über die Kern-Abfrage
+    `surfaceOpening` (`src/plan/surfaceOpening.ts`); Fenster-/Türliste mit Dach/Decke als Wirt (`hostKind`,
+    Geschoss und Raum vom Wirt, Dach = aussen; Nummern zählen nur Geschosse, nicht Schnitte/Ansichten); Löschen
+    eines Dachs/einer Decke (und eines Geschosses mit Decken) löscht deren Fenster im selben Undo-Schritt.
+    Geprüft: Rust-/vitest-Tests, CLI-Liste/-Schnitt/-Ansicht/-Grundriss angesehen (Linux). Offen: Griffe nicht
+    in Schnitt/Ansicht, Verschieben über die Dachfläche hinaus lässt das Fenster verschwinden (kein Wirt an der
+    Stelle), „Alles wählen“ im Geschoss nimmt Dachfenster nicht mit, nicht in der Tauri-App geprüft.
 - ◐ **[110] Linientyp ohne Strichstärke.** (30.10., Wunsch Maintainer: „Volllinie 0.5/0.35 soll es nicht
   geben") Ein Linienstil ist nur Muster (Volllinie, Strich, Punkt, Zickzack, Motiv) + Farbe; die Stärke trägt
   das Element (`Drawing2D.weightMm`, sonst Ebene), die Schraffur (neu `HatchStyle.lineWeight`, Default 0.13),
@@ -1631,6 +1646,19 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Rahmen je Seite, Profile und Zargenspiegel/Bekleidung noch nicht; Türblatt im 3D weiter mittig statt im Falz; Grundriss-
   Türblatt an der Wandachse; Pfosten-Breite wirkt nur im 3D; Ressourcen-Tabs ohne die neuen Felder (nur im Dialog); nicht in
   der Tauri-App geprüft.
+  - (30.10.) Ansicht: Rahmen je Seite, Verbreiterungs-, Bank- und Storenanschlussprofile (Teilungslinien), Anschlag je
+    Seite (links/rechts/oben von der Anschlag-Seite), Pfosten mit Pfostenbreite; Türzargen von der sichtbaren Seite
+    (Umfassungszarge: Spiegel beidseitig, Eckzarge: Spiegel nur auf der Aufschlagseite, Blendrahmen vor der Fläche,
+    Futter: Bekleidung je Seite; Blatt ab der lichten Kante bzw. vor dem Falz). 3D: Türblatt im Falz der Zarge (Lage
+    `leaf_band`, Einzug bis an den Falz; Detail-Anhang `openings3d` 24 Werte), waagrechte Sprossen-Riegel mit
+    Pfostenbreite. Grundriss: Drehpunkt des Blatts an der Falzkante auf der Blattfläche (Anhang `plan_openings`),
+    Pfosten als Rahmenblock in Pfostenbreite (bei Flügeln aus der Flügelzahl Pfosten dazwischen wie im 3D). Schnitt:
+    Kämpfer (Kämpferbreite) und Riegel (Pfostenbreite) geschnitten. Ressourcen-Tabs Fenster/Tür: aufklappbare Gruppen
+    „Rahmen-Detail · Anschlag“ und (Tür) „Zarge / Rahmenart“ mit den Feldern des Dialogs. Testprojekt erweitert (Rahmen
+    je Seite, Rundbogen, Dachfenster, Schnitte parallel, Türansichten beidseitig). Geprüft: Rust-/vitest-Tests,
+    CLI-Ansichten/-Schnitte/-Grundriss als PNG angesehen, Dialog im Chromium (vite-Vorschau) angesehen (Linux).
+    Offen: Pfosten in der Ansicht nur als Mittellinie zwischen den Flügeln (keine eigene Kontur), Türzarge in der
+    Ansicht ohne Oberlicht-Fall (mit Oberlicht bisheriges Blatt), nicht in der Tauri-App geprüft.
 - ◐ **[106] Fenster/Türen: Schichteinzug je Wandschicht und Seite.** (29.10.) `layerReveals` am Typ bzw. an der Öffnung (ersetzt
   dort den Typ): je Schicht (Index ab aussen, negativ ab innen) bündig / zurückspringend um Mass (Vorgabe Schichtdicke) / in
   die Leibung bis an den Rahmen (Vorgabe ≤ 4 cm, vom Rahmen weg gestapelt) / Rahmen überdeckend um Mass (Vorgabe 3 cm), je
@@ -1642,6 +1670,10 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   CLI-Grundriss/-Schnitt einer Aussenwand Putz/Dämmung/Backstein/Putz mit vier Varianten angesehen. Offen: Schnitt quer
   durch eine Leibung (Ebene parallel zur Wand) ohne Rücksprung; Mengen (Leibungsflächen je Schicht) nicht in der Fenster-
   liste; keine Rundbogen-/Dachfenster-Leibungen; nicht in der Tauri-App geprüft.
+  - (30.10.) Schnitt parallel zur Wand durch die Leibung (`parallel_reveal_cuts`): die geschnittene Schicht springt
+    um ihren Rücksprung zurück (Loch je Seite geweitet), Zusatzstücke, die die Ebene queren, als Schnittfläche im
+    Stil der Schicht. Geprüft: Rust-Test (Fläche), CLI-Schnitt durch die Leibungen angesehen (Linux). Offen:
+    schräg zur Wand stehende Ebenen ohne Rücksprung, Formöffnungen (Rechteck-Loch).
 - ◐ **[108] Schräge Wandanschlüsse exakt (T/L/X, ein- und mehrschichtig).** (30.10., Maintainer-Bug: schräger
   T-Stoss) Die Nah-Putz-Aussparung der Durchgangswand (`joins::SpanCutout`) ist jetzt ein Parallelogramm
   (`from/to` auf der Fläche, `from_b/to_b` auf der Rückgrat-Fläche) aus den echten Kern-Kanten des Abzweigs

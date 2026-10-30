@@ -63,3 +63,5 @@ export type { VerticalExtent } from "../geometry/grips";
 export type { GripRequest } from "../geometry/grips";
 export { openingPreviewProject, openingPreviewSvgs } from "../plan/openingPreview";
 export type { OpeningPreviewSvgs } from "../plan/openingPreview";
+export { surfaceOpeningInfo, surfaceOpeningGrips, surfaceOpeningGripPatch } from "../plan/surfaceOpening";
+export type { SurfaceOpeningInfo } from "../plan/surfaceOpening";

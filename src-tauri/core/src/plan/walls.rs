@@ -301,7 +301,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     let wt = if door { None } else { window_type(p, o) };
     // Rahmenband nur bei Türen mit Typ (Fenster zeichnen es selbst).
     let dt = if door { door_type(p, o) } else { None };
-    let sash_list = wt.map(sashes).unwrap_or_default();
+    let mut sash_list = wt.map(sashes).unwrap_or_default();
     let stroke = color.unwrap_or(POCHE_STROKE);
     let frame_color = o.frame_line.as_ref().and_then(|l| l.color.as_deref()).unwrap_or(stroke);
     let frame_weight = o.frame_line.as_ref().and_then(|l| l.weight).unwrap_or(lw);
@@ -325,6 +325,32 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     let dframe = crate::opening_detail::door_frame_of(p, o);
     // Verbreiterungsprofile: das Fenster-Element sitzt um sie eingerückt in der Rohbauöffnung.
     let (ext_l, ext_r) = det.as_ref().filter(|_| !door).map_or((0.0, 0.0), |f| (f.ext.left, f.ext.right));
+    // [105] Pfostenbreite: Pfosten ohne eigene Breite und (bei Flügeln aus der Flügelzahl) Pfosten
+    // zwischen den Flügeln wie im 3D.
+    let mullion = det.as_ref().map_or(f64::NAN, |f| f.mullion_width);
+    if mullion.is_finite() && mullion > 1e-4 {
+        let from_count = wt.is_some_and(|t| t.sashes.as_ref().is_none_or(|s| s.is_empty()));
+        let mut list = Vec::with_capacity(sash_list.len() * 2);
+        for (i, mut s) in sash_list.into_iter().enumerate() {
+            if s.kind == SashDefKind::Pfosten && s.post_width.is_none() {
+                s.post_width = Some(mullion);
+            }
+            if from_count && i > 0 {
+                list.push(SashDef { kind: SashDefKind::Pfosten, post_width: Some(mullion), ..Default::default() });
+            }
+            list.push(s);
+        }
+        sash_list = list;
+    }
+    // [105] Türblatt im Falz der Zarge: Drehpunkt an der Falzkante, auf der Aufschlagfläche des Blatts.
+    let hinge = dframe.as_ref().filter(|_| dt.is_some_and(|t| matches!(t.kind, DoorTypeKind::Dreh | DoorTypeKind::Pendel | DoorTypeKind::Unknown))).map(|df| {
+        use crate::opening_detail as od;
+        let innen = od::aufschlag_innen(o);
+        let clear = od::profile_clear_x(&od::door_frame_profile(df, total, innen));
+        let (d0, _) = od::leaf_band(df, total, innen);
+        let off = ref_off - total / 2.0 + if innen { total - d0 } else { d0 };
+        ((clear - df.falz_width).max(0.0), off)
+    });
     let (o_pos, o_wid) = if ext_l + ext_r > 1e-6 && o.width - ext_l - ext_r > 0.05 { (o.position + ext_l, o.width - ext_l - ext_r) } else { (o.position, o.width) };
     let mut b: Vec<f64> = vec![w.start.x, w.start.y, w.end.x, w.end.y, total, ref_off, o_pos, o_wid, b01(door), detail_code];
     // Tür
@@ -439,10 +465,9 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             b01(s.opening.is_some_and(|k| k != OpeningKind::Fest)),
         ]);
     }
-    // [105] Anhang: Rahmenbreite rechts (Fenster).
-    if let Some(f) = det.as_ref().filter(|f| wt.is_some() && (f.sides.right - f.sides.left).abs() > 1e-9) {
-        b.push(f.sides.right);
-    }
+    // [105] Anhang: Rahmenbreite rechts (Fenster), Drehpunkt des Türblatts im Falz (Einzug, Versatz).
+    b.push(det.as_ref().filter(|f| wt.is_some() && (f.sides.right - f.sides.left).abs() > 1e-9).map_or(f64::NAN, |f| f.sides.right));
+    b.extend(hinge.map_or([f64::NAN; 2], |(x, off)| [x, off]));
     let f = crate::plan_openings::plan_opening(&b);
     if f.is_empty() {
         return Ok(());
