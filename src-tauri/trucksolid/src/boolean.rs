@@ -1,22 +1,23 @@
 // Boolesche Operationen (Union/Differenz/Schnitt) zwischen zwei Dreiecks-Meshes.
-// Mesh-Ebenen-CSG via csgrs (BSP-Baum) statt truck-modeling-Booleans — letztere
-// sind bei koinzidenten/tangentialen Flächen instabil (siehe PENDENZEN.md,
-// truck-Integration Phase 4, monstertruck-solid-Spike). csgrs erwies sich im
-// Spike an genau diesem Fall (Extrusion bündig/eingebunden in eine Wand,
-// deckungsgleicher Querschnitt) als exakt korrekt.
+// Mesh-Ebenen-Boolean mit `manifold-rust` (Port von Manifold, exakter Modus) statt
+// truck-B-Rep-Booleans (scheitern an koinzidenten Flächen) und statt des früheren
+// csgrs-Fallbacks (offene Netze, langsam). Messung und Entscheid: TODO.md [107].
+//
+// Manifold nimmt innen-nach-aussen gedrehte Körper still an und rechnet dann falsch;
+// deshalb werden die Eingaben vorher geprüft (endlich, geschlossen, Orientierung).
 
-use csgrs::csg::CSG;
-use csgrs::mesh::Mesh as CsgMesh;
-use csgrs::polygon::Polygon;
-use csgrs::triangulated::Triangulated3D;
-use csgrs::vertex::Vertex;
-use nalgebra::Point3;
+use std::collections::HashMap;
+
+use manifold_rust::manifold::Manifold;
+use manifold_rust::types::{BooleanEngine, Error, MeshGL64, OpType};
 use serde::{Deserialize, Serialize};
+
+/// Obergrenze Dreiecke je Eingabe (Schutz vor Speicher-/Zeitexplosion im WASM).
+pub const MAX_TRIANGLES: usize = 500_000;
 
 /// Eingabe-Mesh für eine boolesche Operation: flache f64-Positionen (Modell-
 /// Meter) + Dreiecks-Indizes. Getrennt von `MeshOutput` (dort f32, da Render-
-/// Ausgabe) — hier f64, da Eingabe aus Modelldaten und Präzision für die BSP-
-/// Klassifikation an koinzidenten Flächen zählt.
+/// Ausgabe) — hier f64, da Eingabe aus Modelldaten.
 #[derive(Deserialize)]
 pub struct BooleanMeshInput {
     pub a_positions: Vec<f64>,
@@ -31,55 +32,147 @@ pub struct BooleanMeshInput {
 pub struct BooleanMeshOutput {
     pub positions: Vec<f32>,
     pub indices: Vec<u32>,
-    /// Ob das Ergebnis leer ist (z. B. Schnitt zweier sich nur berührender
-    /// Körper) — csgrs liefert das als Trimesh-Fehler statt eines leeren
-    /// Meshes zurück, hier auf einen sauberen Fall normalisiert.
+    /// Ob das Ergebnis leer ist (z. B. Schnitt zweier sich nur berührender Körper).
     pub empty: bool,
 }
 
-fn mesh_from_triangles(positions: &[f64], indices: &[u32]) -> Result<CsgMesh<()>, String> {
-    if indices.len() % 3 != 0 {
-        return Err("indices müssen Dreiecke sein (Vielfaches von 3)".into());
-    }
-    let n_verts = positions.len() / 3;
-    let mut polygons = Vec::with_capacity(indices.len() / 3);
-    for tri in indices.chunks(3) {
-        let mut pts = [Point3::origin(); 3];
-        for (k, &i) in tri.iter().enumerate() {
-            let idx = i as usize;
-            if idx >= n_verts {
-                return Err(format!("Index {idx} außerhalb der Positions-Liste"));
-            }
-            let o = idx * 3;
-            pts[k] = Point3::new(positions[o], positions[o + 1], positions[o + 2]);
-        }
-        let normal = (pts[1] - pts[0]).cross(&(pts[2] - pts[0]));
-        let verts = vec![
-            Vertex::new(pts[0], normal),
-            Vertex::new(pts[1], normal),
-            Vertex::new(pts[2], normal),
-        ];
-        polygons.push(Polygon::new(verts, ()));
-    }
-    Ok(CsgMesh::from_polygons(&polygons, ()))
+/// Ergebnis in voller f64-Genauigkeit (Tests, Weiterverkettung).
+pub struct BooleanMeshF64 {
+    pub positions: Vec<f64>,
+    pub indices: Vec<u32>,
 }
 
-fn triangles_from_mesh(m: &CsgMesh<()>) -> (Vec<f32>, Vec<u32>) {
-    let mut positions: Vec<f32> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    let mut next = 0u32;
-    m.visit_triangles(|tri| {
-        for v in &tri {
-            positions.push(v.position.x as f32);
-            positions.push(v.position.y as f32);
-            positions.push(v.position.z as f32);
+/// Prüft ein Eingabe-Mesh und liefert ein verschweisstes, nach aussen orientiertes Netz
+/// (gleiche Koordinaten werden vereint; Null-Flächen-Dreiecke entfallen).
+fn checked_mesh(positions: &[f64], indices: &[u32], what: &str) -> Result<MeshGL64, String> {
+    if positions.len() % 3 != 0 || indices.len() % 3 != 0 {
+        return Err(format!("{what}: Positionen/Indizes müssen Dreier-Gruppen sein"));
+    }
+    if indices.is_empty() {
+        return Err(format!("{what}: leeres Netz"));
+    }
+    if indices.len() / 3 > MAX_TRIANGLES {
+        return Err(format!("{what}: zu viele Dreiecke (> {MAX_TRIANGLES})"));
+    }
+    if positions.iter().any(|x| !x.is_finite()) {
+        return Err(format!("{what}: nicht endliche Koordinaten"));
+    }
+    let n_in = positions.len() / 3;
+    // Verschweissen über exakt gleiche Koordinaten (-0.0 == 0.0).
+    let mut ids: HashMap<[u64; 3], u32> = HashMap::new();
+    let mut verts: Vec<f64> = Vec::new();
+    let mut map: Vec<u32> = Vec::with_capacity(n_in);
+    for c in positions.chunks_exact(3) {
+        let key = [(c[0] + 0.0).to_bits(), (c[1] + 0.0).to_bits(), (c[2] + 0.0).to_bits()];
+        let next = ids.len() as u32;
+        let id = *ids.entry(key).or_insert_with(|| {
+            verts.extend_from_slice(&[c[0] + 0.0, c[1] + 0.0, c[2] + 0.0]);
+            next
+        });
+        map.push(id);
+    }
+    let mut tris: Vec<u32> = Vec::with_capacity(indices.len());
+    for t in indices.chunks_exact(3) {
+        let mut m = [0u32; 3];
+        for k in 0..3 {
+            let i = t[k] as usize;
+            if i >= n_in {
+                return Err(format!("{what}: Index {i} außerhalb der Positions-Liste"));
+            }
+            m[k] = map[i];
         }
-        indices.push(next);
-        indices.push(next + 1);
-        indices.push(next + 2);
-        next += 3;
-    });
-    (positions, indices)
+        if m[0] == m[1] || m[1] == m[2] || m[0] == m[2] {
+            continue;
+        }
+        tris.extend_from_slice(&m);
+    }
+    if tris.is_empty() {
+        return Err(format!("{what}: nur entartete Dreiecke"));
+    }
+    // Geschlossen und mannigfaltig: jede gerichtete Kante genau einmal, ihre Gegenkante auch.
+    let mut edges: HashMap<(u32, u32), u32> = HashMap::new();
+    for t in tris.chunks_exact(3) {
+        for k in 0..3 {
+            *edges.entry((t[k], t[(k + 1) % 3])).or_default() += 1;
+        }
+    }
+    for (&(a, b), &c) in &edges {
+        if c != 1 || edges.get(&(b, a)).copied() != Some(1) {
+            return Err(format!("{what}: Netz nicht geschlossen/mannigfaltig"));
+        }
+    }
+    // Orientierung: Volumen > 0 (Divergenzsatz, relativ zur Min-Ecke für Stabilität).
+    let mut o = [f64::INFINITY; 3];
+    for v in verts.chunks_exact(3) {
+        for k in 0..3 {
+            o[k] = o[k].min(v[k]);
+        }
+    }
+    let p = |i: u32| {
+        let j = i as usize * 3;
+        [verts[j] - o[0], verts[j + 1] - o[1], verts[j + 2] - o[2]]
+    };
+    let mut vol = 0.0;
+    for t in tris.chunks_exact(3) {
+        let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+        vol += a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+            + a[2] * (b[0] * c[1] - b[1] * c[0]);
+    }
+    if !vol.is_finite() || vol == 0.0 {
+        return Err(format!("{what}: Volumen 0"));
+    }
+    if vol < 0.0 {
+        tris.chunks_exact_mut(3).for_each(|t| t.swap(1, 2));
+    }
+    let mut g = MeshGL64::default();
+    g.num_prop = 3;
+    g.vert_properties = verts;
+    g.tri_verts = tris.iter().map(|&i| i as u64).collect();
+    Ok(g)
+}
+
+fn to_manifold(g: &MeshGL64, what: &str) -> Result<Manifold, String> {
+    let m = Manifold::from_mesh_gl64(g);
+    if m.status() != Error::NoError {
+        return Err(format!("{what}: kein gültiger Körper ({:?})", m.status()));
+    }
+    Ok(m)
+}
+
+/// Boolean in f64. Fehler bei ungültigen Eingaben (offen, nicht endlich, leer …).
+pub fn boolean_mesh_f64(
+    a_positions: &[f64],
+    a_indices: &[u32],
+    b_positions: &[f64],
+    b_indices: &[u32],
+    op: &str,
+) -> Result<BooleanMeshF64, String> {
+    let op = match op {
+        "union" => OpType::Add,
+        "difference" => OpType::Subtract,
+        "intersection" => OpType::Intersect,
+        other => return Err(format!("unbekannte boolesche Operation: {other}")),
+    };
+    let a = to_manifold(&checked_mesh(a_positions, a_indices, "Körper A")?, "Körper A")?;
+    let b = to_manifold(&checked_mesh(b_positions, b_indices, "Körper B")?, "Körper B")?;
+    let r = match op {
+        OpType::Add => a.union_with_engine(&b, BooleanEngine::Exact),
+        OpType::Subtract => a.difference_with_engine(&b, BooleanEngine::Exact),
+        OpType::Intersect => a.intersection_with_engine(&b, BooleanEngine::Exact),
+    };
+    if r.status() != Error::NoError {
+        return Err(format!("Boolean fehlgeschlagen ({:?})", r.status()));
+    }
+    if r.is_empty() {
+        return Ok(BooleanMeshF64 { positions: vec![], indices: vec![] });
+    }
+    // Koplanare Dreiecke und überzählige Knoten zusammenfassen (der exakte Modus liefert
+    // sonst ein Mehrfaches an Dreiecken).
+    let g = r.simplify(0.0).get_mesh_gl64(-1);
+    let np = g.num_prop as usize;
+    let positions: Vec<f64> = g.vert_properties.chunks_exact(np).flat_map(|v| [v[0], v[1], v[2]]).collect();
+    let indices: Vec<u32> = g.tri_verts.iter().map(|&i| i as u32).collect();
+    Ok(BooleanMeshF64 { positions, indices })
 }
 
 pub fn boolean_mesh_core(
@@ -89,19 +182,11 @@ pub fn boolean_mesh_core(
     b_indices: &[u32],
     op: &str,
 ) -> Result<BooleanMeshOutput, String> {
-    let a = mesh_from_triangles(a_positions, a_indices)?;
-    let b = mesh_from_triangles(b_positions, b_indices)?;
-    let result = match op {
-        "union" => a.union(&b),
-        "difference" => a.difference(&b),
-        "intersection" => a.intersection(&b),
-        other => return Err(format!("unbekannte boolesche Operation: {other}")),
-    };
-    let (positions, indices) = triangles_from_mesh(&result);
+    let r = boolean_mesh_f64(a_positions, a_indices, b_positions, b_indices, op)?;
     Ok(BooleanMeshOutput {
-        empty: indices.is_empty(),
-        positions,
-        indices,
+        empty: r.indices.is_empty(),
+        positions: r.positions.iter().map(|x| *x as f32).collect(),
+        indices: r.indices,
     })
 }
 

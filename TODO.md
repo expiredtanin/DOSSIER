@@ -1224,6 +1224,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Ebenen-Zusammenfassung der Ausgabe (exakter Modus liefert bei 200 überlappenden Quadern 2118 statt
   920 Dreiecke → `simplify`), Schnittkanten für Plan/Schnitt ([G1]) aus dem Ergebnisnetz. Nicht geprüft:
   Tauri-App/macOS, C++-Manifold selbst, gekrümmte Körper (Kugel/Zylinder als Netz). · S (Spike) / M (Einbau)
+  - (30.10.) Mesh-Fallback jetzt Manifold statt csgrs: [107].
 - ✅ **[G8] Abzugskörper (senkrechte Prismen)** — Grundriss, Schnitt, 3D, STEP. Offen: Ansicht,
   Schraffur-Deckel im 3D-Live-Schnitt.
 - ◐ **[G10] render2d-Punkte f32** (Fund aus [K3b], geprüft 27.10.): `render2d::types::Scene` speichert Punkte
@@ -1603,6 +1604,19 @@ Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugr
 [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
 (◐, DXF-Parser, IFC-Import) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
 Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
+
+- ◐ **[107] Manifold für Körper-Booleans (Schritt 1: trucksolid).** (30.10.) `manifold-rust` `=0.19.1` (Apache-2.0,
+  exakter Modus) ersetzt den csgrs-Fallback in `src-tauri/trucksolid/src/boolean.rs`; csgrs, die Git-Abhängigkeit
+  und nalgebra sind entfernt, `NOTICE` ergänzt. Reihenfolge unverändert: truck-B-Rep zuerst (exakte Flächen/STEP),
+  bei Fehler Mesh-Boolean (Manifold 14/14 Spike-Fälle, truck 3/14, aber kein B-Rep). Eingabeprüfung vor dem
+  Aufruf (`checked_mesh`): endlich, Indizes, geschlossen/mannigfaltig, Volumen ≠ 0, Orientierung (Volumen < 0 →
+  Dreiecke gedreht), Obergrenze 500 000 Dreiecke, Verschweissen gleicher Koordinaten; sonst Fehlertext, den TS wie
+  bisher behandelt. Ergebnis mit `simplify(0)` (koplanar zusammengefasst). Tests
+  `trucksolid/tests/manifold_cases.rs`: 14 Spike-Fälle (bündiger Abzug, Gaube, Dach-L-Ecke, 30 Öffnungen,
+  200 Quader, Splitter 1e-7/1e-10, 1e-6 rad) ok, geschlossen, Volumen rel < 1e-9; Orientierung, kaputte Eingaben.
+  **WASM:** `pkgTruck` 3.26 → 4.44 MB (gzip 745 → 1082 KB) — deutlich mehr als im Spike gemessen (Clipper2/dashu
+  kommen dazu). Offen: Schritt 2 (Kern-Modul `solid_bool.rs` für [G5]/Abzugskörper, Fuzz, Cache), Panik im WASM
+  (läuft hinter `guarded()`), Tauri/macOS nicht geprüft. · M
 
 - ◐ **[27] Punktwolken — Stufe 1: Anzeige im 3D.** (28.10.) render3d: eigene Punkt-Pipeline
   (`render3d/src/points.rs` GPU-frei: Puffer-Aufbau, Farbabbildung, WGSL; `gpu_points.rs`: Pipeline im

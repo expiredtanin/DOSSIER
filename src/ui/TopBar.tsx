@@ -1028,7 +1028,7 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
           <li>React · Vite — MIT</li>
           <li>Tauri — MIT / Apache-2.0</li>
           <li>wgpu (render3d) — MIT / Apache-2.0</li>
-          <li>truck · csgrs — Apache-2.0</li>
+          <li>truck · manifold-rust — Apache-2.0</li>
           <li>OpenCascade.js — LGPL-2.1</li>
           <li>acadrust — MPL-2.0</li>
         </ul>

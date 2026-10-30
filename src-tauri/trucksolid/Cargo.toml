@@ -29,14 +29,9 @@ truck-modeling = "0.6"
 truck-meshalgo = "0.4"
 truck-shapeops = "0.4"
 truck-stepio = "0.3"
-# Mesh-Ebenen-CSG (Boolesche Operationen) — bewusst NICHT truck-modeling-Booleans
-# (instabil bei koinzidenten Flächen, siehe PENDENZEN.md truck-Integration Phase 4).
-# csgrs arbeitet auf Dreiecks-Ebene (BSP-Baum), robust genau in diesem Fall.
-# Gepinnt auf einen Git-Commit (crates.io-Veröffentlichungen 0.16–0.20.1 sind alle
-# wegen einer harten, zurückgezogenen core2-Abhängigkeit nicht installierbar; auf
-# dem unveröffentlichten main-Branch bereits behoben). Nutzerautorisiert (Spike).
-csgrs = { git = "https://github.com/timschmidt/csgrs", rev = "5e7a37a8803d4e56617734687edc9b98f4ebeed7", default-features = false, features = ["f64", "bmesh", "mesh", "earcut"] }
-nalgebra = "0.34"
+# Mesh-Ebenen-Boolean (Fallback bei koinzidenten Flächen, `boolean.rs`): Port von Manifold, reines
+# Rust, Apache-2.0. Exakte Version gepinnt (junges Crate, ein Maintainer), NOTICE [51].
+manifold-rust = "=0.19.1"
 
 [dev-dependencies]
 serde_json = "1"
