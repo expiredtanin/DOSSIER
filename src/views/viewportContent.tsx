@@ -330,6 +330,56 @@ export function Content({
     return merged;
   }, [selectionLines, clashes]);
 
+  // 3D-Sicht: aus dem Grundriss UND aus Schnitt/Ansicht ([115]); im Schnitt schneidet der Live-Schnitt
+  // an der Schnittlinie (App setzt `section3d` beim Wechsel).
+  const view3dPane = (
+    <section className="pane">
+      <div className="pane-title">
+        {t("content.perspektiveTitle", { name: level.name })}
+      </div>
+      <Viewport3D
+        project={project}
+        renderMode={renderMode}
+        detail={detail}
+        view3d={view3d}
+        groundElevation={level.baseElevation ?? 0}
+        gridVisible={grid3dVisible}
+        onToggleGrid={onToggleGrid3d}
+        section3d={section3d}
+        onClearSection3d={onClearSection3d}
+        onPick3d={onViewport3dPick}
+        highlightLines={highlightLines}
+        commandActive={commandActive}
+        draft={draft}
+        onWorkplanePoint={onWorkplanePoint}
+        onWorkplaneConfirm={onWorkplaneConfirm}
+        hudFields={hudFields}
+        editWalls={edit3dWalls}
+        editDrawings={edit3dDrawings}
+        editCeilings={edit3dCeilings}
+        editRoofs={edit3dRoofs}
+        onEditVertex={onEdit3dVertex}
+        onEditBody={onEdit3dBody}
+        onEditEdge={onEdit3dEdge}
+        onEditRoofPitch={onEdit3dRoofPitch}
+        onEditWallTop={onEdit3dWallTop}
+        onEditEnd={onEdit3dEnd}
+        onEditGroup={onEdit3dGroup}
+        onGrip3dEditTab={onGrip3dEditTab}
+        onGrip3dEditCancel={onGrip3dEditCancel}
+      />
+    </section>
+  );
+
+  if ((level.kind === "section" || level.kind === "elevation") && viewType === "perspektive") {
+    return (
+      <main className="content">
+        <DrawingTabs project={project} handlers={viewSnapshotTabs} />
+        {view3dPane}
+      </main>
+    );
+  }
+
   if (level.kind === "section" || level.kind === "elevation") {
     return (
       <main className="content">
@@ -491,42 +541,7 @@ export function Content({
     <main className="content">
       <DrawingTabs project={project} handlers={viewSnapshotTabs} />
       {viewType === "perspektive" ? (
-        <section className="pane">
-          <div className="pane-title">
-            {t("content.perspektiveTitle", { name: level.name })}
-          </div>
-          <Viewport3D
-            project={project}
-            renderMode={renderMode}
-            detail={detail}
-            view3d={view3d}
-            groundElevation={level.baseElevation ?? 0}
-            gridVisible={grid3dVisible}
-            onToggleGrid={onToggleGrid3d}
-            section3d={section3d}
-            onClearSection3d={onClearSection3d}
-            onPick3d={onViewport3dPick}
-            highlightLines={highlightLines}
-            commandActive={commandActive}
-            draft={draft}
-            onWorkplanePoint={onWorkplanePoint}
-            onWorkplaneConfirm={onWorkplaneConfirm}
-            hudFields={hudFields}
-            editWalls={edit3dWalls}
-            editDrawings={edit3dDrawings}
-            editCeilings={edit3dCeilings}
-            editRoofs={edit3dRoofs}
-            onEditVertex={onEdit3dVertex}
-            onEditBody={onEdit3dBody}
-            onEditEdge={onEdit3dEdge}
-            onEditRoofPitch={onEdit3dRoofPitch}
-            onEditWallTop={onEdit3dWallTop}
-            onEditEnd={onEdit3dEnd}
-            onEditGroup={onEdit3dGroup}
-            onGrip3dEditTab={onGrip3dEditTab}
-            onGrip3dEditCancel={onGrip3dEditCancel}
-          />
-        </section>
+        view3dPane
       ) : (
         <LevelPlanView
           project={project}

@@ -24,7 +24,7 @@ import type {
   Project,
   Vec2,
 } from "../model/types";
-import { createTable, generatePlan, PX_PER_M, sheetTables, TABLE_SOURCES, tableSourceLabel } from "../core";
+import { createTable, PX_PER_M, sheetTables, TABLE_SOURCES, tableSourceLabel, viewportLevelPlan } from "../core";
 import type { TableOut } from "../core";
 import { SheetTableHud } from "./SheetTableHud";
 import { planToPrintSvg } from "../export/planToPrintSvg";
@@ -72,6 +72,9 @@ export function ViewportPlanSvg({
   rect: RectMm;
 }) {
   const ref = useRef<SVGGElement>(null);
+  // Aktuelle Lage für das asynchron eintreffende SVG (Schnitt) — sonst sässe es bis zum nächsten Render falsch.
+  const rectRef = useRef(rect);
+  rectRef.current = rect;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -80,32 +83,45 @@ export function ViewportPlanSvg({
       el.replaceChildren();
       return;
     }
-    try {
-      const codes = visibleCodesFromSnapshot(snap);
-      // Massstab ZUERST: er geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, s. model/dimension.ts).
-      const scaleN = resolveViewportScale(viewport, snap);
-      const plan = generatePlan(project, snap.activeLevelId, codes, undefined, snap.detail, false, false, true, scaleN);
-      const print = planToPrintSvg(plan, {
-        scaleDenominator: scaleN,
-        pageWidthMm: viewport.widthMm,
-        pageHeightMm: viewport.heightMm,
+    let disposed = false;
+    const codes = visibleCodesFromSnapshot(snap);
+    // Massstab ZUERST: er geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, s. model/dimension.ts).
+    const scaleN = resolveViewportScale(viewport, snap);
+    // Geschoss/Zeichnung wie bisher; Schnitt/Ansicht über die abgeleitete Projektion ([115], Schnitt asynchron).
+    void viewportLevelPlan(project, snap.activeLevelId, codes, snap.detail, scaleN)
+      .then((plan) => {
+        if (disposed) return;
+        const print = planToPrintSvg(plan, {
+          scaleDenominator: scaleN,
+          pageWidthMm: viewport.widthMm,
+          pageHeightMm: viewport.heightMm,
+        });
+        el.replaceChildren(print.svg);
+        placeInner(el, rectRef.current);
+      })
+      .catch(() => {
+        if (!disposed) el.replaceChildren();
       });
-      el.replaceChildren(print.svg);
-    } catch {
-      el.replaceChildren();
-    }
+    return () => {
+      disposed = true;
+    };
   }, [project, viewport.snapshotId, viewport.widthMm, viewport.heightMm, viewport.scaleDenominator]);
   // Lage/Grösse über die Attribute des inneren SVG (folgt auch dem Ghost beim Ziehen).
   useEffect(() => {
-    const svg = ref.current?.firstElementChild;
-    if (!svg) return;
-    svg.setAttribute("x", String(rect.xMm));
-    svg.setAttribute("y", String(rect.yMm));
-    svg.setAttribute("width", String(rect.widthMm));
-    svg.setAttribute("height", String(rect.heightMm));
-    svg.setAttribute("preserveAspectRatio", "none");
+    if (ref.current) placeInner(ref.current, rect);
   });
   return <g ref={ref} pointerEvents="none" />;
+}
+
+/** Lage/Grösse des inneren Viewport-SVG in Blatt-mm setzen. */
+function placeInner(el: SVGGElement, rect: RectMm): void {
+  const svg = el.firstElementChild;
+  if (!svg) return;
+  svg.setAttribute("x", String(rect.xMm));
+  svg.setAttribute("y", String(rect.yMm));
+  svg.setAttribute("width", String(rect.widthMm));
+  svg.setAttribute("height", String(rect.heightMm));
+  svg.setAttribute("preserveAspectRatio", "none");
 }
 
 /**

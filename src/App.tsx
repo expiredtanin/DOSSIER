@@ -2354,6 +2354,13 @@ export default function App() {
     return lvl ? sectionPlaneFromLevel(lvl) : null;
   }, [project.drawingLevels, section3dCutId]);
 
+  // Aus einem Schnitt ins 3D ([115]): der Live-Schnitt folgt der Schnittlinie dieses Schnitts (einmal
+  // beim Wechsel; im 3D lässt er sich wie sonst aufheben).
+  const sectionLevelIn3d = activeLevel.kind === "section" && viewType === "perspektive" ? activeLevel.id : null;
+  useEffect(() => {
+    if (sectionLevelIn3d) setSection3dCutId(sectionLevelIn3d);
+  }, [sectionLevelIn3d, setSection3dCutId]);
+
   // Bindet den 3D-Live-Schnitt an eine Schnittlinie (Toggle im Objekt-Info).
   const onToggleSection3dCut = useCallback(
     (id: string) => setSection3dCutId((cur) => (cur === id ? null : id)),
@@ -2751,6 +2758,8 @@ export default function App() {
   // aktiv. Sonst sind Cursor/Zoom bedeutungslos (PlanView ist nicht montiert →
   // das Handle ist null, Aktionen sind No-Ops).
   const planActive = activeLevel.kind === "floor" && viewType === "grundriss";
+  // 3D gibt es aus Geschoss, Schnitt und Ansicht ([115]); eine freie Zeichnung hat keine Höhe.
+  const has3dView = activeLevel.kind !== "drawing";
   // Start-Protokoll: war der letzte Lauf unsauber beendet, kurz darauf hinweisen (Autosave sichert
   // die Daten); beim Schliessen die Sitzung als sauber markieren.
   useEffect(() => {
@@ -3483,7 +3492,7 @@ export default function App() {
         viewType={viewType}
         fov={fov}
         onFov={setFov}
-        cameraEnabled={activeLevel.kind === "floor"}
+        cameraEnabled={has3dView}
         resourcesOpen={resourcesOpen}
         onToggleResources={() => toggleResources()}
         onOpenSettings={() => openSettings()}
@@ -3533,7 +3542,7 @@ export default function App() {
         }
         viewControls={
           <ViewRibbonTab
-            viewToggleEnabled={activeLevel.kind === "floor"}
+            viewToggleEnabled={has3dView}
             viewType={viewType}
             onViewType={setViewType}
             view3d={view3d}
@@ -3938,7 +3947,7 @@ export default function App() {
         // Display/Print wirkt in ALLEN 2D-Darstellungen (Grundriss, Schnitt,
         // Ansicht, Zeichnung — hairline fliesst überall hin); nur die
         // 3D-Perspektive kennt keine Papier-Linienstärken.
-        lineModeEnabled={activeLevel.kind !== "floor" || viewType === "grundriss"}
+        lineModeEnabled={!has3dView || viewType === "grundriss"}
         snap={snap}
         onSnapChange={setSnap}
       />
