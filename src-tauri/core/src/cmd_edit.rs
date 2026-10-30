@@ -733,6 +733,7 @@ fn map_points(g: &Value, f: &dyn Fn(P) -> P) -> Value {
         "rect" | "image" => with_all(g, vec![("min", m("min")), ("max", m("max"))]),
         "circle" | "arc" | "ellipse" => with(g, "center", m("center")),
         "text" | "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => with(g, "at", m("at")),
+        "grid" => with(g, "origin", m("origin")),
         _ => g.clone(),
     }
 }

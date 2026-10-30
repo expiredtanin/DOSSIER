@@ -603,7 +603,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         const o = await computeSection(project, lvl);
         if (!o) fail("keine gültige Schnittlinie");
         // Wie die App: verdeckte Kanten nach der Ebene, geschnittene Fenster/Türen.
-        plan = generateSectionPlan(o, false, { visibleCodes: allCodes, hiddenLines: lvl.hiddenLines, openings: true });
+        plan = generateSectionPlan(o, false, { visibleCodes: allCodes, hiddenLines: lvl.hiddenLines, openings: true, scaleDenominator: scale });
       } else {
         plan = generateElevationPlan(project, lvl, { scaleDenominator: scale });
         if (!plan) fail("keine gültige Ansichtslinie");

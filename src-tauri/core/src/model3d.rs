@@ -1889,24 +1889,28 @@ fn for_each_drawing_chunk(p: &Project, with_color: bool, mut f: impl FnMut(&[f64
         buf.truncate(1);
     };
     for d in &p.drawings2d {
-        let (kind, pts): (f64, Vec<Vec2>) = match &d.geom {
-            Drawing2DGeom::Line { a, b } => (1.0, vec![*a, *b]),
-            Drawing2DGeom::Rect { min, max } => (3.0, vec![*min, *max]),
-            Drawing2DGeom::Polyline { pts, .. } => (2.0, pts.clone()),
+        // Teile einer Zeichnung: (Art, Punkte); ein Achsraster mit `show3d` liefert je Achse eines.
+        let parts: Vec<(f64, Vec<Vec2>)> = match &d.geom {
+            Drawing2DGeom::Line { a, b } => vec![(1.0, vec![*a, *b])],
+            Drawing2DGeom::Rect { min, max } => vec![(3.0, vec![*min, *max])],
+            Drawing2DGeom::Polyline { pts, .. } => vec![(2.0, pts.clone())],
+            Drawing2DGeom::Grid { show_3d: Some(true), .. } => crate::grid::Spec::of(&d.geom).map(|s| crate::grid::polylines_3d(&s)).unwrap_or_default().into_iter().map(|q| (2.0, q.into_iter().map(|(x, y)| Vec2 { x, y }).collect())).collect(),
             _ => continue,
         };
-        let need = 7 + 2 * pts.len();
-        if buf.len() + need > CHUNK_DOUBLES {
-            flush(&mut buf, &mut ids, &mut f);
-        }
+        let closed = matches!(&d.geom, Drawing2DGeom::Polyline { closed: true, .. });
         let elev = *elevations.entry(d.level_id.as_str()).or_insert_with(|| p.floor(&d.level_id).map_or(0.0, |l| l.base_elevation.unwrap_or(0.0)) + DRAWING_LINE_ELEVATION_EPS);
         let rgb = if with_color { drawing_color(d, &by_category, &by_line_style) } else { [0.0; 3] };
-        let closed = matches!(&d.geom, Drawing2DGeom::Polyline { closed: true, .. });
-        buf.extend([kind, elev, rgb[0], rgb[1], rgb[2], if closed { 1.0 } else { 0.0 }, pts.len() as f64]);
-        for q in &pts {
-            buf.extend([q.x, q.y]);
+        for (kind, pts) in parts {
+            let need = 7 + 2 * pts.len();
+            if buf.len() + need > CHUNK_DOUBLES {
+                flush(&mut buf, &mut ids, &mut f);
+            }
+            buf.extend([kind, elev, rgb[0], rgb[1], rgb[2], if closed { 1.0 } else { 0.0 }, pts.len() as f64]);
+            for q in &pts {
+                buf.extend([q.x, q.y]);
+            }
+            ids.push(d);
         }
-        ids.push(d);
     }
     flush(&mut buf, &mut ids, &mut f);
 }
@@ -2097,6 +2101,25 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [112] Achsraster mit `show3d` erscheint als Boden-Spur (eine Strecke je Achse), ohne Flag nicht.
+    #[test]
+    fn achsraster_im_3d_nur_mit_flag() {
+        let mk = |show: serde_json::Value| -> Project {
+            serde_json::from_value(serde_json::json!({
+                "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+                "drawingLevels": [{"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 1.0}],
+                "drawings2d": [{"id": "G", "type": "drawing2d", "levelId": "F", "categoryCode": "20", "geom": {"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+                    "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 4}], "b": [{"label": "A", "pos": 0}], "show3d": show}}]
+            }))
+            .unwrap()
+        };
+        assert!(drawing_line_verts(&mk(serde_json::json!(false))).is_empty());
+        let v = drawing_line_verts(&mk(serde_json::json!(true)));
+        // 3 Achsen × 1 Segment × 2 Endpunkte × 6 Zahlen.
+        assert_eq!(v.len(), 3 * 2 * 6);
+        assert!((v[1] - 1.01).abs() < 1e-4, "Höhe = Geschoss-UK + 0.01: {}", v[1]);
+    }
 
     /// Walmdach 12×7 m: zwei Trapeze + zwei Walm-Dreiecke, First (3,3)-(8,3).
     fn walm_planes() -> Vec<Vec<V3>> {

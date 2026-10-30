@@ -54,6 +54,9 @@ pub fn symbol_factor(p: &Project, level: &str) -> f64 {
     }
 }
 
+/// Rand um die Achsen im Ausmass, damit die Blasen ins Bild passen (Meter).
+const GRID_BUBBLE_MARGIN_M: f64 = 1.0;
+
 // Massstabsbalken, Papier-mm.
 const SCALEBAR_HEIGHT_MM: f64 = 1.5;
 const SCALEBAR_TICK_MM: f64 = 1.0;
@@ -211,6 +214,7 @@ pub fn shape_name(g: &Drawing2DGeom) -> &'static str {
         Drawing2DGeom::Detailref { .. } => "detailref",
         Drawing2DGeom::Scalebar { .. } => "scalebar",
         Drawing2DGeom::Pointmarker { .. } => "pointmarker",
+        Drawing2DGeom::Grid { .. } => "grid",
         Drawing2DGeom::Text { .. } => "text",
         Drawing2DGeom::Block { .. } => "block",
         Drawing2DGeom::Image { .. } => "image",
@@ -738,9 +742,22 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 em.seg(q[q.len() - 1], q[0]);
             }
         }
-        Drawing2DGeom::Dimension { pts, offset, gap_mm, overshoot_mm, tick_len_mm, text_height_mm, line_weight_mm, ext_weight_mm, tick_weight_mm, text_offsets_mm, refs } => {
+        Drawing2DGeom::Dimension { pts, offset, gap_mm, overshoot_mm, tick_len_mm, text_height_mm, line_weight_mm, ext_weight_mm, tick_weight_mm, text_offsets_mm, refs, kind } => {
             let mm = |x: f64| mm_to_model(x, scale);
-            for i in 0..pts.len().saturating_sub(1) {
+            if let Some(k) = kind {
+                let st = DimStyle {
+                    gap: mm(gap_mm.unwrap_or(DIM_GAP_MM)),
+                    overshoot: mm(overshoot_mm.unwrap_or(DIM_OVERSHOOT_MM)),
+                    tick_len: mm(tick_len_mm.unwrap_or(DIM_TICK_LEN_MM)),
+                    text_height: mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM)),
+                    line_weight: line_weight_mm.unwrap_or(em.weight),
+                    ext_weight: ext_weight_mm.unwrap_or(em.weight),
+                    tick_weight: tick_weight_mm.unwrap_or(em.weight * 2.0),
+                    text_offset: (0.0, 0.0),
+                };
+                dimension_round(&mut em, pts, *offset, *k, &st);
+            }
+            for i in 0..(if kind.is_some() { 0 } else { pts.len().saturating_sub(1) }) {
                 let st = DimStyle {
                     gap: mm(gap_mm.unwrap_or(DIM_GAP_MM)),
                     overshoot: mm(overshoot_mm.unwrap_or(DIM_OVERSHOOT_MM)),
@@ -816,6 +833,11 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             em.circle(*at, r, "none", Some(None));
             em.seg(v(at.x - cross, at.y), v(at.x + cross, at.y));
             em.seg(v(at.x, at.y - cross), v(at.x, at.y + cross));
+        }
+        Drawing2DGeom::Grid { bubble_mm, .. } => {
+            if let Some(spec) = crate::grid::Spec::of(geom) {
+                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), scale);
+            }
         }
         Drawing2DGeom::Text { at, text: s, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts } => {
             let color = marks.as_ref().and_then(|m| m.color.clone()).unwrap_or_else(|| em.color.to_string());
@@ -941,6 +963,110 @@ fn dimension_segment(em: &mut Em, a: Vec2, b: Vec2, offset: f64, st: &DimStyle) 
     em.sink.push(p, 0);
 }
 
+/// Achsraster ([112]): Achsen strichpunktiert, an den Enden Blasen mit der Beschriftung.
+fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, scale: f64) {
+    use crate::grid::Shape;
+    let mm = |x: f64| mm_to_model(x, scale);
+    let dash = [mm(12.0), mm(2.5), mm(1.5), mm(2.5)];
+    let dash_ref = em.sink.fresh_ref();
+    let w = jsnum::min(em.weight, XLINE_WEIGHT_MM.max(0.18));
+    let r = diameter / 2.0;
+    let text_h = diameter * 0.5;
+    for ax in spec.axes() {
+        match ax.shape {
+            Shape::Line { a, b } => em.line(v(a.0, a.1), v(b.0, b.1), w, Some(&dash), dash_ref),
+            Shape::Arc { c, r: rad, a0, a1 } => {
+                let dash_v = Some(dash.to_vec());
+                if a1 - a0 >= std::f64::consts::TAU - 1e-9 {
+                    em.sink.push(
+                        Primitive::DrawingCircle { center: v(c.0, c.1), r: rad, fill: "none".into(), stroke: em.color.into(), weight_mm: w, dash: Some(dash_v), drawing_id: Some(em.id.into()), greyed: Some(em.greyed), opacity: None },
+                        dash_ref,
+                    );
+                } else {
+                    em.sink.push(
+                        Primitive::DrawingArc { center: v(c.0, c.1), r: rad, a0, a1, stroke: em.color.into(), weight_mm: w, dash: Some(dash_v), drawing_id: Some(em.id.into()), greyed: Some(em.greyed), opacity: None },
+                        dash_ref,
+                    );
+                }
+            }
+        }
+        for (end, dir) in ax.bubbles.iter().flatten() {
+            let c = v(end.0 + dir.0 * r, end.1 + dir.1 * r);
+            em.circle(c, r, "none", Some(None));
+            let n = ax.label.chars().count() as f64;
+            em.text(v(c.x - text_h * 0.3 * n, c.y - text_h * 0.35), ax.label.clone(), text_h);
+        }
+    }
+}
+
+/// Radius-, Durchmesser- und Bogenlängen-Mass ([38]): `pts` = Mittelpunkt, Punkt auf dem Kreis
+/// (bzw. Bogenanfang, Bogenende); Mass auf dem Rand mit Massstrichen und Masszahl.
+fn dimension_round(em: &mut Em, pts: &[Vec2], offset: f64, kind: DimKind, st: &DimStyle) {
+    let (Some(&c), Some(&p)) = (pts.first(), pts.get(1)) else { return };
+    let r = hypot2(p.x - c.x, p.y - c.y);
+    if !(r > 1e-6) {
+        return;
+    }
+    let (ux, uy) = ((p.x - c.x) / r, (p.y - c.y) / r);
+    let tick = |em: &mut Em, q: Vec2, tx: f64, ty: f64| {
+        let (nx, ny) = (-ty, tx);
+        let (dx, dy) = ((tx + nx) / std::f64::consts::SQRT_2, (ty + ny) / std::f64::consts::SQRT_2);
+        let h = st.tick_len / 2.0;
+        em.line(v(q.x - dx * h, q.y - dy * h), v(q.x + dx * h, q.y + dy * h), st.tick_weight, None, 0);
+    };
+    let label = |em: &mut Em, at: Vec2, ang: f64, s: String| {
+        let mut a = ang;
+        if jsnum::cos(a) < 0.0 {
+            a += std::f64::consts::PI;
+        }
+        let up = v(-jsnum::sin(a), jsnum::cos(a));
+        let q = v(at.x + up.x * st.text_height * 0.6, at.y + up.y * st.text_height * 0.6);
+        let pr = text(q, s, st.text_height, a, em.color, em.greyed, Some(em.id));
+        em.sink.push(pr, 0);
+    };
+    let (dash, dref) = (em.dash.clone(), em.dash_ref);
+    let dash = dash.as_deref();
+    match kind {
+        DimKind::Radius => {
+            em.line(c, p, st.line_weight, dash, dref);
+            tick(em, p, ux, uy);
+            tick(em, c, ux, uy);
+            let mid = v((c.x + p.x) / 2.0, (c.y + p.y) / 2.0);
+            label(em, mid, jsnum::atan2(uy, ux), format!("R {}", to_fixed(r, 2)));
+        }
+        DimKind::Diameter => {
+            let q = v(c.x - ux * r, c.y - uy * r);
+            em.line(q, p, st.line_weight, dash, dref);
+            tick(em, p, ux, uy);
+            tick(em, q, ux, uy);
+            label(em, c, jsnum::atan2(uy, ux), format!("\u{d8} {}", to_fixed(2.0 * r, 2)));
+        }
+        DimKind::Arc => {
+            let Some(&p1) = pts.get(2) else { return };
+            let a0 = jsnum::atan2(p.y - c.y, p.x - c.x);
+            let a1 = jsnum::atan2(p1.y - c.y, p1.x - c.x);
+            let sweep = (a1 - a0).rem_euclid(std::f64::consts::TAU);
+            let rr = r + offset;
+            if !(rr > 1e-6) || !(sweep > 1e-9) {
+                return;
+            }
+            let sign = if offset >= 0.0 { 1.0 } else { -1.0 };
+            for (a, pt) in [(a0, p), (a1, p1)] {
+                let (cx, cy) = (jsnum::cos(a), jsnum::sin(a));
+                em.line(v(pt.x + cx * st.gap * sign, pt.y + cy * st.gap * sign), v(c.x + cx * (rr + st.overshoot * sign), c.y + cy * (rr + st.overshoot * sign)), st.ext_weight, dash, dref);
+                tick(em, v(c.x + cx * rr, c.y + cy * rr), -cy, cx);
+            }
+            em.sink.push(
+                Primitive::DrawingArc { center: c, r: rr, a0, a1: a0 + sweep, stroke: em.color.into(), weight_mm: st.line_weight, dash: Some(dash.map(|x| x.to_vec())), drawing_id: Some(em.id.into()), greyed: Some(em.greyed), opacity: None },
+                if dash.is_some() { dref } else { 0 },
+            );
+            let am = a0 + sweep / 2.0;
+            let at = v(c.x + jsnum::cos(am) * rr, c.y + jsnum::sin(am) * rr);
+            label(em, at, am + std::f64::consts::FRAC_PI_2, format!("L {}", to_fixed(r * sweep, 2)));
+        }
+    }
+}
+
 /// Dreht die Umlauf-Orientierung um (Spiegelung)? Flächenvorzeichen eines Test-Dreiecks.
 fn reverses_orientation(f: &dyn Fn(Vec2) -> Vec2) -> bool {
     let (p0, p1, p2) = (f(v(0.0, 0.0)), f(v(1.0, 0.0)), f(v(0.0, 1.0)));
@@ -986,6 +1112,19 @@ pub fn mv_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2) -> Drawing2DGeom {
         G::Detailref { at, label, sheet_layout_id, sheet_label } => G::Detailref { at: f(*at), label: label.clone(), sheet_layout_id: sheet_layout_id.clone(), sheet_label: sheet_label.clone() },
         G::Scalebar { at, segment_length, segments } => G::Scalebar { at: f(*at), segment_length: *segment_length, segments: *segments },
         G::Pointmarker { at } => G::Pointmarker { at: f(*at) },
+        G::Grid { origin, angle, radial, a, b, extend, bubbles, bubble_mm, levels, show_3d } => {
+            let o = f(*origin);
+            let ex = f(v(origin.x + angle.cos(), origin.y + angle.sin()));
+            let flip = reverses_orientation(f);
+            let neg = |l: &Vec<GridAxis>| l.iter().map(|x| GridAxis { label: x.label.clone(), pos: -x.pos }).collect::<Vec<_>>();
+            let ang = (ex.y - o.y).atan2(ex.x - o.x);
+            let (a2, b2) = match (flip, radial == &Some(true)) {
+                (false, _) => (a.clone(), b.clone()),
+                (true, false) => (a.clone(), neg(b)),
+                (true, true) => (neg(a), b.clone()),
+            };
+            G::Grid { origin: o, angle: ang, radial: *radial, a: a2, b: b2, extend: *extend, bubbles: *bubbles, bubble_mm: *bubble_mm, levels: levels.clone(), show_3d: *show_3d }
+        }
         G::Text { at, text, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts } => G::Text {
             at: f(*at),
             text: text.clone(),
@@ -1024,6 +1163,15 @@ pub fn scale_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2, k: f64) -> Drawin
             *ry *= k;
         }
         G::Dimension { offset, .. } => *offset *= k,
+        G::Grid { a, b, extend, radial, .. } => {
+            if *radial != Some(true) {
+                a.iter_mut().for_each(|x| x.pos *= k);
+            }
+            b.iter_mut().for_each(|x| x.pos *= k);
+            if let Some(e) = extend {
+                *e *= k;
+            }
+        }
         G::Text { height, width, .. } => {
             *height *= k;
             if let Some(w) = width {
@@ -1097,6 +1245,25 @@ fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds) {
             }
         }
         G::Kote { at, .. } | G::Detailref { at, .. } | G::Pointmarker { at } | G::Text { at, .. } => acc(at),
+        G::Grid { .. } => {
+            if let Some(spec) = crate::grid::Spec::of(g) {
+                for ax in spec.axes() {
+                    match ax.shape {
+                        // Rand für die Blasen an den Enden (Durchmesser bis ≈ 1 m bei 1:100).
+                        crate::grid::Shape::Line { a, b: e } => {
+                            acc(&v(a.0 - GRID_BUBBLE_MARGIN_M, a.1 - GRID_BUBBLE_MARGIN_M));
+                            acc(&v(e.0 + GRID_BUBBLE_MARGIN_M, e.1 + GRID_BUBBLE_MARGIN_M));
+                            acc(&v(a.0 + GRID_BUBBLE_MARGIN_M, a.1 + GRID_BUBBLE_MARGIN_M));
+                            acc(&v(e.0 - GRID_BUBBLE_MARGIN_M, e.1 - GRID_BUBBLE_MARGIN_M));
+                        }
+                        crate::grid::Shape::Arc { c, r, .. } => {
+                            acc(&v(c.0 - r - GRID_BUBBLE_MARGIN_M, c.1 - r - GRID_BUBBLE_MARGIN_M));
+                            acc(&v(c.0 + r + GRID_BUBBLE_MARGIN_M, c.1 + r + GRID_BUBBLE_MARGIN_M));
+                        }
+                    }
+                }
+            }
+        }
         G::Scalebar { at, segment_length, segments } => {
             acc(at);
             acc(&v(at.x + segment_length * segments, at.y));
@@ -1107,7 +1274,7 @@ fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds) {
 
 /// Liegt die Zeichnung auf dem Geschoss (und ist sie im Druck nicht ausgenommen, `noPrint`)?
 fn on_floor(c: &Ctx, d: &Drawing2D) -> bool {
-    d.level_id == c.a.floor && !(c.a.for_print && d.no_print == Some(true))
+    crate::grid::visible_on(d, &c.a.floor) && !(c.a.for_print && d.no_print == Some(true))
 }
 
 /// Domäne „2D-Zeichnungen" von `planDomains`: alle gezeichneten Zeichnungen des Geschosses in
@@ -1473,6 +1640,69 @@ mod tests {
             let (model, sheet) = (extent(&on("eg", geom.clone())), extent(&on("sh", geom.clone())));
             assert!((sheet - model * SHEET_SYMBOL_FACTOR).abs() < 1e-9, "{geom}: {model} → {sheet}");
         }
+    }
+
+    /// [112] Achsraster: strichpunktierte Achsen, Blasen (Kreis + Beschriftung) an beiden Enden,
+    /// Ringe als Bögen, Blasengrösse folgt dem Massstab; auf anderen Geschossen sichtbar (`levels` leer).
+    #[test]
+    fn achsraster_achsen_und_blasen() {
+        let p = project(serde_json::json!({}));
+        let grid = |radial: bool| {
+            drawing(serde_json::json!({"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0, "radial": radial,
+                "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": if radial { 90.0 } else { 5.0 }}], "b": [{"label": "A", "pos": 0}, {"label": "B", "pos": 4}], "extend": 1}))
+        };
+        let prims = render(&p, grid(false), 100.0);
+        let lines = prims.iter().filter(|q| matches!(q, Primitive::Line { dash: Some(Some(_)), .. })).count();
+        let circles: Vec<f64> = prims.iter().filter_map(|q| if let Primitive::DrawingCircle { r, .. } = q { Some(*r) } else { None }).collect();
+        let texts: Vec<String> = prims.iter().filter_map(|q| if let Primitive::DrawingText { text, .. } = q { Some(text.clone()) } else { None }).collect();
+        assert_eq!(lines, 4);
+        assert_eq!(circles.len(), 8);
+        // 8 mm Durchmesser bei 1:100 = 0.8 m → Radius 0.4.
+        assert!(circles.iter().all(|r| (r - 0.4).abs() < 1e-9), "{circles:?}");
+        assert_eq!(texts.len(), 8);
+        assert!(["1", "2", "A", "B"].iter().all(|t| texts.iter().any(|x| x == t)));
+        // Halber Massstab → halbe Blase.
+        let half: Vec<f64> = render(&p, grid(false), 50.0).iter().filter_map(|q| if let Primitive::DrawingCircle { r, .. } = q { Some(*r) } else { None }).collect();
+        assert!((half[0] - 0.2).abs() < 1e-9);
+        // Radial: 2 Strahlen (Linien) und 2 Ringe (Bögen, Ring A mit Radius 0 entfällt als Vollkreis-Punkt).
+        let prims = render(&p, grid(true), 100.0);
+        assert_eq!(prims.iter().filter(|q| matches!(q, Primitive::Line { .. })).count(), 2);
+        assert!(prims.iter().any(|q| matches!(q, Primitive::DrawingArc { r, .. } if (*r - 4.0).abs() < 1e-9)));
+    }
+
+    /// [112] Raster erscheint in jedem Geschoss, bei `levels` nur in den genannten.
+    #[test]
+    fn achsraster_je_geschoss() {
+        let g = |levels: Option<Vec<&str>>| {
+            let mut d: Drawing2D = serde_json::from_value(drawing(serde_json::json!({"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0, "a": [], "b": []}))).unwrap();
+            if let Drawing2DGeom::Grid { levels: l, .. } = &mut d.geom {
+                *l = levels.map(|v| v.into_iter().map(String::from).collect());
+            }
+            d
+        };
+        let p = project(serde_json::json!({}));
+        let a = args(100.0);
+        let c = Ctx::new(&p, &a);
+        let mut d = g(None);
+        d.level_id = "og".into();
+        assert!(on_floor(&c, &d), "ohne levels: in allen Geschossen (Plan zeigt eg)");
+        assert!(!on_floor(&c, &g(Some(vec!["og"]))));
+        assert!(on_floor(&c, &g(Some(vec!["og", "eg"]))));
+    }
+
+    /// [38] Radius-, Durchmesser- und Bogenlängen-Mass: Linien, Masszahl mit R / Ø / L.
+    #[test]
+    fn rund_bemassung_zeichnet_zahl() {
+        let p = project(serde_json::json!({}));
+        let dim = |kind: &str, pts: serde_json::Value| drawing(serde_json::json!({"shape": "dimension", "pts": pts, "offset": 0.5, "kind": kind}));
+        let texts = |prims: &[Primitive]| -> Vec<String> { prims.iter().filter_map(|q| if let Primitive::DrawingText { text, .. } = q { Some(text.clone()) } else { None }).collect() };
+        let r = render(&p, dim("radius", serde_json::json!([{"x": 0, "y": 0}, {"x": 3, "y": 0}])), 100.0);
+        assert_eq!(texts(&r), ["R 3.00"]);
+        let r = render(&p, dim("diameter", serde_json::json!([{"x": 0, "y": 0}, {"x": 3, "y": 0}])), 100.0);
+        assert_eq!(texts(&r), ["\u{d8} 6.00"]);
+        let r = render(&p, dim("arc", serde_json::json!([{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 0, "y": 2}])), 100.0);
+        assert_eq!(texts(&r), ["L 3.14"]);
+        assert!(r.iter().any(|q| matches!(q, Primitive::DrawingArc { r, .. } if (*r - 2.5).abs() < 1e-9)));
     }
 
     #[test]

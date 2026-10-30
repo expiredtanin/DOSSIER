@@ -1499,8 +1499,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (Befehl `dimdetach`, Kürzel `bml`, Kontextmenü, Objekt-Info). Autodim [81] hängt an Ecken/Leibungen.
   Transformieren: Bezüge bleiben bei Verschieben/Drehen zusammen mit den Elementen, sonst (allein, Spiegeln,
   Skalieren) gelöst; Kopien hängen an mitkopierten Elementen; ein von Hand gezogener Punkt ist frei.
-  Offen: Bogenwände/Treppen nicht anhängbar, Achsraster fehlt im Modell; nur Linux/Chromium geprüft (Marke
-  am Bildschirm nicht auf macOS/Metal angesehen). · L
+  Nachtrag (30.10.): auch Bogenwände (Enden, Punkt auf Achse/Fläche als Anteil der Bogenlänge, Mittelpunkt, Rand-
+  Bezug `rim` mit Winkel), Treppen (Umriss-Ecken/-Kanten, bei L-Treppen auch Podest-Ecken/-Kanten; Wendel: die vier
+  Ecken der Schliesslinien, Mittelpunkt), Rasterachsen und Achsschnittpunkte [112] sind anhängbar. **Radius-,
+  Durchmesser- und Bogenlängen-Bemassung** (`Dimension.kind`, Befehle `dimradius`/`dimdiameter`/`dimarc`, Kürzel
+  `rad`/`dm`/`bogenl`): Klick auf den Rand eines 2D-Kreises/-Bogens oder einer Bogenwand (Achse oder Schichtfläche);
+  Mittelpunkt und Randpunkte hängen an `center`/`rim` und werden einzeln (ohne Kettenprojektion) nachgeführt; DXF als
+  Linien/Bögen/Text (nicht als DIMENSION). Autodim [81] misst nicht mittige Wände (Referenzlinie/-versatz) jetzt an
+  der echten Fläche. Offen: Wendeltreppen-Bögen (nur die Schliesslinien-Ecken), Treppenlauf-Mitten, Rand-Bezug auf
+  Ellipsen/Splines; nur Linux/Chromium geprüft (Marke am Bildschirm nicht auf macOS/Metal angesehen). · L
 - ○ **[39] Auswahl gehört zum Modell.** · M
 - ◐ **[40] Ansichten duplizieren.** Ebenen duplizieren vorhanden. · S
 - ◐ **[76] Vektorfang auf PDF.** (28.10.) Rust `fileio/pdf_object.rs` + `pdf_vector.rs` (eigener Leser:
@@ -1646,7 +1653,8 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Einzel-Plan-PDF (`exportPdf.ts`) noch ohne Ebenen.
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.
-  (30.10.) Ketten assoziativ [38] (Ecken/Leibungen, nur mittige Wände).
+  (30.10.) Ketten assoziativ [38] (Ecken/Leibungen). Nicht mittige Wände
+  (Referenzlinie links/rechts, -versatz): die Kette misst die echte Fläche (`WallIn.shift`). Offen: Bogenwände als Sehne.
 - ✅ **[82] Grafische Legenden.** (30.10.) `Layout.legends` (`LayoutLegend`: Lage, Titel, Arten Schraffur/Material · Linientyp ·
   Kategorie, optional Handauswahl `manualKeys`). `analysis/legend.ts`: Einträge automatisch aus den Viewports (Material der
   Wand-/Decken-/Dach-Aufbauten und Stützen im gezeigten Geschoss, Schraffuren/Linientypen der Zeichnungen, sichtbare
@@ -1776,6 +1784,18 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Tabellenbreite nur über das Zahlenfeld (kein Ziehgriff); keine Kopfzeilen-Füllung/Farben; Schrift im PDF nur
   Helvetica/Times/Courier (jsPDF-Grundschriften); DXF-Beschriftungen in der Sprache der Oberfläche beim Export;
   nicht in der Tauri-App getestet. · S
+- ✅ **[112] Achsraster.** (30.10.) Neue 2D-Zeichnungsform `Drawing2DGeom::Grid` (`grid.rs`, Auswahl/Verschieben/Kopieren/
+  Ebenen/DXF wie jede Zeichnung): rechtwinklig (`a` = Achsen 1, 2, 3 …, `b` = A, B, C …, unregelmässige Abstände, gedreht
+  um `angle`) oder radial (Strahlen in Grad, Ringe als Bögen/Kreise), `extend` Überstand, `bubbles` Start/Ende/beide,
+  `bubbleMm` (Papier-mm), `levels` (leer = in allen Geschossen), `show3d` (dünne Spur im 3D). Grundriss: strichpunktierte
+  Achsen, Blasen mit Beschriftung (Massstab folgt `scale`); Schnitt und Ansicht: Achsen quer zur Blickebene als senkrechte
+  Linien mit Blase oben (`plan/grid_view.rs`, eigene Gruppe, Massstab über `scaleDenominator`); Fang auf Achsen,
+  Ringe und Achsschnittpunkte (Endpunkt); Griffe: Ursprung und je Achse das Achsende (zieht die Lage); Bemassung
+  assoziativ [38] an Achse/Achsschnittpunkt. Befehl `grid` (Kürzel `achsraster`, `achsen`, Werkzeug „Achsraster"):
+  Ursprung, dann Feldweiten als Text (`6 4.5 3x5`), Option Radial; Attribute-Panel: Blasenseite, Überstand, Blasen-Ø,
+  Geschosse, 3D. Geprüft im Linux-Container (Rust, vitest, e2e, CLI-SVG Grundriss/Schnitt/Ansicht), nicht in der
+  Tauri-App/Metal. Offen: Achsbeschriftung je Achse im UI ändern, Blasenseite je Achse, Achsen als Autodim-Vorschlag,
+  IFC `IfcGrid`, Raster-Versatz je Geschoss. · M
 - ◐ **[110] Linientyp ohne Strichstärke.** (30.10., Wunsch Maintainer: „Volllinie 0.5/0.35 soll es nicht
   geben") Ein Linienstil ist nur Muster (Volllinie, Strich, Punkt, Zickzack, Motiv) + Farbe; die Stärke trägt
   das Element (`Drawing2D.weightMm`, sonst Ebene), die Schraffur (neu `HatchStyle.lineWeight`, Default 0.13),

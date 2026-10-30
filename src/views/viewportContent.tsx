@@ -684,7 +684,7 @@ function useCrossKindOverlay(
       } else if (l.kind === "section") {
         const sOut = sectionOutputs[l.id];
         prims = sOut
-          ? generateSectionPlan(sOut, mono, { hiddenLines: l.hiddenLines, visibleCodes, categoryDisplay })
+          ? generateSectionPlan(sOut, mono, { hiddenLines: l.hiddenLines, visibleCodes, categoryDisplay, scaleDenominator })
               .primitives
           : [];
       } else {
@@ -1170,9 +1170,10 @@ function SectionPlanView({
             visibleCodes,
             categoryDisplay,
             openings: true,
+            scaleDenominator,
           })
         : null,
-    [isElevation, output, mono, level.hiddenLines, visibleCodes, categoryDisplay, inputs],
+    [isElevation, output, mono, level.hiddenLines, visibleCodes, categoryDisplay, inputs, scaleDenominator],
   );
   const rawPlan = isElevation ? elevationPlan : sectionPlan;
   // Grundriss-Unterlage (Nutzer-Wunsch: "in der Ansicht auch mal einen

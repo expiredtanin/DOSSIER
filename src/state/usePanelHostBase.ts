@@ -602,6 +602,17 @@ export function usePanelHostBase(opts: {
             patchItem(p, "drawings2d", drawingId, (d) => ({ ...d, endMarks: { ...d.endMarks, ...patch } })),
           ),
         ),
+      onSetGridProps: (drawingId, patch) =>
+        setProject(
+          opsMutation((p) =>
+            patchItem(p, "drawings2d", drawingId, (d) => {
+              if (d.geom.shape !== "grid") return d;
+              const geom = { ...d.geom, ...patch };
+              if (patch.levels === undefined && "levels" in patch) delete geom.levels;
+              return { ...d, geom };
+            }),
+          ),
+        ),
       onSetDimensionStyle: (drawingId, patch) =>
         setProject(
           opsMutation((p) =>

@@ -2349,7 +2349,12 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     w.group(&prims);
     let ops = if openings { section_opening_primitives(p, &level, &vis)? } else { Vec::new() };
     w.group(&ops);
-    w.bounds = Some(bounds);
+    // Achsraster ([112]): Achsen quer zur Schnittebene.
+    let grid = super::grid_view::grid_prims(p, &level, bounds, v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0).unwrap_or(100.0));
+    if !grid.is_empty() {
+        w.group(&grid);
+    }
+    w.bounds = Some(super::grid_view::union_bounds(bounds, &grid));
     Ok(w.finish())
 }
 

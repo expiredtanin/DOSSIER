@@ -63,6 +63,7 @@ fn shift_geom(g: &Value, dx: f64, dy: f64) -> Value {
         "rect" | "image" => shift_pts_fields(&mut m, &["min", "max"], dx, dy, &[]),
         "circle" | "arc" | "ellipse" => shift_pts_fields(&mut m, &["center"], dx, dy, &[]),
         "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => shift_pts_fields(&mut m, &["at"], dx, dy, &[]),
+        "grid" => shift_pts_fields(&mut m, &["origin"], dx, dy, &[]),
         "text" => {
             shift_pts_fields(&mut m, &["at"], dx, dy, &[]);
             if truthy(g.get("leaderTarget")) {

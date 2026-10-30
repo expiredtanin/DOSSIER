@@ -961,6 +961,127 @@ fn dimension_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGe
     }
 }
 
+// ── Achsraster ([112]) und Radius-/Bogenmass ([38]) ─────────────────────────
+
+/// Geometrie des neuen Rasters: `at` (Ursprung), `xs`/`ys` (Feldweiten als Text), `radial`, `angle`
+/// (Bogenmass), optional `extend`, `bubbles`, `levels`. `None` bei unlesbaren Feldweiten.
+fn grid_geom(v: &Value) -> Option<Value> {
+    let radial = b_of(v, "radial");
+    let xs = crate::grid::parse_bays(s_of(v, "xs"))?;
+    let ys = crate::grid::parse_bays(s_of(v, "ys")).or_else(|| (!radial).then(Vec::new).filter(|_| s_of(v, "ys").trim().is_empty()))?;
+    let (a, b) = crate::grid::axes_from_bays(radial, &xs, &ys);
+    let list = |l: &[crate::model::GridAxis]| Value::Array(l.iter().map(|x| obj(vec![("label", s(&x.label)), ("pos", js_num(x.pos))])).collect());
+    let mut f = vec![("shape", s("grid")), ("origin", pt_val(v, "at")), ("angle", js_num(opt_n(v, "angle").unwrap_or(0.0))), ("a", list(&a)), ("b", list(&b))];
+    if radial {
+        f.push(("radial", Value::Bool(true)));
+    }
+    for k in ["extend", "bubbleMm"] {
+        if let Some(x) = opt_n(v, k) {
+            f.push((k, js_num(x)));
+        }
+    }
+    if matches!(s_of(v, "bubbles"), "start" | "end" | "both") {
+        f.push(("bubbles", s(s_of(v, "bubbles"))));
+    }
+    if let Some(l) = v.get("levels").filter(|l| l.as_array().is_some_and(|a| !a.is_empty())) {
+        f.push(("levels", l.clone()));
+    }
+    Some(obj(f))
+}
+
+/// Vorschau des Rasters am Cursor: Achsen als Linien, Ringe als Polygonzug.
+fn grid_preview(v: &Value, pts: &[V], p: &mut Preview) {
+    let Some(at) = pts.first() else { return };
+    let mut v2 = v.clone();
+    v2["at"] = pv(*at);
+    let Some(g) = grid_geom(&v2).and_then(|g| serde_json::from_value::<crate::model::Drawing2DGeom>(g).ok()) else { return };
+    let Some(spec) = crate::grid::Spec::of(&g) else { return };
+    p.ok = true;
+    for ax in spec.axes() {
+        match ax.shape {
+            crate::grid::Shape::Line { a, b } => p.shapes.line(a, b),
+            crate::grid::Shape::Arc { c, r, a0, a1 } => {
+                let n = (((a1 - a0).abs() / (PI / 24.0)).ceil() as usize).clamp(2, 400);
+                let q: Vec<V> = (0..=n).map(|i| a0 + (a1 - a0) * i as f64 / n as f64).map(|t| (c.0 + r * jsnum::cos(t), c.1 + r * jsnum::sin(t))).collect();
+                p.shapes.poly_open(&q);
+            }
+        }
+    }
+}
+
+fn dim_kind(v: &Value) -> Option<crate::model::DimKind> {
+    use crate::model::DimKind;
+    match s_of(v, "kind") {
+        "radius" => Some(DimKind::Radius),
+        "diameter" => Some(DimKind::Diameter),
+        "arc" => Some(DimKind::Arc),
+        _ => None,
+    }
+}
+
+/// Toleranz beim Treffen eines Kreises/Bogens (Modell-Meter, `tol` der Anfrage).
+fn round_tol(v: &Value) -> f64 {
+    opt_n(v, "tol").filter(|t| *t > 0.0).unwrap_or(0.15)
+}
+
+/// Radius-/Durchmesser-/Bogenlängen-Mass: Klicks auf dem Rand eines Kreises, Bogens oder einer
+/// Bogenwand; Mittelpunkt und Randpunkte hängen daran (`refs`). Bogenlänge: `side` (Punkt der
+/// Masslinie) oder `offset` bestimmt den Abstand vom Bogen.
+fn dimround_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    use crate::model::DimKind;
+    let Some(kind) = dim_kind(v) else { return Vec::new() };
+    let clicks: Vec<V> = arr(v.get("pts")).iter().map(pair).collect();
+    let lk = crate::document::Lookup::plain(root);
+    let Some((pts, refs)) = crate::dim_assoc::round_dimension(&lk, ctx.level, kind, &clicks, round_tol(v)) else { return Vec::new() };
+    let offset = match (kind, opt_p(v, "side")) {
+        (DimKind::Arc, Some(side)) => hypot2(side.0 - pts[0].0, side.1 - pts[0].1) - hypot2(pts[1].0 - pts[0].0, pts[1].1 - pts[0].1),
+        (DimKind::Arc, None) => opt_n(v, "offset").unwrap_or(0.5),
+        _ => 0.0,
+    };
+    let kind_s = match kind {
+        DimKind::Radius => "radius",
+        DimKind::Diameter => "diameter",
+        DimKind::Arc => "arc",
+    };
+    let geom = obj(vec![
+        ("shape", s("dimension")),
+        ("pts", pvs(&pts)),
+        ("offset", js_num(offset)),
+        ("kind", s(kind_s)),
+        ("refs", serde_json::to_value(refs).unwrap_or(Value::Null)),
+    ]);
+    add_drawing(v, ctx, ids, geom)
+}
+
+/// Vorschau: Radius-/Durchmesserlinie bzw. Bogen zwischen den Klicks (Cursor = letzter Punkt).
+fn dimround_preview(root: &Map<String, Value>, v: &Value, ctx: &Ctx, pts: &[V], p: &mut Preview) {
+    use crate::model::DimKind;
+    let Some(kind) = dim_kind(v) else { return };
+    let lk = crate::document::Lookup::plain(root);
+    let tol = round_tol(v);
+    let arc_phase = kind == DimKind::Arc;
+    // Klickpunkte: bei der Bogenlänge die ersten zwei (Cursor als zweiter, solange er läuft).
+    let clicks: Vec<V> = if arc_phase { pts.iter().take(2).copied().collect() } else { pts.iter().take(1).copied().collect() };
+    let Some((q, _)) = crate::dim_assoc::round_dimension(&lk, ctx.level, kind, &clicks, tol).or_else(|| crate::dim_assoc::round_dimension(&lk, ctx.level, kind, &clicks[..1], tol).filter(|_| arc_phase)) else { return };
+    p.ok = true;
+    let c = q[0];
+    match kind {
+        DimKind::Radius => p.shapes.line(c, q[1]),
+        DimKind::Diameter => p.shapes.line((2.0 * c.0 - q[1].0, 2.0 * c.1 - q[1].1), q[1]),
+        DimKind::Arc => {
+            let r = hypot2(q[1].0 - c.0, q[1].1 - c.1);
+            let a0 = angle(c, q[1]);
+            let a1 = if q.len() > 2 { angle(c, q[2]) } else { a0 };
+            let sweep = (a1 - a0).rem_euclid(TAU);
+            let off = pts.get(2).map_or(0.0, |s| hypot2(s.0 - c.0, s.1 - c.1) - r);
+            let n = ((sweep / (PI / 24.0)).ceil() as usize).clamp(1, 400);
+            let poly: Vec<V> = (0..=n).map(|i| a0 + sweep * i as f64 / n as f64).map(|t| (c.0 + (r + off) * jsnum::cos(t), c.1 + (r + off) * jsnum::sin(t))).collect();
+            p.shapes.poly_open(&poly);
+            p.info.push(r * sweep);
+        }
+    }
+}
+
 /// Bemassungs-Vorschau. `phase` next: `pts` = Kette + roher Cursor → Kette bis zum (auf die Masslinie
 /// projizierten) Cursor, `info = [cx, cy]`; offset: `pts` = Kette + Cursor (oder ohne → Abstand 0),
 /// Hilfs- und Masslinien, `info = [Abstand, Summe]`.
@@ -1016,7 +1137,15 @@ fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> 
             let tid = field(w, "wallTypeId").and_then(Value::as_str);
             let th = types.iter().find(|t| id_of(t) == tid).map_or(0.3, type_thickness);
             let (a, b) = (p(w, "start"), p(w, "end"));
-            WallIn { start: [a.0, a.1], end: [b.0, b.1], thickness: th }
+            // Wandmitte gegenüber der Achse (Referenzlinie links/rechts bzw. -versatz, wie `dim_assoc`).
+            let half = th / 2.0;
+            let shift = match (field(w, "referenceOffset").and_then(Value::as_f64), field(w, "referenceLine").and_then(Value::as_str)) {
+                (Some(v), _) => v.clamp(-half, half),
+                (None, Some("left")) => half,
+                (None, Some("right")) => -half,
+                _ => 0.0,
+            };
+            WallIn { start: [a.0, a.1], end: [b.0, b.1], thickness: th, shift }
         })
         .collect();
     let mut oin = Vec::new();
@@ -1154,6 +1283,11 @@ pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> 
         ),
         "pointmarker" => add_drawing(v, ctx, ids, obj(vec![("shape", s("pointmarker")), ("at", pt_val(v, "at"))])),
         "block" => block_ops(v, ctx, ids),
+        "grid" => match grid_geom(v) {
+            Some(g) => add_drawing(v, ctx, ids, g),
+            None => Vec::new(),
+        },
+        "dimround" => dimround_ops(root, v, ctx, ids),
         "dimension" => dimension_ops(root, v, ctx, ids),
         "autodim" => autodim_ops(root, ctx),
         _ => return None,
@@ -1227,6 +1361,8 @@ pub fn preview(root: &Map<String, Value>, v: &Value, ctx: &Ctx, pts: &[V], p: &m
             }
         }
         "dimension" => dimension_preview(v, pts, p),
+        "grid" => grid_preview(v, pts, p),
+        "dimround" => dimround_preview(root, v, ctx, pts, p),
         "autodim" => p.ok = !auto_dims(root, ctx, "autodim", 100.0).is_empty(),
         _ => return false,
     }
@@ -1280,6 +1416,52 @@ mod tests {
         let (at, w, h) = textbox_frame((0.0, 0.0), (0.0001, -0.0001), 0.0035);
         assert!((w - 0.0028).abs() < 1e-12 && (h - 0.0028).abs() < 1e-12);
         assert!((at.1 - (0.0 - 0.0035)).abs() < 1e-12);
+    }
+
+    /// [112] Befehl „Achsraster": Feldweiten als Text → Achsen 1, 2, 3 / A, B …; unlesbar → nichts.
+    #[test]
+    fn achsraster_befehl() {
+        let v = json!({"cmd": "grid", "at": {"x": 1, "y": 2}, "xs": "5 3x6", "ys": "4,5 4", "angle": 0, "bubbles": "end", "levels": ["L"]});
+        let o = ops(&Map::new(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
+        let g = &o[0].to_json()["items"][0]["geom"];
+        assert_eq!(g["shape"], "grid");
+        assert_eq!(g["a"].as_array().unwrap().len(), 5);
+        assert_eq!(g["a"][4]["pos"], 23);
+        assert_eq!(g["b"][2]["label"], "C");
+        assert_eq!(g["b"][2]["pos"], 8.5);
+        assert_eq!(g["bubbles"], "end");
+        assert_eq!(g["origin"]["x"], 1);
+        assert!(serde_json::from_value::<crate::model::Drawing2DGeom>(g.clone()).is_ok());
+        // Ohne `angle` (Befehl aus der Hülle) gilt 0; leere Querachsen sind erlaubt.
+        let bare = json!({"cmd": "grid", "at": [0, 0], "xs": "5", "ys": ""});
+        let o2 = ops(&Map::new(), &bare, &ctx(), &mut IdGen::new("s")).unwrap();
+        assert_eq!(o2[0].to_json()["items"][0]["geom"]["angle"], 0);
+        let bad = json!({"cmd": "grid", "at": {"x": 0, "y": 0}, "xs": "x", "ys": ""});
+        assert!(ops(&Map::new(), &bad, &ctx(), &mut IdGen::new("s")).unwrap().is_empty());
+        // Vorschau am Cursor.
+        let mut p = Preview { shapes: Shapes::default(), ok: false, info: vec![] };
+        grid_preview(&v, &[(0.0, 0.0)], &mut p);
+        assert!(p.ok && !p.shapes.buf.is_empty());
+    }
+
+    /// [38] Befehl Radius/Bogenmass: trifft den Kreis, hängt Mittelpunkt und Rand an.
+    #[test]
+    fn rundmass_befehl() {
+        let root = json!({"drawings2d": [{"id": "K", "levelId": "L", "categoryCode": "20", "geom": {"shape": "circle", "center": {"x": 1, "y": 1}, "r": 2}}]});
+        let root = root.as_object().unwrap().clone();
+        let v = json!({"cmd": "dimround", "kind": "diameter", "pts": [[3.01, 1.0]]});
+        let o = ops(&root, &v, &ctx(), &mut IdGen::new("s")).unwrap();
+        let g = &o[0].to_json()["items"][0]["geom"];
+        assert_eq!(g["kind"], "diameter");
+        assert_eq!(g["refs"][0]["feature"], "center");
+        assert_eq!(g["refs"][1]["feature"], "rim");
+        let v = json!({"cmd": "dimround", "kind": "arc", "pts": [[3.0, 1.0], [1.0, 3.0]], "side": [1.0, 4.0]});
+        let g = &ops(&root, &v, &ctx(), &mut IdGen::new("s")).unwrap()[0].to_json()["items"][0]["geom"];
+        assert_eq!(g["pts"].as_array().unwrap().len(), 3);
+        assert!((g["offset"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+        // Kein Kreis in der Nähe → nichts.
+        let far = json!({"cmd": "dimround", "kind": "radius", "pts": [[50.0, 50.0]]});
+        assert!(ops(&root, &far, &ctx(), &mut IdGen::new("s")).unwrap().is_empty());
     }
 
     #[test]

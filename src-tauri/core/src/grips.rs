@@ -613,6 +613,11 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
                 let ng = with(g, "pts", replace_at(pts, index, &p));
                 return Some(with_geom(d, crate::dim_assoc::without_ref(&ng, index_in(index, n))));
             }
+            if index == n as f64 && field(g, "kind").and_then(Value::as_str) == Some("arc") && n >= 2 {
+                // Bogenlängen-Mass: Abstand der Masslinie vom Bogen (radial).
+                let (c, p0) = (xy(&pts[0]), xy(&pts[1]));
+                return set("offset", js_num(hypot2(x - c.0, y - c.1) - hypot2(p0.0 - c.0, p0.1 - c.1)));
+            }
             if index == n as f64 {
                 // Griff auf der Masslinie: nur `offset` (Normalabstand zur Punktreihe).
                 let (a, b) = (xy(pts.first()?), xy(pts.last()?));
@@ -698,6 +703,33 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
             set("at", p)
         }
         "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => set("at", p),
+        "grid" => {
+            // Griff 0 = Ursprung, danach je Achse (a, dann b) das Achsende: zieht die Achse auf die neue Lage.
+            if index == 0.0 {
+                return set("origin", p);
+            }
+            let (na, nb) = (arr(field(g, "a")).len(), arr(field(g, "b")).len());
+            let k = index_in(index - 1.0, na + nb)?;
+            let (ox, oy) = xy(field(g, "origin").unwrap_or(&Value::Null));
+            let ang = num_of(field(g, "angle"));
+            let (dx, dy) = (x - ox, y - oy);
+            let radial = field(g, "radial").and_then(Value::as_bool) == Some(true);
+            let (key, i) = if k < na { ("a", k) } else { ("b", k - na) };
+            let pos = match (radial, key) {
+                (false, "a") => dx * jsnum::cos(ang) + dy * jsnum::sin(ang),
+                (false, _) => -dx * jsnum::sin(ang) + dy * jsnum::cos(ang),
+                (true, "a") => {
+                    let d = (jsnum::atan2(dy, dx) - ang).to_degrees();
+                    let old = num_of(field(&arr(field(g, "a"))[i], "pos"));
+                    // auf den Winkel nächst dem alten legen (kein Sprung um 360°)
+                    old + (d - old + 180.0).rem_euclid(360.0) - 180.0
+                }
+                (true, _) => hypot2(dx, dy),
+            };
+            let list = arr(field(g, key));
+            let nl = Value::Array(list.iter().enumerate().map(|(j, e)| if j == i { with(e, "pos", js_num(pos)) } else { e.clone() }).collect());
+            set(key, nl)
+        }
         "circle" => {
             let (cx, cy) = xy(field(g, "center").unwrap_or(&Value::Null));
             let r = pass(field(g, "r"));
@@ -758,6 +790,7 @@ fn drawing_moved(d: &Value, dx: f64, dy: f64) -> Option<Value> {
         "rect" | "image" => with_all(g, vec![("min", mv("min")), ("max", mv("max"))]),
         "circle" | "arc" | "ellipse" => with(g, "center", mv("center")),
         "kote" | "detailref" | "scalebar" | "pointmarker" | "text" => with(g, "at", mv("at")),
+        "grid" => with(g, "origin", mv("origin")),
         _ => return None,
     };
     Some(with_geom(d, ng))
@@ -1229,6 +1262,18 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
             out
         }
         "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => vec![p("at")],
+        "grid" => {
+            let geom: crate::model::Drawing2DGeom = serde_json::from_value(g.clone()).ok()?;
+            let spec = crate::grid::Spec::of(&geom)?;
+            let mut out = vec![p("origin")];
+            for ax in spec.axes() {
+                out.push(match ax.shape {
+                    crate::grid::Shape::Line { b, .. } => b,
+                    crate::grid::Shape::Arc { c, r, a1, .. } => (c.0 + r * jsnum::cos(a1), c.1 + r * jsnum::sin(a1)),
+                });
+            }
+            out
+        }
         "text" => {
             if truthy(field(g, "pathPts")) {
                 pts("pathPts")
