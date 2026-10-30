@@ -104,6 +104,11 @@ export interface RWall {
    * Nur für Boxen ohne Löcher/Öffnungen (render3d `WallInput::top_drop`).
    */
   topDrop?: [number, number];
+  /**
+   * Ebene Oberkante unter einer Dachfläche ([G2]): `[z am Anfang, dz/dx, dz/dy]` (Grundriss-Meter);
+   * übersteuert `topDrop` (render3d `WallInput::top_plane`). Fehlt = waagrecht.
+   */
+  topPlane?: [number, number, number];
   color: RRgb;
   /**
    * Immer leer: die Schichten werden TS-seitig in eigene Voll-Boxen zerlegt

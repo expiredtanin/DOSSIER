@@ -84,6 +84,7 @@ import {
   addProgramSheet,
   defaultSheetLabels,
   checkSiteRules,
+  excavationQuantities,
   exportStl,
   exportGlb,
   exportGltf,
@@ -602,7 +603,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         const o = await computeSection(project, lvl);
         if (!o) fail("keine gültige Schnittlinie");
         // Wie die App: verdeckte Kanten nach der Ebene, geschnittene Fenster/Türen.
-        plan = generateSectionPlan(o, false, { visibleCodes: allCodes, hiddenLines: lvl.hiddenLines, openings: true });
+        plan = generateSectionPlan(o, false, { visibleCodes: allCodes, hiddenLines: lvl.hiddenLines, openings: true, scaleDenominator: scale });
       } else {
         plan = generateElevationPlan(project, lvl, { scaleDenominator: scale });
         if (!plan) fail("keine gültige Ansichtslinie");
@@ -683,7 +684,9 @@ async function execute(project: Project, file: string, command: string, rest: st
       const k = computeKennzahlen(project);
       const prog = checkRoomProgram(project);
       const baurecht = checkSiteRules(project);
-      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
+      // [68] Erdarbeiten je Baugrube (Abtrag/Auftrag/Hinterfüllung, m³).
+      const erdarbeiten = excavationQuantities(project);
+      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht, erdarbeiten }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
       return 0;
     }
     case "raumprogramm": {

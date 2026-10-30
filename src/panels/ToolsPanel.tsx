@@ -253,6 +253,17 @@ export function ToolIcon({ id }: { id: ToolId }) {
           />
         </svg>
       );
+    case "grid":
+      // Achsraster: zwei Achsen mit Blasen.
+      return (
+        <svg {...common}>
+          <line x1="5" y1="5" x2="5" y2="15" strokeDasharray="2 1" />
+          <line x1="11" y1="5" x2="11" y2="15" strokeDasharray="2 1" />
+          <line x1="1" y1="10" x2="15" y2="10" strokeDasharray="2 1" />
+          <circle cx="5" cy="3" r="2" fill="none" />
+          <circle cx="11" cy="3" r="2" fill="none" />
+        </svg>
+      );
     case "pointmarker":
       // Kreuz-in-Kreis (Punkt-/Knotenmarker).
       return (
@@ -347,6 +358,7 @@ const TOOLS_2D: ToolId[] = [
   "scalebar",
   "revcloud",
   "pointmarker",
+  "grid",
   "wipeout",
   "text",
   "leader",
@@ -355,7 +367,7 @@ const TOOLS_2D: ToolId[] = [
   "image",
 ];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
-const COMMANDS_3D = ["column", "ceilingopening", "roof", "roofhole", "roofwindow", "dormer", "extrude", "solid", "solidbool", "sectionline", "viewline", "autodim"];
+const COMMANDS_3D = ["column", "ceilingopening", "roof", "roofhole", "roofwindow", "dormer", "extrude", "revolve", "loft", "solid", "solidbool", "sectionline", "viewline", "autodim", "excavation"];
 const COMMANDS_EDIT = ["move", "copy", "array", "rotate", "mirror", "offset", "multiline", "trim", "break", "extend", "fillet", "chamfer", "join", "defblock", "measure"];
 
 type ToolsView = "list" | "icons";

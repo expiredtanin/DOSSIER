@@ -453,7 +453,7 @@ export type ContextImage = {
 };
 
 /** Kontext-Objekt (Tag `type`). */
-export type ContextObject = ImportedMesh | ContourSet | TerrainMesh | ContextImage;
+export type ContextObject = ImportedMesh | ContourSet | TerrainMesh | ContextImage | Excavation;
 
 /**
  * Eine einzelne Kontur (Höhenlinie / Polylinie) auf konstanter Höhe `z`. `pts`
@@ -521,7 +521,16 @@ export type CustomPalette = {
 export type DetailLevel = "grob" | "mittel" | "fein";
 
 /** Merkmal, an dem ein Bemassungspunkt hängt ([38], `dim_assoc.rs`). */
-export type DimFeature = "wall" | "opening" | "vertex" | "edge" | "center" | "intersection";
+export type DimFeature =
+  | "wall"
+  | "opening"
+  | "vertex"
+  | "edge"
+  | "center"
+  | "intersection"
+  | "axis"
+  | "axiscross"
+  | "rim";
 
 /** Bezug eines Bemassungspunkts auf ein Element ([38]). */
 export type DimRef = {
@@ -887,6 +896,11 @@ export type Drawing2DGeom =
      * wenn ein Bezug ungültig wird. Fehlt das Feld, ist die Bemassung frei wie bisher.
      */
     refs?: Array<DimRef | null>;
+    /**
+     * Art der Bemassung (fehlt = linear): Radius/Durchmesser (`pts` = Mittelpunkt, Punkt auf dem
+     * Kreis) und Bogenlänge (`pts` = Mittelpunkt, Bogenanfang, Bogenende).
+     */
+    kind?: "radius" | "diameter" | "arc";
   }
   | {
     shape: "kote";
@@ -921,6 +935,24 @@ export type Drawing2DGeom =
     segments: number;
   }
   | { shape: "pointmarker"; at: Vec2 }
+  | {
+    shape: "grid";
+    origin: Vec2;
+    angle: number;
+    radial?: boolean;
+    a: Array<GridAxis>;
+    b: Array<GridAxis>;
+    /** Überstand der Achsen über die äusserste Querachse (Meter, Standard 1.5). */
+    extend?: number;
+    /** Enden mit Achsblase (Standard Anfang und Ende). */
+    bubbles?: "start" | "end" | "both";
+    /** Blasen-Durchmesser in Papier-mm (Standard 8). */
+    bubbleMm?: number;
+    /** Geschosse, in denen das Raster gezeigt wird; fehlt oder leer = in allen. */
+    levels?: Array<string>;
+    /** Im 3D-Modell als dünne Linien zeigen. */
+    show3d?: boolean;
+  }
   | {
     shape: "text";
     at: Vec2;
@@ -1117,6 +1149,28 @@ export type DrawingLevelKind = "floor" | "section" | "elevation" | "drawing";
  */
 export type EndMark = "none" | "arrow" | "arrowOpen" | "dot" | "tick" | "square";
 
+/**
+ * [68] Baugrube / Geländebearbeitung: Sohle als Umriss auf der Höhe `bottom` (m, Modell ±0.00).
+ * Ausserhalb steigt die Böschung mit `slope` (Grad, Default 45; je Kante `edgeSlopes`, 0 = Default)
+ * bis zum Gelände (Abtrag); liegt das Gelände tiefer, fällt eine Schüttung mit `fillSlope` (Default
+ * 33.7 ≈ 2:3) bis zum Gelände (Auftrag). Bermen: alle `bermHeight` m Höhe eine waagrechte Berme der
+ * Breite `bermWidth`. Schneidet jedes Gelände-Netz, das den Umriss enthält.
+ */
+export type Excavation = {
+  type: "excavation";
+  id: string;
+  name: string;
+  layer?: string;
+  categoryCode?: string;
+  outline: Array<Vec2>;
+  bottom: number;
+  slope?: number;
+  fillSlope?: number;
+  edgeSlopes?: Array<number>;
+  bermWidth?: number;
+  bermHeight?: number;
+};
+
 /** Ein extrudierter Körper: geschlossenes Profil (Modell-Meter) + Höhe. */
 export type ExtrudedSolid = {
   id: string;
@@ -1217,6 +1271,9 @@ export type FrameDetail = {
   /** Anschlag je Seite (Meter; übersteuert `rebateDepth`, 0 = kein Anschlag auf dieser Seite). */
   rebates?: OpeningSides;
 };
+
+/** Eine Achse des Achsrasters: Beschriftung und Lage (Abstand bzw. Winkel/Radius, s. `Grid`). */
+export type GridAxis = { label: string; pos: number };
 
 /**
  * Raster-Regel: generiert Wände entlang gleichmäßiger X-/Y-Achsen.
@@ -1627,7 +1684,7 @@ export type LayoutTable = {
 };
 
 /** Quelle einer Blatt-Tabelle ([111]). */
-export type LayoutTableSource = "openings" | "areas" | "rooms" | "elements";
+export type LayoutTableSource = "openings" | "areas" | "rooms" | "elements" | "earthworks";
 
 /**
  * Einfache Textfelder des Titelblocks (Master). Alle optional — leere Felder
@@ -2852,6 +2909,11 @@ export type Stair = {
    * Dreieck als SIA-Vollpfeil). Fehlt sie, gilt "line".
    */
   arrowStyle?: "line" | "filled";
+  /**
+   * Nur Wendel: Radius (Meter) der Mittelsäule (Spindel) im Zentrum. Fehlt er oder ist er
+   * ≤ 0, gibt es keine Säule.
+   */
+  centerColumn?: number;
 };
 
 /**
@@ -2945,6 +3007,13 @@ export type TerrainMesh = {
    * statt mit der Grundfarbe. Fehlt es, bleibt das Gelände einfarbig.
    */
   vertexColors?: Array<number>;
+  /**
+   * [T6] Äquidistanz der Höhenlinien im Grundriss in m (aus dem Netz neu erzeugt, inkl. Baugruben).
+   * Fehlt der Wert oder ist er ≤ 0, zeigt der Grundriss nur den Rahmen.
+   */
+  contourInterval?: number;
+  /** [T6] Jede n-te Höhenlinie ist Zähllinie (dicker, beschriftet). Default 5. */
+  contourIndexEvery?: number;
 };
 
 /** Ein zusammenhängender Textabschnitt mit einheitlicher Formatierung. */
@@ -3236,6 +3305,12 @@ export type Wall = {
    * Additiv; Alt-Projekte laden unverändert (Default = "both").
    */
   sliceTermination?: SliceTermination;
+  /**
+   * An Dach anschliessen ([G2]): `undefined` = automatisch (die Wand endet an der Dach-Unterkante,
+   * wo ihre Krone darüber liegt — je Schicht, Giebel/Traufe/Grat/Kehle/Gaube), `true` = zusätzlich bis
+   * unter das Dach verlängert, `false` = Dächer schneiden die Wand nicht.
+   */
+  roofAttach?: boolean;
   /**
    * Ansichtsschraffur ([100]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
    * Ausrichtung am Element (Default 0).

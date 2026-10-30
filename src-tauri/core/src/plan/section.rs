@@ -25,6 +25,9 @@ const SECTION_VISIBLE_MM: f64 = 0.18;
 const SECTION_GROUND_MM: f64 = 0.5;
 const SECTION_HIDDEN_MM: f64 = 0.13;
 const SECTION_HIDDEN_DASH: [f64; 2] = [0.12, 0.08];
+/// [T6] gewachsenes Terrain im Schnitt: gestrichelt, dünner als das gestaltete.
+const SECTION_NATURAL_MM: f64 = 0.25;
+const SECTION_NATURAL_DASH: [f64; 2] = [0.4, 0.2];
 /// Achswinkel geschnittener Wände/Decken für wandrelative Muster (s. `toSection.ts`).
 const SECTION_WALL_AXIS_ANGLE_DEG: f64 = 90.0;
 /// Decken liegen: wandbezogene Muster laufen waagrecht entlang der Schicht ([109]; vorher 90° wie Wände,
@@ -187,6 +190,8 @@ pub struct Edge {
 pub struct Profile {
     pub category: Option<String>,
     pub pts: Vec<[f64; 2]>,
+    /// [T6] gewachsenes Terrain (gestrichelt), nur wenn Baugruben das Gelände ändern.
+    pub natural: bool,
 }
 
 /// Ergebnis eines Schnitts (`SectionOutput`).
@@ -196,6 +201,8 @@ pub struct Output {
     pub visible: Vec<Edge>,
     pub hidden: Vec<Edge>,
     pub profiles: Vec<Profile>,
+    /// [T6] Erdreich unter dem gestalteten Terrain (Band, ohne Gebäude-Inneres), mit Schraffur.
+    pub earth: Vec<(Vec<[f64; 2]>, HatchRender)>,
 }
 
 /// Ein truck-Körper (aus TS, asynchron gebaut): Index in `extrudedSolids` + Netz.
@@ -321,6 +328,7 @@ fn wall_input(w: &RWall) -> render3d::WallInput {
         height: json_f32(w.height),
         base_elevation: json_f32(w.base_elevation),
         top_drop: w.top_drop.map_or([0.0, 0.0], f32s2),
+        top_plane: w.top_plane.map(f32s3),
         color: f32s3(w.color),
         openings: Vec::new(),
         layers: Some(Vec::new()),
@@ -1448,14 +1456,85 @@ fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (
         if t.positions.len() < 9 {
             continue;
         }
-        let (_, lines) = cut_mesh(&t.positions, &t.indices, base, u);
-        for line in lines {
-            let parts = match range {
-                Some((lo, hi)) => clip_line_to_u(&line, lo - TERRAIN_MARGIN, hi + TERRAIN_MARGIN),
-                None => vec![line],
-            };
-            for pts in parts {
-                out.profiles.push(Profile { category: t.category_code.clone(), pts });
+        // [T6] Gelände samt Baugruben, Höhen im Modellbezug; das gewachsene Terrain gestrichelt dazu.
+        let st = crate::excavation::site_terrain(p, t);
+        let mut meshes = vec![(st.current().to_flat(-st.datum), false)];
+        if st.modified.is_some() {
+            meshes.push((st.orig.to_flat(-st.datum), true));
+        }
+        for ((pos, idx), natural) in meshes {
+            let (_, lines) = cut_mesh(&pos, &idx, base, u);
+            for line in lines {
+                let parts = match range {
+                    Some((lo, hi)) => clip_line_to_u(&line, lo - TERRAIN_MARGIN, hi + TERRAIN_MARGIN),
+                    None => vec![line],
+                };
+                for pts in parts {
+                    out.profiles.push(Profile { category: t.category_code.clone(), pts, natural });
+                }
+            }
+        }
+    }
+    append_earth(out, p, base, u);
+}
+
+/// Tiefe des Erdreich-Bands unter der Geländelinie (m).
+const EARTH_BAND: f64 = 1.5;
+
+/// [T6]/[109] Erdreich: Band unter dem gestalteten Terrain mit SIA-Erdreich-Schraffur, ohne das
+/// Gebäude-Innere (Grundfläche im Schnitt, von der tiefsten Schnittfläche aufwärts); die geschnittenen
+/// Bauteile selbst liegen ohnehin darüber.
+fn append_earth(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) {
+    let mut band: Vec<crate::flat::Polygon> = Vec::new();
+    for pr in out.profiles.iter().filter(|pr| !pr.natural && pr.pts.len() >= 2) {
+        let mut ring = pr.pts.clone();
+        ring.extend(pr.pts.iter().rev().map(|q| [q[0], q[1] - EARTH_BAND]));
+        band.push(vec![ring]);
+    }
+    if band.is_empty() {
+        return;
+    }
+    let mut band = crate::polygon_bool::union(&band);
+    // Gebäude-Inneres: Abschnitte der Schnittlinie in der Grundfläche.
+    let mut holes: Vec<crate::flat::Polygon> = Vec::new();
+    for poly in crate::site_rules::building_footprint(p) {
+        let mut ts: Vec<f64> = Vec::new();
+        for ring in &poly {
+            let n = ring.len();
+            for i in 0..n {
+                let (a, b) = (ring[i], ring[(i + 1) % n]);
+                // Schnitt der Geraden base + s·u mit der Kante a–b.
+                let (ex, ey) = (b.x - a.x, b.y - a.y);
+                let den = u.0 * ey - u.1 * ex;
+                if den.abs() < 1e-12 {
+                    continue;
+                }
+                let (wx, wy) = (a.x - base.0, a.y - base.1);
+                let s_ = (wx * ey - wy * ex) / den;
+                let t_ = (wx * u.1 - wy * u.0) / den;
+                if (0.0..1.0).contains(&t_) {
+                    ts.push(s_);
+                }
+            }
+        }
+        ts.sort_by(|a, b| a.total_cmp(b));
+        for w in ts.chunks_exact(2) {
+            let (u0, u1) = (w[0], w[1]);
+            let low = out.cuts.iter().flat_map(|c| c.pts.iter()).filter(|q| q[0] >= u0 - 1e-6 && q[0] <= u1 + 1e-6).map(|q| q[1]).fold(f64::INFINITY, f64::min);
+            if low.is_finite() {
+                holes.push(vec![vec![[u0, low], [u1, low], [u1, 1e4], [u0, 1e4]]]);
+            }
+        }
+    }
+    if !holes.is_empty() {
+        band = crate::polygon_bool::difference(&band, &holes);
+    }
+    let hatch = super::style::resolve_hatch(p, "std-h-erdreich", None, None, None)
+        .unwrap_or(HatchRender { pattern: HatchPattern::Earth, scale: 1.0, angle: 45.0, color: HATCH_INK.into(), line_weight: 0.1, ..no_hatch_base() });
+    for poly in band {
+        if let Some(outer) = poly.into_iter().next() {
+            if outer.len() >= 3 {
+                out.earth.push((outer, hatch.clone()));
             }
         }
     }
@@ -1735,7 +1814,7 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
     let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, bodies, &cuts, level.hidden_lines);
     shaped_projection(&mut visible, p, &walls_r, &plane);
-    let mut out = Output { cuts, visible, hidden, profiles: Vec::new() };
+    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new() };
     append_terrain_profiles(&mut out, p, base, u);
     if let Some(d) = level.depth {
         filter_by_depth(&mut out, p, &plane, d, &walls, &slabs, &slabs_r);
@@ -1818,6 +1897,14 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
     let mut prims = Vec::new();
     let mut acc = Acc::new();
     let shown = |code: &str| vis.visible(code) && vis.render(code);
+    // [T6] Erdreich zuerst (unter allem), ohne Umriss; Kategorie wie das Gelände.
+    let terrain_shown = out.profiles.iter().all(|pr| pr.category.as_deref().is_none_or(shown));
+    if terrain_shown {
+        for (ring, hatch) in &out.earth {
+            let hatch = if mono { HatchRender { color: SECTION_INK.into(), ..hatch.clone() } } else { hatch.clone() };
+            prims.push(polygon(ring.iter().map(|q| v2(q[0], q[1])).collect(), "none", "none", 0.0, hatch));
+        }
+    }
     for cp in &out.cuts {
         if cp.pts.len() < 3 {
             continue;
@@ -1867,7 +1954,13 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
         for w in pr.pts.windows(2) {
             acc.add(w[0][0], w[0][1]);
             acc.add(w[1][0], w[1][1]);
-            prims.push(line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), "section-terrain", SECTION_GROUND_MM, SECTION_INK));
+            let mut l = line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), "section-terrain", if pr.natural { SECTION_NATURAL_MM } else { SECTION_GROUND_MM }, SECTION_INK);
+            if pr.natural {
+                if let Primitive::Line { dash, .. } = &mut l {
+                    *dash = Some(Some(SECTION_NATURAL_DASH.to_vec()));
+                }
+            }
+            prims.push(l);
         }
     }
     if hidden_lines {
@@ -1886,7 +1979,8 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
         acc.add(e.b[0], e.b[1]);
         prims.push(line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "section-visible", SECTION_VISIBLE_MM, SECTION_VISIBLE_INK));
     }
-    if acc.min_x.is_finite() && acc.max_x > acc.min_x {
+    // Mit Gelände ersetzt die Geländelinie die Grundlinie ([T6]).
+    if acc.min_x.is_finite() && acc.max_x > acc.min_x && !(terrain_shown && !out.profiles.is_empty()) {
         prims.push(line(v2(acc.min_x, acc.min_y), v2(acc.max_x, acc.min_y), "section-ground", SECTION_GROUND_MM, SECTION_INK));
     }
     (prims, acc.bounds())
@@ -2382,7 +2476,12 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     w.group(&prims);
     let ops = if openings { section_opening_primitives(p, &level, &vis)? } else { Vec::new() };
     w.group(&ops);
-    w.bounds = Some(bounds);
+    // Achsraster ([112]): Achsen quer zur Schnittebene.
+    let grid = super::grid_view::grid_prims(p, &level, bounds, v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0).unwrap_or(100.0));
+    if !grid.is_empty() {
+        w.group(&grid);
+    }
+    w.bounds = Some(super::grid_view::union_bounds(bounds, &grid));
     Ok(w.finish())
 }
 
@@ -2606,6 +2705,43 @@ mod tests {
         assert!(!out.hidden.is_empty());
         let (prims, _) = section_primitives(&out, false, true, &Visibility::default());
         assert!(serde_json::to_string(&prims).unwrap().contains("section-hidden"));
+    }
+
+    /// [T6]/[68] Gelände mit Baugrube: gestaltetes + gewachsenes Terrain, Erdreich ohne Gebäude-Inneres;
+    /// Fassaden-Geländehöhen fürs Baurecht.
+    #[test]
+    fn gelaende_mit_baugrube_im_schnitt() {
+        let mut p = sample();
+        let flat = TerrainMesh {
+            id: "t".into(),
+            positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0],
+            indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+            category_code: Some("02".into()),
+            ..Default::default()
+        };
+        let pit = Excavation {
+            id: "bg".into(),
+            outline: vec![Vec2 { x: -1.0, y: -1.0 }, Vec2 { x: 6.0, y: -1.0 }, Vec2 { x: 6.0, y: 5.0 }, Vec2 { x: -1.0, y: 5.0 }],
+            bottom: -2.0,
+            ..Default::default()
+        };
+        p.context = Some(vec![ContextObject::TerrainMesh(flat), ContextObject::Excavation(pit)]);
+        let out = compute_section(&p, &level(&p, "schnitt-a"), &[]).unwrap().unwrap();
+        assert!(out.profiles.iter().any(|pr| pr.natural) && out.profiles.iter().any(|pr| !pr.natural));
+        let designed_min = out.profiles.iter().filter(|pr| !pr.natural).flat_map(|pr| pr.pts.iter().map(|q| q[1])).fold(f64::INFINITY, f64::min);
+        assert!((designed_min + 2.0).abs() < 1e-6, "{designed_min}");
+        assert!(!out.earth.is_empty());
+        let (prims, _) = section_primitives(&out, false, false, &Visibility::default());
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { hatch, .. } if hatch.pattern == HatchPattern::Earth)));
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Line { cls, dash: Some(Some(_)), .. } if cls == "section-terrain")));
+        let (ep, _) = super::super::elevation::elevation_primitives(&p, &level(&p, "ansicht-sued"), false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        let sil: Vec<f64> = ep.iter().filter_map(|q| if let Primitive::Line { cls, a, b, .. } = q { (cls == "elevation-terrain").then_some(a.y.min(b.y)) } else { None }).collect();
+        // Die Ansichtslinie (y = −2) liegt in der Böschung: die Silhouette taucht vor dem Gebäude ein, nie unter die Sohle.
+        assert!(!sil.is_empty() && sil.iter().all(|z| *z <= 1e-6 && *z >= -2.0 - 1e-6) && sil.iter().any(|z| *z < -0.5), "{sil:?}");
+        assert!(ep.iter().any(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == "#ffffff")));
+        assert!(!ep.iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "elevation-ground")));
+        let f = crate::site_rules::facade_terrain(&p);
+        assert!(!f.is_empty() && f.iter().all(|q| q.natural == Some(0.0) && q.designed.is_some_and(|z| (z + 2.0).abs() < 1e-6)));
     }
 
     #[test]
@@ -3030,5 +3166,86 @@ mod abzug_faelle {
         let area = (0..pts.len()).map(|i| { let (a, b) = (pts[i], pts[(i + 1) % pts.len()]); a.0 * b.1 - b.0 * a.1 }).sum::<f64>().abs() / 2.0;
         assert!((area - (4.0 * 2.5 - 0.6 * 1.0)).abs() < 1e-6, "{area}");
         assert_eq!(out[0].nse.as_ref().map(|n| n.len()), Some(2), "Schlüsselloch-Stege ungestrichen");
+    }
+}
+
+/// [G2] Wand an Dach: Schnitt und 3D-Körper der Wände unter einem Satteldach.
+#[cfg(test)]
+mod wand_an_dach {
+    use super::*;
+
+    fn haus() -> Project {
+        serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "drawings2d": [],
+            "drawingLevels": [
+                {"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0},
+                {"id": "q", "name": "Q", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": 2, "y": -2}, {"x": 2, "y": 10}], "directionSign": 1},
+                {"id": "l", "name": "L", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": -2, "y": 4}, {"x": 12, "y": 4}], "directionSign": 1}
+            ],
+            "walls": [
+                {"id": "WS", "type": "wall", "floorId": "F", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 10, "y": 0}, "height": 3.5},
+                {"id": "WW", "type": "wall", "floorId": "F", "categoryCode": "20", "start": {"x": 0, "y": 8}, "end": {"x": 0, "y": 0}, "height": 9.0},
+                {"id": "WB", "type": "wall", "floorId": "F", "categoryCode": "20", "start": {"x": 6, "y": 1}, "end": {"x": 6, "y": 7}, "height": 9.0, "bulge": 0.4}
+            ],
+            "openings": [{"id": "F1", "type": "opening", "hostWallId": "WW", "categoryCode": "21", "kind": "window", "position": 3.5, "width": 1.0, "height": 1.2, "sillHeight": 3.6}],
+            "roofs": [{"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35",
+                "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}],
+                "shape": "sattel", "pitchDeg": 45, "overhang": 0.5, "ridgeAxis": "x", "thickness": 0.3}]
+        }))
+        .unwrap()
+    }
+
+    /// Dach-Unterkante (Traufkante 3.0 bei y = −0.5, 45°, Dicke 0.3 senkrecht).
+    fn under(y: f64) -> f64 {
+        3.0 + (4.5 - (y - 4.0).abs()) - 0.3 * 2f64.sqrt()
+    }
+
+    #[test]
+    fn schnitt_endet_an_der_dachunterkante() {
+        let p = haus();
+        for id in ["q", "l"] {
+            let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
+            let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+            let out = compute_section(&p, &level, &[]).unwrap().unwrap();
+            let walls: Vec<&Cut> = out.cuts.iter().filter(|c| c.kind == Kind::Wall).collect();
+            assert!(!walls.is_empty());
+            let top = walls.iter().flat_map(|c| c.pts.iter().map(|q| q[1])).fold(f64::NEG_INFINITY, f64::max);
+            // Nie über der First-Unterkante.
+            assert!(top <= under(4.0) + 1e-4, "{id}: {top}");
+        }
+        // Querschnitt quer zum First: Traufwand mit schräger Krone.
+        let l = p.drawing_levels.iter().find(|l| l.id == "q").unwrap();
+        let out = compute_section(&p, &LevelSpec::from_json(&serde_json::to_value(l).unwrap()), &[]).unwrap().unwrap();
+        let sloped = out.cuts.iter().filter(|c| c.kind == Kind::Wall).any(|c| {
+            let ys: Vec<f64> = c.pts.iter().map(|q| q[1]).filter(|v| *v > 2.0).collect();
+            ys.len() >= 2 && (ys.iter().copied().fold(f64::NEG_INFINITY, f64::max) - ys.iter().copied().fold(f64::INFINITY, f64::min)) > 0.1
+        });
+        assert!(sloped, "Traufwand im Querschnitt mit schräger Krone");
+    }
+
+    #[test]
+    fn koerper_dicht_und_volumen_exakt() {
+        let p = haus();
+        let walls = model3d::emit_walls(&p, true).unwrap();
+        let ww: Vec<&RWall> = walls.iter().filter(|w| w.wall_id == "WW").collect();
+        let mut vol = 0.0;
+        for w in walls.iter().filter(|w| w.top_plane.is_some()) {
+            let m = model3d::wall_piece_mesh(w).unwrap();
+            assert!(m.is_closed(), "{w:?}");
+            assert!((m.volume().abs() - model3d::wall_piece_volume(w)).abs() < 1e-9);
+        }
+        for w in &ww {
+            assert!(w.holes.as_ref().is_none_or(|h| h.is_empty()), "Fenster unter dem Dach als Teilkörper: {w:?}");
+            vol += model3d::wall_piece_volume(w);
+        }
+        // Giebelwand: Fünfeck unter der Unterkante × Dicke, minus Fenster.
+        let t = p.wall_thickness(&p.walls[1], 0.2);
+        let area = |y0: f64, y1: f64| (y1 - y0) * (under(y0) + under(y1)) / 2.0;
+        let expect = t * (area(0.0, 4.0) + area(4.0, 8.0) - 1.2);
+        // Gehrungen an den Ecken ändern das Volumen nur an den Enden.
+        assert!((vol - expect).abs() < t * t * 7.0, "{vol} vs {expect}");
+        // Bogenwand ([T2]): Sehnen-Teilwände ebenfalls unter dem Dach.
+        let wb: Vec<&RWall> = walls.iter().filter(|w| w.wall_id == "WB").collect();
+        assert!(wb.len() > 4 && wb.iter().all(|w| w.base_elevation + w.height <= under(4.0) + 1e-6), "{}", wb.len());
     }
 }

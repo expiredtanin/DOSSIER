@@ -68,6 +68,7 @@ export type QueryName =
   | "programLayout"
   | "ivhb"
   | "siteCheck"
+  | "excavationQuantities"
   | "buildingFootprint"
   | "modelTop"
   | "shadows"

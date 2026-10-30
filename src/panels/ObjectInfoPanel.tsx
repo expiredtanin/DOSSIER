@@ -1461,6 +1461,13 @@ export function StairSection({
         value={stair.width}
         onCommit={(v) => host.onSetStairWidth(v)}
       />
+      {stair.shape === "spiral" && (
+        <DimensionField
+          label={t("objinfo.stair.column")}
+          value={stair.centerColumn ?? 0}
+          onCommit={(v) => host.onSetStairColumn(v)}
+        />
+      )}
       <DimensionField
         label={t("objinfo.stair.steps")}
         value={stair.stepCount}
@@ -2051,6 +2058,23 @@ export function WallSection({
             { value: "above", label: t("objinfo.wall.sliceTermination.above") },
           ]}
           title={t("objinfo.wall.sliceTermination")}
+          width={120}
+        />
+      </div>
+
+      {/* An Dach anschliessen ([G2]): automatisch endet die Wand an der Dach-Unterkante, "Ja"
+          verlängert sie bis unter das Dach, "Nein" lässt die Dächer die Wand nicht schneiden. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.wall.roofAttach")}</span>
+        <Dropdown
+          value={wall.roofAttach}
+          onChange={(v) => host.onSetWallRoofAttach(v as "auto" | "on" | "off")}
+          options={[
+            { value: "auto", label: t("objinfo.wall.roofAttach.auto") },
+            { value: "on", label: t("objinfo.wall.roofAttach.on") },
+            { value: "off", label: t("objinfo.wall.roofAttach.off") },
+          ]}
+          title={t("objinfo.wall.roofAttach.tip")}
           width={120}
         />
       </div>

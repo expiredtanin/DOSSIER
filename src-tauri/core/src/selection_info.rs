@@ -488,6 +488,8 @@ fn wall_selection(root: &Map<String, Value>, w: &Value) -> Result<J, String> {
         .raw("referenceOffset", w, "referenceOffset")
         .v("layerBoundaries", J::arr(boundaries))
         .v("sliceTermination", nn(field(w, "sliceTermination")).cloned().unwrap_or_else(|| "both".into()))
+        // An Dach anschliessen ([G2]): fehlt = automatisch.
+        .v("roofAttach", Value::String(match field(w, "roofAttach").and_then(|v| v.as_bool()) { Some(true) => "on", Some(false) => "off", None => "auto" }.into()))
         .raw("wallTypeId", w, "wallTypeId")
         .n("thickness", thickness)
         .v("singleLayer", Value::Bool(layers.len() <= 1))
@@ -912,6 +914,7 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
         .v("up", Value::Bool(field(s, "up") != Some(&Value::Bool(false))))
         .raw("arrowStyle", s, "arrowStyle")
         .raw("referenz", s, "referenz")
+        .raw("centerColumn", s, "centerColumn")
         .raw("typeId", s, "typeId")
         .raw("floorId", s, "floorId")
         .o("floorName", floor_name(floor, field(s, "floorId")))
@@ -1133,6 +1136,16 @@ pub fn geom_bbox(g: &Value) -> [f64; 4] {
             }
         }
         Some("kote" | "text" | "block" | "detailref" | "pointmarker") => pts.push(p("at")),
+        Some("grid") => {
+            if let Some(spec) = serde_json::from_value::<crate::model::Drawing2DGeom>(g.clone()).ok().as_ref().and_then(crate::grid::Spec::of) {
+                for ax in spec.axes() {
+                    match ax.shape {
+                        crate::grid::Shape::Line { a, b } => pts.extend([a, b]),
+                        crate::grid::Shape::Arc { c, r, .. } => pts.extend([(c.0 - r, c.1 - r), (c.0 + r, c.1 + r)]),
+                    }
+                }
+            }
+        }
         Some("scalebar") => {
             let at = p("at");
             pts.extend([at, (at.0 + num_of(field(g, "segmentLength")) * num_of(field(g, "segments")), at.1)]);

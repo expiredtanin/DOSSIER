@@ -1183,6 +1183,32 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Treppenuntersicht, Abzugskörper beliebiger Form im Schnitt. · L
 - ◐ **[G2] Wand an Dach.** 27.10.: schräge Oberkante (`topDrop`) in render3d statt 15-cm-Treppung. Offen:
   Schnitt, exakte Lösung über [B6]. · M–L
+  - (30.10.) **Exakt je Schicht, analytisch** (ohne Booleans, `wall_bands.rs`): Dach-Unterkante als Facetten
+    (`RoofFacet`: Dachfläche um die Schichtdicke senkrecht gesenkt, Gaubeninneres mit der Gaubendach-Unterkante,
+    `DormerGeom::under_facets`); über einem Punkt gilt die obere Hülle (Kehlen verschnittener Dächer, Gaube).
+    Jedes Band wird an den Bereichsgrenzen geteilt — längs mit der exakten Grenzlinie als Schnittlinie (First,
+    Grat, Kehle, Höhenlinie Dach = Krone/Fuss), seitlich über die Dicke, wo eine Grenze längs durchläuft
+    (Traufwand, deren Krone die Dachfläche schneidet) — und bekommt eine **ebene Oberkante** (`Piece.top_plane`,
+    `RWall.topPlane` = `[z am Anfang, dz/dx, dz/dy]`): jede Ecke exakt auf der Unterkante, auch quer über die
+    Dicke. Öffnungen unter dem Dach: Pfeiler/Brüstung/Sturz je mit eigener ebener Oberkante statt Treppung;
+    innere Teilungen als Stossfugen (`joint`, keine Stirn in Ansicht/Schnitt-Projektion). **Option je Wand**
+    `Wall.roofAttach` („An Dach anschliessen", Objekt-Info): fehlt = automatisch (nur kürzen, wo die Krone über
+    der Unterkante liegt), `true` = bis unter das Dach verlängern, `false` = Dächer schneiden nicht. Verbraucher:
+    render3d (Mesh, Deckel-Schraffur, Schnitt-Prisma mit schräger Deckelkante), Kern-Schnitt und -Ansicht
+    (Schnitt-Eingabe jetzt mit den Dächern des Geschosses), OBJ/STL/glTF und IFC (Prisma bis zur Dachunterkante,
+    `model3d::wall_piece_mesh`), Mengen (Brutto-/Nettovolumen exakt über die Grundfläche,
+    `wall_piece_volume`). Ansicht: Wandflächen unter Dächern gegen die Dachscheiben (Oberfläche, Trauf-/Ortgang-
+    Stirn, Gaubenstirn/-wangen) verdeckt bzw. auf die Verdeckungsgrenze gekappt, Giebeldreiecke entfallen, wenn
+    Wände ans Dach reichen (dafür Stirnflächen der Dachscheibe). Bogenwände ([T2]) laufen über die Sehnen-
+    Teilwände mit. Geprüft: Rust-Tests (Giebel beidseitig je Schicht exakt, Traufwand schräg + seitlich geteilt,
+    Fenster unter der Schräge Volumen exakt, An-Dach-Option, Kehle = obere Hülle, Schnitt-Pfad, Körper dicht und
+    Volumen = Analytik, Schnitt nie über der Unterkante, Ansicht Traufe/Giebel), render3d-Test (Mesh-Ecken auf der
+    Ebene, Schnitt schräg), CLI-Schnitte/-Ansichten eines Testhauses (Satteldach mit Trauf-/Giebelwänden,
+    Fenster unter der Schräge, T-Dach mit Kehlen, Gaube, Bogenwand, Innenwand „bis unters Dach") als PNG
+    angesehen (Linux). Offen: Ansicht bleibt Painter + Verdeckungstest gegen Dächer (keine HLR, [G4]); Grenzen,
+    die fast parallel zur Achse schräg durchs Band laufen, nur genähert (seitliche Teilung an der Mitte);
+    Fenster, das ins Dach ragt, verliert seinen Sturz; Dachgeometrie im 3D-Live-Schnitt unverändert; nicht in
+    der Tauri-App/Metal geprüft.
 - ◐ **[G3] Öffnungen beliebiger Form** (29.10.) `Opening.shape` (rundbogen, segmentbogen, spitzbogen, rund/oval,
   schraeg, giebel) + `shapeRise` (Stich). Kern `opening_shape.rs`: konvexer Umriss im Öffnungsrechteck; die Wand
   behält das Rechteck-Loch, der Rest zwischen Rechteck und Umriss kommt als Füllkörper (senkrechte Streifen =
@@ -1255,6 +1281,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     statt `RWall` gehen), 3D-Live-Schnitt-Deckel verschnittener Dächer (zeigen noch die unverschnittenen
     Schichten), IFC-Mengen der Gaube, Kehlen symmetrisch je Schicht (heute „überlappt" das frühere Dach),
     Gauben über First/Grat hinaus nicht abgefangen, nicht in der Tauri-App/Metal geprüft.
+  - (30.10.) Restpunkte: **Gauben über den First** werden abgefangen (`dormer::geometry`): Stirnhöhe (bzw. Tiefe
+    der Schleppgaube) so gekappt, dass die Gaubendach-Oberkante spätestens am First auf die Hauptdach-Oberkante
+    trifft (`DormerGeom.clamped`), das Gaubendach endet am Rand seiner Dachfläche (vorher ragte es jenseits des
+    Firsts als Splitter heraus). **IFC-Mengen der Gaube**: `Qto_DossierDormerQuantities` am IfcRoof (Breiten,
+    Stirnhöhe, geneigter Ausschnitt, Wand- und Dachvolumen aus den Körpern), NetArea des Dachs ohne den
+    Ausschnitt. **Haarfugen** der Dachfläche in der Ansicht: Kontur in Füllfarbe 0.15 mm statt 0.05 mm. Wand ↔
+    Dach: [G2]. Wand ↔ Decke: bestehende Schicht-Dominanz (3D je Band nach Rang, Schnitt
+    `subtract_dominant_bands`) im CLI-Schnitt des Beispielprojekts angesehen, nicht geändert. Offen:
+    3D-Live-Schnitt-Deckel verschnittener Dächer, Kehlen symmetrisch je Schicht, Warnung bei gekappter Gaube in
+    der UI, Wand ↔ Decke für beliebige Polygone im Schnitt ([G6]).
   - (30.10.) Boolean-Werkzeug dafür: Manifold-Port `manifold-rust`, nicht truck — truck scheitert an Gaube und
     L-Ecke (bündige Unterseiten), `manifold-rust` rechnet beide exakt und dicht. Details und Plan: [107].
 - ○ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M
@@ -1380,12 +1416,31 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   der Tauri-App. Offen: Schichteinzug [106], Formöffnungen [G3] und Ansichtsschraffur im 3D ([100]) in Bogenwänden; Wände teilen/trimmen (fehlt
   auch für gerade); echte Polar-Schraffur; IFC-Körper als extrudiertes Bogenprofil statt Netz; Griff-Vorschau
   zeigt nur die Achse; automatische Aussenbemassung misst Bogenwände als Sehne.
-- ○ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M
-- ○ **[T4] Import-Meshes glätten oder kantig** (`add_smooth_normals`). · S
-- ○ **[T5] Import reparieren** (`put_together_same_attrs`, Healing). · S
-- ○ **[T6] Glattes Gelände aus Höhenlinien** + Gelände-Prisma für Aushub (= [68]). · L
-- ○ **[T7] Rotationskörper/Loft im UI** (API besteht). · S–M
-- ○ **[T8] Kollisionsprüfung im 3D zeigen** (heute nur Marker im Grundriss). · S
+- ◐ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M — 30.10.: Ortbeton-Wendeltreppe mit echter Wendelfläche (Schraubenuntersicht, ebene Tritte, `stairs3d::spiral_mesh`), Handlauf als Schraubensweep samt Pfosten (links/rechts/beide nach Drehsinn), Mittelsäule `Stair.centerColumn` (Radius, Objekt-Info; als Block in 3D/Schnitt). Tests Rust (Volumen, Punkte auf der Schraube, Sweep-Radius, Säule). Plansymbol (Bögen, Schnittlinie, Pfeil) war schon da und im CLI-SVG geprüft; nicht in der Tauri-App. Offen: Säule im Grundriss, IFC/Mengen der Wendelfläche, Handlauf-Profil rund.
+- ○ **[T4] Import-Meshes glätten oder kantig** (`add_smooth_normals`). · S — Stand 30.10.: nicht begonnen. Braucht Renderer-Änderung (`render3d::append_context_mesh` rechnet nur Flächennormalen) + Feld an `ImportedMesh`/`RMesh`/`MeshInput` + WASM/Metal-Neubau; Verschweissen ([T5]) als Voraussetzung ist da.
+- ✅ **[T5] Import reparieren** (`put_together_same_attrs`, Healing). · S — 30.10.: `mesh_repair.rs` im Mesh-Import (`decode_mesh`): Ecken verschweissen (0.01 mm), entartete Dreiecke entfernen, Löcher bis 8 Randkanten in fast geschlossenen Netzen (Randanteil ≤ 5 %) per Fächer schliessen, Orientierung nach aussen; Zähler im Importbericht (`repaired`, Meldung). Tests Rust (Suppe, Entartete, Loch/Orientierung, offene Fläche bleibt, Bericht). Gilt für OBJ/STL/glTF/PLY, nicht für IFC/DXF/STEP. Nicht in der App getestet. Offen: Verschweissen über Zellgrenzen, Schalter/Schwellen im Import-Dialog, Normalen-Ausrichtung widersprüchlich orientierter Flächen.
+- ◐ **[T6] Glattes Gelände aus Höhenlinien** + Gelände-Prisma für Aushub (= [68]). (30.10.) Kern `terrain.rs`:
+  Konturen verdichtet und als Bruchkanten erzwungen (constrained Delaunay: Sloan-Kantentausch auf `delaunay.rs`,
+  danach Lawson nur an freien Kanten; konkave Ränder: lange Randsplitter weg), flache Dreiecke (Kuppen/Mulden/
+  Talböden) mit Schwerpunkt aus Eckgradienten, begrenzt auf ±0.45·Äquidistanz (keine neuen Höhenlinien); Glättung
+  durch adaptive Kantenteilung (rissfrei 1→2/3/4) mit Hermite-Mittelpunkt aus 1-Ring-Gradienten, ohne Überschwingen
+  (Mittelpunkt streng zwischen den Endhöhen, Kontur-Kanten exakt). Optionen `smooth`/`maxEdge`/`breaklines`
+  (`terrain_from_contours_opts_json`, Panel „Glätten"); Befehl `terrain` und Panel nutzen es (Standard: 2 Stufen).
+  Neue Felder `TerrainMesh.contourInterval`/`contourIndexEvery`: Grundriss zeichnet Höhenlinien aus dem Netz
+  (samt Baugruben) neu, Zähllinien dicker und beschriftet (2 mm Papier, lesbar gedreht); Rahmen wie bisher.
+  Schnitt: gestaltetes Terrain (Baugruben) ausgezogen, gewachsenes gestrichelt, SIA-Erdreich-Band 1.5 m darunter
+  ([109] `std-h-erdreich`) ohne Gebäude-Inneres; Grundlinie entfällt mit Gelände. Ansicht: Silhouette des Geländes
+  vor dem Gebäude (obere Hüllkurve), darunter verdeckt (Papierfläche). 3D/Export/Pick: geändertes Netz. Höhenbezug:
+  ist `referenceElevationMasl` gesetzt und liegt das Gelände in m ü. M., gilt Modell = roh − Referenz (3D, Schnitt,
+  Baurecht; Höhenlinien-Beschriftung roh). Gelände-Prisma (`terrain::prism`, dicht, Volumen per Divergenzsatz).
+  Tests: Rust (Bruchkanten, Kegelhügel ohne Überschwingen/flache Dreiecke, Prisma dicht, Unsinn), vitest.
+  Geprüft im Linux-Container (CLI-Grundriss/-Schnitt/-Ansicht eines Hügels mit Baugrube angesehen; Erdreich-Schraffur
+  über den Kern-Generator gerendert, das CLI-SVG zeigt keine Schraffuren), nicht in der Tauri-App.
+  Offen: swissALTI3D-Raster wird nicht geglättet (nur Äquidistanz 1 m gesetzt); Natural-Neighbour/Clough-Tocher statt
+  Hermite-Teilung; Höhenlinien unter der Beschriftung nicht unterbrochen; Luftbild-Farben fallen auf geändertem
+  Gelände weg; Erdreich-Band fest 1.5 m (nicht bis zur Planunterkante). · L
+- ✅ **[T7] Rotationskörper/Loft im UI** (API besteht). · S–M — 30.10.: Befehle `revolve` (Profil + Achse aus 2 Plan-Punkten + Winkel; Achse waagrecht auf Höhe r_max, Profil auf einer Seite) und `loft` (≥ 2 Profile der Reihe nach, gleichmässig über die Höhe; Punktzahl durch Kantenteilung angeglichen) in `cmd_solid.rs`/`cmds/{revolve,loft}.ts`, Körper als `ExtrudedSolid.brep` (Objekt-Info, STEP, Kennwerte wie die Grundkörper); Kürzel `rev`/`lf`, Werkzeugpalette 3D. Tests Rust (Spezifikation, Ops, truck-Volumen/STEP), vitest (Befehlsablauf). Nicht in der Tauri-App getestet. Offen: Achse senkrecht/beliebig im Raum, Loft mit Führungskurve, Profil-Startpunkt-Ausrichtung beim Loft.
+- ✅ **[T8] Kollisionsprüfung im 3D zeigen** (heute nur Marker im Grundriss). · S — 30.10.: Treffer in Sitzung (`panels/clashSession.ts`), Panel „Kollisionen" (`ClashPanel`: Liste, Klick wählt beide Bauteile und fährt die 3D-Kamera auf die Durchdringung, `cameraBridge.focusCamera`), im 3D rote Hüllquader aller Treffer (`clashHighlightLines` in `viewportContent`); Prüflauf öffnet das Panel, Marker im Grundriss bleiben. Tests vitest (Linien, Auswahl, Kamera-Fokus). Nicht im echten WebGPU-Viewport/Tauri geprüft. Offen: Hüllquader statt exakter Durchdringungsgeometrie, Panel-Name zeigt Ids statt Bauteilnamen, Wiederholung/Ignorieren einzelner Treffer.
 
 ---
 
@@ -1471,8 +1526,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (Befehl `dimdetach`, Kürzel `bml`, Kontextmenü, Objekt-Info). Autodim [81] hängt an Ecken/Leibungen.
   Transformieren: Bezüge bleiben bei Verschieben/Drehen zusammen mit den Elementen, sonst (allein, Spiegeln,
   Skalieren) gelöst; Kopien hängen an mitkopierten Elementen; ein von Hand gezogener Punkt ist frei.
-  Offen: Bogenwände/Treppen nicht anhängbar, Achsraster fehlt im Modell; nur Linux/Chromium geprüft (Marke
-  am Bildschirm nicht auf macOS/Metal angesehen). · L
+  Nachtrag (30.10.): auch Bogenwände (Enden, Punkt auf Achse/Fläche als Anteil der Bogenlänge, Mittelpunkt, Rand-
+  Bezug `rim` mit Winkel), Treppen (Umriss-Ecken/-Kanten, bei L-Treppen auch Podest-Ecken/-Kanten; Wendel: die vier
+  Ecken der Schliesslinien, Mittelpunkt), Rasterachsen und Achsschnittpunkte [112] sind anhängbar. **Radius-,
+  Durchmesser- und Bogenlängen-Bemassung** (`Dimension.kind`, Befehle `dimradius`/`dimdiameter`/`dimarc`, Kürzel
+  `rad`/`dm`/`bogenl`): Klick auf den Rand eines 2D-Kreises/-Bogens oder einer Bogenwand (Achse oder Schichtfläche);
+  Mittelpunkt und Randpunkte hängen an `center`/`rim` und werden einzeln (ohne Kettenprojektion) nachgeführt; DXF als
+  Linien/Bögen/Text (nicht als DIMENSION). Autodim [81] misst nicht mittige Wände (Referenzlinie/-versatz) jetzt an
+  der echten Fläche. Offen: Wendeltreppen-Bögen (nur die Schliesslinien-Ecken), Treppenlauf-Mitten, Rand-Bezug auf
+  Ellipsen/Splines; nur Linux/Chromium geprüft (Marke am Bildschirm nicht auf macOS/Metal angesehen). · L
 - ○ **[39] Auswahl gehört zum Modell.** · M
 - ◐ **[40] Ansichten duplizieren.** Ebenen duplizieren vorhanden. · S
 - ◐ **[76] Vektorfang auf PDF.** (28.10.) Rust `fileio/pdf_object.rs` + `pdf_vector.rs` (eigener Leser:
@@ -1618,7 +1680,8 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Einzel-Plan-PDF (`exportPdf.ts`) noch ohne Ebenen.
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.
-  (30.10.) Ketten assoziativ [38] (Ecken/Leibungen, nur mittige Wände).
+  (30.10.) Ketten assoziativ [38] (Ecken/Leibungen). Nicht mittige Wände
+  (Referenzlinie links/rechts, -versatz): die Kette misst die echte Fläche (`WallIn.shift`). Offen: Bogenwände als Sehne.
 - ✅ **[82] Grafische Legenden.** (30.10.) `Layout.legends` (`LayoutLegend`: Lage, Titel, Arten Schraffur/Material · Linientyp ·
   Kategorie, optional Handauswahl `manualKeys`). `analysis/legend.ts`: Einträge automatisch aus den Viewports (Material der
   Wand-/Decken-/Dach-Aufbauten und Stützen im gezeigten Geschoss, Schraffuren/Linientypen der Zeichnungen, sichtbare
@@ -1748,6 +1811,18 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Tabellenbreite nur über das Zahlenfeld (kein Ziehgriff); keine Kopfzeilen-Füllung/Farben; Schrift im PDF nur
   Helvetica/Times/Courier (jsPDF-Grundschriften); DXF-Beschriftungen in der Sprache der Oberfläche beim Export;
   nicht in der Tauri-App getestet. · S
+- ✅ **[112] Achsraster.** (30.10.) Neue 2D-Zeichnungsform `Drawing2DGeom::Grid` (`grid.rs`, Auswahl/Verschieben/Kopieren/
+  Ebenen/DXF wie jede Zeichnung): rechtwinklig (`a` = Achsen 1, 2, 3 …, `b` = A, B, C …, unregelmässige Abstände, gedreht
+  um `angle`) oder radial (Strahlen in Grad, Ringe als Bögen/Kreise), `extend` Überstand, `bubbles` Start/Ende/beide,
+  `bubbleMm` (Papier-mm), `levels` (leer = in allen Geschossen), `show3d` (dünne Spur im 3D). Grundriss: strichpunktierte
+  Achsen, Blasen mit Beschriftung (Massstab folgt `scale`); Schnitt und Ansicht: Achsen quer zur Blickebene als senkrechte
+  Linien mit Blase oben (`plan/grid_view.rs`, eigene Gruppe, Massstab über `scaleDenominator`); Fang auf Achsen,
+  Ringe und Achsschnittpunkte (Endpunkt); Griffe: Ursprung und je Achse das Achsende (zieht die Lage); Bemassung
+  assoziativ [38] an Achse/Achsschnittpunkt. Befehl `grid` (Kürzel `achsraster`, `achsen`, Werkzeug „Achsraster"):
+  Ursprung, dann Feldweiten als Text (`6 4.5 3x5`), Option Radial; Attribute-Panel: Blasenseite, Überstand, Blasen-Ø,
+  Geschosse, 3D. Geprüft im Linux-Container (Rust, vitest, e2e, CLI-SVG Grundriss/Schnitt/Ansicht), nicht in der
+  Tauri-App/Metal. Offen: Achsbeschriftung je Achse im UI ändern, Blasenseite je Achse, Achsen als Autodim-Vorschlag,
+  IFC `IfcGrid`, Raster-Versatz je Geschoss. · M
 - ◐ **[110] Linientyp ohne Strichstärke.** (30.10., Wunsch Maintainer: „Volllinie 0.5/0.35 soll es nicht
   geben") Ein Linienstil ist nur Muster (Volllinie, Strich, Punkt, Zickzack, Motiv) + Farbe; die Stärke trägt
   das Element (`Drawing2D.weightMm`, sonst Ebene), die Schraffur (neu `HatchStyle.lineWeight`, Default 0.13),
@@ -1851,11 +1926,29 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 ## Priorität 4 — später
 
 Alle ○: [27] Punktwolken (Leser ✅ [B9], Anzeige ◐ s. u., Modell offen) · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden; Fenster-/Türliste ✅ [97]) · [43] Verknüpfte
-Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (= [T6]) · [71] U-Werte (✅ s. u.) ·
+Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (◐ s. u.) · [71] U-Werte (✅ s. u.) ·
 [72] Graue Energie KBOB · [73] eBKP-H · [74] SIA 500 · [75] Fluchtwege VKF · [83] Befehlspalette ·
 [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
 (◐, DXF-Parser, IFC-Import) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
 Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
+
+- ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
+  Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
+  (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
+  Umriss (Ecken als Kegel) — dasselbe Element schneidet ein (Abtrag) und schüttet auf (Auftrag, Planie am Hang).
+  Kern `excavation.rs`: Netz im Wirkbereich neu trianguliert (Raster mit exakter Höhe, Sohle und Böschungsoberkante
+  als Bruchkanten, aussen Original-TIN samt Kanten), zwischengespeichert je Netz. Mengen (Abfrage
+  `excavationQuantities`): Abtrag/Auftrag als Integral der exakten Funktion (Raster-Mittelpunkte), Hinterfüllung =
+  Abtrag ausserhalb der Gebäude-Grundfläche; Test gegen die analytische Formel (10×10×3 m, 45°: 508.27 m³, < 0.2 %)
+  und gegen die Prisma-Differenz des Netzes (< 2 %). Grundriss: Sohle, Böschungsoberkante, Böschungsschraffur
+  (lang/halb, an Ecken gefächert); Schnitt/Ansicht/3D über das geänderte Gelände. Befehl `excavation`
+  (Alias baugrube/aushub; Sohle = Geschoss − 0.30 m), Panel „Gelände & Kontext" (Sohle, Neigungen, Bermen, Mengen),
+  Layout-Tabelle „Erdarbeiten" ([111], Quelle `earthworks`), CLI `kennzahlen` → `erdarbeiten`.
+  Baurecht ([63]): Geländehöhen an der Fassade (gewachsen/gestaltet, Ecken + alle ≤ 2 m), massgebendes Terrain =
+  tiefster gewachsener Punkt an der Fassade (vereinfacht), Gesamthöhe dagegen geprüft (ohne Gelände wie bisher ±0.00).
+  Offen: Mengen je Baugrube gegen das gewachsene Terrain (Überlagerungen doppelt); Arbeitsraum als Abstand;
+  senkrechter Verbau (Spundwand) nur als 89.5°-Böschung; Griffe/Objekt-Info für den Umriss; IVHB-Terrain nach
+  kantonalem Recht (Lotrechte statt tiefster Fassadenpunkt); nicht in der Tauri-App geprüft.
 
 - ◐ **[107] Manifold für Körper-Booleans (Schritt 1: trucksolid).** (30.10.) `manifold-rust` `=0.19.1` (Apache-2.0,
   exakter Modus) ersetzt den csgrs-Fallback in `src-tauri/trucksolid/src/boolean.rs`; csgrs, die Git-Abhängigkeit

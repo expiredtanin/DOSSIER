@@ -169,6 +169,7 @@ export function usePanelHostBase(opts: {
     | "removeContextObject"
     | "removeContextObjects"
     | "generateTerrain"
+    | "patchContextObject"
     | "commitTransformOn"
     | "setElementColor"
     | "setElementWeight"
@@ -293,6 +294,7 @@ export function usePanelHostBase(opts: {
     removeContextObject,
     removeContextObjects,
     generateTerrain,
+    patchContextObject,
     commitTransformOn,
     setElementColor,
     setElementWeight,
@@ -600,6 +602,17 @@ export function usePanelHostBase(opts: {
             patchItem(p, "drawings2d", drawingId, (d) => ({ ...d, endMarks: { ...d.endMarks, ...patch } })),
           ),
         ),
+      onSetGridProps: (drawingId, patch) =>
+        setProject(
+          opsMutation((p) =>
+            patchItem(p, "drawings2d", drawingId, (d) => {
+              if (d.geom.shape !== "grid") return d;
+              const geom = { ...d.geom, ...patch };
+              if (patch.levels === undefined && "levels" in patch) delete geom.levels;
+              return { ...d, geom };
+            }),
+          ),
+        ),
       onSetDimensionStyle: (drawingId, patch) =>
         setProject(
           opsMutation((p) =>
@@ -800,6 +813,11 @@ export function usePanelHostBase(opts: {
             sliceTermination: termination === "both" ? undefined : termination,
           });
       },
+      onSetWallRoofAttach: (attach) => {
+        if (selection?.kind === "wall")
+          // "auto" ist der Default ⇒ als undefined speichern.
+          updateWall(selection.id, { roofAttach: attach === "auto" ? undefined : attach === "on" });
+      },
       onSetWallType: (wallTypeId) => {
         if (selection?.kind === "wall")
           updateWall(selection.id, { wallTypeId });
@@ -967,6 +985,10 @@ export function usePanelHostBase(opts: {
       onSetStairArrowStyle: (arrowStyle) => {
         if (selection?.kind === "stair") updateStair(selection.id, { arrowStyle });
       },
+      onSetStairColumn: (radius) => {
+        if (selection?.kind === "stair")
+          updateStair(selection.id, { centerColumn: radius > 0 ? radius : undefined });
+      },
       onSetStairReferenz: (referenz) => {
         if (selection?.kind === "stair") updateStair(selection.id, { referenz });
       },
@@ -1083,6 +1105,8 @@ export function usePanelHostBase(opts: {
       onRemoveContextObject: removeContextObject,
       onRemoveContextObjects: removeContextObjects,
       onGenerateTerrain: generateTerrain,
+      onPatchContextObject: patchContextObject,
+      onStartExcavation: () => onRunCommand("excavation"),
       onSetGeoAnchor: (anchor) => {
         applyChange((p) => setFieldIfChanged(p, "geoAnchor", anchor));
       },

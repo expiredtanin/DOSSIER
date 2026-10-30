@@ -4,8 +4,12 @@
 //! - **Anhängen** ([`attach`]): ein gefangener Punkt wird über Deckungsgleichheit (Toleranz [`TOL`])
 //!   einem Merkmal zugeordnet — Öffnungs-Leibung/-Mitte, Wandende, Wandecke (Schnitt zweier
 //!   Wandlinien), Punkt auf Wandachse/Schichtgrenze, Stütze (Mitte, Ecken, Kanten), Decken-/Dach-/
-//!   Raum-Umriss (Ecken, Kanten), 2D-Zeichnung (Eckpunkte, Mittelpunkte, Kanten). Bogenwände
-//!   werden nicht angehängt. Freie Klicks decken sich praktisch nie und bleiben frei.
+//!   Raum-Umriss (Ecken, Kanten), 2D-Zeichnung (Eckpunkte, Mittelpunkte, Kanten), Treppe (Umriss
+//!   und Podest: Ecken, Kanten), Bogenwand (Enden, Punkt auf Achse/Fläche, Mittelpunkt), Rasterachse
+//!   und Achsschnittpunkt ([112]). Freie Klicks decken sich praktisch nie und bleiben frei.
+//! - **Radius/Durchmesser/Bogenlänge** ([`refs_for_round`]): Mittelpunkt und Punkte auf dem Rand
+//!   (`DimFeature::Rim`, Winkel) von 2D-Kreis, -Bogen oder Bogenwand; sie werden einzeln (ohne
+//!   Kettenprojektion) nachgeführt.
 //! - **Nachführen** ([`sync_ops`]): nach jeder Benutzer-Änderung (`Document::commit`) löst der Kern
 //!   die Bezüge auf und schreibt die Lage in `pts` zurück (dieselbe Undo-Stufe). Damit lesen alle
 //!   Ableitungen (Plan, DXF, Griffe, Auswahl-Info) einfach `pts`, und `pts` ist immer die zuletzt
@@ -78,6 +82,7 @@ struct WallGeo {
     offs: Vec<f64>,
     total: f64,
     arc: bool,
+    warc: Option<crate::wall_arc::WallArc>,
 }
 
 fn wall_geo(lk: &Lookup, w: &Value) -> Option<WallGeo> {
@@ -106,16 +111,40 @@ fn wall_geo(lk: &Lookup, w: &Value) -> Option<WallGeo> {
         }
     }
     let arc = crate::wall_arc::is_arc_bulge(num(w.get("bulge")));
-    Some(WallGeo { a, b, offs, total, arc })
+    let warc = if arc { crate::wall_arc::WallArc::of(kernel2d::Vec2 { x: a.0, y: a.1 }, kernel2d::Vec2 { x: b.0, y: b.1 }, num(w.get("bulge"))) } else { None };
+    Some(WallGeo { a, b, offs, total, arc, warc })
 }
 
 impl WallGeo {
-    /// Linie `index` (fehlt = Achse): Anfang und Ende.
+    fn offset(&self, index: Option<u32>) -> Option<f64> {
+        match index {
+            None => Some(0.0),
+            Some(k) => self.offs.get(k as usize).copied(),
+        }
+    }
+
+    /// Punkt auf Linie `index` beim Anteil `t` (Bogenwand: entlang der Bogenlänge auf dem Versatzbogen).
+    fn point(&self, index: Option<u32>, t: f64) -> Option<P> {
+        let o = self.offset(index)?;
+        match &self.warc {
+            Some(w) => {
+                let q = w.point(t * w.length(), o);
+                Some((q.x, q.y))
+            }
+            None => {
+                let (a, b) = self.line(index)?;
+                Some(lerp(a, b, t))
+            }
+        }
+    }
+
+    /// Linie `index` (fehlt = Achse): Anfang und Ende (Bogenwand: Sehne zwischen den Bogenenden).
     fn line(&self, index: Option<u32>) -> Option<(P, P)> {
-        let o = match index {
-            None => 0.0,
-            Some(k) => *self.offs.get(k as usize)?,
-        };
+        let o = self.offset(index)?;
+        if let Some(w) = &self.warc {
+            let (p0, p1) = (w.point(0.0, o), w.point(w.length(), o));
+            return Some(((p0.x, p0.y), (p1.x, p1.y)));
+        }
         let n = left(unit(self.a, self.b)?);
         Some((add(self.a, n, o), add(self.b, n, o)))
     }
@@ -149,6 +178,32 @@ struct Shape {
     pts: Vec<P>,
     closed: bool,
     center: Option<P>,
+    /// Weitere geschlossene Umrisse (Treppenpodest): Ecken/Kanten zählen nach denen von `pts` weiter.
+    more: Vec<Vec<P>>,
+}
+
+impl Shape {
+    fn new(pts: Vec<P>, closed: bool, center: Option<P>) -> Shape {
+        Shape { pts, closed, center, more: Vec::new() }
+    }
+
+    fn vertex(&self, mut i: usize) -> Option<P> {
+        if i < self.pts.len() {
+            return Some(self.pts[i]);
+        }
+        i -= self.pts.len();
+        for m in &self.more {
+            if i < m.len() {
+                return Some(m[i]);
+            }
+            i -= m.len();
+        }
+        None
+    }
+
+    fn vertex_count(&self) -> usize {
+        self.pts.len() + self.more.iter().map(Vec::len).sum::<usize>()
+    }
 }
 
 fn pts_list(v: Option<&Value>) -> Vec<P> {
@@ -163,35 +218,55 @@ fn column_shape(c: &Value) -> Option<Shape> {
         let rot = num(c.get("rotation")).unwrap_or(0.0);
         let (co, si) = (crate::jsnum::cos(rot), crate::jsnum::sin(rot));
         let pts = [(-hw, -hd), (hw, -hd), (hw, hd), (-hw, hd)].iter().map(|&(x, y)| (at.0 + x * co - y * si, at.1 + x * si + y * co)).collect();
-        return Some(Shape { pts, closed: true, center: Some(at) });
+        return Some(Shape::new(pts, true, Some(at)));
     }
-    Some(Shape { pts: Vec::new(), closed: false, center: Some(at) })
+    Some(Shape::new(Vec::new(), false, Some(at)))
 }
 
 fn drawing_shape(d: &Value) -> Option<Shape> {
     let g = d.get("geom")?;
     let p = |k: &str| pt(g.get(k));
     Some(match str_of(g, "shape")? {
-        "line" => Shape { pts: vec![p("a")?, p("b")?], closed: false, center: None },
-        "polyline" => Shape { pts: pts_list(g.get("pts")), closed: g.get("closed").and_then(Value::as_bool).unwrap_or(false), center: None },
+        "line" => Shape::new(vec![p("a")?, p("b")?], false, None),
+        "polyline" => Shape::new(pts_list(g.get("pts")), g.get("closed").and_then(Value::as_bool).unwrap_or(false), None),
         "rect" => {
             let (lo, hi) = (p("min")?, p("max")?);
-            Shape { pts: vec![lo, (hi.0, lo.1), hi, (lo.0, hi.1)], closed: true, center: None }
+            Shape::new(vec![lo, (hi.0, lo.1), hi, (lo.0, hi.1)], true, None)
         }
-        "circle" | "arc" | "ellipse" => Shape { pts: Vec::new(), closed: false, center: Some(p("center")?) },
+        "circle" | "arc" | "ellipse" => Shape::new(Vec::new(), false, Some(p("center")?)),
         _ => return None,
     })
 }
 
 /// Listen, in denen Ecke/Kante/Mitte ihr Element suchen (in dieser Reihenfolge).
-const SHAPE_LISTS: [&str; 5] = ["columns", "ceilings", "roofs", "rooms", "drawings2d"];
+const SHAPE_LISTS: [&str; 6] = ["columns", "ceilings", "roofs", "rooms", "drawings2d", "stairs"];
+
+/// Treppe: Umriss (gerade/L: Aussenlinie; Wendel: die vier Ecken der Schliesslinien), Podest als
+/// weiterer Umriss, Mittelpunkt nur bei der Wendel.
+fn stair_shape(e: &Value) -> Option<Shape> {
+    let s: crate::model::Stair = serde_json::from_value(e.clone()).ok()?;
+    let sp = crate::stair::decode_params(&s.encode())?;
+    let o = kernel2d::stair_outline(&sp);
+    let t = |q: &kernel2d::Vec2| (q.x, q.y);
+    if let Some(poly) = o.polygon {
+        let mut sh = Shape::new(poly.iter().map(t).collect(), true, None);
+        if let Some(l) = kernel2d::stair_geometry(&sp, 3.0).landing {
+            sh.more.push(l.iter().map(t).collect());
+        }
+        return Some(sh);
+    }
+    let sp2 = o.spiral?;
+    let [(i0, o0), (i1, o1)] = sp2.lines;
+    Some(Shape::new(vec![t(&i0), t(&o0), t(&o1), t(&i1)], true, Some((sp2.arcs[0].0.x, sp2.arcs[0].0.y))))
+}
 
 fn shape_of(coll: &str, e: &Value) -> Option<Shape> {
     match coll {
         "columns" => column_shape(e),
-        "ceilings" | "roofs" => Some(Shape { pts: pts_list(e.get("outline")), closed: true, center: None }),
-        "rooms" => Some(Shape { pts: pts_list(e.get("boundary")), closed: true, center: None }),
+        "ceilings" | "roofs" => Some(Shape::new(pts_list(e.get("outline")), true, None)),
+        "rooms" => Some(Shape::new(pts_list(e.get("boundary")), true, None)),
         "drawings2d" => drawing_shape(e),
+        "stairs" => stair_shape(e),
         _ => None,
     }
 }
@@ -200,15 +275,64 @@ fn find_shape(lk: &Lookup, id: &str) -> Option<Shape> {
     SHAPE_LISTS.iter().find_map(|c| lk.find(c, id).map(|e| (*c, e))).and_then(|(c, e)| shape_of(c, e))
 }
 
-fn edge(s: &Shape, i: usize) -> Option<(P, P)> {
-    let n = s.pts.len();
+fn ring_edge(pts: &[P], closed: bool, i: usize) -> Option<(P, P)> {
+    let n = pts.len();
     if i + 1 < n {
-        Some((s.pts[i], s.pts[i + 1]))
-    } else if s.closed && n > 2 && i + 1 == n {
-        Some((s.pts[i], s.pts[0]))
+        Some((pts[i], pts[i + 1]))
+    } else if closed && n > 2 && i + 1 == n {
+        Some((pts[i], pts[0]))
     } else {
         None
     }
+}
+
+fn ring_edges(pts: &[P], closed: bool) -> usize {
+    if closed && pts.len() > 2 {
+        pts.len()
+    } else {
+        pts.len().saturating_sub(1)
+    }
+}
+
+fn edge(s: &Shape, mut i: usize) -> Option<(P, P)> {
+    let n = ring_edges(&s.pts, s.closed);
+    if i < n {
+        return ring_edge(&s.pts, s.closed, i);
+    }
+    i -= n;
+    for m in &s.more {
+        let k = ring_edges(m, true);
+        if i < k {
+            return ring_edge(m, true, i);
+        }
+        i -= k;
+    }
+    None
+}
+
+fn edge_count(s: &Shape) -> usize {
+    ring_edges(&s.pts, s.closed) + s.more.iter().map(|m| ring_edges(m, true)).sum::<usize>()
+}
+
+/// Rasterachse `index` des Rasters `id` und das Raster selbst.
+fn with_grid<T>(lk: &Lookup, id: &str, f: impl FnOnce(&crate::grid::Spec) -> Option<T>) -> Option<T> {
+    let d = lk.find("drawings2d", id)?;
+    let g: crate::model::Drawing2DGeom = serde_json::from_value(d.get("geom")?.clone()).ok()?;
+    f(&crate::grid::Spec::of(&g)?)
+}
+
+/// Kreis/Bogen (2D-Zeichnung) oder Bogenwand-Schicht: Mittelpunkt, Radius.
+fn round_of(lk: &Lookup, id: &str, index: Option<u32>) -> Option<(P, f64)> {
+    if let Some(d) = lk.find("drawings2d", id) {
+        let g = d.get("geom")?;
+        if matches!(str_of(g, "shape"), Some("circle" | "arc")) {
+            return Some((pt(g.get("center"))?, num(g.get("r"))?));
+        }
+        return None;
+    }
+    let g = wall_geo(lk, lk.find("walls", id)?)?;
+    let w = g.warc?;
+    Some(((w.center.x, w.center.y), w.radius_at(g.offset(index)?)))
 }
 
 /// Schnitt zweier unendlicher Geraden (parallel → `None`).
@@ -229,17 +353,27 @@ fn intersect(a: (P, P), b: (P, P)) -> Option<P> {
 pub fn resolve(lk: &Lookup, r: &DimRef) -> Option<P> {
     let wall_line = |id: &str, idx: Option<u32>| -> Option<(P, P)> { wall_geo(lk, lk.find("walls", id)?)?.line(idx) };
     let p = match r.feature {
-        DimFeature::Wall => {
-            let (a, b) = wall_line(&r.id, r.index)?;
-            lerp(a, b, r.t?)
-        }
+        DimFeature::Wall => wall_geo(lk, lk.find("walls", &r.id)?)?.point(r.index, r.t?)?,
         DimFeature::Opening => opening_point(lk, lk.find("openings", &r.id)?, r.index?, r.index2)?,
-        DimFeature::Vertex => *find_shape(lk, &r.id)?.pts.get(r.index? as usize)?,
+        DimFeature::Vertex => find_shape(lk, &r.id)?.vertex(r.index? as usize)?,
         DimFeature::Edge => {
             let (a, b) = edge(&find_shape(lk, &r.id)?, r.index? as usize)?;
             lerp(a, b, r.t?)
         }
-        DimFeature::Center => find_shape(lk, &r.id)?.center?,
+        DimFeature::Center => match find_shape(lk, &r.id) {
+            Some(sh) => sh.center?,
+            None => {
+                let w = wall_geo(lk, lk.find("walls", &r.id)?)?.warc?;
+                (w.center.x, w.center.y)
+            }
+        },
+        DimFeature::Axis => with_grid(lk, &r.id, |g| g.point_at(r.index?, r.t?))?,
+        DimFeature::AxisCross => with_grid(lk, &r.id, |g| g.cross(r.index?, r.index2?))?,
+        DimFeature::Rim => {
+            let (c, rad) = round_of(lk, &r.id, r.index)?;
+            let a = r.t?;
+            (c.0 + rad * a.cos(), c.1 + rad * a.sin())
+        }
         DimFeature::Intersection => intersect(wall_line(&r.id, r.index)?, wall_line(r.id2.as_deref()?, r.index2)?)?,
     };
     finite(p).then_some(p)
@@ -276,7 +410,6 @@ pub fn attach(lk: &Lookup, level: &str, s: P, tol: f64) -> Option<DimRef> {
         .iter()
         .filter(|w| on_level(w, "floorId", level))
         .filter_map(|w| Some((str_of(w, "id")?, wall_geo(lk, w)?)))
-        .filter(|(_, g)| !g.arc)
         .collect();
     // 1) Öffnungen: Leibungen und Mitte auf jeder Linie der Wirtswand.
     for o in list(lk, "openings") {
@@ -300,9 +433,24 @@ pub fn attach(lk: &Lookup, level: &str, s: P, tol: f64) -> Option<DimRef> {
             }
         }
     }
+    // 2b) Bogenwände: Mittelpunkt, Punkt auf Achse/Schichtgrenze (Anteil der Bogenlänge).
+    for (id, g) in walls.iter().filter(|(_, g)| g.warc.is_some()) {
+        let Some(w) = &g.warc else { continue };
+        if dist((w.center.x, w.center.y), s) <= tol {
+            return Some(rf(id, DimFeature::Center));
+        }
+        let (ls, ln) = w.local(kernel2d::Vec2 { x: s.0, y: s.1 });
+        let len = w.length();
+        for (k, _, _) in g.lines() {
+            let Some(o) = g.offset(k) else { continue };
+            if (ln - o).abs() <= tol && ls >= -tol && ls <= len + tol {
+                return Some(DimRef { index: k, t: Some((ls / len).clamp(0.0, 1.0)), ..rf(id, DimFeature::Wall) });
+            }
+        }
+    }
     // 3) Wandecken: auf den Linien zweier Wände (Verlängerung bis zur Wanddicke über das Ende).
     let mut hits: Vec<(&str, Option<u32>, P, P, f64)> = Vec::new();
-    for (id, g) in &walls {
+    for (id, g) in walls.iter().filter(|(_, g)| !g.arc) {
         let len = dist(g.a, g.b);
         let m = (g.total.max(0.3) + tol) / len;
         for (k, a, b) in g.lines() {
@@ -324,7 +472,7 @@ pub fn attach(lk: &Lookup, level: &str, s: P, tol: f64) -> Option<DimRef> {
     if let Some(h) = hits.iter().find(|h| (0.0..=1.0).contains(&h.4)) {
         return Some(DimRef { index: h.1, t: Some(h.4), ..rf(h.0, DimFeature::Wall) });
     }
-    // 5) Stützen, Decken, Dächer, Räume, 2D-Zeichnungen: Mitte, Ecken, Kanten.
+    // 5) Stützen, Decken, Dächer, Räume, 2D-Zeichnungen, Treppen: Mitte, Ecken, Kanten.
     for coll in SHAPE_LISTS {
         let key = if coll == "drawings2d" { "levelId" } else { "floorId" };
         for e in list(lk, coll).iter().filter(|e| on_level(e, key, level)) {
@@ -332,10 +480,10 @@ pub fn attach(lk: &Lookup, level: &str, s: P, tol: f64) -> Option<DimRef> {
             if sh.center.is_some_and(|c| dist(c, s) <= tol) {
                 return Some(rf(id, DimFeature::Center));
             }
-            if let Some(i) = sh.pts.iter().position(|p| dist(*p, s) <= tol) {
+            if let Some(i) = (0..sh.vertex_count()).find(|&i| sh.vertex(i).is_some_and(|p| dist(p, s) <= tol)) {
                 return Some(DimRef { index: Some(i as u32), ..rf(id, DimFeature::Vertex) });
             }
-            for i in 0..sh.pts.len() {
+            for i in 0..edge_count(&sh) {
                 let Some((a, b)) = edge(&sh, i) else { continue };
                 if let Some((t, d)) = param(a, b, s) {
                     if d <= tol && (0.0..=1.0).contains(&t) {
@@ -345,7 +493,91 @@ pub fn attach(lk: &Lookup, level: &str, s: P, tol: f64) -> Option<DimRef> {
             }
         }
     }
+    // 6) Achsraster ([112]): Achsschnittpunkt, sonst Punkt auf einer Achse.
+    for d in list(lk, "drawings2d") {
+        let Some(id) = str_of(d, "id") else { continue };
+        let Some(g) = d.get("geom").filter(|g| str_of(g, "shape") == Some("grid")) else { continue };
+        let Ok(geom) = serde_json::from_value::<crate::model::Drawing2DGeom>(g.clone()) else { continue };
+        let Some(spec) = crate::grid::Spec::of(&geom) else { continue };
+        let visible = serde_json::from_value::<crate::model::Drawing2D>(d.clone()).map(|dd| crate::grid::visible_on(&dd, level)).unwrap_or(false);
+        if !visible {
+            continue;
+        }
+        let n = (spec.a.len() + spec.b.len()) as u32;
+        for i in 0..spec.a.len() as u32 {
+            for j in spec.a.len() as u32..n {
+                if spec.cross(i, j).is_some_and(|p| dist(p, s) <= tol) {
+                    return Some(DimRef { index: Some(i), index2: Some(j), ..rf(id, DimFeature::AxisCross) });
+                }
+            }
+        }
+        for i in 0..n {
+            if let Some((t, d)) = spec.project(i, s) {
+                if d <= tol && (-1e-9..=1.0 + 1e-9).contains(&t) {
+                    return Some(DimRef { index: Some(i), t: Some(t.clamp(0.0, 1.0)), ..rf(id, DimFeature::Axis) });
+                }
+            }
+        }
+    }
     None
+}
+
+/// Rand-Bezug (Winkel `a`) auf dem Kreis/Bogen `id` ([38]).
+fn rim(id: &str, index: Option<u32>, a: f64) -> DimRef {
+    DimRef { index, t: Some(a), ..rf(id, DimFeature::Rim) }
+}
+
+/// Kreis/Bogen (2D-Zeichnung des Geschosses) oder Bogenwand-Schicht, auf deren Rand `s` liegt
+/// (Toleranz `tol`): Kennung, Schichtgrenze, Mittelpunkt, Radius.
+pub fn find_round(lk: &Lookup, level: &str, s: P, tol: f64) -> Option<(String, Option<u32>, P, f64)> {
+    // Nächster Rand innerhalb der Toleranz (bei konzentrischen Kreisen/Schichten der genaueste).
+    let mut best: Option<(f64, (String, Option<u32>, P, f64))> = None;
+    let mut offer = |err: f64, hit: (String, Option<u32>, P, f64)| {
+        if err <= tol && best.as_ref().is_none_or(|(e, _)| err < *e) {
+            best = Some((err, hit));
+        }
+    };
+    for d in list(lk, "drawings2d").iter().filter(|d| on_level(d, "levelId", level)) {
+        let (Some(id), Some(g)) = (str_of(d, "id"), d.get("geom")) else { continue };
+        if !matches!(str_of(g, "shape"), Some("circle" | "arc")) {
+            continue;
+        }
+        let (Some(c), Some(r)) = (pt(g.get("center")), num(g.get("r"))) else { continue };
+        offer((dist(c, s) - r).abs(), (id.to_owned(), None, c, r));
+    }
+    for w in list(lk, "walls").iter().filter(|w| on_level(w, "floorId", level)) {
+        let (Some(id), Some(g)) = (str_of(w, "id"), wall_geo(lk, w)) else { continue };
+        let Some(arc) = g.warc else { continue };
+        let c = (arc.center.x, arc.center.y);
+        let mut ks: Vec<Option<u32>> = vec![None];
+        ks.extend((0..g.offs.len() as u32).map(Some));
+        for k in ks {
+            let Some(o) = g.offset(k) else { continue };
+            let r = arc.radius_at(o);
+            offer((dist(c, s) - r).abs(), (id.to_owned(), k, c, r));
+        }
+    }
+    best.map(|(_, h)| h)
+}
+
+/// Radius-/Durchmesser-/Bogenlängen-Bemassung ([38]): aus den Klickpunkten `clicks` (ein Punkt auf
+/// dem Rand; bei der Bogenlänge Anfang und Ende) die Punkte `pts` (Mittelpunkt, Randpunkt[e]) und
+/// ihre Bezüge. `None`, wenn kein Kreis/Bogen/Bogenwand getroffen wird.
+pub fn round_dimension(lk: &Lookup, level: &str, kind: crate::model::DimKind, clicks: &[P], tol: f64) -> Option<(Vec<P>, Vec<Option<DimRef>>)> {
+    use crate::model::DimKind;
+    let first = *clicks.first()?;
+    let (id, idx, c, r) = find_round(lk, level, first, tol)?;
+    let ang = |p: P| (p.1 - c.1).atan2(p.0 - c.0);
+    let on_rim = |a: f64| (c.0 + r * a.cos(), c.1 + r * a.sin());
+    let a0 = ang(first);
+    let mut pts = vec![c, on_rim(a0)];
+    let mut refs = vec![Some(rf(&id, DimFeature::Center)), Some(rim(&id, idx, a0))];
+    if kind == DimKind::Arc {
+        let a1 = ang(*clicks.get(1)?);
+        pts.push(on_rim(a1));
+        refs.push(Some(rim(&id, idx, a1)));
+    }
+    Some((pts, refs))
 }
 
 /// Bezüge einer neuen Kette `pts`: je Punkt der erste Fangpunkt aus `snaps`, der auf ihn projiziert
@@ -411,6 +643,13 @@ pub fn resolve_chain(lk: &Lookup, pts: &[P], refs: &[Option<DimRef>]) -> (Vec<P>
     (out, lost)
 }
 
+/// Punkte ohne Kettenprojektion (Radius-/Bogenmass): jeder hängende Punkt an seiner Lage.
+fn resolve_each(lk: &Lookup, pts: &[P], refs: &[Option<DimRef>]) -> (Vec<P>, Vec<bool>) {
+    let q: Vec<Option<P>> = (0..pts.len()).map(|i| refs.get(i).and_then(Option::as_ref).and_then(|r| resolve(lk, r))).collect();
+    let lost = (0..refs.len()).map(|i| refs[i].is_some() && q.get(i).copied().flatten().is_none()).collect();
+    (pts.iter().zip(&q).map(|(p, n)| n.unwrap_or(*p)).collect(), lost)
+}
+
 fn refs_of(g: &Value) -> Option<Vec<Option<DimRef>>> {
     let r = g.get("refs")?;
     let refs: Vec<Option<DimRef>> = serde_json::from_value(r.clone()).ok()?;
@@ -441,7 +680,8 @@ pub fn sync_ops(lk: &Lookup) -> Vec<Op> {
         if pts.len() != g.get("pts").and_then(Value::as_array).map_or(0, Vec::len) {
             continue;
         }
-        let (np, lost) = resolve_chain(lk, &pts, &refs);
+        let round = str_of(g, "kind").is_some();
+        let (np, lost) = if round { resolve_each(lk, &pts, &refs) } else { resolve_chain(lk, &pts, &refs) };
         let moved = np.iter().zip(&pts).any(|(a, b)| dist(*a, *b) > MOVE_EPS);
         let flags_changed = refs.iter().zip(&lost).any(|(r, l)| r.as_ref().is_some_and(|r| r.lost.unwrap_or(false) != *l));
         if !moved && !flags_changed {
@@ -688,6 +928,134 @@ mod tests {
         // Ohne Bezugsänderung (Feld ausserhalb): nichts nachzuführen.
         d.commit(crate::ops::ops_from_json(&json!([{"kind": "setField", "key": "name", "value": "X"}])).unwrap(), None, 1.0, false).unwrap();
         assert!(d.last_extra().is_empty());
+    }
+
+    fn grid_project() -> Map<String, Value> {
+        root(json!({
+            "drawings2d": [
+                {"id": "G", "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+                    "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 6}], "b": [{"label": "A", "pos": 0}, {"label": "B", "pos": 4}], "extend": 1}}
+            ]
+        }))
+    }
+
+    /// [112] Rasterachsen: Punkt auf Achse, Achsschnittpunkt; die Bemassung folgt der verschobenen Achse.
+    #[test]
+    fn rasterachsen_bezuege_folgen_der_achse() {
+        let mut r = grid_project();
+        let lk = Lookup::plain(&r);
+        // Achsschnittpunkt 2/B (index 1 × index 3), Punkt auf Achse 1.
+        let cross = attach(&lk, "eg", (6.0, 4.0), TOL).unwrap();
+        assert_eq!((cross.feature, cross.index, cross.index2), (DimFeature::AxisCross, Some(1), Some(3)));
+        let on1 = attach(&lk, "eg", (0.0, 2.5), TOL).unwrap();
+        assert_eq!((on1.feature, on1.index), (DimFeature::Axis, Some(0)));
+        close(resolve(&lk, &on1).unwrap(), (0.0, 2.5));
+        // Bemassung zwischen Achse 1 und Achse 2 (Kette bei y = 1): Länge 6; Achse 2 nach x = 7.5 → 7.5.
+        let pts = [(0.0, 1.0), (6.0, 1.0)];
+        let refs = vec![attach(&lk, "eg", (0.0, 1.0), TOL), attach(&lk, "eg", (6.0, 1.0), TOL)];
+        assert!(refs.iter().all(|x| x.as_ref().is_some_and(|x| x.feature == DimFeature::Axis)));
+        set(&mut r, "drawings2d", "G", "geom", json!({"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+            "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 7.5}], "b": [{"label": "A", "pos": 0}, {"label": "B", "pos": 4}], "extend": 1}));
+        let (np, lost) = resolve_chain(&Lookup::plain(&r), &pts, &refs);
+        assert_eq!(lost, vec![false, false]);
+        close(np[0], (0.0, 1.0));
+        close(np[1], (7.5, 1.0));
+        // Raster gelöscht → ungültig.
+        r.insert("drawings2d".into(), json!([]));
+        assert!(resolve(&Lookup::plain(&r), refs[1].as_ref().unwrap()).is_none());
+    }
+
+    fn arc_project() -> Map<String, Value> {
+        root(json!({
+            "wallTypes": [{"id": "T", "layers": [{"thickness": 0.1}, {"thickness": 0.2}]}],
+            // Halbkreis: Mittelpunkt (5, 0), Achsradius 5, Scheitel (5, 5).
+            "walls": [{"id": "A", "floorId": "eg", "wallTypeId": "T", "start": {"x": 0, "y": 0}, "end": {"x": 10, "y": 0}, "bulge": 1}],
+            "drawings2d": [{"id": "K", "levelId": "eg", "geom": {"shape": "circle", "center": {"x": 30, "y": 0}, "r": 2}}]
+        }))
+    }
+
+    /// [38] Bogenwand: Enden, Punkt auf Achse/Fläche (Anteil der Bogenlänge), Mittelpunkt, Rand-Bezug.
+    #[test]
+    fn bogenwand_bezuege() {
+        let mut r = arc_project();
+        let lk = Lookup::plain(&r);
+        let apex = attach(&lk, "eg", (5.0, 5.0), TOL).unwrap();
+        assert_eq!((apex.feature, apex.index), (DimFeature::Wall, None));
+        assert!((apex.t.unwrap() - 0.5).abs() < 1e-9);
+        let face = attach(&lk, "eg", (5.0, 5.15), TOL).unwrap();
+        assert_eq!((face.feature, face.index), (DimFeature::Wall, Some(2)));
+        let end = attach(&lk, "eg", (10.0, 0.0), TOL).unwrap();
+        assert_eq!((end.feature, end.t), (DimFeature::Wall, Some(1.0)));
+        let centre = attach(&lk, "eg", (5.0, 0.0), TOL).unwrap();
+        assert_eq!(centre.feature, DimFeature::Center);
+        close(resolve(&lk, &centre).unwrap(), (5.0, 0.0));
+        close(resolve(&lk, &face).unwrap(), (5.0, 5.15));
+        // Rand-Bezug (Winkel 90°) auf der Fläche 2: Radius 5.15; Mittelpunkt und Winkel bleiben beim Strecken.
+        let rim_ref = DimRef { index: Some(2), t: Some(std::f64::consts::FRAC_PI_2), ..rf("A", DimFeature::Rim) };
+        close(resolve(&lk, &rim_ref).unwrap(), (5.0, 5.15));
+        // Wand verlängern (Ende x = 12 → Mittelpunkt (6, 0), Radius 6): Scheitel folgt.
+        set(&mut r, "walls", "A", "end", json!({"x": 12, "y": 0}));
+        let lk = Lookup::plain(&r);
+        close(resolve(&lk, &apex).unwrap(), (6.0, 6.0));
+        close(resolve(&lk, &centre).unwrap(), (6.0, 0.0));
+    }
+
+    /// [38] Radius-, Durchmesser- und Bogenlängen-Bemassung hängen an Kreis und Bogenwand.
+    #[test]
+    fn radius_und_bogenmass_assoziativ() {
+        use crate::model::DimKind;
+        let mut r = arc_project();
+        let lk = Lookup::plain(&r);
+        let (pts, refs) = round_dimension(&lk, "eg", DimKind::Radius, &[(30.0, 2.0)], 0.1).unwrap();
+        close(pts[0], (30.0, 0.0));
+        close(pts[1], (30.0, 2.0));
+        assert_eq!(refs[0].as_ref().unwrap().feature, DimFeature::Center);
+        // Kreis verschieben und vergrössern → Mittelpunkt und Randpunkt folgen (ohne Kettenprojektion).
+        set(&mut r, "drawings2d", "K", "geom", json!({"shape": "circle", "center": {"x": 40, "y": 5}, "r": 3}));
+        let (np, lost) = resolve_each(&Lookup::plain(&r), &pts, &refs);
+        assert_eq!(lost, vec![false, false]);
+        close(np[0], (40.0, 5.0));
+        close(np[1], (40.0, 8.0));
+        // Bogenlänge auf der Aussenfläche der Bogenwand (Radius 5.15): Viertelkreis von 90° bis 0°.
+        let lk = Lookup::plain(&r);
+        let (pts, refs) = round_dimension(&lk, "eg", DimKind::Arc, &[(5.0, 5.15), (5.15, 0.0)], 0.04).unwrap();
+        assert_eq!(pts.len(), 3);
+        close(pts[0], (5.0, 0.0));
+        assert_eq!(refs[1].as_ref().unwrap().index, Some(2));
+        // Nichts getroffen.
+        assert!(round_dimension(&lk, "eg", DimKind::Radius, &[(100.0, 100.0)], 0.1).is_none());
+    }
+
+    /// [38] Treppe: Umriss-Ecken/-Kanten und Podest-Kanten der L-Treppe sind anhängbar.
+    #[test]
+    fn treppe_bezuege() {
+        let stair = |shape: &str| json!({"id": "S", "type": "stair", "floorId": "eg", "categoryCode": "20", "shape": shape,
+            "start": {"x": 0, "y": 0}, "dir": {"x": 1, "y": 0}, "runLength": 3, "run2Length": 2, "turn": 1, "width": 1, "stepCount": 16});
+        let r = root(json!({"stairs": [stair("straight")]}));
+        let lk = Lookup::plain(&r);
+        let sh = find_shape(&lk, "S").unwrap();
+        assert_eq!(sh.pts.len(), 4);
+        // Eck 0 und Mitte der Kante 1 (Auftrittsende) hängen an und lösen auf.
+        let v0 = sh.pts[0];
+        let rv = attach(&lk, "eg", v0, TOL).unwrap();
+        assert_eq!((rv.feature, rv.id.as_str(), rv.index), (DimFeature::Vertex, "S", Some(0)));
+        let (a, b) = edge(&sh, 1).unwrap();
+        let mid = lerp(a, b, 0.5);
+        let re = attach(&lk, "eg", mid, TOL).unwrap();
+        assert_eq!((re.feature, re.index), (DimFeature::Edge, Some(1)));
+        close(resolve(&lk, &re).unwrap(), mid);
+        // L-Treppe: zusätzlich Podest-Ecken und -Kanten (Indizes nach dem Umriss).
+        let r = root(json!({"stairs": [stair("L")]}));
+        let lk = Lookup::plain(&r);
+        let sh = find_shape(&lk, "S").unwrap();
+        assert_eq!(sh.pts.len(), 6);
+        assert_eq!(sh.more.len(), 1);
+        let n = sh.pts.len();
+        let landing_corner = sh.vertex(n).unwrap();
+        let rl = attach(&lk, "eg", landing_corner, TOL).unwrap();
+        assert_eq!(rl.feature, DimFeature::Vertex);
+        close(resolve(&lk, &rl).unwrap(), landing_corner);
+        assert!(edge_count(&sh) > n);
     }
 
     #[test]

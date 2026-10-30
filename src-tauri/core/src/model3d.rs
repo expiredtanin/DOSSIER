@@ -255,6 +255,10 @@ pub struct RWall {
     pub base_elevation: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_drop: Option<[f64; 2]>,
+    /// Ebene Oberkante unter einer Dachfläche ([G2]): `[z am Anfang (Mittellinie), dz/dx, dz/dy]`
+    /// (Grundriss-Meter). Übersteuert `topDrop`; `height` ist dann der höchste Eckwert über der UK.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_plane: Option<[f64; 3]>,
     pub color: Rgb,
     pub layers: Vec<()>,
     pub wall_id: String,
@@ -525,13 +529,13 @@ fn compute_joins_by_floor(p: &Project) -> Result<HashMap<String, WallCuts>, Stri
     Ok(merged)
 }
 
-fn floor_context(p: &Project, floor_id: &str) -> FloorContext {
+fn floor_context(p: &Project, floor_id: &str, with_ceilings: bool) -> FloorContext {
     let ceilings: Vec<CeilingIn> = p
         .ceilings
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter(|c| c.floor_id == floor_id && c.outline.len() >= 3)
+        .filter(|c| with_ceilings && c.floor_id == floor_id && c.outline.len() >= 3)
         .map(|c| {
             let (z_bottom, z_top) = p.ceiling_vertical_extent(c);
             CeilingIn {
@@ -552,7 +556,14 @@ fn floor_context(p: &Project, floor_id: &str) -> FloorContext {
             let eaves_z = p.roof_base_elevation(r);
             let geo = crate::roof::roof_geometry(&r.params(), eaves_z);
             let total: f64 = p.roof_layers(r).iter().fold(0.0, |s, l| s + l.thickness.max(0.0));
-            RoofIn { eaves_z, total_thickness: total, eaves: geo.eaves, planes: geo.planes }
+            let mut ri = RoofIn::new(eaves_z, total, geo.eaves, geo.planes);
+            // Gauben ([G2]): unter dem Gaubeninneren endet die Wand an der Gaubendach-Unterkante.
+            for d in r.dormers.as_deref().unwrap_or(&[]) {
+                if let Some(g) = crate::dormer::geometry(p, r, d) {
+                    ri.facets.extend(g.under_facets());
+                }
+            }
+            ri
         })
         .collect();
     FloorContext::new(ceilings, roofs)
@@ -571,17 +582,13 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
     let joins = if layered { Some(compute_joins_by_floor(p)?) } else { None };
     let maps = wall_material_color_maps(p);
     let mut contexts: HashMap<&str, FloorContext> = HashMap::new();
-    let empty = FloorContext::default();
     let mut out = Vec::new();
     let by_wall = p.openings_by_wall();
     for wall in &p.walls {
         let (bands, stacked) = resolve_wall_bands(p, &maps, wall, layered);
         let (z_bottom, z_top) = p.wall_vertical_extent(wall);
-        let ctx = if layered {
-            contexts.entry(wall.floor_id.as_str()).or_insert_with(|| floor_context(p, &wall.floor_id))
-        } else {
-            &empty
-        };
+        // Schnitt-Eingabe: nur die Dächer ([G2]); Decken rechnet der Schnitt selbst (Dominanz).
+        let ctx = contexts.entry(wall.floor_id.as_str()).or_insert_with(|| floor_context(p, &wall.floor_id, layered));
         let win = wall_bands::WallIn {
             start: kv(wall.start),
             end: kv(wall.end),
@@ -599,6 +606,7 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
             bands: bands.iter().map(|b| BandIn { thickness: b.thickness, priority: b.priority }).collect(),
             openings: wall_openings(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), true),
             cuts: if layered { joins.as_ref().and_then(|j| j.get(&wall.id)).cloned().unwrap_or_default() } else { WallCuts::default() },
+            roof_attach: wall.roof_attach,
             reveals: if layered && stacked { wall_reveals(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), bands.len()) } else { Vec::new() },
         };
         // Bogenwand ([T2]): Sehnen-Teilwände mit radialen Gehrungen.
@@ -618,8 +626,8 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
             let Some(b) = bands.get(piece.band) else { continue };
             // Schnitt-Eingabe der Bogen-Teilwände: radiale Gehrungen auch ohne Schichtband-Pfad.
             if arc.is_some() && !layered {
-                piece.start_cut = win.cuts.start_cut;
-                piece.end_cut = win.cuts.end_cut;
+                piece.start_cut = piece.start_cut.or(win.cuts.start_cut);
+                piece.end_cut = piece.end_cut.or(win.cuts.end_cut);
             }
             out.push(RWall {
                 start: [piece.start.x, piece.start.y],
@@ -628,6 +636,7 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
                 height: piece.z_top - piece.z_bottom,
                 base_elevation: piece.z_bottom,
                 top_drop: piece.top_drop,
+                top_plane: piece.top_plane.map(|c| [c[0] + c[1] * piece.start.x + c[2] * piece.start.y, c[1], c[2]]),
                 color: b.color,
                 layers: vec![],
                 wall_id: wall.id.clone(),
@@ -637,13 +646,78 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
                 cut: band_cut_meta(b),
                 start_cut: piece.start_cut.map(|l| [l.point.x, l.point.y, l.dir.x, l.dir.y]),
                 end_cut: piece.end_cut.map(|l| [l.point.x, l.point.y, l.dir.x, l.dir.y]),
-                joint: arc.map_or([false; 2], |a| [inner_joint(&a, wall, &keep, piece.start), inner_joint(&a, wall, &keep, piece.end)]),
+                joint: {
+                    let j = arc.map_or([false; 2], |a| [inner_joint(&a, wall, &keep, piece.start), inner_joint(&a, wall, &keep, piece.end)]);
+                    [j[0] || piece.joint[0], j[1] || piece.joint[1]]
+                },
             });
         }
         }
     }
     let _ = hypot2;
     Ok(out)
+}
+
+/// Grundriss-Ecken eines Wandkörpers an seinen Schnittlinien: Anfang +n, Ende +n, Ende −n, Anfang −n
+/// (+n = linke Normale). `None` bei entarteter Achse.
+pub(crate) fn wall_footprint(w: &RWall) -> Option<[[f64; 2]; 4]> {
+    let (dx, dy) = (w.end[0] - w.start[0], w.end[1] - w.start[1]);
+    let l = hypot2(dx, dy);
+    if !(l > 1e-9) || !(w.thickness > 0.0) {
+        return None;
+    }
+    let (ux, uy) = (dx / l, dy / l);
+    let (nx, ny) = (-uy, ux);
+    let h = w.thickness / 2.0;
+    let at = |p: [f64; 2], o: f64, cut: Option<[f64; 4]>| -> [f64; 2] {
+        let q = [p[0] + nx * o, p[1] + ny * o];
+        let Some([cx, cy, ex, ey]) = cut else { return q };
+        let den = ux * ey - uy * ex;
+        if den.abs() < 1e-12 {
+            return q;
+        }
+        let t = ((cx - q[0]) * ey - (cy - q[1]) * ex) / den;
+        if t.is_finite() && t.abs() < l {
+            [q[0] + ux * t, q[1] + uy * t]
+        } else {
+            q
+        }
+    };
+    Some([at(w.start, h, w.start_cut), at(w.end, h, w.end_cut), at(w.end, -h, w.end_cut), at(w.start, -h, w.start_cut)])
+}
+
+/// Oberkante eines Wandkörpers an einem Grundriss-Punkt (ebene Oberkante unter einem Dach, [G2]).
+pub(crate) fn wall_top_at(w: &RWall, q: [f64; 2]) -> f64 {
+    let zt = w.base_elevation + w.height;
+    match w.top_plane {
+        Some(c) => (c[0] + c[1] * (q[0] - w.start[0]) + c[2] * (q[1] - w.start[1])).clamp(w.base_elevation, zt),
+        None => zt,
+    }
+}
+
+/// Wandkörper mit ebener Oberkante als geschlossenes Netz (Modell x, y, z), ohne Löcher.
+pub(crate) fn wall_piece_mesh(w: &RWall) -> Option<crate::solid_bool::Mesh> {
+    let fp = wall_footprint(w)?;
+    let zb = w.base_elevation;
+    let m = crate::solid_bool::Mesh::prism_between(&fp, &|_, _| zb, &|x, y| wall_top_at(w, [x, y]));
+    (!m.is_empty()).then_some(m)
+}
+
+/// Volumen eines Wandkörpers ohne Löcher: Grundfläche × Höhe im Schwerpunkt (exakt bei ebener Oberkante).
+pub(crate) fn wall_piece_volume(w: &RWall) -> f64 {
+    let Some(q) = wall_footprint(w) else { return 0.0 };
+    let (mut a, mut cx, mut cy) = (0.0, 0.0, 0.0);
+    for i in 0..4 {
+        let (p0, p1) = (q[i], q[(i + 1) % 4]);
+        let c = p0[0] * p1[1] - p1[0] * p0[1];
+        a += c;
+        cx += (p0[0] + p1[0]) * c;
+        cy += (p0[1] + p1[1]) * c;
+    }
+    if a.abs() < 1e-15 {
+        return 0.0;
+    }
+    (a / 2.0).abs() * (wall_top_at(w, [cx / (3.0 * a), cy / (3.0 * a)]) - w.base_elevation)
 }
 
 // ── Öffnungs-Einbauteile (Glas, Rahmen, Sprossen, Bank, Kasten) ─────────────
@@ -1058,7 +1132,7 @@ fn rail_rgb() -> Rgb {
     hex_to_rgb("#74797f", SLAB_RGB)
 }
 
-/// Flache Eingabe der Treppen für `stairs3d` (23 Zahlen je Treppe); `wanted` wählt vor.
+/// Flache Eingabe der Treppen für `stairs3d` (24 Zahlen je Treppe); `wanted` wählt vor.
 fn stair_input<'a>(p: &'a Project, wanted: impl Fn(&Stair, Option<&StairType>) -> bool) -> Option<(Vec<(usize, &'a Stair)>, Vec<f64>)> {
     let mut stairs: Vec<(usize, &Stair)> = Vec::new();
     let mut types: Vec<Option<&StairType>> = Vec::new();
@@ -1093,6 +1167,7 @@ fn stair_input<'a>(p: &'a Project, wanted: impl Fn(&Stair, Option<&StairType>) -
             Some(StairTypeRailing::Beide) => 3.0,
             _ => 0.0,
         });
+        buf.push(s.center_column.filter(|r| r.is_finite() && *r > 0.0).unwrap_or(0.0));
     }
     Some((stairs, buf))
 }
@@ -1123,17 +1198,17 @@ fn meshes_of(meshes: Vec<crate::mesh3d::Mesh>, color: Rgb) -> Vec<RMesh> {
     meshes.into_iter().map(|m| RMesh { positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None }).collect()
 }
 
-/// Glatte Ortbeton-Laufplatten gerader Treppen (`emitStairMeshes`).
+/// Glatte Ortbeton-Laufplatten gerader Treppen und Wendelfläche (Schraubenfläche) von Wendeltreppen (`emitStairMeshes`).
 pub fn emit_stair_meshes(p: &Project) -> Vec<RMesh> {
-    match stair_input(p, |s, st| st.is_some_and(|t| t.structure == StairTypeStructure::Beton) && s.shape == StairShape::Straight) {
+    match stair_input(p, |s, st| st.is_some_and(|t| t.structure == StairTypeStructure::Beton) && matches!(s.shape, StairShape::Straight | StairShape::Spiral)) {
         Some((_, buf)) => meshes_of(crate::stairs3d::slab_meshes(&buf), stair_rgb()),
         None => vec![],
     }
 }
 
-/// Handlauf und Pfosten gerader Treppen (`emitStairRailings`).
+/// Handlauf und Pfosten gerader Treppen (`emitStairRailings`); bei Wendeltreppen als Schraubensweep.
 pub fn emit_stair_railings(p: &Project) -> Vec<RMesh> {
-    match stair_input(p, |s, st| s.shape == StairShape::Straight && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) {
+    match stair_input(p, |s, st| matches!(s.shape, StairShape::Straight | StairShape::Spiral) && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) {
         Some((_, buf)) => meshes_of(crate::stairs3d::railings(&buf), rail_rgb()),
         None => vec![],
     }
@@ -1712,14 +1787,18 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
     let mut out = Vec::new();
     for obj in p.context.as_deref().unwrap_or(&[]) {
         match obj {
-            ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => out.push(RMesh {
-                positions: m.positions.clone(),
-                indices: indices_u32(&m.indices),
-                kind: "terrain",
-                color: TERRAIN_RGB,
-                vertex_colors: m.vertex_colors.clone().filter(|v| !v.is_empty()),
-                material_index: None,
-            }),
+            ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => {
+                // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben nur ungeändert).
+                let (pos, idx, changed) = crate::excavation::terrain_model_mesh(p, m);
+                out.push(RMesh {
+                    positions: pos.into_owned(),
+                    indices: indices_u32(&idx),
+                    kind: "terrain",
+                    color: TERRAIN_RGB,
+                    vertex_colors: if changed { None } else { m.vertex_colors.clone().filter(|v| !v.is_empty()) },
+                    material_index: None,
+                })
+            }
             ContextObject::ImportedMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => out.push(RMesh {
                 positions: m.positions.clone(),
                 indices: indices_u32(&m.indices),
@@ -1810,24 +1889,28 @@ fn for_each_drawing_chunk(p: &Project, with_color: bool, mut f: impl FnMut(&[f64
         buf.truncate(1);
     };
     for d in &p.drawings2d {
-        let (kind, pts): (f64, Vec<Vec2>) = match &d.geom {
-            Drawing2DGeom::Line { a, b } => (1.0, vec![*a, *b]),
-            Drawing2DGeom::Rect { min, max } => (3.0, vec![*min, *max]),
-            Drawing2DGeom::Polyline { pts, .. } => (2.0, pts.clone()),
+        // Teile einer Zeichnung: (Art, Punkte); ein Achsraster mit `show3d` liefert je Achse eines.
+        let parts: Vec<(f64, Vec<Vec2>)> = match &d.geom {
+            Drawing2DGeom::Line { a, b } => vec![(1.0, vec![*a, *b])],
+            Drawing2DGeom::Rect { min, max } => vec![(3.0, vec![*min, *max])],
+            Drawing2DGeom::Polyline { pts, .. } => vec![(2.0, pts.clone())],
+            Drawing2DGeom::Grid { show_3d: Some(true), .. } => crate::grid::Spec::of(&d.geom).map(|s| crate::grid::polylines_3d(&s)).unwrap_or_default().into_iter().map(|q| (2.0, q.into_iter().map(|(x, y)| Vec2 { x, y }).collect())).collect(),
             _ => continue,
         };
-        let need = 7 + 2 * pts.len();
-        if buf.len() + need > CHUNK_DOUBLES {
-            flush(&mut buf, &mut ids, &mut f);
-        }
+        let closed = matches!(&d.geom, Drawing2DGeom::Polyline { closed: true, .. });
         let elev = *elevations.entry(d.level_id.as_str()).or_insert_with(|| p.floor(&d.level_id).map_or(0.0, |l| l.base_elevation.unwrap_or(0.0)) + DRAWING_LINE_ELEVATION_EPS);
         let rgb = if with_color { drawing_color(d, &by_category, &by_line_style) } else { [0.0; 3] };
-        let closed = matches!(&d.geom, Drawing2DGeom::Polyline { closed: true, .. });
-        buf.extend([kind, elev, rgb[0], rgb[1], rgb[2], if closed { 1.0 } else { 0.0 }, pts.len() as f64]);
-        for q in &pts {
-            buf.extend([q.x, q.y]);
+        for (kind, pts) in parts {
+            let need = 7 + 2 * pts.len();
+            if buf.len() + need > CHUNK_DOUBLES {
+                flush(&mut buf, &mut ids, &mut f);
+            }
+            buf.extend([kind, elev, rgb[0], rgb[1], rgb[2], if closed { 1.0 } else { 0.0 }, pts.len() as f64]);
+            for q in &pts {
+                buf.extend([q.x, q.y]);
+            }
+            ids.push(d);
         }
-        ids.push(d);
     }
     flush(&mut buf, &mut ids, &mut f);
 }
@@ -1982,10 +2065,14 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
     let mut context_meshes = Vec::new();
     for obj in p.context.as_deref().unwrap_or(&[]) {
         let (pos, idx, id) = match obj {
-            ContextObject::TerrainMesh(m) => (&m.positions, &m.indices, &m.id),
-            ContextObject::ImportedMesh(m) => (&m.positions, &m.indices, &m.id),
+            ContextObject::TerrainMesh(m) => {
+                let (pos, idx, _) = crate::excavation::terrain_model_mesh(p, m);
+                (pos, idx, &m.id)
+            }
+            ContextObject::ImportedMesh(m) => (std::borrow::Cow::Borrowed(m.positions.as_slice()), std::borrow::Cow::Borrowed(m.indices.as_slice()), &m.id),
             _ => continue,
         };
+        let (pos, idx) = (&*pos, &*idx);
         let vcount = pos.len() / 3;
         let at = |i: usize| -> V3 { [pos[i * 3], pos[i * 3 + 2], -pos[i * 3 + 1]] };
         let mut tris: Vec<Tri> = Vec::new();
@@ -2014,6 +2101,25 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [112] Achsraster mit `show3d` erscheint als Boden-Spur (eine Strecke je Achse), ohne Flag nicht.
+    #[test]
+    fn achsraster_im_3d_nur_mit_flag() {
+        let mk = |show: serde_json::Value| -> Project {
+            serde_json::from_value(serde_json::json!({
+                "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+                "drawingLevels": [{"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 1.0}],
+                "drawings2d": [{"id": "G", "type": "drawing2d", "levelId": "F", "categoryCode": "20", "geom": {"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+                    "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 4}], "b": [{"label": "A", "pos": 0}], "show3d": show}}]
+            }))
+            .unwrap()
+        };
+        assert!(drawing_line_verts(&mk(serde_json::json!(false))).is_empty());
+        let v = drawing_line_verts(&mk(serde_json::json!(true)));
+        // 3 Achsen × 1 Segment × 2 Endpunkte × 6 Zahlen.
+        assert_eq!(v.len(), 3 * 2 * 6);
+        assert!((v[1] - 1.01).abs() < 1e-4, "Höhe = Geschoss-UK + 0.01: {}", v[1]);
+    }
 
     /// Walmdach 12×7 m: zwei Trapeze + zwei Walm-Dreiecke, First (3,3)-(8,3).
     fn walm_planes() -> Vec<Vec<V3>> {

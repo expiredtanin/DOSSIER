@@ -1231,7 +1231,8 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
     let mut block_by_id: HashMap<&str, &Drawing2D> = HashMap::new();
     for d in &project.drawings2d {
         match d.geom {
-            Drawing2DGeom::Dimension { .. } => {
+            // Radius-/Durchmesser-/Bogenmass (`kind`) geht als Linien, Bögen und Text hinaus.
+            Drawing2DGeom::Dimension { kind: None, .. } => {
                 dim_by_id.insert(d.id.as_str(), d);
             }
             Drawing2DGeom::Block { .. } => {

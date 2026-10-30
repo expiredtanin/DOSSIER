@@ -182,6 +182,15 @@ export function CommandIcon({ name }: { name: string }) {
           <line x1="8" y1="3" x2="8" y2="9" strokeDasharray="1.5 1.5" />
         </svg>
       );
+    case "excavation":
+      // Baugrube: Geländelinie mit Grube, Böschungen schräg.
+      return (
+        <svg {...common}>
+          <polyline points="1,5 4,5 6.5,11 9.5,11 12,5 15,5" />
+          <line x1="4.8" y1="6.5" x2="3.6" y2="6.5" />
+          <line x1="11.2" y1="6.5" x2="12.4" y2="6.5" />
+        </svg>
+      );
     case "roofhole":
       // Dachhof: Dach-Umriss mit ausgespartem Innenhof.
       return (
@@ -223,6 +232,24 @@ export function CommandIcon({ name }: { name: string }) {
           <rect x="2.5" y="7.5" width="7" height="5" />
           <path d="M2.5 7.5 L5.5 4.5 L12.5 4.5 L9.5 7.5" />
           <path d="M9.5 12.5 L12.5 9.5 L12.5 4.5" />
+        </svg>
+      );
+    case "revolve":
+      // Rotationskörper: Profil neben einer Achse, Drehbogen.
+      return (
+        <svg {...common}>
+          <path d="M8 2.5 V13.5" strokeDasharray="1.4 1.2" />
+          <path d="M9.5 4.5 H13 V11.5 H9.5 Z" />
+          <path d="M6.5 4.5 H3 V11.5 H6.5" />
+        </svg>
+      );
+    case "loft":
+      // Loft: grosses Profil unten, kleines oben, verbunden.
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="9.5" width="11" height="3" />
+          <rect x="5.5" y="3.5" width="5" height="2" />
+          <path d="M2.5 9.5 L5.5 5.5 M13.5 9.5 L10.5 5.5" />
         </svg>
       );
     case "voidbox":

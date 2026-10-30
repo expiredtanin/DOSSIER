@@ -340,6 +340,7 @@ mod tests {
     fn hatch_muster_id_landet_in_den_cap_vertices() {
         let wall = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.3,
@@ -389,6 +390,7 @@ mod tests {
     fn generator_muster_kommt_als_ribbons() {
         let mk = |pattern: u32| WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.3,
@@ -426,6 +428,7 @@ mod tests {
     fn ohne_hatch_fallback_auf_diagonale() {
         let wall = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.3,
@@ -462,6 +465,7 @@ mod tests {
         // Wand entlang +X bei x in [0,3], Dicke 0.4, volle Hoehe [0,2.5]; Prio 50.
         let wall = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.4,
@@ -539,6 +543,7 @@ mod tests {
         // volle Hoehe [0,2.5]; Prio 50, Muster 2 (diagonal).
         let wall = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.4,
@@ -624,6 +629,7 @@ mod tests {
         let color = [0.2, 0.4, 0.9];
         let wall = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.4,

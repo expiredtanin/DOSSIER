@@ -73,6 +73,7 @@ mod tests {
     fn wall_x(len: f32, thickness: f32, height: f32) -> WallInput {
         WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [len, 0.0],
             thickness,
@@ -219,6 +220,7 @@ mod tests {
     fn wall_x_hatched(len: f32, thickness: f32, height: f32) -> WallInput {
         WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             hatch: Some(Hatch { pattern: 3, angle: 45.0, scale: 1.0, line_weight: 0.13, top_angle: None }),
             ..wall_x(len, thickness, height)
         }
@@ -277,6 +279,7 @@ mod tests {
         let a = wall_x_hatched(3.0, 0.2, 2.5); // (0,0) frei .. (3,0) verbunden
         let b = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [3.0, 0.0],
             end: [3.0, 4.0],
             ..wall_x_hatched(4.0, 0.2, 2.5) // (3,0) verbunden .. (3,4) frei
@@ -305,6 +308,7 @@ mod tests {
             wall_x(3.0, 0.2, 2.5),
             WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
                 start: [3.0, 0.0],
                 end: [3.0, 4.0],
                 thickness: 0.2,
@@ -390,6 +394,7 @@ mod tests {
         // Auch nicht-achsparallele Waende extrudieren korrekt (nur andere Ecken).
         let w = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [2.0, 2.0],
             thickness: 0.3,
@@ -418,6 +423,7 @@ mod tests {
         // Start == Ende -> keine Richtung -> uebersprungen (kein Absturz).
         let w = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [1.0, 1.0],
             end: [1.0, 1.0],
             thickness: 0.2,
@@ -638,6 +644,7 @@ mod tests {
         // weder darueber hinaus (Ueberstand) noch darunter (Spalt).
         let a = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.4,
@@ -655,6 +662,7 @@ mod tests {
         };
         let b = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [0.0, 3.0],
             thickness: 0.4,
@@ -721,6 +729,7 @@ mod tests {
         // rechtwinklig. Regressions-Absicherung: keine Panik, stabile Zaehlung.
         let mk = |s: [f32; 2], e: [f32; 2]| WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: s,
             end: e,
             thickness: 0.2,
@@ -756,6 +765,7 @@ mod tests {
         // Geschoss weiterhin auf der 45-Grad-Linie relativ zu SEINER Basis).
         let mk = |s: [f32; 2], e: [f32; 2], base: f32| WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: s,
             end: e,
             thickness: 0.4,
@@ -851,6 +861,7 @@ mod tests {
         };
         let a = WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.3,

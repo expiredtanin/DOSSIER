@@ -2212,6 +2212,12 @@ pub struct Wall {
     #[serde(rename = "sliceTermination", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub slice_termination: Option<SliceTermination>,
+    /// An Dach anschliessen ([G2]): `undefined` = automatisch (die Wand endet an der Dach-Unterkante,
+    /// wo ihre Krone darüber liegt — je Schicht, Giebel/Traufe/Grat/Kehle/Gaube), `true` = zusätzlich bis
+    /// unter das Dach verlängert, `false` = Dächer schneiden die Wand nicht.
+    #[serde(rename = "roofAttach", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub roof_attach: Option<bool>,
     /// Ansichtsschraffur ([100]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
     /// Ausrichtung am Element (Default 0).
     #[serde(rename = "surfacePatternAngle", default, skip_serializing_if = "Option::is_none")]
@@ -3121,6 +3127,11 @@ pub struct Stair {
     #[serde(rename = "arrowStyle", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, inline)]
     pub arrow_style: Option<StairArrowStyle>,
+    /// Nur Wendel: Radius (Meter) der Mittelsäule (Spindel) im Zentrum. Fehlt er oder ist er
+    /// ≤ 0, gibt es keine Säule.
+    #[serde(rename = "centerColumn", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub center_column: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4119,6 +4130,9 @@ pub enum LayoutTableSource {
     /// Bauteilliste mit U-Werten ([71]).
     #[serde(rename = "elements")]
     Elements,
+    /// [68] Erdarbeiten: Baugruben mit Abtrag/Auftrag/Hinterfüllung.
+    #[serde(rename = "earthworks")]
+    Earthworks,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -5086,6 +5100,53 @@ pub struct TerrainMesh {
     #[serde(rename = "vertexColors", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub vertex_colors: Option<Vec<f64>>,
+    /// [T6] Äquidistanz der Höhenlinien im Grundriss in m (aus dem Netz neu erzeugt, inkl. Baugruben).
+    /// Fehlt der Wert oder ist er ≤ 0, zeigt der Grundriss nur den Rahmen.
+    #[serde(rename = "contourInterval", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub contour_interval: Option<f64>,
+    /// [T6] Jede n-te Höhenlinie ist Zähllinie (dicker, beschriftet). Default 5.
+    #[serde(rename = "contourIndexEvery", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub contour_index_every: Option<f64>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [68] Baugrube / Geländebearbeitung: Sohle als Umriss auf der Höhe `bottom` (m, Modell ±0.00).
+/// Ausserhalb steigt die Böschung mit `slope` (Grad, Default 45; je Kante `edgeSlopes`, 0 = Default)
+/// bis zum Gelände (Abtrag); liegt das Gelände tiefer, fällt eine Schüttung mit `fillSlope` (Default
+/// 33.7 ≈ 2:3) bis zum Gelände (Auftrag). Bermen: alle `bermHeight` m Höhe eine waagrechte Berme der
+/// Breite `bermWidth`. Schneidet jedes Gelände-Netz, das den Umriss enthält.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Excavation {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layer: Option<String>,
+    #[serde(rename = "categoryCode", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub category_code: Option<String>,
+    pub outline: Vec<Vec2>,
+    pub bottom: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub slope: Option<f64>,
+    #[serde(rename = "fillSlope", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fill_slope: Option<f64>,
+    #[serde(rename = "edgeSlopes", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub edge_slopes: Option<Vec<f64>>,
+    #[serde(rename = "bermWidth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub berm_width: Option<f64>,
+    #[serde(rename = "bermHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub berm_height: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

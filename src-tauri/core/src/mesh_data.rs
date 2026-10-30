@@ -127,6 +127,19 @@ const BOX_QUADS: [[usize; 4]; 6] = [[4, 6, 7, 5], [1, 3, 2, 0], [2, 3, 7, 6], [4
 
 /// Voller Wand-Schicht-Quader ohne Öffnungen (lochlose Bänder); entartete Bänder fallen weg.
 fn push_wall_box(g: &mut Prim, w: &RWall) {
+    // Ebene Oberkante unter einem Dach ([G2]): Prisma, Modell (x, y, z) → Welt (x, Höhe, y), gespiegelt.
+    if w.top_plane.is_some() {
+        if let Some(m) = crate::model3d::wall_piece_mesh(w) {
+            let base = (g.positions.len() / 3) as f64;
+            for c in m.positions.chunks_exact(3) {
+                g.positions.extend_from_slice(&[c[0], c[2], c[1]]);
+            }
+            for t in m.indices.chunks_exact(3) {
+                g.indices.extend_from_slice(&[base + t[0] as f64, base + t[2] as f64, base + t[1] as f64]);
+            }
+        }
+        return;
+    }
     let [sx, sy] = w.start;
     let [ex, ey] = w.end;
     let dx = ex - sx;
@@ -485,10 +498,14 @@ pub fn mesh_export_data(src: &Project, opt: &MeshOptions) -> Result<Flat, String
     if opt.context {
         for obj in p.context.as_deref().unwrap_or(&[]) {
             let (terrain, id, name, color, positions, indices) = match obj {
-                ContextObject::TerrainMesh(m) => (true, &m.id, &m.name, None, &m.positions, &m.indices),
-                ContextObject::ImportedMesh(m) => (false, &m.id, &m.name, m.color.as_deref(), &m.positions, &m.indices),
+                ContextObject::TerrainMesh(m) => {
+                    let (pos, idx, _) = crate::excavation::terrain_model_mesh(&p, m);
+                    (true, &m.id, &m.name, None, pos, idx)
+                }
+                ContextObject::ImportedMesh(m) => (false, &m.id, &m.name, m.color.as_deref(), std::borrow::Cow::Borrowed(m.positions.as_slice()), std::borrow::Cow::Borrowed(m.indices.as_slice())),
                 _ => continue,
             };
+            let (positions, indices) = (&*positions, &*indices);
             if positions.len() < 9 || indices.len() < 3 {
                 continue;
             }

@@ -66,7 +66,7 @@ import { IfcImportDialog, type IfcImportMode } from "./ui/IfcImportDialog";
 import { MeshImportHost } from "./ui/MeshImportDialog";
 import { openMeshFileDialog, requestMeshImport, splitMeshFiles } from "./state/meshImportStore";
 import { formatMeshReport, isMeshFile } from "./io/meshImport";
-import { clashMarkerOps, runClashCheck } from "./analysis/clash";
+import { runClashAndStore } from "./panels/clashSession";
 import { checkForUpdate } from "./update/checkForUpdate";
 import type { PlanViewHandle } from "./views/plan/PlanView";
 import type { DisplayResolver } from "./viewport/Viewport3D";
@@ -292,6 +292,7 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   scalebar: "scalebar",
   revcloud: "revcloud",
   pointmarker: "pointmarker",
+  grid: "grid",
   wipeout: "wipeout",
   text: "text",
   leader: "leader",
@@ -1650,6 +1651,7 @@ export default function App() {
     removeContextObject,
     removeContextObjects,
     generateTerrain,
+    patchContextObject,
     moveGripOf,
     moveElementByOf,
     moveEdgeOf,
@@ -2375,23 +2377,8 @@ export default function App() {
       onImportPointCloud: () => openPointCloudFileDialog(),
       onImportMesh: () => openMeshFileDialog(),
       onClashCheck: () => {
-        const p0 = project;
-        runClashCheck(p0)
-          .then((clashes) => {
-            applyChange((p) => clashMarkerOps(p, clashes, activeCategoryCode));
-            // window.alert ist im Tauri-WKWebView wirkungslos → Toast.
-            notify(
-              clashes.length === 0
-                ? t("clash.none")
-                : `${t("clash.found")}: ${clashes.length} — ` +
-                    clashes
-                      .slice(0, 5)
-                      .map((c, k) => `K${k + 1} ${c.a.kind}↔${c.b.kind}${c.volume !== null ? ` ${c.volume.toFixed(3)} m³` : ""}`)
-                      .join(", "),
-              clashes.length === 0 ? "info" : "warning",
-            );
-          })
-          .catch((err) => notify(`${t("clash.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"));
+        setLayout((l) => revealPanel(l, "clash"));
+        void runClashAndStore();
       },
       onKennzahlen: () => {
         const k = computeKennzahlen(project);
@@ -3261,6 +3248,7 @@ export default function App() {
       removeContextObject,
       removeContextObjects,
       generateTerrain,
+      patchContextObject,
       commitTransformOn,
       setElementColor,
       setElementWeight,

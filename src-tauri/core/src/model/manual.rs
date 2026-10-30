@@ -125,6 +125,26 @@ pub enum DimFeature {
     /// Schnittpunkt der Wandlinie (`id`, `index`) mit der Wandlinie (`id2`, `index2`) — Ecken.
     #[serde(rename = "intersection")]
     Intersection,
+    /// Punkt auf Rasterachse `index` des Achsrasters `id` beim Anteil `t` entlang der Achse ([112]).
+    #[serde(rename = "axis")]
+    Axis,
+    /// Schnittpunkt der Rasterachsen `index` und `index2` des Achsrasters `id` ([112]).
+    #[serde(rename = "axiscross")]
+    AxisCross,
+    /// Punkt auf dem Kreis/Bogen (2D-Kreis, -Bogen, Bogenwand) `id` beim Winkel `t` (Bogenmass);
+    /// bei Bogenwänden `index` = Schichtgrenze (fehlt = Achse). Für Radius-, Durchmesser- und
+    /// Bogenlängen-Bemassung ([38]).
+    #[serde(rename = "rim")]
+    Rim,
+}
+
+/// Art einer Bemassung ([38]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum DimKind {
+    Radius,
+    Diameter,
+    Arc,
 }
 
 /// Bezug eines Bemassungspunkts auf ein Element ([38]).
@@ -178,6 +198,23 @@ pub enum KoteKind {
 pub enum SplineMode {
     Fit,
     Control,
+}
+
+/// Eine Achse des Achsrasters: Beschriftung und Lage (Abstand bzw. Winkel/Radius, s. `Grid`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct GridAxis {
+    pub label: String,
+    pub pos: f64,
+}
+
+/// Welche Achsenden eine Blase tragen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum GridBubbles {
+    Start,
+    End,
+    Both,
 }
 
 /// Geometrie eines 2D-Zeichenelements (Tag `shape`).
@@ -332,6 +369,11 @@ pub enum Drawing2DGeom {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         refs: Option<Vec<Option<DimRef>>>,
+        /// Art der Bemassung (fehlt = linear): Radius/Durchmesser (`pts` = Mittelpunkt, Punkt auf dem
+        /// Kreis) und Bogenlänge (`pts` = Mittelpunkt, Bogenanfang, Bogenende).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional, inline)]
+        kind: Option<DimKind>,
     },
     /// Höhenkote (SIA 400 B.5.4, Figur 18): Dreieck-Symbol + Höhenwert (Meter,
     /// ±0.00-Referenz frei wählbar, s. Norm) an einem Punkt. `kind` bestimmt
@@ -404,6 +446,41 @@ pub enum Drawing2DGeom {
     /// gleichbleibende Lesbarkeit im Plan.
     #[serde(rename = "pointmarker")]
     Pointmarker { at: Vec2 },
+    /// Achsraster ([112], `grid.rs`): rechtwinklig (`a` = Achsen parallel zur lokalen Y-Achse bei
+    /// X = `pos`, Beschriftung 1, 2, 3 …; `b` = Achsen parallel zur lokalen X-Achse bei Y = `pos`,
+    /// A, B, C …) oder radial (`radial`: `a` = Strahlen unter `pos` Grad, `b` = Ringe mit Radius
+    /// `pos`). `origin`/`angle` (Bogenmass) legen das lokale System fest.
+    #[serde(rename = "grid")]
+    Grid {
+        origin: Vec2,
+        #[serde(default)]
+        angle: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        radial: Option<bool>,
+        a: Vec<GridAxis>,
+        b: Vec<GridAxis>,
+        /// Überstand der Achsen über die äusserste Querachse (Meter, Standard 1.5).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        extend: Option<f64>,
+        /// Enden mit Achsblase (Standard Anfang und Ende).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional, inline)]
+        bubbles: Option<GridBubbles>,
+        /// Blasen-Durchmesser in Papier-mm (Standard 8).
+        #[serde(rename = "bubbleMm", default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        bubble_mm: Option<f64>,
+        /// Geschosse, in denen das Raster gezeigt wird; fehlt oder leer = in allen.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        levels: Option<Vec<String>>,
+        /// Im 3D-Modell als dünne Linien zeigen.
+        #[serde(rename = "show3d", default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        show_3d: Option<bool>,
+    },
     #[serde(rename = "text")]
     Text {
         at: Vec2,
@@ -527,6 +604,8 @@ pub enum ContextObject {
     TerrainMesh(TerrainMesh),
     #[serde(rename = "image")]
     Image(ContextImage),
+    #[serde(rename = "excavation")]
+    Excavation(Excavation),
 }
 
 impl Default for Drawing2DGeom {

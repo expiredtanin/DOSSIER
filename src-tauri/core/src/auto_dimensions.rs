@@ -20,6 +20,9 @@ pub struct WallIn {
     pub start: Vec2,
     pub end: Vec2,
     pub thickness: f64,
+    /// Versatz der Wandmitte von der Achse (links der Laufrichtung positiv): Wände mit Referenzlinie
+    /// links/rechts oder -versatz liegen nicht mittig auf ihrer Achse.
+    pub shift: f64,
 }
 
 /// Öffnung: Index der Wirtswand in der Wandliste, Leibungspunkte auf der Achse.
@@ -66,8 +69,9 @@ fn wall_rect(w: &WallIn, t: f64, ext_start: f64, ext_end: f64) -> Ring {
     let len = dx.hypot(dy);
     let (ux, uy) = (dx / len, dy / len);
     let (nx, ny) = (-uy * (t / 2.0), ux * (t / 2.0));
-    let a = [w.start[0] - ux * ext_start, w.start[1] - uy * ext_start];
-    let b = [w.end[0] + ux * ext_end, w.end[1] + uy * ext_end];
+    let sh = if w.shift.is_finite() { w.shift } else { 0.0 };
+    let a = [w.start[0] - ux * ext_start - uy * sh, w.start[1] - uy * ext_start + ux * sh];
+    let b = [w.end[0] + ux * ext_end - uy * sh, w.end[1] + uy * ext_end + ux * sh];
     vec![[a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny]]
 }
 
@@ -185,7 +189,8 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
                 continue; // Wand quer zu n
             }
             let t = if w.thickness.is_finite() && w.thickness > 0.0 { w.thickness } else { 0.3 };
-            let outer_s = dot(w.start, n) + t / 2.0;
+            let left = [-dy / len, dx / len];
+            let outer_s = dot(w.start, n) + (if w.shift.is_finite() { w.shift } else { 0.0 }) * dot(left, n) + t / 2.0;
             let (ja, jb) = (dot(o.jamb_start, u), dot(o.jamb_end, u));
             if !ja.is_finite() || !jb.is_finite() {
                 continue;
@@ -239,7 +244,7 @@ mod tests {
     /// L-förmiger Grundriss aus 0.3-m-Wänden (Achsen).
     fn l_walls() -> Vec<WallIn> {
         let axis = [[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [4.0, 6.0], [4.0, 9.0], [0.0, 9.0]];
-        (0..axis.len()).map(|i| WallIn { start: axis[i], end: axis[(i + 1) % axis.len()], thickness: 0.3 }).collect()
+        (0..axis.len()).map(|i| WallIn { start: axis[i], end: axis[(i + 1) % axis.len()], thickness: 0.3, shift: 0.0 }).collect()
     }
     fn lengths(pts: &[Vec2]) -> Vec<f64> {
         pts.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).collect()
@@ -285,17 +290,36 @@ mod tests {
         assert!((south.offset - 1.0).abs() < 1e-12);
     }
 
+    /// Wand mit Referenzlinie links: die Achse liegt an der Innenkante, die Aussenmasse stimmen trotzdem.
+    #[test]
+    fn nicht_mittige_wand_misst_die_echte_flaeche() {
+        // Achse y = 0, Körper y 0 … 0.3 (shift +0.15), Öffnung 1 … 2 m.
+        let w = [WallIn { start: [0.0, 0.0], end: [5.0, 0.0], thickness: 0.3, shift: 0.15 }];
+        let o = OpeningIn { wall: 0, jamb_start: [1.0, 0.0], jamb_end: [2.0, 0.0] };
+        let dims = auto_exterior_dimensions(&w, &[o], 100.0);
+        let south = dims.iter().find(|d| d.side == 0 && d.chain == CHAIN_TOTAL).unwrap();
+        let north = dims.iter().find(|d| d.side == 2 && d.chain == CHAIN_TOTAL).unwrap();
+        // Masslinie Süd liegt 1.0 m (1:100) vor der Südfläche y = 0; Nord vor y = 0.3.
+        let south_y = south.pts[0][1] - south.offset * 1.0 * 0.0;
+        assert!((south_y - 0.0).abs() < 1e-6 || (south_y - 0.3).abs() < 1e-6, "{south_y}");
+        assert!((north.pts[0][1] - 0.3).abs() < 1e-6, "{:?}", north.pts);
+        assert!((south.pts[0][1] - 0.0).abs() < 1e-6, "{:?}", south.pts);
+        // Leibungen der Öffnung hängen an der Nordfläche (y = 0.3), nicht an y = 0.15.
+        let op = dims.iter().find(|d| d.side == 2 && d.chain == CHAIN_OPENINGS).unwrap();
+        assert!(op.src.iter().all(|q| (q[1] - 0.3).abs() < 1e-6), "{:?}", op.src);
+    }
+
     #[test]
     fn unsinn_ohne_panik() {
         assert!(auto_exterior_dimensions(&[], &[], 100.0).is_empty());
         let bad = [
-            WallIn { start: [f64::NAN, 0.0], end: [1.0, 0.0], thickness: 0.3 },
-            WallIn { start: [0.0, 0.0], end: [0.0, 0.0], thickness: 0.3 },
+            WallIn { start: [f64::NAN, 0.0], end: [1.0, 0.0], thickness: 0.3, shift: 0.0 },
+            WallIn { start: [0.0, 0.0], end: [0.0, 0.0], thickness: 0.3, shift: 0.0 },
         ];
         let o = OpeningIn { wall: 7, jamb_start: [0.0, 0.0], jamb_end: [1.0, 0.0] };
         assert!(auto_exterior_dimensions(&bad, &[o], f64::NAN).is_empty());
         // Dicke NaN → 0.3; Öffnung mit NaN-Leibung wird übergangen.
-        let w = [WallIn { start: [0.0, 0.0], end: [5.0, 0.0], thickness: f64::NAN }];
+        let w = [WallIn { start: [0.0, 0.0], end: [5.0, 0.0], thickness: f64::NAN, shift: 0.0 }];
         let o = OpeningIn { wall: 0, jamb_start: [f64::NAN, 0.0], jamb_end: [1.0, 0.0] };
         let dims = auto_exterior_dimensions(&w, &[o], 0.0);
         assert!(dims.iter().all(|d| d.chain != CHAIN_OPENINGS));

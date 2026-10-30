@@ -501,6 +501,45 @@ export function AttributesPanel() {
             (Modellmass, s. `model/dimension.ts`); leer/0 fällt auf den
             Standard zurück. Die Masszahl selbst wird direkt im Plan am
             eigenen Griff verschoben (rastet nahe der Standardlage ein). */}
+        {drawing?.geom.shape === "grid" && (() => {
+          const geom = drawing.geom as Extract<typeof drawing.geom, { shape: "grid" }>;
+          const here = geom.levels?.includes(drawing.levelId) && geom.levels.length === 1;
+          return (
+            <>
+              <div className="attr-section-label">{t("attr.grid.section")}</div>
+              <span className="attr-key">{t("attr.grid.bubbles")}</span>
+              <span className="attr-val">
+                <select value={geom.bubbles ?? "both"} onChange={(e) => host.onSetGridProps(drawing.id, { bubbles: e.target.value as "start" | "end" | "both" })}>
+                  <option value="both">{t("attr.grid.bubbles.both")}</option>
+                  <option value="start">{t("attr.grid.bubbles.start")}</option>
+                  <option value="end">{t("attr.grid.bubbles.end")}</option>
+                </select>
+              </span>
+              <span className="attr-key">{t("attr.grid.extend")}</span>
+              <span className="attr-val">
+                <input className="attr-num" style={{ width: 72 }} type="number" step={0.1} min={0} value={geom.extend ?? 1.5}
+                  onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 0) host.onSetGridProps(drawing.id, { extend: v }); }} />
+              </span>
+              <span className="attr-key">{t("attr.grid.bubbleMm")}</span>
+              <span className="attr-val">
+                <input className="attr-num" style={{ width: 72 }} type="number" step={0.5} min={2} value={geom.bubbleMm ?? 8}
+                  onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 2) host.onSetGridProps(drawing.id, { bubbleMm: v }); }} />
+              </span>
+              <span className="attr-key">{t("attr.grid.show3d")}</span>
+              <span className="attr-val">
+                <input type="checkbox" checked={geom.show3d === true} onChange={(e) => host.onSetGridProps(drawing.id, { show3d: e.target.checked })} />
+              </span>
+              <span className="attr-key">{t("attr.grid.levels")}</span>
+              <span className="attr-val">
+                <select value={here ? "here" : "all"} onChange={(e) => host.onSetGridProps(drawing.id, { levels: e.target.value === "here" ? [drawing.levelId] : undefined })}>
+                  <option value="all">{t("attr.grid.levels.all")}</option>
+                  <option value="here">{t("attr.grid.levels.here")}</option>
+                </select>
+              </span>
+            </>
+          );
+        })()}
+
         {drawing?.geom.shape === "dimension" && (
           <>
             <div className="attr-section-label">{t("attr.dim.section")}</div>

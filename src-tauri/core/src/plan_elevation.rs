@@ -476,8 +476,22 @@ fn wall_faces(f: &Frame, w: &[f64], src: usize, out: &mut Vec<Projected>) {
     let ht = w[4] / 2.0;
     let zb = w[6];
     let zt = w[6] + w[5];
+    // Ebene Oberkante unter einem Dach ([G2]): Deckel-Ecken auf der Ebene.
+    let plane = (w.len() >= 17 && w[13] == 1.0).then(|| [w[14], w[15], w[16]]);
     let corner = |s_along: f64, t_off: f64, y: f64| -> V3 {
-        [sx + a_hat[0] * s_along + n_hat[0] * t_off, y, sz + a_hat[2] * s_along + n_hat[2] * t_off]
+        let (x, z) = (sx + a_hat[0] * s_along + n_hat[0] * t_off, sz + a_hat[2] * s_along + n_hat[2] * t_off);
+        let y = match plane {
+            Some(c) if y == zt => (c[0] + c[1] * (x - sx) + c[2] * (z - sz)).clamp(zb, zt),
+            _ => y,
+        };
+        [x, y, z]
+    };
+    let top_n: V3 = match plane {
+        Some(c) => {
+            let l = (c[1] * c[1] + 1.0 + c[2] * c[2]).sqrt();
+            [-c[1] / l, 1.0 / l, -c[2] / l]
+        }
+        None => [0.0, 1.0, 0.0],
     };
     // Schnitt-Verschiebungen der vier Ecken längs der Achse ([T2]: Gehrung der Bogen-Teilkörper):
     // Anfang +n, Anfang −n, Ende +n, Ende −n; ohne Angabe 0 (rechtwinklig wie bisher).
@@ -506,7 +520,7 @@ fn wall_faces(f: &Frame, w: &[f64], src: usize, out: &mut Vec<Projected>) {
         (neg(n_hat), [corner(s_m, -ht, zb), corner(s_m, -ht, zt), corner(e_m, -ht, zt), corner(e_m, -ht, zb)]),
         (start_n, [corner(s_m, -ht, zb), corner(s_p, ht, zb), corner(s_p, ht, zt), corner(s_m, -ht, zt)]),
         (end_n, [corner(e_m, -ht, zb), corner(e_m, -ht, zt), corner(e_p, ht, zt), corner(e_p, ht, zb)]),
-        ([0.0, 1.0, 0.0], [corner(s_m, -ht, zt), corner(s_p, ht, zt), corner(e_p, ht, zt), corner(e_m, -ht, zt)]),
+        (top_n, [corner(s_m, -ht, zt), corner(s_p, ht, zt), corner(e_p, ht, zt), corner(e_m, -ht, zt)]),
         ([0.0, -1.0, 0.0], [corner(s_m, -ht, zb), corner(e_m, -ht, zb), corner(e_p, ht, zb), corner(s_p, ht, zb)]),
     ];
     for (i, (normal, poly)) in faces.into_iter().enumerate() {
@@ -648,6 +662,9 @@ pub(crate) fn faces_full(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f
         7
     } else if walls.len() == 1 + 13 * nw {
         13
+    } else if walls.len() == 1 + 17 * nw {
+        // + ebene Oberkante ([G2]): Kennung (1 = vorhanden), z am Anfang, dz/dx, dz/dy.
+        17
     } else {
         return None;
     };

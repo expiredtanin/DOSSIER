@@ -40,6 +40,7 @@ import type {
   WallType,
 } from "../model/types";
 import type { MeasurementReadout, SnapSettings, ToolId } from "../tools/types";
+import type { TerrainOptions } from "../model/terrain";
 import type { Selection } from "../state/selectionInfo";
 import type { TextStylePreset } from "../text/richText";
 import type { ScheduleKind } from "../export/exportSchedule";
@@ -296,6 +297,11 @@ export interface PanelHostValue {
     drawingId: string,
     patch: { start?: EndMark; end?: EndMark; sizeMm?: number },
   ) => void;
+  /** Achsraster ([112]): Blasenseite, Überstand (m), Blasen-Ø (Papier-mm), Geschosse (leer = alle). */
+  onSetGridProps: (
+    drawingId: string,
+    patch: { bubbles?: "start" | "end" | "both"; extend?: number; bubbleMm?: number; levels?: string[] | undefined; show3d?: boolean },
+  ) => void;
   onSetDimensionStyle: (
     drawingId: string,
     patch: {
@@ -397,6 +403,8 @@ export interface PanelHostValue {
    * "both" = heutiges Verhalten, "below"/"above" = die Wand endet an der Decke.
    */
   onSetWallSliceTermination: (termination: SliceTermination) => void;
+  /** An Dach anschliessen ([G2]): "auto" = Default (Wand endet an der Dach-Unterkante). */
+  onSetWallRoofAttach: (attach: "auto" | "on" | "off") => void;
   /** Ansichtsschraffur ([100]) an der gewählten Wand bzw. am gewählten Dach drehen/versetzen. */
   onSetSurfacePatternPlacement?: (patch: { surfacePatternAngle?: number; surfacePatternOffset?: { x: number; y: number } }) => void;
   /** Weist der Wand einen Wandtyp-Preset (mehrschichtiger Aufbau) zu. */
@@ -527,6 +535,8 @@ export interface PanelHostValue {
   onSetStairArrowStyle: (style: "line" | "filled") => void;
   /** Setzt den Referenzpunkt der Laufbreite (links/mitte/rechts). */
   onSetStairReferenz: (referenz: "links" | "mitte" | "rechts") => void;
+  /** Radius der Mittelsäule (Wendel) in Metern; ≤ 0 entfernt sie. */
+  onSetStairColumn: (radius: number) => void;
   /** Weist der Treppe einen Treppentyp (Bibliothek) zu; "" löst die Zuweisung. */
   onSetStairType: (typeId: string) => void;
 
@@ -581,7 +591,11 @@ export interface PanelHostValue {
    * Erzeugt aus einem ContourSet (per ID) ein Gelände-TIN. Liefert die neue
    * TerrainMesh-ID oder null (unbekannte ID / kein sinnvolles TIN).
    */
-  onGenerateTerrain: (contourSetId: string) => string | null;
+  onGenerateTerrain: (contourSetId: string, opts?: TerrainOptions) => string | null;
+  /** [T6]/[68] Ändert Felder eines Kontext-Objekts (Äquidistanz, Baugruben-Sohle …). */
+  onPatchContextObject: (id: string, patch: Record<string, unknown>, coalesceKey?: string) => void;
+  /** [68] Startet den Befehl „Baugrube" (Umriss zeichnen). */
+  onStartExcavation: () => void;
   /**
    * Setzt/ersetzt den Georeferenzierungs-Bezug (`Project.geoAnchor`) — welcher
    * Modell-Punkt welcher realen LV95-Koordinate entspricht. `undefined` löscht

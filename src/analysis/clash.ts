@@ -30,8 +30,11 @@ export interface Clash {
   b: ClashItem;
   /** Durchdringungsvolumen (m³), `null` wenn nicht berechenbar. */
   volume: number | null;
-  /** Mittelpunkt der Durchdringungslinien (Welt-Meter). */
+  /** Mittelpunkt der Durchdringungslinien (Modell-Meter, z = Höhe). */
   center: [number, number, number];
+  /** Hüllquader der Durchdringungslinien (Modell-Meter) — für Hervorhebung und Zoom. */
+  min: [number, number, number];
+  max: [number, number, number];
 }
 
 /** Prefix der Marker-Ids (ein neuer Lauf ersetzt die alten Marker). */
@@ -127,13 +130,17 @@ export async function runClashCheck(
     if (!r.colliding || r.lines.length === 0) continue;
     if (r.overlapVolume !== null && r.overlapVolume < MIN_VOLUME) continue;
     const c: [number, number, number] = [0, 0, 0];
+    const min: [number, number, number] = [Infinity, Infinity, Infinity];
+    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
     for (const l of r.lines) {
-      c[0] += (l[0] + l[3]) / 2;
-      c[1] += (l[1] + l[4]) / 2;
-      c[2] += (l[2] + l[5]) / 2;
+      for (let k = 0; k < 3; k++) {
+        c[k] += (l[k] + l[k + 3]) / 2;
+        min[k] = Math.min(min[k], l[k], l[k + 3]);
+        max[k] = Math.max(max[k], l[k], l[k + 3]);
+      }
     }
     const n = r.lines.length;
-    const clash: Clash = { a: items[i], b: items[j], volume: r.overlapVolume, center: [c[0] / n, c[1] / n, c[2] / n] };
+    const clash: Clash = { a: items[i], b: items[j], volume: r.overlapVolume, center: [c[0] / n, c[1] / n, c[2] / n], min, max };
     // Mehrere Wandschichten derselben Wand → eine Kollision (grösstes Volumen).
     const key = [items[i].id, items[j].id].sort().join("|");
     const prev = found.get(key);
@@ -174,4 +181,45 @@ export function clashMarkerOps(project: Project, clashes: Clash[], categoryCode:
     ...removeItems(project, "drawings2d", (d) => d.id.startsWith(CLASH_MARKER_PREFIX)),
     ...addItems("drawings2d", markers),
   ];
+}
+
+/**
+ * Rote Hüllquader der Kollisionen als Linienliste für den 3D-Viewport (`set_highlight_lines`):
+ * `[x, y, z, r, g, b]` je Vertex, 2 Vertices je Kante, 12 Kanten je Kollision. Modell (x, y, Höhe)
+ * → Viewport-Welt (x, Höhe, y). Mindestkantenlänge 0.1 m, damit hauchdünne Durchdringungen sichtbar bleiben.
+ */
+export function clashHighlightLines(clashes: Clash[], rgb: readonly [number, number, number]): Float32Array {
+  const out = new Float32Array(clashes.length * 12 * 2 * 6);
+  let o = 0;
+  const vert = (p: readonly number[]) => {
+    out[o++] = p[0];
+    out[o++] = p[2];
+    out[o++] = p[1];
+    out[o++] = rgb[0];
+    out[o++] = rgb[1];
+    out[o++] = rgb[2];
+  };
+  for (const c of clashes) {
+    const lo = [0, 1, 2].map((k) => Math.min(c.min[k], c.center[k] - 0.05));
+    const hi = [0, 1, 2].map((k) => Math.max(c.max[k], c.center[k] + 0.05));
+    const corner = (i: number) => [i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]];
+    for (let i = 0; i < 8; i++) {
+      for (const bit of [1, 2, 4]) {
+        if (i & bit) continue;
+        vert(corner(i));
+        vert(corner(i | bit));
+      }
+    }
+  }
+  return out;
+}
+
+/** Bauteile einer Kollision je Auswahlkanal (Wand, Decke, Körper, Import). */
+export function clashSelection(c: Clash): { wallIds: string[]; ceilingIds: string[]; extrudedSolidIds: string[]; contextObjectIds: string[] } {
+  const sel = { wallIds: [] as string[], ceilingIds: [] as string[], extrudedSolidIds: [] as string[], contextObjectIds: [] as string[] };
+  for (const it of [c.a, c.b]) {
+    const list = it.kind === "wall" ? sel.wallIds : it.kind === "slab" ? sel.ceilingIds : it.kind === "solid" ? sel.extrudedSolidIds : sel.contextObjectIds;
+    if (!list.includes(it.id)) list.push(it.id);
+  }
+  return sel;
 }

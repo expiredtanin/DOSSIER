@@ -269,7 +269,7 @@ fn by_from(p: &[f64; 4], q: &[f64; 4]) -> std::cmp::Ordering {
 fn bands_match_openings(wall: &Wall, bands: &[&RWall], cutouts: &[Cutout]) -> bool {
     let u = normalize(sub(wall.end, wall.start));
     for b in bands {
-        if b.top_drop.is_some_and(|d| d[0].abs() > 1e-9 || d[1].abs() > 1e-9) {
+        if b.top_plane.is_some() || b.top_drop.is_some_and(|d| d[0].abs() > 1e-9 || d[1].abs() > 1e-9) {
             return false;
         }
         let a = dot(Vec2 { x: b.start[0] - wall.start.x, y: b.start[1] - wall.start.y }, u);
@@ -496,6 +496,33 @@ struct SolidOpening {
 
 /// Dreiecke eines 8-Ecken-Quaders wie `model3d::OPENING_BOX_TRIS`.
 const BOX_TRIS: [u32; 36] = [0, 1, 3, 0, 3, 2, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 3, 7, 1, 7, 5];
+
+/// Gauben eines Dachs (Index) für die Mengen ([G5]): je Gaube Breite, Stirnhöhe, geneigte Fläche des
+/// Ausschnitts im Hauptdach, Volumen der Wände (Stirn/Wangen) und des Gaubendachs aus den Körpern.
+fn dormer_parts(p: &Project, ri: usize, roof: &Roof) -> Vec<qty::DormerIn> {
+    let solids = crate::roof_assembly::roof_solids(p, ri);
+    let vol = |id: &str, role: crate::roof_assembly::Role| -> f64 {
+        solids.as_ref().map_or(0.0, |s| s.parts.iter().filter(|x| x.role == role && x.dormer.as_deref() == Some(id)).map(|x| x.mesh.volume().abs()).sum())
+    };
+    roof.dormers
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|d| {
+            let g = crate::dormer::geometry(p, roof, d)?;
+            let hole = g.hole();
+            let n = hole.len();
+            let proj = (0..n).map(|i| hole[i][0] * hole[(i + 1) % n][1] - hole[(i + 1) % n][0] * hole[i][1]).sum::<f64>().abs() / 2.0;
+            Some(qty::DormerIn {
+                width: d.width,
+                front_height: g.front_height,
+                opening_area: proj * (1.0 + g.frame.tan_main * g.frame.tan_main).sqrt(),
+                wall_volume: vol(&d.id, crate::roof_assembly::Role::DormerWall),
+                roof_volume: vol(&d.id, crate::roof_assembly::Role::DormerRoof),
+            })
+        })
+        .collect()
+}
 
 fn push_box(positions: &mut Vec<f64>, indices: &mut Vec<u32>, b: &[f64; 24], base: f64) {
     let at = (positions.len() / 3) as u32;
@@ -766,6 +793,17 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let bands = bands_by_wall.get(wall.id.as_str()).unwrap_or(&no_bands);
         let (mut positions, mut indices) = (Vec::<f64>::new(), Vec::<u32>::new());
         for b in bands {
+            // Ebene Oberkante unter einem Dach ([G2]): Prisma bis an die Dachunterkante.
+            if b.top_plane.is_some() && b.holes.as_ref().is_none_or(|h| h.is_empty()) {
+                if let Some(m) = model3d::wall_piece_mesh(b) {
+                    let at = (positions.len() / 3) as u32;
+                    for c in m.positions.chunks_exact(3) {
+                        positions.extend_from_slice(&[c[0], c[1], c[2] - base]);
+                    }
+                    indices.extend(m.indices.iter().map(|i| at + i));
+                }
+                continue;
+            }
             let cut = wall_cut_mesh_checked(&CutWall {
                 start: b.start,
                 end: b.end,
@@ -1085,7 +1123,16 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         props.extend(crate::u_value::roof_u_value(&p, roof).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
         let planes = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof)).planes;
         let mut psets = vec![Pset { name: "Pset_RoofCommon", props }];
-        psets.extend(qto("Qto_RoofBaseQuantities", qty::roof_quantities(&planes)));
+        let mut roof_q = qty::roof_quantities(&planes);
+        // Gauben ([G5]): Ausschnitt im Hauptdach (geneigt) von der Nettofläche ab, eigene Mengen der Gauben.
+        let dormer_q = p.roofs.as_deref().unwrap_or(&[]).iter().position(|r| r.id == roof.id).map_or_else(Vec::new, |ri| qty::dormer_quantities(&dormer_parts(&p, ri, roof)));
+        if let Some(cut) = dormer_q.iter().find(|q| q.name == "OpeningArea").map(|q| q.value) {
+            if let Some(net) = roof_q.iter_mut().find(|q| q.name == "NetArea") {
+                net.value = max(0.0, net.value - cut);
+            }
+        }
+        psets.extend(qto("Qto_RoofBaseQuantities", roof_q));
+        psets.extend(qto("Qto_DossierDormerQuantities", dormer_q));
         let ty = roof_type.map(|t| (t.id.clone(), t.name.clone(), t.layers.iter().map(|l| (l.component_id.clone(), component_name(&p, &l.component_id), l.thickness)).collect::<Vec<_>>()));
         let (id, name, pre) = (f.str(&roof.id), f.str(roof_type.map_or("Dach", |t| t.name.as_str())), f.str(predefined));
         f.nums(&[REC_ROOF, structure, id, name, pre]);
@@ -1251,6 +1298,20 @@ mod tests {
         let s = strings(&f);
         assert!(s.iter().any(|x| x == "wall/W1") && s.iter().any(|x| x == "roof/RF1"));
         assert_eq!(f.nums.iter().filter(|v| **v == REC_OPENING_SOLID).count() >= 2, true);
+    }
+
+    /// [G5] Gauben-Mengen: Ausschnitt geneigt, Wand- und Dachvolumen aus den Körpern.
+    #[test]
+    fn gauben_mengen() {
+        let p = crate::dormer::tests::gable_project();
+        let roof = &p.roofs.as_ref().unwrap()[0];
+        let d = dormer_parts(&p, 0, roof);
+        assert_eq!(d.len(), 1);
+        assert!(d[0].opening_area > 2.4 * 1.6 * 2f64.sqrt() && d[0].opening_area < 2.4 * 3.0 * 2f64.sqrt(), "{d:?}");
+        assert!(d[0].wall_volume > 0.1 && d[0].roof_volume > 0.1, "{d:?}");
+        let q = qty::dormer_quantities(&d);
+        assert_eq!(q.len(), 5);
+        assert!(qty::dormer_quantities(&[]).is_empty());
     }
 
     /// [T2] Bogenwand: Datensatz WALL_ARC mit Kreisachse (Mitte, Radius, Startwinkel, Schwenk).

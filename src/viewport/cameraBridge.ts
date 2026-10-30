@@ -257,6 +257,29 @@ export function setCamera(cam: ViewCamera, opts: { animate?: boolean } = {}): bo
   return c3 ? api.write(c3, opts.animate === true) : false;
 }
 
+/**
+ * Kamera, die einen Modellpunkt (x, y, Höhe) ins Ziel nimmt: gleiche Blickrichtung, Abstand so, dass eine
+ * Kugel vom Radius `radius` (Meter) bequem ins Bild passt; orthografisch schrumpft die Sichthöhe.
+ */
+export function focusedCamera(cam: Camera3d, centerModel: readonly number[], radius: number): Camera3d {
+  const target = modelToWorld(centerModel);
+  const d = norm(sub(cam.target, cam.eye)) ?? ([0, 0, -1] as V3);
+  const r = Math.max(radius, 0.5);
+  const dist = Math.max((r * 2.2) / Math.tan((cam.fovY || FOV_Y) / 2), 1.5);
+  return {
+    ...cam,
+    target,
+    eye: [target[0] - d[0] * dist, target[1] - d[1] * dist, target[2] - d[2] * dist],
+    orthoHalfHeight: cam.perspective ? cam.orthoHalfHeight : r * 2.2,
+  };
+}
+
+/** Fokus der Live-Kamera auf einen Modellpunkt; `false` ohne Viewport. */
+export function focusCamera(centerModel: readonly number[], radius: number, opts: { animate?: boolean } = {}): boolean {
+  const cur = api?.read();
+  return api && cur ? api.write(focusedCamera(cur.camera, centerModel, radius), opts.animate !== false) : false;
+}
+
 /** PNG des aktuellen 3D-Bildes, oder null (kein Viewport, leeres/nicht lesbares Bild). */
 export async function captureSnapshot(opts: { maxEdge?: number } = {}): Promise<Uint8Array | null> {
   if (!api) return null;

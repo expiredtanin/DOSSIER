@@ -9,13 +9,13 @@
 //! als Löcher) und Schnitt-Eingabe (Pfeiler/Brüstung/Sturz-Segmente ohne Löcher).
 
 use crate::joins::{js_hypot, reference_offset, Line, Reference, WallCuts};
-use crate::roof::roof_underside_at;
 use kernel2d::{add, dot, left_normal, line_intersect, point_in_outline, scale, sub, Vec2};
 
 /// Toleranz der Wand-Ableitung (`EPS` in `toWalls3d/shared.ts`).
 pub const EPS: f64 = 1e-4;
-/// Schrittweite (Meter) der Dach-Unterkanten-Abtastung.
-const ROOF_CLIP_STEP: f64 = 0.15;
+/// Schrittweite (Meter) der Dach-Unterkanten-Abtastung (Wechsel der Dachfläche suchen; die Grenzen
+/// selbst sind exakt).
+const ROOF_SAMPLE: f64 = 0.05;
 
 /// Ein Schicht-Band: Dicke und Verschneidungs-Rang (`None`: keine Decken-Subtraktion).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -65,13 +65,96 @@ pub struct CeilingIn {
     pub layers: Option<Vec<(f64, Option<f64>)>>,
 }
 
-/// Ein Dach desselben Geschosses: Traufhöhe, Summe der Schichtdicken, Traufe-Umriss, Flächen.
+/// Ein Dach desselben Geschosses: Traufhöhe, Summe der Schichtdicken, Traufe-Umriss, Flächen und
+/// die Unterkanten-Facetten ([G2]), an denen Wände enden.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoofIn {
     pub eaves_z: f64,
     pub total_thickness: f64,
     pub eaves: Vec<[f64; 2]>,
     pub planes: Vec<Vec<[f64; 3]>>,
+    pub facets: Vec<RoofFacet>,
+}
+
+impl RoofIn {
+    /// Facetten aus den Dachflächen (Schichten senkrecht zur Fläche, Summe `total`).
+    pub fn new(eaves_z: f64, total: f64, eaves: Vec<[f64; 2]>, planes: Vec<Vec<[f64; 3]>>) -> Self {
+        let facets = plane_facets(&planes, total);
+        RoofIn { eaves_z, total_thickness: total, eaves, planes, facets }
+    }
+}
+
+/// Ebene Unterkante eines Dachteils über dem Grundriss-Bereich `ring`: `z = c + gx·x + gy·y`. Wo sich
+/// Facetten überdecken (Kehlen verschnittener Dächer, Gaube über dem Hauptdach), gilt die obere Hülle.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoofFacet {
+    pub ring: Vec<[f64; 2]>,
+    pub plane: [f64; 3],
+    bounds: [f64; 4],
+}
+
+impl RoofFacet {
+    /// `None` bei weniger als drei Ecken oder nicht endlichen Werten.
+    pub fn new(ring: Vec<[f64; 2]>, plane: [f64; 3]) -> Option<Self> {
+        if ring.len() < 3 || !plane.iter().all(|v| v.is_finite()) || !ring.iter().all(|q| q[0].is_finite() && q[1].is_finite()) {
+            return None;
+        }
+        let b = outline_bounds(ring.iter().map(|q| (q[0], q[1])));
+        Some(RoofFacet { ring, plane, bounds: [b.min_x, b.min_y, b.max_x, b.max_y] })
+    }
+    pub(crate) fn z(&self, x: f64, y: f64) -> f64 {
+        self.plane[0] + self.plane[1] * x + self.plane[2] * y
+    }
+    pub(crate) fn contains(&self, x: f64, y: f64) -> bool {
+        let b = self.bounds;
+        if x < b[0] || x > b[2] || y < b[1] || y > b[3] {
+            return false;
+        }
+        let mut inside = false;
+        let n = self.ring.len();
+        let mut j = n - 1;
+        for i in 0..n {
+            let (a, c) = (self.ring[i], self.ring[j]);
+            if (a[1] > y) != (c[1] > y) && x < (c[0] - a[0]) * (y - a[1]) / (c[1] - a[1]) + a[0] {
+                inside = !inside;
+            }
+            j = i;
+        }
+        inside
+    }
+    /// Höchster Wert über den Ecken.
+    fn z_max(&self) -> f64 {
+        self.ring.iter().map(|q| self.z(q[0], q[1])).fold(f64::NEG_INFINITY, f64::max)
+    }
+}
+
+/// Unterkanten-Facetten der Dachflächen: Oberfläche um `total` senkrecht zur Fläche gesenkt (wie die
+/// 3D-Schichten); senkrechte Flächen entfallen.
+pub fn plane_facets(planes: &[Vec<[f64; 3]>], total: f64) -> Vec<RoofFacet> {
+    let t = if total.is_finite() { total.max(0.0) } else { 0.0 };
+    let mut out = Vec::new();
+    for pts in planes {
+        if pts.len() < 3 {
+            continue;
+        }
+        let (mut a, mut b, mut c) = (0.0, 0.0, 0.0);
+        for i in 0..pts.len() {
+            let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+            a += (p[1] - q[1]) * (p[2] + q[2]);
+            b += (p[2] - q[2]) * (p[0] + q[0]);
+            c += (p[0] - q[0]) * (p[1] + q[1]);
+        }
+        let len = (a * a + b * b + c * c).sqrt();
+        if !(len > 1e-12) || c.abs() < 1e-6 * len {
+            continue; // senkrecht oder entartet
+        }
+        let (gx, gy) = (-a / c, -b / c);
+        let c0 = pts[0][2] - gx * pts[0][0] - gy * pts[0][1] - t * len / c.abs();
+        if let Some(f) = RoofFacet::new(pts.iter().map(|q| [q[0], q[1]]).collect(), [c0, gx, gy]) {
+            out.push(f);
+        }
+    }
+    out
 }
 
 /// Terminierung am Deckenanschluss (`Wall.sliceTermination`).
@@ -102,6 +185,10 @@ pub struct WallIn {
     pub cuts: WallCuts,
     /// Schichteinzug ([106]); leer = alle Schichten bündig.
     pub reveals: Vec<RevealIn>,
+    /// An Dach anschliessen ([G2], `Wall.roofAttach`): `None` = automatisch (Wand endet an der
+    /// Dach-Unterkante, wo ihre Krone darüber liegt), `Some(true)` = zusätzlich bis unter das Dach
+    /// verlängert, `Some(false)` = Dächer schneiden die Wand nicht.
+    pub roof_attach: Option<bool>,
 }
 
 /// Decken und Dächer eines Geschosses — einmal je Geschoss gelesen, für alle seine Wände; die
@@ -125,7 +212,7 @@ impl FloorContext {
             roofs: roofs
                 .into_iter()
                 .map(|r| {
-                    let b = outline_bounds(r.eaves.iter().map(|p| (p[0], p[1])));
+                    let b = outline_bounds(r.eaves.iter().map(|p| (p[0], p[1])).chain(r.facets.iter().flat_map(|f| f.ring.iter().map(|q| (q[0], q[1])))));
                     (r, b)
                 })
                 .collect(),
@@ -149,8 +236,15 @@ pub struct Piece {
     /// beginnt/endet dort, wo die Band-Mittellinie sie trifft. `None`: rechtwinklig.
     pub start_cut: Option<Line>,
     pub end_cut: Option<Line>,
-    /// Eigene Dicke (Schichteinzug-Stück, [106]); `None` = Banddicke.
+    /// Eigene Dicke (Schichteinzug-Stück, [106]; seitlich geteiltes Band unter einem Dach, [G2]);
+    /// `None` = Banddicke.
     pub thickness: Option<f64>,
+    /// Ebene Oberkante unter einer Dachfläche ([G2]): `z = c + gx·x + gy·y` (Welt); `None` = waagrecht
+    /// auf `z_top`. `z_top` ist dann der höchste Eckwert, `top_drop` die Absenkung auf der Mittellinie.
+    pub top_plane: Option<[f64; 3]>,
+    /// Anfang/Ende liegt an einer inneren Stossfuge (Teilung an Dachkanten oder Öffnungen unter einem
+    /// Dach): dort keine sichtbare Stirnfläche (Ansicht).
+    pub joint: [bool; 2],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -475,94 +569,337 @@ impl Emitter<'_> {
             start_cut: None,
             end_cut: None,
             thickness: None,
+            top_plane: None,
+            joint: [false; 2],
         });
     }
 }
 
-/// Oberkante des Bands unter den Dächern: Dach-Unterkante entlang der Achse abtasten, zu geraden
-/// Stücken (Toleranz 2 mm) zusammenfassen, Knicke exakt als Schnitt der Nachbargeraden; je Stück
-/// ein Körper mit schräger Oberkante. Ohne Dach darüber: ein Körper, unverändert.
-#[allow(clippy::too_many_arguments)]
-fn clip_to_roofs(w: &WallIn, ctx: &FloorContext, u: Vec2, n: Vec2, offset: f64, a: f64, bb: f64, zb: f64, zt: f64, emit: &mut dyn FnMut(f64, f64, f64, f64, f64)) {
-    if zt - zb <= EPS || bb - a <= EPS {
-        return;
-    }
-    let wb = wall_bounds(w, offset.abs() + 0.01);
-    let roofs: Vec<&RoofIn> = ctx.roofs.iter().filter(|(r, rb)| r.eaves_z + 50.0 >= zb && bounds_overlap(wb, *rb)).map(|(r, _)| r).collect();
-    if roofs.is_empty() {
-        emit(a, bb, zb, zt, zt);
-        return;
-    }
-    let span = bb - a;
-    let count = 1usize.max((span / ROOF_CLIP_STEP).ceil() as usize);
-    let top_at = |t: f64| {
-        let tt = (bb - 1e-3).min((a + 1e-3).max(t));
-        let p = add(add(w.start, scale(u, tt)), scale(n, offset));
-        let mut clip = zt;
-        for r in &roofs {
-            if let Some(under) = roof_underside_at(&r.planes, r.total_thickness, p.x, p.y) {
-                if under < clip {
-                    clip = under;
+// ── Wand an Dach ([G2]) ───────────────────────────────────────────────────────
+//
+// Die Oberkante eines Bands ist `clamp(U, zb, zt)` mit U = obere Hülle der Dach-Unterkanten-Facetten
+// über dem Punkt (stückweise eben). Das Band wird an den Grenzen der Bereiche geteilt — längs der
+// Achse mit der exakten Grenzlinie als Schnittlinie (First, Grat, Kehle, Höhenlinie U = zt bzw. zb),
+// quer über die Dicke (seitlich), wo eine Grenze längs durch das Band läuft (Traufwand, deren Krone die
+// Dachfläche schneidet). Jedes Stück bekommt eine ebene Oberkante: exakt je Schicht, an jeder Ecke.
+
+/// Bereich der Oberkante an einem Punkt.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Fac {
+    /// Kein Dach darüber: Wandkrone.
+    Free,
+    /// Unter dem Dach, Unterkante über der (verlängerten) Krone: waagrecht auf der Krone.
+    Cap,
+    /// Unterkante unter dem Fuss: kein Körper.
+    Floor,
+    /// Unterkante der Facette `k`.
+    Roof(usize),
+}
+
+struct Tops<'a> {
+    facets: Vec<&'a RoofFacet>,
+    zb: f64,
+    zt_free: f64,
+    zt_cap: f64,
+}
+
+impl Tops<'_> {
+    fn at(&self, p: Vec2) -> Fac {
+        let mut best: Option<(f64, usize)> = None;
+        for (k, f) in self.facets.iter().enumerate() {
+            if f.contains(p.x, p.y) {
+                let z = f.z(p.x, p.y);
+                if best.is_none_or(|b| z > b.0) {
+                    best = Some((z, k));
                 }
             }
         }
-        zb.max(clip)
-    };
-    let mut ts = Vec::with_capacity(count + 1);
-    let mut tops = Vec::with_capacity(count + 1);
-    for i in 0..=count {
-        ts.push(a + (span * i as f64) / count as f64);
-        tops.push(top_at(ts[i]));
-    }
-    const TOL: f64 = 0.002;
-    let mut runs: Vec<(usize, usize)> = Vec::new();
-    let mut i0 = 0;
-    while i0 < count {
-        let mut i1 = i0 + 1;
-        while i1 < count {
-            let k = i1 + 1;
-            let slope = (tops[k] - tops[i0]) / (ts[k] - ts[i0]);
-            let ok = (i0 + 1..=k).all(|m| (tops[i0] + slope * (ts[m] - ts[i0]) - tops[m]).abs() <= TOL);
-            if !ok {
-                break;
+        match best {
+            None => Fac::Free,
+            Some((z, _)) if z >= self.zt_cap - 1e-9 => {
+                if self.zt_cap == self.zt_free {
+                    Fac::Free
+                } else {
+                    Fac::Cap
+                }
             }
-            i1 = k;
+            Some((z, _)) if z <= self.zb + 1e-9 => Fac::Floor,
+            Some((_, k)) => Fac::Roof(k),
         }
-        runs.push((i0, i1));
-        i0 = i1;
     }
-    let line = |r: (usize, usize)| {
-        let m = (tops[r.1] - tops[r.0]) / (ts[r.1] - ts[r.0]);
-        (m, tops[r.0] - m * ts[r.0])
+    fn coef(&self, f: Fac) -> [f64; 3] {
+        match f {
+            Fac::Free => [self.zt_free, 0.0, 0.0],
+            Fac::Cap => [self.zt_cap, 0.0, 0.0],
+            Fac::Floor => [self.zb, 0.0, 0.0],
+            Fac::Roof(k) => self.facets[k].plane,
+        }
+    }
+}
+
+/// Ein Stück der Band-Oberkante: Achsmass `[a, b]` auf seiner Mittellinie (Versatz `off`, Dicke `th`),
+/// Schnittlinien, Höhe (`top` = höchster Eckwert) und Ebene.
+#[derive(Clone, Debug)]
+struct TopPiece {
+    a: f64,
+    b: f64,
+    cut_a: Option<Line>,
+    cut_b: Option<Line>,
+    off: f64,
+    th: f64,
+    top: f64,
+    plane: Option<[f64; 3]>,
+    joint: [bool; 2],
+}
+
+/// Dächer, die eine Wand im Höhenbereich `[zb, zt]` betreffen; `None` = keine (unverändert).
+fn roof_tops_ctx<'a>(w: &WallIn, ctx: &'a FloorContext, zb: f64, zt: f64) -> Option<Tops<'a>> {
+    if w.roof_attach == Some(false) || ctx.roofs.is_empty() {
+        return None;
+    }
+    let wb = wall_bounds(w, w.thickness_safe.max(0.0) + 0.01);
+    let facets: Vec<&RoofFacet> = ctx
+        .roofs
+        .iter()
+        .filter(|(r, rb)| r.eaves_z + 50.0 >= zb && bounds_overlap(wb, *rb))
+        .flat_map(|(r, _)| r.facets.iter())
+        .filter(|f| bounds_overlap(wb, Bounds { min_x: f.bounds[0], min_y: f.bounds[1], max_x: f.bounds[2], max_y: f.bounds[3] }))
+        .collect();
+    if facets.is_empty() {
+        return None;
+    }
+    // Verlängern nur, wo der Höhenbereich bis zur Wandkrone reicht (nicht unter einer Decke).
+    let zt_cap = if w.roof_attach == Some(true) && (zt - w.z_top).abs() < EPS { facets.iter().map(|f| f.z_max()).fold(zt, f64::max) } else { zt };
+    Some(Tops { facets, zb, zt_free: zt, zt_cap })
+}
+
+/// Ecken der Grundfläche eines Bandstücks (aussen +n, innen −n) an den Schnittlinien.
+#[allow(clippy::too_many_arguments)]
+fn strip_corners(w: &WallIn, u: Vec2, n: Vec2, off: f64, th: f64, a: f64, b: f64, cut_a: Option<Line>, cut_b: Option<Line>) -> [Vec2; 4] {
+    let base = add(w.start, scale(n, off));
+    let at = |s: f64, o: f64, cut: Option<Line>| {
+        let q = add(add(base, scale(u, s)), scale(n, o));
+        cut.and_then(|c| line_intersect(q, u, c.point, c.dir)).filter(|r| r.x.is_finite() && r.y.is_finite()).unwrap_or(q)
     };
-    let mut cuts = vec![a];
-    for r in 0..runs.len().saturating_sub(1) {
-        let l1 = line(runs[r]);
-        let l2 = line(runs[r + 1]);
-        let lo = ts[runs[r].1 - 1];
-        let hi = ts[count.min(runs[r].1 + 1)];
-        let mut x = ts[runs[r].1];
-        if (l1.0 - l2.0).abs() > 1e-9 {
-            let cx = (l2.1 - l1.1) / (l1.0 - l2.0);
-            if cx >= lo && cx <= hi {
-                x = cx;
-            }
-        }
-        cuts.push(x);
+    let h = th / 2.0;
+    [at(a, h, cut_a), at(b, h, cut_b), at(b, -h, cut_b), at(a, -h, cut_a)]
+}
+
+/// Oberkante eines Bandstreifens `[a, b]` (Mittellinie `off`, Dicke `th`) unter den Dächern `t`.
+#[allow(clippy::too_many_arguments)]
+fn strip_tops(w: &WallIn, t: &Tops, u: Vec2, n: Vec2, off: f64, th: f64, a: f64, b: f64, cut_a: Option<Line>, cut_b: Option<Line>, joint: [bool; 2], depth: u32, out: &mut Vec<TopPiece>) {
+    if !(b - a > EPS) || !(th > 0.0) {
+        return;
     }
-    cuts.push(bb);
-    for (k, &r) in runs.iter().enumerate() {
-        let (sa, sb) = (cuts[k], cuts[k + 1]);
-        if sb - sa <= EPS {
+    let base = add(w.start, scale(n, off));
+    let pt = |s: f64| add(base, scale(u, s));
+    let steps = 8usize.max(((b - a) / ROOF_SAMPLE).ceil() as usize).min(20_000);
+    let ts: Vec<f64> = (0..=steps).map(|i| if i == steps { b } else { a + (b - a) * i as f64 / steps as f64 }).collect();
+    let inner = |s: f64| s.clamp(a + 1e-6, b - 1e-6);
+    let fac: Vec<Fac> = ts.iter().map(|&s| t.at(pt(inner(s)))).collect();
+    // Läufe gleicher Bereiche und die Grenzen dazwischen (Achsmass, Schnittlinie).
+    let mut runs: Vec<(Fac, f64, Option<Line>)> = vec![(fac[0], a, cut_a)];
+    for i in 1..=steps {
+        let last = runs.last().map_or(fac[0], |r| r.0);
+        if fac[i] == last {
             continue;
         }
-        let value_at = |x: f64| {
-            let l = line(r);
-            zt.min(zb.max(l.0 * x + l.1))
+        let (fa, fb) = (fac[i - 1], fac[i]);
+        // Wechselstelle auf der Mittellinie (Bisektion), dann die exakte Grenzlinie beider Ebenen.
+        let (mut lo, mut hi) = (ts[i - 1], ts[i]);
+        for _ in 0..50 {
+            let mid = (lo + hi) / 2.0;
+            if t.at(pt(inner(mid))) == fa {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let sm = (lo + hi) / 2.0;
+        let p = pt(sm);
+        let (ca, cb) = (t.coef(fa), t.coef(fb));
+        let d = [ca[0] - cb[0], ca[1] - cb[1], ca[2] - cb[2]];
+        let g = js_hypot(d[1], d[2]);
+        let mut line = None;
+        if g > 1e-9 {
+            let dist = (d[0] + d[1] * p.x + d[2] * p.y) / g;
+            let dir = Vec2::new(-d[2] / g, d[1] / g);
+            // Nur, wenn die Grenze wirklich hier liegt (sonst Sprung, z. B. Traufe) und quer genug steht.
+            if dist.abs() < 0.02 && (dir.x * u.y - dir.y * u.x).abs() > 0.17 {
+                line = Some(Line { point: Vec2::new(p.x - d[1] / g * dist, p.y - d[2] / g * dist), dir });
+            }
+        }
+        let prev = runs.last().map_or(a, |r| r.1);
+        let s_cut = line.and_then(|l| band_cut_distance(w, u, n, off, &l)).filter(|x| x.is_finite()).unwrap_or(sm).clamp(prev, b);
+        runs.push((fb, s_cut, line));
+    }
+    let k_last = runs.len() - 1;
+    for k in 0..runs.len() {
+        let (f, s0, c0) = runs[k];
+        let (s1, c1) = if k < k_last { (runs[k + 1].1, runs[k + 1].2) } else { (b, cut_b) };
+        if !(s1 - s0 > EPS) {
+            continue;
+        }
+        let jt = [if k == 0 { joint[0] } else { true }, if k == k_last { joint[1] } else { true }];
+        // Seitlich: läuft eine Grenze längs durchs Band (Kanten sehen einen anderen Bereich)?
+        if depth < 3 && th > 0.004 {
+            let mut other = None;
+            'edges: for side in [1.0, -1.0] {
+                let eo = side * (th / 2.0 - 1e-4);
+                let e_lo = c0.and_then(|l| band_cut_distance(w, u, n, off + eo, &l)).unwrap_or(s0);
+                let e_hi = c1.and_then(|l| band_cut_distance(w, u, n, off + eo, &l)).unwrap_or(s1);
+                if !(e_hi - e_lo > 4.0 * EPS) {
+                    continue;
+                }
+                let m = 4usize.max(((e_hi - e_lo) / ROOF_SAMPLE).ceil() as usize).min(20_000);
+                for j in 0..m {
+                    let s = e_lo + (e_hi - e_lo) * (j as f64 + 0.5) / m as f64;
+                    let fe = t.at(add(pt(s), scale(n, eo)));
+                    if fe != f {
+                        other = Some(fe);
+                        break 'edges;
+                    }
+                }
+            }
+            if let Some(fo) = other {
+                let (ca, cb) = (t.coef(f), t.coef(fo));
+                let d = [ca[0] - cb[0], ca[1] - cb[1], ca[2] - cb[2]];
+                let mid = pt((s0 + s1) / 2.0);
+                let den = d[1] * n.x + d[2] * n.y;
+                if den.abs() > 1e-9 {
+                    let o = -(d[0] + d[1] * mid.x + d[2] * mid.y) / den;
+                    if o.abs() < th / 2.0 - 1e-3 {
+                        for (lo_o, hi_o) in [(-th / 2.0, o), (o, th / 2.0)] {
+                            let c = off + (lo_o + hi_o) / 2.0;
+                            let sa = c0.and_then(|l| band_cut_distance(w, u, n, c, &l)).unwrap_or(s0);
+                            let sb = c1.and_then(|l| band_cut_distance(w, u, n, c, &l)).unwrap_or(s1);
+                            strip_tops(w, t, u, n, c, hi_o - lo_o, sa, sb, c0, c1, jt, depth + 1, out);
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        let (plane, top) = match f {
+            Fac::Floor => continue,
+            Fac::Free => (None, t.zt_free),
+            Fac::Cap => (None, t.zt_cap),
+            Fac::Roof(_) => {
+                let c = t.coef(f);
+                let zmax = strip_corners(w, u, n, off, th, s0, s1, c0, c1).iter().map(|q| c[0] + c[1] * q.x + c[2] * q.y).fold(f64::NEG_INFINITY, f64::max);
+                (Some(c), zmax.min(t.zt_cap).max(t.zb))
+            }
         };
-        let (z0, z1) = (value_at(sa), value_at(sb));
-        if z0.max(z1) - zb > EPS {
-            emit(sa, sb, zb, z0, z1);
+        out.push(TopPiece { a: s0, b: s1, cut_a: c0, cut_b: c1, off, th, top, plane, joint: jt });
+    }
+}
+
+/// Oberkante eines Bandstücks unter den Dächern; `None`, wenn kein Dach die Wand betrifft (dann
+/// unverändert ein Körper auf der Krone).
+#[allow(clippy::too_many_arguments)]
+fn roof_tops(w: &WallIn, ctx: &FloorContext, u: Vec2, n: Vec2, off: f64, th: f64, a: f64, b: f64, cut_a: Option<Line>, cut_b: Option<Line>, zb: f64, zt: f64) -> Option<Vec<TopPiece>> {
+    if zt - zb <= EPS || b - a <= EPS {
+        return None;
+    }
+    let t = roof_tops_ctx(w, ctx, zb, zt)?;
+    let mut out = Vec::new();
+    strip_tops(w, &t, u, n, off, th, a, b, cut_a, cut_b, [false; 2], 0, &mut out);
+    // Nichts geteilt, nichts geneigt: wie ohne Dach.
+    if out.len() == 1 && out[0].plane.is_none() && out[0].top == zt && out[0].th == th && out[0].a == a && out[0].b == b {
+        return None;
+    }
+    Some(out)
+}
+
+/// Löcher eines Bandkörpers ab `a` (Achsmass) im Höhenbereich `[zb, zt]`, mit Schichteinzug.
+#[allow(clippy::too_many_arguments)]
+fn band_holes(w: &WallIn, li: usize, cutouts: &[OpeningIn], innermost: bool, recess: f64, a: f64, zb: f64, zt: f64) -> Vec<[f64; 4]> {
+    let reveals = &w.reveals;
+    cutouts
+        .iter()
+        .filter(|h| h.z_top > zb + EPS && h.z_bottom < zt - EPS)
+        .map(|h| {
+            if let Some(s) = reveals.iter().find(|r| r.of(h)).and_then(|r| r.shifts.get(li)) {
+                [h.from - a - s[0], h.to - a + s[1], h.z_bottom - s[3], h.z_top + s[2]]
+            } else if innermost && h.recess_inner_layer {
+                [h.from - a - recess, h.to - a + recess, h.z_bottom - recess, h.z_top + recess]
+            } else {
+                [h.from - a, h.to - a, h.z_bottom, h.z_top]
+            }
+        })
+        .collect()
+}
+
+/// Ein Körper aus einem Oberkanten-Stück: Achsmass `[x0, x1]` relativ zu `tp.a`, Höhe `[zb, top]`.
+#[allow(clippy::too_many_arguments)]
+fn push_top_piece(em: &mut Emitter, li: usize, band_th: f64, tp: &TopPiece, x0: f64, x1: f64, zb: f64, top: f64, plane: Option<[f64; 3]>, holes: Vec<[f64; 4]>) {
+    let len = tp.b - tp.a;
+    let first = x0 <= EPS;
+    let last = x1 >= len - EPS;
+    let before = em.out.len();
+    em.push(li, tp.a + x0, tp.a + x1, zb, top, tp.off, holes, [0.0, 0.0]);
+    let Some(pc) = em.out.get_mut(before) else { return };
+    pc.start_cut = if first { tp.cut_a } else { None };
+    pc.end_cut = if last { tp.cut_b } else { None };
+    pc.joint = [if first { tp.joint[0] } else { true }, if last { tp.joint[1] } else { true }];
+    if (tp.th - band_th).abs() > 1e-12 {
+        pc.thickness = Some(tp.th);
+    }
+    if let Some(c) = plane {
+        pc.top_plane = Some(c);
+        let at = |q: Vec2| c[0] + c[1] * q.x + c[2] * q.y;
+        let d = [top - at(pc.start), top - at(pc.end)];
+        pc.top_drop = (d[0] > EPS || d[1] > EPS).then_some(d);
+    }
+}
+
+/// Körper eines Oberkanten-Stücks; unter einer Dachfläche ohne Löcher (Pfeiler, Brüstung, Sturz je mit
+/// eigener ebener Oberkante statt Treppung).
+#[allow(clippy::too_many_arguments)]
+fn emit_top_piece(em: &mut Emitter, li: usize, band_th: f64, tp: &TopPiece, u: Vec2, n: Vec2, zb: f64, cutouts: &[OpeningIn], innermost: bool, recess: f64) {
+    let w = em.w;
+    let holes = if w.layered { band_holes(w, li, cutouts, innermost, recess, tp.a, zb, tp.top) } else { Vec::new() };
+    let len = tp.b - tp.a;
+    let Some(c) = tp.plane else {
+        push_top_piece(em, li, band_th, tp, 0.0, len, zb, tp.top, None, holes);
+        return;
+    };
+    if holes.is_empty() {
+        push_top_piece(em, li, band_th, tp, 0.0, len, zb, tp.top, Some(c), holes);
+        return;
+    }
+    let mut xs = vec![0.0, len];
+    for h in &holes {
+        for x in [h[0], h[1]] {
+            if x > EPS && x < len - EPS {
+                xs.push(x);
+            }
+        }
+    }
+    xs.sort_by(|p, q| p.total_cmp(q));
+    xs.dedup_by(|p, q| (*p - *q).abs() <= EPS);
+    for i in 0..xs.len() - 1 {
+        let (x0, x1) = (xs[i], xs[i + 1]);
+        if x1 - x0 <= EPS {
+            continue;
+        }
+        let mid = (x0 + x1) / 2.0;
+        let mut zs: Vec<[f64; 2]> = holes.iter().filter(|h| h[0] <= mid && h[1] >= mid).map(|h| [h[2], h[3]]).collect();
+        zs.sort_by(|p, q| p[0].total_cmp(&q[0]));
+        let mut cur = zb;
+        for [h0, h1] in zs {
+            if h0 > cur + EPS {
+                push_top_piece(em, li, band_th, tp, x0, x1, cur, h0, None, Vec::new());
+            }
+            cur = cur.max(h1);
+        }
+        let ca = if x0 <= EPS { tp.cut_a } else { None };
+        let cb = if x1 >= len - EPS { tp.cut_b } else { None };
+        let zc: Vec<f64> = strip_corners(w, u, n, tp.off, tp.th, tp.a + x0, tp.a + x1, ca, cb).iter().map(|q| c[0] + c[1] * q.x + c[2] * q.y).collect();
+        let (zmin, zmax) = (zc.iter().copied().fold(f64::INFINITY, f64::min), zc.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        // Sturz/Pfeiler bis unter die Dachfläche (Fenster, das ins Dach ragt: der Rest entfällt).
+        if zmin > cur + EPS {
+            push_top_piece(em, li, band_th, tp, x0, x1, cur, zmax.min(tp.top), Some(c), Vec::new());
         }
     }
 }
@@ -599,9 +936,20 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
 
     if !w.layered {
         // Schnitt-Pfad: Pfeiler/Brüstung/Sturz, je Segment alle Bänder.
+        // Unter Dächern ([G2]) je Segment die exakte Oberkante.
+        let u = Vec2::new((w.end.x - w.start.x) / axis_len, (w.end.y - w.start.y) / axis_len);
+        let n = left_normal(u);
         let seg = |em: &mut Emitter, from: f64, to: f64, zb: f64, zt: f64| {
             for (i, &off) in offsets.iter().enumerate() {
-                em.push(i, from, to, zb, zt, off, vec![], [0.0, 0.0]);
+                let th = w.bands[i].thickness;
+                match roof_tops(w, ctx, u, n, off, th, from, to, None, None, zb, zt) {
+                    None => em.push(i, from, to, zb, zt, off, vec![], [0.0, 0.0]),
+                    Some(tops) => {
+                        for tp in &tops {
+                            emit_top_piece(em, i, th, tp, u, n, zb, &[], false, 0.0);
+                        }
+                    }
+                }
             }
         };
         if cutouts.is_empty() {
@@ -696,8 +1044,14 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
         let recess = b.thickness;
         for ([a, bb], cut_a, cut_b) in axis_pieces {
             let n0 = em.out.len();
-            let mut emit_piece = |a: f64, bb: f64, zb: f64, zt_start: f64, zt_end: f64| {
-                emit_band_piece(&mut em, li, off, &cutouts, innermost, recess, a, bb, zb, zt_start, zt_end);
+            let th = b.thickness;
+            let mut emit_piece = |a: f64, bb: f64, ca: Option<Line>, cb: Option<Line>, zb: f64, zt: f64| match roof_tops(w, ctx, u, n, off, th, a, bb, ca, cb, zb, zt) {
+                None => emit_band_piece(&mut em, li, off, &cutouts, innermost, recess, a, bb, zb, zt),
+                Some(tops) => {
+                    for tp in &tops {
+                        emit_top_piece(&mut em, li, th, tp, u, n, zb, &cutouts, innermost, recess);
+                    }
+                }
             };
             let local: Vec<[f64; 4]> = band_z_cuts
                 .iter()
@@ -705,7 +1059,7 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
                 .filter(|c| c[1] > c[0] + EPS)
                 .collect();
             if local.is_empty() {
-                clip_to_roofs(w, ctx, u, n, off, a, bb, z_bottom, z_top, &mut emit_piece);
+                emit_piece(a, bb, cut_a, cut_b, z_bottom, z_top);
                 set_piece_cuts(&mut em.out[n0..], w, u, a, bb, cut_a, cut_b);
                 continue;
             }
@@ -724,7 +1078,7 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
                 let mid = (xa + xb) / 2.0;
                 let z_cutters: Vec<[f64; 2]> = local.iter().filter(|c| c[0] <= mid && c[1] >= mid).map(|c| [c[2], c[3]]).collect();
                 for [zb, zt] in terminate_or_subtract(z_bottom, z_top, &z_cutters, w.termination) {
-                    clip_to_roofs(w, ctx, u, n, off, xa, xb, zb, zt, &mut emit_piece);
+                    emit_piece(xa, xb, if xa == a { cut_a } else { None }, if xb == bb { cut_b } else { None }, zb, zt);
                 }
             }
             set_piece_cuts(&mut em.out[n0..], w, u, a, bb, cut_a, cut_b);
@@ -781,35 +1135,11 @@ fn reveal_pieces(em: &mut Emitter, offsets: &[f64]) {
 /// Ein Körper eines Bands im layered-Pfad: Öffnungs-Löcher auf den Körper-Start umrechnen (an der
 /// innersten Schicht mit Laibungs-Rücksprung geweitet); schräge Oberkante mit Löchern geht in
 /// render3d nicht → gestuft annähern.
+/// Körper eines Bandstücks ohne Dach darüber (waagrechte Krone, Öffnungen als Löcher).
 #[allow(clippy::too_many_arguments)]
-fn emit_band_piece(em: &mut Emitter, li: usize, off: f64, cutouts: &[OpeningIn], innermost: bool, recess: f64, a: f64, bb: f64, zb: f64, zt_start: f64, zt_end: f64) {
-    let zt = zt_start.max(zt_end);
-    let reveals = &em.w.reveals;
-    let holes: Vec<[f64; 4]> = cutouts
-        .iter()
-        .filter(|h| h.z_top > zb + EPS && h.z_bottom < zt - EPS)
-        .map(|h| {
-            if let Some(s) = reveals.iter().find(|r| r.of(h)).and_then(|r| r.shifts.get(li)) {
-                // [106]: Schicht springt je Seite zurück.
-                [h.from - a - s[0], h.to - a + s[1], h.z_bottom - s[3], h.z_top + s[2]]
-            } else if innermost && h.recess_inner_layer {
-                [h.from - a - recess, h.to - a + recess, h.z_bottom - recess, h.z_top + recess]
-            } else {
-                [h.from - a, h.to - a, h.z_bottom, h.z_top]
-            }
-        })
-        .collect();
-    if !holes.is_empty() && (zt_start - zt_end).abs() > EPS {
-        let k = 1usize.max(((bb - a) / ROOF_CLIP_STEP).ceil() as usize);
-        for i in 0..k {
-            let sa = a + ((bb - a) * i as f64) / k as f64;
-            let sb = a + ((bb - a) * (i + 1) as f64) / k as f64;
-            let zm = zt_start + ((zt_end - zt_start) * (i as f64 + 0.5)) / k as f64;
-            emit_band_piece(em, li, off, cutouts, innermost, recess, sa, sb, zb, zm, zm);
-        }
-        return;
-    }
-    em.push(li, a, bb, zb, zt, off, holes, [zt - zt_start, zt - zt_end]);
+fn emit_band_piece(em: &mut Emitter, li: usize, off: f64, cutouts: &[OpeningIn], innermost: bool, recess: f64, a: f64, bb: f64, zb: f64, zt: f64) {
+    let holes = band_holes(em.w, li, cutouts, innermost, recess, a, zb, zt);
+    em.push(li, a, bb, zb, zt, off, holes, [0.0, 0.0]);
 }
 
 #[cfg(test)]
@@ -832,6 +1162,7 @@ mod tests {
             openings: vec![],
             cuts: WallCuts::default(),
             reveals: vec![],
+            roof_attach: None,
         }
     }
     fn band(t: f64, p: f64) -> BandIn {
@@ -844,9 +1175,6 @@ mod tests {
         wall_bands(w, &FloorContext::default())
     }
     /// Achsen-Länge eines Körpers.
-    fn plen(p: &Piece) -> f64 {
-        js_hypot(p.end.x - p.start.x, p.end.y - p.start.y)
-    }
 
     #[test]
     fn schichten_gestapelt_und_referenzversetzt() {
@@ -1093,7 +1421,7 @@ mod tests {
         w.z_top = 5.0;
         // Ebene z = 2 + 0.5·x über [−1, 5]².
         let plane = vec![[-1.0, -1.0, 1.5], [5.0, -1.0, 4.5], [5.0, 5.0, 4.5], [-1.0, 5.0, 1.5]];
-        let roof = RoofIn { eaves_z: 1.5, total_thickness: 0.0, eaves: plane.iter().map(|p| [p[0], p[1]]).collect(), planes: vec![plane] };
+        let roof = RoofIn::new(1.5, 0.0, plane.iter().map(|p| [p[0], p[1]]).collect(), vec![plane]);
         let ctx = FloorContext::new(vec![], vec![roof]);
         let p = wall_bands(&w, &ctx);
         assert_eq!(p.len(), 1, "{p:?}");
@@ -1101,12 +1429,172 @@ mod tests {
         // Abtastung 1 mm innerhalb der Enden (wie TS) → Toleranz 1e-3.
         let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
         assert!(near(p[0].z_top, 4.0) && near(d[0], 2.0) && d[1] == 0.0, "{p:?}");
-        // Mit Öffnung: gestuft, ohne top_drop.
+        // Mit Öffnung ([G2]): Pfeiler und Sturz mit schräger Oberkante statt Treppung.
         w.openings.push(OpeningIn { from: 1.0, to: 2.0, z_bottom: 0.0, z_top: 2.0, recess_inner_layer: false });
         let p = wall_bands(&w, &ctx);
-        assert!(p.len() > 10 && p.iter().all(|q| q.top_drop.is_none()));
-        let total: f64 = p.iter().map(plen).sum();
-        assert!(close(total, 4.0));
+        assert!(p.len() == 3 && p.iter().all(|q| q.holes.is_empty() && q.top_plane.is_some()), "{p:?}");
+        let vol: f64 = p.iter().map(|q| volume(&w, q)).sum();
+        assert!((vol - 2.0).abs() < 1e-9, "{vol}");
+    }
+
+    // ── [G2] Wand an Dach: exakte Oberkante je Schicht ──────────────────────────
+
+    /// Satteldach über [-1, 9] × [-1, 7], First bei y = 3 (längs x), Traufe z = 3, Neigung 45°.
+    fn gable(total: f64) -> RoofIn {
+        let s = vec![[-1.0, -1.0, 3.0], [9.0, -1.0, 3.0], [9.0, 3.0, 7.0], [-1.0, 3.0, 7.0]];
+        let n = vec![[-1.0, 3.0, 7.0], [9.0, 3.0, 7.0], [9.0, 7.0, 3.0], [-1.0, 7.0, 3.0]];
+        RoofIn::new(3.0, total, vec![[-1.0, -1.0], [9.0, -1.0], [9.0, 7.0], [-1.0, 7.0]], vec![s, n])
+    }
+
+    /// Unterkante des Satteldachs (Dicke `t` senkrecht zur Fläche, 45° ⇒ lotrecht t·√2).
+    fn gable_under(t: f64, y: f64) -> f64 {
+        7.0 - (y - 3.0).abs() - t * 2f64.sqrt()
+    }
+
+    /// Ecken einer Band-Grundfläche (mit Schnittlinien, Eigendicke).
+    fn corners(w: &WallIn, p: &Piece) -> [Vec2; 4] {
+        let u = sub(w.end, w.start);
+        let u = scale(u, 1.0 / js_hypot(u.x, u.y));
+        let n = left_normal(u);
+        let h = p.thickness.unwrap_or(w.bands[p.band].thickness) / 2.0;
+        let clip = |base: Vec2, c: Option<Line>| c.and_then(|c| line_intersect(base, u, c.point, c.dir)).unwrap_or(base);
+        [clip(add(p.start, scale(n, h)), p.start_cut), clip(add(p.end, scale(n, h)), p.end_cut), clip(add(p.end, scale(n, -h)), p.end_cut), clip(add(p.start, scale(n, -h)), p.start_cut)]
+    }
+
+    fn top_at(p: &Piece, q: Vec2) -> f64 {
+        p.top_plane.map_or(p.z_top, |c| c[0] + c[1] * q.x + c[2] * q.y)
+    }
+
+    /// Volumen eines Körpers: Grundfläche × Höhe im Schwerpunkt (exakt bei ebener Oberkante), ohne Löcher.
+    fn volume(w: &WallIn, p: &Piece) -> f64 {
+        let q = corners(w, p);
+        let mut a = 0.0;
+        let (mut cx, mut cy) = (0.0, 0.0);
+        for i in 0..4 {
+            let (p0, p1) = (q[i], q[(i + 1) % 4]);
+            let c = p0.x * p1.y - p1.x * p0.y;
+            a += c;
+            cx += (p0.x + p1.x) * c;
+            cy += (p0.y + p1.y) * c;
+        }
+        if a.abs() < 1e-15 {
+            return 0.0;
+        }
+        let c = Vec2::new(cx / (3.0 * a), cy / (3.0 * a));
+        let holes: f64 = p.holes.iter().map(|h| (h[1] - h[0]) * (h[3] - h[2])).sum::<f64>() * p.thickness.unwrap_or(w.bands[p.band].thickness);
+        (a / 2.0).abs() * (top_at(p, c) - p.z_bottom) - holes
+    }
+
+    #[test]
+    fn giebelwand_folgt_beiden_dachflaechen_je_schicht() {
+        // Giebelwand quer zum First (x = 0, y 0 → 6), zwei Schichten, Oberkante weit über dem Dach.
+        let mut w = base((0.0, 0.0), (0.0, 6.0), vec![band(0.1, 10.0), band(0.2, 50.0)]);
+        w.z_top = 9.0;
+        let ctx = FloorContext::new(vec![], vec![gable(0.2)]);
+        let p = wall_bands(&w, &ctx);
+        // Je Schicht zwei Körper (links/rechts vom First), beide mit ebener Oberkante.
+        assert_eq!(p.len(), 4, "{p:?}");
+        for q in &p {
+            assert!(q.top_plane.is_some() && q.holes.is_empty(), "{q:?}");
+            for c in corners(&w, q) {
+                assert!((top_at(q, c) - gable_under(0.2, c.y)).abs() < 1e-9, "Ecke {c:?} {q:?}");
+            }
+        }
+        // Volumen = Fläche unter der Unterkante × Dicke (Fünfeck), exakt.
+        let vol: f64 = p.iter().map(|q| volume(&w, q)).sum();
+        let h0 = gable_under(0.2, 0.0);
+        let h1 = gable_under(0.2, 3.0);
+        let expect = 0.3 * (6.0 * h0 + 3.0 * (h1 - h0));
+        assert!((vol - expect).abs() < 1e-9, "{vol} vs {expect}");
+        // Innere Stossfuge am First: keine sichtbare Stirn.
+        assert!(p.iter().filter(|q| q.joint[0] || q.joint[1]).count() == 4);
+    }
+
+    #[test]
+    fn traufwand_schraeg_ueber_die_dicke_und_seitlich_geteilt() {
+        // Traufwand längs x bei y = 0.5 (Dicke 0.3: y 0.35 … 0.65), Dach steigt quer zur Wand.
+        let mut w = base((0.0, 0.5), (8.0, 0.5), vec![band(0.3, 50.0)]);
+        w.z_top = 9.0;
+        let ctx = FloorContext::new(vec![], vec![gable(0.0)]);
+        let p = wall_bands(&w, &ctx);
+        assert_eq!(p.len(), 1, "{p:?}");
+        let c = p[0].top_plane.unwrap();
+        assert!(c[1].abs() < 1e-12 && (c[2] - 1.0).abs() < 1e-12, "Oberkante steigt mit y: {c:?}");
+        for k in corners(&w, &p[0]) {
+            assert!((top_at(&p[0], k) - gable_under(0.0, k.y)).abs() < 1e-9);
+        }
+        // Wandkrone 4.5 schneidet die Unterkante in der Dicke (y = 0.5): zwei Streifen nebeneinander.
+        w.z_top = 4.5;
+        let p = wall_bands(&w, &ctx);
+        assert_eq!(p.len(), 2, "{p:?}");
+        let vol: f64 = p.iter().map(|q| volume(&w, q)).sum();
+        // Aussen (y 0.35 … 0.5) schräg 4.35 … 4.5, innen flach 4.5.
+        let expect = 8.0 * (0.15 * (4.35 + 4.5) / 2.0 + 0.15 * 4.5);
+        assert!((vol - expect).abs() < 1e-9, "{vol} vs {expect}");
+        assert!(p.iter().all(|q| q.thickness.is_some_and(|t| (t - 0.15).abs() < 1e-9)));
+    }
+
+    #[test]
+    fn wand_mit_fenster_unter_dachschraege_ohne_treppung() {
+        let mut w = base((0.0, 0.0), (0.0, 6.0), vec![band(0.2, 50.0)]);
+        w.z_top = 9.0;
+        w.openings.push(OpeningIn { from: 1.0, to: 2.0, z_bottom: 1.0, z_top: 2.5, recess_inner_layer: false });
+        let ctx = FloorContext::new(vec![], vec![gable(0.0)]);
+        let p = wall_bands(&w, &ctx);
+        // Pfeiler, Brüstung, Sturz, Pfeiler bis zum First, Pfeiler danach: keine Treppen, keine Löcher.
+        assert!(p.len() <= 6 && p.iter().all(|q| q.holes.is_empty()), "{p:?}");
+        let vol: f64 = p.iter().map(|q| volume(&w, q)).sum();
+        let gross = 0.2 * (6.0 * 4.0 + 3.0 * 3.0);
+        assert!((vol - (gross - 0.2 * 1.5)).abs() < 1e-9, "{vol}");
+        for q in &p {
+            for c in corners(&w, q) {
+                assert!(top_at(q, c) <= gable_under(0.0, c.y) + 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn an_dach_anschliessen_verlaengert_oder_ignoriert() {
+        // Wandkrone 2.5 unter der Traufe: automatisch unverändert.
+        let mut w = base((0.0, 0.0), (0.0, 6.0), vec![band(0.2, 50.0)]);
+        w.z_top = 2.5;
+        let ctx = FloorContext::new(vec![], vec![gable(0.0)]);
+        let p = wall_bands(&w, &ctx);
+        assert!(p.len() == 1 && p[0].top_plane.is_none() && close(p[0].z_top, 2.5));
+        // An Dach anschliessen: bis unter die Dachfläche verlängert.
+        w.roof_attach = Some(true);
+        let p = wall_bands(&w, &ctx);
+        let vol: f64 = p.iter().map(|q| volume(&w, q)).sum();
+        assert!((vol - 0.2 * (6.0 * 4.0 + 9.0)).abs() < 1e-9, "{vol} {p:?}");
+        // Nie: Wand bleibt durchgehend, auch wenn sie über das Dach ragt.
+        w.roof_attach = Some(false);
+        w.z_top = 9.0;
+        let p = wall_bands(&w, &ctx);
+        assert!(p.len() == 1 && close(p[0].z_top, 9.0));
+    }
+
+    #[test]
+    fn kehle_zweier_daecher_nimmt_die_obere_huelle() {
+        // Zwei Pultdächer überdecken sich: Unterkante = obere Hülle (Maximum) der beiden.
+        let a = RoofIn::new(0.0, 0.0, vec![], vec![vec![[0.0, -1.0, 2.0], [6.0, -1.0, 5.0], [6.0, 1.0, 5.0], [0.0, 1.0, 2.0]]]);
+        let b = RoofIn::new(0.0, 0.0, vec![], vec![vec![[0.0, -1.0, 5.0], [6.0, -1.0, 2.0], [6.0, 1.0, 2.0], [0.0, 1.0, 5.0]]]);
+        let mut w = base((0.0, 0.0), (6.0, 0.0), vec![band(0.2, 50.0)]);
+        w.z_top = 9.0;
+        let p = wall_bands(&w, &FloorContext::new(vec![], vec![a, b]));
+        assert_eq!(p.len(), 2, "{p:?}");
+        let vol: f64 = p.iter().map(|q| volume(&w, q)).sum();
+        assert!((vol - 0.2 * 25.5).abs() < 1e-9, "{vol}");
+    }
+
+    #[test]
+    fn schnitt_pfad_schneidet_ebenfalls_am_dach() {
+        let mut w = base((0.0, 0.0), (0.0, 6.0), vec![band(0.3, 50.0)]);
+        w.z_top = 9.0;
+        w.layered = false;
+        w.openings.push(OpeningIn { from: 1.0, to: 2.0, z_bottom: 1.0, z_top: 2.5, recess_inner_layer: false });
+        let p = wall_bands(&w, &FloorContext::new(vec![], vec![gable(0.0)]));
+        let vol: f64 = p.iter().map(|q| volume(&w, q)).sum();
+        assert!((vol - 0.3 * (6.0 * 4.0 + 9.0 - 1.5)).abs() < 1e-9, "{vol}");
     }
 
     #[test]
@@ -1122,7 +1610,7 @@ mod tests {
         w.bands.push(band(0.0, 1.0));
         let ctx = FloorContext::new(
             vec![CeilingIn { z_bottom: 0.5, z_top: 0.5, outline: vec![Vec2::new(0.0, 0.0); 3], layers: Some(vec![]) }],
-            vec![RoofIn { eaves_z: 0.0, total_thickness: 0.0, eaves: vec![], planes: vec![vec![]] }],
+            vec![RoofIn::new(0.0, 0.0, vec![], vec![vec![]]), RoofIn::new(0.0, f64::NAN, vec![], vec![vec![[0.0, 0.0, f64::NAN], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], vec![[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 2.0]]])],
         );
         let _ = wall_bands(&w, &ctx);
 

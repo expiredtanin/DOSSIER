@@ -265,18 +265,31 @@ pub fn collect_drawings(p: &Project, level: &str, codes: &HashSet<String>) -> Sn
     let mut segs: Vec<Seg> = Vec::new();
     let mut circles = Vec::new();
     let mut ellipses = Vec::new();
+    let mut anchors = Vec::new();
     for d in &p.drawings2d {
-        if d.level_id != level || !codes.contains(&d.category_code) {
+        if !crate::grid::visible_on(d, level) || !codes.contains(&d.category_code) {
             continue;
         }
         match &d.geom {
+            // Achsraster ([112]): Achsen als Strecken/Bögen, Achsschnittpunkte als Endpunkte.
+            g @ Drawing2DGeom::Grid { .. } => {
+                if let Some(spec) = crate::grid::Spec::of(g) {
+                    for ax in spec.axes() {
+                        match ax.shape {
+                            crate::grid::Shape::Line { a, b } => segs.push([a.0, a.1, b.0, b.1]),
+                            crate::grid::Shape::Arc { c, r, a0, a1 } => circles.push(Circle { cx: c.0, cy: c.1, r, arc: (a1 - a0 < std::f64::consts::TAU - 1e-9).then_some((a0, a1)) }),
+                        }
+                    }
+                    anchors.extend(spec.crossings());
+                }
+            }
             Drawing2DGeom::Circle { center, r } => circles.push(Circle { cx: center.x, cy: center.y, r: *r, arc: None }),
             Drawing2DGeom::Arc { center, r, a0, a1 } => circles.push(Circle { cx: center.x, cy: center.y, r: *r, arc: Some((*a0, *a1)) }),
             Drawing2DGeom::Ellipse { center, .. } => ellipses.push((center.x, center.y)),
             g => drawing_segs(g, &mut segs),
         }
     }
-    SnapPart { segs: SnapSet::new(segs), circles, anchors: Vec::new(), ellipses }
+    SnapPart { segs: SnapSet::new(segs), circles, anchors, ellipses }
 }
 
 /// Die Kandidaten eines Geschosses: Modell, Zeichnungen, Nahmodus.
@@ -654,6 +667,29 @@ mod tests {
         // Ohne Strecken-Fang: kein Verweilen, keine Blöcke A/B.
         let o = query(ls, &q((2.0, 2.05), F_ENDPOINT, None));
         assert!(o.dwell.is_none() && o.a.is_none() && o.b.is_none());
+    }
+
+    /// [112] Achsraster: Achsen als Strecken, Ringe als Kreise, Achsschnittpunkte als Endpunkte; in allen Geschossen.
+    #[test]
+    fn achsraster_fang() {
+        let mut v = base();
+        v["drawings2d"] = json!([{"id": "G", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "grid", "origin": {"x": 1, "y": 2}, "angle": 0,
+            "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 4}], "b": [{"label": "A", "pos": 0}, {"label": "B", "pos": 3}], "extend": 1}}]);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let codes: HashSet<String> = ["20".to_string()].into_iter().collect();
+        for level in ["eg", "og"] {
+            let part = collect_drawings(&p, level, &codes);
+            assert_eq!(part.anchors.len(), 4, "{level}");
+            assert!(part.anchors.contains(&(5.0, 5.0)));
+        }
+        let mut v = base();
+        v["drawings2d"] = json!([{"id": "G", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0, "radial": true,
+            "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 90}], "b": [{"label": "A", "pos": 3}], "extend": 1}}]);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let part = collect_drawings(&p, "eg", &codes);
+        assert_eq!(part.circles.len(), 1);
+        assert_eq!(part.circles[0].r, 3.0);
+        assert_eq!(part.anchors.len(), 2);
     }
 
     #[test]

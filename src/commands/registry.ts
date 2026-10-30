@@ -47,12 +47,16 @@ import { scaleCommand } from "./cmds/scale";
 import { explodeCommand } from "./cmds/explode";
 import { dimdetachCommand } from "./cmds/dimdetach";
 import { autodimCommand } from "./cmds/autodim";
+import { gridCommand } from "./cmds/grid";
+import { arcDimCommand, diameterDimCommand, radiusDimCommand } from "./cmds/dimround";
 import { alignCommand } from "./cmds/align";
 import { joinCommand } from "./cmds/join";
 import { copyCommand } from "./cmds/copy";
 import { arrayCommand } from "./cmds/array";
 import { offsetCommand } from "./cmds/offset";
 import { extrudeCommand } from "./cmds/extrude";
+import { revolveCommand } from "./cmds/revolve";
+import { loftCommand } from "./cmds/loft";
 import { trimCommand } from "./cmds/trim";
 import { breakCommand } from "./cmds/break";
 import { extendCommand } from "./cmds/extend";
@@ -61,6 +65,7 @@ import { chamferCommand } from "./cmds/chamfer";
 import { multilineCommand } from "./cmds/multiline";
 import { importCommand } from "./cmds/import";
 import { terrainCommand } from "./cmds/terrain";
+import { excavationCommand } from "./cmds/excavation";
 import { measureCommand } from "./cmds/measure";
 import { sectionLineCommand, viewLineCommand } from "./cmds/sectionline";
 import { georefCommand } from "./cmds/georef";
@@ -114,12 +119,18 @@ export const COMMANDS: Record<string, Command> = {
   explode: explodeCommand,
   dimdetach: dimdetachCommand,
   autodim: autodimCommand,
+  grid: gridCommand,
+  dimradius: radiusDimCommand,
+  dimdiameter: diameterDimCommand,
+  dimarc: arcDimCommand,
   align: alignCommand,
   join: joinCommand,
   copy: copyCommand,
   array: arrayCommand,
   offset: offsetCommand,
   extrude: extrudeCommand,
+  revolve: revolveCommand,
+  loft: loftCommand,
   trim: trimCommand,
   break: breakCommand,
   extend: extendCommand,
@@ -128,6 +139,7 @@ export const COMMANDS: Record<string, Command> = {
   multiline: multilineCommand,
   import: importCommand,
   terrain: terrainCommand,
+  excavation: excavationCommand,
   measure: measureCommand,
   sectionline: sectionLineCommand,
   viewline: viewLineCommand,
@@ -234,6 +246,15 @@ export const ALIASES: Record<string, string> = {
   bml: "dimdetach",
   bemassungloesen: "dimdetach",
   ab: "autodim",
+  axes: "grid",
+  achsraster: "grid",
+  achsen: "grid",
+  rad: "dimradius",
+  radiusmass: "dimradius",
+  dm: "dimdiameter",
+  durchmessermass: "dimdiameter",
+  bogenl: "dimarc",
+  bogenlaenge: "dimarc",
   aussenbemassung: "autodim",
   al: "align",
   ausrichten: "align",
@@ -244,6 +265,9 @@ export const ALIASES: Record<string, string> = {
   feld: "array",
   o: "offset",
   ex: "extrude",
+  rev: "revolve",
+  rotation: "revolve",
+  lf: "loft",
   tr: "trim",
   br: "break",
   unterbrechen: "break",
@@ -258,6 +282,8 @@ export const ALIASES: Record<string, string> = {
   parallel: "multiline",
   imp: "import",
   ter: "terrain",
+  baugrube: "excavation",
+  aushub: "excavation",
   schnittlinie: "sectionline",
   ansichtslinie: "viewline",
   bezugspunkt: "georef",

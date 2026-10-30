@@ -192,6 +192,13 @@ describe("Mesh-Import: Abbildung auf Kontext-Meshes", () => {
     expect(text).toContain("mesh.import.done");
     expect(text).toContain("mesh.import.up");
   });
+
+  it("Bericht nennt die Reparatur ([T5]) nur, wenn etwas repariert wurde", () => {
+    const base = { format: "stl" as const, up: "z" as const, upAuto: false, upCertain: true, unitScale: 1, triangles: 12, degenerate: 0, badFaces: 0, truncated: false, warnings: [] as string[], objects: 1 };
+    const tr = (k: string, v?: Record<string, string | number>) => `${k}${v ? JSON.stringify(v) : ""}`;
+    expect(formatMeshReport({ ...base, repaired: { welded: 0, degenerate: 0, holes: 0 } }, tr)).not.toContain("repaired");
+    expect(formatMeshReport({ ...base, repaired: { welded: 28, degenerate: 1, holes: 2 } }, tr)).toContain('mesh.import.repaired{"welded":28,"tris":1,"holes":2}');
+  });
 });
 
 describe("Mesh-Import: Fehler", () => {

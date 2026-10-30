@@ -11,6 +11,7 @@ pub mod context;
 pub mod drawings;
 pub mod section;
 pub mod elevation;
+pub mod grid_view;
 pub mod cache;
 pub mod extras;
 pub mod underlay;

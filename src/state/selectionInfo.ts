@@ -124,6 +124,8 @@ export interface WallInfo {
   layerBoundaries: LayerBoundaryChoice[];
   /** Terminierungs-Regel am Deckenanschluss (Default "both" = heutiges Verhalten). */
   sliceTermination: SliceTermination;
+  /** An Dach anschliessen ([G2]): "auto" (Default), "on" (bis unter das Dach verlängern), "off". */
+  roofAttach: "auto" | "on" | "off";
   wallTypeId: string;
   /** Aktuelle Gesamtdicke (Meter). */
   thickness: number;
@@ -257,6 +259,8 @@ export interface StairInfo {
   arrowStyle?: "line" | "filled";
   /** Referenzpunkt der Laufbreite (links/mitte/rechts). Fehlt → "mitte". */
   referenz?: "links" | "mitte" | "rechts";
+  /** Nur Wendel: Radius der Mittelsäule (Meter); fehlt → keine Säule. */
+  centerColumn?: number;
   /** Zugewiesener Treppentyp (Bibliothek, `Stair.typeId`) oder undefined. */
   typeId?: string;
   /** Geschoss, dem die Treppe zugeordnet ist. */
