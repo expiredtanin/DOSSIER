@@ -1052,8 +1052,9 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let structure = structure_of(&roof.floor_id);
         let base = base_of(structure);
         classified.push((format!("roof/{}", roof.id), Kind::Roof, roof.category_code.clone()));
-        p.roofs = Some(vec![roof.clone()]);
-        let meshes = model3d::emit_roofs(&p, None)?;
+        // Alle Dächer im Projekt lassen (Verschneidung [G5] braucht die Nachbarn), nur dieses ausgeben.
+        p.roofs = roofs.clone();
+        let meshes = model3d::emit_roofs(&p, Some(&roof.id))?;
         let (mut positions, mut indices) = (Vec::<f64>::new(), Vec::<u32>::new());
         for m in &meshes {
             let at = (positions.len() / 3) as u32;
@@ -1097,7 +1098,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     // ── Dach-/Deckenfenster ([103]): IfcOpeningElement im Dach bzw. in der Decke, IfcWindow/IfcDoor darin ──
     for o in openings.iter() {
         let Some(fr) = crate::opening_shape::host_frame(&p, o) else { continue };
-        let (host_key, floor_id) = if fr.plane.is_some() {
+        let (host_key, floor_id) = if fr.plane.is_some() || fr.dormer {
             let r = &p.roofs.as_deref().unwrap_or(&[])[fr.host];
             (format!("roof/{}", r.id), r.floor_id.clone())
         } else {

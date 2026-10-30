@@ -19,6 +19,7 @@ import { solidBoolCommand } from "./cmds/solidbool";
 import { voidBoxCommand } from "./cmds/voidbox";
 import { ceilingOpeningCommand } from "./cmds/ceilingOpening";
 import { roofWindowCommand } from "./cmds/roofWindow";
+import { dormerCommand } from "./cmds/dormer";
 import { roofHoleCommand } from "./cmds/roofHole";
 import { roomCommand } from "./cmds/room";
 import { rectCommand } from "./cmds/rect";
@@ -80,6 +81,7 @@ export const COMMANDS: Record<string, Command> = {
   voidbox: voidBoxCommand,
   ceilingopening: ceilingOpeningCommand,
   roofwindow: roofWindowCommand,
+  dormer: dormerCommand,
   roofhole: roofHoleCommand,
   room: roomCommand,
   line: lineCommand,
@@ -165,6 +167,8 @@ export const ALIASES: Record<string, string> = {
   aussparung: "ceilingopening",
   dachfenster: "roofwindow",
   oberlicht: "roofwindow",
+  gaube: "dormer",
+  lukarne: "dormer",
   dachhof: "roofhole",
   lichthof: "roofhole",
   rf: "roof",

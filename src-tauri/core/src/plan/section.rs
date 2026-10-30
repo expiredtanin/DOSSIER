@@ -940,6 +940,21 @@ fn shaped_wall_cuts(cuts: &mut [Cut], p: &Project, walls_r: &[RWall], base: (f64
     }
 }
 
+/// Neigung (Grad) der längsten Kante eines Schnitt-Rings, auf −90…90 gefaltet.
+fn ring_slope_deg(pts: &[[f64; 2]]) -> f64 {
+    let n = pts.len();
+    let mut best = (0.0, 0.0);
+    for i in 0..n {
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let l = dx * dx + dy * dy;
+        if l > best.0 {
+            best = (l, if dx < 0.0 { atan2(-dy, -dx) } else { atan2(dy, dx) });
+        }
+    }
+    best.1 * 180.0 / std::f64::consts::PI
+}
+
 /// Formöffnungen ([G3]) hinter der Schnittebene: die Wand trägt im Modell das Rechteck-Loch, die
 /// Projektion zeigt aber den Umriss — Kanten der Wand im Loch-Rechteck fallen weg, der Umriss auf der
 /// zugewandten Wandfläche kommt dazu.
@@ -1010,6 +1025,28 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
     let (bx, by) = plane.base();
     let (ux, uy) = plane.u_model();
     for (index, roof) in roofs.iter().enumerate() {
+        // Verschnittene Dächer und Gauben ([G5]): Schnitt durch die Körper je Schicht.
+        if let Some(solids) = crate::roof_assembly::roof_solids(p, index) {
+            for part in &solids.parts {
+                let rings = crate::roof_assembly::section_rings(&part.mesh, (bx, by), (ux, uy));
+                if rings.is_empty() {
+                    continue;
+                }
+                let wall = part.role == crate::roof_assembly::Role::DormerWall;
+                for pts in rings {
+                    // Muster der Dachschichten entlang der Neigung (Richtung der längsten Kante).
+                    let slope = if wall { None } else { Some(ring_slope_deg(&pts)) };
+                    let hatch = if part.component_id.is_empty() { None } else { p.component(&part.component_id).and_then(|comp| resolve_hatch(p, &comp.hatch_id, slope, None, None)) };
+                    let mut c = Cut::new(Kind::Roof, index, pts);
+                    if let Some(h) = &hatch {
+                        c.fill = Some(poche_fill(h.pattern).to_string());
+                        c.hatch = Some(h.clone());
+                    }
+                    cuts.push(c);
+                }
+            }
+            continue;
+        }
         let eaves = p.roof_base_elevation(roof);
         let geo = crate::roof::roof_geometry(&roof.params(), eaves);
         let layers = p.roof_layers(roof);

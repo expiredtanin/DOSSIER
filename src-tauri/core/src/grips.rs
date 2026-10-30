@@ -932,8 +932,77 @@ fn resize_geom(g: &Value, w: f64, h: f64, fx: f64, fy: f64) -> Option<Value> {
 
 // ── Dach, Polylinien-Punkte, Dicken ──────────────────────────────────────────
 
+/// Gauben-Griffe ([G5]) im Dach-Griff: Index = Basis + 10 × Gaube + k; k = 0/1 Breite (links/rechts,
+/// symmetrisch um die Stirnmitte), k = 2 Tiefe (Schleppgaube; die Neigung folgt daraus).
+pub const DORMER_GRIP_BASE: f64 = 1000.0;
+
+fn dormer_grip(r: &Value, local: f64, x: f64, y: f64) -> Option<Value> {
+    if !(local.is_finite() && local >= 0.0 && x.is_finite() && y.is_finite()) {
+        return None;
+    }
+    let (di, k) = ((local / 10.0).floor() as usize, local as i64 % 10);
+    let dormers = field(r, "dormers")?.as_array()?;
+    let d = dormers.get(di)?;
+    let roof: crate::model::Roof = serde_json::from_value(r.clone()).ok()?;
+    let (px, py) = xy(field(d, "position")?);
+    let g = crate::roof::roof_geometry(&roof.params(), 0.0);
+    let pl = g.planes.iter().find(|pl| pl.len() >= 3 && crate::dormer::point_in_xy(px, py, pl))?;
+    let n = crate::model3d::plane_normal_up(pl);
+    let hl = hypot2(n[0], n[1]);
+    if !(hl > 0.05) {
+        return None;
+    }
+    let h = (n[0] / hl, n[1] / hl);
+    let (dx, dy) = (x - px, y - py);
+    let nd = match k {
+        0 | 1 => {
+            let w = 2.0 * (dx * -h.1 + dy * h.0).abs();
+            with(d, "width", js_num(jsnum::max(0.8, w)))
+        }
+        2 => {
+            let depth = -(dx * h.0 + dy * h.1);
+            let mut nd = with(d, "depth", js_num(jsnum::max(0.3, depth)));
+            if let Some(o) = nd.as_object_mut() {
+                o.remove("pitchDeg");
+            }
+            nd
+        }
+        _ => return None,
+    };
+    let mut list = dormers.clone();
+    list[di] = nd;
+    Some(with(r, "dormers", Value::Array(list)))
+}
+
+#[cfg(test)]
+mod dormer_grip_tests {
+    use super::*;
+
+    #[test]
+    fn breite_und_tiefe() {
+        let r = serde_json::json!({
+            "id": "R", "type": "roof", "floorId": "F", "categoryCode": "35",
+            "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}],
+            "shape": "sattel", "pitchDeg": 45, "overhang": 0.3, "ridgeAxis": "x", "thickness": 0.3,
+            "dormers": [{"id": "D", "kind": "schlepp", "position": {"x": 4, "y": 1}, "width": 2, "frontHeight": 1.5, "pitchDeg": 15}]
+        });
+        // Breite: Punkt 1.5 rechts der Mitte (Südseite: ew = +x) ⇒ 3.0
+        let w = roof_grip(&r, DORMER_GRIP_BASE + 1.0, 5.5, 1.0).unwrap();
+        assert_eq!(w["dormers"][0]["width"], 3.0);
+        // Tiefe: 2 m das Gefälle hinauf (+y) ⇒ depth 2, Neigung entfällt
+        let d = roof_grip(&r, DORMER_GRIP_BASE + 2.0, 4.0, 3.0).unwrap();
+        assert_eq!(d["dormers"][0]["depth"], 2.0);
+        assert!(d["dormers"][0].get("pitchDeg").is_none());
+        assert!(roof_grip(&r, DORMER_GRIP_BASE + 10.0, 4.0, 3.0).is_none(), "keine zweite Gaube");
+        assert!(roof_grip(&r, DORMER_GRIP_BASE + 2.0, f64::NAN, 3.0).is_none());
+    }
+}
+
 /// Dach-Eckgriff: die gegenüberliegende Ecke bleibt fix, der Umriss bleibt ein achsparalleles Rechteck.
 fn roof_grip(r: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
+    if index >= DORMER_GRIP_BASE {
+        return dormer_grip(r, index - DORMER_GRIP_BASE, x, y);
+    }
     let outline = field(r, "outline")?.as_array()?;
     let n = outline.len();
     if n < 4 {

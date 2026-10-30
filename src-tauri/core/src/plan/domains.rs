@@ -385,6 +385,25 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 }
             }
         }
+        // Verschnittene Dächer und Gauben ([G5]): Dachaufsicht aus den Körpern (Traufen, Firste,
+        // Grate/Kehlen, verdeckte Teile weg).
+        let ri = p.roofs.as_deref().and_then(|r| r.iter().position(|x| x.id == roof.id));
+        if let Some(ri) = ri.filter(|&ri| crate::roof_assembly::is_assembled(p, ri)) {
+            use crate::roof_assembly::EdgeKind;
+            for (owner, a, b, kind) in crate::roof_assembly::assembly_edges(p).iter() {
+                if *owner != ri {
+                    continue;
+                }
+                let (cls, w) = match kind {
+                    EdgeKind::Eaves => ("roof-eaves", ROOF_EAVES_MM),
+                    EdgeKind::Ridge => ("roof-ridge", ROOF_RIDGE_MM),
+                    EdgeKind::Hip => ("roof-hip", ROOF_HIP_MM),
+                };
+                out.push(line(pv(*a), pv(*b), cls, w, None, stroke, greyed));
+            }
+            roof_windows(c, out, roof);
+            continue;
+        }
         for ring in std::iter::once(&geo.eaves).chain(geo.eaves_holes.iter()) {
             let pts: Vec<Vec2> = ring.iter().map(|q| pv(*q)).collect();
             let n = pts.len();

@@ -177,7 +177,7 @@ pub(crate) fn corner_shifts(x: &RWall) -> [f64; 4] {
 /// `collectRoofFaces`.
 fn collect_roof_faces(p: &Project, frame: &[f64; 9]) -> Result<Vec<Face>, String> {
     let mut roofs = Vec::new();
-    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+    for (ri, roof) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate() {
         let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
         let layers = p.roof_layers(roof);
         let outer = layers.first();
@@ -189,6 +189,35 @@ fn collect_roof_faces(p: &Project, frame: &[f64; 9]) -> Result<Vec<Face>, String
                 None => ROOF_RGB_FALLBACK,
             },
         };
+        // Verschnittene Dächer und Gauben ([G5]): sichtbare Dreiecke der Aussenhaut, Gaubenwände in
+        // ihrer Bauteilfarbe.
+        if let Some(solids) = crate::roof_assembly::roof_solids(p, ri) {
+            let fn_ = [frame[3], frame[4], frame[5]];
+            // Zugewandte Dreiecke (Ansichtswelt x, Höhe, y wie `surface_openings`).
+            let front = |m: &crate::solid_bool::Mesh| -> Vec<usize> {
+                (0..m.indices.len() / 3)
+                    .filter(|&ti| {
+                        let q = |i: u32| {
+                            let j = i as usize * 3;
+                            [m.positions[j], m.positions[j + 1], m.positions[j + 2]]
+                        };
+                        let t = &m.indices[ti * 3..ti * 3 + 3];
+                        let tri = [q(t[0]), q(t[1]), q(t[2])];
+                        let n = crate::opening_shape::cross([tri[1][0] - tri[0][0], tri[1][1] - tri[0][1], tri[1][2] - tri[0][2]], [tri[2][0] - tri[0][0], tri[2][1] - tri[0][1], tri[2][2] - tri[0][2]]);
+                        fn_[0] * n[0] + fn_[1] * n[2] + fn_[2] * n[1] < -1e-12
+                    })
+                    .collect()
+            };
+            // Wie die übrigen Dächer: Oberfläche der Eindeckung (Dach + Gaubendächer), dazu die Gaubenwände.
+            roofs.push(RoofIn { id: roof.id.clone(), fill, planes: crate::roof_assembly::planar_faces(&solids.top, &front(&solids.top)), gables: g.gables.clone() });
+            let wall_comp = solids.parts.iter().find(|pt| pt.role == crate::roof_assembly::Role::DormerWall && pt.layer == 0).and_then(|pt| p.component(&pt.component_id));
+            let wf = wall_comp.map_or([0.85, 0.83, 0.8], |c| hex_to_rgb(&c.color, [0.85, 0.83, 0.8]));
+            let wall_faces = crate::roof_assembly::planar_faces(&solids.walls, &front(&solids.walls));
+            if !wall_faces.is_empty() {
+                roofs.push(RoofIn { id: roof.id.clone(), fill: wf, planes: wall_faces, gables: Vec::new() });
+            }
+            continue;
+        }
         roofs.push(RoofIn { id: roof.id.clone(), fill, planes: g.planes.clone(), gables: g.gables.clone() });
     }
     Ok(project_faces(frame, &[], &[], &roofs))
@@ -542,7 +571,7 @@ fn surface_openings(p: &Project, frame: &[f64; 9], out: &mut Vec<ProjOpening>) {
     };
     for o in p.openings.as_deref().unwrap_or(&[]) {
         let Some(f) = crate::opening_shape::host_frame(p, o) else { continue };
-        if f.plane.is_none() || fnrm[0] * f.n[0] + fnrm[1] * f.n[2] + fnrm[2] * f.n[1] >= -1e-4 {
+        if (f.plane.is_none() && !f.dormer) || fnrm[0] * f.n[0] + fnrm[1] * f.n[2] + fnrm[2] * f.n[1] >= -1e-4 {
             continue;
         }
         let (w, h) = (o.width, o.height);
@@ -701,6 +730,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     let mut seq = 0usize;
     let mut pending: Vec<Pending> = Vec::new();
 
+    let assembled: std::collections::HashSet<&str> = p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().filter(|(i, _)| crate::roof_assembly::is_assembled(p, *i)).map(|(_, r)| r.id.as_str()).collect();
     let mut roof_edges: HashMap<String, Vec<usize>> = HashMap::new();
     for (fi, f) in faces.iter().enumerate() {
         if f.role != Role::Roof || f.id.is_empty() {
@@ -715,12 +745,34 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         if f.role != Role::Roof || f.id.is_empty() {
             return false;
         }
-        roof_edges.get(&edge_key(a, b)).is_some_and(|list| {
-            list.iter().any(|&oi| {
-                let o = &faces[oi];
-                oi != fi && o.id == f.id && f.normal[0] * o.normal[0] + f.normal[1] * o.normal[1] + f.normal[2] * o.normal[2] > 1.0 - 1e-9
+        let same = |oi: usize| {
+            let o = &faces[oi];
+            oi != fi && o.id == f.id && f.normal[0] * o.normal[0] + f.normal[1] * o.normal[1] + f.normal[2] * o.normal[2] > 1.0 - 1e-7
+        };
+        if roof_edges.get(&edge_key(a, b)).is_some_and(|list| list.iter().any(|&oi| same(oi))) {
+            return true;
+        }
+        // Verschnittene Dächer ([G5]): Fugen zwischen Streifen derselben Fläche mit T-Stoss — die Kante
+        // liegt (an Stichproben) auf Kanten koplanarer Nachbarflächen.
+        if !assembled.contains(f.id.as_str()) {
+            return false;
+        }
+        let near = |s: Pt| {
+            faces.iter().enumerate().filter(|(oi, _)| same(*oi)).any(|(_, o)| {
+                (0..o.pts.len()).any(|k| {
+                    let (c, d) = (o.pts[k], o.pts[(k + 1) % o.pts.len()]);
+                    let (dx, dy) = (d[0] - c[0], d[1] - c[1]);
+                    let l2 = dx * dx + dy * dy;
+                    if l2 < 1e-18 {
+                        return false;
+                    }
+                    let t = ((s[0] - c[0]) * dx + (s[1] - c[1]) * dy) / l2;
+                    let (qx, qy) = (c[0] + dx * t, c[1] + dy * t);
+                    (-1e-9..=1.0 + 1e-9).contains(&t) && (s[0] - qx).powi(2) + (s[1] - qy).powi(2) < 1e-12
+                })
             })
-        })
+        };
+        [0.1, 0.3, 0.5, 0.7, 0.9].iter().all(|&t| near([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]))
     };
     // [T2] Bogenwände: Stossfugen der Sehnen-Teilkörper nicht als Kante zeichnen (die Fläche wirkt
     // gekrümmt statt facettiert). Eine senkrechte Kante gilt als Fuge, wenn eine andere Fläche derselben
@@ -787,7 +839,11 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
                 pending.push(Pending::Line { a, b, depth: f.depth_min - EPS * 5.0, style: None, paint: None });
             }
         }
-        let mut prim = polygon(pts, &fill_for(f.fill), "none", 0.0, no_hatch());
+        // Verschnittene Dächer ([G5]) kommen teils als Dreiecke: ein Hauch Kontur in der Füllfarbe deckt
+        // die Haarfugen zwischen ihnen.
+        let fill = fill_for(f.fill);
+        let seam = is_roof && assembled.contains(f.id.as_str());
+        let mut prim = if seam { polygon(pts, &fill, &fill, 0.05, no_hatch()) } else { polygon(pts, &fill, "none", 0.0, no_hatch()) };
         if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, .. } = &mut prim {
             *g = Some(greyed(f));
             if !f.id.is_empty() {
