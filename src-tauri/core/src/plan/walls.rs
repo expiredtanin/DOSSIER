@@ -647,7 +647,7 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         let cut = cut_by_id.get(w.id.as_str()).copied().unwrap_or(&empty);
         let (zb, zt) = p.wall_vertical_extent(w);
         let view_only = zt < cut_z || zb > cut_z;
-        let reveals = crate::opening_detail::plan_reveal_block(p, wv, &openings);
+        let reveals = crate::opening_detail::plan_reveal_block(p, w, &openings);
         let (unroll, cut_u) = match &arc_wall {
             Some((arc, _)) => {
                 let total = p.wall_thickness(w, 0.2);

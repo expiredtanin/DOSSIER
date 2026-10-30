@@ -1296,16 +1296,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Bogenlänge auf der Achse; Lücke radial durch alle Schichten, Plansymbol gebogen; Einbauteile (3D, Schnitt,
   Ansicht, IFC-Füllung) gerade auf der Sehne zwischen den Laibungen (Entscheid). **3D/Schnitt/Ansicht/OBJ**:
   Sehnen-Teilwände mit radialen Gehrungen (`chord_walls`, Teilstellen auch an den Laibungen, Teilwände in der
-  Öffnung = Brüstung/Sturz); Ansicht ohne Facetten-Fugen (Ecken auf der Gehrung, innere Stirnflächen
-  entfallen). **Mengen** exakt (Bogenlänge, Ringsektor; IFC Qto, Objekt-Info, Bauteilliste). **IFC**: Datensatz
+  Öffnung = Brüstung/Sturz); Ansicht und Schnitt ohne Facetten-Fugen (Ecken auf der Gehrung, innere
+  Stirnflächen/Stosskanten entfallen, Umriss bleibt); Schnitt quer durch eine Stossfuge = ein Band je Schicht. **Mengen** exakt (Bogenlänge, Ringsektor; IFC Qto, Objekt-Info, Bauteilliste). **IFC**: Datensatz
   `WALL_ARC` — Körper als Netz, Achse `IfcTrimmedCurve` auf `IfcCircle` (`validate-ifc.py` ohne Befund).
   **Befehle**: Wand-Option „Bogen" (Drei-Punkt/Tangential wie Polylinie), Scheitel-Griff, Spiegeln kehrt den
   Bulge, Öffnung am Bogen platzieren; Fang, Raum-Erkennung, Schatten, Baurecht, Flächen über den Sehnenzug.
   Tests: Rust (Verschneidung, Ringsektor-Volumen/dicht, Grundriss im Kreisring, Ansicht ohne Fugen, IFC,
   Befehle), vitest (Wand-Befehl). Geprüft im Linux-Container (CLI-SVG Grundriss/Schnitt/Ansicht, IFC), nicht in
-  der Tauri-App. Offen: Schichteinzug [106] und Formöffnungen [G3] in Bogenwänden; Wände teilen/trimmen (fehlt
+  der Tauri-App. Offen: Schichteinzug [106], Formöffnungen [G3] und Ansichtsschraffur im 3D ([100]) in Bogenwänden; Wände teilen/trimmen (fehlt
   auch für gerade); echte Polar-Schraffur; IFC-Körper als extrudiertes Bogenprofil statt Netz; Griff-Vorschau
-  zeigt nur die Achse.
+  zeigt nur die Achse; automatische Aussenbemassung misst Bogenwände als Sehne.
 - ○ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M
 - ○ **[T4] Import-Meshes glätten oder kantig** (`add_smooth_normals`). · S
 - ○ **[T5] Import reparieren** (`put_together_same_attrs`, Healing). · S

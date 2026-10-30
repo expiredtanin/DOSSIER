@@ -376,6 +376,10 @@ pub const SIDES: [Side; 4] = [Side::Left, Side::Right, Side::Top, Side::Bottom];
 
 /// `None`: keine Regeln, kein Wandtyp oder Öffnung ausserhalb der Wand.
 pub fn opening_reveal(p: &Project, w: &Wall, o: &Opening) -> Option<OpeningReveal> {
+    // Bogenwände ([T2]): Schichteinzug noch nicht (Laibungen radial, Schichten bündig).
+    if crate::wall_arc::is_arc_bulge(w.bulge) {
+        return None;
+    }
     let rules = reveal_rules(p, o);
     if rules.is_empty() {
         return None;

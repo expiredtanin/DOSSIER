@@ -148,7 +148,7 @@ fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[Ro
 
 /// Verschiebung der vier Wandecken längs der Achse bis auf die Schnittlinien (Anfang +n, Anfang −n,
 /// Ende +n, Ende −n; +n = rechte Normale wie in `plan_elevation::wall_faces`).
-fn corner_shifts(x: &RWall) -> [f64; 4] {
+pub(crate) fn corner_shifts(x: &RWall) -> [f64; 4] {
     let (dx, dy) = (x.end[0] - x.start[0], x.end[1] - x.start[1]);
     let l = hypot2(dx, dy);
     if l < 1e-9 {
