@@ -1040,6 +1040,32 @@ export type DrawingLevel = {
    * Blatt offen ist. Fehlt ⇒ gewöhnliche Ebene.
    */
   layoutId?: string;
+  /**
+   * Ansichtsbereich ([36], nur Geschoss): Oberkante der Sichtweite über OKFF in Metern. Bauteile,
+   * die ganz darüber liegen, entfallen; darunter bis zur Schnitthöhe erscheinen sie als „über
+   * Schnitt“ (gestrichelt). Fehlt ⇒ unbegrenzt (heutiges Verhalten).
+   */
+  viewTop?: number;
+  /**
+   * Ansichtsbereich ([36], nur Geschoss): Unterkante der Sichtweite über OKFF in Metern (auch
+   * negativ). Bauteile ganz darunter entfallen (oder erscheinen gepunktet, s. `viewDepth`).
+   * Fehlt ⇒ unbegrenzt.
+   */
+  viewBottom?: number;
+  /**
+   * Ansichtsbereich ([36], nur Geschoss): „darunter sichtbar bis“ — Tiefe in Metern unter
+   * `viewBottom`, bis zu der Bauteile gepunktet („unter Schnitt“) erscheinen. Fehlt/0 ⇒ keine.
+   */
+  viewDepth?: number;
+  /**
+   * Ansichtsvorlage ([34]), mit der diese Ansicht (Geschoss/Schnitt/Ansicht) einmal angewendet
+   * oder verknüpft wurde.
+   */
+  templateId?: string;
+  /**
+   * `true` ⇒ die Ansicht folgt der Vorlage (Änderungen an der Vorlage wirken); sonst nur einmal angewendet.
+   */
+  templateLinked?: boolean;
 };
 
 /**
@@ -2167,6 +2193,8 @@ export type Project = {
    * alle Ausschnitte auf Wurzelebene).
    */
   viewSnapshotFolders?: Array<ViewSnapshotFolder>;
+  /** Ansichtsvorlagen ([34]). Optional: Alt-Projekte ohne Feld bleiben gültig. */
+  viewTemplates?: Array<ViewTemplate>;
   /**
    * Layout-Blätter (DOSSIER A3) — Druck-/Plan-Blätter mit platzierten Viewports
    * (siehe {@link Layout}). Optional, damit bestehende Projekte/Tests ohne
@@ -2882,6 +2910,10 @@ export type ViewSnapshot = {
   cameraCenter?: Vec2;
   /** Zoom (Bildschirm-Pixel je Meter) beim Erfassen — zusammen mit `cameraCenter`. */
   cameraPxPerMeter?: number;
+  /** Ansichtsvorlage ([34]) des Ausschnitts (einmal angewendet oder verknüpft). */
+  templateId?: string;
+  /** `true` ⇒ der Ausschnitt folgt der Vorlage. */
+  templateLinked?: boolean;
 };
 
 /**
@@ -2895,6 +2927,41 @@ export type ViewSnapshotFolder = {
   name: string;
   /** Übergeordneter Ordner; ohne → Wurzelebene. */
   parentId?: string;
+};
+
+/**
+ * Ansichtsvorlage ([34]): ein benannter Satz Ansichts-Einstellungen für Grundriss, Schnitt, Ansicht
+ * und Ausschnitte. Jedes Feld ist optional — fehlt es, lässt die Vorlage diese Einstellung unberührt.
+ */
+export type ViewTemplate = {
+  id: string;
+  name: string;
+  /** Detailgrad (grob/mittel/fein). */
+  detail?: DetailLevel;
+  /** Papier-Massstab „1:N“ (der Nenner). */
+  scaleDenominator?: number;
+  /** Sichtbare Kategorien: `code` → sichtbar (Kategorien, die fehlen, bleiben unberührt). */
+  layerVisibility?: { [key in string]: boolean };
+  /** Ids der aktiven Override-Regeln (alle übrigen aus). */
+  enabledOverrideRuleIds?: Array<string>;
+  /** Darstellungsmodus der Geschosse (`all_force` … `locked`). */
+  displayMode?: string;
+  /** Schwarz-Weiss. */
+  mono?: boolean;
+  /** Schatten (Ansicht). */
+  shadows?: boolean;
+  /** Verdeckte Kanten (Schnitt/Ansicht). */
+  hiddenLines?: boolean;
+  /** Strichstärken mit dem Massstab skalieren. */
+  scaleLineWeights?: boolean;
+  /** Schnitthöhe über OKFF ([36]). */
+  cutHeight?: number;
+  /** Ansichtsbereich: Oberkante ([36]). */
+  viewTop?: number;
+  /** Ansichtsbereich: Unterkante ([36]). */
+  viewBottom?: number;
+  /** Ansichtsbereich: darunter sichtbar bis ([36]). */
+  viewDepth?: number;
 };
 
 /** Ansichtstyp eines Geschosses (wie in App). */

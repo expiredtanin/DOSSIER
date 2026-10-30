@@ -14,3 +14,4 @@ pub mod elevation;
 pub mod cache;
 pub mod extras;
 pub mod underlay;
+pub mod view_range;

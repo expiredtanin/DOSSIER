@@ -642,6 +642,7 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
     let cuts = plan_joins(p, &walls)?;
     let floor = p.floor(&c.a.floor);
     let cut_z = floor.and_then(|f| f.base_elevation).unwrap_or(0.0) + floor.and_then(|f| f.cut_height).unwrap_or(1.0);
+    let range = super::view_range::ViewRange::of(p, &c.a.floor);
     // Bei doppelten Wand-ids gewinnt in TS (Map) die letzte Verschneidung.
     let mut cut_by_id: HashMap<&str, &WallCuts> = HashMap::new();
     for (e, k) in walls.iter().zip(&cuts) {
@@ -650,6 +651,14 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
     for e in &walls {
         let w = e.w;
         bounds_wall(p, w, bounds);
+        // Ansichtsbereich ([36]): ausserhalb entfällt die Wand samt Öffnungen, über/unter dem Schnitt
+        // wird sie gestrichelt/gepunktet gezeichnet.
+        let (wzb, wzt) = p.wall_vertical_extent(w);
+        let zone = range.classify(wzb, wzt);
+        if zone == super::view_range::Zone::Hidden {
+            continue;
+        }
+        let out_start = out.len();
         // Bogenwand ([T2]): die gerade Pipeline rechnet auf der abgewickelten Ersatzwand `wv`, die
         // Ausgabe wird gebogen (`bend_prims`).
         let arc_wall = crate::wall_arc::unrolled_wall(w);
@@ -721,6 +730,9 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 }
                 None => opening_symbol(c, out, w, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?,
             }
+        }
+        if let Some(d) = range.restyle_dash(zone) {
+            super::view_range::restyle(out, out_start, d);
         }
     }
     Ok(())

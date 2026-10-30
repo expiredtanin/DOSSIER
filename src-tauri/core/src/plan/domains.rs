@@ -286,7 +286,12 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         return Ok(());
     }
     let fps = wall_footprints(c);
+    let range = super::view_range::ViewRange::of(p, &c.a.floor);
     for ce in list {
+        let (zb, zt) = p.ceiling_vertical_extent(ce);
+        if range.classify(zb, zt) == super::view_range::Zone::Hidden {
+            continue;
+        }
         for q in &ce.outline {
             bounds.acc(q.x, q.y);
         }
@@ -339,6 +344,7 @@ fn roof_seen_from_above(p: &Project, roof: &Roof, geo: &crate::roof::RoofGeometr
 fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     let p = c.p;
     let cut_z = super::extras::cut_z(p, &c.a.floor);
+    let range = super::view_range::ViewRange::of(p, &c.a.floor);
     let floor_base = p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
     let below = |r: &Roof| r.floor_id != c.a.floor && p.floor(&r.floor_id).is_some_and(|f| f.base_elevation.unwrap_or(0.0) < floor_base - 1e-6);
     for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| (r.floor_id == c.a.floor || below(r)) && c.shown(&r.category_code)) {
@@ -347,6 +353,11 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         let stroke = roof.color.as_deref().or(category.map(|k| k.color.as_str())).unwrap_or(POCHE_STROKE);
         let geo = crate::roof::roof_geometry(&roof.params(), 0.0);
         let from_above = roof_seen_from_above(p, roof, &geo, cut_z);
+        // Ansichtsbereich ([36]): Dach ganz über der Oberkante bzw. unter der Unterkante entfällt.
+        let rb = p.roof_base_elevation(roof);
+        if range.classify(rb, rb + max(0.0, geo.ridge_height)) == super::view_range::Zone::Hidden {
+            continue;
+        }
         // Dächer tieferer Geschosse nur als Dachaufsicht (ganz unter der Schnittebene).
         if roof.floor_id != c.a.floor && !from_above {
             continue;
@@ -588,7 +599,14 @@ pub fn column_label(col: &Column) -> String {
 
 fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
     let p = c.p;
+    let range = super::view_range::ViewRange::of(p, &c.a.floor);
     for col in p.columns.as_deref().unwrap_or(&[]).iter().filter(|k| k.floor_id == c.a.floor && c.shown(&k.category_code)) {
+        let (zb, zt) = p.column_vertical_extent(col);
+        let zone = range.classify(zb, zt);
+        if zone == super::view_range::Zone::Hidden {
+            continue;
+        }
+        let out_start = out.len();
         let greyed = Some(c.greyed(&col.category_code));
         let category = c.cat(&col.category_code);
         let ov = c.overrides(&col.category_code, Some(&column_label(col)));
@@ -607,13 +625,25 @@ fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
             }
         }
         out.push(polygon(crate::model3d::column_footprint(col), &fill, stroke, lw, hatch, greyed, None, Pick::Column(&col.id)));
+        if let Some(d) = range.restyle_dash(zone) {
+            super::view_range::restyle(out, out_start, d);
+        }
     }
 }
 
 // ── Extrusionen ─────────────────────────────────────────────────────────────
 
 fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
+    let range = super::view_range::ViewRange::of(c.p, &c.a.floor);
+    let base = c.p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
     for s in c.p.extruded_solids.as_deref().unwrap_or(&[]).iter().filter(|s| s.level_id == c.a.floor) {
+        let subtract = s.operation.as_deref() == Some("subtract");
+        let zb = base + s.base_offset.unwrap_or(0.0);
+        let zone = if subtract { super::view_range::Zone::Cut } else { range.classify(zb, zb + s.height) };
+        if zone == super::view_range::Zone::Hidden {
+            continue;
+        }
+        let out_start = out.len();
         if s.operation.as_deref() == Some("subtract") {
             out.push(polygon(s.points.clone(), "none", "none", 0.0, no_hatch(), None, None, Pick::Solid(&s.id)));
             let n = s.points.len();
@@ -627,6 +657,9 @@ fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
             }
         } else {
             out.push(polygon(s.points.clone(), "none", EXTRUSION_STROKE, SYMBOL_HAIRLINE_MM, no_hatch(), None, None, Pick::Solid(&s.id)));
+        }
+        if let Some(d) = range.restyle_dash(zone) {
+            super::view_range::restyle(out, out_start, d);
         }
     }
 }
@@ -934,6 +967,43 @@ mod tests {
         p.drawing_levels.push(dg);
         assert!(count_on(&p, "dg", 100.0) > 10);
         assert_eq!(count(&p, 100.0), 0);
+    }
+
+    #[test]
+    fn ansichtsbereich_blendet_aus_und_strichelt() {
+        let mut p = sample();
+        let walls = |p: &Project| {
+            let r = plan_domains(p, &args("eg", 1.0, &["20", "30", "60"])).unwrap();
+            (serde_json::to_string(&r.walls).unwrap(), serde_json::to_string(&r.solids).unwrap())
+        };
+        let mk = |id: &str, off: f64, h: f64| ExtrudedSolid {
+            id: id.into(),
+            level_id: "eg".into(),
+            points: vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 1.0, y: 0.0 }, Vec2 { x: 1.0, y: 1.0 }, Vec2 { x: 0.0, y: 1.0 }],
+            height: h,
+            base_offset: Some(off),
+            ..Default::default()
+        };
+        p.extruded_solids = Some(vec![mk("oben", 1.4, 0.6), mk("unten", 0.0, 0.5)]);
+        // Standard: unverändert, kein „view-range“.
+        let (w0, s0) = walls(&p);
+        assert!(!w0.contains("view-range") && !s0.contains("view-range"));
+        // Oberkante 1.2 m: Schrank (ab 1.4) fällt weg.
+        p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_top = Some(1.2);
+        let (_, s1) = walls(&p);
+        assert!(!s1.contains("\"oben\"") && s1.contains("\"unten\""), "{s1}");
+        // Oberkante 2.0 m: Schrank bleibt, gestrichelt „über Schnitt“.
+        p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_top = Some(2.0);
+        let (_, s2) = walls(&p);
+        assert!(s2.contains("\"oben\"") && s2.contains("view-range"), "{s2}");
+        // Unterkante 0.6 m ohne Tiefe: Sockel (bis 0.5) entfällt; mit Tiefe gepunktet.
+        let l = p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap();
+        l.view_bottom = Some(0.6);
+        let (_, s3) = walls(&p);
+        assert!(!s3.contains("\"unten\""), "{s3}");
+        p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_depth = Some(0.3);
+        let (_, s4) = walls(&p);
+        assert!(s4.contains("\"unten\"") && s4.contains("[0.04,0.08]"), "{s4}");
     }
 
     #[test]

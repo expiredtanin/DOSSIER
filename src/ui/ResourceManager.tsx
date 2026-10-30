@@ -42,6 +42,8 @@ import { WindowStylesTab } from "./resourceManager/WindowStylesTab";
 import { StairStylesTab } from "./resourceManager/StairStylesTab";
 import { MaterialsTab } from "./resourceManager/MaterialsTab";
 import { OverridesTab } from "./resourceManager/OverridesTab";
+import { ViewTemplatesTab } from "./resourceManager/ViewTemplatesTab";
+import type { ViewTemplateHandlers } from "./resourceManager/ViewTemplatesTab";
 import { PenSetsTab } from "./resourceManager/PenSetsTab";
 import { PalettesTab } from "./resourceManager/PalettesTab";
 import { TextStylesTab } from "./resourceManager/TextStylesTab";
@@ -63,6 +65,7 @@ export type TabId =
   | "stairStyles"
   | "materials"
   | "overrides"
+  | "viewTemplates"
   | "pens"
   | "palettes";
 
@@ -81,10 +84,11 @@ const TABS: { id: TabId; labelKey: string }[] = [
   { id: "stairStyles", labelKey: "resources.tab.stairStyles" },
   { id: "materials", labelKey: "resources.tab.materials" },
   { id: "overrides", labelKey: "resources.tab.overrides" },
+  { id: "viewTemplates", labelKey: "resources.tab.viewTemplates" },
 ];
 
 /** Bündel der immutablen Mutationen (von App über setProject bereitgestellt). */
-export interface ResourceManagerHandlers {
+export interface ResourceManagerHandlers extends ViewTemplateHandlers {
   onPatchComponent: (id: string, patch: Partial<Component>) => void;
   onAddComponent: () => void;
   onDeleteComponent: (id: string) => void;
@@ -481,6 +485,7 @@ export function ResourceManager({
             />
           )}
           {tab === "materials" && <MaterialsTab />}
+          {tab === "viewTemplates" && <ViewTemplatesTab project={project} handlers={handlers} />}
           {tab === "overrides" && (
             <OverridesTab
               project={project}

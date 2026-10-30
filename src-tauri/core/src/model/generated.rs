@@ -1764,6 +1764,96 @@ pub struct DrawingLevel {
     #[serde(rename = "layoutId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub layout_id: Option<String>,
+    /// Ansichtsbereich ([36], nur Geschoss): Oberkante der Sichtweite über OKFF in Metern. Bauteile,
+    /// die ganz darüber liegen, entfallen; darunter bis zur Schnitthöhe erscheinen sie als „über
+    /// Schnitt“ (gestrichelt). Fehlt ⇒ unbegrenzt (heutiges Verhalten).
+    #[serde(rename = "viewTop", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_top: Option<f64>,
+    /// Ansichtsbereich ([36], nur Geschoss): Unterkante der Sichtweite über OKFF in Metern (auch
+    /// negativ). Bauteile ganz darunter entfallen (oder erscheinen gepunktet, s. `viewDepth`).
+    /// Fehlt ⇒ unbegrenzt.
+    #[serde(rename = "viewBottom", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_bottom: Option<f64>,
+    /// Ansichtsbereich ([36], nur Geschoss): „darunter sichtbar bis“ — Tiefe in Metern unter
+    /// `viewBottom`, bis zu der Bauteile gepunktet („unter Schnitt“) erscheinen. Fehlt/0 ⇒ keine.
+    #[serde(rename = "viewDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_depth: Option<f64>,
+    /// Ansichtsvorlage ([34]), mit der diese Ansicht (Geschoss/Schnitt/Ansicht) einmal angewendet
+    /// oder verknüpft wurde.
+    #[serde(rename = "templateId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub template_id: Option<String>,
+    /// `true` ⇒ die Ansicht folgt der Vorlage (Änderungen an der Vorlage wirken); sonst nur einmal angewendet.
+    #[serde(rename = "templateLinked", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub template_linked: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Ansichtsvorlage ([34]): ein benannter Satz Ansichts-Einstellungen für Grundriss, Schnitt, Ansicht
+/// und Ausschnitte. Jedes Feld ist optional — fehlt es, lässt die Vorlage diese Einstellung unberührt.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ViewTemplate {
+    pub id: String,
+    pub name: String,
+    /// Detailgrad (grob/mittel/fein).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<DetailLevel>,
+    /// Papier-Massstab „1:N“ (der Nenner).
+    #[serde(rename = "scaleDenominator", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scale_denominator: Option<f64>,
+    /// Sichtbare Kategorien: `code` → sichtbar (Kategorien, die fehlen, bleiben unberührt).
+    #[serde(rename = "layerVisibility", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layer_visibility: Option<std::collections::BTreeMap<String, bool>>,
+    /// Ids der aktiven Override-Regeln (alle übrigen aus).
+    #[serde(rename = "enabledOverrideRuleIds", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub enabled_override_rule_ids: Option<Vec<String>>,
+    /// Darstellungsmodus der Geschosse (`all_force` … `locked`).
+    #[serde(rename = "displayMode", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub display_mode: Option<String>,
+    /// Schwarz-Weiss.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mono: Option<bool>,
+    /// Schatten (Ansicht).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shadows: Option<bool>,
+    /// Verdeckte Kanten (Schnitt/Ansicht).
+    #[serde(rename = "hiddenLines", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hidden_lines: Option<bool>,
+    /// Strichstärken mit dem Massstab skalieren.
+    #[serde(rename = "scaleLineWeights", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scale_line_weights: Option<bool>,
+    /// Schnitthöhe über OKFF ([36]).
+    #[serde(rename = "cutHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cut_height: Option<f64>,
+    /// Ansichtsbereich: Oberkante ([36]).
+    #[serde(rename = "viewTop", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_top: Option<f64>,
+    /// Ansichtsbereich: Unterkante ([36]).
+    #[serde(rename = "viewBottom", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_bottom: Option<f64>,
+    /// Ansichtsbereich: darunter sichtbar bis ([36]).
+    #[serde(rename = "viewDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_depth: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3890,6 +3980,14 @@ pub struct ViewSnapshot {
     #[serde(rename = "cameraPxPerMeter", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub camera_px_per_meter: Option<f64>,
+    /// Ansichtsvorlage ([34]) des Ausschnitts (einmal angewendet oder verknüpft).
+    #[serde(rename = "templateId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub template_id: Option<String>,
+    /// `true` ⇒ der Ausschnitt folgt der Vorlage.
+    #[serde(rename = "templateLinked", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub template_linked: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4389,6 +4487,10 @@ pub struct Project {
     #[serde(rename = "viewSnapshotFolders", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub view_snapshot_folders: Option<Vec<ViewSnapshotFolder>>,
+    /// Ansichtsvorlagen ([34]). Optional: Alt-Projekte ohne Feld bleiben gültig.
+    #[serde(rename = "viewTemplates", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_templates: Option<Vec<ViewTemplate>>,
     /// Layout-Blätter (DOSSIER A3) — Druck-/Plan-Blätter mit platzierten Viewports
     /// (siehe {@link Layout}). Optional, damit bestehende Projekte/Tests ohne
     /// `layouts` gültig bleiben (Default: leer behandeln). Gehört ins Dokument.
@@ -5100,6 +5202,12 @@ impl Project {
             "viewSnapshotFolders" => {
                 self.view_snapshot_folders = match v {
                     Some(v) => <Option<Vec<ViewSnapshotFolder>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "viewTemplates" => {
+                self.view_templates = match v {
+                    Some(v) => <Option<Vec<ViewTemplate>>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }
