@@ -98,6 +98,20 @@ pub fn wall_layer_segments(p: &Project, w: &crate::model::Wall, out: &mut Vec<Se
         (None, Some(WallReferenceLine::Right)) => -half,
         _ => 0.0,
     };
+    // Bogenwand ([T2]): jede Schichtfuge als Sehnenzug.
+    if crate::wall_arc::is_arc_bulge(w.bulge) {
+        let mut push = |o: f64| {
+            let pts = crate::wall_arc::axis_polyline((w.start.x, w.start.y), (w.end.x, w.end.y), w.bulge, o, total);
+            out.extend(pts.windows(2).map(|q| [q[0].0, q[0].1, q[1].0, q[1].1]));
+        };
+        let mut off = ref_off - total / 2.0;
+        push(off);
+        for layer in &wt.layers {
+            off += layer.thickness;
+            push(off);
+        }
+        return;
+    }
     let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
     let l = hypot2(dx, dy);
     let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };
@@ -118,7 +132,12 @@ pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>) -> SnapP
     let mut segs: Vec<Seg> = Vec::new();
     for w in &p.walls {
         if vis(&w.floor_id, &w.category_code) {
-            segs.push(seg(&w.start, &w.end));
+            if crate::wall_arc::is_arc_bulge(w.bulge) {
+                let pts = crate::wall_arc::axis_polyline((w.start.x, w.start.y), (w.end.x, w.end.y), w.bulge, 0.0, 0.0);
+                segs.extend(pts.windows(2).map(|q| [q[0].0, q[0].1, q[1].0, q[1].1]));
+            } else {
+                segs.push(seg(&w.start, &w.end));
+            }
             wall_layer_segments(p, w, &mut segs);
         }
     }

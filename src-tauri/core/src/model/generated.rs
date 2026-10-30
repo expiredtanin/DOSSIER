@@ -2007,6 +2007,12 @@ pub struct Wall {
     pub start: Vec2,
     /// Achs-Endpunkt im Grundriss (Meter).
     pub end: Vec2,
+    /// Bogenwand ([T2]): Achse als Kreisbogen von `start` nach `end`, `bulge = tan(Öffnungswinkel/4)`;
+    /// positiv = Scheitel links der Sehne (Modell-Konvention wie Polylinien, = −DXF-Bulge). Fehlt/0 =
+    /// gerade Wand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bulge: Option<f64>,
     /// Verweis auf den (mehrschichtigen) Wandtyp.
     #[serde(rename = "wallTypeId")]
     pub wall_type_id: String,

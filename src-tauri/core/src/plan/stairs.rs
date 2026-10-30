@@ -112,6 +112,7 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                         cls: "stair-outline".into(),
                         weight_mm: f[i + 1],
                         dash: None,
+                        color: None,
                         opening_id: None,
                         stair_id: Some(s.id.clone()),
                         greyed,

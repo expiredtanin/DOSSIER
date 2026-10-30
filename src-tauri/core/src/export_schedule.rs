@@ -3,7 +3,6 @@
 //! CSV-Ausgabe (RFC 4180, Feldtrenner `;`, Zeilenende CRLF) mit Aggregat je Bauteil-Typ.
 
 use crate::js_fmt::to_fixed;
-use crate::jsmath::hypot2;
 use crate::jsnum::round;
 use crate::model::*;
 use serde::Serialize;
@@ -41,7 +40,7 @@ pub fn schedule_rows(p: &Project) -> Vec<ScheduleRow> {
             Some(t) => (t.name.clone(), Project::type_thickness(&t.layers)),
             None => (w.wall_type_id.clone(), 0.0),
         };
-        let length = hypot2(w.end.x - w.start.x, w.end.y - w.start.y);
+        let length = crate::wall_arc::axis_length(w);
         rows.push(ScheduleRow {
             kind: "Wand",
             id: w.id.clone(),

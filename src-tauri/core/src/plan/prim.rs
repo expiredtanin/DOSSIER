@@ -126,6 +126,9 @@ pub enum Primitive {
         weight_mm: f64,
         #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_dash")]
         dash: Dash,
+        /// Strichfarbe (sonst die der Klasse), z. B. Umriss einer Bogenwand ([T2]).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         opening_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]

@@ -363,22 +363,28 @@ fn wall_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) ->
             type_id = id;
         }
     }
+    // Bogen-Modus ([T2]): `segs` je Segment wie bei der Polylinie (gerade, tangential, Durchgangspunkt).
+    let bulges = crate::cmd_draw::poly_bulges(&pts, arr(v.get("segs")));
     let mut walls = Vec::new();
-    for w in pts.windows(2) {
+    for (i, w) in pts.windows(2).enumerate() {
         let (a, b) = (w[0], w[1]);
         if seg_len(a, b) < EPS {
             continue;
         }
-        walls.push(obj(vec![
+        let mut f = vec![
             ("id", s(&ids.next("W"))),
             ("type", s("wall")),
             ("floorId", s(ctx.level)),
             ("categoryCode", s(ctx.cat)),
             ("start", pv(a)),
             ("end", pv(b)),
-            ("wallTypeId", type_id.clone()),
-            ("height", js_num(height)),
-        ]));
+        ];
+        if let Some(bl) = bulges.get(i).copied().filter(|b| b.abs() > EPS && b.is_finite()) {
+            f.push(("bulge", js_num(bl)));
+        }
+        f.push(("wallTypeId", type_id.clone()));
+        f.push(("height", js_num(height)));
+        walls.push(obj(f));
     }
     if walls.is_empty() {
         return Vec::new();
@@ -390,9 +396,16 @@ fn wall_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) ->
 /// Wand-Vorschau: je Segment das Band (Dicke wie beim Commit) und die Achse.
 fn wall_preview(root: &Map<String, Value>, v: &Value, ctx: &Ctx, pts: &[V], out: &mut Shapes) {
     let t = wall_thickness(root, ctx, opt_n(v, "thick"));
-    for w in pts.windows(2) {
+    let bulges = crate::cmd_draw::preview_bulges(v, pts);
+    for (i, w) in pts.windows(2).enumerate() {
         let (a, b) = (w[0], w[1]);
         if seg_len(a, b) < EPS {
+            continue;
+        }
+        // Bogenwand ([T2]): Band als Kreisringsektor, Achse als Bogen.
+        if let Some((band, axis)) = crate::wall_arc::band_preview(a, b, bulges.get(i).copied(), t) {
+            out.poly(&band);
+            out.poly_open(&axis);
             continue;
         }
         out.poly(&wall_corners(a, b, t));
@@ -458,8 +471,13 @@ fn floor_walls_flat(root: &Map<String, Value>, level: &str) -> Vec<f64> {
         let tid = field(w, "wallTypeId").and_then(Value::as_str);
         let wt = types.iter().find(|t| id_of(t) == tid);
         let (a, b) = (xy(field(w, "start").unwrap_or(&Value::Null)), xy(field(w, "end").unwrap_or(&Value::Null)));
-        out.extend([a.0, a.1, b.0, b.1, wt.map_or(0.2, type_thickness)]);
-        n += 1;
+        let t = wt.map_or(0.2, type_thickness);
+        // Bogenwand ([T2]): als Sehnenzug.
+        let pts = crate::wall_arc::axis_polyline(a, b, bulge_of(w), 0.0, t);
+        for q in pts.windows(2) {
+            out.extend([q[0].0, q[0].1, q[1].0, q[1].1, t]);
+            n += 1;
+        }
     }
     out[0] = n as f64;
     out
@@ -652,6 +670,28 @@ fn project_onto_wall(start: V, end: V, p: V) -> (f64, V, f64) {
     (t * len2.sqrt(), foot, dist)
 }
 
+/// Bogenwand ([T2]): Bogen aus Achse und Bulge der Anfrage bzw. Wand.
+fn arc_of(a: V, b: V, bulge: Option<f64>) -> Option<crate::wall_arc::WallArc> {
+    crate::wall_arc::WallArc::of(to_p(a), to_p(b), bulge)
+}
+
+/// Wie [`project_onto_wall`], bei Bogenwänden auf den Bogen (Abstand = Bogenlänge ab Wandanfang).
+fn project_onto_any(start: V, end: V, bulge: Option<f64>, p: V) -> (f64, V, f64) {
+    match arc_of(start, end, bulge) {
+        Some(a) => {
+            let (s, _) = a.local(to_p(p));
+            let s = jsnum::max(0.0, jsnum::min(s, a.length()));
+            let f = a.point(s, 0.0);
+            (s, (f.x, f.y), hypot2(p.0 - f.x, p.1 - f.y))
+        }
+        None => project_onto_wall(start, end, p),
+    }
+}
+
+fn bulge_of(w: &Value) -> Option<f64> {
+    field(w, "bulge").and_then(Value::as_f64)
+}
+
 /// Nächste Wand des Geschosses zum Klickpunkt (innerhalb der Toleranz).
 fn pick_wall<'a>(root: &'a Map<String, Value>, level: &str, p: V) -> Option<(&'a Value, V, V)> {
     let mut best: Option<(&Value, V, V, f64)> = None;
@@ -660,7 +700,7 @@ fn pick_wall<'a>(root: &'a Map<String, Value>, level: &str, p: V) -> Option<(&'a
             continue;
         }
         let (a, b) = (xy(field(w, "start").unwrap_or(&Value::Null)), xy(field(w, "end").unwrap_or(&Value::Null)));
-        let (_, _, dist) = project_onto_wall(a, b, p);
+        let (_, _, dist) = project_onto_any(a, b, bulge_of(w), p);
         if dist <= WALL_PICK_DIST && best.is_none_or(|x| dist < x.3) {
             best = Some((w, a, b, dist));
         }
@@ -671,7 +711,10 @@ fn pick_wall<'a>(root: &'a Map<String, Value>, level: &str, p: V) -> Option<(&'a
 /// Öffnung in eine Wand (`start`/`end` der Host-Wand beim Picken, `pos` = Abstand vom Wandanfang).
 fn opening_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let (st, en) = (p_of(v, "start"), p_of(v, "end"));
-    let len = hypot2(en.0 - st.0, en.1 - st.1);
+    let len = match arc_of(st, en, opt_n(v, "bulge")) {
+        Some(a) => a.length(),
+        None => hypot2(en.0 - st.0, en.1 - st.1),
+    };
     let width = jsnum::max(0.1, jsnum::min(n_of(v, "width"), len));
     let position = jsnum::max(0.0, jsnum::min(n_of(v, "pos"), jsnum::max(0.0, len - width)));
     let door = s_of(v, "kind") == "door";
@@ -704,6 +747,40 @@ fn opening_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen)
 /// `info = [pos, von, ax, ay, bx, by, mx, my]` (Position für den Zustand, HUD/Stützpunkte).
 fn opening_preview(v: &Value, cursor: Option<V>, out: &mut Shapes, info: &mut Vec<f64>) {
     let (st, en) = (p_of(v, "start"), p_of(v, "end"));
+    // Bogenwand ([T2]): Lücke und Symbol entlang des Bogens, Position = Bogenlänge.
+    if let Some(arc) = arc_of(st, en, opt_n(v, "bulge")) {
+        let len = arc.length();
+        let pos = match (opt_n(v, "pos"), cursor) {
+            (Some(p), _) => p,
+            (None, Some(c)) => project_onto_any(st, en, opt_n(v, "bulge"), c).0,
+            (None, None) => 0.0,
+        };
+        let width = n_of(v, "width");
+        let from = jsnum::max(0.0, jsnum::min(pos, len));
+        let to = jsnum::max(from, jsnum::min(from + width, len));
+        let at = |s: f64, n: f64| {
+            let q = arc.point(s, n);
+            (q.x, q.y)
+        };
+        let st_pts = arc.stations(from, to, arc.r + 0.15);
+        let half = 0.15;
+        let mut band: Vec<V> = st_pts.iter().map(|&s| at(s, half)).collect();
+        band.extend(st_pts.iter().rev().map(|&s| at(s, -half)));
+        out.poly(&band);
+        let (a, b) = (at(from, 0.0), at(to, 0.0));
+        if s_of(v, "kind") == "door" {
+            let swing = if s_of(v, "side") == "left" { 1.0 } else { -1.0 };
+            let dir = if s_of(v, "dir") == "in" { 1.0 } else { -1.0 };
+            let (hs, hinge) = if s_of(v, "hinge") == "start" { (from, a) } else { (to, b) };
+            let nn = arc.normal(hs);
+            out.line(hinge, (hinge.0 + nn.x * swing * dir * width, hinge.1 + nn.y * swing * dir * width));
+        } else {
+            out.poly_open(&st_pts.iter().map(|&s| at(s, 0.0)).collect::<Vec<_>>());
+        }
+        let m = at((from + to) / 2.0, 0.0);
+        info.extend([pos, from, a.0, a.1, b.0, b.1, m.0, m.1]);
+        return;
+    }
     let pos = match (opt_n(v, "pos"), cursor) {
         (Some(p), _) => p,
         (None, Some(c)) => project_onto_wall(st, en, c).0,
@@ -984,7 +1061,13 @@ pub fn query(root: &Map<String, Value>, v: &Value) -> Option<Result<Value, Strin
     let level = s_of(v, "level");
     Some(Ok(match s_of(v, "q") {
         "pickWall" => match pick_wall(root, level, at) {
-            Some((w, a, b)) => json!({ "hit": { "id": id_of(w), "start": [js_num(a.0), js_num(a.1)], "end": [js_num(b.0), js_num(b.1)], "t": js_num(project_onto_wall(a, b, at).0) } }),
+            Some((w, a, b)) => {
+                let mut hit = json!({ "id": id_of(w), "start": [js_num(a.0), js_num(a.1)], "end": [js_num(b.0), js_num(b.1)], "t": js_num(project_onto_any(a, b, bulge_of(w), at).0) });
+                if let Some(bl) = bulge_of(w).filter(|_| arc_of(a, b, bulge_of(w)).is_some()) {
+                    hit["bulge"] = js_num(bl);
+                }
+                json!({ "hit": hit })
+            }
             None => json!({ "hit": null }),
         },
         "pickProfile" => json!({ "hit": pick_profile(root, level, at).map_or(Value::Null, profile_json) }),
@@ -1072,6 +1155,24 @@ mod tests {
         v
     }
 
+    /// [T2] Bogen-Modus: Drei-Punkt-Bogen (Durchgangspunkt) und tangential anschliessend; Vorschau als
+    /// Kreisringsektor.
+    #[test]
+    fn bogenwand_drei_punkt_und_tangential() {
+        let r = root(json!({"wallTypes": [{"id": "WT1", "name": "Beton", "layers": [{"componentId": "c", "thickness": 0.2}]}]}));
+        // (0,0)→(4,0) durch (2,2): Halbkreis, Scheitel links → Modell-Bulge +1; dann tangential weiter nach (4,-4)?
+        let o = ops(&r, &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0], [8, 0]], "segs": [{"x": 2, "y": 2}, 1], "thick": null}))).unwrap();
+        let w = items(&o, 0);
+        let b0 = w[0]["bulge"].as_f64().unwrap();
+        assert!((b0 - 1.0).abs() < 1e-9, "{b0}");
+        // Tangential an das Ende des Halbkreises (Richtung −y): zweiter Halbkreis mit Scheitel unten (Bulge −1).
+        let b1 = w[1]["bulge"].as_f64().unwrap();
+        assert!((b1 + 1.0).abs() < 1e-9, "{b1}");
+        // Gerade Wand ohne `bulge`-Feld.
+        let o = ops(&r, &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "segs": [0], "thick": null}))).unwrap();
+        assert!(items(&o, 0)[0].get("bulge").is_none());
+    }
+
     #[test]
     fn waende_je_segment_mit_typ_und_hoehe() {
         let r = root(json!({"wallTypes": [{"id": "WT1", "name": "Beton", "layers": [{"componentId": "c", "thickness": 0.2}]}]}));
@@ -1116,6 +1217,20 @@ mod tests {
         assert_eq!(e["wallIds"], json!(["a"]));
         assert!(group_ops(&r, &o, "x").is_empty());
         assert!(group_ops(&r, &[], "g").is_empty());
+    }
+
+    /// [T2] Öffnung in der Bogenwand: Picken am Bogen, Position = Bogenlänge, Begrenzung auf die Bogenlänge.
+    #[test]
+    fn oeffnung_in_bogenwand() {
+        // Halbkreis (0,0)→(4,0), Scheitel oben (2,2): Bogenlänge 2π.
+        let r = root(json!({"walls": [{"id": "w", "floorId": "F1", "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "bulge": 1}], "windowTypes": [{"id": "FT"}]}));
+        let q = query(&r, &json!({"q": "pickWall", "level": "F1", "pt": [2, 2.2]})).unwrap().unwrap();
+        assert_eq!(q["hit"]["id"], "w");
+        assert!((q["hit"]["t"].as_f64().unwrap() - std::f64::consts::PI).abs() < 1e-9);
+        assert_eq!(q["hit"]["bulge"], 1);
+        let o = ops(&r, &req(json!({"cmd": "opening", "wall": "w", "start": [0, 0], "end": [4, 0], "bulge": 1, "kind": "window", "pos": 6.0, "width": 1.2, "height": 1.2, "sill": 0.9}))).unwrap();
+        let pos = items(&o, 0)[0]["position"].as_f64().unwrap();
+        assert!((pos - (2.0 * std::f64::consts::PI - 1.2)).abs() < 1e-9, "{pos}");
     }
 
     #[test]

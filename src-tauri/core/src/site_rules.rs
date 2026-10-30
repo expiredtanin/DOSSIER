@@ -286,7 +286,11 @@ fn footprint_parts(p: &Project) -> Vec<Polygon> {
         if hypot2(w.end.x - w.start.x, w.end.y - w.start.y) < 1e-9 {
             continue;
         }
-        parts.push(vec![wall_corners(w.start, w.end, p.wall_thickness(w, 0.2))]);
+        // Bogenwand ([T2]): Kreisringsektor.
+        match crate::wall_arc::arc_footprint(w, p.wall_thickness(w, 0.2)) {
+            Some(f) => parts.push(vec![f]),
+            None => parts.push(vec![wall_corners(w.start, w.end, p.wall_thickness(w, 0.2))]),
+        }
     }
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
         if s.operation.as_deref() == Some("subtract") || s.points.len() < 3 {

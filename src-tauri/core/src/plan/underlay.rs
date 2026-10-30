@@ -71,7 +71,7 @@ pub fn map_primitive(m: &SectionMap, pr: Primitive) -> Option<Primitive> {
         }
         // `motif` ist im Strich-lokalen Raum definiert — dreht mit der Linie mit.
         Primitive::Line { a, b, cls, weight_mm, dash, zigzag, motif, color, drawing_id, opening_id, stair_id, greyed, opacity } => Primitive::Line { a: p(a), b: p(b), cls, weight_mm, dash, zigzag, motif, color, drawing_id, opening_id, stair_id, greyed, opacity },
-        Primitive::Arc { center, from, to, r, cls, weight_mm, dash, opening_id, stair_id, greyed, opacity } => Primitive::Arc { center: p(center), from: p(from), to: p(to), r, cls, weight_mm, dash, opening_id, stair_id, greyed, opacity },
+        Primitive::Arc { center, from, to, r, cls, weight_mm, dash, color, opening_id, stair_id, greyed, opacity } => Primitive::Arc { center: p(center), from: p(from), to: p(to), r, cls, weight_mm, dash, color, opening_id, stair_id, greyed, opacity },
         Primitive::Text { at, doc, extra_lines, base_pt, color, room_id, greyed, opacity } => Primitive::Text { at: p(at), doc, extra_lines, base_pt, color, room_id, greyed, opacity },
         Primitive::DrawingText { at, text, height_m, angle, color, marks, wrap_width, doc, drawing_id, greyed, opacity } => Primitive::DrawingText { at: p(at), text, height_m, angle: angle + m.theta, color, marks, wrap_width, doc, drawing_id, greyed, opacity },
         Primitive::DrawingTextPath { path_pts, text, height_m, color, drawing_id, greyed, opacity } => Primitive::DrawingTextPath { path_pts: path_pts.into_iter().map(p).collect(), text, height_m, color, drawing_id, greyed, opacity },

@@ -47,6 +47,7 @@ const REC_CLASSIFICATION: f64 = 12.0;
 const REC_ZONE: f64 = 13.0;
 const REC_ATTACH: f64 = 14.0;
 const REC_OPENING_SOLID: f64 = 15.0;
+const REC_WALL_ARC: f64 = 16.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -228,6 +229,25 @@ fn axis_rect(wall: &Wall, from: f64, to: f64, n_lo: f64, n_hi: f64) -> Vec<Vec2>
     let a = add_scaled(wall.start, u, from);
     let b = add_scaled(wall.start, u, to);
     vec![add_scaled(a, n, n_lo), add_scaled(b, n, n_lo), add_scaled(b, n, n_hi), add_scaled(a, n, n_hi)]
+}
+
+/// [T2] Öffnung in der Bogenwand als gerade Ersatzwand (Sehne der Achse zwischen den Laibungen):
+/// (Ersatzwand, Intervall 0…Sehne, Querbereich zur Sehne, Einzug je Ende damit der Öffnungskörper
+/// auch an den Flächen innerhalb des radialen Lochs bleibt).
+fn arc_opening_chord(wall: &Wall, a: &crate::wall_arc::WallArc, c: &Cutout, host: (f64, f64)) -> (Wall, Cutout, (f64, f64), f64, f64) {
+    let (ps, pe) = (a.point(c.from, 0.0), a.point(c.to, 0.0));
+    let mid = a.point((c.from + c.to) / 2.0, 0.0);
+    let chord = (pe.x - ps.x).hypot(pe.y - ps.y);
+    let mut vw = wall.clone();
+    vw.start = Vec2 { x: ps.x, y: ps.y };
+    vw.end = Vec2 { x: pe.x, y: pe.y };
+    vw.bulge = None;
+    let u = normalize(sub(vw.end, vw.start));
+    let n = left_normal(u);
+    let delta = (mid.x - (ps.x + pe.x) / 2.0) * n.x + (mid.y - (ps.y + pe.y) / 2.0) * n.y;
+    let half_angle = (c.to - c.from) / a.r / 2.0;
+    let shrink = (host.0.abs().max(host.1.abs()) + delta.abs()) * half_angle.tan();
+    (vw, Cutout { from: 0.0, to: chord, z_bottom: c.z_bottom, z_top: c.z_top }, (host.0 + delta, host.1 + delta), shrink.min(chord / 4.0), delta.abs())
 }
 
 /// Sortierung `byFrom` (Anfang, dann Unterkante; NaN gilt als gleich wie in `Array.sort`).
@@ -684,7 +704,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     let cutouts_of = |p: &Project, wall: &Wall| -> Vec<(usize, Cutout)> {
         let mut out = Vec::new();
         let (zb, zt) = p.wall_vertical_extent(wall);
-        let axis = hypot2(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+        let axis = crate::wall_arc::axis_length(wall);
         for (k, o) in openings.iter().enumerate().filter(|(_, o)| o.host_wall_id == wall.id) {
             let from = max(0.0, min(o.position, axis));
             let to = max(from, min(o.position + o.width, axis));
@@ -708,7 +728,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let plain: Vec<Cutout> = cutouts.iter().map(|x| x.1).collect();
         cutouts_by_wall.insert(wall.id.clone(), cutouts);
         classified.push((format!("wall/{}", wall.id), Kind::Wall, wall.category_code.clone()));
-        if !bands_match_openings(wall, &bands, &plain) {
+        // Bogenwand ([T2]): immer als Netz (Sehnen-Körper) mit Kreisbogen-Achse.
+        if crate::wall_arc::WallArc::of_wall(wall).is_some() || !bands_match_openings(wall, &bands, &plain) {
             mesh_walls.push(wi);
             continue;
         }
@@ -763,8 +784,10 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 i += 3;
             }
         }
-        // Formöffnungen ([G3]): Füllkörper zwischen Rechteck-Loch und Umriss gehören zur Wand.
-        for &(k, c) in cutouts_by_wall.get(&wall.id).map_or(&[][..], |v| v.as_slice()) {
+        let arc = crate::wall_arc::WallArc::of_wall(wall);
+        // Formöffnungen ([G3]): Füllkörper zwischen Rechteck-Loch und Umriss gehören zur Wand (nicht bei
+        // Bogenwänden: dort bleibt das Rechteck-Loch).
+        for &(k, c) in cutouts_by_wall.get(&wall.id).map_or(&[][..], |v| v.as_slice()).iter().filter(|_| arc.is_none()) {
             let o = &openings[k];
             let Some(poly) = crate::opening_shape::opening_outline(o, c.to - c.from, c.z_top - c.z_bottom) else { continue };
             let n = crate::opening_shape::fill_quads(&poly, c.to - c.from, c.z_top - c.z_bottom).len();
@@ -788,19 +811,31 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let closed = is_watertight(&positions, &indices, 1e-6);
         let net = closed.then(|| crate::export_flat::mesh_volume(&positions, &indices));
         let plain: Vec<Cutout> = cutouts_by_wall.get(&wall.id).map_or_else(Vec::new, |v| v.iter().map(|x| x.1).collect());
-        let mut quantities = qty::wall_quantities(wall.start, wall.end, bands, &plain, net);
-        if net.is_none() {
+        let total = p.wall_thickness(wall, 0.2);
+        let ro = crate::joins::reference_offset(model3d::wall_reference(wall), total);
+        let mut quantities = match &arc {
+            Some(a) => {
+                let (zb, zt) = p.wall_vertical_extent(wall);
+                // Exakt aus dem Kreis statt aus dem Sehnen-Netz.
+                qty::arc_wall_quantities(a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None)
+            }
+            None => qty::wall_quantities(wall.start, wall.end, bands, &plain, net),
+        };
+        if net.is_none() && arc.is_none() {
             let gross = quantities.iter().find(|x| x.name == "GrossVolume").map_or(f64::NAN, |x| x.value);
             if let Some(nv) = quantities.iter_mut().find(|x| x.name == "NetVolume") {
                 nv.value = max(0.0, gross - qty::hole_volume(bands));
             }
         }
         let (name, ty, psets) = wall_ident(&p, wall, quantities);
-        w_head(&mut f, REC_WALL_MESH, structure, &wall.id, &name);
+        w_head(&mut f, if arc.is_some() { REC_WALL_ARC } else { REC_WALL_MESH }, structure, &wall.id, &name);
         w_type(&mut f, ty.as_ref().map(|t| type_ref(t, 0.0, "STANDARD")).as_ref());
         w_psets(&mut f, &psets);
+        if let Some(a) = &arc {
+            f.nums(&[a.center.x, a.center.y, a.r, a.a0, a.sweep]);
+        }
         w_mesh(&mut f, &positions, &indices, closed);
-        host_extent.insert(wall.id.clone(), cross_extent(wall, bands));
+        host_extent.insert(wall.id.clone(), if arc.is_some() { (ro - total / 2.0, ro + total / 2.0) } else { cross_extent(wall, bands) });
     }
 
     // ── Decken ─────────────────────────────────────────────────────────────
@@ -843,8 +878,16 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     for wall in &p.walls {
         let Some(&host) = host_extent.get(&wall.id) else { continue };
         let structure = structure_of(&wall.floor_id);
+        let arc = crate::wall_arc::WallArc::of_wall(wall);
         for &(k, c) in cutouts_by_wall.get(&wall.id).map_or(&[][..], |v| v.as_slice()) {
             let o = &openings[k];
+            // Bogenwand ([T2]): Ersatzwand = Sehne zwischen den Laibungen; Öffnungskörper innerhalb des
+            // (radialen) Lochs, Füllung um den Achsversatz der Sehne verschoben.
+            let chord = arc.map(|a| arc_opening_chord(wall, &a, &c, host));
+            let (wall, c, host, shrink, sag) = match &chord {
+                Some((vw, vc, vh, e, d)) => (vw, *vc, *vh, *e, *d),
+                None => (wall, c, host, 0.0, 0.0),
+            };
             let depth = c.z_top - c.z_bottom;
             if !(depth > 1e-6) {
                 continue;
@@ -854,7 +897,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             let psets = fill_psets(&p, o, c.to - c.from, depth);
             let label = crate::plan::walls::opening_label(o);
             // Formöffnung ([G3]): Öffnungskörper = Umriss quer durch die Wand, Füllung als Netz.
-            if let Some(poly) = crate::opening_shape::opening_outline(o, c.to - c.from, depth) {
+            if let Some(poly) = crate::opening_shape::opening_outline(o, c.to - c.from, depth).filter(|_| chord.is_none()) {
                 let u = normalize(sub(wall.end, wall.start));
                 let ln = left_normal(u);
                 let at = add_scaled(add_scaled(wall.start, u, c.from), ln, host.1 + OPENING_OVERSHOOT);
@@ -874,7 +917,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             let oid = f.str(&o.id);
             let lab = f.str(&label);
             f.nums(&[REC_OPENING, a, structure, oid, if is_door { 1.0 } else { 0.0 }, lab]);
-            w_pts(&mut f, &axis_rect(wall, c.from, c.to, host.0 - OPENING_OVERSHOOT, host.1 + OPENING_OVERSHOOT));
+            let (vlo, vhi) = (host.0 - sag - OPENING_OVERSHOOT, host.1 + sag + OPENING_OVERSHOOT);
+            w_pts(&mut f, &axis_rect(wall, c.from + shrink, c.to - shrink, vlo, vhi));
             f.nums(&[c.z_bottom - base_of(structure), depth, c.to - c.from]);
             w_fill(&mut f, wall, &c, host, &fill_params(&p, o));
             w_psets(&mut f, &psets);
@@ -1201,6 +1245,18 @@ mod tests {
         let s = strings(&f);
         assert!(s.iter().any(|x| x == "wall/W1") && s.iter().any(|x| x == "roof/RF1"));
         assert_eq!(f.nums.iter().filter(|v| **v == REC_OPENING_SOLID).count() >= 2, true);
+    }
+
+    /// [T2] Bogenwand: Datensatz WALL_ARC mit Kreisachse (Mitte, Radius, Startwinkel, Schwenk).
+    #[test]
+    fn bogenwand_als_netz_mit_kreisachse() {
+        let mut p = sample();
+        p.walls[0].bulge = Some(1.0); // W1 (0,0)→(5,0): Halbkreis, Mitte (2.5,0), Uhrzeigersinn
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        let pi = std::f64::consts::PI;
+        let hit = f.nums.windows(6).any(|w| w[0] == 2.5 && w[1] == 0.0 && (w[2] - 2.5).abs() < 1e-12 && (w[3] - pi).abs() < 1e-12 && (w[4] + pi).abs() < 1e-12);
+        assert!(hit, "Kreisachse fehlt");
+        assert!(f.nums.contains(&REC_WALL_ARC));
     }
 
     #[test]

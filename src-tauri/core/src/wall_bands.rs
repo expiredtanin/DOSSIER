@@ -866,6 +866,7 @@ mod tests {
             end: Vec2::new(e.0, e.1),
             reference: Reference::Center,
             layers: Some(vec![JoinLayer { thickness: 0.1, component: Some(0), priority: 10.0 }, JoinLayer { thickness: 0.2, component: Some(1), priority: 50.0 }]),
+            bulge: None,
         };
         let cuts = compute_joins(&[jw((0.0, 0.0), (4.0, 0.0)), jw((4.0, 0.0), (4.0, 3.0))]).unwrap();
         let mut w = base((0.0, 0.0), (4.0, 0.0), vec![band(0.1, 10.0), band(0.2, 50.0)]);
@@ -964,7 +965,7 @@ mod tests {
                 let th = (deg as f64).to_radians();
                 let b0 = Vec2::new(5.0, 0.0);
                 let b1 = Vec2::new(5.0 + 3.0 * th.cos(), 3.0 * th.sin());
-                let jw = |s: Vec2, e: Vec2| JoinWall { start: s, end: e, reference: Reference::Center, layers: Some(lay.clone()) };
+                let jw = |s: Vec2, e: Vec2| JoinWall { start: s, end: e, reference: Reference::Center, layers: Some(lay.clone()), bulge: None };
                 // Soll: Durchgangswand + Abzweig ab ihrer Fläche (y = h) bis zum freien Ende.
                 let ub = scale(sub(b1, b0), 1.0 / 3.0);
                 let nb = left_normal(ub);
@@ -987,7 +988,7 @@ mod tests {
     fn schraege_l_ecke_und_kreuzung_3d_lueckenlos() {
         for (name, lay) in lay_sets() {
             let h: f64 = lay.iter().map(|l| l.thickness).sum::<f64>() / 2.0;
-            let jw = |s: Vec2, e: Vec2| JoinWall { start: s, end: e, reference: Reference::Center, layers: Some(lay.clone()) };
+            let jw = |s: Vec2, e: Vec2| JoinWall { start: s, end: e, reference: Reference::Center, layers: Some(lay.clone()), bulge: None };
             for deg in [30.0f64, 60.0, 120.0, 150.0] {
                 // L: A (0,0)→(4,0), dann B mit Richtungswinkel `deg`.
                 let th = deg.to_radians();

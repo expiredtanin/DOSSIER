@@ -4,6 +4,10 @@
 //   2) „Nächster Punkt ( Zurück ):" → Punkt … (chainend: jede weitere Wand
 //      beginnt am letzten Endpunkt) bis Esc/Enter den Zug beendet.
 //
+// BOGEN-MODUS ([T2], Option „Bogen", wie bei der Polylinie): das nächste Segment wird eine Bogenwand
+// (`Wall.bulge`). Drei-Punkt (Default: Durchgangspunkt, dann Endpunkt) oder „Tangential" (schliesst
+// weich an das vorige Segment an). Die Bulges rechnet der Kern (`cmd_create.rs`/`cmd_draw.rs`).
+//
 // Akzeptiert je Punkt Maus-Picks UND getippte Koordinaten (0,0 · r3,0 · 5<45) —
 // derselbe Eingabepfad wie Linie/Polylinie. Die fertige Wand rendert über die
 // bestehende Wand-Darstellung (generatePlan / 3D); der Draft zeigt die Achse +
@@ -62,16 +66,30 @@ function isSingleLayer(ctx: CommandContext): boolean {
   return !!wt && wt.layers.length === 1;
 }
 
-interface WallIdle extends CommandState {
+/** Art eines Segments: gerade (`0`), tangential (`1`) oder Bogen durch einen Durchgangspunkt. */
+type Seg = 0 | 1 | Vec2;
+
+interface ArcMode {
+  /** Bogen-Modus (bleibt über den Befehl hinweg erhalten). */
+  arc: boolean;
+  /** Im Bogen-Modus: tangential an den Vorgänger statt Drei-Punkt-Bogen. */
+  tangent: boolean;
+}
+
+interface WallIdle extends CommandState, ArcMode {
   phase: "start";
   /** Sticky Dicke-Übersteuerung (nur einschichtig); null = Wandtyp-Dicke. */
   thickOverride: number | null;
   /** Ist der aktive Wandtyp einschichtig? (aus ctx in onMove/onInput gesetzt) */
   single: boolean;
 }
-interface WallDrawing extends CommandState {
+interface WallDrawing extends CommandState, ArcMode {
   phase: "next";
   points: Vec2[];
+  /** Art je Segment (s. {@link Seg}). */
+  segs: Seg[];
+  /** Drei-Punkt-Bogen: gesetzter Durchgangspunkt, der auf seinen Endpunkt wartet. */
+  pendingThrough: Vec2 | null;
   cursor: Vec2 | null;
   /** Sticky Dicke-Übersteuerung (nur einschichtig); null = Wandtyp-Dicke. */
   thickOverride: number | null;
@@ -81,6 +99,8 @@ interface WallDrawing extends CommandState {
 type WallCmdState = WallIdle | WallDrawing;
 
 const UNDO: CmdOption = { id: "undo", labelKey: "cmd.polyline.undo" };
+const arcOption = (on: boolean): CmdOption => ({ id: "arc", labelKey: "cmd.polyline.arcOpt", value: on ? "on" : "off" });
+const tangentOption = (on: boolean): CmdOption => ({ id: "tangent", labelKey: "cmd.polyline.tangentOpt", value: on ? "on" : "off" });
 
 /**
  * Bänder der schon gesetzten Segmente: sie ändern sich je Mausschritt nicht und werden nur neu gerechnet,
@@ -102,7 +122,22 @@ function fixedShapes(ctx: CommandContext, points: Vec2[], thick: number | null):
  * (`cmd_create.rs`), dazu HUD (Länge·Winkel des lebenden Segments). Die FERTIGE Wand rendert über die
  * bestehende Wand-Darstellung — hier ist nur der Rubber-Band-Entwurf.
  */
-function wallDraft(ctx: CommandContext, points: Vec2[], cursor: Vec2 | null, thick: number | null): ToolDraft {
+function wallDraft(
+  ctx: CommandContext,
+  points: Vec2[],
+  cursor: Vec2 | null,
+  thick: number | null,
+  arc?: ArcMode & { segs: Seg[]; pendingThrough: Vec2 | null },
+): ToolDraft {
+  // Bogen im Spiel: ganze Vorschau im Kern (Tangente hängt am Vorgänger), ohne Zwischenspeicher.
+  if (arc && (arc.arc || arc.segs.some((g) => g !== 0))) {
+    const all = cursor ? [...points, cursor] : points;
+    const req = { cmd: "wall", thick, segs: arc.segs, arc: arc.arc, tangent: arc.tangent, through: arc.pendingThrough, cursor: !!cursor };
+    const draft: ToolDraft = { preview: all.length >= 2 ? createPreview(ctx, req, all).shapes : [], vertices: points };
+    const last = points[points.length - 1];
+    if (cursor && last && segLen(last, cursor) >= EPS) draft.hud = segmentHud(last, cursor);
+    return draft;
+  }
   const fixed = fixedShapes(ctx, points, thick);
   const live = cursor && points.length ? createPreview(ctx, { cmd: "wall", thick }, [points[points.length - 1], cursor]).shapes : [];
   const draft: ToolDraft = { preview: live.length ? [...fixed, ...live] : fixed, vertices: points };
@@ -115,30 +150,41 @@ function wallDraft(ctx: CommandContext, points: Vec2[], cursor: Vec2 | null, thi
  * Commit: je Achssegment eine Wand des aktiven Typs (Höhe aus dem Geschoss); eine gelockte Dicke
  * (einschichtig) wählt/erzeugt den passenden Wandtyp — beides im Kern (`cmd_create.rs`).
  */
-const appendWalls = (pts: Vec2[], ctx: CommandContext, thick: number | null) =>
-  createMutation(ctx, { cmd: "wall", pts: pts.map(xy), thick });
+const appendWalls = (pts: Vec2[], ctx: CommandContext, thick: number | null, segs: Seg[] = []) =>
+  createMutation(
+    ctx,
+    segs.some((g) => g !== 0) ? { cmd: "wall", pts: pts.map(xy), thick, segs } : { cmd: "wall", pts: pts.map(xy), thick },
+  );
 
 const idle = (
   thickOverride: number | null = null,
   single = false,
+  mode: ArcMode = { arc: false, tangent: false },
 ): [CommandState, CommandResult] => [
-  { phase: "start", lastPoint: null, thickOverride, single } as WallIdle,
+  { phase: "start", lastPoint: null, thickOverride, single, arc: mode.arc, tangent: mode.tangent } as WallIdle,
   { draft: null, done: true },
 ];
+
+const modeOf = (s: ArcMode): ArcMode => ({ arc: s.arc, tangent: s.tangent });
+const draftOf = (ctx: CommandContext, s: WallDrawing): ToolDraft => wallDraft(ctx, s.points, s.cursor, s.thickOverride, s);
 
 export const wallCommand: Command = {
   name: "wall",
   labelKey: "cmd.wall.label",
   // Wände leben auf Geschossen — wie das Legacy-Werkzeug nur dort aktiv.
   floorOnly: true,
-  prompt: (s) => ((s as WallCmdState).phase === "next" ? "cmd.wall.next" : "cmd.wall.start"),
-  accepts: (s) =>
-    (s as WallCmdState).phase === "next" ? ["point", "number", "option"] : ["point", "number"],
+  prompt: (s) => {
+    const ps = s as WallCmdState;
+    if (ps.phase !== "next") return "cmd.wall.start";
+    return ps.arc && !ps.tangent && !ps.pendingThrough ? "cmd.polyline.arcThrough" : "cmd.wall.next";
+  },
+  accepts: () => ["point", "number", "option"],
   options: (s) => {
     const ps = s as WallCmdState;
-    return ps.phase === "next" ? [UNDO] : [];
+    const arc = [arcOption(!!ps.arc), ...(ps.arc ? [tangentOption(!!ps.tangent)] : [])];
+    return ps.phase === "next" ? [...arc, UNDO] : arc;
   },
-  init: (): WallIdle => ({ phase: "start", lastPoint: null, thickOverride: null, single: false }),
+  init: (): WallIdle => ({ phase: "start", lastPoint: null, thickOverride: null, single: false, arc: false, tangent: false }),
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as WallCmdState;
@@ -146,48 +192,87 @@ export const wallCommand: Command = {
     const single = isSingleLayer(ctx);
 
     if (input.kind === "option") {
+      // Bogen-Modus/Tangential umschalten (auch vor dem Startpunkt); verwirft einen wartenden
+      // Durchgangspunkt.
+      if (input.id === "arc" || input.id === "tangent") {
+        const flip = input.id === "arc" ? { arc: !s.arc } : { tangent: !s.tangent };
+        if (s.phase !== "next") return [{ ...s, ...flip, single } as WallIdle, { draft: null }];
+        const ns: WallDrawing = { ...s, ...flip, single, pendingThrough: null };
+        return [ns, { draft: draftOf(ctx, ns) }];
+      }
       if (s.phase !== "next") return [s, { draft: null }];
       if (input.id === "undo") {
+        if (s.pendingThrough) {
+          const ns: WallDrawing = { ...s, pendingThrough: null };
+          return [ns, { draft: draftOf(ctx, ns) }];
+        }
         const pts = s.points.slice(0, -1);
         if (pts.length === 0)
-          return [{ phase: "start", lastPoint: null, thickOverride: to, single } as WallIdle, { draft: null }];
+          return [{ phase: "start", lastPoint: null, thickOverride: to, single, ...modeOf(s) } as WallIdle, { draft: null }];
         const ns: WallDrawing = {
           phase: "next",
           points: pts,
+          segs: s.segs.slice(0, Math.max(0, pts.length - 1)),
+          pendingThrough: null,
           cursor: s.cursor,
           lastPoint: pts[pts.length - 1],
           thickOverride: to,
           single,
+          ...modeOf(s),
         };
-        return [ns, { draft: wallDraft(ctx, pts, s.cursor, to) }];
+        return [ns, { draft: draftOf(ctx, ns) }];
       }
-      return [{ ...s, single } as WallCmdState, { draft: wallDraft(ctx, s.points, s.cursor, to) }];
+      return [{ ...s, single } as WallCmdState, { draft: draftOf(ctx, s) }];
     }
 
     if (input.kind !== "point") {
-      return [{ ...s, single } as WallCmdState, { draft: s.phase === "next" ? wallDraft(ctx, s.points, s.cursor, to) : null }];
+      return [{ ...s, single } as WallCmdState, { draft: s.phase === "next" ? draftOf(ctx, s) : null }];
     }
     const pt = input.point;
     if (s.phase !== "next") {
-      const ns: WallDrawing = { phase: "next", points: [pt], cursor: pt, lastPoint: pt, thickOverride: to, single };
-      return [ns, { draft: wallDraft(ctx, [pt], pt, to) }];
+      const ns: WallDrawing = {
+        phase: "next",
+        points: [pt],
+        segs: [],
+        pendingThrough: null,
+        cursor: pt,
+        lastPoint: pt,
+        thickOverride: to,
+        single,
+        ...modeOf(s),
+      };
+      return [ns, { draft: draftOf(ctx, ns) }];
     }
     // Chaining: jede weitere Wand beginnt am letzten Endpunkt. Null-Strecke
     // (Klick auf denselben Punkt) ignorieren — nicht abbrechen.
     const last = s.points[s.points.length - 1];
     if (segLen(last, pt) < EPS) {
-      return [{ ...s, single } as WallCmdState, { draft: wallDraft(ctx, s.points, s.cursor, to) }];
+      return [{ ...s, single } as WallCmdState, { draft: draftOf(ctx, s) }];
     }
-    const points = [...s.points, pt];
-    const ns: WallDrawing = { phase: "next", points, cursor: pt, lastPoint: pt, thickOverride: to, single };
-    return [ns, { draft: wallDraft(ctx, points, pt, to) }];
+    // Drei-Punkt-Bogen: der erste Klick setzt nur den Durchgangspunkt.
+    if (s.arc && !s.tangent && !s.pendingThrough) {
+      const ns: WallDrawing = { ...s, pendingThrough: pt, cursor: pt, single };
+      return [ns, { draft: draftOf(ctx, ns) }];
+    }
+    const seg: Seg = !s.arc ? 0 : (s.pendingThrough ?? 1);
+    const ns: WallDrawing = {
+      ...s,
+      points: [...s.points, pt],
+      segs: [...s.segs, seg],
+      pendingThrough: null,
+      cursor: pt,
+      lastPoint: pt,
+      thickOverride: to,
+      single,
+    };
+    return [ns, { draft: draftOf(ctx, ns) }];
   },
 
   onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as WallCmdState;
     if (s.phase !== "next") return [s, { draft: null }];
     const ns: WallDrawing = { ...s, cursor: point, single: isSingleLayer(ctx) };
-    return [ns, { draft: wallDraft(ctx, s.points, point, s.thickOverride) }];
+    return [ns, { draft: draftOf(ctx, ns) }];
   },
 
   // Enter/Space/Rechtsklick: offenen Zug beenden (≥2 Punkte) und committen.
@@ -197,15 +282,15 @@ export const wallCommand: Command = {
       const pts = s.points;
       const to = s.thickOverride;
       return [
-        { phase: "start", lastPoint: null, thickOverride: to, single: s.single } as WallIdle,
-        { draft: null, done: true, commit: appendWalls(pts, ctx, to) },
+        { phase: "start", lastPoint: null, thickOverride: to, single: s.single, ...modeOf(s) } as WallIdle,
+        { draft: null, done: true, commit: appendWalls(pts, ctx, to, s.segs) },
       ];
     }
-    return idle(s.thickOverride, s.single);
+    return idle(s.thickOverride, s.single, modeOf(s));
   },
   onCancel: (state): [CommandState, CommandResult] => {
     const s = state as WallCmdState;
-    return idle(s.thickOverride, s.single);
+    return idle(s.thickOverride, s.single, modeOf(s));
   },
 
   // Tab-Feld-Zyklus im „next"-Schritt: Länge + Winkel relativ zum letzten Punkt.

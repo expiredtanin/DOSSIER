@@ -372,6 +372,86 @@ fn opening_interval(w: &Wall, o: &Opening) -> Option<(f64, f64)> {
 }
 
 
+/// Senkrechte Kanten eines Bogen-Teilkörpers, die an einer inneren Stossfuge liegen (Ecken auf der
+/// Gehrung, in Schnitt-u projiziert), entfallen.
+fn drop_arc_seams(visible: Vec<Edge>, hidden: Vec<Edge>, walls_r: &[RWall], base: (f64, f64), u: (f64, f64)) -> (Vec<Edge>, Vec<Edge>) {
+    let ul = hypot2(u.0, u.1);
+    if !walls_r.iter().any(|r| r.joint != [false; 2]) || !(ul > 1e-12) {
+        return (visible, hidden);
+    }
+    let u = (u.0 / ul, u.1 / ul);
+    let seams: HashMap<usize, Vec<f64>> = walls_r
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.joint != [false; 2])
+        .map(|(i, r)| {
+            let (dx, dy) = (r.end[0] - r.start[0], r.end[1] - r.start[1]);
+            let l = hypot2(dx, dy).max(1e-12);
+            let (ax, ay) = (dx / l, dy / l);
+            let (nx, ny) = (ay, -ax);
+            let ht = r.thickness / 2.0;
+            let sh = super::elevation::corner_shifts(r);
+            let mut us = Vec::new();
+            for (k, (p, t, s)) in [(r.start, ht, sh[0]), (r.start, -ht, sh[1]), (r.end, ht, sh[2]), (r.end, -ht, sh[3])].into_iter().enumerate() {
+                if !r.joint[k / 2] {
+                    continue;
+                }
+                let (x, y) = (p[0] + nx * t + ax * s, p[1] + ny * t + ay * s);
+                us.push((x - base.0) * u.0 + (y - base.1) * u.1);
+            }
+            (i, us)
+        })
+        .collect();
+    // Umriss (Silhouette) bleibt: senkrechte Kanten am äussersten u der ganzen Wand.
+    let vertical = |e: &Edge| e.kind == Kind::Wall && (e.a[0] - e.b[0]).abs() < 1e-4 && seams.contains_key(&e.index);
+    let mut extent: HashMap<&str, (f64, f64)> = HashMap::new();
+    for e in visible.iter().chain(&hidden).filter(|e| vertical(e)) {
+        let Some(r) = walls_r.get(e.index) else { continue };
+        let x = extent.entry(r.wall_id.as_str()).or_insert((f64::INFINITY, f64::NEG_INFINITY));
+        *x = (x.0.min(e.a[0]), x.1.max(e.a[0]));
+    }
+    let keep = |e: &Edge| {
+        if !vertical(e) {
+            return true;
+        }
+        let silhouette = walls_r.get(e.index).and_then(|r| extent.get(r.wall_id.as_str())).is_some_and(|x| (e.a[0] - x.0).abs() < 1e-3 || (e.a[0] - x.1).abs() < 1e-3);
+        silhouette || !seams.get(&e.index).is_some_and(|us| us.iter().any(|x| (x - e.a[0]).abs() < 1e-2))
+    };
+    (visible.into_iter().filter(keep).collect(), hidden.into_iter().filter(keep).collect())
+}
+
+/// [T2] Schnitt durch eine Bogenwand: quert die Ebene eine innere Stossfuge der Sehnen-Teilkörper,
+/// liegt der Querschnitt in zwei Rechtecken nebeneinander — zu EINEM zusammenfassen, damit die
+/// Schichtaufteilung (anteilig über die ganze Dicke) stimmt.
+fn merge_arc_wall_cuts(cuts: Vec<Cut>, p: &Project, walls_r: &[RWall]) -> Vec<Cut> {
+    let arc_ids: HashSet<&str> = p.walls.iter().filter(|w| crate::wall_arc::WallArc::of_wall(w).is_some()).map(|w| w.id.as_str()).collect();
+    if arc_ids.is_empty() {
+        return cuts;
+    }
+    let owner = |c: &Cut| -> Option<&str> { (c.kind == Kind::Wall).then(|| walls_r.get(c.index).map(|w| w.wall_id.as_str())).flatten().filter(|id| arc_ids.contains(id)) };
+    let (mut arc, mut out): (Vec<Cut>, Vec<Cut>) = cuts.into_iter().partition(|c| owner(c).is_some() && c.pts.len() >= 3);
+    arc.sort_by(|a, b| {
+        let (ba, bb) = (bbox(&a.pts), bbox(&b.pts));
+        owner(a).cmp(&owner(b)).then(cmp_num(ba[2] - bb[2])).then(cmp_num(ba[0] - bb[0]))
+    });
+    let mut merged: Vec<Cut> = Vec::new();
+    for c in arc {
+        let b = bbox(&c.pts);
+        if let Some(last) = merged.last_mut() {
+            let lb = bbox(&last.pts);
+            let same = owner(last) == owner(&c) && (lb[2] - b[2]).abs() < 1e-6 && (lb[3] - b[3]).abs() < 1e-6;
+            if same && b[0] <= lb[1] + 1e-3 && b[1] >= lb[0] - 1e-3 {
+                let (u0, u1) = (lb[0].min(b[0]), lb[1].max(b[1]));
+                last.pts = vec![[u0, lb[3]], [u1, lb[3]], [u1, lb[2]], [u0, lb[2]]];
+                continue;
+            }
+        }
+        merged.push(c);
+    }
+    out.extend(merged);
+    out
+}
+
 /// Je emittiertem Wand-Teilquader die Quellwand (über `RWall::wall_id`).
 fn wall_owners<'a>(p: &'a Project, walls: &[RWall]) -> Vec<Option<&'a Wall>> {
     let mut by_id: HashMap<&str, &Wall> = HashMap::with_capacity(p.walls.len());
@@ -614,6 +694,10 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
 #[allow(clippy::type_complexity)]
 fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f64) -> (Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>, Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>) {
     let (mut top, mut bottom) = (None, None);
+    // Bogenwände: kein Schichteinzug ([106] gilt nur gerade).
+    if crate::wall_arc::is_arc_bulge(wall.bulge) {
+        return (None, None);
+    }
     let u_raw = plane.u_model();
     let l = hypot2(u_raw.0, u_raw.1);
     if !(l > 1e-12) {
@@ -822,7 +906,8 @@ fn shaped_wall_cuts(cuts: &mut [Cut], p: &Project, walls_r: &[RWall], base: (f64
     }
     let u = (u.0 / ul, u.1 / ul);
     for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| crate::opening_shape::is_shaped(o)) {
-        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
+        // Formöffnungen in Bogenwänden bleiben im Schnitt rechteckig ([T2], offen).
+        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id && !crate::wall_arc::is_arc_bulge(w.bulge)) else { continue };
         let Some((from, to)) = opening_interval(wall, o) else { continue };
         let (a, _) = axis_frame(wall);
         let den = a.0 * u.1 - a.1 * u.0;
@@ -1275,10 +1360,22 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let not_cut = |e: &&render3d::SectionEdge| !cut_owners.contains(&(kind_of(e.component.kind), e.component.index));
     let visible: Vec<Edge> = raw.visible_edges.iter().filter(not_cut).map(&mut edge).collect();
     let hidden: Vec<Edge> = raw.hidden_edges.iter().filter(not_cut).map(&mut edge).collect();
+    // [T2] Bogenwände: senkrechte Kanten an den inneren Stossfugen der Sehnen-Teilkörper nicht zeigen.
+    let (visible, hidden) = drop_arc_seams(visible, hidden, &walls_r, plane.base(), plane.u_model());
 
     shaped_wall_cuts(&mut cuts, p, &walls_r, plane.base(), plane.u_model());
+    let mut cuts = merge_arc_wall_cuts(cuts, p, &walls_r);
     append_roof_sections(&mut cuts, p, &plane);
-    let walls = wall_owners(p, &walls_r);
+    let owners = wall_owners(p, &walls_r);
+    // Bogenwand ([T2]): Schichtfolge quer zum Schnitt aus der Richtung des Sehnen-Teilkörpers.
+    let virt: Vec<Option<Wall>> = walls_r
+        .iter()
+        .zip(&owners)
+        .map(|(r, o)| {
+            o.filter(|w| crate::wall_arc::WallArc::of_wall(w).is_some()).map(|w| Wall { start: Vec2 { x: r.start[0], y: r.start[1] }, end: Vec2 { x: r.end[0], y: r.end[1] }, ..w.clone() })
+        })
+        .collect();
+    let walls: Vec<Option<&Wall>> = owners.iter().zip(&virt).map(|(o, v)| v.as_ref().or(*o)).collect();
     let slabs = slab_owners(p, &slabs_r);
     let cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
     let cuts = merge_monolith_cuts(cuts, &slabs_r);
@@ -1818,6 +1915,20 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
         if !vis.visible(&wall.category_code) {
             continue;
         }
+        // Bogenwand ([T2]): Öffnung auf der Sehne zwischen den Laibungen (gerades Einbauteil).
+        let chord = crate::wall_arc::WallArc::of_wall(wall).map(|a| {
+            let axis = a.length();
+            let from = max(0.0, min(o.position, axis));
+            let to = max(from, min(o.position + o.width, axis));
+            let (ps, pe) = (a.point(from, 0.0), a.point(to, 0.0));
+            let vw = Wall { start: Vec2 { x: ps.x, y: ps.y }, end: Vec2 { x: pe.x, y: pe.y }, bulge: None, ..wall.clone() };
+            let vo = Opening { position: 0.0, width: hypot2(pe.x - ps.x, pe.y - ps.y), ..o.clone() };
+            (vw, vo)
+        });
+        let (wall, o) = match &chord {
+            Some((vw, vo)) => (vw, vo),
+            None => (wall, o),
+        };
         let Some(c) = cross_section(p, wall, o, p0, u)? else { continue };
         let mut prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(p, o, &c) };
         prims.extend(rebate_cut(p, wall, o, &c)?);
@@ -2040,6 +2151,36 @@ mod tests {
         let prims = section_opening_primitives(&p, &l, &Visibility::default()).unwrap();
         let df: Vec<_> = prims.iter().filter(|pr| matches!(pr, Primitive::Polygon { opening_id: Some(id), .. } if id == "DF")).collect();
         assert!(df.len() >= 4, "Rahmen beidseits, Glas, Eindeckrahmen: {}", df.len());
+    }
+
+    /// [T2] Schräger Schnitt durch eine Bogenwand: je Durchstoss genau ein Band je Schicht (auch wenn die
+    /// Ebene eine Stossfuge der Sehnen-Teilkörper quert), Schichtfolge vollständig.
+    #[test]
+    fn bogenwand_im_schnitt_je_schicht_ein_band() {
+        let mut p = sample();
+        p.walls.retain(|w| w.id == "W1");
+        p.openings = Some(vec![]);
+        p.ceilings = Some(vec![]);
+        p.roofs = Some(vec![]);
+        p.stairs = Some(vec![]);
+        p.walls[0].bulge = Some(-1.0); // Halbkreis nach Süden, Mitte (2.5, 0), r 2.5
+        for l in p.drawing_levels.iter_mut().filter(|l| l.id == "schnitt-a") {
+            l.line_points = Some([Vec2 { x: -1.0, y: -1.5 }, Vec2 { x: 6.0, y: -1.5 }]);
+        }
+        let out = compute_section(&p, &level(&p, "schnitt-a"), &[]).unwrap().unwrap();
+        let walls: Vec<&Cut> = out.cuts.iter().filter(|c| c.kind == Kind::Wall).collect();
+        assert_eq!(walls.len(), 8, "2 Durchstösse × 4 Schichten: {:#?}", walls.iter().map(|c| (bbox(&c.pts), c.component_id.clone())).collect::<Vec<_>>());
+        let mut us: Vec<[f64; 4]> = walls.iter().map(|c| bbox(&c.pts)).collect();
+        us.sort_by(|a, b| cmp_num(a[0] - b[0]));
+        // Lückenlos je Durchstoss.
+        for k in [0usize, 4] {
+            for i in k..k + 3 {
+                assert!((us[i][1] - us[i + 1][0]).abs() < 1e-6, "{us:?}");
+            }
+        }
+        // Hinter der Ebene keine Facetten-Fugen der Sehnen-Teilkörper (nur Umriss).
+        let seams = out.visible.iter().chain(&out.hidden).filter(|e| e.kind == Kind::Wall && (e.a[0] - e.b[0]).abs() < 1e-4).count();
+        assert!(seams <= 4, "senkrechte Kanten: {seams}");
     }
 
     #[test]

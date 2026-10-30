@@ -158,6 +158,10 @@ fn newell(poly: &[[f64; 3]]) -> [f64; 3] {
 /// Beide Wandseiten: rechts der Achse die äusserste Schicht (`layers[0]`), links die innerste — wie
 /// die Ansicht. Wand-Koordinaten: x ab Wandanfang, y ab UK; Öffnungen ausgespart.
 fn wall_lines(p: &Project, w: &Wall, s: &mut Sink) {
+    // Bogenwände ([T2]): Ansichtsschraffur im 3D noch nicht (Fläche gekrümmt).
+    if crate::wall_arc::is_arc_bulge(w.bulge) {
+        return;
+    }
     let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
     let len = crate::jsmath::hypot2(dx, dy);
     if !(len > 1e-6) || !len.is_finite() {
