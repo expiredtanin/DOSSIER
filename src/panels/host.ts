@@ -535,6 +535,8 @@ export interface PanelHostValue {
   onSetStairArrowStyle: (style: "line" | "filled") => void;
   /** Setzt den Referenzpunkt der Laufbreite (links/mitte/rechts). */
   onSetStairReferenz: (referenz: "links" | "mitte" | "rechts") => void;
+  /** Radius der Mittelsäule (Wendel) in Metern; ≤ 0 entfernt sie. */
+  onSetStairColumn: (radius: number) => void;
   /** Weist der Treppe einen Treppentyp (Bibliothek) zu; "" löst die Zuweisung. */
   onSetStairType: (typeId: string) => void;
 

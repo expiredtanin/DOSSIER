@@ -3,9 +3,10 @@
 //! (`railings`). Die Treppengeometrie selbst kommt aus `kernel2d` (`stair_geometry`); TS sammelt aus
 //! dem `Project` nur Parameter, Höhen und Tragart und färbt die Ergebnisse ein.
 //!
-//! Eingabe (je Treppe 23 Zahlen, davor die Anzahl): die 16 Treppen-Parameter (s. [`crate::stair`]),
+//! Eingabe (je Treppe 24 Zahlen, davor die Anzahl): die 16 Treppen-Parameter (s. [`crate::stair`]),
 //! `zUnten, zOben, tragart (0 massiv, 1 beton, 2 offen: Wange/aufgesattelt/Spindel),
-//! trittdicke, nase, geschlosseneSetzstufen (0/1), gelaender (0 keine, 1 links, 2 rechts, 3 beide)`.
+//! trittdicke, nase, geschlosseneSetzstufen (0/1), gelaender (0 keine, 1 links, 2 rechts, 3 beide),
+//! saeulenRadius (0 keine; nur Wendel)`.
 //!
 //! Ausgabe Slabs: `[n, (treppe, monolith 0/1, zUnten, zOben, nPkt, x, y …)…]`; Ausgabe Meshes
 //! (Laufplatte, Geländer): `[n, (treppe, nPos, nIdx, positionen…, indizes…)…]`. `treppe` ist der
@@ -41,11 +42,15 @@ struct StairIn {
     nosing: f64,
     closed_risers: bool,
     railing: u8,
+    column_radius: f64,
 }
 
 impl StairIn {
     fn straight(&self) -> bool {
         self.params.shape == "straight"
+    }
+    fn spiral(&self) -> bool {
+        self.params.shape == "spiral"
     }
 }
 
@@ -58,8 +63,8 @@ fn decode(buf: &[f64]) -> Option<Vec<Option<StairIn>>> {
         for v in p.iter_mut() {
             *v = r.num()?;
         }
-        let (z_bottom, z_top, structure, tread_thickness, nosing, closed, railing) =
-            (r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?);
+        let (z_bottom, z_top, structure, tread_thickness, nosing, closed, railing, column) =
+            (r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?);
         // Eine unbrauchbare Treppe fällt einzeln weg (Index bleibt erhalten).
         let valid = [z_bottom, z_top, tread_thickness, nosing].iter().all(|v| v.is_finite());
         out.push(match (valid, decode_params(&p)) {
@@ -72,6 +77,7 @@ fn decode(buf: &[f64]) -> Option<Vec<Option<StairIn>>> {
                 nosing,
                 closed_risers: closed != 0.0,
                 railing: railing.clamp(0.0, 3.0) as u8,
+                column_radius: if column.is_finite() && column > 0.0 { column.min(5.0) } else { 0.0 },
             }),
             _ => None,
         });
@@ -237,7 +243,21 @@ fn slabs_of(s: &StairIn, idx: usize, for_section: bool, out: &mut Vec<Slab>) {
     let Some((geo, total_rise)) = geometry_of(s) else { return };
     let z_bottom = s.z_bottom;
     let structure = s.structure;
-    if structure == BETON && s.straight() && !for_section {
+    let mut column: Option<Slab> = None;
+    if s.spiral() && s.column_radius > 0.0 {
+        if let Some(c) = &s.params.center {
+            let pts = (0..COLUMN_SEGMENTS)
+                .map(|k| {
+                    let a = std::f64::consts::TAU * k as f64 / COLUMN_SEGMENTS as f64;
+                    [c.x + s.column_radius * a.cos(), c.y + s.column_radius * a.sin()]
+                })
+                .collect();
+            // Säule zuletzt einfügen: siehe unten; hier nur vormerken
+            column = Some(Slab { src: idx, monolith: true, z_bottom, z_top: s.z_top, pts });
+        }
+    }
+    if structure == BETON && (s.straight() || s.spiral()) && !for_section {
+        out.extend(column);
         return;
     }
     let riser = geo.riser_height;
@@ -317,9 +337,114 @@ fn slabs_of(s: &StairIn, idx: usize, for_section: bool, out: &mut Vec<Slab>) {
             });
         }
     }
+    out.extend(column);
+}
+
+/// Kreisbogenstücke je Tritt in Wendelfläche und Handlauf.
+const HELIX_SEGMENTS: usize = 6;
+/// Ecken der Mittelsäule (Vieleck).
+const COLUMN_SEGMENTS: usize = 24;
+
+/// Wendel-Masse: Zentrum, Winkelbereich, Radien (wie `spiral_geometry` in `kernel2d`).
+struct Helix {
+    center: P,
+    a0: f64,
+    sweep: f64,
+    r_in: f64,
+    r_out: f64,
+}
+
+fn helix_of(s: &StairIn) -> Option<Helix> {
+    let p = &s.params;
+    let half_w = 0.05_f64.max(p.width / 2.0);
+    let center = p.center.unwrap_or(p.start);
+    let radius = (half_w + 0.1).max(p.radius.unwrap_or(p.width));
+    let a0 = (p.start.y - center.y).atan2(p.start.x - center.x);
+    let sweep = p.sweep.unwrap_or(270.0).to_radians();
+    if !(sweep.abs() > 1e-6) {
+        return None;
+    }
+    Some(Helix { center: [center.x, center.y], a0, sweep, r_in: (radius - half_w).max(0.02), r_out: radius + half_w })
+}
+
+impl Helix {
+    fn at(&self, r: f64, ang: f64) -> P {
+        [self.center[0] + r * ang.cos(), self.center[1] + r * ang.sin()]
+    }
+}
+
+/// Wendelfläche einer Ortbetontreppe: je Tritt ein geschlossener Block, dessen Untersicht eine echte
+/// Schraubenfläche ist (z linear im Winkel, radiale Erzeugende); Oberseite = ebener Tritt.
+fn spiral_mesh(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
+    let Some((geo, total_rise)) = geometry_of(s) else { return };
+    let Some(h) = helix_of(s) else { return };
+    let n = geo.treads.len();
+    if n == 0 {
+        return;
+    }
+    let waist = concrete_waist(geo.riser_height);
+    let z_bottom = s.z_bottom;
+    let soffit = |frac: f64| z_bottom.max(z_bottom + frac * total_rise - waist);
+    let d_a = h.sweep / n as f64;
+    let mut positions: Vec<f64> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    for (i, tr) in geo.treads.iter().enumerate() {
+        let top = z_bottom + tr.top_rise;
+        // Ringe entlang des Tritts: (innen unten, aussen unten, Winkel)
+        let m = HELIX_SEGMENTS;
+        let base = (positions.len() / 3) as u32;
+        for j in 0..=m {
+            let f = j as f64 / m as f64;
+            let ang = h.a0 + (i as f64 + f) * d_a;
+            let zb = soffit((i as f64 + f) / n as f64);
+            for (r, z) in [(h.r_in, zb), (h.r_out, zb), (h.r_in, top), (h.r_out, top)] {
+                let q = h.at(r, ang);
+                positions.extend([q[0], q[1], z]);
+            }
+        }
+        // Eckindizes je Ring j: 0 = innen unten, 1 = aussen unten, 2 = innen oben, 3 = aussen oben
+        let v = |j: usize, k: u32| base + 4 * j as u32 + k;
+        let mut quad = |a: u32, b: u32, c: u32, d: u32| indices.extend([a, b, c, a, c, d]);
+        for j in 0..m {
+            quad(v(j, 0), v(j, 1), v(j + 1, 1), v(j + 1, 0)); // Untersicht (Wendelfläche)
+            quad(v(j, 2), v(j + 1, 2), v(j + 1, 3), v(j, 3)); // Trittfläche
+            quad(v(j, 0), v(j + 1, 0), v(j + 1, 2), v(j, 2)); // innere Wange
+            quad(v(j, 1), v(j, 3), v(j + 1, 3), v(j + 1, 1)); // äussere Wange
+        }
+        quad(v(0, 0), v(0, 2), v(0, 3), v(0, 1)); // Setzstufe (Anfang)
+        quad(v(m, 0), v(m, 1), v(m, 3), v(m, 2)); // Ende
+    }
+    if indices.is_empty() {
+        return;
+    }
+    // Drehsinn legt die Orientierung fest: bei negativem Volumen alle Dreiecke wenden.
+    let mut mesh = Mesh { src: idx, positions, indices };
+    if signed_volume(&mesh) < 0.0 {
+        for t in mesh.indices.chunks_mut(3) {
+            t.swap(1, 2);
+        }
+    }
+    out.push(mesh);
+}
+
+fn signed_volume(m: &Mesh) -> f64 {
+    let p = |i: u32| {
+        let k = 3 * i as usize;
+        [m.positions[k], m.positions[k + 1], m.positions[k + 2]]
+    };
+    m.indices
+        .chunks(3)
+        .map(|t| {
+            let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+            (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0
+        })
+        .sum()
 }
 
 fn meshes_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
+    if s.structure == BETON && s.spiral() {
+        return spiral_mesh(s, idx, out);
+    }
     if s.structure != BETON || !s.straight() || s.params.run_length <= EPS {
         return;
     }
@@ -414,8 +539,63 @@ fn strut_box(a: V3, b: V3, half: f64) -> Option<(Vec<f64>, Vec<u32>)> {
     Some((positions, indices))
 }
 
+/// Handlauf einer Wendeltreppe als Schraubensweep (Quader-Stücke auf der Schraubenlinie) samt
+/// Pfosten auf den Trittmitten, in einem Netz je Treppe.
+fn spiral_railing(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
+    let Some((geo, total_rise)) = geometry_of(s) else { return };
+    let Some(h) = helix_of(s) else { return };
+    let n = geo.treads.len();
+    if n == 0 {
+        return;
+    }
+    // Laufrichtung = Drehsinn: links der Laufrichtung liegt bei CCW der Innenrand.
+    let ccw = h.sweep > 0.0;
+    let sides: &[bool] = match s.railing {
+        3 => &[true, false],
+        1 => &[true],
+        _ => &[false],
+    };
+    let half = RAIL_THICK / 2.0;
+    let mut positions: Vec<f64> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let mut push = |m: Option<(Vec<f64>, Vec<u32>)>| {
+        if let Some((p, i)) = m {
+            let base = (positions.len() / 3) as u32;
+            positions.extend(p);
+            indices.extend(i.into_iter().map(|k| k + base));
+        }
+    };
+    let rail_z = |frac: f64| s.z_bottom + frac * total_rise + RAIL_HEIGHT;
+    for &left in sides {
+        let r = if left == ccw { h.r_in } else { h.r_out };
+        let total_seg = n * HELIX_SEGMENTS;
+        let pt_at = |k: usize| {
+            let f = k as f64 / total_seg as f64;
+            let q = h.at(r, h.a0 + f * h.sweep);
+            [q[0], q[1], rail_z(f)]
+        };
+        for k in 0..total_seg {
+            push(strut_box(pt_at(k), pt_at(k + 1), half));
+        }
+        for (i, tr) in geo.treads.iter().enumerate() {
+            let f = (i as f64 + 0.5) / n as f64;
+            let q = h.at(r, h.a0 + f * h.sweep);
+            push(strut_box([q[0], q[1], s.z_bottom + tr.top_rise], [q[0], q[1], rail_z(f)], half));
+        }
+    }
+    if !indices.is_empty() {
+        out.push(Mesh { src: idx, positions, indices });
+    }
+}
+
 fn railings_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
-    if !s.straight() || s.railing == 0 {
+    if s.railing == 0 {
+        return;
+    }
+    if s.spiral() {
+        return spiral_railing(s, idx, out);
+    }
+    if !s.straight() {
         return;
     }
     let Some((geo, _)) = geometry_of(s) else { return };
@@ -502,7 +682,7 @@ mod tests {
         vec![
             1.0, // eine Treppe
             0.0, 0.0, 0.0, 1.0, 0.0, 3.0, nan, nan, nan, nan, nan, nan, 1.0, 10.0, nan, 0.0, // Parameter
-            0.0, 2.8, structure, 0.04, nosing, closed, railing,
+            0.0, 2.8, structure, 0.04, nosing, closed, railing, 0.0,
         ]
     }
 
@@ -573,7 +753,7 @@ mod tests {
         let nan = f64::NAN;
         let l = vec![
             1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.5, 1.0, nan, nan, nan, nan, 1.0, 10.0, nan, 0.0, // L
-            0.0, 2.8, 0.0, 0.04, 0.0, 0.0, 0.0,
+            0.0, 2.8, 0.0, 0.04, 0.0, 0.0, 0.0, 0.0,
         ];
         let s = slabs(&l, false);
         assert!(s.len() >= 10);
@@ -581,9 +761,85 @@ mod tests {
         assert!((last.z_top - 1.4).abs() < 1e-9 && last.z_bottom == 0.0);
         let w = vec![
             1.0, 2.0, 1.0, 0.0, 1.0, 0.0, 1.0, nan, nan, 0.0, 0.0, 1.5, 270.0, 1.0, 12.0, nan, 0.0, // Wendel
-            0.0, 2.8, 2.0, 0.04, 0.0, 0.0, 3.0,
+            0.0, 2.8, 2.0, 0.04, 0.0, 0.0, 3.0, 0.0,
         ];
         assert!(!slabs(&w, false).is_empty());
-        assert!(railings(&w).is_empty()); // Geländer nur für gerade Läufe
+        assert!(!railings(&w).is_empty()); // Wendelgeländer = Schraubensweep
+    }
+
+    fn spiral(structure: f64, railing: f64, column: f64) -> Vec<f64> {
+        let nan = f64::NAN;
+        vec![
+            1.0, 2.0, 1.0, 0.0, 1.0, 0.0, 1.0, nan, nan, 0.0, 0.0, 1.5, 270.0, 1.0, 12.0, nan, 0.0, // Wendel
+            0.0, 2.8, structure, 0.04, 0.0, 0.0, railing, column,
+        ]
+    }
+
+    /// Volumen eines geschlossenen Netzes (Divergenzsatz); positiv = Normalen nach aussen.
+    fn volume(m: &Mesh) -> f64 {
+        let p = |i: u32| [m.positions[3 * i as usize], m.positions[3 * i as usize + 1], m.positions[3 * i as usize + 2]];
+        m.indices
+            .chunks(3)
+            .map(|t| {
+                let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+                (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0
+            })
+            .sum()
+    }
+
+    #[test]
+    fn wendel_beton_hat_schraubenfläche() {
+        let ms = slab_meshes(&spiral(1.0, 0.0, 0.0));
+        assert_eq!(ms.len(), 1);
+        let m = &ms[0];
+        // Ringsektor 270° (r 1…2) = 7.07 m², mittlere Dicke ≈ Laufplatte + halbe Steigung
+        let v = volume(m);
+        assert!(v > 1.5 && v < 3.2, "Volumen {v}");
+        // Untersicht folgt der Schraube: an jedem Punkt z_unten = z0 + Winkelanteil·Steighöhe − Dicke (oder 0)
+        let a0 = 0.0_f64; // Start (1,0) um Zentrum (0,0)
+        let waist = concrete_waist(2.8 / 12.0);
+        let mut checked = 0;
+        for c in m.positions.chunks(3) {
+            let ang = c[1].atan2(c[0]).rem_euclid(std::f64::consts::TAU) - a0;
+            let f = ang / (270.0_f64).to_radians();
+            let on_helix = (0.0..=1.0).contains(&f) && (c[2] - (f * 2.8 - waist).max(0.0)).abs() < 1e-6;
+            if on_helix {
+                checked += 1;
+            }
+        }
+        assert!(checked > 12 * 2, "zu wenige Punkte auf der Wendelfläche: {checked}");
+        // Im Grundriss/3D werden die Tritt-Prismen für Beton nicht doppelt gezeichnet, im Schnitt schon
+        assert!(slabs(&spiral(1.0, 0.0, 0.0), false).is_empty());
+        assert!(!slabs(&spiral(1.0, 0.0, 0.0), true).is_empty());
+        // Drehsinn negativ: Netz bleibt geschlossen/nach aussen orientiert
+        let mut cw = spiral(1.0, 0.0, 0.0);
+        cw[12] = -270.0;
+        assert!(volume(&slab_meshes(&cw)[0]) > 1.5);
+    }
+
+    #[test]
+    fn wendel_handlauf_ist_schraubensweep() {
+        let rs = railings(&spiral(1.0, 1.0, 0.0));
+        assert!(!rs.is_empty());
+        let zs: Vec<f64> = rs.iter().flat_map(|m| m.positions.chunks(3).map(|c| c[2])).collect();
+        let (lo, hi) = (zs.iter().cloned().fold(f64::INFINITY, f64::min), zs.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+        assert!(lo < 0.95 && hi > 2.8 + 0.85, "{lo} {hi}");
+        // Handlauf liegt auf einem Kreis (Innenkante r = 1.0 bei Linksgeländer, CCW) — alle Punkte r ≈ 1 ± Querschnitt
+        let big = rs.iter().max_by_key(|m| m.indices.len()).unwrap();
+        let r: Vec<f64> = big.positions.chunks(3).map(|c| c[0].hypot(c[1])).collect();
+        assert!(r.iter().all(|r| (r - 1.0).abs() < 0.05), "Radius streut");
+        assert!(big.positions.chunks(3).any(|c| c[2] > 2.0) && big.positions.chunks(3).any(|c| c[2] < 1.2));
+    }
+
+    #[test]
+    fn wendel_mittelsaeule_als_block() {
+        let none = slabs(&spiral(0.0, 0.0, 0.0), false).len();
+        let with = slabs(&spiral(0.0, 0.0, 0.12), false);
+        assert_eq!(with.len(), none + 1);
+        let col = with.last().unwrap();
+        assert!(col.z_bottom == 0.0 && (col.z_top - 2.8).abs() < 1e-9 && col.pts.len() >= 12);
+        assert!(col.pts.iter().all(|p| (p[0].hypot(p[1]) - 0.12).abs() < 1e-9));
+        // auch bei Beton (Grundriss ohne Tritt-Prismen) und nur für Wendel
+        assert_eq!(slabs(&spiral(1.0, 0.0, 0.12), false).len(), 1);
     }
 }

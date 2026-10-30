@@ -37,6 +37,8 @@ import { unitsForLevel } from "../tools/displayUnits";
 import { setSheetOwnerOutlines, setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { selectionHighlightLines } from "../core";
+import { clashHighlightLines } from "../analysis/clash";
+import { useClashSession } from "../panels/clashSession";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
 import { PlanView } from "./plan/PlanView";
 import type {
@@ -61,6 +63,8 @@ import type { DetailLevel, RenderMode, View3d, ViewType } from "../model/viewTyp
  * grauen Wand-/Deckenton, dem hellen Hidden-Line-Weiss und dem Bodenraster ab.
  */
 const HIGHLIGHT_RGB: [number, number, number] = [1.0, 0.5, 0.1];
+/** Rot der Kollisions-Hüllquader im 3D ([T8]). */
+const CLASH_RGB: [number, number, number] = [0.88, 0.14, 0.16];
 
 /** Hauptinhalt — abhängig von der aktiven Zeichnungsebene und dem Ansichtstyp. */
 export function Content({
@@ -285,7 +289,8 @@ export function Content({
   // im WASM-Zweig (Viewport3D reicht sie nur dort an Wasm3DViewport durch);
   // die three.js-Sicht hebt die Auswahl weiterhin über ihr eigenes Material
   // hervor. Leere Auswahl → null (kein Highlight).
-  const highlightLines = useMemo(
+  const clashes = useClashSession().clashes;
+  const selectionLines = useMemo(
     () =>
       selectedWallIds.length === 0 &&
       selectedCeilingIds.length === 0 &&
@@ -314,6 +319,16 @@ export function Content({
       selectedContextObjectIds,
     ],
   );
+  // Kollisionen der letzten Prüfung: rote Hüllquader zusätzlich zur Auswahl-Hervorhebung.
+  const highlightLines = useMemo(() => {
+    if (clashes.length === 0) return selectionLines;
+    const clashLines = clashHighlightLines(clashes, CLASH_RGB);
+    if (!selectionLines) return clashLines;
+    const merged = new Float32Array(selectionLines.length + clashLines.length);
+    merged.set(selectionLines, 0);
+    merged.set(clashLines, selectionLines.length);
+    return merged;
+  }, [selectionLines, clashes]);
 
   if (level.kind === "section" || level.kind === "elevation") {
     return (
