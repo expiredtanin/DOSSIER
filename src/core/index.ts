@@ -239,6 +239,7 @@ export {
   sectionPlaneFromLevel,
   sectionUAxisModel,
 } from "../plan/toSection";
+export { viewportLevelPlan } from "../plan/viewportPlan";
 
 export {
   TRUCK_MESH_READY_EVENT,

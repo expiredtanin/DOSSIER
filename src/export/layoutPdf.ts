@@ -16,7 +16,8 @@ import type { Layout, LayoutPaperFormat, MasterLayout, Project } from "../model/
 import { t } from "../i18n";
 import { legendPlan, legendPrintSvg } from "./legendSvg";
 import { categoryLayerGroups, enablePdfLayers, type PdfLayers } from "./pdfLayers";
-import { generatePlan } from "../plan/generatePlan";
+import { generatePlan, type Plan } from "../plan/generatePlan";
+import { viewportLevelPlan } from "../plan/viewportPlan";
 import { planToPrintSvg } from "./planToPrintSvg";
 import { drawTablesPdf, sheetTables } from "./sheetTable";
 import { collectVisibleCodes } from "../model/types";
@@ -167,12 +168,13 @@ async function renderPage(
       // Massstab zuerst: er geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken
       // nach Massstab) — wie ViewportPlan in LayoutSheet.tsx, sonst wiche das PDF von der Vorschau ab.
       const scaleN = ctx.scaleOverride ?? resolveViewportScale(vp, snap);
-      const planOf = (visible: Set<string>) => generatePlan(project, snap.activeLevelId, visible, undefined, snap.detail, false, false, true, scaleN, true);
-      const draw = async (plan: ReturnType<typeof planOf>, transparent: boolean, bounds?: typeof plan.bounds) => {
+      // Geschoss/Zeichnung, Schnitt oder Ansicht ([115]) — wie ViewportPlanSvg, im Druck-Modus.
+      const planOf = (visible: Set<string>) => viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true);
+      const draw = async (plan: Plan, transparent: boolean, bounds?: Plan["bounds"]) => {
         const print = planToPrintSvg(plan, { scaleDenominator: scaleN, pageWidthMm: vp.widthMm, pageHeightMm: vp.heightMm, transparent, bounds });
         await doc.svg(print.svg, { x: vp.xMm, y: vp.yMm, width: vp.widthMm, height: vp.heightMm });
       };
-      const full = planOf(codes);
+      const full = await planOf(codes);
       if (!ctx.layers) {
         await draw(full, false);
       } else {
@@ -181,7 +183,7 @@ async function renderPage(
         doc.setFillColor(255, 255, 255);
         doc.rect(vp.xMm, vp.yMm, vp.widthMm, vp.heightMm, "F");
         for (const g of categoryLayerGroups(project.layers, codes, t("pdfLayers.other"))) {
-          const plan = planOf(g.codes);
+          const plan = await planOf(g.codes);
           if (plan.primitives.length === 0) continue; // leere Ebenen nicht anlegen
           await ctx.layers.run(g.name, () => draw(plan, true, full.bounds));
         }

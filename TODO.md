@@ -2014,6 +2014,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (Schnitt, Ansicht, 3D zeigen dort nur die 2D-Zeichnungen der Ebene → keine solchen Blätter im Beispiel);
   Grundriss des DG zeigt die Dachaufsicht flächig über dem Schnitt; e2e-Helfer `openSample` jetzt mit exaktem
   Menünamen. · M
+- ◐ **[115] Schnitt/Ansicht wie Grundriss: 3D-Wechsel und Layout-Viewport.** (30.10., Mac-Befund am Musterhaus
+  komplex) (1) Aus Schnitt und Ansicht liess sich nicht ins 3D wechseln: Ansicht-Knöpfe waren nur für Geschosse frei
+  (`viewToggleEnabled`), Menü/Kürzel setzten `viewType`, aber die Schnitt-Ansicht ignorierte ihn. Jetzt 3D aus
+  Geschoss/Schnitt/Ansicht (nur freie Zeichnung ohne); aus einem Schnitt bindet der Live-Schnitt an dessen Linie
+  (`section3dCutId`, im 3D wie sonst aufhebbar). (2) Layout-Viewports rechneten nur Grundrisse — ein Schnitt-/
+  Ansicht-Ausschnitt zeigte Höhenlinien und Schnittlinien-Symbole statt des Schnitts (seit dem ersten Stand so, keine
+  Regression). `plan/viewportPlan.ts::viewportLevelPlan` (Blatt + PDF): Schnitt/Ansicht wie `SectionPlanView` mit Koten
+  und eigenen 2D-Elementen. vitest `viewportPlan.test.ts`, e2e `sectionViews.spec.ts`. Offen: Fang auf
+  Schnitt-Viewport-Inhalt (`sheet_viewports.rs` nur Grundriss), 3D-Ausschnitt im Viewport; nicht in der Tauri-App
+  geprüft (3D headless ohne Bild). · S
 
 ## Priorität 4 — später
 
