@@ -190,6 +190,14 @@ pub struct WallInput {
     /// Subtraktion, Default-Schnittkante).
     #[serde(default)]
     pub cut: Option<CutBandMeta>,
+    /// Explizite Schnittlinie `[px, py, dx, dy]` (Modell-Meter, Grundriss) am Wandanfang/-ende
+    /// (Gehrung, T-Stoss-Fläche, schräge Aussparungs-Seite aus dem Kern): die Kanten ±Dicke/2
+    /// enden auf ihr. Übersteuert die aus Nachbar-Enden abgeleitete Gehrung; das Ende gilt dann
+    /// nicht als frei.
+    #[serde(default, rename = "startCut")]
+    pub start_cut: Option<[f32; 4]>,
+    #[serde(default, rename = "endCut")]
+    pub end_cut: Option<[f32; 4]>,
 }
 
 /// Ein rechteckiges Loch (Fenster/Tuer) in EINEM Wandkoerper. Siehe

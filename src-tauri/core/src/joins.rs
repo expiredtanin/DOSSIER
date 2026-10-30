@@ -70,13 +70,27 @@ pub struct LayerCuts {
     pub end_side: Vec<Option<Line>>,
 }
 
-/// Aussparung der Nah-Putz-Zone einer Durchgangswand (`SpanCutout` in TS).
+/// Aussparung der Nah-Putz-Zone einer Durchgangswand: ein Parallelogramm im Achsmass der Wand.
+/// `from`/`to` gelten auf der Fläche (`off_a`), `from_b`/`to_b` auf der Rückgrat-Nahfläche
+/// (`off_b`); bei schrägem Abzweig sind die Seiten schräg (Kanten des Abzweig-Kerns), bei
+/// rechtwinkligem gilt `from_b = from`, `to_b = to`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpanCutout {
     pub from: f64,
     pub to: f64,
     pub off_a: f64,
     pub off_b: f64,
+    pub from_b: f64,
+    pub to_b: f64,
+}
+
+impl SpanCutout {
+    /// Achsmass der beiden schrägen Seiten im Querversatz `off` (linear zwischen `off_a`/`off_b`).
+    pub fn at(&self, off: f64) -> (f64, f64) {
+        let d = self.off_b - self.off_a;
+        let t = if d.abs() < 1e-12 { 0.0 } else { (off - self.off_a) / d };
+        (self.from + (self.from_b - self.from) * t, self.to + (self.to_b - self.to) * t)
+    }
 }
 
 /// Schnittlinien einer Wand (`WallCuts` in TS).
@@ -363,13 +377,20 @@ fn apply_t_junction(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts
     let face_cut = Line { point: face_point, dir: u_t };
 
     set_cut(result, branch_end, face_cut);
-    apply_layer_cuts(walls, result, branch_end, ti, face_cut, j, u_t, sign)
+    // Die Durchgangs-Hälften stossen rechtwinklig aneinander; als Schnitt markiert, damit die
+    // Stossfuge nicht als Umriss gezeichnet wird (eine durchlaufende Wand).
+    let joint = Line { point: j, dir: n_t };
+    set_cut(result, ends[t0], joint);
+    set_cut(result, ends[t1], joint);
+    apply_layer_cuts(walls, result, branch_end, ti, Some(ends[t1].wall), face_cut, j, u_t, sign)
 }
 
 /// Materialbewusste Pro-Schicht-Erweiterung eines T-Stoss-Cuts: Abzweig-Schichten gleichen
 /// Materials wie das Rückgrat der Durchgangswand (oder prioritärer) laufen bis zur
 /// Rückgrat-Nahfläche durch; angrenzende getrimmte Schichten bekommen eine seitliche Linie; die
-/// Durchgangswand bekommt eine Nah-Putz-Aussparung über die Kernbreite. Setzt `layer_cuts` nur,
+/// Durchgangswand (am Knoten-T beide Hälften, `other_half`) bekommt eine Nah-Putz-Aussparung über
+/// die Kernbreite — exakt dort, wo die Kern-Kanten des (auch schrägen) Abzweigs die Fläche und die
+/// Rückgrat-Nahfläche kreuzen. Setzt `layer_cuts` nur,
 /// wenn mindestens eine Schicht verschmilzt.
 #[allow(clippy::too_many_arguments)]
 fn apply_layer_cuts(
@@ -377,6 +398,7 @@ fn apply_layer_cuts(
     result: &mut [WallCuts],
     branch_end: WallEnd,
     ti: usize,
+    other_half: Option<usize>,
     face_cut: Line,
     axis_point: Vec2,
     through_dir: Vec2,
@@ -450,8 +472,9 @@ fn apply_layer_cuts(
         side_arr[i] = if adj_merged && !merges_with_near { Some(side_line) } else { None };
     }
 
-    // Durchgangswand-Aussparung über die Kernbreite des Abzweigs (nur bei Nah-Putz).
-    if near_plaster > 1e-9 {
+    // Durchgangswand-Aussparung über die Kernbreite des Abzweigs. Ohne Nah-Putz (Kern trifft direkt
+    // auf die Fläche) ist sie flach (`off_a = off_b`): nur die Flächenlinie bekommt dort eine Lücke.
+    {
         let total_branch = branch_layers.iter().fold(0.0, |s, l| s + l.thickness);
         let ref_off_branch = reference_offset(walls[bi].reference, total_branch);
         let mut b_off = ref_off_branch - total_branch / 2.0;
@@ -470,14 +493,33 @@ fn apply_layer_cuts(
             b_off += th;
         }
         if core_hi > core_lo {
-            let n_branch = left_normal(dir_of(&walls[bi]));
-            let proj = dot(n_branch, through_dir);
-            let axis_at = dot(sub(axis_point, walls[ti].start), through_dir);
-            let e1 = axis_at + core_lo * proj;
-            let e2 = axis_at + core_hi * proj;
-            let off_a = off_t + sign * (t_t / 2.0);
-            let off_b = off_t + sign * (t_t / 2.0 - near_plaster);
-            result[ti].span_cutouts.push(SpanCutout { from: e1.min(e2), to: e1.max(e2), off_a, off_b });
+            let bw = &walls[bi];
+            let n_branch = left_normal(dir_of(bw));
+            let u_branch = dir_of(bw);
+            let edge_lo = add(bw.start, scale(n_branch, core_lo));
+            let edge_hi = add(bw.start, scale(n_branch, core_hi));
+            let face_pt = face_cut.point;
+            for wi in std::iter::once(ti).chain(other_half) {
+                let w = &walls[wi];
+                let u_w = dir_of(w);
+                let n_w = left_normal(u_w);
+                // Flächen im Rahmen der Wand `wi` (die andere Hälfte kann gegenläufig sein).
+                let off_a = dot(sub(face_pt, w.start), n_w);
+                let off_b = dot(sub(merge_point, w.start), n_w);
+                let along = |edge: Vec2, off: f64| -> Option<f64> {
+                    let hit = line_intersect(edge, u_branch, add(w.start, scale(n_w, off)), u_w)?;
+                    Some(dot(sub(hit, w.start), u_w))
+                };
+                let (Some(a_lo), Some(a_hi), Some(b_lo), Some(b_hi)) = (along(edge_lo, off_a), along(edge_hi, off_a), along(edge_lo, off_b), along(edge_hi, off_b)) else {
+                    continue;
+                };
+                let s = if a_lo <= a_hi {
+                    SpanCutout { from: a_lo, to: a_hi, off_a, off_b, from_b: b_lo, to_b: b_hi }
+                } else {
+                    SpanCutout { from: a_hi, to: a_lo, off_a, off_b, from_b: b_hi, to_b: b_lo }
+                };
+                result[wi].span_cutouts.push(s);
+            }
         }
     }
     Ok(())
@@ -544,7 +586,7 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
 
     set_cut(result, free, face_cut);
     let axis_point = add(w.start, scale(u_w, dist_along));
-    apply_layer_cuts(walls, result, free, wi, face_cut, axis_point, u_w, sign)
+    apply_layer_cuts(walls, result, free, wi, None, face_cut, axis_point, u_w, sign)
 }
 
 // ── Flache Kodierung ─────────────────────────────────────────────────────────
@@ -552,7 +594,7 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
 // Wände: [n, (sx, sy, ex, ey, refKind, refValue, typeOk, nLayers, (dicke, bauteil, prio)…)…]
 //   refKind: 0 Mitte, 1 links, 2 rechts, 3 freier Versatz (refValue); bauteil < 0 = unbekannt.
 // Cuts einer Wand: [start(5), end(5), nLC, (start, end, startSide, endSide je nLC × 5),
-//   nSpan, (from, to, offA, offB)…]; Linie = (gesetzt 0/1, px, py, dx, dy).
+//   nSpan, (from, to, offA, offB, fromB, toB)…]; Linie = (gesetzt 0/1, px, py, dx, dy).
 
 /// Liest die Wände; `None` bei kaputten/unendlichen Daten.
 pub fn decode_walls(buf: &[f64]) -> Option<Vec<JoinWall>> {
@@ -614,7 +656,7 @@ pub fn encode_cuts(out: &mut Vec<f64>, c: &WallCuts) {
     }
     out.push(c.span_cutouts.len() as f64);
     for s in &c.span_cutouts {
-        out.extend([s.from, s.to, s.off_a, s.off_b]);
+        out.extend([s.from, s.to, s.off_a, s.off_b, s.from_b, s.to_b]);
     }
 }
 
@@ -652,8 +694,8 @@ pub fn decode_cuts(r: &mut crate::flat_read::Reader) -> Option<WallCuts> {
     let m = r.count()?;
     let mut span_cutouts = Vec::with_capacity(m.min(1 << 10));
     for _ in 0..m {
-        let s = SpanCutout { from: r.num()?, to: r.num()?, off_a: r.num()?, off_b: r.num()? };
-        if ![s.from, s.to, s.off_a, s.off_b].iter().all(|v| v.is_finite()) {
+        let s = SpanCutout { from: r.num()?, to: r.num()?, off_a: r.num()?, off_b: r.num()?, from_b: r.num()?, to_b: r.num()? };
+        if ![s.from, s.to, s.off_a, s.off_b, s.from_b, s.to_b].iter().all(|v| v.is_finite()) {
             return None;
         }
         span_cutouts.push(s);
@@ -725,8 +767,9 @@ mod tests {
     fn t_knoten_schneidet_nur_abzweig() {
         let w = vec![mono((0.0, 0.0), (3.0, 0.0), 0.3), mono((3.0, 0.0), (6.0, 0.0), 0.3), mono((3.0, 0.0), (3.0, 4.0), 0.2)];
         let c = compute_joins(&w).unwrap();
-        assert_eq!(c[0].end_cut, None);
-        assert_eq!(c[1].start_cut, None);
+        // Durchgang: rechtwinklige Stossfuge der beiden Hälften (nicht gezeichnet).
+        assert!(close(c[0].end_cut.unwrap().dir.x, 0.0) && close(c[1].start_cut.unwrap().point.x, 3.0));
+        assert_eq!(c[0].start_cut, None);
         let cut = c[2].start_cut.unwrap();
         assert!(close(cut.point.y, 0.15) && close(cut.dir.y, 0.0));
     }
@@ -744,7 +787,10 @@ mod tests {
         assert!(close(c[1].start_cut.unwrap().point.y, 0.15));
         assert!(close(c[2].end_cut.unwrap().point.y, -0.15));
         assert!(close(c[3].start_cut.unwrap().point.y, 0.15));
-        assert_eq!(c[0], WallCuts::default());
+        // Gleiches Bauteil ohne Nah-Putz: flache Aussparungen (nur Lücke in der Flächenlinie), je Anschluss eine.
+        assert!(c[0].start_cut.is_none() && c[0].end_cut.is_none() && c[0].layer_cuts.is_none());
+        assert_eq!(c[0].span_cutouts.len(), 3);
+        assert!(c[0].span_cutouts.iter().all(|s| s.off_a == s.off_b && close(s.to - s.from, 0.2) && s.from_b == s.from));
     }
 
     #[test]
@@ -803,6 +849,76 @@ mod tests {
         let c = compute_joins(&w).unwrap();
         assert!(c[2].layer_cuts.is_none());
         assert!(c[2].start_cut.is_some());
+    }
+
+    /// Aussenwand-Aufbau wie im Beispielhaus: Aussenputz | Dämmung | Backstein (Rückgrat) | Innenputz.
+    fn aw() -> Vec<JoinLayer> {
+        vec![layer(0.02, 0, 10.0), layer(0.16, 1, 20.0), layer(0.15, 2, 50.0), layer(0.015, 3, 10.0)]
+    }
+
+    /// Wo die Kante (Versatz `o` quer zur Abzweig-Achse durch `b0` mit Winkel `th`) die Gerade
+    /// y = f der waagrechten Durchgangswand trifft (x-Koordinate) — unabhängige Referenz.
+    fn x_on_face(b0: Vec2, th: f64, o: f64, f: f64) -> f64 {
+        let (s, c) = th.sin_cos();
+        let t = (f - b0.y - o * c) / s;
+        b0.x - o * s + t * c
+    }
+
+    #[test]
+    fn schraeger_t_stoss_schneidet_an_der_flaeche_15_bis_165_grad() {
+        for deg in (15..=165).step_by(15) {
+            let th = (deg as f64).to_radians();
+            let b0 = Vec2::new(5.0, 0.0);
+            let b1 = Vec2::new(5.0 + 3.0 * th.cos(), 3.0 * th.sin());
+            for (lay, total) in [(vec![layer(0.25, 0, 10.0)], 0.25), (aw(), 0.345)] {
+                // Mittelspannen-T und Knoten-T (Durchgang aus zwei Hälften).
+                let mid = vec![wall((0.0, 0.0), (10.0, 0.0), lay.clone()), wall((b0.x, b0.y), (b1.x, b1.y), lay.clone())];
+                let node = vec![wall((0.0, 0.0), (5.0, 0.0), lay.clone()), wall((5.0, 0.0), (10.0, 0.0), lay.clone()), wall((b0.x, b0.y), (b1.x, b1.y), lay.clone())];
+                for w in [mid, node] {
+                    let bi = w.len() - 1;
+                    let c = compute_joins(&w).unwrap();
+                    let cut = c[bi].start_cut.unwrap();
+                    // Schnitt liegt auf der zugewandten Fläche y = total/2, parallel zur Durchgangswand.
+                    assert!(close(cut.dir.y, 0.0) && close(cut.point.y, total / 2.0), "{deg}° {cut:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn schraege_nahputz_aussparung_folgt_dem_abzweig_15_bis_165_grad() {
+        let total = 0.345;
+        let (off_a, off_b) = (total / 2.0, total / 2.0 - 0.015);
+        // Rückgrat-Kante des Abzweigs (Backstein) quer zur Achse.
+        let (core_lo, core_hi) = (-total / 2.0 + 0.18, -total / 2.0 + 0.33);
+        for deg in (15..=165).step_by(15) {
+            let th = (deg as f64).to_radians();
+            let b0 = Vec2::new(5.0, 0.0);
+            let b1 = Vec2::new(5.0 + 3.0 * th.cos(), 3.0 * th.sin());
+            let mid = vec![wall((0.0, 0.0), (10.0, 0.0), aw()), wall((b0.x, b0.y), (b1.x, b1.y), aw())];
+            let node = vec![wall((0.0, 0.0), (5.0, 0.0), aw()), wall((5.0, 0.0), (10.0, 0.0), aw()), wall((b0.x, b0.y), (b1.x, b1.y), aw())];
+            for w in [mid, node] {
+                let c = compute_joins(&w).unwrap();
+                let through: Vec<usize> = (0..w.len() - 1).collect();
+                // Aussparung je Durchgangs-Hälfte, in deren Achsmass (Start x = 0 bzw. 5).
+                let mut hits = 0;
+                for &ti in &through {
+                    let x0 = w[ti].start.x;
+                    for s in &c[ti].span_cutouts {
+                        hits += 1;
+                        assert!(close(s.off_a, off_a) && close(s.off_b, off_b), "{deg}° {s:?}");
+                        let xa = [x_on_face(b0, th, core_lo, off_a), x_on_face(b0, th, core_hi, off_a)];
+                        let xb = [x_on_face(b0, th, core_lo, off_b), x_on_face(b0, th, core_hi, off_b)];
+                        let (lo, hi) = if xa[0] < xa[1] { (0, 1) } else { (1, 0) };
+                        assert!(close(s.from + x0, xa[lo]) && close(s.to + x0, xa[hi]), "{deg}° {s:?} {xa:?}");
+                        assert!(close(s.from_b + x0, xb[lo]) && close(s.to_b + x0, xb[hi]), "{deg}° {s:?} {xb:?}");
+                        // Breite = Kernbreite / sin θ (nicht · sin θ).
+                        assert!(close(s.to - s.from, 0.15 / th.sin()), "{deg}°");
+                    }
+                }
+                assert_eq!(hits, through.len(), "{deg}°: jede Durchgangs-Hälfte bekommt die Aussparung");
+            }
+        }
     }
 
     #[test]

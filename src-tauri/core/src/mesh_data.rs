@@ -147,15 +147,72 @@ fn push_wall_box(g: &mut Prim, w: &RWall) {
     let cz = (sy + ey) / 2.0;
     let cy = w.base_elevation + w.height / 2.0;
     let base = (g.positions.len() / 3) as f64;
+    // Kanten ±Dicke/2 an den Schnittlinien (Gehrung, T-Stoss, schräge Aussparung) enden lassen.
+    let clip = |px: f64, pz: f64, cut: Option<[f64; 4]>| -> (f64, f64) {
+        let Some([qx, qz, dx2, dz2]) = cut else { return (px, pz) };
+        let denom = ax * dz2 - az * dx2;
+        if denom.abs() < 1e-9 {
+            return (px, pz);
+        }
+        let t = ((qx - px) * dz2 - (qz - pz) * dx2) / denom;
+        (px + ax * t, pz + az * t)
+    };
     for i in 0..8 {
         let sl = if i & 1 != 0 { 1.0 } else { -1.0 };
         let sh = if i & 2 != 0 { 1.0 } else { -1.0 };
         let st = if i & 4 != 0 { 1.0 } else { -1.0 };
+        let cut = if sl > 0.0 { w.end_cut } else { w.start_cut };
+        if cut.is_some() {
+            let (px, pz) = clip(cx + sl * half_len * ax + st * half_thick * nx, cz + sl * half_len * az + st * half_thick * nz, cut);
+            g.positions.extend_from_slice(&[px, cy + sh * half_height, pz]);
+            continue;
+        }
         g.positions.extend_from_slice(&[cx + sl * half_len * ax + st * half_thick * nx, cy + sh * half_height, cz + sl * half_len * az + st * half_thick * nz]);
     }
     for [a, b, c, d] in BOX_QUADS {
         let (a, b, c, d) = (base + a as f64, base + b as f64, base + c as f64, base + d as f64);
         g.indices.extend_from_slice(&[a, b, c, a, c, d]);
+    }
+}
+
+/// Ecken an Wandanfang/-ende (Welt x, Höhe, y) längs der Achse auf die Schnittlinien schieben
+/// (`RWall::start_cut`/`end_cut`); die Mantelflächen bleiben eben, weil sich nur Endpunkte längs
+/// der Achse verschieben.
+fn shift_cut_ends(pos: &mut [f64], w: &RWall) {
+    if w.start_cut.is_none() && w.end_cut.is_none() {
+        return;
+    }
+    let [sx, sy] = w.start;
+    let (dx, dy) = (w.end[0] - sx, w.end[1] - sy);
+    let len = hypot2(dx, dy);
+    if len < 1e-9 {
+        return;
+    }
+    let (ax, ay) = (dx / len, dy / len);
+    // Achsmass, an dem die Längslinie (Querversatz `t`) die Schnittlinie trifft.
+    let at = |c: [f64; 4], t: f64| -> Option<f64> {
+        let (px, py) = (sx - ay * t, sy + ax * t);
+        let denom = ax * c[3] - ay * c[2];
+        if denom.abs() < 1e-9 {
+            return None;
+        }
+        Some(((c[0] - px) * c[3] - (c[1] - py) * c[2]) / denom)
+    };
+    for v in pos.chunks_exact_mut(3) {
+        let (rx, ry) = (v[0] - sx, v[2] - sy);
+        let a = rx * ax + ry * ay;
+        let t = -rx * ay + ry * ax;
+        let target = if a.abs() < 1e-6 {
+            w.start_cut.and_then(|c| at(c, t))
+        } else if (a - len).abs() < 1e-6 {
+            w.end_cut.and_then(|c| at(c, t))
+        } else {
+            None
+        };
+        if let Some(na) = target {
+            v[0] += ax * (na - a);
+            v[2] += ay * (na - a);
+        }
     }
 }
 
@@ -306,6 +363,8 @@ pub fn mesh_export_data(src: &Project, opt: &MeshOptions) -> Result<Flat, String
                 height: w.height,
                 holes: w.holes.as_deref().unwrap_or(&[]).iter().map(|h| [h.from, h.to, h.z_bottom, h.z_top]).collect(),
             });
+            let mut cut = cut;
+            shift_cut_ends(&mut cut, w);
             let base = (prim.positions.len() / 3) as f64;
             prim.positions.extend_from_slice(&cut);
             prim.indices.extend((0..cut.len() / 3).map(|i| base + i as f64));

@@ -308,6 +308,8 @@ mod tests {
                 top_angle: None,
             }),
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         let plane = SectionPlane::looking_plus_x(1.5);
         let verts = build_cut_caps(&plane, &[wall], &[], &[]);
@@ -349,6 +351,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         let plane = SectionPlane::looking_plus_x(1.5);
         let verts = build_cut_caps(&plane, &[wall], &[], &[]);
@@ -388,6 +392,8 @@ mod tests {
                 line_color: None,
                 line_weight: None,
             }),
+            start_cut: None,
+            end_cut: None,
         };
         // Decken-Slab, deren Umriss die Wand an der Schnittstelle (x=1.5) ueberdeckt,
         // z in [2.0, 2.4]; Prio 100 (Beton laeuft durch, schneidet die Wand).
@@ -463,6 +469,8 @@ mod tests {
                 line_color: None,
                 line_weight: None,
             }),
+            start_cut: None,
+            end_cut: None,
         };
         // Estrich-Slab (Prio 30, Muster 3 crosshatch), z in [1.0,1.06], deckt die
         // Wand in u ab (Umriss ueber y in [-1,1]).
@@ -546,6 +554,8 @@ mod tests {
                 line_color: Some(color),
                 line_weight: Some(2.0),
             }),
+            start_cut: None,
+            end_cut: None,
         };
         let plane = SectionPlane::looking_plus_x(1.5);
         let verts = build_cut_cap_lines(&plane, &[wall.clone()], &[], &[]);

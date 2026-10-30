@@ -350,6 +350,8 @@ fn demo_walls() -> Vec<WallInput> {
         material_index: None,
         hatch: None,
         cut: None,
+        start_cut: None,
+        end_cut: None,
     };
     vec![
         mk([0.0, 0.0], [6.0, 0.0]),

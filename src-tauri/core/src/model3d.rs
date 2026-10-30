@@ -266,6 +266,13 @@ pub struct RWall {
     pub material_index: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cut: Option<RCutMeta>,
+    /// Schnittlinie `[px, py, dx, dy]` (Grundriss) am Anfang/Ende: Gehrung, T-Stoss-Fläche oder schräge
+    /// Aussparungs-Seite; die Kanten ±Dicke/2 enden auf ihr ([108]). Fehlt: rechtwinklig bzw. die
+    /// Gehrung, die render3d aus den Nachbar-Enden ableitet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_cut: Option<[f64; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_cut: Option<[f64; 4]>,
 }
 
 /// Textur-Karten-URLs der Bauteile in der Reihenfolge des ersten Auftretens: Wandtypen, dann
@@ -589,6 +596,8 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
                 hatch: b.hatch.clone().map(|h| with_top_angle(h, dx, dy)),
                 material_index: b.material_index,
                 cut: band_cut_meta(b),
+                start_cut: piece.start_cut.map(|l| [l.point.x, l.point.y, l.dir.x, l.dir.y]),
+                end_cut: piece.end_cut.map(|l| [l.point.x, l.point.y, l.dir.x, l.dir.y]),
             });
         }
     }

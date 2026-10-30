@@ -144,6 +144,11 @@ pub struct Piece {
     pub z_top: f64,
     pub top_drop: Option<[f64; 2]>,
     pub holes: Vec<[f64; 4]>,
+    /// Schnittlinie (Welt) am Körper-Anfang/-Ende: Gehrung, T-Stoss-Fläche oder schräge Seite einer
+    /// Nah-Putz-Aussparung. Die Band-Kanten (±Dicke/2) enden auf ihr statt rechtwinklig; der Körper
+    /// beginnt/endet dort, wo die Band-Mittellinie sie trifft. `None`: rechtwinklig.
+    pub start_cut: Option<Line>,
+    pub end_cut: Option<Line>,
     /// Eigene Dicke (Schichteinzug-Stück, [106]); `None` = Banddicke.
     pub thickness: Option<f64>,
 }
@@ -326,6 +331,83 @@ fn subtract_spans(lo: f64, hi: f64, holes: &[[f64; 2]]) -> Vec<[f64; 2]> {
     parts
 }
 
+/// Loch einer Nah-Putz-Aussparung in einem Band: Achsmass `[a, b]` auf der Band-Mittellinie, die
+/// schrägen Seiten (Welt) und deren Achsmass-Spanne `(min, max)` über die Banddicke.
+#[derive(Clone, Copy, Debug)]
+struct BandHole {
+    a: f64,
+    b: f64,
+    la: Line,
+    lb: Line,
+    la_rng: (f64, f64),
+    lb_rng: (f64, f64),
+}
+
+/// Wie [`subtract_spans`], jedes Teilstück mit den Schnittlinien an seinen Enden: am Rand `lo`/`hi`
+/// `lo_cut`/`hi_cut`, an einem Loch dessen (schräge) Seite. Ragt die schräge Seite eines Lochs
+/// jenseits eines rechtwinkligen Wandendes ins Band (Knoten-T: das Loch liegt auf der Nachbarhälfte),
+/// endet das Band an dieser Seite statt am Wandende; ein Teilstück, dessen Enden sich über die
+/// Banddicke kreuzen (`valid` = falsch), entfällt — die Nachbarhälfte deckt es.
+fn subtract_spans_cut(
+    lo: f64,
+    hi: f64,
+    holes: &[BandHole],
+    lo_cut: Option<Line>,
+    hi_cut: Option<Line>,
+    valid: impl Fn(f64, f64, Option<Line>, Option<Line>) -> bool,
+) -> Vec<([f64; 2], Option<Line>, Option<Line>)> {
+    let (mut lo, mut hi, mut lo_cut, mut hi_cut) = (lo, hi, lo_cut, hi_cut);
+    {
+        if let Some(h) = holes.iter().filter(|h| h.a >= hi - EPS && h.la_rng.0 < hi - EPS).min_by(|p, q| p.a.total_cmp(&q.a)) {
+            hi = h.a;
+            hi_cut = Some(h.la);
+        }
+    }
+    {
+        if let Some(h) = holes.iter().filter(|h| h.b <= lo + EPS && h.lb_rng.1 > lo + EPS).max_by(|p, q| p.b.total_cmp(&q.b)) {
+            lo = h.b;
+            lo_cut = Some(h.lb);
+        }
+    }
+    let mut clipped: Vec<BandHole> = holes.iter().map(|h| BandHole { a: lo.max(h.a), b: hi.min(h.b), ..*h }).filter(|h| h.b > h.a + EPS).collect();
+    clipped.sort_by(|p, q| p.a.partial_cmp(&q.a).unwrap_or(std::cmp::Ordering::Equal));
+    let mut parts = Vec::new();
+    let (mut cursor, mut cursor_cut) = (lo, lo_cut);
+    for h in clipped {
+        if h.a > cursor + EPS {
+            parts.push(([cursor, h.a], cursor_cut, Some(h.la)));
+        }
+        if h.b > cursor {
+            cursor = h.b;
+            cursor_cut = Some(h.lb);
+        }
+    }
+    if cursor < hi - EPS {
+        parts.push(([cursor, hi], cursor_cut, hi_cut));
+    }
+    parts.retain(|&([a, b], sc, ec)| valid(a, b, sc, ec));
+    parts
+}
+
+/// Loch einer Nah-Putz-Aussparung im Band `[band_lo, band_hi]` (Mittellinie `off`).
+fn cutout_hole(w: &WallIn, u: Vec2, n: Vec2, c: &crate::joins::SpanCutout, off: f64, band_lo: f64, band_hi: f64) -> BandHole {
+    let pt = |d: f64, o: f64| add(add(w.start, scale(u, d)), scale(n, o));
+    let side = |p: f64, q: f64| {
+        let (a, b) = (pt(p, c.off_a), pt(q, c.off_b));
+        let dir = sub(b, a);
+        Line { point: a, dir: if js_hypot(dir.x, dir.y) < 1e-12 { n } else { dir } }
+    };
+    let (x0, x1) = c.at(off);
+    let ((p0, q0), (p1, q1)) = (c.at(band_lo), c.at(band_hi));
+    let (rp, rq) = ((p0.min(p1), p0.max(p1)), (q0.min(q1), q0.max(q1)));
+    let (l0, l1) = (side(c.from, c.from_b), side(c.to, c.to_b));
+    if x0 <= x1 {
+        BandHole { a: x0, b: x1, la: l0, lb: l1, la_rng: rp, lb_rng: rq }
+    } else {
+        BandHole { a: x1, b: x0, la: l1, lb: l0, la_rng: rq, lb_rng: rp }
+    }
+}
+
 /// Decken-z-Cutter auf `[lo, hi]` je Terminierung: ausstanzen (beide), unter der Decke enden,
 /// über der Decke beginnen.
 fn terminate_or_subtract(lo: f64, hi: f64, cutters: &[[f64; 2]], term: Termination) -> Vec<[f64; 2]> {
@@ -390,6 +472,8 @@ impl Emitter<'_> {
             z_top: zt,
             top_drop: (drop[0] > EPS || drop[1] > EPS).then_some(drop),
             holes,
+            start_cut: None,
+            end_cut: None,
             thickness: None,
         });
     }
@@ -575,13 +659,25 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
         // (2) Nah-Putz-Aussparungen, die dieses Band quer treffen.
         let band_lo = off - b.thickness / 2.0;
         let band_hi = off + b.thickness / 2.0;
-        let axis_holes: Vec<[f64; 2]> = cuts
+        let axis_holes: Vec<BandHole> = cuts
             .span_cutouts
             .iter()
             .filter(|c| band_lo < c.off_a.max(c.off_b) - EPS && band_hi > c.off_a.min(c.off_b) + EPS)
-            .map(|c| [c.from, c.to])
+            .map(|c| cutout_hole(w, u, n, c, off, band_lo, band_hi))
             .collect();
-        let axis_pieces = subtract_spans(from0, to0, &axis_holes);
+        // Teilstück gültig, wenn es an beiden Band-Kanten eine positive Länge hat.
+        let valid = |a: f64, b: f64, sc: Option<Line>, ec: Option<Line>| {
+            [band_lo, band_hi].iter().all(|&e| {
+                let ps = sc.and_then(|l| band_cut_distance(w, u, n, e, &l)).unwrap_or(a);
+                let pe = ec.and_then(|l| band_cut_distance(w, u, n, e, &l)).unwrap_or(b);
+                pe > ps + EPS
+            })
+        };
+        let axis_pieces = if axis_holes.is_empty() {
+            vec![([from0, to0], s_cut, e_cut)]
+        } else {
+            subtract_spans_cut(from0, to0, &axis_holes, s_cut, e_cut, valid)
+        };
 
         // (3) Decken-Subtraktion je Band dort, wo der Decken-Umriss die Band-Mittellinie deckt.
         let mut band_z_cuts: Vec<[f64; 4]> = Vec::new(); // from, to, zBottom, zTop
@@ -598,11 +694,11 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
 
         let innermost = li == n_bands - 1;
         let recess = b.thickness;
-        let mut emit_piece = |a: f64, bb: f64, zb: f64, zt_start: f64, zt_end: f64| {
-            emit_band_piece(&mut em, li, off, &cutouts, innermost, recess, a, bb, zb, zt_start, zt_end);
-        };
-
-        for [a, bb] in axis_pieces {
+        for ([a, bb], cut_a, cut_b) in axis_pieces {
+            let n0 = em.out.len();
+            let mut emit_piece = |a: f64, bb: f64, zb: f64, zt_start: f64, zt_end: f64| {
+                emit_band_piece(&mut em, li, off, &cutouts, innermost, recess, a, bb, zb, zt_start, zt_end);
+            };
             let local: Vec<[f64; 4]> = band_z_cuts
                 .iter()
                 .map(|c| [a.max(c[0]), bb.min(c[1]), c[2], c[3]])
@@ -610,6 +706,7 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
                 .collect();
             if local.is_empty() {
                 clip_to_roofs(w, ctx, u, n, off, a, bb, z_bottom, z_top, &mut emit_piece);
+                set_piece_cuts(&mut em.out[n0..], w, u, a, bb, cut_a, cut_b);
                 continue;
             }
             let mut xs = vec![a, bb];
@@ -630,10 +727,24 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
                     clip_to_roofs(w, ctx, u, n, off, xa, xb, zb, zt, &mut emit_piece);
                 }
             }
+            set_piece_cuts(&mut em.out[n0..], w, u, a, bb, cut_a, cut_b);
         }
     }
     reveal_pieces(&mut em, &offsets);
     em.out
+}
+
+/// Schnittlinien an die Körper eines Achsenstücks `[a, bb]` hängen: nur Körper, die tatsächlich bei
+/// `a` beginnen bzw. bei `bb` enden (Decken-/Dach-Teilungen dazwischen bleiben rechtwinklig).
+fn set_piece_cuts(pieces: &mut [Piece], w: &WallIn, u: Vec2, a: f64, bb: f64, cut_a: Option<Line>, cut_b: Option<Line>) {
+    for p in pieces {
+        if (dot(sub(p.start, w.start), u) - a).abs() < EPS {
+            p.start_cut = cut_a;
+        }
+        if (dot(sub(p.end, w.start), u) - bb).abs() < EPS {
+            p.end_cut = cut_b;
+        }
+    }
 }
 
 /// Zusatzstücke des Schichteinzugs ([106]) als eigene Körper der Schicht: Leibungen über die
@@ -704,7 +815,7 @@ fn emit_band_piece(em: &mut Emitter, li: usize, off: f64, cutouts: &[OpeningIn],
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::joins::{compute_joins, JoinLayer, JoinWall, SpanCutout};
+    use crate::joins::{compute_joins, JoinLayer, JoinWall, Line, SpanCutout};
 
     fn base(start: (f64, f64), end: (f64, f64), bands: Vec<BandIn>) -> WallIn {
         WallIn {
@@ -765,10 +876,148 @@ mod tests {
         assert!(close(p[0].start.x, 0.0));
     }
 
+    // ── Lückenlose Verschneidung (schräge T-, L-, X-Stösse) ──────────────────
+
+    /// Vorzeichenbehafteter Abstand zum Rand eines konvexen Vierecks (innen positiv).
+    fn quad_margin(q: &[Vec2; 4], p: Vec2) -> f64 {
+        let area: f64 = (0..4).map(|i| kernel2d::cross(q[i], q[(i + 1) % 4])).sum();
+        let s = area.signum();
+        (0..4)
+            .map(|i| {
+                let (a, b) = (q[i], q[(i + 1) % 4]);
+                let d = sub(b, a);
+                s * kernel2d::cross(d, sub(p, a)) / js_hypot(d.x, d.y)
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// Grundriss eines Körpers: Band-Kanten ±Dicke/2, an den Schnittlinien verschnitten (wie
+    /// `extrude_layer_segment` in render3d).
+    fn footprint(w: &WallIn, p: &Piece) -> [Vec2; 4] {
+        let u = sub(w.end, w.start);
+        let u = scale(u, 1.0 / js_hypot(u.x, u.y));
+        let n = left_normal(u);
+        let h = w.bands[p.band].thickness / 2.0;
+        let clip = |base: Vec2, c: Option<Line>| c.and_then(|c| line_intersect(base, u, c.point, c.dir)).unwrap_or(base);
+        [clip(add(p.start, scale(n, h)), p.start_cut), clip(add(p.end, scale(n, h)), p.end_cut), clip(add(p.end, scale(n, -h)), p.end_cut), clip(add(p.start, scale(n, -h)), p.start_cut)]
+    }
+
+    /// Prüft im Kasten `bb` auf einem Raster: jeder Punkt der Soll-Fläche (Vereinigung `region`) ist
+    /// von genau einem Körper gedeckt (keine Lücke, keine Doppelung), kein Körper ragt hinaus.
+    fn assert_watertight(label: &str, walls: &[WallIn], region: &[[Vec2; 4]], bb: [f64; 4]) {
+        let fps: Vec<[Vec2; 4]> = walls.iter().flat_map(|w| bands_of(w).into_iter().map(move |p| footprint(w, &p))).collect();
+        let tol = 1e-6;
+        let steps = 150;
+        for i in 0..=steps {
+            for j in 0..=steps {
+                let p = Vec2::new(bb[0] + (bb[2] - bb[0]) * i as f64 / steps as f64 + 1.3e-5, bb[1] + (bb[3] - bb[1]) * j as f64 / steps as f64 + 0.7e-5);
+                let m = region.iter().map(|q| quad_margin(q, p)).fold(f64::NEG_INFINITY, f64::max);
+                let ms: Vec<f64> = fps.iter().map(|q| quad_margin(q, p)).collect();
+                let covered = ms.iter().filter(|&&x| x > tol).count();
+                let touched = ms.iter().filter(|&&x| x > -tol).count();
+                if m > tol {
+                    assert!(touched >= 1, "{label}: Lücke bei {p:?}");
+                    assert!(covered <= 1, "{label}: Doppelung bei {p:?}");
+                } else if m < -tol {
+                    assert_eq!(covered, 0, "{label}: Körper ragt hinaus bei {p:?}");
+                }
+            }
+        }
+    }
+
+    fn layered(lay: &[JoinLayer]) -> Vec<BandIn> {
+        lay.iter().map(|l| band(l.thickness, l.priority)).collect()
+    }
+
+    fn walls_with_cuts(jw: &[JoinWall]) -> Vec<WallIn> {
+        let cuts = compute_joins(jw).unwrap();
+        jw.iter()
+            .zip(cuts)
+            .map(|(j, c)| {
+                let mut w = base((j.start.x, j.start.y), (j.end.x, j.end.y), layered(j.layers.as_ref().unwrap()));
+                w.cuts = c;
+                w
+            })
+            .collect()
+    }
+
+    fn strip(a: Vec2, b: Vec2, h: f64) -> [Vec2; 4] {
+        let u = sub(b, a);
+        let n = scale(left_normal(u), h / js_hypot(u.x, u.y));
+        [add(a, n), add(b, n), sub(b, n), sub(a, n)]
+    }
+
+    fn lay_sets() -> Vec<(&'static str, Vec<JoinLayer>)> {
+        let l = |t: f64, c: u32, p: f64| JoinLayer { thickness: t, component: Some(c), priority: p };
+        vec![
+            ("einschichtig", vec![l(0.25, 0, 100.0)]),
+            ("aussenwand", vec![l(0.02, 0, 10.0), l(0.16, 1, 20.0), l(0.15, 2, 50.0), l(0.015, 3, 10.0)]),
+            ("innenwand", vec![l(0.015, 3, 10.0), l(0.12, 2, 50.0), l(0.015, 3, 10.0)]),
+        ]
+    }
+
+    #[test]
+    fn schraeger_t_stoss_3d_lueckenlos_15_bis_165_grad() {
+        for (name, lay) in lay_sets() {
+            let h: f64 = lay.iter().map(|l| l.thickness).sum::<f64>() / 2.0;
+            for deg in (15..=165).step_by(15) {
+                let th = (deg as f64).to_radians();
+                let b0 = Vec2::new(5.0, 0.0);
+                let b1 = Vec2::new(5.0 + 3.0 * th.cos(), 3.0 * th.sin());
+                let jw = |s: Vec2, e: Vec2| JoinWall { start: s, end: e, reference: Reference::Center, layers: Some(lay.clone()) };
+                // Soll: Durchgangswand + Abzweig ab ihrer Fläche (y = h) bis zum freien Ende.
+                let ub = scale(sub(b1, b0), 1.0 / 3.0);
+                let nb = left_normal(ub);
+                let at_face = |o: f64| {
+                    let e = add(b0, scale(nb, o));
+                    line_intersect(e, ub, Vec2::new(0.0, h), Vec2::new(1.0, 0.0)).unwrap()
+                };
+                let branch = [at_face(h), add(b1, scale(nb, h)), add(b1, scale(nb, -h)), at_face(-h)];
+                let region = [strip(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), h), branch];
+                let bb = [2.0, -0.4, 8.0, 1.2];
+                let mid = vec![jw(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)), jw(b0, b1)];
+                assert_watertight(&format!("{name} T {deg}°"), &walls_with_cuts(&mid), &region, bb);
+                let node = vec![jw(Vec2::new(0.0, 0.0), b0), jw(b0, Vec2::new(10.0, 0.0)), jw(b0, b1)];
+                assert_watertight(&format!("{name} Knoten-T {deg}°"), &walls_with_cuts(&node), &region, bb);
+            }
+        }
+    }
+
+    #[test]
+    fn schraege_l_ecke_und_kreuzung_3d_lueckenlos() {
+        for (name, lay) in lay_sets() {
+            let h: f64 = lay.iter().map(|l| l.thickness).sum::<f64>() / 2.0;
+            let jw = |s: Vec2, e: Vec2| JoinWall { start: s, end: e, reference: Reference::Center, layers: Some(lay.clone()) };
+            for deg in [30.0f64, 60.0, 120.0, 150.0] {
+                // L: A (0,0)→(4,0), dann B mit Richtungswinkel `deg`.
+                let th = deg.to_radians();
+                let (a0, j) = (Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0));
+                let b1 = add(j, Vec2::new(3.0 * th.cos(), 3.0 * th.sin()));
+                let (ua, ub) = (Vec2::new(1.0, 0.0), scale(sub(b1, j), 1.0 / 3.0));
+                let (na, nb) = (left_normal(ua), left_normal(ub));
+                let apex = |o: f64| line_intersect(add(a0, scale(na, o)), ua, add(j, scale(nb, o)), ub).unwrap();
+                let (pl, pr) = (apex(h), apex(-h));
+                let ra = [add(a0, scale(na, h)), pl, pr, add(a0, scale(na, -h))];
+                let rb = [pl, add(b1, scale(nb, h)), add(b1, scale(nb, -h)), pr];
+                let walls = walls_with_cuts(&[jw(a0, j), jw(j, b1)]);
+                assert_watertight(&format!("{name} L {deg}°"), &walls, &[ra, rb], [2.5, -1.5, 5.5, 1.5]);
+            }
+            for deg in [30.0f64, 45.0, 135.0] {
+                // X: Durchgangswand und zwei Hälften einer schrägen Wand, Knoten auf der Achse.
+                let th = deg.to_radians();
+                let c = Vec2::new(5.0, 0.0);
+                let d = Vec2::new(2.0 * th.cos(), 2.0 * th.sin());
+                let walls = walls_with_cuts(&[jw(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)), jw(sub(c, d), c), jw(c, add(c, d))]);
+                let region = [strip(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), h), strip(sub(c, d), add(c, d), h)];
+                assert_watertight(&format!("{name} X {deg}°"), &walls, &region, [3.0, -1.0, 7.0, 1.0]);
+            }
+        }
+    }
+
     #[test]
     fn t_stoss_aussparung_bricht_band_auf() {
         let mut w = base((0.0, 0.0), (6.0, 0.0), vec![band(0.02, 10.0), band(0.15, 50.0), band(0.015, 10.0)]);
-        w.cuts.span_cutouts.push(SpanCutout { from: 2.0, to: 2.15, off_a: 0.0925, off_b: 0.0775 });
+        w.cuts.span_cutouts.push(SpanCutout { from: 2.0, to: 2.15, off_a: 0.0925, off_b: 0.0775, from_b: 2.0, to_b: 2.15 });
         let p = bands_of(&w);
         // Aussenputz und Kern durchgehend, Innenputz (Band 2) in zwei Stücken.
         assert_eq!(p.iter().filter(|q| q.band == 2).count(), 2);

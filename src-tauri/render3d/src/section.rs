@@ -1239,6 +1239,8 @@ mod tests {
                 material_index: None,
                 hatch: None,
                 cut: None,
+                start_cut: None,
+                end_cut: None,
             },
             WallInput {
             top_drop: [0.0, 0.0],
@@ -1254,6 +1256,8 @@ mod tests {
                 material_index: None,
                 hatch: None,
                 cut: None,
+                start_cut: None,
+                end_cut: None,
             },
         ];
         let slabs = vec![SlabInput {
@@ -1330,6 +1334,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         // Vorderwand bei y=0, Rueckwand bei y=6, Schnitt bei y=2 Blick nach +y.
         let walls = vec![mk([0.0, 0.0], [8.0, 0.0]), mk([0.0, 6.0], [8.0, 6.0])];
@@ -1554,6 +1560,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         }
     }
 
@@ -1644,6 +1652,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         // Blick von y = -2 nach +Y: beide Waende (y=0 bzw. y=1) liegen dahinter.
         let plane = SectionPlane::looking_plus_y(-2.0);
@@ -1763,6 +1773,8 @@ mod tests {
             material_index: None,
             hatch: None,
             cut: None,
+            start_cut: None,
+            end_cut: None,
         };
         // Pultdach-Flaeche wie in roof_cut.rs-Tests: First entlang Welt-Z,
         // steigt von X=0 (Traufe) zu X=4 (First) an.

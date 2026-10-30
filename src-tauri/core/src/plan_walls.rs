@@ -219,12 +219,130 @@ struct LayerCuts {
     end_side: Vec<Option<Line>>,
 }
 
+/// Nah-Putz-Aussparung (Parallelogramm, s. `joins::SpanCutout`): `from`/`to` auf `off_a`,
+/// `from_b`/`to_b` auf `off_b`.
 #[derive(Clone, Copy)]
 struct Cutout {
     from: f64,
     to: f64,
     off_a: f64,
     off_b: f64,
+    from_b: f64,
+    to_b: f64,
+}
+
+impl Cutout {
+    fn lo(&self) -> f64 {
+        min(min(self.from, self.to), min(self.from_b, self.to_b))
+    }
+    fn hi(&self) -> f64 {
+        max(max(self.from, self.to), max(self.from_b, self.to_b))
+    }
+}
+
+/// Loch im Achsmass (auf der Mittellinie eines Bands) samt den schrägen Seitenlinien (Welt) und
+/// deren Achsmass-Spanne `(min, max)` über die Banddicke.
+#[derive(Clone, Copy)]
+struct Hole {
+    a: f64,
+    b: f64,
+    la: Line,
+    lb: Line,
+    la_rng: (f64, f64),
+    lb_rng: (f64, f64),
+}
+
+/// Wandrahmen für die Löcher: Start, Achsrichtung, Links-Normale.
+#[derive(Clone, Copy)]
+struct Frame {
+    o: V,
+    u: V,
+    n: V,
+}
+
+impl Frame {
+    /// Achsmass, an dem die Gerade `l` die Längslinie im Querversatz `off` trifft.
+    fn pos(&self, l: &Line, off: f64) -> Option<f64> {
+        let hit = line_intersect(add(self.o, scale(self.n, off)), self.u, l.point, l.dir)?;
+        Some(dot(sub(hit, self.o), self.u))
+    }
+}
+
+/// Löcher der Aussparungen im Band `[lo, hi]` (bei Linien `lo = hi`).
+fn holes_at(cs: &[&Cutout], lo: f64, hi: f64, f: Frame) -> Vec<Hole> {
+    let pt = |d: f64, o: f64| add(add(f.o, scale(f.u, d)), scale(f.n, o));
+    let at = |c: &Cutout, off: f64| {
+        let d = c.off_b - c.off_a;
+        let t = if d.abs() < 1e-12 { 0.0 } else { (off - c.off_a) / d };
+        (c.from + (c.from_b - c.from) * t, c.to + (c.to_b - c.to) * t)
+    };
+    cs.iter()
+        .map(|c| {
+            let side = |p: f64, q: f64| {
+                let (a, b) = (pt(p, c.off_a), pt(q, c.off_b));
+                let dir = sub(b, a);
+                // Entartet (off_a = off_b): senkrecht zur Achse.
+                Line { point: a, dir: if hypot2(dir.x, dir.y) < 1e-12 { f.n } else { dir } }
+            };
+            let (x0, x1) = at(c, (lo + hi) / 2.0);
+            let ((p0, q0), (p1, q1)) = (at(c, lo), at(c, hi));
+            let (rp, rq) = ((min(p0, p1), max(p0, p1)), (min(q0, q1), max(q0, q1)));
+            let (l0, l1) = (side(c.from, c.from_b), side(c.to, c.to_b));
+            if x0 <= x1 {
+                Hole { a: x0, b: x1, la: l0, lb: l1, la_rng: rp, lb_rng: rq }
+            } else {
+                Hole { a: x1, b: x0, la: l1, lb: l0, la_rng: rq, lb_rng: rp }
+            }
+        })
+        .collect()
+}
+
+/// Wie [`subtract_intervals`], aber jedes Teilstück trägt die Schnittlinien an seinen Enden: am
+/// Segmentende `s`/`e` `s_cut`/`e_cut`, an einem Loch dessen schräge Seite. Ragt eine schräge
+/// Lochseite über ein rechtwinkliges Segmentende ins Band (Knoten-T: Loch auf der Nachbarhälfte),
+/// endet das Band an ihr; Teilstücke, deren Enden sich über die Banddicke `[lo, hi]` kreuzen,
+/// entfallen (die Nachbarhälfte deckt sie). Gleiche Regeln wie `wall_bands::subtract_spans_cut`.
+#[allow(clippy::too_many_arguments)]
+fn subtract_holes(s: f64, e: f64, holes: &[Hole], s_cut: Option<Line>, e_cut: Option<Line>, f: Frame, lo: f64, hi: f64) -> Vec<(f64, f64, Option<Line>, Option<Line>)> {
+    let (mut s, mut e, mut s_cut, mut e_cut) = (s, e, s_cut, e_cut);
+    {
+        if let Some(h) = holes.iter().filter(|h| h.a >= e - CUTOUT_EPS && h.la_rng.0 < e - CUTOUT_EPS).min_by(|p, q| p.a.total_cmp(&q.a)) {
+            e = h.a;
+            e_cut = Some(h.la);
+        }
+    }
+    {
+        if let Some(h) = holes.iter().filter(|h| h.b <= s + CUTOUT_EPS && h.lb_rng.1 > s + CUTOUT_EPS).max_by(|p, q| p.b.total_cmp(&q.b)) {
+            s = h.b;
+            s_cut = Some(h.lb);
+        }
+    }
+    let mut clipped: Vec<Hole> = holes.iter().map(|h| Hole { a: max(s, h.a), b: min(e, h.b), ..*h }).filter(|h| h.b > h.a + CUTOUT_EPS).collect();
+    clipped.sort_by(|p, q| p.a.partial_cmp(&q.a).unwrap_or(std::cmp::Ordering::Equal));
+    let mut parts = Vec::new();
+    let (mut cursor, mut cursor_line) = (s, s_cut);
+    for h in clipped {
+        if h.a > cursor + CUTOUT_EPS {
+            parts.push((cursor, h.a, cursor_line, Some(h.la)));
+        }
+        if h.b > cursor {
+            cursor = h.b;
+            cursor_line = Some(h.lb);
+        }
+    }
+    if cursor < e - CUTOUT_EPS {
+        parts.push((cursor, e, cursor_line, e_cut));
+    }
+    if !holes.is_empty() {
+        parts.retain(|&(a, b, sc, ec)| {
+            [lo, hi].iter().all(|&off| {
+                let ps = sc.and_then(|l| f.pos(&l, off)).unwrap_or(a);
+                let pe = ec.and_then(|l| f.pos(&l, off)).unwrap_or(b);
+                pe > ps + CUTOUT_EPS
+            })
+        });
+    }
+    parts
 }
 
 fn read_line(r: &mut Reader) -> Option<Option<Line>> {
@@ -305,7 +423,7 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
     let n_cut = r.count()?;
     let mut span_cutouts = Vec::with_capacity(n_cut);
     for _ in 0..n_cut {
-        span_cutouts.push(Cutout { from: r.num()?, to: r.num()?, off_a: r.num()?, off_b: r.num()? });
+        span_cutouts.push(Cutout { from: r.num()?, to: r.num()?, off_a: r.num()?, off_b: r.num()?, from_b: r.num()?, to_b: r.num()? });
     }
     let n_gap = r.count()?;
     let mut gaps = Vec::with_capacity(n_gap);
@@ -363,15 +481,14 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
         }
 
         let band_join_edges = join_edges(sc, ec);
-        let seg_cutouts: Vec<Cutout> = span_cutouts
-            .iter()
-            .filter(|c| min(c.from, c.to) < e - CUTOUT_EPS && max(c.from, c.to) > s + CUTOUT_EPS)
-            .copied()
-            .collect();
+        let seg_cutouts: Vec<&Cutout> = span_cutouts.iter().filter(|c| c.lo() < e - CUTOUT_EPS && c.hi() > s + CUTOUT_EPS).collect();
+        let u_w = normalize(sub(wend, wstart));
+        let fr = Frame { o: wstart, u: u_w, n: left_normal(u_w) };
         let seg_adj: Vec<&Adj> = adj.iter().filter(|a| (a.dir > 0.0 && (a.jamb - e).abs() < 1e-6) || (a.dir < 0.0 && (a.jamb - s).abs() < 1e-6)).collect();
         if !seg_adj.is_empty() {
             let seg = Seg { s, e, p1, p2, wstart, wend, axis_len, sc, ec };
-            adjusted_segment(&mut o, &seg, &thick, ref_off - total / 2.0, &layer_cuts, &seg_cutouts, &seg_adj, &band_join_edges);
+            let seg_cut_vals: Vec<Cutout> = seg_cutouts.iter().map(|c| **c).collect();
+            adjusted_segment(&mut o, &seg, &thick, ref_off - total / 2.0, &layer_cuts, &seg_cut_vals, &seg_adj, &band_join_edges);
             continue;
         }
         let axis_pt = |d: f64| if d == s { p1 } else if d == e { p2 } else { along(wstart, wend, d) };
@@ -395,17 +512,13 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
             };
             let band_lo = off;
             let band_hi = off + thick[li];
-            let mut band_holes: Vec<(f64, f64)> = Vec::new();
-            for c in &seg_cutouts {
-                let c_lo = min(c.off_a, c.off_b);
-                let c_hi = max(c.off_a, c.off_b);
-                if band_lo < c_hi - CUTOUT_EPS && band_hi > c_lo + CUTOUT_EPS {
-                    band_holes.push((c.from, c.to));
-                }
-            }
-            for (a, b) in subtract_intervals(s, e, &band_holes) {
-                let bsc = if a <= s + CUTOUT_EPS { layer_start_cut } else { None };
-                let bec = if b >= e - CUTOUT_EPS { layer_end_cut } else { None };
+            let band_cs: Vec<&Cutout> = seg_cutouts
+                .iter()
+                .filter(|c| band_lo < max(c.off_a, c.off_b) - CUTOUT_EPS && band_hi > min(c.off_a, c.off_b) + CUTOUT_EPS)
+                .copied()
+                .collect();
+            let band_holes = holes_at(&band_cs, band_lo, band_hi, fr);
+            for (a, b, bsc, bec) in subtract_holes(s, e, &band_holes, layer_start_cut, layer_end_cut, fr, band_lo, band_hi) {
                 o.polygon(ART_BAND, li, &band_join_edges, &clipped_band(axis_pt(a), axis_pt(b), off, off + thick[li], bsc, bec));
             }
             let side_start = if s <= 1e-6 { layer_cuts.as_ref().and_then(|lc| lc.start_side[li]) } else { None };
@@ -426,17 +539,36 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
             }
             off += thick[li];
             if li + 1 < n_layers {
-                let mut fuge_holes: Vec<(f64, f64)> = Vec::new();
-                for c in &seg_cutouts {
-                    let c_lo = min(c.off_a, c.off_b);
-                    let c_hi = max(c.off_a, c.off_b);
-                    if off >= c_lo - CUTOUT_EPS && off <= c_hi + CUTOUT_EPS {
-                        fuge_holes.push((c.from, c.to));
+                let fuge_cs: Vec<&Cutout> = seg_cutouts
+                    .iter()
+                    .filter(|c| off >= min(c.off_a, c.off_b) - CUTOUT_EPS && off <= max(c.off_a, c.off_b) + CUTOUT_EPS)
+                    .copied()
+                    .collect();
+                // Fuge neben einer durchlaufenden (verschmolzenen) Schicht: sie trennt diese bis zu
+                // ihrem Ende von der Nah-Schicht der Durchgangswand — also bis zum weiter reichenden
+                // der beiden Schicht-Schnitte statt nur bis zur Fläche.
+                let reach = |own: Option<Line>, pair: [Option<Line>; 2], start: bool| -> Option<Line> {
+                    let pos = |l: &Option<Line>| l.as_ref().and_then(|l| fr.pos(l, off));
+                    let mut best = own;
+                    for l in pair.into_iter().flatten() {
+                        let further = match (pos(&Some(l)), pos(&best)) {
+                            (Some(p), Some(q)) => (start && p < q - CUTOUT_EPS) || (!start && p > q + CUTOUT_EPS),
+                            _ => false,
+                        };
+                        if further {
+                            best = Some(l);
+                        }
                     }
-                }
-                for (a, b) in subtract_intervals(s, e, &fuge_holes) {
-                    let jsc = if a <= s + CUTOUT_EPS { sc } else { None };
-                    let jec = if b >= e - CUTOUT_EPS { ec } else { None };
+                    best
+                };
+                let (fsc, fec) = match &layer_cuts {
+                    Some(lc) => (
+                        if s <= 1e-6 { reach(sc, [lc.start[li], lc.start[li + 1]], true) } else { sc },
+                        if e >= axis_len - 1e-6 { reach(ec, [lc.end[li], lc.end[li + 1]], false) } else { ec },
+                    ),
+                    None => (sc, ec),
+                };
+                for (a, b, jsc, jec) in subtract_holes(s, e, &holes_at(&fuge_cs, off, off, fr), fsc, fec, fr, off, off) {
                     let jq = clipped_band(axis_pt(a), axis_pt(b), off, off, jsc, jec);
                     o.line(LINE_JOINT, li, jq[0], jq[1]);
                 }
@@ -445,15 +577,10 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
 
         let off_lo = ref_off - total / 2.0;
         let off_hi = ref_off + total / 2.0;
-        let mut holes_hi: Vec<(f64, f64)> = Vec::new();
-        let mut holes_lo: Vec<(f64, f64)> = Vec::new();
-        for c in &seg_cutouts {
-            if (c.off_a - off_hi).abs() < 1e-6 {
-                holes_hi.push((c.from, c.to));
-            } else if (c.off_a - off_lo).abs() < 1e-6 {
-                holes_lo.push((c.from, c.to));
-            }
-        }
+        let cs_hi: Vec<&Cutout> = seg_cutouts.iter().filter(|c| (c.off_a - off_hi).abs() < 1e-6).copied().collect();
+        let cs_lo: Vec<&Cutout> = seg_cutouts.iter().filter(|c| (c.off_a - off_hi).abs() >= 1e-6 && (c.off_a - off_lo).abs() < 1e-6).copied().collect();
+        let holes_hi = holes_at(&cs_hi, off_hi, off_hi, fr);
+        let holes_lo = holes_at(&cs_lo, off_lo, off_lo, fr);
         let mut outline_no_stroke = band_join_edges.clone();
         if !holes_hi.is_empty() {
             outline_no_stroke.push(2.0);
@@ -462,10 +589,8 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
             outline_no_stroke.push(0.0);
         }
         o.polygon(ART_OUTLINE, 0, &outline_no_stroke, &clipped_band(p1, p2, off_lo, off_hi, sc, ec));
-        let mut near_edge = |edge_off: f64, holes: &[(f64, f64)]| {
-            for (a, b) in subtract_intervals(s, e, holes) {
-                let nsc = if a <= s + CUTOUT_EPS { sc } else { None };
-                let nec = if b >= e - CUTOUT_EPS { ec } else { None };
+        let mut near_edge = |edge_off: f64, holes: &[Hole]| {
+            for (a, b, nsc, nec) in subtract_holes(s, e, holes, sc, ec, fr, edge_off, edge_off) {
                 let jq = clipped_band(axis_pt(a), axis_pt(b), edge_off, edge_off, nsc, nec);
                 o.line(LINE_OUTLINE, 0, jq[0], jq[1]);
             }
@@ -701,6 +826,170 @@ mod tests {
         }
         assert_eq!(i, out.len());
         n
+    }
+
+    // ── Schräger T-Stoss mit materialbewusster Verschneidung ──────────────────
+
+    enum Prim {
+        Poly(f64, usize, Vec<V>),
+        Line(f64, V, V),
+    }
+
+    fn parse(out: &[f64]) -> Vec<Prim> {
+        let (mut i, mut v) = (1, Vec::new());
+        for _ in 0..out[0] as usize {
+            if out[i] == 1.0 {
+                let q = i + 4 + out[i + 3] as usize;
+                v.push(Prim::Poly(out[i + 1], out[i + 2] as usize, (0..4).map(|j| super::v(out[q + 2 * j], out[q + 2 * j + 1])).collect()));
+                i = q + 8;
+            } else {
+                v.push(Prim::Line(out[i + 1], super::v(out[i + 3], out[i + 4]), super::v(out[i + 5], out[i + 6])));
+                i += 7;
+            }
+        }
+        v
+    }
+
+    /// Eingabe wie `encode_wall_poche` (Referenz Mitte) aus Wand und Cuts der Verschneidung.
+    fn poche_of(w: &crate::joins::JoinWall, c: &crate::joins::WallCuts) -> Vec<f64> {
+        let th: Vec<f64> = w.layers.as_ref().unwrap().iter().map(|l| l.thickness).collect();
+        let total: f64 = th.iter().sum();
+        let mut b = vec![w.start.x, w.start.y, w.end.x, w.end.y, total, 0.0, 0.0, 0.0, th.len() as f64];
+        b.extend(&th);
+        let line = |b: &mut Vec<f64>, l: Option<crate::joins::Line>| match l {
+            Some(l) => b.extend([1.0, l.point.x, l.point.y, l.dir.x, l.dir.y]),
+            None => b.extend(NO_LINE),
+        };
+        line(&mut b, c.start_cut);
+        line(&mut b, c.end_cut);
+        match &c.layer_cuts {
+            Some(lc) => {
+                b.push(1.0);
+                for i in 0..th.len() {
+                    line(&mut b, lc.start[i]);
+                    line(&mut b, lc.end[i]);
+                    line(&mut b, lc.start_side[i]);
+                    line(&mut b, lc.end_side[i]);
+                }
+            }
+            None => b.push(0.0),
+        }
+        b.push(c.span_cutouts.len() as f64);
+        for k in &c.span_cutouts {
+            b.extend([k.from, k.to, k.off_a, k.off_b, k.from_b, k.to_b]);
+        }
+        b.push(0.0);
+        b
+    }
+
+    fn inside(poly: &[V], p: V) -> bool {
+        // Konvexes Viereck: Punkt strikt innen (1e-7), beliebiger Umlaufsinn.
+        let mut sgn = 0.0;
+        for i in 0..poly.len() {
+            let c = cross(sub(poly[(i + 1) % poly.len()], poly[i]), sub(p, poly[i]));
+            if c.abs() < 1e-7 {
+                return false;
+            }
+            if sgn == 0.0 {
+                sgn = c.signum();
+            } else if c.signum() != sgn {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn schraeger_t_stoss_grundriss_exakt_15_bis_165_grad() {
+        use crate::joins::{compute_joins, JoinLayer, JoinWall, Reference};
+        let lay = || vec![JoinLayer { thickness: 0.02, component: Some(0), priority: 10.0 }, JoinLayer { thickness: 0.16, component: Some(1), priority: 20.0 }, JoinLayer { thickness: 0.15, component: Some(2), priority: 50.0 }, JoinLayer { thickness: 0.015, component: Some(3), priority: 10.0 }];
+        let jw = |s: (f64, f64), e: (f64, f64)| JoinWall { start: kernel2d::Vec2::new(s.0, s.1), end: kernel2d::Vec2::new(e.0, e.1), reference: Reference::Center, layers: Some(lay()) };
+        let face = 0.345 / 2.0;
+        let merge = face - 0.015;
+        for deg in (15..=165).step_by(15) {
+            let th = (deg as f64).to_radians();
+            let b1 = (5.0 + 3.0 * th.cos(), 3.0 * th.sin());
+            // Mittelspannen-T und Knoten-T (Durchgang aus zwei Hälften).
+            for walls in [vec![jw((0.0, 0.0), (10.0, 0.0)), jw((5.0, 0.0), b1)], vec![jw((0.0, 0.0), (5.0, 0.0)), jw((5.0, 0.0), (10.0, 0.0)), jw((5.0, 0.0), b1)]] {
+            let deg = format!("{deg}° ({} Wände)", walls.len());
+            let bi = walls.len() - 1;
+            let cuts = compute_joins(&walls).unwrap();
+            let thr: Vec<Prim> = (0..bi).flat_map(|i| parse(&wall_poche(&poche_of(&walls[i], &cuts[i])))).collect();
+            let br = parse(&wall_poche(&poche_of(&walls[bi], &cuts[bi])));
+            // Wahre Kreuzung der Kern-Kanten (Backstein, quer 0.0075 … 0.1575) mit Fläche und Rückgrat.
+            let x_at = |o: f64, f: f64| {
+                let t = (f - o * th.cos()) / th.sin();
+                5.0 - o * th.sin() + t * th.cos()
+            };
+            let (xa0, xa1) = (x_at(0.0075, face).min(x_at(0.1575, face)), x_at(0.0075, face).max(x_at(0.1575, face)));
+            let (xb0, xb1) = (x_at(0.0075, merge).min(x_at(0.1575, merge)), x_at(0.0075, merge).max(x_at(0.1575, merge)));
+
+            // (1) Flächenlinie der Durchgangswand: Lücke genau über der Kern-Kreuzung.
+            let face_lines: Vec<(f64, f64)> = thr
+                .iter()
+                .filter_map(|p| match p {
+                    Prim::Line(a, p, q) if *a == LINE_OUTLINE && (p.y - face).abs() < 1e-9 => Some((p.x.min(q.x), p.x.max(q.x))),
+                    _ => None,
+                })
+                .collect();
+            let on_face = |x: f64| face_lines.iter().any(|&(a, b)| a <= x && x <= b);
+            assert!(face_lines.iter().any(|l| (l.1 - xa0).abs() < 1e-9) && face_lines.iter().any(|l| (l.0 - xa1).abs() < 1e-9), "{deg} {face_lines:?} {xa0} {xa1}");
+            assert!(on_face(xa0 - 1e-4) && on_face(xa1 + 1e-4) && !on_face((xa0 + xa1) / 2.0), "{deg} {face_lines:?}");
+
+            // (2) Umriss des Abzweigs endet genau auf der Fläche.
+            let outline = br.iter().find_map(|p| match p {
+                Prim::Poly(a, _, pts) if *a == ART_OUTLINE => Some(pts.clone()),
+                _ => None,
+            });
+            let o = outline.unwrap();
+            assert!((o[0].y - face).abs() < 1e-9 && (o[3].y - face).abs() < 1e-9, "{deg}° {:?}", o);
+
+            // (3) Kern-Band des Abzweigs endet auf der Rückgrat-Fläche, genau an den Lochseiten.
+            let core = br.iter().find_map(|p| match p {
+                Prim::Poly(a, 2, pts) if *a == ART_BAND => Some(pts.clone()),
+                _ => None,
+            });
+            let c = core.unwrap();
+            let mut ends = [c[0].x, c[3].x];
+            ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            assert!((c[0].y - merge).abs() < 1e-9 && (c[3].y - merge).abs() < 1e-9, "{deg}°");
+            assert!((ends[0] - xb0).abs() < 1e-9 && (ends[1] - xb1).abs() < 1e-9, "{deg}° {ends:?} {xb0} {xb1}");
+            // Fugen beidseits des Kerns laufen bis zur Rückgrat-Fläche (Kern gegen Nah-Putz), die
+            // übrige bleibt an der Fläche.
+            let joints: Vec<f64> = br
+                .iter()
+                .filter_map(|p| match p {
+                    Prim::Line(a, p, q) if *a == LINE_JOINT => Some(p.y.min(q.y)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(joints.len(), 3, "{deg}");
+            assert!((joints[0] - face).abs() < 1e-9 && (joints[1] - merge).abs() < 1e-9 && (joints[2] - merge).abs() < 1e-9, "{deg} {joints:?}");
+
+            // (4) Keine Schraffur der Durchgangswand im Kern des Abzweigs, keine Linie quer durch die Lücke.
+            // Mitte des Lochs und nahe seiner beiden schrägen Seiten (auf halber Putzdicke).
+            let (l, r) = ((xa0 + xb0) / 2.0, (xa1 + xb1) / 2.0);
+            let probes = [super::v((l + r) / 2.0, (face + merge) / 2.0), super::v(l * 0.97 + r * 0.03, (face + merge) / 2.0), super::v(l * 0.03 + r * 0.97, (face + merge) / 2.0)];
+            for p in thr.iter() {
+                if let Prim::Poly(a, _, pts) = p {
+                    if *a == ART_BAND {
+                        for q in &probes {
+                            assert!(!inside(pts, *q), "{deg}° Band der Durchgangswand deckt {q:?}");
+                        }
+                    }
+                }
+                if let Prim::Line(_, p, q) = p {
+                    for y in [face, merge] {
+                        if (p.y - y).abs() < 1e-9 && (q.y - y).abs() < 1e-9 {
+                            let (g0, g1) = if y == face { (xa0, xa1) } else { (xb0, xb1) };
+                            let m = (g0 + g1) / 2.0;
+                            assert!(!(p.x.min(q.x) < m && p.x.max(q.x) > m), "{deg}° Linie quer durch die Lücke bei y={y}");
+                        }
+                    }
+                }
+            }
+            }
+        }
     }
 
     #[test]
