@@ -61,6 +61,11 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
     }
     for o in p.openings.as_deref().unwrap_or(&[]) {
         miss(&mut out, "Öffnung", &o.id, "Wand", &o.host_wall_id, &walls);
+        // Dach-/Deckenwirt ([103]).
+        let roof_ids = ids(p.roofs.as_deref().unwrap_or(&[]), |r| r.id.as_str());
+        let ceiling_ids = ids(p.ceilings.as_deref().unwrap_or(&[]), |c| c.id.as_str());
+        miss(&mut out, "Öffnung", &o.id, "Dach", o.host_roof_id.as_deref().unwrap_or(""), &roof_ids);
+        miss(&mut out, "Öffnung", &o.id, "Decke", o.host_ceiling_id.as_deref().unwrap_or(""), &ceiling_ids);
         let types = if door_types.contains(o.type_id.as_deref().unwrap_or("")) { &door_types } else { &window_types };
         miss(&mut out, "Öffnung", &o.id, "Typ", o.type_id.as_deref().unwrap_or(""), types);
         check_pens(&mut out, &pens, "Öffnung", &o.id, [&o.color_pen_id, &none, &none]);

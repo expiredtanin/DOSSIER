@@ -48,6 +48,11 @@
 //     Normale von u; Tür: Y = Aufschlagrichtung); ohne Teile (Wandöffnung) kein Körper. Alle Teile
 //     (0 Rahmen/Zarge, 1 Türblatt, 2 Glas) sind getrennte Körper in EINER Darstellung, je mit eigenem
 //     IfcStyledItem (Farbe/Transparenz je Rolle).
+//   OPENING_SOLID = 15 ([G3] Formöffnung, [103] Dach-/Deckenfenster): host ("wall/<id>", "roof/<id>",
+//                 "slab/<id>"), structure, opening_id, is_door, fill_name, n, (x, y) × n (Profil), origin (3),
+//                 x_dir (3), z_dir (3), depth, height, width, PSETS, MESH (Füllung, Welt rel. Geschoss-UK).
+//     IfcOpeningElement = Profil-Extrusion entlang z_dir (Position origin/x_dir/z_dir) im Geschoss-
+//     Placement, IfcRelVoidsElement zum Wirt; IfcWindow/IfcDoor mit dem Netz, IfcRelFillsElement.
 //   STAIR       = 5, structure, id, predefined (Text), PTS, z_rel, depth (Ersatzkörper, nur ohne Läufe/Podest),
 //                 PSETS, n_flights, FLIGHT × n_flights, has_landing, [LANDING], has_rail, [RAIL]
 //     FLIGHT  = name, n_risers, n_treads, riser_height, tread_length, predefined (Text, IfcStairFlightTypeEnum),
@@ -120,6 +125,7 @@ pub const REC_END_COLUMNS: f64 = 11.0;
 pub const REC_CLASSIFICATION: f64 = 12.0;
 pub const REC_ZONE: f64 = 13.0;
 pub const REC_ATTACH: f64 = 14.0;
+pub const REC_OPENING_SOLID: f64 = 15.0;
 
 // ── IFC-GUID (Kompression nach IfcOpenShell `guid.compress`) ────────────────
 
@@ -1229,6 +1235,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_WALL_MESH => "WALL_MESH",
         c if c == REC_CEILING => "CEILING",
         c if c == REC_OPENING => "OPENING",
+        c if c == REC_OPENING_SOLID => "OPENING_SOLID",
         c if c == REC_CLASSIFICATION => "CLASSIFICATION",
         c if c == REC_ZONE => "ZONE",
         c if c == REC_ATTACH => "ATTACH",
@@ -1655,6 +1662,72 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                     "IFCRELFILLSELEMENT",
                     format!("{g},#{},$,$,#{opening_entity},#{fill_entity}", w.owner_history),
                 );
+                w.add_to_containment(structure, fill_entity);
+                w.elements.insert(format!("fill/{opening_id}"), fill_entity);
+                for p in &psets {
+                    w.add_pset(p, fill_entity, &format!("fill/{opening_id}"));
+                }
+            }
+            c if c == REC_OPENING_SOLID => {
+                let host = r.string()?;
+                let structure = r.structure(n_storeys)?;
+                let opening_id = r.string()?;
+                let is_door = r.flag()?;
+                let fill_name = r.string()?;
+                let profile = r.pts()?;
+                let mut v = [0.0; 10];
+                for x in v.iter_mut() {
+                    *x = r.f()?;
+                }
+                let (height, width) = (r.f()?, r.f()?);
+                let psets = r.psets()?;
+                let mesh = r.mesh()?;
+                if v.iter().any(|x| !x.is_finite()) || profile.len() < 3 || profile.iter().any(|q| !(q.0.is_finite() && q.1.is_finite())) {
+                    return Err(format!("Öffnungskörper mit NaN/∞ bei {}", r.pos - 1));
+                }
+                let host_entity = match host.strip_prefix("wall/") {
+                    Some(id) => w.walls.get(id).map(|x| x.0),
+                    None => w.elements.get(&host).copied(),
+                };
+                let Some(host_entity) = host_entity else { continue };
+                let parent = w.placement_of(structure);
+                let polyline = w.emit_closed_polyline(&profile);
+                let prof = w.add("IFCARBITRARYCLOSEDPROFILEDEF", format!("{},$,#{polyline}", enum_("AREA")));
+                let o = w.add("IFCCARTESIANPOINT", list(&[fmt_real(v[0]), fmt_real(v[1]), fmt_real(v[2])]));
+                let xd = w.add("IFCDIRECTION", list(&[fmt_real(v[3]), fmt_real(v[4]), fmt_real(v[5])]));
+                let zd = w.add("IFCDIRECTION", list(&[fmt_real(v[6]), fmt_real(v[7]), fmt_real(v[8])]));
+                let pos = w.add("IFCAXIS2PLACEMENT3D", format!("#{o},#{zd},#{xd}"));
+                let solid = w.add("IFCEXTRUDEDAREASOLID", format!("#{prof},#{pos},#{},{}", w.extrude_dir, fmt_real(v[9].max(0.001))));
+                let shape = w.emit_swept_shape(&[solid]);
+                let opening_placement = w.emit_placement(0.0, parent);
+                let g = w.gid(&format!("opening/{opening_id}"));
+                let opening_entity = w.add(
+                    "IFCOPENINGELEMENT",
+                    format!(
+                        "{g},#{},{},$,$,#{opening_placement},#{shape},${}",
+                        w.owner_history,
+                        ifc_string(if is_door { "Türöffnung" } else { "Fensteröffnung" }),
+                        if v2 { String::new() } else { format!(",{}", enum_("OPENING")) }
+                    ),
+                );
+                let g = w.gid(&format!("voids/{opening_id}"));
+                w.add("IFCRELVOIDSELEMENT", format!("{g},#{},$,$,#{host_entity},#{opening_entity}", w.owner_history));
+                let fill_placement = w.emit_placement(0.0, opening_placement);
+                let fill_shape = if mesh.indices.is_empty() {
+                    "$".to_string()
+                } else {
+                    let (item, rep_type) = if w.v2() { w.emit_face_brep(&mesh) } else { (w.emit_face_set(&mesh), "Tessellation") };
+                    let rep = w.add("IFCSHAPEREPRESENTATION", format!("#{},{},{},{}", w.context, ifc_string("Body"), ifc_string(rep_type), refs(&[item])));
+                    format!("#{}", w.add("IFCPRODUCTDEFINITIONSHAPE", format!("$,$,{}", refs(&[rep]))))
+                };
+                let g = w.gid(&format!("fill/{opening_id}"));
+                let tail = if v2 { String::new() } else { format!(",{},$,$", enum_(if is_door { "DOOR" } else { "WINDOW" })) };
+                let fill_entity = w.add(
+                    if is_door { "IFCDOOR" } else { "IFCWINDOW" },
+                    format!("{g},#{},{},$,$,#{fill_placement},{fill_shape},$,{},{}{tail}", w.owner_history, ifc_string(&fill_name), fmt_real(height), fmt_real(width)),
+                );
+                let g = w.gid(&format!("fills/{opening_id}"));
+                w.add("IFCRELFILLSELEMENT", format!("{g},#{},$,$,#{opening_entity},#{fill_entity}", w.owner_history));
                 w.add_to_containment(structure, fill_entity);
                 w.elements.insert(format!("fill/{opening_id}"), fill_entity);
                 for p in &psets {
@@ -3042,6 +3115,52 @@ mod tests {
         // Wand W1: StandardCase trägt die GlobalId des IfcWall.
         assert_eq!(guid_of(&b, "IFCWALLSTANDARDCASE"), ifc_guid("t/wall/W1"));
         assert_eq!(b, full_house_2x3(true));
+    }
+
+    /// [103]/[G3] Öffnungskörper als gedrehte Profil-Extrusion im Dach, Füllung als Netz.
+    #[test]
+    fn dachfenster_oeffnungskoerper() {
+        for v2 in [false, true] {
+            let mut b = mini_in(if v2 { B::v2() } else { B::new() });
+            b.n(&[REC_ROOF, -1.0]);
+            b.str("R");
+            b.str("Dach");
+            b.str("GABLE_ROOF");
+            b.no_type();
+            b.no_psets();
+            b.n(&[4.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+            b.n(&[2.0, 0.0, 1.0, 2.0, 0.0, 2.0, 3.0]);
+            b.f.push(0.0);
+            b.n(&[REC_OPENING_SOLID]);
+            b.str("roof/R");
+            b.n(&[-1.0]);
+            b.str("DF");
+            b.n(&[0.0]);
+            b.str("Dachfenster");
+            b.pts(&[(0.0, 0.0), (0.78, 0.0), (0.78, 1.18), (0.0, 1.18)]);
+            b.n(&[0.1, 0.2, 0.3, 1.0, 0.0, 0.0, 0.0, 0.5, -0.866, 1.3, 1.18, 0.78]);
+            b.no_psets();
+            b.n(&[3.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 2.0, 0.0]);
+            // Unbekannter Wirt: übersprungen.
+            b.n(&[REC_OPENING_SOLID]);
+            b.str("roof/X");
+            b.n(&[-1.0]);
+            b.str("DX");
+            b.n(&[0.0]);
+            b.str("x");
+            b.pts(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]);
+            b.n(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+            b.no_psets();
+            b.n(&[0.0, 0.0, 0.0]);
+            let ifc = build(&b).unwrap();
+            check_structure(&ifc);
+            assert_eq!(count(&ifc, "IFCOPENINGELEMENT"), 1);
+            assert_eq!(count(&ifc, "IFCWINDOW"), 1);
+            assert_eq!(count(&ifc, "IFCRELVOIDSELEMENT"), 1);
+            assert_eq!(count(&ifc, "IFCRELFILLSELEMENT"), 1);
+            assert!(ifc.contains("IFCDIRECTION((0.0,0.5,-0.866))"), "Extrusionsrichtung = −Normale");
+            assert_eq!(count(&ifc, "IFCARBITRARYCLOSEDPROFILEDEF"), 1);
+        }
     }
 
     #[test]

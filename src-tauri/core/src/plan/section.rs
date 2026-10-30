@@ -737,6 +737,49 @@ fn subtract_dominant_bands(bands: Vec<Cut>) -> Vec<Cut> {
 // ── Dächer ────────────────────────────────────────────────────────────────────
 
 /// `appendRoofSections`: Schnittspur der Dachflächen, je Schicht ein Band.
+/// Formöffnungen ([G3]): Die Wand hat im Modell das Rechteck-Loch; an der Schnittstelle reicht die
+/// Wand bis an den Umriss. Die geschnittenen Wandbänder über bzw. unter der Öffnung werden bis zur
+/// lichten Höhe des Umrisses an dieser Stelle verlängert.
+fn shaped_wall_cuts(cuts: &mut [Cut], p: &Project, walls_r: &[RWall], base: (f64, f64), u: (f64, f64)) {
+    let ul = hypot2(u.0, u.1);
+    if !(ul > 1e-12) {
+        return;
+    }
+    let u = (u.0 / ul, u.1 / ul);
+    for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| crate::opening_shape::is_shaped(o)) {
+        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
+        let Some((from, to)) = opening_interval(wall, o) else { continue };
+        let (a, _) = axis_frame(wall);
+        let den = a.0 * u.1 - a.1 * u.0;
+        if den.abs() < MIN_CROSS {
+            continue;
+        }
+        let (rx, ry) = (base.0 - wall.start.x, base.1 - wall.start.y);
+        let along = (rx * u.1 - ry * u.0) / den;
+        if along <= from + 1e-4 || along >= to - 1e-4 {
+            continue;
+        }
+        let (zb, zt) = opening_extent(p, wall, o);
+        let Some(poly) = crate::opening_shape::opening_outline(o, to - from, zt - zb) else { continue };
+        let Some((lo, hi)) = crate::opening_shape::v_range(&poly, along - from) else { continue };
+        let (new_bottom, new_top) = (zb + lo, zb + hi);
+        const TOL: f64 = 2e-3;
+        for c in cuts.iter_mut().filter(|c| c.kind == Kind::Wall && walls_r.get(c.index).is_some_and(|w| w.wall_id == wall.id)) {
+            let (y_lo, y_hi) = c.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| (l.min(q[1]), h.max(q[1])));
+            let (from_y, to_y) = if (y_lo - zt).abs() < TOL && new_top < zt - 1e-6 {
+                (zt, new_top)
+            } else if (y_hi - zb).abs() < TOL && new_bottom > zb + 1e-6 {
+                (zb, new_bottom)
+            } else {
+                continue;
+            };
+            for q in c.pts.iter_mut().filter(|q| (q[1] - from_y).abs() < TOL) {
+                q[1] = to_y;
+            }
+        }
+    }
+}
+
 fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
     let roofs = p.roofs.as_deref().unwrap_or(&[]);
     if roofs.is_empty() {
@@ -760,6 +803,11 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
             }
         }
         let sg = crate::plan_section::roof_segments(bx, by, ux, uy, &pl);
+        // Dachfenster ([103]): Lochkörper in der Schnittebene, aus jeder Schicht ausgeschnitten.
+        let holes: Vec<Vec<[f64; 2]>> = crate::opening_shape::roof_openings(p, index)
+            .iter()
+            .filter_map(|(o, f)| crate::opening_shape::box_section(&crate::opening_shape::surface_hole_box(o, f), (bx, by), (ux, uy)))
+            .collect();
         let n = sg.first().copied().unwrap_or(0.0) as usize;
         for k in 0..n {
             let o = 1 + 5 * k;
@@ -774,14 +822,19 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
                 let top0 = z0 - prefix;
                 let top1 = z1 - prefix;
                 prefix += vt;
-                let mut c = Cut::new(Kind::Roof, index, vec![[t_lo, top0], [t_hi, top1], [t_hi, top1 - vt], [t_lo, top0 - vt]]);
-                if !layer.component_id.is_empty() {
-                    if let Some(h) = p.component(&layer.component_id).and_then(|comp| resolve_hatch(p, &comp.hatch_id, None, None, None)) {
-                        c.fill = Some(poche_fill(h.pattern).to_string());
-                        c.hatch = Some(h);
-                    }
+                let mut pieces = vec![vec![[t_lo, top0], [t_hi, top1], [t_hi, top1 - vt], [t_lo, top0 - vt]]];
+                for h in &holes {
+                    pieces = pieces.iter().flat_map(|pc| crate::opening_shape::subtract_convex(pc, h)).collect();
                 }
-                cuts.push(c);
+                let hatch = if layer.component_id.is_empty() { None } else { p.component(&layer.component_id).and_then(|comp| resolve_hatch(p, &comp.hatch_id, None, None, None)) };
+                for pts in pieces {
+                    let mut c = Cut::new(Kind::Roof, index, pts);
+                    if let Some(h) = &hatch {
+                        c.fill = Some(poche_fill(h.pattern).to_string());
+                        c.hatch = Some(h.clone());
+                    }
+                    cuts.push(c);
+                }
             }
         }
     }
@@ -1146,6 +1199,7 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let visible: Vec<Edge> = raw.visible_edges.iter().filter(not_cut).map(&mut edge).collect();
     let hidden: Vec<Edge> = raw.hidden_edges.iter().filter(not_cut).map(&mut edge).collect();
 
+    shaped_wall_cuts(&mut cuts, p, &walls_r, plane.base(), plane.u_model());
     append_roof_sections(&mut cuts, p, &plane);
     let walls = wall_owners(p, &walls_r);
     let slabs = slab_owners(p, &slabs_r);
@@ -1376,7 +1430,12 @@ fn cross_section(p: &Project, wall: &Wall, o: &Opening, p0: (f64, f64), u: (f64,
     if along < from + 1e-4 || along > to - 1e-4 {
         return Ok(None);
     }
-    let (z_bottom, z_top) = opening_extent(p, wall, o);
+    let (mut z_bottom, mut z_top) = opening_extent(p, wall, o);
+    // Formöffnung ([G3]): lichte Höhe an der Schnittstelle aus dem Umriss.
+    if let Some(poly) = crate::opening_shape::opening_outline(o, to - from, z_top - z_bottom) {
+        let Some((lo, hi)) = crate::opening_shape::v_range(&poly, along - from) else { return Ok(None) };
+        (z_bottom, z_top) = (z_bottom + lo, z_bottom + hi);
+    }
     if z_top - z_bottom < 1e-3 {
         return Ok(None);
     }
@@ -1467,9 +1526,13 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
         out.push(l);
     }
     if let Some(t) = wt {
-        let shading = t.shading.as_ref().filter(|s| s.create);
+        // Formöffnung ([G3]): kein Sturz-Querschnitt, kein Storenkasten (Bogen/Schräge statt Sturz).
+        let shaped = crate::opening_shape::is_shaped(o);
+        let shading = t.shading.as_ref().filter(|s| s.create && !shaped);
         let sturz_box = shading.filter(|s| s.mount == Some(WindowShadingMount::Sturz)).map_or(0.0, |s| max(0.0, s.r#box.depth));
-        lintel_cut(&mut out, o, c, t.lintel_height, sturz_box);
+        if !shaped {
+            lintel_cut(&mut out, o, c, t.lintel_height, sturz_box);
+        }
         // Fensterbänke nur bei ausdrücklicher Wahl (bisherige Schnitte bleiben gleich).
         let zb = c.z_bottom;
         if matches!(t.sill_board, Some(WindowTypeSillBoard::Aussen | WindowTypeSillBoard::Beide)) {
@@ -1522,7 +1585,9 @@ fn lintel_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, height: O
 
 fn door_cut(p: &Project, o: &Opening, c: &CrossSection) -> Vec<Primitive> {
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
-    lintel_cut(&mut out, o, c, p.door_type(o).and_then(|t| t.lintel_height), 0.0);
+    if !crate::opening_shape::is_shaped(o) {
+        lintel_cut(&mut out, o, c, p.door_type(o).and_then(|t| t.lintel_height), 0.0);
+    }
     let kind = p.door_type(o).map(|t| t.kind);
     if o.door_type == Some(OpeningDoorType::Wandoeffnung) || kind == Some(DoorTypeKind::Wandoeffnung) {
         return out;
@@ -1574,6 +1639,16 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
     let mut out = Vec::new();
     for o in p.openings.as_deref().unwrap_or(&[]) {
         if !vis.visible(&o.category_code) || !vis.render(&o.category_code) {
+            continue;
+        }
+        // Dach-/Deckenfenster ([103]): Schnitt durch Rahmen, Glas und Eindeckrahmen.
+        if let Some(f) = crate::opening_shape::host_frame(p, o) {
+            let greyed = vis.greyed(&o.category_code);
+            for (part, corners) in crate::opening_shape::surface_window_boxes(p, o, &f) {
+                let Some(pts) = crate::opening_shape::box_section(&corners, p0, u) else { continue };
+                let pr = opening_poly(pts.iter().map(|q| v2(q[0], q[1])).collect(), part != 0, &o.id);
+                out.push(if greyed { pr.with_greyed(true) } else { pr });
+            }
             continue;
         }
         let Some(wall) = walls_by_id.get(o.host_wall_id.as_str()).copied() else { continue };
@@ -1750,6 +1825,57 @@ mod tests {
         assert!(more.len() > base.len(), "{} {}", more.len(), base.len());
         let json = serde_json::to_string(&more).unwrap();
         assert!(json.contains(LINTEL_FILL) && json.contains(SHADING_PACK_FILL), "{json}");
+    }
+
+    /// [G3] Rundbogen-Fenster: an der Schnittstelle reicht die Wand bis an den Bogen, Rahmen/Glas folgen.
+    #[test]
+    fn rundbogen_im_schnitt() {
+        let mut p = sample();
+        let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+        let w1 = p.walls.iter().find(|w| w.id == o1.host_wall_id).unwrap().clone();
+        let (u, n) = axis_frame(&w1);
+        // Viertel der Breite: Bogen 0,5 m Radius, Kämpfer 0,7 m über der Brüstung.
+        let m = o1.position + o1.width / 4.0;
+        let c = (w1.start.x + u.0 * m, w1.start.y + u.1 * m);
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: c.0 - n.0 * 3.0, y: c.1 - n.1 * 3.0 }, Vec2 { x: c.0 + n.0 * 3.0, y: c.1 + n.1 * 3.0 }]), ..Default::default() };
+        let (zb, zt) = opening_extent(&p, &w1, &o1);
+        let top_of = |p: &Project| -> f64 {
+            let out = compute_section(p, &l, &[]).unwrap().unwrap();
+            out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W1")).flat_map(|c| c.pts.iter().map(|q| q[1])).filter(|y| *y > zb + 0.1).fold(f64::INFINITY, f64::min)
+        };
+        assert!((top_of(&p) - zt).abs() < 1e-3, "Rechteck: Sturz bei {zt}");
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.shape = Some(OpeningShape::Rundbogen);
+        }
+        let want = zb + 0.7 + (0.25f64 - 0.0625).sqrt();
+        assert!((top_of(&p) - want).abs() < 5e-3, "{} vs {want}", top_of(&p));
+        let prims = section_opening_primitives(&p, &l, &Visibility::default()).unwrap();
+        let ys: Vec<f64> = prims.iter().filter_map(|pr| if let Primitive::Polygon { pts, opening_id: Some(id), .. } = pr { (id == "O1").then(|| pts.iter().map(|q| q.y).fold(f64::NEG_INFINITY, f64::max)) } else { None }).collect();
+        assert!(!ys.is_empty() && ys.iter().all(|y| *y < want + 5e-3), "kein Sturz/Kasten über dem Bogen: {ys:?}");
+    }
+
+    /// [103] Dachfenster: Lücke in allen Dachschichten, Rahmen/Glas geschnitten.
+    #[test]
+    fn dachfenster_im_schnitt() {
+        let mut p = sample();
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: 2.5, y: -2.0 }, Vec2 { x: 2.5, y: 6.0 }]), ..Default::default() };
+        let roof_cuts = |p: &Project| compute_section(p, &l, &[]).unwrap().unwrap().cuts.iter().filter(|c| c.kind == Kind::Roof).count();
+        let before = roof_cuts(&p);
+        assert!(before > 0);
+        p.openings.as_mut().unwrap().push(Opening {
+            id: "DF".into(),
+            kind: ElementKind::Window,
+            category_code: "21".into(),
+            width: 0.78,
+            height: 1.18,
+            host_roof_id: Some("RF1".into()),
+            host_point: Some(Vec2 { x: 2.5, y: 1.0 }),
+            ..Default::default()
+        });
+        assert!(roof_cuts(&p) > before, "Schichten links und rechts des Fensters");
+        let prims = section_opening_primitives(&p, &l, &Visibility::default()).unwrap();
+        let df: Vec<_> = prims.iter().filter(|pr| matches!(pr, Primitive::Polygon { opening_id: Some(id), .. } if id == "DF")).collect();
+        assert!(df.len() >= 4, "Rahmen beidseits, Glas, Eindeckrahmen: {}", df.len());
     }
 
     #[test]

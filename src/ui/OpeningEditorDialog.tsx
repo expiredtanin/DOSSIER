@@ -425,9 +425,42 @@ function GroessePanel({
         min={0}
         onCommit={(n) => onPatchOpening({ position: n })}
       />
+      {/* [G3] Umrissform (Wandausschnitt in Schnitt, Ansicht, 3D, IFC; Grundriss bleibt SIA-Symbol). */}
+      <SelField<OpeningShapeValue>
+        label={t("oed.f.shape")}
+        value={opening.shape ?? "rechteck"}
+        options={OPENING_SHAPE_OPTS()}
+        onChange={(v) => onPatchOpening({ shape: v === "rechteck" ? undefined : v, shapeRise: undefined })}
+      />
+      {(opening.shape === "segmentbogen" ||
+        opening.shape === "spitzbogen" ||
+        opening.shape === "schraeg" ||
+        opening.shape === "giebel") && (
+        <NumField
+          label={t("oed.f.shapeRise")}
+          value={opening.shapeRise ?? defaultShapeRise(opening)}
+          onCommit={(n) => onPatchOpening({ shapeRise: n })}
+        />
+      )}
+      {opening.shape && opening.shape !== "rechteck" && <p className="oed-hint">{t("oed.shapeNote")}</p>}
     </>
   );
 }
+
+type OpeningShapeValue = NonNullable<Opening["shape"]>;
+
+/** Stich ohne Angabe wie im Kern (`opening_shape::outline`). */
+function defaultShapeRise(o: Opening): number {
+  const w = o.width;
+  const r = o.shape === "segmentbogen" ? w / 6 : o.shape === "spitzbogen" ? (w * Math.sqrt(3)) / 2 : w / 2;
+  return Math.round(r * 1000) / 1000;
+}
+
+const OPENING_SHAPE_OPTS = (): { value: OpeningShapeValue; label: string }[] =>
+  (["rechteck", "rundbogen", "segmentbogen", "spitzbogen", "rund", "schraeg", "giebel"] as const).map((v) => ({
+    value: v,
+    label: t(`oed.shape.${v}`),
+  }));
 
 function RahmenPanel({
   isDoor,

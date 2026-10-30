@@ -17,15 +17,15 @@ use crate::joins::{js_hypot, js_round};
 use crate::wall_bands::EPS;
 
 /// Halbe Dicke EINER Fensterscheibe (8 mm je Scheibe).
-const GLASS_HALF_THICK: f64 = 0.004;
+pub(crate) const GLASS_HALF_THICK: f64 = 0.004;
 /// Luftraum zwischen zwei Scheiben einer Mehrfachverglasung.
 const GLASS_PANE_GAP: f64 = 0.006;
 /// Halbe Breite der Symbol-Diagonalen (~5 mm Gesamtbreite).
 const SYMBOL_HALF_WIDTH: f64 = 0.0025;
 /// Türblatt-Dicke quer zur Wand.
-const DOOR_LEAF_THICK: f64 = 0.04;
+pub(crate) const DOOR_LEAF_THICK: f64 = 0.04;
 /// Default-Ansichtsbreite des Rahmenprofils, wenn der Typ keine nennt.
-const DEFAULT_FRAME_WIDTH: f64 = 0.06;
+pub(crate) const DEFAULT_FRAME_WIDTH: f64 = 0.06;
 /// Default-Rahmentiefe (deckt sich mit `geometry/opening.ts::DEFAULT_FRAME_DEPTH`, 2D = 3D).
 const DEFAULT_FRAME_DEPTH: f64 = 0.07;
 /// Stegbreite der Kassetten-Füllstäbe.
@@ -423,14 +423,14 @@ struct FrameParams<'a> {
 }
 
 /// Rahmentiefe quer zur Wand: `frame_depth` (> EPS) oder Default, auf die Wanddicke geklemmt.
-fn across_wall_depth(frame_depth: f64, wall_thickness: f64) -> f64 {
+pub(crate) fn across_wall_depth(frame_depth: f64, wall_thickness: f64) -> f64 {
     let depth = if frame_depth > EPS { frame_depth } else { DEFAULT_FRAME_DEPTH };
     jmin(depth, wall_thickness)
 }
 
 /// Quer-Versatz `[n_min, n_max]` des Rahmenkörpers: Vorderkante bündig mit der gewählten
 /// Wandfläche (minus Schichteinzug), `depth` zur Wandmitte hin, auf die halbe Dicke geklemmt.
-fn frame_normal_range(half: f64, depth: f64, inset: f64, inner: bool, mid: bool) -> (f64, f64) {
+pub(crate) fn frame_normal_range(half: f64, depth: f64, inset: f64, inner: bool, mid: bool) -> (f64, f64) {
     let sign = if inner { -1.0 } else { 1.0 };
     let (front, back) = if mid { (depth / 2.0, -depth / 2.0) } else { (sign * (half - inset), sign * (half - inset) - sign * depth) };
     let a = clamp_range(front, -half, half);

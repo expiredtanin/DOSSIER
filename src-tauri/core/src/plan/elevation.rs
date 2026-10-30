@@ -221,6 +221,16 @@ struct ProjOpening {
     sill: Vec<[Pt; 4]>,
     symbol: Vec<(Pt, Pt)>,
     id: String,
+    /// Formöffnung ([G3]): Rahmen-Umriss und Glas entlang des Umrisses statt der Rechtecke.
+    shape: Option<(Vec<Pt>, Vec<Pt>, Vec<Vec<Pt>>, String)>,
+}
+
+/// Umriss einer Formöffnung in Anteilen (0…1) und das um die Rahmenbreite eingerückte Glas.
+type ShapeNorm = (Vec<[f64; 2]>, Vec<[f64; 2]>, Vec<[[f64; 2]; 4]>, String);
+
+fn map_quad(q: &[Pt; 4], s: f64, t: f64) -> Pt {
+    let lerp = |a: Pt, b: Pt, k: f64| -> Pt { [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k] };
+    lerp(lerp(q[0], q[1], s), lerp(q[3], q[2], s), t)
 }
 
 fn sash_kind(k: OpeningKind) -> f64 {
@@ -237,6 +247,7 @@ fn sash_kind(k: OpeningKind) -> f64 {
 fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
     let mut b = vec![0.0];
     let mut ids: Vec<&str> = Vec::new();
+    let mut shapes: Vec<Option<ShapeNorm>> = Vec::new();
     let by_wall = p.openings_by_wall();
     for wall in &p.walls {
         let thickness = p.wall_type(wall).map_or(0.2, |t| t.layers.iter().fold(0.0, |s, l| s + l.thickness));
@@ -332,6 +343,13 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
                 ]);
             }
             ids.push(&op.id);
+            shapes.push(crate::opening_shape::opening_outline(op, to - from, ot - ob).map(|poly| {
+                let (w, h) = (to - from, ot - ob);
+                let fw = if door { dt.and_then(|t| t.frame_width) } else { wt.and_then(|t| t.frame_width) }.unwrap_or(0.06).min(w.min(h) / 3.0);
+                let norm = |q: &[f64; 2]| [q[0] / w, q[1] / h];
+                let fills = crate::opening_shape::fill_quads(&poly, w, h).iter().map(|q| q.map(|c| norm(&c))).collect();
+                (poly.iter().map(norm).collect(), crate::opening_shape::inset(&poly, fw).iter().map(norm).collect(), fills, wall.id.clone())
+            }));
             b[0] += 1.0;
         }
     }
@@ -376,9 +394,55 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
         let sash_rects = quads(&mut i);
         let sill = quads(&mut i);
         let symbol = lines(&mut i);
-        out.push(ProjOpening { pts, depth, glass, door_leaf, divisions, sash_rects, sill, symbol, id: ids[k].to_string() });
+        let m = |q: &[f64; 2]| map_quad(&pts, q[0], q[1]);
+        let shape = shapes[k].as_ref().map(|(o, g, fl, wid)| (o.iter().map(m).collect(), g.iter().map(m).collect(), fl.iter().map(|q| q.iter().map(m).collect()).collect(), wid.clone()));
+        if shape.is_some() {
+            // Formöffnung ([G3]): ohne Flügel-/Sprossenteilung, Türblatt und Symbole (Rechteck-Raster).
+            let round = p.openings.as_deref().unwrap_or(&[]).iter().any(|o| o.id == ids[k] && !crate::opening_shape::has_flat_bottom(o));
+            out.push(ProjOpening { pts, depth, glass: Vec::new(), door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: if round { Vec::new() } else { sill }, symbol: Vec::new(), id: ids[k].to_string(), shape });
+            continue;
+        }
+        out.push(ProjOpening { pts, depth, glass, door_leaf, divisions, sash_rects, sill, symbol, id: ids[k].to_string(), shape });
     }
+    surface_openings(p, frame, &mut out);
     out
+}
+
+/// Dach-/Deckenfenster ([103]) in der Ansicht: Rahmen-Rechteck in der Dachfläche (6 cm über der
+/// Eindeckung) und Glas, nur wenn die Fläche zum Betrachter zeigt.
+fn surface_openings(p: &Project, frame: &[f64; 9], out: &mut Vec<ProjOpening>) {
+    let (fp, fnrm, fu) = ([frame[0], frame[1], frame[2]], [frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
+    let proj = |q: [f64; 3]| -> (Pt, f64) {
+        // Modell (x, y, z) → Ansichtswelt (x, Höhe, y).
+        let w = [q[0] - fp[0], q[2] - fp[1], q[1] - fp[2]];
+        ([w[0] * fu[0] + w[1] * fu[1] + w[2] * fu[2], q[2]], w[0] * fnrm[0] + w[1] * fnrm[1] + w[2] * fnrm[2])
+    };
+    for o in p.openings.as_deref().unwrap_or(&[]) {
+        let Some(f) = crate::opening_shape::host_frame(p, o) else { continue };
+        if f.plane.is_none() || fnrm[0] * f.n[0] + fnrm[1] * f.n[2] + fnrm[2] * f.n[1] >= -1e-4 {
+            continue;
+        }
+        let (w, h) = (o.width, o.height);
+        let fw = crate::opening_shape::surface_frame_width(p, o);
+        let quad = |inset: f64| -> ([Pt; 4], f64) {
+            let c = [f.at(-w / 2.0 + inset, -h / 2.0 + inset, -0.06), f.at(w / 2.0 - inset, -h / 2.0 + inset, -0.06), f.at(w / 2.0 - inset, h / 2.0 - inset, -0.06), f.at(-w / 2.0 + inset, h / 2.0 - inset, -0.06)];
+            let pr = c.map(proj);
+            ([pr[0].0, pr[1].0, pr[2].0, pr[3].0], (pr[0].1 + pr[1].1 + pr[2].1 + pr[3].1) / 4.0)
+        };
+        let (pts, own) = quad(0.0);
+        if own <= 1e-6 {
+            continue;
+        }
+        // Painter: knapp vor der eigenen Dachfläche (deren Tiefe = Mittel ihrer Ecken wie `project_face`).
+        let plane_depth = p.roofs.as_deref().and_then(|r| r.get(f.host)).and_then(|roof| {
+            let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+            let pl = g.planes.get(f.plane?)?.clone();
+            Some(pl.iter().map(|q| proj(*q).1).sum::<f64>() / pl.len() as f64)
+        });
+        let depth = plane_depth.map_or(own, |d| d.min(own));
+        let glass = if o.kind == ElementKind::Window { vec![quad(fw).0] } else { Vec::new() };
+        out.push(ProjOpening { pts, depth, glass, door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: Vec::new(), symbol: Vec::new(), id: o.id.clone(), shape: None });
+    }
 }
 
 fn encode_shadow_faces(faces: &[&Face]) -> Vec<f64> {
@@ -687,11 +751,24 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         };
         let d = op.depth - EPS * 100.0;
         let id = Some(op.id.as_str());
+        // Formöffnung: das Rechteck-Loch der Wand ausserhalb des Umrisses in Wandfarbe schliessen.
+        if let Some((_, _, fills, wid)) = &op.shape {
+            let wall_fill = faces.iter().find(|f| f.role == Role::Wall && f.id == *wid).map_or("#ffffff".to_string(), |f| fill_for(f.fill));
+            for q in fills {
+                let pts = to_vec(q);
+                items.push(Item { depth: d + EPS * 10.0, seq, rank: None, prim: polygon(pts, &wall_fill, "none", 0.0, no_hatch()) });
+                seq += 1;
+            }
+        }
         let mut push = |prim: Primitive| {
             items.push(Item { depth: d, seq, rank: None, prim });
             seq += 1;
         };
-        push(poly_prim(to_vec(&op.pts), if mono { "#ffffff" } else { FRAME_FILL_COLOR }, EDGE_INK, FRAME_MM, id));
+        let frame_pts = op.shape.as_ref().map_or(&op.pts[..], |(o, _, _, _)| &o[..]);
+        push(poly_prim(to_vec(frame_pts), if mono { "#ffffff" } else { FRAME_FILL_COLOR }, EDGE_INK, FRAME_MM, id));
+        if let Some((_, g, _, _)) = &op.shape {
+            push(poly_prim(to_vec(g), if mono { GLASS_FILL_MONO } else { GLASS_FILL_COLOR }, EDGE_INK, EDGE_MM, id));
+        }
         for r in &op.sill {
             push(poly_prim(to_vec(r), if mono { "#ffffff" } else { SILL_FILL_COLOR }, EDGE_INK, EDGE_MM, id));
         }
@@ -704,7 +781,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         for r in &op.door_leaf {
             push(poly_prim(to_vec(r), if mono { "#ffffff" } else { DOOR_LEAF_FILL_COLOR }, EDGE_INK, EDGE_MM, id));
         }
-        if shadows {
+        if shadows && op.shape.is_none() {
             let q = &op.pts;
             let lerp = |a: Pt, b: Pt, t: f64| -> Pt { [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] };
             let quad_at = |fa: f64, fz: f64| lerp(lerp(q[0], q[1], fa), lerp(q[3], q[2], fa), fz);
@@ -965,5 +1042,26 @@ mod tests {
         let n_mid = render(&p, 200.0).matches("elevation-surface-pattern").count();
         assert!(n_mid < n_fine && n_mid > 0, "{n_mid} vs {n_fine}");
         assert_eq!(render(&p, 2000.0).matches("elevation-surface-pattern").count(), 0, "grob: weggelassen");
+    }
+
+    /// [G3] Formöffnung: Rahmen als Umriss (viele Ecken), Glas eingerückt; [103] Dachfenster auf der
+    /// Südfläche sichtbar.
+    #[test]
+    fn formoeffnung_und_dachfenster_in_der_ansicht() {
+        let mut p = sample();
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.shape = Some(OpeningShape::Rund);
+        }
+        p.openings.as_mut().unwrap().push(Opening { id: "DF".into(), kind: ElementKind::Window, category_code: "21".into(), width: 0.78, height: 1.18, host_roof_id: Some("RF1".into()), host_point: Some(Vec2 { x: 2.5, y: 1.0 }), ..Default::default() });
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        let polys = |id: &str| -> Vec<usize> { prims.iter().filter_map(|pr| if let Primitive::Polygon { pts, opening_id: Some(o), .. } = pr { (o == id).then_some(pts.len()) } else { None }).collect() };
+        let o1 = polys("O1");
+        assert!(o1.len() == 2 && o1.iter().all(|n| *n >= 40), "Rahmen + Glas als Ellipse: {o1:?}");
+        assert_eq!(polys("DF"), vec![4, 4], "Dachfenster: Rahmen + Glas");
+        let first_df = prims.iter().position(|pr| matches!(pr, Primitive::Polygon { opening_id: Some(o), .. } if o == "DF")).unwrap();
+        let last_roof = prims.iter().rposition(|pr| matches!(pr, Primitive::Polygon { roof_id: Some(_), .. })).unwrap();
+        assert!(first_df > last_roof, "Dachfenster vor der Dachfläche gezeichnet");
     }
 }
