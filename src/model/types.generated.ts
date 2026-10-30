@@ -1176,6 +1176,15 @@ export type Excavation = {
   edgeSlopes?: Array<number>;
   bermWidth?: number;
   bermHeight?: number;
+  /**
+   * [68] Arbeitsraum in m: der Umriss gilt als Gebäude-Grundfläche, die Sohle liegt um dieses Mass
+   * weiter aussen (Gehrung an den Ecken). Fehlt = 0 (Umriss = Sohle).
+   */
+  workingSpace?: number;
+  /**
+   * [68] Senkrechter Verbau (Spundwand) je Kante (wie `edgeSlopes`): keine Böschung, Wand steht senkrecht.
+   */
+  edgeShoring?: Array<boolean>;
 };
 
 /** Ein extrudierter Körper: geschlossenes Profil (Modell-Meter) + Höhe. */
@@ -1280,7 +1289,15 @@ export type FrameDetail = {
 };
 
 /** Eine Achse des Achsrasters: Beschriftung und Lage (Abstand bzw. Winkel/Radius, s. `Grid`). */
-export type GridAxis = { label: string; pos: number };
+export type GridAxis = {
+  label: string;
+  pos: number;
+  /** Blasenseite nur dieser Achse (überschreibt `Grid.bubbles`); fehlt = wie das Raster. */
+  bubble?: GridBubbles;
+};
+
+/** Welche Achsenden eine Blase tragen. */
+export type GridBubbles = "start" | "end" | "both";
 
 /**
  * Raster-Regel: generiert Wände entlang gleichmäßiger X-/Y-Achsen.
@@ -3025,6 +3042,8 @@ export type TerrainMesh = {
   contourInterval?: number;
   /** [T6] Jede n-te Höhenlinie ist Zähllinie (dicker, beschriftet). Default 5. */
   contourIndexEvery?: number;
+  /** [T6] Tiefe des Erdreich-Bands im Schnitt unter dem Gelände in m (Default 1.5). */
+  earthDepth?: number;
 };
 
 /** Ein zusammenhängender Textabschnitt mit einheitlicher Formatierung. */

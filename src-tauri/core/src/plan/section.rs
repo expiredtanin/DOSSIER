@@ -1554,17 +1554,23 @@ fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (
     append_earth(out, p, base, u);
 }
 
-/// Tiefe des Erdreich-Bands unter der Geländelinie (m).
+/// Tiefe des Erdreich-Bands unter der Geländelinie (m), wenn das Gelände keine `earthDepth` trägt.
 const EARTH_BAND: f64 = 1.5;
+
+/// Tiefe des Erdreich-Bands: `earthDepth` des ersten Geländes, das eine positive Tiefe setzt.
+fn earth_band(p: &Project) -> f64 {
+    crate::excavation::terrains(p).iter().find_map(|t| t.earth_depth.filter(|d| d.is_finite() && *d > 0.0)).unwrap_or(EARTH_BAND)
+}
 
 /// [T6]/[109] Erdreich: Band unter dem gestalteten Terrain mit SIA-Erdreich-Schraffur, ohne das
 /// Gebäude-Innere (Grundfläche im Schnitt, von der tiefsten Schnittfläche aufwärts); die geschnittenen
 /// Bauteile selbst liegen ohnehin darüber.
 fn append_earth(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) {
+    let depth = earth_band(p);
     let mut band: Vec<crate::flat::Polygon> = Vec::new();
     for pr in out.profiles.iter().filter(|pr| !pr.natural && pr.pts.len() >= 2) {
         let mut ring = pr.pts.clone();
-        ring.extend(pr.pts.iter().rev().map(|q| [q[0], q[1] - EARTH_BAND]));
+        ring.extend(pr.pts.iter().rev().map(|q| [q[0], q[1] - depth]));
         band.push(vec![ring]);
     }
     if band.is_empty() {

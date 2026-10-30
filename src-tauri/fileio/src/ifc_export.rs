@@ -43,6 +43,8 @@
 //                 zur nächsten Ecke als IfcTrimmedCurve auf IfcCircle, DXF-Sinn: positiv = Gegenuhrzeigersinn;
 //                 sonst Strecke), IfcExtrudedAreaSolid in +Z; Achse wie WALL_ARC. Öffnungen schneiden über
 //                 OPENING (IfcRelVoidsElement).
+//   GRID        = 18 ([112] Achsraster → IfcGrid), structure, id, name, n_u, n_v, (label, PTS) × (n_u + n_v)
+//                 Linienzüge in Welt-XY (Bögen schon in Sehnen zerlegt); Placement der Trägerstruktur, ohne Darstellung.
 //   CEILING     = 3, structure, id, name, TYPEREF, PSETS, PTS, n_inner, PTS × n_inner, z_rel, depth
 //                 (innere Ringe = Deckenaussparungen, IfcArbitraryProfileDefWithVoids)
 //   OPENING     = 4, wall_id, structure, opening_id, is_door (0/1), fill_name, PTS (Öffnungskörper), z_rel,
@@ -138,6 +140,7 @@ pub const REC_ATTACH: f64 = 14.0;
 pub const REC_OPENING_SOLID: f64 = 15.0;
 pub const REC_WALL_ARC: f64 = 16.0;
 pub const REC_WALL_ARC_SOLID: f64 = 17.0;
+pub const REC_GRID: f64 = 18.0;
 
 // ── IFC-GUID (Kompression nach IfcOpenShell `guid.compress`) ────────────────
 
@@ -932,6 +935,12 @@ impl Builder {
         }
     }
 
+    /// Offener Linienzug als IfcPolyline.
+    fn emit_open_polyline(&mut self, pts: &[(f64, f64)]) -> usize {
+        let ids: Vec<usize> = pts.iter().map(|p| self.add("IFCCARTESIANPOINT", list(&[fmt_real(p.0), fmt_real(p.1)]))).collect();
+        self.add("IFCPOLYLINE", refs(&ids))
+    }
+
     /// Geschlossener Linienzug (erster Punkt am Ende wiederholt) als IfcPolyline.
     fn emit_closed_polyline(&mut self, ring: &[(f64, f64)]) -> usize {
         let mut pt_ids = Vec::with_capacity(ring.len() + 1);
@@ -1339,6 +1348,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_CLASSIFICATION => "CLASSIFICATION",
         c if c == REC_ZONE => "ZONE",
         c if c == REC_ATTACH => "ATTACH",
+        c if c == REC_GRID => "GRID",
         _ => "?",
     }
 }
@@ -2190,6 +2200,29 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 for p in &psets {
                     w.add_pset(p, zone, &zone_key);
                 }
+            }
+            c if c == REC_GRID => {
+                let structure = r.structure(n_storeys)?;
+                let id = r.string()?;
+                let name = r.string()?;
+                let (n_u, n_v) = (r.idx()?, r.idx()?);
+                let mut axes = Vec::new();
+                for _ in 0..n_u + n_v {
+                    let tag = r.string()?;
+                    let pts = r.pts()?;
+                    let curve = w.emit_open_polyline(&pts);
+                    axes.push(w.add("IFCGRIDAXIS", format!("{},#{curve},.T.", ifc_string(&tag))));
+                }
+                let placement = w.emit_placement(0.0, w.placement_of(structure));
+                let g = w.gid(&format!("grid/{id}"));
+                let u = refs(&axes[..n_u]);
+                let v = refs(&axes[n_u..]);
+                let entity = w.add(
+                    "IFCGRID",
+                    format!("{g},#{},{},$,$,#{placement},$,{u},{v},$", w.owner_history, ifc_string(&name)),
+                );
+                w.add_to_containment(structure, entity);
+                w.elements.insert(format!("grid/{id}"), entity);
             }
             c if c == REC_ATTACH => {
                 let key = r.string()?;

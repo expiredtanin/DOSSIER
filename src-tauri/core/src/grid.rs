@@ -84,7 +84,8 @@ impl<'a> Spec<'a> {
 
     /// Alle Achsen (Index: `a` zuerst, dann `b`).
     pub fn axes(&self) -> Vec<Axis> {
-        let want = |start: bool| match self.bubbles {
+        // Blasenseite: die der Achse, sonst die des Rasters.
+        let want = |g: &GridAxis, start: bool| match g.bubble.unwrap_or(self.bubbles) {
             GridBubbles::Both => true,
             GridBubbles::Start => start,
             GridBubbles::End => !start,
@@ -101,7 +102,7 @@ impl<'a> Spec<'a> {
                     index: i as u32,
                     label: g.label.clone(),
                     shape: Shape::Line { a: p0, b: p1 },
-                    bubbles: [want(true).then_some((p0, d0)), want(false).then_some((p1, d1))],
+                    bubbles: [want(g, true).then_some((p0, d0)), want(g, false).then_some((p1, d1))],
                 });
             }
             for (j, g) in self.b.iter().enumerate() {
@@ -111,7 +112,7 @@ impl<'a> Spec<'a> {
                     index: (self.a.len() + j) as u32,
                     label: g.label.clone(),
                     shape: Shape::Line { a: p0, b: p1 },
-                    bubbles: [want(true).then_some((p0, d0)), want(false).then_some((p1, d1))],
+                    bubbles: [want(g, true).then_some((p0, d0)), want(g, false).then_some((p1, d1))],
                 });
             }
             return out;
@@ -126,7 +127,7 @@ impl<'a> Spec<'a> {
                 index: i as u32,
                 label: g.label.clone(),
                 shape: Shape::Line { a: self.origin, b: end },
-                bubbles: [None, (self.bubbles != GridBubbles::Start).then_some((end, u))],
+                bubbles: [None, (g.bubble.unwrap_or(self.bubbles) != GridBubbles::Start).then_some((end, u))],
             });
         }
         let (t0, t1) = Self::span(self.a);
@@ -147,8 +148,8 @@ impl<'a> Spec<'a> {
                 label: g.label.clone(),
                 shape: Shape::Arc { c: self.origin, r, a0, a1 },
                 bubbles: [
-                    (!full && want(true)).then(|| (at(a0), tan(a0, -1.0))),
-                    (if full { self.bubbles != GridBubbles::Start } else { want(false) }).then(|| (at(a1), tan(a1, 1.0))),
+                    (!full && want(g, true)).then(|| (at(a0), tan(a0, -1.0))),
+                    (if full { g.bubble.unwrap_or(self.bubbles) != GridBubbles::Start } else { want(g, false) }).then(|| (at(a1), tan(a1, 1.0))),
                 ],
             });
         }
@@ -270,8 +271,8 @@ pub fn axes_from_bays(radial: bool, xs: &[f64], ys: &[f64]) -> (Vec<GridAxis>, V
         }
         out
     };
-    let a = cum(xs, true).iter().enumerate().map(|(i, p)| GridAxis { label: (i + 1).to_string(), pos: *p }).collect();
-    let b = cum(ys, !radial).iter().enumerate().map(|(i, p)| GridAxis { label: letter_label(i), pos: *p }).collect();
+    let a = cum(xs, true).iter().enumerate().map(|(i, p)| GridAxis { label: (i + 1).to_string(), pos: *p, ..Default::default() }).collect();
+    let b = cum(ys, !radial).iter().enumerate().map(|(i, p)| GridAxis { label: letter_label(i), pos: *p, ..Default::default() }).collect();
     (a, b)
 }
 
@@ -330,13 +331,27 @@ pub fn section_axes(spec: &Spec, origin: P, dir: P, projected: bool) -> Vec<(Str
     out
 }
 
+/// Verlauf einer Achse als Linienzug (Bögen in Schritten von höchstens 5°), z. B. für den IFC-Export.
+pub fn polyline(ax: &Axis) -> Vec<P> {
+    match ax.shape {
+        Shape::Line { a, b } => vec![a, b],
+        Shape::Arc { c, r, a0, a1 } => {
+            let n = (((a1 - a0).abs() / 5f64.to_radians()).ceil() as usize).max(2);
+            (0..=n).map(|i| {
+                let t = a0 + (a1 - a0) * i as f64 / n as f64;
+                (c.0 + r * t.cos(), c.1 + r * t.sin())
+            }).collect()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::Vec2;
 
     fn ax(l: &str, p: f64) -> GridAxis {
-        GridAxis { label: l.into(), pos: p }
+        GridAxis { label: l.into(), pos: p, ..Default::default() }
     }
 
     fn ortho() -> Drawing2DGeom {
@@ -384,6 +399,20 @@ mod tests {
         assert!((p.0 - 5.0).abs() < 1e-12 && (p.1 - 24.0).abs() < 1e-12);
         let a = &s.axes()[0];
         assert!(a.bubbles[0].is_none() && a.bubbles[1].is_some());
+    }
+
+    #[test]
+    fn blasenseite_je_achse() {
+        let mut g = ortho();
+        if let Drawing2DGeom::Grid { a, .. } = &mut g {
+            a[0].bubble = Some(GridBubbles::Start);
+            a[1].bubble = Some(GridBubbles::End);
+        }
+        let axes = Spec::of(&g).unwrap().axes();
+        assert!(axes[0].bubbles[0].is_some() && axes[0].bubbles[1].is_none());
+        assert!(axes[1].bubbles[0].is_none() && axes[1].bubbles[1].is_some());
+        // Achsen ohne eigene Seite folgen dem Raster (beide Enden).
+        assert!(axes[2].bubbles[0].is_some() && axes[2].bubbles[1].is_some());
     }
 
     #[test]

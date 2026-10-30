@@ -142,6 +142,11 @@ impl<'a> TinIndex<'a> {
 
     /// Höhe am Punkt (x, y); `None` ausserhalb des Netzes.
     pub fn z_at(&self, x: f64, y: f64) -> Option<f64> {
+        self.bary_at(x, y).map(|(t, l)| l[0] * self.tin.z[t[0]] + l[1] * self.tin.z[t[1]] + l[2] * self.tin.z[t[2]])
+    }
+
+    /// Dreieck (Eckindizes) und Schwerpunktkoordinaten am Punkt (x, y); `None` ausserhalb des Netzes.
+    pub fn bary_at(&self, x: f64, y: f64) -> Option<([usize; 3], [f64; 3])> {
         if !(x >= self.b[0] - 1e-9 && x <= self.b[2] + 1e-9 && y >= self.b[1] - 1e-9 && y <= self.b[3] + 1e-9) {
             return None;
         }
@@ -159,7 +164,7 @@ impl<'a> TinIndex<'a> {
             let l0 = 1.0 - l1 - l2;
             const E: f64 = -1e-9;
             if l0 >= E && l1 >= E && l2 >= E {
-                return Some(l0 * t.z[a] + l1 * t.z[b] + l2 * t.z[c]);
+                return Some(([a, b, c], [l0, l1, l2]));
             }
         }
         None
@@ -961,6 +966,43 @@ pub fn datum(reference_masl: Option<f64>, z: &[f64]) -> f64 {
     }
 }
 
+/// [T6] Glättet ein Höhenraster (`z[j * nx + i]`, NaN = kein Messwert) mit `passes` Durchgängen eines
+/// Binomialfilters [1 2 1]/4 je Achse. Fehlende Nachbarn zählen nicht (Gewichte werden renormiert), fehlende
+/// Zellen bleiben fehlend. Falsche Grösse → Eingabe unverändert.
+pub fn smooth_grid(z: &[f64], nx: usize, ny: usize, passes: u32) -> Vec<f64> {
+    if nx == 0 || ny == 0 || z.len() != nx * ny {
+        return z.to_vec();
+    }
+    let mut cur = z.to_vec();
+    for _ in 0..passes.min(20) {
+        for horizontal in [true, false] {
+            let src = cur.clone();
+            for j in 0..ny {
+                for i in 0..nx {
+                    let c = src[j * nx + i];
+                    if c.is_nan() {
+                        continue;
+                    }
+                    let (a, b) = if horizontal {
+                        (if i > 0 { src[j * nx + i - 1] } else { f64::NAN }, if i + 1 < nx { src[j * nx + i + 1] } else { f64::NAN })
+                    } else {
+                        (if j > 0 { src[(j - 1) * nx + i] } else { f64::NAN }, if j + 1 < ny { src[(j + 1) * nx + i] } else { f64::NAN })
+                    };
+                    let (mut sum, mut w) = (2.0 * c, 2.0);
+                    for v in [a, b] {
+                        if !v.is_nan() {
+                            sum += v;
+                            w += 1.0;
+                        }
+                    }
+                    cur[j * nx + i] = sum / w;
+                }
+            }
+        }
+    }
+    cur
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1062,5 +1104,18 @@ mod tests {
         assert_eq!(datum(Some(450.0), &[452.0, 455.0]), 450.0);
         assert_eq!(datum(Some(450.0), &[2.0, 5.0]), 0.0);
         assert_eq!(datum(None, &[452.0]), 0.0);
+    }
+
+    #[test]
+    fn raster_glaetten() {
+        // Spitze in der Mitte wird abgebaut, Summe grob erhalten, NaN bleibt NaN, Ebene bleibt eben.
+        let mut z = vec![0.0; 25];
+        z[12] = 8.0;
+        z[0] = f64::NAN;
+        let g = smooth_grid(&z, 5, 5, 1);
+        assert!(g[12] < 8.0 && g[12] > 1.0 && g[11] > 0.0 && g[0].is_nan());
+        assert!(smooth_grid(&vec![3.0; 25], 5, 5, 3).iter().all(|v| (v - 3.0).abs() < 1e-12));
+        assert_eq!(smooth_grid(&z[..4], 5, 5, 1).len(), 4);
+        assert!(smooth_grid(&z, 5, 5, 0)[12] == 8.0);
     }
 }

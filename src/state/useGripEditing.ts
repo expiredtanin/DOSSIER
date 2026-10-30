@@ -7,7 +7,7 @@
 
 import { useRef, useState, type RefObject } from "react";
 import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
-import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
+import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Room, Stair, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { bulgeArcPoints, drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo, wallArcBand } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
@@ -35,10 +35,20 @@ function arcApex(a: Vec2, b: Vec2, bulge: number): Vec2 {
   return add(scale(add(a, b), 0.5), scale(normalize(leftNormal(sub(b, a))), h * bulge));
 }
 
+/** Griff-Punkte einer Baugrube: Umriss-Ecken, dann der Sohlen-Griff (Schwerpunkt, y + Sohlenhöhe; Kern `grips.rs`). */
+export function excavationGripPoints(e: Excavation): Vec2[] {
+  const n = Math.max(1, e.outline.length);
+  const cx = e.outline.reduce((a, q) => a + q.x, 0) / n;
+  const cy = e.outline.reduce((a, q) => a + q.y, 0) / n;
+  return [...e.outline, { x: cx, y: cy + e.bottom }];
+}
+
 export function useGripEditing(opts: {
   project: Project;
   selectedDrawing: Drawing2D | null;
   selectedCeiling: Ceiling | null;
+  /** [68] Einzeln gewählte Baugrube (Umriss-Ecken, Kanten, Sohlenhöhe als Griffe). */
+  selectedExcavation?: Excavation | null;
   selectedRoom: Room | null;
   selectedOpeningId: string | null;
   selectedStairId: string | null;
@@ -79,6 +89,8 @@ export function useGripEditing(opts: {
   moveStairBy: (id: string, delta: Vec2) => void;
   moveRoomGrip: (id: string, index: number, pt: Vec2) => void;
   moveCeilingGrip: (id: string, index: number, pt: Vec2) => void;
+  moveExcavationGrip: (id: string, index: number, pt: Vec2) => void;
+  moveExcavationEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   moveGripOf: (
     drawingId: string | null,
     wallId: string | null,
@@ -108,6 +120,7 @@ export function useGripEditing(opts: {
     project,
     selectedDrawing,
     selectedCeiling,
+    selectedExcavation = null,
     selectedRoom,
     selectedOpeningId,
     selectedStairId,
@@ -132,6 +145,8 @@ export function useGripEditing(opts: {
     moveStairBy,
     moveRoomGrip,
     moveCeilingGrip,
+    moveExcavationGrip,
+    moveExcavationEdge,
     moveGripOf,
     moveRoomEdge,
     moveCeilingEdge,
@@ -275,6 +290,12 @@ export function useGripEditing(opts: {
       gripOwnerRange.push([0, 0]);
       return [stairMoveHandle(st)];
     }
+    // [68] Baugrube: Umriss-Ecken + Sohlen-Griff (Lage: Schwerpunkt, y um die Sohlenhöhe versetzt).
+    if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+      const pts = excavationGripPoints(selectedExcavation);
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
+    }
     // Decke: die Umriss-Vertices als Griffe (nur bei genau einer gewählten Decke,
     // solange kein 2D-Element/Wand mitgewählt ist — kein Multi-Select für Decken).
     if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
@@ -386,6 +407,9 @@ export function useGripEditing(opts: {
   //    Verschieben EINER Kante einer komplexen Polylinie, §Task B).
   const edgeGrips: EdgeGrip[] = (() => {
     // ringEdges/openEdges/polylineEdgeGrips: Kern (`geometry/grips.ts`, `grips.rs`).
+    if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+      return ringEdges(selectedExcavation.outline, {});
+    }
     // Decke: geschlossener Ring aus dem Umriss (Auswahl exklusiv, wie bei grips).
     if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       return ringEdges(selectedCeiling.outline, {});
@@ -525,7 +549,7 @@ export function useGripEditing(opts: {
   // Dasselbe für das Verschieben eines ganzen 2D-Elements (Gesamt-Delta) und für
   // Kanten-Griffe von Polylinien (Ziel-Delta): bis zum Loslassen nur Vorschau.
   const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
-  const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
+  const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling" | "excavation"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaMoveRef = useRef<{ kind: "ceiling" | "room" | "stair"; id: string; total: Vec2 } | null>(null);
   const pendingWallMoveRef = useRef<{ wallId: string; total: Vec2 } | null>(null);
   /** Aufgeschobene Öffnungs-Verschiebung im Schnitt/in der Ansicht (neue `position`). */
@@ -634,7 +658,9 @@ export function useGripEditing(opts: {
     if (!owner?.drawingId && !owner?.wallId) {
       // Raum/Decke (exklusiv) — kein Owner, `localIndex` fehlt dann auch, also
       // ist der flache `index` selbst der Ring-Index.
-      const pts = selectedCeiling
+      const pts = selectedExcavation && !selectedCeiling
+        ? selectedExcavation.outline
+        : selectedCeiling
         ? selectedCeiling.outline
         : selectedRoom
         ? selectedRoom.boundary
@@ -907,6 +933,12 @@ export function useGripEditing(opts: {
       if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
       return;
     }
+    // [68] Baugrube: Sohlen-Griff sofort (Höhe), Ecken als Vorschau bis zum Setzen.
+    if (selectedExcavation && !selectedCeilingId && !selectedRoomId) {
+      if (index >= selectedExcavation.outline.length) moveExcavationGrip(selectedExcavation.id, index, pt);
+      else pendingAreaGripRef.current = { kind: "excavation", id: selectedExcavation.id, index, flat: index, pt };
+      return;
+    }
     // Raum/Decke: Eckpunkt-Zug nur als Vorschau, Projekt erst beim Setzen.
     if (selectedRoomId || selectedCeilingId) {
       pendingAreaGripRef.current = selectedRoomId
@@ -950,6 +982,8 @@ export function useGripEditing(opts: {
       const ring =
         pa.kind === "room"
           ? (project.rooms ?? []).find((r) => r.id === pa.id)?.boundary
+          : pa.kind === "excavation"
+          ? selectedExcavation?.outline
           : (project.ceilings ?? []).find((c) => c.id === pa.id)?.outline;
       if (!ring) return [];
       return [{ kind: "poly", pts: ring.map((q, i) => (i === pa.index ? pa.pt : q)), closed: true }];
@@ -994,6 +1028,7 @@ export function useGripEditing(opts: {
     pendingAreaGripRef.current = null;
     if (pa) {
       if (pa.kind === "room") moveRoomGrip(pa.id, pa.index, pa.pt);
+      else if (pa.kind === "excavation") moveExcavationGrip(pa.id, pa.index, pa.pt);
       else moveCeilingGrip(pa.id, pa.index, pa.pt);
     }
     const pw = pendingWallGripRef.current;
@@ -1073,7 +1108,8 @@ export function useGripEditing(opts: {
     applyEdge(pend.edge, pend.delta);
   };
   const applyEdge = (edge: EdgeGrip, delta: Vec2) => {
-    if (selectedRoomId) moveRoomEdge(selectedRoomId, edge.aIndex, edge.bIndex, delta);
+    if (selectedExcavation && !selectedRoomId && !selectedCeilingId) moveExcavationEdge(selectedExcavation.id, edge.aIndex, edge.bIndex, delta);
+    else if (selectedRoomId) moveRoomEdge(selectedRoomId, edge.aIndex, edge.bIndex, delta);
     else if (selectedCeilingId) moveCeilingEdge(selectedCeilingId, edge.aIndex, edge.bIndex, delta);
     else moveEdgeOf(edge.owner?.drawingId ?? selectedDrawingId, edge.owner?.wallId ?? selectedWallId, edge.aIndex, edge.bIndex, delta);
   };

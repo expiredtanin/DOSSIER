@@ -192,6 +192,13 @@ fn find<'a>(root: &'a Map<String, Value>, collection: &str, id: &str) -> Option<
     arr(root.get(collection)).iter().find(|e| id_of(e) == Some(id))
 }
 
+/// Mittelwert der Ecken eines Umrisses (Griff-Lage der Sohlenhöhe einer Baugruben).
+pub fn ring_centroid(ring: &[Value]) -> (f64, f64) {
+    let n = ring.len().max(1) as f64;
+    let (sx, sy) = ring.iter().map(xy).fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
+    (sx / n, sy / n)
+}
+
 fn replace(collection: &str, entity: Value) -> Op {
     Op::Replace { collection: collection.into(), entity }
 }
@@ -406,6 +413,27 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             let (coll, field) = if op == "ceilingGrip" { ("ceilings", "outline") } else { ("rooms", "boundary") };
             let (index, (x, y)) = (r.n("index"), r.p("pt"));
             patch(coll, r.s("id"), &|e| Some(with(e, field, replace_at(e.get(field)?.as_array()?, index, &pt(x, y))))).into()
+        }
+        // [68] Baugrube: Umriss-Ecke ziehen; der Index hinter der letzten Ecke ist der Sohlen-Griff
+        // (Lage = Schwerpunkt, y um die Sohlenhöhe versetzt: Ziehen setzt `bottom` = y − Schwerpunkt-y).
+        "excavationGrip" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("context", r.s("id"), &|e| {
+                let ring = field(e, "outline")?.as_array()?;
+                if index_in(index, ring.len()).is_some() {
+                    return Some(with(e, "outline", replace_at(ring, index, &pt(x, y))));
+                }
+                if index == ring.len() as f64 && y.is_finite() {
+                    let c = ring_centroid(ring);
+                    return Some(with(e, "bottom", js_num(((y - c.1) * 100.0).round() / 100.0)));
+                }
+                None
+            })
+            .into()
+        }
+        "excavationEdge" => {
+            let (a, b, (dx, dy)) = (r.n("a"), r.n("b"), r.p("delta"));
+            patch("context", r.s("id"), &|e| Some(with(e, "outline", move_polygon_edge(field(e, "outline")?.as_array()?, a, b, dx, dy, true)?))).into()
         }
         "ceilingBy" | "roofBy" => {
             let coll = if op == "ceilingBy" { "ceilings" } else { "roofs" };
@@ -1389,6 +1417,22 @@ mod tests {
         assert_eq!(res.ops[0].to_json()["entity"]["bulge"], json!(0.5));
         let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 0]}))).unwrap();
         assert!(res.ops[0].to_json()["entity"].get("bulge").is_none());
+    }
+
+    /// [68] Baugrube: Ecke, Kante und Sohlen-Griff (Index hinter der letzten Ecke).
+    #[test]
+    fn baugrube_griffe() {
+        let r = root(json!({"context": [{"id": "bg", "type": "excavation", "bottom": -2, "outline": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}]}]}));
+        let ent = |v: Value| run(&Lookup::plain(&r), &rq(v)).unwrap().ops[0].to_json()["entity"].clone();
+        let e = ent(json!({"op": "excavationGrip", "id": "bg", "index": 2, "pt": [5, 6]}));
+        assert_eq!(e["outline"][2], json!({"x": 5, "y": 6}));
+        // Kante 0–1 um 1 nach unten: beide Ecken wandern.
+        let e = ent(json!({"op": "excavationEdge", "id": "bg", "a": 0, "b": 1, "delta": [0, -1]}));
+        assert_eq!((e["outline"][0]["y"].as_f64(), e["outline"][1]["y"].as_f64()), (Some(-1.0), Some(-1.0)));
+        // Sohlen-Griff: Schwerpunkt-y = 2, Ziel-y = −1 → Sohle −3.
+        let e = ent(json!({"op": "excavationGrip", "id": "bg", "index": 4, "pt": [2, -1]}));
+        assert_eq!(e["bottom"], json!(-3));
+        assert_eq!(e["outline"][2], json!({"x": 4, "y": 4}));
     }
 
     #[test]

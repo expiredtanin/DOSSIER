@@ -206,6 +206,10 @@ pub enum SplineMode {
 pub struct GridAxis {
     pub label: String,
     pub pos: f64,
+    /// Blasenseite nur dieser Achse (überschreibt `Grid.bubbles`); fehlt = wie das Raster.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bubble: Option<GridBubbles>,
 }
 
 /// Welche Achsenden eine Blase tragen.

@@ -34,6 +34,8 @@ pub struct ExSpec {
     pub ring: Vec<P2>,
     pub bottom: f64,
     pub cut_tan: Vec<f64>,
+    /// Kante mit senkrechtem Verbau (Spundwand): keine Böschung, keine Schraffur.
+    pub shored: Vec<bool>,
     pub fill_tan: f64,
     pub berm_w: f64,
     pub berm_h: f64,
@@ -65,6 +67,30 @@ fn signed_area(r: &[P2]) -> f64 {
     (0..n).map(|i| r[i][0] * r[(i + 1) % n][1] - r[(i + 1) % n][0] * r[i][1]).sum::<f64>() / 2.0
 }
 
+/// Umriss (gegen den Uhrzeigersinn) um `d` nach aussen versetzt: Gehrung an den Ecken, höchstens 4·d weit.
+pub fn offset_ring(ring: &[P2], d: f64) -> Vec<P2> {
+    let n = ring.len();
+    let normal = |i: usize| {
+        let (a, b) = (ring[i], ring[(i + 1) % n]);
+        let l = (b[0] - a[0]).hypot(b[1] - a[1]).max(1e-12);
+        [(b[1] - a[1]) / l, -(b[0] - a[0]) / l]
+    };
+    (0..n)
+        .map(|i| {
+            let (n0, n1) = (normal((i + n - 1) % n), normal(i));
+            let (mx, my) = (n0[0] + n1[0], n0[1] + n1[1]);
+            let k = 1.0 + n0[0] * n1[0] + n0[1] * n1[1];
+            if k < 1e-6 {
+                return [ring[i][0] + n1[0] * d, ring[i][1] + n1[1] * d];
+            }
+            let (sx, sy) = (mx * d / k, my * d / k);
+            let l = sx.hypot(sy);
+            let f = if l > 4.0 * d { 4.0 * d / l } else { 1.0 };
+            [ring[i][0] + sx * f, ring[i][1] + sy * f]
+        })
+        .collect()
+}
+
 impl ExSpec {
     /// Aus dem Modell; `dz` = Höhenbezug des Netzes ([`datum`]). `None` bei kaputtem Umriss.
     pub fn of(e: &Excavation, dz: f64) -> Option<ExSpec> {
@@ -78,14 +104,21 @@ impl ExSpec {
         }
         let n = ring.len();
         let slope = e.slope.filter(|s| s.is_finite() && *s > 0.0).unwrap_or(DEFAULT_SLOPE);
-        let mut cut_tan: Vec<f64> = (0..n).map(|i| tan_deg(e.edge_slopes.as_ref().and_then(|v| v.get(i)).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(slope))).collect();
+        let mut shored: Vec<bool> = (0..n).map(|i| e.edge_shoring.as_ref().and_then(|v| v.get(i)).copied().unwrap_or(false)).collect();
+        let mut cut_tan: Vec<f64> = (0..n).map(|i| if shored[i] { tan_deg(89.5) } else { tan_deg(e.edge_slopes.as_ref().and_then(|v| v.get(i)).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(slope)) }).collect();
         if signed_area(&ring) < 0.0 {
             // Kante i (p_i → p_i+1) wird nach dem Umdrehen Kante n−2−i (mod n).
             ring.reverse();
-            let old = cut_tan.clone();
+            let (old, old_s) = (cut_tan.clone(), shored.clone());
             for i in 0..n {
                 cut_tan[(2 * n - 2 - i) % n] = old[i];
+                shored[(2 * n - 2 - i) % n] = old_s[i];
             }
+        }
+        // Arbeitsraum: Sohle um `workingSpace` nach aussen (Gehrung, höchstens 4× so weit an spitzen Ecken).
+        let ws = e.working_space.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
+        if ws > 0.0 {
+            ring = offset_ring(&ring, ws);
         }
         let bw = e.berm_width.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
         let bh = e.berm_height.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
@@ -93,6 +126,7 @@ impl ExSpec {
             ring,
             bottom: e.bottom + dz,
             cut_tan,
+            shored,
             fill_tan: tan_deg(e.fill_slope.filter(|s| s.is_finite() && *s > 0.0).unwrap_or(DEFAULT_FILL_SLOPE)),
             berm_w: if bh > 0.0 { bw } else { 0.0 },
             berm_h: if bw > 0.0 { bh } else { 0.0 },
@@ -374,38 +408,68 @@ pub struct Volumes {
     pub bottom_area: f64,
 }
 
-/// Integriert (t − neu) über ein Raster der Weite ≤ `h` (Mittelpunkte, höchstens ~1.5 Mio. Proben).
+/// Mengen mehrerer Baugruben ohne Doppelzählung: die Baugruben wirken der Reihe nach (wie in [`site_terrain`]),
+/// je Probe geht der Höhenunterschied einer Baugrube an sie allein — die Summe ist die Vereinigung.
+/// Integriert über ein Raster der Weite ≤ `h` (Mittelpunkte, höchstens ~1.5 Mio. Proben).
 /// `footprint`: Gebäude-Grundfläche (Ringe); Abtrag darin zählt nicht zur Hinterfüllung.
-pub fn volumes(orig: &Tin, ex: &ExSpec, h: f64, footprint: &[Vec<P2>]) -> Volumes {
+/// Sohlenfläche = Fläche des Umrisses ohne die der vorherigen Baugruben (Überlappung per Raster).
+pub fn volumes_union(orig: &Tin, specs: &[&ExSpec], h: f64, footprint: &[Vec<P2>]) -> Vec<Volumes> {
+    if specs.is_empty() {
+        return Vec::new();
+    }
     let idx = TinIndex::new(orig);
-    let r = ex.reach_in(orig, &idx);
-    let b = ex.bbox();
-    let reg = [b[0] - r, b[1] - r, b[2] + r, b[3] + r];
+    let mut reg = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for ex in specs {
+        let (b, r) = (ex.bbox(), ex.reach_in(orig, &idx));
+        reg = [reg[0].min(b[0] - r), reg[1].min(b[1] - r), reg[2].max(b[2] + r), reg[3].max(b[3] + r)];
+    }
     let (w, hh) = (reg[2] - reg[0], reg[3] - reg[1]);
     let mut h = h.max(1e-3);
     while (w / h).ceil() * (hh / h).ceil() > 1.5e6 {
         h *= 1.2;
     }
-    let (nx, ny) = ((w / h).ceil() as usize, (hh / h).ceil() as usize);
+    let (nx, ny) = (((w / h).ceil() as usize).max(1), ((hh / h).ceil() as usize).max(1));
     let (hx, hy) = (w / nx as f64, hh / ny as f64);
     let cell = hx * hy;
-    let mut v = Volumes { bottom_area: signed_area(&ex.ring).abs(), ..Default::default() };
+    let boxes: Vec<[f64; 4]> = specs.iter().map(|e| e.bbox()).collect();
+    let overlaps: Vec<bool> = (0..specs.len())
+        .map(|k| (0..k).any(|j| boxes[j][0] < boxes[k][2] && boxes[k][0] < boxes[j][2] && boxes[j][1] < boxes[k][3] && boxes[k][1] < boxes[j][3]))
+        .collect();
+    let mut out: Vec<Volumes> = specs.iter().map(|e| Volumes { bottom_area: signed_area(&e.ring).abs(), ..Default::default() }).collect();
+    let mut shared = vec![0.0; specs.len()];
     for j in 0..ny {
         for i in 0..nx {
             let p = [reg[0] + (i as f64 + 0.5) * hx, reg[1] + (j as f64 + 0.5) * hy];
             let Some(t) = idx.z_at(p[0], p[1]) else { continue };
-            let dz = t - ex.apply(t, p);
-            if dz > 0.0 {
-                v.cut += dz * cell;
-                if !footprint.iter().any(|f| point_in_ring(p, f)) {
-                    v.backfill += dz * cell;
+            let mut cur = t;
+            let outside_fp = !footprint.iter().any(|f| point_in_ring(p, f));
+            for (k, ex) in specs.iter().enumerate() {
+                if overlaps[k] && p[0] >= boxes[k][0] && p[0] <= boxes[k][2] && p[1] >= boxes[k][1] && p[1] <= boxes[k][3] && point_in_ring(p, &ex.ring) && (0..k).any(|q| point_in_ring(p, &specs[q].ring)) {
+                    shared[k] += cell;
                 }
-            } else {
-                v.fill -= dz * cell;
+                let next = ex.apply(cur, p);
+                let dz = cur - next;
+                if dz > 0.0 {
+                    out[k].cut += dz * cell;
+                    if outside_fp {
+                        out[k].backfill += dz * cell;
+                    }
+                } else {
+                    out[k].fill -= dz * cell;
+                }
+                cur = next;
             }
         }
     }
-    v
+    for (v, s) in out.iter_mut().zip(shared) {
+        v.bottom_area = (v.bottom_area - s).max(0.0);
+    }
+    out
+}
+
+/// Mengen einer einzelnen Baugrube (s. [`volumes_union`]).
+pub fn volumes(orig: &Tin, ex: &ExSpec, h: f64, footprint: &[Vec<P2>]) -> Volumes {
+    volumes_union(orig, &[ex], h, footprint).pop().unwrap_or_default()
 }
 
 // ── Gelände mit Baugruben, zwischengespeichert ──────────────────────────────
@@ -492,6 +556,40 @@ pub fn terrain_model_mesh<'a>(p: &Project, t: &'a TerrainMesh) -> (std::borrow::
     (Cow::Owned(pos), Cow::Owned(idx), st.modified.is_some())
 }
 
+/// [T6] Luftbild-Farben (flach r,g,b je Eckpunkt des Original-Netzes) auf das geänderte Gelände übertragen:
+/// jeder neue Eckpunkt erhält die in der Grundrissprojektion (x, y) des Originals interpolierte Farbe
+/// (Böschungen und Sohle bekommen so die Farbe des Bildes darüber); ausserhalb der nächste Eckpunkt.
+pub fn reproject_colors(orig: &Tin, colors: &[f64], new: &Tin) -> Vec<f64> {
+    let idx = TinIndex::new(orig);
+    let col = |i: usize| -> [f64; 3] { [colors[3 * i], colors[3 * i + 1], colors[3 * i + 2]] };
+    let mut out = Vec::with_capacity(new.xy.len() * 3);
+    for p in &new.xy {
+        let c = match idx.bary_at(p[0], p[1]) {
+            Some((t, l)) => {
+                let (a, b, c) = (col(t[0]), col(t[1]), col(t[2]));
+                [0, 1, 2].map(|k| l[0] * a[k] + l[1] * b[k] + l[2] * c[k])
+            }
+            None => {
+                let n = orig.xy.iter().enumerate().min_by(|a, b| (a.1[0] - p[0]).hypot(a.1[1] - p[1]).total_cmp(&(b.1[0] - p[0]).hypot(b.1[1] - p[1]))).map_or(0, |x| x.0);
+                col(n)
+            }
+        };
+        out.extend(c);
+    }
+    out
+}
+
+/// Vertex-Farben des Geländes im Modell: unverändert, oder auf das Netz mit Baugruben übertragen.
+/// `None` ohne (passende) Farben.
+pub fn terrain_vertex_colors(p: &Project, t: &TerrainMesh) -> Option<Vec<f64>> {
+    let c = t.vertex_colors.as_ref().filter(|v| !v.is_empty())?;
+    let st = site_terrain(p, t);
+    match &st.modified {
+        None => Some(c.clone()),
+        Some(m) => (c.len() == st.orig.xy.len() * 3).then(|| reproject_colors(&st.orig, c, m)),
+    }
+}
+
 /// Mengen je Baugrube (gegen das gewachsene Terrain des ersten Netzes, das sie trifft).
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -507,18 +605,27 @@ pub struct ExQty {
 
 pub fn quantities(p: &Project) -> Vec<ExQty> {
     let fp: Vec<Vec<P2>> = crate::site_rules::building_footprint(p).iter().flat_map(|poly| poly.first().map(|r| r.iter().map(|v| [v.x, v.y]).collect::<Vec<P2>>())).collect();
-    let mut out = Vec::new();
-    for e in excavations(p) {
-        for t in terrains(p) {
-            let st = site_terrain(p, t);
-            let Some((_, spec, _)) = st.items.iter().find(|(id, ..)| *id == e.id) else { continue };
-            let h = (spec.ring.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max) - spec.ring.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min)).max(1.0) / 400.0;
-            let v = volumes(&st.orig, spec, h.clamp(0.02, 0.5), &fp);
-            out.push(ExQty { id: e.id.clone(), name: e.name.clone(), bottom: e.bottom, bottom_area: v.bottom_area, cut: v.cut, fill: v.fill, backfill: v.backfill });
-            break;
+    let mut done: Vec<ExQty> = Vec::new();
+    // Je Gelände-Netz alle Baugruben, die es trifft, zusammen (Überlagerungen zählen einmal).
+    for t in terrains(p) {
+        let st = site_terrain(p, t);
+        let hits: Vec<&(String, ExSpec, Vec<Vec<P2>>)> = st.items.iter().filter(|(id, ..)| !done.iter().any(|q| q.id == *id)).collect();
+        if hits.is_empty() {
+            continue;
+        }
+        let specs: Vec<&ExSpec> = hits.iter().map(|(_, s, _)| s).collect();
+        let (x0, x1) = specs.iter().flat_map(|s| s.ring.iter().map(|q| q[0])).fold((f64::INFINITY, f64::NEG_INFINITY), |a, x| (a.0.min(x), a.1.max(x)));
+        let h = ((x1 - x0).max(1.0) / 400.0).clamp(0.02, 0.5);
+        let vols = volumes_union(&st.orig, &specs, h, &fp);
+        for ((id, ..), v) in hits.iter().zip(vols) {
+            let Some(e) = excavations(p).into_iter().find(|e| e.id == *id) else { continue };
+            done.push(ExQty { id: e.id.clone(), name: e.name.clone(), bottom: e.bottom, bottom_area: v.bottom_area, cut: v.cut, fill: v.fill, backfill: v.backfill });
         }
     }
-    out
+    // Reihenfolge wie im Modell.
+    let order: Vec<&str> = excavations(p).iter().map(|e| e.id.as_str()).collect();
+    done.sort_by_key(|q| order.iter().position(|i| *i == q.id).unwrap_or(usize::MAX));
+    done
 }
 
 /// Höhe des gewachsenen (`designed = false`) bzw. gestalteten Terrains im Modellbezug; `None` ohne Gelände.
@@ -568,6 +675,9 @@ pub fn slope_hatch(t: &Tin, ex: &ExSpec, spacing: f64) -> Vec<(P2, P2)> {
         let (a, b) = (ex.ring[i], ex.ring[(i + 1) % n]);
         let len = (b[0] - a[0]).hypot(b[1] - a[1]);
         let nn = normal(i);
+        if ex.shored[i] {
+            continue;
+        }
         let k = (len / spacing).floor() as usize;
         let off = (len - k as f64 * spacing) / 2.0;
         for s in 0..=k {
@@ -580,7 +690,7 @@ pub fn slope_hatch(t: &Tin, ex: &ExSpec, spacing: f64) -> Vec<(P2, P2)> {
         // Fächer an der konvexen Ecke b.
         let n2 = normal((i + 1) % n);
         let cross = nn[0] * n2[1] - nn[1] * n2[0];
-        if cross > 1e-9 {
+        if cross > 1e-9 && !ex.shored[(i + 1) % n] {
             let a0 = nn[1].atan2(nn[0]);
             let mut a1 = n2[1].atan2(n2[0]);
             if a1 < a0 {
@@ -668,6 +778,62 @@ mod tests {
             for q in l {
                 assert!((ex.dist(*q).0 - 3.0).abs() < 0.1, "{q:?}");
             }
+        }
+    }
+
+    #[test]
+    fn arbeitsraum_verbau_und_ueberlappung() {
+        // Arbeitsraum 1 m: Sohle 12 × 12 statt 10 × 10 (Gehrung), Mengen wachsen entsprechend.
+        let mut e = square(5.0, -3.0);
+        e.working_space = Some(1.0);
+        let ws = ExSpec::of(&e, 0.0).unwrap();
+        assert!((signed_area(&ws.ring) - 144.0).abs() < 1e-9, "{}", signed_area(&ws.ring));
+        // Senkrechter Verbau auf allen Kanten: Abtrag = Sohle × Tiefe (kaum Böschung), keine Schraffur.
+        let mut e = square(5.0, -3.0);
+        e.edge_shoring = Some(vec![true; 4]);
+        let sh = ExSpec::of(&e, 0.0).unwrap();
+        let t = flat(0.0, 50.0);
+        let v = volumes(&t, &sh, 0.05, &[]);
+        assert!((v.cut - 300.0).abs() < 0.03 * 300.0, "{}", v.cut);
+        assert!(slope_hatch(&t, &sh, 0.5).is_empty());
+        // Nur eine Kante verbaut: Hatch an den anderen drei bleibt, Index folgt dem Umlaufsinn (auch im Uhrzeigersinn).
+        let mut e = square(5.0, -3.0);
+        e.outline.reverse();
+        e.edge_shoring = Some(vec![true, false, false, false]);
+        let one = ExSpec::of(&e, 0.0).unwrap();
+        assert_eq!(one.shored.iter().filter(|b| **b).count(), 1);
+        // Überlagerung: zwei sich überdeckende Gruben zählen die gemeinsame Fläche einmal.
+        let mut a = square(5.0, -3.0);
+        a.id = "a".into();
+        let mut b = square(5.0, -3.0);
+        b.id = "b".into();
+        let (sa, sb) = (ExSpec::of(&a, 0.0).unwrap(), ExSpec::of(&b, 0.0).unwrap());
+        let single = volumes(&t, &sa, 0.1, &[]);
+        let both = volumes_union(&t, &[&sa, &sb], 0.1, &[]);
+        assert!((both[0].cut + both[1].cut - single.cut).abs() < 1e-6, "{} vs {}", both[0].cut + both[1].cut, single.cut);
+        assert!(both[1].cut.abs() < 1e-6 && both[1].bottom_area < 1.0, "{:?}", both[1]);
+        // Teilweise versetzt: Summe < Summe der Einzelmengen, > jede einzelne.
+        let mut c = square(5.0, -3.0);
+        for q in &mut c.outline {
+            q.x += 6.0;
+        }
+        let sc = ExSpec::of(&c, 0.0).unwrap();
+        let sep = volumes(&t, &sc, 0.1, &[]);
+        let u = volumes_union(&t, &[&sa, &sc], 0.1, &[]);
+        let sum = u[0].cut + u[1].cut;
+        assert!(sum < single.cut + sep.cut - 1.0 && sum > single.cut, "{sum}");
+    }
+
+    #[test]
+    fn luftbildfarben_auf_geaendertem_gelaende() {
+        // Original-Netz mit Farbverlauf in x; nach der Baugrube behalten alle neuen Punkte die Farbe ihrer (x, y).
+        let t = flat(0.0, 50.0);
+        let colors: Vec<f64> = t.xy.iter().flat_map(|p| [(p[0] + 50.0) / 100.0, 0.5, 0.25]).collect();
+        let r = excavate(&t, &ExSpec::of(&square(5.0, -3.0), 0.0).unwrap()).unwrap();
+        let c = reproject_colors(&t, &colors, &r.tin);
+        assert_eq!(c.len(), r.tin.xy.len() * 3);
+        for (p, q) in r.tin.xy.iter().zip(c.chunks(3)) {
+            assert!((q[0] - (p[0] + 50.0) / 100.0).abs() < 1e-9 && (q[1] - 0.5).abs() < 1e-9, "{p:?} {q:?}");
         }
     }
 

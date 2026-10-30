@@ -1823,15 +1823,15 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
     for obj in p.context.as_deref().unwrap_or(&[]) {
         match obj {
             ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => {
-                // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben nur ungeändert).
-                let (pos, idx, changed) = crate::excavation::terrain_model_mesh(p, m);
+                // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben auf das geänderte Netz übertragen).
+                let (pos, idx, _) = crate::excavation::terrain_model_mesh(p, m);
                 out.push(RMesh {
                     crease_angle: None,
                     positions: pos.into_owned(),
                     indices: indices_u32(&idx),
                     kind: "terrain",
                     color: TERRAIN_RGB,
-                    vertex_colors: if changed { None } else { m.vertex_colors.clone().filter(|v| !v.is_empty()) },
+                    vertex_colors: crate::excavation::terrain_vertex_colors(p, m),
                     material_index: None,
                 })
             }

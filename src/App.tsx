@@ -20,6 +20,7 @@ import { addLegend, patchLegend, removeLegend } from "./analysis/legend";
 import { lengthFromDisplay, unitsForLevel } from "./tools/displayUnits";
 import { NON_LENGTH_FIELDS } from "./commands/parseInput";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDormerNotice } from "./state/useDormerNotice";
 import {
   collectVisibleCodes,
   flattenCategories,
@@ -366,6 +367,7 @@ export default function App() {
   const applyChange = useStore((s) => s.applyChange);
   const groupChanges = useStore((s) => s.groupChanges);
   const notify = useStore((s) => s.notify);
+  useDormerNotice(project, notify);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const canUndo = useStore((s) => s.canUndo);
@@ -1188,6 +1190,12 @@ export default function App() {
     () => (project.ceilings ?? []).find((c) => c.id === selectedCeilingId) ?? null,
     [project.ceilings, selectedCeilingId],
   );
+  // [68] Genau eine gewählte Baugrube (Griffe für Umriss und Sohle).
+  const selectedExcavation = useMemo(() => {
+    if (selectedContextObjectIds.length !== 1) return null;
+    const o = (project.context ?? []).find((c) => c.id === selectedContextObjectIds[0]);
+    return o && o.type === "excavation" ? o : null;
+  }, [project.context, selectedContextObjectIds]);
   const selectedRoom = useMemo(
     () => (project.rooms ?? []).find((r) => r.id === selectedRoomId) ?? null,
     [project.rooms, selectedRoomId],
@@ -1670,6 +1678,8 @@ export default function App() {
     setWallThickness,
     updateOpening,
     moveCeilingGrip,
+    moveExcavationGrip,
+    moveExcavationEdge,
     moveCeilingBy,
     moveCeilingEdge,
     updateCeiling,
@@ -1757,6 +1767,7 @@ export default function App() {
     project,
     selectedDrawing,
     selectedCeiling,
+    selectedExcavation,
     selectedRoom,
     selectedOpeningId,
     selectedStairId,
@@ -1781,6 +1792,8 @@ export default function App() {
     moveStairBy,
     moveRoomGrip,
     moveCeilingGrip,
+    moveExcavationGrip,
+    moveExcavationEdge,
     moveGripOf,
     moveRoomEdge,
     moveCeilingEdge,

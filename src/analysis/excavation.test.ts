@@ -64,3 +64,41 @@ describe("[T6] Gelände aus Höhenlinien", () => {
     expect(Math.max(...zs)).toBeGreaterThan(3);
   });
 });
+
+describe("[68] Arbeitsraum, Verbau, Überlagerung", () => {
+  const pit = (id: string, dx: number, extra: object = {}) => ({
+    id,
+    type: "excavation" as const,
+    name: id,
+    outline: [{ x: -5 + dx, y: -5 }, { x: 5 + dx, y: -5 }, { x: 5 + dx, y: 5 }, { x: -5 + dx, y: 5 }],
+    bottom: -3,
+    slope: 45,
+    ...extra,
+  });
+  const terrain = project().context![0];
+  const withPits = (...pits: ReturnType<typeof pit>[]): Project => ({ ...project(), context: [terrain, ...pits] });
+
+  it("Arbeitsraum vergrössert Sohle und Abtrag", () => {
+    const [plain] = excavationQuantities(withPits(pit("a", 0)));
+    const [ws] = excavationQuantities(withPits(pit("a", 0, { workingSpace: 1 })));
+    expect(ws.bottomArea).toBeCloseTo(144, 6);
+    expect(ws.cut).toBeGreaterThan(plain.cut * 1.3);
+  });
+
+  it("senkrechter Verbau: Abtrag ≈ Sohle × Tiefe", () => {
+    const [q] = excavationQuantities(withPits(pit("a", 0, { edgeShoring: [true, true, true, true] })));
+    expect(Math.abs(q.cut - 300) / 300).toBeLessThan(0.03);
+  });
+
+  it("überlappende Baugruben: Summe zählt die Überlagerung einmal", () => {
+    const [single] = excavationQuantities(withPits(pit("a", 0)));
+    const same = excavationQuantities(withPits(pit("a", 0), pit("b", 0)));
+    expect(same.map((q) => q.id)).toEqual(["a", "b"]);
+    expect(same[0].cut + same[1].cut).toBeCloseTo(single.cut, 3);
+    expect(same[1].bottomArea).toBeLessThan(1);
+    const shifted = excavationQuantities(withPits(pit("a", 0), pit("b", 6)));
+    const sum = shifted[0].cut + shifted[1].cut;
+    expect(sum).toBeGreaterThan(single.cut);
+    expect(sum).toBeLessThan(2 * single.cut - 10);
+  });
+});

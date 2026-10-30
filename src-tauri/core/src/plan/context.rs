@@ -128,22 +128,33 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>) {
         let w = if index { 0.25 } else { 0.1 };
         let n = l.pts.len();
         let segs = if l.closed { n } else { n - 1 };
-        for i in 0..segs {
-            let (a, b) = (l.pts[i], l.pts[(i + 1) % n]);
-            out.push(ink_line(v2(a[0], a[1]), v2(b[0], b[1]), w, TERRAIN_INK, None));
-        }
-        if !index {
-            continue;
-        }
-        // Beschriftung in der Mitte der Linie (nur, wenn sie lang genug ist).
-        let len: f64 = (0..segs).map(|i| (l.pts[(i + 1) % n][0] - l.pts[i][0]).hypot(l.pts[(i + 1) % n][1] - l.pts[i][1])).sum();
-        if len < 12.0 * text_h {
-            continue;
-        }
+        let seg_len = |i: usize| (l.pts[(i + 1) % n][0] - l.pts[i][0]).hypot(l.pts[(i + 1) % n][1] - l.pts[i][1]);
+        let len: f64 = (0..segs).map(seg_len).sum();
+        // Beschriftung in der Mitte der Zähllinie (nur, wenn sie lang genug ist); die Linie wird dort unterbrochen.
+        let text = crate::js_fmt::to_fixed(l.level, if iv.fract() == 0.0 { 0 } else { 1 });
+        let half = 0.3 * text_h * text.chars().count() as f64;
+        let gap = (index && len >= 12.0 * text_h).then(|| (len / 2.0 - half - 0.4 * text_h, len / 2.0 + half + 0.4 * text_h));
         let mut acc = 0.0;
         for i in 0..segs {
             let (a, b) = (l.pts[i], l.pts[(i + 1) % n]);
-            let d = (b[0] - a[0]).hypot(b[1] - a[1]);
+            let d = seg_len(i);
+            // Anteile (Bruchteile 0..1) des Segments ausserhalb der Lücke.
+            let mut spans = vec![(0.0, 1.0)];
+            if let (Some((g0, g1)), true) = (gap, d > 0.0) {
+                let (f0, f1) = (((g0 - acc) / d).clamp(0.0, 1.0), ((g1 - acc) / d).clamp(0.0, 1.0));
+                spans = [(0.0, f0), (f1, 1.0)].into_iter().filter(|(x, y)| y - x > 1e-9).collect();
+            }
+            for (f0, f1) in spans {
+                let pt = |f: f64| v2(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
+                out.push(ink_line(pt(f0), pt(f1), w, TERRAIN_INK, None));
+            }
+            acc += d;
+        }
+        let Some(_) = gap else { continue };
+        let mut acc = 0.0;
+        for i in 0..segs {
+            let (a, b) = (l.pts[i], l.pts[(i + 1) % n]);
+            let d = seg_len(i);
             if acc + d >= len / 2.0 && d > 0.0 {
                 let f = (len / 2.0 - acc) / d;
                 let mut ang = (b[1] - a[1]).atan2(b[0] - a[0]);
@@ -151,8 +162,6 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>) {
                     ang += std::f64::consts::PI;
                 }
                 // Text mittig auf die Linie (Breite ≈ 0.6 · Höhe je Zeichen, Grundlinie ≈ −0.35 · Höhe).
-                let text = crate::js_fmt::to_fixed(l.level, if iv.fract() == 0.0 { 0 } else { 1 });
-                let half = 0.3 * text_h * text.chars().count() as f64;
                 let (c, s) = (ang.cos(), ang.sin());
                 let m = (a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
                 out.push(Primitive::DrawingText {
@@ -311,6 +320,11 @@ mod tests {
         assert!(labels.contains(&"5"), "{labels:?}");
         let ex = out.iter().filter(|q| matches!(q, Primitive::Line { color: Some(c), .. } if c == EXCAVATION_INK)).count();
         assert!(ex > 20, "{ex}");
+        // Die Zähllinie ist unter ihrer Beschriftung unterbrochen: keine Linie läuft durch den Textmittelpunkt.
+        let at = out.iter().find_map(|q| if let Primitive::DrawingText { text, at, .. } = q { (text == "5").then_some(*at) } else { None }).unwrap();
+        let near = out.iter().filter(|q| matches!(q, Primitive::Line { a, b, weight_mm, color: Some(c), .. }
+            if *weight_mm == 0.25 && c == TERRAIN_INK && (a.x.min(b.x) - 0.01..=a.x.max(b.x) + 0.01).contains(&at.x) && (a.y.min(b.y) - 0.01..=a.y.max(b.y) + 0.01).contains(&at.y))).count();
+        assert_eq!(near, 0, "Linie läuft durch das Etikett bei {at:?}");
     }
 
     #[test]

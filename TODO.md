@@ -1262,8 +1262,11 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     Ausschnitt. **Haarfugen** der Dachfläche in der Ansicht: Kontur in Füllfarbe 0.15 mm statt 0.05 mm. Wand ↔
     Dach: [G2]. Wand ↔ Decke: bestehende Schicht-Dominanz (3D je Band nach Rang, Schnitt
     `subtract_dominant_bands`) im CLI-Schnitt des Beispielprojekts angesehen, nicht geändert. Offen:
-    3D-Live-Schnitt-Deckel verschnittener Dächer, Kehlen symmetrisch je Schicht, Warnung bei gekappter Gaube in
-    der UI, Wand ↔ Decke für beliebige Polygone im Schnitt ([G6]).
+    3D-Live-Schnitt-Deckel verschnittener Dächer, Kehlen symmetrisch je Schicht, Wand ↔ Decke für beliebige Polygone im Schnitt ([G6]).
+  - (30.10.) **Hinweis bei gekappter Gaube:** Kern-Abfrage `dormerStatus` (`dormer.rs::status`: gekappt/ungültig,
+    tatsächliche Stirnhöhe); Objekt-Info des Dachs zeigt je Gaube eine Warnung, ein Toast erscheint, wenn eine Gaube
+    durch Anlegen/Ändern neu gekappt (oder unbrauchbar) wird (`useDormerNotice`; beim Öffnen nur merken). Tests Rust +
+    vitest (`dormerStatus.test.ts`). Nicht in der Tauri-App geprüft.
   - (30.10.) Boolean-Werkzeug dafür: Manifold-Port `manifold-rust`, nicht truck — truck scheitert an Gaube und
     L-Ecke (bündige Unterseiten), `manifold-rust` rechnet beide exakt und dicht. Details und Plan: [107].
 - ○ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M
@@ -1427,9 +1430,13 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Tests: Rust (Bruchkanten, Kegelhügel ohne Überschwingen/flache Dreiecke, Prisma dicht, Unsinn), vitest.
   Geprüft im Linux-Container (CLI-Grundriss/-Schnitt/-Ansicht eines Hügels mit Baugrube angesehen; Erdreich-Schraffur
   über den Kern-Generator gerendert, das CLI-SVG zeigt keine Schraffuren), nicht in der Tauri-App.
-  Offen: swissALTI3D-Raster wird nicht geglättet (nur Äquidistanz 1 m gesetzt); Natural-Neighbour/Clough-Tocher statt
-  Hermite-Teilung; Höhenlinien unter der Beschriftung nicht unterbrochen; Luftbild-Farben fallen auf geändertem
-  Gelände weg; Erdreich-Band fest 1.5 m (nicht bis zur Planunterkante). · L
+  (30.10., Folge) **Höhenlinien** sind unter der Zähllinien-Beschriftung unterbrochen (Lücke = Textbreite + 0.4·Höhe je
+  Seite). **swissALTI3D-Glättung:** Importdialog „Glättung des Höhenrasters" (Rohdaten/leicht = 1/stark = 3 Durchgänge),
+  Kern `terrain::smooth_grid` (Binomialfilter [1 2 1] je Achse, Lücken bleiben). **Luftbild-Farben auf geändertem Gelände:**
+  `excavation::reproject_colors` überträgt die Vertex-Farben per Grundriss-Projektion (x, y) auf das Netz mit Baugruben
+  (3D). Erdreich-Band konfigurierbar (`earthDepth`, s. [68]). Tests Rust (Lücke, Glättung, Farben), vitest (Raster).
+  Offen: Natural-Neighbour/Clough-Tocher statt Hermite-Teilung; Erdreich-Band nicht „bis zur Planunterkante"; Glättung
+  ohne Kantenerhalt (Gebäude/Böschungen im Raster werden mitgeglättet). · L
 - ✅ **[T7] Rotationskörper/Loft im UI** (API besteht). · S–M — 30.10.: Befehle `revolve` (Profil + Achse aus 2 Plan-Punkten + Winkel; Achse waagrecht auf Höhe r_max, Profil auf einer Seite) und `loft` (≥ 2 Profile der Reihe nach, gleichmässig über die Höhe; Punktzahl durch Kantenteilung angeglichen) in `cmd_solid.rs`/`cmds/{revolve,loft}.ts`, Körper als `ExtrudedSolid.brep` (Objekt-Info, STEP, Kennwerte wie die Grundkörper); Kürzel `rev`/`lf`, Werkzeugpalette 3D. Tests Rust (Spezifikation, Ops, truck-Volumen/STEP), vitest (Befehlsablauf). Nicht in der Tauri-App getestet. Offen: Achse senkrecht/beliebig im Raum, Loft mit Führungskurve, Profil-Startpunkt-Ausrichtung beim Loft.
 - ✅ **[T8] Kollisionsprüfung im 3D zeigen** (heute nur Marker im Grundriss). · S — 30.10.: Treffer in Sitzung (`panels/clashSession.ts`), Panel „Kollisionen" (`ClashPanel`: Liste, Klick wählt beide Bauteile und fährt die 3D-Kamera auf die Durchdringung, `cameraBridge.focusCamera`), im 3D rote Hüllquader aller Treffer (`clashHighlightLines` in `viewportContent`); Prüflauf öffnet das Panel, Marker im Grundriss bleiben. Tests vitest (Linien, Auswahl, Kamera-Fokus). Nicht im echten WebGPU-Viewport/Tauri geprüft. Offen: Hüllquader statt exakter Durchdringungsgeometrie, Panel-Name zeigt Ids statt Bauteilnamen, Wiederholung/Ignorieren einzelner Treffer.
 
@@ -1812,8 +1819,14 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   assoziativ [38] an Achse/Achsschnittpunkt. Befehl `grid` (Kürzel `achsraster`, `achsen`, Werkzeug „Achsraster"):
   Ursprung, dann Feldweiten als Text (`6 4.5 3x5`), Option Radial; Attribute-Panel: Blasenseite, Überstand, Blasen-Ø,
   Geschosse, 3D. Geprüft im Linux-Container (Rust, vitest, e2e, CLI-SVG Grundriss/Schnitt/Ansicht), nicht in der
-  Tauri-App/Metal. Offen: Achsbeschriftung je Achse im UI ändern, Blasenseite je Achse, Achsen als Autodim-Vorschlag,
-  IFC `IfcGrid`, Raster-Versatz je Geschoss. · M
+  Tauri-App/Metal. Offen: Achsen als Autodim-Vorschlag, Raster-Versatz je Geschoss. · M
+  - (30.10.) **Achsbeschriftung und Blasenseite je Achse** (`GridAxis.bubble`, optional, überschreibt `Grid.bubbles`;
+    `grid.rs`): Attribute-Panel listet alle Achsen (Strahl/Ring bei radial) mit Textfeld Beschriftung und Auswahl
+    Blasenseite (statt Objekt-Info, dort steht das Raster nicht). **IFC:** `IfcGrid` (`REC_GRID` in `ifc_data.rs`/
+    `ifc_export.rs`, IFC4 und 2x3): a-Achsen = UAxes, b-Achsen = VAxes als `IfcGridAxis` mit `IfcPolyline` in Welt-XY
+    (Bögen in ≤ 5°-Sehnen, kein `IfcCircle`), ohne eigene Darstellung (2D-Kurven in 3D-Kontext scheitern in ifcopenshell), am Geschoss (genau ein
+    `levels`-Eintrag) sonst am Gebäude. Tests: Rust (Blasenseite), vitest `exportIfc.grid.test.ts` (Text IFC4/2x3 +
+    ifcopenshell `validate-ifc.py` gültig, Achsen lesbar; ortho und radial).
 - ◐ **[110] Linientyp ohne Strichstärke.** (30.10., Wunsch Maintainer: „Volllinie 0.5/0.35 soll es nicht
   geben") Ein Linienstil ist nur Muster (Volllinie, Strich, Punkt, Zickzack, Motiv) + Farbe; die Stärke trägt
   das Element (`Drawing2D.weightMm`, sonst Ebene), die Schraffur (neu `HatchStyle.lineWeight`, Default 0.13),
@@ -1937,8 +1950,18 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Layout-Tabelle „Erdarbeiten" ([111], Quelle `earthworks`), CLI `kennzahlen` → `erdarbeiten`.
   Baurecht ([63]): Geländehöhen an der Fassade (gewachsen/gestaltet, Ecken + alle ≤ 2 m), massgebendes Terrain =
   tiefster gewachsener Punkt an der Fassade (vereinfacht), Gesamthöhe dagegen geprüft (ohne Gelände wie bisher ±0.00).
-  Offen: Mengen je Baugrube gegen das gewachsene Terrain (Überlagerungen doppelt); Arbeitsraum als Abstand;
-  senkrechter Verbau (Spundwand) nur als 89.5°-Böschung; Griffe/Objekt-Info für den Umriss; IVHB-Terrain nach
+  (30.10., Folge) **Griffe** im Grundriss (genau eine gewählte Baugrube): Umriss-Ecken, Kanten (parallel ziehen) und
+  Sohlenhöhe (Kern `grips.rs` `excavationGrip`/`excavationEdge`; der Sohlen-Griff sitzt im Schwerpunkt, y um die Sohlenhöhe
+  versetzt, Ziehen setzt `bottom` auf 1 cm gerundet; Ecken als Vorschau bis zum Loslassen). **Arbeitsraum**
+  `workingSpace` (m): Umriss gilt als Gebäude-Grundfläche, Sohle um das Mass nach aussen (Gehrung ≤ 4×). **Verbau**
+  `edgeShoring` je Kante: senkrecht (89.5° im Rechner, ohne Böschungsschraffur), Panel: Kästchen je Kante.
+  **Überlagerung:** `volumes_union` wirkt die Baugruben der Reihe nach (wie das Netz), Differenz je Probe geht an
+  die jeweilige Grube — Summe = Vereinigung; Sohlenfläche ohne die der früheren Gruben (per Raster, ≈).
+  Erdreich-Band: `TerrainMesh.earthDepth` (Panel „Erdreich-Band im Schnitt", Default 1.5 m). Tests Rust
+  (Arbeitsraum/Verbau/Überlappung, Griffe), vitest (Mengen, Griffe). CLI-Grundriss/-Schnitt mit Arbeitsraum + Verbau
+  angesehen (Linux). Offen: Verbau als echte Wand im Schnitt mit Dicke/Schraffur; Überlappung der Sohlenfläche
+  nur gerastert; Arbeitsraum an konkaven Ecken ohne Selbstüberschneidungs-Prüfung; Griffe nicht in der Tauri-App
+  geprüft; IVHB-Terrain nach
   kantonalem Recht (Lotrechte statt tiefster Fassadenpunkt); nicht in der Tauri-App geprüft.
 
 - ◐ **[107] Manifold für Körper-Booleans (Schritt 1: trucksolid).** (30.10.) `manifold-rust` `=0.19.1` (Apache-2.0,
