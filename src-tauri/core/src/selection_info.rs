@@ -656,6 +656,7 @@ fn roof_selection(root: &Map<String, Value>, r: &Value) -> Result<J, String> {
         .v("edges", roof_edges(r))
         .v("holes", J::arr(holes))
         .v("hasEdgePitch", Value::Bool(field(r, "edgePitchDeg").is_some()))
+        .raw("dormers", r, "dormers")
         .done();
     Ok(O::default()
         .s("kind", "roof")

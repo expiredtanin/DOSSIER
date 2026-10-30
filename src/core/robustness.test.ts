@@ -235,6 +235,23 @@ function corruptions(base: Project, seed: number): [string, Project][] {
       }
     }
   });
+  add("Gauben kaputt ([G5])", (p) => {
+    const roofs = list(p, "roofs");
+    const bad = [NaN, -1, 0, 1e9, Infinity];
+    if (!Array.isArray(p.openings)) p.openings = [];
+    for (const [i, rf] of roofs.entries()) {
+      const o = rf.outline as { x: number; y: number }[] | undefined;
+      const c = Array.isArray(o) && o[0] ? { x: o[0].x + 1, y: o[0].y + 1 } : { x: 1, y: 1 };
+      rf.dormers = [
+        { id: `GD${i}a`, kind: "sattel", position: c, width: 2, frontHeight: 1.2 },
+        { id: `GD${i}b`, kind: "unbekannt", position: { x: NaN, y: 0 }, width: bad[i % bad.length], frontHeight: bad[(i + 1) % bad.length] },
+        { id: `GD${i}c`, kind: "schlepp", position: c, width: 1e-9, frontHeight: 1, depth: -5, pitchDeg: 89, overhang: NaN, wallTypeId: "fehlt", roofTypeId: "fehlt" },
+        { id: `GD${i}d`, kind: "walm", position: c, width: 3, frontHeight: 1, overhang: 1e6 },
+      ];
+      list(p, "openings").push({ id: `GW${i}`, type: "opening", hostWallId: "", hostRoofId: rf.id, hostDormerId: `GD${i}a`, categoryCode: "21", kind: "window", position: NaN, width: 0.8, height: 0.8, sillHeight: 0.1 });
+      list(p, "openings").push({ id: `GX${i}`, type: "opening", hostWallId: "", hostRoofId: rf.id, hostDormerId: "fehlt", categoryCode: "21", kind: "window", position: 0, width: 0.8, height: 0.8, sillHeight: 0 });
+    }
+  });
   add("Baurecht/Sonne kaputt", (p) => {
     p.siteRules = { parcel: [{ x: 0, y: 0 }, { x: NaN, y: 1 }, { x: 1, y: 1 }], setbacks: [NaN, -1], defaultSetback: NaN, buildingLines: [{ a: { x: 0, y: 0 }, b: { x: 0, y: 0 } }], maxHeight: NaN, show: true };
     p.sunStudy = { when: "kein Datum", show: true };

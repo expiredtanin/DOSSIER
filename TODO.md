@@ -1186,7 +1186,32 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     Projektion bei schräg zur Ebene stehender Wand nur mit dem Umriss der zugewandten Fläche (Leibungskanten
     fehlen), Abzugskörper beliebiger Form, nicht in der Tauri-App/Metal geprüft.
 - ○ **[G4] Exakte Sichtbarkeit (HLR)** für Ansicht und Projektionsteil des Schnitts. · XL
-- ○ **[G5] Dächer untereinander, Gauben, Wand ↔ Decke** per Boolean. · L · nach [G1]/[G2].
+- ◐ **[G5] Dächer untereinander, Gauben, Wand ↔ Decke** per Boolean. · L · nach [G1]/[G2].
+  - (30.10.) **Dach ↔ Dach und Gauben** über Körper-Booleans ([107] Schritt 2, `solid_bool.rs`). Kern
+    `roof_assembly.rs`: ein Dach ist „verschnitten", wenn sich sein Traufumriss mit einem anderen überdeckt
+    (L-/T-Dächer) oder es Gauben trägt — nur dann rechnen 3D, Schnitt, Ansicht und Grundriss mit Körpern, alle
+    übrigen Dächer bleiben analytisch. Regel je Schicht (Tiefe d0…d1): früheres Dach A − `S_B(d1)`, späteres B −
+    `S_A(d0)` (`S_X(d)` = Raum unter der um d gesenkten Oberfläche) ⇒ je Schicht die obere Hülle, Kehlen/Grate,
+    keine Überlappung. **Gauben** (`Roof.dormers`, `dormer.rs`; Schlepp/Sattel/Flach/Walm; Breite, Stirnhöhe,
+    Neigung oder Tiefe (Schlepp), Überstand, Wandtyp, Dachtyp sonst der des Hauptdachs): Hauptdach − Loch (alle
+    Schichten), Gaubendach-Schichten − Raum unter der Hauptdach-Oberkante, Stirn/Wangen je Wandschicht bis
+    Hauptdach-Unterkante und Gaubendach-Unterkante; Fenster = `Opening` mit `hostDormerId` (+ `hostRoofId`) über
+    die Dachfenster-Mechanik (`host_frame` → senkrechtes System in der Stirn: 3D Rahmen/Glas, Schnitt, Ansicht,
+    IFC IfcOpeningElement/IfcWindow). Ausgaben: 3D je Schicht (Bauteilfarbe/Material), Schnitt =
+    `mesh_section` je Schicht mit Bauteil-Schraffur (Kind Roof, Besitzer = Dach), Ansicht = sichtbare Flächen der
+    Aussenhaut (koplanare Dreiecke zu Flächen, Löcher als Streifen), Grundriss = Dachaufsicht aus den Körpern
+    (Traufe/First/Grat-Kehle, verdeckte Teile weg). IFC: Gaube gehört zur IfcRoof-Darstellung (Wangen mit;
+    Entscheid: Gaube ist Dach-Bestandteil, kein eigenes Element), Bauteilliste: Zeile „Gaube". UI: Befehl
+    „Gaube" (`dormer`, Alias gaube/lukarne, Inline-Option Art), Objekt-Info des Dachs: Abschnitt „Gauben"
+    (Felder je Gaube, entfernen), 3D-Griffe Breite (links/rechts) und Tiefe (Schlepp). Cache je Dach
+    (`roof-solids/<id>`, Inhalts-Hash). Geprüft: Rust-Tests (L-Dach ohne Überlappung, alle Teile dicht, Gaube
+    aller Arten dicht und überlappungsfrei, Hauptdach-Volumen kleiner, Schnitt trifft alle Teile, Griffe,
+    Befehl), vitest-Robustheit (kaputte Gauben), CLI-Grundriss/-Schnitte/-Ansicht eines Testprojekts
+    (Schlepp- + Satteldachgaube, T-Dach) als PNG angesehen (Linux). Offen: **Wand ↔ Dach/Decke** per Boolean
+    (Wände laufen weiter über die Bänder mit `topDrop`, gestuft bei Öffnungen — dafür müssten Wände als Netze
+    statt `RWall` gehen), 3D-Live-Schnitt-Deckel verschnittener Dächer (zeigen noch die unverschnittenen
+    Schichten), IFC-Mengen der Gaube, Kehlen symmetrisch je Schicht (heute „überlappt" das frühere Dach),
+    Gauben über First/Grat hinaus nicht abgefangen, nicht in der Tauri-App/Metal geprüft.
   - (30.10.) Boolean-Werkzeug dafür: Manifold-Port `manifold-rust`, nicht truck — truck scheitert an Gaube und
     L-Ecke (bündige Unterseiten), `manifold-rust` rechnet beide exakt und dicht. Details und Plan: [107].
 - ○ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M
@@ -1708,8 +1733,21 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   `trucksolid/tests/manifold_cases.rs`: 14 Spike-Fälle (bündiger Abzug, Gaube, Dach-L-Ecke, 30 Öffnungen,
   200 Quader, Splitter 1e-7/1e-10, 1e-6 rad) ok, geschlossen, Volumen rel < 1e-9; Orientierung, kaputte Eingaben.
   **WASM:** `pkgTruck` 3.26 → 4.44 MB (gzip 745 → 1082 KB) — deutlich mehr als im Spike gemessen (Clipper2/dashu
-  kommen dazu). Offen: Schritt 2 (Kern-Modul `solid_bool.rs` für [G5]/Abzugskörper, Fuzz, Cache), Panik im WASM
+  kommen dazu). Schritt 2 (30.10.): Kern-Modul `solid_bool.rs` (s. u.). Offen: Panik im WASM
   (läuft hinter `guarded()`), Tauri/macOS nicht geprüft. · M
+
+- ◐ **[107] Schritt 2: Körper-Booleans im Kern.** (30.10.) `src-tauri/core/src/solid_bool.rs` mit
+  `manifold-rust` `=0.19.1` (exakter Modus) für synchrone Ableitungen ([G5]): `Solid::new` prüft vorher
+  (Dreier-Gruppen, Indizes, endlich und |x| < 1e7 m, ≤ 200 000 Dreiecke, Ecken auf 1e-7 m verschweisst,
+  geschlossen/mannigfaltig, Volumen ≠ 0, innen nach aussen ⇒ gedreht), `status()` nach jeder Operation,
+  Ergebnis mit `simplify`; `Solid::new_exact` für Manifold-eigene Netze. Flache Kodierung
+  `[nV, xyz…, nT, ijk…]`, Bindung `solid_boolean` (leer bei Unsinn), TS-Fassade `src/geometry/solidBool.ts`.
+  Cache je Element (`cached(key, hash, f)`: gleicher Inhalts-Hash ⇒ gespeichert, sonst ersetzt). Fuzz:
+  Rust 400 zufällige/kaputte Netze (NaN, ∞, Indizes, abgeschnitten, doppelte Flächen, platt, Splitter,
+  gedreht) + 2000 kaputte flache Puffer, vitest 300 Fälle über WASM — keine Panik. Entscheid: im Kern statt
+  eigenem Modul, weil nur geprüfte, selbst erzeugte Netze hineingehen; eine Restgefahr durch Panik im
+  Fremd-Crate bleibt (kein `catch_unwind` auf wasm32). Offen: Abzugskörper beliebiger Form ([G1]/[G3]) über
+  `solid_bool`. · M
 
 - ◐ **[27] Punktwolken — Stufe 1: Anzeige im 3D.** (28.10.) render3d: eigene Punkt-Pipeline
   (`render3d/src/points.rs` GPU-frei: Puffer-Aufbau, Farbabbildung, WGSL; `gpu_points.rs`: Pipeline im

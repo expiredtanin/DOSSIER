@@ -316,6 +316,13 @@ pub fn material_color_maps(p: &Project, only_roof: Option<&str>) -> Vec<String> 
                 consider(&l.component_id);
             }
         }
+        for d in r.dormers.as_deref().unwrap_or(&[]) {
+            for l in crate::dormer::wall_layers(p, d).iter().chain(crate::dormer::roof_layers(p, r, d).iter()) {
+                if !l.component_id.is_empty() {
+                    consider(&l.component_id);
+                }
+            }
+        }
     }
     list
 }
@@ -1445,6 +1452,22 @@ fn push_roof_slab_between(positions: &mut Vec<f64>, indices: &mut Vec<u32>, top:
     }
 }
 
+/// Je Dachfläche ein geschlossenes Prisma der Schicht `d0`–`d1` unter der Oberkante (alle Seiten, auch
+/// die gemeinsamen) — Eingabe der Körper-Booleans ([G5], `roof_assembly`).
+pub(crate) fn roof_plane_prisms(planes: &[Vec<V3>], d0: f64, d1: f64) -> Vec<crate::solid_bool::Mesh> {
+    let mitre = Mitre::new(planes);
+    let mut out = Vec::new();
+    for (i, plane) in planes.iter().enumerate() {
+        if plane.len() < 3 {
+            continue;
+        }
+        let (mut positions, mut indices) = (Vec::new(), Vec::new());
+        push_roof_slab_between(&mut positions, &mut indices, &mitre.at(i, d0), &mitre.at(i, d1), &vec![false; plane.len()]);
+        out.push(crate::solid_bool::Mesh { positions, indices });
+    }
+    out
+}
+
 /// Dachfenster-Loch in einer Dachfläche ([103]): Ecken auf der Dach-Oberkante (Gegenuhrzeigersinn um
 /// `n`) und die Normale.
 pub(crate) struct RoofHoleRect {
@@ -1594,9 +1617,24 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
     let maps = material_color_maps(p, only_roof);
     let mut out = Vec::new();
     for (ri, roof) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().filter(|(_, r)| only_roof.is_none_or(|id| r.id == id)) {
+        let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
+        // Verschnittene Dächer und Gauben ([G5]): Körper aus `roof_assembly`.
+        if let Some(solids) = crate::roof_assembly::roof_solids(p, ri) {
+            for part in &solids.parts {
+                let wall = part.role == crate::roof_assembly::Role::DormerWall;
+                let color = if wall {
+                    p.component(&part.component_id).map_or(WALL_RGB, |c| hex_to_rgb(&c.color, WALL_RGB))
+                } else {
+                    roof_color(p, override_color, &part.component_id)?
+                };
+                let material_index = if (wall || override_color.is_none()) && !part.component_id.is_empty() { material_layer(p, &maps, &part.component_id) } else { None };
+                let (positions, indices) = crate::roof_assembly::unshared(&part.mesh);
+                out.push(RMesh { positions, indices, kind: "extrusion", color, vertex_colors: None, material_index });
+            }
+            continue;
+        }
         let eaves_z = p.roof_base_elevation(roof);
         let g = crate::roof::roof_geometry(&roof.params(), eaves_z);
-        let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
         let mitre = Mitre::new(&g.planes);
         let holes = roof_holes_by_plane(p, ri, g.planes.len());
         let mut offset_above = 0.0;

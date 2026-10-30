@@ -129,6 +129,44 @@ interface Grip {
   pos: Vec3;
 }
 
+/** Gauben-Griffe: erster Index (Kern `grips.rs::DORMER_GRIP_BASE`). */
+const DORMER_GRIP_BASE = 1000;
+
+/** System einer Gaube: Dachfläche über `p` (Normale → `h` nach aussen, `ew` Breite), Höhe dort. */
+function dormerGripFrame(
+  planes: readonly { pts: readonly (readonly [number, number, number])[] }[],
+  p: Vec2,
+): { h: [number, number]; ew: [number, number]; z: number; tanMain: number } | null {
+  for (const pl of planes) {
+    const pts = pl.pts;
+    if (pts.length < 3) continue;
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const a = pts[i];
+      const b = pts[j];
+      if (a[1] > p.y !== b[1] > p.y && p.x < ((b[0] - a[0]) * (p.y - a[1])) / (b[1] - a[1]) + a[0]) inside = !inside;
+    }
+    if (!inside) continue;
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const c = pts[i];
+      const d = pts[(i + 1) % pts.length];
+      nx += (c[1] - d[1]) * (c[2] + d[2]);
+      ny += (c[2] - d[2]) * (c[0] + d[0]);
+      nz += (c[0] - d[0]) * (c[1] + d[1]);
+    }
+    if (nz < 0) [nx, ny, nz] = [-nx, -ny, -nz];
+    const hl = Math.hypot(nx, ny);
+    if (!(hl > 1e-9 && nz > 1e-9)) return null;
+    const h: [number, number] = [nx / hl, ny / hl];
+    const z = pts[0][2] - (nx * (p.x - pts[0][0]) + ny * (p.y - pts[0][1])) / nz;
+    return { h, ew: [-h[1], h[0]], z, tanMain: hl / nz };
+  }
+  return null;
+}
+
 /**
  * Alle Griffe der gewählten Wände + 2D-Zeichnungen: pro Wand zwei Endpunkte
  * (UK), ein Höhen-Griff (Achsmitte, OK) und ein Verschiebe-Griff (Achsmitte,
@@ -217,6 +255,25 @@ function computeGrips(
       // g-Punkte sind MODELL [x, y, z=Höhe] → world [x, Höhe, y].
       if (apex) out.push({ kind: "roofpitch", target, index: -1, pos: [apex[0], apex[2], apex[1]] });
     }
+    // Gauben ([G5]): Breiten-Griffe links/rechts der Stirn, Tiefen-Griff (Schleppgaube) hinten; Index ab
+    // DORMER_GRIP_BASE (Kern `grips.rs::dormer_grip`).
+    (roof.dormers ?? []).forEach((d, di) => {
+      const f = dormerGripFrame(g.planes, d.position);
+      if (!f) return;
+      const z = f.z + d.frontHeight;
+      const at = (u: number, v: number, zz: number): Vec3 => [
+        d.position.x + f.ew[0] * u - f.h[0] * v,
+        zz,
+        d.position.y + f.ew[1] * u - f.h[1] * v,
+      ];
+      const base = DORMER_GRIP_BASE + di * 10;
+      out.push({ kind: "vertex", target, index: base, pos: at(-d.width / 2, 0, z) });
+      out.push({ kind: "vertex", target, index: base + 1, pos: at(d.width / 2, 0, z) });
+      if (d.kind === "schlepp") {
+        const depth = d.depth ?? d.frontHeight / Math.max(0.05, f.tanMain - Math.tan(((d.pitchDeg ?? 15) * Math.PI) / 180));
+        out.push({ kind: "vertex", target, index: base + 2, pos: at(0, depth, f.z + depth * f.tanMain) });
+      }
+    });
   }
   return out;
 }

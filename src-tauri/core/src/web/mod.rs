@@ -45,6 +45,7 @@ mod area_report;
 mod rich_text;
 mod geo_mesh;
 mod opening_presets;
+mod solid_bool;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

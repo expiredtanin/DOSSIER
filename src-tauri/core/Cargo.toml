@@ -29,6 +29,8 @@ zmij = "1"
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 # TS-Typen aus dem Rust-Modell ([K4] S4): `src/model/types.generated.ts`, s. `model/ts_export.rs`.
+# Körper-Booleans ([107] Schritt 2, `solid_bool.rs`): Manifold-Port, exakter Modus; Version gepinnt (junges Crate).
+manifold-rust = "=0.19.1"
 ts-rs = { version = "12", default-features = false, features = ["serde-compat"] }
 
 [profile.release]

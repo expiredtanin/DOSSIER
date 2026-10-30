@@ -2432,6 +2432,73 @@ pub struct Roof {
     #[serde(rename = "surfacePatternOffset", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub surface_pattern_offset: Option<Vec2>,
+    /// Gauben/Lukarnen ([G5]) in den Dachflächen dieses Dachs. Fehlt ⇒ keine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dormers: Option<Vec<Dormer>>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Gaubenart ([G5]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum DormerKind {
+    /// Schleppgaube: eine Dachfläche, flacher als das Hauptdach.
+    #[default]
+    #[serde(rename = "schlepp")]
+    Schlepp,
+    /// Satteldachgaube (Giebelgaube): First quer zur Traufe des Hauptdachs.
+    #[serde(rename = "sattel")]
+    Sattel,
+    /// Flachdachgaube.
+    #[serde(rename = "flach")]
+    Flach,
+    /// Walmgaube: Satteldachgaube mit abgewalmter Stirn.
+    #[serde(rename = "walm")]
+    Walm,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Gaube/Lukarne ([G5]) in einer Dachfläche: Stirnwand parallel zur Traufe, Wangen bis an das
+/// Hauptdach, eigenes Dach mit dem Hauptdach verschnitten; das Hauptdach ist an der Gaube in allen
+/// Schichten ausgeschnitten. Das Fenster in der Stirn ist eine `Opening` mit `hostDormerId`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Dormer {
+    pub id: String,
+    pub kind: DormerKind,
+    /// Mitte der Stirnwand-Aussenseite im Grundriss (Meter); legt auch die Dachfläche fest.
+    pub position: Vec2,
+    /// Aussenbreite (Wange aussen bis Wange aussen, Meter).
+    pub width: f64,
+    /// Stirnhöhe: von der Dach-Oberkante an der Stirn bis Unterkante Gaubendach (Meter).
+    #[serde(rename = "frontHeight")]
+    pub front_height: f64,
+    /// Neigung des Gaubendachs in Grad (Sattel/Walm/Schlepp); fehlt ⇒ Sattel/Walm 40°, Schlepp aus der
+    /// Tiefe bzw. 15°, Flach 0.
+    #[serde(rename = "pitchDeg", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pitch_deg: Option<f64>,
+    /// Nur Schleppgaube: waagrechte Tiefe von der Stirn bis zum Anschluss an das Hauptdach (Meter);
+    /// gesetzt ⇒ die Neigung folgt daraus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub depth: Option<f64>,
+    /// Dachüberstand an Stirn und Seiten (Meter); fehlt ⇒ 0.15.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub overhang: Option<f64>,
+    /// Wandtyp für Wangen und Stirn; fehlt ⇒ einschichtig 0.15 m.
+    #[serde(rename = "wallTypeId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wall_type_id: Option<String>,
+    /// Dachtyp des Gaubendachs; fehlt ⇒ der des Hauptdachs.
+    #[serde(rename = "roofTypeId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub roof_type_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2770,6 +2837,12 @@ pub struct Opening {
     #[serde(rename = "hostAngle", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub host_angle: Option<f64>,
+    /// Wirt Gaube ([G5]): Fenster in der Stirnwand der Gaube `hostDormerId` des Dachs `hostRoofId`.
+    /// `position` = Versatz der Fenstermitte von der Stirnmitte (Meter, + nach rechts von aussen),
+    /// `sillHeight` = Brüstung über der Dach-Oberkante an der Stirn.
+    #[serde(rename = "hostDormerId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host_dormer_id: Option<String>,
     /// Übersteuert das Rahmen-Detail des Typs feldweise für diese Öffnung ([105]).
     #[serde(rename = "frameDetail", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

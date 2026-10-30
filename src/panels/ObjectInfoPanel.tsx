@@ -27,6 +27,8 @@ import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { flattenCategories, formatM } from "../model/types";
 import type {
+  Dormer,
+  DormerKind,
   DrawingLevel,
   RoofShape,
   SiaCategory,
@@ -922,6 +924,103 @@ function rectOutline(x0: number, y0: number, w: number, d: number) {
   ];
 }
 
+/** Gauben ([G5]) des Dachs: Art, Masse, Neigung, Aufbau je Gaube; Hinzufügen über den Befehl „Gaube". */
+function DormersSection({ roof, host }: { roof: RoofInfo; host: ReturnType<typeof usePanelHost> }) {
+  const dormers = roof.dormers ?? [];
+  const patch = (i: number, p: Partial<Dormer>) =>
+    host.onSetRoofPatch({ dormers: dormers.map((d, k) => (k === i ? { ...d, ...p } : d)) }, `dormer-${i}`);
+  const num = (labelKey: TranslationKey, value: number, step: number, apply: (v: number) => void) => (
+    <div className="objinfo-field">
+      <span className="objinfo-flabel">{t(labelKey)}</span>
+      <input
+        type="number"
+        className="objinfo-text"
+        step={step}
+        value={Number(value.toFixed(2))}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (Number.isFinite(v)) apply(v);
+        }}
+        title={t(labelKey)}
+      />
+    </div>
+  );
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.dormer.section")}</div>
+      {dormers.map((d, i) => (
+        <div key={d.id} data-testid="objinfo-dormer">
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.dormer.kind")}</span>
+            <Dropdown
+              value={d.kind}
+              onChange={(v) => patch(i, { kind: v as DormerKind })}
+              options={[
+                { value: "schlepp", label: t("objinfo.dormer.kind.schlepp") },
+                { value: "sattel", label: t("objinfo.dormer.kind.sattel") },
+                { value: "flach", label: t("objinfo.dormer.kind.flach") },
+                { value: "walm", label: t("objinfo.dormer.kind.walm") },
+              ]}
+              title={t("objinfo.dormer.kind")}
+              width={130}
+            />
+            <button
+              type="button"
+              className="objinfo-typebtn"
+              title={t("objinfo.dormer.remove")}
+              aria-label={t("objinfo.dormer.remove")}
+              onClick={() => host.onSetRoofPatch({ dormers: dormers.filter((_, k) => k !== i) })}
+            >
+              ×
+            </button>
+          </div>
+          {num("objinfo.dormer.width", d.width, 0.1, (v) => patch(i, { width: Math.max(0.8, v) }))}
+          {num("objinfo.dormer.frontHeight", d.frontHeight, 0.05, (v) => patch(i, { frontHeight: Math.max(0.5, v) }))}
+          {d.kind !== "flach" &&
+            num("objinfo.dormer.pitch", d.pitchDeg ?? (d.kind === "schlepp" ? 15 : 40), 1, (v) =>
+              patch(i, { pitchDeg: Math.max(0, Math.min(75, v)), depth: undefined }),
+            )}
+          {d.kind === "schlepp" &&
+            num("objinfo.dormer.depth", d.depth ?? 0, 0.1, (v) => patch(i, { depth: v > 0.1 ? v : undefined }))}
+          {num("objinfo.dormer.overhang", d.overhang ?? 0.15, 0.05, (v) => patch(i, { overhang: Math.max(0, v) }))}
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.dormer.wallType")}</span>
+            <Dropdown
+              value={d.wallTypeId ?? ""}
+              onChange={(v) => patch(i, { wallTypeId: v || undefined })}
+              options={[
+                { value: "", label: t("objinfo.dormer.wallType.default") },
+                ...host.project.wallTypes.map((wt) => ({ value: wt.id, label: wt.name })),
+              ]}
+              title={t("objinfo.dormer.wallType")}
+              width={130}
+            />
+          </div>
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.dormer.roofType")}</span>
+            <Dropdown
+              value={d.roofTypeId ?? ""}
+              onChange={(v) => patch(i, { roofTypeId: v || undefined })}
+              options={[
+                { value: "", label: t("objinfo.dormer.roofType.host") },
+                ...(host.project.roofTypes ?? []).map((rt) => ({ value: rt.id, label: rt.name })),
+              ]}
+              title={t("objinfo.dormer.roofType")}
+              width={130}
+            />
+          </div>
+        </div>
+      ))}
+      <div className="objinfo-field">
+        <button type="button" className="objinfo-typebtn" title={t("objinfo.dormer.add")} onClick={() => host.onRunCommand("dormer")}>
+          {t("objinfo.dormer.addBtn")}
+        </button>
+      </div>
+    </>
+  );
+}
+
 /** Dach-Abschnitt: Form, Neigung(en), Überstand, Firstrichtung, Dicke. */
 export function RoofSection({
   roof,
@@ -1092,6 +1191,7 @@ export function RoofSection({
         <RoofEdgesSection roof={roof} host={host} />
       )}
       {/* Innenhöfe: Liste mit Entfernen, Hinzufügen über den Befehl „Dachhof“. */}
+      <DormersSection roof={roof} host={host} />
       {roof.shape !== "pult" && (
         <>
           <div className="objinfo-sep" />
