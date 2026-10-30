@@ -2045,6 +2045,12 @@ fn write_hatch_words(out: &mut Vec<f64>, h: &HatchRender, color: f64) {
         HatchPattern::Crosshatch => 3.0,
         HatchPattern::Insulation => 4.0,
         HatchPattern::Custom => 5.0,
+        HatchPattern::InsulationHard => 6.0,
+        HatchPattern::InsulationWave => 7.0,
+        HatchPattern::Timber => 8.0,
+        HatchPattern::Earth => 9.0,
+        HatchPattern::Gravel => 10.0,
+        HatchPattern::Stone => 11.0,
         _ => 2.0,
     };
     let kind = match h.kind {

@@ -523,10 +523,18 @@ fn dash_seg(a: V2, b: V2, cycle: &[f64]) -> Vec<(V2, V2)> {
     out
 }
 
+/// Muster, die nicht als DXF-Linienscharen gehen und als Polylinien geschrieben werden ([109]).
+fn is_curve_pattern(p: Pattern) -> bool {
+    matches!(
+        p,
+        Pattern::Insulation | Pattern::InsulationHard | Pattern::InsulationWave | Pattern::Timber | Pattern::Earth | Pattern::Gravel | Pattern::Stone
+    )
+}
+
 /// Linienscharen einer Vektor-Schraffur als (Winkel rad, Abstand m) (`hatchFamilies`).
 fn hatch_families(h: &Hatch) -> Vec<(f64, f64)> {
     let unit_m = 1.0 / 90.0;
-    let tile_m = (if h.pattern == Pattern::Insulation { 10.0 } else { 8.0 }) * h.scale * unit_m;
+    let tile_m = 8.0 * h.scale * unit_m;
     let spacing = jsnum::max(0.02, tile_m);
     if !spacing.is_finite() {
         return Vec::new();
@@ -535,9 +543,6 @@ fn hatch_families(h: &Hatch) -> Vec<(f64, f64)> {
     let mut out = vec![(angle, spacing)];
     if h.pattern == Pattern::Crosshatch {
         out.push((angle + PI / 2.0, spacing));
-    }
-    if h.pattern == Pattern::Insulation {
-        out.push((angle - PI / 4.0, spacing));
     }
     out
 }
@@ -928,6 +933,14 @@ impl Ctx<'_> {
                                 }
                                 None => self.flat.add_line(b, hatch_layer, a, q),
                             }
+                        }
+                    } else if is_curve_pattern(pattern) {
+                        // Schicht-/Kurvenmuster ([109]: Dämmschlange, Zickzack, Welle, Holzkreuz, Erdreich,
+                        // Kies, Naturstein) kennt DXF-HATCH nicht: als Polylinien aus dem Kern-Generator.
+                        let runs = hatch::apply_dash_runs(hatch::build_hatch_runs(pts, &h.h), &hatch::hatch_dash(&h.h));
+                        self.flat.set_pen(b, -1.0);
+                        for run in runs.iter().filter(|r| r.len() >= 2) {
+                            self.flat.add_polyline(b, hatch_layer, run, false);
                         }
                     } else if pattern != Pattern::None {
                         let families = hatch_families(&h.h);

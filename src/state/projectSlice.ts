@@ -894,7 +894,6 @@ export function createProjectSlice(
         const lineStyle: LineStyle = {
           id: `line-${Date.now()}`,
           name: t("default.lineStyleName"),
-          weight: 0.18,
           color: "#2b3039",
           dash: null,
         };

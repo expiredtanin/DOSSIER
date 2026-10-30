@@ -236,7 +236,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
                     a,
                     b,
                     "layer-joint",
-                    jls.map_or(layer_mm, |s| s.weight * detail.layer_factor()),
+                    wt.layers.get(li).and_then(|l| l.joint_weight_mm).filter(|w| w.is_finite() && *w > 0.0).map_or(layer_mm, |w| w * detail.layer_factor()),
                     Some(jls.and_then(|s| s.dash.clone())),
                     Some(jls.map_or(stroke, |s| s.color.as_str())),
                     greyed,

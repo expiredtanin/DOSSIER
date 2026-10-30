@@ -111,6 +111,12 @@ const PATTERN_CODE: Record<string, number> = {
   crosshatch: 3,
   insulation: 4,
   custom: 5,
+  insulationHard: 6,
+  insulationWave: 7,
+  timber: 8,
+  earth: 9,
+  gravel: 10,
+  stone: 11,
 };
 
 /** Ein Hatch-Datensatz (auch Eingabe der Einzel-Bindungen in `glPlanHatch.ts`). */

@@ -4,7 +4,6 @@
 
 import { useState } from "react";
 import type { LineStyle, Project } from "../../model/types";
-import { PEN_WEIGHTS } from "../../model/types";
 import { parseLin } from "../../io/linParser";
 import { LineSwatch } from "../hatchPreview";
 import { segmentsToDash, dashToSegments, presetOfDash, LINE_PRESETS, type LineSegment, type LineSegmentType, type LinePresetKey } from "../../core";
@@ -249,11 +248,10 @@ function LineStyleDetail({
   );
 }
 
-/** .lin-Text → id-lose Linienstile (schwarze Haarlinie 0.18 als Default). */
+/** .lin-Text → id-lose Linienstile (nur Muster; die Stärke trägt das Element, [110]). */
 function linToStyles(text: string): Omit<LineStyle, "id">[] {
   return parseLin(text).map((p) => ({
     name: p.name,
-    weight: 0.18,
     color: "#1a1a1a",
     dash: p.dash,
   }));
@@ -278,12 +276,6 @@ export function LinesTab({
 
   return (
     <div className="res-tab">
-      {/* Vorschlagswerte für die Strichstärke (Standard-Stiftbreiten in mm). */}
-      <datalist id="pen-weights">
-        {PEN_WEIGHTS.map((w) => (
-          <option key={w} value={w} />
-        ))}
-      </datalist>
       <div className="res-hint">{t("resources.lines.hint")}</div>
       <div className="res-md">
         <div className="res-md-list">

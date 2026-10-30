@@ -26,7 +26,9 @@ const SECTION_HIDDEN_MM: f64 = 0.13;
 const SECTION_HIDDEN_DASH: [f64; 2] = [0.12, 0.08];
 /// Achswinkel geschnittener Wände/Decken für wandrelative Muster (s. `toSection.ts`).
 const SECTION_WALL_AXIS_ANGLE_DEG: f64 = 90.0;
-const SECTION_SLAB_AXIS_ANGLE_DEG: f64 = 90.0;
+/// Decken liegen: wandbezogene Muster laufen waagrecht entlang der Schicht ([109]; vorher 90° wie Wände,
+/// dann lagen Querstriche der Dämmung längs und die Dämmschlange stand quer).
+const SECTION_SLAB_AXIS_ANGLE_DEG: f64 = 0.0;
 /// Seitenrand (m) der Geländelinie um den Inhalt des Schnitts.
 const TERRAIN_MARGIN: f64 = 6.0;
 /// Neutrale Füllung geschnittener freier Körper.
@@ -434,7 +436,9 @@ fn wall_section_style(p: &Project, wall: &Wall) -> Option<(String, HatchRender)>
     }
     let best = best?;
     let category = p.layer_category(&wall.category_code);
-    let angle = atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) * 180.0 / std::f64::consts::PI;
+    // Im Schnitt steht die geschnittene Wand senkrecht — wandbezogene Muster wie bei den Schicht-Bändern
+    // (`split_wall_layers`), nicht nach dem Grundriss-Winkel der Wand ([109]).
+    let angle = SECTION_WALL_AXIS_ANGLE_DEG;
     let hatch_id = resolve_hatch_id(wall.hatch_id.as_deref(), wall.hatch_source, category, Some(&best.hatch_id)).unwrap_or(&best.hatch_id);
     let hatch = resolve_hatch(p, hatch_id, Some(angle), resolve_foreground(best, wall.foreground.as_deref(), category, wall.foreground_source), None)?;
     Some((poche_fill(hatch.pattern).to_string(), hatch))
@@ -902,7 +906,9 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
                 for h in &holes {
                     pieces = pieces.iter().flat_map(|pc| crate::opening_shape::subtract_convex(pc, h)).collect();
                 }
-                let hatch = if layer.component_id.is_empty() { None } else { p.component(&layer.component_id).and_then(|comp| resolve_hatch(p, &comp.hatch_id, None, None, None)) };
+                // Wandbezogene Muster laufen entlang der Dachneigung ([109]: Dämmschlange über die Schichtdicke).
+                let slope_deg = atan2(z1 - z0, t_hi - t_lo) * 180.0 / std::f64::consts::PI;
+                let hatch = if layer.component_id.is_empty() { None } else { p.component(&layer.component_id).and_then(|comp| resolve_hatch(p, &comp.hatch_id, Some(slope_deg), None, None)) };
                 for pts in pieces {
                     let mut c = Cut::new(Kind::Roof, index, pts);
                     if let Some(h) = &hatch {

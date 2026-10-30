@@ -26,18 +26,13 @@ export const sampleProject: Project = {
   id: "demo",
   name: "Demo-Haus",
   // ── Ressourcen-Bibliotheken (zentral verwiesen per id) ──────────────────
-  // Linienstile: aufgeräumt auf kanonische VOLLLINIEN je Strichstärke (dash=null)
-  // + eine gestrichelte Linie. Früher gab es drei funktional identische 0.13-
-  // Volllinien ("thin"/"hatch-line"/"joint-massive") — zusammengeführt auf "thin"
-  // ("Volllinie 0.13"); Schraffur-/Schichtfugen-Referenzen zeigen jetzt darauf.
-  // (Die ids bleiben stabil, damit geladene Projekte + interne Referenzen halten.)
+  // Linienstile: nur Muster + Farbe ([110]) — die Strichstärke tragen Schraffur (`lineWeight`),
+  // Schichtfuge (`jointWeightMm`) bzw. Element/Ebene. Früher gab es „Volllinie 0.02/0.13/0.25/0.5";
+  // zusammengeführt auf „thin" (Volllinie). Die ids bleiben stabil.
   lineStyles: [
-    { id: "hatch-hair", name: "Volllinie 0.02", weight: 0.02, color: "#1a1a1a", dash: null },
-    { id: "thin", name: "Volllinie 0.13", weight: 0.13, color: "#1a1a1a", dash: null },
-    { id: "medium", name: "Volllinie 0.25", weight: 0.25, color: "#1a1a1a", dash: null },
-    { id: "thick", name: "Volllinie 0.5", weight: 0.5, color: "#0a0a0a", dash: null },
-    // Gestrichelte Haarlinie für die Dämmung (Striche quer durch die Wanddicke).
-    { id: "hatch-dash", name: "Dämmungsstrich", weight: 0.02, color: "#1a1a1a", dash: [0.35, 0.3] },
+    { id: "thin", name: "Volllinie", color: "#1a1a1a", dash: null },
+    // Gestrichelte Linie (z. B. Dämmung, Striche quer durch die Wanddicke).
+    { id: "hatch-dash", name: "Dämmungsstrich", color: "#1a1a1a", dash: [0.35, 0.3] },
   ],
   // Schraffuren: color = Linien-/Vollfüllfarbe des Musters; angle in Grad.
   // "none" = keine Schraffur (nur Component-Füllung).
@@ -52,7 +47,7 @@ export const sampleProject: Project = {
       scale: 1,
       angle: 0,
       color: "#1a1a1a",
-      lineStyleId: "thin",
+      lineWeight: 0.13,
     },
     {
       id: "diagonal",
@@ -61,7 +56,7 @@ export const sampleProject: Project = {
       scale: 1,
       angle: 45,
       color: "#1a1a1a",
-      lineStyleId: "thin",
+      lineWeight: 0.13,
     },
     {
       id: "crosshatch",
@@ -70,7 +65,7 @@ export const sampleProject: Project = {
       scale: 1,
       angle: 0,
       color: "#1a1a1a",
-      lineStyleId: "thin",
+      lineWeight: 0.13,
     },
     {
       id: "solid-concrete",
@@ -79,7 +74,7 @@ export const sampleProject: Project = {
       scale: 1,
       angle: 0,
       color: "#9aa0a6",
-      lineStyleId: "thin",
+      lineWeight: 0.13,
     },
     // ── SIA-Schnittschraffuren (Haarlinie) ──────────────────────────────────
     // Dichte Teilung (scale < 1; Muster-Kachel = 8·scale) für den SIA-Look.
@@ -91,7 +86,7 @@ export const sampleProject: Project = {
       scale: 0.5,
       angle: 45,
       color: "#1a1a1a",
-      lineStyleId: "hatch-hair",
+      lineWeight: 0.02,
     },
     // Backstein: Diagonale, 45° RELATIV zur Wandachse (dreht mit der Wand mit).
     {
@@ -102,7 +97,7 @@ export const sampleProject: Project = {
       angle: 45,
       relativeToWall: true,
       color: "#1a1a1a",
-      lineStyleId: "hatch-hair",
+      lineWeight: 0.02,
     },
     // Dämmung: DURCHGEZOGENE (nicht gestrichelte) Linien QUER durch die Wanddicke
     // (senkrecht zur Wandachse), wandbezogen. Basiswinkel 0 = Musterlinie steht
@@ -115,7 +110,7 @@ export const sampleProject: Project = {
       angle: 0,
       relativeToWall: true,
       color: "#1a1a1a",
-      lineStyleId: "hatch-hair",
+      lineWeight: 0.02,
     },
   ],
   // Bauteil-Materialien: color = Poché-Füllung im Grundriss UND 3D-Diffusfarbe;
@@ -182,7 +177,7 @@ export const sampleProject: Project = {
       layers: [
         { componentId: "render-ext", thickness: 0.02 },
         // Innere Fuge der Dämmung trifft auf den Backstein (massiv↔massiv) → 0.13 mm.
-        { componentId: "insulation", thickness: 0.16, jointLineStyleId: "thin" },
+        { componentId: "insulation", thickness: 0.16, jointLineStyleId: "thin", jointWeightMm: 0.13 },
         { componentId: "brick", thickness: 0.15 },
         { componentId: "render-int", thickness: 0.015 },
       ],
@@ -209,7 +204,7 @@ export const sampleProject: Project = {
         // Estrich (schwimmend) → Trittschalldämmung.
         { componentId: "screed", thickness: 0.06 },
         // Innere Fuge der Dämmung trifft auf die Betondecke (massiv) → 0.13 mm.
-        { componentId: "insulation", thickness: 0.04, jointLineStyleId: "thin" },
+        { componentId: "insulation", thickness: 0.04, jointLineStyleId: "thin", jointWeightMm: 0.13 },
         // Betondecke (Rohdecke, tragend) — innerste/unterste Schicht.
         { componentId: "concrete", thickness: 0.2 },
       ],
@@ -222,7 +217,7 @@ export const sampleProject: Project = {
       // Aussen (Eindeckung) → innen (Verkleidung); Bauteile aus der Bibliothek.
       layers: [
         { componentId: "roof-tiles", thickness: 0.04 }, // Eindeckung (Tonziegel)
-        { componentId: "insulation", thickness: 0.22, jointLineStyleId: "thin" }, // Sparren/Dämmung
+        { componentId: "insulation", thickness: 0.22, jointLineStyleId: "thin", jointWeightMm: 0.13 }, // Sparren/Dämmung
         { componentId: "render-int", thickness: 0.0125 }, // Innenverkleidung (GK)
       ],
     },
