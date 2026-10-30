@@ -12,6 +12,10 @@ const ALLOWED_CONSOLE_ERRORS: { re: RegExp; why: string }[] = [
     re: /createBuffer failed|wgpu-.*webgpu\.rs/,
     why: "render2d/render3d: SwiftShader verliert das WebGPU-Gerät beim Präsentieren, createBuffer(mappedAtCreation) wirft, wgpu paniert (nur headless). render2d baut dann neu auf bzw. fällt auf SVG zurück (planEngine.spec.ts).",
   },
+  {
+    re: /WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/' failed/,
+    why: "[9] KI-Zugriff: die App sucht die MCP-Brücke alle 2 s auf 127.0.0.1, bis sie läuft; Chromium meldet jeden Fehlversuch (aiBridge.spec.ts).",
+  },
 ];
 
 export const test = base.extend<{ errors: string[] }>({

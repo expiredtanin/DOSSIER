@@ -21,13 +21,13 @@ const call = async (...a: string[]) => run([file, ...a]);
 describe("dossier-cli", () => {
   it("importiert ausschliesslich ../core", () => {
     const src = readFileSync(join(process.cwd(), "src", "cli", "main.ts"), "utf8");
-    for (const f of ["main.ts", "mcp.ts"]) {
+    for (const f of ["main.ts", "mcp.ts", "mcpBridge.ts"]) {
       const text = readFileSync(join(process.cwd(), "src", "cli", f), "utf8");
       const rel = [...text.matchAll(/from\s+"(\.[^"]+)"/g)].map((m) => m[1]);
-      expect(rel.every((r) => r === "../core" || r === "./mcp"), f).toBe(true);
+      expect(rel.every((r) => r === "../core" || r === "./mcp" || r === "./mcpBridge"), f).toBe(true);
     }
     expect(src.length).toBeGreaterThan(0);
-    expect(readdirSync(join(process.cwd(), "src", "cli")).filter((f) => statSync(join(process.cwd(), "src", "cli", f)).isFile() && f.endsWith(".ts") && !f.endsWith(".test.ts")).sort()).toEqual(["main.ts", "mcp.ts"]);
+    expect(readdirSync(join(process.cwd(), "src", "cli")).filter((f) => statSync(join(process.cwd(), "src", "cli", f)).isFile() && f.endsWith(".ts") && !f.endsWith(".test.ts")).sort()).toEqual(["main.ts", "mcp.ts", "mcpBridge.ts"]);
   });
 
   it("info, validate, migrate", async () => {
@@ -159,7 +159,11 @@ describe("MCP-Server", () => {
     const init = (await handleMessage(file, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} })) as { result: { serverInfo: { name: string } } };
     expect(init.result.serverInfo.name).toBe("dossier");
     const list = (await handleMessage(file, { jsonrpc: "2.0", id: 2, method: "tools/list" })) as { result: { tools: Array<{ name: string }> } };
-    expect(list.result.tools.map((t) => t.name)).toEqual(["project_info", "query", "render_svg", "apply_ops", "validate"]);
+    // gemeinsame Liste (core/aiToolDefs.ts) ohne die App-Werkzeuge
+    const names = list.result.tools.map((t) => t.name);
+    expect(names.slice(0, 4)).toEqual(["project_info", "query", "render_svg", "apply_ops"]);
+    expect(names).toContain("run_command");
+    expect(names).not.toContain("select");
     expect(await handleMessage(file, { jsonrpc: "2.0", method: "notifications/initialized" })).toBeNull();
 
     const call = async (name: string, args: Record<string, unknown>) =>

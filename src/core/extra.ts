@@ -69,3 +69,7 @@ export { openingPreviewProject, openingPreviewSvgs } from "../plan/openingPrevie
 export type { OpeningPreviewSvgs } from "../plan/openingPreview";
 export { surfaceOpeningInfo, surfaceOpeningGrips, surfaceOpeningGripPatch } from "../plan/surfaceOpening";
 export type { SurfaceOpeningInfo } from "../plan/surfaceOpening";
+export { AI_TOOLS, AI_BRIDGE_DEFAULT_PORT, aiText, aiToolDef, hmacHex, randomHex, sameMac } from "./aiToolDefs";
+export type { AiToolDef, AiToolResult, AiBridgeMsg } from "./aiToolDefs";
+export { callAiTool } from "./aiTools";
+export type { AiHost } from "./aiTools";

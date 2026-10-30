@@ -8219,6 +8219,33 @@ body {
   margin-top: 10px;
 }
 
+/* ── KI-Zugriff [9] (AiAccessSection, AiActivityPanel) ───────────────── */
+.ai-token-row { display: flex; gap: 6px; align-items: center; margin: 4px 0 8px; }
+.ai-token { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px; }
+.ai-cmd { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px; overflow-wrap: anywhere; user-select: all; }
+.ai-activity {
+  position: fixed; left: 12px; bottom: 36px; z-index: 900; width: 260px; max-height: 40vh; overflow: auto;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 11px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); padding: 6px 8px;
+}
+.ai-activity.is-paused { border-color: var(--danger-light); }
+.ai-activity-head { display: flex; align-items: center; gap: 6px; }
+.ai-activity-title { flex: 1; text-align: left; background: none; border: 0; color: inherit; font-weight: 600; cursor: pointer; padding: 0; }
+.ai-count { margin-left: 4px; padding: 0 5px; border-radius: 8px; background: var(--active-dim); }
+.ai-pause { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.ai-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.ai-dot-connected { background: #3a9a4a; }
+.ai-dot-auth-failed { background: var(--danger-light); }
+.ai-activity-empty { color: var(--muted); margin-top: 6px; }
+.ai-activity-log { list-style: none; margin: 6px 0 0; padding: 0; }
+.ai-activity-log li { display: flex; gap: 6px; padding: 2px 0; border-top: 1px solid var(--line); }
+.ai-activity-log li.is-change .ai-tool { font-weight: 600; }
+.ai-activity-log li.is-error { color: var(--danger-light); }
+.ai-time { color: var(--muted); font-family: var(--font-mono); }
+.ai-tool { flex: 1; }
+.ai-tag { color: var(--muted); }
+.ai-activity-clear { margin-top: 4px; font-size: 11px; }
+
 /* ── BCF-Themen (BcfPanel) ───────────────────────────────────────────── */
 .bcf-panel {
   display: flex;

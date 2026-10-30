@@ -14,6 +14,7 @@ import { t, type TranslationKey } from "../i18n";
 import { ACCENT_SWATCHES } from "../theme/accents";
 import { ColorHexField } from "./ColorHexField";
 import { LayoutMenu } from "./LayoutMenu";
+import { AiAccessSection, type AiAccessView } from "./AiAccessSection";
 import { APP_VERSION } from "./TopBar";
 import type { LayoutState } from "../panels/types";
 import type { ThemeMode } from "../theme/themeMode";
@@ -79,6 +80,9 @@ export interface SettingsDialogProps {
   /** Offline-Modus: sperrt alle entfernten Abrufe (Materialbibliothek, swisstopo, OSM). */
   offline: boolean;
   onOfflineChange: (offline: boolean) => void;
+  /** [9] KI-Zugriff (MCP-Brücke): Stand und Schalter; ohne Angabe keine Sektion. */
+  aiAccess?: AiAccessView;
+  onAiAccessChange?: (on: boolean) => void;
   /** Arbeitsumgebung (Fenster-/Dock-Layouts) — LayoutMenu wird HIER gerendert
    * (nicht mehr als vorgefertigtes ReactNode hereingereicht: JSX ist über eine
    * Fenstergrenze nicht serialisierbar, s. `windowed`). */
@@ -124,6 +128,8 @@ export function SettingsDialog({
   onScaleLineWeightsChange,
   offline,
   onOfflineChange,
+  aiAccess,
+  onAiAccessChange,
   layout,
   onApplyLayout,
   onAliasOverridesChange,
@@ -231,6 +237,8 @@ export function SettingsDialog({
             </label>
             <div className="imp-note">{t("settings.offline.hint")}</div>
           </section>
+
+          {aiAccess && onAiAccessChange && <AiAccessSection view={aiAccess} onChange={onAiAccessChange} />}
 
           <section className="imp-section">
             <div className="imp-section-title">{t("settings.section.display")}</div>

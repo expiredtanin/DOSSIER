@@ -136,6 +136,25 @@ Weitere Befehle: `section`, `elevation`, `dxf`, `dwg`, `step`, `glb`,
 `schedule`, `sun`, `validate`, `bench` und `mcp`, mit dem ein KI-Assistent das
 Projekt abfragen und ändern kann.
 
+### KI-Assistent am offenen Projekt (MCP)
+
+`dossier-cli … mcp` arbeitet auf einer Datei. Für das in der App **offene**
+Projekt: in Dossier unter *Fenster → Einstellungen → KI-Zugriff* „KI-Zugriff
+erlauben“ einschalten (aus per Vorgabe, nur 127.0.0.1) und die angezeigte Zeile
+im MCP-Client eintragen, z. B. in Claude Desktop (`claude_desktop_config.json`)
+bzw. mit `claude mcp add dossier -- node …/dossier-cli.mjs mcp --app --token …`:
+
+```json
+{ "mcpServers": { "dossier": { "command": "node",
+  "args": ["/pfad/zu/dist-cli/dossier-cli.mjs", "mcp", "--app", "--token", "<schlüssel>"] } } }
+```
+
+Der Schlüssel gilt bis zum Beenden der App. Werkzeuge: Abfragen (Auswahl,
+Geschosse, Elemente, Kennzahlen, Listen), Befehle mit JSON-Parametern, Auswahl
+und Zoom, Export (SVG/PDF/IFC; Speichern nur über den Dialog). Jede Änderung ist
+ein Undo-Schritt „KI: …“ und steht im KI-Protokoll unten links, dort lässt sich
+die KI auch pausieren.
+
 ## Aufbau
 
 ```

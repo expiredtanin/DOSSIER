@@ -97,6 +97,8 @@ export function SettingsWindowApp() {
       onScaleLineWeightsChange={handlers.onScaleLineWeightsChange}
       offline={state.offline}
       onOfflineChange={handlers.onOfflineChange}
+      aiAccess={state.aiAccess}
+      onAiAccessChange={handlers.onAiAccessChange}
       layout={state.layout}
       onApplyLayout={handlers.onApplyLayout}
       onClose={onClose}
