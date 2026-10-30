@@ -881,7 +881,7 @@ const PROFILE_HIT_TOL: f64 = 0.25;
 
 /// Extrudierbares Profil einer Zeichnung: geschlossene Polylinie (≥ 3 Punkte), Rechteck, Kreis.
 /// Punkte als JSON-Werte (Polylinie: die gespeicherten), dazu `circle` beim Kreis.
-fn profile_of(d: &Value) -> Option<(Vec<Value>, Option<Value>)> {
+pub(crate) fn profile_of(d: &Value) -> Option<(Vec<Value>, Option<Value>)> {
     let g = field(d, "geom")?;
     match field(g, "shape").and_then(Value::as_str)? {
         "polyline" => {

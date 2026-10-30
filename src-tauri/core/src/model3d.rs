@@ -1164,7 +1164,7 @@ fn rail_rgb() -> Rgb {
     hex_to_rgb("#74797f", SLAB_RGB)
 }
 
-/// Flache Eingabe der Treppen für `stairs3d` (23 Zahlen je Treppe); `wanted` wählt vor.
+/// Flache Eingabe der Treppen für `stairs3d` (24 Zahlen je Treppe); `wanted` wählt vor.
 fn stair_input<'a>(p: &'a Project, wanted: impl Fn(&Stair, Option<&StairType>) -> bool) -> Option<(Vec<(usize, &'a Stair)>, Vec<f64>)> {
     let mut stairs: Vec<(usize, &Stair)> = Vec::new();
     let mut types: Vec<Option<&StairType>> = Vec::new();
@@ -1199,6 +1199,7 @@ fn stair_input<'a>(p: &'a Project, wanted: impl Fn(&Stair, Option<&StairType>) -
             Some(StairTypeRailing::Beide) => 3.0,
             _ => 0.0,
         });
+        buf.push(s.center_column.filter(|r| r.is_finite() && *r > 0.0).unwrap_or(0.0));
     }
     Some((stairs, buf))
 }
@@ -1230,17 +1231,17 @@ fn meshes_of(meshes: Vec<crate::mesh3d::Mesh>, color: Rgb) -> Vec<RMesh> {
                     crease_angle: None, positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None }).collect()
 }
 
-/// Glatte Ortbeton-Laufplatten gerader Treppen (`emitStairMeshes`).
+/// Glatte Ortbeton-Laufplatten gerader Treppen und Wendelfläche (Schraubenfläche) von Wendeltreppen (`emitStairMeshes`).
 pub fn emit_stair_meshes(p: &Project) -> Vec<RMesh> {
-    match stair_input(p, |s, st| st.is_some_and(|t| t.structure == StairTypeStructure::Beton) && s.shape == StairShape::Straight) {
+    match stair_input(p, |s, st| st.is_some_and(|t| t.structure == StairTypeStructure::Beton) && matches!(s.shape, StairShape::Straight | StairShape::Spiral)) {
         Some((_, buf)) => meshes_of(crate::stairs3d::slab_meshes(&buf), stair_rgb()),
         None => vec![],
     }
 }
 
-/// Handlauf und Pfosten gerader Treppen (`emitStairRailings`).
+/// Handlauf und Pfosten gerader Treppen (`emitStairRailings`); bei Wendeltreppen als Schraubensweep.
 pub fn emit_stair_railings(p: &Project) -> Vec<RMesh> {
-    match stair_input(p, |s, st| s.shape == StairShape::Straight && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) {
+    match stair_input(p, |s, st| matches!(s.shape, StairShape::Straight | StairShape::Spiral) && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) {
         Some((_, buf)) => meshes_of(crate::stairs3d::railings(&buf), rail_rgb()),
         None => vec![],
     }

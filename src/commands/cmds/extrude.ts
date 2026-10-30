@@ -32,25 +32,25 @@ let lastTaper = 0;
 // ── Profil (Kern, `cmd_create.rs`): geschlossene polyline/rect/circle → Punktliste ─
 
 /** Profil eines extrudierbaren 2D-Elements (Kreis: 48-Eck + Mittelpunkt/Radius). */
-interface Profile {
+export interface Profile {
   pts: Vec2[];
   circle?: { center: Vec2; r: number };
 }
 
-type ProfileHit = { id: string } & Profile;
+export type ProfileHit = { id: string } & Profile;
 
 function profileQuery(project: Project, req: { q: string } & Record<string, unknown>): ProfileHit | null {
   return createQuery<{ hit: (ProfileHit & { circle: Profile["circle"] | null }) | null }>(project, req).hit ?? null;
 }
 
 /** Genau EIN geeignetes Profil vorgewählt (sonst null). */
-function singleSelectedProfile(project: Project, sel: CommandSelection): ProfileHit | null {
+export function singleSelectedProfile(project: Project, sel: CommandSelection): ProfileHit | null {
   if (!sel.drawingId || sel.wallIds.length > 0) return null;
   return profileQuery(project, { q: "profile", id: sel.drawingId });
 }
 
 /** Nächstes Profil der Ebene am Klickpunkt (Kanten-Abstand < 0.25 m). */
-const pickProfileAt = (project: Project, levelId: string, pt: Vec2): ProfileHit | null =>
+export const pickProfileAt = (project: Project, levelId: string, pt: Vec2): ProfileHit | null =>
   profileQuery(project, { q: "pickProfile", level: levelId, pt: xy(pt) });
 
 /** Commit (Kern): Quelle entfernen, Körper (Punkte + Höhe + Verjüngung) anlegen. */

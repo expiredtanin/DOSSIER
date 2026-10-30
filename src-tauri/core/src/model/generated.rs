@@ -3127,6 +3127,11 @@ pub struct Stair {
     #[serde(rename = "arrowStyle", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, inline)]
     pub arrow_style: Option<StairArrowStyle>,
+    /// Nur Wendel: Radius (Meter) der Mittelsäule (Spindel) im Zentrum. Fehlt er oder ist er
+    /// ≤ 0, gibt es keine Säule.
+    #[serde(rename = "centerColumn", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub center_column: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

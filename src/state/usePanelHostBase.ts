@@ -974,6 +974,10 @@ export function usePanelHostBase(opts: {
       onSetStairArrowStyle: (arrowStyle) => {
         if (selection?.kind === "stair") updateStair(selection.id, { arrowStyle });
       },
+      onSetStairColumn: (radius) => {
+        if (selection?.kind === "stair")
+          updateStair(selection.id, { centerColumn: radius > 0 ? radius : undefined });
+      },
       onSetStairReferenz: (referenz) => {
         if (selection?.kind === "stair") updateStair(selection.id, { referenz });
       },

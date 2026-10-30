@@ -374,6 +374,7 @@ pub fn decode_mesh(f: &[f64], strings: &[String]) -> Result<(Vec<MeshObject>, Va
         k += 1.0;
     }
     let mut objects = Vec::new();
+    let mut repaired = [0usize; 3];
     let mut k = 0.0;
     while k < n_obj {
         let h = f.get(at..at + 9).ok_or("Mesh-Import: Puffer beschädigt")?;
@@ -385,12 +386,17 @@ pub fn decode_mesh(f: &[f64], strings: &[String]) -> Result<(Vec<MeshObject>, Va
         if !(np.fract() == 0.0 && ni.fract() == 0.0 && np >= 0.0 && ni >= 0.0) || at + np as usize + ni as usize > f.len() {
             return Err("Mesh-Import: Puffer beschädigt".into());
         }
-        let positions = f[at..at + np as usize].to_vec();
+        let positions: Vec<f64> = f[at..at + np as usize].to_vec();
         at += np as usize;
         // Wie `Uint32Array`: ganzzahlig modulo 2³².
-        let indices = f[at..at + ni as usize].iter().map(|&x| (jsnum::to_int32(x) as u32) as f64).collect();
+        let indices: Vec<f64> = f[at..at + ni as usize].iter().map(|&x| (jsnum::to_int32(x) as u32) as f64).collect();
         at += ni as usize;
-        objects.push(MeshObject { name, group, color, positions, indices });
+        // Reparatur ([T5]): verschweissen, Entartete raus, kleine Löcher zu; Zähler gehen in den Bericht.
+        let r = crate::mesh_repair::repair(&positions, &indices);
+        repaired[0] += r.welded;
+        repaired[1] += r.degenerate;
+        repaired[2] += r.holes;
+        objects.push(MeshObject { name, group, color, positions: r.pos, indices: r.idx });
         k += 1.0;
     }
     let report = json!({
@@ -405,6 +411,7 @@ pub fn decode_mesh(f: &[f64], strings: &[String]) -> Result<(Vec<MeshObject>, Va
         "truncated": f[9] == 1.0,
         "warnings": warnings,
         "objects": objects.len(),
+        "repaired": {"welded": repaired[0], "degenerate": repaired[1], "holes": repaired[2]},
     });
     Ok((objects, report))
 }
@@ -591,5 +598,26 @@ mod step_tests {
         assert!(decode_step(&[2.0, 0.0]).is_err());
         assert!(decode_step(&[1.0, 1.0, 9.0, 3.0, 0.0]).is_err());
         assert!(decode_step(&[1.0, f64::NAN]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod repair_tests {
+    use super::*;
+
+    /// [T5] Der Import verschweisst Ecken und meldet die Reparatur im Bericht.
+    #[test]
+    fn mesh_import_repariert_und_berichtet() {
+        let mut f = vec![1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        // Objekt: Name 0, Gruppe -1, keine Farbe, 6 Ecken (Quadrat als zwei Dreiecke, STL-artig) + 1 entartetes Dreieck
+        f.extend([0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 18.0, 9.0]);
+        f.extend([0., 0., 0., 1., 0., 0., 1., 1., 0., 0., 0., 0., 1., 1., 0., 0., 1., 0.]);
+        f.extend([0., 1., 2., 3., 4., 5., 0., 0., 1.]);
+        let (objects, report) = decode_mesh(&f, &["q".to_string()]).unwrap();
+        assert_eq!(objects[0].positions.len(), 12); // 4 statt 6 Ecken
+        assert_eq!(objects[0].indices.len(), 6);
+        assert_eq!(report["repaired"]["welded"], 2);
+        assert_eq!(report["repaired"]["degenerate"], 1);
+        assert_eq!(report["repaired"]["holes"], 0);
     }
 }
