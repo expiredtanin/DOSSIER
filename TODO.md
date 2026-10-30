@@ -1358,7 +1358,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[T5] Import reparieren** (`put_together_same_attrs`, Healing). · S
 - ○ **[T6] Glattes Gelände aus Höhenlinien** + Gelände-Prisma für Aushub (= [68]). · L
 - ✅ **[T7] Rotationskörper/Loft im UI** (API besteht). · S–M — 30.10.: Befehle `revolve` (Profil + Achse aus 2 Plan-Punkten + Winkel; Achse waagrecht auf Höhe r_max, Profil auf einer Seite) und `loft` (≥ 2 Profile der Reihe nach, gleichmässig über die Höhe; Punktzahl durch Kantenteilung angeglichen) in `cmd_solid.rs`/`cmds/{revolve,loft}.ts`, Körper als `ExtrudedSolid.brep` (Objekt-Info, STEP, Kennwerte wie die Grundkörper); Kürzel `rev`/`lf`, Werkzeugpalette 3D. Tests Rust (Spezifikation, Ops, truck-Volumen/STEP), vitest (Befehlsablauf). Nicht in der Tauri-App getestet. Offen: Achse senkrecht/beliebig im Raum, Loft mit Führungskurve, Profil-Startpunkt-Ausrichtung beim Loft.
-- ○ **[T8] Kollisionsprüfung im 3D zeigen** (heute nur Marker im Grundriss). · S
+- ✅ **[T8] Kollisionsprüfung im 3D zeigen** (heute nur Marker im Grundriss). · S — 30.10.: Treffer in Sitzung (`panels/clashSession.ts`), Panel „Kollisionen" (`ClashPanel`: Liste, Klick wählt beide Bauteile und fährt die 3D-Kamera auf die Durchdringung, `cameraBridge.focusCamera`), im 3D rote Hüllquader aller Treffer (`clashHighlightLines` in `viewportContent`); Prüflauf öffnet das Panel, Marker im Grundriss bleiben. Tests vitest (Linien, Auswahl, Kamera-Fokus). Nicht im echten WebGPU-Viewport/Tauri geprüft. Offen: Hüllquader statt exakter Durchdringungsgeometrie, Panel-Name zeigt Ids statt Bauteilnamen, Wiederholung/Ignorieren einzelner Treffer.
 
 ---
 

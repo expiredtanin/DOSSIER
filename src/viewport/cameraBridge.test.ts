@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { projectToModel3d, sampleProject } from "../core";
 import {
   FOV_Y,
+  focusCamera,
+  focusedCamera,
   camera3dFromViewCamera,
   captureSnapshot,
   getCamera,
@@ -153,6 +155,25 @@ describe("Schnittebene", () => {
   });
 });
 
+describe("Fokus auf einen Punkt (Kollisionsliste)", () => {
+  it("zentriert das Ziel auf den Modellpunkt, behält die Blickrichtung, Abstand folgt dem Radius", () => {
+    const cam = orbitCamera({ yaw: 0.4, pitch: 0.3, dist: 15, target: [1, 2, 3], ortho: false, orthoHalfHeight: 8 });
+    const f = focusedCamera(cam, [4, 5, 6], 2);
+    close(f.target, modelToWorld([4, 5, 6]));
+    const d = (c: Camera3d) => {
+      const v = [c.target[0] - c.eye[0], c.target[1] - c.eye[1], c.target[2] - c.eye[2]];
+      const l = Math.hypot(...v);
+      return v.map((x) => x / l);
+    };
+    close(d(f), d(cam));
+    const near = Math.hypot(...f.target.map((t, i) => t - f.eye[i]));
+    expect(near).toBeGreaterThan(2);
+    expect(near).toBeLessThan(15);
+    const ortho = focusedCamera({ ...cam, perspective: false, orthoHalfHeight: 8 }, [0, 0, 0], 2);
+    expect(ortho.orthoHalfHeight).toBeLessThan(8);
+  });
+});
+
 describe("Registrierung", () => {
   function fakeViewport() {
     const state = { cam: orbitCamera({ yaw: 0.4, pitch: 0.3, dist: 15, target: [1, 2, 3], ortho: false, orthoHalfHeight: 8 }), written: null as Camera3d | null, section: undefined as unknown };
@@ -179,6 +200,14 @@ describe("Registrierung", () => {
     expect(setSection(null)).toBe(false);
     const vc: ViewCamera = { kind: "perspective", position: [0, 0, 0], direction: [1, 0, 0], up: [0, 0, 1], fovDeg: 50, orthoHeight: 5, aspect: 1 };
     expect(setCamera(vc)).toBe(false);
+  });
+
+  it("focusCamera schreibt die fokussierte Kamera in den Viewport (false ohne Viewport)", () => {
+    expect(focusCamera([1, 2, 3], 1)).toBe(false);
+    const { state, a } = fakeViewport();
+    registerViewportCamera(a);
+    expect(focusCamera([5, 6, 7], 1)).toBe(true);
+    close(state.written!.target, modelToWorld([5, 6, 7]));
   });
 
   it("getCamera → setCamera am angemeldeten Viewport lässt die Kamera unverändert", () => {
