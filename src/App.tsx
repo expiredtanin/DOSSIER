@@ -29,6 +29,7 @@ import type {
   Drawing2D,
   DrawingLevel,
   Layout,
+  LayoutTable,
   LayoutViewport,
   Project,
   Roof,
@@ -93,6 +94,9 @@ import {
   addViewport as addViewportToLayout,
   removeViewport as removeViewportFromLayout,
   patchViewport as patchViewportInLayout,
+  addTable as addTableToLayout,
+  patchTable as patchTableInLayout,
+  removeTable as removeTableFromLayout,
 } from "./model/layoutModel";
 import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar, ViewRibbonTab } from "./ui/TopBar";
@@ -2641,6 +2645,10 @@ export default function App() {
               patchOpenLayout(activeLayout.id, (l) => patchViewportInLayout(l, viewportId, patch)),
             onRemoveViewport: (viewportId: string) =>
               patchOpenLayout(activeLayout.id, (l) => removeViewportFromLayout(l, viewportId)),
+            onAddTable: (table: LayoutTable) => patchOpenLayout(activeLayout.id, (l) => addTableToLayout(l, table)),
+            onPatchTable: (tableId: string, patch: Partial<Omit<LayoutTable, "id">>, coalesceKey?: string) =>
+              patchOpenLayout(activeLayout.id, (l) => patchTableInLayout(l, tableId, patch), coalesceKey),
+            onRemoveTable: (tableId: string) => patchOpenLayout(activeLayout.id, (l) => removeTableFromLayout(l, tableId)),
             onAddViewport: (snapshotId: string, init: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) =>
               patchOpenLayout(activeLayout.id, (l) =>
                 addViewportToLayout(l, createViewport(`vp-${Date.now()}`, snapshotId, init)),

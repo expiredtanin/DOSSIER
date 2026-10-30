@@ -14,6 +14,7 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
 
+import { UValueRow } from "./UValueRow";
 import { lengthFromDisplay, lengthToDisplay, unitsForLevel, xToDisplay, yFromDisplay, yToDisplay } from "../tools/displayUnits";
 import { solidProps } from "../engine/truckSolid";
 import type { SolidProps, SolidSpec } from "../engine/truckSolid";
@@ -989,6 +990,7 @@ export function RoofSection({
           width={130}
         />
       </div>
+      <UValueRow project={host.project} kind="roof" typeId={roof.roofTypeId} />
 
       {/* Firstrichtung (X/Y) — nur bei Formen mit First relevant. */}
       {roof.shape !== "flach" && roof.shape !== "zelt" && (
@@ -1765,6 +1767,7 @@ export function CeilingSection({
         <span className="objinfo-flabel">{t("objinfo.ceiling.refFloor")}</span>
         <span className="objinfo-fval">{ceiling.floorName}</span>
       </div>
+      <UValueRow project={host.project} kind="ceiling" typeId={ceiling.typeId} />
 
       {/* Fläche + Volumen (read-only). */}
       <div className="objinfo-field">
@@ -1964,6 +1967,7 @@ export function WallSection({
         <span className="objinfo-flabel">{t("objinfo.wall.refFloor")}</span>
         <span className="objinfo-fval">{wall.floorName}</span>
       </div>
+      <UValueRow project={host.project} kind="wall" typeId={wall.wallTypeId} />
 
       {/* Länge + Volumen (read-only). Volumen ist NETTO — Fenster/Türen
           abgezogen; der Titel zeigt zusätzlich das Bruttovolumen. */}

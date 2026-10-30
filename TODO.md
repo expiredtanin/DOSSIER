@@ -1553,7 +1553,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `loadBearing`. Anzeige editierbar in der Flächenbilanz (`OpeningScheduleSection`), Export CSV/SVG/PDF über das
   Berichtsmodell des Flächennachweises, CLI `schedule --openings [--format json|csv|svg|pdf]`.
   Offen: Wand/Decke `isExternal`/`loadBearing` ohne UI (nur über Ops/IFC-Import setzbar; Objekt-Info fehlt);
-  Tabelle noch nicht als Element auf dem Layout-Blatt (Layout-Blatt hat keinen Tabellen-Baustein); Typ-Vorgaben
+  Tabelle als Element auf dem Layout-Blatt ✅ [111]; Typ-Vorgaben
   (Brand/Schall/U am Tür-/Fenstertyp) fehlen — die Werte liegen je Öffnung; Nummern nicht stabil bei
   Umordnung (automatisch nach Dokumentreihenfolge); nicht in der Tauri-App getestet.
 - ◐ **[94] Fenster/Türen: Konstruktionsdetails.** (29.10., Wunsch Maintainer vor den Lukarnen) Neue Typ-Felder (Fenster- und
@@ -1603,6 +1603,37 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     Geprüft: Rust-/vitest-Tests, CLI-Liste/-Schnitt/-Ansicht/-Grundriss angesehen (Linux). Offen: Griffe nicht
     in Schnitt/Ansicht, Verschieben über die Dachfläche hinaus lässt das Fenster verschwinden (kein Wirt an der
     Stelle), „Alles wählen“ im Geschoss nimmt Dachfenster nicht mit, nicht in der Tauri-App geprüft.
+- ✅ **[71] U-Wert aus dem Schichtaufbau** (SIA 180 / EN ISO 6946). (30.10.) Kern `u_value.rs`: R = Rsi + Σ d/λ + Rse
+  (λ je Bauteil `Component.lambda`, [100]); Wand waagrecht 0.13/0.04, Dach aufwärts 0.10/0.04, Decke abwärts
+  0.17/0.04 (Decke: oben → unten, Aussenseite unten); hinterlüftete Schicht (Standard-Luftschicht oder Name mit
+  „hinterl“) kappt die Aussenseite, Rse = Rsi; nicht hinterlüftete Luftschicht ohne λ mit R nach Dicke (ISO 6946
+  Tab. 2); Schicht ohne λ ⇒ `complete = false`, `u = None` (Anzeige „unvollständig“/„k. A.“, nie eine falsche Zahl).
+  Abfragen `uValue` (Typ oder Schichten), `elementSchedule`. Anzeige: Objekt-Info (Wand/Decke/Dach, `UValueRow`),
+  Ressourcen-Manager (Wand-/Decken-/Dachtyp, live beim Bearbeiten der Schichten), Bauteilliste (Typ, Geschoss,
+  Fläche, Dicke, U-Wert) im Flächenbilanz-Panel mit CSV/PDF, CLI `schedule --elements`, Blatt-Tabelle „Bauteile mit
+  U-Wert“ ([111]), IFC `ThermalTransmittance` in `Pset_WallCommon`/`Pset_SlabCommon`/`Pset_RoofCommon` (nur wenn
+  vollständig). Geprüft: Rust-Tests (die 5 Standard-Aufbauten gegen Handrechnung, Beton + Dämmung 0.2071, hinterlüftet,
+  Luftschicht, unvollständig, Bauteilliste, IFC-Pset), vitest. Offen: ungleichartige Schichten (Holzständer + Dämmung):
+  das Modell hat kein Flächenanteil-Feld, es wird homogen gerechnet (Hinweis im Bericht); Wärmebrücken/Dach-Flachdach-
+  Sonderfälle (Gefälledämmung), Boden gegen Erdreich (Rse/Ersatzdicke) nicht berücksichtigt; Fenster-U-Wert bleibt
+  Eingabe ([97]); IFC-Rückimport liest den berechneten Wert nicht (nur Anzeige); nicht in der Tauri-App getestet. · S
+- ✅ **[111] Tabellen auf Layout-Blättern.** (30.10.) Neues Modellfeld `Layout.tables` (`LayoutTable`, optional):
+  Quelle `openings` (Fenster-/Türliste [97], Filter nur Fenster/Türen), `areas` (Flächentabelle SIA 416 [70]),
+  `rooms` (Raumprogramm Soll/Ist), `elements` (Bauteile mit U-Wert [71]); Spaltenwahl (Kennungen je Quelle), Textstil
+  (`textStyleId` → Schrift/Grösse/fett/kursiv) oder Schrift in pt, Zeilenhöhe, Linien (Raster/waagrecht/Rahmen/keine),
+  Kopfzeile, Rahmen (x/y/Breite/Höhe) und `continues`: ist die Höhe gesetzt, zeigt die Tabelle nur die Zeilen, die
+  hineinpassen, die Folgetabelle (erbt Quelle/Spalten/Filter, Kopf wiederholt) den Rest; was nirgends Platz findet,
+  meldet die Blatt-Leiste („n Zeilen ohne Platz"). Kern `sheet_table.rs` (Abfragen `sheetTables`,
+  `sheetTableCatalog`): rechnet bei jedem Aufruf aus dem Dokument (lebendig) und liefert Text/Linien in Papier-mm;
+  Beschriftungen kommen aus TS (`t()`, `export/sheetTable.ts`). Dieselben Primitive: Blattansicht (SVG, Tabelle
+  wählen, ziehen, Eigenschaften in `SheetTableHud`), Ordner-PDF (jsPDF, Vektortext, `layoutPdf.ts`), DXF-Export
+  (Block `SHEETTAB_n` im Papierbereich, Beschriftungen als Parameter `table_labels` von `plan_dxf_flat`).
+  Geprüft: Rust-Tests (wächst mit dem Modell, Aufteilen, Spalten/Filter, Zyklus, DXF), vitest, e2e `sheetTable.spec.ts`
+  (Tabelle platzieren, Spalten wählen, Fenster löschen → Zeile weg, PDF enthält den Text), Blatt und PDF als PNG angesehen
+  (Linux/Chromium). Offen: Zeilenumbruch in Zellen (zu lange Texte werden gekürzt, Breite ≈ 0.5 em je Zeichen geschätzt);
+  Tabellenbreite nur über das Zahlenfeld (kein Ziehgriff); keine Kopfzeilen-Füllung/Farben; Schrift im PDF nur
+  Helvetica/Times/Courier (jsPDF-Grundschriften); DXF-Beschriftungen in der Sprache der Oberfläche beim Export;
+  nicht in der Tauri-App getestet. · S
 - ◐ **[110] Linientyp ohne Strichstärke.** (30.10., Wunsch Maintainer: „Volllinie 0.5/0.35 soll es nicht
   geben") Ein Linienstil ist nur Muster (Volllinie, Strich, Punkt, Zickzack, Motiv) + Farbe; die Stärke trägt
   das Element (`Drawing2D.weightMm`, sonst Ebene), die Schraffur (neu `HatchStyle.lineWeight`, Default 0.13),
@@ -1706,7 +1737,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 ## Priorität 4 — später
 
 Alle ○: [27] Punktwolken (Leser ✅ [B9], Anzeige ◐ s. u., Modell offen) · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden; Fenster-/Türliste ✅ [97]) · [43] Verknüpfte
-Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (= [T6]) · [71] U-Werte ·
+Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (= [T6]) · [71] U-Werte (✅ s. u.) ·
 [72] Graue Energie KBOB · [73] eBKP-H · [74] SIA 500 · [75] Fluchtwege VKF · [83] Befehlspalette ·
 [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
 (◐, DXF-Parser, IFC-Import) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
@@ -1893,8 +1924,8 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     Reference (Nummer, sonst Typname), IsExternal (eigene Angabe > Wand > Raumlage wie die Liste [97]),
     FireRating, AcousticRating, ThermalTransmittance (`IfcThermalTransmittanceMeasure`), SecurityRating.
     Import liest dieselben Werte aus `Pset_*Common` zurück (Rundreise-Test; nur bekannte Eigenschaften).
-    Mit ifcopenshell geprüft (`exportIfc.validate.test.ts`: gültig). Offen: U-Wert der Wand aus den
-    Schichten (λ je Bauteil, [71]); Wand/Decke-Felder ohne UI; Reference-Rückimport (Nummer) fehlt;
+    Mit ifcopenshell geprüft (`exportIfc.validate.test.ts`: gültig). Offen: (U-Wert der Wand aus den
+    Schichten ✅ [71]); Wand/Decke-Felder ohne UI; Reference-Rückimport (Nummer) fehlt;
     IFC2x3 nicht gesondert geprüft. · S
   - ✅ IfcMaterialLayerSetUsage + Achs-Darstellung an Extrusions-Wänden. (28.10.) Wand-Placement am
     Wandanfang, X = Achse, Y = linke Normale (Rust rechnet die Welt-Profile und die Öffnungen ins

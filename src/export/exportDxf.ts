@@ -33,6 +33,7 @@ import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { fileio, loadFileio } from "../engine/fileioWasm";
 import { core } from "../engine/coreWasm";
 import { documentFor } from "../core/document";
+import { tableLabels } from "./sheetTable";
 import { planParts, withPlanParts } from "../plan/planParts";
 
 export interface ExportDxfOptions {
@@ -138,7 +139,7 @@ export function collectPlanDrawing(
   const o = Float64Array.of(scale, (opts.includeHatches ?? true) ? 1 : 0, opts.dimUnit === "cm" ? 1 : 0, opts.paperLayout ? 1 : 0, b.minX, b.minY, b.maxX, b.maxY);
   const doc = documentFor(project).id;
   // Eigener Puffer mit Schraffur-JSON (Verlauf-Schraffuren brauchen ihre Farben).
-  const bytes = withPlanParts(planParts(plan, true), (segs) => core().plan_dxf_flat(doc, segs, o, opts.levelId ?? ""));
+  const bytes = withPlanParts(planParts(plan, true), (segs) => core().plan_dxf_flat(doc, segs, o, opts.levelId ?? "", JSON.stringify(tableLabels(project))));
   return decodeFlat(bytes);
 }
 

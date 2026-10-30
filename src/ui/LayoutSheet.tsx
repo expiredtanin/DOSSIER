@@ -17,11 +17,15 @@ import type {
   Layout,
   LayoutOrientation,
   LayoutPaperFormat,
+  LayoutTable,
+  LayoutTableSource,
   LayoutViewport,
   Project,
   Vec2,
 } from "../model/types";
-import { generatePlan, PX_PER_M } from "../core";
+import { createTable, generatePlan, PX_PER_M, sheetTables, TABLE_SOURCES, tableSourceLabel } from "../core";
+import type { TableOut } from "../core";
+import { SheetTableHud } from "./SheetTableHud";
 import { planToPrintSvg } from "../export/planToPrintSvg";
 import {
   effectiveSheetSizeMm,
@@ -166,6 +170,11 @@ export interface LayoutSheetHandlers {
   onRemoveViewport: (viewportId: string) => void;
   /** Fügt einen Viewport (gebunden an `snapshotId`) mit gegebener Geometrie an. */
   onAddViewport: (snapshotId: string, init: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) => void;
+  /** Legt eine lebendige Tabelle auf dem Blatt an ([111]). */
+  onAddTable: (table: LayoutTable) => void;
+  /** Ändert eine Tabelle (Teil-Patch; gleiche `coalesceKey` fassen sich zu einem Undo-Schritt zusammen). */
+  onPatchTable: (tableId: string, patch: Partial<Omit<LayoutTable, "id">>, coalesceKey?: string) => void;
+  onRemoveTable: (tableId: string) => void;
 }
 
 /** Was die Plan-Ansicht der Blatt-Ebene vom Blatt bekommt. */
@@ -236,6 +245,9 @@ export function LayoutSheetPane({
   children: (props: SheetPlanProps) => ReactNode;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  // Tabellen-Verschiebung läuft (Versatz in mm), sonst null.
+  const [tableDrag, setTableDrag] = useState<{ id: string; dx: number; dy: number } | null>(null);
   // „Viewport aufziehen" armiert; danach folgt ggf. die Ausschnitt-Bindung.
   const [placing, setPlacing] = useState(false);
   // Live-Geometrie während Platzieren/Verschieben/Skalieren (Ghost), sonst null.
@@ -251,10 +263,15 @@ export function LayoutSheetPane({
   const drawBorder = master ? master.border ?? true : false;
   const snapshots = project.viewSnapshots ?? [];
   const selectedVp = layout.viewports.find((v) => v.id === selectedId) ?? null;
+  // Lebendige Tabellen: folgen dem Modell (jede Projekt-Änderung rechnet neu).
+  const tables = useMemo(() => sheetTables(project, layout.id), [project, layout.id]);
+  const layoutTables = layout.tables ?? [];
+  const selectedTable = layoutTables.find((tb) => tb.id === selectedTableId) ?? null;
 
   // Gelöschter Viewport / anderes Blatt → Auswahl und laufendes Platzieren verwerfen.
   useEffect(() => {
     setSelectedId(null);
+    setSelectedTableId(null);
     setPlacing(false);
     setPendingRect(null);
   }, [layout.id]);
@@ -268,13 +285,19 @@ export function LayoutSheetPane({
 
   // Entf löscht den gewählten Viewport, Escape hebt Auswahl/Platzieren auf (nicht in Eingabefeldern).
   useEffect(() => {
-    if (!selectedVp && !placing) return;
+    if (!selectedVp && !placing && !selectedTable) return;
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
       if (e.key === "Escape") {
         setSelectedId(null);
+        setSelectedTableId(null);
         setPlacing(false);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedTable && !selectedVp) {
+        e.preventDefault();
+        e.stopPropagation();
+        handlers.onRemoveTable(selectedTable.id);
+        setSelectedTableId(null);
       } else if ((e.key === "Delete" || e.key === "Backspace") && selectedVp) {
         e.preventDefault();
         e.stopPropagation();
@@ -284,7 +307,7 @@ export function LayoutSheetPane({
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [selectedVp, placing, handlers]);
+  }, [selectedVp, selectedTable, placing, handlers]);
 
   // Client-Pixel → Blatt-mm über die Bildschirm-Matrix der Blatt-Gruppe (enthält Pan/Zoom).
   const toMm = (clientX: number, clientY: number): { xMm: number; yMm: number } | null => {
@@ -344,6 +367,33 @@ export function LayoutSheetPane({
     window.addEventListener("pointercancel", up);
   };
 
+  // Tabelle verschieben: Versatz live als Transform, beim Loslassen ein Patch (x/y, auf 0.1 mm).
+  const startTableDrag = (e: ReactPointerEvent<SVGElement>, table: LayoutTable) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const grab = toMm(e.clientX, e.clientY);
+    if (!grab) return;
+    let last = { dx: 0, dy: 0 };
+    const move = (ev: PointerEvent) => {
+      const mm = toMm(ev.clientX, ev.clientY);
+      if (!mm) return;
+      last = { dx: mm.xMm - grab.xMm, dy: mm.yMm - grab.yMm };
+      setTableDrag({ id: table.id, ...last });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setTableDrag(null);
+      if (last.dx === 0 && last.dy === 0) return;
+      handlers.onPatchTable(table.id, { xMm: round1(table.xMm + last.dx), yMm: round1(table.yMm + last.dy) });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+
   const displayRect = (vp: LayoutViewport): RectMm =>
     preview && preview.drag.mode === "edit" && preview.drag.id === vp.id ? preview.rect : vpRect(vp);
 
@@ -391,6 +441,51 @@ export function LayoutSheetPane({
                 strokeWidth={hair * (vp.id === selectedId ? 1.5 : 1)}
                 pointerEvents="none"
               />
+            </g>
+          );
+        })}
+        {/* Lebendige Tabellen ([111]): Text + Linien aus dem Kern, über den Viewports. */}
+        {tables.map((tb) => {
+          const off = tableDrag && tableDrag.id === tb.id ? tableDrag : null;
+          const src = layoutTables.find((x) => x.id === tb.id);
+          return (
+            <g key={tb.id} data-table-id={tb.id} transform={off ? `translate(${off.dx} ${off.dy})` : undefined}>
+              {tb.prims.map((p, i) =>
+                p.k === "line" ? (
+                  <line key={i} x1={p.x1} y1={p.y1} x2={p.x2} y2={p.y2} stroke="#111111" strokeWidth={p.w} pointerEvents="none" />
+                ) : (
+                  <text
+                    key={i}
+                    x={p.x}
+                    y={p.y}
+                    fontSize={p.size}
+                    fontFamily={p.font === "serif" ? "Times, serif" : p.font === "mono" ? "Courier, monospace" : "Helvetica, Arial, sans-serif"}
+                    fontWeight={p.bold ? "bold" : "normal"}
+                    fontStyle={p.italic ? "italic" : "normal"}
+                    textAnchor={p.align === "r" ? "end" : "start"}
+                    fill="#111111"
+                    pointerEvents="none"
+                  >
+                    {p.s}
+                  </text>
+                ),
+              )}
+              {src && (
+                <rect
+                  x={src.xMm}
+                  y={src.yMm}
+                  width={tb.widthMm}
+                  height={Math.max(tb.heightMm, 4)}
+                  fill="transparent"
+                  stroke={tb.id === selectedTableId ? ACCENT : "none"}
+                  strokeWidth={hair * 1.5}
+                  strokeDasharray={`${hair * 4} ${hair * 3}`}
+                  pointerEvents={tb.id === selectedTableId && editable ? "all" : "none"}
+                  style={{ cursor: "move" }}
+                  data-table-body
+                  onPointerDown={(e) => startTableDrag(e, src)}
+                />
+              )}
             </g>
           );
         })}
@@ -468,10 +563,17 @@ export function LayoutSheetPane({
   const onSheetSelect = (sel: PlanSelection) => {
     if (!toolInputActive && isEmptyPick(sel)) {
       const mm = sheetModelToMm(sel.model);
-      const hit = pickViewport(layout.viewports, mm.xMm, mm.yMm, 0);
+      // Tabelle zuerst (liegt über den Viewports), dann Viewport.
+      const tableHit = [...tables].reverse().find((tb) => {
+        const src = layoutTables.find((x) => x.id === tb.id);
+        return src && mm.xMm >= src.xMm && mm.xMm <= src.xMm + tb.widthMm && mm.yMm >= src.yMm && mm.yMm <= src.yMm + Math.max(tb.heightMm, 4);
+      });
+      setSelectedTableId(tableHit ? tableHit.id : null);
+      const hit = tableHit ? null : pickViewport(layout.viewports, mm.xMm, mm.yMm, 0);
       setSelectedId(hit ? hit.id : null);
     } else {
       setSelectedId(null);
+      setSelectedTableId(null);
     }
     onPlanSelect(sel);
   };
@@ -502,6 +604,26 @@ export function LayoutSheetPane({
         >
           ＋ {t("layouts.placeViewport")}
         </button>
+        <select
+          className="res-select"
+          value=""
+          disabled={toolInputActive}
+          title={t("sheetTable.add")}
+          data-table-add
+          onChange={(e) => {
+            const source = e.target.value as LayoutTableSource;
+            if (!source) return;
+            const tb = createTable(`tb-${Date.now()}`, source, sheet.w, sheet.h, layoutTables);
+            handlers.onAddTable(tb);
+            setSelectedTableId(tb.id);
+            setSelectedId(null);
+          }}
+        >
+          <option value="">＋ {t("sheetTable.add")}</option>
+          {TABLE_SOURCES.map((src) => (
+            <option key={src} value={src}>{tableSourceLabel(src)}</option>
+          ))}
+        </select>
         <span style={{ flex: 1 }} />
         <button className="nav-add" onClick={() => planViewRef.current?.fit()} title={t("layouts.fit")}>
           {t("layouts.fit")}
@@ -559,6 +681,21 @@ export function LayoutSheetPane({
               </button>
             </div>
           </div>
+        )}
+
+        {/* Eigenschaften der gewählten Tabelle ([111]). */}
+        {selectedTable && !selectedVp && (
+          <SheetTableHud
+            project={project}
+            table={selectedTable}
+            others={layoutTables.filter((o) => o.id !== selectedTable.id)}
+            out={tables.find((tb: TableOut) => tb.id === selectedTable.id)}
+            onPatch={(patch) => handlers.onPatchTable(selectedTable.id, patch, `sheetTable:${selectedTable.id}`)}
+            onRemove={() => {
+              handlers.onRemoveTable(selectedTable.id);
+              setSelectedTableId(null);
+            }}
+          />
         )}
 
         {/* Ausschnitt-Bindung nach dem Aufziehen (Inline-Dropdown, kein prompt). */}
