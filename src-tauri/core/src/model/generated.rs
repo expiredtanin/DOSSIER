@@ -4224,10 +4224,127 @@ pub struct Layout {
     /// Die 2D-Zeichnung auf dem Blatt liegt auf der Blatt-Ebene ({@link DrawingLevel.layoutId}),
     /// nicht im Layout (bis Format 2: `annotations`, s. `project_format::migrate_layout_annotations`).
     pub viewports: Vec<LayoutViewport>,
+    /// Revisionsindex des Blatts (z. B. "A", "B" oder "2"); steht im Titelblock, wird beim
+    /// Publizieren eines Satzes optional hochgezählt ([79]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub revision: Option<String>,
+    /// Grafische Legenden auf dem Blatt ([82]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub legends: Option<Vec<LayoutLegend>>,
     /// Lebendige Tabellen auf dem Blatt ([111]); fehlt = keine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tables: Option<Vec<LayoutTable>>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Grafische Legende auf einem Layout-Blatt ([82]): listet Schraffuren/Materialien, Linientypen und/oder
+/// Kategorien der gezeigten Viewports (`manualKeys` leer) oder einer Handauswahl, mit Muster und Name.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct LayoutLegend {
+    pub id: String,
+    /// Linke Kante auf dem Blatt (mm).
+    #[serde(rename = "xMm")]
+    pub x_mm: f64,
+    /// Obere Kante auf dem Blatt (mm).
+    #[serde(rename = "yMm")]
+    pub y_mm: f64,
+    /// Titel; fehlt = „Legende".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
+    /// Gezeigte Arten: "hatch", "lineType", "category"; fehlt = nur Schraffuren.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub kinds: Option<Vec<String>>,
+    /// Handauswahl als Schlüssel "hatch:<id>", "lineType:<id>", "category:<code>"; leer/fehlt = automatisch
+    /// aus den Viewports des Blatts.
+    #[serde(rename = "manualKeys", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub manual_keys: Option<Vec<String>>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Publikationssatz ([79]): benannte Menge von Layouts (und optional Ansichten) mit Ausgabe-Einstellungen.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct PublishSet {
+    pub id: String,
+    pub name: String,
+    /// Layouts des Satzes in Ausgabe-Reihenfolge.
+    #[serde(rename = "layoutIds")]
+    pub layout_ids: Vec<String>,
+    /// Gespeicherte Ansichten, die zusätzlich als eigene Seiten ausgegeben werden.
+    #[serde(rename = "snapshotIds", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub snapshot_ids: Option<Vec<String>>,
+    /// "pdf-multi" (ein PDF, Standard), "pdf-single" (je Blatt eine Datei), "dxf" (DXF mit Layouts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub format: Option<String>,
+    /// Dateinamen-Muster mit {Projektnummer} {Projekt} {Blattnummer} {Blattname} {Index} {Datum} {Satz}.
+    #[serde(rename = "namePattern", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name_pattern: Option<String>,
+    /// Papierformat-Übersteuerung für alle Blätter des Satzes.
+    #[serde(rename = "paperOverride", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub paper_override: Option<LayoutPaperFormat>,
+    /// Massstab-Übersteuerung (1:N) für alle Viewports des Satzes.
+    #[serde(rename = "scaleOverride", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scale_override: Option<f64>,
+    /// Revisionsindex im Titelblock/Dateinamen ausgeben (Standard ja).
+    #[serde(rename = "includeRevision", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub include_revision: Option<bool>,
+    /// Revisionsindex je Blatt beim Publizieren erhöhen (A→B, 1→2).
+    #[serde(rename = "bumpRevision", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bump_revision: Option<bool>,
+    /// PDF-Ebenen (Optional Content) je Kategorie.
+    #[serde(rename = "pdfLayers", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pdf_layers: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Ein Blatt im Publikationsprotokoll.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct PublishLogSheet {
+    #[serde(rename = "layoutId")]
+    pub layout_id: String,
+    pub number: String,
+    pub name: String,
+    pub revision: String,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Protokolleintrag einer Publikation ([79]): Datum, Blätter mit Revision, erzeugte Dateien.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct PublishLogEntry {
+    pub id: String,
+    #[serde(rename = "setId")]
+    pub set_id: String,
+    #[serde(rename = "setName")]
+    pub set_name: String,
+    /// ISO-Zeitstempel.
+    pub date: String,
+    pub sheets: Vec<PublishLogSheet>,
+    pub files: Vec<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4598,6 +4715,18 @@ pub struct Project {
     #[serde(rename = "layoutFolders", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub layout_folders: Option<Vec<LayoutFolder>>,
+    /// Publikationssätze ([79]).
+    #[serde(rename = "publishSets", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub publish_sets: Option<Vec<PublishSet>>,
+    /// Publikationsprotokoll ([79]), neueste zuletzt.
+    #[serde(rename = "publishLog", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub publish_log: Option<Vec<PublishLogEntry>>,
+    /// Projektnummer für Titelblock und Dateinamen ([79]).
+    #[serde(rename = "projectNumber", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub project_number: Option<String>,
     /// Referenzhöhe des Erdgeschosses in Metern über Meer (m ü. M.), editierbar
     /// im Einstellungs-Fenster. Optional, damit bestehende Projekte ohne diesen
     /// Wert gültig bleiben (Default: unbestimmt/0). NUR Speicherfeld — die
@@ -5315,6 +5444,24 @@ impl Project {
             "layoutFolders" => {
                 self.layout_folders = match v {
                     Some(v) => <Option<Vec<LayoutFolder>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "publishSets" => {
+                self.publish_sets = match v {
+                    Some(v) => <Option<Vec<PublishSet>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "publishLog" => {
+                self.publish_log = match v {
+                    Some(v) => <Option<Vec<PublishLogEntry>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "projectNumber" => {
+                self.project_number = match v {
+                    Some(v) => <Option<String>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

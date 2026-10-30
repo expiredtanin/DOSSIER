@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import type {
   Layout,
+  LayoutLegend,
   LayoutOrientation,
   LayoutPaperFormat,
   LayoutTable,
@@ -27,6 +28,8 @@ import { createTable, generatePlan, PX_PER_M, sheetTables, TABLE_SOURCES, tableS
 import type { TableOut } from "../core";
 import { SheetTableHud } from "./SheetTableHud";
 import { planToPrintSvg } from "../export/planToPrintSvg";
+import { legendPlan, legendPrintSvg } from "../export/legendSvg";
+import { legendBox, legendEntries, legendKeysOfViewports, type LegendKind } from "../analysis/legend";
 import {
   effectiveSheetSizeMm,
   findMaster,
@@ -106,6 +109,31 @@ export function ViewportPlanSvg({
 }
 
 /**
+ * Legende ([82]) als verschachteltes `<svg>` in Blatt-mm: derselbe Weg wie im PDF (`legendPlan`, Schraffur-Muster
+ * und Schrift vom Kern); folgt dem Projekt live, weil sie bei jeder Änderung neu aufgebaut wird.
+ */
+export function LegendSvg({ project, layout, legend }: { project: Project; layout: Layout; legend: LayoutLegend }) {
+  const ref = useRef<SVGGElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    try {
+      const lp = legendPlan(project, layout, legend);
+      if (!lp) return void el.replaceChildren();
+      const svg = legendPrintSvg(lp);
+      svg.setAttribute("x", String(lp.xMm));
+      svg.setAttribute("y", String(lp.yMm));
+      svg.setAttribute("width", String(lp.widthMm));
+      svg.setAttribute("height", String(lp.heightMm));
+      el.replaceChildren(svg);
+    } catch {
+      el.replaceChildren();
+    }
+  }, [project, layout, legend]);
+  return <g ref={ref} pointerEvents="none" data-legend-id={legend.id} />;
+}
+
+/**
  * Schlichtes Schriftfeld unten rechts (mm-Koordinaten des Blatts) mit den aufgelösten Master-Werten —
  * dieselbe Anmutung wie der PDF-Titelblock.
  */
@@ -116,7 +144,7 @@ export function TitleBlockSvg({
   orientation,
 }: {
   sheet: { w: number; h: number };
-  tb: { projectName: string; sheetName: string; scale: string; date: string; author: string; planNumber: string };
+  tb: { projectName: string; sheetName: string; scale: string; date: string; author: string; planNumber: string; revision?: string };
   paper: LayoutPaperFormat;
   orientation: LayoutOrientation;
 }) {
@@ -140,6 +168,11 @@ export function TitleBlockSvg({
       <text x={x + 3} y={y + 13} fontSize={3} fontFamily="Helvetica, Arial, sans-serif" fill="#111111">
         {clip(tb.sheetName, 36)}
       </text>
+      {tb.revision && (
+        <text x={x + boxW - 3} y={y + 13} fontSize={2.6} fontFamily="Helvetica, Arial, sans-serif" fill="#111111" textAnchor="end">
+          {t("layouts.revision.short")} {tb.revision}
+        </text>
+      )}
       {tb.author && (
         <text x={x + 3} y={y + 18} fontSize={2.6} fontFamily="Helvetica, Arial, sans-serif" fill="#444444">
           {clip(tb.author, 40)}
@@ -170,6 +203,12 @@ export interface LayoutSheetHandlers {
   onRemoveViewport: (viewportId: string) => void;
   /** Fügt einen Viewport (gebunden an `snapshotId`) mit gegebener Geometrie an. */
   onAddViewport: (snapshotId: string, init: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) => void;
+  /** Legt eine Legende ([82]) an; liefert deren Id. */
+  onAddLegend: (init: Omit<LayoutLegend, "id">) => string;
+  /** Ändert Felder einer Legende (Titel, Lage, Arten, Handauswahl). */
+  onPatchLegend: (legendId: string, patch: Partial<Omit<LayoutLegend, "id">>) => void;
+  /** Entfernt eine Legende. */
+  onRemoveLegend: (legendId: string) => void;
   /** Legt eine lebendige Tabelle auf dem Blatt an ([111]). */
   onAddTable: (table: LayoutTable) => void;
   /** Ändert eine Tabelle (Teil-Patch; gleiche `coalesceKey` fassen sich zu einem Undo-Schritt zusammen). */
@@ -245,6 +284,7 @@ export function LayoutSheetPane({
   children: (props: SheetPlanProps) => ReactNode;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedLegendId, setSelectedLegendId] = useState<string | null>(null);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   // Tabellen-Verschiebung läuft (Versatz in mm), sonst null.
   const [tableDrag, setTableDrag] = useState<{ id: string; dx: number; dy: number } | null>(null);
@@ -263,6 +303,7 @@ export function LayoutSheetPane({
   const drawBorder = master ? master.border ?? true : false;
   const snapshots = project.viewSnapshots ?? [];
   const selectedVp = layout.viewports.find((v) => v.id === selectedId) ?? null;
+  const selectedLegend = (layout.legends ?? []).find((l) => l.id === selectedLegendId) ?? null;
   // Lebendige Tabellen: folgen dem Modell (jede Projekt-Änderung rechnet neu).
   const tables = useMemo(() => sheetTables(project, layout.id), [project, layout.id]);
   const layoutTables = layout.tables ?? [];
@@ -271,6 +312,7 @@ export function LayoutSheetPane({
   // Gelöschter Viewport / anderes Blatt → Auswahl und laufendes Platzieren verwerfen.
   useEffect(() => {
     setSelectedId(null);
+    setSelectedLegendId(null);
     setSelectedTableId(null);
     setPlacing(false);
     setPendingRect(null);
@@ -444,6 +486,17 @@ export function LayoutSheetPane({
             </g>
           );
         })}
+        {(layout.legends ?? []).map((lg) => {
+          const box = legendBox(project, layout, lg);
+          return (
+            <g key={lg.id}>
+              <LegendSvg project={project} layout={layout} legend={lg} />
+              {lg.id === selectedLegendId && (
+                <rect {...rectAttrs(box)} fill="none" stroke={ACCENT} strokeWidth={hair * 1.5} pointerEvents="none" data-legend-selected />
+              )}
+            </g>
+          );
+        })}
         {/* Lebendige Tabellen ([111]): Text + Linien aus dem Kern, über den Viewports. */}
         {tables.map((tb) => {
           const off = tableDrag && tableDrag.id === tb.id ? tableDrag : null;
@@ -563,17 +616,25 @@ export function LayoutSheetPane({
   const onSheetSelect = (sel: PlanSelection) => {
     if (!toolInputActive && isEmptyPick(sel)) {
       const mm = sheetModelToMm(sel.model);
-      // Tabelle zuerst (liegt über den Viewports), dann Viewport.
+      // Tabelle zuerst (liegt über den Viewports), dann Legende, dann Viewport.
       const tableHit = [...tables].reverse().find((tb) => {
         const src = layoutTables.find((x) => x.id === tb.id);
         return src && mm.xMm >= src.xMm && mm.xMm <= src.xMm + tb.widthMm && mm.yMm >= src.yMm && mm.yMm <= src.yMm + Math.max(tb.heightMm, 4);
       });
       setSelectedTableId(tableHit ? tableHit.id : null);
-      const hit = tableHit ? null : pickViewport(layout.viewports, mm.xMm, mm.yMm, 0);
+      const lg = tableHit
+        ? undefined
+        : [...(layout.legends ?? [])].reverse().find((l) => {
+            const b = legendBox(project, layout, l);
+            return mm.xMm >= b.xMm && mm.xMm <= b.xMm + b.widthMm && mm.yMm >= b.yMm && mm.yMm <= b.yMm + b.heightMm;
+          });
+      setSelectedLegendId(lg ? lg.id : null);
+      const hit = tableHit || lg ? null : pickViewport(layout.viewports, mm.xMm, mm.yMm, 0);
       setSelectedId(hit ? hit.id : null);
     } else {
       setSelectedId(null);
       setSelectedTableId(null);
+      setSelectedLegendId(null);
     }
     onPlanSelect(sel);
   };
@@ -603,6 +664,19 @@ export function LayoutSheetPane({
           title={snapshots.length === 0 ? t("layouts.noSnapshots") : t("layouts.placeViewport")}
         >
           ＋ {t("layouts.placeViewport")}
+        </button>
+        <button
+          className="nav-add"
+          data-add-legend
+          disabled={toolInputActive}
+          title={t("legend.add")}
+          onClick={() => {
+            const id = handlers.onAddLegend({ xMm: 10, yMm: 10 });
+            setSelectedId(null);
+            setSelectedLegendId(id);
+          }}
+        >
+          ＋ {t("legend.add")}
         </button>
         <select
           className="res-select"
@@ -683,6 +757,20 @@ export function LayoutSheetPane({
           </div>
         )}
 
+        {/* Eigenschaften der gewählten Legende ([82]). */}
+        {selectedLegend && (
+          <LegendHud
+            project={project}
+            layout={layout}
+            legend={selectedLegend}
+            onPatch={(patch) => handlers.onPatchLegend(selectedLegend.id, patch)}
+            onRemove={() => {
+              handlers.onRemoveLegend(selectedLegend.id);
+              setSelectedLegendId(null);
+            }}
+          />
+        )}
+
         {/* Eigenschaften der gewählten Tabelle ([111]). */}
         {selectedTable && !selectedVp && (
           <SheetTableHud
@@ -740,4 +828,91 @@ export function LayoutSheetPane({
 
 function rectAttrs(r: RectMm) {
   return { x: r.xMm, y: r.yMm, width: r.widthMm, height: r.heightMm };
+}
+
+const LEGEND_KINDS: LegendKind[] = ["hatch", "lineType", "category"];
+
+/** Eigenschaften einer Legende: Titel, Lage, gezeigte Arten, automatisch/festgehalten, Löschen. */
+function LegendHud({
+  project,
+  layout,
+  legend,
+  onPatch,
+  onRemove,
+}: {
+  project: Project;
+  layout: Layout;
+  legend: LayoutLegend;
+  onPatch: (patch: Partial<Omit<LayoutLegend, "id">>) => void;
+  onRemove: () => void;
+}) {
+  const kinds = new Set<string>(legend.kinds?.length ? legend.kinds : ["hatch"]);
+  const manual = (legend.manualKeys ?? []).length > 0;
+  const num = (v: number, set: (n: number) => void) => (
+    <input
+      type="number"
+      className="res-input mono num"
+      step={1}
+      value={Math.round(v * 10) / 10}
+      onChange={(e) => {
+        const n = parseFloat(e.target.value);
+        if (Number.isFinite(n)) set(n);
+      }}
+    />
+  );
+  return (
+    <div className="layout-sheet-hud" data-sheet-ui data-legend-hud>
+      <div className="layout-sheet-hud-title">{t("legend.add")}</div>
+      <label className="layout-sheet-hud-row">
+        <span>{t("legend.title")}</span>
+        <input
+          type="text"
+          className="res-input"
+          value={legend.title ?? ""}
+          placeholder={t("legend.defaultTitle")}
+          onChange={(e) => onPatch({ title: e.target.value || undefined })}
+        />
+      </label>
+      <div className="layout-sheet-hud-row">
+        <span>X / Y mm</span>
+        <span className="layout-sheet-hud-scale">
+          {num(legend.xMm, (xMm) => onPatch({ xMm }))}
+          {num(legend.yMm, (yMm) => onPatch({ yMm }))}
+        </span>
+      </div>
+      {LEGEND_KINDS.map((k) => (
+        <label key={k} className="layout-sheet-hud-row">
+          <input
+            type="checkbox"
+            checked={kinds.has(k)}
+            onChange={(e) => {
+              const next = new Set(kinds);
+              if (e.target.checked) next.add(k);
+              else next.delete(k);
+              onPatch({ kinds: next.size > 0 ? LEGEND_KINDS.filter((x) => next.has(x)) : ["hatch"] });
+            }}
+          />
+          <span>{t(`legend.kind.${k}`)}</span>
+        </label>
+      ))}
+      <div className="layout-sheet-hud-size">
+        {t("legend.entries")}: {legendEntries(project, layout, legend).length}
+        {manual ? ` · ${t("legend.manual")}` : ` · ${t("legend.auto")}`}
+      </div>
+      <div className="layout-sheet-hud-actions">
+        {manual ? (
+          <button className="nav-add" onClick={() => onPatch({ manualKeys: undefined })}>
+            {t("legend.auto")}
+          </button>
+        ) : (
+          <button className="nav-add" onClick={() => onPatch({ manualKeys: legendKeysOfViewports(project, layout) })} title={t("legend.freeze.hint")}>
+            {t("legend.freeze")}
+          </button>
+        )}
+        <button className="nav-add" onClick={onRemove} title={t("legend.remove")}>
+          <span className="material-symbols-outlined" aria-hidden="true">delete</span>
+        </button>
+      </div>
+    </div>
+  );
 }

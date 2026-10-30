@@ -1492,7 +1492,17 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[77] Zauberstab.** · M
 - ✅ **[78] Autotext im Plankopf.** Titelblock löst Projekt/Blatt/Massstab/Datum auf; Plannummer laufend
   oder `Layout.planNumber` (27.10.).
-- ○ **[79] Publikationssätze.** · M
+- ◐ **[79] Publikationssätze.** (30.10.) Modell (Rust, optional): `Project.publishSets` (`PublishSet`: Layouts in Reihenfolge,
+  optional gespeicherte Ansichten, Ausgabe pdf-multi / pdf-single / dxf / dwg mit Layouts, Dateinamen-Muster
+  `{Projektnummer} {Projekt} {Blattnummer} {Blattname} {Index} {Datum} {Satz}`, Papier-/Massstab-Übersteuerung, Index ausgeben,
+  Index beim Publizieren erhöhen, PDF-Ebenen), `Project.publishLog` (Datum, Blätter mit Nummer/Index, Dateien),
+  `Project.projectNumber`, `Layout.revision` (Index; steht im Titelblock auf Bildschirm und PDF). Logik `export/publishSet.ts`
+  (Index A→B→…→AA, 2→3; Plan, Ops), Ausführung `export/publishRun.ts` (PDF über `layoutPdf.buildPagesPdf`, DXF/DWG über den
+  Papierbereich-Export; mehrere Dateien als ZIP), Hülle `state/publishActions.ts`, UI-Abschnitt „Publikation“ im Mappe-Reiter
+  (`panels/PublishSection.tsx`: Sätze, Einstellungen, ein Klick, Protokoll). Publizieren = ein Undo-Schritt (Index + Protokoll).
+  Offen: Reihenfolge der Blätter im Satz per Ziehen (heute Projekt-Reihenfolge beim Anhaken), DXF/DWG enthält die Papierbereiche
+  der Satz-Blätter, aber Papier-/Massstab-Übersteuerung wirkt dort nur als Export-Massstab, Satz je Ordner, Protokoll als Export.
+  Nicht in der Tauri-App getestet (Browser-Download-Pfad geprüft).
 - ✅ **[93] Zeichnen auf dem Layout-Blatt = Zeichnen im Grundriss.** (29.10., Wartungs-Feedback „soll sich genau
   gleich anfühlen") Vorher eigener Pfad: `Layout.annotations` (Linie/Rechteck/Text/Bild in Papier-mm) mit eigenen
   Werkzeug-Zuständen, Klick-Logik, Griffen, Inline-Editor und DOM-Rendering in `LayoutSheet.tsx`, ohne Fang,
@@ -1597,11 +1607,24 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `dashScale`); SVG-Rückfall: Linientypen in Papier-mm im Plot-Massstab, unter `non-scaling-stroke` über die
   meet-Variable `--plan-dash-k` (`dashArrayCss`). Test: Modell-Periode bei zwei Zoomstufen gleich und = Druck-SVG.
   Offen: Bildschirm (WebGPU/macOS) nicht angesehen; CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
-- ○ **[80] PDF mit Ebenen.** · M
+- ✅ **[80] PDF mit Ebenen.** (30.10.) jsPDF kennt keine optionalen Inhalte → `export/pdfLayers.ts` schreibt Optional Content
+  selbst (OCG je Ebenenname, `/OC … BDC … EMC` im Seitenstrom, `/Properties`, `/OCProperties` im Katalog; gleiche Namen auf
+  mehreren Seiten = eine in Acrobat schaltbare Ebene). Layout-PDF (`buildPagesPdf`, Ordner-PDF und Publikationssätze) legt je Viewport
+  und Wurzel-Kategorie (Name aus dem Kategorie-Baum, sichtbare Codes samt Unterkategorien) eine Ebene an, dazu „Rahmen und
+  Titelblock“, „Blatt-Zeichnung“, „Legende“. Geprüft mit pypdf (OCProperties, Namen); Ordner-PDF bleibt ohne Ebenen.
+  Offen: Elemente ohne Kategorie-Bezug (Massstabsleiste, Ebenen-Marken) erscheinen in jeder Kategorie-Ebene des Viewports;
+  Einzel-Plan-PDF (`exportPdf.ts`) noch ohne Ebenen.
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.
   (30.10.) Ketten assoziativ [38] (Ecken/Leibungen, nur mittige Wände).
-- ○ **[82] Grafische Legenden.** · M
+- ✅ **[82] Grafische Legenden.** (30.10.) `Layout.legends` (`LayoutLegend`: Lage, Titel, Arten Schraffur/Material · Linientyp ·
+  Kategorie, optional Handauswahl `manualKeys`). `analysis/legend.ts`: Einträge automatisch aus den Viewports (Material der
+  Wand-/Decken-/Dach-Aufbauten und Stützen im gezeigten Geschoss, Schraffuren/Linientypen der Zeichnungen, sichtbare
+  Kategorien) und die Legende als gewöhnliche 2D-Elemente der Blatt-Ebene — Muster, Linien und Schrift erzeugt derselbe Kern wie
+  im Plan (`export/legendSvg.ts`: Hilfsprojekt → `generatePlan` → `planToPrintSvg`); Bildschirm (`LayoutSheet`, folgt dem Projekt
+  live) und PDF teilen den Weg; im DXF/DWG-Papierbereich eines Publikationssatzes als Blatt-Zeichnung (Weg gebaut, aber nicht mit echter Datei geprüft). Bedienung: „＋ Legende“ in
+  der Blatt-Leiste, Klick wählt sie, HUD: Titel, X/Y, Arten, „Auswahl festhalten“ / automatisch.
+  Offen: Verschieben per Ziehen (heute X/Y-Felder), DXF-Legende nur im Satz-Export (nicht im allgemeinen DXF-Dialog).
 - ○ **[65] Explosionsaxonometrie.** · S–M
 - ○ **[66] Präsentationspläne mit einem Klick.** · M
 - ○ **[67] Skizzenstil.** · M
