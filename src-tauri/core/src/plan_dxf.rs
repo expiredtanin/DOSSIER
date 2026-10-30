@@ -936,9 +936,10 @@ impl Ctx<'_> {
                                 None => self.flat.add_line(b, hatch_layer, a, q),
                             }
                         }
-                    } else if is_curve_pattern(pattern) {
+                    } else if is_curve_pattern(pattern) || h.h.polar.is_some() {
                         // Schicht-/Kurvenmuster ([109]: Dämmschlange, Zickzack, Welle, Holzkreuz, Erdreich,
-                        // Kies, Naturstein) kennt DXF-HATCH nicht: als Polylinien aus dem Kern-Generator.
+                        // Kies, Naturstein) und polare Schraffur ([T2] Bogenwand) kennt DXF-HATCH nicht: als
+                        // Polylinien aus dem Kern-Generator.
                         let runs = hatch::apply_dash_runs(hatch::build_hatch_runs(pts, &h.h), &hatch::hatch_dash(&h.h));
                         self.flat.set_pen(b, -1.0);
                         for run in runs.iter().filter(|r| r.len() >= 2) {
@@ -1231,7 +1232,8 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
     let mut block_by_id: HashMap<&str, &Drawing2D> = HashMap::new();
     for d in &project.drawings2d {
         match d.geom {
-            Drawing2DGeom::Dimension { .. } => {
+            // Bogenmass ([T2]) geht als Linien/Text (keine DXF-Bogenbemassung).
+            Drawing2DGeom::Dimension { arc_center: None, .. } => {
                 dim_by_id.insert(d.id.as_str(), d);
             }
             Drawing2DGeom::Block { .. } => {

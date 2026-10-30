@@ -276,6 +276,31 @@ export function SitePanel() {
                   >
                     ×
                   </button>
+                  {obj.type === "importedMesh" && (
+                    // [T4] Glatt oder kantig schattieren, Knickwinkel je Mesh (Vorgabe 30°).
+                    <div className="site-props">
+                      <label className="site-check">
+                        <input
+                          type="checkbox"
+                          checked={obj.smoothShading === true}
+                          onChange={(e) =>
+                            host.onPatchContextObject(obj.id, { smoothShading: e.target.checked }, `site-${obj.id}-smoothShading`)
+                          }
+                        />
+                        {t("site.smoothShading")}
+                      </label>
+                      {obj.smoothShading === true && (
+                        <NumField
+                          label={t("site.creaseAngle")}
+                          value={obj.creaseAngle}
+                          step={5}
+                          min={1}
+                          placeholder="30"
+                          onChange={patch(obj.id, "creaseAngle")}
+                        />
+                      )}
+                    </div>
+                  )}
                   {obj.type === "terrainMesh" && (
                     <div className="site-props">
                       <NumField

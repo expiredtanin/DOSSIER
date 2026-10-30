@@ -71,6 +71,9 @@ export interface HatchRender {
    * (s. `hatchLineFamily`). Gesetzt wird er über `Drawing2D.hatchOrigin`.
    */
   origin?: Vec2;
+  /** [T2] Polare Schraffur (Bogenwand-Schicht): `[Mitte x, Mitte y, Bezugsradius]` — das Muster folgt
+   *  der Krümmung (Kern `hatch::Hatch::polar`). */
+  polar?: [number, number, number];
   /** Linienstärke der Musterlinien in mm. */
   lineWeight: number;
   /** Strichmuster der Musterlinien in mm; null = durchgezogen. */

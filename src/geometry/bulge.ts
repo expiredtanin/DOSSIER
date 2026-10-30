@@ -59,6 +59,19 @@ export function bulgeArcPoints(a: Vec2, b: Vec2, bulge: number | undefined): Vec
 }
 
 /**
+ * [T2] Band einer Bogenwand (Dicke `t` mittig zur Achse) und Achse als Punktzüge — für Vorschauen
+ * (Griffe). `null` = gerade oder entartet.
+ */
+export function wallArcBand(a: Vec2, b: Vec2, bulge: number | undefined, t: number): { band: Vec2[]; axis: Vec2[] } | null {
+  if (bulge === undefined || bulge === 0) return null;
+  const f = core().wall_arc_band(a.x, a.y, b.x, b.y, bulge, t);
+  if (f.length < 1) return null;
+  const n = f[0];
+  const pts = toPoints(f.subarray(1));
+  return { band: pts.slice(0, n), axis: pts.slice(n) };
+}
+
+/**
  * Ganze Polylinie tessellieren (`bulge[i]` krümmt die Kante pts[i]→pts[i+1], geschlossen zusätzlich
  * die Schlusskante). Kantenpunkte verkettet ohne doppelte Stösse; bei `closed` wird der Startpunkt
  * am Ende nicht wiederholt.

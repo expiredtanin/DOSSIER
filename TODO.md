@@ -1209,7 +1209,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     die fast parallel zur Achse schräg durchs Band laufen, nur genähert (seitliche Teilung an der Mitte);
     Fenster, das ins Dach ragt, verliert seinen Sturz; Dachgeometrie im 3D-Live-Schnitt unverändert; nicht in
     der Tauri-App/Metal geprüft.
-- ◐ **[G3] Öffnungen beliebiger Form** (29.10.) `Opening.shape` (rundbogen, segmentbogen, spitzbogen, rund/oval,
+- ◐ **[G3] Öffnungen beliebiger Form** (29.10.; Schnitt/IFC in Bogenwänden 30.10., s. [T2]) `Opening.shape` (rundbogen, segmentbogen, spitzbogen, rund/oval,
   schraeg, giebel) + `shapeRise` (Stich). Kern `opening_shape.rs`: konvexer Umriss im Öffnungsrechteck; die Wand
   behält das Rechteck-Loch, der Rest zwischen Rechteck und Umriss kommt als Füllkörper (senkrechte Streifen =
   8-Ecken-Quader, Wandfarbe) dazu — render3d, Wandbänder und Exporte bleiben unverändert. Schnitt: Wandband an der
@@ -1386,11 +1386,29 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Bulge, Öffnung am Bogen platzieren; Fang, Raum-Erkennung, Schatten, Baurecht, Flächen über den Sehnenzug.
   Tests: Rust (Verschneidung, Ringsektor-Volumen/dicht, Grundriss im Kreisring, Ansicht ohne Fugen, IFC,
   Befehle), vitest (Wand-Befehl). Geprüft im Linux-Container (CLI-SVG Grundriss/Schnitt/Ansicht, IFC), nicht in
-  der Tauri-App. Offen: Schichteinzug [106], Formöffnungen [G3] und Ansichtsschraffur im 3D ([100]) in Bogenwänden; Wände teilen/trimmen (fehlt
-  auch für gerade); echte Polar-Schraffur; IFC-Körper als extrudiertes Bogenprofil statt Netz; Griff-Vorschau
-  zeigt nur die Achse; automatische Aussenbemassung misst Bogenwände als Sehne.
+  der Tauri-App.
+  **Restpunkte (30.10.)**: Schichteinzug [106] in Bogenwänden — Grundriss auf der Abwicklung (radial), 3D: EINE
+  gerade Sehnen-Teilwand über Öffnung + Rücksprung + 5 cm (`wall_arc::reveal_zone`), Loch, Zusatzstücke und
+  Einbauteile gerade auf dieser Sehne (Entscheid; Leibungen dort senkrecht zur Sehne, Öffnung ≤ 5 mm schmaler),
+  Schnitt über die Sehne zwischen den Laibungen. Formöffnungen [G3] im Schnitt (Wand bis an den Umriss,
+  Projektion) und im IFC (Profil-Öffnungskörper auf der Sehne, um den Pfeil verlängert). Ansichtsschraffur
+  [100] im 3D auf beiden Bogenflächen (Abwicklung je Fläche, Linien längs folgen dem Bogen). **Polare
+  Schraffur**: `HatchRender.polar` = [Mitte, Bezugsradius] (Plan-Puffer Flag 128), `hatch::build_hatch_runs`
+  schraffiert auf der Abwicklung und biegt zurück (≤ 2°) — ein Band je Schicht, Muster stetig (vorher
+  Winkelstücke; Muster wie an einer waagrechten Wand, auch im DXF als Linien). **IFC**: Datensatz WALL_ARC_SOLID — je Schicht-Kette IfcArbitraryClosedProfileDef aus
+  IfcCompositeCurve (Kreisbögen als IfcTrimmedCurve + Anschluss-Strecken), IfcExtrudedAreaSolid; Öffnungen
+  schneiden als IfcOpeningElement mit radialen Laibungen; Netz nur noch mit Dachanschluss (`validate-ifc.py`
+  ohne Befund). **Griff-Vorschau** zeigt das ganze Band (`wallArcBand`). **Aussenbemassung**: Kreisring in der
+  Grundfläche (Gesamtmass mit Scheitel), gewölbte Aussenseite bekommt eine Bogenmass-Kette (neues Feld
+  `Dimension.arcCenter`: Masslinie als Bogen, radiale Hilfslinien, Masszahl = Bogenlänge; DXF als Linien/Text).
+  Geprüft: Rust-Tests, CLI-SVG Grundriss/Schnitte/Ansicht angesehen, IFC validiert (Linux), nicht in der
+  Tauri-App. Offen: Wände teilen/trimmen (fehlt auch für gerade); Bogenmass-Griffe verschieben Punkte frei (nicht auf dem Kreis).
 - ○ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M
-- ○ **[T4] Import-Meshes glätten oder kantig** (`add_smooth_normals`). · S
+- ◐ **[T4] Import-Meshes glätten oder kantig** (30.10.) `ImportedMesh.smoothShading`/`creaseAngle` (Vorgabe 30°,
+  auch STEP-Körper), Schalter + Knickwinkel im Panel „Gelände & Kontext"; `RMesh.creaseAngle` → render3d
+  `MeshInput.creaseAngle`: geteilte Normalen je Ecke (über die Lage verschweisst, flächengewichtet, nur Nachbarn
+  innerhalb des Knickwinkels), Rückseite mit Gegennormale. Geprüft: Rust-Tests (render3d, Kern); gemeinsamer
+  Mesh-Code, Metal-Pfad nicht gebaut/gesehen (nur Linux). · S
 - ○ **[T5] Import reparieren** (`put_together_same_attrs`, Healing). · S
 - ◐ **[T6] Glattes Gelände aus Höhenlinien** + Gelände-Prisma für Aushub (= [68]). (30.10.) Kern `terrain.rs`:
   Konturen verdichtet und als Bruchkanten erzwungen (constrained Delaunay: Sloan-Kantentausch auf `delaunay.rs`,
@@ -1584,7 +1602,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Tests: `commands/engine.keys.test.ts` (jeder Befehl), `state/commandKeys.test.ts`, e2e `commandKeys.spec.ts` (jeder
   registrierte Befehl: Punkte, Esc, Esc-Esc, Enter; Fokus Befehlsfeld/Fläche/Panel-Knopf; Wandzug in allen drei).
   Offen: 3D-Ansicht und Layout-Blatt nur über den gemeinsamen Verteiler, nicht eigens per e2e; nicht auf dem Mac geprüft. · S
-- ◐ **[100] Standard-Baustoffe und Ansichtsschraffur (SIA 400).** (29.10., Wunsch Maintainer) Kern `standards.rs`:
+- ◐ **[100] Standard-Baustoffe und Ansichtsschraffur (SIA 400).** (29.10., Wunsch Maintainer; 3D an Bogenwänden 30.10., s. [T2]) Kern `standards.rs`:
   33 Baustoffe/Bekleidungen (Beton, Stahlbeton, Backstein, Kalksandstein, Porenbeton, Holz massiv, Brettsperrholz,
   Holzwerkstoff, Mineral-/Steinwolle, EPS, XPS, Holzfaser, Trittschall, Gipskarton, Innen-/Aussenputz, Zementestrich,
   Glas, Stahl, Aluminium, Naturstein, Erdreich, Kies/Sauberkeitsschicht, Luftschicht, Lattung vertikal/horizontal,
@@ -1846,7 +1864,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     CLI-Ansichten/-Schnitte/-Grundriss als PNG angesehen, Dialog im Chromium (vite-Vorschau) angesehen (Linux).
     Offen: Pfosten in der Ansicht nur als Mittellinie zwischen den Flügeln (keine eigene Kontur), Türzarge in der
     Ansicht ohne Oberlicht-Fall (mit Oberlicht bisheriges Blatt), nicht in der Tauri-App geprüft.
-- ◐ **[106] Fenster/Türen: Schichteinzug je Wandschicht und Seite.** (29.10.) `layerReveals` am Typ bzw. an der Öffnung (ersetzt
+- ◐ **[106] Fenster/Türen: Schichteinzug je Wandschicht und Seite.** (29.10.; Bogenwände 30.10., s. [T2]) `layerReveals` am Typ bzw. an der Öffnung (ersetzt
   dort den Typ): je Schicht (Index ab aussen, negativ ab innen) bündig / zurückspringend um Mass (Vorgabe Schichtdicke) / in
   die Leibung bis an den Rahmen (Vorgabe ≤ 4 cm, vom Rahmen weg gestapelt) / Rahmen überdeckend um Mass (Vorgabe 3 cm), je
   Seite (Leibung links/rechts, Sturz, Brüstung) übersteuerbar; Vorgaben (z. B. „Aussendämmung überdämmt Rahmen 3 cm,

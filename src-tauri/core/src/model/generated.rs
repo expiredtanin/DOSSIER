@@ -4988,6 +4988,14 @@ pub struct ImportedMesh {
     #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub ifc_global_id: Option<String>,
+    /// [T4] Glatt schattieren (geteilte Normalen an Kanten über dem Knickwinkel); fehlt = kantig.
+    #[serde(rename = "smoothShading", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub smooth_shading: Option<bool>,
+    /// [T4] Knickwinkel in Grad für das glatte Schattieren (Default 30°).
+    #[serde(rename = "creaseAngle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub crease_angle: Option<f64>,
     pub positions: Vec<f64>,
     pub indices: Vec<f64>,
     #[serde(flatten)]

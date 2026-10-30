@@ -369,6 +369,19 @@ fn opening_extent(p: &Project, w: &Wall, o: &Opening) -> (f64, f64) {
     (ob, min(zt, ob + o.height))
 }
 
+/// [T2] Öffnung in der Bogenwand als gerade Ersatzwand: Sehne der Achse zwischen den Laibungen,
+/// Öffnung ab 0 über die Sehnenlänge. `None` bei gerader Wand.
+fn arc_chord_opening(wall: &Wall, o: &Opening) -> Option<(Wall, Opening)> {
+    let a = crate::wall_arc::WallArc::of_wall(wall)?;
+    let axis = a.length();
+    let from = max(0.0, min(o.position, axis));
+    let to = max(from, min(o.position + o.width, axis));
+    let (ps, pe) = (a.point(from, 0.0), a.point(to, 0.0));
+    let vw = Wall { start: Vec2 { x: ps.x, y: ps.y }, end: Vec2 { x: pe.x, y: pe.y }, bulge: None, ..wall.clone() };
+    let vo = Opening { position: 0.0, width: hypot2(pe.x - ps.x, pe.y - ps.y), ..o.clone() };
+    Some((vw, vo))
+}
+
 fn opening_interval(w: &Wall, o: &Opening) -> Option<(f64, f64)> {
     let axis = hypot2(w.end.x - w.start.x, w.end.y - w.start.y);
     let from = max(0.0, min(o.position, axis));
@@ -702,29 +715,33 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
 #[allow(clippy::type_complexity)]
 fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f64) -> (Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>, Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>) {
     let (mut top, mut bottom) = (None, None);
-    // Bogenwände: kein Schichteinzug ([106] gilt nur gerade).
-    if crate::wall_arc::is_arc_bulge(wall.bulge) {
-        return (None, None);
-    }
     let u_raw = plane.u_model();
     let l = hypot2(u_raw.0, u_raw.1);
     if !(l > 1e-12) {
         return (None, None);
     }
     let u = (u_raw.0 / l, u_raw.1 / l);
-    let (a, n) = axis_frame(wall);
-    let un = u.0 * n.0 + u.1 * n.1;
-    if un.abs() < MIN_CROSS {
-        return (None, None);
-    }
-    let p0 = plane.base();
-    let rel = (p0.0 - wall.start.x, p0.1 - wall.start.y);
-    let n0 = rel.0 * n.0 + rel.1 * n.1;
-    let a0 = rel.0 * a.0 + rel.1 * a.1;
-    let ua = u.0 * a.0 + u.1 * a.1;
-    let along = a0 + ((0.0 - n0) / un) * ua;
     let (zb, zt) = p.wall_vertical_extent(wall);
+    // Bogenwand: `wall` ist hier die Sehnen-Teilwand (mit Bulge) — die Öffnung sitzt auf der echten Wand.
+    let host = p.walls.iter().find(|w| w.id == wall.id).unwrap_or(wall);
     for o in p.openings_of_wall(&wall.id) {
+        // Bogenwand ([T2]): Einzug auf der Sehne zwischen den Laibungen.
+        let chord = arc_chord_opening(host, o);
+        let (wall, o) = match &chord {
+            Some((vw, vo)) => (vw, vo),
+            None => (wall, o),
+        };
+        let (a, n) = axis_frame(wall);
+        let un = u.0 * n.0 + u.1 * n.1;
+        if un.abs() < MIN_CROSS {
+            continue;
+        }
+        let p0 = plane.base();
+        let rel = (p0.0 - wall.start.x, p0.1 - wall.start.y);
+        let n0 = rel.0 * n.0 + rel.1 * n.1;
+        let a0 = rel.0 * a.0 + rel.1 * a.1;
+        let ua = u.0 * a.0 + u.1 * a.1;
+        let along = a0 + ((0.0 - n0) / un) * ua;
         let Some(r) = crate::opening_detail::opening_reveal(p, wall, o) else { continue };
         if along < r.from + 1e-4 || along > r.to - 1e-4 {
             continue;
@@ -914,8 +931,13 @@ fn shaped_wall_cuts(cuts: &mut [Cut], p: &Project, walls_r: &[RWall], base: (f64
     }
     let u = (u.0 / ul, u.1 / ul);
     for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| crate::opening_shape::is_shaped(o)) {
-        // Formöffnungen in Bogenwänden bleiben im Schnitt rechteckig ([T2], offen).
-        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id && !crate::wall_arc::is_arc_bulge(w.bulge)) else { continue };
+        let Some(host) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
+        // Bogenwand ([T2]): Umriss auf der Sehne zwischen den Laibungen.
+        let chord = arc_chord_opening(host, o);
+        let (wall, o) = match &chord {
+            Some((vw, vo)) => (vw, vo),
+            None => (host, o),
+        };
         let Some((from, to)) = opening_interval(wall, o) else { continue };
         let (a, _) = axis_frame(wall);
         let den = a.0 * u.1 - a.1 * u.0;
@@ -975,7 +997,13 @@ fn shaped_projection(visible: &mut Vec<Edge>, p: &Project, walls_r: &[RWall], pl
     let u = (u.0 / ul, u.1 / ul);
     let nrm = (plane.normal[0], plane.normal[2]);
     for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| crate::opening_shape::is_shaped(o)) {
-        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
+        let Some(host) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
+        // Bogenwand ([T2]): Umriss auf der Sehne zwischen den Laibungen.
+        let chord = arc_chord_opening(host, o);
+        let (wall, o) = match &chord {
+            Some((vw, vo)) => (vw, vo),
+            None => (host, o),
+        };
         let owners: Vec<usize> = walls_r.iter().enumerate().filter(|(_, w)| w.wall_id == wall.id).map(|(i, _)| i).collect();
         if owners.is_empty() || !visible.iter().any(|e| e.kind == Kind::Wall && owners.contains(&e.index)) {
             continue;
@@ -1185,6 +1213,10 @@ fn parallel_reveal_cuts(mut cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &
             continue;
         }
         seen.push(&w.id);
+        // Bogenwand: Ebene parallel zur gekrümmten Wand gibt es nicht (nur Sehnen-Teilwände).
+        if crate::wall_arc::is_arc_bulge(w.bulge) {
+            continue;
+        }
         let (a, n) = axis_frame(w);
         let (un, ua) = (u.0 * n.0 + u.1 * n.1, u.0 * a.0 + u.1 * a.1);
         if un.abs() > 0.05 || ua.abs() < 0.5 {
@@ -2257,15 +2289,7 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
             continue;
         }
         // Bogenwand ([T2]): Öffnung auf der Sehne zwischen den Laibungen (gerades Einbauteil).
-        let chord = crate::wall_arc::WallArc::of_wall(wall).map(|a| {
-            let axis = a.length();
-            let from = max(0.0, min(o.position, axis));
-            let to = max(from, min(o.position + o.width, axis));
-            let (ps, pe) = (a.point(from, 0.0), a.point(to, 0.0));
-            let vw = Wall { start: Vec2 { x: ps.x, y: ps.y }, end: Vec2 { x: pe.x, y: pe.y }, bulge: None, ..wall.clone() };
-            let vo = Opening { position: 0.0, width: hypot2(pe.x - ps.x, pe.y - ps.y), ..o.clone() };
-            (vw, vo)
-        });
+        let chord = arc_chord_opening(wall, o);
         let (wall, o) = match &chord {
             Some((vw, vo)) => (vw, vo),
             None => (wall, o),
@@ -2468,6 +2492,39 @@ mod tests {
         let prims = section_opening_primitives(&p, &l, &Visibility::default()).unwrap();
         let ys: Vec<f64> = prims.iter().filter_map(|pr| if let Primitive::Polygon { pts, opening_id: Some(id), .. } = pr { (id == "O1").then(|| pts.iter().map(|q| q.y).fold(f64::NEG_INFINITY, f64::max)) } else { None }).collect();
         assert!(!ys.is_empty() && ys.iter().all(|y| *y < want + 5e-3), "kein Sturz/Kasten über dem Bogen: {ys:?}");
+    }
+
+    /// [T2]/[G3]/[106] Bogenwand: Rundbogen-Fenster im Schnitt (Wand bis an den Bogen) und Schichteinzug
+    /// am Sturz (Sehne zwischen den Laibungen).
+    #[test]
+    fn rundbogen_und_einzug_in_bogenwand() {
+        let mut p = sample();
+        p.walls.iter_mut().find(|w| w.id == "W1").unwrap().bulge = Some(-0.3);
+        let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+        let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap().clone();
+        let a = crate::wall_arc::WallArc::of_wall(&w1).unwrap();
+        let m = o1.position + o1.width / 4.0;
+        let (c, n) = (a.point(m, 0.0), a.normal(m));
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: c.x - n.x * 3.0, y: c.y - n.y * 3.0 }, Vec2 { x: c.x + n.x * 3.0, y: c.y + n.y * 3.0 }]), ..Default::default() };
+        let (zb, zt) = opening_extent(&p, &w1, &o1);
+        let top_of = |p: &Project| -> f64 {
+            let out = compute_section(p, &l, &[]).unwrap().unwrap();
+            out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W1")).flat_map(|c| c.pts.iter().map(|q| q[1])).filter(|y| *y > zb + 0.1).fold(f64::INFINITY, f64::min)
+        };
+        assert!((top_of(&p) - zt).abs() < 1e-3, "Rechteck: Sturz bei {zt}");
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.shape = Some(OpeningShape::Rundbogen);
+        }
+        let want = zb + 0.7 + (0.25f64 - 0.0625).sqrt();
+        assert!((top_of(&p) - want).abs() < 1e-2, "{} vs {want}", top_of(&p));
+        // Schichteinzug: innerste Schicht springt am Sturz 5 cm zurück.
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.shape = None;
+            o.layer_reveals = Some(vec![crate::model::LayerReveal { layer: -1.0, mode: crate::model::RevealMode::Zurueck, amount: Some(0.05), ..Default::default() }]);
+        }
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let inner_top = out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W1") && c.component_id.as_deref() == Some("render-int")).flat_map(|c| c.pts.iter().map(|q| q[1])).filter(|y| *y > zb + 0.1).fold(f64::INFINITY, f64::min);
+        assert!((inner_top - (zt + 0.05)).abs() < 1e-3, "Innenputz am Sturz zurück: {inner_top} vs {}", zt + 0.05);
     }
 
     /// [G3] Projektion hinter der Schnittebene: Rundfenster zeigt den Umriss statt des Rechteck-Lochs.

@@ -1983,6 +1983,8 @@ export const de = {
   "site.excavation.hint": "Umriss der Sohle zeichnen; Böschungen schneiden das Gelände",
   "site.contourInterval": "Äquidistanz [m]",
   "site.contourIndexEvery": "Zähllinie jede",
+  "site.smoothShading": "Glatt schattieren",
+  "site.creaseAngle": "Knickwinkel °",
   "site.excavation.bottom": "Sohle [m]",
   "site.excavation.slope": "Böschung [°]",
   "site.excavation.fillSlope": "Schüttung [°]",

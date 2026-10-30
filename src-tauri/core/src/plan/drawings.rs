@@ -738,7 +738,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 em.seg(q[q.len() - 1], q[0]);
             }
         }
-        Drawing2DGeom::Dimension { pts, offset, gap_mm, overshoot_mm, tick_len_mm, text_height_mm, line_weight_mm, ext_weight_mm, tick_weight_mm, text_offsets_mm, refs } => {
+        Drawing2DGeom::Dimension { pts, offset, gap_mm, overshoot_mm, tick_len_mm, text_height_mm, line_weight_mm, ext_weight_mm, tick_weight_mm, text_offsets_mm, refs, arc_center } => {
             let mm = |x: f64| mm_to_model(x, scale);
             for i in 0..pts.len().saturating_sub(1) {
                 let st = DimStyle {
@@ -754,7 +754,10 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                         None => (0.0, 0.0),
                     },
                 };
-                dimension_segment(&mut em, pts[i], pts[i + 1], *offset, &st);
+                match arc_center {
+                    Some(c) => arc_dimension_segment(&mut em, *c, pts[i], pts[i + 1], *offset, &st),
+                    None => dimension_segment(&mut em, pts[i], pts[i + 1], *offset, &st),
+                }
             }
             // Ungültiger Bezug ([38]): nur am Bildschirm eine rote Marke am Punkt.
             if !c.a.for_print {
@@ -941,6 +944,64 @@ fn dimension_segment(em: &mut Em, a: Vec2, b: Vec2, offset: f64, st: &DimStyle) 
     em.sink.push(p, 0);
 }
 
+/// [T2] Bogenmass-Segment: Masslinie als Kreisbogen um `c` im Radius |a − c| + `offset`, radiale
+/// Masshilfslinien, 45°-Massstriche zur Tangente, Masszahl = Bogenlänge (kürzerer Bogen) auf |a − c|.
+fn arc_dimension_segment(em: &mut Em, c: Vec2, a: Vec2, b: Vec2, offset: f64, st: &DimStyle) {
+    let r = hypot2(a.x - c.x, a.y - c.y);
+    if !(r > 1e-6) || !offset.is_finite() {
+        return;
+    }
+    let (ta, tb) = (jsnum::atan2(a.y - c.y, a.x - c.x), jsnum::atan2(b.y - c.y, b.x - c.x));
+    let pi = std::f64::consts::PI;
+    let mut d = tb - ta;
+    while d > pi {
+        d -= 2.0 * pi;
+    }
+    while d <= -pi {
+        d += 2.0 * pi;
+    }
+    if d.abs() < 1e-9 {
+        return;
+    }
+    let rm = r + offset;
+    let sign = if offset >= 0.0 { 1.0 } else { -1.0 };
+    let at = |t: f64, rr: f64| v(c.x + rr * jsnum::cos(t), c.y + rr * jsnum::sin(t));
+    let (dash, dref) = (em.dash.clone(), em.dash_ref);
+    let dash = dash.as_deref();
+    // Radiale Masshilfslinien vom Punkt (Abstand) bis über die Masslinie (Überstand).
+    for t in [ta, ta + d] {
+        em.line(at(t, r + st.gap * sign), at(t, rm + st.overshoot * sign), st.ext_weight, dash, dref);
+    }
+    // Masslinie: Bogen in ≤ 2°-Stücken.
+    let n = ((d.abs() / (pi / 90.0)).ceil() as usize).max(1);
+    for k in 0..n {
+        let (t0, t1) = (ta + d * k as f64 / n as f64, ta + d * (k + 1) as f64 / n as f64);
+        em.line(at(t0, rm), at(t1, rm), st.line_weight, dash, dref);
+    }
+    // Massstriche: 45° zwischen Tangente (Laufrichtung) und Radiale, an beiden Enden gleich.
+    let half = st.tick_len / 2.0;
+    for t in [ta, ta + d] {
+        let q = at(t, rm);
+        let tan = v(-jsnum::sin(t) * d.signum(), jsnum::cos(t) * d.signum());
+        let rad = v(jsnum::cos(t), jsnum::sin(t));
+        let (tx, ty) = ((tan.x + rad.x) / std::f64::consts::SQRT_2, (tan.y + rad.y) / std::f64::consts::SQRT_2);
+        em.line(v(q.x - tx * half, q.y - ty * half), v(q.x + tx * half, q.y + ty * half), st.tick_weight, None, 0);
+    }
+    // Masszahl tangential in der Bogenmitte, aussen an der Masslinie (nie kopfüber).
+    let tm = ta + d / 2.0;
+    let mut angle = tm + pi / 2.0;
+    if jsnum::cos(angle) < 0.0 {
+        angle += pi;
+    }
+    let read = v(jsnum::cos(angle), jsnum::sin(angle));
+    let up = v(-jsnum::sin(angle), jsnum::cos(angle));
+    let base = at(tm, rm + sign * st.text_height * 0.6);
+    let (along, perp) = st.text_offset;
+    let pos = v(base.x + read.x * along + up.x * perp, base.y + read.y * along + up.y * perp);
+    let p = text(pos, to_fixed(r * d.abs(), 2), st.text_height, angle, em.color, em.greyed, Some(em.id));
+    em.sink.push(p, 0);
+}
+
 /// Dreht die Umlauf-Orientierung um (Spiegelung)? Flächenvorzeichen eines Test-Dreiecks.
 fn reverses_orientation(f: &dyn Fn(Vec2) -> Vec2) -> bool {
     let (p0, p1, p2) = (f(v(0.0, 0.0)), f(v(1.0, 0.0)), f(v(0.0, 1.0)));
@@ -977,8 +1038,9 @@ pub fn mv_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2) -> Drawing2DGeom {
         G::Spline { pts, closed, mode } => G::Spline { pts: map(pts), closed: *closed, mode: *mode },
         G::Dimension { pts, .. } => {
             let mut out = g.clone();
-            if let G::Dimension { pts: p2, .. } = &mut out {
+            if let G::Dimension { pts: p2, arc_center, .. } = &mut out {
                 *p2 = map(pts);
+                *arc_center = arc_center.map(f);
             }
             out
         }
@@ -1506,6 +1568,20 @@ mod tests {
             }
             o => panic!("{o:?}"),
         }
+    }
+
+    /// [T2] Bogenmass: Viertelkreis r 2 → Masszahl π (Bogenlänge), Masslinie auf r 2.5, radiale Hilfslinien.
+    #[test]
+    fn bogenmass_masszahl_ist_bogenlaenge() {
+        let p = project(serde_json::json!({}));
+        let out = render(&p, drawing(serde_json::json!({"shape": "dimension", "pts": [{"x": 2, "y": 0}, {"x": 0, "y": 2}], "offset": 0.5, "arcCenter": {"x": 0, "y": 0}})), 50.0);
+        let texts: Vec<&str> = out.iter().filter_map(|pr| if let Primitive::DrawingText { text, .. } = pr { Some(text.as_str()) } else { None }).collect();
+        assert_eq!(texts, vec!["3.14"]);
+        let ends: Vec<(Vec2, Vec2)> = out.iter().filter_map(|pr| if let Primitive::Line { a, b, .. } = pr { Some((*a, *b)) } else { None }).collect();
+        assert!(ends.len() > 40, "Bogen in Stücken: {}", ends.len());
+        // Masslinie: Punkte im Radius 2.5 (ohne Hilfslinien und Striche).
+        let on = ends.iter().filter(|(a, b)| ((a.x.hypot(a.y) - 2.5).abs() < 1e-9) && ((b.x.hypot(b.y) - 2.5).abs() < 1e-9)).count();
+        assert_eq!(on, 45);
     }
 
     #[test]

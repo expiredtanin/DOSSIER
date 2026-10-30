@@ -203,15 +203,13 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             let pts: Vec<Vec2> = (0..4).map(|j| v2(f[q + 2 * j], f[q + 2 * j + 1])).collect();
             i = q + 8;
             if let (Some(u), true) = (bend, art == 2.0) {
-                // [T2] Bogenwand: Schichtband in Winkelstücke teilen, damit die Schraffur der
-                // Tangente folgt (gebogen wird danach in `bend_prims`).
-                for (piece, s_mid) in split_band(u, &pts) {
-                    let t = u.arc.tangent(s_mid);
-                    let local = atan2(t.y, t.x) * 180.0 / std::f64::consts::PI;
-                    let (hatch, fill) = layer_style(p, w, wt, li, category, local)?;
-                    let all: Vec<f64> = (0..piece.len()).map(|k| k as f64).collect();
-                    out.push(wall_polygon(piece, &fill, "none", 0.0, hatch, greyed, Some(all), Some(&w.id), None));
-                }
+                // [T2] Bogenwand: polare Schraffur — das Muster folgt der Krümmung stetig (Abwicklung
+                // im Uhrzeigersinn: Laufrichtung 0° bzw. 180° im Gegenuhrzeigersinn; gebogen wird das
+                // Band danach in `bend_prims`).
+                let local = if u.arc.sigma() > 0.0 { 180.0 } else { 0.0 };
+                let (mut hatch, fill) = layer_style(p, w, wt, li, category, local)?;
+                hatch.polar = Some([u.arc.center.x, u.arc.center.y, u.arc.r]);
+                out.push(wall_polygon(pts, &fill, "none", 0.0, hatch, greyed, Some(no_stroke), Some(&w.id), None));
                 continue;
             }
             if art == 2.0 {
@@ -752,48 +750,6 @@ fn unroll_cuts(u: &mut Unroll, c: &WallCuts, lo: f64, hi: f64) -> WallCuts {
         end_side: lc.end_side.iter().map(|l| one(l, len)).collect(),
     });
     WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone() }
-}
-
-/// Konvexes Viereck (abgewickelt) an den Zerlegungsstellen in Stücke teilen: (Stück, mittleres s).
-fn split_band(u: &Unroll, pts: &[Vec2]) -> Vec<(Vec<Vec2>, f64)> {
-    let (x0, x1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.x), b.max(q.x)));
-    if !(x1 > x0) {
-        return vec![];
-    }
-    let (n0, n1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.y), b.max(q.y)));
-    let st = u.arc.stations(x0, x1, u.arc.r_max(n0, n1));
-    let mut out = Vec::new();
-    for k in 0..st.len() - 1 {
-        let piece = clip_slab(pts, st[k], st[k + 1]);
-        if piece.len() >= 3 {
-            out.push((piece, (st[k] + st[k + 1]) / 2.0));
-        }
-    }
-    out
-}
-
-/// Polygon auf den Streifen a ≤ x ≤ b beschneiden (Sutherland–Hodgman).
-fn clip_slab(pts: &[Vec2], a: f64, b: f64) -> Vec<Vec2> {
-    let clip = |poly: Vec<Vec2>, keep: &dyn Fn(Vec2) -> bool, x: f64| -> Vec<Vec2> {
-        let n = poly.len();
-        let mut o = Vec::with_capacity(n + 2);
-        for i in 0..n {
-            let (p, q) = (poly[i], poly[(i + 1) % n]);
-            let (kp, kq) = (keep(p), keep(q));
-            if kp {
-                o.push(p);
-            }
-            if kp != kq && (q.x - p.x).abs() > 1e-15 {
-                let t = (x - p.x) / (q.x - p.x);
-                o.push(v2(x, p.y + (q.y - p.y) * t));
-            }
-        }
-        o
-    };
-    let p1 = clip(pts.to_vec(), &|q: Vec2| q.x >= a - 1e-12, a);
-    let mut p2 = clip(p1, &|q: Vec2| q.x <= b + 1e-12, b);
-    p2.dedup_by(|p, q| (p.x - q.x).abs() < 1e-12 && (p.y - q.y).abs() < 1e-12);
-    p2
 }
 
 fn kv(p: Vec2) -> kernel2d::Vec2 {

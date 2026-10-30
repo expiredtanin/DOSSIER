@@ -48,6 +48,7 @@ const REC_ZONE: f64 = 13.0;
 const REC_ATTACH: f64 = 14.0;
 const REC_OPENING_SOLID: f64 = 15.0;
 const REC_WALL_ARC: f64 = 16.0;
+const REC_WALL_ARC_SOLID: f64 = 17.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -248,6 +249,80 @@ fn arc_opening_chord(wall: &Wall, a: &crate::wall_arc::WallArc, c: &Cutout, host
     let half_angle = (c.to - c.from) / a.r / 2.0;
     let shrink = (host.0.abs().max(host.1.abs()) + delta.abs()) * half_angle.tan();
     (vw, Cutout { from: 0.0, to: chord, z_bottom: c.z_bottom, z_top: c.z_top }, (host.0 + delta, host.1 + delta), shrink.min(chord / 4.0), delta.abs())
+}
+
+/// [T2] Bogenwand als Profil-Extrusion: je Schicht ein Profil (Ecken mit Bulge zur nächsten, DXF-Sinn:
+/// positiv = Gegenuhrzeigersinn) aus den Sehnen-Teilkörpern der Wand OHNE Öffnungen — Kreisbögen innen
+/// und aussen, dazwischen die Anschluss-Schnitte (Ecken aus `model3d::wall_footprint`, radial auf den
+/// Schicht-Radius gesetzt). `None` (Netz-Weg): Dachanschluss, Aussparungen, Löcher oder Lücken.
+fn arc_wall_profiles(arc: &crate::wall_arc::WallArc, pieces: &[RWall], base: f64) -> Option<Vec<(Vec<[f64; 3]>, f64, f64)>> {
+    if pieces.is_empty() || pieces.iter().any(|b| b.top_plane.is_some() || b.top_drop.is_some_and(|d| d.iter().any(|x| x.abs() > 1e-12)) || b.holes.as_ref().is_some_and(|h| !h.is_empty())) {
+        return None;
+    }
+    let kv = |q: [f64; 2]| kernel2d::Vec2::new(q[0], q[1]);
+    // Schichtband = gleicher Querversatz, gleiche Dicke, gleiche Höhe.
+    let mut groups: Vec<((i64, i64, i64, i64), Vec<(f64, f64, &RWall)>)> = Vec::new();
+    for b in pieces {
+        let (s0, n0) = arc.local(kv(b.start));
+        let (s1, n1) = arc.local(kv(b.end));
+        let q = |v: f64| (v * 1e5).round() as i64;
+        let key = (q((n0 + n1) / 2.0), q(b.thickness), q(b.base_elevation), q(b.height));
+        match groups.iter_mut().find(|g| g.0 == key) {
+            Some(g) => g.1.push((s0.min(s1), s0.max(s1), b)),
+            None => groups.push((key, vec![(s0.min(s1), s0.max(s1), b)])),
+        }
+    }
+    let mut out = Vec::new();
+    for (_, mut list) in groups {
+        list.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        // Zusammenhängende Ketten (Eckstücke an den Anschlüssen, Teilungen an Decken = eigene Ketten).
+        let mut chains: Vec<Vec<&RWall>> = Vec::new();
+        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+        for (_, _, b) in list {
+            let fp = model3d::wall_footprint(b)?;
+            let joins = chains.last().and_then(|c| c.last()).and_then(|l| model3d::wall_footprint(l)).is_some_and(|lf| near(lf[1], fp[0]) && near(lf[2], fp[3]));
+            match chains.last_mut() {
+                Some(c) if joins => c.push(b),
+                _ => chains.push(vec![b]),
+            }
+        }
+        for chain in chains {
+            let (first, last) = (chain[0], chain[chain.len() - 1]);
+            let (fa, fb) = (model3d::wall_footprint(first)?, model3d::wall_footprint(last)?);
+            let n_mid = (arc.local(kv(first.start)).1 + arc.local(kv(first.end)).1) / 2.0;
+            let h = first.thickness / 2.0;
+            // Ecken: Anfang +n, Ende +n, Ende −n, Anfang −n; Bogen zwischen gleichem Querversatz.
+            let corners = [(fa[0], n_mid + h), (fb[1], n_mid + h), (fb[2], n_mid - h), (fa[3], n_mid - h)];
+            let s: Vec<f64> = corners.iter().map(|(q, _)| arc.local(kv(*q)).0).collect();
+            let pts: Vec<kernel2d::Vec2> = corners.iter().zip(&s).map(|((_, n), s)| arc.point(*s, *n)).collect();
+            let bulge = |sa: f64, sb: f64| (arc.sigma() * (sb - sa) / arc.r / 4.0).tan();
+            let ring = vec![[pts[0].x, pts[0].y, bulge(s[0], s[1])], [pts[1].x, pts[1].y, 0.0], [pts[2].x, pts[2].y, bulge(s[2], s[3])], [pts[3].x, pts[3].y, 0.0]];
+            if ring.iter().flatten().any(|v| !v.is_finite()) {
+                return None;
+            }
+            out.push((ring, first.base_elevation - base, first.height));
+        }
+    }
+    Some(out)
+}
+
+/// [T2] Öffnungskörper in der Bogenwand mit Profil-Körper: radiale Laibungen; die Ecken auf der
+/// äusseren Seite so weit hinaus, dass die Sehne dazwischen ausserhalb der Wandfläche bleibt.
+fn arc_opening_quad(a: &crate::wall_arc::WallArc, from: f64, to: f64, host: (f64, f64)) -> Vec<Vec2> {
+    let half = (to - from) / a.r / 2.0;
+    let k = 1.0 / half.cos().max(0.5);
+    let (mut lo, mut hi) = (host.0 - OPENING_OVERSHOOT, host.1 + OPENING_OVERSHOOT);
+    let push_out = |n: f64| a.sigma() * (a.r - a.radius_at(n) * k);
+    if a.radius_at(lo) > a.radius_at(hi) {
+        lo = push_out(lo);
+    } else {
+        hi = push_out(hi);
+    }
+    let p = |s: f64, n: f64| {
+        let q = a.point(s, n);
+        Vec2 { x: q.x, y: q.y }
+    };
+    vec![p(from, lo), p(to, lo), p(to, hi), p(from, hi)]
 }
 
 /// Sortierung `byFrom` (Anfang, dann Unterkante; NaN gilt als gleich wie in `Array.sort`).
@@ -702,6 +777,23 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     for b in &all_bands {
         bands_by_wall.entry(b.wall_id.as_str()).or_default().push(b);
     }
+    // [T2] Bogenwände ohne Öffnungen: Körper als Bogenprofil-Extrusion, die Öffnungen schneiden als
+    // IfcOpeningElement (Netz-Weg nur noch mit Dachanschluss/Aussparungen).
+    let arc_plain: HashMap<String, Vec<RWall>> = {
+        let ids: std::collections::HashSet<&str> = p.walls.iter().filter(|w| crate::wall_arc::is_arc_bulge(w.bulge)).map(|w| w.id.as_str()).collect();
+        let mut m: HashMap<String, Vec<RWall>> = HashMap::new();
+        if !ids.is_empty() {
+            let mut q = p.clone();
+            q.openings = p.openings.as_ref().map(|v| v.iter().filter(|o| !ids.contains(o.host_wall_id.as_str())).cloned().collect());
+            for b in model3d::emit_walls(&q, true)? {
+                if ids.contains(b.wall_id.as_str()) {
+                    m.entry(b.wall_id.clone()).or_default().push(b);
+                }
+            }
+        }
+        m
+    };
+    let mut arc_solid: std::collections::HashSet<String> = std::collections::HashSet::new();
     let no_bands: Vec<&RWall> = Vec::new();
     let mut host_extent: HashMap<String, (f64, f64)> = HashMap::new();
     let mut cutouts_by_wall: HashMap<String, Vec<(usize, Cutout)>> = HashMap::new();
@@ -791,6 +883,31 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let structure = structure_of(&wall.floor_id);
         let base = base_of(structure);
         let bands = bands_by_wall.get(wall.id.as_str()).unwrap_or(&no_bands);
+        // [T2] Bogenwand als Profil-Extrusion (Kreisbögen), Kreisachse dazu.
+        if let Some(a) = crate::wall_arc::WallArc::of_wall(wall) {
+            if let Some(profiles) = arc_plain.get(&wall.id).and_then(|v| arc_wall_profiles(&a, v, base)) {
+                let total = p.wall_thickness(wall, 0.2);
+                let ro = crate::joins::reference_offset(model3d::wall_reference(wall), total);
+                let (zb, zt) = p.wall_vertical_extent(wall);
+                let plain: Vec<Cutout> = cutouts_by_wall.get(&wall.id).map_or_else(Vec::new, |v| v.iter().map(|x| x.1).collect());
+                let (name, ty, psets) = wall_ident(&p, wall, qty::arc_wall_quantities(&a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None));
+                w_head(&mut f, REC_WALL_ARC_SOLID, structure, &wall.id, &name);
+                w_type(&mut f, ty.as_ref().map(|t| type_ref(t, 0.0, "STANDARD")).as_ref());
+                w_psets(&mut f, &psets);
+                f.nums(&[a.center.x, a.center.y, a.r, a.a0, a.sweep]);
+                f.num(profiles.len() as f64);
+                for (ring, z_rel, depth) in &profiles {
+                    f.num(ring.len() as f64);
+                    for v in ring {
+                        f.nums(v);
+                    }
+                    f.nums(&[*z_rel, *depth]);
+                }
+                host_extent.insert(wall.id.clone(), (ro - total / 2.0, ro + total / 2.0));
+                arc_solid.insert(wall.id.clone());
+                continue;
+            }
+        }
         let (mut positions, mut indices) = (Vec::<f64>::new(), Vec::<u32>::new());
         for b in bands {
             // Ebene Oberkante unter einem Dach ([G2]): Prisma bis an die Dachunterkante.
@@ -925,6 +1042,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             let o = &openings[k];
             // Bogenwand ([T2]): Ersatzwand = Sehne zwischen den Laibungen; Öffnungskörper innerhalb des
             // (radialen) Lochs, Füllung um den Achsversatz der Sehne verschoben.
+            let solid_arc = arc_solid.contains(&wall.id);
+            let radial = arc.filter(|_| solid_arc).map(|a| arc_opening_quad(&a, c.from, c.to, host));
             let chord = arc.map(|a| arc_opening_chord(wall, &a, &c, host));
             let (wall, c, host, shrink, sag) = match &chord {
                 Some((vw, vc, vh, e, d)) => (vw, *vc, *vh, *e, *d),
@@ -938,18 +1057,20 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             classified.push((format!("fill/{}", o.id), if is_door { Kind::Door } else { Kind::Window }, o.category_code.clone()));
             let psets = fill_psets(&p, o, c.to - c.from, depth);
             let label = crate::plan::walls::opening_label(o);
-            // Formöffnung ([G3]): Öffnungskörper = Umriss quer durch die Wand, Füllung als Netz.
-            if let Some(poly) = crate::opening_shape::opening_outline(o, c.to - c.from, depth).filter(|_| chord.is_none()) {
+            // Formöffnung ([G3]): Öffnungskörper = Umriss quer durch die Wand, Füllung als Netz (Bogenwand
+            // mit Profil-Körper: auf der Sehne, quer um den Pfeil verlängert).
+            if let Some(poly) = crate::opening_shape::opening_outline(o, c.to - c.from, depth).filter(|_| chord.is_none() || solid_arc) {
                 let u = normalize(sub(wall.end, wall.start));
                 let ln = left_normal(u);
-                let at = add_scaled(add_scaled(wall.start, u, c.from), ln, host.1 + OPENING_OVERSHOOT);
+                let extra = OPENING_OVERSHOOT + sag;
+                let at = add_scaled(add_scaled(wall.start, u, c.from), ln, host.1 + extra);
                 let solid = SolidOpening {
                     host: format!("wall/{}", wall.id),
                     profile: poly,
                     origin: [at.x, at.y, c.z_bottom - base_of(structure)],
                     x_dir: [u.x, u.y, 0.0],
                     z_dir: [-ln.x, -ln.y, 0.0],
-                    depth: host.1 - host.0 + 2.0 * OPENING_OVERSHOOT,
+                    depth: host.1 - host.0 + 2.0 * extra,
                 };
                 let fill = shaped_fill_mesh(&p, wall, o, &c, base_of(structure));
                 w_solid_opening(&mut f, &solid, structure, o, &label, (c.to - c.from, depth), &psets, &fill);
@@ -960,7 +1081,10 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             let lab = f.str(&label);
             f.nums(&[REC_OPENING, a, structure, oid, if is_door { 1.0 } else { 0.0 }, lab]);
             let (vlo, vhi) = (host.0 - sag - OPENING_OVERSHOOT, host.1 + sag + OPENING_OVERSHOOT);
-            w_pts(&mut f, &axis_rect(wall, c.from + shrink, c.to - shrink, vlo, vhi));
+            match &radial {
+                Some(q) => w_pts(&mut f, q),
+                None => w_pts(&mut f, &axis_rect(wall, c.from + shrink, c.to - shrink, vlo, vhi)),
+            }
             f.nums(&[c.z_bottom - base_of(structure), depth, c.to - c.from]);
             w_fill(&mut f, wall, &c, host, &fill_params(&p, o));
             w_psets(&mut f, &psets);
@@ -1314,16 +1438,34 @@ mod tests {
         assert!(qty::dormer_quantities(&[]).is_empty());
     }
 
-    /// [T2] Bogenwand: Datensatz WALL_ARC mit Kreisachse (Mitte, Radius, Startwinkel, Schwenk).
+    /// [T2] Bogenwand: Datensatz WALL_ARC_SOLID mit Kreisachse (Mitte, Radius, Startwinkel, Schwenk) und
+    /// je Schicht einem Bogenprofil (Ecken mit Bulge); Öffnungskörper mit radialen Laibungen.
     #[test]
-    fn bogenwand_als_netz_mit_kreisachse() {
+    fn bogenwand_als_bogenprofil_mit_kreisachse() {
         let mut p = sample();
         p.walls[0].bulge = Some(1.0); // W1 (0,0)→(5,0): Halbkreis, Mitte (2.5,0), Uhrzeigersinn
         let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
         let pi = std::f64::consts::PI;
-        let hit = f.nums.windows(6).any(|w| w[0] == 2.5 && w[1] == 0.0 && (w[2] - 2.5).abs() < 1e-12 && (w[3] - pi).abs() < 1e-12 && (w[4] + pi).abs() < 1e-12);
-        assert!(hit, "Kreisachse fehlt");
-        assert!(f.nums.contains(&REC_WALL_ARC));
+        let at = f.nums.windows(6).position(|w| w[0] == 2.5 && w[1] == 0.0 && (w[2] - 2.5).abs() < 1e-12 && (w[3] - pi).abs() < 1e-12 && (w[4] + pi).abs() < 1e-12);
+        let at = at.expect("Kreisachse fehlt");
+        assert!(f.nums.contains(&REC_WALL_ARC_SOLID));
+        // Profile je Schicht-Kette (Hauptbänder, Eckstücke an den Anschlüssen, Teilung an der Decke), je
+        // 4 Ecken; Bögen auf gleichem Radius, durchgehende Bänder über den ganzen Halbkreis (Bulge −1).
+        let n = f.nums[at + 5] as usize;
+        assert!(n >= 4, "{n}");
+        let mut k = at + 6;
+        let mut full = 0;
+        for _ in 0..n {
+            assert_eq!(f.nums[k], 4.0);
+            let v = &f.nums[k + 1..k + 13];
+            let r = |i: usize| ((v[3 * i] - 2.5).powi(2) + v[3 * i + 1].powi(2)).sqrt();
+            assert!((r(0) - r(1)).abs() < 1e-9 && (r(2) - r(3)).abs() < 1e-9 && (r(0) - r(2)).abs() > 0.01);
+            if (v[2] + 1.0).abs() < 2e-2 {
+                full += 1;
+            }
+            k += 15;
+        }
+        assert!(full >= 3, "{full}"); // Innenputz durch den T-Anschluss von W9 geteilt
     }
 
     /// [71] U-Wert aus dem Schichtaufbau landet als ThermalTransmittance in Pset_WallCommon (nur mit λ).

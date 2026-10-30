@@ -72,6 +72,7 @@ pub fn no_hatch() -> HatchRender {
         length_min: None,
         length_max: None,
         motif: None,
+        polar: None,
     }
 }
 
@@ -112,6 +113,7 @@ pub fn resolve_hatch(p: &Project, hatch_id: &str, wall_angle_deg: Option<f64>, f
         length_min: h.length_min,
         length_max: h.length_max,
         motif: h.motif.clone(),
+        polar: None,
     })
 }
 

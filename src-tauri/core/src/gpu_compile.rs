@@ -1076,6 +1076,7 @@ mod tests {
                 length_max: None,
                 dash: vec![],
                 motif: None,
+                polar: None,
             },
             color: -1,
         });

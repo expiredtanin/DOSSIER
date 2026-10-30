@@ -376,9 +376,9 @@ pub const SIDES: [Side; 4] = [Side::Left, Side::Right, Side::Top, Side::Bottom];
 
 /// `None`: keine Regeln, kein Wandtyp oder Öffnung ausserhalb der Wand.
 pub fn opening_reveal(p: &Project, w: &Wall, o: &Opening) -> Option<OpeningReveal> {
-    // Bogenwände ([T2]): Schichteinzug noch nicht (Laibungen radial, Schichten bündig).
-    if crate::wall_arc::is_arc_bulge(w.bulge) {
-        return None;
+    // Bogenwände ([T2]): auf der abgewickelten Ersatzwand (Lage = Bogenlänge).
+    if let Some((_, v)) = crate::wall_arc::unrolled_wall(w) {
+        return opening_reveal(p, &v, o);
     }
     let rules = reveal_rules(p, o);
     if rules.is_empty() {
@@ -815,6 +815,43 @@ mod tests {
         // Ohne Regeln: kein Block, keine Stücke.
         let p0 = wand_mit(Some(WindowType { id: "t".into(), ..Default::default() }), None);
         assert_eq!(plan_reveal_block(&p0, &p0.walls[0], &[&p0.openings.as_ref().unwrap()[0]]), vec![0.0]);
+    }
+
+    /// [T2]/[106] Schichteinzug in der Bogenwand: Zusatzstücke im 3D (auf der Sehne über die Öffnung
+    /// samt Einzug), Grundriss-Block auf der Abwicklung, Öffnungsteile auf derselben Sehne.
+    #[test]
+    fn schichteinzug_in_bogenwand() {
+        let reveals = vec![LayerReveal { layer: 1.0, mode: RevealMode::Ueberdaemmt, amount: Some(0.03), ..Default::default() }, LayerReveal { layer: -1.0, mode: RevealMode::Leibung, ..Default::default() }];
+        let mut p = wand_mit(Some(WindowType { id: "t".into(), inset_from_face: Some(0.18), frame_depth: Some(0.08), layer_reveals: Some(reveals), ..Default::default() }), None);
+        p.walls[0].bulge = Some(0.4);
+        let o = p.openings.as_ref().unwrap()[0].clone();
+        let r = opening_reveal(&p, &p.walls[0], &o).expect("Einzug auch in der Bogenwand");
+        assert!((r.from - 1.0).abs() < 1e-9 && (r.to - 2.2).abs() < 1e-9);
+        let walls = crate::model3d::emit_walls(&p, true).unwrap();
+        let len = |w: &crate::model3d::RWall| (w.end[0] - w.start[0]).hypot(w.end[1] - w.start[1]);
+        // Dämmung über dem Rahmen: eigene Dicke, Länge ≈ Öffnungsbreite (Sehne, wenig kürzer als 1.2).
+        assert!(walls.iter().any(|w| (w.thickness - 0.16).abs() < 1e-9 && w.holes.is_none() && (len(w) - 1.2).abs() < 0.01), "Überdämmung fehlt");
+        assert!(walls.iter().any(|w| (w.thickness - 0.07).abs() < 1e-9), "Leibungsputz fehlt");
+        // Wandkörper mit Loch: genau eine Sehne trägt die Öffnung.
+        let dirs: std::collections::BTreeSet<i64> = walls.iter().filter(|w| w.holes.as_ref().is_some_and(|h| !h.is_empty())).map(|w| ((w.end[1] - w.start[1]).atan2(w.end[0] - w.start[0]) * 1e6).round() as i64).collect();
+        assert_eq!(dirs.len(), 1, "{dirs:?}");
+        let b = plan_reveal_block(&p, &p.walls[0], &[&o]);
+        assert!(b[0] >= 2.0);
+        // Einbauteile liegen auf der Sehne der Teilwand mit dem Loch (Rahmen bündig im Loch).
+        let host = walls.iter().find(|w| w.holes.as_ref().is_some_and(|h| !h.is_empty())).unwrap();
+        let (dx, dy) = (host.end[0] - host.start[0], host.end[1] - host.start[1]);
+        let l = dx.hypot(dy);
+        let meshes = crate::model3d::emit_opening_meshes(&p, 1.0);
+        assert!(!meshes.is_empty());
+        let hole = &host.holes.as_ref().unwrap()[0];
+        let frames: Vec<_> = meshes.iter().filter(|m| m.color == crate::model3d::PART_RGB[1]).collect();
+        assert!(!frames.is_empty());
+        for m in frames {
+            for c in m.positions.chunks_exact(3) {
+                let t = ((c[0] - host.start[0]) * dx + (c[1] - host.start[1]) * dy) / l;
+                assert!(t > hole.from - 1e-6 && t < hole.to + 1e-6, "Rahmen ausserhalb des Lochs: {t} ∉ [{}, {}]", hole.from, hole.to);
+            }
+        }
     }
 
     #[test]

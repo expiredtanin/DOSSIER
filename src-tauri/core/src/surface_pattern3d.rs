@@ -158,9 +158,9 @@ fn newell(poly: &[[f64; 3]]) -> [f64; 3] {
 /// Beide Wandseiten: rechts der Achse die äusserste Schicht (`layers[0]`), links die innerste — wie
 /// die Ansicht. Wand-Koordinaten: x ab Wandanfang, y ab UK; Öffnungen ausgespart.
 fn wall_lines(p: &Project, w: &Wall, s: &mut Sink) {
-    // Bogenwände ([T2]): Ansichtsschraffur im 3D noch nicht (Fläche gekrümmt).
-    if crate::wall_arc::is_arc_bulge(w.bulge) {
-        return;
+    // Bogenwände ([T2]): Muster auf der abgewickelten Fläche, entlang des Bogens gebogen.
+    if let Some(arc) = crate::wall_arc::WallArc::of_wall(w) {
+        return arc_wall_lines(p, w, &arc, s);
     }
     let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
     let len = crate::jsmath::hypot2(dx, dy);
@@ -201,6 +201,60 @@ fn wall_lines(p: &Project, w: &Wall, s: &mut Sink) {
         for (a, b, m) in lod_segments(|sc| sp::segments(&face, &spec, off, sc)) {
             let at = |q: P| [ox + ux * q[0], oy + uy * q[0], z0 + q[1]];
             s.push(at(a), at(b), rgb, m);
+        }
+    }
+}
+
+/// Bogenwand ([T2]): Muster je Seite auf der abgewickelten Wandfläche (x = Bogenlänge DIESER Fläche, damit
+/// Abstände auf der Fläche stimmen), Punkte mit dem Bogen gebogen; Linien längs der Wand folgen der
+/// Krümmung (geteilt wie die Sehnen-Zerlegung), senkrechte bleiben gerade.
+fn arc_wall_lines(p: &Project, w: &Wall, arc: &crate::wall_arc::WallArc, s: &mut Sink) {
+    let len = arc.length();
+    let Some(wt) = p.wall_type(w) else { return };
+    let (z0, z1) = p.wall_vertical_extent(w);
+    if !(z1 - z0 > 1e-6) || !(len > 1e-6) {
+        return;
+    }
+    let total = crate::model::Project::type_thickness(&wt.layers);
+    let ref_off = crate::joins::reference_offset(crate::model3d::wall_reference(w), total);
+    let off = w.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
+    for (layer, side) in [(wt.layers.first(), -1.0), (wt.layers.last(), 1.0)] {
+        let Some((pat, comp, spec)) = spec_for(layer.and_then(|l| p.component(&l.component_id)), w.surface_pattern_angle.unwrap_or(0.0)) else { continue };
+        let rgb = ink_rgb(pat, comp);
+        let d = -ref_off + side * (total / 2.0 + LIFT);
+        let k = arc.radius_at(d) / arc.r;
+        if !(k > 1e-9) {
+            continue;
+        }
+        let holes: Vec<Vec<P>> = p
+            .openings
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter(|o| o.host_wall_id == w.id)
+            .filter_map(|o| {
+                let from = o.position.max(0.0).min(len) * k;
+                let to = (o.position + o.width).min(len) * k;
+                let b = o.sill_height.max(0.0);
+                let t = (b + o.height).min(z1 - z0);
+                (to - from > 1e-4 && t - b > 1e-4).then(|| vec![[from, b], [to, b], [to, t], [from, t]])
+            })
+            .collect();
+        let face = ring_with_holes(&[[0.0, 0.0], [len * k, 0.0], [len * k, z1 - z0], [0.0, z1 - z0]], &holes);
+        let step = len / arc.segments(arc.radius_at(d)) as f64;
+        let at = |q: P| {
+            let pt = arc.point(q[0] / k, d);
+            [pt.x, pt.y, z0 + q[1]]
+        };
+        for (a, b, m) in lod_segments(|sc| sp::segments(&face, &spec, off, sc)) {
+            let n = (((b[0] - a[0]).abs() / k / step).ceil() as usize).clamp(1, 512);
+            let mut prev = at(a);
+            for i in 1..=n {
+                let t = i as f64 / n as f64;
+                let q = at([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+                s.push(prev, q, rgb, m);
+                prev = q;
+            }
         }
     }
 }
@@ -253,6 +307,32 @@ mod tests {
         assert!(mid > 0 && mid < n, "{mid} von {n}");
         // Welt-Höhe (y) innerhalb der Wandhöhen 0…5.2 m.
         assert!(v.chunks(PATTERN_STRIDE).all(|c| c[1] >= -0.01 && c[1] <= 5.21));
+    }
+
+    /// [T2]/[100] Bogenwand: waagrechte Lattung folgt dem Bogen (alle Punkte auf dem Flächenradius).
+    #[test]
+    fn bogenwand_muster_folgt_dem_bogen() {
+        let mut p = sample();
+        p.walls.retain(|w| w.id == "W1");
+        p.openings = Some(vec![]);
+        p.ceilings = Some(vec![]);
+        p.roofs = Some(vec![]);
+        p.walls[0].bulge = Some(1.0); // Halbkreis (0,0)→(5,0), Mitte (2.5,0), r 2.5
+        let outer = p.wall_type(&p.walls[0]).unwrap().layers[0].component_id.clone();
+        let c = p.components.iter_mut().find(|c| c.id == outer).unwrap();
+        c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Lines, direction: Some(SurfacePatternDirection::Horizontal), spacing: 0.2, ..Default::default() });
+        let v = pattern_lines_3d(&p);
+        let n = v.len() / PATTERN_STRIDE;
+        assert!(n > 100, "{n}");
+        // Welt (x, Höhe, y): Abstand zur Bogenmitte = Radius der Aussenfläche (Achse mittig, 0.345 dick).
+        // Uhrzeigersinn: rechts der Laufrichtung (äusserste Schicht) liegt zur Bogenmitte hin.
+        let r_face = 2.5 - 0.345 / 2.0 - LIFT;
+        for c in v.chunks(PATTERN_STRIDE) {
+            for (x, y) in [(c[0], c[2]), (c[3], c[5])] {
+                let r = ((x as f64 - 2.5).powi(2) + (y as f64).powi(2)).sqrt();
+                assert!((r - r_face).abs() < 1e-4, "{r} ≠ {r_face}");
+            }
+        }
     }
 
     #[test]

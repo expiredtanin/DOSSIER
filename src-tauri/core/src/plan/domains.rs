@@ -1153,9 +1153,15 @@ mod tests {
         let (r_in, r_out) = (2.5 - 0.345 / 2.0, 2.5 + 0.345 / 2.0);
         let mut band_area = 0.0;
         let mut arcs = 0;
+        let mut polar = 0;
         for pr in &r.walls {
             match pr {
-                Primitive::Polygon { pts, stroke, .. } => {
+                Primitive::Polygon { pts, stroke, hatch, .. } => {
+                    // Schichtbänder: EIN Band je Schicht mit polarer Schraffur um die Bogenmitte.
+                    if let Some(c) = hatch.polar {
+                        polar += 1;
+                        assert!((c[0] - 2.5).abs() < 1e-9 && c[1].abs() < 1e-9 && (c[2] - 2.5).abs() < 1e-9, "{c:?}");
+                    }
                     for q in pts {
                         let d = ((q.x - 2.5).powi(2) + q.y.powi(2)).sqrt();
                         assert!(d > r_in - 1e-6 && d < r_out + 1e-6 && q.y > -1e-6, "{q:?} d={d}");
@@ -1180,5 +1186,6 @@ mod tests {
         let exact = std::f64::consts::PI / 2.0 * (r_out * r_out - r_in * r_in);
         assert!((band_area - exact).abs() < exact * 2e-3, "{band_area} ≠ {exact}");
         assert!(arcs >= 2 * 2, "Umriss innen/aussen als Bögen (≤ 90° je Stück): {arcs}");
+        assert_eq!(polar, 4, "ein polar schraffiertes Band je Schicht");
     }
 }

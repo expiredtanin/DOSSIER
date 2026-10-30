@@ -9,8 +9,21 @@ import {
   bulgeArcPoints,
   bulgePolylinePoints,
   bulgeFromSagittaPoint,
+  wallArcBand,
 } from "./bulge";
 import type { Vec2 } from "../model/types";
+
+describe("wallArcBand ([T2] Griff-Vorschau)", () => {
+  it("Band im Kreisring um die Achse, gerade Wand = null", () => {
+    expect(wallArcBand({ x: 0, y: 0 }, { x: 4, y: 0 }, undefined, 0.2)).toBeNull();
+    const r = wallArcBand({ x: 0, y: 0 }, { x: 4, y: 0 }, 1, 0.2);
+    expect(r).not.toBeNull();
+    const d = (q: Vec2) => Math.hypot(q.x - 2, q.y);
+    expect(r!.band.length).toBeGreaterThan(8);
+    for (const q of r!.band) expect(Math.abs(d(q) - 2)).toBeCloseTo(0.1, 9);
+    for (const q of r!.axis) expect(d(q)).toBeCloseTo(2, 9);
+  });
+});
 
 describe("bulgeArc / bulgeArcPoints", () => {
   it("bulge 0 (oder fehlend) → Gerade, keine Bogen-Tessellation", () => {

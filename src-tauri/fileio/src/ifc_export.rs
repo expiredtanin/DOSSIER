@@ -37,6 +37,12 @@
 //                 Körper als Netz (Sehnen-Zerlegung, Öffnungen ausgespart), dazu die Achse als
 //                 IfcTrimmedCurve auf einem IfcCircle (Welt-XY; a0/sweep im Bogenmass, sweep < 0 =
 //                 Uhrzeigersinn → SenseAgreement .F.).
+//   WALL_ARC_SOLID = 17 ([T2] Bogenwand als Profil-Extrusion), structure, id, name, TYPEREF, PSETS, cx, cy, r,
+//                 a0, sweep, n_solids, (n, (x, y, bulge) × n, z_rel, depth) × n_solids
+//                 Je Profil IfcArbitraryClosedProfileDef aus einer IfcCompositeCurve (bulge ≠ 0: Kreisbogen
+//                 zur nächsten Ecke als IfcTrimmedCurve auf IfcCircle, DXF-Sinn: positiv = Gegenuhrzeigersinn;
+//                 sonst Strecke), IfcExtrudedAreaSolid in +Z; Achse wie WALL_ARC. Öffnungen schneiden über
+//                 OPENING (IfcRelVoidsElement).
 //   CEILING     = 3, structure, id, name, TYPEREF, PSETS, PTS, n_inner, PTS × n_inner, z_rel, depth
 //                 (innere Ringe = Deckenaussparungen, IfcArbitraryProfileDefWithVoids)
 //   OPENING     = 4, wall_id, structure, opening_id, is_door (0/1), fill_name, PTS (Öffnungskörper), z_rel,
@@ -131,6 +137,7 @@ pub const REC_ZONE: f64 = 13.0;
 pub const REC_ATTACH: f64 = 14.0;
 pub const REC_OPENING_SOLID: f64 = 15.0;
 pub const REC_WALL_ARC: f64 = 16.0;
+pub const REC_WALL_ARC_SOLID: f64 = 17.0;
 
 // ── IFC-GUID (Kompression nach IfcOpenShell `guid.compress`) ────────────────
 
@@ -1073,12 +1080,67 @@ impl Builder {
 
     /// Bogenwand ([T2]): Netz-Körper wie [`Self::emit_triangulated_product`] plus Achse als
     /// IfcTrimmedCurve (IfcCircle, Parameter = Winkel im Bogenmass).
-    fn emit_arc_wall_product(&mut self, mesh: &Mesh, (cx, cy, r, a0, sweep): (f64, f64, f64, f64, f64), relative_to: usize) -> (usize, usize) {
+    fn emit_arc_wall_product(&mut self, mesh: &Mesh, axis: (f64, f64, f64, f64, f64), relative_to: usize) -> (usize, usize) {
         let (item, rep_type) = if self.v2() { self.emit_face_brep(mesh) } else { (self.emit_face_set(mesh), "Tessellation") };
         let body = self.add(
             "IFCSHAPEREPRESENTATION",
             format!("#{},{},{},{}", self.context, ifc_string("Body"), ifc_string(rep_type), refs(&[item])),
         );
+        let axis = self.emit_arc_axis(axis);
+        let shape = self.add("IFCPRODUCTDEFINITIONSHAPE", format!("$,$,{}", refs(&[axis, body])));
+        let placement = self.emit_placement(0.0, relative_to);
+        (placement, shape)
+    }
+
+    /// Bogenwand als Profil-Extrusion ([T2], WALL_ARC_SOLID): „Axis" (Kreisbogen) und „Body" (SweptSolid).
+    fn emit_arc_wall_solid_product(&mut self, solids: &[usize], axis: (f64, f64, f64, f64, f64), relative_to: usize) -> (usize, usize) {
+        let body = self.add(
+            "IFCSHAPEREPRESENTATION",
+            format!("#{},{},{},{}", self.context, ifc_string("Body"), ifc_string("SweptSolid"), refs(solids)),
+        );
+        let axis = self.emit_arc_axis(axis);
+        let shape = self.add("IFCPRODUCTDEFINITIONSHAPE", format!("$,$,{}", refs(&[axis, body])));
+        let placement = self.emit_placement(0.0, relative_to);
+        (placement, shape)
+    }
+
+    /// Profil aus Ecken mit Bulge (zur nächsten Ecke; DXF-Sinn) als IfcCompositeCurve → IfcExtrudedAreaSolid.
+    fn emit_bulge_extrusion(&mut self, ring: &[(f64, f64, f64)], z_rel: f64, depth: f64) -> usize {
+        let n = ring.len();
+        let mut segs = Vec::with_capacity(n);
+        for i in 0..n {
+            let (x0, y0, b) = ring[i];
+            let (x1, y1, _) = ring[(i + 1) % n];
+            let p0 = self.add("IFCCARTESIANPOINT", list(&[fmt_real(x0), fmt_real(y0)]));
+            let p1 = self.add("IFCCARTESIANPOINT", list(&[fmt_real(x1), fmt_real(y1)]));
+            let (dx, dy) = (x1 - x0, y1 - y0);
+            let l = (dx * dx + dy * dy).sqrt();
+            let curve = if b.abs() < 1e-9 || !(l > 1e-12) {
+                self.add("IFCPOLYLINE", refs(&[p0, p1]))
+            } else {
+                // Mitte links der Sehne im Abstand (L/2)·(1 − b²)/(2b); Radius (L/2)·(1 + b²)/(2|b|).
+                let k = (1.0 - b * b) / (2.0 * b) / 2.0;
+                let (cx, cy) = ((x0 + x1) / 2.0 - dy * k, (y0 + y1) / 2.0 + dx * k);
+                let r = l / 2.0 * (1.0 + b * b) / (2.0 * b.abs());
+                let c = self.add("IFCCARTESIANPOINT", list(&[fmt_real(cx), fmt_real(cy)]));
+                let pl = self.add("IFCAXIS2PLACEMENT2D", format!("#{c},$"));
+                let circle = self.add("IFCCIRCLE", format!("#{pl},{}", fmt_real(r)));
+                self.add("IFCTRIMMEDCURVE", format!("#{circle},(#{p0}),(#{p1}),{},{}", if b > 0.0 { ".T." } else { ".F." }, enum_("CARTESIAN")))
+            };
+            segs.push(self.add("IFCCOMPOSITECURVESEGMENT", format!("{},.T.,#{curve}", enum_("CONTINUOUS"))));
+        }
+        let cc = self.add("IFCCOMPOSITECURVE", format!("{},.F.", refs(&segs)));
+        let profile = self.add("IFCARBITRARYCLOSEDPROFILEDEF", format!("{},$,#{cc}", enum_("AREA")));
+        let mut position = self.identity_axis;
+        if z_rel != 0.0 {
+            let pt = self.add("IFCCARTESIANPOINT", list(&[fmt_real(0.0), fmt_real(0.0), fmt_real(z_rel)]));
+            position = self.add("IFCAXIS2PLACEMENT3D", format!("#{pt},$,$"));
+        }
+        self.add("IFCEXTRUDEDAREASOLID", format!("#{profile},#{position},#{},{}", self.extrude_dir, fmt_real(depth.max(0.001))))
+    }
+
+    /// Achse einer Bogenwand: IfcTrimmedCurve auf IfcCircle (Parameter = Winkel im Bogenmass).
+    fn emit_arc_axis(&mut self, (cx, cy, r, a0, sweep): (f64, f64, f64, f64, f64)) -> usize {
         let c = self.add("IFCCARTESIANPOINT", list(&[fmt_real(cx), fmt_real(cy)]));
         let pl = self.add("IFCAXIS2PLACEMENT2D", format!("#{c},$"));
         let circle = self.add("IFCCIRCLE", format!("#{pl},{}", fmt_real(r)));
@@ -1096,13 +1158,10 @@ impl Builder {
             ),
         );
         let axis_ctx = self.axis_context();
-        let axis = self.add(
+        self.add(
             "IFCSHAPEREPRESENTATION",
             format!("#{axis_ctx},{},{},{}", ifc_string("Axis"), ifc_string("Curve2D"), refs(&[trimmed])),
-        );
-        let shape = self.add("IFCPRODUCTDEFINITIONSHAPE", format!("$,$,{}", refs(&[axis, body])));
-        let placement = self.emit_placement(0.0, relative_to);
-        (placement, shape)
+        )
     }
 
     fn emit_face_set(&mut self, mesh: &Mesh) -> usize {
@@ -1273,6 +1332,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_WALL_SOLIDS => "WALL_SOLIDS",
         c if c == REC_WALL_MESH => "WALL_MESH",
         c if c == REC_WALL_ARC => "WALL_ARC",
+        c if c == REC_WALL_ARC_SOLID => "WALL_ARC_SOLID",
         c if c == REC_CEILING => "CEILING",
         c if c == REC_OPENING => "OPENING",
         c if c == REC_OPENING_SOLID => "OPENING_SOLID",
@@ -1623,6 +1683,34 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 }
                 let mesh = r.mesh()?;
                 let (placement, shape) = w.emit_arc_wall_product(&mesh, (cx, cy, rad, a0, sweep), w.placement_of(structure));
+                let entity = w.finish_typed("IFCWALL", format!("wall/{id}"), &name, &ty, &psets, structure, placement, shape, None, true);
+                w.walls.insert(id, (entity, placement, Frame::WORLD));
+            }
+            c if c == REC_WALL_ARC_SOLID => {
+                let structure = r.structure(n_storeys)?;
+                let id = r.string()?;
+                let name = r.string()?;
+                let ty = r.type_ref()?;
+                let psets = r.psets()?;
+                let (cx, cy, rad, a0, sweep) = (r.f()?, r.f()?, r.f()?, r.f()?, r.f()?);
+                if !(rad > 0.0) || !(sweep.abs() > 1e-9) {
+                    return Err(format!("Bogenachse ungültig bei {}", r.pos - 1));
+                }
+                let n = r.idx()?;
+                let mut solids = Vec::new();
+                for _ in 0..n {
+                    let m = r.idx()?;
+                    if m < 2 {
+                        return Err(format!("Bogenprofil zu kurz bei {}", r.pos - 1));
+                    }
+                    let ring: Vec<(f64, f64, f64)> = r.take(m.checked_mul(3).ok_or("Überlauf")?)?.chunks_exact(3).map(|c| (c[0], c[1], c[2])).collect();
+                    if ring.iter().any(|v| !(v.0.is_finite() && v.1.is_finite() && v.2.is_finite())) {
+                        return Err(format!("Bogenprofil ungültig bei {}", r.pos - 1));
+                    }
+                    let (z_rel, depth) = (r.f()?, r.f()?);
+                    solids.push(w.emit_bulge_extrusion(&ring, z_rel, depth));
+                }
+                let (placement, shape) = w.emit_arc_wall_solid_product(&solids, (cx, cy, rad, a0, sweep), w.placement_of(structure));
                 let entity = w.finish_typed("IFCWALL", format!("wall/{id}"), &name, &ty, &psets, structure, placement, shape, None, true);
                 w.walls.insert(id, (entity, placement, Frame::WORLD));
             }
@@ -2804,6 +2892,38 @@ mod tests {
         b.no_psets();
         b.n(&[2.5, 0.0, 0.0, 0.0, 1.0]);
         b.mesh_tetra();
+        assert!(build(&b).is_err());
+    }
+
+    /// [T2] Bogenwand als Profil-Extrusion: Kreisbögen in einer IfcCompositeCurve, Achse dazu.
+    #[test]
+    fn bogenwand_als_bogenprofil() {
+        let mut b = mini();
+        b.n(&[REC_WALL_ARC_SOLID, -1.0]);
+        b.str("WA");
+        b.str("Bogen");
+        b.no_type();
+        b.no_psets();
+        b.n(&[2.5, 0.0, 2.5, std::f64::consts::PI, -std::f64::consts::PI]);
+        // Halbkreisring r 2.4 … 2.6 um (5, 0): aussen im Gegenuhrzeigersinn, innen zurück im Uhrzeigersinn.
+        b.n(&[1.0, 4.0, 7.6, 0.0, 1.0, 2.4, 0.0, 0.0, 2.6, 0.0, -1.0, 7.4, 0.0, 0.0, 0.0, 2.6]);
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        assert_eq!(count(&ifc, "IFCWALL"), 1);
+        assert_eq!(count(&ifc, "IFCCOMPOSITECURVE("), 1);
+        assert_eq!(count(&ifc, "IFCCOMPOSITECURVESEGMENT"), 4);
+        assert_eq!(count(&ifc, "IFCCIRCLE"), 3, "zwei Profilbögen und die Achse");
+        assert!(ifc.contains(",2.6);") && ifc.contains(",2.4);"), "Radien 2.6 und 2.4");
+        assert!(ifc.contains(".F.,.CARTESIAN.") && ifc.contains(".T.,.CARTESIAN."));
+        assert!(ifc.contains("'Body','SweptSolid'") && ifc.contains("'Axis','Curve2D'"));
+        // Kaputtes Profil: Fehler statt Panik.
+        let mut b = mini();
+        b.n(&[REC_WALL_ARC_SOLID, -1.0]);
+        b.str("WA");
+        b.str("Bogen");
+        b.no_type();
+        b.no_psets();
+        b.n(&[2.5, 0.0, 2.5, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
         assert!(build(&b).is_err());
     }
 

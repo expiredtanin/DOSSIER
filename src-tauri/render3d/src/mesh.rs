@@ -1412,7 +1412,9 @@ pub fn append_context_mesh(mesh: &mut Mesh, input: &MeshInput) {
             [pos[b], pos[b + 2], pos[b + 1]]
         }
     };
-    for t in input.indices.chunks_exact(3) {
+    // [T4] Glatt: Ecken-Normalen je Dreieck (sonst kantig mit der Flaechennormale).
+    let smooth = input.crease_angle.filter(|a| a.is_finite() && *a > 0.0).map(|a| smooth_corner_normals(&input.indices, vcount, &vworld, a));
+    for (k, t) in input.indices.chunks_exact(3).enumerate() {
         let (ia, ib, ic) = (t[0] as usize, t[1] as usize, t[2] as usize);
         // Fehlerhafte Indizes robust ueberspringen (kein Panic bei kaputter Eingabe).
         if ia >= vcount || ib >= vcount || ic >= vcount {
@@ -1435,10 +1437,87 @@ pub fn append_context_mesh(mesh: &mut Mesh, input: &MeshInput) {
             continue;
         }
         let n = [gn[0] / len, gn[1] / len, gn[2] / len];
+        if let Some([na, nb, nc]) = smooth.as_ref().and_then(|s| s.get(k)).copied().flatten() {
+            let neg = |v: [f32; 3]| [-v[0], -v[1], -v[2]];
+            push_ctx_tri_n(mesh, [a, b, c], [na, nb, nc], [ca, cb, cc]);
+            push_ctx_tri_n(mesh, [a, c, b], [neg(na), neg(nc), neg(nb)], [ca, cc, cb]);
+            continue;
+        }
         // Vorderseite + Rueckseite (siehe Moduldoc: doppelseitig).
         push_ctx_tri(mesh, a, b, c, n, [ca, cb, cc]);
         push_ctx_tri(mesh, a, c, b, [-n[0], -n[1], -n[2]], [ca, cc, cb]);
     }
+}
+
+/// [T4] Geteilte Normalen ("split normals") je Dreiecks-Ecke: Summe der flaechengewichteten Normalen
+/// aller Dreiecke an derselben Lage (verschweisst ueber die Lage, 0.01 mm Raster), deren Normale um
+/// hoechstens `crease_deg` von der des Dreiecks abweicht. Entartete Dreiecke/kaputte Indizes: `None`.
+fn smooth_corner_normals(indices: &[u32], vcount: usize, vworld: &dyn Fn(usize) -> [f32; 3], crease_deg: f32) -> Vec<Option<[[f32; 3]; 3]>> {
+    use std::collections::HashMap;
+    let key = |p: [f32; 3]| [(p[0] as f64 * 1e5).round() as i64, (p[1] as f64 * 1e5).round() as i64, (p[2] as f64 * 1e5).round() as i64];
+    let mut weld: HashMap<[i64; 3], usize> = HashMap::new();
+    let mut id = vec![usize::MAX; vcount];
+    for (i, slot) in id.iter_mut().enumerate() {
+        let n = weld.len();
+        *slot = *weld.entry(key(vworld(i))).or_insert(n);
+    }
+    let tris: Vec<Option<([usize; 3], [f32; 3], [f32; 3])>> = indices
+        .chunks_exact(3)
+        .map(|t| {
+            let v = [t[0] as usize, t[1] as usize, t[2] as usize];
+            if v.iter().any(|&i| i >= vcount) {
+                return None;
+            }
+            let (a, b, c) = (vworld(v[0]), vworld(v[1]), vworld(v[2]));
+            let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let g = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+            let l = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+            (l >= 1e-12 && l.is_finite()).then(|| ([id[v[0]], id[v[1]], id[v[2]]], g, [g[0] / l, g[1] / l, g[2] / l]))
+        })
+        .collect();
+    let mut around: Vec<Vec<usize>> = vec![Vec::new(); weld.len()];
+    for (k, t) in tris.iter().enumerate() {
+        if let Some((w, _, _)) = t {
+            for &v in w {
+                if around[v].last() != Some(&k) {
+                    around[v].push(k);
+                }
+            }
+        }
+    }
+    let cos = crease_deg.min(180.0).to_radians().cos() - 1e-6;
+    tris.iter()
+        .map(|t| {
+            let (w, _, nt) = t.as_ref()?;
+            let corner = |v: usize| {
+                let mut s = [0.0f32; 3];
+                for &f in &around[v] {
+                    if let Some((_, g, nf)) = &tris[f] {
+                        if nf[0] * nt[0] + nf[1] * nt[1] + nf[2] * nt[2] >= cos {
+                            s = [s[0] + g[0], s[1] + g[1], s[2] + g[2]];
+                        }
+                    }
+                }
+                let l = (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt();
+                if l > 1e-20 && l.is_finite() {
+                    [s[0] / l, s[1] / l, s[2] / l]
+                } else {
+                    *nt
+                }
+            };
+            Some([corner(w[0]), corner(w[1]), corner(w[2])])
+        })
+        .collect()
+}
+
+/// Wie [`push_ctx_tri`], mit einer Normale je Ecke ([T4] glatt).
+fn push_ctx_tri_n(mesh: &mut Mesh, p: [[f32; 3]; 3], n: [[f32; 3]; 3], colors: [Rgb; 3]) {
+    let base = (mesh.verts.len() / FLOATS_PER_VERTEX) as u32;
+    for k in 0..3 {
+        mesh.verts.extend_from_slice(&[p[k][0], p[k][1], p[k][2], n[k][0], n[k][1], n[k][2], colors[k][0], colors[k][1], colors[k][2]]);
+    }
+    mesh.indices.extend_from_slice(&[base, base + 1, base + 2]);
 }
 
 /// Haengt EIN Dreieck (drei world-Ecken) mit gegebener Normale + Farbe an —
@@ -1687,11 +1766,49 @@ mod tests {
             color: None,
             material_index: None,
             vertex_colors: vec![],
+            crease_angle: None,
         };
         let mut mesh = Mesh::default();
         append_context_mesh(&mut mesh, &input);
         // Erstes emittiertes Dreieck (Vorderseite a,b,c) — dritter Vertex (c).
         let base = 2 * FLOATS_PER_VERTEX;
         assert_eq!(&mesh.verts[base..base + 3], &[2.0, 4.0, -3.0]);
+    }
+
+    /// [T4] Zwei Dreiecke mit 10°-Knick, Kante NICHT geteilt (eigene Punkte gleicher Lage): glatt mit
+    /// 30° bekommen die Kantenpunkte beider Dreiecke dieselbe Normale, mit 5° (oder ohne) die
+    /// Flaechennormalen; die Rueckseite traegt die Gegennormale.
+    #[test]
+    fn glatt_mit_knickwinkel_teilt_normalen() {
+        let t = 10f32.to_radians();
+        // Dreieck 1 in der Ebene z = 0, Dreieck 2 um die x-Achse (Kante y = 0) um 10° geknickt.
+        let positions = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, t.cos(), t.sin()];
+        let mk = |crease: Option<f32>| {
+            let input = MeshInput { positions: positions.clone(), indices: vec![0, 1, 2, 3, 4, 5], kind: MeshKind::Imported, color: None, material_index: None, vertex_colors: vec![], crease_angle: crease };
+            let mut mesh = Mesh::default();
+            append_context_mesh(&mut mesh, &input);
+            mesh
+        };
+        let normal = |m: &Mesh, v: usize| -> [f32; 3] {
+            let b = v * FLOATS_PER_VERTEX + 3;
+            [m.verts[b], m.verts[b + 1], m.verts[b + 2]]
+        };
+        let close = |a: [f32; 3], b: [f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-5);
+        // Vorderseiten: Dreieck 1 = Vertex 0..3, Dreieck 2 = Vertex 6..9 (je 3 Rueckseiten dazwischen).
+        let smooth = mk(Some(30.0));
+        assert_eq!(smooth.verts.len(), 12 * FLOATS_PER_VERTEX);
+        // Kantenpunkt (1,0,0): in Dreieck 1 Ecke 1, in Dreieck 2 Ecke 0.
+        assert!(close(normal(&smooth, 1), normal(&smooth, 6)), "{:?} {:?}", normal(&smooth, 1), normal(&smooth, 6));
+        // Nicht-Kantenpunkt behaelt einen eigenen Mix: Ecke 2 von Dreieck 1 liegt nur an Dreieck 1.
+        assert!(!close(normal(&smooth, 2), normal(&smooth, 1)));
+        // Rueckseite = Gegennormale.
+        let back = normal(&smooth, 3);
+        let front = normal(&smooth, 0);
+        assert!(close(back, [-front[0], -front[1], -front[2]]));
+        for crease in [Some(5.0), None] {
+            let hard = mk(crease);
+            assert!(!close(normal(&hard, 1), normal(&hard, 6)));
+            assert!(close(normal(&hard, 0), normal(&hard, 1)) && close(normal(&hard, 1), normal(&hard, 2)));
+        }
     }
 }
