@@ -211,6 +211,12 @@ describe("resolveTitleBlock — Master-Vererbung + Defaults", () => {
     expect(tb.date).toBe("2026-07-07");
     expect(tb.author).toBe("");
     expect(tb.planNumber).toBe("01"); // nicht in project.layouts → erste Nummer
+    expect(tb.revision).toBeUndefined();
+  });
+
+  it("[79] Revisionsindex des Blatts steht im Titelblock", () => {
+    const l = { ...createLayout("l1", "EG", "a4", "portrait"), revision: "C" };
+    expect(resolveTitleBlock(p, l, undefined, "2026-07-07").revision).toBe("C");
   });
 
   it("Plannummer: laufend nach Reihenfolge, eigene Nummer übersteuert", () => {
