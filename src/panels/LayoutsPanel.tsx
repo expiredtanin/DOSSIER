@@ -34,6 +34,7 @@ import {
   type LayoutSizeStart,
   type NewLayoutStart,
 } from "../ui/LayoutCreateDialogs";
+import { PublishSection } from "./PublishSection";
 import { t } from "../i18n";
 
 // ── Baum-Icons (inline-SVG im Panel-Stil: 14px, stroke currentColor 1.4) ──────
@@ -872,6 +873,8 @@ export function LayoutsPanel() {
           {masterTree.rootMasters.map((m) => renderMasterRow(m, 0))}
         </div>
       )}
+
+      <PublishSection />
 
       {dialog === "layout" && (
         <NewLayoutDialog

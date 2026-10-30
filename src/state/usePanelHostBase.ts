@@ -55,6 +55,7 @@ import {
   createSheetLevel,
 } from "../model/layoutModel";
 import { folderPdfBytes } from "../export/layoutPdf";
+import { addPublishSetOps, deletePublishSetOps, patchPublishSetOps, publishSet } from "./publishActions";
 import { saveBinaryFile } from "../native/saveFile";
 import type { useProjectActions } from "./useProjectActions";
 import type { useSelectionState } from "./useSelectionState";
@@ -1450,6 +1451,19 @@ export function usePanelHostBase(opts: {
         applyChange((p) =>
           fieldOps(p, "layoutFolders", moveFolderToFolder(p.layoutFolders ?? [], folderId, parentId)),
         );
+      },
+      onAddPublishSet: () => {
+        const id = `pubset-${Date.now()}`;
+        applyChange((p) => addPublishSetOps(p, id));
+        return id;
+      },
+      onPatchPublishSet: (id, patch) => applyChange((p) => patchPublishSetOps(p, id, patch), `pubset-${id}`),
+      onSetProjectNumber: (value) => applyChange((p) => fieldOps(p, "projectNumber", value.trim() ? value : undefined), "projectNumber"),
+      onDeletePublishSet: (id) => applyChange((p) => deletePublishSetOps(p, id)),
+      onPublishSet: (id) => {
+        void publishSet(project, id).then((ops) => {
+          if (ops && ops.length > 0) applyChange(ops);
+        });
       },
     };
     return value;

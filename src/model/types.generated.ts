@@ -1537,6 +1537,13 @@ export type Layout = {
    * nicht im Layout (bis Format 2: `annotations`, s. `project_format::migrate_layout_annotations`).
    */
   viewports: Array<LayoutViewport>;
+  /**
+   * Revisionsindex des Blatts (z. B. "A", "B" oder "2"); steht im Titelblock, wird beim
+   * Publizieren eines Satzes optional hochgezählt ([79]).
+   */
+  revision?: string;
+  /** Grafische Legenden auf dem Blatt ([82]). */
+  legends?: Array<LayoutLegend>;
   /** Lebendige Tabellen auf dem Blatt ([111]); fehlt = keine. */
   tables?: Array<LayoutTable>;
 };
@@ -1559,6 +1566,27 @@ export type LayoutFolder = {
    * (rückwärtskompatibel — Alt-Projekte ohne `kind` bleiben Layout-Ordner).
    */
   kind?: "layout" | "master";
+};
+
+/**
+ * Grafische Legende auf einem Layout-Blatt ([82]): listet Schraffuren/Materialien, Linientypen und/oder
+ * Kategorien der gezeigten Viewports (`manualKeys` leer) oder einer Handauswahl, mit Muster und Name.
+ */
+export type LayoutLegend = {
+  id: string;
+  /** Linke Kante auf dem Blatt (mm). */
+  xMm: number;
+  /** Obere Kante auf dem Blatt (mm). */
+  yMm: number;
+  /** Titel; fehlt = „Legende". */
+  title?: string;
+  /** Gezeigte Arten: "hatch", "lineType", "category"; fehlt = nur Schraffuren. */
+  kinds?: Array<string>;
+  /**
+   * Handauswahl als Schlüssel "hatch:<id>", "lineType:<id>", "category:<code>"; leer/fehlt = automatisch
+   * aus den Viewports des Blatts.
+   */
+  manualKeys?: Array<string>;
 };
 
 /** Ausrichtung eines Layout-Blatts. */
@@ -2301,6 +2329,12 @@ export type Project = {
    * gültig bleiben (Default: leer → alle Layouts auf Wurzelebene).
    */
   layoutFolders?: Array<LayoutFolder>;
+  /** Publikationssätze ([79]). */
+  publishSets?: Array<PublishSet>;
+  /** Publikationsprotokoll ([79]), neueste zuletzt. */
+  publishLog?: Array<PublishLogEntry>;
+  /** Projektnummer für Titelblock und Dateinamen ([79]). */
+  projectNumber?: string;
   /**
    * Referenzhöhe des Erdgeschosses in Metern über Meer (m ü. M.), editierbar
    * im Einstellungs-Fenster. Optional, damit bestehende Projekte ohne diesen
@@ -2336,6 +2370,50 @@ export type Project = {
     /** Anzeige-Adresse/Bezeichnung des Bezugspunkts. */
     label?: string;
   };
+};
+
+/** Protokolleintrag einer Publikation ([79]): Datum, Blätter mit Revision, erzeugte Dateien. */
+export type PublishLogEntry = {
+  id: string;
+  setId: string;
+  setName: string;
+  /** ISO-Zeitstempel. */
+  date: string;
+  sheets: Array<PublishLogSheet>;
+  files: Array<string>;
+};
+
+/** Ein Blatt im Publikationsprotokoll. */
+export type PublishLogSheet = { layoutId: string; number: string; name: string; revision: string };
+
+/**
+ * Publikationssatz ([79]): benannte Menge von Layouts (und optional Ansichten) mit Ausgabe-Einstellungen.
+ */
+export type PublishSet = {
+  id: string;
+  name: string;
+  /** Layouts des Satzes in Ausgabe-Reihenfolge. */
+  layoutIds: Array<string>;
+  /** Gespeicherte Ansichten, die zusätzlich als eigene Seiten ausgegeben werden. */
+  snapshotIds?: Array<string>;
+  /**
+   * "pdf-multi" (ein PDF, Standard), "pdf-single" (je Blatt eine Datei), "dxf" (DXF mit Layouts).
+   */
+  format?: string;
+  /**
+   * Dateinamen-Muster mit {Projektnummer} {Projekt} {Blattnummer} {Blattname} {Index} {Datum} {Satz}.
+   */
+  namePattern?: string;
+  /** Papierformat-Übersteuerung für alle Blätter des Satzes. */
+  paperOverride?: LayoutPaperFormat;
+  /** Massstab-Übersteuerung (1:N) für alle Viewports des Satzes. */
+  scaleOverride?: number;
+  /** Revisionsindex im Titelblock/Dateinamen ausgeben (Standard ja). */
+  includeRevision?: boolean;
+  /** Revisionsindex je Blatt beim Publizieren erhöhen (A→B, 1→2). */
+  bumpRevision?: boolean;
+  /** PDF-Ebenen (Optional Content) je Kategorie. */
+  pdfLayers?: boolean;
 };
 
 /**

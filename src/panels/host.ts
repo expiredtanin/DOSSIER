@@ -29,6 +29,7 @@ import type {
   LayoutPaperFormat,
   LineStyle,
   MasterLayout,
+  PublishSet,
   Project,
   SiaCategory,
   SliceTermination,
@@ -754,6 +755,18 @@ export interface PanelHostValue {
    * werden verworfen (No-op).
    */
   onMoveFolderToFolder: (folderId: string, parentId: string | null) => void;
+
+  // ── Publikationssätze ([79]) ────────────────────────────────────────────
+  /** Legt einen Publikationssatz mit allen Layouts an; liefert die Id. */
+  onAddPublishSet: () => string;
+  /** Ändert Felder eines Satzes (Name, Layouts, Format, Namensmuster, Übersteuerungen …). */
+  onPatchPublishSet: (id: string, patch: Partial<Omit<PublishSet, "id">>) => void;
+  /** Löscht einen Satz. */
+  onDeletePublishSet: (id: string) => void;
+  /** Erzeugt und speichert alle Dateien des Satzes; zählt Indizes hoch und protokolliert. */
+  onPublishSet: (id: string) => void;
+  /** Setzt die Projektnummer (Dateinamen-Muster `{Projektnummer}`). */
+  onSetProjectNumber: (value: string) => void;
 }
 
 /** Startwerte eines neuen Layouts (aus dem „Neues Layout"-Dialog). */

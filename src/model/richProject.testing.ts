@@ -125,7 +125,7 @@ const OPTIONAL_KEYS = [
   "formatVersion", "textStyles", "ceilingTypes", "roofTypes", "blockDefs", "doorTypes", "windowTypes", "stairTypes", "pens", "penSets",
   "activePenSetId", "customPalettes", "builtinPaletteBanks", "roomProgram", "roomProgramTolerance", "parcelArea", "sunStudy", "siteRules",
   "scaleLineWeights", "ceilings", "roofs", "openings", "stairs", "rooms", "context", "extrudedSolids", "columns", "groups",
-  "parametricWalls", "overrideRules", "viewSnapshots", "viewSnapshotFolders", "layouts", "masterLayouts", "layoutFolders",
+  "parametricWalls", "overrideRules", "viewSnapshots", "viewSnapshotFolders", "layouts", "masterLayouts", "layoutFolders", "publishSets", "publishLog", "projectNumber",
   "referenceElevationMasl", "geoAnchor",
 ] as const satisfies readonly (keyof Project)[];
 

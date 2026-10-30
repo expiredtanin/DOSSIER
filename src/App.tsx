@@ -16,6 +16,7 @@
 // fünf DOSSIER-Modi): das Zeichnungsebenen-Panel steuert das 3D, das
 // Ebenen-Panel die Kategorie-Darstellung in Grundriss UND 3D.
 
+import { addLegend, patchLegend, removeLegend } from "./analysis/legend";
 import { lengthFromDisplay, unitsForLevel } from "./tools/displayUnits";
 import { NON_LENGTH_FIELDS } from "./commands/parseInput";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +30,7 @@ import type {
   Drawing2D,
   DrawingLevel,
   Layout,
+  LayoutLegend,
   LayoutTable,
   LayoutViewport,
   Project,
@@ -2684,6 +2686,14 @@ export default function App() {
               patchOpenLayout(activeLayout.id, (l) =>
                 addViewportToLayout(l, createViewport(`vp-${Date.now()}`, snapshotId, init)),
               ),
+            onAddLegend: (init: Omit<LayoutLegend, "id">) => {
+              const id = `legend-${Date.now()}`;
+              patchOpenLayout(activeLayout.id, (l) => addLegend(l, { ...init, id }));
+              return id;
+            },
+            onPatchLegend: (legendId: string, patch: Partial<Omit<LayoutLegend, "id">>) =>
+              patchOpenLayout(activeLayout.id, (l) => patchLegend(l, legendId, patch), `legend-${legendId}`),
+            onRemoveLegend: (legendId: string) => patchOpenLayout(activeLayout.id, (l) => removeLegend(l, legendId)),
           },
         }
       : null;
