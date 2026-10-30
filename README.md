@@ -104,6 +104,22 @@ npm run dev           # nur im Browser, für Entwicklung
 Prüfen: `npm run check` (TypeScript, Vitest und die Rust-Tests aller Crates),
 `npm run e2e` für die Oberflächentests mit Playwright.
 
+## Releases
+
+Ein Release entsteht aus einem Tag: Version in `src-tauri/tauri.conf.json` anheben, committen, dann
+`git tag v0.2.0 && git push origin v0.2.0`. `.github/workflows/release.yml` baut die macOS-App (Tauri,
+universal arm64 + x64) und legt einen **Release-Entwurf** mit den Artefakten und einer Änderungsliste
+(Commit-Titel seit dem letzten `v*`-Tag) an; der Entwurf wird von Hand veröffentlicht. Ohne Secrets
+entstehen unsignierte Artefakte. Optionale Repository-Secrets:
+
+- Signierung/Notarisierung: `APPLE_CERTIFICATE` (base64 der .p12), `APPLE_CERTIFICATE_PASSWORD`,
+  `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (App-spezifisch), `APPLE_TEAM_ID`
+- Updater-Signatur: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+  (passend zum `pubkey` in `tauri.conf.json`; ohne Schlüssel entfallen die Updater-Artefakte)
+
+Der Updater-Endpunkt in `tauri.conf.json` zeigt noch auf `git.openbureau.ch`; soll er GitHub nutzen,
+dort `…/releases/latest/download/latest.json` eintragen. Linux (Electron) hat keinen Release-Build.
+
 ## Kommandozeile
 
 `dossier-cli` benutzt denselben Kern wie die App, nur ohne Fenster. Gebaut wird

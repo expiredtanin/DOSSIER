@@ -1077,9 +1077,14 @@ Frage: WebGPU weiterführen oder wie BIMCraft CPU + native GPU?
   1 Speicher-Explosion (revisionCloud), behoben. · S
 - ✅ **[22] Fester Check vor Abschluss.** `npm run check` (tsc, vitest, cargo test aller 6 Crates,
   `--fast` ohne Rust). `cargo fmt`/`clippy` fehlen noch (Riesen-Diff) → eigener Schritt.
-- ○ **[30] Release-Workflow.** · M · Hängt an [57].
+- ◐ **[30] Release-Workflow.** 30.10.: `.github/workflows/release.yml` (Tag `v*` → macOS universal,
+  Release-Entwurf, Änderungsliste, Signierung/Notarisierung und Updater-Signatur nur mit Secrets, README
+  „Releases"). Nicht auf GitHub gelaufen. Offen: Updater-Endpunkt (zeigt auf git.openbureau.ch), Secrets
+  setzen, Linux-Build (kein Electron-Build vorhanden). · M
 - ◐ **[57] Tests bei jedem Push.** `.github/workflows/check.yml` (baut alle WASM-Pakete, installiert
-  ifcopenshell, `npm run check`; (28.10.) zusätzlich Job `e2e` für [49]). Läuft auf GitHub, sobald Actions aktiv sind. · S–M
+  ifcopenshell, `npm run check`; (28.10.) zusätzlich Job `e2e` für [49]). 30.10.: nur Push/PR auf master, Caches (rust-cache je Crate,
+  npm, Playwright), `--no-opt`-Fallback für wasm-opt, `build:cli`, e2e-Spuren bei Fehler. YAML geprüft
+  (action-validator), nicht auf GitHub gelaufen. · S–M
 - ○ **[60] Nur versprechen, was getestet ist.** · S · Regel, keine Arbeit.
 - ○ **[51] Herkunft übernommenen Codes.** · S · fällig mit [B2]/[B3]: Dateikopf (Repo, Commit, Datei,
   „geändert") + `NOTICE` im Repo.

@@ -1,0 +1,91 @@
+# Release ([30]): bei Tag `v*` baut die macOS-App (Tauri, universal = arm64 + x64) und legt einen
+# Release-Entwurf mit den Artefakten an. Ohne Secrets entstehen unsignierte Artefakte; mit Secrets
+# werden sie signiert/notarisiert und die Updater-Signaturen (latest.json) erzeugt.
+# Secrets: siehe README, Abschnitt „Releases". Ein Linux-/Electron-Build existiert nicht (nur Prototyp-Shell).
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "wasm32-unknown-unknown,aarch64-apple-darwin,x86_64-apple-darwin" }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            src-tauri/core
+            src-tauri/render2d
+            src-tauri/render3d
+            src-tauri/trucksolid
+            src-tauri/fileio
+      - uses: taiki-e/install-action@v2
+        with: { tool: wasm-pack }
+      - run: npm ci
+      - name: Secrets prüfen
+        run: |
+          # Ohne Updater-Schlüssel keine Updater-Artefakte (sonst bricht tauri build wegen createUpdaterArtifacts ab).
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY fehlt: Updater-Artefakte werden ausgelassen."
+            echo 'TAURI_ARGS=--config {"bundle":{"createUpdaterArtifacts":false}}' >> "$GITHUB_ENV"
+          else
+            echo "TAURI_ARGS=" >> "$GITHUB_ENV"
+          fi
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "APPLE_CERTIFICATE fehlt: App wird unsigniert gebaut (Gatekeeper warnt)."
+          fi
+      - name: WASM-Pakete bauen
+        run: |
+          for s in core truck engine3d engine fileio; do
+            npm run "build:$s" || npm run "build:$s" -- --no-opt
+          done
+      - run: npm run check -- --fast
+      - run: npm run build
+      - name: Änderungsliste seit letztem Tag
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          range=${prev:+$prev..}${GITHUB_REF_NAME}
+          { echo "## Änderungen${prev:+ seit $prev}"; echo; git log "$range" --no-merges --pretty='- %s'; } > CHANGELOG-release.md
+          cat CHANGELOG-release.md
+      - uses: tauri-apps/tauri-action@v0
+        with:
+          tauriScript: node scripts/tauri-native.mjs
+          args: --target universal-apple-darwin ${{ env.TAURI_ARGS }}
+          projectPath: .
+          tagName: ${{ github.ref_name }}
+          releaseName: Dossier ${{ github.ref_name }}
+          releaseBody: "Dossier ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonKeepUniversal: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Änderungsliste an Release-Entwurf hängen
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --json body -q .body > body.txt
+          printf '\n\n' >> body.txt
+          cat CHANGELOG-release.md >> body.txt
+          gh release edit "$GITHUB_REF_NAME" --notes-file body.txt
