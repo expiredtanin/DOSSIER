@@ -1378,9 +1378,21 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 ## Priorität 3 — Planproduktion und Darstellung
 
 - ◐ **[33] Objektstile mit Rangfolge.** Regelbasierte Overrides vorhanden. · M
-- ○ **[34] Ansichtsvorlagen.** · M
+- ◐ **[34] Ansichtsvorlagen.** (30.10.) `Project.viewTemplates` (Rust-Modell): benannter Satz aus Detailgrad,
+  Massstab, Kategorien, Override-Regeln, Darstellungsmodus, Schwarz-Weiss, Schatten, verdeckte Kanten,
+  Strichstärken-Skalierung und Ansichtsbereich; Ansicht (`DrawingLevel.templateId/templateLinked`) und
+  Ausschnitt (`ViewSnapshot.templateId/templateLinked`) einmal anwenden oder verknüpfen — Änderung der Vorlage
+  schreibt in einem Undo-Schritt in alle verknüpften (`state/viewTemplates.ts`, Wirkung in `useViewTemplateHandlers.ts`).
+  Ressourcen-Tab „Ansichtsvorlagen" (neu aus aktiver Ansicht, duplizieren, umbenennen, löschen, anwenden).
+  e2e `viewTemplates.spec.ts`. Offen: Vorlage direkt im Ausschnitte-Panel wählen, Tab im macOS-Ressourcenfenster
+  nicht getestet, Schnitt/Ansicht-Detailgrad/Massstab folgen der Vorlage nur über Anzeigezustand der aktiven Ansicht. · M
 - ◐ **[35] Detailgrad pro Ansicht.** · S–M
-- ◐ **[36] View Range.** Unter-/Oberkante im Grundriss fehlen. · M
+- ◐ **[36] View Range.** (30.10.) Geschoss-Felder `viewTop`/`viewBottom`/`viewDepth` (m über OKFF, neben `cutHeight`;
+  Eingabe im Geschoss-Editor). Kern `plan/view_range.rs`: Zone Cut/Below/Above/Under/Hidden; ganz über der Oberkante
+  oder unter der Unterkante entfällt das Bauteil, darüber bis Oberkante gestrichelt („über Schnitt"), unter der
+  Unterkante bis „darunter sichtbar bis" gepunktet. Wirkt auf Wände (samt Öffnungen), Stützen, Treppen, Decken
+  (nur ausblenden), Dächer (nur ausblenden) und Extrusionen. Ohne Grenzen unverändert. CLI-Plan geprüft (Linux).
+  Offen: Dach/Decke über/unter gestrichelt statt nur ausblenden, Schnitt/Ansicht, Raum/Fenster eigenständig. · M
 - ○ **[37] Beschriftung in Papiergrösse.** · M
 - ○ **[38] Assoziative Bemassung.** · L · nach [10].
 - ○ **[39] Auswahl gehört zum Modell.** · M

@@ -238,6 +238,7 @@ import {
   snapshotMatchesLiveState,
   type ViewSnapshotState,
 } from "./state/viewSnapshots";
+import { useViewTemplateHandlers } from "./state/useViewTemplateHandlers";
 // Seiteneffekt: registriert die zwei dockbaren Kern-Panels in der Registry.
 import { BUILTIN_PANEL_IDS } from "./panels/builtinPanels";
 import { SplashScreen } from "./ui/SplashScreen";
@@ -2503,8 +2504,28 @@ export default function App() {
     dockFloatTo,
   });
 
+  // Ansichtsvorlagen ([34]): Ressourcen-Handler + Abgleich der verknüpften Vorlage der aktiven Ansicht.
+  const viewTemplateHandlers = useViewTemplateHandlers({
+    project,
+    applyChange,
+    groupChanges,
+    activeLevel,
+    detail,
+    setDetail,
+    scaleDenominator,
+    setScaleDenominator,
+    snapshotLayerVisibility,
+    applyLayerVisibility,
+    mono: planColorMode === "mono",
+    setMono: (m) => setPlanColorMode(m ? "mono" : "color"),
+    displayMode: modeFor(BUILTIN_PANEL_IDS.drawingLevels),
+    setDisplayMode: (m) => setModeFor(BUILTIN_PANEL_IDS.drawingLevels, m),
+    planViewRef,
+  });
+
   // Handler-Bündel für das schwebende Ressourcen-Fenster (ResourceManager).
   const resourceHandlers: ResourceManagerHandlers = {
+    ...viewTemplateHandlers,
     onPatchComponent: patchComponent,
     onPatchWallType: patchWallType,
     onAddWallType: addWallType,
@@ -4304,6 +4325,27 @@ export default function App() {
                       <span className="editor-unit">{t("editor.unit.m")}</span>
                     </span>
                   </EditorField>
+                  {/* Ansichtsbereich ([36]): leer = unbegrenzt (Darstellung wie bisher). */}
+                  {(["viewTop", "viewBottom", "viewDepth"] as const).map((k) => (
+                    <EditorField key={k} label={t(`editor.${k}`)}>
+                      <span className="editor-num">
+                        <input
+                          type="number"
+                          step={0.1}
+                          min={k === "viewDepth" ? 0 : undefined}
+                          data-testid={`level-${k}`}
+                          value={level[k] ?? ""}
+                          placeholder="∞"
+                          onChange={(e) =>
+                            patchLevel(level.id, {
+                              [k]: e.target.value === "" ? undefined : Number(e.target.value),
+                            })
+                          }
+                        />
+                        <span className="editor-unit">{t("editor.unit.m")}</span>
+                      </span>
+                    </EditorField>
+                  ))}
                 </>
               )}
               {!isFloor && (

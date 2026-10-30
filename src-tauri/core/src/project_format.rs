@@ -15,13 +15,13 @@ const REQUIRED_ARRAYS: [&str; 3] = ["walls", "layers", "drawingLevels"];
 const DEFAULT_ARRAYS: [&str; 5] = ["lineStyles", "hatches", "components", "wallTypes", "drawings2d"];
 
 /// Bekannte Felder von `Project` (für die Meldung unbekannter Felder).
-const KNOWN_KEYS: [&str; 47] = [
+const KNOWN_KEYS: [&str; 48] = [
     "formatVersion", "id", "name", "lineStyles", "textStyles", "hatches", "components", "wallTypes",
     "ceilingTypes", "roofTypes", "blockDefs", "doorTypes", "windowTypes", "stairTypes", "pens",
     "penSets", "activePenSetId", "customPalettes", "builtinPaletteBanks", "drawingLevels", "layers",
     "walls", "ceilings", "roofs", "openings", "stairs", "rooms", "drawings2d", "context",
     "extrudedSolids", "columns", "groups", "parametricWalls", "overrideRules", "viewSnapshots",
-    "viewSnapshotFolders", "layouts", "masterLayouts", "layoutFolders", "referenceElevationMasl",
+    "viewSnapshotFolders", "viewTemplates", "layouts", "masterLayouts", "layoutFolders", "referenceElevationMasl",
     "geoAnchor", "roomProgram", "roomProgramTolerance", "parcelArea", "sunStudy", "siteRules", "scaleLineWeights",
 ];
 

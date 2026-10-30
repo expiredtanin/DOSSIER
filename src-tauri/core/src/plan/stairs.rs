@@ -31,12 +31,18 @@ fn v2(x: f64, y: f64) -> Vec2 {
 pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     let p = c.p;
     let cut_height = p.floor(&c.a.floor).and_then(|f| f.cut_height).unwrap_or(1.0);
+    let range = super::view_range::ViewRange::of(p, &c.a.floor);
     for s in p.stairs.as_deref().unwrap_or(&[]).iter().filter(|s| s.floor_id == c.a.floor && c.shown(&s.category_code)) {
         let greyed = Some(c.greyed(&s.category_code));
         let ov = c.overrides(&s.category_code, Some(&stair_label(s)));
         let lw = ov.lineweight.unwrap_or_else(|| c.cat(&s.category_code).map_or(WALL_FALLBACK_MM, |k| k.lw));
         let stroke = ov.color.as_deref().or(s.color.as_deref()).unwrap_or(POCHE_STROKE).to_string();
         let (zb, zt) = p.stair_vertical_extent(s);
+        let zone = range.classify(zb, zt);
+        if zone == super::view_range::Zone::Hidden {
+            continue;
+        }
+        let out_start = out.len();
         let params = s.encode();
         if let Some(sp) = crate::stair::decode_params(&params).filter(|_| (zt - zb).is_finite()) {
             let geo = kernel2d::stair_geometry(&sp, zt - zb);
@@ -121,6 +127,9 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                     i += 9;
                 }
             }
+        }
+        if let Some(d) = range.restyle_dash(zone) {
+            super::view_range::restyle(out, out_start, d);
         }
     }
 }

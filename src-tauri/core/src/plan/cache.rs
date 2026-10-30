@@ -35,6 +35,7 @@ pub const NOT_FOR_DRAWINGS: &[&str] = &[
     "parametricWalls",
     "viewSnapshots",
     "viewSnapshotFolders",
+    "viewTemplates",
     "roomProgram",
     "roomProgramTolerance",
     "parcelArea",
@@ -45,7 +46,7 @@ pub const NOT_FOR_DRAWINGS: &[&str] = &[
 ];
 
 /// Felder, die die übrigen Domänen nicht lesen.
-pub const NOT_FOR_REST: &[&str] = &["drawings2d", "viewSnapshots", "viewSnapshotFolders"];
+pub const NOT_FOR_REST: &[&str] = &["drawings2d", "viewSnapshots", "viewSnapshotFolders", "viewTemplates"];
 
 /// So viele Argument-Sätze bleiben im Cache (aktives Geschoss, Nachbar-Ebenen, Export …).
 pub const MAX_CONTEXTS: usize = 8;
