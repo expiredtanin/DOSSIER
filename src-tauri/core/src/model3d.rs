@@ -1724,10 +1724,11 @@ fn roof_color(p: &Project, override_color: Option<Rgb>, component_id: &str) -> R
 pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, String> {
     let maps = material_color_maps(p, only_roof);
     let mut out = Vec::new();
+    let nb = crate::roof_assembly::neighbors_rc(p);
     for (ri, roof) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().filter(|(_, r)| only_roof.is_none_or(|id| r.id == id)) {
         let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
         // Verschnittene Dächer und Gauben ([G5]): Körper aus `roof_assembly`.
-        if let Some(solids) = crate::roof_assembly::roof_solids(p, ri) {
+        if let Some(solids) = crate::roof_assembly::roof_solids_with(p, ri, &nb) {
             for part in &solids.parts {
                 let wall = part.role == crate::roof_assembly::Role::DormerWall;
                 let color = if wall {

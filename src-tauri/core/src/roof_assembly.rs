@@ -133,6 +133,12 @@ fn overlaps(a: &RoofIn, b: &RoofIn) -> bool {
     if a.eaves.len() < 3 || b.eaves.len() < 3 || a.z_hi < b.z_lo || b.z_hi < a.z_lo {
         return false;
     }
+    // Getrennte Ausdehnung: Schnitt leer (spart den Boolean; quadratisch über alle Dachpaare).
+    let bb = |r: &[[f64; 2]]| r.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]);
+    let (ba, bb_) = (bb(&a.eaves), bb(&b.eaves));
+    if ba[2] < bb_[0] || bb_[2] < ba[0] || ba[3] < bb_[1] || bb_[3] < ba[1] {
+        return false;
+    }
     let pa = vec![vec![a.eaves.clone()]];
     let pb = vec![vec![b.eaves.clone()]];
     let i = crate::polygon_bool::intersection(&pa, &pb);
@@ -141,6 +147,12 @@ fn overlaps(a: &RoofIn, b: &RoofIn) -> bool {
 
 /// Je Dach: verschnitten (Nachbarn überdecken sich oder Gauben)? Und mit welchen Nachbarn.
 pub fn neighbors(p: &Project) -> Vec<Vec<usize>> {
+    (*neighbors_rc(p)).clone()
+}
+
+/// Wie `neighbors`, ohne Kopie: Schleifen über alle Dächer holen die Liste einmal (der Schlüssel
+/// hasht alle Dächer; je Dach neu gerechnet war das quadratisch) und fragen dann `*_with`.
+pub fn neighbors_rc(p: &Project) -> Rc<Vec<Vec<usize>>> {
     let roofs = p.roofs.as_deref().unwrap_or(&[]);
     let mut h = ContentHash::default();
     for r in roofs {
@@ -148,7 +160,7 @@ pub fn neighbors(p: &Project) -> Vec<Vec<usize>> {
         h.json(&r.pitch_upper_deg).json(&r.mansard_type).json(&r.mansard_knee_ratio).json(&r.half_hip_ratio).json(&r.roof_type_id);
     }
     h.json(&p.roof_types);
-    (*cached("roof-solids/neighbors", h.finish(), || neighbors_uncached(p, roofs))).clone()
+    cached("roof-solids/neighbors", h.finish(), || neighbors_uncached(p, roofs))
 }
 
 fn neighbors_uncached(p: &Project, roofs: &[Roof]) -> Vec<Vec<usize>> {
@@ -171,15 +183,25 @@ fn has_dormers(r: &Roof) -> bool {
 
 /// Ist das Dach `ri` verschnitten (Körper-Weg)?
 pub fn is_assembled(p: &Project, ri: usize) -> bool {
+    is_assembled_with(p, ri, &neighbors_rc(p))
+}
+
+/// `is_assembled` mit vorab geholten Nachbarn (`neighbors_rc`).
+pub fn is_assembled_with(p: &Project, ri: usize, all: &[Vec<usize>]) -> bool {
     let Some(r) = p.roofs.as_deref().and_then(|v| v.get(ri)) else { return false };
-    has_dormers(r) || !neighbors(p).get(ri).is_none_or(Vec::is_empty)
+    has_dormers(r) || !all.get(ri).is_none_or(Vec::is_empty)
 }
 
 /// Körper des Dachs `ri`, falls verschnitten (sonst `None`), aus dem Cache.
 pub fn roof_solids(p: &Project, ri: usize) -> Option<Rc<RoofSolids>> {
+    roof_solids_with(p, ri, &neighbors_rc(p))
+}
+
+/// `roof_solids` mit vorab geholten Nachbarn (`neighbors_rc`).
+pub fn roof_solids_with(p: &Project, ri: usize, all: &[Vec<usize>]) -> Option<Rc<RoofSolids>> {
     let roofs = p.roofs.as_deref()?;
     let roof = roofs.get(ri)?;
-    let nb = neighbors(p).swap_remove(ri);
+    let nb = all.get(ri)?.clone();
     if nb.is_empty() && !has_dormers(roof) {
         return None;
     }
@@ -511,7 +533,9 @@ pub fn planar_faces(m: &Mesh, tris: &[usize]) -> Vec<Vec<V3>> {
                 *directed.entry((tv[k][e], tv[k][(e + 1) % 3])).or_default() += 1;
             }
         }
-        let boundary: Vec<(u32, u32)> = directed.keys().copied().filter(|&(a, b)| !directed.contains_key(&(b, a))).collect();
+        let mut boundary: Vec<(u32, u32)> = directed.keys().copied().filter(|&(a, b)| !directed.contains_key(&(b, a))).collect();
+        // Feste Startecke (HashMap-Reihenfolge ist je Prozess zufällig): sonst wechselt die Ausgabe.
+        boundary.sort_unstable();
         let mut next: HashMap<u32, u32> = HashMap::new();
         let mut simple = true;
         for &(a, b) in &boundary {
@@ -617,7 +641,11 @@ pub fn top_view_edges(skin: &Mesh, occluders: &[&Mesh]) -> Vec<([f64; 2], [f64; 
         })
     };
     let mut out = Vec::new();
-    for (&(a, b), list) in &edges {
+    // Feste Reihenfolge der Kanten (HashMap-Reihenfolge ist je Prozess zufällig).
+    let mut edge_keys: Vec<(u32, u32)> = edges.keys().copied().collect();
+    edge_keys.sort_unstable();
+    for (a, b) in edge_keys {
+        let list = &edges[&(a, b)];
         let ups: Vec<usize> = list.iter().copied().filter(|&t| is_up(t)).collect();
         let kind = match ups.as_slice() {
             [] => continue,
@@ -661,7 +689,8 @@ pub fn top_view_edges(skin: &Mesh, occluders: &[&Mesh]) -> Vec<([f64; 2], [f64; 
 /// Oberkante an ihrer Mitte.
 pub fn assembly_edges(p: &Project) -> Rc<Vec<(usize, [f64; 2], [f64; 2], EdgeKind)>> {
     let n = p.roofs.as_deref().map_or(0, |r| r.len());
-    let solids: Vec<(usize, Rc<RoofSolids>)> = (0..n).filter_map(|i| roof_solids(p, i).map(|s| (i, s))).collect();
+    let nb = neighbors_rc(p);
+    let solids: Vec<(usize, Rc<RoofSolids>)> = (0..n).filter_map(|i| roof_solids_with(p, i, &nb).map(|s| (i, s))).collect();
     let mut h = ContentHash::default();
     for (i, s) in &solids {
         h.u64(*i as u64).f64s(&s.top.positions).u64(s.top.indices.len() as u64);
