@@ -1624,10 +1624,24 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Musterlinien 0.10/0.13 mm). Schnitt: Dachschichten-Muster folgen der Dachneigung, Deckenschichten liegen
   (Achse 0°, vorher 90°), einschalige Wände wie Schicht-Bänder (vorher Grundriss-Winkel). DXF: Kurven-Muster
   als Polylinien; Ressourcen-Vorschau zeichnet Vektor-Schraffuren mit dem Kern-Generator. Geprüft: Rust-
-  Tests, CLI-Grundriss 1:50/1:100 und Schnitte (Wand, Decke, Dach) aller Standard-Baustoffe angesehen
-  (Linux). Offen: 3D-Live-Schnitt (render3d) zeigt neue Muster vereinfacht (Zickzack/Kreuz/Diagonal);
-  Projekte mit Standards vom 29.10. behalten die alten Schraffur-Definitionen (Standards laden ergänzt nur);
-  Alt-Pfade `planToPrintSvg`/SVG-PlanView zeichnen neue Muster als Diagonale; nicht in der Tauri-App geprüft. · M
+  Tests, CLI-Grundriss 1:50/1:100 und Schnitte (Wand, Decke, Dach) aller Standard-Baustoffe angesehen  (Linux).
+  Nachtrag 30.10. (Offene Punkte erledigt): Schraffur-Generator (`hatch.rs`, `jsnum`, `jsmath`) in eigenem Crate
+  `src-tauri/hatchgen` (`dossier-hatch`; Kern re-exportiert unter `crate::hatch` …, im `exclude` des Workspace,
+  Teil von `npm run check`). render3d-Live-Schnitt zeichnet Schicht-/Streumuster (Muster-Ids ab 4 = Generator-Codes)
+  mit demselben Generator als Ribbons in den Schnittlinien (`section_fill::push_generated_hatch`), der Cap-Shader
+  füllt dort Papier (Zickzack-Zweig entfernt). Druck-SVG (`plan_print_svg.rs`) und SVG-PlanView-Rückfall
+  (`isGeneratedPattern`, `buildHatchRuns`) nutzen den Generator, die `<pattern>`-Kachel „insulation" entfällt.
+  Neues Muster `dots` (Punktfeld, Schichtmuster, Teilung 5 cm · scale) für Putz innen/aussen (`std-h-putz`),
+  Keramik (`std-h-keramik`, Kreuzraster 45°), Faserzement (`std-h-faserzement`, Diagonale 135°). Keine
+  Massstabsgrenze für Schraffuren: Putz ist auch in 1:100 ein feiner Grauton; leer = „SIA Ohne Schraffur" wählen.
+  „Standards aktualisieren" ([101]) im Ressourcen-Manager-Kopf: Overlay (kein window.confirm) listet je Eintrag
+  mit Standard-id die abweichenden Felder; Regel: nur vom Standard geführte Felder (Name/Zusatzfelder bleiben),
+  Selbstanpassung ist nicht erkennbar (alte Fassungen nicht gespeichert) → umbenannte Einträge abgewählt, alle
+  anderen vorgewählt, „Alle überschreiben"/„Keine"; fehlende Standards werden mit ergänzt; ein Undo-Schritt
+  (`standards.rs::update_plan/update_ops`, Abfragen `standardsUpdatePlan/-Ops`). Geprüft: Rust-/vitest-Tests,
+  Druck-SVG-Schnitte 1:50 aller Standard-Baustoffe angesehen (Linux). Offen: render3d-Ribbons nicht visuell
+  geprüft (Metal nur macOS, WebGPU nicht im Browser); Ribbon-Breite konstant in der Welt wie die Trennlinien;
+  SVG-PlanView-Rückfall ohne Strichmuster der Musterlinien; nicht in der Tauri-App geprüft. · M
 - ◐ **[105] Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten.** (29.10., Wunsch Maintainer „so tief wie
   ArchiCAD“) Neue optionale Modellfelder (nur Rust-Modell): `frameDetail` am Fenster-/Türtyp und feldweise an der Öffnung
   (`Opening.frameDetail`): Blendrahmen-Breite je Seite, Tiefe/Lage, Flügelrahmen (Breite, Tiefe, Überschlag), Pfosten/

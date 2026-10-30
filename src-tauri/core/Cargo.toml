@@ -15,13 +15,15 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 # Browser-/Node-Bindings (wasm-bindgen); nur fuer wasm32-unknown-unknown.
-web = ["dep:wasm-bindgen", "dep:console_error_panic_hook"]
+web = ["dep:wasm-bindgen", "dep:console_error_panic_hook", "dossier-hatch/web"]
 
 [dependencies]
 i_overlay = { version = "9.1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 kernel2d = { path = "../kernel2d" }
+# Schraffur-Generator + JS-Zahlsemantik (auch von render3d genutzt), s. hatchgen/src/lib.rs.
+dossier-hatch = { path = "../hatchgen" }
 # Analytischer Schnitt-Extraktor (`section::cut_section`, GPU-frei, nur serde) für Schnitt/Ansicht im Kern ([K3c]).
 render3d = { path = "../render3d", default-features = false }
 # Kürzeste Dezimaldarstellung wie serde_json (Zahlen, die früher über JSON reisten, bitgleich nachbilden).

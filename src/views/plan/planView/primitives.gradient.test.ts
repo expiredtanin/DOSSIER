@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { polyUsesPattern } from "./primitives";
+import { isGeneratedPattern, polyUsesPattern } from "./primitives";
 import type { HatchRender } from "../../../plan/generatePlan/shared";
 
 function hatch(over: Partial<HatchRender> = {}): HatchRender {
@@ -41,5 +41,16 @@ describe("polyUsesPattern — gradient", () => {
   it("kind:'vector' (Default) bleibt unverändert vom `pattern`-Feld gesteuert", () => {
     expect(polyUsesPattern(hatch({ pattern: "diagonal" }))).toBe(true);
     expect(polyUsesPattern(hatch({ pattern: "none" }))).toBe(false);
+  });
+});
+
+describe("polyUsesPattern — Kern-Generator-Muster ([109])", () => {
+  it("Schicht-/Streumuster laufen über buildHatchRuns, nicht über <pattern>-Kacheln", () => {
+    for (const pattern of ["insulation", "insulationHard", "insulationWave", "timber", "earth", "gravel", "stone", "dots"] as const) {
+      expect(isGeneratedPattern(pattern)).toBe(true);
+      expect(polyUsesPattern(hatch({ pattern }))).toBe(false);
+    }
+    expect(polyUsesPattern(hatch({ pattern: "diagonal" }))).toBe(true);
+    expect(polyUsesPattern(hatch({ pattern: "crosshatch" }))).toBe(true);
   });
 });

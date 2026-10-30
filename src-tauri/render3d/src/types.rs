@@ -27,7 +27,7 @@ pub type Rgb = [f32; 3];
 /// siehe 2D-Direktive `HATCH_INK`) und wandert deshalb bewusst NICHT mit.
 ///
 /// `pattern`: 0 = none (leer/weiss), 1 = solid (Vollton), 2 = diagonal (45°),
-/// 3 = crosshatch (Kreuz), 4 = insulation (Zickzack/Daemmung). Die Zuordnung ist
+/// 3 = crosshatch (Kreuz), ab 4 = Muster-Code des Kern-Generators (`dossier_hatch::Pattern`: 4 Daemmschlange, 6-7 Hartschaum/Welle, 8 Holz, 9 Erdreich, 10 Kies, 11 Naturstein, 12 Punktfeld). Die Zuordnung ist
 /// mit der TS-Seite (`toWalls3d::hatchPatternId`) und dem Shader synchron zu halten.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Hatch {

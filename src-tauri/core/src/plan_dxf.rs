@@ -527,7 +527,7 @@ fn dash_seg(a: V2, b: V2, cycle: &[f64]) -> Vec<(V2, V2)> {
 fn is_curve_pattern(p: Pattern) -> bool {
     matches!(
         p,
-        Pattern::Insulation | Pattern::InsulationHard | Pattern::InsulationWave | Pattern::Timber | Pattern::Earth | Pattern::Gravel | Pattern::Stone
+        Pattern::Insulation | Pattern::InsulationHard | Pattern::InsulationWave | Pattern::Timber | Pattern::Earth | Pattern::Gravel | Pattern::Stone | Pattern::Dots
     )
 }
 

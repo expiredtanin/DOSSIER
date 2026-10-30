@@ -34,6 +34,7 @@ import { EyeIcon } from "./EyeIcon";
 import { t } from "../i18n";
 import { ComponentsTab } from "./resourceManager/ComponentsTab";
 import { HatchesTab } from "./resourceManager/HatchesTab";
+import { StandardsUpdateDialog } from "./resourceManager/StandardsUpdateDialog";
 import { LinesTab } from "./resourceManager/LinesTab";
 import { CeilingStylesTab, RoofStylesTab, WallStylesTab } from "./resourceManager/LayeredStylesTab";
 import { DoorStylesTab } from "./resourceManager/DoorStylesTab";
@@ -153,6 +154,8 @@ export interface ResourceManagerHandlers {
   onSeedStandardPenSet?: () => void;
   /** Ergänzt die fehlenden SIA-400-Standards ([100]–[102], „Standards laden"). */
   onLoadStandards?: () => void;
+  /** „Standards aktualisieren" ([109]): bringt die gewählten Standard-Einträge (`"<Liste>:<id>"`) auf den heutigen Stand. */
+  onUpdateStandards?: (selected: string[]) => void;
   /**
    * Farbpaletten (Tab „Paletten"): eigene Paletten verwalten + Sichtbarkeit
    * der Bänke im Farbwahl-Popover. Optional wie die Stift-Handler.
@@ -234,6 +237,7 @@ export function ResourceManager({
     if (initialTab) setTab(initialTab);
   }, [initialTab]);
   const [rect, setRect] = useState<WindowRect>(initialRect);
+  const [updateStandardsOpen, setUpdateStandardsOpen] = useState(false);
 
   // Verschieben über die Kopfzeile: Cursor − linke/obere Kante festhalten und die
   // Kante der Cursorbewegung folgen lassen (Pointer-Capture hält die Geste).
@@ -328,6 +332,16 @@ export function ResourceManager({
               onClick={() => handlers.onLoadStandards?.()}
             >
               {t("resources.loadStandards")}
+            </button>
+          )}
+          {handlers.onUpdateStandards && (
+            <button
+              className="res-add res-update-standards"
+              title={t("resources.updateStandards.hint")}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => setUpdateStandardsOpen(true)}
+            >
+              {t("resources.updateStandards")}
             </button>
           )}
           {!windowed && (
@@ -474,6 +488,14 @@ export function ResourceManager({
             />
           )}
         </div>
+
+        {updateStandardsOpen && handlers.onUpdateStandards && (
+          <StandardsUpdateDialog
+            project={project}
+            onApply={(sel) => handlers.onUpdateStandards?.(sel)}
+            onClose={() => setUpdateStandardsOpen(false)}
+          />
+        )}
 
         {/* Greifer unten rechts (Größe ändern) — im eigenen OS-Fenster übernimmt
             das Betriebssystem das Grössenändern, daher windowed ohne Greifer. */}

@@ -34,6 +34,7 @@
 //! Rechteck (4 Ecken, siehe `section.rs`) — Fan-Triangulierung genuegt.
 
 use crate::section::{cut_section, CutPolygon, SectionPlane};
+use dossier_hatch::hatch::{build_hatch_runs, v2, Hatch as GenHatch, HatchKind, Pattern};
 use crate::section_boolean::subtract_dominant_bands;
 use crate::types::{RoofLayerInput, SlabInput, WallInput};
 
@@ -77,6 +78,12 @@ const CUT_LINE_MM_TO_WORLD: f32 = 0.01;
 /// `GRID_WGSL` (`depth > 0` = hinter der Ebene) weggeschnitten werden und (b)
 /// sichtbar VOR den Cut-Caps liegen (die exakt auf der Ebene sitzen).
 const CUT_LINE_LIFT: f32 = 0.002;
+
+/// Ab dieser Muster-Id zeichnet NICHT der Cap-Shader, sondern der Kern-Generator (`dossier_hatch`, derselbe
+/// wie in Plan/Schnitt — Dämmschlange, Zickzack, Welle, Holzkreuz, Naturstein, Erdreich, Kies, Punktfeld):
+/// die Ids sind die Muster-Codes des Generators (`Pattern::from_code`). Der Shader füllt solche Flächen leer
+/// (Papier); die Linien kommen als Ribbons (`build_cut_cap_lines`).
+pub const GENERATED_PATTERN_MIN: u32 = 4;
 
 /// Fallback-Muster-Id, wenn ein Cut-Polygon keine `hatch` traegt: 2 = diagonal
 /// (45°) — reproduziert mit `angle_rad = 0`, `scale = 1` exakt das fruehere fest
@@ -138,7 +145,8 @@ pub fn build_cut_caps(
         // cos/sin rechnen kann.
         let (pattern, angle_rad, scale, line_weight) = match poly.hatch {
             Some(h) => (
-                h.pattern as f32,
+                // Generator-Muster: Shader zeichnet nichts (Id 0), die Linien kommen als Ribbons.
+                if h.pattern >= GENERATED_PATTERN_MIN { 0.0 } else { h.pattern as f32 },
                 h.angle.to_radians(),
                 h.scale.max(0.05),
                 h.line_weight.max(0.0),
@@ -229,8 +237,51 @@ pub fn build_cut_cap_lines(
             let b = to_world(poly.pts[(k + 1) % n]);
             push_line_ribbon(&mut verts, a, b, normal, half_w, color);
         }
+        push_generated_hatch(&mut verts, poly, &to_world, normal);
     }
     verts
+}
+
+/// Muster-Tinte der Generator-Schraffur (wie `ink` im Cap-Shader).
+const HATCH_INK: [f32; 3] = [0.06, 0.06, 0.06];
+
+/// Musterlinien eines Cut-Polygons mit Generator-Muster (`GENERATED_PATTERN_MIN`) als Ribbons: dieselben
+/// Linien wie im 2D-Schnitt (`dossier_hatch::hatch::build_hatch_runs`, Polygon (u,v) in Metern, Winkel und
+/// Skala der Bauteil-Schraffur). Breite wie die Shader-Linien (mm-Papier -> Welt über `CUT_LINE_MM_TO_WORLD`).
+fn push_generated_hatch(
+    out: &mut Vec<f32>,
+    poly: &CutPolygon,
+    to_world: &dyn Fn([f32; 2]) -> [f32; 3],
+    normal: [f32; 3],
+) {
+    let Some(h) = poly.hatch else { return };
+    if h.pattern < GENERATED_PATTERN_MIN || poly.pts.len() < 3 {
+        return;
+    }
+    let gen = GenHatch {
+        pattern: Pattern::from_code(h.pattern as f64),
+        kind: HatchKind::Vector,
+        random: false,
+        scale: h.scale.max(0.05) as f64,
+        angle: h.angle as f64,
+        line_weight: h.line_weight as f64,
+        origin: None,
+        seed: None,
+        density: None,
+        length_min: None,
+        length_max: None,
+        dash: Vec::new(),
+        motif: None,
+    };
+    let pts: Vec<_> = poly.pts.iter().map(|p| v2(p[0] as f64, p[1] as f64)).collect();
+    let half_w = (h.line_weight.max(0.0) * CUT_LINE_MM_TO_WORLD * 0.5).max(1e-4);
+    for run in build_hatch_runs(&pts, &gen) {
+        for w in run.windows(2) {
+            let a = to_world([w[0].x as f32, w[0].y as f32]);
+            let b = to_world([w[1].x as f32, w[1].y as f32]);
+            push_line_ribbon(out, a, b, normal, half_w, HATCH_INK);
+        }
+    }
 }
 
 /// Legt ein flaches Ribbon-Quad (2 Dreiecke) der halben Breite `half_w` um die
@@ -331,6 +382,43 @@ mod tests {
             assert_eq!(verts[base + 7], 2.0, "scale je Vertex");
             assert_eq!(verts[base + 8], 0.5, "line_weight (mm) je Vertex");
         }
+    }
+
+    /// Generator-Muster (Id >= 4, hier 4 Daemmschlange): der Shader bekommt Id 0 (Papier), die Linien kommen als
+    /// Ribbons aus dem Kern-Generator in den Cut-Linien — mehr Dreiecke als ohne Muster, alle in der Schnittebene.
+    #[test]
+    fn generator_muster_kommt_als_ribbons() {
+        let mk = |pattern: u32| WallInput {
+            top_drop: [0.0, 0.0],
+            start: [0.0, 0.0],
+            end: [3.0, 0.0],
+            thickness: 0.3,
+            height: 2.5,
+            base_elevation: 0.0,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![],
+            layers: None,
+            holes: vec![],
+            material_index: None,
+            hatch: Some(Hatch { pattern, angle: -90.0, scale: 1.0, line_weight: 0.13, top_angle: None }),
+            cut: None,
+            start_cut: None,
+            end_cut: None,
+        };
+        let plane = SectionPlane::looking_plus_x(1.5);
+        let caps = build_cut_caps(&plane, &[mk(4)], &[], &[]);
+        assert!(!caps.is_empty());
+        for i in 0..caps.len() / CAP_FLOATS_PER_VERTEX {
+            assert_eq!(caps[i * CAP_FLOATS_PER_VERTEX + 5], 0.0, "Shader zeichnet kein Muster");
+        }
+        let plain = build_cut_cap_lines(&plane, &[mk(0)], &[], &[]);
+        for pat in [4u32, 6, 7, 8, 9, 10, 11, 12] {
+            let lines = build_cut_cap_lines(&plane, &[mk(pat)], &[], &[]);
+            assert!(lines.len() > plain.len() + 6 * CUT_LINE_FLOATS_PER_VERTEX * 10, "Muster {pat}: Musterlinien fehlen");
+            assert_eq!(lines.len() % CUT_LINE_FLOATS_PER_VERTEX, 0);
+        }
+        // Diagonale/Kreuz bleiben im Shader (keine Ribbons)
+        assert_eq!(build_cut_cap_lines(&plane, &[mk(2)], &[], &[]).len(), plain.len());
     }
 
     /// Ohne `hatch` faellt jedes Cap-Polygon auf das Diagonalmuster (Id 2,

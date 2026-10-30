@@ -250,6 +250,9 @@ pub enum HatchPattern {
     /// Naturstein ([109]): Diagonale in Doppellinien.
     #[serde(rename = "stone")]
     Stone,
+    /// Punktfeld ([109], Putz): feine Punkte im versetzten Raster.
+    #[serde(rename = "dots")]
+    Dots,
     #[serde(other)]
     #[ts(skip)]
     Unknown,

@@ -245,19 +245,24 @@ fn fill_parallel(poly: &[V2], angle: f64, spacing: f64, out: &mut Vec<(V2, V2)>)
     }
 }
 
+/// Muster, die der Kern-Generator als Linien/Polylinien erzeugt (Schichtmuster, Streu-/Punktmuster, Doppellinien).
+fn is_generated(p: Pattern) -> bool {
+    matches!(
+        p,
+        Pattern::Insulation | Pattern::InsulationHard | Pattern::InsulationWave | Pattern::Timber | Pattern::Earth | Pattern::Gravel | Pattern::Stone | Pattern::Dots
+    )
+}
+
 /// Schraffurlinien in Papier-mm (`hatchLines`).
 fn hatch_lines(poly_mm: &[V2], h: &Hatch, mm_per_m: f64) -> Vec<(V2, V2)> {
     let unit_mm = (1.0 / 90.0) * mm_per_m;
-    let tile_mm = (if h.pattern == Pattern::Insulation { 10.0 } else { 8.0 }) * h.scale * unit_mm;
+    let tile_mm = 8.0 * h.scale * unit_mm;
     let spacing = jsnum::max(0.5, tile_mm);
     let angle = (h.angle * PI) / 180.0;
     let mut segs = Vec::new();
     fill_parallel(poly_mm, angle, spacing, &mut segs);
     if h.pattern == Pattern::Crosshatch {
         fill_parallel(poly_mm, angle + PI / 2.0, spacing, &mut segs);
-    }
-    if h.pattern == Pattern::Insulation {
-        fill_parallel(poly_mm, angle - PI / 4.0, spacing, &mut segs);
     }
     segs
 }
@@ -350,6 +355,16 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                         }
                         let (a, b) = (run[0], run[run.len() - 1]);
                         out.el(1, "line", &line_attrs(m.at(a.x, a.y), m.at(b.x, b.y), &hatch_color, pen, Some(&hdash)));
+                    }
+                } else if is_generated(h.pattern) {
+                    // Schicht-/Streumuster ([109]): dieselben Linien wie Szene und Chunk-Pfad (Kern-Generator).
+                    for run in hatch::build_hatch_runs(&pts, &h) {
+                        let p: Vec<V2> = run.iter().map(|q| m.at(q.x, q.y)).collect();
+                        match p.len() {
+                            0 | 1 => {}
+                            2 => out.el(1, "line", &line_attrs(p[0], p[1], &hatch_color, pen, Some(&hdash))),
+                            _ => out.el(1, "polyline", &polyline_attrs(&p, &hatch_color, pen, Some(&hdash))),
+                        }
                     }
                 } else {
                     // Strichmuster der Schraffur (null und [] gleich: keins).

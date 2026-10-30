@@ -1108,6 +1108,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dossier-hatch"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4013,6 +4020,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "console_error_panic_hook",
+ "dossier-hatch",
  "env_logger",
  "js-sys",
  "naga",

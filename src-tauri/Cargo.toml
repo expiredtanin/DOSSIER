@@ -7,7 +7,7 @@ members = ["."]
 # nutzen kann. kernel2d: analog — eigenstaendiger 2D-Geometrie-Kern, als
 # Pfad-Abhaengigkeit von dossier-core (src-tauri/core) eingebunden, ausserhalb
 # des cad-tauri-Workspace.
-exclude = ["render2d", "render3d", "kernel2d", "dwgimport", "trucksolid"]
+exclude = ["render2d", "render3d", "kernel2d", "dwgimport", "trucksolid", "hatchgen"]
 
 [package]
 name = "cad-tauri"
