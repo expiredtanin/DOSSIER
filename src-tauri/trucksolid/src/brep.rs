@@ -1127,6 +1127,32 @@ mod dbg_step {
         assert!((vol(&mir) - 6.0).abs() < 1e-6, "mir {}", vol(&mir));
     }
 
+    /// [T7] Rotationskörper um eine waagrechte Planachse (Befehl `revolve`, `cmd_solid.rs`): Zylinder r=1, l=2
+    /// auf dem Boden; Halbdrehung = halbes Volumen; STEP-Export klappt.
+    #[test]
+    fn revolve_um_waagrechte_achse_steht_auf_dem_boden() {
+        let spec = |angle: f64| SolidSpec::Transform {
+            m: [-1.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0],
+            solid: Box::new(SolidSpec::Revolve { profile: vec![0.0, 0.0, 0.0, 2.0, 1.0, 2.0, 1.0, 0.0], cx: 0.0, cy: 0.0, angle_deg: angle }),
+        };
+        let vol_zmin = |sp: &SolidSpec| {
+            let m = solid_mesh_core(sp, 0.005).unwrap();
+            let p: Vec<[f64; 3]> = m.positions.chunks(3).map(|c| [c[0] as f64, c[1] as f64, c[2] as f64]).collect();
+            let v: f64 = m.indices.chunks(3).map(|t| {
+                let (a, b, c) = (p[t[0] as usize], p[t[1] as usize], p[t[2] as usize]);
+                (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0
+            }).sum();
+            (v, p.iter().map(|q| q[2]).fold(f64::INFINITY, f64::min), p.iter().map(|q| q[2]).fold(f64::NEG_INFINITY, f64::max))
+        };
+        let (v, z0, z1) = vol_zmin(&spec(360.0));
+        assert!((v - 2.0 * std::f64::consts::PI).abs() < 0.02, "Volumen {v}");
+        assert!(z0.abs() < 1e-3 && (z1 - 2.0).abs() < 1e-3, "z {z0}..{z1}");
+        let (vh, h0, _) = vol_zmin(&spec(180.0));
+        assert!((vh - std::f64::consts::PI).abs() < 0.02, "halb {vh}");
+        assert!(h0 > 0.99, "Halbdrehung steigt nach oben: {h0}");
+        assert!(export_step_core(&[spec(360.0)], &StepHeader::default()).is_ok());
+    }
+
     #[test]
     fn bool_result_step_dump() {
         let dir = std::env::var("STEP_DUMP_DIR").unwrap_or_default();

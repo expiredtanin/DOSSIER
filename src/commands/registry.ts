@@ -53,6 +53,8 @@ import { copyCommand } from "./cmds/copy";
 import { arrayCommand } from "./cmds/array";
 import { offsetCommand } from "./cmds/offset";
 import { extrudeCommand } from "./cmds/extrude";
+import { revolveCommand } from "./cmds/revolve";
+import { loftCommand } from "./cmds/loft";
 import { trimCommand } from "./cmds/trim";
 import { breakCommand } from "./cmds/break";
 import { extendCommand } from "./cmds/extend";
@@ -120,6 +122,8 @@ export const COMMANDS: Record<string, Command> = {
   array: arrayCommand,
   offset: offsetCommand,
   extrude: extrudeCommand,
+  revolve: revolveCommand,
+  loft: loftCommand,
   trim: trimCommand,
   break: breakCommand,
   extend: extendCommand,
@@ -244,6 +248,9 @@ export const ALIASES: Record<string, string> = {
   feld: "array",
   o: "offset",
   ex: "extrude",
+  rev: "revolve",
+  rotation: "revolve",
+  lf: "loft",
   tr: "trim",
   br: "break",
   unterbrechen: "break",

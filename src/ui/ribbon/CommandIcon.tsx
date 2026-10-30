@@ -225,6 +225,24 @@ export function CommandIcon({ name }: { name: string }) {
           <path d="M9.5 12.5 L12.5 9.5 L12.5 4.5" />
         </svg>
       );
+    case "revolve":
+      // Rotationskörper: Profil neben einer Achse, Drehbogen.
+      return (
+        <svg {...common}>
+          <path d="M8 2.5 V13.5" strokeDasharray="1.4 1.2" />
+          <path d="M9.5 4.5 H13 V11.5 H9.5 Z" />
+          <path d="M6.5 4.5 H3 V11.5 H6.5" />
+        </svg>
+      );
+    case "loft":
+      // Loft: grosses Profil unten, kleines oben, verbunden.
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="9.5" width="11" height="3" />
+          <rect x="5.5" y="3.5" width="5" height="2" />
+          <path d="M2.5 9.5 L5.5 5.5 M13.5 9.5 L10.5 5.5" />
+        </svg>
+      );
     case "voidbox":
       // Durchbruch: Wand mit gestricheltem, durchkreuztem Ausschnitt.
       return (
