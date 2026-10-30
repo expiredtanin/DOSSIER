@@ -57,7 +57,7 @@ import {
   PEN_FALLBACK_COLOR,
   PEN_FALLBACK_WEIGHT,
 } from "../model/penSets";
-import { standardsMergeOps } from "../model/standards";
+import { standardsMergeCounts, standardsMergeOps } from "../model/standards";
 import { reorderByIds } from "../model/reorder";
 import { transformMutation } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
@@ -1025,7 +1025,16 @@ export function createProjectSlice(
       }),
 
     seedStandardPenSet: () => applyChange((p) => seedStandardPenSetOps(p)),
-    loadStandards: () => applyChange((p) => standardsMergeOps(p)),
+    loadStandards: () => {
+      // Rückmeldung, was hinzukam ([101]); ein Undo-Schritt.
+      const ops = standardsMergeOps(get().project);
+      const c = standardsMergeCounts(ops);
+      const parts = (["components", "wallTypes", "ceilingTypes", "roofTypes", "hatches", "lineStyles"] as const)
+        .filter((k) => c[k] > 0)
+        .map((k) => t(`resources.loadStandards.n.${k}`, { n: c[k] }));
+      if (ops.length) applyChange(ops);
+      get().notify(parts.length ? t("resources.loadStandards.added", { list: parts.join(", ") }) : t("resources.loadStandards.none"), "info");
+    },
 
     addCustomPalette: () =>
       applyChange(

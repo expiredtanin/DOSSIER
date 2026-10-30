@@ -104,6 +104,12 @@ impl RenderStyle {
         )
     }
 
+    /// Ansichtsschraffur auf den Flaechen ([100])? In den Stilen mit Flaechen UND Kanten (Verdeckt,
+    /// Schattiert mit Kanten); im Drahtmodell ohne Flaechen wuerde sie nur verwirren.
+    fn draws_pattern_lines(self) -> bool {
+        matches!(self, RenderStyle::Hidden | RenderStyle::ShadedEdges)
+    }
+
     /// Braucht dieser Stil die leicht nach hinten gebiaste Flaechen-Pipeline,
     /// damit die (tiefengetesteten) Kanten sauber obenauf liegen, statt mit den
     /// Flaechen zu flackern (Z-Fighting)? Gilt fuer alle Stile, die BEIDES
@@ -365,6 +371,11 @@ pub struct Renderer {
     /// 2 Vertices je Segment. Ueber `set_drawing_lines` gesetzt/geloescht;
     /// tiefengetestet wie das Gitter gezeichnet (Bauteile verdecken korrekt).
     drawing_lines: Option<LineBuffers>,
+    /// Ansichtsschraffur auf den Flächen ([100], `pattern_lines`): Rohdaten aus dem Kern und die für die
+    /// aktuelle Kamera ausgewählten Linien (neu bei merklicher Kamera-/Grössenänderung).
+    pattern_data: Vec<f32>,
+    pattern_lines: Option<LineBuffers>,
+    pattern_key: Option<[i64; 8]>,
     /// Schnittflaechen-Kappen (Cut-Caps) des Live-Schnitts. None = kein Schnitt
     /// aktiv / keine Schnittgeometrie. Ueber `set_cut_caps` gesetzt/geloescht,
     /// gezeichnet NACH den Flaechen, VOR Kanten/Grid/Highlight.
@@ -1012,6 +1023,9 @@ impl Renderer {
             grid: None,
             highlight: None,
             drawing_lines: None,
+            pattern_data: Vec::new(),
+            pattern_lines: None,
+            pattern_key: None,
             caps: None,
             wall_end_caps: None,
             cut_lines: None,
@@ -1291,6 +1305,14 @@ impl Renderer {
             vbo,
             vertex_count: (verts.len() / GRID_FLOATS_PER_VERTEX) as u32,
         });
+    }
+
+    /// Setzt die Ansichtsschraffur-Linien (`pattern_lines::PATTERN_STRIDE` Floats je Linie); leer löscht.
+    /// Die Auswahl nach Abstand passiert im nächsten `render`.
+    pub fn set_pattern_lines(&mut self, data: &[f32]) {
+        self.pattern_data = data.to_vec();
+        self.pattern_lines = None;
+        self.pattern_key = None;
     }
 
     /// Setzt/loescht die 2D-Zeichnungs-Unterlage (Boden-Spuren der
@@ -1715,6 +1737,33 @@ impl Renderer {
         self.ensure_depth(device, w, h);
         self.ensure_msaa(device, w, h);
 
+        // Ansichtsschraffur: Linien je Kamera nach Abstand auswählen (Signatur-Cache wie die Silhouette).
+        if self.style.draws_pattern_lines() && !self.pattern_data.is_empty() {
+            let q = |v: f32, s: f32| (v * s).round() as i64;
+            let key = [
+                q(camera.eye[0], 20.0),
+                q(camera.eye[1], 20.0),
+                q(camera.eye[2], 20.0),
+                q(camera.target[0], 20.0),
+                q(camera.target[1], 20.0),
+                q(camera.target[2], 20.0),
+                q(camera.ortho_half_height, 20.0),
+                h as i64,
+            ];
+            if self.pattern_key != Some(key) {
+                let verts = crate::pattern_lines::select_pattern_lines(&self.pattern_data, camera, h as f32);
+                self.pattern_lines = (!verts.is_empty()).then(|| LineBuffers {
+                    vbo: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("pattern_lines.vbo"),
+                        contents: bytemuck::cast_slice(&verts),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+                    vertex_count: (verts.len() / GRID_FLOATS_PER_VERTEX) as u32,
+                });
+                self.pattern_key = Some(key);
+            }
+        }
+
         // Silhouette (Stil `Contour`) je Blickwinkel neu ableiten — aber nur, wenn
         // sich die Kamera merklich bewegt hat (Signatur-Cache), nicht blind je Frame.
         if self.style == RenderStyle::Contour && !self.edge_adj.is_empty() {
@@ -1914,6 +1963,17 @@ impl Renderer {
                 }
             }
 
+            // 2a) Ansichtsschraffur auf den Flächen ([100]) in den Kanten-Stilen (Verdeckt, Schattiert mit
+            //     Kanten): tiefengetestet gegen die gebiasten Flächen, knapp vor der Fläche angehoben.
+            if self.style.draws_pattern_lines() {
+                if let Some(pl) = &self.pattern_lines {
+                    pass.set_pipeline(&self.grid_pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_vertex_buffer(0, pl.vbo.slice(..));
+                    pass.draw(0..pl.vertex_count, 0..1);
+                }
+            }
+
             // 2b) „Nur Konturen" (Stil Contour): die blickabhaengige Silhouette
             //     obenauf (tiefengetestet gegen die gebiasten Flaechen -> nur
             //     sichtbare Umrisslinien). Gleiche LineList-Pipeline wie die
@@ -1999,6 +2059,8 @@ mod render_style_tests {
     fn shaded_edges_draws_both_faces_and_edges() {
         assert!(RenderStyle::ShadedEdges.draws_faces());
         assert!(RenderStyle::ShadedEdges.draws_edges());
+        assert!(RenderStyle::ShadedEdges.draws_pattern_lines() && RenderStyle::Hidden.draws_pattern_lines());
+        assert!(!RenderStyle::Wireframe.draws_pattern_lines() && !RenderStyle::Shaded.draws_pattern_lines());
     }
 
     #[test]

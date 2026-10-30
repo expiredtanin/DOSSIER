@@ -480,7 +480,7 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                             let hatch_col = with_opacity(color(part, hc as f64).unwrap_or(INK), None, greyed);
                             let hatch_mm = if h.line_weight > 0.0 { h.line_weight } else { 0.13 };
                             let runs = if pts.len() < 3 { Vec::new() } else { hatch::build_hatch_runs(&pts, &h) };
-                            let runs = hatch::apply_dash_runs(runs, &h.dash);
+                            let runs = hatch::apply_dash_runs(runs, &hatch::hatch_dash(&h));
                             let hz = b.z();
                             for run in runs {
                                 if run.len() >= 2 {

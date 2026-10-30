@@ -813,7 +813,7 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
                     if hatch_draws_lines(&h.hatch) {
                         let hatch_color = dim(color_or_ink(plan, h.color), style);
                         let hatch_mm = if h.hatch.line_weight > 0.0 { h.hatch.line_weight } else { 0.13 };
-                        let runs: Vec<Run> = hatch::apply_dash_runs(hatch::build_hatch_runs(pts, &h.hatch), &h.hatch.dash);
+                        let runs: Vec<Run> = hatch::apply_dash_runs(hatch::build_hatch_runs(pts, &h.hatch), &hatch::hatch_dash(&h.hatch));
                         for run in &runs {
                             c.stroke_polyline(run, false, hatch_color, hatch_mm, false);
                         }

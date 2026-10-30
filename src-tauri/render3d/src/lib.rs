@@ -18,6 +18,7 @@ pub mod edges;
 pub mod grid;
 pub mod math;
 pub mod mesh;
+pub mod pattern_lines;
 pub mod points;
 pub(crate) mod openings;
 pub mod roof_cut;

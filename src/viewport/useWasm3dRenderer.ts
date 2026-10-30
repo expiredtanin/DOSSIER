@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextImage, Project } from "../model/types";
-import { emitDrawingLineVerts, projectToModel3d } from "../core";
+import { emitDrawingLineVerts, emitSurfacePatternLines, projectToModel3d } from "../core";
 import type { DetailLevel } from "../model/viewTypes";
 import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
@@ -94,6 +94,8 @@ interface WebModelRendererLike {
    * `toWalls3d/drawing2d.ts::emitDrawingLineVerts`. Optional — ältere
    * WASM-Builds ohne diesen Export lassen den Aufrufer still zurückfallen. */
   set_drawing_lines?(vertices: Float32Array): void;
+  /** Ansichtsschraffur auf den Flächen (`web::set_pattern_lines`), in den Kanten-Stilen gezeichnet. */
+  set_pattern_lines?(data: Float32Array): void;
   /** Material-Farbkarten (Stil „textured") als Textur-Array hochladen
    * (`web::set_material_textures`). `rgba` = gepackte RGBA8-Bytes von
    * `layerCount` 256×256-Ebenen; Ebene 0 bleibt intern das Fallback-Schachbrett,
@@ -247,6 +249,13 @@ export function useWasm3dRenderer(
         r.set_drawing_lines(emitDrawingLineVerts(project));
       } catch (e) {
         console.warn("render3d set_drawing_lines fehlgeschlagen:", e);
+      }
+    }
+    if (typeof r.set_pattern_lines === "function") {
+      try {
+        r.set_pattern_lines(emitSurfacePatternLines(project));
+      } catch (e) {
+        console.warn("render3d set_pattern_lines fehlgeschlagen:", e);
       }
     }
     // Material-Farbkarten (Stil „textured") ASYNCHRON dekodieren + hochladen.

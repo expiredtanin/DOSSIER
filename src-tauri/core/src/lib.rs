@@ -110,6 +110,7 @@ pub mod solid_specs;
 pub mod highlight3d;
 pub mod opening_presets;
 pub mod surface_pattern;
+pub mod surface_pattern3d;
 pub mod standards;
 
 #[cfg(feature = "web")]

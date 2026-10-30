@@ -17,3 +17,23 @@ export function standardsMergeOps(project: Project): CoreOp[] {
 export function withStandards(project: Project): Project {
   return applyOps(project, standardsMergeOps(project));
 }
+
+/** Was „Standards laden" anhängt: Anzahl neuer Einträge je Projekt-Liste (für die Rückmeldung). */
+export interface StandardsMergeCounts {
+  lineStyles: number;
+  hatches: number;
+  components: number;
+  wallTypes: number;
+  ceilingTypes: number;
+  roofTypes: number;
+}
+
+export function standardsMergeCounts(ops: readonly CoreOp[]): StandardsMergeCounts {
+  const out: StandardsMergeCounts = { lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0 };
+  for (const op of ops) {
+    const key = op.kind === "add" ? op.collection : op.kind === "setField" ? op.key : null;
+    const n = op.kind === "add" ? op.items.length : op.kind === "setField" && Array.isArray(op.value) ? op.value.length : 0;
+    if (key && key in out) out[key as keyof StandardsMergeCounts] += n;
+  }
+  return out;
+}

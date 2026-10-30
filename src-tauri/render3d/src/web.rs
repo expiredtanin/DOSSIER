@@ -531,6 +531,13 @@ impl WebModelRenderer {
         Ok(())
     }
 
+    /// Ansichtsschraffur auf den Flaechen ([100]): je Linie `ax ay az bx by bz r g b maske`
+    /// (`pattern_lines::PATTERN_STRIDE`), Auswahl nach Abstand je Kamera; leer loescht.
+    pub fn set_pattern_lines(&mut self, data: &[f32]) -> Result<(), JsValue> {
+        self.renderer.set_pattern_lines(data);
+        Ok(())
+    }
+
     /// Setzt die 2D-Zeichnungs-Unterlage (Boden-Spuren der `Drawing2D`-Elemente)
     /// als LineList. `vertices` = interleaved `[px,py,pz, r,g,b, ...]`
     /// (world-Meter, je 2 Vertices = 1 Segment), dasselbe Format wie

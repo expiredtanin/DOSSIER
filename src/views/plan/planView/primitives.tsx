@@ -11,6 +11,7 @@ import { quantizePen } from "../../../export/sceneToPrintSvg";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../../../core";
 import { dashHasDot } from "../../../core";
 import { HAIRLINE_PX, PX_PER_M, mmToPx, printStrokeVb, visibleEdgeRuns } from "../../../core";
+import { dashArrayCss, fitDashToPeriod, hatchDashVb, lineDashVb } from "../../../core";
 
 /** Basis-Kachelmaß (viewBox-Einheiten) einer Bild-Schraffur bei scaleX/scaleY = 1. */
 const IMG_TILE_VB = 40;
@@ -68,11 +69,10 @@ export function HatchPattern({
       ? printStrokeVb(quantizePen(hatch.lineWeight), paperScale!)
       : mmToPx(hatch.lineWeight);
   const vfx = print ? undefined : ("non-scaling-stroke" as const);
-  const dashes = hatch.dash?.length
-    ? hatch.dash
-        .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
-        .join(" ")
-    : undefined;
+  // Strichmuster im Musterraum (wie Kern `hatch::hatch_dash`): fest im Modell, je Kachel ganze Perioden.
+  const dashVb = hatch.dash?.length ? hatchDashVb(hatch.dash, hatch.scale, hatch.lines === "random") : [];
+  const dashStyle = (period: number) =>
+    dashVb.length ? { strokeDasharray: dashArrayCss(fitDashToPeriod(dashVb, period), !print) } : undefined;
   // Punktmuster in den Musterlinien: runde Kappe → Dots (Punkt/Strich-Punkt).
   const dashCap = dashHasDot(hatch.dash) ? ("round" as const) : undefined;
 
@@ -145,7 +145,7 @@ export function HatchPattern({
           fill="none"
           stroke={hatch.color}
           strokeWidth={sw}
-          strokeDasharray={dashes}
+          style={dashStyle(w)}
           strokeLinecap={dashCap}
           vectorEffect={vfx}
         />
@@ -182,7 +182,7 @@ export function HatchPattern({
           fill="none"
           stroke={hatch.color}
           strokeWidth={sw}
-          strokeDasharray={dashes}
+          style={dashStyle(period)}
           strokeLinecap={dashCap}
           vectorEffect={vfx}
         />
@@ -210,7 +210,7 @@ export function HatchPattern({
         y2={tile}
         stroke={hatch.color}
         strokeWidth={sw}
-        strokeDasharray={dashes}
+        style={dashStyle(tile)}
         strokeLinecap={dashCap}
         vectorEffect={vfx}
       />
@@ -222,7 +222,7 @@ export function HatchPattern({
           y2={0}
           stroke={hatch.color}
           strokeWidth={sw}
-          strokeDasharray={dashes}
+          style={dashStyle(tile)}
           strokeLinecap={dashCap}
           vectorEffect={vfx}
         />
@@ -403,12 +403,8 @@ export function DrawingRunShape({
       ? printStrokeVb(quantizePen(run.weightMm), paperScale!)
       : mmToPx(run.weightMm);
   const vfx = print ? undefined : ("non-scaling-stroke" as const);
-  const dashStr =
-    run.dash && run.dash.length
-      ? run.dash
-          .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
-          .join(" ")
-      : undefined;
+  // Linientyp in Papier-mm im Plot-Massstab: fest im Modell-Raum (Bildschirm = Druckansicht).
+  const dashStr = run.dash && run.dash.length ? dashArrayCss(lineDashVb(run.dash, paperScale ?? 100), !print) : undefined;
   // Zickzack-/Custom-Motiv-Lauf: im MODELL-Raum tessellieren (Papier-mm →
   // Modell-Meter via DASH_MM_TO_M), dann toScreen. Sonst die Roh-Stützpunkte.
   const modelPts = run.zigzag
@@ -433,7 +429,7 @@ export function DrawingRunShape({
       fill="none"
       stroke={stroke}
       strokeWidth={sw}
-      strokeDasharray={dashStr}
+      style={dashStr ? { strokeDasharray: dashStr } : undefined}
       strokeLinecap={cap}
       vectorEffect={vfx}
     />
@@ -444,7 +440,7 @@ export function DrawingRunShape({
       fill="none"
       stroke={stroke}
       strokeWidth={sw}
-      strokeDasharray={dashStr}
+      style={dashStr ? { strokeDasharray: dashStr } : undefined}
       strokeLinecap={cap}
       vectorEffect={vfx}
     />
@@ -508,11 +504,12 @@ export function renderPrimitive(
   const vfx = print ? undefined : ("non-scaling-stroke" as const);
   // Strichmuster: im Print-Modus ebenfalls in viewBox-Einheiten (skaliert mit),
   // sonst wie bisher in Bildschirm-px (non-scaling).
-  const dashOf = (dash: number[] | null | undefined): string | undefined => {
+  // Linientypen in Papier-mm im Plot-Massstab: fest im Modell-Raum, auch unter non-scaling-stroke
+  // (über die meet-Variable am SVG) — der Rhythmus gleicht bei jedem Zoom der Druckansicht.
+  const dashOf = (dash: number[] | null | undefined): { strokeDasharray: string } | undefined => {
     if (!dash || !dash.length) return undefined;
-    return dash
-      .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
-      .join(" ");
+    const css = dashArrayCss(lineDashVb(dash, paperScale ?? 100), !print);
+    return css ? { strokeDasharray: css } : undefined;
   };
   switch (p.kind) {
     case "polygon": {
@@ -670,7 +667,7 @@ export function renderPrimitive(
           className={p.cls}
           stroke={p.color}
           strokeWidth={weight(p.weightMm)}
-          strokeDasharray={dashOf(p.dash)}
+          style={dashOf(p.dash)}
           strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
           vectorEffect={vfx}
         />
@@ -693,7 +690,7 @@ export function renderPrimitive(
           d={d}
           className={p.cls}
           strokeWidth={weight(p.weightMm)}
-          strokeDasharray={dashOf(p.dash)}
+          style={dashOf(p.dash)}
           strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
           vectorEffect={vfx}
         />
@@ -892,7 +889,7 @@ export function renderPrimitive(
           fill={p.fill}
           stroke={p.stroke}
           strokeWidth={weight(p.weightMm)}
-          strokeDasharray={dashOf(p.dash)}
+          style={dashOf(p.dash)}
           vectorEffect={vfx}
         />
       );
@@ -920,7 +917,7 @@ export function renderPrimitive(
           fill="none"
           stroke={p.stroke}
           strokeWidth={weight(p.weightMm)}
-          strokeDasharray={dashOf(p.dash)}
+          style={dashOf(p.dash)}
           strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
           vectorEffect={vfx}
         />

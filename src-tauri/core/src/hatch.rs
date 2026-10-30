@@ -301,6 +301,15 @@ fn to_model_angle_rad(screen_deg: f64) -> f64 {
 
 // ── Strichmuster ────────────────────────────────────────────────────────────
 
+/// Strichmuster der Musterlinien einer Schraffur (mm im Musterraum, für [`apply_dash_runs`]): skaliert
+/// mit der Musterskala wie der Linienabstand (Kachel `8 · scale`), damit Strich/Lücke zum Abstand passen
+/// — sonst ist der Strich bei feinen Mustern (Estrich 0.35) länger als die Linie in einer dünnen Schicht
+/// und die Schraffur wirkt durchgezogen. Gilt in Szene, Chunk-Pfad, Druck-SVG und DXF gleich.
+pub fn hatch_dash(h: &Hatch) -> Vec<f64> {
+    let k = if !h.random && h.scale.is_finite() && h.scale > 0.0 { h.scale } else { 1.0 };
+    h.dash.iter().map(|d| d * k).collect()
+}
+
 /// Zerlegt Läufe entlang eines Strichmusters (`dash` in mm-Papier, [an, aus, …]; ungerade
 /// Länge wird verdoppelt). Die Phase läuft über Stützpunkte hinweg durch.
 pub fn apply_dash_runs(runs: Vec<Run>, dash: &[f64]) -> Vec<Run> {
@@ -761,6 +770,23 @@ mod tests {
         assert!((out[0][1].x - 0.5).abs() < 1e-9);
         assert_eq!(apply_dash_runs(vec![run.clone()], &[]).len(), 1);
         assert_eq!(apply_dash_runs(vec![run], &[0.0, -1.0]).len(), 1);
+    }
+
+    #[test]
+    fn schraffur_strich_folgt_musterskala() {
+        // SIA Estrich: Musterskala 0.35, Strich [1, 0.7] mm → Strich/Lücke im Verhältnis zum Abstand.
+        let mut h = hatch(Pattern::Diagonal);
+        h.scale = 0.35;
+        h.dash = vec![1.0, 0.7];
+        let d = hatch_dash(&h);
+        assert!((d[0] - 0.35).abs() < 1e-12 && (d[1] - 0.245).abs() < 1e-12);
+        // 8 cm Estrich-Schicht: jede Musterlinie (≈ 11 cm) zerfällt in mehrere Striche.
+        let band = vec![v2(0.0, 0.0), v2(2.0, 0.0), v2(2.0, 0.08), v2(0.0, 0.08)];
+        let solid = build_hatch_runs(&band, &h);
+        let dashed = apply_dash_runs(solid.clone(), &d);
+        assert!(dashed.len() >= solid.len() * 2, "{} vs {}", dashed.len(), solid.len());
+        h.random = true;
+        assert_eq!(hatch_dash(&h), vec![1.0, 0.7]);
     }
 
     #[test]
