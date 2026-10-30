@@ -76,6 +76,8 @@ pub struct DormerGeom {
     pub main_thickness: f64,
     /// Ende der Gaubendach-Flächen hinten (lokal v).
     pub v_end: f64,
+    /// Über den First hinaus und darum gekappt ([G5]).
+    pub clamped: bool,
 }
 
 /// Fläche des Gaubendachs: Grundriss-Polygon (lokal, Gegenuhrzeigersinn) und Ebene `z = a + bu·u + bv·v`
@@ -157,8 +159,62 @@ pub fn roof_layers(p: &Project, roof: &Roof, d: &Dormer) -> Vec<Layer> {
 }
 
 /// Gaubengeometrie; `None` bei unsinnigen Parametern (zu schmal, zu niedrig, Gaubendach steiler als das
-/// Hauptdach bei der Schleppgaube, Punkt nicht in einer geneigten Fläche).
+/// Hauptdach bei der Schleppgaube, Punkt nicht in einer geneigten Fläche). Reicht die Gaube über den
+/// First/Grat ihrer Dachfläche hinaus (zu hoch), wird sie abgefangen: Stirnhöhe (bzw. Tiefe der
+/// Schleppgaube) so gekappt, dass die Gaubendach-Oberkante spätestens am First auf die Hauptdach-Oberkante
+/// trifft (`clamped`); das Gaubendach endet am Rand der Dachfläche.
 pub fn geometry(p: &Project, roof: &Roof, d: &Dormer) -> Option<DormerGeom> {
+    let g = geometry_raw(p, roof, d)?;
+    let pts = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof)).planes.into_iter().nth(g.frame.plane)?;
+    let f = g.frame.clone();
+    let inside = |v: f64| point_in_xy(f.plan(0.0, v)[0], f.plan(0.0, v)[1], &pts);
+    // Tiefe bis zum Rand der Dachfläche (First/Grat) längs der Gaubenmitte.
+    let (mut lo, mut hi) = (0.0, 60.0);
+    if inside(hi) {
+        return Some(g);
+    }
+    let mut g = g;
+    for _ in 0..60 {
+        let m = (lo + hi) / 2.0;
+        if inside(m) {
+            lo = m;
+        } else {
+            hi = m;
+        }
+    }
+    let v_edge = lo;
+    // Wo die Gaubendach-OBERKANTE die Hauptdach-Oberkante trifft (hinter dem Lochrand).
+    let (tm, t, hw, rv) = (f.tan_main, g.tan_p, g.width / 2.0, g.roof_vertical());
+    let meet = match g.kind {
+        DormerKind::Schlepp => (g.front_height + rv) / (tm - t),
+        DormerKind::Flach => (g.front_height + rv) / tm,
+        _ => (g.front_height + hw * t + rv) / tm,
+    };
+    let v_r = v_edge - 1e-3;
+    // Gaubendach nicht über den Rand der Dachfläche hinaus verlängern (sonst ragt es jenseits des Firsts);
+    // 1 cm davor endet es unter der Hauptdach-Oberkante (nicht bündig mit dem First: keine Splitter).
+    let cap = |g: &mut DormerGeom, meet: f64| g.v_end = g.v_end.min((v_edge - 0.01).max(meet.min(v_edge)));
+    if meet <= v_r + 1e-9 {
+        cap(&mut g, meet);
+        return Some(g);
+    }
+    let mut d2 = d.clone();
+    match g.kind {
+        DormerKind::Schlepp if d.depth.is_some_and(|x| x.is_finite() && x > 0.1) => d2.depth = Some(d2.depth.unwrap_or(0.0) - (meet - v_r)),
+        DormerKind::Schlepp => d2.front_height = v_r * (tm - t) - rv,
+        DormerKind::Flach => d2.front_height = v_r * tm - rv,
+        _ => d2.front_height = v_r * tm - hw * t - rv,
+    }
+    if !(d2.front_height >= 0.3) || d2.depth.is_some_and(|x| !(x > 0.1)) {
+        return None;
+    }
+    let mut g2 = geometry_raw(p, roof, &d2)?;
+    cap(&mut g2, v_r);
+    g2.clamped = true;
+    Some(g2)
+}
+
+fn geometry_raw(p: &Project, roof: &Roof, d: &Dormer) -> Option<DormerGeom> {
     let frame = frame(p, roof, d)?;
     if !(finite_pos(d.width) && d.width >= 0.4 && d.width <= 30.0 && finite_pos(d.front_height) && d.front_height <= 10.0) {
         return None;
@@ -186,7 +242,7 @@ pub fn geometry(p: &Project, roof: &Roof, d: &Dormer) -> Option<DormerGeom> {
         return None;
     }
     let z_e = frame.z_m0 + d.front_height;
-    let mut g = DormerGeom { frame, kind: d.kind, width: d.width, front_height: d.front_height, overhang, tan_p, z_e, roof_layers, wall_layers, roof_thickness, wall_thickness, main_thickness, v_end: 0.0 };
+    let mut g = DormerGeom { frame, kind: d.kind, width: d.width, front_height: d.front_height, overhang, tan_p, z_e, roof_layers, wall_layers, roof_thickness, wall_thickness, main_thickness, v_end: 0.0, clamped: false };
     // Hinten weit genug, dass die ganze Gaubendach-Unterkante unter der Hauptdach-Unterkante endet.
     let main_v = main_thickness * (1.0 + tm * tm).sqrt();
     let top_extra = roof_thickness * (1.0 + tan_p * tan_p).sqrt();
@@ -212,6 +268,49 @@ impl DormerGeom {
             DormerKind::Sattel | DormerKind::Unknown => self.z_e + (hw - u.abs()) * self.tan_p,
             DormerKind::Walm => self.z_e + (hw - u.abs()).min(v) * self.tan_p,
         }
+    }
+
+    /// Unterkante des Gaubeninneren als Facetten für Wände darunter ([G2]): Bereich zwischen Stirn und
+    /// Wangen bis zum Lochrand, je Gaubendach-Fläche eine Ebene (Welt).
+    pub fn under_facets(&self) -> Vec<crate::wall_bands::RoofFacet> {
+        let (hw, tw, t, ze) = (self.width / 2.0, self.wall_thickness, self.tan_p, self.z_e);
+        let hi = hw - tw;
+        if !(hi > 1e-3) {
+            return Vec::new();
+        }
+        let ring: Vec<P> = match self.kind {
+            DormerKind::Flach | DormerKind::Schlepp => vec![[-hi, tw], [hi, tw], [hi, self.hole_v(hi)], [-hi, self.hole_v(-hi)]],
+            _ => vec![[-hi, tw], [hi, tw], [hi, self.hole_v(hi)], [0.0, self.hole_v(0.0)], [-hi, self.hole_v(-hi)]],
+        };
+        // (Ring lokal, z = a + bu·u + bv·v), Bereiche überdeckungsfrei.
+        let mut parts: Vec<(Vec<P>, f64, f64, f64)> = Vec::new();
+        match self.kind {
+            DormerKind::Flach => parts.push((ring, ze, 0.0, 0.0)),
+            DormerKind::Schlepp => parts.push((ring, ze, 0.0, t)),
+            DormerKind::Sattel | DormerKind::Unknown => {
+                parts.push((clip_half(&ring, [-1.0, 0.0, 0.0]), ze + hw * t, t, 0.0));
+                parts.push((clip_half(&ring, [1.0, 0.0, 0.0]), ze + hw * t, -t, 0.0));
+            }
+            DormerKind::Walm => {
+                // Stirn-Walm: v ≤ hw − |u|; Seiten: darüber, links/rechts.
+                let front = clip_half(&clip_half(&ring, [-1.0, -1.0, hw]), [1.0, -1.0, hw]);
+                parts.push((front, ze, 0.0, t));
+                parts.push((clip_half(&clip_half(&ring, [-1.0, 0.0, 0.0]), [-1.0, 1.0, -hw]), ze + hw * t, t, 0.0));
+                parts.push((clip_half(&clip_half(&ring, [1.0, 0.0, 0.0]), [1.0, 1.0, -hw]), ze + hw * t, -t, 0.0));
+            }
+        }
+        let f = &self.frame;
+        parts
+            .into_iter()
+            .filter(|(r, ..)| r.len() >= 3)
+            .filter_map(|(r, a, bu, bv)| {
+                // u = (q − p)·ew, v = −(q − p)·h.
+                let gx = bu * f.ew[0] - bv * f.h[0];
+                let gy = bu * f.ew[1] - bv * f.h[1];
+                let c = a - gx * f.p[0] - gy * f.p[1];
+                crate::wall_bands::RoofFacet::new(r.iter().map(|q| f.plan(q[0], q[1])).collect(), [c, gx, gy])
+            })
+            .collect()
     }
 
     /// Lotrechter Abstand Oberkante − Unterkante (Gaubendach).
@@ -319,6 +418,24 @@ impl DormerGeom {
     }
 }
 
+/// Konvexer Ring, beschnitten auf die Halbebene `a·u + b·v + c ≥ 0` (Sutherland-Hodgman).
+fn clip_half(ring: &[P], [a, b, c]: [f64; 3]) -> Vec<P> {
+    let f = |q: P| a * q[0] + b * q[1] + c;
+    let mut out = Vec::new();
+    for i in 0..ring.len() {
+        let (p, q) = (ring[i], ring[(i + 1) % ring.len()]);
+        let (fp, fq) = (f(p), f(q));
+        if fp >= 0.0 {
+            out.push(p);
+        }
+        if (fp >= 0.0) != (fq >= 0.0) {
+            let t = fp / (fp - fq);
+            out.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]);
+        }
+    }
+    out
+}
+
 /// Gaube `dormer_id` im Dach `roof_id` (Index des Dachs, Gaube).
 pub fn find<'a>(p: &'a Project, roof_id: &str, dormer_id: &str) -> Option<(usize, &'a Roof, &'a Dormer)> {
     let (ri, roof) = p.roofs.as_deref()?.iter().enumerate().find(|(_, r)| r.id == roof_id)?;
@@ -345,7 +462,7 @@ pub fn dormer_openings(p: &Project, roof_index: usize) -> Vec<(&Opening, &Dormer
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     pub(crate) fn gable_project() -> Project {
@@ -360,6 +477,25 @@ mod tests {
             }]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn zu_hohe_gaube_wird_vor_dem_first_gekappt() {
+        let mut p = gable_project();
+        let roof = &mut p.roofs.as_mut().unwrap()[0];
+        roof.dormers.as_mut().unwrap()[0].front_height = 6.0;
+        let roof = &p.roofs.as_ref().unwrap()[0];
+        let g = geometry(&p, roof, &roof.dormers.as_ref().unwrap()[0]).expect("gekappt statt verworfen");
+        assert!(g.clamped && g.front_height < 6.0);
+        // Gaubendach trifft die Hauptdach-Oberkante 1 mm vor dem First (y = 4; Stirn bei y = 1 ⇒ 3 m),
+        // nichts reicht über den First.
+        let reach = g.hole().iter().map(|q| q[1]).fold(0.0, f64::max);
+        let meet = (g.front_height + 1.2 * g.tan_p + g.roof_vertical()) / g.frame.tan_main;
+        assert!(reach < 2.999 && (meet - 2.999).abs() < 1e-6 && g.v_end <= 3.0 + 1e-9, "{reach} {meet} {}", g.v_end);
+        let q = gable_project();
+        let r0 = &q.roofs.as_ref().unwrap()[0];
+        let ok = geometry(&q, r0, &r0.dormers.as_ref().unwrap()[0]).unwrap();
+        assert!(!ok.clamped);
     }
 
     #[test]

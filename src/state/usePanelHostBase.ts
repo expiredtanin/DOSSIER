@@ -799,6 +799,11 @@ export function usePanelHostBase(opts: {
             sliceTermination: termination === "both" ? undefined : termination,
           });
       },
+      onSetWallRoofAttach: (attach) => {
+        if (selection?.kind === "wall")
+          // "auto" ist der Default ⇒ als undefined speichern.
+          updateWall(selection.id, { roofAttach: attach === "auto" ? undefined : attach === "on" });
+      },
       onSetWallType: (wallTypeId) => {
         if (selection?.kind === "wall")
           updateWall(selection.id, { wallTypeId });

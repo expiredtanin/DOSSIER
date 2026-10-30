@@ -1172,6 +1172,32 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Treppenuntersicht, Abzugskörper beliebiger Form im Schnitt. · L
 - ◐ **[G2] Wand an Dach.** 27.10.: schräge Oberkante (`topDrop`) in render3d statt 15-cm-Treppung. Offen:
   Schnitt, exakte Lösung über [B6]. · M–L
+  - (30.10.) **Exakt je Schicht, analytisch** (ohne Booleans, `wall_bands.rs`): Dach-Unterkante als Facetten
+    (`RoofFacet`: Dachfläche um die Schichtdicke senkrecht gesenkt, Gaubeninneres mit der Gaubendach-Unterkante,
+    `DormerGeom::under_facets`); über einem Punkt gilt die obere Hülle (Kehlen verschnittener Dächer, Gaube).
+    Jedes Band wird an den Bereichsgrenzen geteilt — längs mit der exakten Grenzlinie als Schnittlinie (First,
+    Grat, Kehle, Höhenlinie Dach = Krone/Fuss), seitlich über die Dicke, wo eine Grenze längs durchläuft
+    (Traufwand, deren Krone die Dachfläche schneidet) — und bekommt eine **ebene Oberkante** (`Piece.top_plane`,
+    `RWall.topPlane` = `[z am Anfang, dz/dx, dz/dy]`): jede Ecke exakt auf der Unterkante, auch quer über die
+    Dicke. Öffnungen unter dem Dach: Pfeiler/Brüstung/Sturz je mit eigener ebener Oberkante statt Treppung;
+    innere Teilungen als Stossfugen (`joint`, keine Stirn in Ansicht/Schnitt-Projektion). **Option je Wand**
+    `Wall.roofAttach` („An Dach anschliessen", Objekt-Info): fehlt = automatisch (nur kürzen, wo die Krone über
+    der Unterkante liegt), `true` = bis unter das Dach verlängern, `false` = Dächer schneiden nicht. Verbraucher:
+    render3d (Mesh, Deckel-Schraffur, Schnitt-Prisma mit schräger Deckelkante), Kern-Schnitt und -Ansicht
+    (Schnitt-Eingabe jetzt mit den Dächern des Geschosses), OBJ/STL/glTF und IFC (Prisma bis zur Dachunterkante,
+    `model3d::wall_piece_mesh`), Mengen (Brutto-/Nettovolumen exakt über die Grundfläche,
+    `wall_piece_volume`). Ansicht: Wandflächen unter Dächern gegen die Dachscheiben (Oberfläche, Trauf-/Ortgang-
+    Stirn, Gaubenstirn/-wangen) verdeckt bzw. auf die Verdeckungsgrenze gekappt, Giebeldreiecke entfallen, wenn
+    Wände ans Dach reichen (dafür Stirnflächen der Dachscheibe). Bogenwände ([T2]) laufen über die Sehnen-
+    Teilwände mit. Geprüft: Rust-Tests (Giebel beidseitig je Schicht exakt, Traufwand schräg + seitlich geteilt,
+    Fenster unter der Schräge Volumen exakt, An-Dach-Option, Kehle = obere Hülle, Schnitt-Pfad, Körper dicht und
+    Volumen = Analytik, Schnitt nie über der Unterkante, Ansicht Traufe/Giebel), render3d-Test (Mesh-Ecken auf der
+    Ebene, Schnitt schräg), CLI-Schnitte/-Ansichten eines Testhauses (Satteldach mit Trauf-/Giebelwänden,
+    Fenster unter der Schräge, T-Dach mit Kehlen, Gaube, Bogenwand, Innenwand „bis unters Dach") als PNG
+    angesehen (Linux). Offen: Ansicht bleibt Painter + Verdeckungstest gegen Dächer (keine HLR, [G4]); Grenzen,
+    die fast parallel zur Achse schräg durchs Band laufen, nur genähert (seitliche Teilung an der Mitte);
+    Fenster, das ins Dach ragt, verliert seinen Sturz; Dachgeometrie im 3D-Live-Schnitt unverändert; nicht in
+    der Tauri-App/Metal geprüft.
 - ◐ **[G3] Öffnungen beliebiger Form** (29.10.) `Opening.shape` (rundbogen, segmentbogen, spitzbogen, rund/oval,
   schraeg, giebel) + `shapeRise` (Stich). Kern `opening_shape.rs`: konvexer Umriss im Öffnungsrechteck; die Wand
   behält das Rechteck-Loch, der Rest zwischen Rechteck und Umriss kommt als Füllkörper (senkrechte Streifen =
@@ -1217,6 +1243,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     statt `RWall` gehen), 3D-Live-Schnitt-Deckel verschnittener Dächer (zeigen noch die unverschnittenen
     Schichten), IFC-Mengen der Gaube, Kehlen symmetrisch je Schicht (heute „überlappt" das frühere Dach),
     Gauben über First/Grat hinaus nicht abgefangen, nicht in der Tauri-App/Metal geprüft.
+  - (30.10.) Restpunkte: **Gauben über den First** werden abgefangen (`dormer::geometry`): Stirnhöhe (bzw. Tiefe
+    der Schleppgaube) so gekappt, dass die Gaubendach-Oberkante spätestens am First auf die Hauptdach-Oberkante
+    trifft (`DormerGeom.clamped`), das Gaubendach endet am Rand seiner Dachfläche (vorher ragte es jenseits des
+    Firsts als Splitter heraus). **IFC-Mengen der Gaube**: `Qto_DossierDormerQuantities` am IfcRoof (Breiten,
+    Stirnhöhe, geneigter Ausschnitt, Wand- und Dachvolumen aus den Körpern), NetArea des Dachs ohne den
+    Ausschnitt. **Haarfugen** der Dachfläche in der Ansicht: Kontur in Füllfarbe 0.15 mm statt 0.05 mm. Wand ↔
+    Dach: [G2]. Wand ↔ Decke: bestehende Schicht-Dominanz (3D je Band nach Rang, Schnitt
+    `subtract_dominant_bands`) im CLI-Schnitt des Beispielprojekts angesehen, nicht geändert. Offen:
+    3D-Live-Schnitt-Deckel verschnittener Dächer, Kehlen symmetrisch je Schicht, Warnung bei gekappter Gaube in
+    der UI, Wand ↔ Decke für beliebige Polygone im Schnitt ([G6]).
   - (30.10.) Boolean-Werkzeug dafür: Manifold-Port `manifold-rust`, nicht truck — truck scheitert an Gaube und
     L-Ecke (bündige Unterseiten), `manifold-rust` rechnet beide exakt und dicht. Details und Plan: [107].
 - ○ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M

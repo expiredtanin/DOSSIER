@@ -136,6 +136,10 @@ pub struct WallInput {
     /// gestuft. Nur für Wände ohne `openings`/`holes` wirksam; `[0,0]` (Default) = flach.
     #[serde(default, rename = "topDrop")]
     pub top_drop: [f32; 2],
+    /// Ebene Oberkante unter einer Dachfläche ([G2]): `[z an start, dz/dx, dz/dy]` (Grundriss-Meter).
+    /// Übersteuert `top_drop`; jede Ecke liegt exakt auf der Ebene (auch quer über die Dicke).
+    #[serde(default, rename = "topPlane", skip_serializing_if = "Option::is_none")]
+    pub top_plane: Option<[f32; 3]>,
     /// Albedo-Farbe der Wand (RGB 0..1). Default helles Grau wie die three.js-Sicht.
     /// Nur wirksam, wenn `layers` fehlt/leer ist (Vollkoerper-Fallback).
     #[serde(default = "default_wall_color")]

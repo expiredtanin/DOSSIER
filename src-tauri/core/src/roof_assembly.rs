@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn planar_faces_keep_area() {
         let mut r = sattel("R", [[0.0, 0.0], [10.0, 8.0]], "x");
-        r["dormers"] = serde_json::json!([{"id": "D", "kind": "sattel", "position": {"x": 4.0, "y": 1.2}, "width": 2.4, "frontHeight": 1.3}]);
+        r["dormers"] = serde_json::json!([{"id": "D", "kind": "sattel", "position": {"x": 4.0, "y": 1.2}, "width": 2.4, "frontHeight": 1.0}]);
         let p = base_project(serde_json::json!([r]));
         let s = roof_solids(&p, 0).unwrap();
         let all: Vec<usize> = (0..s.skin.indices.len() / 3).collect();
@@ -844,7 +844,8 @@ mod tests {
         let faces = planar_faces(&s.skin, &all);
         let face_area: f64 = faces.iter().map(|f| area3(f)).sum();
         assert!((tri_area - face_area).abs() < 1e-6 * tri_area, "{tri_area} vs {face_area}");
-        assert!(faces.len() * 2 < all.len(), "zusammengefasst: {} Flächen aus {} Dreiecken", faces.len(), all.len());
+        // Gaubendach endet am First ([G5]): ein paar Dreiecke mehr im Hauptdach-Querschnitt.
+        assert!(faces.len() * 3 < all.len() * 2, "zusammengefasst: {} Flächen aus {} Dreiecken", faces.len(), all.len());
     }
 
     #[test]

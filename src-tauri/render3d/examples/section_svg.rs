@@ -20,6 +20,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
         // Bruestung 0.8 m, Fensterhoehe 1.0 m (Sturz ab Y-Hoehe 1.8).
         WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 0.0],
             end: [0.0, 3.0],
             thickness: 0.2,
@@ -42,6 +43,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
         },
         WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [0.0, 3.0],
             end: [3.0, 3.0],
             thickness: 0.2,
@@ -64,6 +66,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
         // 0.8..1.8), verdeckt darueber/darunter.
         WallInput {
             top_drop: [0.0, 0.0],
+            top_plane: None,
             start: [1.5, 1.2],
             end: [1.5, 1.8],
             thickness: 0.2,

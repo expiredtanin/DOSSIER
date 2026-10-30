@@ -2212,6 +2212,12 @@ pub struct Wall {
     #[serde(rename = "sliceTermination", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub slice_termination: Option<SliceTermination>,
+    /// An Dach anschliessen ([G2]): `undefined` = automatisch (die Wand endet an der Dach-Unterkante,
+    /// wo ihre Krone darüber liegt — je Schicht, Giebel/Traufe/Grat/Kehle/Gaube), `true` = zusätzlich bis
+    /// unter das Dach verlängert, `false` = Dächer schneiden die Wand nicht.
+    #[serde(rename = "roofAttach", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub roof_attach: Option<bool>,
     /// Ansichtsschraffur ([100]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
     /// Ausrichtung am Element (Default 0).
     #[serde(rename = "surfacePatternAngle", default, skip_serializing_if = "Option::is_none")]

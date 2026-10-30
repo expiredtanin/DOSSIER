@@ -396,6 +396,8 @@ export interface PanelHostValue {
    * "both" = heutiges Verhalten, "below"/"above" = die Wand endet an der Decke.
    */
   onSetWallSliceTermination: (termination: SliceTermination) => void;
+  /** An Dach anschliessen ([G2]): "auto" = Default (Wand endet an der Dach-Unterkante). */
+  onSetWallRoofAttach: (attach: "auto" | "on" | "off") => void;
   /** Ansichtsschraffur ([100]) an der gewählten Wand bzw. am gewählten Dach drehen/versetzen. */
   onSetSurfacePatternPlacement?: (patch: { surfacePatternAngle?: number; surfacePatternOffset?: { x: number; y: number } }) => void;
   /** Weist der Wand einen Wandtyp-Preset (mehrschichtiger Aufbau) zu. */

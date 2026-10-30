@@ -488,6 +488,8 @@ fn wall_selection(root: &Map<String, Value>, w: &Value) -> Result<J, String> {
         .raw("referenceOffset", w, "referenceOffset")
         .v("layerBoundaries", J::arr(boundaries))
         .v("sliceTermination", nn(field(w, "sliceTermination")).cloned().unwrap_or_else(|| "both".into()))
+        // An Dach anschliessen ([G2]): fehlt = automatisch.
+        .v("roofAttach", Value::String(match field(w, "roofAttach").and_then(|v| v.as_bool()) { Some(true) => "on", Some(false) => "off", None => "auto" }.into()))
         .raw("wallTypeId", w, "wallTypeId")
         .n("thickness", thickness)
         .v("singleLayer", Value::Bool(layers.len() <= 1))
