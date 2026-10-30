@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 use truck_modeling::*;
 
-mod boolean;
+pub mod boolean;
 pub mod brep;
 pub use boolean::{boolean_mesh_core, BooleanMeshInput, BooleanMeshOutput};
 
@@ -448,8 +448,8 @@ mod web {
         Ok(brep::step_meshes_flat(&meshes))
     }
 
-    /// Boolesche Operation zwischen zwei Dreiecks-Meshes (Mesh-Ebenen-CSG via
-    /// csgrs). Input JSON: `{ "a_positions": […], "a_indices": […],
+    /// Boolesche Operation zwischen zwei Dreiecks-Meshes (Mesh-Ebenen-Boolean via
+    /// Manifold). Input JSON: `{ "a_positions": […], "a_indices": […],
     /// "b_positions": […], "b_indices": […], "op": "union"|"difference"|"intersection" }`
     /// Output JSON: `{ "positions": […], "indices": […], "empty": bool }`
     #[wasm_bindgen]
