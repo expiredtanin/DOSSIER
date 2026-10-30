@@ -69,7 +69,7 @@ export async function discardIfAsked(page: Page, expectDialog = false): Promise<
 
 /** Neu aus Vorlage: Musterhaus (Demo-Haus mit 9 Wänden im EG, 4 im OG) — der Beispielprojekt-Weg im UI. */
 export async function openSample(page: Page): Promise<void> {
-  await fileMenu(page, /Neu aus Vorlage: Musterhaus/);
+  await fileMenu(page, /^Neu aus Vorlage: Musterhaus$/);
   await discardIfAsked(page);
   await expect(page.locator(".project-name")).toHaveText("Demo-Haus");
 }

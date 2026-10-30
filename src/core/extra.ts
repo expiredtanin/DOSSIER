@@ -50,6 +50,7 @@ export { sampleProject } from "../model/sampleProject";
 export { parseDxf } from "../io/dxfParser";
 export { ProjectDocument, sharedDocument } from "./document";
 export { emptyProject } from "../model/sampleProject";
+export { buildComplexSampleProject } from "../model/sampleProjectComplex";
 export { readPointCloud, readPointCloudFlat, isPointCloudFile, DEFAULT_MAX_POINTS } from "../io/pointCloud";
 export type { PointCloudData, PointCloudOptions, PointCloudReport } from "../io/pointCloud";
 export { readPdfVector, pdfImport, pdfPageInfo, isPdfFile, PDF_SCALES } from "../io/pdfVector";

@@ -22,6 +22,7 @@ import type { View3d, ViewType } from "../model/viewTypes";
 export interface NativeAppMenuHandlers {
   onNewProject: () => void;
   onNewProjectFromSample: () => void;
+  onNewProjectFromComplexSample: () => void;
   onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
@@ -154,6 +155,10 @@ export function useNativeAppMenu(
               await MenuItem.new({
                 text: t("menu.native.newFromSample"),
                 action: () => handlersRef.current.onNewProjectFromSample(),
+              }),
+              await MenuItem.new({
+                text: t("menu.native.newFromComplexSample"),
+                action: () => handlersRef.current.onNewProjectFromComplexSample(),
               }),
               await MenuItem.new({
                 text: t("menu.native.newFromTemplateFile"),
