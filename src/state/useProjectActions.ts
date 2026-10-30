@@ -48,6 +48,8 @@ function contextObjectsBounds(objs: ContextObject[]): Vec2[] | null {
     } else if (obj.type === "image") {
       acc(obj.min.x, obj.min.y);
       acc(obj.max.x, obj.max.y);
+    } else if (obj.type === "excavation") {
+      for (const p of obj.outline) acc(p.x, p.y);
     } else {
       // importedMesh / terrainMesh: flaches (x,y,z…)-Array, Stride 3.
       const pos = obj.positions;
@@ -351,6 +353,7 @@ export function useProjectActions(
   const removeContextObject = useStore((s) => s.removeContextObject);
   const removeContextObjects = useStore((s) => s.removeContextObjects);
   const generateTerrain = useStore((s) => s.generateTerrain);
+  const patchContextObject = useStore((s) => s.patchContextObject);
   const moveGripOf = useStore((s) => s.moveGripOf);
   const moveElementByOf = useStore((s) => s.moveElementByOf);
   const moveEdgeOf = useStore((s) => s.moveEdgeOf);
@@ -465,6 +468,7 @@ export function useProjectActions(
     removeContextObject,
     removeContextObjects,
     generateTerrain,
+    patchContextObject,
     moveGripOf,
     moveElementByOf,
     moveEdgeOf,

@@ -53,12 +53,12 @@ describe("Tabellen auf dem Blatt ([111])", () => {
     expect(b.prims.filter((x) => x.k === "text" && x.s === tableLabels(p)["openings.col.mark"]).length).toBe(1);
   });
 
-  it("alle vier Quellen liefern Primitive; Katalog nennt die Spalten", () => {
+  it("alle Quellen liefern Primitive; Katalog nennt die Spalten", () => {
     const cat = tableCatalog(sampleProject);
-    expect(Object.keys(cat.sources).sort()).toEqual(["areas", "elements", "openings", "rooms"]);
-    const p = withTables((["openings", "areas", "rooms", "elements"] as const).map((source) => table({ id: source, source })));
+    expect(Object.keys(cat.sources).sort()).toEqual(["areas", "earthworks", "elements", "openings", "rooms"]);
+    const p = withTables((["openings", "areas", "rooms", "elements", "earthworks"] as const).map((source) => table({ id: source, source })));
     const out = sheetTables(p, "L1");
-    expect(out.map((o) => o.id)).toEqual(["openings", "areas", "rooms", "elements"]);
+    expect(out.map((o) => o.id)).toEqual(["openings", "areas", "rooms", "elements", "earthworks"]);
     for (const o of out) expect(o.prims.some((x) => x.k === "text")).toBe(true);
   });
 

@@ -84,6 +84,7 @@ import {
   addProgramSheet,
   defaultSheetLabels,
   checkSiteRules,
+  excavationQuantities,
   exportStl,
   exportGlb,
   exportGltf,
@@ -683,7 +684,9 @@ async function execute(project: Project, file: string, command: string, rest: st
       const k = computeKennzahlen(project);
       const prog = checkRoomProgram(project);
       const baurecht = checkSiteRules(project);
-      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
+      // [68] Erdarbeiten je Baugrube (Abtrag/Auftrag/Hinterfüllung, m³).
+      const erdarbeiten = excavationQuantities(project);
+      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht, erdarbeiten }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
       return 0;
     }
     case "raumprogramm": {

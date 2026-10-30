@@ -527,6 +527,8 @@ pub enum ContextObject {
     TerrainMesh(TerrainMesh),
     #[serde(rename = "image")]
     Image(ContextImage),
+    #[serde(rename = "excavation")]
+    Excavation(Excavation),
 }
 
 impl Default for Drawing2DGeom {

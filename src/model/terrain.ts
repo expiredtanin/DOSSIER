@@ -19,14 +19,32 @@ let terrainSeq = 0;
 export const TERRAIN_LAYER = "Terrain";
 
 /**
- * Erzeugt ein TIN aus Konturen (Rust-Kern, `cmd_solid.rs::terrain_from_contours`): alle endlichen
- * Stützpunkte der Konturen als Vertices (Z = Kontur-Höhe, nicht endlich → 0), 2D-Delaunay über die
- * (x, y)-Projektion (`delaunay.rs`), Dreiecke mit (nahezu) null Fläche verworfen. Offene und
- * geschlossene Konturen gleich; unter 3 Punkten ein leeres Mesh.
+ * Erzeugt ein Gelände aus Konturen (Rust-Kern, `terrain.rs`): Konturen verdichtet und als Bruchkanten
+ * erzwungen (constrained Delaunay), flache Dreiecke behoben, adaptiv geglättet ohne Überschwingen.
+ * `contourInterval` = kleinster Höhenabstand der Konturen (Höhenlinien im Grundriss). Unter 3 Punkten
+ * ein leeres Mesh.
  */
-export function generateTerrainFromContours(contours: Contour[]): TerrainMesh {
+export function generateTerrainFromContours(contours: Contour[], opts: TerrainOptions = {}): TerrainMesh {
   const id = `terrain-${Date.now()}-${terrainSeq++}`;
-  return JSON.parse(core().terrain_from_contours_json(toMarkedJson(contours), id)) as TerrainMesh;
+  const json = core().terrain_from_contours_opts_json(
+    toMarkedJson(contours),
+    id,
+    opts.smooth ?? 2,
+    opts.maxEdge ?? 0,
+    opts.breaklines === false ? 0 : 1,
+  );
+  return JSON.parse(json) as TerrainMesh;
+}
+
+/**
+ * [T6] Optionen der Gelände-Erzeugung (`terrain.rs`): `smooth` = Glättungsstufen 0–4 (0 = reines TIN mit
+ * Bruchkanten, Standard 2), `maxEdge` = Verdichtung/grösste Kante in m (0 = automatisch), `breaklines` =
+ * Höhenlinien als Bruchkanten erzwingen (Standard ja).
+ */
+export interface TerrainOptions {
+  smooth?: number;
+  maxEdge?: number;
+  breaklines?: boolean;
 }
 
 /**
@@ -91,5 +109,6 @@ export function terrainMeshFromGrid(grid: TerrainGrid): TerrainMesh {
     categoryCode: TERRAIN_CATEGORY.code,
     positions,
     indices,
+    contourInterval: 1,
   };
 }

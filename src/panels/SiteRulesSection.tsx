@@ -84,10 +84,13 @@ export function SiteRulesSection() {
           {rules.maxHeight !== undefined && check.maxTop !== null && (
             <div>
               {t(check.heightExceeded ? "siteRules.heightOver" : "siteRules.heightOk", {
-                top: fmt(check.maxTop, 2),
+                top: fmt(check.heightAboveTerrain ?? check.maxTop, 2),
                 max: fmt(rules.maxHeight, 2),
               })}
             </div>
+          )}
+          {check.terrainMin !== null && (
+            <div>{t("siteRules.terrainAtFacade", { z: fmt(check.terrainMin, 2) })}</div>
           )}
         </div>
       )}

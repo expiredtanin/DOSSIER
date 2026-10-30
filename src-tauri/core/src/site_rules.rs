@@ -340,6 +340,43 @@ pub struct SiteCheckOut {
     pub violation_area: f64,
     pub max_top: Option<f64>,
     pub height_exceeded: bool,
+    /// [T6] Geländehöhen an der Fassade (Grundfläche, Ecken + alle ≤ 2 m), Modellbezug; leer ohne Gelände.
+    pub facade_terrain: Vec<FacadePoint>,
+    /// Tiefster Punkt des gewachsenen Terrains an der Fassade (massgebendes Terrain, vereinfacht).
+    pub terrain_min: Option<f64>,
+    /// Gesamthöhe über dem massgebenden Terrain (`maxTop − terrainMin`); ohne Gelände `None` (dann gilt ±0.00).
+    pub height_above_terrain: Option<f64>,
+}
+
+/// Fassadenpunkt mit gewachsenem und gestaltetem Terrain (Modellbezug; `None` ausserhalb des Geländes).
+#[derive(Debug, Serialize)]
+pub struct FacadePoint {
+    pub x: f64,
+    pub y: f64,
+    pub natural: Option<f64>,
+    pub designed: Option<f64>,
+}
+
+/// Geländehöhen an der Fassade: Ecken der Aussenringe der Grundfläche und Zwischenpunkte (≤ 2 m).
+pub fn facade_terrain(p: &Project) -> Vec<FacadePoint> {
+    if crate::excavation::terrains(p).is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for poly in building_footprint(p) {
+        let Some(ring) = poly.first() else { continue };
+        let n = ring.len();
+        for i in 0..n {
+            let (a, b) = (ring[i], ring[(i + 1) % n]);
+            let k = (hypot2(b.x - a.x, b.y - a.y) / 2.0).ceil().max(1.0) as usize;
+            for j in 0..k {
+                let f = j as f64 / k as f64;
+                let (x, y) = (a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+                out.push(FacadePoint { x, y, natural: crate::excavation::terrain_z(p, x, y, false), designed: crate::excavation::terrain_z(p, x, y, true) });
+            }
+        }
+    }
+    out
 }
 
 /// Prüft das Modell gegen `siteRules`; `None` ohne (gültiges) Baurecht.
@@ -351,7 +388,12 @@ pub fn check_project(p: &Project) -> Option<SiteCheckOut> {
         setbacks: (0..r.parcel.len()).map(|i| r.setbacks.as_ref().and_then(|s| s.get(i)).copied().unwrap_or(r.default_setback)).collect(),
         lines: r.building_lines.as_deref().unwrap_or(&[]).iter().map(|l| BuildingLine { a: [l.a.x, l.a.y], b: [l.b.x, l.b.y] }).collect(),
     };
-    let c = check_site_rules(&rules, &footprint_parts(p), r.max_height.unwrap_or(f64::NAN), max_top.unwrap_or(f64::NAN))?;
+    let facade = facade_terrain(p);
+    let terrain_min = facade.iter().filter_map(|f| f.natural).reduce(f64::min);
+    let height_above_terrain = max_top.zip(terrain_min).map(|(t, g)| t - g);
+    // Mit Gelände zählt die Höhe über dem massgebenden Terrain, sonst über ±0.00.
+    let top_for_check = height_above_terrain.or(max_top);
+    let c = check_site_rules(&rules, &footprint_parts(p), r.max_height.unwrap_or(f64::NAN), top_for_check.unwrap_or(f64::NAN))?;
     Some(SiteCheckOut {
         parcel_area: c.parcel_area,
         allowed: area_out(&c.allowed),
@@ -360,5 +402,8 @@ pub fn check_project(p: &Project) -> Option<SiteCheckOut> {
         violation_area: c.violation_area,
         max_top,
         height_exceeded: c.height_exceeded,
+        facade_terrain: facade,
+        terrain_min,
+        height_above_terrain,
     })
 }

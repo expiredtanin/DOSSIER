@@ -485,10 +485,14 @@ pub fn mesh_export_data(src: &Project, opt: &MeshOptions) -> Result<Flat, String
     if opt.context {
         for obj in p.context.as_deref().unwrap_or(&[]) {
             let (terrain, id, name, color, positions, indices) = match obj {
-                ContextObject::TerrainMesh(m) => (true, &m.id, &m.name, None, &m.positions, &m.indices),
-                ContextObject::ImportedMesh(m) => (false, &m.id, &m.name, m.color.as_deref(), &m.positions, &m.indices),
+                ContextObject::TerrainMesh(m) => {
+                    let (pos, idx, _) = crate::excavation::terrain_model_mesh(&p, m);
+                    (true, &m.id, &m.name, None, pos, idx)
+                }
+                ContextObject::ImportedMesh(m) => (false, &m.id, &m.name, m.color.as_deref(), std::borrow::Cow::Borrowed(m.positions.as_slice()), std::borrow::Cow::Borrowed(m.indices.as_slice())),
                 _ => continue,
             };
+            let (positions, indices) = (&*positions, &*indices);
             if positions.len() < 9 || indices.len() < 3 {
                 continue;
             }

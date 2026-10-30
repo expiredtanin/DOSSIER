@@ -63,6 +63,7 @@ fn shift_context(o: &mut ContextObject, dx: f64, dy: f64) {
         }
         ContextObject::ImportedMesh(m) => shift_positions(&mut m.positions, dx, dy),
         ContextObject::TerrainMesh(m) => shift_positions(&mut m.positions, dx, dy),
+        ContextObject::Excavation(e) => shift_all(&mut e.outline, dx, dy),
     }
 }
 

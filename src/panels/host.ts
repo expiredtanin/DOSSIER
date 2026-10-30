@@ -40,6 +40,7 @@ import type {
   WallType,
 } from "../model/types";
 import type { MeasurementReadout, SnapSettings, ToolId } from "../tools/types";
+import type { TerrainOptions } from "../model/terrain";
 import type { Selection } from "../state/selectionInfo";
 import type { TextStylePreset } from "../text/richText";
 import type { ScheduleKind } from "../export/exportSchedule";
@@ -581,7 +582,11 @@ export interface PanelHostValue {
    * Erzeugt aus einem ContourSet (per ID) ein Gelände-TIN. Liefert die neue
    * TerrainMesh-ID oder null (unbekannte ID / kein sinnvolles TIN).
    */
-  onGenerateTerrain: (contourSetId: string) => string | null;
+  onGenerateTerrain: (contourSetId: string, opts?: TerrainOptions) => string | null;
+  /** [T6]/[68] Ändert Felder eines Kontext-Objekts (Äquidistanz, Baugruben-Sohle …). */
+  onPatchContextObject: (id: string, patch: Record<string, unknown>, coalesceKey?: string) => void;
+  /** [68] Startet den Befehl „Baugrube" (Umriss zeichnen). */
+  onStartExcavation: () => void;
   /**
    * Setzt/ersetzt den Georeferenzierungs-Bezug (`Project.geoAnchor`) — welcher
    * Modell-Punkt welcher realen LV95-Koordinate entspricht. `undefined` löscht

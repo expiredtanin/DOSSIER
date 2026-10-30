@@ -44,6 +44,7 @@ export type { AreaReport, AreaReportOptions } from "../export/areaReport";
 export { sunPosition, shadowPolygons, shadowOfPrism, projectLatLon } from "../analysis/sun";
 export type { SunPosition } from "../analysis/sun";
 export { checkSiteRules, allowedArea, multiPolygonArea, buildingFootprint, modelTop } from "../analysis/siteRules";
+export { excavationQuantities, type ExcavationQuantity } from "../analysis/excavation";
 export type { SiteCheck } from "../analysis/siteRules";
 export { sampleProject } from "../model/sampleProject";
 export { parseDxf } from "../io/dxfParser";

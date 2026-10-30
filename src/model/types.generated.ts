@@ -453,7 +453,7 @@ export type ContextImage = {
 };
 
 /** Kontext-Objekt (Tag `type`). */
-export type ContextObject = ImportedMesh | ContourSet | TerrainMesh | ContextImage;
+export type ContextObject = ImportedMesh | ContourSet | TerrainMesh | ContextImage | Excavation;
 
 /**
  * Eine einzelne Kontur (Höhenlinie / Polylinie) auf konstanter Höhe `z`. `pts`
@@ -1117,6 +1117,28 @@ export type DrawingLevelKind = "floor" | "section" | "elevation" | "drawing";
  */
 export type EndMark = "none" | "arrow" | "arrowOpen" | "dot" | "tick" | "square";
 
+/**
+ * [68] Baugrube / Geländebearbeitung: Sohle als Umriss auf der Höhe `bottom` (m, Modell ±0.00).
+ * Ausserhalb steigt die Böschung mit `slope` (Grad, Default 45; je Kante `edgeSlopes`, 0 = Default)
+ * bis zum Gelände (Abtrag); liegt das Gelände tiefer, fällt eine Schüttung mit `fillSlope` (Default
+ * 33.7 ≈ 2:3) bis zum Gelände (Auftrag). Bermen: alle `bermHeight` m Höhe eine waagrechte Berme der
+ * Breite `bermWidth`. Schneidet jedes Gelände-Netz, das den Umriss enthält.
+ */
+export type Excavation = {
+  type: "excavation";
+  id: string;
+  name: string;
+  layer?: string;
+  categoryCode?: string;
+  outline: Array<Vec2>;
+  bottom: number;
+  slope?: number;
+  fillSlope?: number;
+  edgeSlopes?: Array<number>;
+  bermWidth?: number;
+  bermHeight?: number;
+};
+
 /** Ein extrudierter Körper: geschlossenes Profil (Modell-Meter) + Höhe. */
 export type ExtrudedSolid = {
   id: string;
@@ -1627,7 +1649,7 @@ export type LayoutTable = {
 };
 
 /** Quelle einer Blatt-Tabelle ([111]). */
-export type LayoutTableSource = "openings" | "areas" | "rooms" | "elements";
+export type LayoutTableSource = "openings" | "areas" | "rooms" | "elements" | "earthworks";
 
 /**
  * Einfache Textfelder des Titelblocks (Master). Alle optional — leere Felder
@@ -2945,6 +2967,13 @@ export type TerrainMesh = {
    * statt mit der Grundfarbe. Fehlt es, bleibt das Gelände einfarbig.
    */
   vertexColors?: Array<number>;
+  /**
+   * [T6] Äquidistanz der Höhenlinien im Grundriss in m (aus dem Netz neu erzeugt, inkl. Baugruben).
+   * Fehlt der Wert oder ist er ≤ 0, zeigt der Grundriss nur den Rahmen.
+   */
+  contourInterval?: number;
+  /** [T6] Jede n-te Höhenlinie ist Zähllinie (dicker, beschriftet). Default 5. */
+  contourIndexEvery?: number;
 };
 
 /** Ein zusammenhängender Textabschnitt mit einheitlicher Formatierung. */
