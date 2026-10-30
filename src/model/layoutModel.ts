@@ -19,6 +19,7 @@ import type {
   LayoutFolder,
   LayoutOrientation,
   LayoutPaperFormat,
+  LayoutTable,
   LayoutViewport,
   MasterLayout,
   Project,
@@ -410,6 +411,34 @@ export function patchViewport(
     viewports: layout.viewports.map((v) =>
       v.id === viewportId ? { ...v, ...patch } : v,
     ),
+  };
+}
+
+// ── Immutable CRUD (Tabellen auf einem Layout, [111]) ────────────────────────
+
+/** Fügt eine Tabelle an (immutabel). */
+export function addTable(layout: Layout, table: LayoutTable): Layout {
+  return { ...layout, tables: [...(layout.tables ?? []), table] };
+}
+
+/** Entfernt eine Tabelle; Tabellen, die sie fortsetzten, verlieren den Verweis (immutabel). */
+export function removeTable(layout: Layout, tableId: string): Layout {
+  return {
+    ...layout,
+    tables: (layout.tables ?? []).filter((tb) => tb.id !== tableId).map((tb) => (tb.continues === tableId ? { ...tb, continues: undefined } : tb)),
+  };
+}
+
+/** Ändert Felder einer Tabelle (immutabel); `undefined` entfernt ein optionales Feld. */
+export function patchTable(layout: Layout, tableId: string, patch: Partial<Omit<LayoutTable, "id">>): Layout {
+  return {
+    ...layout,
+    tables: (layout.tables ?? []).map((tb) => {
+      if (tb.id !== tableId) return tb;
+      const next = { ...tb, ...patch } as Record<string, unknown>;
+      for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+      return next as LayoutTable;
+    }),
   };
 }
 

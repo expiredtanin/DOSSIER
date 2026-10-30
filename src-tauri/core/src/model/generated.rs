@@ -4103,6 +4103,85 @@ pub struct LayoutViewport {
     pub extra: Extra,
 }
 
+/// Quelle einer Blatt-Tabelle ([111]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum LayoutTableSource {
+    /// Fenster- und Türliste ([97]).
+    #[default]
+    #[serde(rename = "openings")]
+    Openings,
+    /// Flächentabelle nach SIA 416 ([70]).
+    #[serde(rename = "areas")]
+    Areas,
+    /// Raumprogramm Soll/Ist.
+    #[serde(rename = "rooms")]
+    Rooms,
+    /// Bauteilliste mit U-Werten ([71]).
+    #[serde(rename = "elements")]
+    Elements,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Eine lebendige Tabelle auf einem Layout-Blatt ([111]): zeigt eine Liste des Modells (Fenster/Türen,
+/// Flächen, Raumprogramm, Bauteile) im Rahmen `xMm`/`yMm`/`widthMm`/(`heightMm`). Ist `heightMm` gesetzt, zeigt
+/// die Tabelle nur so viele Zeilen, wie hineinpassen; `continues` verweist auf die vorige Tabelle, deren Rest sie zeigt.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct LayoutTable {
+    pub id: String,
+    pub source: LayoutTableSource,
+    /// Linke Kante auf dem Blatt (mm, von links).
+    #[serde(rename = "xMm")]
+    pub x_mm: f64,
+    /// Obere Kante auf dem Blatt (mm, von oben).
+    #[serde(rename = "yMm")]
+    pub y_mm: f64,
+    /// Breite (mm).
+    #[serde(rename = "widthMm")]
+    pub width_mm: f64,
+    /// Höhe des Rahmens (mm); fehlt sie, zeigt die Tabelle alle Zeilen.
+    #[serde(rename = "heightMm", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub height_mm: Option<f64>,
+    /// Gewählte Spalten (Kennungen der Quelle, in Reihenfolge); fehlt sie, gelten die Standard-Spalten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub columns: Option<Vec<String>>,
+    /// Einschränkung der Quelle: Öffnungen "window"/"door".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub filter: Option<String>,
+    /// Textstil ({@link TextStylePreset.id}): Schrift, Grösse, fett.
+    #[serde(rename = "textStyleId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub text_style_id: Option<String>,
+    /// Schriftgrösse in pt (übersteuert den Textstil); Standard 8.
+    #[serde(rename = "fontSizePt", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub font_size_pt: Option<f64>,
+    /// Zeilenhöhe in mm; Standard 1.9 × Schrifthöhe.
+    #[serde(rename = "rowHeightMm", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub row_height_mm: Option<f64>,
+    /// Linien: "grid" (Standard), "rows" (nur waagrecht), "outer" (Rahmen + Kopflinie), "none".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub borders: Option<String>,
+    /// Kopfzeile zeigen (Standard ja).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub header: Option<bool>,
+    /// Vorige Tabelle ({@link LayoutTable.id}), deren übrige Zeilen diese Tabelle zeigt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub continues: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Ein Layout-Blatt — Papierformat/Ausrichtung, optionaler Master (`masterId`)
 /// und die platzierten Viewports.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
@@ -4148,6 +4227,10 @@ pub struct Layout {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub legends: Option<Vec<LayoutLegend>>,
+    /// Lebendige Tabellen auf dem Blatt ([111]); fehlt = keine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tables: Option<Vec<LayoutTable>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

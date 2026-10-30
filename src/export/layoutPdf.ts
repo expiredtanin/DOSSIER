@@ -18,6 +18,7 @@ import { legendPlan, legendPrintSvg } from "./legendSvg";
 import { categoryLayerGroups, enablePdfLayers, type PdfLayers } from "./pdfLayers";
 import { generatePlan } from "../plan/generatePlan";
 import { planToPrintSvg } from "./planToPrintSvg";
+import { drawTablesPdf, sheetTables } from "./sheetTable";
 import { collectVisibleCodes } from "../model/types";
 import {
   effectiveSheetSizeMm,
@@ -214,6 +215,13 @@ async function renderPage(
       const tb = resolveTitleBlock(project, layout, master);
       drawTitleBlock(doc, widthMm, heightMm, tb, layout.paper, layout.orientation, ctx.includeRevision);
     });
+  }
+
+  // Lebendige Tabellen ([111]): Vektortext + Linien wie in der Blattansicht.
+  try {
+    await inLayer(ctx, t("pdfLayers.tables"), () => drawTablesPdf(doc, sheetTables(project, layout.id)));
+  } catch {
+    // Eine Tabelle, die nicht rechnet, darf die Seite nicht killen.
   }
 
   // 2D-Zeichnung des Blatts — ÜBER Viewports + Master, wie am Bildschirm.
