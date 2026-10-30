@@ -237,6 +237,8 @@ pub struct HostFrame {
     pub plane: Option<usize>,
     /// Index des Wirts in `Project::roofs` bzw. `Project::ceilings`.
     pub host: usize,
+    /// Fenster in der Stirnwand einer Gaube ([G5]): `host` = Dach, `n` waagrecht nach aussen.
+    pub dormer: bool,
 }
 
 impl HostFrame {
@@ -292,6 +294,9 @@ pub fn is_surface_hosted(o: &Opening) -> bool {
 
 /// Öffnungs-System eines Dach-/Deckenwirts; `None` ohne Wirt, Lage ausserhalb oder Unsinn.
 pub fn host_frame(p: &Project, o: &Opening) -> Option<HostFrame> {
+    if o.host_dormer_id.as_deref().is_some_and(|s| !s.is_empty()) {
+        return dormer_frame(p, o);
+    }
     let hp = o.host_point?;
     if !(hp.x.is_finite() && hp.y.is_finite() && o.width > MIN && o.height > MIN) {
         return None;
@@ -308,14 +313,22 @@ pub fn host_frame(p: &Project, o: &Opening) -> Option<HostFrame> {
         let z = pts[0][2] - (n[0] * (hp.x - pts[0][0]) + n[1] * (hp.y - pts[0][1])) / n[2];
         let thickness = p.roof_layers(roof).iter().fold(0.0, |s, l| s + l.thickness.max(0.0));
         let (ew, eh) = axes(n, angle);
-        return Some(HostFrame { c: [hp.x, hp.y, z], ew, eh, n, thickness, plane: Some(plane), host });
+        return Some(HostFrame { c: [hp.x, hp.y, z], ew, eh, n, thickness, plane: Some(plane), host, dormer: false });
     }
     let id = o.host_ceiling_id.as_deref().filter(|s| !s.is_empty())?;
     let (host, c) = p.ceilings.as_deref()?.iter().enumerate().find(|(_, c)| c.id == id)?;
     let (zb, zt) = p.ceiling_vertical_extent(c);
     let n = [0.0, 0.0, 1.0];
     let (ew, eh) = axes(n, angle);
-    Some(HostFrame { c: [hp.x, hp.y, zt], ew, eh, n, thickness: (zt - zb).max(0.0), plane: None, host })
+    Some(HostFrame { c: [hp.x, hp.y, zt], ew, eh, n, thickness: (zt - zb).max(0.0), plane: None, host, dormer: false })
+}
+
+fn dormer_frame(p: &Project, o: &Opening) -> Option<HostFrame> {
+    let did = o.host_dormer_id.as_deref()?;
+    let (ri, roof, d) = crate::dormer::find(p, o.host_roof_id.as_deref()?, did)?;
+    let mut f = crate::dormer::geometry(p, roof, d)?.window_frame(o)?;
+    f.host = ri;
+    Some(f)
 }
 
 /// Rechteck der Öffnung im Grundriss (Oberfläche, Gegenuhrzeigersinn).
@@ -344,7 +357,7 @@ pub fn roof_openings(p: &Project, roof_index: usize) -> Vec<(&Opening, HostFrame
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter(|o| o.host_roof_id.as_deref() == Some(roof.id.as_str()))
+        .filter(|o| o.host_roof_id.as_deref() == Some(roof.id.as_str()) && o.host_dormer_id.as_deref().is_none_or(str::is_empty))
         .filter_map(|o| host_frame(p, o).map(|f| (o, f)))
         .collect()
 }
@@ -375,7 +388,7 @@ pub fn surface_window_boxes(p: &Project, o: &Opening, f: &HostFrame) -> Vec<(u8,
             out.push((0, quad_box(&q, top - 0.03, top - 0.01, &map)));
         }
     }
-    if o.host_roof_id.is_some() {
+    if o.host_roof_id.is_some() && !f.dormer {
         let flash = [[-0.06, -0.06], [w + 0.06, -0.06], [w + 0.06, h + 0.06], [-0.06, h + 0.06]];
         for q in ring_quads(&flash, &outer) {
             out.push((2, quad_box(&q, 0.0, 0.03, &map)));

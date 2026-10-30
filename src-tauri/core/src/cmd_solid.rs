@@ -446,6 +446,60 @@ fn roof_window_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut Id
     add_op("openings", vec![obj(f)])
 }
 
+/// Gaube ([G5]): ein Klick in eine geneigte Dachfläche setzt die Gaube (Stirnmitte am Punkt) und ein
+/// Fenster in ihre Stirn (`hostDormerId`). Art über `kind` (schlepp/sattel/flach/walm).
+fn dormer_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let at = p_of(v, "p");
+    if !(at.0.is_finite() && at.1.is_finite()) {
+        return Vec::new();
+    }
+    let on_sloped = |e: &&Value| {
+        let Ok(r) = serde_json::from_value::<crate::model::Roof>((*e).clone()) else { return false };
+        crate::roof::roof_geometry(&r.params(), 0.0).planes.iter().any(|pl| {
+            let n = crate::model3d::plane_normal_up(pl);
+            pl.len() >= 3 && n[2] > 0.05 && n[2] < 0.99 && crate::dormer::point_in_xy(at.0, at.1, pl)
+        })
+    };
+    let on_level = |e: &&Value| crate::cmd_create::floor_of(e) == Some(ctx.level);
+    let roofs = arr(root.get("roofs"));
+    let Some(host) = roofs.iter().filter(on_sloped).find(on_level).or_else(|| roofs.iter().find(on_sloped)) else { return Vec::new() };
+    let Some(roof_id) = id_of(host) else { return Vec::new() };
+    let kind = match s_of(v, "kind") {
+        k @ ("schlepp" | "sattel" | "flach" | "walm") => k,
+        _ => "schlepp",
+    };
+    let width = num_or(field(v, "width"), 2.4).clamp(0.8, 20.0);
+    let front = num_or(field(v, "frontHeight"), 1.5).clamp(0.6, 6.0);
+    let did = ids.next("G");
+    let mut d = vec![("id", s(&did)), ("kind", s(kind)), ("position", pv(at)), ("width", js_num(width)), ("frontHeight", js_num(front))];
+    if let Some(wt) = Some(ctx.wall_type).filter(|t| !t.is_empty()) {
+        d.push(("wallTypeId", s(wt)));
+    }
+    let mut dormers = arr(field(host, "dormers")).to_vec();
+    dormers.push(obj(d));
+    let mut ops = vec![Op::Replace { collection: "roofs".into(), entity: with(host, "dormers", Value::Array(dormers)) }];
+    // Fenster: Breite 60 % der Gaube, Höhe bis 15 cm unter das Gaubendach.
+    let sill = 0.2;
+    let mut f = vec![
+        ("id", s(&ids.next("O"))),
+        ("type", s("opening")),
+        ("hostWallId", s("")),
+        ("hostRoofId", s(roof_id)),
+        ("hostDormerId", s(&did)),
+        ("categoryCode", crate::cmd_create::category_or(root, "21", ctx)),
+        ("kind", s("window")),
+        ("position", js_num(0.0)),
+        ("width", js_num(jsnum::round(width * 0.6 * 100.0) / 100.0)),
+        ("height", js_num(jsnum::round((front - sill - 0.15).max(0.3) * 100.0) / 100.0)),
+        ("sillHeight", js_num(sill)),
+    ];
+    if let Some(t) = arr(root.get("windowTypes")).first().and_then(|t| field(t, "id")).filter(|id| truthy(Some(id))) {
+        f.push(("typeId", t.clone()));
+    }
+    ops.extend(add_op("openings", vec![obj(f)]));
+    ops
+}
+
 /// Hof-Ring des Dach-Hof-Befehls: ≥ 3 Punkte wie gezeichnet, 2 Punkte als Rechteck.
 fn hole_ring(points: &[V]) -> Option<Vec<V>> {
     match points {
@@ -573,6 +627,7 @@ pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> 
         "ceilingOpening" => ceiling_opening_ops(root, v, ctx),
         "roofHole" => roof_hole_ops(root, v, ctx),
         "roofWindow" => roof_window_ops(root, v, ctx, ids),
+        "dormer" => dormer_ops(root, v, ctx, ids),
         "sectionline" => sectionline_ops(root, v, ids),
         _ => return None,
     })
@@ -632,6 +687,35 @@ mod tests {
         assert_eq!(label, "Kegelstumpf r=2.00/1.00 h=3.00");
         let solid = json!({"points": [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 1, "y": 1}], "height": 2, "taper": 0.5});
         assert_eq!(extruded_solid_spec(&solid, 1.0).unwrap()["kind"], "loft");
+    }
+
+    /// [G5] Gaube: nur in geneigten Dachflächen; Gaube im Dach + Fenster mit `hostDormerId`.
+    #[test]
+    fn gauben_befehl() {
+        let rect = json!([{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}]);
+        let roof = json!({"id": "R", "type": "roof", "floorId": "dg", "categoryCode": "35", "outline": rect, "shape": "sattel", "pitchDeg": 40, "overhang": 0.3, "ridgeAxis": "x", "thickness": 0.3});
+        let mut flat = roof.clone();
+        flat["id"] = "F".into();
+        flat["shape"] = "flach".into();
+        flat["outline"] = json!([{"x": 20, "y": 0}, {"x": 25, "y": 0}, {"x": 25, "y": 5}, {"x": 20, "y": 5}]);
+        let root = json!({"roofs": [roof, flat]});
+        let root = root.as_object().unwrap();
+        let run = |x: f64, y: f64, kind: &str| {
+            let mut ids = IdGen::new("s");
+            let ctx = Ctx { level: "dg", floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
+            ops(root, &json!({"cmd": "dormer", "p": {"x": x, "y": y}, "kind": kind}), &ctx, &mut ids).unwrap()
+        };
+        let o = run(4.0, 1.5, "sattel");
+        assert_eq!(o.len(), 2);
+        let Op::Replace { entity, .. } = &o[0] else { panic!() };
+        assert_eq!(entity["dormers"][0]["kind"], "sattel");
+        let Op::Add { items, .. } = &o[1] else { panic!() };
+        assert_eq!(items[0]["hostDormerId"], entity["dormers"][0]["id"]);
+        assert_eq!(items[0]["hostRoofId"], "R");
+        assert!(run(22.0, 2.0, "sattel").is_empty(), "Flachdach: keine Gaube");
+        assert!(run(40.0, 2.0, "sattel").is_empty());
+        let Op::Replace { entity, .. } = &run(4.0, 1.5, "unsinn")[0] else { panic!() };
+        assert_eq!(entity["dormers"][0]["kind"], "schlepp");
     }
 
     /// [103] Dachfenster: Dach mit dem Punkt im Umriss (aktives Geschoss zuerst), sonst Decke, sonst nichts.

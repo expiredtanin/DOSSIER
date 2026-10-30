@@ -631,6 +631,41 @@ export type DoorType = {
   doorFrame?: DoorFrameDetail;
 };
 
+/**
+ * Gaube/Lukarne ([G5]) in einer Dachfläche: Stirnwand parallel zur Traufe, Wangen bis an das
+ * Hauptdach, eigenes Dach mit dem Hauptdach verschnitten; das Hauptdach ist an der Gaube in allen
+ * Schichten ausgeschnitten. Das Fenster in der Stirn ist eine `Opening` mit `hostDormerId`.
+ */
+export type Dormer = {
+  id: string;
+  kind: DormerKind;
+  /** Mitte der Stirnwand-Aussenseite im Grundriss (Meter); legt auch die Dachfläche fest. */
+  position: Vec2;
+  /** Aussenbreite (Wange aussen bis Wange aussen, Meter). */
+  width: number;
+  /** Stirnhöhe: von der Dach-Oberkante an der Stirn bis Unterkante Gaubendach (Meter). */
+  frontHeight: number;
+  /**
+   * Neigung des Gaubendachs in Grad (Sattel/Walm/Schlepp); fehlt ⇒ Sattel/Walm 40°, Schlepp aus der
+   * Tiefe bzw. 15°, Flach 0.
+   */
+  pitchDeg?: number;
+  /**
+   * Nur Schleppgaube: waagrechte Tiefe von der Stirn bis zum Anschluss an das Hauptdach (Meter);
+   * gesetzt ⇒ die Neigung folgt daraus.
+   */
+  depth?: number;
+  /** Dachüberstand an Stirn und Seiten (Meter); fehlt ⇒ 0.15. */
+  overhang?: number;
+  /** Wandtyp für Wangen und Stirn; fehlt ⇒ einschichtig 0.15 m. */
+  wallTypeId?: string;
+  /** Dachtyp des Gaubendachs; fehlt ⇒ der des Hauptdachs. */
+  roofTypeId?: string;
+};
+
+/** Gaubenart ([G5]). */
+export type DormerKind = "schlepp" | "sattel" | "flach" | "walm";
+
 /** Ein freies 2D-Zeichenelement auf einer Zeichnungsebene. */
 export type Drawing2D = {
   id: string;
@@ -1802,6 +1837,12 @@ export type Opening = {
    * Traufe aus. Fehlt ⇒ 0 (x-Achse).
    */
   hostAngle?: number;
+  /**
+   * Wirt Gaube ([G5]): Fenster in der Stirnwand der Gaube `hostDormerId` des Dachs `hostRoofId`.
+   * `position` = Versatz der Fenstermitte von der Stirnmitte (Meter, + nach rechts von aussen),
+   * `sillHeight` = Brüstung über der Dach-Oberkante an der Stirn.
+   */
+  hostDormerId?: string;
   /** Übersteuert das Rahmen-Detail des Typs feldweise für diese Öffnung ([105]). */
   frameDetail?: FrameDetail;
   /** Ersetzt den Schichteinzug des Typs für diese Öffnung ([106]). */
@@ -2309,6 +2350,8 @@ export type Roof = {
    * der Elementkante.
    */
   surfacePatternOffset?: Vec2;
+  /** Gauben/Lukarnen ([G5]) in den Dachflächen dieses Dachs. Fehlt ⇒ keine. */
+  dormers?: Array<Dormer>;
 };
 
 /**

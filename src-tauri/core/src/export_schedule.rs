@@ -127,6 +127,22 @@ pub fn schedule_rows(p: &Project) -> Vec<ScheduleRow> {
             thickness: Some(r.thickness),
             area: Some(polygon_area(&r.outline)),
         });
+        // Gauben ([G5]): Breite, Stirnhöhe, Wanddicke, Grundfläche des Ausschnitts im Hauptdach.
+        for d in r.dormers.as_deref().unwrap_or(&[]) {
+            let Some(g) = crate::dormer::geometry(p, r, d) else { continue };
+            let hole: Vec<Vec2> = g.hole().iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect();
+            rows.push(ScheduleRow {
+                kind: "Gaube",
+                id: d.id.clone(),
+                type_name: dormer_kind_name(d.kind).into(),
+                floor: floor_name(p, &r.floor_id),
+                floor_id: Some(r.floor_id.clone()),
+                length: Some(d.width),
+                height_m: Some(d.front_height),
+                thickness: Some(g.wall_thickness),
+                area: Some(polygon_area(&hole)),
+            });
+        }
     }
     for c in p.columns.as_deref().unwrap_or(&[]) {
         let (type_name, length, thickness) = match &c.profile {
@@ -146,6 +162,15 @@ pub fn schedule_rows(p: &Project) -> Vec<ScheduleRow> {
         });
     }
     rows
+}
+
+fn dormer_kind_name(k: DormerKind) -> &'static str {
+    match k {
+        DormerKind::Schlepp => "Schleppgaube",
+        DormerKind::Sattel | DormerKind::Unknown => "Satteldachgaube",
+        DormerKind::Flach => "Flachdachgaube",
+        DormerKind::Walm => "Walmgaube",
+    }
 }
 
 fn shape_name(s: RoofShape) -> &'static str {

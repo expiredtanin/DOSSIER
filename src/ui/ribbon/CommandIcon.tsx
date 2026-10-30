@@ -190,6 +190,15 @@ export function CommandIcon({ name }: { name: string }) {
           <rect x="6" y="6.5" width="4" height="3" strokeDasharray="1.4 1.2" />
         </svg>
       );
+    case "dormer":
+      // Gaube: Dachfläche mit Satteldach-Gaube und Fenster in der Stirn.
+      return (
+        <svg {...common}>
+          <polyline points="2,13 6,5 14,5" />
+          <polygon points="5.5,13 5.5,9 8,6.5 10.5,9 10.5,13" />
+          <rect x="7" y="10" width="2" height="2.5" />
+        </svg>
+      );
     case "roofwindow":
       // Dachfenster: Dachfläche mit Fensterrahmen und Glas.
       return (

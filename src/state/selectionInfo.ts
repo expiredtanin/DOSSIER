@@ -88,6 +88,8 @@ export interface RoofInfo {
   minY: number;
   /** Kanten (Umriss, dann Höfe) mit Neigungsvorgabe ([26], `roofEdgeList`). */
   edges: RoofEdge[];
+  /** Gauben ([G5]) des Dachs, wie gespeichert. */
+  dormers?: import("../model/types").Dormer[];
   /** Innenhöfe: Fläche (m²) und Punktzahl je Hof, in der Reihenfolge von `Roof.holes`. */
   holes: { area: number; points: number }[];
   /** Ob `edgePitchDeg` gesetzt ist. */
