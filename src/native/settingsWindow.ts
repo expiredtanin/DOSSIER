@@ -12,6 +12,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import type { AiAccessView } from "../ui/AiAccessSection";
 import { useEffect, useRef } from "react";
 import { isTauriRuntime } from "./projectFile";
 import type { LayoutState } from "../panels/types";
@@ -28,6 +29,8 @@ export interface SettingsSyncState {
   referenceElevationMasl: number | undefined;
   scaleLineWeights: boolean;
   offline: boolean;
+  /** [9] KI-Zugriff (Schalter, Sitzungsschlüssel, Stand). */
+  aiAccess: AiAccessView;
   layout: LayoutState;
 }
 
@@ -39,6 +42,7 @@ export interface SettingsCommandHandlers {
   onReferenceElevationChange: (n: number | undefined) => void;
   onScaleLineWeightsChange: (on: boolean) => void;
   onOfflineChange: (offline: boolean) => void;
+  onAiAccessChange: (on: boolean) => void;
   onApplyLayout: (layout: LayoutState) => void;
 }
 

@@ -27,7 +27,8 @@
 //   dossier-cli pdf-info <datei.pdf> [--page 1]    Vektor-PDF lesen ([76]): Seiten, Pfade, Texte, BBox (pt) als JSON
 //   dossier-cli convert plan.pdf plan.obp [--scale 100] [--page 1] [--no-text]
 //                                                  Vektor-PDF als 2D-Zeichnung (Ebenen nach Farbe/Strichstärke)
-//   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
+//   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio) auf der Datei: Werkzeuge aus core/aiToolDefs.ts
+//   dossier-cli mcp --app [--port 7979] [--token …] MCP-Brücke zur offenen App ([9], KI-Zugriff in den Einstellungen)
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
 //
 // Statt einer Datei nimmt `:beispiel` das eingebaute Demo-Haus (sampleProject).
@@ -105,9 +106,11 @@ import {
   validateProject,
   projectWarnings,
   sampleProject,
+  AI_BRIDGE_DEFAULT_PORT,
 } from "../core";
 import type { Project } from "../core";
 import { serveStdio } from "./mcp";
+import { startBridge } from "./mcpBridge";
 
 type Args = { positional: string[]; flags: Map<string, string>; cmds: string[] };
 
@@ -299,6 +302,7 @@ export async function run(argv: string[]): Promise<number> {
   if (file === "bcf-info") return runBcfInfo(command);
   if (file === "pointcloud-info") return pointCloudInfo(args, command);
   if (file === "pdf-info") return runPdfInfo(args, command);
+  if (file === "mcp" && args.flags.has("app")) return runAppBridge(args);
   if (!file || (!command && args.cmds.length === 0)) {
     process.stderr.write(
       "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|step|obj|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d> [Optionen]\n" +
@@ -306,7 +310,8 @@ export async function run(argv: string[]): Promise<number> {
         "        dossier-cli <projekt.obp> --cmd \"befehl …\" [--cmd …]   ({last} = zuletzt geschriebene Datei)\n" +
         "        dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n" +
         "        dossier-cli bcf-info <datei.bcfzip>\n" +
-        "        dossier-cli pdf-info <datei.pdf> [--page 1]\n",
+        "        dossier-cli pdf-info <datei.pdf> [--page 1]\n" +
+        "        dossier-cli mcp --app [--port 7979] [--token schlüssel]   (MCP-Brücke zur offenen App)\n",
     );
     return 2;
   }
@@ -321,6 +326,27 @@ export async function run(argv: string[]): Promise<number> {
   let code = 0;
   if (command) code = await execute(project, file, command, rest, args);
   return code === 0 ? runCmds(project, file, args) : code;
+}
+
+/**
+ * [9] `dossier-cli mcp --app [--port 7979] [--token …]`: MCP über stdio, Werkzeuge laufen in der offenen App.
+ * Schlüssel aus `--token` oder `DOSSIER_AI_TOKEN` (Einstellungen der App → KI-Zugriff).
+ */
+async function runAppBridge(args: Args): Promise<number> {
+  const token = args.flags.get("token") ?? process.env.DOSSIER_AI_TOKEN ?? "";
+  if (!token || token === "true") fail("mcp --app: Schlüssel fehlt (--token oder DOSSIER_AI_TOKEN, s. Einstellungen der App → KI-Zugriff)");
+  const port = Number(args.flags.get("port") ?? AI_BRIDGE_DEFAULT_PORT);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) fail("--port: 1 bis 65535");
+  let bridge;
+  try {
+    bridge = await startBridge({ port, token });
+  } catch (e) {
+    fail(`mcp --app: Port ${port} nicht verfügbar (${e instanceof Error ? e.message : String(e)})`);
+  }
+  process.stderr.write(`Dossier MCP-Brücke auf 127.0.0.1:${bridge.port} — wartet auf die App.\n`);
+  await serveStdio(bridge.handle);
+  await bridge.close();
+  return 0;
 }
 
 /** Endung (klein, ohne Punkt) eines Dateinamens. */

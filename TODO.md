@@ -1126,6 +1126,17 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
   Rest (nur Laden/Import/CLI) unter [K4] S3. · M
   29.10.: auch Laden/Import/CLI ohne Projekt-Differenz (`diffToOps` gelöscht); Öffnen/Neu leeren den Verlauf im Kern, ein Import = ein Schritt ([K4] S3/S4).
 - ◐ **[9] MCP-Brücke.** Headless `dossier-cli … mcp`; Brücke zum offenen Fenster fehlt. · M
+  30.10.: Brücke zur offenen App. `dossier-cli mcp --app [--port 7979] --token …` spricht MCP (stdio) und lauscht auf
+  127.0.0.1; die App verbindet sich als WebSocket-Client, nur mit „KI-Zugriff erlauben“ (Einstellungen, aus per Vorgabe,
+  Sitzungsschlüssel, gegenseitige HMAC-Anmeldung ohne dass der Schlüssel reist) — kein eigener Server im Tauri-Host, kein
+  Rust nötig. Eine Werkzeugliste für Datei und App (`core/aiToolDefs.ts`, Verteilung `core/aiTools.ts`): project_info,
+  query, render_svg, apply_ops, run_command (Kern-Befehle `cmdOps` mit JSON), validate, kennzahlen, schedule; nur App:
+  get_selection, select, zoom_to, export pdf, Speichern über den Dialog. Jede Änderung = ein Undo-Schritt „KI: <werkzeug>“,
+  KI-Protokoll unten links mit „KI pausieren“ (`ui/AiActivityPanel.tsx`, `state/aiAccess.ts`). Tests: `aiTools.test.ts`,
+  `mcpBridge.test.ts`, `aiAccess.test.ts`, e2e `aiBridge.spec.ts` (MCP-Client → Brücke → Browser-App).
+  **Offen:** in Tauri/macOS und Electron nicht getestet (WebSocket aus `tauri://localhost` auf `ws://127.0.0.1` ungeprüft;
+  CSP ist `null`); kein Ereignis-Strom (Auswahl/Änderungen an den Client); Undo/Redo und Ansichten (Schnitt/3D) als
+  Werkzeuge; [C3] (`screenshot`, `ui_click`) bleibt offen.
 
 ### Daten
 

@@ -127,6 +127,8 @@ import { RoomStampEditor } from "./panels/RoomStampEditor";
 import { defaultRoomStamp } from "./model/roomStamp";
 import { StatusBar } from "./ui/StatusBar";
 import { isOffline, setOffline } from "./net/net";
+import { setAiAccessEnabled, setAiView, useAiAccess } from "./state/aiAccess";
+import { AiActivityPanel } from "./ui/AiActivityPanel";
 import { markSessionClean, markSessionStart } from "./state/startupGuard";
 import { getTool } from "./tools/tools";
 import { computeSnap } from "./tools/snapping";
@@ -2765,6 +2767,16 @@ export default function App() {
     setOfflineState(v);
   };
 
+  // [9] KI-Zugriff (MCP-Brücke, Einstellungen → Allgemein): Stand für die Einstellungen; die
+  // Planansicht für `zoom_to` anmelden.
+  const aiAccessState = useAiAccess();
+  const aiAccess = { enabled: aiAccessState.enabled, token: aiAccessState.token, port: aiAccessState.port, status: aiAccessState.status };
+  useEffect(() => {
+    setAiView({ fitBounds: (pts) => planViewRef.current?.fitBounds(pts) });
+    return () => setAiView(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Hell/Dunkel (Einstellungen → Darstellung). Standard Hell (styles.css);
   // Dunkel ist Opt-in und persistiert in localStorage.
   const { themeMode, setThemeMode } = useThemeModeState();
@@ -2782,6 +2794,7 @@ export default function App() {
       referenceElevationMasl: project.referenceElevationMasl,
       scaleLineWeights: project.scaleLineWeights === true,
       offline,
+      aiAccess,
       layout,
     },
     {
@@ -2791,6 +2804,7 @@ export default function App() {
       onReferenceElevationChange: (n) => applyChange((p) => setFieldIfChanged(p, "referenceElevationMasl", n)),
       onScaleLineWeightsChange: setScaleLineWeights,
       onOfflineChange,
+      onAiAccessChange: setAiAccessEnabled,
       onApplyLayout: (l) => setLayout(reconcileLayout(l)),
     },
   );
@@ -3954,6 +3968,7 @@ export default function App() {
       )}
 
       <BusyOverlay />
+      <AiActivityPanel />
 
       {/* Modaler Import-Dialog (DXF/DWG) — offen, sobald eine Datei gewählt/
           fallengelassen wurde. Liefert eine strukturierte Entscheidung an
@@ -4015,6 +4030,8 @@ export default function App() {
           onScaleLineWeightsChange={setScaleLineWeights}
           offline={offline}
           onOfflineChange={onOfflineChange}
+          aiAccess={aiAccess}
+          onAiAccessChange={setAiAccessEnabled}
           layout={layout}
           onApplyLayout={(l) => setLayout(reconcileLayout(l))}
           onAliasOverridesChange={setAliasOverrides}
