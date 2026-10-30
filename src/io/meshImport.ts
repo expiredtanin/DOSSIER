@@ -64,6 +64,8 @@ export interface MeshImportReport {
   truncated: boolean;
   warnings: string[];
   objects: number;
+  /** Reparatur beim Import ([T5]): zusammengelegte Ecken, entfernte entartete Dreiecke, geschlossene Löcher. */
+  repaired?: { welded: number; degenerate: number; holes: number };
 }
 
 /** Rohergebnis aus Rust: Zahlenpuffer + Zeichenketten. */
@@ -198,7 +200,7 @@ export async function readMesh(bytes: Uint8Array, name: string, opts?: MeshReadO
 export function formatMeshReport(
   r: MeshImportReport,
   tr: (
-    key: "mesh.import.done" | "mesh.import.up" | "mesh.import.upUncertain" | "mesh.import.dropped" | "mesh.import.truncated",
+    key: "mesh.import.done" | "mesh.import.up" | "mesh.import.upUncertain" | "mesh.import.dropped" | "mesh.import.truncated" | "mesh.import.repaired",
     vars?: Record<string, string | number>,
   ) => string,
 ): string {
@@ -206,6 +208,8 @@ export function formatMeshReport(
   if (r.upAuto) parts.push(tr(r.upCertain ? "mesh.import.up" : "mesh.import.upUncertain", { axis: r.up.toUpperCase() }));
   const dropped = r.degenerate + r.badFaces;
   if (dropped) parts.push(tr("mesh.import.dropped", { n: dropped }));
+  const fixed = r.repaired ? r.repaired.degenerate + r.repaired.holes : 0;
+  if (r.repaired && (r.repaired.welded || fixed)) parts.push(tr("mesh.import.repaired", { welded: r.repaired.welded, tris: r.repaired.degenerate, holes: r.repaired.holes }));
   if (r.truncated) parts.push(tr("mesh.import.truncated"));
   return parts.join(" · ");
 }

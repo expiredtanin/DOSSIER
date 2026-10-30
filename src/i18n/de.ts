@@ -2250,6 +2250,7 @@ export const de = {
   "mesh.import.upUncertain": "Achse unsicher, angenommen: {axis} oben (im Import-Dialog wählbar)",
   "mesh.import.dropped": "{n} ungültige oder entartete Flächen verworfen",
   "mesh.import.truncated": "abgebrochen: zu viele Dreiecke",
+  "mesh.import.repaired": "repariert: {welded} Ecken verschweisst, {tris} entartete Dreiecke entfernt, {holes} Löcher geschlossen",
   "mesh.import.noFaces": "Die PLY-Datei enthält keine Flächen (Punktwolke): sie wird als Punktwolke geöffnet.",
   "mesh.import.missingExternal": "Zusätzliche Dateien fehlen: {list}. Wählen Sie sie zusammen mit dem Modell aus (oder ziehen Sie alle Dateien gemeinsam ins Fenster).",
   "mesh.importDialog.files": "Begleitdateien: {list}",

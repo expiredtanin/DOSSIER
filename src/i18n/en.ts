@@ -2200,6 +2200,7 @@ export const en: Record<TranslationKey, string> = {
   "mesh.import.upUncertain": "Axis uncertain, assumed: {axis} up (selectable in the import dialog)",
   "mesh.import.dropped": "{n} invalid or degenerate faces dropped",
   "mesh.import.truncated": "aborted: too many triangles",
+  "mesh.import.repaired": "repaired: {welded} vertices welded, {tris} degenerate triangles removed, {holes} holes closed",
   "mesh.import.noFaces": "The PLY file has no faces (point cloud): opening it as a point cloud.",
   "mesh.import.missingExternal": "Additional files are missing: {list}. Select them together with the model (or drop all files into the window together).",
   "mesh.importDialog.files": "Companion files: {list}",
