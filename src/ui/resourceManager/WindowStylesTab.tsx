@@ -7,6 +7,7 @@ import { FieldRow, NumberField, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
 import { ElevationPreview } from "../ElevationPreview";
 import { openingTypePresets } from "../../model/openingPresets";
+import { REVEAL_PRESETS, revealPresetOf } from "../OpeningDetailPanels";
 
 /**
  * Synthetische Öffnungs-Instanz NUR für die Vorschau: `ElevationPreview`
@@ -163,13 +164,25 @@ export function WindowStylesTab({
               />
             </FieldRow>
           )}
-          <FieldRow label={t("resources.field.innerLayerRecess")}>
-            <input
-              type="checkbox"
-              checked={!!win.innerLayerRecess}
-              onChange={(e) => patch({ innerLayerRecess: e.target.checked })}
+          <FieldRow label={t("oed.cat.schichten")}>
+            {/* [106] Schichteinzug-Vorgabe (ersetzt „innerLayerRecess"; Details im Dialog „Fenster bearbeiten"). */}
+            <select
+              value={revealPresetOf(win.layerReveals ?? (win.innerLayerRecess ? [{ layer: -1, mode: "zurueck" }] : []))}
+              onChange={(e) => {
+                const p = REVEAL_PRESETS.find((x) => x.id === e.target.value);
+                if (p) patch({ layerReveals: p.rules.map((r) => ({ ...r })), innerLayerRecess: undefined });
+              }}
               title={t("resources.field.innerLayerRecess.hint")}
-            />
+            >
+              {REVEAL_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {t(`oed.rv.preset.${p.id}`)}
+                </option>
+              ))}
+              <option value="custom" disabled>
+                {t("oed.rv.custom")}
+              </option>
+            </select>
           </FieldRow>
           <FieldRow label={t("resources.field.transomHeight")}>
             <NumberField

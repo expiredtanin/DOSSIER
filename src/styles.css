@@ -5895,6 +5895,78 @@ body {
 .oed-hint-warn {
   color: var(--ctx-danger);
 }
+/* [105]/[106] Detail-Panels und Kern-Vorschau im Fenster-/Tür-Dialog. */
+.oed-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px 8px;
+  margin: 0;
+}
+.oed-group legend {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-2);
+  padding: 0 4px;
+}
+.oed-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.oed-reveal-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+.oed-reveal-table th,
+.oed-reveal-table td {
+  text-align: left;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.oed-reveal-table .oed-input,
+.oed-reveal-table .oed-select {
+  min-width: 0;
+  width: 100%;
+}
+.oed-side-rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 10px 2px 0;
+}
+.oed-input-short {
+  width: 70px;
+}
+.oed-dim {
+  color: var(--muted);
+}
+.oed-core-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 300px;
+}
+.oed-preview-tabs {
+  display: flex;
+  gap: 4px;
+}
+.oed-preview-svg {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
 .oed-check {
   display: flex;
   align-items: center;

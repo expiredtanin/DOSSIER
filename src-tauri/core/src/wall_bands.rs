@@ -35,6 +35,26 @@ pub struct OpeningIn {
     pub recess_inner_layer: bool,
 }
 
+/// Schichteinzug einer Öffnung ([106], nur gestapelte Schichten): erkannt am gleichen Intervall/
+/// Höhe wie ihr [`OpeningIn`]; je Band Rücksprung links/rechts/oben/unten und Zusatzstücke
+/// `(band, seite 0 L | 1 R | 2 oben | 3 unten, [x0, x1, o0, o1])` mit x ab Rohbaukante in die
+/// Öffnung, o quer ab der Aussenfläche (Band 0 = aussen).
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct RevealIn {
+    pub from: f64,
+    pub to: f64,
+    pub z_bottom: f64,
+    pub z_top: f64,
+    pub shifts: Vec<[f64; 4]>,
+    pub pieces: Vec<(usize, usize, [f64; 4])>,
+}
+
+impl RevealIn {
+    fn of(&self, h: &OpeningIn) -> bool {
+        self.from == h.from && self.to == h.to && self.z_bottom == h.z_bottom && self.z_top == h.z_top
+    }
+}
+
 /// Eine Decke desselben Geschosses: z-Ausdehnung, Umriss, Schichten (Dicke, Rang; `None` =
 /// Bauteil unbekannt). `layers = None`: Deckentyp unbekannt.
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +100,8 @@ pub struct WallIn {
     pub bands: Vec<BandIn>,
     pub openings: Vec<OpeningIn>,
     pub cuts: WallCuts,
+    /// Schichteinzug ([106]); leer = alle Schichten bündig.
+    pub reveals: Vec<RevealIn>,
 }
 
 /// Decken und Dächer eines Geschosses — einmal je Geschoss gelesen, für alle seine Wände; die
@@ -122,6 +144,8 @@ pub struct Piece {
     pub z_top: f64,
     pub top_drop: Option<[f64; 2]>,
     pub holes: Vec<[f64; 4]>,
+    /// Eigene Dicke (Schichteinzug-Stück, [106]); `None` = Banddicke.
+    pub thickness: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -366,6 +390,7 @@ impl Emitter<'_> {
             z_top: zt,
             top_drop: (drop[0] > EPS || drop[1] > EPS).then_some(drop),
             holes,
+            thickness: None,
         });
     }
 }
@@ -607,7 +632,39 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
             }
         }
     }
+    reveal_pieces(&mut em, &offsets);
     em.out
+}
+
+/// Zusatzstücke des Schichteinzugs ([106]) als eigene Körper der Schicht: Leibungen über die
+/// Öffnungshöhe (ohne die Ecken der Sturz-/Brüstungsstücke derselben Schicht), Sturz/Brüstung
+/// über die ganze Öffnungsbreite.
+fn reveal_pieces(em: &mut Emitter, offsets: &[f64]) {
+    let w = em.w;
+    if !w.stacked || w.bands.is_empty() {
+        return;
+    }
+    let face = offsets[0] - w.bands[0].thickness / 2.0;
+    for r in &w.reveals {
+        let reach = |band: usize, side: usize| r.pieces.iter().filter(|p| p.0 == band && p.1 == side).fold(0.0f64, |m, p| m.max(p.2[1]));
+        for &(band, side, [x0, x1, o0, o1]) in &r.pieces {
+            if band >= w.bands.len() || !(x1 - x0 > EPS) || !(o1 - o0 > EPS) {
+                continue;
+            }
+            let off = face + (o0 + o1) / 2.0;
+            let (a, b, zb, zt) = match side {
+                0 => (r.from + x0, r.from + x1, r.z_bottom + reach(band, 3), r.z_top - reach(band, 2)),
+                1 => (r.to - x1, r.to - x0, r.z_bottom + reach(band, 3), r.z_top - reach(band, 2)),
+                2 => (r.from, r.to, r.z_top - x1, r.z_top - x0),
+                _ => (r.from, r.to, r.z_bottom + x0, r.z_bottom + x1),
+            };
+            let before = em.out.len();
+            em.push(band, a, b, zb, zt, off, vec![], [0.0, 0.0]);
+            if let Some(pc) = em.out.get_mut(before) {
+                pc.thickness = Some(o1 - o0);
+            }
+        }
+    }
 }
 
 /// Ein Körper eines Bands im layered-Pfad: Öffnungs-Löcher auf den Körper-Start umrechnen (an der
@@ -616,11 +673,15 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
 #[allow(clippy::too_many_arguments)]
 fn emit_band_piece(em: &mut Emitter, li: usize, off: f64, cutouts: &[OpeningIn], innermost: bool, recess: f64, a: f64, bb: f64, zb: f64, zt_start: f64, zt_end: f64) {
     let zt = zt_start.max(zt_end);
+    let reveals = &em.w.reveals;
     let holes: Vec<[f64; 4]> = cutouts
         .iter()
         .filter(|h| h.z_top > zb + EPS && h.z_bottom < zt - EPS)
         .map(|h| {
-            if innermost && h.recess_inner_layer {
+            if let Some(s) = reveals.iter().find(|r| r.of(h)).and_then(|r| r.shifts.get(li)) {
+                // [106]: Schicht springt je Seite zurück.
+                [h.from - a - s[0], h.to - a + s[1], h.z_bottom - s[3], h.z_top + s[2]]
+            } else if innermost && h.recess_inner_layer {
                 [h.from - a - recess, h.to - a + recess, h.z_bottom - recess, h.z_top + recess]
             } else {
                 [h.from - a, h.to - a, h.z_bottom, h.z_top]
@@ -659,6 +720,7 @@ mod tests {
             bands,
             openings: vec![],
             cuts: WallCuts::default(),
+            reveals: vec![],
         }
     }
     fn band(t: f64, p: f64) -> BandIn {
@@ -732,6 +794,30 @@ mod tests {
         // Sturz Tür, Pfeiler, Brüstung + Sturz Fenster (Tür bis zum Rand: kein Pfeiler davor).
         assert_eq!(s.len(), 4, "{s:?}");
         assert!(s.iter().all(|q| q.holes.is_empty() && q.top_drop.is_none()));
+    }
+
+    #[test]
+    fn schichteinzug_weitet_loch_und_setzt_stuecke() {
+        let mut w = base((0.0, 0.0), (4.0, 0.0), vec![band(0.16, 1.0), band(0.15, 2.0), band(0.01, 1.0)]);
+        let o = OpeningIn { from: 1.0, to: 2.0, z_bottom: 0.9, z_top: 2.1, recess_inner_layer: false };
+        w.openings.push(o);
+        w.reveals.push(RevealIn {
+            from: 1.0,
+            to: 2.0,
+            z_bottom: 0.9,
+            z_top: 2.1,
+            shifts: vec![[0.0; 4], [0.0; 4], [0.02, 0.02, 0.0, 0.0]],
+            pieces: vec![(0, 2, [0.0, 0.03, 0.0, 0.16])],
+        });
+        let ps = bands_of(&w);
+        let inner = ps.iter().find(|p| p.band == 2 && p.thickness.is_none()).unwrap();
+        assert!(close(inner.holes[0][0], 0.98) && close(inner.holes[0][1], 2.02));
+        let outer = ps.iter().find(|p| p.band == 0 && p.thickness.is_none()).unwrap();
+        assert!(close(outer.holes[0][0], 1.0));
+        let st = ps.iter().find(|p| p.thickness.is_some()).unwrap();
+        assert!(close(st.thickness.unwrap(), 0.16) && close(st.z_bottom, 2.07) && close(st.z_top, 2.1));
+        // Stück liegt in der Aussendämmung (Mitte −0.16 + 0.08 bei Gesamtdicke 0.32 zentriert).
+        assert!(close(st.start.y, -0.08));
     }
 
     #[test]

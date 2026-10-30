@@ -1504,6 +1504,35 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Offen: Verschieben/Griffe und Objekt-Info für Dach-Öffnungen (Info zeigt Wand-Felder), Fenster-/Türliste
   (Geschoss aus der Wand), Löschen des Dachs löscht die Fenster nicht mit (Prüfung meldet den fehlenden Wirt),
   Eindeckrahmen nur als flacher Ring, Lukarnen, nicht in der Tauri-App geprüft. · M
+- ◐ **[105] Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten.** (29.10., Wunsch Maintainer „so tief wie
+  ArchiCAD“) Neue optionale Modellfelder (nur Rust-Modell): `frameDetail` am Fenster-/Türtyp und feldweise an der Öffnung
+  (`Opening.frameDetail`): Blendrahmen-Breite je Seite, Tiefe/Lage, Flügelrahmen (Breite, Tiefe, Überschlag), Pfosten/
+  Kämpfer (Breite, Tiefe), Verbreiterungsprofile links/rechts, Fensterbank- und Storen-Anschlussprofil, Anschlag je Seite.
+  Türtyp `frameKind` neu `umfassungszarge`/`eckzarge`/`blockzarge`/`blendrahmen`/`futter` (Zarge und Blockrahmen behalten das bisherige Rahmenband), Masse
+  `doorFrame` (Falz, Spiegel, Blech, Futter, Bekleidung ein-/beidseitig), an der Öffnung `doorFrameKind`/`doorFrame`. Kern
+  `opening_detail.rs` (Auflösung Typ + Übersteuerung, Zargen-Profil je Art = Grundriss- und Sturzschnitt, Rechteck-Zerlegung
+  für 3D). Grundriss: Zargen-Profil an beiden Leibungen (fein: Stahl gefüllt), Blatt schlägt im Falz an, Rahmenbreite
+  rechts ≠ links, Verbreiterungsprofile, Anschlag je Seite in der Schicht-Schraffur. Schnitt: Rahmen oben/unten je Breite,
+  Anschlussprofile, Zarge am Sturz + Blatt im Falz, Anschlag oben/unten (Sturz-Nase, bisher offen aus [94]). 3D: Rahmenring
+  je Seite (`frame_ring_quads_sides`), Profile, Flügel/Pfosten/Kämpfer-Masse, Anschlag je Seite, Zargen als Quader.
+  Dialog „Fenster/Tür-Einstellungen“: Kategorien Rahmen-Detail, Anschlag, Zarge/Rahmenart, Schalter „Typ / nur diese
+  Öffnung“ (Übersteuerung, zurücksetzbar); Vorschau neu aus dem Kern (Grundriss fein, Schnitt, Ansicht der Öffnung als SVG,
+  Abfrage `openingPreview`, `src/plan/openingPreview.ts`). Testprojekt `scripts/gen-opening-test-project.ts`. Geprüft:
+  Rust-/vitest-Tests, CLI-Grundriss/-Schnitte/-Ansicht als PNG angesehen (Linux). Offen: Ansicht (`plan_elevation.rs`) zeigt
+  Rahmen je Seite, Profile und Zargenspiegel/Bekleidung noch nicht; Türblatt im 3D weiter mittig statt im Falz; Grundriss-
+  Türblatt an der Wandachse; Pfosten-Breite wirkt nur im 3D; Ressourcen-Tabs ohne die neuen Felder (nur im Dialog); nicht in
+  der Tauri-App geprüft.
+- ◐ **[106] Fenster/Türen: Schichteinzug je Wandschicht und Seite.** (29.10.) `layerReveals` am Typ bzw. an der Öffnung (ersetzt
+  dort den Typ): je Schicht (Index ab aussen, negativ ab innen) bündig / zurückspringend um Mass (Vorgabe Schichtdicke) / in
+  die Leibung bis an den Rahmen (Vorgabe ≤ 4 cm, vom Rahmen weg gestapelt) / Rahmen überdeckend um Mass (Vorgabe 3 cm), je
+  Seite (Leibung links/rechts, Sturz, Brüstung) übersteuerbar; Vorgaben (z. B. „Aussendämmung überdämmt Rahmen 3 cm,
+  Innenputz in Leibung“). `innerLayerRecess` gilt nur noch ohne Regeln (= innerste Schicht zurück), der Dialog/Ressourcen-Tab
+  schreibt beim Ändern `layerReveals` und löscht es. Geometrie im Kern: Grundriss-Poché je Schicht (`plan_walls.rs`, Umriss
+  und Fugen aus dem Teilflächen-Raster), Schnitt (Sturz/Brüstung je Schicht in `split_wall_layers`), 3D (`wall_bands.rs`:
+  Loch je Schicht geweitet, Zusatzstücke als eigene Körper) — damit auch IFC-Wandkörper/Netto-Volumen. Geprüft: Rust-Tests,
+  CLI-Grundriss/-Schnitt einer Aussenwand Putz/Dämmung/Backstein/Putz mit vier Varianten angesehen. Offen: Schnitt quer
+  durch eine Leibung (Ebene parallel zur Wand) ohne Rücksprung; Mengen (Leibungsflächen je Schicht) nicht in der Fenster-
+  liste; keine Rundbogen-/Dachfenster-Leibungen; nicht in der Tauri-App geprüft.
 
 ## Priorität 4 — später
 

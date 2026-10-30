@@ -714,6 +714,21 @@ pub enum DoorTypeFrameKind {
     Zarge,
     #[serde(rename = "blockrahmen")]
     Blockrahmen,
+    /// Blendrahmen ([105]): Rahmen VOR der Wandfläche (Aufschlagseite), überdeckt die Leibungskante.
+    #[serde(rename = "blendrahmen")]
+    Blendrahmen,
+    /// Umfassungszarge ([105]): Stahlzarge umfasst die ganze Wanddicke, Spiegel beidseitig.
+    #[serde(rename = "umfassungszarge")]
+    Umfassungszarge,
+    /// Eckzarge ([105]): Winkel-Stahlzarge nur auf der Aufschlagseite (Spiegel + Falz).
+    #[serde(rename = "eckzarge")]
+    Eckzarge,
+    /// Blockzarge ([105]): Holz-Blockzarge über die ganze Leibungstiefe, Falz auf der Aufschlagseite.
+    #[serde(rename = "blockzarge")]
+    Blockzarge,
+    /// Futter und Bekleidung ([105]): Futterbrett in der Leibung, Bekleidung auf einer/beiden Wandflächen.
+    #[serde(rename = "futter")]
+    Futter,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -857,6 +872,20 @@ pub struct DoorType {
     #[serde(rename = "lintelHeight", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lintel_height: Option<f64>,
+    /// Rahmen-Detail ([105]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
+    /// Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
+    #[serde(rename = "frameDetail", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub frame_detail: Option<FrameDetail>,
+    /// Schichteinzug ([106]): wie die Wandschichten an Leibung, Sturz und Brüstung anschliessen.
+    /// Fehlt ⇒ alle Schichten bündig (bzw. `innerLayerRecess`, veraltet).
+    #[serde(rename = "layerReveals", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layer_reveals: Option<Vec<LayerReveal>>,
+    /// Masse der Türzarge/des Türrahmens ([105]): Falz, Spiegel, Futter, Bekleidung.
+    #[serde(rename = "doorFrame", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub door_frame: Option<DoorFrameDetail>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -1161,6 +1190,7 @@ pub struct WindowType {
     /// Öffnung zurück, statt bündig mit den übrigen Schichten abzuschliessen —
     /// anders als {@link insetFromFace} (der Rahmen-Position), ändert dies die
     /// WAND-GEOMETRIE selbst an der Laibung. Default false (bündig, Alt-Verhalten).
+    /// Veraltet ([106]): gilt nur ohne {@link layerReveals} (= innerste Schicht „zurück um Schichtdicke").
     #[serde(rename = "innerLayerRecess", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub inner_layer_recess: Option<bool>,
@@ -1207,6 +1237,230 @@ pub struct WindowType {
     #[serde(rename = "lintelHeight", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lintel_height: Option<f64>,
+    /// Rahmen-Detail ([105]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
+    /// Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
+    #[serde(rename = "frameDetail", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub frame_detail: Option<FrameDetail>,
+    /// Schichteinzug ([106]): wie die Wandschichten an Leibung, Sturz und Brüstung anschliessen.
+    /// Fehlt ⇒ alle Schichten bündig (bzw. `innerLayerRecess`, veraltet).
+    #[serde(rename = "layerReveals", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layer_reveals: Option<Vec<LayerReveal>>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+// ── [105] Rahmen-/Anschlag-Details, [106] Schichteinzug ─────────────────────
+
+/// Werte je Seite einer Öffnung (Meter). `left` = Leibung beim Wandanfang (kleineres Achsmass),
+/// `right` = beim Wandende, `top` = Sturz, `bottom` = Brüstung/Schwelle. Fehlt ⇒ Rückfallwert.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct OpeningSides {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub left: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub right: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub top: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bottom: Option<f64>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Rahmen-Detail eines Fenster-/Türtyps ([105]); an der Öffnung feldweise übersteuerbar
+/// (`Opening.frameDetail`). Alle Masse in Metern, fehlend ⇒ Typ-Wert bzw. bisheriges Verhalten.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct FrameDetail {
+    /// Blendrahmen: Ansichtsbreite je Seite (fehlt ⇒ `frameWidth`).
+    #[serde(rename = "frameSides", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub frame_sides: Option<OpeningSides>,
+    /// Blendrahmen-Tiefe quer zur Wand (übersteuert `frameDepth`).
+    #[serde(rename = "frameDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub frame_depth: Option<f64>,
+    /// Lage: Abstand der Rahmen-Vorderkante von der Fläche `insetFace` (übersteuert `insetFromFace`).
+    #[serde(rename = "insetFromFace", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub inset_from_face: Option<f64>,
+    /// Bezugsfläche der Lage (übersteuert `insetFace`).
+    #[serde(rename = "insetFace", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, inline)]
+    pub inset_face: Option<WindowTypeInsetFace>,
+    /// Flügelrahmen: Ansichtsbreite (fehlt ⇒ wie Blendrahmen).
+    #[serde(rename = "sashWidth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sash_width: Option<f64>,
+    /// Flügelrahmen: Tiefe quer zur Wand (fehlt ⇒ Blendrahmen-Tiefe).
+    #[serde(rename = "sashDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sash_depth: Option<f64>,
+    /// Flügel-Überschlag: so weit überdeckt der Flügel den Blendrahmen (fehlt ⇒ 0).
+    #[serde(rename = "sashOverlap", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sash_overlap: Option<f64>,
+    /// Pfosten (senkrechte Teilung): Breite (fehlt ⇒ `postWidth` der Flügeltabelle).
+    #[serde(rename = "mullionWidth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mullion_width: Option<f64>,
+    /// Pfosten-Tiefe (fehlt ⇒ Blendrahmen-Tiefe).
+    #[serde(rename = "mullionDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mullion_depth: Option<f64>,
+    /// Kämpfer (waagrechte Teilung, Riegel): Breite (fehlt ⇒ wie Blendrahmen).
+    #[serde(rename = "transomWidth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub transom_width: Option<f64>,
+    /// Kämpfer-Tiefe (fehlt ⇒ Blendrahmen-Tiefe).
+    #[serde(rename = "transomDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub transom_depth: Option<f64>,
+    /// Verbreiterungsprofile je Seite (Ansichtsbreite, aussen am Blendrahmen angesetzt).
+    #[serde(rename = "extensionProfiles", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub extension_profiles: Option<OpeningSides>,
+    /// Fensterbank-Anschlussprofil unten (Höhe, unter dem Blendrahmen).
+    #[serde(rename = "sillProfile", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sill_profile: Option<f64>,
+    /// Storen-/Rollladen-Anschlussprofil oben (Höhe, über dem Blendrahmen).
+    #[serde(rename = "shadingProfile", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shading_profile: Option<f64>,
+    /// Anschlag je Seite (Meter; übersteuert `rebateDepth`, 0 = kein Anschlag auf dieser Seite).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rebates: Option<OpeningSides>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Bekleidung einer Tür ([105]): auf der Aufschlagseite, der Gegenseite, beidseitig oder keine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum CasingSides {
+    #[default]
+    #[serde(rename = "beide")]
+    Beide,
+    #[serde(rename = "aufschlag")]
+    Aufschlag,
+    #[serde(rename = "gegen")]
+    Gegen,
+    #[serde(rename = "keine")]
+    Keine,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Masse einer Türzarge/eines Türrahmens ([105]); Bedeutung je `frameKind`. Fehlt ⇒ Vorgabe.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct DoorFrameDetail {
+    /// Falzbreite (parallel zur Wandfläche: Überdeckung Blatt/Rahmen), Vorgabe 0.015.
+    #[serde(rename = "falzWidth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub falz_width: Option<f64>,
+    /// Falztiefe (quer zur Wand, ≈ Blattdicke), Vorgabe 0.04.
+    #[serde(rename = "falzDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub falz_depth: Option<f64>,
+    /// Spiegelbreite der Stahlzarge auf der Wandfläche, Vorgabe 0.05.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub spiegel: Option<f64>,
+    /// Blechdicke der Stahlzarge, Vorgabe 0.002.
+    #[serde(rename = "sheetThickness", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sheet_thickness: Option<f64>,
+    /// Futterstärke (Brett in der Leibung), Vorgabe 0.025.
+    #[serde(rename = "liningThickness", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lining_thickness: Option<f64>,
+    /// Bekleidungsbreite, Vorgabe 0.07.
+    #[serde(rename = "casingWidth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub casing_width: Option<f64>,
+    /// Bekleidungsdicke, Vorgabe 0.012.
+    #[serde(rename = "casingThickness", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub casing_thickness: Option<f64>,
+    /// Bekleidung auf welcher Seite (Vorgabe beide).
+    #[serde(rename = "casingSides", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub casing_sides: Option<CasingSides>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Wie eine Wandschicht an der Öffnung anschliesst ([106]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum RevealMode {
+    /// Schicht endet bündig an der Rohbauöffnung (bisher).
+    #[default]
+    #[serde(rename = "buendig")]
+    Buendig,
+    /// Schicht springt um `amount` zurück (fehlt ⇒ um ihre eigene Dicke).
+    #[serde(rename = "zurueck")]
+    Zurueck,
+    /// Schicht läuft in die Leibung bis an den Rahmen (Dicke dort `amount`, fehlt ⇒ Schichtdicke, höchstens 4 cm).
+    #[serde(rename = "leibung")]
+    Leibung,
+    /// Schicht überdeckt den Rahmen um `amount` (fehlt ⇒ 3 cm), nur vor dem Rahmen.
+    #[serde(rename = "ueberdaemmt")]
+    Ueberdaemmt,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Abweichende Regel für eine Seite ([106]).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct RevealSide {
+    pub mode: RevealMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub amount: Option<f64>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Schichteinzug einer Wandschicht an der Öffnung ([106]): Regel für alle Seiten, je Seite
+/// übersteuerbar. `layer` zählt ab aussen (0 = äusserste Schicht); negativ ab innen (−1 = innerste),
+/// damit dieselbe Regel für verschiedene Wandtypen gilt.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct LayerReveal {
+    pub layer: f64,
+    pub mode: RevealMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub amount: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub left: Option<RevealSide>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub right: Option<RevealSide>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub top: Option<RevealSide>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bottom: Option<RevealSide>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2485,6 +2739,22 @@ pub struct Opening {
     #[serde(rename = "hostAngle", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub host_angle: Option<f64>,
+    /// Übersteuert das Rahmen-Detail des Typs feldweise für diese Öffnung ([105]).
+    #[serde(rename = "frameDetail", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub frame_detail: Option<FrameDetail>,
+    /// Ersetzt den Schichteinzug des Typs für diese Öffnung ([106]).
+    #[serde(rename = "layerReveals", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layer_reveals: Option<Vec<LayerReveal>>,
+    /// Übersteuert die Rahmenart des Türtyps ([105]).
+    #[serde(rename = "doorFrameKind", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, inline)]
+    pub door_frame_kind: Option<DoorTypeFrameKind>,
+    /// Übersteuert die Zargen-/Rahmenmasse des Türtyps feldweise ([105]).
+    #[serde(rename = "doorFrame", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub door_frame: Option<DoorFrameDetail>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
