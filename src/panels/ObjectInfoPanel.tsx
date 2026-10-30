@@ -27,6 +27,7 @@ import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { flattenCategories, formatM } from "../model/types";
 import type {
+  DimRef,
   DrawingLevel,
   RoofShape,
   SiaCategory,
@@ -580,6 +581,44 @@ export function SectionLineSection({
       <button type="button" className="objinfo-btn" onClick={() => host.onDeleteSectionLine()}>
         {t("objinfo.sectionLine.delete")}
       </button>
+    </>
+  );
+}
+
+// ── Assoziative Bemassung ([38]) ────────────────────────────────────────────
+// Je Punkt: frei, angehängt (Merkmal + Element) oder Bezug verloren; „Bemassung lösen" entfernt alle.
+export function DimRefsSection({
+  refs,
+  drawingId,
+  host,
+}: {
+  refs: (DimRef | null)[];
+  drawingId: string;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  const lost = refs.some((r) => r?.lost);
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.dimRefs.section")}</div>
+      {refs.map((r, i) => (
+        <div className="objinfo-field" key={i} data-testid="dim-ref">
+          <span className="objinfo-flabel">{t("objinfo.dimRefs.point", { n: i + 1 })}</span>
+          <span className="objinfo-fval">
+            {!r
+              ? t("objinfo.dimRefs.free")
+              : r.lost
+                ? t("objinfo.dimRefs.lost", { id: r.id })
+                : `${t(`objinfo.dimRefs.feature.${r.feature}` as TranslationKey)} · ${r.id}${r.id2 ? ` / ${r.id2}` : ""}`}
+          </span>
+        </div>
+      ))}
+      {lost && <div className="objinfo-measure-hint">{t("objinfo.dimRefs.lostHint")}</div>}
+      <div className="objinfo-field">
+        <button type="button" className="objinfo-btn" onClick={() => host.onDetachDimension(drawingId)}>
+          {t("cmd.dimdetach.label")}
+        </button>
+      </div>
     </>
   );
 }

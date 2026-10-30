@@ -24,6 +24,7 @@
 
 import { segmentHud } from "../../tools/types";
 import type {
+  CmdInput,
   Command,
   CommandContext,
   CommandField,
@@ -76,6 +77,8 @@ interface DimStart extends CommandState {
 interface DimNext extends CommandState {
   phase: "next";
   pts: Vec2[];
+  /** Gefangene Klickpunkte (roh, vor der Projektion) — daran hängt die Kette assoziativ ([38]). */
+  snaps?: Vec2[];
   cursor: Vec2 | null;
   /** ID der bearbeiteten Kette (Ergänzen-Modus) — null = neue Kette. */
   editId: string | null;
@@ -83,6 +86,7 @@ interface DimNext extends CommandState {
 interface DimOffset extends CommandState {
   phase: "offset";
   pts: Vec2[];
+  snaps?: Vec2[];
   cursor: Vec2 | null;
   editId: string | null;
 }
@@ -117,8 +121,12 @@ function offsetDraft(ctx: CommandContext, pts: Vec2[], at: Vec2 | null): ToolDra
 }
 
 /** Commit (Kern): Kette (Nullstrecken entfernt) mit Abstand bzw. Seite eines Punkts; `editId` ändert eine bestehende. */
-const commitChain = (ctx: CommandContext, pts: Vec2[], offset: number | null, side: Vec2 | null, editId: string | null) =>
-  createMutation(ctx, { cmd: "dimension", pts, offset, side, editId });
+const commitChain = (ctx: CommandContext, pts: Vec2[], offset: number | null, side: Vec2 | null, editId: string | null, snaps: Vec2[] = []) =>
+  createMutation(ctx, { cmd: "dimension", pts, offset, side, editId, snaps });
+
+/** Gefangene Punkte samt neuem Klick (nur wenn er gefangen wurde). */
+const withSnap = (snaps: Vec2[] | undefined, input: CmdInput): Vec2[] =>
+  input.kind === "point" && input.snap ? [...(snaps ?? []), input.point] : (snaps ?? []);
 
 const idle = (): [CommandState, CommandResult] => [
   { phase: "start", lastPoint: null },
@@ -147,11 +155,11 @@ export const dimensionCommand: Command = {
       if (input.id === "undo") {
         const pts = s.pts.slice(0, -1);
         if (pts.length === 0) return [{ phase: "start", lastPoint: null }, { draft: null }];
-        const ns: DimNext = { phase: "next", pts, cursor: s.cursor, editId: s.editId, lastPoint: pts[pts.length - 1] };
+        const ns: DimNext = { phase: "next", pts, cursor: s.cursor, editId: s.editId, lastPoint: pts[pts.length - 1], snaps: s.snaps };
         return [ns, { draft: chainDraft(pts, s.cursor) }];
       }
       if (input.id === "finish" && s.pts.length >= 2) {
-        const ns: DimOffset = { phase: "offset", pts: s.pts, cursor: s.cursor, editId: s.editId, lastPoint: s.lastPoint };
+        const ns: DimOffset = { phase: "offset", pts: s.pts, cursor: s.cursor, editId: s.editId, lastPoint: s.lastPoint, snaps: s.snaps };
         return [ns, { draft: offsetDraft(ctx, s.pts, null) }];
       }
       return [s, { draft: chainDraft(s.pts, s.cursor) }];
@@ -166,13 +174,13 @@ export const dimensionCommand: Command = {
         const existing = selectedChain(ctx);
         const pts = existing ? insertIntoChain(ctx, existing.pts, pt) : [pt];
         const editId = existing ? existing.id : null;
-        const ns: DimNext = { phase: "next", pts, cursor: pt, editId, lastPoint: pt };
+        const ns: DimNext = { phase: "next", pts, cursor: pt, editId, lastPoint: pt, snaps: withSnap([], input) };
         return [ns, { draft: chainDraft(pts, pt) }];
       }
       // Ab dem dritten Punkt (bzw. jedem weiteren Klick im Ergänzen-Modus):
       // auf die durch Punkt 1/2 festgelegte Gerade projizieren/einsortieren.
       const pts = s.pts.length >= 2 ? insertIntoChain(ctx, s.pts, pt) : [...s.pts, pt];
-      const ns: DimNext = { phase: "next", pts, cursor: pt, editId: s.editId, lastPoint: pt };
+      const ns: DimNext = { phase: "next", pts, cursor: pt, editId: s.editId, lastPoint: pt, snaps: withSnap(s.snaps, input) };
       return [ns, { draft: chainDraft(pts, pt) }];
     }
 
@@ -180,8 +188,8 @@ export const dimensionCommand: Command = {
     if (input.kind !== "number" && input.kind !== "point") return [s, { draft: offsetDraft(ctx, s.pts, null) }];
     const commit =
       input.kind === "number"
-        ? commitChain(ctx, s.pts, input.value, null, s.editId)
-        : commitChain(ctx, s.pts, null, input.point, s.editId);
+        ? commitChain(ctx, s.pts, input.value, null, s.editId, s.snaps)
+        : commitChain(ctx, s.pts, null, input.point, s.editId, s.snaps);
     return [{ phase: "start", lastPoint: null }, { draft: null, done: true, commit }];
   },
 
@@ -210,7 +218,7 @@ export const dimensionCommand: Command = {
   onConfirm: (state, ctx): [CommandState, CommandResult] => {
     const s = state as DimState;
     if (s.phase === "next" && s.pts.length >= 2) {
-      const ns: DimOffset = { phase: "offset", pts: s.pts, cursor: s.cursor, editId: s.editId, lastPoint: s.lastPoint };
+      const ns: DimOffset = { phase: "offset", pts: s.pts, cursor: s.cursor, editId: s.editId, lastPoint: s.lastPoint, snaps: s.snaps };
       return [ns, { draft: offsetDraft(ctx, s.pts, null) }];
     }
     return idle();

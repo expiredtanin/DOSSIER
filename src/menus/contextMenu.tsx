@@ -117,6 +117,9 @@ export interface MenuActions {
   selectionAllNoPrint: boolean;
   /** Setzt/löscht `noPrint` für die gesamte aktuelle 2D-Auswahl in einem Zug. */
   toggleSelectionNoPrint: () => void;
+  /** Gewählte Bemassungen mit Bezügen ([38]); ab 1 erscheint „Bemassung lösen". */
+  attachedDimensionCount?: number;
+  detachDimensions?: () => void;
 }
 
 /**
@@ -377,6 +380,12 @@ function planMenuItems(
         ]
       : [];
 
+  // „Bemassung lösen" ([38]) — nur wenn gewählte Bemassungen an Elementen hängen.
+  const dimDetachItems: ContextMenuItem[] =
+    a.attachedDimensionCount && a.detachDimensions
+      ? [{ label: t("cmd.dimdetach.label"), icon: <MenuIcon name="link_off" />, onClick: a.detachDimensions }]
+      : [];
+
   // Boolean-Einträge (Vereinigen/Subtrahieren/Schneiden) auf die 2D-Auswahl.
   // Aktiv ab 2 geschlossenen Flächen; sonst deaktiviert mit erklärendem Tooltip.
   const boolEnabled = a.closedSelectionCount >= 2;
@@ -452,6 +461,7 @@ function planMenuItems(
       ...layerItems,
       ...(layerItems.length ? [{ divider: true } as ContextMenuItem] : []),
       ...noPrintItems,
+      ...dimDetachItems,
       ...(noPrintItems.length ? [{ divider: true } as ContextMenuItem] : []),
       {
         label: t("ctx.fitSelection"),
@@ -485,6 +495,7 @@ function planMenuItems(
     ...layerItems,
     ...(layerItems.length ? [{ divider: true } as ContextMenuItem] : []),
     ...noPrintItems,
+    ...dimDetachItems,
     ...(noPrintItems.length ? [{ divider: true } as ContextMenuItem] : []),
     ...booleanItems,
     { divider: true },

@@ -520,6 +520,24 @@ export type CustomPalette = {
  */
 export type DetailLevel = "grob" | "mittel" | "fein";
 
+/** Merkmal, an dem ein Bemassungspunkt hängt ([38], `dim_assoc.rs`). */
+export type DimFeature = "wall" | "opening" | "vertex" | "edge" | "center" | "intersection";
+
+/** Bezug eines Bemassungspunkts auf ein Element ([38]). */
+export type DimRef = {
+  /** Element-id (Wand, Öffnung, Stütze, Decke, Dach, Raum oder 2D-Zeichnung). */
+  id: string;
+  feature: DimFeature;
+  index?: number;
+  t?: number;
+  id2?: string;
+  index2?: number;
+  /** Normalabstand Merkmal → Masslinie (Modell-Meter, links der Masslinie positiv); fehlt = 0. */
+  d?: number;
+  /** Bezug ungültig (Element/Punkt weg): der Punkt bleibt an der zuletzt gespeicherten Lage. */
+  lost?: boolean;
+};
+
 /** Masse einer Türzarge/eines Türrahmens ([105]); Bedeutung je `frameKind`. Fehlt ⇒ Vorgabe. */
 export type DoorFrameDetail = {
   /** Falzbreite (parallel zur Wandfläche: Überdeckung Blatt/Rahmen), Vorgabe 0.015. */
@@ -827,6 +845,13 @@ export type Drawing2DGeom =
      * Index = Segmentnummer.
      */
     textOffsetsMm?: Array<{ along: number; perp: number }>;
+    /**
+     * Assoziative Bemassung ([38]): je Punkt (Index wie `pts`) der Bezug auf ein Merkmal eines
+     * Elements (`null` = freier Punkt). Der Kern führt `pts` nach jeder Änderung nach
+     * (`dim_assoc.rs`); `pts` ist damit immer die zuletzt aufgelöste Lage und der Rückfall,
+     * wenn ein Bezug ungültig wird. Fehlt das Feld, ist die Bemassung frei wie bisher.
+     */
+    refs?: Array<DimRef | null>;
   }
   | {
     shape: "kote";

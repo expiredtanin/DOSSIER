@@ -868,6 +868,7 @@ pub fn ops(root: &Map<String, Value>, v: &Value) -> Option<Vec<Op>> {
         "offset" => offset_ops(root, s_arg(v, "id"), n_arg(v, "d"), &mut ids),
         "join" => join_ops(root, &list("ids"), &mut ids),
         "explode" => explode_ops(root, &list("ids"), &mut ids),
+        "dimdetach" => crate::dim_assoc::detach_ops(root, &list("ids")),
         _ => return None,
     })
 }

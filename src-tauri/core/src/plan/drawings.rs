@@ -76,6 +76,10 @@ const MAX_BLOCK_DEPTH: u32 = 32;
 const DASH_REF_STYLE: u32 = 1_000_000;
 const DASH_REF_XLINE: u32 = 999_999;
 
+/// Marke eines Bemassungspunkts mit ungültigem Bezug ([38], nur Bildschirm): Radius in Papier-mm, Farbe.
+const LOST_MARK_MM: f64 = 1.2;
+const LOST_MARK_COLOR: &str = "#e0301e";
+
 /// Papier-mm → Modell-Meter beim Massstab 1:`scale` (`mmToModel`).
 pub fn mm_to_model(mm: f64, scale: f64) -> f64 {
     (mm / 1000.0) * scale
@@ -734,7 +738,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 em.seg(q[q.len() - 1], q[0]);
             }
         }
-        Drawing2DGeom::Dimension { pts, offset, gap_mm, overshoot_mm, tick_len_mm, text_height_mm, line_weight_mm, ext_weight_mm, tick_weight_mm, text_offsets_mm } => {
+        Drawing2DGeom::Dimension { pts, offset, gap_mm, overshoot_mm, tick_len_mm, text_height_mm, line_weight_mm, ext_weight_mm, tick_weight_mm, text_offsets_mm, refs } => {
             let mm = |x: f64| mm_to_model(x, scale);
             for i in 0..pts.len().saturating_sub(1) {
                 let st = DimStyle {
@@ -751,6 +755,18 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                     },
                 };
                 dimension_segment(&mut em, pts[i], pts[i + 1], *offset, &st);
+            }
+            // Ungültiger Bezug ([38]): nur am Bildschirm eine rote Marke am Punkt.
+            if !c.a.for_print {
+                for i in crate::dim_assoc::lost_points(refs.as_ref()) {
+                    if let Some(q) = pts.get(i) {
+                        let r = mm(LOST_MARK_MM);
+                        em.sink.push(
+                            Primitive::DrawingCircle { center: *q, r, fill: LOST_MARK_COLOR.into(), stroke: LOST_MARK_COLOR.into(), weight_mm: em.weight, dash: None, drawing_id: Some(em.id.into()), greyed: Some(em.greyed), opacity: None },
+                            0,
+                        );
+                    }
+                }
             }
         }
         Drawing2DGeom::Kote { at, value, kind, .. } => {

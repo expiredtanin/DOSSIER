@@ -1434,6 +1434,15 @@ export default function App() {
     applyChange((p) => patchItems(p, "drawings2d", selectedDrawingIds, (d) => ({ ...d, noPrint: next })));
   };
 
+  // „Bemassung lösen" ([38]): gewählte Bemassungen mit Bezügen auf Modell-Elemente.
+  const attachedDimensionIds = selectedDrawingIds.filter((id) => {
+    const g = project.drawings2d.find((d) => d.id === id)?.geom;
+    return g?.shape === "dimension" && !!g.refs?.some(Boolean);
+  });
+  const detachDimensions = () => {
+    if (attachedDimensionIds.length) applyChange((p) => cmdMutation({ cmd: "dimdetach", ids: attachedDimensionIds }).toOps(p));
+  };
+
   // Ctrl/Cmd+G / Ctrl/Cmd+Shift+G = Gruppieren/Auflösen (Vectorworks-artig,
   // s. state/groupActions.ts). `applyGroupSelection` setzt nach dem Gruppieren/
   // Auflösen alle betroffenen Auswahl-Kanäle auf einen Schlag.
@@ -4141,6 +4150,8 @@ export default function App() {
             isolateSelectionLayers,
             selectionAllNoPrint: !!selectionAllNoPrint,
             toggleSelectionNoPrint,
+            attachedDimensionCount: attachedDimensionIds.length,
+            detachDimensions,
             bringToFront: () => reorderDrawings(selectedDrawingIds, "front"),
             bringForward: () => reorderDrawings(selectedDrawingIds, "forward"),
             sendBackward: () => reorderDrawings(selectedDrawingIds, "backward"),

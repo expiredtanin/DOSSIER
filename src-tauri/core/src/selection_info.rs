@@ -1175,6 +1175,8 @@ fn drawing_selection(root: &Map<String, Value>, d: &Value) -> J {
         (None, None, Some(Value::Null))
     };
     let is_image = str_of(field(g, "shape")) == Some("image");
+    // Assoziative Bemassung ([38]): Bezug je Punkt (`null` = frei) für die Objekt-Info.
+    let dim_refs = if str_of(field(g, "shape")) == Some("dimension") { field(g, "refs").filter(|r| r.is_array()).cloned() } else { None };
     let detail = (str_of(field(g, "shape")) == Some("detailref")).then(|| {
         let layouts = J::arr(arr(root.get("layouts")).iter().map(|l| O::default().raw("id", l, "id").raw("name", l, "name").done()));
         O::default().raw("label", g, "label").raw("sheetLayoutId", g, "sheetLayoutId").raw("sheetLabel", g, "sheetLabel").v("availableLayouts", layouts).done()
@@ -1206,6 +1208,7 @@ fn drawing_selection(root: &Map<String, Value>, d: &Value) -> J {
         .o("opacity", if is_image { Some(nn(field(g, "opacity")).cloned().unwrap_or_else(|| Value::from(1u64))) } else { field(d, "opacity").cloned() })
         .v("bbox", bbox_value(geom_bbox(g)))
         .o("detailRef", detail)
+        .o("dimRefs", dim_refs)
         .done()
 }
 

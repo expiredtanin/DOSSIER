@@ -609,7 +609,9 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
             let pts = arr(field(g, "pts"));
             let n = pts.len();
             if index < n as f64 {
-                return set("pts", replace_at(pts, index, &p));
+                // Von Hand gezogener Punkt ist frei ([38]).
+                let ng = with(g, "pts", replace_at(pts, index, &p));
+                return Some(with_geom(d, crate::dim_assoc::without_ref(&ng, index_in(index, n))));
             }
             if index == n as f64 {
                 // Griff auf der Masslinie: nur `offset` (Normalabstand zur Punktreihe).
@@ -750,7 +752,9 @@ fn drawing_moved(d: &Value, dx: f64, dy: f64) -> Option<Value> {
     let mv = |k: &str| moved(g.get(k).unwrap_or(&Value::Null), dx, dy);
     let ng = match shape(g) {
         "line" => with_all(g, vec![("a", mv("a")), ("b", mv("b"))]),
-        "polyline" | "bezier" | "spline" | "dimension" => with(g, "pts", moved_all(arr(field(g, "pts")), dx, dy)),
+        "polyline" | "bezier" | "spline" => with(g, "pts", moved_all(arr(field(g, "pts")), dx, dy)),
+        // Allein verschobene Bemassung löst ihre Bezüge ([38]).
+        "dimension" => crate::dim_assoc::without_ref(&with(g, "pts", moved_all(arr(field(g, "pts")), dx, dy)), None),
         "rect" | "image" => with_all(g, vec![("min", mv("min")), ("max", mv("max"))]),
         "circle" | "arc" | "ellipse" => with(g, "center", mv("center")),
         "kote" | "detailref" | "scalebar" | "pointmarker" | "text" => with(g, "at", mv("at")),

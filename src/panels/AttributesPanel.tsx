@@ -52,6 +52,7 @@ import {
   ColumnSection,
   SectionLineSection,
   DetailRefSection,
+  DimRefsSection,
 } from "./ObjectInfoPanel";
 import { SurfacePatternPlacement } from "./SurfacePatternPlacement";
 
@@ -793,6 +794,7 @@ export function AttributesPanel() {
       {sel.extrudedSolid && <ExtrudedSolidSection solid={sel.extrudedSolid} host={host} />}
       {sel.column && <ColumnSection column={sel.column} host={host} />}
       {sel.detailRef && <DetailRefSection detailRef={sel.detailRef} drawingId={sel.id} host={host} />}
+      {sel.dimRefs && <DimRefsSection refs={sel.dimRefs} drawingId={sel.id} host={host} />}
     </div>
   );
 }

@@ -8,7 +8,7 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { applyFillMode } from "./fillMode";
-import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, removeRoofHole, setFieldIfChanged, setRoofEdge } from "../core";
+import { addItems, cmdMutation, fieldOps, opsMutation, patchItem, patchItems, removeItems, removeRoofHole, setFieldIfChanged, setRoofEdge } from "../core";
 import type { CoreOp, ProjectMutation } from "../core";
 import { useMemo, type RefObject } from "react";
 import type { DrawingLevel, Project } from "../model/types";
@@ -548,6 +548,7 @@ export function usePanelHostBase(opts: {
       onAddColorToCustomPalette: (paletteId, hex) => addColorToCustomPalette(paletteId, hex),
       onSetDashScale: (drawingId, scale) =>
         setProject(opsMutation((p) => patchItem(p, "drawings2d", drawingId, { dashScale: scale }))),
+      onDetachDimension: (drawingId) => setProject(cmdMutation({ cmd: "dimdetach", ids: [drawingId] })),
       onSetDetailRefLabel: (drawingId, label) =>
         setProject(
           opsMutation((p) =>
