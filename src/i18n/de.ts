@@ -1159,6 +1159,7 @@ export const de = {
   "resources.field.innerLayerRecess.hint": "Die innerste Wandschicht (meist Gips/Holzverkleidung) weicht an diesem Fenster rundum um ihre eigene Dicke von der Laibung zurück, statt bündig mit den übrigen Schichten abzuschliessen — ändert die 3D-Wandgeometrie, nicht nur die Rahmenposition.",
   "resources.field.transomHeight": "Oberlicht-Höhe (m)",
   "resources.field.mullionRows": "Kämpfer-Zeilen",
+  "resources.field.mullionCols": "Sprossen-Spalten",
   "resources.frameKind.zarge": "Zarge",
   "resources.frameKind.blockrahmen": "Blockrahmen",
   "resources.insetFace.aussen": "Aussen",

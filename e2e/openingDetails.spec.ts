@@ -19,10 +19,11 @@ test("Fenster-Einstellungen: Rahmen-Detail im Dialog und im Ressourcen-Tab ([105
   expect(box && vp && box.x >= 0 && box.y >= 0 && box.x + box.width <= vp.width + 1 && box.y + box.height <= vp.height + 1).toBe(true);
   const shots = process.env.DOSSIER_SHOTS;
   if (shots) await page.screenshot({ path: `${shots}/fenster-dialog-rahmendetail.png` });
-  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "Schließen", exact: true }).last().click();
   await expect(dialog).toBeHidden();
 
-  await page.getByRole("button", { name: "Ressourcen" }).first().click();
+  await page.getByRole("button", { name: "Fenster", exact: true }).first().click();
+  await page.getByRole("option", { name: /Ressourcen/ }).click();
   await page.getByRole("tab", { name: "Fenstertypen" }).click();
   await page.locator(".rm-detail-group summary").first().click();
   await expect(page.locator(".rm-detail-group").first().getByText("Pfosten-Breite (m)")).toBeVisible();

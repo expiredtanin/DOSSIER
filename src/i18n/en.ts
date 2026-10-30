@@ -1153,6 +1153,7 @@ export const en: Record<TranslationKey, string> = {
   "resources.field.innerLayerRecess.hint": "The innermost wall layer (usually plasterboard/wood lining) steps back all around this window's reveal by its own thickness, instead of finishing flush with the other layers — changes the 3D wall geometry, not just the frame position.",
   "resources.field.transomHeight": "Transom height (m)",
   "resources.field.mullionRows": "Transom rows",
+  "resources.field.mullionCols": "Mullion columns",
   "resources.frameKind.zarge": "Lining",
   "resources.frameKind.blockrahmen": "Block frame",
   "resources.insetFace.aussen": "Outer",

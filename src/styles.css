@@ -8701,3 +8701,14 @@ body {
 .rm-detail-group[open] > summary ~ * {
   margin-bottom: 6px;
 }
+/* [105] Fenster-/Tür-Dialog: Vorschau-Spalte breit genug für die Kern-Vorschau (lief rechts über den Rand). */
+.oed-main {
+  grid-template-columns: 150px minmax(0, 1fr) 320px;
+}
+.oed-core-preview {
+  min-width: 0;
+}
+.oed-group .oed-flabel {
+  flex: 1 1 auto;
+  min-width: 0;
+}
