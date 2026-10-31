@@ -54,14 +54,14 @@ describe("Standard-Bibliothek ([100]–[102])", () => {
   it("„Standards aktualisieren“: alte Definitionen auf heutigen Stand, Auswahl, ein Op-Satz", () => {
     const full = withStandards({ ...emptyProject, components: [], hatches: [], lineStyles: [], wallTypes: [], ceilingTypes: [], roofTypes: [] });
     expect(standardsUpdatePlan(full).changes).toEqual([]);
-    // Stand 30.10.: Dämmschlange unter dem früheren Namen, Putz-Schraffur fehlt, Kalksandstein umbenannt
+    // Stand 31.10. früh: SIA-Parallelen unter dem früheren Namen „SIA Dämmstoffe“, Putz-Schraffur fehlt, Kalksandstein umbenannt
     const old = {
       ...full,
       hatches: full.hatches
         .filter((h) => h.id !== "std-h-putz")
         .map((h) =>
           h.id === "std-h-daemmung-weich"
-            ? { ...h, name: "SIA Dämmung weich", pattern: "insulation" as const }
+            ? { ...h, name: "SIA Dämmstoffe", pattern: "diagonal" as const }
             : h.id === "std-h-kalksandstein"
               ? { ...h, name: "Mein KS", pattern: "crosshatch" as const }
               : h,
@@ -76,7 +76,7 @@ describe("Standard-Bibliothek ([100]–[102])", () => {
     const selected = plan.changes.filter((c) => !c.renamed).map(standardsChangeKey);
     const after = applyOps(old, standardsUpdateOps(old, selected));
     const dae = after.hatches.find((h) => h.id === "std-h-daemmung-weich")!;
-    expect([dae.name, dae.pattern]).toEqual(["SIA Dämmstoffe", "diagonal"]);
+    expect([dae.name, dae.pattern]).toEqual(["SIA Dämmung weich", "insulation"]);
     expect(after.hatches.find((h) => h.id === "std-h-kalksandstein")!.pattern).toBe("crosshatch");
     expect(after.components.find((c) => c.id === "std-c-innenputz")!.hatchId).toBe("std-h-putz");
     expect(standardsUpdatePlan(after).changes.map((c) => c.id)).toEqual(["std-h-kalksandstein"]);

@@ -41,8 +41,8 @@ pub fn line_styles() -> Vec<Value> {
     let dash = |id: &str, name: &str, d: Value| json!({"id": id, "name": name, "color": INK, "dash": d});
     vec![
         dash("std-ls-voll", "Volllinie", Value::Null),
-        dash("std-ls-strich-fein", "Strichlinie", json!([3, 1.5])),
-        dash("std-ls-strich-grob", "Strichlinie lang", json!([6, 2])),
+        dash("std-ls-strich-fein", "Strichlinie", json!([3, 2])),
+        dash("std-ls-strich-grob", "Strichlinie lang", json!([6, 4])),
         dash("std-ls-punkt", "Punktierte Linie", json!([0, 1])),
         dash("std-ls-strichpunkt", "Strichpunktlinie (Achse)", json!([12, 1.5, 0, 1.5])),
         dash("std-ls-strichzweipunkt", "Strich-Zweipunktlinie", json!([12, 1.5, 0, 1.5, 0, 1.5])),
@@ -103,11 +103,13 @@ pub fn hatches() -> Vec<Value> {
         lines("std-h-bsp", "SIA Brettsperrholz", "diagonal", 0.04, 90.0, true, 0.1, ""),
         // Fig. 34 Holzwerkstoffe: 45°-Linien in Dreiergruppen (Teilung 2.5 mm in 1:50).
         lines("std-h-holzwerkstoff", "SIA Holzwerkstoff", "woodBased", 0.125, 45.0, true, 0.1, ""),
-        // Fig. 34 Dämmstoffe (Fig. 37/38): Parallelen quer zur Schicht über die ganze Dicke; SIA 400
-        // unterscheidet weiche/harte Dämmung nicht.
-        lines("std-h-daemmung-weich", "SIA Dämmstoffe", "diagonal", 0.035, 0.0, true, 0.1, ""),
-        // Dämmschlange (DIN 1356) als Alternative, kein SIA-Sinnbild.
-        layer("std-h-daemmung-schlaufe", "Dämmung weich, Schlaufe (nicht SIA)", "insulation", 1.0, 0.13),
+        // Weiche Dämmung (Mineral-/Steinwolle, Trittschall): Dämmschlange über die ganze Dicke (Entscheid
+        // Maintainer 31.10., klassisches Sinnbild statt der SIA-Parallelen); Holzfaser gleich, weitere Teilung.
+        layer("std-h-daemmung-weich", "SIA Dämmung weich", "insulation", 1.0, 0.1),
+        layer("std-h-daemmung-holzfaser", "SIA Dämmung Holzfaser", "insulation", 1.4, 0.1),
+        // Fig. 34 Dämmstoffe (Fig. 37/38): Parallelen quer zur Schicht über die ganze Dicke — für harte
+        // Dämmung (EPS/XPS), damit sie sich von der weichen unterscheidet.
+        lines("std-h-daemmstoffe-sia", "Dämmstoffe (SIA-Linien)", "diagonal", 0.035, 0.0, true, 0.1, ""),
         // Fig. 34 Mörtel, Gips, Verputz: leer (Farbe violett nur bei farbiger Darstellung). Estrich ist Mörtel.
         empty("std-h-gips", "SIA Gips"),
         empty("std-h-putz", "SIA Putz"),
@@ -136,7 +138,7 @@ pub fn hatches() -> Vec<Value> {
 /// „Standards aktualisieren" setzt dort den heutigen Namen (Begriffe nach SIA 400).
 fn former_names(id: &str) -> &'static [&'static str] {
     match id {
-        "std-h-daemmung-weich" => &["SIA Dämmung weich"],
+        "std-h-daemmung-weich" => &["SIA Dämmstoffe"],
         "std-ls-punkt" => &["Punktlinie"],
         _ => &[],
     }
@@ -186,9 +188,9 @@ pub fn components() -> Vec<Value> {
         Mat { id: "std-c-holzwerkstoff", name: "Holzwerkstoff (OSB/Spanplatte)", abbrev: "OSB", fill: "#ffffff", elev: "#d9b98a", hatch: "std-h-holzwerkstoff", lambda: Some(0.13), density: Some(650.0), rf: "RF3", tex: Some(("Chipboard001", 1.0)), prio: 35.0, pattern: sp("grid", None, 1.25, Some(2.5), None) },
         Mat { id: "std-c-mineralwolle", name: "Mineralwolle", abbrev: "MW", fill: "#ffffff", elev: "#efe6a8", hatch: "std-h-daemmung-weich", lambda: Some(0.035), density: Some(20.0), rf: "RF1", tex: None, prio: 20.0, pattern: None },
         Mat { id: "std-c-steinwolle", name: "Steinwolle", abbrev: "SW", fill: "#ffffff", elev: "#d9cfa0", hatch: "std-h-daemmung-weich", lambda: Some(0.036), density: Some(100.0), rf: "RF1", tex: None, prio: 21.0, pattern: None },
-        Mat { id: "std-c-eps", name: "EPS", abbrev: "EPS", fill: "#ffffff", elev: "#f2f2f2", hatch: "std-h-daemmung-weich", lambda: Some(0.034), density: Some(20.0), rf: "RF3", tex: None, prio: 22.0, pattern: None },
-        Mat { id: "std-c-xps", name: "XPS", abbrev: "XPS", fill: "#ffffff", elev: "#cfe3ef", hatch: "std-h-daemmung-weich", lambda: Some(0.033), density: Some(35.0), rf: "RF3", tex: None, prio: 23.0, pattern: None },
-        Mat { id: "std-c-holzfaser", name: "Holzfaser", abbrev: "HF", fill: "#ffffff", elev: "#b08a5a", hatch: "std-h-daemmung-weich", lambda: Some(0.04), density: Some(140.0), rf: "RF3", tex: None, prio: 24.0, pattern: None },
+        Mat { id: "std-c-eps", name: "EPS", abbrev: "EPS", fill: "#ffffff", elev: "#f2f2f2", hatch: "std-h-daemmstoffe-sia", lambda: Some(0.034), density: Some(20.0), rf: "RF3", tex: None, prio: 22.0, pattern: None },
+        Mat { id: "std-c-xps", name: "XPS", abbrev: "XPS", fill: "#ffffff", elev: "#cfe3ef", hatch: "std-h-daemmstoffe-sia", lambda: Some(0.033), density: Some(35.0), rf: "RF3", tex: None, prio: 23.0, pattern: None },
+        Mat { id: "std-c-holzfaser", name: "Holzfaser", abbrev: "HF", fill: "#ffffff", elev: "#b08a5a", hatch: "std-h-daemmung-holzfaser", lambda: Some(0.04), density: Some(140.0), rf: "RF3", tex: None, prio: 24.0, pattern: None },
         Mat { id: "std-c-trittschall", name: "Trittschalldämmung", abbrev: "TSD", fill: "#ffffff", elev: "#efe6a8", hatch: "std-h-daemmung-weich", lambda: Some(0.035), density: Some(100.0), rf: "RF1", tex: None, prio: 19.0, pattern: None },
         Mat { id: "std-c-gipskarton", name: "Gipskarton", abbrev: "GK", fill: "#ffffff", elev: "#f4f4f2", hatch: "std-h-gips", lambda: Some(0.25), density: Some(800.0), rf: "RF1", tex: Some(("Plaster001", 1.0)), prio: 12.0, pattern: None },
         Mat { id: "std-c-innenputz", name: "Innenputz", abbrev: "IP", fill: "#ffffff", elev: "#f5f3ee", hatch: "std-h-putz", lambda: Some(0.7), density: Some(1400.0), rf: "RF1", tex: Some(("Plaster001", 1.0)), prio: 10.0, pattern: None },
@@ -589,10 +591,15 @@ mod tests {
         assert_eq!((of("std-c-backstein").pattern, of("std-c-backstein").angle), (P::Diagonal, 45.0));
         assert_eq!((of("std-c-kalksandstein").pattern, of("std-c-kalksandstein").angle), (P::Diagonal, 135.0));
         assert!((spacing("std-c-backstein") - spacing("std-c-kalksandstein")).abs() < 1e-9);
-        // Dämmstoffe: eine Schraffur, Parallelen quer zur Schicht.
-        for c in ["std-c-mineralwolle", "std-c-steinwolle", "std-c-eps", "std-c-xps", "std-c-holzfaser", "std-c-trittschall"] {
+        // Weiche Dämmung: Dämmschlange (Holzfaser weiter); harte Dämmung: SIA-Parallelen quer zur Schicht.
+        for c in ["std-c-mineralwolle", "std-c-steinwolle", "std-c-trittschall"] {
             let h = of(c);
-            assert_eq!((h.id.as_str(), h.pattern, h.angle, h.relative_to_wall), ("std-h-daemmung-weich", P::Diagonal, 0.0, Some(true)), "{c}");
+            assert_eq!((h.id.as_str(), h.pattern, h.scale, h.relative_to_wall), ("std-h-daemmung-weich", P::Insulation, 1.0, Some(true)), "{c}");
+        }
+        assert_eq!((of("std-c-holzfaser").pattern, of("std-c-holzfaser").scale), (P::Insulation, 1.4));
+        for c in ["std-c-eps", "std-c-xps"] {
+            let h = of(c);
+            assert_eq!((h.id.as_str(), h.pattern, h.angle, h.relative_to_wall), ("std-h-daemmstoffe-sia", P::Diagonal, 0.0, Some(true)), "{c}");
         }
         // Mörtel, Gips, Verputz (und Estrich) leer; Metall leer, Stahl schwarz.
         for c in ["std-c-innenputz", "std-c-aussenputz", "std-c-gipskarton", "std-c-zementestrich", "std-c-aluminium"] {
@@ -614,16 +621,16 @@ mod tests {
         assert!(p.line_styles.iter().any(|l| l.name == "Punktierte Linie"));
     }
 
-    /// Ein Projekt mit den Standards vom 30.10. ([109]) bekommt über „Aktualisieren" die SIA-Fassung: alle
-    /// Abweichungen vorgewählt (auch der frühere Name „SIA Dämmung weich"), danach nichts mehr offen.
+    /// Ein Projekt mit den Standards vom 30.10. ([109]) bekommt über „Aktualisieren" die heutige Fassung: alle
+    /// Abweichungen vorgewählt (auch der frühere Name „SIA Dämmstoffe"), danach nichts mehr offen.
     #[test]
     fn aktualisieren_bringt_sia_fassung_in_alte_projekte() {
         let mut root = apply(&empty_root(), &merge_ops(&empty_root()));
         let hs = root.get_mut("hatches").unwrap().as_array_mut().unwrap();
-        hs.retain(|h| !["std-h-holz-massiv", "std-h-glas", "std-h-sperrschicht", "std-h-stahl-detail", "std-h-daemmung-schlaufe"].contains(&h["id"].as_str().unwrap()));
+        hs.retain(|h| !["std-h-holz-massiv", "std-h-glas", "std-h-sperrschicht", "std-h-stahl-detail", "std-h-daemmstoffe-sia", "std-h-daemmung-holzfaser"].contains(&h["id"].as_str().unwrap()));
         for h in hs.iter_mut() {
             match h["id"].as_str().unwrap() {
-                "std-h-daemmung-weich" => *h = json!({"id": "std-h-daemmung-weich", "name": "SIA Dämmung weich", "pattern": "insulation", "scale": 1, "angle": 0, "relativeToWall": true, "color": INK, "lineWeight": 0.13}),
+                "std-h-daemmung-weich" => *h = json!({"id": "std-h-daemmung-weich", "name": "SIA Dämmstoffe", "pattern": "diagonal", "scale": 0.3938, "angle": 0, "relativeToWall": true, "color": INK, "lineWeight": 0.1}),
                 "std-h-beton" => {
                     h["pattern"] = json!("diagonal");
                     h["lineStyleId"] = json!("std-ls-schraffur-strich");
@@ -650,12 +657,13 @@ mod tests {
         let all: Vec<String> = ch.iter().map(|c| format!("{}:{}", c["collection"].as_str().unwrap(), c["id"].as_str().unwrap())).collect();
         let after = apply_all(&root, &update_ops(&root, &all));
         let get = |k: &str, id: &str| after[k].as_array().unwrap().iter().find(|e| e["id"] == id).unwrap().clone();
-        assert_eq!(get("hatches", "std-h-daemmung-weich")["name"], "SIA Dämmstoffe");
-        assert_eq!(get("hatches", "std-h-daemmung-weich")["pattern"], "diagonal");
+        assert_eq!(get("hatches", "std-h-daemmung-weich")["name"], "SIA Dämmung weich");
+        assert_eq!(get("hatches", "std-h-daemmung-weich")["pattern"], "insulation");
         assert_eq!(get("hatches", "std-h-beton")["pattern"], "crosshatch");
         assert!(get("hatches", "std-h-beton").get("lineStyleId").is_none());
         assert_eq!(get("hatches", "std-h-putz")["pattern"], "none");
-        assert_eq!(get("components", "std-c-eps")["hatchId"], "std-h-daemmung-weich");
+        assert_eq!(get("components", "std-c-eps")["hatchId"], "std-h-daemmstoffe-sia");
+        assert_eq!(get("components", "std-c-holzfaser")["hatchId"], "std-h-daemmung-holzfaser");
         assert_eq!(get("components", "std-c-holz")["hatchId"], "std-h-holz-massiv");
         assert_eq!(get("components", "std-c-glas")["hatchId"], "std-h-glas");
         assert_eq!(get("components", "std-c-glas")["color"], "#ffffff");
@@ -673,7 +681,7 @@ mod tests {
         hs.retain(|h| h["id"] != "std-h-putz");
         for h in hs.iter_mut() {
             if h["id"] == "std-h-daemmung-weich" {
-                h["pattern"] = json!("insulation");
+                h["pattern"] = json!("diagonal");
             }
             if h["id"] == "std-h-kalksandstein" {
                 h["name"] = json!("Meine KS");
@@ -724,7 +732,7 @@ mod tests {
         let ops = update_ops(&root, &["hatches:std-h-daemmung-weich".to_string(), "components:std-c-innenputz".to_string()]);
         let after = apply_all(&root, &ops);
         let get = |k: &str, id: &str| after[k].as_array().unwrap().iter().find(|e| e["id"] == id).unwrap().clone();
-        assert_eq!(get("hatches", "std-h-daemmung-weich")["pattern"], "diagonal");
+        assert_eq!(get("hatches", "std-h-daemmung-weich")["pattern"], "insulation");
         assert_eq!(get("hatches", "std-h-kalksandstein")["pattern"], "crosshatch", "nicht gewählt: bleibt");
         assert_eq!(get("components", "std-c-innenputz")["hatchId"], "std-h-putz");
         assert!(after["hatches"].as_array().unwrap().iter().any(|h| h["id"] == "std-h-putz"));

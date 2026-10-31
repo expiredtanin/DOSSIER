@@ -602,24 +602,65 @@ fn band_curve(poly: &[V2], b: &Band, vc: f64, margin: f64, dx: f64, f: impl Fn(f
     clip_polyline_to_polygon(&pts, poly)
 }
 
-/// Dämmschlange (SIA 400, weiche Dämmung): fortlaufende, sich überlappende Schlaufen über die
-/// ganze Schichtdicke — eine „Sinuslinie mit Schlaufen" (projizierte Schraubenlinie):
-/// `u = a·t + R·sin t`, `v = h·cos t`, Steigung `P = 2πa` ≈ 0.45 · Dicke, Schlaufenbreite `R` = ⅔ P.
+/// Dämmschlange (weiche Dämmung, klassisches CAD-Sinnbild, [109] Entscheid Maintainer 31.10.): eine
+/// fortlaufende Linie über die ganze Schichtdicke aus Kreisbögen (Radius `r` = ½ Teilung), die an Ober-
+/// und Unterkante anliegen, und geraden Schenkeln, die je einen oberen und einen unteren Bogen als
+/// äussere Tangente verbinden. Obere Bögen sitzen bei `k·P`, untere bei `(k+½)·P`, alle im gleichen
+/// Drehsinn durchlaufen: benachbarte Bögen berühren sich, die Schenkel laufen schräg zurück und kreuzen
+/// sich kurz über der Unterkante (Spiralfeder von der Seite; Vorlage des Maintainers).
+/// Teilung `P` = [`INSULATION_PITCH`] · Dicke · scale. Bögen in Schritten ≤ 5° (so auch DXF-Polylinien).
 fn insulation_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     let Some(b) = band_frame(poly, hatch, scale) else { return Vec::new() };
     let mut runs = Vec::new();
     for &(vc, half) in &b.rows {
-        let pitch = (0.45 * 2.0 * half * scale).max(BAND_MIN_PITCH_M);
-        let a = pitch / (2.0 * PI);
-        let r = pitch * (2.0 / 3.0);
-        // Parameter t läuft gleichmässig; 36 Stützpunkte je Schlaufe.
-        let dt = 2.0 * PI / 36.0;
-        runs.extend(band_curve(poly, &b, vc, r + pitch, a * dt, |x| {
-            let t = x / a;
-            (a * t + r * jsnum::sin(t), half * jsnum::cos(t))
-        }));
+        // Knapp innerhalb der Kanten (Bogen liegt an, berührt die Schichtgrenze aber nicht numerisch).
+        let h = half * (1.0 - 2.0 * INSULATION_INSET);
+        let p = (INSULATION_PITCH * 2.0 * half * scale).max(BAND_MIN_PITCH_M);
+        runs.extend(insulation_snake(poly, &b, vc, h, p));
     }
     runs
+}
+
+/// Teilung der Dämmschlange je Schichtdicke (bei scale 1); Vorlage: 6 Schlaufen auf 1.27 Dicken.
+pub const INSULATION_PITCH: f64 = 0.22;
+/// Abstand der Bögen von den Schichtkanten, Anteil der Dicke (≈ halbe Musterlinie in 1:50).
+const INSULATION_INSET: f64 = 0.008;
+/// Grösster Winkelschritt der Bögen.
+const ARC_STEP_RAD: f64 = 5.0 * PI / 180.0;
+
+/// Eine Dämmschlange im Band (Mitte `vc`, halbe Höhe `h`, Teilung `p`), geclippt. Läuft in −u:
+/// oberer Bogen k im Uhrzeigersinn (links → über die Kante → rechts), Schenkel „/" hinab zum unteren
+/// Bogen k−½ (rechts → unter der Kante → links), Schenkel „\" hinauf zum oberen Bogen k−1.
+fn insulation_snake(poly: &[V2], b: &Band, vc: f64, h: f64, p: f64) -> Vec<Run> {
+    if !(p > 1e-9) || !(h > 1e-9) || (b.u1 - b.u0 + 4.0 * p) / p * 80.0 > BAND_MAX_POINTS {
+        return Vec::new();
+    }
+    let r = (p / 2.0).min(0.9 * h);
+    let vt = h - r; // Mitte obere Bögen (relativ zu vc)
+    let vb = -h + r; // Mitte untere Bögen
+    // Neigung der Schenkel: Tangentenpunkte liegen um γ unter der Waagrechten der Bogenmitte.
+    let g = jsnum::atan2(p / 2.0, vt - vb);
+    let (top_from, top_sweep) = (PI + g, PI + 2.0 * g);
+    let (bot_from, bot_sweep) = (-g, PI - 2.0 * g);
+    let n_top = (top_sweep / ARC_STEP_RAD).ceil().max(1.0) as usize;
+    let n_bot = (bot_sweep / ARC_STEP_RAD).ceil().max(1.0) as usize;
+    let k0 = ((b.u0 - b.ua) / p).floor() - 1.0;
+    let mut k = ((b.u1 - b.ua) / p).ceil() + 1.0;
+    let mut pts = Vec::new();
+    while k >= k0 {
+        let ct = b.ua + k * p;
+        for i in 0..=n_top {
+            let a = top_from - top_sweep * (i as f64) / (n_top as f64);
+            pts.push(b.at(ct + r * jsnum::cos(a), vc + vt + r * jsnum::sin(a)));
+        }
+        let cb = ct - p / 2.0;
+        for i in 0..=n_bot {
+            let a = bot_from - bot_sweep * (i as f64) / (n_bot as f64);
+            pts.push(b.at(cb + r * jsnum::cos(a), vc + vb + r * jsnum::sin(a)));
+        }
+        k -= 1.0;
+    }
+    clip_polyline_to_polygon(&pts, poly)
 }
 
 /// Hartschaum (EPS/XPS): Zickzack über die ganze Dicke, halbe Periode = 0.5 · Dicke · scale.
@@ -1177,17 +1218,49 @@ mod tests {
         }
     }
 
-    /// Die Dämmschlange bildet Schlaufen (läuft stellenweise zurück), Steigung ≈ 0.45 · Dicke.
+    /// Dämmschlange nach Vorlage des Maintainers (31.10.): Bögen an beiden Kanten (≤ 5° je Schritt),
+    /// gerade, schräg zurücklaufende Schenkel, die sich über der Unterkante kreuzen; Teilung 0.22 · Dicke.
     #[test]
-    fn daemmschlange_hat_schlaufen() {
+    fn daemmschlange_boegen_und_schenkel() {
         let mut h = hatch(Pattern::Insulation);
         h.angle = 0.0;
-        let runs = build_hatch_runs(&band(2.0, 0.2), &h);
-        let back = runs.iter().any(|r| r.windows(2).any(|w| w[1].x < w[0].x - 1e-6));
-        assert!(back, "Schlaufen fehlen");
-        // Scheitel oben: Anzahl Annäherungen an die Oberkante ≈ Länge / Steigung (2.0 / 0.09 ≈ 22).
-        let tops = runs.iter().flat_map(|r| r.windows(3)).filter(|w| w[1].y > w[0].y && w[1].y >= w[2].y && w[1].y > 0.199).count();
-        assert!((19..=25).contains(&tops), "{tops}");
+        let t = 0.16;
+        let runs = build_hatch_runs(&band(2.0, t), &h);
+        // Fortlaufend; an den Schichtenden (Clip) höchstens ein paar Endstücke.
+        assert!(runs.len() <= 5, "{}", runs.len());
+        let pts = runs.iter().max_by_key(|r| r.len()).unwrap();
+        let p = INSULATION_PITCH * t;
+        let r = p / 2.0;
+        // Scheitel oben/unten je Teilung.
+        let tops = pts.windows(3).filter(|w| w[1].y >= w[0].y && w[1].y > w[2].y && w[1].y > t * 0.97).count();
+        let bots = pts.windows(3).filter(|w| w[1].y <= w[0].y && w[1].y < w[2].y && w[1].y < t * 0.03).count();
+        let n = (2.0 / p).round() as usize;
+        assert!(tops.abs_diff(n) <= 1 && bots.abs_diff(n) <= 1, "{tops} {bots} ≈ {n}");
+        // Bogen liegt an der Kante (knapp innen).
+        let (lo, hi) = extent(&runs, |q| q.y);
+        assert!(lo > 0.0 && lo < 0.003 && hi < t && hi > t - 0.003, "{lo}..{hi}");
+        // Segmente: Bogenschritte (Sehne ≤ 2r·sin 2.5°) oder lange Schenkel; Schenkel laufen zurück.
+        let chord = 2.0 * r * (2.5f64).to_radians().sin() * 1.001;
+        let mut legs: usize = 0;
+        for w in pts.windows(2) {
+            let len = ((w[1].x - w[0].x).powi(2) + (w[1].y - w[0].y).powi(2)).sqrt();
+            if len > chord {
+                legs += 1;
+                assert!(len > 0.5 * t, "Zwischenstück {len}");
+                let down = w[1].y < w[0].y;
+                // Schenkel neigen sich: abwärts nach links (zurück), aufwärts ebenfalls nach links.
+                assert!(w[1].x < w[0].x, "Schenkel läuft zurück ({down})");
+            }
+        }
+        assert!(legs.abs_diff(2 * n) <= 2, "{legs}");
+        // Kreuzungen über der Unterkante: Schenkel „/“ schneidet den Schenkel „\\“ der Nachbarschlaufe.
+        let seg: Vec<(V2, V2)> = pts.windows(2).filter(|w| ((w[1].x - w[0].x).powi(2) + (w[1].y - w[0].y).powi(2)).sqrt() > chord).map(|w| (w[0], w[1])).collect();
+        let cross = |a: (V2, V2), b: (V2, V2)| {
+            let d = |p: V2, q: V2, r: V2| (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+            d(a.0, a.1, b.0) * d(a.0, a.1, b.1) < 0.0 && d(b.0, b.1, a.0) * d(b.0, b.1, a.1) < 0.0
+        };
+        let crossings = (0..seg.len()).flat_map(|i| (i + 1..seg.len()).map(move |j| (i, j))).filter(|&(i, j)| cross(seg[i], seg[j])).count();
+        assert!(crossings + 3 >= n, "{crossings}");
     }
 
     /// Breite Flächen werden in Bänder geteilt (keine riesige Schlange).

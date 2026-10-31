@@ -321,12 +321,12 @@ describe("generatePlan — Auf-/Untersicht-Andeutung (WindowType.sillLine)", () 
     expect(linesOfClass(p, "window-sill", "grob").length).toBe(0);
   });
 
-  it("view: 'unter' nutzt die Überkopf-Strichelung (gestrichelt wie sonstige Überkopf-Projektionen)", () => {
+  it("view: 'unter' nutzt die Überkopf-Linie (Strichpunkt nach SIA 400 B.3.3 wie sonstige Überkopf-Projektionen)", () => {
     const wt: WindowType = { ...baseWindowType, sillLine: { faces: "aussen", view: "unter" } };
     const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
     const lines = linesOfClass(p, "window-sill", "mittel");
     expect(lines.length).toBe(1);
-    expect(lines[0].kind === "line" && lines[0].dash).toEqual([0.4, 0.25]);
+    expect(lines[0].kind === "line" && lines[0].dash).toEqual([0.4, 0.12, 0, 0.12]);
   });
 });
 
