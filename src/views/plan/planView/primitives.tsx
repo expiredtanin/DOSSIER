@@ -27,7 +27,7 @@ export function needsPattern(pattern: HatchRender["pattern"]): boolean {
 
 /**
  * Muster, die der Kern-Generator als Linien/Polylinien erzeugt ([109]: Dämmschlange, Zickzack, Welle, Holzkreuz,
- * Naturstein, Erdreich, Kies, Punktfeld) — der SVG-Rückfall zeichnet sie wie GL/Druck-SVG aus
+ * Naturstein, Erdreich, Kies, Punktfeld; Holz massiv, Holzwerkstoffe, Sperrschicht nach SIA 400) — der SVG-Rückfall zeichnet sie wie GL/Druck-SVG aus
  * `buildHatchRuns` (eine Implementierung) statt als `<pattern>`-Kachel.
  */
 export function isGeneratedPattern(pattern: HatchRender["pattern"]): boolean {
@@ -39,7 +39,10 @@ export function isGeneratedPattern(pattern: HatchRender["pattern"]): boolean {
     pattern === "earth" ||
     pattern === "gravel" ||
     pattern === "stone" ||
-    pattern === "dots"
+    pattern === "dots" ||
+    pattern === "woodBased" ||
+    pattern === "wood" ||
+    pattern === "barrier"
   );
 }
 

@@ -1712,6 +1712,9 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   gibt den stabilen Referenz-Massstab (wie Druckansicht) an WebGPU- und native Fläche (`native2d_frame`
   `dashScale`); SVG-Rückfall: Linientypen in Papier-mm im Plot-Massstab, unter `non-scaling-stroke` über die
   meet-Variable `--plan-dash-k` (`dashArrayCss`). Test: Modell-Periode bei zwei Zoomstufen gleich und = Druck-SVG.
+  Nachtrag 31.10. (SIA 400 B.3): „Punktlinie" heisst „Punktierte Linie" (B.3.2), neu „Sperrschicht (Wind, Dampf,
+  Wasser)" (Fig. 34). Offen: Kanten über der Schnittebene zeichnet der Grundriss gestrichelt (`OVERHEAD_DASH`), B.3.3
+  verlangt Strichpunkt (mittel); Strichlinie im Norm-Muster Strich:Lücke ≈ 1.5:1 (unsere 2:1).
   Offen: Bildschirm (WebGPU/macOS) nicht angesehen; CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
 - ✅ **[80] PDF mit Ebenen.** (30.10.) jsPDF kennt keine optionalen Inhalte → `export/pdfLayers.ts` schreibt Optional Content
   selbst (OCG je Ebenenname, `/OC … BDC … EMC` im Seitenstrom, `/Properties`, `/OCProperties` im Katalog; gleiche Namen auf
@@ -1926,7 +1929,21 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (`standards.rs::update_plan/update_ops`, Abfragen `standardsUpdatePlan/-Ops`). Geprüft: Rust-/vitest-Tests,
   Druck-SVG-Schnitte 1:50 aller Standard-Baustoffe angesehen (Linux). Offen: render3d-Ribbons nicht visuell
   geprüft (Metal nur macOS, WebGPU nicht im Browser); Ribbon-Breite konstant in der Welt wie die Trennlinien;
-  SVG-PlanView-Rückfall ohne Strichmuster der Musterlinien; nicht in der Tauri-App geprüft. · M
+  SVG-PlanView-Rückfall ohne Strichmuster der Musterlinien; nicht in der Tauri-App geprüf
+  Nachtrag 31.10. (Maintainer: „Gewisse Schraffuren entsprechen immer noch nicht SIA", Abgleich mit SIA 400:2000
+  B.8.3.1 Fig. 34, B.8.4.1, Fig. 28/36–39): Beton unbewehrt = Stahlbeton (Kreuzschraffur, nicht mehr gestrichelt);
+  Backstein/Kalksandstein 45°/135° gleiche Teilung 0.075 m (1.5 mm in 1:50); **Dämmstoffe = Parallelen quer zur
+  Schicht** (Fig. 34/37/38, eine Schraffur „SIA Dämmstoffe" für Mineral-/Steinwolle, EPS, XPS, Holzfaser,
+  Trittschall; die Dämmschlange bleibt als „Dämmung weich, Schlaufe (nicht SIA)"); Mörtel/Gips/Putz/Estrich und
+  Metall (Alu) leer, Füllung weiss; Holz massiv/Brett/Parkett/Schalung neues Muster `wood` (dichte 45°, unregelmässig),
+  Kantholz/Lattung Kreuz, Holzwerkstoff neues Muster `woodBased` (Dreiergruppen), Naturstein Paare bei ⅓ Teilung,
+  Glas Parallelen längs (`std-h-glas`), neu Baustoff „Abdichtung / Sperrschicht" mit Muster `barrier` und Linientyp
+  „Sperrschicht (Wind, Dampf, Wasser)", „SIA Stahl M 1:1" (B.8.4.1: grösser als 1:10 schraffiert). 1:100 („häufig
+  schwarz", Fig. 36) = Detailgrad grob, kein eigenes Modellfeld. „Standards aktualisieren": frühere Standard-Namen
+  (`former_names`) gelten nicht als umbenannt und bekommen den neuen Namen. Geprüft: Rust-/vitest-Tests, CLI-Szene
+  1:20/1:50/1:100 aller Standard-Baustoffe neben Fig. 34 angesehen (Linux). Offen: Porenbeton, Keramik, Faserzement,
+  Erdreich, Kies ohne SIA-Sinnbild (Konvention); dünne Sperrschicht in 1:50 kaum vom Umriss zu unterscheiden; nicht
+  in der Tauri-App geprüft. · M
 - ◐ **[105] Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten.** (29.10., Wunsch Maintainer „so tief wie
   ArchiCAD“) Neue optionale Modellfelder (nur Rust-Modell): `frameDetail` am Fenster-/Türtyp und feldweise an der Öffnung
   (`Opening.frameDetail`): Blendrahmen-Breite je Seite, Tiefe/Lage, Flügelrahmen (Breite, Tiefe, Überschlag), Pfosten/

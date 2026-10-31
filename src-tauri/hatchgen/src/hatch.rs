@@ -51,6 +51,9 @@ pub enum Pattern {
     Gravel = 10,
     Stone = 11,
     Dots = 12,
+    WoodBased = 13,
+    Wood = 14,
+    Barrier = 15,
 }
 
 impl Pattern {
@@ -68,6 +71,9 @@ impl Pattern {
             10 => Pattern::Gravel,
             11 => Pattern::Stone,
             12 => Pattern::Dots,
+            13 => Pattern::WoodBased,
+            14 => Pattern::Wood,
+            15 => Pattern::Barrier,
             _ => Pattern::Diagonal,
         }
     }
@@ -427,6 +433,7 @@ pub fn build_hatch_runs(poly: &[V2], hatch: &Hatch) -> Vec<Run> {
         Pattern::Earth => return earth_runs(poly, hatch, scale),
         Pattern::Gravel => return gravel_runs(poly, hatch, scale),
         Pattern::Dots => return dots_runs(poly, hatch, scale),
+        Pattern::Barrier => return barrier_runs(poly, hatch, scale),
         _ => {}
     }
     let spacing_m = 8.0 * scale * PX_TO_M;
@@ -434,6 +441,9 @@ pub fn build_hatch_runs(poly: &[V2], hatch: &Hatch) -> Vec<Run> {
     let dir1 = rotate(v2(0.0, -1.0), rot);
     let a1 = jsnum::atan2(dir1.y, dir1.x);
     let anchor = hatch.origin.unwrap_or(v2(0.0, 0.0));
+    if pattern == Pattern::Wood {
+        return wood_runs(poly, a1, spacing_m, anchor, hatch.seed.unwrap_or(0.0));
+    }
     let mut runs: Vec<Run> = hatch_line_family(poly, a1, spacing_m, 0.0, anchor)
         .into_iter()
         .map(|(a, b)| match (&hatch.motif, pattern) {
@@ -446,10 +456,70 @@ pub fn build_hatch_runs(poly: &[V2], hatch: &Hatch) -> Vec<Run> {
             runs.push(vec![a, b]);
         }
     }
-    // Naturstein: jede Musterlinie als Doppellinie (zweite um 18 % des Abstands versetzt).
+    // Naturstein (SIA 400 Fig. 34): Linien paarweise, die zweite um ⅓ der Teilung versetzt.
     if pattern == Pattern::Stone {
-        for (a, b) in hatch_line_family(poly, a1, spacing_m, 0.18 * spacing_m, anchor) {
+        for (a, b) in hatch_line_family(poly, a1, spacing_m, spacing_m / 3.0, anchor) {
             runs.push(vec![a, b]);
+        }
+    }
+    // Holzwerkstoffe (SIA 400 Fig. 34): Dreiergruppen bei 0, 0.2 und 0.4 der Teilung.
+    if pattern == Pattern::WoodBased {
+        for f in [0.2, 0.4] {
+            for (a, b) in hatch_line_family(poly, a1, spacing_m, f * spacing_m, anchor) {
+                runs.push(vec![a, b]);
+            }
+        }
+    }
+    runs
+}
+
+/// Holz massiv (SIA 400 Fig. 34): dichte Parallelen mit unregelmässigem Abstand (Maserung) — Linie `k`
+/// liegt bei `k · Teilung` ± 15 % (deterministisch je Linie und `seed`, modellraum-stabil).
+fn wood_runs(poly: &[V2], angle_rad: f64, spacing_m: f64, anchor: V2, seed: f64) -> Vec<Run> {
+    if poly.len() < 3 || spacing_m <= 1e-9 {
+        return Vec::new();
+    }
+    let dir = v2(jsnum::cos(angle_rad), jsnum::sin(angle_rad));
+    let nrm = v2(-dir.y, dir.x);
+    let (mut d_min, mut d_max) = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in poly {
+        let d = (p.x - anchor.x) * nrm.x + (p.y - anchor.y) * nrm.y;
+        d_min = d_min.min(d);
+        d_max = d_max.max(d);
+    }
+    let (first, last) = ((d_min / spacing_m).floor() - 1.0, (d_max / spacing_m).ceil() + 1.0);
+    if !(last - first).is_finite() || last - first > 1e6 {
+        return Vec::new();
+    }
+    let mut runs = Vec::new();
+    let mut k = first;
+    while k <= last {
+        let jitter = Mulberry32 { a: hash_cell(k, 0.0, seed) }.next() - 0.5;
+        let d = (k + 0.3 * jitter) * spacing_m;
+        let p0 = v2(anchor.x + nrm.x * d, anchor.y + nrm.y * d);
+        runs.extend(clip_line_to_polygon(p0, dir, poly).into_iter().map(|(a, b)| vec![a, b]));
+        k += 1.0;
+    }
+    runs
+}
+
+/// Sperrschicht (Wind, Dampf, Wasser; SIA 400 Fig. 34): Strichlinie auf der Mittellinie der Schicht,
+/// Strich = Lücke = 0.15 m · scale (1:50 → 3 mm). Die Breite gibt die Strichstärke der Schraffur.
+fn barrier_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
+    let Some(b) = band_frame(poly, hatch, scale) else { return Vec::new() };
+    let dash = 0.15 * scale;
+    if !(dash > 1e-6) || (b.u1 - b.u0) / dash > BAND_MAX_POINTS {
+        return Vec::new();
+    }
+    let mut runs = Vec::new();
+    for &(vc, _) in &b.rows {
+        let mut i = ((b.u0 - b.ua) / (2.0 * dash)).floor();
+        while b.ua + 2.0 * i * dash <= b.u1 {
+            let s = b.ua + 2.0 * i * dash;
+            for (sa, sb) in clip_segment_to_polygon(b.at(s, vc), b.at(s + dash, vc), poly) {
+                runs.push(vec![sa, sb]);
+            }
+            i += 1.0;
         }
     }
     runs
@@ -1177,10 +1247,67 @@ mod tests {
         assert!(phases.len() >= 2, "{phases:?}");
     }
 
+    /// Abstände der Musterlinien senkrecht zur Linienrichtung (Winkel 0 ⇒ Linien senkrecht zu x im
+    /// Musterraum), gemessen als Schnittpunkte mit der waagrechten Mittellinie eines Quadrats.
+    fn offsets_on_row(runs: &[Run], y: f64) -> Vec<f64> {
+        let mut xs: Vec<f64> = runs
+            .iter()
+            .filter_map(|r| {
+                let (a, b) = (r[0], r[r.len() - 1]);
+                ((a.y - y) * (b.y - y) <= 0.0 && (b.y - a.y).abs() > 1e-12).then(|| a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x))
+            })
+            .collect();
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        xs
+    }
+
+    /// SIA 400 Fig. 34: Naturstein = 45°-Linien paarweise (zweite Linie bei ⅓ der Teilung), Holzwerkstoffe =
+    /// Dreiergruppen (0, 0.2, 0.4 der Teilung), Holz massiv = dichte Linien mit unregelmässigem Abstand.
+    #[test]
+    fn naturstein_holzwerkstoff_holz_nach_sia() {
+        let sq = band(1.0, 1.0);
+        let mut h = hatch(Pattern::Stone);
+        h.angle = 0.0;
+        let sp = 8.0 * h.scale * PX_TO_M;
+        let xs = offsets_on_row(&build_hatch_runs(&sq, &h), 0.5);
+        let gaps: Vec<f64> = xs.windows(2).map(|w| ((w[1] - w[0]) / sp * 100.0).round() / 100.0).collect();
+        assert!(gaps.iter().all(|g| (*g - 0.33).abs() < 0.011 || (*g - 0.67).abs() < 0.011), "{gaps:?}");
+        h.pattern = Pattern::WoodBased;
+        let xs = offsets_on_row(&build_hatch_runs(&sq, &h), 0.5);
+        let gaps: Vec<f64> = xs.windows(2).map(|w| ((w[1] - w[0]) / sp * 100.0).round() / 100.0).collect();
+        assert!(gaps.iter().all(|g| (*g - 0.2).abs() < 0.011 || (*g - 0.6).abs() < 0.011), "{gaps:?}");
+        assert!(gaps.iter().filter(|g| (**g - 0.2).abs() < 0.011).count() > gaps.len() / 2, "je Gruppe zwei enge Abstände");
+        h.pattern = Pattern::Wood;
+        let a = build_hatch_runs(&sq, &h);
+        assert_eq!(a, build_hatch_runs(&sq, &h), "stabil");
+        let xs = offsets_on_row(&a, 0.5);
+        let gaps: Vec<f64> = xs.windows(2).map(|w| (w[1] - w[0]) / sp).collect();
+        let (lo, hi) = gaps.iter().fold((f64::INFINITY, 0.0f64), |(l, u), g| (l.min(*g), u.max(*g)));
+        assert!(lo > 0.6 && hi < 1.4 && hi - lo > 0.2, "unregelmässig, aber ohne Berührung: {lo}…{hi}");
+        let mean = gaps.iter().sum::<f64>() / gaps.len() as f64;
+        assert!((mean - 1.0).abs() < 0.05, "{mean}");
+    }
+
+    /// Sperrschicht (SIA 400 Fig. 34): Strich-Lücke gleich lang auf der Mittellinie der Schicht.
+    #[test]
+    fn sperrschicht_strichlinie_in_der_mitte() {
+        let mut h = hatch(Pattern::Barrier);
+        h.angle = 0.0;
+        h.scale = 1.0;
+        let thin = band(1.0, 0.004);
+        let runs = build_hatch_runs(&thin, &h);
+        assert!(runs.len() >= 3, "{}", runs.len());
+        for r in &runs {
+            assert!(r.iter().all(|p| (p.y - 0.002).abs() < 1e-9), "Mittellinie");
+        }
+        let lens: Vec<f64> = runs.iter().map(|r| r[r.len() - 1].x - r[0].x).collect();
+        assert!(lens.iter().filter(|l| (**l - 0.15).abs() < 1e-9).count() >= 2, "{lens:?}");
+    }
+
     #[test]
     fn schichtmuster_entartet_leer() {
         let p = vec![v2(0.0, 0.0), v2(f64::INFINITY, 0.0), v2(1.0, 1.0)];
-        for pat in [Pattern::InsulationHard, Pattern::InsulationWave, Pattern::Timber, Pattern::Earth, Pattern::Gravel, Pattern::Stone, Pattern::Dots] {
+        for pat in [Pattern::InsulationHard, Pattern::InsulationWave, Pattern::Timber, Pattern::Earth, Pattern::Gravel, Pattern::Stone, Pattern::Dots, Pattern::WoodBased, Pattern::Wood, Pattern::Barrier] {
             assert!(build_hatch_runs(&p, &hatch(pat)).is_empty(), "{pat:?}");
         }
         // Linie ohne Dicke

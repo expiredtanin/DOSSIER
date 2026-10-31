@@ -118,6 +118,9 @@ const PATTERN_CODE: Record<string, number> = {
   gravel: 10,
   stone: 11,
   dots: 12,
+  woodBased: 13,
+  wood: 14,
+  barrier: 15,
 };
 
 /** Ein Hatch-Datensatz (auch Eingabe der Einzel-Bindungen in `glPlanHatch.ts`). */

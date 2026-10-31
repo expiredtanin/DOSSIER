@@ -32,17 +32,21 @@ describe("Standard-Bibliothek ([100]–[102])", () => {
   it("zählt, was „Standards laden“ hinzufügt (Rückmeldung)", () => {
     const empty = { ...emptyProject, components: [], hatches: [], lineStyles: [], wallTypes: [], ceilingTypes: [], roofTypes: [] };
     const c = standardsMergeCounts(standardsMergeOps(empty));
-    expect(c.components).toBe(34);
+    expect(c.components).toBe(35);
     expect(c.lineStyles).toBeGreaterThan(5);
     expect(c.wallTypes + c.ceilingTypes + c.roofTypes).toBe(5);
     expect(standardsMergeCounts(standardsMergeOps(withStandards(empty)))).toEqual({ lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0 });
   });
 
-  it("Putz, Keramik und Faserzement haben eine Schraffur", () => {
+  it("Sinnbilder nach SIA 400 Fig. 34: Putz leer, Dämmung quer, Beton gekreuzt", () => {
     const p = withStandards({ ...emptyProject, components: [], hatches: [], lineStyles: [], wallTypes: [], ceilingTypes: [], roofTypes: [] });
     const hatchOf = (name: string) => p.hatches.find((h) => h.id === p.components.find((c) => c.name === name)!.hatchId)!;
-    expect(hatchOf("Innenputz").pattern).toBe("dots");
-    expect(hatchOf("Aussenputz").pattern).toBe("dots");
+    expect(hatchOf("Innenputz").pattern).toBe("none");
+    expect(hatchOf("Aussenputz").pattern).toBe("none");
+    expect(hatchOf("Beton").pattern).toBe("crosshatch");
+    expect(hatchOf("EPS").pattern).toBe("diagonal");
+    expect(hatchOf("EPS").angle).toBe(0);
+    expect(hatchOf("Holzwerkstoff (OSB/Spanplatte)").pattern).toBe("woodBased");
     expect(hatchOf("Keramikplatten").pattern).toBe("crosshatch");
     expect(hatchOf("Faserzementplatten").pattern).toBe("diagonal");
   });
@@ -50,21 +54,31 @@ describe("Standard-Bibliothek ([100]–[102])", () => {
   it("„Standards aktualisieren“: alte Definitionen auf heutigen Stand, Auswahl, ein Op-Satz", () => {
     const full = withStandards({ ...emptyProject, components: [], hatches: [], lineStyles: [], wallTypes: [], ceilingTypes: [], roofTypes: [] });
     expect(standardsUpdatePlan(full).changes).toEqual([]);
-    // Stand 29.10.: EPS mit alter Schraffur, Putz ohne Schraffur, XPS umbenannt
+    // Stand 30.10.: Dämmschlange unter dem früheren Namen, Putz-Schraffur fehlt, Kalksandstein umbenannt
     const old = {
       ...full,
-      hatches: full.hatches.filter((h) => h.id !== "std-h-putz").map((h) => (h.id === "std-h-eps" ? { ...h, pattern: "insulation" as const } : h.id === "std-h-xps" ? { ...h, name: "Meine XPS", pattern: "diagonal" as const } : h)),
+      hatches: full.hatches
+        .filter((h) => h.id !== "std-h-putz")
+        .map((h) =>
+          h.id === "std-h-daemmung-weich"
+            ? { ...h, name: "SIA Dämmung weich", pattern: "insulation" as const }
+            : h.id === "std-h-kalksandstein"
+              ? { ...h, name: "Mein KS", pattern: "crosshatch" as const }
+              : h,
+        ),
       components: full.components.map((c) => (c.id === "std-c-innenputz" ? { ...c, hatchId: "std-h-ohne" } : c)),
     };
     const plan = standardsUpdatePlan(old);
     expect(plan.added).toBe(1);
-    expect(plan.changes.map((c) => c.id).sort()).toEqual(["std-c-innenputz", "std-h-eps", "std-h-xps"]);
-    expect(plan.changes.find((c) => c.id === "std-h-xps")!.renamed).toBe(true);
+    expect(plan.changes.map((c) => c.id).sort()).toEqual(["std-c-innenputz", "std-h-daemmung-weich", "std-h-kalksandstein"]);
+    expect(plan.changes.find((c) => c.id === "std-h-kalksandstein")!.renamed).toBe(true);
+    expect(plan.changes.find((c) => c.id === "std-h-daemmung-weich")!.renamed).toBe(false);
     const selected = plan.changes.filter((c) => !c.renamed).map(standardsChangeKey);
     const after = applyOps(old, standardsUpdateOps(old, selected));
-    expect(after.hatches.find((h) => h.id === "std-h-eps")!.pattern).toBe("insulationHard");
-    expect(after.hatches.find((h) => h.id === "std-h-xps")!.pattern).toBe("diagonal");
+    const dae = after.hatches.find((h) => h.id === "std-h-daemmung-weich")!;
+    expect([dae.name, dae.pattern]).toEqual(["SIA Dämmstoffe", "diagonal"]);
+    expect(after.hatches.find((h) => h.id === "std-h-kalksandstein")!.pattern).toBe("crosshatch");
     expect(after.components.find((c) => c.id === "std-c-innenputz")!.hatchId).toBe("std-h-putz");
-    expect(standardsUpdatePlan(after).changes.map((c) => c.id)).toEqual(["std-h-xps"]);
+    expect(standardsUpdatePlan(after).changes.map((c) => c.id)).toEqual(["std-h-kalksandstein"]);
   });
 });

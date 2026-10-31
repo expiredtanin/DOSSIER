@@ -1370,7 +1370,10 @@ export type HatchPattern =
   | "earth"
   | "gravel"
   | "stone"
-  | "dots";
+  | "dots"
+  | "woodBased"
+  | "wood"
+  | "barrier";
 
 /** Eine wiederverwendbare Schraffur (Hatch Manager). */
 export type HatchStyle = {

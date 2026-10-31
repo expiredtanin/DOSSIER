@@ -247,12 +247,21 @@ pub enum HatchPattern {
     /// Kies/Geröll ([109]): kleine Kreise auf gestreutem Raster.
     #[serde(rename = "gravel")]
     Gravel,
-    /// Naturstein ([109]): Diagonale in Doppellinien.
+    /// Naturstein ([109], SIA 400 Fig. 34): Diagonale paarweise (zweite Linie bei ⅓ der Teilung).
     #[serde(rename = "stone")]
     Stone,
     /// Punktfeld ([109], Putz): feine Punkte im versetzten Raster.
     #[serde(rename = "dots")]
     Dots,
+    /// Holzwerkstoffe (SIA 400 Fig. 34): 45°-Linien in Dreiergruppen.
+    #[serde(rename = "woodBased")]
+    WoodBased,
+    /// Holz massiv (SIA 400 Fig. 34): dichte Parallelen mit unregelmässigem Abstand (Maserung).
+    #[serde(rename = "wood")]
+    Wood,
+    /// Sperrschicht (Wind, Dampf, Wasser; SIA 400 Fig. 34): kräftige Strichlinie auf der Schichtmitte.
+    #[serde(rename = "barrier")]
+    Barrier,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
