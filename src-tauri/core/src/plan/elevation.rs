@@ -1454,7 +1454,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     let depth_max = faces.iter().map(|f| f.depth_min).fold(f64::INFINITY, f64::min) + 0.3;
     let mut has_terrain = false;
     if acc.min_x.is_finite() && depth_max.is_finite() && !crate::excavation::terrains(p).is_empty() {
-        let terrain_shown = |c: Option<&str>| c.is_none_or(|c| !vis.has_vis || !vis.has_display || (vis.visible(c) && vis.render(c)));
+        let terrain_shown = |c: Option<&str>| c.is_none_or(|c| vis.visible(c) && vis.render(c));
         for t in crate::excavation::terrains(p) {
             if !terrain_shown(t.category_code.as_deref()) {
                 continue;

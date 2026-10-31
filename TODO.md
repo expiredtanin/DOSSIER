@@ -1480,7 +1480,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `excavation::reproject_colors` überträgt die Vertex-Farben per Grundriss-Projektion (x, y) auf das Netz mit Baugruben
   (3D). Erdreich-Band konfigurierbar (`earthDepth`, s. [68]). Tests Rust (Lücke, Glättung, Farben), vitest (Raster).
   Offen: Natural-Neighbour/Clough-Tocher statt Hermite-Teilung; Erdreich-Band nicht „bis zur Planunterkante"; Glättung
-  ohne Kantenerhalt (Gebäude/Böschungen im Raster werden mitgeglättet). · L
+  ohne Kantenerhalt (Gebäude/Böschungen im Raster werden mitgeglättet).
+  **Gelände ausblenden (31.10., Meldung „Terrain im Musterhaus komplex lässt sich nicht ausblenden"):** Ursachen: das
+  3D-Modell (`model3d::emit_context_meshes`) kannte die Ebenen-Sichtbarkeit nicht; die Ansicht blendete Gelände nur mit
+  gesetzter Darstellung (`has_display`) aus (Viewport-Pläne ohne `categoryDisplay`); „Kontext" (05) ausblenden liess
+  „Gelände" (02) stehen. Jetzt: 3D filtert Gelände/Import-Meshes nach Kategorie, Ansicht prüft `visible && render`,
+  `visibleCodes` (`layers.rs`) blendet Kinder einer ausgeblendeten Elternebene mit aus. Tests Rust (3D, Elternebene),
+  vitest `sampleProjectComplex.terrainHide.test.ts` (Plan, Schnitt, Ansicht, 3D), e2e `terrainHide.spec.ts`
+  (Schnitt/Ansicht/Situation; 3D nur als Unit-Test, headless kein WebGPU). Offen: Baugrube („07") ist eigene Kategorie
+  und bleibt beim Ausblenden von „02" stehen; gespeicherte Ansichten übernehmen beim Öffnen ihre `layerVisibility`
+  (Grundriss-Ausschnitte des Beispiels blenden 02 von Haus aus ab). · L
 - ✅ **[T7] Rotationskörper/Loft im UI** (API besteht). · S–M — 30.10.: Befehle `revolve` (Profil + Achse aus 2 Plan-Punkten + Winkel; Achse waagrecht auf Höhe r_max, Profil auf einer Seite) und `loft` (≥ 2 Profile der Reihe nach, gleichmässig über die Höhe; Punktzahl durch Kantenteilung angeglichen) in `cmd_solid.rs`/`cmds/{revolve,loft}.ts`, Körper als `ExtrudedSolid.brep` (Objekt-Info, STEP, Kennwerte wie die Grundkörper); Kürzel `rev`/`lf`, Werkzeugpalette 3D. Tests Rust (Spezifikation, Ops, truck-Volumen/STEP), vitest (Befehlsablauf). Nicht in der Tauri-App getestet. Offen: Achse senkrecht/beliebig im Raum, Loft mit Führungskurve, Profil-Startpunkt-Ausrichtung beim Loft.
 - ✅ **[T8] Kollisionsprüfung im 3D zeigen** (heute nur Marker im Grundriss). · S — 30.10.: Treffer in Sitzung (`panels/clashSession.ts`), Panel „Kollisionen" (`ClashPanel`: Liste, Klick wählt beide Bauteile und fährt die 3D-Kamera auf die Durchdringung, `cameraBridge.focusCamera`), im 3D rote Hüllquader aller Treffer (`clashHighlightLines` in `viewportContent`); Prüflauf öffnet das Panel, Marker im Grundriss bleiben. Tests vitest (Linien, Auswahl, Kamera-Fokus). Nicht im echten WebGPU-Viewport/Tauri geprüft. Offen: Hüllquader statt exakter Durchdringungsgeometrie, Panel-Name zeigt Ids statt Bauteilnamen, Wiederholung/Ignorieren einzelner Treffer.
 

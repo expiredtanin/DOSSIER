@@ -48,13 +48,36 @@ pub fn find<'a>(cats: &'a [Value], code: &str) -> Option<&'a Value> {
     flatten(cats).into_iter().find(|c| code_of(c) == Some(code))
 }
 
-/// Codes aller sichtbaren Kategorien in Baumreihenfolge (`collectVisibleCodes`, ohne Doppelungen).
+/// Codes der wirksam ausgeblendeten Kategorien: eigenes `visible` aus, oder eine Elternebene ist aus
+/// ([T6]/[114]: „Kontext" ausblenden blendet Gelände, Situation … mit aus).
+fn hidden_codes(cats: &[Value]) -> HashSet<String> {
+    fn walk(list: &[Value], parent_hidden: bool, out: &mut HashSet<String>) {
+        for c in list {
+            let hidden = parent_hidden || !truthy(c.get("visible"));
+            if hidden {
+                if let Some(k) = code_of(c) {
+                    out.insert(k.to_string());
+                }
+            }
+            if let Some(ch) = children(c) {
+                walk(ch, hidden, out);
+            }
+        }
+    }
+    let mut out = HashSet::new();
+    walk(cats, false, &mut out);
+    out
+}
+
+/// Codes aller sichtbaren Kategorien in Baumreihenfolge (`collectVisibleCodes`, ohne Doppelungen);
+/// Kinder einer ausgeblendeten Elternebene gelten als ausgeblendet.
 pub fn visible_codes(cats: &[Value]) -> Vec<String> {
+    let hidden = hidden_codes(cats);
     let mut seen = HashSet::new();
     flatten(cats)
         .into_iter()
-        .filter(|c| truthy(c.get("visible")))
         .filter_map(|c| code_of(c).map(str::to_string))
+        .filter(|c| !hidden.contains(c))
         .filter(|c| seen.insert(c.clone()))
         .collect()
 }
@@ -384,6 +407,19 @@ mod tests {
         assert_eq!(find(&t, "101").unwrap()["name"], "01847");
         assert!(find(&t, "999").is_none());
         assert_eq!(visible_codes(&t), ["20", "05", "100", "101"]);
+    }
+
+    /// [T6]/[114] Ausgeblendete Elternebene blendet ihre Kinder in `visibleCodes` mit aus.
+    #[test]
+    fn ausgeblendete_elternebene_blendet_kinder_aus() {
+        let t = tree();
+        let parent = flatten(&t).iter().find(|c| children(c).is_some_and(|ch| !ch.is_empty())).map(|c| code_of(c).unwrap().to_string()).unwrap();
+        let n = set_visible(&t, &set(&[parent.as_str()]), false).unwrap();
+        let vis = visible_codes(&n);
+        assert!(!vis.contains(&parent));
+        for c in children(find(&n, &parent).unwrap()).unwrap() {
+            assert!(!vis.contains(&code_of(c).unwrap().to_string()));
+        }
     }
 
     #[test]
