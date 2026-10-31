@@ -7,8 +7,8 @@ use super::prim::Primitive;
 use super::style::no_hatch;
 use crate::model::*;
 
-/// Strichmuster „über Schnitt“ (wie die Dach-/Deckenkanten).
-pub const ABOVE_DASH: [f64; 2] = super::style::OVERHEAD_DASH;
+/// Strichmuster „über Schnitt“ (wie die Dach-/Deckenkanten, Strichpunkt nach SIA 400 B.3.3).
+pub const ABOVE_DASH: [f64; 4] = super::style::OVERHEAD_DASH;
 /// Strichmuster „unter Schnitt“ (gepunktet).
 pub const UNDER_DASH: [f64; 2] = [0.04, 0.08];
 
@@ -73,10 +73,10 @@ impl ViewRange {
     }
 
     /// Strichmuster für `Above`/`Under`, nur mit eigenem Bereich; sonst `None` (Darstellung wie bisher).
-    pub fn restyle_dash(&self, z: Zone) -> Option<[f64; 2]> {
+    pub fn restyle_dash(&self, z: Zone) -> Option<&'static [f64]> {
         match z {
-            Zone::Above if self.custom => Some(ABOVE_DASH),
-            Zone::Under if self.custom => Some(UNDER_DASH),
+            Zone::Above if self.custom => Some(&ABOVE_DASH),
+            Zone::Under if self.custom => Some(&UNDER_DASH),
             _ => None,
         }
     }
@@ -85,7 +85,7 @@ impl ViewRange {
 /// Primitive ab `from` als „über/unter Schnitt“ umzeichnen: Flächen verlieren Füllung, Schraffur und
 /// Strich (bleiben als unsichtbare Pick-Fläche), ihre Kanten werden Linien im Strichmuster `dash`;
 /// Linien und Bögen bekommen das Muster.
-pub fn restyle(prims: &mut Vec<Primitive>, from: usize, dash: [f64; 2]) {
+pub fn restyle(prims: &mut Vec<Primitive>, from: usize, dash: &[f64]) {
     let tail: Vec<Primitive> = prims.drain(from..).collect();
     for mut q in tail {
         match &mut q {
@@ -152,7 +152,10 @@ mod tests {
         let v = r(Some(2.0), None, 0.0);
         assert_eq!(v.classify(1.4, 2.5), Zone::Above);
         assert_eq!(v.classify(2.1, 2.5), Zone::Hidden);
-        assert_eq!(v.restyle_dash(Zone::Above), Some(ABOVE_DASH));
+        assert_eq!(v.restyle_dash(Zone::Above), Some(&ABOVE_DASH[..]));
+        // SIA 400 B.3.3: über der Schnittebene Strichpunkt (Strich, Lücke, Punkt, Lücke).
+        assert_eq!(ABOVE_DASH.len(), 4);
+        assert_eq!(ABOVE_DASH[2], 0.0);
     }
 
     #[test]
@@ -163,7 +166,7 @@ mod tests {
         let v = r(None, Some(0.0), 0.5);
         assert_eq!(v.classify(-0.6, -0.2), Zone::Under);
         assert_eq!(v.classify(-1.0, -0.6), Zone::Hidden);
-        assert_eq!(v.restyle_dash(Zone::Under), Some(UNDER_DASH));
+        assert_eq!(v.restyle_dash(Zone::Under), Some(&UNDER_DASH[..]));
     }
 
     #[test]
@@ -206,7 +209,7 @@ mod tests {
             roof_id: None,
             section_line_id: None,
         }];
-        restyle(&mut v, 0, ABOVE_DASH);
+        restyle(&mut v, 0, &ABOVE_DASH);
         assert_eq!(v.iter().filter(|q| matches!(q, Primitive::Line { dash: Some(Some(_)), .. })).count(), 3);
         assert!(matches!(v.last(), Some(Primitive::Polygon { stroke, wall_id: Some(_), .. }) if stroke == "none"));
     }

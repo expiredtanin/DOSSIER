@@ -1713,8 +1713,9 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `dashScale`); SVG-Rückfall: Linientypen in Papier-mm im Plot-Massstab, unter `non-scaling-stroke` über die
   meet-Variable `--plan-dash-k` (`dashArrayCss`). Test: Modell-Periode bei zwei Zoomstufen gleich und = Druck-SVG.
   Nachtrag 31.10. (SIA 400 B.3): „Punktlinie" heisst „Punktierte Linie" (B.3.2), neu „Sperrschicht (Wind, Dampf,
-  Wasser)" (Fig. 34). Offen: Kanten über der Schnittebene zeichnet der Grundriss gestrichelt (`OVERHEAD_DASH`), B.3.3
-  verlangt Strichpunkt (mittel); Strichlinie im Norm-Muster Strich:Lücke ≈ 1.5:1 (unsere 2:1).
+  Wasser)" (Fig. 34). Nachtrag 31.10. (erledigt): Kanten über der Schnittebene (Decken-/Dachränder, Ansichtsbereich
+  „über Schnitt", Fensterbank „unter") als Strichpunkt nach B.3.3 (`OVERHEAD_DASH` = [0.4, 0.12, 0, 0.12]);
+  Strichlinie/Strichlinie lang im Norm-Verhältnis 1.5:1 ([3, 2] bzw. [6, 4], über „Standards aktualisieren").
   Offen: Bildschirm (WebGPU/macOS) nicht angesehen; CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
 - ✅ **[80] PDF mit Ebenen.** (30.10.) jsPDF kennt keine optionalen Inhalte → `export/pdfLayers.ts` schreibt Optional Content
   selbst (OCG je Ebenenname, `/OC … BDC … EMC` im Seitenstrom, `/Properties`, `/OCProperties` im Katalog; gleiche Namen auf
@@ -1943,7 +1944,21 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (`former_names`) gelten nicht als umbenannt und bekommen den neuen Namen. Geprüft: Rust-/vitest-Tests, CLI-Szene
   1:20/1:50/1:100 aller Standard-Baustoffe neben Fig. 34 angesehen (Linux). Offen: Porenbeton, Keramik, Faserzement,
   Erdreich, Kies ohne SIA-Sinnbild (Konvention); dünne Sperrschicht in 1:50 kaum vom Umriss zu unterscheiden; nicht
-  in der Tauri-App geprüft. · M
+  in der Tauri-App geprüft.
+  Nachtrag 31.10. (Entscheid Maintainer, Vorlagebild): weiche Dämmung = klassische **Dämmschlange** statt SIA-Parallelen.
+  Generator `insulation` neu: Kreisbögen (r = ½ Teilung) an Ober- und Unterkante, gerade Schenkel als äussere
+  Tangenten, alle Bögen gleicher Drehsinn → Bögen berühren sich, Schenkel laufen schräg zurück und kreuzen sich über der
+  Unterkante; Teilung 0.22 · Dicke · scale (gemessen an der Vorlage: 6 Schlaufen auf 1.27 Dicken — die genannten
+  0.45 ergaben dicke Tropfen ohne lange Schenkel, verworfen), Bögen ≤ 5° (gilt für DXF-Polylinien), 0.8 % Einzug von
+  den Kanten statt halber Strichstärke (Generator kennt den Plot-Massstab nicht). Läuft über denselben Generator in
+  render2d (Szene/Chunk), Druck-SVG/PDF, DXF und render3d-Live-Schnitt. Standards: „SIA Dämmung weich" (Mineral-/
+  Steinwolle, Trittschall), neu „SIA Dämmung Holzfaser" (gleiche Schlange, scale 1.4), harte Dämmung EPS/XPS = neu
+  „Dämmstoffe (SIA-Linien)" (Fig. 34-Parallelen, damit hart/weich unterscheidbar); „Dämmung weich, Schlaufe (nicht
+  SIA)" entfällt in neuen Projekten (bestehende zeichnen mit der neuen Form). „Standards aktualisieren": früherer Name
+  „SIA Dämmstoffe" gilt nicht als umbenannt. 1:100 schwarz = weiterhin Detailgrad „grob" (kein eigenes Feld, bleibt
+  so). Geprüft: Rust-/vitest-Tests, Druck-SVG Wand mit 16 cm MW/HF/EPS in 1:20/1:50/1:100 neben der Vorlage angesehen
+  (Linux). Offen: render3d-Ribbons und Bildschirm nicht angesehen; in 1:100 (mittel) ist die Schlange sehr dicht
+  (Teilung 0.35 mm Papier); nicht in der Tauri-App geprüft. · M
 - ◐ **[105] Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten.** (29.10., Wunsch Maintainer „so tief wie
   ArchiCAD“) Neue optionale Modellfelder (nur Rust-Modell): `frameDetail` am Fenster-/Türtyp und feldweise an der Öffnung
   (`Opening.frameDetail`): Blendrahmen-Breite je Seite, Tiefe/Lage, Flügelrahmen (Breite, Tiefe, Überschlag), Pfosten/

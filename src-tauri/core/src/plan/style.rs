@@ -8,7 +8,9 @@ pub const POCHE_STROKE: &str = "#1a1a1a";
 pub const MONO_INK: &str = "#111111";
 pub const LAYER_LINE_MM: f64 = 0.02;
 pub const SYMBOL_HAIRLINE_MM: f64 = 0.02;
-pub const OVERHEAD_DASH: [f64; 2] = [0.4, 0.25];
+/// Kanten über der Schnittebene (Decken-/Dachränder, Bauteile „über Schnitt"): Strichpunktlinie nach
+/// SIA 400 B.3.3 (Strich, Lücke, Punkt, Lücke; Punkt = Länge 0 mit runder Kappe).
+pub const OVERHEAD_DASH: [f64; 4] = [0.4, 0.12, 0.0, 0.12];
 pub const ROOF_EAVES_MM: f64 = 0.13;
 pub const ROOF_RIDGE_MM: f64 = 0.25;
 pub const ROOF_HIP_MM: f64 = 0.18;
