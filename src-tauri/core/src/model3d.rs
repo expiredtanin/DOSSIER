@@ -1818,10 +1818,36 @@ fn indices_u32(v: &[f64]) -> Vec<u32> {
     v.iter().map(|&i| i as u32).collect()
 }
 
+/// Codes ausgeblendeter Kategorien samt Kindern einer ausgeblendeten Elternebene.
+fn hidden_category_codes(cats: &[crate::model::LayerCategory]) -> std::collections::HashSet<&str> {
+    fn walk<'a>(list: &'a [crate::model::LayerCategory], parent_hidden: bool, out: &mut std::collections::HashSet<&'a str>) {
+        for c in list {
+            let hidden = parent_hidden || !c.visible;
+            if hidden {
+                out.insert(c.code.as_str());
+            }
+            walk(c.children.as_deref().unwrap_or(&[]), hidden, out);
+        }
+    }
+    let mut out = std::collections::HashSet::new();
+    walk(cats, false, &mut out);
+    out
+}
+
 /// Rohe Kontext-Meshes: Gelände-TIN und importierte Volumen (`emitMeshes`).
 pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
     let mut out = Vec::new();
+    // [T6]/[114] Ebenen-Sichtbarkeit: ein ausgeblendetes Gelände (Kategorie „02") verschwindet auch im 3D.
+    let hidden = hidden_category_codes(&p.layers);
     for obj in p.context.as_deref().unwrap_or(&[]) {
+        let code = match obj {
+            ContextObject::TerrainMesh(m) => m.category_code.as_deref(),
+            ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
+            _ => None,
+        };
+        if code.is_some_and(|c| hidden.contains(c)) {
+            continue;
+        }
         match obj {
             ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => {
                 // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben auf das geänderte Netz übertragen).
@@ -2171,6 +2197,21 @@ mod tests {
 
     fn near(a: V3, b: V3) -> bool {
         hypot(&[a[0] - b[0], a[1] - b[1], a[2] - b[2]]) < 1e-6
+    }
+
+    /// [T6]/[114] Gelände in ausgeblendeter Kategorie kommt nicht ins 3D.
+    #[test]
+    fn gelaende_ausgeblendet_nicht_im_3d() {
+        let t = crate::model::TerrainMesh { id: "t".into(), category_code: Some("02".into()), positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], ..Default::default() };
+        let cat = |visible| crate::model::LayerCategory { code: "02".into(), name: "Gelände".into(), visible, ..Default::default() };
+        let mk = |visible| Project { context: Some(vec![ContextObject::TerrainMesh(t.clone())]), layers: vec![cat(visible)], ..Default::default() };
+        assert_eq!(emit_context_meshes(&mk(true)).len(), 1);
+        assert!(emit_context_meshes(&mk(false)).is_empty());
+        // Elternebene „05 Kontext" aus blendet das Kind „02" mit aus.
+        let parent = |visible| crate::model::LayerCategory { code: "05".into(), name: "Kontext".into(), visible, children: Some(vec![cat(true)]), ..Default::default() };
+        let pp = |visible| Project { layers: vec![parent(visible)], ..mk(true) };
+        assert_eq!(emit_context_meshes(&pp(true)).len(), 1);
+        assert!(emit_context_meshes(&pp(false)).is_empty());
     }
 
     /// [T4] Import-Mesh glatt: Knickwinkel geht ans 3D (Vorgabe 30°), kantig ohne; JSON `creaseAngle`.
