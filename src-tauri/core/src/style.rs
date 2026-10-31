@@ -51,6 +51,9 @@ fn pattern_id(p: HatchPattern) -> f64 {
         HatchPattern::Gravel => 10.0,
         HatchPattern::Stone => 11.0,
         HatchPattern::Dots => 12.0,
+        HatchPattern::WoodBased => 13.0,
+        HatchPattern::Wood => 14.0,
+        HatchPattern::Barrier => 15.0,
         _ => 0.0,
     }
 }

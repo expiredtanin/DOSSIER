@@ -590,16 +590,17 @@ function annotations(): Drawing2D[] {
   const dl = "detail-traufe";
   // Lage abseits des Geländes (Kontext wird auf allen Ebenen gezeichnet), Ursprung x = 60 m.
   const Q = (x: number, y: number) => P(DETAIL_X + x, y);
-  const layer = (id: string, x0: number, y0: number, x1: number, y1: number, hatchId: string, fillColor = "#ffffff") =>
-    add(id, dl, "85", { shape: "rect", min: Q(x0, y0), max: Q(x1, y1) }, { hatchId, fillColor, weightMm: 0.25, lineStyleId: "std-ls-voll" });
+  const layer = (id: string, x0: number, y0: number, x1: number, y1: number, hatchId: string, fillColor = "#ffffff", hatchAngleDeg?: number) =>
+    add(id, dl, "85", { shape: "rect", min: Q(x0, y0), max: Q(x1, y1) }, { hatchId, fillColor, weightMm: 0.25, lineStyleId: "std-ls-voll", ...(hatchAngleDeg != null ? { hatchAngleDeg } : {}) });
   layer("det-aussenputz", 0, 0, 0.02, 2.0, "std-h-putz");
-  layer("det-eps", 0.02, 0, 0.2, 2.0, "std-h-eps");
+  // Dämmstoffe (SIA 400 Fig. 34): Linien quer zur senkrechten Schicht.
+  layer("det-eps", 0.02, 0, 0.2, 2.0, "std-h-daemmung-weich", "#ffffff", 90);
   layer("det-bs-unten", 0.2, 0, 0.375, 0.99, "std-h-backstein");
   layer("det-bs-oben", 0.2, 1.37, 0.375, 2.0, "std-h-backstein");
   layer("det-decke", 0.2, 0.99, 1.4, 1.24, "std-h-stahlbeton");
   layer("det-tsd", 0.375, 1.24, 1.4, 1.28, "std-h-daemmung-weich");
   layer("det-estrich", 0.375, 1.28, 1.4, 1.345, "std-h-estrich");
-  layer("det-parkett", 0.375, 1.345, 1.4, 1.36, "std-h-holz");
+  layer("det-parkett", 0.375, 1.345, 1.4, 1.36, "std-h-holz-massiv");
   layer("det-putz-unten", 0.375, 0, 0.39, 0.99, "std-h-putz");
   layer("det-putz-decke", 0.39, 0.98, 1.4, 0.99, "std-h-putz");
   add("det-randstreifen", dl, "85", { shape: "line", a: Q(0.38, 1.24), b: Q(0.38, 1.36) }, { lineStyleId: "std-ls-strich-fein", weightMm: 0.18 });

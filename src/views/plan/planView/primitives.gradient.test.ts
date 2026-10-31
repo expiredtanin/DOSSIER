@@ -46,7 +46,7 @@ describe("polyUsesPattern — gradient", () => {
 
 describe("polyUsesPattern — Kern-Generator-Muster ([109])", () => {
   it("Schicht-/Streumuster laufen über buildHatchRuns, nicht über <pattern>-Kacheln", () => {
-    for (const pattern of ["insulation", "insulationHard", "insulationWave", "timber", "earth", "gravel", "stone", "dots"] as const) {
+    for (const pattern of ["insulation", "insulationHard", "insulationWave", "timber", "earth", "gravel", "stone", "dots", "wood", "woodBased", "barrier"] as const) {
       expect(isGeneratedPattern(pattern)).toBe(true);
       expect(polyUsesPattern(hatch({ pattern }))).toBe(false);
     }

@@ -249,7 +249,7 @@ fn fill_parallel(poly: &[V2], angle: f64, spacing: f64, out: &mut Vec<(V2, V2)>)
 fn is_generated(p: Pattern) -> bool {
     matches!(
         p,
-        Pattern::Insulation | Pattern::InsulationHard | Pattern::InsulationWave | Pattern::Timber | Pattern::Earth | Pattern::Gravel | Pattern::Stone | Pattern::Dots
+        Pattern::Insulation | Pattern::InsulationHard | Pattern::InsulationWave | Pattern::Timber | Pattern::Earth | Pattern::Gravel | Pattern::Stone | Pattern::Dots | Pattern::WoodBased | Pattern::Wood | Pattern::Barrier
     )
 }
 
