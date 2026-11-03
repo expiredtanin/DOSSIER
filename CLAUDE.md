@@ -43,6 +43,10 @@ Der ganze Kern wandert nach Rust (`src-tauri/core`, Crate `dossier-core`); die U
   2D-Flächen-Booleans laufen über den Kern (i_overlay), 3D-Körper über truck — nicht vermischen.
 - **Zahlen:** Trigonometrie, `pow`, `hypot` über das Crate `libm` (deterministisch auf allen Plattformen, kein Aufruf in die
   JS-Engine); `jsnum.rs` behält die JS-artigen `min/max/round`/ToInt32 wegen der NaN-Semantik (Rust `f64::min/max` ignorieren NaN).
+- **3D-Booleans, wer wo:** Manifold (`core/solid_bool.rs`, exakt, synchron) für Körper im Modell (Öffnungen, Wandverbindungen,
+  Ableitungen); truck (`trucksolid`) für B-Rep, STEP und Kennwerte/Kollision; BSP (`fileio/csg.rs`, csg.js-Port) nur im IFC-Import
+  (IfcBooleanResult, Öffnungen, Halbräume): toleriert offene/nicht-mannigfaltige Netze und fällt bei Budget-Überschreitung auf den
+  ersten Operanden zurück, wo Manifold ablehnt. Neue 3D-Booleans nie mit BSP.
 - **Genauigkeit:** i_overlay rechnet auf einem Ganzzahlraster (≈ Ausdehnung/2³⁰); Tests mit 1e-6 m statt 1e-9.
 
 ## Architektur (harte Grenze, vom Test `src/core/boundary.test.ts` geprüft)
