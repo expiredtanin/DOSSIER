@@ -1103,8 +1103,21 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   e2e `transform.spec.ts`. Geändert gegenüber vorher: Spiegeln per Knopf/Tippen bewegt jetzt wie per Taste das
   Original (vorher Kopie), getippte Zahl nach dem Drehzentrum gilt als Distanz-Punkt (vorher ignoriert).
   Offen: ungenutzte i18n-Schlüssel (`cmd.move.base` …, `transform.bar` …) aufräumen; nicht in der Tauri-App geprüft. · M 3.11. Nachtrag: Spiegeln mit Vorgabe Kopie (Original bleibt, wie AutoCAD/Rhino; Entscheid Maintainer), U spiegelt das Original.
-- ○ **[124] Kern typisiert.** 152 Funktionen lesen rohes JSON (`grips::field/num_of`); Ops gegen Modell prüfen,
+- ◐ **[124] Kern typisiert.** 152 Funktionen lesen rohes JSON (`grips::field/num_of`); Ops gegen Modell prüfen,
   `cmd_*` auf `&Project`. · L
+  3.11. Stufe 1: (1) `apply_checked` prüft neue Werte gegen das Modell (`model/check.rs`: `add`/`replace`-Elemente,
+  `setField`; gleiche Lese-Logik wie die typisierte Sicht) → ganze Folge zurück, Meldung mit Liste, id, Feldpfad,
+  serde-Fehler. Laden bleibt tolerant; ein Element mit Alt-Fehler darf ihn behalten, aber keinen neuen bekommen.
+  Tiefe NaN-Marken werden vor der Prüfung null (Pflichtfeld → abgelehnt; vorher still als null gespeichert).
+  Kosten: ~5 µs je kleiner Änderung (Musterhaus komplex, 1000 Änderungen nativ: Commit ~280–330 µs vorher wie
+  nachher, im Rauschen; Messung `tausend_kleine_aenderungen_musterhaus`). Kein Erzeuger musste korrigiert werden
+  (cargo test, vitest inkl. beider Musterhäuser als Op-Folge, e2e). (2) JSON-Hilfen `grips` → `json_util.rs`.
+  (3) Muster `&Project` in den Befehlen: `commands::ops`/`cmd_create`/`cmd_solid::ops` bekommen die typisierte
+  Sicht (`Document::project_lookup`); typisiert: Kategorie-Suche, aktiver Wandtyp, Raumerkennungs-Wände, Raumzahl,
+  Tür-/Fenstertyp (Decke, Raum, Treppe, Öffnung, Dach, Dachfenster, Gaube). **Offen:** übrige Leser in `cmd_draw`,
+  `cmd_edit`, `cmd_transform`, `cmd_wall_edit`, `cmd_split`, `cmd_paste`, Rest `cmd_solid`/`cmd_create` (Wand,
+  Picks, Extrusion), `grips`, `selection_info`, `dim_assoc`, `pens`, `layers`, `geo_translate`, Importe; Einfügen
+  einer Kopie eines Alt-Fehler-Elements (`add`) wird jetzt abgelehnt. Nicht in der Tauri-App geprüft.
 - ✅ **[125] Doppelte Schnitt-Dominanz** (`render3d/section_boolean.rs` ↔ `core/plan_section.rs`) auf eine Fassung. · S
   3.11.: eine Fassung `dossier_hatch::section_dominance` (f64, JS-`min/max`, Schneider-Vorauswahl `ugrid` — mit
   `ugrid` aus dem Kern nach `hatchgen` verschoben); `core/plan/section.rs` und `render3d/section_boolean.rs` sind
