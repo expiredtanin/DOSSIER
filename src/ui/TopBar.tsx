@@ -8,11 +8,10 @@
 // aus App, Aktionen melden sich über Callbacks zurück. Bezeichner englisch,
 // UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
-import type { Project } from "../model/types";
 import { t } from "../i18n";
 import { checkForUpdate } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Dropdown } from "./Dropdown";
 import type { DropdownItem, DropdownOption } from "./Dropdown";
@@ -56,56 +55,14 @@ export const SCALE_PRESETS: number[] = [1, 5, 10, 20, 50, 100, 200, 500, 1000];
 const ZOOM_CLUSTER_WIDTH = 140;
 
 export interface TopBarProps {
-  project: Project;
+  /** Projektname rechts in der Leiste (nur dieser, nicht das ganze Projekt: [121]). */
+  projectName: string;
 
   // Kein Ribbon-Tab-Reiter mehr (Werkzeuge leben im ToolsPanel, siehe
   // ribbonItems.ts/layout.ts v12) — die TopBar ist nur noch die schmale
   // globale Leiste: Marke/Menü · Datei/Export/Einstellungen. Ansichts-/Zoom-/
   // Darstellungs-Steuerung folgt direkt darunter (siehe ViewRibbonTab, von
   // App unconditional gerendert statt über Tab-Umschaltung).
-
-  /** Ob Zoom/Plan aktiv ist — steuert nur noch, ob Export im Datei-Menü geht. */
-  zoomEnabled: boolean;
-  /** Öffnet den PDF-Export-Dialog (nur im Grundriss sinnvoll). */
-  onExportPdf: () => void;
-  /** Öffnet den DXF-Export-Dialog (nur im Grundriss sinnvoll). */
-  onExportDxf: () => void;
-  /** Lädt die Bauteilliste des Projekts als CSV herunter. */
-  onExportSchedule: () => void;
-  /** Lädt das Projekt als IFC4-STEP-Datei herunter. */
-  onExportIfc: () => void;
-  onExportObj: () => void;
-  onExportStl: () => void;
-  onExportGlb?: () => void;
-  onExportStep?: () => void;
-
-  // Kamera-Settings (FOV), ZUSÄTZLICH zur bestehenden im „Ansichten"-Ribbon-
-  // Tab (ViewRibbonTab) und im 3D-Ribbon-Tab (Ribbon3dTab) — hier direkt neben
-  // dem CSV-Export in der schmalen Chrome-Zeile, damit sie immer erreichbar
-  // ist (Nutzer-Wunsch). Dieselben Felder/Handler wie dort.
-  viewType: ViewType;
-  fov: number;
-  onFov: (n: number) => void;
-  /** Presets nur sinnvoll, solange ein Geschoss aktiv ist (wie `viewToggleEnabled`
-   *  in {@link ViewRibbonTabProps}). */
-  cameraEnabled: boolean;
-
-  // Ressourcen-Fenster.
-  resourcesOpen: boolean;
-  onToggleResources: () => void;
-
-  /** Öffnet das Einstellungs-Fenster (Darstellungsfarben, Projekt-Felder). */
-  onOpenSettings: () => void;
-
-  /** Layout-Menü (von App geliefert, damit dessen Logik dort bleibt). */
-
-  // ── Datei-Menü (Burger, ganz rechts) ───────────────────────────────────────
-  /** Öffnet den DXF/DWG-Import-Datei-Dialog. */
-  onImport: () => void;
-  /** Projekt als Datei speichern (JSON-Export des gesamten Projekts). */
-  onSaveProject: () => void;
-  /** Projekt aus einer Datei laden. */
-  onOpenProject: () => void;
 
   /** Menüleiste (Bearbeiten/Ansicht/Fenster, {@link AppMenuBar}) — von App
    * zusammengesetzt (dort leben Undo/Redo/Auswahl/View-State), hier nur
@@ -1104,7 +1061,7 @@ export interface ViewRibbonTabProps {
  * Massstab/Zoom-Cluster und Darstellungsart. EIN Ribbon für alles; Handler/Setter
  * kommen unverändert von App (gleiche Props wie zuvor an die TopBar).
  */
-export function ViewRibbonTab({
+export const ViewRibbonTab = memo(function ViewRibbonTab({
   viewToggleEnabled,
   viewType,
   onViewType,
@@ -1389,10 +1346,10 @@ export function ViewRibbonTab({
       )}
     </div>
   );
-}
+});
 
-export function TopBar({
-  project,
+export const TopBar = memo(function TopBar({
+  projectName,
   menuBar,
   viewControls,
 }: TopBarProps) {
@@ -1465,11 +1422,11 @@ export function TopBar({
           Projektname ganz rechts). Die Fensterknöpfe sitzen ganz links
           (macOS-Titelleisten-Konvention). */}
       <div className="topbar-right">
-        <span className="project-name">{project.name}</span>
+        <span className="project-name">{projectName}</span>
       </div>
     </header>
   );
-}
+});
 
 // Hinweis: Die früheren Helfer SNAP_TOGGLES + SnapMenu (Fang-Optionen) und die
 // Zeichenwerkzeug-Buttons wurden aus der Oberleiste entfernt; sie leben jetzt

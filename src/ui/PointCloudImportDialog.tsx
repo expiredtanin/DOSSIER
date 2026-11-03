@@ -6,7 +6,8 @@
 //
 // Muster: ExportDxfDialog (abgedunkeltes Overlay, Esc/Hintergrund schliessen).
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
+import { useStore } from "../state/appStore";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { Dropdown } from "./Dropdown";
@@ -211,8 +212,14 @@ function PointCloudImportDialog({ file, project }: { file: File; project: Projec
   );
 }
 
-/** Verstecktes Datei-Feld + Dialog; einmal in der App einhängen. */
-export function PointCloudImportHost({ project }: { project: Project }) {
+/** Dialog mit dem aktuellen Projekt aus dem Store (nur solange er offen ist abonniert, [121]). */
+function ConnectedPointCloudImportDialog({ file }: { file: File }) {
+  const project = useStore((s) => s.project);
+  return <PointCloudImportDialog file={file} project={project} />;
+}
+
+/** Verstecktes Datei-Feld + Dialog; einmal in der App einhängen. Liest das Projekt selbst. */
+export const PointCloudImportHost = memo(function PointCloudImportHost() {
   const file = usePointCloudImportRequest();
   return (
     <>
@@ -228,7 +235,7 @@ export function PointCloudImportHost({ project }: { project: Project }) {
           if (f) requestPointCloudImport(f);
         }}
       />
-      {file && <PointCloudImportDialog key={file.name + file.size + file.lastModified} file={file} project={project} />}
+      {file && <ConnectedPointCloudImportDialog key={file.name + file.size + file.lastModified} file={file} />}
     </>
   );
-}
+});

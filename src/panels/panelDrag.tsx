@@ -25,7 +25,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, memo } from "react";
 import type { DockId } from "./types";
 import { getPanel } from "./registry";
 import { t } from "../i18n";
@@ -253,7 +253,7 @@ export function usePanelDrag(cb: PanelDragCallbacks) {
  * reagiert nicht auf Zeiger (pointer-events: none), damit die Trefferprüfung
  * weiter die darunterliegenden Tab-Leisten/Zonen erreicht.
  */
-export function DragOverlay({ drag }: { drag: ReturnType<typeof usePanelDrag>["drag"] }) {
+export const DragOverlay = memo(function DragOverlay({ drag }: { drag: ReturnType<typeof usePanelDrag>["drag"] }) {
   if (!drag) return null;
   const def = getPanel(drag.panelId);
   const label = def ? t(def.title) : drag.panelId;
@@ -295,4 +295,4 @@ export function DragOverlay({ drag }: { drag: ReturnType<typeof usePanelDrag>["d
       </div>
     </div>
   );
-}
+});

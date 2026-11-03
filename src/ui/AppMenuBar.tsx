@@ -1,3 +1,4 @@
+import { memo } from "react";
 // Klassische Menüleiste (Bearbeiten/Ansicht/Fenster) neben der Wortmarke in
 // der TopBar — ergänzt die bestehende Quick-Access-Icon-Leiste um textuelle
 // Menüs im Rhino-/Desktop-Stil. Reine Darstellung + Callbacks (voll gesteuert,
@@ -57,7 +58,7 @@ export interface AppMenuBarProps {
 }
 
 /** Menüleiste (Bearbeiten/Ansicht/Fenster) — sitzt in der TopBar neben der Wortmarke. */
-export function AppMenuBar({
+export const AppMenuBar = memo(function AppMenuBar({
   onNewProject,
   onNewProjectFromSample,
   onNewProjectFromComplexSample,
@@ -195,4 +196,4 @@ export function AppMenuBar({
       />
     </div>
   );
-}
+});

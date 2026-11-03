@@ -10,7 +10,7 @@
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
-import { useEffect } from "react";
+import { useEffect, memo } from "react";
 import { useStore } from "../state/appStore";
 import { t } from "../i18n";
 import type { NotifyKind } from "../state/notifySlice";
@@ -18,7 +18,7 @@ import type { NotifyKind } from "../state/notifySlice";
 const AUTO_DISMISS_MS = 4000;
 
 /** Top-level Toast-Stack — einmal in App.tsx gerendert. */
-export function Toast() {
+export const Toast = memo(function Toast() {
   const notifications = useStore((s) => s.notifications);
   const dismissNotify = useStore((s) => s.dismissNotify);
 
@@ -37,7 +37,7 @@ export function Toast() {
       ))}
     </div>
   );
-}
+});
 
 function ToastItem({
   id,

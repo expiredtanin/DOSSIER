@@ -11,7 +11,7 @@
 // (siehe Report am Ende der Aufgabe). Bezeichner englisch, Kommentare deutsch
 // (CONVENTIONS.md).
 
-import { useContext } from "react";
+import { createContext, createElement, useContext, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { PanelHostContext } from "./types";
 import type { DisplayMode, PanelHost } from "./types";
 import type {
@@ -857,4 +857,98 @@ export function hostWithMode(
     },
   };
   return value as unknown as PanelHost;
+}
+
+// ── Host-Store: selektives Abonnieren ([121]) ─────────────────────────────────
+//
+// Der Host-Wert ist bei jedem App-Render ein neues Objekt (Projekt, Handler …); wer
+// `usePanelHost()` liest, rendert darum bei JEDER Op neu. Panels, die nur wenige Felder
+// brauchen (Werkzeug-Palette), lesen stattdessen über `usePanelHostSelect` (Wert-Felder,
+// flach verglichen) und `usePanelHostAction` (Handler mit stabiler Identität, ruft beim
+// Aufruf die aktuelle Fassung) — zusammen mit `memo` rendern sie dann nur, wenn sich ihre
+// Felder ändern. `PanelHostProvider` stellt beides bereit (Context wie bisher + Store).
+
+interface PanelHostStore {
+  get: () => PanelHostValue;
+  subscribe: (cb: () => void) => () => void;
+}
+
+const PanelHostStoreContext = createContext<PanelHostStore | null>(null);
+
+/** Ersetzt `<PanelHostContext.Provider>`: gleicher Context, dazu der Store fürs selektive Lesen. */
+export function PanelHostProvider({ value, children }: { value: PanelHost; children?: ReactNode }) {
+  const current = useRef(value);
+  // Im Render nachführen: Kinder, die im selben Durchgang rendern, lesen schon den neuen Wert.
+  current.current = value;
+  const listeners = useRef(new Set<() => void>());
+  const store = useRef<PanelHostStore | null>(null);
+  if (store.current === null) {
+    store.current = {
+      get: () => current.current as unknown as PanelHostValue,
+      subscribe: (cb) => {
+        listeners.current.add(cb);
+        return () => listeners.current.delete(cb);
+      },
+    };
+  }
+  // Nach dem Commit memoisierte Leser benachrichtigen (die prüfen selbst, ob ihre Auswahl sich änderte).
+  useLayoutEffect(() => {
+    for (const cb of listeners.current) cb();
+  }, [value]);
+  return createElement(
+    PanelHostContext.Provider,
+    { value },
+    createElement(PanelHostStoreContext.Provider, { value: store.current }, children),
+  );
+}
+
+function useHostStore(): PanelHostStore {
+  const store = useContext(PanelHostStoreContext);
+  if (store === null) {
+    throw new Error("usePanelHostSelect: außerhalb von <PanelHostProvider> verwendet.");
+  }
+  return store;
+}
+
+function shallowEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    if (!Object.is((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
+  }
+  return true;
+}
+
+/**
+ * Liest eine Auswahl aus dem Host; rendert nur neu, wenn sie sich (flach verglichen) ändert.
+ * Für Wert-Felder — Handler über {@link usePanelHostAction}.
+ */
+export function usePanelHostSelect<T>(select: (host: PanelHostValue) => T): T {
+  const store = useHostStore();
+  const selectRef = useRef(select);
+  selectRef.current = select;
+  const cache = useRef<{ value: T } | null>(null);
+  const snapshot = () => {
+    const next = selectRef.current(store.get());
+    if (cache.current && shallowEqual(cache.current.value, next)) return cache.current.value;
+    cache.current = { value: next };
+    return next;
+  };
+  return useSyncExternalStore(store.subscribe, snapshot, snapshot);
+}
+
+type HostFn<K extends keyof PanelHostValue> = Extract<PanelHostValue[K], (...args: never[]) => unknown>;
+
+/** Handler des Hosts mit stabiler Identität (ruft beim Aufruf die aktuelle Fassung). */
+export function usePanelHostAction<K extends keyof PanelHostValue>(name: K): HostFn<K> {
+  const store = useHostStore();
+  const fn = useRef<HostFn<K> | null>(null);
+  if (fn.current === null) {
+    fn.current = ((...args: unknown[]) =>
+      (store.get()[name] as unknown as (...a: unknown[]) => unknown)(...args)) as HostFn<K>;
+  }
+  return fn.current;
 }

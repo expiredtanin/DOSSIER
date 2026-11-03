@@ -1,13 +1,13 @@
 // [9] Kleines Protokoll der KI-Aufrufe (unten links, nur solange „KI-Zugriff erlauben“ an ist):
 // Verbindungsstand, Schalter „KI pausieren“, die letzten Aufrufe (Änderungen hervorgehoben).
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import { t } from "../i18n";
 import { clearAiLog, setAiPaused, useAiAccess } from "../state/aiAccess";
 
 const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-export function AiActivityPanel() {
+export const AiActivityPanel = memo(function AiActivityPanel() {
   const ai = useAiAccess();
   const [open, setOpen] = useState(true);
   if (!ai.enabled) return null;
@@ -49,4 +49,4 @@ export function AiActivityPanel() {
       )}
     </div>
   );
-}
+});
