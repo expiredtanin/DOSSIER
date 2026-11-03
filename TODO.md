@@ -1069,7 +1069,13 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   alles über `CommandEngine`. `commitTransform` (nur Tests) löschen. · M
 - ○ **[124] Kern typisiert.** 152 Funktionen lesen rohes JSON (`grips::field/num_of`); Ops gegen Modell prüfen,
   `cmd_*` auf `&Project`. · L
-- ○ **[125] Doppelte Schnitt-Dominanz** (`render3d/section_boolean.rs` ↔ `core/plan_section.rs`) auf eine Fassung. · S
+- ✅ **[125] Doppelte Schnitt-Dominanz** (`render3d/section_boolean.rs` ↔ `core/plan_section.rs`) auf eine Fassung. · S
+  3.11.: eine Fassung `dossier_hatch::section_dominance` (f64, JS-`min/max`, Schneider-Vorauswahl `ugrid` — mit
+  `ugrid` aus dem Kern nach `hatchgen` verschoben); `core/plan/section.rs` und `render3d/section_boolean.rs` sind
+  dünne Adapter, der Flachpuffer `plan_section::dominant_bands` entfällt. Abweichungen der alten Fassungen: 3D
+  rechnete in f32 (Überlapp knapp über EPS bei ~100 m ging verloren); NaN-Ecke liess im 2D jedes schwächere Band
+  verschwinden, im 3D zählte die endliche Hülle — jetzt nimmt ein nicht endliches Rechteck nicht teil. Sonst
+  gleich (Verschmelzen geprüft). Golden-Tests unverändert; nicht in der Tauri-App angesehen.
 - ○ **[126] `jsnum`/`jsmath` ersetzen** (libm, deterministisch über Plattformen); `plan_*.rs`-Paare nach `plan/`
   zusammenführen. · M
 - ○ **[127] 3D-Booleans klären:** BSP in `fileio/csg.rs` stilllegen, Manifold vs. truck dokumentieren. · S
