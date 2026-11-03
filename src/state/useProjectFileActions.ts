@@ -154,11 +154,15 @@ export function useProjectFileActions(
     }, AUTOSAVE_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, []);
-  // Kern-Panic ([118], `engine/coreWasm.ts`): der Kern ist schon neu gestartet und hat das Projekt aus
-  // der Leseansicht wieder geöffnet (Verlauf leer). Sofort eine Autosave-Kopie, Verlaufsanzeige nachführen, melden.
+  // Kern-Panic ([118], `engine/coreWasm.ts`): der Kern ist neu gestartet und hat das Projekt aus der
+  // Leseansicht wieder geöffnet (Verlauf leer). Sofort eine Autosave-Kopie, Verlaufsanzeige nachführen,
+  // melden (gedrosselt) und neu zeichnen (Kern-Handles der Ansichten sind neu aufzubauen).
+  const [, setCoreTick] = useState(0);
   useEffect(
     () =>
-      onCoreRestart(() => {
+      onCoreRestart((info) => {
+        setCoreTick(info.restarts);
+        if (info.quiet) return;
         const p = getState().project;
         try {
           if (autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) void writeAutosave(openedProjectPathRef.current, serializeProject(p));

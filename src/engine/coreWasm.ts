@@ -6,10 +6,12 @@
 // Wiederanlauf nach einem Panic ([118]): wasm32 kennt kein catch_unwind — ein Rust-Panic endet als
 // Trap (`WebAssembly.RuntimeError: unreachable`), danach ist die Instanz unbrauchbar (geborgte
 // RefCells, verwaister Zustand). `core()` liefert deshalb Hüllen um die Exporte: fängt eine einen
-// Trap, wird sofort eine frische Instanz aus dem schon übersetzten Modul gebaut (`__dossier_reinit`,
-// ergänzt von `scripts/patch-core-glue.mjs`), die Wiederherstellungs-Haken laufen (Dokumente öffnen
-// sich aus ihrer Leseansicht neu, s. `core/document.ts`), die Melde-Haken bekommen Bescheid (Hülle:
-// Meldung + Autosave) — und der Aufruf wirft {@link CoreTrapError}. Er wird NICHT wiederholt.
+// Trap, wirft der Aufruf {@link CoreTrapError} (er wird NICHT wiederholt), und im Hintergrund entsteht
+// eine frische Instanz aus dem schon übersetzten Modul (`__dossier_reinit`, ergänzt von
+// `scripts/build-core.mjs`; asynchron, weil Chromium `new WebAssembly.Instance` > 8 MB im Haupt-Thread
+// verbietet). Bis sie steht, wirft `core()` {@link CoreRestartingError}. Danach: Epoche +1 (alte
+// Kern-Handles ungültig), Wiederherstellungs-Haken (Dokumente öffnen sich aus ihrer Leseansicht neu,
+// s. `core/document.ts`), Melde-Haken (Hülle: Meldung, Autosave, Neurendern).
 
 import * as wasm from "./pkgCore/core.js";
 import { wasmInitArg } from "./wasmSource";
@@ -21,13 +23,19 @@ let ready = false;
 let guarded: CoreModule | null = null;
 /** Zahl der Neustarts seit dem Laden (Gültigkeit von Kern-Handles, s. {@link coreEpoch}). */
 let epoch = 0;
+/** Laufender Neustart (bis dahin wirft `core()`). */
+let restart: Promise<void> | null = null;
+/** Trap während der Wiederherstellung: der nächste Neustart öffnet nichts neu (sonst Endlosschleife). */
 let restoring = false;
-/** Zeit der letzten Meldung an die Hülle (Drosselung, s. {@link restartAfterTrap}). */
+let skipRestore = false;
+/** Neustart gescheitert: der Kern bleibt tot. */
+let dead = false;
+/** Zeit der letzten Meldung (Drosselung, s. {@link CoreRestartInfo.quiet}). */
 let lastReport = -Infinity;
-/** Mindestabstand der Meldungen: ein Panic, den der Render-Pfad gleich wieder auslöst, darf keine Schleife aus Meldung → Neurendern → Panic bilden. */
+/** Mindestabstand der Meldungen: ein Panic, den der Render-Pfad gleich wieder auslöst, soll nicht je Runde melden. */
 const REPORT_INTERVAL_MS = 5000;
 
-/** Was beim Neustart gemeldet wird. */
+/** Was nach einem Neustart gemeldet wird. */
 export interface CoreRestartInfo {
   /** Kern-Funktion, in der der Trap auftrat. */
   fn: string;
@@ -35,12 +43,14 @@ export interface CoreRestartInfo {
   message: string;
   /** Neustarts seit dem Laden. */
   restarts: number;
+  /** Kurz nach einer anderen Meldung: nur neu zeichnen, nicht erneut melden. */
+  quiet: boolean;
 }
 
 const restoreHooks: Array<() => void> = [];
 const listeners = new Set<(info: CoreRestartInfo) => void>();
 
-/** Fehler eines Kern-Aufrufs, der im Kern einen Panic (Trap) auslöste; der Kern läuft danach schon wieder. */
+/** Fehler eines Kern-Aufrufs, der im Kern einen Panic (Trap) auslöste; der Kern startet im Hintergrund neu. */
 export class CoreTrapError extends Error {
   constructor(
     readonly fn: string,
@@ -51,8 +61,22 @@ export class CoreTrapError extends Error {
   }
 }
 
+/** `core()` während eines Neustarts (kurz, s. {@link coreReady}). */
+export class CoreRestartingError extends Error {
+  constructor() {
+    super("Rust-Kern startet nach einem internen Fehler neu.");
+    this.name = "CoreRestartingError";
+  }
+}
+
+/** Ob `e` von einem Kern-Absturz bzw. -Neustart kommt (Hülle: abwarten statt Fehlerseite). */
+export function isCoreRestartError(e: unknown): boolean {
+  return e instanceof CoreTrapError || e instanceof CoreRestartingError;
+}
+
 /** Ob `e` ein WASM-Trap ist (Rust-Panic → `unreachable`, Speicherfehler, Stapelüberlauf). */
 export function isCoreTrap(e: unknown): boolean {
+  if (e instanceof CoreTrapError || e instanceof CoreRestartingError) return false;
   if (typeof WebAssembly !== "undefined" && e instanceof WebAssembly.RuntimeError) return true;
   const msg = e instanceof Error ? `${e.name} ${e.message}` : String(e);
   return /RuntimeError|unreachable|memory access out of bounds|Maximum call stack size exceeded|recursive use of an object/i.test(msg);
@@ -66,7 +90,7 @@ export function registerCoreRestore(hook: () => void): void {
   restoreHooks.push(hook);
 }
 
-/** Meldung nach einem Neustart (Hülle: Hinweis, Autosave, Verlaufsanzeige), als Microtask nach dem Aufruf. Rückgabe: abmelden. */
+/** Meldung nach einem Neustart (Hülle: Hinweis, Autosave, Neurendern). Rückgabe: abmelden. */
 export function onCoreRestart(listener: (info: CoreRestartInfo) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -75,6 +99,11 @@ export function onCoreRestart(listener: (info: CoreRestartInfo) => void): () => 
 /** Zahl der Neustarts: Kern-Handles (gehaltene Puffer, Indizes) aus einer älteren Epoche sind ungültig. */
 export function coreEpoch(): number {
   return epoch;
+}
+
+/** Erfüllt, sobald kein Neustart mehr läuft (sofort, wenn keiner läuft). */
+export async function coreReady(): Promise<void> {
+  while (restart) await restart;
 }
 
 /** Lädt den Kern asynchron (Browser/Tauri/Electron per URL, Node über den Byte-Provider). */
@@ -91,9 +120,11 @@ export function initCoreSync(bytes: BufferSource): void {
   ready = true;
 }
 
-/** Der geladene Kern; wirft, wenn `initCore()` noch nicht gelaufen ist (Programmierfehler). */
+/** Der geladene Kern; wirft, wenn `initCore()` noch nicht gelaufen ist (Programmierfehler) oder er gerade neu startet. */
 export function core(): CoreModule {
   if (!ready) throw new Error("Rust-Kern nicht geladen: initCore() muss vor der ersten Kern-Funktion laufen.");
+  if (restart) throw new CoreRestartingError();
+  if (dead) throw new Error("Rust-Kern nach einem internen Fehler nicht wieder gestartet — bitte die App neu laden.");
   return (guarded ??= buildGuarded());
 }
 
@@ -109,10 +140,12 @@ function buildGuarded(): CoreModule {
     }
     const f = value as (...args: unknown[]) => unknown;
     out[name] = function (this: unknown, ...args: unknown[]) {
+      // Ein Neustart, der während einer laufenden Kette (`const c = core(); …`) begann: nicht in die tote Instanz.
+      if (restart) throw new CoreRestartingError();
       try {
         return f.apply(this, args);
       } catch (e) {
-        if (isCoreTrap(e)) throw restartAfterTrap(name, e);
+        if (isCoreTrap(e)) throw startRestart(name, e);
         throw e;
       }
     };
@@ -120,47 +153,54 @@ function buildGuarded(): CoreModule {
   return out as CoreModule;
 }
 
-/** Nach einem Trap: neue Instanz, Wiederherstellung, Meldung; Ergebnis ist der Fehler für den Aufrufer. */
-function restartAfterTrap(fn: string, e: unknown): CoreTrapError {
+/** Nach einem Trap: Neustart anstossen; Ergebnis ist der Fehler für den Aufrufer. */
+function startRestart(fn: string, e: unknown): CoreTrapError {
   const message = e instanceof Error ? e.message : String(e);
   console.error(`Rust-Kern abgestürzt in ${fn} — Instanz wird neu gestartet.`, e);
+  if (restoring) skipRestore = true;
+  if (!restart) restart = runRestart(fn, message);
+  return new CoreTrapError(fn, message);
+}
+
+async function runRestart(fn: string, message: string): Promise<void> {
   try {
-    wasm.__dossier_reinit();
+    await wasm.__dossier_reinit();
   } catch (err) {
     // Ohne frische Instanz bleibt der Kern tot (wie vor [118]); nicht still weitermachen.
     console.error("Rust-Kern konnte nicht neu gestartet werden.", err);
-    return new CoreTrapError(fn, message);
+    dead = true;
+    restart = null;
+    return;
   }
   epoch++;
-  // Trap während der Wiederherstellung (das Projekt selbst bringt den Kern zu Fall): Instanz ist
-  // wieder frisch, der Fehler geht an den Haken, keine weitere Runde.
-  if (restoring) return new CoreTrapError(fn, message);
-  restoring = true;
-  try {
-    for (const hook of restoreHooks) {
-      try {
-        hook();
-      } catch (err) {
-        console.error("Wiederherstellung nach Kern-Neustart unvollständig.", err);
-      }
-    }
-  } finally {
-    restoring = false;
-  }
-  const now = Date.now();
-  if (now - lastReport >= REPORT_INTERVAL_MS) {
-    lastReport = now;
-    const info: CoreRestartInfo = { fn, message, restarts: epoch };
-    // Nach dem laufenden Aufruf melden: der Trap kann mitten im Rendern liegen (Store-Änderung dort verboten).
-    queueMicrotask(() => {
-      for (const l of listeners) {
+  restart = null;
+  const skip = skipRestore;
+  skipRestore = false;
+  if (!skip) {
+    restoring = true;
+    try {
+      for (const hook of restoreHooks) {
         try {
-          l(info);
+          hook();
         } catch (err) {
-          console.error(err);
+          console.error("Wiederherstellung nach Kern-Neustart unvollständig.", err);
         }
       }
-    });
+    } finally {
+      restoring = false;
+    }
   }
-  return new CoreTrapError(fn, message);
+  // Ein Trap in den Haken hat schon den nächsten Neustart angestossen: erst danach melden.
+  if (restart) return;
+  const now = Date.now();
+  const quiet = now - lastReport < REPORT_INTERVAL_MS;
+  if (!quiet) lastReport = now;
+  const info: CoreRestartInfo = { fn, message, restarts: epoch, quiet };
+  for (const l of listeners) {
+    try {
+      l(info);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 }

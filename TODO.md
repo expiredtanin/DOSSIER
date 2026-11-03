@@ -1056,16 +1056,17 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   Offen: nicht in der Tauri-App (macOS) und nicht im gepackten Electron geprüft (`'self'` unter `file://` ungeprüft);
   `'unsafe-inline'` bei Stilen bleibt; Material-Symbols-Font kommt noch von Google Fonts (lokal bündeln würde zwei Hosts sparen). · S
 - ◐ **[118] Wiederanlauf nach Kern-Panic.** (3.11.) `core()` (`engine/coreWasm.ts`) hüllt alle Kern-Exporte: ein
-  Trap (`RuntimeError`/`unreachable`) baut sofort eine frische Instanz aus dem übersetzten Modul
-  (`__dossier_reinit`, ergänzt von `scripts/build-core.mjs` = `npm run build:core`), jedes `ProjectDocument`
-  öffnet sich aus seiner Leseansicht neu (= letzter angenommener Stand), Kern-Handles (gehaltene Plan-Puffer,
-  Pick-Index, Vorschau-Optionen, Stück-Cache) gelten über `coreEpoch()` als ungültig; der Aufruf wirft
-  `CoreTrapError` und wird nicht wiederholt. Hülle (`useProjectFileActions`): sofort Autosave-Kopie,
-  Verlaufsanzeige nachführen, `notify(t("core.restarted"))` (gedrosselt, 5 s). Panic-Hook war schon da.
-  Test: verstecktes `__debug_panic` (nur Test, keine Fassade) in `engine/coreRecovery.test.ts`.
-  Offen: Undo-Verlauf geht beim Neustart verloren (Meldung sagt es) — Wiederaufbau per Op-Log wäre der
-  nächste Schritt; nur im Linux-Container (vitest/Node) geprüft, nicht in Tauri/Electron (synchrones
-  `new WebAssembly.Instance` im Haupt-Thread). · M
+  Trap (`RuntimeError`/`unreachable`) wirft `CoreTrapError` (nicht wiederholt) und startet im Hintergrund eine frische
+  Instanz aus dem übersetzten Modul (`__dossier_reinit`, asynchron — Chromium verbietet `new WebAssembly.Instance`
+  > 8 MB im Haupt-Thread; ergänzt von `scripts/build-core.mjs` = `npm run build:core`). Bis dahin wirft `core()`
+  `CoreRestartingError`; die `ErrorBoundary` wartet dann (`coreReady()`) und baut den Baum neu auf (höchstens 3× in
+  30 s, sonst Fehlerseite). Danach öffnet sich jedes `ProjectDocument` aus seiner Leseansicht neu (= letzter
+  angenommener Stand), Kern-Handles (gehaltene Plan-Puffer, Pick-Index, Vorschau-Optionen, Stück-Cache) gelten über
+  `coreEpoch()` als ungültig; Hülle (`useProjectFileActions`): neu zeichnen, Autosave-Kopie, Verlaufsanzeige,
+  `notify(t("core.restarted"))` (gedrosselt, 5 s). Tests: verstecktes `__debug_panic` (keine Fassade);
+  `engine/coreRecovery.test.ts` (Node) und `e2e/coreRecovery.spec.ts` (Chromium, Test-Naht `?dossierTest` →
+  `state/testHooks.ts`). Offen: Undo-Verlauf geht beim Neustart verloren (Meldung sagt es) — Wiederaufbau per
+  Op-Log wäre der nächste Schritt; nicht in Tauri (WKWebView) und nicht im gepackten Electron geprüft. · M
 - ✅ **[119] Referenz-Ausgaben (golden).** 3.11.: `src/plan/golden.test.ts` — beide Musterprojekte: Grundriss je Geschoss
   (1:100, 1:50), Schnitt, Ansicht, 3D-Zusammenfassung als Digest (Zähler, Rahmen, Hash gerundeter Zahlen) in
   `src/plan/__golden__/`; Update mit `vitest -u`. Nur Linux geprüft; Hash deckt Detailabweichungen ab, Diff zeigt nur Zähler. · M

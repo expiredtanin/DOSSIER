@@ -1,9 +1,9 @@
 // [118] Wiederanlauf nach Kern-Panic: der versteckte Test-Export `__debug_panic` (web/document.rs)
 // panict mitten in einem Dokument-Zugriff — danach wäre die alte Instanz tot (geborgte RefCell).
-// Geprüft: `core()` startet neu, die Dokumente öffnen sich aus der Leseansicht, der Store behält
+// Geprüft: `core()` startet (asynchron) neu, die Dokumente öffnen sich aus der Leseansicht, der Store behält
 // das Projekt, weitere Abfragen/Änderungen/Undo laufen, der Vorgang wird nicht wiederholt.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { core, coreEpoch, CoreTrapError, isCoreTrap, onCoreRestart } from "./coreWasm";
+import { core, coreEpoch, coreReady, CoreRestartingError, CoreTrapError, isCoreTrap, onCoreRestart } from "./coreWasm";
 import * as raw from "./pkgCore/core.js";
 import { getState } from "../state/appStore";
 import { storeDocument } from "../state/historySlice";
@@ -40,8 +40,11 @@ describe("Kern-Neustart nach Panic ([118])", () => {
     } catch (e) {
       thrown = e;
     }
-    expect(seen).not.toHaveBeenCalled(); // Meldung erst nach dem Aufruf (Microtask)
-    await Promise.resolve();
+    // Neustart asynchron (Chromium: kein synchrones Instanziieren > 8 MB): bis dahin wirft `core()`.
+    expect(() => core()).toThrow(CoreRestartingError);
+    expect(() => doc.serialize()).toThrow(CoreRestartingError);
+    expect(seen).not.toHaveBeenCalled();
+    await coreReady();
     off();
     err.mockRestore();
     expect(thrown).toBeInstanceOf(CoreTrapError);
@@ -56,7 +59,7 @@ describe("Kern-Neustart nach Panic ([118])", () => {
     doc.close();
   });
 
-  it("Panic während einer Store-Änderung: Projekt unverändert, Verlauf leer, danach Änderung + Undo", () => {
+  it("Panic während einer Store-Änderung: Projekt unverändert, Verlauf leer, danach Änderung + Undo", async () => {
     const id = st().project.walls[0].id;
     st().applyChange((p) => patchItem(p, "walls", id, { height: 3.1 }));
     expect(st().undoDepth).toBe(1);
@@ -68,6 +71,7 @@ describe("Kern-Neustart nach Panic ([118])", () => {
         return patchItem(p, "walls", id, { height: 9 });
       }),
     ).toThrow(CoreTrapError);
+    await coreReady();
     err.mockRestore();
     expect(st().project).toBe(before);
     expect(st().project.walls[0].height).toBe(3.1);

@@ -591,7 +591,13 @@ registerCoreRestore(() => {
   for (const r of liveDocs) {
     const doc = r.deref();
     if (!doc) liveDocs.delete(r);
-    else doc.restoreAfterRestart();
+    else
+      try {
+        doc.restoreAfterRestart();
+      } catch (e) {
+        // Bleibt zu (Handle 0) und öffnet sich beim nächsten Gebrauch neu (`ensure`/`sync`).
+        console.error("Kern-Dokument nach Neustart nicht wieder geöffnet.", e);
+      }
   }
 });
 
