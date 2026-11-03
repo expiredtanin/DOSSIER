@@ -7,7 +7,7 @@
 
 import type { DrawingLevel, Project, Vec2 } from "../model/types";
 import { flattenCategories, getFloor } from "../model/types";
-import { documentFor } from "../core/document";
+import { withDocument } from "../core/document";
 import { buildSolidMesh } from "../engine/truckSolid";
 import { extrudedSolidSpec } from "./extrudedSolidSpec";
 import { decodePlanBuf } from "./planBuf";
@@ -132,7 +132,9 @@ export function generateSectionPlan(
   const args = output.bodies.slice();
   args[0] = mono ? 1 : 0;
   args[1] = opts.openings ? 1 : 0;
-  const buf = decodePlanBuf(documentFor(project).queryBin("sectionPlan", args, text));
+  // `output` kann von einem älteren Stand stammen (Schnitt-Körper asynchron gerechnet, inzwischen
+  // geändert): dann rechnet ein eigenes, kurzlebiges Dokument dieses Stands ([122]).
+  const buf = decodePlanBuf(withDocument(project, (d) => d.queryBin("sectionPlan", args, text)));
   if (buf.groups.length === 0) return { primitives: [], bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
   const b = buf.bounds ?? [0, 0, 1, 1];
   return lazyPlan(

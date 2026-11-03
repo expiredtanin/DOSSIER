@@ -6,16 +6,16 @@
 import type { Project } from "./types";
 import type { CoreOp } from "../core/ops";
 import { applyOps } from "../core/ops";
-import { documentFor } from "../core/document";
+import { documentFor, withDocument } from "../core/document";
 
 /** Ops, die die fehlenden Standard-Ressourcen anhängen („Standards laden"); leer, wenn alles da ist. */
 export function standardsMergeOps(project: Project): CoreOp[] {
   return documentFor(project).queryRoot<CoreOp[]>("standardsMergeOps");
 }
 
-/** Projekt mit allen Standard-Ressourcen (für neue Projekte). */
+/** Projekt mit allen Standard-Ressourcen (für neue Projekte; eigenes, kurzlebiges Dokument, [122]). */
 export function withStandards(project: Project): Project {
-  return applyOps(project, standardsMergeOps(project));
+  return applyOps(project, withDocument(project, () => standardsMergeOps(project)));
 }
 
 /** Was „Standards laden" anhängt: Anzahl neuer Einträge je Projekt-Liste (für die Rückmeldung). */

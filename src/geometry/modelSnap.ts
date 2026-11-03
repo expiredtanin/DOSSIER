@@ -69,10 +69,11 @@ function flat(segs: readonly SnapSeg[]): Float64Array {
 /**
  * Kandidaten des Geschosses `levelId` (sichtbare Ebenen `codes`) im Kern sammeln bzw. wiederfinden:
  * dieselbe Nummer, solange sich die betroffenen Felder des Dokuments nicht ändern. 0 = kein Dokument.
+ * `skip`: ids der Elemente, die nicht fangen (die gerade gezogenen, [122]) — statt eines abgewandelten Projekts.
  */
-export function holdModelSnap(project: Project, levelId: string, codes: ReadonlySet<string>): number {
+export function holdModelSnap(project: Project, levelId: string, codes: ReadonlySet<string>, skip: Iterable<string> = []): number {
   const doc = documentFor(project);
-  return doc.id ? core().doc_snap_hold(doc.id, levelId, [...codes].join("\n")) : 0;
+  return doc.id ? core().doc_snap_hold(doc.id, levelId, [...codes].join("\n"), [...skip].join("\n")) : 0;
 }
 
 const cand = (f: Float64Array, k: number): ModelSnapCand | null =>

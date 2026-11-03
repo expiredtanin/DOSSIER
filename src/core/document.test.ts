@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ProjectDocument } from "./document";
+import { ProjectDocument, detachedLoadCount, documentFor, setPrimaryDocument, withDocument } from "./document";
 import { sampleProject } from "../model/sampleProject";
 import type { Project } from "../model/types";
 
@@ -32,25 +32,46 @@ describe("ProjectDocument (Kern-Spiegel)", () => {
     d.close();
   });
 
-  it("folgt beliebigen Änderungen über Ops", () => {
-    const d = new ProjectDocument(sampleProject);
-    let cur = sampleProject;
-    for (let seed = 1; seed <= 300; seed++) {
-      cur = mutate(cur, seed);
-      d.sync(cur);
-      const got = JSON.parse(d.json()) as Record<string, unknown>;
-      const want = plain(cur) as Record<string, unknown>;
-      const bad = [...new Set([...Object.keys(got), ...Object.keys(want)])].filter((k) => JSON.stringify(got[k]) !== JSON.stringify(want[k]));
-      expect(bad, `seed ${seed}`).toEqual([]);
+  it("documentFor: ohne Store ein eigenes, ganz geladenes Dokument je Projekt-Stand (kein Abgleich)", () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const cur = mutate(sampleProject, seed);
+      const before = detachedLoadCount();
+      const d = documentFor(cur);
+      expect(documentFor(cur)).toBe(d);
+      expect(detachedLoadCount()).toBe(before + 1);
+      expect(JSON.parse(d.json())).toEqual(plain(cur));
     }
-    d.close();
   });
 
-  it("heilt sich bei doppelten ids (Neuöffnen)", () => {
-    const d = new ProjectDocument(sampleProject);
-    const dup = { ...sampleProject, walls: [...sampleProject.walls, sampleProject.walls[0]] };
-    d.sync(dup);
-    expect(JSON.parse(d.json())).toEqual(plain(dup));
-    d.close();
+  it("withDocument: kurzlebiges Dokument, documentFor trifft es, danach geschlossen", async () => {
+    const p = mutate(sampleProject, 7);
+    const before = detachedLoadCount();
+    let held: ProjectDocument | null = null;
+    const n = withDocument(p, (d) => {
+      held = d;
+      expect(documentFor(p)).toBe(d);
+      return d.current.walls.length;
+    });
+    expect(n).toBe(p.walls.length);
+    expect(held!.id).toBe(0);
+    await withDocument(p, async (d) => {
+      await Promise.resolve();
+      expect(documentFor(p)).toBe(d);
+    });
+    expect(detachedLoadCount()).toBe(before);
+  });
+
+  it("mit Store-Dokument wirft ein fremdes Projekt (Entwicklung/Tests)", () => {
+    const store = new ProjectDocument(sampleProject);
+    setPrimaryDocument(store);
+    try {
+      expect(documentFor(sampleProject)).toBe(store);
+      expect(() => documentFor({ ...sampleProject, name: "anders" })).toThrow(/withDocument/);
+      const other = { ...sampleProject, name: "anders" };
+      expect(withDocument(other, (d) => documentFor(other) === d)).toBe(true);
+    } finally {
+      setPrimaryDocument(null);
+      store.close();
+    }
   });
 });

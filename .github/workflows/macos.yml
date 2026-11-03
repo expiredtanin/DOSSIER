@@ -25,12 +25,15 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-unknown-unknown }
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             src-tauri
             src-tauri/render2d
             src-tauri/render3d
+      - uses: taiki-e/install-action@v2
+        with: { tool: wasm-pack }
       - run: npm ci
       # tauri::generate_context! verlangt, dass frontendDist (../dist) existiert; für cargo check genügt ein leerer Ordner.
       - name: Platzhalter für frontendDist
@@ -50,6 +53,10 @@ jobs:
       # Rauchtest 3D headless: Musterprojekt -> model3d -> render_png (Metal) -> PNG.
       - name: 3D-Rauchtest (render_png)
         run: |
+          # Die CLI bündelt die WASM-Pakete (nicht im Repo), daher vorher bauen.
+          for s in core truck fileio; do
+            npm run "build:$s" || npm run "build:$s" -- --no-opt
+          done
           npm run build:cli
           npm run build:render-png
           mkdir -p smoke

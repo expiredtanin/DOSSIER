@@ -127,11 +127,12 @@ pub fn wall_layer_segments(p: &Project, w: &crate::model::Wall, out: &mut Vec<Se
 }
 
 /// Modell-Teil eines Geschosses (alles ausser den 2D-Zeichnungen).
-pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>) -> SnapPart {
-    let vis = |floor: &str, code: &str| floor == level && codes.contains(code);
+/// `skip`: ids der Elemente, die nicht fangen (z. B. die gerade gezogenen, [122]).
+pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>, skip: &HashSet<String>) -> SnapPart {
+    let vis_el = |id: &str, floor: &str, code: &str| floor == level && codes.contains(code) && !skip.contains(id);
     let mut segs: Vec<Seg> = Vec::new();
     for w in &p.walls {
-        if vis(&w.floor_id, &w.category_code) {
+        if vis_el(&w.id, &w.floor_id, &w.category_code) {
             if crate::wall_arc::is_arc_bulge(w.bulge) {
                 let pts = crate::wall_arc::axis_polyline((w.start.x, w.start.y), (w.end.x, w.end.y), w.bulge, 0.0, 0.0);
                 segs.extend(pts.windows(2).map(|q| [q[0].0, q[0].1, q[1].0, q[1].1]));
@@ -143,12 +144,12 @@ pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>) -> SnapP
     }
     let mut anchors = Vec::new();
     for r in p.rooms.as_deref().unwrap_or(&[]) {
-        if vis(&r.floor_id, &r.category_code) {
+        if vis_el(&r.id, &r.floor_id, &r.category_code) {
             closed_poly(&r.boundary, &mut segs);
         }
     }
     for c in p.ceilings.as_deref().unwrap_or(&[]) {
-        if vis(&c.floor_id, &c.category_code) {
+        if vis_el(&c.id, &c.floor_id, &c.category_code) {
             closed_poly(&c.outline, &mut segs);
             for hole in c.openings.as_deref().unwrap_or(&[]) {
                 closed_poly(hole, &mut segs);
@@ -156,13 +157,13 @@ pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>) -> SnapP
         }
     }
     for r in p.roofs.as_deref().unwrap_or(&[]) {
-        if vis(&r.floor_id, &r.category_code) {
+        if vis_el(&r.id, &r.floor_id, &r.category_code) {
             closed_poly(&r.outline, &mut segs);
         }
     }
     let mut stair_arcs = Vec::new();
     for s in p.stairs.as_deref().unwrap_or(&[]) {
-        if !vis(&s.floor_id, &s.category_code) {
+        if !vis_el(&s.id, &s.floor_id, &s.category_code) {
             continue;
         }
         // `stairOutline`: `[0, n, Punkte…]` Polygon, `[1, 4 Punkte, 2 × (cx, cy, r, a0, a1)]` Wendel.
@@ -185,7 +186,7 @@ pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>) -> SnapP
     }
     let mut circles = Vec::new();
     for col in p.columns.as_deref().unwrap_or(&[]) {
-        if !vis(&col.floor_id, &col.category_code) {
+        if !vis_el(&col.id, &col.floor_id, &col.category_code) {
             continue;
         }
         match col.profile {
@@ -195,7 +196,7 @@ pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>) -> SnapP
     }
     circles.extend(stair_arcs);
     for r in p.rooms.as_deref().unwrap_or(&[]) {
-        if vis(&r.floor_id, &r.category_code) && r.boundary.len() >= 3 {
+        if vis_el(&r.id, &r.floor_id, &r.category_code) && r.boundary.len() >= 3 {
             anchors.push(match &r.stamp_anchor {
                 Some(a) => (a.x, a.y),
                 None => {
@@ -260,14 +261,14 @@ fn drawing_segs(g: &Drawing2DGeom, out: &mut Vec<Seg>) {
     }
 }
 
-/// Zeichnungs-Teil eines Geschosses.
-pub fn collect_drawings(p: &Project, level: &str, codes: &HashSet<String>) -> SnapPart {
+/// Zeichnungs-Teil eines Geschosses; `skip` wie bei [`collect_model`].
+pub fn collect_drawings(p: &Project, level: &str, codes: &HashSet<String>, skip: &HashSet<String>) -> SnapPart {
     let mut segs: Vec<Seg> = Vec::new();
     let mut circles = Vec::new();
     let mut ellipses = Vec::new();
     let mut anchors = Vec::new();
     for d in &p.drawings2d {
-        if !crate::grid::visible_on(d, level) || !codes.contains(&d.category_code) {
+        if !crate::grid::visible_on(d, level) || !codes.contains(&d.category_code) || skip.contains(&d.id) {
             continue;
         }
         match &d.geom {
@@ -461,6 +462,8 @@ struct PartKey {
     revs: Vec<u64>,
     level: String,
     codes: String,
+    /// Ausgenommene ids (sortiert, `\n`-getrennt).
+    skip: String,
 }
 
 /// Felder, aus denen der Modell-Teil sammelt (ändert sich eines, wird neu gesammelt).
@@ -505,6 +508,17 @@ impl SnapCache {
     /// sammeln bzw. wiederverwenden; Nummer für [`SnapCache::get`]. Dieselbe Nummer, solange sich die
     /// betroffenen Felder nicht ändern.
     pub fn hold(&mut self, doc_id: u32, doc: &mut crate::document::Document, level: &str, codes: &[String]) -> u32 {
+        self.hold_except(doc_id, doc, level, codes, &[])
+    }
+
+    /// Wie [`SnapCache::hold`], ohne die Elemente mit den ids `skip` (Fang beim Ziehen: das gezogene
+    /// Element fängt nicht an sich selbst, [122] — statt eines abgewandelten Projekts).
+    pub fn hold_except(&mut self, doc_id: u32, doc: &mut crate::document::Document, level: &str, codes: &[String], skip: &[String]) -> u32 {
+        let mut skip_sorted: Vec<&str> = skip.iter().map(String::as_str).filter(|s| !s.is_empty()).collect();
+        skip_sorted.sort_unstable();
+        skip_sorted.dedup();
+        let skip_key = skip_sorted.join("\n");
+        let skip_set: HashSet<String> = skip_sorted.iter().map(|s| (*s).to_owned()).collect();
         let mut sorted: Vec<&str> = codes.iter().map(String::as_str).collect();
         sorted.sort_unstable();
         sorted.dedup();
@@ -517,6 +531,7 @@ impl SnapCache {
             revs: fields.iter().map(|f| revs.field(f)).collect(),
             level: level.to_owned(),
             codes: codes_key.clone(),
+            skip: skip_key.clone(),
         };
         let (mut mk, dk) = (key(&MODEL_FIELDS, doc.revs()), key(&DRAWING_FIELDS, doc.revs()));
         // Blatt-Ebene eines Layouts ([93]): statt des (leeren) Modells die Inhalte der Viewports, auf das
@@ -530,11 +545,11 @@ impl SnapCache {
             doc.project()
                 .map(|p| match crate::sheet_viewports::layout_of_level(p, level).filter(|_| sheet) {
                     Some(l) => SnapPart { segs: SnapSet::new(crate::sheet_viewports::viewport_snap_segments(p, l)), ..SnapPart::default() },
-                    None => collect_model(p, level, &set),
+                    None => collect_model(p, level, &set, &skip_set),
                 })
                 .unwrap_or_default()
         });
-        let drawings = cached(&mut self.drawings, dk, || doc.project().map(|p| collect_drawings(p, level, &set)).unwrap_or_default());
+        let drawings = cached(&mut self.drawings, dk, || doc.project().map(|p| collect_drawings(p, level, &set, &skip_set)).unwrap_or_default());
         if let Some(e) = self.held.iter().find(|e| Rc::ptr_eq(&e.1.model, &model) && Rc::ptr_eq(&e.1.drawings, &drawings) && e.1.near_mode == near_mode) {
             return e.0;
         }
@@ -678,7 +693,7 @@ mod tests {
         let p: Project = serde_json::from_value(v).unwrap();
         let codes: HashSet<String> = ["20".to_string()].into_iter().collect();
         for level in ["eg", "og"] {
-            let part = collect_drawings(&p, level, &codes);
+            let part = collect_drawings(&p, level, &codes, &HashSet::new());
             assert_eq!(part.anchors.len(), 4, "{level}");
             assert!(part.anchors.contains(&(5.0, 5.0)));
         }
@@ -686,10 +701,29 @@ mod tests {
         v["drawings2d"] = json!([{"id": "G", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0, "radial": true,
             "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 90}], "b": [{"label": "A", "pos": 3}], "extend": 1}}]);
         let p: Project = serde_json::from_value(v).unwrap();
-        let part = collect_drawings(&p, "eg", &codes);
+        let part = collect_drawings(&p, "eg", &codes, &HashSet::new());
         assert_eq!(part.circles.len(), 1);
         assert_eq!(part.circles[0].r, 3.0);
         assert_eq!(part.anchors.len(), 2);
+    }
+
+    #[test]
+    fn ausgenommene_elemente_fangen_nicht_eigene_nummer() {
+        let mut v = base();
+        v["walls"] = json!([wall(None)]);
+        v["drawings2d"] = json!([{"id": "l", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "line", "a": {"x": 0, "y": 5}, "b": {"x": 1, "y": 5}}}]);
+        let mut d = doc(v);
+        let mut cache = SnapCache::default();
+        let all = cache.hold(1, &mut d, "eg", &codes());
+        let no_wall = cache.hold_except(1, &mut d, "eg", &codes(), &["w".into()]);
+        let no_line = cache.hold_except(1, &mut d, "eg", &codes(), &["l".into(), String::new()]);
+        assert!(all != no_wall && all != no_line && no_wall != no_line);
+        assert!(!cache.get(all).unwrap().model.segs.segs.is_empty());
+        assert!(cache.get(no_wall).unwrap().model.segs.segs.is_empty());
+        assert_eq!(cache.get(no_wall).unwrap().drawings.segs.segs.len(), 1);
+        assert!(cache.get(no_line).unwrap().drawings.segs.segs.is_empty());
+        // Leere Ausnahme = ohne Ausnahme.
+        assert_eq!(cache.hold_except(1, &mut d, "eg", &codes(), &[]), all);
     }
 
     #[test]

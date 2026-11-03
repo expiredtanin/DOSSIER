@@ -11,6 +11,7 @@
 import { applyOps } from "../core/ops";
 import type { CoreOp } from "../core/ops";
 import type { ProjectMutation } from "../core";
+import { withDocument } from "../core";
 import type { LoadFileResult, ProjectDocument } from "../core/document";
 import {
   addItems,
@@ -1002,7 +1003,7 @@ export function createProjectSlice(
     setActivePenSet: (id) =>
       applyChange((p) => {
         const stateOps = [setField("activePenSetId", id)];
-        return [...stateOps, ...rebakePenOps(applyOps(p, stateOps))];
+        return [...stateOps, ...rebakeAfter(p, stateOps)];
       }),
 
     patchPenSetColor: (setId, penId, color) =>
@@ -1014,7 +1015,7 @@ export function createProjectSlice(
             [penId]: { ...(s.pens[penId] ?? { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }), color },
           },
         }));
-        return setId === p.activePenSetId ? [...stateOps, ...rebakePenOps(applyOps(p, stateOps))] : stateOps;
+        return setId === p.activePenSetId ? [...stateOps, ...rebakeAfter(p, stateOps)] : stateOps;
       }),
 
     patchPenSetWeight: (setId, penId, weight) =>
@@ -1026,7 +1027,7 @@ export function createProjectSlice(
             [penId]: { ...(s.pens[penId] ?? { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }), weight },
           },
         }));
-        return setId === p.activePenSetId ? [...stateOps, ...rebakePenOps(applyOps(p, stateOps))] : stateOps;
+        return setId === p.activePenSetId ? [...stateOps, ...rebakeAfter(p, stateOps)] : stateOps;
       }),
 
     seedStandardPenSet: () => applyChange((p) => seedStandardPenSetOps(p)),
@@ -1260,6 +1261,15 @@ export function createProjectSlice(
 }
 
 /** Immutabler Map über einen Raum (per ID); No-op ohne Treffer. */
+/**
+ * Ops, die die Stifte nach `stateOps` neu einbrennen: gerechnet auf dem Stand danach, in einem eigenen,
+ * kurzlebigen Dokument (der Stand ist noch nicht übernommen, [122]).
+ */
+function rebakeAfter(p: Project, stateOps: CoreOp[]): CoreOp[] {
+  const next = applyOps(p, stateOps);
+  return withDocument(next, () => rebakePenOps(next));
+}
+
 function mapRoom(
   project: Project,
   roomId: string,

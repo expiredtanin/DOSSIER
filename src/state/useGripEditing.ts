@@ -1317,15 +1317,8 @@ export function useGripEditing(opts: {
       // das singuläre selectedDrawingId/selectedWallId) — von den eigenen
       // Snap-Kandidaten ausschließen (sonst fängt der Punkt an sich selbst).
       const owner = gripOwners[index];
-      const snapProject: Project = selectedRoomId
-        ? { ...project, rooms: (project.rooms ?? []).filter((r) => r.id !== selectedRoomId) }
-        : selectedCeilingId
-        ? { ...project, ceilings: (project.ceilings ?? []).filter((c) => c.id !== selectedCeilingId) }
-        : owner?.drawingId
-        ? { ...project, drawings2d: project.drawings2d.filter((d) => d.id !== owner.drawingId) }
-        : owner?.wallId
-        ? { ...project, walls: project.walls.filter((w) => w.id !== owner.wallId) }
-        : project;
+      const snapSkip = selectedRoomId || selectedCeilingId || owner?.drawingId || owner?.wallId;
+      const excludeIds = snapSkip ? [snapSkip] : [];
       // Bezugspunkt für Shift-Ortho: ein Nachbar-Griff DESSELBEN Elements
       // (festes Ende), relativ zu dem die Bewegung auf H/V eingerastet wird.
       const refIndex = neighborGripIndex(index);
@@ -1361,7 +1354,8 @@ export function useGripEditing(opts: {
       // laufende Werkzeug-Zustand (kein aktives Zeichenwerkzeug während des Drags).
       const snapResult = computeSnap({
         raw,
-        project: snapProject,
+        project,
+        excludeIds,
         levelId,
         visibleCodes,
         settings: snap,

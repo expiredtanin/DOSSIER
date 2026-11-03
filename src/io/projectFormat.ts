@@ -17,7 +17,7 @@
 // Projekt laufen danach ohne erneute Übergabe.
 
 import type { Project } from "../model/types";
-import { documentFor, sharedDocument } from "../core/document";
+import { sharedDocument, withDocument } from "../core/document";
 import type { LoadFileResult } from "../core/document";
 
 /** Aktuelle Version des Dateiformats (muss `PROJECT_FORMAT_VERSION` im Kern entsprechen — Test). */
@@ -30,7 +30,10 @@ export function parseProjectFile(text: string): ParseProjectResult {
   return sharedDocument().loadFile(text);
 }
 
-/** Serialisiert ein Projekt für die Datei (mit aktueller Formatversion vorne). */
+/**
+ * Serialisiert ein Projekt für die Datei (mit aktueller Formatversion vorne): über das Dokument des
+ * Stores bzw. CLI, sonst ein eigenes, kurzlebiges Dokument (z. B. ältere Autosave-Stände, [122]).
+ */
 export function serializeProject(project: Project): string {
-  return documentFor(project).serialize();
+  return withDocument(project, (d) => d.serialize());
 }

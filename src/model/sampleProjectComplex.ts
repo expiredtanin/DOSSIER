@@ -36,7 +36,7 @@ import type {
 import { sampleProject } from "./sampleProject";
 import { withStandards } from "./standards";
 import { applyOps, type CoreOp } from "../core/ops";
-import { documentFor } from "../core/document";
+import { withDocument } from "../core/document";
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Hilfen
@@ -74,12 +74,12 @@ let stampSeq = 0;
 /** Kern-Befehl auf dem Projekt rechnen und anwenden (wie die Zeichenbefehle der App, fester Stempel). */
 function runCmd(p: Project, level: string, cmd: string, req: Record<string, unknown>, cat = "20"): { project: Project; ops: CoreOp[] } {
   const lvl = p.drawingLevels.find((l) => l.id === level);
-  const ops = documentFor(p).cmdOps({
+  const ops = withDocument(p, (d) => d.cmdOps({
     cmd,
     ...req,
     ctx: { level, floorHeight: lvl?.floorHeight ?? null, cat, wallType: "std-wt-iw-backstein" },
     stamp: `mk${++stampSeq}`,
-  });
+  }));
   return { project: ops.length ? applyOps(p, ops) : p, ops };
 }
 
@@ -653,7 +653,7 @@ const ROOMS: RoomDef[] = [
 function addRooms(p: Project): Project {
   for (const [level, at, nr, name, sia] of ROOMS) {
     const lvl = p.drawingLevels.find((l) => l.id === level);
-    const ops = documentFor(p).cmdOps({ cmd: "room", at: [at.x, at.y], ctx: { level, floorHeight: lvl?.floorHeight ?? null, cat: "60", wallType: "" }, stamp: `raum${nr}` });
+    const ops = withDocument(p, (d) => d.cmdOps({ cmd: "room", at: [at.x, at.y], ctx: { level, floorHeight: lvl?.floorHeight ?? null, cat: "60", wallType: "" }, stamp: `raum${nr}` }));
     const made = ops.find((o) => o.kind === "add" && o.collection === "rooms");
     if (!made || made.kind !== "add") throw new Error(`Musterhaus komplex: Raum ${nr} nicht erkannt`);
     const stamp: RoomStamp = { number: nr, name, showFloorArea: true, showUsage: true, roundingStep: 0.1 };

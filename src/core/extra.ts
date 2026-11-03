@@ -49,6 +49,7 @@ export type { SiteCheck } from "../analysis/siteRules";
 export { sampleProject } from "../model/sampleProject";
 export { parseDxf } from "../io/dxfParser";
 export { ProjectDocument, sharedDocument } from "./document";
+export { withDocument } from "./document";
 export { emptyProject } from "../model/sampleProject";
 export { buildComplexSampleProject } from "../model/sampleProjectComplex";
 export { readPointCloud, readPointCloudFlat, isPointCloudFile, DEFAULT_MAX_POINTS } from "../io/pointCloud";

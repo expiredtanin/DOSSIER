@@ -34,7 +34,6 @@ import type {
   LayoutLegend,
   LayoutTable,
   LayoutViewport,
-  Project,
   Roof,
   Vec2,
   Wall,
@@ -1744,14 +1743,10 @@ export default function App() {
     excludeWallIds: Set<string>,
     excludeDrawingIds: Set<string>,
   ): SnapResult | null => {
-    const snapProject: Project = {
-      ...project,
-      walls: project.walls.filter((w) => !excludeWallIds.has(w.id)),
-      drawings2d: project.drawings2d.filter((d) => !excludeDrawingIds.has(d.id)),
-    };
     return computeSnap({
       raw,
-      project: snapProject,
+      project,
+      excludeIds: [...excludeWallIds, ...excludeDrawingIds],
       levelId: activeLevel.id,
       visibleCodes,
       settings: snap,

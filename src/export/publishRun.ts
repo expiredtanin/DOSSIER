@@ -11,6 +11,7 @@ import { legendDrawings, legendEntries } from "../analysis/legend";
 import { buildPagesPdf, layoutPages } from "./layoutPdf";
 import { buildPlanDwg, buildPlanDxfBinary } from "./exportDxf";
 import { loadFileio } from "../engine/fileioWasm";
+import { withDocument } from "../core/document";
 import type { PublishPlan } from "./publishSet";
 import type { FolderPdfPage } from "../model/layoutModel";
 
@@ -63,15 +64,23 @@ async function cadFile(project: Project, set: PublishSet, plan: PublishPlan, fil
     .find(Boolean);
   const levelId = firstSnap?.activeLevelId ?? scoped.drawingLevels.find((l) => !l.layoutId)?.id ?? scoped.drawingLevels[0]?.id ?? "";
   const scale = set.scaleOverride ?? 100;
-  const p = generatePlan(scoped, levelId, collectVisibleCodes(scoped.layers), undefined, "fein", false, false, true, scale, true);
   const opts = { scaleDenominator: scale, paperLayout: true, levelId, title: set.name };
-  const bytes = format === "dwg" ? buildPlanDwg(p, scoped, opts) : buildPlanDxfBinary(p, scoped, opts);
+  // Gefilterte Kopie mit Legenden = eigenes, kurzlebiges Dokument ([122]).
+  const bytes = withDocument(scoped, () => {
+    const p = generatePlan(scoped, levelId, collectVisibleCodes(scoped.layers), undefined, "fein", false, false, true, scale, true);
+    return format === "dwg" ? buildPlanDwg(p, scoped, opts) : buildPlanDxfBinary(p, scoped, opts);
+  });
   return { fileName, bytes, mime: format === "dwg" ? "image/vnd.dwg" : "application/dxf" };
 }
 
 /** Erzeugt alle Dateien des Plans. */
 export async function runPublish(project: Project, set: PublishSet, plan: PublishPlan): Promise<PublishedFile[]> {
   const shown = projectForPublish(project, plan);
+  // Das veröffentlichte Projekt (Revisionen hochgezählt) = eigenes Dokument, solange der Lauf dauert ([122]).
+  return withDocument(shown, () => publishFiles(shown, set, plan));
+}
+
+async function publishFiles(shown: Project, set: PublishSet, plan: PublishPlan): Promise<PublishedFile[]> {
   const out: PublishedFile[] = [];
   for (const f of plan.files) {
     if (f.format === "dxf" || f.format === "dwg") {
