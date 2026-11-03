@@ -7,7 +7,7 @@
 
 use crate::cmd_create::{add_op, circle_pts, find, n_of, obj, opt_p, p_of, pts_of, pv, pvs, rect_corners, s, s_of, Ctx, Preview, V};
 use crate::cmd_transform::{IdGen, Shapes};
-use crate::grips::{arr, field, js_num, num_of, num_or, truthy, with, xy};
+use crate::json_util::{arr, field, js_num, num_of, num_or, truthy, with, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::ops::{id_of, Op};
@@ -726,7 +726,7 @@ fn sectionline_ops(root: &Map<String, Value>, v: &Value, ids: &mut IdGen) -> Vec
             None | Some(Value::Null) => js_num(1.0),
             Some(x) => x.clone(),
         };
-        return vec![Op::Replace { collection: "drawingLevels".into(), entity: crate::grips::with_all(z, vec![("linePoints", line), ("directionSign", sign)]) }];
+        return vec![Op::Replace { collection: "drawingLevels".into(), entity: crate::json_util::with_all(z, vec![("linePoints", line), ("directionSign", sign)]) }];
     }
     let name = s_of(v, "name").replace('\u{1}', &level_letters(of_kind.len()));
     add_op(

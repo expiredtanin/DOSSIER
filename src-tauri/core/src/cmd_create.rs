@@ -16,7 +16,7 @@
 //! Elemente mit der Schlüsselreihenfolge der früheren Objekt-Literale.
 
 use crate::cmd_transform::{IdGen, Shapes};
-use crate::grips::{arr, field, js_num, num_of, pt, truthy, xy};
+use crate::json_util::{arr, field, js_num, num_of, pt, truthy, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::ops::{id_of, Op};

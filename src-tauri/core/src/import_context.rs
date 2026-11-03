@@ -7,7 +7,7 @@
 //! Positionen/Indizes; `fileio/src/mesh_import.rs`: Zahlenpuffer + Strings). Zahlen wie in der TS-Fassung
 //! (`Math.hypot`, `Math.round`), ids aus Zeit (Basis 36) + Zähler.
 
-use crate::grips::js_num;
+use crate::json_util::js_num;
 use crate::import_drawing::{next_seq, GENERIC_IMPORT_CODE};
 use crate::jsmath;
 use crate::jsnum;
@@ -195,7 +195,7 @@ fn group_by<T>(items: &[T], key: impl Fn(&T) -> String) -> Vec<Vec<usize>> {
 
 /// LV95-Ursprung des Projekts (`projectGeoOrigin`: `geoAnchor.lv95 − geoAnchor.model`), ohne Bezug `None`.
 pub fn project_geo_origin(root: &Map<String, Value>) -> Option<[f64; 2]> {
-    let a = root.get("geoAnchor").filter(|a| crate::grips::truthy(Some(a)))?;
+    let a = root.get("geoAnchor").filter(|a| crate::json_util::truthy(Some(a)))?;
     let n = |p: &str, k: &str| a.get(p).and_then(|o| o.get(k)).and_then(Value::as_f64).unwrap_or(f64::NAN);
     Some([n("lv95", "e") - n("model", "x"), n("lv95", "n") - n("model", "y")])
 }

@@ -14,7 +14,7 @@
 //! Zahlen und Texte wie in der TS-Fassung (`Math.round`, `toFixed`, `String(n)`, ids aus Zeit + Zähler),
 //! Schlüsselreihenfolge der erzeugten Objekte wie die früheren Objekt-Literale.
 
-use crate::grips::js_num;
+use crate::json_util::js_num;
 use crate::js_fmt::{js_number, to_fixed};
 use crate::jsnum;
 use crate::ops::Op;

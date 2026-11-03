@@ -20,7 +20,7 @@ fn shift_all(v: Option<&Value>, dx: f64, dy: f64) -> Value {
     Value::Array(v.and_then(Value::as_array).map(|a| a.iter().map(|p| shift(p, dx, dy)).collect()).unwrap_or_default())
 }
 
-use crate::grips::truthy;
+use crate::json_util::truthy;
 
 /// `{...m, key: v}` — ein vorhandener Schlüssel behält seine Stelle; `None` = `undefined` (Feld entfällt).
 fn set(m: &mut Map<String, Value>, key: &str, v: Option<Value>) {

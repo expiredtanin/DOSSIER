@@ -106,6 +106,7 @@ pub mod wasm_alloc;
 pub mod text_layout;
 pub mod plan_text;
 pub mod grips;
+pub mod json_util;
 pub mod selection_info;
 pub mod project_refs;
 pub mod commands;

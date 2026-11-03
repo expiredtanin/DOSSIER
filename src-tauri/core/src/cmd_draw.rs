@@ -9,7 +9,7 @@ use crate::cmd_create::{
     pts_of, pv, pvs, s, s_of, seg_len, to_p, type_thickness, wall_types, Ctx, Preview, V, EPS,
 };
 use crate::cmd_transform::{IdGen, Shapes};
-use crate::grips::{arr, field, js_num, num_of, num_or, with, xy};
+use crate::json_util::{arr, field, js_num, num_of, num_or, with, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::ops::{id_of, Op};
@@ -373,7 +373,7 @@ fn straight_edges(g: &Value) -> Vec<(V, V)> {
         Some("polyline") => {
             let pts: Vec<V> = arr(field(g, "pts")).iter().map(xy).collect();
             let bulge = arr(field(g, "bulge"));
-            polyline_edges(&pts, crate::grips::truthy(field(g, "closed")))
+            polyline_edges(&pts, crate::json_util::truthy(field(g, "closed")))
                 .into_iter()
                 .enumerate()
                 .filter(|(i, _)| num_or(bulge.get(*i), 0.0).abs() <= EPS)
@@ -1182,11 +1182,11 @@ fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> 
                 Some((_, wi)) => format!("{prefix}-{}-arc-{}", ctx.level, id_of(walls[wi]).unwrap_or("")),
                 None => format!("{prefix}-{}-{}-{}", ctx.level, SIDES[c.side as usize], CHAINS[c.chain as usize]),
             };
-            let pts = Value::Array(c.pts.iter().map(|q| crate::grips::pt(q[0], q[1])).collect());
+            let pts = Value::Array(c.pts.iter().map(|q| crate::json_util::pt(q[0], q[1])).collect());
             let mut fields = vec![("shape", s("dimension")), ("pts", pts), ("offset", js_num(c.offset))];
             // Bogenmass ([T2]): Kette auf dem Kreis um die Bogenmitte.
             if let Some((ctr, _)) = c.arc {
-                fields.push(("arcCenter", crate::grips::pt(ctr[0], ctr[1])));
+                fields.push(("arcCenter", crate::json_util::pt(ctr[0], ctr[1])));
             }
             // Assoziativ ([38]): je Punkt das Merkmal (Ecke, Leibung), aus dem er stammt.
             let chain: Vec<V> = c.pts.iter().map(|q| (q[0], q[1])).collect();

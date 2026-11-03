@@ -8,7 +8,7 @@
 //! Deckentypen nach Schichten (Material + Dicke, ±0.5 mm), Materialien nach Namen; Zahlen auf 1e-9 m bzw.
 //! 1e-6 gerundet (`Math.round(x / step) * step`).
 
-use crate::grips::js_num;
+use crate::json_util::js_num;
 use crate::import_context::{color_hex, color_of, context_ops, geo_shift, ifc_meshes, project_geo_origin, stamp36, IfcProduct};
 use crate::import_drawing::next_seq;
 use crate::js_fmt::js_number;
@@ -715,14 +715,14 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
     ops.extend(grown_list_ops("drawingLevels", root.get("drawingLevels"), std::mem::take(&mut ctx.levels)));
     ops.extend(grown_list_ops("components", root.get("components"), std::mem::take(&mut ctx.components)));
     ops.extend(grown_list_ops("wallTypes", root.get("wallTypes"), wall_types));
-    if !ceiling_types.is_empty() || root.get("ceilingTypes").is_some_and(|v| crate::grips::truthy(Some(v))) {
+    if !ceiling_types.is_empty() || root.get("ceilingTypes").is_some_and(|v| crate::json_util::truthy(Some(v))) {
         ops.extend(grown_list_ops("ceilingTypes", root.get("ceilingTypes"), ceiling_types));
     }
     if !walls.is_empty() {
         ops.push(Op::Add { collection: "walls".into(), items: walls, at: None });
     }
     for (key, items) in [("openings", openings), ("ceilings", ceilings), ("columns", columns), ("rooms", rooms)] {
-        if root.get(key).is_some_and(|v| crate::grips::truthy(Some(v))) {
+        if root.get(key).is_some_and(|v| crate::json_util::truthy(Some(v))) {
             if !items.is_empty() {
                 ops.push(Op::Add { collection: key.into(), items, at: None });
             }

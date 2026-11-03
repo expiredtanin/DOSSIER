@@ -657,7 +657,7 @@ fn refs_of(g: &Value) -> Option<Vec<Option<DimRef>>> {
 }
 
 fn pv(p: P) -> Value {
-    crate::grips::pt(p.0, p.1)
+    crate::json_util::pt(p.0, p.1)
 }
 
 fn with(v: &Value, key: &str, x: Value) -> Value {

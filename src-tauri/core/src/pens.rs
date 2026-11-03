@@ -12,7 +12,7 @@ pub const PEN_FALLBACK_COLOR: &str = "#9aa0a6";
 /// Strichstärke (mm) eines Stifts ohne Eintrag.
 pub const PEN_FALLBACK_WEIGHT: f64 = 0.18;
 
-use crate::grips::truthy;
+use crate::json_util::truthy;
 
 /// Schlüssel des Stifts als Objekt-Schlüssel (JS: `pens[penId]`, eine Zahl wird zu Text).
 fn key_of(v: &Value) -> Option<String> {

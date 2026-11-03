@@ -9,14 +9,14 @@
 //! nach einem Mausschritt an einer grossen Liste wäre deren Neueinlesen teurer als die Abfrage). Nur das
 //! gewählte Dach, die Treppe und die Stütze werden typisiert gelesen, wo die Geometrie schon typisiert im
 //! Kern steht (`roof.rs`, `stair.rs`, `model3d::column_footprint`). Zahlen wie in JS: `null` rechnet wie
-//! 0 (`grips::num_of`), nicht endliche Ergebnisse reisen als Marken (`grips::js_num`).
+//! 0 (`json_util::num_of`), nicht endliche Ergebnisse reisen als Marken (`json_util::js_num`).
 //!
 //! Wo TS warf (unbekannter Wandtyp, Deckentyp oder Bauteil), kommt dieselbe Meldung als Fehler.
 //! Der B-Rep-Körper einer Extrusion (`spec`) bleibt in TS (truck-Pipeline, `plan/extrudedSolidSpec.ts`).
 
 use crate::document::Lookup;
 use crate::model::helpers::heights;
-use crate::grips::{arr, field, js_num, num_of, truthy, xy};
+use crate::json_util::{arr, field, js_num, num_of, truthy, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::ops::id_of;
