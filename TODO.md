@@ -1051,8 +1051,9 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   `connect-src` = netFetch-Hosts + ipc). Rich-Text-`innerHTML` prüfen. · S
 - ○ **[118] Wiederanlauf nach Kern-Panic.** Dokument + Verlauf im selben WASM wie alle Geometrie
   (`web/document.rs`); TS hält Op-Log seit letztem Laden, baut Instanz nach Trap neu auf. · M
-- ○ **[119] Referenz-Ausgaben (golden).** Plan-Puffer/SVG/Schnitt/Ansicht der Musterprojekte als Snapshot;
-  seit TS gelöscht ist, fehlt die Bitgleich-Referenz. · M
+- ✅ **[119] Referenz-Ausgaben (golden).** 3.11.: `src/plan/golden.test.ts` — beide Musterprojekte: Grundriss je Geschoss
+  (1:100, 1:50), Schnitt, Ansicht, 3D-Zusammenfassung als Digest (Zähler, Rahmen, Hash gerundeter Zahlen) in
+  `src/plan/__golden__/`; Update mit `vitest -u`. Nur Linux geprüft; Hash deckt Detailabweichungen ab, Diff zeigt nur Zähler. · M
 - ○ **[120] macOS in CI.** `cargo check --features native2d`, Bildvergleich Metal ↔ WebGPU. · M
 - ○ **[121] App.tsx zerlegen, Neurendern stoppen.** `App.tsx:365` abonniert ganzes Projekt, 0× `memo`;
   Abschnitte in Hooks/Komponenten, Panels lesen den Store selbst; Nebenfenster bekommen Ops statt Projekt. · L

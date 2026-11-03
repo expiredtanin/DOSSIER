@@ -1,0 +1,31 @@
+meshes [44]
+meshes[].color [3] x44
+meshes[].indices [36] x42
+meshes[].indices [540]
+meshes[].indices [60]
+meshes[].positions [120]
+meshes[].positions [24] x42
+meshes[].positions [360]
+roofLayers [2]
+roofLayers[].color [3] x2
+roofLayers[].normal [3] x2
+roofLayers[].polygon [4] x2
+roofLayers[].polygon[] [3] x8
+slabs [3]
+slabs[].color [3] x3
+slabs[].cut.lineColor [3]
+slabs[].outline [4] x3
+slabs[].outline[] [2] x12
+walls [47]
+walls[].color [3] x47
+walls[].cut.lineColor [3] x11
+walls[].end [2] x47
+walls[].endCut [4] x47
+walls[].holes [1] x5
+walls[].holes [2] x5
+walls[].layers [0] x47
+walls[].start [2] x47
+walls[].startCut [4] x47
+walls[].topDrop [2] x6
+walls[].topPlane [3] x6
+hash 43431f51d1e44e8b

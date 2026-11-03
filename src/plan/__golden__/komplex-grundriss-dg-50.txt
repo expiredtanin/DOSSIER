@@ -1,0 +1,10 @@
+viewBox -16.5 0 49 35.22
+bytes 343059
+circle 14
+line 3498
+path 8
+polygon 91
+rect 1
+svg 1
+text 36
+hash f96ebde7ba7f7e74
