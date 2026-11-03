@@ -27,8 +27,6 @@ import type {
   Vec2,
   Wall,
 } from "./model/types";
-import { activePenSet, resolvePenColor, resolvePenWeight } from "./model/penSets";
-import { PenColorField } from "./ui/PenColorField";
 import { generatePlan, computeKennzahlen, checkRoomProgram } from "./core";
 import { addedItems } from "./core";
 import { programStatusLabel } from "./panels/KennzahlenSection";
@@ -71,13 +69,11 @@ import {
   sheetMmToModel,
   SHEET_SCALE_DENOMINATOR,
 } from "./model/layoutModel";
-import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar, ViewRibbonTab } from "./ui/TopBar";
 import { AppMenuBar } from "./ui/AppMenuBar";
 import { PointCloudImportHost } from "./ui/PointCloudImportDialog";
 import { openPointCloudFileDialog, requestPointCloudImport } from "./state/pointCloudStore";
 import { isPointCloudFile } from "./io/pointCloud";
-import { EditorField } from "./ui/EditorField";
 import { useNativeAppMenu } from "./native/appMenu";
 import { openResourceWindowNative, useResourceWindowHost } from "./native/resourceWindow";
 import { openSettingsWindowNative, useSettingsWindowHost } from "./native/settingsWindow";
@@ -93,9 +89,7 @@ import {
   openContextImportWindowNative,
   useContextImportWindowHost,
 } from "./native/contextImportWindow";
-import { TextEditorDialog } from "./ui/TextEditorDialog";
-import { RoomStampEditor } from "./panels/RoomStampEditor";
-import { defaultRoomStamp } from "./model/roomStamp";
+import { RoomStampEditorHost } from "./ui/RoomStampEditorHost";
 import { StatusBar } from "./ui/StatusBar";
 import { isOffline, setOffline } from "./net/net";
 import { setAiAccessEnabled, setAiView, useAiAccess } from "./state/aiAccess";
@@ -117,7 +111,7 @@ import {
 } from "./state/selectionLayers";
 import { buildMenuItems, menuTitle } from "./menus/contextMenu";
 import { useContextMenuState } from "./menus/useContextMenuState";
-import { InlineEditor } from "./views/InlineEditor";
+import { LayerInlineEditor, LevelInlineEditor } from "./menus/InlineEditors";
 import { Content } from "./views/viewportContent";
 import { useDialogState } from "./state/useDialogState";
 import { useTopBarState } from "./state/useTopBarState";
@@ -164,7 +158,7 @@ import { applyDrawingStyleOps, readDrawingStyle } from "./editors/matchProps";
 
 // Globaler Store (Slices: project/selection/view/layout).
 import { getState, useStore } from "./state/appStore";
-import { categoryLabel, findCategory } from "./model/layers";
+import { categoryLabel } from "./model/layers";
 import { reconcileLayout } from "./state/layoutSlice";
 
 // Panel-System.
@@ -3130,38 +3124,14 @@ export default function App() {
           Button in der Objekt-Info öffnet ihn. „Übernehmen" schreibt das
           bearbeitete Rich-Text-Dokument über setRoomStampDoc. Die Formatier-
           Leiste in der Oberleiste wirkt ebenfalls live auf den gewählten Raum. */}
-      {stampEditorRoomId &&
-        (() => {
-          const room = (project.rooms ?? []).find((r) => r.id === stampEditorRoomId);
-          if (!room) return null;
-          // Strukturierter Stempel für neue Räume (kein Alt-Rich-Text) bzw. sobald
-          // einer gesetzt ist; freier Text nur noch als Fallback für Alt-Räume,
-          // die einen stampDoc, aber keinen strukturierten Stempel tragen.
-          const useStructured = Boolean(room.stamp) || !room.stampDoc;
-          if (useStructured) {
-            return (
-              <RoomStampEditor
-                value={room.stamp ?? defaultRoomStamp(room)}
-                onApply={(edited) => {
-                  setRoomStamp(room.id, edited);
-                  setStampEditorRoomId(null);
-                }}
-                onCancel={() => setStampEditorRoomId(null)}
-              />
-            );
-          }
-          const doc = room.stampDoc ?? docFromText(room.name);
-          return (
-            <TextEditorDialog
-              value={doc}
-              onApply={(edited) => {
-                setRoomStampDoc(room.id, edited);
-                setStampEditorRoomId(null);
-              }}
-              onCancel={() => setStampEditorRoomId(null)}
-            />
-          );
-        })()}
+      {stampEditorRoomId && (
+        <RoomStampEditorHost
+          roomId={stampEditorRoomId}
+          onClose={() => setStampEditorRoomId(null)}
+          setRoomStamp={setRoomStamp}
+          setRoomStampDoc={setRoomStampDoc}
+        />
+      )}
 
       {/* Dezenter Drop-Rahmen, solange eine Datei über die App gezogen wird. */}
       {dropActive && (
@@ -3241,179 +3211,18 @@ export default function App() {
       )}
 
       {/* Inline-Editor (Ebene bzw. Geschoss) — minimaler echter Editor, der live
-          auf den State wirkt. Aus einem Menüpunkt geöffnet. */}
-      {editor?.kind === "layer" &&
-        (() => {
-          const cat = findCategory(project.layers, editor.code);
-          if (!cat) return null;
-          return (
-            <InlineEditor
-              x={editor.x}
-              y={editor.y}
-              title={t("editor.layerTitle", { code: cat.code })}
-              onClose={() => setEditor(null)}
-            >
-              <EditorField label={t("editor.name")}>
-                <input
-                  type="text"
-                  value={cat.name}
-                  autoFocus
-                  onChange={(e) =>
-                    patchCategory(cat.code, { name: e.target.value })
-                  }
-                />
-              </EditorField>
-              <EditorField label={t("editor.color")}>
-                <PenColorField
-                  color={cat.colorPenId ? resolvePenColor(project, cat.colorPenId) : cat.color}
-                  penId={cat.colorPenId}
-                  pens={project.pens ?? []}
-                  activeStyles={activePenSet(project)?.pens}
-                  customPalettes={project.customPalettes}
-                  builtinBanks={project.builtinPaletteBanks}
-                  onSaveColor={addColorToCustomPalette}
-                  showWeight
-                  onColorChange={(color) => patchCategory(cat.code, { color, colorPenId: undefined })}
-                  onPenChange={(colorPenId) =>
-                    patchCategory(cat.code, {
-                      colorPenId,
-                      ...(colorPenId
-                        ? { color: resolvePenColor(project, colorPenId), lw: resolvePenWeight(project, colorPenId) }
-                        : {}),
-                    })
-                  }
-                />
-              </EditorField>
-              <EditorField label={t("editor.lineWeight")}>
-                <span className="editor-num">
-                  <input
-                    type="number"
-                    step={0.01}
-                    min={0.01}
-                    value={cat.lw}
-                    disabled={!!cat.colorPenId}
-                    onChange={(e) =>
-                      patchCategory(cat.code, { lw: Number(e.target.value) })
-                    }
-                  />
-                  <span className="editor-unit">{t("editor.unit.mm")}</span>
-                </span>
-              </EditorField>
-              <EditorField label={t("editor.hatch")}>
-                <span className="editor-hatch">
-                  <select
-                    value={cat.hatch ?? ""}
-                    onChange={(e) =>
-                      patchCategory(cat.code, {
-                        hatch: e.target.value || undefined,
-                      })
-                    }
-                  >
-                    <option value="">{t("resources.viewHatch.none")}</option>
-                    {project.hatches.map((h) => (
-                      <option key={h.id} value={h.id}>
-                        {h.name}
-                      </option>
-                    ))}
-                  </select>
-                  {cat.hatch &&
-                    (() => {
-                      const h = project.hatches.find((ht) => ht.id === cat.hatch);
-                      return h ? <HatchSwatch hatch={h} size={26} /> : null;
-                    })()}
-                </span>
-              </EditorField>
-            </InlineEditor>
-          );
-        })()}
-
-      {editor?.kind === "level" &&
-        (() => {
-          const level = project.drawingLevels.find((z) => z.id === editor.id);
-          if (!level) return null;
-          const isFloor = level.kind === "floor";
-          return (
-            <InlineEditor
-              x={editor.x}
-              y={editor.y}
-              title={level.name}
-              onClose={() => setEditor(null)}
-            >
-              <EditorField label={t("editor.name")}>
-                <input
-                  type="text"
-                  value={level.name}
-                  autoFocus
-                  onChange={(e) => patchLevel(level.id, { name: e.target.value })}
-                />
-              </EditorField>
-              {isFloor && (
-                <>
-                  <EditorField label={t("editor.floorHeight")}>
-                    <span className="editor-num">
-                      <input
-                        type="number"
-                        step={0.05}
-                        min={0}
-                        value={level.floorHeight ?? 0}
-                        onChange={(e) =>
-                          patchLevel(level.id, {
-                            floorHeight: Number(e.target.value),
-                          })
-                        }
-                      />
-                      <span className="editor-unit">{t("editor.unit.m")}</span>
-                    </span>
-                  </EditorField>
-                  <EditorField label={t("editor.cutHeight")}>
-                    <span className="editor-num">
-                      <input
-                        type="number"
-                        step={0.05}
-                        min={0}
-                        value={level.cutHeight ?? 0}
-                        onChange={(e) =>
-                          patchLevel(level.id, {
-                            cutHeight: Number(e.target.value),
-                          })
-                        }
-                      />
-                      <span className="editor-unit">{t("editor.unit.m")}</span>
-                    </span>
-                  </EditorField>
-                  {/* Ansichtsbereich ([36]): leer = unbegrenzt (Darstellung wie bisher). */}
-                  {(["viewTop", "viewBottom", "viewDepth"] as const).map((k) => (
-                    <EditorField key={k} label={t(`editor.${k}`)}>
-                      <span className="editor-num">
-                        <input
-                          type="number"
-                          step={0.1}
-                          min={k === "viewDepth" ? 0 : undefined}
-                          data-testid={`level-${k}`}
-                          value={level[k] ?? ""}
-                          placeholder="∞"
-                          onChange={(e) =>
-                            patchLevel(level.id, {
-                              [k]: e.target.value === "" ? undefined : Number(e.target.value),
-                            })
-                          }
-                        />
-                        <span className="editor-unit">{t("editor.unit.m")}</span>
-                      </span>
-                    </EditorField>
-                  ))}
-                </>
-              )}
-              {!isFloor && (
-                <div className="editor-note">
-                  {level.kind === "drawing"
-                    ? t("editor.noHeightDrawing")
-                    : t("editor.noHeightSection")}
-                </div>
-              )}
-            </InlineEditor>
-          );
-        })()}
+          auf den State wirkt. Aus einem Menüpunkt geöffnet (menus/InlineEditors.tsx). */}
+      {editor?.kind === "layer" && (
+        <LayerInlineEditor
+          editor={editor}
+          onClose={() => setEditor(null)}
+          patchCategory={patchCategory}
+          onSaveColor={addColorToCustomPalette}
+        />
+      )}
+      {editor?.kind === "level" && (
+        <LevelInlineEditor editor={editor} onClose={() => setEditor(null)} patchLevel={patchLevel} />
+      )}
 
       {/* Nicht-blockierende Kurzmeldungen (Ersatz für window.alert, siehe
           notifySlice.ts) — top-level, damit sie über allen Docks/Modals liegen. */}
