@@ -1070,7 +1070,13 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
 - ✅ **[119] Referenz-Ausgaben (golden).** 3.11.: `src/plan/golden.test.ts` — beide Musterprojekte: Grundriss je Geschoss
   (1:100, 1:50), Schnitt, Ansicht, 3D-Zusammenfassung als Digest (Zähler, Rahmen, Hash gerundeter Zahlen) in
   `src/plan/__golden__/`; Update mit `vitest -u`. Nur Linux geprüft; Hash deckt Detailabweichungen ab, Diff zeigt nur Zähler. · M
-- ○ **[120] macOS in CI.** `cargo check --features native2d`, Bildvergleich Metal ↔ WebGPU. · M
+- ◐ **[120] macOS in CI.** 3.11.: `.github/workflows/macos.yml` (macos-latest; master, PRs auf `src-tauri/**` und
+  `src/views/plan/**`, manuell): `cargo check --features native2d`, render2d-/render3d-Tests, render2d-Golden auf Metal
+  (nicht blockierend), 3D-Rauchtest `:beispiel` → `model3d` → `render_png` als Artefakt. **Ungeprüft bis zum ersten
+  GitHub-Lauf** (nur YAML-Syntax und der Linux-Teil `build:cli` + `model3d` geprüft). Offen: Bildvergleich Metal ↔ WebGPU —
+  Plan: gleiche Szene (`demo_scene` bzw. `scene_v1.bin`) einmal per `render2d::headless` auf Metal, einmal im
+  Chromium (Playwright, WebGPU) rendern und mit der Pixeltoleranz aus `tests/golden.rs` vergleichen; Chromium-WebGPU auf
+  macOS-Runnern zuerst prüfen. · M
 - ○ **[121] App.tsx zerlegen, Neurendern stoppen.** `App.tsx:365` abonniert ganzes Projekt, 0× `memo`;
   Abschnitte in Hooks/Komponenten, Panels lesen den Store selbst; Nebenfenster bekommen Ops statt Projekt. · L
 - ○ **[122] Zweites Kern-Dokument (`documentFor` → `shared`, Differenz-Abgleich) abschaffen.** Fang/Griffe/
@@ -1102,9 +1108,10 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
 - ✅ **[129] Grenze schärfen.** (3.11.) `i18n/translate.ts` (React-frei: `t`, Sprache, Wörterbücher), `i18n/index.ts` re-exportiert
   und hält nur `useT`; Kern-Dateien importieren `i18n/translate`. `net/` in `CORE_DIRS`, neuer Test prüft transitive
   relative Importe (Ausnahmelisten leer). · S
-- ○ **[130] Kleinkram:** eine generische Fenster-Brücke statt 5 Kopien; Auswahl als ein `Selection`-Objekt statt
-  12 Felder; `primitives.tsx` auf Overlay zurückschneiden; Cargo-Workspace + cargo-deny; NOTICE (OFL-Schriften,
-  wgpu, Tauri, React, pdf.js, lcms). · M
+- ◐ **[130] Kleinkram:** eine generische Fenster-Brücke statt 5 Kopien; Auswahl als ein `Selection`-Objekt statt
+  12 Felder; `primitives.tsx` auf Overlay zurückschneiden; Cargo-Workspace. · M
+  3.11. Lizenzteil erledigt: NOTICE ergänzt (OFL-Schriften, wgpu, Tauri, React, pdf.js, jsPDF, lcms, truck …),
+  `src-tauri/deny.toml` + CI-Job `licenses` (check.yml, `cargo deny check licenses` je Crate).
 
 ## Priorität 0 — vor der öffentlichen Beta
 

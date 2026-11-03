@@ -1,0 +1,67 @@
+# macOS-Prüfung ([120]): die native Metal-Schicht (Feature native2d, render2d/render3d mit GPU) wird nur
+# auf macOS übersetzt und bricht in check.yml (Linux) unbemerkt. Hier: cargo check der
+# Tauri-App mit native2d, GPU-Tests von render2d, Headless-3D-Rauchtest (render_png) als Artefakt.
+# Ungeprüft bis zum ersten GitHub-Lauf (Entwurf ohne macOS-Rechner entstanden).
+name: macos
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+    paths:
+      - "src-tauri/**"
+      - "src/views/plan/**"
+      - ".github/workflows/macos.yml"
+  workflow_dispatch:
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            src-tauri/render2d
+            src-tauri/render3d
+      - run: npm ci
+      # tauri::generate_context! verlangt, dass frontendDist (../dist) existiert; für cargo check genügt ein leerer Ordner.
+      - name: Platzhalter für frontendDist
+        run: mkdir -p dist && [ -f dist/index.html ] || echo '<!doctype html>' > dist/index.html
+      # Wie scripts/tauri-native.mjs auf macOS: --features native2d.
+      - name: Tauri-App prüfen (native2d)
+        run: cargo check --manifest-path src-tauri/Cargo.toml --features native2d
+      - name: render2d Tests (CPU-Schicht)
+        run: cargo test -q --release --manifest-path src-tauri/render2d/Cargo.toml
+      # Metal-Tests: Golden-Bild der Demo-Szene (#[ignore] wegen GPU). Runner können Software-/Paravirt-Metal
+      # haben, deshalb vorerst nicht blockierend; Ist-/Diff-Bild als Artefakt.
+      - name: render2d Golden-Bild auf Metal
+        continue-on-error: true
+        run: cargo test -q --release --manifest-path src-tauri/render2d/Cargo.toml --features headless -- --include-ignored
+      - name: render3d Tests
+        run: cargo test -q --release --manifest-path src-tauri/render3d/Cargo.toml
+      # Rauchtest 3D headless: Musterprojekt -> model3d -> render_png (Metal) -> PNG.
+      - name: 3D-Rauchtest (render_png)
+        run: |
+          npm run build:cli
+          npm run build:render-png
+          mkdir -p smoke
+          node dist-cli/dossier-cli.mjs :beispiel model3d --out smoke/m.json
+          src-tauri/render3d/target/release/render_png smoke/m.json smoke/iso.png --view iso --style shaded-edges
+          test "$(wc -c < smoke/iso.png)" -gt 5000
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-render
+          path: |
+            smoke/*.png
+            src-tauri/render2d/target/golden-*.png
+          if-no-files-found: ignore
+          retention-days: 14
