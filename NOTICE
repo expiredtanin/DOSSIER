@@ -62,3 +62,26 @@ BIMCraft (https://github.com/IPedrax/BIMCraft), MIT OR Apache-2.0, Copyright (c)
   Skeleton mit Löchern) aus Commit f3bbb33f3b8b6cc6f80b3bd6611e33c330cb448f → src-tauri/core/src/skeleton.rs
   (Meter statt Millimeter, Rust 2021, Arbeitsbudget, Fehler statt Panic, deutsche Kommentare); hier unter
   der MIT-Lizenz genutzt.
+
+Ausgelieferte Pakete und Schriften ([130]); die Lizenztexte liegen in den jeweiligen Paketen bzw. Ordnern.
+Die Rust-Abhängigkeiten werden mit cargo-deny geprüft (src-tauri/deny.toml, CI-Job "licenses").
+
+Schriften (public/fonts/*, je Ordner mit OFL.txt), SIL Open Font License 1.1, lokal gebündelt:
+  Archivo, DM Sans, IBM Plex Sans und IBM Plex Mono (IBM Corp.), Inter, Jost, Karla, Manrope, Outfit,
+  Public Sans, Rubik, Source Sans 3 und Source Serif 4 (Adobe), Space Grotesk, Work Sans.
+
+Webview-Oberfläche (npm, ausgeliefert):
+  React und react-dom (https://github.com/facebook/react), MIT
+  pdf.js (pdfjs-dist, https://github.com/mozilla/pdf.js), Apache-2.0 — PDF-Unterlagen lesen
+  jsPDF (https://github.com/parallax/jsPDF), MIT, und svg2pdf.js (https://github.com/yWorks/svg2pdf.js), MIT — PDF-Export
+  JSZip (https://github.com/Stuk/jszip), MIT OR GPL-3.0-or-later — hier unter MIT genutzt
+  lcms-wasm (https://github.com/matmen/lcms-wasm), MIT — WASM-Fassung von Little CMS (https://github.com/mm2/Little-CMS, MIT), Farbprofile
+  Tauri-JavaScript-API und -Plugins (@tauri-apps/*, https://github.com/tauri-apps), MIT OR Apache-2.0
+
+Rust (ausgeliefert):
+  Tauri 2 und tauri-plugin-* (https://github.com/tauri-apps/tauri), MIT OR Apache-2.0
+  wgpu (https://github.com/gfx-rs/wgpu), MIT OR Apache-2.0 — GPU-Zugriff von render2d/render3d (Metal, WebGPU)
+  winit, pollster, bytemuck, lyon_tessellation, glyphon (cosmic-text), fontdb, ttf-parser, image, wasm-bindgen:
+    MIT und/oder Apache-2.0 (glyphon: MIT OR Apache-2.0 OR Zlib)
+  truck-modeling, -meshalgo, -shapeops, -stepio (src-tauri/trucksolid), Apache-2.0
+  serde, serde_json, ts-rs, fs4: MIT OR Apache-2.0

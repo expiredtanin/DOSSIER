@@ -6,6 +6,7 @@
 [package]
 name = "kernel2d"
 version = "0.1.0"
+license = "AGPL-3.0-or-later"
 edition = "2021"
 description = "2D-Geometrie-Kern von Dossier — handgeschriebene f64-Mathematik, headless per `cargo test`. Produktiv als Pfad-Abhaengigkeit von dossier-core (src-tauri/core, WASM-Paket pkgCore)."
 

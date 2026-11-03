@@ -43,6 +43,22 @@ jobs:
           done
       - run: npm run check
       - run: npm run build:cli
+  # Lizenzprüfung der Rust-Abhängigkeiten ([130]): Allowlist in src-tauri/deny.toml (AGPL-3.0-verträglich).
+  licenses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-deny }
+      - name: cargo deny check licenses
+        run: |
+          for c in core render2d render3d kernel2d trucksolid fileio hatchgen; do
+            echo "== $c"
+            cargo deny --manifest-path "src-tauri/$c/Cargo.toml" --config src-tauri/deny.toml check licenses
+          done
+          echo "== cad-tauri"
+          cargo deny --manifest-path src-tauri/Cargo.toml --config src-tauri/deny.toml check licenses
   # UI-Suite ([49]): bedient die gebaute Web-App wie ein Mensch (Playwright, Chromium headless).
   # Eigener Job, damit `npm run check` schnell bleibt; läuft parallel dazu.
   e2e:

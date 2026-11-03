@@ -1,6 +1,7 @@
 [package]
 name = "render3d"
 version = "0.1.0"
+license = "AGPL-3.0-or-later"
 edition = "2021"
 description = "Nativer wgpu-3D-Renderer fuer die CAD-Modellsicht (Wand-Extrusion + Kamera + Pipeline)"
 

@@ -1,0 +1,38 @@
+# cargo-deny ([130]): Lizenzprüfung der Rust-Abhängigkeiten. Dossier wird unter AGPL-3.0 verbreitet,
+# deshalb nur Lizenzen zulassen, die damit verträglich sind (permissiv + schwaches Copyleft auf Dateiebene).
+# Aufruf je Crate (jedes hat sein eigenes Cargo.lock):
+#   cargo deny --manifest-path src-tauri/core/Cargo.toml --config src-tauri/deny.toml check licenses
+[graph]
+# Nur Ziele, die ausgeliefert werden (spart Windows-/Android-only-Abhängigkeiten).
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "wasm32-unknown-unknown",
+]
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "CC0-1.0",
+  "BSL-1.0",
+  "CDLA-Permissive-2.0",
+  "0BSD",
+  "Unlicense",
+  "AGPL-3.0-only",
+  "AGPL-3.0-or-later",
+]
+
+[licenses.private]
+# Die eigenen Crates (path-Abhängigkeiten) tragen keine veröffentlichte Lizenz.
+ignore = true

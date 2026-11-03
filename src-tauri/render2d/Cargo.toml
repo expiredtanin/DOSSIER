@@ -1,6 +1,7 @@
 [package]
 name = "render2d"
 version = "0.1.0"
+license = "AGPL-3.0-or-later"
 edition = "2021"
 description = "Nativer wgpu-2D-Renderer fuer den CAD-Grundriss (Tessellierung + Pipelines)"
 
