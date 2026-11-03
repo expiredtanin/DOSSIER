@@ -1048,7 +1048,7 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   (Exporte/`saveBinaryFile` schreiben weiter direkt); in der Tauri-App nicht von Hand geprüft; Electron
   schreibt keine Dateien (Browser-Download), daher keine Änderung; keine Wiederherstellungs-UI für `.obp~`. · S
 - ✅ **[117] CSP setzen.** (3.11.) Eine Quelle `scripts/csp.cjs` (`script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self' blob:`,
-  `style-src` mit `'unsafe-inline'` für React-Inline-Styles + fonts.googleapis.com, `connect-src` = ipc + netFetch-Hosts +
+  `style-src` mit `'unsafe-inline'` für React-Inline-Styles (Icon-Font seit 3.11. lokal gebündelt: `material-symbols`, kein Google-Fonts-Host mehr), `connect-src` = ipc + netFetch-Hosts +
   localhost/127.0.0.1 + ws://127.0.0.1 für die KI-Brücke). Tauri: `tauri.conf.json` (`devCsp: null`, Test `src/net/csp.test.ts`
   gleicht mit `csp.cjs` und `ALLOWED_HOSTS` ab); Electron: Antwort-Header nur gepackt; Browser/e2e: Meta-Tag nur im Vite-Build
   (Dev-HMR unberührt). `e2e/csp.spec.ts` prüft Plan/Schnitt/Ansicht/3D auf CSP-Verletzungen. Rich-Text: Text war schon

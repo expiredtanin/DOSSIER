@@ -1,5 +1,9 @@
 Dossier — Hinweise zu übernommenem und eingebundenem Fremdcode ([51])
 
+Material Symbols (Icon-Font, npm-Paket material-symbols, https://github.com/marella/material-symbols; Schrift von Google,
+  https://github.com/google/material-design-icons), Apache-2.0
+  Lokal gebündelt (src/main.tsx), statt von fonts.googleapis.com geladen ([117]).
+
 acadrust (https://github.com/hakanaktt/acadrust), MPL-2.0
   Abhängigkeit von src-tauri/fileio (DXF/DWG lesen und schreiben), unverändert eingebunden.
   Der DWG-Code von acadrust ist aus ACadSharp portiert:
