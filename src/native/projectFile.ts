@@ -118,6 +118,7 @@ export async function openProjectFileAtPath(path: string): Promise<OpenedProject
  * @param projectName `project.name` für den Standard-Dateinamen (Fallback "projekt").
  * @param onSavedPath Optionaler Callback mit dem gewählten Pfad (Zuletzt-
  *        geöffnet-Liste, s. state/recentProjects.ts).
+ * Schreibt atomar ([116]); wirft `SaveError`, wenn das Schreiben scheitert.
  */
 export async function saveProjectFile(
   json: string,
@@ -125,7 +126,7 @@ export async function saveProjectFile(
   onSavedPath?: (path: string) => void,
 ): Promise<boolean> {
   const filename = `${projectName || "projekt"}.${PROJECT_EXT}`;
-  return saveTextFile(json, filename, "application/json", PROJECT_DIALOG_FILTERS, onSavedPath);
+  return saveTextFile(json, filename, "application/json", PROJECT_DIALOG_FILTERS, onSavedPath, true);
 }
 
 // ── Lock gegen Doppelöffnung (nur Tauri) ────────────────────────────────────

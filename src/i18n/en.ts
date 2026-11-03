@@ -2333,6 +2333,7 @@ export const en: Record<TranslationKey, string> = {
   "window.minimize": "Minimize",
   "startup.previousCrashed": "Dossier did not shut down cleanly last time. Unsaved work is offered for recovery when you open it.",
   "project.open.failed": "Project could not be opened.",
+  "project.save.failed": "Project could not be saved; the file and the recovery copy are unchanged.",
   "menu.native.clashCheck": "Clash detection …",
   "menu.native.kennzahlen": "Key figures and room programme …",
   "kennzahlen.summary": "GFA {gf} m² · usable {agf} m² · volume {gv} m³",

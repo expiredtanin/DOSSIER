@@ -16,6 +16,9 @@ mod native_embed;
 // App-Instanzen (OS-Advisory-Lock via `fs4`, siehe lock.rs).
 mod lock;
 
+// Absturzsicheres Speichern ([116]): Temp-Datei + fsync + Umbenennen, `<pfad>~` als Sicherung.
+mod atomic_save;
+
 use std::path::PathBuf;
 use tauri::State;
 
@@ -29,6 +32,12 @@ fn acquire_project_lock(
     state: State<lock::LockState>,
 ) -> Result<(), Option<lock::LockInfo>> {
     lock::acquire(&state, &PathBuf::from(path))
+}
+
+/// Schreibt eine Projektdatei atomar ([116]); die Vorversion bleibt als `<pfad>~` erhalten.
+#[tauri::command]
+fn save_atomic(path: String, content: String) -> Result<(), String> {
+    atomic_save::save_atomic_impl(&PathBuf::from(path), content.as_bytes())
 }
 
 /// Gibt einen von dieser Instanz gehaltenen Lock frei. No-op, wenn der Pfad
@@ -280,7 +289,8 @@ pub fn run() {
         push_native_scene,
         push_native_walls,
         acquire_project_lock,
-        release_project_lock
+        release_project_lock,
+        save_atomic
     ]);
     #[cfg(not(any(feature = "native2d", feature = "native3d")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -295,7 +305,8 @@ pub fn run() {
         native2d_frame,
         native2d_texts,
         acquire_project_lock,
-        release_project_lock
+        release_project_lock,
+        save_atomic
     ]);
 
     builder

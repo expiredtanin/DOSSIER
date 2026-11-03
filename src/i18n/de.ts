@@ -2383,6 +2383,7 @@ export const de = {
   "window.minimize": "Minimieren",
   "startup.previousCrashed": "Dossier wurde beim letzten Mal nicht sauber beendet. Ungesicherte Arbeit wird beim Öffnen zur Wiederherstellung angeboten.",
   "project.open.failed": "Projekt konnte nicht geöffnet werden.",
+  "project.save.failed": "Projekt konnte nicht gespeichert werden; die Datei und die Wiederherstellungskopie bleiben unverändert.",
   "menu.native.clashCheck": "Kollisionsprüfung …",
   "menu.native.kennzahlen": "Kennzahlen und Raumprogramm …",
   "kennzahlen.summary": "GF {gf} m² · aGF {agf} m² · GV {gv} m³",

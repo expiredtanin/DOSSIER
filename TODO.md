@@ -1041,8 +1041,12 @@ Frage: WebGPU weiterführen oder wie BIMCraft CPU + native GPU?
 
 Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code gelesen.
 
-- ○ **[116] Speichern absturzsicher.** `native/saveFile.ts:49` überschreibt direkt; Temp-Datei + Umbenennen
-  (Rust-Befehl), `.obp~`-Sicherung; Autosave erst nach erfolgreichem Umbenennen löschen. · S
+- ✅ **[116] Speichern absturzsicher.** 3.11.: Rust-Befehl `save_atomic` (`src-tauri/src/atomic_save.rs`):
+  `<pfad>.tmp` schreiben + fsync, Vorversion als `<pfad>~` kopieren, Umbenennen, Ordner-fsync; Fehler lassen die
+  Datei unberührt. `saveProjectFile` nutzt ihn (`saveTextFile(..., atomic)`); bei Fehler `SaveError` + `notify`
+  (`project.save.failed`), Autosave-Kopie bleibt, sonst Löschen erst nach Erfolg. Offen: nur Projektdatei
+  (Exporte/`saveBinaryFile` schreiben weiter direkt); in der Tauri-App nicht von Hand geprüft; Electron
+  schreibt keine Dateien (Browser-Download), daher keine Änderung; keine Wiederherstellungs-UI für `.obp~`. · S
 - ○ **[117] CSP setzen.** `tauri.conf.json` hat `"csp": null`; strikte CSP (`script-src 'self' 'wasm-unsafe-eval'`,
   `connect-src` = netFetch-Hosts + ipc). Rich-Text-`innerHTML` prüfen. · S
 - ○ **[118] Wiederanlauf nach Kern-Panic.** Dokument + Verlauf im selben WASM wie alle Geometrie
