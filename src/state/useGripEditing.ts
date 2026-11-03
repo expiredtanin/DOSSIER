@@ -6,6 +6,7 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useRef, useState, type RefObject } from "react";
+import { useEventBundle, useSameData } from "./useEvent";
 import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
 import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Room, Stair, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
@@ -1571,11 +1572,17 @@ export function useGripEditing(opts: {
   const pendingNow = pendingGripRef.current ?? pendingWallGripRef.current ?? pendingAreaGripRef.current;
   const displayGrips = pendingNow ? grips.map((g, i) => (i === pendingNow.flat ? pendingNow.pt : g)) : grips;
 
+  // Referenzstabil für die memoisierte Hauptansicht ([121]): gleiche Griffe → gleiche Referenz,
+  // Handler mit fester Identität (rufen die Fassung des letzten Renders).
+  const stableGrips = useSameData(displayGrips);
+  const stableHandleLines = useSameData(gripHandleLines);
+  const stableEdgeGrips = useSameData(edgeGrips);
+  const stableGripHandlers = useEventBundle(gripHandlers);
   return {
-    grips: displayGrips,
-    gripHandleLines,
-    edgeGrips,
-    gripHandlers,
+    grips: stableGrips,
+    gripHandleLines: stableHandleLines,
+    edgeGrips: stableEdgeGrips,
+    gripHandlers: stableGripHandlers,
     gripEdit,
     setGripEdit,
     gripEditFields,

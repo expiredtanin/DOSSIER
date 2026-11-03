@@ -36,24 +36,14 @@ export function useTopBarState() {
   const setSnapColor = useStore((s) => s.setSnapColor);
   const scaleDenominator = useStore((s) => s.scaleDenominator);
   const setScaleDenominator = useStore((s) => s.setScaleDenominator);
-  // LIVE Papier-Massstab-Nenner aus der View-Transform (PlanView meldet ihn);
-  // null = keine Plan-Ansicht aktiv. Transienter UI-State, bleibt lokal.
-  const [liveScale, setLiveScale] = useState<number | null>(null);
+  // Der LIVE Papier-Massstab (PlanView meldet ihn) lebt in `liveScaleStore` ([121]): sonst
+  // rendert jeder Zoom-Schritt die ganze App neu.
   // „Angewählter" Ausschnitt (View-Snapshot): bleibt gesetzt, solange der
   // Live-Zustand EXAKT dem Ausschnitt entspricht (siehe Effekt weiter unten).
   // Steuert die Footer-Bar + die Aktiv-Markierung im Ausschnitte-Panel.
   const [selectedViewSnapshotId, setSelectedViewSnapshotId] = useState<
     string | null
   >(null);
-  // Live-Zoom in Prozent RELATIV zum angewandten Papier-Massstab: 100 % =
-  // Live-Ansicht steht exakt im angewandten Massstab (liveScale == scaleDenominator).
-  // Reinzoomen > 100 %, Rauszoomen < 100 %. Einzige Quelle: angewandter Nenner
-  // (scaleDenominator) / Live-Nenner (liveScale). Ohne Live-Massstab (keine
-  // Plan-Ansicht) Fallback 100 %.
-  const zoomPercent =
-    liveScale != null && liveScale > 0
-      ? (scaleDenominator / liveScale) * 100
-      : 100;
 
   return {
     detail,
@@ -78,10 +68,7 @@ export function useTopBarState() {
     setSnapColor,
     scaleDenominator,
     setScaleDenominator,
-    liveScale,
-    setLiveScale,
     selectedViewSnapshotId,
     setSelectedViewSnapshotId,
-    zoomPercent,
   };
 }

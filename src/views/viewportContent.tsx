@@ -6,7 +6,7 @@
 // Extrahiert aus App.tsx (top-level, alles über Props — keine App-Closure).
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 
 import { t } from "../i18n";
 import { LayoutSheetPane, type LayoutSheetHandlers, type SheetPlanProps } from "../ui/LayoutSheet";
@@ -66,8 +66,11 @@ const HIGHLIGHT_RGB: [number, number, number] = [1.0, 0.5, 0.1];
 /** Rot der Kollisions-Hüllquader im 3D ([T8]). */
 const CLASH_RGB: [number, number, number] = [0.88, 0.14, 0.16];
 
-/** Hauptinhalt — abhängig von der aktiven Zeichnungsebene und dem Ansichtstyp. */
-export function Content({
+/**
+ * Hauptinhalt — abhängig von der aktiven Zeichnungsebene und dem Ansichtstyp. `memo` ([121]): App
+ * reicht stabile Handler, ein App-Render ohne geänderte Eingaben zeichnet Plan/3D nicht neu.
+ */
+export const Content = memo(function Content({
   project,
   level,
   viewType,
@@ -603,7 +606,7 @@ export function Content({
       )}
     </main>
   );
-}
+});
 
 // Auswahl-Felder (wallId/ceilingId/…) aus einer Referenz-Überlagerung entfernen:
 // die Geometrie stammt aus einer FREMDEN Projektion (z. B. Schnitt-Koordinaten

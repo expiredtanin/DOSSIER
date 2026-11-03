@@ -44,3 +44,27 @@ export function useEventBundle<T extends Record<string, (...args: any[]) => any>
   }
   return stable.current;
 }
+
+/** Strukturgleichheit für reine Daten (Zahlen, Strings, Arrays, flache Objekte). */
+function sameData(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    if (!sameData((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
+  }
+  return true;
+}
+
+/**
+ * Behält die vorige Referenz, solange der neue Wert strukturell gleich ist — für je Render neu
+ * berechnete, kleine Daten (Griff-Listen), die an `memo`-Kinder gehen. Nicht für grosse Listen.
+ */
+export function useSameData<T>(value: T): T {
+  const ref = useRef(value);
+  if (!sameData(ref.current, value)) ref.current = value;
+  return ref.current;
+}

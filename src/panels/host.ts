@@ -845,6 +845,18 @@ export function hostWithMode(
   setModeFor: (id: string | null, mode: DisplayMode) => void,
   measurement: MeasurementReadout | null = null,
 ): PanelHost {
+  const mode = modeFor(activeTab);
+  // Gleiche Eingaben → derselbe Wert ([121]): sonst wäre der Host bei JEDEM App-Render neu und
+  // alle Panels würden mitrendern, auch wenn sich weder Projekt noch Auswahl geändert haben.
+  let perBase = HOST_CACHE.get(base);
+  if (!perBase) {
+    perBase = new Map();
+    HOST_CACHE.set(base, perBase);
+  }
+  const hit = perBase.get(activeTab);
+  if (hit && hit.mode === mode && hit.measurement === measurement && hit.setModeFor === setModeFor) {
+    return hit.value;
+  }
   const value: PanelHostValue = {
     ...base,
     // Live-Messwerte NICHT aus dem memoisierten `base` (dort wären sie eingefroren,
@@ -852,12 +864,28 @@ export function hostWithMode(
     // Mausbewegung neu gebaut). Hier bei jedem Render frisch injiziert.
     measurement,
     displayMode: {
-      mode: modeFor(activeTab),
-      setMode: (mode) => setModeFor(activeTab, mode),
+      mode,
+      setMode: (m) => setModeFor(activeTab, m),
     },
   };
-  return value as unknown as PanelHost;
+  const host = value as unknown as PanelHost;
+  perBase.set(activeTab, { mode, measurement, setModeFor, value: host });
+  return host;
 }
+
+/** Zuletzt gebauter Host je Basis-Wert und Tab (s. `hostWithMode`). */
+const HOST_CACHE = new WeakMap<
+  object,
+  Map<
+    string | null,
+    {
+      mode: DisplayMode;
+      measurement: MeasurementReadout | null;
+      setModeFor: (id: string | null, mode: DisplayMode) => void;
+      value: PanelHost;
+    }
+  >
+>();
 
 // ── Host-Store: selektives Abonnieren ([121]) ─────────────────────────────────
 //

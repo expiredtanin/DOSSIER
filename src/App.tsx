@@ -122,6 +122,7 @@ import { Content } from "./views/viewportContent";
 import { useDialogState } from "./state/useDialogState";
 import { useTopBarState } from "./state/useTopBarState";
 import { setCursor } from "./state/cursorStore";
+import { setLiveScale } from "./state/liveScaleStore";
 import { useDrawingToolState } from "./state/useDrawingToolState";
 import { useSelectionState } from "./state/useSelectionState";
 import { useGripEditing } from "./state/useGripEditing";
@@ -323,11 +324,8 @@ export default function App() {
     setSnapColor,
     scaleDenominator,
     setScaleDenominator,
-    liveScale,
-    setLiveScale,
     selectedViewSnapshotId,
     setSelectedViewSnapshotId,
-    zoomPercent,
   } = useTopBarState();
 
   // ── Zeichenwerkzeuge (transienter View-State; bleibt lokal) ───────────────
@@ -2406,6 +2404,26 @@ export default function App() {
         : engine.escape(),
     cmdStillActive: () => engine.isActive(),
     cmdSuggest: (prefix: string) => engine.suggest(prefix),
+    // Hauptansicht (Grundriss/3D).
+    onToggleGrid3d: () => setGrid3dVisible(!grid3dVisible),
+    onClearSection3d: () => setSection3dCutId(null),
+    moveRoomStamp,
+    onOpenStampEditor,
+    onEditDrawingText,
+    onEnterGroup,
+    onLeaveGroup,
+    commitTextEdit,
+    closeTextEdit,
+    onPlanSelect,
+    onPlanMarquee,
+    onSegmentCut,
+    onPlanContextMenu,
+    onViewport3dPick,
+    onWorkplanePoint,
+    onWorkplaneConfirm,
+    onToolMove: toolHandlers.onToolMove,
+    onToolClick: toolHandlers.onToolClick,
+    onToolCommit: toolHandlers.onToolCommit,
     onMeshImport: (read: MeshRead, fileName: string, placement: MeshPlacement) => {
       // Der Kern macht die Kontext-Meshes und übernimmt sie als EINEN Undo-Schritt ([K4] S4).
       const r = getState().commitImport((doc, base, now) => doc.importMesh(base, read.flat, { fileName, placement }, now), "history.import.mesh");
@@ -2436,6 +2454,20 @@ export default function App() {
     ? grip3dEditFields(grip3dEdit, last3dDragRef.current?.raw ?? grip3dEdit.anchor)
     : engineView.fields;
   const cmdLineSteps = fieldController ? 0 : engineView.steps;
+  const contentToolHandlers: ToolHandlers = useMemo(
+    () => ({ onToolMove: ev.onToolMove, onToolClick: ev.onToolClick, onToolCommit: ev.onToolCommit, draft }),
+    [ev, draft],
+  );
+  const viewSnapshotTabs = useMemo(
+    () => ({
+      selectedId: baseHost.selectedViewSnapshotId,
+      onApply: baseHost.onApplyViewSnapshot,
+      onCaptureAuto: baseHost.onCaptureViewSnapshotAuto,
+      autoName: baseHost.viewSnapshotAutoName,
+      onDelete: baseHost.onDeleteViewSnapshot,
+    }),
+    [baseHost],
+  );
   const hasSelection = hasSelectionToDelete();
   // Unter Tauri (macOS) übernimmt die native Systemmenüleiste (oben am Bildschirm,
   // useNativeAppMenu) exakt dieselben Aktionen bereits — die In-App-Menüleiste wäre reine
@@ -2510,8 +2542,6 @@ export default function App() {
         detailEnabled={planActive || viewType === "perspektive"}
         scaleDenominator={scaleDenominator}
         onApplyScale={ev.applyScale}
-        liveScale={planActive ? liveScale : null}
-        zoomPercent={zoomPercent}
         zoomEnabled={planActive}
         onFit={ev.fitPlan}
         onFitSelection={ev.fitSelection}
@@ -2541,8 +2571,6 @@ export default function App() {
       setDetail,
       planActive,
       scaleDenominator,
-      liveScale,
-      zoomPercent,
       renderMode,
       setRenderMode,
       planColorMode,
@@ -2740,17 +2768,11 @@ export default function App() {
           view3d={view3d}
           fov={fov}
           grid3dVisible={grid3dVisible}
-          onToggleGrid3d={() => setGrid3dVisible(!grid3dVisible)}
+          onToggleGrid3d={ev.onToggleGrid3d}
           section3d={section3dPlane}
-          onClearSection3d={() => setSection3dCutId(null)}
+          onClearSection3d={ev.onClearSection3d}
           mono={planColorMode === "mono"}
-          viewSnapshotTabs={{
-            selectedId: baseHost.selectedViewSnapshotId,
-            onApply: baseHost.onApplyViewSnapshot,
-            onCaptureAuto: baseHost.onCaptureViewSnapshotAuto,
-            autoName: baseHost.viewSnapshotAutoName,
-            onDelete: baseHost.onDeleteViewSnapshot,
-          }}
+          viewSnapshotTabs={viewSnapshotTabs}
           onSelectLevel={setActiveLevelId}
           floorDisplay={floorDisplay}
           categoryDisplay={categoryDisplay}
@@ -2770,29 +2792,29 @@ export default function App() {
           selectedContextObjectIds={selectedContextObjectIds}
           selectedSectionLineIds={selectedSectionLineIds}
           roomStamp={roomStamp}
-          onStampMove={moveRoomStamp}
-          onStampEdit={onOpenStampEditor}
-          onEditDrawingText={onEditDrawingText}
-          onEnterGroup={onEnterGroup}
-          onLeaveGroup={onLeaveGroup}
+          onStampMove={ev.moveRoomStamp}
+          onStampEdit={ev.onOpenStampEditor}
+          onEditDrawingText={ev.onEditDrawingText}
+          onEnterGroup={ev.onEnterGroup}
+          onLeaveGroup={ev.onLeaveGroup}
           groupPath={groupPath}
           editTextId={editTextId}
           editTextMinHeightM={editTextMinHeightM}
-          onCommitTextEdit={commitTextEdit}
-          onCloseTextEdit={closeTextEdit}
-          onPlanSelect={onPlanSelect}
-          onPlanMarquee={onPlanMarquee}
-          onSegmentCut={onSegmentCut}
-          onPlanContextMenu={onPlanContextMenu}
-          onViewport3dPick={onViewport3dPick}
+          onCommitTextEdit={ev.commitTextEdit}
+          onCloseTextEdit={ev.closeTextEdit}
+          onPlanSelect={ev.onPlanSelect}
+          onPlanMarquee={ev.onPlanMarquee}
+          onSegmentCut={ev.onSegmentCut}
+          onPlanContextMenu={ev.onPlanContextMenu}
+          onViewport3dPick={ev.onViewport3dPick}
           // Zeichnen-Modus des 3D-Viewports (auch Bewegen/Drehen/Spiegeln sind Befehle).
           commandActive={commandActive}
           draft={draft}
-          onWorkplanePoint={onWorkplanePoint}
-          onWorkplaneConfirm={onWorkplaneConfirm}
+          onWorkplanePoint={ev.onWorkplanePoint}
+          onWorkplaneConfirm={ev.onWorkplaneConfirm}
           activeTool={activeTool}
           toolInputActive={toolInputActive}
-          toolHandlers={toolHandlers}
+          toolHandlers={contentToolHandlers}
           hudFields={hudFields}
           grips={grips}
           gripHandleLines={gripHandleLines}

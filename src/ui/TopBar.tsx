@@ -12,6 +12,7 @@ import { t } from "../i18n";
 import { checkForUpdate } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
 import { memo, useEffect, useRef, useState } from "react";
+import { useLiveScale, zoomPercentOf } from "../state/liveScaleStore";
 import { createPortal } from "react-dom";
 import { Dropdown } from "./Dropdown";
 import type { DropdownItem, DropdownOption } from "./Dropdown";
@@ -1030,8 +1031,7 @@ export interface ViewRibbonTabProps {
   detailEnabled: boolean;
   scaleDenominator: number;
   onApplyScale: (n: number) => void;
-  liveScale: number | null;
-  zoomPercent: number;
+  /** Plan-Zoom aktiv; der Live-Massstab kommt aus `state/liveScaleStore` (nicht als Prop, [121]). */
   zoomEnabled: boolean;
   onFit: () => void;
   onFitSelection: () => void;
@@ -1072,8 +1072,6 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
   detailEnabled,
   scaleDenominator,
   onApplyScale,
-  liveScale,
-  zoomPercent,
   zoomEnabled,
   onFit,
   onFitSelection,
@@ -1090,6 +1088,10 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
   textTarget,
   textStyles,
 }: ViewRibbonTabProps) {
+  // Live-Massstab direkt abonnieren: ein Zoom-Schritt rendert nur diese Leiste neu ([121]).
+  const liveScaleRaw = useLiveScale();
+  const liveScale = zoomEnabled ? liveScaleRaw : null;
+  const zoomPercent = zoomPercentOf(scaleDenominator, liveScaleRaw);
   // „frei" wird über einen In-App-Dialog erfasst (window.prompt ist im Tauri-
   // WKWebView deaktiviert); akzeptiert „1:35" ODER „35".
   const [scalePromptOpen, setScalePromptOpen] = useState(false);
