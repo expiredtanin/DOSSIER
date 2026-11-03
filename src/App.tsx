@@ -44,7 +44,7 @@ import { PenColorField } from "./ui/PenColorField";
 import { generatePlan, computeKennzahlen, checkRoomProgram } from "./core";
 import { addedItems } from "./core";
 import { programStatusLabel } from "./panels/KennzahlenSection";
-import type { CategoryDisplayResolver, ProjectMutation } from "./core";
+import type { CategoryDisplayResolver } from "./core";
 import { sectionPlaneFromLevel, sectionUAxisModel } from "./core";
 import { roofBaseElevation, roofGeometry } from "./core";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
@@ -131,23 +131,14 @@ import { isOffline, setOffline } from "./net/net";
 import { setAiAccessEnabled, setAiView, useAiAccess } from "./state/aiAccess";
 import { AiActivityPanel } from "./ui/AiActivityPanel";
 import { markSessionClean, markSessionStart } from "./state/startupGuard";
-import { getTool } from "./tools/tools";
+import { toolInfo } from "./tools/tools";
 import { computeSnap } from "./tools/snapping";
-import {
-  requiredPoints,
-  transformPreview,
-  rotateGizmoShapes,
-} from "./tools/transform";
-import type { CopyMode, TransformOp, TransformSelection } from "./tools/transform";
+import type { TransformSelection } from "./tools/transform";
 import type {
   SnapResult,
-  ToolContext,
-  ToolDraft,
   ToolHandlers,
   ToolId,
   ToolMods,
-  ToolPointer,
-  ToolState,
 } from "./tools/types";
 import { ContextMenu } from "./ui/ContextMenu";
 import {
@@ -186,13 +177,12 @@ import {
   useTransformShortcuts,
   useUndoRedoShortcut,
 } from "./state/useKeyboardShortcuts";
-import { useCommandKeys, type CommandKeyTarget } from "./state/commandKeys";
-import { ESC_DOUBLE_MS } from "./commands/engine";
+import { useCommandKeys } from "./state/commandKeys";
 import { useFileDropImport, useImageImportHandling } from "./state/useImportHandling";
 import { useExportHandlers } from "./state/useExportHandlers";
 import { useThemeModeState } from "./theme/useThemeMode";
 import { CommandLine } from "./ui/CommandLine";
-import type { CommandLineHandle, CommandLineField, CommandLineOption } from "./ui/CommandLine";
+import type { CommandLineHandle } from "./ui/CommandLine";
 import { CommandEngine } from "./commands/engine";
 import { loadAliasOverrides, saveAliasOverrides } from "./state/commandAliasOverrides";
 import {
@@ -261,49 +251,15 @@ import { StartScreen } from "./ui/StartScreen";
  *   • "viewport" — Rechtsklick im 3D (optional getroffene Wand).
  */
 /**
- * GUI-Werkzeug → Befehlsname der Engine. Die Zeichen-Werkzeuge der Palette sind
- * in Wahrheit Engine-Befehle: ein Klick auf das Werkzeug startet diesen Befehl
- * (statt das Legacy-Tool zu fahren). „select" hat (noch) keinen Befehl und bleibt
- * der Auswahl-Modus. „wall" ist jetzt ebenfalls ein Befehl (`wall`) — Klick und
- * getipptes „wall"/„wand" münden in denselben Befehl; der Legacy-Wand-Pfad ist
- * damit deaktiviert (siehe toolHandlers/onSelectTool).
+ * Befehlsname für ein gekoppeltes Werkzeug (oder null). Die Zeichen-Werkzeuge der Palette sind
+ * Engine-Befehle: ein Klick auf das Werkzeug startet diesen Befehl (`tools/tools.ts`, [123]).
  */
-const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
-  wall: "wall",
-  ceiling: "ceiling",
-  window: "fenster",
-  door: "tuer",
-  stair: "stair",
-  room: "room",
-  line: "line",
-  xline: "xline",
-  ray: "ray",
-  polyline: "polyline",
-  rect: "rect",
-  circle: "circle",
-  arc: "arc",
-  ellipse: "ellipse",
-  polygon: "polygon",
-  block: "block",
-  spline: "spline",
-  bezier: "bezier",
-  dimension: "dimension",
-  kote: "kote",
-  detailref: "detailref",
-  scalebar: "scalebar",
-  revcloud: "revcloud",
-  pointmarker: "pointmarker",
-  grid: "grid",
-  wipeout: "wipeout",
-  text: "text",
-  leader: "leader",
-  textpath: "textpath",
-  textbox: "textbox",
-};
-/** Befehlsname für ein gekoppeltes Werkzeug (oder null, wenn keiner). */
 function coupledCommandFor(id: ToolId): string | null {
-  return TOOL_COMMAND[id] ?? null;
+  return toolInfo(id).command ?? null;
 }
+
+/** Transformations-Befehle der Auswahl: Rechtsklick bricht ab, Geschoss-/Ansichtswechsel auch. */
+const TRANSFORM_COMMANDS = new Set(["move", "rotate", "mirror"]);
 
 /**
  * Auswahl für Transformationen/Befehle: im Schnitt/in der Ansicht nur die
@@ -450,12 +406,8 @@ export default function App() {
     activeLineStyleId,
     snap,
     setSnap,
-    toolStateRef,
     draft,
     setDraft,
-    activeTransform,
-    setActiveTransform,
-    transformDragInfoRef,
     pendingCopyMode,
     setPendingCopyMode,
     requestCopyCount,
@@ -625,40 +577,21 @@ export default function App() {
     [project.layers],
   );
 
-  // ── ToolController (Zeichenwerkzeuge) ─────────────────────────────────────
-  // PlanView meldet rohe Modellpunkte + Pixel/Meter hierher; wir snappen, fahren
-  // das aktive Werkzeug (Zustand in toolStateRef, kein Re-Render je Bewegung) und
-  // halten den Draft (Vorschau) im State. Commit läuft immutabel über setProject.
-  const toolCtx: ToolContext = useMemo(
-    () => ({
-      project,
-      level: activeLevel,
-      defaultCategoryCode: activeCategoryCode,
-      activeWallTypeId,
-      activeLineStyleId,
-    }),
-    [project, activeLevel, activeCategoryCode, activeWallTypeId, activeLineStyleId],
-  );
-
-  // Beim Werkzeugwechsel / Geschoss-/Ansichtswechsel: laufenden Entwurf +
-  // laufende Transformation verwerfen.
+  // ── Plan-Eingabe → Befehls-Engine ─────────────────────────────────────────
+  // PlanView meldet rohe Modellpunkte hierher; alles Zeichnen und Transformieren läuft über die
+  // Engine ([123]). Beim Werkzeug-/Geschoss-/Ansichtswechsel die Vorschau verwerfen; eine laufende
+  // Transformation endet bei Geschoss-/Ansichtswechsel.
   useEffect(() => {
-    toolStateRef.current = getTool(activeTool).init();
     setDraft(null);
-    setActiveTransform(null);
   }, [activeTool, activeLevelId, viewType]);
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (eng && TRANSFORM_COMMANDS.has(eng.activeCommandName() ?? "")) eng.cancel();
+  }, [activeLevelId, viewType]);
 
-  // Snap-Kandidaten brauchen die bereits gesetzten Punkte + den letzten Punkt aus
-  // dem laufenden Werkzeug-Zustand (Wand: points[], Linie: a).
-  const draftPointsFromState = (st: ToolState): Vec2[] => {
-    const s = st as { points?: Vec2[]; a?: Vec2 };
-    if (s.points) return s.points;
-    if (s.a) return [s.a];
-    return [];
-  };
-
+  // Snap ohne Entwurfspunkte (Griff-Ziehen, s. useGripEditing).
   const snapFor = (raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
-    const pts = draftPointsFromState(toolStateRef.current);
+    const pts: Vec2[] = [];
     return computeSnap({
       raw,
       project,
@@ -673,137 +606,14 @@ export default function App() {
     });
   };
 
-  // Wendet ein ToolResult an: Draft (+ Snap-Marker) zeigen, ggf. committen/abschließen.
-  const applyToolResult = (
-    res: { draft: ToolDraft | null; commit?: ProjectMutation; done?: boolean },
-    snapResult: ReturnType<typeof snapFor>,
-  ) => {
-    if (res.draft) setDraft({ ...res.draft, snap: snapResult });
-    else if (snapResult) setDraft({ preview: [], vertices: [], snap: snapResult });
-    else setDraft(null);
-    if (res.commit) setProject(res.commit);
-    if (res.done) toolStateRef.current = getTool(activeTool).init();
-  };
-
-  const runToolStep = (
-    kind: "move" | "click",
-    raw: Vec2,
-    pxPerMeter: number,
-    mods: ToolMods,
-  ) => {
-    const tool = getTool(activeTool);
-    const snapResult = snapFor(raw, pxPerMeter, mods);
-    const p: ToolPointer = {
-      raw,
-      snap: snapResult,
-      point: snapResult?.point ?? raw,
-      shift: mods.shift,
-      ctrl: mods.ctrl,
-      alt: mods.alt,
-      button: 0,
-    };
-    const [st, res] =
-      kind === "click"
-        ? tool.onClick(toolStateRef.current, p, toolCtx)
-        : tool.onMove(toolStateRef.current, p, toolCtx);
-    toolStateRef.current = st;
-    applyToolResult(res, snapResult);
-  };
-
-  // ── Transformation (Bewegen/Spiegeln/Drehen) auf der Auswahl ──────────────
-  // Trägt ALLE von der Transform-Engine unterstützten Elementarten (Wände, 2D-
-  // Zeichnungen, extrudierte Körper, Stützen, Decken/Dächer/Treppen/Räume) —
-  // sonst wirken die Kürzel m/s/d nur auf einen Teil dessen, was
-  // `commitTransform` tatsächlich bewegt.
-  const transformSel: TransformSelection = sheetOnlySelection(activeLevel, {
-    wallIds: selectedWallIds,
-    drawingId: selectedDrawingId,
-    drawingIds: selectedDrawingIds,
-    extrudedSolidId: selectedExtrudedSolidId,
-    columnId: selectedColumnId,
-    ceilingIds: selectedCeilingIds,
-    roofIds: selectedRoofIds,
-    stairIds: selectedStairIds,
-    roomIds: selectedRoomIds,
-  });
-  const snapForTransform = (raw: Vec2, pxPerMeter: number, mods: ToolMods, points: Vec2[]) =>
-    computeSnap({
-      raw,
-      project,
-      levelId: activeLevel.id,
-      visibleCodes,
-      settings: snap,
-      draftPoints: points,
-      lastPoint: points.length ? points[points.length - 1] : null,
-      pxPerMeter,
-      shift: mods.shift,
-      ctrl: mods.ctrl,
-    });
-  const transformMove = (raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
-    const tr = activeTransform!;
-    const snapResult = snapForTransform(raw, pxPerMeter, mods, tr.points);
-    const cursor = snapResult?.point ?? raw;
-    // Letzter gesnappter Cursor — speist das Live-Feld (Winkel/Distanz) der
-    // Befehlszeile, analog zu gripDragInfoRef beim Vertex-Drag.
-    transformDragInfoRef.current = { cursor };
-    const need = requiredPoints(tr.op);
-    const eff = [...tr.points, cursor].slice(0, need);
-    const preview =
-      eff.length === need
-        ? transformPreview(project, transformSel, tr.op, eff, tr.copyMode, tr.count)
-        : [];
-    // Dreh-Gizmo (Radius-Kreis + Referenz-/Winkel-Strahl) ZUSÄTZLICH zur
-    // transformierten Vorschau, sobald Zentrum+Referenzpunkt stehen und der
-    // dritte Punkt (Winkel) noch läuft — Nutzer-Wunsch „bei Drehen auch eine
-    // Darstellung". Über denselben `preview`-Kanal wie oben → zeichnet sich
-    // automatisch in 2D UND 3D (s. `tools/transform.ts::rotateGizmoShapes`-Doc).
-    const gizmo =
-      tr.op === "rotate" && tr.points.length === 2
-        ? rotateGizmoShapes(tr.points[0], tr.points[1], cursor)
-        : [];
-    // `hud.at` positioniert die Cursor-HUD-Box (Werte selbst kommen aus
-    // `transformFields()`/`hudFields`, s. o. — Nutzer-Wunsch „bei Drehen auch
-    // eine Darstellung"); ohne `hud` bliebe die Box unsichtbar (2D UND 3D),
-    // auch wenn `hudFields` bereits gültige Felder liefert.
-    setDraft({
-      preview: [...preview, ...gizmo],
-      vertices: tr.points,
-      snap: snapResult,
-      hud: { at: cursor },
-    });
-  };
-  const transformClick = (raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
-    const tr = activeTransform!;
-    const snapResult = snapForTransform(raw, pxPerMeter, mods, tr.points);
-    const pt = snapResult?.point ?? raw;
-    const points = [...tr.points, pt];
-    if (points.length >= requiredPoints(tr.op)) {
-      commitTransformOn(transformSel, tr.op, points, tr.copyMode, tr.count);
-      setActiveTransform(null);
-      setDraft(null);
-      transformDragInfoRef.current = null;
-    } else {
-      setActiveTransform({ ...tr, points });
-    }
-  };
-
   const toolHandlers: ToolHandlers = {
-    onToolMove: (raw, pxPerMeter, mods) => {
+    onToolMove: (raw, _pxPerMeter, mods) => {
       // Läuft ein Befehl, übernimmt die Engine die Plan-Eingabe (ein Eingabepfad).
       // Modifikatoren (Shift=Ortho, Ctrl=Snap aus) mitgeben, damit auch der ERSTE
-      // Punkt sauber snappt bzw. unterdrückt werden kann.
-      if (engineRef.current?.isActive()) {
-        engineRef.current.move(raw, { shift: mods.shift, ctrl: mods.ctrl });
-        return;
-      }
-      // Gekoppeltes Werkzeug (Wand/Linie/Rechteck/Polylinie) ohne laufenden
-      // Befehl: KEIN Legacy-Zeichnen — nur Hover (die Engine startet beim Klick neu).
-      if (coupledCommandFor(activeTool)) return;
-      activeTransform
-        ? transformMove(raw, pxPerMeter, mods)
-        : runToolStep("move", raw, pxPerMeter, mods);
+      // Punkt sauber snappt bzw. unterdrückt werden kann. Ohne Befehl: nur Hover.
+      engineRef.current?.move(raw, { shift: mods.shift, ctrl: mods.ctrl });
     },
-    onToolClick: (raw, pxPerMeter, mods) => {
+    onToolClick: (raw, _pxPerMeter, mods) => {
       const em = { shift: mods.shift, ctrl: mods.ctrl };
       if (engineRef.current?.isActive()) {
         engineRef.current.pick(raw, em);
@@ -811,36 +621,19 @@ export default function App() {
       }
       // Gekoppeltes Werkzeug, aber der Befehl ist (nach Commit) beendet: denselben
       // Befehl neu starten und den Klick als ersten Punkt durchreichen — so bleibt
-      // das Werkzeug wie in einem CAD armiert, ohne dass der Legacy-Pfad zeichnet.
-      // Der erste Punkt snappt so ebenfalls (mods durchgereicht).
+      // das Werkzeug wie in einem CAD armiert. Der erste Punkt snappt ebenfalls.
       const cmd = coupledCommandFor(activeTool);
       if (cmd) {
         engineRef.current?.start(cmd);
         engineRef.current?.pick(raw, em);
-        return;
       }
-      activeTransform
-        ? transformClick(raw, pxPerMeter, mods)
-        : runToolStep("click", raw, pxPerMeter, mods);
     },
     onToolCommit: () => {
-      // Rechtsklick im Viewport = Enter an die Engine (§2.3), wenn ein Befehl läuft.
-      if (engineRef.current?.isActive()) {
-        engineRef.current.confirm();
-        return;
-      }
-      if (activeTransform) {
-        // Rechts-/Doppelklick während einer Transformation = abbrechen.
-        setActiveTransform(null);
-        setDraft(null);
-        return;
-      }
-      const tool = getTool(activeTool);
-      const [st, res] = tool.onCommitGesture(toolStateRef.current, toolCtx);
-      toolStateRef.current = st;
-      if (res.commit) setProject(res.commit);
-      setDraft(null);
-      if (res.done) toolStateRef.current = tool.init();
+      // Rechtsklick im Viewport = Enter an die Engine (§2.3); in einer Transformation = abbrechen.
+      const eng = engineRef.current;
+      if (!eng?.isActive()) return;
+      if (TRANSFORM_COMMANDS.has(eng.activeCommandName() ?? "")) eng.cancel();
+      else eng.confirm();
     },
     draft,
   };
@@ -956,6 +749,8 @@ export default function App() {
         cmdLatest.current.setProject(group && mutate.coreReq ? cmdMutation({ ...mutate.coreReq, group }) : mutate);
       },
       isFloor: () => cmdLatest.current.activeLevel.kind === "floor",
+      // Befehl braucht eine Auswahl (Bewegen/Drehen/Spiegeln), es ist keine da.
+      notify: (key) => notify(t(key as Parameters<typeof t>[0]), "info"),
       // Getippte Werte auf einem Layout-Blatt in Papier-mm, y nach unten ([93]).
       inputUnits: () => unitsForLevel(cmdLatest.current.activeLevel),
       // Frisch über `text`/`textbox` erzeugtes Element sofort inline editieren
@@ -983,8 +778,7 @@ export default function App() {
   }
   const engine = engineRef.current;
   // [99] Esc/Enter eines laufenden Befehls unabhängig vom Fokus (ein Verteiler, s. commandKeys.ts).
-  const transformKeysRef = useRef<CommandKeyTarget | null>(null);
-  useCommandKeys(engineRef, transformKeysRef);
+  useCommandKeys(engineRef);
 
   // Nutzer-Kürzel-Übersteuerungen (Einstellungen → Remap) — aus localStorage
   // geladen, bei jeder Änderung sofort an die Engine gereicht (s. `commands/
@@ -1069,7 +863,7 @@ export default function App() {
     if (id === "image") {
       // Datei-Auswahl ist async (Dateidialog) — kein Klick-Platzieren wie bei
       // den übrigen Zeichen-Werkzeugen, daher hier abgefangen statt über die
-      // Befehls-Engine/`activeTool` zu laufen (s. tools.ts `imageTool`-Kommentar).
+      // Befehls-Engine/`activeTool` zu laufen (s. tools/tools.ts).
       imageInputRef.current?.click();
       return;
     }
@@ -1077,9 +871,8 @@ export default function App() {
     if (cmd) {
       // Den gekoppelten Befehl in DERSELBEN Engine starten wie das Tippen von
       // „line" — Klick und Tippen münden in denselben Befehl. Das aktive-Tool-
-      // Highlight spiegelt den laufenden Befehl (activeTool = id). Der Legacy-
-      // Zeichenpfad ist deaktiviert, solange ein Befehl läuft (toolHandlers
-      // leiten Move/Pick/Confirm an die Engine, siehe oben).
+      // Highlight spiegelt den laufenden Befehl (activeTool = id); toolHandlers
+      // leiten Move/Pick/Confirm an die Engine (siehe oben).
       engine.start(cmd);
       setActiveTool(id);
       // Befehlsfeld fokussieren: getippte Präzisionseingabe steht sofort bereit.
@@ -1087,7 +880,7 @@ export default function App() {
       requestAnimationFrame(() => commandLineRef.current?.focus());
       return;
     }
-    // „Auswahl" oder ein Legacy-Werkzeug (Wand): laufenden Befehl beenden.
+    // „Auswahl": laufenden Befehl beenden.
     if (engine.isActive()) engine.cancel();
     setActiveTool(id);
   };
@@ -1096,38 +889,10 @@ export default function App() {
   // eigenes Werkzeug (kein ToolId). Läuft über DIESELBE Engine wie das Tippen des
   // Befehls; das Werkzeug-Highlight fällt auf „Auswahl" zurück, das Aktiv-
   // Highlight des Ribbon-Befehls spiegelt der laufende Befehl (engineView).
-  // Interaktive Transformation (Bewegen/Spiegeln/Drehen) auf der Auswahl starten —
-  // derselbe U/I/O/P-Pfad (`activeTransform`) wie die Kürzel m/s/d, nur von Button/
-  // Befehlszeile ausgelöst. Ohne transformierbare Auswahl ein kurzer Hinweis.
-  const startTransformOp = (op: TransformOp) => {
-    const hasSel =
-      selectedWallIds.length > 0 ||
-      !!selectedDrawingId ||
-      selectedDrawingIds.length > 0 ||
-      !!selectedExtrudedSolidId ||
-      !!selectedColumnId ||
-      selectedCeilingIds.length > 0 ||
-      selectedRoofIds.length > 0 ||
-      selectedStairIds.length > 0 ||
-      selectedRoomIds.length > 0;
-    if (!hasSel) {
-      notify(t("transform.needSelection"), "info");
-      return;
-    }
-    setActiveTool("select");
-    setActiveTransform({ op, copyMode: "move", count: 1, points: [] });
-    setDraft(null);
-    requestAnimationFrame(() => commandLineRef.current?.focus());
-  };
+  // Bewegen/Drehen/Spiegeln sind gewöhnliche Befehle ([123]); ohne Auswahl starten sie nicht
+  // (Hinweis über den Engine-Host) und das Werkzeug bleibt, wie es ist.
   const onRunCommand = (name: string) => {
-    // „rotate" (Drehen) läuft über die interaktive Transformation mit U/I/O/P —
-    // nicht über die Befehls-Engine (die kennt kein Rotate-Kommando). So ist der
-    // Ribbon-Button der Einstieg in denselben Fluss wie die Taste „d".
-    if (name === "rotate") {
-      startTransformOp("rotate");
-      return;
-    }
-    engine.start(name);
+    if (!engine.start(name) && TRANSFORM_COMMANDS.has(name)) return;
     setActiveTool("select");
     requestAnimationFrame(() => commandLineRef.current?.focus());
   };
@@ -1138,36 +903,14 @@ export default function App() {
   // Snapping/Tab-Felder/Commit laufen unverändert über den EngineHost; die neuen
   // Elemente landen auf dem aktiven Geschoss (host.context().level).
   const onWorkplanePoint = (kind: "move" | "pick", model: Vec2, mods?: EngineMods) => {
-    // Läuft eine interaktive Transformation (m/s/d — Bewegen/Spiegeln/Drehen
-    // der Auswahl), hat sie Vorrang — exakt wie `toolHandlers.onToolMove`/
-    // `onToolClick` das für den 2D-Plan schon tun (s. o.). Bisher war das hier
-    // NICHT verdrahtet: ein Klick im 3D-Viewport während m/s/d tat schlicht
-    // nichts, Drehen/Verschieben/Spiegeln funktionierten im 3D also gar nicht
-    // (Nutzer-Wunsch „bei Drehen auch eine Darstellung" — die Vorschau kommt
-    // jetzt über denselben `draft`-Kanal wie das Zeichnen, s. `transformMove`).
-    // 3D hat kein echtes pxPerMeter (Perspektive) — derselbe feste Näherungs-
-    // wert wie `snapFor3dVertex` oben.
-    if (activeTransform) {
-      const toolMods: ToolMods = { shift: !!mods?.shift, ctrl: !!mods?.ctrl, alt: false };
-      if (kind === "move") transformMove(model, 90, toolMods);
-      else transformClick(model, 90, toolMods);
-      return;
-    }
     const eng = engineRef.current;
     if (!eng?.isActive()) return;
     if (kind === "move") eng.move(model, mods);
     else eng.pick(model, mods);
   };
   const onWorkplaneConfirm = () => {
-    // Rechtsklick-ohne-Drag/Doppelklick im 3D während einer Transformation =
-    // abbrechen — dasselbe Verhalten wie `onToolCommit` im 2D-Plan (§ s. o.).
-    if (activeTransform) {
-      setActiveTransform(null);
-      setDraft(null);
-      return;
-    }
-    const eng = engineRef.current;
-    if (eng?.isActive()) eng.confirm();
+    // Rechtsklick-ohne-Drag/Doppelklick im 3D — dasselbe Verhalten wie `onToolCommit` im 2D-Plan.
+    toolHandlers.onToolCommit();
   };
 
   // Globaler Undo/Redo-Shortcut — siehe state/useKeyboardShortcuts.ts.
@@ -1178,7 +921,7 @@ export default function App() {
   // (useToolNumberShortcuts) folgt weiter unten, NACH useGripEditing() — sie
   // braucht dessen gripDragInfoRef, um Zifferntasten während einer Griff-
   // Bearbeitung nicht als Werkzeug-Wechsel misszuverstehen.
-  useActiveToolKeys(activeTool, toolCtx, engineRef, toolStateRef, setDraft, setActiveTool, setProject);
+  useActiveToolKeys(activeTool, engineRef, setActiveTool);
 
   // ── Editier-Griffe (Grips) des einzeln selektierten Elements ──────────────
   // Genau eine Wand ODER ein 2D-Element → dessen Eckpunkte als ziehbare Griffe.
@@ -1293,7 +1036,7 @@ export default function App() {
   // Auswahl löschen — siehe state/useKeyboardShortcuts.ts.
   useSelectAllAndDeleteShortcut({
     activeTool,
-    activeTransform,
+    transformActive: TRANSFORM_COMMANDS.has(engineView.commandName ?? ""),
     project,
     activeLevelId: activeLevel.id,
     shortcutOverrides,
@@ -1555,22 +1298,18 @@ export default function App() {
   // state/useKeyboardShortcuts.ts.
   useTransformShortcuts(
     activeTool,
-    activeTransform,
-    setActiveTransform,
-    selectedWallIds,
-    selectedDrawingId,
-    selectedDrawingIds,
-    selectedExtrudedSolidId,
-    selectedColumnId,
-    selectedCeilingIds,
-    selectedRoofIds,
-    selectedStairIds,
-    selectedRoomIds,
+    selectedWallIds.length > 0 ||
+      !!selectedDrawingId ||
+      selectedDrawingIds.length > 0 ||
+      !!selectedExtrudedSolidId ||
+      !!selectedColumnId ||
+      selectedCeilingIds.length > 0 ||
+      selectedRoofIds.length > 0 ||
+      selectedStairIds.length > 0 ||
+      selectedRoomIds.length > 0,
     engine,
-    setDraft,
-    requestCopyCount,
+    (id) => onCommandOption(id),
     onRunCommand,
-    commandLineRef,
     shortcutOverrides,
   );
 
@@ -2420,9 +2159,9 @@ export default function App() {
       onUndo: undo,
       onRedo: redo,
       onDeleteSelection: deleteSelection,
-      onMove: () => startTransformOp("move"),
-      onMirror: () => startTransformOp("mirror"),
-      onRotate: () => startTransformOp("rotate"),
+      onMove: () => onRunCommand("move"),
+      onMirror: () => onRunCommand("mirror"),
+      onRotate: () => onRunCommand("rotate"),
       onViewType: setViewType,
       onView3d: setView3d,
       onReferenceLines: setReferenceLines,
@@ -2871,7 +2610,7 @@ export default function App() {
   // Ein laufender Befehl übernimmt ebenfalls die linke Maustaste der Plan-Ansicht
   // (über denselben toolHandlers-Pfad) — daher hier mit einbeziehen.
   const toolInputActive =
-    activeTool !== "select" || !!activeTransform || commandActive;
+    activeTool !== "select" || commandActive;
 
   // Tatsächlich (noch) existierende gewählte Wände — IDs, die es nicht mehr gibt
   // (z. B. nach Löschen/Geschosswechsel), fallen heraus.
@@ -2961,81 +2700,20 @@ export default function App() {
     setExportDxfOpen,
   });
 
-  // Modusleiste-Wechsel: array/distribute fragen die Kopienanzahl ab.
-  const onTransformMode = (mode: CopyMode) => {
-    if (mode === "array" || mode === "distribute") {
-      requestCopyCount(mode);
-    } else {
-      setActiveTransform((tr) => (tr ? { ...tr, copyMode: mode } : tr));
-    }
-  };
-
-  // ── Transformation in der Befehlszeile ────────────────────────────────────
-  // Die laufende Transformation speist Prompt + U/I/O/P-Optionen + ein Live-Feld
-  // (Winkel beim Drehen, Distanz beim Bewegen) in die Command-Line — statt einer
-  // eigenen schwebenden Leiste. Rein die UI-Fläche; Geometrie unverändert.
-  const TRANSFORM_MODES: { id: CopyMode; labelKey: string; key: string }[] = [
-    { id: "move", labelKey: "transform.mode.move", key: "U" },
-    { id: "copy", labelKey: "transform.mode.copy", key: "I" },
-    { id: "array", labelKey: "transform.mode.array", key: "O" },
-    { id: "distribute", labelKey: "transform.mode.distribute", key: "P" },
-  ];
-
-  const transformOptions = (): CommandLineOption[] => {
-    const tr = activeTransform;
-    if (!tr) return [];
-    return TRANSFORM_MODES.map((m) => ({
-      id: m.id,
-      labelKey: m.labelKey,
-      key: m.key,
-      active: tr.copyMode === m.id,
-      // ×count nur beim aktiven Reihen-/Verteilungs-Modus.
-      value:
-        (m.id === "array" || m.id === "distribute") && tr.copyMode === m.id
-          ? `×${tr.count}`
-          : undefined,
-    }));
-  };
-
-  // Live-/lockbares Feld: Winkel (Drehen, ab Zentrum+Bezug) bzw. Distanz
-  // (Bewegen, ab Basispunkt). Ohne Bezugspunkt kein sinnvolles Feld → [].
-  const transformFields = (): CommandLineField[] => {
-    const tr = activeTransform;
-    const info = transformDragInfoRef.current;
-    if (!tr || !info) return [];
-    const cursor = info.cursor;
-    if (tr.op === "rotate") {
-      if (tr.points.length !== 2) return [];
-      const c = tr.points[0], refP = tr.points[1];
-      const a0 = Math.atan2(refP.y - c.y, refP.x - c.x);
-      const a1 = Math.atan2(cursor.y - c.y, cursor.x - c.x);
-      const deg = ((((a1 - a0) * 180) / Math.PI) % 360 + 360) % 360;
-      return [
-        { id: "angle", labelKey: "cmd.field.angle", value: deg, locked: false, active: true },
-      ];
-    }
-    // Bewegen: Distanz ab Basispunkt. Spiegeln hat kein sinnvolles Zahlenfeld
-    // (freie Achse) → keine Felder.
-    if (tr.op !== "move") return [];
-    if (tr.points.length !== 1) return [];
-    const base = tr.points[0];
-    const dist = Math.hypot(cursor.x - base.x, cursor.y - base.y);
-    return [
-      { id: "distance", labelKey: "cmd.field.distance", value: dist, locked: false, active: true },
-    ];
+  // Option der Befehlszeile (Klick, Kürzel): „N Kopien"/„Verteilen" fragen erst die Anzahl ab
+  // (Dialog), dann geht die Option mit der Zahl an den laufenden Befehl.
+  const onCommandOption = (id: string) => {
+    if (id === "array" || id === "distribute") requestCopyCount(id);
+    else engine.chooseOption(id);
   };
 
   // Feld-Zustand fürs Cursor-HUD (neben der Maus, VW-Stil): läuft ein Punkt-
   // ODER Kanten-Griff-Drag, hat er Vorrang (dieselben Felder wie unten in der
-  // Befehlszeile — Länge/Winkel- bzw. Abstand-Tab-Zyklus), dann eine laufende
-  // Transformation (m/s/d — Winkel beim Drehen bzw. Distanz beim Bewegen,
-  // Nutzer-Wunsch „bei Drehen auch eine Darstellung"), sonst die Befehls-
-  // Engine-Felder beim Zeichnen. Vorher zeigte das Cursor-HUD beim Griff-Ziehen
+  // Befehlszeile — Länge/Winkel- bzw. Abstand-Tab-Zyklus), sonst die Befehls-
+  // Engine-Felder (Zeichnen; Winkel beim Drehen bzw. Distanz beim Bewegen). Vorher zeigte das Cursor-HUD beim Griff-Ziehen
   // GAR KEINE Länge/Winkel-Werte an (nur die Befehlszeile unten) — Nutzer-
   // Wunsch: „du kannst [Länge/Winkel] gleich bei der Maus anzeigen wie beim
-  // Erstellen". Nach `transformFields` platziert (nicht weiter oben), weil es
-  // deren Deklaration direkt aufruft (keine Ref/Closure-Indirektion nötig).
-  const activeTransformFields = activeTransform ? transformFields() : [];
+  // Erstellen".
   const hudFields =
     gripEdit
       ? { fields: gripEditFields(), typed: cmdTyped }
@@ -3046,8 +2724,6 @@ export default function App() {
               fields: grip3dEditFields(grip3dEdit, last3dDragRef.current?.raw ?? grip3dEdit.anchor),
               typed: cmdTyped,
             }
-          : activeTransformFields.length > 0
-          ? { fields: activeTransformFields, typed: cmdTyped }
           : commandActive && engineView.fields.length > 0
             ? {
                 fields: engineView.fields.map((f) => ({
@@ -3059,66 +2735,6 @@ export default function App() {
                 typed: cmdTyped,
               }
             : null;
-
-  // Getippte Zahl in der Transformation: als Wert des aktiven Feldes deuten und
-  // über denselben Pfad wie transformClick committen.
-  const submitTransformValue = (value: number) => {
-    const tr = activeTransform;
-    const info = transformDragInfoRef.current;
-    if (!tr || !info) return;
-    if (tr.op === "rotate") {
-      if (tr.points.length !== 2) return;
-      const c = tr.points[0], refP = tr.points[1];
-      const a0 = Math.atan2(refP.y - c.y, refP.x - c.x);
-      const a = a0 + (value * Math.PI) / 180;
-      const r = Math.hypot(refP.x - c.x, refP.y - c.y) || 1;
-      const target = { x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r };
-      const points = [...tr.points, target];
-      commitTransformOn(transformSel, tr.op, points, tr.copyMode, tr.count);
-    } else if (tr.op === "move") {
-      if (tr.points.length !== 1) return;
-      // Distanz entlang der aktuellen Live-Richtung locken.
-      const base = tr.points[0];
-      const dx = info.cursor.x - base.x, dy = info.cursor.y - base.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const target = { x: base.x + (dx / len) * value, y: base.y + (dy / len) * value };
-      const points = [...tr.points, target];
-      commitTransformOn(transformSel, tr.op, points, tr.copyMode, tr.count);
-    }
-    setActiveTransform(null);
-    setDraft(null);
-    transformDragInfoRef.current = null;
-  };
-
-  const cancelTransform = () => {
-    setActiveTransform(null);
-    setDraft(null);
-    transformDragInfoRef.current = null;
-  };
-  // [99] Esc in der Transformation wie in jedem Befehl: einmal = letzten Punkt zurück (ohne
-  // Punkt: Ende), Esc-Esc schnell = abbrechen.
-  const transformEscAtRef = useRef(-Infinity);
-  const escapeTransform = () => {
-    const now = Date.now();
-    const quick = now - transformEscAtRef.current <= ESC_DOUBLE_MS;
-    transformEscAtRef.current = now;
-    if (!activeTransform || quick || activeTransform.points.length === 0) cancelTransform();
-    else {
-      setActiveTransform({ ...activeTransform, points: activeTransform.points.slice(0, -1) });
-      setDraft(null);
-      transformDragInfoRef.current = null;
-    }
-  };
-  // Enter = Klick auf die letzte (gesnappte) Mausposition: setzt den nächsten Punkt bzw. schliesst ab.
-  const confirmTransform = () => {
-    const cursor = transformDragInfoRef.current?.cursor;
-    if (activeTransform && cursor) transformClick(cursor, 1, { shift: false, ctrl: true, alt: false });
-  };
-  transformKeysRef.current = {
-    active: () => !!activeTransform,
-    escape: escapeTransform,
-    confirm: confirmTransform,
-  };
 
 
   // Maus-Schema: Auswahl + Kontextmenü aus Grundriss / 3D — siehe
@@ -3688,12 +3304,8 @@ export default function App() {
           onSegmentCut={onSegmentCut}
           onPlanContextMenu={onPlanContextMenu}
           onViewport3dPick={onViewport3dPick}
-          // Zeichnen-Modus des 3D-Viewports gilt AUCH während einer
-          // interaktiven Transformation (m/s/d) — sonst würde ein Klick im 3D
-          // während des Drehens/Verschiebens/Spiegelns weiterhin als Orbit/
-          // Auswahl interpretiert statt als Transformations-Punkt (s.
-          // `onWorkplanePoint`-Doc oben).
-          commandActive={commandActive || !!activeTransform}
+          // Zeichnen-Modus des 3D-Viewports (auch Bewegen/Drehen/Spiegeln sind Befehle).
+          commandActive={commandActive}
           draft={draft}
           onWorkplanePoint={onWorkplanePoint}
           onWorkplaneConfirm={onWorkplaneConfirm}
@@ -3738,8 +3350,6 @@ export default function App() {
               ? true
               : grip3dEdit
               ? true
-              : activeTransform
-              ? true
               : engineView.active
           }
           promptKey={
@@ -3749,18 +3359,11 @@ export default function App() {
               ? "cmd.edit.edge"
               : grip3dEdit
               ? "cmd.edit.point"
-              : activeTransform
-              ? `transform.hint.${activeTransform.op}.${Math.min(
-                  activeTransform.points.length,
-                  activeTransform.op === "rotate" ? 2 : 1,
-                )}`
               : engineView.promptKey
           }
           options={
             gripEdit || edgeEdit || grip3dEdit
               ? []
-              : activeTransform
-              ? transformOptions()
               : engineView.options
           }
           fields={
@@ -3770,19 +3373,15 @@ export default function App() {
               ? edgeEditFields()
               : grip3dEdit
               ? grip3dEditFields(grip3dEdit, last3dDragRef.current?.raw ?? grip3dEdit.anchor)
-              : activeTransform
-              ? transformFields()
               : engineView.fields
           }
           onSubmit={(text) => {
-            // Feld-Controller (Griff, Kante, Transformation): getippte Länge in Anzeige-Einheiten
+            // Feld-Controller (Griff, Kante): getippte Länge in Anzeige-Einheiten
             // (Blatt: Papier-mm) → Meter; Winkel/Anzahl bleiben.
             const ctlFields = gripEdit
               ? gripEditFields()
               : edgeEdit
               ? edgeEditFields()
-              : activeTransform
-              ? transformFields()
               : [];
             const ctlActive = ctlFields.find((f) => f.active)?.id;
             const typed = (raw: string): number => {
@@ -3814,24 +3413,9 @@ export default function App() {
               else setGrip3dEdit(null);
               return;
             }
-            if (activeTransform) {
-              const v = typed(text);
-              if (isFinite(v)) submitTransformValue(v);
-              else confirmTransform();
-              return;
-            }
-            // Getipptes „rotate"/„drehen" startet die interaktive Drehung (U/I/O/P),
-            // analog zum Ribbon-Button und der Taste „d".
-            const cmdWord = text.trim().toLowerCase();
-            if (cmdWord === "rotate" || cmdWord === "drehen") {
-              startTransformOp("rotate");
-              return;
-            }
             engine.submitText(text);
           }}
-          onOption={(id) =>
-            activeTransform ? onTransformMode(id as CopyMode) : engine.chooseOption(id)
-          }
+          onOption={onCommandOption}
           onCycleField={() =>
             gripEdit
               ? cycleGripEditField()
@@ -3839,8 +3423,6 @@ export default function App() {
               ? cycleEdgeEditField()
               : grip3dEdit
               ? cycleGrip3dEditField()
-              : activeTransform
-              ? undefined
               : engine.cycleField()
           }
           onCancel={() =>
@@ -3850,12 +3432,10 @@ export default function App() {
               ? closeEdgeEditField()
               : grip3dEdit
               ? setGrip3dEdit(null)
-              : activeTransform
-              ? escapeTransform()
               : engine.escape()
           }
           stillActive={() => engine.isActive()}
-          steps={gripEdit || edgeEdit || grip3dEdit ? 0 : activeTransform ? activeTransform.points.length : engineView.steps}
+          steps={gripEdit || edgeEdit || grip3dEdit ? 0 : engineView.steps}
           suggest={(prefix) => engine.suggest(prefix)}
           onTextChange={setCmdTyped}
         />
@@ -4120,7 +3700,7 @@ export default function App() {
           label={t("transform.countPrompt")}
           defaultValue="3"
           type="number"
-          onConfirm={commitCopyCount}
+          onConfirm={(v) => commitCopyCount(v, (mode, n) => engine.chooseOption(mode, n))}
           onClose={() => setPendingCopyMode(null)}
         />
       )}

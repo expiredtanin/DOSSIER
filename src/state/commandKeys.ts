@@ -38,39 +38,18 @@ export function commandKeyAction(
   return e.key === "Escape" ? "escape" : "confirm";
 }
 
-/**
- * Weiterer Befehl ausserhalb der Engine (Auswahl-Transformation Bewegen/Drehen/Spiegeln …):
- * gleiche Esc-/Enter-Regeln.
- */
-export interface CommandKeyTarget {
-  active(): boolean;
-  escape(): void;
-  confirm(): void;
-}
-
-/** Hängt den Verteiler einmal an (liest Engine und Transformation über Refs). */
-export function useCommandKeys(
-  engineRef: RefObject<CommandEngine | null>,
-  otherRef?: RefObject<CommandKeyTarget | null>,
-): void {
+/** Hängt den Verteiler einmal an (liest die Engine über die Ref). */
+export function useCommandKeys(engineRef: RefObject<CommandEngine | null>): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const eng = engineRef.current;
-      const other = otherRef?.current;
-      const engActive = !!eng?.isActive();
-      const action = commandKeyAction(e, engActive || !!other?.active());
-      if (!action) return;
-      if (engActive && eng) {
-        e.preventDefault();
-        if (action === "escape") eng.escape();
-        else if (action === "confirm") eng.confirm();
-      } else if (other) {
-        e.preventDefault();
-        if (action === "escape") other.escape();
-        else if (action === "confirm") other.confirm();
-      }
+      const action = commandKeyAction(e, !!eng?.isActive());
+      if (!action || !eng) return;
+      e.preventDefault();
+      if (action === "escape") eng.escape();
+      else if (action === "confirm") eng.confirm();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [engineRef, otherRef]);
+  }, [engineRef]);
 }

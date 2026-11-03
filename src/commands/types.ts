@@ -31,7 +31,7 @@ export type AcceptKind = "point" | "number" | "option" | "text" | "selection";
 export type CmdInput =
   | { kind: "point"; point: Vec2; snap?: SnapResult | null }
   | { kind: "number"; value: number }
-  | { kind: "option"; id: string }
+  | { kind: "option"; id: string; value?: number }
   | { kind: "text"; text: string }
   | { kind: "selection"; wallIds: string[]; drawingIds: string[] };
 
@@ -48,6 +48,10 @@ export interface CmdOption {
   labelKey: TranslationKey;
   /** Aktueller Wert (Toggle/Value-Option); fehlt → Action-Option. */
   value?: string;
+  /** Gewählte Modus-Option (hervorgehoben), z. B. der aktive Kopiermodus. */
+  active?: boolean;
+  /** Tastenkürzel (ein Buchstabe, z. B. „U"); wirkt auch bei fokussiertem Befehlsfeld. */
+  key?: string;
 }
 
 // ── Kontext + Ergebnis ───────────────────────────────────────────────────────
@@ -145,6 +149,11 @@ export interface CommandState {
   phase: string;
   /** Letzter gesetzter Punkt (für relative/polare Eingabe), null am Anfang. */
   lastPoint: Vec2 | null;
+  /**
+   * Einstellungen, die kein Schritt sind (z. B. Kopiermodus U/I/O/P): Esc nimmt sie nicht zurück,
+   * die Engine trägt sie beim Schritt zurück mit.
+   */
+  sticky?: Record<string, unknown>;
 }
 
 // ── Tab-Feld-Zyklus (Präzisionseingabe §2.7, erweitert) ──────────────────────
@@ -177,6 +186,11 @@ export interface Command {
   options(state: CommandState): CmdOption[];
   /** Nur auf Geschossen aktiv? (analog floorOnly bei Tools.) */
   floorOnly?: boolean;
+  /**
+   * Braucht eine Auswahl (Bewegen/Drehen/Spiegeln): ohne transformierbare Auswahl startet der
+   * Befehl nicht, die Engine meldet diesen Hinweis über `EngineHost.notify`.
+   */
+  needsSelection?: TranslationKey;
   /** Initialer Schritt-Zustand. */
   init(): CommandState;
   /** Eine Eingabe (Punkt/Zahl/Option/Auswahl) verarbeiten. */

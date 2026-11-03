@@ -16,6 +16,8 @@ declare global {
       coreEpoch: () => number;
       /** Zahl der Elemente je Liste des Projekts (Wände, Öffnungen, Zeichnungsebenen) und das Projekt im Kern als JSON-Länge. */
       counts: () => { walls: number; openings: number; drawingLevels: number; coreJson: number };
+      /** Endpunkte aller 2D-Linien des Projekts ([123] Transformations-Test). */
+      lines: () => { a: { x: number; y: number }; b: { x: number; y: number } }[];
     };
   }
 }
@@ -36,5 +38,7 @@ export function installTestHooks(): void {
       const p = getState().project;
       return { walls: p.walls.length, openings: p.openings?.length ?? 0, drawingLevels: p.drawingLevels.length, coreJson: storeDocument(p).json().length };
     },
+    lines: () =>
+      getState().project.drawings2d.flatMap((d) => (d.geom.shape === "line" ? [{ a: d.geom.a, b: d.geom.b }] : [])),
   };
 }

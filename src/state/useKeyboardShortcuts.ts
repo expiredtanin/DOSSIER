@@ -11,14 +11,12 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useRef } from "react";
-import type { MutableRefObject, RefObject } from "react";
-import { getTool } from "../tools/tools";
-import type { ToolContext, ToolDraft, ToolId, ToolState } from "../tools/types";
-import type { CopyMode, TransformOp } from "../tools/transform";
+import type { RefObject } from "react";
+import type { ToolId } from "../tools/types";
 import type { CommandEngine } from "../commands/engine";
 import type { CommandLineHandle } from "../ui/CommandLine";
 import type { Drawing2D, Project, Vec2 } from "../model/types";
-import type { CoreOp, ProjectMutation } from "../core";
+import type { CoreOp } from "../core";
 import { differenceDrawings, intersectionDrawings, unionDrawings } from "../editors/booleanOps";
 import type { BooleanResult } from "../editors/booleanOps";
 import { groupSelection, mergeMembership, ungroup, EMPTY_MEMBERSHIP } from "./groupActions";
@@ -31,14 +29,6 @@ import {
 import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editors/elementClipboard";
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
 import { matchesShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
-
-/** Aktive Transformation (Bewegen/Spiegeln/Drehen) — Form aus useDrawingToolState. */
-type ActiveTransform = {
-  op: TransformOp;
-  copyMode: CopyMode;
-  count: number;
-  points: Vec2[];
-} | null;
 
 const isEditableTarget = (e: KeyboardEvent): boolean => {
   const el = e.target as HTMLElement | null;
@@ -222,55 +212,30 @@ export function useToolNumberShortcuts(
 }
 
 /**
- * Tastatur für aktive Zeichenwerkzeuge: Esc verwirft den Entwurf (bzw. schaltet
- * im Ruhezustand zurück auf Auswahl), Enter schließt mehrteilige Werkzeuge ab,
- * Backspace nimmt den letzten Punkt zurück. In echten Eingaben inaktiv. Läuft
- * ein gekoppelter Befehl (Linie/Rechteck/Polylinie über die Engine), gehören
- * Esc/Enter/Backspace der Engine bzw. dem Befehlsfeld — der Legacy-Werkzeug-
- * Pfad bleibt stumm (keine doppelte Mechanik).
+ * Tastatur für ein gewähltes, aber ruhendes Zeichenwerkzeug (sein Befehl ist nach dem Commit
+ * beendet): Esc schaltet zurück auf Auswahl, Enter wird geschluckt. Läuft der Befehl, gehören
+ * Esc/Enter der Engine (`commandKeys.ts`). In echten Eingaben inaktiv.
  */
 export function useActiveToolKeys(
   activeTool: ToolId,
-  toolCtx: ToolContext,
   engineRef: RefObject<CommandEngine | null>,
-  toolStateRef: MutableRefObject<ToolState>,
-  setDraft: (draft: ToolDraft | null) => void,
   setActiveTool: (id: ToolId) => void,
-  setProject: (next: ProjectMutation) => void,
 ): void {
   useEffect(() => {
     if (activeTool === "select") return;
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e)) return;
       if (engineRef.current?.isActive()) return;
-      const tool = getTool(activeTool);
-      const drawing = toolStateRef.current.phase !== "idle";
       if (e.key === "Escape") {
-        if (drawing) {
-          const [st] = tool.onCancel(toolStateRef.current);
-          toolStateRef.current = st;
-          setDraft(null);
-        } else {
-          setActiveTool("select");
-        }
+        setActiveTool("select");
         e.preventDefault();
       } else if (e.key === "Enter") {
-        const [st, res] = tool.onCommitGesture(toolStateRef.current, toolCtx);
-        toolStateRef.current = st;
-        if (res.commit) setProject(res.commit);
-        setDraft(null);
-        if (res.done) toolStateRef.current = tool.init();
-        e.preventDefault();
-      } else if (e.key === "Backspace" && tool.onUndoPoint) {
-        const [st, res] = tool.onUndoPoint(toolStateRef.current, toolCtx);
-        toolStateRef.current = st;
-        setDraft(res.draft);
         e.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeTool, toolCtx]);
+  }, [activeTool]);
 }
 
 /**
@@ -281,7 +246,8 @@ export function useActiveToolKeys(
  */
 export function useSelectAllAndDeleteShortcut(opts: {
   activeTool: ToolId;
-  activeTransform: ActiveTransform;
+  /** Läuft Bewegen/Drehen/Spiegeln? Dann löscht Entf nicht. */
+  transformActive: boolean;
   project: Project;
   activeLevelId: string;
   shortcutOverrides: ShortcutOverrides;
@@ -312,7 +278,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
 }): void {
   const {
     activeTool,
-    activeTransform,
+    transformActive,
     project,
     activeLevelId,
     shortcutOverrides,
@@ -442,7 +408,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
         matchesShortcut(e, "deleteSelection", shortcutOverrides) ||
         (e.key === "Backspace" && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey);
       if (!isDelete) return;
-      if (activeTransform) return; // während einer Transformation nicht löschen
+      if (transformActive) return; // während einer Transformation nicht löschen
       if (hasSelectionToDelete()) {
         deleteSelection();
         e.preventDefault();
@@ -452,7 +418,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
     return () => window.removeEventListener("keydown", onKey);
   }, [
     opts.activeTool,
-    opts.activeTransform,
+    opts.transformActive,
     opts.shortcutOverrides,
     opts.selectedDrawingIds,
     opts.selectedWallIds,
@@ -657,31 +623,17 @@ export function useBooleanOpsShortcut(
 
 /**
  * Transformations-Shortcuts (nur im Auswahl-Werkzeug):
- *  m = Bewegen, s = Spiegeln, d = Drehen (startet auf der Auswahl);
- *  während einer Transformation: u/i/o/p = Modus (move/copy/array/distribute),
- *  Esc = abbrechen. O/P fragen die Kopienanzahl ab. „q" = Messen (Distanz/
- *  Winkel) — braucht KEINE Auswahl.
+ *  m = Bewegen, s = Spiegeln, d = Drehen (startet den Befehl auf der Auswahl);
+ *  läuft ein Befehl mit Options-Kürzeln (U/I/O/P der Transformations-Befehle), wählen diese
+ *  Tasten die Option auch ohne Fokus im Befehlsfeld. O/P fragen die Kopienanzahl ab.
+ *  „q" = Messen (Distanz/Winkel) — braucht KEINE Auswahl.
  */
 export function useTransformShortcuts(
   activeTool: ToolId,
-  activeTransform: ActiveTransform,
-  setActiveTransform: (
-    next: ActiveTransform | ((t: ActiveTransform) => ActiveTransform),
-  ) => void,
-  selectedWallIds: string[],
-  selectedDrawingId: string | null,
-  selectedDrawingIds: string[],
-  selectedExtrudedSolidId: string | null,
-  selectedColumnId: string | null,
-  selectedCeilingIds: string[],
-  selectedRoofIds: string[],
-  selectedStairIds: string[],
-  selectedRoomIds: string[],
+  hasTransformSelection: boolean,
   engine: CommandEngine,
-  setDraft: (draft: ToolDraft | null) => void,
-  requestCopyCount: (mode: "array" | "distribute") => void,
+  onCommandOption: (id: string) => void,
   onRunCommand: (name: string) => void,
-  commandLineRef: RefObject<CommandLineHandle | null>,
   overrides: ShortcutOverrides,
 ): void {
   useEffect(() => {
@@ -689,20 +641,11 @@ export function useTransformShortcuts(
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (activeTransform) {
+      if (engine.isActive()) {
         const k = e.key.toLowerCase();
-        if (k === "u") setActiveTransform((t) => (t ? { ...t, copyMode: "move" } : t));
-        else if (k === "i") setActiveTransform((t) => (t ? { ...t, copyMode: "copy" } : t));
-        else if (k === "o") {
-          requestCopyCount("array");
-        } else if (k === "p") {
-          requestCopyCount("distribute");
-        } else if (e.key === "Escape") {
-          // [99] Esc der Transformation läuft über den zentralen Verteiler (commandKeys.ts).
-          if (e.defaultPrevented) return;
-          setActiveTransform(null);
-          setDraft(null);
-        } else return;
+        const opt = e.key.length === 1 ? engine.view().options.find((o) => o.key?.toLowerCase() === k) : undefined;
+        if (!opt) return;
+        onCommandOption(opt.id);
         e.preventDefault();
         return;
       }
@@ -713,26 +656,10 @@ export function useTransformShortcuts(
         return;
       }
       // Transformierbar sind Wände, 2D-Zeichnungen, extrudierte Körper, Stützen,
-      // Decken/Dächer/Treppen/Räume (dieselben Arten wie transformSel). Öffnungen
-      // laufen bewusst NICHT hierüber, sondern über ihre eigenen Bewegpunkte
-      // (Grips) — sie sind wandgebunden (Position = Abstand entlang der
-      // Wandachse), kein freier 2D-Punkt.
-      const hasSel =
-        selectedWallIds.length > 0 ||
-        !!selectedDrawingId ||
-        selectedDrawingIds.length > 0 ||
-        !!selectedExtrudedSolidId ||
-        !!selectedColumnId ||
-        selectedCeilingIds.length > 0 ||
-        selectedRoofIds.length > 0 ||
-        selectedStairIds.length > 0 ||
-        selectedRoomIds.length > 0;
-      if (!hasSel) return;
-      // Bewegen/Spiegeln/Drehen laufen ALLE über die interaktive Transformation
-      // (`activeTransform`) mit den U/I/O/P-Kopiermodi (Bewegen/Kopie/Reihe/
-      // Verteilen). Prompt + Optionen + Live-Feld speisen die Command-Line; die
-      // Kürzel U/I/O/P wirken dort auch bei fokussiertem Eingabefeld (options.key).
-      const op: TransformOp | null = matchesShortcut(e, "transformMove", overrides)
+      // Decken/Dächer/Treppen/Räume. Öffnungen laufen bewusst NICHT hierüber, sondern über ihre
+      // eigenen Bewegpunkte (Grips) — sie sind wandgebunden. Ohne Auswahl: still.
+      if (!hasTransformSelection) return;
+      const op = matchesShortcut(e, "transformMove", overrides)
         ? "move"
         : matchesShortcut(e, "transformMirror", overrides)
           ? "mirror"
@@ -740,29 +667,14 @@ export function useTransformShortcuts(
             ? "rotate"
             : null;
       if (op) {
-        setActiveTransform({ op, copyMode: "move", count: 1, points: [] });
-        setDraft(null);
-        requestAnimationFrame(() => commandLineRef.current?.focus());
+        onRunCommand(op);
         e.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [
-    activeTool,
-    activeTransform,
-    selectedWallIds,
-    selectedDrawingId,
-    selectedDrawingIds,
-    selectedExtrudedSolidId,
-    selectedColumnId,
-    selectedCeilingIds,
-    selectedRoofIds,
-    selectedStairIds,
-    selectedRoomIds,
-    engine,
-    overrides,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTool, hasTransformSelection, engine, overrides]);
 }
 
 /**
