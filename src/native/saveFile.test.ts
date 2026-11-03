@@ -49,3 +49,34 @@ describe("saveTextFile", () => {
     await expect(saveTextFile("x", "a.bin")).resolves.toBe(true);
   });
 });
+
+describe("saveTextFile atomar ([116])", () => {
+  async function withTauri(invoke: (cmd: string, args: unknown) => Promise<unknown>) {
+    vi.resetModules();
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.doMock("@tauri-apps/plugin-dialog", () => ({ save: async () => "/tmp/x/a.obp" }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    return import("./saveFile");
+  }
+
+  it("ruft save_atomic mit Pfad und Inhalt und meldet den Pfad erst danach", async () => {
+    const calls: unknown[][] = [];
+    const m = await withTauri(async (cmd, args) => void calls.push([cmd, args]));
+    const saved: string[] = [];
+    const ok = await m.saveTextFile("{}", "a.obp", "application/json", undefined, (p) => saved.push(p), true);
+    expect(ok).toBe(true);
+    expect(calls).toEqual([["save_atomic", { path: "/tmp/x/a.obp", content: "{}" }]]);
+    expect(saved).toEqual(["/tmp/x/a.obp"]);
+  });
+
+  it("wirft SaveError bei Fehler, ohne Download-Fallback und ohne Pfad-Callback", async () => {
+    const m = await withTauri(async () => {
+      throw "Umbenennen: Permission denied";
+    });
+    const saved: string[] = [];
+    await expect(
+      m.saveTextFile("{}", "a.obp", "application/json", undefined, (p) => saved.push(p), true),
+    ).rejects.toBeInstanceOf(m.SaveError);
+    expect(saved).toEqual([]);
+  });
+});

@@ -352,15 +352,22 @@ export function useProjectFileActions(
     const json = serializeProject(project);
     return saveProjectFile(json, project.name, (path) =>
       addRecentProject(path, project.name || "modell"),
-    ).then((saved) => {
-      if (saved) {
-        lastSavedProjectRef.current = project;
-        void clearAutosave(openedProjectPathRef.current);
-        void clearAutosave(null);
-        autosaveTracker.cleared();
-      }
-      return saved;
-    });
+    ).then(
+      (saved) => {
+        if (saved) {
+          lastSavedProjectRef.current = project;
+          // Erst nach erfolgreichem Umbenennen ([116]) — bei Fehler bleibt die Kopie.
+          void clearAutosave(openedProjectPathRef.current);
+          void clearAutosave(null);
+          autosaveTracker.cleared();
+        }
+        return saved;
+      },
+      (e) => {
+        notify(`${t("project.save.failed")} ${e instanceof Error ? e.message : String(e)}`, "error");
+        return false;
+      },
+    );
   };
   // „Neu" (Datei-Menü): leeres Projekt, wie am Startbildschirm — löst dabei
   // einen evtl. gehaltenen Datei-Lock der bisherigen Projektdatei und vergisst
