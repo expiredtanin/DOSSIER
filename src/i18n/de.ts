@@ -2383,6 +2383,8 @@ export const de = {
   "window.minimize": "Minimieren",
   "startup.previousCrashed": "Dossier wurde beim letzten Mal nicht sauber beendet. Ungesicherte Arbeit wird beim Öffnen zur Wiederherstellung angeboten.",
   "project.open.failed": "Projekt konnte nicht geöffnet werden.",
+  "core.restarting": "Kern startet nach einem internen Fehler neu …",
+  "core.restarted": "Interner Fehler im Kern – der Vorgang wurde abgebrochen, das Projekt ist wiederhergestellt. Der Rückgängig-Verlauf wurde dabei geleert.",
   "project.save.failed": "Projekt konnte nicht gespeichert werden; die Datei und die Wiederherstellungskopie bleiben unverändert.",
   "menu.native.clashCheck": "Kollisionsprüfung …",
   "menu.native.kennzahlen": "Kennzahlen und Raumprogramm …",

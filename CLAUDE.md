@@ -81,7 +81,9 @@ aus dem Hauptcheckout kopieren (beide gitignored).
 
 - **WASM-Pakete** (`src/engine/pkg*`) sind nicht im Repo: vor vitest mit `npm run build:core` sowie den
   übrigen `build:*`-Skripten in `package.json` bauen. In Linux-Cloud-Containern ist das System-`wasm-opt`
-  zu alt (Module brechen mit `Table.grow`): dort `wasm-pack build … --no-opt` direkt aufrufen.
+  zu alt (Module brechen mit `Table.grow`): dort `wasm-pack build … --no-opt` direkt aufrufen (oder
+  `npm run build:core -- --no-opt`); nach direktem wasm-pack für den Kern `node scripts/build-core.mjs --patch-only`
+  (ergänzt `__dossier_reinit` für den Neustart nach Kern-Panic, [118]).
 - **IFC-Prüfung:** `scripts/validate-ifc.py` (braucht `pip install ifcopenshell pytest`); der Test
   `src/export/exportIfc.validate.test.ts` läuft nur, wenn es installiert ist.
 - **macOS** ist die Hauptplattform des Maintainers; Metal (`render_png`, native Ansicht) gibt es nur dort.

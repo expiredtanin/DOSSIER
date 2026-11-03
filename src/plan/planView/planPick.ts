@@ -11,7 +11,7 @@ import type { Vec2 } from "../../model/types";
 import type { Plan, Primitive } from "../generatePlan";
 import { heldSegs, planParts } from "../planParts";
 import { planPrimAt } from "../planLazy";
-import { core } from "../../engine/coreWasm";
+import { core, coreEpoch } from "../../engine/coreWasm";
 import type { ModelRect } from "./geometry";
 
 /** Pick-Felder eines Primitivs (Besitzer-Ids). */
@@ -77,6 +77,8 @@ const splitIds = (s: string): string[] => (s ? s.split("\0").slice(1) : []);
 
 export class PlanPickIndex {
   private id = 0;
+  /** Kern-Epoche des Index (nach einem Kern-Neustart neu bauen, [118]). */
+  private epoch = 0;
 
   constructor(readonly plan: Plan) {}
 
@@ -87,7 +89,8 @@ export class PlanPickIndex {
 
   /** Kern-Index (lazy beim ersten Abfragen gebaut). Texte/Bilder mit JSON (Rahmen-Treffer). */
   private ix(): number {
-    if (this.id) return this.id;
+    if (this.id && this.epoch === coreEpoch()) return this.id;
+    this.epoch = coreEpoch();
     const c = core();
     const parts = planParts(this.plan, true);
     this.id = c.pick_index_build(heldSegs(parts, false));
@@ -97,7 +100,7 @@ export class PlanPickIndex {
 
   /** Kern-Index freigeben (danach baut eine Abfrage ihn neu). */
   release(): void {
-    if (this.id) core().pick_index_release(this.id);
+    if (this.id && this.epoch === coreEpoch()) core().pick_index_release(this.id);
     this.id = 0;
   }
 

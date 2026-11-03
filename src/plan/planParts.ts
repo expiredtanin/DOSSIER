@@ -14,12 +14,14 @@
 import type { Plan, PlanBufRun, Primitive } from "./generatePlan";
 import { encodePlanBuf } from "./planBuf";
 import { isBufPiece, lazyPieces, type PlanPiece } from "./planLazy";
-import { core } from "../engine/coreWasm";
+import { core, coreEpoch } from "../engine/coreWasm";
 
 /** Ein im Kern ablegbarer Puffer (Kern-Ergebnis `DecodedPlanBuf` oder eigener). */
 interface HoldableBuf {
   bytes: Uint8Array;
   hold: number;
+  /** Kern-Epoche von `hold` ([118], `coreEpoch`). */
+  holdEpoch?: number;
 }
 
 export interface PlanParts {
@@ -171,7 +173,14 @@ export function heldSegs(parts: PlanParts, fresh: boolean): Float64Array {
   // Eine Runde: die Puffer dieses Plans (viele Zeichnungs-Stücke) verdrängen sich nicht gegenseitig.
   c.plan_buf_round_begin();
   try {
-    for (const b of parts.bufs) if (!b.hold || ((fresh || parts.bufs.length > 1) && !c.plan_buf_touch(b.hold))) b.hold = c.plan_buf_hold(b.bytes);
+    const ep = coreEpoch();
+    for (const b of parts.bufs) {
+      if (b.holdEpoch !== ep) b.hold = 0; // Nummer aus einer Kern-Instanz vor dem Neustart ([118])
+      if (!b.hold || ((fresh || parts.bufs.length > 1) && !c.plan_buf_touch(b.hold))) {
+        b.hold = c.plan_buf_hold(b.bytes);
+        b.holdEpoch = ep;
+      }
+    }
   } finally {
     c.plan_buf_round_end();
   }

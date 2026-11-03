@@ -479,6 +479,8 @@ export interface DecodedPlanBuf {
   hashes: Float64Array | null;
   /** Nummer des im Kern gehaltenen Puffers (0 = keiner), s. `compilePlanBufRange`. */
   hold: number;
+  /** Kern-Epoche, in der `hold` vergeben wurde (nach einem Kern-Neustart ungültig, [118]). */
+  holdEpoch?: number;
 }
 
 function unitsToString(u: Uint16Array): string {

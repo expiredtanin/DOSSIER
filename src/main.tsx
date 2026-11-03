@@ -85,7 +85,12 @@ function RootByWindowKind() {
 // rufen ihn danach synchron auf (engine/coreWasm.ts). Scheitert das Laden, gibt es keinen
 // sinnvollen Betrieb — die Meldung erscheint statt der App.
 const root = createRoot(document.getElementById("root")!);
+// Test-Naht der UI-Suite (Kern-Panic auslösen, [118]): nur mit `?dossierTest`, sonst nicht einmal geladen.
+const testHooks = new URLSearchParams(window.location.search).has("dossierTest")
+  ? import("./state/testHooks").then((m) => m.installTestHooks())
+  : Promise.resolve();
 initCore()
+  .then(() => testHooks)
   .then(() =>
     root.render(
       <StrictMode>

@@ -14,7 +14,7 @@ import type { Primitive } from '../generatePlan';
 import type { Vec2 } from '../../model/types';
 import type { BufferGl, DashBatch, GpuGeometry, Rgba } from './glPlanTypes';
 import { encodePlanBuf, type DecodedPlanBuf } from '../planBuf';
-import { core } from '../../engine/coreWasm';
+import { core, coreEpoch } from '../../engine/coreWasm';
 
 /**
  * Ear-Clipping-Triangulierung eines einfachen (lochfreien) Polygons, konvex oder konkav.
@@ -54,9 +54,11 @@ export function compilePrimitivesToGpu(
 export function compilePlanBufRange(gl: BufferGl, src: DecodedPlanBuf, from: number, to: number, pxPerMeter = 0): GpuGeometry {
   const packed = gl.packedLineVertices === true;
   const c = core();
+  if (src.holdEpoch !== coreEpoch()) src.hold = 0; // Nummer aus einer Kern-Instanz vor dem Neustart ([118])
   let out = src.hold ? c.gpu_compile_held(src.hold, from, to, pxPerMeter, packed) : new Uint32Array(0);
   if (out.length === 0) {
     src.hold = c.plan_buf_hold(src.bytes);
+    src.holdEpoch = coreEpoch();
     out = src.hold ? c.gpu_compile_held(src.hold, from, to, pxPerMeter, packed) : c.gpu_compile_flat(src.bytes, from, to, pxPerMeter, packed);
   }
   return uploadCompiled(gl, out);

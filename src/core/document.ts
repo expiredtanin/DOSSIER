@@ -5,7 +5,7 @@
 // feldweise (`sync`); bei jedem Widerspruch wird es aus dem vollen Projekt neu geöffnet.
 
 import type { Project } from "../model/types";
-import { core } from "../engine/coreWasm";
+import { core, registerCoreRestore } from "../engine/coreWasm";
 import { applyOps, opsToJson } from "./ops";
 import { fromMarkedJson, toMarkedJson } from "./ops";
 import type { CoreOp } from "./ops";
@@ -124,11 +124,25 @@ export class ProjectDocument {
   constructor(project: Project) {
     this.mirror = project;
     this.reopen(project);
+    if (liveDocs.size >= 64) for (const r of liveDocs) if (!r.deref()) liveDocs.delete(r);
+    liveDocs.add(new WeakRef(this));
   }
 
   /** Handle im Kern (0 = nicht offen). */
   get id(): number {
     return this.handle;
+  }
+
+  /**
+   * Nach einem Kern-Neustart ([118], `coreWasm.ts`): die alte Instanz samt Handle und Verlauf ist weg;
+   * das Dokument öffnet sich aus der Leseansicht neu (die ist der letzte angenommene Stand — eine
+   * Änderung, deren Aufruf den Panic auslöste, war noch nicht übernommen). Der Verlauf beginnt leer.
+   */
+  restoreAfterRestart(): void {
+    const wasOpen = this.handle !== 0;
+    this.handle = 0;
+    this.steps.clear();
+    if (wasOpen) this.reopen(this.mirror);
   }
 
   private reopen(project: Project): void {
@@ -253,6 +267,7 @@ export class ProjectDocument {
   close(): void {
     if (this.handle) core().doc_close(this.handle);
     this.handle = 0;
+    for (const r of liveDocs) if (r.deref() === this) liveDocs.delete(r);
   }
 
   // ── Änderungen mit Verlauf ([K4] S3, [7], [8]) ──────────────────────────────
@@ -568,6 +583,23 @@ export class ProjectDocument {
     if (this.handle) core().doc_group_end(this.handle);
   }
 }
+
+/** Alle Dokumente (schwach gehalten), die nach einem Kern-Neustart neu geöffnet werden. */
+const liveDocs = new Set<WeakRef<ProjectDocument>>();
+
+registerCoreRestore(() => {
+  for (const r of liveDocs) {
+    const doc = r.deref();
+    if (!doc) liveDocs.delete(r);
+    else
+      try {
+        doc.restoreAfterRestart();
+      } catch (e) {
+        // Bleibt zu (Handle 0) und öffnet sich beim nächsten Gebrauch neu (`ensure`/`sync`).
+        console.error("Kern-Dokument nach Neustart nicht wieder geöffnet.", e);
+      }
+  }
+});
 
 /** Griff-Anfrage als JSON; Marken nur bei nicht endlichen Zahlen (der Ersetzer kostet je Wert einen Aufruf). */
 function gripJson(req: object): string {
