@@ -11,6 +11,7 @@ import { initCore } from "./core";
 import { getLanguage, setLanguage } from "./i18n";
 import type { Language } from "./i18n";
 import { applyThemeMode, getStoredThemeMode } from "./theme/themeMode";
+import "material-symbols/outlined.css";
 import "./styles.css";
 import "./text/fonts.css";
 

@@ -14,6 +14,7 @@ Anzeige nur über die zwei Rust-Engines `render2d` und `render3d` (WebGPU/Metal)
    ansehen") — Zahlen allein reichen nicht.
 5. **Abschliessen:** kleine Commits, Nachricht deutsch, beginnt mit den IDs (`[63] Baurecht: …`), ohne
    Co-Authored-By-Zeile. `TODO.md` im selben Commit nachführen (Stand + Datum + was offen bleibt).
+   Gewollte Änderung an Plan/Schnitt/Ansicht/3D: `npx vitest run -u src/plan/golden.test.ts`, Diff in `src/plan/__golden__` im Commit prüfen ([119]).
 6. **Ehrlich berichten:** was geprüft wurde und was nicht (z. B. „nicht in der Tauri-App getestet").
 
 ```

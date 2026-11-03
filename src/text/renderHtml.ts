@@ -27,6 +27,31 @@ function escapeAttr(s: string): string {
 
 // ── Gemeinsame Mark→Stil-Zuordnung ──────────────────────────────────────────
 
+// ── CSS-Werte aus Dateien ([117]) ───────────────────────────────────────────
+// Rich-Text kommt auch aus importierten Projektdateien und landet per `innerHTML` im Editor. Der Text ist
+// escaped; die Stil-Werte (Farbe, Schriftname, Ausrichtung, Zeilenhöhe) werden hier auf eine Positivliste
+// beschränkt, damit keine CSS-Einschleusung (`;`, `url(…)`, `position:fixed` …) möglich ist.
+
+/** Farbe: `#rgb[a]`/`#rrggbb[aa]`, `rgb()/rgba()/hsl()` mit Zahlen, `var(--name)` oder ein Farbwort. */
+export function safeCssColor(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const c = v.trim();
+  if (/^#[0-9a-f]{3,8}$/i.test(c)) return c;
+  if (/^(rgb|rgba|hsl|hsla)\(\s*[0-9.%\s,/-]+\)$/i.test(c)) return c;
+  if (/^var\(--[a-z0-9-]+\)$/i.test(c)) return c;
+  if (/^[a-z]{3,20}$/i.test(c)) return c;
+  return undefined;
+}
+
+/** Schriftname: Buchstaben, Ziffern, Leerzeichen, `-`, `,`, `_`, `.`, Anführungszeichen (kein `;(){}:/\\`). */
+export function safeFontFamily(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const f = v.trim();
+  return f.length > 0 && f.length <= 120 && /^[\p{L}\p{N} _.,'"-]+$/u.test(f) ? f : undefined;
+}
+
+const SAFE_ALIGN = new Set(["left", "center", "right", "justify"]);
+
 /** Kombiniert underline + strike zu einem CSS/SVG-text-decoration-Wert. */
 function textDecoration(marks: Marks): string | undefined {
   const parts: string[] = [];
@@ -67,11 +92,13 @@ export function runCssProps(
   if (marks.italic) css["font-style"] = "italic";
   const deco = textDecoration(marks);
   if (deco) css["text-decoration"] = deco;
-  if (marks.font) css["font-family"] = marks.font;
+  const font = safeFontFamily(marks.font);
+  if (font) css["font-family"] = font;
   const sizePt = (marks.sizePt ?? basePt) * (marks.super || marks.sub ? SCRIPT_SCALE : 1);
   css["font-size"] =
     sizeUnit === "em" ? `${round(sizePt / basePt)}em` : `${round(sizePt)}pt`;
-  if (marks.color) css["color"] = marks.color;
+  const color = safeCssColor(marks.color);
+  if (color) css["color"] = color;
   if (marks.super) css["vertical-align"] = "super";
   if (marks.sub) css["vertical-align"] = "sub";
   return css;
@@ -113,8 +140,8 @@ export function docToHtml(doc: RichTextDoc, opts: HtmlOptions = {}): string {
 
 function paragraphToHtml(p: Paragraph, basePt: number, sizeUnit: "pt" | "em", color?: string): string {
   const styles: string[] = [];
-  if (p.align && p.align !== "left") styles.push(`text-align:${p.align}`);
-  if (p.lineHeight != null) styles.push(`line-height:${p.lineHeight}`);
+  if (p.align && p.align !== "left" && SAFE_ALIGN.has(p.align)) styles.push(`text-align:${p.align}`);
+  if (typeof p.lineHeight === "number" && Number.isFinite(p.lineHeight)) styles.push(`line-height:${p.lineHeight}`);
   const style = styles.length ? ` style="${styles.join(";")}"` : "";
   if (p.runs.length === 0) return `<div${style}><br></div>`;
   const inner = p.runs.map((r) => runToHtmlSpan(r, basePt, sizeUnit, color)).join("");

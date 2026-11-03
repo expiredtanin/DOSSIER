@@ -1041,10 +1041,20 @@ Frage: WebGPU weiterführen oder wie BIMCraft CPU + native GPU?
 
 Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code gelesen.
 
-- ○ **[116] Speichern absturzsicher.** `native/saveFile.ts:49` überschreibt direkt; Temp-Datei + Umbenennen
-  (Rust-Befehl), `.obp~`-Sicherung; Autosave erst nach erfolgreichem Umbenennen löschen. · S
-- ○ **[117] CSP setzen.** `tauri.conf.json` hat `"csp": null`; strikte CSP (`script-src 'self' 'wasm-unsafe-eval'`,
-  `connect-src` = netFetch-Hosts + ipc). Rich-Text-`innerHTML` prüfen. · S
+- ✅ **[116] Speichern absturzsicher.** 3.11.: Rust-Befehl `save_atomic` (`src-tauri/src/atomic_save.rs`):
+  `<pfad>.tmp` schreiben + fsync, Vorversion als `<pfad>~` kopieren, Umbenennen, Ordner-fsync; Fehler lassen die
+  Datei unberührt. `saveProjectFile` nutzt ihn (`saveTextFile(..., atomic)`); bei Fehler `SaveError` + `notify`
+  (`project.save.failed`), Autosave-Kopie bleibt, sonst Löschen erst nach Erfolg. Offen: nur Projektdatei
+  (Exporte/`saveBinaryFile` schreiben weiter direkt); in der Tauri-App nicht von Hand geprüft; Electron
+  schreibt keine Dateien (Browser-Download), daher keine Änderung; keine Wiederherstellungs-UI für `.obp~`. · S
+- ✅ **[117] CSP setzen.** (3.11.) Eine Quelle `scripts/csp.cjs` (`script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self' blob:`,
+  `style-src` mit `'unsafe-inline'` für React-Inline-Styles (Icon-Font seit 3.11. lokal gebündelt: `material-symbols`, kein Google-Fonts-Host mehr), `connect-src` = ipc + netFetch-Hosts +
+  localhost/127.0.0.1 + ws://127.0.0.1 für die KI-Brücke). Tauri: `tauri.conf.json` (`devCsp: null`, Test `src/net/csp.test.ts`
+  gleicht mit `csp.cjs` und `ALLOWED_HOSTS` ab); Electron: Antwort-Header nur gepackt; Browser/e2e: Meta-Tag nur im Vite-Build
+  (Dev-HMR unberührt). `e2e/csp.spec.ts` prüft Plan/Schnitt/Ansicht/3D auf CSP-Verletzungen. Rich-Text: Text war schon
+  escaped; Farbe/Schriftname/Ausrichtung/Zeilenhöhe aus Dateien jetzt per Positivliste (`safeCssColor`, `safeFontFamily`).
+  Offen: nicht in der Tauri-App (macOS) und nicht im gepackten Electron geprüft (`'self'` unter `file://` ungeprüft);
+  `'unsafe-inline'` bei Stilen bleibt; Material-Symbols-Font kommt noch von Google Fonts (lokal bündeln würde zwei Hosts sparen). · S
 - ◐ **[118] Wiederanlauf nach Kern-Panic.** (3.11.) `core()` (`engine/coreWasm.ts`) hüllt alle Kern-Exporte: ein
   Trap (`RuntimeError`/`unreachable`) baut sofort eine frische Instanz aus dem übersetzten Modul
   (`__dossier_reinit`, ergänzt von `scripts/build-core.mjs` = `npm run build:core`), jedes `ProjectDocument`
@@ -1056,8 +1066,9 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   Offen: Undo-Verlauf geht beim Neustart verloren (Meldung sagt es) — Wiederaufbau per Op-Log wäre der
   nächste Schritt; nur im Linux-Container (vitest/Node) geprüft, nicht in Tauri/Electron (synchrones
   `new WebAssembly.Instance` im Haupt-Thread). · M
-- ○ **[119] Referenz-Ausgaben (golden).** Plan-Puffer/SVG/Schnitt/Ansicht der Musterprojekte als Snapshot;
-  seit TS gelöscht ist, fehlt die Bitgleich-Referenz. · M
+- ✅ **[119] Referenz-Ausgaben (golden).** 3.11.: `src/plan/golden.test.ts` — beide Musterprojekte: Grundriss je Geschoss
+  (1:100, 1:50), Schnitt, Ansicht, 3D-Zusammenfassung als Digest (Zähler, Rahmen, Hash gerundeter Zahlen) in
+  `src/plan/__golden__/`; Update mit `vitest -u`. Nur Linux geprüft; Hash deckt Detailabweichungen ab, Diff zeigt nur Zähler. · M
 - ○ **[120] macOS in CI.** `cargo check --features native2d`, Bildvergleich Metal ↔ WebGPU. · M
 - ○ **[121] App.tsx zerlegen, Neurendern stoppen.** `App.tsx:365` abonniert ganzes Projekt, 0× `memo`;
   Abschnitte in Hooks/Komponenten, Panels lesen den Store selbst; Nebenfenster bekommen Ops statt Projekt. · L
@@ -1073,8 +1084,9 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
 - ○ **[127] 3D-Booleans klären:** BSP in `fileio/csg.rs` stilllegen, Manifold vs. truck dokumentieren. · S
 - ○ **[128] Restlogik nach Rust:** Griffe (`useGripEditing.ts`), `layoutModel.ts`, Kollisions-Vorprüfung,
   `exportStep.projectSolidSpecs`. · L
-- ○ **[129] Grenze schärfen:** React-freies `t()` (Kern importiert `i18n` → React), `net/` in `CORE_DIRS`,
-  transitive Importe prüfen. · S
+- ✅ **[129] Grenze schärfen.** (3.11.) `i18n/translate.ts` (React-frei: `t`, Sprache, Wörterbücher), `i18n/index.ts` re-exportiert
+  und hält nur `useT`; Kern-Dateien importieren `i18n/translate`. `net/` in `CORE_DIRS`, neuer Test prüft transitive
+  relative Importe (Ausnahmelisten leer). · S
 - ○ **[130] Kleinkram:** eine generische Fenster-Brücke statt 5 Kopien; Auswahl als ein `Selection`-Objekt statt
   12 Felder; `primitives.tsx` auf Overlay zurückschneiden; Cargo-Workspace + cargo-deny; NOTICE (OFL-Schriften,
   wgpu, Tauri, React, pdf.js, lcms). · M

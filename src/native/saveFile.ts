@@ -12,6 +12,26 @@ function isTauri(): boolean {
 
 let warnedFallback = false;
 
+/** Schreiben in die Zieldatei ist gescheitert ([116]); die bisherige Datei ist unverändert.
+ *  Wird NICHT auf den Browser-Download zurückgefallen — der Aufrufer meldet es dem Nutzer. */
+export class SaveError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SaveError";
+  }
+}
+
+/** Atomar schreiben über den Rust-Befehl `save_atomic` (Temp-Datei + fsync + Umbenennen,
+ *  Vorversion als `<pfad>~`). Wirft {@link SaveError}. */
+export async function writeFileAtomic(path: string, content: string): Promise<void> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("save_atomic", { path, content });
+  } catch (err) {
+    throw new SaveError(err instanceof Error ? err.message : String(err));
+  }
+}
+
 /** Datei-Endungsfilter fuer den nativen Speichern-/Oeffnen-Dialog (Tauri). */
 export interface FileDialogFilter {
   name: string;
@@ -29,6 +49,8 @@ export interface FileDialogFilter {
  * @param onSavedPath Optionaler Callback mit dem gewaehlten Pfad, NUR bei
  *        erfolgreichem Tauri-Speichern (z. B. fuer die Zuletzt-geoeffnet-Liste,
  *        s. state/recentProjects.ts) — additiv, aendert den Rueckgabewert nicht.
+ * @param atomic Absturzsicher schreiben ([116], `writeFileAtomic`): bei Fehler wird
+ *        {@link SaveError} geworfen statt auf den Download zurückzufallen.
  * @returns `true` wenn geschrieben/geladen wurde, `false` bei Abbruch (Dialog
  *          ohne Pfad). Bei einem Tauri-Fehler wird auf den Browser-Fallback
  *          zurueckgefallen.
@@ -39,17 +61,22 @@ export async function saveTextFile(
   mime = "application/octet-stream",
   filters?: FileDialogFilter[],
   onSavedPath?: (path: string) => void,
+  atomic = false,
 ): Promise<boolean> {
   if (isTauri()) {
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const path = await save({ defaultPath: defaultName, filters });
       if (!path) return false; // Nutzer hat abgebrochen
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-      await writeTextFile(path, content);
+      if (atomic) await writeFileAtomic(path, content);
+      else {
+        const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+        await writeTextFile(path, content);
+      }
       onSavedPath?.(path);
       return true;
     } catch (err) {
+      if (err instanceof SaveError) throw err;
       if (!warnedFallback) {
         warnedFallback = true;
         console.warn(

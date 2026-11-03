@@ -1,7 +1,8 @@
 // Wächter für die Kern/Hülle-Grenze (docs/core-ui-split.md, Phase A). Es gibt kein ESLint im
 // Projekt — die Regeln laufen deshalb als Test über die Importzeilen aller Quelldateien.
 //
-//  1. Der KERN (model, geometry, plan, io, export, analysis, materials, text, engine) importiert
+//  1. Der KERN (core, model, geometry, plan, io, export, analysis, materials, text, engine, net) — auch
+//     transitiv über relative Importe importiert
 //     nie die HÜLLE (ui, panels, views, menus, editors, viewport, native, tools, state, commands,
 //     App) und nie React/Zustand/Tauri statisch.
 //  2. Die HÜLLE holt Funktionen aus `plan/` und `geometry/` nur über die Fassade `src/core`.
@@ -14,7 +15,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative, sep } from "node:path";
 
 const SRC = join(process.cwd(), "src");
-const CORE_DIRS = new Set(["core", "model", "geometry", "plan", "io", "export", "analysis", "materials", "text", "engine"]);
+const CORE_DIRS = new Set(["core", "model", "geometry", "plan", "io", "export", "analysis", "materials", "text", "engine", "net"]);
 const SHELL_DIRS = new Set(["ui", "panels", "views", "menus", "editors", "viewport", "native", "tools", "state", "commands"]);
 const FACADE_DIRS = new Set(["plan", "geometry"]);
 const FORBIDDEN_PACKAGES = /^(react|react-dom|zustand|@tauri-apps\/.*)$/;
@@ -78,6 +79,43 @@ describe("Kern/Hülle-Grenze", () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  it("der Kern erreicht transitiv keine Hülle und keine UI-Pakete", () => {
+    const violations: string[] = [];
+    const resolve = (target: string): string | null => {
+      for (const c of [`${target}.ts`, `${target}.tsx`, `${target}/index.ts`, `${target}/index.tsx`, target]) {
+        const abs = join(SRC, c);
+        try {
+          if (statSync(abs).isFile()) return abs;
+        } catch {
+          /* nächster Kandidat */
+        }
+      }
+      return null;
+    };
+    for (const root of files) {
+      if (!CORE_DIRS.has(top(root))) continue;
+      const seen = new Set<string>([root]);
+      const queue: Array<{ file: string; path: string[] }> = [{ file: root, path: [] }];
+      while (queue.length) {
+        const { file, path } = queue.shift()!;
+        for (const i of importsOf(file)) {
+          const tt = i.target?.split("/")[0];
+          const chain = () => [relative(SRC, root), ...path, i.target ?? i.spec].join(" → ");
+          if (tt && (SHELL_DIRS.has(tt) || tt === "App" || tt === "main")) violations.push(chain());
+          else if (!i.target && FORBIDDEN_PACKAGES.test(i.spec)) violations.push(chain());
+          else if (i.target) {
+            const next = resolve(i.target);
+            if (next && !seen.has(next) && !/\.test\.tsx?$/.test(next)) {
+              seen.add(next);
+              queue.push({ file: next, path: [...path, i.target] });
+            }
+          }
+        }
+      }
+    }
+    expect([...new Set(violations)]).toEqual([]);
   });
 
   it("die Hülle holt plan/ und geometry/ nur über die Fassade src/core", () => {

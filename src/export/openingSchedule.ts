@@ -4,7 +4,7 @@
 // (`areaReport.ts`: `areaReportToCsv` / `areaReportToSvg` / `buildAreaReportPdf`).
 
 import type { Project } from "../model/types";
-import { t } from "../i18n";
+import { t } from "../i18n/translate";
 import { documentFor } from "../core/document";
 import type { AreaReport, Cell, ReportRow, ReportSection } from "./areaReport";
 
