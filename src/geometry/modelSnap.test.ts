@@ -66,6 +66,8 @@ function lineProject(segs: SnapSeg[]): Project {
 
 const flags = { segs: true, perpendicular: true, endpoint: true, midpoint: true, intersection: true, onEdge: true, center: false, tangent: false };
 
+const approx = (v: unknown) => JSON.parse(JSON.stringify(v ?? null, (_k, x) => (typeof x === "number" ? Math.round(x * 1e9) / 1e9 : x)));
+
 describe("Objektfang aus dem Modell (Kern)", () => {
   it("gleich wie die Suche über alle Strecken und Paare (Zufallsdaten)", () => {
     let seed = 3;
@@ -89,8 +91,9 @@ describe("Objektfang aus dem Modell (Kern)", () => {
         const last = rnd() < 0.5 ? { x: rnd() * 20, y: rnd() * 20 } : null;
         const r = queryModelSnap(h, draft, [], { raw, tolM, pxPerMeter: 100, lastPoint: last, ...flags })!;
         const e = brute(segs, raw, tolM, 100, last);
-        expect(r.a).toEqual(e.a);
-        expect(r.b).toEqual(e.b);
+        // libm-Hypot statt JS-Hypot: letzte Stelle darf abweichen.
+        expect(approx(r.a)).toEqual(approx(e.a));
+        expect(approx(r.b)).toEqual(approx(e.b));
       }
     }
     expect(queryModelSnap(987654, [], [], { raw: { x: 0, y: 0 }, tolM: 1, pxPerMeter: 1, lastPoint: null, ...flags })).toBeNull();

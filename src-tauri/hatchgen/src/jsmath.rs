@@ -1,36 +1,18 @@
-//! `Math.hypot` wie in V8 (Kahan-Summe über die auf den Maximalwert skalierten Beträge). Die
-//! 3D-Ableitungen (`stairs3d`, `drawing2d_3d`) lieferten in TS bitgenau diese Werte; `f64::hypot`
-//! weicht in der letzten Stelle ab und würde Vergleiche alt/neu unnötig aufweichen.
+//! `hypot` über `libm` (deterministisch auf allen Plattformen, kein Aufruf in die JS-Engine).
 
+/// Euklidische Länge beliebig vieler Komponenten (NaN-Eingabe → NaN, ±∞ → ∞).
 pub fn hypot(v: &[f64]) -> f64 {
-    let mut max = 0.0f64;
-    let mut nan = false;
-    for &x in v {
-        let a = x.abs();
-        if a.is_infinite() {
-            return f64::INFINITY;
-        }
-        if a.is_nan() {
-            nan = true;
-        } else if a > max {
-            max = a;
+    match v {
+        [] => 0.0,
+        [a] => a.abs(),
+        [a, b] => libm::hypot(*a, *b),
+        _ => {
+            if v.iter().any(|x| x.is_infinite()) {
+                return f64::INFINITY;
+            }
+            libm::sqrt(v.iter().map(|x| x * x).sum())
         }
     }
-    if nan {
-        return f64::NAN;
-    }
-    if max == 0.0 {
-        return 0.0;
-    }
-    let (mut sum, mut comp) = (0.0f64, 0.0f64);
-    for &x in v {
-        let n = x.abs() / max;
-        let summand = n * n - comp;
-        let prelim = sum + summand;
-        comp = (prelim - sum) - summand;
-        sum = prelim;
-    }
-    sum.sqrt() * max
 }
 
 pub fn hypot2(a: f64, b: f64) -> f64 {

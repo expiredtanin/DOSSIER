@@ -15,7 +15,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 # Browser-/Node-Bindings (wasm-bindgen); nur fuer wasm32-unknown-unknown.
-web = ["dep:wasm-bindgen", "dep:console_error_panic_hook", "dossier-hatch/web"]
+web = ["dep:wasm-bindgen", "dep:console_error_panic_hook"]
 
 [dependencies]
 i_overlay = { version = "9.1", default-features = false }
