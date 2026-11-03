@@ -119,3 +119,33 @@ describe("docToHtml — sizeUnit reicht bis in jeden Run-Span durch", () => {
     expect(html).toContain("font-size:1.5em");
   });
 });
+
+describe("docToHtml: Bereinigung nicht vertrauenswürdiger Dateiinhalte ([117])", () => {
+  const evil = (over: Record<string, unknown>, text = "x"): RichTextDoc =>
+    ({
+      version: 1,
+      paragraphs: [{ runs: [{ text, marks: { ...over } }] }],
+    }) as unknown as RichTextDoc;
+
+  it("escapt Tags im Text", () => {
+    const html = docToHtml(evil({}, '<img src=x onerror=alert(1)><script>1</script>'));
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<script");
+    expect(html).toContain("&lt;img");
+  });
+  it("verwirft Schrift und Farbe mit CSS-/Attribut-Einschleusung", () => {
+    const html = docToHtml(evil({ font: 'a";onmouseover="alert(1)', color: "red;background:url(https://evil/x)" }));
+    expect(html).not.toContain("onmouseover");
+    expect(html).not.toContain("url(");
+    expect(html).not.toContain("font-family");
+  });
+  it("behält harmlose Werte", () => {
+    const html = docToHtml(evil({ font: "Inter", color: "#aabbcc" }));
+    expect(html).toContain("font-family:Inter");
+    expect(html).toContain("color:#aabbcc");
+  });
+  it("Absatz-Ausrichtung nur aus der Positivliste", () => {
+    const doc = { version: 1, paragraphs: [{ align: 'center;position:fixed', runs: [] }] } as unknown as RichTextDoc;
+    expect(docToHtml(doc)).not.toContain("position");
+  });
+});

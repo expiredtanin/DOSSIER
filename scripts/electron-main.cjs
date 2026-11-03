@@ -6,6 +6,7 @@
 
 const { app, BrowserWindow, Menu, ipcMain } = require("electron");
 const path = require("node:path");
+const { buildCsp } = require("./csp.cjs");
 
 // Randloses App-Fenster wie chromium-shell.sh (--app=…): keine native
 // Menüleiste (File/Edit/View/Window), kein Fensterrahmen. Minimieren/
@@ -66,7 +67,16 @@ ipcMain.handle("window:is-maximized", (event) => {
   return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // [117] CSP als Antwort-Header — nur gepackt: der Dev-Server (Vite HMR) braucht Inline-Skripte.
+  if (!isDev) {
+    const { session } = require("electron");
+    session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+      cb({ responseHeaders: { ...details.responseHeaders, "Content-Security-Policy": [buildCsp()] } });
+    });
+  }
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

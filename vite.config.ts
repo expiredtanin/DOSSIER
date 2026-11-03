@@ -1,9 +1,21 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { createRequire } from "node:module";
+
+const { buildCsp } = createRequire(import.meta.url)("./scripts/csp.cjs") as { buildCsp: () => string };
+
+// [117] CSP nur im Build (Meta-Tag): der Dev-Server braucht Inline-Skripte für HMR/React-Refresh.
+const cspPlugin = {
+  name: "dossier-csp",
+  apply: "build" as const,
+  transformIndexHtml: () => [
+    { tag: "meta", attrs: { "http-equiv": "Content-Security-Policy", content: buildCsp() }, injectTo: "head-prepend" as const },
+  ],
+};
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cspPlugin],
   // Tauri lädt die App über den Vite-Dev-Server; dessen Logs (cargo/tauri)
   // sollen nicht vom Bildschirm gewischt werden, und Tauri-eigene Env-Vars
   // müssen im Client sichtbar sein.

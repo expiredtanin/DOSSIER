@@ -1047,8 +1047,14 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   (`project.save.failed`), Autosave-Kopie bleibt, sonst Löschen erst nach Erfolg. Offen: nur Projektdatei
   (Exporte/`saveBinaryFile` schreiben weiter direkt); in der Tauri-App nicht von Hand geprüft; Electron
   schreibt keine Dateien (Browser-Download), daher keine Änderung; keine Wiederherstellungs-UI für `.obp~`. · S
-- ○ **[117] CSP setzen.** `tauri.conf.json` hat `"csp": null`; strikte CSP (`script-src 'self' 'wasm-unsafe-eval'`,
-  `connect-src` = netFetch-Hosts + ipc). Rich-Text-`innerHTML` prüfen. · S
+- ✅ **[117] CSP setzen.** (3.11.) Eine Quelle `scripts/csp.cjs` (`script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self' blob:`,
+  `style-src` mit `'unsafe-inline'` für React-Inline-Styles + fonts.googleapis.com, `connect-src` = ipc + netFetch-Hosts +
+  localhost/127.0.0.1 + ws://127.0.0.1 für die KI-Brücke). Tauri: `tauri.conf.json` (`devCsp: null`, Test `src/net/csp.test.ts`
+  gleicht mit `csp.cjs` und `ALLOWED_HOSTS` ab); Electron: Antwort-Header nur gepackt; Browser/e2e: Meta-Tag nur im Vite-Build
+  (Dev-HMR unberührt). `e2e/csp.spec.ts` prüft Plan/Schnitt/Ansicht/3D auf CSP-Verletzungen. Rich-Text: Text war schon
+  escaped; Farbe/Schriftname/Ausrichtung/Zeilenhöhe aus Dateien jetzt per Positivliste (`safeCssColor`, `safeFontFamily`).
+  Offen: nicht in der Tauri-App (macOS) und nicht im gepackten Electron geprüft (`'self'` unter `file://` ungeprüft);
+  `'unsafe-inline'` bei Stilen bleibt; Material-Symbols-Font kommt noch von Google Fonts (lokal bündeln würde zwei Hosts sparen). · S
 - ○ **[118] Wiederanlauf nach Kern-Panic.** Dokument + Verlauf im selben WASM wie alle Geometrie
   (`web/document.rs`); TS hält Op-Log seit letztem Laden, baut Instanz nach Trap neu auf. · M
 - ✅ **[119] Referenz-Ausgaben (golden).** 3.11.: `src/plan/golden.test.ts` — beide Musterprojekte: Grundriss je Geschoss
