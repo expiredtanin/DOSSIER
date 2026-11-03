@@ -1075,8 +1075,16 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   Abschnitte in Hooks/Komponenten, Panels lesen den Store selbst; Nebenfenster bekommen Ops statt Projekt. · L
 - ○ **[122] Zweites Kern-Dokument (`documentFor` → `shared`, Differenz-Abgleich) abschaffen.** Fang/Griffe/
   Export bauen abgewandelte Projekte; stattdessen Ausschluss-Filter an Kern-Abfragen. · M
-- ○ **[123] Doppelte Transformation + alte Werkzeugliste streichen** (`activeTransform` in App, `tools/tools.ts`);
-  alles über `CommandEngine`. `commitTransform` (nur Tests) löschen. · M
+- ✅ **[123] Doppelte Transformation + alte Werkzeugliste streichen.** (3.11.) Bewegen/Drehen/Spiegeln sind nur noch
+  Engine-Befehle (`commands/cmds/transform.ts`, ein Baukasten für alle drei) mit den Abläufen und Prompts der früheren
+  App-Maschine: U/I/O/P-Kopiermodus als Option (Kürzel, kein Esc-Schritt: `CommandState.sticky`), Distanz-/Winkelfeld,
+  Dreh-Darstellung, Enter = Punkt an der Maus, Rechtsklick/Geschosswechsel = Abbruch, ohne Auswahl kein Start
+  (`Command.needsSelection` → Hinweis). Knopf, Menü, m/s/d und getippter Befehl münden in denselben Befehl.
+  `activeTransform` und die Tool-Registry (32 leere Handler) entfallen; `tools/tools.ts` ist nur noch die
+  Werkzeug-Liste (Label, Hinweis, gekoppelter Befehl). `commitTransform` gelöscht (Tests über `transformOps`).
+  e2e `transform.spec.ts`. Geändert gegenüber vorher: Spiegeln per Knopf/Tippen bewegt jetzt wie per Taste das
+  Original (vorher Kopie), getippte Zahl nach dem Drehzentrum gilt als Distanz-Punkt (vorher ignoriert).
+  Offen: ungenutzte i18n-Schlüssel (`cmd.move.base` …, `transform.bar` …) aufräumen; nicht in der Tauri-App geprüft. · M
 - ○ **[124] Kern typisiert.** 152 Funktionen lesen rohes JSON (`grips::field/num_of`); Ops gegen Modell prüfen,
   `cmd_*` auf `&Project`. · L
 - ✅ **[125] Doppelte Schnitt-Dominanz** (`render3d/section_boolean.rs` ↔ `core/plan_section.rs`) auf eine Fassung. · S

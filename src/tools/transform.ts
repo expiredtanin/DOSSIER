@@ -14,7 +14,6 @@ import type { DraftShape } from "./types";
 import { uniqueStamp } from "./types";
 import { decodeShapes, pair } from "./coreCmd";
 import type { CommandSelection } from "../commands/types";
-import { applyOps } from "../core";
 import type { CoreOp, ProjectMutation } from "../core";
 import { cmdMutation, documentFor } from "../core/document";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
@@ -220,20 +219,8 @@ export function transformOps(
   return documentFor(project).cmdOps(transformReq(sel, op, pts, mode, count));
 }
 
-/** Wendet die Transformation immutabel auf das Projekt an (Original + Kopien), über {@link transformOps}. */
-export function commitTransform(
-  project: Project,
-  sel: TransformSelection,
-  op: TransformOp,
-  pts: Vec2[],
-  mode: CopyMode,
-  count: number,
-): Project {
-  return applyOps(project, transformOps(project, sel, op, pts, mode, count));
-}
-
 /**
- * Wie {@link commitTransform}, als Projekt → Projekt-Funktion mit mitgeführten Ops (`opsMutation`) —
+ * Die Transformation ({@link transformOps}) als Projekt → Projekt-Funktion mit mitgeführten Ops (`opsMutation`) —
  * für `CommandResult.commit`: `setProject` übergibt die Ops ohne Projekt-Differenz an den Kern.
  */
 export function transformMutation(

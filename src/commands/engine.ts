@@ -19,6 +19,7 @@ import type { ProjectMutation } from "../core";
 import { NON_LENGTH_FIELDS, parseInput, resolvePoint, toModelInput } from "./parseInput";
 import { MODEL_UNITS, type DisplayUnits } from "../tools/displayUnits";
 import { getCommand, resolveCommand, autocomplete } from "./registry";
+import { hasTransformSelection } from "../tools/transform";
 import type {
   Command,
   CommandContext,
@@ -65,6 +66,8 @@ export interface EngineHost {
    * (s. `tools/displayUnits.ts`). Fehlt der Handler, gelten Meter.
    */
   inputUnits?(): DisplayUnits;
+  /** Optional: Hinweis zeigen (i18n-Key), z. B. „erst Objekte wählen" (`Command.needsSelection`). */
+  notify?(key: string): void;
 }
 
 /** Öffentlicher Schnappschuss für die Command-Line-UI (rein lesend). */
@@ -74,7 +77,7 @@ export interface EngineView {
   /** Aktueller Prompt-Key (i18n) oder null (Ruhezustand). */
   promptKey: string | null;
   /** Inline-Optionen des aktuellen Schritts. */
-  options: { id: string; labelKey: string; value?: string }[];
+  options: { id: string; labelKey: string; value?: string; active?: boolean; key?: string }[];
   /** Name des aktiven Befehls (für Anzeige), null im Ruhezustand. */
   commandName: string | null;
   /**
@@ -105,7 +108,7 @@ export const ESC_DOUBLE_MS = 300;
 function sameStep(a: CommandState, b: CommandState): boolean {
   if (a === b) return true;
   try {
-    const strip = (k: string, v: unknown) => (k === "cursor" || k === "hover" ? undefined : v);
+    const strip = (k: string, v: unknown) => (k === "cursor" || k === "hover" || k === "sticky" ? undefined : v);
     return JSON.stringify(a, strip) === JSON.stringify(b, strip);
   } catch {
     return false;
@@ -313,6 +316,10 @@ export class CommandEngine {
   /** Startet einen konkreten Befehl (z. B. zur Wiederholung). */
   startCommand(cmd: Command): boolean {
     if (cmd.floorOnly && !this.host.isFloor()) return false;
+    if (cmd.needsSelection && !hasTransformSelection(this.host.context(null).selection)) {
+      this.host.notify?.(cmd.needsSelection);
+      return false;
+    }
     this.command = cmd;
     this.state = cmd.init();
     this.lastCommandName = cmd.name;
@@ -387,7 +394,8 @@ export class CommandEngine {
       this.cancel();
       return;
     }
-    this.state = prev;
+    // Einstellungen (Kopiermodus u. Ä.) bleiben, nur der Schritt geht zurück.
+    this.state = this.state.sticky ? { ...prev, sticky: this.state.sticky } : prev;
     this.resetFields();
     this.redraw();
     this.emit();
@@ -542,10 +550,15 @@ export class CommandEngine {
     return this.command.pointFromFields(this.state, this.locks, cursor);
   }
 
-  /** Klick auf eine Inline-Option (§2.4). */
-  chooseOption(id: string): void {
+  /** Klick auf eine Inline-Option (§2.4); `value` z. B. die im Dialog erfragte Anzahl. */
+  chooseOption(id: string, value?: number): void {
     if (!this.command || !this.state) return;
-    this.feed({ kind: "option", id });
+    this.feed(value === undefined ? { kind: "option", id } : { kind: "option", id, value });
+  }
+
+  /** Name des laufenden Befehls (oder null). */
+  activeCommandName(): string | null {
+    return this.command?.name ?? null;
   }
 
   /** Enter = Space = Rechtsklick: bestätigen/Default/mehrteilig-beenden (§2.3). */

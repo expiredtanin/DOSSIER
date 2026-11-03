@@ -6,7 +6,7 @@
 // aus der Reihe fällt.
 //
 // Daten/Handler kommen über usePanelHost (kein Prop-Drilling). Werkzeug-Metadaten
-// aus der Tools-Registry (getTool), Befehls-Labels aus der Command-Registry.
+// aus der Werkzeug-Liste (toolInfo), Befehls-Labels aus der Command-Registry.
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
@@ -15,7 +15,7 @@ import { useState } from "react";
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
 import type { ToolId } from "./host";
-import { getTool } from "../tools/tools";
+import { toolInfo } from "../tools/tools";
 import { getCommand } from "../commands/registry";
 import { CommandIcon } from "../ui/ribbon/CommandIcon";
 
@@ -399,11 +399,11 @@ export function ToolsPanel() {
   // Ein Werkzeug-Knopf (Icon + Name). Boden-gebundene (`floorOnly`) Werkzeuge
   // sind ohne aktives Geschoss gesperrt; freie 2D-Werkzeuge bleiben nutzbar.
   const toolButton = (id: ToolId) => {
-    const tool = getTool(id);
+    const tool = toolInfo(id);
     const active = host.activeTool === id;
     const disabled = !!tool.floorOnly && !host.toolsEnabled;
     const label = t(tool.labelKey);
-    const title = disabled ? t("tool.floorOnlyDisabled") : t(tool.hintKey(tool.init()));
+    const title = disabled ? t("tool.floorOnlyDisabled") : t(tool.hintKey);
     return (
       <button
         key={id}

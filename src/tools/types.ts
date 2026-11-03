@@ -1,12 +1,8 @@
-// Tool-System für das aktive Zeichnen im Grundriss (docs/design/drawing-tools.md).
-//
-// Werkzeuge sind reine Funktionen über einen internen `ToolState`
-// (Discriminated Union je Werkzeug). Sie greifen NUR über `commit(project)`
-// immutabel auf das Modell zu und schreiben nie Plan-Primitive — die Ansicht
-// bleibt abgeleitet. Bezeichner englisch, UI-Text via t().
+// Gemeinsame Typen des Zeichnens im Grundriss: Werkzeug-IDs, Snap, Vorschau (Draft) und die
+// PlanView-Brücke. Das Zeichnen selbst läuft über die Befehls-Engine (`src/commands`, [123]).
+// Bezeichner englisch, UI-Text via t().
 
-import type { DrawingLevel, Project, Vec2 } from "../model/types";
-import type { ProjectMutation } from "../core";
+import type { Vec2 } from "../model/types";
 
 /** Werkzeug-Identität. */
 export type ToolId =
@@ -192,35 +188,7 @@ export const DEFAULT_SNAP: SnapSettings = {
   hoverDivideCount: 2,
 };
 
-// ── Werkzeug-Schnittstelle ──────────────────────────────────────────────────
-
-/** Live-Kontext, den ein Werkzeug bei jedem Schritt erhält. */
-export interface ToolContext {
-  project: Project;
-  /** Aktives Geschoss/die aktive Zeichnungsebene (Ziel der neuen Elemente). */
-  level: DrawingLevel;
-  /** Default-Kategorie-Code für neue Elemente. */
-  defaultCategoryCode: string;
-  /** Aktiver Wandtyp für das Wand-Werkzeug. */
-  activeWallTypeId: string;
-  /** Aktiver Linienstil-Code für 2D-Primitive. */
-  activeLineStyleId: string;
-}
-
-/** Ein an einer Modellposition ausgelöstes Pointer-Ereignis (fertig gesnappt). */
-export interface ToolPointer {
-  /** Roher Modellpunkt (vor Snapping), in Metern. */
-  raw: Vec2;
-  /** Gesnappter Punkt + Marker-Info; null = kein Snap. */
-  snap: SnapResult | null;
-  /** Effektiver Punkt = snap?.point ?? raw. */
-  point: Vec2;
-  shift: boolean;
-  ctrl: boolean;
-  alt: boolean;
-  /** 0 = links, 2 = rechts. */
-  button: number;
-}
+// ── Vorschau (Draft) ────────────────────────────────────────────────────────
 
 /**
  * Leichte Vorschau-Form (Rubber-Band). Bewusst NICHT der volle `Primitive`-Typ
@@ -272,50 +240,9 @@ export interface ToolDraft {
   measure?: MeasurementReadout;
 }
 
-/** Was ein Werkzeug-Schritt nach außen meldet. */
-export interface ToolResult {
-  /** Neuer Vorschau-Zustand; null = nichts zu zeigen. */
-  draft: ToolDraft | null;
-  /** Bei Abschluss: Änderung mit mitgeführten Ops (`opsMutation`), die App über setProject anwendet. */
-  commit?: ProjectMutation;
-  /** true → Werkzeug ist fertig und kehrt in seinen Ruhezustand zurück. */
-  done?: boolean;
-}
-
-/**
- * Interner Zustand eines Werkzeugs. Basis-Form; jedes Werkzeug verfeinert sie zu
- * einer eigenen Discriminated Union (z. B. WallState) und castet beim Eintritt.
- */
-export interface ToolState {
-  phase: string;
-}
-
-/** Die Werkzeug-Schnittstelle (reine Funktionen über einen internen State). */
-export interface Tool {
-  id: ToolId;
-  /** UI-Label-Key (i18n), z. B. „tool.wall". */
-  labelKey: string;
-  /** Statuszeilen-Hinweis-Key je Phase. */
-  hintKey: (state: ToolState) => string;
-  /** Nur auf Geschossen aktiv? (Wand braucht ein Geschoss.) */
-  floorOnly?: boolean;
-  /** Initialer Ruhezustand. */
-  init(): ToolState;
-  /** Klick (Punkt setzen). */
-  onClick(state: ToolState, p: ToolPointer, ctx: ToolContext): [ToolState, ToolResult];
-  /** Bewegung (Hover/Drag): nur Vorschau, nie Commit. */
-  onMove(state: ToolState, p: ToolPointer, ctx: ToolContext): [ToolState, ToolResult];
-  /** Doppelklick/Enter/Rechtsklick: mehrteilige Werkzeuge abschließen. */
-  onCommitGesture(state: ToolState, ctx: ToolContext): [ToolState, ToolResult];
-  /** Esc: Entwurf verwerfen, im selben Werkzeug bleiben. */
-  onCancel(state: ToolState): [ToolState, ToolResult];
-  /** Backspace: letzten gesetzten Punkt zurücknehmen (optional). */
-  onUndoPoint?(state: ToolState, ctx: ToolContext): [ToolState, ToolResult];
-}
-
 // ── PlanView-Brücke ──────────────────────────────────────────────────────────
 // PlanView meldet rohe Modellpunkte + die aktuelle Pixel/Meter-Skala nach oben;
-// der ToolController (App) snappt, fährt das Werkzeug und hält den `draft`,
+// App reicht sie an die Befehls-Engine (Snap, Schritt) und hält den `draft`,
 // den PlanView als Overlay zeichnet. So bleibt die Snap-/Modell-Logik außerhalb
 // der reinen Darstellungs-/Eingabeschicht.
 

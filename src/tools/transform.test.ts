@@ -8,9 +8,15 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { commitTransform, rotateGizmoShapes, transformPreview } from "./transform";
-import type { TransformSelection } from "./transform";
+import { rotateGizmoShapes, transformOps, transformPreview } from "./transform";
+import type { CopyMode, TransformOp, TransformSelection } from "./transform";
+import { applyOps } from "../core";
 import type { Ceiling, Drawing2D, ExtrudedSolid, Project, Roof, Room, Stair } from "../model/types";
+
+/** Transformation über die Kern-Ops anwenden (wie der Befehl beim Commit). */
+function commitTransform(p: Project, sel: TransformSelection, op: TransformOp, pts: { x: number; y: number }[], mode: CopyMode, count: number): Project {
+  return applyOps(p, transformOps(p, sel, op, pts, mode, count));
+}
 
 function project(drawings: Drawing2D[]): Project {
   return {
