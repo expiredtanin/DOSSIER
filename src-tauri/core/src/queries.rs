@@ -61,6 +61,8 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             }
             json(&parts)
         }
+        // STEP-Export: alle Bauteile als truck-Spezifikationen (`solid_specs::project_solid_specs`).
+        ("projectSolidSpecs", _) => json(&crate::solid_specs::project_solid_specs(p)?),
         // Gruppen ([K4] S3, `groups.rs`): `text` = Gruppen-id bzw. JSON der Argumente.
         ("groupMembership", _) => json(&crate::groups::transitive_membership(p, text)),
         ("containingGroup", _) => {

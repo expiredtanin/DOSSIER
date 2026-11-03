@@ -3,6 +3,8 @@
 // (Wandschichten, Decken, andere Körper). Wand↔Wand und Wand↔Decke werden NICHT geprüft —
 // sie greifen konstruktiv ineinander (Gehrungen, Auflager) und wären reine Falschmeldungen.
 //
+// Vorstufe (Hüllquader-Paare) im Rust-Kern (`clash_broad.rs`), Feinprüfung in trucksolid.
+//
 // Ergebnis: je Kollision ein Paar + Durchdringungsvolumen + Mittelpunkt. `clashMarkers`
 // macht daraus rote Markierungen (Kreis + Text, nicht druckend) auf dem passenden Geschoss.
 
@@ -13,6 +15,7 @@ import { getFloor } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
 import { extrudedSolidSpec } from "../plan/extrudedSolidSpec";
 import { wallSpec } from "../plan/wallSpec";
+import { core } from "../engine/coreWasm";
 import { solidClash, solidProps } from "../engine/truckSolid";
 import type { SolidSpec } from "../engine/truckSolid";
 
@@ -80,21 +83,18 @@ export function clashItems(project: Project): ClashItem[] {
 
 type Box = { min: [number, number, number]; max: [number, number, number] };
 
-const overlaps = (a: Box, b: Box, eps = 0.002): boolean =>
-  a.min[0] < b.max[0] - eps && b.min[0] < a.max[0] - eps &&
-  a.min[1] < b.max[1] - eps && b.min[1] < a.max[1] - eps &&
-  a.min[2] < b.max[2] - eps && b.min[2] < a.max[2] - eps;
-
-/** Zu prüfende Paare: mindestens ein freier Körper, Hüllquader überlappen (reiner Kern). */
+/** Zu prüfende Paare: mindestens ein freier Körper, Hüllquader überlappen (Rust-Kern, `clash_broad.rs`). */
 export function candidatePairs(items: ClashItem[], boxes: Box[]): Array<[number, number]> {
+  const groups = new Map<string, number>();
+  const flat = new Float64Array(items.length * 8);
+  items.forEach((it, i) => {
+    const g = groups.get(it.id) ?? groups.size;
+    groups.set(it.id, g);
+    flat.set([FREE.has(it.kind) ? 1 : 0, g, ...boxes[i].min, ...boxes[i].max], i * 8);
+  });
+  const out = core().clash_candidate_pairs(flat);
   const pairs: Array<[number, number]> = [];
-  for (let i = 0; i < items.length; i++) {
-    for (let j = i + 1; j < items.length; j++) {
-      if (!FREE.has(items[i].kind) && !FREE.has(items[j].kind)) continue;
-      if (items[i].id === items[j].id) continue;
-      if (overlaps(boxes[i], boxes[j])) pairs.push([i, j]);
-    }
-  }
+  for (let k = 0; k < out.length; k += 2) pairs.push([out[k], out[k + 1]]);
   return pairs;
 }
 
