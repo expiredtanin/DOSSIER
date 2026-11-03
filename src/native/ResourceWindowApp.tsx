@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ResourceManager } from "../ui/ResourceManager";
 import type { ResourceManagerHandlers, TabId } from "../ui/ResourceManager";
 import type { Project } from "../model/types";
+import { applyProjectDelta, type ProjectDelta } from "./projectDelta";
 import { t } from "../i18n";
 
 /** Alle Felder von ResourceManagerHandlers sind Funktionen — für den Proxy unten. */
@@ -43,6 +44,13 @@ export function ResourceWindowApp() {
       if (disposed) return;
       unlisten.push(
         await listen<Project>("resource-sync-project", (e) => setProject(e.payload)),
+      );
+      // Danach nur noch die geänderten Felder ([121]); ohne vollen Stand verworfen (der kommt
+      // mit der „ready"-Antwort).
+      unlisten.push(
+        await listen<ProjectDelta>("resource-sync-delta", (e) =>
+          setProject((p) => (p ? applyProjectDelta(p, e.payload) : p)),
+        ),
       );
       unlisten.push(await listen<TabId>("resource-set-tab", (e) => setTab(e.payload)));
       // Hauptfenster um den aktuellen Stand bitten — deckt den Fall ab, dass
