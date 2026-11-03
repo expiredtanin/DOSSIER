@@ -6,6 +6,7 @@
 import type { Layout, LayoutLegend, Project } from "../model/types";
 import { collectVisibleCodes } from "../model/types";
 import { generatePlan, type Plan } from "../plan/generatePlan";
+import { withDocument } from "../core/document";
 import { legendDrawings, legendEntries } from "../analysis/legend";
 import { SHEET_SCALE_DENOMINATOR, sheetMmToModel } from "../model/layoutModel";
 import { planToPrintSvg } from "./planToPrintSvg";
@@ -45,7 +46,8 @@ export function legendPlan(project: Project, layout: Layout, legend: LayoutLegen
   const levelId = `legend-${legend.id}`;
   const { drawings, widthMm, heightMm } = legendDrawings(project, legend, entries, levelId);
   const tmp = legendProject(project, layout, drawings, levelId);
-  const plan = generatePlan(tmp, levelId, collectVisibleCodes(tmp.layers), undefined, "fein", false, false, false, SHEET_SCALE_DENOMINATOR, true);
+  // Hilfsprojekt = eigenes, kurzlebiges Dokument ([122]); `forPrint` braucht danach nichts mehr davon.
+  const plan = withDocument(tmp, () => generatePlan(tmp, levelId, collectVisibleCodes(tmp.layers), undefined, "fein", false, false, false, SHEET_SCALE_DENOMINATOR, true));
   return { plan, xMm: legend.xMm, yMm: legend.yMm, widthMm, heightMm };
 }
 

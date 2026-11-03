@@ -43,6 +43,8 @@ export interface SnapInput {
   pxPerMeter: number;
   shift: boolean;
   ctrl: boolean;
+  /** ids der Elemente, die nicht fangen (gerade gezogen; sonst fängt der Punkt an sich selbst). */
+  excludeIds?: readonly string[];
 }
 
 /** Eine Strecke als Snap-Quelle (Entwurf, Blatt-Geometrie, Verweil-Referenz). */
@@ -66,16 +68,18 @@ interface LevelHold {
   project: Project;
   levelId: string;
   codes: Set<string>;
+  skip: string;
   held: number;
 }
 const levelHolds: LevelHold[] = [];
 const MAX_LEVEL_HOLDS = 4;
 function levelHold(input: SnapInput, fresh: boolean): number {
-  let e = levelHolds.find((h) => h.project === input.project && h.levelId === input.levelId && h.codes === input.visibleCodes);
+  const skip = input.excludeIds?.length ? input.excludeIds.join("\n") : "";
+  let e = levelHolds.find((h) => h.project === input.project && h.levelId === input.levelId && h.codes === input.visibleCodes && h.skip === skip);
   if (e && !fresh) return e.held;
-  const held = holdModelSnap(input.project, input.levelId, input.visibleCodes);
+  const held = holdModelSnap(input.project, input.levelId, input.visibleCodes, input.excludeIds ?? []);
   if (!e) {
-    e = { project: input.project, levelId: input.levelId, codes: input.visibleCodes, held };
+    e = { project: input.project, levelId: input.levelId, codes: input.visibleCodes, skip, held };
     levelHolds.push(e);
     if (levelHolds.length > MAX_LEVEL_HOLDS) levelHolds.shift();
   }

@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { cutSegmentOps, splitOps } from "./splitJoin";
 import { getState } from "../state/appStore";
 import type { Drawing2D, Project } from "../model/types";
-import { documentFor } from "../core/document";
+import { documentFor, withDocument } from "../core/document";
 import { applyOps } from "../core/ops";
 import { sampleProject } from "../model/sampleProject";
 
@@ -129,7 +129,8 @@ describe("Split (Kern `cmd_split.rs`)", () => {
     const b: Drawing2D = { id: "b", type: "drawing2d", levelId: "eg", categoryCode: "20", geom: { shape: "line", a: { x: 4, y: -1 }, b: { x: 4, y: 1 } } };
     const z: Drawing2D = { id: "z", type: "drawing2d", levelId: "eg", categoryCode: "20", geom: { shape: "circle", center: { x: 0, y: 0 }, r: 1 } };
     const p = { ...sampleProject, drawings2d: [a, b, z] } as Project;
-    const { ops, selectIds } = splitOps(p, ["a", "z"]);
+    // Eigenes Projekt neben dem Store: ausdrücklich geöffnet ([122]).
+    const { ops, selectIds } = withDocument(p, () => splitOps(p, ["a", "z"]));
     const next = applyOps(p, ops).drawings2d;
     expect(next.map((d) => d.geom)).toEqual([
       { shape: "line", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },

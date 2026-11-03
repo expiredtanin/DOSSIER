@@ -5,7 +5,7 @@
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { generatePlan } from "../core";
+import { generatePlan, withDocument } from "../core";
 import type { CategoryDisplayResolver } from "../core";
 import type { DetailLevel } from "../model/viewTypes";
 import type { DisplayResolver } from "../viewport/Viewport3D";
@@ -56,9 +56,12 @@ export function useExportHandlers(opts: {
   const scopedProject = (selectionOnly: boolean): Project =>
     selectionOnly ? filterProjectToSelection(project, selectionMembers) : project;
 
+  // Gefilterte/verschobene Kopie = eigenes, kurzlebiges Kern-Dokument ([122]); das ganze Projekt läuft
+  // direkt über das Dokument des Stores.
   const onExportPdf = async (decision: ExportPdfDecision) => {
-    const plan = generatePlan(
-      scopedProject(decision.selectionOnly),
+    const scoped = scopedProject(decision.selectionOnly);
+    const plan = withDocument(scoped, () => generatePlan(
+      scoped,
       activeLevelId,
       visibleCodes,
       categoryDisplay,
@@ -68,7 +71,7 @@ export function useExportHandlers(opts: {
       true, // includeGlobal (Default, explizit weil forPrint danach folgt)
       decision.scaleDenominator, // Export-Massstab: Bemassung in Papier-mm, Strichstärken nach Massstab
       true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
-    );
+    ));
     await savePlanPdf(plan, {
       scaleDenominator: decision.scaleDenominator,
       paper: decision.paper,
@@ -84,8 +87,9 @@ export function useExportHandlers(opts: {
   // Ausrichtung wie der PDF-Export (Nutzer-Wunsch „Kein SVG-Export"), nur
   // ohne den jsPDF/svg2pdf-Umweg — reiner Download des Druck-SVG.
   const onExportSvg = (decision: ExportPdfDecision) => {
-    const plan = generatePlan(
-      scopedProject(decision.selectionOnly),
+    const scoped = scopedProject(decision.selectionOnly);
+    const plan = withDocument(scoped, () => generatePlan(
+      scoped,
       activeLevelId,
       visibleCodes,
       categoryDisplay,
@@ -95,7 +99,7 @@ export function useExportHandlers(opts: {
       true, // includeGlobal (Default)
       decision.scaleDenominator, // wie PDF
       true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
-    );
+    ));
     savePlanSvg(plan, {
       scaleDenominator: decision.scaleDenominator,
       paper: decision.paper,
@@ -115,7 +119,9 @@ export function useExportHandlers(opts: {
     // damit die Datei in anderer CAD-Software lagerichtig ankommt — auch wenn
     // lokal nahe (0,0) gezeichnet wurde. Ohne Bezug bleibt alles lokal.
     // (Der Papier-/Layout-Export bleibt bewusst in lokalen Koordinaten.)
-    const exportProject = projectToWorldCoords(scopedProject(decision.selectionOnly));
+    const scoped = scopedProject(decision.selectionOnly);
+    const exportProject = withDocument(scoped, () => projectToWorldCoords(scoped));
+    await withDocument(exportProject, async () => {
     const plan = generatePlan(
       exportProject,
       activeLevelId,
@@ -142,6 +148,7 @@ export function useExportHandlers(opts: {
     } catch (err) {
       getState().notify(`${t("exportDxf.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
+    });
     setExportDxfOpen(false);
   };
 

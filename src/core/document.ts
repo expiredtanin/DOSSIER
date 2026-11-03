@@ -1,15 +1,14 @@
 // Projekt-Dokument im Rust-Kern ([K4], Stufe S1; S3: Prüfung und Undo/Redo im Kern, s. `commit`;
 // S4: Laden/Speichern der Projektdatei, s. `loadFile`/`serialize`). Änderungen kommen als Ops
 // (`commit`), ein anderes Projekt als Ganzes (`load`, `loadFile` — leert den Verlauf). TS hält die
-// Leseansicht (`current`). Das gemeinsame Abfrage-Dokument (`documentFor`) folgt fremden Projekten
-// feldweise (`sync`); bei jedem Widerspruch wird es aus dem vollen Projekt neu geöffnet.
+// Leseansicht (`current`). Abfragen finden ihr Dokument über die Leseansicht (`documentFor`); ein
+// abgewandeltes Projekt wird ausdrücklich geöffnet (`withDocument`) statt abgeglichen ([122]).
 
 import type { Project } from "../model/types";
 import { core, registerCoreRestore } from "../engine/coreWasm";
 import { applyOps, opsToJson } from "./ops";
 import { fromMarkedJson, toMarkedJson } from "./ops";
 import type { CoreOp } from "./ops";
-import { fieldOps } from "./opsBuild";
 import { opsMutation } from "./opsBuild";
 import { StepStates } from "./stepStates";
 import type { ProjectMutation } from "./opsBuild";
@@ -110,9 +109,6 @@ export type QueryName =
   | "selectionHighlight"
   | "modelJson";
 
-/** Ab so vielen Ops öffnet `sync` das Dokument neu, statt sie einzeln anzuwenden. */
-const SYNC_REOPEN_OPS = 2000;
-
 export class ProjectDocument {
   private handle = 0;
   private mirror: Project;
@@ -150,34 +146,6 @@ export class ProjectDocument {
     this.handle = core().doc_open(JSON.stringify(project));
     if (!this.handle) console.warn("Projekt-Dokument im Kern konnte nicht geöffnet werden.");
     else if (this.limits) core().doc_history_limits(this.handle, this.limits[0], this.limits[1]);
-  }
-
-  /**
-   * Bringt das Abfrage-Dokument auf den Stand `next` (ohne Verlauf): nur die Felder, deren Referenz
-   * sich geändert hat, je über {@link fieldOps} (Listen elementweise) — unveränderte Teile kosten
-   * nichts. Kein Weg für Benutzer-Änderungen (die gehen als Ops über {@link commit}).
-   */
-  sync(next: Project): void {
-    if (next === this.mirror) return;
-    const a = this.mirror as unknown as Record<string, unknown>;
-    const b = next as unknown as Record<string, unknown>;
-    const ops: CoreOp[] = [];
-    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-      if (a[key] !== b[key]) ops.push(...fieldOps(this.mirror, key as keyof Project, b[key] as never));
-    }
-    this.mirror = next;
-    if (ops.length === 0) return;
-    // Ganz anderes Projekt (Tests, Laden): neu öffnen statt Tausender Einzel-Ops — das Entfernen
-    // vieler Elemente einzeln wäre quadratisch (Kataster-Importe mit 10⁵ Zeichnungen).
-    if (!this.handle || ops.length > SYNC_REOPEN_OPS) {
-      this.reopen(next);
-      return;
-    }
-    const problems = core().doc_apply(this.handle, JSON.stringify(ops));
-    if (problems) {
-      console.warn("Kern-Dokument weicht ab, wird neu geöffnet:", problems);
-      this.reopen(next);
-    }
   }
 
   /**
@@ -595,7 +563,7 @@ registerCoreRestore(() => {
       try {
         doc.restoreAfterRestart();
       } catch (e) {
-        // Bleibt zu (Handle 0) und öffnet sich beim nächsten Gebrauch neu (`ensure`/`sync`).
+        // Bleibt zu (Handle 0) und öffnet sich beim nächsten Gebrauch neu (`ensure`/`load`).
         console.error("Kern-Dokument nach Neustart nicht wieder geöffnet.", e);
       }
   }
@@ -613,8 +581,8 @@ function gripJson(req: object): string {
 let shared: ProjectDocument | null = null;
 
 /**
- * Das gemeinsame Abfrage-Dokument (ohne Verlauf), z. B. für das CLI: eine dort geladene Datei
- * ({@link ProjectDocument.loadFile}) ist sofort das Dokument der Abfragen auf ihrem Projekt.
+ * Das Dokument des CLI (ohne Verlauf): eine dort geladene Datei ({@link ProjectDocument.loadFile})
+ * ist sofort das Dokument der Abfragen auf ihrem Projekt (s. {@link documentFor}).
  */
 export function sharedDocument(): ProjectDocument {
   if (!shared) shared = new ProjectDocument({} as Project);
@@ -628,16 +596,84 @@ export function setPrimaryDocument(doc: ProjectDocument | null): void {
   primary = doc;
 }
 
+/** Ausdrücklich geöffnete, kurzlebige Dokumente ({@link withDocument}), innerste zuletzt. */
+const scoped: ProjectDocument[] = [];
+
+/** Offenes Dokument, dessen Leseansicht `project` ist (Store, CLI, {@link withDocument}). */
+function lookup(project: Project): ProjectDocument | null {
+  if (primary && primary.current === project && primary.id) return primary;
+  for (let i = scoped.length - 1; i >= 0; i--) if (scoped[i].current === project && scoped[i].id) return scoped[i];
+  if (shared && shared.current === project && shared.id) return shared;
+  return null;
+}
+
 /**
- * Das gemeinsame Kern-Dokument, auf den Stand von `project` gebracht. Der Abgleich läuft über die
- * Differenz zum zuletzt gesehenen Projekt (Referenzvergleich, unveränderte Teile kosten nichts);
- * wechselt ein Aufrufer zwischen sehr verschiedenen Projekten, ist es nur langsamer, nie falsch.
+ * Rechnet `run` auf einem eigenen, kurzlebigen Dokument von `project` (z. B. Export einer gefilterten
+ * Kopie): voll geöffnet, ohne Abgleich; Abfragen auf `project` (`documentFor`) treffen es, solange
+ * `run` läuft (auch über `await`), danach wird es geschlossen. Ist `project` schon offen (Store),
+ * läuft `run` direkt auf jenem Dokument.
+ */
+export function withDocument<T>(project: Project, run: (doc: ProjectDocument) => T): T {
+  const known = lookup(project);
+  if (known) return run(known);
+  const doc = new ProjectDocument(project);
+  if (!doc.id) throw new Error("Projekt-Dokument im Kern konnte nicht geöffnet werden.");
+  scoped.push(doc);
+  const done = () => {
+    scoped.splice(scoped.indexOf(doc), 1);
+    doc.close();
+  };
+  let out: T;
+  try {
+    out = run(doc);
+  } catch (e) {
+    done();
+    throw e;
+  }
+  if (out instanceof Promise) return out.finally(done) as T;
+  done();
+  return out;
+}
+
+/** Ohne Store (Tests, Skripte): Dokument des zuletzt gefragten fremden Projekts, als Ganzes geladen. */
+let detached: ProjectDocument | null = null;
+/** Zähler der Ganz-Ladungen ausserhalb der offenen Dokumente (Messung, Tests: heisser Pfad = 0). */
+let detachedLoads = 0;
+export function detachedLoadCount(): number {
+  return detachedLoads;
+}
+
+const ENV = (import.meta as unknown as { env?: Record<string, unknown> }).env;
+/** Entwicklung und Tests: ein Projekt ohne offenes Dokument neben dem Store ist ein Fehler. */
+const STRICT = !!ENV?.DEV || ENV?.MODE === "test";
+
+/**
+ * Das Kern-Dokument, dessen Leseansicht `project` ist: das des Stores (aktueller Stand), des CLI
+ * oder eines {@link withDocument}. Es gibt keinen versteckten Abgleich mehr ([122]): wer ein
+ * abgewandeltes Projekt abfragen will, öffnet es ausdrücklich ({@link withDocument}) oder gibt der
+ * Kern-Abfrage einen Filter mit (z. B. Fang ohne gezogene Elemente, `holdModelSnap`).
+ *
+ * Ohne Store-Dokument (Unit-Tests, Skripte, Musterhaus-Bau) wird ein fremdes Projekt als Ganzes in
+ * ein eigenes Dokument geladen (kein Abgleich, jede neue Identität = volles Laden). Mit Store-Dokument
+ * ist ein fremdes Projekt ein Fehler: in Entwicklung/Tests wirft es, im Produkt meldet es und lädt.
  */
 export function documentFor(project: Project): ProjectDocument {
-  if (primary && primary.current === project && primary.id) return primary;
-  if (!shared) shared = new ProjectDocument(project);
-  else shared.sync(project);
-  return shared;
+  const known = lookup(project);
+  if (known) return known;
+  if (primary && primary.id) {
+    const msg = "documentFor: Projekt ist weder der Stand des Store-Dokuments noch ausdrücklich geöffnet (withDocument).";
+    if (STRICT) throw new Error(msg);
+    console.error(msg);
+  }
+  if (!detached) {
+    detached = new ProjectDocument(project);
+    detachedLoads++;
+  } else if (detached.current !== project || !detached.id) {
+    detached.load(project);
+    detachedLoads++;
+  }
+  if (!detached.id) throw new Error("Projekt-Dokument im Kern konnte nicht geöffnet werden.");
+  return detached;
 }
 
 /**

@@ -1073,8 +1073,20 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
 - ○ **[120] macOS in CI.** `cargo check --features native2d`, Bildvergleich Metal ↔ WebGPU. · M
 - ○ **[121] App.tsx zerlegen, Neurendern stoppen.** `App.tsx:365` abonniert ganzes Projekt, 0× `memo`;
   Abschnitte in Hooks/Komponenten, Panels lesen den Store selbst; Nebenfenster bekommen Ops statt Projekt. · L
-- ○ **[122] Zweites Kern-Dokument (`documentFor` → `shared`, Differenz-Abgleich) abschaffen.** Fang/Griffe/
-  Export bauen abgewandelte Projekte; stattdessen Ausschluss-Filter an Kern-Abfragen. · M
+- ✅ **[122] Zweites Kern-Dokument (`documentFor` → `shared`, Differenz-Abgleich) abschaffen.** (3.11.) `sync`/
+  Differenz-Abgleich gestrichen; `documentFor` findet nur offene Dokumente über die Leseansicht (Store, CLI,
+  `withDocument`). Abgewandelte Projekte: Fang beim Ziehen (`App.tsx` 3D-Griff, `useGripEditing`) über
+  `excludeIds` → `doc_snap_hold(…, skip)` (Kern-Fang ohne die gezogenen Elemente, eigener Cache-Schlüssel);
+  Export (Auswahl/LV95, Publikation, Legende), Öffnungs-Vorschau, `withStandards`, Stift-Neueinbrennen und
+  Musterhaus-Bau öffnen ausdrücklich ein kurzlebiges Dokument (`withDocument`, danach geschlossen).
+  Fremdes Projekt neben dem Store-Dokument: wirft in Entwicklung/Tests, im Produkt `console.error` + volles
+  Laden; ohne Store (Unit-Tests, Skripte) volles Laden in ein eigenes Dokument (`detachedLoadCount`).
+  Gemessen (Musterhaus komplex, 200 Fang-Bewegungen, Node/vitest): statisch (3D-Griff, Projekt unverändert)
+  27–48 → 11–12 ms; Griff-Zug (je Bewegung Commit + Fang) 252–282 → 343–379 ms: der Modell-Teil des Fangs
+  wird je Stand neu gesammelt (vorher blieb die gefilterte Kopie unverändert und damit veraltet: Schichtgrenzen
+  der Nachbarwände). Schnitt-Plan auf älterem Stand (asynchron) über `withDocument`.
+  Offen: Fang-Sammeln je Element zwischenspeichern (Griff-Zug); nicht in Tauri geprüft; andere Pfade, die im Produkt noch fremde Projekte abfragen, zeigt nur
+  `console.error` (Entwicklung wirft). · M
 - ○ **[123] Doppelte Transformation + alte Werkzeugliste streichen** (`activeTransform` in App, `tools/tools.ts`);
   alles über `CommandEngine`. `commitTransform` (nur Tests) löschen. · M
 - ○ **[124] Kern typisiert.** 152 Funktionen lesen rohes JSON (`grips::field/num_of`); Ops gegen Modell prüfen,

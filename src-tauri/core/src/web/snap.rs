@@ -13,12 +13,17 @@ thread_local! {
     static CACHE: RefCell<SnapCache> = RefCell::new(SnapCache::default());
 }
 
+fn lines(s: &str) -> Vec<String> {
+    if s.is_empty() { Vec::new() } else { s.split('\n').map(str::to_owned).collect() }
+}
+
 /// Kandidaten des Geschosses `level` mit den sichtbaren Ebenen `codes` (durch `\n` getrennt) im
-/// Dokument `h`; Nummer ≥ 1 für [`snap_query`] (0 = Dokument nicht offen).
+/// Dokument `h`, ohne die Elemente mit den ids `skip` (durch `\n` getrennt; gezogene Elemente, [122]);
+/// Nummer ≥ 1 für [`snap_query`] (0 = Dokument nicht offen).
 #[wasm_bindgen]
-pub fn doc_snap_hold(h: u32, level: &str, codes: &str) -> u32 {
-    let codes: Vec<String> = if codes.is_empty() { Vec::new() } else { codes.split('\n').map(str::to_owned).collect() };
-    with_doc(h, |d| CACHE.with(|c| c.borrow_mut().hold(h, d, level, &codes))).unwrap_or(0)
+pub fn doc_snap_hold(h: u32, level: &str, codes: &str, skip: &str) -> u32 {
+    let (codes, skip) = (lines(codes), lines(skip));
+    with_doc(h, |d| CACHE.with(|c| c.borrow_mut().hold_except(h, d, level, &codes, &skip))).unwrap_or(0)
 }
 
 fn push(out: &mut Vec<f64>, c: Option<Cand>) {

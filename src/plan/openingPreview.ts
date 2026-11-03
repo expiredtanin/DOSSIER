@@ -4,7 +4,7 @@
 // gewöhnlichen Kern-Fassaden, als SVG-Text (`planToSvgString`).
 
 import type { DetailLevel, Project } from "../model/types";
-import { documentFor } from "../core/document";
+import { documentFor, withDocument } from "../core/document";
 import { generatePlan } from "./generatePlan";
 import { computeSection, generateSectionPlan } from "./toSection";
 import { generateElevationPlan } from "./toElevation";
@@ -25,6 +25,11 @@ export function openingPreviewProject(project: Project, openingId: string): Proj
 export async function openingPreviewSvgs(project: Project, openingId: string, detail: DetailLevel = "fein", scale = 20): Promise<OpeningPreviewSvgs | null> {
   const mini = openingPreviewProject(project, openingId);
   if (!mini) return null;
+  // Das Vorschau-Projekt ist ein eigenes Projekt: eigenes, kurzlebiges Dokument ([122]).
+  return withDocument(mini, () => previewSvgs(mini, detail, scale));
+}
+
+async function previewSvgs(mini: Project, detail: DetailLevel, scale: number): Promise<OpeningPreviewSvgs> {
   const codes = new Set<string>(["", ...collectCodes(mini)]);
   const opts = { scaleDenominator: scale, marginM: 0.15 };
   const plan = planToSvgString(generatePlan(mini, "preview-floor", codes, undefined, detail, false, false, false, scale), opts);
