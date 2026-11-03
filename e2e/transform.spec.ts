@@ -76,11 +76,11 @@ test("Bewegen, Drehen, Spiegeln über Knopf, getippten Befehl und Taste; Esc/Ent
   await expect(prompt(page)).toHaveText("Befehl:");
   expect(await ends(page)).toEqual([[1, 1, 1, 3]]);
 
-  // Spiegeln über die Taste „s", Kopie (I); Esc nimmt nur den Punkt zurück, der Modus bleibt.
+  // Spiegeln über die Taste „s": Kopie ist Vorgabe (wie AutoCAD/Rhino); Esc nimmt nur den Punkt zurück, der Modus bleibt.
   await blurFocus(page);
   await page.keyboard.press("s");
   await expect(prompt(page)).toHaveText("Erster Punkt der Spiegelachse");
-  await page.keyboard.press("i");
+  await expect(page.locator(".cmdline-option.active")).toHaveText(/Kopie/);
   await expect(page.locator(".cmdline-option.active")).toHaveText(/Kopie/);
   await commandInput(page).focus();
   await typeCommand(page, "0,0");

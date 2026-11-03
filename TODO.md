@@ -1084,7 +1084,7 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   Werkzeug-Liste (Label, Hinweis, gekoppelter Befehl). `commitTransform` gelöscht (Tests über `transformOps`).
   e2e `transform.spec.ts`. Geändert gegenüber vorher: Spiegeln per Knopf/Tippen bewegt jetzt wie per Taste das
   Original (vorher Kopie), getippte Zahl nach dem Drehzentrum gilt als Distanz-Punkt (vorher ignoriert).
-  Offen: ungenutzte i18n-Schlüssel (`cmd.move.base` …, `transform.bar` …) aufräumen; nicht in der Tauri-App geprüft. · M
+  Offen: ungenutzte i18n-Schlüssel (`cmd.move.base` …, `transform.bar` …) aufräumen; nicht in der Tauri-App geprüft. · M 3.11. Nachtrag: Spiegeln mit Vorgabe Kopie (Original bleibt, wie AutoCAD/Rhino; Entscheid Maintainer), U spiegelt das Original.
 - ○ **[124] Kern typisiert.** 152 Funktionen lesen rohes JSON (`grips::field/num_of`); Ops gegen Modell prüfen,
   `cmd_*` auf `&Project`. · L
 - ✅ **[125] Doppelte Schnitt-Dominanz** (`render3d/section_boolean.rs` ↔ `core/plan_section.rs`) auf eine Fassung. · S

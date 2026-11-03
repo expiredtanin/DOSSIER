@@ -125,10 +125,12 @@ describe("Transformations-Befehle", () => {
     engine.move({ x: 1, y: 1 });
     engine.confirm();
     expect(engine.isActive()).toBe(false);
-    const g = lines(log.project)[0];
+    // Vorgabe Kopie (wie AutoCAD/Rhino): Original bleibt, gespiegelte Kopie kommt dazu.
+    const ls = lines(log.project);
+    expect(ls).toHaveLength(2);
+    const g = ls[1];
     expect(g.a.y).toBeCloseTo(2, 9);
     expect(g.b.y).toBeCloseTo(2, 9);
-    expect(lines(log.project)).toHaveLength(1);
   });
 
   it("Esc-Esc schnell bricht ab, nichts committet", () => {

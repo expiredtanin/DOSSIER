@@ -136,7 +136,8 @@ export function makeTransformCommand(op: TransformCmdOp, labelKey: TranslationKe
         value: (m.id === "array" || m.id === "distribute") && s.sticky.copyMode === m.id ? `×${s.sticky.count}` : undefined,
       }));
     },
-    init: () => stateOf([], null, { copyMode: "move", count: 1 }),
+    // Spiegeln behält das Original (Kopie) wie AutoCAD/Rhino; mit U wird das Original gespiegelt.
+    init: () => stateOf([], null, { copyMode: op === "mirror" ? "copy" : "move", count: 1 }),
     onInput: input,
     onMove: (state, point, _snap, ctx) => {
       const s = state as TrState;
