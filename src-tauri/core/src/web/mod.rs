@@ -33,6 +33,7 @@ mod plan_print_svg;
 mod layers;
 mod pens;
 mod layout_model;
+mod clash_broad;
 mod parametric_walls;
 mod reorder;
 mod text_layout;

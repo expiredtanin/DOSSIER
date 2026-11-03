@@ -95,6 +95,7 @@ pub mod levels;
 pub mod pens;
 pub mod folder_tree;
 pub mod layout_model;
+pub mod clash_broad;
 pub mod sheet_viewports;
 pub mod parametric_walls;
 pub mod geo_translate;

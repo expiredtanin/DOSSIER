@@ -191,6 +191,102 @@ pub fn void_cuts(p: &Project, walls: &[RWall], slabs: &[RSlab]) -> VoidCuts {
     out
 }
 
+/// Alle Bauteile des Projekts als B-Rep-Spezifikationen für den STEP-Export (früher `projectSolidSpecs` in
+/// `export/exportStep.ts`): Wände (je Materiallage) und Decken samt „Bauteil − Abzugskörper", Dachflächen als
+/// Platten der Gesamt-Schichtdicke, Extrusionskörper (ohne Abzugskörper). `fallbacks`: (Index in `specs`,
+/// Bauteil ohne Abzug) — scheitert truck am Boolean, exportiert TS das Bauteil ungeschnitten.
+#[derive(serde::Serialize, Default, Debug)]
+pub struct ProjectSpecs {
+    pub specs: Vec<Value>,
+    pub fallbacks: Vec<(usize, Value)>,
+}
+
+type V3 = [f64; 3];
+fn sub3(a: V3, b: V3) -> V3 {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn dot3(a: V3, b: V3) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+fn cross3(a: V3, b: V3) -> V3 {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+/// Platte einer ebenen Dachfläche (`pts` ≥ 3 Ecken) der Dicke `total` nach unten; `None` bei entarteter Fläche.
+fn roof_plane_spec(p: &[V3], total: f64) -> Option<Value> {
+    if p.len() < 3 {
+        return None;
+    }
+    let (e1, e2) = (sub3(p[1], p[0]), sub3(p[2], p[0]));
+    let mut n = cross3(e1, e2);
+    let nl = crate::jsmath::hypot(&n);
+    if nl < EPS {
+        return None;
+    }
+    n = [n[0] / nl, n[1] / nl, n[2] / nl];
+    if n[2] < 0.0 {
+        n = [-n[0], -n[1], -n[2]]; // Normale nach oben
+    }
+    let el = crate::jsmath::hypot(&e1);
+    let u = [e1[0] / el, e1[1] / el, e1[2] / el];
+    let v = cross3(n, u); // u × v = n
+    let pts: Vec<f64> = p
+        .iter()
+        .flat_map(|q| {
+            let d = sub3(*q, p[0]);
+            [dot3(d, u), dot3(d, v)]
+        })
+        .collect();
+    Some(json!({"kind": "extrudePlane", "points": pts, "origin": p[0], "uAxis": u, "vAxis": v, "depth": -total}))
+}
+
+pub fn project_solid_specs(p: &Project) -> Result<ProjectSpecs, String> {
+    let mut out = ProjectSpecs::default();
+    // Detail „fein", geschichtete Wände.
+    let parts = crate::model3d::parts(p, true, 2.0, false)?;
+    let cuts = void_cuts(p, &parts.walls, &parts.slabs);
+    let wall_cut: std::collections::HashMap<usize, Value> = cuts.walls.into_iter().collect();
+    let slab_cut: std::collections::HashMap<usize, Value> = cuts.slabs.into_iter().collect();
+    let push = |out: &mut ProjectSpecs, base: Value, cut: Option<&Value>| match cut {
+        Some(c) => {
+            out.fallbacks.push((out.specs.len(), base));
+            out.specs.push(c.clone());
+        }
+        None => out.specs.push(base),
+    };
+    for (i, w) in parts.walls.iter().enumerate() {
+        if let Some(s) = wall_spec(&WallIn::of(w)) {
+            push(&mut out, s, wall_cut.get(&i));
+        }
+    }
+    for (i, s) in parts.slabs.iter().enumerate() {
+        if s.outline.len() < 3 || s.z_top - s.z_bottom < MIN_THICKNESS {
+            continue;
+        }
+        let pts: Vec<f64> = s.outline.iter().flat_map(|q| [q[0], q[1]]).collect();
+        push(&mut out, json!({"kind": "extrude", "points": pts, "height": s.z_top - s.z_bottom, "z0": s.z_bottom}), slab_cut.get(&i));
+    }
+    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+        let total: f64 = p.roof_layers(roof).iter().map(|l| max(0.0, l.thickness)).sum();
+        if total < MIN_THICKNESS {
+            continue;
+        }
+        let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+        out.specs.extend(g.planes.iter().filter_map(|pl| roof_plane_spec(pl, total)));
+    }
+    for solid in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        if solid.operation.as_deref() == Some("subtract") {
+            continue; // Abzugskörper sind kein Material
+        }
+        let base_z = if solid.level_id.is_empty() { 0.0 } else { p.floor(&solid.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0)) };
+        let v = serde_json::to_value(solid).map_err(|e| e.to_string())?;
+        if let Some(spec) = crate::cmd_solid::extruded_solid_spec(&v, base_z) {
+            out.specs.push(spec);
+        }
+    }
+    Ok(out)
+}
+
 /// Flache Wand für die Bindung: `[sx, sy, ex, ey, Dicke, Höhe, UK, (von, bis, UK, OK) × n]`.
 pub fn wall_spec_flat(f: &[f64]) -> String {
     if f.len() < 7 || (f.len() - 7) % 4 != 0 {
@@ -248,5 +344,57 @@ mod tests {
             assert_eq!(spec["kind"], "boolean");
             assert_eq!(spec["b"]["z0"], json!(p.floor("eg").and_then(|f| f.base_elevation).unwrap_or(0.0) + 1.0));
         }
+    }
+
+    fn sample() -> Value {
+        serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap()
+    }
+
+    #[test]
+    fn projekt_specs_wand_decke_dach_koerper() {
+        let mut v = sample();
+        v["extrudedSolids"] = json!([
+            {"id": "k1", "type": "extrudedSolid", "levelId": "eg", "height": 1.0,
+             "points": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 0.0, "y": 1.0}]},
+            {"id": "k2", "type": "extrudedSolid", "levelId": "eg", "operation": "subtract", "height": 1.0,
+             "points": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 0.0, "y": 1.0}]}
+        ]);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let r = project_solid_specs(&p).unwrap();
+        let n_plane = r.specs.iter().filter(|s| s["kind"] == "extrudePlane").count();
+        let n_extrude = r.specs.iter().filter(|s| s["kind"] == "extrude").count();
+        assert!(n_plane > 10, "Wandlagen + Dachflächen: {n_plane}");
+        assert!(n_extrude > 1, "Decken + Körper");
+        // Rückfall nur dort, wo der Entwurf einen Abzug trifft (Boolean-Spezifikation an dieser Stelle).
+        assert!(r.fallbacks.iter().all(|(i, _)| r.specs[*i]["kind"] == "boolean"));
+        // Nur der additive Körper (k1) kommt dazu, der Abzugskörper (k2) nicht.
+        let base: Project = serde_json::from_value(sample()).unwrap();
+        let n0 = project_solid_specs(&base).unwrap().specs.len();
+        assert_eq!(r.specs.len(), n0 + 1);
+    }
+
+    #[test]
+    fn projekt_specs_abzug_gibt_rueckfall_ohne_schnitt() {
+        let mut v = sample();
+        v["extrudedSolids"] = json!([{"id": "v1", "type": "extrudedSolid", "levelId": "eg", "operation": "subtract", "height": 1.0, "baseOffset": 1.0,
+            "points": [{"x": -100.0, "y": -100.0}, {"x": 100.0, "y": -100.0}, {"x": 100.0, "y": 100.0}, {"x": -100.0, "y": 100.0}]}]);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let r = project_solid_specs(&p).unwrap();
+        assert!(!r.fallbacks.is_empty());
+        for (i, base) in &r.fallbacks {
+            assert_eq!(r.specs[*i]["kind"], "boolean");
+            assert_ne!(base["kind"], "boolean");
+        }
+    }
+
+    #[test]
+    fn dachflaeche_entartet_gibt_keine_platte() {
+        let line: Vec<V3> = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+        assert!(roof_plane_spec(&line, 0.2).is_none());
+        assert!(roof_plane_spec(&line[..2], 0.2).is_none());
+        let tri: Vec<V3> = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let s = roof_plane_spec(&tri, 0.2).unwrap();
+        assert_eq!(s["depth"], json!(-0.2));
+        assert_eq!(s["vAxis"], json!([0.0, 1.0, 0.0]));
     }
 }

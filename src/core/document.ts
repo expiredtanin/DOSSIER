@@ -93,6 +93,7 @@ export type QueryName =
   | "scheduleCsv"
   | "pickGeometry"
   | "model3dParts"
+  | "projectSolidSpecs"
   | "planDomains"
   | "ifcExportData"
   | "meshExportData"

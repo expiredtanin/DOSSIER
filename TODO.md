@@ -1103,8 +1103,14 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
 - ○ **[126] `jsnum`/`jsmath` ersetzen** (libm, deterministisch über Plattformen); `plan_*.rs`-Paare nach `plan/`
   zusammenführen. · M
 - ○ **[127] 3D-Booleans klären:** BSP in `fileio/csg.rs` stilllegen, Manifold vs. truck dokumentieren. · S
-- ○ **[128] Restlogik nach Rust:** Griffe (`useGripEditing.ts`), `layoutModel.ts`, Kollisions-Vorprüfung,
+- ◐ **[128] Restlogik nach Rust:** Griffe (`useGripEditing.ts`), `layoutModel.ts`, Kollisions-Vorprüfung,
   `exportStep.projectSolidSpecs`. · L
+  3.11. Erledigt: Kollisions-Vorstufe (`clash_broad.rs`, Hüllquader-Paare als flacher Puffer; Feinprüfung bleibt in
+  trucksolid) und `projectSolidSpecs` (`solid_specs::project_solid_specs`, Abfrage `projectSolidSpecs`: Wände, Decken
+  samt Abzug, Dachplatten, Körper + Rückfall-Liste; TS nur noch Fassade). `layoutModel.ts`: Rechnung (Blattgrössen,
+  Bäume, Löschen, Nachfahren, Ordner-PDF, Titelblock) lag schon im Kern ([K4] S3); der Rest sind Fabriken und
+  Listen-`map`/`filter` ohne Logik — bewusst in TS gelassen. **Offen: Griffe** (`useGripEditing.ts`, anderer Agent).
+  Geprüft: cargo test (Kern), vitest; nicht in der Tauri-App.
 - ✅ **[129] Grenze schärfen.** (3.11.) `i18n/translate.ts` (React-frei: `t`, Sprache, Wörterbücher), `i18n/index.ts` re-exportiert
   und hält nur `useT`; Kern-Dateien importieren `i18n/translate`. `net/` in `CORE_DIRS`, neuer Test prüft transitive
   relative Importe (Ausnahmelisten leer). · S
