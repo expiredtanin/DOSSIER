@@ -61,7 +61,7 @@ jobs:
           npm run build:render-png
           mkdir -p smoke
           node dist-cli/dossier-cli.mjs :beispiel model3d --out smoke/m.json
-          src-tauri/render3d/target/release/render_png smoke/m.json smoke/iso.png --view iso --style shaded-edges
+          src-tauri/target/release/render_png smoke/m.json smoke/iso.png --view iso --style shaded-edges
           test "$(wc -c < smoke/iso.png)" -gt 5000
       - uses: actions/upload-artifact@v4
         if: always()
