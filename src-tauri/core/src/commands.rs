@@ -5,6 +5,7 @@
 //! (Verschieben/Drehen/Spiegeln/Skalieren/Reihe, Ausrichten/Verteilen, Block definieren).
 
 use crate::grips::{result_json, GripResult};
+use crate::model::Project;
 use crate::ops::Op;
 use serde_json::{Map, Value};
 
@@ -12,14 +13,15 @@ fn parse<T: serde::de::DeserializeOwned>(v: &Value, what: &str) -> Result<T, Str
     serde_json::from_value(v.clone()).map_err(|e| format!("{what}: {e}"))
 }
 
-/// Ops eines Befehls (`text` = JSON `{cmd, …}`, Zahlen dürfen Nicht-endlich-Marken sein).
-pub fn ops(root: &Map<String, Value>, text: &str) -> Result<Vec<Op>, String> {
+/// Ops eines Befehls (`text` = JSON `{cmd, …}`, Zahlen dürfen Nicht-endlich-Marken sein). `p` = typisierte
+/// Sicht derselben Wurzel (Lesen, [124]); geänderte Elemente entstehen verlustfrei aus `root`.
+pub fn ops(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Vec<Op>, String> {
     let v: Value = serde_json::from_str(text).map_err(|e| format!("cmdOps: {e}"))?;
     // Zeichnen in einer betretenen Gruppe: neue Elemente werden ihr Mitglied (`cmd_create::group_ops`).
     if let Some(group) = v.get("group").and_then(Value::as_str) {
         let mut inner = v.clone();
         inner.as_object_mut().map(|m| m.remove("group"));
-        let mut out = ops(root, &inner.to_string())?;
+        let mut out = ops(root, p, &inner.to_string())?;
         let extra = crate::cmd_create::group_ops(root, &out, group);
         out.extend(extra);
         return Ok(out);
@@ -30,7 +32,7 @@ pub fn ops(root: &Map<String, Value>, text: &str) -> Result<Vec<Op>, String> {
     if let Some(ops) = crate::cmd_edit::ops(root, &v) {
         return Ok(ops);
     }
-    if let Some(ops) = crate::cmd_create::ops(root, &v) {
+    if let Some(ops) = crate::cmd_create::ops(root, p, &v) {
         return Ok(ops);
     }
     Ok(match cmd {
@@ -46,8 +48,8 @@ pub fn ops(root: &Map<String, Value>, text: &str) -> Result<Vec<Op>, String> {
 }
 
 /// Wie [`ops`], als Antwort-JSON `{"ops": […]}` (Zahlen mit Nicht-endlich-Marken).
-pub fn ops_json(root: &Map<String, Value>, text: &str) -> Result<String, String> {
-    Ok(result_json(&GripResult { ops: ops(root, text)?, notice: None }))
+pub fn ops_json(root: &Map<String, Value>, p: &Project, text: &str) -> Result<String, String> {
+    Ok(result_json(&GripResult { ops: ops(root, p, text)?, notice: None }))
 }
 
 /// Schneller Hasher für id-Mengen der Befehle (FNV-1a; je Mausschritt werden Tausende ids geprüft,

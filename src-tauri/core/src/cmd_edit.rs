@@ -13,7 +13,7 @@
 
 use crate::cmd_transform::{IdGen, Shapes};
 use crate::cmd_wall_edit as wall_edit;
-use crate::grips::{arr, field, js_num, num_of, num_or, pt, truthy, with, with_all, xy};
+use crate::json_util::{arr, field, js_num, num_of, num_or, pt, truthy, with, with_all, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::ops::{id_of, Op};

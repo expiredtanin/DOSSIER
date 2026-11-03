@@ -1,5 +1,6 @@
 //! Projekt-Dokument ([K4], Stufen S1/S3): Rust hält das Projekt als JSON-Baum, wendet Op-Folgen
-//! (`ops.rs`) atomar an, prüft sie (NaN, neue doppelte ids → Rücknahme mit Meldungen) und führt den
+//! (`ops.rs`) atomar an, prüft sie (NaN, neue doppelte ids, Werte gegen das typisierte Modell
+//! `model::check` → Rücknahme mit Meldungen) und führt den
 //! Undo/Redo-Verlauf als inverse Ops. Die Ableitungen (Kennzahlen, 3D, Export …) lesen die
 //! typisierte Sicht [`Document::project`].
 //!
@@ -13,6 +14,16 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+
+/// Nicht-endlich-Marken in den Werten einer Op durch `null` ersetzen (Speicherform, s. `ops.rs`).
+fn sanitize_op(op: &mut Op) {
+    match op {
+        Op::Add { items, .. } => items.iter_mut().for_each(crate::ops::sanitize_non_finite),
+        Op::Replace { entity, .. } => crate::ops::sanitize_non_finite(entity),
+        Op::SetField { value: Some(v), .. } => crate::ops::sanitize_non_finite(v),
+        _ => {}
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Document {
@@ -339,6 +350,14 @@ impl Document {
         Ok(self.typed.as_ref().expect("gerade gesetzt"))
     }
 
+    /// Typisierte Sicht und die Wurzel samt Positions-Index (getrennte Ausleihen): Befehle lesen das Projekt
+    /// typisiert und bauen geänderte Elemente verlustfrei aus dem rohen Baum ([124]).
+    pub fn project_lookup(&mut self) -> Result<(&Project, Lookup<'_>), String> {
+        self.project()?;
+        let p = self.typed.as_ref().expect("gerade gelesen");
+        Ok((p, Lookup { root: &self.root, pos: Some(&self.pos) }))
+    }
+
     /// Die Projekt-Wurzel als JSON (für Abfragen, die auf dem rohen Baum rechnen, s. `queries::run_root`).
     pub fn root(&self) -> &Map<String, Value> {
         &self.root
@@ -588,7 +607,7 @@ impl Document {
     }
 
     /// Wendet `ops` atomar an und prüft sie (`ops::validate`, Werte vor dem Anwenden, neue doppelte ids
-    /// danach — die Ops gehen ohne Kopie ins Dokument über). Verstösse → `Err(Meldungen)`, Dokument
+    /// danach — die Ops gehen ohne Kopie ins Dokument über; neue Werte gegen das typisierte Modell, [124]). Verstösse → `Err(Meldungen)`, Dokument
     /// unverändert. Ok → inverse Ops. `sanitize`: die Ops können Nicht-endlich-Marken enthalten
     /// (s. `ops.rs`).
     fn apply_checked(&mut self, ops: Vec<Op>, sanitize: bool) -> Result<Vec<Op>, Vec<String>> {
@@ -606,9 +625,17 @@ impl Document {
         // Je Op: Feld, ob `replace`, ob `add`, Befunde der Werte.
         let mut info: Vec<(String, bool, bool, Vec<String>)> = Vec::with_capacity(n);
         let mut pos = self.pos.take();
-        for op in ops {
+        for mut op in ops {
             let mut found = Vec::new();
             crate::ops::value_problems(&op, &had, &mut found);
+            if found.is_empty() {
+                if sanitize {
+                    // Tiefer liegende Nicht-endlich-Marken als null (Speicherform), vor der Modell-Prüfung:
+                    // ein optionales Feld nimmt null an, ein Pflichtfeld weist es zurück.
+                    sanitize_op(&mut op);
+                }
+                self.type_problems(&mut op, &mut found);
+            }
             info.push((op.key().to_owned(), matches!(op, Op::Replace { .. }), matches!(op, Op::Add { .. }), found));
             let (inv, hit) = self.apply_recorded(op, &mut pos);
             inverses.push(inv);
@@ -634,20 +661,30 @@ impl Document {
             return Err(problems);
         }
         *self.pos.get_mut() = pos;
-        if sanitize {
-            // Angenommene Nicht-endlich-Marken (zu tief für die Prüfung) als null speichern.
-            let keys: HashSet<&str> = info.iter().map(|i| i.0.as_str()).collect();
-            for k in keys {
-                if let Some(v) = self.root.get_mut(k) {
-                    crate::ops::sanitize_non_finite(v);
-                }
-            }
-        }
         for ((key, replace, _, _), hit) in info.into_iter().zip(&hits) {
             self.mark_dirty(key, replace, *hit);
         }
         self.last_hits = hits;
         Ok(inverses.into_iter().rev().flatten().collect())
+    }
+
+    /// Prüft die neuen Werte einer Op gegen das typisierte Modell ([124], `model::check`): eingefügte und
+    /// ersetzte Elemente, gesetzte Felder. Ein Element, das schon vorher nicht passte (Alt-Datei), darf
+    /// seine alten Fehler behalten, aber keine neuen dazubekommen.
+    fn type_problems(&self, op: &mut Op, out: &mut Vec<String>) {
+        use crate::model::check::{check_items, check_set_field};
+        match op {
+            Op::Add { collection, items, .. } => out.extend(check_items(collection, items, &|_| None)),
+            Op::Replace { collection, entity } => {
+                let list = self.root.get(collection.as_str()).and_then(Value::as_array);
+                let old = |id: &str| list.and_then(|l| l.iter().find(|e| id_of(e) == Some(id)));
+                let mut one = vec![std::mem::take(entity)];
+                out.extend(check_items(collection, &mut one, &old));
+                *entity = one.pop().unwrap_or_default();
+            }
+            Op::SetField { key, value, .. } => out.extend(check_set_field(key, value.as_ref(), self.root.get(key.as_str()))),
+            Op::Remove { .. } | Op::Reorder { .. } => {}
+        }
     }
 
     /// Wendet `ops` atomar an, ohne Verlauf (Abgleich des Spiegels). Verstösse (NaN, neue
@@ -1111,6 +1148,77 @@ mod tests {
         assert_eq!(d.field("walls").unwrap()[0]["p"]["q"]["r"]["s"]["t"], Value::Null);
     }
 
+    /// [124]: neue Werte müssen zum typisierten Modell passen; die ganze Folge wird zurückgenommen.
+    #[test]
+    fn falsch_typisierte_ops_abgelehnt() {
+        let mut d = Document::from_json(
+            r#"{"id":"p","name":"x","walls":[{"id":"w1","height":2.5}],"drawings2d":[{"id":"d1","levelId":"eg","geom":{"shape":"line","a":{"x":0,"y":0},"b":{"x":1,"y":0}}}]}"#,
+        )
+        .unwrap();
+        let start = d.to_json();
+        let reject = |d: &mut Document, v: Value, needle: &[&str]| {
+            let p = d.commit(ops(v), None, 0.0, true).unwrap_err();
+            let text = p.join(" | ");
+            for n in needle {
+                assert!(text.contains(n), "„{n}\" fehlt in: {text}");
+            }
+        };
+        // Falscher Typ (Text statt Zahl) — die gültige Op davor wird mit zurückgenommen.
+        reject(
+            &mut d,
+            json!([{"kind":"setField","key":"name","value":"neu"},{"kind":"replace","collection":"walls","entity":{"id":"w1","height":"hoch"}}]),
+            &["walls", "w1", "height", "invalid type"],
+        );
+        // Unbekannte Variante eines Enums ohne Rückfall.
+        reject(
+            &mut d,
+            json!([{"kind":"add","collection":"drawings2d","items":[{"id":"d2","levelId":"eg","geom":{"shape":"klecks"}}]}]),
+            &["drawings2d", "d2", "geom", "unknown variant"],
+        );
+        // NaN: flach (bisherige Meldung) und tief (Marke als null → Pflichtfeld fehlt).
+        reject(&mut d, json!([{"kind":"replace","collection":"walls","entity":{"id":"w1","height":"\u{1}NaN"}}]), &["NaN ist nicht endlich"]);
+        reject(
+            &mut d,
+            json!([{"kind":"add","collection":"blockDefs","items":[{"id":"b1","name":"B","geom2d":[{"shape":"polyline","closed":false,"pts":[{"x":0,"y":0},{"x":"\u{1}NaN","y":0}]}]}]}]),
+            &["b1", "geom2d[0]", "null"],
+        );
+        // Feld: falscher Typ, Liste mit kaputtem Element.
+        reject(&mut d, json!([{"kind":"setField","key":"parcelArea","value":"gross"}]), &["parcelArea"]);
+        reject(&mut d, json!([{"kind":"setField","key":"walls","value":[{"id":"w1"},{"id":"w9","start":7}]}]), &["w9", "start"]);
+        assert_eq!(d.to_json(), start, "Dokument unverändert");
+        assert_eq!(d.history().undo_depth(), 0, "kein Schritt");
+        // Gültige Ops werden angenommen (auch Felder ausserhalb des Modells und null = Feld fehlt).
+        d.commit(
+            ops(json!([
+                {"kind":"replace","collection":"walls","entity":{"id":"w1","height":3}},
+                {"kind":"add","collection":"drawings2d","items":[{"id":"d2","levelId":"eg","geom":{"shape":"circle","center":{"x":0,"y":0},"r":1}}]},
+                {"kind":"setField","key":"parcelArea","value":500},
+                {"kind":"setField","key":"siteRules","value":null},
+                {"kind":"setField","key":"eigenesFeld","value":{"x":"y"}},
+                {"kind":"add","collection":"eigeneListe","items":[{"id":"e","a":[1,"b"]}]}
+            ])),
+            None,
+            0.0,
+            false,
+        )
+        .unwrap();
+        assert_eq!(d.field("walls").unwrap()[0]["height"], json!(3));
+    }
+
+    /// [124]: Alt-Dateien laden tolerant; ein Element mit Alt-Fehler bleibt änderbar, neue Fehler nicht.
+    #[test]
+    fn alt_fehler_bleiben_aenderbar() {
+        let mut d = Document::from_json(r#"{"id":"p","walls":[{"id":"w1","height":null,"start":{"x":0,"y":0}}],"parcelArea":"alt"}"#).unwrap();
+        assert_eq!(d.project().unwrap().walls[0].height, 0.0, "tolerant geladen");
+        d.commit(ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"w1","height":null,"start":{"x":1,"y":0}}}])), None, 0.0, false).unwrap();
+        assert_eq!(d.project().unwrap().walls[0].start.x, 1.0);
+        let p = d.commit(ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"w1","height":null,"start":{"x":"a","y":0}}}])), None, 1e4, false).unwrap_err();
+        assert!(p[0].contains("start.x"), "{p:?}");
+        // Feld mit Alt-Fehler: derselbe Fehler bleibt erlaubt, ein gültiger Wert sowieso.
+        d.commit(ops(json!([{"kind":"setField","key":"parcelArea","value":"immer noch alt"}])), None, 2e4, false).unwrap();
+        d.commit(ops(json!([{"kind":"setField","key":"parcelArea","value":12}])), None, 3e4, false).unwrap();
+    }
+
     #[test]
     fn feld_reihenfolge_bleibt_beim_undo() {
         let mut d = doc();
@@ -1236,6 +1344,62 @@ mod big_steps {
         assert!(!d.undo_with(|_| panic!("leer")));
         assert!(d.redo_with(|_| ()) && d.redo_with(|_| ()));
         assert_eq!(d.to_json(), r#"{"id":"p","walls":[{"id":"a","x":2},{"id":"d"}]}"#);
+    }
+
+    /// Messung ([124]): 1000 kleine Änderungen (Wand-Höhe, Öffnung, Zeichnung, Feld) auf dem Musterhaus
+    /// komplex. Datei: `MK_OUT=<pfad> npx vitest run src/model/sampleProjectComplex.test.ts`, dann
+    /// `DOSSIER_COMPLEX=<pfad> cargo test --release -- --ignored --nocapture tausend_kleine`.
+    #[test]
+    #[ignore]
+    fn tausend_kleine_aenderungen_musterhaus() {
+        let Ok(path) = std::env::var("DOSSIER_COMPLEX") else { return };
+        let mut d = Document::default();
+        d.load_file(&std::fs::read_to_string(path).unwrap(), 0.0).unwrap();
+        d.project().unwrap();
+        let pick = |d: &Document, c: &str, k: usize| {
+            let l = d.field(c).and_then(Value::as_array).unwrap();
+            l[k % l.len()].clone()
+        };
+        let n = 1000;
+        let (mut commit, mut typed, mut check) = (0.0, 0.0, 0.0);
+        for i in 0..n {
+            let op = match i % 4 {
+                0 => {
+                    let mut w = pick(&d, "walls", i);
+                    w["height"] = json!(2.5 + (i % 7) as f64 * 0.01);
+                    Op::Replace { collection: "walls".into(), entity: w }
+                }
+                1 => {
+                    let mut o = pick(&d, "openings", i);
+                    o["sillHeight"] = json!(0.8 + (i % 5) as f64 * 0.01);
+                    Op::Replace { collection: "openings".into(), entity: o }
+                }
+                2 => {
+                    let mut g = pick(&d, "drawings2d", i);
+                    g["categoryCode"] = json!(if i % 8 == 2 { "20" } else { "80" });
+                    Op::Replace { collection: "drawings2d".into(), entity: g }
+                }
+                _ => Op::SetField { key: "parcelArea".into(), value: Some(json!(1500 + i)), at: None },
+            };
+            let mut probe = op.clone();
+            let t = std::time::Instant::now();
+            let mut found = Vec::new();
+            d.type_problems(&mut probe, &mut found);
+            check += t.elapsed().as_secs_f64();
+            assert!(found.is_empty(), "{found:?}");
+            let t = std::time::Instant::now();
+            d.commit(vec![op], None, i as f64 * 1000.0, false).unwrap();
+            commit += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            d.project().unwrap();
+            typed += t.elapsed().as_secs_f64();
+        }
+        eprintln!(
+            "Musterhaus komplex, {n} Änderungen: commit {:.1} µs/Schritt (davon Modell-Prüfung {:.1} µs), typisierte Sicht {:.1} µs/Schritt",
+            commit * 1e6 / n as f64,
+            check * 1e6 / n as f64,
+            typed * 1e6 / n as f64
+        );
     }
 
     /// Messung (nativ): grosser Import (150 000 Zeichnungen) committen, Undo, Redo. `cargo test --release -- --ignored`.

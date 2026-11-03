@@ -19,7 +19,12 @@ fn run(h: u32, req: &Req, pts: &[f64]) -> Vec<f64> {
     if pts.len() % 2 != 0 {
         return Vec::new();
     }
-    with_doc(h, |d| crate::cmd_create::preview_req(d.root(), req, pts).flat()).unwrap_or_default()
+    with_doc(h, |d| {
+        let (p, lk) = d.project_lookup().ok()?;
+        Some(crate::cmd_create::preview_req(lk.root, p, req, pts).flat())
+    })
+    .flatten()
+    .unwrap_or_default()
 }
 
 /// Vorschau eines Zeichenbefehls auf dem Dokument `h`: `[ok, nInfo, info…, Formen…]` (Formen wie

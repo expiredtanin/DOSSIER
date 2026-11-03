@@ -13,7 +13,11 @@ pub fn doc_cmd_commit(h: u32, req_json: &str, key: &str, now_ms: f64) -> String 
     let key = (!key.is_empty()).then_some(key);
     let now = if now_ms.is_finite() { now_ms } else { 0.0 };
     let out = with_doc(h, |d| -> Result<String, String> {
-        let res = crate::grips::GripResult { ops: crate::commands::ops(d.root(), req_json)?, notice: None };
+        let ops = {
+            let (p, lk) = d.project_lookup()?;
+            crate::commands::ops(lk.root, p, req_json)?
+        };
+        let res = crate::grips::GripResult { ops, notice: None };
         let text = crate::grips::result_json(&res);
         if res.ops.is_empty() {
             return Ok(text);

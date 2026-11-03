@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 type Tree = Vec<Value>;
 
-use crate::grips::truthy;
+use crate::json_util::truthy;
 
 fn code_of(c: &Value) -> Option<&str> {
     c.get("code").and_then(Value::as_str)

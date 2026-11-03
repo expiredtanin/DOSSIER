@@ -657,7 +657,7 @@ fn refs_of(g: &Value) -> Option<Vec<Option<DimRef>>> {
 }
 
 fn pv(p: P) -> Value {
-    crate::grips::pt(p.0, p.1)
+    crate::json_util::pt(p.0, p.1)
 }
 
 fn with(v: &Value, key: &str, x: Value) -> Value {
@@ -1062,14 +1062,14 @@ mod tests {
     fn befehl_bemassung_haengt_gefangene_punkte_an() {
         let r = project();
         let req = json!({"cmd": "dimension", "pts": [[0, -2], [2, -2], [5, -2]], "snaps": [[0, -0.15], [2, -0.15]], "offset": -0.5, "ctx": {"level": "eg"}, "stamp": "s"});
-        let ops = crate::commands::ops(&r, &req.to_string()).unwrap();
+        let ops = crate::commands::ops(&r, &crate::model::lenient::typed_for_test(&r), &req.to_string()).unwrap();
         let Op::Add { items, .. } = &ops[0] else { panic!("{ops:?}") };
         let refs = &items[0]["geom"]["refs"];
         assert_eq!(refs[0]["feature"], json!("wall"));
         assert_eq!(refs[1]["feature"], json!("opening"));
         assert_eq!(refs[2], Value::Null);
         // Aussenbemassung: Ketten hängen an Ecken und Leibungen.
-        let ops = crate::commands::ops(&r, &json!({"cmd": "autodim", "ctx": {"level": "eg"}, "stamp": "s"}).to_string()).unwrap();
+        let ops = crate::commands::ops(&r, &crate::model::lenient::typed_for_test(&r), &json!({"cmd": "autodim", "ctx": {"level": "eg"}, "stamp": "s"}).to_string()).unwrap();
         let n_refs: usize = ops
             .iter()
             .filter_map(|o| if let Op::Add { items, .. } = o { Some(items) } else { None })

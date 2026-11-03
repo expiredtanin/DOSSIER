@@ -10,9 +10,9 @@
 //! dasselbe wie `a·x + b·y + e`).
 //!
 //! Rechnung auf der rohen Projekt-Wurzel (verlustfrei, Schlüsselreihenfolge wie das Objekt-Spreizen in
-//! TS); Zahlen wie in JS (`jsnum`, `jsmath`), nicht endliche Ergebnisse als Marken (`grips::js_num`).
+//! TS); Zahlen wie in JS (`jsnum`, `jsmath`), nicht endliche Ergebnisse als Marken (`json_util::js_num`).
 
-use crate::grips::{arr, field, js_num, num_of, num_or, pt, truthy, with, with_all, with_opt, xy, N};
+use crate::json_util::{arr, field, js_num, num_of, num_or, pt, truthy, with, with_all, with_opt, xy, N};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::ops::{id_of, Op};

@@ -21,7 +21,7 @@
 //! Geschosses, 2D-Linien/-Polylinien (mit Bögen)/-Rechtecke/-Kreise/-Bögen und Achsraster der Ebene.
 
 use crate::cmd_transform::{IdGen, Shapes};
-use crate::grips::{arr, field, js_num, num_of, pt, truthy, with, with_all, xy};
+use crate::json_util::{arr, field, js_num, num_of, pt, truthy, with, with_all, xy};
 use crate::joins::Line;
 use crate::model::{DimFeature, DimRef};
 use crate::ops::{id_of, Op};

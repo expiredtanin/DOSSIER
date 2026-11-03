@@ -16,9 +16,10 @@
 //! Elemente mit der Schlüsselreihenfolge der früheren Objekt-Literale.
 
 use crate::cmd_transform::{IdGen, Shapes};
-use crate::grips::{arr, field, js_num, num_of, pt, truthy, xy};
+use crate::json_util::{arr, field, js_num, num_of, pt, truthy, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
+use crate::model::{LayerCategory, Project};
 use crate::ops::{id_of, Op};
 use kernel2d::{self as k, Vec2 as P};
 use serde_json::{json, Map, Value};
@@ -226,35 +227,38 @@ pub(crate) fn point_segment_distance(p: V, a: V, b: V) -> f64 {
 
 // ── Projekt lesen ────────────────────────────────────────────────────────────
 
-/// Gibt es die Kategorie `code` irgendwo im Ebenen-Baum (`layers`, rekursiv über `children`)?
-pub(crate) fn has_category(root: &Map<String, Value>, code: &str) -> bool {
-    fn walk(list: &[Value], code: &str) -> bool {
-        list.iter().any(|c| field(c, "code").and_then(Value::as_str) == Some(code) || walk(arr(field(c, "children")), code))
+// Lesen über die typisierte Sicht (`&Project`, [124]): Muster für die weiteren Befehle. Neue Elemente
+// entstehen weiter als JSON (Schlüsselreihenfolge der früheren Objekt-Literale).
+
+/// Erste Kategorie `code` im Ebenen-Baum (Tiefensuche über `children`, wie `flat.find`).
+fn find_category<'a>(list: &'a [LayerCategory], code: &str) -> Option<&'a LayerCategory> {
+    for c in list {
+        if c.code == code {
+            return Some(c);
+        }
+        if let Some(f) = c.children.as_deref().and_then(|ch| find_category(ch, code)) {
+            return Some(f);
+        }
     }
-    walk(arr(root.get("layers")), code)
+    None
+}
+
+/// Gibt es die Kategorie `code` irgendwo im Ebenen-Baum (`layers`, rekursiv über `children`)?
+pub(crate) fn has_category(p: &Project, code: &str) -> bool {
+    find_category(&p.layers, code).is_some()
 }
 
 /// Kategorie `code`, falls vorhanden, sonst die aktive.
-pub(crate) fn category_or(root: &Map<String, Value>, code: &str, ctx: &Ctx) -> Value {
-    s(if has_category(root, code) { code } else { ctx.cat })
+pub(crate) fn category_or(p: &Project, code: &str, ctx: &Ctx) -> Value {
+    s(if has_category(p, code) { code } else { ctx.cat })
 }
 
-/// Farbe der Kategorie `code` (erste im Baum, Tiefensuche wie `flat.find`), sonst `def`.
-fn category_color(root: &Map<String, Value>, code: &str, def: &str) -> Value {
-    fn walk<'a>(list: &'a [Value], code: &str) -> Option<&'a Value> {
-        for c in list {
-            if field(c, "code").and_then(Value::as_str) == Some(code) {
-                return Some(c);
-            }
-            if let Some(f) = walk(arr(field(c, "children")), code) {
-                return Some(f);
-            }
-        }
-        None
-    }
-    match walk(arr(root.get("layers")), code).and_then(|c| field(c, "color")) {
-        None | Some(Value::Null) => s(def),
-        Some(c) => c.clone(),
+/// Farbe der Kategorie `code` (erste im Baum), sonst `def` (auch bei leerer Farbe: fehlt sie in der
+/// Datei, liest die typisierte Sicht "").
+fn category_color(p: &Project, code: &str, def: &str) -> Value {
+    match find_category(&p.layers, code) {
+        Some(c) if !c.color.is_empty() => s(&c.color),
+        _ => s(def),
     }
 }
 
@@ -268,12 +272,10 @@ fn active_wall_type<'a>(root: &'a Map<String, Value>, ctx: &Ctx) -> Option<&'a V
     list.iter().find(|t| id_of(t) == Some(ctx.wall_type)).or(list.first())
 }
 
-/// id des aktiven Wandtyps (Fallback: die id aus dem Kontext).
-fn active_wall_type_id(root: &Map<String, Value>, ctx: &Ctx) -> Value {
-    match active_wall_type(root, ctx) {
-        Some(t) => field(t, "id").cloned().unwrap_or(Value::Null),
-        None => s(ctx.wall_type),
-    }
+/// id des aktiven Wandtyps (Fallback: erster Typ, sonst die id aus dem Kontext).
+fn active_wall_type_id(p: &Project, ctx: &Ctx) -> Value {
+    let t = p.wall_types.iter().find(|t| t.id == ctx.wall_type).or(p.wall_types.first());
+    s(t.map_or(ctx.wall_type, |t| t.id.as_str()))
 }
 
 /// Gesamtdicke eines Wand-/Deckentyps (`wallTypeThickness`: Summe der Schichten).
@@ -351,11 +353,11 @@ fn wall_type_for_thickness(root: &Map<String, Value>, base: &Value, thickness: f
 
 /// Wand-Befehl: je Achssegment eine Wand des aktiven Typs (Null-Strecken übersprungen); eine gelockte
 /// Dicke (einschichtig) wählt/erzeugt den passenden Wandtyp.
-fn wall_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn wall_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let pts = pts_of(v, "pts");
     let height = ctx.floor_height.unwrap_or(DEF_HEIGHT);
     let mut type_ops = Vec::new();
-    let mut type_id = active_wall_type_id(root, ctx);
+    let mut type_id = active_wall_type_id(p, ctx);
     if let (Some(base), Some(t)) = (active_wall_type(root, ctx), opt_n(v, "thick")) {
         if layers_len(base) == 1 && t >= MIN_THICKNESS && (t - type_thickness(base)).abs() > 1e-4 {
             let (o, id) = wall_type_for_thickness(root, base, t, ids);
@@ -441,7 +443,7 @@ fn abs_area(pts: &[V]) -> f64 {
 }
 
 /// Decke aus einem geschlossenen Umriss (entartet → nichts).
-fn ceiling_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn ceiling_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let Some(outline) = normalize_outline(&pts_of(v, "pts")) else { return Vec::new() };
     if abs_area(&outline) < 1e-4 {
         return Vec::new();
@@ -452,28 +454,23 @@ fn ceiling_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen)
             ("id", s(&ids.next("C"))),
             ("type", s("ceiling")),
             ("floorId", s(ctx.level)),
-            ("categoryCode", category_or(root, "30", ctx)),
+            ("categoryCode", category_or(p, "30", ctx)),
             ("outline", pvs(&outline)),
-            ("wallTypeId", active_wall_type_id(root, ctx)),
+            ("wallTypeId", active_wall_type_id(p, ctx)),
         ])],
     )
 }
 
 /// Wände des Geschosses als `[n, (ax, ay, bx, by, dicke)…]` für die Raumerkennung.
-fn floor_walls_flat(root: &Map<String, Value>, level: &str) -> Vec<f64> {
-    let types = wall_types(root);
+fn floor_walls_flat(p: &Project, level: &str) -> Vec<f64> {
     let mut out = vec![0.0];
     let mut n = 0;
-    for w in arr(root.get("walls")) {
-        if floor_of(w) != Some(level) {
-            continue;
-        }
-        let tid = field(w, "wallTypeId").and_then(Value::as_str);
-        let wt = types.iter().find(|t| id_of(t) == tid);
-        let (a, b) = (xy(field(w, "start").unwrap_or(&Value::Null)), xy(field(w, "end").unwrap_or(&Value::Null)));
-        let t = wt.map_or(0.2, type_thickness);
+    for w in p.walls.iter().filter(|w| w.floor_id == level) {
+        let wt = p.wall_types.iter().find(|t| t.id == w.wall_type_id);
+        // Summe der Schichten wie `type_thickness` (Startwert 0, Reihenfolge der Liste).
+        let t = wt.map_or(0.2, |t| t.layers.iter().fold(0.0, |sum, l| sum + l.thickness));
         // Bogenwand ([T2]): als Sehnenzug.
-        let pts = crate::wall_arc::axis_polyline(a, b, bulge_of(w), 0.0, t);
+        let pts = crate::wall_arc::axis_polyline((w.start.x, w.start.y), (w.end.x, w.end.y), w.bulge, 0.0, t);
         for q in pts.windows(2) {
             out.extend([q[0].0, q[0].1, q[1].0, q[1].1, t]);
             n += 1;
@@ -484,8 +481,8 @@ fn floor_walls_flat(root: &Map<String, Value>, level: &str) -> Vec<f64> {
 }
 
 /// Lichter Umriss der Zelle um `at` (Raum „innen“), `None` = keine geschlossene Zelle.
-fn room_inside(root: &Map<String, Value>, level: &str, at: V) -> Option<Vec<V>> {
-    let f = crate::room_boundary::from_point(at.0, at.1, &floor_walls_flat(root, level), 0.05, true);
+fn room_inside(p: &Project, level: &str, at: V) -> Option<Vec<V>> {
+    let f = crate::room_boundary::from_point(at.0, at.1, &floor_walls_flat(p, level), 0.05, true);
     if f.is_empty() {
         return None;
     }
@@ -494,9 +491,9 @@ fn room_inside(root: &Map<String, Value>, level: &str, at: V) -> Option<Vec<V>> 
 }
 
 /// Raum aus Umriss (Modus „manuell“: `pts`; „innen“: `at` → Zelle).
-fn room_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn room_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let boundary = match opt_p(v, "at") {
-        Some(at) => match room_inside(root, ctx.level, at) {
+        Some(at) => match room_inside(p, ctx.level, at) {
             Some(b) if b.len() >= 3 => b,
             _ => return Vec::new(),
         },
@@ -507,8 +504,8 @@ fn room_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) ->
     if boundary.len() < 3 || e.gross < 1e-4 {
         return Vec::new();
     }
-    let code = if has_category(root, "60") { "60" } else { ctx.cat };
-    let name = format!("Raum {}", arr(root.get("rooms")).len() + 1);
+    let code = if has_category(p, "60") { "60" } else { ctx.cat };
+    let name = format!("Raum {}", p.rooms.as_ref().map_or(0, Vec::len) + 1);
     let doc = json!({ "version": 1, "paragraphs": [{ "runs": [{ "text": name, "marks": {} }], "align": "center" }] });
     add_op(
         "rooms",
@@ -520,7 +517,7 @@ fn room_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) ->
             ("siaCategory", s("HNF")),
             ("name", s(&name)),
             ("boundary", pvs(&boundary)),
-            ("color", category_color(root, code, "#5a7a9a")),
+            ("color", category_color(p, code, "#5a7a9a")),
             ("stampAnchor", pt(e.centroid[0], e.centroid[1])),
             ("stampDoc", doc),
         ])],
@@ -547,7 +544,7 @@ struct StairBuilt {
     steps: f64,
 }
 
-fn build_stair(root: &Map<String, Value>, v: &Value, ctx: &Ctx, id: Value) -> StairBuilt {
+fn build_stair(p: &Project, v: &Value, ctx: &Ctx, id: Value) -> StairBuilt {
     let shape = s_of(v, "shape");
     let start = p_of(v, "start");
     let cursor = p_of(v, "cursor");
@@ -574,7 +571,7 @@ fn build_stair(root: &Map<String, Value>, v: &Value, ctx: &Ctx, id: Value) -> St
         ("id", id),
         ("type", s("stair")),
         ("floorId", s(ctx.level)),
-        ("categoryCode", category_or(root, "40", ctx)),
+        ("categoryCode", category_or(p, "40", ctx)),
         ("shape", s(shape)),
         ("start", pv(start)),
         ("dir", pv(dir)),
@@ -618,14 +615,14 @@ fn build_stair(root: &Map<String, Value>, v: &Value, ctx: &Ctx, id: Value) -> St
     StairBuilt { fields: f, params, rise, steps }
 }
 
-fn stair_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
-    let b = build_stair(root, v, ctx, s(&ids.next("ST")));
+fn stair_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let b = build_stair(p, v, ctx, s(&ids.next("ST")));
     add_op("stairs", vec![obj(b.fields)])
 }
 
 /// Treppen-Vorschau: Tritte, Podest, Lauflinie; `info = [Stufenzahl]`.
-fn stair_preview(root: &Map<String, Value>, v: &Value, ctx: &Ctx, out: &mut Shapes, info: &mut Vec<f64>) {
-    let b = build_stair(root, v, ctx, Value::Null);
+fn stair_preview(p: &Project, v: &Value, ctx: &Ctx, out: &mut Shapes, info: &mut Vec<f64>) {
+    let b = build_stair(p, v, ctx, Value::Null);
     info.push(b.steps);
     let f = crate::stair::geometry(&b.params, b.rise);
     if f.len() < 4 {
@@ -709,7 +706,7 @@ fn pick_wall<'a>(root: &'a Map<String, Value>, level: &str, p: V) -> Option<(&'a
 }
 
 /// Öffnung in eine Wand (`start`/`end` der Host-Wand beim Picken, `pos` = Abstand vom Wandanfang).
-fn opening_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn opening_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let (st, en) = (p_of(v, "start"), p_of(v, "end"));
     let len = match arc_of(st, en, opt_n(v, "bulge")) {
         Some(a) => a.length(),
@@ -718,13 +715,14 @@ fn opening_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen)
     let width = jsnum::max(0.1, jsnum::min(n_of(v, "width"), len));
     let position = jsnum::max(0.0, jsnum::min(n_of(v, "pos"), jsnum::max(0.0, len - width)));
     let door = s_of(v, "kind") == "door";
-    let lib = arr(root.get(if door { "doorTypes" } else { "windowTypes" }));
-    let type_id = lib.first().and_then(|t| field(t, "id")).filter(|id| truthy(Some(id)));
+    // Erster Typ der Bibliothek (leere id = keiner, JS-Wahrheitswert).
+    let first = if door { p.door_types.as_ref().and_then(|l| l.first()).map(|t| &t.id) } else { p.window_types.as_ref().and_then(|l| l.first()).map(|t| &t.id) };
+    let type_id = first.filter(|id| !id.is_empty());
     let mut f = vec![
         ("id", s(&ids.next("O"))),
         ("type", s("opening")),
         ("hostWallId", s(s_of(v, "wall"))),
-        ("categoryCode", category_or(root, "21", ctx)),
+        ("categoryCode", category_or(p, "21", ctx)),
         ("kind", s(s_of(v, "kind"))),
         ("position", js_num(position)),
         ("width", js_num(width)),
@@ -732,7 +730,7 @@ fn opening_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen)
         ("sillHeight", js_num(if door { 0.0 } else { n_of(v, "sill") })),
     ];
     if let Some(t) = type_id {
-        f.push(("typeId", t.clone()));
+        f.push(("typeId", s(t)));
     }
     if door {
         f.push(("hinge", s(s_of(v, "hinge"))));
@@ -813,7 +811,7 @@ fn opening_preview(v: &Value, cursor: Option<V>, out: &mut Shapes, info: &mut Ve
 
 // ── Dach, Stütze ─────────────────────────────────────────────────────────────
 
-fn roof_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn roof_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let (a, b) = (p_of(v, "a"), p_of(v, "b"));
     let (w, d) = ((b.0 - a.0).abs(), (b.1 - a.1).abs());
     if w < 0.1 || d < 0.1 {
@@ -826,7 +824,7 @@ fn roof_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) ->
             ("id", s(&ids.next("RF"))),
             ("type", s("roof")),
             ("floorId", s(ctx.level)),
-            ("categoryCode", category_or(root, "31", ctx)),
+            ("categoryCode", category_or(p, "31", ctx)),
             ("outline", pvs(&rect_corners(a, b))),
             ("shape", s(shape)),
             ("pitchDeg", js_num(if shape == "flach" { 0.0 } else { 30.0 })),
@@ -959,20 +957,20 @@ fn extrude_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen)
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Ops eines Zeichenbefehls (`None` = kein Zeichenbefehl).
-pub fn ops(root: &Map<String, Value>, v: &Value) -> Option<Vec<Op>> {
+pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>> {
     let ctx = ctx_of(v);
     let mut ids = IdGen::new(s_of(v, "stamp"));
     let ids = &mut ids;
     Some(match s_of(v, "cmd") {
-        "wall" => wall_ops(root, v, &ctx, ids),
-        "ceiling" => ceiling_ops(root, v, &ctx, ids),
-        "room" => room_ops(root, v, &ctx, ids),
-        "stair" => stair_ops(root, v, &ctx, ids),
-        "opening" => opening_ops(root, v, &ctx, ids),
-        "roof" => roof_ops(root, v, &ctx, ids),
+        "wall" => wall_ops(root, p, v, &ctx, ids),
+        "ceiling" => ceiling_ops(p, v, &ctx, ids),
+        "room" => room_ops(p, v, &ctx, ids),
+        "stair" => stair_ops(p, v, &ctx, ids),
+        "opening" => opening_ops(p, v, &ctx, ids),
+        "roof" => roof_ops(p, v, &ctx, ids),
         "column" => column_ops(v, &ctx, ids),
         "extrude" => extrude_ops(root, v, &ctx, ids),
-        _ => return crate::cmd_draw::ops(root, v, &ctx, ids).or_else(|| crate::cmd_solid::ops(root, v, &ctx, ids)),
+        _ => return crate::cmd_draw::ops(root, v, &ctx, ids).or_else(|| crate::cmd_solid::ops(root, p, v, &ctx, ids)),
     })
 }
 
@@ -998,8 +996,8 @@ impl Preview {
 
 /// Vorschau eines Zeichenbefehls: `v` = Optionen (`cmd`, …, `ctx`), `pts` = die Punkte flach (je Befehl
 /// die gesetzten Punkte und zuletzt der Cursor).
-pub fn preview(root: &Map<String, Value>, v: &Value, pts: &[f64]) -> Preview {
-    preview_req(root, &Req::new(v.clone()), pts)
+pub fn preview(root: &Map<String, Value>, project: &Project, v: &Value, pts: &[f64]) -> Preview {
+    preview_req(root, project, &Req::new(v.clone()), pts)
 }
 
 /// Gelesene Vorschau-Anfrage: die Optionen und, für den Mausschritt ohne Hash-Suchen, Befehl und Kontext.
@@ -1024,7 +1022,7 @@ impl Req {
 }
 
 /// Wie [`preview`] mit gelesener Anfrage (Mausschritt: dieselbe Anfrage, neue Punkte).
-pub fn preview_req(root: &Map<String, Value>, req: &Req, pts: &[f64]) -> Preview {
+pub fn preview_req(root: &Map<String, Value>, project: &Project, req: &Req, pts: &[f64]) -> Preview {
     let v = &req.v;
     let ctx = Ctx { level: &req.level, floor_height: req.floor_height, cat: &req.cat, wall_type: &req.wall_type, text_height: req.text_height, symbol: req.symbol };
     let pts = flat_pts(pts);
@@ -1032,9 +1030,9 @@ pub fn preview_req(root: &Map<String, Value>, req: &Req, pts: &[f64]) -> Preview
     let out = &mut p.shapes;
     match req.cmd.as_str() {
         "wall" => wall_preview(root, v, &ctx, &pts, out),
-        "stair" => stair_preview(root, v, &ctx, out, &mut p.info),
+        "stair" => stair_preview(project, v, &ctx, out, &mut p.info),
         "opening" => opening_preview(v, pts.first().copied(), out, &mut p.info),
-        "roomInside" => p.ok = pts.first().and_then(|at| room_inside(root, ctx.level, *at)).is_some_and(|b| b.len() >= 3),
+        "roomInside" => p.ok = pts.first().and_then(|at| room_inside(project, ctx.level, *at)).is_some_and(|b| b.len() >= 3),
         "column" => {
             if let Some(at) = pts.first() {
                 out.poly(&column_footprint(*at, v));
@@ -1161,7 +1159,7 @@ mod tests {
     fn bogenwand_drei_punkt_und_tangential() {
         let r = root(json!({"wallTypes": [{"id": "WT1", "name": "Beton", "layers": [{"componentId": "c", "thickness": 0.2}]}]}));
         // (0,0)→(4,0) durch (2,2): Halbkreis, Scheitel links → Modell-Bulge +1; dann tangential weiter nach (4,-4)?
-        let o = ops(&r, &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0], [8, 0]], "segs": [{"x": 2, "y": 2}, 1], "thick": null}))).unwrap();
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0], [8, 0]], "segs": [{"x": 2, "y": 2}, 1], "thick": null}))).unwrap();
         let w = items(&o, 0);
         let b0 = w[0]["bulge"].as_f64().unwrap();
         assert!((b0 - 1.0).abs() < 1e-9, "{b0}");
@@ -1169,19 +1167,19 @@ mod tests {
         let b1 = w[1]["bulge"].as_f64().unwrap();
         assert!((b1 + 1.0).abs() < 1e-9, "{b1}");
         // Gerade Wand ohne `bulge`-Feld.
-        let o = ops(&r, &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "segs": [0], "thick": null}))).unwrap();
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "segs": [0], "thick": null}))).unwrap();
         assert!(items(&o, 0)[0].get("bulge").is_none());
     }
 
     #[test]
     fn waende_je_segment_mit_typ_und_hoehe() {
         let r = root(json!({"wallTypes": [{"id": "WT1", "name": "Beton", "layers": [{"componentId": "c", "thickness": 0.2}]}]}));
-        let o = ops(&r, &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0], [4, 0], [4, 3]], "thick": null}))).unwrap();
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0], [4, 0], [4, 3]], "thick": null}))).unwrap();
         let w = items(&o, 0);
         assert_eq!(w.as_array().unwrap().len(), 2);
         assert_eq!(w[0], json!({"id": "W-s-1", "type": "wall", "floorId": "F1", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "wallTypeId": "WT1", "height": 3}));
         // Gelockte Dicke → neuer einschichtiger Typ vor den Wänden.
-        let o = ops(&r, &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "thick": 0.3}))).unwrap();
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "thick": 0.3}))).unwrap();
         assert_eq!(items(&o, 0)[0], json!({"id": "WT-s-1", "name": "Beton 30 cm", "layers": [{"componentId": "c", "thickness": 0.3}]}));
         assert_eq!(items(&o, 1)[0]["wallTypeId"], "WT-s-1");
     }
@@ -1206,7 +1204,7 @@ mod tests {
         let r = root(json!({"wallTypes": wt, "rooms": [], "layers": [{"code": "60", "color": "#abc"}], "walls": [
             wall("a", (0.0, 0.0), (5.0, 0.0)), wall("b", (5.0, 0.0), (5.0, 4.0)), wall("c", (5.0, 4.0), (0.0, 4.0)), wall("d", (0.0, 4.0), (0.0, 0.0))],
             "groups": [{"id": "g", "name": "G", "wallIds": ["a"], "drawingIds": []}]}));
-        let o = ops(&r, &req(json!({"cmd": "room", "at": [2, 2]}))).unwrap();
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "room", "at": [2, 2]}))).unwrap();
         let room = &items(&o, 0)[0];
         assert_eq!(room["name"], "Raum 1");
         assert_eq!(room["color"], "#abc");
@@ -1228,7 +1226,7 @@ mod tests {
         assert_eq!(q["hit"]["id"], "w");
         assert!((q["hit"]["t"].as_f64().unwrap() - std::f64::consts::PI).abs() < 1e-9);
         assert_eq!(q["hit"]["bulge"], 1);
-        let o = ops(&r, &req(json!({"cmd": "opening", "wall": "w", "start": [0, 0], "end": [4, 0], "bulge": 1, "kind": "window", "pos": 6.0, "width": 1.2, "height": 1.2, "sill": 0.9}))).unwrap();
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "opening", "wall": "w", "start": [0, 0], "end": [4, 0], "bulge": 1, "kind": "window", "pos": 6.0, "width": 1.2, "height": 1.2, "sill": 0.9}))).unwrap();
         let pos = items(&o, 0)[0]["position"].as_f64().unwrap();
         assert!((pos - (2.0 * std::f64::consts::PI - 1.2)).abs() < 1e-9, "{pos}");
     }
@@ -1239,11 +1237,11 @@ mod tests {
         let q = query(&r, &json!({"q": "pickWall", "level": "F1", "pt": [2, 0.3]})).unwrap().unwrap();
         assert_eq!(q["hit"]["id"], "w");
         assert_eq!(q["hit"]["t"], 2);
-        let o = ops(&r, &req(json!({"cmd": "opening", "wall": "w", "start": [0, 0], "end": [6, 0], "kind": "window", "pos": 5.5, "width": 1.2, "height": 1.2, "sill": 0.9}))).unwrap();
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "opening", "wall": "w", "start": [0, 0], "end": [6, 0], "kind": "window", "pos": 5.5, "width": 1.2, "height": 1.2, "sill": 0.9}))).unwrap();
         let op = &items(&o, 0)[0];
         assert_eq!(op["position"], 4.8);
         assert_eq!(op["typeId"], "FT");
-        let p = preview(&r, &json!({"cmd": "opening", "start": [0, 0], "end": [6, 0], "kind": "window", "width": 1.2, "pos": null}), &[2.0, 1.0]);
+        let p = preview(&r, &crate::model::lenient::typed_for_test(&r), &json!({"cmd": "opening", "start": [0, 0], "end": [6, 0], "kind": "window", "width": 1.2, "pos": null}), &[2.0, 1.0]);
         assert_eq!(p.info[0], 2.0);
         assert_eq!(p.shapes.count, 2);
     }

@@ -4,6 +4,7 @@
 //! (`src/model/types.generated.ts`) erzeugt `ts_export.rs` daraus (`npm run gen:types`).
 //! Neue Modellfelder nur hier eintragen (serde + ts-rs-Attribute, Regeln in `ts_export.rs`).
 
+pub mod check;
 pub mod generated;
 pub mod helpers;
 pub mod items;
