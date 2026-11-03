@@ -4,7 +4,7 @@
 // (wie die Fenster-/Türliste, `openingSchedule.ts`).
 
 import type { Layer, Project } from "../model/types";
-import { t } from "../i18n";
+import { t } from "../i18n/translate";
 import { documentFor } from "../core/document";
 import type { AreaReport, Cell, ReportRow } from "./areaReport";
 

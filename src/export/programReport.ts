@@ -3,7 +3,7 @@
 // Die Zahlen rechnet der Kern (`analysis/roomProgram.ts`); hier nur die Beschriftung mit `t()`.
 
 import type { Project } from "../model/types";
-import { t } from "../i18n";
+import { t } from "../i18n/translate";
 import { compareRoomProgram } from "../analysis/roomProgram";
 import type { CompareSum, Light } from "../analysis/roomProgram";
 import type { AreaReport, Cell, ReportRow, ReportSection } from "./areaReport";

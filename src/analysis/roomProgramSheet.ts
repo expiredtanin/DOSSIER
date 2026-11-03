@@ -10,7 +10,7 @@
 // Der Aufruf gehört in EIN `setProject` (ein Undo-Schritt).
 
 import type { Drawing2D, DrawingLevel, Project } from "../model/types";
-import { t } from "../i18n";
+import { t } from "../i18n/translate";
 import { applyOps } from "../core/ops";
 import type { CoreOp } from "../core/ops";
 import { addItems } from "../core/opsBuild";

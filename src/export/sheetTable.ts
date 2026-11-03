@@ -5,7 +5,7 @@
 
 import type { jsPDF } from "jspdf";
 import type { Layout, LayoutTable, LayoutTableSource, Project } from "../model/types";
-import { t } from "../i18n";
+import { t } from "../i18n/translate";
 import { documentFor } from "../core/document";
 
 export type { LayoutTable, LayoutTableSource };

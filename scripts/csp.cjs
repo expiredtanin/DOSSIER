@@ -15,9 +15,6 @@ const NET_HOSTS = [
 ];
 
 const https = NET_HOSTS.map((h) => `https://${h}`);
-// Icon-Font (index.html): Stylesheet von fonts.googleapis.com, Schrift von fonts.gstatic.com.
-const GOOGLE_FONTS_CSS = "https://fonts.googleapis.com";
-const GOOGLE_FONTS_FILES = "https://fonts.gstatic.com";
 
 const DIRECTIVES = {
   "default-src": ["'self'"],
@@ -26,8 +23,8 @@ const DIRECTIVES = {
   // Import-Worker (DXF/IFC/Mesh/Punktwolke) und pdf.js-Worker: Modul-URLs aus dem eigenen Bundle.
   "worker-src": ["'self'", "blob:"],
   // React setzt viele Inline-`style`-Attribute -> 'unsafe-inline' (nur Stile, keine Skripte).
-  "style-src": ["'self'", "'unsafe-inline'", GOOGLE_FONTS_CSS],
-  "font-src": ["'self'", "data:", GOOGLE_FONTS_FILES],
+  "style-src": ["'self'", "'unsafe-inline'"],
+  "font-src": ["'self'", "data:"],
   "img-src": ["'self'", "data:", "blob:", ...https],
   "media-src": ["'self'", "blob:"],
   "connect-src": [

@@ -13,7 +13,7 @@
 import { jsPDF } from "jspdf";
 import "svg2pdf.js";
 import type { Layout, LayoutPaperFormat, MasterLayout, Project } from "../model/types";
-import { t } from "../i18n";
+import { t } from "../i18n/translate";
 import { legendPlan, legendPrintSvg } from "./legendSvg";
 import { categoryLayerGroups, enablePdfLayers, type PdfLayers } from "./pdfLayers";
 import { generatePlan, type Plan } from "../plan/generatePlan";

@@ -1048,7 +1048,7 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   (Exporte/`saveBinaryFile` schreiben weiter direkt); in der Tauri-App nicht von Hand geprüft; Electron
   schreibt keine Dateien (Browser-Download), daher keine Änderung; keine Wiederherstellungs-UI für `.obp~`. · S
 - ✅ **[117] CSP setzen.** (3.11.) Eine Quelle `scripts/csp.cjs` (`script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self' blob:`,
-  `style-src` mit `'unsafe-inline'` für React-Inline-Styles + fonts.googleapis.com, `connect-src` = ipc + netFetch-Hosts +
+  `style-src` mit `'unsafe-inline'` für React-Inline-Styles (Icon-Font seit 3.11. lokal gebündelt: `material-symbols`, kein Google-Fonts-Host mehr), `connect-src` = ipc + netFetch-Hosts +
   localhost/127.0.0.1 + ws://127.0.0.1 für die KI-Brücke). Tauri: `tauri.conf.json` (`devCsp: null`, Test `src/net/csp.test.ts`
   gleicht mit `csp.cjs` und `ALLOWED_HOSTS` ab); Electron: Antwort-Header nur gepackt; Browser/e2e: Meta-Tag nur im Vite-Build
   (Dev-HMR unberührt). `e2e/csp.spec.ts` prüft Plan/Schnitt/Ansicht/3D auf CSP-Verletzungen. Rich-Text: Text war schon
@@ -1075,8 +1075,9 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
 - ○ **[127] 3D-Booleans klären:** BSP in `fileio/csg.rs` stilllegen, Manifold vs. truck dokumentieren. · S
 - ○ **[128] Restlogik nach Rust:** Griffe (`useGripEditing.ts`), `layoutModel.ts`, Kollisions-Vorprüfung,
   `exportStep.projectSolidSpecs`. · L
-- ○ **[129] Grenze schärfen:** React-freies `t()` (Kern importiert `i18n` → React), `net/` in `CORE_DIRS`,
-  transitive Importe prüfen. · S
+- ✅ **[129] Grenze schärfen.** (3.11.) `i18n/translate.ts` (React-frei: `t`, Sprache, Wörterbücher), `i18n/index.ts` re-exportiert
+  und hält nur `useT`; Kern-Dateien importieren `i18n/translate`. `net/` in `CORE_DIRS`, neuer Test prüft transitive
+  relative Importe (Ausnahmelisten leer). · S
 - ○ **[130] Kleinkram:** eine generische Fenster-Brücke statt 5 Kopien; Auswahl als ein `Selection`-Objekt statt
   12 Felder; `primitives.tsx` auf Overlay zurückschneiden; Cargo-Workspace + cargo-deny; NOTICE (OFL-Schriften,
   wgpu, Tauri, React, pdf.js, lcms). · M
