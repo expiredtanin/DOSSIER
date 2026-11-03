@@ -1037,6 +1037,39 @@ Frage: WebGPU weiterführen oder wie BIMCraft CPU + native GPU?
 
 ---
 
+## Architektur-Review 2.11. [A]
+
+Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code gelesen.
+
+- ○ **[116] Speichern absturzsicher.** `native/saveFile.ts:49` überschreibt direkt; Temp-Datei + Umbenennen
+  (Rust-Befehl), `.obp~`-Sicherung; Autosave erst nach erfolgreichem Umbenennen löschen. · S
+- ○ **[117] CSP setzen.** `tauri.conf.json` hat `"csp": null`; strikte CSP (`script-src 'self' 'wasm-unsafe-eval'`,
+  `connect-src` = netFetch-Hosts + ipc). Rich-Text-`innerHTML` prüfen. · S
+- ○ **[118] Wiederanlauf nach Kern-Panic.** Dokument + Verlauf im selben WASM wie alle Geometrie
+  (`web/document.rs`); TS hält Op-Log seit letztem Laden, baut Instanz nach Trap neu auf. · M
+- ○ **[119] Referenz-Ausgaben (golden).** Plan-Puffer/SVG/Schnitt/Ansicht der Musterprojekte als Snapshot;
+  seit TS gelöscht ist, fehlt die Bitgleich-Referenz. · M
+- ○ **[120] macOS in CI.** `cargo check --features native2d`, Bildvergleich Metal ↔ WebGPU. · M
+- ○ **[121] App.tsx zerlegen, Neurendern stoppen.** `App.tsx:365` abonniert ganzes Projekt, 0× `memo`;
+  Abschnitte in Hooks/Komponenten, Panels lesen den Store selbst; Nebenfenster bekommen Ops statt Projekt. · L
+- ○ **[122] Zweites Kern-Dokument (`documentFor` → `shared`, Differenz-Abgleich) abschaffen.** Fang/Griffe/
+  Export bauen abgewandelte Projekte; stattdessen Ausschluss-Filter an Kern-Abfragen. · M
+- ○ **[123] Doppelte Transformation + alte Werkzeugliste streichen** (`activeTransform` in App, `tools/tools.ts`);
+  alles über `CommandEngine`. `commitTransform` (nur Tests) löschen. · M
+- ○ **[124] Kern typisiert.** 152 Funktionen lesen rohes JSON (`grips::field/num_of`); Ops gegen Modell prüfen,
+  `cmd_*` auf `&Project`. · L
+- ○ **[125] Doppelte Schnitt-Dominanz** (`render3d/section_boolean.rs` ↔ `core/plan_section.rs`) auf eine Fassung. · S
+- ○ **[126] `jsnum`/`jsmath` ersetzen** (libm, deterministisch über Plattformen); `plan_*.rs`-Paare nach `plan/`
+  zusammenführen. · M
+- ○ **[127] 3D-Booleans klären:** BSP in `fileio/csg.rs` stilllegen, Manifold vs. truck dokumentieren. · S
+- ○ **[128] Restlogik nach Rust:** Griffe (`useGripEditing.ts`), `layoutModel.ts`, Kollisions-Vorprüfung,
+  `exportStep.projectSolidSpecs`. · L
+- ○ **[129] Grenze schärfen:** React-freies `t()` (Kern importiert `i18n` → React), `net/` in `CORE_DIRS`,
+  transitive Importe prüfen. · S
+- ○ **[130] Kleinkram:** eine generische Fenster-Brücke statt 5 Kopien; Auswahl als ein `Selection`-Objekt statt
+  12 Felder; `primitives.tsx` auf Overlay zurückschneiden; Cargo-Workspace + cargo-deny; NOTICE (OFL-Schriften,
+  wgpu, Tauri, React, pdf.js, lcms). · M
+
 ## Priorität 0 — vor der öffentlichen Beta
 
 - ✅ **[5] Doppelspur `Door[]`/`Opening[]` auflösen.** 27.10.: Formatversion 2, `Project.doors`/`Door`
