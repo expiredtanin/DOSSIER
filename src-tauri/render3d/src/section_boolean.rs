@@ -1,260 +1,55 @@
-//! Schnitt-Boolean-Dominanz fuer den 3D-Live-Schnitt — die 1:1-Portierung von
-//! `src/plan/toSection.ts::subtractDominantBands`/`subtractRect` nach Rust.
+//! Schnitt-Boolean-Dominanz fuer den 3D-Live-Schnitt: duenner Adapter um
+//! `dossier_hatch::section_dominance` ([125]) — dieselbe Rechnung wie der 2D-Schnitt
+//! (`dossier-core`, `plan/section.rs`), damit beide nicht auseinanderlaufen.
 //!
-//! GRUND: der 2D-Schnitt (`toSection.ts`) ist die Referenz-Implementierung. Er
-//! sammelt alle Cut-Baender (Wand- und Deckenschichten) als achsparallele
-//! (u,v)-Rechtecke, taggt jedes mit seiner `Component.joinPriority` und laesst
-//! dann die STAERKERE Schicht die schwaechere per Rechteck-Subtraktion wegschneiden
-//! (elementuebergreifend). Der 3D-Rust-Cut (`section.rs`) produziert bereits genau
-//! dasselbe Format — achsparallele (u,v)-Rechteck-`CutPolygon`s — also laesst sich
-//! die Dominanz-Zerlegung hier identisch nachbauen, damit der 3D-Live-Schnitt fuer
-//! Wand+Decken-Schichten EXAKT wie der 2D-Schnitt aussieht.
-//!
-//! Die Prioritaet/Identitaet je Band kommt aus `CutPolygon::cut` (`CutBandMeta`,
-//! aus der TS-Emission `toWalls3d`). Baender ohne `join_priority` (unaufloesbares
-//! Bauteil) nehmen weder als Basis noch als Cutter teil und bleiben unveraendert.
+//! Der 3D-Rust-Cut (`section.rs`) liefert achsparallele (u,v)-Rechteck-`CutPolygon`s; Prioritaet und
+//! Komponente je Band kommen aus `CutPolygon::cut` (`CutBandMeta`, aus der TS-Emission `toWalls3d`).
+//! Baender ohne `join_priority` (unaufloesbares Bauteil, Dach-Schichten) nehmen weder als Basis noch als
+//! Cutter teil und bleiben unveraendert. Gerechnet wird in f64, das Ergebnis zurueck in f32.
 
 use crate::section::CutPolygon;
+use dossier_hatch::section_dominance::{dominant_bands, rect_of_points, Band, Rect};
+use std::collections::HashMap;
 
-/// Toleranz fuer Ueberlappungs-/Rest-Rechtecke (Meter): Null-/Negativflaechen und
-/// Rest-Streifen duenner als EPS werden verworfen (Float-Rauschen der (u,v)-Meter).
-/// Identisch zu `RECT_EPS` in `toSection.ts`.
-const RECT_EPS: f32 = 1e-6;
-
-/// Achsparalleles Rechteck in (u, v)-Metern — das Rust-Gegenstueck zu `Rect` in
-/// `toSection.ts`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Rect {
-    pub u_min: f32,
-    pub u_max: f32,
-    pub v_min: f32,
-    pub v_max: f32,
-}
-
-/// Bounding-Box eines (achsparallelen) Cut-Bands als `Rect`, oder `None` bei <3
-/// Ecken (analog `rectOfBand`).
-pub fn rect_of_poly(poly: &CutPolygon) -> Option<Rect> {
-    if poly.pts.len() < 3 {
-        return None;
-    }
-    let mut u_min = f32::INFINITY;
-    let mut u_max = f32::NEG_INFINITY;
-    let mut v_min = f32::INFINITY;
-    let mut v_max = f32::NEG_INFINITY;
-    for p in &poly.pts {
-        u_min = u_min.min(p[0]);
-        u_max = u_max.max(p[0]);
-        v_min = v_min.min(p[1]);
-        v_max = v_max.max(p[1]);
-    }
-    Some(Rect {
-        u_min,
-        u_max,
-        v_min,
-        v_max,
-    })
-}
-
-/// Rechteck-minus-Rechteck (beide achsparallel): `base` ohne die Ueberlappung mit
-/// `cutter`, zerlegt in 0–4 disjunkte Rest-Rechtecke (links/rechts ueber die volle
-/// Hoehe, dann oben/unten im mittleren u-Streifen — ueberlappungsfrei). Kein echter
-/// Ueberlapp (Flaeche ≤ EPS in u oder v) ⇒ `base` bleibt ganz. Vollstaendige
-/// Ueberdeckung ⇒ leere Liste. Rest-Streifen duenner als EPS werden verworfen.
-/// 1:1 aus `toSection.ts::subtractRect`.
-pub fn subtract_rect(base: Rect, cutter: Rect) -> Vec<Rect> {
-    let o_min_u = base.u_min.max(cutter.u_min);
-    let o_max_u = base.u_max.min(cutter.u_max);
-    let o_min_v = base.v_min.max(cutter.v_min);
-    let o_max_v = base.v_max.min(cutter.v_max);
-    // Kein (nennenswerter) Ueberlapp — `base` unveraendert.
-    if o_max_u - o_min_u <= RECT_EPS || o_max_v - o_min_v <= RECT_EPS {
-        return vec![base];
-    }
-    let mut out = Vec::new();
-    let mut push = |r: Rect| {
-        if r.u_max - r.u_min > RECT_EPS && r.v_max - r.v_min > RECT_EPS {
-            out.push(r);
-        }
-    };
-    // Links / rechts der Ueberlappung, jeweils ueber die volle Basis-Hoehe.
-    push(Rect {
-        u_min: base.u_min,
-        u_max: o_min_u,
-        v_min: base.v_min,
-        v_max: base.v_max,
-    });
-    push(Rect {
-        u_min: o_max_u,
-        u_max: base.u_max,
-        v_min: base.v_min,
-        v_max: base.v_max,
-    });
-    // Unten / oben im mittleren u-Streifen (nur der von der Ueberlappung befreite Rest).
-    push(Rect {
-        u_min: o_min_u,
-        u_max: o_max_u,
-        v_min: base.v_min,
-        v_max: o_min_v,
-    });
-    push(Rect {
-        u_min: o_min_u,
-        u_max: o_max_u,
-        v_min: o_max_v,
-        v_max: base.v_max,
-    });
-    out
-}
-
-/// `join_priority` eines Bands (aus `CutBandMeta`), oder `None`.
-fn priority_of(poly: &CutPolygon) -> Option<i32> {
-    poly.cut.as_ref().and_then(|c| c.join_priority)
-}
-
-/// `component_id` eines Bands (aus `CutBandMeta`), oder `None`.
-fn component_of(poly: &CutPolygon) -> Option<&str> {
-    poly.cut.as_ref().and_then(|c| c.component_id.as_deref())
-}
-
-/// Erzeugt aus einem Rest-`Rect` ein Cut-Band, das Stil/Referenz/Metadaten von
-/// `src` erbt (analog `bandFromRect`). Ecken-Reihenfolge wie in `section.rs`
-/// (CCW-analog, hier v_max oben zuerst — fuer die Fan-Triangulierung irrelevant).
+/// Erzeugt aus einem Rest-`Rect` ein Cut-Band, das Stil/Referenz/Metadaten von `src` erbt. Ecken wie in
+/// `section.rs` (v_max oben zuerst — fuer die Fan-Triangulierung irrelevant).
 fn poly_from_rect(src: &CutPolygon, r: Rect) -> CutPolygon {
+    let (u0, u1, v0, v1) = (r.u_min as f32, r.u_max as f32, r.v_min as f32, r.v_max as f32);
     CutPolygon {
         component: src.component,
         color: src.color,
         hatch: src.hatch,
         cut: src.cut.clone(),
-        pts: vec![
-            [r.u_min, r.v_max],
-            [r.u_max, r.v_max],
-            [r.u_max, r.v_min],
-            [r.u_min, r.v_min],
-        ],
+        pts: vec![[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
     }
 }
 
-/// Globale Schnitt-Dominanz: fuer jedes Band wird die Rechteck-Ueberlappung ALLER
-/// Baender mit STRIKT hoeherer `join_priority` subtrahiert (elementuebergreifend —
-/// z. B. schneidet ein Decken-Beton-Band 100 ein ueberlappendes Wand-Putz-Band 10
-/// weg). Gleiche Prioritaet schneidet NICHT (koexistiert → durchgehende Flaeche).
-/// Baender ohne `join_priority` nehmen weder als Basis noch als Cutter teil und
-/// bleiben unveraendert erhalten. 1:1 aus `toSection.ts::subtractDominantBands`
-/// (inklusive der abschliessenden MERGE-Phase).
+/// Globale Schnitt-Dominanz (staerkere `join_priority` schneidet schwaechere weg, gleiche Komponente
+/// und Prioritaet verschmilzt) — siehe `dossier_hatch::section_dominance`.
 pub fn subtract_dominant_bands(bands: Vec<CutPolygon>) -> Vec<CutPolygon> {
-    let rects: Vec<Option<Rect>> = bands.iter().map(rect_of_poly).collect();
-    let prios: Vec<Option<i32>> = bands.iter().map(priority_of).collect();
-    let mut out: Vec<CutPolygon> = Vec::new();
-
-    for i in 0..bands.len() {
-        // Nicht-rechteckig oder ohne Prioritaet: unveraendert durchreichen.
-        let (base, prio) = match (rects[i], prios[i]) {
-            (Some(b), Some(p)) => (b, p),
-            _ => {
-                out.push(bands[i].clone());
-                continue;
+    let mut ids: HashMap<&str, u32> = HashMap::new();
+    let inp: Vec<Band> = bands
+        .iter()
+        .map(|b| {
+            let meta = b.cut.as_ref();
+            let comp = meta.and_then(|c| c.component_id.as_deref()).map(|id| {
+                let n = ids.len() as u32;
+                *ids.entry(id).or_insert(n)
+            });
+            Band {
+                rect: rect_of_points(b.pts.iter().map(|p| (p[0] as f64, p[1] as f64))),
+                prio: meta.and_then(|c| c.join_priority).map(f64::from),
+                comp,
             }
-        };
-        let mut pieces = vec![base];
-        for j in 0..bands.len() {
-            if pieces.is_empty() {
-                break;
-            }
-            if j == i {
-                continue;
-            }
-            let cutter = match (rects[j], prios[j]) {
-                (Some(c), Some(op)) if op > prio => c,
-                _ => continue,
-            };
-            let mut next = Vec::new();
-            for p in &pieces {
-                next.extend(subtract_rect(*p, cutter));
-            }
-            pieces = next;
-        }
-        for p in pieces {
-            out.push(poly_from_rect(&bands[i], p));
-        }
-    }
-    merge_same_component_bands(out)
-}
-
-/// Union zweier achsparalleler Rechtecke, ABER NUR wenn das Ergebnis EXAKT wieder
-/// ein Rechteck ist — sonst `None`. Enthaltensein oder Achs-Deckung + Beruehrung
-/// liefern eine rechteckige Union; Teil-/Eck-Ueberlappungen (L-Form) und Baender
-/// mit Spalt liefern `None`. 1:1 aus `toSection.ts::rectUnionIfRect`.
-fn rect_union_if_rect(a: Rect, b: Rect) -> Option<Rect> {
-    const E: f32 = RECT_EPS;
-    // Enthaltensein (inkl. Deckungsgleichheit): Union = umschliessendes Rechteck.
-    let a_in_b = b.u_min - a.u_min <= E
-        && a.u_max - b.u_max <= E
-        && b.v_min - a.v_min <= E
-        && a.v_max - b.v_max <= E;
-    if a_in_b {
-        return Some(b);
-    }
-    let b_in_a = a.u_min - b.u_min <= E
-        && b.u_max - a.u_max <= E
-        && a.v_min - b.v_min <= E
-        && b.v_max - a.v_max <= E;
-    if b_in_a {
-        return Some(a);
-    }
-    let u_aligned = (a.u_min - b.u_min).abs() <= E && (a.u_max - b.u_max).abs() <= E;
-    let v_aligned = (a.v_min - b.v_min).abs() <= E && (a.v_max - b.v_max).abs() <= E;
-    // Beruehrung/Ueberlappung in der jeweils ANDEREN Achse (kein Spalt groesser EPS).
-    let v_touch = a.v_max >= b.v_min - E && b.v_max >= a.v_min - E;
-    let u_touch = a.u_max >= b.u_min - E && b.u_max >= a.u_min - E;
-    if (u_aligned && v_touch) || (v_aligned && u_touch) {
-        return Some(Rect {
-            u_min: a.u_min.min(b.u_min),
-            u_max: a.u_max.max(b.u_max),
-            v_min: a.v_min.min(b.v_min),
-            v_max: a.v_max.max(b.v_max),
-        });
-    }
-    None
-}
-
-/// MERGE-Phase der Schnitt-Dominanz: Baender mit GLEICHER `component_id` UND
-/// gleicher `join_priority`, deren achsparallele Rechtecke sich beruehren/ueberlappen
-/// und eine rechteckige Union bilden (`rect_union_if_rect`), werden zu EINEM Band
-/// zusammengefasst — so entsteht an der Beruehrkante keine innere Trennlinie durch
-/// gleichartiges Material. Baender ohne `component_id`/`join_priority` oder ohne
-/// Rechteck-Form nehmen nicht teil. Iterativ bis zum Fixpunkt. 1:1 aus
-/// `toSection.ts::mergeSameComponentBands`.
-fn merge_same_component_bands(bands: Vec<CutPolygon>) -> Vec<CutPolygon> {
-    let mut out = bands;
-    let mut merged = true;
-    while merged {
-        merged = false;
-        'outer: for i in 0..out.len() {
-            let (ci, pi) = match (component_of(&out[i]), priority_of(&out[i])) {
-                (Some(c), Some(p)) => (c.to_string(), p),
-                _ => continue,
-            };
-            let ri = match rect_of_poly(&out[i]) {
-                Some(r) => r,
-                None => continue,
-            };
-            for j in (i + 1)..out.len() {
-                if component_of(&out[j]) != Some(ci.as_str()) || priority_of(&out[j]) != Some(pi) {
-                    continue;
-                }
-                let rj = match rect_of_poly(&out[j]) {
-                    Some(r) => r,
-                    None => continue,
-                };
-                if let Some(u) = rect_union_if_rect(ri, rj) {
-                    out[i] = poly_from_rect(&out[i], u);
-                    out.remove(j);
-                    merged = true; // Fixpunkt-Neustart
-                    break 'outer;
-                }
-            }
-        }
-    }
-    out
+        })
+        .collect();
+    dominant_bands(&inp)
+        .into_iter()
+        .map(|piece| match piece.rect {
+            Some(r) => poly_from_rect(&bands[piece.src], r),
+            None => bands[piece.src].clone(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -295,8 +90,22 @@ mod tests {
         }
     }
 
-    fn rect_of(p: &CutPolygon) -> Rect {
-        rect_of_poly(p).unwrap()
+    /// Umgebendes Rechteck eines Bands (f32, wie die Ecken).
+    #[derive(Debug)]
+    struct R {
+        u_min: f32,
+        u_max: f32,
+        v_min: f32,
+        v_max: f32,
+    }
+
+    fn rect_of(p: &CutPolygon) -> R {
+        let r = rect_of_points(p.pts.iter().map(|q| (q[0] as f64, q[1] as f64))).unwrap();
+        R { u_min: r.u_min as f32, u_max: r.u_max as f32, v_min: r.v_min as f32, v_max: r.v_max as f32 }
+    }
+
+    fn component_of(poly: &CutPolygon) -> Option<&str> {
+        poly.cut.as_ref().and_then(|c| c.component_id.as_deref())
     }
 
     fn area(bands: &[CutPolygon]) -> f32 {
@@ -313,56 +122,7 @@ mod tests {
         (a - b).abs() < 1e-5
     }
 
-    // --- subtractRect (Referenz: toSection.boolean.test.ts) ------------------
-
-    #[test]
-    fn subtract_rect_kein_overlap_base_unveraendert() {
-        let base = Rect { u_min: 0.0, u_max: 1.0, v_min: 0.0, v_max: 1.0 };
-        let cut = Rect { u_min: 2.0, u_max: 3.0, v_min: 2.0, v_max: 3.0 };
-        assert_eq!(subtract_rect(base, cut), vec![base]);
-    }
-
-    #[test]
-    fn subtract_rect_kantenberuehrung_base_unveraendert() {
-        let base = Rect { u_min: 0.0, u_max: 1.0, v_min: 0.0, v_max: 1.0 };
-        let cut = Rect { u_min: 1.0, u_max: 2.0, v_min: 0.0, v_max: 1.0 };
-        assert_eq!(subtract_rect(base, cut), vec![base]);
-    }
-
-    #[test]
-    fn subtract_rect_cutter_enthaelt_base_leer() {
-        let base = Rect { u_min: 1.0, u_max: 2.0, v_min: 1.0, v_max: 2.0 };
-        let cut = Rect { u_min: 0.0, u_max: 3.0, v_min: 0.0, v_max: 3.0 };
-        assert!(subtract_rect(base, cut).is_empty());
-    }
-
-    #[test]
-    fn subtract_rect_cutter_mittig_vier_reste() {
-        let base = Rect { u_min: 0.0, u_max: 3.0, v_min: 0.0, v_max: 3.0 };
-        let cut = Rect { u_min: 1.0, u_max: 2.0, v_min: 1.0, v_max: 2.0 };
-        let rest = subtract_rect(base, cut);
-        assert_eq!(rest.len(), 4);
-        let a: f32 = rest
-            .iter()
-            .map(|r| (r.u_max - r.u_min) * (r.v_max - r.v_min))
-            .sum();
-        assert!(approx(a, 8.0), "9 (base) - 1 (overlap) = 8, ist {a}");
-    }
-
-    #[test]
-    fn subtract_rect_eck_ueberlappung_zwei_reste() {
-        // cutter deckt die obere-rechte Ecke von base: overlap [1,2]x[1,2].
-        let base = Rect { u_min: 0.0, u_max: 2.0, v_min: 0.0, v_max: 2.0 };
-        let cut = Rect { u_min: 1.0, u_max: 3.0, v_min: 1.0, v_max: 3.0 };
-        let rest = subtract_rect(base, cut);
-        let a: f32 = rest
-            .iter()
-            .map(|r| (r.u_max - r.u_min) * (r.v_max - r.v_min))
-            .sum();
-        assert!(approx(a, 3.0), "4 - 1 = 3, ist {a}");
-    }
-
-    // --- subtractDominantBands: die geometrische Kernaussage ------------------
+    // --- Adapter Ende-zu-Ende (Rechnung: dossier_hatch::section_dominance) ----
 
     #[test]
     fn decke_100_schneidet_wand_50_im_ueberlappungs_z_intervall_weg() {
@@ -512,5 +272,19 @@ mod tests {
         assert_eq!(out.len(), 1);
         let r = rect_of(&out[0]);
         assert!(approx(r.v_min, 0.0) && approx(r.v_max, 4.0), "verschmolzen {r:?}");
+    }
+
+    #[test]
+    fn dach_ohne_prioritaet_bleibt_polygon() {
+        // Dach-Schicht (schiefes Trapez, ohne join_priority) wird unveraendert durchgereicht, auch wenn
+        // ein staerkeres Band ueberlappt — keine Ersetzung durch die Bounding-Box.
+        let mut dach = band(0.0, 2.0, 0.0, 1.0, 0, Some("dach"));
+        dach.cut = None;
+        dach.pts = vec![[0.0, 0.0], [2.0, 0.0], [1.5, 1.0], [0.5, 1.0]];
+        let pts = dach.pts.clone();
+        let beton = band(0.0, 2.0, 0.0, 1.0, 100, Some("beton"));
+        let out = subtract_dominant_bands(vec![dach, beton]);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].pts, pts);
     }
 }

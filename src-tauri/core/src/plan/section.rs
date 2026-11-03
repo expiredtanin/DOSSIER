@@ -833,32 +833,27 @@ fn apply_wall_termination(bands: Vec<Cut>, walls: &[Option<&Wall>]) -> Vec<Cut> 
     out
 }
 
-/// `subtractDominantBands` (Rechnung: `plan_section::dominant_bands`).
+/// `subtractDominantBands` (Rechnung: `dossier_hatch::section_dominance`, gemeinsam mit dem 3D-Live-Schnitt).
 fn subtract_dominant_bands(bands: Vec<Cut>) -> Vec<Cut> {
-    let mut ids: HashMap<&str, usize> = HashMap::new();
-    let mut b: Vec<f64> = Vec::with_capacity(1 + 7 * bands.len());
-    b.push(bands.len() as f64);
-    for band in &bands {
-        let r = rect_of_band(band);
-        let mut comp = -1.0;
-        if let Some(id) = band.component_id.as_deref() {
-            let n = ids.len();
-            let k = *ids.entry(id).or_insert(n);
-            comp = k as f64;
-        }
-        let r4 = r.unwrap_or([0.0; 4]);
-        b.extend([if r.is_some() { 1.0 } else { 0.0 }, r4[0], r4[1], r4[2], r4[3], band.join_priority.unwrap_or(f64::NAN), comp]);
-    }
-    let f = crate::plan_section::dominant_bands(&b);
-    let mut out = Vec::new();
-    let Some(&n) = f.first() else { return out };
-    let mut i = 1;
-    for _ in 0..n as usize {
-        let src = &bands[f[i] as usize];
-        if f[i + 1] == 0.0 {
-            out.push(src.clone());
-        } else {
-            let mut c = Cut::new(src.kind, src.index, vec![[f[i + 2], f[i + 5]], [f[i + 3], f[i + 5]], [f[i + 3], f[i + 4]], [f[i + 2], f[i + 4]]]);
+    use dossier_hatch::section_dominance::{dominant_bands, Band};
+    let mut ids: HashMap<&str, u32> = HashMap::new();
+    let inp: Vec<Band> = bands
+        .iter()
+        .map(|band| {
+            let comp = band.component_id.as_deref().map(|id| {
+                let n = ids.len() as u32;
+                *ids.entry(id).or_insert(n)
+            });
+            let rect = rect_of_band(band).map(|r| dossier_hatch::section_dominance::Rect { u_min: r[0], u_max: r[1], v_min: r[2], v_max: r[3] });
+            Band { rect, prio: band.join_priority, comp }
+        })
+        .collect();
+    dominant_bands(&inp)
+        .into_iter()
+        .map(|piece| {
+            let src = &bands[piece.src];
+            let Some(r) = piece.rect else { return src.clone() };
+            let mut c = Cut::new(src.kind, src.index, vec![[r.u_min, r.v_max], [r.u_max, r.v_max], [r.u_max, r.v_min], [r.u_min, r.v_min]]);
             c.fill = src.fill.clone();
             c.hatch = src.hatch.clone();
             c.join_priority = src.join_priority;
@@ -867,11 +862,9 @@ fn subtract_dominant_bands(bands: Vec<Cut>) -> Vec<Cut> {
             // Herkunft bleibt am Stück (Ebenen-Sichtbarkeit, Treppen-Pick).
             c.category = src.category.clone();
             c.stair_id = src.stair_id.clone();
-            out.push(c);
-        }
-        i += 6;
-    }
-    out
+            c
+        })
+        .collect()
 }
 
 // ── Dächer ────────────────────────────────────────────────────────────────────

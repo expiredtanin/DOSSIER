@@ -100,7 +100,7 @@ pub mod parametric_walls;
 pub mod geo_translate;
 pub mod selection_filter;
 pub mod reorder;
-pub mod ugrid;
+pub use dossier_hatch::ugrid;
 pub mod wasm_alloc;
 pub mod text_layout;
 pub mod plan_text;
