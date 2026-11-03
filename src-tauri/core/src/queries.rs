@@ -83,6 +83,16 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
     }
 }
 
+/// Wie [`run_root`] auf dem Dokument; Befehle (`cmdOps`, [K4] S3, `commands.rs`: `text` = JSON `{cmd, …}`,
+/// Antwort `{ops}`) lesen dazu die typisierte Sicht ([124]).
+pub fn run_root_doc(d: &mut crate::document::Document, name: &str, text: &str) -> Result<String, String> {
+    if name == "cmdOps" {
+        let (p, lk) = d.project_lookup()?;
+        return crate::commands::ops_json(lk.root, p, text);
+    }
+    run_root(&d.lookup(), name, text)
+}
+
 /// Abfragen auf der rohen Projekt-Wurzel (JSON-Baum, verlustfrei; Antwort JSON). `text`: Argument als Text/JSON.
 /// Elemente per id sucht `lk` (im Dokument über dessen Positions-Index).
 pub fn run_root(lk: &crate::document::Lookup, name: &str, text: &str) -> Result<String, String> {
@@ -132,7 +142,6 @@ pub fn run_root(lk: &crate::document::Lookup, name: &str, text: &str) -> Result<
         }
         // Griff-Änderungen ([K4] S3, `grips.rs`): `text` = JSON der Anfrage; Antwort `{ops, notice}` (ohne Commit).
         // Befehle ([K4] S3, `commands.rs`): `text` = JSON `{cmd, …}`; Antwort `{ops}`.
-        "cmdOps" => crate::commands::ops_json(root, text),
         "gripOps" => {
             let req: crate::grips::Request = serde_json::from_str(text).map_err(|e| format!("gripOps: {e}"))?;
             Ok(crate::grips::result_json(&crate::grips::run(lk, &req)?))

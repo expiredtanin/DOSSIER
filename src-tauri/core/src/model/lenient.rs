@@ -271,6 +271,13 @@ pub fn project_lenient(root: &Map<String, Value>) -> (Project, Vec<String>) {
     (p, dropped)
 }
 
+/// Typisierte Sicht einer Test-Wurzel (tolerant, unbekannte Felder erlaubt): für Tests von Funktionen,
+/// die Wurzel und Sicht zugleich lesen ([124]).
+#[cfg(test)]
+pub fn typed_for_test(root: &Map<String, Value>) -> Project {
+    super::allowing_extra(|| project_lenient(root).0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

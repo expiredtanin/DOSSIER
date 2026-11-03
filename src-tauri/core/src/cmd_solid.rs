@@ -10,6 +10,7 @@ use crate::cmd_transform::{IdGen, Shapes};
 use crate::json_util::{arr, field, js_num, num_of, num_or, truthy, with, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
+use crate::model::Project;
 use crate::ops::{id_of, Op};
 use serde_json::{json, Map, Value};
 
@@ -554,7 +555,7 @@ fn ceiling_opening_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx) -> Vec<O
 /// Dachfenster / Deckenöffnung mit Oberlicht ([103]): ein Klick setzt die Öffnung (Mitte im Grundriss) in das
 /// Dach, dessen Umriss den Punkt enthält (Dächer des aktiven Geschosses zuerst), sonst in die Decke des
 /// Geschosses. Masse in der Dachebene (Standard 78 × 118 cm), Fenstertyp wie beim Fenster-Befehl.
-fn roof_window_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn roof_window_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let at = p_of(v, "p");
     if !(at.0.is_finite() && at.1.is_finite()) {
         return Vec::new();
@@ -581,7 +582,7 @@ fn roof_window_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut Id
         ("hostWallId", s("")),
         (key, s(host_id)),
         ("hostPoint", pv(at)),
-        ("categoryCode", crate::cmd_create::category_or(root, "21", ctx)),
+        ("categoryCode", crate::cmd_create::category_or(p, "21", ctx)),
         ("kind", s("window")),
         ("position", js_num(0.0)),
         ("width", js_num(width)),
@@ -596,7 +597,7 @@ fn roof_window_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut Id
 
 /// Gaube ([G5]): ein Klick in eine geneigte Dachfläche setzt die Gaube (Stirnmitte am Punkt) und ein
 /// Fenster in ihre Stirn (`hostDormerId`). Art über `kind` (schlepp/sattel/flach/walm).
-fn dormer_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn dormer_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let at = p_of(v, "p");
     if !(at.0.is_finite() && at.1.is_finite()) {
         return Vec::new();
@@ -634,7 +635,7 @@ fn dormer_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) 
         ("hostWallId", s("")),
         ("hostRoofId", s(roof_id)),
         ("hostDormerId", s(&did)),
-        ("categoryCode", crate::cmd_create::category_or(root, "21", ctx)),
+        ("categoryCode", crate::cmd_create::category_or(p, "21", ctx)),
         ("kind", s("window")),
         ("position", js_num(0.0)),
         ("width", js_num(jsnum::round(width * 0.6 * 100.0) / 100.0)),
@@ -766,7 +767,7 @@ fn direction_arrow(a: V, b: V, sign: f64, out: &mut Shapes) {
 // Einstiege (über `cmd_create`)
 // ═════════════════════════════════════════════════════════════════════════════
 
-pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Option<Vec<Op>> {
+pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Option<Vec<Op>> {
     Some(match s_of(v, "cmd") {
         "solid" => solid_ops(v, ctx, ids),
         "revolve" => revolve_ops(root, v, ctx, ids),
@@ -777,8 +778,8 @@ pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> 
         "excavation" => excavation_ops(root, v, ctx, ids),
         "ceilingOpening" => ceiling_opening_ops(root, v, ctx),
         "roofHole" => roof_hole_ops(root, v, ctx),
-        "roofWindow" => roof_window_ops(root, v, ctx, ids),
-        "dormer" => dormer_ops(root, v, ctx, ids),
+        "roofWindow" => roof_window_ops(root, p, v, ctx, ids),
+        "dormer" => dormer_ops(root, p, v, ctx, ids),
         "sectionline" => sectionline_ops(root, v, ids),
         _ => return None,
     })
@@ -854,7 +855,7 @@ mod tests {
         let run = |x: f64, y: f64, kind: &str| {
             let mut ids = IdGen::new("s");
             let ctx = Ctx { level: "dg", floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
-            ops(root, &json!({"cmd": "dormer", "p": {"x": x, "y": y}, "kind": kind}), &ctx, &mut ids).unwrap()
+            ops(root, &crate::model::lenient::typed_for_test(root), &json!({"cmd": "dormer", "p": {"x": x, "y": y}, "kind": kind}), &ctx, &mut ids).unwrap()
         };
         let o = run(4.0, 1.5, "sattel");
         assert_eq!(o.len(), 2);
@@ -878,7 +879,7 @@ mod tests {
         let run = |level: &str, x: f64| {
             let mut ids = IdGen::new("s");
             let ctx = Ctx { level, floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
-            ops(root, &json!({"cmd": "roofWindow", "p": {"x": x, "y": 1.0}}), &ctx, &mut ids).unwrap()
+            ops(root, &crate::model::lenient::typed_for_test(root), &json!({"cmd": "roofWindow", "p": {"x": x, "y": 1.0}}), &ctx, &mut ids).unwrap()
         };
         let item = |o: &[Op]| match &o[0] {
             Op::Add { items, .. } => items[0].clone(),
@@ -900,7 +901,7 @@ mod tests {
         let run = |pts: Value| {
             let mut ids = IdGen::new("s");
             let ctx = Ctx { level: "ug", floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
-            ops(root, &json!({"cmd": "excavation", "pts": pts}), &ctx, &mut ids).unwrap()
+            ops(root, &crate::model::lenient::typed_for_test(root), &json!({"cmd": "excavation", "pts": pts}), &ctx, &mut ids).unwrap()
         };
         let o = run(json!([{"x": 0, "y": 0}, {"x": 10, "y": 8}]));
         let Op::Add { collection, items, .. } = &o[0] else { panic!() };

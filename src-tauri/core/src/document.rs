@@ -350,6 +350,14 @@ impl Document {
         Ok(self.typed.as_ref().expect("gerade gesetzt"))
     }
 
+    /// Typisierte Sicht und die Wurzel samt Positions-Index (getrennte Ausleihen): Befehle lesen das Projekt
+    /// typisiert und bauen geänderte Elemente verlustfrei aus dem rohen Baum ([124]).
+    pub fn project_lookup(&mut self) -> Result<(&Project, Lookup<'_>), String> {
+        self.project()?;
+        let p = self.typed.as_ref().expect("gerade gelesen");
+        Ok((p, Lookup { root: &self.root, pos: Some(&self.pos) }))
+    }
+
     /// Die Projekt-Wurzel als JSON (für Abfragen, die auf dem rohen Baum rechnen, s. `queries::run_root`).
     pub fn root(&self) -> &Map<String, Value> {
         &self.root
