@@ -1086,8 +1086,9 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   rechnete in f32 (Überlapp knapp über EPS bei ~100 m ging verloren); NaN-Ecke liess im 2D jedes schwächere Band
   verschwinden, im 3D zählte die endliche Hülle — jetzt nimmt ein nicht endliches Rechteck nicht teil. Sonst
   gleich (Verschmelzen geprüft). Golden-Tests unverändert; nicht in der Tauri-App angesehen.
-- ○ **[126] `jsnum`/`jsmath` ersetzen** (libm, deterministisch über Plattformen); `plan_*.rs`-Paare nach `plan/`
-  zusammenführen. · M
+- ◐ **[126] `jsnum`/`jsmath` ersetzen** (3.11.): sin/cos/tan/atan/atan2/acos/pow/hypot laufen über `libm` (kein
+  `Math`-Import aus JS mehr, Feature `web` von `dossier-hatch` entfällt); `jsnum::min/max/round`/`to_int32` bleiben
+  als reines Rust (NaN-Semantik). Bench (big.obp, ms): Plan→Szene 196→132, Modell3d 242→172, Schnitt 249→172, Ansicht 117→78; Golden-Tests unverändert (Linux/V8 geprüft, nicht in Tauri). Offen: `plan_*.rs`-Paare nach `plan/` zusammenführen (anderer Agent). · M
 - ○ **[127] 3D-Booleans klären:** BSP in `fileio/csg.rs` stilllegen, Manifold vs. truck dokumentieren. · S
 - ○ **[128] Restlogik nach Rust:** Griffe (`useGripEditing.ts`), `layoutModel.ts`, Kollisions-Vorprüfung,
   `exportStep.projectSolidSpecs`. · L

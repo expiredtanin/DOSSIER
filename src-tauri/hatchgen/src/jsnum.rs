@@ -1,99 +1,18 @@
-//! Zahl-Semantik von JavaScript für bitgleiche Portierungen ([K3b] GPU-Kompilierung, Schraffur).
+//! Zahl-Helfer mit JavaScript-Semantik ([126]).
 //!
+//! - Trigonometrie und `pow` laufen über das Crate `libm` (reines Rust, auf allen Plattformen und im
+//!   Web-Build dieselben Werte; kein Aufruf in die JS-Engine).
 //! - `Math.min/max` liefern bei NaN NaN (Rust `f64::min/max` ignorieren NaN).
 //! - `Math.round` rundet halbe Werte Richtung +∞ (Rust `round` weg von 0).
 //! - `x | 0` ist ToInt32 (Rest modulo 2³², Rust `as i32` sättigt).
-//! - `Math.pow` (`x ** 3`) und Trigonometrie: im Web-Build (wasm32 + Feature "web") ruft der Kern `Math.cos/sin/tan/atan/atan2/acos`
-//!   der laufenden JS-Engine. Nur so sind die Werte bitgleich zur bisherigen TS-Fassung — V8
-//!   (glibc-abgeleitete sin/cos), JavaScriptCore (System-libm von macOS) und Rusts libm (musl)
-//!   unterscheiden sich in einzelnen Fällen in der letzten Stelle. Nativ (`cargo test`, Tauri)
-//!   gilt die Rust-Standardbibliothek.
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-mod trig {
-    use wasm_bindgen::prelude::wasm_bindgen;
+pub use libm::{acos, atan, atan2, cos, sin, tan};
 
-    #[wasm_bindgen]
-    extern "C" {
-        #[wasm_bindgen(js_namespace = Math, js_name = cos)]
-        fn js_cos(x: f64) -> f64;
-        #[wasm_bindgen(js_namespace = Math, js_name = sin)]
-        fn js_sin(x: f64) -> f64;
-        #[wasm_bindgen(js_namespace = Math, js_name = atan2)]
-        fn js_atan2(y: f64, x: f64) -> f64;
-        #[wasm_bindgen(js_namespace = Math, js_name = acos)]
-        fn js_acos(x: f64) -> f64;
-        #[wasm_bindgen(js_namespace = Math, js_name = pow)]
-        fn js_pow(x: f64, y: f64) -> f64;
-        #[wasm_bindgen(js_namespace = Math, js_name = tan)]
-        fn js_tan(x: f64) -> f64;
-        #[wasm_bindgen(js_namespace = Math, js_name = atan)]
-        fn js_atan(x: f64) -> f64;
-    }
-    #[inline]
-    pub fn atan(x: f64) -> f64 {
-        js_atan(x)
-    }
-    #[inline]
-    pub fn tan(x: f64) -> f64 {
-        js_tan(x)
-    }
-    #[inline]
-    pub fn pow(x: f64, y: f64) -> f64 {
-        js_pow(x, y)
-    }
-
-    #[inline]
-    pub fn cos(x: f64) -> f64 {
-        js_cos(x)
-    }
-    #[inline]
-    pub fn sin(x: f64) -> f64 {
-        js_sin(x)
-    }
-    #[inline]
-    pub fn atan2(y: f64, x: f64) -> f64 {
-        js_atan2(y, x)
-    }
-    #[inline]
-    pub fn acos(x: f64) -> f64 {
-        js_acos(x)
-    }
+/// `x ** y` (libm).
+#[inline]
+pub fn pow(x: f64, y: f64) -> f64 {
+    libm::pow(x, y)
 }
-
-#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
-mod trig {
-    #[inline]
-    pub fn cos(x: f64) -> f64 {
-        x.cos()
-    }
-    #[inline]
-    pub fn sin(x: f64) -> f64 {
-        x.sin()
-    }
-    #[inline]
-    pub fn atan2(y: f64, x: f64) -> f64 {
-        y.atan2(x)
-    }
-    #[inline]
-    pub fn acos(x: f64) -> f64 {
-        x.acos()
-    }
-    #[inline]
-    pub fn pow(x: f64, y: f64) -> f64 {
-        x.powf(y)
-    }
-    #[inline]
-    pub fn tan(x: f64) -> f64 {
-        x.tan()
-    }
-    #[inline]
-    pub fn atan(x: f64) -> f64 {
-        x.atan()
-    }
-}
-
-pub use trig::{acos, atan, atan2, cos, pow, sin, tan};
 
 /// Endliche Zahl oder 0 (NaN/±∞ → 0; Summen der Kennzahlen/Flächen).
 #[inline]

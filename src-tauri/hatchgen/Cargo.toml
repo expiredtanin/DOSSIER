@@ -5,16 +5,11 @@
 name = "dossier-hatch"
 version = "0.1.0"
 edition = "2021"
-description = "Schraffur-Generator (Linien, Schichtmuster) als eigenes Crate: dossier-core (Plan/Schnitt/Ansicht) und render3d (Live-Schnitt) zeichnen damit dieselben Linien. Nur JS-Zahlsemantik (jsnum, jsmath), keine weiteren Abhaengigkeiten."
+description = "Schraffur-Generator (Linien, Schichtmuster) als eigenes Crate: dossier-core (Plan/Schnitt/Ansicht) und render3d (Live-Schnitt) zeichnen damit dieselben Linien. Zahl-Helfer (jsnum, jsmath) ueber libm."
 license = "AGPL-3.0-or-later"
 
 [lib]
 name = "dossier_hatch"
 
-[features]
-default = []
-# Math-Aufrufe der JS-Engine (bitgleich zu TS), nur wasm32; vom Kern (Feature "web") durchgereicht.
-web = ["dep:wasm-bindgen"]
-
 [dependencies]
-wasm-bindgen = { version = "0.2", optional = true }
+libm = "0.2"
