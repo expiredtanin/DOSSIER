@@ -8,6 +8,7 @@ import type { CommandContext, DraftShape } from "./types";
 import type { ProjectMutation } from "../core";
 import { cmdMutation, documentFor } from "../core/document";
 import { toMarkedJson } from "../core/ops";
+import { coreEpoch } from "../engine/coreWasm";
 import { uniqueStamp } from "../tools/types";
 import { decodeShapes } from "../tools/coreCmd";
 
@@ -46,7 +47,11 @@ export const xy = (p: Vec2): [number, number] => [p.x, p.y];
 let lastReq: Record<string, unknown> | null = null;
 let lastCtx: { level: string; floorHeight: unknown; cat: string; wallType: string } | null = null;
 
+/** Kern-Epoche der gemerkten Optionen (nach einem Kern-Neustart kennt der Kern sie nicht mehr, [118]). */
+let lastEpoch = 0;
+
 function sameReq(req: Record<string, unknown>, ctx: CommandContext): boolean {
+  if (lastEpoch !== coreEpoch()) return false;
   const c = lastCtx;
   if (!lastReq || !c) return false;
   if (c.level !== ctx.level.id || !Object.is(c.floorHeight, ctx.level.floorHeight) || c.cat !== ctx.defaultCategoryCode || c.wallType !== ctx.activeWallTypeId) return false;
@@ -71,6 +76,7 @@ export function createPreview(ctx: CommandContext, req: { cmd: string } & Record
   if (!sameReq(req, ctx)) {
     json = toMarkedJson({ ...req, ctx: ctxReq(ctx) });
     lastReq = req;
+    lastEpoch = coreEpoch();
     lastCtx = { level: ctx.level.id, floorHeight: ctx.level.floorHeight, cat: ctx.defaultCategoryCode, wallType: ctx.activeWallTypeId };
   }
   const f = documentFor(ctx.project).createPreview(json, flat);

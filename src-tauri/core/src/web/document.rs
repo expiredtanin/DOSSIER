@@ -310,3 +310,12 @@ pub fn doc_last_extra(h: u32) -> String {
 pub fn doc_last_hits(h: u32) -> Vec<f64> {
     with_doc(h, |d| d.last_hits().iter().map(|p| p.map_or(-1.0, |i| i as f64)).collect()).unwrap_or_default()
 }
+
+/// NUR für Tests ([118], Wiederanlauf nach Kern-Panic): löst mitten in einem Dokument-Zugriff einen
+/// Panic aus (die `RefCell` der Dokument-Tabelle bleibt danach geborgt, die Instanz ist unbrauchbar).
+/// Versteckter Export ohne TS-Fassade und ohne Aufrufer in der App; `src/engine/coreRecovery.test.ts`
+/// prüft damit, dass `core()` die Instanz neu startet und die Dokumente aus der Leseansicht wieder öffnet.
+#[wasm_bindgen]
+pub fn __debug_panic(h: u32) {
+    with_doc(h, |_| panic!("__debug_panic: absichtlicher Test-Panic ([118])"));
+}

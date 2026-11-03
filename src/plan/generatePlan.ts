@@ -25,6 +25,7 @@ import type {
   Vec2,
 } from "../model/types";
 import { documentFor } from "../core/document";
+import { registerCoreRestore } from "../engine/coreWasm";
 import { decodePlanBuf, type DecodedPlanBuf } from "./planBuf";
 import {
   SHOW_ALL,
@@ -440,6 +441,8 @@ const PLAN_MULTI_MAGIC = 1_347_175_021;
  */
 const chunkStores = new Map<string, Map<number, DecodedPlanBuf>>();
 const MAX_CHUNK_STORES = 16;
+// Der Kern-Cache der Stücke ist nach einem Kern-Neustart leer ([118]): alles neu anfordern.
+registerCoreRestore(() => chunkStores.clear());
 
 const DETAIL_CODE: Record<DetailLevel, number> = { grob: 0, mittel: 1, fein: 2 };
 

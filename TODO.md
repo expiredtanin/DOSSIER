@@ -1045,8 +1045,17 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   (Rust-Befehl), `.obp~`-Sicherung; Autosave erst nach erfolgreichem Umbenennen löschen. · S
 - ○ **[117] CSP setzen.** `tauri.conf.json` hat `"csp": null`; strikte CSP (`script-src 'self' 'wasm-unsafe-eval'`,
   `connect-src` = netFetch-Hosts + ipc). Rich-Text-`innerHTML` prüfen. · S
-- ○ **[118] Wiederanlauf nach Kern-Panic.** Dokument + Verlauf im selben WASM wie alle Geometrie
-  (`web/document.rs`); TS hält Op-Log seit letztem Laden, baut Instanz nach Trap neu auf. · M
+- ◐ **[118] Wiederanlauf nach Kern-Panic.** (3.11.) `core()` (`engine/coreWasm.ts`) hüllt alle Kern-Exporte: ein
+  Trap (`RuntimeError`/`unreachable`) baut sofort eine frische Instanz aus dem übersetzten Modul
+  (`__dossier_reinit`, ergänzt von `scripts/build-core.mjs` = `npm run build:core`), jedes `ProjectDocument`
+  öffnet sich aus seiner Leseansicht neu (= letzter angenommener Stand), Kern-Handles (gehaltene Plan-Puffer,
+  Pick-Index, Vorschau-Optionen, Stück-Cache) gelten über `coreEpoch()` als ungültig; der Aufruf wirft
+  `CoreTrapError` und wird nicht wiederholt. Hülle (`useProjectFileActions`): sofort Autosave-Kopie,
+  Verlaufsanzeige nachführen, `notify(t("core.restarted"))` (gedrosselt, 5 s). Panic-Hook war schon da.
+  Test: verstecktes `__debug_panic` (nur Test, keine Fassade) in `engine/coreRecovery.test.ts`.
+  Offen: Undo-Verlauf geht beim Neustart verloren (Meldung sagt es) — Wiederaufbau per Op-Log wäre der
+  nächste Schritt; nur im Linux-Container (vitest/Node) geprüft, nicht in Tauri/Electron (synchrones
+  `new WebAssembly.Instance` im Haupt-Thread). · M
 - ○ **[119] Referenz-Ausgaben (golden).** Plan-Puffer/SVG/Schnitt/Ansicht der Musterprojekte als Snapshot;
   seit TS gelöscht ist, fehlt die Bitgleich-Referenz. · M
 - ○ **[120] macOS in CI.** `cargo check --features native2d`, Bildvergleich Metal ↔ WebGPU. · M
