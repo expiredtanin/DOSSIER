@@ -11,7 +11,7 @@
 
 import { jsPDF } from "jspdf";
 import type { Project } from "../model/types";
-import { t } from "../i18n";
+import { t } from "../i18n/translate";
 import { core } from "../engine/coreWasm";
 import { computeAreaTable, computeIvhb } from "../analysis/areaTable";
 import type { AreaRow, IvhbOptions } from "../analysis/areaTable";

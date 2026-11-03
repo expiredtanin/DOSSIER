@@ -1075,8 +1075,9 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
 - ○ **[127] 3D-Booleans klären:** BSP in `fileio/csg.rs` stilllegen, Manifold vs. truck dokumentieren. · S
 - ○ **[128] Restlogik nach Rust:** Griffe (`useGripEditing.ts`), `layoutModel.ts`, Kollisions-Vorprüfung,
   `exportStep.projectSolidSpecs`. · L
-- ○ **[129] Grenze schärfen:** React-freies `t()` (Kern importiert `i18n` → React), `net/` in `CORE_DIRS`,
-  transitive Importe prüfen. · S
+- ✅ **[129] Grenze schärfen.** (3.11.) `i18n/translate.ts` (React-frei: `t`, Sprache, Wörterbücher), `i18n/index.ts` re-exportiert
+  und hält nur `useT`; Kern-Dateien importieren `i18n/translate`. `net/` in `CORE_DIRS`, neuer Test prüft transitive
+  relative Importe (Ausnahmelisten leer). · S
 - ○ **[130] Kleinkram:** eine generische Fenster-Brücke statt 5 Kopien; Auswahl als ein `Selection`-Objekt statt
   12 Felder; `primitives.tsx` auf Overlay zurückschneiden; Cargo-Workspace + cargo-deny; NOTICE (OFL-Schriften,
   wgpu, Tauri, React, pdf.js, lcms). · M
