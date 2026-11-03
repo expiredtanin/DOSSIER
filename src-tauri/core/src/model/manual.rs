@@ -14,6 +14,21 @@ pub struct Extra(pub serde_json::Map<String, serde_json::Value>);
 thread_local! {
     /// Gesetzt während [`to_value_typed_only`]: `Extra` schreibt dann nichts.
     static OMIT_EXTRA: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Gesetzt während [`allowing_extra`]: unbekannte Felder sind auch in Tests kein Panic.
+    static ALLOW_EXTRA: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Führt `f` aus, ohne dass unbekannte Felder in Tests einen Panic auslösen (Prüfung neuer Op-Werte,
+/// `model::check`: Felder ausserhalb des Modells sind erlaubt — die Test-Stummel tragen viele).
+pub fn allowing_extra<R>(f: impl FnOnce() -> R) -> R {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            ALLOW_EXTRA.with(|a| a.set(self.0));
+        }
+    }
+    let _reset = Reset(ALLOW_EXTRA.with(|a| a.replace(true)));
+    f()
 }
 
 impl Serialize for Extra {
@@ -44,7 +59,7 @@ impl<'de> Deserialize<'de> for Extra {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let m = serde_json::Map::<String, serde_json::Value>::deserialize(d)?;
         #[cfg(test)]
-        if !m.is_empty() {
+        if !m.is_empty() && !ALLOW_EXTRA.with(|a| a.get()) {
             panic!("Modell kennt Felder nicht: {:?}", m.keys().collect::<Vec<_>>());
         }
         Ok(Extra(m))
