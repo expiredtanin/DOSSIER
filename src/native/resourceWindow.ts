@@ -5,9 +5,12 @@
 // gemeinsamer JS-Speicher, also kein direkter Store-Zugriff. Die Brücke
 // synchronisiert daher explizit über Tauri-Events (@tauri-apps/api/event):
 //   • Hauptfenster → Ressourcen-Fenster: „resource-sync-project" mit dem
-//     kompletten (JSON-serialisierbaren) Project bei jeder Änderung + einmal
-//     sofort, sobald das Ressourcen-Fenster „resource-window-ready" meldet
-//     (Race-Schutz: das Fenster könnte später starten als der erste Push).
+//     kompletten (JSON-serialisierbaren) Project einmal sofort, sobald das
+//     Ressourcen-Fenster „resource-window-ready" meldet (Race-Schutz: das
+//     Fenster könnte später starten als der erste Push); danach bei jeder
+//     Änderung nur „resource-sync-delta" mit den geänderten Feldern der obersten
+//     Ebene ([121], `projectDelta.ts`) — eine Wand-Änderung schickt `walls`,
+//     nicht das ganze Projekt.
 //   • Ressourcen-Fenster → Hauptfenster: „resource-command" mit
 //     `{ name, args }` — der Name eines ResourceManagerHandlers-Feldes plus
 //     seine Argumente. Das Hauptfenster ruft den ECHTEN Handler auf (der
@@ -21,6 +24,7 @@
 import { useEffect, useRef } from "react";
 import { isTauriRuntime } from "./projectFile";
 import type { Project } from "../model/types";
+import { projectDelta } from "./projectDelta";
 import type { ResourceManagerHandlers, TabId } from "../ui/ResourceManager";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 
@@ -71,6 +75,9 @@ export function useResourceWindowHost(
   handlersRef.current = handlers;
   const projectRef = useRef(project);
   projectRef.current = project;
+  // Stand, den das Fenster zuletzt bekommen hat (Basis der nächsten Differenz); null = beim
+  // nächsten Mal das ganze Projekt senden.
+  const sentRef = useRef<Project | null>(null);
 
   // Befehle vom Ressourcen-Fenster entgegennehmen + auf die echten Handler
   // anwenden, UND bei „ready" (Fenster gerade erst gestartet) sofort das
@@ -94,9 +101,11 @@ export function useResourceWindowHost(
       );
       unlisten.push(
         await listen("resource-window-ready", () => {
-          void emitTo(RESOURCE_WINDOW_LABEL, "resource-sync-project", projectRef.current).catch(
-            () => {},
-          );
+          const full = projectRef.current;
+          sentRef.current = full;
+          void emitTo(RESOURCE_WINDOW_LABEL, "resource-sync-project", full).catch(() => {
+            sentRef.current = null;
+          });
         }),
       );
     })();
@@ -119,9 +128,24 @@ export function useResourceWindowHost(
     const timer = setTimeout(() => {
       void (async () => {
         const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-        if (cancelled || !(await WebviewWindow.getByLabel(RESOURCE_WINDOW_LABEL))) return;
+        if (cancelled) return;
+        if (!(await WebviewWindow.getByLabel(RESOURCE_WINDOW_LABEL))) {
+          // Fenster zu: beim nächsten Öffnen meldet es „ready" und bekommt das ganze Projekt.
+          sentRef.current = null;
+          return;
+        }
         const { emitTo } = await import("@tauri-apps/api/event");
-        await emitTo(RESOURCE_WINDOW_LABEL, "resource-sync-project", project).catch(() => {});
+        const prev = sentRef.current;
+        sentRef.current = project;
+        const onFail = () => {
+          sentRef.current = null;
+        };
+        if (!prev) {
+          await emitTo(RESOURCE_WINDOW_LABEL, "resource-sync-project", project).catch(onFail);
+          return;
+        }
+        const delta = projectDelta(prev, project);
+        if (delta) await emitTo(RESOURCE_WINDOW_LABEL, "resource-sync-delta", delta).catch(onFail);
       })();
     }, 150);
     return () => {

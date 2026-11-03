@@ -10,7 +10,7 @@
 
 import { MODEL_UNITS, fmtDisplay, xToDisplay, yToDisplay, type DisplayUnits } from "../tools/displayUnits";
 import { useCursor } from "../state/cursorStore";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import type { SnapSettings } from "../tools/types";
 import { t } from "../i18n";
 
@@ -357,7 +357,7 @@ function Sep() {
 /** Eine Meterzahl für die Statusleiste (3 Nachkommastellen, ohne Einheit). */
 const fmt = (n: number): string => n.toFixed(3);
 
-export function StatusBar({
+export const StatusBar = memo(function StatusBar({
   hint,
   showCursor,
   unit,
@@ -423,4 +423,4 @@ export function StatusBar({
       </div>
     </footer>
   );
-}
+});

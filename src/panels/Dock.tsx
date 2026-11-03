@@ -23,7 +23,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { PanelFrame } from "./PanelFrame";
 import { TabStrip } from "./TabStrip";
 import { getPanel } from "./registry";
-import { PanelHostContext } from "./types";
+import { PanelHostProvider } from "./host";
 import type {
   DisplayMode,
   DockId,
@@ -57,7 +57,7 @@ export interface DockProps {
   /**
    * Baut den Host-Context-Wert für eine Gruppe (passend zu ihrem aktiven Tab).
    * App reicht hier `hostWithMode(...)` herein; das Dock wickelt jede Gruppe in
-   * einen eigenen <PanelHostContext.Provider>.
+   * einen eigenen <PanelHostProvider>.
    */
   buildHost: (activeTab: string | null) => PanelHost;
   /** Generischer Kontext, den der PanelFrame an `def.render` weiterreicht. */
@@ -223,7 +223,7 @@ export function Dock({
                 onStartDrag={onStartTabDrag}
               />
               {def ? (
-                <PanelHostContext.Provider value={buildHost(group.activeTab)}>
+                <PanelHostProvider value={buildHost(group.activeTab)}>
                   <PanelFrame
                     def={def}
                     ctx={ctx}
@@ -232,7 +232,7 @@ export function Dock({
                       onDisplayModeChange(group.activeTab, m)
                     }
                   />
-                </PanelHostContext.Provider>
+                </PanelHostProvider>
               ) : (
                 <div className="panel-frame panel-frame-empty" />
               )}

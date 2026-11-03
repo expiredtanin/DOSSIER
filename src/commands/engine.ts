@@ -115,6 +115,15 @@ function sameStep(a: CommandState, b: CommandState): boolean {
   }
 }
 
+/** Ansicht ohne laufenden Befehl — unveränderlich geteilt. */
+const IDLE_VIEW: EngineView = Object.freeze({
+  active: false,
+  promptKey: null,
+  options: Object.freeze([]) as unknown as EngineView["options"],
+  commandName: null,
+  fields: Object.freeze([]) as unknown as EngineView["fields"],
+}) as EngineView;
+
 export class CommandEngine {
   private host: EngineHost;
   private command: Command | null = null;
@@ -165,9 +174,8 @@ export class CommandEngine {
 
   /** Lesender Schnappschuss für die Command-Line. */
   view(): EngineView {
-    if (!this.command || !this.state) {
-      return { active: false, promptKey: null, options: [], commandName: null, fields: [] };
-    }
+    // Ruhe: immer dasselbe Objekt (stabile Identität für memoisierte Befehlszeile, [121]).
+    if (!this.command || !this.state) return IDLE_VIEW;
     this.syncFields();
     const defs = this.currentFields();
     // Live-Werte (Maus-Vorschau) für ungelockte Felder, falls der Befehl sie

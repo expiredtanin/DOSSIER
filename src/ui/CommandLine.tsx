@@ -5,7 +5,7 @@
 // Rein gesteuert: alle Aktionen laufen über Callbacks an die Engine. Tab (global
 // in App) fokussiert das Eingabefeld. Bezeichner englisch, sichtbarer Text via t().
 
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, memo, useImperativeHandle, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { NON_LENGTH_FIELDS } from "../commands/parseInput";
@@ -86,7 +86,8 @@ export interface CommandLineHandle {
   blur: () => void;
 }
 
-export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
+// memo ([121]): App reicht stabile Handler; ohne Änderung an Prompt/Feldern kein Neurendern.
+export const CommandLine = memo(forwardRef<CommandLineHandle, CommandLineProps>(
   function CommandLine(
     { active, promptKey, options, fields, onSubmit, onOption, onCycleField, onCancel, stillActive, steps, suggest, onTextChange, units = MODEL_UNITS },
     ref,
@@ -258,4 +259,4 @@ export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
       </div>
     );
   },
-);
+));

@@ -11,9 +11,9 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import { t } from "../i18n";
-import { usePanelHost } from "./host";
+import { usePanelHostAction, usePanelHostSelect } from "./host";
 import type { ToolId } from "./host";
 import { toolInfo } from "../tools/tools";
 import { getCommand } from "../commands/registry";
@@ -23,7 +23,7 @@ import { CommandIcon } from "../ui/ribbon/CommandIcon";
 // Keine echten Asset-Icons vorhanden: schlichte Inline-SVG-Glyphen je Werkzeug
 // (~16×16, stroke=currentColor, fill=none), damit das Icon die Textfarbe der
 // Zeile übernimmt.
-export function ToolIcon({ id }: { id: ToolId }) {
+export const ToolIcon = memo(function ToolIcon({ id }: { id: ToolId }) {
   const common = {
     width: 16,
     height: 16,
@@ -333,7 +333,7 @@ export function ToolIcon({ id }: { id: ToolId }) {
     default:
       return null;
   }
-}
+});
 
 // ── Kategorien ───────────────────────────────────────────────────────────────
 // Werkzeuge/Befehle in drei Rubriken sortiert (Nutzerwunsch: „sortiere nach 2D
@@ -383,8 +383,15 @@ function loadView(): ToolsView {
 
 // ── Panel ────────────────────────────────────────────────────────────────────
 
-export function ToolsPanel() {
-  const host = usePanelHost();
+export const ToolsPanel = memo(function ToolsPanel() {
+  // Nur die eigenen Felder abonnieren ([121]): eine Op am Projekt rendert die Palette nicht neu.
+  const host = usePanelHostSelect((h) => ({
+    activeTool: h.activeTool,
+    toolsEnabled: h.toolsEnabled,
+    activeCommand: h.activeCommand,
+  }));
+  const onSelectTool = usePanelHostAction("onSelectTool");
+  const onRunCommand = usePanelHostAction("onRunCommand");
   const [view, setView] = useState<ToolsView>(loadView);
 
   const chooseView = (v: ToolsView) => {
@@ -411,7 +418,7 @@ export function ToolsPanel() {
         className={"tp-item" + (active ? " active" : "") + (disabled ? " disabled" : "")}
         title={view === "icons" ? label : title}
         disabled={disabled}
-        onClick={() => host.onSelectTool(id)}
+        onClick={() => onSelectTool(id)}
       >
         <ToolIcon id={id} />
         <span className="tp-label">{label}</span>
@@ -431,7 +438,7 @@ export function ToolsPanel() {
         type="button"
         className={"tp-item" + (active ? " active" : "")}
         title={label}
-        onClick={() => host.onRunCommand(name)}
+        onClick={() => onRunCommand(name)}
       >
         <CommandIcon name={name} />
         <span className="tp-label">{label}</span>
@@ -487,4 +494,4 @@ export function ToolsPanel() {
       </section>
     </div>
   );
-}
+});

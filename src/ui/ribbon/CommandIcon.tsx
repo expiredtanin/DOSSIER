@@ -14,7 +14,9 @@ const common = {
   strokeLinejoin: "round" as const,
 };
 
-export function CommandIcon({ name }: { name: string }) {
+import { memo } from "react";
+
+export const CommandIcon = memo(function CommandIcon({ name }: { name: string }) {
   switch (name) {
     case "move":
       // Vier-Wege-Verschiebepfeil.
@@ -307,4 +309,4 @@ export function CommandIcon({ name }: { name: string }) {
     default:
       return null;
   }
-}
+});

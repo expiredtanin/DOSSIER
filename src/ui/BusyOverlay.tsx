@@ -1,7 +1,8 @@
+import { memo } from "react";
 import { useBusy } from "../state/busyStore";
 
 /** Vollflächiger "Bitte warten"-Hinweis, solange `busyStore` ein Label hält. */
-export function BusyOverlay() {
+export const BusyOverlay = memo(function BusyOverlay() {
   const label = useBusy();
   if (!label) return null;
   return (
@@ -12,4 +13,4 @@ export function BusyOverlay() {
       </div>
     </div>
   );
-}
+});

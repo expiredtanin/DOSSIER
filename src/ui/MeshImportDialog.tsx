@@ -6,7 +6,7 @@
 //
 // Muster: PointCloudImportDialog (abgedunkeltes Overlay, Esc/Hintergrund schliessen).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import { t } from "../i18n";
 import { Dropdown } from "./Dropdown";
 import {
@@ -195,7 +195,7 @@ function MeshImportDialog({ req, onImport, notify }: { req: MeshImportRequest } 
 }
 
 /** Verstecktes Datei-Feld (mehrere Dateien: Modell + `.mtl`/`.bin`) + Dialog; einmal in der App einhängen. */
-export function MeshImportHost(props: MeshImportHostProps) {
+export const MeshImportHost = memo(function MeshImportHost(props: MeshImportHostProps) {
   const req = useMeshImportRequest();
   return (
     <>
@@ -216,4 +216,4 @@ export function MeshImportHost(props: MeshImportHostProps) {
       {req && <MeshImportDialog key={req.file.name + req.file.size + req.file.lastModified} req={req} {...props} />}
     </>
   );
-}
+});

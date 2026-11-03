@@ -1077,8 +1077,20 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   Plan: gleiche Szene (`demo_scene` bzw. `scene_v1.bin`) einmal per `render2d::headless` auf Metal, einmal im
   Chromium (Playwright, WebGPU) rendern und mit der Pixeltoleranz aus `tests/golden.rs` vergleichen; Chromium-WebGPU auf
   macOS-Runnern zuerst prüfen. · M
-- ○ **[121] App.tsx zerlegen, Neurendern stoppen.** `App.tsx:365` abonniert ganzes Projekt, 0× `memo`;
-  Abschnitte in Hooks/Komponenten, Panels lesen den Store selbst; Nebenfenster bekommen Ops statt Projekt. · L
+- ◐ **[121] App.tsx zerlegen, Neurendern stoppen.** (3.11.) App.tsx 4003 → 3232 Zeilen: Befehls-Engine
+  (`state/useCommandEngineHost`), 3D-Griffe (`state/useGrip3dEditing`), Layout-Blatt (`state/useSheetPane`),
+  Darstellungs-Resolver (`state/useDisplayResolvers`), Inline-Editoren (`menus/InlineEditors`), Stempel-Editor
+  (`ui/RoomStampEditorHost`). `memo` + stabile Handler (`state/useEvent`: `useEvent`/`useEventBundle`/`useSameData`)
+  für Oberleiste (nur `projectName`), Menü-/Ansichtsleiste, Statusleiste, Befehlszeile (Ruhe-Ansicht der Engine
+  geteilt), Hauptansicht `Content` (Plan/3D), Overlays, Icons. Panels: `hostWithMode` liefert bei gleichen Eingaben
+  denselben Host; `PanelHostProvider` mit Store + `usePanelHostSelect`/`usePanelHostAction` (Werkzeug-Palette
+  abonniert nur ihre Felder). Live-Massstab in `state/liveScaleStore` (Zoom rendert App nicht mehr).
+  Ressourcen-Fenster bekommt nach dem ersten vollen Stand nur die geänderten Felder (`native/projectDelta`).
+  Gemessen (`e2e/renderCount.spec.ts`, Musterhaus, unminifiziert): Wand-Änderung 413 → 290 Renders (Rest: ~200
+  Plan-Primitive, Objekt-Info, Elemente-Baum), Zoom-Schritt 240 → 61. Nicht in der Tauri-App geprüft (Ressourcen-
+  Fenster nur Unit-Test). Offen: App abonniert weiter das ganze Projekt (rendert je Op 1×, Kinder nicht); übrige
+  Panels lesen noch den ganzen Host (`usePanelHost`); `usePanelHostBase` (1515 Z.) und Kontextmenü-Verdrahtung
+  noch in App; andere Nebenfenster (Zeichnungsebenen, Ebenen) senden weiter ihren ganzen Zustand ([130]). · L
 - ✅ **[122] Zweites Kern-Dokument (`documentFor` → `shared`, Differenz-Abgleich) abschaffen.** (3.11.) `sync`/
   Differenz-Abgleich gestrichen; `documentFor` findet nur offene Dokumente über die Leseansicht (Store, CLI,
   `withDocument`). Abgewandelte Projekte: Fang beim Ziehen (`App.tsx` 3D-Griff, `useGripEditing`) über
