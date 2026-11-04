@@ -834,8 +834,15 @@ fn multiline_preview(v: &Value, pts: &[V], p: &mut Preview) {
 /// Mindestgrösse eines Textrahmens als Vielfaches der Schrifthöhe (0.2 m bei 0.25 m Schrift).
 const TEXTBOX_MIN_PER_HEIGHT: f64 = 0.8;
 
+/// [37] Schrifthöhe neuer Texte im Grundriss in Papiergrösse (mm): 2.5 mm = die Modell-Vorgabe 0.25 m bei 1:100.
+pub(crate) const DEFAULT_TEXT_PAPER_MM: f64 = 2.5;
+
 fn text_geom(ctx: &Ctx, at: Value, extra: Vec<(&str, Value)>) -> Value {
     let mut f = vec![("shape", s("text")), ("at", at), ("text", s("")), ("height", js_num(ctx.text_height)), ("angle", js_num(0.0))];
+    // Im Modell (nicht auf dem Blatt, dort ist Papier 1:1) gilt die Papiergrösse in jedem Massstab.
+    if ctx.symbol == 1.0 {
+        f.push(("paperHeight", js_num(DEFAULT_TEXT_PAPER_MM)));
+    }
     f.extend(extra);
     obj(f)
 }
@@ -1425,6 +1432,11 @@ mod tests {
         assert_eq!(c.text_height, 0.0035);
         let o = ops(&Map::new(), &v, &c, &mut IdGen::new("s")).unwrap();
         assert_eq!(o[0].to_json()["items"][0]["geom"]["height"], 0.0035);
+        // [37] Im Grundriss in Papiergrösse (2.5 mm), auf dem Blatt (`sheet`) nicht.
+        assert_eq!(o[0].to_json()["items"][0]["geom"]["paperHeight"], 2.5);
+        let sheet = json!({"cmd": "text", "at": {"x": 0.1, "y": -0.1}, "ctx": {"level": "blatt", "cat": "20", "textHeight": 0.0035, "sheet": true}});
+        let o = ops(&Map::new(), &sheet, &crate::cmd_create::ctx_of(&sheet), &mut IdGen::new("s")).unwrap();
+        assert!(o[0].to_json()["items"][0]["geom"].get("paperHeight").is_none());
         let plain = json!({"ctx": {"level": "eg", "textHeight": -1}});
         assert_eq!(crate::cmd_create::ctx_of(&plain).text_height, crate::cmd_create::DEFAULT_TEXT_HEIGHT);
         // Textrahmen: Mindestgrösse folgt der Schrifthöhe, Anker eine Zeile unter der Oberkante.
