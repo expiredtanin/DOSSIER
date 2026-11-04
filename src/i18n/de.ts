@@ -2829,6 +2829,7 @@ export const de = {
   "viewsnap.footer.layerCombo": "Ebenenkombi",
   "viewsnap.footer.drawingCombo": "Zeichnungskombi",
   "viewsnap.footer.overrides": "Overrides",
+  "viewsnap.footer.template": "Vorlage",
   "viewsnap.footer.none": "—",
 
   // Layout-Blätter mit Masterlayout (DOSSIER A3).

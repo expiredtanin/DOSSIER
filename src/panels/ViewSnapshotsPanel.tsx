@@ -30,6 +30,9 @@ import {
   type ViewSnapshotFolderNode,
 } from "../state/viewSnapshotFolders";
 import { matchingComboName } from "../state/viewSnapshots";
+import { applyToSnapshotOps } from "../state/viewTemplates";
+import { getState } from "../state/appStore";
+import { patchItem } from "../core";
 import { t } from "../i18n";
 
 // ── Baum-Icons (inline-SVG im Panel-Stil: 14px, stroke currentColor 1.4) ──────
@@ -618,6 +621,35 @@ export function ViewSnapshotsPanel() {
               {footer.overrideNames.length
                 ? footer.overrideNames.join(", ")
                 : t("viewsnap.footer.none")}
+            </dd>
+            {/* [34] Ansichtsvorlage direkt am Ausschnitt (verknüpft: Änderungen an der Vorlage wirken mit). */}
+            <dt>{t("viewsnap.footer.template")}</dt>
+            <dd>
+              <select
+                data-testid="viewsnap-template"
+                value={selectedSnap.templateId ?? ""}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const snapId = selectedSnap.id;
+                  getState().applyChange((p) =>
+                    id
+                      ? applyToSnapshotOps(p, id, snapId, true)
+                      : patchItem(p, "viewSnapshots", snapId, (v) => {
+                          const { templateId: _a, templateLinked: _b, ...rest } = v;
+                          return rest as typeof v;
+                        }),
+                  );
+                  // Ansicht gleich nachziehen (sonst weicht sie vom geänderten Ausschnitt ab und die Wahl springt weg).
+                  host.onApplyViewSnapshot(snapId);
+                }}
+              >
+                <option value="">{t("viewsnap.footer.none")}</option>
+                {(host.project.viewTemplates ?? []).map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>
+                    {tpl.name}
+                  </option>
+                ))}
+              </select>
             </dd>
           </dl>
         </div>

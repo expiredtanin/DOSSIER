@@ -2816,6 +2816,7 @@ export const en: Record<TranslationKey, string> = {
   "viewsnap.footer.layerCombo": "Layer combo",
   "viewsnap.footer.drawingCombo": "Drawing combo",
   "viewsnap.footer.overrides": "Overrides",
+  "viewsnap.footer.template": "Template",
   "viewsnap.footer.none": "—",
 
   // Layout sheets with master layout (DOSSIER A3).

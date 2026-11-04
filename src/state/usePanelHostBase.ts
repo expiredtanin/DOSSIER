@@ -25,6 +25,7 @@ import type { TabId as ResourceTabId } from "../ui/ResourceManager";
 import { isTauriRuntime } from "../native/projectFile";
 import { openDrawingLevelsWindowNative } from "../native/drawingLevelsWindow";
 import { t } from "../i18n";
+import { getState } from "./appStore";
 import {
   applyOverrideRuleEnabled,
   captureViewSnapshot,
@@ -1257,7 +1258,8 @@ export function usePanelHostBase(opts: {
       // Massstab-Zoom (Plan muss für den neuen View gemountet sein) via rAF
       // nachziehen — analog zum BIM-Tree-Geschosswechsel.
       onApplyViewSnapshot: (id: string) => {
-        const snap = (project.viewSnapshots ?? []).find((s) => s.id === id);
+        // Aktuellen Stand lesen (direkt nach einer Änderung am Ausschnitt ist `project` hier noch der alte).
+        const snap = (getState().project.viewSnapshots ?? []).find((s) => s.id === id);
         if (!snap) return;
         const st = readViewSnapshot(snap);
         setActiveLevelId(st.activeLevelId);

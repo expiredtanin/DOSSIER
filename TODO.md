@@ -1698,7 +1698,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Ausschnitt (`ViewSnapshot.templateId/templateLinked`) einmal anwenden oder verknüpfen — Änderung der Vorlage
   schreibt in einem Undo-Schritt in alle verknüpften (`state/viewTemplates.ts`, Wirkung in `useViewTemplateHandlers.ts`).
   Ressourcen-Tab „Ansichtsvorlagen" (neu aus aktiver Ansicht, duplizieren, umbenennen, löschen, anwenden).
-  e2e `viewTemplates.spec.ts`. Offen: Vorlage direkt im Ausschnitte-Panel wählen, Tab im macOS-Ressourcenfenster
+  e2e `viewTemplates.spec.ts`. 4.11.: Vorlage direkt im Ausschnitte-Panel wählen (Fussbereich, verknüpft; e2e). Offen: Tab im macOS-Ressourcenfenster
   nicht getestet, Schnitt/Ansicht-Detailgrad/Massstab folgen der Vorlage nur über Anzeigezustand der aktiven Ansicht. · M
 - ✅ **[35] Detailgrad pro Ansicht.** (4.11. geprüft) Über Ausschnitte (`ViewSnapshot.detail`), Ansichtsvorlagen ([34], `ViewTemplate.detail`, an Geschoss/Schnitt/Ansicht gebunden) und je Element (`detailLevel` an Öffnung/Wand). · S–M
 - ◐ **[36] View Range.** (30.10.) Geschoss-Felder `viewTop`/`viewBottom`/`viewDepth` (m über OKFF, neben `cutHeight`;
