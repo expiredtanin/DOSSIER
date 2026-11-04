@@ -54,6 +54,16 @@ pub fn symbol_factor(p: &Project, level: &str) -> f64 {
     }
 }
 
+/// [37] Symbolgrösse (Kote, Detailverweis, Punktmarke) in Papiergrösse: auf dem Blatt der Blatt-Faktor, im
+/// Modell mit dem Massstab mitgehend (bei 1:100 = 1, die bisherige feste Grösse).
+pub fn symbol_factor_at(p: &Project, level: &str, scale: f64) -> f64 {
+    let f = symbol_factor(p, level);
+    if f != 1.0 || !(scale.is_finite() && scale > 0.0) {
+        return f;
+    }
+    scale / 100.0
+}
+
 /// Rand um die Achsen im Ausmass, damit die Blasen ins Bild passen (Meter).
 const GRID_BUBBLE_MARGIN_M: f64 = 1.0;
 
@@ -796,10 +806,10 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             }
         }
         Drawing2DGeom::Kote { at, value, kind, .. } => {
-            push_kote(em.sink, *at, *value, *kind, em.color, em.weight, em.greyed, Some(em.id), symbol_factor(p, &d.level_id));
+            push_kote(em.sink, *at, *value, *kind, em.color, em.weight, em.greyed, Some(em.id), symbol_factor_at(p, &d.level_id, scale));
         }
         Drawing2DGeom::Detailref { at, label, sheet_layout_id, sheet_label } => {
-            let f = symbol_factor(p, &d.level_id);
+            let f = symbol_factor_at(p, &d.level_id, scale);
             let (radius, text_h) = (DETAILREF_RADIUS_M * f, DETAILREF_TEXT_HEIGHT_M * f);
             em.circle(*at, radius, "none", Some(None));
             em.seg(v(at.x - radius, at.y), v(at.x + radius, at.y));
@@ -837,7 +847,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             }
         }
         Drawing2DGeom::Pointmarker { at } => {
-            let f = symbol_factor(p, &d.level_id);
+            let f = symbol_factor_at(p, &d.level_id, scale);
             let (r, cross) = (POINTMARKER_RADIUS_M * f, POINTMARKER_CROSS_M * f);
             em.circle(*at, r, "none", Some(None));
             em.seg(v(at.x - cross, at.y), v(at.x + cross, at.y));
@@ -1688,7 +1698,8 @@ mod tests {
         let on = |level: &str, geom: serde_json::Value| -> Vec<Primitive> {
             let mut d = drawing(geom);
             d["levelId"] = serde_json::json!(level);
-            render(&p, d, 1.0)
+            // Grundriss 1:100, Blatt Papier 1:1.
+            render(&p, d, if level == "sh" { 1.0 } else { 100.0 })
         };
         let extent = |prims: &[Primitive]| -> f64 {
             let mut b = Bounds::new();
@@ -1716,6 +1727,11 @@ mod tests {
         ] {
             let (model, sheet) = (extent(&on("eg", geom.clone())), extent(&on("sh", geom.clone())));
             assert!((sheet - model * SHEET_SYMBOL_FACTOR).abs() < 1e-9, "{geom}: {model} → {sheet}");
+            // [37] Im Grundriss 1:50 halb so gross wie bei 1:100 (Papiergrösse).
+            let mut d = drawing(geom.clone());
+            d["levelId"] = serde_json::json!("eg");
+            let half = extent(&render(&p, d, 50.0));
+            assert!((half - model * 0.5).abs() < 1e-9, "{geom}: {model} → {half}");
         }
     }
 
