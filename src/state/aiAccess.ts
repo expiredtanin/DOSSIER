@@ -11,6 +11,7 @@ import { connectAiBridge, type AiBridgeStatus } from "../net/aiBridge";
 import { buildPlanPdf } from "../export/exportPdf";
 import { saveBinaryFile, saveTextFile } from "../native/saveFile";
 import { getState, setState } from "./appStore";
+import type { Selection, SelectionKind } from "./selection";
 
 export interface AiLogEntry {
   at: number;
@@ -103,32 +104,18 @@ export function setAiView(v: { fitBounds(pts: Vec2[]): void } | null): void {
 
 // ── Host über den Store ─────────────────────────────────────────────────────────────────────
 
-type SelSetter = keyof Pick<
-  ReturnType<typeof getState>,
-  | "setSelectedWallIds"
-  | "setSelectedDrawingIds"
-  | "setSelectedCeilingIds"
-  | "setSelectedOpeningIds"
-  | "setSelectedStairIds"
-  | "setSelectedRoomIds"
-  | "setSelectedExtrudedSolidIds"
-  | "setSelectedColumnIds"
-  | "setSelectedRoofIds"
-  | "setSelectedContextObjectIds"
->;
-
-/** Liste des Projekts → Auswahl-Kanal (Lesen, Setzen). */
-const CHANNELS: [keyof Project, string, SelSetter][] = [
-  ["walls", "selectedWallIds", "setSelectedWallIds"],
-  ["drawings2d", "selectedDrawingIds", "setSelectedDrawingIds"],
-  ["ceilings", "selectedCeilingIds", "setSelectedCeilingIds"],
-  ["openings", "selectedOpeningIds", "setSelectedOpeningIds"],
-  ["stairs", "selectedStairIds", "setSelectedStairIds"],
-  ["rooms", "selectedRoomIds", "setSelectedRoomIds"],
-  ["extrudedSolids", "selectedExtrudedSolidIds", "setSelectedExtrudedSolidIds"],
-  ["columns", "selectedColumnIds", "setSelectedColumnIds"],
-  ["roofs", "selectedRoofIds", "setSelectedRoofIds"],
-  ["context", "selectedContextObjectIds", "setSelectedContextObjectIds"],
+/** Liste des Projekts → Auswahl-Art. */
+const CHANNELS: [keyof Project, SelectionKind][] = [
+  ["walls", "walls"],
+  ["drawings2d", "drawings"],
+  ["ceilings", "ceilings"],
+  ["openings", "openings"],
+  ["stairs", "stairs"],
+  ["rooms", "rooms"],
+  ["extrudedSolids", "solids"],
+  ["columns", "columns"],
+  ["roofs", "roofs"],
+  ["context", "contextObjects"],
 ];
 
 type Ent = Record<string, unknown> & { id?: string };
@@ -172,18 +159,20 @@ export const appHost: AiHost = {
     return getState().project === before ? "vom Kern abgelehnt" : null;
   },
   selection: () => {
-    const s = getState() as unknown as Record<string, string[]>;
-    return Object.fromEntries(CHANNELS.map(([k, sel]) => [k, s[sel] ?? []]).filter(([, ids]) => ids.length > 0));
+    const sel = getState().selection;
+    return Object.fromEntries(CHANNELS.map(([k, kind]) => [k, sel[kind]]).filter(([, ids]) => ids.length > 0));
   },
   select: (ids: string[]) => {
     const s = getState();
     const p = s.project;
-    s.clearSelection();
-    for (const [k, , set] of CHANNELS) {
+    const patch: Partial<Selection> = {};
+    for (const [k, kind] of CHANNELS) {
       const have = new Set(listOf(p, k).map((e) => e.id));
       const mine = ids.filter((id) => have.has(id));
-      if (mine.length) s[set](mine);
+      if (mine.length) patch[kind] = mine;
     }
+    s.clearSelection();
+    s.setSelection(patch);
   },
   zoomTo: (ids: string[]) => {
     const p = getState().project;

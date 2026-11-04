@@ -18,7 +18,9 @@ import type { ViewType } from "../model/viewTypes";
 import type { TransformSelection } from "../tools/transform";
 import type { PlanViewHandle } from "../views/plan/PlanView";
 import type { PanelHostValue } from "../panels/host";
-import type { Selection } from "./selectionInfo";
+import type { SelectionInfo } from "./selectionInfo";
+import { clearKinds } from "./selection";
+import type { SelectionKind } from "./selection";
 import type { EngineView } from "../commands/engine";
 import type { ScheduleKind } from "../export/exportSchedule";
 import type { TabId as ResourceTabId } from "../ui/ResourceManager";
@@ -127,7 +129,7 @@ export function usePanelHostBase(opts: {
   openResources: (tab?: ResourceTabId) => void;
   dxfInputRef: RefObject<HTMLInputElement | null>;
   planViewRef: RefObject<PlanViewHandle | null>;
-  selection: Selection | null;
+  selection: SelectionInfo | null;
   projectActions: Pick<
     ReturnType<typeof useProjectActions>,
     | "toggleLevelVisible"
@@ -191,19 +193,8 @@ export function usePanelHostBase(opts: {
   selectionState: Pick<
     ReturnType<typeof useSelectionState>,
     | "updateRoof"
-    | "setSelectedWallIds"
-    | "setSelectedDrawingId"
-    | "selectedContextObjectIds"
-    | "setSelectedCeilingIds"
-    | "setSelectedOpeningIds"
-    | "setSelectedStairIds"
-    | "setSelectedRoomIds"
-    | "setSelectedExtrudedSolidIds"
-    | "setSelectedColumnIds"
-    | "setSelectedRoofIds"
-    | "setSelectedContextObjectIds"
+    | "setSelection"
     | "selectedSectionLineId"
-    | "setSelectedSectionLineIds"
     | "section3dCutId"
   >;
   toolState: Pick<
@@ -315,19 +306,8 @@ export function usePanelHostBase(opts: {
   } = projectActions;
   const {
     updateRoof,
-    setSelectedWallIds,
-    setSelectedDrawingId,
-    selectedContextObjectIds,
-    setSelectedCeilingIds,
-    setSelectedOpeningIds,
-    setSelectedStairIds,
-    setSelectedRoomIds,
-    setSelectedExtrudedSolidIds,
-    setSelectedColumnIds,
-    setSelectedRoofIds,
-    setSelectedContextObjectIds,
+    setSelection,
     selectedSectionLineId,
-    setSelectedSectionLineIds,
     section3dCutId,
   } = selectionState;
   const { activeTool, activeWallTypeId, setActiveWallTypeId, activeCategoryCode, setActiveCategoryCode, snap, setSnap } =
@@ -1114,7 +1094,6 @@ export function usePanelHostBase(opts: {
       },
       // ── Site-/Kontext-Schicht ──────────────────────────────────────────────
       contextObjects: project.context ?? [],
-      selectedContextObjectIds,
       onAddContextObjects: addContextObjectsAndFit,
       onRemoveContextObject: removeContextObject,
       onRemoveContextObjects: removeContextObjects,
@@ -1134,44 +1113,20 @@ export function usePanelHostBase(opts: {
         opts?: { zoom?: boolean },
       ) => {
         const applySelection = () => {
-          setSelectedWallIds([]);
-          setSelectedDrawingId(null);
-          setSelectedCeilingIds([]);
-          setSelectedOpeningIds([]);
-          setSelectedStairIds([]);
-          setSelectedRoomIds([]);
-          setSelectedExtrudedSolidIds([]);
-          setSelectedColumnIds([]);
-          setSelectedRoofIds([]);
-          setSelectedContextObjectIds([]);
-          setSelectedSectionLineIds([]);
-          switch (kind) {
-            case "Wand":
-              setSelectedWallIds([id]);
-              break;
-            case "Decke":
-              setSelectedCeilingIds([id]);
-              break;
-            case "Fenster":
-            case "Öffnung":
-              setSelectedOpeningIds([id]);
-              break;
-            case "Treppe":
-              setSelectedStairIds([id]);
-              break;
-            case "Extrusion":
-              setSelectedExtrudedSolidIds([id]);
-              break;
-            case "Dach":
-              setSelectedRoofIds([id]);
-              break;
-            case "Stütze":
-              setSelectedColumnIds([id]);
-              break;
-            default:
-              // z. B. Legacy-„Tür"-Datensätze (project.doors) — kein Auswahl-Kanal.
-              return;
-          }
+          const kindOf: Partial<Record<ScheduleKind, SelectionKind>> = {
+            Wand: "walls",
+            Decke: "ceilings",
+            Fenster: "openings",
+            Öffnung: "openings",
+            Treppe: "stairs",
+            Extrusion: "solids",
+            Dach: "roofs",
+            Stütze: "columns",
+          };
+          const k = kindOf[kind];
+          setSelection({ ...clearKinds(), ...(k ? { [k]: [id] } : {}) });
+          // z. B. Legacy-„Tür"-Datensätze (project.doors) — kein Auswahl-Kanal.
+          if (!k) return;
           if (opts?.zoom) requestAnimationFrame(() => planViewRef.current?.fit());
         };
         if (floorId && floorId !== activeLevelId) {
@@ -1532,7 +1487,6 @@ export function usePanelHostBase(opts: {
     section3dCutId,
     onToggleSection3dCut,
     selectedViewSnapshotId,
-    selectedContextObjectIds,
   ]);
 
   return baseHost;

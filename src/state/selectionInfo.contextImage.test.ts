@@ -45,7 +45,7 @@ describe("deriveSelection — Kontext-Objekt-Luftbild (ContextImage)", () => {
         filters: { saturation: 0.5, brightness: 1.1, contrast: 1, grayscale: 0.2 },
       },
     ]);
-    const sel = deriveSelection(project, [], null, null, null, null, null, null, null, null, "IMG1");
+    const sel = deriveSelection(project, { contextObjects: ["IMG1"] });
     expect(sel?.kind).toBe("contextObject");
     expect(sel?.isImage).toBe(true);
     expect(sel?.opacity).toBe(0.8);
@@ -56,7 +56,7 @@ describe("deriveSelection — Kontext-Objekt-Luftbild (ContextImage)", () => {
     const project = projectWith([
       { id: "IMG1", type: "image", name: "Luftbild", src: "x", min: { x: 0, y: 0 }, max: { x: 1, y: 1 } },
     ]);
-    const sel = deriveSelection(project, [], null, null, null, null, null, null, null, null, "IMG1");
+    const sel = deriveSelection(project, { contextObjects: ["IMG1"] });
     expect(sel?.opacity).toBe(1);
     expect(sel?.imageFilters).toBeUndefined();
   });
@@ -65,7 +65,7 @@ describe("deriveSelection — Kontext-Objekt-Luftbild (ContextImage)", () => {
     const project = projectWith([
       { id: "M1", type: "importedMesh", name: "Haus", positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2] },
     ]);
-    const sel = deriveSelection(project, [], null, null, null, null, null, null, null, null, "M1");
+    const sel = deriveSelection(project, { contextObjects: ["M1"] });
     expect(sel?.isImage).toBeFalsy();
     expect(sel?.opacity).toBeUndefined();
     expect(sel?.imageFilters).toBeUndefined();

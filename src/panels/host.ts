@@ -41,7 +41,7 @@ import type {
 } from "../model/types";
 import type { MeasurementReadout, SnapSettings, ToolId } from "../tools/types";
 import type { TerrainOptions } from "../model/terrain";
-import type { Selection } from "../state/selectionInfo";
+import type { SelectionInfo } from "../state/selectionInfo";
 import type { TextStylePreset } from "../text/richText";
 import type { ScheduleKind } from "../export/exportSchedule";
 import type { DetailLevel } from "../model/viewTypes";
@@ -176,7 +176,7 @@ export interface PanelHostValue {
    * (oder `null`). Die Paletten lesen daraus Farbe/Strichstärke/Füllung/bbox
    * und grauen nicht-anwendbare Felder per `selection.kind` aus.
    */
-  selection: Selection | null;
+  selection: SelectionInfo | null;
   /**
    * Live-Messwerte des Mess-Werkzeugs (Länge/Fläche/Winkel), oder `null`, wenn
    * gerade nicht gemessen wird. Das Objekt-Info-Panel zeigt sie dauerhaft an,
@@ -595,8 +595,6 @@ export interface PanelHostValue {
   // ── Site-/Kontext-Schicht (SitePanel) ───────────────────────────────────
   /** Aktuelle Kontext-Objekte (Meshes/Konturen/Gelände) aus `project.context`. */
   contextObjects: ContextObject[];
-  /** Im 3D-Viewport angewählte Kontext-Objekte (Umriss-Hervorhebung), s. selectionSlice. */
-  selectedContextObjectIds: string[];
   /** Fügt mehrere Kontext-Objekte hinzu (z. B. aus einem DXF-Import). */
   onAddContextObjects: (objs: ContextObject[]) => void;
   /** Entfernt ein Kontext-Objekt per ID. */
@@ -822,7 +820,7 @@ export interface CreateMasterLayoutOptions {
 // importieren Panels nur aus „./host" und bleiben auf einen Pfad fokussiert.
 export type { DrawingLevel, LayerCategory };
 export type { SnapSettings, ToolId };
-export type { Selection } from "../state/selectionInfo";
+export type { SelectionInfo } from "../state/selectionInfo";
 export type { ScheduleKind, ScheduleRow } from "../export/exportSchedule";
 
 // ── Hook ───────────────────────────────────────────────────────────────────

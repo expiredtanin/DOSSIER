@@ -53,7 +53,7 @@ function bench(n: number, fn: (i: number) => void, rounds = 3): number {
 }
 
 const sel = (p: Project, k: { wall?: string; drawing?: string; roof?: string }) =>
-  deriveSelection(p, k.wall ? [k.wall] : [], k.drawing ?? null, null, null, null, null, null, null, k.roof ?? null);
+  deriveSelection(p, { walls: k.wall ? [k.wall] : [], drawings: k.drawing ? [k.drawing] : [], roofs: k.roof ? [k.roof] : [] });
 
 describe("Messung Objekt-Info und Griffe, 3000 Wände + 20 000 Zeichnungen", () => {
   it("Objekt-Info, Griff-Schritte, Polylinien-Punkttyp", { timeout: 120000 }, () => {

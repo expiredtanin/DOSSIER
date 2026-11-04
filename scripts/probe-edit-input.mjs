@@ -59,7 +59,7 @@ const wallEnds = () => p.evaluate(() => {
   if (!proj) return null;
   return proj.walls.map((w) => ({ id: w.id, start: w.start, end: w.end }));
 });
-const selectedWalls = () => p.evaluate(() => window.__store?.getState?.().selectedWallIds ?? []);
+const selectedWalls = () => p.evaluate(() => window.__store?.getState?.().selection?.walls ?? []);
 
 const box = await planBox();
 const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
@@ -144,8 +144,8 @@ console.log("(b) common corner:", stillJoined, "| wall1", moved);
 await clickTool("Auswahl"); await wait(120);
 // Genau Wand 2 selektieren (Store direkt — robuster als ein Pixel-Klick auf die
 // verschobene Geometrie). Testet (c) isoliert: Grip-Drag + Tab + Wert.
-await p.evaluate((id) => window.__store.getState().setSelectedWallIds([id]), w2id);
-await p.evaluate(() => window.__store.getState().setSelectedDrawingIds([]));
+await p.evaluate((id) => window.__store.getState().setSelection({ walls: [id] }), w2id);
+await p.evaluate(() => window.__store.getState().setSelection({ drawings: [] }));
 await wait(200);
 let gBefore = await grips();
 console.log("(c) grips:", gBefore.length, "selected:", await selectedWalls());

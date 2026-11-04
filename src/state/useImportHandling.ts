@@ -17,6 +17,8 @@ import { defaultImageSizeM, readImageFile } from "../io/imageAsset";
 import { rasterizePdfPages } from "../io/pdfImport";
 import { t } from "../i18n";
 import type { Vec2 } from "../model/types";
+import { clearKinds } from "./selection";
+import type { Selection } from "./selection";
 
 /**
  * „Bild einfügen" (Werkzeug „image"): kein Klick-Platzieren (Datei-Auswahl ist
@@ -35,17 +37,7 @@ export function useImageImportHandling(opts: {
   /** Änderung als Ops (Store `applyChange`): alle Bilder eines Einfügens = ein Undo-Schritt. */
   applyChange: (ops: readonly CoreOp[]) => void;
   notify: (message: string, kind?: NotifyKind) => void;
-  setSelectedDrawingId: (id: string | null) => void;
-  setSelectedWallIds: (ids: string[]) => void;
-  setSelectedCeilingIds: (ids: string[]) => void;
-  setSelectedOpeningIds: (ids: string[]) => void;
-  setSelectedStairIds: (ids: string[]) => void;
-  setSelectedRoomIds: (ids: string[]) => void;
-  setSelectedExtrudedSolidIds: (ids: string[]) => void;
-  setSelectedColumnIds: (ids: string[]) => void;
-  setSelectedRoofIds: (ids: string[]) => void;
-  setSelectedContextObjectIds: (ids: string[]) => void;
-  setSelectedSectionLineIds: (ids: string[]) => void;
+  setSelection: (patch: Partial<Selection>) => void;
 }): {
   insertImageDrawings: (assets: { src: string; naturalWidth: number; naturalHeight: number }[]) => void;
   onImageOrPdfFileChosen: (file: File) => void;
@@ -56,17 +48,7 @@ export function useImageImportHandling(opts: {
     imagePlacement,
     applyChange,
     notify,
-    setSelectedDrawingId,
-    setSelectedWallIds,
-    setSelectedCeilingIds,
-    setSelectedOpeningIds,
-    setSelectedStairIds,
-    setSelectedRoomIds,
-    setSelectedExtrudedSolidIds,
-    setSelectedColumnIds,
-    setSelectedRoofIds,
-    setSelectedContextObjectIds,
-    setSelectedSectionLineIds,
+    setSelection,
   } = opts;
 
   const insertImageDrawings = (
@@ -82,17 +64,7 @@ export function useImageImportHandling(opts: {
     applyChange(addItems("drawings2d", drawings));
     const lastId = drawings.length ? drawings[drawings.length - 1].id : null;
     if (lastId) {
-      setSelectedDrawingId(lastId);
-      setSelectedWallIds([]);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedContextObjectIds([]);
-      setSelectedSectionLineIds([]);
+      setSelection({ ...clearKinds(), drawings: [lastId] });
     }
   };
 

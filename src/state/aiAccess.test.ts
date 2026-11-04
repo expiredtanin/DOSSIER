@@ -59,8 +59,8 @@ describe("KI-Zugriff (App-Host)", () => {
     const wall = sampleProject.walls[0];
     const room = sampleProject.rooms![0];
     expect((await handleAiCall("select", { ids: [wall.id, room.id, "gibtsnicht"] })).isError).toBe(false);
-    expect(getState().selectedWallIds).toEqual([wall.id]);
-    expect(getState().selectedRoomIds).toEqual([room.id]);
+    expect(getState().selection.walls).toEqual([wall.id]);
+    expect(getState().selection.rooms).toEqual([room.id]);
     expect(JSON.parse(text(await handleAiCall("get_selection", {})))).toMatchObject({ walls: [wall.id], rooms: [room.id] });
     let fitted: { x: number; y: number }[] = [];
     setAiView({ fitBounds: (pts) => (fitted = pts) });

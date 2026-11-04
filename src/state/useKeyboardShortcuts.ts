@@ -21,6 +21,8 @@ import { differenceDrawings, intersectionDrawings, unionDrawings } from "../edit
 import type { BooleanResult } from "../editors/booleanOps";
 import { groupSelection, mergeMembership, ungroup, EMPTY_MEMBERSHIP } from "./groupActions";
 import type { GroupMembership } from "./groupActions";
+import { clearKinds, fromIdLists, isEmpty } from "./selection";
+import type { Selection } from "./selection";
 import {
   collectElementClipboard,
   isClipboardEmpty,
@@ -251,28 +253,8 @@ export function useSelectAllAndDeleteShortcut(opts: {
   project: Project;
   activeLevelId: string;
   shortcutOverrides: ShortcutOverrides;
-  selectedDrawingIds: string[];
-  selectedWallIds: string[];
-  selectedCeilingIds: string[];
-  selectedOpeningIds: string[];
-  selectedStairIds: string[];
-  selectedRoomIds: string[];
-  selectedExtrudedSolidIds: string[];
-  selectedColumnIds: string[];
-  selectedRoofIds: string[];
-  selectedContextObjectIds: string[];
-  selectedSectionLineIds: string[];
-  setSelectedWallIds: (ids: string[]) => void;
-  setSelectedDrawingIds: (ids: string[]) => void;
-  setSelectedCeilingIds: (ids: string[]) => void;
-  setSelectedOpeningIds: (ids: string[]) => void;
-  setSelectedStairIds: (ids: string[]) => void;
-  setSelectedRoomIds: (ids: string[]) => void;
-  setSelectedExtrudedSolidIds: (ids: string[]) => void;
-  setSelectedColumnIds: (ids: string[]) => void;
-  setSelectedRoofIds: (ids: string[]) => void;
-  setSelectedContextObjectIds: (ids: string[]) => void;
-  setSelectedSectionLineIds: (ids: string[]) => void;
+  selection: Selection;
+  setSelection: (patch: Partial<Selection>) => void;
   hasSelectionToDelete: () => boolean;
   deleteSelection: () => void;
 }): void {
@@ -282,16 +264,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
     project,
     activeLevelId,
     shortcutOverrides,
-    setSelectedWallIds,
-    setSelectedDrawingIds,
-    setSelectedCeilingIds,
-    setSelectedOpeningIds,
-    setSelectedStairIds,
-    setSelectedRoomIds,
-    setSelectedExtrudedSolidIds,
-    setSelectedColumnIds,
-    setSelectedRoofIds,
-    setSelectedSectionLineIds,
+    setSelection,
     hasSelectionToDelete,
     deleteSelection,
   } = opts;
@@ -305,30 +278,8 @@ export function useSelectAllAndDeleteShortcut(opts: {
       if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         queueMicrotask(() => {
           if (e.defaultPrevented) return;
-          const any =
-            opts.selectedDrawingIds.length > 0 ||
-            opts.selectedWallIds.length > 0 ||
-            opts.selectedCeilingIds.length > 0 ||
-            opts.selectedOpeningIds.length > 0 ||
-            opts.selectedStairIds.length > 0 ||
-            opts.selectedRoomIds.length > 0 ||
-            opts.selectedExtrudedSolidIds.length > 0 ||
-            opts.selectedColumnIds.length > 0 ||
-            opts.selectedRoofIds.length > 0 ||
-            opts.selectedContextObjectIds.length > 0 ||
-            opts.selectedSectionLineIds.length > 0;
-          if (!any) return;
-          setSelectedWallIds([]);
-          setSelectedDrawingIds([]);
-          setSelectedCeilingIds([]);
-          setSelectedOpeningIds([]);
-          setSelectedStairIds([]);
-          setSelectedRoomIds([]);
-          setSelectedExtrudedSolidIds([]);
-          setSelectedColumnIds([]);
-          setSelectedRoofIds([]);
-          opts.setSelectedContextObjectIds([]);
-          setSelectedSectionLineIds([]);
+          if (isEmpty(opts.selection, { withGroups: false })) return;
+          setSelection(clearKinds());
         });
         return;
       }
@@ -391,16 +342,18 @@ export function useSelectAllAndDeleteShortcut(opts: {
           roofIds.length ||
           sectionLineIds.length
         ) {
-          setSelectedWallIds(wallIds);
-          setSelectedDrawingIds(drawingIds);
-          setSelectedCeilingIds(ceilingIds);
-          setSelectedOpeningIds(openingIds);
-          setSelectedStairIds(stairIds);
-          setSelectedRoomIds(roomIds);
-          setSelectedExtrudedSolidIds(extrudedSolidIds);
-          setSelectedColumnIds(columnIds);
-          setSelectedRoofIds(roofIds);
-          setSelectedSectionLineIds(sectionLineIds);
+          setSelection({
+            walls: wallIds,
+            drawings: drawingIds,
+            ceilings: ceilingIds,
+            openings: openingIds,
+            stairs: stairIds,
+            rooms: roomIds,
+            solids: extrudedSolidIds,
+            columns: columnIds,
+            roofs: roofIds,
+            sectionLines: sectionLineIds,
+          });
           e.preventDefault();
         }
         return;
@@ -423,17 +376,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
     opts.activeTool,
     opts.transformActive,
     opts.shortcutOverrides,
-    opts.selectedDrawingIds,
-    opts.selectedWallIds,
-    opts.selectedCeilingIds,
-    opts.selectedOpeningIds,
-    opts.selectedStairIds,
-    opts.selectedRoomIds,
-    opts.selectedExtrudedSolidIds,
-    opts.selectedColumnIds,
-    opts.selectedRoofIds,
-    opts.selectedContextObjectIds,
-    opts.selectedSectionLineIds,
+    opts.selection,
     opts.project.walls,
     opts.project.drawings2d,
     opts.project.ceilings,
@@ -460,8 +403,7 @@ export function useSplitJoinShortcut(
   selectedDrawingIds: string[],
   engine: CommandEngine,
   runSplit: (ids: string[]) => void,
-  setSelectedDrawingIds: (ids: string[]) => void,
-  setSelectedWallIds: (ids: string[]) => void,
+  setSelection: (patch: Partial<Selection>) => void,
   overrides: ShortcutOverrides,
 ): void {
   useEffect(() => {
@@ -481,8 +423,7 @@ export function useSplitJoinShortcut(
       // Join: exakt derselbe Befehl wie „join" tippen (Sofort-Befehl, autoRun).
       // Nach dem Verbinden zeigt die alte Auswahl auf ersetzte IDs → aufräumen.
       engine.start("join");
-      setSelectedDrawingIds([]);
-      setSelectedWallIds([]);
+      setSelection({ drawings: [], walls: [] });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -519,17 +460,7 @@ export function useElementClipboardShortcut(
   activeLevelId: string,
   project: Project,
   applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[])) => void,
-  setSelected: {
-    wallIds: (ids: string[]) => void;
-    drawingIds: (ids: string[]) => void;
-    ceilingIds: (ids: string[]) => void;
-    roofIds: (ids: string[]) => void;
-    openingIds: (ids: string[]) => void;
-    stairIds: (ids: string[]) => void;
-    roomIds: (ids: string[]) => void;
-    extrudedSolidIds: (ids: string[]) => void;
-    columnIds: (ids: string[]) => void;
-  },
+  setSelection: (patch: Partial<Selection>) => void,
   overrides: ShortcutOverrides,
 ): void {
   useEffect(() => {
@@ -566,15 +497,7 @@ export function useElementClipboardShortcut(
         });
         const pastedIds = out.ids;
         if (!pastedIds) return;
-        setSelected.wallIds(pastedIds.wallIds);
-        setSelected.drawingIds(pastedIds.drawingIds);
-        setSelected.ceilingIds(pastedIds.ceilingIds);
-        setSelected.roofIds(pastedIds.roofIds);
-        setSelected.openingIds(pastedIds.openingIds);
-        setSelected.stairIds(pastedIds.stairIds);
-        setSelected.roomIds(pastedIds.roomIds);
-        setSelected.extrudedSolidIds(pastedIds.extrudedSolidIds);
-        setSelected.columnIds(pastedIds.columnIds);
+        setSelection(fromIdLists(pastedIds));
       };
       if (navigator.clipboard?.readText) {
         navigator.clipboard

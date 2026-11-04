@@ -15,6 +15,8 @@ import type { RichTextDoc } from "../text/richText";
 import { plainText } from "../text/richText";
 import { hitTestWall } from "../viewport/planHitTest";
 import type { useSelectionState } from "./useSelectionState";
+import { ELEMENT_KINDS, clearKinds, fromIdLists } from "./selection";
+import type { Selection, SelectionKind } from "./selection";
 import type { useContextMenuState } from "../menus/useContextMenuState";
 import {
   EMPTY_MEMBERSHIP,
@@ -50,68 +52,14 @@ export function useMouseSelectionHandlers(opts: {
    * nur für Geschoss/Zeichnung) — sperrt Elemente einer nicht-aktiven,
    * überlagerten Ebene analog zum Kategorie-Sperren unten. */
   floorDisplay: CategoryDisplayResolver & DisplayResolver;
-  selectionState: Pick<
-    ReturnType<typeof useSelectionState>,
-    | "selectedWallIds"
-    | "setSelectedWallIds"
-    | "selectedDrawingIds"
-    | "setSelectedDrawingIds"
-    | "setSelectedDrawingId"
-    | "selectedCeilingIds"
-    | "setSelectedCeilingIds"
-    | "selectedOpeningIds"
-    | "setSelectedOpeningIds"
-    | "selectedStairIds"
-    | "setSelectedStairIds"
-    | "selectedRoomIds"
-    | "setSelectedRoomIds"
-    | "selectedExtrudedSolidIds"
-    | "setSelectedExtrudedSolidIds"
-    | "selectedColumnIds"
-    | "setSelectedColumnIds"
-    | "selectedRoofIds"
-    | "setSelectedRoofIds"
-    | "selectedContextObjectIds"
-    | "setSelectedContextObjectIds"
-    | "selectedSectionLineIds"
-    | "setSelectedSectionLineIds"
-    | "selectedGroupIds"
-    | "setSelectedGroupIds"
-    | "groupPath"
-  >;
+  selectionState: Pick<ReturnType<typeof useSelectionState>, "selection" | "setSelection" | "groupPath">;
   contextMenuState: Pick<
     ReturnType<typeof useContextMenuState>,
     "setMenu" | "setStampEditorRoomId" | "editTextId" | "setEditTextId" | "setEditTextMinHeightM"
   >;
 }) {
   const { project, setProject, activeLevelId, visibleCodes, categoryDisplay, floorDisplay, selectionState, contextMenuState } = opts;
-  const {
-    selectedWallIds,
-    setSelectedWallIds,
-    selectedDrawingIds,
-    setSelectedDrawingIds,
-    setSelectedDrawingId,
-    selectedCeilingIds,
-    setSelectedCeilingIds,
-    selectedOpeningIds,
-    setSelectedOpeningIds,
-    selectedStairIds,
-    setSelectedStairIds,
-    selectedRoomIds,
-    setSelectedRoomIds,
-    selectedExtrudedSolidIds,
-    setSelectedExtrudedSolidIds,
-    selectedColumnIds,
-    setSelectedColumnIds,
-    selectedRoofIds,
-    setSelectedRoofIds,
-    selectedContextObjectIds,
-    setSelectedContextObjectIds,
-    selectedSectionLineIds,
-    setSelectedSectionLineIds,
-    setSelectedGroupIds,
-    groupPath,
-  } = selectionState;
+  const { selection, setSelection, groupPath } = selectionState;
   const { setMenu, setStampEditorRoomId, editTextId, setEditTextId, setEditTextMinHeightM } = contextMenuState;
 
   // ── Maus-Schema: Auswahl + Kontextmenü aus Grundriss / 3D ─────────────────
@@ -120,34 +68,14 @@ export function useMouseSelectionHandlers(opts: {
   // Doppelklick auf einen Raum-Stempel: den Raum wählen + den Stempel-Editor
   // öffnen (Rich-Text-Popup).
   const onOpenStampEditor = (roomId: string) => {
-    setSelectedRoomIds([roomId]);
-    setSelectedWallIds([]);
-    setSelectedDrawingId(null);
-    setSelectedCeilingIds([]);
-    setSelectedOpeningIds([]);
-    setSelectedStairIds([]);
-    setSelectedExtrudedSolidIds([]);
-    setSelectedColumnIds([]);
-    setSelectedRoofIds([]);
-    setSelectedContextObjectIds([]);
-    setSelectedSectionLineIds([]);
+    setSelection({ ...clearKinds(), rooms: [roomId] });
     setStampEditorRoomId(roomId);
   };
   // Doppelklick auf ein Text-2D-Element: selektieren + Inhalts-Editor öffnen.
   const onEditDrawingText = (drawingId: string) => {
     const d = project.drawings2d.find((x) => x.id === drawingId);
     if (!d || d.geom.shape !== "text") return;
-    setSelectedDrawingId(drawingId);
-    setSelectedWallIds([]);
-    setSelectedCeilingIds([]);
-    setSelectedOpeningIds([]);
-    setSelectedStairIds([]);
-    setSelectedRoomIds([]);
-    setSelectedExtrudedSolidIds([]);
-    setSelectedColumnIds([]);
-    setSelectedRoofIds([]);
-    setSelectedContextObjectIds([]);
-    setSelectedSectionLineIds([]);
+    setSelection({ ...clearKinds(), drawings: [drawingId] });
     // Bestehendes Element per Doppelklick: keine Rahmen-Mindesthöhe (nur bei
     // frisch aufgezogener Textspalte relevant, s. textbox.ts focusMinHeightM)
     // — sonst könnte eine vorige Textspalten-Erstellung hier nachwirken.
@@ -265,19 +193,20 @@ export function useMouseSelectionHandlers(opts: {
     if (sel.shift) {
       // Je Art: Auswahl-Liste + Setter. `replaces` (Shift-Durchschalten) entfernt
       // zuerst das vorige Zwischenergebnis, bevor das neue Objekt umgeschaltet wird.
+      // Shift-Art (PlanSelection) → Auswahl-Art.
       const channels = {
-        section: [selectedSectionLineIds, setSelectedSectionLineIds],
-        wall: [selectedWallIds, setSelectedWallIds],
-        drawing: [selectedDrawingIds, setSelectedDrawingIds],
-        ceiling: [selectedCeilingIds, setSelectedCeilingIds],
-        opening: [selectedOpeningIds, setSelectedOpeningIds],
-        stair: [selectedStairIds, setSelectedStairIds],
-        room: [selectedRoomIds, setSelectedRoomIds],
-        solid: [selectedExtrudedSolidIds, setSelectedExtrudedSolidIds],
-        column: [selectedColumnIds, setSelectedColumnIds],
-        roof: [selectedRoofIds, setSelectedRoofIds],
-        context: [selectedContextObjectIds, setSelectedContextObjectIds],
-      } as const;
+        section: "sectionLines",
+        wall: "walls",
+        drawing: "drawings",
+        ceiling: "ceilings",
+        opening: "openings",
+        stair: "stairs",
+        room: "rooms",
+        solid: "solids",
+        column: "columns",
+        roof: "roofs",
+        context: "contextObjects",
+      } as const satisfies Record<string, SelectionKind>;
       type Kind = keyof typeof channels;
       const target: { kind: Kind; id: string } | null = sel.sectionLineId
         ? { kind: "section", id: sel.sectionLineId }
@@ -304,16 +233,16 @@ export function useMouseSelectionHandlers(opts: {
                             : null;
       const rep = sel.replaces;
       const base = (kind: Kind): string[] => {
-        const list = channels[kind][0] as readonly string[];
+        const list = selection[channels[kind]];
         return rep && rep.kind === kind ? list.filter((x) => x !== rep.id) : [...list];
       };
-      if (rep && (!target || rep.kind !== target.kind)) channels[rep.kind][1](base(rep.kind));
+      const patch: Partial<Selection> = {};
+      if (rep && (!target || rep.kind !== target.kind)) patch[channels[rep.kind]] = base(rep.kind);
       if (target) {
         const list = base(target.kind);
-        channels[target.kind][1](
-          list.includes(target.id) ? list.filter((x) => x !== target.id) : [...list, target.id],
-        );
+        patch[channels[target.kind]] = list.includes(target.id) ? list.filter((x) => x !== target.id) : [...list, target.id];
       }
+      setSelection(patch);
       return;
     }
     // Gruppen-Erweiterung: gehört das getroffene Element zu einer (im
@@ -328,76 +257,37 @@ export function useMouseSelectionHandlers(opts: {
         groupPath,
       );
       if (groupIds.length > 0) {
-        setSelectedWallIds(expanded.wallIds);
-        setSelectedDrawingIds(expanded.drawingIds);
-        setSelectedCeilingIds(expanded.ceilingIds);
-        setSelectedOpeningIds(expanded.openingIds);
-        setSelectedStairIds(expanded.stairIds);
-        setSelectedRoomIds(expanded.roomIds);
-        setSelectedColumnIds(expanded.columnIds);
-        setSelectedRoofIds(expanded.roofIds);
-        setSelectedExtrudedSolidIds([]);
-        setSelectedContextObjectIds([]);
-        setSelectedSectionLineIds([]);
-        setSelectedGroupIds(groupIds);
+        setSelection({ ...clearKinds(), ...fromIdLists(expanded), groups: groupIds });
         return;
       }
     }
-    setSelectedGroupIds([]);
     // Ohne Shift: ersetzen. Öffnung hat Vorrang (ihr Symbol liegt in der Lücke),
-    // dann Wand, dann 2D-Element, dann Decke; sonst leeren. Die Kanäle schließen
-    // sich gegenseitig aus.
-    // Alle Kanäle ausser dem gewählten leeren — als Helfer, damit jeder Zweig
-    // (inkl. des neuen Dach-Kanals) konsistent bleibt.
-    const clearOthers = (keep: string) => {
-      if (keep !== "wall") setSelectedWallIds([]);
-      if (keep !== "drawing") setSelectedDrawingId(null);
-      if (keep !== "ceiling") setSelectedCeilingIds([]);
-      if (keep !== "opening") setSelectedOpeningIds([]);
-      if (keep !== "stair") setSelectedStairIds([]);
-      if (keep !== "room") setSelectedRoomIds([]);
-      if (keep !== "extrudedSolid") setSelectedExtrudedSolidIds([]);
-      if (keep !== "column") setSelectedColumnIds([]);
-      if (keep !== "roof") setSelectedRoofIds([]);
-      if (keep !== "contextObject") setSelectedContextObjectIds([]);
-      if (keep !== "sectionLine") setSelectedSectionLineIds([]);
-    };
-    if (sel.sectionLineId) {
-      setSelectedSectionLineIds([sel.sectionLineId]);
-      clearOthers("sectionLine");
-    } else if (sel.openingId) {
-      setSelectedOpeningIds([sel.openingId]);
-      clearOthers("opening");
-    } else if (sel.wallId) {
-      setSelectedWallIds([sel.wallId]);
-      clearOthers("wall");
-    } else if (sel.columnId) {
-      setSelectedColumnIds([sel.columnId]);
-      clearOthers("column");
-    } else if (sel.drawingId) {
-      setSelectedDrawingId(sel.drawingId);
-      clearOthers("drawing");
-    } else if (sel.extrudedSolidId) {
-      setSelectedExtrudedSolidIds([sel.extrudedSolidId]);
-      clearOthers("extrudedSolid");
-    } else if (sel.ceilingId) {
-      setSelectedCeilingIds([sel.ceilingId]);
-      clearOthers("ceiling");
-    } else if (sel.stairId) {
-      setSelectedStairIds([sel.stairId]);
-      clearOthers("stair");
-    } else if (sel.roomId) {
-      setSelectedRoomIds([sel.roomId]);
-      clearOthers("room");
-    } else if (sel.roofId) {
-      setSelectedRoofIds([sel.roofId]);
-      clearOthers("roof");
-    } else if (sel.contextObjectId) {
-      setSelectedContextObjectIds([sel.contextObjectId]);
-      clearOthers("contextObject");
-    } else {
-      clearOthers("");
-    }
+    // dann Wand, dann 2D-Element, dann Decke; sonst leeren. Die Arten schließen
+    // sich gegenseitig aus (alle anderen und die Gruppen werden geleert).
+    const one: [SelectionKind, string] | null = sel.sectionLineId
+      ? ["sectionLines", sel.sectionLineId]
+      : sel.openingId
+        ? ["openings", sel.openingId]
+        : sel.wallId
+          ? ["walls", sel.wallId]
+          : sel.columnId
+            ? ["columns", sel.columnId]
+            : sel.drawingId
+              ? ["drawings", sel.drawingId]
+              : sel.extrudedSolidId
+                ? ["solids", sel.extrudedSolidId]
+                : sel.ceilingId
+                  ? ["ceilings", sel.ceilingId]
+                  : sel.stairId
+                    ? ["stairs", sel.stairId]
+                    : sel.roomId
+                      ? ["rooms", sel.roomId]
+                      : sel.roofId
+                        ? ["roofs", sel.roofId]
+                        : sel.contextObjectId
+                          ? ["contextObjects", sel.contextObjectId]
+                          : null;
+    setSelection({ ...clearKinds(), groups: [], ...(one ? { [one[0]]: [one[1]] } : {}) });
   };
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
   // (nach CAD-Konvention von PlanView bestimmt). Ersetzt die bisherige Auswahl.
@@ -433,22 +323,19 @@ export function useMouseSelectionHandlers(opts: {
     // Gruppen-Erweiterung: jedes getroffene Element, das zu einer sichtbaren
     // Gruppe gehört, zieht deren ganze (transitive) Mitgliedschaft nach.
     const { expanded, groupIds } = expandToGroups(project, filtered, groupPath);
-    setSelectedWallIds(expanded.wallIds);
-    setSelectedDrawingIds(expanded.drawingIds);
-    setSelectedCeilingIds(expanded.ceilingIds);
-    setSelectedStairIds(expanded.stairIds);
-    setSelectedRoomIds(expanded.roomIds);
-    setSelectedGroupIds(groupIds);
     // Öffnungen/Extrusionen/Stützen/Dächer/Kontext-Objekte sind (noch) nicht
     // Teil des Marquee (Nutzer-Report betraf nur Decken/Räume/Treppen; Stütze/
     // Dach liessen sich mit derselben `marqueeHitByField`-Mechanik ergänzen,
     // falls gewünscht) → beim Aufziehen abwählen.
-    setSelectedOpeningIds([]);
-    setSelectedExtrudedSolidIds([]);
-    setSelectedColumnIds([]);
-    setSelectedRoofIds([]);
-    setSelectedContextObjectIds([]);
-    setSelectedSectionLineIds([]);
+    setSelection({
+      ...clearKinds(),
+      walls: expanded.wallIds,
+      drawings: expanded.drawingIds,
+      ceilings: expanded.ceilingIds,
+      stairs: expanded.stairIds,
+      rooms: expanded.roomIds,
+      groups: groupIds,
+    });
   };
   // Rechts-Klick im Grundriss: Wand-Kontextmenü. Trifft der Klick eine Wand, die
   // NICHT bereits in der Auswahl ist, wird die Auswahl auf sie gesetzt (damit die
@@ -460,7 +347,7 @@ export function useMouseSelectionHandlers(opts: {
     model: Vec2;
   }) => {
     const wallId = hitTestWall(project, activeLevelId, visibleCodes, info.model);
-    if (wallId && !selectedWallIds.includes(wallId)) setSelectedWallIds([wallId]);
+    if (wallId && !selection.walls.includes(wallId)) setSelection({ walls: [wallId] });
     setMenu({ kind: "plan", x: info.clientX, y: info.clientY, wallId, model: info.model });
   };
   // Links-KLICK im Nordstern-3D-Viewport (WASM, TS-Raycast): getroffenes Bauteil
@@ -471,114 +358,39 @@ export function useMouseSelectionHandlers(opts: {
   // Leertreffer (kein Bauteil) → alle Selektionen leeren.
   const onViewport3dPick = (hit: Pick3dHit, additive: boolean) => {
     if (!hit) {
-      setSelectedWallIds([]);
-      setSelectedCeilingIds([]);
-      setSelectedDrawingId(null);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedContextObjectIds([]);
-      setSelectedSectionLineIds([]);
+      setSelection(clearKinds());
       return;
     }
+    // Öffnung (Fenster/Tür), Treppe, Kontext-Objekt, 2D-Element und Dach ersetzen
+    // die Auswahl exklusiv; nur Wände und Decken unterstützen additive
+    // Mehrfachauswahl (wie bisher; ein 2D-Treffer wählt auch mit Shift nur sich).
     if (hit.kind === "contextObject") {
-      setSelectedContextObjectIds([hit.id]);
-      setSelectedWallIds([]);
-      setSelectedCeilingIds([]);
-      setSelectedDrawingId(null);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedSectionLineIds([]);
+      setSelection({ ...clearKinds(), contextObjects: [hit.id] });
       return;
     }
-    // Öffnung (Fenster/Tür) und Treppe sind jetzt auch im WASM-Viewport pickbar
-    // (raycast3d/pickGeometry). Jede Art ersetzt die Auswahl exklusiv; nur Wände
-    // unterstützen additive Mehrfachauswahl (wie bisher).
     if (hit.kind === "opening") {
-      setSelectedOpeningIds([hit.id]);
-      setSelectedWallIds([]);
-      setSelectedCeilingIds([]);
-      setSelectedDrawingId(null);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedContextObjectIds([]);
-      setSelectedSectionLineIds([]);
+      setSelection({ ...clearKinds(), openings: [hit.id] });
       return;
     }
     if (hit.kind === "drawing") {
-      setSelectedDrawingIds(
-        additive ? Array.from(new Set([...selectedDrawingIds, hit.id])) : [hit.id],
-      );
-      setSelectedDrawingId(hit.id);
-      setSelectedWallIds([]);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedContextObjectIds([]);
-      setSelectedSectionLineIds([]);
+      setSelection({ ...clearKinds(), drawings: [hit.id] });
       return;
     }
     if (hit.kind === "stair") {
-      setSelectedStairIds([hit.id]);
-      setSelectedWallIds([]);
-      setSelectedCeilingIds([]);
-      setSelectedDrawingId(null);
-      setSelectedOpeningIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedContextObjectIds([]);
-      setSelectedSectionLineIds([]);
+      setSelection({ ...clearKinds(), stairs: [hit.id] });
       return;
     }
     if (hit.kind === "roof") {
-      setSelectedRoofIds([hit.id]);
-      setSelectedWallIds([]);
-      setSelectedCeilingIds([]);
-      setSelectedDrawingId(null);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedContextObjectIds([]);
+      // Schnittlinien bleiben hier (wie bisher) gewählt.
+      setSelection({ ...clearKinds(...ELEMENT_KINDS.filter((k) => k !== "sectionLines")), roofs: [hit.id] });
       return;
     }
-    if (hit.kind === "wall") {
-      setSelectedWallIds(
-        additive ? Array.from(new Set([...selectedWallIds, hit.id])) : [hit.id],
-      );
-      setSelectedCeilingIds([]);
-    } else {
-      setSelectedCeilingIds(
-        additive ? Array.from(new Set([...selectedCeilingIds, hit.id])) : [hit.id],
-      );
-      setSelectedWallIds([]);
-    }
-    setSelectedDrawingId(null);
-    setSelectedOpeningIds([]);
-    setSelectedStairIds([]);
-    setSelectedContextObjectIds([]);
-    setSelectedRoomIds([]);
-    setSelectedExtrudedSolidIds([]);
-    setSelectedColumnIds([]);
-    setSelectedRoofIds([]);
-    setSelectedSectionLineIds([]);
+    const add = (ids: string[]) => (additive ? Array.from(new Set([...ids, hit.id])) : [hit.id]);
+    setSelection(
+      hit.kind === "wall"
+        ? { ...clearKinds(), walls: add(selection.walls) }
+        : { ...clearKinds(), ceilings: add(selection.ceilings) },
+    );
   };
   return {
     onOpenStampEditor,

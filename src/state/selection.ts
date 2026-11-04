@@ -12,6 +12,7 @@
 
 import type { CommandSelection } from "../commands/types";
 import type { TransformSelection } from "../tools/transform";
+import type { GroupMembership } from "../core";
 
 /** Gewählte Elemente, je Art eine Menge (Reihenfolge = Wahl-Reihenfolge). */
 export interface Selection {
@@ -198,4 +199,18 @@ export function fromIdLists(lists: Partial<SelectionIdLists>): Partial<Selection
     if (ids) out[k] = ids;
   }
   return out;
+}
+
+/** Auswahl → Gruppen-Mitgliedschaft (die acht gruppierbaren Arten). */
+export function toMembership(sel: Selection): GroupMembership {
+  return {
+    wallIds: sel.walls,
+    drawingIds: sel.drawings,
+    ceilingIds: sel.ceilings,
+    roomIds: sel.rooms,
+    stairIds: sel.stairs,
+    columnIds: sel.columns,
+    roofIds: sel.roofs,
+    openingIds: sel.openings,
+  };
 }
