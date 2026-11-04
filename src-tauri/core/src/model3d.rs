@@ -174,7 +174,7 @@ pub fn emit_slabs(p: &Project) -> Vec<RSlab> {
 // ── Stützen ─────────────────────────────────────────────────────────────────
 
 const COLUMN_ROUND_SEGMENTS: usize = 32;
-const COLUMN_RGB: Rgb = [0.7, 0.7, 0.72];
+pub(crate) const COLUMN_RGB: Rgb = [0.7, 0.7, 0.72];
 
 /// Grundriss-Querschnitt einer Stütze (`columnFootprint`).
 pub fn column_footprint(col: &Column) -> Vec<Vec2> {

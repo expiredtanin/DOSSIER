@@ -57,11 +57,13 @@ fn rgb_to_hex(c: [f64; 3]) -> String {
     format!("#{}{}{}", b(c[0]), b(c[1]), b(c[2]))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Role {
     Wall,
     Slab,
     Roof,
+    /// Stütze ([132]): Prisma aus dem Querschnitt, Flächen wie eine Platte.
+    Column,
 }
 
 struct Face {
@@ -79,7 +81,7 @@ struct Face {
 
 /// Stirnflächen der Dachscheibe an den freien Rändern der Dachflächen (Traufe, Ortgang): je Rand ein
 /// Viereck von der Oberkante senkrecht zur Fläche um die Dicke nach innen (wie die 3D-Schichten).
-fn fascia_quads(planes: &[Vec<[f64; 3]>], total: f64) -> Vec<[[f64; 3]; 4]> {
+pub(crate) fn fascia_quads(planes: &[Vec<[f64; 3]>], total: f64) -> Vec<[[f64; 3]; 4]> {
     let mut out = Vec::new();
     if !(total > 1e-6) {
         return out;
@@ -524,7 +526,7 @@ fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[Ro
         };
         let (id, fill) = match role {
             Role::Wall => (walls[f.src].wall_id.clone(), walls[f.src].color),
-            Role::Slab => (slabs[f.src].ceiling_id.clone(), slabs[f.src].color),
+            Role::Slab | Role::Column => (slabs[f.src].ceiling_id.clone(), slabs[f.src].color),
             Role::Roof => (roofs[f.src].id.clone(), roofs[f.src].fill),
         };
         let pts = f.pts.iter().map(|q| [q.0, q.1]).collect();
@@ -559,6 +561,38 @@ pub(crate) fn corner_shifts(x: &RWall) -> [f64; 4] {
         }
     };
     [shift(x.start, ht, x.start_cut), shift(x.start, -ht, x.start_cut), shift(x.end, ht, x.end_cut), shift(x.end, -ht, x.end_cut)]
+}
+
+/// Stützen ([132]) als lotrechte Prismen aus dem Querschnitt (wie im 3D, `model3d::emit_columns`).
+fn collect_column_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
+    let slabs: Vec<RSlab> = p
+        .columns
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|c| c.height > 0.0)
+        .map(|c| {
+            let (z_bottom, z_top) = p.column_vertical_extent(c);
+            let color = c.component_id.as_deref().and_then(|id| p.component(id)).map_or(model3d::COLUMN_RGB, |k| crate::style::hex_to_rgb(&k.color, model3d::COLUMN_RGB));
+            RSlab {
+                outline: model3d::column_footprint(c).iter().map(|q| [q.x, q.y]).collect(),
+                z_bottom,
+                z_top,
+                color,
+                ceiling_id: c.id.clone(),
+                hatch: None,
+                cut: None,
+                monolith: None,
+                source: Default::default(),
+            }
+        })
+        .filter(|s| s.z_top - s.z_bottom > 1e-6 && s.outline.iter().flatten().all(|v| v.is_finite()))
+        .collect();
+    let mut faces = project_faces(frame, &[], &slabs, &[]);
+    for f in &mut faces {
+        f.role = Role::Column;
+    }
+    faces
 }
 
 /// `collectRoofFaces`.
@@ -608,7 +642,7 @@ fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall]) -> Result<
             };
             // Wie die übrigen Dächer: Oberfläche der Eindeckung (Dach + Gaubendächer), dazu die Gaubenwände.
             // Wände reichen ans Dach ([G2]): Stirnflächen der Ränder, die nicht in einem anderen Dach stecken.
-            let gables = if floors.contains(roof.floor_id.as_str()) {
+            let gables = {
                 let total: f64 = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).sum();
                 // Nur Dächer, deren Ausdehnung einen Stirn-Mittelpunkt enthalten kann (ausserhalb liegt
                 // kein Punkt in einer ihrer Flächen).
@@ -618,16 +652,15 @@ fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall]) -> Result<
                     .filter(|(j, o)| o.id != roof.id && o.floor_id == roof.floor_id && !(boxes[*j][2] < boxes[ri][0] || boxes[*j][0] > boxes[ri][2] || boxes[*j][3] < boxes[ri][1] || boxes[*j][1] > boxes[ri][3]))
                     .flat_map(|(j, _)| &geos[j].planes)
                     .collect();
-                fascia_quads(&g.planes, total)
+                let fascia = fascia_quads(&g.planes, total)
                     .into_iter()
                     .filter(|q| {
                         let (mx, my) = ((q[0][0] + q[1][0]) / 2.0, (q[0][1] + q[1][1]) / 2.0);
                         !others.iter().any(|o| crate::dormer::point_in_xy(mx, my, o))
                     })
-                    .map(|q| q.to_vec())
-                    .collect()
-            } else {
-                g.gables.clone()
+                    .map(|q| q.to_vec());
+                // Ohne Wände bis ans Dach zusätzlich die Giebeldreiecke ([132]: Stirnen immer).
+                if floors.contains(roof.floor_id.as_str()) { fascia.collect() } else { g.gables.iter().cloned().chain(fascia).collect::<Vec<_>>() }
             };
             roofs.push(RoofIn { id: roof.id.clone(), fill, planes: crate::roof_assembly::planar_faces(&solids.top, &front(&solids.top)), gables });
             let wall_comp = solids.parts.iter().find(|pt| pt.role == crate::roof_assembly::Role::DormerWall && pt.layer == 0).and_then(|pt| p.component(&pt.component_id));
@@ -639,12 +672,11 @@ fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall]) -> Result<
             continue;
         }
         // Wände reichen ans Dach: statt der Giebeldreiecke die Stirnflächen der Dachscheibe (Traufe, Ortgang).
-        let gables = if floors.contains(roof.floor_id.as_str()) {
-            let total: f64 = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).sum();
-            fascia_quads(&g.planes, total).into_iter().map(|q| q.to_vec()).collect()
-        } else {
-            g.gables.clone()
-        };
+        // Sonst Giebeldreiecke und Stirnen ([132]: ein Flachdach zeigt sonst gar nichts, die Fläche liegt
+        // in der Ansicht auf der Kante).
+        let total: f64 = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).sum();
+        let fascia = fascia_quads(&g.planes, total).into_iter().map(|q| q.to_vec());
+        let gables = if floors.contains(roof.floor_id.as_str()) { fascia.collect() } else { g.gables.iter().cloned().chain(fascia).collect() };
         roofs.push(RoofIn { id: roof.id.clone(), fill, planes: g.planes.clone(), gables });
     }
     Ok(project_faces(frame, &[], &[], &roofs))
@@ -1078,6 +1110,7 @@ struct EdgeSeg {
 /// Öffnungen als ebene Verdecker in ihrer Tiefe (eigene Kanten zeichnen sie selbst).
 fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpening], frame: &[f64; 9], hidden: bool) -> Vec<EdgeSeg> {
     let arc_ids: HashMap<&str, u32> = p.walls.iter().filter(|w| crate::wall_arc::WallArc::of_wall(w).is_some()).enumerate().map(|(i, w)| (w.id.as_str(), i as u32 + 1)).collect();
+    let round_cols: HashMap<&str, u32> = p.columns.as_deref().unwrap_or(&[]).iter().filter(|c| matches!(c.profile, ColumnProfile::Round { .. })).enumerate().map(|(i, c)| (c.id.as_str(), i as u32)).collect();
     let (n, u) = ([frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
     let mut hf: Vec<crate::hlr::Face> = Vec::with_capacity(faces.len() + openings.len());
     for f in faces {
@@ -1087,6 +1120,10 @@ fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpening], frame:
         let mut h = crate::hlr::Face::new(pts, normal, 0);
         if f.role == Role::Wall {
             h.smooth = arc_ids.get(f.id.as_str()).copied().unwrap_or(0);
+        }
+        // Runde Stützen ([132]): Mantelfacetten ohne Fugen (eigene Gruppen hinter denen der Bogenwände).
+        if f.role == Role::Column {
+            h.smooth = round_cols.get(f.id.as_str()).map_or(0, |i| arc_ids.len() as u32 + 1 + i);
         }
         hf.push(h);
     }
@@ -1182,6 +1219,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     let mut faces = project_faces(&frame, &walls, &slabs, &[]);
     cull_under_roofs(p, &frame, &walls, &mut faces);
     faces.extend(collect_roof_faces(p, &frame, &walls)?);
+    faces.extend(collect_column_faces(p, &frame));
 
     // Kategorie einer Fläche (erstes Element mit der id, wie `find`).
     let mut wall_cat: HashMap<&str, &str> = HashMap::new();
@@ -1196,6 +1234,10 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     for r in p.roofs.as_deref().unwrap_or(&[]) {
         roof_cat.entry(r.id.as_str()).or_insert(r.category_code.as_str());
     }
+    let mut col_cat: HashMap<&str, &str> = HashMap::new();
+    for c in p.columns.as_deref().unwrap_or(&[]) {
+        col_cat.entry(c.id.as_str()).or_insert(c.category_code.as_str());
+    }
     let category = |f: &Face| -> Option<&str> {
         if f.id.is_empty() {
             return None;
@@ -1204,6 +1246,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             Role::Wall => wall_cat.get(f.id.as_str()).copied(),
             Role::Slab => ceil_cat.get(f.id.as_str()).copied(),
             Role::Roof => roof_cat.get(f.id.as_str()).copied(),
+            Role::Column => col_cat.get(f.id.as_str()).copied(),
         }
     };
     if vis.has_vis && vis.has_display {
@@ -1260,19 +1303,20 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         let fill = fill_for(f.fill);
         let seam = is_roof && assembled.contains(f.id.as_str());
         let mut prim = if seam { polygon(pts, &fill, &fill, 0.15, no_hatch()) } else { polygon(pts, &fill, "none", 0.0, no_hatch()) };
-        if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, .. } = &mut prim {
+        if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, column_id, .. } = &mut prim {
             *g = Some(greyed(f));
             if !f.id.is_empty() {
                 match f.role {
                     Role::Wall => *wall_id = Some(f.id.clone()),
                     Role::Slab => *ceiling_id = Some(f.id.clone()),
                     Role::Roof => *roof_id = Some(f.id.clone()),
+                    Role::Column => *column_id = Some(f.id.clone()),
                 }
             }
         }
         let rank = match f.role {
             Role::Slab => 0.0,
-            Role::Wall => 1.0,
+            Role::Wall | Role::Column => 1.0,
             Role::Roof => 2.0,
         };
         pending.push(Pending::Item { depth: f.depth, rank: Some(rank), prim });
@@ -1605,6 +1649,10 @@ fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9], scale: f6
             }
             // Maler-Tiefe der Fläche wie `project_face`: Mittel der Eckentiefen.
             let face_depth = plane.iter().map(|q| proj([q[0], q[2], q[1]]).2).sum::<f64>() / plane.len() as f64;
+            // [132] Verschnittene Dächer mit Löchern kommen als Dreiecke dieser Ebene, je mit eigener
+            // Maler-Tiefe: die Musterlinien je Dreieck zuschneiden und mit ihm malen (sonst decken nähere
+            // Dreiecke die Linien der ferneren, und die Grenze erscheint als Treppe/Strichellinie).
+            let tris = plane_triangles(faces, &roof.id, n, plane, &proj);
             for (a, b) in sp::segments_3d(plane, &spec, off, scale) {
                 let (ua, va, da) = proj([a[0], a[2], a[1]]);
                 let (ub, vb, db) = proj([b[0], b[2], b[1]]);
@@ -1615,7 +1663,16 @@ fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9], scale: f6
                     styles.push(pattern_style(pat, comp));
                     styles.len() - 1
                 });
-                lines.push(([ua, va], [ub, vb], min(da, db) - EPS * 5.0, face_depth - EPS * 5.0, k));
+                if tris.is_empty() {
+                    lines.push(([ua, va], [ub, vb], min(da, db) - EPS * 5.0, face_depth - EPS * 5.0, k));
+                    continue;
+                }
+                for &ti in &tris {
+                    let Some((t0, t1)) = clip_to_convex([ua, va], [ub, vb], &faces[ti].pts) else { continue };
+                    let at = |t: f64| ([ua + (ub - ua) * t, va + (vb - va) * t], da + (db - da) * t);
+                    let ((qa, za), (qb, zb)) = (at(t0), at(t1));
+                    lines.push((qa, qb, min(za, zb) - EPS * 5.0, faces[ti].depth - EPS * 5.0, k));
+                }
             }
         }
     }
@@ -1625,6 +1682,88 @@ fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9], scale: f6
         }
     }
     (lines, styles)
+}
+
+/// [132] Dreiecke (Flächen) des Dachs `id`, die in der Dachebene `plane` liegen (Normale `n` in Plan-
+/// Koordinaten, Schwerpunkt im Ebenen-Umriss); leer, wenn die Ebene als ein Polygon kommt (dann gilt
+/// eine Maler-Tiefe für die ganze Fläche).
+fn plane_triangles(faces: &[Face], id: &str, n: [f64; 3], plane: &[[f64; 3]], proj: &dyn Fn([f64; 3]) -> (f64, f64, f64)) -> Vec<usize> {
+    let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    if !(l > 0.0) {
+        return Vec::new();
+    }
+    // Plan (x, y, Höhe) → Welt (x, Höhe, y), wie `Face::normal`.
+    let nw = [n[0] / l, n[2] / l, n[1] / l];
+    let outline: Vec<[f64; 2]> = plane.iter().map(|q| { let (u, v, _) = proj([q[0], q[2], q[1]]); [u, v] }).collect();
+    let inside = |p: [f64; 2]| {
+        let mut c = false;
+        let m = outline.len();
+        for i in 0..m {
+            let (a, b) = (outline[i], outline[(i + 1) % m]);
+            if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < a[0] + (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) {
+                c = !c;
+            }
+        }
+        c
+    };
+    let mut out = Vec::new();
+    let mut polygons = 0usize;
+    for (i, f) in faces.iter().enumerate() {
+        if f.role != Role::Roof || f.id != id || f.pts.len() < 3 {
+            continue;
+        }
+        let fl = (f.normal[0] * f.normal[0] + f.normal[1] * f.normal[1] + f.normal[2] * f.normal[2]).sqrt();
+        if !(fl > 0.0) || (f.normal[0] * nw[0] + f.normal[1] * nw[1] + f.normal[2] * nw[2]) / fl < 1.0 - 1e-6 {
+            continue;
+        }
+        let m = f.pts.len() as f64;
+        let c = [f.pts.iter().map(|q| q[0]).sum::<f64>() / m, f.pts.iter().map(|q| q[1]).sum::<f64>() / m];
+        if !inside(c) {
+            continue;
+        }
+        if f.pts.len() == 3 {
+            out.push(i);
+        } else {
+            polygons += 1;
+        }
+    }
+    if polygons > 0 || out.len() < 2 {
+        return Vec::new();
+    }
+    out
+}
+
+/// Parameterbereich `[t0, t1]` der Strecke `a → b` innerhalb des konvexen Polygons `poly` (Cyrus-Beck).
+fn clip_to_convex(a: Pt, b: Pt, poly: &[Pt]) -> Option<(f64, f64)> {
+    let m = poly.len();
+    let area: f64 = (0..m).map(|i| poly[i][0] * poly[(i + 1) % m][1] - poly[(i + 1) % m][0] * poly[i][1]).sum();
+    if !(area.abs() > 1e-12) {
+        return None;
+    }
+    let s = area.signum();
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let (mut t0, mut t1) = (0.0f64, 1.0f64);
+    for i in 0..m {
+        let (p, q) = (poly[i], poly[(i + 1) % m]);
+        // Innen: links der Kante (bei positivem Umlauf).
+        let e = [q[0] - p[0], q[1] - p[1]];
+        let f = |x: Pt| s * (e[0] * (x[1] - p[1]) - e[1] * (x[0] - p[0]));
+        let fa = f(a);
+        let fd = s * (e[0] * d[1] - e[1] * d[0]);
+        if fd.abs() < 1e-15 {
+            if fa < -1e-12 {
+                return None;
+            }
+            continue;
+        }
+        let t = -fa / fd;
+        if fd > 0.0 {
+            t0 = t0.max(t);
+        } else {
+            t1 = t1.min(t);
+        }
+    }
+    (t1 - t0 > 1e-9).then_some((t0, t1))
 }
 
 /// Abfrage `elevationPlan`: `args` = `[mono, shadows]`, `text` = `{"level": {...}, "hasVis", "invisible",
@@ -1945,4 +2084,105 @@ mod tests {
         }
     }
 
+
+    /// Kleines Projekt für [132]: Geschoss F, Ansicht Süd (Blick nach Norden) und West, frei stehendes
+    /// Dach ohne Wände bis ans Dach, dazu Stützen.
+    fn proj132(roofs: serde_json::Value, columns: serde_json::Value) -> Project {
+        serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "drawings2d": [], "openings": [],
+            "drawingLevels": [
+                {"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0},
+                {"id": "s", "name": "S", "kind": "elevation", "visible": true, "locked": false, "linePoints": [{"x": -2, "y": -3}, {"x": 12, "y": -3}], "directionSign": 1},
+                {"id": "w", "name": "W", "kind": "elevation", "visible": true, "locked": false, "linePoints": [{"x": -3, "y": 10}, {"x": -3, "y": -2}], "directionSign": 1}
+            ],
+            "walls": [],
+            "roofs": roofs,
+            "columns": columns
+        }))
+        .unwrap()
+    }
+
+    fn view132(p: &Project, id: &str) -> Vec<Primitive> {
+        let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
+        elevation_primitives(p, &LevelSpec::from_json(&serde_json::to_value(l).unwrap()), false, false, &Visibility::default(), 100.0).unwrap().unwrap().0
+    }
+
+    fn outline_lines(prims: &[Primitive]) -> Vec<(Vec2, Vec2)> {
+        prims.iter().filter_map(|q| match q { Primitive::Line { a, b, cls, .. } if cls == "elevation-outline" => Some((*a, *b)), _ => None }).collect()
+    }
+
+    /// [132] Flachdach in der Ansicht: die Stirn (Dicke des Aufbaus) erscheint als Band mit Ober- und
+    /// Unterkante, nicht als nichts (die Dachfläche liegt auf der Kante).
+    #[test]
+    fn flachdach_zeigt_stirn_in_der_ansicht() {
+        let p = proj132(
+            serde_json::json!([{"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35",
+                "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}],
+                "shape": "flach", "pitchDeg": 0, "overhang": 0, "ridgeAxis": "x", "baseElevation": 3.0, "thickness": 0.4}]),
+            serde_json::json!([]),
+        );
+        for id in ["s", "w"] {
+            let prims = view132(&p, id);
+            let roof: Vec<&Primitive> = prims.iter().filter(|q| matches!(q, Primitive::Polygon { roof_id: Some(r), .. } if r == "R")).collect();
+            assert!(!roof.is_empty(), "{id}: keine Dachfläche");
+            let (lo, hi) = roof.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| match q {
+                Primitive::Polygon { pts, .. } => pts.iter().fold((lo, hi), |(lo, hi), v| (lo.min(v.y), hi.max(v.y))),
+                _ => (lo, hi),
+            });
+            assert!((hi - lo - 0.4).abs() < 1e-6, "{id}: Stirnband {lo}..{hi}");
+            // Ober- und Unterkante als waagrechte Linien über die ganze Breite.
+            let lines = outline_lines(&prims);
+            for z in [lo, hi] {
+                assert!(lines.iter().any(|(a, b)| (a.y - z).abs() < 1e-6 && (b.y - z).abs() < 1e-6 && (a.x - b.x).abs() > 7.9), "{id}: Kante bei {z} fehlt");
+            }
+        }
+    }
+
+    /// [132] Stützen erscheinen in der Ansicht (Fläche mit Pick-Id, Umriss); runde ohne Facettenfugen.
+    #[test]
+    fn stuetzen_in_der_ansicht() {
+        let p = proj132(
+            serde_json::json!([]),
+            serde_json::json!([
+                {"id": "C1", "type": "column", "floorId": "F", "categoryCode": "25", "position": {"x": 2, "y": 2}, "profile": {"kind": "rect", "width": 0.2, "depth": 0.2}, "rotation": 0, "height": 2.5},
+                {"id": "C2", "type": "column", "floorId": "F", "categoryCode": "25", "position": {"x": 6, "y": 2}, "profile": {"kind": "round", "radius": 0.15}, "rotation": 0, "height": 2.5}
+            ]),
+        );
+        let prims = view132(&p, "s");
+        for id in ["C1", "C2"] {
+            assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { column_id: Some(c), .. } if c == id)), "{id} fehlt");
+        }
+        // Senkrechte Kanten: je Stütze genau zwei (links, rechts), keine Facettenfugen der runden.
+        let verticals = outline_lines(&prims).into_iter().filter(|(a, b)| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() > 1.0).count();
+        assert_eq!(verticals, 4);
+    }
+
+    #[test]
+    #[ignore]
+    fn debug132() {
+        let Ok(path) = std::env::var("MK") else { return };
+        let p: Project = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let id = std::env::var("VIEW").unwrap_or("ansicht-nord".into());
+        let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let plane = level.plane().unwrap();
+        let frame = frame_of(&plane);
+        let mut walls = model3d::emit_walls(&p, false).unwrap();
+        for w in walls.iter().filter(|w| w.wall_id.starts_with("og-anbau")) {
+            println!("RW {} {:?}->{:?} th {} base {} h {} plane {:?}", w.wall_id, w.start, w.end, w.thickness, w.base_elevation, w.height, w.top_plane);
+        }
+        let slabs = model3d::emit_slabs(&p);
+        extend_wall_corners(&p, &mut walls, (frame[6], frame[8]));
+        let mut faces = project_faces(&frame, &walls, &slabs, &[]);
+        cull_under_roofs(&p, &frame, &walls, &mut faces);
+        faces.extend(collect_roof_faces(&p, &frame, &walls).unwrap());
+        let r: Vec<f64> = std::env::var("BOX").unwrap().split(',').map(|x| x.parse().unwrap()).collect();
+        for f in &faces {
+            let (x0, x1) = f.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q[0]), a.1.max(q[0])));
+            let (y0, y1) = f.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q[1]), a.1.max(q[1])));
+            if x1 > r[0] && x0 < r[1] && y1 > r[2] && y0 < r[3] {
+                println!("{:?} {} n={:?} d={:.3} [{:.2},{:.2}]x[{:.2},{:.2}] {:?}", f.role, f.id, f.normal.map(|v| (v * 1000.0).round() / 1000.0), f.depth, x0, x1, y0, y1, f.pts.iter().map(|q| [(q[0]*100.0).round()/100.0, (q[1]*100.0).round()/100.0]).collect::<Vec<_>>());
+            }
+        }
+    }
 }

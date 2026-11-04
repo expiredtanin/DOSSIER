@@ -1764,7 +1764,10 @@ fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3
         }
         // Dachhaut ohne Dicke: beidseitig.
         let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
-        for poly in g.planes.iter().chain(&g.gables) {
+        // Stirnflächen der Ränder ([132]): Flachdächer zeigen sonst hinter dem Schnitt nur eine Linie.
+        let total: f64 = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).sum();
+        let fascia: Vec<Vec<[f64; 3]>> = super::elevation::fascia_quads(&g.planes, total).into_iter().map(|q| q.to_vec()).collect();
+        for poly in g.planes.iter().chain(&g.gables).chain(&fascia) {
             let w: Vec<[f64; 3]> = poly.iter().map(|q| [q[0], q[2], q[1]]).collect();
             if w.len() >= 3 {
                 push(&mut faces, &w, [0.0; 3], owner, 0, true);
@@ -3304,5 +3307,105 @@ mod wand_an_dach {
         // Bogenwand ([T2]): Sehnen-Teilwände ebenfalls unter dem Dach.
         let wb: Vec<&RWall> = walls.iter().filter(|w| w.wall_id == "WB").collect();
         assert!(wb.len() > 4 && wb.iter().all(|w| w.base_elevation + w.height <= under(4.0) + 1e-6), "{}", wb.len());
+    }
+
+    /// [132] T-Dach: Hauptdach (First in x, Traufe 3.0, 45°) und Anbau (First in y, Traufe 3.0) auf
+    /// demselben Geschoss; der Anbau beginnt unter dem Hauptdach. Schnitt bei y = 1 mit Blick auf den Anbau.
+    fn t_dach(dir: f64, ys: f64) -> Project {
+        serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "drawings2d": [], "openings": [], "walls": [],
+            "drawingLevels": [
+                {"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0},
+                {"id": "s", "name": "S", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": -2, "y": 1}, {"x": 12, "y": 1}], "directionSign": dir}
+            ],
+            "roofs": [
+                {"id": "H", "type": "roof", "floorId": "F", "categoryCode": "35",
+                 "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}],
+                 "shape": "sattel", "pitchDeg": 45, "overhang": 0, "overhangGable": 0, "ridgeAxis": "x", "thickness": 0.3},
+                {"id": "A", "type": "roof", "floorId": "F", "categoryCode": "35",
+                 "outline": [{"x": 3, "y": ys}, {"x": 7, "y": ys}, {"x": 7, "y": 14}, {"x": 3, "y": 14}],
+                 "shape": "sattel", "pitchDeg": 45, "overhang": 0, "overhangGable": 0, "ridgeAxis": "y", "thickness": 0.3}
+            ]
+        }))
+        .unwrap()
+    }
+
+    /// [132] Was vom Anbaudach unter dem Hauptdach liegt, ist vom Schnitt aus verdeckt: Im Dachraum bei
+    /// y = 1 deckt die Unterseite der Hauptdach-Fläche alles über ihrer Höhe an der Schnittebene; sichtbare
+    /// Anbau-Kanten gibt es dort nicht (auch keine durch die Öffnung im Hauptdach unter dem Anbau).
+    #[test]
+    fn t_dach_anbau_unter_dem_hauptdach_verdeckt() {
+        // Unterkante der Hauptdach-Südfläche an der Schnittebene y = 1.
+        let z_cut = 3.0 + 1.0 - 0.3 * 2f64.sqrt();
+        for (dir, ys) in [(1.0, 5.5), (-1.0, 5.5), (1.0, 6.3), (-1.0, 6.3)] {
+            let p = t_dach(dir, ys);
+            let l = p.drawing_levels.iter().find(|l| l.id == "s").unwrap();
+            let out = compute_section(&p, &LevelSpec::from_json(&serde_json::to_value(l).unwrap()), &[]).unwrap().unwrap();
+            let bad: Vec<_> = out.visible.iter().filter(|e| e.kind == Kind::Roof && e.index == 1 && e.a[1].max(e.b[1]) > z_cut + 1e-3).map(|e| (e.a, e.b)).collect();
+            assert!(bad.is_empty(), "dir {dir} ys {ys}: sichtbare Anbau-Kanten über {z_cut}: {bad:?}");
+        }
+    }
+
+    /// [132] Flachdach hinter dem Schnitt: Stirn als Band (Ober- und Unterkante), nicht nur eine Linie.
+    #[test]
+    fn flachdach_hinter_dem_schnitt_mit_stirn() {
+        let p: Project = serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "drawings2d": [], "openings": [], "walls": [],
+            "drawingLevels": [
+                {"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0},
+                {"id": "s", "name": "S", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": -2, "y": -1}, {"x": 12, "y": -1}], "directionSign": 1},
+                {"id": "t", "name": "T", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": 12, "y": -1}, {"x": -2, "y": -1}], "directionSign": 1}
+            ],
+            "roofs": [{"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35",
+                "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}],
+                "shape": "flach", "pitchDeg": 0, "overhang": 0, "ridgeAxis": "x", "baseElevation": 3.0, "thickness": 0.4}]
+        }))
+        .unwrap();
+        // Eine der beiden Blickrichtungen sieht das Dach (die andere schaut weg).
+        let mut seen = false;
+        for id in ["s", "t"] {
+            let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
+            let out = compute_section(&p, &LevelSpec::from_json(&serde_json::to_value(l).unwrap()), &[]).unwrap().unwrap();
+            let hz = |z: f64| out.visible.iter().any(|e| e.kind == Kind::Roof && (e.a[1] - z).abs() < 1e-6 && (e.b[1] - z).abs() < 1e-6 && (e.a[0] - e.b[0]).abs() > 9.9);
+            if hz(3.0) || hz(2.6) {
+                assert!(hz(3.0) && hz(2.6), "{id}: Ober- und Unterkante der Stirn");
+                seen = true;
+            }
+        }
+        assert!(seen, "Flachdach fehlt im Schnitt");
+    }
+
+    #[test]
+    #[ignore]
+    fn debug132s() {
+        let Ok(path) = std::env::var("MK") else { return };
+        let p: Project = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let id = std::env::var("VIEW").unwrap_or("schnitt-b".into());
+        let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
+        let out = compute_section(&p, &LevelSpec::from_json(&serde_json::to_value(l).unwrap()), &[]).unwrap().unwrap();
+        for (i, r) in p.roofs.as_deref().unwrap().iter().enumerate() { println!("roof {i} {}", r.id); }
+        let plane = LevelSpec::from_json(&serde_json::to_value(l).unwrap()).plane().unwrap();
+        let nl = crate::jsmath::hypot(&plane.normal);
+        let n = [plane.normal[0] / nl, plane.normal[1] / nl, plane.normal[2] / nl];
+        let ul = hypot2(n[2], n[0]);
+        let u = [n[2] / ul, 0.0, -n[0] / ul];
+        let o = plane.point;
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let view = |w: [f64; 3]| { let r = [w[0] - o[0], w[1] - o[1], w[2] - o[2]]; [dot(r, u), w[1], dot(r, n)] };
+        let pu: Vec<f64> = std::env::var("PT").unwrap().split(',').map(|x| x.parse().unwrap()).collect();
+        let solids = crate::roof_assembly::roof_solids(&p, 0).unwrap();
+        let m = &solids.skin;
+        for t in m.indices.chunks_exact(3) {
+            let q = |i: u32| { let j = i as usize * 3; view([m.positions[j], m.positions[j + 2], m.positions[j + 1]]) };
+            let tr = [q(t[0]), q(t[1]), q(t[2])];
+            let s2 = |a: [f64; 3], b: [f64; 3]| (b[0] - a[0]) * (pu[1] - a[1]) - (b[1] - a[1]) * (pu[0] - a[0]);
+            let (d0, d1, d2) = (s2(tr[0], tr[1]), s2(tr[1], tr[2]), s2(tr[2], tr[0]));
+            if (d0 >= 0.0 && d1 >= 0.0 && d2 >= 0.0) || (d0 <= 0.0 && d1 <= 0.0 && d2 <= 0.0) {
+                println!("tri {:?}", tr.map(|v| v.map(|x| (x * 1000.0).round() / 1000.0)));
+            }
+        }
+        for e in out.visible.iter().filter(|e| e.kind == Kind::Roof) {
+            println!("V {} {:.3},{:.3} -> {:.3},{:.3}", e.index, e.a[0], e.a[1], e.b[0], e.b[1]);
+        }
     }
 }
