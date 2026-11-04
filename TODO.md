@@ -2185,7 +2185,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Ansichten, alle Blätter, Publikation als PDF). IFC: `scripts/validate-ifc.py` 0 Befunde (204 Produkte).
   Geprüft: CLI-SVGs und Blatt-Screenshots angesehen (Linux), nicht in der Tauri-App/3D-Metal. **Befunde** (4.11. alle bearbeitet): Geschosse unter ±0.00 → [131]; Flachdach-Stirn, Stützen in Ansichten, T-Dach im
   Schnitt, Dachschraffur → [132]; Ausschnitt-Zoom, Dach über Schnitt, Kleinmasse am Erker → [133]; Layout-Viewports mit
-  Schnitt/Ansicht → [115]. Offen bleibt nur, ob das Bodenbelag-Muster der OG-Decke im DG-Grundriss erscheinen soll.
+  Schnitt/Ansicht → [115]. Bodenbelag-Muster der OG-Decke im DG-Grundriss ist richtig (Oberseite der Decke = Boden des DG, wie ArchiCAD).
   e2e-Helfer `openSample` mit exaktem Menünamen. · M
 - ◐ **[115] Schnitt/Ansicht wie Grundriss: 3D-Wechsel und Layout-Viewport.** (30.10., Mac-Befund am Musterhaus
   komplex) (1) Aus Schnitt und Ansicht liess sich nicht ins 3D wechseln: Ansicht-Knöpfe waren nur für Geschosse frei
@@ -2231,7 +2231,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Haupthaus im Ausschnitt). Offen: Mac/Tauri-Gegenprobe. (2) Dächer im Grundriss über der Schnittebene: Traufe/First/Grat
   jetzt strichpunktiert (`OVERHEAD_DASH`, wie Decken-/Fensterkanten), Dachaufsicht darunter ausgezogen; Cargo-Test
   `dach_ueber_schnittebene_strichpunkt`. Die flächige Schraffur im DG-Grundriss ist der Bodenbelag-Muster der OG-Decke
-  (`floor_finish_pattern`, [100]), kein Dach — unverändert, offen zu entscheiden. (3) Aussenbemassung: Teilstrecken unter
+  (`floor_finish_pattern`, [100]), kein Dach — richtig so (Boden des DG). (3) Aussenbemassung: Teilstrecken unter
   1,5 mm Papier (Bogenfacetten am Erkerscheitel, Mauerversprünge) werden zusammengefasst (`auto_dimensions::thin`); Test
   `keine_kleinmasse`. · S
 
