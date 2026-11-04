@@ -1690,7 +1690,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Ressourcen-Tab „Ansichtsvorlagen" (neu aus aktiver Ansicht, duplizieren, umbenennen, löschen, anwenden).
   e2e `viewTemplates.spec.ts`. Offen: Vorlage direkt im Ausschnitte-Panel wählen, Tab im macOS-Ressourcenfenster
   nicht getestet, Schnitt/Ansicht-Detailgrad/Massstab folgen der Vorlage nur über Anzeigezustand der aktiven Ansicht. · M
-- ◐ **[35] Detailgrad pro Ansicht.** · S–M
+- ✅ **[35] Detailgrad pro Ansicht.** (4.11. geprüft) Über Ausschnitte (`ViewSnapshot.detail`), Ansichtsvorlagen ([34], `ViewTemplate.detail`, an Geschoss/Schnitt/Ansicht gebunden) und je Element (`detailLevel` an Öffnung/Wand). · S–M
 - ◐ **[36] View Range.** (30.10.) Geschoss-Felder `viewTop`/`viewBottom`/`viewDepth` (m über OKFF, neben `cutHeight`;
   Eingabe im Geschoss-Editor). Kern `plan/view_range.rs`: Zone Cut/Below/Above/Under/Hidden; ganz über der Oberkante
   oder unter der Unterkante entfällt das Bauteil, darüber bis Oberkante gestrichelt („über Schnitt"), unter der
