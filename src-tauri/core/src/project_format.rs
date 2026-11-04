@@ -9,7 +9,7 @@
 use serde_json::{Map, Value};
 
 /// Aktuelle Version des Dateiformats. Bei jeder Formatänderung erhöhen + Migration anhängen.
-pub const PROJECT_FORMAT_VERSION: u64 = 4;
+pub const PROJECT_FORMAT_VERSION: u64 = 5;
 
 const REQUIRED_ARRAYS: [&str; 3] = ["walls", "layers", "drawingLevels"];
 const DEFAULT_ARRAYS: [&str; 5] = ["lineStyles", "hatches", "components", "wallTypes", "drawings2d"];
@@ -390,6 +390,10 @@ pub fn parse_project_object(raw: Value, now_ms: f64) -> Parsed {
             1 => migrate_doors(obj),
             2 => migrate_layout_annotations(obj),
             3 => migrate_line_weights(obj),
+            // 4 → 5 ([131]): Bezugsgeschoss ±0.00 (`DrawingLevel.zeroLevel`), Untergeschosse dürfen negativ
+            // liegen. Ohne Kennzeichen bleibt das erste Geschoss der Bezug, gespeicherte Höhen gelten weiter:
+            // alte Dateien sehen gleich aus. Die Version steigt, damit ältere Programme Dateien mit negativen
+            // Geschossen ablehnen, statt sie beim nächsten Ebenen-Edit wieder ab ±0.00 zu stapeln.
             _ => obj, // 0 → 1: Einführung von `formatVersion`; Inhalt unverändert.
         };
     }
@@ -639,7 +643,7 @@ mod tests {
     fn alte_datei_wird_migriert_und_ergaenzt() {
         let Parsed::Ok { project, warnings, migrated_from } = parse_project_object(minimal(), 0.0) else { panic!() };
         assert_eq!(migrated_from, Some(0));
-        assert_eq!(project["formatVersion"], 4);
+        assert_eq!(project["formatVersion"], 5);
         assert_eq!(project["lineStyles"], json!([]));
         assert!(warnings.is_empty());
     }
@@ -779,10 +783,24 @@ mod tests {
         assert_eq!(keys(&v["a"]), ["2", "10", "4294967294", "x", "01", "4294967295"]);
     }
 
+    /// [131] 4 → 5: Geschosse bleiben wie gespeichert (erstes Geschoss = Bezug, kein `zeroLevel` ergänzt).
+    #[test]
+    fn format5_laesst_geschosse_unveraendert() {
+        let levels = json!([
+            {"id":"ug","name":"UG","kind":"floor","visible":true,"locked":false,"floorHeight":2.7,"baseElevation":0},
+            {"id":"eg","name":"EG","kind":"floor","visible":true,"locked":false,"floorHeight":2.9,"baseElevation":2.7}
+        ]);
+        let v = json!({"formatVersion": 4, "id":"p","name":"N","walls":[],"layers":[],"drawingLevels": levels});
+        let Parsed::Ok { project, migrated_from, .. } = parse_project_object(v, 0.0) else { panic!() };
+        assert_eq!(migrated_from, Some(4));
+        assert_eq!(project["drawingLevels"], levels);
+        assert_eq!(project["formatVersion"], 5);
+    }
+
     #[test]
     fn serialisierung_setzt_version_nach_vorn() {
         let Value::Object(m) = minimal() else { panic!() };
         let s = serialize_project(&m);
-        assert!(s.starts_with("{\n  \"formatVersion\": 4,\n  \"id\": \"p\""));
+        assert!(s.starts_with("{\n  \"formatVersion\": 5,\n  \"id\": \"p\""));
     }
 }

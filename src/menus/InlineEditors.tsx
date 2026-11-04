@@ -7,9 +7,9 @@
 import type { ComponentProps } from "react";
 import { t } from "../i18n";
 import { activePenSet, resolvePenColor, resolvePenWeight } from "../model/penSets";
-import { findCategory } from "../model/layers";
+import { findCategory, formatElevation } from "../model/layers";
 import type { DrawingLevel, LayerCategory } from "../model/types";
-import { useStore } from "../state/appStore";
+import { getState, useStore } from "../state/appStore";
 import { EditorField } from "../ui/EditorField";
 import { HatchSwatch } from "../ui/hatchPreview";
 import { PenColorField } from "../ui/PenColorField";
@@ -110,6 +110,12 @@ export function LayerInlineEditor({
   );
 }
 
+/** Bezugsgeschoss ±0.00: das erste Geschoss mit `zeroLevel`, sonst das erste Geschoss. */
+function isZeroLevel(levels: readonly DrawingLevel[], id: string): boolean {
+  const floors = levels.filter((z) => z.kind === "floor");
+  return (floors.find((z) => z.zeroLevel) ?? floors[0])?.id === id;
+}
+
 export function LevelInlineEditor({
   editor,
   onClose,
@@ -140,6 +146,32 @@ export function LevelInlineEditor({
       </EditorField>
       {isFloor && (
         <>
+          {/* [131] OK fertig Boden relativ zu ±0.00 (aus dem Stapel); ein Geschoss ist der Bezug. */}
+          <EditorField label={t("editor.levelElevation")}>
+            <span className="editor-num">
+              <span data-testid="level-elevation">{formatElevation(level.baseElevation ?? 0)}</span>
+              <span className="editor-unit">{t("editor.unit.m")}</span>
+            </span>
+          </EditorField>
+          <EditorField label={t("editor.zeroLevel")}>
+            <input
+              type="checkbox"
+              data-testid="level-zero"
+              title={t("editor.zeroLevel.hint")}
+              checked={isZeroLevel(project.drawingLevels, level.id)}
+              disabled={isZeroLevel(project.drawingLevels, level.id)}
+              onChange={(e) => {
+                if (!e.target.checked) return;
+                const prev = project.drawingLevels.find((z) => z.kind === "floor" && z.zeroLevel && z.id !== level.id);
+                // Ein Undo-Schritt: altes Kennzeichen weg, neues setzen; der Kern stapelt neu.
+                if (prev) getState().groupChanges(() => {
+                  patchLevel(prev.id, { zeroLevel: undefined });
+                  patchLevel(level.id, { zeroLevel: true });
+                });
+                else patchLevel(level.id, { zeroLevel: true });
+              }}
+            />
+          </EditorField>
           <EditorField label={t("editor.floorHeight")}>
             <span className="editor-num">
               <input

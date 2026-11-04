@@ -200,7 +200,7 @@ export const getFloor = (project: Project, id: string): DrawingLevel => {
 
 // Ebenen-Baum und Geschoss-Stapelung liegen im Rust-Kern ([K4] S3, `model/layers.ts`); Re-Export, damit
 // die Aufrufer gleich bleiben.
-export { collectVisibleCodes, flattenCategories, getLayerCategory, recomputeFloorElevations } from "./layers";
+export { collectVisibleCodes, flattenCategories, formatElevation, getLayerCategory, recomputeFloorElevations } from "./layers";
 
 /** Gesamtdicke eines Wandtyps = Summe der Schichtdicken. */
 export const wallTypeThickness = (wt: WallType): number =>

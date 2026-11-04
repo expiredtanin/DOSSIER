@@ -52,7 +52,7 @@ describe("Projekt laden ([K4] S4)", () => {
     st().undo();
     expect(st().project).toBe(next);
     // Kern-Dokument = Leseansicht (Speichern aus dem Kern).
-    expect(JSON.parse(serializeProject(st().project))).toEqual({ ...next, formatVersion: 4 });
+    expect(JSON.parse(serializeProject(st().project))).toEqual({ ...next, formatVersion: 5 });
   });
 
   it("openProjectFile: Kern liest, migriert und lädt direkt; Verlauf leer; kaputte Datei ändert nichts", () => {
@@ -70,7 +70,7 @@ describe("Projekt laden ([K4] S4)", () => {
     expect(r.ok && r.migratedFrom).toBe(1);
     expect(st().undoDepth).toBe(0);
     expect(st().redoDepth).toBe(0);
-    expect(st().project.formatVersion).toBe(4);
+    expect(st().project.formatVersion).toBe(5);
     expect(st().project.openings?.some((o) => o.id === "TX" && o.kind === "door")).toBe(true);
     expect("doors" in st().project).toBe(false);
     // Danach normal weiterarbeiten: ein Schritt, Undo zurück auf den geladenen Stand.

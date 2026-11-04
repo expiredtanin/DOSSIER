@@ -1725,6 +1725,13 @@ pub struct DrawingLevel {
     #[serde(rename = "baseElevation", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub base_elevation: Option<f64>,
+    /// Bezugsgeschoss ±0.00 ([131], nur Geschoss): OK fertig Boden dieses Geschosses ist ±0.00
+    /// (Modell-z 0, m ü. M. = `Project.referenceElevationMasl`); Geschosse darunter erhalten negative
+    /// `baseElevation`. Höchstens ein Geschoss trägt das Kennzeichen; fehlt es, ist das erste Geschoss
+    /// der Bezug (Verhalten vor Format 5).
+    #[serde(rename = "zeroLevel", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub zero_level: Option<bool>,
     /// Schnitt-/Ansichtslinie im Grundriss (nur Schnitt/Ansicht).
     #[serde(rename = "linePoints", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -4744,12 +4751,10 @@ pub struct Project {
     #[serde(rename = "projectNumber", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub project_number: Option<String>,
-    /// Referenzhöhe des Erdgeschosses in Metern über Meer (m ü. M.), editierbar
-    /// im Einstellungs-Fenster. Optional, damit bestehende Projekte ohne diesen
-    /// Wert gültig bleiben (Default: unbestimmt/0). NUR Speicherfeld — die
-    /// eigentliche Verwendung (Terrain-Draping/reale Höhen relativ dazu, siehe
-    /// HANDOVER GEO-BLOCK) ist ein separater, späterer Task und liest dieses
-    /// Feld noch nicht.
+    /// Höhe von ±0.00 (OK fertig Boden des Bezugsgeschosses, `DrawingLevel.zeroLevel`)
+    /// in Metern über Meer (m ü. M.), editierbar im Einstellungs-Fenster. Optional.
+    /// Die automatischen Koten im Schnitt/in der Ansicht schreiben „±0.00 = 512.40"
+    /// ([131]); Terrain-Draping liest den Wert noch nicht.
     #[serde(rename = "referenceElevationMasl", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reference_elevation_masl: Option<f64>,

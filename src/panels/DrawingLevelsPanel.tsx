@@ -22,6 +22,7 @@ import type { DrawingLevel } from "./host";
 import type { DisplayMode } from "./types";
 import { DisplayModeSelect } from "./DisplayModeSelect";
 import type { DrawingLevelKind } from "../model/types";
+import { formatElevation } from "../model/layers";
 import { t } from "../i18n";
 
 /** i18n-Key des Kurzbadges für die Art einer Zeichnungsebene. */
@@ -242,7 +243,7 @@ export function LevelRow({
       <span className="nav-label">{level.name}</span>
 
       {level.kind === "floor" && level.baseElevation !== undefined && (
-        <span className="nav-elev">+{level.baseElevation.toFixed(2)}</span>
+        <span className="nav-elev" data-testid={`level-elev-${level.id}`}>{formatElevation(level.baseElevation)}</span>
       )}
 
       <span className={`chip badge-${level.kind}`}>

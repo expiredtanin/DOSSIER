@@ -1007,6 +1007,9 @@ export const en: Record<TranslationKey, string> = {
   "editor.hatch": "Hatch",
   "editor.floorHeight": "Floor height",
   "editor.cutHeight": "Cut height",
+  "editor.levelElevation": "Finished floor level",
+  "editor.zeroLevel": "Datum ±0.00",
+  "editor.zeroLevel.hint": "This storey is at ±0.00; storeys below get negative elevations.",
   "editor.viewTop": "View top",
   "editor.viewBottom": "View bottom",
   "editor.viewDepth": "Visible below down to",
@@ -2552,9 +2555,9 @@ export const en: Record<TranslationKey, string> = {
   "settings.snapColor.hint":
     "Color of the snap/endpoint highlight while drawing/editing in the plan view.",
   "settings.section.project": "Project",
-  "settings.referenceElevation": "Ground floor reference elevation (m a.s.l.)",
+  "settings.referenceElevation": "Elevation of ±0.00 (m a.s.l.)",
   "settings.referenceElevation.hint":
-    "Stored only — not used yet. Terrain draping / real-world elevations relative to the ground floor will follow.",
+    "Finished floor of the datum storey (±0.00) above sea level; shown in sections and elevations at the ±0.00 level mark.",
   "settings.scaleLineWeights": "Line weights by scale",
   "settings.scaleLineWeights.hint": "Plan line weights are scaled by (100/n)^¼: 1:200 ≈ 84 %, 1:50 ≈ 119 %. Applies on screen, in layouts and exports.",
   "settings.section.shortcuts": "Command-line shortcuts (typed alias)",
