@@ -982,7 +982,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "roof" => roof_ops(p, v, &ctx, ids),
         "column" => column_ops(v, &ctx, ids),
         "extrude" => extrude_ops(root, v, &ctx, ids),
-        _ => return crate::cmd_draw::ops(root, v, &ctx, ids).or_else(|| crate::cmd_solid::ops(root, p, v, &ctx, ids)),
+        _ => return crate::cmd_draw::ops(root, p, v, &ctx, ids).or_else(|| crate::cmd_solid::ops(root, p, v, &ctx, ids)),
     })
 }
 
@@ -1062,7 +1062,7 @@ pub fn preview_req(root: &Map<String, Value>, project: &Project, req: &Req, pts:
             }
         }
         _ => {
-            if !crate::cmd_draw::preview(root, v, &ctx, &pts, &mut p) && !crate::cmd_solid::preview(root, v, &pts, &mut p) {
+            if !crate::cmd_draw::preview(root, project, v, &ctx, &pts, &mut p) && !crate::cmd_solid::preview(root, v, &pts, &mut p) {
                 p.ok = false;
             }
         }
@@ -1071,7 +1071,7 @@ pub fn preview_req(root: &Map<String, Value>, project: &Project, req: &Req, pts:
 }
 
 /// Treffer-Abfragen der Zeichenbefehle (`None` = keine Abfrage dieses Moduls).
-pub fn query(root: &Map<String, Value>, v: &Value) -> Option<Result<Value, String>> {
+pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Result<Value, String>> {
     let at = p_of(v, "pt");
     let level = s_of(v, "level");
     Some(Ok(match s_of(v, "q") {
@@ -1087,7 +1087,7 @@ pub fn query(root: &Map<String, Value>, v: &Value) -> Option<Result<Value, Strin
         },
         "pickProfile" => json!({ "hit": pick_profile(root, level, at).map_or(Value::Null, profile_json) }),
         "profile" => json!({ "hit": find(root, "drawings2d", s_of(v, "id")).map_or(Value::Null, profile_json) }),
-        _ => return crate::cmd_draw::query(root, v).or_else(|| crate::cmd_solid::query(root, v)).map(Ok),
+        _ => return crate::cmd_draw::query(root, p, v).or_else(|| crate::cmd_solid::query(root, v)).map(Ok),
     }))
 }
 
@@ -1239,7 +1239,8 @@ mod tests {
     fn oeffnung_in_bogenwand() {
         // Halbkreis (0,0)→(4,0), Scheitel oben (2,2): Bogenlänge 2π.
         let r = root(json!({"walls": [{"id": "w", "floorId": "F1", "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "bulge": 1}], "windowTypes": [{"id": "FT"}]}));
-        let q = query(&r, &json!({"q": "pickWall", "level": "F1", "pt": [2, 2.2]})).unwrap().unwrap();
+        let p = crate::document::Document::from_json(&Value::Object(r.clone()).to_string()).unwrap().project().unwrap().clone();
+        let q = query(&r, &p, &json!({"q": "pickWall", "level": "F1", "pt": [2, 2.2]})).unwrap().unwrap();
         assert_eq!(q["hit"]["id"], "w");
         assert!((q["hit"]["t"].as_f64().unwrap() - std::f64::consts::PI).abs() < 1e-9);
         assert_eq!(q["hit"]["bulge"], 1);
@@ -1251,7 +1252,8 @@ mod tests {
     #[test]
     fn oeffnung_pick_und_vorschau() {
         let r = root(json!({"walls": [{"id": "w", "floorId": "F1", "start": {"x": 0, "y": 0}, "end": {"x": 6, "y": 0}}], "windowTypes": [{"id": "FT"}]}));
-        let q = query(&r, &json!({"q": "pickWall", "level": "F1", "pt": [2, 0.3]})).unwrap().unwrap();
+        let p = crate::document::Document::from_json(&Value::Object(r.clone()).to_string()).unwrap().project().unwrap().clone();
+        let q = query(&r, &p, &json!({"q": "pickWall", "level": "F1", "pt": [2, 0.3]})).unwrap().unwrap();
         assert_eq!(q["hit"]["id"], "w");
         assert_eq!(q["hit"]["t"], 2);
         let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "opening", "wall": "w", "start": [0, 0], "end": [6, 0], "kind": "window", "pos": 5.5, "width": 1.2, "height": 1.2, "sill": 0.9}))).unwrap();
