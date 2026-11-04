@@ -3222,6 +3222,8 @@ export const de = {
   "publish.format.dxf": "DXF mit Layouts",
   "publish.format.dwg": "DWG mit Layouts",
   "publish.sheets": "Blätter",
+  "publish.moveUp": "Im Satz nach vorne",
+  "publish.moveDown": "Im Satz nach hinten",
   "publish.views": "Gespeicherte Ansichten",
   "publish.pattern": "Dateiname",
   "publish.pattern.hint": "Platzhalter: {Projektnummer} {Projekt} {Blattnummer} {Blattname} {Index} {Datum} {Satz}",

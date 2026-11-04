@@ -1770,7 +1770,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (Index A→B→…→AA, 2→3; Plan, Ops), Ausführung `export/publishRun.ts` (PDF über `layoutPdf.buildPagesPdf`, DXF/DWG über den
   Papierbereich-Export; mehrere Dateien als ZIP), Hülle `state/publishActions.ts`, UI-Abschnitt „Publikation“ im Mappe-Reiter
   (`panels/PublishSection.tsx`: Sätze, Einstellungen, ein Klick, Protokoll). Publizieren = ein Undo-Schritt (Index + Protokoll).
-  Offen: Reihenfolge der Blätter im Satz per Ziehen (heute Projekt-Reihenfolge beim Anhaken), DXF/DWG enthält die Papierbereiche
+  4.11.: Reihenfolge der Blätter im Satz mit ↑/↓ (gewählte Blätter oben in Ausgabe-Reihenfolge). Offen: DXF/DWG enthält die Papierbereiche
   der Satz-Blätter, aber Papier-/Massstab-Übersteuerung wirkt dort nur als Export-Massstab, Satz je Ordner, Protokoll als Export.
   Nicht in der Tauri-App getestet (Browser-Download-Pfad geprüft).
 - ✅ **[93] Zeichnen auf dem Layout-Blatt = Zeichnen im Grundriss.** (29.10., Wartungs-Feedback „soll sich genau

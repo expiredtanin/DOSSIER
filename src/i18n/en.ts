@@ -3208,6 +3208,8 @@ export const en: Record<TranslationKey, string> = {
   "publish.format.dxf": "DXF with layouts",
   "publish.format.dwg": "DWG with layouts",
   "publish.sheets": "Sheets",
+  "publish.moveUp": "Move earlier in the set",
+  "publish.moveDown": "Move later in the set",
   "publish.views": "Saved views",
   "publish.pattern": "File name",
   "publish.pattern.hint": "Placeholders: {Projektnummer} {Projekt} {Blattnummer} {Blattname} {Index} {Datum} {Satz}",

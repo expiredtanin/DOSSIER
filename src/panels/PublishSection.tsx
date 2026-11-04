@@ -16,6 +16,15 @@ function toggle(list: readonly string[], id: string, on: boolean): string[] {
   return on ? (list.includes(id) ? [...list] : [...list, id]) : list.filter((x) => x !== id);
 }
 
+/** Eintrag `i` um `d` (±1) verschieben. */
+export function move(list: readonly string[], i: number, d: number): string[] {
+  const j = i + d;
+  if (i < 0 || j < 0 || i >= list.length || j >= list.length) return [...list];
+  const out = [...list];
+  [out[i], out[j]] = [out[j], out[i]];
+  return out;
+}
+
 function SetEditor({ set }: { set: PublishSet }) {
   const host = usePanelHost();
   const project = host.project;
@@ -43,12 +52,24 @@ function SetEditor({ set }: { set: PublishSet }) {
       <div>
         <div>{t("publish.sheets")}</div>
         {layouts.length === 0 && <div style={{ color: "var(--muted)" }}>{t("layouts.tree.empty")}</div>}
-        {layouts.map((l) => (
-          <label key={l.id} style={{ display: "flex", gap: 5, alignItems: "center" }}>
-            <input type="checkbox" checked={set.layoutIds.includes(l.id)} onChange={(e) => patch({ layoutIds: toggle(set.layoutIds, l.id, e.target.checked) })} />
-            <span>{l.name}</span>
-          </label>
-        ))}
+        {/* Gewählte Blätter in Satz-Reihenfolge (so werden sie ausgegeben, [79]), mit ↑/↓; darunter die übrigen. */}
+        {[...set.layoutIds.map((id) => layouts.find((l) => l.id === id)).filter((l) => !!l), ...layouts.filter((l) => !set.layoutIds.includes(l.id))].map((l) => {
+          const i = set.layoutIds.indexOf(l!.id);
+          return (
+            <div key={l!.id} style={{ display: "flex", gap: 5, alignItems: "center" }} data-testid="publish-sheet-row">
+              <label style={{ display: "flex", gap: 5, alignItems: "center", flex: 1 }}>
+                <input type="checkbox" checked={i >= 0} onChange={(e) => patch({ layoutIds: toggle(set.layoutIds, l!.id, e.target.checked) })} />
+                <span>{l!.name}</span>
+              </label>
+              {i >= 0 && (
+                <>
+                  <button className="nav-add" title={t("publish.moveUp")} disabled={i === 0} onClick={() => patch({ layoutIds: move(set.layoutIds, i, -1) })}>↑</button>
+                  <button className="nav-add" title={t("publish.moveDown")} disabled={i === set.layoutIds.length - 1} onClick={() => patch({ layoutIds: move(set.layoutIds, i, 1) })}>↓</button>
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
       {pdf && snapshots.length > 0 && (
         <div>
