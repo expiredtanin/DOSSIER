@@ -1013,6 +1013,9 @@ export const de = {
   "editor.hatch": "Schraffur",
   "editor.floorHeight": "Geschosshöhe",
   "editor.cutHeight": "Schnitthöhe",
+  "editor.levelElevation": "OK fertig Boden",
+  "editor.zeroLevel": "Bezug ±0.00",
+  "editor.zeroLevel.hint": "Dieses Geschoss liegt auf ±0.00; Geschosse darunter erhalten negative Höhen.",
   "editor.viewTop": "Oberkante Sicht",
   "editor.viewBottom": "Unterkante Sicht",
   "editor.viewDepth": "Darunter sichtbar bis",
@@ -2565,9 +2568,9 @@ export const de = {
   "settings.snapColor.hint":
     "Farbe der Snap-/Endpunkt-Hervorhebung beim Zeichnen/Editieren im Grundriss.",
   "settings.section.project": "Projekt",
-  "settings.referenceElevation": "Referenzhöhe EG (m ü. M.)",
+  "settings.referenceElevation": "Höhe ±0.00 (m ü. M.)",
   "settings.referenceElevation.hint":
-    "Nur gespeichert — wird noch nicht verwendet. Folgt für Terrain-Draping/reale Höhen relativ zum Erdgeschoss.",
+    "OK fertig Boden des Bezugsgeschosses (±0.00) über Meer; erscheint in Schnitten und Ansichten an der Kote ±0.00.",
   "settings.scaleLineWeights": "Strichstärken nach Massstab",
   "settings.scaleLineWeights.hint": "Grundriss-Strichstärken werden mit (100/n)^¼ skaliert: 1:200 ≈ 84 %, 1:50 ≈ 119 %. Gilt am Bildschirm, in Layouts und im Export.",
   "settings.section.shortcuts": "Befehlszeilen-Kürzel (Tipp-Alias)",

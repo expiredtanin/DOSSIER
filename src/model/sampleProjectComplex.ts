@@ -11,8 +11,8 @@
 // Lage (x = Ost, y = Nord): Haupthaus 15 × 10 m (Wandachsen), Anbau Nord 5 × 5 m (Eingang, T-Dach),
 // runder Erker Ost (Bogenwand r = 2 m, Wendeltreppe UG → EG), Carport West. Das Gelände fällt nach
 // Süden: das UG liegt im Norden im Hang, im Süden frei (Gartengeschoss).
-// Höhen: Geschosse gestapelt ab UG = 0.00 (wie `recomputeFloorElevations`): UG 0.00, EG 2.70,
-// OG 5.60, DG 8.40. Gelände und absolute Höhen (Dachfuss, Baugrube) im selben System.
+// Höhen ([131]): EG = ±0.00 (Bezugsgeschoss, = 515.10 m ü. M.), gestapelt wie `recomputeFloorElevations`:
+// UG −2.70, EG ±0.00, OG +2.90, DG +5.70. Gelände und absolute Höhen (Dachfuss, Baugrube) im selben System.
 
 import type {
   CeilingType,
@@ -88,9 +88,9 @@ function runCmd(p: Project, level: string, cmd: string, req: Record<string, unkn
 // ═════════════════════════════════════════════════════════════════════════════
 
 const H = { ug: 2.7, eg: 2.9, og: 2.8, dg: 2.6 } as const;
-const Z = { ug: 0, eg: 2.7, og: 5.6, dg: 8.4 } as const;
+const Z = { ug: -2.7, eg: 0, og: 2.9, dg: 5.7 } as const;
 /** Traufhöhe (Dachfuss aussen) des Hauptdachs: 1.60 m über DG (Kniestock innen ≈ 1.2 m). */
-const EAVE_MAIN = 10.0;
+const EAVE_MAIN = 7.3;
 const PITCH = 38;
 /** Wanddicke der Aussenwände (alle Aufbauten 39 cm, damit die Fluchten über die Geschosse stimmen). */
 const AW = 0.39;
@@ -98,7 +98,7 @@ const HA = AW / 2;
 
 const LEVELS: DrawingLevel[] = [
   { id: "ug", name: "Untergeschoss", kind: "floor", visible: true, locked: false, floorHeight: H.ug, cutHeight: 1.2, baseElevation: Z.ug, viewTop: 2.7, viewBottom: 0, viewDepth: -0.5, templateId: "vt-gr100", templateLinked: false },
-  { id: "eg", name: "Erdgeschoss", kind: "floor", visible: true, locked: false, floorHeight: H.eg, cutHeight: 1.0, baseElevation: Z.eg, viewTop: 2.9, viewBottom: 0, viewDepth: -2.7, templateId: "vt-gr100", templateLinked: false },
+  { id: "eg", name: "Erdgeschoss", kind: "floor", visible: true, locked: false, floorHeight: H.eg, cutHeight: 1.0, baseElevation: Z.eg, zeroLevel: true, viewTop: 2.9, viewBottom: 0, viewDepth: -2.7, templateId: "vt-gr100", templateLinked: false },
   { id: "og", name: "Obergeschoss", kind: "floor", visible: true, locked: false, floorHeight: H.og, cutHeight: 1.0, baseElevation: Z.og, viewTop: 2.8, viewBottom: 0, viewDepth: -0.3, templateId: "vt-gr100", templateLinked: false },
   { id: "dg", name: "Dachgeschoss", kind: "floor", visible: true, locked: false, floorHeight: H.dg, cutHeight: 1.0, baseElevation: Z.dg, viewTop: 2.6, viewBottom: 0, viewDepth: -0.3, templateId: "vt-gr100", templateLinked: false },
   // Schnitte: A längs durch Schleppgaube und Dachfenster (Blick nach Westen), B quer durch Treppen und Erker (Blick nach Norden).
@@ -272,9 +272,9 @@ shell("ug", "mk-aw-ug", H.ug, false);
 cores("ug", "mk-iw-ks", H.ug);
 wall("ug-iw-y5", "ug", P(0, 5), P(6, 5), "mk-iw-ks", H.ug);
 wall("ug-iw-y75", "ug", P(10, 7.5), P(15, 7.5), "mk-iw-ks", H.ug);
-// Fundamentriegel unter dem Anbau (kein UG): frostfrei ab 1.30 bis UK Decke.
+// Fundamentriegel unter dem Anbau (kein UG): frostfrei ab −1.40 bis UK Decke.
 for (const [id, a, b] of [["ug-fund-o", P(10, 10 + HA), P(10, 15)], ["ug-fund-n", P(10, 15), P(5, 15)], ["ug-fund-w", P(5, 15), P(5, 10 + HA)]] as const) {
-  wall(id, "ug", a, b, "mk-aw-ug", 1.03, { isExternal: true, bottom: { mode: "custom", z: 1.3 }, top: { mode: "custom", z: 2.33 } });
+  wall(id, "ug", a, b, "mk-aw-ug", 1.03, { isExternal: true, bottom: { mode: "custom", z: -1.4 }, top: { mode: "custom", z: -0.37 } });
 }
 // Stützmauer im Garten: schräger Stoss an die Westfassade, schräge Ecke (Gehrung).
 wall("ug-stuetz-1", "ug", P(-HA, 4), P(-4.5, 1), "mk-stuetzmauer", 1.8, { isExternal: true });
@@ -446,7 +446,7 @@ const roofs: NonNullable<Project["roofs"]> = [
   {
     id: "dach-carport", type: "roof", floorId: "eg", categoryCode: "31", outline: rect(-6.6, 10.6, -0.9, 16.2),
     // Pultdach 3° (Trapezblech) — ein Flachdach zeigt in der Ansicht keine Stirn.
-    shape: "pult", pitchDeg: 3, overhang: 0.1, ridgeAxis: "y", baseElevation: 5.0, thickness: 0.2, roofTypeId: "mk-rt-blech",
+    shape: "pult", pitchDeg: 3, overhang: 0.1, ridgeAxis: "y", baseElevation: 2.3, thickness: 0.2, roofTypeId: "mk-rt-blech",
   },
 ];
 
@@ -474,7 +474,7 @@ const stairs: NonNullable<Project["stairs"]> = [
 const columns: NonNullable<Project["columns"]> = [
   ...[P(-6.2, 11.0), P(-1.3, 11.0), P(-6.2, 15.8), P(-1.3, 15.8)].map((position, i) => ({
     id: `st-carport-${i + 1}`, type: "column" as const, floorId: "eg", categoryCode: "25", position, profile: { kind: "rect" as const, width: 0.12, depth: 0.12 }, rotation: 0,
-    height: 3.0, componentId: "std-c-stahl", bottom: { mode: "custom" as const, z: 2.0 }, top: { mode: "custom" as const, z: 5.0 },
+    height: 3.0, componentId: "std-c-stahl", bottom: { mode: "custom" as const, z: -0.7 }, top: { mode: "custom" as const, z: 2.3 },
   })),
   // Rundstütze unter dem Podest der Gartenterrasse (UG, Sichtbeton).
   { id: "st-ug-1", type: "column", floorId: "ug", categoryCode: "25", position: P(10.0, 2.6), profile: { kind: "round", radius: 0.15 }, rotation: 0, height: H.ug, componentId: "std-c-stahlbeton" },
@@ -492,14 +492,16 @@ const extrudedSolids: NonNullable<Project["extrudedSolids"]> = [
 // ═════════════════════════════════════════════════════════════════════════════
 
 /** Gelände z(x, y): fällt nach Süden (tanh-Profil), leicht gewellt. */
-const terrainZ = (x: number, y: number) => 0.9 + 1.5 * Math.tanh((y - 4 - 0.8 * Math.sin(x / 9)) / 8);
+const terrainZ = (x: number, y: number) => -1.8 + 1.5 * Math.tanh((y - 4 - 0.8 * Math.sin(x / 9)) / 8);
 /** Höhenlinie z als Polylinie y(x) über x = −16 … 32. */
 function contourAt(z: number): Vec2[] {
   const pts: Vec2[] = [];
-  for (let x = -16; x <= 32; x += 2) pts.push(P(x, r3(4 + 0.8 * Math.sin(x / 9) + 8 * Math.atanh((z - 0.9) / 1.5))));
+  for (let x = -16; x <= 32; x += 2) pts.push(P(x, r3(4 + 0.8 * Math.sin(x / 9) + 8 * Math.atanh((z + 1.8) / 1.5))));
   return pts;
 }
-const CONTOUR_Z = [-0.55, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.35];
+const CONTOUR_Z = [-3.25, -3.2, -2.95, -2.7, -2.45, -2.2, -1.95, -1.7, -1.45, -1.2, -0.95, -0.7, -0.45, -0.35];
+/** Hauptlinie je halben Meter ab UG-Boden (−2.70). */
+const isMainContour = (z: number) => Math.abs((z + 2.7) * 2 - Math.round((z + 2.7) * 2)) < 1e-9;
 
 // Parzelle (Kataster) mit Nachbarparzellen; Grenzabstände je Kante, Baulinie an der Strasse (Nord).
 const PARCEL = [P(-14, -12), P(28, -13), P(29, 23), P(-15, 24)];
@@ -702,12 +704,12 @@ function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapsho
       snap("vs-eg50", "EG 1:50 Ausschnitt Wohnen", "eg", 50, P(10, 3.5), { folderId: "vf-gr", templateId: "vt-gr50", templateLinked: true }),
       snap("vs-situation", "Situation 1:500", "eg", 500, P(7, 5), { folderId: "vf-gr", detail: "grob", layerVisibility: ALL }),
       snap("vs-brand", "EG Brandschutz", "eg", 100, P(7.5, 6), { folderId: "vf-gr", templateId: "vt-brand", templateLinked: true, enabledOverrideRuleIds: ["or-brand"] }),
-      snap("vs-schnitt-a", "Schnitt A-A", "schnitt-a", 100, P(6, 6), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-schnitt-b", "Schnitt B-B", "schnitt-b", 100, P(6, 6), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-ansicht-s", "Ansicht Süd", "ansicht-sued", 100, P(6, 6), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-ansicht-o", "Ansicht Ost", "ansicht-ost", 100, P(6, 6), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-ansicht-n", "Ansicht Nord", "ansicht-nord", 100, P(6, 6), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-ansicht-w", "Ansicht West", "ansicht-west", 100, P(6, 6), { folderId: "vf-sa", layerVisibility: ALL }),
+      snap("vs-schnitt-a", "Schnitt A-A", "schnitt-a", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
+      snap("vs-schnitt-b", "Schnitt B-B", "schnitt-b", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
+      snap("vs-ansicht-s", "Ansicht Süd", "ansicht-sued", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
+      snap("vs-ansicht-o", "Ansicht Ost", "ansicht-ost", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
+      snap("vs-ansicht-n", "Ansicht Nord", "ansicht-nord", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
+      snap("vs-ansicht-w", "Ansicht West", "ansicht-west", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
       snap("vs-detail", "Detail Deckenauflager 1:10", "detail-traufe", 10, P(DETAIL_X + 0.4, 1.0), { folderId: "vf-sa", detail: "fein", layerVisibility: HIDE_SITE }),
       snap("vs-3d", "Axonometrie Südost", "eg", 100, P(7.5, 5), { folderId: "vf-3d", viewType: "perspektive", view3d: "isoFrontLeft", fov: 45 }),
     ],
@@ -805,13 +807,13 @@ export function buildComplexSampleProject(): Project {
     context: [
       {
         type: "contourSet", id: "hoehenlinien", name: "Höhenlinien (Vermessung)", layer: "Terrain", categoryCode: "14",
-        contours: CONTOUR_Z.map((z) => ({ z, pts: contourAt(z), closed: false, layer: Number.isInteger(z * 2) ? "HL-Haupt" : "HL" })),
+        contours: CONTOUR_Z.map((z) => ({ z, pts: contourAt(z), closed: false, layer: isMainContour(z) ? "HL-Haupt" : "HL" })),
       },
       {
         // Baugrube: Böschung 60° (Ost 50°), Nordkante (Hang) mit Rühlwand gesichert, Sohle unter der Bodenplatte.
         type: "excavation", id: "baugrube", name: "Baugrube Haupthaus", layer: "Terrain", categoryCode: "07",
         // Umriss = Gebäude-Grundfläche UG (mit Erker), Arbeitsraum 0.8 m; Neigungen in Grad.
-        outline: rect(-HA, -HA, 17.2, 10 + HA), bottom: -0.65, slope: 60, fillSlope: 33.7,
+        outline: rect(-HA, -HA, 17.2, 10 + HA), bottom: -3.35, slope: 60, fillSlope: 33.7,
         edgeSlopes: [60, 50, 90, 60], edgeShoring: [false, false, true, false], workingSpace: 0.8,
       },
     ],
@@ -834,8 +836,8 @@ export function buildComplexSampleProject(): Project {
       buildingLines: [{ a: P(-15, 19.5), b: P(29, 18.5) }],
       maxHeight: 15, show: true,
     },
-    referenceElevationMasl: 512.4,
-    geoAnchor: { lv95: { e: 2689540, n: 1240310 }, height: 512.4, model: P(0, 0), label: "Musterweg 12, 8700 Küsnacht (fiktiv)" },
+    referenceElevationMasl: 515.1,
+    geoAnchor: { lv95: { e: 2689540, n: 1240310 }, height: 515.1, model: P(0, 0), label: "Musterweg 12, 8700 Küsnacht (fiktiv)" },
     groups: [
       { id: "grp-carport", name: "Carport", wallIds: [], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: columns.filter((c) => c.id.startsWith("st-carport")).map((c) => c.id), roofIds: ["dach-carport"], openingIds: [], groupIds: [] },
     ],

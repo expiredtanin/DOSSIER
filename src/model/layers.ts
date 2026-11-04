@@ -127,3 +127,10 @@ export function recomputeFloorElevations(levels: DrawingLevel[]): DrawingLevel[]
   if (out === "") throw new Error("Kern: Geschoss-Höhen fehlgeschlagen");
   return JSON.parse(out) as DrawingLevel[];
 }
+
+/** Geschosshöhe relativ zu ±0.00 für die Anzeige ([131]): „±0.00" · „+2.70" · „−2.80". */
+export function formatElevation(z: number): string {
+  const r = Math.round(z * 100) / 100;
+  if (Math.abs(r) < 1e-9) return "±0.00";
+  return `${r > 0 ? "+" : "−"}${Math.abs(r).toFixed(2)}`;
+}

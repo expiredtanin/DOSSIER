@@ -1060,6 +1060,13 @@ export type DrawingLevel = {
   cutHeight?: number;
   /** Oberkante Fertigfußboden in Metern (nur Geschoss). */
   baseElevation?: number;
+  /**
+   * Bezugsgeschoss ±0.00 ([131], nur Geschoss): OK fertig Boden dieses Geschosses ist ±0.00
+   * (Modell-z 0, m ü. M. = `Project.referenceElevationMasl`); Geschosse darunter erhalten negative
+   * `baseElevation`. Höchstens ein Geschoss trägt das Kennzeichen; fehlt es, ist das erste Geschoss
+   * der Bezug (Verhalten vor Format 5).
+   */
+  zeroLevel?: boolean;
   /** Schnitt-/Ansichtslinie im Grundriss (nur Schnitt/Ansicht). */
   linePoints?:[Vec2, Vec2];
   /** Blickrichtung relativ zur Schnittlinie (nur Schnitt/Ansicht). */
@@ -2402,12 +2409,10 @@ export type Project = {
   /** Projektnummer für Titelblock und Dateinamen ([79]). */
   projectNumber?: string;
   /**
-   * Referenzhöhe des Erdgeschosses in Metern über Meer (m ü. M.), editierbar
-   * im Einstellungs-Fenster. Optional, damit bestehende Projekte ohne diesen
-   * Wert gültig bleiben (Default: unbestimmt/0). NUR Speicherfeld — die
-   * eigentliche Verwendung (Terrain-Draping/reale Höhen relativ dazu, siehe
-   * HANDOVER GEO-BLOCK) ist ein separater, späterer Task und liest dieses
-   * Feld noch nicht.
+   * Höhe von ±0.00 (OK fertig Boden des Bezugsgeschosses, `DrawingLevel.zeroLevel`)
+   * in Metern über Meer (m ü. M.), editierbar im Einstellungs-Fenster. Optional.
+   * Die automatischen Koten im Schnitt/in der Ansicht schreiben „±0.00 = 512.40"
+   * ([131]); Terrain-Draping liest den Wert noch nicht.
    */
   referenceElevationMasl?: number;
   /**

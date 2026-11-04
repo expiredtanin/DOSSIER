@@ -388,12 +388,18 @@ fn kote_label(value: f64) -> String {
 /// im Schnitt/in der Ansicht ([`level_markers`]).
 #[allow(clippy::too_many_arguments)]
 fn push_kote(sink: &mut Sink, at: Vec2, value: f64, kind: KoteKind, color: &str, weight: f64, greyed: bool, id: Option<&str>, f: f64) {
+    push_kote_labeled(sink, at, kote_label(value), kind, color, weight, greyed, id, f);
+}
+
+/// [`push_kote`] mit fertigem Text (z. B. „±0.00 = 512.40").
+#[allow(clippy::too_many_arguments)]
+fn push_kote_labeled(sink: &mut Sink, at: Vec2, label: String, kind: KoteKind, color: &str, weight: f64, greyed: bool, id: Option<&str>, f: f64) {
     let up = if matches!(kind, KoteKind::OkFertig | KoteKind::OkRoh) { 1.0 } else { -1.0 };
     let filled = matches!(kind, KoteKind::OkRoh | KoteKind::UkRoh);
     let (size, half) = (KOTE_TRI_SIZE_M * f, KOTE_TRI_HALF_W_M * f);
     let pts = vec![at, v(at.x - half, at.y + up * size), v(at.x + half, at.y + up * size)];
     sink.push(polygon(pts, if filled { color } else { "none" }, color, weight, no_hatch(), greyed, id), 0);
-    sink.push(text(v(at.x + half + KOTE_TEXT_GAP_M * f, at.y + up * size * 0.5), kote_label(value), KOTE_TEXT_HEIGHT_M * f, 0.0, color, greyed, id), 0);
+    sink.push(text(v(at.x + half + KOTE_TEXT_GAP_M * f, at.y + up * size * 0.5), label, KOTE_TEXT_HEIGHT_M * f, 0.0, color, greyed, id), 0);
 }
 
 /// Aufgelöster Stil eines Element-Aufrufs.
@@ -1620,7 +1626,13 @@ pub fn level_markers(p: &Project, b: [f64; 4]) -> Vec<Primitive> {
             LineRef { a: v(x - 0.3, z), b: v(min_x - LEADER_GAP_M, z), cls: "section-level-leader", weight_mm: 0.13, dash: None, zigzag: None, motif: None, color: Some(INK), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None },
             0,
         );
-        push_kote(&mut sink, v(x, z), jsnum::round(z * 100.0) / 100.0, KoteKind::OkFertig, INK, 0.18, false, None, 1.0);
+        let value = jsnum::round(z * 100.0) / 100.0;
+        let mut label = kote_label(value);
+        // ±0.00 = Bezugsgeschoss ([131]): mit bekannter Meereshöhe „±0.00 = 512.40" (m ü. M.).
+        if let Some(masl) = p.reference_elevation_masl.filter(|m| m.is_finite() && value.abs() < 1e-6) {
+            label = format!("{label} = {}", to_fixed(masl, 2));
+        }
+        push_kote_labeled(&mut sink, v(x, z), label, KoteKind::OkFertig, INK, 0.18, false, None, 1.0);
     }
     out.prims
 }
@@ -1830,6 +1842,19 @@ mod tests {
         // je Höhe (0, 3, 6): Bezugslinie, Dreieck, Zahl
         assert_eq!(out.len(), 9);
         assert!(level_markers(&p, [0.0, 0.0, 0.0, 6.0]).is_empty());
+    }
+
+    /// [131] Untergeschoss unter ±0.00: negative Kote; mit `referenceElevationMasl` trägt ±0.00 die Meereshöhe.
+    #[test]
+    fn hoehenkoten_untergeschoss_und_meereshoehe() {
+        let p = project(serde_json::json!({ "referenceElevationMasl": 512.4, "drawingLevels": [
+            {"id": "ug", "name": "UG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 2.8, "baseElevation": -2.8},
+            {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3, "baseElevation": 0, "zeroLevel": true}] }));
+        let texts: Vec<String> = level_markers(&p, [0.0, -3.0, 10.0, 3.0])
+            .into_iter()
+            .filter_map(|q| if let Primitive::DrawingText { text, .. } = q { Some(text) } else { None })
+            .collect();
+        assert_eq!(texts, vec!["-2.80".to_string(), "±0.00 = 512.40".into(), "+3.00".into()]);
     }
 
     #[test]

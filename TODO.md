@@ -2170,7 +2170,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Schnitte/Ansichten, 3D, Kennzahlen, Erdarbeiten, Blatt-Tabellen), e2e `sampleComplex.spec.ts` (Geschosse,
   Ansichten, alle Blätter, Publikation als PDF). IFC: `scripts/validate-ifc.py` 0 Befunde (204 Produkte).
   Geprüft: CLI-SVGs und Blatt-Screenshots angesehen (Linux), nicht in der Tauri-App/3D-Metal. **Befunde (offen):**
-  Geschosse stapeln ab dem ersten (UG = ±0.00, EG = +2.70; keine negative Basis möglich, Koten absolut);
+  ~~Geschosse stapeln ab dem ersten (UG = ±0.00)~~ → [131] (EG = ±0.00, UG −2.70);
   Flachdächer zeigen in der Ansicht keine Stirn (Carport darum Pultdach 3°); Stützen fehlen in Ansichten; T-Dach:
   der unter dem Hauptdach liegende Teil des Anbaudachs erscheint im Schnitt als Hintergrundlinie; Aussenbemassung
   am Bogenwand-Erker ergibt gedrängte Kleinmasse; Layout-Viewports rechnen nur Grundriss-/Zeichnungsebenen
@@ -2187,6 +2187,24 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   und eigenen 2D-Elementen. vitest `viewportPlan.test.ts`, e2e `sectionViews.spec.ts`. Offen: Fang auf
   Schnitt-Viewport-Inhalt (`sheet_viewports.rs` nur Grundriss), 3D-Ausschnitt im Viewport; nicht in der Tauri-App
   geprüft (3D headless ohne Bild). · S
+- ◐ **[131] Untergeschosse unter ±0.00 (Bezugsgeschoss).** (04.11., Befund aus [114]) Bisher stapelten die Geschosse
+  ab dem ersten (UG = ±0.00). Neu: `DrawingLevel.zeroLevel` (Rust-Modell) markiert das Bezugsgeschoss ±0.00 (wie
+  ArchiCADs Projektnullpunkt); `levels.rs::recompute_floor_elevations` stapelt weiter nach `floorHeight`, verschiebt den
+  Stapel aber so, dass dieses Geschoss auf 0 liegt — Geschosse darunter erhalten negative `baseElevation`, eine
+  geänderte UG-Höhe schiebt das UG nach unten statt das EG nach oben; nur ein Kennzeichen gilt. Ohne Kennzeichen
+  bleibt das erste Geschoss der Bezug. Format 5 (Migration 4 → 5 ohne Inhaltsänderung: alte Dateien sehen gleich aus;
+  die Version steigt, damit ältere Programme Dateien mit negativen Geschossen ablehnen). Alle Ableitungen lesen schon
+  die absolute `baseElevation` (Grundriss, Schnitt, Ansicht, 3D, IFC-Storey-Elevation, Gelände/Baugrube in
+  Modell-z). Koten im Schnitt/in der Ansicht: „-2.70" · „±0.00 = 515.10" (mit `referenceElevationMasl` = Höhe ±0.00
+  m ü. M., Einstellungen jetzt so benannt). UI: Geschoss-Einstellungen zeigen OK fertig Boden relativ zu ±0.00 und
+  „Bezug ±0.00" (ein Undo-Schritt), Navigator „−2.70"/„±0.00"/„+2.90". Musterhaus komplex: EG = ±0.00 (515.10 m ü. M.),
+  UG −2.70, alle absoluten Höhen (Gelände, Baugrube, Dachfuss, Carport, Fundamentriegel) um −2.70 verschoben;
+  Golden-Diffs geprüft (CLI-SVG Schnitt A-A alt/neu bis auf ±1e-5 m Gelände gleich, Ansicht Süd nur andere
+  Dach-Triangulierung; Grundrisse: Schatten/Baurecht jetzt im EG als Geschoss nächst ±0.00). Tests: cargo
+  (`levels`, Format 5, Koten), vitest `layers.test.ts`, `sampleProjectComplex.test.ts`, e2e `levelZero.spec.ts`
+  (Bezug wählen → EG −2.60, Höhe ändern, Undo), `sectionViews.spec.ts`. Geprüft: Screenshot Schnitt A-A im Browser
+  (Linux). Offen: Höhe eines Geschosses direkt eintippen (heute nur über Bezug + Geschosshöhen), Umordnen der Ebenen
+  stapelt nicht neu, nicht in der Tauri-App geprüft. · S
 
 ## Priorität 4 — später
 

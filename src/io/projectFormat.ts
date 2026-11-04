@@ -21,7 +21,7 @@ import { sharedDocument, withDocument } from "../core/document";
 import type { LoadFileResult } from "../core/document";
 
 /** Aktuelle Version des Dateiformats (muss `PROJECT_FORMAT_VERSION` im Kern entsprechen — Test). */
-export const PROJECT_FORMAT_VERSION = 4;
+export const PROJECT_FORMAT_VERSION = 5;
 
 export type ParseProjectResult = LoadFileResult;
 

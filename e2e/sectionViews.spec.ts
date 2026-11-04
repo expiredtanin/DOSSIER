@@ -61,7 +61,9 @@ test("Layout-Blatt: Viewport zeigt Schnitt wie einen Grundriss", async ({ page }
   // Der Schnitt mit seinen Höhenkoten — vorher rechnete der Viewport den Grundriss-Weg (Gelände-Höhenlinien,
   // Schnittlinien-Symbole „West"/„A-A" …), aber keinen Schnitt.
   const vp = page.locator("[data-viewport-id] svg").first();
-  await expect(vp).toContainText("+2.70", { timeout: 30_000 });
+  // [131] EG = ±0.00 (515.10 m ü. M.), UG darunter negativ.
+  await expect(vp).toContainText("±0.00 = 515.10", { timeout: 30_000 });
+  await expect(vp).toContainText("-2.70");
   await expect(vp).not.toContainText("West");
   expect(await vp.locator("path, line, polygon, polyline").count()).toBeGreaterThan(200);
   await page.locator(".layout-sheet-pane").screenshot({ path: "test-results/blatt-schnitt.png" });

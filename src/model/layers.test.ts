@@ -8,6 +8,7 @@ import {
   collectVisibleCodes,
   findCategory,
   flattenCategories,
+  formatElevation,
   insertAfterCode,
   nextFreeCode,
   patchCategoryByCode,
@@ -68,5 +69,20 @@ describe("Geschoss-Stapelung (Kern)", () => {
 
   it("Musterprojekt trägt die gestapelten Höhen ausgeschrieben (Modul wird vor dem Kern geladen)", () => {
     expect(recomputeFloorElevations(sampleProject.drawingLevels)).toEqual(sampleProject.drawingLevels);
+  });
+
+  it("[131] Bezugsgeschoss ±0.00: Untergeschoss negativ, nur ein Kennzeichen", () => {
+    const l = [
+      { id: "ug", name: "UG", kind: "floor", visible: true, locked: false, floorHeight: 2.8 },
+      { id: "eg", name: "EG", kind: "floor", visible: true, locked: false, floorHeight: 3, zeroLevel: true },
+      { id: "og", name: "OG", kind: "floor", visible: true, locked: false, floorHeight: 2.9, zeroLevel: true },
+    ] as DrawingLevel[];
+    const r = recomputeFloorElevations(l);
+    expect(r.map((x) => x.baseElevation)).toEqual([-2.8, 0, 3]);
+    expect(r.map((x) => x.zeroLevel)).toEqual([undefined, true, undefined]);
+  });
+
+  it("[131] Höhenanzeige relativ zu ±0.00", () => {
+    expect([-2.8, 0, -0.001, 2.7].map(formatElevation)).toEqual(["−2.80", "±0.00", "±0.00", "+2.70"]);
   });
 });

@@ -14,7 +14,7 @@ import { excavationQuantities } from "../analysis/excavation";
 import { checkSiteRules } from "../analysis/siteRules";
 import { sheetTables } from "../export/sheetTable";
 import { serializeProject, parseProjectFile } from "../io/projectFormat";
-import { collectVisibleCodes } from "./types";
+import { collectVisibleCodes, recomputeFloorElevations } from "./types";
 
 const p = buildComplexSampleProject();
 const codes = collectVisibleCodes(p.layers);
@@ -42,6 +42,14 @@ describe("Musterhaus komplex", () => {
     expect(p.drawings2d.filter((d) => d.geom.shape === "dimension").length).toBeGreaterThan(8);
     const frameKinds = new Set(p.doorTypes!.map((d) => d.frameKind ?? d.kind));
     for (const k of ["blockrahmen", "umfassungszarge", "futter", "schiebe", "eckzarge", "wandoeffnung"]) expect(frameKinds).toContain(k);
+  });
+
+  it("[131] EG = ±0.00, UG darunter negativ; Höhen = Stapel des Kerns", () => {
+    const z = Object.fromEntries(p.drawingLevels.filter((l) => l.kind === "floor").map((l) => [l.id, l.baseElevation]));
+    expect(z).toEqual({ ug: -2.7, eg: 0, og: 2.9, dg: 5.7 });
+    expect(p.drawingLevels.find((l) => l.id === "eg")?.zeroLevel).toBe(true);
+    const r = recomputeFloorElevations(p.drawingLevels);
+    for (const [i, l] of r.entries()) if (l.kind === "floor") expect(l.baseElevation, l.id).toBeCloseTo(p.drawingLevels[i].baseElevation!, 9);
   });
 
   it("Grundrisse aller Geschosse und das Detail rechnen", () => {
