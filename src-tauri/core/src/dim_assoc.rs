@@ -1078,4 +1078,24 @@ mod tests {
             .sum();
         assert!(n_refs >= 4, "{n_refs}");
     }
+
+    /// Aussenbemassung im Massstab der Ansicht: 1:50 setzt die Ketten halb so weit von der Wand wie 1:100.
+    #[test]
+    fn autodim_im_massstab_der_ansicht() {
+        let r = project();
+        let offsets = |scale: f64| -> Vec<f64> {
+            let req = json!({"cmd": "autodim", "scale": scale, "ctx": {"level": "eg"}, "stamp": "s"});
+            let ops = crate::commands::ops(&r, &crate::model::lenient::typed_for_test(&r), &req.to_string()).unwrap();
+            ops.iter()
+                .filter_map(|o| if let Op::Add { items, .. } = o { Some(items) } else { None })
+                .flatten()
+                .filter_map(|d| d["geom"]["offset"].as_f64())
+                .map(f64::abs)
+                .collect()
+        };
+        let (a, b) = (offsets(100.0), offsets(50.0));
+        assert!(!a.is_empty() && a.len() == b.len());
+        let (ma, mb) = (a.iter().cloned().fold(0.0, f64::max), b.iter().cloned().fold(0.0, f64::max));
+        assert!(mb < ma * 0.75, "1:50 {mb} vs 1:100 {ma}");
+    }
 }

@@ -1871,7 +1871,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Offen: Elemente ohne Kategorie-Bezug (Massstabsleiste, Ebenen-Marken) erscheinen in jeder Kategorie-Ebene des Viewports;
   Einzel-Plan-PDF (`exportPdf.ts`) noch ohne Ebenen.
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
-  Vor-/Rücksprung- und Gesamtkette. Offen: schiefe Wände, Massstab aus der Ansicht statt fest 1:100.
+  Vor-/Rücksprung- und Gesamtkette. 4.11.: Massstab aus der Ansicht (Befehls-Kontext `scaleDenominator`, Test `autodim_im_massstab_der_ansicht`). Offen: schiefe Wände.
   (30.10.) Ketten assoziativ [38] (Ecken/Leibungen). Nicht mittige Wände
   (Referenzlinie links/rechts, -versatz): die Kette misst die echte Fläche (`WallIn.shift`). Offen: Bogenwände als Sehne.
 - ✅ **[82] Grafische Legenden.** (30.10.) `Layout.legends` (`LayoutLegend`: Lage, Titel, Arten Schraffur/Material · Linientyp ·

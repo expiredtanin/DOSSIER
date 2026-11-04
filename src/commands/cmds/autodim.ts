@@ -23,8 +23,8 @@ export const autodimCommand: Command = {
   autoRun: (ctx: CommandContext): CommandResult => {
     if (ctx.level.kind !== "floor") return { draft: null, done: true };
     // Ketten im Kern (`cmd_draw.rs`, `auto_dimensions.rs`); ohne Ketten (keine Wände) kein Commit.
-    if (!createPreview(ctx, { cmd: "autodim" }, []).ok) return { draft: null, done: true };
-    return { draft: null, done: true, commit: createMutation(ctx, { cmd: "autodim" }) };
+    if (!createPreview(ctx, { cmd: "autodim", scale: ctx.scaleDenominator ?? 100 }, []).ok) return { draft: null, done: true };
+    return { draft: null, done: true, commit: createMutation(ctx, { cmd: "autodim", scale: ctx.scaleDenominator ?? 100 }) };
   },
 
   onInput: (): [CommandState, CommandResult] => done(),

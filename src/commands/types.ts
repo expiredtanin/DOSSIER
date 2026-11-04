@@ -93,6 +93,8 @@ export interface CommandContext {
   level: DrawingLevel;
   /** Default-Kategorie-Code für neue Elemente. */
   defaultCategoryCode: string;
+  /** Papier-Massstab der aktuellen Ansicht (1:N); fehlt → 1:100. Ketten-/Symbolabstände in Papier-mm. */
+  scaleDenominator?: number;
   /** Aktiver Linienstil-Code für 2D-Primitive. */
   activeLineStyleId: string;
   /**

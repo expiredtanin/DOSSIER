@@ -1206,8 +1206,13 @@ fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> 
         .collect()
 }
 
-fn autodim_ops(root: &Map<String, Value>, ctx: &Ctx) -> Vec<Op> {
-    let dims = auto_dims(root, ctx, "autodim", 100.0);
+/// Massstab der Ansicht für die Kettenabstände (`scale` in der Anfrage, sonst 1:100).
+fn autodim_scale(v: &Value) -> f64 {
+    v.get("scale").and_then(Value::as_f64).filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0)
+}
+
+fn autodim_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx) -> Vec<Op> {
+    let dims = auto_dims(root, ctx, "autodim", autodim_scale(v));
     if dims.is_empty() {
         return Vec::new();
     }
@@ -1311,7 +1316,7 @@ pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> 
         },
         "dimround" => dimround_ops(root, v, ctx, ids),
         "dimension" => dimension_ops(root, v, ctx, ids),
-        "autodim" => autodim_ops(root, ctx),
+        "autodim" => autodim_ops(root, v, ctx),
         _ => return None,
     })
 }
@@ -1385,7 +1390,7 @@ pub fn preview(root: &Map<String, Value>, v: &Value, ctx: &Ctx, pts: &[V], p: &m
         "dimension" => dimension_preview(v, pts, p),
         "grid" => grid_preview(v, pts, p),
         "dimround" => dimround_preview(root, v, ctx, pts, p),
-        "autodim" => p.ok = !auto_dims(root, ctx, "autodim", 100.0).is_empty(),
+        "autodim" => p.ok = !auto_dims(root, ctx, "autodim", autodim_scale(v)).is_empty(),
         _ => return false,
     }
     true

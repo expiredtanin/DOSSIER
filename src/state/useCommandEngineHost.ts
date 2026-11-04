@@ -21,6 +21,7 @@ import { loadAliasOverrides, saveAliasOverrides } from "./commandAliasOverrides"
 import { loadShortcutOverrides, saveShortcutOverrides, type ShortcutOverrides } from "./keyboardShortcuts";
 import { useCommandKeys } from "./commandKeys";
 import { t } from "../i18n";
+import { getState } from "./appStore";
 import type { useSelectionState } from "./useSelectionState";
 import type { useContextMenuState } from "../menus/useContextMenuState";
 
@@ -184,6 +185,7 @@ export function useCommandEngineHost(opts: {
           project: c.project,
           level: c.activeLevel,
           defaultCategoryCode: c.activeCategoryCode,
+          scaleDenominator: getState().scaleDenominator,
           activeLineStyleId: c.activeLineStyleId,
           activeWallTypeId: c.activeWallTypeId,
           lastPoint,
