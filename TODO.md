@@ -2150,7 +2150,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Tests: Winkel 15°–165° ein-/mehrschichtig (Joins, Grundriss-Primitive, 3D-Rasterprüfung lückenlos/ohne
   Doppelung für T, Knoten-T, L, X). Geprüft: cargo/vitest, CLI-Grundriss-SVG angesehen (Linux). Offen: 3D nur
   per Rust-Test (kein Metal-Render), IFC/truck-Körper noch rechtwinklig, nicht in der Tauri-App geprüft. · S
-- ◐ **[114] Musterhaus komplex.** (30.10.) Zweites Beispielprojekt (`src/model/sampleProjectComplex.ts`,
+- ✅ **[114] Musterhaus komplex.** (30.10.) Zweites Beispielprojekt (`src/model/sampleProjectComplex.ts`,
   `buildComplexSampleProject()`), in dem möglichst alle Funktionen vorkommen: Zweifamilienhaus am Südhang, UG (im
   Hang, Süden frei) / EG / OG / DG mit Sichtbereichen und Ansichtsvorlagen; Gelände aus Höhenlinien (Kern-Befehl
   `terrain`), Baugrube mit Arbeitsraum, Böschungen je Kante und Rühlwand, Kataster/Strasse, Baurecht (Grenzabstände,
@@ -2169,14 +2169,10 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   --out mk.obp`). Test `sampleProjectComplex.test.ts` (gültig ohne Warnungen, deterministisch, alle Grundrisse/
   Schnitte/Ansichten, 3D, Kennzahlen, Erdarbeiten, Blatt-Tabellen), e2e `sampleComplex.spec.ts` (Geschosse,
   Ansichten, alle Blätter, Publikation als PDF). IFC: `scripts/validate-ifc.py` 0 Befunde (204 Produkte).
-  Geprüft: CLI-SVGs und Blatt-Screenshots angesehen (Linux), nicht in der Tauri-App/3D-Metal. **Befunde (offen):**
-  ~~Geschosse stapeln ab dem ersten (UG = ±0.00)~~ → [131] (EG = ±0.00, UG −2.70);
-  Flachdächer zeigen in der Ansicht keine Stirn (Carport darum Pultdach 3°); Stützen fehlen in Ansichten; T-Dach:
-  der unter dem Hauptdach liegende Teil des Anbaudachs erscheint im Schnitt als Hintergrundlinie; Aussenbemassung
-  am Bogenwand-Erker ergibt gedrängte Kleinmasse; Layout-Viewports rechnen nur Grundriss-/Zeichnungsebenen
-  (Schnitt, Ansicht, 3D zeigen dort nur die 2D-Zeichnungen der Ebene → keine solchen Blätter im Beispiel);
-  Grundriss des DG zeigt die Dachaufsicht flächig über dem Schnitt; e2e-Helfer `openSample` jetzt mit exaktem
-  Menünamen. · M
+  Geprüft: CLI-SVGs und Blatt-Screenshots angesehen (Linux), nicht in der Tauri-App/3D-Metal. **Befunde** (4.11. alle bearbeitet): Geschosse unter ±0.00 → [131]; Flachdach-Stirn, Stützen in Ansichten, T-Dach im
+  Schnitt, Dachschraffur → [132]; Ausschnitt-Zoom, Dach über Schnitt, Kleinmasse am Erker → [133]; Layout-Viewports mit
+  Schnitt/Ansicht → [115]. Offen bleibt nur, ob das Bodenbelag-Muster der OG-Decke im DG-Grundriss erscheinen soll.
+  e2e-Helfer `openSample` mit exaktem Menünamen. · M
 - ◐ **[115] Schnitt/Ansicht wie Grundriss: 3D-Wechsel und Layout-Viewport.** (30.10., Mac-Befund am Musterhaus
   komplex) (1) Aus Schnitt und Ansicht liess sich nicht ins 3D wechseln: Ansicht-Knöpfe waren nur für Geschosse frei
   (`viewToggleEnabled`), Menü/Kürzel setzten `viewType`, aber die Schnitt-Ansicht ignorierte ihn. Jetzt 3D aus
