@@ -49,10 +49,12 @@ export function surfaceOpeningGripPatch(
   info: SurfaceOpeningInfo,
   index: number,
   pt: P,
+  hostOutline?: readonly P[],
 ): { hostPoint?: P; width?: number; height?: number } | null {
   const c = info.center;
   const d = { x: pt.x - c[0], y: pt.y - c[1] };
-  if (index === 0) return { hostPoint: { x: pt.x, y: pt.y } };
+  // Mitte: auf der Dach-/Deckenfläche bleiben (ausserhalb verschwände das Fenster mangels Wirt).
+  if (index === 0) return { hostPoint: hostOutline && hostOutline.length >= 3 ? clampInside(pt, hostOutline) : { x: pt.x, y: pt.y } };
   const axis = index === 1 ? info.ew : info.eh;
   const l2 = axis[0] * axis[0] + axis[1] * axis[1];
   if (!(l2 > 1e-9)) return null;
@@ -60,4 +62,28 @@ export function surfaceOpeningGripPatch(
   if (!(v >= 0.1) || !Number.isFinite(v)) return null;
   const r = Math.round(v * 1000) / 1000;
   return index === 1 ? { width: r } : { height: r };
+}
+
+/** Punkt im Umriss lassen: ausserhalb → nächster Randpunkt, 5 cm nach innen gerückt (zum Schwerpunkt der Ecken). */
+export function clampInside(pt: P, ring: readonly P[]): P {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    if (a.y > pt.y !== b.y > pt.y && pt.x < ((b.x - a.x) * (pt.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  if (inside) return { x: pt.x, y: pt.y };
+  let best = { x: ring[0].x, y: ring[0].y };
+  let bestD = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / l2)) : 0;
+    const q = { x: a.x + dx * t, y: a.y + dy * t };
+    const dd = (q.x - pt.x) ** 2 + (q.y - pt.y) ** 2;
+    if (dd < bestD) { bestD = dd; best = q; }
+  }
+  const cx = ring.reduce((s, q) => s + q.x, 0) / ring.length, cy = ring.reduce((s, q) => s + q.y, 0) / ring.length;
+  const l = Math.hypot(cx - best.x, cy - best.y);
+  return l > 0.05 ? { x: best.x + ((cx - best.x) / l) * 0.05, y: best.y + ((cy - best.y) / l) * 0.05 } : best;
 }

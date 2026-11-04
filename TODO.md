@@ -1973,8 +1973,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     Geschoss und Raum vom Wirt, Dach = aussen; Nummern zählen nur Geschosse, nicht Schnitte/Ansichten); Löschen
     eines Dachs/einer Decke (und eines Geschosses mit Decken) löscht deren Fenster im selben Undo-Schritt.
     Geprüft: Rust-/vitest-Tests, CLI-Liste/-Schnitt/-Ansicht/-Grundriss angesehen (Linux). Offen: Griffe nicht
-    in Schnitt/Ansicht, Verschieben über die Dachfläche hinaus lässt das Fenster verschwinden (kein Wirt an der
-    Stelle), nicht in der Tauri-App geprüft. (4.11.: „Alles wählen“ nimmt Dach-/Deckenfenster des Geschosses mit.)
+    in Schnitt/Ansicht, nicht in der Tauri-App geprüft. (4.11.: „Alles wählen“ nimmt Dach-/Deckenfenster des Geschosses mit; Ziehen der Mitte bleibt auf der Dach-/Deckenfläche, `clampInside`.)
 - ✅ **[71] U-Wert aus dem Schichtaufbau** (SIA 180 / EN ISO 6946). (30.10.) Kern `u_value.rs`: R = Rsi + Σ d/λ + Rse
   (λ je Bauteil `Component.lambda`, [100]); Wand waagrecht 0.13/0.04, Dach aufwärts 0.10/0.04, Decke abwärts
   0.17/0.04 (Decke: oben → unten, Aussenseite unten); hinterlüftete Schicht (Standard-Luftschicht oder Name mit

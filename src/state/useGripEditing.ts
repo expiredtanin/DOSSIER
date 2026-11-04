@@ -909,7 +909,10 @@ export function useGripEditing(opts: {
       const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
       if (op && (op.hostRoofId || op.hostCeilingId)) {
         const info = op.locked ? null : surfaceOpeningInfo(project, op.id);
-        const patch = info && surfaceOpeningGripPatch(info, index, pt);
+        const outline = op.hostRoofId
+          ? (project.roofs ?? []).find((r) => r.id === op.hostRoofId)?.outline
+          : (project.ceilings ?? []).find((c) => c.id === op.hostCeilingId)?.outline;
+        const patch = info && surfaceOpeningGripPatch(info, index, pt, outline);
         if (patch) updateOpening(op.id, patch);
         return;
       }
