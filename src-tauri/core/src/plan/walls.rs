@@ -691,17 +691,22 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             }
             None => (None, WallCuts::default()),
         };
+        // [95] Taschen der Taschen-Schiebetüren (Hohlraum in der Wand, aus der Schraffur ausgespart).
+        let pockets = if view_only { WallPockets { o: wv.start, u: v2(1.0, 0.0), n: v2(0.0, 1.0), cuts: vec![] } } else { wall_pockets(p, wv, &openings) };
         match &unroll {
             Some(u) => {
                 let mut tmp = Vec::new();
                 wall_poche(c, &mut tmp, &ev, &gaps, &cut_u, greyed, lw, category, view_only, &reveals, Some(u))?;
+                cut_pockets(&mut tmp, 0, &pockets);
                 if reference_lines {
                     tmp.push(mk_line(wv.start, wv.end, "wall-axis", 0.13, Some(Some(vec![0.18, 0.06, 0.04, 0.06])), None, greyed, None));
                 }
                 bend_prims(u, tmp, out);
             }
             None => {
+                let at = out.len();
                 wall_poche(c, out, e, &gaps, cut, greyed, lw, category, view_only, &reveals, None)?;
+                cut_pockets(out, at, &pockets);
                 if reference_lines {
                     out.push(mk_line(w.start, w.end, "wall-axis", 0.13, Some(Some(vec![0.18, 0.06, 0.04, 0.06])), None, greyed, None));
                 }
@@ -735,6 +740,192 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         }
     }
     Ok(())
+}
+
+/// [95] Taschen der Taschen-Schiebetüren einer Wand: Wandrahmen (Start, Achse, Normale) und je Tasche
+/// die Aussparung `(u0, u1, n0, n1)` (Hohlraum + Blattbahn durch die Öffnung).
+pub(crate) struct WallPockets {
+    o: Vec2,
+    u: Vec2,
+    n: Vec2,
+    cuts: Vec<(f64, f64, f64, f64)>,
+}
+
+pub(crate) fn wall_pockets(p: &Project, w: &Wall, openings: &[&Opening]) -> WallPockets {
+    use crate::opening_geom as og;
+    let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
+    let l = crate::jsmath::hypot2(dx, dy);
+    let u = if l > 1e-12 { v2(dx / l, dy / l) } else { v2(1.0, 0.0) };
+    let mut r = WallPockets { o: w.start, u, n: v2(-u.y, u.x), cuts: vec![] };
+    let pocket: Vec<&&Opening> = openings.iter().filter(|o| o.kind == ElementKind::Door && door_type(p, o).is_some_and(|t| t.kind == DoorTypeKind::Tasche)).collect();
+    if pocket.is_empty() || l <= 1e-9 {
+        return r;
+    }
+    let Ok(wt) = wall_type(p, w) else { return r };
+    let total = thickness(&wt.layers);
+    let wr = og::WallRef { start: og::v(w.start.x, w.start.y), end: og::v(w.end.x, w.end.y), total, ref_off: joins::reference_offset(crate::model3d::wall_reference(w), total) };
+    for o in pocket {
+        let count = crate::jsnum::max(1.0, round(door_type(p, o).map_or(1.0, |t| t.leaf_count)));
+        let hinge_end = o.hinge.is_some_and(|s| s != OpeningHinge::Start);
+        r.cuts.extend(og::pocket_cavities(&wr, o.position, o.width, hinge_end, count).iter().map(|k| k.cut()));
+    }
+    r
+}
+
+/// [95] Taschen aus Schraffur/Füllung und Fugenlinien der Wand-Primitive ab `from` aussparen (die
+/// Schichten sind dort nicht massiv); den Umriss der Tasche zeichnet das Türsymbol.
+fn cut_pockets(prims: &mut Vec<Primitive>, from: usize, wp: &WallPockets) {
+    if wp.cuts.is_empty() {
+        return;
+    }
+    let local = |q: Vec2| {
+        let d = v2(q.x - wp.o.x, q.y - wp.o.y);
+        (d.x * wp.u.x + d.y * wp.u.y, d.x * wp.n.x + d.y * wp.n.y)
+    };
+    let world = |u: f64, n: f64| v2(wp.o.x + wp.u.x * u + wp.n.x * n, wp.o.y + wp.u.y * u + wp.n.y * n);
+    let rect = |&(u0, u1, n0, n1): &(f64, f64, f64, f64)| -> crate::flat::Polygon {
+        vec![[(u0, n0), (u1, n0), (u1, n1), (u0, n1)].iter().map(|&(u, n)| { let q = world(u, n); [q.x, q.y] }).collect()]
+    };
+    let rects: Vec<crate::flat::Polygon> = wp.cuts.iter().map(rect).collect();
+    // Teilstücke (Parameter 0..1) einer Strecke ausserhalb aller Taschen (Liang-Barsky im Wandrahmen).
+    let keep_of = |a: Vec2, b: Vec2| -> Vec<(f64, f64)> {
+        let (la, lb) = (local(a), local(b));
+        let (du, dn) = (lb.0 - la.0, lb.1 - la.1);
+        let mut keep = vec![(0.0_f64, 1.0_f64)];
+        for &(u0, u1, n0, n1) in &wp.cuts {
+            let e = 1e-7;
+            let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+            for (pp, q) in [(-du, la.0 - (u0 + e)), (du, (u1 - e) - la.0), (-dn, la.1 - (n0 + e)), (dn, (n1 - e) - la.1)] {
+                if pp.abs() < 1e-15 {
+                    if q < 0.0 {
+                        t0 = 1.0;
+                        t1 = 0.0;
+                    }
+                } else if pp < 0.0 {
+                    t0 = t0.max(q / pp);
+                } else {
+                    t1 = t1.min(q / pp);
+                }
+            }
+            if t1 - t0 <= 1e-9 {
+                continue;
+            }
+            keep = keep
+                .into_iter()
+                .flat_map(|(s, f)| {
+                    let mut r = vec![];
+                    if t0 > s + 1e-9 {
+                        r.push((s, t0.min(f)));
+                    }
+                    if t1 < f - 1e-9 {
+                        r.push((t1.max(s), f));
+                    }
+                    r.into_iter().filter(|(x, y)| y - x > 1e-9)
+                })
+                .collect();
+        }
+        keep
+    };
+    let lerp = |a: Vec2, b: Vec2, t: f64| v2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+    // Umriss einer gestrichenen Fläche als Linien, ohne die Stücke in der Tasche (`None`: nichts betroffen).
+    let outline = |prim: &Primitive| -> Option<Vec<Primitive>> {
+        let Primitive::Polygon { pts, stroke, stroke_width_mm, no_stroke_edges, greyed, .. } = prim else { return None };
+        let n = pts.len();
+        let skip = |i: usize| no_stroke_edges.as_ref().is_some_and(|v| v.iter().any(|k| *k as usize == i));
+        let mut out = Vec::new();
+        let mut cut = false;
+        for i in (0..n).filter(|&i| !skip(i)) {
+            let (a, b) = (pts[i], pts[(i + 1) % n]);
+            let keep = keep_of(a, b);
+            cut |= !(keep.len() == 1 && keep[0] == (0.0, 1.0));
+            for (s, f) in keep {
+                out.push(mk_line(lerp(a, b, s), lerp(a, b, f), "wall-outline", *stroke_width_mm, None, Some(stroke), greyed.unwrap_or(false), None));
+            }
+        }
+        cut.then_some(out)
+    };
+    let tail = prims.split_off(from);
+    for prim in tail {
+        match &prim {
+            Primitive::Polygon { pts, fill, stroke, .. } if fill != "none" && pts.len() >= 3 => {
+                // Nur Flächen, die eine Tasche echt überlappen (Hüllquader im Wandrahmen).
+                let lp: Vec<(f64, f64)> = pts.iter().map(|q| local(*q)).collect();
+                let (pu0, pu1) = lp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q.0), a.1.max(q.0)));
+                let (pn0, pn1) = lp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q.1), a.1.max(q.1)));
+                let eps = 1e-6;
+                let hit: Vec<usize> = (0..wp.cuts.len())
+                    .filter(|&i| {
+                        let (u0, u1, n0, n1) = wp.cuts[i];
+                        pu0 < u1 - eps && pu1 > u0 + eps && pn0 < n1 - eps && pn1 > n0 + eps
+                    })
+                    .collect();
+                if hit.is_empty() {
+                    prims.push(prim);
+                    continue;
+                }
+                let subj: crate::flat::Polygon = vec![pts.iter().map(|q| [q.x, q.y]).collect()];
+                let clip: Vec<crate::flat::Polygon> = hit.iter().map(|&i| rects[i].clone()).collect();
+                let mut parts = crate::polygon_bool::difference(std::slice::from_ref(&subj), &clip);
+                if parts.iter().any(|q| q.len() > 1) {
+                    // Tasche ganz innerhalb der Fläche: Fläche an der Taschenmitte teilen, damit kein Loch entsteht.
+                    let (u0, u1, _, _) = wp.cuts[hit[0]];
+                    let um = (u0 + u1) / 2.0;
+                    let big = 1e3 + (pu1 - pu0).abs() + (pn1 - pn0).abs();
+                    let halves = [rect(&(pu0 - big, um, pn0 - big, pn1 + big)), rect(&(um, pu1 + big, pn0 - big, pn1 + big))];
+                    parts = halves.iter().flat_map(|h| crate::polygon_bool::intersection(std::slice::from_ref(&subj), std::slice::from_ref(h))).flat_map(|h| crate::polygon_bool::difference(&[h], &clip)).collect();
+                }
+                // Füllung ausgespart (ohne Strich), der Umriss danach als Linien ohne die Taschenmündung.
+                let stroked = stroke != "none";
+                for part in parts {
+                    let Some(ring) = part.first() else { continue };
+                    let mut o = prim.clone();
+                    if let Primitive::Polygon { pts, no_stroke_edges, stroke, stroke_width_mm, .. } = &mut o {
+                        *pts = ring.iter().map(|q| v2(q[0], q[1])).collect();
+                        *no_stroke_edges = None;
+                        if stroked {
+                            *stroke = "none".into();
+                            *stroke_width_mm = 0.0;
+                        }
+                    }
+                    prims.push(o);
+                }
+                if stroked {
+                    match outline(&prim) {
+                        Some(lines) => prims.extend(lines),
+                        None => {
+                            let mut o = prim.clone();
+                            if let Primitive::Polygon { fill, hatch, .. } = &mut o {
+                                *fill = "none".into();
+                                *hatch = no_hatch();
+                            }
+                            prims.push(o);
+                        }
+                    }
+                }
+            }
+            Primitive::Polygon { stroke, .. } if stroke != "none" => match outline(&prim) {
+                Some(lines) => prims.extend(lines),
+                None => prims.push(prim),
+            },
+            Primitive::Line { a, b, cls, .. } if cls.starts_with("layer-joint") || cls == "wall-outline" => {
+                let keep = keep_of(*a, *b);
+                if keep.len() == 1 && keep[0] == (0.0, 1.0) {
+                    prims.push(prim);
+                    continue;
+                }
+                for (s, f) in keep {
+                    let mut o = prim.clone();
+                    if let Primitive::Line { a, b, .. } = &mut o {
+                        let (pa, pb) = (lerp(*a, *b, s), lerp(*a, *b, f));
+                        *a = pa;
+                        *b = pb;
+                    }
+                    prims.push(o);
+                }
+            }
+            _ => prims.push(prim),
+        }
+    }
 }
 
 /// Schnittlinien einer Bogenwand in den abgewickelten Rahmen ([T2]); Aussparungen sind schon in
@@ -854,5 +1045,105 @@ fn bounds_wall(p: &Project, w: &Wall, bounds: &mut super::domains::Bounds) {
     let (nx, ny) = (-uy, ux);
     for (q, off) in [(w.start, h), (w.end, h), (w.end, -h), (w.start, -h)] {
         bounds.acc(q.x + nx * off, q.y + ny * off);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// Projekt: dreischichtige Wand (Putz 2 · Backstein 12 · Putz 2 cm) entlang +x mit einer Tür
+    /// (1.0..1.9) des Typs `kind`.
+    pub(crate) fn pocket_project(kind: DoorTypeKind, hinge: Option<OpeningHinge>, leaves: f64) -> Project {
+        let mut p = Project::default();
+        for id in ["a", "b"] {
+            p.components.push(Component { id: id.into(), ..Default::default() });
+        }
+        let l = |c: &str, t: f64| Layer { component_id: c.into(), thickness: t, ..Default::default() };
+        p.wall_types.push(WallType { id: "iw".into(), layers: vec![l("a", 0.02), l("b", 0.12), l("a", 0.02)], ..Default::default() });
+        p.drawing_levels.push(DrawingLevel { id: "eg".into(), kind: DrawingLevelKind::Floor, floor_height: Some(2.6), ..Default::default() });
+        p.walls.push(Wall { id: "w".into(), floor_id: "eg".into(), wall_type_id: "iw".into(), category_code: "20".into(), start: Vec2 { x: 0.0, y: 0.0 }, end: Vec2 { x: 4.0, y: 0.0 }, height: 2.6, ..Default::default() });
+        p.door_types = Some(vec![DoorType { id: "t".into(), kind, leaf_count: leaves, ..Default::default() }]);
+        p.openings = Some(vec![Opening { id: "o".into(), host_wall_id: "w".into(), kind: ElementKind::Door, type_id: Some("t".into()), category_code: "20".into(), position: 1.0, width: 0.9, height: 2.0, hinge, ..Default::default() }]);
+        p
+    }
+
+    fn wall_prims(p: &Project) -> Vec<Primitive> {
+        let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [] }).to_string();
+        super::super::domains::plan_domains(p, &super::super::domains::PlanArgs::parse(1.0, &t).unwrap()).unwrap().walls
+    }
+
+    fn area(pts: &[Vec2]) -> f64 {
+        let n = pts.len();
+        (0..n).map(|i| pts[i].x * pts[(i + 1) % n].y - pts[(i + 1) % n].x * pts[i].y).sum::<f64>().abs() / 2.0
+    }
+
+    /// Gefüllte Wandflächen (ohne Öffnungs-Lücken): Fläche gesamt und die Ringe.
+    fn hatched(prims: &[Primitive]) -> (f64, Vec<Vec<Vec2>>) {
+        let polys: Vec<Vec<Vec2>> = prims
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Polygon { pts, fill, wall_id: Some(_), opening_id: None, .. } if fill != "none" => Some(pts.clone()),
+                _ => None,
+            })
+            .collect();
+        (polys.iter().map(|q| area(q)).sum(), polys)
+    }
+
+    /// [95] Taschen-Schiebetür: die Tasche (Blattbreite + 5 cm × 7 cm) fehlt in der Schraffur, auf der
+    /// Bandseite; die Fugen laufen nicht durch die Tasche.
+    #[test]
+    fn tasche_aus_der_schraffur_ausgespart() {
+        let (full, _) = hatched(&wall_prims(&pocket_project(DoorTypeKind::Schiebe, None, 1.0)));
+        assert!((full - 3.1 * 0.16).abs() < 1e-9, "{full}");
+        let cavity = (0.9 + 0.05) * 0.07;
+        for (hinge, side) in [(None, -1.0), (Some(OpeningHinge::End), 1.0)] {
+            let prims = wall_prims(&pocket_project(DoorTypeKind::Tasche, hinge, 1.0));
+            let (a, polys) = hatched(&prims);
+            assert!((full - a - cavity).abs() < 1e-5, "{full} {a} {cavity}");
+            let inside = |q: Vec2| {
+                polys.iter().any(|pts| {
+                    let n = pts.len();
+                    let mut c = false;
+                    for i in 0..n {
+                        let (a, b) = (pts[i], pts[(i + 1) % n]);
+                        if (a.y > q.y) != (b.y > q.y) && q.x < (b.x - a.x) * (q.y - a.y) / (b.y - a.y) + a.x {
+                            c = !c;
+                        }
+                    }
+                    c
+                })
+            };
+            let (pocket_x, other_x, jamb_x) = if side < 0.0 { (0.5, 2.5, 1.0) } else { (2.4, 0.5, 1.9) };
+            // Die Leibung ist an der Taschenmündung offen: kein Strich durch (Leibung, Wandmitte).
+            let through = |a: Vec2, b: Vec2| (a.x - jamb_x).abs() < 1e-6 && (b.x - jamb_x).abs() < 1e-6 && a.y.min(b.y) < 0.0 && a.y.max(b.y) > 0.0;
+            for q in &prims {
+                match q {
+                    Primitive::Line { a, b, cls, .. } if cls == "wall-outline" || cls.starts_with("layer-joint") => assert!(!through(*a, *b), "{a:?} {b:?}"),
+                    Primitive::Polygon { pts, stroke, no_stroke_edges, .. } if stroke != "none" => {
+                        for i in 0..pts.len() {
+                            let skip = no_stroke_edges.as_ref().is_some_and(|v| v.iter().any(|k| *k as usize == i));
+                            assert!(skip || !through(pts[i], pts[(i + 1) % pts.len()]), "{pts:?}");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            assert!(!inside(v2(pocket_x, 0.001)), "Tasche ausgespart ({hinge:?})");
+            assert!(inside(v2(other_x, 0.001)), "Gegenseite massiv ({hinge:?})");
+            assert!(inside(v2(pocket_x, 0.05)) && inside(v2(pocket_x, -0.07)), "ausserhalb der Tasche massiv ({hinge:?})");
+            // Keine Schichtfuge/Umrisslinie durch die Tasche.
+            for q in &prims {
+                if let Primitive::Line { a, b, cls, .. } = q {
+                    if cls.starts_with("layer-joint") || cls == "wall-outline" {
+                        let m = v2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+                        assert!(!(m.y.abs() < 0.034 && (m.x - pocket_x).abs() < 0.4), "{a:?} {b:?}");
+                    }
+                }
+            }
+        }
+        // Zweiflügelig: Taschen beidseitig (je halbe Breite + 5 cm).
+        let (a, _) = hatched(&wall_prims(&pocket_project(DoorTypeKind::Tasche, None, 2.0)));
+        assert!((full - a - 2.0 * (0.45 + 0.05) * 0.07).abs() < 1e-5, "{full} {a}");
     }
 }

@@ -586,6 +586,12 @@ fn inner_joint(a: &crate::wall_arc::WallArc, _w: &Wall, keep: &[f64], p: KVec) -
 /// Wandkörper (`projectToWalls3d`): `layered` = ein Körper je Schicht mit Löchern (3D-Viewer),
 /// sonst Pfeiler/Brüstung/Sturz-Segmente (Schnitt-Eingabe).
 pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
+    emit_walls_with(p, layered, true)
+}
+
+/// Wie [`emit_walls`]; `pockets = false` lässt die Taschen der Taschen-Schiebetüren im Körper ([95]) —
+/// für Schnitt/Ansicht, die die Wand nach Schichten aufteilen und die Tasche selbst aussparen.
+pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<RWall>, String> {
     let joins = if layered { Some(compute_joins_by_floor(p)?) } else { None };
     let maps = wall_material_color_maps(p);
     let mut contexts: HashMap<&str, FloorContext> = HashMap::new();
@@ -627,6 +633,7 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
             Some(a) => crate::wall_arc::chord_walls(&win, &a),
             None => vec![win],
         };
+        let first_piece = out.len();
         for win in &wins {
         let (dx, dy) = (win.end.x - win.start.x, win.end.y - win.start.y);
         for mut piece in wall_bands::wall_bands(win, ctx) {
@@ -660,9 +667,134 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
             });
         }
         }
+        if pockets && arc.is_none() {
+            cut_wall_pockets(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), &mut out, first_piece);
+        }
     }
     let _ = hypot2;
     Ok(out)
+}
+
+/// [95] Taschen der Taschen-Schiebetüren einer Wand: je Tasche `[u0, u1, n0, n1, z0, z1]` im Wandrahmen
+/// (Achsmass ab Wandstart, Querversatz zur Achse, absolute Höhen der Öffnung) — Hohlraum samt Blattbahn
+/// durch die Öffnung (`Pocket::cut`).
+pub(crate) fn wall_pocket_cuts(p: &Project, w: &Wall, openings: &[&Opening]) -> Vec<[f64; 6]> {
+    let wr = wall_ref(p, w);
+    let (zb, zt) = p.wall_vertical_extent(w);
+    let mut out = Vec::new();
+    for &o in openings {
+        let Some(dt) = p.door_type(o).filter(|t| o.kind == ElementKind::Door && t.kind == DoorTypeKind::Tasche) else { continue };
+        let count = crate::jsnum::max(1.0, crate::jsnum::round(dt.leaf_count));
+        let hinge_end = o.hinge.is_some_and(|s| s != OpeningHinge::Start);
+        let z0 = zb + o.sill_height.max(0.0);
+        let z1 = zt.min(z0 + o.height);
+        if z1 - z0 <= 1e-6 {
+            continue;
+        }
+        for k in opening_geom::pocket_cavities(&wr, o.position, o.width, hinge_end, count) {
+            let (u0, u1, n0, n1) = k.cut();
+            out.push([u0, u1, n0, n1, z0, z1]);
+        }
+    }
+    out
+}
+
+/// [95] Taschen aus den Wandkörpern `pieces[from..]` einer geraden Wand ausschneiden: ein Körper, der
+/// quer in die Tasche reicht, wird quer geteilt (aussen unverändert); der mittlere Teil entlang der
+/// Achse um die Tasche geteilt, über ihr (und unter ihr bei Brüstung) bleibt Wand. Körper mit schräger
+/// Oberkante (`top_drop`) bleiben ganz.
+fn cut_wall_pockets(p: &Project, wall: &Wall, openings: &[&Opening], pieces: &mut Vec<RWall>, from: usize) {
+    let cuts = wall_pocket_cuts(p, wall, openings);
+    if cuts.is_empty() {
+        return;
+    }
+    let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+    let l = hypot2(dx, dy);
+    if !(l > 1e-9) {
+        return;
+    }
+    let (ux, uy) = (dx / l, dy / l);
+    let (nx, ny) = (-uy, ux);
+    let eps = 1e-6;
+    for c in cuts {
+        let [cu0, cu1, cn0, cn1, cz0, cz1] = c;
+        let tail = pieces.split_off(from);
+        for w in tail {
+            let (pdx, pdy) = (w.end[0] - w.start[0], w.end[1] - w.start[1]);
+            let len = hypot2(pdx, pdy);
+            let rel = [w.start[0] - wall.start.x, w.start[1] - wall.start.y];
+            let (ps, pn) = (rel[0] * ux + rel[1] * uy, rel[0] * nx + rel[1] * ny);
+            // Nur zur Wand parallele Körper (Laufrichtung wie die Wand).
+            let parallel = len > 1e-9 && (pdx * ux + pdy * uy) > len * (1.0 - 1e-9);
+            let (a, b) = (pn - w.thickness / 2.0, pn + w.thickness / 2.0);
+            let (h0, h1) = (cu0 - ps, cu1 - ps);
+            let zt = w.base_elevation + w.height;
+            let hit = parallel && w.top_drop.is_none() && a < cn1 - eps && b > cn0 + eps && h0 < len - eps && h1 > eps && w.base_elevation < cz1 - eps && zt > cz0 + eps;
+            if !hit {
+                pieces.push(w);
+                continue;
+            }
+            // Quer: [a, m0] aussen, [m0, m1] Tasche, [m1, b] aussen.
+            let (m0, m1) = (a.max(cn0), b.min(cn1));
+            let across = |w: &RWall, lo: f64, hi: f64| -> RWall {
+                let sh = (lo + hi) / 2.0 - pn;
+                let mut q = w.clone();
+                q.start = [w.start[0] + nx * sh, w.start[1] + ny * sh];
+                q.end = [w.end[0] + nx * sh, w.end[1] + ny * sh];
+                q.thickness = hi - lo;
+                if let Some(t) = &mut q.top_plane {
+                    t[0] += t[1] * nx * sh + t[2] * ny * sh;
+                }
+                q
+            };
+            for (lo, hi) in [(a, m0), (m1, b)] {
+                if hi - lo > eps {
+                    pieces.push(across(&w, lo, hi));
+                }
+            }
+            let mid = across(&w, m0, m1);
+            // Entlang: [0, h0] und [h1, len] voll, [h0, h1] nur über/unter der Tasche.
+            let (k0, k1) = (h0.max(0.0), h1.min(len));
+            let part = |s: f64, e: f64, z0: f64, z1: f64| -> Option<RWall> {
+                if e - s <= eps || z1 - z0 <= eps {
+                    return None;
+                }
+                let mut q = mid.clone();
+                q.start = [mid.start[0] + ux * s, mid.start[1] + uy * s];
+                q.end = [mid.start[0] + ux * e, mid.start[1] + uy * e];
+                q.base_elevation = z0;
+                q.height = z1 - z0;
+                if s > eps {
+                    q.start_cut = None;
+                    q.joint[0] = false;
+                }
+                if e < len - eps {
+                    q.end_cut = None;
+                    q.joint[1] = false;
+                }
+                if let Some(t) = &mut q.top_plane {
+                    t[0] += t[1] * ux * s + t[2] * uy * s;
+                }
+                let holes: Vec<RHole> = mid
+                    .holes
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|h| {
+                        let (f, t) = (h.from.max(s), h.to.min(e));
+                        let (hb, ht) = (h.z_bottom.max(z0), h.z_top.min(z1));
+                        (t - f > eps && ht - hb > eps).then(|| RHole { from: f - s, to: t - s, z_bottom: hb, z_top: ht })
+                    })
+                    .collect();
+                q.holes = (!holes.is_empty()).then_some(holes);
+                Some(q)
+            };
+            let z_b = w.base_elevation;
+            for q in [part(0.0, k0, z_b, zt), part(k0, k1, cz1, zt), part(k0, k1, z_b, cz0), part(k1, len, z_b, zt)].into_iter().flatten() {
+                pieces.push(q);
+            }
+        }
+    }
 }
 
 /// Grundriss-Ecken eines Wandkörpers an seinen Schnittlinien: Anfang +n, Ende +n, Ende −n, Anfang −n
@@ -2432,5 +2564,35 @@ mod tests {
             }
         }
     }
-}
 
+    /// [95] Taschen-Schiebetür: der Hohlraum (Blattbreite + 5 cm × 7 cm × Türhöhe) fehlt im Wandkörper,
+    /// geschichtet wie einschichtig; Tasche auf der Bandseite.
+    #[test]
+    fn tasche_aus_dem_wandkoerper_ausgeschnitten() {
+        use crate::plan::walls::tests::pocket_project;
+        let vol = |ws: &[RWall]| -> f64 {
+            ws.iter().map(|w| wall_piece_volume(w) - w.holes.as_deref().unwrap_or(&[]).iter().map(|h| (h.to - h.from) * (h.z_top - h.z_bottom) * w.thickness).sum::<f64>()).sum()
+        };
+        for layered in [false, true] {
+            let full = vol(&emit_walls(&pocket_project(DoorTypeKind::Schiebe, None, 1.0), layered).unwrap());
+            for (hinge, x_pocket, x_other) in [(None, 0.5, 2.5), (Some(OpeningHinge::End), 2.4, 0.5)] {
+                let ws = emit_walls(&pocket_project(DoorTypeKind::Tasche, hinge, 1.0), layered).unwrap();
+                let v = vol(&ws);
+                assert!((full - v - 0.95 * 0.07 * 2.0).abs() < 1e-9, "{layered} {full} {v}");
+                // Wandmitte (y = 0): in der Tasche kein Körper bis zur Türhöhe, darüber schon.
+                let solid_at = |x: f64, z: f64| {
+                    ws.iter().any(|w| {
+                        let lo_hi = |a: f64, b: f64| (a.min(b), a.max(b));
+                        let (x0, x1) = lo_hi(w.start[0], w.end[0]);
+                        x0 < x && x < x1 && w.start[1].abs() < w.thickness / 2.0 && w.base_elevation < z && z < w.base_elevation + w.height
+                    })
+                };
+                assert!(!solid_at(x_pocket, 1.0), "{layered} {hinge:?}");
+                assert!(solid_at(x_pocket, 2.3), "{layered} {hinge:?}");
+                assert!(solid_at(x_other, 1.0), "{layered} {hinge:?}");
+            }
+            let ws = emit_walls(&pocket_project(DoorTypeKind::Tasche, None, 2.0), layered).unwrap();
+            assert!((full - vol(&ws) - 2.0 * 0.5 * 0.07 * 2.0).abs() < 1e-9, "zweiflügelig {layered}");
+        }
+    }
+}

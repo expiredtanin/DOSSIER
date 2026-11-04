@@ -153,7 +153,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
         } else if door_kind == 1 {
             sliding_leaves(&mut o, &w, jamb_start, jamb_end, &door, count, hair);
         } else if door_kind == 4 {
-            pocket_leaves(&mut o, &w, jamb_start, jamb_end, door.hinge_end, count, hair);
+            pocket_leaves(&mut o, &w, position, width, door.hinge_end, count, hair);
         } else if door_kind == 2 {
             // Gleise im Rahmen: hinter der Anschlag-Zone (bzw. mittig ohne Rahmentyp).
             let half = total / 2.0;
@@ -416,46 +416,31 @@ fn sliding_leaves(o: &mut Out, w: &WallRef, js: V, je: V, p: &DoorParams, count:
 /// Taschen-Schiebetür (SIA): Blatt als schmales Rechteck in der Wandmitte in Schliessstellung, der Teil
 /// in der Tasche verdeckt (gestrichelt); die Tasche (Hohlraum über Blattbreite + Anschlag) als dünner
 /// Linienzug in der Wand auf der Bandseite, zweiflügelig beidseitig; Pfeil zur Tasche.
-fn pocket_leaves(o: &mut Out, w: &WallRef, js: V, je: V, hinge_end: bool, count: f64, hair: f64) {
+fn pocket_leaves(o: &mut Out, w: &WallRef, position: f64, width: f64, hinge_end: bool, count: f64, hair: f64) {
     let n = w.frame().1;
-    let wd = hypot2(je.x - js.x, je.y - js.y);
-    if wd <= 1e-3 || w.total <= 1e-3 {
-        return;
-    }
-    // Hohlraum und Blatt quer zur Wand, für dünne Wände geklemmt.
-    let ch = max(0.005, min(0.035, w.total / 2.0 - 0.02));
-    let lt = min(0.02, ch * 0.6);
-    let ov = 0.05;
-    let c = w.ref_off;
-    let pt = |u: f64, k: f64| add(along(js, je, u), scale(n, c + k));
-    let rect = |o: &mut Out, u0: f64, u1: f64, dash: f64| {
-        let q = [pt(u0, -lt), pt(u1, -lt), pt(u1, lt), pt(u0, lt)];
-        for i in 0..4 {
-            o.line(C_LEAF, hair, 0.0, dash, q[i], q[(i + 1) % 4]);
-        }
-    };
-    // (Anschlag an der Öffnungskante, Richtung in die Tasche, Blattbreite)
-    let pockets: Vec<(f64, f64, f64)> = if count >= 2.0 {
-        vec![(0.0, -1.0, wd / 2.0), (wd, 1.0, wd / 2.0)]
-    } else if hinge_end {
-        vec![(wd, 1.0, wd)]
-    } else {
-        vec![(0.0, -1.0, wd)]
-    };
-    for (u_j, d, lw) in pockets {
-        let u_end = u_j + d * (lw + ov);
+    let pt = |u: f64, k: f64| add(along(w.start, w.end, u), scale(n, k));
+    for pk in crate::opening_geom::pocket_cavities(w, position, width, hinge_end, count) {
+        let (u_j, d, lw, c, ch, lt) = (pk.u_jamb, pk.dir, pk.leaf, pk.n_center, pk.half, pk.leaf_half);
+        let ov = crate::opening_geom::POCKET_OVERRUN;
+        let rect = |o: &mut Out, u0: f64, u1: f64, dash: f64| {
+            let q = [pt(u0, c - lt), pt(u1, c - lt), pt(u1, c + lt), pt(u0, c + lt)];
+            for i in 0..4 {
+                o.line(C_LEAF, hair, 0.0, dash, q[i], q[(i + 1) % 4]);
+            }
+        };
+        let u_end = pk.u_end();
         // Tasche: zwei Längslinien und Abschluss.
         for k in [-ch, ch] {
-            o.line(C_DOOR_FRAME, hair, 1.0, 0.0, pt(u_j, k), pt(u_end, k));
+            o.line(C_DOOR_FRAME, hair, 1.0, 0.0, pt(u_j, c + k), pt(u_end, c + k));
         }
-        o.line(C_DOOR_FRAME, hair, 1.0, 0.0, pt(u_end, -ch), pt(u_end, ch));
+        o.line(C_DOOR_FRAME, hair, 1.0, 0.0, pt(u_end, c - ch), pt(u_end, c + ch));
         // Blatt: sichtbar in der Öffnung, verdeckt in der Tasche (Überstand bis zum Anschlag).
         let u_far = u_j - d * lw;
         rect(o, min(u_j, u_far), max(u_j, u_far), 0.0);
         rect(o, min(u_j, u_j + d * ov), max(u_j, u_j + d * ov), 1.0);
         let an = ch + min(0.06, max(0.0, w.total / 2.0 - ch) * 0.5);
-        let a = add(along(js, je, u_j - d * lw * 0.75), scale(n, c + an));
-        let b = add(along(js, je, u_j - d * lw * 0.25), scale(n, c + an));
+        let a = pt(u_j - d * lw * 0.75, c + an);
+        let b = pt(u_j - d * lw * 0.25, c + an);
         arrow(o, a, b, n, hair);
     }
 }

@@ -37,7 +37,7 @@
 //! rahmenbreite, kaempferHoehe, sprossenZeilen (NaN = 1), sprossenSpalten (NaN = 1),
 //! bankAn, typArt (0 fest, 1 dreh, 2 kipp, 3 drehkipp, 4 schiebe),
 //! anschlag (Meter, 0 keiner), anschlagSeite (1 aussen | −1 innen; [94]),
-//! tuerArt (0 Dreh | 1 Schiebe | 2 Hebeschiebe | 3 Pendel; [95]), nFluegel, (pfosten, pfostenBreite (NaN), autoBreite (0/1), breite (NaN), art (-1 = typArt), bandLinks) × nFluegel
+//! tuerArt (0 Dreh | 1 Schiebe/Tasche, Pfeil zum Anfang | 2 Hebeschiebe | 3 Pendel | 4 Schiebe/Tasche zum Ende | 5 zweiflügelig; [95]), nFluegel, (pfosten, pfostenBreite (NaN), autoBreite (0/1), breite (NaN), art (-1 = typArt), bandLinks) × nFluegel
 //! ```
 //! → `[n, (ok, tiefe, istTuer, 8 Ecken, Listen) × n]`; `ok` 0 = nicht sichtbar (sonst nichts mehr).
 //! Listen in dieser Reihenfolge, je `[anzahl, Einträge]`: glas, tuerblatt (Vierecke à 8 Werte),
@@ -1007,8 +1007,14 @@ fn layout_opening(o: &[f64], sashes: &[f64], transom_sashes: &[f64], pts: &Quad)
         } else {
             out.door_leaf.push(rect(pts, 0.04, 0.96, 0.0, top));
         }
+        // Schiebe-/Taschentür ([95]): 1 Pfeil zum Anfang, 4 zum Ende, 5 zweiflügelig nach aussen.
         if kind == 1.0 {
             slide_arrow(&mut out, pts, 0.75, 0.25, top * 0.5, top);
+        } else if kind == 4.0 {
+            slide_arrow(&mut out, pts, 0.25, 0.75, top * 0.5, top);
+        } else if kind == 5.0 {
+            slide_arrow(&mut out, pts, 0.4, 0.1, top * 0.5, top);
+            slide_arrow(&mut out, pts, 0.6, 0.9, top * 0.5, top);
         }
         return out;
     }
@@ -1351,5 +1357,34 @@ mod tests_ts {
         let q = &f[14..22];
         let u0 = [q[0], q[2], q[4], q[6]].iter().cloned().fold(f64::INFINITY, f64::min);
         assert!((u0 - (f[4] + 0.1)).abs() < 1e-9, "{u0}");
+    }
+
+    /// [95] Schiebe-/Taschentür: Pfeil zur Bandseite (1 Anfang, 4 Ende), zweiflügelig zwei Pfeile.
+    #[test]
+    fn schiebepfeil_zur_tasche() {
+        let frame = [0.0, 0.0, -3.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
+        let rec = |kind: f64| {
+            let mut b = vec![1.0, 0.0, 0.0, 5.0, 0.0, 0.3, 1.0, 2.2, 0.0, 2.3, 1.0, 0.0, f64::NAN, 0.06, 0.0, f64::NAN, f64::NAN, 1.0, 1.0, 0.0, 1.0, kind];
+            b.extend([f64::NAN; 13]);
+            b.extend([0.0, 0.0]);
+            b
+        };
+        // Symbol-Linien (letzte Liste ab Index 12): glas, tuerblatt, teilungen, fluegel, bank, symbol.
+        let symbols = |f: &[f64]| {
+            let mut i = 12;
+            for size in [8, 8, 4, 8, 8] {
+                i += 1 + f[i] as usize * size;
+            }
+            (0..f[i] as usize).map(|k| [f[i + 1 + 4 * k], f[i + 2 + 4 * k], f[i + 3 + 4 * k], f[i + 4 + 4 * k]]).collect::<Vec<_>>()
+        };
+        let s1 = symbols(&openings(&frame, &rec(1.0)));
+        let s4 = symbols(&openings(&frame, &rec(4.0)));
+        assert_eq!((s1.len(), s4.len()), (3, 3));
+        // Schaft: Schwanz → Spitze.
+        assert!(s1[0][2] < s1[0][0], "{s1:?}");
+        assert!(s4[0][2] > s4[0][0], "{s4:?}");
+        let s5 = symbols(&openings(&frame, &rec(5.0)));
+        assert_eq!(s5.len(), 6);
+        assert!(s5[0][2] < s5[0][0] && s5[3][2] > s5[3][0], "{s5:?}");
     }
 }

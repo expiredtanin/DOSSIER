@@ -85,6 +85,62 @@ pub fn opening_gap_quad(w: &WallRef, position: f64, width: f64) -> Option<Vec<V>
     Some(vec![add(js, scale(n, outer)), add(je, scale(n, outer)), add(je, scale(n, inner)), add(js, scale(n, inner))])
 }
 
+/// [95] Tasche einer Taschen-Schiebetür im Wandrahmen: `u` entlang der Achse ab Wandstart, `n` quer
+/// (Links-Normale, absolut inkl. Referenzversatz). `u_jamb` Anschlag an der Öffnungskante, `dir` +1/−1
+/// Richtung in die Tasche, `leaf` Blattbreite; Hohlraum `u_jamb .. u_jamb + dir·(leaf + POCKET_OVERRUN)`
+/// über `n_center ± half`, Blatt `± leaf_half`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pocket {
+    pub u_jamb: f64,
+    pub dir: f64,
+    pub leaf: f64,
+    pub n_center: f64,
+    pub half: f64,
+    pub leaf_half: f64,
+}
+
+/// Überlänge der Tasche über die Blattbreite (Anschlag/Puffer).
+pub const POCKET_OVERRUN: f64 = 0.05;
+
+impl Pocket {
+    /// Achsmass am Taschenende.
+    pub fn u_end(&self) -> f64 {
+        self.u_jamb + self.dir * (self.leaf + POCKET_OVERRUN)
+    }
+    /// Hohlraum als `(u0, u1, n0, n1)` (aufsteigend).
+    pub fn cavity(&self) -> (f64, f64, f64, f64) {
+        let e = self.u_end();
+        (min(self.u_jamb, e), max(self.u_jamb, e), self.n_center - self.half, self.n_center + self.half)
+    }
+    /// Aussparung im Wandkörper: Hohlraum plus Blattbahn durch die Öffnung (Blatt in Schliessstellung)
+    /// bis zur Gegenkante.
+    pub fn cut(&self) -> (f64, f64, f64, f64) {
+        let e = self.u_end();
+        let far = self.u_jamb - self.dir * self.leaf;
+        (min(far, e), max(far, e), self.n_center - self.half, self.n_center + self.half)
+    }
+}
+
+/// [95] Taschen der Taschen-Schiebetür: einflügelig auf der Bandseite (`hinge_end`: Ende der Öffnung),
+/// zweiflügelig beidseitig. Hohlraum und Blatt quer zur Wand mittig, für dünne Wände geklemmt.
+pub fn pocket_cavities(w: &WallRef, position: f64, width: f64, hinge_end: bool, count: f64) -> Vec<Pocket> {
+    let Some((from, to)) = opening_interval(w, position, width) else { return vec![] };
+    let wd = to - from;
+    if wd <= 1e-3 || !(w.total > 1e-3) {
+        return vec![];
+    }
+    let half = max(0.005, min(0.035, w.total / 2.0 - 0.02));
+    let leaf_half = min(0.02, half * 0.6);
+    let mk = |u_jamb: f64, dir: f64, leaf: f64| Pocket { u_jamb, dir, leaf, n_center: w.ref_off, half, leaf_half };
+    if count >= 2.0 {
+        vec![mk(from, -1.0, wd / 2.0), mk(to, 1.0, wd / 2.0)]
+    } else if hinge_end {
+        vec![mk(to, 1.0, wd)]
+    } else {
+        vec![mk(from, -1.0, wd)]
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct DoorLeaf {
     pub hinge: V,
