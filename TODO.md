@@ -1699,7 +1699,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Offen: Dach/Decke über/unter gestrichelt statt nur ausblenden, Schnitt/Ansicht, Raum/Fenster eigenständig. · M
 - ◐ **[37] Beschriftung in Papiergrösse.** · M — 4.11.: Text `paperHeight` (mm auf dem Blatt, Rust-Modell): Plan rechnet
   die Modellhöhe je Massstab (`drawings.rs`, Test `text_in_papiergroesse`), Textrahmen-Griffe ebenso; Objekt-Info
-  „Papiergrösse" (0 = aus). Offen: Vorgabe im Text-Werkzeug, Hinweislinien/Koten/Raumstempel, DXF-Export nutzt `height`.
+  „Papiergrösse" (0 = aus). Offen: Vorgabe im Text-Werkzeug, Koten/Raumstempel. DXF/PDF/SVG folgen automatisch (Plan-Primitive).
 - ✅ **[38] Assoziative Bemassung.** (30.10.) Rust `dim_assoc.rs`: gefangene Bemassungspunkte tragen
   `Dimension.refs` (je Punkt `DimRef`: Wand-Linie/-Ende, Wandecke = Schnitt zweier Wandlinien, Öffnungs-
   Leibung/-Mitte, Stütze/Decke/Dach/Raum Ecke/Kante/Mitte, 2D-Eckpunkt/-Kante/-Mittelpunkt; Anhängen über
