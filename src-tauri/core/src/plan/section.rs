@@ -2555,12 +2555,16 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
         }
     };
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
-    let (prims, bounds) = section_primitives(&out, mono, hidden, &vis);
+    let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
+    let (mut prims, bounds) = section_primitives(&out, mono, hidden, &vis);
+    // Strichstärken nach Massstab ([32]) wie im Grundriss.
+    super::extras::scale_line_weights(p, scale, &mut prims);
     w.group(&prims);
-    let ops = if openings { section_opening_primitives(p, &level, &vis)? } else { Vec::new() };
+    let mut ops = if openings { section_opening_primitives(p, &level, &vis)? } else { Vec::new() };
+    super::extras::scale_line_weights(p, scale, &mut ops);
     w.group(&ops);
     // Achsraster ([112]): Achsen quer zur Schnittebene.
-    let grid = super::grid_view::grid_prims(p, &level, bounds, v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0).unwrap_or(100.0));
+    let grid = super::grid_view::grid_prims(p, &level, bounds, scale);
     if !grid.is_empty() {
         w.group(&grid);
     }

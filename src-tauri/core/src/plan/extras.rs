@@ -393,6 +393,22 @@ impl Post {
     }
 }
 
+/// [32] Strichstärken nach Massstab auf Schnitt-/Ansichts-Primitive (wie im Grundriss über [`post_for`]):
+/// Faktor [`line_weight_factor`] auf Linien, Umrisse und Schraffurlinien; ohne Projekt-Option nichts.
+pub fn scale_line_weights(p: &Project, scale: f64, prims: &mut [Primitive]) {
+    let lw = line_weight_factor(p, scale);
+    if lw == 1.0 {
+        return;
+    }
+    let post = Post { mono: false, lw };
+    for q in prims.iter_mut() {
+        match q {
+            Primitive::Line { weight_mm, .. } => *weight_mm *= lw,
+            _ => post.apply(q),
+        }
+    }
+}
+
 /// Nachbearbeitung eines Plans: Schwarz-Weiss und Strichstärken-Faktor; `None`, wenn sie nichts tut.
 /// Auf einer Blatt-Ebene (`layoutId`) gelten die Strichstärken unverändert (Papier 1:1).
 pub fn post_for(p: &Project, a: &super::domains::PlanArgs) -> Option<Post> {
@@ -484,6 +500,22 @@ mod tests {
         assert_eq!(line_weight_factor(&on, 100000.0), 0.5);
         assert_eq!(line_weight_factor(&sample(), 200.0), 1.0);
         assert_eq!(line_weight_factor(&on, f64::NAN), 1.0);
+    }
+
+    /// [32] Schnitt/Ansicht: Faktor auch auf Linien; ohne Option unverändert.
+    #[test]
+    fn strichstaerken_in_schnitt_und_ansicht() {
+        let mut on = sample();
+        on.scale_line_weights = Some(true);
+        let lines = || vec![Primitive::Line { a: Vec2 { x: 0.0, y: 0.0 }, b: Vec2 { x: 1.0, y: 0.0 }, cls: "x".into(), weight_mm: 0.5, dash: None, zigzag: None, motif: None, color: None, drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None }];
+        let mut a = lines();
+        scale_line_weights(&on, 200.0, &mut a);
+        let Primitive::Line { weight_mm, .. } = &a[0] else { unreachable!() };
+        assert!((weight_mm - 0.5 * 0.5f64.powf(0.25)).abs() < 1e-12);
+        let mut b = lines();
+        scale_line_weights(&sample(), 200.0, &mut b);
+        let Primitive::Line { weight_mm, .. } = &b[0] else { unreachable!() };
+        assert_eq!(*weight_mm, 0.5);
     }
 
     #[test]

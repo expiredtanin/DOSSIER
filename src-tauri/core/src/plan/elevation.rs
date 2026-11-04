@@ -1728,7 +1728,8 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     // Massstab für die Ausdünnung der Ansichtsschraffur (fehlt er: 1:100).
     let scale = args.get(2).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0);
     let mut w = crate::plan_buf::Writer::new(true);
-    if let Some((prims, bounds)) = elevation_primitives(p, &level, shadows, mono, &vis, scale)? {
+    if let Some((mut prims, bounds)) = elevation_primitives(p, &level, shadows, mono, &vis, scale)? {
+        super::extras::scale_line_weights(p, scale, &mut prims);
         w.group(&prims);
         // Achsraster ([112]): Achsen quer zur Blickebene.
         let grid = super::grid_view::grid_prims(p, &level, bounds, scale);

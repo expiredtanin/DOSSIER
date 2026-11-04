@@ -1675,8 +1675,8 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   auch in CLI/PDF. Offen: Schatten im 3D.
 - ○ **[88] Nur-Lese-Link fürs Web.** · M
 - ✅ **[31] Stiftstärken in Papier-mm.**
-- ◐ **[32] Linienstärken pro Massstab.** (27.10.) Projekt-Option skaliert Grundriss-Stärken mit
-  (100/n)^0.25; Layout-PDF/Plan-Export nutzen jetzt den echten Massstab. Offen: Schnitt/Ansicht. · M
+- ✅ **[32] Linienstärken pro Massstab.** (27.10.) Projekt-Option skaliert Grundriss-Stärken mit
+  (100/n)^0.25; Layout-PDF/Plan-Export nutzen jetzt den echten Massstab. 4.11.: auch Schnitt und Ansicht (`extras::scale_line_weights`, Test `strichstaerken_in_schnitt_und_ansicht`). · M
 - ✅ **[69] Georeferenz im IFC.** IfcProjectedCRS EPSG:2056 + IfcMapConversion.
 
 ## Priorität 3 — Planproduktion und Darstellung
