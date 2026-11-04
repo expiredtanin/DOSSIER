@@ -11,7 +11,7 @@ describe("deriveSelection (Kern)", () => {
   it("Wand: Typ-Liste, Geschosse, Länge, Volumen und UK/OK", () => {
     const p = base();
     const w = p.walls[0];
-    const sel = deriveSelection(p, [w.id], null)!;
+    const sel = deriveSelection(p, { walls: [w.id] })!;
     expect(sel.kind).toBe("wall");
     expect(sel.id).toBe(w.id);
     expect(sel.wall!.wallTypes.length).toBe(p.wallTypes.length);
@@ -25,7 +25,7 @@ describe("deriveSelection (Kern)", () => {
   it("unbekannter Wandtyp bricht mit derselben Meldung ab wie bisher", () => {
     const p = base();
     p.walls[0] = { ...p.walls[0], wallTypeId: "fehlt" };
-    expect(() => deriveSelection(p, [p.walls[0].id], null)).toThrow("Unbekannter Wandtyp: fehlt");
+    expect(() => deriveSelection(p, { walls: [p.walls[0].id] })).toThrow("Unbekannter Wandtyp: fehlt");
   });
 
   it("Zeichnung: offene Linie ohne Füllung, Rechteck mit Ebenen-Vorgaben", () => {
@@ -36,15 +36,15 @@ describe("deriveSelection (Kern)", () => {
       { id: "l", type: "drawing2d", levelId: lvl, categoryCode: code, geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 3, y: -2 } } },
       { id: "r", type: "drawing2d", levelId: lvl, categoryCode: code, hatchId: "h", geom: { shape: "rect", min: { x: 1, y: 1 }, max: { x: 2, y: 4 } } },
     ];
-    const l = deriveSelection(p, [], "l")!;
+    const l = deriveSelection(p, { drawings: ["l"] })!;
     expect(l.closed).toBe(false);
     expect(l.effectiveHatchId).toBeNull();
     expect(l.bbox).toEqual({ minX: 0, minY: -2, maxX: 3, maxY: 0 });
-    const r = deriveSelection(p, [], "r")!;
+    const r = deriveSelection(p, { drawings: ["r"] })!;
     expect(r.closed).toBe(true);
     expect(r.fillHatchId).toBe("h");
     expect(r.effectiveHatchId).toBe("h");
-    expect(deriveSelection(p, [], "nix")).toBeNull();
+    expect(deriveSelection(p, { drawings: ["nix"] })).toBeNull();
   });
 
   it("Extrusion: Fläche im Kern, B-Rep-Beschreibung (truck) aus TS", () => {
@@ -53,7 +53,7 @@ describe("deriveSelection (Kern)", () => {
     p.extrudedSolids = [
       { id: "x", type: "extrudedSolid", levelId: lvl, points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 3 }], height: 2 },
     ];
-    const sel = deriveSelection(p, [], null, null, null, null, null, "x")!;
+    const sel = deriveSelection(p, { solids: ["x"] })!;
     expect(sel.extrudedSolid!.area).toBeCloseTo(3, 12);
     expect(sel.extrudedSolid!.spec).toMatchObject({ kind: "extrude", height: 2 });
     expect(Object.keys(sel.extrudedSolid!)).toEqual([
@@ -72,7 +72,7 @@ describe("deriveSelection (Kern)", () => {
     });
     const edges = (r: Roof) => {
       // Neues Projekt-Objekt je Fall: der Kern gleicht über Referenzen ab.
-      return deriveSelection({ ...p, roofs: [r] }, [], null, null, null, null, null, null, null, "R")!.roof!.edges;
+      return deriveSelection({ ...p, roofs: [r] }, { roofs: ["R"] })!.roof!.edges;
     };
     const list = edges(roof({ holes: [rect(4, 2, 4, 4)] }));
     expect(list).toHaveLength(8);

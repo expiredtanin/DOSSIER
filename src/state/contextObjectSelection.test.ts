@@ -32,7 +32,7 @@ describe("deriveSelection — Kontext-Objekt", () => {
         },
       ],
     } as unknown as Project;
-    const sel = deriveSelection(project, [], null, null, null, null, null, null, null, null, "CTX1");
+    const sel = deriveSelection(project, { contextObjects: ["CTX1"] });
     expect(sel?.kind).toBe("contextObject");
     expect(sel?.id).toBe("CTX1");
     expect(sel?.bbox).toEqual({ minX: 0, minY: 0, maxX: 10, maxY: 6 });
@@ -54,7 +54,7 @@ describe("deriveSelection — Kontext-Objekt", () => {
         },
       ],
     } as unknown as Project;
-    const sel = deriveSelection(project, [], null, null, null, null, null, null, null, null, "CTX1");
+    const sel = deriveSelection(project, { contextObjects: ["CTX1"] });
     // Bbox-Mittelpunkt (50,25) -> LV95 = origin + Mittelpunkt (origin = lv95 - model = lv95, model (0,0)).
     expect(sel?.contextObject?.lv95Center).toEqual({ e: 2600050, n: 1200025 });
   });
@@ -73,7 +73,7 @@ describe("deriveSelection — Kontext-Objekt", () => {
         },
       ],
     } as unknown as Project;
-    const sel = deriveSelection(project, [], null, null, null, null, null, null, null, null, "CTX1");
+    const sel = deriveSelection(project, { contextObjects: ["CTX1"] });
     // Der Modellpunkt (500,300) IST der Anker -> muss exakt auf lv95 (2600000,1200000) zurückrechnen.
     expect(sel?.contextObject?.lv95Center).toEqual({ e: 2600000, n: 1200000 });
   });
@@ -92,18 +92,18 @@ describe("deriveSelection — Kontext-Objekt", () => {
         },
       ],
     } as unknown as Project;
-    const sel = deriveSelection(project, [], null, null, null, null, null, null, null, null, "CS1");
+    const sel = deriveSelection(project, { contextObjects: ["CS1"] });
     expect(sel?.contextObject?.objType).toBe("contourSet");
     expect(sel?.bbox).toEqual({ minX: -5, minY: -3, maxX: 8, maxY: 2 });
   });
 
   it("unbekannte Id -> null", () => {
     const project = { ...baseProject, context: [] } as unknown as Project;
-    expect(deriveSelection(project, [], null, null, null, null, null, null, null, null, "does-not-exist")).toBeNull();
+    expect(deriveSelection(project, { contextObjects: ["does-not-exist"] })).toBeNull();
   });
 
   it("keine Kontext-Auswahl (null) -> fällt durch zu anderen Kanälen (hier auch leer -> null)", () => {
     const project = { ...baseProject, context: [] } as unknown as Project;
-    expect(deriveSelection(project, [], null)).toBeNull();
+    expect(deriveSelection(project, {})).toBeNull();
   });
 });

@@ -37,7 +37,7 @@ const project = {
 
 describe("deriveSelection — Dach", () => {
   it("liefert eine Roof-Selection mit Form + abgeleiteten Werten", () => {
-    const sel = deriveSelection(project, [], null, null, null, null, null, null, null, "RF1");
+    const sel = deriveSelection(project, { roofs: ["RF1"] });
     expect(sel?.kind).toBe("roof");
     expect(sel?.roof?.shape).toBe("sattel");
     expect(sel?.roof?.pitchDeg).toBe(45);
@@ -49,6 +49,6 @@ describe("deriveSelection — Dach", () => {
   });
 
   it("ohne Dach-Auswahl kein Roof (null bei leerer Auswahl)", () => {
-    expect(deriveSelection(project, [], null)).toBeNull();
+    expect(deriveSelection(project, {})).toBeNull();
   });
 });

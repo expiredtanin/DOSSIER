@@ -4,6 +4,7 @@
 
 import { t } from "../i18n";
 import { getState } from "../state/appStore";
+import { fromIdLists } from "../state/selection";
 import { clashSelection, type Clash } from "../analysis/clash";
 import { focusCamera, viewportAvailable } from "../viewport/cameraBridge";
 import { runClashAndStore, setClashSession, useClashSession } from "./clashSession";
@@ -13,10 +14,7 @@ export function focusClash(c: Clash, index: number): void {
   const s = getState();
   const sel = clashSelection(c);
   s.clearSelection();
-  s.setSelectedWallIds(sel.wallIds);
-  s.setSelectedCeilingIds(sel.ceilingIds);
-  s.setSelectedExtrudedSolidIds(sel.extrudedSolidIds);
-  s.setSelectedContextObjectIds(sel.contextObjectIds);
+  s.setSelection(fromIdLists(sel));
   setClashSession({ selected: index });
   const radius = Math.hypot(c.max[0] - c.min[0], c.max[1] - c.min[1], c.max[2] - c.min[2]) / 2;
   if (viewportAvailable()) focusCamera(c.center, radius);

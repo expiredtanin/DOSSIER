@@ -120,6 +120,8 @@ function ExcavationQty({ q }: { q: { cut: number; fill: number; backfill: number
 
 export function SitePanel() {
   const host = usePanelHost();
+  // Gewählte Kontext-Objekte schmal aus dem Store ([121], [130]).
+  const selectedContextObjectIds = useStore((s) => s.selection.contextObjects);
   const notify = useStore((s) => s.notify);
   const objects = host.contextObjects;
   const contourSets = objects.filter((o) => o.type === "contourSet");
@@ -258,7 +260,7 @@ export function SitePanel() {
                   key={obj.id}
                   className={
                     "site-row" +
-                    (host.selectedContextObjectIds.includes(obj.id) ? " site-row-selected" : "")
+                    (selectedContextObjectIds.includes(obj.id) ? " site-row-selected" : "")
                   }
                 >
                   <span className="site-name" title={obj.name}>

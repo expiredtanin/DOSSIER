@@ -21,6 +21,8 @@ import { sheetOwnerOutlines } from "../tools/sheetSnapGeometry";
 import type { BodyTarget } from "../views/plan/PlanView";
 import type { CommandLineHandle } from "../ui/CommandLine";
 import type { CommandEngine } from "../commands/engine";
+import { single } from "./selection";
+import type { Selection } from "./selection";
 
 export interface GripEditFieldsState {
   id: string;
@@ -51,14 +53,8 @@ export function useGripEditing(opts: {
   /** [68] Einzeln gewählte Baugrube (Umriss-Ecken, Kanten, Sohlenhöhe als Griffe). */
   selectedExcavation?: Excavation | null;
   selectedRoom: Room | null;
-  selectedOpeningId: string | null;
-  selectedStairId: string | null;
-  selectedRoomId: string | null;
-  selectedCeilingId: string | null;
-  selectedDrawingId: string | null;
-  selectedWallId: string | null;
-  selectedWallIds: string[];
-  selectedDrawingIds: string[];
+  /** Die Auswahl ([130]); Einzel-Elemente daraus wie in `useSelectionState`. */
+  selection: Selection;
   levelId: string;
   /**
    * Ob Modell-Bauteile (Wand/Decke/Raum/Öffnung/Treppe) Griffe bekommen und per
@@ -123,14 +119,7 @@ export function useGripEditing(opts: {
     selectedCeiling,
     selectedExcavation = null,
     selectedRoom,
-    selectedOpeningId,
-    selectedStairId,
-    selectedRoomId,
-    selectedCeilingId,
-    selectedDrawingId,
-    selectedWallId,
-    selectedWallIds,
-    selectedDrawingIds,
+    selection,
     levelId,
     modelEditable = true,
     sheet = null,
@@ -156,6 +145,13 @@ export function useGripEditing(opts: {
     moveCeilingBy,
     moveElementByOf,
   } = opts;
+  const selectedOpeningId = single(selection, "openings");
+  const selectedStairId = single(selection, "stairs");
+  const selectedRoomId = single(selection, "rooms");
+  const selectedCeilingId = single(selection, "ceilings");
+  const selectedDrawingId = single(selection, "drawings");
+  const selectedWallId = selection.walls[0] ?? null;
+  const { walls: selectedWallIds, drawings: selectedDrawingIds } = selection;
   const groupChanges = opts.groupChanges ?? ((fn: () => void) => fn());
 
   // Bewegpunkt (Move-Handle) einer Treppe: liegt auf der Treppe (Mitte des
@@ -184,15 +180,8 @@ export function useGripEditing(opts: {
   // demselben Element kommen, nicht irgendeinem anderen der Mehrfachauswahl.
   const gripOwnerRange: [number, number][] = [];
 
-  // Bei Mehrfachauswahl fehlt `selectedDrawingIds` manchmal trotzdem (nur die
-  // Einzel-ID `selectedDrawingId` gesetzt, s. useSelectionState-Konvention) —
-  // derselbe Fallback wie an anderen Stellen im Projekt.
-  const effectiveDrawingIds =
-    selectedDrawingIds.length > 0
-      ? selectedDrawingIds
-      : selectedDrawingId
-        ? [selectedDrawingId]
-        : [];
+  // Die Einzel-ID leitet sich aus der Menge ab ([130]) — die Menge genügt.
+  const effectiveDrawingIds = selectedDrawingIds;
 
   // Griff-Grenzen (s. gripLimits.ts): grosse Mehrfachauswahlen ohne Griffe, ein einzeln gewähltes
   // Element immer mit Griffen (Kataster-Parzellen mit tausenden Stützpunkten).

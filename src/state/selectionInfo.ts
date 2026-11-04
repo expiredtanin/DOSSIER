@@ -17,6 +17,8 @@
 import { extrudedSolidSpec } from "../core";
 import type { SolidSpec } from "../engine/truckSolid";
 import { documentFor } from "../core/document";
+import { EMPTY_SELECTION, mergeSelection, single } from "./selection";
+import type { Selection } from "./selection";
 import type {
   AttributeSource,
   DimRef,
@@ -358,7 +360,7 @@ export interface SelectionBBox {
  * EFFEKTIV aufgelöst (Override sonst Default), damit die Palette den real
  * gezeichneten Wert zeigt. `fillHatchId`/`closed` sind nur für Drawing2D sinnvoll.
  */
-export interface Selection {
+export interface SelectionInfo {
   kind:
     | "wall"
     | "ceiling"
@@ -411,7 +413,7 @@ export interface Selection {
    */
   foreground?: string;
   /**
-   * Stift-Kopplung von `foreground`, analog {@link Selection.colorPenId} —
+   * Stift-Kopplung von `foreground`, analog {@link SelectionInfo.colorPenId} —
    * gesetzt bei Wand, Decke, Stütze und Drawing2D (dieselben `kind`s wie
    * `foreground` selbst).
    */
@@ -421,7 +423,7 @@ export interface Selection {
    * System". Nachfolger von `fillColor`; hat im Plan Vorrang.
    */
   background?: string;
-  /** Stift-Kopplung von `background`, analog {@link Selection.foregroundPenId}. */
+  /** Stift-Kopplung von `background`, analog {@link SelectionInfo.foregroundPenId}. */
   backgroundPenId?: string;
   /**
    * Quelle des Vordergrunds, wenn `foreground` NICHT gesetzt ist ("layer" =
@@ -429,7 +431,7 @@ export interface Selection {
    * Wand, Decke und geschlossener Drawing2D (wie `foreground`/`pocheEditable`).
    */
   foregroundSource?: AttributeSource;
-  /** Quelle des Hintergrunds, analog zu {@link Selection.foregroundSource}. */
+  /** Quelle des Hintergrunds, analog zu {@link SelectionInfo.foregroundSource}. */
   backgroundSource?: AttributeSource;
   /**
    * RAW Strichstärke-Override (mm) DIESES Elements; `undefined` = kein Override
@@ -449,9 +451,9 @@ export interface Selection {
    * `undefined` = kein Wert an keiner Stelle der Kette (echtes „Nach System").
    */
   effectiveForeground?: string;
-  /** Effektiv aufgelöster Hintergrund, analog zu {@link Selection.effectiveForeground}. */
+  /** Effektiv aufgelöster Hintergrund, analog zu {@link SelectionInfo.effectiveForeground}. */
   effectiveBackground?: string;
-  /** Effektiv aufgelöste Schraffur-ID, analog zu {@link Selection.effectiveForeground}. */
+  /** Effektiv aufgelöste Schraffur-ID, analog zu {@link SelectionInfo.effectiveForeground}. */
   effectiveHatchId?: string | null;
   /** Ob die Form geschlossen ist (rect/circle/closed polyline) — nur Drawing2D. */
   closed?: boolean;
@@ -539,45 +541,34 @@ const THROWN = /^Unbekannte[rs]? /;
  * Bauteil wirft wie bisher; ein Element, das das Kern-Modell nicht lesen kann,
  * ergibt `null` (mit Warnung).
  */
-export function deriveSelection(
-  project: Project,
-  selectedWallIds: string[],
-  selectedDrawingId: string | null,
-  selectedCeilingId: string | null = null,
-  selectedOpeningId: string | null = null,
-  selectedStairId: string | null = null,
-  selectedRoomId: string | null = null,
-  selectedExtrudedSolidId: string | null = null,
-  selectedColumnId: string | null = null,
-  selectedRoofId: string | null = null,
-  selectedContextObjectId: string | null = null,
-): Selection | null {
+export function deriveSelection(project: Project, selection: Partial<Selection>): SelectionInfo | null {
+  const sel = mergeSelection(EMPTY_SELECTION, selection);
   const args = {
-    wallIds: selectedWallIds,
-    drawingId: selectedDrawingId,
-    ceilingId: selectedCeilingId,
-    openingId: selectedOpeningId,
-    stairId: selectedStairId,
-    roomId: selectedRoomId,
-    extrudedSolidId: selectedExtrudedSolidId,
-    columnId: selectedColumnId,
-    roofId: selectedRoofId,
-    contextObjectId: selectedContextObjectId,
+    wallIds: sel.walls,
+    drawingId: single(sel, "drawings"),
+    ceilingId: single(sel, "ceilings"),
+    openingId: single(sel, "openings"),
+    stairId: single(sel, "stairs"),
+    roomId: single(sel, "rooms"),
+    extrudedSolidId: single(sel, "solids"),
+    columnId: single(sel, "columns"),
+    roofId: single(sel, "roofs"),
+    contextObjectId: single(sel, "contextObjects"),
   };
   // Das Element sucht der Kern über den Positions-Index des Dokuments (keine lineare Suche).
-  let sel: Selection | null;
+  let info: SelectionInfo | null;
   try {
-    sel = documentFor(project).queryRootMarked<Selection | null>("selectionInfo", JSON.stringify(args));
+    info = documentFor(project).queryRootMarked<SelectionInfo | null>("selectionInfo", JSON.stringify(args));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (THROWN.test(msg)) throw new Error(msg);
     console.warn("Objekt-Info:", msg);
     return null;
   }
-  if (sel?.extrudedSolid) {
-    const s = (project.extrudedSolids ?? []).find((x) => x.id === sel!.id);
+  if (info?.extrudedSolid) {
+    const s = (project.extrudedSolids ?? []).find((x) => x.id === info!.id);
     const floor = s && project.drawingLevels.find((z) => z.id === s.levelId);
-    sel.extrudedSolid.spec = s && s.operation !== "subtract" ? extrudedSolidSpec(s, floor?.baseElevation ?? 0) : null;
+    info.extrudedSolid.spec = s && s.operation !== "subtract" ? extrudedSolidSpec(s, floor?.baseElevation ?? 0) : null;
   }
-  return sel;
+  return info;
 }

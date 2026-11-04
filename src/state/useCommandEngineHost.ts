@@ -22,6 +22,7 @@ import { loadShortcutOverrides, saveShortcutOverrides, type ShortcutOverrides } 
 import { useCommandKeys } from "./commandKeys";
 import { t } from "../i18n";
 import { getState } from "./appStore";
+import { clearKinds, toCommandSelection } from "./selection";
 import type { useSelectionState } from "./useSelectionState";
 import type { useContextMenuState } from "../menus/useContextMenuState";
 
@@ -57,30 +58,7 @@ export function useCommandEngineHost(opts: {
   activeWallTypeId: string;
   visibleCodes: Set<string>;
   snap: SnapSettings;
-  sel: Pick<
-    Sel,
-    | "selectedWallIds"
-    | "selectedDrawingId"
-    | "selectedDrawingIds"
-    | "selectedExtrudedSolidId"
-    | "selectedColumnId"
-    | "selectedCeilingIds"
-    | "selectedRoofIds"
-    | "selectedStairIds"
-    | "selectedRoomIds"
-    | "groupPath"
-    | "setSelectedWallIds"
-    | "setSelectedCeilingIds"
-    | "setSelectedOpeningIds"
-    | "setSelectedStairIds"
-    | "setSelectedRoomIds"
-    | "setSelectedExtrudedSolidIds"
-    | "setSelectedColumnIds"
-    | "setSelectedRoofIds"
-    | "setSelectedContextObjectIds"
-    | "setSelectedSectionLineIds"
-    | "setSelectedDrawingId"
-  >;
+  sel: Pick<Sel, "selection" | "groupPath" | "setSelection">;
   setProject: (m: ProjectMutation) => void;
   setDraft: (d: ToolDraft | null) => void;
   notify: (msg: string, kind: "info" | "warning" | "error") => void;
@@ -103,29 +81,7 @@ export function useCommandEngineHost(opts: {
     setEditTextId,
     setEditTextMinHeightM,
   } = opts;
-  const {
-    selectedWallIds,
-    selectedDrawingId,
-    selectedDrawingIds,
-    selectedExtrudedSolidId,
-    selectedColumnId,
-    selectedCeilingIds,
-    selectedRoofIds,
-    selectedStairIds,
-    selectedRoomIds,
-    groupPath,
-    setSelectedWallIds,
-    setSelectedCeilingIds,
-    setSelectedOpeningIds,
-    setSelectedStairIds,
-    setSelectedRoomIds,
-    setSelectedExtrudedSolidIds,
-    setSelectedColumnIds,
-    setSelectedRoofIds,
-    setSelectedContextObjectIds,
-    setSelectedSectionLineIds,
-    setSelectedDrawingId,
-  } = opts.sel;
+  const { selection, groupPath, setSelection } = opts.sel;
   // ── Command-Engine (Rhino-artiges Befehlssystem) ──────────────────────────
   // Eine stabile Engine-Instanz; alle Live-Werte (Kontext/Snap/visibleCodes)
   // liest der Host über einen jeweils aktualisierten `latest`-Ref, damit die
@@ -141,15 +97,7 @@ export function useCommandEngineHost(opts: {
     activeWallTypeId,
     visibleCodes,
     snap,
-    selectedWallIds,
-    selectedDrawingId,
-    selectedDrawingIds,
-    selectedExtrudedSolidId,
-    selectedColumnId,
-    selectedCeilingIds,
-    selectedRoofIds,
-    selectedStairIds,
-    selectedRoomIds,
+    selection,
     groupPath,
     setProject,
     setDraft,
@@ -162,15 +110,7 @@ export function useCommandEngineHost(opts: {
     activeWallTypeId,
     visibleCodes,
     snap,
-    selectedWallIds,
-    selectedDrawingId,
-    selectedDrawingIds,
-    selectedExtrudedSolidId,
-    selectedColumnId,
-    selectedCeilingIds,
-    selectedRoofIds,
-    selectedStairIds,
-    selectedRoomIds,
+    selection,
     groupPath,
     setProject,
     setDraft,
@@ -193,17 +133,7 @@ export function useCommandEngineHost(opts: {
           // Befehl). Move/Copy/Offset operieren darauf.
           // Im Schnitt/in der Ansicht nur die 2D-Elemente der Ebene: Bauteile
           // leben im Grundriss-Raum, ein Schnitt-Delta wäre dort falsch.
-          selection: sheetOnlySelection(c.activeLevel, {
-            wallIds: c.selectedWallIds,
-            drawingId: c.selectedDrawingId,
-            drawingIds: c.selectedDrawingIds,
-            extrudedSolidId: c.selectedExtrudedSolidId,
-            columnId: c.selectedColumnId,
-            ceilingIds: c.selectedCeilingIds,
-            roofIds: c.selectedRoofIds,
-            stairIds: c.selectedStairIds,
-            roomIds: c.selectedRoomIds,
-          }),
+          selection: sheetOnlySelection(c.activeLevel, toCommandSelection(c.selection)),
         };
       },
       snap: (raw, draftPoints, mods) => {
@@ -248,17 +178,7 @@ export function useCommandEngineHost(opts: {
       // onEditDrawingText (useMouseSelectionHandlers.ts), damit kein anderes
       // Element gleichzeitig markiert bleibt.
       focusDrawing: (id, minHeightM) => {
-        setSelectedWallIds([]);
-        setSelectedCeilingIds([]);
-        setSelectedOpeningIds([]);
-        setSelectedStairIds([]);
-        setSelectedRoomIds([]);
-        setSelectedExtrudedSolidIds([]);
-        setSelectedColumnIds([]);
-        setSelectedRoofIds([]);
-        setSelectedContextObjectIds([]);
-        setSelectedSectionLineIds([]);
-        setSelectedDrawingId(id);
+        setSelection({ ...clearKinds(), drawings: [id] });
         setEditTextMinHeightM(minHeightM ?? null);
         setEditTextId(id);
       },

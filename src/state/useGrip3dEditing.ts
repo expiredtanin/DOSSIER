@@ -24,6 +24,7 @@ import {
 import type { CommandLineHandle } from "../ui/CommandLine";
 import { useEvent } from "./useEvent";
 import type { useSelectionState } from "./useSelectionState";
+import type { Selection } from "./selection";
 import type { useProjectActions } from "./useProjectActions";
 
 type Sel = ReturnType<typeof useSelectionState>;
@@ -37,10 +38,7 @@ export function useGrip3dEditing(opts: {
   setDraft: (d: ToolDraft | null) => void;
   undo: () => void;
   commandLineRef: RefObject<CommandLineHandle>;
-  selectedWallIds: string[];
-  selectedDrawingIds: string[];
-  selectedCeilingIds: string[];
-  selectedRoofIds: string[];
+  selection: Selection;
   updateRoof: Sel["updateRoof"];
   moveRoofGrip: Sel["moveRoofGrip"];
   moveRoofBy: Sel["moveRoofBy"];
@@ -59,10 +57,7 @@ export function useGrip3dEditing(opts: {
     setDraft,
     undo,
     commandLineRef,
-    selectedWallIds,
-    selectedDrawingIds,
-    selectedCeilingIds,
-    selectedRoofIds,
+    selection,
     updateRoof,
     moveRoofGrip,
     moveRoofBy,
@@ -73,6 +68,7 @@ export function useGrip3dEditing(opts: {
     moveElementByOf,
     updateWall,
   } = opts;
+  const { walls: selectedWallIds, drawings: selectedDrawingIds, ceilings: selectedCeilingIds, roofs: selectedRoofIds } = selection;
   // ── 3D-Editier-Griffe (direkt im Viewport3D) ──────────────────────────────
   // Genau EINE gewählte Wand (kein 2D-Element) bzw. genau EIN 2D-Element liefert
   // die Quelle der 3D-Griffe. Dieselben Store-Actions wie bei den Plan-Griffen

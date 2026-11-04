@@ -56,6 +56,7 @@ import type { Pick3dHit } from "../viewport/Wasm3DViewport";
 import { DrawingTabs } from "../DrawingTabs";
 import type { ViewSnapshotTabsHandlers } from "../DrawingTabs";
 import type { ToolDraft, ToolHandlers, ToolId } from "../tools/types";
+import type { Selection } from "../state/selection";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "../model/viewTypes";
 
 /**
@@ -99,17 +100,7 @@ export const Content = memo(function Content({
   planViewRef,
   onCursor,
   onScale,
-  selectedWallIds,
-  selectedCeilingIds,
-  selectedOpeningIds,
-  selectedStairIds,
-  selectedExtrudedSolidIds,
-  selectedColumnIds,
-  selectedGroupIds,
-  selectedRoomIds,
-  selectedRoofIds,
-  selectedContextObjectIds,
-  selectedSectionLineIds,
+  selection,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -137,8 +128,6 @@ export const Content = memo(function Content({
   grips,
   gripHandleLines,
   edgeGrips,
-  selectedDrawingId,
-  selectedDrawingIds,
   gripHandlers,
   edit3dWalls,
   edit3dDrawings,
@@ -206,17 +195,8 @@ export const Content = memo(function Content({
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
   onScale: (n: number) => void;
-  selectedWallIds: string[];
-  selectedCeilingIds: string[];
-  selectedOpeningIds: string[];
-  selectedStairIds: string[];
-  selectedExtrudedSolidIds: string[];
-  selectedColumnIds: string[];
-  selectedGroupIds: string[];
-  selectedRoomIds: string[];
-  selectedRoofIds: string[];
-  selectedContextObjectIds: string[];
-  selectedSectionLineIds: string[];
+  /** Die Auswahl ([130]). */
+  selection: Selection;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -253,8 +233,6 @@ export const Content = memo(function Content({
   grips: Vec2[];
   gripHandleLines: { a: Vec2; b: Vec2 }[];
   edgeGrips: EdgeGrip[];
-  selectedDrawingId: string | null;
-  selectedDrawingIds?: string[];
   gripHandlers: GripHandlers;
   /** Alle gewählten Wände — Quelle der 3D-Editier-Griffe (Mehrfachauswahl ⇒ alle). */
   edit3dWalls: Wall[];
@@ -296,36 +274,18 @@ export const Content = memo(function Content({
   const clashes = useClashSession().clashes;
   // Explosionsaxonometrie ([65]): Hervorhebung folgt dem auseinandergezogenen 3D-Modell.
   const explode = useStore((s) => (s.explode3d ? s.explode3dGap : 0));
+  const { walls, ceilings, openings, stairs, roofs, contextObjects } = selection;
   const selectionLines = useMemo(
     () =>
-      selectedWallIds.length === 0 &&
-      selectedCeilingIds.length === 0 &&
-      selectedOpeningIds.length === 0 &&
-      selectedStairIds.length === 0 &&
-      selectedRoofIds.length === 0 &&
-      selectedContextObjectIds.length === 0
+      walls.length === 0 &&
+      ceilings.length === 0 &&
+      openings.length === 0 &&
+      stairs.length === 0 &&
+      roofs.length === 0 &&
+      contextObjects.length === 0
         ? null
-        : selectionHighlightLines(
-            project,
-            selectedWallIds,
-            selectedCeilingIds,
-            HIGHLIGHT_RGB,
-            selectedOpeningIds,
-            selectedStairIds,
-            selectedRoofIds,
-            selectedContextObjectIds,
-            explode,
-          ),
-    [
-      project,
-      explode,
-      selectedWallIds,
-      selectedCeilingIds,
-      selectedOpeningIds,
-      selectedStairIds,
-      selectedRoofIds,
-      selectedContextObjectIds,
-    ],
+        : selectionHighlightLines(project, walls, ceilings, HIGHLIGHT_RGB, openings, stairs, roofs, contextObjects, explode),
+    [project, explode, walls, ceilings, openings, stairs, roofs, contextObjects],
   );
   // Kollisionen der letzten Prüfung: rote Hüllquader zusätzlich zur Auswahl-Hervorhebung.
   const highlightLines = useMemo(() => {
@@ -410,16 +370,7 @@ export const Content = memo(function Content({
           planViewRef={planViewRef}
           onCursor={onCursor}
           onScale={onScale}
-          selectedWallIds={selectedWallIds}
-          selectedCeilingIds={selectedCeilingIds}
-          selectedOpeningIds={selectedOpeningIds}
-          selectedStairIds={selectedStairIds}
-          selectedExtrudedSolidIds={selectedExtrudedSolidIds}
-          selectedColumnIds={selectedColumnIds}
-          selectedGroupIds={selectedGroupIds}
-          selectedRoomIds={selectedRoomIds}
-          selectedRoofIds={selectedRoofIds}
-          selectedSectionLineIds={selectedSectionLineIds}
+          selection={selection}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -443,8 +394,6 @@ export const Content = memo(function Content({
           grips={grips}
           gripHandleLines={gripHandleLines}
           edgeGrips={edgeGrips}
-          selectedDrawingId={selectedDrawingId}
-          selectedDrawingIds={selectedDrawingIds}
           gripHandlers={gripHandlers}
         />
       </main>
@@ -479,17 +428,7 @@ export const Content = memo(function Content({
           planViewRef={planViewRef}
           onCursor={onCursor}
           onScale={onScale}
-          selectedWallIds={selectedWallIds}
-          selectedCeilingIds={selectedCeilingIds}
-          selectedOpeningIds={selectedOpeningIds}
-          selectedStairIds={selectedStairIds}
-          selectedExtrudedSolidIds={selectedExtrudedSolidIds}
-          selectedColumnIds={selectedColumnIds}
-          selectedGroupIds={selectedGroupIds}
-          selectedRoomIds={selectedRoomIds}
-          selectedRoofIds={selectedRoofIds}
-          selectedContextObjectIds={selectedContextObjectIds}
-          selectedSectionLineIds={selectedSectionLineIds}
+          selection={selection}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -513,8 +452,6 @@ export const Content = memo(function Content({
           grips={grips}
           gripHandleLines={gripHandleLines}
           edgeGrips={edgeGrips}
-          selectedDrawingId={selectedDrawingId}
-          selectedDrawingIds={selectedDrawingIds}
           gripHandlers={gripHandlers}
         />
     );
@@ -570,17 +507,7 @@ export const Content = memo(function Content({
           planViewRef={planViewRef}
           onCursor={onCursor}
           onScale={onScale}
-          selectedWallIds={selectedWallIds}
-          selectedCeilingIds={selectedCeilingIds}
-          selectedOpeningIds={selectedOpeningIds}
-          selectedStairIds={selectedStairIds}
-          selectedExtrudedSolidIds={selectedExtrudedSolidIds}
-          selectedColumnIds={selectedColumnIds}
-          selectedGroupIds={selectedGroupIds}
-          selectedRoomIds={selectedRoomIds}
-          selectedRoofIds={selectedRoofIds}
-          selectedContextObjectIds={selectedContextObjectIds}
-          selectedSectionLineIds={selectedSectionLineIds}
+          selection={selection}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -604,8 +531,6 @@ export const Content = memo(function Content({
           grips={grips}
           gripHandleLines={gripHandleLines}
           edgeGrips={edgeGrips}
-          selectedDrawingId={selectedDrawingId}
-          selectedDrawingIds={selectedDrawingIds}
           gripHandlers={gripHandlers}
         />
       )}
@@ -754,17 +679,7 @@ function LevelPlanView({
   planViewRef,
   onCursor,
   onScale,
-  selectedWallIds,
-  selectedCeilingIds,
-  selectedOpeningIds,
-  selectedStairIds,
-  selectedExtrudedSolidIds,
-  selectedColumnIds,
-  selectedGroupIds,
-  selectedRoomIds,
-  selectedRoofIds,
-  selectedContextObjectIds,
-  selectedSectionLineIds,
+  selection,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -788,8 +703,6 @@ function LevelPlanView({
   grips,
   gripHandleLines,
   edgeGrips,
-  selectedDrawingId,
-  selectedDrawingIds,
   gripHandlers,
 }: {
   /** Hintergrund unter der Zeichnung (Layout-Blatt), s. `PlanView.backdrop`. */
@@ -815,17 +728,8 @@ function LevelPlanView({
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
   onScale: (n: number) => void;
-  selectedWallIds: string[];
-  selectedCeilingIds: string[];
-  selectedOpeningIds: string[];
-  selectedStairIds: string[];
-  selectedExtrudedSolidIds: string[];
-  selectedColumnIds: string[];
-  selectedGroupIds: string[];
-  selectedRoomIds: string[];
-  selectedRoofIds: string[];
-  selectedContextObjectIds?: string[];
-  selectedSectionLineIds: string[];
+  /** Die Auswahl ([130]). */
+  selection: Selection;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -853,8 +757,6 @@ function LevelPlanView({
   grips: Vec2[];
   gripHandleLines: { a: Vec2; b: Vec2 }[];
   edgeGrips: EdgeGrip[];
-  selectedDrawingId: string | null;
-  selectedDrawingIds?: string[];
   gripHandlers: GripHandlers;
 }) {
   // Fremd-Art-Referenz-Unterlage (Nutzer-Wunsch: "will mal etwas vom Schnitt
@@ -949,17 +851,7 @@ function LevelPlanView({
         resetKey={level.id}
         onCursor={onCursor}
         onScale={onScale}
-        selectedWallIds={selectedWallIds}
-        selectedCeilingIds={selectedCeilingIds}
-        selectedOpeningIds={selectedOpeningIds}
-        selectedStairIds={selectedStairIds}
-        selectedExtrudedSolidIds={selectedExtrudedSolidIds}
-        selectedColumnIds={selectedColumnIds}
-        selectedGroupIds={selectedGroupIds}
-        selectedRoomIds={selectedRoomIds}
-        selectedRoofIds={selectedRoofIds}
-        selectedContextObjectIds={selectedContextObjectIds}
-        selectedSectionLineIds={selectedSectionLineIds}
+        selection={selection}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
@@ -987,8 +879,6 @@ function LevelPlanView({
         snapColor={snapColor}
         hoverDivideDelayMs={hoverDivideDelayMs}
         hoverDivideCount={hoverDivideCount}
-        selectedDrawingId={selectedDrawingId}
-        selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}
         backdrop={backdrop}
         units={unitsForLevel(level)}
@@ -1027,16 +917,7 @@ function SectionPlanView({
   planViewRef,
   onCursor,
   onScale,
-  selectedWallIds,
-  selectedCeilingIds,
-  selectedOpeningIds,
-  selectedStairIds,
-  selectedExtrudedSolidIds,
-  selectedColumnIds,
-  selectedGroupIds,
-  selectedRoomIds,
-  selectedRoofIds,
-  selectedSectionLineIds,
+  selection,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -1060,8 +941,6 @@ function SectionPlanView({
   grips,
   gripHandleLines,
   edgeGrips,
-  selectedDrawingId,
-  selectedDrawingIds,
   gripHandlers,
 }: {
   project: Project;
@@ -1082,16 +961,8 @@ function SectionPlanView({
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
   onScale: (n: number) => void;
-  selectedWallIds: string[];
-  selectedCeilingIds: string[];
-  selectedOpeningIds: string[];
-  selectedStairIds: string[];
-  selectedExtrudedSolidIds: string[];
-  selectedColumnIds: string[];
-  selectedGroupIds: string[];
-  selectedRoomIds: string[];
-  selectedRoofIds: string[];
-  selectedSectionLineIds: string[];
+  /** Die Auswahl ([130]). */
+  selection: Selection;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -1115,10 +986,13 @@ function SectionPlanView({
   grips: Vec2[];
   gripHandleLines: { a: Vec2; b: Vec2 }[];
   edgeGrips: EdgeGrip[];
-  selectedDrawingId: string | null;
-  selectedDrawingIds?: string[];
   gripHandlers: GripHandlers;
 }) {
+  // Kontext-Objekte hebt der Schnitt (wie bisher) nicht hervor.
+  const sectionSelection = useMemo(
+    () => (selection.contextObjects.length ? { ...selection, contextObjects: [] } : selection),
+    [selection],
+  );
   // Die Ansicht (kind "elevation") ist synchron (Kern, Painter); nur der Schnitt wartet auf die
   // truck-Körper.
   const isElevation = level.kind === "elevation";
@@ -1338,16 +1212,7 @@ function SectionPlanView({
         resetKey={level.id}
         onCursor={onCursor}
         onScale={onScale}
-        selectedWallIds={selectedWallIds}
-        selectedCeilingIds={selectedCeilingIds}
-        selectedOpeningIds={selectedOpeningIds}
-        selectedStairIds={selectedStairIds}
-        selectedExtrudedSolidIds={selectedExtrudedSolidIds}
-        selectedColumnIds={selectedColumnIds}
-        selectedGroupIds={selectedGroupIds}
-        selectedRoomIds={selectedRoomIds}
-        selectedRoofIds={selectedRoofIds}
-        selectedSectionLineIds={selectedSectionLineIds}
+        selection={sectionSelection}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
@@ -1375,8 +1240,6 @@ function SectionPlanView({
         snapColor={snapColor}
         hoverDivideDelayMs={hoverDivideDelayMs}
         hoverDivideCount={hoverDivideCount}
-        selectedDrawingId={selectedDrawingId}
-        selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}
         sheetBodies
       />

@@ -1169,6 +1169,14 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   4.11.: generische Fenster-Brücke `native/windowBridge.ts` (`useWindowBridgeHost`) für Einstellungen, Geschosse,
   Ebenen-Einstellungen und Kontext-Import (−110 Zeilen); Ressourcen-Fenster bleibt eigen (Teil-Änderungen, [121]).
   Nicht in der Tauri-App geprüft.
+  4.11.: Auswahl als ein Wert: `state/selection.ts` (`Selection` mit 12 Arten, `mergeSelection` hält Referenzen
+  stabil, `clearKinds`, `single`, `toCommandSelection`/`toTransformSelection`, `toMembership`, `toIdLists`/`fromIdLists`,
+  vitest). Store: `selection` + `setSelection(patch)` + `clearSelection` statt 12 Felder/12 Setter; App, Maus-/
+  Tastatur-/Befehls-/Griff-/Import-Hooks, BCF, Kollision, KI-Zugang, PlanView/viewportContent (eine `selection`-Prop
+  statt 13) und `deriveSelection(project, selection)` umgestellt; Objekt-Info-Typ heisst jetzt `SelectionInfo`;
+  SitePanel liest `s.selection.contextObjects` schmal. Verhalten unverändert (auch Eigenheiten: Geschosswechsel lässt
+  Kontext-Objekte gewählt, Schnitt hebt Kontext-Objekte nicht hervor, 3D-Klick auf 2D-Element wählt auch mit Shift nur
+  es). Offen: PlanView/useGrip3dEditing nutzen intern noch lokale `selected…Ids`-Namen; nicht in Tauri geprüft.
   3.11. Lizenzteil erledigt: NOTICE ergänzt (OFL-Schriften, wgpu, Tauri, React, pdf.js, jsPDF, lcms, truck …),
   `src-tauri/deny.toml` + CI-Job `licenses` (check.yml, `cargo deny check licenses` je Crate).
 

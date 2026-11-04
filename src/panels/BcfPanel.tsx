@@ -16,6 +16,7 @@ import { useMemo, useRef } from "react";
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
 import { getState, useStore } from "../state/appStore";
+import { fromIdLists, toIdLists } from "../state/selection";
 import { saveBinaryFile } from "../native/saveFile";
 import {
   BCF_STATUSES,
@@ -73,31 +74,14 @@ function uuid(): string {
 function applySelection(sel: BcfSelection): void {
   const s = getState();
   s.clearSelection();
-  s.setSelectedWallIds(sel.wallIds);
-  s.setSelectedCeilingIds(sel.ceilingIds);
-  s.setSelectedOpeningIds(sel.openingIds);
-  s.setSelectedStairIds(sel.stairIds);
-  s.setSelectedRoomIds(sel.roomIds);
-  s.setSelectedExtrudedSolidIds(sel.extrudedSolidIds);
-  s.setSelectedColumnIds(sel.columnIds);
-  s.setSelectedRoofIds(sel.roofIds);
-  s.setSelectedContextObjectIds(sel.contextObjectIds);
+  s.setSelection(fromIdLists(sel));
 }
 
 function currentSelection(): BcfSelection {
-  const s = getState();
-  return {
-    ...emptyBcfSelection(),
-    wallIds: s.selectedWallIds,
-    ceilingIds: s.selectedCeilingIds,
-    openingIds: s.selectedOpeningIds,
-    stairIds: s.selectedStairIds,
-    roomIds: s.selectedRoomIds,
-    extrudedSolidIds: s.selectedExtrudedSolidIds,
-    columnIds: s.selectedColumnIds,
-    roofIds: s.selectedRoofIds,
-    contextObjectIds: s.selectedContextObjectIds,
-  };
+  const l = toIdLists(getState().selection);
+  const out = emptyBcfSelection();
+  for (const k of Object.keys(out) as (keyof BcfSelection)[]) out[k] = l[k];
+  return out;
 }
 
 const f1 = (n: number) => n.toLocaleString("de-CH", { maximumFractionDigits: 1 });

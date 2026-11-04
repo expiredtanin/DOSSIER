@@ -119,6 +119,7 @@ import { setCursor } from "./state/cursorStore";
 import { setLiveScale } from "./state/liveScaleStore";
 import { useDrawingToolState } from "./state/useDrawingToolState";
 import { useSelectionState } from "./state/useSelectionState";
+import { clearKinds, fromIdLists, hasTransformable, isEmpty, toIdLists, toMembership } from "./state/selection";
 import { useGripEditing } from "./state/useGripEditing";
 import { usePanelHostBase } from "./state/usePanelHostBase";
 import { useDockDragState } from "./state/useDockDragState";
@@ -167,7 +168,7 @@ import { FloatingPanel } from "./panels/FloatingPanel";
 import { DragOverlay } from "./panels/panelDrag";
 import { hostWithMode, PanelHostProvider } from "./panels/host";
 import { deriveSelection } from "./state/selectionInfo";
-import type { Selection } from "./state/selectionInfo";
+import type { SelectionInfo } from "./state/selectionInfo";
 import { centroid as roomCentroid } from "./core";
 import { docFromText, plainText, DEFAULT_PRESETS } from "./text/richText";
 import type { RichTextDoc } from "./text/richText";
@@ -344,50 +345,22 @@ export default function App() {
     commitCopyCount,
   } = useDrawingToolState(project.wallTypes[0].id, project.lineStyles[0].id);
 
-  // ── Auswahl (Store-Slice) ─────────────────────────────────────────────────
+  // ── Auswahl (Store-Slice, ein `Selection`-Wert, [130]) ──────────────────────
   const {
-    selectedWallIds,
-    setSelectedWallIds,
-    selectedDrawingIds,
-    setSelectedDrawingIds,
+    selection,
+    setSelection,
     selectedDrawingId,
-    setSelectedDrawingId,
     elementClipboard,
     setElementClipboard,
     selectedWallId,
-    selectedCeilingIds,
-    setSelectedCeilingIds,
     selectedCeilingId,
-    selectedRoofIds,
-    setSelectedRoofIds,
-    selectedRoofId,
-    selectedSectionLineIds,
-    setSelectedSectionLineIds,
     selectedSectionLineId,
     section3dCutId,
     setSection3dCutId,
     updateRoof,
     moveRoofGrip,
     moveRoofBy,
-    selectedOpeningIds,
-    setSelectedOpeningIds,
-    selectedOpeningId,
-    selectedStairIds,
-    setSelectedStairIds,
-    selectedStairId,
-    selectedRoomIds,
-    setSelectedRoomIds,
     selectedRoomId,
-    selectedExtrudedSolidIds,
-    setSelectedExtrudedSolidIds,
-    selectedExtrudedSolidId,
-    selectedColumnIds,
-    setSelectedColumnIds,
-    selectedColumnId,
-    selectedContextObjectIds,
-    setSelectedContextObjectIds,
-    selectedGroupIds,
-    setSelectedGroupIds,
     groupPath,
     setGroupPath,
   } = useSelectionState();
@@ -417,16 +390,8 @@ export default function App() {
   // (Grundriss ↔ 3D) lässt die Auswahl bestehen — dieselbe wallId gilt in
   // beiden Ansichten; nur die offenen Overlays werden geschlossen.
   useEffect(() => {
-    setSelectedWallIds([]);
-    setSelectedDrawingId(null);
-    setSelectedCeilingIds([]);
-    setSelectedOpeningIds([]);
-    setSelectedStairIds([]);
-    setSelectedRoomIds([]);
-    setSelectedExtrudedSolidIds([]);
-    setSelectedColumnIds([]);
-    setSelectedRoofIds([]);
-    setSelectedSectionLineIds([]);
+    // Kontext-Objekte (projektweit) und Gruppen bleiben gewählt.
+    setSelection((s) => ({ ...clearKinds(), contextObjects: s.contextObjects }));
     setMenu(null);
     setEditor(null);
   }, [activeLevelId]);
@@ -566,29 +531,7 @@ export default function App() {
   };
 
   // ── Command-Engine (Rhino-artiges Befehlssystem) → state/useCommandEngineHost.ts ──
-  const selectionState = {
-    selectedWallIds,
-    selectedDrawingId,
-    selectedDrawingIds,
-    selectedExtrudedSolidId,
-    selectedColumnId,
-    selectedCeilingIds,
-    selectedRoofIds,
-    selectedStairIds,
-    selectedRoomIds,
-    groupPath,
-    setSelectedWallIds,
-    setSelectedCeilingIds,
-    setSelectedOpeningIds,
-    setSelectedStairIds,
-    setSelectedRoomIds,
-    setSelectedExtrudedSolidIds,
-    setSelectedColumnIds,
-    setSelectedRoofIds,
-    setSelectedContextObjectIds,
-    setSelectedSectionLineIds,
-    setSelectedDrawingId,
-  };
+  const selectionState = { selection, groupPath, setSelection };
   const {
     engineRef,
     engine,
@@ -700,10 +643,10 @@ export default function App() {
   );
   // [68] Genau eine gewählte Baugrube (Griffe für Umriss und Sohle).
   const selectedExcavation = useMemo(() => {
-    if (selectedContextObjectIds.length !== 1) return null;
-    const o = (project.context ?? []).find((c) => c.id === selectedContextObjectIds[0]);
+    if (selection.contextObjects.length !== 1) return null;
+    const o = (project.context ?? []).find((c) => c.id === selection.contextObjects[0]);
     return o && o.type === "excavation" ? o : null;
-  }, [project.context, selectedContextObjectIds]);
+  }, [project.context, selection.contextObjects]);
   const selectedRoom = useMemo(
     () => (project.rooms ?? []).find((r) => r.id === selectedRoomId) ?? null,
     [project.rooms, selectedRoomId],
@@ -724,45 +667,22 @@ export default function App() {
 
   // Ob irgendeine löschbare Auswahl ansteht — geteilt zwischen dem Entf-
   // Tastatur-Handler unten und dem Menüpunkt „Bearbeiten > Löschen" (AppMenuBar).
-  const hasSelectionToDelete = () =>
-    !!(
-      selectedSectionLineIds.length ||
-      selectedDrawingIds.length ||
-      selectedWallIds.length ||
-      selectedCeilingIds.length ||
-      selectedOpeningIds.length ||
-      selectedStairIds.length ||
-      selectedRoomIds.length ||
-      selectedExtrudedSolidIds.length ||
-      selectedColumnIds.length ||
-      selectedRoofIds.length ||
-      selectedContextObjectIds.length
-    );
+  const hasSelectionToDelete = () => !isEmpty(selection, { withGroups: false });
 
   // Löscht die AKTUELLE Auswahl (alle Kanäle) — geteilte Logik zwischen dem
   // Entf-Tastatur-Handler und dem Menüpunkt „Bearbeiten > Löschen".
   const deleteSelection = () => {
     // Ein Undo-Schritt für alles (Schnittlinien + Elemente), [K4] S3.
     groupChanges(() => deleteSelectionChanges());
-    setSelectedDrawingIds([]);
-    setSelectedWallIds([]);
-    setSelectedCeilingIds([]);
-    setSelectedOpeningIds([]);
-    setSelectedStairIds([]);
-    setSelectedRoomIds([]);
-    setSelectedExtrudedSolidIds([]);
-    setSelectedColumnIds([]);
-    setSelectedRoofIds([]);
-    setSelectedContextObjectIds([]);
-    setSelectedSectionLineIds([]);
+    setSelection(clearKinds());
   };
   const deleteSelectionChanges = () => {
     // Schnittlinie(n): Entf löscht NUR ihre Linie (linePoints), die Ebene
     // bleibt — ADDITIV zu den übrigen Kanälen unten (nicht mehr exklusiv:
     // seit Cmd/Ctrl+A Schnittlinien zusammen mit Wänden/etc. mitselektiert,
     // würde ein frühes `return` hier die übrigen Kanäle stumm überspringen).
-    if (selectedSectionLineIds.length) {
-      for (const id of selectedSectionLineIds) patchLevel(id, { linePoints: undefined });
+    if (selection.sectionLines.length) {
+      for (const id of selection.sectionLines) patchLevel(id, { linePoints: undefined });
     }
     // Objekt-Sperre: gesperrte Elemente aus der Löschung ausnehmen (s.
     // `moveGrip`/`moveElementBy` im Kern, `grips.rs`, für dieselbe Prüfung
@@ -770,16 +690,16 @@ export default function App() {
     // (s. deren Typdefinitionen) — bleiben ungefiltert.
     const notLocked = (kind: MemberKind, ids: string[]) =>
       ids.filter((id) => !isLocked(project, kind, id));
-    const dids = new Set(notLocked("drawingIds", selectedDrawingIds));
-    const wids = new Set(notLocked("wallIds", selectedWallIds));
-    const cids = new Set(notLocked("ceilingIds", selectedCeilingIds));
-    const oids = new Set(notLocked("openingIds", selectedOpeningIds));
-    const stids = new Set(notLocked("stairIds", selectedStairIds));
-    const rmids = new Set(notLocked("roomIds", selectedRoomIds));
-    const exids = new Set(selectedExtrudedSolidIds);
-    const colids = new Set(notLocked("columnIds", selectedColumnIds));
-    const rfids = new Set(notLocked("roofIds", selectedRoofIds));
-    const ctxids = new Set(selectedContextObjectIds);
+    const dids = new Set(notLocked("drawingIds", selection.drawings));
+    const wids = new Set(notLocked("wallIds", selection.walls));
+    const cids = new Set(notLocked("ceilingIds", selection.ceilings));
+    const oids = new Set(notLocked("openingIds", selection.openings));
+    const stids = new Set(notLocked("stairIds", selection.stairs));
+    const rmids = new Set(notLocked("roomIds", selection.rooms));
+    const exids = new Set(selection.solids);
+    const colids = new Set(notLocked("columnIds", selection.columns));
+    const rfids = new Set(notLocked("roofIds", selection.roofs));
+    const ctxids = new Set(selection.contextObjects);
     setProject(
       opsMutation((p) => [
         ...removeItems(p, "drawings2d", dids),
@@ -805,28 +725,8 @@ export default function App() {
     project,
     activeLevelId: activeLevel.id,
     shortcutOverrides,
-    selectedDrawingIds,
-    selectedWallIds,
-    selectedCeilingIds,
-    selectedOpeningIds,
-    selectedStairIds,
-    selectedRoomIds,
-    selectedExtrudedSolidIds,
-    selectedColumnIds,
-    selectedRoofIds,
-    selectedContextObjectIds,
-    selectedSectionLineIds,
-    setSelectedWallIds,
-    setSelectedDrawingIds,
-    setSelectedCeilingIds,
-    setSelectedOpeningIds,
-    setSelectedStairIds,
-    setSelectedRoomIds,
-    setSelectedExtrudedSolidIds,
-    setSelectedColumnIds,
-    setSelectedRoofIds,
-    setSelectedContextObjectIds,
-    setSelectedSectionLineIds,
+    selection,
+    setSelection,
     hasSelectionToDelete,
     deleteSelection,
   });
@@ -842,20 +742,12 @@ export default function App() {
       newIds = r.selectIds;
       return r.ops;
     });
-    setSelectedDrawingIds(newIds);
-    setSelectedWallIds([]);
+    setSelection({ drawings: newIds, walls: [] });
   };
 
   // Ctrl/Cmd+S = Split, Ctrl/Cmd+J = Join der selektierten Drawing2D-Elemente —
   // siehe state/useKeyboardShortcuts.ts.
-  useSplitJoinShortcut(
-    selectedDrawingIds,
-    engine,
-    runSplit,
-    setSelectedDrawingIds,
-    setSelectedWallIds,
-    shortcutOverrides,
-  );
+  useSplitJoinShortcut(selection.drawings, engine, runSplit, setSelection, shortcutOverrides);
 
   // Ctrl/Cmd+Shift+U/D/I = Boolean Vereinigung/Subtraktion/Schnitt — siehe
   // state/useKeyboardShortcuts.ts. (Ctrl/Cmd+C/V-Kopieren/Einfügen folgt weiter
@@ -863,13 +755,13 @@ export default function App() {
 
   // 2D-Boolean-Operation (Union / Subtract / Intersect) auf die gewählten
   // geschlossenen Drawing2D anwenden. Reihenfolge der Auswahl = Reihenfolge in
-  // `selectedDrawingIds` (für Differenz: erstes Element = Basis). Ersetzt die
+  // `selection.drawings` (für Differenz: erstes Element = Basis). Ersetzt die
   // beteiligten Quellen durch das Ergebnis und selektiert die neuen Elemente.
   // Braucht ≥2 geschlossene Flächen; sonst No-op.
   const applyBoolean = (
     op: (srcs: Drawing2D[]) => BooleanResult,
   ) => {
-    const order = selectedDrawingIds;
+    const order = selection.drawings;
     if (order.length < 2) return;
     const byId = new Map(project.drawings2d.map((d) => [d.id, d]));
     // In Auswahl-Reihenfolge (Basis zuerst) auflösen.
@@ -880,21 +772,20 @@ export default function App() {
     if (result.replacedIds.length === 0) return; // <2 geschlossene → No-op
     const replaced = new Set(result.replacedIds);
     applyChange((p) => [...removeItems(p, "drawings2d", replaced), ...addItems("drawings2d", result.created)]);
-    setSelectedDrawingIds(result.created.map((d) => d.id));
-    setSelectedWallIds([]);
+    setSelection({ drawings: result.created.map((d) => d.id), walls: [] });
   };
-  useBooleanOpsShortcut(selectedDrawingIds, project.drawings2d, applyBoolean, shortcutOverrides);
+  useBooleanOpsShortcut(selection.drawings, project.drawings2d, applyBoolean, shortcutOverrides);
 
   // „Eigenschaften übertragen" (2D-Kontextmenü) — dasselbe Zwischenablage-
   // Muster wie beim Ebenen-Menü (`layerClipboard`), nur für den vollen
   // Aussehen-Stil eines 2D-Elements (s. `editors/matchProps.ts`).
   const copyDrawingStyle = () => {
-    const d = project.drawings2d.find((x) => x.id === selectedDrawingIds[0]);
+    const d = project.drawings2d.find((x) => x.id === selection.drawings[0]);
     if (d) setDrawingStyleClipboard(readDrawingStyle(d));
   };
   const pasteDrawingStyle = () => {
-    if (!drawingStyleClipboard || selectedDrawingIds.length === 0) return;
-    applyChange((p) => applyDrawingStyleOps(p, selectedDrawingIds, drawingStyleClipboard));
+    if (!drawingStyleClipboard || selection.drawings.length === 0) return;
+    applyChange((p) => applyDrawingStyleOps(p, selection.drawings, drawingStyleClipboard));
   };
 
   // Objekt sperren/entsperren (Kontextmenü) — wirkt auf die GANZE aktuelle
@@ -902,16 +793,8 @@ export default function App() {
   // Anders als der Ebenen-/Geschoss-Sperrmodus (`DisplayMode`, session-lokal)
   // ist `locked` hier ein persistiertes Feld am Element selbst, s.
   // `state/objectLock.ts`.
-  const selectionLockMembers: Partial<Record<MemberKind, string[]>> = {
-    wallIds: selectedWallIds,
-    drawingIds: selectedDrawingIds,
-    ceilingIds: selectedCeilingIds,
-    roomIds: selectedRoomIds,
-    stairIds: selectedStairIds,
-    columnIds: selectedColumnIds,
-    roofIds: selectedRoofIds,
-    openingIds: selectedOpeningIds,
-  };
+  const groupMembers = useMemo(() => toMembership(selection), [selection]);
+  const selectionLockMembers: Partial<Record<MemberKind, string[]>> = groupMembers;
   const selectionLockIds = (
     Object.entries(selectionLockMembers) as [MemberKind, string[]][]
   ).flatMap(([kind, ids]) => ids.map((id) => [kind, id] as const));
@@ -926,16 +809,7 @@ export default function App() {
   // Ebene(n) der Auswahl ausblenden / isolieren (Kontextmenü). Nur bei geöffnetem
   // Menü berechnet — bei Kataster-Importen (~10^5 Zeichnungen) nicht bei jedem Render.
   const selectionLayerCodes = menu
-    ? selectionCategoryCodes(project, {
-        wallIds: selectedWallIds,
-        drawingIds: selectedDrawingIds,
-        ceilingIds: selectedCeilingIds,
-        roomIds: selectedRoomIds,
-        stairIds: selectedStairIds,
-        columnIds: selectedColumnIds,
-        roofIds: selectedRoofIds,
-        openingIds: selectedOpeningIds,
-      })
+    ? selectionCategoryCodes(project, groupMembers)
     : [];
   const hideSelectionLayers = () => {
     if (selectionLayerCodes.length === 0) return;
@@ -950,18 +824,18 @@ export default function App() {
 
   // „Nicht drucken"/„Drucken" (Kontextmenü) — nur `Drawing2D` kennt
   // `noPrint` (Nutzer-Wunsch „Kein 'nicht druckend'-Flag im Modell"), daher
-  // simpler als die Sperre oben: direkt über `selectedDrawingIds`.
+  // simpler als die Sperre oben: direkt über `selection.drawings`.
   const selectionAllNoPrint =
-    selectedDrawingIds.length > 0 &&
-    selectedDrawingIds.every((id) => project.drawings2d.find((d) => d.id === id)?.noPrint);
+    selection.drawings.length > 0 &&
+    selection.drawings.every((id) => project.drawings2d.find((d) => d.id === id)?.noPrint);
   const toggleSelectionNoPrint = () => {
-    if (selectedDrawingIds.length === 0) return;
+    if (selection.drawings.length === 0) return;
     const next = !selectionAllNoPrint;
-    applyChange((p) => patchItems(p, "drawings2d", selectedDrawingIds, (d) => ({ ...d, noPrint: next })));
+    applyChange((p) => patchItems(p, "drawings2d", selection.drawings, (d) => ({ ...d, noPrint: next })));
   };
 
   // „Bemassung lösen" ([38]): gewählte Bemassungen mit Bezügen auf Modell-Elemente.
-  const attachedDimensionIds = selectedDrawingIds.filter((id) => {
+  const attachedDimensionIds = selection.drawings.filter((id) => {
     const g = project.drawings2d.find((d) => d.id === id)?.geom;
     return g?.shape === "dimension" && !!g.refs?.some(Boolean);
   });
@@ -972,31 +846,13 @@ export default function App() {
   // Ctrl/Cmd+G / Ctrl/Cmd+Shift+G = Gruppieren/Auflösen (Vectorworks-artig,
   // s. state/groupActions.ts). `applyGroupSelection` setzt nach dem Gruppieren/
   // Auflösen alle betroffenen Auswahl-Kanäle auf einen Schlag.
-  const applyGroupSelection = (mem: GroupMembership, groupIds: string[]) => {
-    setSelectedWallIds(mem.wallIds);
-    setSelectedDrawingIds(mem.drawingIds);
-    setSelectedCeilingIds(mem.ceilingIds);
-    setSelectedOpeningIds(mem.openingIds);
-    setSelectedStairIds(mem.stairIds);
-    setSelectedRoomIds(mem.roomIds);
-    setSelectedColumnIds(mem.columnIds);
-    setSelectedRoofIds(mem.roofIds);
-    setSelectedGroupIds(groupIds);
-  };
+  const applyGroupSelection = (mem: GroupMembership, groupIds: string[]) =>
+    setSelection({ ...fromIdLists(mem), groups: groupIds });
   useGroupShortcut(
     project,
     applyChange,
-    {
-      wallIds: selectedWallIds,
-      drawingIds: selectedDrawingIds,
-      ceilingIds: selectedCeilingIds,
-      roomIds: selectedRoomIds,
-      stairIds: selectedStairIds,
-      columnIds: selectedColumnIds,
-      roofIds: selectedRoofIds,
-      openingIds: selectedOpeningIds,
-    },
-    selectedGroupIds,
+    groupMembers,
+    selection.groups,
     applyGroupSelection,
     shortcutOverrides,
   );
@@ -1056,22 +912,14 @@ export default function App() {
       removed = r.removed;
       return r.ops;
     });
-    if (removed) setSelectedDrawingIds([]);
+    if (removed) setSelection({ drawings: [] });
   };
 
   // Transformations-Shortcuts (m/s/d, U/I/O/P-Modusleiste, „q" Messen) — siehe
   // state/useKeyboardShortcuts.ts.
   useTransformShortcuts(
     activeTool,
-    selectedWallIds.length > 0 ||
-      !!selectedDrawingId ||
-      selectedDrawingIds.length > 0 ||
-      !!selectedExtrudedSolidId ||
-      !!selectedColumnId ||
-      selectedCeilingIds.length > 0 ||
-      selectedRoofIds.length > 0 ||
-      selectedStairIds.length > 0 ||
-      selectedRoomIds.length > 0,
+    hasTransformable(selection),
     engine,
     (id) => onCommandOption(id),
     onRunCommand,
@@ -1273,14 +1121,7 @@ export default function App() {
     selectedCeiling,
     selectedExcavation,
     selectedRoom,
-    selectedOpeningId,
-    selectedStairId,
-    selectedRoomId,
-    selectedCeilingId,
-    selectedDrawingId,
-    selectedWallId,
-    selectedWallIds,
-    selectedDrawingIds,
+    selection,
     levelId: activeLevel.id,
     modelEditable: activeLevel.kind !== "section" && activeLevel.kind !== "elevation",
     sheet: sectionSheet,
@@ -1321,36 +1162,17 @@ export default function App() {
     edgeDragInfoRef,
   );
 
+  const clipboardIds = useMemo(() => toIdLists(selection), [selection]);
   // Ctrl/Cmd+C / Ctrl/Cmd+V = Bauteile kopieren/einfügen (alle 9 Auswahl-Kanäle,
   // nicht nur 2D-Zeichenelemente) — siehe state/useKeyboardShortcuts.ts.
   useElementClipboardShortcut(
-    {
-      wallIds: selectedWallIds,
-      drawingIds: selectedDrawingIds,
-      ceilingIds: selectedCeilingIds,
-      roofIds: selectedRoofIds,
-      openingIds: selectedOpeningIds,
-      stairIds: selectedStairIds,
-      roomIds: selectedRoomIds,
-      extrudedSolidIds: selectedExtrudedSolidIds,
-      columnIds: selectedColumnIds,
-    },
+    clipboardIds,
     elementClipboard,
     setElementClipboard,
     activeLevelId,
     project,
     applyChange,
-    {
-      wallIds: setSelectedWallIds,
-      drawingIds: setSelectedDrawingIds,
-      ceilingIds: setSelectedCeilingIds,
-      roofIds: setSelectedRoofIds,
-      openingIds: setSelectedOpeningIds,
-      stairIds: setSelectedStairIds,
-      roomIds: setSelectedRoomIds,
-      extrudedSolidIds: setSelectedExtrudedSolidIds,
-      columnIds: setSelectedColumnIds,
-    },
+    setSelection,
     shortcutOverrides,
   );
 
@@ -1470,10 +1292,7 @@ export default function App() {
     setDraft,
     undo,
     commandLineRef,
-    selectedWallIds,
-    selectedDrawingIds,
-    selectedCeilingIds,
-    selectedRoofIds,
+    selection,
     updateRoof,
     moveRoofGrip,
     moveRoofBy,
@@ -1487,33 +1306,9 @@ export default function App() {
 
   // ── Selektions-Attribut-Kontrakt (Attributes-/Object-Info-Paletten) ───────
   // Normalisierte, effektiv aufgelöste Sicht auf das erste selektierte Element.
-  const selection = useMemo((): Selection | null => {
-    return deriveSelection(
-      project,
-      selectedWallIds,
-      selectedDrawingId,
-      selectedCeilingId,
-      selectedOpeningId,
-      selectedStairId,
-      selectedRoomId,
-      selectedExtrudedSolidId,
-      selectedColumnId,
-      selectedRoofId,
-      selectedContextObjectIds.length === 1 ? selectedContextObjectIds[0] : null,
-    );
-  }, [
-      project,
-      selectedWallIds,
-      selectedDrawingId,
-      selectedCeilingId,
-      selectedOpeningId,
-      selectedStairId,
-      selectedRoomId,
-      selectedExtrudedSolidId,
-      selectedColumnId,
-      selectedRoofId,
-      selectedContextObjectIds,
-    ],
+  const selectionInfo = useMemo(
+    (): SelectionInfo | null => deriveSelection(project, selection),
+    [project, selection],
   );
 
   // Gewählte Schnitt-/Ansichtslinie (DrawingLevel) — separat von `selection`, da
@@ -1966,9 +1761,9 @@ export default function App() {
   // Tatsächlich (noch) existierende gewählte Wände — IDs, die es nicht mehr gibt
   // (z. B. nach Löschen/Geschosswechsel), fallen heraus.
   const selectedWalls = useMemo(() => {
-    const ids = new Set(selectedWallIds);
+    const ids = new Set(selection.walls);
     return project.walls.filter((w) => ids.has(w.id));
-  }, [project.walls, selectedWallIds]);
+  }, [project.walls, selection.walls]);
   const selectionCount = selectedWalls.length;
   // Erste gewählte Wand (für Status-Leiste / Kontextmenü-Aktionen mit Einzelbezug).
   const selectedWall = selectedWalls[0] ?? null;
@@ -2106,34 +1901,7 @@ export default function App() {
     visibleCodes,
     categoryDisplay,
     floorDisplay,
-    selectionState: {
-      selectedWallIds,
-      setSelectedWallIds,
-      selectedDrawingIds,
-      setSelectedDrawingIds,
-      setSelectedDrawingId,
-      selectedCeilingIds,
-      setSelectedCeilingIds,
-      selectedOpeningIds,
-      setSelectedOpeningIds,
-      selectedStairIds,
-      setSelectedStairIds,
-      selectedRoomIds,
-      setSelectedRoomIds,
-      selectedExtrudedSolidIds,
-      setSelectedExtrudedSolidIds,
-      selectedColumnIds,
-      setSelectedColumnIds,
-      selectedRoofIds,
-      setSelectedRoofIds,
-      selectedContextObjectIds,
-      setSelectedContextObjectIds,
-      selectedSectionLineIds,
-      setSelectedSectionLineIds,
-      selectedGroupIds,
-      setSelectedGroupIds,
-      groupPath,
-    },
+    selectionState: { selection, setSelection, groupPath },
     contextMenuState: { setMenu, setStampEditorRoomId, editTextId, setEditTextId, setEditTextMinHeightM },
   });
 
@@ -2151,17 +1919,7 @@ export default function App() {
       : undefined,
     applyChange,
     notify,
-    setSelectedDrawingId,
-    setSelectedWallIds,
-    setSelectedCeilingIds,
-    setSelectedOpeningIds,
-    setSelectedStairIds,
-    setSelectedRoomIds,
-    setSelectedExtrudedSolidIds,
-    setSelectedColumnIds,
-    setSelectedRoofIds,
-    setSelectedContextObjectIds,
-    setSelectedSectionLineIds,
+    setSelection,
   });
 
   // App-weites Drag & Drop einer DXF/DWG-Datei — siehe state/useImportHandling.ts.
@@ -2198,7 +1956,7 @@ export default function App() {
     openResources,
     dxfInputRef,
     planViewRef,
-    selection,
+    selection: selectionInfo,
     projectActions: {
       toggleLevelVisible,
       toggleCategoryVisible,
@@ -2258,23 +2016,7 @@ export default function App() {
       updateRoom,
       addColorToCustomPalette,
     },
-    selectionState: {
-      updateRoof,
-      setSelectedWallIds,
-      setSelectedDrawingId,
-      selectedContextObjectIds,
-      setSelectedCeilingIds,
-      setSelectedOpeningIds,
-      setSelectedStairIds,
-      setSelectedRoomIds,
-      setSelectedExtrudedSolidIds,
-      setSelectedColumnIds,
-      setSelectedRoofIds,
-      setSelectedContextObjectIds,
-      selectedSectionLineId,
-      setSelectedSectionLineIds,
-      section3dCutId,
-    },
+    selectionState: { updateRoof, setSelection, selectedSectionLineId, section3dCutId },
     toolState: {
       activeTool,
       activeWallTypeId,
@@ -2774,17 +2516,7 @@ export default function App() {
           planViewRef={planViewRef}
           onCursor={setCursor}
           onScale={setLiveScale}
-          selectedWallIds={selectedWallIds}
-          selectedCeilingIds={selectedCeilingIds}
-          selectedOpeningIds={selectedOpeningIds}
-          selectedStairIds={selectedStairIds}
-          selectedExtrudedSolidIds={selectedExtrudedSolidIds}
-          selectedColumnIds={selectedColumnIds}
-          selectedGroupIds={selectedGroupIds}
-          selectedRoomIds={selectedRoomIds}
-          selectedRoofIds={selectedRoofIds}
-          selectedContextObjectIds={selectedContextObjectIds}
-          selectedSectionLineIds={selectedSectionLineIds}
+          selection={selection}
           roomStamp={roomStamp}
           onStampMove={ev.moveRoomStamp}
           onStampEdit={ev.onOpenStampEditor}
@@ -2813,8 +2545,6 @@ export default function App() {
           grips={grips}
           gripHandleLines={gripHandleLines}
           edgeGrips={edgeGrips}
-          selectedDrawingId={selectedDrawingId}
-          selectedDrawingIds={selectedDrawingIds}
           gripHandlers={gripHandlers}
           edit3dWalls={edit3dWalls}
           edit3dDrawings={edit3dDrawings}
@@ -3163,18 +2893,18 @@ export default function App() {
             patchCategory,
             duplicateLevel,
             deleteLevel,
-            clearSelection: () => setSelectedWallIds([]),
+            clearSelection: () => setSelection({ walls: [] }),
             fit: () => planViewRef.current?.fit(),
             fitSelection: () => planViewRef.current?.fitSelection(),
             closedSelectionCount: countClosedAreas(
               project.drawings2d.filter((d) =>
-                selectedDrawingIds.includes(d.id),
+                selection.drawings.includes(d.id),
               ),
             ),
             union: () => applyBoolean(unionDrawings),
             difference: () => applyBoolean(differenceDrawings),
             intersect: () => applyBoolean(intersectionDrawings),
-            drawingSelectionCount: selectedDrawingIds.length,
+            drawingSelectionCount: selection.drawings.length,
             hasDrawingStyleClipboard: drawingStyleClipboard !== null,
             copyDrawingStyle,
             pasteDrawingStyle,
@@ -3188,15 +2918,15 @@ export default function App() {
             toggleSelectionNoPrint,
             attachedDimensionCount: attachedDimensionIds.length,
             detachDimensions,
-            bringToFront: () => reorderDrawings(selectedDrawingIds, "front"),
-            bringForward: () => reorderDrawings(selectedDrawingIds, "forward"),
-            sendBackward: () => reorderDrawings(selectedDrawingIds, "backward"),
-            sendToBack: () => reorderDrawings(selectedDrawingIds, "back"),
+            bringToFront: () => reorderDrawings(selection.drawings, "front"),
+            bringForward: () => reorderDrawings(selection.drawings, "forward"),
+            sendBackward: () => reorderDrawings(selection.drawings, "backward"),
+            sendToBack: () => reorderDrawings(selection.drawings, "back"),
             // Stützpunkt-Einträge nur bei GENAU EINER selektierten Polylinie
             // (mehrere gleichzeitig hätten keinen eindeutigen Klick-Bezug).
             selectedPolyline: (() => {
-              if (selectedDrawingIds.length !== 1) return null;
-              const d = project.drawings2d.find((x) => x.id === selectedDrawingIds[0]);
+              if (selection.drawings.length !== 1) return null;
+              const d = project.drawings2d.find((x) => x.id === selection.drawings[0]);
               return d && d.geom.shape === "polyline"
                 ? { id: d.id, pts: d.geom.pts, closed: d.geom.closed, bulge: d.geom.bulge }
                 : null;

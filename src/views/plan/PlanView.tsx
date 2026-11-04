@@ -53,6 +53,8 @@ import { PlanPickIndex, type ClientMap, type OwnerField } from "../../core";
 import { planPrimAt, planTextEntries } from "../../core";
 import { buildDrawingIndex, drawingsWithinDistance, marqueeHitUnderlay, nearestInDrawings, type DrawingIndex } from "../../core";
 import { endBusyAfterPaint } from "../../state/busyStore";
+import { EMPTY_SELECTION, single } from "../../state/selection";
+import type { Selection } from "../../state/selection";
 import { createCursorStore, useCursorValue, type CursorStore } from "../../state/cursorStore";
 
 /**
@@ -382,62 +384,13 @@ export interface PlanViewProps {
    */
   onSegmentCut?: (drawingId: string, model: Vec2) => void;
   /**
-   * Aktuell ausgewählte Wand-IDs (kontrolliert von App). Die Ansicht markiert
-   * ALLE Polygone JEDER dieser Wände mit einer Akzentkontur — unabhängig davon,
-   * welches Band der Klick traf. Leeres Array/undefined = keine Wand-Auswahl.
+   * Die Auswahl (kontrolliert von App, [130]). Die Ansicht markiert ALLE Primitive
+   * JEDES gewählten Elements mit einer Akzentkontur (Wände: alle Bänder; Dach: die
+   * Traufe; Kontext-Objekte/Schnittlinien: das Pick-Band). Gewählte GRUPPEN zeigen
+   * statt der Mitglieds-Umrisse nur eine Bounding-Box (s. `groupBBox`); die übrigen
+   * Arten tragen weiterhin die volle Mitgliedschaft. Fehlt = nichts gewählt.
    */
-  selectedWallIds?: string[];
-  /**
-   * Aktuell ausgewählte Decken-IDs (kontrolliert von App). Die Ansicht markiert
-   * ALLE Polygone JEDER dieser Decken mit einer Akzentkontur.
-   */
-  selectedCeilingIds?: string[];
-  /**
-   * Aktuell ausgewählte Öffnungs-IDs (Fenster/Tür; kontrolliert von App). Die
-   * Ansicht markiert alle Symbol-Primitive JEDER dieser Öffnungen.
-   */
-  selectedOpeningIds?: string[];
-  /**
-   * Aktuell ausgewählte Treppen-IDs (kontrolliert von App). Die Ansicht markiert
-   * alle Tritt-/Symbol-Primitive JEDER dieser Treppen mit einer Akzentkontur.
-   */
-  selectedStairIds?: string[];
-  /**
-   * Aktuell ausgewählte Raum-IDs (kontrolliert von App). Die Ansicht markiert die
-   * Fläche JEDES dieser Räume mit einer Akzentkontur.
-   */
-  selectedRoomIds?: string[];
-  /** Aktuell ausgewählte Dach-IDs (von App); die Ansicht markiert die Traufe. */
-  selectedRoofIds?: string[];
-  /**
-   * Aktuell ausgewählte Kontext-Objekt-IDs (importiertes Gebäude/Terrain; von
-   * App). Die Ansicht markiert das Grundriss-Pick-Band JEDES dieser Objekte mit
-   * einer Akzentkontur.
-   */
-  selectedContextObjectIds?: string[];
-  /**
-   * Aktuell ausgewählte Schnitt-/Ansichtslinien-IDs (DrawingLevel; von App). Die
-   * Ansicht markiert das Pick-Band JEDER dieser Linien mit einer Akzentkontur.
-   */
-  selectedSectionLineIds?: string[];
-  /**
-   * Aktuell ausgewählte IDs extrudierter Körper (truck-Integration; kontrolliert
-   * von App). Die Ansicht markiert den Footprint-Umriss JEDES dieser Körper mit
-   * einer Akzentkontur.
-   */
-  selectedExtrudedSolidIds?: string[];
-  /**
-   * Aktuell ausgewählte Stützen-IDs (Tragwerk; kontrolliert von App). Die Ansicht
-   * markiert den Querschnitt-Umriss JEDER dieser Stützen mit einer Akzentkontur.
-   */
-  selectedColumnIds?: string[];
-  /**
-   * IDs der gewählten GRUPPEN (Vectorworks-artig). Nicht-leer → die Ansicht
-   * zeigt statt der einzelnen Mitglieds-Umrisse nur eine Bounding-Box mit vier
-   * Eckpunkten (s. `groupBBox`); die per-Kind-`selected…Ids`-Felder tragen
-   * weiterhin die volle Mitgliedschaft (für Verschieben/Griffe/Löschen).
-   */
-  selectedGroupIds?: string[];
+  selection?: Selection;
   /**
    * Der Stempel-Griff des (einzeln) gewählten Raums: sein Anker (Meter) + ID.
    * PlanView zeichnet einen ziehbaren Griff und meldet Bewegung/Doppelklick.
@@ -548,10 +501,6 @@ export interface PlanViewProps {
    * statt der echten mm-Strichstärken (Print). Reine Darstellung.
    */
   hairline?: boolean;
-  /** ID des selektierten 2D-Elements (für „Körper greifen → verschieben"). */
-  selectedDrawingId?: string | null;
-  /** Alle selektierten 2D-Elemente (Mehrfach-/Marquee-Auswahl) — für Hervorhebung. */
-  selectedDrawingIds?: string[];
   /** Griff-Zieh-Treiber: Live-Bewegung (gesnappt) + Abschluss. */
   gripHandlers?: GripHandlers;
   /**
@@ -680,18 +629,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       onMarquee,
       onSegmentCut,
       onContextMenu,
-      selectedWallIds,
-      selectedCeilingIds,
-      selectedOpeningIds,
+      selection = EMPTY_SELECTION,
       sheetBodies = false,
-      selectedStairIds,
-      selectedRoomIds,
-      selectedRoofIds,
-      selectedContextObjectIds,
-      selectedSectionLineIds,
-      selectedExtrudedSolidIds,
-      selectedColumnIds,
-      selectedGroupIds,
       roomStamp,
       onStampMove,
       onStampEdit,
@@ -712,8 +651,6 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       gripHandleLines,
       edgeGrips,
       hairline,
-      selectedDrawingId,
-      selectedDrawingIds,
       gripHandlers,
       marqueeColor = DEFAULT_MARQUEE_COLOR,
       snapColor = DEFAULT_SNAP_COLOR,
@@ -725,6 +662,21 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     },
     ref,
   ) {
+  const {
+    walls: selectedWallIds,
+    ceilings: selectedCeilingIds,
+    openings: selectedOpeningIds,
+    stairs: selectedStairIds,
+    rooms: selectedRoomIds,
+    roofs: selectedRoofIds,
+    contextObjects: selectedContextObjectIds,
+    sectionLines: selectedSectionLineIds,
+    solids: selectedExtrudedSolidIds,
+    columns: selectedColumnIds,
+    groups: selectedGroupIds,
+    drawings: selectedDrawingIds,
+  } = selection;
+  const selectedDrawingId = single(selection, "drawings");
   // Linke Maustaste liegt beim Werkzeug/der Transformation, wenn App das meldet
   // (toolInputActive) bzw. — fallback — ein Zeichenwerkzeug aktiv ist.
   const inputActive = toolInputActive ?? (!!activeTool && activeTool !== "select");

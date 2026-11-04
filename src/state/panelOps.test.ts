@@ -11,6 +11,7 @@ import { applyOps } from "../core/ops";
 import type { CoreOp } from "../core/ops";
 import { useProjectActions } from "./useProjectActions";
 import { usePanelHostBase } from "./usePanelHostBase";
+import { EMPTY_SELECTION } from "./selection";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function capture<T>(f: () => T): T {
@@ -126,7 +127,7 @@ function host(h: ReturnType<typeof holder>, selection: any) {
       viewType: "grundriss",
       selection,
       projectActions: stubObj({ snapshotLayerVisibility: () => ({}), snapshotDrawingVisibility: () => ({}), applyLayerVisibility: () => {}, applyDrawingVisibility: () => {} }),
-      selectionState: stubObj({ selectedContextObjectIds: [] }),
+      selectionState: stubObj({ selection: EMPTY_SELECTION }),
       toolState: stubObj({}),
       topBarState: stubObj({}),
       dialogState: stubObj({ setActiveLayoutId: () => {} }),
