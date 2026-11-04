@@ -1288,6 +1288,16 @@ export function usePanelHostBase(opts: {
         applyChange((p) => patchItem(p, "viewSnapshots", id, { name: trimmed }));
       },
 
+      onDuplicateViewSnapshot: (id: string) => {
+        // [40] Kopie gleich hinter dem Original, gleicher Ordner, „… Kopie"; danach angewählt.
+        const list = project.viewSnapshots ?? [];
+        const i = list.findIndex((v) => v.id === id);
+        if (i < 0) return;
+        const copy = { ...list[i], id: `vs-${Date.now()}`, name: t("viewsnap.copyName", { name: list[i].name }) };
+        applyChange(() => addItems("viewSnapshots", [copy], i + 1));
+        setSelectedViewSnapshotId(copy.id);
+      },
+
       onDeleteViewSnapshot: (id: string) => {
         applyChange((p) => removeItems(p, "viewSnapshots", [id]));
         if (selectedViewSnapshotId === id) setSelectedViewSnapshotId(null);

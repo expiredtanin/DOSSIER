@@ -2801,6 +2801,8 @@ export const de = {
   "viewsnap.renamePrompt": "Ausschnitt umbenennen:",
   "viewsnap.rename": "Umbenennen",
   "viewsnap.delete": "Löschen",
+  "viewsnap.duplicate": "Duplizieren",
+  "viewsnap.copyName": "{name} Kopie",
   "viewsnap.deleteConfirm": "Ausschnitt „{name}\" löschen?",
   "viewsnap.empty": "Noch keine Ausschnitte. Ansicht einrichten und speichern.",
   "viewsnap.applyHint": "Ausschnitt „{name}\" wiederherstellen",

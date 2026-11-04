@@ -673,6 +673,8 @@ export interface PanelHostValue {
   onApplyViewSnapshot: (id: string) => void;
   /** Benennt einen Ausschnitt um. */
   onRenameViewSnapshot: (id: string, name: string) => void;
+  /** Dupliziert einen Ausschnitt ([40]): Kopie hinter dem Original, gleicher Ordner. */
+  onDuplicateViewSnapshot: (id: string) => void;
   /** Löscht einen Ausschnitt. */
   onDeleteViewSnapshot: (id: string) => void;
 

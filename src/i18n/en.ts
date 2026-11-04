@@ -2788,6 +2788,8 @@ export const en: Record<TranslationKey, string> = {
   "viewsnap.renamePrompt": "Rename view:",
   "viewsnap.rename": "Rename",
   "viewsnap.delete": "Delete",
+  "viewsnap.duplicate": "Duplicate",
+  "viewsnap.copyName": "{name} copy",
   "viewsnap.deleteConfirm": "Delete view “{name}”?",
   "viewsnap.empty": "No views yet. Set up a view and save it.",
   "viewsnap.applyHint": "Restore view “{name}”",

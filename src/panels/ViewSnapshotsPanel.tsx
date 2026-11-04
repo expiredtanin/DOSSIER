@@ -340,6 +340,18 @@ export function ViewSnapshotsPanel() {
       <button
         className="nav-add"
         style={{ padding: "1px 5px" }}
+        title={t("viewsnap.duplicate")}
+        data-testid={`viewsnap-duplicate-${snap.id}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          host.onDuplicateViewSnapshot(snap.id);
+        }}
+      >
+        ⧉
+      </button>
+      <button
+        className="nav-add"
+        style={{ padding: "1px 5px" }}
         title={t("viewsnap.delete")}
         onClick={(e) => {
           e.stopPropagation();

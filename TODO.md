@@ -1719,7 +1719,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   der echten Fläche. Offen: Wendeltreppen-Bögen (nur die Schliesslinien-Ecken), Treppenlauf-Mitten, Rand-Bezug auf
   Ellipsen/Splines; nur Linux/Chromium geprüft (Marke am Bildschirm nicht auf macOS/Metal angesehen). · L
 - ○ **[39] Auswahl gehört zum Modell.** · M
-- ◐ **[40] Ansichten duplizieren.** Ebenen duplizieren vorhanden. · S
+- ✅ **[40] Ansichten duplizieren.** Ebenen duplizieren vorhanden; 4.11.: Ausschnitte duplizieren (Knopf ⧉ im Ausschnitte-Panel, Kopie „… Kopie" hinter dem Original, gleicher Ordner, ein Undo-Schritt; e2e `viewSnapshotDuplicate.spec.ts`). · S
 - ◐ **[76] Vektorfang auf PDF.** (28.10.) Rust `fileio/pdf_object.rs` + `pdf_vector.rs` (eigener Leser:
   Querverweis-Tabelle/-Stream, Objekt-Streams, Flate/LZW/A85/AHx, Wiederherstellung kaputter xref,
   verschlüsselt → Fehler; Content-Stream mit CTM, Farben, w/d, ExtGState /LW /D /CA /ca, Form-XObjects,
