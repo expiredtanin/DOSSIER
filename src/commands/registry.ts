@@ -35,6 +35,7 @@ import { detailrefCommand } from "./cmds/detailref";
 import { scalebarCommand } from "./cmds/scalebar";
 import { revcloudCommand } from "./cmds/revcloud";
 import { pointmarkerCommand } from "./cmds/pointmarker";
+import { wandCommand } from "./cmds/wand";
 import { wipeoutCommand } from "./cmds/wipeout";
 import { textCommand } from "./cmds/text";
 import { leaderCommand } from "./cmds/leader";
@@ -106,6 +107,7 @@ export const COMMANDS: Record<string, Command> = {
   scalebar: scalebarCommand,
   revcloud: revcloudCommand,
   pointmarker: pointmarkerCommand,
+  wand: wandCommand,
   wipeout: wipeoutCommand,
   text: textCommand,
   leader: leaderCommand,
@@ -221,6 +223,8 @@ export const ALIASES: Record<string, string> = {
   wolke: "revcloud",
   revisionswolke: "revcloud",
   pm: "pointmarker",
+  zs: "wand",
+  zauberstab: "wand",
   punkt: "pointmarker",
   knoten: "pointmarker",
   wo: "wipeout",

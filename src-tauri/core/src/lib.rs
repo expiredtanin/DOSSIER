@@ -33,6 +33,7 @@ pub mod wall_arc;
 pub mod grid;
 pub mod room_area;
 pub mod room_boundary;
+pub mod magic_wand;
 pub mod polygon_holes;
 pub mod js_fmt;
 pub use dossier_hatch::jsmath;

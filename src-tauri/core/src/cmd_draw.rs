@@ -36,7 +36,7 @@ fn angle(c: V, p: V) -> f64 {
 }
 
 /// Neue 2D-Zeichnung `{id, type, levelId, categoryCode, geom}` (Farbe/Strich erbt die Ebene).
-fn drawing(id: String, ctx: &Ctx, geom: Value) -> Value {
+pub(crate) fn drawing(id: String, ctx: &Ctx, geom: Value) -> Value {
     obj(vec![("id", s(&id)), ("type", s("drawing2d")), ("levelId", s(ctx.level)), ("categoryCode", s(ctx.cat)), ("geom", geom)])
 }
 

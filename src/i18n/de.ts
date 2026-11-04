@@ -1799,6 +1799,8 @@ export const de = {
   "cmd.revcloud.arcSize": "Beulengrösse",
   "cmd.pointmarker.label": "Punktmarker",
   "cmd.pointmarker.point": "Punkt:",
+  "cmd.wand.label": "Zauberstab",
+  "cmd.wand.point": "In eine umschlossene Fläche klicken:",
   "cmd.grid.label": "Achsraster",
   "cmd.grid.origin": "Ursprung des Achsrasters ( Radial ):",
   "cmd.grid.radial": "Radial",

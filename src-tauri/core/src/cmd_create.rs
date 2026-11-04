@@ -491,6 +491,17 @@ fn room_inside(p: &Project, level: &str, at: V) -> Option<Vec<V>> {
 }
 
 /// Raum aus Umriss (Modus „manuell“: `pts`; „innen“: `at` → Zelle).
+/// Zauberstab ([77]): geschlossene Polylinie um die Masche unter `at` (mit `hatchId`, falls angegeben: Schraffur).
+fn wand_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let Some(ring) = opt_p(v, "at").and_then(|at| crate::magic_wand::region_at(p, ctx.level, at)) else { return Vec::new() };
+    let g = obj(vec![("shape", s("polyline")), ("pts", pvs(&ring)), ("closed", Value::Bool(true))]);
+    let mut d = crate::cmd_draw::drawing(ids.next("dr2d"), ctx, g);
+    if let (Some(m), Some(h)) = (d.as_object_mut(), v.get("hatchId").and_then(Value::as_str).filter(|h| !h.is_empty())) {
+        m.insert("hatchId".into(), s(h));
+    }
+    add_op("drawings2d", vec![d])
+}
+
 fn room_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let boundary = match opt_p(v, "at") {
         Some(at) => match room_inside(p, ctx.level, at) {
@@ -965,6 +976,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "wall" => wall_ops(root, p, v, &ctx, ids),
         "ceiling" => ceiling_ops(p, v, &ctx, ids),
         "room" => room_ops(p, v, &ctx, ids),
+        "wand" => wand_ops(p, v, &ctx, ids),
         "stair" => stair_ops(p, v, &ctx, ids),
         "opening" => opening_ops(p, v, &ctx, ids),
         "roof" => roof_ops(p, v, &ctx, ids),
@@ -1033,6 +1045,11 @@ pub fn preview_req(root: &Map<String, Value>, project: &Project, req: &Req, pts:
         "stair" => stair_preview(project, v, &ctx, out, &mut p.info),
         "opening" => opening_preview(v, pts.first().copied(), out, &mut p.info),
         "roomInside" => p.ok = pts.first().and_then(|at| room_inside(project, ctx.level, *at)).is_some_and(|b| b.len() >= 3),
+        // Zauberstab ([77]): die gefundene Masche unter dem Cursor.
+        "wand" => match pts.first().and_then(|at| crate::magic_wand::region_at(project, ctx.level, *at)) {
+            Some(ring) => out.poly(&ring),
+            None => p.ok = false,
+        },
         "column" => {
             if let Some(at) = pts.first() {
                 out.poly(&column_footprint(*at, v));

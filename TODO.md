@@ -1736,7 +1736,11 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   → Massstab; `io/pdfCalibrate.ts`, `ui/PdfCalibrate.tsx`).
   Offen: Muster/Schattierungen und Soft-Masks, Clip-Pfade mit Text (Tr 7), Kreise in Linienzügen
   (Rundungen als Bogen abspalten), Strichphase; Kalibrierung nicht in der Tauri-App geprüft. · M
-- ○ **[77] Zauberstab.** · M
+- ◐ **[77] Zauberstab.** · M — 4.11.: Befehl `wand` (Kürzel `zs`/`zauberstab`): Klick in eine von Linien umschlossene
+  Fläche (2D-Zeichnungen + Modellkanten des Geschosses, Kreise/Bögen als Sehnenzüge, Kreuzungen werden geteilt) →
+  geschlossene Polylinie mit der ersten Projekt-Schraffur; Vorschau beim Überfahren. Kern `magic_wand.rs`
+  (planarer Graph, kleinste Masche, `kernel2d::room_from_point_inside_faces`), Tests Rust + vitest. Offen: Wahl der
+  Schraffur/Option „nur Umriss", Inseln (Löcher) in der Fläche, Knopf in der Werkzeugleiste; nicht in der App geklickt.
 - ✅ **[78] Autotext im Plankopf.** Titelblock löst Projekt/Blatt/Massstab/Datum auf; Plannummer laufend
   oder `Layout.planNumber` (27.10.).
 - ◐ **[79] Publikationssätze.** (30.10.) Modell (Rust, optional): `Project.publishSets` (`PublishSet`: Layouts in Reihenfolge,
