@@ -2204,7 +2204,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (`levels`, Format 5, Koten), vitest `layers.test.ts`, `sampleProjectComplex.test.ts`, e2e `levelZero.spec.ts`
   (Bezug wählen → EG −2.60, Höhe ändern, Undo), `sectionViews.spec.ts`. Geprüft: Screenshot Schnitt A-A im Browser
   (Linux). Offen: Höhe eines Geschosses direkt eintippen (heute nur über Bezug + Geschosshöhen), Umordnen der Ebenen
-  stapelt nicht neu, nicht in der Tauri-App geprüft. · S
+  ändert die Höhen nicht mehr (Stapel nach bisheriger Höhe, 4.11.), nicht in der Tauri-App geprüft. · S
 - ◐ **[132] Ansichten/Schnitte aus [114].** (4.11.) Flachdächer zeigen in Ansicht und Schnitt ihre Stirn als Band
   (`elevation::fascia_quads`, Aufbaudicke); Stützen erscheinen in Ansichten als Prismen (`collect_column_faces`, runde
   ohne Facettenfugen); T-Dach: der unter dem Hauptdach liegende Teil des Anbaudachs bleibt im Schnitt verdeckt.

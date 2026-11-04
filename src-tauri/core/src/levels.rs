@@ -21,30 +21,40 @@ fn floor_height(level: &Value) -> f64 {
 /// negative Höhen. Nur das erste Kennzeichen gilt, weitere entfallen. Nicht-Geschoss-Ebenen verlieren
 /// `baseElevation` und `zeroLevel`.
 pub fn recompute_floor_elevations(levels: &[Value]) -> Vec<Value> {
-    let zero_idx = levels.iter().filter(|l| is_floor(l)).position(is_zero).unwrap_or(0);
-    // Stapelhöhe des Bezugsgeschosses ab dem ersten Geschoss = Verschiebung des ganzen Stapels.
-    let offset: f64 = levels.iter().filter(|l| is_floor(l)).take(zero_idx).map(floor_height).sum();
+    // Stapelreihenfolge nach der bisherigen Höhe (stabil; Geschosse ohne Höhe obenauf), nicht nach der
+    // Listen-Reihenfolge: die bestimmt nur die Überlagerung im Grundriss (`reorderDrawingLevels`).
+    let floors: Vec<usize> = levels.iter().enumerate().filter(|(_, l)| is_floor(l)).map(|(i, _)| i).collect();
+    let mut order = floors.clone();
+    let key = |i: usize| levels[i].get("baseElevation").and_then(Value::as_f64).filter(|v| v.is_finite()).unwrap_or(f64::INFINITY);
+    order.sort_by(|&a, &b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal));
+    let zero_pos = order.iter().position(|&i| is_zero(&levels[i])).unwrap_or(0);
+    // Stapelhöhe des Bezugsgeschosses ab dem untersten Geschoss = Verschiebung des ganzen Stapels.
+    let offset: f64 = order.iter().take(zero_pos).map(|&i| floor_height(&levels[i])).sum();
+    let mut base_of = vec![0.0; levels.len()];
     let mut next_base = -offset;
-    let mut floor_i = 0usize;
+    for &i in &order {
+        // −0 vermeiden (Datei und Koten zeigen sonst „-0").
+        let base = if next_base.abs() < 1e-12 { 0.0 } else { next_base };
+        base_of[i] = base;
+        next_base = base + floor_height(&levels[i]);
+    }
+    let zero_idx = order.get(zero_pos).copied();
     levels
         .iter()
-        .map(|level| {
+        .enumerate()
+        .map(|(i, level)| {
             let mut m = level.as_object().cloned().unwrap_or_default();
             if !is_floor(level) {
                 m.shift_remove("baseElevation");
                 m.shift_remove("zeroLevel");
                 return Value::Object(m);
             }
-            if floor_i == zero_idx && is_zero(level) {
+            if Some(i) == zero_idx && is_zero(level) {
                 m.insert("zeroLevel".into(), Value::Bool(true));
             } else {
                 m.shift_remove("zeroLevel");
             }
-            // −0 vermeiden (Datei und Koten zeigen sonst „-0").
-            let base = if next_base.abs() < 1e-12 { 0.0 } else { next_base };
-            next_base = base + floor_height(level);
-            floor_i += 1;
-            m.insert("baseElevation".into(), serde_json::Number::from_f64(base).map_or(Value::Null, Value::Number));
+            m.insert("baseElevation".into(), serde_json::Number::from_f64(base_of[i]).map_or(Value::Null, Value::Number));
             Value::Object(m)
         })
         .collect()
@@ -54,6 +64,20 @@ pub fn recompute_floor_elevations(levels: &[Value]) -> Vec<Value> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// [131] Umordnen der Liste (Überlagerung) ändert die Höhen nicht.
+    #[test]
+    fn umordnen_aendert_hoehen_nicht() {
+        let l = vec![
+            json!({"id": "og", "kind": "floor", "floorHeight": 3.0, "baseElevation": 2.7}),
+            json!({"id": "ug", "kind": "floor", "floorHeight": 2.7, "baseElevation": -2.7}),
+            json!({"id": "eg", "kind": "floor", "floorHeight": 2.7, "baseElevation": 0.0, "zeroLevel": true}),
+        ];
+        let r = recompute_floor_elevations(&l);
+        let z: Vec<f64> = r.iter().map(|v| v["baseElevation"].as_f64().unwrap()).collect();
+        assert_eq!(z, vec![2.7, -2.7, 0.0]);
+        assert_eq!(r[2]["zeroLevel"], json!(true));
+    }
 
     #[test]
     fn stapelt_geschosse() {
