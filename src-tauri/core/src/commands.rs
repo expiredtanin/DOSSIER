@@ -36,7 +36,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Vec<Op>
         return Ok(ops);
     }
     Ok(match cmd {
-        "transform" => crate::cmd_transform::transform_ops(root, &parse(&v, cmd)?),
+        "transform" => crate::cmd_transform::transform_ops(root, p, &parse(&v, cmd)?),
         "align" => crate::cmd_transform::align_ops(root, &ids("ids"), &s("mode")),
         "distribute" => crate::cmd_transform::distribute_ops(root, &ids("ids"), &s("axis")),
         "defblock" => crate::cmd_transform::defblock_ops(root, &parse(&v, cmd)?),

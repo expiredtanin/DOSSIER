@@ -1140,6 +1140,15 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   `cmd_create` ~60, `cmd_edit` (Kurven/Ecken/Aufloesen auf 2D-Zeichnungen) ~45, `cmd_draw` (Bemassung/Polylinie) ~40,
   `cmd_split` ~25, `geo_translate`, `pens`, `layers`, Importe. `selection_info`/`grips` bewusst nicht angefasst:
   sie geben fehlende/`null`-Felder unverändert ins Ergebnis-JSON weiter (undefined ≠ null), das braucht eigene Tests.
+  5.11. Stufe 3 (mechanisch, Verhalten gleich): `cmd_transform` liest Öffnungen der bewegten Wände (`moved_openings`,
+  `Project.openings`) und die Wanddicke der Vorschau (`wall_thickness`, `Project.wall_types`) typisiert;
+  `transform_ops`/`preview_pending` nehmen `&Project` (`doc_cmd_preview` über `project_lookup`; bei ungültigem Projekt
+  jetzt leere Vorschau statt Rechnung auf dem rohen Baum). `cmd_draw::dimension_ops` liest die alte Bemassung beim
+  Bearbeiten (`editId`: Punkte, Bezüge) aus `Drawing2DGeom::Dimension`. **Bewusst roh geblieben:** der Rest von
+  `cmd_transform` (~75 Zeilen: `mv_geom`/`scale_geom`/`mv_wall`/… bauen das Element per `with_all` verlustfrei aus dem
+  rohen JSON um, fehlende Felder bleiben fehlend; Typen würden Defaults/`null` ergänzen), `cmd_split` (~25: `poly_form`
+  liest fehlende Punkte als NaN, `closed` als JS-truthy, Bulge-Einträge per `num_of`), `cmd_draw` Rest (~35: `pair`/
+  `n_of` auf Befehls-Eingaben, `query` Bemassungs-Treffer gibt `null`/fehlende Felder unverändert weiter).
 - ✅ **[125] Doppelte Schnitt-Dominanz** (`render3d/section_boolean.rs` ↔ `core/plan_section.rs`) auf eine Fassung. · S
   3.11.: eine Fassung `dossier_hatch::section_dominance` (f64, JS-`min/max`, Schneider-Vorauswahl `ugrid` — mit
   `ugrid` aus dem Kern nach `hatchgen` verschoben); `core/plan/section.rs` und `render3d/section_boolean.rs` sind

@@ -15,6 +15,7 @@
 use crate::json_util::{arr, field, js_num, num_of, num_or, pt, truthy, with, with_all, with_opt, xy, N};
 use crate::jsmath::hypot2;
 use crate::jsnum;
+use crate::model::Project;
 use crate::ops::{id_of, Op};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -538,7 +539,7 @@ fn add(collection: &str, items: Vec<Value>) -> Option<Op> {
 
 /// Die Transformation als Ops: `replace` je bewegtem Original (Modus „move“), dann `add` der Kopien je
 /// Liste (Wände, 2D, Körper, Stützen, Decken, Dächer, Treppen, Räume).
-pub fn transform_ops(root: &Map<String, Value>, req: &TransformReq) -> Vec<Op> {
+pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq) -> Vec<Op> {
     let (sel, op) = (&req.sel, req.op.as_str());
     let items = gather(root, sel, op, false);
     if items.is_empty() {
@@ -554,7 +555,7 @@ pub fn transform_ops(root: &Map<String, Value>, req: &TransformReq) -> Vec<Op> {
     let rigid = op == "move" || op == "rotate";
     let moved: std::collections::HashSet<&str> = items.iter().filter_map(|(_, e)| id_of(e)).collect();
     let moved_openings: std::collections::HashSet<&str> =
-        list(root, "openings").iter().filter(|o| field(o, "hostWallId").and_then(Value::as_str).is_some_and(|h| moved.contains(h))).filter_map(id_of).collect();
+        p.openings.iter().flatten().filter(|o| moved.contains(o.host_wall_id.as_str())).map(|o| o.id.as_str()).collect();
     let fix_refs = |d: Value, map: &dyn Fn(&str) -> Option<String>| -> Value {
         let Some(g) = field(&d, "geom") else { return d };
         let keep = |id: &str| if rigid { map(id) } else { None };
@@ -902,20 +903,20 @@ fn mapped(pts: &[(f64, f64)], xf: &Xf) -> Vec<(f64, f64)> {
 }
 
 /// Wand-Dicke über den Wandtyp (`wallTypeThickness`), ohne Typ 0.2 m.
-fn wall_thickness(root: &Map<String, Value>, w: &Value) -> f64 {
-    let tid = field(w, "wallTypeId");
-    match list(root, "wallTypes").iter().find(|t| tid.is_some() && field(t, "id") == tid) {
-        Some(t) => arr(field(t, "layers")).iter().fold(0.0, |s, l| s + num_of(field(l, "thickness"))),
+fn wall_thickness(p: &Project, w: &Value) -> f64 {
+    let tid = field(w, "wallTypeId").and_then(Value::as_str);
+    match p.wall_types.iter().find(|t| tid == Some(t.id.as_str())) {
+        Some(t) => t.layers.iter().fold(0.0, |s, l| s + l.thickness),
         None => 0.2,
     }
 }
 
-fn item_preview(root: &Map<String, Value>, kind: Kind, e: &Value, xf: &Xf, out: &mut Pending) {
+fn item_preview(p: &Project, kind: Kind, e: &Value, xf: &Xf, out: &mut Pending) {
     let s = &mut out.shapes;
     let pt = |k: &str| xy(field(e, k).unwrap_or(&Value::Null));
     match kind {
         Kind::Wall => {
-            let th = wall_thickness(root, e);
+            let th = wall_thickness(p, e);
             let (sx, sy) = pt("start");
             let (ex, ey) = pt("end");
             let (a, b) = (xf.apply(sx, sy), xf.apply(ex, ey));
@@ -978,7 +979,7 @@ fn stair_preview(e: &Value, xf: &Xf, out: &mut Shapes) {
 }
 
 /// Vorschau aller Instanzen (Kopien, dann das bewegte Original im Modus „move“) — Teil 1 auf der Wurzel.
-pub fn preview_pending(root: &Map<String, Value>, req: &TransformReq) -> Pending {
+pub fn preview_pending(root: &Map<String, Value>, p: &Project, req: &TransformReq) -> Pending {
     let op = req.op.as_str();
     let items = gather(root, &req.sel, op, req.ignore_lock);
     let pts = req.points();
@@ -990,7 +991,7 @@ pub fn preview_pending(root: &Map<String, Value>, req: &TransformReq) -> Pending
     for t in ts {
         let xf = Xf::of(op, &pts, t);
         for (kind, e) in &items {
-            item_preview(root, *kind, e, &xf, &mut out);
+            item_preview(p, *kind, e, &xf, &mut out);
         }
     }
     out
@@ -1063,7 +1064,7 @@ mod tests {
         let r = root(json!({"walls":[{"id":"a","start":{"x":0,"y":0},"end":{"x":4,"y":0},"bulge":0.5}]}));
         let run = |op: &str, pts: Value| {
             let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":["a"]},"op":op,"pts":pts,"mode":"move","count":1,"stamp":"s"})).unwrap();
-            transform_ops(&r, &req)[0].to_json()["entity"].clone()
+            transform_ops(&r, &Project::default(), &req)[0].to_json()["entity"].clone()
         };
         assert_eq!(run("move", json!([[0, 0], [1, 1]]))["bulge"], json!(0.5));
         assert_eq!(run("rotate", json!([[0, 0], [1, 0], [0, 1]]))["bulge"], json!(0.5));
@@ -1074,11 +1075,11 @@ mod tests {
     fn verschieben_und_kopieren() {
         let r = root(json!({"walls":[{"id":"a","start":{"x":0,"y":0},"end":{"x":1,"y":0},"locked":false},{"id":"b","start":{"x":0,"y":0},"end":{"x":1,"y":0},"locked":true}]}));
         let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":["a","b"]},"op":"move","pts":[[0,0],[2,3]],"mode":"move","count":1,"stamp":"s"})).unwrap();
-        let ops = transform_ops(&r, &req);
+        let ops = transform_ops(&r, &Project::default(), &req);
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].to_json()["entity"]["start"], json!({"x":2,"y":3}));
         let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":["a"]},"op":"move","pts":[[0,0],[1,0]],"mode":"array","count":3,"stamp":"s"})).unwrap();
-        let ops = transform_ops(&r, &req);
+        let ops = transform_ops(&r, &Project::default(), &req);
         let items = &ops[0].to_json()["items"];
         assert_eq!(items.as_array().unwrap().len(), 3);
         assert_eq!(items[2]["id"], "W-s-3");
