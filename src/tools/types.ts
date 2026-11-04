@@ -31,6 +31,7 @@ export type ToolId =
   | "scalebar"
   | "revcloud"
   | "pointmarker"
+  | "wand"
   | "grid"
   | "wipeout"
   | "text"

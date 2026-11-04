@@ -209,6 +209,8 @@ export const de = {
   "tool.revcloud.hint": "Revisionswolke: Punkte wie Polylinie klicken, Enter beendet offen, Klick nahe Start oder \"Schliessen\" schliesst",
   "tool.pointmarker": "Punktmarker",
   "tool.pointmarker.hint": "Punktmarker: Punkt setzen — Kreuz-in-Kreis-Symbol markiert einen Referenzpunkt",
+  "tool.wand": "Zauberstab",
+  "tool.wand.hint": "In eine umschlossene Fläche klicken: schraffierte Polylinie entlang ihres Rands",
   "tool.grid": "Achsraster",
   "tool.grid.hint": "Achsraster: Ursprung setzen, dann Feldweiten eingeben — Achsen mit Blasen in allen Plänen, Schnitten und Ansichten",
   "tool.wipeout": "Maskenregion",

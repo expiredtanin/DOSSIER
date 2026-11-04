@@ -264,6 +264,17 @@ export const ToolIcon = memo(function ToolIcon({ id }: { id: ToolId }) {
           <circle cx="11" cy="3" r="2" fill="none" />
         </svg>
       );
+    case "wand":
+      // Zauberstab ([77]): Stab mit Funken.
+      return (
+        <svg {...common}>
+          <line x1="3" y1="13" x2="10" y2="6" />
+          <line x1="12" y1="1" x2="12" y2="4" />
+          <line x1="15" y1="4" x2="12" y2="4" />
+          <line x1="9" y1="2" x2="10" y2="3.5" />
+          <line x1="14" y1="7" x2="12.5" y2="6" />
+        </svg>
+      );
     case "pointmarker":
       // Kreuz-in-Kreis (Punkt-/Knotenmarker).
       return (
@@ -360,6 +371,7 @@ const TOOLS_2D: ToolId[] = [
   "pointmarker",
   "grid",
   "wipeout",
+  "wand",
   "text",
   "leader",
   "textpath",

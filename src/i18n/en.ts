@@ -207,6 +207,8 @@ export const en: Record<TranslationKey, string> = {
   "tool.revcloud.hint": "Revision cloud: click points like a polyline, Enter finishes open, clicking near start or \"Close\" closes it",
   "tool.pointmarker": "Point marker",
   "tool.pointmarker.hint": "Point marker: set a point — a cross-in-circle symbol marks a reference point",
+  "tool.wand": "Magic wand",
+  "tool.wand.hint": "Click inside an enclosed area: hatched polyline along its boundary",
   "tool.grid": "Structural grid",
   "tool.grid.hint": "Structural grid: set the origin, then enter bay widths — axes with bubbles in all plans, sections and elevations",
   "tool.wipeout": "Mask region",

@@ -43,6 +43,7 @@ const TOOLS: Record<ToolId, ToolInfo> = {
   scalebar: { labelKey: "tool.scalebar", hintKey: "tool.scalebar.hint", command: "scalebar" },
   revcloud: { labelKey: "tool.revcloud", hintKey: "tool.revcloud.hint", command: "revcloud" },
   pointmarker: { labelKey: "tool.pointmarker", hintKey: "tool.pointmarker.hint", command: "pointmarker" },
+  wand: { labelKey: "tool.wand", hintKey: "tool.wand.hint", command: "wand" },
   grid: { labelKey: "tool.grid", hintKey: "tool.grid.hint", command: "grid" },
   wipeout: { labelKey: "tool.wipeout", hintKey: "tool.wipeout.hint", command: "wipeout" },
   text: { labelKey: "tool.text", hintKey: "tool.text.hint", command: "text" },
