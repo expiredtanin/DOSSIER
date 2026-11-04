@@ -155,6 +155,30 @@ fn unique_sorted(vals: &[f64]) -> Vec<f64> {
     out
 }
 
+/// Kleinste Messstrecke auf dem Papier (mm): kürzere Teilstrecken (Bogen-Facetten, Mauerversprünge) würden
+/// sich als Kleinmasse drängen und werden mit dem Nachbarpunkt zusammengefasst.
+const MIN_SEGMENT_MM: f64 = 1.5;
+
+/// Punkte (sortiert) ausdünnen: Abstände unter `min` entfallen; Anfang und Ende der Kette bleiben.
+fn thin(ts: Vec<f64>, min: f64) -> Vec<f64> {
+    let mut out: Vec<f64> = Vec::with_capacity(ts.len());
+    for (i, &t) in ts.iter().enumerate() {
+        let last = i + 1 == ts.len();
+        match out.last() {
+            Some(&l) if t - l < min => {
+                if last && out.len() > 1 {
+                    out.pop();
+                    out.push(t);
+                } else if last {
+                    out.push(t);
+                }
+            }
+            _ => out.push(t),
+        }
+    }
+    out
+}
+
 /// Massketten eines Geschosses. `scale_denominator` bestimmt den Abstand der Ketten
 /// (Papier-mm → Modell-Meter).
 pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_denominator: f64) -> Vec<DimChain> {
@@ -229,12 +253,13 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
             }
         }
 
-        let steps = unique_sorted(&corners);
+        let min_gap = MIN_SEGMENT_MM / 1000.0 * scale;
+        let steps = thin(unique_sorted(&corners), min_gap);
         let mut chains: Vec<(usize, Vec<f64>)> = vec![];
         if !jambs.is_empty() {
             let mut all = steps.clone();
             all.extend(jambs);
-            chains.push((CHAIN_OPENINGS, unique_sorted(&all)));
+            chains.push((CHAIN_OPENINGS, thin(unique_sorted(&all), min_gap)));
         }
         if steps.len() > 2 {
             chains.push((CHAIN_STEPS, steps));
@@ -288,7 +313,7 @@ fn arc_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scale: f
                 }
             }
         }
-        let st = unique_sorted(&st);
+        let st = thin(unique_sorted(&st), MIN_SEGMENT_MM / 1000.0 * scale);
         if st.len() < 2 {
             continue;
         }
@@ -409,6 +434,21 @@ mod tests {
         // Nach innen gewölbt: keine Bogenmass-Kette.
         w[0].bulge = 0.4;
         assert!(auto_exterior_dimensions(&w, &[], 100.0).iter().all(|d| d.arc.is_none()));
+    }
+
+    /// Mauerversprung von 0.1 m ergäbe ein Kleinmass: Ketten enthalten keine Teilstrecke unter 1.5 mm Papier.
+    #[test]
+    fn keine_kleinmasse() {
+        let axis = [[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [4.0, 6.0], [4.0, 6.1], [0.0, 6.1]];
+        let w: Vec<WallIn> = (0..axis.len()).map(|i| WallIn { start: axis[i], end: axis[(i + 1) % axis.len()], thickness: 0.3, shift: 0.0, bulge: 0.0 }).collect();
+        let dims = auto_exterior_dimensions(&w, &[], 100.0);
+        assert!(dims.iter().any(|d| d.chain == CHAIN_STEPS));
+        for d in &dims {
+            assert!(lengths(&d.pts).iter().all(|l| *l >= 0.15 - 1e-9), "{d:?}");
+        }
+        // Gesamtmass unverändert.
+        let east = dims.iter().find(|d| d.side == 1 && d.chain == CHAIN_TOTAL).unwrap();
+        assert!((total(east) - 6.4).abs() < 1e-6 || total(east) > 6.0, "{east:?}");
     }
 
     #[test]

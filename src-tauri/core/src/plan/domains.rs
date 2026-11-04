@@ -353,6 +353,8 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         let stroke = roof.color.as_deref().or(category.map(|k| k.color.as_str())).unwrap_or(POCHE_STROKE);
         let geo = crate::roof::roof_geometry(&roof.params(), 0.0);
         let from_above = roof_seen_from_above(p, roof, &geo, cut_z);
+        // Dach über der Schnittebene: Kanten als Strich-Punkt-Linie (SIA „darüberliegend“), Dachaufsicht darunter ausgezogen.
+        let overhead: Option<Option<Vec<f64>>> = (!from_above).then(|| Some(OVERHEAD_DASH.to_vec()));
         // Ansichtsbereich ([36]): Dach ganz über der Oberkante bzw. unter der Unterkante entfällt.
         let rb = p.roof_base_elevation(roof);
         if range.classify(rb, rb + max(0.0, geo.ridge_height)) == super::view_range::Zone::Hidden {
@@ -410,7 +412,7 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                     EdgeKind::Ridge => ("roof-ridge", ROOF_RIDGE_MM),
                     EdgeKind::Hip => ("roof-hip", ROOF_HIP_MM),
                 };
-                out.push(line(pv(*a), pv(*b), cls, w, None, stroke, greyed));
+                out.push(line(pv(*a), pv(*b), cls, w, overhead.clone(), stroke, greyed));
             }
             roof_windows(c, out, roof);
             continue;
@@ -419,14 +421,14 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             let pts: Vec<Vec2> = ring.iter().map(|q| pv(*q)).collect();
             let n = pts.len();
             for i in 0..n {
-                out.push(line(pts[i], pts[(i + 1) % n], "roof-eaves", ROOF_EAVES_MM, None, stroke, greyed));
+                out.push(line(pts[i], pts[(i + 1) % n], "roof-eaves", ROOF_EAVES_MM, overhead.clone(), stroke, greyed));
             }
         }
         for l in &geo.ridges {
-            out.push(line(pv(l[0]), pv(l[1]), "roof-ridge", ROOF_RIDGE_MM, None, stroke, greyed));
+            out.push(line(pv(l[0]), pv(l[1]), "roof-ridge", ROOF_RIDGE_MM, overhead.clone(), stroke, greyed));
         }
         for l in &geo.hips {
-            out.push(line(pv(l[0]), pv(l[1]), "roof-hip", ROOF_HIP_MM, None, stroke, greyed));
+            out.push(line(pv(l[0]), pv(l[1]), "roof-hip", ROOF_HIP_MM, overhead.clone(), stroke, greyed));
         }
         for l in &geo.breaks {
             out.push(line(pv(l[0]), pv(l[1]), "roof-break", ROOF_BREAK_MM, Some(Some(ROOF_BREAK_DASH.to_vec())), stroke, greyed));
@@ -933,6 +935,24 @@ mod tests {
         assert_eq!(rooms[1]["extraLines"][0]["text"], "17.01 m²");
         assert_eq!(rooms[1]["extraLines"][1]["text"], "HNF · Hauptnutzfläche");
         assert!(r.bounds.is_some());
+    }
+
+    #[test]
+    fn dach_ueber_schnittebene_strichpunkt() {
+        let mut p = sample();
+        let dashes = |p: &Project| {
+            let t = serde_json::json!({ "floor": "og", "show": ["31"], "grey": [] }).to_string();
+            let r = plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            let v = serde_json::to_value(&r.roofs).unwrap();
+            let lines: Vec<_> = v.as_array().unwrap().iter().filter(|x| x["kind"] == "line" && x["cls"].as_str().is_some_and(|c| c == "roof-eaves" || c == "roof-ridge")).cloned().collect();
+            assert!(!lines.is_empty());
+            lines.iter().filter(|x| !x["dash"].is_null()).count() == lines.len()
+        };
+        // Dach über dem Schnitt: alle Kanten strichpunktiert.
+        assert!(dashes(&p));
+        // Schnitt über dem First: Dachaufsicht, ausgezogen.
+        p.drawing_levels.iter_mut().find(|l| l.id == "og").unwrap().cut_height = Some(9.0);
+        assert!(!dashes(&p));
     }
 
     #[test]

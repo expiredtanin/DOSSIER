@@ -676,9 +676,11 @@ const LEVEL_VIS: Record<string, boolean> = Object.fromEntries(LEVELS.map((l) => 
 const PLAN_VIS = vis(["01", "02", "10", "11", "13", "14"]);
 /** Kontext (Gelände, Baugrube, Höhenlinien, Kataster, Raster) aus — für das Detail. */
 const HIDE_SITE = vis(["00", "01", "02", "07", "10", "11", "13", "14"]);
+/** Bildschirm-px je Meter, bei denen die Ansicht genau im Papier-Massstab 1:`scale` steht (96 dpi, wie `geometry.ts::dpi`). */
+const pxPerMeterAt = (scale: number) => Math.round((96 / 25.4) * 1000 / scale * 100) / 100;
 const snap = (id: string, name: string, level: string, scale: number, center: Vec2, extra: Partial<NonNullable<Project["viewSnapshots"]>[number]> = {}) => ({
   id, name, viewType: "grundriss" as const, view3d: "iso" as const, scaleDenominator: scale, detail: (scale <= 50 ? "fein" : "mittel") as "fein" | "mittel",
-  activeLevelId: level, layerVisibility: PLAN_VIS, drawingVisibility: LEVEL_VIS, cameraCenter: center, cameraPxPerMeter: 40, ...extra,
+  activeLevelId: level, layerVisibility: PLAN_VIS, drawingVisibility: LEVEL_VIS, cameraCenter: center, cameraPxPerMeter: pxPerMeterAt(scale), ...extra,
 });
 
 function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapshotFolders" | "layouts" | "masterLayouts" | "layoutFolders" | "publishSets" | "overrideRules"> {
