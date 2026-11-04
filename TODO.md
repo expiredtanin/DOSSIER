@@ -1156,6 +1156,9 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   relative Importe (Ausnahmelisten leer). · S
 - ◐ **[130] Kleinkram:** eine generische Fenster-Brücke statt 5 Kopien; Auswahl als ein `Selection`-Objekt statt
   12 Felder; `primitives.tsx` auf Overlay zurückschneiden; Cargo-Workspace. · M
+  4.11.: generische Fenster-Brücke `native/windowBridge.ts` (`useWindowBridgeHost`) für Einstellungen, Geschosse,
+  Ebenen-Einstellungen und Kontext-Import (−110 Zeilen); Ressourcen-Fenster bleibt eigen (Teil-Änderungen, [121]).
+  Nicht in der Tauri-App geprüft.
   3.11. Lizenzteil erledigt: NOTICE ergänzt (OFL-Schriften, wgpu, Tauri, React, pdf.js, jsPDF, lcms, truck …),
   `src-tauri/deny.toml` + CI-Job `licenses` (check.yml, `cargo deny check licenses` je Crate).
 

@@ -17,11 +17,10 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { useEffect, useRef } from "react";
-import { isTauriRuntime } from "./projectFile";
 import type { DrawingLevel } from "../model/types";
 import type { DisplayMode } from "../panels/types";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
+import { useWindowBridgeHost, type WindowHandlers } from "./windowBridge";
 
 const DRAWING_LEVELS_WINDOW_LABEL = "drawing-levels";
 
@@ -65,47 +64,5 @@ export function useDrawingLevelsWindowHost(
   state: DrawingLevelsSyncState,
   handlers: DrawingLevelsCommandHandlers,
 ): void {
-  const handlersRef = useRef(handlers);
-  handlersRef.current = handlers;
-  const stateRef = useRef(state);
-  stateRef.current = state;
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let disposed = false;
-    const unlisten: Array<() => void> = [];
-    void (async () => {
-      const { listen, emitTo } = await import("@tauri-apps/api/event");
-      if (disposed) return;
-      unlisten.push(
-        await listen<{ name: string; args: unknown[] }>("drawing-levels-command", (e) => {
-          const fn = (handlersRef.current as unknown as Record<string, unknown>)[e.payload.name];
-          if (typeof fn === "function") (fn as (...a: unknown[]) => void)(...e.payload.args);
-        }),
-      );
-      unlisten.push(
-        await listen("drawing-levels-window-ready", () => {
-          void emitTo(
-            DRAWING_LEVELS_WINDOW_LABEL,
-            "drawing-levels-sync-state",
-            stateRef.current,
-          ).catch(() => {});
-        }),
-      );
-    })();
-    return () => {
-      disposed = true;
-      unlisten.forEach((u) => u());
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    void (async () => {
-      const { emitTo } = await import("@tauri-apps/api/event");
-      await emitTo(DRAWING_LEVELS_WINDOW_LABEL, "drawing-levels-sync-state", state).catch(
-        () => {},
-      );
-    })();
-  }, [state]);
+  useWindowBridgeHost(DRAWING_LEVELS_WINDOW_LABEL, "drawing-levels", state, handlers as unknown as WindowHandlers);
 }

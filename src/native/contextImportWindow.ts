@@ -15,10 +15,9 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { useEffect, useRef } from "react";
-import { isTauriRuntime } from "./projectFile";
 import type { GeoAnchor } from "../ui/ContextImportDialog";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
+import { useWindowBridgeHost, type WindowHandlers } from "./windowBridge";
 
 const CONTEXT_IMPORT_WINDOW_LABEL = "context-import";
 
@@ -55,45 +54,5 @@ export function useContextImportWindowHost(
   geoAnchor: GeoAnchor | undefined,
   handlers: ContextImportCommandHandlers,
 ): void {
-  const handlersRef = useRef(handlers);
-  handlersRef.current = handlers;
-  const geoAnchorRef = useRef(geoAnchor);
-  geoAnchorRef.current = geoAnchor;
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let disposed = false;
-    const unlisten: Array<() => void> = [];
-    void (async () => {
-      const { listen, emitTo } = await import("@tauri-apps/api/event");
-      if (disposed) return;
-      unlisten.push(
-        await listen<{ name: string; args: unknown[] }>("context-import-command", (e) => {
-          const fn = (handlersRef.current as unknown as Record<string, unknown>)[e.payload.name];
-          if (typeof fn === "function") (fn as (...a: unknown[]) => void)(...e.payload.args);
-        }),
-      );
-      unlisten.push(
-        await listen("context-import-window-ready", () => {
-          void emitTo(CONTEXT_IMPORT_WINDOW_LABEL, "context-import-sync-state", {
-            geoAnchor: geoAnchorRef.current,
-          }).catch(() => {});
-        }),
-      );
-    })();
-    return () => {
-      disposed = true;
-      unlisten.forEach((u) => u());
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    void (async () => {
-      const { emitTo } = await import("@tauri-apps/api/event");
-      await emitTo(CONTEXT_IMPORT_WINDOW_LABEL, "context-import-sync-state", {
-        geoAnchor,
-      }).catch(() => {});
-    })();
-  }, [geoAnchor]);
+  useWindowBridgeHost(CONTEXT_IMPORT_WINDOW_LABEL, "context-import", { geoAnchor }, handlers as unknown as WindowHandlers, [geoAnchor]);
 }

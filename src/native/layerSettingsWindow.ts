@@ -21,11 +21,10 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { useEffect, useRef } from "react";
-import { isTauriRuntime } from "./projectFile";
 import { findCategory } from "../model/layers";
 import type { HatchStyle, LayerCategory, Project } from "../model/types";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
+import { useWindowBridgeHost } from "./windowBridge";
 
 const LAYER_SETTINGS_WINDOW_LABEL = "layer-settings";
 
@@ -83,52 +82,6 @@ export function useLayerSettingsWindowHost(
   code: string | null,
   onPatchCategory: (code: string, patch: Partial<LayerCategory>) => void,
 ): void {
-  const stateRef = useRef<LayerSettingsSyncState | null>(code ? stateFor(project, code) : null);
-  stateRef.current = code ? stateFor(project, code) : null;
-  const onPatchRef = useRef(onPatchCategory);
-  onPatchRef.current = onPatchCategory;
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let disposed = false;
-    const unlisten: Array<() => void> = [];
-    void (async () => {
-      const { listen, emitTo } = await import("@tauri-apps/api/event");
-      if (disposed) return;
-      unlisten.push(
-        await listen<{ name: string; args: unknown[] }>("layer-settings-command", (e) => {
-          if (e.payload.name === "onPatchCategory") {
-            const [c, patch] = e.payload.args as [string, Partial<LayerCategory>];
-            onPatchRef.current(c, patch);
-          }
-        }),
-      );
-      unlisten.push(
-        await listen("layer-settings-window-ready", () => {
-          void emitTo(
-            LAYER_SETTINGS_WINDOW_LABEL,
-            "layer-settings-sync-state",
-            stateRef.current,
-          ).catch(() => {});
-        }),
-      );
-    })();
-    return () => {
-      disposed = true;
-      unlisten.forEach((u) => u());
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    void (async () => {
-      const { emitTo } = await import("@tauri-apps/api/event");
-      await emitTo(
-        LAYER_SETTINGS_WINDOW_LABEL,
-        "layer-settings-sync-state",
-        stateRef.current,
-      ).catch(() => {});
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- stateRef.current ist bereits die aktuelle Ableitung
-  }, [project, code]);
+  const state: LayerSettingsSyncState | null = code ? stateFor(project, code) : null;
+  useWindowBridgeHost(LAYER_SETTINGS_WINDOW_LABEL, "layer-settings", state, { onPatchCategory: (c: string, patch: Partial<LayerCategory>) => onPatchCategory(c, patch) }, [project, code]);
 }

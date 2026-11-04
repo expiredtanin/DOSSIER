@@ -13,11 +13,10 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { AiAccessView } from "../ui/AiAccessSection";
-import { useEffect, useRef } from "react";
-import { isTauriRuntime } from "./projectFile";
 import type { LayoutState } from "../panels/types";
 import type { ThemeMode } from "../theme/themeMode";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
+import { useWindowBridgeHost, type WindowHandlers } from "./windowBridge";
 
 const SETTINGS_WINDOW_LABEL = "settings";
 
@@ -74,43 +73,5 @@ export function useSettingsWindowHost(
   state: SettingsSyncState,
   handlers: SettingsCommandHandlers,
 ): void {
-  const handlersRef = useRef(handlers);
-  handlersRef.current = handlers;
-  const stateRef = useRef(state);
-  stateRef.current = state;
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let disposed = false;
-    const unlisten: Array<() => void> = [];
-    void (async () => {
-      const { listen, emitTo } = await import("@tauri-apps/api/event");
-      if (disposed) return;
-      unlisten.push(
-        await listen<{ name: string; args: unknown[] }>("settings-command", (e) => {
-          const fn = (handlersRef.current as unknown as Record<string, unknown>)[e.payload.name];
-          if (typeof fn === "function") (fn as (...a: unknown[]) => void)(...e.payload.args);
-        }),
-      );
-      unlisten.push(
-        await listen("settings-window-ready", () => {
-          void emitTo(SETTINGS_WINDOW_LABEL, "settings-sync-state", stateRef.current).catch(
-            () => {},
-          );
-        }),
-      );
-    })();
-    return () => {
-      disposed = true;
-      unlisten.forEach((u) => u());
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    void (async () => {
-      const { emitTo } = await import("@tauri-apps/api/event");
-      await emitTo(SETTINGS_WINDOW_LABEL, "settings-sync-state", state).catch(() => {});
-    })();
-  }, [state]);
+  useWindowBridgeHost(SETTINGS_WINDOW_LABEL, "settings", state, handlers as unknown as WindowHandlers);
 }
