@@ -559,7 +559,21 @@ fn bbox(pts: &[[f64; 2]]) -> [f64; 4] {
 }
 
 fn rect_of_band(c: &Cut) -> Option<[f64; 4]> {
-    (c.pts.len() >= 3).then(|| bbox(&c.pts))
+    (c.pts.len() >= 3 && is_axis_rect(&c.pts)).then(|| bbox(&c.pts))
+}
+
+/// [G6] Liegt der Umriss genau auf seinem umgebenden Rechteck (achsparallel, Fläche = Rechteckfläche)?
+/// Schräge Bänder (Dachschichten, schräge Wandoberkanten) gehen sonst als Rechteck in die Dominanz ein
+/// und schneiden zu viel weg bzw. verlieren beim Beschneiden ihre Schräge.
+fn is_axis_rect(pts: &[[f64; 2]]) -> bool {
+    const E: f64 = 1e-6;
+    let b = bbox(pts);
+    if !(b[1] - b[0] > E && b[3] - b[2] > E) {
+        return false;
+    }
+    let on_edge = pts.iter().all(|q| ((q[0] - b[0]).abs() < E || (q[0] - b[1]).abs() < E) || ((q[1] - b[2]).abs() < E || (q[1] - b[3]).abs() < E));
+    let area = pts.iter().enumerate().map(|(i, a)| { let c = pts[(i + 1) % pts.len()]; a[0] * c[1] - c[0] * a[1] }).sum::<f64>().abs() / 2.0;
+    on_edge && (area - (b[1] - b[0]) * (b[3] - b[2])).abs() < E * (b[1] - b[0] + b[3] - b[2])
 }
 
 /// Bauteil-Stil einer Schicht (Füllung, Schraffur) mit dem Override des Elements (`split*Layers`).
@@ -847,7 +861,7 @@ fn subtract_dominant_bands(bands: Vec<Cut>) -> Vec<Cut> {
             Band { rect, prio: band.join_priority, comp }
         })
         .collect();
-    dominant_bands(&inp)
+    let rect_out: Vec<Cut> = dominant_bands(&inp)
         .into_iter()
         .map(|piece| {
             let src = &bands[piece.src];
@@ -863,7 +877,50 @@ fn subtract_dominant_bands(bands: Vec<Cut>) -> Vec<Cut> {
             c.stair_id = src.stair_id.clone();
             c
         })
-        .collect()
+        .collect();
+    subtract_dominant_polygons(rect_out, &bands)
+}
+
+/// [G6] Dominanz für Bänder, die keine achsparallelen Rechtecke sind (schräge Dachschichten …): Jedes Stück
+/// verliert die Überlappung mit allen Bändern STRIKT höherer Priorität, wenn eines der beiden kein Rechteck ist
+/// (Rechteck gegen Rechteck hat `dominant_bands` schon erledigt). Polygon-Booleans über den Kern (i_overlay).
+/// Bleibt ein Loch übrig (Band ganz um ein dominantes herum), wird das Stück unverändert übernommen.
+fn subtract_dominant_polygons(pieces: Vec<Cut>, bands: &[Cut]) -> Vec<Cut> {
+    let cutters: Vec<(&Cut, bool, [f64; 4])> = bands.iter().filter(|b| b.pts.len() >= 3 && b.join_priority.is_some()).map(|b| (b, is_axis_rect(&b.pts), bbox(&b.pts))).collect();
+    if cutters.iter().all(|c| c.1) {
+        return pieces;
+    }
+    let mut out = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        let Some(jp) = piece.join_priority.filter(|_| piece.pts.len() >= 3) else {
+            out.push(piece);
+            continue;
+        };
+        let rect = is_axis_rect(&piece.pts);
+        let pb = bbox(&piece.pts);
+        let polys: Vec<crate::flat::Polygon> = cutters
+            .iter()
+            .filter(|(c, c_rect, cb)| c.join_priority.is_some_and(|q| q > jp) && !(rect && *c_rect) && cb[0] < pb[1] - 1e-9 && cb[1] > pb[0] + 1e-9 && cb[2] < pb[3] - 1e-9 && cb[3] > pb[2] + 1e-9)
+            .map(|(c, _, _)| vec![c.pts.clone()])
+            .collect();
+        if polys.is_empty() {
+            out.push(piece);
+            continue;
+        }
+        let rest = crate::polygon_bool::difference(&[vec![piece.pts.clone()]], &polys);
+        if rest.iter().any(|p| p.len() > 1) {
+            out.push(piece);
+            continue;
+        }
+        for poly in rest {
+            let Some(ring) = poly.into_iter().next() else { continue };
+            let area = ring.iter().enumerate().map(|(i, a)| { let c = ring[(i + 1) % ring.len()]; a[0] * c[1] - c[0] * a[1] }).sum::<f64>().abs() / 2.0;
+            if ring.len() >= 3 && area > 1e-8 {
+                out.push(Cut { pts: ring, ..piece.clone() });
+            }
+        }
+    }
+    out
 }
 
 // ── Dächer ────────────────────────────────────────────────────────────────────
@@ -2922,6 +2979,38 @@ mod ts_faelle {
         c.fill = Some(tag.into());
         c.join_priority = jp;
         c
+    }
+
+    fn ring_area(pts: &[[f64; 2]]) -> f64 {
+        pts.iter().enumerate().map(|(i, a)| { let c = pts[(i + 1) % pts.len()]; a[0] * c[1] - c[0] * a[1] }).sum::<f64>().abs() / 2.0
+    }
+
+    /// [G6] Schräges Band hoher Priorität (Parallelogramm) schneidet nur, wo es wirklich überlappt — nicht
+    /// sein umgebendes Rechteck.
+    #[test]
+    fn schraeges_band_schneidet_nur_seine_flaeche() {
+        let mut roof = Cut::new(Kind::Roof, 1, vec![[0.0, 2.0], [4.0, 4.0], [4.0, 4.5], [0.0, 2.5]]);
+        roof.join_priority = Some(100.0);
+        roof.fill = Some("beton".into());
+        // Putzband unten links: berührt das Dach-Rechteck (bbox v 2..4.5), nicht aber das Dach selbst.
+        let out = subtract_dominant_bands(vec![band(3.0, 4.0, 0.0, 2.9, Some(10.0), "putz"), roof]);
+        let putz: Vec<&Cut> = out.iter().filter(|c| c.fill.as_deref() == Some("putz")).collect();
+        assert_eq!(putz.len(), 1);
+        assert!((ring_area(&putz[0].pts) - 2.9).abs() < 1e-6, "{:?}", putz[0].pts);
+    }
+
+    /// [G6] Schräges Band niedriger Priorität behält beim Beschneiden seine Schräge (kein Rechteck-Ersatz).
+    #[test]
+    fn schraeges_band_behaelt_schraege() {
+        let mut roof = Cut::new(Kind::Roof, 1, vec![[0.0, 2.0], [4.0, 4.0], [4.0, 4.5], [0.0, 2.5]]);
+        roof.join_priority = Some(10.0);
+        roof.fill = Some("daemmung".into());
+        let out = subtract_dominant_bands(vec![roof, band(1.0, 2.0, 0.0, 5.0, Some(100.0), "beton")]);
+        let d: Vec<&Cut> = out.iter().filter(|c| c.fill.as_deref() == Some("daemmung")).collect();
+        assert_eq!(d.len(), 2, "links und rechts der Stütze");
+        // Fläche: Parallelogramm 4 × 0.5 = 2.0, minus der Streifen 1..2 (0.5) = 1.5; Stücke nicht rechteckig.
+        assert!((d.iter().map(|c| ring_area(&c.pts)).sum::<f64>() - 1.5).abs() < 1e-6);
+        assert!(d.iter().all(|c| !is_axis_rect(&c.pts)));
     }
 
     fn cband(u0: f64, u1: f64, v0: f64, v1: f64, jp: f64, comp: &str, tag: &str) -> Cut {

@@ -1435,7 +1435,12 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     vitest (`dormerStatus.test.ts`). Nicht in der Tauri-App geprüft.
   - (30.10.) Boolean-Werkzeug dafür: Manifold-Port `manifold-rust`, nicht truck — truck scheitert an Gaube und
     L-Ecke (bündige Unterseiten), `manifold-rust` rechnet beide exakt und dicht. Details und Plan: [107].
-- ○ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M
+- ◐ **[G6] Allgemeine Polygon-Dominanz im Schnitt** (nicht nur Rechtecke). · M — 4.11.: 2D-Schnitt: Bänder gehen nur
+  noch als Rechteck in die Dominanz, wenn sie wirklich achsparallele Rechtecke sind (`is_axis_rect`; vorher galt das
+  umgebende Rechteck → schräge Dachschichten schnitten zu viel weg und verloren beim Beschneiden ihre Schräge). Alles
+  mit einem Nicht-Rechteck läuft über Polygon-Booleans (`subtract_dominant_polygons`, i_overlay). Tests
+  `schraeges_band_schneidet_nur_seine_flaeche`, `schraeges_band_behaelt_schraege`; Musterhäuser unverändert.
+  Offen: 3D-Live-Schnitt (`render3d/section_boolean.rs`) rechnet weiter nur Rechtecke; Ring mit Loch bleibt unbeschnitten.
 - ○ **[G7] Robuste Booleans bei bündigen Flächen** — wächst mit jeder Phase. · L (laufend)
   - (30.10.) Messung in [107]: truck-B-Rep 3/14 Fälle, csgrs-Fallback Volumen stimmt, Netz aber offen
     (T-Stösse) und langsam; `manifold-rust`/`boolmesh` 14/14 exakt (Volumenfehler ≤ 4e-14) und geschlossen.
