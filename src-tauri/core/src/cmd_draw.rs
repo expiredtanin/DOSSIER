@@ -5,13 +5,14 @@
 //! und die Treffer der Befehle (Tangenten-Objekt, Massketten). Einstieg über `cmd_create`.
 
 use crate::cmd_create::{
-    add_op, b_of, circle_pts, find, level_of, n_of, normalize, obj, opt_n, opt_p, p_of, pair, point_segment_distance, polyline_edges,
-    pts_of, pv, pvs, s, s_of, seg_len, to_p, type_thickness, wall_types, Ctx, Preview, V, EPS,
+    add_op, b_of, circle_pts, find, n_of, normalize, obj, opt_n, opt_p, p_of, pair, point_segment_distance, polyline_edges,
+    pts_of, pv, pvs, s, s_of, seg_len, to_p, Ctx, Preview, V, EPS,
 };
 use crate::cmd_transform::{IdGen, Shapes};
-use crate::json_util::{arr, field, js_num, num_of, num_or, with, xy};
+use crate::json_util::{arr, field, js_num, num_of, with, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
+use crate::model::{Drawing2D, Drawing2DGeom, Project, Vec2, Wall, WallReferenceLine};
 use crate::ops::{id_of, Op};
 use kernel2d::{self as k, TangentTarget, Vec2 as P};
 use serde_json::{json, Map, Value};
@@ -362,21 +363,17 @@ fn in_arc_span(a0: f64, a1: f64, ang: f64) -> bool {
 }
 
 /// Gerade Kanten einer Form für die Tangenten-Wahl (Bogen-Segmente ausgenommen).
-fn straight_edges(g: &Value) -> Vec<(V, V)> {
-    let p = |k: &str| xy(field(g, k).unwrap_or(&Value::Null));
-    match field(g, "shape").and_then(Value::as_str) {
-        Some("line") => vec![(p("a"), p("b"))],
-        Some("rect") => {
-            let (mn, mx) = (p("min"), p("max"));
-            polyline_edges(&corners_of(mn, mx), true)
-        }
-        Some("polyline") => {
-            let pts: Vec<V> = arr(field(g, "pts")).iter().map(xy).collect();
-            let bulge = arr(field(g, "bulge"));
-            polyline_edges(&pts, crate::json_util::truthy(field(g, "closed")))
+fn straight_edges(g: &Drawing2DGeom) -> Vec<(V, V)> {
+    let v = |p: &Vec2| (p.x, p.y);
+    match g {
+        Drawing2DGeom::Line { a, b } => vec![(v(a), v(b))],
+        Drawing2DGeom::Rect { min, max } => polyline_edges(&corners_of(v(min), v(max)), true),
+        Drawing2DGeom::Polyline { pts, closed, bulge } => {
+            let pts: Vec<V> = pts.iter().map(v).collect();
+            polyline_edges(&pts, *closed)
                 .into_iter()
                 .enumerate()
-                .filter(|(i, _)| num_or(bulge.get(*i), 0.0).abs() <= EPS)
+                .filter(|(i, _)| bulge.as_ref().and_then(|b| b.get(*i)).copied().unwrap_or(0.0).abs() <= EPS)
                 .map(|(_, e)| e)
                 .collect()
         }
@@ -401,30 +398,37 @@ fn target_of(v: &Value) -> Option<TangentTarget> {
 }
 
 /// Nächstes tangentenfähiges Element (Gerade oder Kreis/Bogen) zum Klickpunkt.
-fn pick_tangent<'a>(root: &'a Map<String, Value>, level: &str, at: V) -> Option<(TangentTarget, &'a Value)> {
-    let mut best: Option<(TangentTarget, &Value)> = None;
+fn pick_tangent<'a>(p: &'a Project, level: &str, at: V) -> Option<(TangentTarget, &'a Drawing2D)> {
+    let mut best: Option<(TangentTarget, &Drawing2D)> = None;
     let mut best_d = TTR_HIT_TOL;
-    for d in arr(root.get("drawings2d")) {
-        if level_of(d) != Some(level) {
+    for d in &p.drawings2d {
+        if d.level_id != level {
             continue;
         }
-        let Some(g) = field(d, "geom") else { continue };
-        let shape = field(g, "shape").and_then(Value::as_str);
-        if shape == Some("circle") || shape == Some("arc") {
-            let c = xy(field(g, "center").unwrap_or(&Value::Null));
-            let r = num_of(field(g, "r"));
-            let dd = (dist(at, c) - r).abs();
-            let span = shape == Some("circle") || in_arc_span(num_of(field(g, "a0")), num_of(field(g, "a1")), angle(c, at));
-            if dd < best_d && span {
-                best_d = dd;
-                best = Some((TangentTarget::Circle { center: to_p(c), r }, d));
-            }
-        } else {
-            for (a, b) in straight_edges(g) {
-                let dd = point_segment_distance(at, a, b);
-                if dd < best_d {
+        match &d.geom {
+            g @ (Drawing2DGeom::Circle { .. } | Drawing2DGeom::Arc { .. }) => {
+                let (center, r) = match g {
+                    Drawing2DGeom::Circle { center, r } | Drawing2DGeom::Arc { center, r, .. } => (center, *r),
+                    _ => continue,
+                };
+                let c = (center.x, center.y);
+                let dd = (dist(at, c) - r).abs();
+                let span = match g {
+                    Drawing2DGeom::Arc { a0, a1, .. } => in_arc_span(*a0, *a1, angle(c, at)),
+                    _ => true,
+                };
+                if dd < best_d && span {
                     best_d = dd;
-                    best = Some((TangentTarget::Line { a: to_p(a), b: to_p(b) }, d));
+                    best = Some((TangentTarget::Circle { center: to_p(c), r }, d));
+                }
+            }
+            g => {
+                for (a, b) in straight_edges(g) {
+                    let dd = point_segment_distance(at, a, b);
+                    if dd < best_d {
+                        best_d = dd;
+                        best = Some((TangentTarget::Line { a: to_p(a), b: to_p(b) }, d));
+                    }
                 }
             }
         }
@@ -1130,40 +1134,37 @@ fn dimension_preview(v: &Value, pts: &[V], p: &mut Preview) {
 // ── Aussenbemassung ──────────────────────────────────────────────────────────
 
 /// Aussenbemassung des Geschosses `level` (Ketten aus `auto_dimensions`), ids `prefix-Geschoss-Seite-Kette`.
-fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> Vec<Value> {
+fn auto_dims(root: &Map<String, Value>, pr: &Project, ctx: &Ctx, prefix: &str, scale: f64) -> Vec<Value> {
     use crate::auto_dimensions::{auto_exterior_dimensions, OpeningIn, WallIn};
-    let types = wall_types(root);
-    let walls: Vec<&Value> = arr(root.get("walls")).iter().filter(|w| crate::cmd_create::floor_of(w) == Some(ctx.level)).collect();
+    let walls: Vec<&Wall> = pr.walls.iter().filter(|w| w.floor_id == ctx.level).collect();
     if walls.is_empty() {
         return Vec::new();
     }
-    let p = |w: &Value, k: &str| xy(field(w, k).unwrap_or(&Value::Null));
+    let p = |v: &Vec2| (v.x, v.y);
     let win: Vec<WallIn> = walls
         .iter()
         .map(|w| {
-            let tid = field(w, "wallTypeId").and_then(Value::as_str);
-            let th = types.iter().find(|t| id_of(t) == tid).map_or(0.3, type_thickness);
-            let (a, b) = (p(w, "start"), p(w, "end"));
+            let th = pr.wall_types.iter().find(|t| t.id == w.wall_type_id).map_or(0.3, |t| t.layers.iter().fold(0.0, |sum, l| sum + l.thickness));
+            let (a, b) = (p(&w.start), p(&w.end));
             // Wandmitte gegenüber der Achse (Referenzlinie links/rechts bzw. -versatz, wie `dim_assoc`).
             let half = th / 2.0;
-            let shift = match (field(w, "referenceOffset").and_then(Value::as_f64), field(w, "referenceLine").and_then(Value::as_str)) {
+            let shift = match (w.reference_offset, w.reference_line) {
                 (Some(v), _) => v.clamp(-half, half),
-                (None, Some("left")) => half,
-                (None, Some("right")) => -half,
+                (None, Some(WallReferenceLine::Left)) => half,
+                (None, Some(WallReferenceLine::Right)) => -half,
                 _ => 0.0,
             };
-            WallIn { start: [a.0, a.1], end: [b.0, b.1], thickness: th, shift, bulge: field(w, "bulge").and_then(Value::as_f64).unwrap_or(0.0) }
+            WallIn { start: [a.0, a.1], end: [b.0, b.1], thickness: th, shift, bulge: w.bulge.unwrap_or(0.0) }
         })
         .collect();
     let mut oin = Vec::new();
-    for o in arr(root.get("openings")) {
-        let host = field(o, "hostWallId").and_then(Value::as_str);
-        let Some(i) = walls.iter().position(|w| id_of(w) == host) else { continue };
-        let (a, b) = (p(walls[i], "start"), p(walls[i], "end"));
+    for o in pr.openings.iter().flatten() {
+        let Some(i) = walls.iter().position(|w| w.id == o.host_wall_id) else { continue };
+        let (a, b) = (p(&walls[i].start), p(&walls[i].end));
         // Bogenwand ([T2]): Lage = Bogenlänge, Leibungen auf dem Achsbogen.
         let arc = win[i].arc();
         let axis = arc.map_or_else(|| dist(a, b), |x| x.length());
-        let (pos, width) = (num_of(field(o, "position")), num_of(field(o, "width")));
+        let (pos, width) = (o.position, o.width);
         let from = jsnum::max(0.0, jsnum::min(pos, axis));
         let to = jsnum::max(from, jsnum::min(pos + width, axis));
         if to - from < 1e-4 {
@@ -1186,7 +1187,7 @@ fn auto_dims(root: &Map<String, Value>, ctx: &Ctx, prefix: &str, scale: f64) -> 
         .into_iter()
         .map(|c| {
             let id = match c.arc {
-                Some((_, wi)) => format!("{prefix}-{}-arc-{}", ctx.level, id_of(walls[wi]).unwrap_or("")),
+                Some((_, wi)) => format!("{prefix}-{}-arc-{}", ctx.level, walls[wi].id),
                 None => format!("{prefix}-{}-{}-{}", ctx.level, SIDES[c.side as usize], CHAINS[c.chain as usize]),
             };
             let pts = Value::Array(c.pts.iter().map(|q| crate::json_util::pt(q[0], q[1])).collect());
@@ -1211,8 +1212,8 @@ fn autodim_scale(v: &Value) -> f64 {
     v.get("scale").and_then(Value::as_f64).filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0)
 }
 
-fn autodim_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx) -> Vec<Op> {
-    let dims = auto_dims(root, ctx, "autodim", autodim_scale(v));
+fn autodim_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx) -> Vec<Op> {
+    let dims = auto_dims(root, p, ctx, "autodim", autodim_scale(v));
     if dims.is_empty() {
         return Vec::new();
     }
@@ -1228,7 +1229,7 @@ fn autodim_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx) -> Vec<Op> {
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Ops eines 2D-Zeichenbefehls (`None` = keiner dieses Moduls).
-pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Option<Vec<Op>> {
+pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Option<Vec<Op>> {
     let geom2 = |shape: &str| obj(vec![("shape", s(shape)), ("a", pt_val(v, "a")), ("b", pt_val(v, "b"))]);
     Some(match s_of(v, "cmd") {
         "line" | "xline" | "ray" => add_drawing(v, ctx, ids, geom2(s_of(v, "cmd"))),
@@ -1316,13 +1317,13 @@ pub fn ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> 
         },
         "dimround" => dimround_ops(root, v, ctx, ids),
         "dimension" => dimension_ops(root, v, ctx, ids),
-        "autodim" => autodim_ops(root, v, ctx),
+        "autodim" => autodim_ops(root, p, v, ctx),
         _ => return None,
     })
 }
 
 /// Vorschau eines 2D-Zeichenbefehls (`false` = keiner dieses Moduls).
-pub fn preview(root: &Map<String, Value>, v: &Value, ctx: &Ctx, pts: &[V], p: &mut Preview) -> bool {
+pub fn preview(root: &Map<String, Value>, project: &Project, v: &Value, ctx: &Ctx, pts: &[V], p: &mut Preview) -> bool {
     match s_of(v, "cmd") {
         "xline" | "ray" => {
             if let [a, c] = pts {
@@ -1390,18 +1391,18 @@ pub fn preview(root: &Map<String, Value>, v: &Value, ctx: &Ctx, pts: &[V], p: &m
         "dimension" => dimension_preview(v, pts, p),
         "grid" => grid_preview(v, pts, p),
         "dimround" => dimround_preview(root, v, ctx, pts, p),
-        "autodim" => p.ok = !auto_dims(root, ctx, "autodim", autodim_scale(v)).is_empty(),
+        "autodim" => p.ok = !auto_dims(root, project, ctx, "autodim", autodim_scale(v)).is_empty(),
         _ => return false,
     }
     true
 }
 
 /// Treffer-Abfragen der 2D-Befehle (`None` = keine dieses Moduls).
-pub fn query(root: &Map<String, Value>, v: &Value) -> Option<Value> {
+pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Value> {
     let at = p_of(v, "pt");
     Some(match s_of(v, "q") {
-        "pickTangent" => match pick_tangent(root, s_of(v, "level"), at) {
-            Some((t, d)) => json!({ "hit": { "target": target_json(&t), "id": id_of(d) } }),
+        "pickTangent" => match pick_tangent(p, s_of(v, "level"), at) {
+            Some((t, d)) => json!({ "hit": { "target": target_json(&t), "id": d.id } }),
             None => json!({ "hit": null }),
         },
         "dimChain" => {
@@ -1435,12 +1436,12 @@ mod tests {
         let v = json!({"cmd": "text", "at": {"x": 0.1, "y": -0.1}, "ctx": {"level": "blatt", "cat": "20", "textHeight": 0.0035}});
         let c = crate::cmd_create::ctx_of(&v);
         assert_eq!(c.text_height, 0.0035);
-        let o = ops(&Map::new(), &v, &c, &mut IdGen::new("s")).unwrap();
+        let o = ops(&Map::new(), &Project::default(), &v, &c, &mut IdGen::new("s")).unwrap();
         assert_eq!(o[0].to_json()["items"][0]["geom"]["height"], 0.0035);
         // [37] Im Grundriss in Papiergrösse (2.5 mm), auf dem Blatt (`sheet`) nicht.
         assert_eq!(o[0].to_json()["items"][0]["geom"]["paperHeight"], 2.5);
         let sheet = json!({"cmd": "text", "at": {"x": 0.1, "y": -0.1}, "ctx": {"level": "blatt", "cat": "20", "textHeight": 0.0035, "sheet": true}});
-        let o = ops(&Map::new(), &sheet, &crate::cmd_create::ctx_of(&sheet), &mut IdGen::new("s")).unwrap();
+        let o = ops(&Map::new(), &Project::default(), &sheet, &crate::cmd_create::ctx_of(&sheet), &mut IdGen::new("s")).unwrap();
         assert!(o[0].to_json()["items"][0]["geom"].get("paperHeight").is_none());
         let plain = json!({"ctx": {"level": "eg", "textHeight": -1}});
         assert_eq!(crate::cmd_create::ctx_of(&plain).text_height, crate::cmd_create::DEFAULT_TEXT_HEIGHT);
@@ -1454,7 +1455,7 @@ mod tests {
     #[test]
     fn achsraster_befehl() {
         let v = json!({"cmd": "grid", "at": {"x": 1, "y": 2}, "xs": "5 3x6", "ys": "4,5 4", "angle": 0, "bubbles": "end", "levels": ["L"]});
-        let o = ops(&Map::new(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
+        let o = ops(&Map::new(), &Project::default(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
         let g = &o[0].to_json()["items"][0]["geom"];
         assert_eq!(g["shape"], "grid");
         assert_eq!(g["a"].as_array().unwrap().len(), 5);
@@ -1466,10 +1467,10 @@ mod tests {
         assert!(serde_json::from_value::<crate::model::Drawing2DGeom>(g.clone()).is_ok());
         // Ohne `angle` (Befehl aus der Hülle) gilt 0; leere Querachsen sind erlaubt.
         let bare = json!({"cmd": "grid", "at": [0, 0], "xs": "5", "ys": ""});
-        let o2 = ops(&Map::new(), &bare, &ctx(), &mut IdGen::new("s")).unwrap();
+        let o2 = ops(&Map::new(), &Project::default(), &bare, &ctx(), &mut IdGen::new("s")).unwrap();
         assert_eq!(o2[0].to_json()["items"][0]["geom"]["angle"], 0);
         let bad = json!({"cmd": "grid", "at": {"x": 0, "y": 0}, "xs": "x", "ys": ""});
-        assert!(ops(&Map::new(), &bad, &ctx(), &mut IdGen::new("s")).unwrap().is_empty());
+        assert!(ops(&Map::new(), &Project::default(), &bad, &ctx(), &mut IdGen::new("s")).unwrap().is_empty());
         // Vorschau am Cursor.
         let mut p = Preview { shapes: Shapes::default(), ok: false, info: vec![] };
         grid_preview(&v, &[(0.0, 0.0)], &mut p);
@@ -1482,18 +1483,18 @@ mod tests {
         let root = json!({"drawings2d": [{"id": "K", "levelId": "L", "categoryCode": "20", "geom": {"shape": "circle", "center": {"x": 1, "y": 1}, "r": 2}}]});
         let root = root.as_object().unwrap().clone();
         let v = json!({"cmd": "dimround", "kind": "diameter", "pts": [[3.01, 1.0]]});
-        let o = ops(&root, &v, &ctx(), &mut IdGen::new("s")).unwrap();
+        let o = ops(&root, &Project::default(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
         let g = &o[0].to_json()["items"][0]["geom"];
         assert_eq!(g["kind"], "diameter");
         assert_eq!(g["refs"][0]["feature"], "center");
         assert_eq!(g["refs"][1]["feature"], "rim");
         let v = json!({"cmd": "dimround", "kind": "arc", "pts": [[3.0, 1.0], [1.0, 3.0]], "side": [1.0, 4.0]});
-        let g = &ops(&root, &v, &ctx(), &mut IdGen::new("s")).unwrap()[0].to_json()["items"][0]["geom"];
+        let g = &ops(&root, &Project::default(), &v, &ctx(), &mut IdGen::new("s")).unwrap()[0].to_json()["items"][0]["geom"];
         assert_eq!(g["pts"].as_array().unwrap().len(), 3);
         assert!((g["offset"].as_f64().unwrap() - 1.0).abs() < 1e-9);
         // Kein Kreis in der Nähe → nichts.
         let far = json!({"cmd": "dimround", "kind": "radius", "pts": [[50.0, 50.0]]});
-        assert!(ops(&root, &far, &ctx(), &mut IdGen::new("s")).unwrap().is_empty());
+        assert!(ops(&root, &Project::default(), &far, &ctx(), &mut IdGen::new("s")).unwrap().is_empty());
     }
 
     #[test]
@@ -1509,7 +1510,7 @@ mod tests {
     #[test]
     fn polylinie_tangential_und_schluss() {
         let v = json!({"cmd": "polyline", "pts": [[0, 0], [2, 0], [2, 2]], "segs": [0, 1], "closed": true, "closing": 0});
-        let o = ops(&Map::new(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
+        let o = ops(&Map::new(), &Project::default(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
         let g = &o[0].to_json()["items"][0]["geom"];
         assert_eq!(g["bulge"].as_array().unwrap().len(), 3);
         assert!(g["bulge"][1].as_f64().unwrap().abs() > 0.1);
@@ -1519,10 +1520,10 @@ mod tests {
     #[test]
     fn rechteck_gerundet_und_kreis_durch_drei_punkte() {
         let v = json!({"cmd": "rect", "method": "corner", "a": [0, 0], "b": [2, 1], "radius": 0.1});
-        let o = ops(&Map::new(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
+        let o = ops(&Map::new(), &Project::default(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
         assert_eq!(o[0].to_json()["items"][0]["geom"]["pts"].as_array().unwrap().len(), 8);
         let v = json!({"cmd": "circle", "method": "threePoint", "pts": [[1, 0], [0, 1], [-1, 0]]});
-        let o = ops(&Map::new(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
+        let o = ops(&Map::new(), &Project::default(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
         assert_eq!(o[0].to_json()["items"][0]["geom"]["r"], 1);
     }
 
@@ -1533,7 +1534,7 @@ mod tests {
         assert_eq!(out[1], json!({"x": 2, "y": 0}));
         let root = json!({"drawings2d": [{"id": "d", "levelId": "L", "geom": {"shape": "dimension", "pts": [], "offset": 0}}]});
         let v = json!({"cmd": "dimension", "pts": [[0, 0], [4, 0]], "side": [1, 1], "editId": "d"});
-        let o = ops(root.as_object().unwrap(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
+        let o = ops(root.as_object().unwrap(), &Project::default(), &v, &ctx(), &mut IdGen::new("s")).unwrap();
         assert_eq!(o[0].to_json()["entity"]["geom"]["offset"], 1);
     }
 }

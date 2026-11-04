@@ -29,7 +29,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Vec<Op>
     let cmd = v.get("cmd").and_then(Value::as_str).unwrap_or("");
     let ids = |k: &str| -> Vec<String> { v.get(k).and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default() };
     let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    if let Some(ops) = crate::cmd_edit::ops(root, &v) {
+    if let Some(ops) = crate::cmd_edit::ops(root, p, &v) {
         return Ok(ops);
     }
     if let Some(ops) = crate::cmd_create::ops(root, p, &v) {

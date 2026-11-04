@@ -1130,6 +1130,16 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   `cmd_edit`, `cmd_transform`, `cmd_wall_edit`, `cmd_split`, `cmd_paste`, Rest `cmd_solid`/`cmd_create` (Wand,
   Picks, Extrusion), `grips`, `selection_info`, `dim_assoc`, `pens`, `layers`, `geo_translate`, Importe; Einfügen
   einer Kopie eines Alt-Fehler-Elements (`add`) wird jetzt abgelehnt. Nicht in der Tauri-App geprüft.
+  4.11. Stufe 2 (mechanisch, Verhalten gleich): `cmd_wall_edit` liest Wände, Wandtypen, Öffnungen, Bemassungen und
+  2D-Grenzen typisiert (`&Project`/`&Wall`/`&Drawing2D`; `Axis::of(&Wall)`, `Plan.src: &Wall`); die rohen Elemente
+  holen nur noch `commit`/`join_ops`/`opening_ops`/`dim_ops` per id, um sie verlustfrei zurückzuschreiben.
+  `cmd_edit::ops/query` und die Wand-Anfragen (`pickWall`, Trim/Extend/Bruch/Offset/Verrunden) nehmen `&Project`;
+  `cmd_draw`: `auto_dims` (Aussenbemassung) und `pick_tangent` typisiert, `ops/preview/query` mit `&Project`
+  (`cmd_create::query` ebenso, `web/*` über `project_lookup`). **Offen** (Rest rohes JSON, Zahl der Zeilen mit
+  `field/num_of/truthy/js_num/arr`): `selection_info` ~200, `grips` ~145, `cmd_solid` ~90, `cmd_transform` ~80,
+  `cmd_create` ~60, `cmd_edit` (Kurven/Ecken/Aufloesen auf 2D-Zeichnungen) ~45, `cmd_draw` (Bemassung/Polylinie) ~40,
+  `cmd_split` ~25, `geo_translate`, `pens`, `layers`, Importe. `selection_info`/`grips` bewusst nicht angefasst:
+  sie geben fehlende/`null`-Felder unverändert ins Ergebnis-JSON weiter (undefined ≠ null), das braucht eigene Tests.
 - ✅ **[125] Doppelte Schnitt-Dominanz** (`render3d/section_boolean.rs` ↔ `core/plan_section.rs`) auf eine Fassung. · S
   3.11.: eine Fassung `dossier_hatch::section_dominance` (f64, JS-`min/max`, Schneider-Vorauswahl `ugrid` — mit
   `ugrid` aus dem Kern nach `hatchgen` verschoben); `core/plan/section.rs` und `render3d/section_boolean.rs` sind

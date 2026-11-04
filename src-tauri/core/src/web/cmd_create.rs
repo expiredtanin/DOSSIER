@@ -51,7 +51,10 @@ pub fn doc_create_query(h: u32, req_json: &str) -> String {
         Ok(v) => v,
         Err(e) => return format!("\u{1}Zeichen-Abfrage: {e}"),
     };
-    match with_doc(h, |d| crate::cmd_create::query(d.root(), &v)) {
+    match with_doc(h, |d| match d.project_lookup() {
+        Ok((p, lk)) => crate::cmd_create::query(lk.root, p, &v),
+        Err(e) => Some(Err(e)),
+    }) {
         Some(Some(Ok(v))) => v.to_string(),
         Some(Some(Err(e))) => format!("\u{1}{e}"),
         Some(None) => "\u{1}Unbekannte Zeichen-Abfrage".to_string(),
