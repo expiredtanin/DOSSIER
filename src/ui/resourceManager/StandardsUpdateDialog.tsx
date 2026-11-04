@@ -9,7 +9,7 @@ import type { Project } from "../../model/types";
 import { standardsChangeKey, standardsUpdatePlan } from "../../model/standards";
 import { t } from "../../i18n";
 
-const COLLECTION_ORDER = ["components", "hatches", "lineStyles", "wallTypes", "ceilingTypes", "roofTypes"];
+const COLLECTION_ORDER = ["components", "hatches", "lineStyles", "wallTypes", "ceilingTypes", "roofTypes", "viewTemplates"];
 
 export function StandardsUpdateDialog({
   project,

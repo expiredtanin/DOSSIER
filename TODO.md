@@ -1882,7 +1882,10 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   der Blatt-Leiste, Klick wählt sie, HUD: Titel, X/Y, Arten, „Auswahl festhalten“ / automatisch.
   Offen: Verschieben per Ziehen (heute X/Y-Felder), DXF-Legende nur im Satz-Export (nicht im allgemeinen DXF-Dialog).
 - ○ **[65] Explosionsaxonometrie.** · S–M
-- ○ **[66] Präsentationspläne mit einem Klick.** · M
+- ◐ **[66] Präsentationspläne mit einem Klick.** · M — 4.11.: Standard-Ansichtsvorlagen (neue Projekte, „Standards
+  laden/aktualisieren"): „Präsentation" (farbig, Schatten, ohne Referenzen/Konstruktion), „Eingabeplan 1:100" und
+  „Ausführungsplan 1:50" (schwarz-weiss, fein, Strichstärken nach Massstab) — an Geschoss/Schnitt/Ansicht binden ([34]).
+  Offen: eigener Knopf „Präsentationsplan" (Blatt mit Grundrissen/Ansichten und Vorlage in einem Schritt).
 - ○ **[67] Skizzenstil.** · M
 - ◐ **[25] IFC-Import** → [B3] ✅ (Mesh), [B4] ◐ (Bauteile). · L
 - ◐ **[26] Dächer über beliebige Grundrisse.** `geometry/roofSkeleton.ts` (Walm/Sattel/Mansarde/

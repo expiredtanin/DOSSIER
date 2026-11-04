@@ -26,10 +26,11 @@ export interface StandardsMergeCounts {
   wallTypes: number;
   ceilingTypes: number;
   roofTypes: number;
+  viewTemplates: number;
 }
 
 export function standardsMergeCounts(ops: readonly CoreOp[]): StandardsMergeCounts {
-  const out: StandardsMergeCounts = { lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0 };
+  const out: StandardsMergeCounts = { lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0, viewTemplates: 0 };
   for (const op of ops) {
     const key = op.kind === "add" ? op.collection : op.kind === "setField" ? op.key : null;
     const n = op.kind === "add" ? op.items.length : op.kind === "setField" && Array.isArray(op.value) ? op.value.length : 0;

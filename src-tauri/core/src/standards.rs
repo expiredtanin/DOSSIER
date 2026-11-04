@@ -267,6 +267,20 @@ pub fn roof_types() -> Vec<Value> {
 }
 
 /// Alle Standard-Ressourcen je Projekt-Liste, in Abhängigkeitsreihenfolge.
+/// [66] Ansichtsvorlagen für Pläne „mit einem Klick" (an Geschoss/Schnitt/Ansicht binden oder anwenden):
+/// Präsentation (farbig, Schatten, ohne Referenz- und Konstruktionslinien), Eingabe 1:100 und Ausführung 1:50
+/// (schwarz-weiss nach SIA 400).
+pub fn view_templates() -> Vec<Value> {
+    vec![
+        json!({"id": "std-vt-praesentation", "name": "Präsentation", "detail": "mittel", "mono": false, "shadows": true, "hiddenLines": false,
+               "layerVisibility": {"90": false, "99": false}}),
+        json!({"id": "std-vt-eingabe-100", "name": "Eingabeplan 1:100", "detail": "mittel", "scaleDenominator": 100, "mono": true, "shadows": false,
+               "layerVisibility": {"99": false}}),
+        json!({"id": "std-vt-ausfuehrung-50", "name": "Ausführungsplan 1:50", "detail": "fein", "scaleDenominator": 50, "mono": true, "shadows": false,
+               "scaleLineWeights": true, "layerVisibility": {"99": false}}),
+    ]
+}
+
 pub fn library() -> Vec<(&'static str, Vec<Value>)> {
     vec![
         ("lineStyles", line_styles()),
@@ -275,6 +289,7 @@ pub fn library() -> Vec<(&'static str, Vec<Value>)> {
         ("wallTypes", wall_types()),
         ("ceilingTypes", ceiling_types()),
         ("roofTypes", roof_types()),
+        ("viewTemplates", view_templates()),
     ]
 }
 
