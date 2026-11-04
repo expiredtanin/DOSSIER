@@ -1491,6 +1491,71 @@ fn subtract_voids_in_section(cuts: Vec<Cut>, p: &Project, base: (f64, f64), u: (
     out
 }
 
+/// [95] Taschen der Taschen-Schiebetüren aus den geschnittenen Wandschichten aussparen (Hohlraum samt
+/// Blattbahn über die Türhöhe, wie im 3D-Körper).
+fn subtract_pockets_in_section(cuts: Vec<Cut>, p: &Project, base: (f64, f64), u: (f64, f64)) -> Vec<Cut> {
+    let by_wall = p.openings_by_wall();
+    let mut rects: Vec<Vec<[f64; 2]>> = Vec::new();
+    for w in &p.walls {
+        let Some(ops) = by_wall.get(w.id.as_str()) else { continue };
+        if crate::wall_arc::WallArc::of_wall(w).is_some() {
+            continue;
+        }
+        let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
+        let l = hypot2(dx, dy);
+        if !(l > 1e-9) {
+            continue;
+        }
+        let (ux, uy) = (dx / l, dy / l);
+        for [u0, u1, n0, n1, z0, z1] in model3d::wall_pocket_cuts(p, w, ops) {
+            let at = |a: f64, n: f64| [w.start.x + ux * a - uy * n, w.start.y + uy * a + ux * n];
+            let mut pts = vec![4.0];
+            for q in [at(u0, n0), at(u1, n0), at(u1, n1), at(u0, n1)] {
+                pts.extend(q);
+            }
+            let f = crate::voids::section_rects_flat(&pts, &[base.0, base.1, u.0, u.1]);
+            for k in 0..f.first().copied().unwrap_or(0.0) as usize {
+                let (a, b) = (f[1 + 2 * k], f[2 + 2 * k]);
+                rects.push(vec![[a, z0], [b, z0], [b, z1], [a, z1]]);
+            }
+        }
+    }
+    if rects.is_empty() {
+        return cuts;
+    }
+    let refs: Vec<&[[f64; 2]]> = rects.iter().map(|r| r.as_slice()).collect();
+    let cutters = encode_rings(&refs);
+    let mut out = Vec::with_capacity(cuts.len());
+    for cp in cuts {
+        if cp.pts.len() < 3 || cp.kind != Kind::Wall {
+            out.push(cp);
+            continue;
+        }
+        let ring = &encode_rings(&[cp.pts.as_slice()])[1..];
+        let nse = cp.nse.as_deref().unwrap_or(&[]);
+        let mut ns = vec![nse.len() as f64];
+        ns.extend(nse);
+        let f = crate::voids::subtract_rings_flat(ring, &cutters, &ns);
+        if f.is_empty() || f[0] < 0.0 {
+            out.push(cp);
+            continue;
+        }
+        let mut i = 1;
+        for _ in 0..f[0] as usize {
+            let n = f[i] as usize;
+            i += 1;
+            let pts: Vec<[f64; 2]> = (0..n).map(|j| [f[i + 2 * j], f[i + 2 * j + 1]]).collect();
+            i += 2 * n;
+            let m = f[i] as usize;
+            i += 1;
+            let nse: Vec<f64> = f[i..i + m].to_vec();
+            i += m;
+            out.push(Cut { pts, nse: (!nse.is_empty()).then_some(nse), ..cp.clone() });
+        }
+    }
+    out
+}
+
 /// Liest `[n, (k, u, v …) × n]` ab `i`.
 fn read_rings(f: &[f64], i: &mut usize) -> Vec<Vec<[f64; 2]>> {
     let mut out = Vec::new();
@@ -1956,7 +2021,7 @@ fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3
 /// `computeSection` (ohne den asynchronen Teil: die Körper-Netze kommen fertig aus TS).
 pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> Result<Option<Output>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
-    let walls_r = model3d::emit_walls(p, false)?;
+    let walls_r = model3d::emit_walls_with(p, false, false)?;
     let mut slabs_r = model3d::emit_slabs(p);
     slabs_r.extend(model3d::emit_stairs(p, true));
     let wi: Vec<render3d::WallInput> = walls_r.iter().map(wall_input).collect();
@@ -1994,6 +2059,7 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let base = plane.base();
     let u = plane.u_model();
     let cuts = subtract_voids_in_section(cuts, p, base, u);
+    let cuts = subtract_pockets_in_section(cuts, p, base, u);
     let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
     append_body_sections(&mut cuts, p, bodies, base, u);
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
@@ -2671,6 +2737,31 @@ mod tests {
             let mid = ((v as f32) as f64 + ((v as f32).next_up() as f64)) / 2.0;
             assert_eq!(json_f32(mid).to_bits(), json_f32_read(mid).to_bits(), "{mid}");
         }
+    }
+
+    /// [95] Schnitt quer durch die Tasche einer Taschen-Schiebetür: die Wandschichten fehlen dort über
+    /// die Türhöhe (7 cm × 2.0 m), ausserhalb der Tasche bleibt der Schnitt voll.
+    #[test]
+    fn schnitt_durch_die_tasche() {
+        use crate::plan::walls::tests::pocket_project;
+        let wall_area = |p: &Project, x: f64| {
+            let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x, y: -1.0 }, Vec2 { x, y: 1.0 }]), ..Default::default() };
+            let out = compute_section(p, &l, &[]).unwrap().unwrap();
+            out.cuts
+                .iter()
+                .filter(|c| c.kind == Kind::Wall)
+                .map(|c| {
+                    let n = c.pts.len();
+                    (0..n).map(|i| c.pts[i][0] * c.pts[(i + 1) % n][1] - c.pts[(i + 1) % n][0] * c.pts[i][1]).sum::<f64>().abs() / 2.0
+                })
+                .sum::<f64>()
+        };
+        let p = pocket_project(DoorTypeKind::Tasche, Some(OpeningHinge::End), 1.0);
+        let full = wall_area(&p, 3.5);
+        assert!((full - 0.16 * 2.6).abs() < 1e-4, "{full}");
+        assert!((full - wall_area(&p, 2.4) - 0.07 * 2.0).abs() < 1e-4);
+        // Gegenseite (Anschlag, x = 0.5) ohne Tasche.
+        assert!((full - wall_area(&p, 0.5)).abs() < 1e-4);
     }
 
     #[test]

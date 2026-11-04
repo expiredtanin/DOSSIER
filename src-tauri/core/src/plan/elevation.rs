@@ -858,7 +858,12 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
                 },
                 if (door && dt.and_then(|t| t.inset_face) == Some(DoorTypeInsetFace::Innen)) || (!door && wt.and_then(|t| t.inset_face) == Some(WindowTypeInsetFace::Innen)) { -1.0 } else { 1.0 },
                 match dt.map(|t| t.kind) {
-                    Some(DoorTypeKind::Schiebe | DoorTypeKind::Tasche) => 1.0,
+                    // Schiebe-/Taschentür: Pfeil zur Park-/Taschenseite (Bandseite), zweiflügelig beidseitig.
+                    Some(DoorTypeKind::Schiebe | DoorTypeKind::Tasche) => match dt.map_or(1.0, |t| round(t.leaf_count)) {
+                        n if n >= 2.0 => 5.0,
+                        _ if op.hinge.is_some_and(|s| s != OpeningHinge::Start) => 4.0,
+                        _ => 1.0,
+                    },
                     Some(DoorTypeKind::Hebeschiebe) => 2.0,
                     Some(DoorTypeKind::Pendel) => 3.0,
                     _ => 0.0,
@@ -1212,7 +1217,7 @@ fn terrain_silhouette(p: &Project, t: &TerrainMesh, frame: &[f64; 9], range: (f6
 pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
     let frame = frame_of(&plane);
-    let mut walls = model3d::emit_walls(p, false)?;
+    let mut walls = model3d::emit_walls_with(p, false, false)?;
     let mut slabs = model3d::emit_slabs(p);
     slabs.extend(model3d::emit_stairs(p, false));
     extend_wall_corners(p, &mut walls, (frame[6], frame[8]));

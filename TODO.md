@@ -1989,10 +1989,14 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   der Bandseite (`hinge` der Öffnung), zweiflügelig beidseitig; Grundriss: Blatt als schmales Rechteck in der Wandmitte,
   in der Tasche gestrichelt, Taschen-Umriss (dünn) über Blattbreite + 5 cm, Pfeil zur Tasche; Schnitt wie Schiebetür
   (Blatt mittig), Ansicht mit Schiebepfeil, 3D Blatt in der Wanddicke, IFC SLIDING_TO_LEFT/RIGHT; Türart in Dialog und
-  Ressourcen. Offen: Tasche nicht als Hohlraum aus dem 3D-Wandkörper und der Grundriss-Schraffur ausgespart, Ansicht-
-  Pfeil zeigt fest nach links (nicht zur Tasche); nicht in der Tauri-App geprüft. Offen sonst: Ansicht zeigt bei
-  zweiflügeliger Schiebetür nur einen Pfeil, 3D/Ansicht ohne Hebeschiebe-Bandseite in der Ansicht, Brüstungs-/Riegel-
-  Einteilung unten (nur Oberlicht), nicht in der Tauri-App geprüft.
+  Ressourcen. (04.11.) Tasche als Hohlraum (Blattbreite + 5 cm × Blatt + Luft, mittig; `opening_geom::pocket_cavities`):
+  Grundriss spart sie aus Schichtflächen, Fugen und Wandumriss aus (Leibung an der Taschenmündung offen), 3D-Wandkörper
+  quer/längs um die Tasche geteilt (bis Türhöhe, darüber Wand; Volumen −Hohlraum), Schnitt spart sie aus den
+  Schichtbändern aus; Ansicht: Schiebepfeil zur Bandseite (Schiebe- und Taschentür), zweiflügelig zwei Pfeile nach aussen.
+  Geprüft: Rust-Tests (Fläche/Seite/Volumen/Schnitt/Pfeil), CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux). Offen:
+  Tasche in Bogenwänden und unter schrägen Wandoberkanten (`top_drop`) nicht ausgespart; nicht in der Tauri-App geprüft.
+  Offen sonst: 3D/Ansicht ohne Hebeschiebe-Bandseite in der Ansicht, Brüstungs-/Riegel-Einteilung unten (nur
+  Oberlicht), nicht in der Tauri-App geprüft.
 - ◐ **[103] Dachfenster und Öffnungen in Dach/Decke.** (29.10., Grundlage für Lukarnen) Wirt allgemein: `Opening`
   neu `hostRoofId` | `hostCeilingId` (dann `hostWallId` leer), `hostPoint` (Mitte im Grundriss), `hostAngle`
   (Breitenrichtung auf waagrechten Flächen). `width` quer zum Gefälle, `height` entlang des Gefälles, in der
