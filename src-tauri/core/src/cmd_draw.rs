@@ -368,7 +368,7 @@ fn straight_edges(g: &Drawing2DGeom) -> Vec<(V, V)> {
     match g {
         Drawing2DGeom::Line { a, b } => vec![(v(a), v(b))],
         Drawing2DGeom::Rect { min, max } => polyline_edges(&corners_of(v(min), v(max)), true),
-        Drawing2DGeom::Polyline { pts, closed, bulge } => {
+        Drawing2DGeom::Polyline { pts, closed, bulge, .. } => {
             let pts: Vec<V> = pts.iter().map(v).collect();
             polyline_edges(&pts, *closed)
                 .into_iter()

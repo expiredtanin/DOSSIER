@@ -59,7 +59,13 @@ fn shift_geom(g: &Value, dx: f64, dy: f64) -> Value {
     let mut m = obj(g);
     match g.get("shape").and_then(Value::as_str).unwrap_or("") {
         "line" | "xline" | "ray" => shift_pts_fields(&mut m, &["a", "b"], dx, dy, &[]),
-        "polyline" | "bezier" | "spline" | "dimension" => shift_pts_fields(&mut m, &[], dx, dy, &["pts"]),
+        "polyline" | "bezier" | "spline" | "dimension" => {
+            shift_pts_fields(&mut m, &[], dx, dy, &["pts"]);
+            // Inseln ([77]).
+            if let Some(Value::Array(hs)) = g.get("holes") {
+                m.insert("holes".into(), Value::Array(hs.iter().map(|h| shift_all(Some(h), dx, dy)).collect()));
+            }
+        }
         "rect" | "image" => shift_pts_fields(&mut m, &["min", "max"], dx, dy, &[]),
         "circle" | "arc" | "ellipse" => shift_pts_fields(&mut m, &["center"], dx, dy, &[]),
         "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => shift_pts_fields(&mut m, &["at"], dx, dy, &[]),

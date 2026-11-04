@@ -493,8 +493,12 @@ fn room_inside(p: &Project, level: &str, at: V) -> Option<Vec<V>> {
 /// Raum aus Umriss (Modus „manuell“: `pts`; „innen“: `at` → Zelle).
 /// Zauberstab ([77]): geschlossene Polylinie um die Masche unter `at` (mit `hatchId`, falls angegeben: Schraffur).
 fn wand_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
-    let Some(ring) = opt_p(v, "at").and_then(|at| crate::magic_wand::region_at(p, ctx.level, at)) else { return Vec::new() };
-    let g = obj(vec![("shape", s("polyline")), ("pts", pvs(&ring)), ("closed", Value::Bool(true))]);
+    let Some(r) = opt_p(v, "at").and_then(|at| crate::magic_wand::region_at(p, ctx.level, at)) else { return Vec::new() };
+    let mut f = vec![("shape", s("polyline")), ("pts", pvs(&r.outer)), ("closed", Value::Bool(true))];
+    if !r.holes.is_empty() {
+        f.push(("holes", Value::Array(r.holes.iter().map(|h| pvs(h)).collect())));
+    }
+    let g = obj(f);
     let mut d = crate::cmd_draw::drawing(ids.next("dr2d"), ctx, g);
     if let (Some(m), Some(h)) = (d.as_object_mut(), v.get("hatchId").and_then(Value::as_str).filter(|h| !h.is_empty())) {
         m.insert("hatchId".into(), s(h));
@@ -1047,7 +1051,12 @@ pub fn preview_req(root: &Map<String, Value>, project: &Project, req: &Req, pts:
         "roomInside" => p.ok = pts.first().and_then(|at| room_inside(project, ctx.level, *at)).is_some_and(|b| b.len() >= 3),
         // Zauberstab ([77]): die gefundene Masche unter dem Cursor.
         "wand" => match pts.first().and_then(|at| crate::magic_wand::region_at(project, ctx.level, *at)) {
-            Some(ring) => out.poly(&ring),
+            Some(r) => {
+                out.poly(&r.outer);
+                for h in &r.holes {
+                    out.poly(h);
+                }
+            }
             None => p.ok = false,
         },
         "column" => {

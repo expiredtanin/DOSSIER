@@ -1931,6 +1931,15 @@ struct RbHalfEdge {
 
 /// Extrahiert die minimalen geschlossenen Maschen (Port von `extractFaces`).
 fn extract_faces(nodes: &[RbNode], edges: &[RbUEdge]) -> Vec<Vec<usize>> {
+    // Aussenmaschen verwerfen: nur CCW (positive Flaeche) behalten.
+    extract_all_faces(nodes, edges).into_iter().filter(|f| {
+        let poly: Vec<Vec2> = f.iter().map(|&n| nodes[n].p).collect();
+        signed_area(&poly) > RB_EPS
+    }).collect()
+}
+
+/// Alle Maschen-Umläufe: innere CCW, die Aussenränder je Zusammenhangskomponente CW.
+fn extract_all_faces(nodes: &[RbNode], edges: &[RbUEdge]) -> Vec<Vec<usize>> {
     let mut half_edges: Vec<RbHalfEdge> = Vec::new();
     let mut outgoing: Vec<Vec<usize>> = (0..nodes.len()).map(|_| Vec::new()).collect();
 
@@ -1992,12 +2001,7 @@ fn extract_faces(nodes: &[RbNode], edges: &[RbUEdge]) -> Vec<Vec<usize>> {
             faces.push(face_nodes);
         }
     }
-
-    // Aussenmaschen verwerfen: nur CCW (positive Flaeche) behalten.
-    faces.into_iter().filter(|f| {
-        let poly: Vec<Vec2> = f.iter().map(|&n| nodes[n].p).collect();
-        signed_area(&poly) > RB_EPS
-    }).collect()
+    faces
 }
 
 // ── Innen-Offset ──────────────────────────────────────────────────────────────
@@ -2247,6 +2251,78 @@ pub fn room_from_point_inside_faces(
     }
 
     best
+}
+
+/// Zauberstab ([77]): kleinste Masche um `point` wie [`room_from_point_inside_faces`] (CCW), dazu ihre
+/// Inseln (CW): Aussenränder der Zusammenhangskomponenten des Graphen, die die Masche nicht berühren und
+/// ganz in ihr liegen. Nur die äussersten Inseln (eine Insel in einer Insel ist kein Loch des Lochs).
+pub fn region_with_islands(point: Vec2, wall_faces: &[WallFace], gap_tol: f64) -> Option<(Vec<Vec2>, Vec<Vec<Vec2>>)> {
+    if wall_faces.len() < 3 {
+        return None;
+    }
+    let segs: Vec<(Vec2, Vec2)> = wall_faces.iter().map(|f| (f.a, f.b)).collect();
+    let (nodes, edges) = build_planar_graph(&segs, gap_tol);
+    if edges.len() < 3 {
+        return None;
+    }
+    // Zusammenhangskomponenten (Union-Find über die Kanten).
+    let mut parent: Vec<usize> = (0..nodes.len()).collect();
+    fn root(p: &mut [usize], mut i: usize) -> usize {
+        while p[i] != i {
+            p[i] = p[p[i]];
+            i = p[i];
+        }
+        i
+    }
+    for e in &edges {
+        let (a, b) = (root(&mut parent, e.u), root(&mut parent, e.v));
+        parent[a] = b;
+    }
+    let faces = extract_all_faces(&nodes, &edges);
+    let ring_of = |f: &[usize]| dedupe_ring_rb(&f.iter().map(|&n| nodes[n].p).collect::<Vec<_>>());
+
+    let mut best: Option<(Vec<Vec2>, usize)> = None;
+    let mut best_area = f64::INFINITY;
+    // Aussenrand je Komponente: der CW-Umlauf mit der grössten Fläche.
+    let mut outer: std::collections::HashMap<usize, (f64, Vec<Vec2>)> = std::collections::HashMap::new();
+    for f in &faces {
+        let poly = ring_of(f);
+        if poly.len() < 3 {
+            continue;
+        }
+        let comp = root(&mut parent, f[0]);
+        let sa = signed_area(&poly);
+        if sa > RB_EPS {
+            if rb_point_in_polygon(point, &poly) {
+                let area = polygon_area(&poly);
+                if area < best_area {
+                    best_area = area;
+                    best = Some((poly, comp));
+                }
+            }
+        } else if sa < -RB_EPS && outer.get(&comp).is_none_or(|(a, _)| -sa > *a) {
+            outer.insert(comp, (-sa, poly));
+        }
+    }
+    let (ring, comp) = best?;
+    let mut cands: Vec<Vec<Vec2>> = outer
+        .into_iter()
+        .filter(|(c, (_, r))| *c != comp && rb_point_in_polygon(r[0], &ring) && !rb_point_in_polygon(point, r))
+        .map(|(_, (_, r))| r)
+        .collect();
+    // Stabile Reihenfolge (HashMap): nach erstem Punkt.
+    cands.sort_by(|a, b| (a[0].x, a[0].y).partial_cmp(&(b[0].x, b[0].y)).unwrap_or(std::cmp::Ordering::Equal));
+    let holes: Vec<Vec<Vec2>> = cands
+        .iter()
+        .enumerate()
+        .filter(|(i, r)| !cands.iter().enumerate().any(|(j, o)| j != *i && rb_point_in_polygon(r[0], o)))
+        .map(|(_, r)| r.clone())
+        .collect();
+    let mut out = ring;
+    if signed_area(&out) < 0.0 {
+        out.reverse();
+    }
+    Some((out, holes))
 }
 
 // --- Oeffnungs-Geometrie (Port von src/geometry/opening.ts, Slice 4) --------

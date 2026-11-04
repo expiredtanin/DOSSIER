@@ -309,7 +309,9 @@ pub fn compact_eligible(d: &Drawing2D) -> bool {
     let marks = d.end_marks.as_ref().is_some_and(|m| m.start.is_some() || m.end.is_some());
     match &d.geom {
         Drawing2DGeom::Line { .. } => !marks,
-        Drawing2DGeom::Polyline { bulge, .. } => !marks && bulge.as_ref().is_none_or(|b| b.iter().all(|v| *v == 0.0 || v.is_nan())),
+        Drawing2DGeom::Polyline { bulge, holes, .. } => {
+            !marks && holes.as_ref().is_none_or(Vec::is_empty) && bulge.as_ref().is_none_or(|b| b.iter().all(|v| *v == 0.0 || v.is_nan()))
+        }
         _ => false,
     }
 }
@@ -651,13 +653,28 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 em.line(from, v(b.x + ux * XLINE_EXTEND_M, b.y + uy * XLINE_EXTEND_M), w, Some(&XLINE_DASH), DASH_REF_XLINE);
             }
         }
-        Drawing2DGeom::Polyline { pts, closed, bulge } => {
+        Drawing2DGeom::Polyline { pts, closed, bulge, holes } => {
             let n = pts.len();
             let bl = bulge.as_deref();
             let closed_ring = *closed && n > 2;
+            // Inseln ([77]): gültige Ringe (≥ 3 Punkte), nur bei geschlossener Kontur.
+            let holes: Vec<&Vec<Vec2>> = if closed_ring { holes.iter().flatten().filter(|h| h.len() >= 3).collect() } else { Vec::new() };
             if closed_ring {
                 let ring = bulge_polyline_points(pts, bl, true);
-                fill_poly(&mut em, ring)?;
+                if holes.is_empty() {
+                    fill_poly(&mut em, ring)?;
+                } else {
+                    // Ein Ring mit Brücken zu den Löchern (wie Decken): Füllung/Schraffur sparen sie aus.
+                    let outer: Vec<[f64; 2]> = ring.iter().map(|q| [q.x, q.y]).collect();
+                    let hs: Vec<Vec<[f64; 2]>> = holes.iter().map(|h| h.iter().map(|q| [q.x, q.y]).collect()).collect();
+                    let merged = crate::polygon_holes::merge_holes(&outer, &hs, 1e-4);
+                    fill_poly(&mut em, merged.ring.iter().map(|q| v(q[0], q[1])).collect())?;
+                }
+            }
+            for h in &holes {
+                for i in 0..h.len() {
+                    em.seg(h[i], h[(i + 1) % h.len()]);
+                }
             }
             let bulge_at = |i: usize| bl.and_then(|b| b.get(i)).copied();
             let open = !closed_ring;
@@ -1160,10 +1177,11 @@ pub fn mv_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2) -> Drawing2DGeom {
         G::Line { a, b } => G::Line { a: f(*a), b: f(*b) },
         G::Xline { a, b } => G::Xline { a: f(*a), b: f(*b) },
         G::Ray { a, b } => G::Ray { a: f(*a), b: f(*b) },
-        G::Polyline { pts, closed, bulge } => {
+        G::Polyline { pts, closed, bulge, holes } => {
             let pts = map(pts);
             let bulge = bulge.as_ref().map(|b| if reverses_orientation(f) { b.iter().map(|x| -x).collect() } else { b.clone() });
-            G::Polyline { pts, closed: *closed, bulge }
+            let holes = holes.as_ref().map(|hs| hs.iter().map(map).collect());
+            G::Polyline { pts, closed: *closed, bulge, holes }
         }
         G::Rect { min, max } => {
             let c = [*min, v(max.x, min.y), *max, v(min.x, max.y)].map(f);
@@ -1172,7 +1190,7 @@ pub fn mv_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2) -> Drawing2DGeom {
                 let fold = |k: fn(f64, f64) -> f64, s: fn(&Vec2) -> f64| c.iter().map(s).reduce(k).unwrap_or(f64::NAN);
                 G::Rect { min: v(fold(jsnum::min, |q| q.x), fold(jsnum::min, |q| q.y)), max: v(fold(jsnum::max, |q| q.x), fold(jsnum::max, |q| q.y)) }
             } else {
-                G::Polyline { pts: c.to_vec(), closed: true, bulge: None }
+                G::Polyline { pts: c.to_vec(), closed: true, bulge: None, holes: None }
             }
         }
         G::Circle { center, r } => G::Circle { center: f(*center), r: *r },
@@ -1889,6 +1907,23 @@ mod tests {
             .filter_map(|q| if let Primitive::DrawingText { text, .. } = q { Some(text) } else { None })
             .collect();
         assert_eq!(texts, vec!["-2.80".to_string(), "±0.00 = 512.40".into(), "+3.00".into()]);
+    }
+
+    /// [77] Polylinie mit Insel: die Fläche (Füllung/Schraffur) spart das Loch aus, sein Umriss wird gezeichnet.
+    #[test]
+    fn insel_wird_ausgespart() {
+        let p = project(serde_json::json!({}));
+        let mut d = drawing(serde_json::json!({"shape": "polyline", "closed": true,
+            "pts": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}],
+            "holes": [[{"x": 1, "y": 1}, {"x": 1, "y": 2}, {"x": 2, "y": 2}, {"x": 2, "y": 1}]]}));
+        d["fillColor"] = "#ff0000".into();
+        let out = render(&p, d.clone(), 100.0);
+        let Primitive::Polygon { pts, .. } = &out[0] else { panic!("{:?}", out[0]) };
+        let k: Vec<kernel2d::Vec2> = pts.iter().map(|q| kernel2d::Vec2::new(q.x, q.y)).collect();
+        assert!(!kernel2d::rb_point_in_polygon(kernel2d::Vec2::new(1.5, 1.5), &k), "{pts:?}");
+        assert!(kernel2d::rb_point_in_polygon(kernel2d::Vec2::new(3.0, 3.0), &k));
+        assert_eq!(out.len(), 1 + 4 + 4);
+        assert!(!compact_eligible(&serde_json::from_value(d).unwrap()));
     }
 
     #[test]

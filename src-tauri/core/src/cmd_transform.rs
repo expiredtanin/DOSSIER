@@ -134,6 +134,8 @@ pub fn mv_geom(g: &Value, xf: &Xf) -> Option<Value> {
         "line" | "xline" | "ray" => with_all(g, vec![("a", p("a")), ("b", p("b"))]),
         "polyline" => {
             let pts = ps("pts");
+            // Inseln ([77]) wandern mit.
+            let g = &if truthy(field(g, "holes")) { with(g, "holes", Value::Array(arr(field(g, "holes")).iter().map(|h| xf.pts(Some(h))).collect())) } else { g.clone() };
             if !truthy(field(g, "bulge")) {
                 return Some(with(g, "pts", pts));
             }
@@ -1095,6 +1097,16 @@ mod tests {
         assert_eq!(mv_geom(&rect, &rot).unwrap()["shape"], "polyline");
         assert_eq!(mv_geom(&rect, &Xf::translate(1.0, 1.0)).unwrap(), json!({"shape":"rect","min":{"x":1,"y":1},"max":{"x":3,"y":2}}));
         assert!(mv_geom(&json!({"shape":"?"}), &xf).is_none());
+    }
+
+    /// [77] Inseln einer Polylinie wandern mit (Verschieben, Skalieren).
+    #[test]
+    fn inseln_wandern_mit() {
+        let g = json!({"shape":"polyline","closed":true,"pts":[{"x":0,"y":0},{"x":4,"y":0},{"x":4,"y":4}],"holes":[[{"x":1,"y":1},{"x":2,"y":1},{"x":2,"y":2}]]});
+        let m = mv_geom(&g, &Xf::translate(1.0, 0.0)).unwrap();
+        assert_eq!(m["holes"], json!([[{"x":2,"y":1},{"x":3,"y":1},{"x":3,"y":2}]]));
+        let s = scale_geom(&g, &Xf::of("scale", &[(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)], 1.0), 2.0).unwrap();
+        assert_eq!(s["holes"][0][2], json!({"x":4,"y":4}), "{s}");
     }
 
     #[test]
