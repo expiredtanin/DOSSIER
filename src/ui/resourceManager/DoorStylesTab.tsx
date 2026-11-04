@@ -34,6 +34,7 @@ const DOOR_KIND_OPTIONS: { value: DoorType["kind"]; labelKey: string }[] = [
   { value: "wandoeffnung", labelKey: "resources.doorKind.wandoeffnung" },
   { value: "hebeschiebe", labelKey: "resources.doorKind.hebeschiebe" },
   { value: "pendel", labelKey: "resources.doorKind.pendel" },
+  { value: "tasche", labelKey: "resources.doorKind.tasche" },
 ];
 
 const DOOR_LEAF_STYLE_OPTIONS: { value: DoorType["leafStyle"]; labelKey: string }[] = [

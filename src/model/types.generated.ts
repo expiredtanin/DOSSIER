@@ -574,7 +574,7 @@ export type DoorType = {
    * Bauart: normaler Drehflügel, reine Wandöffnung (kein Blatt/Schwenk),
    * Schiebetür. Ersetzt/ergänzt das Inline-Feld `Opening.doorType`.
    */
-  kind: "dreh" | "schiebe" | "wandoeffnung" | "hebeschiebe" | "pendel";
+  kind: "dreh" | "schiebe" | "wandoeffnung" | "hebeschiebe" | "pendel" | "tasche";
   /** Anzahl Türblätter (1 = einflügelig, 2 = zweiflügelig). */
   leafCount: 1 | 2;
   /** Blatt-Ausführung (3D/Detail): glatt, Kassette, Glasfüllung. */

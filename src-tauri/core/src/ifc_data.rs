@@ -501,7 +501,7 @@ fn fill_params(p: &Project, o: &Opening) -> FillParams {
             .collect(),
         // Türart: Typ vor Öffnung.
         door_kind: match dt.map(|t| t.kind) {
-            Some(DoorTypeKind::Schiebe | DoorTypeKind::Hebeschiebe) => 1.0,
+            Some(DoorTypeKind::Schiebe | DoorTypeKind::Hebeschiebe | DoorTypeKind::Tasche) => 1.0,
             Some(DoorTypeKind::Pendel) => 3.0,
             Some(DoorTypeKind::Wandoeffnung) => 2.0,
             Some(_) => 0.0,
@@ -1635,6 +1635,10 @@ mod tests {
         assert_eq!(fill_params(&p, &wo).door_kind, 2.0);
         p.door_types = Some(vec![dt(DoorTypeKind::Wandoeffnung)]);
         assert_eq!(fill_params(&p, &opening(ElementKind::Door, Some("dt"))).door_kind, 2.0);
+        // [95] Taschen-Schiebetür: IFC wie Schiebetür (SLIDING_TO_LEFT/RIGHT nach Bandseite).
+        p.door_types = Some(vec![DoorType { leaf_count: 1.0, ..dt(DoorTypeKind::Tasche) }]);
+        let x = fill_params(&p, &o);
+        assert_eq!((x.door_kind, x.leaf_count, x.hinge_at_start), (1.0, 1.0, false));
     }
 
     #[test]

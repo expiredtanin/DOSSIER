@@ -879,6 +879,7 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
             DoorTypeKind::Schiebe => 1.0,
             DoorTypeKind::Hebeschiebe => 2.0,
             DoorTypeKind::Pendel => 3.0,
+            DoorTypeKind::Tasche => 4.0,
             _ => 0.0,
         },
         // Aufschlagseite wie im Grundriss (linke Normale), hier entlang der rechten Normalen.

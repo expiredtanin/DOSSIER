@@ -338,6 +338,7 @@ const DOOR_KIND_OPTS = (): { value: DoorKind; label: string }[] => [
   { value: "wandoeffnung", label: t("oed.door.wandoeffnung") },
   { value: "hebeschiebe", label: t("oed.door.hebeschiebe") },
   { value: "pendel", label: t("oed.door.pendel") },
+  { value: "tasche", label: t("oed.door.tasche") },
 ];
 
 function BasisPanel({
