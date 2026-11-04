@@ -347,8 +347,11 @@ export function useSelectAllAndDeleteShortcut(opts: {
           .map((c) => c.id);
         // Öffnungen haben kein eigenes floorId (das Geschoss ergibt sich aus
         // der Wirtswand) — über die bereits geschossgefilterten Wand-Ids.
+        // Dachfenster/Deckenöffnungen ([103]): über das Dach bzw. die Decke des Geschosses.
+        const roofIdSet = new Set((project.roofs ?? []).filter((r) => r.floorId === activeLevelId).map((r) => r.id));
+        const ceilingIdSet = new Set(ceilingIds);
         const openingIds = (project.openings ?? [])
-          .filter((o) => wallIdSet.has(o.hostWallId))
+          .filter((o) => wallIdSet.has(o.hostWallId) || (!!o.hostRoofId && roofIdSet.has(o.hostRoofId)) || (!!o.hostCeilingId && ceilingIdSet.has(o.hostCeilingId)))
           .map((o) => o.id);
         const stairIds = (project.stairs ?? [])
           .filter((s) => s.floorId === activeLevelId)
