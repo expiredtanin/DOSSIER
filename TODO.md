@@ -1739,8 +1739,9 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ◐ **[77] Zauberstab.** · M — 4.11.: Befehl `wand` (Kürzel `zs`/`zauberstab`): Klick in eine von Linien umschlossene
   Fläche (2D-Zeichnungen + Modellkanten des Geschosses, Kreise/Bögen als Sehnenzüge, Kreuzungen werden geteilt) →
   geschlossene Polylinie mit der ersten Projekt-Schraffur; Vorschau beim Überfahren. Kern `magic_wand.rs`
-  (planarer Graph, kleinste Masche, `kernel2d::room_from_point_inside_faces`), Tests Rust + vitest. Offen:
-  Schraffur/Option „nur Umriss", Inseln (Löcher) in der Fläche; Knopf in der Werkzeugleiste (2D) seit 4.11.; nicht in der App geklickt.
+  (planarer Graph, kleinste Masche, `kernel2d::room_from_point_inside_faces`), Tests Rust + vitest. Option S
+  wählt die Schraffur (alle der Reihe nach, dann „keine" = nur Umriss); Knopf in der Werkzeugleiste (2D). Offen: Inseln
+  (Löcher) in der Fläche; nicht in der App geklickt.
 - ✅ **[78] Autotext im Plankopf.** Titelblock löst Projekt/Blatt/Massstab/Datum auf; Plannummer laufend
   oder `Layout.planNumber` (27.10.).
 - ◐ **[79] Publikationssätze.** (30.10.) Modell (Rust, optional): `Project.publishSets` (`PublishSet`: Layouts in Reihenfolge,
