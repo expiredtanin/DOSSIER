@@ -15,14 +15,17 @@ test("Ansichtsvorlage: Kategorie ausblenden, anwenden, Vorlage ändern, Ansicht 
   };
   const closeResources = () => page.locator(".res-window").getByRole("button", { name: "Schließen" }).first().click();
   await openResources();
+  // Neue Projekte bringen Standard-Vorlagen mit ([66]); gezählt wird relativ dazu.
+  const rows = page.getByTestId("view-template-row");
+  const base = await rows.count();
   await page.getByTestId("view-template-add").click();
-  await expect(page.getByTestId("view-template-row")).toHaveCount(1);
+  await expect(rows).toHaveCount(base + 1);
 
   // Kategorie „Wände" (20) in der Vorlage ausblenden, dann mit der aktiven Ansicht verknüpfen.
   const wallsCat = page.getByTestId("view-template-categories").getByRole("combobox", { name: /^20 / });
   await wallsCat.selectOption("hide");
   await page.getByTestId("view-template-apply-linked").click();
-  await expect(page.getByTestId("view-template-row")).toContainText("1 verknüpft");
+  await expect(rows.filter({ hasText: "1 verknüpft" })).toHaveCount(1);
 
   // Ebenen-Panel: Wände sind ausgeblendet (Schalter bietet „Einblenden").
   await closeResources();
@@ -38,8 +41,8 @@ test("Ansichtsvorlage: Kategorie ausblenden, anwenden, Vorlage ändern, Ansicht 
 
   // Duplizieren und Löschen.
   await openResources();
-  await page.getByTitle("Vorlage duplizieren").click();
-  await expect(page.getByTestId("view-template-row")).toHaveCount(2);
+  await page.getByTitle("Vorlage duplizieren").last().click();
+  await expect(rows).toHaveCount(base + 2);
   await page.getByTitle("Vorlage löschen").last().click();
-  await expect(page.getByTestId("view-template-row")).toHaveCount(1);
+  await expect(rows).toHaveCount(base + 1);
 });
