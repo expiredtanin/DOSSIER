@@ -135,7 +135,7 @@ pub struct DoorTypeIn {
     pub zarge: bool,
     pub panel_cols: f64,
     pub panel_rows: f64,
-    /// Türart ([95]): 0 Dreh, 1 Schiebe (vor der Wand), 2 Hebeschiebe, 3 Pendel.
+    /// Türart ([95]): 0 Dreh, 1 Schiebe (vor der Wand), 2 Hebeschiebe, 3 Pendel, 4 Tasche (in der Wand).
     pub kind: f64,
     /// Schiebetür: Seite des Blatts (+1 = +n, aussen; −1 innen).
     pub slide_side: f64,
@@ -520,8 +520,8 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
             wing_count: jmax(1.0, js_round(or(d.leaf_count, 1.0))),
             mullion_rows: 1.0,
             mullion_cols: 1.0,
-            // Schiebe-/Hebeschiebeflügel zeichnet `door_leaf` selbst (eigene Lage bzw. Glasfelder).
-            glazed: d.leaf_style == LeafStyle::Glass && d.kind != 1.0 && d.kind != 2.0,
+            // Schiebe-/Hebeschiebe-/Taschenflügel zeichnet `door_leaf` selbst (eigene Lage bzw. Glasfelder).
+            glazed: d.leaf_style == LeafStyle::Glass && d.kind != 1.0 && d.kind != 2.0 && d.kind != 4.0,
             glazing_panes: 1.0,
             glazed_fraction: jmax(0.05, jmin(1.0, or(d.glazing_ratio, 1.0))),
             sashes: std::borrow::Cow::Borrowed(&[]),
@@ -925,6 +925,15 @@ fn door_leaf(em: &mut Emitter, o: &OpeningIn, p: &FrameParams) {
         let side = if p.slide_side < 0.0 { -1.0 } else { 1.0 };
         let (a, b) = (side * (p.half_thickness + 0.01), side * (p.half_thickness + 0.01 + DOOR_LEAF_THICK));
         em.axis_box(o.from - 0.05, o.to + 0.05, o.z_bottom, leaf_top, jmin(a, b), jmax(a, b), Part::DoorLeaf);
+        return;
+    }
+    if p.door_kind == 4.0 {
+        // Taschen-Schiebetür: Blatt in Schliessstellung in der Wandmitte, 5 cm in die Tasche (Bandseite,
+        // zweiflügelig beidseitig). Die Tasche selbst bleibt im Wandkörper (kein Hohlraum).
+        let t = jmin(DOOR_LEAF_THICK, p.half_thickness);
+        let ov = 0.05;
+        let (from, to) = if p.wing_count >= 2.0 { (o.from - ov, o.to + ov) } else if p.hinge_end { (o.from, o.to + ov) } else { (o.from - ov, o.to) };
+        em.axis_box(from, to, o.z_bottom, leaf_top, -t / 2.0, t / 2.0, Part::DoorLeaf);
         return;
     }
     let (n0, n1) = match falz {
@@ -1567,5 +1576,19 @@ mod tests {
         assert!(ys.iter().all(|y| *y > 0.15), "{ys:?}");
         let xs: Vec<f64> = (0..8).map(|i| leaf.positions[i * 3]).collect();
         assert!(xs.iter().cloned().fold(f64::INFINITY, f64::min) < 1.0 && xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max) > 2.2);
+        // [95] Taschen-Schiebetür: Blatt in der Wanddicke, auf der Bandseite in die Tasche.
+        if let KindIn::Door(k) = &mut d.kind {
+            k.kind = 4.0;
+            k.hinge_end = true;
+        }
+        let m = opening_meshes(&[wall(op(true, Some(d.clone())))], Detail::Fine);
+        let leaves: Vec<_> = m.iter().filter(|m| m.part == Part::DoorLeaf).collect();
+        assert_eq!(leaves.len(), 1, "Taschenblatt");
+        assert_eq!(m.iter().filter(|m| m.part == Part::Glass).count(), 0);
+        let ys: Vec<f64> = (0..8).map(|i| leaves[0].positions[i * 3 + 1]).collect();
+        assert!(ys.iter().all(|y| y.abs() <= 0.03), "{ys:?}");
+        let xs: Vec<f64> = (0..8).map(|i| leaves[0].positions[i * 3]).collect();
+        let (x0, x1) = (xs.iter().cloned().fold(f64::INFINITY, f64::min), xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+        assert!((x0 - 1.0).abs() < 1e-9 && (x1 - 2.25).abs() < 1e-9, "{x0} {x1}");
     }
 }

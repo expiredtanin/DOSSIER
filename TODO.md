@@ -1985,7 +1985,12 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Oberlichts, je Feld fest/kipp/dreh): Ansicht und 3D (Pfosten, Flügelrahmen, Symbole). Zweiflügelige Türen gab es schon
   (`leafCount`). Bibliothek: `opening_presets.rs` (6 Fenster-, 7 Türvorlagen, Namen über `preset.<id>`), Ressourcen-Tabs
   „Aus Bibliothek…“; Dialog „Fenster bearbeiten“: Türarten, Oberlicht-Felder/-Öffnung. Geprüft: Rust-/vitest-Tests,
-  CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux). Offen: Taschen-Schiebetür (in der Wand), Ansicht zeigt bei
+  CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux). (04.11.) Taschen-Schiebetür: Türtyp `kind: "tasche"`, Tasche auf
+  der Bandseite (`hinge` der Öffnung), zweiflügelig beidseitig; Grundriss: Blatt als schmales Rechteck in der Wandmitte,
+  in der Tasche gestrichelt, Taschen-Umriss (dünn) über Blattbreite + 5 cm, Pfeil zur Tasche; Schnitt wie Schiebetür
+  (Blatt mittig), Ansicht mit Schiebepfeil, 3D Blatt in der Wanddicke, IFC SLIDING_TO_LEFT/RIGHT; Türart in Dialog und
+  Ressourcen. Offen: Tasche nicht als Hohlraum aus dem 3D-Wandkörper und der Grundriss-Schraffur ausgespart, Ansicht-
+  Pfeil zeigt fest nach links (nicht zur Tasche); nicht in der Tauri-App geprüft. Offen sonst: Ansicht zeigt bei
   zweiflügeliger Schiebetür nur einen Pfeil, 3D/Ansicht ohne Hebeschiebe-Bandseite in der Ansicht, Brüstungs-/Riegel-
   Einteilung unten (nur Oberlicht), nicht in der Tauri-App geprüft.
 - ◐ **[103] Dachfenster und Öffnungen in Dach/Decke.** (29.10., Grundlage für Lukarnen) Wirt allgemein: `Opening`

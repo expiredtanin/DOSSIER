@@ -451,6 +451,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         Some(DoorTypeKind::Schiebe) => 1.0,
         Some(DoorTypeKind::Hebeschiebe) => 2.0,
         Some(DoorTypeKind::Pendel) => 3.0,
+        Some(DoorTypeKind::Tasche) => 4.0,
         _ => 0.0,
     });
     b.push(sash_list.len() as f64);

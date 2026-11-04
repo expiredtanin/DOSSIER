@@ -14,7 +14,8 @@
 //! Stärken: haar, rahmenHaar, rahmenAufsicht, fluegel, sims,
 //! Details ([94]): anschlag (Meter, 0 keiner), bank (0 fehlt | 1 keine | 2 innen | 3 beide | 4 aussen),
 //!   kastenSturz (0 vorgesetzt | 1 im Sturz), kastenTiefe, kastenArt (0 Rollladen | 1 Raffstore | 2 Markise),
-//! Türart ([95]): 0 Dreh | 1 Schiebe (vor der Wand, Aufschlagseite) | 2 Hebeschiebe | 3 Pendel,
+//! Türart ([95]): 0 Dreh | 1 Schiebe (vor der Wand, Aufschlagseite) | 2 Hebeschiebe | 3 Pendel |
+//!   4 Tasche (Blatt in der Wand, Tasche auf der Bandseite),
 //! nFluegel, (pfosten, auto, breite, pfostenbreite, oeffenbar) × n]`.
 //!
 //! Ausgabe `[n, Eintrag × n]` in Zeichenreihenfolge:
@@ -151,6 +152,8 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             // Reine Wandöffnung: nur Lücke (und Sturzlinien).
         } else if door_kind == 1 {
             sliding_leaves(&mut o, &w, jamb_start, jamb_end, &door, count, hair);
+        } else if door_kind == 4 {
+            pocket_leaves(&mut o, &w, jamb_start, jamb_end, door.hinge_end, count, hair);
         } else if door_kind == 2 {
             // Gleise im Rahmen: hinter der Anschlag-Zone (bzw. mittig ohne Rahmentyp).
             let half = total / 2.0;
@@ -407,6 +410,53 @@ fn sliding_leaves(o: &mut Out, w: &WallRef, js: V, je: V, p: &DoorParams, count:
         leaf(o, -ov, wd + ov);
         let (from, to) = if p.hinge_end { (wd * 0.25, wd * 0.75) } else { (wd * 0.75, wd * 0.25) };
         arrow(o, at(from), at(to), n, hair);
+    }
+}
+
+/// Taschen-Schiebetür (SIA): Blatt als schmales Rechteck in der Wandmitte in Schliessstellung, der Teil
+/// in der Tasche verdeckt (gestrichelt); die Tasche (Hohlraum über Blattbreite + Anschlag) als dünner
+/// Linienzug in der Wand auf der Bandseite, zweiflügelig beidseitig; Pfeil zur Tasche.
+fn pocket_leaves(o: &mut Out, w: &WallRef, js: V, je: V, hinge_end: bool, count: f64, hair: f64) {
+    let n = w.frame().1;
+    let wd = hypot2(je.x - js.x, je.y - js.y);
+    if wd <= 1e-3 || w.total <= 1e-3 {
+        return;
+    }
+    // Hohlraum und Blatt quer zur Wand, für dünne Wände geklemmt.
+    let ch = max(0.005, min(0.035, w.total / 2.0 - 0.02));
+    let lt = min(0.02, ch * 0.6);
+    let ov = 0.05;
+    let c = w.ref_off;
+    let pt = |u: f64, k: f64| add(along(js, je, u), scale(n, c + k));
+    let rect = |o: &mut Out, u0: f64, u1: f64, dash: f64| {
+        let q = [pt(u0, -lt), pt(u1, -lt), pt(u1, lt), pt(u0, lt)];
+        for i in 0..4 {
+            o.line(C_LEAF, hair, 0.0, dash, q[i], q[(i + 1) % 4]);
+        }
+    };
+    // (Anschlag an der Öffnungskante, Richtung in die Tasche, Blattbreite)
+    let pockets: Vec<(f64, f64, f64)> = if count >= 2.0 {
+        vec![(0.0, -1.0, wd / 2.0), (wd, 1.0, wd / 2.0)]
+    } else if hinge_end {
+        vec![(wd, 1.0, wd)]
+    } else {
+        vec![(0.0, -1.0, wd)]
+    };
+    for (u_j, d, lw) in pockets {
+        let u_end = u_j + d * (lw + ov);
+        // Tasche: zwei Längslinien und Abschluss.
+        for k in [-ch, ch] {
+            o.line(C_DOOR_FRAME, hair, 1.0, 0.0, pt(u_j, k), pt(u_end, k));
+        }
+        o.line(C_DOOR_FRAME, hair, 1.0, 0.0, pt(u_end, -ch), pt(u_end, ch));
+        // Blatt: sichtbar in der Öffnung, verdeckt in der Tasche (Überstand bis zum Anschlag).
+        let u_far = u_j - d * lw;
+        rect(o, min(u_j, u_far), max(u_j, u_far), 0.0);
+        rect(o, min(u_j, u_j + d * ov), max(u_j, u_j + d * ov), 1.0);
+        let an = ch + min(0.06, max(0.0, w.total / 2.0 - ch) * 0.5);
+        let a = add(along(js, je, u_j - d * lw * 0.75), scale(n, c + an));
+        let b = add(along(js, je, u_j - d * lw * 0.25), scale(n, c + an));
+        arrow(o, a, b, n, hair);
     }
 }
 
@@ -721,6 +771,63 @@ mod tests {
         let f = plan_opening(&b);
         assert_eq!(arcs(&f), 0);
         assert_eq!(count_cls(&f, C_LEAF), 2);
+    }
+
+    /// Alle Linien: (cls, strich, ax, ay, bx, by).
+    fn lines(buf: &[f64]) -> Vec<(f64, f64, f64, f64, f64, f64)> {
+        let (mut i, mut out) = (1, Vec::new());
+        for _ in 0..buf[0] as usize {
+            match buf[i] as i64 {
+                1 => i += 5 + 2 * buf[i + 4] as usize,
+                2 => {
+                    out.push((buf[i + 1], buf[i + 4], buf[i + 5], buf[i + 6], buf[i + 7], buf[i + 8]));
+                    i += 9
+                }
+                _ => i += 9,
+            }
+        }
+        out
+    }
+
+    /// [95] Taschen-Schiebetür: Blatt als schmales Rechteck in der Wand (Öffnung 1.0..1.9, Wand ±0.15),
+    /// Tasche (dünne Linien) und verdecktes Blatt (gestrichelt) auf der Bandseite, kein Bogen.
+    #[test]
+    fn taschen_schiebetuer_blatt_in_der_wand_tasche_auf_bandseite() {
+        const KIND: usize = DETAILS + 5;
+        let mut b = input(true, 1.0, false, &[]);
+        b[KIND] = 4.0;
+        let f = plan_opening(&b);
+        assert_eq!(tags(&f).iter().filter(|t| **t == 3.0).count(), 0, "kein Bogen");
+        let ls = lines(&f);
+        let leaf: Vec<_> = ls.iter().filter(|l| l.0 == C_LEAF).collect();
+        assert!(!leaf.is_empty());
+        // Alles innerhalb des Wandbands (quer), Blatt dünn.
+        for l in &ls {
+            if l.0 == C_LEAF || l.0 == C_DOOR_FRAME {
+                assert!(l.3.abs() < 0.15 && l.5.abs() < 0.15, "{l:?}");
+            }
+        }
+        // Sichtbares Blatt (durchgezogen) überdeckt die Öffnung.
+        let solid: Vec<_> = leaf.iter().filter(|l| l.1 == 0.0 && (l.3 - l.5).abs() < 1e-9).collect();
+        assert!(solid.iter().any(|l| l.2.min(l.4) <= 1.0 + 1e-9 && l.2.max(l.4) >= 1.9 - 1e-9), "{solid:?}");
+        // Bandseite Anfang: Tasche links der Öffnung (x < 1.0), verdeckt gestrichelt, Länge ≈ Blattbreite.
+        let pocket = |f: &[f64]| lines(f).into_iter().filter(|l| l.0 == C_DOOR_FRAME).collect::<Vec<_>>();
+        let hidden = |f: &[f64]| lines(f).into_iter().filter(|l| l.0 == C_LEAF && l.1 == 1.0).collect::<Vec<_>>();
+        let p = pocket(&f);
+        assert!(p.len() >= 3, "{p:?}");
+        assert!(p.iter().all(|l| l.2 <= 1.0 + 1e-9 && l.4 <= 1.0 + 1e-9));
+        let min_x = p.iter().map(|l| l.2.min(l.4)).fold(f64::INFINITY, f64::min);
+        assert!((min_x - (1.0 - 0.9 - 0.05)).abs() < 0.02, "{min_x}");
+        assert!(!hidden(&f).is_empty() && hidden(&f).iter().all(|l| l.2 <= 1.0 + 1e-9 && l.4 <= 1.0 + 1e-9));
+        // Bandseite Ende: Tasche rechts (x > 1.9).
+        b[12] = 1.0;
+        let f = plan_opening(&b);
+        assert!(pocket(&f).iter().all(|l| l.2 >= 1.9 - 1e-9 && l.4 >= 1.9 - 1e-9));
+        assert!(hidden(&f).iter().all(|l| l.2 >= 1.9 - 1e-9 && l.4 >= 1.9 - 1e-9));
+        // Zweiflügelig: Taschen beidseitig.
+        b[15] = 2.0;
+        let p = pocket(&plan_opening(&b));
+        assert!(p.iter().any(|l| l.2 < 1.0) && p.iter().any(|l| l.2 > 1.9));
     }
 
     /// [105] Türblatt im Falz: Drehpunkt um den Einzug in der Öffnung und quer versetzt; Bogenradius

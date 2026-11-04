@@ -725,6 +725,9 @@ pub enum DoorTypeKind {
     /// Pendeltür: schlägt nach beiden Seiten auf ([95]).
     #[serde(rename = "pendel")]
     Pendel,
+    /// Taschen-Schiebetür: Blatt läuft in eine Tasche in der Wand, Taschenseite = Bandseite (`hinge`) ([95]).
+    #[serde(rename = "tasche")]
+    Tasche,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
