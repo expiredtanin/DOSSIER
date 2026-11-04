@@ -2205,6 +2205,17 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (Bezug wählen → EG −2.60, Höhe ändern, Undo), `sectionViews.spec.ts`. Geprüft: Screenshot Schnitt A-A im Browser
   (Linux). Offen: Höhe eines Geschosses direkt eintippen (heute nur über Bezug + Geschosshöhen), Umordnen der Ebenen
   stapelt nicht neu, nicht in der Tauri-App geprüft. · S
+- ◐ **[133] Musterhaus komplex: drei Befunde aus [114].** (4.11.) (1) Ausschnitt „EG 1:100" öffnete mit hohem Zoom
+  gemeldet (~1000 %): in Chromium/Linux nicht reproduzierbar (Wiederherstellung `applyScale` + `setCamera` rechnet
+  konsistent in px/m, alle Ausschnitte auch nach Wechsel aus Detail/3D/Schnitt/Ansicht im Rahmen). Datenfehler im Beispiel
+  behoben: alle Ausschnitte trugen `cameraPxPerMeter: 40`, unabhängig vom Massstab (1:50, 1:500 inkonsistent) — jetzt
+  aus dem Massstab abgeleitet (96 dpi). e2e `sampleComplexViews.spec.ts` (Zoom 3…80 px/m, Live-Massstab = gespeicherter,
+  Haupthaus im Ausschnitt). Offen: Mac/Tauri-Gegenprobe. (2) Dächer im Grundriss über der Schnittebene: Traufe/First/Grat
+  jetzt strichpunktiert (`OVERHEAD_DASH`, wie Decken-/Fensterkanten), Dachaufsicht darunter ausgezogen; Cargo-Test
+  `dach_ueber_schnittebene_strichpunkt`. Die flächige Schraffur im DG-Grundriss ist der Bodenbelag-Muster der OG-Decke
+  (`floor_finish_pattern`, [100]), kein Dach — unverändert, offen zu entscheiden. (3) Aussenbemassung: Teilstrecken unter
+  1,5 mm Papier (Bogenfacetten am Erkerscheitel, Mauerversprünge) werden zusammengefasst (`auto_dimensions::thin`); Test
+  `keine_kleinmasse`. · S
 
 ## Priorität 4 — später
 
