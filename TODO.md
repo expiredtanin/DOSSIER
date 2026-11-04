@@ -1707,9 +1707,9 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Unterkante bis „darunter sichtbar bis" gepunktet. Wirkt auf Wände (samt Öffnungen), Stützen, Treppen, Decken
   (nur ausblenden), Dächer (nur ausblenden) und Extrusionen. Ohne Grenzen unverändert. CLI-Plan geprüft (Linux).
   Offen: Dach/Decke über/unter gestrichelt statt nur ausblenden, Schnitt/Ansicht, Raum/Fenster eigenständig. · M
-- ◐ **[37] Beschriftung in Papiergrösse.** · M — 4.11.: Text `paperHeight` (mm auf dem Blatt, Rust-Modell): Plan rechnet
+- ✅ **[37] Beschriftung in Papiergrösse.** · M — 4.11.: Text `paperHeight` (mm auf dem Blatt, Rust-Modell): Plan rechnet
   die Modellhöhe je Massstab (`drawings.rs`, Test `text_in_papiergroesse`), Textrahmen-Griffe ebenso; Objekt-Info
-  „Papiergrösse" (0 = aus). Neue Texte im Grundriss entstehen mit 2.5 mm Papiergrösse (bei 1:100 wie bisher 0.25 m), auf dem Blatt nicht. Koten, Detailverweise, Punktmarken gehen mit dem Massstab mit (`symbol_factor_at`, bei 1:100 unverändert). Offen: Raumstempel. DXF/PDF/SVG folgen automatisch (Plan-Primitive).
+  „Papiergrösse" (0 = aus). Neue Texte im Grundriss entstehen mit 2.5 mm Papiergrösse (bei 1:100 wie bisher 0.25 m), auf dem Blatt nicht. Koten, Detailverweise, Punktmarken gehen mit dem Massstab mit (`symbol_factor_at`, bei 1:100 unverändert); Raumstempel rechnen ohnehin in pt (Papier). DXF/PDF/SVG folgen automatisch (Plan-Primitive).
 - ✅ **[38] Assoziative Bemassung.** (30.10.) Rust `dim_assoc.rs`: gefangene Bemassungspunkte tragen
   `Dimension.refs` (je Punkt `DimRef`: Wand-Linie/-Ende, Wandecke = Schnitt zweier Wandlinien, Öffnungs-
   Leibung/-Mitte, Stütze/Decke/Dach/Raum Ecke/Kante/Mitte, 2D-Eckpunkt/-Kante/-Mittelpunkt; Anhängen über
