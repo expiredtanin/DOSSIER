@@ -57,7 +57,7 @@ pub fn doc_cmd_query(h: u32, req_json: &str) -> String {
         Ok(v) => v,
         Err(e) => return format!("\u{1}Befehls-Abfrage: {e}"),
     };
-    match with_doc(h, |d| crate::cmd_edit::query(d.root(), &v)) {
+    match with_doc(h, |d| d.project_lookup().and_then(|(p, lk)| crate::cmd_edit::query(lk.root, p, &v))) {
         Some(Ok(v)) => v.to_string(),
         Some(Err(e)) => format!("\u{1}{e}"),
         None => "\u{1}Dokument nicht offen".to_string(),

@@ -21,9 +21,9 @@
 //! Geschosses, 2D-Linien/-Polylinien (mit Bögen)/-Rechtecke/-Kreise/-Bögen und Achsraster der Ebene.
 
 use crate::cmd_transform::{IdGen, Shapes};
-use crate::json_util::{arr, field, js_num, num_of, pt, truthy, with, with_all, xy};
+use crate::json_util::{arr, field, js_num, pt, with, with_all};
 use crate::joins::Line;
-use crate::model::{DimFeature, DimRef};
+use crate::model::{DimFeature, DimRef, Drawing2D, Drawing2DGeom, Project, Vec2, Wall, WallReferenceLine};
 use crate::ops::{id_of, Op};
 use crate::wall_arc::{circle_circle, circle_line, WallArc};
 use kernel2d::Vec2 as P;
@@ -39,9 +39,8 @@ const EPS_GEO: f64 = 1e-5;
 /// Pick-Toleranz neben dem Wandkörper (Meter, wie `cmd_edit::HIT_TOL`).
 const HIT_TOL: f64 = 0.25;
 
-fn p_of(v: Option<&Value>) -> P {
-    let (x, y) = xy(v.unwrap_or(&Value::Null));
-    P::new(x, y)
+fn p_of(v: &Vec2) -> P {
+    P::new(v.x, v.y)
 }
 fn ptv(p: P) -> Value {
     pt(p.x, p.y)
@@ -55,20 +54,21 @@ fn dist(a: P, b: P) -> f64 {
 fn cross(a: P, b: P) -> f64 {
     a.x * b.y - a.y * b.x
 }
-fn str_of<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
-    field(v, k).and_then(Value::as_str)
+pub fn walls(p: &Project) -> &[Wall] {
+    &p.walls
 }
 
-pub fn walls(root: &Map<String, Value>) -> &[Value] {
-    arr(root.get("walls"))
+pub fn find_wall<'a>(p: &'a Project, id: &str) -> Option<&'a Wall> {
+    p.walls.iter().find(|w| w.id == id)
 }
 
-pub fn find_wall<'a>(root: &'a Map<String, Value>, id: &str) -> Option<&'a Value> {
-    walls(root).iter().find(|w| id_of(w) == Some(id))
+/// Das rohe Element (verlustfreier Baum) zu einer id: Ops schreiben es mit geänderten Feldern zurück.
+fn raw<'a>(root: &'a Map<String, Value>, collection: &str, id: &str) -> Option<&'a Value> {
+    arr(root.get(collection)).iter().find(|e| id_of(e) == Some(id))
 }
 
-fn editable(w: &Value) -> bool {
-    !truthy(field(w, "locked"))
+fn editable(w: &Wall) -> bool {
+    !w.locked.unwrap_or(false)
 }
 
 // ── Achse ───────────────────────────────────────────────────────────────────
@@ -100,8 +100,8 @@ impl Axis {
         Some(Axis { a, b, arc, len, u, sign: bulge.unwrap_or(0.0).signum() })
     }
 
-    pub fn of(w: &Value) -> Option<Axis> {
-        Axis::new(p_of(field(w, "start")), p_of(field(w, "end")), field(w, "bulge").and_then(Value::as_f64))
+    pub fn of(w: &Wall) -> Option<Axis> {
+        Axis::new(p_of(&w.start), p_of(&w.end), w.bulge)
     }
 
     /// Weltpunkt bei (s, n), `n` links der Laufrichtung.
@@ -199,17 +199,13 @@ fn on_arc(c: P, a0: f64, sweep: f64, x: P) -> bool {
 }
 
 /// Linien der Wand quer zur Achse: (erste Fläche, zweite Fläche) wie `dim_assoc::wall_geo`.
-pub fn faces(root: &Map<String, Value>, w: &Value) -> (f64, f64) {
-    let layers: Vec<f64> = str_of(w, "wallTypeId")
-        .and_then(|id| arr(root.get("wallTypes")).iter().find(|t| id_of(t) == Some(id)))
-        .map(|t| arr(field(t, "layers")).iter().map(|l| field(l, "thickness").and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(0.0)).collect())
-        .unwrap_or_default();
-    let total: f64 = layers.iter().sum();
+pub fn faces(p: &Project, w: &Wall) -> (f64, f64) {
+    let total: f64 = p.wall_types.iter().find(|t| t.id == w.wall_type_id).map_or(0.0, |t| t.layers.iter().map(|l| Some(l.thickness).filter(|x| x.is_finite()).unwrap_or(0.0)).sum());
     let half = total / 2.0;
-    let r = match (field(w, "referenceOffset").and_then(Value::as_f64), str_of(w, "referenceLine")) {
+    let r = match (w.reference_offset, w.reference_line) {
         (Some(v), _) if v.is_finite() => crate::joins::Reference::Offset(v),
-        (_, Some("left")) => crate::joins::Reference::Left,
-        (_, Some("right")) => crate::joins::Reference::Right,
+        (_, Some(WallReferenceLine::Left)) => crate::joins::Reference::Left,
+        (_, Some(WallReferenceLine::Right)) => crate::joins::Reference::Right,
         _ => crate::joins::Reference::Center,
     };
     let off = crate::joins::reference_offset(r, total);
@@ -238,50 +234,45 @@ fn wall_bound(ax: &Axis, n: f64, ext: f64) -> Bound {
 }
 
 /// Grenzen einer 2D-Zeichnung (Linie, Polylinie mit Bögen, Rechteck, Kreis, Bogen, Achsraster).
-fn drawing_bounds(d: &Value, level: &str, out: &mut Vec<Bound>) {
-    let g = field(d, "geom").unwrap_or(&Value::Null);
-    match str_of(g, "shape").unwrap_or("") {
-        "line" => out.push(Bound::Seg(p_of(field(g, "a")), p_of(field(g, "b")))),
-        "rect" => {
-            let (a, b) = (p_of(field(g, "min")), p_of(field(g, "max")));
+fn drawing_bounds(d: &Drawing2D, out: &mut Vec<Bound>) {
+    match &d.geom {
+        Drawing2DGeom::Line { a, b } => out.push(Bound::Seg(p_of(a), p_of(b))),
+        Drawing2DGeom::Rect { min, max } => {
+            let (a, b) = (p_of(min), p_of(max));
             let c = [a, P::new(b.x, a.y), b, P::new(a.x, b.y)];
             for i in 0..4 {
                 out.push(Bound::Seg(c[i], c[(i + 1) % 4]));
             }
         }
-        "polyline" => {
-            let pts: Vec<P> = arr(field(g, "pts")).iter().map(|v| p_of(Some(v))).collect();
+        Drawing2DGeom::Polyline { pts, closed, bulge } => {
+            let pts: Vec<P> = pts.iter().map(p_of).collect();
             let n = pts.len();
-            let segs = if truthy(field(g, "closed")) && n > 2 { n } else { n.saturating_sub(1) };
-            let bulge = arr(field(g, "bulge"));
+            let segs = if *closed && n > 2 { n } else { n.saturating_sub(1) };
             for i in 0..segs {
                 let (a, b) = (pts[i], pts[(i + 1) % n]);
-                let bv = num_of(bulge.get(i));
+                let bv = bulge.as_ref().and_then(|b| b.get(i)).copied().unwrap_or(f64::NAN);
                 match kernel2d::bulge_arc(a, b, bv).filter(|_| bv.abs() > 1e-9) {
                     Some(arc) => out.push(Bound::Arc { c: arc.center, r: arc.r, a0: arc.a0, sweep: arc.sweep }),
                     None => out.push(Bound::Seg(a, b)),
                 }
             }
         }
-        "circle" => out.push(Bound::Arc { c: p_of(field(g, "center")), r: num_of(field(g, "r")), a0: 0.0, sweep: TAU }),
-        "arc" => {
-            let (a0, a1) = (num_of(field(g, "a0")), num_of(field(g, "a1")));
+        Drawing2DGeom::Circle { center, r } => out.push(Bound::Arc { c: p_of(center), r: *r, a0: 0.0, sweep: TAU }),
+        Drawing2DGeom::Arc { center, r, a0, a1 } => {
             let mut sweep = (a1 - a0).rem_euclid(TAU);
             if sweep < 1e-12 {
                 sweep = TAU;
             }
-            out.push(Bound::Arc { c: p_of(field(g, "center")), r: num_of(field(g, "r")), a0, sweep });
+            out.push(Bound::Arc { c: p_of(center), r: *r, a0: *a0, sweep });
         }
-        "grid" => {
-            let Ok(geom) = serde_json::from_value::<crate::model::Drawing2DGeom>(g.clone()) else { return };
-            let Some(spec) = crate::grid::Spec::of(&geom) else { return };
+        g @ Drawing2DGeom::Grid { .. } => {
+            let Some(spec) = crate::grid::Spec::of(g) else { return };
             for ax in spec.axes() {
                 match ax.shape {
                     crate::grid::Shape::Line { a, b } => out.push(Bound::Seg(P::new(a.0, a.1), P::new(b.0, b.1))),
                     crate::grid::Shape::Arc { c, r, a0, a1 } => out.push(Bound::Arc { c: P::new(c.0, c.1), r, a0, sweep: a1 - a0 }),
                 }
             }
-            let _ = level;
         }
         _ => {}
     }
@@ -289,16 +280,15 @@ fn drawing_bounds(d: &Value, level: &str, out: &mut Vec<Bound>) {
 
 /// Alle Grenzen für die Wand `target`: übrige Wände des Geschosses (Achse oder, `face`, beide Flächen,
 /// je um die halbe Dicke über die Enden verlängert, damit Ecken greifen), 2D-Zeichnungen und Achsraster.
-pub fn bounds(root: &Map<String, Value>, target: &Value, face: bool) -> Vec<Bound> {
-    let level = str_of(target, "floorId").unwrap_or("");
-    let tid = id_of(target);
+pub fn bounds(p: &Project, target: &Wall, face: bool) -> Vec<Bound> {
+    let level = target.floor_id.as_str();
     let mut out = Vec::new();
-    for w in walls(root) {
-        if id_of(w) == tid || str_of(w, "floorId") != Some(level) {
+    for w in walls(p) {
+        if w.id == target.id || w.floor_id != level {
             continue;
         }
         let Some(ax) = Axis::of(w) else { continue };
-        let (lo, hi) = faces(root, w);
+        let (lo, hi) = faces(p, w);
         let ext = (hi - lo) / 2.0;
         if face && hi - lo > 1e-9 {
             out.push(wall_bound(&ax, lo, ext));
@@ -307,12 +297,9 @@ pub fn bounds(root: &Map<String, Value>, target: &Value, face: bool) -> Vec<Boun
             out.push(wall_bound(&ax, 0.0, ext));
         }
     }
-    for d in arr(root.get("drawings2d")) {
-        let on = str_of(d, "levelId") == Some(level)
-            || (str_of(field(d, "geom").unwrap_or(&Value::Null), "shape") == Some("grid")
-                && serde_json::from_value::<crate::model::Drawing2D>(d.clone()).is_ok_and(|dd| crate::grid::visible_on(&dd, level)));
-        if on {
-            drawing_bounds(d, level, &mut out);
+    for d in &p.drawings2d {
+        if d.level_id == level || (matches!(d.geom, Drawing2DGeom::Grid { .. }) && crate::grid::visible_on(d, level)) {
+            drawing_bounds(d, &mut out);
         }
     }
     out
@@ -329,26 +316,26 @@ fn cuts(ax: &Axis, bs: &[Bound]) -> Vec<f64> {
 // ── Treffer ─────────────────────────────────────────────────────────────────
 
 /// Abstand des Punkts zum Wandkörper (0 innen), `None` ausserhalb der Länge.
-pub fn wall_distance(root: &Map<String, Value>, w: &Value, at: P) -> Option<f64> {
+pub fn wall_distance(p: &Project, w: &Wall, at: P) -> Option<f64> {
     let ax = Axis::of(w)?;
     let (s, n) = ax.local(at);
     if !(s >= -HIT_TOL && s <= ax.len + HIT_TOL) {
         return None;
     }
-    let (lo, hi) = faces(root, w);
+    let (lo, hi) = faces(p, w);
     let d = if n < lo { lo - n } else if n > hi { n - hi } else { 0.0 };
     let along = if s < 0.0 { -s } else if s > ax.len { s - ax.len } else { 0.0 };
     Some(d.hypot(along))
 }
 
 /// Nächste bearbeitbare Wand des Geschosses unter dem Punkt (Abstand < `HIT_TOL`), mit Abstand.
-pub fn pick_wall<'a>(root: &'a Map<String, Value>, level: &str, at: P) -> Option<(&'a Value, f64)> {
-    let mut best: Option<(&Value, f64)> = None;
-    for w in walls(root) {
-        if str_of(w, "floorId") != Some(level) || !editable(w) {
+pub fn pick_wall<'a>(p: &'a Project, level: &str, at: P) -> Option<(&'a Wall, f64)> {
+    let mut best: Option<(&Wall, f64)> = None;
+    for w in walls(p) {
+        if w.floor_id != level || !editable(w) {
             continue;
         }
-        if let Some(d) = wall_distance(root, w, at) {
+        if let Some(d) = wall_distance(p, w, at) {
             if d < HIT_TOL && best.map_or(true, |b| d < b.1) {
                 best = Some((w, d));
             }
@@ -361,7 +348,7 @@ pub fn pick_wall<'a>(root: &'a Map<String, Value>, level: &str, at: P) -> Option
 
 /// Teilstücke einer Wand: `(id, s0, s1)` im Parameter der alten Achse (`None` = alte id).
 pub struct Plan<'a> {
-    pub src: &'a Value,
+    pub src: &'a Wall,
     pub ax: Axis,
     pub pieces: Vec<(f64, f64)>,
     /// Wandende-Bezüge folgen dem ersten/letzten Stück (Trim, Extend, Verrunden).
@@ -370,7 +357,7 @@ pub struct Plan<'a> {
 
 /// Neue Wand als Kopie von `src` (Fillet-Bogen, Offset).
 pub struct NewWall<'a> {
-    pub src: &'a Value,
+    pub src: &'a Wall,
     pub a: P,
     pub b: P,
     pub bulge: Option<f64>,
@@ -429,26 +416,25 @@ impl Remap {
 }
 
 /// Öffnungen der umgebauten Wände umhängen/umrechnen/löschen.
-fn opening_ops(root: &Map<String, Value>, maps: &[Remap]) -> Vec<Op> {
+fn opening_ops(root: &Map<String, Value>, p: &Project, maps: &[Remap]) -> Vec<Op> {
     let mut ops = Vec::new();
     let mut gone = Vec::new();
-    for o in arr(root.get("openings")) {
-        let Some(m) = str_of(o, "hostWallId").and_then(|h| maps.iter().find(|m| m.old == h)) else { continue };
-        let (pos, width) = (num_of(field(o, "position")), num_of(field(o, "width")));
+    for o in p.openings.iter().flatten() {
+        let Some(m) = maps.iter().find(|m| m.old == o.host_wall_id) else { continue };
+        let (pos, width) = (o.position, o.width);
         let c = pos + width / 2.0;
         let t = m.containing(c);
         let Some(t) = t.filter(|t| width <= t.s1 - t.s0 + EPS_S) else {
-            if let Some(id) = id_of(o) {
-                gone.push(id.to_string());
-            }
+            gone.push(o.id.clone());
             continue;
         };
         let np = (pos - t.s0).min(t.s1 - t.s0 - width).max(0.0);
-        let same_host = str_of(o, "hostWallId") == Some(t.id.as_str());
+        let same_host = o.host_wall_id == t.id;
         if same_host && (np - pos).abs() < 1e-12 {
             continue;
         }
-        ops.push(Op::Replace { collection: "openings".into(), entity: with_all(o, vec![("hostWallId", Value::String(t.id.clone())), ("position", js_num(np))]) });
+        let Some(ro) = raw(root, "openings", &o.id) else { continue };
+        ops.push(Op::Replace { collection: "openings".into(), entity: with_all(ro, vec![("hostWallId", Value::String(t.id.clone())), ("position", js_num(np))]) });
     }
     if !gone.is_empty() {
         ops.push(Op::Remove { collection: "openings".into(), ids: gone });
@@ -457,13 +443,12 @@ fn opening_ops(root: &Map<String, Value>, maps: &[Remap]) -> Vec<Op> {
 }
 
 /// Bezüge der Bemassung auf umgebaute Wände umschreiben ([38]).
-fn dim_ops(root: &Map<String, Value>, maps: &[Remap]) -> Vec<Op> {
+fn dim_ops(root: &Map<String, Value>, p: &Project, maps: &[Remap]) -> Vec<Op> {
     let mut ops = Vec::new();
-    for d in arr(root.get("drawings2d")) {
-        let Some(g) = field(d, "geom").filter(|g| str_of(g, "shape") == Some("dimension")) else { continue };
-        let Some(rv) = field(g, "refs") else { continue };
-        let Ok(mut refs) = serde_json::from_value::<Vec<Option<DimRef>>>(rv.clone()) else { continue };
-        let pts: Vec<P> = arr(field(g, "pts")).iter().map(|v| p_of(Some(v))).collect();
+    for d in &p.drawings2d {
+        let Drawing2DGeom::Dimension { pts, refs: Some(refs), .. } = &d.geom else { continue };
+        let mut refs: Vec<Option<DimRef>> = refs.clone();
+        let pts: Vec<P> = pts.iter().map(p_of).collect();
         let mut changed = false;
         for (i, r) in refs.iter_mut().enumerate() {
             let Some(r) = r.as_mut() else { continue };
@@ -511,15 +496,16 @@ fn dim_ops(root: &Map<String, Value>, maps: &[Remap]) -> Vec<Op> {
             }
         }
         if changed {
-            let ng = with(g, "refs", serde_json::to_value(&refs).unwrap_or(Value::Null));
-            ops.push(Op::Replace { collection: "drawings2d".into(), entity: with(d, "geom", ng) });
+            let Some(rd) = raw(root, "drawings2d", &d.id) else { continue };
+            let ng = with(field(rd, "geom").unwrap_or(&Value::Null), "refs", serde_json::to_value(&refs).unwrap_or(Value::Null));
+            ops.push(Op::Replace { collection: "drawings2d".into(), entity: with(rd, "geom", ng) });
         }
     }
     ops
 }
 
 /// Ops einer Änderung (eine Undo-Stufe).
-pub fn commit(root: &Map<String, Value>, e: &Edit, ids: &mut IdGen) -> Vec<Op> {
+pub fn commit(root: &Map<String, Value>, pr: &Project, e: &Edit, ids: &mut IdGen) -> Vec<Op> {
     if !e.changes() {
         return vec![];
     }
@@ -527,17 +513,18 @@ pub fn commit(root: &Map<String, Value>, e: &Edit, ids: &mut IdGen) -> Vec<Op> {
     let mut added = Vec::new();
     let mut maps = Vec::new();
     for p in &e.plans {
-        let Some(old) = id_of(p.src) else { continue };
+        let old = p.src.id.as_str();
+        let Some(src) = raw(root, "walls", old) else { continue };
         let mut targets = Vec::new();
         for (k, (s0, s1)) in p.pieces.iter().enumerate() {
             let Some((a, b, bulge)) = p.ax.piece(*s0, *s1) else { continue };
             let id = if k == 0 { old.to_string() } else { ids.next("wall") };
             let mut f = geom_fields(a, b, bulge);
             if k == 0 {
-                ops.push(Op::Replace { collection: "walls".into(), entity: with_all(p.src, f) });
+                ops.push(Op::Replace { collection: "walls".into(), entity: with_all(src, f) });
             } else {
                 f.push(("id", Value::String(id.clone())));
-                added.push(with_all(p.src, f));
+                added.push(with_all(src, f));
             }
             targets.push(Target { id, s0: *s0, s1: *s1 });
         }
@@ -547,9 +534,10 @@ pub fn commit(root: &Map<String, Value>, e: &Edit, ids: &mut IdGen) -> Vec<Op> {
         maps.push(Remap { old: old.to_string(), len: p.ax.len, ax: p.ax.clone(), targets, follow_ends: p.follow_ends });
     }
     for n in &e.extra {
+        let Some(src) = raw(root, "walls", &n.src.id) else { continue };
         let mut f = geom_fields(n.a, n.b, n.bulge);
         f.push(("id", Value::String(ids.next("wall"))));
-        let w = with_all(n.src, f);
+        let w = with_all(src, f);
         // Gerade Kopie einer Bogenwand: kein Bulge.
         let w = if n.bulge.is_none() { without(&w, "bulge") } else { w };
         added.push(w);
@@ -557,8 +545,8 @@ pub fn commit(root: &Map<String, Value>, e: &Edit, ids: &mut IdGen) -> Vec<Op> {
     if !added.is_empty() {
         ops.push(Op::Add { collection: "walls".into(), items: added, at: None });
     }
-    ops.extend(opening_ops(root, &maps));
-    ops.extend(dim_ops(root, &maps));
+    ops.extend(opening_ops(root, pr, &maps));
+    ops.extend(dim_ops(root, pr, &maps));
     ops
 }
 
@@ -569,9 +557,9 @@ fn without(v: &Value, k: &str) -> Value {
 }
 
 /// Vorschau: Umriss jedes Ergebnis-Stücks.
-pub fn preview(root: &Map<String, Value>, e: &Edit, out: &mut Shapes) {
+pub fn preview(pr: &Project, e: &Edit, out: &mut Shapes) {
     for p in &e.plans {
-        let (lo, hi) = faces(root, p.src);
+        let (lo, hi) = faces(pr, p.src);
         for (s0, s1) in &p.pieces {
             if p.ax.piece(*s0, *s1).is_some() {
                 out.poly(&p.ax.outline(*s0, *s1, lo, hi));
@@ -579,7 +567,7 @@ pub fn preview(root: &Map<String, Value>, e: &Edit, out: &mut Shapes) {
         }
     }
     for n in &e.extra {
-        let (lo, hi) = faces(root, n.src);
+        let (lo, hi) = faces(pr, n.src);
         if let Some(ax) = Axis::new(n.a, n.b, n.bulge) {
             out.poly(&ax.outline(0.0, ax.len, lo, hi));
         }
@@ -588,13 +576,13 @@ pub fn preview(root: &Map<String, Value>, e: &Edit, out: &mut Shapes) {
 
 // ── Befehle ─────────────────────────────────────────────────────────────────
 
-fn plan(w: &Value, follow_ends: bool) -> Option<Plan<'_>> {
+fn plan(w: &Wall, follow_ends: bool) -> Option<Plan<'_>> {
     editable(w).then_some(())?;
     Some(Plan { src: w, ax: Axis::of(w)?, pieces: vec![], follow_ends })
 }
 
 /// Trim: das angeklickte Stück zwischen den nächsten Schnitten (bzw. bis zum Ende) entfällt.
-pub fn trim<'a>(root: &'a Map<String, Value>, w: &'a Value, at: P, face: bool) -> Option<Edit<'a>> {
+pub fn trim<'a>(root: &'a Project, w: &'a Wall, at: P, face: bool) -> Option<Edit<'a>> {
     let mut p = plan(w, true)?;
     let s = p.ax.local(at).0;
     let c: Vec<f64> = cuts(&p.ax, &bounds(root, w, face)).into_iter().filter(|x| *x > EPS_S && *x < p.ax.len - EPS_S).collect();
@@ -614,7 +602,7 @@ pub fn trim<'a>(root: &'a Map<String, Value>, w: &'a Value, at: P, face: bool) -
 }
 
 /// Extend: das dem Punkt nähere Ende bis zur nächsten Grenze dahinter verlängern.
-pub fn extend<'a>(root: &'a Map<String, Value>, w: &'a Value, at: P, face: bool) -> Option<Edit<'a>> {
+pub fn extend<'a>(root: &'a Project, w: &'a Wall, at: P, face: bool) -> Option<Edit<'a>> {
     let mut p = plan(w, true)?;
     let start = dist(at, p.ax.a) <= dist(at, p.ax.b);
     let c = cuts(&p.ax, &bounds(root, w, face));
@@ -626,7 +614,7 @@ pub fn extend<'a>(root: &'a Map<String, Value>, w: &'a Value, at: P, face: bool)
 }
 
 /// Bruch zwischen zwei Punkten (gleicher Punkt = Teilen an dieser Stelle).
-pub fn break_at<'a>(w: &'a Value, p1: P, p2: P) -> Option<Edit<'a>> {
+pub fn break_at<'a>(w: &'a Wall, p1: P, p2: P) -> Option<Edit<'a>> {
     let mut p = plan(w, false)?;
     let len = p.ax.len;
     let (s1, s2) = (p.ax.local(p1).0.clamp(0.0, len), p.ax.local(p2).0.clamp(0.0, len));
@@ -644,7 +632,7 @@ pub fn break_at<'a>(w: &'a Value, p1: P, p2: P) -> Option<Edit<'a>> {
 }
 
 /// Teilen an allen Schnittpunkten mit den Grenzen (Achsen der übrigen Wände, 2D, Achsraster).
-pub fn split_at_intersections<'a>(root: &'a Map<String, Value>, w: &'a Value) -> Option<Edit<'a>> {
+pub fn split_at_intersections<'a>(root: &'a Project, w: &'a Wall) -> Option<Edit<'a>> {
     let mut p = plan(w, false)?;
     let len = p.ax.len;
     let mut last = 0.0;
@@ -662,7 +650,7 @@ pub fn split_at_intersections<'a>(root: &'a Map<String, Value>, w: &'a Value) ->
 }
 
 /// Offset: parallele (bei Bogenwänden konzentrische) Kopie im Achsabstand `d` (links positiv).
-pub fn offset(w: &Value, d: f64) -> Option<Edit<'_>> {
+pub fn offset(w: &Wall, d: f64) -> Option<Edit<'_>> {
     let ax = Axis::of(w)?;
     if !d.is_finite() || d.abs() < 1e-9 {
         return None;
@@ -673,12 +661,12 @@ pub fn offset(w: &Value, d: f64) -> Option<Edit<'_>> {
         }
     }
     let (a, b) = (ax.point(0.0, d), ax.point(ax.len, d));
-    let bulge = ax.arc.map(|_| num_of(field(w, "bulge")));
+    let bulge = ax.arc.map(|_| w.bulge.unwrap_or(f64::NAN));
     Some(Edit { plans: vec![], extra: vec![NewWall { src: w, a, b, bulge }] })
 }
 
 /// Seite des Punkts zur Wand (+1 links, −1 rechts).
-pub fn side(w: &Value, at: P) -> Option<f64> {
+pub fn side(w: &Wall, at: P) -> Option<f64> {
     let (_, n) = Axis::of(w)?.local(at);
     Some(if n >= 0.0 { 1.0 } else { -1.0 })
 }
@@ -702,8 +690,8 @@ fn keep(ax: &Axis, s_x: f64, s_c: f64) -> Option<(f64, f64)> {
 /// Verrunden zweier Wände: beide bis zum Achsschnittpunkt (nächst den Klicks) stutzen bzw. verlängern
 /// (L-Ecke); mit Radius `r > 0` (nur gerade Wände) enden sie an den Tangentenpunkten und eine
 /// Bogenwand (Kopie der ersten Wand) schliesst tangential an.
-pub fn fillet<'a>(w1: &'a Value, p1: P, w2: &'a Value, p2: P, r: f64) -> Option<Edit<'a>> {
-    if id_of(w1) == id_of(w2) {
+pub fn fillet<'a>(w1: &'a Wall, p1: P, w2: &'a Wall, p2: P, r: f64) -> Option<Edit<'a>> {
+    if w1.id == w2.id {
         return None;
     }
     let (mut a, mut b) = (plan(w1, true)?, plan(w2, true)?);
@@ -748,16 +736,16 @@ pub fn fillet<'a>(w1: &'a Value, p1: P, w2: &'a Value, p2: P, r: f64) -> Option<
 /// Verketten: gewählte Wände desselben Geschosses und Wandtyps, die mit der ersten kollinear (gleiche
 /// Laufrichtung) bzw. auf demselben Kreis (gleicher Drehsinn) liegen, werden eine Wand über die
 /// Gesamtspanne (Lücken werden geschlossen). Die erste behält id und Attribute.
-pub fn join_ops(root: &Map<String, Value>, ids_sel: &[String]) -> Vec<Op> {
-    let sel: Vec<&Value> = walls(root).iter().filter(|w| editable(w) && id_of(w).is_some_and(|i| ids_sel.iter().any(|x| x == i))).collect();
+pub fn join_ops(root: &Map<String, Value>, pr: &Project, ids_sel: &[String]) -> Vec<Op> {
+    let sel: Vec<&Wall> = walls(pr).iter().filter(|w| editable(w) && ids_sel.iter().any(|x| *x == w.id)).collect();
     let Some((first, rest)) = sel.split_first() else { return vec![] };
     let Some(ax) = Axis::of(first) else { return vec![] };
-    let same = |w: &Value, k: &str| field(w, k) == field(first, k);
+    let Some(first_raw) = raw(root, "walls", &first.id) else { return vec![] };
     // Lage jeder Partnerwand auf der ersten Achse: Versatz ihres Starts.
-    let mut members: Vec<(&Value, Axis, f64)> = Vec::new();
+    let mut members: Vec<(&Wall, Axis, f64)> = Vec::new();
     for w in rest {
         let Some(bx) = Axis::of(w) else { continue };
-        if !same(w, "floorId") || !same(w, "wallTypeId") {
+        if w.floor_id != first.floor_id || w.wall_type_id != first.wall_type_id {
             continue;
         }
         let ok = match (&ax.arc, &bx.arc) {
@@ -779,15 +767,15 @@ pub fn join_ops(root: &Map<String, Value>, ids_sel: &[String]) -> Vec<Op> {
     let lo = members.iter().map(|m| m.2).fold(0.0_f64, f64::min);
     let hi = members.iter().map(|m| m.2 + m.1.len).fold(ax.len, f64::max);
     let Some((a, b, bulge)) = ax.piece(lo, hi) else { return vec![] };
-    let new_id = id_of(first).unwrap_or("").to_string();
-    let mut ops = vec![Op::Replace { collection: "walls".into(), entity: with_all(first, geom_fields(a, b, bulge)) }];
-    ops.push(Op::Remove { collection: "walls".into(), ids: members.iter().filter_map(|m| id_of(m.0)).map(str::to_owned).collect() });
+    let new_id = first.id.clone();
+    let mut ops = vec![Op::Replace { collection: "walls".into(), entity: with_all(first_raw, geom_fields(a, b, bulge)) }];
+    ops.push(Op::Remove { collection: "walls".into(), ids: members.iter().map(|m| m.0.id.clone()).collect() });
     let mut maps = vec![Remap { old: new_id.clone(), len: ax.len, ax: ax.clone(), targets: vec![Target { id: new_id.clone(), s0: lo, s1: hi }], follow_ends: false }];
     for (w, bx, off) in &members {
-        maps.push(Remap { old: id_of(w).unwrap_or("").to_string(), len: bx.len, ax: bx.clone(), targets: vec![Target { id: new_id.clone(), s0: lo - off, s1: hi - off }], follow_ends: false });
+        maps.push(Remap { old: w.id.clone(), len: bx.len, ax: bx.clone(), targets: vec![Target { id: new_id.clone(), s0: lo - off, s1: hi - off }], follow_ends: false });
     }
-    ops.extend(opening_ops(root, &maps));
-    ops.extend(dim_ops(root, &maps));
+    ops.extend(opening_ops(root, pr, &maps));
+    ops.extend(dim_ops(root, pr, &maps));
     ops
 }
 
@@ -829,7 +817,10 @@ mod tests {
         d.root().clone()
     }
     fn w_of<'a>(r: &'a Map<String, Value>, id: &str) -> &'a Value {
-        find_wall(r, id).unwrap()
+        raw(r, "walls", id).unwrap()
+    }
+    fn typed(r: &Map<String, Value>) -> Project {
+        Document::from_json(&Value::Object(r.clone()).to_string()).unwrap().project().unwrap().clone()
     }
     fn xy_of(v: &Value) -> (f64, f64) {
         (v["x"].as_f64().unwrap(), v["y"].as_f64().unwrap())
@@ -837,8 +828,8 @@ mod tests {
     fn close(a: (f64, f64), b: (f64, f64)) -> bool {
         (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6
     }
-    fn commit_edit(r: &Map<String, Value>, e: Option<Edit>) -> Map<String, Value> {
-        let ops = commit(r, &e.expect("Änderung"), &mut IdGen::new("s"));
+    fn commit_edit(r: &Map<String, Value>, p: &Project, e: Option<Edit>) -> Map<String, Value> {
+        let ops = commit(r, p, &e.expect("Änderung"), &mut IdGen::new("s"));
         assert!(!ops.is_empty());
         apply(r, ops)
     }
@@ -856,8 +847,9 @@ mod tests {
     #[test]
     fn trim_gerade_wand_an_querwand() {
         let r = t_case();
-        let e = trim(&r, w_of(&r, "a"), P::new(8.0, 0.0), false);
-        let n = commit_edit(&r, e);
+        let pr = typed(&r);
+        let e = trim(&pr, find_wall(&pr, "a").unwrap(), P::new(8.0, 0.0), false);
+        let n = commit_edit(&r, &pr, e);
         let a = w_of(&n, "a");
         assert!(close(xy_of(&a["end"]), (6.0, 0.0)));
         // o2 lag im weggeschnittenen Teil → weg; o1 bleibt.
@@ -874,8 +866,9 @@ mod tests {
     fn trim_mittelstueck_teilt_und_haengt_oeffnungen_um() {
         let mut r = t_case();
         r.get_mut("walls").unwrap().as_array_mut().unwrap().push(wall("c", (3.0, -3.0), (3.0, 3.0), None));
-        let e = trim(&r, w_of(&r, "a"), P::new(4.5, 0.0), false);
-        let n = commit_edit(&r, e);
+        let pr = typed(&r);
+        let e = trim(&pr, find_wall(&pr, "a").unwrap(), P::new(4.5, 0.0), false);
+        let n = commit_edit(&r, &pr, e);
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (3.0, 0.0)));
         let new = arr(n.get("walls")).iter().find(|w| w["id"] == "wall-s-1").unwrap();
         assert!(close(xy_of(&new["start"]), (6.0, 0.0)));
@@ -892,13 +885,15 @@ mod tests {
     #[test]
     fn extend_bis_zur_achse_und_flaeche() {
         let r = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (6.0, -3.0), (6.0, 3.0), None)], vec![], vec![]);
-        let n = commit_edit(&r, extend(&r, w_of(&r, "a"), P::new(3.9, 0.0), false));
+        let pr = typed(&r);
+        let n = commit_edit(&r, &pr, extend(&pr, find_wall(&pr, "a").unwrap(), P::new(3.9, 0.0), false));
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
-        let n = commit_edit(&r, extend(&r, w_of(&r, "a"), P::new(3.9, 0.0), true));
+        let n = commit_edit(&r, &pr, extend(&pr, find_wall(&pr, "a").unwrap(), P::new(3.9, 0.0), true));
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (5.9, 0.0)));
         // Start verlängern: Öffnungen behalten ihre Weltlage.
         let r = project(vec![wall("a", (2.0, 0.0), (8.0, 0.0), None), wall("b", (0.0, -3.0), (0.0, 3.0), None)], vec![opening("o", "a", 1.0, 1.0)], vec![]);
-        let n = commit_edit(&r, extend(&r, w_of(&r, "a"), P::new(2.1, 0.0), false));
+        let pr = typed(&r);
+        let n = commit_edit(&r, &pr, extend(&pr, find_wall(&pr, "a").unwrap(), P::new(2.1, 0.0), false));
         assert!(close(xy_of(&w_of(&n, "a")["start"]), (0.0, 0.0)));
         assert!((arr(n.get("openings"))[0]["position"].as_f64().unwrap() - 3.0).abs() < 1e-9);
     }
@@ -908,13 +903,14 @@ mod tests {
         // Halbkreis (−5,0)→(5,0) um (0,0), Scheitel unten oder oben je nach Bulge; Gerade x = 0 schneidet.
         let arc = wall("a", (-5.0, 0.0), (5.0, 0.0), Some(1.0));
         let r = project(vec![arc, wall("b", (0.0, -8.0), (0.0, 8.0), None)], vec![opening("o", "a", 6.0, 1.0)], vec![]);
-        let ax = Axis::of(w_of(&r, "a")).unwrap();
+        let pr = typed(&r);
+        let ax = Axis::of(find_wall(&typed(&r), "a").unwrap()).unwrap();
         let len = ax.len;
         assert!((len - 5.0 * PI).abs() < 1e-9);
         let mid = ax.point(len / 2.0, 0.0);
         assert!(mid.x.abs() < 1e-9);
         // Split an den Schnittpunkten: zwei Viertelbögen, die Öffnung (Mitte 6.5 < len/2 ≈ 7.85) bleibt auf dem ersten.
-        let n = commit_edit(&r, split_at_intersections(&r, w_of(&r, "a")));
+        let n = commit_edit(&r, &pr, split_at_intersections(&pr, find_wall(&pr, "a").unwrap()));
         let a = w_of(&n, "a");
         assert!(close(xy_of(&a["end"]), (mid.x, mid.y)));
         assert!((a["bulge"].as_f64().unwrap() - (PI / 8.0).tan()).abs() < 1e-9);
@@ -923,14 +919,15 @@ mod tests {
         assert_eq!(arr(n.get("openings"))[0]["hostWallId"], "a");
         // Trim des zweiten Viertels: die Öffnung mit Mitte 6.5 < 7.85 bleibt.
         let p = ax.point(len * 0.75, 0.0);
-        let n = commit_edit(&r, trim(&r, w_of(&r, "a"), p, false));
+        let n = commit_edit(&r, &pr, trim(&pr, find_wall(&pr, "a").unwrap(), p, false));
         let a = w_of(&n, "a");
         assert!(close(xy_of(&a["end"]), (mid.x, mid.y)));
         assert_eq!(arr(n.get("openings")).len(), 1);
         // Extend: Viertelbogen auf demselben Kreis bis zur Geraden x = 4 (Treffer (4, 3)).
         let q = wall("q", (-5.0, 0.0), (mid.x, mid.y), Some((PI / 8.0).tan()));
         let r = project(vec![q, wall("g", (4.0, -8.0), (4.0, 8.0), None)], vec![], vec![]);
-        let n = commit_edit(&r, extend(&r, w_of(&r, "q"), P::new(mid.x, mid.y), false));
+        let pr = typed(&r);
+        let n = commit_edit(&r, &pr, extend(&pr, find_wall(&pr, "q").unwrap(), P::new(mid.x, mid.y), false));
         let q = w_of(&n, "q");
         assert!(close(xy_of(&q["end"]), (4.0, 3.0)));
         let sweep = PI - 3.0_f64.atan2(4.0);
@@ -940,7 +937,8 @@ mod tests {
     #[test]
     fn teilen_am_punkt_und_bruch() {
         let r = t_case();
-        let n = commit_edit(&r, break_at(w_of(&r, "a"), P::new(4.0, 0.1), P::new(4.0, 0.1)));
+        let pr = typed(&r);
+        let n = commit_edit(&r, &pr, break_at(find_wall(&pr, "a").unwrap(), P::new(4.0, 0.1), P::new(4.0, 0.1)));
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (4.0, 0.0)));
         let o2 = arr(n.get("openings")).iter().find(|o| o["id"] == "o2").unwrap();
         assert_eq!(o2["hostWallId"], "wall-s-1");
@@ -950,7 +948,7 @@ mod tests {
         assert_eq!(g["refs"][2]["id"], "wall-s-1");
         assert_eq!(g["refs"][2]["t"], json!(1.0));
         // Bruch 2..3 entfernt das Stück dazwischen; o1 (1..2) bleibt am ersten Stück.
-        let n = commit_edit(&r, break_at(w_of(&r, "a"), P::new(2.5, 0.0), P::new(3.5, 0.0)));
+        let n = commit_edit(&r, &pr, break_at(find_wall(&pr, "a").unwrap(), P::new(2.5, 0.0), P::new(3.5, 0.0)));
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (2.5, 0.0)));
         assert_eq!(arr(n.get("openings")).len(), 2);
     }
@@ -962,7 +960,7 @@ mod tests {
             vec![opening("o", "b", 1.0, 1.0)],
             vec![dim("d", json!([{"id": "a", "feature": "wall", "t": 0.0}, {"id": "b", "feature": "wall", "t": 1.0}]), json!([{"x": 0, "y": 0}, {"x": 10, "y": 0}]))],
         );
-        let n = apply(&r, join_ops(&r, &["a".into(), "b".into()]));
+        let n = apply(&r, join_ops(&r, &typed(&r), &["a".into(), "b".into()]));
         assert_eq!(arr(n.get("walls")).len(), 1);
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (10.0, 0.0)));
         let o = &arr(n.get("openings"))[0];
@@ -973,13 +971,13 @@ mod tests {
         assert!(close(xy_of(&g["pts"][1]), (10.0, 0.0)));
         // Gegenläufig: nicht verketten.
         let r2 = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (10.0, 0.0), (4.0, 0.0), None)], vec![], vec![]);
-        assert!(join_ops(&r2, &["a".into(), "b".into()]).is_empty());
+        assert!(join_ops(&r2, &typed(&r2), &["a".into(), "b".into()]).is_empty());
         // Zwei Viertelbögen desselben Kreises (um (0,0), unten herum) → Halbkreis.
         let t = (PI / 8.0).tan();
         let r3 = project(vec![wall("a", (-5.0, 0.0), (0.0, -5.0), Some(-t)), wall("b", (0.0, -5.0), (5.0, 0.0), Some(-t))], vec![], vec![]);
-        let c = Axis::of(w_of(&r3, "a")).unwrap().arc.unwrap().center;
+        let c = Axis::of(find_wall(&typed(&r3), "a").unwrap()).unwrap().arc.unwrap().center;
         assert!(close((c.x, c.y), (0.0, 0.0)));
-        let n = apply(&r3, join_ops(&r3, &["a".into(), "b".into()]));
+        let n = apply(&r3, join_ops(&r3, &typed(&r3), &["a".into(), "b".into()]));
         let a = w_of(&n, "a");
         assert!(close(xy_of(&a["end"]), (5.0, 0.0)));
         assert!((a["bulge"].as_f64().unwrap() + 1.0).abs() < 1e-9);
@@ -989,19 +987,20 @@ mod tests {
     fn verrunden_l_ecke_und_radius() {
         // a läuft nach rechts bis x = 4 (zu kurz), b senkrecht bei x = 6 über y = 0 hinaus.
         let r = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (6.0, 5.0), (6.0, -2.0), None)], vec![opening("o", "b", 1.0, 1.0)], vec![]);
-        let (a, b) = (w_of(&r, "a"), w_of(&r, "b"));
-        let n = commit_edit(&r, fillet(a, P::new(2.0, 0.0), b, P::new(6.0, 3.0), 0.0));
+        let pr = typed(&r);
+        let (a, b) = (find_wall(&pr, "a").unwrap(), find_wall(&pr, "b").unwrap());
+        let n = commit_edit(&r, &pr, fillet(a, P::new(2.0, 0.0), b, P::new(6.0, 3.0), 0.0));
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
         assert!(close(xy_of(&w_of(&n, "b")["end"]), (6.0, 0.0)));
         assert!(close(xy_of(&w_of(&n, "b")["start"]), (6.0, 5.0)));
         // Radius 1: Tangentenpunkte (5,0) und (6,1), Bogenwand dazwischen.
-        let n = commit_edit(&r, fillet(a, P::new(2.0, 0.0), b, P::new(6.0, 3.0), 1.0));
+        let n = commit_edit(&r, &pr, fillet(a, P::new(2.0, 0.0), b, P::new(6.0, 3.0), 1.0));
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (5.0, 0.0)));
         assert!(close(xy_of(&w_of(&n, "b")["end"]), (6.0, 1.0)));
         let arcw = arr(n.get("walls")).iter().find(|w| w["id"] == "wall-s-1").unwrap();
         assert!(close(xy_of(&arcw["start"]), (5.0, 0.0)));
         assert!(close(xy_of(&arcw["end"]), (6.0, 1.0)));
-        let ax = Axis::of(arcw).unwrap();
+        let ax = Axis::of(find_wall(&typed(&n), "wall-s-1").unwrap()).unwrap();
         let m = ax.point(ax.len / 2.0, 0.0);
         let c = (5.0, 1.0);
         assert!(((m.x - c.0).hypot(m.y - c.1) - 1.0).abs() < 1e-9);
@@ -1013,14 +1012,15 @@ mod tests {
     #[test]
     fn offset_gerade_und_bogen() {
         let r = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("c", (-5.0, 0.0), (5.0, 0.0), Some(1.0))], vec![], vec![]);
-        let n = commit_edit(&r, offset(w_of(&r, "a"), 1.5));
+        let pr = typed(&r);
+        let n = commit_edit(&r, &pr, offset(find_wall(&pr, "a").unwrap(), 1.5));
         let w = arr(n.get("walls")).iter().find(|w| w["id"] == "wall-s-1").unwrap();
         assert!(close(xy_of(&w["start"]), (0.0, 1.5)));
         assert!(close(xy_of(&w["end"]), (4.0, 1.5)));
-        let n = commit_edit(&r, offset(w_of(&r, "c"), 1.0));
+        let n = commit_edit(&r, &pr, offset(find_wall(&pr, "c").unwrap(), 1.0));
         let w = arr(n.get("walls")).iter().find(|w| w["id"] == "wall-s-1").unwrap();
-        let ax = Axis::of(w).unwrap();
-        let c = Axis::of(w_of(&r, "c")).unwrap().arc.unwrap();
+        let ax = Axis::of(find_wall(&typed(&n), "wall-s-1").unwrap()).unwrap();
+        let c = Axis::of(find_wall(&typed(&r), "c").unwrap()).unwrap().arc.unwrap();
         assert!((ax.arc.unwrap().r - c.radius_at(1.0)).abs() < 1e-9);
         assert_eq!(w["bulge"].as_f64(), Some(1.0));
     }
@@ -1028,16 +1028,19 @@ mod tests {
     #[test]
     fn treffer_und_gesperrt() {
         let mut r = t_case();
-        assert_eq!(pick_wall(&r, "eg", P::new(8.0, 0.05)).map(|w| id_of(w.0)), Some(Some("a")));
+        let pr = typed(&r);
+        assert_eq!(pick_wall(&pr, "eg", P::new(8.0, 0.05)).map(|w| w.0.id.as_str()), Some("a"));
         r.get_mut("walls").unwrap().as_array_mut().unwrap()[0]["locked"] = json!(true);
-        assert!(trim(&r, w_of(&r, "a"), P::new(8.0, 0.0), false).is_none());
-        assert_ne!(pick_wall(&r, "eg", P::new(8.0, 0.05)).map(|w| id_of(w.0)), Some(Some("a")));
+        let pr = typed(&r);
+        assert!(trim(&pr, find_wall(&pr, "a").unwrap(), P::new(8.0, 0.0), false).is_none());
+        assert_ne!(pick_wall(&pr, "eg", P::new(8.0, 0.05)).map(|w| w.0.id.as_str()), Some("a"));
     }
 
     #[test]
     fn trim_an_2d_linie_und_achsraster() {
         let r = project(vec![wall("a", (0.0, 0.0), (10.0, 0.0), None)], vec![], vec![json!({"id": "l", "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "line", "a": {"x": 3, "y": -1}, "b": {"x": 3, "y": 1}}})]);
-        let n = commit_edit(&r, trim(&r, w_of(&r, "a"), P::new(1.0, 0.0), false));
+        let pr = typed(&r);
+        let n = commit_edit(&r, &pr, trim(&pr, find_wall(&pr, "a").unwrap(), P::new(1.0, 0.0), false));
         assert!(close(xy_of(&w_of(&n, "a")["start"]), (3.0, 0.0)));
     }
 }
