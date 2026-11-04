@@ -2212,7 +2212,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `t_dach_anbau_unter_dem_hauptdach_verdeckt`. Dreiecke einer Dachebene malen mit der Tiefe der ganzen Fläche.
   4.11. nachgezogen: auch gemischte Dreiecke/Polygone einer Dachebene bekommen eine Tiefe → Ziegelschraffur deckt die
   ganze verschnittene Dachfläche (vorher nur eine Hälfte). **Offen:** ganz feine Haarlinien an Dreiecksfugen (SVG-
-  Kantenglättung); Carport noch als Pultdach 3°. Nur Linux/CLI-SVG geprüft. · M
+  Kantenglättung); Carport bleibt bewusst Pultdach 3° (Trapezblech braucht Gefälle). Nur Linux/CLI-SVG geprüft. · M
 - ◐ **[133] Musterhaus komplex: drei Befunde aus [114].** (4.11.) (1) Ausschnitt „EG 1:100" öffnete mit hohem Zoom
   gemeldet (~1000 %): in Chromium/Linux nicht reproduzierbar (Wiederherstellung `applyScale` + `setCamera` rechnet
   konsistent in px/m, alle Ausschnitte auch nach Wechsel aus Detail/3D/Schnitt/Ansicht im Rahmen). Datenfehler im Beispiel

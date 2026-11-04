@@ -445,7 +445,7 @@ const roofs: NonNullable<Project["roofs"]> = [
   },
   {
     id: "dach-carport", type: "roof", floorId: "eg", categoryCode: "31", outline: rect(-6.6, 10.6, -0.9, 16.2),
-    // Pultdach 3° (Trapezblech) — ein Flachdach zeigt in der Ansicht keine Stirn.
+    // Pultdach 3°: Trapezblech braucht Gefälle (Flachdach mit Stirn: Erker).
     shape: "pult", pitchDeg: 3, overhang: 0.1, ridgeAxis: "y", baseElevation: 2.3, thickness: 0.2, roofTypeId: "mk-rt-blech",
   },
 ];
