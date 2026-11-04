@@ -34,6 +34,18 @@ describe("wandCommand", () => {
     if (d.geom.shape === "polyline") expect(d.geom.closed).toBe(true);
   });
 
+  it("Option S: nächste Schraffur, dann „keine“ (nur Umriss)", () => {
+    const p = project();
+    const ctx = ctxOf(p);
+    const [s1] = wandCommand.onInput(wandCommand.init(), { kind: "option", id: "hatch" }, ctx);
+    expect(wandCommand.options(s1)[0].value).toBe("—");
+    const [, r] = wandCommand.onInput(s1, { kind: "point", point: { x: 1, y: 1 } }, ctx);
+    const next = r.commit!(p);
+    expect(next.drawings2d[next.drawings2d.length - 1].hatchId).toBeUndefined();
+    const [s2] = wandCommand.onInput(s1, { kind: "option", id: "hatch" }, ctx);
+    expect(wandCommand.options(s2)[0].value).toBe("Beton");
+  });
+
   it("Klick ausserhalb: kein Commit, Befehl bleibt aktiv", () => {
     const p = project();
     const [, r] = wandCommand.onInput(wandCommand.init(), { kind: "point", point: { x: 9, y: 9 } }, ctxOf(p));

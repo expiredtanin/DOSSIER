@@ -1805,6 +1805,7 @@ export const de = {
   "cmd.pointmarker.point": "Punkt:",
   "cmd.wand.label": "Zauberstab",
   "cmd.wand.point": "In eine umschlossene Fläche klicken:",
+  "cmd.wand.hatch": "Schraffur",
   "cmd.grid.label": "Achsraster",
   "cmd.grid.origin": "Ursprung des Achsrasters ( Radial ):",
   "cmd.grid.radial": "Radial",

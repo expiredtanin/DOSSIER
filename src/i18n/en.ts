@@ -1794,6 +1794,7 @@ export const en: Record<TranslationKey, string> = {
   "cmd.pointmarker.point": "Point:",
   "cmd.wand.label": "Magic wand",
   "cmd.wand.point": "Click inside an enclosed area:",
+  "cmd.wand.hatch": "Hatch",
   "cmd.grid.label": "Structural grid",
   "cmd.grid.origin": "Grid origin ( Radial ):",
   "cmd.grid.radial": "Radial",
