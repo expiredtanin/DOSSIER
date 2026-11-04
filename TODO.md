@@ -1892,7 +1892,13 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   live) und PDF teilen den Weg; im DXF/DWG-Papierbereich eines Publikationssatzes als Blatt-Zeichnung (Weg gebaut, aber nicht mit echter Datei geprüft). Bedienung: „＋ Legende“ in
   der Blatt-Leiste, Klick wählt sie, HUD: Titel, X/Y, Arten, „Auswahl festhalten“ / automatisch.
   Offen: Verschieben per Ziehen (heute X/Y-Felder), DXF-Legende nur im Satz-Export (nicht im allgemeinen DXF-Dialog).
-- ○ **[65] Explosionsaxonometrie.** · S–M
+- ◐ **[65] Explosionsaxonometrie.** · S–M — 4.11.: Kern `explode3d.rs` hebt im 3D jedes Geschoss (nach
+  `baseElevation` sortiert) um Index × Abstand; Bauteile folgen `floorId`, Öffnungen ihrem Wirt, truck-Extrusionen
+  `levelId`; Kontext bleibt. Modell (`model3dParts` `args[4]`), Pick-Geometrie und Auswahl-Hervorhebung gleich versetzt;
+  Plan/Schnitt/Ansicht unberührt. Bedienung: Knopf unten rechts im 3D-Viewport (neben Raster) + Abstandsfeld
+  (Ansichtszustand, nicht im Projekt). CLI `model3d --explode 3`; macOS-Rauchtest `smoke/explode.png`.
+  Offen: nur im Linux-Container geprüft (Zahlen, kein Bild); mit Explosion keine Abzugskörper, 2D-Boden-Spuren
+  und 3D-Griffe/Zeichnen-Vorschau bleiben unversetzt; natives Metal-3D-Fenster (`nativeSync`) ohne Explosion.
 - ◐ **[66] Präsentationspläne mit einem Klick.** · M — 4.11.: Standard-Ansichtsvorlagen (neue Projekte, „Standards
   laden/aktualisieren"): „Präsentation" (farbig, Schatten, ohne Referenzen/Konstruktion), „Eingabeplan 1:100" und
   „Ausführungsplan 1:50" (schwarz-weiss, fein, Strichstärken nach Massstab) — an Geschoss/Schnitt/Ansicht binden ([34]).

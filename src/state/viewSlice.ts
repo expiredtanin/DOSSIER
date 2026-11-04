@@ -37,6 +37,10 @@ export interface ViewSlice {
   // im Nordstern/WASM-Pfad — die three.js-Sicht zeigt ihr Raster unveraendert
   // immer; s. Wasm3DViewport.tsx).
   grid3dVisible: boolean;
+  // Explosionsaxonometrie im 3D ([65]): Geschosse senkrecht auseinandergezogen (nur Ansicht,
+  // nicht im Projekt) und der Abstand je Geschoss in Metern.
+  explode3d: boolean;
+  explode3dGap: number;
   // Farb-Modus des Grundrisses: "color" = Kategorie-/Element-Farben (heute),
   // "mono" = reiner Schwarz-Weiss-Plan (Tinte, keine Farb-/Schraffurfarben).
   planColorMode: "color" | "mono";
@@ -65,6 +69,8 @@ export interface ViewSlice {
   setView3d: (v: View3d) => void;
   setFov: (n: number) => void;
   setGrid3dVisible: (b: boolean) => void;
+  setExplode3d: (b: boolean) => void;
+  setExplode3dGap: (m: number) => void;
   setPlanColorMode: (m: "color" | "mono") => void;
   setReferenceLines: (b: boolean) => void;
   setLineMode: (m: "display" | "print") => void;
@@ -89,6 +95,8 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     view3d: "perspective",
     fov: 50,
     grid3dVisible: true,
+    explode3d: false,
+    explode3dGap: 3,
     planColorMode: "color",
     referenceLines: false,
     lineMode: "display",
@@ -114,6 +122,10 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     setView3d: (v) => set({ view3d: v }),
     setFov: (n) => set({ fov: n }),
     setGrid3dVisible: (b) => set({ grid3dVisible: b }),
+    setExplode3d: (b) => set({ explode3d: b }),
+    setExplode3dGap: (m) => {
+      if (Number.isFinite(m) && m > 0) set({ explode3dGap: Math.min(m, 100) });
+    },
     setPlanColorMode: (m) => set({ planColorMode: m }),
     setReferenceLines: (b) => set({ referenceLines: b }),
     setLineMode: (m) => set({ lineMode: m }),

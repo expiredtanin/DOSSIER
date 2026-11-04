@@ -47,11 +47,20 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("surfaceOpening", _) => json(&crate::opening_shape::surface_opening_info(p, text)),
         ("openingPreview", _) => json(&crate::opening_preview::opening_preview(p, text)),
         ("scheduleCsv", 1) => Ok(export_schedule::export_schedule_csv(p, text, args[0] != 0.0)),
-        ("pickGeometry", _) => json(&model3d::pick_geometry(p)?),
+        // `args[0]`: Explosionsabstand ([65], fehlt/0 = aus).
+        ("pickGeometry", _) => json(&crate::explode3d::pick_geometry(p, args.first().copied().unwrap_or(0.0))?),
         ("modelJson", _) => crate::model::to_value_typed_only(p).map(|v| v.to_string()).map_err(|e| e.to_string()),
         // Mit Abzugskörpern (`args[3]` ≠ 0) zusätzlich `voidCuts`: die getroffenen Wände/Decken als
         // truck-Spezifikationen (`solid_specs.rs`).
+        // `args[4]`: Explosionsabstand ([65], `explode3d.rs`; > 0 zusätzlich `floorOffsets`, ohne Abzugskörper).
         ("model3dParts", n) if n >= 3 => {
+            let explode = args.get(4).copied().filter(|g| g.is_finite() && *g > 0.0);
+            if let Some(gap) = explode {
+                let parts = crate::explode3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0, gap)?;
+                let mut v = serde_json::to_value(&parts).map_err(|e| e.to_string())?;
+                v["floorOffsets"] = serde_json::to_value(crate::explode3d::floor_offsets(p, gap)).map_err(|e| e.to_string())?;
+                return Ok(v.to_string());
+            }
             let parts = model3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0)?;
             if args.get(3).is_some_and(|v| *v != 0.0) {
                 let cuts = crate::solid_specs::void_cuts(p, &parts.walls, &parts.slabs);

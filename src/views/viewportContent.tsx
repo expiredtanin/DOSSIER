@@ -40,6 +40,7 @@ import { selectionHighlightLines } from "../core";
 import { clashHighlightLines } from "../analysis/clash";
 import { useClashSession } from "../panels/clashSession";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
+import { useStore } from "../state/appStore";
 import { PlanView } from "./plan/PlanView";
 import type {
   GripHandlers,
@@ -293,6 +294,8 @@ export const Content = memo(function Content({
   // die three.js-Sicht hebt die Auswahl weiterhin über ihr eigenes Material
   // hervor. Leere Auswahl → null (kein Highlight).
   const clashes = useClashSession().clashes;
+  // Explosionsaxonometrie ([65]): Hervorhebung folgt dem auseinandergezogenen 3D-Modell.
+  const explode = useStore((s) => (s.explode3d ? s.explode3dGap : 0));
   const selectionLines = useMemo(
     () =>
       selectedWallIds.length === 0 &&
@@ -311,9 +314,11 @@ export const Content = memo(function Content({
             selectedStairIds,
             selectedRoofIds,
             selectedContextObjectIds,
+            explode,
           ),
     [
       project,
+      explode,
       selectedWallIds,
       selectedCeilingIds,
       selectedOpeningIds,

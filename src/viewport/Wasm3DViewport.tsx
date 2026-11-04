@@ -65,6 +65,7 @@ import type { Vec3 } from "../core";
 import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
 import { pointCloudSyncItems } from "./pointCloudSync";
 import { usePointClouds } from "../state/pointCloudStore";
+import { useStore } from "../state/appStore";
 import { projectGeoOrigin } from "../core";
 import {
   FOV_Y,
@@ -562,6 +563,14 @@ export function Wasm3DViewport({
   groundElevationRef.current = groundElevation;
   const detailRef = useRef(detail);
   detailRef.current = detail;
+  // Explosionsaxonometrie ([65], Ansichtszustand): Abstand je Geschoss, 0 = aus.
+  const explodeOn = useStore((s) => s.explode3d);
+  const explodeGap = useStore((s) => s.explode3dGap);
+  const setExplodeOn = useStore((s) => s.setExplode3d);
+  const setExplodeGap = useStore((s) => s.setExplode3dGap);
+  const explode = explodeOn ? explodeGap : 0;
+  const explodeRef = useRef(explode);
+  explodeRef.current = explode;
   const {
     render,
     updateModel,
@@ -606,9 +615,9 @@ export function Wasm3DViewport({
   // Snapshot) — nur das `view3d`-Effekt unten springt aktiv auf ein Praeset.
   useEffect(() => {
     if (!ready) return;
-    updateModel(project, detail);
+    updateModel(project, detail, explode);
     redrawRef.current();
-  }, [ready, project, detail, updateModel]);
+  }, [ready, project, detail, explode, updateModel]);
 
   // Punktwolken abgleichen (neu/umgestellt/entfernt) und neu zeichnen, wenn sich etwas tat.
   useEffect(() => {
@@ -633,7 +642,7 @@ export function Wasm3DViewport({
   useEffect(() => {
     if (!ready) return;
     const onMeshReady = () => {
-      updateModel(projectRef.current, detailRef.current);
+      updateModel(projectRef.current, detailRef.current, explodeRef.current);
       redrawRef.current();
     };
     window.addEventListener(TRUCK_MESH_READY_EVENT, onMeshReady);
@@ -1371,6 +1380,7 @@ export function Wasm3DViewport({
       const ray = cameraRay(orbitCamera(o), ndc.ndcX, ndc.ndcY, ndc.aspect);
       const { walls, slabs, openings, stairs, roofs, contextMeshes, drawings } = pickGeometry(
         projectRef.current,
+        explodeRef.current,
       );
       // Erweiterter Pick inkl. Öffnungen (Fenster/Türen) + Treppen + Kontext-
       // Meshes + freie 2D-Zeichnungen (Linie/Polylinie/Rechteck, s.
@@ -1853,6 +1863,56 @@ export function Wasm3DViewport({
           </span>
         </button>
       )}
+      {/* Explosionsaxonometrie ([65]): Umschalter links neben dem Raster-Knopf, aktiv mit Abstandsfeld. */}
+      <div style={{ position: "absolute", right: onToggleGrid ? 48 : 10, bottom: 10, display: "flex", gap: 4, alignItems: "center" }}>
+        {explodeOn && (
+          <input
+            type="number"
+            min={0.5}
+            max={100}
+            step={0.5}
+            value={explodeGap}
+            aria-label={t("viewport3d.explode.gap")}
+            title={t("viewport3d.explode.gap")}
+            onChange={(e) => setExplodeGap(Number(e.target.value))}
+            style={{
+              width: 56,
+              height: 30,
+              boxSizing: "border-box",
+              borderRadius: 7,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(20,20,24,0.65)",
+              color: "#f2f2f2",
+              padding: "0 6px",
+            }}
+          />
+        )}
+        <button
+          type="button"
+          data-testid="explode3d-toggle"
+          onClick={() => setExplodeOn(!explodeOn)}
+          title={t(explodeOn ? "viewport3d.explode.off" : "viewport3d.explode.on")}
+          aria-pressed={explodeOn}
+          style={{
+            width: 30,
+            height: 30,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+            borderRadius: 7,
+            border: "1px solid rgba(255,255,255,0.14)",
+            background: explodeOn ? "rgba(255,255,255,0.14)" : "rgba(20,20,24,0.65)",
+            color: explodeOn ? "#f2f2f2" : "#9a9a9a",
+            cursor: "pointer",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>
+            {explodeOn ? "unfold_less" : "unfold_more"}
+          </span>
+        </button>
+      </div>
       {failed && (
         <div className="viewport-fallback">
           <strong>{t("viewport3d.engineUnavailable")}</strong>
