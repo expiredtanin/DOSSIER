@@ -46,6 +46,14 @@ describe("wandCommand", () => {
     expect(wandCommand.options(s2)[0].value).toBe("Beton");
   });
 
+  it("Schraffur „Ohne“ (Muster none) wird übersprungen", () => {
+    const p = project();
+    p.hatches = [{ id: "none", name: "Ohne", pattern: "none" } as unknown as Project["hatches"][number], ...p.hatches];
+    const [, r] = wandCommand.onInput(wandCommand.init(), { kind: "point", point: { x: 1, y: 1 } }, ctxOf(p));
+    const next = r.commit!(p);
+    expect(next.drawings2d[next.drawings2d.length - 1].hatchId).toBe("h1");
+  });
+
   it("Klick ausserhalb: kein Commit, Befehl bleibt aktiv", () => {
     const p = project();
     const [, r] = wandCommand.onInput(wandCommand.init(), { kind: "point", point: { x: 9, y: 9 } }, ctxOf(p));

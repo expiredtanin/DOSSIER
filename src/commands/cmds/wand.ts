@@ -7,16 +7,19 @@ import type { CmdOption, Command, CommandContext, CommandResult, CommandState, V
 import { createMutation, createPreview } from "../createCore";
 
 interface WandState extends CommandState {
-  /** `hatch`: Index in `project.hatches` (`NONE` = nur Umriss); `name`: Anzeige in der Befehlszeile. */
+  /** `hatch`: Index in den wählbaren Schraffuren (`NONE` = nur Umriss); `name`: Anzeige in der Befehlszeile. */
   sticky: { hatch: number; name?: string };
 }
 
 const NONE = -1;
 const idle = (): [CommandState, CommandResult] => [{ phase: "point", lastPoint: null }, { draft: null, done: true }];
 
-/** Gewählte Schraffur: Index in `project.hatches`, `NONE` = nur Umriss; ausser Reichweite → erste. */
+/** Wählbare Schraffuren: ohne Muster „none" (die Standard-Schraffur „Ohne" stünde sonst als Vorgabe vorne). */
+const usable = (ctx: CommandContext) => ctx.project.hatches.filter((h) => h.pattern !== "none");
+
+/** Gewählte Schraffur: Index in `usable`, `NONE` = nur Umriss; ausser Reichweite → erste. */
 const hatchOf = (s: WandState, ctx: CommandContext): string | undefined =>
-  s.sticky.hatch === NONE ? undefined : (ctx.project.hatches[s.sticky.hatch] ?? ctx.project.hatches[0])?.id;
+  s.sticky.hatch === NONE ? undefined : (usable(ctx)[s.sticky.hatch] ?? usable(ctx)[0])?.id;
 
 export const wandCommand: Command = {
   name: "wand",
@@ -33,10 +36,11 @@ export const wandCommand: Command = {
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as WandState;
     if (input.kind === "option" && input.id === "hatch") {
-      const n = ctx.project.hatches.length;
+      const list = usable(ctx);
+      const n = list.length;
       // Reihenfolge: 0, 1, …, n−1, keine, 0 …
       const next = s.sticky.hatch === NONE ? 0 : s.sticky.hatch + 1 >= n ? NONE : s.sticky.hatch + 1;
-      return [{ ...s, sticky: { hatch: next, name: next === NONE ? undefined : ctx.project.hatches[next]?.name } } as WandState, { draft: null }];
+      return [{ ...s, sticky: { hatch: next, name: next === NONE ? undefined : list[next]?.name } } as WandState, { draft: null }];
     }
     if (input.kind !== "point") return [s, { draft: null }];
     const at: Vec2 = input.point;
