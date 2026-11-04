@@ -967,6 +967,12 @@ export type Drawing2DGeom =
     height: number;
     angle: number;
     /**
+     * [37] Beschriftung in Papiergrösse: Schrifthöhe auf dem Papier in mm. Ist sie gesetzt, gilt sie in
+     * jedem Massstab (Modellhöhe = mm × Massstab / 1000) und `height` ist nur der Wert ohne Massstab
+     * (Modellbereich, Export ohne Bezug).
+     */
+    paperHeight?: number;
+    /**
      * Optionale Spaltenbreite in Metern (Textspalte/Absatztext). Ist sie gesetzt,
      * wird der Text beim Rendern wortweise auf diese Breite umgebrochen; fehlt
      * sie, bleibt es einzeiliger Text (heutiges Verhalten).

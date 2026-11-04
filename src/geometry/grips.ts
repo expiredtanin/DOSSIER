@@ -56,7 +56,9 @@ export function drawingVertices(d: Drawing2D, scaleDenominator: number = DEFAULT
   // NaN/±∞ als Marken (JSON hätte null daraus gemacht, das rechnet wie 0).
   const f = core().grip_vertices(toMarkedJson(g), scaleDenominator);
   if (f[0] === -1 && g.shape === "text") {
-    return textFrameCorners({ at: g.at, text: g.text, heightM: g.height, angle: g.angle, marks: g.marks, doc: g.doc, wrapWidth: g.width });
+    // [37] Papiergrösse: Schrifthöhe in mm auf dem Blatt → Modellmeter im aktuellen Massstab.
+    const heightM = g.paperHeight && g.paperHeight > 0 ? (g.paperHeight / 1000) * scaleDenominator : g.height;
+    return textFrameCorners({ at: g.at, text: g.text, heightM, angle: g.angle, marks: g.marks, doc: g.doc, wrapWidth: g.width });
   }
   const n = f[0] ?? 0;
   const out: Vec2[] = new Array(n);

@@ -277,6 +277,16 @@ export function ObjectInfoPanel() {
               />
             </>
           )}
+          {drawingShape === "text" && rawDrawing?.geom.shape === "text" && (
+            <DimensionField
+              label={t("objinfo.drawing.paperHeight")}
+              value={rawDrawing.geom.paperHeight ?? 0}
+              min={0}
+              step={0.5}
+              unit="mm"
+              onCommit={(v) => host.onSetDrawingTextPaperHeight(v)}
+            />
+          )}
           {drawingShape === "circle" && (
             <DimensionField
               label={t("objinfo.drawing.radius")}

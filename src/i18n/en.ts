@@ -903,6 +903,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.drawing.length": "Length",
   "objinfo.drawing.angle": "Angle",
   "objinfo.drawing.radius": "Radius",
+  "objinfo.drawing.paperHeight": "Paper size",
   "objinfo.drawing.startAngle": "Start angle",
   "objinfo.drawing.endAngle": "End angle",
   "levels.addFloor": "+ Floor",

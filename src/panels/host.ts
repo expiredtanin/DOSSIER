@@ -388,6 +388,11 @@ export interface PanelHostValue {
    */
   onSetDrawingCircleRadius: (radius: number) => void;
   /**
+   * [37] Schrifthöhe eines Texts in Papiergrösse (mm, in jedem Massstab gleich); 0 = aus (Modellhöhe gilt).
+   * No-op, wenn die Selektion kein Text ist.
+   */
+  onSetDrawingTextPaperHeight: (mm: number) => void;
+  /**
    * Setzt den Radius eines Bogens (Mittelpunkt + Winkel bleiben fix). No-op,
    * wenn die Selektion kein Bogen ist.
    */

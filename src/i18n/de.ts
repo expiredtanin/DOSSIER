@@ -907,6 +907,7 @@ export const de = {
   "objinfo.drawing.length": "Länge",
   "objinfo.drawing.angle": "Winkel",
   "objinfo.drawing.radius": "Radius",
+  "objinfo.drawing.paperHeight": "Papiergrösse",
   "objinfo.drawing.startAngle": "Startwinkel",
   "objinfo.drawing.endAngle": "Endwinkel",
   "objinfo.wall.floorAboveNone": "Kein oberes Geschoss",

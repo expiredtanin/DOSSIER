@@ -774,6 +774,13 @@ export function usePanelHostBase(opts: {
         if (!d || d.geom.shape !== "circle") return;
         updateDrawing2D(selection.id, { geom: { ...d.geom, r: radius } });
       },
+      onSetDrawingTextPaperHeight: (mm) => {
+        if (selection?.kind !== "drawing2d" || !isFinite(mm) || mm < 0) return;
+        const d = project.drawings2d.find((x) => x.id === selection.id);
+        if (!d || d.geom.shape !== "text") return;
+        const { paperHeight: _old, ...rest } = d.geom;
+        updateDrawing2D(selection.id, { geom: mm > 0 ? { ...rest, paperHeight: mm } : rest });
+      },
       onSetDrawingArcRadius: (radius) => {
         if (selection?.kind !== "drawing2d" || !isFinite(radius) || radius <= 0) return;
         const d = project.drawings2d.find((x) => x.id === selection.id);

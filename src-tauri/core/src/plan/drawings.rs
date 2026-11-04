@@ -848,7 +848,9 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), scale);
             }
         }
-        Drawing2DGeom::Text { at, text: s, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts } => {
+        Drawing2DGeom::Text { at, text: s, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts, paper_height } => {
+            // [37] Papiergrösse: Schrifthöhe in mm auf dem Blatt, unabhängig vom Massstab.
+            let height = &paper_height.filter(|mm| mm.is_finite() && *mm > 0.0).map_or(*height, |mm| mm_to_model(mm, scale));
             let color = marks.as_ref().and_then(|m| m.color.clone()).unwrap_or_else(|| em.color.to_string());
             if let Some(path) = path_pts.as_ref().filter(|q| q.len() >= 2) {
                 em.sink.push(
@@ -1193,10 +1195,11 @@ pub fn mv_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2) -> Drawing2DGeom {
             };
             G::Grid { origin: o, angle: ang, radial: *radial, a: a2, b: b2, extend: *extend, bubbles: *bubbles, bubble_mm: *bubble_mm, levels: levels.clone(), show_3d: *show_3d }
         }
-        G::Text { at, text, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts } => G::Text {
+        G::Text { at, text, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts, paper_height } => G::Text {
             at: f(*at),
             text: text.clone(),
             height: *height,
+            paper_height: *paper_height,
             angle: *angle,
             width: *width,
             marks: marks.clone(),
@@ -1796,6 +1799,21 @@ mod tests {
             { "shape": "block", "blockDefId": "b", "at": {"x": 0, "y": 0}, "rotation": 0 } ] }] }));
         let out = render(&p, drawing(serde_json::json!({"shape": "block", "blockDefId": "b", "at": {"x": 0, "y": 0}, "rotation": 0})), 100.0);
         assert_eq!(out.len(), MAX_BLOCK_DEPTH as usize);
+    }
+
+    /// [37] Text in Papiergrösse: 2.5 mm auf dem Blatt in jedem Massstab; ohne `paperHeight` gilt `height`.
+    #[test]
+    fn text_in_papiergroesse() {
+        let p = project(serde_json::json!({}));
+        let h = |geom: serde_json::Value, scale: f64| match render(&p, drawing(geom), scale).into_iter().next() {
+            Some(Primitive::DrawingText { height_m, .. }) => height_m,
+            o => panic!("{o:?}"),
+        };
+        let paper = serde_json::json!({"shape": "text", "at": {"x": 0, "y": 0}, "text": "A", "height": 0.3, "angle": 0, "paperHeight": 2.5});
+        assert!((h(paper.clone(), 100.0) - 0.25).abs() < 1e-12);
+        assert!((h(paper, 50.0) - 0.125).abs() < 1e-12);
+        let model = serde_json::json!({"shape": "text", "at": {"x": 0, "y": 0}, "text": "A", "height": 0.3, "angle": 0});
+        assert!((h(model, 50.0) - 0.3).abs() < 1e-12);
     }
 
     #[test]

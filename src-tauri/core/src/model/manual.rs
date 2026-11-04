@@ -513,6 +513,12 @@ pub enum Drawing2DGeom {
         text: String,
         height: f64,
         angle: f64,
+        /// [37] Beschriftung in Papiergrösse: Schrifthöhe auf dem Papier in mm. Ist sie gesetzt, gilt sie in
+        /// jedem Massstab (Modellhöhe = mm × Massstab / 1000) und `height` ist nur der Wert ohne Massstab
+        /// (Modellbereich, Export ohne Bezug).
+        #[serde(rename = "paperHeight", default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        paper_height: Option<f64>,
         /// Optionale Spaltenbreite in Metern (Textspalte/Absatztext). Ist sie gesetzt,
         /// wird der Text beim Rendern wortweise auf diese Breite umgebrochen; fehlt
         /// sie, bleibt es einzeiliger Text (heutiges Verhalten).
