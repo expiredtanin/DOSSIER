@@ -2,6 +2,11 @@
 //! Strecken wie beim Fang (`snap_model`: 2D-Zeichnungen und Modell-Kanten des Geschosses, Kreise/Bögen als
 //! Sehnenzüge), daraus der planare Graph und die kleinste Masche um den Punkt (`kernel2d`,
 //! `room_from_point_inside_faces`, wie die Raumerkennung aus Wandflächen).
+//!
+//! Inseln: geschlossene Formen ganz in der Masche, die ihren Rand nicht berühren (eigene Zusammenhangs-
+//! komponente des Graphen, z. B. Stütze im Raum), werden Löcher (wie Schraffur-Inseln in CAD). Nur die
+//! äussersten: eine Insel im Loch einer Insel bleibt unberücksichtigt. Eine Form, die den Rand berührt,
+//! gehört zum Graphen der Masche und formt deren Umriss selbst.
 
 use crate::model::Project;
 use crate::snap_model::Circle;
@@ -31,9 +36,16 @@ fn arc_segments(c: &Circle, out: &mut Vec<[f64; 4]>) {
     }
 }
 
-/// Umriss (gegen den Uhrzeigersinn) der kleinsten geschlossenen Fläche um `at` auf dem Geschoss `level`;
+/// Gefundene Fläche: Umriss (gegen den Uhrzeigersinn) und Inseln (im Uhrzeigersinn).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Region {
+    pub outer: Vec<(f64, f64)>,
+    pub holes: Vec<Vec<(f64, f64)>>,
+}
+
+/// Kleinste geschlossene Fläche um `at` auf dem Geschoss `level` samt Inseln;
 /// `None`, wenn der Punkt in keiner geschlossenen Masche liegt.
-pub fn region_at(p: &Project, level: &str, at: (f64, f64)) -> Option<Vec<(f64, f64)>> {
+pub fn region_at(p: &Project, level: &str, at: (f64, f64)) -> Option<Region> {
     if !(at.0.is_finite() && at.1.is_finite()) {
         return None;
     }
@@ -53,8 +65,9 @@ pub fn region_at(p: &Project, level: &str, at: (f64, f64)) -> Option<Vec<(f64, f
         return None;
     }
     let faces: Vec<WallFace> = segs.iter().map(|s| WallFace { a: Vec2::new(s[0], s[1]), b: Vec2::new(s[2], s[3]) }).collect();
-    let ring = kernel2d::room_from_point_inside_faces(Vec2::new(at.0, at.1), &faces, GAP_TOL)?;
-    (ring.len() >= 3).then(|| ring.iter().map(|q| (q.x, q.y)).collect())
+    let (ring, holes) = kernel2d::region_with_islands(Vec2::new(at.0, at.1), &faces, GAP_TOL)?;
+    let pl = |r: &[Vec2]| r.iter().map(|q| (q.x, q.y)).collect::<Vec<_>>();
+    (ring.len() >= 3).then(|| Region { outer: pl(&ring), holes: holes.iter().filter(|h| h.len() >= 3).map(|h| pl(h)).collect() })
 }
 
 #[cfg(test)]
@@ -86,9 +99,9 @@ mod tests {
             line("a", (-1.0, 0.0), (5.0, 0.0)), line("b", (4.0, -1.0), (4.0, 4.0)), line("c", (5.0, 3.0), (-1.0, 3.0)),
             line("d", (0.0, 4.0), (0.0, -1.0)), line("e", (2.0, 0.0), (2.0, 3.0))
         ]));
-        let r = region_at(&p, "L", (1.0, 1.0)).unwrap();
+        let r = region_at(&p, "L", (1.0, 1.0)).unwrap().outer;
         assert!((area(&r) - 6.0).abs() < 1e-9, "{r:?}");
-        let r = region_at(&p, "L", (3.0, 2.0)).unwrap();
+        let r = region_at(&p, "L", (3.0, 2.0)).unwrap().outer;
         assert!((area(&r) - 6.0).abs() < 1e-9);
         assert!(region_at(&p, "L", (10.0, 10.0)).is_none());
         assert!(region_at(&p, "L", (f64::NAN, 0.0)).is_none());
@@ -113,11 +126,50 @@ mod tests {
         assert!(crate::cmd_create::ops(root, &p, &out).unwrap().is_empty());
     }
 
+    fn rect(id: &str, a: (f64, f64), b: (f64, f64)) -> Vec<serde_json::Value> {
+        let c = [a, (b.0, a.1), b, (a.0, b.1)];
+        (0..4).map(|i| line(&format!("{id}{i}"), c[i], c[(i + 1) % 4])).collect()
+    }
+
+    /// [77] Inseln: Raum aus Linien mit quadratischer Stütze und runder Stütze darin → Umriss + 2 Löcher;
+    /// ein Quadrat in der Stütze (Insel in der Insel) zählt nicht; ein Quadrat am Rand formt den Umriss.
+    #[test]
+    fn inseln_werden_loecher() {
+        let mut d = rect("r", (0.0, 0.0), (10.0, 6.0));
+        d.extend(rect("s", (2.0, 2.0), (3.0, 3.0)));
+        d.extend(rect("t", (2.3, 2.3), (2.7, 2.7)));
+        d.push(serde_json::json!({"id": "k", "levelId": "L", "categoryCode": "20", "geom": {"shape": "circle", "center": {"x": 6, "y": 3}, "r": 0.5}}));
+        // Am Rand: Nische (berührt die rechte Kante).
+        d.extend(rect("n", (9.0, 4.0), (10.0, 5.0)));
+        let p = project(serde_json::Value::Array(d));
+        let r = region_at(&p, "L", (1.0, 1.0)).unwrap();
+        assert_eq!(r.holes.len(), 2, "{:?}", r.holes);
+        // Umriss ohne Nische: 60 - 1; Löcher im Uhrzeigersinn.
+        assert!((area(&r.outer) - 59.0).abs() < 1e-9, "{}", area(&r.outer));
+        let ha: f64 = r.holes.iter().map(|h| area(h)).sum();
+        assert!((ha + 1.0 + std::f64::consts::PI * 0.25).abs() < 0.01, "{ha}");
+        // Klick in die Stütze: deren Ring mit dem inneren Quadrat als Loch.
+        let s = region_at(&p, "L", (2.1, 2.1)).unwrap();
+        assert!((area(&s.outer) - 1.0).abs() < 1e-9);
+        assert_eq!(s.holes.len(), 1);
+        // Befehl schreibt `holes`.
+        let root = serde_json::to_value(&p).unwrap();
+        let v = serde_json::json!({"cmd": "wand", "at": {"x": 1, "y": 1}, "stamp": "s", "ctx": {"level": "L", "cat": "20"}});
+        let ops = crate::cmd_create::ops(root.as_object().unwrap(), &p, &v).unwrap();
+        let item = &ops[0].to_json()["items"][0];
+        assert_eq!(item["geom"]["holes"].as_array().unwrap().len(), 2);
+        // Ohne Inseln kein Feld.
+        let q = project(serde_json::Value::Array(rect("r", (0.0, 0.0), (2.0, 2.0))));
+        let root = serde_json::to_value(&q).unwrap();
+        let ops = crate::cmd_create::ops(root.as_object().unwrap(), &q, &v).unwrap();
+        assert!(ops[0].to_json()["items"][0]["geom"].get("holes").is_none());
+    }
+
     /// Kreis als Begrenzung (Sehnenzug).
     #[test]
     fn kreis_als_rand() {
         let p = project(serde_json::json!([{"id": "k", "levelId": "L", "categoryCode": "20", "geom": {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 1}}]));
-        let r = region_at(&p, "L", (0.1, 0.1)).unwrap();
+        let r = region_at(&p, "L", (0.1, 0.1)).unwrap().outer;
         assert!((area(&r) - std::f64::consts::PI).abs() < 0.01, "{}", area(&r));
     }
 }

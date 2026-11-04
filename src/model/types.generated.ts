@@ -839,6 +839,12 @@ export type Drawing2DGeom =
      * Bogen (kein eigenes SVG-Arc-Primitiv, analog Ellipse/Spline/Bezier).
      */
     bulge?: Array<number>;
+    /**
+     * Inseln/Löcher ([77], Zauberstab): nur bei `closed`, je ein gerader Ring (ohne Bögen).
+     * Füllung und Schraffur sparen sie aus, ihre Umrisse werden mitgezeichnet; fehlt das Feld,
+     * verhält sich die Polylinie exakt wie bisher.
+     */
+    holes?: Array<Array<Vec2>>;
   }
   | { shape: "rect"; min: Vec2; max: Vec2 }
   | { shape: "circle"; center: Vec2; r: number }

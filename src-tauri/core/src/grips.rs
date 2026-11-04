@@ -649,6 +649,10 @@ fn drawing_moved(d: &Value, dx: f64, dy: f64) -> Option<Value> {
     let mv = |k: &str| moved(g.get(k).unwrap_or(&Value::Null), dx, dy);
     let ng = match shape(g) {
         "line" => with_all(g, vec![("a", mv("a")), ("b", mv("b"))]),
+        "polyline" if truthy(field(g, "holes")) => {
+            let holes = Value::Array(arr(field(g, "holes")).iter().map(|h| moved_all(arr(Some(h)), dx, dy)).collect());
+            with_all(g, vec![("pts", moved_all(arr(field(g, "pts")), dx, dy)), ("holes", holes)])
+        }
         "polyline" | "bezier" | "spline" => with(g, "pts", moved_all(arr(field(g, "pts")), dx, dy)),
         // Allein verschobene Bemassung löst ihre Bezüge ([38]).
         "dimension" => crate::dim_assoc::without_ref(&with(g, "pts", moved_all(arr(field(g, "pts")), dx, dy)), None),

@@ -24,7 +24,13 @@ fn shift_geom(g: &mut Drawing2DGeom, dx: f64, dy: f64) {
             *a = shift(*a, dx, dy);
             *b = shift(*b, dx, dy);
         }
-        Polyline { pts, .. } | Bezier { pts } | Spline { pts, .. } | Dimension { pts, .. } => shift_all(pts, dx, dy),
+        Polyline { pts, holes, .. } => {
+            shift_all(pts, dx, dy);
+            for h in holes.iter_mut().flatten() {
+                shift_all(h, dx, dy);
+            }
+        }
+        Bezier { pts } | Spline { pts, .. } | Dimension { pts, .. } => shift_all(pts, dx, dy),
         Rect { min, max } | Image { min, max, .. } => {
             *min = shift(*min, dx, dy);
             *max = shift(*max, dx, dy);

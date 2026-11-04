@@ -244,7 +244,14 @@ fn drawing_bounds(d: &Drawing2D, out: &mut Vec<Bound>) {
                 out.push(Bound::Seg(c[i], c[(i + 1) % 4]));
             }
         }
-        Drawing2DGeom::Polyline { pts, closed, bulge } => {
+        Drawing2DGeom::Polyline { pts, closed, bulge, holes } => {
+            // Inseln ([77]) begrenzen wie der Umriss.
+            for h in holes.iter().flatten() {
+                let h: Vec<P> = h.iter().map(p_of).collect();
+                for i in 0..h.len() {
+                    out.push(Bound::Seg(h[i], h[(i + 1) % h.len()]));
+                }
+            }
             let pts: Vec<P> = pts.iter().map(p_of).collect();
             let n = pts.len();
             let segs = if *closed && n > 2 { n } else { n.saturating_sub(1) };
