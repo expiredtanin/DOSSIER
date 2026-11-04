@@ -550,6 +550,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.wall.refLine.joint": "Joint",
   "objinfo.wall.sliceTermination": "End at ceiling",
   "objinfo.wall.roofAttach": "Attach to roof",
+  "objinfo.isExternal": "External",
+  "objinfo.loadBearing": "Load-bearing",
   "objinfo.wall.roofAttach.auto": "Automatic",
   "objinfo.wall.roofAttach.on": "Yes, up to the roof",
   "objinfo.wall.roofAttach.off": "No",

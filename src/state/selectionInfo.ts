@@ -126,6 +126,9 @@ export interface WallInfo {
   sliceTermination: SliceTermination;
   /** An Dach anschliessen ([G2]): "auto" (Default), "on" (bis unter das Dach verlängern), "off". */
   roofAttach: "auto" | "on" | "off";
+  /** Aussenbauteil / tragend ([97]/[98]). */
+  isExternal: boolean;
+  loadBearing: boolean;
   wallTypeId: string;
   /** Aktuelle Gesamtdicke (Meter). */
   thickness: number;
@@ -164,6 +167,9 @@ export interface WallInfo {
 export interface CeilingInfo {
   /** Effektiv aktiver Aufbau-Typ: `ceilingTypeId`, sonst LEGACY-`wallTypeId`. */
   typeId: string;
+  /** Aussenbauteil / tragend ([97]/[98]). */
+  isExternal: boolean;
+  loadBearing: boolean;
   /** Aktuelle Gesamtdicke (Meter). */
   thickness: number;
   /** Ob der aktuelle Aufbau-Typ einschichtig ist (1 Schicht). */

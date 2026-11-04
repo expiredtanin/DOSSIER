@@ -825,6 +825,13 @@ export function usePanelHostBase(opts: {
           // "auto" ist der Default ⇒ als undefined speichern.
           updateWall(selection.id, { roofAttach: attach === "auto" ? undefined : attach === "on" });
       },
+      onSetBuildingFlags: (flags) => {
+        const patch: { isExternal?: boolean; loadBearing?: boolean } = {};
+        if (flags.isExternal !== undefined) patch.isExternal = flags.isExternal || undefined;
+        if (flags.loadBearing !== undefined) patch.loadBearing = flags.loadBearing || undefined;
+        if (selection?.kind === "wall") updateWall(selection.id, patch);
+        else if (selection?.kind === "ceiling") updateCeiling(selection.id, patch);
+      },
       onSetWallType: (wallTypeId) => {
         if (selection?.kind === "wall")
           updateWall(selection.id, { wallTypeId });

@@ -1924,7 +1924,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `Opening.mark/fireRating/soundClass/uValue/burglaryClass/notes/isExternal`, `Wall`/`Ceiling` `isExternal`/
   `loadBearing`. Anzeige editierbar in der Flächenbilanz (`OpeningScheduleSection`), Export CSV/SVG/PDF über das
   Berichtsmodell des Flächennachweises, CLI `schedule --openings [--format json|csv|svg|pdf]`.
-  Offen: Wand/Decke `isExternal`/`loadBearing` ohne UI (nur über Ops/IFC-Import setzbar; Objekt-Info fehlt);
+  Wand/Decke `isExternal`/`loadBearing`: 4.11. Häkchen „Aussenbauteil"/„Tragend" im Objekt-Info (ohne eigenen Test);
   Tabelle als Element auf dem Layout-Blatt ✅ [111]; Typ-Vorgaben
   (Brand/Schall/U am Tür-/Fenstertyp) fehlen — die Werte liegen je Öffnung; Nummern nicht stabil bei
   Umordnung (automatisch nach Dokumentreihenfolge); nicht in der Tauri-App getestet.

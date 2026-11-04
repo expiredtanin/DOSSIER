@@ -491,6 +491,9 @@ fn wall_selection(root: &Map<String, Value>, w: &Value) -> Result<J, String> {
         // An Dach anschliessen ([G2]): fehlt = automatisch.
         .v("roofAttach", Value::String(match field(w, "roofAttach").and_then(|v| v.as_bool()) { Some(true) => "on", Some(false) => "off", None => "auto" }.into()))
         .raw("wallTypeId", w, "wallTypeId")
+        // Aussenbauteil / tragend ([97]/[98]: Listen, IFC-Pset).
+        .v("isExternal", Value::Bool(field(w, "isExternal").and_then(Value::as_bool).unwrap_or(false)))
+        .v("loadBearing", Value::Bool(field(w, "loadBearing").and_then(Value::as_bool).unwrap_or(false)))
         .n("thickness", thickness)
         .v("singleLayer", Value::Bool(layers.len() <= 1))
         .v("wallTypes", type_choices(root, "wallTypes"))
@@ -563,6 +566,8 @@ fn ceiling_selection(root: &Map<String, Value>, c: &Value) -> Result<J, String> 
         .o("typeId", nn(field(c, "ceilingTypeId")).or(field(c, "wallTypeId")).cloned())
         .n("thickness", thickness)
         .v("singleLayer", Value::Bool(arr(field(wt, "layers")).len() <= 1))
+        .v("isExternal", Value::Bool(field(c, "isExternal").and_then(Value::as_bool).unwrap_or(false)))
+        .v("loadBearing", Value::Bool(field(c, "loadBearing").and_then(Value::as_bool).unwrap_or(false)))
         .n("area", area)
         .n("volume", area * thickness)
         .v("ceilingTypes", type_choices(root, "ceilingTypes"))

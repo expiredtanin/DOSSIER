@@ -552,6 +552,8 @@ export const de = {
   "objinfo.wall.refLine.joint": "Fuge",
   "objinfo.wall.sliceTermination": "An Decke enden",
   "objinfo.wall.roofAttach": "An Dach anschliessen",
+  "objinfo.isExternal": "Aussenbauteil",
+  "objinfo.loadBearing": "Tragend",
   "objinfo.wall.roofAttach.auto": "Automatisch",
   "objinfo.wall.roofAttach.on": "Ja, bis unters Dach",
   "objinfo.wall.roofAttach.off": "Nein",

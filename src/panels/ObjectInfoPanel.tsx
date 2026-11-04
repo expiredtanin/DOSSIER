@@ -1858,6 +1858,22 @@ function SurfaceOpeningSection({
 // ── Decken-Attribut-Abschnitt ────────────────────────────────────────────────
 // Aufbau-Typ (einschichtig/mehrschichtig), Dicke/Preset, Referenzgeschoss +
 // OK-Bindung, Fläche. Alle Werte/Setter über den Host.
+/** Aussenbauteil / tragend ([97]/[98]): wirken auf Bauteil-/Öffnungslisten und das IFC-Pset. */
+function BuildingFlags({ isExternal, loadBearing, host }: { isExternal: boolean; loadBearing: boolean; host: ReturnType<typeof usePanelHost> }) {
+  return (
+    <>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.isExternal")}</span>
+        <input type="checkbox" data-testid="objinfo-isExternal" checked={isExternal} onChange={(e) => host.onSetBuildingFlags({ isExternal: e.target.checked })} />
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.loadBearing")}</span>
+        <input type="checkbox" data-testid="objinfo-loadBearing" checked={loadBearing} onChange={(e) => host.onSetBuildingFlags({ loadBearing: e.target.checked })} />
+      </div>
+    </>
+  );
+}
+
 export function CeilingSection({
   ceiling,
   host,
@@ -1882,6 +1898,7 @@ export function CeilingSection({
     <>
       <div className="objinfo-sep" />
       <div className="objinfo-section-label">{t("objinfo.ceiling.section")}</div>
+      <BuildingFlags isExternal={ceiling.isExternal} loadBearing={ceiling.loadBearing} host={host} />
 
       {/* Aufbau-Typ-Segment. */}
       <div className="objinfo-field">
@@ -2099,6 +2116,7 @@ export function WallSection({
           width={120}
         />
       </div>
+      <BuildingFlags isExternal={wall.isExternal} loadBearing={wall.loadBearing} host={host} />
 
       {/* Aufbau-Typ-Segment. */}
       <div className="objinfo-field">
