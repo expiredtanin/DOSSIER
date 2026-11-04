@@ -637,9 +637,11 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
     let ordered: Vec<&Layer> = if reversed { layers.iter().rev().collect() } else { layers.iter().collect() };
     let category = p.layer_category(&owner.category_code);
     let mut out = Vec::with_capacity(layers.len());
-    // [106] Schichteinzug am Sturz (Stück liegt über der Öffnung) bzw. an der Brüstung (darunter).
+    // [106] Schichteinzug am Sturz (Stück liegt über der Öffnung) bzw. an der Brüstung (darunter),
+    // [94] Anschlag: die Schichten vor dem Rahmen reichen um die Anschlagtiefe in die Öffnung.
     let (top, bottom) = section_reveal(p, owner, plane, v_min, v_max);
     let n = layers.len();
+    let offsets: Vec<f64> = layers.iter().scan(0.0, |acc, l| { let o = *acc; *acc += l.thickness; Some(o) }).collect();
     let mut acc = 0.0;
     for (k, layer) in ordered.into_iter().enumerate() {
         let li = if reversed { n - 1 - k } else { k };
@@ -658,31 +660,99 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
             c.category = cp.category.clone();
             c
         };
-        let shift = |s: &Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>| s.as_ref().and_then(|(_, v)| v.iter().find(|a| a.layer == li)).map_or(0.0, |a| a.shift);
+        let shift = |s: &Option<EdgeJoin>| s.as_ref().map_or(0.0, |e| e.shift(li));
         let (vb, vt) = (v_min + shift(&top), v_max - shift(&bottom));
-        if vt - vb > 1e-6 {
-            out.push(mk(vec![[u_left, vt], [u_right, vt], [u_right, vb], [u_left, vb]]));
-        }
-        // Zusatzstücke dieser Schicht in der Öffnung.
         let u_of = |o: f64| if reversed { u_max - o * scale } else { u_min + o * scale };
+        let nibs = rebate_nibs(&top, &bottom, (offsets[li], offsets[li] + layer.thickness), (v_min, v_max), &u_of);
+        // Zusatzstücke dieser Schicht in der Öffnung `[u0, u1, v0, v1]` (an der Kante des Wandstücks).
+        let mut pieces: Vec<[f64; 4]> = Vec::new();
         for (side, below) in [(&top, true), (&bottom, false)] {
-            let Some((z, adj)) = side else { continue };
-            for a in adj.iter().filter(|a| a.layer == li) {
+            let Some(e) = side else { continue };
+            for a in e.adj.iter().filter(|a| a.layer == li) {
                 for pc in &a.pieces {
-                    let (z0, z1) = if below { (z - pc[1], z - pc[0]) } else { (z + pc[0], z + pc[1]) };
+                    // In der Anschlag-Zone deckt die Nase das Stück bis zur Anschlagtiefe schon ab.
+                    let mut pc = *pc;
+                    if let Some((d, _, _)) = e.rebate.filter(|r| pc[2] >= r.1 - 1e-6 && pc[3] <= r.2 + 1e-6) {
+                        pc[0] = pc[0].max(d);
+                        if pc[1] - pc[0] <= 1e-6 {
+                            continue;
+                        }
+                    }
+                    let (z0, z1) = if below { (v_min - pc[1], v_min - pc[0]) } else { (v_max + pc[0], v_max + pc[1]) };
                     let (ua, ub) = (min(u_of(pc[2]), u_of(pc[3])), max(u_of(pc[2]), u_of(pc[3])));
-                    out.push(mk(vec![[ua, z1], [ub, z1], [ub, z0], [ua, z0]]));
+                    pieces.push([ua, ub, z0, z1]);
                 }
             }
+        }
+        let rect_pts = |r: [f64; 4]| vec![[r[0], r[3]], [r[1], r[3]], [r[1], r[2]], [r[0], r[2]]];
+        if nibs.is_empty() {
+            if vt - vb > 1e-6 {
+                out.push(mk(rect_pts([u_left, u_right, vb, vt])));
+            }
+            out.extend(pieces.into_iter().map(|r| mk(rect_pts(r))));
+        } else {
+            // Band, Nase(n) und Zusatzstücke der Schicht als EIN Umriss (keine Fuge an der Nase).
+            let mut rects = nibs;
+            if vt - vb > 1e-6 {
+                rects.push([u_left, u_right, vb, vt]);
+            }
+            rects.extend(pieces);
+            out.extend(union_rect_outlines(&rects).into_iter().map(mk));
         }
     }
     Ok(out)
 }
 
-/// Schichteinzug der Öffnung, deren Sturz (unten an `v_min`) bzw. Brüstung (oben an `v_max`) dieses
-/// Wandstück ist und die die Schnittebene quert: `(Öffnungs-OK bzw. -UK, Anschlüsse)`.
-#[allow(clippy::type_complexity)]
-fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f64) -> (Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>, Option<(f64, Vec<crate::opening_detail::LayerAdjust>)>) {
+/// Anschlag-Nasen eines einschaligen Wandbands (ganze Dicke als eine Schicht).
+fn single_layer_nibs(p: &Project, owner: &Wall, cp: &Cut, u_world: (f64, f64), plane: &Plane) -> Vec<[f64; 4]> {
+    let total = sum_thickness(&p.wall_type_or_fallback(owner).layers);
+    let [u_min, u_max, v_min, v_max] = bbox(&cp.pts);
+    if !(total > 1e-9 && u_max - u_min > 1e-9) {
+        return Vec::new();
+    }
+    let (top, bottom) = section_reveal(p, owner, plane, v_min, v_max);
+    if top.is_none() && bottom.is_none() {
+        return Vec::new();
+    }
+    let scale = (u_max - u_min) / total;
+    let reversed = wall_layers_reversed_in_u(owner, u_world);
+    let u_of = |o: f64| if reversed { u_max - o * scale } else { u_min + o * scale };
+    rebate_nibs(&top, &bottom, (0.0, total), (v_min, v_max), &u_of)
+}
+
+/// Anschluss eines Wandstücks an die Öffnung, deren Sturz (Stück darüber) bzw. Brüstung (darunter) es ist.
+struct EdgeJoin {
+    /// Schichteinzug [106].
+    adj: Vec<crate::opening_detail::LayerAdjust>,
+    /// Anschlag [94]/[105]: Tiefe in die Öffnung und Zone quer ab Aussenfläche (zwischen Fläche und Rahmen).
+    rebate: Option<(f64, f64, f64)>,
+}
+
+impl EdgeJoin {
+    fn shift(&self, layer: usize) -> f64 {
+        self.adj.iter().find(|a| a.layer == layer).map_or(0.0, |a| a.shift)
+    }
+}
+
+/// Anschlag-Nasen `[u0, u1, v0, v1]` einer Schicht (quer `l0..l1` ab Aussenfläche) am Sturz (unter
+/// `v_min`) und an der Brüstung (über `v_max`); `u_of` bildet die Lage ab Aussenfläche auf u ab.
+fn rebate_nibs(top: &Option<EdgeJoin>, bottom: &Option<EdgeJoin>, (l0, l1): (f64, f64), (v_min, v_max): (f64, f64), u_of: &dyn Fn(f64) -> f64) -> Vec<[f64; 4]> {
+    let mut out = Vec::new();
+    for (side, below) in [(top, true), (bottom, false)] {
+        let Some((d, z0, z1)) = side.as_ref().and_then(|e| e.rebate) else { continue };
+        let (a, b) = (z0.max(l0), z1.min(l1));
+        if b - a <= 1e-6 {
+            continue;
+        }
+        let (ua, ub) = (min(u_of(a), u_of(b)), max(u_of(a), u_of(b)));
+        out.push(if below { [ua, ub, v_min - d, v_min] } else { [ua, ub, v_max, v_max + d] });
+    }
+    out
+}
+
+/// Schichteinzug und Anschlag der Öffnung, deren Sturz (unten an `v_min`) bzw. Brüstung (oben an `v_max`)
+/// dieses Wandstück ist und die die Schnittebene quert.
+fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f64) -> (Option<EdgeJoin>, Option<EdgeJoin>) {
     let (mut top, mut bottom) = (None, None);
     let u_raw = plane.u_model();
     let l = hypot2(u_raw.0, u_raw.1);
@@ -690,7 +760,6 @@ fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f6
         return (None, None);
     }
     let u = (u_raw.0 / l, u_raw.1 / l);
-    let (zb, zt) = p.wall_vertical_extent(wall);
     // Bogenwand: `wall` ist hier die Sehnen-Teilwand (mit Bulge) — die Öffnung sitzt auf der echten Wand.
     let host = p.walls.iter().find(|w| w.id == wall.id).unwrap_or(wall);
     for o in p.openings_of_wall(&wall.id) {
@@ -700,29 +769,28 @@ fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f6
             Some((vw, vo)) => (vw, vo),
             None => (wall, o),
         };
-        let (a, n) = axis_frame(wall);
-        let un = u.0 * n.0 + u.1 * n.1;
-        if un.abs() < MIN_CROSS {
+        // Lichte Höhe an der Schnittstelle (Formöffnungen: aus dem Umriss, wie die Wandbänder).
+        let Ok(Some(c)) = cross_section(p, wall, o, plane.base(), u) else { continue };
+        let at_top = (v_min - c.z_top).abs() < 1e-3;
+        let at_bottom = (v_max - c.z_bottom).abs() < 1e-3;
+        if !at_top && !at_bottom {
             continue;
         }
-        let p0 = plane.base();
-        let rel = (p0.0 - wall.start.x, p0.1 - wall.start.y);
-        let n0 = rel.0 * n.0 + rel.1 * n.1;
-        let a0 = rel.0 * a.0 + rel.1 * a.1;
-        let ua = u.0 * a.0 + u.1 * a.1;
-        let along = a0 + ((0.0 - n0) / un) * ua;
-        let Some(r) = crate::opening_detail::opening_reveal(p, wall, o) else { continue };
-        if along < r.from + 1e-4 || along > r.to - 1e-4 {
-            continue;
+        let [_, _, t, b] = crate::opening_detail::opening_reveal(p, wall, o).map(|r| r.sides).unwrap_or_default();
+        // Anschlag: oben wie an der Leibung (Sturz-Nase), unten nach `rebates.bottom` (Türen: keiner).
+        let h = c.z_top - c.z_bottom;
+        let frame = crate::opening_detail::frame_of(p, o);
+        let zone = frame.as_ref().and_then(|f| f.rebate_zone(c.face_max - c.face_min));
+        let rebate = |d: f64| zone.map(|(z0, z1)| (min(d, h / 3.0), z0, z1)).filter(|r| r.0 > 1e-4);
+        let (rt, rb) = match &frame {
+            Some(f) => (rebate(f.rebate.top), if o.kind == ElementKind::Door { None } else { rebate(f.rebate.bottom) }),
+            None => (None, None),
+        };
+        if at_top && (!t.is_empty() || rt.is_some()) {
+            top = Some(EdgeJoin { adj: t, rebate: rt });
         }
-        let o_bottom = zb + o.sill_height.max(0.0);
-        let o_top = zt.min(o_bottom + o.height);
-        let [_, _, t, b] = r.sides;
-        if (v_min - o_top).abs() < 1e-3 {
-            top = Some((o_top, t));
-        }
-        if (v_max - o_bottom).abs() < 1e-3 {
-            bottom = Some((o_bottom, b));
+        if at_bottom && (!b.is_empty() || rb.is_some()) {
+            bottom = Some(EdgeJoin { adj: b, rebate: rb });
         }
     }
     (top, bottom)
@@ -761,6 +829,18 @@ fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option
                 }
                 cp.join_priority = owner.and_then(|o| wall_representative_priority(p, o));
                 cp.component_id = owner.and_then(|o| wall_representative_component_id(p, o));
+                // [94] Anschlag-Nase der einschaligen Wand: Band und Nase als ein Umriss.
+                let nibs = owner.map(|o| single_layer_nibs(p, o, &cp, u_world, plane)).unwrap_or_default();
+                if !nibs.is_empty() {
+                    let mut polys = vec![vec![cp.pts.clone()]];
+                    polys.extend(nibs.iter().map(|r| vec![vec![[r[0], r[3]], [r[1], r[3]], [r[1], r[2]], [r[0], r[2]]]]));
+                    for poly in crate::polygon_bool::union(&polys) {
+                        if let Some(ring) = poly.into_iter().next().filter(|r| r.len() >= 3) {
+                            bands.push(Cut { pts: ring, ..cp.clone() });
+                        }
+                    }
+                    continue;
+                }
                 bands.push(cp);
             }
             _ => {
@@ -830,7 +910,7 @@ fn apply_wall_termination(bands: Vec<Cut>, walls: &[Option<&Wall>]) -> Vec<Cut> 
             }
             let top = min(clip_top, wb[3]);
             if top > wb[2] + EPS_T {
-                out.push(Cut { pts: vec![[wb[0], top], [wb[1], top], [wb[1], wb[2]], [wb[0], wb[2]]], ..b });
+                out.extend(clip_band(b, [wb[0], wb[1], wb[2], top]));
             }
             continue;
         }
@@ -840,10 +920,24 @@ fn apply_wall_termination(bands: Vec<Cut>, walls: &[Option<&Wall>]) -> Vec<Cut> 
         }
         let bottom = max(clip_bottom, wb[2]);
         if bottom < wb[3] - EPS_T {
-            out.push(Cut { pts: vec![[wb[0], wb[3]], [wb[1], wb[3]], [wb[1], bottom], [wb[0], bottom]], ..b });
+            out.extend(clip_band(b, [wb[0], wb[1], bottom, wb[3]]));
         }
     }
     out
+}
+
+/// Band auf das Rechteck `[u0, u1, v0, v1]` beschnitten; ein Band mit Anschlag-Nase ([94], kein
+/// Rechteck) behält seine Form.
+fn clip_band(b: Cut, r: [f64; 4]) -> Vec<Cut> {
+    let rect = vec![[r[0], r[3]], [r[1], r[3]], [r[1], r[2]], [r[0], r[2]]];
+    if b.pts.len() <= 4 || is_axis_rect(&b.pts) {
+        return vec![Cut { pts: rect, ..b }];
+    }
+    crate::polygon_bool::intersection(&[vec![b.pts.clone()]], &[vec![rect]])
+        .into_iter()
+        .filter_map(|poly| poly.into_iter().next().filter(|ring| ring.len() >= 3))
+        .map(|ring| Cut { pts: ring, ..b.clone() })
+        .collect()
 }
 
 /// `subtractDominantBands` (Rechnung: `dossier_hatch::section_dominance`, gemeinsam mit dem 3D-Live-Schnitt).
@@ -2404,42 +2498,6 @@ fn door_frame_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, df: &
     out.push(opening_poly(rect(c.u_at(s_of(d0)), c.u_at(s_of(d1)), c.z_bottom + 0.01, top), true, &o.id));
 }
 
-/// Anschlag im Schnitt ([105]/[94]): Wandnase oben (Sturz) und unten (Brüstung) über die Zone
-/// zwischen gewählter Fläche und Rahmen, je Wandschicht in deren Schnitt-Darstellung.
-fn rebate_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result<Vec<Primitive>, String> {
-    let mut out = Vec::new();
-    let Some(f) = crate::opening_detail::frame_of(p, o) else { return Ok(out) };
-    let wt = p.wall_type_or_fallback(wall);
-    let total = sum_thickness(&wt.layers);
-    let Some((z0, z1)) = f.rebate_zone(total) else { return Ok(out) };
-    let h = c.z_top - c.z_bottom;
-    let category = p.layer_category(&wall.category_code);
-    for (rd, top) in [(f.rebate.top, true), (if o.kind == ElementKind::Door { 0.0 } else { f.rebate.bottom }, false)] {
-        let rd = min(rd, h / 3.0);
-        if !(rd > 1e-4) {
-            continue;
-        }
-        let (v0, v1) = if top { (c.z_top - rd, c.z_top) } else { (c.z_bottom, c.z_bottom + rd) };
-        let mut l0 = 0.0;
-        for layer in &wt.layers {
-            let l1 = l0 + layer.thickness;
-            let (a, b) = (z0.max(l0), z1.min(l1));
-            l0 = l1;
-            if b - a <= 1e-6 {
-                continue;
-            }
-            let comp = p.component_or_fallback(&layer.component_id);
-            let (fill, hatch) = layer_style(p, comp, wall.hatch_id.as_deref(), wall.hatch_source, wall.foreground.as_deref(), wall.foreground_source, wall.background.as_deref(), wall.background_source, category, SECTION_WALL_AXIS_ANGLE_DEG)?;
-            let mut pr = polygon(rect(c.u_at(c.face_min + a), c.u_at(c.face_min + b), v0, v1), &fill, OPENING_INK, FRAME_MM, hatch);
-            if let Primitive::Polygon { opening_id, .. } = &mut pr {
-                *opening_id = Some(o.id.clone());
-            }
-            out.push(pr);
-        }
-    }
-    Ok(out)
-}
-
 /// `sectionOpeningPrimitives`.
 pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibility) -> Result<Vec<Primitive>, String> {
     let Some(plane) = level.plane() else { return Ok(Vec::new()) };
@@ -2481,8 +2539,7 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
             None => (wall, o),
         };
         let Some(c) = cross_section(p, wall, o, p0, u)? else { continue };
-        let mut prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(p, o, &c) };
-        prims.extend(rebate_cut(p, wall, o, &c)?);
+        let prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(p, o, &c) };
         let greyed = vis.greyed(&o.category_code);
         for pr in prims {
             out.push(if greyed { pr.with_greyed(true) } else { pr });
@@ -2660,6 +2717,81 @@ mod tests {
         assert!(more.len() > base.len(), "{} {}", more.len(), base.len());
         let json = serde_json::to_string(&more).unwrap();
         assert!(json.contains(LINTEL_FILL) && json.contains(SHADING_PACK_FILL), "{json}");
+    }
+
+    /// [94] Anschlag im Schnitt: Die Schichten vor dem Rahmen (Aussenputz, Dämmung) reichen am Sturz um die
+    /// Anschlagtiefe unter die Öffnungs-OK (Sturz-Nase) und an der Brüstung darüber — als Teil des Schicht-
+    /// Bands (ein Umriss, keine Fuge), nicht als eigenes Öffnungs-Stück. Ohne Anschlag bleibt das Loch glatt.
+    #[test]
+    fn anschlag_im_schnitt_sturz_nase_und_bruestung() {
+        let mut p = sample();
+        let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+        let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap().clone();
+        let (u, n) = axis_frame(&w1);
+        let m = o1.position + o1.width / 2.0;
+        let c = (w1.start.x + u.0 * m, w1.start.y + u.1 * m);
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: c.0 - n.0 * 3.0, y: c.1 - n.1 * 3.0 }, Vec2 { x: c.0 + n.0 * 3.0, y: c.1 + n.1 * 3.0 }]), ..Default::default() };
+        let (zb, zt) = opening_extent(&p, &w1, &o1);
+        // (Sturz-UK, Brüstungs-OK, Anzahl Bänder über der Öffnung) einer Schicht.
+        let edges = |p: &Project, comp: &str| -> (f64, f64, usize) {
+            let out = compute_section(p, &l, &[]).unwrap().unwrap();
+            let mine: Vec<&Cut> = out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W1") && c.component_id.as_deref() == Some(comp)).collect();
+            let above: Vec<&&Cut> = mine.iter().filter(|c| c.pts.iter().all(|q| q[1] > zb + 0.3)).collect();
+            let head = above.iter().flat_map(|c| c.pts.iter().map(|q| q[1])).fold(f64::INFINITY, f64::min);
+            let sill = mine.iter().flat_map(|c| c.pts.iter().map(|q| q[1])).filter(|y| *y < zt - 0.3).fold(f64::NEG_INFINITY, f64::max);
+            (head, sill, above.len())
+        };
+        // Ohne Anschlag (Rahmen aussen bündig): glattes Loch durch alle Schichten.
+        let mut count = HashMap::new();
+        for comp in ["render-ext", "insulation", "brick"] {
+            let (h, s, k) = edges(&p, comp);
+            assert!((h - zt).abs() < 1e-6 && (s - zb).abs() < 1e-6, "{comp}: {h} {s}");
+            count.insert(comp, k);
+        }
+        // Rahmen 18 cm hinter der Aussenfläche (hinter der Dämmung), Anschlag 5 cm.
+        for t in p.window_types.iter_mut().flatten() {
+            t.inset_face = Some(WindowTypeInsetFace::Aussen);
+            t.inset_from_face = Some(0.18);
+            t.rebate_depth = Some(0.05);
+        }
+        for comp in ["render-ext", "insulation"] {
+            let (h, s, k) = edges(&p, comp);
+            assert!((h - (zt - 0.05)).abs() < 1e-6, "{comp}: Sturz-Nase {h} vs {}", zt - 0.05);
+            assert!((s - (zb + 0.05)).abs() < 1e-6, "{comp}: Brüstung {s} vs {}", zb + 0.05);
+            assert_eq!(k, count[comp], "{comp}: Nase gehört zum Band (keine Fuge)");
+        }
+        // Mauerwerk hinter dem Rahmen: unverändert.
+        let (h, s, _) = edges(&p, "brick");
+        assert!((h - zt).abs() < 1e-6 && (s - zb).abs() < 1e-6, "brick: {h} {s}");
+        // Überdämmt [106] innerhalb der Nase: kein doppeltes Stück; darüber hinaus Teil desselben Umrisses.
+        let reveal = |a: f64| vec![crate::model::LayerReveal { layer: 1.0, mode: crate::model::RevealMode::Ueberdaemmt, amount: Some(a), ..Default::default() }];
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.layer_reveals = Some(reveal(0.03));
+        }
+        let (h, _, k) = edges(&p, "insulation");
+        assert!((h - (zt - 0.05)).abs() < 1e-6 && k == count["insulation"], "{h} {k}");
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.layer_reveals = Some(reveal(0.08));
+        }
+        let (h, _, k) = edges(&p, "insulation");
+        assert!((h - (zt - 0.08)).abs() < 1e-6 && k == count["insulation"], "{h} {k}");
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.layer_reveals = None;
+        }
+        // Anschlag unten eigens (Rahmen-Detail): Brüstung 2 cm, Sturz bleibt 5 cm.
+        for t in p.window_types.iter_mut().flatten() {
+            t.frame_detail = Some(crate::model::FrameDetail { rebates: Some(crate::model::OpeningSides { bottom: Some(0.02), ..Default::default() }), ..Default::default() });
+        }
+        let (h, s, _) = edges(&p, "render-ext");
+        assert!((h - (zt - 0.05)).abs() < 1e-6 && (s - (zb + 0.02)).abs() < 1e-6, "{h} {s}");
+        // Die Nase ist kein eigenes Öffnungs-Stück mehr (sonst doppelt).
+        let with = section_opening_primitives(&p, &l, &Visibility::default()).unwrap().len();
+        for t in p.window_types.iter_mut().flatten() {
+            t.frame_detail = None;
+            t.rebate_depth = Some(0.0);
+        }
+        let without = section_opening_primitives(&p, &l, &Visibility::default()).unwrap().len();
+        assert_eq!(with, without);
     }
 
     /// [G3] Rundbogen-Fenster: an der Schnittstelle reicht die Wand bis an den Bogen, Rahmen/Glas folgen.

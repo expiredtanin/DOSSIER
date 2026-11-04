@@ -1953,8 +1953,20 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   mit Gefälle), Storenkasten `shading.mount: "sturz"` (Schweizer Lamellenstoren: Kasten im Sturz verdeckt — Grundriss
   Überkopf-Rechteck ab Aussenfläche, fein Führungsschienen neben dem Anschlag; Schnitt Kasten + Lamellenpaket, vorgesetzter
   Kasten jetzt auch im Schnitt; 3D nur Schienen). UI: „Fenster bearbeiten" (Rahmen/Sonnenschutz). Geprüft: Rust-Tests,
-  CLI-Grundriss/-Schnitt/-Ansicht als PNG angesehen (Linux). Offen: Anschlag im Schnitt (Sturz-Nase), Brüstung als
-  eigenes Bauteil, Anschlag/Leibung in den Ressourcen-Tabs (nur im Bearbeiten-Dialog).
+  CLI-Grundriss/-Schnitt/-Ansicht als PNG angesehen (Linux). Offen: Brüstung als eigenes Bauteil, Anschlag/Leibung in
+  den Ressourcen-Tabs (nur im Bearbeiten-Dialog).
+  - (04.11.) Anschlag im Schnitt (Sturz-Nase): Die Schichten in der Anschlag-Zone (zwischen gewählter Fläche und Rahmen)
+    reichen am Sturz um `rebates.top` (sonst `rebateDepth`) unter die Öffnungs-OK und an der Brüstung um `rebates.bottom`
+    (eigene Regel aus [105]; ohne sie wie Leibung/Sturz `rebateDepth`; Türen unten keiner) darüber — jetzt als Teil des
+    Schicht-Bands (`split_wall_layers`, ein Umriss ohne Fuge; einschalige Wände ebenso), nicht mehr als eigenes
+    Öffnungs-Stück (`rebate_cut` entfernt). [106]-Zusatzstücke der Schicht verschmelzen mit der Nase; ein überdämmt-
+    Stück innerhalb der Nase entfällt (vorher doppelt). Sturz/Brüstung werden über denselben Querschnitt wie Rahmen/Glas
+    erkannt (`cross_section`): Schichteinzug [106] greift dadurch auch dort, wo er vorher im Schnitt fehlte (Musterhaus
+    komplex, Schnitt A-A: Innenputz in die Leibung). Terminierung (`slice_termination`) behält die Form von Bändern mit
+    Nase. Golden `komplex-schnitt-schnitt-a` bewusst nachgeführt. Geprüft: Rust-Test, CLI-Schnitt A-A als PNG vorher/
+    nachher angesehen (Linux). Offen: Schnitt genau durch die Leibungs-Nase (zwischen Rohbaukante und Anschlag links/
+    rechts) zeigt das Loch ohne Nase; Rundbogen-Nase folgt dem Bogen nicht (Rechteck an der lichten Höhe); nicht in der
+    Tauri-App geprüft.
 - ◐ **[95] Fenster/Türen: mehr Bauarten und Typen-Bibliothek.** (29.10.) Türtyp `kind` neu `hebeschiebe` und `pendel`;
   `schiebe` wird jetzt auch gezeichnet: Grundriss nach SIA (Schiebetür: Blatt-Rechteck vor der Wand auf der Aufschlagseite +
   Pfeil zur Parkseite, zweiflügelig zwei Pfeile; Hebeschiebe: zwei Flügel auf versetzten Gleisen im Rahmen mit Glaslinien
