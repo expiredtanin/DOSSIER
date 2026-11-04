@@ -2815,8 +2815,9 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   `SHA256SUMS.txt`): Muster für [30]. · M
 - ○ **[C9] Ehrliche Paritäts-Doku** (`docs/file-format-parity.md`, `docs/gaps.md`: was beim Speichern verloren
   geht, was fehlt): passt zu [60]. · S
-- ○ **[C10] Kleinigkeiten:** Log-Rotation über `RUST_LOG`, isoliertes Profil per Umgebungsvariable,
-  „reduzierte Bewegung" aus den Systemeinstellungen. · je S
+- ◐ **[C10] Kleinigkeiten:** Log-Rotation über `RUST_LOG`, isoliertes Profil per Umgebungsvariable,
+  „reduzierte Bewegung" aus den Systemeinstellungen. · je S — 4.11.: „Bewegung reduzieren" (macOS/Linux-System):
+  keine CSS-Übergänge/Animationen (`styles.css`), 3D-Kamerafahrten springen direkt (`prefersReducedMotion`).
 - ◐ **[C11] glTF 2.0 / GLB-Export + Mesh-Export in Rust** (28.10.): `src-tauri/fileio/src/mesh_export.rs` schreibt
   OBJ, STL (Ausgabe zeichengleich zur früheren TS-Fassung, Golden am Beispielprojekt) und **glTF/GLB** (eigener
   Code, keine Abhängigkeit): ein Knoten je Bauteil (`Wand_<id>`, `extras` = Typ + id), Geschoss als Eltern-Knoten,

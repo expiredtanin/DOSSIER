@@ -243,6 +243,11 @@ export function getCamera(): ViewCamera | null {
 }
 
 /** Kamera setzen. `false` ohne Viewport oder bei unbrauchbarer Kamera (NaN, Nullvektor). */
+/** [C10] Systemeinstellung „Bewegung reduzieren": Kamerafahrten springen dann direkt ans Ziel. */
+export function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export function setCamera(cam: ViewCamera, opts: { animate?: boolean } = {}): boolean {
   if (!api) return false;
   const cur = api.read();
@@ -254,7 +259,7 @@ export function setCamera(cam: ViewCamera, opts: { animate?: boolean } = {}): bo
     dist = along >= 1 ? along : len(sub(cur.camera.target, cur.camera.eye)) || 10;
   }
   const c3 = camera3dFromViewCamera(cam, dist);
-  return c3 ? api.write(c3, opts.animate === true) : false;
+  return c3 ? api.write(c3, opts.animate === true && !prefersReducedMotion()) : false;
 }
 
 /**
@@ -277,7 +282,7 @@ export function focusedCamera(cam: Camera3d, centerModel: readonly number[], rad
 /** Fokus der Live-Kamera auf einen Modellpunkt; `false` ohne Viewport. */
 export function focusCamera(centerModel: readonly number[], radius: number, opts: { animate?: boolean } = {}): boolean {
   const cur = api?.read();
-  return api && cur ? api.write(focusedCamera(cur.camera, centerModel, radius), opts.animate !== false) : false;
+  return api && cur ? api.write(focusedCamera(cur.camera, centerModel, radius), opts.animate !== false && !prefersReducedMotion()) : false;
 }
 
 /** PNG des aktuellen 3D-Bildes, oder null (kein Viewport, leeres/nicht lesbares Bild). */
