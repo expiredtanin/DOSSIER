@@ -24,6 +24,9 @@ pub struct Args {
     pub roofs: Vec<String>,
     pub context: Vec<String>,
     pub rgb: [f64; 3],
+    /// Explosionsabstand ([65], `explode3d.rs`; fehlt/0 = aus): Linien folgen dem auseinandergezogenen Modell.
+    #[serde(default)]
+    pub explode: f64,
 }
 
 const BOX_EDGES: [(usize, usize); 12] = [(0, 1), (0, 2), (0, 4), (1, 3), (1, 5), (2, 3), (2, 6), (3, 7), (4, 5), (4, 6), (5, 7), (6, 7)];
@@ -98,32 +101,50 @@ fn set(ids: &[String]) -> HashSet<&str> {
 /// Linienliste der Hervorhebung (leer, wenn nichts gewählt ist).
 pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, String> {
     let mut out = Out { v: Vec::new(), rgb: a.rgb };
+    // Explosionsaxonometrie: die Linien eines Bauteils ab Puffer-Index `from` um seinen Geschoss-Versatz heben (Welt-y).
+    let ex = crate::explode3d::Explode::new(p, a.explode);
+    let lift = |out: &mut Out, from: usize, id: &str| {
+        let dz = ex.as_ref().map_or(0.0, |e| e.of(id)) as f32;
+        if dz != 0.0 {
+            for v in out.v[from..].chunks_exact_mut(6) {
+                v[1] += dz;
+            }
+        }
+    };
     let (walls, ceilings, openings, stairs, roofs, context) = (set(&a.walls), set(&a.ceilings), set(&a.openings), set(&a.stairs), set(&a.roofs), set(&a.context));
     if !walls.is_empty() {
         for w in emit_walls(p, true)? {
             if walls.contains(w.wall_id.as_str()) {
+                let n = out.v.len();
                 out.box_edges(w.start, w.end, w.thickness, w.height, w.base_elevation);
+                lift(&mut out, n, &w.wall_id);
             }
         }
     }
     if !openings.is_empty() {
         for o in pick_openings(p) {
             if openings.contains(o.opening_id.as_str()) {
+                let n = out.v.len();
                 out.box_edges(o.start, o.end, o.thickness, o.height, o.base_elevation);
+                lift(&mut out, n, &o.opening_id);
             }
         }
     }
     if !ceilings.is_empty() {
         for s in emit_slabs(p) {
             if ceilings.contains(s.ceiling_id.as_str()) {
+                let n = out.v.len();
                 out.prism_edges(&s.outline, s.z_bottom, s.z_top);
+                lift(&mut out, n, &s.ceiling_id);
             }
         }
     }
     if !stairs.is_empty() {
         for st in pick_stairs(p) {
             if stairs.contains(st.stair_id.as_str()) {
+                let n = out.v.len();
                 out.prism_edges(&st.outline, st.z_bottom, st.z_top);
+                lift(&mut out, n, &st.stair_id);
             }
         }
     }
@@ -133,6 +154,7 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
                 continue;
             }
             let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+            let n = out.v.len();
             for pts in g.planes.iter().chain(g.gables.iter()) {
                 let m = pts.len();
                 if m == 0 {
@@ -145,6 +167,7 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
                     j = i;
                 }
             }
+            lift(&mut out, n, &roof.id);
         }
     }
     if !context.is_empty() {

@@ -39,7 +39,11 @@ function extrudedSolidSignature(solid: ExtrudedSolid): string {
   return `${solid.baseOffset ?? 0}|${solid.height}|${solid.taper ?? 0}|${solid.cornerRadius ?? 0}|${solid.chamfer ?? 0}|${brep}|${solid.points.map((p) => `${p.x},${p.y}`).join(";")}`;
 }
 
-export function emitExtrudedSolids(project: Project): RMesh[] {
+export function emitExtrudedSolids(
+  project: Project,
+  /** Explosionsaxonometrie ([65]): Versatz (m) je Geschoss-id; der Cache bleibt unverschoben. */
+  floorOffsets?: Record<string, number>,
+): RMesh[] {
   if (typeof window === "undefined") return [];
   const out: RMesh[] = [];
   // Cache-Einträge gelöschter/nicht mehr existierender Körper verwerfen (sonst
@@ -94,7 +98,9 @@ export function emitExtrudedSolids(project: Project): RMesh[] {
         })
         .catch((e) => console.warn("truck-Extrusion fehlgeschlagen:", e));
     }
-    if (entry.mesh) out.push(entry.mesh);
+    if (!entry.mesh) continue;
+    const dz = floorOffsets?.[solid.levelId] ?? 0;
+    out.push(dz === 0 ? entry.mesh : { ...entry.mesh, positions: entry.mesh.positions.map((v, i) => (i % 3 === 2 ? v + dz : v)) });
   }
   return out;
 }

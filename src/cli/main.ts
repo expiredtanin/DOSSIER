@@ -21,7 +21,7 @@
 //                                                  Bauteile ([B4]); Bericht als JSON auf stdout
 //   dossier-cli <projekt.obp> import-mesh <datei.obj|stl|gltf|glb|ply> [--out neu.obp] [--unit mm|cm|m|inch|foot] [--up z|y|auto]
 //                                                  [--placement center|original]   3D-Modell als Kontext-Meshes; Bericht als JSON
-//   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
+//   dossier-cli <projekt.obp> model3d [--explode 3] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
 //                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
 //   dossier-cli pdf-info <datei.pdf> [--page 1]    Vektor-PDF lesen ([76]): Seiten, Pfade, Texte, BBox (pt) als JSON
@@ -822,7 +822,8 @@ async function execute(project: Project, file: string, command: string, rest: st
       await serveStdio(file);
       return 0;
     case "model3d":
-      out(args, JSON.stringify(projectToModel3d(project)), `${project.name || "projekt"}.model3d.json`);
+      // `--explode <m>`: Explosionsaxonometrie ([65]), Geschosse um Index × Abstand angehoben.
+      out(args, JSON.stringify(projectToModel3d(project, { explode: Number(args.flags.get("explode") ?? 0) || 0 })), `${project.name || "projekt"}.model3d.json`);
       return 0;
     case "bench": {
       const runs = Number(args.flags.get("runs") ?? 10);

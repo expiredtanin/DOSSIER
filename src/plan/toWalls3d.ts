@@ -137,6 +137,12 @@ export interface Model3dOptions {
    * `toWalls3d/voids3d.ts`). Schnitt/Ansicht/Export behandeln Abzugskörper selbst.
    */
   voids?: boolean;
+  /**
+   * Explosionsaxonometrie ([65]): Abstand (m) zwischen den Geschossen; 0/fehlt = aus. Jedes
+   * Geschoss hebt sich um Index × Abstand (Kern `explode3d.rs`); Kontext bleibt stehen.
+   * Mit Explosion keine Abzugskörper (die truck-Ergebnisse lägen am alten Ort).
+   */
+  explode?: number;
 }
 
 /** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
@@ -144,14 +150,15 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   const layered = opts.layeredWalls ?? true;
   const detail = opts.detail ?? "fein";
   // Mit `voids` liefert der Kern zusätzlich die getroffenen Wände/Decken als truck-Spezifikationen.
-  const voids = !!opts.voids && typeof window !== "undefined";
+  const explode = explodeGap(opts.explode);
+  const voids = !!opts.voids && typeof window !== "undefined" && explode === 0;
   const parts = documentFor(project).query<Model3dParts>(
     "model3dParts",
-    [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0],
+    [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, explode],
   );
   // Die truck-Körper (asynchron, mit Cache) kommen zwischen Kontext-Meshes und Stützen.
   const meshes: RMesh[] = [...parts.contextMeshes];
-  for (const m of emitExtrudedSolids(project)) meshes.push(m);
+  for (const m of emitExtrudedSolids(project, parts.floorOffsets)) meshes.push(m);
   for (const m of parts.columnMeshes) meshes.push(m);
   for (const m of parts.openingMeshes) meshes.push(m);
   for (const m of parts.stairMeshes) meshes.push(m);
@@ -183,6 +190,13 @@ interface Model3dParts {
   roofLayers: RModel3d["roofLayers"];
   /** Nur mit Abzugskörpern: (Index im Modell, Bauteil − Körper) je getroffene Wand/Decke. */
   voidCuts?: VoidCuts;
+  /** Nur mit Explosion: Versatz (m) je Geschoss-id (für die truck-Extrusionen). */
+  floorOffsets?: Record<string, number>;
+}
+
+/** Explosionsabstand bereinigt: endlich und > 0, sonst 0 (= aus). */
+function explodeGap(v: number | undefined): number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
 }
 
 const DETAIL_CODE: Record<string, number> = { grob: 0, mittel: 1, fein: 2 };
@@ -200,6 +214,8 @@ const DETAIL_CODE: Record<string, number> = { grob: 0, mittel: 1, fein: 2 };
  */
 export function pickGeometry(
   project: Project,
+  /** Explosionsabstand ([65]) wie bei {@link projectToModel3d}; 0 = aus. */
+  explode = 0,
 ): {
   walls: RWall[];
   slabs: RSlab[];
@@ -209,7 +225,7 @@ export function pickGeometry(
   contextMeshes: PickContextMesh[];
   drawings: PickDrawingSeg[];
 } {
-  return documentFor(project).query("pickGeometry");
+  return documentFor(project).query("pickGeometry", [explodeGap(explode)]);
 }
 
 /**
@@ -249,11 +265,13 @@ export function selectionHighlightLines(
   stairIds: string[] = [],
   roofIds: string[] = [],
   contextObjectIds: string[] = [],
+  /** Explosionsabstand ([65]); 0 = aus. */
+  explode = 0,
 ): Float32Array {
   const sel = { walls: wallIds, ceilings: ceilingIds, openings: openingIds, stairs: stairIds, roofs: roofIds, context: contextObjectIds };
   if (Object.values(sel).every((l) => l.length === 0)) return new Float32Array(0);
   // Gerechnet im Kern (`highlight3d.rs`); Antwort f32-LE.
-  const b = documentFor(project).queryBin("selectionHighlight", [], JSON.stringify({ ...sel, rgb }));
+  const b = documentFor(project).queryBin("selectionHighlight", [], JSON.stringify({ ...sel, rgb, explode: explodeGap(explode) }));
   return new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
 }
 

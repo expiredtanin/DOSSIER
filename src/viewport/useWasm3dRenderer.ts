@@ -231,11 +231,11 @@ export function useWasm3dRenderer(
 
   /** Modell bei Projektänderung neu setzen (re-extrudiert in Rust). `detail`
    *  steuert den Öffnungs-Detailgrad (grob/mittel/fein) im 3D wie im Grundriss. */
-  const updateModel = useCallback((project: Project, detail?: DetailLevel) => {
+  const updateModel = useCallback((project: Project, detail?: DetailLevel, explode = 0) => {
     const r = rendererRef.current;
     if (!r || !project) return;
     try {
-      r.set_model(JSON.stringify(projectToModel3d(project, { detail, voids: true })));
+      r.set_model(JSON.stringify(projectToModel3d(project, { detail, voids: true, explode })));
     } catch (e) {
       console.warn("render3d set_model fehlgeschlagen:", e);
     }
