@@ -1140,7 +1140,7 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   `cmd_create` ~60, `cmd_edit` (Kurven/Ecken/Aufloesen auf 2D-Zeichnungen) ~45, `cmd_draw` (Bemassung/Polylinie) ~40,
   `cmd_split` ~25, `geo_translate`, `pens`, `layers`, Importe. `selection_info`/`grips` bewusst nicht angefasst:
   sie geben fehlende/`null`-Felder unverändert ins Ergebnis-JSON weiter (undefined ≠ null), das braucht eigene Tests.
-  5.11. Stufe 3 (mechanisch, Verhalten gleich): `cmd_transform` liest Öffnungen der bewegten Wände (`moved_openings`,
+  4.11. Stufe 3 (mechanisch, Verhalten gleich): `cmd_transform` liest Öffnungen der bewegten Wände (`moved_openings`,
   `Project.openings`) und die Wanddicke der Vorschau (`wall_thickness`, `Project.wall_types`) typisiert;
   `transform_ops`/`preview_pending` nehmen `&Project` (`doc_cmd_preview` über `project_lookup`; bei ungültigem Projekt
   jetzt leere Vorschau statt Rechnung auf dem rohen Baum). `cmd_draw::dimension_ops` liest die alte Bemassung beim
