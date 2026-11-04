@@ -1008,6 +1008,7 @@ export const en: Record<TranslationKey, string> = {
   "editor.floorHeight": "Floor height",
   "editor.cutHeight": "Cut height",
   "editor.levelElevation": "Finished floor level",
+  "editor.levelElevation.hint": "Type the level relative to ±0.00; the storey height below (below ±0.00: its own) adapts",
   "editor.zeroLevel": "Datum ±0.00",
   "editor.zeroLevel.hint": "This storey is at ±0.00; storeys below get negative elevations.",
   "editor.viewTop": "View top",

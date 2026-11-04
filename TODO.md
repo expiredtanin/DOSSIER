@@ -2199,7 +2199,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Dach-Triangulierung; Grundrisse: Schatten/Baurecht jetzt im EG als Geschoss nächst ±0.00). Tests: cargo
   (`levels`, Format 5, Koten), vitest `layers.test.ts`, `sampleProjectComplex.test.ts`, e2e `levelZero.spec.ts`
   (Bezug wählen → EG −2.60, Höhe ändern, Undo), `sectionViews.spec.ts`. Geprüft: Screenshot Schnitt A-A im Browser
-  (Linux). Offen: Höhe eines Geschosses direkt eintippen (heute nur über Bezug + Geschosshöhen), Umordnen der Ebenen
+  (Linux). 4.11.: Höhe direkt eintippen (Geschoss-Editor; über ±0.00 passt sich die Geschosshöhe darunter an, darunter die eigene; `elevationFix`, vitest + e2e). Umordnen der Ebenen
   ändert die Höhen nicht mehr (Stapel nach bisheriger Höhe, 4.11.), nicht in der Tauri-App geprüft. · S
 - ◐ **[132] Ansichten/Schnitte aus [114].** (4.11.) Flachdächer zeigen in Ansicht und Schnitt ihre Stirn als Band
   (`elevation::fascia_quads`, Aufbaudicke); Stützen erscheinen in Ansichten als Prismen (`collect_column_faces`, runde

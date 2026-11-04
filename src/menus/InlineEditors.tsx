@@ -116,6 +116,29 @@ function isZeroLevel(levels: readonly DrawingLevel[], id: string): boolean {
   return (floors.find((z) => z.zeroLevel) ?? floors[0])?.id === id;
 }
 
+/**
+ * [131] Höhe eines Geschosses direkt setzen: Über ±0.00 wird die Geschosshöhe des Geschosses darunter angepasst,
+ * unter ±0.00 die eigene (Abstand zum Geschoss darüber). Liefert die Änderung oder `null` bei Unsinn
+ * (gleiche Höhe, nicht positiv, Bezugsgeschoss).
+ */
+export function elevationFix(levels: readonly DrawingLevel[], id: string, z: number): { id: string; floorHeight: number } | null {
+  if (!Number.isFinite(z)) return null;
+  const floors = levels.filter((l) => l.kind === "floor").slice().sort((a, b) => (a.baseElevation ?? 0) - (b.baseElevation ?? 0));
+  const i = floors.findIndex((l) => l.id === id);
+  if (i < 0 || isZeroLevel(levels, id)) return null;
+  const cur = floors[i].baseElevation ?? 0;
+  if (Math.abs(z - cur) < 1e-9) return null;
+  const round = (v: number) => Math.round(v * 1e6) / 1e6;
+  if (cur > 0) {
+    const below = floors[i - 1];
+    const h = round(z - (below?.baseElevation ?? 0));
+    return below && h > 0 ? { id: below.id, floorHeight: h } : null;
+  }
+  const above = floors[i + 1];
+  const h = round((above?.baseElevation ?? 0) - z);
+  return above && h > 0 ? { id, floorHeight: h } : null;
+}
+
 export function LevelInlineEditor({
   editor,
   onClose,
@@ -149,7 +172,28 @@ export function LevelInlineEditor({
           {/* [131] OK fertig Boden relativ zu ±0.00 (aus dem Stapel); ein Geschoss ist der Bezug. */}
           <EditorField label={t("editor.levelElevation")}>
             <span className="editor-num">
-              <span data-testid="level-elevation">{formatElevation(level.baseElevation ?? 0)}</span>
+              {isZeroLevel(project.drawingLevels, level.id) ? (
+                <span data-testid="level-elevation">{formatElevation(level.baseElevation ?? 0)}</span>
+              ) : (
+                <input
+                  key={`${level.id}:${level.baseElevation ?? 0}`}
+                  type="number"
+                  step={0.05}
+                  data-testid="level-elevation-input"
+                  title={t("editor.levelElevation.hint")}
+                  defaultValue={Math.round((level.baseElevation ?? 0) * 1000) / 1000}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.stopPropagation();
+                    const fix = elevationFix(project.drawingLevels, level.id, Number((e.target as HTMLInputElement).value));
+                    if (fix) patchLevel(fix.id, { floorHeight: fix.floorHeight });
+                  }}
+                  onBlur={(e) => {
+                    const fix = elevationFix(project.drawingLevels, level.id, Number(e.target.value));
+                    if (fix) patchLevel(fix.id, { floorHeight: fix.floorHeight });
+                  }}
+                />
+              )}
               <span className="editor-unit">{t("editor.unit.m")}</span>
             </span>
           </EditorField>

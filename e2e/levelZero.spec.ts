@@ -25,14 +25,22 @@ test("Geschoss als ±0.00 wählen: Erdgeschoss liegt danach negativ", async ({ p
   await page.keyboard.press("Escape");
   await page.locator(".nav-row", { hasText: "Erdgeschoss" }).first().click({ button: "right" });
   await page.getByText("Einstellungen…", { exact: true }).click();
-  const h = page.locator(".editor-num input[type=number]").first();
+  const h = page.locator(".editor-num input[type=number]:not([data-testid])").first();
   await h.fill("2.8");
   await expect(egElev).toHaveText("−2.80");
   await expect(ogElev).toHaveText("±0.00");
+  // Höhe direkt eintippen: unter ±0.00 passt sich die eigene Geschosshöhe an.
+  const z = page.getByTestId("level-elevation-input");
+  await z.fill("-3");
+  await z.press("Enter");
+  await expect(egElev).toHaveText("−3.00");
+  await expect(ogElev).toHaveText("±0.00");
   await page.keyboard.press("Escape");
 
-  // Undo: Höhe zurück, dann Bezug zurück (ein Schritt) → EG wieder ±0.00.
+  // Undo: eingetippte Höhe zurück, Geschosshöhe zurück, dann Bezug zurück (ein Schritt) → EG wieder ±0.00.
   await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(egElev).toHaveText("−2.80");
   await page.keyboard.press("ControlOrMeta+z");
   await expect(egElev).toHaveText("−2.60");
   await page.keyboard.press("ControlOrMeta+z");

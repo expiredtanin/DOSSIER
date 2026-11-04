@@ -1014,6 +1014,7 @@ export const de = {
   "editor.floorHeight": "Geschosshöhe",
   "editor.cutHeight": "Schnitthöhe",
   "editor.levelElevation": "OK fertig Boden",
+  "editor.levelElevation.hint": "Höhe relativ zu ±0.00 eintippen; die Geschosshöhe darunter (unter ±0.00: die eigene) passt sich an",
   "editor.zeroLevel": "Bezug ±0.00",
   "editor.zeroLevel.hint": "Dieses Geschoss liegt auf ±0.00; Geschosse darunter erhalten negative Höhen.",
   "editor.viewTop": "Oberkante Sicht",
