@@ -1677,9 +1677,8 @@ fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9], scale: f6
     (lines, styles)
 }
 
-/// [132] Dreiecke (Flächen) des Dachs `id`, die in der Dachebene `plane` liegen (Normale `n` in Plan-
-/// Koordinaten, Schwerpunkt im Ebenen-Umriss); leer, wenn die Ebene als ein Polygon kommt (dann gilt
-/// eine Maler-Tiefe für die ganze Fläche).
+/// [132] Flächen (Dreiecke oder Polygone) des Dachs `id`, die in der Dachebene `plane` liegen (Normale `n` in
+/// Plan-Koordinaten, Schwerpunkt im Ebenen-Umriss).
 fn plane_triangles(faces: &[Face], id: &str, n: [f64; 3], plane: &[[f64; 3]], proj: &dyn Fn([f64; 3]) -> (f64, f64, f64)) -> Vec<usize> {
     let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
     if !(l > 0.0) {
@@ -1700,7 +1699,6 @@ fn plane_triangles(faces: &[Face], id: &str, n: [f64; 3], plane: &[[f64; 3]], pr
         c
     };
     let mut out = Vec::new();
-    let mut polygons = 0usize;
     for (i, f) in faces.iter().enumerate() {
         if f.role != Role::Roof || f.id != id || f.pts.len() < 3 {
             continue;
@@ -1714,14 +1712,7 @@ fn plane_triangles(faces: &[Face], id: &str, n: [f64; 3], plane: &[[f64; 3]], pr
         if !inside(c) {
             continue;
         }
-        if f.pts.len() == 3 {
-            out.push(i);
-        } else {
-            polygons += 1;
-        }
-    }
-    if polygons > 0 || out.len() < 2 {
-        return Vec::new();
+        out.push(i);
     }
     out
 }
