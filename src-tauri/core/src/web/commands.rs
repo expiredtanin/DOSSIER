@@ -42,10 +42,11 @@ pub fn doc_cmd_commit(h: u32, req_json: &str, key: &str, now_ms: f64) -> String 
 pub fn doc_cmd_preview(h: u32, req_json: &str) -> Vec<f64> {
     let Ok(req) = serde_json::from_str::<crate::cmd_transform::TransformReq>(req_json) else { return Vec::new() };
     with_doc(h, |d| {
-        let pending = crate::cmd_transform::preview_pending(d.root(), &req);
-        let p = if pending.has_drawings() { d.project().ok() } else { None };
-        crate::cmd_transform::preview_finish(p, pending, req.scale.0, req.top.0)
+        let (p, lk) = d.project_lookup().ok()?;
+        let pending = crate::cmd_transform::preview_pending(lk.root, p, &req);
+        Some(crate::cmd_transform::preview_finish(pending.has_drawings().then_some(p), pending, req.scale.0, req.top.0))
     })
+    .flatten()
     .unwrap_or_default()
 }
 

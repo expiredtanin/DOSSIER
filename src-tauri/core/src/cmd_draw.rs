@@ -932,7 +932,7 @@ fn insert_into_chain(pts: &[Value], raw: V) -> Vec<Value> {
 }
 
 /// Bemassung: `pts`, `offset` (oder `side` = Punkt), `editId` (bestehende Kette ändern).
-fn dimension_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn dimension_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let raw = arr(v.get("pts"));
     let pts: Vec<V> = raw.iter().map(pair).collect();
     let offset = match opt_p(v, "side") {
@@ -953,9 +953,11 @@ fn dimension_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGe
     // behalten die alten Punkte ihre Bezüge.
     let chain: Vec<V> = cleaned.iter().map(pair).collect();
     let snaps: Vec<V> = arr(v.get("snaps")).iter().map(pair).collect();
-    let old = v.get("editId").and_then(Value::as_str).and_then(|id| find(root, "drawings2d", id)).and_then(|d| field(d, "geom"));
-    let old_pts: Vec<V> = old.map(|g| arr(field(g, "pts")).iter().map(pair).collect()).unwrap_or_default();
-    let old_refs: Vec<Option<crate::model::DimRef>> = old.and_then(|g| field(g, "refs")).and_then(|r| serde_json::from_value(r.clone()).ok()).unwrap_or_default();
+    let old = v.get("editId").and_then(Value::as_str).and_then(|id| p.drawings2d.iter().find(|d| d.id == id));
+    let (old_pts, old_refs): (Vec<V>, Vec<Option<crate::model::DimRef>>) = match old.map(|d| &d.geom) {
+        Some(Drawing2DGeom::Dimension { pts, refs, .. }) => (pts.iter().map(|q| (q.x, q.y)).collect(), refs.clone().unwrap_or_default()),
+        _ => (Vec::new(), Vec::new()),
+    };
     let keep = |q: V| old_pts.iter().position(|o| dist(*o, q) < 1e-9).and_then(|i| old_refs.get(i).cloned().flatten());
     let refs = crate::dim_assoc::refs_for_chain(&crate::document::Lookup::plain(root), ctx.level, &chain, &snaps, &keep);
     let mut fields = vec![("shape", s("dimension")), ("pts", Value::Array(cleaned)), ("offset", js_num(offset))];
@@ -1316,7 +1318,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &m
             None => Vec::new(),
         },
         "dimround" => dimround_ops(root, v, ctx, ids),
-        "dimension" => dimension_ops(root, v, ctx, ids),
+        "dimension" => dimension_ops(root, p, v, ctx, ids),
         "autodim" => autodim_ops(root, p, v, ctx),
         _ => return None,
     })
