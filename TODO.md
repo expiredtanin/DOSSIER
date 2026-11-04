@@ -2205,6 +2205,14 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (Bezug wählen → EG −2.60, Höhe ändern, Undo), `sectionViews.spec.ts`. Geprüft: Screenshot Schnitt A-A im Browser
   (Linux). Offen: Höhe eines Geschosses direkt eintippen (heute nur über Bezug + Geschosshöhen), Umordnen der Ebenen
   stapelt nicht neu, nicht in der Tauri-App geprüft. · S
+- ◐ **[132] Ansichten/Schnitte aus [114].** (4.11.) Flachdächer zeigen in Ansicht und Schnitt ihre Stirn als Band
+  (`elevation::fascia_quads`, Aufbaudicke); Stützen erscheinen in Ansichten als Prismen (`collect_column_faces`, runde
+  ohne Facettenfugen); T-Dach: der unter dem Hauptdach liegende Teil des Anbaudachs bleibt im Schnitt verdeckt.
+  Cargo-Tests `flachdach_zeigt_stirn_in_der_ansicht`, `stuetzen_in_der_ansicht`, `flachdach_hinter_dem_schnitt_mit_stirn`,
+  `t_dach_anbau_unter_dem_hauptdach_verdeckt`. Dreiecke einer Dachebene malen mit der Tiefe der ganzen Fläche.
+  **Offen:** feine Diagonalen und halb fehlende Ziegelschraffur auf verschnittenen Dachflächen (Gauben) in der
+  Ansicht — die Musterlinien werden im Verdecker-Clipping (Tiefe je Ecke) von Dreiecken derselben Fläche abgeschnitten;
+  Carport noch als Pultdach 3°. Nur Linux/CLI-SVG geprüft. · M
 - ◐ **[133] Musterhaus komplex: drei Befunde aus [114].** (4.11.) (1) Ausschnitt „EG 1:100" öffnete mit hohem Zoom
   gemeldet (~1000 %): in Chromium/Linux nicht reproduzierbar (Wiederherstellung `applyScale` + `setCamera` rechnet
   konsistent in px/m, alle Ausschnitte auch nach Wechsel aus Detail/3D/Schnitt/Ansicht im Rahmen). Datenfehler im Beispiel

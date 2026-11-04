@@ -62,5 +62,9 @@
 <line x1="6.4" y1="1.88564" x2="6.4" y2="0.73094" stroke="#2b3039" stroke-width="0.018"/>
 <line x1="6.4" y1="0.5" x2="0.6" y2="0.5" stroke="#2b3039" stroke-width="0.018"/>
 <line x1="0.6" y1="0.73094" x2="0.6" y2="1.88564" stroke="#2b3039" stroke-width="0.018"/>
+<line x1="6.4" y1="1.88564" x2="6.4" y2="2.05885" stroke="#2b3039" stroke-width="0.018"/>
+<line x1="6.4" y1="2.05885" x2="6.1725" y2="2.05885" stroke="#2b3039" stroke-width="0.018"/>
+<line x1="0.8275" y1="2.05885" x2="0.6" y2="2.05885" stroke="#2b3039" stroke-width="0.018"/>
+<line x1="0.6" y1="2.05885" x2="0.6" y2="1.88564" stroke="#2b3039" stroke-width="0.018"/>
 <line x1="0.6" y1="7.08564" x2="6.4" y2="7.08564" stroke="#1f242c" stroke-width="0.05"/>
 </svg>
