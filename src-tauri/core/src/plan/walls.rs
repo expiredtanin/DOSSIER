@@ -164,6 +164,41 @@ fn v2(x: f64, y: f64) -> Vec2 {
     Vec2 { x, y }
 }
 
+/// [140] Dünne Schichten unter dieser Papierdicke (mm) gehen im Detailgrad mittel ab 1:100 in der
+/// Nachbarschicht auf (Putz, Parkett, Folien): sonst liegen Umriss, Fuge und Schraffur in 1:100 als
+/// schwarzer Balken übereinander. In 1:50 und im Detailgrad fein bleiben alle Schichten.
+pub const THIN_LAYER_PAPER_MM: f64 = 0.25;
+
+/// Ziel-Schicht je Schicht: dünne Schichten zeigen auf die nächste nicht dünne (bei gleichem Abstand
+/// die dickere), alle anderen auf sich selbst. Fugen zwischen Schichten mit gleichem Ziel entfallen.
+pub fn thin_layer_targets(thick: &[f64], detail: Detail, scale: f64) -> Vec<usize> {
+    let n = thick.len();
+    let ident: Vec<usize> = (0..n).collect();
+    if detail != Detail::Mittel || !(scale >= 75.0) {
+        return ident;
+    }
+    let thin: Vec<bool> = thick.iter().map(|t| !(t * 1000.0 / scale >= THIN_LAYER_PAPER_MM)).collect();
+    if thin.iter().all(|t| *t) {
+        return ident;
+    }
+    (0..n)
+        .map(|i| {
+            if !thin[i] {
+                return i;
+            }
+            let left = (0..i).rev().find(|&j| !thin[j]);
+            let right = (i + 1..n).find(|&j| !thin[j]);
+            match (left, right) {
+                (Some(l), Some(r)) if i - l == r - i => if thick[l] >= thick[r] { l } else { r },
+                (Some(l), Some(r)) => if i - l < r - i { l } else { r },
+                (Some(l), None) => l,
+                (None, Some(r)) => r,
+                (None, None) => i,
+            }
+        })
+        .collect()
+}
+
 /// Wand-Poché (`addWallPoche`).
 #[allow(clippy::too_many_arguments)]
 fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)], cuts: &WallCuts, greyed: bool, wall_lw: f64, category: Option<&LayerCategory>, view_only: bool, reveals: &[f64], bend: Option<&Unroll>) -> Result<(), String> {
@@ -179,6 +214,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     let layer_mm = LAYER_JOINT_MM * detail.layer_factor();
     let thick: Vec<f64> = wt.layers.iter().map(|l| l.thickness).collect();
     let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, detail == Detail::Grob, view_only, reveals));
+    let target = thin_layer_targets(&thick, detail, c.a.scale);
     if f.is_empty() {
         return Ok(());
     }
@@ -187,7 +223,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
         if let Some(s) = styles.get(&li) {
             return Ok(s.clone());
         }
-        let (hatch, fill) = layer_style(p, w, wt, li, category, angle)?;
+        let (hatch, fill) = layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, angle)?;
         styles.insert(li, (hatch.clone(), fill.clone()));
         Ok((hatch, fill))
     };
@@ -207,7 +243,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
                 // im Uhrzeigersinn: Laufrichtung 0° bzw. 180° im Gegenuhrzeigersinn; gebogen wird das
                 // Band danach in `bend_prims`).
                 let local = if u.arc.sigma() > 0.0 { 180.0 } else { 0.0 };
-                let (mut hatch, fill) = layer_style(p, w, wt, li, category, local)?;
+                let (mut hatch, fill) = layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, local)?;
                 hatch.polar = Some([u.arc.center.x, u.arc.center.y, u.arc.r]);
                 out.push(wall_polygon(pts, &fill, "none", 0.0, hatch, greyed, Some(no_stroke), Some(&w.id), None));
                 continue;
@@ -226,6 +262,11 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             let a = v2(f[i + 3], f[i + 4]);
             let b = v2(f[i + 5], f[i + 6]);
             i += 7;
+            // [140] Fuge zwischen zusammengefassten Schichten bzw. quer über eine dünne Schicht entfällt.
+            let merged = |k: usize| target.get(k).is_some_and(|t| *t != k);
+            if (art == 1.0 && target.get(li).is_some() && target.get(li) == target.get(li + 1)) || (art == 0.0 && merged(li)) {
+                continue;
+            }
             if art == 0.0 {
                 out.push(mk_line(a, b, "layer-joint-l", layer_mm, None, Some(stroke), greyed, None));
             } else if art == 1.0 {
@@ -1141,6 +1182,26 @@ pub(crate) mod tests {
     fn wall_prims(p: &Project) -> Vec<Primitive> {
         let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [] }).to_string();
         super::super::domains::plan_domains(p, &super::super::domains::PlanArgs::parse(1.0, &t).unwrap()).unwrap().walls
+    }
+
+    /// [140] Dünne Schichten (Putz 2 cm) gehen in 1:100 (mittel) in der Nachbarschicht auf: keine
+    /// Schichtfuge zwischen Putz und Backstein, das Putzband trägt den Stil des Backsteins. In 1:50
+    /// und im Detailgrad fein bleiben alle Schichten mit Fugen.
+    #[test]
+    fn duenne_schichten_je_massstab_zusammengefasst() {
+        let p = pocket_project(DoorTypeKind::Schiebe, None, 1.0);
+        let joints = |detail: f64, scale: f64| {
+            let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": scale }).to_string();
+            let prims = super::super::domains::plan_domains(&p, &super::super::domains::PlanArgs::parse(detail, &t).unwrap()).unwrap().walls;
+            prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "layer-joint")).count()
+        };
+        assert_eq!(joints(1.0, 100.0), 0, "1:100 mittel: Putz ohne Fuge");
+        assert!(joints(1.0, 50.0) >= 4, "1:50: alle Fugen");
+        assert!(joints(2.0, 100.0) >= 4, "fein: alle Fugen");
+        assert_eq!(thin_layer_targets(&[0.02, 0.12, 0.02], Detail::Mittel, 100.0), vec![1, 1, 1]);
+        assert_eq!(thin_layer_targets(&[0.02, 0.18, 0.003, 0.16, 0.015], Detail::Mittel, 100.0), vec![1, 1, 1, 3, 3]);
+        assert_eq!(thin_layer_targets(&[0.01, 0.01], Detail::Mittel, 100.0), vec![0, 1], "nur dünne: unverändert");
+        assert_eq!(thin_layer_targets(&[0.02, 0.12], Detail::Fein, 100.0), vec![0, 1]);
     }
 
     fn area(pts: &[Vec2]) -> f64 {
