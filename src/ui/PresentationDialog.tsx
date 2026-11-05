@@ -32,6 +32,8 @@ export function PresentationDialogHost({ onCreated }: { onCreated: (layoutId: st
   useEffect(() => {
     if (!opts) return;
     const onKey = (e: KeyboardEvent) => {
+      // Enter aus der Befehlszeile (die den Dialog eben geöffnet hat) bestätigt nicht.
+      if (e.target instanceof Element && e.target.closest("input, textarea") && !e.target.closest(".presentation-dialog")) return;
       if (e.key === "Escape") close();
       else if (e.key === "Enter") confirm();
     };
