@@ -72,7 +72,9 @@ will (Rahmen, Flügel, Anschlag, Leibung), öffnet den Typ im
 - **Raum** (`0` oder `raum`): in einen Raum klicken; Dossier findet den
   Umriss aus den Wänden und setzt den Raumstempel mit Fläche.
   Mit der Option *Modus* zeichnet man den Umriss stattdessen von Hand.
-- **Dach** (`dach`): Umriss zeichnen, Dachform und Neigung wählen.
+- **Dach** (`dach`): Rechteck mit zwei Ecken aufziehen; Dachform (Sattel,
+  Walm, Pult, Mansarde, Zelt, Flach), Neigung, Firstrichtung und Überstände
+  stellt man danach in der **Objekt-Info** ein.
 
 ## Schnitt und 3D
 
