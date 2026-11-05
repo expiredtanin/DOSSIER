@@ -324,15 +324,23 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
     let mut result = vec![WallCuts::default(); walls.len()];
 
     // Knotenkarte in Einfüge-Reihenfolge: gerundeter Endpunkt → dort endende Wandenden.
+    // [141] Enden, die nur fast aufeinander liegen (Fanglücke ≤ JOIN_SNAP), gehören zum selben Knoten.
     let mut index: HashMap<(u64, u64), usize> = HashMap::new();
     let mut junctions: Vec<Vec<WallEnd>> = Vec::new();
+    let mut reps: Vec<Vec2> = Vec::new();
     let mut push = |p: Vec2, we: WallEnd| {
         let key = round_key(p);
-        match index.get(&key) {
-            Some(&k) => junctions[k].push(we),
+        let near = index.get(&key).copied().or_else(|| reps.iter().position(|r| len(sub(*r, p)) <= JOIN_SNAP));
+        match near {
+            Some(k) => {
+                if !junctions[k].iter().any(|e| e.wall == we.wall) {
+                    junctions[k].push(we);
+                }
+            }
             None => {
                 index.insert(key, junctions.len());
                 junctions.push(vec![we]);
+                reps.push(p);
             }
         }
     };
@@ -349,8 +357,8 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
                     set_cut(&mut result, ends[1], cut);
                 }
             }
-            3 => apply_t_junction(walls, ends, &mut result)?,
-            // Freies Ende (Fall 2 unten) bzw. echter Stern-Knoten (bleibt rechtwinklig).
+            3.. => apply_node(walls, ends, &mut result)?,
+            // Freies Ende (Fall 2 unten).
             _ => {}
         }
     }
@@ -370,6 +378,122 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
         }
     }
     Ok(result)
+}
+
+/// [141] Fangtoleranz der Verschneidung (m): Enden mit kleinerem Abstand bilden einen Knoten, ein
+/// freies Ende so nah vor einer Wandfläche stösst an sie.
+pub const JOIN_SNAP: f64 = 0.01;
+
+/// Rang einer Wand im Knoten: höchste Schicht-Priorität, dann Dicke.
+fn wall_rank(walls: &[JoinWall], i: usize) -> R<(f64, f64)> {
+    let ls = layers_of(walls, i)?;
+    Ok((ls.iter().fold(f64::NEG_INFINITY, |m, l| m.max(l.priority)), ls.iter().fold(0.0, |s, l| s + l.thickness)))
+}
+
+fn rank_lt(a: (f64, f64), b: (f64, f64)) -> bool {
+    a.0 < b.0 || (a.0 == b.0 && a.1 < b.1 - 1e-9)
+}
+
+/// [141] Knoten mit ≥ 3 Enden: das stärkste Wandpaar (Rang der schwächeren Wand; bei Gleichstand
+/// der Durchgang) verbindet sich — kollinear als Durchgang, sonst auf Gehrung —, alle übrigen Enden
+/// stossen an dieses Paar (Abzweig am Durchgang wie am T, an der Ecke an die zuerst getroffene Fläche).
+/// Vorher: nur drei Enden mit kollinearem Paar (der Durchgang auch aus Wänden ungleichen Typs, etwa
+/// Aussen- und Innenwand, während die Aussenwand-Ecke offen blieb), vier Enden blieben rechtwinklig.
+fn apply_node(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts]) -> R<()> {
+    // Nulllängen-Wände tragen nichts bei.
+    let ends: Vec<WallEnd> = ends.iter().copied().filter(|e| len(sub(walls[e.wall].end, walls[e.wall].start)) > 1e-9).collect();
+    let ends = &ends[..];
+    let n = ends.len();
+    if n < 2 {
+        return Ok(());
+    }
+    if n == 2 {
+        if let Some(cut) = miter_line(walls, ends[0].wall, ends[0].end, ends[1].wall)? {
+            set_cut(result, ends[0], cut);
+            set_cut(result, ends[1], cut);
+        }
+        return Ok(());
+    }
+    let arcs = ends.iter().any(|e| is_arc(&walls[e.wall]));
+    let into: Vec<Vec2> = ends
+        .iter()
+        .map(|e| {
+            let u = dir_at(&walls[e.wall], e.end);
+            if e.end == End::Start {
+                u
+            } else {
+                scale(u, -1.0)
+            }
+        })
+        .collect();
+    let mut rank = Vec::with_capacity(n);
+    for e in ends {
+        // Unbekannter Wandtyp: schwächste Wand (der Fehler kommt, wo ihre Dicke gebraucht wird).
+        rank.push(wall_rank(walls, e.wall).unwrap_or((f64::NEG_INFINITY, 0.0)));
+    }
+    let mut best: Option<(usize, usize, (f64, f64), bool)> = None;
+    for i in 0..n {
+        for k in i + 1..n {
+            let c = dot(into[i], into[k]);
+            let parallel = 1.0 - c.abs() < 1e-6;
+            if parallel && c > 0.0 {
+                continue; // gleichgerichtet übereinander: kein Paar
+            }
+            let r = if rank_lt(rank[i], rank[k]) { rank[i] } else { rank[k] };
+            let better = match best {
+                None => true,
+                Some((_, _, br, bs)) => rank_lt(br, r) || (!rank_lt(r, br) && parallel && !bs),
+            };
+            if better {
+                best = Some((i, k, r, parallel));
+            }
+        }
+    }
+    let Some((i, k, _, straight)) = best else { return Ok(()) };
+    if n == 3 && straight {
+        return apply_t_junction(walls, ends, result);
+    }
+    let others: Vec<usize> = (0..n).filter(|&b| b != i && b != k).collect();
+    if straight {
+        for b in others {
+            t_branch(walls, ends[i], ends[k], ends[b], arcs, result)?;
+        }
+        return Ok(());
+    }
+    if let Some(cut) = miter_line(walls, ends[i].wall, ends[i].end, ends[k].wall)? {
+        set_cut(result, ends[i], cut);
+        set_cut(result, ends[k], cut);
+    }
+    for b in others {
+        let bw = &walls[ends[b].wall];
+        let p = point_of(bw, ends[b].end);
+        // Zugewandte Fläche jeder Eckwand; der Abzweig endet an der, die er (von seinem fernen Ende
+        // her) zuerst trifft.
+        let mut pick: Option<(usize, f64)> = None;
+        for &q in &[i, k] {
+            let qi = ends[q].wall;
+            let qw = &walls[qi];
+            let tq = thickness(walls, qi)?;
+            let uq = dir_at(qw, ends[q].end);
+            let nq = left_normal(uq);
+            let facing = dot(nq, into[b]);
+            if facing.abs() < 1e-6 {
+                continue;
+            }
+            let sign = if facing > 0.0 { 1.0 } else { -1.0 };
+            let face = add(point_of(qw, ends[q].end), scale(nq, reference_offset(qw.reference, tq) + sign * tq / 2.0));
+            let Some(hit) = line_intersect(p, into[b], face, uq) else { continue };
+            let t = dot(sub(hit, p), into[b]);
+            if pick.map_or(true, |(_, bt)| t > bt) {
+                pick = Some((qi, t));
+            }
+        }
+        if let Some((qi, _)) = pick {
+            let (along, perp) = local_of(&walls[qi], p);
+            tee_on(walls, ends[b], qi, perp, along, result)?;
+        }
+    }
+    Ok(())
 }
 
 /// Gemeinsame Gehrungslinie zweier Wände A, B im Knoten (orientierungsbasierte Flächen-Paarung:
@@ -392,11 +516,13 @@ fn miter_line(walls: &[JoinWall], ai: usize, a_end: End, bi: usize) -> R<Option<
 
     let p_la = add(j, scale(n_a, off_a + t_a / 2.0));
     let p_ra = add(j, scale(n_a, off_a - t_a / 2.0));
-    let p_lb = add(j, scale(n_b, off_b + t_b / 2.0));
-    let p_rb = add(j, scale(n_b, off_b - t_b / 2.0));
+    // [141] Flächen von B durch B's eigenes Ende (Fangtoleranz: die Enden liegen nur fast aufeinander).
+    let b_at_start = len(sub(b.start, j)) <= len(sub(b.end, j));
+    let jb = if b_at_start { b.start } else { b.end };
+    let p_lb = add(jb, scale(n_b, off_b + t_b / 2.0));
+    let p_rb = add(jb, scale(n_b, off_b - t_b / 2.0));
 
     let d_a = if a_end == End::Start { u_a } else { scale(u_a, -1.0) };
-    let b_at_start = len(sub(b.start, j)) <= len(sub(b.end, j));
     let d_b = if b_at_start { u_b } else { scale(u_b, -1.0) };
 
     let b_outer = if dot(n_b, d_a) < 0.0 { p_lb } else { p_rb };
@@ -472,8 +598,11 @@ fn apply_t_junction(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts
     }
     let Some((t0, t1)) = through else { return Ok(()) };
     let branch_idx = (0..3).find(|&i| i != t0 && i != t1).unwrap_or(0);
-    let branch_end = ends[branch_idx];
-    let through_end = ends[t0];
+    t_branch(walls, ends[t0], ends[t1], ends[branch_idx], arcs, result)
+}
+
+/// Abzweig `branch_end` am Durchgang `through_end`/`other_end` (T-Knoten; am Kreuz-Knoten je Abzweig).
+fn t_branch(walls: &[JoinWall], through_end: WallEnd, other_end: WallEnd, branch_end: WallEnd, arcs: bool, result: &mut [WallCuts]) -> R<()> {
     let (bi, ti) = (branch_end.wall, through_end.wall);
     let through_wall = &walls[ti];
 
@@ -498,9 +627,9 @@ fn apply_t_junction(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts
     // Die Durchgangs-Hälften stossen rechtwinklig aneinander; als Schnitt markiert, damit die
     // Stossfuge nicht als Umriss gezeichnet wird (eine durchlaufende Wand).
     let joint = Line { point: j, dir: n_t };
-    set_cut(result, ends[t0], joint);
-    set_cut(result, ends[t1], joint);
-    apply_layer_cuts(walls, result, branch_end, ti, Some(ends[t1].wall), face_cut, j, u_t, sign)
+    set_cut(result, through_end, joint);
+    set_cut(result, other_end, joint);
+    apply_layer_cuts(walls, result, branch_end, ti, Some(other_end.wall), face_cut, j, u_t, sign)
 }
 
 /// Materialbewusste Pro-Schicht-Erweiterung eines T-Stoss-Cuts: Abzweig-Schichten gleichen
@@ -529,12 +658,15 @@ fn apply_layer_cuts(
         return Ok(());
     }
 
-    // Rückgrat der Durchgangswand: Schicht mit der höchsten joinPriority (erste gewinnt).
+    // Rückgrat der Durchgangswand: die tragende Schicht — grösstes Produkt aus joinPriority und Dicke
+    // (erste gewinnt). [141] Vorher die höchste Priorität allein: bei der Holzständerwand die äussere
+    // Lattung (41), der Backstein-Abzweig (50) lief durch Gipskarton, Dämmung und Holzfaser bis aussen.
+    let score = |l: &JoinLayer| l.priority * l.thickness;
     let mut backbone = (component(ti, &through_layers[0])?, through_layers[0].priority);
     let mut backbone_idx = 0;
     for (i, l) in through_layers.iter().enumerate() {
         let c = component(ti, l)?;
-        if l.priority > backbone.1 {
+        if score(l) > score(&through_layers[backbone_idx]) {
             backbone = (c, l.priority);
             backbone_idx = i;
         }
@@ -681,7 +813,6 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
     let free_wall = &walls[fi];
     let p = point_of(free_wall, free.end);
     const END_GAP: f64 = 1e-4;
-    const TOL: f64 = 1e-3;
 
     // (Wand, perp, dist, distAlong)
     let mut best: Option<(usize, f64, f64, f64)> = None;
@@ -695,8 +826,8 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
                 continue;
             }
             let tw = thickness(walls, wi)?;
-            let dist = perp.abs();
-            if dist > tw / 2.0 + TOL {
+            let dist = (perp - reference_offset(w.reference, tw)).abs();
+            if dist > tw / 2.0 + JOIN_SNAP {
                 continue;
             }
             if best.map_or(true, |b| dist < b.2) {
@@ -716,8 +847,9 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
         }
         let perp = dot(rel, left_normal(u));
         let tw = thickness(walls, wi)?;
-        let dist = perp.abs();
-        if dist > tw / 2.0 + TOL {
+        // [141] Abstand zum Wandband (Referenzlinie beachtet); ein Ende knapp vor der Fläche fängt.
+        let dist = (perp - reference_offset(w.reference, tw)).abs();
+        if dist > tw / 2.0 + JOIN_SNAP {
             continue;
         }
         if best.map_or(true, |b| dist < b.2) {
@@ -725,6 +857,13 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
         }
     }
     let Some((wi, perp, _, dist_along)) = best else { return Ok(()) };
+    tee_on(walls, free, wi, perp, dist_along, result)
+}
+
+/// Freies Ende `free` stösst an die Seite der Wand `wi` (Achsmass `dist_along`, Querversatz `perp`
+/// des Endes im Rahmen von `wi`): Schnitt an der zugewandten Fläche, materialbewusst je Schicht.
+fn tee_on(walls: &[JoinWall], free: WallEnd, wi: usize, perp: f64, dist_along: f64, result: &mut [WallCuts]) -> R<()> {
+    let free_wall = &walls[free.wall];
     if is_arc(&walls[wi]) || is_arc(free_wall) {
         return mid_span_tee_arc(walls, free, wi, perp, dist_along, result);
     }
@@ -1019,12 +1158,64 @@ mod tests {
     }
 
     // Aus `model/joins.test.ts` übernommen ([K3d]: der TS-Sammler ist weg).
+    /// [141] Kreuz-Knoten aus vier Enden (vorher „Stern", rechtwinklig übereinander): ein Paar läuft
+    /// durch (Stossfuge), die beiden anderen stossen an seine Flächen.
     #[test]
-    fn stern_knoten_bleibt_rechtwinklig() {
+    fn kreuz_knoten_durchgang_und_zwei_abzweige() {
         let w = vec![mono((0.0, 5.0), (5.0, 5.0), 0.3), mono((5.0, 5.0), (10.0, 5.0), 0.3), mono((5.0, 5.0), (5.0, 0.0), 0.3), mono((5.0, 5.0), (5.0, 10.0), 0.3)];
-        for c in compute_joins(&w).unwrap() {
-            assert!(c.start_cut.is_none() && c.end_cut.is_none());
-        }
+        let c = compute_joins(&w).unwrap();
+        let j0 = c[0].end_cut.unwrap();
+        let j1 = c[1].start_cut.unwrap();
+        assert!(close(j0.point.x, 5.0) && close(j0.dir.x, 0.0) && close(j1.point.x, 5.0));
+        assert!(close(c[2].start_cut.unwrap().point.y, 4.85), "{:?}", c[2]);
+        assert!(close(c[3].start_cut.unwrap().point.y, 5.15), "{:?}", c[3]);
+    }
+
+    /// [141] Knoten aus Aussenwand-Ecke und Innenwand, die kollinear mit einem Aussenwand-Schenkel
+    /// weiterläuft (Anbau): die Aussenwände bilden die Gehrung, die Innenwand stösst an; vorher lief
+    /// Aussenwand plus Innenwand als Durchgang und die Ecke blieb offen.
+    #[test]
+    fn knoten_ecke_vor_ungleichem_durchgang() {
+        let ext = || vec![JoinLayer { thickness: 0.4, component: Some(0), priority: 50.0 }];
+        let int = || vec![JoinLayer { thickness: 0.12, component: Some(1), priority: 50.0 }];
+        let w = vec![wall((5.0, 10.0), (0.0, 10.0), ext()), wall((5.0, 15.0), (5.0, 10.0), ext()), wall((10.0, 10.0), (5.0, 10.0), int())];
+        let c = compute_joins(&w).unwrap();
+        let m0 = c[0].start_cut.unwrap();
+        let m1 = c[1].end_cut.unwrap();
+        assert_eq!(m0, m1);
+        assert!(close((m0.dir.x / m0.dir.y).abs(), 1.0), "Gehrung 45°: {m0:?}");
+        let e = c[2].end_cut.unwrap();
+        assert!(close(e.point.x, 5.2) && close(e.dir.x, 0.0), "{e:?}");
+    }
+
+    /// [141] Holzständerwand mit Backstein-Abzweig: das Rückgrat ist die Ständer-/Dämmschicht (grösstes
+    /// Produkt Rang × Dicke), nicht die äussere Lattung mit der höchsten Priorität — der Kern des
+    /// Abzweigs endet an der Innenfläche der Dämmschicht statt die ganze Wand zu durchstossen.
+    #[test]
+    fn rueckgrat_holzstaenderwand_ist_die_staenderschicht() {
+        let l = |t: f64, c: u32, p: f64| JoinLayer { thickness: t, component: Some(c), priority: p };
+        let holz = vec![l(0.024, 0, 41.0), l(0.04, 1, 1.0), l(0.06, 2, 24.0), l(0.2385, 3, 20.0), l(0.015, 4, 35.0), l(0.0125, 5, 12.0)];
+        let total: f64 = holz.iter().map(|x| x.thickness).sum();
+        let iw = vec![l(0.01, 6, 10.0), l(0.125, 7, 50.0), l(0.01, 6, 10.0)];
+        let w = vec![wall((0.0, 0.0), (10.0, 0.0), holz), wall((4.0, 0.0), (4.0, 3.0), iw)];
+        let c = compute_joins(&w).unwrap();
+        let lc = c[1].layer_cuts.as_ref().unwrap();
+        // Gipskarton und Holzwerkstoff (+n-Seite) liegen vor dem Rückgrat: 0.0275 m.
+        assert!(close(lc.start[1].unwrap().point.y, total / 2.0 - 0.0275), "{:?}", lc.start[1]);
+    }
+
+    /// [141] Fanglücke: Enden 4 mm auseinander bilden trotzdem die Gehrung, ein Abzweig 5 mm vor der
+    /// Fläche stösst an (vorher rechtwinklige Enden mit Lücke bzw. Überlappung).
+    #[test]
+    fn fangluecke_wenige_millimeter() {
+        let w = vec![mono((0.0, 0.0), (5.0, 0.0), 0.3), mono((5.004, 0.003), (5.004, 4.0), 0.3), mono((2.0, 3.84), (2.0, 0.155), 0.1)];
+        let c = compute_joins(&w).unwrap();
+        let (a, b) = (c[0].end_cut.unwrap(), c[1].start_cut.unwrap());
+        assert_eq!(a, b);
+        let on = |x: f64, y: f64| (kernel2d::cross(a.dir, sub(Vec2 { x, y }, a.point))).abs() < 1e-9;
+        assert!(on(5.154, -0.15) && on(4.854, 0.15), "{a:?}");
+        let s = c[2].end_cut.unwrap();
+        assert!(close(s.point.y, 0.15) && close(s.dir.y, 0.0), "{s:?}");
     }
 
     #[test]
