@@ -1100,10 +1100,11 @@ fn outline_line(a: Pt, b: Pt) -> Primitive {
     line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-outline", EDGE_MM, EDGE_INK)
 }
 
-/// [140] Ränder der vereinigten Bauteilflächen (Silhouette des Baukörpers in der Ansicht).
+/// [140] Aussenränder der vereinigten Bauteilflächen (Silhouette des Baukörpers in der Ansicht).
 fn silhouette_rings(faces: &[Face]) -> Vec<Vec<Pt>> {
     let polys: Vec<crate::flat::Polygon> = faces.iter().filter(|f| f.pts.len() >= 3).map(|f| vec![f.pts.clone()]).collect();
-    crate::polygon_bool::union(&polys).into_iter().flatten().collect()
+    // Nur Aussenringe: Löcher der Vereinigung (Gauben-Ausschnitte, Fugen zwischen Dachflächen) sind keine Silhouette.
+    crate::polygon_bool::union(&polys).into_iter().filter_map(|poly| poly.into_iter().next()).collect()
 }
 
 /// Liegt `q` (bis [`SILHOUETTE_TOL`]) auf einem der Ringe?
