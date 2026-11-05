@@ -30,6 +30,7 @@
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio) auf der Datei: Werkzeuge aus core/aiToolDefs.ts
 //   dossier-cli mcp --app [--port 7979] [--token …] MCP-Brücke zur offenen App ([9], KI-Zugriff in den Einstellungen)
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
+//   dossier-cli bench --big [--floors 8 --apartments 15]   dasselbe am parametrischen Grossgebäude (`:gross`, [20])
 //
 // Statt einer Datei nimmt `:beispiel` das eingebaute Demo-Haus (sampleProject), `:musterhaus-komplex` das
 // grosse Beispiel (model/sampleProjectComplex.ts; als Datei: `dossier-cli :musterhaus-komplex migrate --out mk.obp`).
@@ -109,6 +110,8 @@ import {
   projectWarnings,
   sampleProject,
   buildComplexSampleProject,
+  buildBigSampleProject,
+  withDocument,
   AI_BRIDGE_DEFAULT_PORT,
 } from "../core";
 import type { Project } from "../core";
@@ -165,9 +168,10 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-function loadProject(path: string): Project {
+function loadProject(path: string, args: Args): Project {
   if (path === ":beispiel") return sampleProject;
   if (path === ":musterhaus-komplex") return buildComplexSampleProject();
+  if (path === ":gross") return buildBigSampleProject({ floors: Number(args.flags.get("floors") ?? 8), apartments: Number(args.flags.get("apartments") ?? 15) });
   let text: string;
   try {
     text = readFileSync(path, "utf8");
@@ -302,6 +306,8 @@ async function pointCloudInfo(args: Args, src: string | undefined): Promise<numb
 export async function run(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const convertMode = args.positional[0] === "convert";
+  // `dossier-cli bench --big [--floors 8 --apartments 15]` = `dossier-cli :gross bench` ([20]).
+  if (args.positional[0] === "bench" && args.flags.has("big")) args.positional.unshift(":gross");
   const [file, command, ...rest] = args.positional;
   if (file === "bcf-info") return runBcfInfo(command);
   if (file === "pointcloud-info") return pointCloudInfo(args, command);
@@ -326,7 +332,7 @@ export async function run(argv: string[]): Promise<number> {
   });
   await initCore();
   if (convertMode) return convert(command, rest[0], args);
-  const project = loadProject(file);
+  const project = loadProject(file, args);
   let code = 0;
   if (command) code = await execute(project, file, command, rest, args);
   return code === 0 ? runCmds(project, file, args) : code;
@@ -387,7 +393,7 @@ function importDoc(project: Project) {
 /** Liest Eingabe nach Endung in ein Projekt: obp direkt, dxf/dwg als 2D-Zeichnung + Meshes, ifc als Kontext-Meshes (`--elements`: Bauteile). */
 async function importAny(path: string, args: Args): Promise<Project> {
   const ext = extOf(path);
-  if (ext === "obp" || ext === "json" || path === ":beispiel" || path === ":musterhaus-komplex") return loadProject(path);
+  if (ext === "obp" || ext === "json" || path === ":beispiel" || path === ":musterhaus-komplex") return loadProject(path, args);
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(readFileSync(path));
@@ -831,6 +837,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       const sec = findLevel(project, ["section"], undefined);
       const elev = findLevel(project, ["elevation"], undefined);
       const rows: Array<[string, number]> = [];
+      process.stdout.write(`${project.name}: ${project.walls.length} Wände, ${(project.openings?.length ?? 0)} Öffnungen, ${(project.rooms?.length ?? 0)} Räume, ${project.stairs?.length ?? 0} Treppen\n`);
       const time = async (name: string, f: () => unknown | Promise<unknown>, n = runs) => {
         await f(); // Aufwärmen (füllt Caches wie roofGeometry)
         const t0 = performance.now();
@@ -849,6 +856,39 @@ async function execute(project: Project, file: string, command: string, rest: st
       if (project.walls.length) {
         const w0 = project.walls[0];
         await time("Op: patch+apply (1 Wand)", () => applyOps(project, patchItem(project, "walls", w0.id, { height: (w0.height ?? 2.6) + 0.1 })), runs * 20);
+      }
+      // Exporte ([20]): DXF eines Geschosses, IFC des ganzen Modells.
+      if (floor) {
+        const world = projectToWorldCoords(project);
+        await loadFileio();
+        await time("DXF (1 Geschoss)", () => buildPlanDxf(generatePlan(world, floor.id, allCodes), world, { scaleDenominator: scale, levelId: floor.id }), Math.max(3, runs / 2));
+      }
+      await loadFileio();
+      await time("IFC (Modell)", () => exportIfcSpf(project, {}), Math.max(2, runs / 5));
+      // Ops am Dokument ([20]): Stapel von Änderungen annehmen (ein Verlaufsschritt), Undo, Redo.
+      if (project.walls.length) {
+        const batch = project.walls.slice(0, Math.min(200, project.walls.length));
+        const opsFor = (p: Project, dh: number) => batch.flatMap((w) => patchItem(p, "walls", w.id, { height: (w.height ?? 2.6) + dh }));
+        withDocument(project, (doc) => {
+          let cur = project;
+          const lap = (name: string, f: () => void, n = Math.max(3, runs)) => {
+            f();
+            const t0 = performance.now();
+            for (let i = 0; i < n; i++) f();
+            rows.push([name, (performance.now() - t0) / n]);
+          };
+          let k = 0;
+          lap(`Doc: commit (${batch.length} Wände, 1 Schritt)`, () => {
+            const r = doc.commit(cur, opsFor(cur, 0.01 * ++k), undefined, Date.now());
+            if ("project" in r) cur = r.project;
+          });
+          lap(`Doc: undo (${batch.length} Wände)`, () => { cur = doc.undo(cur) ?? cur; }, Math.max(3, runs / 2));
+          lap(`Doc: redo (${batch.length} Wände)`, () => { cur = doc.redo(cur) ?? cur; }, Math.max(3, runs / 2));
+          lap("Doc: commit (1 Wand)", () => {
+            const r = doc.commit(cur, opsFor({ ...cur, walls: cur.walls.slice(0, 1) } as Project, 0.01 * ++k).slice(0, 1), undefined, Date.now());
+            if ("project" in r) cur = r.project;
+          }, runs * 5);
+        });
       }
       for (const [n, ms] of rows) process.stdout.write(`${n.padEnd(28)} ${ms.toFixed(2).padStart(9)} ms\n`);
       return 0;

@@ -1321,7 +1321,17 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
 - ◐ **[17] Ergebnisse über die Ausgabe testen.** Golden-SVGs für Plan/Schnitt/Ansicht; 3D noch nicht. · M
 - ✅ **[18] IFC gegen IfcOpenShell.** = [B1]. 27.10.: `scripts/validate-ifc.py` + `exportIfc.validate.test.ts`. · S–M
 - ◐ **[19] Beispielgebäude als Skript.** `sampleProject.ts` + Kontrollmodell. · S
-- ◐ **[20] Performance-Benchmark.** `dossier-cli … bench`; grosses Testgebäude/Frame-Zeiten offen. · M
+- ◐ **[20] Performance-Benchmark.** `dossier-cli … bench`; 5.11.: parametrisches Grossgebäude
+  (`model/sampleProjectBig.ts`, `buildBigSampleProject({floors, apartments})`, Standard 8 × 15: 1832 Wände + 2160 Öffnungen,
+  1080 Räume, Treppen, Decken, Dach; nicht in den Menüs). `bench --big [--floors N --apartments M --runs R]` (oder `:gross bench`) misst
+  zusätzlich DXF (1 Geschoss), IFC und Doc-commit/undo/redo (200 Wände = 1 Schritt). Frame-Zeiten: `e2e/bigBuilding.spec.ts`
+  (`npm run e2e:perf`, nur mit `E2E_PERF=1`; rAF-Abstände bei Rad-Zoom und Schwenken, p50/p95, grosse Obergrenze).
+  Messung 5.11., **Linux-Container (nicht macOS), Mittel über 5 Läufe, Software-Rendering, Plan über SVG-Rückfall**:
+  generatePlan 3,1 ms (Cache) · planToRenderScene 34,7 · planToSvgString 36,2 · projectToModel3d 327 · Schnitt 110 ·
+  Ansicht 124 · DXF 73 · IFC 548 ms; Doc-commit 200 Wände 2,7 ms, undo 2,0, redo 0,8; commit 1 Wand 0,10 ms.
+  Frames im Plan (Chromium headless, SVG): Zoom p50 16,7 / p95 450 / max 650 ms; Schwenken p50 150 / p95 550 / max 617 ms —
+  Plan-Ansicht mit ~4000 Elementen im SVG-Rückfall ruckelt deutlich (ein Rad-Schritt ≈ 1 s Wartezeit). Offen: Messung auf macOS
+  (Metal/WebGPU, `data-engine=wasm`), Verlauf in CI festhalten, Plan/3D-Messung mehrerer Geschosse. · M
 - ◐ **[49] UI-Tests wie ein Mensch.** (28.10.) Suite in `e2e/` (`npm run e2e`, Playwright, baut `dist-test`,
   `vite preview` Port 5199; nicht in `npm run check`, eigener CI-Job `e2e` in `check.yml`). 14 Tests, ~40 s:
   Start, neues Projekt, Beispielprojekt (Vorlage), Wand per Klicks und per Befehlszeile, Rückgängig/Wiederholen

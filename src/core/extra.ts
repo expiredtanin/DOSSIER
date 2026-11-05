@@ -53,6 +53,7 @@ export { ProjectDocument, sharedDocument } from "./document";
 export { withDocument } from "./document";
 export { emptyProject } from "../model/sampleProject";
 export { buildComplexSampleProject } from "../model/sampleProjectComplex";
+export { buildBigSampleProject } from "../model/sampleProjectBig";
 export { readPointCloud, readPointCloudFlat, isPointCloudFile, DEFAULT_MAX_POINTS } from "../io/pointCloud";
 export type { PointCloudData, PointCloudOptions, PointCloudReport } from "../io/pointCloud";
 export { readPdfVector, pdfImport, pdfPageInfo, isPdfFile, PDF_SCALES } from "../io/pdfVector";
