@@ -364,17 +364,32 @@ pub fn cut_z(p: &Project, floor: &str) -> f64 {
 // ── Schwarz-Weiss und Strichstärken ─────────────────────────────────────────────────────────────
 
 const REFERENCE_SCALE: f64 = 100.0;
-const MIN_FACTOR: f64 = 0.5;
-const MAX_FACTOR: f64 = 1.6;
+const MIN_FACTOR: f64 = 0.4;
+const MAX_FACTOR: f64 = 2.0;
+/// [140] Sockel (Papier-mm), der nicht mit dem Massstab wächst/schrumpft: feine Linien (Schraffur,
+/// Bemassung) ändern sich kaum, Haarlinien darunter gar nicht.
+const FINE_MM: f64 = 0.09;
 
-/// Strichstärken-Faktor für 1:`scale` ([32], nur mit `Project.scaleLineWeights`): (100/n)^0.25,
-/// begrenzt auf 0,5–1,6; sonst 1.
+/// Strichstärken-Faktor für 1:`scale` ([32], nur mit `Project.scaleLineWeights`): (100/n)^0.5 (1:50 ≈ 1.41,
+/// 1:200 ≈ 0.71, 1:500 ≈ 0.45), begrenzt auf 0,4–2; sonst 1. Wirkt über [`scale_weight`] je nach Stärke.
 pub fn line_weight_factor(p: &Project, scale: f64) -> f64 {
     if p.scale_line_weights != Some(true) || !(scale > 0.0) || !scale.is_finite() {
         return 1.0;
     }
-    let f = jsnum::pow(REFERENCE_SCALE / scale, 0.25);
+    let f = jsnum::pow(REFERENCE_SCALE / scale, 0.5);
     jsnum::min(MAX_FACTOR, jsnum::max(MIN_FACTOR, f))
+}
+
+/// [140] Stärke `w` (Papier-mm, bezogen auf 1:100) beim Massstabsfaktor `f`: nur der Anteil über dem
+/// Sockel [`FINE_MM`] skaliert (w' = 0.09 + (w − 0.09)·f). Schwere Linien folgen dem Massstab fast ganz
+/// (Schnittkante 0.5 → 0.67 bei 1:50, → 0.38 bei 1:200), feine kaum (0.13 → 0.15 / 0.12) — die Rangfolge
+/// bleibt in jedem Massstab erhalten (linear, steigend), und Schraffuren fallen in 1:200/1:500 nicht unter
+/// die Druckgrenze. Linien bis 0.09 (Haarlinien) bleiben unverändert.
+pub fn scale_weight(w: f64, f: f64) -> f64 {
+    if f == 1.0 || !(w > FINE_MM) || !f.is_finite() {
+        return w;
+    }
+    FINE_MM + (w - FINE_MM) * f
 }
 
 /// Nachbearbeitung beim Schreiben (`plan::buf::Writer::post`): Schwarz-Weiss (alle Farben auf Tinte
@@ -399,7 +414,7 @@ impl Post {
             h.color = (if h.pattern == HatchPattern::Solid { HATCH_INK } else { MONO_INK }).into();
         }
         if self.lw != 1.0 {
-            h.line_weight *= self.lw;
+            h.line_weight = scale_weight(h.line_weight, self.lw);
         }
     }
 
@@ -416,7 +431,7 @@ impl Post {
                 }
                 self.hatch(hatch);
                 if self.lw != 1.0 {
-                    *stroke_width_mm *= self.lw;
+                    *stroke_width_mm = scale_weight(*stroke_width_mm, self.lw);
                 }
             }
             Primitive::Text { color, .. } => {
@@ -429,12 +444,12 @@ impl Post {
                     *color = Some(MONO_INK.into());
                 }
                 if self.lw != 1.0 {
-                    *weight_mm *= self.lw;
+                    *weight_mm = scale_weight(*weight_mm, self.lw);
                 }
             }
             Primitive::Arc { weight_mm, .. } | Primitive::DrawingCircle { weight_mm, .. } | Primitive::DrawingArc { weight_mm, .. } => {
                 if self.lw != 1.0 {
-                    *weight_mm *= self.lw;
+                    *weight_mm = scale_weight(*weight_mm, self.lw);
                 }
             }
             Primitive::DrawingText { .. } | Primitive::DrawingTextPath { .. } | Primitive::DrawingImage { .. } => {}
@@ -443,7 +458,7 @@ impl Post {
 
     /// Farbe und Stärke einer Linie.
     pub fn line<'a>(&self, color: Option<&'a str>, w: f64) -> (Option<&'a str>, f64) {
-        (if self.mono { Some(MONO_INK) } else { color }, if self.lw != 1.0 { w * self.lw } else { w })
+        (if self.mono { Some(MONO_INK) } else { color }, scale_weight(w, self.lw))
     }
 }
 
@@ -457,7 +472,7 @@ pub fn scale_line_weights(p: &Project, scale: f64, prims: &mut [Primitive]) {
     let post = Post { mono: false, lw, sketch: 0.0 };
     for q in prims.iter_mut() {
         match q {
-            Primitive::Line { weight_mm, .. } => *weight_mm *= lw,
+            Primitive::Line { weight_mm, .. } => *weight_mm = scale_weight(*weight_mm, lw),
             _ => post.apply(q),
         }
     }
@@ -658,9 +673,10 @@ mod tests {
         let mut on = sample();
         on.scale_line_weights = Some(true);
         assert_eq!(line_weight_factor(&on, 100.0), 1.0);
-        assert!((line_weight_factor(&on, 200.0) - 0.5f64.powf(0.25)).abs() < 1e-12);
-        assert!((line_weight_factor(&on, 50.0) - 2f64.powf(0.25)).abs() < 1e-12);
-        assert_eq!(line_weight_factor(&on, 100000.0), 0.5);
+        assert!((line_weight_factor(&on, 200.0) - 0.5f64.sqrt()).abs() < 1e-12);
+        assert!((line_weight_factor(&on, 50.0) - 2f64.sqrt()).abs() < 1e-12);
+        assert_eq!(line_weight_factor(&on, 100000.0), 0.4);
+        assert_eq!(line_weight_factor(&on, 1.0), 2.0);
         assert_eq!(line_weight_factor(&sample(), 200.0), 1.0);
         assert_eq!(line_weight_factor(&on, f64::NAN), 1.0);
     }
@@ -674,11 +690,32 @@ mod tests {
         let mut a = lines();
         scale_line_weights(&on, 200.0, &mut a);
         let Primitive::Line { weight_mm, .. } = &a[0] else { unreachable!() };
-        assert!((weight_mm - 0.5 * 0.5f64.powf(0.25)).abs() < 1e-12);
+        assert!((weight_mm - (0.09 + 0.41 * 0.5f64.sqrt())).abs() < 1e-12);
         let mut b = lines();
         scale_line_weights(&sample(), 200.0, &mut b);
         let Primitive::Line { weight_mm, .. } = &b[0] else { unreachable!() };
         assert_eq!(*weight_mm, 0.5);
+    }
+
+    /// [140] Rangfolge der Strichstärken je Massstab: Schnittkante 0.5 (1:100) → ≈ 0.67 (1:50) / ≈ 0.38
+    /// (1:200); feine Linien (Schraffur 0.1, Bemassung 0.13) ändern sich kaum, nie unter 0.09; die
+    /// Reihenfolge schwer > mittel > fein > Schraffur bleibt in jedem Massstab.
+    #[test]
+    fn strichstaerken_rangfolge_je_massstab() {
+        let mut on = sample();
+        on.scale_line_weights = Some(true);
+        let at = |w: f64, s: f64| scale_weight(w, line_weight_factor(&on, s));
+        assert!((at(0.5, 50.0) - 0.67).abs() < 0.01);
+        assert!((at(0.5, 200.0) - 0.38).abs() < 0.01);
+        assert_eq!(at(0.5, 100.0), 0.5);
+        assert!((at(0.13, 50.0) - 0.13).abs() < 0.02 && (at(0.13, 200.0) - 0.13).abs() < 0.02);
+        for s in [20.0, 50.0, 100.0, 200.0, 500.0, 1000.0] {
+            let class = [0.7, 0.5, 0.35, 0.25, 0.18, 0.13, 0.1].map(|w| at(w, s));
+            assert!(class.windows(2).all(|p| p[0] > p[1]), "1:{s}: {class:?}");
+            assert!(at(0.1, s) >= 0.09 && at(0.13, s) >= 0.09, "1:{s}: feine Linien druckbar");
+        }
+        assert_eq!(scale_weight(0.02, 0.5), 0.02, "Haarlinien bleiben");
+        assert_eq!(scale_weight(f64::NAN, 2.0).is_nan(), true);
     }
 
     #[test]

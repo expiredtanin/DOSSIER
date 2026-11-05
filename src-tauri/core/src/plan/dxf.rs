@@ -69,8 +69,8 @@ const K_INSERT: usize = 7;
 /// Bemassungs-Standards in Papier-mm (`DIM_DEFAULTS_MM`).
 const DIM_GAP: f64 = 1.0;
 const DIM_OVERSHOOT: f64 = 1.0;
-const DIM_TICK: f64 = 3.0;
-const DIM_TEXT: f64 = 4.0;
+const DIM_TICK: f64 = 2.0;
+const DIM_TEXT: f64 = 2.5;
 
 /// Optionen des Exports.
 pub struct DxfOptions {

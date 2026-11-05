@@ -134,7 +134,8 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>) {
     for l in crate::terrain::isolines(st.current(), iv, 0.0) {
         let k = (l.level / iv).round() as i64;
         let index = k.rem_euclid(every) == 0;
-        let w = if index { 0.25 } else { 0.1 };
+        // [140] Zähllinie mittel (0.18), Höhenlinie fein (0.1): Gelände bleibt unter dem Gebäude zurück.
+        let w = if index { 0.18 } else { 0.1 };
         let n = l.pts.len();
         let segs = if l.closed { n } else { n - 1 };
         let seg_len = |i: usize| (l.pts[(i + 1) % n][0] - l.pts[i][0]).hypot(l.pts[(i + 1) % n][1] - l.pts[i][1]);
@@ -373,7 +374,7 @@ mod tests {
         let mut out = Vec::new();
         plan_context(&Ctx::new(&p, &a), &mut out);
         let w = |m: f64| out.iter().filter(|q| matches!(q, Primitive::Line { weight_mm, color: Some(c), .. } if *weight_mm == m && c == TERRAIN_INK)).count();
-        assert!(w(0.1) > 4 && w(0.25) > 0, "{} {}", w(0.1), w(0.25));
+        assert!(w(0.1) > 4 && w(0.18) > 0, "{} {}", w(0.1), w(0.18));
         let labels: Vec<&str> = out.iter().filter_map(|q| if let Primitive::DrawingText { text, .. } = q { Some(text.as_str()) } else { None }).collect();
         assert!(labels.contains(&"5"), "{labels:?}");
         let ex = out.iter().filter(|q| matches!(q, Primitive::Line { color: Some(c), .. } if c == EXCAVATION_INK)).count();
@@ -381,7 +382,7 @@ mod tests {
         // Die Zähllinie ist unter ihrer Beschriftung unterbrochen: keine Linie läuft durch den Textmittelpunkt.
         let at = out.iter().find_map(|q| if let Primitive::DrawingText { text, at, .. } = q { (text == "5").then_some(*at) } else { None }).unwrap();
         let near = out.iter().filter(|q| matches!(q, Primitive::Line { a, b, weight_mm, color: Some(c), .. }
-            if *weight_mm == 0.25 && c == TERRAIN_INK && (a.x.min(b.x) - 0.01..=a.x.max(b.x) + 0.01).contains(&at.x) && (a.y.min(b.y) - 0.01..=a.y.max(b.y) + 0.01).contains(&at.y))).count();
+            if *weight_mm == 0.18 && c == TERRAIN_INK && (a.x.min(b.x) - 0.01..=a.x.max(b.x) + 0.01).contains(&at.x) && (a.y.min(b.y) - 0.01..=a.y.max(b.y) + 0.01).contains(&at.y))).count();
         assert_eq!(near, 0, "Linie läuft durch das Etikett bei {at:?}");
     }
 

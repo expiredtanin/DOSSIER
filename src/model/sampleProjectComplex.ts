@@ -688,7 +688,7 @@ const snap = (id: string, name: string, level: string, scale: number, center: Ve
 function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapshotFolders" | "layouts" | "masterLayouts" | "layoutFolders" | "publishSets" | "overrideRules"> {
   return {
     overrideRules: [
-      { id: "or-brand", name: "Brandschutztüren rot", enabled: true, condition: { type: "layer_name", operator: "contains", value: "Türen" }, actions: { color: "#c0392b", lineweight: 0.35 } },
+      { id: "or-brand", name: "Brandschutztüren rot", enabled: false, condition: { type: "layer_name", operator: "contains", value: "Türen" }, actions: { color: "#c0392b", lineweight: 0.35 } },
     ],
     viewTemplates: [
       { id: "vt-gr100", name: "Grundriss 1:100", detail: "mittel", scaleDenominator: 100, scaleLineWeights: true, cutHeight: 1.0 },

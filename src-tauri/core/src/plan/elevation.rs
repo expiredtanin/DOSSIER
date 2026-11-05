@@ -15,6 +15,10 @@ use std::collections::HashMap;
 
 const EDGE_INK: &str = "#2b3039";
 const EDGE_MM: f64 = 0.13;
+/// [140] Silhouette (Umriss aller Bauteile zusammen) mittelstark: hebt den Baukörper von Details ab.
+const SILHOUETTE_MM: f64 = 0.35;
+/// [140] Abstand (m), bis zu dem eine Kante als Teil der Silhouette gilt.
+const SILHOUETTE_TOL: f64 = 2e-3;
 const FRAME_MM: f64 = 0.18;
 const GLASS_FILL_MONO: &str = "#c4c8cd";
 const GLASS_FILL_COLOR: &str = "#9fc2d9";
@@ -1096,6 +1100,26 @@ fn outline_line(a: Pt, b: Pt) -> Primitive {
     line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-outline", EDGE_MM, EDGE_INK)
 }
 
+/// [140] Ränder der vereinigten Bauteilflächen (Silhouette des Baukörpers in der Ansicht).
+fn silhouette_rings(faces: &[Face]) -> Vec<Vec<Pt>> {
+    let polys: Vec<crate::flat::Polygon> = faces.iter().filter(|f| f.pts.len() >= 3).map(|f| vec![f.pts.clone()]).collect();
+    crate::polygon_bool::union(&polys).into_iter().flatten().collect()
+}
+
+/// Liegt `q` (bis [`SILHOUETTE_TOL`]) auf einem der Ringe?
+fn on_rings(rings: &[Vec<Pt>], q: Pt) -> bool {
+    rings.iter().any(|r| {
+        (0..r.len()).any(|i| {
+            let (a, b) = (r[i], r[(i + 1) % r.len()]);
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let l2 = dx * dx + dy * dy;
+            let t = if l2 > 0.0 { (((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+            let (ex, ey) = (a[0] + t * dx - q[0], a[1] + t * dy - q[1]);
+            ex * ex + ey * ey <= SILHOUETTE_TOL * SILHOUETTE_TOL
+        })
+    })
+}
+
 fn poly_prim(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, opening: Option<&str>) -> Primitive {
     let mut pr = polygon(pts, fill, stroke, w, no_hatch());
     if let (Primitive::Polygon { opening_id, .. }, Some(id)) = (&mut pr, opening) {
@@ -1495,6 +1519,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     });
     let mut prims: Vec<Primitive> = items.into_iter().map(|it| it.prim).collect();
     // Exakt sichtbare Kanten liegen über allen Füllungen (die Füllungen bleiben Maler-Ordnung).
+    let silhouette = silhouette_rings(&faces);
     for e in &edges {
         acc.add(e.a[0], e.a[1]);
         acc.add(e.b[0], e.b[1]);
@@ -1504,6 +1529,8 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
                 *dash = Some(Some(HIDDEN_DASH.to_vec()));
             }
             prims.push(l);
+        } else if on_rings(&silhouette, [(e.a[0] + e.b[0]) / 2.0, (e.a[1] + e.b[1]) / 2.0]) {
+            prims.push(line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "elevation-outline", SILHOUETTE_MM, EDGE_INK));
         } else {
             prims.push(outline_line(e.a, e.b));
         }
@@ -2125,6 +2152,25 @@ mod tests {
     }
 
     /// [132] Stützen erscheinen in der Ansicht (Fläche mit Pick-Id, Umriss); runde ohne Facettenfugen.
+    /// [140] Ansicht: Silhouette des Baukörpers mittel (0.35), innere Kanten fein (0.13), Grundlinie schwer.
+    #[test]
+    fn silhouette_mittel_details_fein() {
+        let p = proj132(
+            serde_json::json!([]),
+            serde_json::json!([
+                {"id": "C1", "type": "column", "floorId": "F", "categoryCode": "25", "position": {"x": 2, "y": 2}, "profile": {"kind": "rect", "width": 0.2, "depth": 0.2}, "rotation": 0, "height": 2.5},
+                {"id": "C2", "type": "column", "floorId": "F", "categoryCode": "25", "position": {"x": 2, "y": 4}, "profile": {"kind": "rect", "width": 0.6, "depth": 0.2}, "rotation": 0, "height": 1.5}
+            ]),
+        );
+        let prims = view132(&p, "s");
+        let ws: Vec<f64> = prims.iter().filter_map(|q| match q { Primitive::Line { cls, weight_mm, .. } if cls == "elevation-outline" => Some(*weight_mm), _ => None }).collect();
+        assert!(ws.contains(&SILHOUETTE_MM), "Silhouette fehlt: {ws:?}");
+        // C1 (schmal, vorne) steht vor C2 (breiter, niedriger): die Oberkante von C2 ist Silhouette, die
+        // Kanten von C1 innerhalb von C2 sind fein.
+        assert!(ws.contains(&EDGE_MM), "innere Kanten fehlen: {ws:?}");
+        assert!(GROUND_MM > SILHOUETTE_MM && SILHOUETTE_MM > EDGE_MM);
+    }
+
     #[test]
     fn stuetzen_in_der_ansicht() {
         let p = proj132(

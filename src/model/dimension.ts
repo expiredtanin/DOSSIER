@@ -8,14 +8,14 @@
 // Erzeugungszeit also bekannt und eindeutig.
 
 /**
- * Defaults in PAPIER-MILLIMETERN (übliche Zeichnungswerte; entsprechen bei
- * 1:50 genau den früheren festen Modellwerten 0.05/0.05/0.15/0.2 m).
+ * Defaults in PAPIER-MILLIMETERN (übliche Zeichnungswerte; [140]: Masszahl 2.5 mm,
+ * Schrägstrich 2 mm — eine Stufe unter dem Raumstempel).
  */
 export const DIM_DEFAULTS_MM = {
   gap: 1,
   overshoot: 1,
-  tickLen: 3,
-  textHeight: 4,
+  tickLen: 2,
+  textHeight: 2.5,
 } as const;
 
 /** Default-Grösse der Linienenden (Pfeil, Punkt, …) in Papier-Millimetern (wie im Kern). */

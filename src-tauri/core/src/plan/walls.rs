@@ -176,7 +176,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     let angle = atan2(w.end.y - w.start.y, w.end.x - w.start.x) * 180.0 / std::f64::consts::PI;
     let stroke = e.color.as_deref().unwrap_or(POCHE_STROKE);
     let outline_mm = wall_lw * detail.outline_factor();
-    let layer_mm = LAYER_LINE_MM * detail.layer_factor();
+    let layer_mm = LAYER_JOINT_MM * detail.layer_factor();
     let thick: Vec<f64> = wt.layers.iter().map(|l| l.thickness).collect();
     let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, detail == Detail::Grob, view_only, reveals));
     if f.is_empty() {
@@ -420,11 +420,11 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     b.push(shading.map_or(0.0, |s| s.r#box.width));
     b.push(shading.map_or(0.0, |s| s.r#box.height));
     // Strichstärken
-    b.push(SYMBOL_HAIRLINE_MM);
-    b.push(o.frame_line.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_HAIRLINE_MM));
+    b.push(SYMBOL_LINE_MM);
+    b.push(o.frame_line.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_LINE_MM));
     b.push(frame_view_weight);
-    b.push(o.sash_line.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_HAIRLINE_MM));
-    b.push(o.sill_line_style.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_HAIRLINE_MM));
+    b.push(o.sash_line.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_LINE_MM));
+    b.push(o.sill_line_style.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_LINE_MM));
     // Details ([94]): Anschlag, Fensterbank, Storenkasten.
     // Anschlag: je Seite verschieden ⇒ zeichnet `opening_detail_plan`.
     let rebate_sides = det.as_ref().map(|f| f.rebate).filter(|r| (r.left - r.right).abs() > 1e-9 || dframe.is_some());
