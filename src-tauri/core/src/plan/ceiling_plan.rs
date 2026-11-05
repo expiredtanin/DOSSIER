@@ -74,7 +74,9 @@ pub fn domains(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result<bo
     let fc = Ctx::new(c.p, &fa);
     let (cut, limit) = heights(c.p, f);
     let soffits = soffits(&fc, cut, limit, &mut out.ceilings, bounds)?;
-    roof_soffits(&fc, cut, limit, &mut out.roofs, bounds);
+    // Dächer anderer Geschosse nur unter der tiefsten Deckenuntersicht (sonst verdeckt die Decke sie).
+    let lowest = soffits.iter().map(|s| s.z).fold(limit, f64::min);
+    roof_soffits(&fc, cut, lowest, &mut out.roofs, bounds);
     let mut walls = Vec::new();
     super::walls::plan_walls(&fc, c.a.reference_lines, &mut walls, bounds)?;
     out.walls = walls.into_iter().filter(|q| !below_ceiling_only(q)).collect();
@@ -151,7 +153,8 @@ fn soffits(c: &Ctx, cut: f64, limit: f64, out: &mut Vec<Primitive>, bounds: &mut
     Ok(res)
 }
 
-/// Dächer über der Schnitthöhe (eigenes Geschoss oder Traufe unter `limit`) von unten: Traufe, First,
+/// Dächer über der Schnitthöhe (eigenes Geschoss oder Traufe unter `limit`: Obergrenze bzw. tiefste
+/// Deckenuntersicht) von unten: Traufe, First,
 /// Grate/Kehlen und Knicke ausgezogen, Ansichtsmuster der innersten Schicht, Dachfenster.
 fn roof_soffits(c: &Ctx, cut: f64, limit: f64, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     let p = c.p;
@@ -256,6 +259,8 @@ mod tests {
         assert!(ce.contains("\"ceilingId\":\"C1\""), "Untersicht der Decke über dem EG: {ce}");
         assert!(!ce.contains("floor-finish-pattern"));
         assert!(r.stairs.is_empty());
+        // Das Dach des OG liegt über der Decke C1: von unten verdeckt.
+        assert!(!json(&r.roofs).contains("roof-eaves"), "verdecktes Dach");
         // Räume nur als Beschriftung mit UK-Kote (keine Raumfläche).
         let rooms = serde_json::to_value(&r.rooms).unwrap();
         assert!(rooms.as_array().unwrap().iter().all(|q| q["kind"] == "text"), "{rooms}");
