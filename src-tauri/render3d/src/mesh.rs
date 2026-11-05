@@ -55,6 +55,7 @@
 // XZ-Ebene, Extrusion entlang +Y (Y-up), exakt wie Viewport3D.tsx:
 //   "Modell (x,y,z) -> Three (x, z, y)  (Z = Hoehe nach oben)".
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 
 use crate::openings::{split_range_by_voids, MIN_SPAN};
@@ -98,7 +99,7 @@ pub fn extrude_wall(mesh: &mut Mesh, wall: &WallInput) {
 /// Oeffnungen wird die Wand zuerst in Achsen-Teilstuecke (Pfeiler/Bruestung/
 /// Sturz) zerlegt, mit `layers` zusaetzlich in Schicht-Baender quer zur
 /// Dicke — siehe Moduldoc.
-fn extrude_wall_with_miters(mesh: &mut Mesh, wall: &WallInput, miters: WallMiters) {
+pub(crate) fn extrude_wall_with_miters(mesh: &mut Mesh, wall: &WallInput, miters: WallMiters) {
     let n = left_normal(wall.start, wall.end);
     // Degenerierte Wand (Start == Ende) ueberspringen.
     if n == [0.0, 0.0] {
@@ -667,15 +668,15 @@ fn quad_normal(a: [f32; 3], b: [f32; 3], d: [f32; 3]) -> [f32; 3] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Eine Gehrungslinie (Punkt + Richtung, Modell-Meter) an einem Wandende.
-#[derive(Debug, Clone, Copy)]
-struct MiterLine {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MiterLine {
     point: Point2,
     dir: Point2,
 }
 
 /// Die (ggf. fehlenden) Gehrungslinien EINER Wand an Start/Ende.
-#[derive(Debug, Clone, Copy, Default)]
-struct WallMiters {
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct WallMiters {
     start: Option<MiterLine>,
     end: Option<MiterLine>,
 }
@@ -762,10 +763,10 @@ fn cluster_by_height_overlap(ends: &[EndRef], members: &[usize]) -> Vec<Vec<usiz
 /// rechte mit der jeweils anderen. Liefert `None` bei (nahezu) kollinearen
 /// Richtungen — das deckt insbesondere zwei Teilstuecke DERSELBEN Wand ab
 /// (identische Richtung, siehe Moduldoc).
-fn miter_line(walls: &[WallInput], a: &EndRef, b: &EndRef) -> Option<MiterLine> {
+fn miter_line<W: Borrow<WallInput>>(walls: &[W], a: &EndRef, b: &EndRef) -> Option<MiterLine> {
     let j = a.point;
-    let t_a = walls[a.wall].thickness;
-    let t_b = walls[b.wall].thickness;
+    let t_a = walls[a.wall].borrow().thickness;
+    let t_b = walls[b.wall].borrow().thickness;
     let n_a: Point2 = [-a.dir[1], a.dir[0]];
     let n_b: Point2 = [-b.dir[1], b.dir[0]];
 
@@ -808,11 +809,12 @@ fn apply_cut(out: &mut [WallMiters], e: &EndRef, cut: MiterLine) {
 /// Wandenden treffen, werden gehrt; freie Enden, T-/X-Stoesse und mehrdeutige
 /// Knoten (z. B. eine Oeffnung direkt an einer echten Ecke, die das Ende in
 /// mehrere Hoehen-Teilstuecke zerlegt) bleiben konservativ rechtwinklig.
-fn compute_wall_miters(walls: &[WallInput]) -> Vec<WallMiters> {
+pub(crate) fn compute_wall_miters<W: Borrow<WallInput>>(walls: &[W]) -> Vec<WallMiters> {
     let mut out = vec![WallMiters::default(); walls.len()];
 
     let mut ends: Vec<EndRef> = Vec::with_capacity(walls.len() * 2);
     for (i, w) in walls.iter().enumerate() {
+        let w: &WallInput = w.borrow();
         let n = left_normal(w.start, w.end);
         if n == [0.0, 0.0] {
             continue; // entartete Wand, siehe extrude_wall
@@ -855,6 +857,7 @@ fn compute_wall_miters(walls: &[WallInput]) -> Vec<WallMiters> {
     // übersteuern die abgeleitete Gehrung — sie kennen auch Stösse ohne gemeinsamen Endpunkt.
     let line = |c: [f32; 4]| MiterLine { point: [c[0], c[1]], dir: [c[2], c[3]] };
     for (i, w) in walls.iter().enumerate() {
+        let w: &WallInput = w.borrow();
         if let Some(c) = w.start_cut {
             out[i].start = Some(line(c));
         }
@@ -875,11 +878,12 @@ fn compute_wall_miters(walls: &[WallInput]) -> Vec<WallMiters> {
 /// (`build_free_wall_end_caps`) — ein Wandende "ohne Anschluss" (Nutzer-Begriff)
 /// zeigt dort die Bauteil-Schraffur statt der Flaechenfarbe, wie ein echter
 /// Schnitt.
-fn compute_free_wall_ends(walls: &[WallInput]) -> Vec<(bool, bool)> {
+pub(crate) fn compute_free_wall_ends<W: Borrow<WallInput>>(walls: &[W]) -> Vec<(bool, bool)> {
     let mut out = vec![(true, true); walls.len()];
 
     let mut ends: Vec<EndRef> = Vec::with_capacity(walls.len() * 2);
     for (i, w) in walls.iter().enumerate() {
+        let w: &WallInput = w.borrow();
         let n = left_normal(w.start, w.end);
         if n == [0.0, 0.0] {
             continue; // entartete Wand: weder Ende gilt als "frei" (irrelevant)
@@ -916,6 +920,7 @@ fn compute_free_wall_ends(walls: &[WallInput]) -> Vec<(bool, bool)> {
     }
     // Explizite Schnittlinie (Kern-Verschneidung): das Ende ist angeschlossen, nicht frei.
     for (i, w) in walls.iter().enumerate() {
+        let w: &WallInput = w.borrow();
         if w.start_cut.is_some() {
             out[i].0 = false;
         }
@@ -1016,14 +1021,22 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
     let free_ends = compute_free_wall_ends(walls);
     let miters = compute_wall_miters(walls);
     let mut verts: Vec<f32> = Vec::new();
-
     for (wi, wall) in walls.iter().enumerate() {
-        let Some(hatch) = wall.hatch else { continue };
+        push_wall_caps(&mut verts, wall, miters[wi], free_ends[wi]);
+    }
+    verts
+}
+
+/// Kappen EINER Wand (Oberseite + freie Enden, s. `build_free_wall_end_caps`) mit ihren Gehrungen und
+/// freien Enden — auch für die teilweise Neuberechnung der Szene (`scene.rs`).
+pub(crate) fn push_wall_caps(verts: &mut Vec<f32>, wall: &WallInput, miters: WallMiters, free: (bool, bool)) {
+    {
+        let Some(hatch) = wall.hatch else { return };
         // Wand-OBERSEITE (Draufsicht): die Bauteil-Schraffur statt der Material-Textur/-Farbe,
         // wie die geschnittene Wand im Grundriss. (u,v) = Weltkoordinaten (x, z) — metrisch,
         // ueber alle Waende hinweg phasengleich.
         if wall.height > 1e-6 {
-            if let Some(fp) = wall_mitered_footprint(wall, miters[wi]) {
+            if let Some(fp) = wall_mitered_footprint(wall, miters) {
                 let y_top = wall.base_elevation + wall.height;
                 // Schräge Oberkante: Höhe je Punkt aus der Lage entlang der Achse.
                 let dx = wall.end[0] - wall.start[0];
@@ -1052,7 +1065,7 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
                 let perp_n = [n[0], 0.0, n[1]];
                 for (a, b) in [(0usize, 1usize), (3, 2)] {
                     push_line_strip(
-                        &mut verts,
+                        verts,
                         [fp[a][0], y_at(fp[a]), fp[a][1]],
                         [fp[b][0], y_at(fp[b]), fp[b][1]],
                         perp_n,
@@ -1060,13 +1073,13 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
                 }
             }
         }
-        let (free_start, free_end) = free_ends[wi];
+        let (free_start, free_end) = free;
         if !free_start && !free_end {
-            continue;
+            return;
         }
         let n = left_normal(wall.start, wall.end);
         if n == [0.0, 0.0] || wall.height <= 1e-6 {
-            continue;
+            return;
         }
         let y0 = wall.base_elevation;
         let y1 = wall.base_elevation + wall.height;
@@ -1087,18 +1100,17 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
 
         if free_start {
             push_wall_end_cap(
-                &mut verts, wall.start, n, layers, total, y0, y1 - wall.top_drop[0], pattern, angle_rad, scale,
+                verts, wall.start, n, layers, total, y0, y1 - wall.top_drop[0], pattern, angle_rad, scale,
                 line_weight,
             );
         }
         if free_end {
             push_wall_end_cap(
-                &mut verts, wall.end, n, layers, total, y0, y1 - wall.top_drop[1], pattern, angle_rad, scale,
+                verts, wall.end, n, layers, total, y0, y1 - wall.top_drop[1], pattern, angle_rad, scale,
                 line_weight,
             );
         }
     }
-    verts
 }
 
 /// Grundriss-Fussabdruck EINER Wand (die vier Band-Eckpunkte g0..g3 in CCW),

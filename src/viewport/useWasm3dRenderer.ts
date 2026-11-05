@@ -7,9 +7,10 @@
  * in Rust (src-tauri/render3d, Feature `web`) — dieselbe Extrusion/Pipeline
  * wie das native wgpu-Fenster.
  *
- * Modell-Sync: `updateModel(project)` flacht das Projekt über
- * {@link projectToModel3d} (Wände mit Öffnungs-Teilquadern + Deckenplatten)
- * und schiebt es als JSON an `set_model` — exakt dasselbe Format wie der
+ * Modell-Sync: `updateModel(project)` holt das Modell in Teilen
+ * ({@link projectToModel3dParts}, je Wand-/Öffnungs-Eintrag des Kern-Caches plus Rest-Gruppen) und
+ * schickt nur Geändertes an `set_parts` ([58]); mit Explosion das ganze Modell
+ * ({@link projectToModel3d}) als JSON an `set_model` — dasselbe Format wie der
  * native Tauri-Push (nativeSync.ts).
  *
  * Fällt bei fehlendem WebGPU oder Init-Fehler auf `ready:false` + `failed:true`
@@ -18,7 +19,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextImage, Project } from "../model/types";
-import { emitDrawingLineVerts, emitSurfacePatternLines, projectToModel3d, siteEnvelope3d } from "../core";
+import { emitDrawingLineVerts, emitSurfacePatternLines, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
+import { Model3dPartsSync } from "./model3dPartsSync";
 import type { DetailLevel } from "../model/viewTypes";
 import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
@@ -42,6 +44,9 @@ export interface Camera3d {
 /** Minimal-Typ des WASM-Exports (das echte .d.ts entsteht erst mit `build:engine3d`). */
 interface WebModelRendererLike {
   set_model(json: string): void;
+  /** Teil-Update ([58], `web::set_parts`): `{ reset?, remove?, upsert? }`, s. `model3dPartsSync.ts`.
+   *  Optional — ältere WASM-Builds. */
+  set_parts?(json: string): number;
   /** Darstellungsart setzen — `style` ∈ "shaded"|"white"|"wireframe"|"hidden"|
    * "textured" (deckt die volle `RenderMode`-Union der Oberleiste ab;
    * "textured" faellt engine-seitig vorerst auf "shaded" zurueck). */
@@ -183,6 +188,35 @@ function getRenderer(canvas: HTMLCanvasElement): Promise<WebModelRendererLike> {
   return p;
 }
 
+/** Was jeder Renderer schon an Modell-Teilen hat ([58]). */
+const partsSyncs = new WeakMap<object, Model3dPartsSync>();
+
+/**
+ * Modell an den Renderer: ohne Explosion als Teil-Update (nur geänderte Wände/Öffnungen/Gruppen reisen
+ * und werden in render3d neu vernetzt und hochgeladen), sonst bzw. bei älteren WASM-Builds und nach
+ * einem Fehler das ganze Modell über `set_model`.
+ */
+function syncModel3d(r: WebModelRendererLike, project: Project, detail: DetailLevel | undefined, explode: number): void {
+  let sync = partsSyncs.get(r);
+  if (!sync) partsSyncs.set(r, (sync = new Model3dPartsSync()));
+  try {
+    const parts = typeof r.set_parts === "function" ? projectToModel3dParts(project, { detail, voids: true, explode }) : null;
+    if (parts) {
+      const d = sync.diff(parts);
+      if (d) r.set_parts!(d.json);
+      return;
+    }
+  } catch (e) {
+    console.warn("render3d set_parts fehlgeschlagen, ganzes Modell:", e);
+  }
+  sync.reset();
+  try {
+    r.set_model(JSON.stringify(projectToModel3d(project, { detail, voids: true, explode })));
+  } catch (e) {
+    console.warn("render3d set_model fehlgeschlagen:", e);
+  }
+}
+
 export function useWasm3dRenderer(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   enabled: boolean,
@@ -236,11 +270,7 @@ export function useWasm3dRenderer(
   const updateModel = useCallback((project: Project, detail?: DetailLevel, explode = 0) => {
     const r = rendererRef.current;
     if (!r || !project) return;
-    try {
-      r.set_model(JSON.stringify(projectToModel3d(project, { detail, voids: true, explode })));
-    } catch (e) {
-      console.warn("render3d set_model fehlgeschlagen:", e);
-    }
+    syncModel3d(r, project, detail, explode);
     // 2D-Boden-Spuren als eigener BINÄRER LineList-Kanal — bewusst NICHT Teil
     // des JSON-Modells oben: ein Kataster-DXF (Mio. Segmente) sprengt als
     // Ribbon-Meshes im JSON die String-Längengrenze komplett (Nutzer-Report

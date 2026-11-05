@@ -43,6 +43,7 @@
 import type { Project, Vec2 } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 import { documentFor } from "../core/document";
+import { coreEpoch } from "../engine/coreWasm";
 import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickDrawingSeg } from "./pickTypes";
 import {
   type RMesh,
@@ -192,6 +193,93 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   };
   if (parts.voidCuts) applyVoids3d(model, parts.voidCuts);
   return model;
+}
+
+/**
+ * Ein Teil des 3D-Modells für Teil-Updates im Viewer ([58], render3d `set_parts`). `fixed`: der Inhalt
+ * zur `id` ändert sich nie (Wand-/Öffnungs-Eintrag des Kern-Caches, Laufnummer in der id) — der Viewer
+ * schickt ihn nur einmal; sonst entscheidet der Inhalt (Rest-Gruppen: Decken, Dächer, Kontext …).
+ */
+export interface Model3dPart {
+  id: string;
+  fixed: boolean;
+  walls?: RWall[];
+  slabs?: RSlab[];
+  meshes?: RMesh[];
+  roofLayers?: RModel3d["roofLayers"];
+}
+
+/** Stabile Nummer je Objekt (truck-Ergebnis der Abzugskörper) für die Teil-id. */
+const objectIds = new WeakMap<object, number>();
+let nextObjectId = 1;
+function objectId(o: object): number {
+  let id = objectIds.get(o);
+  if (id === undefined) objectIds.set(o, (id = nextObjectId++));
+  return id;
+}
+
+/**
+ * Das 3D-Modell wie {@link projectToModel3d} (gleiche Wände, Decken, Meshes — nur anders gruppiert), aber
+ * in Teilen ([58]): je Wand-Eintrag des Kern-Caches (`w…`) und je Öffnungs-Eintrag (`o…`) ein
+ * unveränderlicher Teil, dazu Rest-Gruppen. `null` mit Explosion (dort kein Cache): dann das ganze Modell.
+ */
+export function projectToModel3dParts(project: Project, opts: Model3dOptions = {}): Model3dPart[] | null {
+  const layered = opts.layeredWalls ?? true;
+  const detail = opts.detail ?? "fein";
+  if (explodeGap(opts.explode) > 0) return null;
+  const voids = !!opts.voids && typeof window !== "undefined";
+  const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, 0];
+  const { parts, keyed } = documentFor(project).model3dPartsKeyed<Model3dParts>(args);
+  const wallEntries = keyed.wallEntries as (readonly [number, RWall[]])[];
+  const openingEntries = keyed.openingEntries as (readonly [number, RMesh[][]])[];
+  // Abzugskörper wie im vollen Modell (gleiche Reihenfolge, gleicher truck-Cache); danach zuordnen,
+  // welche Wand/Decke durch welches Netz ersetzt wurde (Netze in Index-Reihenfolge der Schnitte).
+  const vm: RModel3d = { walls: parts.walls, slabs: parts.slabs, meshes: [], roofLayers: [] };
+  const wallMesh = new Map<number, RMesh>();
+  const slabMeshes: RMesh[] = [];
+  if (parts.voidCuts) {
+    applyVoids3d(vm, parts.voidCuts);
+    const keptW = new Set(vm.walls);
+    const keptS = new Set(vm.slabs);
+    let mi = 0;
+    for (const i of parts.voidCuts.walls.map(([i]) => i).sort((a, b) => a - b)) {
+      if (!keptW.has(parts.walls[i])) wallMesh.set(i, vm.meshes[mi++]);
+    }
+    for (const i of parts.voidCuts.slabs.map(([i]) => i).sort((a, b) => a - b)) {
+      if (!keptS.has(parts.slabs[i])) slabMeshes.push(vm.meshes[mi++]);
+    }
+  }
+  const ns = `${coreEpoch()}.`;
+  const out: Model3dPart[] = [];
+  let at = 0;
+  for (const [k, ws] of wallEntries) {
+    const start = at;
+    at += ws.length;
+    let cut = "";
+    const walls: RWall[] = [];
+    const meshes: RMesh[] = [];
+    for (let i = start; i < at; i++) {
+      const m = wallMesh.get(i);
+      if (m) {
+        meshes.push(m);
+        cut += `.${i - start}m${objectId(m)}`;
+      } else walls.push(parts.walls[i]);
+    }
+    out.push(cut ? { id: `w${ns}${k}${cut}`, fixed: true, walls, meshes } : { id: `w${ns}${k}`, fixed: true, walls });
+  }
+  for (const [k, lists] of openingEntries) {
+    const meshes = lists.flat();
+    if (meshes.length) out.push({ id: `o${ns}${k}`, fixed: true, meshes });
+  }
+  const rest = (id: string, p: Omit<Model3dPart, "id" | "fixed">) => out.push({ id, fixed: false, ...p });
+  rest("slabs", { slabs: vm.slabs, meshes: slabMeshes });
+  rest("context", { meshes: parts.contextMeshes });
+  rest("extrusions", { meshes: emitExtrudedSolids(project, parts.floorOffsets) });
+  rest("columns", { meshes: parts.columnMeshes });
+  rest("openingTail", { meshes: keyed.openingTail as RMesh[] });
+  rest("stairs", { meshes: [...parts.stairMeshes, ...parts.stairRailings] });
+  rest("roofs", { meshes: parts.roofMeshes, roofLayers: parts.roofLayers });
+  return out;
 }
 
 /** Teile des 3D-Modells aus dem Kern (`model3d::Parts`). */

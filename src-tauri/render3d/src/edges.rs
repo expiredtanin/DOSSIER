@@ -48,7 +48,10 @@ const QUANT: f32 = 1.0e4;
 const CREASE_COS: f32 = 0.966;
 
 /// Ganzzahliger Positions-Schluessel (quantisiert) fuer die Kanten-Deduplizierung.
-type Key = [i64; 3];
+pub(crate) type Key = [i64; 3];
+
+/// Kanonischer Kanten-Schlüssel (sortiertes Endpunkt-Paar).
+pub(crate) type EdgeKey = (Key, Key);
 
 fn key_of(p: [f32; 3]) -> Key {
     [
@@ -106,17 +109,41 @@ pub struct EdgeAdj {
 /// die deduplizierten Repraesentanten-Normalen. GPU-frei; einmalig bei `set_model`
 /// berechnet und gecacht (die Silhouette wird daraus je Blickwinkel neu abgeleitet).
 pub fn build_edge_adjacency(mesh: &Mesh) -> Vec<EdgeAdj> {
+    // Kanten-Schluessel (kanonisch sortiertes Endpunkt-Paar) -> Datensatz.
+    let mut edges: HashMap<EdgeKey, EdgeRec> = HashMap::new();
+    for_each_tri_edge(mesh, |key, p0, p1, n| {
+        edges
+            .entry(key)
+            .or_insert_with(|| EdgeRec {
+                p0,
+                p1,
+                normals: Vec::new(),
+            })
+            .normals
+            .push(n);
+    });
+
+    edges
+        .into_values()
+        .map(|rec| EdgeAdj {
+            p0: rec.p0,
+            p1: rec.p1,
+            reps: representatives(&rec.normals),
+        })
+        .collect()
+}
+
+/// Ruft `f(schluessel, p0, p1, flaechennormale)` fuer jede Kante jedes nicht entarteten Dreiecks
+/// (Null-Laengen-Kanten ausgelassen) — gemeinsame Grundlage der vollen und der teilweisen
+/// Kanten-Adjazenz (`scene.rs`).
+pub(crate) fn for_each_tri_edge(mesh: &Mesh, mut f: impl FnMut(EdgeKey, [f32; 3], [f32; 3], [f32; 3])) {
     if mesh.indices.len() < 3 {
-        return Vec::new();
+        return;
     }
     let pos = |i: u32| -> [f32; 3] {
         let b = i as usize * FLOATS_PER_VERTEX;
         [mesh.verts[b], mesh.verts[b + 1], mesh.verts[b + 2]]
     };
-
-    // Kanten-Schluessel (kanonisch sortiertes Endpunkt-Paar) -> Datensatz.
-    let mut edges: HashMap<(Key, Key), EdgeRec> = HashMap::new();
-
     for tri in mesh.indices.chunks_exact(3) {
         let (a, b, c) = (pos(tri[0]), pos(tri[1]), pos(tri[2]));
         // Geometrische Flaechennormale (robuster als die pro-Vertex-Normalen).
@@ -130,34 +157,16 @@ pub fn build_edge_adjacency(mesh: &Mesh) -> Vec<EdgeAdj> {
                 continue; // Null-Laengen-Kante
             }
             // Kanonische Reihenfolge, damit u->v und v->u denselben Schluessel haben.
-            let (key, p0, p1) = if ku <= kv {
-                ((ku, kv), u, v)
+            if ku <= kv {
+                f((ku, kv), u, v, n);
             } else {
-                ((kv, ku), v, u)
-            };
-            edges
-                .entry(key)
-                .or_insert_with(|| EdgeRec {
-                    p0,
-                    p1,
-                    normals: Vec::new(),
-                })
-                .normals
-                .push(n);
+                f((kv, ku), v, u, n);
+            }
         }
     }
-
-    edges
-        .into_values()
-        .map(|rec| EdgeAdj {
-            p0: rec.p0,
-            p1: rec.p1,
-            reps: representatives(&rec.normals),
-        })
-        .collect()
 }
 
-fn push_edge(verts: &mut Vec<f32>, p0: [f32; 3], p1: [f32; 3]) {
+pub(crate) fn push_edge(verts: &mut Vec<f32>, p0: [f32; 3], p1: [f32; 3]) {
     for p in [p0, p1] {
         verts.extend_from_slice(&[p[0], p[1], p[2], EDGE_COLOR[0], EDGE_COLOR[1], EDGE_COLOR[2]]);
     }
@@ -185,14 +194,15 @@ pub fn build_mesh_edges(mesh: &Mesh) -> Vec<f32> {
 /// Konturen-Look) ohne die inneren Knickkanten (Dachgrate). `eye` = Kameraposition
 /// (world), `forward` = Blickrichtung (world, von der Kamera ins Bild); `perspective`
 /// waehlt die pro-Kante-Blickrichtung (Perspektive) vs. die konstante (ortho).
-pub fn build_silhouette_edges(
-    adj: &[EdgeAdj],
+pub fn build_silhouette_edges<A: std::borrow::Borrow<EdgeAdj>>(
+    adj: impl IntoIterator<Item = A>,
     eye: [f32; 3],
     forward: [f32; 3],
     perspective: bool,
 ) -> Vec<f32> {
     let mut verts: Vec<f32> = Vec::new();
     for a in adj {
+        let a: &EdgeAdj = a.borrow();
         let draw = match a.reps.len() {
             0 => false,
             1 => true, // offene Randkante -> immer Teil der Kontur
@@ -247,7 +257,7 @@ pub fn build_silhouette_edges(
 /// Dedupliziert die angrenzenden Normalen zu Repraesentanten: paart die von der
 /// doppelseitigen Emission stammenden Rueckseiten (dot ≈ -1) und behaelt je
 /// Original-Dreieck EINEN Vertreter (s. Moduldoc `should_draw`-Historie).
-fn representatives(normals: &[[f32; 3]]) -> Vec<[f32; 3]> {
+pub(crate) fn representatives(normals: &[[f32; 3]]) -> Vec<[f32; 3]> {
     let mut reps: Vec<[f32; 3]> = Vec::new();
     let mut used = vec![false; normals.len()];
     for i in 0..normals.len() {
@@ -272,7 +282,7 @@ fn representatives(normals: &[[f32; 3]]) -> Vec<[f32; 3]> {
 /// Entscheidet fuer die STATISCHEN Feature-Edges, ob eine Kante gezeichnet wird:
 /// Randkante (ein Repraesentant) oder Knickkante (zwei stehen ueber dem Crease-
 /// Winkel zueinander). Koplanare geteilte Kanten (Flaechendiagonalen) fallen weg.
-fn draws_crease(reps: &[[f32; 3]]) -> bool {
+pub(crate) fn draws_crease(reps: &[[f32; 3]]) -> bool {
     match reps.len() {
         0 => false,
         1 => true, // Silhouette/Rand: gehoert nur einem Original-Dreieck
