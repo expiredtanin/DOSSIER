@@ -1065,8 +1065,15 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   `coreEpoch()` als ungültig; Hülle (`useProjectFileActions`): neu zeichnen, Autosave-Kopie, Verlaufsanzeige,
   `notify(t("core.restarted"))` (gedrosselt, 5 s). Tests: verstecktes `__debug_panic` (keine Fassade);
   `engine/coreRecovery.test.ts` (Node) und `e2e/coreRecovery.spec.ts` (Chromium, Test-Naht `?dossierTest` →
-  `state/testHooks.ts`). Offen: Undo-Verlauf geht beim Neustart verloren (Meldung sagt es) — Wiederaufbau per
-  Op-Log wäre der nächste Schritt; nicht in Tauri (WKWebView) und nicht im gepackten Electron geprüft. · M
+  `state/testHooks.ts`). 5.11.: Verlauf übersteht den Neustart — `core/historyBackup.ts` hält eine Kopie der
+  Kern-Schritte (nach jeder angenommenen Änderung/Undo/Redo/Gruppenende: `doc_history_index` = Laufnummern +
+  Koaleszenz-Schlüssel, nur neue Schritte als JSON über `doc_history_step`; gleiche Grenzen wie der Kern, Schritte
+  > 8 MB und Gesamt > 64 M Zeichen werden nicht kopiert → Verlauf endet dort). Nach dem Neustart setzt
+  `doc_history_import` sie ins neu geöffnete Dokument, nur wenn die Kopie zur Leseansicht gehört (sonst leer +
+  Meldung `core.restartedHistoryLost`); die abgebrochene Änderung war nie angenommen, wird also nie wiederholt.
+  Tests: Rust `verlauf_export_import_*` (Gruppen, Koaleszenz, Grenzen), `coreRecovery.test.ts`. Offen: Panic
+  mitten in Undo/Redo stellt den Stand davor wieder her — erneutes Undo trifft denselben Schritt; nicht in Tauri
+  (WKWebView) und nicht im gepackten Electron geprüft. · M
 - ✅ **[119] Referenz-Ausgaben (golden).** 3.11.: `src/plan/golden.test.ts` — beide Musterprojekte: Grundriss je Geschoss
   (1:100, 1:50), Schnitt, Ansicht, 3D-Zusammenfassung als Digest (Zähler, Rahmen, Hash gerundeter Zahlen) in
   `src/plan/__golden__/`; Update mit `vitest -u`. Nur Linux geprüft; Hash deckt Detailabweichungen ab, Diff zeigt nur Zähler. · M
