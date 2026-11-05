@@ -1,1 +1,3 @@
-<li><a href="{{ .Get "link" }}">{{ .Get "title" }}</a>{{ with .Get "subtitle" }} <span>{{ . }}</span>{{ end }}</li>
+{{- $u := .Get "link" -}}
+{{- if hasPrefix $u "/" }}{{ $u = strings.TrimPrefix "/" $u | relURL }}{{ end -}}
+<li><a href="{{ $u }}">{{ .Get "title" }}</a>{{ with .Get "subtitle" }} <span>{{ . }}</span>{{ end }}</li>

@@ -1,0 +1,11 @@
+<footer class="foot">
+  <span class="mark">dossier<span>.</span></span>
+  <a href="{{ site.Params.repo }}/blob/master/LICENSE">Lizenz AGPL-3.0</a>
+  <a href="{{ site.Params.repo }}">Quellcode auf GitHub</a>
+  <a href="{{ "docs/" | relURL }}">Dokumentation</a>
+  <a href="{{ "stand/" | relURL }}">Stand</a>
+  <a href="{{ site.Params.bureau }}">Impressum und Kontakt: openbureau</a>
+  {{- if not .IsHome }}{{ with .File }}
+  <a href="{{ site.Params.repo }}/blob/master/website/content/{{ .Path }}">Diese Seite im Repo</a>
+  {{- end }}{{ end }}
+</footer>

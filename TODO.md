@@ -2562,24 +2562,38 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   setzt sie nur bei Abweichung, als ein Undo-Schritt. Kein Modellwechsel (Reiter waren nie im Modell). Tests
   `viewTabs.test.ts`, e2e `viewTabs.spec.ts`. Offen: Reiter nicht mit dem Projekt gespeichert; nicht in der Tauri-App geprüft. · S
 - ◐ **[138] Dokumentation und Website.** (5.11.) Inhalt von `website/` neu geschrieben (nur Markdown in
-  `website/content/`; Layouts/CSS/Startseiten-Design unverändert, weil der Maintainer eine Design-Vorlage liefert).
-  Bilder in `website/static/img` (WebP, ~0.7 MB): App aus `dist-test` (Playwright/Chromium, Linux, SVG-Rückfall statt
-  WebGPU) und CLI-Renders (`:musterhaus-komplex … --hatch/--sketch/--ceiling`); 3D headless leer → kein 3D-Bild.
-  Struktur: Startseite `content/_index.md`; `/funktionen/` (nach Gruppen, ◐ mit Nummern); `/download/`; `/stand/`
-  (Meilensteine, bekannte Lücken); `/docs/anleitung/` (15 Kapitel: Erste Schritte, Oberfläche, Befehlszeile mit allen
-  74 Befehlen + Kürzeln aus `registry.ts`, Zeichnen, Bauteile, Geschosse/±0.00, Ansichten/Ansichtsbereich/Vorlagen,
-  Layout/Publikation, Bemassung, Lage/Baurecht/Gelände/Sonne, Kennzahlen, Import/Export, Kommandozeile/MCP,
-  Tastenkürzel, Probleme); `/docs/entwickler/` (Architektur, Rust-Kern, Anzeige/Geometrie, Bauen/Testen/CI,
-  Mitarbeiten). Alte Seiten (Gitea-Links, three.js/WebGL-Stand) entfernt. Gebaut mit Hugo 0.147.9 extended (Linux,
-  ohne Warnungen), interne Links und Anker geprüft. Nicht in der Tauri-App gegengelesen; Bedienangaben aus Code/i18n.
-  Offen: Design-Vorlage einbauen (Layouts/CSS; Bilder laufen in der alten CSS über die Textbreite, `img{max-width:100%}`
-  fehlt); `hugo.toml` `repo`/`commitsApi` und Fusszeile/`log`-Shortcode zeigen auf `git.openbureau.ch/karim/
-  DOSSIER-STANDALONE` — dort letzter Commit 23.10., also kein Spiegel → auf GitHub umstellen (GitHub-Commits-API hat
-  dieselben Felder; Pfade `/blob/master/…`, `/commits/master`), „Letzter Commit" im Plankopf der Startseite ist bis
-  dahin veraltet; `{{< log >}}` aus dem Inhalt genommen. Ungenutztes Theme `website/themes/hextra` (1.6 MB) löschen.
-  Englisch: `[languages.de]`/`[languages.en]` in `hugo.toml`, `contentDir` je Sprache (`content/`, `content.en/`), gleiche
-  Dateinamen, UI-Texte in `website/i18n/`. Build-Prüfung in der CI (nur `hugo --minify` bei `website/**`). Mac-Screenshots
-  (Metal, echtes 3D) nachliefern. · M
+  `website/content/`). Bilder in `website/static/img` (WebP): App aus `dist-test` (Playwright/Chromium, Linux, SVG-Rückfall
+  statt WebGPU) und CLI-Renders (`:musterhaus-komplex … --hatch/--sketch/--ceiling`); 3D headless leer → kein 3D-Bild.
+  Struktur: `/funktionen/` (nach Gruppen, ◐ mit Nummern); `/download/`; `/stand/`; `/docs/anleitung/` (15 Kapitel);
+  `/docs/entwickler/` (5 Kapitel). Interne Links und Anker geprüft.
+  (5.11.) **Startseite und Look nach dem freigegebenen Design-Paket** (`website/_design/DESIGN-PAKET.md`, Texte wörtlich;
+  Titel „Open-Source-CAAD"): Startseite = `layouts/home.html` (eigenes Dokument, gleiche Partials `head`/`header`/`footer`
+  wie die Doku), `assets/css/home.css`, `assets/js/home.js`; gemeinsame Tokens/Schriften/Doku-Stil in `assets/css/site.css`
+  (hell + dunkel „Lichtpause", Umschalter ohne Inline-Skript, CSP-tauglich). Scroll-Hero (1000vh) nach dem Scrub-Standard:
+  Video als Blob mit Ladering und Wachhund, geglättete Zeit (rAF ruht), gegatete Seeks, DOM nur bei Änderung, fünf
+  Abschnitte in Scroll-Distanz mit eigenem Auftritt, Lesbarkeit mit Papier-Schleiern, fünf Bedingungen für die ruhige
+  Startseite live in CSS und JS (gleiche Abfragen), reduzierte Bewegung live in beide Richtungen, vollständig ohne Video.
+  Erkennungselement: Schnittmarken A–A … H–H als Abschnittswechsel (zeichnen sich beim Hineinscrollen), Masslinie mit
+  Kote, Fangpunkt je Abschnitt, Planraster als feste Ebene. „Schnitt setzen": 12 vorgerechnete Schnitte, Linie ziehen
+  oder Regler/Tastatur. **Hero-Video aus echten Plänen** (kein KI-Video): Varianten des Musterhauses komplex (nur Wände →
+  + Öffnungen → + Schraffur → + Räume/Masse; Schnitt; Ansicht Süd), mit `dossier-cli` als SVG gerechnet, in Chromium zu
+  300 Bildern 1920×1200 komponiert (Striche ziehen sich, Schnittlinie fährt, Schnitt klappt hoch, Blatt), ffmpeg
+  `-crf 20 -g 8 -keyint_min 8 +faststart`, 3.0 MB (`static/hero/`). Werkzeuge dazu liegen nicht im Repo (Scratch);
+  bei Bedarf als `scripts/site-hero/` nachziehen. Schriften selbst gehostet (`static/fonts`, OFL, s. `NOTICE`; Plex
+  umbenannt wegen reserviertem Namen). Gitea-Links → GitHub (`/blob/master/…`), Commit-Log-Shortcode entfernt (kein Netz
+  beim Bauen), `themes/hextra` gelöscht, `img{max-width:100%}`. GitHub Pages: `.github/workflows/pages.yml` (Hugo 0.147.9
+  extended, bei Pushes auf `website/**`, `actions/deploy-pages`); Links über `relURL` und Render-Hooks, damit die Seite
+  auch unter `expiredtanin.github.io/DOSSIER/` läuft. Selbsttest (Playwright/Chromium, Linux): 1280×800, 1440×900,
+  1920×1080, 375×812, 375×667, Telefon quer, Tablet hoch, reduzierte Bewegung (auch live), Video gesperrt, Wischtest
+  120/240/360, Lesbarkeit je Abschnitt hell/dunkel, kein seitliches Scrollen, Konsole sauber, Hugo ohne Warnungen.
+  Nicht in Safari/auf einem echten Telefon geprüft.
+  Offen: **Pages in den Repo-Einstellungen einschalten** (Settings → Pages → Source: GitHub Actions). Eigene Domain
+  später: erst DNS (`dossier.openbureau.ch` CNAME → `expiredtanin.github.io`), dann `website/static/CNAME` mit
+  `dossier.openbureau.ch` anlegen und in den Pages-Einstellungen eintragen. Releases-Seite ist noch leer (Knopf
+  „Dossier herunterladen" führt dorthin). Doku-Texte haben noch Halbgeviertstriche als Gedankenstriche und vereinzelt
+  „robust"/„Lösung"/„nicht nur" (Textprüfung des Pakets gilt bisher nur für die Startseite). Bilder der Fenster- und
+  Türliste: das SVG von `schedule --openings --format svg` überlappt Spalten (Textbreiten), darum zeigt die Startseite dort
+  einen Grundriss-Ausschnitt. Englisch: `[languages.en]`, `content.en/`. Mac-Screenshots (Metal, echtes 3D). · M
 
 ## Priorität 4 — später
 

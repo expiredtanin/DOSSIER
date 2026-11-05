@@ -1,7 +1,7 @@
 {{ define "main" }}
 <div class="docs">
   {{ partial "docnav.html" . }}
-  <main class="prose">
+  <main class="prose" id="main" tabindex="-1">
     <h1>{{ .Title }}</h1>
     {{ .Content }}
   </main>

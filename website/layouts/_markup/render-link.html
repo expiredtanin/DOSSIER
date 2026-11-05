@@ -1,0 +1,6 @@
+{{- /* Root-relative Ziele („/docs/…") auf die baseURL beziehen: die Seite läuft unter
+   dossier.openbureau.ch und unter expiredtanin.github.io/DOSSIER/. */ -}}
+{{- $u := .Destination -}}
+{{- if and (hasPrefix $u "/") (not (hasPrefix $u "//")) }}{{ $u = strings.TrimPrefix "/" $u | relURL }}{{ end -}}
+<a href="{{ $u | safeURL }}"{{ with .Title }} title="{{ . }}"{{ end }}>{{ .Text }}</a>
+{{- /* kein Zeilenumbruch */ -}}

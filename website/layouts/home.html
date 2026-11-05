@@ -1,21 +1,217 @@
-{{ define "main" }}
-{{ $commits := partialCached "commits.html" . }}
-<main class="home">
-  {{/* Plankopf statt Hero: nur Fakten. */}}
-  <dl class="titleblock">
-    <div class="tb-wide"><dt>Projekt</dt><dd class="tb-name">DOSSIER</dd></div>
-    <div class="tb-wide"><dt>Inhalt</dt><dd>Open-Source-CAD für Architektur</dd></div>
-    <div><dt>Version</dt><dd>{{ site.Params.version }}</dd></div>
-    <div><dt>Lizenz</dt><dd>AGPL-3.0</dd></div>
-    <div><dt>Plattform</dt><dd>macOS, Linux, Browser</dd></div>
-    <div><dt>Letzter Commit</dt><dd>
-      {{- with index $commits 0 }}<a href="{{ .html_url }}">{{ time.Format "02.01.2006" .commit.author.date }}</a>
-      {{- else }}{{ now.Format "02.01.2006" }}{{ end -}}
-    </dd></div>
-  </dl>
+<!doctype html>
+{{- /* Startseite: eigenes Dokument (nicht über baseof), Kopf/Fuss/Tokens wie die Doku.
+   Texte wörtlich aus website/_design/DESIGN-PAKET.md. Hero-Video aus echten Dossier-Plänen,
+   Erzeugung s. TODO.md [138]. */ -}}
+<html lang="de">
+<head>
+  {{ partial "head.html" . }}
+  {{- $home := resources.Get "css/home.css" | minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $home.RelPermalink }}" integrity="{{ $home.Data.Integrity }}">
+  {{- $js := resources.Get "js/home.js" | js.Build (dict "minify" true) | fingerprint }}
+  <script src="{{ $js.RelPermalink }}" integrity="{{ $js.Data.Integrity }}" defer></script>
+</head>
+<body class="home-page">
+<div class="plangrid" aria-hidden="true"></div>
+{{ partial "header.html" . }}
 
-  <div class="prose">
-    {{ .Content }}
+<main id="main" tabindex="-1">
+
+<section class="hero" aria-label="Dossier">
+  <div class="stage">
+    <div class="poster" aria-hidden="true"></div>
+    <video class="hero-video" muted playsinline preload="none" disablepictureinpicture aria-hidden="true" tabindex="-1"></video>
+    <div class="scrim" aria-hidden="true"></div>
+    <svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="126"/></svg>
+    <div class="cue" aria-hidden="true"><svg viewBox="0 0 16 24"><path d="M8 2v18M3 15l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></div>
+
+    <div class="band b1" data-a="0" data-b="0.16" data-ramp="0.045">
+      <p class="say" data-split="chars">Zeichne eine Wand.</p>
+    </div>
+    <div class="band b2" data-a="0.18" data-b="0.36">
+      <p class="say" data-split="words">Dossier weiss, dass es eine Wand ist. Mit Schichten, Fenstern, Türen.</p>
+    </div>
+    <div class="band b3" data-a="0.38" data-b="0.56" data-ramp="0.035">
+      <p class="say" data-split="lines"><span>Der Grundriss rechnet sich selbst.</span> <span>Schraffur, Masse, Flächen.</span></p>
+    </div>
+    <div class="band b4" data-a="0.58" data-b="0.78" data-ramp="0.035">
+      <p class="say" data-split="halves"><span>Schnitt und Ansicht</span> <span>kommen aus demselben Modell.</span></p>
+    </div>
+    <div class="band b5" data-a="0.80" data-b="1" data-ramp="0.06">
+      <h1 class="title" data-split="rise">Open-Source-CAAD</h1>
+      <p class="kicker">Computer-Aided Architectural Design</p>
+      <p class="sub only-static">Dossier ist ein freies CAD für Architektur. Du baust ein Gebäude aus Bauteilen, Grundriss, Schnitt und Ansicht werden daraus berechnet.</p>
+      <div class="cta">
+        <a class="btn" href="{{ site.Params.releases }}">Dossier herunterladen</a>
+        <a class="link only-scrub" href="{{ "docs/anleitung/" | relURL }}">Anleitung lesen</a>
+      </div>
+    </div>
   </div>
+  <figure class="static-sheet">
+    <img src="{{ "hero/hero-sheet.webp" | relURL }}" width="1110" height="596" loading="lazy" decoding="async"
+      alt="Blatt aus Dossier: Grundriss Erdgeschoss und Ansicht Süd des Musterhauses, 1:100">
+  </figure>
+</section>
+
+<div class="cutmark" data-letter="A" aria-hidden="true"></div>
+
+<section class="sec steps" aria-labelledby="h-steps">
+  <div class="wrap">
+    <h2 id="h-steps" class="sec-title"><span class="snap" aria-hidden="true"></span>So arbeitet Dossier</h2>
+    <div class="dimline" aria-hidden="true"><i></i><span>17.39</span><i></i></div>
+    <ol class="step-list reveal">
+      <li class="step">
+        <figure><img src="{{ "img/app-grundriss.webp" | relURL }}" width="1600" height="1000" loading="lazy" decoding="async" alt="Dossier mit dem Grundriss Erdgeschoss, Werkzeuge links, Objekt-Info rechts"></figure>
+        <p class="num">01</p>
+        <h3>Zeichnen.</h3>
+        <p>Linien, Wände, Öffnungen, mit Fang und Befehlszeile.</p>
+      </li>
+      <li class="step">
+        <figure><img src="{{ "img/app-schnitt.webp" | relURL }}" width="1600" height="1000" loading="lazy" decoding="async" alt="Dossier mit einem Schnitt durch das Musterhaus, Decken und Dach geschnitten"></figure>
+        <p class="num">02</p>
+        <h3>Modellieren.</h3>
+        <p>Wandtypen mit Schichten, Decken, Dächer, Treppen, Gelände.</p>
+      </li>
+      <li class="step">
+        <figure><img src="{{ "img/app-layout-blatt.webp" | relURL }}" width="1600" height="1000" loading="lazy" decoding="async" alt="Dossier mit einem Planblatt: Ansichtsfenster, Plankopf und Massstab"></figure>
+        <p class="num">03</p>
+        <h3>Publizieren.</h3>
+        <p>Pläne auf Blätter legen, PDF mit Ebenen, DXF, IFC.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<div class="cutmark" data-letter="B" aria-hidden="true"></div>
+
+<section class="sec features" aria-labelledby="h-features">
+  <div class="wrap feat-grid">
+    <div>
+      <h2 id="h-features" class="sec-title"><span class="snap" aria-hidden="true"></span>Was alles drin ist</h2>
+      <ul class="feat-list reveal">
+        <li><button type="button" data-shot="0" aria-pressed="true">Grundriss, Schnitt, Ansicht, Deckenspiegel</button></li>
+        <li><button type="button" data-shot="1" aria-pressed="false">Bemassung, auch automatisch</button></li>
+        <li><button type="button" data-shot="2" aria-pressed="false">Fenster- und Türliste</button></li>
+        <li><button type="button" data-shot="3" aria-pressed="false">Baurecht mit Grenzabständen und Gebäudeprofil</button></li>
+        <li><button type="button" data-shot="4" aria-pressed="false">Gelände aus Höhenlinien, Swisstopo</button></li>
+        <li><button type="button" data-shot="5" aria-pressed="false">Sonne und Schatten</button></li>
+        <li><button type="button" data-shot="6" aria-pressed="false">DXF, DWG, IFC, STEP, PDF</button></li>
+        <li><button type="button" data-shot="7" aria-pressed="false">Skizzenstil und Präsentationsplan</button></li>
+      </ul>
+    </div>
+    <div class="shots" aria-live="polite">
+      <img class="on plan-img" src="{{ "img/cli-deckenspiegel-eg.webp" | relURL }}" width="1400" height="908" loading="lazy" decoding="async" alt="Deckenspiegel Erdgeschoss aus Dossier, 1:100">
+      <img class="plan-img" src="{{ "img/cli-grundriss-eg.webp" | relURL }}" width="1500" height="1000" loading="lazy" decoding="async" alt="Grundriss Erdgeschoss mit Bemassung und Raumstempeln">
+      <img class="plan-img" src="{{ "img/fenster.webp" | relURL }}" width="1200" height="673" loading="lazy" decoding="async" alt="Fenster und Türen im Grundriss mit ihren Massen, aus denen die Liste entsteht">
+      <img src="{{ "img/app-situation.webp" | relURL }}" width="1600" height="1000" loading="lazy" decoding="async" alt="Situation in Dossier mit Parzelle, Grenzabständen und Baulinie">
+      <img class="plan-img" src="{{ "img/gelaende.webp" | relURL }}" width="1200" height="638" loading="lazy" decoding="async" alt="Schnitt durch das Musterhaus mit Gelände aus Höhenlinien">
+      <img class="plan-img" src="{{ "img/lage.webp" | relURL }}" width="1200" height="864" loading="lazy" decoding="async" alt="Lageplan mit Schatten am 21. Juni, Höhenlinien und Grenzabständen">
+      <img class="plan-img" src="{{ "img/cli-schnitt-aa.webp" | relURL }}" width="1600" height="851" loading="lazy" decoding="async" alt="Schnitt A-A als Vektorplan, wie er als PDF oder DXF hinausgeht">
+      <img class="plan-img" src="{{ "img/cli-ansicht-skizze.webp" | relURL }}" width="1600" height="768" loading="lazy" decoding="async" alt="Ansicht Süd im Skizzenstil">
+    </div>
+  </div>
+</section>
+
+<div class="cutmark" data-letter="C" aria-hidden="true"></div>
+
+<section class="sec swiss" aria-labelledby="h-swiss">
+  <div class="wrap">
+    <h2 id="h-swiss" class="sec-title small"><span class="snap" aria-hidden="true"></span>Gemacht für die Schweizer Praxis</h2>
+    <p class="statement reveal">Schraffuren und Linientypen nach SIA-Konventionen, Koordinaten in LV95, Höhen ab ±0.00, Kataster und Höhenmodell von Swisstopo.</p>
+    <p class="kotes" aria-hidden="true"><span>LV95</span><span>±0.00</span><span>1:100</span></p>
+  </div>
+</section>
+
+<div class="cutmark" data-letter="D" aria-hidden="true"></div>
+
+<section class="sec cut" aria-labelledby="h-cut">
+  <div class="wrap">
+    <div class="cut-panel">
+      <div class="cut-head">
+        <h2 id="h-cut" class="sec-title"><span class="snap" aria-hidden="true"></span>Schnitt setzen</h2>
+        <p class="lede">Zieh die Linie. Der Schnitt folgt.</p>
+      </div>
+      <div class="cut-body">
+        <figure class="cut-plan">
+          <img src="{{ "img/schnitt/grundriss-eg.webp" | relURL }}" width="1200" height="981" loading="lazy" decoding="async" alt="Grundriss Erdgeschoss des Musterhauses mit einer verschiebbaren Schnittlinie">
+          <div class="cut-line" aria-hidden="true"><b>A</b><b>A</b></div>
+        </figure>
+        <figure class="cut-view">
+          {{- range $i, $_ := seq 0 11 }}
+          <img src="{{ printf "img/schnitt/schnitt-%02d.webp" $i | relURL }}" width="1200" height="799" loading="lazy" decoding="async" alt="Schnitt durch das Musterhaus an Stelle {{ add $i 1 }} von 12">
+          {{- end }}
+        </figure>
+      </div>
+      <div class="cut-ctrl">
+        <input type="range" min="0" max="1000" value="500" step="1" aria-label="Schnittlinie" aria-valuetext="">
+        <output class="kote" aria-hidden="true">A–A</output>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="cutmark" data-letter="E" aria-hidden="true"></div>
+
+<section class="sec free" aria-labelledby="h-free">
+  <div class="wrap split">
+    <h2 id="h-free" class="sec-title big"><span class="snap" aria-hidden="true"></span>Frei und offen</h2>
+    <p class="reveal">Dossier ist freie Software unter AGPL-3.0. Kein Konto, keine Cloud, kein Abo. Deine Projekte sind Dateien auf deinem Rechner, lesbar und versionierbar.</p>
+  </div>
+</section>
+
+<div class="cutmark" data-letter="F" aria-hidden="true"></div>
+
+<section class="sec state" aria-labelledby="h-state">
+  <div class="wrap narrow">
+    <h2 id="h-state" class="sec-title"><span class="snap" aria-hidden="true"></span>Ehrlicher Stand</h2>
+    <p class="reveal">Dossier ist jung. Vieles ist fertig, einiges erst halb. Hier steht genau, was.</p>
+    <p><a class="btn ghost" href="{{ "stand/" | relURL }}">Zum Stand</a></p>
+  </div>
+</section>
+
+<div class="cutmark" data-letter="G" aria-hidden="true"></div>
+
+<section class="sec faq" aria-labelledby="h-faq">
+  <div class="wrap split">
+    <h2 id="h-faq" class="sec-title big"><span class="snap" aria-hidden="true"></span>Fragen</h2>
+    <div class="faq-list">
+      <details>
+        <summary>Läuft Dossier auf meinem Rechner?</summary>
+        <p>macOS ist die Hauptplattform, mit Anzeige über Metal. Linux läuft über Electron. Windows ist bisher nicht geprüft. Fertige Installer gibt es noch nicht; bis dahin wird Dossier aus dem Quellcode gebaut, siehe <a href="{{ "download/" | relURL }}">Download und Installation</a>.</p>
+      </details>
+      <details>
+        <summary>Kann ich DWG und DXF öffnen?</summary>
+        <p>Ja, Import und Export. DXF ab R12 und DWG von R13 bis 2018 lassen sich öffnen, Grundriss, Schnitt und Ansicht gehen als DXF oder DWG hinaus, auf Wunsch mit Layouts. Wände und Öffnungen werden aus DXF und DWG nicht erkannt: Der Import bleibt Unterlage oder 2D-Plan.</p>
+      </details>
+      <details>
+        <summary>Kann ich mit anderen Programmen IFC austauschen?</summary>
+        <p>Ja, IFC4 und IFC2x3, mit Schichten, Öffnungen, Räumen und Georeferenz. Die Dateien werden mit IfcOpenShell gegen Schema und Regeln geprüft.</p>
+      </details>
+      <details>
+        <summary>Kostet das etwas?</summary>
+        <p>Nein. Freie Software, auch für Büros.</p>
+      </details>
+      <details>
+        <summary>Ist es fertig?</summary>
+        <p>Nein, aber brauchbar für Entwurf und Eingabe. Was fehlt, steht im <a href="{{ "stand/" | relURL }}">Stand</a>.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<div class="cutmark" data-letter="H" aria-hidden="true"></div>
+
+<section class="sec end" aria-labelledby="h-end">
+  <div class="wrap">
+    <svg class="wall" viewBox="0 0 400 24" aria-hidden="true" preserveAspectRatio="none"><path d="M2 6H398M2 18H398" fill="none" stroke="currentColor" stroke-width="2" pathLength="1"/></svg>
+    <h2 id="h-end" class="end-title">Fang mit einer Wand an.</h2>
+    <div class="cta">
+      <a class="btn" href="{{ site.Params.releases }}">Dossier herunterladen</a>
+      <a class="link" href="{{ "docs/anleitung/" | relURL }}">Anleitung lesen</a>
+    </div>
+  </div>
+</section>
+
 </main>
-{{ end }}
+{{ partial "footer.html" . }}
+</body>
+</html>
