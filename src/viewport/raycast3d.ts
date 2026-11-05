@@ -18,7 +18,7 @@
 
 
 import { DRAWING_PICK_TOLERANCE } from "../core";
-import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh } from "../core";
+import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh } from "../core";
 
 /** Kamera-Parameter für den Pick-Strahl (Teilmenge von Camera3d). */
 export interface RayCamera {
@@ -42,7 +42,7 @@ export interface Ray {
 
 /** Ergebnis eines Picks: getroffenes Bauteil + Distanz entlang des Strahls. */
 export interface PickHit {
-  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing";
+  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing" | "column";
   id: string;
   t: number;
   /** Bei `kind:"opening"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
@@ -357,6 +357,7 @@ export function pickNearest(
   roofs?: readonly PickRoof[],
   contextMeshes?: readonly PickContextMesh[],
   drawings?: readonly PickDrawingSeg[],
+  columns?: readonly PickColumnMesh[],
 ): PickHit | null;
 /**
  * Nächstes getroffenes Bauteil (kleinstes t) über Wände, Decken, Öffnungen und
@@ -376,6 +377,7 @@ export function pickNearest(
   roofs: readonly PickRoof[] = [],
   contextMeshes: readonly PickContextMesh[] = [],
   drawings: readonly PickDrawingSeg[] = [],
+  columns: readonly PickColumnMesh[] = [],
 ): PickHit | null {
   const TIE_EPS = 1e-6;
   let hit: PickHit | null = null;
@@ -425,6 +427,11 @@ export function pickNearest(
     if (t !== null) {
       consider({ kind: "contextObject", id: m.contextObjectId, t, contextObjectId: m.contextObjectId }, 1);
     }
+  }
+  // [137] Stützen: Prisma-Dreiecke, Rang wie Wand/Decke.
+  for (const c of columns) {
+    const t = rayContextMeshTris(ray, { tris: c.tris, contextObjectId: c.columnId });
+    if (t !== null) consider({ kind: "column", id: c.columnId, t }, 1);
   }
   return hit;
 }

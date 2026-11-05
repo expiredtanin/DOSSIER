@@ -485,6 +485,7 @@ pub fn terrain_from_contours_with(contours: &[Value], id: &str, o: crate::terrai
         ("positions", Value::Array(pos.into_iter().map(js_num).collect())),
         ("indices", Value::Array(idx.into_iter().map(Value::from).collect())),
         ("contourInterval", js_num(iv)),
+        ("smooth", Value::from(o.smooth)),
     ])
 }
 
@@ -520,9 +521,13 @@ fn terrain_ops(root: &Map<String, Value>, ids: &mut IdGen) -> Vec<Op> {
     let Some(set) = arr(root.get("context")).iter().find(|o| field(o, "type").and_then(Value::as_str) == Some("contourSet")) else {
         return Vec::new();
     };
-    let t = terrain_from_contours(arr(field(set, "contours")), &ids.next("terrain"));
+    let mut t = terrain_from_contours(arr(field(set, "contours")), &ids.next("terrain"));
     if arr(field(&t, "indices")).is_empty() {
         return Vec::new();
+    }
+    // [137] Quelle merken: die Objekt-Info glättet das Gelände aus diesen Höhenlinien neu.
+    if let (Some(m), Some(src)) = (t.as_object_mut(), field(set, "id").cloned()) {
+        m.insert("sourceId".into(), src);
     }
     add_op("context", vec![t])
 }

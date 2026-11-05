@@ -2331,6 +2331,14 @@ pub struct PickContextMesh {
     pub context_object_id: String,
 }
 
+/// [137] Stütze für den 3D-Pick: Welt-Dreiecke ihres Prismas.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickColumn {
+    pub tris: Vec<Tri>,
+    pub column_id: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PickGeometry {
     pub walls: Vec<RWall>,
@@ -2340,6 +2348,8 @@ pub struct PickGeometry {
     pub roofs: Vec<PickRoof>,
     #[serde(rename = "contextMeshes")]
     pub context_meshes: Vec<PickContextMesh>,
+    /// [137] Stützen (vorher im 3D nicht anwählbar).
+    pub columns: Vec<PickColumn>,
     pub drawings: Vec<PickDrawingSeg>,
 }
 
@@ -2425,16 +2435,48 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         let (pos, idx) = (&*pos, &*idx);
         let vcount = pos.len() / 3;
         let at = |i: usize| -> V3 { [pos[i * 3], pos[i * 3 + 2], -pos[i * 3 + 1]] };
+        // [137] Dreiecke im Wirkbereich einer Baugrube (Sohle, Böschungen) wählen die Baugrube.
+        let site = match obj {
+            ContextObject::TerrainMesh(m) => Some(crate::excavation::site_terrain(p, m)),
+            _ => None,
+        };
+        let site = site.filter(|st| !st.items.is_empty());
+        let orig_idx = site.as_ref().map(|st| crate::terrain::TinIndex::new(&st.orig));
+        let boxes: Vec<[f64; 4]> = site.as_ref().map_or_else(Vec::new, |st| {
+            st.items
+                .iter()
+                .map(|(eid, ..)| crate::excavation::affected_hull(st, eid).iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]))
+                .collect()
+        });
         let mut tris: Vec<Tri> = Vec::new();
+        let mut owned: Vec<(String, Vec<Tri>)> = Vec::new();
         for t in idx.chunks_exact(3) {
             let ok = |v: f64| v >= 0.0 && v.fract() == 0.0 && (v as usize) < vcount;
             if !(ok(t[0]) && ok(t[1]) && ok(t[2])) {
                 continue;
             }
-            tris.push([at(t[0] as usize), at(t[1] as usize), at(t[2] as usize)]);
+            let tri = [at(t[0] as usize), at(t[1] as usize), at(t[2] as usize)];
+            let owner = match (&site, &orig_idx) {
+                (Some(st), Some(oi)) => {
+                    let (cx, cy) = ((tri[0][0] + tri[1][0] + tri[2][0]) / 3.0, -(tri[0][2] + tri[1][2] + tri[2][2]) / 3.0);
+                    let near = boxes.iter().any(|b| cx >= b[0] - 0.01 && cx <= b[2] + 0.01 && cy >= b[1] - 0.01 && cy <= b[3] + 0.01);
+                    if near { crate::excavation::owner_at(st, oi, cx, cy) } else { None }
+                }
+                _ => None,
+            };
+            match owner {
+                Some(eid) => match owned.iter_mut().find(|(i, _)| i == eid) {
+                    Some((_, l)) => l.push(tri),
+                    None => owned.push((eid.to_string(), vec![tri])),
+                },
+                None => tris.push(tri),
+            }
         }
         if !tris.is_empty() {
             context_meshes.push(PickContextMesh { tris, context_object_id: id.clone() });
+        }
+        for (eid, tris) in owned {
+            context_meshes.push(PickContextMesh { tris, context_object_id: eid });
         }
     }
     Ok(PickGeometry {
@@ -2444,8 +2486,31 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         stairs,
         roofs,
         context_meshes,
+        columns: pick_columns(p),
         drawings: pick_drawing_segs(p, &HashMap::new()),
     })
+}
+
+/// [137] Stützen als Welt-Dreiecke (Prisma aus Querschnitt und Höhenlage, wie [`emit_columns`]).
+fn pick_columns(p: &Project) -> Vec<PickColumn> {
+    let mut out = Vec::new();
+    for col in p.columns.as_deref().unwrap_or(&[]) {
+        if !(col.height > 0.0) {
+            continue;
+        }
+        let (z0, z1) = p.column_vertical_extent(col);
+        let foot: Vec<[f64; 2]> = column_footprint(col).iter().map(|q| [q.x, q.y]).collect();
+        if foot.len() < 3 || !(z0.is_finite() && z1.is_finite()) {
+            continue;
+        }
+        let (pos, idx) = crate::columns3d::prism(&foot, z0, z1);
+        let at = |i: u32| -> V3 { let i = i as usize * 3; [pos[i], pos[i + 2], -pos[i + 1]] };
+        let tris: Vec<Tri> = idx.chunks_exact(3).filter(|t| t.iter().all(|&i| (i as usize) * 3 + 2 < pos.len())).map(|t| [at(t[0]), at(t[1]), at(t[2])]).collect();
+        if !tris.is_empty() {
+            out.push(PickColumn { tris, column_id: col.id.clone() });
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -2498,6 +2563,49 @@ mod tests {
         let pp = |visible| Project { layers: vec![parent(visible)], ..mk(true) };
         assert_eq!(emit_context_meshes(&pp(true)).len(), 1);
         assert!(emit_context_meshes(&pp(false)).is_empty());
+    }
+
+    /// [137] 3D-Picken: Dreiecke der Baugrube (Sohle, Böschung) tragen die Id der Baugrube, das übrige
+    /// Gelände die des Netzes.
+    #[test]
+    fn pick_gelaende_und_baugrube_im_3d() {
+        let t = crate::model::TerrainMesh {
+            id: "t".into(),
+            positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0],
+            indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+            ..Default::default()
+        };
+        let v = |x: f64, y: f64| crate::model::Vec2 { x, y };
+        let pit = crate::model::Excavation { id: "bg".into(), outline: vec![v(20.0, 15.0), v(30.0, 15.0), v(30.0, 25.0), v(20.0, 25.0)], bottom: 1.0, ..Default::default() };
+        let p = Project { context: Some(vec![ContextObject::Excavation(pit), ContextObject::TerrainMesh(t)]), ..Default::default() };
+        let g = pick_geometry(&p).unwrap();
+        let of = |id: &str| g.context_meshes.iter().find(|m| m.context_object_id == id).map(|m| m.tris.clone()).unwrap_or_default();
+        let (bg, terr) = (of("bg"), of("t"));
+        assert!(!bg.is_empty() && !terr.is_empty(), "{} {}", bg.len(), terr.len());
+        // Welt (x, z, −y): alle Baugruben-Dreiecke liegen im Wirkbereich (x 18…32, y 13…27), Sohle auf 1 m dabei.
+        for tri in &bg {
+            let (cx, cy) = ((tri[0][0] + tri[1][0] + tri[2][0]) / 3.0, -(tri[0][2] + tri[1][2] + tri[2][2]) / 3.0);
+            assert!((17.0..=33.0).contains(&cx) && (12.0..=28.0).contains(&cy), "{cx} {cy}");
+        }
+        assert!(bg.iter().any(|tri| tri.iter().all(|q| (q[1] - 1.0).abs() < 1e-6)));
+    }
+
+    /// [137] Stützen sind im 3D anwählbar: ihr Prisma kommt mit Id in die Pick-Geometrie (Welt: x, Höhe, −y).
+    #[test]
+    fn pick_stuetzen_im_3d() {
+        let p: Project = serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+            "drawingLevels": [{"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0.0}],
+            "columns": [{"id": "k1", "type": "column", "floorId": "EG", "categoryCode": "25", "position": {"x": 2, "y": 3}, "profile": {"kind": "rect", "width": 0.3, "depth": 0.3}, "rotation": 0, "height": 2.5}],
+            "drawings2d": []
+        }))
+        .unwrap();
+        let g = pick_geometry(&p).unwrap();
+        assert_eq!(g.columns.len(), 1);
+        assert_eq!(g.columns[0].column_id, "k1");
+        let v: Vec<&V3> = g.columns[0].tris.iter().flatten().collect();
+        assert!(v.iter().all(|q| (q[0] - 2.0).abs() <= 0.15 + 1e-9 && (q[2] + 3.0).abs() <= 0.15 + 1e-9 && q[1] >= -1e-9 && q[1] <= 2.5 + 1e-9));
+        assert!(v.iter().any(|q| (q[1] - 2.5).abs() < 1e-9));
     }
 
     /// [T4] Import-Mesh glatt: Knickwinkel geht ans 3D (Vorgabe 30°), kantig ohne; JSON `creaseAngle`.

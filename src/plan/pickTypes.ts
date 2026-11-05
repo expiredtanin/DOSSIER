@@ -96,3 +96,9 @@ export interface PickContextMesh {
   tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
   contextObjectId: string;
 }
+
+/** [137] Stütze für den Raycast: WORLD-Dreiecke ihres Prismas (Konvention wie {@link PickContextMesh}). */
+export interface PickColumnMesh {
+  tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
+  columnId: string;
+}

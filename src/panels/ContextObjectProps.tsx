@@ -1,0 +1,156 @@
+// Einstellungen eines Kontext-Objekts (importiertes Mesh, Gelände, Baugrube) — gemeinsam für die Liste im
+// Panel „Gelände & Kontext" und die Objekt-Info ([137]: ein angeklicktes Gelände bzw. eine Baugrube zeigt
+// dort dieselben Felder). Gelände zusätzlich: Sichtbarkeit seiner Kategorie und Glättung (aus den
+// Höhenlinien neu erzeugt, ein Undo-Schritt).
+//
+// Bezeichner englisch, UI-Text/Kommentare deutsch. Alle sichtbaren Texte über t(...).
+
+import { t } from "../i18n";
+import { usePanelHost } from "./host";
+import { useStore } from "../state/appStore";
+import type { ContextObject } from "../model/types";
+import { flattenCategories } from "../model/types";
+import type { ExcavationQuantity } from "../core";
+
+/** Zahl-Eingabe für ein Feld eines Kontext-Objekts (leer = Standard, ungültig = keine Änderung). */
+export function NumField(props: {
+  label: string;
+  value: number | undefined;
+  step: number;
+  min?: number;
+  placeholder?: string;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <label className="site-prop">
+      <span>{props.label}</span>
+      <input
+        type="number"
+        step={props.step}
+        min={props.min}
+        placeholder={props.placeholder}
+        value={props.value ?? ""}
+        onChange={(e) => {
+          const raw = e.target.value.trim();
+          if (raw === "") return props.onChange(undefined);
+          const v = Number(raw);
+          if (Number.isFinite(v)) props.onChange(v);
+        }}
+      />
+    </label>
+  );
+}
+
+const fmt1 = (v: number) => v.toLocaleString("de-CH", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+
+function ExcavationQty({ q }: { q: ExcavationQuantity | undefined }) {
+  if (!q) return <div className="site-qty">{t("site.excavation.noTerrain")}</div>;
+  return (
+    <div className="site-qty">
+      {t("site.excavation.qty", { cut: fmt1(q.cut), fill: fmt1(q.fill), backfill: fmt1(q.backfill) })}
+    </div>
+  );
+}
+
+/** Glättungsstufen der Gelände-Erzeugung (`terrain.rs`, 0 = roh). */
+const SMOOTH_LEVELS = [0, 1, 2, 3] as const;
+
+/** Felder eines Kontext-Objekts; `null` für Arten ohne eigene Einstellungen (Höhenlinien, Luftbild). */
+export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; quantities: readonly ExcavationQuantity[] }) {
+  const host = usePanelHost();
+  const notify = useStore((s) => s.notify);
+  const regenerateTerrain = useStore((s) => s.regenerateTerrain);
+  const patch = (field: string) => (v: number | undefined) => host.onPatchContextObject(obj.id, { [field]: v }, `site-${obj.id}-${field}`);
+
+  if (obj.type === "importedMesh") {
+    // [T4] Glatt oder kantig schattieren, Knickwinkel je Mesh (Vorgabe 30°).
+    return (
+      <div className="site-props">
+        <label className="site-check">
+          <input
+            type="checkbox"
+            checked={obj.smoothShading === true}
+            onChange={(e) => host.onPatchContextObject(obj.id, { smoothShading: e.target.checked }, `site-${obj.id}-smoothShading`)}
+          />
+          {t("site.smoothShading")}
+        </label>
+        {obj.smoothShading === true && (
+          <NumField label={t("site.creaseAngle")} value={obj.creaseAngle} step={5} min={1} placeholder="30" onChange={patch("creaseAngle")} />
+        )}
+      </div>
+    );
+  }
+
+  if (obj.type === "terrainMesh") {
+    const cat = obj.categoryCode ? flattenCategories(host.project.layers).find((c) => c.code === obj.categoryCode) : undefined;
+    const hasSource = (host.project.context ?? []).some((o) => o.type === "contourSet");
+    return (
+      <div className="site-props">
+        {cat && (
+          <label className="site-check" title={t("site.terrain.visible.hint", { name: `${cat.code} ${cat.name}` })}>
+            <input type="checkbox" data-testid="terrain-visible" checked={cat.visible} onChange={() => host.onToggleCategory(cat.code)} />
+            {t("site.terrain.visible")}
+          </label>
+        )}
+        {hasSource && (
+          <label className="site-prop" title={t("site.terrain.smooth.hint")}>
+            <span>{t("site.terrain.smooth")}</span>
+            <select
+              data-testid="terrain-smooth"
+              value={obj.smooth === undefined ? "" : String(obj.smooth)}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (e.target.value === "" || !Number.isFinite(v)) return;
+                if (!regenerateTerrain(obj.id, v)) notify(t("site.terrainFailed"), "error");
+              }}
+            >
+              {obj.smooth === undefined && <option value="">—</option>}
+              {SMOOTH_LEVELS.map((n) => (
+                <option key={n} value={String(n)}>
+                  {n === 0 ? t("site.terrain.smooth.raw") : t("site.terrain.smooth.level", { n })}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <NumField label={t("site.contourInterval")} value={obj.contourInterval} step={0.5} min={0} placeholder="—" onChange={patch("contourInterval")} />
+        <NumField label={t("site.contourIndexEvery")} value={obj.contourIndexEvery} step={1} min={1} placeholder="5" onChange={patch("contourIndexEvery")} />
+        <NumField label={t("site.earthDepth")} value={obj.earthDepth} step={0.5} min={0.1} placeholder="1.5" onChange={patch("earthDepth")} />
+      </div>
+    );
+  }
+
+  if (obj.type === "excavation") {
+    return (
+      <div className="site-props">
+        <NumField label={t("site.excavation.bottom")} value={obj.bottom} step={0.05} onChange={(v) => v !== undefined && patch("bottom")(v)} />
+        <NumField label={t("site.excavation.slope")} value={obj.slope} step={5} min={5} placeholder="45" onChange={patch("slope")} />
+        <NumField label={t("site.excavation.fillSlope")} value={obj.fillSlope} step={5} min={5} placeholder="33.7" onChange={patch("fillSlope")} />
+        <NumField label={t("site.excavation.bermWidth")} value={obj.bermWidth} step={0.25} min={0} placeholder="—" onChange={patch("bermWidth")} />
+        <NumField label={t("site.excavation.bermHeight")} value={obj.bermHeight} step={0.5} min={0} placeholder="—" onChange={patch("bermHeight")} />
+        <NumField label={t("site.excavation.workingSpace")} value={obj.workingSpace} step={0.1} min={0} placeholder="0" onChange={patch("workingSpace")} />
+        <div className="site-prop" title={t("site.excavation.shoringHint")}>
+          <span>{t("site.excavation.shoring")}</span>
+          <span>
+            {obj.outline.map((_, i) => (
+              <label key={i} style={{ marginRight: 6 }}>
+                <input
+                  type="checkbox"
+                  data-testid={`excavation-shoring-${i}`}
+                  checked={obj.edgeShoring?.[i] === true}
+                  onChange={(e) => {
+                    const next = obj.outline.map((__, k) => (k === i ? e.target.checked : obj.edgeShoring?.[k] === true));
+                    host.onPatchContextObject(obj.id, { edgeShoring: next.some(Boolean) ? next : undefined }, `site-${obj.id}-edgeShoring`);
+                  }}
+                />
+                {i + 1}
+              </label>
+            ))}
+          </span>
+        </div>
+        <ExcavationQty q={quantities.find((x) => x.id === obj.id)} />
+      </div>
+    );
+  }
+  return null;
+}

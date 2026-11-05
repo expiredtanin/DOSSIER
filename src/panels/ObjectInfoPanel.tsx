@@ -59,6 +59,11 @@ import type {
   WallInfo,
 } from "../state/selectionInfo";
 import type { MeasurementReadout } from "../tools/types";
+import { useStore } from "../state/appStore";
+import { excavationQuantities } from "../core";
+import { ContextObjectProps } from "./ContextObjectProps";
+import { SunStudySection } from "./SunStudySection";
+import { SiteRulesSection } from "./SiteRulesSection";
 
 // ── Bezugspunkt-Raster ───────────────────────────────────────────────────────
 // Neun Anker als 3×3-Raster. Zeile 0 = oben (fy=0), Spalte 0 = links (fx=0).
@@ -91,7 +96,27 @@ export function ObjectInfoPanel() {
   // (das Mess-Werkzeug erzeugt kein Element). Hat Vorrang vor dem Leerzustand.
   const m = host.measurement;
 
+  // [137] Lage-Darstellung angeklickt (Schattenfläche / Baurechtslinie): Einstellungen der Quelle.
+  const site = useStore((s) => s.selection.site);
+  const ctxObj = sel?.kind === "contextObject" ? (host.project.context ?? []).find((o) => o.id === sel.id) : undefined;
+  const quantities = useMemo(
+    () => (ctxObj?.type === "excavation" ? excavationQuantities(host.project) : []),
+    [ctxObj?.type, host.project],
+  );
+
   // ── Leerzustand ───────────────────────────────────────────────────────────
+  if (sel === null && site.length > 0) {
+    const sun = site[0] === "sunStudy";
+    return (
+      <div className="objinfo-panel">
+        <div className="objinfo-head">
+          <span className="objinfo-kind">{t(sun ? "objinfo.kind.sunStudy" : "objinfo.kind.siteRules")}</span>
+        </div>
+        <div className="objinfo-muted objinfo-site-hint">{t(sun ? "objinfo.sunStudy.hint" : "objinfo.siteRules.hint")}</div>
+        <div className="site-panel objinfo-site">{sun ? <SunStudySection /> : <SiteRulesSection />}</div>
+      </div>
+    );
+  }
   if (sel === null) {
     return (
       <div className="objinfo-panel">
@@ -340,6 +365,11 @@ export function ObjectInfoPanel() {
             <span className="objinfo-flabel">{t("objinfo.contextObject.type")}</span>
             <span className="objinfo-fval">{t(`objinfo.contextObject.type.${sel.contextObject.objType}`)}</span>
           </div>
+          {ctxObj && (
+            <div className="site-panel objinfo-site">
+              <ContextObjectProps obj={ctxObj} quantities={quantities} />
+            </div>
+          )}
           {sel.contextObject.lv95Center ? (
             <>
               <div className="objinfo-field">

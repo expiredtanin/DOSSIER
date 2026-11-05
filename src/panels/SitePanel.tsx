@@ -27,6 +27,7 @@ import { SunStudySection } from "./SunStudySection";
 import { SiteRulesSection } from "./SiteRulesSection";
 import { PointCloudSection } from "./PointCloudSection";
 import { excavationQuantities } from "../core";
+import { ContextObjectProps } from "./ContextObjectProps";
 
 /** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */
 function typeBadgeKey(obj: ContextObject): TranslationKey {
@@ -61,37 +62,6 @@ function layerOf(obj: ContextObject): string {
   }
 }
 
-/** Zahl-Eingabe für ein Feld eines Kontext-Objekts (leer = Standard, ungültig = keine Änderung). */
-function NumField(props: {
-  label: string;
-  value: number | undefined;
-  step: number;
-  min?: number;
-  placeholder?: string;
-  onChange: (v: number | undefined) => void;
-}) {
-  return (
-    <label className="site-prop">
-      <span>{props.label}</span>
-      <input
-        type="number"
-        step={props.step}
-        min={props.min}
-        placeholder={props.placeholder}
-        value={props.value ?? ""}
-        onChange={(e) => {
-          const raw = e.target.value.trim();
-          if (raw === "") return props.onChange(undefined);
-          const v = Number(raw);
-          if (Number.isFinite(v)) props.onChange(v);
-        }}
-      />
-    </label>
-  );
-}
-
-const fmt1 = (v: number) => v.toLocaleString("de-CH", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
-
 /** Gruppiert Kontext-Objekte nach Ebene, Reihenfolge des ersten Auftretens. */
 function groupByLayer(objects: ContextObject[]): { layer: string; items: ContextObject[] }[] {
   const order: string[] = [];
@@ -107,15 +77,6 @@ function groupByLayer(objects: ContextObject[]): { layer: string; items: Context
     items.push(obj);
   }
   return order.map((layer) => ({ layer, items: byLayer.get(layer)! }));
-}
-
-function ExcavationQty({ q }: { q: { cut: number; fill: number; backfill: number } | undefined }) {
-  if (!q) return <div className="site-qty">{t("site.excavation.noTerrain")}</div>;
-  return (
-    <div className="site-qty">
-      {t("site.excavation.qty", { cut: fmt1(q.cut), fill: fmt1(q.fill), backfill: fmt1(q.backfill) })}
-    </div>
-  );
 }
 
 export function SitePanel() {
@@ -140,8 +101,6 @@ export function SitePanel() {
   const [smooth, setSmooth] = useState(true);
   // [68] Mengen der Baugruben (Kern), nur neu, wenn sich das Projekt ändert.
   const quantities = useMemo(() => excavationQuantities(host.project), [host.project]);
-  const patch = (id: string, field: string) => (v: number | undefined) =>
-    host.onPatchContextObject(id, { [field]: v }, `site-${id}-${field}`);
 
   const onGenerate = () => {
     if (!effectiveSet) return;
@@ -278,122 +237,7 @@ export function SitePanel() {
                   >
                     ×
                   </button>
-                  {obj.type === "importedMesh" && (
-                    // [T4] Glatt oder kantig schattieren, Knickwinkel je Mesh (Vorgabe 30°).
-                    <div className="site-props">
-                      <label className="site-check">
-                        <input
-                          type="checkbox"
-                          checked={obj.smoothShading === true}
-                          onChange={(e) =>
-                            host.onPatchContextObject(obj.id, { smoothShading: e.target.checked }, `site-${obj.id}-smoothShading`)
-                          }
-                        />
-                        {t("site.smoothShading")}
-                      </label>
-                      {obj.smoothShading === true && (
-                        <NumField
-                          label={t("site.creaseAngle")}
-                          value={obj.creaseAngle}
-                          step={5}
-                          min={1}
-                          placeholder="30"
-                          onChange={patch(obj.id, "creaseAngle")}
-                        />
-                      )}
-                    </div>
-                  )}
-                  {obj.type === "terrainMesh" && (
-                    <div className="site-props">
-                      <NumField
-                        label={t("site.contourInterval")}
-                        value={obj.contourInterval}
-                        step={0.5}
-                        min={0}
-                        placeholder="—"
-                        onChange={patch(obj.id, "contourInterval")}
-                      />
-                      <NumField
-                        label={t("site.contourIndexEvery")}
-                        value={obj.contourIndexEvery}
-                        step={1}
-                        min={1}
-                        placeholder="5"
-                        onChange={patch(obj.id, "contourIndexEvery")}
-                      />
-                      <NumField
-                        label={t("site.earthDepth")}
-                        value={obj.earthDepth}
-                        step={0.5}
-                        min={0.1}
-                        placeholder="1.5"
-                        onChange={patch(obj.id, "earthDepth")}
-                      />
-                    </div>
-                  )}
-                  {obj.type === "excavation" && (
-                    <div className="site-props">
-                      <NumField
-                        label={t("site.excavation.bottom")}
-                        value={obj.bottom}
-                        step={0.05}
-                        onChange={(v) => v !== undefined && patch(obj.id, "bottom")(v)}
-                      />
-                      <NumField label={t("site.excavation.slope")} value={obj.slope} step={5} min={5} placeholder="45" onChange={patch(obj.id, "slope")} />
-                      <NumField
-                        label={t("site.excavation.fillSlope")}
-                        value={obj.fillSlope}
-                        step={5}
-                        min={5}
-                        placeholder="33.7"
-                        onChange={patch(obj.id, "fillSlope")}
-                      />
-                      <NumField
-                        label={t("site.excavation.bermWidth")}
-                        value={obj.bermWidth}
-                        step={0.25}
-                        min={0}
-                        placeholder="—"
-                        onChange={patch(obj.id, "bermWidth")}
-                      />
-                      <NumField
-                        label={t("site.excavation.bermHeight")}
-                        value={obj.bermHeight}
-                        step={0.5}
-                        min={0}
-                        placeholder="—"
-                        onChange={patch(obj.id, "bermHeight")}
-                      />
-                      <NumField
-                        label={t("site.excavation.workingSpace")}
-                        value={obj.workingSpace}
-                        step={0.1}
-                        min={0}
-                        placeholder="0"
-                        onChange={patch(obj.id, "workingSpace")}
-                      />
-                      <div className="site-prop" title={t("site.excavation.shoringHint")}>
-                        <span>{t("site.excavation.shoring")}</span>
-                        <span>
-                          {obj.outline.map((_, i) => (
-                            <label key={i} style={{ marginRight: 6 }}>
-                              <input
-                                type="checkbox"
-                                data-testid={`excavation-shoring-${i}`}
-                                checked={obj.edgeShoring?.[i] === true}
-                                onChange={(e) => {
-                                  const next = obj.outline.map((__, k) => (k === i ? e.target.checked : obj.edgeShoring?.[k] === true));
-                                  host.onPatchContextObject(obj.id, { edgeShoring: next.some(Boolean) ? next : undefined }, `site-${obj.id}-edgeShoring`);
-                                }}
-                              />
-                              {i + 1}
-                            </label>
-                          ))}
-                        </span>
-                      </div>
-                      <ExcavationQty q={quantities.find((x) => x.id === obj.id)} />
-                    </div>
-                  )}
+                  <ContextObjectProps obj={obj} quantities={quantities} />
                 </li>
               ))}
             </ul>

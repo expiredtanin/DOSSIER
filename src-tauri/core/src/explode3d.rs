@@ -207,6 +207,12 @@ pub fn pick_geometry(p: &Project, gap: f64) -> Result<PickGeometry, String> {
             v[1] += dz;
         }
     }
+    for c in &mut g.columns {
+        let dz = ex.of(&c.column_id);
+        for v in c.tris.iter_mut().flatten() {
+            v[1] += dz;
+        }
+    }
     Ok(g)
 }
 

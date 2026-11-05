@@ -206,6 +206,7 @@ export function useMouseSelectionHandlers(opts: {
         column: "columns",
         roof: "roofs",
         context: "contextObjects",
+        site: "site",
       } as const satisfies Record<string, SelectionKind>;
       type Kind = keyof typeof channels;
       const target: { kind: Kind; id: string } | null = sel.sectionLineId
@@ -286,7 +287,9 @@ export function useMouseSelectionHandlers(opts: {
                         ? ["roofs", sel.roofId]
                         : sel.contextObjectId
                           ? ["contextObjects", sel.contextObjectId]
-                          : null;
+                          : sel.siteId
+                            ? ["site", sel.siteId]
+                            : null;
     setSelection({ ...clearKinds(), groups: [], ...(one ? { [one[0]]: [one[1]] } : {}) });
   };
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
@@ -378,6 +381,10 @@ export function useMouseSelectionHandlers(opts: {
     }
     if (hit.kind === "stair") {
       setSelection({ ...clearKinds(), stairs: [hit.id] });
+      return;
+    }
+    if (hit.kind === "column") {
+      setSelection({ ...clearKinds(), columns: [hit.id] });
       return;
     }
     if (hit.kind === "roof") {

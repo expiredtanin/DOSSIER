@@ -828,6 +828,7 @@ function LevelPlanView({
     [project],
   );
 
+
   // Live-Spiegelung in die nativen wgpu-Fenster (No-op ohne Tauri, debounced):
   // EXAKT der sichtbare Plan (gleiches Geschoss, gleicher Detailgrad) fürs
   // 2D-Fenster, die Projekt-Wände fürs 3D-Fenster.
