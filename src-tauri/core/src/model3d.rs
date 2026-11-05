@@ -2341,6 +2341,14 @@ pub struct PickColumn {
     pub column_id: String,
 }
 
+/// [137] Öffnung ohne Wand (Dach, Decke, Gaube) für den 3D-Pick: Welt-Dreiecke ihrer Teile.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickOpeningMesh {
+    pub tris: Vec<Tri>,
+    pub opening_id: String,
+}
+
 /// [137] Freier Körper für den 3D-Pick: Welt-Dreiecke.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2362,6 +2370,9 @@ pub struct PickGeometry {
     pub columns: Vec<PickColumn>,
     /// [137] Freie Körper (Prisma-Näherung; TS ersetzt sie durch das truck-Netz).
     pub solids: Vec<PickSolid>,
+    /// [137] Öffnungen in Dach/Decke/Gaube als Netz.
+    #[serde(rename = "openingMeshes")]
+    pub opening_meshes: Vec<PickOpeningMesh>,
     pub drawings: Vec<PickDrawingSeg>,
 }
 
@@ -2421,8 +2432,10 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
     for roof in p.roofs.as_deref().unwrap_or(&[]) {
         let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
         let to_world = |q: &V3| -> V3 { [q[0], q[2], q[1]] };
-        let mut tris: Vec<Tri> = Vec::new();
-        for poly in g.planes.iter().chain(g.gables.iter()) {
+        // [137] Dachkörper wie gezeichnet (Gauben, Verschneidungen, Löcher der Dachfenster); ohne Körper die Flächen.
+        let mut tris: Vec<Tri> = emit_roofs(p, Some(&roof.id)).unwrap_or_default().iter().flat_map(|m| extrusion_tris(&m.positions, &m.indices)).collect();
+        let planes: &[Vec<V3>] = if tris.is_empty() { &g.planes } else { &[] };
+        for poly in planes.iter().chain(g.gables.iter()) {
             for i in 1..poly.len().saturating_sub(1) {
                 tris.push([to_world(&poly[0]), to_world(&poly[i]), to_world(&poly[i + 1])]);
             }
@@ -2510,8 +2523,30 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         context_meshes,
         columns: pick_columns(p),
         solids: pick_solids(p),
+        opening_meshes: pick_hosted_openings(p),
         drawings: pick_drawing_segs(p, &HashMap::new()),
     })
+}
+
+/// [137] Öffnungen in Dach, Decke oder Gaube (Dachfenster, Deckenöffnung, Gaubenfenster): ihre 3D-Teile
+/// (Rahmen, Glas, Eindeckrahmen) als Welt-Dreiecke — sie haben keine Wand-Box wie [`pick_openings`].
+pub fn pick_hosted_openings(p: &Project) -> Vec<PickOpeningMesh> {
+    let hosted: Vec<&Opening> = p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_roof_id.is_some() || o.host_ceiling_id.is_some() || o.host_dormer_id.is_some()).collect();
+    if hosted.is_empty() {
+        return Vec::new();
+    }
+    let mut q = p.clone();
+    q.context = None;
+    q.drawings2d.clear();
+    let mut out = Vec::new();
+    for o in hosted {
+        q.openings = Some(vec![o.clone()]);
+        let tris: Vec<Tri> = emit_opening_meshes(&q, 1.0).iter().flat_map(|m| extrusion_tris(&m.positions, &m.indices)).collect();
+        if !tris.is_empty() {
+            out.push(PickOpeningMesh { tris, opening_id: o.id.clone() });
+        }
+    }
+    out
 }
 
 /// [137] Freie Körper (`extrudedSolids`, ohne Abzugskörper) als Prisma über dem Grundriss-Umriss: UK =
@@ -2694,6 +2729,29 @@ mod tests {
         let e = crate::explode3d::pick_geometry(&p, 2.0).unwrap();
         let top = e.solids[0].tris.iter().flatten().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max);
         assert!((top - 7.0).abs() < 1e-9, "{top}");
+    }
+
+    /// [137] Dachfenster sind im 3D anwählbar (Netz mit Id); das Dach hat dort ein Loch statt der vollen Fläche.
+    #[test]
+    fn pick_dachfenster_im_3d() {
+        let mut p = sample();
+        p.openings.as_mut().unwrap().push(Opening {
+            id: "DF".into(),
+            kind: ElementKind::Window,
+            width: 0.78,
+            height: 1.18,
+            host_roof_id: Some("RF1".into()),
+            host_point: Some(Vec2 { x: 2.5, y: 1.0 }),
+            ..Default::default()
+        });
+        let g = pick_geometry(&p).unwrap();
+        let df = g.opening_meshes.iter().find(|m| m.opening_id == "DF").expect("Dachfenster in der Pick-Geometrie");
+        assert!(df.tris.len() > 12);
+        // Welt (x, Höhe, y): um den Wirtpunkt (2.5, 1.0).
+        let (cx, cz) = df.tris.iter().flatten().fold((0.0, 0.0), |a, q| (a.0 + q[0], a.1 + q[2]));
+        let n = (df.tris.len() * 3) as f64;
+        assert!((cx / n - 2.5).abs() < 1.0 && (cz / n - 1.0).abs() < 1.5, "{} {}", cx / n, cz / n);
+        assert!(g.roofs.iter().any(|r| r.roof_id == "RF1" && !r.tris.is_empty()));
     }
 
     /// [137] Einzeln ausgeblendetes Gelände (`hidden`) und Gelände einer ausgeblendeten Kategorie fehlen im 3D

@@ -2499,8 +2499,9 @@ describe("pickGeometry — Dächer (Ray-Dreieck-Pick)", () => {
     // sampleProject trägt das Demo-Satteldach RF1.
     expect(roofs.length).toBe(1);
     expect(roofs[0].roofId).toBe("RF1");
-    // Sattel: 2 Flächen (je 4 Ecken → 2 Dreiecke) + 2 Giebel (je 1 Dreieck) = 6.
-    expect(roofs[0].tris.length).toBe(6);
+    // [137] Dachkörper wie gezeichnet (Schichten mit Dicke, Gauben, Löcher der Dachfenster) + 2 Giebel —
+    // vorher nur die 2 Flächen (4 Dreiecke) + 2 Giebel = 6.
+    expect(roofs[0].tris.length).toBeGreaterThan(6);
     // Höhe liegt in der WORLD-Y-Komponente (Index 1) — alle über der Traufe > 0.
     for (const tri of roofs[0].tris) for (const p of tri) expect(p[1]).toBeGreaterThan(0);
   });

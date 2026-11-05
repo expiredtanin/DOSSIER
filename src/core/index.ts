@@ -162,6 +162,8 @@ export {
   DRAWING_PICK_TOLERANCE,
   type PickContextMesh,
   type PickColumnMesh,
+  type PickSolidMesh,
+  type PickOpeningMesh,
   type PickDrawingSeg,
   type PickOpening,
   type PickRoof,

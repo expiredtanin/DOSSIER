@@ -76,6 +76,16 @@ export function smoothTerrainGrid(grid: TerrainGrid, passes: number): TerrainGri
 }
 
 /**
+ * [137] Raster-Gelände (swissALTI3D, ein Vertex je Rasterpunkt) um `passes` weitere Durchgänge glätten
+ * (Rust `terrain.rs::resmooth_grid_mesh`): neue `positions` (nur z geändert), `null`, wenn das Netz kein
+ * Raster ist (TIN aus Höhenlinien). `passes` 0 prüft nur.
+ */
+export function resmoothGridTerrain(positions: readonly number[], passes: number): number[] | null {
+  const out = core().terrain_resmooth_grid(Float64Array.from(positions), passes);
+  return out.length === positions.length && out.length > 0 ? Array.from(out) : null;
+}
+
+/**
  * Baut ein Terrain-Mesh aus einem regulären Höhenraster (Quad-Gitter → zwei
  * Dreiecke je Zelle). Fehlende Zellen (`null`) werden ausgelassen; eine Zelle
  * entsteht nur, wenn alle vier Ecken vorhanden sind. Rohes positions/indices-

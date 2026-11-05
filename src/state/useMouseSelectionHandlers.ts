@@ -387,6 +387,11 @@ export function useMouseSelectionHandlers(opts: {
       setSelection({ ...clearKinds(), columns: [hit.id] });
       return;
     }
+    // [137] Freier Körper (Loft, Rotation, Extrusion): Objekt-Info wie im Grundriss.
+    if (hit.kind === "solid") {
+      setSelection({ ...clearKinds(), solids: [hit.id] });
+      return;
+    }
     if (hit.kind === "roof") {
       // Schnittlinien bleiben hier (wie bisher) gewählt.
       setSelection({ ...clearKinds(...ELEMENT_KINDS.filter((k) => k !== "sectionLines")), roofs: [hit.id] });

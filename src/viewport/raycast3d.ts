@@ -18,7 +18,7 @@
 
 
 import { DRAWING_PICK_TOLERANCE } from "../core";
-import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh } from "../core";
+import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh } from "../core";
 
 /** Kamera-Parameter für den Pick-Strahl (Teilmenge von Camera3d). */
 export interface RayCamera {
@@ -42,7 +42,7 @@ export interface Ray {
 
 /** Ergebnis eines Picks: getroffenes Bauteil + Distanz entlang des Strahls. */
 export interface PickHit {
-  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing" | "column";
+  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing" | "column" | "solid";
   id: string;
   t: number;
   /** Bei `kind:"opening"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
@@ -358,6 +358,8 @@ export function pickNearest(
   contextMeshes?: readonly PickContextMesh[],
   drawings?: readonly PickDrawingSeg[],
   columns?: readonly PickColumnMesh[],
+  solids?: readonly PickSolidMesh[],
+  openingMeshes?: readonly PickOpeningMesh[],
 ): PickHit | null;
 /**
  * Nächstes getroffenes Bauteil (kleinstes t) über Wände, Decken, Öffnungen und
@@ -378,6 +380,8 @@ export function pickNearest(
   contextMeshes: readonly PickContextMesh[] = [],
   drawings: readonly PickDrawingSeg[] = [],
   columns: readonly PickColumnMesh[] = [],
+  solids: readonly PickSolidMesh[] = [],
+  openingMeshes: readonly PickOpeningMesh[] = [],
 ): PickHit | null {
   const TIE_EPS = 1e-6;
   let hit: PickHit | null = null;
@@ -432,6 +436,16 @@ export function pickNearest(
   for (const c of columns) {
     const t = rayContextMeshTris(ray, { tris: c.tris, contextObjectId: c.columnId });
     if (t !== null) consider({ kind: "column", id: c.columnId, t }, 1);
+  }
+  // [137] Freie Körper (truck-Netz bzw. Prisma-Näherung), Rang wie Wand/Decke.
+  for (const s of solids) {
+    const t = rayContextMeshTris(ray, { tris: s.tris, contextObjectId: s.solidId });
+    if (t !== null) consider({ kind: "solid", id: s.solidId, t }, 1);
+  }
+  // [137] Dachfenster/Deckenöffnungen (Netz): Rang wie Öffnungen in Wänden.
+  for (const o of openingMeshes) {
+    const t = rayContextMeshTris(ray, { tris: o.tris, contextObjectId: o.openingId });
+    if (t !== null) consider({ kind: "opening", id: o.openingId, t, openingId: o.openingId }, 0);
   }
   return hit;
 }

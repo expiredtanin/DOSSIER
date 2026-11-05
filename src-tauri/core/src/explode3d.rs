@@ -217,6 +217,12 @@ pub fn pick_geometry(p: &Project, gap: f64) -> Result<PickGeometry, String> {
             v[1] += dz;
         }
     }
+    for o in &mut g.opening_meshes {
+        let dz = ex.of(&o.opening_id);
+        for v in o.tris.iter_mut().flatten() {
+            v[1] += dz;
+        }
+    }
     for s in &mut g.solids {
         let dz = ex.of(&s.solid_id);
         for v in s.tris.iter_mut().flatten() {

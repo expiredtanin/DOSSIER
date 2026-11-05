@@ -97,8 +97,25 @@ export interface PickContextMesh {
   contextObjectId: string;
 }
 
-/** [137] Stütze für den Raycast: WORLD-Dreiecke ihres Prismas (Konvention wie {@link PickContextMesh}). */
+/** [137] Stütze für den Raycast: WORLD-Dreiecke ihres Prismas (x, Höhe, y — wie Wände/Dächer, ohne die
+ * Nord-Negation der Kontext-Meshes). */
 export interface PickColumnMesh {
   tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
   columnId: string;
+}
+
+/**
+ * [137] Freier Körper (`extrudedSolids`, Loft/Rotation/Abzug/B-Rep) für den Raycast: WORLD-Dreiecke
+ * (x, Höhe, y). Der Kern liefert das Prisma über dem Umriss; sobald das truck-Netz geladen ist, ersetzt
+ * `pickGeometry` (plan/toWalls3d.ts) es durch dessen Dreiecke.
+ */
+export interface PickSolidMesh {
+  tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
+  solidId: string;
+}
+
+/** [137] Öffnung ohne Wand (Dachfenster, Deckenöffnung, Gaubenfenster): WORLD-Dreiecke ihrer 3D-Teile. */
+export interface PickOpeningMesh {
+  tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
+  openingId: string;
 }

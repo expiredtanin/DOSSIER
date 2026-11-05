@@ -1,7 +1,8 @@
 // Einstellungen eines Kontext-Objekts (importiertes Mesh, Gelände, Baugrube) — gemeinsam für die Liste im
 // Panel „Gelände & Kontext" und die Objekt-Info ([137]: ein angeklicktes Gelände bzw. eine Baugrube zeigt
 // dort dieselben Felder). Gelände zusätzlich: Sichtbarkeit seiner Kategorie und Glättung (aus den
-// Höhenlinien neu erzeugt, ein Undo-Schritt).
+// Höhenlinien neu erzeugt, ein Undo-Schritt). [137] Dazu: dieses Netz einzeln ausblenden (`hidden`) und
+// Raster-Gelände (swissALTI3D, ohne Höhenlinien) additiv nachglätten.
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch. Alle sichtbaren Texte über t(...).
 
@@ -10,6 +11,8 @@ import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
 import type { ContextObject } from "../model/types";
 import { flattenCategories } from "../model/types";
+import { resmoothGridTerrain } from "../model/terrain";
+import { useMemo } from "react";
 import type { ExcavationQuantity } from "../core";
 
 /** Zahl-Eingabe für ein Feld eines Kontext-Objekts (leer = Standard, ungültig = keine Änderung). */
@@ -54,12 +57,18 @@ function ExcavationQty({ q }: { q: ExcavationQuantity | undefined }) {
 
 /** Glättungsstufen der Gelände-Erzeugung (`terrain.rs`, 0 = roh). */
 const SMOOTH_LEVELS = [0, 1, 2, 3] as const;
+/** [137] Zusätzliche Glättungs-Durchgänge für Raster-Gelände. */
+const RESMOOTH_PASSES = [1, 2, 4] as const;
 
 /** Felder eines Kontext-Objekts; `null` für Arten ohne eigene Einstellungen (Höhenlinien, Luftbild). */
 export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; quantities: readonly ExcavationQuantity[] }) {
   const host = usePanelHost();
   const notify = useStore((s) => s.notify);
   const regenerateTerrain = useStore((s) => s.regenerateTerrain);
+  const resmoothTerrain = useStore((s) => s.resmoothTerrain);
+  // [137] Raster-Gelände (swissALTI3D) lässt sich ohne Höhenlinien nachglätten; Prüfung nur bei Netz-Wechsel.
+  const terrainPositions = obj.type === "terrainMesh" ? obj.positions : null;
+  const isGrid = useMemo(() => (terrainPositions ? resmoothGridTerrain(terrainPositions, 0) !== null : false), [terrainPositions]);
   const patch = (field: string) => (v: number | undefined) => host.onPatchContextObject(obj.id, { [field]: v }, `site-${obj.id}-${field}`);
 
   if (obj.type === "importedMesh") {
@@ -86,6 +95,15 @@ export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; qu
     const hasSource = (host.project.context ?? []).some((o) => o.type === "contourSet");
     return (
       <div className="site-props">
+        <label className="site-check" title={t("site.terrain.meshVisible.hint")}>
+          <input
+            type="checkbox"
+            data-testid="terrain-mesh-visible"
+            checked={obj.hidden !== true}
+            onChange={(e) => host.onPatchContextObject(obj.id, { hidden: e.target.checked ? undefined : true }, `site-${obj.id}-hidden`)}
+          />
+          {t("site.terrain.meshVisible")}
+        </label>
         {cat && (
           <label className="site-check" title={t("site.terrain.visible.hint", { name: `${cat.code} ${cat.name}` })}>
             <input type="checkbox" data-testid="terrain-visible" checked={cat.visible} onChange={() => host.onToggleCategory(cat.code)} />
@@ -110,6 +128,31 @@ export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; qu
                   {n === 0 ? t("site.terrain.smooth.raw") : t("site.terrain.smooth.level", { n })}
                 </option>
               ))}
+            </select>
+          </label>
+        )}
+        {!hasSource && (
+          <label className="site-prop" title={isGrid ? t("site.terrain.resmooth.hint") : t("site.terrain.resmooth.unavailable")}>
+            <span>{t("site.terrain.smooth")}</span>
+            <select
+              data-testid="terrain-resmooth"
+              disabled={!isGrid}
+              value=""
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (!(n > 0)) return;
+                if (!resmoothTerrain(obj.id, n)) notify(t("site.terrain.resmooth.unavailable"), "error");
+              }}
+            >
+              <option value="">
+                {obj.smooth ? t("site.terrain.resmooth.current", { n: obj.smooth }) : t("site.terrain.resmooth.none")}
+              </option>
+              {isGrid &&
+                RESMOOTH_PASSES.map((n) => (
+                  <option key={n} value={String(n)}>
+                    {t("site.terrain.resmooth.more", { n })}
+                  </option>
+                ))}
             </select>
           </label>
         )}

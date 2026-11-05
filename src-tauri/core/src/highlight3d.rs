@@ -77,6 +77,27 @@ impl Out {
         }
     }
 
+    /// Achsparalleler Hüllquader um Welt-Punkte (nichts bei leerer Menge).
+    fn aabb_edges<'a>(&mut self, pts: impl Iterator<Item = &'a V3>) {
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for q in pts {
+            for k in 0..3 {
+                lo[k] = lo[k].min(q[k]);
+                hi[k] = hi[k].max(q[k]);
+            }
+        }
+        if !lo[0].is_finite() {
+            return;
+        }
+        let mut c = [[0.0; 3]; 8];
+        for (i, v) in c.iter_mut().enumerate() {
+            *v = [if i & 1 != 0 { hi[0] } else { lo[0] }, if i & 2 != 0 { hi[1] } else { lo[1] }, if i & 4 != 0 { hi[2] } else { lo[2] }];
+        }
+        for (i, j) in BOX_EDGES {
+            self.edge(c[i], c[j]);
+        }
+    }
+
     /// Prisma über dem Grundriss `outline` von `z_bottom` bis `z_top`.
     fn prism_edges(&mut self, outline: &[[f64; 2]], z_bottom: f64, z_top: f64) {
         let n = outline.len();
@@ -130,6 +151,16 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
                 let n = out.v.len();
                 out.box_edges(o.start, o.end, o.thickness, o.height, o.base_elevation);
                 lift(&mut out, n, &o.opening_id);
+            }
+        }
+    }
+    // [137] Öffnungen in Dach/Decke/Gaube: Hüllquader ihrer Teile.
+    if !openings.is_empty() {
+        for m in crate::model3d::pick_hosted_openings(p) {
+            if openings.contains(m.opening_id.as_str()) {
+                let n = out.v.len();
+                out.aabb_edges(m.tris.iter().flatten());
+                lift(&mut out, n, &m.opening_id);
             }
         }
     }
