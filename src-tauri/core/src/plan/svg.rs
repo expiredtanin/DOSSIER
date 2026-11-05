@@ -143,7 +143,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                         out.push(format!("<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"none\"{}/>", op(greyed, opacity(4))));
                         if !d.is_empty() {
                             out.push(format!(
-                                "<path d=\"{d}\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{}\" stroke-linejoin=\"round\"{}/>",
+                                "<path d=\"{d}\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{}\" stroke-linejoin=\"round\" stroke-linecap=\"round\"{}/>",
                                 num(f[2] * mm_to_m),
                                 op(greyed, opacity(4))
                             ));
@@ -196,7 +196,12 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                 }
                 T_LINE => {
                     let color = if fl & F_COLOR != 0 { esc(part.str(f[1]).unwrap_or("")) } else { "#000".into() };
-                    let dash = dash_attr(part)?;
+                    let mut dash = dash_attr(part)?;
+                    // [141] Volle Linien mit runder Kappe wie Bildschirm (render2d) und Druck: Wand-Umrisse
+                    // zweier Wände treffen sich an der Ecke ohne Kerbe (Stumpf-Kappe liess sie offen).
+                    if dash.is_empty() {
+                        dash = " stroke-linecap=\"round\"".into();
+                    }
                     out.push(format!(
                         "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{color}\" stroke-width=\"{}\"{dash}{}/>",
                         xs(f[4]),
@@ -348,5 +353,49 @@ mod tests {
         assert_eq!(op(false, Some(0.5)), " opacity=\"0.5\"");
         assert_eq!(op(true, Some(0.5)), " opacity=\"0.35\"");
         assert_eq!(op(false, Some(1.0)), "");
+    }
+
+    /// [141] Wand-Umrisse als volle Linien bzw. offene Kantenläufe (Stossfugen nicht gestrichen) tragen
+    /// runde Kappen: an der Ecke zweier Wände bleibt keine Kerbe (Stumpf-Kappe, halbe Strichbreite).
+    #[test]
+    fn umriss_mit_runder_kappe() {
+        use crate::model::Vec2;
+        use crate::plan::buf::{View, Writer};
+        use crate::plan::prim::Primitive;
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let mut w = Writer::new(false);
+        let g = w.begin_group();
+        w.push(&Primitive::Polygon {
+            pts: vec![v(0.0, 0.0), v(4.0, 0.0), v(3.7, 0.3), v(0.3, 0.3)],
+            fill: "#fff".into(),
+            stroke: "#000".into(),
+            stroke_width_mm: 0.5,
+            hatch: crate::plan::style::no_hatch(),
+            greyed: None,
+            opacity: None,
+            no_stroke_edges: Some(vec![1.0, 3.0]),
+            wall_id: None,
+            drawing_id: None,
+            ceiling_id: None,
+            opening_id: None,
+            stair_id: None,
+            room_id: None,
+            extruded_solid_id: None,
+            context_object_id: None,
+            column_id: None,
+            roof_id: None,
+            section_line_id: None,
+        });
+        w.push(&Primitive::Line { a: v(0.0, 0.0), b: v(0.0, 4.0), cls: "wall-outline".into(), weight_mm: 0.5, dash: None, zigzag: None, motif: None, color: Some("#000".into()), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None });
+        w.end_group(g);
+        let bytes = w.finish();
+        let view = View::parse(&bytes).unwrap();
+        let n = view.len();
+        let mut parts = vec![Part::new(view, 0, n).unwrap()];
+        let svg = plan_svg(&mut parts, &SvgOptions { scale_denominator: 50.0, margin_m: 0.5, min_x: 0.0, min_y: 0.0, max_x: 4.0, max_y: 4.0, hatch: false }).unwrap();
+        let path = svg.lines().find(|l| l.starts_with("<path")).unwrap();
+        assert!(path.contains("stroke-linecap=\"round\""), "{path}");
+        let line = svg.lines().find(|l| l.starts_with("<line")).unwrap();
+        assert!(line.contains("stroke-linecap=\"round\""), "{line}");
     }
 }

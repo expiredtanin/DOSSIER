@@ -778,7 +778,10 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
             while j1 < ny && kind(at(i as i64 - 1, j1 as i64), at(i as i64, j1 as i64)) == k {
                 j1 += 1;
             }
-            if k != 0 {
+            // [141] Verschnittenes Wandende (Gehrung, Stoss): dort läuft die Nachbarwand weiter —
+            // keine Umriss-Linie quer über die Ecke (wie die nicht gestrichenen Kanten im Normalfall).
+            let joined_end = (i == 0 && g.sc.is_some()) || (i == nx && g.ec.is_some());
+            if k != 0 && !(k == 1 && joined_end) {
                 let (y0, y1) = (ys[j], ys[j1]);
                 if (x - s).abs() < CUTOUT_EPS && g.sc.is_some() {
                     let q = clipped_band(g.p1, g.p2, y0, y1, g.sc, None);
@@ -1055,6 +1058,31 @@ mod tests {
         assert!(step);
         // Ohne Block wie bisher.
         assert_eq!(count(&wall_poche(&wall(4.0, false, &[(1.0, 2.0)])), 1.0), 6);
+    }
+
+    /// [141] Schichteinzug an einer Wand mit Gehrung an beiden Enden: keine Umriss-Linie auf den
+    /// Gehrungen (vorher ein Strich quer über jede Ecke, deren Wand ein Fenster mit Einzug hat).
+    #[test]
+    fn schichteinzug_ohne_umriss_auf_der_gehrung() {
+        let mut b = vec![0.0, 0.0, 4.0, 0.0, 0.3, 0.0, 0.0, 0.0, 2.0, 0.1, 0.2];
+        // Gehrung 45° am Start (durch (0,0), Richtung (1,1)), am Ende (durch (4,0), Richtung (-1,1)).
+        b.extend([1.0, 0.0, 0.0, 1.0, 1.0]);
+        b.extend([1.0, 4.0, 0.0, -1.0, 1.0]);
+        b.extend([0.0, 0.0, 1.0, 1.0, 2.0]);
+        b.extend([2.0, 1.0, 1.0, 1.0, 0.05, 0.0, 2.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.03, 0.0, 0.1]);
+        let o = wall_poche(&b);
+        let sm = |a: V| (a.x - a.y).abs() < 1e-9;
+        let em = |a: V| (4.0 - a.x - a.y).abs() < 1e-9;
+        let mut outlines = 0;
+        for p in parse(&o) {
+            if let Prim::Line(art, a, c) = p {
+                if art == LINE_OUTLINE {
+                    outlines += 1;
+                    assert!(!(sm(a) && sm(c)) && !(em(a) && em(c)), "Umriss auf der Gehrung: {a:?} {c:?}");
+                }
+            }
+        }
+        assert!(outlines >= 4);
     }
 
     #[test]
