@@ -340,8 +340,8 @@ export const de = {
 
   // ── Dokument-Tabs (Zeichnungen/Blätter) ─────────────────────────────────
   "tabs.drawings": "Zeichnungen",
-  "tabs.add": "Neuer Ausschnitt-Tab",
-  "tabs.delete": "Ausschnitt-Tab löschen",
+  "tabs.add": "Neuer Reiter mit der aktuellen Ansicht",
+  "tabs.close": "Reiter „{name}\" schliessen",
 
   // ── Navigator-Panels ─────────────────────────────────────────────────────
   "nav.drawingLevels": "Zeichnungsebenen",
@@ -2848,7 +2848,10 @@ export const de = {
   "viewsnap.copyName": "{name} Kopie",
   "viewsnap.deleteConfirm": "Ausschnitt „{name}\" löschen?",
   "viewsnap.empty": "Noch keine Ausschnitte. Ansicht einrichten und speichern.",
-  "viewsnap.applyHint": "Ausschnitt „{name}\" wiederherstellen",
+  "viewsnap.applyHint": "Klick: „{name}\" im aktiven Reiter zeigen · Doppelklick: in neuem Reiter öffnen",
+  "viewsnap.openNewTab": "In neuem Reiter öffnen",
+  "viewsnap.update": "Ausschnitt aktualisieren",
+  "viewsnap.updateHint": "Aktuelle Ansicht in diesen Ausschnitt übernehmen (Name, Ordner und Vorlage bleiben)",
   "viewsnap.add.folder": "Ordner erstellen",
   "viewsnap.add.snapshot": "Ausschnitt speichern",
   "viewsnap.folder.defaultName": "Neuer Ordner",

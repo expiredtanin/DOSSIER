@@ -9,7 +9,6 @@ import {
   captureViewSnapshot,
   readViewSnapshot,
   applyOverrideRuleEnabled,
-  snapshotMatchesLiveState,
   boolMapEqual,
   matchingComboName,
   type ViewSnapshotState,
@@ -112,12 +111,6 @@ describe("viewSnapshots — Kamera (cameraCenter/cameraPxPerMeter)", () => {
     expect(st.cameraCenter).toBeUndefined();
     expect(st.cameraPxPerMeter).toBeUndefined();
   });
-
-  it("snapshotMatchesLiveState ignoriert eine abweichende Kamera (bewusst ausgenommen)", () => {
-    const snap = { ...sampleState(), cameraCenter: { x: 0, y: 0 }, cameraPxPerMeter: 50 };
-    const live = { ...sampleState(), cameraCenter: { x: 999, y: 999 }, cameraPxPerMeter: 5 };
-    expect(snapshotMatchesLiveState(snap, live)).toBe(true);
-  });
 });
 
 describe("viewSnapshots — readViewSnapshot", () => {
@@ -175,77 +168,6 @@ describe("viewSnapshots — applyOverrideRuleEnabled", () => {
   it("liefert dieselbe Referenz zurück, wenn nichts zu ändern ist (No-Op)", () => {
     const rules = [mk("r1", true), mk("r2", false)];
     expect(applyOverrideRuleEnabled(rules, ["r1"])).toBe(rules);
-  });
-});
-
-describe("viewSnapshots — snapshotMatchesLiveState", () => {
-  it("identischer Zustand → true", () => {
-    expect(snapshotMatchesLiveState(sampleState(), sampleState())).toBe(true);
-  });
-
-  it("Override-Ids in anderer Reihenfolge → weiterhin true (Menge zählt)", () => {
-    const live = { ...sampleState(), enabledOverrideRuleIds: ["r3", "r1"] };
-    expect(snapshotMatchesLiveState(sampleState(), live)).toBe(true);
-  });
-
-  // Jedes einzelne abweichende Feld muss zu false führen.
-  it("viewType weicht ab → false", () => {
-    expect(
-      snapshotMatchesLiveState(sampleState(), { ...sampleState(), viewType: "grundriss" }),
-    ).toBe(false);
-  });
-  it("view3d weicht ab → false", () => {
-    expect(
-      snapshotMatchesLiveState(sampleState(), { ...sampleState(), view3d: "perspective" }),
-    ).toBe(false);
-  });
-  it("fov weicht ab → false", () => {
-    expect(
-      snapshotMatchesLiveState(sampleState(), { ...sampleState(), fov: 43 }),
-    ).toBe(false);
-  });
-  it("scaleDenominator weicht ab → false", () => {
-    expect(
-      snapshotMatchesLiveState(sampleState(), { ...sampleState(), scaleDenominator: 100 }),
-    ).toBe(false);
-  });
-  it("detail weicht ab → false", () => {
-    expect(
-      snapshotMatchesLiveState(sampleState(), { ...sampleState(), detail: "grob" }),
-    ).toBe(false);
-  });
-  it("activeLevelId weicht ab → false", () => {
-    expect(
-      snapshotMatchesLiveState(sampleState(), { ...sampleState(), activeLevelId: "floor-9" }),
-    ).toBe(false);
-  });
-  it("layerVisibility-Wert weicht ab → false", () => {
-    const live = { ...sampleState(), layerVisibility: { "20": true, "30": true } };
-    expect(snapshotMatchesLiveState(sampleState(), live)).toBe(false);
-  });
-  it("layerVisibility-Key fehlt/kommt hinzu → false", () => {
-    const live = { ...sampleState(), layerVisibility: { "20": true } };
-    expect(snapshotMatchesLiveState(sampleState(), live)).toBe(false);
-    const live2 = {
-      ...sampleState(),
-      layerVisibility: { "20": true, "30": false, "40": true },
-    };
-    expect(snapshotMatchesLiveState(sampleState(), live2)).toBe(false);
-  });
-  it("drawingVisibility weicht ab → false", () => {
-    const live = {
-      ...sampleState(),
-      drawingVisibility: { "floor-1": true, "floor-2": true },
-    };
-    expect(snapshotMatchesLiveState(sampleState(), live)).toBe(false);
-  });
-  it("enabledOverrideRuleIds weicht ab (eine Regel mehr) → false", () => {
-    const live = { ...sampleState(), enabledOverrideRuleIds: ["r1", "r3", "r4"] };
-    expect(snapshotMatchesLiveState(sampleState(), live)).toBe(false);
-  });
-  it("enabledOverrideRuleIds weicht ab (andere Regel) → false", () => {
-    const live = { ...sampleState(), enabledOverrideRuleIds: ["r1", "r2"] };
-    expect(snapshotMatchesLiveState(sampleState(), live)).toBe(false);
   });
 });
 

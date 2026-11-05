@@ -1916,15 +1916,31 @@ body {
   background: var(--active-dim);
   color: var(--active-light);
 }
-.drawing-tab-label {
-  pointer-events: none;
-}
 .drawing-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
+  padding: 0 6px 0 0;
+}
+/* [136] Reiter = Container: Titel und Schliessen sind zwei eigene Knöpfe. */
+.drawing-tab-label {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 5px 4px 5px 14px;
+  cursor: pointer;
+}
+.drawing-tab:not(:has(.drawing-tab-close)) .drawing-tab-label {
+  padding-right: 8px;
 }
 .drawing-tab-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;

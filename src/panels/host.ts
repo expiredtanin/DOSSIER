@@ -661,22 +661,25 @@ export interface PanelHostValue {
    * Ausschnitt-Id (leer bei leerem/ungetrimmtem Namen).
    */
   onCaptureViewSnapshot: (name: string, folderId?: string) => string;
-  /**
-   * Wie `onCaptureViewSnapshot`, aber mit automatisch bestimmtem Namen (aktive
-   * Zeichnungskombination falls exakt passend, sonst das aktive Blatt) — für
-   * die Ausschnitt-Tab-Leiste ("+"-Knopf, s. DrawingTabs.tsx). Wählt den neuen
-   * Ausschnitt sofort an.
-   */
-  onCaptureViewSnapshotAuto: () => string;
-  /** Name, den ein automatisch angelegter Ausschnitt jetzt bekäme (aktive Kombination bzw. Blatt). */
-  viewSnapshotAutoName: () => string;
-  /** Stellt alle Felder eines Ausschnitts wieder her (Geschoss/Sichtbarkeit/Overrides/Ansicht). */
+  /** Titel eines Reiters ohne Ausschnitt ([136]): aktive Zeichnungskombination bzw. Name der
+   *  Zeichnungsebene `levelId` (ohne Argument: die aktive). */
+  viewTabAutoName: (levelId?: string) => string;
+  /** Klick im Panel: zeigt den Ausschnitt im AKTIVEN Reiter und wählt ihn im Panel ([136]). */
   onApplyViewSnapshot: (id: string) => void;
+  /** Doppelklick/Knopf im Panel: öffnet den Ausschnitt in einem NEUEN Reiter ([136]). */
+  onOpenViewSnapshotInNewTab: (id: string) => void;
+  /** Schreibt die aktuelle Ansicht ausdrücklich in den Ausschnitt (Name/Ordner/Vorlage bleiben, [136]). */
+  onUpdateViewSnapshot: (id: string) => void;
+  /** Reiterleiste ([136], Reiter = UI-Zustand, state/viewTabs.ts): aktivieren, neu (aktuelle Ansicht), schliessen
+   *  (löscht nie einen Ausschnitt). */
+  onActivateViewTab: (tabId: string) => void;
+  onNewViewTab: () => void;
+  onCloseViewTab: (tabId: string) => void;
   /** Benennt einen Ausschnitt um. */
   onRenameViewSnapshot: (id: string, name: string) => void;
   /** Dupliziert einen Ausschnitt ([40]): Kopie hinter dem Original, gleicher Ordner. */
   onDuplicateViewSnapshot: (id: string) => void;
-  /** Löscht einen Ausschnitt. */
+  /** Löscht einen Ausschnitt (nur im Panel); offene Reiter bleiben mit eigenem Zustand offen. */
   onDeleteViewSnapshot: (id: string) => void;
 
   // ── Ausschnitte-Baum (Ordner, DOSSIER A2) ───────────────────────────────
@@ -703,11 +706,8 @@ export interface PanelHostValue {
    */
   onMoveViewSnapshotFolder: (folderId: string, parentId: string | null) => void;
 
-  /**
-   * Id des aktuell „angewählten" Ausschnitts (Footer-Bar sichtbar) oder `null`.
-   * Bleibt gesetzt, solange der Live-Zustand exakt dem Ausschnitt entspricht;
-   * App löscht ihn, sobald der Nutzer eine erfasste Grösse ändert.
-   */
+  /** Im Panel gewählter Ausschnitt (Fussbereich sichtbar) oder `null`. Bleibt gewählt, bis ein anderer
+   *  gewählt oder er gelöscht wird — Ansichtsänderungen heben die Wahl nicht auf ([136]). */
   selectedViewSnapshotId: string | null;
   /** Namen aller gespeicherten Ebenen-Kombinationen (localStorage). */
   listLayerCombos: () => string[];

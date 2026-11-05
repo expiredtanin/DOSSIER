@@ -71,6 +71,7 @@ import type { StoreApi } from "./store";
 import { createHistorySlice, historyPatch, labelCommit, storeDocument } from "./historySlice";
 import type { HistorySlice } from "./historySlice";
 import { opsLabel } from "./historyLabels";
+import { resetViewTabs } from "./viewTabs";
 import type { NotifyKind } from "./notifySlice";
 
 /** Felder, die diese Slice in den RootState beisteuert. */
@@ -604,12 +605,16 @@ export function createProjectSlice(
       const doc = storeDocument(get().project);
       doc.load(next);
       set({ project: next, ...historyPatch(doc) });
+      resetViewTabs(); // [136] neues Projekt: ein Reiter mit der aktuellen Ansicht
     },
 
     openProjectFile: (text) => {
       const doc = storeDocument(get().project);
       const r = doc.loadFile(text);
-      if (r.ok) set({ project: r.project, ...historyPatch(doc) });
+      if (r.ok) {
+        set({ project: r.project, ...historyPatch(doc) });
+        resetViewTabs(); // [136]
+      }
       return r;
     },
 

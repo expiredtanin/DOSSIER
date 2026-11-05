@@ -36,6 +36,21 @@ import {
   type ViewSnapshotState,
 } from "./viewSnapshots";
 import {
+  activateTab,
+  activeTab,
+  closeTab,
+  detachSnapshots,
+  getViewTabs,
+  linkActiveTab,
+  openTab,
+  setViewTabs,
+  storeActiveState,
+  type ViewTabsState,
+} from "./viewTabs";
+
+/** Letzter Klick auf einen Ausschnitt im Panel (Doppelklick-Erkennung, [136]). */
+let lastPanelClick: { id: string; at: number; tabs: ViewTabsState } | null = null;
+import {
   createViewSnapshotFolder,
   deleteFolder as deleteViewSnapshotFolder,
   moveSnapshotToFolder,
@@ -97,6 +112,12 @@ function singleTransformSel(kind: string, id: string): TransformSelection | null
  * `ViewSnapshotState`-Objektliteral eingemischt werden kann, ohne `undefined`-
  * Werte explizit zu setzen.
  */
+/** Stimmt die Live-Sichtbarkeit mit der gespeicherten überein (nur gespeicherte Schlüssel zählen)? */
+function visibilityMatches(live: Record<string, boolean>, stored: Record<string, boolean>): boolean {
+  for (const k of Object.keys(stored)) if (k in live && live[k] !== stored[k]) return false;
+  return true;
+}
+
 function captureCameraState(
   planViewRef: RefObject<PlanViewHandle | null>,
   viewType: ViewType,
@@ -331,6 +352,54 @@ export function usePanelHostBase(opts: {
   const { setMenu } = contextMenuState;
 
   const baseHost = useMemo(() => {
+    // Aktueller Darstellungszustand (Ansicht/Kamera/Massstab/Detail/Geschoss + Sichtbarkeit + Overrides).
+    const liveViewState = (): ViewSnapshotState => ({
+      viewType,
+      view3d,
+      fov,
+      scaleDenominator,
+      detail,
+      activeLevelId,
+      layerVisibility: snapshotLayerVisibility(),
+      drawingVisibility: snapshotDrawingVisibility(),
+      enabledOverrideRuleIds: (getState().project.overrideRules ?? []).filter((r) => r.enabled).map((r) => r.id),
+      ...captureCameraState(planViewRef, viewType),
+    });
+    // Darstellungszustand wiederherstellen. Reihenfolge: Geschoss ZUERST (setActiveLevelId setzt viewType
+    // provisorisch aus viewTypeByLevel), danach die Ansicht (überschreibt es synchron), dann Sichtbarkeit +
+    // Overrides — diese sind Projektdaten: nur bei echter Abweichung und dann als EIN Undo-Schritt.
+    // Den imperativen Massstab-Zoom (Plan muss für den neuen View gemountet sein) via rAF nachziehen.
+    const applyViewState = (st: ViewSnapshotState) => {
+      setActiveLevelId(st.activeLevelId);
+      setViewType(st.viewType);
+      setView3d(st.view3d);
+      setFov(st.fov);
+      setDetail(st.detail);
+      setScaleDenominator(st.scaleDenominator);
+      const layersDiffer = !visibilityMatches(snapshotLayerVisibility(), st.layerVisibility);
+      const drawingsDiffer = !visibilityMatches(snapshotDrawingVisibility(), st.drawingVisibility);
+      const wanted = new Set(st.enabledOverrideRuleIds);
+      const overridesDiffer = (getState().project.overrideRules ?? []).some((r) => !!r.enabled !== wanted.has(r.id));
+      if (layersDiffer || drawingsDiffer || overridesDiffer) {
+        getState().groupChanges(() => {
+          if (layersDiffer) applyLayerVisibility(st.layerVisibility);
+          if (drawingsDiffer) applyDrawingVisibility(st.drawingVisibility);
+          if (overridesDiffer)
+            applyChange((p) =>
+              fieldOps(p, "overrideRules", applyOverrideRuleEnabled(p.overrideRules ?? [], st.enabledOverrideRuleIds)),
+            );
+        });
+      }
+      requestAnimationFrame(() => {
+        planViewRef.current?.applyScale(st.scaleDenominator);
+        // Kamera NACH `applyScale` restaurieren (nicht statt): `applyScale` setzt auch die
+        // Papier-Massstab-Referenz für Strichbreiten, hält aber die BISHERIGE Bildmitte; `setCamera`
+        // schwenkt danach im selben Tick auf die erfasste Mitte — nur wenn der Zustand eine Kamera trägt.
+        if (st.cameraCenter && st.cameraPxPerMeter) {
+          planViewRef.current?.setCamera(st.cameraCenter, st.cameraPxPerMeter);
+        }
+      });
+    };
     const value: Omit<PanelHostValue, "displayMode"> = {
       project,
       activeLevelId,
@@ -1144,109 +1213,94 @@ export function usePanelHostBase(opts: {
         }
       },
 
-      // ── Ausschnitte / View-Snapshots (DOSSIER A2) ─────────────────────────
-      // Erfassen: aktuellen Darstellungszustand einsammeln (View-State +
-      // Sichtbarkeits-Snapshots + aktive Overrides) → pure captureViewSnapshot →
-      // an project.viewSnapshots anhängen (im Dokument, nicht localStorage).
+      // ── Ausschnitte / View-Snapshots (DOSSIER A2) und Reiter ([136]) ──────
+      // Ausschnitte leben im Projekt (Panel „Ausschnitte"), Reiter sind reiner UI-Zustand
+      // (state/viewTabs.ts). Klick im Panel zeigt den Ausschnitt im aktiven Reiter, Doppelklick/Knopf
+      // öffnet ihn in einem neuen; Reiter schliessen löscht keinen Ausschnitt; „Aktualisieren" schreibt
+      // die aktuelle Ansicht ausdrücklich in den Ausschnitt zurück.
       onCaptureViewSnapshot: (name: string, folderId?: string): string => {
         const trimmed = name.trim();
         if (!trimmed) return "";
-        const st: ViewSnapshotState = {
-          viewType,
-          view3d,
-          fov,
-          scaleDenominator,
-          detail,
-          activeLevelId,
-          layerVisibility: snapshotLayerVisibility(),
-          drawingVisibility: snapshotDrawingVisibility(),
-          enabledOverrideRuleIds: (project.overrideRules ?? [])
-            .filter((r) => r.enabled)
-            .map((r) => r.id),
-          ...captureCameraState(planViewRef, viewType),
-        };
-        const snap = captureViewSnapshot(`vs-${Date.now()}`, trimmed, st);
+        const snap = captureViewSnapshot(`vs-${Date.now()}`, trimmed, liveViewState());
         // Neuer Ausschnitt landet im aktiven Ordner (falls das Panel einen
         // mitgibt), sonst auf der Wurzelebene — additiv (folderId optional).
         const full = folderId ? { ...snap, folderId } : snap;
         applyChange(addItems("viewSnapshots", [full]));
+        // Der aktive Reiter zeigt jetzt diesen Ausschnitt (Titel), der Ausschnitt ist im Panel gewählt.
+        setViewTabs(linkActiveTab(getViewTabs(), full.id));
+        setSelectedViewSnapshotId(full.id);
         return full.id;
       },
 
-      // Wie `onCaptureViewSnapshot`, aber OHNE getippten Namen: die Ausschnitt-
-      // Tab-Leiste (DrawingTabs.tsx) legt per „+" einen neuen Tab aus dem
-      // aktuellen Stand an — Name automatisch die aktive Zeichnungskombination
-      // (falls deren Sichtbarkeits-Map exakt passt) oder sonst das aktive Blatt
-      // (Nutzer-Wunsch). Wählt den neuen Ausschnitt sofort an (Tab wird aktiv).
-      viewSnapshotAutoName: (): string => {
-        const combo = matchingComboName(listDrawingCombos(), loadDrawingCombo, snapshotDrawingVisibility());
-        return combo ?? project.drawingLevels.find((l) => l.id === activeLevelId)?.name ?? activeLevelId;
+      // Titel eines Reiters ohne Ausschnitt: aktive Zeichnungskombination (falls deren
+      // Sichtbarkeits-Map exakt passt), sonst die Zeichnungsebene des Reiters.
+      viewTabAutoName: (levelId?: string): string => {
+        if (!levelId || levelId === activeLevelId) {
+          const combo = matchingComboName(listDrawingCombos(), loadDrawingCombo, snapshotDrawingVisibility());
+          if (combo) return combo;
+        }
+        const id = levelId ?? activeLevelId;
+        return project.drawingLevels.find((l) => l.id === id)?.name ?? id;
       },
 
-      onCaptureViewSnapshotAuto: (): string => {
-        const drawingVisibility = snapshotDrawingVisibility();
-        const combo = matchingComboName(listDrawingCombos(), loadDrawingCombo, drawingVisibility);
-        const levelName =
-          project.drawingLevels.find((l) => l.id === activeLevelId)?.name ?? activeLevelId;
-        const name = combo ?? levelName;
-        const st: ViewSnapshotState = {
-          viewType,
-          view3d,
-          fov,
-          scaleDenominator,
-          detail,
-          activeLevelId,
-          layerVisibility: snapshotLayerVisibility(),
-          drawingVisibility,
-          enabledOverrideRuleIds: (project.overrideRules ?? [])
-            .filter((r) => r.enabled)
-            .map((r) => r.id),
-          ...captureCameraState(planViewRef, viewType),
-        };
-        const snap = captureViewSnapshot(`vs-${Date.now()}`, name, st);
-        applyChange(addItems("viewSnapshots", [snap]));
-        setSelectedViewSnapshotId(snap.id);
-        return snap.id;
-      },
-
-      // Wiederherstellen: ALLE Felder zurückspielen. Reihenfolge: Geschoss ZUERST
-      // (setActiveLevelId setzt viewType provisorisch aus viewTypeByLevel), danach
-      // die Ansicht (überschreibt es synchron), dann Sichtbarkeit + Overrides.
-      // Die Store-Setter laufen synchron im selben Tick; nur den imperativen
-      // Massstab-Zoom (Plan muss für den neuen View gemountet sein) via rAF
-      // nachziehen — analog zum BIM-Tree-Geschosswechsel.
+      // Klick im Panel: Ausschnitt im AKTIVEN Reiter anzeigen und im Panel wählen.
       onApplyViewSnapshot: (id: string) => {
         // Aktuellen Stand lesen (direkt nach einer Änderung am Ausschnitt ist `project` hier noch der alte).
         const snap = (getState().project.viewSnapshots ?? []).find((s) => s.id === id);
         if (!snap) return;
-        const st = readViewSnapshot(snap);
-        setActiveLevelId(st.activeLevelId);
-        setViewType(st.viewType);
-        setView3d(st.view3d);
-        setFov(st.fov);
-        setDetail(st.detail);
-        setScaleDenominator(st.scaleDenominator);
-        applyLayerVisibility(st.layerVisibility);
-        applyDrawingVisibility(st.drawingVisibility);
-        applyChange((p) =>
-          fieldOps(p, "overrideRules", applyOverrideRuleEnabled(p.overrideRules ?? [], st.enabledOverrideRuleIds)),
-        );
-        requestAnimationFrame(() => {
-          planViewRef.current?.applyScale(st.scaleDenominator);
-          // Kamera NACH `applyScale` restaurieren (nicht statt): `applyScale`
-          // setzt auch die Papier-Massstab-Referenz für Strichbreiten
-          // (`setPaperScale`, s. `PlanView.tsx`), hält dabei aber die BISHERIGE
-          // Bildmitte. `setCamera` schwenkt danach im selben Tick (kein
-          // sichtbares Doppel-Springen) auf die erfasste Mitte — nur wenn der
-          // Ausschnitt eine Kamera trägt (Alt-Ausschnitte/3D-Erfassung: Mitte
-          // bleibt wie bisher unverändert).
-          if (st.cameraCenter && st.cameraPxPerMeter) {
-            planViewRef.current?.setCamera(st.cameraCenter, st.cameraPxPerMeter);
-          }
-        });
-        // Klick = Anwenden UND Anwählen: der Ausschnitt bleibt markiert, bis der
-        // Nutzer eine erfasste Grösse ändert (Abweichungs-Effekt löscht ihn dann).
+        // Für einen folgenden Doppelklick merken, was der aktive Reiter vorher zeigte.
+        lastPanelClick = { id, at: Date.now(), tabs: storeActiveState(getViewTabs(), liveViewState()) };
+        applyViewState(readViewSnapshot(snap));
+        setViewTabs(linkActiveTab(getViewTabs(), id));
         setSelectedViewSnapshotId(id);
+      },
+
+      // Doppelklick/Knopf im Panel: Ausschnitt in einem NEUEN Reiter öffnen.
+      onOpenViewSnapshotInNewTab: (id: string) => {
+        const snap = (getState().project.viewSnapshots ?? []).find((s) => s.id === id);
+        if (!snap) return;
+        // Doppelklick: die beiden vorangehenden Klicks haben den Ausschnitt schon im aktiven Reiter gezeigt —
+        // dieser behält seinen früheren Inhalt, nur der neue Reiter zeigt den Ausschnitt.
+        const prev = lastPanelClick;
+        lastPanelClick = null;
+        const base = prev && prev.id === id && Date.now() - prev.at < 1000 ? prev.tabs : undefined;
+        const cur = getViewTabs();
+        setViewTabs(
+          base && base.activeId === cur.activeId
+            ? openTab({ ...cur, tabs: cur.tabs.map((tb) => (tb.id === cur.activeId ? activeTab(base) : tb)) }, { snapshotId: id })
+            : openTab(cur, { snapshotId: id }, liveViewState()),
+        );
+        applyViewState(readViewSnapshot(snap));
+        setSelectedViewSnapshotId(id);
+      },
+
+      // Ausdrücklich: aktuelle Ansicht in den Ausschnitt schreiben (Name, Ordner, Vorlage bleiben).
+      onUpdateViewSnapshot: (id: string) => {
+        const live = liveViewState();
+        applyChange((p) =>
+          patchItem(p, "viewSnapshots", id, (v) => {
+            const fresh = captureViewSnapshot(v.id, v.name, live);
+            const { cameraCenter: _c, cameraPxPerMeter: _m, ...rest } = v;
+            return { ...rest, ...fresh };
+          }),
+        );
+      },
+
+      // Reiterleiste.
+      onActivateViewTab: (tabId: string) => {
+        const { next, apply } = activateTab(getViewTabs(), tabId, liveViewState());
+        setViewTabs(next);
+        if (apply) applyViewState(apply);
+        const snapId = next.tabs.find((tb) => tb.id === next.activeId)?.snapshotId;
+        if (snapId) setSelectedViewSnapshotId(snapId);
+      },
+      onNewViewTab: () => {
+        setViewTabs(openTab(getViewTabs(), {}, liveViewState()));
+      },
+      onCloseViewTab: (tabId: string) => {
+        const { next, apply } = closeTab(getViewTabs(), tabId);
+        setViewTabs(next);
+        if (apply) applyViewState(apply);
       },
 
       onRenameViewSnapshot: (id: string, name: string) => {
@@ -1265,8 +1319,11 @@ export function usePanelHostBase(opts: {
         setSelectedViewSnapshotId(copy.id);
       },
 
+      // Löschen nur im Panel. Offene Reiter des Ausschnitts bleiben (eigener Zustand, letzter Name als Titel).
       onDeleteViewSnapshot: (id: string) => {
+        const snap = (getState().project.viewSnapshots ?? []).find((s) => s.id === id);
         applyChange((p) => removeItems(p, "viewSnapshots", [id]));
+        if (snap) setViewTabs(detachSnapshots(getViewTabs(), [{ id, name: snap.name }]));
         if (selectedViewSnapshotId === id) setSelectedViewSnapshotId(null);
       },
 
