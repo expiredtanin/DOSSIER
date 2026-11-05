@@ -6,4 +6,4 @@ polygon 1541
 rect 1
 svg 1
 text 4
-hash 99e90b8d7e720074
+hash 13c462eddf903040
