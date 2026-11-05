@@ -3,8 +3,9 @@
 //! gespiegelt (Schweizer Praxis: deckt den Grundriss). Inhalt: Wände und Stützen geschnitten wie im
 //! Grundriss (ohne Türflügel/-bögen, Fensterflügel, Brüstungen), die Untersichten der Decken darüber
 //! (Ansichtsfarbe und Ansichtsmuster der untersten Schicht, Aussparungen wie Treppenlöcher und
-//! Deckenöffnungen ausgezogen), Dachuntersichten (Traufe, First, Grate, Dachfenster), je Raum die Kote
-//! „UK“ der Decke darüber. Keine Böden, Möbel, Treppen, Raumflächen. Eigene 2D-Elemente der Ebene
+//! Deckenöffnungen ausgezogen, mit Diagonalkreuz nach SIA 400 — Treppen darunter entfallen), Dachuntersichten
+//! (Traufe, First, Grate, Dachfenster), je Raum die Kote „UK“ der Decke darüber; ist das Dach die Decke,
+//! tiefste und höchste Dach-Unterkante über dem Raum („UK +2.10 … +4.80“, am Raumstempel). Keine Böden, Möbel, Treppen, Raumflächen. Eigene 2D-Elemente der Ebene
 //! (Leuchten …) zeichnet `drawings.rs` wie bei jeder Ebene.
 
 use super::domains::{ceiling_layers, columns, line, polygon, pv, roof_windows, Bounds, Ctx, DomainPrims, PlanArgs, Pick};
@@ -18,6 +19,8 @@ use crate::model::*;
 const TOP_REACH: f64 = 2.0;
 /// Strichstärke des Untersicht-Umrisses (Rand der Decke, Aussparungen).
 const SOFFIT_OUTLINE_MM: f64 = 0.18;
+/// Strichstärke des Diagonalkreuzes in Aussparungen (fein).
+const OPENING_CROSS_MM: f64 = 0.13;
 /// Raum-Kote im Deckenspiegel (pt).
 const LABEL_PT: f64 = 9.0;
 
@@ -74,12 +77,12 @@ pub fn domains(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result<bo
     let fc = Ctx::new(c.p, &fa);
     let (cut, limit) = heights(c.p, f);
     let soffits = soffits(&fc, cut, limit, &mut out.ceilings, bounds)?;
-    roof_soffits(&fc, cut, limit, &soffits, &mut out.roofs, bounds);
+    let roofs = roof_soffits(&fc, cut, limit, &soffits, &mut out.roofs, bounds);
     let mut walls = Vec::new();
     super::walls::plan_walls(&fc, c.a.reference_lines, &mut walls, bounds)?;
     out.walls = walls.into_iter().filter(|q| !below_ceiling_only(q)).collect();
     columns(&fc, &mut out.columns);
-    room_labels(&fc, &soffits, &mut out.rooms);
+    room_labels(&fc, &soffits, &roofs, &mut out.rooms);
     Ok(true)
 }
 
@@ -146,16 +149,83 @@ fn soffits(c: &Ctx, cut: f64, limit: f64, out: &mut Vec<Primitive>, bounds: &mut
         for [a, b] in crate::plan::wall_poche::ceiling_outline_lines(&merged.ring, &merged.bridge_edges, &fps) {
             out.push(line(pv(a), pv(b), "ceiling-soffit-outline", SOFFIT_OUTLINE_MM, None, stroke, greyed));
         }
+        // Aussparungen (Treppenloch, Deckenöffnung) mit Diagonalkreuz (SIA 400); die Treppe darunter
+        // sieht man im Deckenspiegel nicht.
+        for h in &holes {
+            for (a, b) in opening_cross(h) {
+                out.push(line(pv(a), pv(b), "ceiling-opening-cross", OPENING_CROSS_MM, None, stroke, greyed));
+            }
+        }
         res.push(Soffit { ring: merged.ring.iter().flat_map(|q| [q[0], q[1]]).collect(), z: zb });
     }
     Ok(res)
 }
 
+/// Diagonalkreuz einer Aussparung: bei Vierecken die Eckdiagonalen, sonst die Diagonalen des
+/// umschreibenden Rechtecks — jeweils auf die Aussparung geschnitten.
+fn opening_cross(h: &[[f64; 2]]) -> Vec<([f64; 2], [f64; 2])> {
+    let mut out = Vec::new();
+    if h.len() < 3 || h.iter().any(|q| !q[0].is_finite() || !q[1].is_finite()) {
+        return out;
+    }
+    let diagonals = if h.len() == 4 {
+        [(h[0], h[2]), (h[1], h[3])]
+    } else {
+        let (x0, y0, x1, y1) = h.iter().fold((f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |(a, b, c, d), q| (a.min(q[0]), b.min(q[1]), c.max(q[0]), d.max(q[1])));
+        [([x0, y0], [x1, y1]), ([x0, y1], [x1, y0])]
+    };
+    for (a, b) in diagonals {
+        crate::surface_pattern::clip_to_poly(a, b, h, &mut out);
+    }
+    out
+}
+
+/// Dach-Untersicht für die UK-Kote: Dachflächen (absolute Höhen der Oberkante) und Schichtdicke.
+struct RoofUnder {
+    planes: Vec<Vec<[f64; 3]>>,
+    thickness: f64,
+    lines: Vec<[[f64; 2]; 2]>,
+}
+
+impl RoofUnder {
+    /// Unterkante an (x, y): Oberkante der Fläche, die den Punkt enthält, minus die Dicke lotrecht
+    /// gemessen (Schichtdicke senkrecht zur Fläche / cos Neigung). Punkte auf Kanten (First, Grat)
+    /// werden leicht versetzt nochmals geprüft.
+    fn z_at(&self, x: f64, y: f64) -> Option<f64> {
+        const E: f64 = 1e-6;
+        [(0.0, 0.0), (E, 0.0), (-E, 0.0), (0.0, E), (0.0, -E)].iter().find_map(|(dx, dy)| self.z_exact(x + dx, y + dy))
+    }
+
+    fn z_exact(&self, x: f64, y: f64) -> Option<f64> {
+        for pts in &self.planes {
+            let ring: Vec<f64> = pts.iter().flat_map(|q| [q[0], q[1]]).collect();
+            if pts.len() < 3 || !super::pick::point_in_polygon(x, y, &ring) {
+                continue;
+            }
+            let (mut a, mut b, mut c) = (0.0, 0.0, 0.0);
+            for i in 0..pts.len() {
+                let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+                a += (p[1] - q[1]) * (p[2] + q[2]);
+                b += (p[2] - q[2]) * (p[0] + q[0]);
+                c += (p[0] - q[0]) * (p[1] + q[1]);
+            }
+            if c.abs() < 1e-9 {
+                continue;
+            }
+            let top = pts[0][2] - (a * (x - pts[0][0]) + b * (y - pts[0][1])) / c;
+            let k = crate::jsmath::hypot(&[a, b, c]) / c.abs();
+            return Some(top - self.thickness * k);
+        }
+        None
+    }
+}
+
 /// Dächer über der Schnitthöhe (eigenes Geschoss oder Traufe unter `limit`) von unten, sofern keine
 /// tiefere Deckenuntersicht sie verdeckt (Mitte des Traufumrisses unter einer Decke): Traufe, First,
 /// Grate/Kehlen und Knicke ausgezogen, Ansichtsmuster der innersten Schicht, Dachfenster.
-fn roof_soffits(c: &Ctx, cut: f64, limit: f64, soffits: &[Soffit], out: &mut Vec<Primitive>, bounds: &mut Bounds) {
+fn roof_soffits(c: &Ctx, cut: f64, limit: f64, soffits: &[Soffit], out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Vec<RoofUnder> {
     let p = c.p;
+    let mut unders = Vec::new();
     for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| c.shown(&r.category_code)) {
         let rb = p.roof_base_elevation(roof);
         let geo = crate::roof::roof_geometry(&roof.params(), 0.0);
@@ -180,6 +250,12 @@ fn roof_soffits(c: &Ctx, cut: f64, limit: f64, soffits: &[Soffit], out: &mut Vec
             out.push(polygon(merged.ring.iter().map(|q| pv(*q)).collect(), "none", "none", 0.0, no_hatch(), greyed, bridges, Pick::Roof(&roof.id)));
         }
         let layers = p.roof_layers(roof);
+        let thickness = layers.iter().map(|l| l.thickness).filter(|t| t.is_finite() && *t > 0.0).sum::<f64>();
+        unders.push(RoofUnder {
+            planes: geo.planes.iter().map(|pl| pl.iter().map(|q| [q[0], q[1], q[2] + rb]).collect()).collect(),
+            thickness,
+            lines: geo.ridges.iter().chain(geo.hips.iter()).chain(geo.breaks.iter()).copied().collect(),
+        });
         if let Some(comp) = layers.last().filter(|l| !l.component_id.is_empty()).and_then(|l| p.component(&l.component_id)) {
             if let Some((pat, spec)) = comp.surface_pattern.as_ref().and_then(|sp| Some((sp, crate::surface_pattern::spec_of(sp, roof.surface_pattern_angle.unwrap_or(0.0))?))) {
                 let w = pat.weight_mm.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(0.1);
@@ -211,10 +287,56 @@ fn roof_soffits(c: &Ctx, cut: f64, limit: f64, soffits: &[Soffit], out: &mut Vec
             }
         }
     }
+    unders
 }
 
-/// Je Raum des Geschosses: Name und Kote „UK“ der tiefsten Untersicht über dem Stempelpunkt.
-fn room_labels(c: &Ctx, soffits: &[Soffit], out: &mut Vec<Primitive>) {
+/// Tiefste und höchste Dach-Unterkante über dem Raum (Umriss `pts`): die Unterkante ist je Fläche
+/// eben, also liegen die Extreme an den Raumecken, an Schnittpunkten der Raumkanten mit First/Grat/Knick
+/// oder an deren Endpunkten im Raum. Mehrere Dächer: je Punkt das tiefste. `None` ohne Dach darüber.
+fn roof_range(pts: &[[f64; 2]], roofs: &[RoofUnder]) -> Option<(f64, f64)> {
+    let ring: Vec<f64> = pts.iter().flat_map(|q| [q[0], q[1]]).collect();
+    let mut probe: Vec<[f64; 2]> = pts.to_vec();
+    let n = pts.len();
+    for r in roofs {
+        for l in &r.lines {
+            for e in l {
+                if super::pick::point_in_polygon(e[0], e[1], &ring) {
+                    probe.push(*e);
+                }
+            }
+            for i in 0..n {
+                if let Some(q) = seg_cross(pts[i], pts[(i + 1) % n], l[0], l[1]) {
+                    probe.push(q);
+                }
+            }
+        }
+    }
+    let mut range: Option<(f64, f64)> = None;
+    for q in probe {
+        let z = roofs.iter().filter_map(|r| r.z_at(q[0], q[1])).fold(f64::INFINITY, f64::min);
+        if z.is_finite() {
+            range = Some(range.map_or((z, z), |(a, b)| (a.min(z), b.max(z))));
+        }
+    }
+    range
+}
+
+/// Schnittpunkt der Strecken a–b und c–d (ohne parallele).
+fn seg_cross(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> Option<[f64; 2]> {
+    let (rx, ry, sx, sy) = (b[0] - a[0], b[1] - a[1], d[0] - c[0], d[1] - c[1]);
+    let den = rx * sy - ry * sx;
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    let t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den;
+    let u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den;
+    ((-1e-9..=1.0 + 1e-9).contains(&t) && (-1e-9..=1.0 + 1e-9).contains(&u)).then(|| [a[0] + rx * t, a[1] + ry * t])
+}
+
+/// Je Raum des Geschosses: Name und Kote „UK“ der tiefsten Untersicht über dem Stempelpunkt; liegt
+/// dort keine Decke, aber ein Dach (Dach als Decke, oberstes Geschoss), die tiefste und höchste
+/// Dach-Unterkante über dem Raum („UK +2.10 … +4.80“, gleich hoch: eine Kote).
+fn room_labels(c: &Ctx, soffits: &[Soffit], roofs: &[RoofUnder], out: &mut Vec<Primitive>) {
     if c.a.detail == Detail::Grob {
         return;
     }
@@ -223,8 +345,12 @@ fn room_labels(c: &Ctx, soffits: &[Soffit], out: &mut Vec<Primitive>) {
         let at = room.stamp_anchor.unwrap_or(pv(crate::room_area::evaluate(&pts, 0.0).centroid));
         let z = soffits.iter().filter(|s| super::pick::point_in_polygon(at.x, at.y, &s.ring)).map(|s| s.z).fold(f64::INFINITY, f64::min);
         let mut lines = Vec::new();
+        let kote = super::drawings::kote_label;
         if z.is_finite() {
-            lines.push(super::prim::StampLine { text: format!("UK {}", super::drawings::kote_label(z)), align: Align::Center });
+            lines.push(super::prim::StampLine { text: format!("UK {}", kote(z)), align: Align::Center });
+        } else if let Some((lo, hi)) = roof_range(&pts, roofs) {
+            let text = if hi - lo < 0.005 { format!("UK {}", kote(lo)) } else { format!("UK {} … {}", kote(lo), kote(hi)) };
+            lines.push(super::prim::StampLine { text, align: Align::Center });
         }
         out.push(Primitive::Text { at, doc: super::domains::doc_from_text(&room.name), extra_lines: lines, base_pt: LABEL_PT, color: POCHE_STROKE.into(), room_id: Some(room.id.clone()), greyed: Some(c.greyed(&room.category_code)), opacity: None });
     }
@@ -299,6 +425,14 @@ mod tests {
             let my = (q["a"]["y"].as_f64().unwrap() + q["b"]["y"].as_f64().unwrap()) / 2.0;
             assert!(!(mx > o.x + 1.0 + 1e-6 && mx < o.x + 2.0 - 1e-6 && my > o.y + 1.0 + 1e-6 && my < o.y + 3.0 - 1e-6), "Muster im Loch: {mx} {my}");
         }
+        // Aussparung mit Diagonalkreuz (SIA 400): die beiden Eckdiagonalen, fein, ausgezogen.
+        let cross = lines("ceiling-opening-cross");
+        assert_eq!(cross.len(), 2, "{cross:?}");
+        for q in &cross {
+            let (ax, ay, bx, by) = (q["a"]["x"].as_f64().unwrap() - o.x, q["a"]["y"].as_f64().unwrap() - o.y, q["b"]["x"].as_f64().unwrap() - o.x, q["b"]["y"].as_f64().unwrap() - o.y);
+            assert!(((ax - bx).abs() - 1.0).abs() < 1e-9 && ((ay - by).abs() - 2.0).abs() < 1e-9, "Diagonale: {q}");
+            assert!(q.get("dash").is_none_or(|d| d.is_null()));
+        }
     }
 
     #[test]
@@ -311,6 +445,41 @@ mod tests {
         assert!(eaves.iter().all(|q| q.get("dash").is_none_or(|d| d.is_null())), "von unten gesehen ausgezogen");
         // Decke unter dem OG (C1) liegt unter dem Schnitt: keine Untersicht.
         assert!(!json(&r.ceilings).contains("\"ceilingId\":\"C1\""));
+    }
+
+    #[test]
+    fn deckenspiegel_uk_unter_dach_tiefste_und_hoechste() {
+        let mut p = sample();
+        p.rooms.as_mut().unwrap().push(Room { id: "R-og".into(), name: "Estrich".into(), floor_id: "og".into(), category_code: "60".into(), boundary: vec![Vec2 { x: 0.2, y: 0.2 }, Vec2 { x: 4.8, y: 0.2 }, Vec2 { x: 4.8, y: 2.8 }, Vec2 { x: 0.2, y: 2.8 }], ..Default::default() });
+        let r = plan_domains(&p, &args("ds-og")).unwrap();
+        let rooms = serde_json::to_value(&r.rooms).unwrap();
+        let t = rooms.as_array().unwrap().iter().find(|q| q["roomId"] == "R-og").expect("Raum-Kote")["extraLines"][0]["text"].as_str().unwrap().to_string();
+        let parts: Vec<f64> = t.trim_start_matches("UK ").split(" … ").map(|s| s.trim_start_matches('+').parse().unwrap()).collect();
+        assert_eq!(parts.len(), 2, "tiefste und höchste: {t}");
+        assert!(parts[1] > parts[0] + 0.3, "{t}");
+        // Unterkante tiefer als die Oberkante: unter der Traufhöhe des Dachs plus Firsthöhe.
+        let roof = &p.roofs.as_ref().unwrap()[0];
+        let rb = p.roof_base_elevation(roof);
+        let g = crate::roof::roof_geometry(&roof.params(), 0.0);
+        assert!(parts[1] < rb + g.ridge_height - 0.05 && parts[0] > rb - 2.0, "{t} rb {rb}");
+        // Flachdach gleicher Höhe: eine Kote.
+        p.roofs.as_mut().unwrap()[0].shape = RoofShape::Flach;
+        let r = plan_domains(&p, &args("ds-og")).unwrap();
+        let rooms = serde_json::to_value(&r.rooms).unwrap();
+        let t = rooms.as_array().unwrap().iter().find(|q| q["roomId"] == "R-og").unwrap()["extraLines"][0]["text"].as_str().unwrap().to_string();
+        assert!(t.starts_with("UK +") && !t.contains('…'), "{t}");
+    }
+
+    #[test]
+    fn aussparung_kreuz_nicht_viereck() {
+        let l = [[0.0, 0.0], [4.0, 0.0], [4.0, 1.0], [1.0, 1.0], [1.0, 3.0], [0.0, 3.0]];
+        let segs = opening_cross(&l);
+        assert!(!segs.is_empty());
+        for (a, b) in segs {
+            let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+            assert!(crate::surface_pattern::point_in(m, &l), "Stück innen: {a:?} {b:?}");
+        }
+        assert!(opening_cross(&[[0.0, 0.0], [f64::NAN, 1.0], [1.0, 1.0]]).is_empty());
     }
 
     #[test]
