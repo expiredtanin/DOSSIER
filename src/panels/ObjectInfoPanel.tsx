@@ -287,6 +287,12 @@ export function ObjectInfoPanel() {
               onCommit={(v) => host.onSetDrawingTextPaperHeight(v)}
             />
           )}
+          {sel.kind === "drawing2d" && sel.area !== undefined && (
+            <div className="objinfo-field">
+              <span className="objinfo-flabel">{t("objinfo.drawing.area")}</span>
+              <span className="objinfo-fval">{sel.area.toFixed(2)} m²</span>
+            </div>
+          )}
           {drawingShape === "circle" && (
             <DimensionField
               label={t("objinfo.drawing.radius")}

@@ -591,6 +591,7 @@ export const de = {
   "objinfo.ceiling.openings": "Aussparungen",
   "objinfo.ceiling.removeOpening": "Aussparung entfernen",
   "objinfo.ceiling.area": "Fläche",
+  "objinfo.drawing.area": "Fläche",
   "objinfo.ceiling.anchorFloor": "Gebunden",
   "objinfo.ceiling.anchorCustom": "Eigene",
   // ── Öffnungs-Attribute (Object-Info-Panel) ──────────────────────────────

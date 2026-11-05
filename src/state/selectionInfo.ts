@@ -457,6 +457,8 @@ export interface SelectionInfo {
   effectiveHatchId?: string | null;
   /** Ob die Form geschlossen ist (rect/circle/closed polyline) — nur Drawing2D. */
   closed?: boolean;
+  /** Fläche in m² (geschlossene Form: rect/circle/ellipse/Polylinie inkl. Bögen, netto ohne Löcher) — nur Drawing2D. */
+  area?: number;
   /**
    * Ob das Element ein Bild ist (Drawing2D `{shape:"image"}`, Layout-
    * Annotation `kind:"image"` ODER Kontext-Objekt `type:"image"`) — steuert

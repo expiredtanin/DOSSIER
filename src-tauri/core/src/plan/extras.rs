@@ -19,6 +19,8 @@ pub const SITE_PARCEL_CLS: &str = "site-parcel";
 pub const SITE_ALLOWED_CLS: &str = "site-allowed";
 pub const SITE_VIOLATION_FILL: &str = "#d0342c";
 const SITE_VIOLATION_OPACITY: f64 = 0.45;
+/// Profilverstösse ([63]): gleiches Rot, schwächer gefüllt (Bauteil ragt über das Gebäudeprofil).
+const SITE_PROFILE_OPACITY: f64 = 0.25;
 const PARCEL_COLOR: &str = "#1f6f3f";
 const ALLOWED_COLOR: &str = "#2b5fae";
 const PARCEL_DASH: [f64; 4] = [6.0, 1.5, 0.5, 1.5];
@@ -148,6 +150,12 @@ pub fn site_and_shadow(p: &Project, floor: &str, when_ms: Option<f64>) -> (Vec<(
             let rings: Vec<Vec<[f64; 2]>> = poly.iter().map(|r| r.iter().map(|q| [q.x, q.y]).collect()).collect();
             for ring in crate::sun::without_holes(&rings) {
                 violations.push(flat_polygon(ring_pts(&ring), SITE_VIOLATION_FILL, SITE_VIOLATION_OPACITY));
+            }
+        }
+        for poly in &check.profile_violations {
+            let rings: Vec<Vec<[f64; 2]>> = poly.iter().map(|r| r.iter().map(|q| [q.x, q.y]).collect()).collect();
+            for ring in crate::sun::without_holes(&rings) {
+                violations.push(flat_polygon(ring_pts(&ring), SITE_VIOLATION_FILL, SITE_PROFILE_OPACITY));
             }
         }
     }
@@ -506,6 +514,25 @@ mod tests {
 
     fn sample() -> Project {
         serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap()
+    }
+
+    /// [63] Profilverstösse erscheinen im Grundriss (schwächeres Rot); ohne Profil nichts.
+    #[test]
+    fn profilverstoesse_im_grundriss() {
+        let mut p = sample();
+        let floor = ground_floor_id(&p).unwrap().to_string();
+        let rules = |extra: serde_json::Value| {
+            let mut v = serde_json::json!({"parcel": [{"x": -1, "y": -1}, {"x": 6, "y": -1}, {"x": 6, "y": 5}, {"x": -1, "y": 5}], "defaultSetback": 0.0});
+            v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            serde_json::from_value(v).unwrap()
+        };
+        p.site_rules = Some(rules(serde_json::json!({})));
+        let n0 = site_and_shadow(&p, &floor, None).1.len();
+        p.site_rules = Some(rules(serde_json::json!({"profileAngle": 10.0, "profileHeight": 0.01})));
+        let c = crate::site_rules::check_project(&p).unwrap();
+        assert!(c.profile_exceeded);
+        let n1 = site_and_shadow(&p, &floor, None).1.len();
+        assert!(n1 > n0, "{n0} {n1}");
     }
 
     #[test]
