@@ -102,7 +102,7 @@ function withReveals(sec: ReportSection, rows: OpeningScheduleRow[]): ReportSect
   return {
     ...sec,
     columns: [...sec.columns, ...keys.map((name) => t("openings.col.reveal", { name }))],
-    widths: [...sec.widths, ...keys.map(() => 1.4)],
+    widths: [...sec.widths, ...keys.map(() => 1.9)],
     rows: sec.rows.map((row, i) => ({ ...row, cells: [...row.cells, ...keys.map((k) => num(revealArea(rows[i]!, k), 2))] })),
   };
 }
@@ -119,7 +119,7 @@ function windowBase(rows: OpeningScheduleRow[]): ReportSection {
   return {
     heading: t("openings.windows"),
     columns: [t("openings.col.mark"), t("openings.col.type"), t("openings.col.floor"), t("openings.col.rooms"), t("openings.col.width"), t("openings.col.height"), t("openings.col.sill"), t("openings.col.sound"), t("openings.col.u"), t("openings.col.rc"), t("openings.col.ext"), t("openings.col.notes")],
-    widths: [1.4, 2.4, 1.4, 3.2, 1.2, 1.2, 1.2, 1.6, 1.1, 1.1, 1.4, 3],
+    widths: [1.3, 3.4, 1.9, 3, 1.4, 1.4, 1.4, 1.5, 1.3, 1.3, 1.6, 2.6],
     rows: rows.map((r): ReportRow => ({ cells: [r.mark, r.typeName, r.floor, roomsText(r), num(r.width, 2), num(r.height, 2), num(r.sill, 2), r.soundClass, num(r.uValue, 2), r.burglaryClass, externalText(r.external), r.notes] })),
   };
 }
@@ -128,7 +128,7 @@ function doorBase(rows: OpeningScheduleRow[]): ReportSection {
   return {
     heading: t("openings.doors"),
     columns: [t("openings.col.mark"), t("openings.col.type"), t("openings.col.floor"), t("openings.col.rooms"), t("openings.col.width"), t("openings.col.height"), t("openings.col.clearWidth"), t("openings.col.clearHeight"), t("openings.col.swing"), t("openings.col.fire"), t("openings.col.sound"), t("openings.col.u"), t("openings.col.rc"), t("openings.col.ext"), t("openings.col.notes")],
-    widths: [1.4, 2.2, 1.3, 3, 1.1, 1.1, 1.2, 1.2, 2.6, 1.1, 1.5, 1, 1, 1.3, 2.6],
+    widths: [1.3, 3, 1.9, 3, 1.3, 1.3, 1.4, 1.4, 2.6, 1.1, 1.5, 1.1, 1.3, 1.6, 2.4],
     rows: rows.map((r): ReportRow => ({ cells: [r.mark, r.typeName, r.floor, roomsText(r), num(r.width, 2), num(r.height, 2), num(r.clearWidth, 2), num(r.clearHeight, 2), swingText(r), r.fireRating, r.soundClass, num(r.uValue, 2), r.burglaryClass, externalText(r.external), r.notes] })),
   };
 }

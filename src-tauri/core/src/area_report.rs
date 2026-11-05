@@ -239,6 +239,59 @@ fn wrap(text: &str, max_mm: f64, size_pt: f64) -> Vec<String> {
     lines
 }
 
+/// Geschätzte Textbreite in mm (Helvetica: Ziffern 0.556 em, Fett etwas breiter; bewusst grosszügig).
+fn char_w_mm(size_pt: f64, bold: bool) -> f64 {
+    size_pt * 0.3528 * if bold { 0.58 } else { 0.52 }
+}
+
+/// Bricht eine Zelle in Zeilen, die in `avail_mm` passen: an Leerzeichen, überlange Wörter hart.
+fn fit_cell(text: &str, avail_mm: f64, size_pt: f64, bold: bool) -> Vec<String> {
+    let max = (avail_mm / char_w_mm(size_pt, bold)).floor().max(1.0) as usize;
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let push_word = |cur: &mut String, lines: &mut Vec<String>, w: &str| {
+        let mut w: Vec<char> = w.chars().collect();
+        while utf16_len(&w.iter().collect::<String>()) > max {
+            let mut n = 0;
+            let mut take = 0;
+            for (i, c) in w.iter().enumerate() {
+                n += c.len_utf16();
+                if n > max {
+                    break;
+                }
+                take = i + 1;
+            }
+            let take = take.max(1);
+            if !cur.is_empty() {
+                lines.push(std::mem::take(cur));
+            }
+            lines.push(w.drain(..take).collect());
+        }
+        let ws: String = w.iter().collect();
+        if ws.is_empty() {
+            return;
+        }
+        if cur.is_empty() {
+            *cur = ws;
+        } else if utf16_len(cur) + 1 + utf16_len(&ws) <= max {
+            cur.push(' ');
+            cur.push_str(&ws);
+        } else {
+            lines.push(std::mem::replace(cur, ws));
+        }
+    };
+    for w in text.split_whitespace() {
+        push_word(&mut cur, &mut lines, w);
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
 fn text(x: f64, y: f64, s: &str, size: f64, bold: bool, right: bool) -> Prim {
     Prim::Text { x, y, s: s.to_string(), size, bold, right }
 }
@@ -288,7 +341,18 @@ pub fn layout(report: &Report, o: &LayoutOptions) -> Layout {
         let numeric: Vec<bool> = (0..s.columns.len()).map(|i| s.rows.iter().any(|r| matches!(r.cells.get(i), Some(Cell::Num { .. })))).collect();
         // 0 = keine Linie, 1 = oben
         let draw_row = |pages: &mut Vec<Vec<Prim>>, y: &mut f64, cells: &[String], bold: bool, top: bool| {
-            if *y + row_h > height - m {
+            // Zellen auf Spaltenbreite umbrechen; die Zeile wächst mit der höchsten Zelle.
+            let wrapped: Vec<Vec<String>> = cells
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let w = xs.get(i + 1).copied().unwrap_or(f64::NAN) - xs.get(i).copied().unwrap_or(f64::NAN);
+                    if w.is_finite() { fit_cell(c, (w - 3.0).max(2.0), 8.5, bold) } else { vec![c.clone()] }
+                })
+                .collect();
+            let n = wrapped.iter().map(|l| l.len()).max().unwrap_or(1).max(1);
+            let h = if n == 1 { row_h } else { n as f64 * 3.6 + 2.4 };
+            if *y + h > height - m {
                 pages.push(Vec::new());
                 *y = m;
             }
@@ -296,13 +360,15 @@ pub fn layout(report: &Report, o: &LayoutOptions) -> Layout {
             if top {
                 pg.push(Prim::Line { x1: m, y1: *y, x2: m + inner, y2: *y, w: 0.35 });
             }
-            for (i, c) in cells.iter().enumerate() {
+            for (i, lines) in wrapped.iter().enumerate() {
                 let right = numeric.get(i).copied().unwrap_or(false);
                 let xi = xs.get(i).copied().unwrap_or(f64::NAN);
                 let xn = xs.get(i + 1).copied().unwrap_or(f64::NAN);
-                pg.push(text(if right { xn - 1.5 } else { xi + 1.5 }, *y + 4.2, c, 8.5, bold, right));
+                for (k, l) in lines.iter().enumerate() {
+                    pg.push(text(if right { xn - 1.5 } else { xi + 1.5 }, *y + 4.2 + k as f64 * 3.6, l, 8.5, bold, right));
+                }
             }
-            *y += row_h;
+            *y += h;
         };
         draw_row(&mut pages, &mut y, &s.columns, true, false);
         page!().push(Prim::Line { x1: m, y1: y, x2: m + inner, y2: y, w: 0.35 });
@@ -418,6 +484,33 @@ mod tests {
         assert_eq!(p["sections"][0]["rows"][0], json!(["EG", 12.35]));
         assert_eq!(p["sections"][0]["rows"][1], json!(["Σ", null]));
         assert_eq!(p["notes"][0], "Eine Fussnote");
+    }
+
+    #[test]
+    fn lange_zellen_ueberlappen_nicht() {
+        let r: Report = serde_json::from_value(json!({
+            "title": "T", "projectName": "",
+            "sections": [{ "heading": "H", "columns": ["Nr", "Bezeichnung sehr lang", "Mass"], "widths": [1, 1, 1],
+                "rows": [{ "cells": ["EG.01", "Hebeschiebetür Aluminium dreifach verglast mit Oberlicht", { "n": 1234567.891, "d": 2 }] }] }],
+            "notes": []
+        }))
+        .unwrap();
+        let l = layout(&r, &LayoutOptions::default());
+        // Text-Kästen je Grundlinie sammeln: (links, rechts) nach Ausrichtung; keine zwei überlappen.
+        let mut rows: std::collections::BTreeMap<i64, Vec<(f64, f64)>> = Default::default();
+        for p in &l.pages[0] {
+            if let Prim::Text { x, y, s, size, bold, right } = p {
+                let w = utf16_len(s) as f64 * char_w_mm(*size, *bold) * 0.9;
+                let (a, b) = if *right { (x - w, *x) } else { (*x, x + w) };
+                rows.entry((y * 100.0).round() as i64).or_default().push((a, b));
+            }
+        }
+        for (_, mut v) in rows {
+            v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            for w in v.windows(2) {
+                assert!(w[0].1 <= w[1].0, "Überlappung {:?}", w);
+            }
+        }
     }
 
     #[test]
