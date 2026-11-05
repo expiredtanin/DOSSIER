@@ -2095,10 +2095,19 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (`pattern_lines_3d_exploded`, `emitSurfacePatternLines(project, explode)`).
   Offen: nur im Linux-Container geprüft (Zahlen, kein Bild, kein Metal/Tauri); Abzugskörper (truck-Booleans) werden bei
   reiner Abstandsänderung neu gerechnet (Cache ohne Abstand + Verschieben nicht umgesetzt).
-- ◐ **[66] Präsentationspläne mit einem Klick.** · M — 4.11.: Standard-Ansichtsvorlagen (neue Projekte, „Standards
+- ✅ **[66] Präsentationspläne mit einem Klick.** · M — 4.11.: Standard-Ansichtsvorlagen (neue Projekte, „Standards
   laden/aktualisieren"): „Präsentation" (farbig, Schatten, ohne Referenzen/Konstruktion), „Eingabeplan 1:100" und
   „Ausführungsplan 1:50" (schwarz-weiss, fein, Strichstärken nach Massstab) — an Geschoss/Schnitt/Ansicht binden ([34]).
-  Offen: eigener Knopf „Präsentationsplan" (Blatt mit Grundrissen/Ansichten und Vorlage in einem Schritt).
+  5.11.: Knopf „Präsentationsplan" (Layouts-Panel „Mappe", Befehl `praesentation`, Aliase `praesentationsplan`/
+  `presentation`) mit Overlay-Dialog (Geschosse, Ansichten, ein Schnitt, Blattformat/Ausrichtung, Skizzenstil [67]):
+  neues Blatt in EINEM Undo-Schritt — Master passenden Formats (sonst neu, Schriftfeld vom ersten Master), je Ebene ein
+  an „Präsentation" gebundener Ausschnitt + Viewport, Titel „Name 1:N", Nordpfeil und Massstabsbalken beim ersten
+  Grundriss, Schatten der Ansichten nach Vorlage. Massstab/Raster im Kern (`presentation_sheet.rs`, Abfrage
+  `presentationSheet`): grösster aus 1:50/100/200/500/1000, bei dem alle Gruppen (Grundrisse, Ansichten, Schnitt)
+  zeilenweise ohne Überlappung neben dem Schriftfeld Platz haben. Tests: Rust-Packer, vitest (Rahmen auf dem Blatt,
+  keine Überlappung, ein Undo-Schritt), e2e `presentationSheet.spec.ts`. Offen: nur Linux-Container/Chromium geprüft
+  (nicht in Tauri); Titelbreite geschätzt (Massstabsbalken entfällt bei schmalem Rahmen); keine Anpassung der
+  Anordnung von Hand im Dialog.
 - ◐ **[67] Skizzenstil.** · M — 5.11.: `DrawingLevel.sketch` (+ `ViewTemplate.sketch`, über `LEVEL_KEYS` an verknüpfte
   Ansichten): Kern `plan/sketch.rs` bearbeitet beim Schreiben des Plan-Puffers (`extras::Post::sketch`, Grundriss
   `post_for`, Schnitt/Ansicht `sketch_post`) Linien und Polygon-Umrisse nach — leicht gebogen/gewellt, an Enden und
