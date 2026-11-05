@@ -587,7 +587,7 @@ fn tube_along(path: &[V3], radius: f64) -> Option<(Vec<f64>, Vec<u32>)> {
         let bi = cross(tangents[i], normal);
         for k in 0..TUBE_SEGMENTS {
             let a = std::f64::consts::TAU * k as f64 / TUBE_SEGMENTS as f64;
-            let (c, s) = (libm::cos(a) * radius, libm::sin(a) * radius);
+            let (c, s) = (crate::jsnum::cos(a) * radius, crate::jsnum::sin(a) * radius);
             for d in 0..3 {
                 positions.push(path[i][d] + normal[d] * c + bi[d] * s);
             }
