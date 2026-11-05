@@ -15,7 +15,7 @@ const CONTEXT_LINE_MM: f64 = 0.1;
 const SECTION_LINE_CATEGORY: &str = "90";
 const SECTION_LINE_INK: &str = "#1f242c";
 const SECTION_LINE_MM: f64 = 0.18;
-const SECTION_LINE_MARK_MM: f64 = 0.5;
+const SECTION_LINE_MARK_MM: f64 = 0.25;
 const SECTION_LINE_DASH: [f64; 4] = [6.0, 1.5, 0.4, 1.5];
 const SECTION_LABEL_H: f64 = 0.5;
 
@@ -127,10 +127,13 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
     out.append(&mut late);
 }
 
-const TERRAIN_INK: &str = "#7a5b3a";
+/// [140] Gelände/Höhenlinien grau statt braun.
+const TERRAIN_INK: &str = "#6e6e6e";
+/// [140] Kleinster Papierabstand (mm) zwischen Höhenlinien; enger werden Zwischenlinien ausgelassen.
+const CONTOUR_MIN_GAP_MM: f64 = 0.6;
 
 /// [140] Aussenringe der Gebäudegrundfläche (Wände und Körper aller Geschosse vereinigt, ohne Innenhöfe/Räume).
-fn building_rings(p: &Project) -> Vec<Vec<Vec2>> {
+pub(super) fn building_rings(p: &Project) -> Vec<Vec<Vec2>> {
     crate::site_rules::building_footprint(p).into_iter().filter_map(|poly| poly.into_iter().next()).filter(|r| r.len() >= 3).collect()
 }
 
@@ -147,7 +150,7 @@ fn inside(q: Vec2, ring: &[Vec2]) -> bool {
 }
 
 /// Teile der Strecke a–b ausserhalb aller `rings`.
-fn outside(a: Vec2, b: Vec2, rings: &[Vec<Vec2>]) -> Vec<(Vec2, Vec2)> {
+pub(super) fn outside(a: Vec2, b: Vec2, rings: &[Vec<Vec2>]) -> Vec<(Vec2, Vec2)> {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     let (lo_x, hi_x, lo_y, hi_y) = (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y));
     let mut ts = vec![0.0, 1.0];
@@ -193,7 +196,22 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
     let every = t.contour_index_every.filter(|v| v.is_finite() && *v >= 1.0).map_or(5, |v| v.round() as i64);
     let st = crate::excavation::site_terrain(c.p, t);
     let text_h = 0.002 * c.a.scale.max(1.0);
-    for l in crate::terrain::isolines(st.current(), iv, 0.0) {
+    let tin = st.current();
+    let idx = crate::terrain::TinIndex::new(tin);
+    // [140] Papierabstand (mm) benachbarter Höhenlinien am Punkt: Äquidistanz / Gefälle des Dreiecks.
+    let spacing_mm = |x: f64, y: f64| -> f64 {
+        let Some(([a, b, cc], _)) = idx.bary_at(x, y) else { return f64::INFINITY };
+        let (pa, pb, pc) = (tin.xy[a], tin.xy[b], tin.xy[cc]);
+        let (ux, uy, uz) = (pb[0] - pa[0], pb[1] - pa[1], tin.z[b] - tin.z[a]);
+        let (vx, vy, vz) = (pc[0] - pa[0], pc[1] - pa[1], tin.z[cc] - tin.z[a]);
+        let d = ux * vy - vx * uy;
+        if d.abs() < 1e-12 {
+            return f64::INFINITY;
+        }
+        let g = ((uz * vy - vz * uy) / d).hypot((ux * vz - vx * uz) / d);
+        if g > 1e-12 { iv / g * 1000.0 / c.a.scale.max(1.0) } else { f64::INFINITY }
+    };
+    for l in crate::terrain::isolines(tin, iv, 0.0) {
         let k = (l.level / iv).round() as i64;
         let index = k.rem_euclid(every) == 0;
         // [140] Zähllinie mittel (0.18), Höhenlinie fein (0.1): Gelände bleibt unter dem Gebäude zurück.
@@ -210,6 +228,14 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
         for i in 0..segs {
             let (a, b) = (l.pts[i], l.pts[(i + 1) % n]);
             let d = seg_len(i);
+            // [140] Zu eng (< 0.6 mm auf dem Papier): nur jede zweite, bei < 0.3 mm nur die Zähllinien.
+            if !index {
+                let s = spacing_mm((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0);
+                if s < CONTOUR_MIN_GAP_MM && (k.rem_euclid(2) != 0 || 2.0 * s < CONTOUR_MIN_GAP_MM) {
+                    acc += d;
+                    continue;
+                }
+            }
             // Anteile (Bruchteile 0..1) des Segments ausserhalb der Lücke.
             let mut spans = vec![(0.0, 1.0)];
             if let (Some((g0, g1)), true) = (gap, d > 0.0) {
@@ -442,6 +468,31 @@ mod tests {
         let lines: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK => Some((*a, *b)), _ => None }).collect();
         assert!(lines.iter().any(|(a, _)| (a.x - 5.0).abs() < 1e-6), "Höhenlinie ausserhalb fehlt");
         assert!(lines.iter().all(|(a, b)| !((a.x - 15.0).abs() < 1e-6 && (a.y + b.y) / 2.0 > 0.0 && (a.y + b.y) / 2.0 < 10.0)), "Höhenlinie im Haus");
+    }
+
+    /// [140] Steile Stellen (Stützmauer, Böschung): Höhenlinien enger als 0.6 mm auf dem Papier werden
+    /// ausgedünnt (jede zweite, sonst nur Zähllinien); im flachen Teil bleiben alle.
+    #[test]
+    fn hoehenlinien_ausgeduennt_wo_zu_eng() {
+        // x 0..10 flach (z = 0.1 x), x 10..11 steil (z 1 → 11).
+        let t = TerrainMesh {
+            id: "t".into(),
+            positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 1.0, 10.0, 10.0, 1.0, 0.0, 10.0, 0.0, 11.0, 0.0, 11.0, 11.0, 10.0, 11.0],
+            indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0, 1.0, 4.0, 5.0, 1.0, 5.0, 2.0],
+            contour_interval: Some(0.1),
+            ..Default::default()
+        };
+        let p = Project { context: Some(vec![ContextObject::TerrainMesh(t)]), ..Default::default() };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"scale": 100}"#).unwrap();
+        let mut out = Vec::new();
+        plan_context(&Ctx::new(&p, &a), &mut out);
+        let xs: Vec<f64> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK && (a.x - b.x).abs() < 1e-9 => Some(a.x), _ => None }).collect();
+        let flat = xs.iter().filter(|x| **x > 0.5 && **x < 9.5).count();
+        let steep: Vec<f64> = xs.iter().copied().filter(|x| *x > 10.05 && *x < 10.95).collect();
+        assert_eq!(flat, 18, "flach: alle neun Linien (je zwei Dreiecke)");
+        // Steil: Abstand 1 mm = 0.01 mm Papier → nur Zähllinien (jede 5.: z = 1.5, 2 … 10.5).
+        assert!(!steep.is_empty() && steep.len() <= 3 * 19, "{steep:?}");
+        assert!(steep.iter().all(|x| { let z = 1.0 + (x - 10.0) * 10.0; ((z * 2.0).round() - z * 2.0).abs() < 1e-6 }), "nur Zähllinien: {steep:?}");
     }
 
     /// [T6]/[68] Höhenlinien (Zähllinien dicker + beschriftet) und Baugrube (Sohle, Oberkante, Schraffur).

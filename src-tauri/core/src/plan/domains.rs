@@ -16,7 +16,8 @@ use crate::plan::wall_poche::{ceiling_outline_lines, wall_footprint, WallFootpri
 use std::collections::{HashMap, HashSet};
 
 /// Footprint-Farbe der Extrusionen (wie das 3D-Orange).
-const EXTRUSION_STROKE: &str = "#d98c40";
+/// [140] Tusche statt Orange.
+const EXTRUSION_STROKE: &str = "#3a3f47";
 /// Rückfall-Füllung einer Stütze ohne auflösbares Bauteil.
 const COLUMN_FALLBACK_FILL: &str = "#3a3f47";
 /// Alpha-Suffix der (unsichtbaren) Raumfüllung.
@@ -50,6 +51,23 @@ pub struct PlanArgs {
     pub mono: bool,
     /// Zeitpunkt der Schattenstudie (Unix-ms; fehlt/ungültig = kein Schatten).
     pub sun_when: Option<f64>,
+    /// [140] Detailgrad „mittel" ab 1:200 automatisch als „grob" gezeichnet (Raumstempel bleiben, nur
+    /// knapper; ab 1:500 ohne Masslinien).
+    pub auto_coarse: bool,
+}
+
+/// [140] Ab diesem Massstab (1:N) zeichnet der Detailgrad „mittel" wie „grob".
+pub const AUTO_COARSE_FROM: f64 = 200.0;
+/// [140] Ab diesem Massstab (1:N) im automatisch groben Plan: Raumstempel nur mit Namen, keine Masslinien.
+pub const OVERVIEW_FROM: f64 = 500.0;
+
+/// [140] Wirksamer Detailgrad: „mittel" ab 1:200 wie „grob" (zweiter Wert: automatisch vergröbert).
+pub fn effective_detail(requested: Detail, scale: f64) -> (Detail, bool) {
+    if requested == Detail::Mittel && scale >= AUTO_COARSE_FROM {
+        (Detail::Grob, true)
+    } else {
+        (requested, false)
+    }
 }
 
 impl PlanArgs {
@@ -59,22 +77,26 @@ impl PlanArgs {
     pub fn parse(detail: f64, text: &str) -> Result<PlanArgs, String> {
         let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("Plan-Argumente: {e}"))?;
         let set = |k: &str| -> HashSet<String> { v.get(k).and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_default() };
+        let scale = v.get("scale").and_then(|b| b.as_f64()).unwrap_or(super::drawings::DEFAULT_SCALE_DENOMINATOR);
+        let requested = match detail as i64 {
+            0 => Detail::Grob,
+            2 => Detail::Fein,
+            _ => Detail::Mittel,
+        };
+        let (detail, auto_coarse) = effective_detail(requested, scale);
         Ok(PlanArgs {
             floor: v.get("floor").and_then(|f| f.as_str()).unwrap_or_default().to_string(),
-            detail: match detail as i64 {
-                0 => Detail::Grob,
-                2 => Detail::Fein,
-                _ => Detail::Mittel,
-            },
+            detail,
             show: set("show"),
             grey: set("grey"),
             reference_lines: v.get("referenceLines").and_then(|b| b.as_bool()).unwrap_or(false),
             global: v.get("global").and_then(|b| b.as_bool()).unwrap_or(false),
-            scale: v.get("scale").and_then(|b| b.as_f64()).unwrap_or(super::drawings::DEFAULT_SCALE_DENOMINATOR),
+            scale,
             for_print: v.get("forPrint").and_then(|b| b.as_bool()).unwrap_or(false),
             compact: v.get("compact").and_then(|b| b.as_bool()).unwrap_or(false),
             mono: v.get("mono").and_then(|b| b.as_bool()).unwrap_or(false),
             sun_when: v.get("sunWhen").and_then(|b| b.as_f64()),
+            auto_coarse,
         })
     }
 }
@@ -604,12 +626,20 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         let pts: Vec<[f64; 2]> = room.boundary.iter().map(|v| [v.x, v.y]).collect();
         let res = crate::room_area::evaluate(&pts, 0.0);
         out.push(polygon(room.boundary.clone(), &with_alpha(color, ROOM_FILL_ALPHA), color, LAYER_LINE_MM * c.a.detail.layer_factor(), no_hatch(), greyed, None, Pick::Room(&room.id)));
-        if c.a.detail == Detail::Grob {
+        if c.a.detail == Detail::Grob && !c.a.auto_coarse {
             continue;
         }
         let at = room.stamp_anchor.unwrap_or(pv(res.centroid));
         let small = c.a.scale >= ROOM_STAMP_SMALL_FROM;
+        // [140] Übersicht (ab 1:500, automatisch grob): nur der Name.
+        let overview = c.a.auto_coarse && c.a.scale >= OVERVIEW_FROM;
+        // [140] Raumstempel in Tinte (Druck ohne Schwarz-Weiss); Farbe nur aus einer Darstellungsregel
+        // oder aus den Auszeichnungen des Stempel-Texts.
+        let text_color = ov.color.as_deref().unwrap_or(MONO_INK);
         let (doc, extra_lines) = match &room.stamp {
+            _ if overview => (doc_from_text(room.stamp.as_ref().map_or(&room.name, |s| &s.name)), vec![]),
+            // [140] ab 1:200 auch eigene Stempel ohne Nutzungs-/Personenzeile.
+            Some(s) if small => (room_stamp_to_doc(s), room_stamp_extra_lines(&RoomStamp { show_usage: false, occupancy: None, ..s.clone() }, res.net, room.sia_category)),
             Some(s) => (room_stamp_to_doc(s), room_stamp_extra_lines(s, res.net, room.sia_category)),
             None => {
                 let mut lines = vec![StampLine { text: format!("{} m²", to_fixed(res.net, 2)), align: Align::Center }];
@@ -619,7 +649,7 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 (room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)), lines)
             }
         };
-        out.push(Primitive::Text { at, doc, extra_lines, base_pt: if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, color: color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
+        out.push(Primitive::Text { at, doc, extra_lines, base_pt: if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, color: text_color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
     }
 }
 
@@ -954,7 +984,15 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         }
         h ^ cc.drawings.sig.wrapping_mul(0xff51_afd7_ed55_8ccd)
     };
-    let chunks = super::drawings::plan_drawings_chunked(c, revs.item_stamps("drawings2d").unwrap_or(&[]), &mut cc.drawings, salt, have, &mut bounds)?;
+    // [140] Achsraster enden an der Gebäudegrundfläche: ihr Stand folgt auch Wänden, Körpern und Dächern.
+    let stamps = revs.item_stamps("drawings2d").unwrap_or(&[]);
+    let house_rev = ["walls", "extrudedSolids", "roofs"].iter().fold(0u64, |h, k| (h ^ revs.field(k)).wrapping_mul(0x0000_0100_0000_01b3));
+    let stamps: std::borrow::Cow<[u64]> = if house_rev != 0 && c.p.drawings2d.iter().any(|d| matches!(d.geom, crate::model::Drawing2DGeom::Grid { .. })) {
+        c.p.drawings2d.iter().zip(stamps).map(|(d, &st)| if matches!(d.geom, crate::model::Drawing2DGeom::Grid { .. }) { st ^ house_rev.rotate_left(17) } else { st }).collect::<Vec<_>>().into()
+    } else {
+        stamps.into()
+    };
+    let chunks = super::drawings::plan_drawings_chunked(c, &stamps, &mut cc.drawings, salt, have, &mut bounds)?;
     for k in 7..11 {
         put(w, k, &mut segs);
     }
@@ -1000,6 +1038,36 @@ mod tests {
         };
         assert_eq!(stamp(100.0), (ROOM_STAMP_PT, 2));
         assert_eq!(stamp(200.0), (ROOM_STAMP_SMALL_PT, 1));
+        // [140] 1:500 (mittel → automatisch grob): nur der Name; Stempel in Tinte.
+        assert_eq!(stamp(500.0), (ROOM_STAMP_SMALL_PT, 0));
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 100 }).to_string();
+        let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        assert!(r.rooms.iter().all(|q| !matches!(q, Primitive::Text { color, .. } if color != MONO_INK)), "Stempel in Tinte");
+        // Eigener Stempel ab 1:200 ohne Nutzungszeile.
+        let mut q = p.clone();
+        for r in q.rooms.as_mut().unwrap() {
+            r.stamp = Some(RoomStamp { name: r.name.clone(), show_floor_area: true, show_usage: true, occupancy: Some(3.0), ..Default::default() });
+        }
+        let lines = |scale: f64| {
+            let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": scale }).to_string();
+            plan_domains(&q, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().rooms.iter().find_map(|q| match q { Primitive::Text { extra_lines, .. } => Some(extra_lines.len()), _ => None }).unwrap()
+        };
+        assert_eq!((lines(100.0), lines(200.0), lines(500.0)), (3, 1, 0));
+    }
+
+    /// [140] „mittel" ab 1:200 wie „grob" (Wände als Sammelfläche), „fein" bleibt; explizit „grob" ohne Stempel.
+    #[test]
+    fn mittel_ab_1_200_automatisch_grob() {
+        assert_eq!(effective_detail(Detail::Mittel, 100.0), (Detail::Mittel, false));
+        assert_eq!(effective_detail(Detail::Mittel, 200.0), (Detail::Grob, true));
+        assert_eq!(effective_detail(Detail::Fein, 500.0), (Detail::Fein, false));
+        assert_eq!(effective_detail(Detail::Grob, 500.0), (Detail::Grob, false));
+        let p = sample();
+        let rooms = |detail: f64| {
+            let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 200 }).to_string();
+            plan_domains(&p, &PlanArgs::parse(detail, &t).unwrap()).unwrap().rooms.iter().filter(|q| matches!(q, Primitive::Text { .. })).count()
+        };
+        assert!(rooms(1.0) > 0 && rooms(0.0) == 0);
     }
 
     #[test]

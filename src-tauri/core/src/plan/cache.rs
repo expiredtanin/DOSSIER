@@ -133,7 +133,7 @@ impl Clone for PlanCache {
 
 /// Schlüssel eines Argument-Satzes ohne Sichtbarkeit/Dimmen (die wirken je Element).
 pub fn ctx_key(a: &PlanArgs) -> String {
-    format!("{}\u{1}{:?}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}", a.floor, a.detail, a.reference_lines, a.global, a.scale.to_bits(), a.for_print, a.compact, a.mono)
+    format!("{}\u{1}{:?}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}", a.floor, a.detail, a.reference_lines, a.global, a.scale.to_bits(), a.for_print, a.compact, a.mono, a.auto_coarse)
 }
 
 /// Sichtbarkeit und Dimmen als vergleichbarer Text (Mengen sortiert).

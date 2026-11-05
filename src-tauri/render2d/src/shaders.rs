@@ -98,7 +98,10 @@ fn vs_main(in : VsIn) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_main() -> @location(0) vec4<f32> {
-    return globals.color;
+    // [140] Unter 1 Geraete-px gilt die Breite als Deckung: feine Linien werden heller statt alle
+    // gleich 1 px — die Rangfolge der Strichstaerken bleibt auch weit herausgezoomt sichtbar.
+    let cov = clamp(globals.stroke_px * globals.stroke_scale, 0.35, 1.0);
+    return vec4<f32>(globals.color.rgb, globals.color.a * cov);
 }
 "#;
 
@@ -258,7 +261,8 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
         cov_dash = smoothstep(-0.5, 0.5, sdist);
     }
 
-    let a = in.color.a * cov_radial * cov_cap * cov_dash;
+    // [140] Deckung unter 1 Geraete-px wie `LINE_WGSL`.
+    let a = in.color.a * cov_radial * cov_cap * cov_dash * clamp(width_mm * g.stroke_scale, 0.35, 1.0);
     if (a <= 0.002) {
         discard;
     }
@@ -384,7 +388,8 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
         }
     }
     let e = e_in + e_out;
-    var a = globals.color.a;
+    // [140] Deckung unter 1 Geraete-px wie `LINE_WGSL`.
+    var a = globals.color.a * clamp(globals.stroke_px * globals.stroke_scale, 0.35, 1.0);
     if (e > 0.0) {
         // Rundes Strich-Ende (Abstand zum Strich), Kante ~1 px weich wie die Boegen.
         let d = sqrt(e * e + y * y);

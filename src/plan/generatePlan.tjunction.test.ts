@@ -195,7 +195,8 @@ describe("generatePlan — Durchgangswand-Aussparung am Mittelspann-Stoss (Phase
   });
 
   it("unterbricht die Schichtfuge im Merge-Bereich (keine Trennlinie an der Verschmelzungsfläche)", () => {
-    const plan = generatePlan(midSpanProject(), "eg", visible, undefined, "mittel");
+    // „fein": alle Schichten mit Fugen ([140] fasst in „mittel" 1:100 den 15-mm-Putz zusammen).
+    const plan = generatePlan(midSpanProject(), "eg", visible, undefined, "fein");
     // Fugen der Durchgangswand W: layer-joint-Linien parallel zur x-Achse.
     const joints = plan.primitives.filter(
       (p): p is Extract<typeof p, { kind: "line" }> =>

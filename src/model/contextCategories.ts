@@ -53,7 +53,7 @@ export const CONTEXT_PARENT_CATEGORY: ContextCategoryDef = {
 export const TERRAIN_CATEGORY: ContextCategoryDef = {
   code: "02",
   name: "Gelände",
-  color: "#8a9478",
+  color: "#808080",
   lw: 0.13,
 };
 
@@ -84,8 +84,8 @@ export const GENERIC_IMPORT_CATEGORY: ContextCategoryDef = {
 export const IMPORTED_ROOF_CATEGORY: ContextCategoryDef = {
   code: "31",
   name: "Dächer",
-  color: "#7a4a3a",
-  lw: 0.35,
+  color: "#4a4a4a",
+  lw: 0.18,
 };
 
 /**
@@ -95,12 +95,12 @@ export const IMPORTED_ROOF_CATEGORY: ContextCategoryDef = {
  */
 export const GEO_CATEGORY_DEFS: Record<GeoCategory, ContextCategoryDef> = {
   building: { code: "12", name: "Gebäude", color: "#888888", lw: 0.25 },
-  road: { code: "11", name: "Strasse", color: "#a89070", lw: 0.18 },
-  forest: { code: "04", name: "Wald", color: "#3a7a3a", lw: 0.13 },
+  road: { code: "11", name: "Strasse", color: "#808080", lw: 0.18 },
+  forest: { code: "04", name: "Wald", color: "#909090", lw: 0.13 },
   parking: { code: "15", name: "Parkplätze", color: "#a0a0a0", lw: 0.13 },
   railway: { code: "16", name: "Bahn", color: "#606060", lw: 0.18 },
-  water: { code: "17", name: "Gewässer", color: "#5a90b0", lw: 0.13 },
-  green: { code: "18", name: "Grünflächen", color: "#70b070", lw: 0.13 },
+  water: { code: "17", name: "Gewässer", color: "#909090", lw: 0.13 },
+  green: { code: "18", name: "Grünflächen", color: "#a0a0a0", lw: 0.13 },
 };
 
 /**

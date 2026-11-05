@@ -15,20 +15,22 @@ use std::collections::HashMap;
 
 const EDGE_INK: &str = "#2b3039";
 const EDGE_MM: f64 = 0.13;
-/// [140] Silhouette (Umriss aller Bauteile zusammen) mittelstark: hebt den Baukörper von Details ab.
-const SILHOUETTE_MM: f64 = 0.35;
+/// [140] Silhouette (Umriss aller Bauteile zusammen) mittelstark: hebt den Baukörper von Details (0.13) ab;
+/// Terrainlinie 0.25 (grösste Standard-Stärke bei 1:100).
+const SILHOUETTE_MM: f64 = 0.18;
 /// [140] Abstand (m), bis zu dem eine Kante als Teil der Silhouette gilt.
 const SILHOUETTE_TOL: f64 = 2e-3;
-const FRAME_MM: f64 = 0.18;
+const FRAME_MM: f64 = 0.13;
 const GLASS_FILL_MONO: &str = "#c4c8cd";
-const GLASS_FILL_COLOR: &str = "#9fc2d9";
+/// [140] Glas hellgrau statt blau (Farbe nur, wo der Nutzer sie setzt).
+const GLASS_FILL_COLOR: &str = "#d3d8dd";
 const SHADOW_FILL: &str = "#8f959e";
 const OPENING_SHADOW_FILL: &str = "#a7adb5";
 const GROUND_INK: &str = "#1f242c";
-const GROUND_MM: f64 = 0.5;
-const FRAME_FILL_COLOR: &str = "#d9d9d4";
+const GROUND_MM: f64 = 0.25;
+const FRAME_FILL_COLOR: &str = "#dcdcdc";
 const SILL_FILL_COLOR: &str = "#cccccb";
-const DOOR_LEAF_FILL_COLOR: &str = "#ede6d9";
+const DOOR_LEAF_FILL_COLOR: &str = "#ececec";
 const SYMBOL_INK: &str = "#7d858f";
 const ROOF_RGB_FALLBACK: [f64; 3] = [0.72, 0.45, 0.36];
 const EPS: f64 = 1e-6;

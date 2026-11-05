@@ -24,22 +24,23 @@ struct Def {
     lw: f64,
 }
 
+/// [140] Kontext in Grautönen (Tusche-Standard), Farbe nur, wo der Nutzer sie setzt.
 /// „05 Kontext" — Elternkategorie der Kontext-Kategorien.
 const CONTEXT_PARENT: Def = Def { code: "05", name: "Kontext", color: "#707078", lw: 0.13 };
 /// „31 Dächer" bleibt oberste Ebene.
-const IMPORTED_ROOF: Def = Def { code: "31", name: "Dächer", color: "#7a4a3a", lw: 0.35 };
+const IMPORTED_ROOF: Def = Def { code: "31", name: "Dächer", color: "#4a4a4a", lw: 0.18 };
 /// Kinder von „05 Kontext", in dieser Reihenfolge (`NESTED_CONTEXT_CATEGORIES`).
 const NESTED: [Def; 10] = [
-    Def { code: "02", name: "Gelände", color: "#8a9478", lw: 0.13 },
+    Def { code: "02", name: "Gelände", color: "#808080", lw: 0.13 },
     Def { code: "03", name: "Luftbild", color: "#707078", lw: 0.13 },
     Def { code: "10", name: "Situation", color: "#909090", lw: 0.18 },
     Def { code: "12", name: "Gebäude", color: "#888888", lw: 0.25 },
-    Def { code: "11", name: "Strasse", color: "#a89070", lw: 0.18 },
-    Def { code: "04", name: "Wald", color: "#3a7a3a", lw: 0.13 },
+    Def { code: "11", name: "Strasse", color: "#808080", lw: 0.18 },
+    Def { code: "04", name: "Wald", color: "#909090", lw: 0.13 },
     Def { code: "15", name: "Parkplätze", color: "#a0a0a0", lw: 0.13 },
     Def { code: "16", name: "Bahn", color: "#606060", lw: 0.18 },
-    Def { code: "17", name: "Gewässer", color: "#5a90b0", lw: 0.13 },
-    Def { code: "18", name: "Grünflächen", color: "#70b070", lw: 0.13 },
+    Def { code: "17", name: "Gewässer", color: "#909090", lw: 0.13 },
+    Def { code: "18", name: "Grünflächen", color: "#a0a0a0", lw: 0.13 },
 ];
 
 fn category(d: &Def) -> Value {

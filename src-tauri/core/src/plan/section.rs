@@ -20,12 +20,13 @@ use std::collections::{HashMap, HashSet};
 const SECTION_INK: &str = "#1f242c";
 const SECTION_VISIBLE_INK: &str = "#2b3039";
 const SECTION_HIDDEN_INK: &str = "#8a929c";
-/// [140] Umriss der geschnittenen Masse (Vereinigung aller Schnittflächen): schwer wie die Wand im Grundriss.
-const SECTION_CUT_OUTLINE_MM: f64 = 0.5;
+/// [140] Umriss der geschnittenen Masse (Vereinigung aller Schnittflächen): schwer wie die Wand im Grundriss
+/// (grösste Standard-Stärke 0.25 bei 1:100, Entscheid Maintainer).
+const SECTION_CUT_OUTLINE_MM: f64 = 0.25;
 /// [140] Fugen zwischen Schichten/Bauteilen innerhalb der geschnittenen Masse: fein.
 const SECTION_JOINT_MM: f64 = 0.13;
 const SECTION_VISIBLE_MM: f64 = 0.18;
-const SECTION_GROUND_MM: f64 = 0.5;
+const SECTION_GROUND_MM: f64 = 0.25;
 const SECTION_HIDDEN_MM: f64 = 0.13;
 const SECTION_HIDDEN_DASH: [f64; 2] = [0.12, 0.08];
 /// [T6] gewachsenes Terrain im Schnitt: gestrichelt, dünner als das gestaltete.

@@ -776,6 +776,8 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 em.seg(q[q.len() - 1], q[0]);
             }
         }
+        // [140] Übersichtsplan (ab 1:500, Detail „mittel" automatisch grob): keine Masslinien.
+        Drawing2DGeom::Dimension { .. } if c.a.auto_coarse && c.a.scale >= super::domains::OVERVIEW_FROM => {}
         Drawing2DGeom::Dimension { pts, offset, gap_mm, overshoot_mm, tick_len_mm, text_height_mm, line_weight_mm, ext_weight_mm, tick_weight_mm, text_offsets_mm, refs, kind, arc_center } => {
             let mm = |x: f64| mm_to_model(x, scale);
             if let Some(k) = kind {
@@ -873,7 +875,9 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
         }
         Drawing2DGeom::Grid { bubble_mm, .. } => {
             if let Some(spec) = crate::grid::Spec::of(geom) {
-                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), scale);
+                // [140] Achsen enden an der Gebäudegrundfläche (alle Geschosse vereinigt).
+                let house = super::context::building_rings(p);
+                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), scale, &house);
             }
         }
         Drawing2DGeom::Text { at, text: s, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts, paper_height } => {
@@ -1003,7 +1007,7 @@ fn dimension_segment(em: &mut Em, a: Vec2, b: Vec2, offset: f64, st: &DimStyle) 
 }
 
 /// Achsraster ([112]): Achsen strichpunktiert, an den Enden Blasen mit der Beschriftung.
-fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, scale: f64) {
+fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, scale: f64, house: &[Vec<Vec2>]) {
     use crate::grid::Shape;
     let mm = |x: f64| mm_to_model(x, scale);
     let dash = [mm(12.0), mm(2.5), mm(1.5), mm(2.5)];
@@ -1013,7 +1017,11 @@ fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, scale: f64) {
     let text_h = diameter * 0.5;
     for ax in spec.axes() {
         match ax.shape {
-            Shape::Line { a, b } => em.line(v(a.0, a.1), v(b.0, b.1), w, Some(&dash), dash_ref),
+            Shape::Line { a, b } => {
+                for (p0, p1) in super::context::outside(v(a.0, a.1), v(b.0, b.1), house) {
+                    em.line(p0, p1, w, Some(&dash), dash_ref);
+                }
+            }
             Shape::Arc { c, r: rad, a0, a1 } => {
                 let dash_v = Some(dash.to_vec());
                 if a1 - a0 >= std::f64::consts::TAU - 1e-9 {
@@ -1780,6 +1788,25 @@ mod tests {
         let prims = render(&p, grid(true), 100.0);
         assert_eq!(prims.iter().filter(|q| matches!(q, Primitive::Line { .. })).count(), 2);
         assert!(prims.iter().any(|q| matches!(q, Primitive::DrawingArc { r, .. } if (*r - 4.0).abs() < 1e-9)));
+    }
+
+    /// [140] Achsen im Grundriss enden am Gebäude: innerhalb der Gebäudegrundfläche keine Achslinie,
+    /// ausserhalb (bis zu den Blasen) strichpunktiert.
+    #[test]
+    fn achsraster_unterbrochen_im_gebaeude() {
+        let p = project(serde_json::json!({"extrudedSolids": [{"id": "s", "type": "extrudedSolid", "levelId": "eg", "height": 3,
+            "points": [{"x": -1, "y": 1}, {"x": 6, "y": 1}, {"x": 6, "y": 3}, {"x": -1, "y": 3}]}]}));
+        let grid = drawing(serde_json::json!({"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+            "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 5}], "b": [{"label": "A", "pos": 0}, {"label": "B", "pos": 4}], "extend": 1}));
+        let prims = render(&p, grid, 100.0);
+        let segs: Vec<(Vec2, Vec2)> = prims.iter().filter_map(|q| match q { Primitive::Line { a, b, dash: Some(Some(_)), .. } => Some((*a, *b)), _ => None }).collect();
+        // Achsen 1, 2 (senkrecht) je zwei Stücke, A, B (waagrecht, ausserhalb) je eins.
+        assert_eq!(segs.len(), 6, "{segs:?}");
+        for (a, b) in &segs {
+            let m = v((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+            assert!(!(m.x > -1.0 && m.x < 6.0 && m.y > 1.0 && m.y < 3.0), "Achse im Gebäude: {a:?} {b:?}");
+        }
+        assert_eq!(prims.iter().filter(|q| matches!(q, Primitive::DrawingCircle { .. })).count(), 8, "Blasen bleiben");
     }
 
     /// [112] Raster erscheint in jedem Geschoss, bei `levels` nur in den genannten.
