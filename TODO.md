@@ -2129,9 +2129,8 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Glas auf zugewandten Flächen; IFC: IfcOpeningElement im IfcRoof (bzw. IfcSlab) + IfcWindow (Netz). Befehl
   „Dachfenster" (`roofwindow`, Alias dachfenster/oberlicht): ein Klick, 78 × 118 cm, Dach mit dem Punkt im
   Umriss, sonst Decke des Geschosses. Geprüft: Rust-Tests, CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux).
-  Offen: Verschieben/Griffe und Objekt-Info für Dach-Öffnungen (Info zeigt Wand-Felder), Fenster-/Türliste
-  (Geschoss aus der Wand), Löschen des Dachs löscht die Fenster nicht mit (Prüfung meldet den fehlenden Wirt),
-  Eindeckrahmen nur als flacher Ring, Lukarnen, nicht in der Tauri-App geprüft. · M
+  Offen (Stand 5.11.; Verschieben/Griffe, Objekt-Info, Fenster-/Türliste und Löschen mit dem Wirt erledigt, s. u.):
+  Griffe in Schnitt/Ansicht, Eindeckrahmen nur als flacher Ring, Lukarnen, nicht in der Tauri-App geprüft. · M
   - (30.10.) Griffe im Grundriss: Mitte (verschieben = `hostPoint`), Breite quer, Höhe im Gefälle (in der
     Dachebene, Grundriss-Abstand / projizierte Höhenachse); Objekt-Info mit Dachfenster-Feldern (Wirt Dach/Decke +
     Geschoss, Breite/Höhe, Lage X/Y, Drehung nur auf Decken, Neigung, UK/OK) über die Kern-Abfrage
@@ -2140,6 +2139,11 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     eines Dachs/einer Decke (und eines Geschosses mit Decken) löscht deren Fenster im selben Undo-Schritt.
     Geprüft: Rust-/vitest-Tests, CLI-Liste/-Schnitt/-Ansicht/-Grundriss angesehen (Linux). Offen: Griffe nicht
     in Schnitt/Ansicht, nicht in der Tauri-App geprüft. (4.11.: „Alles wählen“ nimmt Dach-/Deckenfenster des Geschosses mit; Ziehen der Mitte bleibt auf der Dach-/Deckenfläche, `clampInside`.)
+  - (5.11.) Verschieben/Spiegeln/Drehen (nur Decken)/Skalieren eines Dachs/einer Decke nimmt deren Öffnungen mit
+    (`hostPoint`, `hostAngle`; Kern `cmd_transform`), Kopie/Reihe kopiert sie mit neuem Wirt. Löschen, Objekt-Info,
+    Fenster-/Türliste und Mittel-Griff (geklemmt) waren schon erledigt (s. 30.10./4.11.). Geprüft: Rust-Test, vitest,
+    e2e roof/openingSchedule (Linux). Offen: Umriss-Griffe eines Dachs können ein Fenster ausserhalb lassen (Prüfung
+    meldet nichts), Wandkopien kopieren ihre Öffnungen weiterhin nicht mit, Lukarnen, Tauri-App.
 - ✅ **[71] U-Wert aus dem Schichtaufbau** (SIA 180 / EN ISO 6946). (30.10.) Kern `u_value.rs`: R = Rsi + Σ d/λ + Rse
   (λ je Bauteil `Component.lambda`, [100]); Wand waagrecht 0.13/0.04, Dach aufwärts 0.10/0.04, Decke abwärts
   0.17/0.04 (Decke: oben → unten, Aussenseite unten); hinterlüftete Schicht (Standard-Luftschicht oder Name mit
