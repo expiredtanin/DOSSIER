@@ -627,6 +627,93 @@ fn spiral_railing(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
     }
 }
 
+/// Handlauf und Pfosten einer L-Treppe: je Gehseite ein durchgehender Rohrzug (Lauf 1 ansteigend,
+/// Podest eben, Lauf 2 ansteigend; Podest-Ecken bei der Aussenseite, an der Innenecke Sprung um eine
+/// Steighöhe), runde Pfosten am Lauf-Anfang, auf jedem Tritt und auf den Podest-Ecken.
+fn l_railing(s: &StairIn, geo: &StairGeometry, idx: usize, out: &mut Vec<Mesh>) {
+    let Some(landing) = geo.landing.as_ref().filter(|l| l.len() == 4) else { return };
+    let tr = &geo.treads;
+    // Lauf 2 beginnt dort, wo der Tritt-Index springt (Podest dazwischen).
+    let Some(split) = (1..tr.len()).find(|&k| tr[k].index != tr[k - 1].index + 1) else { return };
+    if tr.iter().any(|t| t.pts.len() < 4) {
+        return;
+    }
+    let landing: Vec<P> = landing.iter().map(pt).collect();
+    let z_land = s.z_bottom + tr[split].base_rise;
+    let sides: &[bool] = match s.railing {
+        3 => &[true, false],
+        1 => &[true],
+        _ => &[false],
+    };
+    let half = RAIL_THICK / 2.0;
+    let near = |a: P, b: P| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+    let closest = |p: P| {
+        (0..4)
+            .min_by(|&i, &j| {
+                let d = |k: usize| (landing[k][0] - p[0]).powi(2) + (landing[k][1] - p[1]).powi(2);
+                d(i).total_cmp(&d(j))
+            })
+            .unwrap_or(0)
+    };
+    for &left in sides {
+        let (i_start, i_end) = if left { (0, 1) } else { (3, 2) };
+        let start = pt(&tr[0].pts[i_start]);
+        let e = pt(&tr[split - 1].pts[i_end]);
+        let st2 = pt(&tr[split].pts[i_start]);
+        let end = pt(&tr[tr.len() - 1].pts[i_end]);
+        // Podest-Weg von der Lauf-1-Ecke zur Lauf-2-Ecke (kürzerer Bogen; bei Gleichstand über Ecke 2).
+        let (a, b) = (closest(e), closest(st2));
+        let mut corners = vec![landing[a]];
+        if a != b {
+            let fwd = (b + 4 - a) % 4;
+            let step = match fwd {
+                1 => 1,
+                3 => 3,
+                _ => if (a + 1) % 4 == 2 { 1 } else { 3 },
+            };
+            let mut k = a;
+            while k != b {
+                k = (k + step) % 4;
+                corners.push(landing[k]);
+            }
+        }
+        let h = RAIL_HEIGHT;
+        let mut path: Vec<V3> = vec![
+            [start[0], start[1], s.z_bottom + tr[0].base_rise + h],
+            [e[0], e[1], s.z_bottom + tr[split - 1].top_rise + h],
+        ];
+        for c in &corners {
+            path.push([c[0], c[1], z_land + h]);
+        }
+        path.push([st2[0], st2[1], z_land + h]);
+        path.push([end[0], end[1], s.z_bottom + tr[tr.len() - 1].top_rise + h]);
+        // doppelte Punkte (gleiche Lage und Höhe) entfernen; der Sprung an der Innenecke bleibt
+        path.dedup_by(|b, a| near([a[0], a[1]], [b[0], b[1]]) && (a[2] - b[2]).abs() < 1e-9);
+        if let Some((positions, indices)) = tube_along(&path, half) {
+            out.push(Mesh { src: idx, positions, indices });
+        }
+        // Pfosten: Podest-Ecken zuerst, dann Lauf-Anfang und Tritte (ohne Doppelungen in der Lage)
+        let mut posts: Vec<(P, f64)> = corners.iter().map(|c| (*c, z_land)).collect();
+        posts.push((st2, z_land));
+        posts.push((start, s.z_bottom + tr[0].base_rise));
+        for t in tr {
+            posts.push((pt(&t.pts[i_end]), s.z_bottom + t.top_rise));
+        }
+        let mut placed: Vec<P> = Vec::new();
+        for (p, z) in posts {
+            if placed.iter().any(|q| near(*q, p)) {
+                continue;
+            }
+            placed.push(p);
+            if let Some((positions, indices)) =
+                tube_along(&[[p[0], p[1], z], [p[0], p[1], z + h]], half * 0.75)
+            {
+                out.push(Mesh { src: idx, positions, indices });
+            }
+        }
+    }
+}
+
 fn railings_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
     if s.railing == 0 {
         return;
@@ -634,10 +721,13 @@ fn railings_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
     if s.spiral() {
         return spiral_railing(s, idx, out);
     }
+    let Some((geo, _)) = geometry_of(s) else { return };
+    if s.params.shape == "L" {
+        return l_railing(s, &geo, idx, out);
+    }
     if !s.straight() {
         return;
     }
-    let Some((geo, _)) = geometry_of(s) else { return };
     if geo.treads.is_empty() {
         return;
     }
@@ -761,6 +851,84 @@ mod tests {
         assert!(r.iter().all(|m| m.positions.len() == 3 * (2 * TUBE_SEGMENTS + 2)));
         assert_eq!(railings(&straight(2.0, 1.0, 0.0, 0.0)).len(), 12);
         assert!(railings(&straight(2.0, 0.0, 0.0, 0.0)).is_empty());
+    }
+
+    /// L-Treppe: Start (0,0), +x, Lauf 2 m, Lauf2 1.5 m, Wendung `turn`, Breite 1 m, 10 Stufen.
+    fn l_stair(turn: f64, railing: f64) -> Vec<f64> {
+        let nan = f64::NAN;
+        vec![
+            1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.5, turn, nan, nan, nan, nan, 1.0, 10.0, nan, 0.0,
+            0.0, 2.8, 0.0, 0.04, 0.0, 0.0, railing, 0.0,
+        ]
+    }
+
+    fn bbox_z(m: &Mesh) -> (f64, f64) {
+        let zs: Vec<f64> = m.positions.chunks(3).map(|p| p[2]).collect();
+        (zs.iter().cloned().fold(f64::INFINITY, f64::min), zs.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+    }
+
+    #[test]
+    fn l_gelaender_seiten_und_hoehe() {
+        for turn in [1.0, -1.0] {
+            assert!(railings(&l_stair(turn, 0.0)).is_empty());
+            let one = railings(&l_stair(turn, 1.0));
+            let two = railings(&l_stair(turn, 2.0));
+            let both = railings(&l_stair(turn, 3.0));
+            assert!(!one.is_empty() && !two.is_empty());
+            assert_eq!(both.len(), one.len() + two.len());
+            // Handlauf = erstes Netz je Seite: durchgehend vom Anfang (0.9) bis zum Ende (2.8 + 0.9)
+            let (lo, hi) = bbox_z(&one[0]);
+            assert!(lo > 0.9 - 0.03 && lo < 0.9 + 0.03, "{lo}");
+            assert!((hi - (2.8 + 0.9)).abs() < 0.03, "{hi}");
+            // Pfosten: Länge = Handlaufhöhe über Trittoberkante
+            for m in &one[1..] {
+                let (a, b) = bbox_z(m);
+                assert!((b - a - RAIL_HEIGHT).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn l_handlauf_durchgehend_und_ueber_podest_eben() {
+        let buf = l_stair(1.0, 2.0); // rechts = Aussenseite bei Linkswendung
+        let stairs = decode(&buf).unwrap();
+        let s = stairs[0].as_ref().unwrap();
+        let (geo, _) = geometry_of(s).unwrap();
+        let mut out = Vec::new();
+        l_railing(s, &geo, 0, &mut out);
+        let rail = &out[0];
+        // Podesthöhe: Oberkante Podest + 0.9 kommt als Ebene im Handlauf vor
+        let z_land = geo.treads.iter().find(|t| t.index > 2).unwrap().base_rise + RAIL_HEIGHT;
+        let (lo, hi) = bbox_z(rail);
+        assert!(lo < z_land && hi > z_land);
+        // Rohr verbindet sich lückenlos: jeder Ring liegt dicht am nächsten
+        let pos = &rail.positions;
+        let ring = 3 * TUBE_SEGMENTS;
+        let n = (pos.len() / 3 - 2) / TUBE_SEGMENTS;
+        let c = |i: usize| {
+            let (mut x, mut y, mut z) = (0.0, 0.0, 0.0);
+            for k in 0..TUBE_SEGMENTS {
+                x += pos[i * ring + 3 * k];
+                y += pos[i * ring + 3 * k + 1];
+                z += pos[i * ring + 3 * k + 2];
+            }
+            let m = TUBE_SEGMENTS as f64;
+            [x / m, y / m, z / m]
+        };
+        for i in 1..n {
+            let (a, b) = (c(i - 1), c(i));
+            let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+            assert!(d > 1e-6 && d < 2.5, "Lücke {d}");
+        }
+        // Handlaufhöhe über Nase: Tritt 3 (Lauf 1, Index 2) Vorderkante rechts
+        let t = &geo.treads[2];
+        let (px, py) = (t.pts[2].x, t.pts[2].y);
+        let zt = t.top_rise + RAIL_HEIGHT;
+        let (p0, p1) = (c(0), c(1));
+        let f = (px - p0[0]) / (p1[0] - p0[0]);
+        assert!((p0[1] - py).abs() < 1e-6 && (0.0..=1.0).contains(&f));
+        let z_line = p0[2] + f * (p1[2] - p0[2]);
+        assert!((z_line - zt).abs() < 0.03, "Handlauf nicht 0.9 über der Nase: {z_line} vs {zt}");
     }
 
     #[test]
