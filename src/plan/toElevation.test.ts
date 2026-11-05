@@ -359,7 +359,7 @@ describe("toElevation — Öffnungen: Verdeckung + Reveal-Schatten", () => {
       const plan = generateElevationPlan(p, p.drawingLevels[1])!;
       // Glasflächen = weiss/blau gefüllte Polygone mit Kontur, keine Öffnung/Rahmen.
       return plan.primitives.filter(
-        (pr) => pr.kind === "polygon" && pr.fill === "#9fc2d9",
+        (pr) => pr.kind === "polygon" && pr.fill === "#d3d8dd",
       ).length;
     };
     expect(glassCount(1)).toBe(1); // fest, 1 Feld
@@ -405,7 +405,7 @@ describe("toElevation — Öffnungen: Verdeckung + Reveal-Schatten", () => {
       const plan = generateElevationPlan(p, p.drawingLevels[1])!;
       // Glasflächen = weiss/blau gefüllte Polygone mit Kontur, keine Öffnung/Rahmen.
       return plan.primitives.filter(
-        (pr) => pr.kind === "polygon" && pr.fill === "#9fc2d9",
+        (pr) => pr.kind === "polygon" && pr.fill === "#d3d8dd",
       ).length;
     };
     expect(glassCount(1)).toBe(1); // fest, 1 Feld
@@ -504,7 +504,7 @@ describe("Dächer auf L-Grundriss in der Ansicht", () => {
 });
 
 describe("toElevation — Tür-Teilverglasung (glazingRatio)", () => {
-  const GLASS_FILL_COLOR = "#9fc2d9";
+  const GLASS_FILL_COLOR = "#d3d8dd";
   const DOOR_LEAF_FILL_COLOR = "#ede6d9";
 
   function doorProject(dt: {

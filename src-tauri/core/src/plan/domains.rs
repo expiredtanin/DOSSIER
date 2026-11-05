@@ -16,7 +16,8 @@ use crate::plan::wall_poche::{ceiling_outline_lines, wall_footprint, WallFootpri
 use std::collections::{HashMap, HashSet};
 
 /// Footprint-Farbe der Extrusionen (wie das 3D-Orange).
-const EXTRUSION_STROKE: &str = "#d98c40";
+/// [140] Tusche statt Orange.
+const EXTRUSION_STROKE: &str = "#3a3f47";
 /// Rückfall-Füllung einer Stütze ohne auflösbares Bauteil.
 const COLUMN_FALLBACK_FILL: &str = "#3a3f47";
 /// Alpha-Suffix der (unsichtbaren) Raumfüllung.

@@ -119,8 +119,8 @@ const LAYERS: LayerCategory[] = [
       ? {
           ...l,
           children: [
-            { code: "02", name: "Gelände", color: "#8a9478", lw: 0.13, visible: true, locked: false },
-            { code: "07", name: "Baugrube", color: "#a07850", lw: 0.18, visible: true, locked: false },
+            { code: "02", name: "Gelände", color: "#808080", lw: 0.13, visible: true, locked: false },
+            { code: "07", name: "Baugrube", color: "#4a4a4a", lw: 0.18, visible: true, locked: false },
             ...(l.children ?? []),
           ],
         }

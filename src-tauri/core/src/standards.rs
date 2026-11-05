@@ -297,7 +297,7 @@ pub fn block_defs() -> Vec<Value> {
 pub const LIGHT_CATEGORY_CODE: &str = "65";
 
 pub fn light_category() -> Value {
-    json!({"code": LIGHT_CATEGORY_CODE, "name": "Leuchten", "color": "#b08020", "lw": 0.18, "visible": true, "locked": false})
+    json!({"code": LIGHT_CATEGORY_CODE, "name": "Leuchten", "color": "#1a1a1a", "lw": 0.18, "visible": true, "locked": false})
 }
 
 /// Gibt es im Kategorie-Baum schon den Code oder den Namen der Leuchten-Kategorie?

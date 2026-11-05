@@ -7,7 +7,8 @@ use super::section::{LevelSpec, Plane};
 use crate::grid::{bubble_diameter, section_axes, Spec};
 use crate::model::{Drawing2DGeom, GridBubbles, Project, Vec2};
 
-const INK: &str = "#5a5f66";
+/// [140] Achsen in Tusche (schwarz), nicht grau.
+const INK: &str = "#1f242c";
 const AXIS_MM: f64 = 0.18;
 /// Überstand der Achse über die Gebäudehöhe und unter die Bodenlinie (Meter).
 const OVER_TOP: f64 = 0.8;

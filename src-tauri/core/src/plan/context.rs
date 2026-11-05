@@ -127,7 +127,8 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
     out.append(&mut late);
 }
 
-const TERRAIN_INK: &str = "#7a5b3a";
+/// [140] Gelände/Höhenlinien grau statt braun.
+const TERRAIN_INK: &str = "#6e6e6e";
 /// [140] Kleinster Papierabstand (mm) zwischen Höhenlinien; enger werden Zwischenlinien ausgelassen.
 const CONTOUR_MIN_GAP_MM: f64 = 0.6;
 

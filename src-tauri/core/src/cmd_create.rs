@@ -532,7 +532,7 @@ fn room_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
             ("siaCategory", s("HNF")),
             ("name", s(&name)),
             ("boundary", pvs(&boundary)),
-            ("color", category_color(p, code, "#5a7a9a")),
+            ("color", category_color(p, code, "#4a4a4a")),
             ("stampAnchor", pt(e.centroid[0], e.centroid[1])),
             ("stampDoc", doc),
         ])],

@@ -19,7 +19,8 @@ pub const SITE_PICK_RULES: &str = "@siteRules";
 pub const SITE_PICK_VIEW_SHADOWS: &str = "@viewShadows";
 
 /// Füllfarbe der Schattenflächen.
-pub const SUN_SHADOW_FILL: &str = "#3a4a66";
+/// [140] Schatten grau (Tusche-Darstellung), nicht blau.
+pub const SUN_SHADOW_FILL: &str = "#3c3c3c";
 /// [140] Schatten heller (0.28 → 0.16): Bemassung und Stempel darüber bleiben lesbar.
 const SUN_SHADOW_OPACITY: f64 = 0.16;
 /// Linien-Klassen und Füllfarbe des Baurechts.
@@ -29,8 +30,9 @@ pub const SITE_VIOLATION_FILL: &str = "#d0342c";
 const SITE_VIOLATION_OPACITY: f64 = 0.45;
 /// Profilverstösse ([63]): gleiches Rot, schwächer gefüllt (Bauteil ragt über das Gebäudeprofil).
 const SITE_PROFILE_OPACITY: f64 = 0.25;
-const PARCEL_COLOR: &str = "#1f6f3f";
-const ALLOWED_COLOR: &str = "#2b5fae";
+/// [140] Baurecht in Grautönen (Parzelle dunkel, zulässiger Baukörper mittel); Verstösse bleiben rot.
+const PARCEL_COLOR: &str = "#3a3a3a";
+const ALLOWED_COLOR: &str = "#6e6e6e";
 const PARCEL_DASH: [f64; 4] = [6.0, 1.5, 0.5, 1.5];
 const ALLOWED_DASH: [f64; 2] = [2.0, 1.0];
 
