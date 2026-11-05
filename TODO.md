@@ -1773,9 +1773,10 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `kernel2d::region_with_islands`); nur äusserste Inseln (Insel im Loch einer Insel bleibt unberücksichtigt).
   Plan: Füllung/Schraffur als Ring mit Brücken (`merge_holes`, wie Decken) → SVG/PDF/DXF/Render sparen aus,
   Loch-Umrisse gezeichnet; Vorschau zeigt sie. Verschieben/Kopieren/Drehen/Spiegeln/Skalieren, Griff „ganz
-  verschieben", Geo-Verschiebung und Wand-Begrenzung nehmen `holes` mit. Offen: Fläche in der Objekt-Info (gibt
-  es für Polylinien nicht), Auflösen/Versetzen/Trennen/Booleans ignorieren `holes` (Loch geht verloren), Griffe an
-  Lochpunkten; nicht in der App geklickt.
+  verschieben", Geo-Verschiebung und Wand-Begrenzung nehmen `holes` mit. 4.11. Griffe: Loch-Ecken sind Eckgriffe (Index ab 2n, hinter den Bogen-Griffen; bestehende Indizes unverändert).
+  Auflösen liefert zusätzlich die Lochkanten als Linien. Verrunden/Fasen behalten die Löcher; Versetzen, Bruch,
+  Teilen, Trimmen/Verlängern und Verbinden bauen neue Ketten und lassen `holes` bewusst weg (Kopie ohne Löcher, kein
+  Panic). Offen: Fläche in der Objekt-Info (gibt es für Polylinien nicht); nicht in der App geklickt.
 - ✅ **[78] Autotext im Plankopf.** Titelblock löst Projekt/Blatt/Massstab/Datum auf; Plannummer laufend
   oder `Layout.planNumber` (27.10.).
 - ◐ **[79] Publikationssätze.** (30.10.) Modell (Rust, optional): `Project.publishSets` (`PublishSet`: Layouts in Reihenfolge,
