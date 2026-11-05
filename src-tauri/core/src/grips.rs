@@ -456,6 +456,20 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
             if index < n as f64 {
                 return set("pts", replace_at(pts, index, &p));
             }
+            // Loch-Ecken (Index ≥ 2n, geschlossen): nach den Bogen-Griffen, Löcher der Reihe nach.
+            if truthy(field(g, "closed")) && n > 2 && index >= (2 * n) as f64 && field(g, "holes").is_some() {
+                let mut rest = index as usize - 2 * n;
+                let mut holes: Vec<Value> = arr(field(g, "holes")).to_vec();
+                for h in holes.iter_mut() {
+                    let ring = arr(Some(&*h));
+                    if rest < ring.len() {
+                        *h = replace_at(ring, rest as f64, &p);
+                        return set("holes", Value::Array(holes));
+                    }
+                    rest -= ring.len();
+                }
+                return None;
+            }
             // Bulge-Griff (Index ≥ n): Segment-Mitte senkrecht zur Sehne → Bogen dieses Segments.
             let seg = index - n as f64;
             let k = index_in(seg, n)?;
@@ -1088,7 +1102,15 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
         "line" | "xline" | "ray" => vec![p("a"), p("b")],
         "polyline" => {
             let bulge = arr(field(g, "bulge"));
-            polyline_vertices(pts("pts"), truthy(field(g, "closed")), |i| num_or(bulge.get(i), 0.0))
+            let closed = truthy(field(g, "closed"));
+            let mut out = polyline_vertices(pts("pts"), closed, |i| num_or(bulge.get(i), 0.0));
+            // Loch-Ecken hinter den Bogen-Griffen (Index ≥ 2n); nur geschlossene Polylinien tragen Löcher.
+            if closed && out.len() >= 6 {
+                for h in arr(field(g, "holes")) {
+                    out.extend(arr(Some(h)).iter().map(xy));
+                }
+            }
+            out
         }
         "rect" | "image" => rect_corners(g).to_vec(),
         "circle" => {
@@ -1326,6 +1348,21 @@ mod tests {
         }));
         let ops = run(&Lookup::plain(&r), &rq(json!({"op": "ceilingThickness", "id": "c1", "thickness": 0.25, "newId": "ct-1", "newName": "Decke"}))).unwrap().ops;
         assert_eq!(crate::ops::ops_to_json(&ops), r#"[{"kind":"add","collection":"ceilingTypes","items":[{"id":"ct-1","name":"Decke","layers":[{"componentId":"c","thickness":0.25}]}]},{"kind":"replace","collection":"ceilings","entity":{"id":"c1","wallTypeId":"wt","ceilingTypeId":"ct-1"}}]"#);
+    }
+
+    #[test]
+    fn loch_ecken_haben_griffe() {
+        let pl = |o: bool| json!({"id": "d", "geom": {"shape": "polyline", "closed": o, "pts": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}],
+            "holes": [[{"x": 1, "y": 1}, {"x": 2, "y": 1}, {"x": 2, "y": 2}]]}});
+        let v = drawing_vertices(&pl(true)["geom"], 100.0).unwrap();
+        assert_eq!(v.len(), 4 + 4 + 3);
+        assert_eq!(v[9], (2.0, 1.0));
+        let r = drawing_grip(&pl(true), 9.0, 3.0, 1.5, 100.0).unwrap();
+        assert_eq!((r["geom"]["holes"][0][1]["x"].as_f64(), r["geom"]["holes"][0][1]["y"].as_f64()), (Some(3.0), Some(1.5)));
+        assert_eq!(r["geom"]["pts"].as_array().unwrap().len(), 4);
+        assert!(drawing_grip(&pl(true), 11.0, 0.0, 0.0, 100.0).is_none());
+        // Bestehende Indizes bleiben: Bogen-Griff 4..8.
+        assert!(drawing_grip(&pl(true), 5.0, 2.0, -1.0, 100.0).unwrap()["geom"]["bulge"].is_array());
     }
 
     #[test]

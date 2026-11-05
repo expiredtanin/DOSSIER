@@ -546,6 +546,16 @@ fn polyline_geom(pts: Vec<Value>, closed: Option<Value>, bulge: Option<Vec<Value
     Value::Object(m)
 }
 
+/// Löcher der Quell-Polylinie in die neue Geometrie übernehmen (nur Verrunden/Fasen: Ecken des Aussenrings
+/// ändern, Löcher bleiben). Offset, Bruch, Teilen, Trimmen, Verbinden bauen neue Ketten und lassen Löcher
+/// bewusst weg (kein halb passendes Loch an verschobenem Rand).
+fn keep_holes(src: &Value, g: Value) -> Value {
+    match field(src, "holes") {
+        Some(h) if truthy(Some(h)) => with(&g, "holes", h.clone()),
+        _ => g,
+    }
+}
+
 /// Verrunden der Ecke `index` von `id` mit Radius `r` (Bogen als bulge zwischen den Tangentenpunkten).
 pub fn fillet_ops(root: &Map<String, Value>, id: &str, index: f64, r: f64) -> Vec<Op> {
     let Some(h) = corner_of(root, id, index) else { return vec![] };
@@ -559,14 +569,14 @@ pub fn fillet_ops(root: &Map<String, Value>, id: &str, index: f64, r: f64) -> Ve
     if h.index < bulge.len() {
         bulge[h.index] = js_num(b);
     }
-    patch_geom(root, id, polyline_geom(pts, h.c.closed_raw.clone(), Some(bulge)))
+    patch_geom(root, id, keep_holes(find(root, id).map_or(&Value::Null, geom), polyline_geom(pts, h.c.closed_raw.clone(), Some(bulge))))
 }
 
 /// Fasen der Ecke `index` von `id` um `d`.
 pub fn chamfer_ops(root: &Map<String, Value>, id: &str, index: f64, d: f64) -> Vec<Op> {
     let Some(h) = corner_of(root, id, index) else { return vec![] };
     let Some(c) = chamfer_of(&h, d) else { return vec![] };
-    patch_geom(root, id, polyline_geom(split_corner(&h, c.a, c.b), h.c.closed_raw.clone(), None))
+    patch_geom(root, id, keep_holes(find(root, id).map_or(&Value::Null, geom), polyline_geom(split_corner(&h, c.a, c.b), h.c.closed_raw.clone(), None)))
 }
 
 /// Vorschau Verrunden/Fasen einer Ecke (`fillet`: Bogen, sonst die Fasung).
@@ -830,6 +840,22 @@ fn explode_geom(g: &Value, root: &Map<String, Value>) -> Option<Vec<Value>> {
                 }
                 out.push(Value::Object(m));
             }
+            // Löcher (nur geschlossen): ihre Kanten als Linien.
+            if segs == n {
+                for h in arr(field(g, "holes")) {
+                    let ring = arr(Some(h));
+                    if ring.len() < 3 {
+                        continue;
+                    }
+                    for i in 0..ring.len() {
+                        let mut m = Map::new();
+                        m.insert("shape".into(), "line".into());
+                        m.insert("a".into(), ring[i].clone());
+                        m.insert("b".into(), ring[(i + 1) % ring.len()].clone());
+                        out.push(Value::Object(m));
+                    }
+                }
+            }
             Some(out)
         }
         "rect" => {
@@ -1090,6 +1116,27 @@ mod tests {
         let g = &ops[0].to_json()["entity"]["geom"];
         assert_eq!(g["pts"].as_array().unwrap().len(), 4);
         assert!(g["bulge"][1].as_f64().unwrap().abs() > 0.1);
+    }
+
+    #[test]
+    fn aufloesen_polylinie_mit_loch_liefert_lochkanten() {
+        let pl = json!({"id": "p", "geom": {"shape": "polyline", "closed": true, "pts": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}],
+            "holes": [[{"x": 1, "y": 1}, {"x": 2, "y": 1}, {"x": 2, "y": 2}]]}});
+        let r = root(json!({"drawings2d": [pl]}));
+        let ops = explode_ops(&r, &["p".into()], &mut IdGen::new("s"));
+        assert_eq!(ops.last().unwrap().to_json()["items"].as_array().unwrap().len(), 4 + 3);
+    }
+
+    #[test]
+    fn offset_und_verbinden_mit_loch_ohne_panik_loecher_entfallen() {
+        let pl = json!({"id": "p", "geom": {"shape": "polyline", "closed": true, "pts": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}],
+            "holes": [[{"x": 1, "y": 1}, {"x": 2, "y": 1}, {"x": 2, "y": 2}]]}});
+        let r = root(json!({"drawings2d": [pl, line("a", (0.0, 0.0), (1.0, 0.0))]}));
+        let ops = offset_ops(&r, "p", 0.5, &mut IdGen::new("s"));
+        assert_eq!(ops.len(), 1);
+        assert!(ops[0].to_json()["items"][0]["geom"].get("holes").is_none());
+        let _ = join_ops(&r, &["p".into(), "a".into()], &mut IdGen::new("j"));
+        let _ = break_ops(&r, "p", P::new(0.0, 0.0), P::new(2.0, 0.0), &mut IdGen::new("b"));
     }
 
     #[test]
