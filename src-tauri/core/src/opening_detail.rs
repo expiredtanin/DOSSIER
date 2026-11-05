@@ -1,10 +1,10 @@
 //! Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten ([105]) und Schichteinzug
 //! ([106]) — aus Typ und Öffnungs-Übersteuerung aufgelöst, dazu die gemeinsame Geometrie für
-//! Grundriss (`plan/walls.rs`, `plan_walls.rs`), Schnitt (`plan/section.rs`) und 3D (`model3d.rs`,
+//! Grundriss (`plan/walls.rs`, `plan/wall_poche.rs`), Schnitt (`plan/section.rs`) und 3D (`model3d.rs`,
 //! `wall_bands.rs`).
 //!
 //! Koordinaten quer zur Wand: Abstand ab der Aussenfläche (0 = aussen, `total` = innen) — die
-//! Wandschichten liegen in Typ-Reihenfolge von aussen nach innen (wie `plan_walls.rs`, Versatz
+//! Wandschichten liegen in Typ-Reihenfolge von aussen nach innen (wie `plan/wall_poche.rs`, Versatz
 //! `ref_off − total/2 + …` entlang der linken Normalen). In der Öffnung: `x` = Abstand von der
 //! Rohbaukante in die Öffnung hinein (> 0 = in der lichten Öffnung, < 0 = in der Wand).
 

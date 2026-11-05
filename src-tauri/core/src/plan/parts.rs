@@ -1,7 +1,7 @@
 //! Zusammengesetzter Plan ([K3d]): ein Grundriss besteht aus Abschnitten mehrerer Plan-Puffer
 //! (Kern-Puffer aus `planDomains` je Geschoss, dazu ein Puffer mit dem, was TS noch selbst
 //! erzeugt: 2D-Zeichnungen, Schatten, Baurecht, zerlegte Polygone). Die Verbraucher im Kern
-//! (Render-Szene `plan_scene`, Auswahl `plan_pick`, SVG-Export `plan_svg`) laufen über die
+//! (Render-Szene `plan/scene`, Auswahl `plan/pick`, SVG-Export `plan/svg`) laufen über die
 //! Abschnitte in Zeichenreihenfolge; der Index eines Primitivs im zusammengesetzten Plan ist
 //! seine Stelle in `Plan.primitives` auf der TS-Seite.
 //!
