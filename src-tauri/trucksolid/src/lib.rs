@@ -13,6 +13,7 @@ use truck_modeling::*;
 
 pub mod boolean;
 pub mod brep;
+pub mod polyhedron;
 pub use boolean::{boolean_mesh_core, BooleanMeshInput, BooleanMeshOutput};
 
 /// Flaches [x0,y0, x1,y1, …] Array + Höhe → Extrusion.

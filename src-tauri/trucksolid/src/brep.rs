@@ -579,7 +579,8 @@ pub fn build_solid(spec: &SolidSpec) -> Res<Solid> {
         SolidSpec::Cone { cx, cy, z0, r, height } => cone(*cx, *cy, *z0, *r, *height),
         SolidSpec::Torus { center, major, minor } => torus(*center, *major, *minor),
         SolidSpec::Boolean { op, a, b } => bool_op(&build_solid(a)?, &build_solid(b)?, *op),
-        SolidSpec::Mesh { .. } => Err("Mesh-Körper hat keine B-Rep-Beschreibung".into()),
+        // [T1] Geschlossenes Polyeder → ebene B-Rep-Flächen; sonst Fehler (Mesh bleibt Mesh).
+        SolidSpec::Mesh { positions, indices } => crate::polyhedron::polyhedron_solid(positions, indices),
         SolidSpec::Transform { m, solid } => {
             let mat = Matrix4::new(
                 m[0], m[4], m[8], 0.0, m[1], m[5], m[9], 0.0, m[2], m[6], m[10], 0.0, m[3], m[7], m[11], 1.0,
@@ -629,12 +630,16 @@ pub fn mesh_of_solid(solid: &Solid, tol: f64) -> MeshOutput {
 /// Spezifikation → Mesh. Scheitert eine B-Rep-Boolean (koinzidente Flächen), wird die
 /// Operation auf Mesh-Ebene (Manifold, `boolean.rs`) wiederholt — das Ergebnis ist dann ein
 /// reines Dreiecks-Mesh (ohne exakte B-Rep-Flächen; der STEP-Export dieses Körpers entfällt).
+/// Mesh-Körper ([T1]: B-Rep nur für STEP) bleiben hier auf dem Mesh-Weg: Darstellung, Kennwerte
+/// und Booleans (Manifold) rechnen mit dem Original-Netz.
 pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
     match spec {
         SolidSpec::Boolean { op, a, b } => {
-            if let (Ok(sa), Ok(sb)) = (build_solid(a), build_solid(b)) {
-                if let Ok(s) = bool_op(&sa, &sb, *op) {
-                    return Ok(mesh_of_solid(&s, tol));
+            if !contains_mesh(spec) {
+                if let (Ok(sa), Ok(sb)) = (build_solid(a), build_solid(b)) {
+                    if let Ok(s) = bool_op(&sa, &sb, *op) {
+                        return Ok(mesh_of_solid(&s, tol));
+                    }
                 }
             }
             let (ma, mb) = (solid_mesh_core(a, tol)?, solid_mesh_core(b, tol)?);
@@ -657,7 +662,7 @@ pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
             positions: positions.iter().map(|x| *x as f32).collect(),
             indices: indices.clone(),
         }),
-        SolidSpec::Translate { v, solid } if build_solid(spec).is_err() => {
+        SolidSpec::Translate { v, solid } if contains_mesh(solid) || build_solid(spec).is_err() => {
             // Unter einer Verschiebung liegt ein Mesh-Ergebnis (Boolean-Fallback, Mesh): Mesh verschieben.
             let mut m = solid_mesh_core(solid, tol)?;
             for p in m.positions.chunks_mut(3) {
@@ -667,7 +672,7 @@ pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
             }
             Ok(m)
         }
-        SolidSpec::Transform { m: mat, solid } if build_solid(spec).is_err() => {
+        SolidSpec::Transform { m: mat, solid } if contains_mesh(solid) || build_solid(spec).is_err() => {
             let mut m = solid_mesh_core(solid, tol)?;
             for p in m.positions.chunks_mut(3) {
                 let (x, y, z) = (p[0] as f64, p[1] as f64, p[2] as f64);
@@ -686,6 +691,16 @@ pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
             let solid = build_solid(spec)?;
             Ok(mesh_of_solid(&solid, tol))
         }
+    }
+}
+
+/// Enthält die Spezifikation einen Mesh-Körper?
+fn contains_mesh(spec: &SolidSpec) -> bool {
+    match spec {
+        SolidSpec::Mesh { .. } => true,
+        SolidSpec::Boolean { a, b, .. } => contains_mesh(a) || contains_mesh(b),
+        SolidSpec::Transform { solid, .. } | SolidSpec::Translate { solid, .. } => contains_mesh(solid),
+        _ => false,
     }
 }
 
@@ -1179,6 +1194,46 @@ mod tests {
         assert!((volume(&m) - expect).abs() < 0.01, "{}", volume(&m));
     }
 
+    /// [T1] Geschlossenes Dreiecks-Mesh (L-Prisma 2×2 − 1×1, Höhe 3) als Mesh-Spezifikation.
+    fn l_mesh() -> SolidSpec {
+        let ring = [(0., 0.), (2., 0.), (2., 1.), (1., 1.), (1., 2.), (0., 2.)];
+        let mut positions = Vec::new();
+        for z in [0.0, 3.0] {
+            ring.iter().for_each(|&(x, y)| positions.extend_from_slice(&[x, y, z]));
+        }
+        positions.extend_from_slice(&[0.5, 0.5, 0.0, 0.5, 0.5, 3.0]);
+        let mut indices = Vec::new();
+        for i in 0..6u32 {
+            let j = (i + 1) % 6;
+            indices.extend_from_slice(&[12, j, i, 13, 6 + i, 6 + j, i, j, 6 + j, i, 6 + j, 6 + i]);
+        }
+        SolidSpec::Mesh { positions, indices }
+    }
+
+    #[test]
+    fn mesh_koerper_wird_als_b_rep_nach_step_exportiert() {
+        let moved = SolidSpec::Translate { v: [10.0, 0.0, 0.0], solid: Box::new(l_mesh()) };
+        let step = export_step_core(&[l_mesh(), moved.clone()], &StepHeader::default()).unwrap();
+        assert!(step.contains("PLANE"));
+        let back = import_step_core(&step, 0.001).unwrap();
+        assert_eq!(back.len(), 2);
+        for b in &back {
+            let m = MeshOutput { positions: b.positions.clone(), indices: b.indices.clone() };
+            assert!((volume(&m) - 9.0).abs() < 1e-6, "{}", volume(&m));
+        }
+        // Darstellung, Kennwerte und Booleans bleiben auf dem Original-Netz.
+        let m = solid_mesh_core(&moved, 0.01).unwrap();
+        assert_eq!(m.indices.len(), 6 * 12);
+        let p = solid_props_core(&l_mesh(), 0.01).unwrap();
+        assert!((p.volume - 9.0).abs() < 1e-9 && (p.area - 30.0).abs() < 1e-9 && p.closed);
+        // Offenes Netz: kein B-Rep (STEP-Export dieses Körpers scheitert wie bisher), Mesh bleibt.
+        let SolidSpec::Mesh { positions, mut indices } = l_mesh() else { unreachable!() };
+        indices.truncate(indices.len() - 12);
+        let open = SolidSpec::Mesh { positions, indices };
+        assert!(export_step_core(&[open.clone()], &StepHeader::default()).is_err());
+        assert!(solid_mesh_core(&open, 0.01).is_ok());
+    }
+
     #[test]
     fn extrude_json_spezifikation_wird_gelesen() {
         let json = r#"{"kind":"extrude","points":[0,0,1,0,1,1,0,1],"height":2}"#;
@@ -1384,6 +1439,10 @@ mod dbg_step {
         // Mesh unter transform (Spiegelung): Volumen bleibt positiv.
         let mir = SolidSpec::Transform { m: [-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0], solid: Box::new(mesh) };
         assert!((solid_props_core(&mir, 0.01).unwrap().volume - 8.0).abs() < 1e-6);
-        assert!(export_step_core(&[mir], &StepHeader::default()).is_err());
+        // [T1] Geschlossenes Mesh → B-Rep-Polyeder: STEP-Export gelingt (gespiegelt, Volumen bleibt).
+        let step = export_step_core(&[mir], &StepHeader::default()).unwrap();
+        let back = import_step_core(&step, 0.001).unwrap();
+        let bm = MeshOutput { positions: back[0].positions.clone(), indices: back[0].indices.clone() };
+        assert!((solid_props_core(&SolidSpec::Mesh { positions: bm.positions.iter().map(|x| *x as f64).collect(), indices: bm.indices }, 0.01).unwrap().volume - 8.0).abs() < 1e-4);
     }
 }
