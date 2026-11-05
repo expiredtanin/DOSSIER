@@ -2102,11 +2102,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `presentation`) mit Overlay-Dialog (Geschosse, Ansichten, ein Schnitt, Blattformat/Ausrichtung, Skizzenstil [67]):
   neues Blatt in EINEM Undo-Schritt — Master passenden Formats (sonst neu, Schriftfeld vom ersten Master), je Ebene ein
   an „Präsentation" gebundener Ausschnitt + Viewport, Titel „Name 1:N", Nordpfeil und Massstabsbalken beim ersten
-  Grundriss, Schatten der Ansichten nach Vorlage. Massstab/Raster im Kern (`presentation_sheet.rs`, Abfrage
+  Grundriss, Schatten der Ansichten nach Vorlage; Ausschnitte ohne Umgebung (Vermessung `01`, Umgebung `05`+, Kategorien
+  der Kontext-Objekte), sonst bestimmen Parzelle/Gelände Grösse und Massstab (Musterhaus komplex: A1 → 1:200 statt 1:500).
+  Kern dazu: Plan-Ausmass zählt ausgeblendete Kontext-Objekte nicht mehr (Zoom/Viewport-Mitte), Baurecht im Grundriss
+  entfällt bei ausgeblendeter Kategorie „01" (wenn vorhanden). Massstab/Raster im Kern (`presentation_sheet.rs`, Abfrage
   `presentationSheet`): grösster aus 1:50/100/200/500/1000, bei dem alle Gruppen (Grundrisse, Ansichten, Schnitt)
   zeilenweise ohne Überlappung neben dem Schriftfeld Platz haben. Tests: Rust-Packer, vitest (Rahmen auf dem Blatt,
   keine Überlappung, ein Undo-Schritt), e2e `presentationSheet.spec.ts`. Offen: nur Linux-Container/Chromium geprüft
-  (nicht in Tauri); Titelbreite geschätzt (Massstabsbalken entfällt bei schmalem Rahmen); keine Anpassung der
+  (nicht in Tauri); Ausschnitte sind an die Vorlage gebunden — ändert man die Vorlage, kommt die Umgebung zurück;
+  Viewport kann nur auf die Plan-Mitte zentrieren (kein eigener Ausschnitt-Mittelpunkt); Titelbreite geschätzt (Massstabsbalken entfällt bei schmalem Rahmen); keine Anpassung der
   Anordnung von Hand im Dialog.
 - ◐ **[67] Skizzenstil.** · M — 5.11.: `DrawingLevel.sketch` (+ `ViewTemplate.sketch`, über `LEVEL_KEYS` an verknüpfte
   Ansichten): Kern `plan/sketch.rs` bearbeitet beim Schreiben des Plan-Puffers (`extras::Post::sketch`, Grundriss
