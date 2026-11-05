@@ -1188,6 +1188,52 @@ mod tests {
         let spec: SolidSpec = serde_json::from_str(rev).unwrap();
         assert!(solid_mesh_core(&spec, 0.01).is_ok());
     }
+
+    /// Schräge Wand (30°) als Prisma in gedrehter Ebene, Aussparung bündig mit beiden Wandflächen
+    /// (B-Rep scheitert) → Mesh-Fallback. Truck vernetzt jede Fläche einzeln; die Ecken sind dann
+    /// nicht bitgleich und müssen mit Toleranz verschweisst werden ([108], [G7]).
+    fn schraeg(points: Vec<f64>, x0: f64, depth: f64) -> SolidSpec {
+        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        SolidSpec::ExtrudePlane {
+            points,
+            holes: vec![],
+            origin: [x0 * c, x0 * s, 0.0],
+            u_axis: [c, s, 0.0],
+            v_axis: [0.0, 0.0, 1.0],
+            depth,
+        }
+    }
+
+    #[test]
+    fn schraege_wand_minus_gedrehte_aussparung_ueber_mesh_fallback() {
+        let wall = schraeg(ring(0.0, 0.0, 5.0, 2.6), 0.0, -0.3);
+        let void = schraeg(ring(1.0, 0.9, 2.2, 2.1), 0.0, -0.3);
+        let spec = SolidSpec::Boolean { op: BoolKind::Difference, a: Box::new(wall), b: Box::new(void) };
+        let m = solid_mesh_core(&spec, 0.01).unwrap();
+        let expect = (5.0 * 2.6 - 1.2 * 1.2) * 0.3;
+        assert!((volume(&m) - expect).abs() < 1e-4, "{}", volume(&m));
+    }
+
+    #[test]
+    fn gehrte_schraege_wand_minus_aussparung_ueber_mesh_fallback() {
+        // Wand-Grundriss als Trapez (Gehrungen 60°/120° an den Enden), um 30° gedreht.
+        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        let rot = |x: f64, y: f64| [x * c - y * s, x * s + y * c];
+        let t = 0.3 / 60f64.to_radians().tan();
+        let mut pts = vec![];
+        for (x, y) in [(0.0, 0.0), (5.0, 0.0), (5.0 - t, 0.3), (t, 0.3)] {
+            pts.extend_from_slice(&rot(x, y));
+        }
+        let wall = SolidSpec::Extrude { points: pts, holes: vec![], height: 2.6, z0: 0.0, corner_radius: 0.0, chamfer: 0.0 };
+        let void = schraeg(ring(1.0, 0.9, 2.2, 2.1), 0.0, -0.3);
+        // truck-shapeops panikt hier selbst („wire is not simple"), deshalb direkt der Mesh-Pfad.
+        let (ma, mb) = (solid_mesh_core(&wall, 0.01).unwrap(), solid_mesh_core(&void, 0.01).unwrap());
+        let f64s = |v: &[f32]| v.iter().map(|x| *x as f64).collect::<Vec<f64>>();
+        let r = crate::boolean::boolean_mesh_core(&f64s(&ma.positions), &ma.indices, &f64s(&mb.positions), &mb.indices, "difference").unwrap();
+        let m = MeshOutput { positions: r.positions, indices: r.indices };
+        let expect = ((5.0 + 5.0 - 2.0 * t) / 2.0 * 0.3) * 2.6 - 1.2 * 1.2 * 0.3;
+        assert!((volume(&m) - expect).abs() < 1e-4, "{}", volume(&m));
+    }
 }
 
 
