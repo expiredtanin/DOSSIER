@@ -1,5 +1,5 @@
 baseURL = "https://dossier.openbureau.ch/"
-title = "DOSSIER"
+title = "Dossier"
 languageCode = "de-CH"
 defaultContentLanguage = "de"
 enableRobotsTXT = true
@@ -12,13 +12,9 @@ disableKinds = ["taxonomy", "term", "rss"]
     unsafe = true
 
 [params]
-  description = "DOSSIER ist ein Open-Source-CAD für Architektur: 2D-Zeichnen und ein Gebäudemodell aus Bauteilen, aus dem Grundriss, Schnitt, Ansicht und PDF berechnet werden. AGPL-3.0."
+  description = "Dossier ist ein freies CAD für Architektur. Du baust ein Gebäude aus Bauteilen, Grundriss, Schnitt und Ansicht werden daraus berechnet. Open-Source-CAAD unter AGPL-3.0."
   version = "0.1.0"
 
-  repo    = "https://git.openbureau.ch/karim/DOSSIER-STANDALONE"
-  # Gitea-API für das Commit-Log auf der Startseite (wird beim Bauen geholt;
-  # ohne Netz fällt der Abschnitt auf einen Link zurück).
-  commitsApi = "https://git.openbureau.ch/api/v1/repos/karim/DOSSIER-STANDALONE/commits?limit=12&stat=false&verification=false&files=false"
-  plugin  = "https://git.openbureau.ch/karim/dossier"
-  bureau  = "https://openbureau.ch"
-  forum   = "https://dossier.openbureau.ch/forum"
+  repo     = "https://github.com/expiredtanin/DOSSIER"
+  releases = "https://github.com/expiredtanin/DOSSIER/releases"
+  bureau   = "https://openbureau.ch"
