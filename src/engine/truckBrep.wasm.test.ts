@@ -128,4 +128,21 @@ describe("trucksolid-WASM", () => {
     // Das Modul lebt weiter (kein Abbruch).
     expect(volume(build(wall))).toBeCloseTo((l - e / 2) * d * h, 6);
   }, 30_000);
+  it("[T1] Geschlossenes Dreiecks-Mesh → B-Rep-Polyeder im STEP; offenes Mesh wird abgelehnt", () => {
+    // Würfel 2 m aus 12 Dreiecken mit je eigenen Ecken (Verschweissen nötig).
+    const quads = [
+      [[0, 0, 0], [0, 2, 0], [2, 2, 0], [2, 0, 0]], [[0, 0, 2], [2, 0, 2], [2, 2, 2], [0, 2, 2]],
+      [[0, 0, 0], [2, 0, 0], [2, 0, 2], [0, 0, 2]], [[0, 2, 0], [0, 2, 2], [2, 2, 2], [2, 2, 0]],
+      [[0, 0, 0], [0, 0, 2], [0, 2, 2], [0, 2, 0]], [[2, 0, 0], [2, 2, 0], [2, 2, 2], [2, 0, 2]],
+    ];
+    const positions = quads.flat(2);
+    const indices = quads.flatMap((_, q) => [0, 1, 2, 0, 2, 3].map((k) => q * 4 + k));
+    const step: string = mod.export_step(JSON.stringify({ solids: [{ kind: "mesh", positions, indices }], fileName: "m.stp" }));
+    expect(step.match(/= PLANE\(/g)).toHaveLength(6); // sechs ebene Flächen statt zwölf Dreiecke
+    expect(volume(stepBodies(mod.import_step_flat(step, 0.0005))[0])).toBeCloseTo(8, 6);
+    const open = { kind: "mesh", positions, indices: indices.slice(0, -6) };
+    expect(() => mod.export_step(JSON.stringify({ solids: [open] }))).toThrow();
+    // Darstellung bleibt das Original-Netz.
+    expect(build({ kind: "mesh", positions, indices }).indices).toHaveLength(36);
+  }, 60_000);
 });

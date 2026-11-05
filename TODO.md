@@ -1623,7 +1623,19 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 
 - ✅ truck 0.6, B-Rep-Grundkörper, Booleans mit Mesh-Fallback, Transformation, STEP-Export und -Import,
   Kennwerte, Kollisionsprüfung, `mesh`-Spec.
-- ○ **[T1] Polyeder-Körper** (`try_attach_plane` → Shell → Solid). · M
+- ◐ **[T1] Polyeder-Körper** (5.11.) · M
+  `trucksolid::polyhedron`: geschlossenes Dreiecks-Mesh (`mesh`-Spec) → truck-B-Rep: Ecken verschweissen,
+  entartete/doppelte Dreiecke verwerfen (gegenläufige Paare = Innenhaut heben sich auf), Kanten-Mannigfaltigkeit
+  prüfen, nach aussen wenden, komplanare Nachbardreiecke zu ebenen Flächen (mit Löchern) zusammenfassen,
+  kollineare Zwischenpunkte zwischen zwei Flächen entfernen; nur `try_*`-Konstruktoren (kein Panic).
+  `build_solid(Mesh)` liefert das Polyeder → STEP-Export von Mesh-Körpern als ebene B-Rep-Flächen. Darstellung,
+  Kennwerte und Booleans bleiben auf dem Original-Netz (`contains_mesh`, Booleans weiter über Manifold).
+  Rückfall (Fehler wie bisher): offen/nicht mannigfaltig, T-Stösse, mehrere Teile/Hohlräume, Fläche berührt sich
+  an einer Ecke, > 200 000 Dreiecke. Tests: Rust (Würfel 12 Dreiecke → 6 Flächen, L-Prisma mit Fächerdeckeln,
+  Rahmen mit Loch, offen/Unsinn, STEP-Roundtrip), vitest gegen das truck-WASM. Offen: mehrteilige Netze und
+  Hohlräume als mehrere Shells; importierte Kontext-Meshes (`ImportedMesh`) gehen nicht in den Projekt-STEP-Export
+  (`solid_specs.rs`) — Entscheid offen; Komplanarität streng (1e-9 × Ausdehnung), f32-Importe ergeben ggf. mehr
+  Flächen. Nur im Linux-Container geprüft, nicht in der Tauri-App.
 - ◐ **[T2] Bogenwände** (30.10., im eigenen Kern statt truck) · L
   Modell `Wall.bulge` (optional; Modell-Bulge wie Polylinien: positiv = Scheitel links der Sehne). Kern
   `wall_arc.rs`: Bogen, Abwicklung (`Unroll`), Sehnen-Zerlegung (Pfeil ≤ 1 mm, ≤ 7.5°). **Verschneidung**
