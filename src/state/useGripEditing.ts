@@ -7,15 +7,30 @@
 
 import { useRef, useState, type RefObject } from "react";
 import { useEventBundle, useSameData } from "./useEvent";
-import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
-import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Room, Stair, Vec2 } from "../model/types";
+import { leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
+import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Room, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { bulgeArcPoints, drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo, wallArcBand } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
 import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
+import {
+  coincidentGripPoints,
+  excavationGripPoints,
+  gripAxisLock,
+  gripEdgeTarget,
+  gripPolar,
+  gripPolarPoint,
+  openingGripPoint,
+  openingSheetSlide,
+  openingSlidePosition,
+  sheetHeightDrag,
+  stairMoveHandle,
+  wallGripPoints,
+  type GripLocks,
+} from "../core";
 import { areaMovePreview, drawingMovePreview } from "../tools/transform";
 import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
-import { applyAngleConstraint, computeSnap } from "../tools/snapping";
+import { computeSnap } from "../tools/snapping";
 import { useCommandTabShortcut } from "./useKeyboardShortcuts";
 import { sheetOwnerOutlines } from "../tools/sheetSnapGeometry";
 import type { BodyTarget } from "../views/plan/PlanView";
@@ -32,18 +47,15 @@ export interface GripEditFieldsState {
   active: boolean;
 }
 
-/** Scheitel eines Bogens a→b (Modell-Bulge: Pfeilhöhe = halbe Sehne · bulge, links der Sehne). */
-function arcApex(a: Vec2, b: Vec2, bulge: number): Vec2 {
-  const h = Math.hypot(b.x - a.x, b.y - a.y) / 2;
-  return add(scale(add(a, b), 0.5), scale(normalize(leftNormal(sub(b, a))), h * bulge));
-}
-
-/** Griff-Punkte einer Baugrube: Umriss-Ecken, dann der Sohlen-Griff (Schwerpunkt, y + Sohlenhöhe; Kern `grips.rs`). */
-export function excavationGripPoints(e: Excavation): Vec2[] {
-  const n = Math.max(1, e.outline.length);
-  const cx = e.outline.reduce((a, q) => a + q.x, 0) / n;
-  const cy = e.outline.reduce((a, q) => a + q.y, 0) / n;
-  return [...e.outline, { x: cx, y: cy + e.bottom }];
+/** Länge/Winkel-Felder des Befehlsfelds (Live-Werte `live`, gelockte aus `ed.locks`). */
+function polarFields(
+  ed: { active: "length" | "angle"; locks: GripLocks },
+  live: { length: number; angleDeg: number },
+): GripEditFieldsState[] {
+  return [
+    { id: "length", labelKey: "cmd.field.length", value: ed.locks.length ?? live.length, locked: ed.locks.length != null, active: ed.active === "length" },
+    { id: "angle", labelKey: "cmd.field.angle", value: ed.locks.angle ?? live.angleDeg, locked: ed.locks.angle != null, active: ed.active === "angle" },
+  ];
 }
 
 export function useGripEditing(opts: {
@@ -154,15 +166,8 @@ export function useGripEditing(opts: {
   const { walls: selectedWallIds, drawings: selectedDrawingIds } = selection;
   const groupChanges = opts.groupChanges ?? ((fn: () => void) => fn());
 
-  // Bewegpunkt (Move-Handle) einer Treppe: liegt auf der Treppe (Mitte des
-  // ersten Laufs bei gerade/L, Zentrum bei Wendel) und verschiebt beim Ziehen
-  // die GANZE Treppe (moveStairBy mit dem Delta). Ein einzelner, gut sichtbarer
-  // Griff — analog zum Öffnungs-Mittelpunkt.
-  const stairMoveHandle = (st: Stair): Vec2 => {
-    if (st.shape === "spiral") return st.center ?? st.start;
-    const d = normalize(st.dir);
-    return add(st.start, scale(d, st.runLength / 2));
-  };
+  // Bewegpunkt einer Treppe (`stairMoveHandle`, Kern `grip_drag.rs`): liegt auf der Treppe und verschiebt
+  // beim Ziehen die GANZE Treppe (moveStairBy mit dem Delta) — analog zum Öffnungs-Mittelpunkt.
 
   // Welchem Element + lokalem Vertex-Index ein Griff im flachen `grips`-Array
   // gehört (Mehrfachauswahl, Nutzer-Report: Griffe verschwanden komplett,
@@ -263,8 +268,7 @@ export function useGripEditing(opts: {
       }
       const w = op && project.walls.find((x) => x.id === op.hostWallId);
       if (op && w) {
-        const axis = normalize(sub(w.end, w.start));
-        const pt = add(w.start, scale(axis, op.position + op.width / 2));
+        const pt = openingGripPoint(w, op);
         gripOwners.push({ localIndex: 0 });
         gripOwnerRange.push([0, 0]);
         return [pt];
@@ -344,7 +348,7 @@ export function useGripEditing(opts: {
       for (const id of selectedWallIds) {
         const w = project.walls.find((x) => x.id === id);
         // Bogenwand ([T2]): dritter Griff im Bogenscheitel (zieht den Bogen durch den Punkt).
-        if (w) pushGroup(w.bulge ? [w.start, w.end, arcApex(w.start, w.end, w.bulge)] : [w.start, w.end], { wallId: id });
+        if (w) pushGroup(wallGripPoints(w), { wallId: id });
       }
     }
     return out;
@@ -455,10 +459,7 @@ export function useGripEditing(opts: {
   // mitgeführt (gemeinsame Ecke bleibt verbunden). Lazy beim ersten Move-Event
   // bestimmt (Snapshot der Selektion), je Drag in onGripEnd zurückgesetzt. null =
   // noch nicht bestimmt.
-  const moveCoincidentRef = useRef<
-    | { drawingId: string | null; wallId: string | null; index: number; pos: Vec2 }[]
-    | null
-  >(null);
+  const moveCoincidentRef = useRef<{ drawingId: string | null; wallId: string | null; index: number; pos: Vec2 }[] | null>(null);
   // Eckpunkte eines selektierten Elements (Wand: start/end; 2D: drawingVertices).
   const elementCorners = (drawingId: string | null, wallId: string | null): Vec2[] => {
     if (drawingId) {
@@ -471,42 +472,23 @@ export function useGripEditing(opts: {
     }
     return [];
   };
-  // Koinzidente Sibling-Vertices (unter den ÜBRIGEN gewählten Elementen) an JEDER
-  // Ecke des verschobenen Elements. Toleranz wie beim 3D-Drag (gemeinsame Ecke).
-  const COINCIDENT_TOL_2D = 0.05; // m
-  const findMoveCoincident2D = (
-    selfDrawingId: string | null,
-    selfWallId: string | null,
-  ): { drawingId: string | null; wallId: string | null; index: number; pos: Vec2 }[] => {
+  // Koinzidente Sibling-Vertices (unter den ÜBRIGEN gewählten Elementen) an JEDER Ecke des verschobenen
+  // Elements (Kern `coincidentGripPoints`, Toleranz wie beim 3D-Drag): hier nur die Kandidaten sammeln.
+  type CoincidentVertex = { drawingId: string | null; wallId: string | null; index: number; pos: Vec2 };
+  const findMoveCoincident2D = (selfDrawingId: string | null, selfWallId: string | null): CoincidentVertex[] => {
     const corners = elementCorners(selfDrawingId, selfWallId);
     if (corners.length === 0) return [];
-    const near = (p: Vec2, q: Vec2) => Math.hypot(p.x - q.x, p.y - q.y) <= COINCIDENT_TOL_2D;
-    const seen = new Set<string>();
-    const out: { drawingId: string | null; wallId: string | null; index: number; pos: Vec2 }[] = [];
-    const add2 = (drawingId: string | null, wallId: string | null, index: number, pos: Vec2) => {
-      const key = `${drawingId ?? ""}|${wallId ?? ""}|${index}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push({ drawingId, wallId, index, pos: { ...pos } });
-    };
-    for (const corner of corners) {
-      for (const id of selectedWallIds) {
-        if (id === selfWallId) continue;
-        const w = project.walls.find((x) => x.id === id);
-        if (!w) continue;
-        if (near(corner, w.start)) add2(null, id, 0, w.start);
-        if (near(corner, w.end)) add2(null, id, 1, w.end);
-      }
-      for (const id of selectedDrawingIds) {
-        if (id === selfDrawingId) continue;
-        const d = project.drawings2d.find((x) => x.id === id);
-        if (!d) continue;
-        drawingVertices(d, scaleDenominator).forEach((v, i) => {
-          if (near(corner, v)) add2(id, null, i, v);
-        });
-      }
+    const owners: { drawingId: string | null; wallId: string | null }[] = [];
+    const groups: Vec2[][] = [];
+    for (const id of selectedWallIds) {
+      const w = id !== selfWallId ? project.walls.find((x) => x.id === id) : undefined;
+      if (w) { owners.push({ drawingId: null, wallId: id }); groups.push([w.start, w.end]); }
     }
-    return out;
+    for (const id of selectedDrawingIds) {
+      const d = id !== selfDrawingId ? project.drawings2d.find((x) => x.id === id) : undefined;
+      if (d) { owners.push({ drawingId: id, wallId: null }); groups.push(drawingVertices(d, scaleDenominator)); }
+    }
+    return coincidentGripPoints(corners, groups).map(({ group, index }) => ({ ...owners[group], index, pos: { ...groups[group][index] } }));
   };
 
   // Editieren läuft AD-HOC (gripHandlers → moveGripOf), NICHT durch die Engine.
@@ -557,47 +539,15 @@ export function useGripEditing(opts: {
   // mitdriften).
   const gripOriginRef = useRef<Vec2 | null>(null);
 
-  // Endpunkt aus Anker + (gelockten/Live-)Länge/Winkel — wie lineEndFromFields,
-  // hier für den Vertex-Drag. Ungelockte Größen folgen dem rohen Cursor `raw`.
-  const gripEditPoint = (
-    anchor: Vec2,
-    locks: { length?: number; angle?: number },
-    raw: Vec2,
-  ): Vec2 => {
-    const DEG = Math.PI / 180;
-    const dx = raw.x - anchor.x;
-    const dy = raw.y - anchor.y;
-    const length = locks.length != null ? locks.length : Math.hypot(dx, dy);
-    const angleDeg = locks.angle != null ? locks.angle : (Math.atan2(dy, dx) * 180) / Math.PI;
-    const a = angleDeg * DEG;
-    return { x: anchor.x + Math.cos(a) * length, y: anchor.y + Math.sin(a) * length };
-  };
+  // Endpunkt aus Anker + (gelockten/Live-)Länge/Winkel (Kern `gripPolarPoint`) — wie lineEndFromFields.
+  const gripEditPoint = gripPolarPoint;
 
   // Felder fürs Befehlsfeld während des Vertex-Drags (Live ODER gelockt).
   const gripEditFields = (): GripEditFieldsState[] => {
     const ge = gripEdit;
     const info = gripDragInfoRef.current;
     if (!ge || !info) return [];
-    const dx = info.raw.x - ge.anchor.x;
-    const dy = info.raw.y - ge.anchor.y;
-    const liveLen = Math.hypot(dx, dy);
-    const liveAng = ((((Math.atan2(dy, dx) * 180) / Math.PI) % 360) + 360) % 360;
-    return [
-      {
-        id: "length",
-        labelKey: "cmd.field.length",
-        value: ge.locks.length ?? liveLen,
-        locked: ge.locks.length != null,
-        active: ge.active === "length",
-      },
-      {
-        id: "angle",
-        labelKey: "cmd.field.angle",
-        value: ge.locks.angle ?? liveAng,
-        locked: ge.locks.angle != null,
-        active: ge.active === "angle",
-      },
-    ];
+    return polarFields(ge, gripPolar(ge.anchor, info.raw));
   };
 
   // Fixer Bezug (Anker) für Länge/Winkel eines gezogenen Punkt-Griffs. Normal
@@ -621,30 +571,12 @@ export function useGripEditing(opts: {
     return refIndex != null ? grips[refIndex] : null;
   };
 
-  // Die beiden (fixen) Polygon-Nachbarn eines gezogenen Punkt-Griffs — für die
-  // Flucht-Kandidaten unten. Anders als `neighborGripIndex` (EIN Nachbar,
-  // reicht für Länge/Winkel-Anker) werden hier BEIDE gebraucht: ein Vielecks-
-  // Eckpunkt hängt an ZWEI Kanten, jede liefert eine eigene mögliche Flucht-
-  // Richtung. Kennt geschlossene Ringe (rect/geschlossene Polylinie/Raum/
-  // Decke — Nachbar 0/n-1 wickelt um) vs. offene Ketten (offene Polylinie/
-  // Linie — Enden haben nur einen Nachbarn). Kreis/Bogen/Wand/Öffnung/Treppe
-  // haben keine Polygon-Nachbarn (kein Vielecks-Eckpunkt) → {null,null}.
-  const ringNeighborPts = (
-    pts: Vec2[],
-    i: number,
-    closed: boolean,
-  ): { prev: Vec2 | null; next: Vec2 | null } => {
-    const n = pts.length;
-    const prevIdx = i > 0 ? i - 1 : closed ? n - 1 : null;
-    const nextIdx = i < n - 1 ? i + 1 : closed ? 0 : null;
-    return {
-      prev: prevIdx != null && prevIdx !== i ? pts[prevIdx] : null,
-      next: nextIdx != null && nextIdx !== i && nextIdx !== prevIdx ? pts[nextIdx] : null,
-    };
-  };
-  const resolvePolygonNeighbors = (index: number): { prev: Vec2 | null; next: Vec2 | null } => {
+  // Punkte + Ring-Art des Elements eines gezogenen Punkt-Griffs — für die Flucht-Kandidaten des Shift-
+  // Achsen-Locks (Kern `gripAxisLock`: Welt-H/V plus die Flucht der beiden fixen Nachbarkanten). Geschlossen:
+  // rect/geschlossene Polylinie/Raum/Decke (Nachbar 0/n-1 wickelt um); offen: Polylinie/Linie. Kreis/Bogen/
+  // Wand/Öffnung/Treppe haben keine Polygon-Nachbarn → null.
+  const resolvePolygonRing = (index: number): { pts: Vec2[]; index: number; closed: boolean } | null => {
     const owner = gripOwners[index];
-    const none = { prev: null, next: null };
     if (!owner?.drawingId && !owner?.wallId) {
       // Raum/Decke (exklusiv) — kein Owner, `localIndex` fehlt dann auch, also
       // ist der flache `index` selbst der Ring-Index.
@@ -655,44 +587,18 @@ export function useGripEditing(opts: {
         : selectedRoom
         ? selectedRoom.boundary
         : null;
-      return pts ? ringNeighborPts(pts, owner?.localIndex ?? index, true) : none;
+      return pts ? { pts, index: owner?.localIndex ?? index, closed: true } : null;
     }
-    if (owner.wallId) return none; // Wand: nur 2 Punkte, kein Vielecks-Nachbar
-    const d = project.drawings2d.find((x) => x.id === owner.drawingId);
-    const g = d?.geom;
-    if (!g) return none;
-    if (g.shape === "polyline" || g.shape === "spline")
-      return ringNeighborPts(g.pts, owner.localIndex, !!g.closed);
+    if (owner.wallId) return null; // Wand: nur 2 Punkte, kein Vielecks-Nachbar
+    const g = project.drawings2d.find((x) => x.id === owner.drawingId)?.geom;
+    if (!g) return null;
+    const i = owner.localIndex;
+    if (g.shape === "polyline" || g.shape === "spline") return { pts: g.pts, index: i, closed: !!g.closed };
     if (g.shape === "rect" || g.shape === "image") {
-      const corners = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-      return ringNeighborPts(corners, owner.localIndex, true);
+      return { pts: [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }], index: i, closed: true };
     }
-    if (g.shape === "line") return ringNeighborPts([g.a, g.b], owner.localIndex, false);
-    return none; // circle/arc: kein Vielecks-Eckpunkt
-  };
-
-  // Rohen Cursor `raw` auf die nächstliegende von mehreren Kandidaten-Achsen
-  // projizieren (jeweils Stützpunkt + Richtung) — "nächstliegend" = kleinster
-  // senkrechter Abstand von `raw` zur (unendlich verlängerten) Achse. Deckt
-  // Shift-Ortho (Welt-H/V) UND Flucht-Snap (Richtung anliegender, fixer
-  // Kanten) in einem einheitlichen Mechanismus ab.
-  const closestAxisPoint = (raw: Vec2, candidates: { point: Vec2; dir: Vec2 }[]): Vec2 | null => {
-    let best: Vec2 | null = null;
-    let bestDist = Infinity;
-    for (const c of candidates) {
-      const len = Math.hypot(c.dir.x, c.dir.y);
-      if (len < 1e-9) continue; // entartete Richtung (koinzidenter Nachbar) → überspringen
-      const u = { x: c.dir.x / len, y: c.dir.y / len };
-      const rel = sub(raw, c.point);
-      const t = rel.x * u.x + rel.y * u.y;
-      const proj = add(c.point, scale(u, t));
-      const dist = Math.hypot(raw.x - proj.x, raw.y - proj.y);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = proj;
-      }
-    }
-    return best;
+    if (g.shape === "line") return { pts: [g.a, g.b], index: i, closed: false };
+    return null; // circle/arc: kein Vielecks-Eckpunkt
   };
 
   // Stabiler Ref auf cycleGripEditField (der globale Tab-Handler hat leere Deps).
@@ -716,11 +622,8 @@ export function useGripEditing(opts: {
     if (!anchor) return; // ohne Anker keine polare Eingabe möglich
     setGripEdit((prev) => {
       if (!prev) {
-        const frozen = grips[info.index];
-        const dx = frozen.x - anchor.x;
-        const dy = frozen.y - anchor.y;
-        const angle = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
-        return { anchor, active: "length", locks: { length: Math.hypot(dx, dy), angle } };
+        const { length, angleDeg: angle } = gripPolar(anchor, grips[info.index]);
+        return { anchor, active: "length", locks: { length, angle } };
       }
       const active = prev.active === "length" ? "angle" : "length";
       const locks = { ...prev.locks };
@@ -767,19 +670,9 @@ export function useGripEditing(opts: {
   // Letzter roher Cursor + der gezogene Kanten-Griff (Momentaufnahme vom Grab).
   const edgeDragInfoRef = useRef<{ edge: EdgeGrip; raw: Vec2 } | null>(null);
 
-  // Zielpunkt aus Anker + (gelockten/Live-)Werten — bei freien Kanten wie ein
-  // Punkt-Griff (polar), bei geführten Kanten nur entlang der festen Normale.
-  const edgeEditPoint = (
-    edge: EdgeGrip,
-    anchor: Vec2,
-    locks: { length?: number; angle?: number },
-    raw: Vec2,
-  ): Vec2 => {
-    if (edge.free) return gripEditPoint(anchor, locks, raw);
-    const live = dot(sub(raw, anchor), edge.normal);
-    const len = locks.length != null ? locks.length : live;
-    return add(anchor, scale(edge.normal, len));
-  };
+  // Zielpunkt aus Anker (= `edge.mid`) + (gelockten/Live-)Werten — bei freien Kanten wie ein Punkt-Griff
+  // (polar), bei geführten Kanten nur entlang der festen Normale (Kern `gripEdgeTarget`).
+  const edgeEditPoint = (edge: EdgeGrip, locks: GripLocks, raw: Vec2): Vec2 => gripEdgeTarget(edge, raw, { locks });
 
   // Felder fürs Befehlsfeld während des Kanten-Drags. Geführte Kanten zeigen
   // NUR "Länge" (kein Winkel — der ist durch die feste Normale vorgegeben).
@@ -788,38 +681,11 @@ export function useGripEditing(opts: {
     const info = edgeDragInfoRef.current;
     if (!ee || !info) return [];
     const { edge, raw } = info;
+    const live = gripPolar(ee.anchor, raw, edge.normal);
     if (!edge.free) {
-      const live = dot(sub(raw, ee.anchor), edge.normal);
-      return [
-        {
-          id: "length",
-          labelKey: "cmd.field.length",
-          value: ee.locks.length ?? live,
-          locked: ee.locks.length != null,
-          active: true,
-        },
-      ];
+      return [{ id: "length", labelKey: "cmd.field.length", value: ee.locks.length ?? live.offset, locked: ee.locks.length != null, active: true }];
     }
-    const dx = raw.x - ee.anchor.x;
-    const dy = raw.y - ee.anchor.y;
-    const liveLen = Math.hypot(dx, dy);
-    const liveAng = ((((Math.atan2(dy, dx) * 180) / Math.PI) % 360) + 360) % 360;
-    return [
-      {
-        id: "length",
-        labelKey: "cmd.field.length",
-        value: ee.locks.length ?? liveLen,
-        locked: ee.locks.length != null,
-        active: ee.active === "length",
-      },
-      {
-        id: "angle",
-        labelKey: "cmd.field.angle",
-        value: ee.locks.angle ?? liveAng,
-        locked: ee.locks.angle != null,
-        active: ee.active === "angle",
-      },
-    ];
+    return polarFields(ee, live);
   };
 
   const cycleEdgeEditFieldRef = useRef<() => void>(() => {});
@@ -835,15 +701,9 @@ export function useGripEditing(opts: {
     setEdgeEdit((prev) => {
       if (!prev) {
         const anchor = edge.mid;
-        const frozen = edgeEditPoint(edge, anchor, {}, raw);
-        const dx = frozen.x - anchor.x;
-        const dy = frozen.y - anchor.y;
-        if (edge.free) {
-          const angle = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
-          return { anchor, active: "length", locks: { length: Math.hypot(dx, dy), angle } };
-        }
-        const offset = dx * edge.normal.x + dy * edge.normal.y;
-        return { anchor, active: "length", locks: { length: offset } };
+        const frozen = gripPolar(anchor, edgeEditPoint(edge, {}, raw), edge.normal);
+        if (edge.free) return { anchor, active: "length", locks: { length: frozen.length, angle: frozen.angleDeg } };
+        return { anchor, active: "length", locks: { length: frozen.offset } };
       }
       if (!edge.free) return prev; // geführte Kante: nur ein Feld, nichts zu zykeln
       const active = prev.active === "length" ? "angle" : "length";
@@ -877,7 +737,7 @@ export function useGripEditing(opts: {
     const locks = { ...ee.locks, [ee.active]: value };
     const next = edge.free ? (ee.active === "length" ? "angle" : "length") : ee.active;
     setEdgeEdit({ ...ee, locks, active: next });
-    const pt = edgeEditPoint(edge, ee.anchor, locks, raw);
+    const pt = edgeEditPoint(edge, locks, raw);
     applyEdgeToward(edge, ee.anchor, pt);
   };
 
@@ -906,16 +766,8 @@ export function useGripEditing(opts: {
         return;
       }
       const w = op && project.walls.find((x) => x.id === op.hostWallId);
-      if (op && w) {
-        const d = sub(w.end, w.start);
-        const len = Math.hypot(d.x, d.y);
-        if (len > 1e-9) {
-          const axis = scale(d, 1 / len);
-          const t = dot(sub(pt, w.start), axis);
-          const pos = Math.max(0, Math.min(len - op.width, t - op.width / 2));
-          updateOpening(op.id, { position: pos });
-        }
-      }
+      const pos = op && w ? openingSlidePosition(w, op, pt) : null;
+      if (op && pos != null) updateOpening(op.id, { position: pos });
       return;
     }
     // Treppe: den Bewegpunkt verfolgen → ganze Treppe um das Delta (Ziel −
@@ -1135,23 +987,16 @@ export function useGripEditing(opts: {
   const hudFor = (index: number, pt: Vec2): NonNullable<ToolDraft["hud"]> | undefined => {
     const anchor = resolveGripAnchor(index);
     if (!anchor) return undefined;
-    const dx = pt.x - anchor.x;
-    const dy = pt.y - anchor.y;
-    const angleDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
-    return { at: pt, length: Math.hypot(dx, dy), angleDeg };
+    const { length, angleDeg } = gripPolar(anchor, pt);
+    return { at: pt, length, angleDeg };
   };
   // Dasselbe für einen gezogenen Kanten-Griff: freie Kanten zeigen Länge+Winkel
   // (wie ein Punkt-Griff), geführte Kanten nur EINEN Wert (Abstand entlang der
   // Normale) — dafür reicht das HUD-Schema nicht (length+angleDeg gehören
   // zusammen), daher als freier Text `Δ: …m`.
   const edgeHudFor = (edge: EdgeGrip, anchor: Vec2, pt: Vec2): NonNullable<ToolDraft["hud"]> => {
-    const dx = pt.x - anchor.x;
-    const dy = pt.y - anchor.y;
-    if (edge.free) {
-      const angleDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
-      return { at: pt, length: Math.hypot(dx, dy), angleDeg };
-    }
-    const offset = dx * edge.normal.x + dy * edge.normal.y;
+    const { length, angleDeg, offset } = gripPolar(anchor, pt, edge.normal);
+    if (edge.free) return { at: pt, length, angleDeg };
     return { at: pt, text: `Δ: ${offset.toFixed(3)}m` };
   };
 
@@ -1235,15 +1080,11 @@ export function useGripEditing(opts: {
     const op = (project.openings ?? []).find((o) => o.id === openingId);
     const w = op && project.walls.find((x) => x.id === op.hostWallId);
     if (!op || !w || op.locked) return;
-    const axis = normalize(sub(w.end, w.start));
-    const factor = dot(sh.uAxis, axis);
-    if (Math.abs(factor) < 0.15) return;
     const prevDu = sheetDuRef.current && sheetDuRef.current.id === openingId ? sheetDuRef.current.du : 0;
-    const len = Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
-    // Auf die Wand klemmen (Öffnung bleibt drin) — auch die Vorschau.
-    const rawPos = op.position + (prevDu + delta.x) * factor;
-    const pos = Math.max(0, Math.min(len - op.width, rawPos));
-    const du = (pos - op.position) / factor;
+    // Auf die Wand geklemmt (Öffnung bleibt drin) — auch die Vorschau.
+    const slide = openingSheetSlide(w, op, sh.uAxis, prevDu + delta.x);
+    if (!slide) return;
+    const { position: pos, du } = slide;
     sheetDuRef.current = { id: openingId, du };
     pendingOpeningMoveRef.current = { id: openingId, position: pos };
     const preview: DraftShape[] = sheetOwnerOutlines(sh.levelId, "opening", openingId).map((pts) => ({
@@ -1260,23 +1101,9 @@ export function useGripEditing(opts: {
       if (!modelEditable && sheet) {
         const g = sheetHeightGrips[index];
         if (!g) return;
-        const v = mods.ctrl ? raw.y : Math.round(raw.y * 100) / 100; // 1-cm-Raster, Strg = frei
-        let newTop = g.top;
-        let newBottom = g.bottom;
-        if (g.kind === "wallTop") {
-          newTop = Math.max(g.base + 0.3, v);
-          pendingSheetHeightRef.current = { kind: "wall", id: g.id, patch: { height: Math.round((newTop - g.base) * 1000) / 1000 } };
-        } else if (g.kind === "openingTop") {
-          newTop = Math.max(g.bottom + 0.2, v);
-          pendingSheetHeightRef.current = { kind: "opening", id: g.id, patch: { height: Math.round((newTop - g.bottom) * 1000) / 1000 } };
-        } else {
-          newBottom = Math.min(g.top - 0.2, Math.max(g.base, v));
-          pendingSheetHeightRef.current = {
-            kind: "opening",
-            id: g.id,
-            patch: { sillHeight: Math.round((newBottom - g.base) * 1000) / 1000, height: Math.round((g.top - newBottom) * 1000) / 1000 },
-          };
-        }
+        // 1-cm-Raster, Strg = frei; Mindestmasse und mm-Rundung im Kern (`sheetHeightDrag`).
+        const { top: newTop, bottom: newBottom, patch } = sheetHeightDrag(g.kind, g, raw.y, !!mods.ctrl);
+        pendingSheetHeightRef.current = { kind: g.kind === "wallTop" ? "wall" : "opening", id: g.id, patch };
         const bottom = g.kind === "wallTop" ? g.bottom : newBottom;
         setDraft({
           preview: [{
@@ -1327,17 +1154,9 @@ export function useGripEditing(opts: {
       // dominiert (kein Snap), damit die Endkoordinate garantiert eine Achse
       // trifft — identisch zum bisherigen Ortho-Verhalten.
       if (mods.shift && anchor) {
-        const candidates: { point: Vec2; dir: Vec2 }[] = [
-          { point: anchor, dir: { x: 1, y: 0 } },
-          { point: anchor, dir: { x: 0, y: 1 } },
-        ];
         const origin = gripOriginRef.current;
-        if (origin) {
-          const { prev, next } = resolvePolygonNeighbors(index);
-          if (prev) candidates.push({ point: prev, dir: sub(origin, prev) });
-          if (next) candidates.push({ point: next, dir: sub(next, origin) });
-        }
-        const pt = closestAxisPoint(raw, candidates) ?? applyAngleConstraint(anchor, raw, 90);
+        const ring = origin ? resolvePolygonRing(index) : null;
+        const pt = gripAxisLock(raw, anchor, origin, ring?.pts ?? null, ring?.index ?? -1, ring?.closed ?? false);
         applyGrip(index, pt);
         setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, pt) });
         return;
@@ -1475,49 +1294,27 @@ export function useGripEditing(opts: {
       // `locks` ist ab dem Öffnen (Tab) immer befüllt (s. cycleEdgeEditField),
       // die Maus wirkt also erst wieder, sobald ein Feld per Tab gelöst wurde.
       if (ee && (ee.locks.length != null || ee.locks.angle != null)) {
-        const pt = edgeEditPoint(edge, anchor, ee.locks, raw);
+        const pt = edgeEditPoint(edge, ee.locks, raw);
         applyEdgeToward(edge, anchor, pt);
         setDraft({ preview: edgePreviewShapes(), vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
         return;
       }
+      // Raster nur ohne Strg und bei eingeschaltetem Raster-Snap.
+      const grid = !mods.ctrl && snap.enabled && snap.grid && snap.gridSize > 0 ? snap.gridSize : 0;
       if (edge.free) {
-        // Keine Geometrie-Snap-Projektion (keine feste Kanten-Normale, an die
-        // sich ein gefangener Punkt anlehnen könnte) — der Cursor bewegt den
-        // Zielpunkt direkt, nur Ortho/Raster wirken.
-        let pt = raw;
-        if (mods.shift) {
-          const dx = raw.x - anchor.x;
-          const dy = raw.y - anchor.y;
-          pt = Math.abs(dx) >= Math.abs(dy) ? { x: raw.x, y: anchor.y } : { x: anchor.x, y: raw.y };
-        }
-        const gs = snap.gridSize;
-        if (!mods.ctrl && snap.enabled && snap.grid && gs > 0) {
-          const dx = Math.round((pt.x - anchor.x) / gs) * gs;
-          const dy = Math.round((pt.y - anchor.y) / gs) * gs;
-          pt = { x: anchor.x + dx, y: anchor.y + dy };
-        }
+        // Keine Geometrie-Snap-Projektion (keine feste Kanten-Normale, an die sich ein gefangener Punkt
+        // anlehnen könnte) — der Cursor bewegt den Zielpunkt direkt, nur Ortho/Raster wirken (Kern).
+        const pt = gripEdgeTarget(edge, raw, { shift: mods.shift, grid });
         applyEdgeToward(edge, anchor, pt);
         setDraft({ preview: edgePreviewShapes(), vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
         return;
       }
-      // Cursor zuerst durch die Snap-Engine schicken (Ctrl unterdrückt Snap
-      // wie überall sonst, siehe computeSnap). Ein GEOMETRIE-Snap (Endpunkt/
-      // Mittelpunkt/Schnittpunkt/…, nicht Raster/Ortho) liefert den gefangenen
-      // Punkt, der dann auf die Außennormale projiziert wird — so rastet die
-      // Kante an reale Geometrie statt nur ans Raster.
+      // Cursor zuerst durch die Snap-Engine schicken (Ctrl unterdrückt Snap wie überall sonst, siehe
+      // computeSnap). Ein GEOMETRIE-Snap (Endpunkt/Mittelpunkt/Schnittpunkt/…, nicht Raster/Ortho) liefert den
+      // gefangenen Punkt, den der Kern auf die Aussennormale projiziert (vor dem Raster).
       const snapResult = snapFor(raw, pxPerMeter, mods);
       const isGeometrySnap = !!snapResult && snapResult.kind !== "grid" && snapResult.kind !== "ortho";
-      const cursor = isGeometrySnap ? snapResult!.point : raw;
-      // Senkrechte Projektion von (Cursor − Anker) auf die Außennormale.
-      const rel = sub(cursor, anchor);
-      let offset = rel.x * edge.normal.x + rel.y * edge.normal.y;
-      // Raster-Schritt (Snap) nur, wenn kein Geometrie-Snap gefangen wurde —
-      // sonst gewinnt der gefangene Punkt.
-      const step = snap.gridSize;
-      if (!isGeometrySnap && !mods.ctrl && snap.enabled && snap.grid && step > 0) {
-        offset = Math.round(offset / step) * step;
-      }
-      const pt = add(anchor, scale(edge.normal, offset));
+      const pt = gripEdgeTarget(edge, raw, { grid, snapped: isGeometrySnap ? snapResult!.point : null });
       applyEdgeToward(edge, anchor, pt);
       setDraft({
         preview: edgePreviewShapes(),

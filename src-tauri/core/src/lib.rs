@@ -94,6 +94,7 @@ pub use dossier_hatch::ugrid;
 pub mod wasm_alloc;
 pub mod text_layout;
 pub mod grips;
+pub mod grip_drag;
 pub mod json_util;
 pub mod selection_info;
 pub mod project_refs;

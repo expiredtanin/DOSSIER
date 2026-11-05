@@ -38,6 +38,7 @@ mod parametric_walls;
 mod reorder;
 mod text_layout;
 mod grips;
+mod grip_drag;
 mod project_refs;
 mod commands;
 mod import;
