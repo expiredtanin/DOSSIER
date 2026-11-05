@@ -1420,12 +1420,19 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // (Gelände in der Ansicht) verdeckt dagegen wie bisher.
   const hitTest = (clientX: number, clientY: number): number | null => {
     const v = clientToView(clientX, clientY, view);
+    // Unter einem Gelände-/Baugruben-Band zählt die leere Innenfläche einer 2D-Kontur (z. B. Parzelle) nicht:
+    // dort meint der Klick das Gelände (die Kontur bleibt über ihre Linie wählbar) — wie vor [137].
     const pick = getPick();
+    let underBand = false;
     for (const i of pick.polygonsAt(viewToModel(v.x, v.y))) {
       const p = pick.prim(i);
       if (p?.kind !== "polygon") continue;
-      if (p.wallId || p.drawingId || p.ceilingId || p.openingId || p.stairId || p.roomId || p.extrudedSolidId || p.columnId || p.roofId) return i;
+      if (p.wallId || p.drawingId || p.ceilingId || p.openingId || p.stairId || p.roomId || p.extrudedSolidId || p.columnId || p.roofId) {
+        const emptyArea = p.drawingId && p.fill === "none" && (!p.hatch || p.hatch.pattern === "none");
+        return underBand && emptyArea ? null : i;
+      }
       if ((p.contextObjectId || p.sectionLineId) && p.fill !== "none") return i;
+      if (p.contextObjectId && !p.contextObjectId.startsWith("@")) underBand = true;
     }
     return null;
   };
