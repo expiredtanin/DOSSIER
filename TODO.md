@@ -2719,6 +2719,36 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   1:200 alle Zeilen; ein Geschoss in 1:500 braucht Detail „grob" (sonst Stempel/Masse übereinander — die CLI rechnet
   immer „mittel"); gestapelte Höhenlinien an Stützmauer/Baugrube wirken als brauner Balken. Nur Linux/CLI-SVG + Chromium geprüft,
   nicht in der Tauri-App (Bildschirm-Modus nicht angesehen). · M
+- ◐ **[141] Wandecken im Grundriss.** (5.11., Maintainer: „Warum sind die Wandecken nicht verbunden?") Befund an
+  allen Wandknoten beider Beispiele (`:beispiel`, `:musterhaus-komplex`, jedes Geschoss, CLI-SVG 1:50 mit Schraffur,
+  Ausschnitt je Knoten in Chromium): (1) Wand mit Fenster-Schichteinzug ([106], Raster-Pfad `adjusted_segment`)
+  zeichnete ihre Gehrung als dicke Umrisslinie quer über die Ecke (fast jede Aussenecke des Musterhauses komplex,
+  auch Bogen–Gerade); (2) Knoten mit ≥ 3 Enden: ein kollineares Paar galt immer als Durchgang, auch Aussen- + Innenwand
+  (Anbau-Knoten: Aussenwand-Ecke offen, Schichten überlappend), 4 Enden („Stern") blieben rechtwinklig übereinander,
+  Y-Knoten ohne kollineares Paar ebenso; (3) Rückgrat der Durchgangswand = höchste Priorität allein → bei der
+  Holzständerwand die äussere Lattung, der Backstein-Abzweig stiess durch Gipskarton, Dämmung und Holzfaser bis aussen;
+  (4) Umrisslinie fehlte zwischen Aussparung und Gehrung, wenn ein Abzweig nahe einer Ecke anstösst (Loch ragt über
+  das Achsende); (5) Wand unter der Schnittebene (Fundament) sparte die Schichten der geschnittenen Wand aus (Lücke in
+  Dämmung/Putz); (6) Fanglücken: Enden mm auseinander bildeten keinen Knoten, ein Ende knapp vor der Fläche keinen
+  Stoss; (7) Diagonalschraffur wandbezogen → Fischgrat-Knick an jeder rechtwinkligen Ecke/T; (8) Plan-SVG: Umriss als
+  offene Kantenläufe mit Stumpf-Kappe → Kerbe an jeder Aussenecke, weisses Quadrat an der Innenecke (Bildschirm/render2d
+  und Druck-SVG haben schon runde Kappen). Geändert: `joins.rs` `apply_node` (stärkstes Paar nach Rang der schwächeren
+  Wand = max. Priorität, dann Dicke; Gleichstand → Durchgang; Paar kollinear = Durchgang mit allen übrigen als Abzweig,
+  sonst Gehrung und die übrigen stossen an die zuerst getroffene Fläche, `tee_on`), Fangtoleranz `JOIN_SNAP` 1 cm
+  (Knoten, Mittelspannen-Stoss gegen das Band mit Referenzlinie, Gehrung über die eigenen Flächen), Rückgrat = grösstes
+  Produkt Priorität × Dicke; `plan/wall_poche.rs` (keine Umrisslinie auf verschnittenen Enden im Raster, Löcher gegen
+  die Gehrungs-Reichweite an Anfang und Ende, Raster ab Gehrungsspitze); `plan/walls.rs` `plan_joins_by_zone`
+  (geschnittene Wände verschneiden nur untereinander, andere mit allen sichtbaren); `plan/style.rs` `wall_turn`
+  (Diagonale unter 45° und Kreuzschraffur drehen nur modulo 90° mit; Längsstriche, Dämmung, Holz voll); `plan/svg.rs`
+  runde Kappen für volle Linien und Kantenläufe. Wirkt auch in 3D/IFC/Schnitt (gleiche Verschneidung). Tests: je
+  Klasse ein Rust-Test (`schichteinzug_ohne_umriss_auf_der_gehrung`, `kreuz_knoten_durchgang_und_zwei_abzweige`,
+  `knoten_ecke_vor_ungleichem_durchgang`, `fangluecke_wenige_millimeter`, `rueckgrat_holzstaenderwand_ist_die_staenderschicht`,
+  `umriss_zwischen_aussparung_und_gehrung`, `niedrige_wand_spart_geschnittene_nicht_aus`,
+  `diagonale_dreht_modulo_90_daemmung_voll`, `umriss_mit_runder_kappe`). Goldens neu (Plan/Schnitt/Ansicht: Kappen im
+  SVG, Knoten; `komplex-model3d`: mehr verschnittene Enden). Geprüft: cargo test Kern, vitest, tsc, CLI-SVG angesehen
+  (Linux/Chromium). Offen: Wand endet an Stütze (keine Verschneidung Wand–Stütze, im Beispiel kein Fall); überlappende
+  kollineare Wände werden nicht vereinigt; Dämm-Muster (gerichtet) wechseln an der Gehrung die Richtung (gewollt), ihr
+  Muster endet dort gezackt; Y-Knoten: der dritte Ast endet an nur einer Fläche; nicht in der Tauri-App/Metal geprüft. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
