@@ -30,7 +30,7 @@ const CONTEXT_PARENT: Def = Def { code: "05", name: "Kontext", color: "#707078",
 /// „31 Dächer" bleibt oberste Ebene.
 const IMPORTED_ROOF: Def = Def { code: "31", name: "Dächer", color: "#4a4a4a", lw: 0.18 };
 /// Kinder von „05 Kontext", in dieser Reihenfolge (`NESTED_CONTEXT_CATEGORIES`).
-const NESTED: [Def; 10] = [
+const NESTED: [Def; 11] = [
     Def { code: "02", name: "Gelände", color: "#808080", lw: 0.13 },
     Def { code: "03", name: "Luftbild", color: "#707078", lw: 0.13 },
     Def { code: "10", name: "Situation", color: "#909090", lw: 0.18 },
@@ -41,6 +41,8 @@ const NESTED: [Def; 10] = [
     Def { code: "16", name: "Bahn", color: "#606060", lw: 0.18 },
     Def { code: "17", name: "Gewässer", color: "#909090", lw: 0.13 },
     Def { code: "18", name: "Grünflächen", color: "#a0a0a0", lw: 0.13 },
+    // [143] Baugruben eigene Kategorie: Grundrisse blenden „02 Gelände" oft aus, die Baugrube soll bleiben.
+    Def { code: "07", name: "Baugrube", color: "#4a4a4a", lw: 0.18 },
 ];
 
 fn category(d: &Def) -> Value {

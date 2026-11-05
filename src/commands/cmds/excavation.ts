@@ -7,8 +7,12 @@
 //   2) „Nächster Punkt …" → Punkt … Schliessen per Klick auf den Startpunkt, Option „Schliessen" oder
 //      Enter (≥ 3 Punkte; bei genau 2 Punkten: Rechteck aus den Ecken).
 
+//
+// [143] Meldungen statt stillem Scheitern: ohne Gelände startet der Befehl nicht; ausserhalb des Geländes
+// oder entartet entsteht nichts (Hinweis); sonst Hinweis mit Sohle (und neuem Höhenbezug ±0.00, s. Kern).
+
 import type { Command, CommandContext, CommandResult, CommandState, CmdOption, DraftShape, ToolDraft, Vec2 } from "../types";
-import { createMutation } from "../createCore";
+import { createMutation, createQuery } from "../createCore";
 
 const EPS = 1e-6;
 const CLOSE_HIT = 0.08; // Modell-Meter: Klick nahe Startpunkt schliesst die Kontur
@@ -46,9 +50,40 @@ const excavationOps = (points: Vec2[], ctx: CommandContext) => createMutation(ct
 
 const idle = (): [CommandState, CommandResult] => [{ phase: "start", lastPoint: null } as HoleIdle, { draft: null, done: true }];
 
+/** Prüfung des Kerns vor dem Anlegen (`cmd_solid.rs`, `excavationCheck`). */
+interface ExcavationCheck {
+  valid: boolean;
+  bottom: number;
+  terrain: boolean;
+  over: boolean;
+  cut: boolean;
+  datum: number | null;
+}
+
+const hasTerrain = (ctx: CommandContext): boolean => (ctx.project.context ?? []).some((o) => o.type === "terrainMesh");
+
+/** Sohle als Kote (−3.00). */
+const kote = (z: number): string => (z > 0 ? "+" : z < 0 ? "−" : "±") + Math.abs(z).toFixed(2);
+
+/** Baugrube anlegen oder sagen, warum nicht. */
+function finishResult(points: Vec2[], ctx: CommandContext): CommandResult {
+  const c = createQuery<ExcavationCheck>(ctx.project, { q: "excavationCheck", pts: points, level: ctx.level.id });
+  if (!c.valid) return { draft: null, done: true, notice: { key: "cmd.excavation.degenerate", kind: "warning" } };
+  if (!c.terrain) return { draft: null, done: true, notice: { key: "cmd.excavation.noTerrain", kind: "warning" } };
+  if (!c.over) return { draft: null, done: true, notice: { key: "cmd.excavation.outside", kind: "warning" } };
+  const bottom = kote(c.bottom);
+  const notice: CommandResult["notice"] =
+    c.datum != null
+      ? { key: "cmd.excavation.createdDatum", params: { bottom, datum: c.datum.toFixed(2) }, kind: "info" }
+      : c.cut
+        ? { key: "cmd.excavation.created", params: { bottom }, kind: "info" }
+        : { key: "cmd.excavation.fillOnly", params: { bottom }, kind: "warning" };
+  return { draft: null, done: true, commit: excavationOps(points, ctx), notice };
+}
+
 const finish = (points: Vec2[], ctx: CommandContext): [CommandState, CommandResult] => [
   { phase: "start", lastPoint: null } as HoleIdle,
-  { draft: null, done: true, commit: excavationOps(points, ctx) },
+  finishResult(points, ctx),
 ];
 
 export const excavationCommand: Command = {
@@ -62,6 +97,8 @@ export const excavationCommand: Command = {
     if (ps.phase !== "next") return [];
     return ps.points.length >= 3 ? [CLOSE, UNDO] : [UNDO];
   },
+  // [143] Ohne Gelände gibt es nichts auszuheben (das Panel zeigt den Knopf erst mit Gelände).
+  precondition: (ctx) => (hasTerrain(ctx) ? null : "cmd.excavation.noTerrain"),
   init: (): HoleIdle => ({ phase: "start", lastPoint: null }),
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {

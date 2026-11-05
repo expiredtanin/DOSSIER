@@ -1096,7 +1096,7 @@ pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Result
         },
         "pickProfile" => json!({ "hit": pick_profile(root, level, at).map_or(Value::Null, profile_json) }),
         "profile" => json!({ "hit": find(root, "drawings2d", s_of(v, "id")).map_or(Value::Null, profile_json) }),
-        _ => return crate::cmd_draw::query(root, p, v).or_else(|| crate::cmd_solid::query(root, v)).map(Ok),
+        _ => return crate::cmd_draw::query(root, p, v).or_else(|| crate::cmd_solid::query(root, p, v)).map(Ok),
     }))
 }
 

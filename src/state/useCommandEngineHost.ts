@@ -169,7 +169,7 @@ export function useCommandEngineHost(opts: {
       },
       isFloor: () => cmdLatest.current.activeLevel.kind === "floor",
       // Befehl braucht eine Auswahl (Bewegen/Drehen/Spiegeln), es ist keine da.
-      notify: (key) => notify(t(key as Parameters<typeof t>[0]), "info"),
+      notify: (key, params, kind) => notify(t(key as Parameters<typeof t>[0], params), kind ?? "info"),
       // Getippte Werte auf einem Layout-Blatt in Papier-mm, y nach unten ([93]).
       inputUnits: () => unitsForLevel(cmdLatest.current.activeLevel),
       // Frisch über `text`/`textbox` erzeugtes Element sofort inline editieren
