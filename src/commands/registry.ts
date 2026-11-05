@@ -71,6 +71,7 @@ import { sectionLineCommand, viewLineCommand } from "./cmds/sectionline";
 import { georefCommand } from "./cmds/georef";
 import { blockCommand } from "./cmds/block";
 import { defblockCommand } from "./cmds/defblock";
+import { presentationCommand } from "./cmds/presentation";
 
 /** Alle bekannten Befehle, Schlüssel = Befehlsname (lowercase). */
 export const COMMANDS: Record<string, Command> = {
@@ -140,6 +141,7 @@ export const COMMANDS: Record<string, Command> = {
   chamfer: chamferCommand,
   multiline: multilineCommand,
   import: importCommand,
+  praesentation: presentationCommand,
   terrain: terrainCommand,
   excavation: excavationCommand,
   measure: measureCommand,
@@ -184,6 +186,9 @@ export const ALIASES: Record<string, string> = {
   dachfenster: "roofwindow",
   oberlicht: "roofwindow",
   gaube: "dormer",
+  praesentationsplan: "praesentation",
+  präsentation: "praesentation",
+  presentation: "praesentation",
   lukarne: "dormer",
   dachhof: "roofhole",
   lichthof: "roofhole",
