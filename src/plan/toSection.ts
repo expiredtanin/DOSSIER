@@ -49,7 +49,9 @@ export async function computeSection(project: Project, level: DrawingLevel): Pro
   const solids = project.extrudedSolids ?? [];
   for (let index = 0; index < solids.length; index++) {
     const solid = solids[index];
-    if (solid.operation === "subtract" || isVoid(solid)) continue;
+    // Senkrechte Prismen-Abzugskörper rechnet der Kern selbst; alle übrigen Abzugskörper ([G1]) kommen
+    // als Netz mit und werden im Kern aus den Schnittflächen ausgespart.
+    if (isVoid(solid)) continue;
     let baseZ = 0;
     try {
       baseZ = solid.levelId ? (getFloor(project, solid.levelId).baseElevation ?? 0) : 0;

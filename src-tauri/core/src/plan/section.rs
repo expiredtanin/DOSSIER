@@ -1461,7 +1461,34 @@ fn subtract_voids_in_section(cuts: Vec<Cut>, p: &Project, base: (f64, f64), u: (
     if !any || rects.is_empty() {
         return cuts;
     }
-    let refs: Vec<&[[f64; 2]]> = rects.iter().map(|r| r.as_slice()).collect();
+    subtract_rings_from_cuts(cuts, &rects)
+}
+
+/// [G1] Ob ein Körper-Netz zu einem Abzugskörper gehört.
+fn is_subtract_body(p: &Project, b: &BodyMesh) -> bool {
+    p.extruded_solids.as_deref().and_then(|s| s.get(b.index)).is_some_and(|s| s.operation.as_deref() == Some("subtract"))
+}
+
+/// [G1] Abzugskörper beliebiger Form: Netz mit der Ebene schneiden, Flächen (Löcher als Schlüsselloch)
+/// von allen bisherigen Schnittflächen abziehen.
+fn subtract_body_voids_in_section(cuts: Vec<Cut>, voids: &[&BodyMesh], base: (f64, f64), u: (f64, f64)) -> Vec<Cut> {
+    let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
+    for b in voids {
+        let (r, _) = cut_mesh(&b.positions, &b.indices, base, u);
+        for poly in rings_to_polygons(&r) {
+            rings.push(if poly.len() > 1 { keyhole(&poly).0 } else { poly[0].clone() });
+        }
+    }
+    rings.retain(|r| r.len() >= 3);
+    if rings.is_empty() {
+        return cuts;
+    }
+    subtract_rings_from_cuts(cuts, &rings)
+}
+
+/// Zieht `rings` von jeder Schnittfläche ab (Ränder auf den Schnittkanten ohne Strich); Fehlschlag ⇒ unverändert.
+fn subtract_rings_from_cuts(cuts: Vec<Cut>, rings: &[Vec<[f64; 2]>]) -> Vec<Cut> {
+    let refs: Vec<&[[f64; 2]]> = rings.iter().map(|r| r.as_slice()).collect();
     let cutters = encode_rings(&refs);
     let mut out = Vec::with_capacity(cuts.len());
     for cp in cuts {
@@ -1630,7 +1657,7 @@ fn keyhole(poly: &[Vec<[f64; 2]>]) -> (Vec<[f64; 2]>, Vec<f64>) {
 }
 
 /// `appendBodySections` + `attachBodyOwners`: geschnittene freie Körper.
-fn append_body_sections(cuts: &mut Vec<Cut>, p: &Project, bodies: &[BodyMesh], base: (f64, f64), u: (f64, f64)) {
+fn append_body_sections(cuts: &mut Vec<Cut>, p: &Project, bodies: &[&BodyMesh], base: (f64, f64), u: (f64, f64)) {
     let solids = p.extruded_solids.as_deref().unwrap_or(&[]);
     for b in bodies {
         let (rings, _) = cut_mesh(&b.positions, &b.indices, base, u);
@@ -1845,7 +1872,7 @@ fn quad_of(t: &[[f64; 3]; 3], n: [f64; 3], next: &[u32], vert: &dyn Fn(u32) -> (
 /// Dreiecke (Wände samt Gehrung und Löchern wie im 3D-Modell, Platten, Treppen, Dächer, Körper),
 /// auf die Seite hinter der Ebene zugeschnitten; die Schnittflächen verdecken in Tiefe 0. Bogenwände,
 /// verschnittene Dächer und Körper glätten ihre Facetten (keine Fugen, nur Knicke und Silhouetten).
-fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[BodyMesh], cuts: &[Cut], hidden: bool, max_depth: Option<f64>) -> (Vec<Edge>, Vec<Edge>) {
+fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], cuts: &[Cut], hidden: bool, max_depth: Option<f64>) -> (Vec<Edge>, Vec<Edge>) {
     use crate::hlr;
     let nl = crate::jsmath::hypot(&plane.normal);
     if !(nl > 1e-12) {
@@ -2043,11 +2070,14 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let base = plane.base();
     let u = plane.u_model();
     let cuts = subtract_voids_in_section(cuts, p, base, u);
+    // [G1] Abzugskörper beliebiger Form kommen als Netz mit (wie freie Körper): ausgespart, nicht gezeichnet.
+    let (void_bodies, bodies): (Vec<&BodyMesh>, Vec<&BodyMesh>) = bodies.iter().partition(|b| is_subtract_body(p, b));
+    let cuts = subtract_body_voids_in_section(cuts, &void_bodies, base, u);
     let cuts = subtract_pockets_in_section(cuts, p, base, u);
     let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
-    append_body_sections(&mut cuts, p, bodies, base, u);
+    append_body_sections(&mut cuts, p, &bodies, base, u);
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
-    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, bodies, &cuts, level.hidden_lines, level.depth);
+    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &cuts, level.hidden_lines, level.depth);
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new() };
     append_terrain_profiles(&mut out, p, base, u);
@@ -2744,6 +2774,42 @@ mod tests {
         assert!((full - wall_area(&p, 2.4) - 0.07 * 2.0).abs() < 1e-4);
         // Gegenseite (Anschlag, x = 0.5) ohne Tasche.
         assert!((full - wall_area(&p, 0.5)).abs() < 1e-4);
+    }
+
+    /// [G1] Abzugskörper beliebiger Form (Netz, hier dreieckiges Prisma quer durch die Wand): seine
+    /// Schnittfläche wird aus der Wand-Poché ausgespart; er selbst erscheint weder als Schnittfläche
+    /// noch in der Projektion.
+    #[test]
+    fn abzugskoerper_beliebiger_form_im_schnitt() {
+        use crate::plan::walls::tests::pocket_project;
+        let mut p = pocket_project(DoorTypeKind::Tasche, Some(OpeningHinge::End), 1.0);
+        // Profil/Verjüngung nur, damit es kein senkrechtes Prisma ist (das ginge über `section_rects`).
+        let pts = vec![Vec2 { x: 3.2, y: -1.0 }, Vec2 { x: 3.8, y: -1.0 }, Vec2 { x: 3.8, y: 1.0 }, Vec2 { x: 3.2, y: 1.0 }];
+        p.extruded_solids = Some(vec![ExtrudedSolid { id: "v".into(), level_id: "eg".into(), points: pts, height: 1.0, base_offset: Some(1.0), taper: Some(0.5), operation: Some("subtract".into()), ..Default::default() }]);
+        // Dreieckiges Prisma längs x: Querschnitt (y, z) = (−1, 1), (1, 1), (0, 2).
+        let tri = [[-1.0, 1.0], [1.0, 1.0], [0.0, 2.0]];
+        let mut positions = Vec::new();
+        for x in [3.2, 3.8] {
+            for q in tri {
+                positions.extend([x, q[0], q[1]]);
+            }
+        }
+        let indices: Vec<f64> = [0, 2, 1, 3, 4, 5, 0, 1, 4, 0, 4, 3, 1, 2, 5, 1, 5, 4, 2, 0, 3, 2, 3, 5].iter().map(|&i| i as f64).collect();
+        let body = BodyMesh { index: 0, positions, indices };
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: 3.5, y: -1.0 }, Vec2 { x: 3.5, y: 1.0 }]), ..Default::default() };
+        let area = |c: &Cut| {
+            let n = c.pts.len();
+            (0..n).map(|i| c.pts[i][0] * c.pts[(i + 1) % n][1] - c.pts[(i + 1) % n][0] * c.pts[i][1]).sum::<f64>().abs() / 2.0
+        };
+        let full: f64 = compute_section(&p, &l, &[]).unwrap().unwrap().cuts.iter().filter(|c| c.kind == Kind::Wall).map(area).sum();
+        let out = compute_section(&p, &l, std::slice::from_ref(&body)).unwrap().unwrap();
+        let cut: f64 = out.cuts.iter().filter(|c| c.kind == Kind::Wall).map(area).sum();
+        // Wand 16 cm mittig auf y = 0: ∫ min(0.16, 2·(2 − z)) dz über 1…2 = 0.16·0.92 + 0.08².
+        assert!((full - cut - (0.16 * 0.92 + 0.0064)).abs() < 1e-5, "{full} {cut}");
+        assert!(out.cuts.iter().all(|c| c.kind != Kind::Body));
+        // Keine Kante des Abzugskörpers in der Projektion (Prisma-Enden bei x = 3.8 liegen hinter der Ebene).
+        let apex = |q: [f64; 2]| (q[0] - 1.0).abs() < 1e-6 && (q[1] - 2.0).abs() < 1e-6;
+        assert!(!out.visible.iter().chain(&out.hidden).any(|e| apex(e.a) || apex(e.b)));
     }
 
     /// [95][T2] Schnitt durch die Tasche in der Bogenwand (radial) und unter schräger Oberkante.
