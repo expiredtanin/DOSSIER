@@ -82,3 +82,5 @@ export { AI_TOOLS, AI_BRIDGE_DEFAULT_PORT, aiText, aiToolDef, hmacHex, randomHex
 export type { AiToolDef, AiToolResult, AiBridgeMsg } from "./aiToolDefs";
 export { callAiTool } from "./aiTools";
 export type { AiHost } from "./aiTools";
+export { PRESENTATION_TEMPLATE_ID, presentationDefaults, presentationSheetOps, planPresentationSheet } from "../plan/presentationSheet";
+export type { PresentationOptions, PresentationPlan, PresentationLabels } from "../plan/presentationSheet";

@@ -34,6 +34,7 @@ import {
   type LayoutSizeStart,
   type NewLayoutStart,
 } from "../ui/LayoutCreateDialogs";
+import { openPresentationDialog } from "../state/presentationSheetHook";
 import { PublishSection } from "./PublishSection";
 import { t } from "../i18n";
 
@@ -809,6 +810,15 @@ export function LayoutsPanel() {
           >
             <PlusIcon />
           </button>
+          <button
+            className="nav-add"
+            data-testid="presentation-open"
+            style={{ display: "inline-flex", padding: "1px 5px" }}
+            title={t("presentation.button")}
+            onClick={openPresentationDialog}
+          >
+            <PresentationIcon />
+          </button>
         </span>
       </header>
 
@@ -910,6 +920,18 @@ export function LayoutsTabIcon() {
     >
       <rect x="4.5" y="2.5" width="9" height="11" rx="1" />
       <path d="M2.5 4.5v9h8" />
+    </svg>
+  );
+}
+
+/** [66] Symbol „Präsentationsplan" — Blatt mit vier Ausschnitten. */
+function PresentationIcon() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.3} aria-hidden="true">
+      <rect x={1.5} y={2.5} width={13} height={11} rx={1} />
+      <rect x={3.5} y={4.5} width={4} height={3} />
+      <rect x={8.5} y={4.5} width={4} height={3} />
+      <rect x={3.5} y={9} width={9} height={2.5} />
     </svg>
   );
 }

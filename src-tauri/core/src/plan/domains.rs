@@ -790,7 +790,7 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
         w.group(g);
     }
     w.group(&violations);
-    w.bounds = Some(super::extras::plan_bounds(&bounds, &super::extras::extra_bounds(p, &under)));
+    w.bounds = Some(super::extras::plan_bounds(&bounds, &super::extras::extra_bounds(p, &under, |k| c.shown(k))));
     Ok(w.finish())
 }
 
@@ -798,7 +798,9 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
 /// beim projektglobalen Aufruf (`global`).
 fn extras_of(p: &Project, a: &PlanArgs) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
     if a.global {
-        super::extras::site_and_shadow(p, &a.floor, a.sun_when, a.scale)
+        // [66] Baurecht (Parzelle, Baubereich, Verstösse) gehört zur Vermessung: ausgeblendete Kategorie „01" ⇒ ohne.
+        let site = !(p.flat_categories().iter().any(|c| c.code == super::extras::SITE_CATEGORY) && !a.show.contains(super::extras::SITE_CATEGORY));
+        super::extras::site_and_shadow(p, &a.floor, a.sun_when, a.scale, site)
     } else {
         (Vec::new(), Vec::new())
     }
@@ -908,7 +910,7 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         domains_before(c, &mut d, &mut b)?;
         domains_after(c, &mut d);
         let (under, violations) = extras_of(c.p, c.a);
-        let extra = super::extras::extra_bounds(c.p, &under);
+        let extra = super::extras::extra_bounds(c.p, &under, |k| c.shown(k));
         apply_voids(c.p, c.a, &mut d);
         let plain = |g: Vec<Primitive>| g.into_iter().map(|q| (q, 0)).collect::<Vec<_>>();
         let mut lists = vec![under];
@@ -1247,7 +1249,7 @@ mod tests {
         // Ausmass: Domänen und Kontext.
         let mut db = Bounds::new();
         db.merge(d.bounds.unwrap());
-        assert_eq!(bounds, Some(super::super::extras::plan_bounds(&db, &super::super::extras::extra_bounds(&p, &[]))));
+        assert_eq!(bounds, Some(super::super::extras::plan_bounds(&db, &super::super::extras::extra_bounds(&p, &[], |_| true))));
     }
 
     #[test]

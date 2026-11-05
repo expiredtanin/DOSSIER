@@ -99,12 +99,7 @@ pub fn viewport_maps(p: &Project, layout: &Layout) -> Vec<VpMap> {
             continue;
         }
         let scale = viewport_scale(vp, Some(snap));
-        let level = p.drawing_levels.iter().find(|l| l.id == snap.active_level_id);
-        let buf = match level {
-            Some(l) if matches!(l.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation) => section_view_buf(p, l, snap, scale),
-            _ => plan_domains_buf(p, &viewport_args(snap, scale)).ok(),
-        };
-        let Some(buf) = buf else { continue };
+        let Some(buf) = snapshot_buf(p, snap, scale, None) else { continue };
         let Some(b) = crate::plan::buf::View::parse(&buf).and_then(|v| v.bounds()) else { continue };
         out.push(VpMap {
             x_mm: vp.x_mm,
@@ -119,6 +114,25 @@ pub fn viewport_maps(p: &Project, layout: &Layout) -> Vec<VpMap> {
         });
     }
     out
+}
+
+/// Plan-Puffer des Inhalts eines Ausschnitts beim Massstab 1:`scale` (Grundriss bzw. Schnitt/Ansicht wie
+/// im Viewport). `shadows` übersteuert den Schatten der Ansicht (Präsentationsplan [66]: Vorlage vor dem Anwenden).
+pub fn snapshot_buf(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: Option<bool>) -> Option<Vec<u8>> {
+    match p.drawing_levels.iter().find(|l| l.id == snap.active_level_id) {
+        Some(l) if matches!(l.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation) => match shadows {
+            Some(s) => section_view_buf(p, &DrawingLevel { shadows: Some(s), ..l.clone() }, snap, scale),
+            None => section_view_buf(p, l, snap, scale),
+        },
+        _ => plan_domains_buf(p, &viewport_args(snap, scale)).ok(),
+    }
+}
+
+/// Ausmass (Modell-Meter `[minX, minY, maxX, maxY]`) des Ausschnitt-Inhalts — das Rechteck, dessen Mitte
+/// der Viewport zentriert.
+pub fn snapshot_bounds(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: Option<bool>) -> Option<[f64; 4]> {
+    let buf = snapshot_buf(p, snap, scale, shadows)?;
+    crate::plan::buf::View::parse(&buf).and_then(|v| v.bounds())
 }
 
 /// Kategorie-Codes, die Schnitt/Ansicht prüfen (`candidateCodes` in `toSection.ts`).

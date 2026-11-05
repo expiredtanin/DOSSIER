@@ -158,11 +158,18 @@ fn seg_band(a: Vec2, b: Vec2, half: f64) -> Option<Primitive> {
 /// Unterste Gruppe: Schatten, dann Parzellengrenze (Strich-Punkt) und zulässige Fläche
 /// (gestrichelt); mit Strichmuster-Kennung je Primitiv. Dazu die Verstösse (Gebäude-Grundfläche
 /// ausserhalb der zulässigen Fläche) für die oberste Gruppe.
-pub fn site_and_shadow(p: &Project, floor: &str, when_ms: Option<f64>, scale: f64) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
+/// Kategorie der Vermessung; ist sie im Projekt und ausgeblendet, entfällt das Baurecht im Grundriss ([66]).
+pub const SITE_CATEGORY: &str = "01";
+
+/// `site = false`: nur der Schatten, ohne Baurecht.
+pub fn site_and_shadow(p: &Project, floor: &str, when_ms: Option<f64>, scale: f64, site: bool) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
     let mut shadow = Vec::new();
     sun_shadow(p, floor, when_ms, &mut shadow);
     let mut under: Vec<(Primitive, u32)> = shadow.into_iter().map(|q| (q, 0)).collect();
     let mut violations = Vec::new();
+    if !site {
+        return (under, violations);
+    }
     if let (Some(check), Some(rules)) = (site_check(p, floor), p.site_rules.as_ref()) {
         let mut r = 1;
         ring_lines(&mut under, &rules.parcel, SITE_PARCEL_CLS, PARCEL_COLOR, 0.35, &PARCEL_DASH, r);
@@ -484,7 +491,9 @@ pub fn sketch_post(on: Option<bool>, scale: f64) -> Option<Post> {
 /// Ausmass der Zutaten, die „Einpassen" und Druck ganz zeigen sollen: Schatten und Baurechts-Linien
 /// (`extra`) und die ganze Kontext-Schicht (Konturen, Netze, Luftbilder) — Rohwerte für
 /// [`plan_bounds`].
-pub fn extra_bounds(p: &Project, extra: &[(Primitive, u32)]) -> Bounds {
+/// Kontext-Objekte zählen nur, wenn ihre Kategorie gezeigt wird (`shown`, wie `plan_context`; ohne Kategorie
+/// immer) — sonst bestimmt ein ausgeblendetes Gelände Zoom und Viewport-Grösse ([66]).
+pub fn extra_bounds(p: &Project, extra: &[(Primitive, u32)], shown: impl Fn(&str) -> bool) -> Bounds {
     let mut b = Bounds::new();
     for (e, _) in extra {
         match e {
@@ -501,6 +510,16 @@ pub fn extra_bounds(p: &Project, extra: &[(Primitive, u32)]) -> Bounds {
         }
     }
     for obj in p.context.as_deref().unwrap_or(&[]) {
+        let code = match obj {
+            ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
+            ContextObject::ContourSet(s) => s.category_code.as_deref(),
+            ContextObject::TerrainMesh(t) => t.category_code.as_deref(),
+            ContextObject::Image(i) => i.category_code.as_deref(),
+            ContextObject::Excavation(e) => e.category_code.as_deref(),
+        };
+        if code.is_some_and(|k| !shown(k)) {
+            continue;
+        }
         match obj {
             ContextObject::ContourSet(cs) => {
                 for c in &cs.contours {
@@ -553,6 +572,20 @@ mod tests {
         serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap()
     }
 
+    /// [66] Ausgeblendete Kontext-Kategorien (Höhenlinien) bestimmen das Ausmass nicht mit.
+    #[test]
+    fn ausmass_ohne_ausgeblendeten_kontext() {
+        let mut p = sample();
+        p.context = Some(vec![serde_json::from_value(serde_json::json!({
+            "type": "contourSet", "id": "hl", "name": "HL", "categoryCode": "14",
+            "contours": [{"z": 0.0, "pts": [{"x": -100.0, "y": -100.0}, {"x": 100.0, "y": 100.0}]}]
+        }))
+        .unwrap()]);
+        let on = extra_bounds(&p, &[], |_| true).get().unwrap();
+        assert_eq!(on, [-100.0, -100.0, 100.0, 100.0]);
+        assert!(extra_bounds(&p, &[], |k| k != "14").get().is_none());
+    }
+
     /// [63] Profilverstösse erscheinen im Grundriss (schwächeres Rot); ohne Profil nichts.
     #[test]
     fn profilverstoesse_im_grundriss() {
@@ -564,12 +597,15 @@ mod tests {
             serde_json::from_value(v).unwrap()
         };
         p.site_rules = Some(rules(serde_json::json!({})));
-        let n0 = site_and_shadow(&p, &floor, None, 100.0).1.len();
+        let n0 = site_and_shadow(&p, &floor, None, 100.0, true).1.len();
         p.site_rules = Some(rules(serde_json::json!({"profileAngle": 10.0, "profileHeight": 0.01})));
         let c = crate::site_rules::check_project(&p).unwrap();
         assert!(c.profile_exceeded);
-        let n1 = site_and_shadow(&p, &floor, None, 100.0).1.len();
+        let n1 = site_and_shadow(&p, &floor, None, 100.0, true).1.len();
         assert!(n1 > n0, "{n0} {n1}");
+        // [66] Ohne Vermessung (Kategorie aus) kein Baurecht.
+        let (under, viol) = site_and_shadow(&p, &floor, None, 100.0, false);
+        assert!(under.is_empty() && viol.is_empty());
     }
 
     /// Oberste Fläche mit Pick-Id unter dem Punkt (wie `PickIndex::polygons_at`, Maske „Kontext").
@@ -592,7 +628,7 @@ mod tests {
         let floor = ground_floor_id(&p).unwrap().to_string();
         p.sun_study = Some(SunStudy { when: "2026-12-21T09:00:00Z".into(), show: true, ..Default::default() });
         let when = Some(1_797_843_600_000.0); // 2026-12-21T09:00:00Z
-        let (under, _) = site_and_shadow(&p, &floor, when, 100.0);
+        let (under, _) = site_and_shadow(&p, &floor, when, 100.0, true);
         let shadows: Vec<&Primitive> = under.iter().map(|(q, _)| q).filter(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == SUN_SHADOW_FILL)).collect();
         assert!(!shadows.is_empty());
         assert!(shadows.iter().all(|q| matches!(q, Primitive::Polygon { context_object_id: Some(id), .. } if id == SITE_PICK_SUN)));
@@ -604,17 +640,17 @@ mod tests {
         let inside = (0..400).map(|k| (x0 + (x1 - x0) * ((k % 20) as f64 + 0.5) / 20.0, y0 + (y1 - y0) * ((k / 20) as f64 + 0.5) / 20.0)).find(|q| crate::plan::pick::point_in_polygon(q.0, q.1, &flat)).unwrap();
         assert_eq!(top_pick(&under, inside.0, inside.1).as_deref(), Some(SITE_PICK_SUN));
         assert_eq!(top_pick(&under, 1e4, 1e4), None);
-        assert!(site_and_shadow(&p, "anderes-geschoss", when, 100.0).0.is_empty());
+        assert!(site_and_shadow(&p, "anderes-geschoss", when, 100.0, true).0.is_empty());
         p.sun_study.as_mut().unwrap().show = false;
-        assert_eq!(top_pick(&site_and_shadow(&p, &floor, when, 100.0).0, inside.0, inside.1), None);
+        assert_eq!(top_pick(&site_and_shadow(&p, &floor, when, 100.0, true).0, inside.0, inside.1), None);
         // Baurecht: Parzellengrenze bei x = −30, Grenzabstand 3 m → zulässige Fläche ab x = −27; Band ±0.15 m bei 1:100.
         p.site_rules = Some(serde_json::from_value(serde_json::json!({"parcel": [{"x": -30, "y": -30}, {"x": 40, "y": -30}, {"x": 40, "y": 40}, {"x": -30, "y": 40}], "defaultSetback": 3.0})).unwrap());
-        let (under, _) = site_and_shadow(&p, &floor, when, 100.0);
+        let (under, _) = site_and_shadow(&p, &floor, when, 100.0, true);
         assert_eq!(top_pick(&under, -30.1, 5.0).as_deref(), Some(SITE_PICK_RULES));
         assert_eq!(top_pick(&under, -27.0, 5.0).as_deref(), Some(SITE_PICK_RULES), "zulässige Fläche");
         assert_eq!(top_pick(&under, -28.5, 5.0), None);
         // Massstab 1:500: Band ±0.75 m.
-        assert_eq!(top_pick(&site_and_shadow(&p, &floor, when, 500.0).0, -29.4, 5.0).as_deref(), Some(SITE_PICK_RULES));
+        assert_eq!(top_pick(&site_and_shadow(&p, &floor, when, 500.0, true).0, -29.4, 5.0).as_deref(), Some(SITE_PICK_RULES));
     }
 
     #[test]
