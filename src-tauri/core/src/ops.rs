@@ -612,6 +612,51 @@ impl History {
         self.bytes += s.bytes;
         self.undo.push_back(s);
     }
+
+    // ── Sicherung über einen Kern-Neustart ([118]) ─────────────────────────────
+    // TS hält eine Kopie der Schritte (JSON je Laufnummer, nur neue werden geholt) und setzt sie nach
+    // einem Panic in die frische Instanz ein. Offene Gruppen gehen nicht mit (der Neustart bricht den
+    // laufenden Vorgang ab).
+
+    /// Laufnummern beider Stapel (Undo: ältester zuerst; Redo: Stapel-Reihenfolge, nächster zuletzt) und
+    /// der Koaleszenz-Zustand (`last_key`, `last_at`).
+    pub fn export_index(&self) -> (Vec<u64>, Vec<u64>, Option<&str>, f64) {
+        (self.undo.iter().map(|s| s.seq).collect(), self.redo.iter().map(|s| s.seq).collect(), self.last_key.as_deref(), self.last_at)
+    }
+
+    /// Schritt `seq` (auf einem der Stapel) als JSON `{"label":…,"ops":[…]}`; `None` = nicht da oder
+    /// grösser als `max_bytes` (geschätzt).
+    pub fn export_step(&self, seq: u64, max_bytes: usize) -> Option<String> {
+        let s = self.undo.iter().chain(self.redo.iter()).find(|s| s.seq == seq)?;
+        if s.bytes > max_bytes {
+            return None;
+        }
+        let mut out = b"{\"label\":".to_vec();
+        serde_json::to_writer(&mut out, &s.label).ok()?;
+        out.extend_from_slice(b",\"ops\":");
+        write_ops(&mut out, &s.ops);
+        out.push(b'}');
+        String::from_utf8(out).ok()
+    }
+
+    /// Ersetzt beide Stapel (Reihenfolge wie [`History::export_index`]); die Schritte bekommen neue
+    /// Laufnummern, die Grenzen gelten wie beim Aufzeichnen (die ältesten Undo-Schritte fallen weg).
+    pub fn import(&mut self, undo: Vec<(String, Vec<Op>)>, redo: Vec<(String, Vec<Op>)>, last_key: Option<String>, last_at: f64) {
+        self.clear();
+        for (label, ops) in undo {
+            self.push_undo(Step::new(ops).labeled(label));
+        }
+        for (label, ops) in redo {
+            self.push_redo(Step::new(ops).labeled(label));
+        }
+        self.last_key = last_key;
+        self.last_at = last_at;
+        self.merged = false;
+        while self.undo.len() > self.max_steps || (self.bytes > self.max_bytes && self.undo.len() > 1) {
+            let s = self.undo.pop_front().expect("nicht leer");
+            self.bytes -= s.bytes;
+        }
+    }
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ import { fromMarkedJson, toMarkedJson } from "./ops";
 import type { CoreOp } from "./ops";
 import { opsMutation } from "./opsBuild";
 import { StepStates } from "./stepStates";
+import { HistoryBackup } from "./historyBackup";
 import type { ProjectMutation } from "./opsBuild";
 import type { IfcImportResult } from "../io/ifcImport";
 import type { MeshImportReport } from "../io/meshImport";
@@ -180,6 +181,8 @@ export class ProjectDocument {
   private limits: [number, number] | null = null;
   /** Stände grosser Verlaufsschritte (Undo/Redo ohne Ops-Rückgabe, s. `stepStates.ts`). */
   private steps = new StepStates();
+  /** Kopie des Kern-Verlaufs für einen Neustart nach Panic ([118]). */
+  private hist = new HistoryBackup();
   /** Gelieferte Einträge des 3D-Modells je Argument-Satz ([58], {@link model3dParts}). */
   private m3d = new Map<string, Model3dDeltaCache>();
 
@@ -198,14 +201,27 @@ export class ProjectDocument {
   /**
    * Nach einem Kern-Neustart ([118], `coreWasm.ts`): die alte Instanz samt Handle und Verlauf ist weg;
    * das Dokument öffnet sich aus der Leseansicht neu (die ist der letzte angenommene Stand — eine
-   * Änderung, deren Aufruf den Panic auslöste, war noch nicht übernommen). Der Verlauf beginnt leer.
+   * Änderung, deren Aufruf den Panic auslöste, war noch nicht übernommen). Der Verlauf kommt aus der
+   * TS-Kopie zurück (`historyBackup.ts`), wenn sie zu dieser Leseansicht gehört; sonst beginnt er leer.
    */
   restoreAfterRestart(): void {
     this.m3d.clear();
     const wasOpen = this.handle !== 0;
     this.handle = 0;
     this.steps.clear();
-    if (wasOpen) this.reopen(this.mirror);
+    this.historyKept = true;
+    if (!wasOpen) return this.hist.clear();
+    this.reopen(this.mirror);
+    this.historyKept = this.hist.restore(this.handle, this.mirror);
+  }
+
+  /** Ob beim letzten Kern-Neustart der Verlauf erhalten blieb ([118]; Meldung an den Benutzer). */
+  historyKept = true;
+
+  /** Neue Leseansicht nach einer angenommenen Änderung bzw. Undo/Redo; Verlaufskopie nachführen ([118]). */
+  private setMirror(project: Project): void {
+    this.mirror = project;
+    this.hist.sync(this.handle, project);
   }
 
   private reopen(project: Project): void {
@@ -293,6 +309,7 @@ export class ProjectDocument {
     this.steps.clear();
     this.m3d.clear();
     if (!this.handle || !core().doc_load_json(this.handle, JSON.stringify(project))) this.reopen(project);
+    this.hist.sync(this.handle, project);
   }
 
   /**
@@ -308,7 +325,7 @@ export class ProjectDocument {
       | { ok: false; error: string };
     if (!r.ok) return r;
     const project = JSON.parse(core().doc_json(this.handle)) as Project;
-    this.mirror = project;
+    this.setMirror(project);
     return { ok: true, project, warnings: r.warnings, migratedFrom: r.migratedFrom };
   }
 
@@ -382,7 +399,7 @@ export class ProjectDocument {
     }
     const extra = this.lastExtra();
     const project = this.withExtra(applyOps(base, ops, core().doc_last_hits(this.handle)), extra);
-    this.mirror = project;
+    this.setMirror(project);
     this.rememberCommit(base, project, extra.length ? [...ops, ...extra] : ops);
     return { project };
   }
@@ -403,7 +420,7 @@ export class ProjectDocument {
     if (r.ops.length === 0) return { project: base, ops: r.ops, notice: r.notice };
     const extra = this.lastExtra();
     const project = this.withExtra(applyOps(base, r.ops, core().doc_last_hits(this.handle)), extra);
-    this.mirror = project;
+    this.setMirror(project);
     return { project, ops: extra.length ? [...r.ops, ...extra] : r.ops, notice: r.notice };
   }
 
@@ -452,7 +469,7 @@ export class ProjectDocument {
     if (r.ops.length === 0) return { project: base, ops: r.ops };
     const extra = this.lastExtra();
     const project = this.withExtra(applyOps(base, r.ops), extra);
-    this.mirror = project;
+    this.setMirror(project);
     return { project, ops: extra.length ? [...r.ops, ...extra] : r.ops };
   }
 
@@ -470,7 +487,7 @@ export class ProjectDocument {
     if ("problems" in r) return r;
     const extra = r.ops.length ? this.lastExtra() : [];
     const project = r.ops.length ? this.withExtra(applyOps(base, r.ops), extra) : base;
-    this.mirror = project;
+    this.setMirror(project);
     const ops = extra.length ? [...r.ops, ...extra] : r.ops;
     this.rememberCommit(base, project, ops);
     return { ...r, ops, project };
@@ -558,14 +575,14 @@ export class ProjectDocument {
     if (this.steps.has(top)) {
       if (!core().doc_jump_quiet(this.handle, !undo)) return null;
       const project = this.steps.jump(top, base, undo, this.historySeqs()[undo ? 1 : 0]);
-      this.mirror = project;
+      this.setMirror(project);
       return project;
     }
     const json = core()[fn](this.handle);
     if (!json) return null;
     const ops = JSON.parse(json) as CoreOp[];
     const project = applyOps(base, ops, core().doc_last_hits(this.handle));
-    this.mirror = project;
+    this.setMirror(project);
     // Gegenschritt (neu oben auf dem anderen Stapel) führt zwischen denselben Ständen.
     const next = this.historySeqs()[undo ? 1 : 0];
     if (undo) this.steps.remember(next, project, base, ops);
@@ -582,7 +599,7 @@ export class ProjectDocument {
     const json = core().doc_history_jump(this.handle, target);
     if (!json) return null;
     const project = applyOps(base, JSON.parse(json) as CoreOp[], core().doc_last_hits(this.handle));
-    this.mirror = project;
+    this.setMirror(project);
     return project;
   }
 
@@ -630,6 +647,7 @@ export class ProjectDocument {
   clearHistory(): void {
     this.steps.clear();
     if (this.handle) core().doc_history_clear(this.handle);
+    this.hist.sync(this.handle, this.mirror);
   }
 
   /** Grenzen des Verlaufs (Schritte, ungefähre Bytes). */
@@ -654,6 +672,7 @@ export class ProjectDocument {
 
   endGroup(): void {
     if (this.handle) core().doc_group_end(this.handle);
+    this.hist.sync(this.handle, this.mirror);
   }
 }
 

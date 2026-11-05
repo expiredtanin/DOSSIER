@@ -155,7 +155,7 @@ export function useProjectFileActions(
     return () => window.clearInterval(id);
   }, []);
   // Kern-Panic ([118], `engine/coreWasm.ts`): der Kern ist neu gestartet und hat das Projekt aus der
-  // Leseansicht wieder geöffnet (Verlauf leer). Sofort eine Autosave-Kopie, Verlaufsanzeige nachführen,
+  // Leseansicht wieder geöffnet samt Verlauf (TS-Kopie, `core/historyBackup.ts`). Sofort eine Autosave-Kopie, Verlaufsanzeige nachführen,
   // melden (gedrosselt) und neu zeichnen (Kern-Handles der Ansichten sind neu aufzubauen).
   const [, setCoreTick] = useState(0);
   useEffect(
@@ -169,8 +169,9 @@ export function useProjectFileActions(
         } catch (e) {
           console.error("Autosave nach Kern-Neustart fehlgeschlagen.", e);
         }
-        setState(historyPatch(storeDocument(getState().project)));
-        notify(t("core.restarted"), "error");
+        const doc = storeDocument(getState().project);
+        setState(historyPatch(doc));
+        notify(t(doc.historyKept ? "core.restarted" : "core.restartedHistoryLost"), "error");
       }),
     [],
   );
