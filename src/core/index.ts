@@ -249,8 +249,10 @@ export {
   explodeFloorOffsets,
   pickGeometry,
   projectToModel3d,
+  projectToModel3dParts,
   selectionHighlightLines,
   wallMaterialColorMaps,
 } from "../plan/toWalls3d";
+export type { Model3dPart } from "../plan/toWalls3d";
 
 export * from "./extra";

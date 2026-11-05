@@ -69,7 +69,17 @@ interface Model3dDeltaCache {
 }
 
 /** Setzt die Teile aus Antwort und gehaltenen Einträgen zusammen; `null`, wenn ein Eintrag fehlt. */
-function assembleModel3dDelta(r: Model3dDelta, cache: Model3dDeltaCache | undefined): { parts: Record<string, unknown>; cache: Model3dDeltaCache } | null {
+/** Einträge des 3D-Modells mit Laufnummer (Wandkörper bzw. 5 Listen Einbauteile) und Öffnungs-Rest. */
+export interface Model3dKeyed {
+  wallEntries: (readonly [number, unknown[]])[];
+  openingEntries: (readonly [number, unknown[][]])[];
+  openingTail: unknown[];
+}
+
+function assembleModel3dDelta(
+  r: Model3dDelta,
+  cache: Model3dDeltaCache | undefined,
+): { parts: Record<string, unknown>; keyed: Model3dKeyed; cache: Model3dDeltaCache } | null {
   const wallNew = new Map(r.wallNew);
   const walls: unknown[] = [];
   const wallMap = new Map<number, unknown[]>();
@@ -91,8 +101,14 @@ function assembleModel3dDelta(r: Model3dDelta, cache: Model3dDeltaCache | undefi
   const openingMeshes: unknown[] = [];
   for (let l = 0; l < 5; l++) for (const e of entries) for (const x of e[l]) openingMeshes.push(x);
   for (const x of r.openingTail) openingMeshes.push(x);
-  const { mark, wallKeys: _wk, wallNew: _wn, openingKeys: _ok, openingNew: _on, openingTail: _ot, ...rest } = r;
-  return { parts: { ...rest, walls, openingMeshes }, cache: { mark, walls: wallMap, openings: openMap } };
+  const { mark, wallKeys: _wk, wallNew: _wn, openingKeys: _ok, openingNew: _on, openingTail, ...rest } = r;
+  // Einträge mit Laufnummer zusätzlich, für den 3D-Viewer (Teil-Updates, `toWalls3d.projectToModel3dParts`).
+  const keyed: Model3dKeyed = {
+    wallEntries: r.wallKeys.map((k) => [k, wallMap.get(k)!] as const),
+    openingEntries: r.openingKeys.map((k) => [k, openMap.get(k)!] as const),
+    openingTail,
+  };
+  return { parts: { ...rest, walls, openingMeshes }, keyed, cache: { mark, walls: wallMap, openings: openMap } };
 }
 
 /** Ergebnis des Ladens einer Projektdatei ({@link ProjectDocument.loadFile}). */
@@ -217,6 +233,11 @@ export class ProjectDocument {
    * Ergebnissen geteilt — nicht verändern.
    */
   model3dParts<T>(args: number[]): T {
+    return this.model3dPartsKeyed<T>(args).parts;
+  }
+
+  /** Wie {@link model3dParts}, dazu die Einträge mit Laufnummer (3D-Viewer, Teil-Updates [58]). */
+  model3dPartsKeyed<T>(args: number[]): { parts: T; keyed: Model3dKeyed } {
     const a = [0, 0, 0, 0, 0].map((d, i) => args[i] ?? d);
     const key = a.join(",");
     let cache = this.m3d.get(key);
@@ -227,7 +248,7 @@ export class ProjectDocument {
         this.m3d.delete(key);
         this.m3d.set(key, out.cache);
         if (this.m3d.size > 4) this.m3d.delete(this.m3d.keys().next().value!);
-        return out.parts as T;
+        return { parts: out.parts as T, keyed: out.keyed };
       }
       // Ein Eintrag fehlt (sollte nicht vorkommen): einmal alles neu anfordern.
       cache = undefined;
