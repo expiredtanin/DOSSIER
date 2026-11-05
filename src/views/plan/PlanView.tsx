@@ -56,6 +56,7 @@ import { endBusyAfterPaint } from "../../state/busyStore";
 import { EMPTY_SELECTION, single } from "../../state/selection";
 import type { Selection } from "../../state/selection";
 import { createCursorStore, useCursorValue, type CursorStore } from "../../state/cursorStore";
+import { cycleHint, plainCycleNext, selectionHas, type PlainCycle } from "./pickCycle";
 
 /**
  * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7) — Typ
@@ -382,6 +383,8 @@ export interface PlanViewProps {
   onSelect?: (selection: PlanSelection) => void;
   /** Kategorie-/Layer-Name eines Objekts für die Cmd/Strg+Klick-Liste ("Fläche · 01421"). */
   describePick?: (kind: PickKind, id: string) => string | undefined;
+  /** [137] Statusleisten-Hinweis zum Klick-Zyklus („2/3 Treffer — erneut klicken …"), `null` = keiner. */
+  onPickHint?: (hint: string | null) => void;
   /**
    * Alt+Klick (Schere/Segment löschen): meldet das nahe getroffene Drawing2D plus
    * den Modellpunkt des Klicks. Der Aufrufer (App) ermittelt daraus die nächst-
@@ -632,6 +635,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       onScale,
       onSelect,
       describePick,
+      onPickHint,
       onMarquee,
       onSegmentCut,
       onContextMenu,
@@ -1233,6 +1237,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const moveDrag = useRef<{
     pointerId: number;
     last: Vec2;
+    /** Bildschirm-Start (ohne Bewegung = Klick, [137] Klick-Zyklus). */
+    startX?: number;
+    startY?: number;
     target: BodyTarget;
   } | null>(null);
   // Transiente Stempel-Griff-Zieh-Daten: letzter Modellpunkt, gegen den das
@@ -1801,7 +1808,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (body) {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
-        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body };
+        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body, startX: e.clientX, startY: e.clientY };
         return;
       }
     }
@@ -1814,7 +1821,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (body) {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
-        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body };
+        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body, startX: e.clientX, startY: e.clientY };
         return;
       }
     }
@@ -2207,9 +2214,23 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     additive?: boolean;
   } | null>(null);
   // Liste/Zyklus verwerfen, sobald sich Ausschnitt oder Plan ändern.
+  // [137] Einfacher Klick-Zyklus: Kandidaten des letzten einfachen Klicks (s. pickCycle.ts).
+  const plainCycleRef = useRef<PlainCycle<PickCandidate> | null>(null);
+  // Auswahl anderswo geändert (Escape, Panel): Zyklus und Hinweis verwerfen.
+  useEffect(() => {
+    const pc = plainCycleRef.current;
+    if (pc && !selectionHas(selection, pc.items[pc.idx])) {
+      plainCycleRef.current = null;
+      onPickHint?.(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection]);
   useEffect(() => {
     setPickList(null);
     cycleRef.current = null;
+    plainCycleRef.current = null;
+    onPickHint?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, planRaw]);
   useEffect(() => {
     if (!pickList) return;
@@ -2416,6 +2437,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return true;
   };
 
+  /** [137] Einfacher Klick an der Stelle des letzten Klicks: nächsten Kandidaten wählen. true = behandelt. */
+  const plainCycleStep = (clientX: number, clientY: number): boolean => {
+    const pc = plainCycleRef.current;
+    const now = Date.now();
+    const next = onSelect ? plainCycleNext(pc, { x: clientX, y: clientY, t: now, planKey: plan }, selection) : null;
+    if (next === null || !pc) return false;
+    pc.idx = next;
+    pc.t = now;
+    const v = clientToView(clientX, clientY, view);
+    applyCandidate(pc.items[next], viewToModel(v.x, v.y), false);
+    onPickHint?.(cycleHint(pc.items.length, next));
+    return true;
+  };
+
   const endDrag = (e: React.PointerEvent<SVGSVGElement>) => {
     // Perf: einen anhängigen (rAF-gedrosselten) Drag mit der FINALEN Position
     // sofort anwenden, damit das Objekt exakt an der Loslass-Stelle landet, bevor
@@ -2474,6 +2509,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       }
       moveDrag.current = null;
       gripHandlers!.onGripEnd();
+      // [137] Ohne Bewegung war es ein Klick auf das Gewählte: an derselben Stelle zum nächsten Objekt wechseln.
+      if (md.startX !== undefined && Math.hypot(e.clientX - md.startX, e.clientY - (md.startY ?? 0)) < MARQUEE_THRESHOLD_PX && !e.shiftKey) {
+        plainCycleStep(e.clientX, e.clientY);
+      }
       return;
     }
 
@@ -2528,14 +2567,23 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       }
       // Kein Drag → Klick: Objekt unter dem Cursor wählen bzw. Auswahl löschen.
       setMarqueeRect(null);
-      if (onSelect && cycleModifier(e) && cycleSelect(e)) return;
+      if (onSelect && cycleModifier(e) && cycleSelect(e)) {
+        plainCycleRef.current = null;
+        onPickHint?.(null);
+        return;
+      }
       setPickList(null);
       cycleRef.current = null;
+      if (!e.shiftKey && plainCycleStep(e.clientX, e.clientY)) return;
       const dp = defaultPick(e.clientX, e.clientY);
       setSelected(dp.hitIndex);
       if (onSelect) {
         const v = clientToView(e.clientX, e.clientY, view);
         onSelect({ model: viewToModel(v.x, v.y), ...dp, shift: e.shiftKey });
+        // [137] Kandidaten an dieser Stelle merken: ein erneuter Klick hier wählt das nächste Objekt.
+        const items = e.shiftKey ? [] : collectCandidates(e.clientX, e.clientY, dp);
+        plainCycleRef.current = items.length > 1 ? { x: e.clientX, y: e.clientY, t: Date.now(), planKey: plan, items, idx: 0 } : null;
+        onPickHint?.(cycleHint(items.length, 0));
       }
       return;
     }

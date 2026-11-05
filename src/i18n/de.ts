@@ -2189,6 +2189,7 @@ export const de = {
   "pick.kind.site": "Lage",
   "pick.site.sunStudy": "Schatten (Sonnenstand)",
   "pick.site.siteRules": "Baurecht",
+  "pick.cycle.hint": "{i}/{n} Treffer — erneut klicken zum Wechseln",
   "pick.shape.line": "Linie",
   "pick.shape.polyline": "Polylinie",
   "pick.shape.area": "Fläche",

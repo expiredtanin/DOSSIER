@@ -57,6 +57,7 @@ import { DrawingTabs } from "../DrawingTabs";
 import type { ViewSnapshotTabsHandlers } from "../DrawingTabs";
 import type { ToolDraft, ToolHandlers, ToolId } from "../tools/types";
 import type { Selection } from "../state/selection";
+import { setPickHint } from "../state/pickHintStore";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "../model/viewTypes";
 
 /**
@@ -857,6 +858,7 @@ function LevelPlanView({
         ref={planViewRef}
         plan={plan}
         describePick={describePick}
+        onPickHint={setPickHint}
         resetKey={level.id}
         onCursor={onCursor}
         onScale={onScale}

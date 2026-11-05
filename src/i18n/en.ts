@@ -2177,6 +2177,7 @@ export const en: Record<TranslationKey, string> = {
   "pick.kind.site": "Site",
   "pick.site.sunStudy": "Shadow (sun position)",
   "pick.site.siteRules": "Building regulations",
+  "pick.cycle.hint": "{i}/{n} hits — click again to cycle",
   "pick.shape.line": "Line",
   "pick.shape.polyline": "Polyline",
   "pick.shape.area": "Area",
