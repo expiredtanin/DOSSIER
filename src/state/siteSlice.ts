@@ -9,7 +9,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { generateTerrainFromContours, type TerrainOptions } from "../model/terrain";
+import { generateTerrainFromContours, resmoothGridTerrain, type TerrainOptions } from "../model/terrain";
 import type { ContextObject, Project } from "../model/types";
 import { addItems, fieldOps, patchItem, removeItems } from "../core/opsBuild";
 import type { CoreOp } from "../core/ops";
@@ -41,6 +41,11 @@ export interface SiteSlice {
    * `false`, wenn es keine Quelle gibt oder kein Netz entsteht.
    */
   regenerateTerrain: (terrainId: string, smooth: number) => boolean;
+  /**
+   * [137] Raster-Gelände (swissALTI3D, ohne Höhenlinien-Quelle) um `passes` Durchgänge nachglätten:
+   * gleiche Id, nur z geändert, `smooth` zählt die Durchgänge; ein Undo-Schritt. false = kein Raster.
+   */
+  resmoothTerrain: (terrainId: string, passes: number) => boolean;
   /** Leert die gesamte Kontext-Schicht. */
   clearContext: () => void;
 }
@@ -116,6 +121,16 @@ export function createSiteSlice(
       get().applyChange((p) =>
         patchItem(p, "context", terrainId, (o) => ({ ...o, positions: fresh.positions, indices: fresh.indices, smooth, sourceId: set.id }) as ContextObject),
       );
+      return true;
+    },
+
+    resmoothTerrain: (terrainId, passes) => {
+      const terrain = (get().project.context ?? []).find((o) => o.id === terrainId && o.type === "terrainMesh");
+      if (!terrain || terrain.type !== "terrainMesh" || !(passes > 0)) return false;
+      const positions = resmoothGridTerrain(terrain.positions, passes);
+      if (!positions) return false;
+      const smooth = (terrain.smooth ?? 0) + passes;
+      get().applyChange((p) => patchItem(p, "context", terrainId, (o) => ({ ...o, positions, smooth }) as ContextObject));
       return true;
     },
 

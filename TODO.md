@@ -2611,13 +2611,13 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   nicht anwählen und bearbeiten") **Bestand** (Klick im Plan / im 3D, Objekt-Info, Bearbeiten; vorher → jetzt):
   | Element | Grundriss | Schnitt/Ansicht | 3D | Objekt-Info / Bearbeiten |
   |---|---|---|---|---|
-  | Wand, Öffnung, Decke, Dach, Treppe | ✓ (in Situation/mit sichtbarem Gelände: Wand/Decke vom Gelände-Rahmen verdeckt ✗ → ✓) | ✓ (Ansicht: Wand unter Schlagschatten ✗ → ✓) | ✓ | ✓ Felder, Griffe |
+  | Wand, Öffnung, Decke, Dach, Treppe | ✓ (in Situation/mit sichtbarem Gelände: Wand/Decke vom Gelände-Rahmen verdeckt ✗ → ✓) | ✓ (Ansicht: Wand unter Schlagschatten ✗ → ✓) | ✓ (Dachfenster/Deckenöffnung/Gaubenfenster ✗ → ✓ als Netz; Dach-Pick über den gezeichneten Dachkörper inkl. Gauben, vorher nur Dachflächen) | ✓ Felder, Griffe |
   | Raum | ✓ | – | – (nicht dargestellt) | ✓ |
-  | Stütze | ✓ | ✓ | ✗ → ✓ | ✓ |
-  | Freie Körper (Loft, Rotation, Abzug) | ✓ (Umriss) | ✓ | ✗ (truck-Netze in TS, offen) | ✓ |
+  | Stütze | ✓ | ✓ | ✗ → ✓ (5.11.: Pick war zur Darstellung gespiegelt, −y → y; Hervorhebung neu) | ✓ |
+  | Freie Körper (Extrusion, Loft, Rotation, Sweep, B-Rep) | ✓ (Umriss) | ✓ | ✗ → ✓ (truck-Netz, bis es geladen ist Prisma über dem Umriss; Hervorhebung; Abzugskörper nicht, im 3D nicht gezeichnet) | ✓ (keine Griffe, auch nicht im Plan) |
   | 2D: Bemassung, Koten, Text, Hinweis, Wolke, Nordpfeil-Block, Detail, Kataster, Strasse, Bäume | ✓ (Linien; leere Kreise/Konturen am Rand, leere Konturfläche unter Gelände meint das Gelände) | ✓ eigene | Linien-Spur | ✓ |
   | Achsraster | ✓ | ✗ (Projektion ohne Id, offen) | Spur (`show3d`) | ✓ |
-  | Gelände (TerrainMesh) | Rahmen-Band, Objekt-Info nur LV95 → ✓ mit Optionen | ✗ → ✓ (Erdreich-Band, Geländefläche) | ✓ | ✗ → ✓ Sichtbar (Kategorie), Glättung, Äquidistanz, Zähllinie, Erdreich-Band |
+  | Gelände (TerrainMesh) | Rahmen-Band, Objekt-Info nur LV95 → ✓ mit Optionen | ✗ → ✓ (Erdreich-Band, Geländefläche) | ✓ (ausgeblendete Kategorie/ausgeblendetes Netz fing den Klick ✗ → ✓ nicht mehr) | ✗ → ✓ Sichtbar (Netz einzeln `hidden` + Kategorie), Glättung (Höhenlinien neu bzw. Raster nachglätten), Äquidistanz, Zähllinie, Erdreich-Band |
   | Höhenlinien-Satz (contourSet) | ✗ → ✓ (Rahmen unter dem Gelände, Cmd/Strg+Klick-Liste) | – | – | Typ, LV95 |
   | Baugrube, Böschungen, Rühlwand (excavation) | ✗ (Band nur Sohle, unter dem Gelände-Rahmen) → ✓ Wirkbereich zuoberst | über Gelände | ✗ → ✓ (Dreiecke im Wirkbereich) | Typ ohne Übersetzung → ✓ alle Felder, Mengen; Griffe (bestehend) |
   | Schatten (Sonnenstudie) | ✗ → ✓ Pseudo-Auswahl `site` | – | – (kein Schatten im 3D, [64]) | ✓ Sonnenstand: Schalter, Datum, Uhrzeit (Undo) |
@@ -2636,9 +2636,28 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   vitest `siteSelection.test.ts` (Plan-Pick im Musterhaus komplex, Objekt-Info Baugrube, Neu-Glätten mit Undo), e2e
   `siteSelect.spec.ts` (Gelände in der Situation wählen, Glättung ändern, Undo; Schatten im EG wählen, Uhrzeit ändern,
   Undo); Goldens EG (unsichtbare Bänder). Geprüft im Linux-Container (Chromium), 3D-Pick nur als Unit-Test (headless kein
-  WebGPU), nicht in der Tauri-App. Offen: freie Körper im 3D-Pick; Achsraster in Schnitt/Ansicht; „Gelände sichtbar"
-  schaltet die ganze Kategorie; Glättung nur mit Höhenlinien-Satz (swissALTI3D-Netze nicht); in der dichten Situation
-  1:500 gehen 2D-Elemente (Bemassung) vor — Schatten/Gelände dort per Cmd/Strg+Klick-Liste. · M
+  WebGPU), nicht in der Tauri-App.
+  (5.11., 3D und Gelände) **3D-Pick:** Kern `model3d::pick_geometry` liefert zusätzlich `solids` (freie Körper als Prisma,
+  `pick_solids`) und `openingMeshes` (Öffnungen in Dach/Decke/Gaube aus `emit_opening_meshes`, `pick_hosted_openings`);
+  Dächer aus `emit_roofs` (Körper mit Gauben und Dachfenster-Löchern) statt nur der Flächen; Stützen/Körper/Dachfenster in
+  Welt (x, Höhe, y) wie render3d `Extrusion` (Stützen-Pick war gespiegelt). `explode3d` hebt die neuen Teile mit.
+  TS `pickGeometry` ersetzt das Körper-Prisma durch das geladene truck-Netz (`truckSolidPickTris`); `pickNearest` kennt
+  `solid` (Auswahl `solids`, Objekt-Info wie im Plan) und Öffnungs-Netze (Rang wie Öffnung). Hervorhebung (`highlight3d`)
+  für Stützen, Körper, Dachfenster. Ausgeblendete Kategorie bzw. ausgeblendetes Netz liefert keine Pick-Dreiecke mehr.
+  **Gelände:** `TerrainMesh.hidden` (Rust-Modell) blendet nur dieses Netz aus (Grundriss, Schnitt, Ansicht, 3D, Pick);
+  Objekt-Info „Dieses Gelände sichtbar" neben dem Kategorie-Schalter (unverändert). Raster-Gelände (swissALTI3D, keine
+  Höhenlinien): „Glättung" glättet additiv nach (`terrain::resmooth_grid_mesh`: Raster aus den Vertices zurückgewonnen,
+  `smooth_grid`, nur z ändert sich; Import merkt die Durchgänge in `smooth`); anderes TIN ohne Quelle: Auswahl
+  ausgegraut mit Hinweis. Tests: Rust (Körper/Explosion, Dachfenster, Gelände einzeln, Raster nachglätten,
+  Hervorhebung), vitest `toWalls3d.pickSolids.test.ts` (Strahl auf Körper, truck-Netz statt Prisma, Stütze lagerichtig,
+  Hervorhebung, Gelände ausgeblendet), `siteSelection.test.ts` (Nachglätten mit Undo), e2e `siteSelect.spec.ts`
+  (Netz ausblenden + Undo). Linux-Container; 3D-Pick nur als Unit-Test (headless kein WebGPU), nicht in der Tauri-App.
+  Offen: Achsraster in Schnitt/Ansicht; in der dichten Situation 1:500 gehen 2D-Elemente (Bemassung) vor —
+  Schatten/Gelände dort per Cmd/Strg+Klick-Liste; im 3D nicht anwählbar: Treppengeländer über der Treppen-Hülle
+  (oberes Podest), 2D-Kreise/Bögen/Texte (Bäume, Symbole: keine Pick-Box), Punktwolken, Baurechts-Hüllkörper und
+  Schnittbox (Hilfsdarstellung, Klick geht hindurch), Gauben nur als Teil des Dachs (keine eigene Auswahl);
+  importierte Meshes nur über die Kategorie ausblendbar; Raster-Gelände nur stärker glätten (rohe Höhen nicht
+  gespeichert). · M
 
 ## Priorität 4 — später
 

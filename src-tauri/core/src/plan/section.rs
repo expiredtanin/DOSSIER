@@ -1838,7 +1838,8 @@ fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (
     }
     let range = lo.is_finite().then_some((lo, hi));
     for t in terrains {
-        if t.positions.len() < 9 {
+        // [137] Einzeln ausgeblendetes Gelände.
+        if t.positions.len() < 9 || t.hidden == Some(true) {
             continue;
         }
         out.terrain_id.get_or_insert_with(|| t.id.clone());

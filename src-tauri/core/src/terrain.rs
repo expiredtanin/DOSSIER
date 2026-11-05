@@ -1003,9 +1003,77 @@ pub fn smooth_grid(z: &[f64], nx: usize, ny: usize, passes: u32) -> Vec<f64> {
     cur
 }
 
+/// [137] Höhen eines Raster-Geländes (swissALTI3D: ein Vertex je Rasterpunkt, s. `terrainMeshFromGrid`) mit
+/// `passes` weiteren Durchgängen von [`smooth_grid`] glätten. Das Raster wird aus den Vertices selbst
+/// zurückgewonnen (eindeutige x- und y-Werte); Vertex-Reihenfolge, Dreiecke und Lage bleiben, nur z ändert sich.
+/// `None`, wenn das Netz kein Raster ist (TIN aus Höhenlinien, doppelte Punkte, zu dünn besetzt).
+/// Durchgänge sind additiv: k und danach m Durchgänge = k + m Durchgänge.
+pub fn resmooth_grid_mesh(positions: &[f64], passes: u32) -> Option<Vec<f64>> {
+    if positions.len() < 12 || positions.len() % 3 != 0 || positions.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let n = positions.len() / 3;
+    let axis = |k: usize| -> Vec<f64> {
+        let mut v: Vec<f64> = (0..n).map(|i| positions[i * 3 + k]).collect();
+        v.sort_by(|a, b| a.total_cmp(b));
+        v.dedup_by(|a, b| (*a - *b).abs() <= 1e-6);
+        v
+    };
+    let (xs, ys) = (axis(0), axis(1));
+    let (nx, ny) = (xs.len(), ys.len());
+    // Ein Raster ist mindestens zur Hälfte besetzt (Lücken nur am Rand / ohne Messwert).
+    if nx < 2 || ny < 2 || nx.saturating_mul(ny) > 2 * n || nx * ny > 50_000_000 {
+        return None;
+    }
+    let find = |v: &[f64], q: f64| -> Option<usize> {
+        let i = v.partition_point(|a| *a < q - 1e-6);
+        (i < v.len() && (v[i] - q).abs() <= 1e-6).then_some(i)
+    };
+    let mut z = vec![f64::NAN; nx * ny];
+    let mut cell = Vec::with_capacity(n);
+    for i in 0..n {
+        let (ix, iy) = (find(&xs, positions[i * 3])?, find(&ys, positions[i * 3 + 1])?);
+        let c = iy * nx + ix;
+        if !z[c].is_nan() {
+            return None;
+        }
+        z[c] = positions[i * 3 + 2];
+        cell.push(c);
+    }
+    let sm = smooth_grid(&z, nx, ny, passes);
+    let mut out = positions.to_vec();
+    for (i, c) in cell.into_iter().enumerate() {
+        out[i * 3 + 2] = sm[c];
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [137] Raster-Gelände neu glätten: Raster erkannt, nur z ändert sich, Spitze wird flacher; additiv
+    /// (1 + 1 = 2 Durchgänge); ein TIN ohne Raster wird abgelehnt.
+    #[test]
+    fn raster_gelaende_nachglaetten() {
+        let mut pos = Vec::new();
+        for j in 0..5 {
+            for i in 0..5 {
+                pos.extend([i as f64 * 2.0, j as f64 * 2.0, if i == 2 && j == 2 { 10.0 } else { 0.0 }]);
+            }
+        }
+        let one = resmooth_grid_mesh(&pos, 1).unwrap();
+        assert!(one[12 * 3 + 2] < 10.0 && one[12 * 3 + 2] > 0.0);
+        assert!(pos.chunks_exact(3).zip(one.chunks_exact(3)).all(|(a, b)| a[0] == b[0] && a[1] == b[1]));
+        let two = resmooth_grid_mesh(&pos, 2).unwrap();
+        let one_one = resmooth_grid_mesh(&one, 1).unwrap();
+        assert!(two.iter().zip(&one_one).all(|(a, b)| (a - b).abs() < 1e-12));
+        assert_eq!(resmooth_grid_mesh(&pos, 0).unwrap(), pos);
+        // Unregelmässige Punkte (TIN aus Höhenlinien): kein Raster.
+        let tin = vec![0.0, 0.0, 0.0, 1.3, 0.2, 1.0, 0.4, 2.1, 2.0, 3.7, 1.9, 0.5, 2.2, 3.3, 1.0];
+        assert!(resmooth_grid_mesh(&tin, 1).is_none());
+        assert!(resmooth_grid_mesh(&[f64::NAN; 12], 1).is_none());
+    }
 
     fn ring(cx: f64, cy: f64, r: f64, n: usize) -> Vec<P2> {
         (0..n).map(|i| {

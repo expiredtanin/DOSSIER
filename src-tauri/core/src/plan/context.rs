@@ -73,6 +73,10 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
         if code.is_some_and(|k| !c.shown(k)) {
             continue;
         }
+        // [137] Einzeln ausgeblendetes Gelände (Kategorie bleibt sichtbar).
+        if matches!(obj, ContextObject::TerrainMesh(t) if t.hidden == Some(true)) {
+            continue;
+        }
         match obj {
             ContextObject::ContourSet(s) => {
                 // [137] Rahmen als Pick-Fläche (unter dem daraus erzeugten Gelände; Cmd+Klick schaltet durch).

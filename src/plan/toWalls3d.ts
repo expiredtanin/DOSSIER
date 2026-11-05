@@ -44,7 +44,7 @@ import type { Project, Vec2 } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 import { documentFor } from "../core/document";
 import { coreEpoch } from "../engine/coreWasm";
-import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickColumnMesh, PickDrawingSeg } from "./pickTypes";
+import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickDrawingSeg } from "./pickTypes";
 import {
   type RMesh,
   type RModel3d,
@@ -53,7 +53,7 @@ import {
   type RVec2,
   type RWall,
 } from "./toWalls3d/shared";
-import { emitExtrudedSolids, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
+import { emitExtrudedSolids, truckSolidPickTris, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
 import { applyVoids3d, type VoidCuts } from "./toWalls3d/voids3d";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (viewport/,
@@ -329,9 +329,20 @@ export function pickGeometry(
   roofs: PickRoof[];
   contextMeshes: PickContextMesh[];
   columns: PickColumnMesh[];
+  solids: PickSolidMesh[];
+  openingMeshes: PickOpeningMesh[];
   drawings: PickDrawingSeg[];
 } {
-  return documentFor(project).query("pickGeometry", [explodeGap(explode)]);
+  const g = documentFor(project).query("pickGeometry", [explodeGap(explode)]) as ReturnType<typeof pickGeometry>;
+  // [137] Freie Körper: das geladene truck-Netz (Loft, Rotation, Verjüngung, Rundung) statt der Prisma-Näherung des Kerns.
+  const gap = explodeGap(explode);
+  const offsets = gap > 0 ? explodeFloorOffsets(project, gap) : undefined;
+  const levelOf = new Map((project.extrudedSolids ?? []).map((s) => [s.id, s.levelId]));
+  g.solids = (g.solids ?? []).map((s) => {
+    const tris = truckSolidPickTris(s.solidId, offsets?.[levelOf.get(s.solidId) ?? ""] ?? 0);
+    return tris ? { ...s, tris } : s;
+  });
+  return g;
 }
 
 /**
@@ -373,8 +384,11 @@ export function selectionHighlightLines(
   contextObjectIds: string[] = [],
   /** Explosionsabstand ([65]); 0 = aus. */
   explode = 0,
+  /** [137] Stützen und freie Körper (Prisma-Umriss). */
+  columnIds: string[] = [],
+  solidIds: string[] = [],
 ): Float32Array {
-  const sel = { walls: wallIds, ceilings: ceilingIds, openings: openingIds, stairs: stairIds, roofs: roofIds, context: contextObjectIds };
+  const sel = { walls: wallIds, ceilings: ceilingIds, openings: openingIds, stairs: stairIds, roofs: roofIds, context: contextObjectIds, columns: columnIds, solids: solidIds };
   if (Object.values(sel).every((l) => l.length === 0)) return new Float32Array(0);
   // Gerechnet im Kern (`highlight3d.rs`); Antwort f32-LE.
   const b = documentFor(project).queryBin("selectionHighlight", [], JSON.stringify({ ...sel, rgb, explode: explodeGap(explode) }));

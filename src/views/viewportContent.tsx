@@ -279,7 +279,7 @@ export const Content = memo(function Content({
     () => (explode > 0 ? (explodeFloorOffsets(project, explode)[level.id] ?? 0) : 0),
     [project, explode, level.id],
   );
-  const { walls, ceilings, openings, stairs, roofs, contextObjects } = selection;
+  const { walls, ceilings, openings, stairs, roofs, contextObjects, columns, solids } = selection;
   const selectionLines = useMemo(
     () =>
       walls.length === 0 &&
@@ -287,10 +287,12 @@ export const Content = memo(function Content({
       openings.length === 0 &&
       stairs.length === 0 &&
       roofs.length === 0 &&
-      contextObjects.length === 0
+      contextObjects.length === 0 &&
+      columns.length === 0 &&
+      solids.length === 0
         ? null
-        : selectionHighlightLines(project, walls, ceilings, HIGHLIGHT_RGB, openings, stairs, roofs, contextObjects, explode),
-    [project, explode, walls, ceilings, openings, stairs, roofs, contextObjects],
+        : selectionHighlightLines(project, walls, ceilings, HIGHLIGHT_RGB, openings, stairs, roofs, contextObjects, explode, columns, solids),
+    [project, explode, walls, ceilings, openings, stairs, roofs, contextObjects, columns, solids],
   );
   // Kollisionen der letzten Prüfung: rote Hüllquader zusätzlich zur Auswahl-Hervorhebung.
   const highlightLines = useMemo(() => {

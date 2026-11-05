@@ -7,6 +7,7 @@ import { getFloor } from "../../model/types";
 import { buildSolidMesh, extrudeCircle, extrudePolygon } from "../../engine/truckSolid";
 import { extrudedSolidSpec, needsBrepPath } from "../extrudedSolidSpec";
 import type { RMesh, RRgb } from "./shared";
+import type { Vec3 } from "../pickTypes";
 
 /** Warmes Orange für truck-Profil-Extrusionen (hebt sie klar von Wand/Decke/Kontext ab). */
 const EXTRUSION_RGB: RRgb = [0.85, 0.55, 0.25];
@@ -103,4 +104,28 @@ export function emitExtrudedSolids(
     out.push(dz === 0 ? entry.mesh : { ...entry.mesh, positions: entry.mesh.positions.map((v, i) => (i % 3 === 2 ? v + dz : v)) });
   }
   return out;
+}
+
+/**
+ * [137] Dreiecke des geladenen truck-Netzes eines freien Körpers in WORLD-Koordinaten (x, Höhe, y — wie
+ * render3d `Extrusion`), um `dz` (Explosion) angehoben; `null`, solange das Netz nicht geladen ist.
+ */
+export function truckSolidPickTris(solidId: string, dz = 0): [Vec3, Vec3, Vec3][] | null {
+  const mesh = truckMeshCache.get(solidId)?.mesh;
+  if (!mesh || mesh.indices.length < 3) return null;
+  const pos = mesh.positions;
+  const n = pos.length / 3;
+  const at = (i: number): Vec3 => [pos[i * 3], pos[i * 3 + 2] + dz, pos[i * 3 + 1]];
+  const tris: [Vec3, Vec3, Vec3][] = [];
+  for (let k = 0; k + 2 < mesh.indices.length; k += 3) {
+    const [a, b, c] = [mesh.indices[k], mesh.indices[k + 1], mesh.indices[k + 2]];
+    if (a < n && b < n && c < n) tris.push([at(a), at(b), at(c)]);
+  }
+  return tris.length ? tris : null;
+}
+
+/** Nur für Tests: ein truck-Netz für einen Körper in den Cache legen. */
+export function __setTruckMeshForTest(solidId: string, mesh: RMesh | null): void {
+  if (mesh) truckMeshCache.set(solidId, { signature: "test", mesh });
+  else truckMeshCache.delete(solidId);
 }

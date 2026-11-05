@@ -78,3 +78,33 @@ describe("[137] Gelände neu glätten", () => {
     expect(terrain().smooth).toBe(2);
   });
 });
+
+describe("[137] Raster-Gelände (swissALTI3D) nachglätten", () => {
+  it("additive Durchgänge, nur z ändert sich, Undo; TIN aus Höhenlinien wird abgelehnt", () => {
+    const positions: number[] = [];
+    for (let j = 0; j < 6; j++) for (let i = 0; i < 6; i++) positions.push(i * 2, j * 2, i === 3 && j === 3 ? 10 : 0);
+    const indices: number[] = [];
+    for (let j = 0; j < 5; j++)
+      for (let i = 0; i < 5; i++) {
+        const a = j * 6 + i;
+        indices.push(a, a + 1, a + 7, a, a + 7, a + 6);
+      }
+    const grid: TerrainMesh = { id: "alti", type: "terrainMesh", name: "swissALTI3D", positions, indices, smooth: 1 };
+    setState({ project: { ...p, context: [grid] }, undoDepth: 0, redoDepth: 0, canUndo: false, canRedo: false });
+    getState().clearHistory();
+    const cur = () => getState().project.context!.find((c) => c.id === "alti") as TerrainMesh;
+    expect(getState().resmoothTerrain("alti", 2)).toBe(true);
+    expect(cur().smooth).toBe(3);
+    const peak = cur().positions[(3 * 6 + 3) * 3 + 2];
+    expect(peak).toBeLessThan(10);
+    expect(peak).toBeGreaterThan(0);
+    expect(cur().positions.filter((_, k) => k % 3 !== 2)).toEqual(positions.filter((_, k) => k % 3 !== 2));
+    expect(cur().indices).toEqual(indices);
+    getState().undo();
+    expect(cur().positions).toEqual(positions);
+    expect(cur().smooth).toBe(1);
+    // Musterhaus-Gelände (TIN aus Höhenlinien) ist kein Raster.
+    setState({ project: p });
+    expect(getState().resmoothTerrain(terrainId, 1)).toBe(false);
+  });
+});

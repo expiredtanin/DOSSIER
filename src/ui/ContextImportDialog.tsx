@@ -280,7 +280,8 @@ export function ContextImportDialog({
       let terrain: TerrainMesh | null = null;
       if (terrainResult?.grid) {
         const mesh = terrainMeshFromGrid(smoothTerrainGrid(terrainResult.grid, terrainSmooth));
-        if (mesh.positions.length >= 9) terrain = mesh;
+        // [137] Glättung (Durchgänge) merken: die Objekt-Info glättet Raster-Gelände additiv nach.
+        if (mesh.positions.length >= 9) terrain = { ...mesh, smooth: terrainSmooth };
       }
 
       // SWISSIMAGE-Luftbild (WMS) → georeferenziertes Rasterbild (EIN ContextImage).

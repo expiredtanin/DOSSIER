@@ -2129,6 +2129,8 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
             continue;
         }
         match obj {
+            // [137] Einzeln ausgeblendetes Gelände.
+            ContextObject::TerrainMesh(m) if m.hidden == Some(true) => {}
             ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => {
                 // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben auf das geänderte Netz übertragen).
                 let (pos, idx, _) = crate::excavation::terrain_model_mesh(p, m);
@@ -2339,6 +2341,22 @@ pub struct PickColumn {
     pub column_id: String,
 }
 
+/// [137] Öffnung ohne Wand (Dach, Decke, Gaube) für den 3D-Pick: Welt-Dreiecke ihrer Teile.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickOpeningMesh {
+    pub tris: Vec<Tri>,
+    pub opening_id: String,
+}
+
+/// [137] Freier Körper für den 3D-Pick: Welt-Dreiecke.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickSolid {
+    pub tris: Vec<Tri>,
+    pub solid_id: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PickGeometry {
     pub walls: Vec<RWall>,
@@ -2350,6 +2368,11 @@ pub struct PickGeometry {
     pub context_meshes: Vec<PickContextMesh>,
     /// [137] Stützen (vorher im 3D nicht anwählbar).
     pub columns: Vec<PickColumn>,
+    /// [137] Freie Körper (Prisma-Näherung; TS ersetzt sie durch das truck-Netz).
+    pub solids: Vec<PickSolid>,
+    /// [137] Öffnungen in Dach/Decke/Gaube als Netz.
+    #[serde(rename = "openingMeshes")]
+    pub opening_meshes: Vec<PickOpeningMesh>,
     pub drawings: Vec<PickDrawingSeg>,
 }
 
@@ -2409,8 +2432,10 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
     for roof in p.roofs.as_deref().unwrap_or(&[]) {
         let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
         let to_world = |q: &V3| -> V3 { [q[0], q[2], q[1]] };
-        let mut tris: Vec<Tri> = Vec::new();
-        for poly in g.planes.iter().chain(g.gables.iter()) {
+        // [137] Dachkörper wie gezeichnet (Gauben, Verschneidungen, Löcher der Dachfenster); ohne Körper die Flächen.
+        let mut tris: Vec<Tri> = emit_roofs(p, Some(&roof.id)).unwrap_or_default().iter().flat_map(|m| extrusion_tris(&m.positions, &m.indices)).collect();
+        let planes: &[Vec<V3>] = if tris.is_empty() { &g.planes } else { &[] };
+        for poly in planes.iter().chain(g.gables.iter()) {
             for i in 1..poly.len().saturating_sub(1) {
                 tris.push([to_world(&poly[0]), to_world(&poly[i]), to_world(&poly[i + 1])]);
             }
@@ -2423,7 +2448,17 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
     let stairs = pick_stairs(p);
     // Kontext-Meshes: rohe Welt-Dreiecke, Modell (x, y, z) → Welt (x, z, −y).
     let mut context_meshes = Vec::new();
+    // [137] Was im 3D nicht gezeichnet wird (Kategorie aus, Gelände einzeln aus), fängt auch keinen Klick.
+    let hidden = hidden_category_codes(&p.layers);
     for obj in p.context.as_deref().unwrap_or(&[]) {
+        let code = match obj {
+            ContextObject::TerrainMesh(m) => m.category_code.as_deref(),
+            ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
+            _ => None,
+        };
+        if code.is_some_and(|c| hidden.contains(c)) || matches!(obj, ContextObject::TerrainMesh(m) if m.hidden == Some(true)) {
+            continue;
+        }
         let (pos, idx, id) = match obj {
             ContextObject::TerrainMesh(m) => {
                 let (pos, idx, _) = crate::excavation::terrain_model_mesh(p, m);
@@ -2487,8 +2522,66 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         roofs,
         context_meshes,
         columns: pick_columns(p),
+        solids: pick_solids(p),
+        opening_meshes: pick_hosted_openings(p),
         drawings: pick_drawing_segs(p, &HashMap::new()),
     })
+}
+
+/// [137] Öffnungen in Dach, Decke oder Gaube (Dachfenster, Deckenöffnung, Gaubenfenster): ihre 3D-Teile
+/// (Rahmen, Glas, Eindeckrahmen) als Welt-Dreiecke — sie haben keine Wand-Box wie [`pick_openings`].
+pub fn pick_hosted_openings(p: &Project) -> Vec<PickOpeningMesh> {
+    let hosted: Vec<&Opening> = p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_roof_id.is_some() || o.host_ceiling_id.is_some() || o.host_dormer_id.is_some()).collect();
+    if hosted.is_empty() {
+        return Vec::new();
+    }
+    let mut q = p.clone();
+    q.context = None;
+    q.drawings2d.clear();
+    let mut out = Vec::new();
+    for o in hosted {
+        q.openings = Some(vec![o.clone()]);
+        let tris: Vec<Tri> = emit_opening_meshes(&q, 1.0).iter().flat_map(|m| extrusion_tris(&m.positions, &m.indices)).collect();
+        if !tris.is_empty() {
+            out.push(PickOpeningMesh { tris, opening_id: o.id.clone() });
+        }
+    }
+    out
+}
+
+/// [137] Freie Körper (`extrudedSolids`, ohne Abzugskörper) als Prisma über dem Grundriss-Umriss: UK =
+/// Geschoss-UK + `baseOffset`, OK = UK + `height`. Näherung für Loft/Rotation/Abzug/Verjüngung — die Hülle
+/// (`pickGeometry` in `plan/toWalls3d.ts`) ersetzt die Dreiecke durch das truck-Netz, sobald es geladen ist.
+pub fn pick_solids(p: &Project) -> Vec<PickSolid> {
+    let mut out = Vec::new();
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        if s.operation.as_deref() == Some("subtract") || !(s.height > 0.0) || s.points.len() < 3 {
+            continue;
+        }
+        let z0 = solid_base_z(p, s);
+        let foot: Vec<[f64; 2]> = s.points.iter().map(|q| [q.x, q.y]).collect();
+        if !(z0.is_finite() && foot.iter().all(|q| q[0].is_finite() && q[1].is_finite())) {
+            continue;
+        }
+        let (pos, idx) = crate::columns3d::prism(&foot, z0, z0 + s.height);
+        let tris = extrusion_tris(&pos, &idx);
+        if !tris.is_empty() {
+            out.push(PickSolid { tris, solid_id: s.id.clone() });
+        }
+    }
+    out
+}
+
+/// UK eines freien Körpers (Geschoss-UK + `baseOffset`), wie `emitExtrudedSolids`.
+pub fn solid_base_z(p: &Project, s: &ExtrudedSolid) -> f64 {
+    p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0)) + s.base_offset.unwrap_or(0.0)
+}
+
+/// Modell-Netz (x, y, z = Höhe) eines plan-abgeleiteten Körpers (render3d `MeshKind::Extrusion`) als
+/// Welt-Dreiecke (x, Höhe, y) — ohne Vorzeichenwechsel, anders als Gelände/Import (x, Höhe, −y).
+fn extrusion_tris(pos: &[f64], idx: &[u32]) -> Vec<Tri> {
+    let at = |i: u32| -> V3 { let i = i as usize * 3; [pos[i], pos[i + 2], pos[i + 1]] };
+    idx.chunks_exact(3).filter(|t| t.iter().all(|&i| (i as usize) * 3 + 2 < pos.len())).map(|t| [at(t[0]), at(t[1]), at(t[2])]).collect()
 }
 
 /// [137] Stützen als Welt-Dreiecke (Prisma aus Querschnitt und Höhenlage, wie [`emit_columns`]).
@@ -2504,8 +2597,7 @@ fn pick_columns(p: &Project) -> Vec<PickColumn> {
             continue;
         }
         let (pos, idx) = crate::columns3d::prism(&foot, z0, z1);
-        let at = |i: u32| -> V3 { let i = i as usize * 3; [pos[i], pos[i + 2], -pos[i + 1]] };
-        let tris: Vec<Tri> = idx.chunks_exact(3).filter(|t| t.iter().all(|&i| (i as usize) * 3 + 2 < pos.len())).map(|t| [at(t[0]), at(t[1]), at(t[2])]).collect();
+        let tris = extrusion_tris(&pos, &idx);
         if !tris.is_empty() {
             out.push(PickColumn { tris, column_id: col.id.clone() });
         }
@@ -2590,7 +2682,8 @@ mod tests {
         assert!(bg.iter().any(|tri| tri.iter().all(|q| (q[1] - 1.0).abs() < 1e-6)));
     }
 
-    /// [137] Stützen sind im 3D anwählbar: ihr Prisma kommt mit Id in die Pick-Geometrie (Welt: x, Höhe, −y).
+    /// [137] Stützen sind im 3D anwählbar: ihr Prisma kommt mit Id in die Pick-Geometrie (Welt: x, Höhe, y —
+    /// wie render3d `Extrusion`; vorher −y, d. h. gespiegelt zur Darstellung).
     #[test]
     fn pick_stuetzen_im_3d() {
         let p: Project = serde_json::from_value(serde_json::json!({
@@ -2604,8 +2697,84 @@ mod tests {
         assert_eq!(g.columns.len(), 1);
         assert_eq!(g.columns[0].column_id, "k1");
         let v: Vec<&V3> = g.columns[0].tris.iter().flatten().collect();
-        assert!(v.iter().all(|q| (q[0] - 2.0).abs() <= 0.15 + 1e-9 && (q[2] + 3.0).abs() <= 0.15 + 1e-9 && q[1] >= -1e-9 && q[1] <= 2.5 + 1e-9));
+        assert!(v.iter().all(|q| (q[0] - 2.0).abs() <= 0.15 + 1e-9 && (q[2] - 3.0).abs() <= 0.15 + 1e-9 && q[1] >= -1e-9 && q[1] <= 2.5 + 1e-9));
         assert!(v.iter().any(|q| (q[1] - 2.5).abs() < 1e-9));
+    }
+
+    fn solid_project() -> Project {
+        serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+            "drawingLevels": [
+                {"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0.0},
+                {"id": "OG", "name": "OG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 3.0}],
+            "extrudedSolids": [
+                {"id": "s1", "type": "extrudedSolid", "levelId": "OG", "points": [{"x": 1, "y": 2}, {"x": 3, "y": 2}, {"x": 3, "y": 5}, {"x": 1, "y": 5}], "height": 1.5, "baseOffset": 0.5},
+                {"id": "v1", "type": "extrudedSolid", "levelId": "EG", "points": [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 1, "y": 1}], "height": 1.0, "operation": "subtract"}],
+            "drawings2d": []
+        }))
+        .unwrap()
+    }
+
+    /// [137] Freie Körper sind im 3D anwählbar: Prisma über dem Umriss (Welt x, Höhe, y), UK = Geschoss + Versatz;
+    /// Abzugskörper (nur Umriss) nicht. Mit Explosion wandern sie mit ihrem Geschoss.
+    #[test]
+    fn pick_freie_koerper_im_3d() {
+        let p = solid_project();
+        let g = pick_geometry(&p).unwrap();
+        assert_eq!(g.solids.len(), 1);
+        assert_eq!(g.solids[0].solid_id, "s1");
+        let v: Vec<&V3> = g.solids[0].tris.iter().flatten().collect();
+        assert!(v.iter().all(|q| (1.0 - 1e-9..=3.0 + 1e-9).contains(&q[0]) && (2.0 - 1e-9..=5.0 + 1e-9).contains(&q[2]) && (3.5 - 1e-9..=5.0 + 1e-9).contains(&q[1])));
+        assert!(v.iter().any(|q| (q[1] - 5.0).abs() < 1e-9) && v.iter().any(|q| (q[1] - 3.5).abs() < 1e-9));
+        let e = crate::explode3d::pick_geometry(&p, 2.0).unwrap();
+        let top = e.solids[0].tris.iter().flatten().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max);
+        assert!((top - 7.0).abs() < 1e-9, "{top}");
+    }
+
+    /// [137] Dachfenster sind im 3D anwählbar (Netz mit Id); das Dach hat dort ein Loch statt der vollen Fläche.
+    #[test]
+    fn pick_dachfenster_im_3d() {
+        let mut p = sample();
+        p.openings.as_mut().unwrap().push(Opening {
+            id: "DF".into(),
+            kind: ElementKind::Window,
+            width: 0.78,
+            height: 1.18,
+            host_roof_id: Some("RF1".into()),
+            host_point: Some(Vec2 { x: 2.5, y: 1.0 }),
+            ..Default::default()
+        });
+        let g = pick_geometry(&p).unwrap();
+        let df = g.opening_meshes.iter().find(|m| m.opening_id == "DF").expect("Dachfenster in der Pick-Geometrie");
+        assert!(df.tris.len() > 12);
+        // Welt (x, Höhe, y): um den Wirtpunkt (2.5, 1.0).
+        let (cx, cz) = df.tris.iter().flatten().fold((0.0, 0.0), |a, q| (a.0 + q[0], a.1 + q[2]));
+        let n = (df.tris.len() * 3) as f64;
+        assert!((cx / n - 2.5).abs() < 1.0 && (cz / n - 1.0).abs() < 1.5, "{} {}", cx / n, cz / n);
+        assert!(g.roofs.iter().any(|r| r.roof_id == "RF1" && !r.tris.is_empty()));
+    }
+
+    /// [137] Einzeln ausgeblendetes Gelände (`hidden`) und Gelände einer ausgeblendeten Kategorie fehlen im 3D
+    /// und in der Pick-Geometrie; ein zweites Netz bleibt.
+    #[test]
+    fn gelaende_einzeln_ausblenden() {
+        let mk = |id: &str, hidden: Option<bool>, code: Option<&str>| {
+            ContextObject::TerrainMesh(TerrainMesh {
+                id: id.into(),
+                positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 10.0, 10.0, 1.0],
+                indices: vec![0.0, 1.0, 2.0],
+                hidden,
+                category_code: code.map(Into::into),
+                ..Default::default()
+            })
+        };
+        let mut p = Project { context: Some(vec![mk("a", Some(true), None), mk("b", None, None), mk("c", Some(false), Some("02"))]), ..Default::default() };
+        let ids = |p: &Project| pick_geometry(p).unwrap().context_meshes.iter().map(|m| m.context_object_id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&p), vec!["b", "c"]);
+        assert_eq!(emit_context_meshes(&p).len(), 2);
+        p.layers = serde_json::from_value(serde_json::json!([{"code": "02", "name": "Gelände", "color": "#000000", "visible": false}])).unwrap();
+        assert_eq!(ids(&p), vec!["b"]);
+        assert_eq!(emit_context_meshes(&p).len(), 1);
     }
 
     /// [T4] Import-Mesh glatt: Knickwinkel geht ans 3D (Vorgabe 30°), kantig ohne; JSON `creaseAngle`.
