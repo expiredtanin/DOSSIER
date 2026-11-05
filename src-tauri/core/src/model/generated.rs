@@ -1762,6 +1762,11 @@ pub struct DrawingLevel {
     #[serde(rename = "hiddenLines", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hidden_lines: Option<bool>,
+    /// Skizzenstil ([67]): Striche leicht gewellt, an Enden und Ecken überzogen (Präsentation).
+    /// Wirkt auf Grundriss, Schnitt und Ansicht dieser Ebene; Default aus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sketch: Option<bool>,
     /// Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
     /// Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
     /// linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
@@ -1853,6 +1858,10 @@ pub struct ViewTemplate {
     #[serde(rename = "hiddenLines", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hidden_lines: Option<bool>,
+    /// Skizzenstil ([67]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sketch: Option<bool>,
     /// Strichstärken mit dem Massstab skalieren.
     #[serde(rename = "scaleLineWeights", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

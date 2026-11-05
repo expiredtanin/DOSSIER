@@ -77,6 +77,8 @@ pub struct LevelSpec {
     pub shadows: bool,
     /// Verdeckte Kanten gestrichelt zeigen ([G4], Ansicht; der Schnitt liest es aus dem Aufruf).
     pub hidden_lines: bool,
+    /// Skizzenstil ([67]).
+    pub sketch: bool,
 }
 
 impl LevelSpec {
@@ -91,6 +93,7 @@ impl LevelSpec {
             depth: num("depth"),
             shadows: v.get("shadows").and_then(|b| b.as_bool()).unwrap_or(false),
             hidden_lines: v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false),
+            sketch: v.get("sketch").and_then(|b| b.as_bool()).unwrap_or(false),
         }
     }
 
@@ -2689,6 +2692,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
     let (mut prims, bounds) = section_primitives(&out, mono, hidden, &vis);
+    w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     super::extras::scale_line_weights(p, scale, &mut prims);
     w.group(&prims);

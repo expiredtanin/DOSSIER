@@ -332,12 +332,14 @@ pub fn line_weight_factor(p: &Project, scale: f64) -> f64 {
 pub struct Post {
     pub mono: bool,
     pub lw: f64,
+    /// Skizzenstil ([67], `plan/sketch.rs`): Meter Modell je Papier-mm; 0 = aus.
+    pub sketch: f64,
 }
 
 impl Post {
     /// Wirkt sie auf etwas?
     pub fn active(&self) -> bool {
-        self.mono || self.lw != 1.0
+        self.mono || self.lw != 1.0 || self.sketch > 0.0
     }
 
     fn hatch(&self, h: &mut HatchRender) {
@@ -400,7 +402,7 @@ pub fn scale_line_weights(p: &Project, scale: f64, prims: &mut [Primitive]) {
     if lw == 1.0 {
         return;
     }
-    let post = Post { mono: false, lw };
+    let post = Post { mono: false, lw, sketch: 0.0 };
     for q in prims.iter_mut() {
         match q {
             Primitive::Line { weight_mm, .. } => *weight_mm *= lw,
@@ -412,8 +414,24 @@ pub fn scale_line_weights(p: &Project, scale: f64, prims: &mut [Primitive]) {
 /// Nachbearbeitung eines Plans: Schwarz-Weiss und Strichstärken-Faktor; `None`, wenn sie nichts tut.
 /// Auf einer Blatt-Ebene (`layoutId`) gelten die Strichstärken unverändert (Papier 1:1).
 pub fn post_for(p: &Project, a: &super::domains::PlanArgs) -> Option<Post> {
-    let sheet = p.floor(&a.floor).is_some_and(|l| l.layout_id.is_some());
-    Some(Post { mono: a.mono, lw: if sheet { 1.0 } else { line_weight_factor(p, a.scale) } }).filter(Post::active)
+    let level = p.floor(&a.floor);
+    let sheet = level.is_some_and(|l| l.layout_id.is_some());
+    let sketch = if sheet { 0.0 } else { sketch_k(level.and_then(|l| l.sketch), a.scale) };
+    Some(Post { mono: a.mono, lw: if sheet { 1.0 } else { line_weight_factor(p, a.scale) }, sketch }).filter(Post::active)
+}
+
+/// [67] Skizzenstil einer Ebene beim Massstab 1:`scale`: Meter je Papier-mm, 0 = aus.
+pub fn sketch_k(on: Option<bool>, scale: f64) -> f64 {
+    if on == Some(true) && scale > 0.0 && scale.is_finite() {
+        scale / 1000.0
+    } else {
+        0.0
+    }
+}
+
+/// [67] Nachbearbeitung nur mit Skizzenstil (Schnitt/Ansicht; `None` = aus).
+pub fn sketch_post(on: Option<bool>, scale: f64) -> Option<Post> {
+    Some(Post { mono: false, lw: 1.0, sketch: sketch_k(on, scale) }).filter(Post::active)
 }
 
 // ── Ausmass ─────────────────────────────────────────────────────────────────────────────────────
@@ -558,7 +576,7 @@ mod tests {
 
     #[test]
     fn mono_poche_bleibt_schwarz() {
-        let post = Post { mono: true, lw: 1.0 };
+        let post = Post { mono: true, lw: 1.0, sketch: 0.0 };
         let mut solid = HatchRender { pattern: HatchPattern::Solid, ..no_hatch() };
         solid.color = "#123456".into();
         let mut p = flat_polygon(vec![], "#abcdef", 1.0);

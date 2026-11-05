@@ -1108,6 +1108,11 @@ export type DrawingLevel = {
    */
   hiddenLines?: boolean;
   /**
+   * Skizzenstil ([67]): Striche leicht gewellt, an Enden und Ecken überzogen (Präsentation).
+   * Wirkt auf Grundriss, Schnitt und Ansicht dieser Ebene; Default aus.
+   */
+  sketch?: boolean;
+  /**
    * Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
    * Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
    * linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
@@ -3250,6 +3255,8 @@ export type ViewTemplate = {
   shadows?: boolean;
   /** Verdeckte Kanten (Schnitt/Ansicht). */
   hiddenLines?: boolean;
+  /** Skizzenstil ([67]). */
+  sketch?: boolean;
   /** Strichstärken mit dem Massstab skalieren. */
   scaleLineWeights?: boolean;
   /** Schnitthöhe über OKFF ([36]). */

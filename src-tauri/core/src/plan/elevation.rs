@@ -1733,6 +1733,7 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     // Massstab für die Ausdünnung der Ansichtsschraffur (fehlt er: 1:100).
     let scale = args.get(2).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0);
     let mut w = crate::plan::buf::Writer::new(true);
+    w.post = super::extras::sketch_post(Some(level.sketch), scale);
     if let Some((mut prims, bounds)) = elevation_primitives(p, &level, shadows, mono, &vis, scale)? {
         super::extras::scale_line_weights(p, scale, &mut prims);
         w.group(&prims);
