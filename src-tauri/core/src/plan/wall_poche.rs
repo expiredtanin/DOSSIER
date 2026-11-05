@@ -335,7 +335,9 @@ fn subtract_holes(s: f64, e: f64, holes: &[Hole], s_cut: Option<Line>, e_cut: Op
     let mut clipped: Vec<Hole> = holes.iter().map(|h| Hole { a: max(s_reach, h.a), b: min(e_reach, h.b), ..*h }).filter(|h| h.b > h.a + CUTOUT_EPS).collect();
     clipped.sort_by(|p, q| p.a.partial_cmp(&q.a).unwrap_or(std::cmp::Ordering::Equal));
     let mut parts = Vec::new();
-    let (mut cursor, mut cursor_line) = (s, s_cut);
+    // Loch vor dem Achsanfang (in der Gehrungs-Verlängerung): das Stück davor beginnt an der Gehrung.
+    let first_before = clipped.first().is_some_and(|h| h.a < s - CUTOUT_EPS);
+    let (mut cursor, mut cursor_line) = (if first_before { s_reach } else { s }, s_cut);
     for h in clipped {
         if h.a > cursor + CUTOUT_EPS {
             parts.push((cursor, h.a, cursor_line, Some(h.la)));
@@ -1120,6 +1122,12 @@ mod tests {
         let near = |p: V| hypot2(p.x - corner.x, p.y - corner.y) < 1e-9;
         let hit = parse(&out).into_iter().any(|p| matches!(p, Prim::Line(art, a, b) if art == LINE_OUTLINE && (near(a) || near(b))));
         assert!(hit, "keine Umrisslinie bis zur Innenecke");
+        // Gleich am Wandanfang (Loch vor dem Achsanfang): Eckwand beginnt im Knoten.
+        let walls = vec![w((5.0, 10.0), (0.0, 10.0), ext()), w((5.0, 10.0), (5.0, 15.0), ext()), w((10.0, 10.0), (5.0, 10.0), iw())];
+        let c = compute_joins(&walls).unwrap();
+        let out = wall_poche(&poche_of(&walls[1], &c[1]));
+        let hit = parse(&out).into_iter().any(|p| matches!(p, Prim::Line(art, a, b) if art == LINE_OUTLINE && (near(a) || near(b))));
+        assert!(hit, "keine Umrisslinie bis zur Innenecke (Wandanfang)");
     }
 
     #[test]
