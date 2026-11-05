@@ -6,8 +6,10 @@
 //  • Baulinie: Halbebene auf der Seite des Parzellen-Schwerpunkts.
 //  • Gebäude-Grundfläche: Wände aller Geschosse und freie Körper (ohne Abzugskörper).
 //  • Vorsprünge (nur mit `projectionDepth`): Dachüberstände und als Vorsprung markierte Decken/Körper
-//    (`siteProjection`) dürfen bis zur Tiefe in den Abstand ragen, markierte zusätzlich höchstens
+//    bzw. Erkerwände (`siteProjection`) dürfen bis zur Tiefe in den Abstand ragen, markierte zusätzlich höchstens
 //    auf `projectionShare` der Fassadenlänge je Grenze.
+//  • Gebäudeprofil (mit `profileAngle`): zulässige Höhe = `profileHeight` + tan(α)·Abstand zur Grenze/
+//    Baulinie über dem massgebenden Terrain; geprüft werden obere Punkte der Bauteile.
 //  • Zulässige Hülle im 3D (`siteEnvelope3d`, mit `show3d`): durchscheinend in render3d.
 // Gerechnet wird im Rust-Kern (`src-tauri/core/src/site_rules.rs`), die Prüfung des Modells auf dem
 // Projekt-Dokument; die Flächen-Hilfen (`allowedArea`, `multiPolygonArea`) nehmen flache Daten.
@@ -66,6 +68,10 @@ export interface SiteCheck {
   terrainMin: number | null;
   /** Gesamthöhe über dem massgebenden Terrain; mit Gelände prüft die Höhe dagegen statt gegen ±0.00. */
   heightAboveTerrain: number | null;
+  /** Gebäudeprofil ([63], mit `profileAngle`): ein Bauteil ragt mit oberen Punkten über das Profil. */
+  profileExceeded: boolean;
+  /** Grundrisse der Bauteile über dem Profil (ganzes Bauteil, Näherung). */
+  profileViolations: Area;
 }
 
 /** Prüft das Modell gegen `project.siteRules`; `null` ohne (gültiges) Baurecht. Rechnung im Rust-Kern (`site_rules.rs`). */

@@ -18,14 +18,18 @@ function parseLen(text: string): number | undefined | null {
   return Number.isFinite(v) && v >= 0 ? v : null;
 }
 
-/** Gewählte Decke/Körper, der als Vorsprung markiert werden kann, samt aktuellem Stand. */
+/** Gewählte Decke/Körper/Wand (Erker), die als Vorsprung markiert werden kann, samt aktuellem Stand. */
 function projectionTarget(
   p: Project,
   sel: { kind: string; id: string } | null | undefined,
-): { kind: "ceiling" | "extrudedSolid"; id: string; flag: boolean } | null {
+): { kind: "ceiling" | "extrudedSolid" | "wall"; id: string; flag: boolean } | null {
   if (sel?.kind === "ceiling") {
     const c = p.ceilings?.find((x) => x.id === sel.id);
     return c ? { kind: "ceiling", id: c.id, flag: c.siteProjection === true } : null;
+  }
+  if (sel?.kind === "wall") {
+    const w = p.walls.find((x) => x.id === sel.id);
+    return w ? { kind: "wall", id: w.id, flag: w.siteProjection === true } : null;
   }
   if (sel?.kind === "extrudedSolid") {
     const x = p.extrudedSolids?.find((e) => e.id === sel.id);
@@ -48,7 +52,7 @@ export function SiteRulesSection() {
   const selDrawing = sel?.kind === "drawing2d" ? host.project.drawings2d.find((d) => d.id === sel.id) : undefined;
   const selParcel = parcelFromDrawing(selDrawing);
   const selLine = lineFromDrawing(selDrawing);
-  // Vorsprung markieren: gewählte Decke (Balkon) oder freier Körper (Erker).
+  // Vorsprung markieren: gewählte Decke (Balkon), freier Körper oder Wand (Erker).
   const selProjection = projectionTarget(host.project, sel);
 
   const write = (fn: (r: SiteRules) => SiteRules | undefined, key?: string) =>
@@ -81,7 +85,7 @@ export function SiteRulesSection() {
 
   const check = checkSiteRules(host.project);
   const n = rules.parcel.length;
-  const ok = check !== null && check.violationArea < 0.01 && !check.heightExceeded;
+  const ok = check !== null && check.violationArea < 0.01 && !check.heightExceeded && !check.profileExceeded;
 
   return (
     <div className="site-rules">
@@ -120,6 +124,9 @@ export function SiteRulesSection() {
                 max: fmt(rules.maxHeight, 2),
               })}
             </div>
+          )}
+          {rules.profileAngle !== undefined && (
+            <div>{t(check.profileExceeded ? "siteRules.profileOver" : "siteRules.profileOk")}</div>
           )}
           {check.terrainMin !== null && (
             <div>{t("siteRules.terrainAtFacade", { z: fmt(check.terrainMin, 2) })}</div>
@@ -162,6 +169,50 @@ export function SiteRulesSection() {
         />
         <span>m</span>
       </label>
+
+      <label className="kz-parcel" title={t("siteRules.profileAngle.hint")}>
+        <span>{t("siteRules.profileAngle")}</span>
+        <input
+          type="number"
+          min={0}
+          max={89}
+          step={5}
+          className="kz-input kz-num"
+          value={rules.profileAngle ?? ""}
+          placeholder="–"
+          onChange={(e) => {
+            const v = parseLen(e.target.value);
+            if (v === null || (v !== undefined && v >= 90)) return;
+            write((r) => {
+              const { profileAngle: _old, ...rest } = r;
+              return v === undefined ? rest : { ...rest, profileAngle: v };
+            }, "siteRules:profileAngle");
+          }}
+        />
+        <span>°</span>
+      </label>
+      {rules.profileAngle !== undefined && (
+        <label className="kz-parcel" title={t("siteRules.profileHeight.hint")}>
+          <span>{t("siteRules.profileHeight")}</span>
+          <input
+            type="number"
+            min={0}
+            step={0.5}
+            className="kz-input kz-num"
+            value={rules.profileHeight ?? ""}
+            placeholder="0"
+            onChange={(e) => {
+              const v = parseLen(e.target.value);
+              if (v === null) return;
+              write((r) => {
+                const { profileHeight: _old, ...rest } = r;
+                return v === undefined ? rest : { ...rest, profileHeight: v };
+              }, "siteRules:profileHeight");
+            }}
+          />
+          <span>m</span>
+        </label>
+      )}
 
       <label className="kz-parcel" title={t("siteRules.projectionDepth.hint")}>
         <span>{t("siteRules.projectionDepth")}</span>
@@ -216,7 +267,9 @@ export function SiteRulesSection() {
               applyChange((p: Project) =>
                 selProjection.kind === "ceiling"
                   ? patchItem(p, "ceilings", selProjection.id, (c) => withProjection(c, v))
-                  : patchItem(p, "extrudedSolids", selProjection.id, (x) => withProjection(x, v)),
+                  : selProjection.kind === "wall"
+                    ? patchItem(p, "walls", selProjection.id, (w) => withProjection(w, v))
+                    : patchItem(p, "extrudedSolids", selProjection.id, (x) => withProjection(x, v)),
               );
             }}
           />
