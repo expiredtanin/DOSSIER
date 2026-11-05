@@ -87,12 +87,14 @@ fn ceiling_rings(ce: &Ceiling) -> Option<(Vec<P>, Vec<Vec<P>>)> {
 
 struct Sink {
     out: Vec<f32>,
+    /// Explosionsversatz ([65]) des aktuellen Bauteils (Höhe, m).
+    dz: f64,
 }
 
 impl Sink {
     fn push(&mut self, a: [f64; 3], b: [f64; 3], rgb: [f64; 3], mask: u8) {
         // Plan (x, y, z) → Welt (x, z, y).
-        for v in [a[0], a[2], a[1], b[0], b[2], b[1], rgb[0], rgb[1], rgb[2], mask as f64] {
+        for v in [a[0], a[2] + self.dz, a[1], b[0], b[2] + self.dz, b[1], rgb[0], rgb[1], rgb[2], mask as f64] {
             self.out.push(v as f32);
         }
     }
@@ -100,14 +102,24 @@ impl Sink {
 
 /// Alle Musterlinien des Projekts für render3d (s. Modulkopf).
 pub fn pattern_lines_3d(p: &Project) -> Vec<f32> {
-    let mut s = Sink { out: Vec::new() };
+    pattern_lines_3d_exploded(p, 0.0)
+}
+
+/// Wie `pattern_lines_3d`, mit Explosionsabstand `gap` ([65], ≤ 0 = aus): die Linien heben sich mit dem Geschoss ihres Bauteils.
+pub fn pattern_lines_3d_exploded(p: &Project, gap: f64) -> Vec<f32> {
+    let ex = crate::explode3d::Explode::new(p, gap);
+    let dz_of = |id: &str| ex.as_ref().map_or(0.0, |e| e.of(id));
+    let mut s = Sink { out: Vec::new(), dz: 0.0 };
     for w in &p.walls {
+        s.dz = dz_of(&w.id);
         wall_lines(p, w, &mut s);
     }
     for ce in p.ceilings.as_deref().unwrap_or(&[]) {
+        s.dz = dz_of(&ce.id);
         ceiling_lines(p, ce, &mut s);
     }
     for roof in p.roofs.as_deref().unwrap_or(&[]) {
+        s.dz = dz_of(&roof.id);
         let Some((pat, comp, spec)) = spec_for(p.roof_layers(roof).first().and_then(|l| p.component(&l.component_id)), roof.surface_pattern_angle.unwrap_or(0.0)) else { continue };
         let rgb = ink_rgb(pat, comp);
         let off = roof.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
@@ -286,6 +298,33 @@ mod tests {
     fn with_pattern(p: &mut Project, comp_id: &str, spacing: f64) {
         let c = p.components.iter_mut().find(|c| c.id == comp_id).unwrap();
         c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Lines, direction: Some(SurfacePatternDirection::Vertical), spacing, ..Default::default() });
+    }
+
+    /// [65] Mit Explosionsabstand heben sich die Linien mit dem Geschoss ihres Bauteils (EG bleibt, OG +gap).
+    #[test]
+    fn muster_folgt_dem_explosionsversatz() {
+        let mut p = sample();
+        let ids: Vec<String> = p.components.iter().map(|c| c.id.clone()).collect();
+        for id in &ids {
+            with_pattern(&mut p, id, 0.2);
+        }
+        let a = pattern_lines_3d(&p);
+        assert_eq!(a, pattern_lines_3d_exploded(&p, 0.0));
+        let b = pattern_lines_3d_exploded(&p, 2.0);
+        assert_eq!(a.len(), b.len());
+        let (mut lifted, mut kept) = (0, 0);
+        for (x, y) in a.chunks_exact(PATTERN_STRIDE).zip(b.chunks_exact(PATTERN_STRIDE)) {
+            assert_eq!((x[0], x[2], x[3], x[5]), (y[0], y[2], y[3], y[5]));
+            let (d0, d1) = (y[1] - x[1], y[4] - x[4]);
+            assert!((d0 - d1).abs() < 1e-5);
+            if d0.abs() < 1e-5 {
+                kept += 1;
+            } else {
+                assert!((d0 - 2.0).abs() < 1e-5, "{d0}");
+                lifted += 1;
+            }
+        }
+        assert!(lifted > 0 && kept > 0, "{lifted} {kept}");
     }
 
     #[test]

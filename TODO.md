@@ -1935,8 +1935,10 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   sitzen auf den gehobenen Bauteilen (`explodeGripDz`, Abfrage `explodeOffsets`), Höhen-/First-Drag schreiben
   unversetzte Höhen; Arbeitsebene/Raster/Zeichnen-Vorschau auf dem gehobenen aktiven Geschoss; natives
   3D-Fenster bekommt dasselbe Modell (`pushNativeWalls(project, explode)`, Rust unverändert).
-  Offen: nur im Linux-Container geprüft (Zahlen, kein Bild, kein Metal/Tauri); Ansichtsschraffur auf Flächen
-  (`emitSurfacePatternLines`) bleibt unversetzt.
+  Ansichtsschraffur auf Wänden/Decken/Dächern hebt sich mit dem Geschoss ihres Bauteils
+  (`pattern_lines_3d_exploded`, `emitSurfacePatternLines(project, explode)`).
+  Offen: nur im Linux-Container geprüft (Zahlen, kein Bild, kein Metal/Tauri); Abzugskörper (truck-Booleans) werden bei
+  reiner Abstandsänderung neu gerechnet (Cache ohne Abstand + Verschieben nicht umgesetzt).
 - ◐ **[66] Präsentationspläne mit einem Klick.** · M — 4.11.: Standard-Ansichtsvorlagen (neue Projekte, „Standards
   laden/aktualisieren"): „Präsentation" (farbig, Schatten, ohne Referenzen/Konstruktion), „Eingabeplan 1:100" und
   „Ausführungsplan 1:50" (schwarz-weiss, fein, Strichstärken nach Massstab) — an Geschoss/Schnitt/Ansicht binden ([34]).

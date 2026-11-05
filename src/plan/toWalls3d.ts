@@ -88,8 +88,12 @@ export function explodeFloorOffsets(project: Project, explode: number): Record<s
  * Ansichtsschraffur ([100]) auf den Flächen als Linien für render3d (`set_pattern_lines`): je Linie
  * `ax ay az bx by bz r g b maske` (Welt-Meter); die Maske wählt die Ausdünnung nach Abstand.
  */
-export function emitSurfacePatternLines(project: Project): Float32Array {
-  return documentFor(project).surfacePatternLines();
+export function emitSurfacePatternLines(
+  project: Project,
+  /** Explosionsabstand ([65]): Linien heben sich mit dem Geschoss ihres Bauteils; 0 = aus. */
+  explode = 0,
+): Float32Array {
+  return documentFor(project).surfacePatternLines(explodeGap(explode));
 }
 
 /**
