@@ -1,6 +1,6 @@
 // Musterhaus komplex ([133]): jeder gespeicherte Grundriss-Ausschnitt öffnet mit sinnvollem Zoom und zeigt das
 // Gebäude (Haupthaus 0…15 × 0…10 m) — auch beim Wechsel aus Detail, 3D, Schnitt und Ansicht zurück.
-import { discardIfAsked, expect, fileMenu, startNewProject, test } from "./app";
+import { discardIfAsked, expect, fileMenu, showSnapshot, startNewProject, test } from "./app";
 
 // [Name, Massstab-Nenner]
 const PLANS: [string, number][] = [["UG 1:100", 100], ["EG 1:100", 100], ["OG 1:100", 100], ["DG 1:100", 100], ["EG 1:50 Ausschnitt Wohnen", 50], ["Situation 1:500", 500], ["EG Brandschutz", 100]];
@@ -17,11 +17,9 @@ test("Musterhaus komplex: gespeicherte Grundriss-Ausschnitte öffnen mit sinnvol
   await fileMenu(page, /Musterhaus \(komplex\)/);
   await discardIfAsked(page);
   await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
-  const tabs = page.getByRole("tablist", { name: "Zeichnungen" });
-  const tab = (name: string) => tabs.getByRole("tab", { name: `${name} Ausschnitt-Tab löschen`, exact: true });
 
   const check = async (name: string, scale = 100) => {
-    await tab(name).click();
+    await showSnapshot(page, name);
     const svg = page.locator("svg.plan-svg").first();
     await expect(svg).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(800);
@@ -48,7 +46,7 @@ test("Musterhaus komplex: gespeicherte Grundriss-Ausschnitte öffnen mit sinnvol
 
   for (const [name, scale] of PLANS) await check(name, scale);
   for (const detour of DETOURS) {
-    await tab(detour).click();
+    await showSnapshot(page, detour);
     await page.waitForTimeout(1000);
     await check("EG 1:100");
   }

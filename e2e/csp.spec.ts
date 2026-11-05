@@ -1,6 +1,6 @@
 // [117] Strikte CSP (Meta-Tag im Build, s. vite.config.ts / scripts/csp.cjs): Musterhaus öffnen, Plan, Schnitt,
 // Ansicht und 3D besuchen — es darf keine CSP-Verletzung geben (Konsole oder securitypolicyviolation).
-import { discardIfAsked, expect, fileMenu, startNewProject, test } from "./app";
+import { discardIfAsked, expect, fileMenu, showSnapshot, startNewProject, test } from "./app";
 
 test("keine CSP-Verletzung bei Plan, Schnitt, Ansicht und 3D", async ({ page }) => {
   test.setTimeout(120_000);
@@ -22,10 +22,7 @@ test("keine CSP-Verletzung bei Plan, Schnitt, Ansicht und 3D", async ({ page }) 
   await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
 
   for (const name of ["Schnitt A-A", "Ansicht Süd"]) {
-    await page
-      .getByRole("tablist", { name: "Zeichnungen" })
-      .getByRole("tab", { name: `${name} Ausschnitt-Tab löschen`, exact: true })
-      .click();
+    await showSnapshot(page, name);
     await expect(page.locator("svg.plan-svg").first()).toBeVisible({ timeout: 30_000 });
   }
   await page.getByRole("button", { name: "Axonometrie", exact: true }).click();

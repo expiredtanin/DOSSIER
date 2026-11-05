@@ -2,7 +2,7 @@
 // schalten — ohne Konsolenfehler (Wächter in app.ts). Den Publikationssatz „Baueingabe" als PDF ausgeben.
 // Mit DOSSIER_SHOTS=<ordner> entstehen Screenshots je Blatt und das PDF für die Abnahme.
 import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { discardIfAsked, expect, fileMenu, openTab, startNewProject, test } from "./app";
+import { discardIfAsked, expect, fileMenu, openTab, showSnapshot, startNewProject, test } from "./app";
 
 // Gespeicherte Ausschnitte erscheinen als Zeichnungs-Reiter (Geschosse, Schnitte, Ansichten, Detail, 3D).
 const VIEWS = ["UG 1:100", "EG 1:100", "OG 1:100", "DG 1:100", "EG 1:50 Ausschnitt Wohnen", "Situation 1:500", "EG Brandschutz", "Schnitt A-A", "Schnitt B-B", "Ansicht Süd", "Ansicht Ost", "Ansicht Nord", "Ansicht West", "Detail Deckenauflager 1:10", "Axonometrie Südost"];
@@ -17,14 +17,12 @@ test("Musterhaus komplex: Geschosse, Ansichten und Blätter ohne Konsolenfehler"
   await discardIfAsked(page);
   await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
 
-  const tabs = page.getByRole("tablist", { name: "Zeichnungen" });
   for (const name of VIEWS) {
-    const tab = tabs.getByRole("tab", { name: `${name} Ausschnitt-Tab löschen`, exact: true });
-    await tab.click();
+    await showSnapshot(page, name);
     if (!name.startsWith("Axonometrie")) await expect(page.locator("svg.plan-svg").first()).toBeVisible({ timeout: 30_000 });
   }
   // Zurück in einen Grundriss (der 3D-Viewport schliesst).
-  await tabs.getByRole("tab", { name: "EG 1:100 Ausschnitt-Tab löschen", exact: true }).click();
+  await showSnapshot(page, "EG 1:100");
 
   await openTab(page, "Mappe");
   for (const name of SHEETS) {
