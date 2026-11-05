@@ -107,6 +107,64 @@ fn connected(p: Vec2, self_idx: usize, walls: &[WallIn]) -> bool {
     false
 }
 
+fn thick(w: &WallIn) -> f64 {
+    if w.thickness.is_finite() && w.thickness > 0.0 {
+        w.thickness
+    } else {
+        0.3
+    }
+}
+
+/// Seitenflächen einer geraden Wand: (Punkt links, Punkt rechts, Richtung).
+fn face_lines(w: &WallIn) -> Option<(Vec2, Vec2, Vec2)> {
+    let (dx, dy) = (w.end[0] - w.start[0], w.end[1] - w.start[1]);
+    let len = dx.hypot(dy);
+    if !(len >= EPS) || w.arc().is_some() {
+        return None;
+    }
+    let u = [dx / len, dy / len];
+    let sh = if w.shift.is_finite() { w.shift } else { 0.0 };
+    let h = thick(w) / 2.0;
+    let at = |k: f64| [w.start[0] - u[1] * k, w.start[1] + u[0] * k];
+    Some((at(sh + h), at(sh - h), u))
+}
+
+fn line_x(p: Vec2, u: Vec2, q: Vec2, v: Vec2) -> Option<Vec2> {
+    let den = u[0] * v[1] - u[1] * v[0];
+    if den.abs() < 1e-9 {
+        return None;
+    }
+    let k = ((q[0] - p[0]) * v[1] - (q[1] - p[1]) * v[0]) / den;
+    Some([p[0] + u[0] * k, p[1] + u[1] * k])
+}
+
+/// [81] Gehrung am Ende (`at_end`) der Wand `i`, wenn dort genau eine andere gerade Wand mit ihrem Ende
+/// schief (weder rechtwinklig noch gleichlaufend) anschliesst: (Ecke links, Ecke rechts) als Schnitt der
+/// gleichseitigen Wandflächen. Rechtwinklige Stösse bleiben bei der t/2-Verlängerung (unverändert).
+fn mitre_end(walls: &[WallIn], i: usize, at_end: bool) -> Option<(Vec2, Vec2)> {
+    let w = &walls[i];
+    let p = if at_end { w.end } else { w.start };
+    let near = |q: Vec2| (q[0] - p[0]).hypot(q[1] - p[1]) < 1e-3;
+    let mut hits = walls.iter().enumerate().filter(|(j, o)| *j != i && (near(o.start) || near(o.end)));
+    let (_, o) = hits.next()?;
+    if hits.next().is_some() {
+        return None;
+    }
+    let (wl, wr, wu) = face_lines(w)?;
+    let (ol, or, ou) = face_lines(o)?;
+    if dot(wu, ou).abs() <= 1e-6 {
+        return None;
+    }
+    // Laufen beide in derselben Richtung durch den Stoss weiter, liegen links und links aneinander.
+    let cont = if at_end { near(o.start) } else { near(o.end) };
+    let (l, r) = if cont { (line_x(wl, wu, ol, ou)?, line_x(wr, wu, or, ou)?) } else { (line_x(wl, wu, or, ou)?, line_x(wr, wu, ol, ou)?) };
+    let reach = 4.0 * thick(w).max(thick(o));
+    if !finite2(l) || !finite2(r) || (l[0] - p[0]).hypot(l[1] - p[1]) > reach || (r[0] - p[0]).hypot(r[1] - p[1]) > reach {
+        return None;
+    }
+    Some((l, r))
+}
+
 /// Aussenringe der vereinigten Wand-Grundfläche (gegen den Uhrzeigersinn).
 fn outer_rings(walls: &[WallIn]) -> Vec<Ring> {
     let mut parts: Vec<Polygon> = vec![];
@@ -123,6 +181,15 @@ fn outer_rings(walls: &[WallIn]) -> Vec<Ring> {
             let mut ring: Ring = st.iter().map(|&s| a.point(s, t / 2.0)).map(|q| [q.x, q.y]).collect();
             ring.extend(st.iter().rev().map(|&s| a.point(s, -t / 2.0)).map(|q| [q.x, q.y]));
             parts.push(vec![ring]);
+            continue;
+        }
+        // [81] Schiefer Eckstoss: Ende auf die Gehrung schneiden (sonst stünde die t/2-Verlängerung als Spitze vor).
+        let (ms, me) = (if es > 0.0 { mitre_end(walls, i, false) } else { None }, if ee > 0.0 { mitre_end(walls, i, true) } else { None });
+        if ms.is_some() || me.is_some() {
+            let r = wall_rect(w, t, es, ee);
+            let (sl, sr) = ms.unwrap_or((r[0], r[3]));
+            let (el, er) = me.unwrap_or((r[1], r[2]));
+            parts.push(vec![vec![sl, el, er, sr]]);
             continue;
         }
         parts.push(vec![wall_rect(w, t, es, ee)]);
@@ -227,15 +294,7 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
         // Öffnungen in Wänden, deren Aussenseite auf einer dieser Kanten liegt.
         let mut jambs = vec![];
         for o in openings {
-            let Some(w) = walls.get(o.wall).filter(|w| w.arc().is_none()) else { continue };
-            let (dx, dy) = (w.end[0] - w.start[0], w.end[1] - w.start[1]);
-            let len = dx.hypot(dy);
-            if !(len >= EPS) || dot([dx / len, dy / len], n).abs() > 1e-6 {
-                continue; // Wand quer zu n
-            }
-            let t = if w.thickness.is_finite() && w.thickness > 0.0 { w.thickness } else { 0.3 };
-            let left = [-dy / len, dx / len];
-            let outer_s = dot(w.start, n) + (if w.shift.is_finite() { w.shift } else { 0.0 }) * dot(left, n) + t / 2.0;
+            let Some(outer_s) = walls.get(o.wall).and_then(|w| outer_face_s(w, n)) else { continue };
             let (ja, jb) = (dot(o.jamb_start, u), dot(o.jamb_end, u));
             if !ja.is_finite() || !jb.is_finite() {
                 continue;
@@ -253,35 +312,190 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
             }
         }
 
-        let min_gap = MIN_SEGMENT_MM / 1000.0 * scale;
-        let steps = thin(unique_sorted(&corners), min_gap);
-        let mut chains: Vec<(usize, Vec<f64>)> = vec![];
-        if !jambs.is_empty() {
-            let mut all = steps.clone();
-            all.extend(jambs);
-            chains.push((CHAIN_OPENINGS, thin(unique_sorted(&all), min_gap)));
-        }
-        if steps.len() > 2 {
-            chains.push((CHAIN_STEPS, steps));
-        }
-        chains.push((CHAIN_TOTAL, vec![t_min, t_max]));
-
-        for (chain, ts) in chains {
-            if ts.len() < 2 {
-                continue;
-            }
-            let pts: Vec<Vec2> = ts.iter().map(|&t| [u[0] * t + n[0] * s_max, u[1] * t + n[1] * s_max]).collect();
-            // Leibungen vor Ecken (Tiefe + 1), sonst die äusserste Ecke gleicher Lage.
-            let src = ts
-                .iter()
-                .zip(&pts)
-                .map(|(&t, &p)| feats.iter().filter(|f| (f.0 - t).abs() <= 1e-3).max_by(|a, b| a.2.total_cmp(&b.2)).map_or(p, |f| f.1))
-                .collect();
-            out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale, src, arc: None });
-        }
+        emit_chains(&mut out, side, n, s_max, (t_min, t_max), &corners, jambs, &feats, scale);
     }
     out.extend(arc_chains(walls, openings, &rings, scale));
+    out.extend(oblique_chains(walls, openings, &rings, scale));
     out
+}
+
+/// Ketten einer Seite (Aussennormale `n`, Masslinie bei `s_line` entlang `n`): Öffnungen (Ecken +
+/// Leibungen), Vor-/Rücksprünge (nur bei mehr als zwei Ecken), Gesamt `t_range`.
+#[allow(clippy::too_many_arguments)]
+fn emit_chains(out: &mut Vec<DimChain>, side: usize, n: Vec2, s_line: f64, t_range: (f64, f64), corners: &[f64], jambs: Vec<f64>, feats: &[(f64, Vec2, f64)], scale: f64) {
+    let u = [n[1], -n[0]];
+    let min_gap = MIN_SEGMENT_MM / 1000.0 * scale;
+    let steps = thin(unique_sorted(corners), min_gap);
+    let mut chains: Vec<(usize, Vec<f64>)> = vec![];
+    if !jambs.is_empty() {
+        let mut all = steps.clone();
+        all.extend(jambs);
+        chains.push((CHAIN_OPENINGS, thin(unique_sorted(&all), min_gap)));
+    }
+    if steps.len() > 2 {
+        chains.push((CHAIN_STEPS, steps));
+    }
+    chains.push((CHAIN_TOTAL, vec![t_range.0, t_range.1]));
+
+    for (chain, ts) in chains {
+        if ts.len() < 2 {
+            continue;
+        }
+        let pts: Vec<Vec2> = ts.iter().map(|&t| [u[0] * t + n[0] * s_line, u[1] * t + n[1] * s_line]).collect();
+        // Leibungen vor Ecken (Tiefe + 1), sonst die äusserste Ecke gleicher Lage.
+        let src = ts
+            .iter()
+            .zip(&pts)
+            .map(|(&t, &p)| feats.iter().filter(|f| (f.0 - t).abs() <= 1e-3).max_by(|a, b| a.2.total_cmp(&b.2)).map_or(p, |f| f.1))
+            .collect();
+        out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale, src, arc: None });
+    }
+}
+
+/// Gerade Wand parallel zur Fläche mit Normale `n`: Lage ihrer nach `n` schauenden Fläche entlang `n`.
+fn outer_face_s(w: &WallIn, n: Vec2) -> Option<f64> {
+    if w.arc().is_some() {
+        return None;
+    }
+    let (dx, dy) = (w.end[0] - w.start[0], w.end[1] - w.start[1]);
+    let len = dx.hypot(dy);
+    if !(len >= EPS) || dot([dx / len, dy / len], n).abs() > 1e-6 {
+        return None; // Wand quer zu n
+    }
+    let left = [-dy / len, dx / len];
+    Some(dot(w.start, n) + (if w.shift.is_finite() { w.shift } else { 0.0 }) * dot(left, n) + thick(w) / 2.0)
+}
+
+/// [81] Ketten schiefer Fassaden: Umriss-Kanten, die keiner Hauptseite angehören, nach Richtung der
+/// Aussennormale gruppiert (kollineare und parallele Teilstücke in eine Gruppe). Je Gruppe die üblichen
+/// drei Ketten parallel zur Fassade; die Masslinie liegt vor der äussersten Fläche der Gruppe (nicht vor
+/// dem ganzen Gebäude: eine schiefe Fläche in einer Einbuchtung bleibt bei sich). `side` = 4 + Gruppe.
+/// Kanten kürzer als die dickste Wand (Stirnseiten, Gehrungsreste) fallen weg. Bogenwände: Facetten und
+/// Stirnseiten fallen weg; die Sehne zwischen den Ecken der gewölbten Aussenfläche gilt als
+/// Fassadenstück, wenn sie schief liegt (achsparallel deckt sie schon die Seitenkette).
+fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scale: f64) -> Vec<DimChain> {
+    let min_gap = MIN_SEGMENT_MM / 1000.0 * scale;
+    let min_len = (walls.iter().map(thick).fold(0.0, f64::max) + 1e-3).max(min_gap);
+    let circles: Vec<(Vec2, f64, f64)> = walls
+        .iter()
+        .filter_map(|w| {
+            let a = w.arc()?;
+            let h = thick(w) / 2.0;
+            Some(([a.center.x, a.center.y], a.radius_at(-h), a.radius_at(h)))
+        })
+        .collect();
+    let on_arc = |a: Vec2, b: Vec2| {
+        circles.iter().any(|&(c, r0, r1)| {
+            let on = |q: Vec2| {
+                let d = (q[0] - c[0]).hypot(q[1] - c[1]);
+                (d - r0).abs() < 1e-4 || (d - r1).abs() < 1e-4
+            };
+            on(a) && on(b)
+        })
+    };
+    // Fassadenstücke (a, b): Aussennormale rechts der Laufrichtung (CCW-Ring).
+    let mut edges: Vec<(Vec2, Vec2)> = vec![];
+    for ring in rings {
+        // Gerade durchlaufende Zwischenpunkte (Stösse der Wandflächen) weglassen.
+        let k = ring.len();
+        let unit = |a: Vec2, b: Vec2| {
+            let l = (b[0] - a[0]).hypot(b[1] - a[1]);
+            [(b[0] - a[0]) / l, (b[1] - a[1]) / l]
+        };
+        let ring: Vec<Vec2> = (0..k)
+            .filter(|&i| {
+                let (p, q, r) = (ring[(i + k - 1) % k], ring[i], ring[(i + 1) % k]);
+                let (d0, d1) = (unit(p, q), unit(q, r));
+                !(dot(d0, d1) > 0.0 && (d0[0] * d1[1] - d0[1] * d1[0]).abs() < 1e-7)
+            })
+            .map(|i| ring[i])
+            .collect();
+        for i in 0..ring.len() {
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            if (b[0] - a[0]).hypot(b[1] - a[1]) >= min_len && !on_arc(a, b) {
+                edges.push((a, b));
+            }
+        }
+    }
+    for w in walls {
+        let Some((arc, n_out, lo, hi)) = arc_outer(w, rings) else { continue };
+        let (p, q, m) = (arc.point(lo, n_out), arc.point(hi, n_out), arc.point((lo + hi) / 2.0, n_out));
+        let (a, b) = ([p.x, p.y], [q.x, q.y]);
+        // Laufrichtung so, dass die Wölbung rechts (aussen) liegt.
+        let right = [b[1] - a[1], a[0] - b[0]];
+        edges.push(if dot(right, [m.x - a[0], m.y - a[1]]) >= 0.0 { (a, b) } else { (b, a) });
+    }
+    let mut groups: Vec<(Vec2, Vec<(Vec2, Vec2)>)> = vec![];
+    for (a, b) in edges {
+        let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+        if !(len >= EPS) {
+            continue;
+        }
+        let n = [(b[1] - a[1]) / len, (a[0] - b[0]) / len];
+        if SIDES.iter().any(|&s| dot(n, s) >= 1.0 - 1e-6) {
+            continue; // achsparallel: Sache der vier Seiten
+        }
+        match groups.iter_mut().find(|g| dot(g.0, n) >= 1.0 - 1e-6) {
+            Some(g) => g.1.push((a, b)),
+            None => groups.push((n, vec![(a, b)])),
+        }
+    }
+    let mut out = vec![];
+    let mut side = SIDES.len();
+    for (n, faces) in groups {
+        let u = [n[1], -n[0]];
+        let (mut s_line, mut t_min, mut t_max) = (f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        let (mut corners, mut feats, mut spans) = (vec![], vec![], vec![]);
+        for &(a, b) in &faces {
+            let (ta, tb) = (dot(a, u), dot(b, u));
+            s_line = s_line.max(dot(a, n)).max(dot(b, n));
+            t_min = t_min.min(ta).min(tb);
+            t_max = t_max.max(ta).max(tb);
+            corners.extend([ta, tb]);
+            feats.extend([(ta, a, dot(a, n)), (tb, b, dot(b, n))]);
+            spans.push((dot(a, n), ta.min(tb), ta.max(tb)));
+        }
+        if !(t_max - t_min >= min_gap) {
+            continue;
+        }
+        let mut jambs = vec![];
+        for o in openings {
+            let Some(outer_s) = walls.get(o.wall).and_then(|w| outer_face_s(w, n)) else { continue };
+            let (ja, jb) = (dot(o.jamb_start, u), dot(o.jamb_end, u));
+            if !ja.is_finite() || !jb.is_finite() {
+                continue;
+            }
+            if spans.iter().any(|&(s, t0, t1)| (s - outer_s).abs() < 1e-3 && ja.min(jb) >= t0 - 1e-3 && ja.max(jb) <= t1 + 1e-3) {
+                jambs.extend([ja, jb]);
+                for j in [o.jamb_start, o.jamb_end] {
+                    let k = outer_s - dot(j, n);
+                    feats.push((dot(j, u), [j[0] + n[0] * k, j[1] + n[1] * k], outer_s + 1.0));
+                }
+            }
+        }
+        emit_chains(&mut out, side, n, s_line, (t_min, t_max), &corners, jambs, &feats, scale);
+        side += 1;
+    }
+    out
+}
+
+/// Bogenwand, deren gewölbte (äussere) Fläche auf dem Umriss liegt: (Bogen, Seitenlage der gewölbten
+/// Fläche, erste/letzte Bogenlänge der Umriss-Punkte auf diesem Kreis).
+fn arc_outer(w: &WallIn, rings: &[Ring]) -> Option<(crate::wall_arc::WallArc, f64, f64, f64)> {
+    let a = w.arc()?;
+    let t = thick(w);
+    // Gewölbte Seite = grösserer Radius.
+    let n_out = if a.radius_at(t / 2.0) > a.radius_at(-t / 2.0) { t / 2.0 } else { -t / 2.0 };
+    let r_out = a.radius_at(n_out);
+    let len = a.length();
+    let on_circle = |q: &Vec2| ((q[0] - a.center.x).hypot(q[1] - a.center.y) - r_out).abs() < 1e-4;
+    // Liegt die gewölbte Fläche auf dem Umriss (Ring-Punkte auf dem Kreis auch im mittleren Teil)?
+    let ss: Vec<f64> = rings.iter().flatten().filter(|q| on_circle(q)).map(|q| a.local(kernel2d::Vec2::new(q[0], q[1])).0).filter(|s| *s > -t && *s < len + t).collect();
+    let (lo, hi) = ss.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &s| (l.min(s), h.max(s)));
+    if !ss.iter().any(|s| *s > len / 4.0 && *s < 3.0 * len / 4.0) {
+        return None;
+    }
+    Some((a, n_out, lo, hi))
 }
 
 /// [T2] Bogenmass-Ketten: je Bogenwand, deren gewölbte (äussere) Fläche auf dem Umriss liegt — Ecken
@@ -289,19 +503,7 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
 fn arc_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scale: f64) -> Vec<DimChain> {
     let mut out = Vec::new();
     for (wi, w) in walls.iter().enumerate() {
-        let Some(a) = w.arc() else { continue };
-        let t = if w.thickness.is_finite() && w.thickness > 0.0 { w.thickness } else { 0.3 };
-        // Gewölbte Seite = grösserer Radius.
-        let n_out = if a.radius_at(t / 2.0) > a.radius_at(-t / 2.0) { t / 2.0 } else { -t / 2.0 };
-        let r_out = a.radius_at(n_out);
-        let len = a.length();
-        let on_circle = |q: &Vec2| ((q[0] - a.center.x).hypot(q[1] - a.center.y) - r_out).abs() < 1e-4;
-        // Liegt die gewölbte Fläche auf dem Umriss (Ring-Punkte auf dem Kreis auch im mittleren Teil)?
-        let ss: Vec<f64> = rings.iter().flatten().filter(|q| on_circle(q)).map(|q| a.local(kernel2d::Vec2::new(q[0], q[1])).0).filter(|s| *s > -t && *s < len + t).collect();
-        let (lo, hi) = ss.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &s| (l.min(s), h.max(s)));
-        if !ss.iter().any(|s| *s > len / 4.0 && *s < 3.0 * len / 4.0) {
-            continue;
-        }
+        let Some((a, n_out, lo, hi)) = arc_outer(w, rings) else { continue };
         let mut st = vec![lo, hi];
         for o in openings.iter().filter(|o| o.wall == wi) {
             for j in [o.jamb_start, o.jamb_end] {
@@ -449,6 +651,111 @@ mod tests {
         // Gesamtmass unverändert.
         let east = dims.iter().find(|d| d.side == 1 && d.chain == CHAIN_TOTAL).unwrap();
         assert!((total(east) - 6.4).abs() < 1e-6 || total(east) > 6.0, "{east:?}");
+    }
+
+    /// Rechteck-Wände, um `deg` gedreht (um den Ursprung).
+    fn rotated_rect(w: f64, h: f64, deg: f64) -> Vec<WallIn> {
+        let (s, c) = deg.to_radians().sin_cos();
+        let r = |p: Vec2| [p[0] * c - p[1] * s, p[0] * s + p[1] * c];
+        let axis = [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]].map(r);
+        (0..4).map(|i| WallIn { start: axis[i], end: axis[(i + 1) % 4], thickness: 0.3, shift: 0.0, bulge: 0.0 }).collect()
+    }
+    /// Kettenrichtung (Einheitsvektor erster → letzter Punkt).
+    fn dir(d: &DimChain) -> Vec2 {
+        let (a, b) = (d.pts[0], d.pts[d.pts.len() - 1]);
+        let l = (b[0] - a[0]).hypot(b[1] - a[1]);
+        [(b[0] - a[0]) / l, (b[1] - a[1]) / l]
+    }
+    fn parallel(a: Vec2, b: Vec2) -> bool {
+        (a[0] * b[1] - a[1] * b[0]).abs() < 1e-6
+    }
+
+    /// Um 30° gedrehtes Rechteck: je Fassade eine Gesamtkette parallel zur Fassade, Länge = Aussenmass,
+    /// Masslinie aussen; Öffnungskette auf der Fassade mit der Öffnung.
+    #[test]
+    fn schiefes_rechteck_30_grad() {
+        let walls = rotated_rect(10.0, 6.0, 30.0);
+        let a = walls[0].start;
+        let u = [(walls[0].end[0] - a[0]) / 10.0, (walls[0].end[1] - a[1]) / 10.0];
+        let at = |d: f64| [a[0] + u[0] * d, a[1] + u[1] * d];
+        let o = OpeningIn { wall: 0, jamb_start: at(1.25), jamb_end: at(2.75) };
+        let dims = auto_exterior_dimensions(&walls, &[o], 100.0);
+        assert!(dims.iter().all(|d| d.side >= 4 && d.arc.is_none()), "keine achsparallelen Ketten: {dims:?}");
+        let totals: Vec<&DimChain> = dims.iter().filter(|d| d.chain == CHAIN_TOTAL).collect();
+        assert_eq!(totals.len(), 4, "{totals:?}");
+        let mid = [walls[2].start[0] / 2.0, walls[2].start[1] / 2.0];
+        for d in &totals {
+            let l = total(d);
+            let long = (l - 10.3).abs() < 1e-6;
+            assert!(long || (l - 6.3).abs() < 1e-6, "{l}");
+            // Parallel zur entsprechenden Wand.
+            let wu = if long { u } else { [-u[1], u[0]] };
+            assert!(parallel(dir(d), wu), "{d:?}");
+            assert!((d.offset - 2.4).abs() < 1e-12);
+            // Linke Normale der Kette zeigt nach aussen (weg von der Gebäudemitte), Punkte auf der Aussenfläche.
+            let dd = dir(d);
+            let n = [-dd[1], dd[0]];
+            let s = dot(d.pts[0], n) - dot(mid, n);
+            let half = if long { 3.15 } else { 5.15 };
+            assert!((s - half).abs() < 1e-6, "{s} {d:?}");
+        }
+        let op: Vec<&DimChain> = dims.iter().filter(|d| d.chain == CHAIN_OPENINGS).collect();
+        assert_eq!(op.len(), 1);
+        let mut l: Vec<f64> = lengths(&op[0].pts).iter().map(|v| (v * 1000.0).round() / 1000.0).collect();
+        assert!((total(op[0]) - 10.3).abs() < 1e-6);
+        l.sort_by(f64::total_cmp);
+        assert_eq!(l, vec![1.4, 1.5, 7.4]);
+        // Leibungen hängen an der Aussenfläche (0.15 vor der Achse).
+        let dd = dir(op[0]);
+        let n = [-dd[1], dd[0]];
+        assert!(op[0].src.iter().all(|q| (dot(*q, n) - dot(a, n) - 0.15).abs() < 1e-6), "{:?}", op[0].src);
+    }
+
+    /// L-Form mit einer schiefen Fassade (Nordost-Ecke abgeschrägt): achsparallele Seiten wie bisher,
+    /// dazu eine Kette parallel zur Schräge zwischen den Gehrungsecken.
+    #[test]
+    fn l_form_mit_schraeger_fassade() {
+        let axis = [[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [4.0, 9.0], [0.0, 9.0]];
+        let walls: Vec<WallIn> = (0..axis.len()).map(|i| WallIn { start: axis[i], end: axis[(i + 1) % axis.len()], thickness: 0.3, shift: 0.0, bulge: 0.0 }).collect();
+        let dims = auto_exterior_dimensions(&walls, &[], 100.0);
+        let obl: Vec<&DimChain> = dims.iter().filter(|d| d.side >= 4).collect();
+        assert_eq!(obl.len(), 1, "{obl:?}");
+        let d = obl[0];
+        assert_eq!(d.chain, CHAIN_TOTAL);
+        assert!(parallel(dir(d), [-6.0 / 45f64.sqrt(), 3.0 / 45f64.sqrt()]));
+        // Gehrungsecken: Schnitt der Aussenfläche mit x = 10.15 bzw. y = 9.15.
+        let c = 22.0 + 0.15 * 5f64.sqrt();
+        let (p, q) = ([10.15, (c - 10.15) / 2.0], [c - 18.3, 9.15]);
+        let want = (p[0] - q[0]).hypot(p[1] - q[1]);
+        assert!((total(d) - want).abs() < 1e-6, "{} != {want}", total(d));
+        // Achsparallele Gesamtmasse: Ost bis zur Ecke der Schräge, Nord bis zur Schräge, aussen 10.3 × 9.3.
+        let east = dims.iter().find(|d| d.side == 1 && d.chain == CHAIN_TOTAL).unwrap();
+        assert!((total(east) - 9.3).abs() < 1e-6, "{east:?}");
+        assert!((east.pts[0][0] - 10.15).abs() < 1e-6, "keine Spitze an der Gehrung: {east:?}");
+    }
+
+    /// Kollineare schiefe Teilstücke (durch einen Vorsprung getrennt) bilden eine Kette.
+    #[test]
+    fn kollineare_schiefe_stuecke_eine_kette() {
+        // Gedrehtes Rechteck mit Vorbau mitten auf der Südfassade.
+        let (s, c) = 30f64.to_radians().sin_cos();
+        let r = |p: Vec2| [p[0] * c - p[1] * s, p[0] * s + p[1] * c];
+        let axis = [[0.0, 0.0], [3.0, 0.0], [3.0, -2.0], [7.0, -2.0], [7.0, 0.0], [10.0, 0.0], [10.0, 6.0], [0.0, 6.0]].map(r);
+        let walls: Vec<WallIn> = (0..axis.len()).map(|i| WallIn { start: axis[i], end: axis[(i + 1) % axis.len()], thickness: 0.3, shift: 0.0, bulge: 0.0 }).collect();
+        let dims = auto_exterior_dimensions(&walls, &[], 100.0);
+        let su = r([1.0, 0.0]);
+        let south: Vec<&DimChain> = dims.iter().filter(|d| d.side >= 4 && parallel(dir(d), su) && dot(d.pts[0], r([0.0, 1.0])) < 0.0).collect();
+        // Gesamt + Vor-/Rücksprünge, alle auf derselben Linie (Vorbau-Front).
+        assert_eq!(south.iter().filter(|d| d.chain == CHAIN_TOTAL).count(), 1, "{south:?}");
+        let steps = south.iter().find(|d| d.chain == CHAIN_STEPS).expect("Stufen-Kette");
+        assert_eq!(steps.pts.len(), 4, "{steps:?}");
+        assert!((total(steps) - 10.3).abs() < 1e-6);
+    }
+
+    /// Achsparallele Grundrisse: keine schiefen Ketten.
+    #[test]
+    fn achsparallel_ohne_schiefe_ketten() {
+        assert!(auto_exterior_dimensions(&l_walls(), &[], 100.0).iter().all(|d| d.side < 4));
     }
 
     #[test]

@@ -1190,6 +1190,8 @@ fn auto_dims(root: &Map<String, Value>, pr: &Project, ctx: &Ctx, prefix: &str, s
         .map(|c| {
             let id = match c.arc {
                 Some((_, wi)) => format!("{prefix}-{}-arc-{}", ctx.level, walls[wi].id),
+                // [81] Schiefe Fassade (Gruppe nach Richtung): `oblique1`, `oblique2` …
+                None if c.side >= SIDES.len() => format!("{prefix}-{}-oblique{}-{}", ctx.level, c.side - SIDES.len() + 1, CHAINS[c.chain as usize]),
                 None => format!("{prefix}-{}-{}-{}", ctx.level, SIDES[c.side as usize], CHAINS[c.chain as usize]),
             };
             let pts = Value::Array(c.pts.iter().map(|q| crate::json_util::pt(q[0], q[1])).collect());
