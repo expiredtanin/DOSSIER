@@ -888,6 +888,26 @@ async function execute(project: Project, file: string, command: string, rest: st
             const r = doc.commit(cur, opsFor({ ...cur, walls: cur.walls.slice(0, 1) } as Project, 0.01 * ++k).slice(0, 1), undefined, Date.now());
             if ("project" in r) cur = r.project;
           }, runs * 5);
+          // [58] Inkrementelle 3D-Ableitung: eine Änderung, dann das ganze 3D-Modell neu abfragen.
+          lap("projectToModel3d (Dokument)", () => projectToModel3d(cur));
+          lap("  davon Kern (model3dParts)", () => doc.queryJson("model3dParts", [1, 2, 0, 0, 0]));
+          const partsJson = doc.queryJson("model3dParts", [1, 2, 0, 0, 0]);
+          lap("  davon JSON.parse", () => JSON.parse(partsJson));
+          lap("projectToModel3d nach 1 Wand-Änderung", () => {
+            const w = cur.walls[++k % cur.walls.length];
+            const r = doc.commit(cur, patchItem(cur, "walls", w.id, { height: (w.height ?? 2.6) + (k % 2 ? 0.01 : -0.01) }), undefined, Date.now());
+            if ("project" in r) cur = r.project;
+            projectToModel3d(cur);
+          });
+          const ops = cur.openings ?? [];
+          if (ops.length) {
+            lap("projectToModel3d nach 1 Öffnungs-Änderung", () => {
+              const o = (cur.openings ?? [])[++k % ops.length];
+              const r = doc.commit(cur, patchItem(cur, "openings", o.id, { width: o.width + (k % 2 ? 0.01 : -0.01) }), undefined, Date.now());
+              if ("project" in r) cur = r.project;
+              projectToModel3d(cur);
+            });
+          }
         });
       }
       for (const [n, ms] of rows) process.stdout.write(`${n.padEnd(28)} ${ms.toFixed(2).padStart(9)} ms\n`);
