@@ -72,6 +72,17 @@ impl ViewRange {
         }
     }
 
+    /// Bauteil eines anderen Geschosses (Decke, Dach) im Grundriss zeigen ([36]): nur mit eigenem
+    /// Bereich, „über Schnitt“ nur bei gesetzter Oberkante (sonst wäre alles darüber sichtbar),
+    /// „unter Schnitt“ innerhalb „darunter sichtbar bis“.
+    pub fn admits_other_floor(&self, z: Zone) -> bool {
+        self.custom && match z {
+            Zone::Above => self.top.is_some(),
+            Zone::Under => true,
+            _ => false,
+        }
+    }
+
     /// Strichmuster für `Above`/`Under`, nur mit eigenem Bereich; sonst `None` (Darstellung wie bisher).
     pub fn restyle_dash(&self, z: Zone) -> Option<&'static [f64]> {
         match z {
@@ -80,6 +91,13 @@ impl ViewRange {
             _ => None,
         }
     }
+}
+
+/// Höhenbereich einer Öffnung (Brüstung bis Sturz, höchstens bis OK Wand), absolut.
+pub fn opening_vertical_extent(p: &Project, w: &Wall, o: &Opening) -> (f64, f64) {
+    let (zb, zt) = p.wall_vertical_extent(w);
+    let ob = zb + crate::jsnum::max(0.0, o.sill_height);
+    (ob, crate::jsnum::min(zt, ob + o.height))
 }
 
 /// Primitive ab `from` als „über/unter Schnitt“ umzeichnen: Flächen verlieren Füllung, Schraffur und
@@ -174,6 +192,16 @@ mod tests {
         let v = r(Some(1.2), Some(0.9), 0.3);
         assert_eq!(v.classify(-5.0, 5.0), Zone::Cut);
         assert_eq!(v.classify(1.0, 1.0), Zone::Cut);
+    }
+
+    #[test]
+    fn andere_geschosse_nur_mit_grenze() {
+        assert!(!r(None, None, 0.0).admits_other_floor(Zone::Above));
+        assert!(!r(None, Some(0.0), 0.5).admits_other_floor(Zone::Above));
+        assert!(r(Some(3.0), None, 0.0).admits_other_floor(Zone::Above));
+        assert!(r(None, Some(0.0), 0.5).admits_other_floor(Zone::Under));
+        assert!(!r(Some(3.0), Some(0.0), 0.5).admits_other_floor(Zone::Below));
+        assert!(!r(Some(3.0), Some(0.0), 0.5).admits_other_floor(Zone::Cut));
     }
 
     #[test]
