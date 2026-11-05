@@ -253,7 +253,7 @@ export function useWasm3dRenderer(
     }
     if (typeof r.set_pattern_lines === "function") {
       try {
-        r.set_pattern_lines(emitSurfacePatternLines(project));
+        r.set_pattern_lines(emitSurfacePatternLines(project, explode));
       } catch (e) {
         console.warn("render3d set_pattern_lines fehlgeschlagen:", e);
       }

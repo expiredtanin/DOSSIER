@@ -225,8 +225,8 @@ export class ProjectDocument {
   }
 
   /** Ansichtsschraffur auf den Flächen (Wände, Decken, Dächer) für render3d `set_pattern_lines`. */
-  surfacePatternLines(): Float32Array {
-    return this.handle ? core().doc_surface_pattern_lines(this.handle) : new Float32Array(0);
+  surfacePatternLines(explode = 0): Float32Array {
+    return this.handle ? core().doc_surface_pattern_lines(this.handle, explode) : new Float32Array(0);
   }
 
   /** Das Dokument als JSON-Text (Test, Export). */
