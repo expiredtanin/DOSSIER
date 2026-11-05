@@ -132,8 +132,6 @@ pub struct Request {
     /// Gruppe je Ebene (0 Grundrisse, 1 Ansichten, 2 Schnitte), aufsteigend.
     pub groups: Vec<u32>,
     pub layer_visibility: BTreeMap<String, bool>,
-    /// Abweichende Sichtbarkeit je Ebene (über `layer_visibility` gelegt), z. B. ohne Gelände in den Obergeschossen.
-    pub level_visibility: BTreeMap<String, BTreeMap<String, bool>>,
     pub detail: DetailLevel,
     pub sheet_w: f64,
     pub sheet_h: f64,
@@ -151,13 +149,7 @@ pub fn query(p: &Project, text: &str) -> Result<Value, String> {
     }
     let snap = |level: &str| ViewSnapshot {
         active_level_id: level.to_string(),
-        layer_visibility: {
-            let mut v = req.layer_visibility.clone();
-            if let Some(o) = req.level_visibility.get(level) {
-                v.extend(o.iter().map(|(k, b)| (k.clone(), *b)));
-            }
-            v
-        },
+        layer_visibility: req.layer_visibility.clone(),
         detail: req.detail,
         scale_denominator: 100.0,
         ..Default::default()
