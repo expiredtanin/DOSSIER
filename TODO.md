@@ -2664,13 +2664,15 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   (0.13), Umriss der vereinigten Schnittflächen 0.5 (`section-cut-outline`); Ansicht: Silhouette (Aussenrand aller
   Bauteilflächen) 0.35, Details 0.13, Grundlinie 0.5; Höhenlinien enden an der Gebäudegrundfläche
   (`site_rules::building_footprint`), Zähllinie 0.18 statt 0.25; Bemassung 2.5 mm Text / 2 mm Strich (Kern, DXF,
-  Griffe, `DIM_DEFAULTS_MM`). Standard-Ebenen (neue Projekte): Wände 0.5 statt 0.35, Treppen 0.25 statt 0.35,
+  Griffe, `DIM_DEFAULTS_MM`); Raumstempel ab 1:200 7 pt statt 10 pt, Standardstempel ohne SIA-Zeile. Standard-Ebenen (neue Projekte): Wände 0.5 statt 0.35, Treppen 0.25 statt 0.35,
   `scaleLineWeights` an. Bestehende Projekte behalten ihre Ebenen-/Element-Stärken; neu wirken nur Ableitung, Faktor
   und Fallbacks (ohne eigene Werte). Tests: `strichstaerken_rangfolge_je_massstab`, `schnittkante_schwer_fugen_fein`,
-  `silhouette_mittel_details_fein`, `hoehenlinien_enden_am_gebaeude`. Goldens neu (Strichstärken, Masszahlgrösse,
+  `silhouette_mittel_details_fein`, `hoehenlinien_enden_am_gebaeude`, `raumstempel_je_massstab`. Goldens neu (Strichstärken, Masszahlgrösse,
   Höhenlinien). Offen: dünne Schichten (Putz, Parkett) laufen in 1:100 zu einem Balken zusammen (Detailgrad sollte
   sie zusammenfassen); Achsen laufen in Ansicht/Grundriss durch das Gebäude; Raumstempel farbig statt schwarz im
-  Druck ohne Schwarz-Weiss; Schatten im EG-Grundriss überdeckt Bemassung. Nur Linux/CLI-SVG + Chromium geprüft,
+  Druck ohne Schwarz-Weiss; Schatten im EG-Grundriss überdeckt Bemassung; eigene Stempel (`Room.stamp`) behalten in
+  1:200 alle Zeilen; ein Geschoss in 1:500 braucht Detail „grob" (sonst Stempel/Masse übereinander — die CLI rechnet
+  immer „mittel"); gestapelte Höhenlinien an Stützmauer/Baugrube wirken als brauner Balken. Nur Linux/CLI-SVG + Chromium geprüft,
   nicht in der Tauri-App (Bildschirm-Modus nicht angesehen). · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
