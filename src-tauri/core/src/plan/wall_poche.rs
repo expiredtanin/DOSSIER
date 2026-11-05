@@ -666,9 +666,27 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
         offs.push(last + t);
     }
     let (off_lo, off_hi) = (off0, offs[n_layers]);
+    // [141] Ragt eine Aussparung über ein Wandende mit Gehrung hinaus, rechnet das Raster ab der
+    // Gehrungs-Spitze (die Bänder werden an den Schnittlinien beschnitten), sonst fehlt das Stück
+    // zwischen Gehrung und Aussparung samt Umriss.
+    let u_w = normalize(sub(g.wend, g.wstart));
+    let fr = Frame { o: g.wstart, u: u_w, n: left_normal(u_w) };
+    let ends_at = |cut: Option<Line>, base: f64, far: bool| {
+        let mut r = base;
+        if let Some(l) = cut {
+            for off in [off_lo, off_hi] {
+                if let Some(p) = fr.pos(&l, off) {
+                    r = if far { max(r, p) } else { min(r, p) };
+                }
+            }
+        }
+        r
+    };
+    let x_lo = if cutouts.iter().any(|c| c.lo() < s - CUTOUT_EPS) { ends_at(g.sc, s, false) } else { s };
+    let x_hi = if cutouts.iter().any(|c| c.hi() > e + CUTOUT_EPS) { ends_at(g.ec, e, true) } else { e };
     let mut rects: Vec<(f64, f64, f64, f64, usize)> = Vec::new();
     for li in 0..n_layers {
-        let (mut a, mut b) = (s, e);
+        let (mut a, mut b) = (x_lo, x_hi);
         for ad in adj.iter().filter(|ad| ad.layer == li) {
             if ad.dir > 0.0 {
                 b = min(b, e - ad.shift);
@@ -716,7 +734,7 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
         }
     }
     // Raster der Teilflächen.
-    let mut xs: Vec<f64> = vec![s, e];
+    let mut xs: Vec<f64> = vec![x_lo, x_hi];
     let mut ys: Vec<f64> = offs.clone();
     for r in &rects {
         xs.extend([r.0, r.1]);
@@ -1128,6 +1146,14 @@ mod tests {
         let out = wall_poche(&poche_of(&walls[1], &c[1]));
         let hit = parse(&out).into_iter().any(|p| matches!(p, Prim::Line(art, a, b) if art == LINE_OUTLINE && (near(a) || near(b))));
         assert!(hit, "keine Umrisslinie bis zur Innenecke (Wandanfang)");
+        // Dasselbe mit Fenster samt Schichteinzug im ersten Stück (Raster-Pfad `adjusted_segment`).
+        let mut b = poche_of(&walls[1], &c[1]);
+        b.pop();
+        b.extend([1.0, 2.0, 3.0]);
+        b.extend([1.0, 2.0, 1.0, 3.0, 0.05, 0.0]);
+        let out = wall_poche(&b);
+        let hit = parse(&out).into_iter().any(|p| matches!(p, Prim::Line(art, a, b) if art == LINE_OUTLINE && (near(a) || near(b))));
+        assert!(hit, "keine Umrisslinie bis zur Innenecke (Schichteinzug)");
     }
 
     #[test]
