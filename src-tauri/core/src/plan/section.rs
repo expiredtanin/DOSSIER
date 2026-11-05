@@ -664,13 +664,27 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
             c
         };
         let shift = |s: &Option<EdgeJoin>| s.as_ref().map_or(0.0, |e| e.shift(li));
-        let (vb, vt) = (v_min + shift(&top), v_max - shift(&bottom));
+        let (mut vb, mut vt) = (v_min + shift(&top), v_max - shift(&bottom));
+        // Formöffnung ([G3]): Rücksprung senkrecht zum (versetzten) Umriss.
+        if let Some(v) = top.as_ref().and_then(|e| e.shape.as_ref()).and_then(|s| s.layer_edge(li, true)) {
+            vb = v;
+        }
+        if let Some(v) = bottom.as_ref().and_then(|e| e.shape.as_ref()).and_then(|s| s.layer_edge(li, false)) {
+            vt = v;
+        }
         let u_of = |o: f64| if reversed { u_max - o * scale } else { u_min + o * scale };
         let nibs = rebate_nibs(&top, &bottom, (offsets[li], offsets[li] + layer.thickness), (v_min, v_max), &u_of);
         // Zusatzstücke dieser Schicht in der Öffnung `[u0, u1, v0, v1]` (an der Kante des Wandstücks).
         let mut pieces: Vec<[f64; 4]> = Vec::new();
         for (side, below) in [(&top, true), (&bottom, false)] {
             let Some(e) = side else { continue };
+            if let Some(sj) = &e.shape {
+                for [o0, o1, z0, z1] in sj.pieces(li, below) {
+                    let (ua, ub) = (min(u_of(o0), u_of(o1)), max(u_of(o0), u_of(o1)));
+                    pieces.push([ua, ub, z0, z1]);
+                }
+                continue;
+            }
             for a in e.adj.iter().filter(|a| a.layer == li) {
                 for pc in &a.pieces {
                     // In der Anschlag-Zone deckt die Nase das Stück bis zur Anschlagtiefe schon ab.
@@ -729,6 +743,50 @@ struct EdgeJoin {
     adj: Vec<crate::opening_detail::LayerAdjust>,
     /// Anschlag [94]/[105]: Tiefe in die Öffnung und Zone quer ab Aussenfläche (zwischen Fläche und Rahmen).
     rebate: Option<(f64, f64, f64)>,
+    /// Formöffnung ([G3]): der Schichteinzug folgt dem Umriss statt Sturz/Brüstung.
+    shape: Option<ShapeJoin>,
+}
+
+/// Schichteinzug [106] einer Formöffnung an der Schnittstelle `u` (Öffnungskoordinaten): Umriss,
+/// Brüstungshöhe `zb` und die Anschlüsse aller vier Seiten (die Bogenkante gehört nach ihrer Normalen
+/// zu einer Seite, `opening_shape::edge_side`).
+struct ShapeJoin {
+    poly: Vec<crate::opening_shape::P>,
+    u: f64,
+    zb: f64,
+    sides: [Vec<crate::opening_detail::LayerAdjust>; 4],
+}
+
+impl ShapeJoin {
+    /// Kante der Schicht `layer` an der Schnittstelle: oben (`top`) bzw. unten, um den Rücksprung je Seite
+    /// versetzt (wie im 3D, `opening_shape::layer_fill_quads`).
+    fn layer_edge(&self, layer: usize, top: bool) -> Option<f64> {
+        let s: [f64; 4] = std::array::from_fn(|k| self.sides[k].iter().find(|a| a.layer == layer).map_or(0.0, |a| a.shift));
+        let r = crate::opening_shape::v_range(&crate::opening_shape::outset_sides(&self.poly, s), self.u)?;
+        Some(self.zb + if top { r.1 } else { r.0 })
+    }
+
+    /// Zusatzstücke der Schicht an der Schnittstelle `[o0, o1, z0, z1]`: senkrecht zum Umriss gemessen.
+    fn pieces(&self, layer: usize, top: bool) -> Vec<[f64; 4]> {
+        use crate::opening_shape as os;
+        let n = self.poly.len();
+        // Kante des Umrisses über bzw. unter der Schnittstelle.
+        let Some(edge) = (0..n).filter(|&i| {
+            let (a, b) = (self.poly[i], self.poly[(i + 1) % n]);
+            (a[0].min(b[0]) <= self.u && self.u <= a[0].max(b[0])) && (b[0] - a[0]).abs() > 1e-9 && ((b[0] < a[0]) == top)
+        }).next() else { return Vec::new() };
+        let side = os::edge_side(&self.poly, edge);
+        let at = |d: f64| os::v_range(&os::inset(&self.poly, d), self.u).map(|r| self.zb + if top { r.1 } else { r.0 });
+        let mut out = Vec::new();
+        for a in self.sides[side].iter().filter(|a| a.layer == layer) {
+            for &[x0, x1, o0, o1] in &a.pieces {
+                if let (Some(z0), Some(z1)) = (at(x0), at(x1)) {
+                    out.push([o0, o1, min(z0, z1), max(z0, z1)]);
+                }
+            }
+        }
+        out
+    }
 }
 
 impl EdgeJoin {
@@ -779,7 +837,10 @@ fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f6
         if !at_top && !at_bottom {
             continue;
         }
-        let [_, _, t, b] = crate::opening_detail::opening_reveal(p, wall, o).map(|r| r.sides).unwrap_or_default();
+        let sides = crate::opening_detail::opening_reveal(p, wall, o).map(|r| r.sides).unwrap_or_default();
+        let shaped = c.shape.as_ref().filter(|_| sides.iter().any(|s| !s.is_empty()));
+        let shape = || shaped.map(|(poly, u, zb)| ShapeJoin { poly: poly.clone(), u: *u, zb: *zb, sides: sides.clone() });
+        let [_, _, t, b] = sides.clone();
         // Anschlag: oben wie an der Leibung (Sturz-Nase), unten nach `rebates.bottom` (Türen: keiner).
         let h = c.z_top - c.z_bottom;
         let frame = crate::opening_detail::frame_of(p, o);
@@ -789,11 +850,11 @@ fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f6
             Some(f) => (rebate(f.rebate.top), if o.kind == ElementKind::Door { None } else { rebate(f.rebate.bottom) }),
             None => (None, None),
         };
-        if at_top && (!t.is_empty() || rt.is_some()) {
-            top = Some(EdgeJoin { adj: t, rebate: rt });
+        if at_top && (!t.is_empty() || rt.is_some() || shaped.is_some()) {
+            top = Some(EdgeJoin { adj: t, rebate: rt, shape: shape() });
         }
-        if at_bottom && (!b.is_empty() || rb.is_some()) {
-            bottom = Some(EdgeJoin { adj: b, rebate: rb });
+        if at_bottom && (!b.is_empty() || rb.is_some() || shaped.is_some()) {
+            bottom = Some(EdgeJoin { adj: b, rebate: rb, shape: shape() });
         }
     }
     (top, bottom)
@@ -2321,6 +2382,8 @@ struct CrossSection {
     z_top: f64,
     face_min: f64,
     face_max: f64,
+    /// Formöffnung ([G3]): Umriss (Öffnungskoordinaten), Lage der Schnittstelle darin und Brüstungshöhe.
+    shape: Option<(Vec<crate::opening_shape::P>, f64, f64)>,
 }
 
 impl CrossSection {
@@ -2356,14 +2419,16 @@ fn cross_section(p: &Project, wall: &Wall, o: &Opening, p0: (f64, f64), u: (f64,
     }
     let (mut z_bottom, mut z_top) = opening_extent(p, wall, o);
     // Formöffnung ([G3]): lichte Höhe an der Schnittstelle aus dem Umriss.
+    let mut shape = None;
     if let Some(poly) = crate::opening_shape::opening_outline(o, to - from, z_top - z_bottom) {
         let Some((lo, hi)) = crate::opening_shape::v_range(&poly, along - from) else { return Ok(None) };
+        shape = Some((poly, along - from, z_bottom));
         (z_bottom, z_top) = (z_bottom + lo, z_bottom + hi);
     }
     if z_top - z_bottom < 1e-3 {
         return Ok(None);
     }
-    Ok(Some(CrossSection { n0, un, z_bottom, z_top, face_min: ref_off - total / 2.0, face_max: ref_off + total / 2.0 }))
+    Ok(Some(CrossSection { n0, un, z_bottom, z_top, face_min: ref_off - total / 2.0, face_max: ref_off + total / 2.0, shape }))
 }
 
 /// Sash-Liste eines Fenstertyps (`sashesOfWindowType`) für das Fenster-Symbol.
@@ -3085,6 +3150,42 @@ mod tests {
         let out = compute_section(&p, &l, &[]).unwrap().unwrap();
         let inner_top = out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W1") && c.component_id.as_deref() == Some("render-int")).flat_map(|c| c.pts.iter().map(|q| q[1])).filter(|y| *y > zb + 0.1).fold(f64::INFINITY, f64::min);
         assert!((inner_top - (zt + 0.05)).abs() < 1e-3, "Innenputz am Sturz zurück: {inner_top} vs {}", zt + 0.05);
+    }
+
+    /// [106]/[G3] Schnitt quer durch einen Rundbogen nahe der Leibung: der zurückspringende Innenputz
+    /// folgt dem um 5 cm versetzten Bogen (senkrecht zum Umriss, nicht 5 cm lotrecht über dem Bogen).
+    #[test]
+    fn rundbogen_schichteinzug_folgt_dem_bogen() {
+        let mut p = sample();
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.shape = Some(OpeningShape::Rundbogen);
+            o.layer_reveals = Some(vec![crate::model::LayerReveal { layer: -1.0, mode: crate::model::RevealMode::Zurueck, amount: Some(0.05), ..Default::default() }]);
+        }
+        let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+        let w1 = p.walls.iter().find(|w| w.id == o1.host_wall_id).unwrap().clone();
+        let (from, to) = opening_interval(&w1, &o1).unwrap();
+        let (zb, zt) = opening_extent(&p, &w1, &o1);
+        let (u, n) = axis_frame(&w1);
+        let at = from + 0.1;
+        let c = (w1.start.x + u.0 * at, w1.start.y + u.1 * at);
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: c.0 - n.0 * 3.0, y: c.1 - n.1 * 3.0 }, Vec2 { x: c.0 + n.0 * 3.0, y: c.1 + n.1 * 3.0 }]), ..Default::default() };
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let low = |comp: Option<&str>| out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some(w1.id.as_str()) && (comp.is_none() || c.component_id.as_deref() == comp)).flat_map(|c| c.pts.iter().map(|q| q[1])).filter(|y| *y > zb + 0.1).fold(f64::INFINITY, f64::min);
+        let (r, spring) = ((to - from) / 2.0, zt - (to - from) / 2.0);
+        let dx = r - 0.1;
+        let arch = spring + (r * r - dx * dx).sqrt();
+        assert!((low(None) - arch).abs() < 5e-3, "Wand bis an den Bogen: {} vs {arch}", low(None));
+        let want = spring + ((r + 0.05) * (r + 0.05) - dx * dx).sqrt();
+        let inner = low(Some("render-int"));
+        assert!((inner - want).abs() < 5e-3, "Innenputz am versetzten Bogen: {inner} vs {want} (lotrecht wäre {})", arch + 0.05);
+        // Innenputz in die Leibung (2 cm): das Stück hängt unter dem Bogen, senkrecht zum Umriss gemessen.
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.layer_reveals = Some(vec![crate::model::LayerReveal { layer: -1.0, mode: crate::model::RevealMode::Leibung, amount: Some(0.02), ..Default::default() }]);
+        }
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let lowest = out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some(w1.id.as_str())).flat_map(|c| c.pts.iter().map(|q| q[1])).filter(|y| *y > zb + 0.1).fold(f64::INFINITY, f64::min);
+        let want = spring + ((r - 0.02) * (r - 0.02) - dx * dx).sqrt();
+        assert!((lowest - want).abs() < 5e-3, "Leibungsstück am Bogen: {lowest} vs {want} (lotrecht wäre {})", arch - 0.02);
     }
 
     /// [G3] Projektion hinter der Schnittebene: Rundfenster zeigt den Umriss statt des Rechteck-Lochs.

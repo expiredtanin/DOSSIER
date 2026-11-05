@@ -469,7 +469,8 @@ fn wall_reveals(p: &Project, w: &Wall, openings: &[&Opening], n_bands: usize) ->
         for (k, side) in r.sides.iter().enumerate() {
             for a in side {
                 shifts[a.layer][k] = a.shift;
-                for pc in &a.pieces {
+                // Formöffnung ([G3]): Zusatzstücke laufen dem Umriss entlang (`shaped_wall_fill`).
+                for pc in a.pieces.iter().filter(|_| !crate::opening_shape::is_shaped(o)) {
                     pieces.push((a.layer, k, *pc));
                 }
             }
@@ -1250,29 +1251,79 @@ fn box_mesh(positions: [f64; 24], color: Rgb) -> RMesh {
     RMesh { crease_angle: None, positions: positions.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color, vertex_colors: None, material_index: None }
 }
 
-/// Formöffnung in der Wand ([G3]) als Quader: Füllkörper (Wandfarbe, ganze Wanddicke) zwischen dem
-/// Rechteck-Loch und dem Umriss, Rahmen-Ring und Glas (bzw. Türblatt) entlang des Umrisses. Rahmenlage
-/// quer zur Wand wie bei den Rechteck-Öffnungen (`openings3d::frame_normal_range`). Nicht für Formen:
-/// Anschlag, Fensterbank, Storenkasten, Flügel-/Sprossenteilung (bleiben beim Rechteck).
 /// Schichten einer Wand für die Füllkörper einer Formöffnung ([G3]): Dicke (auf `total` skaliert)
-/// und Farbe, aussen zuerst; ohne Aufbau eine Schicht in Wandfarbe.
-fn shaped_fill_bands(p: &Project, wall: &Wall, total: f64) -> Vec<(f64, Rgb)> {
-    let (bands, _) = resolve_wall_bands(p, &wall_material_color_maps(p), wall, true);
+/// und Farbe, aussen zuerst; ohne Aufbau eine Schicht in Wandfarbe. Dazu je Schicht der
+/// Schichteinzug [106] (nur gestapelte Schichten wie die Wandbänder): Rücksprung je Seite
+/// `[links, rechts, oben, unten]` und Zusatzstücke `(seite, [x0, x1, o0, o1])`.
+struct FillBand {
+    thickness: f64,
+    color: Rgb,
+    shift: [f64; 4],
+    pieces: Vec<(usize, [f64; 4])>,
+}
+
+fn shaped_fill_bands(p: &Project, wall: &Wall, op: &Opening, total: f64) -> Vec<FillBand> {
+    let (bands, stacked) = resolve_wall_bands(p, &wall_material_color_maps(p), wall, true);
     let sum: f64 = bands.iter().map(|b| b.thickness.max(0.0)).sum();
-    let list: Vec<(f64, Rgb)> = bands.iter().filter(|b| b.thickness > 1e-9).map(|b| (b.thickness * total / sum, b.color)).collect();
-    if list.is_empty() || !(sum > 1e-9) {
-        return vec![(total, WALL_RGB)];
+    if !(sum > 1e-9) || bands.iter().all(|b| b.thickness <= 1e-9) {
+        return vec![FillBand { thickness: total, color: WALL_RGB, shift: [0.0; 4], pieces: Vec::new() }];
     }
+    let reveal = if stacked { crate::opening_detail::opening_reveal(p, wall, op).filter(|r| r.thick.len() == bands.len()) } else { None };
+    let mut list: Vec<FillBand> = bands.iter().map(|b| FillBand { thickness: b.thickness.max(0.0) * total / sum, color: b.color, shift: [0.0; 4], pieces: Vec::new() }).collect();
+    for (k, side) in reveal.iter().flat_map(|r| r.sides.iter().enumerate()) {
+        for a in side {
+            if let Some(fb) = list.get_mut(a.layer) {
+                fb.shift[k] = a.shift;
+                fb.pieces.extend(a.pieces.iter().map(|pc| (k, [pc[0], pc[1], pc[2] * total / sum, pc[3] * total / sum])));
+            }
+        }
+    }
+    list.retain(|b| b.thickness > 1e-9);
     list
 }
 
-/// Anzahl der Füllkörper (je Schicht) einer Formöffnung — sie stehen in
-/// [`shaped_wall_opening_meshes`] vor Rahmen und Glas.
-pub(crate) fn shaped_fill_count(p: &Project, wall: &Wall, op: &Opening, w: f64, h: f64) -> usize {
-    let total = p.wall_thickness(wall, 0.2);
-    crate::opening_shape::opening_outline(op, w, h).map_or(0, |poly| crate::opening_shape::fill_quads(&poly, w, h).len() * shaped_fill_bands(p, wall, total).len())
+/// Wandkörper einer Formöffnung als Vierecke in Öffnungskoordinaten mit Lage quer `[n0, n1]` (aussen =
+/// +total/2) und Farbe: Füllkörper je Schicht zwischen dem (geweiteten) Rechteck-Loch und dem um den
+/// Schichteinzug versetzten Umriss, Zusatzstücke [106] entlang des Umrisses (je Kante nach ihrer Seite).
+fn shaped_wall_fill(p: &Project, wall: &Wall, op: &Opening, total: f64, w: f64, h: f64) -> Vec<([crate::opening_shape::P; 4], f64, f64, Rgb)> {
+    use crate::opening_shape as os;
+    let Some(poly) = os::opening_outline(op, w, h) else { return Vec::new() };
+    let half = total / 2.0;
+    let bands = shaped_fill_bands(p, wall, op, total);
+    let mut out = Vec::new();
+    let mut n_hi = half;
+    for b in &bands {
+        for q in os::layer_fill_quads(&poly, w, h, b.shift) {
+            out.push((q, n_hi - b.thickness, n_hi, b.color));
+        }
+        n_hi -= b.thickness;
+    }
+    for b in &bands {
+        for &(side, [x0, x1, o0, o1]) in &b.pieces {
+            if !(x1 - x0 > 1e-9 && o1 - o0 > 1e-9) {
+                continue;
+            }
+            let (outer, inner) = (os::inset(&poly, x0), os::inset(&poly, x1));
+            for (i, q) in os::ring_quads(&outer, &inner).into_iter().enumerate() {
+                if os::edge_side(&poly, i) == side {
+                    out.push((q, half - o1, half - o0, b.color));
+                }
+            }
+        }
+    }
+    out
 }
 
+/// Anzahl der Wandkörper (Füllkörper je Schicht, Zusatzstücke) einer Formöffnung — sie stehen in
+/// [`shaped_wall_opening_meshes`] vor Rahmen und Glas.
+pub(crate) fn shaped_fill_count(p: &Project, wall: &Wall, op: &Opening, w: f64, h: f64) -> usize {
+    shaped_wall_fill(p, wall, op, p.wall_thickness(wall, 0.2), w, h).len()
+}
+
+/// Formöffnung in der Wand ([G3]) als Quader: Füllkörper (je Wandschicht, mit Schichteinzug [106]) zwischen dem
+/// Rechteck-Loch und dem Umriss, Rahmen-Ring und Glas (bzw. Türblatt) entlang des Umrisses. Rahmenlage
+/// quer zur Wand wie bei den Rechteck-Öffnungen (`openings3d::frame_normal_range`). Nicht für Formen:
+/// Anschlag, Fensterbank, Storenkasten, Flügel-/Sprossenteilung (bleiben beim Rechteck).
 pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef, op: &Opening, [from, to, zb, zt]: [f64; 4]) -> Vec<RMesh> {
     use crate::opening_shape as os;
     let (w, h) = (to - from, zt - zb);
@@ -1290,16 +1341,8 @@ pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef,
         [wall.start.x + ux * s + uy * t, wall.start.y + uy * s - ux * t, zb + v]
     };
     let half = wr.total / 2.0;
-    let mut out = Vec::new();
-    // Füllkörper je Wandschicht (aussen = +half) in deren Farbe.
-    let bands = shaped_fill_bands(p, wall, wr.total);
-    for q in os::fill_quads(&poly, w, h) {
-        let mut n_hi = half;
-        for &(t, rgb) in &bands {
-            out.push(box_mesh(os::quad_box(&q, n_hi - t, n_hi, &map), rgb));
-            n_hi -= t;
-        }
-    }
+    // Wandkörper je Schicht (aussen = +half) in deren Farbe.
+    let mut out: Vec<RMesh> = shaped_wall_fill(p, wall, op, wr.total, w, h).into_iter().map(|(q, n0, n1, rgb)| box_mesh(os::quad_box(&q, n0, n1, &map), rgb)).collect();
     let door = op.kind == ElementKind::Door;
     let ty = if door {
         p.door_type(op).map(|t| (t.frame_depth, t.inset_from_face, t.inset_face == Some(DoorTypeInsetFace::Innen), t.inset_face == Some(DoorTypeInsetFace::Mitte), t.frame_width))
