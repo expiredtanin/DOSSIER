@@ -3383,7 +3383,7 @@ mod ts_faelle {
         let mut p = Project::default();
         // quer: von der Ebene geschnitten und weit nach hinten; nah: 3 m, fern: 10 m hinter der Ebene (höher).
         p.walls = vec![wall("quer", (0.0, -1.0), (0.0, 12.0), 2.5), wall("nah", (2.0, 3.0), (6.0, 3.0), 2.5), wall("fern", (2.0, 10.0), (6.0, 10.0), 4.0)];
-        let lv = |depth: Option<f64>| LevelSpec { kind: "section".into(), line: Some([Vec2 { x: -1.0, y: 0.0 }, Vec2 { x: 8.0, y: 0.0 }]), direction_sign: Some(1.0), depth, shadows: false, hidden_lines: false };
+        let lv = |depth: Option<f64>| LevelSpec { sketch: false, kind: "section".into(), line: Some([Vec2 { x: -1.0, y: 0.0 }, Vec2 { x: 8.0, y: 0.0 }]), direction_sign: Some(1.0), depth, shadows: false, hidden_lines: false };
         let top = |o: &Output| o.visible.iter().map(|e| e.a[1].max(e.b[1])).fold(f64::NEG_INFINITY, f64::max);
         let all = compute_section(&p, &lv(None), &[]).unwrap().unwrap();
         assert!(top(&all) > 3.9, "ohne Tiefe ist die ferne Wand sichtbar: {}", top(&all));
