@@ -1921,8 +1921,13 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `levelId`; Kontext bleibt. Modell (`model3dParts` `args[4]`), Pick-Geometrie und Auswahl-Hervorhebung gleich versetzt;
   Plan/Schnitt/Ansicht unberührt. Bedienung: Knopf unten rechts im 3D-Viewport (neben Raster) + Abstandsfeld
   (Ansichtszustand, nicht im Projekt). CLI `model3d --explode 3`; macOS-Rauchtest `smoke/explode.png`.
-  Offen: nur im Linux-Container geprüft (Zahlen, kein Bild); mit Explosion keine Abzugskörper, 2D-Boden-Spuren
-  und 3D-Griffe/Zeichnen-Vorschau bleiben unversetzt; natives Metal-3D-Fenster (`nativeSync`) ohne Explosion.
+  5.11.: Abzugskörper wirken am ursprünglichen Ort und wandern mit dem Bauteil (`explode3d::void_cuts`,
+  `solid_specs::void_cuts_lifted`); 2D-Boden-Spuren und ihre Pick-Strecken heben sich mit `levelId`; 3D-Griffe
+  sitzen auf den gehobenen Bauteilen (`explodeGripDz`, Abfrage `explodeOffsets`), Höhen-/First-Drag schreiben
+  unversetzte Höhen; Arbeitsebene/Raster/Zeichnen-Vorschau auf dem gehobenen aktiven Geschoss; natives
+  3D-Fenster bekommt dasselbe Modell (`pushNativeWalls(project, explode)`, Rust unverändert).
+  Offen: nur im Linux-Container geprüft (Zahlen, kein Bild, kein Metal/Tauri); Ansichtsschraffur auf Flächen
+  (`emitSurfacePatternLines`) bleibt unversetzt.
 - ◐ **[66] Präsentationspläne mit einem Klick.** · M — 4.11.: Standard-Ansichtsvorlagen (neue Projekte, „Standards
   laden/aktualisieren"): „Präsentation" (farbig, Schatten, ohne Referenzen/Konstruktion), „Eingabeplan 1:100" und
   „Ausführungsplan 1:50" (schwarz-weiss, fein, Strichstärken nach Massstab) — an Geschoss/Schnitt/Ansicht binden ([34]).
