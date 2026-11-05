@@ -317,7 +317,22 @@ fn subtract_holes(s: f64, e: f64, holes: &[Hole], s_cut: Option<Line>, e_cut: Op
             s_cut = Some(h.lb);
         }
     }
-    let mut clipped: Vec<Hole> = holes.iter().map(|h| Hole { a: max(s, h.a), b: min(e, h.b), ..*h }).filter(|h| h.b > h.a + CUTOUT_EPS).collect();
+    // [141] Reichweite des Bands über die Endschnitte hinaus (Gehrung verlängert die Fläche über das
+    // Achsende): ein Loch nahe der Ecke darf das Reststück zwischen Loch und Gehrung nicht schlucken
+    // (vorher fehlte dort die Umrisslinie, z. B. Innenwand-Stoss an einer Aussenwand-Ecke).
+    let reach = |cut: Option<Line>, base: f64, far: bool| {
+        let mut r = base;
+        if let Some(l) = cut {
+            for off in [lo, hi] {
+                if let Some(p) = f.pos(&l, off) {
+                    r = if far { max(r, p) } else { min(r, p) };
+                }
+            }
+        }
+        r
+    };
+    let (s_reach, e_reach) = (reach(s_cut, s, false), reach(e_cut, e, true));
+    let mut clipped: Vec<Hole> = holes.iter().map(|h| Hole { a: max(s_reach, h.a), b: min(e_reach, h.b), ..*h }).filter(|h| h.b > h.a + CUTOUT_EPS).collect();
     clipped.sort_by(|p, q| p.a.partial_cmp(&q.a).unwrap_or(std::cmp::Ordering::Equal));
     let mut parts = Vec::new();
     let (mut cursor, mut cursor_line) = (s, s_cut);
@@ -332,6 +347,8 @@ fn subtract_holes(s: f64, e: f64, holes: &[Hole], s_cut: Option<Line>, e_cut: Op
     }
     if cursor < e - CUTOUT_EPS {
         parts.push((cursor, e, cursor_line, e_cut));
+    } else if cursor < e_reach - CUTOUT_EPS {
+        parts.push((cursor, e_reach, cursor_line, e_cut));
     }
     if !holes.is_empty() {
         parts.retain(|&(a, b, sc, ec)| {
@@ -1083,6 +1100,26 @@ mod tests {
             }
         }
         assert!(outlines >= 4);
+    }
+
+    /// [141] Innenwand stösst nahe einer Aussenwand-Ecke an (Anbau-Knoten): die Aussparung im Umriss
+    /// der Eckwand reicht über deren Achsende hinaus, die Gehrung verlängert die Fläche bis zur
+    /// Innenecke — das Reststück zwischen Aussparung und Innenecke wird gezeichnet (vorher Lücke).
+    #[test]
+    fn umriss_zwischen_aussparung_und_gehrung() {
+        use crate::joins::{compute_joins, JoinLayer, JoinWall, Reference};
+        let l = |t: f64, c: u32, p: f64| JoinLayer { thickness: t, component: Some(c), priority: p };
+        let ext = || Some(vec![l(0.02, 3, 10.0), l(0.18, 2, 22.0), l(0.175, 1, 50.0), l(0.015, 0, 10.0)]);
+        let iw = || Some(vec![l(0.01, 0, 10.0), l(0.125, 1, 50.0), l(0.01, 0, 10.0)]);
+        let w = |s: (f64, f64), e: (f64, f64), layers| JoinWall { start: kernel2d::Vec2::new(s.0, s.1), end: kernel2d::Vec2::new(e.0, e.1), reference: Reference::Center, layers, bulge: None };
+        let walls = vec![w((5.0, 10.0), (0.0, 10.0), ext()), w((5.0, 15.0), (5.0, 10.0), ext()), w((10.0, 10.0), (5.0, 10.0), iw())];
+        let c = compute_joins(&walls).unwrap();
+        assert!(!c[1].span_cutouts.is_empty(), "{:?}", c[1]);
+        let out = wall_poche(&poche_of(&walls[1], &c[1]));
+        let corner = super::v(5.195, 9.805);
+        let near = |p: V| hypot2(p.x - corner.x, p.y - corner.y) < 1e-9;
+        let hit = parse(&out).into_iter().any(|p| matches!(p, Prim::Line(art, a, b) if art == LINE_OUTLINE && (near(a) || near(b))));
+        assert!(hit, "keine Umrisslinie bis zur Innenecke");
     }
 
     #[test]
