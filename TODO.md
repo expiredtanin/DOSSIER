@@ -1463,6 +1463,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     Geprüft: Rust-Tests, CLI-Schnitt parallel vor einem Rundbogenfenster als PNG angesehen (Linux). Offen:
     Projektion bei schräg zur Ebene stehender Wand nur mit dem Umriss der zugewandten Fläche (Leibungskanten
     fehlen), Abzugskörper beliebiger Form, nicht in der Tauri-App/Metal geprüft.
+  - (5.11.) Grundriss nicht mehr SIA-Rechteck: an der Schnitthöhe die Sehne des Umrisses (`opening_shape::u_range`,
+    `plan/walls.rs` `shaped_plan_cut`) — Wandlücke, Leibungen/Schichteinzug [106] und Fenstersymbol in deren Lage/
+    Breite (Rundfenster auf ¼ Höhe schmaler, Rundbogen unter dem Kämpfer unverändert), wie Schnitt und 3D.
+    Entscheid: Schweizer Praxis zeigt im Grundriss die Öffnung, wie die Schnittebene sie trifft; keine Option.
+    Berührt der Umriss die Schnittebene nur (Scheitel/Sohle genau auf Schnitthöhe), bleibt die Wand zu, Symbol
+    „über/unter Schnitt“ ([36]); ganz über/unter dem Schnitt wie bisher (Zone des Rechtecks). Rechtecke
+    unverändert; Goldens unverändert (Rundfenster eg-f8/dg-f1 der Komplex-Probe liegen über dem Schnitt). Geprüft:
+    Rust-Tests, CLI-Grundriss (`--hatch`) Rund/Spitzbogen als PNG angesehen (Linux). Offen: Masskette/Beschriftung
+    zeigen die Nennbreite (gewollt), nicht in der Tauri-App geprüft.
 - ◐ **[G4] Exakte Sichtbarkeit (HLR)** für Ansicht und Projektionsteil des Schnitts. · XL
   - (30.10.) Kern `hlr.rs`: ebene Flächen (Polygone/Dreiecke) in Ansichtskoordinaten → Kanten. Einordnung je
     Kantenstück (an T-Stössen kollinearer Kanten zerlegt): deckungsgleiche Gegenflächen heben sich auf (Stoss
@@ -2384,10 +2393,11 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     komplex: 3D (og-f1 Rundbogen mit Überdämmung/Innenputz-Leibung: 12 Rechteck-Stücke → 81 Ring-Stücke) und
     Schnitt A (Leibungsputz am Bogen 5 mm tiefer, senkrecht gemessen) bewusst nachgeführt. Geprüft: Rust-Tests
     (Abdeckung Innenputz rund um den Bogen, Schnitt nahe der Leibung), cargo test, tsc, vitest (Linux; 3D nicht
-    gerendert, nur Netz-Prüfung). Offen: Grundriss zeigt für geschnittene Formöffnungen weiter die Rechteck-Lücke
-    (SIA-Symbol, Leibungen an den Rechteck-Kanten; Rundfenster der Muster liegen über der Schnitthöhe); Schnitt
+    gerendert, nur Netz-Prüfung). Offen: Schnitt
     parallel zur Wand durch Formöffnungs-Leibungen (Rechteck-Loch); 3D ohne Schichten (`layeredWalls = false`)
     zeigt am Bogen den Rücksprung, an den Leibungen nicht; nicht in der Tauri-App/Metal geprüft.
+  - (5.11.) Grundriss: Formöffnungen [G3] bekommen die Leibungen/Schichteinzüge an der Sehne auf Schnitthöhe statt am
+    Rechteck (Öffnung mit Sehnen-Lage/-Breite an `plan_reveal_block`).
 - ◐ **[108] Schräge Wandanschlüsse exakt (T/L/X, ein- und mehrschichtig).** (30.10., Maintainer-Bug: schräger
   T-Stoss) Die Nah-Putz-Aussparung der Durchgangswand (`joins::SpanCutout`) ist jetzt ein Parallelogramm
   (`from/to` auf der Fläche, `from_b/to_b` auf der Rückgrat-Fläche) aus den echten Kern-Kanten des Abzweigs

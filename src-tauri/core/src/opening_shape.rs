@@ -136,6 +136,13 @@ pub fn v_range(poly: &[P], u: f64) -> Option<(f64, f64)> {
     (lo <= hi).then_some((lo, hi))
 }
 
+/// Waagrechte Ausdehnung `[u_lo, u_hi]` eines konvexen Umrisses auf Höhe `v` (Sehne, [G3] Grundriss);
+/// ausserhalb ⇒ `None`.
+pub fn u_range(poly: &[P], v: f64) -> Option<(f64, f64)> {
+    let swapped: Vec<P> = poly.iter().map(|q| [q[1], q[0]]).collect();
+    v_range(&swapped, v)
+}
+
 fn breakpoints(poly: &[P], extra: &[f64]) -> Vec<f64> {
     let mut us: Vec<f64> = poly.iter().map(|q| q[0]).chain(extra.iter().copied()).collect();
     us.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -586,6 +593,27 @@ pub fn surface_opening_info(p: &Project, id: &str) -> Option<SurfaceOpeningInfo>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [G3] Waagrechte Ausdehnung (Sehne) eines Umrisses auf Höhe v.
+    #[test]
+    fn sehne_auf_hoehe() {
+        let rund = outline(OpeningShape::Rund, None, 1.2, 1.2).unwrap();
+        let (a, b) = u_range(&rund, 0.6).unwrap();
+        assert!(a.abs() < 1e-9 && (b - 1.2).abs() < 1e-9, "{a} {b}");
+        let (a, b) = u_range(&rund, 0.3).unwrap();
+        let half = 0.6 * (0.75f64).sqrt();
+        assert!((a - (0.6 - half)).abs() < 0.01 && (b - (0.6 + half)).abs() < 0.01 && ((a + b) / 2.0 - 0.6).abs() < 1e-9, "{a} {b}");
+        assert!(u_range(&rund, -0.01).is_none() && u_range(&rund, 1.21).is_none());
+        // Rundbogen: unter dem Kämpfer volle Breite, im Bogen schmaler.
+        let rb = outline(OpeningShape::Rundbogen, None, 1.0, 1.0).unwrap();
+        assert_eq!(u_range(&rb, 0.4), Some((0.0, 1.0)));
+        let (a, b) = u_range(&rb, 0.8).unwrap();
+        assert!((b - a - 2.0 * (0.25f64 - 0.09).sqrt()).abs() < 0.01, "{a} {b}");
+        // Schräg: links tiefer (Stich 0.4), auf 0.8 nur noch der rechte Teil.
+        let sq = outline(OpeningShape::Schraeg, Some(0.4), 1.0, 1.0).unwrap();
+        let (a, b) = u_range(&sq, 0.8).unwrap();
+        assert!((a - 0.5).abs() < 1e-9 && (b - 1.0).abs() < 1e-9, "{a} {b}");
+    }
 
     fn area(p: &[P]) -> f64 {
         (0..p.len()).map(|i| p[i][0] * p[(i + 1) % p.len()][1] - p[(i + 1) % p.len()][0] * p[i][1]).sum::<f64>() / 2.0
