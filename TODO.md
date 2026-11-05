@@ -2330,7 +2330,12 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     je Seite, Rundbogen, Dachfenster, Schnitte parallel, Türansichten beidseitig). Geprüft: Rust-/vitest-Tests,
     CLI-Ansichten/-Schnitte/-Grundriss als PNG angesehen, Dialog im Chromium (vite-Vorschau) angesehen (Linux).
     Offen: Pfosten in der Ansicht nur als Mittellinie zwischen den Flügeln (keine eigene Kontur), Türzarge in der
-    Ansicht ohne Oberlicht-Fall (mit Oberlicht bisheriges Blatt), nicht in der Tauri-App geprüft.
+    Ansicht ohne Oberlicht-Fall (mit Oberlicht bisheriges Blatt; beides erledigt 5.11.), nicht in der Tauri-App geprüft.
+  - (5.11.) Ansicht: Pfosten mit eigener Kontur (beide Kanten in Pfostenbreite, unter 1 cm weiter Mittellinie);
+    Türzarge mit Oberlicht: Blatt ab dem Zargen-Einzug bis unter den Kämpfer (Zargenbreite), Oberlicht-Glas in der
+    Zarge. Testprojekt: Umfassungszarge mit Oberlicht. Golden `komplex-ansicht-ansicht-sued` (+2 Linien, Pfosten des
+    dreiteiligen Fensters). Geprüft: Rust-/vitest-Tests, CLI-Ansichten (Testprojekt, Musterhaus komplex) als PNG
+    vorher/nachher angesehen (Linux). Offen: nicht in der Tauri-App geprüft.
 - ◐ **[106] Fenster/Türen: Schichteinzug je Wandschicht und Seite.** (29.10.; Bogenwände 30.10., s. [T2]) `layerReveals` am Typ bzw. an der Öffnung (ersetzt
   dort den Typ): je Schicht (Index ab aussen, negativ ab innen) bündig / zurückspringend um Mass (Vorgabe Schichtdicke) / in
   die Leibung bis an den Rahmen (Vorgabe ≤ 4 cm, vom Rahmen weg gestapelt) / Rahmen überdeckend um Mass (Vorgabe 3 cm), je

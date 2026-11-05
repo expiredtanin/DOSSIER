@@ -878,8 +878,15 @@ fn sash_band(out: &mut OpeningOut, o: &[f64], sashes: &[f64], pts: &Quad, w: f64
         let fa1 = cursor + sw / w;
         cursor = fa1;
         if sd[0] != 0.0 {
-            let fm = (fa0 + fa1) / 2.0;
-            out.divisions.push((quad_at(pts, fm, fz), quad_at(pts, fm, field_top)));
+            // [105] Pfosten mit Kontur (beide Kanten); unter 1 cm als Mittellinie.
+            if sw >= 0.01 {
+                for fe in [fa0, fa1] {
+                    out.divisions.push((quad_at(pts, fe, fz), quad_at(pts, fe, field_top)));
+                }
+            } else {
+                let fm = (fa0 + fa1) / 2.0;
+                out.divisions.push((quad_at(pts, fm, fz), quad_at(pts, fm, field_top)));
+            }
             continue;
         }
         out.sash_rects.push(rect(pts, fa0, fa1, fz, field_top));
@@ -958,9 +965,22 @@ fn layout_opening(o: &[f64], sashes: &[f64], transom_sashes: &[f64], pts: &Quad)
     if o[9] != 0.0 {
         // [105] Türzarge: Blatt ab der lichten Kante (bzw. dem Falz von der Aufschlagseite).
         let (la, lt) = (o[32], o[33]);
-        if la.is_finite() && lt.is_finite() && (o[20] == 0.0 || o[20] == 3.0) && !(o[13] > EPS) {
+        if la.is_finite() && lt.is_finite() && (o[20] == 0.0 || o[20] == 3.0) {
             let fa = min(0.45, max(0.0, la) / max(w, 1e-6));
-            let top = 1.0 - min(0.45, max(0.0, lt) / max(h, 1e-6));
+            let mut top = 1.0 - min(0.45, max(0.0, lt) / max(h, 1e-6));
+            // Oberlicht: Kämpfer in Zargenbreite um die Oberlicht-Unterkante, darüber Glas in der Zarge.
+            let transom = if o[13].is_nan() { 0.0 } else { o[13] };
+            if transom > EPS && transom < h * 0.8 {
+                let f_tr = 1.0 - transom / h;
+                let kz = min(0.1, max(0.01, lt) / max(h, 1e-6)) / 2.0;
+                if f_tr + kz < top {
+                    out.glass.push(rect(pts, fa, 1.0 - fa, f_tr + kz, top));
+                    for z in [f_tr - kz, f_tr + kz] {
+                        out.divisions.push((quad_at(pts, fa, z), quad_at(pts, 1.0 - fa, z)));
+                    }
+                    top = f_tr - kz;
+                }
+            }
             if o[10] != 0.0 {
                 let ratio = max(0.05, min(1.0, if o[11].is_nan() { 1.0 } else { o[11] }));
                 let split_z = top * (1.0 - ratio);
@@ -1357,6 +1377,54 @@ mod tests_ts {
         let q = &f[14..22];
         let u0 = [q[0], q[2], q[4], q[6]].iter().cloned().fold(f64::INFINITY, f64::min);
         assert!((u0 - (f[4] + 0.1)).abs() < 1e-9, "{u0}");
+    }
+
+    /// Teilungslinien (u0, v0, u1, v1) einer Öffnung; Listen ab Index 12.
+    fn divisions(f: &[f64]) -> Vec<[f64; 4]> {
+        let mut i = 12;
+        for size in [8, 8] {
+            i += 1 + f[i] as usize * size;
+        }
+        (0..f[i] as usize).map(|k| [f[i + 1 + 4 * k], f[i + 2 + 4 * k], f[i + 3 + 4 * k], f[i + 4 + 4 * k]]).collect()
+    }
+
+    /// [105] Türzarge mit Oberlicht: Blatt ab dem Zargen-Einzug bis unter den Kämpfer, darüber Glas.
+    #[test]
+    fn tuerzarge_mit_oberlicht() {
+        let frame = [0.0, 0.0, -3.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
+        let n = f64::NAN;
+        let mut b = rec105(1.0, [n, n, n, n, n, n, n, n, n, n, n, 0.1, 0.05]);
+        b[14] = 0.4; // Oberlicht 40 cm (Öffnung 0.9..2.3 m)
+        let f = openings(&frame, &b);
+        assert_eq!((f[12], f[21]), (1.0, 1.0), "ein Glasfeld, ein Blatt");
+        let g = first_glass(&f);
+        let q = &f[22..30];
+        let us = [q[0], q[2], q[4], q[6]];
+        let vs = [q[1], q[3], q[5], q[7]];
+        let u0 = us.iter().cloned().fold(f64::INFINITY, f64::min);
+        let v1 = vs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        assert!((u0 - (f[4] + 0.1)).abs() < 1e-9, "Blatt eingerückt: {u0}");
+        assert!((g[0] - (f[4] + 0.1)).abs() < 1e-9, "Oberlicht-Glas eingerückt: {g:?}");
+        // Kämpfer (Zargenbreite 5 cm) um 1.9 m: Blatt endet darunter, Glas beginnt darüber, oben Zarge.
+        assert!((v1 - 1.875).abs() < 1e-9 && (g[2] - 1.925).abs() < 1e-9 && (g[3] - 2.25).abs() < 1e-9, "{v1} {g:?}");
+        assert_eq!(divisions(&f).iter().filter(|d| (d[1] - d[3]).abs() < 1e-9).count(), 2, "Kämpfer-Kanten");
+    }
+
+    /// [105] Pfosten in der Ansicht mit eigener Kontur (zwei Kanten in Pfostenbreite) statt Mittellinie.
+    #[test]
+    fn pfosten_mit_kontur() {
+        let frame = [0.0, 0.0, -3.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
+        let n = f64::NAN;
+        let mut b = rec105(0.0, [n; 13]);
+        // Flügelliste ersetzen: Flügel, Pfosten 10 cm, Flügel; ohne Oberlicht.
+        let k = b.len() - 8;
+        b.truncate(k);
+        b.extend([3.0, 0.0, n, 1.0, n, 3.0, 1.0, 1.0, 0.1, 1.0, n, 0.0, 1.0, 0.0, n, 1.0, n, 3.0, 0.0, 0.0]);
+        let f = openings(&frame, &b);
+        let vert: Vec<f64> = divisions(&f).iter().filter(|d| (d[0] - d[2]).abs() < 1e-9 && (d[1] - d[3]).abs() > 0.5).map(|d| d[0]).collect();
+        // Rahmen 6 cm, lichte Breite 1.08, je Flügel 0.49: Pfosten von 1.55 bis 1.65.
+        assert!(vert.iter().any(|u| (u - 1.55).abs() < 1e-9) && vert.iter().any(|u| (u - 1.65).abs() < 1e-9), "{vert:?}");
+        assert!(!vert.iter().any(|u| (u - 1.6).abs() < 1e-9), "keine Mittellinie: {vert:?}");
     }
 
     /// [95] Schiebe-/Taschentür: Pfeil zur Bandseite (1 Anfang, 4 Ende), zweiflügelig zwei Pfeile.

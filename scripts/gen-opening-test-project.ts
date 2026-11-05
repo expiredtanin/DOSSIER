@@ -72,7 +72,9 @@ const doorTypes: DoorType[] = doorKinds.map((k) => ({
   doorFrame: k === "futter" ? { casingSides: "beide" } : undefined,
 }));
 
-const walls: Wall[] = [wall("AW", "aw", 0, 0, 15, 0), wall("IW", "iw", 0, 4, 14, 4)];
+// [105] Umfassungszarge mit Oberlicht (Kämpfer in Zargenbreite, Glas in der Zarge).
+doorTypes.push({ ...doorTypes[0], id: "d-oberlicht", name: "Tür umfassungszarge mit Oberlicht", transomHeight: 0.45, defaultHeight: 2.5 });
+const walls: Wall[] = [wall("AW", "aw", 0, 0, 15, 0), wall("IW", "iw", 0, 4, 15.5, 4)];
 const openings: Opening[] = [];
 windowTypes.forEach((t, i) => {
   const pos = 0.8 + i * 2.8;
@@ -81,7 +83,7 @@ windowTypes.forEach((t, i) => {
 });
 doorTypes.forEach((t, i) => {
   const pos = 0.6 + i * 2.2;
-  openings.push({ id: `T${i + 1}`, type: "opening", hostWallId: "IW", categoryCode: "21", kind: "door", typeId: t.id, position: pos, width: 0.9, height: 2.05, sillHeight: 0, swing: "left", openingDir: "in", detailLevel: "fein" } as Opening);
+  openings.push({ id: `T${i + 1}`, type: "opening", hostWallId: "IW", categoryCode: "21", kind: "door", typeId: t.id, position: pos, width: 0.9, height: t.defaultHeight, sillHeight: 0, swing: "left", openingDir: "in", detailLevel: "fein" } as Opening);
   levels.push(section(`S-T${i + 1}`, pos + 0.45, 3, 5));
 });
 // [G3] Rundbogenfenster in einer eigenen Wand; Schnitt parallel davor (Projektion) und quer.
@@ -93,8 +95,8 @@ levels.push({ id: "s-fb-par2", name: "S-FB-parallel-2", kind: "section", visible
 // [106]/[105] Schnitt parallel zur Aussenwand mitten durch die Leibungen.
 levels.push({ id: "s-leibung", name: "S-Leibung", kind: "section", visible: true, locked: false, linePoints: [{ x: -0.5, y: 0.05 }, { x: 12.5, y: 0.05 }], directionSign: 1, levelMarks: false } as DrawingLevel);
 // Türen von beiden Seiten (Zargenspiegel, Bekleidung je Seite).
-levels.push({ id: "a-tuer-s", name: "Ansicht-Tueren-Sued", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 0, y: 2.5 }, { x: 14, y: 2.5 }], directionSign: 1, levelMarks: false } as DrawingLevel);
-levels.push({ id: "a-tuer-n", name: "Ansicht-Tueren-Nord", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 0, y: 5.5 }, { x: 14, y: 5.5 }], directionSign: -1, levelMarks: false } as DrawingLevel);
+levels.push({ id: "a-tuer-s", name: "Ansicht-Tueren-Sued", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 0, y: 2.5 }, { x: 15.5, y: 2.5 }], directionSign: 1, levelMarks: false } as DrawingLevel);
+levels.push({ id: "a-tuer-n", name: "Ansicht-Tueren-Nord", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 0, y: 5.5 }, { x: 15.5, y: 5.5 }], directionSign: -1, levelMarks: false } as DrawingLevel);
 // [103] Dachfenster in einem Satteldach über dem Dachgeschoss (eigenes Gebäude rechts).
 levels.push({ id: "dg", name: "DG", kind: "floor", visible: true, locked: false, floorHeight: 2.6, cutHeight: 1.0, baseElevation: 2.6 } as DrawingLevel);
 const roofs = [{ id: "R1", type: "roof", floorId: "dg", categoryCode: "35", outline: [{ x: 16, y: 0 }, { x: 22, y: 0 }, { x: 22, y: 6 }, { x: 16, y: 6 }], shape: "sattel", pitchDeg: 40, overhang: 0.3, ridgeAxis: "x", baseElevation: 2.6, thickness: 0.3 }];
