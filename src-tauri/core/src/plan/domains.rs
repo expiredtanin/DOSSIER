@@ -1154,6 +1154,34 @@ mod tests {
         assert_eq!(r0, r2);
     }
 
+    /// Gegenstück zum Oberlicht: Lüftungsschlitz ganz unter der Schnittebene (0.1–0.4 m) schliesst die
+    /// geschnittene Wand, Symbol gepunktet; unter „darunter sichtbar bis“ hinaus entfällt er.
+    #[test]
+    fn ansichtsbereich_lueftungsschlitz_unter_schnitt() {
+        let mut p = sample();
+        let o1 = p.openings.as_mut().unwrap().iter_mut().find(|o| o.id == "O1").unwrap();
+        (o1.sill_height, o1.height) = (0.1, 0.3);
+        let codes = ["20", "21", "30", "60"];
+        let run = |p: &Project| serde_json::to_value(&plan_domains(p, &args("eg", 1.0, &codes)).unwrap().walls).unwrap();
+        let of = |v: &serde_json::Value, id: &str| -> Vec<serde_json::Value> { v.as_array().unwrap().iter().filter(|x| x["openingId"] == id).cloned().collect() };
+        let w1_polys = |v: &serde_json::Value| v.as_array().unwrap().iter().filter(|x| x["kind"] == "polygon" && x["wallId"] == "W1").count();
+        let dotted = |xs: &[serde_json::Value]| xs.iter().filter(|x| x["kind"] == "line").all(|x| x["dash"] == serde_json::json!([0.04, 0.08]));
+        let w0 = run(&p);
+        assert!(!of(&w0, "O1").is_empty() && !dotted(&of(&w0, "O1")));
+        // Unterkante 0 m: Schlitz liegt im Bereich unter dem Schnitt → Wand geschlossen, Symbol gepunktet.
+        set_range(&mut p, "eg", None, Some(0.0), None);
+        let w1 = run(&p);
+        let s1 = of(&w1, "O1");
+        assert!(s1.iter().any(|x| x["kind"] == "line") && dotted(&s1), "{s1:?}");
+        assert!(w1_polys(&w1) < w1_polys(&w0), "{} {}", w1_polys(&w1), w1_polys(&w0));
+        assert!(!dotted(&of(&w1, "D1")) && !dotted(&of(&w1, "O2")));
+        // Unterkante 0.5 m ohne „darunter sichtbar bis“: Schlitz entfällt, Wand bleibt geschlossen.
+        set_range(&mut p, "eg", None, Some(0.5), None);
+        let w2 = run(&p);
+        assert!(of(&w2, "O1").is_empty());
+        assert_eq!(w1_polys(&w2), w1_polys(&w1));
+    }
+
     #[test]
     fn bodenbelag_im_og_grundriss() {
         let mut p = sample();

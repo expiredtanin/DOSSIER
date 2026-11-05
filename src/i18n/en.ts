@@ -1020,6 +1020,8 @@ export const en: Record<TranslationKey, string> = {
   "editor.viewTop": "View top",
   "editor.viewBottom": "View bottom",
   "editor.viewDepth": "Visible below down to",
+  "editor.sectionDepth": "View depth",
+  "editor.sectionDepth.hint": "Elements farther behind the section/view plane are not projected (empty = unlimited).",
   "editor.unit.mm": "mm",
   "editor.unit.m": "m",
   "editor.noHeightDrawing": "Drawings have no floor/cut height.",

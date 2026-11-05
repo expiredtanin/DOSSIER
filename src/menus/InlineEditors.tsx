@@ -271,6 +271,26 @@ export function LevelInlineEditor({
           ))}
         </>
       )}
+      {/* Sichttiefe ([36]) für Schnitt/Ansicht: leer = unbegrenzt (Darstellung wie bisher). */}
+      {(level.kind === "section" || level.kind === "elevation") && (
+        <EditorField label={t("editor.sectionDepth")}>
+          <span className="editor-num" title={t("editor.sectionDepth.hint")}>
+            <input
+              type="number"
+              step={0.5}
+              min={0}
+              data-testid="level-depth"
+              value={level.depth ?? ""}
+              placeholder="∞"
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                patchLevel(level.id, { depth: e.target.value === "" || !(v > 0) ? undefined : v });
+              }}
+            />
+            <span className="editor-unit">{t("editor.unit.m")}</span>
+          </span>
+        </EditorField>
+      )}
       {!isFloor && (
         <div className="editor-note">
           {level.kind === "drawing"
