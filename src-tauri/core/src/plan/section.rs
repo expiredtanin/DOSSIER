@@ -36,10 +36,10 @@ const SECTION_SLAB_AXIS_ANGLE_DEG: f64 = 0.0;
 /// Seitenrand (m) der Geländelinie um den Inhalt des Schnitts.
 const TERRAIN_MARGIN: f64 = 6.0;
 /// Neutrale Füllung geschnittener freier Körper.
-const BODY_FILL: &str = "#d9dde2";
+pub(crate) const BODY_FILL: &str = "#d9dde2";
 
 /// Rückfall-Schraffur der Cut-Flächen ohne auflösbares Bauteil.
-fn section_hatch() -> HatchRender {
+pub(crate) fn section_hatch() -> HatchRender {
     HatchRender { pattern: HatchPattern::Diagonal, scale: 1.0, angle: 45.0, color: HATCH_INK.into(), line_weight: 0.13, ..no_hatch_base() }
 }
 
