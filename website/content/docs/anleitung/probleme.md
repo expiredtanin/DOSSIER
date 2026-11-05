@@ -74,7 +74,6 @@ Stand 5.11.2026; die vollständige Liste führt
 
 - Zeichnungs-Reiter werden nicht im Projekt gespeichert [136].
 - Ziehen von Griffen mit Fang ist im 3D noch nicht vollständig.
-- Mod+S ist doppelt belegt (Speichern / Teilen bei 2D-Auswahl).
 
 **Modell und Pläne**
 

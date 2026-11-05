@@ -26,6 +26,7 @@ export interface NativeAppMenuHandlers {
   onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
+  onSaveProjectAs: () => void;
   onImport: () => void;
   onExportPdf: () => void;
   onExportDxf: () => void;
@@ -173,9 +174,14 @@ export function useNativeAppMenu(
             action: () => handlersRef.current.onOpenProject(),
           }),
           await MenuItem.new({
-            text: t("menu.native.saveAs"),
+            text: t("menu.native.save"),
             accelerator: "CmdOrCtrl+S",
             action: () => handlersRef.current.onSaveProject(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.saveAs"),
+            accelerator: "CmdOrCtrl+Shift+S",
+            action: () => handlersRef.current.onSaveProjectAs(),
           }),
           await MenuItem.new({
             text: t("menu.native.import"),

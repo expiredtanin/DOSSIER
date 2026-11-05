@@ -124,7 +124,15 @@ export async function saveProjectFile(
   json: string,
   projectName: string,
   onSavedPath?: (path: string) => void,
+  knownPath?: string | null,
 ): Promise<boolean> {
+  // „Speichern" (Cmd/Ctrl+S): bekannter Pfad → ohne Dialog atomar überschreiben.
+  if (knownPath && isTauriRuntime()) {
+    const { writeFileAtomic } = await import("./saveFile");
+    await writeFileAtomic(knownPath, json);
+    onSavedPath?.(knownPath);
+    return true;
+  }
   const filename = `${projectName || "projekt"}.${PROJECT_EXT}`;
   return saveTextFile(json, filename, "application/json", PROJECT_DIALOG_FILTERS, onSavedPath, true);
 }

@@ -132,6 +132,7 @@ export const en: Record<TranslationKey, string> = {
   "menu.native.newFromComplexSample": "Sample House (Complex)",
   "menu.native.newFromTemplateFile": "Choose Template File…",
   "menu.native.open": "Open…",
+  "menu.native.save": "Save",
   "menu.native.saveAs": "Save As…",
   "menu.native.import": "Import…",
   "menu.native.export": "Export",

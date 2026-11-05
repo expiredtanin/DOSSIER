@@ -20,6 +20,7 @@ export interface AppMenuBarProps {
   onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
+  onSaveProjectAs: () => void;
   onImport: () => void;
   /** Datei: Punktwolke importieren ([27]). */
   onImportPointCloud?: () => void;
@@ -65,6 +66,7 @@ export const AppMenuBar = memo(function AppMenuBar({
   onNewProjectFromTemplate,
   onOpenProject,
   onSaveProject,
+  onSaveProjectAs,
   onImport,
   onImportPointCloud,
   onImportMesh,
@@ -98,6 +100,7 @@ export const AppMenuBar = memo(function AppMenuBar({
     { divider: true },
     { label: t("file.open"), onSelect: onOpenProject },
     { label: t("file.save"), onSelect: onSaveProject },
+    { label: t("menu.native.saveAs"), onSelect: onSaveProjectAs },
     { divider: true },
     { label: t("file.import"), onSelect: onImport },
     ...(onImportPointCloud ? [{ label: t("menu.native.importPointCloud"), onSelect: onImportPointCloud }] : []),

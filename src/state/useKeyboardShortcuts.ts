@@ -392,7 +392,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
 }
 
 /**
- * Ctrl/Cmd+S = Split, Ctrl/Cmd+J = Join der selektierten Drawing2D-Elemente.
+ * Ctrl/Cmd+Shift+J = Split (Ctrl/Cmd+S ist Speichern), Ctrl/Cmd+J = Join der selektierten Drawing2D-Elemente.
  * Join läuft über DENSELBEN Engine-Befehl wie getipptes „join" (Sofort-
  * Befehl, autoRun). Split bleibt die direkte Aktion (`runSplit`, in App.tsx —
  * bleibt dort, da es auch für einen etwaigen Menü-Eintrag geteilt wird). Beide
