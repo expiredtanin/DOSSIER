@@ -40,6 +40,8 @@ pub struct Document {
     revs: Revs,
     /// Caches der Plan-Erzeugung (`plan::cache`), gültig über [`Revs`].
     plan_cache: crate::plan::cache::PlanCache,
+    /// Cache der 3D-Ableitung ([58], `model3d_cache`), gültig über [`Revs`].
+    model3d_cache: crate::model3d_cache::Model3dCache,
     /// id → Position je Liste über die Aufrufe hinweg (s. [`PosCache`]); in einer `RefCell`, damit auch
     /// lesende Abfragen ([`Lookup`]) den Index bauen und nutzen.
     pos: RefCell<PosCache>,
@@ -788,6 +790,22 @@ impl Document {
     /// Änderungsstände (Schlüssel der Caches der Ableitungen).
     pub fn revs(&self) -> &Revs {
         &self.revs
+    }
+
+    /// 3D-Modell in Teilen ([58]) wie `model3d::parts`, Wände und Öffnungs-Einbauteile je Wand aus dem
+    /// Cache (`model3d_cache`); `structs` wie dort.
+    pub fn model3d_parts(&mut self, layered: bool, detail: f64, for_section: bool, structs: bool) -> Result<crate::model3d_cache::CachedParts, String> {
+        self.project()?;
+        let p = self.typed.as_ref().expect("gerade gelesen");
+        let n_open = p.openings.as_ref().map_or(0, Vec::len);
+        let walls = self.revs.items("walls", p.walls.len()).to_vec();
+        let openings = self.revs.items("openings", n_open).to_vec();
+        self.model3d_cache.parts(p, &self.revs, &walls, &openings, layered, detail, for_section, structs)
+    }
+
+    /// Letzte Statistik des 3D-Caches (Tests): neu gerechnete Wände / Öffnungs-Wände.
+    pub fn model3d_rebuilt(&self) -> (usize, usize) {
+        self.model3d_cache.last_rebuilt
     }
 
     /// Typisierte Sicht samt Änderungsständen (Element-Stände der 2D-Zeichnungen vergeben) und

@@ -1030,9 +1030,17 @@ fn kassette(em: &mut Emitter, leaf_from: f64, leaf_to: f64, leaf_bottom: f64, le
 /// aller Wände (`emitOpeningGlass`), dann Rahmen (`emitOpeningFrames`, nicht bei grob), dann
 /// Rollladenkästen (`emitOpeningShading`, nicht bei grob).
 pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
+    let per: Vec<[Vec<BoxMesh>; 3]> = walls.iter().map(|w| wall_mesh_passes(w, detail)).collect();
+    (0..3).flat_map(|k| per.iter().flat_map(move |p| p[k].iter().cloned())).collect()
+}
+
+/// Die Quader EINER Wand in den drei Durchgängen von [`opening_meshes`] (Scheiben/Blätter/Anschläge,
+/// Rahmen, Sonnenschutz): das ganze Modell reiht erst alle Wände des ersten Durchgangs, dann des zweiten
+/// usw. — so kann der 3D-Cache ([58], `model3d_cache.rs`) die Teile je Wand behalten.
+pub fn wall_mesh_passes(w: &WallIn, detail: Detail) -> [Vec<BoxMesh>; 3] {
     let mut out = Vec::new();
     let open = |o: &OpeningIn| !(o.z_top - o.z_bottom <= EPS);
-    for w in walls {
+    {
         let mut em = Emitter { axis: Axis::of(w.start, w.end), out: &mut out };
         for o in w.openings.iter().filter(|o| open(o)) {
             let params = resolve_frame(o);
@@ -1052,9 +1060,10 @@ pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
         }
     }
     if detail == Detail::Coarse {
-        return out;
+        return [out, Vec::new(), Vec::new()];
     }
-    for w in walls {
+    let first = std::mem::take(&mut out);
+    {
         let mut em = Emitter { axis: Axis::of(w.start, w.end), out: &mut out };
         for o in w.openings.iter().filter(|o| open(o)) {
             if let Some(p) = resolve_frame(o) {
@@ -1062,7 +1071,8 @@ pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
             }
         }
     }
-    for w in walls {
+    let second = std::mem::take(&mut out);
+    {
         let mut em = Emitter { axis: Axis::of(w.start, w.end), out: &mut out };
         for o in w.openings.iter().filter(|o| open(o)) {
             let Some(TypeIn { kind: KindIn::Window(wt), .. }) = &o.ty else { continue };
@@ -1093,7 +1103,7 @@ pub fn opening_meshes(walls: &[WallIn], detail: Detail) -> Vec<BoxMesh> {
             em.axis_box(from, to, o.z_top, o.z_top + h, n_outer, n_outer + d, Part::Shading);
         }
     }
-    out
+    [first, second, out]
 }
 
 // ── Flache Kodierung ─────────────────────────────────────────────────────────
@@ -1270,10 +1280,21 @@ fn decode(buf: &[f64]) -> Option<(Vec<WallIn>, Detail)> {
 /// Flache Bindung (Kodierung s. oben); nie ein Panic.
 pub fn opening_meshes_flat(buf: &[f64]) -> Vec<f64> {
     let Some((walls, detail)) = decode(buf) else { return vec![0.0] };
-    let meshes = opening_meshes(&walls, detail);
+    flat_out(&opening_meshes(&walls, detail))
+}
+
+/// Wie [`opening_meshes_flat`], aber je Durchgang ([`wall_mesh_passes`]) ein eigener Puffer, über
+/// alle Wände der Eingabe gereiht ([58]: die Eingabe ist dort eine einzelne Wand).
+pub fn opening_mesh_passes_flat(buf: &[f64]) -> [Vec<f64>; 3] {
+    let Some((walls, detail)) = decode(buf) else { return [vec![0.0], vec![0.0], vec![0.0]] };
+    let per: Vec<[Vec<BoxMesh>; 3]> = walls.iter().map(|w| wall_mesh_passes(w, detail)).collect();
+    [0, 1, 2].map(|k| flat_out(&per.iter().flat_map(|p| p[k].iter().cloned()).collect::<Vec<_>>()))
+}
+
+fn flat_out(meshes: &[BoxMesh]) -> Vec<f64> {
     let mut out = Vec::with_capacity(1 + meshes.len() * 25);
     out.push(meshes.len() as f64);
-    for m in &meshes {
+    for m in meshes {
         out.push(m.part as i32 as f64);
         out.extend_from_slice(&m.positions);
     }
