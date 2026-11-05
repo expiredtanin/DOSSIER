@@ -634,7 +634,10 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
             None => vec![win],
         };
         let first_piece = out.len();
+        // [95] Taschen (Achsmass; bei Bogenwänden = Bogenlänge, je Sehnen-Teilwand abgebildet).
+        let pocket_cuts = if pockets { wall_pocket_cuts(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice())) } else { Vec::new() };
         for win in &wins {
+        let win_first = out.len();
         let (dx, dy) = (win.end.x - win.start.x, win.end.y - win.start.y);
         for mut piece in wall_bands::wall_bands(win, ctx) {
             let Some(b) = bands.get(piece.band) else { continue };
@@ -666,9 +669,19 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
                 },
             });
         }
+        if let (Some(a), false) = (arc, pocket_cuts.is_empty()) {
+            // Sehne pa→pb über die Bogenlänge [sa, sb]: Achsmass linear auf die Sehne abgebildet.
+            let (sa, sb) = (a.local(win.start).0, a.local(win.end).0);
+            let chord = hypot2(dx, dy);
+            if (sb - sa).abs() > 1e-9 {
+                let m = |u: f64| (u - sa) / (sb - sa) * chord;
+                let cuts: Vec<[f64; 6]> = pocket_cuts.iter().map(|c| [m(c[0]), m(c[1]), c[2], c[3], c[4], c[5]]).collect();
+                cut_wall_pockets([win.start.x, win.start.y], [dx, dy], &cuts, &mut out, win_first);
+            }
         }
-        if pockets && arc.is_none() {
-            cut_wall_pockets(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), &mut out, first_piece);
+        }
+        if arc.is_none() && !pocket_cuts.is_empty() {
+            cut_wall_pockets([wall.start.x, wall.start.y], [wall.end.x - wall.start.x, wall.end.y - wall.start.y], &pocket_cuts, &mut out, first_piece);
         }
     }
     let _ = hypot2;
@@ -699,37 +712,36 @@ pub(crate) fn wall_pocket_cuts(p: &Project, w: &Wall, openings: &[&Opening]) -> 
     out
 }
 
-/// [95] Taschen aus den Wandkörpern `pieces[from..]` einer geraden Wand ausschneiden: ein Körper, der
-/// quer in die Tasche reicht, wird quer geteilt (aussen unverändert); der mittlere Teil entlang der
-/// Achse um die Tasche geteilt, über ihr (und unter ihr bei Brüstung) bleibt Wand. Körper mit schräger
-/// Oberkante (`top_drop`) bleiben ganz.
-fn cut_wall_pockets(p: &Project, wall: &Wall, openings: &[&Opening], pieces: &mut Vec<RWall>, from: usize) {
-    let cuts = wall_pocket_cuts(p, wall, openings);
+/// [95] Taschen `cuts` (`[u0, u1, n0, n1, z0, z1]` im Rahmen `origin` + Achsrichtung `dir`: gerade Wand
+/// oder Sehnen-Teilwand einer Bogenwand) aus den Wandkörpern `pieces[from..]` ausschneiden: ein Körper,
+/// der quer in die Tasche reicht, wird quer geteilt (aussen unverändert); der mittlere Teil entlang der
+/// Achse um die Tasche geteilt, über ihr (und unter ihr bei Brüstung) bleibt Wand. Schräge Oberkante
+/// (`top_plane`/`top_drop`): die Teile behalten die Dachebene, Höhe und Absenkung neu je Teil.
+fn cut_wall_pockets(origin: [f64; 2], dir: [f64; 2], cuts: &[[f64; 6]], pieces: &mut Vec<RWall>, from: usize) {
     if cuts.is_empty() {
         return;
     }
-    let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
-    let l = hypot2(dx, dy);
+    let l = hypot2(dir[0], dir[1]);
     if !(l > 1e-9) {
         return;
     }
-    let (ux, uy) = (dx / l, dy / l);
+    let (ux, uy) = (dir[0] / l, dir[1] / l);
     let (nx, ny) = (-uy, ux);
     let eps = 1e-6;
-    for c in cuts {
+    for &c in cuts {
         let [cu0, cu1, cn0, cn1, cz0, cz1] = c;
         let tail = pieces.split_off(from);
         for w in tail {
             let (pdx, pdy) = (w.end[0] - w.start[0], w.end[1] - w.start[1]);
             let len = hypot2(pdx, pdy);
-            let rel = [w.start[0] - wall.start.x, w.start[1] - wall.start.y];
+            let rel = [w.start[0] - origin[0], w.start[1] - origin[1]];
             let (ps, pn) = (rel[0] * ux + rel[1] * uy, rel[0] * nx + rel[1] * ny);
             // Nur zur Wand parallele Körper (Laufrichtung wie die Wand).
             let parallel = len > 1e-9 && (pdx * ux + pdy * uy) > len * (1.0 - 1e-9);
             let (a, b) = (pn - w.thickness / 2.0, pn + w.thickness / 2.0);
             let (h0, h1) = (cu0 - ps, cu1 - ps);
             let zt = w.base_elevation + w.height;
-            let hit = parallel && w.top_drop.is_none() && a < cn1 - eps && b > cn0 + eps && h0 < len - eps && h1 > eps && w.base_elevation < cz1 - eps && zt > cz0 + eps;
+            let hit = parallel && a < cn1 - eps && b > cn0 + eps && h0 < len - eps && h1 > eps && w.base_elevation < cz1 - eps && zt > cz0 + eps;
             if !hit {
                 pieces.push(w);
                 continue;
@@ -790,11 +802,33 @@ fn cut_wall_pockets(p: &Project, wall: &Wall, openings: &[&Opening], pieces: &mu
                 Some(q)
             };
             let z_b = w.base_elevation;
-            for q in [part(0.0, k0, z_b, zt), part(k0, k1, cz1, zt), part(k0, k1, z_b, cz0), part(k1, len, z_b, zt)].into_iter().flatten() {
-                pieces.push(q);
+            let below = part(k0, k1, z_b, cz0).map(|mut q| {
+                // Unter der Tasche (Brüstung): waagrecht auf Taschen-UK.
+                q.top_plane = None;
+                q.top_drop = None;
+                q
+            });
+            for mut q in [part(0.0, k0, z_b, zt), part(k0, k1, cz1, zt), below, part(k1, len, z_b, zt)].into_iter().flatten() {
+                refit_sloped_top(&mut q);
+                if q.height > eps {
+                    pieces.push(q);
+                }
             }
         }
     }
+}
+
+/// Teilkörper mit Dachebene (`top_plane`): Höhe = höchster Eckwert (höchstens die bisherige), Absenkung
+/// der Mittellinie an Anfang/Ende (`top_drop`) neu.
+fn refit_sloped_top(q: &mut RWall) {
+    let Some(c) = q.top_plane else { return };
+    let Some(fp) = wall_footprint(q) else { return };
+    let at = |x: f64, y: f64| c[0] + c[1] * (x - q.start[0]) + c[2] * (y - q.start[1]);
+    let zt = q.base_elevation + q.height;
+    let top = fp.iter().map(|p| at(p[0], p[1])).fold(f64::NEG_INFINITY, f64::max).min(zt);
+    q.height = top - q.base_elevation;
+    let d = [top - at(q.start[0], q.start[1]), top - at(q.end[0], q.end[1])];
+    q.top_drop = (d[0] > wall_bands::EPS || d[1] > wall_bands::EPS).then_some(d);
 }
 
 /// Grundriss-Ecken eines Wandkörpers an seinen Schnittlinien: Anfang +n, Ende +n, Ende −n, Anfang −n
@@ -2593,6 +2627,35 @@ mod tests {
             }
             let ws = emit_walls(&pocket_project(DoorTypeKind::Tasche, None, 2.0), layered).unwrap();
             assert!((full - vol(&ws) - 2.0 * 0.5 * 0.07 * 2.0).abs() < 1e-9, "zweiflügelig {layered}");
+        }
+    }
+
+    /// [95][T2] Tasche in der Bogenwand (entlang der Sehnen-Teilkörper, Länge = Achsmass) und unter
+    /// schräger Oberkante (Dachanschluss, `top_plane`/`top_drop`): Volumen −Hohlraum wie gerade.
+    #[test]
+    fn tasche_in_bogenwand_und_unter_dach() {
+        use crate::plan::walls::tests::{pocket_project_with, POCKET_BULGE};
+        let vol = |ws: &[RWall]| -> f64 {
+            ws.iter().map(|w| wall_piece_volume(w) - w.holes.as_deref().unwrap_or(&[]).iter().map(|h| (h.to - h.from) * (h.z_top - h.z_bottom) * w.thickness).sum::<f64>()).sum()
+        };
+        for (bulge, roof, tol) in [(Some(POCKET_BULGE), false, 2e-4), (None, true, 1e-9)] {
+            for layered in [false, true] {
+                for (hinge, leaves, k) in [(None, 1.0, 0.95), (Some(OpeningHinge::End), 1.0, 0.95), (None, 2.0, 1.0)] {
+                    let full = emit_walls(&pocket_project_with(DoorTypeKind::Schiebe, hinge, leaves, bulge, roof), layered).unwrap();
+                    if roof {
+                        assert!(full.iter().any(|w| w.top_plane.is_some() && w.top_drop.is_some()), "schräge Oberkante");
+                    }
+                    let ws = emit_walls(&pocket_project_with(DoorTypeKind::Tasche, hinge, leaves, bulge, roof), layered).unwrap();
+                    let d = vol(&full) - vol(&ws);
+                    assert!((d - k * 0.07 * 2.0).abs() < tol, "{bulge:?} {roof} {layered} {hinge:?} {leaves}: {d}");
+                    // Unter dem Dach: Oberkante der Teilkörper weiter auf der Dachebene (nicht über die Ursprungshöhe).
+                    for w in ws.iter().filter(|w| w.top_plane.is_some()) {
+                        let fp = wall_footprint(w).unwrap();
+                        let top = fp.iter().map(|q| wall_top_at(w, *q)).fold(f64::MIN, f64::max);
+                        assert!(top <= w.base_elevation + w.height + 1e-9 && top > 2.0, "{w:?}");
+                    }
+                }
+            }
         }
     }
 }
