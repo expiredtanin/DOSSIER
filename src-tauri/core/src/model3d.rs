@@ -2066,7 +2066,8 @@ fn drawing_color(
 }
 
 /// Packt die darstellbaren Zeichnungen (Linie, Polylinie, Rechteck) in Chargen für `drawing2d_3d`.
-fn for_each_drawing_chunk(p: &Project, with_color: bool, mut f: impl FnMut(&[f64], &[&Drawing2D])) {
+/// `lift`: zusätzliche Höhe je Geschoss-id (Explosionsaxonometrie [65], `explode3d.rs`; leer = keine).
+fn for_each_drawing_chunk(p: &Project, with_color: bool, lift: &HashMap<String, f64>, mut f: impl FnMut(&[f64], &[&Drawing2D])) {
     if p.drawings2d.is_empty() {
         return;
     }
@@ -2095,7 +2096,7 @@ fn for_each_drawing_chunk(p: &Project, with_color: bool, mut f: impl FnMut(&[f64
             _ => continue,
         };
         let closed = matches!(&d.geom, Drawing2DGeom::Polyline { closed: true, .. });
-        let elev = *elevations.entry(d.level_id.as_str()).or_insert_with(|| p.floor(&d.level_id).map_or(0.0, |l| l.base_elevation.unwrap_or(0.0)) + DRAWING_LINE_ELEVATION_EPS);
+        let elev = *elevations.entry(d.level_id.as_str()).or_insert_with(|| p.floor(&d.level_id).map_or(0.0, |l| l.base_elevation.unwrap_or(0.0)) + DRAWING_LINE_ELEVATION_EPS + lift.get(d.level_id.as_str()).copied().unwrap_or(0.0));
         let rgb = if with_color { drawing_color(d, &by_category, &by_line_style) } else { [0.0; 3] };
         for (kind, pts) in parts {
             let need = 7 + 2 * pts.len();
@@ -2114,8 +2115,13 @@ fn for_each_drawing_chunk(p: &Project, with_color: bool, mut f: impl FnMut(&[f64
 
 /// Boden-Spuren aller Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]` (`emitDrawingLineVerts`).
 pub fn drawing_line_verts(p: &Project) -> Vec<f32> {
+    drawing_line_verts_lifted(p, &HashMap::new())
+}
+
+/// Wie [`drawing_line_verts`], jede Spur um `lift[level_id]` angehoben (Explosion [65]).
+pub fn drawing_line_verts_lifted(p: &Project, lift: &HashMap<String, f64>) -> Vec<f32> {
     let mut out = Vec::new();
-    for_each_drawing_chunk(p, true, |buf, _| out.extend(crate::drawing2d_3d::line_verts(buf)));
+    for_each_drawing_chunk(p, true, lift, |buf, _| out.extend(crate::drawing2d_3d::line_verts(buf)));
     out
 }
 
@@ -2129,9 +2135,9 @@ pub struct PickDrawingSeg {
     pub drawing_id: String,
 }
 
-fn pick_drawing_segs(p: &Project) -> Vec<PickDrawingSeg> {
+pub(crate) fn pick_drawing_segs(p: &Project, lift: &HashMap<String, f64>) -> Vec<PickDrawingSeg> {
     let mut out = Vec::new();
-    for_each_drawing_chunk(p, false, |buf, drawings| {
+    for_each_drawing_chunk(p, false, lift, |buf, drawings| {
         let f = crate::drawing2d_3d::pick_segs(buf, DRAWING_PICK_TOLERANCE);
         for c in f.chunks_exact(6) {
             out.push(PickDrawingSeg { start: [c[0], c[1]], end: [c[2], c[3]], base_elevation: c[4], drawing_id: drawings[c[5] as usize].id.clone() });
@@ -2291,7 +2297,7 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         stairs,
         roofs,
         context_meshes,
-        drawings: pick_drawing_segs(p),
+        drawings: pick_drawing_segs(p, &HashMap::new()),
     })
 }
 

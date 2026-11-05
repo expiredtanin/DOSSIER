@@ -12,6 +12,7 @@ import {
   grip3dEditFields,
   findCoincidentVertices,
   findMoveCoincidentVertices,
+  explodeGripDz,
   type Grip3dEditState,
 } from "./grip3dHud";
 
@@ -309,5 +310,20 @@ describe("findMoveCoincidentVertices", () => {
 
   it("leeres Ergebnis für ein unbekanntes Ziel", () => {
     expect(findMoveCoincidentVertices(sampleProject, {})).toEqual([]);
+  });
+});
+
+describe("explodeGripDz ([65])", () => {
+  const w = sampleProject.walls[0];
+  const offsets = { [w.floorId]: 2.5 };
+  it("Versatz über das Geschoss des Ziels", () => {
+    expect(explodeGripDz(sampleProject, offsets, { wallId: w.id })).toBe(2.5);
+    const c = (sampleProject.ceilings ?? []).find((x) => x.floorId === w.floorId);
+    if (c) expect(explodeGripDz(sampleProject, offsets, { ceilingId: c.id })).toBe(2.5);
+  });
+  it("ohne Explosion, unbekannt oder Zeichnung: 0", () => {
+    expect(explodeGripDz(sampleProject, {}, { wallId: w.id })).toBe(0);
+    expect(explodeGripDz(sampleProject, offsets, { wallId: "fehlt" })).toBe(0);
+    expect(explodeGripDz(sampleProject, offsets, { drawingId: "d" })).toBe(0);
   });
 });

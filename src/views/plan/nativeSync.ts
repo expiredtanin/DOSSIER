@@ -82,18 +82,25 @@ export function pushNativeScene(plan: Plan): void {
  * Öffnungs-Teilquadern plus Deckenplatten — ans native 3D-Fenster schieben.
  * No-op ohne Tauri.
  */
-export function pushNativeWalls(project: Project): void {
+export function pushNativeWalls(
+  project: Project,
+  /** Explosionsabstand ([65], 0 = aus): dasselbe Modell wie im WASM-Viewport (`projectToModel3d`). */
+  explode = lastExplode,
+): void {
   if (!isTauri()) return;
   lastProject = project;
+  lastExplode = explode;
   clearTimeout(wallsTimer);
   wallsTimer = setTimeout(async () => {
     if (!(await isNativeEnabled())) return;
-    void invokeNative("push_native_walls", { walls: projectToModel3d(project, { voids: true }) });
+    void invokeNative("push_native_walls", { walls: projectToModel3d(project, { voids: true, explode }) });
   }, DEBOUNCE_MS);
 }
 
 /** Letztes an {@link pushNativeWalls} übergebenes Projekt (für den Re-Push unten). */
 let lastProject: Project | null = null;
+/** Letzter Explosionsabstand (Re-Push nach truck-Ergebnis behält ihn). */
+let lastExplode = 0;
 
 // truck-Extrusionen (s. toWalls3d.ts emitExtrudedSolids) laden WASM asynchron;
 // ohne diesen Re-Push nach Abschluss bliebe eine fertige Extrusion im nativen

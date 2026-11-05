@@ -262,10 +262,10 @@ pub fn doc_query_root(h: u32, name: &str, text: &str) -> String {
 }
 
 /// Boden-Spuren aller 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]` (Float32);
-/// leer bei Fehler oder ohne Zeichnungen.
+/// leer bei Fehler oder ohne Zeichnungen. `explode`: Explosionsabstand ([65], ≤ 0/NaN = aus).
 #[wasm_bindgen]
-pub fn doc_drawing_line_verts(h: u32) -> Vec<f32> {
-    with_doc(h, |d| d.project().ok().map(|p| crate::model3d::drawing_line_verts(&p))).flatten().unwrap_or_default()
+pub fn doc_drawing_line_verts(h: u32, explode: f64) -> Vec<f32> {
+    with_doc(h, |d| d.project().ok().map(|p| crate::explode3d::drawing_line_verts(&p, explode))).flatten().unwrap_or_default()
 }
 
 /// Ansichtsschraffur auf den Flächen für render3d (`surface_pattern3d`, je Linie `ax ay az bx by bz r g b

@@ -67,8 +67,21 @@ export type { RVec2, RRgb, RWall, RSlab, RModel3d };
  * Kataster-DXF kann Millionen Segmente liefern, als JSON-Mesh sprengte das Speicher und
  * String-Länge). Rechnet der Kern (`model3d.rs`, Chargen).
  */
-export function emitDrawingLineVerts(project: Project): Float32Array {
-  return documentFor(project).drawingLineVerts();
+export function emitDrawingLineVerts(
+  project: Project,
+  /** Explosionsabstand ([65]): Spuren heben sich mit ihrem Geschoss; 0 = aus. */
+  explode = 0,
+): Float32Array {
+  return documentFor(project).drawingLineVerts(explodeGap(explode));
+}
+
+/**
+ * Explosionsaxonometrie ([65]): Versatz (m) je Geschoss-id (Kern `explode3d.rs::floor_offsets`),
+ * für 3D-Griffe und Arbeitsebene. Abstand ≤ 0 → leer (= nirgends Versatz).
+ */
+export function explodeFloorOffsets(project: Project, explode: number): Record<string, number> {
+  const gap = explodeGap(explode);
+  return gap === 0 ? {} : documentFor(project).query<Record<string, number>>("explodeOffsets", [gap]);
 }
 
 /**
@@ -139,8 +152,8 @@ export interface Model3dOptions {
   voids?: boolean;
   /**
    * Explosionsaxonometrie ([65]): Abstand (m) zwischen den Geschossen; 0/fehlt = aus. Jedes
-   * Geschoss hebt sich um Index × Abstand (Kern `explode3d.rs`); Kontext bleibt stehen.
-   * Mit Explosion keine Abzugskörper (die truck-Ergebnisse lägen am alten Ort).
+   * Geschoss hebt sich um Index × Abstand (Kern `explode3d.rs`); Kontext bleibt stehen,
+   * Abzugskörper wandern mit dem getroffenen Bauteil.
    */
   explode?: number;
 }
@@ -151,7 +164,7 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   const detail = opts.detail ?? "fein";
   // Mit `voids` liefert der Kern zusätzlich die getroffenen Wände/Decken als truck-Spezifikationen.
   const explode = explodeGap(opts.explode);
-  const voids = !!opts.voids && typeof window !== "undefined" && explode === 0;
+  const voids = !!opts.voids && typeof window !== "undefined";
   const parts = documentFor(project).query<Model3dParts>(
     "model3dParts",
     [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, explode],

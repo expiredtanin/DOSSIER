@@ -91,6 +91,7 @@ export type QueryName =
   | "scheduleRows"
   | "scheduleCsv"
   | "pickGeometry"
+  | "explodeOffsets"
   | "model3dParts"
   | "projectSolidSpecs"
   | "planDomains"
@@ -219,8 +220,8 @@ export class ProjectDocument {
   }
 
   /** Boden-Spuren der 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]`. */
-  drawingLineVerts(): Float32Array {
-    return this.handle ? core().doc_drawing_line_verts(this.handle) : new Float32Array(0);
+  drawingLineVerts(explode = 0): Float32Array {
+    return this.handle ? core().doc_drawing_line_verts(this.handle, explode) : new Float32Array(0);
   }
 
   /** Ansichtsschraffur auf den Flächen (Wände, Decken, Dächer) für render3d `set_pattern_lines`. */

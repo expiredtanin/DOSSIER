@@ -246,7 +246,7 @@ export function useWasm3dRenderer(
     // Fehler hier das bereits gesetzte Modell nicht mit wegreisst.
     if (typeof r.set_drawing_lines === "function") {
       try {
-        r.set_drawing_lines(emitDrawingLineVerts(project));
+        r.set_drawing_lines(emitDrawingLineVerts(project, explode));
       } catch (e) {
         console.warn("render3d set_drawing_lines fehlgeschlagen:", e);
       }

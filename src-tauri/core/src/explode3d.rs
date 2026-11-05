@@ -2,7 +2,8 @@
 //!
 //! Jedes Geschoss (nach `baseElevation` sortiert, Index ab dem tiefsten) wird um `Index × Abstand`
 //! angehoben; jedes Bauteil folgt seinem Geschoss (`floorId`), Öffnungen ihrem Wirt (Wand, Dach,
-//! Decke). Kontext (Gelände, Importe) und 2D-Boden-Spuren bleiben stehen. Nur das 3D-Modell, die
+//! Decke), 2D-Boden-Spuren ihrem Geschoss (`levelId`), Abzugskörper wirken am ursprünglichen Ort
+//! und wandern mit dem Bauteil. Kontext (Gelände, Importe) bleibt stehen. Nur das 3D-Modell, die
 //! Pick-Geometrie und die Hervorhebung verschieben sich — Plan, Schnitt und Ansicht nie.
 
 use crate::model::{DrawingLevelKind, Project};
@@ -166,10 +167,25 @@ pub fn floor_offsets(p: &Project, gap: f64) -> HashMap<String, f64> {
     Explode::new(p, gap).map(|ex| ex.by_floor.iter().map(|(k, v)| (k.to_string(), *v)).collect()).unwrap_or_default()
 }
 
-/// Pick-Geometrie passend zu [`parts`]; 2D-Spuren und Kontext bleiben stehen wie im Modell.
+/// Abzugskörper ([`crate::solid_specs::void_cuts`]) für die Teile aus [`parts`] mit demselben Abstand.
+pub fn void_cuts(p: &Project, parts: &Parts, gap: f64) -> crate::solid_specs::VoidCuts {
+    let ex = Explode::new(p, gap);
+    let of = |id: &str| ex.as_ref().map_or(0.0, |e| e.of(id));
+    let wall_dz = |i: usize| of(&parts.walls[i].wall_id);
+    let slab_dz = |i: usize| of(&parts.slabs[i].ceiling_id);
+    crate::solid_specs::void_cuts_lifted(p, &parts.walls, &parts.slabs, &wall_dz, &slab_dz)
+}
+
+/// Boden-Spuren der 2D-Zeichnungen, je Geschoss angehoben (`gap` ≤ 0: wie `drawing_line_verts`).
+pub fn drawing_line_verts(p: &Project, gap: f64) -> Vec<f32> {
+    model3d::drawing_line_verts_lifted(p, &floor_offsets(p, gap))
+}
+
+/// Pick-Geometrie passend zu [`parts`]; Kontext bleibt stehen wie im Modell.
 pub fn pick_geometry(p: &Project, gap: f64) -> Result<PickGeometry, String> {
     let mut g = model3d::pick_geometry(p)?;
     let Some(ex) = Explode::new(p, gap) else { return Ok(g) };
+    g.drawings = model3d::pick_drawing_segs(p, &floor_offsets(p, gap));
     for w in &mut g.walls {
         shift_wall(w, ex.of(&w.wall_id));
     }
@@ -220,9 +236,51 @@ mod tests {
             ],
             "context": [
                 {"type": "importedMesh", "id": "m", "name": "M", "positions": [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], "indices": [0.0, 1.0, 2.0]}
+            ],
+            "drawings2d": [
+                {"id": "d2", "type": "drawing2d", "levelId": "OG", "categoryCode": "", "geom": {"shape": "line", "a": {"x": 0, "y": 1}, "b": {"x": 4, "y": 1}}}
+            ],
+            "extrudedSolids": [
+                {"id": "v1", "type": "extrudedSolid", "levelId": "EG", "operation": "subtract", "points": [{"x": 1, "y": -1}, {"x": 2, "y": -1}, {"x": 2, "y": 1}, {"x": 1, "y": 1}], "height": 10.0}
             ]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn abzugskoerper_wandern_mit_dem_geschoss() {
+        let p = project();
+        let parts = parts(&p, true, 2.0, false, 3.0).unwrap();
+        let cuts = void_cuts(&p, &parts, 3.0);
+        // Körper (EG, 0–10 m) trifft beide Wände; die OG-Wand liegt 3 m höher, ihr Körper ebenso.
+        let z0 = |i: usize| -> f64 {
+            let (_, spec) = cuts.walls.iter().find(|(j, _)| *j == i).expect("Wand getroffen");
+            spec["b"]["z0"].as_f64().unwrap()
+        };
+        let idx = |id: &str| parts.walls.iter().position(|w| w.wall_id == id).unwrap();
+        assert!((z0(idx("w1")) - 0.0).abs() < 1e-9);
+        assert!((z0(idx("w2")) - 3.0).abs() < 1e-9);
+        let base = model3d::parts(&p, true, 2.0, false).unwrap();
+        let plain = crate::solid_specs::void_cuts(&p, &base.walls, &base.slabs);
+        assert_eq!(plain.walls.len(), cuts.walls.len());
+        assert_eq!(serde_json::to_string(&void_cuts(&p, &base, 0.0)).unwrap(), serde_json::to_string(&plain).unwrap());
+    }
+
+    #[test]
+    fn boden_spuren_folgen_dem_geschoss() {
+        let p = project();
+        let a = drawing_line_verts(&p, 0.0);
+        let b = drawing_line_verts(&p, 2.0);
+        assert_eq!(a, model3d::drawing_line_verts(&p));
+        assert_eq!(a.len(), b.len());
+        assert!(!a.is_empty());
+        // Welt (x, Höhe, y): Höhe = Index 1.
+        for (x, y) in a.chunks_exact(6).zip(b.chunks_exact(6)) {
+            assert!((y[1] - x[1] - 2.0).abs() < 1e-5);
+        }
+        let pa = model3d::pick_geometry(&p).unwrap();
+        let pb = pick_geometry(&p, 2.0).unwrap();
+        assert!((pb.drawings[0].base_elevation - pa.drawings[0].base_elevation - 2.0).abs() < 1e-9);
     }
 
     fn min_z(meshes: &[RMesh]) -> f64 {
