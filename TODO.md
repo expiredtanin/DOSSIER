@@ -2008,7 +2008,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ◐ **[81] Automatische Aussenbemassung.** (27.10.) Befehl `autodim` (Kürzel `ab`): je Seite Öffnungs-,
   Vor-/Rücksprung- und Gesamtkette. 4.11.: Massstab aus der Ansicht (Befehls-Kontext `scaleDenominator`, Test `autodim_im_massstab_der_ansicht`). Offen: schiefe Wände.
   (30.10.) Ketten assoziativ [38] (Ecken/Leibungen). Nicht mittige Wände
-  (Referenzlinie links/rechts, -versatz): die Kette misst die echte Fläche (`WallIn.shift`). Offen: Bogenwände als Sehne.
+  (Referenzlinie links/rechts, -versatz): die Kette misst die echte Fläche (`WallIn.shift`).
+  5.11.: Schiefe Fassaden: Umriss-Kanten ausserhalb der vier Hauptrichtungen, nach Normale gruppiert (kollineare/parallele
+  Stücke = eine Gruppe), bekommen Öffnungs- (Rohbau-Leibungen), Vor-/Rücksprung- und Gesamtkette parallel zur Fassade
+  (ids `autodim-<Geschoss>-oblique<n>-<Kette>`, assoziativ). Schiefe Eckstösse im Umriss auf Gehrung geschnitten (vorher
+  t/2-Spitze); freistehende schiefe Mauer (Stützmauer) nur auf der vom Gebäude abgewandten Seite. Bogenwände: Bogenmass-Kette
+  bleibt, dazu die Sehne (Gesamtkette vor dem Bogenscheitel), wenn sie schief liegt; achsparallele Sehnen decken die
+  Seitenketten. Radius nicht automatisch (Radius-Bemassung von Hand). Achsparallele Ketten unverändert (Goldens Muster/EG/OG
+  gleich; komplex UG +2 Ketten an der Stützmauer, angesehen). Offen: schiefe Kette in Einbuchtung kann Geometrie kreuzen;
+  Seitenketten umfassen weiterhin alle Gebäude des Geschosses.
 - ✅ **[82] Grafische Legenden.** (30.10.) `Layout.legends` (`LayoutLegend`: Lage, Titel, Arten Schraffur/Material · Linientyp ·
   Kategorie, optional Handauswahl `manualKeys`). `analysis/legend.ts`: Einträge automatisch aus den Viewports (Material der
   Wand-/Decken-/Dach-Aufbauten und Stützen im gezeigten Geschoss, Schraffuren/Linientypen der Zeichnungen, sichtbare
