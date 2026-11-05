@@ -6,4 +6,4 @@ polygon 168
 rect 1
 svg 1
 text 3
-hash e772f37426bcacb7
+hash 4c4a94713688309d

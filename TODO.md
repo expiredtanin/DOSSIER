@@ -2366,6 +2366,20 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
     um ihren Rücksprung zurück (Loch je Seite geweitet), Zusatzstücke, die die Ebene queren, als Schnittfläche im
     Stil der Schicht. Geprüft: Rust-Test (Fläche), CLI-Schnitt durch die Leibungen angesehen (Linux). Offen:
     schräg zur Wand stehende Ebenen ohne Rücksprung, Formöffnungen (Rechteck-Loch).
+  - (5.11.) **Formöffnungen [G3] mit Schichteinzug** (Bug bestätigt: über dem Kämpfer blieb im 3D ein Spalt
+    zwischen geweitetem Rechteck-Loch und Füllkörper, Zusatzstücke liefen als Rechteck am Sturz). 3D: Füllkörper je
+    Schicht zwischen geweitetem Loch und dem um den Rücksprung versetzten Umriss (`opening_shape::outset_sides`,
+    je Seite elliptisch nach der Kantennormalen, gleiches Mass = Parallelversatz; `layer_fill_quads`);
+    Zusatzstücke (Leibung, überdämmt) als Ring entlang des Umrisses, je Kante nach ihrer Seite (`edge_side`),
+    statt Rechteck-Stücken in `wall_bands` (IFC zählt sie über `shaped_fill_count` zur Wand). Schnitt quer durch
+    den Bogen: Schichtkante und Zusatzstücke senkrecht zum Umriss (`ShapeJoin` in `plan/section.rs`). Golden
+    komplex: 3D (og-f1 Rundbogen mit Überdämmung/Innenputz-Leibung: 12 Rechteck-Stücke → 81 Ring-Stücke) und
+    Schnitt A (Leibungsputz am Bogen 5 mm tiefer, senkrecht gemessen) bewusst nachgeführt. Geprüft: Rust-Tests
+    (Abdeckung Innenputz rund um den Bogen, Schnitt nahe der Leibung), cargo test, tsc, vitest (Linux; 3D nicht
+    gerendert, nur Netz-Prüfung). Offen: Grundriss zeigt für geschnittene Formöffnungen weiter die Rechteck-Lücke
+    (SIA-Symbol, Leibungen an den Rechteck-Kanten; Rundfenster der Muster liegen über der Schnitthöhe); Schnitt
+    parallel zur Wand durch Formöffnungs-Leibungen (Rechteck-Loch); 3D ohne Schichten (`layeredWalls = false`)
+    zeigt am Bogen den Rücksprung, an den Leibungen nicht; nicht in der Tauri-App/Metal geprüft.
 - ◐ **[108] Schräge Wandanschlüsse exakt (T/L/X, ein- und mehrschichtig).** (30.10., Maintainer-Bug: schräger
   T-Stoss) Die Nah-Putz-Aussparung der Durchgangswand (`joins::SpanCutout`) ist jetzt ein Parallelogramm
   (`from/to` auf der Fläche, `from_b/to_b` auf der Rückgrat-Fläche) aus den echten Kern-Kanten des Abzweigs
