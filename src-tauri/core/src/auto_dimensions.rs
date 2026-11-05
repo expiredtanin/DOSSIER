@@ -4,8 +4,8 @@
 //!   2. Vor-/Rücksprünge — die Ecken der nach dieser Seite schauenden Aussenkanten (nur bei Stufung),
 //!   3. Gesamtmass.
 //! Grundlage ist die vereinigte Grundfläche der Wände des Geschosses (an verbundenen Enden um die
-//! halbe Dicke verlängert, damit Aussenecken voll sind). Nur achsparallele Kanten werden bemasst;
-//! schiefe Wände fehlen in den Ketten. Bogenwände ([T2]) gehen mit ihrem Kreisring in die Grundfläche
+//! halbe Dicke verlängert, schiefe Eckstösse auf Gehrung). Achsparallele Kanten gehören zu den vier Seiten;
+//! schiefe Fassaden bekommen eigene Ketten (`oblique_chains`). Bogenwände ([T2]) gehen mit ihrem Kreisring in die Grundfläche
 //! ein; liegt ihre gewölbte Seite aussen, bekommen sie eine eigene Bogenmass-Kette (Ecken und
 //! Leibungen auf dieser Fläche, gemessen entlang des Bogens). TS liefert Wände (Achse + Dicke) und Öffnungs-Leibungen,
 //! baut aus den Ketten die Bemassungs-Objekte.
