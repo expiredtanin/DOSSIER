@@ -716,7 +716,7 @@ pub struct Profile {
 fn profile_of(r: &crate::model::SiteRules, base: f64) -> Option<Profile> {
     let a = r.profile_angle.filter(|a| a.is_finite() && *a > 0.0 && *a < 90.0)?;
     let h = r.profile_height.filter(|h| h.is_finite()).unwrap_or(0.0);
-    Some(Profile { h0: base + h, slope: a.to_radians().tan() })
+    Some(Profile { h0: base + h, slope: crate::jsnum::tan(a.to_radians()) })
 }
 
 /// Zulässige Höhe (absolut) des Profils am Punkt p.
