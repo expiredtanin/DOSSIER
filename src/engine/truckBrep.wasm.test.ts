@@ -110,4 +110,22 @@ describe("trucksolid-WASM", () => {
     const far = JSON.parse(mod.solid_clash(JSON.stringify({ a: cub(0, 0, 0, 1, 1, 1), b: cub(5, 5, 5, 6, 6, 6) })));
     expect(far.colliding).toBe(false);
   }, 30_000);
+
+  it("[108] schräge Wand mit Gehrung minus Abzugskörper: Mesh über Manifold, STEP lehnt ohne Panic ab", () => {
+    // Wand Richtung 30°, 0.3 dick, Gehrung 30° am Anfang (Rückseite um d·cot 30° länger); Abzugskörper
+    // mit der Wand gedreht, 0.1 tief von der Vorderfläche, längs 0.05…1.05, z 1…2. truck-shapeops
+    // panikte hier („This wire is not simple") und riss den ganzen WASM-Aufruf mit.
+    const [d, h, l, e] = [0.3, 2.5, 4, 0.3 * Math.sqrt(3)];
+    const [c, s] = [Math.cos(Math.PI / 6), Math.sin(Math.PI / 6)];
+    const wall = { kind: "extrudePlane", points: [e, 0, l, 0, l, h, e, h], pointsBack: [0, 0, l, 0, l, h, 0, h], origin: [1.3, 0.7, 0], uAxis: [c, s, 0], vAxis: [0, 0, 1], depth: d };
+    const at = (u: number, t: number) => [1.3 + c * u + s * t, 0.7 + s * u - c * t];
+    const pts = [at(0.05, -0.5), at(1.05, -0.5), at(1.05, 0.1), at(0.05, 0.1)].flat();
+    const spec = { kind: "boolean", op: "difference", a: wall, b: { kind: "extrude", points: pts, height: 1, z0: 1 } };
+    // Abgezogen: ∫₀^0.1 (1.05 − max(0.05, e·(1 − t/d))) dt (Wandanfang wandert mit der Tiefe).
+    const cut = 0.1 * 1.05 - (e * 0.1 - (e * 0.01) / (2 * d));
+    expect(volume(build(spec))).toBeCloseTo((l - e / 2) * d * h - cut, 5);
+    expect(() => mod.export_step(JSON.stringify({ solids: [spec], fileName: "t.stp" }))).toThrow(/schrägen Stirnflächen/);
+    // Das Modul lebt weiter (kein Abbruch).
+    expect(volume(build(wall))).toBeCloseTo((l - e / 2) * d * h, 6);
+  }, 30_000);
 });

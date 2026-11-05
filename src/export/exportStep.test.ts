@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { sampleProject } from "../model/sampleProject";
 import { projectSolidSpecs, wallProfile } from "./exportStep";
+import type { SolidSpec } from "../engine/truckSolid";
 
 /** Flacher STEP-Puffer von truck (`[1, n, (np, ni, Positionen…, Indizes…)…]`) → Körper. */
 function stepBodies(f: Float64Array): Array<{ positions: number[]; indices: number[] }> {
@@ -83,7 +84,15 @@ describe("STEP-Export Ende-zu-Ende (truck-WASM)", () => {
     const vol = (spec: unknown) => JSON.parse(mod.solid_props(JSON.stringify({ spec }))).volume as number;
     const b0 = bools[0] as { a: unknown };
     expect(vol(bools[0])).toBeLessThan(vol(b0.a) - 1e-4);
-    const step: string = mod.export_step(JSON.stringify({ solids: bools, fileName: "void.stp" }));
+    // STEP: Booleans an Wänden mit schrägen Stirnflächen lehnt truck vorab ab (shapeops panikt dort, [108]) —
+    // `exportProjectStep` nimmt dann das Bauteil ohne Abzug; die übrigen schneidet truck als B-Rep.
+    const skew = (s: SolidSpec) => (s as { a: { pointsBack?: number[] } }).a.pointsBack !== undefined;
+    for (const s of bools.filter(skew)) {
+      expect(() => mod.export_step(JSON.stringify({ solids: [s], fileName: "" }))).toThrow(/schrägen Stirnflächen/);
+    }
+    const plain = bools.filter((s) => !skew(s));
+    expect(plain.length).toBeGreaterThan(0);
+    const step: string = mod.export_step(JSON.stringify({ solids: plain, fileName: "void.stp" }));
     expect(step.startsWith("ISO-10303-21;")).toBe(true);
   }, 60_000);
 

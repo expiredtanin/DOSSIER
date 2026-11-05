@@ -578,6 +578,11 @@ pub fn build_solid(spec: &SolidSpec) -> Res<Solid> {
         SolidSpec::Cylinder { cx, cy, z0, r, height } => cylinder(*cx, *cy, *z0, *r, *height),
         SolidSpec::Cone { cx, cy, z0, r, height } => cone(*cx, *cy, *z0, *r, *height),
         SolidSpec::Torus { center, major, minor } => torus(*center, *major, *minor),
+        // Schräge Stirnflächen: truck-shapeops panikt (im WASM ohne Rückfall) — vorab ablehnen; STEP
+        // exportiert dann das Bauteil ohne Abzug (`exportStep.ts`), das Mesh läuft über Manifold.
+        SolidSpec::Boolean { .. } if has_ruled_faces(spec) => {
+            Err("B-Rep-Boolean mit schrägen Stirnflächen nicht möglich (truck)".into())
+        }
         SolidSpec::Boolean { op, a, b } => bool_op(&build_solid(a)?, &build_solid(b)?, *op),
         SolidSpec::Mesh { .. } => Err("Mesh-Körper hat keine B-Rep-Beschreibung".into()),
         SolidSpec::Transform { m, solid } => {
@@ -626,17 +631,33 @@ pub fn mesh_of_solid(solid: &Solid, tol: f64) -> MeshOutput {
     mesh_of_polygon(&poly)
 }
 
-/// Spezifikation → Mesh. Scheitert eine B-Rep-Boolean (koinzidente Flächen), wird die
-/// Operation auf Mesh-Ebene (Manifold, `boolean.rs`) wiederholt — das Ergebnis ist dann ein
-/// reines Dreiecks-Mesh (ohne exakte B-Rep-Flächen; der STEP-Export dieses Körpers entfällt).
+/// Ob unter `spec` ein Boolean oder ein Mesh liegt (dann gibt es das Mesh nur über den Mesh-Weg).
+fn needs_mesh_path(spec: &SolidSpec) -> bool {
+    match spec {
+        SolidSpec::Boolean { .. } | SolidSpec::Mesh { .. } => true,
+        SolidSpec::Translate { solid, .. } | SolidSpec::Transform { solid, .. } => needs_mesh_path(solid),
+        _ => false,
+    }
+}
+
+/// Ob unter `spec` eine Wand mit schrägen Stirnflächen (`pointsBack`, Regelflächen) liegt: daran
+/// panikt truck-shapeops („This wire is not simple"), [108].
+fn has_ruled_faces(spec: &SolidSpec) -> bool {
+    match spec {
+        SolidSpec::ExtrudePlane { points_back, .. } => !points_back.is_empty(),
+        SolidSpec::Boolean { a, b, .. } => has_ruled_faces(a) || has_ruled_faces(b),
+        SolidSpec::Translate { solid, .. } | SolidSpec::Transform { solid, .. } => has_ruled_faces(solid),
+        _ => false,
+    }
+}
+
+/// Spezifikation → Mesh. Booleans laufen immer auf Mesh-Ebene (Manifold, `boolean.rs`, exakt) über
+/// die tessellierten Operanden, nie über truck-shapeops: dessen B-Rep-Booleans scheitern an
+/// koinzidenten Flächen und panicken bei manchen Lagen (schräge Stirnflächen, Körper neben der
+/// Wand, [108]) — ein Panic bricht im WASM den ganzen Aufruf ab, ohne Rückfall.
 pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
     match spec {
         SolidSpec::Boolean { op, a, b } => {
-            if let (Ok(sa), Ok(sb)) = (build_solid(a), build_solid(b)) {
-                if let Ok(s) = bool_op(&sa, &sb, *op) {
-                    return Ok(mesh_of_solid(&s, tol));
-                }
-            }
             let (ma, mb) = (solid_mesh_core(a, tol)?, solid_mesh_core(b, tol)?);
             let f64s = |v: &[f32]| v.iter().map(|x| *x as f64).collect::<Vec<f64>>();
             let op_name = match op {
@@ -657,7 +678,7 @@ pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
             positions: positions.iter().map(|x| *x as f32).collect(),
             indices: indices.clone(),
         }),
-        SolidSpec::Translate { v, solid } if build_solid(spec).is_err() => {
+        SolidSpec::Translate { v, solid } if needs_mesh_path(solid) => {
             // Unter einer Verschiebung liegt ein Mesh-Ergebnis (Boolean-Fallback, Mesh): Mesh verschieben.
             let mut m = solid_mesh_core(solid, tol)?;
             for p in m.positions.chunks_mut(3) {
@@ -667,7 +688,7 @@ pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
             }
             Ok(m)
         }
-        SolidSpec::Transform { m: mat, solid } if build_solid(spec).is_err() => {
+        SolidSpec::Transform { m: mat, solid } if needs_mesh_path(solid) => {
             let mut m = solid_mesh_core(solid, tol)?;
             for p in m.positions.chunks_mut(3) {
                 let (x, y, z) = (p[0] as f64, p[1] as f64, p[2] as f64);
@@ -994,6 +1015,69 @@ mod tests {
             "points": [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0], "pointsBack": [0.0, 0.0, 1.0, 0.0, 1.0, 1.0],
             "origin": [0.0, 0.0, 0.0], "uAxis": [1.0, 0.0, 0.0], "vAxis": [0.0, 0.0, 1.0], "depth": 0.3})).unwrap();
         assert!(build_solid(&bad).is_err());
+    }
+
+    /// [108] Schräge Wand (Richtung 30°, Gehrung 30°: Rückseite um d·cot 30° länger) minus Abzugskörper
+    /// (Quader, mit der Wand gedreht). Ergebnis + erwartetes Volumen. `u0`: Anfang des Körpers längs der
+    /// Wand, `ov`: wie tief er von der Vorderfläche her in die Wand reicht (0 = bündig anliegend).
+    pub(crate) fn schraege_wand_minus_abzug(u0: f64, ov: f64) -> (SolidSpec, f64) {
+        let (d, h, l) = (0.3, 2.5, 4.0);
+        let e = d * 3f64.sqrt();
+        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        let o = [1.3, 0.7];
+        let wall: SolidSpec = serde_json::from_value(serde_json::json!({"kind": "extrudePlane",
+            "points": [e, 0.0, l, 0.0, l, h, e, h], "pointsBack": [0.0, 0.0, l, 0.0, l, h, 0.0, h],
+            "origin": [o[0], o[1], 0.0], "uAxis": [c, s, 0.0], "vAxis": [0.0, 0.0, 1.0], "depth": d})).unwrap();
+        // Wand-Koordinaten (u längs, t in die Tiefe: Extrusionsrichtung u × v = (s, −c)) → Welt.
+        let at = |u: f64, t: f64| [o[0] + c * u + s * t, o[1] + s * u - c * t];
+        let pts: Vec<f64> = [(u0, -0.5), (u0 + 1.0, -0.5), (u0 + 1.0, ov), (u0, ov)].iter().flat_map(|&(u, t)| at(u, t)).collect();
+        let void: SolidSpec = serde_json::from_value(serde_json::json!({"kind": "extrude", "points": pts, "height": 1.0, "z0": 1.0})).unwrap();
+        // Abgezogene Fläche: ∫₀^ov (u0 + 1 − max(u0, e·(1 − t/d))) dt, Wand beginnt bei Tiefe t bei e·(1 − t/d).
+        let n = 20000;
+        let cut: f64 = (0..n)
+            .map(|i| {
+                let t = (i as f64 + 0.5) / n as f64 * ov.min(d);
+                (u0 + 1.0 - u0.max(e * (1.0 - t / d))).max(0.0) * ov.min(d) / n as f64
+            })
+            .sum();
+        let full = (l - e / 2.0) * d * h;
+        (SolidSpec::Boolean { op: BoolKind::Difference, a: Box::new(wall), b: Box::new(void) }, full - cut * 1.0)
+    }
+
+    /// truck-shapeops panikt bei solchen Körpern („This wire is not simple", in WASM ein Abbruch des ganzen
+    /// Aufrufs) — Booleans fürs Mesh laufen darum immer über Manifold, B-Rep-Booleans mit schrägen
+    /// Stirnflächen werden vorab abgelehnt.
+    #[test]
+    fn schraege_wand_minus_abzugskoerper() {
+        for u0 in [-0.5, 0.05, 0.3, 1.0] {
+            for ov in [0.0, 0.1, 0.25, 0.8] {
+                let (spec, expect) = schraege_wand_minus_abzug(u0, ov);
+                let m = solid_mesh_core(&spec, 0.01).unwrap();
+                assert!((volume(&m) - expect).abs() < 1e-5, "u0 {u0} ov {ov}: {} ≠ {expect}", volume(&m));
+                let props = solid_props_core(&spec, 0.01).unwrap();
+                assert!(props.closed, "u0 {u0} ov {ov}: offen");
+                // Verschoben (Explosion [65]) ebenso.
+                let moved = SolidSpec::Translate { v: [0.0, 0.0, 3.0], solid: Box::new(spec.clone()) };
+                assert!((volume(&solid_mesh_core(&moved, 0.01).unwrap()) - expect).abs() < 1e-5);
+                // B-Rep (STEP): Fehler statt Panic — TS exportiert dann das Bauteil ohne Abzug.
+                assert!(build_solid(&spec).is_err());
+                assert!(export_step_core(&[spec], &StepHeader::default()).is_err());
+            }
+        }
+    }
+
+    /// Auch rechtwinklige Wände lassen truck-shapeops bei manchen Lagen paniken (hier: Abzugskörper
+    /// neben der Wand); der Mesh-Weg rührt die B-Rep-Booleans nicht an.
+    #[test]
+    fn rechtwinklige_wand_minus_abzug_ohne_brep_boolean() {
+        let wall: SolidSpec = serde_json::from_value(serde_json::json!({"kind": "extrudePlane",
+            "points": [0.0, 0.0, 4.0, 0.0, 4.0, 2.5, 0.0, 2.5], "origin": [1.3, 0.7, 0.0], "uAxis": [1.0, 0.0, 0.0],
+            "vAxis": [0.0, 0.0, 1.0], "depth": 0.3})).unwrap();
+        let void: SolidSpec = serde_json::from_value(serde_json::json!({"kind": "extrude",
+            "points": [1.0, 0.75, 2.0, 0.75, 2.0, 1.35, 1.0, 1.35], "height": 1.0, "z0": 1.0})).unwrap();
+        let spec = SolidSpec::Boolean { op: BoolKind::Difference, a: Box::new(wall), b: Box::new(void) };
+        let m = solid_mesh_core(&spec, 0.01).unwrap();
+        assert!((volume(&m) - 4.0 * 0.3 * 2.5).abs() < 1e-6, "{}", volume(&m));
     }
 
     fn ring(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<f64> {
