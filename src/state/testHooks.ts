@@ -18,6 +18,10 @@ declare global {
       counts: () => { walls: number; openings: number; drawingLevels: number; coreJson: number };
       /** Endpunkte aller 2D-Linien des Projekts ([123] Transformations-Test). */
       lines: () => { a: { x: number; y: number }; b: { x: number; y: number } }[];
+      /** [137] Polylinien-Punkte der 2D-Elemente mit Id-Präfix (Präsentations-Massstabsbalken). */
+      polylines: (prefix: string) => { id: string; pts: { x: number; y: number }[] }[];
+      /** [137] Gewählte 2D-Elemente und Gruppen. */
+      selected: () => { drawings: string[]; groups: string[]; all: string };
     };
   }
 }
@@ -40,5 +44,8 @@ export function installTestHooks(): void {
     },
     lines: () =>
       getState().project.drawings2d.flatMap((d) => (d.geom.shape === "line" ? [{ a: d.geom.a, b: d.geom.b }] : [])),
+    polylines: (prefix) =>
+      getState().project.drawings2d.flatMap((d) => (d.id.startsWith(prefix) && d.geom.shape === "polyline" ? [{ id: d.id, pts: d.geom.pts }] : [])),
+    selected: () => ({ drawings: [...getState().selection.drawings], groups: [...getState().selection.groups], all: JSON.stringify(getState().selection) }),
   };
 }

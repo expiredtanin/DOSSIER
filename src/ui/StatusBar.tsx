@@ -8,6 +8,7 @@
 // Rein gesteuert (controlled): alle Werte kommen aus App (Modell + View-State),
 // keine eigene Logik. Bezeichner englisch, UI-Text/Kommentare deutsch.
 
+import { usePickHint } from "../state/pickHintStore";
 import { MODEL_UNITS, fmtDisplay, xToDisplay, yToDisplay, type DisplayUnits } from "../tools/displayUnits";
 import { useCursor } from "../state/cursorStore";
 import { useEffect, useRef, useState, memo } from "react";
@@ -394,10 +395,12 @@ export const StatusBar = memo(function StatusBar({
   snap,
   onSnapChange,
 }: StatusBarProps) {
+  // [137] Klick-Zyklus im Plan („2/3 Treffer — erneut klicken zum Wechseln") hat Vorrang vor dem Werkzeug-Hinweis.
+  const pickHint = usePickHint();
   return (
     <footer className="statusbar">
       {/* Links: Werkzeug-Hinweis. */}
-      <span className="sb-hint">{hint}</span>
+      <span className="sb-hint" data-testid="status-hint">{pickHint ?? hint}</span>
 
       {/* Rechts: abgeleiteter Wert-Cluster. Interaktive Kontrollen (Linien-
           Darstellung, Fang) zuerst, danach die reinen Anzeigewerte. */}

@@ -15,6 +15,8 @@ use std::collections::HashMap;
 /// beginnt so): Schattenflächen wählen den Sonnenstand, die Baurechtslinien (unsichtbare Bänder) das Baurecht.
 pub const SITE_PICK_SUN: &str = "@sunStudy";
 pub const SITE_PICK_RULES: &str = "@siteRules";
+/// [137] Schlagschatten der Ansicht (Ebenen-Schalter `shadows`).
+pub const SITE_PICK_VIEW_SHADOWS: &str = "@viewShadows";
 
 /// Füllfarbe der Schattenflächen.
 pub const SUN_SHADOW_FILL: &str = "#3a4a66";

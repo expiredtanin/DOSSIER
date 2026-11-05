@@ -25,7 +25,15 @@ pub fn grid_prims(p: &Project, level: &LevelSpec, bounds: [f64; 4], scale: f64) 
     for d in &p.drawings2d {
         let Drawing2DGeom::Grid { bubble_mm, bubbles, .. } = &d.geom else { continue };
         let Some(spec) = Spec::of(&d.geom) else { continue };
-        out.extend(one(&spec, &plane, level, bounds, scale, bubble_diameter(*bubble_mm, scale), bubbles.unwrap_or(GridBubbles::Both)));
+        // [137] Achsen, Blasen und Beschriftung tragen die Raster-Id: im Schnitt/in der Ansicht anwählbar.
+        let id = Some(d.id.clone());
+        out.extend(one(&spec, &plane, level, bounds, scale, bubble_diameter(*bubble_mm, scale), bubbles.unwrap_or(GridBubbles::Both)).into_iter().map(|mut q| {
+            match &mut q {
+                Primitive::Line { drawing_id, .. } | Primitive::DrawingCircle { drawing_id, .. } | Primitive::DrawingText { drawing_id, .. } => *drawing_id = id.clone(),
+                _ => {}
+            }
+            q
+        }));
     }
     out
 }
@@ -147,6 +155,8 @@ mod tests {
         assert!((lines[0].0 - 1.0).abs() < 1e-9 && (lines[1].0 - 5.0).abs() < 1e-9);
         assert!(lines[0].1 < 0.0 && lines[0].2 > 6.0);
         assert_eq!(texts(&prims), ["1", "2"]);
+        // [137] alles mit der Raster-Id (anwählbar)
+        assert!(prims.iter().all(|q| matches!(q, Primitive::Line { drawing_id: Some(i), .. } | Primitive::DrawingCircle { drawing_id: Some(i), .. } | Primitive::DrawingText { drawing_id: Some(i), .. } if i == "G")), "{prims:?}");
         // Schnitt längs der Achsen 1/2: nur die waagrechten Achsen A, B queren.
         let level = LevelSpec { kind: "section".into(), line: Some([v2(2.0, -1.0), v2(2.0, 9.0)]), ..Default::default() };
         let prims = grid_prims(&p, &level, [0.0, 0.0, 9.0, 6.0], 100.0);

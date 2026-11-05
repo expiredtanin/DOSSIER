@@ -56,6 +56,7 @@ import { endBusyAfterPaint } from "../../state/busyStore";
 import { EMPTY_SELECTION, single } from "../../state/selection";
 import type { Selection } from "../../state/selection";
 import { createCursorStore, useCursorValue, type CursorStore } from "../../state/cursorStore";
+import { cycleHint, plainCycleNext, selectionHas, type PlainCycle } from "./pickCycle";
 
 /**
  * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7) — Typ
@@ -382,6 +383,8 @@ export interface PlanViewProps {
   onSelect?: (selection: PlanSelection) => void;
   /** Kategorie-/Layer-Name eines Objekts für die Cmd/Strg+Klick-Liste ("Fläche · 01421"). */
   describePick?: (kind: PickKind, id: string) => string | undefined;
+  /** [137] Statusleisten-Hinweis zum Klick-Zyklus („2/3 Treffer — erneut klicken …"), `null` = keiner. */
+  onPickHint?: (hint: string | null) => void;
   /**
    * Alt+Klick (Schere/Segment löschen): meldet das nahe getroffene Drawing2D plus
    * den Modellpunkt des Klicks. Der Aufrufer (App) ermittelt daraus die nächst-
@@ -632,6 +635,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       onScale,
       onSelect,
       describePick,
+      onPickHint,
       onMarquee,
       onSegmentCut,
       onContextMenu,
@@ -1218,7 +1222,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // folgt dem Cursor beim Schweben weiter — wie beim Zeichnen (Klick → Punkt
   // setzen, Maus bewegt sich frei, Wert tippbar, nächster Klick/Enter bestätigt,
   // Escape verwirft zur ursprünglichen Position `origin` zurück).
-  const gripDrag = useRef<{ pointerId: number; index: number; origin: Vec2 } | null>(
+  const gripDrag = useRef<{ pointerId: number; index: number; origin: Vec2; startX?: number; startY?: number } | null>(
     null,
   );
   // Transiente Kanten-Griff-Zieh-Daten (linke Taste auf einem Dreieck-Anfasser).
@@ -1227,12 +1231,15 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // onEdgeMove. Dasselbe „bewaffnet"-Verhalten wie gripDrag oben: Loslassen
   // beendet die Bearbeitung NICHT, erst ein weiterer Klick/Enter (bestätigt)
   // oder Escape (verwirft zurück auf `edge.mid`).
-  const edgeDrag = useRef<{ pointerId: number; edge: EdgeGrip } | null>(null);
+  const edgeDrag = useRef<{ pointerId: number; edge: EdgeGrip; startX?: number; startY?: number } | null>(null);
   // Transiente „Körper verschieben"-Daten: letzter Modellpunkt, gegen den das
   // inkrementelle Delta gebildet wird (parallel-Verschiebung des Elements).
   const moveDrag = useRef<{
     pointerId: number;
     last: Vec2;
+    /** Bildschirm-Start (ohne Bewegung = Klick, [137] Klick-Zyklus). */
+    startX?: number;
+    startY?: number;
     target: BodyTarget;
   } | null>(null);
   // Transiente Stempel-Griff-Zieh-Daten: letzter Modellpunkt, gegen den das
@@ -1431,7 +1438,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const emptyArea = p.drawingId && p.fill === "none" && (!p.hatch || p.hatch.pattern === "none");
         return underBand && emptyArea ? null : i;
       }
-      if ((p.contextObjectId || p.sectionLineId) && p.fill !== "none") return i;
+      // Lage-Darstellung (`@…`: Schlagschatten der Ansicht, Schatten, Baurecht) verdeckt nie — sie liegt auf den
+      // Bauteilen und wird erst nach ihnen gewählt (bzw. per erneutem Klick, [137] Klick-Zyklus).
+      if (((p.contextObjectId && !p.contextObjectId.startsWith("@")) || p.sectionLineId) && p.fill !== "none") return i;
       if (p.contextObjectId && !p.contextObjectId.startsWith("@")) underBand = true;
     }
     return null;
@@ -1781,7 +1790,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         // KEIN Pointer-Capture: der Griff bleibt nach dem Loslassen bewaffnet
         // und folgt via normalem Hover-onPointerMove weiter dem Cursor (s.
         // Kommentar an der gripDrag-Deklaration).
-        gripDrag.current = { pointerId: e.pointerId, index: gi, origin: grips![gi] };
+        gripDrag.current = { pointerId: e.pointerId, index: gi, origin: grips![gi], startX: e.clientX, startY: e.clientY };
         return;
       }
       // Linke Taste auf einem Kanten-Anfasser (Dreieck): Seite ziehen. KEIN
@@ -1791,7 +1800,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const eg = edgeGripAt(e.clientX, e.clientY);
         if (eg) {
           e.preventDefault();
-          edgeDrag.current = { pointerId: e.pointerId, edge: eg };
+          edgeDrag.current = { pointerId: e.pointerId, edge: eg, startX: e.clientX, startY: e.clientY };
           return;
         }
       }
@@ -1801,7 +1810,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (body) {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
-        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body };
+        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body, startX: e.clientX, startY: e.clientY };
         return;
       }
     }
@@ -1814,7 +1823,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (body) {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
-        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body };
+        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body, startX: e.clientX, startY: e.clientY };
         return;
       }
     }
@@ -2207,10 +2216,29 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     additive?: boolean;
   } | null>(null);
   // Liste/Zyklus verwerfen, sobald sich Ausschnitt oder Plan ändern.
+  // [137] Einfacher Klick-Zyklus: Kandidaten des letzten einfachen Klicks (s. pickCycle.ts).
+  const plainCycleRef = useRef<PlainCycle<PickCandidate> | null>(null);
+  const plainCyclePlan = useRef<Plan | null>(null);
+  // Auswahl anderswo geändert (Escape, Panel): Zyklus und Hinweis verwerfen.
+  useEffect(() => {
+    const pc = plainCycleRef.current;
+    if (pc && !selectionHas(selection, pc.items[pc.idx])) {
+      plainCycleRef.current = null;
+      onPickHint?.(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection]);
   useEffect(() => {
     setPickList(null);
     cycleRef.current = null;
   }, [view, planRaw]);
+  // Der Klick-Zyklus überlebt neu erzeugte Pläne (Greifen des Gewählten baut den Plan neu auf): Kandidaten
+  // sind Ids; nur Ausschnitt oder Ebene verwerfen ihn.
+  useEffect(() => {
+    plainCycleRef.current = null;
+    onPickHint?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, resetKey]);
   useEffect(() => {
     if (!pickList) return;
     const onKey = (ev: KeyboardEvent) => {
@@ -2279,7 +2307,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       const key = `${kind}:${id}`;
       if (seen.has(key)) return;
       seen.add(key);
-      const base = kind === "drawing" ? drawingLabel(id) : kind === "site" ? t(id === "siteRules" ? "pick.site.siteRules" : "pick.site.sunStudy") : t(`pick.kind.${kind}`);
+      const base = kind === "drawing" ? drawingLabel(id) : kind === "site" ? t(id === "siteRules" ? "pick.site.siteRules" : id === "viewShadows" ? "pick.site.viewShadows" : "pick.site.sunStudy") : t(`pick.kind.${kind}`);
       const cat = describePick?.(kind, id);
       out.push({ kind, id, hitIndex, label: cat ? `${base} · ${cat}` : base });
     };
@@ -2416,6 +2444,30 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return true;
   };
 
+  /** [137] Loslassen ohne Bewegung (ohne Shift), und der Klick setzt den Klick-Zyklus fort? */
+  const clickCycles = (e: React.PointerEvent, startX: number | undefined, startY: number | undefined): boolean =>
+    startX !== undefined &&
+    startY !== undefined &&
+    !e.shiftKey &&
+    Math.hypot(e.clientX - startX, e.clientY - startY) < MARQUEE_THRESHOLD_PX &&
+    plainCycleNext(plainCycleRef.current, { x: e.clientX, y: e.clientY, t: Date.now(), planKey: resetKey ?? null }, selection) !== null;
+
+  /** [137] Einfacher Klick an der Stelle des letzten Klicks: nächsten Kandidaten wählen. true = behandelt. */
+  const plainCycleStep = (clientX: number, clientY: number): boolean => {
+    const pc = plainCycleRef.current;
+    const now = Date.now();
+    const next = onSelect ? plainCycleNext(pc, { x: clientX, y: clientY, t: now, planKey: resetKey ?? null }, selection) : null;
+    if (next === null || !pc) return false;
+    pc.idx = next;
+    pc.t = now;
+    const v = clientToView(clientX, clientY, view);
+    // Polygon-Index nur aus demselben Plan (sonst zeigt die lokale Hervorhebung auf ein fremdes Primitiv).
+    const c = pc.items[next];
+    applyCandidate(plainCyclePlan.current === plan ? c : { ...c, hitIndex: null }, viewToModel(v.x, v.y), false);
+    onPickHint?.(cycleHint(pc.items.length, next));
+    return true;
+  };
+
   const endDrag = (e: React.PointerEvent<SVGSVGElement>) => {
     // Perf: einen anhängigen (rAF-gedrosselten) Drag mit der FINALEN Position
     // sofort anwenden, damit das Objekt exakt an der Loslass-Stelle landet, bevor
@@ -2423,6 +2475,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (dragMoveRaf.current !== null) {
       cancelAnimationFrame(dragMoveRaf.current);
       dragMoveRaf.current = null;
+    }
+    // [137] Klick ohne Bewegung auf einen Griff an der Stelle des letzten Klicks: nächstes Objekt statt Griff
+    // bewaffnen (bei kleinem Massstab liegen die Griffe dicht, z. B. Bemassungsketten 1:500). Nichts wurde
+    // gezogen — Griff ohne Änderung abschliessen.
+    const gd0 = gripDrag.current?.pointerId === e.pointerId ? gripDrag.current : null;
+    const ed0 = edgeDrag.current?.pointerId === e.pointerId ? edgeDrag.current : null;
+    if ((gd0 || ed0) && clickCycles(e, (gd0 ?? ed0)!.startX, (gd0 ?? ed0)!.startY)) {
+      gripDrag.current = null;
+      edgeDrag.current = null;
+      dragMovePending.current = null;
+      if (gd0) gripHandlers?.onGripEnd();
+      else gripHandlers?.onEdgeEnd();
+      plainCycleStep(e.clientX, e.clientY);
+      return;
     }
     if (
       (edgeDrag.current && edgeDrag.current.pointerId === e.pointerId) ||
@@ -2474,6 +2540,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       }
       moveDrag.current = null;
       gripHandlers!.onGripEnd();
+      // [137] Ohne Bewegung war es ein Klick auf das Gewählte: an derselben Stelle zum nächsten Objekt wechseln.
+      if (clickCycles(e, md.startX, md.startY)) plainCycleStep(e.clientX, e.clientY);
       return;
     }
 
@@ -2528,14 +2596,24 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       }
       // Kein Drag → Klick: Objekt unter dem Cursor wählen bzw. Auswahl löschen.
       setMarqueeRect(null);
-      if (onSelect && cycleModifier(e) && cycleSelect(e)) return;
+      if (onSelect && cycleModifier(e) && cycleSelect(e)) {
+        plainCycleRef.current = null;
+        onPickHint?.(null);
+        return;
+      }
       setPickList(null);
       cycleRef.current = null;
+      if (!e.shiftKey && plainCycleStep(e.clientX, e.clientY)) return;
       const dp = defaultPick(e.clientX, e.clientY);
       setSelected(dp.hitIndex);
       if (onSelect) {
         const v = clientToView(e.clientX, e.clientY, view);
         onSelect({ model: viewToModel(v.x, v.y), ...dp, shift: e.shiftKey });
+        // [137] Kandidaten an dieser Stelle merken: ein erneuter Klick hier wählt das nächste Objekt.
+        const items = e.shiftKey ? [] : collectCandidates(e.clientX, e.clientY, dp);
+        plainCycleRef.current = items.length > 1 ? { x: e.clientX, y: e.clientY, t: Date.now(), planKey: resetKey ?? null, items, idx: 0 } : null;
+        plainCyclePlan.current = plan;
+        onPickHint?.(cycleHint(items.length, 0));
       }
       return;
     }

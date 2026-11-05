@@ -2616,7 +2616,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   | Stütze | ✓ | ✓ | ✗ → ✓ (5.11.: Pick war zur Darstellung gespiegelt, −y → y; Hervorhebung neu) | ✓ |
   | Freie Körper (Extrusion, Loft, Rotation, Sweep, B-Rep) | ✓ (Umriss) | ✓ | ✗ → ✓ (truck-Netz, bis es geladen ist Prisma über dem Umriss; Hervorhebung; Abzugskörper nicht, im 3D nicht gezeichnet) | ✓ (keine Griffe, auch nicht im Plan) |
   | 2D: Bemassung, Koten, Text, Hinweis, Wolke, Nordpfeil-Block, Detail, Kataster, Strasse, Bäume | ✓ (Linien; leere Kreise/Konturen am Rand, leere Konturfläche unter Gelände meint das Gelände) | ✓ eigene | Linien-Spur | ✓ |
-  | Achsraster | ✓ | ✗ (Projektion ohne Id, offen) | Spur (`show3d`) | ✓ |
+  | Achsraster | ✓ | ✗ → ✓ (Achse, Blase, Text mit Raster-Id; im Blatt ohne Griffe/Verschieben) | Spur (`show3d`) | ✓ |
   | Gelände (TerrainMesh) | Rahmen-Band, Objekt-Info nur LV95 → ✓ mit Optionen | ✗ → ✓ (Erdreich-Band, Geländefläche) | ✓ (ausgeblendete Kategorie/ausgeblendetes Netz fing den Klick ✗ → ✓ nicht mehr) | ✗ → ✓ Sichtbar (Netz einzeln `hidden` + Kategorie), Glättung (Höhenlinien neu bzw. Raster nachglätten), Äquidistanz, Zähllinie, Erdreich-Band |
   | Höhenlinien-Satz (contourSet) | ✗ → ✓ (Rahmen unter dem Gelände, Cmd/Strg+Klick-Liste) | – | – | Typ, LV95 |
   | Baugrube, Böschungen, Rühlwand (excavation) | ✗ (Band nur Sohle, unter dem Gelände-Rahmen) → ✓ Wirkbereich zuoberst | über Gelände | ✗ → ✓ (Dreiecke im Wirkbereich) | Typ ohne Übersetzung → ✓ alle Felder, Mengen; Griffe (bestehend) |
@@ -2652,12 +2652,38 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Hervorhebung), vitest `toWalls3d.pickSolids.test.ts` (Strahl auf Körper, truck-Netz statt Prisma, Stütze lagerichtig,
   Hervorhebung, Gelände ausgeblendet), `siteSelection.test.ts` (Nachglätten mit Undo), e2e `siteSelect.spec.ts`
   (Netz ausblenden + Undo). Linux-Container; 3D-Pick nur als Unit-Test (headless kein WebGPU), nicht in der Tauri-App.
-  Offen: Achsraster in Schnitt/Ansicht; in der dichten Situation 1:500 gehen 2D-Elemente (Bemassung) vor —
-  Schatten/Gelände dort per Cmd/Strg+Klick-Liste; im 3D nicht anwählbar: Treppengeländer über der Treppen-Hülle
+  Offen: im 3D nicht anwählbar: Treppengeländer über der Treppen-Hülle
   (oberes Podest), 2D-Kreise/Bögen/Texte (Bäume, Symbole: keine Pick-Box), Punktwolken, Baurechts-Hüllkörper und
   Schnittbox (Hilfsdarstellung, Klick geht hindurch), Gauben nur als Teil des Dachs (keine eigene Auswahl);
   importierte Meshes nur über die Kategorie ausblendbar; Raster-Gelände nur stärker glätten (rohe Höhen nicht
   gespeichert). · M
+  **(5.11., Plan und Blätter)** Klick-Zyklus wie in CAD üblich: ein erneuter einfacher Klick an derselben Stelle
+  (≤ 5 px, kein Doppelklick < 400 ms, Auswahl unverändert) wählt das nächste Objekt darunter, Reihenfolge wie die
+  Cmd/Strg+Klick-Liste; Statusleiste „2/8 Treffer — erneut klicken zum Wechseln". Gilt auch, wenn der Klick auf einen
+  Griff oder den Körper des Gewählten fällt (ohne Bewegung; Ziehen bleibt Griff/Verschieben) — sonst wären dichte
+  Bemassungsketten 1:500 nie zu verlassen. Neu erzeugter Plan (Greifen) behält den Zyklus, Ausschnitt-/Ebenenwechsel
+  verwirft ihn. **Bestand Plan/Blatt** (Musterhaus komplex; vorher → jetzt):
+  | Darstellung | Sichtbares | Anwählen / Bearbeiten |
+  |---|---|---|
+  | Grundriss, Situation 1:500 | Bemassung über Baugrube, Schatten, Gelände, Höhenlinien, Parzelle | nur Cmd/Strg-Liste → ✓ erneut klicken (8 Treffer an der Südfassade) |
+  | Grundriss | Raumstempel, Schraffuren/Muster der Flächen, Schnitt-/Ansichtsmarker | ✓ (Stempel-Griff/Doppelklick; Schraffur = Bauteil; Marker = Schnittlinie) |
+  | Grundriss | Ansichtsbereich (gestrichelt über/unter Schnitt) | ✓ Quelle über die unsichtbare Pick-Fläche (bestehend) |
+  | Deckenspiegel | Untersicht, Dachuntersicht, Aussparungs-Kreuz, UK-/Raum-Beschriftung, Leuchten (2D/Blöcke) | ✓ Decke/Dach/Raum/2D (bestehend) |
+  | Schnitt/Ansicht | Achsraster | ✗ → ✓ (s. Tabelle oben) |
+  | Ansicht | Schlagschatten (45°) | ✗ → ✓ Pseudo-Auswahl `site: viewShadows` (Kern `@viewShadows`), Objekt-Info: Schalter „Schatten" der Ansicht (Undo); verdeckt die Wand darunter nicht (`@…` nie verdeckend) |
+  | Schnitt/Ansicht | automatische Höhenkoten (aus den Geschossen) | ✗ offen (keine Auswahl-Art für Geschosse; Höhe im Geschoss ändern) |
+  | Blatt | Viewport-Rahmen, Legende, Tabelle, Blatt-Texte (Titel des Präsentationsplans) | ✓ (bestehend) |
+  | Blatt | Schriftfeld | ✗ → ✓ Klick wählt (Akzentrahmen), Feld-Karte: Blattname/Plan-Nr./Index am Blatt, Projekt/Bearbeiter/Datum am Master (Tippen = ein Undo-Schritt je Feld) |
+  | Präsentationsplan [66] | Nordpfeil, Massstabsbalken (lose Formen) | ✗ (je Teil einzeln) → ✓ je eine Gruppe „Nordpfeil"/„Massstabsbalken": Klick wählt, Ziehen verschiebt, Entf löscht als Ganzes |
+  Gewählte Gruppen zeigen keine Griffe ihrer 2D-Mitglieder mehr (wie Vectorworks: Gruppe betreten zum Bearbeiten) —
+  sonst traf ein Ziehen am Massstabsbalken immer einen der dichten Griffe. Tests: vitest `pickCycle.test.ts` (Zyklus-
+  Regeln), `presentationSheet.test.ts` (Gruppen), Rust `grid_view` (Raster-Id), `elevation::beispiel_ansicht`
+  (Schatten-Pick-Id); e2e `pickCycle.spec.ts` (Situation 1:500: 8 Treffer bis Gelände und zurück, Escape löscht den
+  Hinweis; Präsentationsplan: Balken als Gruppe wählen, verschieben, löschen; Schriftfeld Plan-Nr.). Goldens
+  unverändert. Nur Linux-Container/Chromium, nicht in der Tauri-App. Offen: Höhenkoten im Schnitt; Marker anderer
+  Schnitte in Schnitt/Ansicht nicht geprüft; Achsraster im Blatt nicht verschiebbar (nur Objekt-Info/Löschen);
+  Klick auf einen Griff an der Stelle des letzten Klicks schaltet weiter statt den Griff zu bewaffnen (Ziehen geht);
+  Viewport-Titel normaler Layouts (nicht Präsentationsplan) nicht geprüft. · M
 
 ## Priorität 4 — später
 

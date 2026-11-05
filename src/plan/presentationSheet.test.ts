@@ -5,7 +5,7 @@ import { sheetSizeMm } from "../model/layoutModel";
 import { PRESENTATION_TEMPLATE_ID, presentationDefaults, presentationSheetOps } from "./presentationSheet";
 import type { Project } from "../model/types";
 
-const LABELS = { sheetName: "Präsentationsplan", masterName: "Planrahmen", north: "N" };
+const LABELS = { sheetName: "Präsentationsplan", masterName: "Planrahmen", north: "N", northGroup: "Nordpfeil", scaleBarGroup: "Massstabsbalken" };
 const st = () => getState();
 
 function overlaps(a: { xMm: number; yMm: number; widthMm: number; heightMm: number }, b: typeof a): boolean {
@@ -62,6 +62,10 @@ describe("[66] Präsentationsplan", () => {
     const texts = onSheet.filter((d) => d.geom.shape === "text");
     expect(texts.length).toBe(lay.viewports.length + 1 + 2);
     expect(onSheet.filter((d) => /-s\d$/.test(d.id) && d.geom.shape === "polyline").length).toBe(5);
+    // [137] Nordpfeil und Massstabsbalken sind je eine Gruppe (Klick wählt, verschiebt und löscht sie als Ganzes).
+    const groups = (p.groups ?? []).filter((g) => g.drawingIds.some((id) => onSheet.some((d) => d.id === id)));
+    expect(groups.map((g) => g.drawingIds.length).sort()).toEqual([4, 7]);
+    expect(groups.every((g) => g.name && g.drawingIds.every((id) => onSheet.some((d) => d.id === id)))).toBe(true);
     // Titel und Balken liegen auf dem Blatt.
     for (const d of onSheet) if (d.geom.shape === "text") {
       expect(d.geom.at.x * 1000).toBeGreaterThan(0);
