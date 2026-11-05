@@ -1985,8 +1985,21 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Deckenober- und -untersicht (`surface_pattern3d::pattern_lines_3d` → render3d `set_pattern_lines`) in den
   Stilen „Verdeckt"/„Schattiert mit Kanten", Ausdünnung je Linie nach Abstand über eine Massstabs-Leiter
   (`render3d::pattern_lines`). Geprüft: Rust-Tests, Schnitt-Szene 1:50 (Beton unbewehrt, Estrich) und OG-Grundriss
-  vorher/nachher angesehen (Linux). Offen: Untersicht nur im 3D (es gibt keinen Deckenspiegel; waagrechte Flächen
-  sind in Schnitt/Ansicht nicht sichtbar); Decken ohne `surfacePatternAngle/Offset` (Muster am Plan ausgerichtet);
+  vorher/nachher angesehen (Linux). 5.11.: **Deckenspiegel** als eigene Zeichnungsebene `DrawingLevel.kind`
+  "ceiling" mit Bezug `ceilingOfId` (Geschoss), Kern `plan/ceiling_plan.rs`: von der Schnitthöhe nach oben,
+  in Grundriss-Lage gespiegelt (deckt den Grundriss); Wände/Stützen geschnitten wie im Grundriss ohne Türflügel/
+  -bögen, Fensterflügel, Brüstungen; Untersicht der Decken mit UK zwischen Schnitthöhe und Schnitthöhe des
+  nächsten Geschosses (oberstes: Geschosshöhe + 2 m), Fläche in Ansichtsfarbe der untersten Schicht mit deren
+  Ansichtsmuster (`surface_pattern3d::soffit_segments`, sonst Ansichtsschraffur), Rand und Aussparungen
+  (Treppenloch, gehostete Deckenöffnungen) ausgezogen; Dachuntersichten (Traufe, First, Grate, Dachfenster
+  ausgezogen, Muster der innersten Schicht), verdeckt, wenn eine tiefere Decke über der Dachmitte liegt; je Raum
+  Name + „UK +x.xx“. Eigene 2D-Elemente der Ebene (Leuchten …) wie bei jeder Ebene. Navigator „+ Deckenspiegel“
+  (aktives Geschoss), Bezugsgeschoss im Ebenen-Editor, Ansicht 2D wie Zeichnung (kein 3D); CLI
+  `plan --level EG --ceiling`. Tests `deckenspiegel_*` (ceiling_plan.rs), `src/state/addCeiling.test.ts`; Goldens
+  unverändert. CLI-Deckenspiegel EG/OG/DG des Musterhauses (komplex) mit `--hatch` + Chromium angesehen (Linux),
+  nicht in der Tauri-App. Offen Deckenspiegel: Unterzüge (kein Modell-Element), Leuchten-Symbole/Kategorie,
+  Deckenuntersicht ohne Treppe darunter, UK-Kote bei Dach als Decke, Layout-Viewport/Druck nicht eigens geprüft.
+  Offen sonst: waagrechte Flächen sind in Schnitt/Ansicht nicht sichtbar; Decken ohne `surfacePatternAngle/Offset` (Muster am Plan ausgerichtet);
   Wandseiten im 3D ohne Rücksicht auf Eckverschnitt; 3D-Linien in der nativen macOS-Ansicht und im Browser
   (WebGPU) nicht angesehen; ambientCG-Kennungen CorrugatedSteel005, WoodSiding008, Chipboard001 ohne Netz nicht
   geprüft; nicht in der Tauri-App/macOS geprüft. · M
