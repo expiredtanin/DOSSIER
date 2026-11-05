@@ -12,6 +12,9 @@ import type { Primitive } from "./generatePlan/shared";
 
 const ALL = new Set(flattenCategories(sampleProject.layers).map((c) => c.code));
 const on: Project = { ...sampleProject, scaleLineWeights: true };
+const off: Project = { ...sampleProject, scaleLineWeights: false };
+// [140] Kern `scale_weight`: nur der Anteil über 0.09 mm skaliert (1:200: Faktor √½).
+const scaledWeight = (w: number, f: number) => (w > 0.09 ? 0.09 + (w - 0.09) * f : w);
 const weights = (ps: Primitive[]) =>
   ps.flatMap((p) => (p.kind === "polygon" ? [p.strokeWidthMm] : "weightMm" in p && typeof p.weightMm === "number" ? [p.weightMm] : []));
 const plan = (p: Project, n: number, compact = false) =>
@@ -19,18 +22,18 @@ const plan = (p: Project, n: number, compact = false) =>
 
 describe("Strichstärken nach Massstab", () => {
   // Der Faktor selbst (Grenzen, ungültiger Massstab) ist im Kern geprüft (`plan/extras.rs`).
-  it("Grundriss 1:200: jede Stärke × Faktor, aus → unverändert", () => {
-    const base = weights(plan(sampleProject, 200).primitives);
+  it("Grundriss 1:200: jede Stärke über dem Sockel × Faktor, aus → unverändert", () => {
+    const base = weights(plan(off, 200).primitives);
     const scaled = weights(plan(on, 200).primitives);
     expect(scaled.length).toBe(base.length);
-    const f = 0.5 ** 0.25;
-    scaled.forEach((w, i) => expect(w).toBeCloseTo(base[i] * f, 9));
+    expect(scaled).not.toEqual(base);
+    scaled.forEach((w, i) => expect(w).toBeCloseTo(scaledWeight(base[i], Math.SQRT1_2), 9));
   });
   it("auch die kompakte Linien-Unterlage (GPU-Ansicht) wird skaliert", () => {
-    const base = weights(plan(sampleProject, 200, true).primitives);
+    const base = weights(plan(off, 200, true).primitives);
     const scaled = weights(plan(on, 200, true).primitives);
     expect(scaled.length).toBe(base.length);
-    scaled.forEach((w, i) => expect(w).toBeCloseTo(base[i] * 0.5 ** 0.25, 9));
+    scaled.forEach((w, i) => expect(w).toBeCloseTo(scaledWeight(base[i], Math.SQRT1_2), 9));
   });
   it("gleiche Eingabe → gleiche Inhalts-Hashes der Kern-Abschnitte (GPU-Cache), auch mit Massstab", () => {
     const line = {
@@ -41,7 +44,7 @@ describe("Strichstärken nach Massstab", () => {
       const pl = generatePlan(p, "eg", ALL, undefined, "mittel", false, false, true, 200);
       return (pl.bufRuns ?? []).flatMap((r) => Array.from(r.buf.hashes!.subarray(r.from, r.to)));
     };
-    const base = { ...sampleProject, drawings2d: [...sampleProject.drawings2d, line] };
+    const base = { ...off, drawings2d: [...sampleProject.drawings2d, line] };
     const a = hashes(base);
     expect(a.length).toBeGreaterThan(0);
     expect(hashes(base)).toEqual(a);

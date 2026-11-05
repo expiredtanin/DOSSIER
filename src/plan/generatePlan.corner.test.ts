@@ -134,11 +134,11 @@ describe("generatePlan — Schichtfugen als stilisierbare Linien", () => {
     expect(joints[0].dash ?? null).toBeNull();
   });
 
-  it("fällt ohne Zuweisung auf die Haarlinie (0.02 mm) in Wandfarbe zurück", () => {
+  it("fällt ohne Zuweisung auf die feine Fuge (0.09 mm, [140]) in Wandfarbe zurück", () => {
     const proj = cornerProject();
     proj.walls = [proj.walls[0]];
     const joints = jointLines(proj);
     expect(joints.length).toBe(1);
-    expect(joints[0].weightMm).toBeCloseTo(0.02, 6);
+    expect(joints[0].weightMm).toBeCloseTo(0.09, 6);
   });
 });

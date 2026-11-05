@@ -26,8 +26,9 @@ pub const DEFAULT_SCALE_DENOMINATOR: f64 = 100.0;
 // Bemassung (SIA 400 B.5.3): Defaults in Papier-mm (`model/dimension.ts`).
 const DIM_GAP_MM: f64 = 1.0;
 const DIM_OVERSHOOT_MM: f64 = 1.0;
-const DIM_TICK_LEN_MM: f64 = 3.0;
-const DIM_TEXT_HEIGHT_MM: f64 = 4.0;
+// [140] Masszahl 2.5 mm, Schrägstrich 2 mm (vorher 4 / 3 — grösser als Raumstempel).
+const DIM_TICK_LEN_MM: f64 = 2.0;
+const DIM_TEXT_HEIGHT_MM: f64 = 2.5;
 
 // Höhenkote (SIA 400 B.5.4), fixe Modell-Meter.
 const KOTE_TRI_SIZE_M: f64 = 0.15;
@@ -1858,7 +1859,7 @@ mod tests {
         match &out[5] {
             Primitive::DrawingText { text, height_m, .. } => {
                 assert_eq!(text, "3.25");
-                assert!((height_m - 0.2).abs() < 1e-12);
+                assert!((height_m - 0.125).abs() < 1e-12);
             }
             o => panic!("{o:?}"),
         }

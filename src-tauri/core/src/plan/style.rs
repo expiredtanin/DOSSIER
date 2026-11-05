@@ -8,6 +8,12 @@ pub const POCHE_STROKE: &str = "#1a1a1a";
 pub const MONO_INK: &str = "#111111";
 pub const LAYER_LINE_MM: f64 = 0.02;
 pub const SYMBOL_HAIRLINE_MM: f64 = 0.02;
+/// [140] Feine Symbol-Linien der Türen/Fenster im Grundriss (Blatt, Aufschlag, Glas, Bank), solange der Typ
+/// keine eigene Stärke trägt — vorher Haarlinie 0.02 (im Druck kaum sichtbar).
+pub const SYMBOL_LINE_MM: f64 = 0.13;
+/// [140] Schichtfugen im Wandschnitt ohne eigene Fugenstärke (`Layer.jointWeightMm`): fein, aber druckbar
+/// (vorher 0.02); bewusst unter der Schraffur-Stärke, damit dünne Schichten in 1:100 nicht zulaufen.
+pub const LAYER_JOINT_MM: f64 = 0.09;
 /// Kanten über der Schnittebene (Decken-/Dachränder, Bauteile „über Schnitt"): Strichpunktlinie nach
 /// SIA 400 B.3.3 (Strich, Lücke, Punkt, Lücke; Punkt = Länge 0 mit runder Kappe).
 pub const OVERHEAD_DASH: [f64; 4] = [0.4, 0.12, 0.0, 0.12];
@@ -40,9 +46,11 @@ impl Detail {
     /// Stärke der Wand-Umrisslinie als Faktor auf die Ebenen-lw.
     pub fn outline_factor(self) -> f64 {
         match self {
-            Detail::Grob => 1.6,
+            // [140] Fein (1:50/1:20) behält die volle Schnittkante (vorher 0.6 — dünner als die
+            // Fugen-Rangfolge verlangt); Grob (1:200/1:500, Vollpoché) etwas kräftiger.
+            Detail::Grob => 1.2,
             Detail::Mittel => 1.0,
-            Detail::Fein => 0.6,
+            Detail::Fein => 1.0,
         }
     }
 

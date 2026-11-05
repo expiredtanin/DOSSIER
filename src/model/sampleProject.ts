@@ -389,7 +389,8 @@ export const sampleProject: Project = {
       code: "20",
       name: "Wände",
       color: "#0a0a0a",
-      lw: 0.35,
+      // [140] Schnittkante 0.5 bei 1:100 (mit `scaleLineWeights` ≈ 0.7 bei 1:50, ≈ 0.35 bei 1:200).
+      lw: 0.5,
       visible: true,
       locked: false,
       children: [
@@ -400,13 +401,15 @@ export const sampleProject: Project = {
     },
     { code: "30", name: "Decken", color: "#605850", lw: 0.35, visible: true, locked: false },
     { code: "31", name: "Dächer", color: "#7a4a3a", lw: 0.35, visible: true, locked: false },
-    { code: "40", name: "Treppen", color: "#4a6a58", lw: 0.35, visible: true, locked: false },
+    { code: "40", name: "Treppen", color: "#4a6a58", lw: 0.25, visible: true, locked: false },
     { code: "35", name: "Träger", color: "#a87858", lw: 0.5, visible: true, locked: false },
     { code: "50", name: "Text", color: "#d0d0d0", lw: 0.13, visible: true, locked: false },
     { code: "60", name: "Räume", color: "#5a7a9a", lw: 0.13, visible: true, locked: false },
     { code: "90", name: "Referenzen", color: "#585860", lw: 0.13, visible: true, locked: false },
     { code: "99", name: "Konstruktion", color: "#404048", lw: 0.13, visible: true, locked: false },
   ],
+  // [140] Strichstärken folgen dem Massstab (neue Projekte; bestehende behalten ihre Einstellung).
+  scaleLineWeights: true,
   walls: [
     // ── EG: 5 × 4 m Raum (CCW) ──
     // Süd (unten)

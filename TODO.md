@@ -2696,6 +2696,29 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
 
 - ✅ **[139] Kleine Fehler aus der Doku.** (5.11.) Beim Schreiben der Doku gefunden: (1) Befehl `wand` startete den Zauberstab statt der Wand; der Zauberstab heisst jetzt `zauberstab` (Kürzel `zs`), `wand` = Wand, Kern-Befehl `wand` unverändert. (2) Cmd/Strg+S war doppelt belegt: jetzt Speichern (bekannter Pfad ohne Dialog, sonst Dialog), Cmd/Strg+Shift+S = Speichern unter, Teilen auf Cmd/Strg+Shift+J. (3) `schedule --openings --format svg`: Zellen werden in der Blattaufteilung (`area_report.rs`, gilt auch für PDF) auf Spaltenbreite umbrochen statt zu überlappen, Spaltenbreiten der Liste angepasst. Offen: Speichern/Speichern unter nur per vitest geprüft, nicht in der Tauri-App.
 
+- ◐ **[140] Plandarstellung überarbeitet.** (5.11., Wunsch Maintainer: „Plandarstellung schöner, Strichstärken
+  richtig") Befund am Musterhaus komplex (CLI-SVG in Papiergrösse, 1:50/100/200/500, Schnitt, Ansicht, Deckenspiegel):
+  Tür-/Fenstersymbole und Schichtfugen als Haarlinie 0.02 (im Druck fast weg), Wand-Schnittkante 0.35 = so stark wie
+  Zähl-Höhenlinien (0.25) und Schnitt-Schichten (jede Schicht 0.35 umrandet), Detail „fein" machte die Schnittkante
+  dünner (×0.6), Massstab-Faktor (100/n)^0.25 zu flach (1:50 nur ×1.19) und für alle Stärken gleich, Masszahlen 4 mm
+  (grösser als Raumstempel), Höhenlinien quer durch die Räume, Ansicht ohne Silhouette (alles 0.13), Override
+  „Brandschutztüren rot" färbte im Beispiel alle Türen. Geändert: [32] Faktor (100/n)^0.5 (0.4–2), wirkt nur über dem
+  Sockel 0.09 (`extras::scale_weight`: w' = 0.09 + (w − 0.09)·f) → Schnittkante 0.5 → 0.67 (1:50) / 0.38 (1:200),
+  Schraffur/Bemassung bleiben ≈ 0.1–0.15, Rangfolge in jedem Massstab erhalten; Symbole Türen/Fenster 0.13
+  (`SYMBOL_LINE_MM`), Schichtfugen 0.09 (`LAYER_JOINT_MM`), Detail fein ×1.0 / grob ×1.2; Schnitt: Schichten fein
+  (0.13), Umriss der vereinigten Schnittflächen 0.5 (`section-cut-outline`); Ansicht: Silhouette (Aussenrand aller
+  Bauteilflächen) 0.35, Details 0.13, Grundlinie 0.5; Höhenlinien enden an der Gebäudegrundfläche
+  (`site_rules::building_footprint`), Zähllinie 0.18 statt 0.25; Bemassung 2.5 mm Text / 2 mm Strich (Kern, DXF,
+  Griffe, `DIM_DEFAULTS_MM`); Raumstempel ab 1:200 7 pt statt 10 pt, Standardstempel ohne SIA-Zeile. Standard-Ebenen (neue Projekte): Wände 0.5 statt 0.35, Treppen 0.25 statt 0.35,
+  `scaleLineWeights` an. Bestehende Projekte behalten ihre Ebenen-/Element-Stärken; neu wirken nur Ableitung, Faktor
+  und Fallbacks (ohne eigene Werte). Tests: `strichstaerken_rangfolge_je_massstab`, `schnittkante_schwer_fugen_fein`,
+  `silhouette_mittel_details_fein`, `hoehenlinien_enden_am_gebaeude`, `raumstempel_je_massstab`. Goldens neu (Strichstärken, Masszahlgrösse,
+  Höhenlinien). Offen: dünne Schichten (Putz, Parkett) laufen in 1:100 zu einem Balken zusammen (Detailgrad sollte
+  sie zusammenfassen); Achsen laufen in Ansicht/Grundriss durch das Gebäude; Raumstempel farbig statt schwarz im
+  Druck ohne Schwarz-Weiss; Schatten im EG-Grundriss überdeckt Bemassung; eigene Stempel (`Room.stamp`) behalten in
+  1:200 alle Zeilen; ein Geschoss in 1:500 braucht Detail „grob" (sonst Stempel/Masse übereinander — die CLI rechnet
+  immer „mittel"); gestapelte Höhenlinien an Stützmauer/Baugrube wirken als brauner Balken. Nur Linux/CLI-SVG + Chromium geprüft,
+  nicht in der Tauri-App (Bildschirm-Modus nicht angesehen). · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

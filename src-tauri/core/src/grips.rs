@@ -419,7 +419,7 @@ fn model_to_mm(m: f64, scale: f64) -> f64 {
 }
 
 /// Standard-Schrifthöhe der Masszahl (Papier-mm, `DIM_DEFAULTS_MM.textHeight`).
-const DIM_TEXT_HEIGHT_MM: f64 = 4.0;
+const DIM_TEXT_HEIGHT_MM: f64 = 2.5;
 
 /// `dimTextFrame` der TS-Fassade: bei nicht endlichen Eingaben alles NaN.
 fn dim_frame(a: (f64, f64), b: (f64, f64), offset: f64, h: f64) -> ((f64, f64), (f64, f64), (f64, f64)) {

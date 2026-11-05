@@ -20,7 +20,10 @@ use std::collections::{HashMap, HashSet};
 const SECTION_INK: &str = "#1f242c";
 const SECTION_VISIBLE_INK: &str = "#2b3039";
 const SECTION_HIDDEN_INK: &str = "#8a929c";
-const SECTION_CUT_OUTLINE_MM: f64 = 0.35;
+/// [140] Umriss der geschnittenen Masse (Vereinigung aller Schnittflächen): schwer wie die Wand im Grundriss.
+const SECTION_CUT_OUTLINE_MM: f64 = 0.5;
+/// [140] Fugen zwischen Schichten/Bauteilen innerhalb der geschnittenen Masse: fein.
+const SECTION_JOINT_MM: f64 = 0.13;
 const SECTION_VISIBLE_MM: f64 = 0.18;
 const SECTION_GROUND_MM: f64 = 0.5;
 const SECTION_HIDDEN_MM: f64 = 0.13;
@@ -2266,6 +2269,7 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
     let mut prims = Vec::new();
     let mut acc = Acc::new();
     let shown = |code: &str| vis.visible(code) && vis.render(code);
+    let mut cut_rings: Vec<crate::flat::Polygon> = Vec::new();
     // [T6] Erdreich zuerst (unter allem), ohne Umriss; Kategorie wie das Gelände.
     let terrain_shown = out.profiles.iter().all(|pr| pr.category.as_deref().is_none_or(shown));
     if terrain_shown {
@@ -2306,7 +2310,7 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
             (fill.to_string(), hatch)
         };
         let src = cp.source_id.clone();
-        let mut pr = polygon(pts, &fill, SECTION_INK, SECTION_CUT_OUTLINE_MM, hatch);
+        let mut pr = polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch);
         if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, no_stroke_edges, greyed, .. } = &mut pr {
             *wall_id = if cp.kind == Kind::Wall { src.clone() } else { None };
             *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() { src.clone() } else { None };
@@ -2316,7 +2320,17 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
             *no_stroke_edges = cp.nse.clone();
             *greyed = Some(cp.category.as_deref().is_some_and(|c| vis.greyed(c)));
         }
+        cut_rings.push(vec![cp.pts.clone()]);
         prims.push(pr);
+    }
+    // [140] Schnittkante: Umriss der vereinigten Schnittflächen schwer, Fugen dazwischen bleiben fein.
+    for poly in crate::polygon_bool::union(&cut_rings) {
+        for ring in &poly {
+            for i in 0..ring.len() {
+                let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+                prims.push(line(v2(a[0], a[1]), v2(b[0], b[1]), "section-cut-outline", SECTION_CUT_OUTLINE_MM, SECTION_INK));
+            }
+        }
     }
     for pr in &out.profiles {
         if let Some(code) = pr.category.as_deref() {
@@ -3629,6 +3643,22 @@ mod ts_faelle {
         // Tiefe 0 ist kein Filter.
         let zero = compute_section(&p, &lv(Some(0.0)), &[]).unwrap().unwrap();
         assert_eq!(zero.visible.len(), all.visible.len());
+    }
+
+    /// [140] Rangfolge im Schnitt: Umriss der geschnittenen Masse schwer (0.5), Fuge zwischen zwei
+    /// aneinanderstossenden Bauteilen fein (0.13), Ansichtskanten dazwischen (0.18).
+    #[test]
+    fn schnittkante_schwer_fugen_fein() {
+        let out = Output { cuts: vec![band(0.0, 1.0, 0.0, 1.0, None, "#fff"), band(1.0, 2.0, 0.0, 1.0, None, "#fff")], ..Default::default() };
+        let (prims, _) = section_primitives(&out, false, false, &Visibility::default());
+        let joints: Vec<f64> = prims.iter().filter_map(|q| match q { Primitive::Polygon { stroke_width_mm, .. } => Some(*stroke_width_mm), _ => None }).collect();
+        assert_eq!(joints, [SECTION_JOINT_MM, SECTION_JOINT_MM]);
+        let outline: Vec<(Vec2, Vec2)> = prims.iter().filter_map(|q| match q { Primitive::Line { a, b, cls, weight_mm, .. } if cls == "section-cut-outline" => { assert_eq!(*weight_mm, SECTION_CUT_OUTLINE_MM); Some((*a, *b)) } _ => None }).collect();
+        // Umriss = Rechteck 2 × 1 (die Fuge bei x = 1 gehört nicht dazu).
+        let len: f64 = outline.iter().map(|(a, b)| (b.x - a.x).hypot(b.y - a.y)).sum();
+        assert!((len - 6.0).abs() < 1e-6, "{len}");
+        assert!(outline.iter().all(|(a, b)| !((a.x - 1.0).abs() < 1e-6 && (b.x - 1.0).abs() < 1e-6)));
+        assert!(SECTION_CUT_OUTLINE_MM > SECTION_VISIBLE_MM && SECTION_VISIBLE_MM > SECTION_JOINT_MM);
     }
 
     #[test]
