@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { documentFor } from "../core/document";
 import { sampleProject } from "../model/sampleProject";
 import type { Excavation, Project } from "../model/types";
-import { excavationGripPoints } from "./useGripEditing";
+import { excavationGripPoints } from "../core";
 
 const pit: Excavation = {
   id: "bg",
