@@ -283,7 +283,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             o.ring(C_STULP, sash_w, 4.0, mark);
         }
         for (a, b) in &sym.glass_lines {
-            o.line(C_GLASS, hair, 0.0, 0.0, *a, *b);
+            o.line(C_GLASS, super::style::GLASS_LINE_MM, 0.0, 0.0, *a, *b);
         }
         if detail == Detail::Fein {
             if let Some((js, je)) = opening_jambs(&w, position, width) {
@@ -465,7 +465,7 @@ fn lift_slide(o: &mut Out, js: V, je: V, n: V, lo: f64, hi: f64, hinge_end: bool
         let b = along(js, je, u1);
         o.ring(C_LEAF, hair, 0.0, &[add(a, scale(n, n0)), add(b, scale(n, n0)), add(b, scale(n, n1)), add(a, scale(n, n1))]);
         let g = (n0 + n1) / 2.0;
-        o.line(C_GLASS, hair, 0.0, 0.0, add(a, scale(n, g)), add(b, scale(n, g)));
+        o.line(C_GLASS, super::style::GLASS_LINE_MM, 0.0, 0.0, add(a, scale(n, g)), add(b, scale(n, g)));
     }
     // Pfeil auf der Innenseite des Schiebefelds, zur Bandseite (über das feste Feld).
     let an = inner.1 + gap.max(0.04);

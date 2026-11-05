@@ -2378,7 +2378,7 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
 
 const OPENING_INK: &str = "#1f242c";
 const FRAME_MM: f64 = 0.25;
-const GLASS_MM: f64 = 0.13;
+const GLASS_MM: f64 = super::style::GLASS_LINE_MM;
 const DEFAULT_FRAME_DEPTH: f64 = 0.07;
 const DEFAULT_FRAME_WIDTH: f64 = 0.06;
 const DOOR_LEAF_THICKNESS: f64 = 0.04;
@@ -2611,7 +2611,7 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
                 out.push(opening_poly(rect(c.u_at(s0), c.u_at(s1), c.z_top, c.z_top + h), true, &o.id));
                 // Lamellen-/Rollpaket im Kasten.
                 let m = min(0.02, d / 4.0);
-                let mut pack = polygon(rect(c.u_at(s0 + m), c.u_at(s1 - m), c.z_top + m, c.z_top + h * 0.6), SHADING_PACK_FILL, OPENING_INK, GLASS_MM, no_hatch_base());
+                let mut pack = polygon(rect(c.u_at(s0 + m), c.u_at(s1 - m), c.z_top + m, c.z_top + h * 0.6), SHADING_PACK_FILL, OPENING_INK, super::style::SYMBOL_LINE_MM, no_hatch_base());
                 if let Primitive::Polygon { opening_id, .. } = &mut pack {
                     *opening_id = Some(o.id.clone());
                 }

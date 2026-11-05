@@ -340,11 +340,11 @@ describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine
     sillLine: { faces: "aussen", view: "auf" },
   };
 
-  it("ohne Übersteuerung: Stulp-/Sash-/Sims-Linien nutzen den Default (Opening.color bzw. feine Linie 0.13, [140])", () => {
+  it("ohne Übersteuerung: Stulp-/Sash-/Sims-Linien nutzen den Default (Opening.color bzw. feine Linie 0.1, [140])", () => {
     const p = project({ ...baseWindow, typeId: "wt1" }, [twoSashType]);
     const stulp = linesOfClass(p, "window-stulp", "mittel");
     expect(stulp.length).toBeGreaterThan(0);
-    for (const l of stulp) expect(l.kind === "line" && l.weightMm).toBeCloseTo(0.13, 6);
+    for (const l of stulp) expect(l.kind === "line" && l.weightMm).toBeCloseTo(0.1, 6);
   });
 
   it("frameLine übersteuert Farbe+Stärke der Laibungs-Blöcke (window-stulp, einflügliges Fenster ohne Flügelstoss)", () => {

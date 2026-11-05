@@ -8,9 +8,11 @@ pub const POCHE_STROKE: &str = "#1a1a1a";
 pub const MONO_INK: &str = "#111111";
 pub const LAYER_LINE_MM: f64 = 0.02;
 pub const SYMBOL_HAIRLINE_MM: f64 = 0.02;
-/// [140] Feine Symbol-Linien der Türen/Fenster im Grundriss (Blatt, Aufschlag, Glas, Bank), solange der Typ
-/// keine eigene Stärke trägt — vorher Haarlinie 0.02 (im Druck kaum sichtbar).
-pub const SYMBOL_LINE_MM: f64 = 0.13;
+/// [140] Feine Symbol-Linien der Türen/Fenster im Grundriss (Blatt, Aufschlag, Rahmen, Bank), solange der Typ
+/// keine eigene Stärke trägt; 0.1 nach Wunsch Maintainer (5.11.). Glas: `GLASS_LINE_MM`.
+pub const SYMBOL_LINE_MM: f64 = 0.1;
+/// Glasscheiben (Fenster im Grundriss und im Schnitt): feinste Linie, Wunsch Maintainer 5.11. ([140]).
+pub const GLASS_LINE_MM: f64 = 0.02;
 /// [140] Schichtfugen im Wandschnitt ohne eigene Fugenstärke (`Layer.jointWeightMm`): fein, aber druckbar
 /// (vorher 0.02); bewusst unter der Schraffur-Stärke, damit dünne Schichten in 1:100 nicht zulaufen.
 pub const LAYER_JOINT_MM: f64 = 0.09;
