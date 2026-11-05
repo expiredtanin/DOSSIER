@@ -70,6 +70,11 @@ Schriften (public/fonts/*, je Ordner mit OFL.txt), SIL Open Font License 1.1, lo
   Archivo, DM Sans, IBM Plex Sans und IBM Plex Mono (IBM Corp.), Inter, Jost, Karla, Manrope, Outfit,
   Public Sans, Rubik, Source Sans 3 und Source Serif 4 (Adobe), Space Grotesk, Work Sans.
 
+Website (website/static/fonts, Lizenztexte OFL-*.txt daneben), SIL Open Font License 1.1, Quelle google/fonts:
+  Schibsted Grotesk (The Schibsted-Grotesk Project Authors), Schnitte 600 und 800, auf Latein beschnitten;
+  IBM Plex Sans 400/500 und IBM Plex Mono 400 (IBM Corp.), instanziert und auf Latein beschnitten, darum
+  wegen des reservierten Namens „Plex" umbenannt in „Dossier Text" und „Dossier Mono".
+
 Webview-Oberfläche (npm, ausgeliefert):
   React und react-dom (https://github.com/facebook/react), MIT
   pdf.js (pdfjs-dist, https://github.com/mozilla/pdf.js), Apache-2.0 — PDF-Unterlagen lesen

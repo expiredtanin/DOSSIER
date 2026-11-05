@@ -184,11 +184,7 @@ import {
   saveDrawingCombo,
   saveLayerCombo,
 } from "./state/visibilitySets";
-import {
-  readViewSnapshot,
-  snapshotMatchesLiveState,
-  type ViewSnapshotState,
-} from "./state/viewSnapshots";
+import { useViewTabs } from "./state/viewTabs";
 import { useViewTemplateHandlers } from "./state/useViewTemplateHandlers";
 // Seiteneffekt: registriert die zwei dockbaren Kern-Panels in der Registry.
 import { BUILTIN_PANEL_IDS } from "./panels/builtinPanels";
@@ -1437,54 +1433,6 @@ export default function App() {
     nativeMenuPanels,
   );
 
-  // ── Ausschnitt-Anwahl: „bleibt bis zur Abweichung" (DOSSIER A2) ───────────
-  // Sobald ein Ausschnitt angewählt ist, vergleicht dieser Effekt bei JEDER
-  // Änderung einer ERFASSTEN Grösse (Ansicht/Kamera/Massstab/Detail/Geschoss +
-  // Ebenen-/Zeichnungssichtbarkeit + aktive Overrides) den Live-Zustand gegen
-  // den gespeicherten Kernzustand (pure `snapshotMatchesLiveState`). Weicht auch
-  // nur EIN Feld ab → Auswahl löschen (Footer verschwindet). Der Effekt reagiert
-  // NUR auf die snapshot-relevanten Projekt-Teile (layers/drawingLevels/
-  // overrideRules), NICHT auf `project` als Ganzes — eine Wand verschieben o. Ä.
-  // lässt die Auswahl unberührt.
-  useEffect(() => {
-    if (!selectedViewSnapshotId) return;
-    const snap = (project.viewSnapshots ?? []).find(
-      (s) => s.id === selectedViewSnapshotId,
-    );
-    if (!snap) {
-      setSelectedViewSnapshotId(null);
-      return;
-    }
-    const live: ViewSnapshotState = {
-      viewType,
-      view3d,
-      fov,
-      scaleDenominator,
-      detail,
-      activeLevelId,
-      layerVisibility: snapshotLayerVisibility(),
-      drawingVisibility: snapshotDrawingVisibility(),
-      enabledOverrideRuleIds: (project.overrideRules ?? [])
-        .filter((r) => r.enabled)
-        .map((r) => r.id),
-    };
-    if (!snapshotMatchesLiveState(readViewSnapshot(snap), live)) {
-      setSelectedViewSnapshotId(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selectedViewSnapshotId,
-    viewType,
-    view3d,
-    fov,
-    scaleDenominator,
-    detail,
-    activeLevelId,
-    project.viewSnapshots,
-    project.layers,
-    project.drawingLevels,
-    project.overrideRules,
-  ]);
 
   // ── Dock-/Float-Handler (aus dem Layout-Slice) ────────────────────────────
   // Die Layout-Mutationen (Resize/Reorder/Stapeln/Lösen/Float) liegen jetzt im
@@ -2198,15 +2146,16 @@ export default function App() {
     () => ({ onToolMove: ev.onToolMove, onToolClick: ev.onToolClick, onToolCommit: ev.onToolCommit, draft }),
     [ev, draft],
   );
+  const viewTabsState = useViewTabs();
   const viewSnapshotTabs = useMemo(
     () => ({
-      selectedId: baseHost.selectedViewSnapshotId,
-      onApply: baseHost.onApplyViewSnapshot,
-      onCaptureAuto: baseHost.onCaptureViewSnapshotAuto,
-      autoName: baseHost.viewSnapshotAutoName,
-      onDelete: baseHost.onDeleteViewSnapshot,
+      tabs: viewTabsState,
+      onActivate: baseHost.onActivateViewTab,
+      onNew: baseHost.onNewViewTab,
+      onClose: baseHost.onCloseViewTab,
+      autoName: baseHost.viewTabAutoName,
     }),
-    [baseHost],
+    [baseHost, viewTabsState],
   );
   const hasSelection = hasSelectionToDelete();
   // Unter Tauri (macOS) übernimmt die native Systemmenüleiste (oben am Bildschirm,

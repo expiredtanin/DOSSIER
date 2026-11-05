@@ -2552,6 +2552,48 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   nutzt Generator und Beschnitt des Druckpfads (`hatch_lines`, `build_hatch_runs`, Zufall; Bild/Vollfläche bleiben Füllung).
   Standard aus: Ausgabe, Goldens, KI-Werkzeuge, Öffnungsvorschau byte-gleich. Test `planToSvgString.hatch.test.ts`;
   Beispiel-EG angesehen (Chromium). Offen: Vollflächen-/Bildschraffur und Schraffur-Löcher nicht ausgebreitet; nicht in der Tauri-App geprüft. · S
+- ◐ **[136] Reiter und Ausschnitte entkoppelt.** (5.11.) Zeichnungs-Reiter sind reiner UI-Zustand (`state/viewTabs.ts`,
+  nicht im Projekt, kein Undo-Schritt, beim Öffnen/Neu ein Reiter): jeder merkt seinen Darstellungszustand und optional den
+  Ausschnitt, aus dem er kam (nur Titel). Beliebig viele, auch mehrere aus einem Ausschnitt; „+" = neuer Reiter mit der
+  aktuellen Ansicht, „×" schliesst nur den Reiter (nie den letzten, nie einen Ausschnitt). Ausschnitte nur im Panel: Klick =
+  im aktiven Reiter zeigen, Doppelklick/„↗" = neuer Reiter, „Ausschnitt aktualisieren" schreibt die Ansicht ausdrücklich
+  zurück; gelöschter Ausschnitt lässt seine Reiter offen (letzter Name als Titel). Panel-Wahl bleibt stabil (keine
+  Abweichungs-Abwahl mehr; Fussbereich/Vorlage-Wahl e2e repariert). Sichtbarkeit/Overrides sind Projektdaten: ein Wechsel
+  setzt sie nur bei Abweichung, als ein Undo-Schritt. Kein Modellwechsel (Reiter waren nie im Modell). Tests
+  `viewTabs.test.ts`, e2e `viewTabs.spec.ts`. Offen: Reiter nicht mit dem Projekt gespeichert; nicht in der Tauri-App geprüft. · S
+- ◐ **[138] Dokumentation und Website.** (5.11.) Inhalt von `website/` neu geschrieben (nur Markdown in
+  `website/content/`). Bilder in `website/static/img` (WebP): App aus `dist-test` (Playwright/Chromium, Linux, SVG-Rückfall
+  statt WebGPU) und CLI-Renders (`:musterhaus-komplex … --hatch/--sketch/--ceiling`); 3D headless leer → kein 3D-Bild.
+  Struktur: `/funktionen/` (nach Gruppen, ◐ mit Nummern); `/download/`; `/stand/`; `/docs/anleitung/` (15 Kapitel);
+  `/docs/entwickler/` (5 Kapitel). Interne Links und Anker geprüft.
+  (5.11.) **Startseite und Look nach dem freigegebenen Design-Paket** (`website/_design/DESIGN-PAKET.md`, Texte wörtlich;
+  Titel „Open-Source-CAAD"): Startseite = `layouts/home.html` (eigenes Dokument, gleiche Partials `head`/`header`/`footer`
+  wie die Doku), `assets/css/home.css`, `assets/js/home.js`; gemeinsame Tokens/Schriften/Doku-Stil in `assets/css/site.css`
+  (hell + dunkel „Lichtpause", Umschalter ohne Inline-Skript, CSP-tauglich). Scroll-Hero (1000vh) nach dem Scrub-Standard:
+  Video als Blob mit Ladering und Wachhund, geglättete Zeit (rAF ruht), gegatete Seeks, DOM nur bei Änderung, fünf
+  Abschnitte in Scroll-Distanz mit eigenem Auftritt, Lesbarkeit mit Papier-Schleiern, fünf Bedingungen für die ruhige
+  Startseite live in CSS und JS (gleiche Abfragen), reduzierte Bewegung live in beide Richtungen, vollständig ohne Video.
+  Erkennungselement: Schnittmarken A–A … H–H als Abschnittswechsel (zeichnen sich beim Hineinscrollen), Masslinie mit
+  Kote, Fangpunkt je Abschnitt, Planraster als feste Ebene. „Schnitt setzen": 12 vorgerechnete Schnitte, Linie ziehen
+  oder Regler/Tastatur. **Hero-Video aus echten Plänen** (kein KI-Video): Varianten des Musterhauses komplex (nur Wände →
+  + Öffnungen → + Schraffur → + Räume/Masse; Schnitt; Ansicht Süd), mit `dossier-cli` als SVG gerechnet, in Chromium zu
+  300 Bildern 1920×1200 komponiert (Striche ziehen sich, Schnittlinie fährt, Schnitt klappt hoch, Blatt), ffmpeg
+  `-crf 20 -g 8 -keyint_min 8 +faststart`, 3.0 MB (`static/hero/`). Werkzeuge dazu liegen nicht im Repo (Scratch);
+  bei Bedarf als `scripts/site-hero/` nachziehen. Schriften selbst gehostet (`static/fonts`, OFL, s. `NOTICE`; Plex
+  umbenannt wegen reserviertem Namen). Gitea-Links → GitHub (`/blob/master/…`), Commit-Log-Shortcode entfernt (kein Netz
+  beim Bauen), `themes/hextra` gelöscht, `img{max-width:100%}`. GitHub Pages: `.github/workflows/pages.yml` (Hugo 0.147.9
+  extended, bei Pushes auf `website/**`, `actions/deploy-pages`); Links über `relURL` und Render-Hooks, damit die Seite
+  auch unter `expiredtanin.github.io/DOSSIER/` läuft. Selbsttest (Playwright/Chromium, Linux): 1280×800, 1440×900,
+  1920×1080, 375×812, 375×667, Telefon quer, Tablet hoch, reduzierte Bewegung (auch live), Video gesperrt, Wischtest
+  120/240/360, Lesbarkeit je Abschnitt hell/dunkel, kein seitliches Scrollen, Konsole sauber, Hugo ohne Warnungen.
+  Nicht in Safari/auf einem echten Telefon geprüft.
+  Offen: **Pages in den Repo-Einstellungen einschalten** (Settings → Pages → Source: GitHub Actions). Eigene Domain
+  später: erst DNS (`dossier.openbureau.ch` CNAME → `expiredtanin.github.io`), dann `website/static/CNAME` mit
+  `dossier.openbureau.ch` anlegen und in den Pages-Einstellungen eintragen. Releases-Seite ist noch leer (Knopf
+  „Dossier herunterladen" führt dorthin). Doku-Texte haben noch Halbgeviertstriche als Gedankenstriche und vereinzelt
+  „robust"/„Lösung"/„nicht nur" (Textprüfung des Pakets gilt bisher nur für die Startseite). Bilder der Fenster- und
+  Türliste: das SVG von `schedule --openings --format svg` überlappt Spalten (Textbreiten), darum zeigt die Startseite dort
+  einen Grundriss-Ausschnitt. Englisch: `[languages.en]`, `content.en/`. Mac-Screenshots (Metal, echtes 3D). · M
 
 ## Priorität 4 — später
 

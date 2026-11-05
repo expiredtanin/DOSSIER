@@ -79,6 +79,35 @@ export async function openTab(page: Page, name: string): Promise<void> {
   await page.getByRole("tab", { name, exact: true }).click();
 }
 
+/** [136] Panel „Ausschnitte" (Dock-Bereich mit diesem Reiter). */
+export function snapshotPanel(page: Page) {
+  return page.getByRole("complementary").filter({ has: page.getByRole("tab", { name: "Ausschnitte", exact: true }) });
+}
+
+/** [136] Zeile eines Ausschnitts im Panel „Ausschnitte" (öffnet das Panel). */
+export async function snapshotRow(page: Page, name: string) {
+  await openTab(page, "Ausschnitte");
+  return snapshotPanel(page).locator(".nav-row").filter({ has: page.getByText(name, { exact: true }) }).first();
+}
+
+/** [136] Ausschnitt im AKTIVEN Zeichnungs-Reiter zeigen (Klick im Panel „Ausschnitte"). */
+export async function showSnapshot(page: Page, name: string): Promise<void> {
+  await (await snapshotRow(page, name)).click();
+}
+
+/** [136] Ausschnitt in einem NEUEN Zeichnungs-Reiter öffnen (Knopf „↗" im Panel). */
+export async function openSnapshotInNewTab(page: Page, name: string): Promise<void> {
+  await (await snapshotRow(page, name)).getByRole("button", { name: "In neuem Reiter öffnen" }).click();
+}
+
+/** [136] Zeichnungs-Reiterleiste über der Zeichenfläche und ein Reiter darin. */
+export function drawingTabs(page: Page) {
+  return page.getByRole("tablist", { name: "Zeichnungen" });
+}
+export function drawingTab(page: Page, name: string) {
+  return drawingTabs(page).getByRole("tab", { name, exact: true });
+}
+
 /** Zeilen des Elemente-Baums (Reiter „Elemente"), z. B. `Aussenwand 34.5 cm W1`. */
 export function elementRows(page: Page) {
   return page.locator(".nav-row");

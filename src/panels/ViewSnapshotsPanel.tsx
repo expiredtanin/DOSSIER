@@ -12,9 +12,13 @@
 // im Tauri-WKWebView deaktiviert). Ausschnitte/Ordner lassen sich per HTML5-
 // Drag&Drop zwischen Ordnern verschieben (Zyklus-Schutz im Host).
 //
-// Die Footer-Bar (Massstab/Kombis/Overrides/Umbenennen bei angewähltem
-// Ausschnitt) und die Anwahl-Persistenz (`selectedViewSnapshotId`) bleiben
-// unverändert erhalten — sie hängen unter dem Baum.
+// [136] Ausschnitte und Zeichnungs-Reiter sind entkoppelt: Klick auf eine Zeile zeigt den Ausschnitt im
+// AKTIVEN Reiter, Doppelklick oder „↗" öffnet ihn in einem NEUEN Reiter. Anlegen/Umbenennen/Duplizieren/
+// Löschen gibt es nur hier. Die Ansicht im Reiter ändern schreibt nie still in den Ausschnitt zurück —
+// „Ausschnitt aktualisieren" im Fussbereich tut das ausdrücklich.
+//
+// Die Footer-Bar (Massstab/Kombis/Overrides/Vorlage/Umbenennen/Aktualisieren) zeigt den im Panel
+// gewählten Ausschnitt (`selectedViewSnapshotId`); die Wahl bleibt, bis ein anderer gewählt wird.
 //
 // Reine Verdrahtung über den Host-Context (usePanelHost); die Erfassungs-/
 // Anwendungslogik lebt in App.tsx (Setter/rAF) bzw. state/viewSnapshots.ts, die
@@ -175,9 +179,8 @@ export function ViewSnapshotsPanel() {
   } | null>(null);
   const [dragOverId, setDragOverId] = useState<string | "root" | null>(null);
 
-  // Der aktuell „angewählte" Ausschnitt (bleibt markiert, bis App bei einer
-  // Abweichung `selectedViewSnapshotId` auf null setzt). Footer-Bar nur sichtbar,
-  // solange dieser existiert.
+  // Der im Panel gewählte Ausschnitt ([136]: bleibt gewählt, auch wenn die Ansicht danach geändert
+  // wird). Footer-Bar nur sichtbar, solange dieser existiert.
   const selectedId = host.selectedViewSnapshotId;
   const selectedSnap = useMemo(
     () => (selectedId ? snaps.find((s) => s.id === selectedId) ?? null : null),
@@ -311,6 +314,9 @@ export function ViewSnapshotsPanel() {
           ? undefined
           : host.onApplyViewSnapshot(snap.id)
       }
+      onDoubleClick={() =>
+        renamingRow(snap.id, "snapshot") ? undefined : host.onOpenViewSnapshotInNewTab(snap.id)
+      }
       style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 10 + depth * 14 }}
     >
       {renamingRow(snap.id, "snapshot") ? (
@@ -329,6 +335,20 @@ export function ViewSnapshotsPanel() {
           {snap.name}
         </span>
       )}
+      <button
+        className="nav-add"
+        style={{ padding: "1px 5px" }}
+        title={t("viewsnap.openNewTab")}
+        aria-label={t("viewsnap.openNewTab")}
+        data-testid={`viewsnap-open-tab-${snap.id}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          host.onOpenViewSnapshotInNewTab(snap.id);
+        }}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        ↗
+      </button>
       <button
         className="nav-add"
         style={{ padding: "1px 5px" }}
@@ -601,6 +621,15 @@ export function ViewSnapshotsPanel() {
                 <button
                   className="nav-add"
                   style={{ padding: "1px 5px" }}
+                  title={t("viewsnap.updateHint")}
+                  data-testid="viewsnap-update"
+                  onClick={() => host.onUpdateViewSnapshot(selectedSnap.id)}
+                >
+                  {t("viewsnap.update")}
+                </button>
+                <button
+                  className="nav-add"
+                  style={{ padding: "1px 5px" }}
                   title={t("viewsnap.rename")}
                   onClick={startFooterRename}
                 >
@@ -639,7 +668,7 @@ export function ViewSnapshotsPanel() {
                           return rest as typeof v;
                         }),
                   );
-                  // Ansicht gleich nachziehen (sonst weicht sie vom geänderten Ausschnitt ab und die Wahl springt weg).
+                  // Den geänderten Ausschnitt gleich im aktiven Reiter zeigen.
                   host.onApplyViewSnapshot(snapId);
                 }}
               >

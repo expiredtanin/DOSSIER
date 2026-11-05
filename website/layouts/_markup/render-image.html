@@ -1,0 +1,4 @@
+{{- $u := .Destination -}}
+{{- if and (hasPrefix $u "/") (not (hasPrefix $u "//")) }}{{ $u = strings.TrimPrefix "/" $u | relURL }}{{ end -}}
+<img src="{{ $u | safeURL }}" alt="{{ .PlainText }}"{{ with .Title }} title="{{ . }}"{{ end }} loading="lazy" decoding="async">
+{{- /* kein Zeilenumbruch */ -}}
