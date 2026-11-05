@@ -383,6 +383,10 @@ export function useMouseSelectionHandlers(opts: {
       setSelection({ ...clearKinds(), stairs: [hit.id] });
       return;
     }
+    if (hit.kind === "column") {
+      setSelection({ ...clearKinds(), columns: [hit.id] });
+      return;
+    }
     if (hit.kind === "roof") {
       // Schnittlinien bleiben hier (wie bisher) gewählt.
       setSelection({ ...clearKinds(...ELEMENT_KINDS.filter((k) => k !== "sectionLines")), roofs: [hit.id] });

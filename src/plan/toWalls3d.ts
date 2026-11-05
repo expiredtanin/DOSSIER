@@ -44,7 +44,7 @@ import type { Project, Vec2 } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 import { documentFor } from "../core/document";
 import { coreEpoch } from "../engine/coreWasm";
-import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickDrawingSeg } from "./pickTypes";
+import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickColumnMesh, PickDrawingSeg } from "./pickTypes";
 import {
   type RMesh,
   type RModel3d,
@@ -328,6 +328,7 @@ export function pickGeometry(
   stairs: PickStair[];
   roofs: PickRoof[];
   contextMeshes: PickContextMesh[];
+  columns: PickColumnMesh[];
   drawings: PickDrawingSeg[];
 } {
   return documentFor(project).query("pickGeometry", [explodeGap(explode)]);

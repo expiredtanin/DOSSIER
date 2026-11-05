@@ -2331,6 +2331,14 @@ pub struct PickContextMesh {
     pub context_object_id: String,
 }
 
+/// [137] Stütze für den 3D-Pick: Welt-Dreiecke ihres Prismas.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickColumn {
+    pub tris: Vec<Tri>,
+    pub column_id: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PickGeometry {
     pub walls: Vec<RWall>,
@@ -2340,6 +2348,8 @@ pub struct PickGeometry {
     pub roofs: Vec<PickRoof>,
     #[serde(rename = "contextMeshes")]
     pub context_meshes: Vec<PickContextMesh>,
+    /// [137] Stützen (vorher im 3D nicht anwählbar).
+    pub columns: Vec<PickColumn>,
     pub drawings: Vec<PickDrawingSeg>,
 }
 
@@ -2476,8 +2486,31 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         stairs,
         roofs,
         context_meshes,
+        columns: pick_columns(p),
         drawings: pick_drawing_segs(p, &HashMap::new()),
     })
+}
+
+/// [137] Stützen als Welt-Dreiecke (Prisma aus Querschnitt und Höhenlage, wie [`emit_columns`]).
+fn pick_columns(p: &Project) -> Vec<PickColumn> {
+    let mut out = Vec::new();
+    for col in p.columns.as_deref().unwrap_or(&[]) {
+        if !(col.height > 0.0) {
+            continue;
+        }
+        let (z0, z1) = p.column_vertical_extent(col);
+        let foot: Vec<[f64; 2]> = column_footprint(col).iter().map(|q| [q.x, q.y]).collect();
+        if foot.len() < 3 || !(z0.is_finite() && z1.is_finite()) {
+            continue;
+        }
+        let (pos, idx) = crate::columns3d::prism(&foot, z0, z1);
+        let at = |i: u32| -> V3 { let i = i as usize * 3; [pos[i], pos[i + 2], -pos[i + 1]] };
+        let tris: Vec<Tri> = idx.chunks_exact(3).filter(|t| t.iter().all(|&i| (i as usize) * 3 + 2 < pos.len())).map(|t| [at(t[0]), at(t[1]), at(t[2])]).collect();
+        if !tris.is_empty() {
+            out.push(PickColumn { tris, column_id: col.id.clone() });
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -2555,6 +2588,24 @@ mod tests {
             assert!((17.0..=33.0).contains(&cx) && (12.0..=28.0).contains(&cy), "{cx} {cy}");
         }
         assert!(bg.iter().any(|tri| tri.iter().all(|q| (q[1] - 1.0).abs() < 1e-6)));
+    }
+
+    /// [137] Stützen sind im 3D anwählbar: ihr Prisma kommt mit Id in die Pick-Geometrie (Welt: x, Höhe, −y).
+    #[test]
+    fn pick_stuetzen_im_3d() {
+        let p: Project = serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+            "drawingLevels": [{"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0.0}],
+            "columns": [{"id": "k1", "type": "column", "floorId": "EG", "categoryCode": "25", "position": {"x": 2, "y": 3}, "profile": {"kind": "rect", "width": 0.3, "depth": 0.3}, "rotation": 0, "height": 2.5}],
+            "drawings2d": []
+        }))
+        .unwrap();
+        let g = pick_geometry(&p).unwrap();
+        assert_eq!(g.columns.len(), 1);
+        assert_eq!(g.columns[0].column_id, "k1");
+        let v: Vec<&V3> = g.columns[0].tris.iter().flatten().collect();
+        assert!(v.iter().all(|q| (q[0] - 2.0).abs() <= 0.15 + 1e-9 && (q[2] + 3.0).abs() <= 0.15 + 1e-9 && q[1] >= -1e-9 && q[1] <= 2.5 + 1e-9));
+        assert!(v.iter().any(|q| (q[1] - 2.5).abs() < 1e-9));
     }
 
     /// [T4] Import-Mesh glatt: Knickwinkel geht ans 3D (Vorgabe 30°), kantig ohne; JSON `creaseAngle`.
