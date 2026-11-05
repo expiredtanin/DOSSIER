@@ -12,24 +12,19 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::edges::{
-    build_edge_adjacency, build_mesh_edges, build_silhouette_edges, EdgeAdj, EDGE_FLOATS_PER_VERTEX,
-};
+use crate::edges::{build_silhouette_edges, EDGE_FLOATS_PER_VERTEX};
 use crate::grid::{build_ground_grid, GRID_FLOATS_PER_VERTEX};
 use crate::gpu_points::{PointRenderer, PointStyle};
 use crate::points::PointCloudCpu;
 use crate::math::{view_projection, Mat4};
-use crate::mesh::{
-    build_free_wall_end_caps, build_scene_mesh, build_scene_mesh_textured, build_terrain_mesh,
-    build_walls_mesh, build_walls_mesh_textured,
-};
+use crate::scene::{ChunkData, PartEntry, PartInput, PartsUpdate, Scene, SceneChange};
 use crate::section::SectionPlane;
 use crate::section_fill::{
     build_cut_cap_lines, build_cut_caps, CAP_FLOATS_PER_VERTEX, CUT_LINE_FLOATS_PER_VERTEX,
 };
 use crate::shaders::{CAP_WGSL, GHOST_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL};
 use crate::types::{
-    Camera, Mesh, MeshInput, RoofLayerInput, SlabInput, TexturedMesh, WallInput,
+    Camera, MeshInput, RoofLayerInput, SlabInput, WallInput,
     FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
 };
 
@@ -263,6 +258,70 @@ struct CapBuffers {
     vertex_count: u32,
 }
 
+/// GPU-Puffer eines Klumpens der Szene (`scene.rs`); None = leer.
+#[derive(Default)]
+struct ChunkBuffers {
+    mesh: Option<MeshBuffers>,
+    textured: Option<TexturedMeshBuffers>,
+    /// Modell-Kanten (Feature-Edges) als LineList, gezeichnet in wireframe/hidden/… und bei Schnitt.
+    edges: Option<LineBuffers>,
+    /// Schraffur-Kappen an Wand-Oberseiten und freien Wandenden (statisch, unabhaengig vom Live-Schnitt).
+    caps: Option<CapBuffers>,
+}
+
+fn vertex_buffer(device: &wgpu::Device, label: &str, data: &[f32]) -> wgpu::Buffer {
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(label),
+        contents: bytemuck::cast_slice(data),
+        usage: wgpu::BufferUsages::VERTEX,
+    })
+}
+
+fn index_buffer(device: &wgpu::Device, label: &str, data: &[u32]) -> wgpu::Buffer {
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(label),
+        contents: bytemuck::cast_slice(data),
+        usage: wgpu::BufferUsages::INDEX,
+    })
+}
+
+/// Laedt die Zeichendaten eines Klumpens hoch (leere Teile -> None).
+fn upload_chunk(device: &wgpu::Device, d: ChunkData) -> ChunkBuffers {
+    let mut out = ChunkBuffers::default();
+    if !d.edges.is_empty() {
+        out.edges = Some(LineBuffers {
+            vbo: vertex_buffer(device, "edges.vbo", &d.edges),
+            vertex_count: (d.edges.len() / EDGE_FLOATS_PER_VERTEX) as u32,
+        });
+    }
+    if !d.caps.is_empty() {
+        out.caps = Some(CapBuffers {
+            vbo: vertex_buffer(device, "wall_end_caps.vbo", &d.caps),
+            vertex_count: (d.caps.len() / CAP_FLOATS_PER_VERTEX) as u32,
+        });
+    }
+    if d.mesh.indices.is_empty() {
+        return out;
+    }
+    out.mesh = Some(MeshBuffers {
+        vbo: vertex_buffer(device, "mesh.vbo", &d.mesh.verts),
+        ibo: index_buffer(device, "mesh.ibo", &d.mesh.indices),
+        index_count: d.mesh.indices.len() as u32,
+    });
+    // Texturiertes Pendant: [pos, normal, uv] + Material-Ebene je Vertex (fehlt sie: -1 = Schachbrett).
+    let vertex_count = d.textured.verts.len() / TEXTURED_FLOATS_PER_VERTEX;
+    let layer_data: Vec<f32> =
+        if d.textured.layers.len() == vertex_count { d.textured.layers } else { vec![-1.0; vertex_count] };
+    out.textured = Some(TexturedMeshBuffers {
+        vbo: vertex_buffer(device, "mesh.textured.vbo", &d.textured.verts),
+        layer_vbo: vertex_buffer(device, "mesh.textured.layer.vbo", &layer_data),
+        ibo: index_buffer(device, "mesh.textured.ibo", &d.textured.indices),
+        index_count: d.textured.indices.len() as u32,
+    })
+    ;
+    out
+}
+
 /// Der native 3D-Renderer: haelt die Pipeline, das Uniform (View-Projektion +
 /// Licht) und das aktuell hochgeladene Mesh. Ein Tiefenpuffer wird passend zur
 /// Ziel-Groesse (neu) angelegt.
@@ -326,9 +385,6 @@ pub struct Renderer {
     /// Grundlage des Luftbild-Overlays. Bei `upload_model` erzeugt; None = kein
     /// Terrain. Wird nur gezeichnet, wenn zusaetzlich `aerial` gesetzt ist.
     terrain_overlay: Option<MeshBuffers>,
-    /// Gecachte Kanten-Adjazenz des Modells (bei `upload_*` erzeugt) — Grundlage
-    /// der blickabhaengigen Silhouette (Stil `Contour`). Leer = kein Modell.
-    edge_adj: Vec<EdgeAdj>,
     /// Zuletzt gebaute Silhouetten-LineList (Stil `Contour`) + die Kamera-Signatur,
     /// fuer die sie gilt — bei Blickwechsel neu abgeleitet (nicht je Frame blind).
     silhouette: Option<LineBuffers>,
@@ -354,15 +410,11 @@ pub struct Renderer {
     texture_uploaded: bool,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
-    mesh: Option<MeshBuffers>,
-    /// Texturiertes Wand-Mesh (`[pos, normal, uv]`) — zweiter, additiver Puffer
-    /// neben `mesh`. Nur im Stil `Textured` gezeichnet; bei `upload_*` zusammen mit
-    /// `mesh` erzeugt. None = kein Mesh geladen.
-    textured_mesh: Option<TexturedMeshBuffers>,
-    /// Modell-Kanten (Feature-Edges, edges.rs) als LineList. Einmalig bei
-    /// `set_model`/`upload_*` erzeugt und gecacht (nicht je Frame). Gezeichnet in
-    /// den Stilen wireframe/hidden.
-    edges: Option<LineBuffers>,
+    /// Das Modell als Teile ([58], `scene.rs`): CPU-Netze je Teil, Kanten-Index, Klumpen-Zuordnung.
+    scene: Scene,
+    /// GPU-Puffer je Klumpen der Szene (Flächen, texturiert, Kanten, Wand-Kappen); ein Teil-Update
+    /// lädt nur die geänderten Klumpen neu hoch.
+    chunks: Vec<ChunkBuffers>,
     /// Bodengitter-Vertices (None = nicht erzeugt). Wird nur gezeichnet, wenn
     /// zusaetzlich `grid_visible` gesetzt ist.
     grid: Option<LineBuffers>,
@@ -387,12 +439,6 @@ pub struct Renderer {
     /// aktiv / keine Schnittgeometrie. Ueber `set_cut_caps` gesetzt/geloescht,
     /// gezeichnet NACH den Flaechen, VOR Kanten/Grid/Highlight.
     caps: Option<CapBuffers>,
-    /// STATISCHE Schraffur-Kappen an freien Wandenden (`mesh::build_free_wall_end_caps`,
-    /// kein Live-Schnitt noetig — unabhaengig von `caps`/`cut_lines`, die nur bei
-    /// aktivem Live-Schnitt existieren). Bei `upload_model` neu gebaut; None = keine
-    /// Wand hat eine offene, schraffierte Kante. Immer gezeichnet, wenn Flaechen
-    /// gezeichnet werden (nicht an den Live-Schnitt-Zustand gebunden).
-    wall_end_caps: Option<CapBuffers>,
     /// Schnitt-Umrisslinien (Cut-Cap-Kanten, P2) als Ribbon-TriangleList
     /// (`[pos, color]`). None = kein Schnitt aktiv / keine Kanten. Ueber
     /// `set_cut_lines` gesetzt/geloescht, gezeichnet NACH den Caps.
@@ -1069,7 +1115,6 @@ impl Renderer {
             aerial_sampler,
             aerial: None,
             terrain_overlay: None,
-            edge_adj: Vec::new(),
             silhouette: None,
             silhouette_key: None,
             texture_bind_group,
@@ -1080,9 +1125,8 @@ impl Renderer {
             texture_uploaded: false,
             bind_group,
             uniform,
-            mesh: None,
-            textured_mesh: None,
-            edges: None,
+            scene: Scene::new(),
+            chunks: Vec::new(),
             grid: None,
             highlight: None,
             drawing_lines: None,
@@ -1090,7 +1134,6 @@ impl Renderer {
             pattern_lines: None,
             pattern_key: None,
             caps: None,
-            wall_end_caps: None,
             cut_lines: None,
             grid_visible: false,
             style: RenderStyle::Shaded,
@@ -1147,11 +1190,12 @@ impl Renderer {
 
     /// Erzeugt das Mesh aus geflachten Waenden und laedt die Puffer hoch.
     pub fn upload_walls(&mut self, device: &wgpu::Device, walls: &[WallInput]) {
-        self.upload_mesh(device, build_walls_mesh(walls), build_walls_mesh_textured(walls));
+        self.upload_model(device, walls, &[], &[]);
     }
 
     /// Erzeugt das Mesh aus Waenden, Deckenplatten UND rohen Kontext-Meshes
-    /// (Terrain/importierte Volumen, siehe `MeshInput`) und laedt die Puffer hoch.
+    /// (Terrain/importierte Volumen, siehe `MeshInput`) und laedt die Puffer hoch
+    /// (ein einziger Teil der Szene, voller Neuaufbau).
     pub fn upload_model(
         &mut self,
         device: &wgpu::Device,
@@ -1159,133 +1203,43 @@ impl Renderer {
         slabs: &[SlabInput],
         meshes: &[MeshInput],
     ) {
-        self.upload_mesh(
-            device,
-            build_scene_mesh(walls, slabs, meshes),
-            build_scene_mesh_textured(walls, slabs, meshes),
-        );
-        // Terrain-Overlay-Puffer (nur Gelaende-Dreiecke) fuer das Luftbild-Drapieren.
-        let terrain = build_terrain_mesh(meshes);
-        self.terrain_overlay = if terrain.indices.is_empty() {
-            None
-        } else {
-            let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("terrain.overlay.vbo"),
-                contents: bytemuck::cast_slice(&terrain.verts),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let ibo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("terrain.overlay.ibo"),
-                contents: bytemuck::cast_slice(&terrain.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-            Some(MeshBuffers {
-                vbo,
-                ibo,
-                index_count: terrain.indices.len() as u32,
-            })
-        };
-        // Schraffur-Kappen an freien (unangeschlossenen) Wandenden — statisch aus
-        // der Wandkonnektivitaet, unabhaengig vom Live-Schnitt-Zustand.
-        let end_caps = build_free_wall_end_caps(walls);
-        self.wall_end_caps = if end_caps.is_empty() {
-            None
-        } else {
-            let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("wall_end_caps.vbo"),
-                contents: bytemuck::cast_slice(&end_caps),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            Some(CapBuffers {
-                vbo,
-                vertex_count: (end_caps.len() / CAP_FLOATS_PER_VERTEX) as u32,
-            })
-        };
+        let part = PartInput { walls: walls.to_vec(), slabs: slabs.to_vec(), meshes: meshes.to_vec(), roof_layers: Vec::new() };
+        self.update_parts(device, PartsUpdate { reset: true, remove: Vec::new(), upsert: vec![PartEntry::new("", part)] });
     }
 
-    /// Laedt ein fertiges Mesh in die GPU-Puffer (oder loescht es bei leer) und
-    /// erzeugt ZUGLEICH die gecachten Modell-Kanten (Feature-Edges, edges.rs) fuer
-    /// die Stile wireframe/hidden — einmalig hier, nicht je Frame.
-    fn upload_mesh(&mut self, device: &wgpu::Device, mesh: Mesh, tex_mesh: TexturedMesh) {
+    /// Teil-Update des Modells ([58], `scene.rs`): fuegt Teile hinzu, ersetzt oder entfernt sie und
+    /// laedt nur die betroffenen Klumpen neu hoch (Flaechen, texturiert, Kanten, Wand-Kappen; das
+    /// Gelaende-Overlay nur, wenn sich Gelaende geaendert hat). `reset` = ganzes Modell neu.
+    pub fn update_parts(&mut self, device: &wgpu::Device, upd: PartsUpdate) -> SceneChange {
+        let ch = self.scene.apply(upd);
         // Silhouette-Cache verwerfen (neues Modell) — wird bei Bedarf neu gebaut.
         self.silhouette = None;
         self.silhouette_key = None;
-        if mesh.indices.is_empty() {
-            self.mesh = None;
-            self.textured_mesh = None;
-            self.edges = None;
-            self.edge_adj = Vec::new();
-            return;
+        if ch.reset {
+            self.chunks.clear();
         }
+        self.chunks.resize_with(self.scene.chunk_count(), ChunkBuffers::default);
+        for &c in &ch.dirty_chunks {
+            self.chunks[c] = upload_chunk(device, self.scene.chunk_data(c));
+        }
+        if ch.terrain_changed {
+            let terrain = self.scene.terrain();
+            self.terrain_overlay = if terrain.indices.is_empty() {
+                None
+            } else {
+                Some(MeshBuffers {
+                    vbo: vertex_buffer(device, "terrain.overlay.vbo", &terrain.verts),
+                    ibo: index_buffer(device, "terrain.overlay.ibo", &terrain.indices),
+                    index_count: terrain.indices.len() as u32,
+                })
+            };
+        }
+        ch
+    }
 
-        // Kanten-Adjazenz einmalig ableiten: Grundlage der statischen Feature-Edges
-        // UND der blickabhaengigen Silhouette (Stil `Contour`).
-        self.edge_adj = build_edge_adjacency(&mesh);
-        // Kanten aus der Mesh-Geometrie ableiten und (falls vorhanden) hochladen.
-        let edge_verts = build_mesh_edges(&mesh);
-        self.edges = if edge_verts.is_empty() {
-            None
-        } else {
-            let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("edges.vbo"),
-                contents: bytemuck::cast_slice(&edge_verts),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            Some(LineBuffers {
-                vbo,
-                vertex_count: (edge_verts.len() / EDGE_FLOATS_PER_VERTEX) as u32,
-            })
-        };
-
-        let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh.vbo"),
-            contents: bytemuck::cast_slice(&mesh.verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let ibo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh.ibo"),
-            contents: bytemuck::cast_slice(&mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-        self.mesh = Some(MeshBuffers {
-            vbo,
-            ibo,
-            index_count: mesh.indices.len() as u32,
-        });
-
-        // Texturiertes Pendant (planare Welt-UV je Vertex + Material-Ebenen-Puffer,
-        // siehe `build_scene_mesh_textured`) in zwei Vertex-Puffer hochladen. Die
-        // Geometrie bleibt bitgleich zum Alt-Pfad; der Stil `Textured` hat ohne
-        // Re-Meshing seine Puffer bereit.
-        let tvbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh.textured.vbo"),
-            contents: bytemuck::cast_slice(&tex_mesh.verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let tibo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh.textured.ibo"),
-            contents: bytemuck::cast_slice(&tex_mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-        // Material-Ebenen-Puffer (1 f32 je Vertex). Fehlt er (kein Material-Bau),
-        // mit `-1` je Vertex fuellen -> alle Vertices auf das Fallback-Schachbrett.
-        let vertex_count = tex_mesh.verts.len() / TEXTURED_FLOATS_PER_VERTEX;
-        let layer_data: Vec<f32> = if tex_mesh.layers.len() == vertex_count {
-            tex_mesh.layers
-        } else {
-            vec![-1.0; vertex_count]
-        };
-        let tlvbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh.textured.layer.vbo"),
-            contents: bytemuck::cast_slice(&layer_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        self.textured_mesh = Some(TexturedMeshBuffers {
-            vbo: tvbo,
-            layer_vbo: tlvbo,
-            ibo: tibo,
-            index_count: tex_mesh.indices.len() as u32,
-        });
+    /// Die Szene (Teile, Ausdehnung, Eingaben fuer den Live-Schnitt).
+    pub fn scene(&self) -> &Scene {
+        &self.scene
     }
 
     /// Setzt die Richtung ZUM Directional-Light (Sonne, world). Das hemisphaerische
@@ -1853,7 +1807,7 @@ impl Renderer {
 
         // Silhouette (Stil `Contour`) je Blickwinkel neu ableiten — aber nur, wenn
         // sich die Kamera merklich bewegt hat (Signatur-Cache), nicht blind je Frame.
-        if self.style == RenderStyle::Contour && !self.edge_adj.is_empty() {
+        if self.style == RenderStyle::Contour && self.scene.has_edges() {
             let eye = camera.eye;
             let mut fwd = [
                 camera.target[0] - eye[0],
@@ -1877,7 +1831,7 @@ impl Renderer {
                 q(fwd[2], 1000.0),
             ];
             if self.silhouette.is_none() || self.silhouette_key != Some(key) {
-                let verts = build_silhouette_edges(&self.edge_adj, eye, fwd, perspective);
+                let verts = build_silhouette_edges(self.scene.edge_adj(), eye, fwd, perspective);
                 self.silhouette = if verts.is_empty() {
                     None
                 } else {
@@ -1957,16 +1911,16 @@ impl Renderer {
                     // ([pos, normal, uv]) + zusaetzliche Textur-Bind-Group (group 1).
                     // Globals bleiben group 0. Fehlt der texturierte Puffer (kein
                     // Mesh geladen), wird nichts gezeichnet.
-                    if let Some(t) = &self.textured_mesh {
-                        pass.set_pipeline(&self.textured_pipeline);
-                        pass.set_bind_group(0, &self.bind_group, &[]);
-                        pass.set_bind_group(1, &self.texture_bind_group, &[]);
+                    pass.set_pipeline(&self.textured_pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_bind_group(1, &self.texture_bind_group, &[]);
+                    for t in self.chunks.iter().filter_map(|c| c.textured.as_ref()) {
                         pass.set_vertex_buffer(0, t.vbo.slice(..));
                         pass.set_vertex_buffer(1, t.layer_vbo.slice(..));
                         pass.set_index_buffer(t.ibo.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..t.index_count, 0, 0..1);
                     }
-                } else if let Some(m) = &self.mesh {
+                } else {
                     let face_pipeline = if self.style.needs_biased_face_pipeline()
                         || force_edges_for_section
                     {
@@ -1976,9 +1930,11 @@ impl Renderer {
                     };
                     pass.set_pipeline(face_pipeline);
                     pass.set_bind_group(0, &self.bind_group, &[]);
-                    pass.set_vertex_buffer(0, m.vbo.slice(..));
-                    pass.set_index_buffer(m.ibo.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..m.index_count, 0, 0..1);
+                    for m in self.chunks.iter().filter_map(|c| c.mesh.as_ref()) {
+                        pass.set_vertex_buffer(0, m.vbo.slice(..));
+                        pass.set_index_buffer(m.ibo.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..m.index_count, 0, 0..1);
+                    }
                 }
             }
 
@@ -2006,9 +1962,9 @@ impl Renderer {
             //      der (weiterhin vorhandenen) flach eingefaerbten End-Kappe im
             //      Hauptpuffer und gewinnt den Tiefentest.
             if self.style.draws_faces() {
-                if let Some(wc) = &self.wall_end_caps {
-                    pass.set_pipeline(&self.cap_pipeline);
-                    pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_pipeline(&self.cap_pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                for wc in self.chunks.iter().filter_map(|c| c.caps.as_ref()) {
                     pass.set_vertex_buffer(0, wc.vbo.slice(..));
                     pass.draw(0..wc.vertex_count, 0..1);
                 }
@@ -2042,9 +1998,9 @@ impl Renderer {
             //    gegen die (gebiasten) Flaechen -> verdeckte Kanten fallen weg.
             //    Im Wireframe ohne Flaechen -> alle Kanten sichtbar.
             if self.style.draws_edges() || force_edges_for_section {
-                if let Some(e) = &self.edges {
-                    pass.set_pipeline(&self.grid_pipeline);
-                    pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_pipeline(&self.grid_pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                for e in self.chunks.iter().filter_map(|c| c.edges.as_ref()) {
                     pass.set_vertex_buffer(0, e.vbo.slice(..));
                     pass.draw(0..e.vertex_count, 0..1);
                 }

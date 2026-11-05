@@ -33,6 +33,7 @@ use web_sys::HtmlCanvasElement;
 use crate::gpu::Renderer;
 use crate::math::preset_camera;
 use crate::section::{cut_section, SectionPlane};
+use crate::scene::{PartEntry, PartInput, PartsUpdate};
 use crate::types::{Camera, CameraPreset, MeshInput, Projection, RoofLayerInput, SlabInput, WallInput};
 
 /// JSON-Eingabe des Modells: Waende (bereits in Teilquader zerlegt, siehe
@@ -106,76 +107,34 @@ pub struct WebModelRenderer {
     /// Ziel/Distanz, mirror der TS-`fitTargetDist` in Wasm3DViewport.tsx).
     /// `None` bei leerem Modell (kein Wall-/Slab-Vertex) oder vor `set_model`.
     bounds: Option<([f32; 3], [f32; 3])>,
-    /// Gecachte Wand-/Decken-Eingabe des zuletzt gesetzten Modells. `set_model`
-    /// verwirft sie nach dem GPU-Upload NICHT (anders als der Renderer selbst),
-    /// weil der Live-Schnitt (`set_section_plane`) daraus jederzeit die
-    /// Cut-Cap-Geometrie neu berechnen koennen muss (GPU-frei, `cut_section`).
-    walls: Vec<WallInput>,
-    slabs: Vec<SlabInput>,
-    /// Gecachte Dach-Schichten (analog `walls`/`slabs`) fuer denselben Zweck —
-    /// der Live-Schnitt braucht sie bei jedem `set_section_plane`/`set_model`.
-    roof_layers: Vec<RoofLayerInput>,
+    /// Wand-/Decken-/Dach-Schicht-Eingabe des Modells fuer den Live-Schnitt (`cut_section`), aus den
+    /// Teilen der Szene zusammengesetzt — erst bei aktivem Schnitt, verworfen bei jeder Modell-Aenderung.
+    section_inputs: Option<(Vec<WallInput>, Vec<SlabInput>, Vec<RoofLayerInput>)>,
     /// Aktueller Live-Schnitt-Zustand: aktiv? + Ebene (point/normal). Gemerkt,
     /// damit ein `set_model` bei aktivem Schnitt die Caps automatisch neu baut.
     section: Option<([f32; 3], [f32; 3])>,
 }
 
-/// Achsparallele Bounding-Box des Modells in Welt-Metern (Y-up), aus Waenden +
-/// Decken. Mirror der TS-`fitTargetDist`-Grow-Schleife (Wasm3DViewport.tsx):
-/// Wand-Achsenpunkte auf Basis-/Firsthoehe, Decken-Umriss auf Unter-/Oberkante.
-/// `None` bei leerem Modell.
-fn model_bounds(
-    walls: &[WallInput],
-    slabs: &[SlabInput],
-    meshes: &[MeshInput],
-) -> Option<([f32; 3], [f32; 3])> {
-    let mut min = [f32::INFINITY; 3];
-    let mut max = [f32::NEG_INFINITY; 3];
-    let mut grow = |x: f32, y: f32, z: f32| {
-        if x < min[0] {
-            min[0] = x;
+impl WebModelRenderer {
+    /// Wendet ein Teil-Update an, merkt die Ausdehnung und baut bei aktivem Schnitt die Kappen neu.
+    fn apply_parts(&mut self, upd: PartsUpdate) -> usize {
+        let ch = self.renderer.update_parts(&self.device, upd);
+        self.bounds = self.renderer.scene().bounds();
+        self.section_inputs = None;
+        if let Some((point, normal)) = self.section {
+            self.refresh_section(true, point, normal);
         }
-        if x > max[0] {
-            max[0] = x;
-        }
-        if y < min[1] {
-            min[1] = y;
-        }
-        if y > max[1] {
-            max[1] = y;
-        }
-        if z < min[2] {
-            min[2] = z;
-        }
-        if z > max[2] {
-            max[2] = z;
-        }
-    };
-    for w in walls {
-        grow(w.start[0], w.base_elevation, w.start[1]);
-        grow(w.end[0], w.base_elevation + w.height, w.end[1]);
+        ch.remeshed
     }
-    for s in slabs {
-        for p in &s.outline {
-            grow(p[0], s.z_bottom, p[1]);
-            grow(p[0], s.z_top, p[1]);
+
+    fn refresh_section(&mut self, active: bool, point: [f32; 3], normal: [f32; 3]) {
+        if active && self.section_inputs.is_none() {
+            self.section_inputs = Some(self.renderer.scene().collect_inputs());
         }
+        let empty = (Vec::new(), Vec::new(), Vec::new());
+        let (w, s, r) = self.section_inputs.as_ref().unwrap_or(&empty);
+        self.renderer.update_section(&self.device, active, point, normal, w, s, r);
     }
-    // Meshes (Daecher, Extrusionen, Stuetzen UND importierte Gebaeude/Terrain):
-    // model (x,y,z=Hoehe) -> world (x, z, y). Ohne sie kann ein Praeset/Fit den
-    // (evtl. weit entfernten) Import nicht rahmen.
-    for m in meshes {
-        let p = &m.positions;
-        let mut i = 0;
-        while i + 2 < p.len() {
-            grow(p[i], p[i + 2], p[i + 1]);
-            i += 3;
-        }
-    }
-    if !min[0].is_finite() {
-        return None;
-    }
-    Some((min, max))
 }
 
 #[wasm_bindgen]
@@ -267,41 +226,31 @@ impl WebModelRenderer {
             renderer,
             camera: Camera::default(),
             bounds: None,
-            walls: Vec::new(),
-            slabs: Vec::new(),
-            roof_layers: Vec::new(),
+            section_inputs: None,
             section: None,
         })
     }
 
     /// Setzt/aktualisiert das darzustellende Modell aus einem JSON-String
-    /// (Format = `{ walls: WallInput[], slabs?: SlabInput[] }`, identisch zum
-    /// nativen Push). Laedt die GPU-Puffer neu hoch; ruft NICHT selbst `render`.
+    /// (Format = `{ walls: WallInput[], slabs?: SlabInput[], meshes?, roofLayers? }`, identisch zum
+    /// nativen Push) — als einziger Teil der Szene, alle GPU-Puffer neu. Ruft NICHT selbst `render`.
     /// Merkt sich zusaetzlich die Bounding-Box (fuer `set_view_preset`).
     pub fn set_model(&mut self, json: &str) -> Result<(), JsValue> {
         let model: ModelInput = serde_json::from_str(json)
             .map_err(|e| JsValue::from_str(&format!("Modell parsen: {e}")))?;
-        self.bounds = model_bounds(&model.walls, &model.slabs, &model.meshes);
-        self.renderer
-            .upload_model(&self.device, &model.walls, &model.slabs, &model.meshes);
-        // Wand-/Decken-/Dach-Eingabe fuer den Live-Schnitt cachen (Klon, da der
-        // Renderer sie nur zu GPU-Puffern verarbeitet und verwirft).
-        self.walls = model.walls;
-        self.slabs = model.slabs;
-        self.roof_layers = model.roof_layers;
-        // Ist der Schnitt aktiv, die Caps am neuen Modell neu aufbauen.
-        if let Some((point, normal)) = self.section {
-            self.renderer.update_section(
-                &self.device,
-                true,
-                point,
-                normal,
-                &self.walls,
-                &self.slabs,
-                &self.roof_layers,
-            );
-        }
+        let part = PartInput { walls: model.walls, slabs: model.slabs, meshes: model.meshes, roof_layers: model.roof_layers };
+        self.apply_parts(PartsUpdate { reset: true, remove: Vec::new(), upsert: vec![PartEntry::new("", part)] });
         Ok(())
+    }
+
+    /// Teil-Update des Modells ([58], `scene.rs`): JSON `{ reset?, remove?: [id], upsert?: [{ id,
+    /// walls?, slabs?, meshes?, roofLayers? }] }`. Ersetzt/entfernt nur die genannten Teile und laedt
+    /// nur die betroffenen GPU-Klumpen neu hoch; `reset` leert vorher. Ruft NICHT selbst `render`.
+    /// Gibt die Zahl der neu vernetzten Teile zurueck (Diagnose).
+    pub fn set_parts(&mut self, json: &str) -> Result<u32, JsValue> {
+        let upd: PartsUpdate =
+            serde_json::from_str(json).map_err(|e| JsValue::from_str(&format!("Teile parsen: {e}")))?;
+        Ok(self.apply_parts(upd) as u32)
     }
 
     /// Live-Schnitt ein-/ausschalten und die Schnittebene setzen. `active=false`
@@ -325,15 +274,7 @@ impl WebModelRenderer {
         let point = [px, py, pz];
         let normal = [nx, ny, nz];
         self.section = if active { Some((point, normal)) } else { None };
-        self.renderer.update_section(
-            &self.device,
-            active,
-            point,
-            normal,
-            &self.walls,
-            &self.slabs,
-            &self.roof_layers,
-        );
+        self.refresh_section(active, point, normal);
         Ok(())
     }
 

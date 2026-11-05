@@ -22,6 +22,7 @@ pub mod pattern_lines;
 pub mod points;
 pub(crate) mod openings;
 pub mod roof_cut;
+pub mod scene;
 pub mod section;
 pub mod section_boolean;
 pub mod section_fill;
