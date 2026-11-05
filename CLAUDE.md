@@ -127,7 +127,10 @@ Notizen: `docs/*.md`, `PENDENZEN.md` — was alle wissen müssen, gehört in `TO
 ## Ergebnis ansehen
 
 Plan/Schnitt/Ansicht headless: `node dist-cli/dossier-cli.mjs projekt.obp plan --scale 100 --out eg.svg`
-und Chromium-Screenshot (Playwright ist vorinstalliert). Weitere CLI-Befehle: `kennzahlen`, `sun --when …`,
+und Chromium-Screenshot (Playwright ist vorinstalliert). **Der CLI-SVG hat bewusst keine Schraffur-Linien**
+(nur Grundfüllung, s. Kopf `src/export/planToSvgString.ts`; gleicher Serializer für KI-Werkzeuge/Öffnungsvorschau). Schraffuren
+steckt nur der Druck-/PDF-Export der App (`sceneToPrintSvg`, Kern `plan/print_svg.rs`) und die Szene: `--format json`
+(render2d-Szene) enthält sie; zum Ansehen die Szene mit render2d rendern. Weitere CLI-Befehle: `kennzahlen`, `sun --when …`,
 `ifc`, `bench`. **3D headless (nur macOS):** `dossier-cli … model3d --out m.json`, dann
 `src-tauri/target/release/render_png m.json out.png --view iso --style shaded-edges` (vorher
 `npm run build:render-png`). App im Browser: `vite build --outDir dist-test`, Vorschau auf Port 5188.
