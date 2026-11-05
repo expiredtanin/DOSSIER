@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "check": "node scripts/check.mjs",
     "e2e": "playwright test",
+    "e2e:perf": "E2E_PERF=1 playwright test bigBuilding",
     "build:render-png": "cargo build --release --features png --bin render_png --manifest-path src-tauri/render3d/Cargo.toml",
     "gen:types": "DOSSIER_GEN_TYPES=1 cargo test --quiet --lib --manifest-path src-tauri/core/Cargo.toml ts_types_aktuell",
     "build:cli": "esbuild src/cli/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist-cli/dossier-cli.mjs --log-level=warning",
