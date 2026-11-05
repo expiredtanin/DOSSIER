@@ -283,3 +283,6 @@ body.paused *, body.paused *::before, body.paused *::after { animation-play-stat
 @media (prefers-reduced-motion: reduce) {
   .cm-line i, .cm-end svg, .cm-end b, .dimline i, .step-list .step, .feat-list li, .statement, .reveal, .end .wall { opacity: 1 !important; transform: none !important; }
 }
+@media (max-width: 720px) {
+  .hero, .scrub .hero { padding-top: 8.5rem; }
+}
