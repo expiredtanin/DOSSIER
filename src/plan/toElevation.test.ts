@@ -505,7 +505,7 @@ describe("Dächer auf L-Grundriss in der Ansicht", () => {
 
 describe("toElevation — Tür-Teilverglasung (glazingRatio)", () => {
   const GLASS_FILL_COLOR = "#d3d8dd";
-  const DOOR_LEAF_FILL_COLOR = "#ede6d9";
+  const DOOR_LEAF_FILL_COLOR = "#ececec";
 
   function doorProject(dt: {
     leafStyle: "glatt" | "kassette" | "glas";

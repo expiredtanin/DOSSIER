@@ -2713,12 +2713,32 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   `scaleLineWeights` an. Bestehende Projekte behalten ihre Ebenen-/Element-Stärken; neu wirken nur Ableitung, Faktor
   und Fallbacks (ohne eigene Werte). Tests: `strichstaerken_rangfolge_je_massstab`, `schnittkante_schwer_fugen_fein`,
   `silhouette_mittel_details_fein`, `hoehenlinien_enden_am_gebaeude`, `raumstempel_je_massstab`. Goldens neu (Strichstärken, Masszahlgrösse,
-  Höhenlinien). Offen: dünne Schichten (Putz, Parkett) laufen in 1:100 zu einem Balken zusammen (Detailgrad sollte
-  sie zusammenfassen); Achsen laufen in Ansicht/Grundriss durch das Gebäude; Raumstempel farbig statt schwarz im
-  Druck ohne Schwarz-Weiss; Schatten im EG-Grundriss überdeckt Bemassung; eigene Stempel (`Room.stamp`) behalten in
-  1:200 alle Zeilen; ein Geschoss in 1:500 braucht Detail „grob" (sonst Stempel/Masse übereinander — die CLI rechnet
-  immer „mittel"); gestapelte Höhenlinien an Stützmauer/Baugrube wirken als brauner Balken. Nur Linux/CLI-SVG + Chromium geprüft,
-  nicht in der Tauri-App (Bildschirm-Modus nicht angesehen). · M
+  Höhenlinien).
+  (5.11., Teil 2) **Strichstärken** nach Entscheid Maintainer: grösste Standard-Stärke 0.25 bei 1:100 — Kategorien
+  Wände/Stützen/Träger 0.25, Decken/Dächer/Türen-Fenster/Treppen/Gebäude 0.18 (`sampleProject.ts`, neue Projekte);
+  Schnitt-Umriss und Terrain 0.25, Ansicht Terrain 0.25 / Silhouette 0.18 / Rahmen 0.13, Schnittlinie im Grundriss 0.25,
+  Skizzen-Doppelzug ab 0.25, importierte Dächer 0.18; Massstabsfaktor bleibt. **Tusche-Standard:** Kategorien,
+  Kontext/Gelände/Höhenlinien, Baurecht (Parzelle/zulässig; Verstösse bleiben rot), Schatten, Achsen, Extrusionen,
+  Glas/Türblatt der Ansicht in Schwarz/Grau statt farbig; Raumstempel in Tinte (Farbe nur aus Darstellungsregel oder
+  Text-Auszeichnung). Der vorhandene Modus „Schwarz-Weiss" ist KEIN brauchbarer Standard (ohne Wandschraffur, ohne
+  Schatten/Luftbilder, Gelände schwarz) — Standard bleibt „Farbig", jetzt mit schwarzen Standardfarben. **Dünne
+  Schichten:** im Detail „mittel" ab 1:100 gehen Schichten < 0.25 mm Papierdicke in der Nachbarschicht auf (Stil der
+  Nachbarschicht, keine Fuge dazwischen; `walls::thin_layer_targets`); 1:50 und „fein" zeigen alle Schichten.
+  **Achsen:** im Grundriss an der Gebäudegrundfläche unterbrochen (Stand der Raster-Stücke folgt Wänden/Körpern/Dächern),
+  in der Ansicht nur Stummel unter/über dem Bild mit Blase. **Massstab:** „mittel" zeichnet ab 1:200 automatisch wie
+  „grob" (`domains::effective_detail`, auch Layout-Viewports), Raumstempel bleiben (explizit „grob": ohne Stempel wie
+  bisher); eigene Stempel ab 1:200 ohne Nutzungs-/Personenzeile; ab 1:500 nur der Name und keine Masslinien.
+  **Schatten** heller (Deckung 0.16, grau). **Höhenlinien** enger als 0.6 mm auf dem Papier: nur jede zweite, unter
+  0.3 mm nur Zähllinien (je Dreieck nach Gefälle). **Bildschirm** (render2d): Linien unter 1 Geräte-px zeichnen ihre
+  Breite als Deckung (min. 0.35) statt alle 1 px — die Rangfolge bleibt auch herausgezoomt sichtbar. Tests:
+  `duenne_schichten_je_massstab_zusammengefasst`, `achsraster_unterbrochen_im_gebaeude`, `senkrechte_achsen_mit_blase`
+  (Stummel), `raumstempel_je_massstab` (1:500, Tinte, eigene Stempel), `mittel_ab_1_200_automatisch_grob`,
+  `hoehenlinien_ausgeduennt_wo_zu_eng`, WGSL-Validierung. Goldens neu (Strichstärken, Farben, Schichten, Achsen).
+  Offen: Schnitt fasst dünne Decken-/Dachschichten (Parkett, Putz) noch nicht zusammen; Ansicht zeigt im Modus
+  „Farbig" weiter Materialfarben (Ziegelrot, Fassade) — für Tusche-Ansicht braucht es einen eigenen Modus oder einen
+  brauchbaren „Schwarz-Weiss"-Modus; Achsblasen in 1:500 gross (Papiermass fest); in 1:200 („grob") keine
+  Türaufschläge; enge Räume (Bad/Réduit) Stempel überlappen; Stifte (`penSets`) nicht angepasst. Nur Linux/CLI-SVG +
+  Chromium geprüft, nicht in der Tauri-App (Bildschirm-Deckung nur per WGSL-Validierung geprüft, nicht angesehen). · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
