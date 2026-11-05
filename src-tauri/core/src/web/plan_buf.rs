@@ -1,4 +1,4 @@
-//! Bindungen des Plan-Puffers (`crate::plan_buf`). Format s. dort.
+//! Bindungen des Plan-Puffers (`crate::plan::buf`). Format s. dort.
 //!
 //! Gehaltene Puffer: TS übergibt einen Plan-Puffer einmal (`plan_buf_hold`) und kompiliert danach
 //! beliebig viele GPU-Chunks daraus (`gpu_compile_held`), ohne ihn je Chunk erneut zu kopieren.
@@ -80,13 +80,13 @@ pub fn plan_buf_touch(id: u32) -> bool {
 /// fremder Version oder kaputtem Puffer.
 #[wasm_bindgen]
 pub fn plan_buf_recode(buf: &[u8]) -> Vec<u8> {
-    crate::plan_buf::recode(buf)
+    crate::plan::buf::recode(buf)
 }
 
 /// Puffer im Kern halten; Ergebnis ist die Nummer (≥ 1), 0 bei unlesbarem Puffer.
 #[wasm_bindgen]
 pub fn plan_buf_hold(buf: &[u8]) -> u32 {
-    if crate::plan_buf::View::parse(buf).is_none() {
+    if crate::plan::buf::View::parse(buf).is_none() {
         return 0;
     }
     HELD.with(|h| {
@@ -125,7 +125,7 @@ pub(crate) fn held_for_segs(segs: &[f64]) -> Option<Vec<(u32, Rc<[u8]>)>> {
     }
     let mut out: Vec<(u32, Rc<[u8]>)> = Vec::new();
     for s in segs.chunks_exact(3) {
-        let nr = crate::plan_buf::whole(s[0])? as u32;
+        let nr = crate::plan::buf::whole(s[0])? as u32;
         if !out.iter().any(|e| e.0 == nr) {
             out.push((nr, held_rc(nr)?));
         }

@@ -1,8 +1,8 @@
-//! Bindung des SVG-Text-Exports (`crate::plan_svg`) auf gehaltenen Plan-Puffern (Abschnitte wie
+//! Bindung des SVG-Text-Exports (`crate::plan::svg`) auf gehaltenen Plan-Puffern (Abschnitte wie
 //! `plan_parts`). Leerer Text = Puffer fehlt oder kaputt (TS legt neu ab und fragt nochmals).
 
-use crate::plan_parts::parts_from;
-use crate::plan_svg::{plan_svg, SvgOptions};
+use crate::plan::parts::parts_from;
+use crate::plan::svg::{plan_svg, SvgOptions};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 /// `opts` = `[Massstab-Nenner, Rand m, minX, minY, maxX, maxY]`.

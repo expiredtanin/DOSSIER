@@ -1,6 +1,6 @@
 /**
  * Plan-Puffer v2 ([K3d]): binäre Übergabe der Plan-Primitive zwischen Rust-Kern und TS — Format
- * und Bedeutung aller Felder stehen im Kopf von `src-tauri/core/src/plan_buf.rs` (hier gekürzt).
+ * und Bedeutung aller Felder stehen im Kopf von `src-tauri/core/src/plan/buf.rs` (hier gekürzt).
  * Der Kern schreibt ihn direkt aus der Plan-Erzeugung (Abfrage `planDomains`); TS liest ihn zu
  * `Primitive[]` ({@link decodePlanBuf}: Auswahl, Overlay, SVG/PDF/DXF) und schreibt ihn für
  * GPU-Chunks aus gemischten Listen ({@link encodePlanBuf}, `glPlanCompile.ts`). Die GPU-Kompilierung

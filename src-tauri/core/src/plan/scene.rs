@@ -1,6 +1,6 @@
 //! Render-Szene aus dem Plan-Puffer ([K3d], früher `planToRenderScene` in
 //! `src/plan/toRenderScene.ts`): Füllungen, Umrisse, Polylinien, Bögen und Linien für render2d,
-//! direkt aus den Abschnitten eines zusammengesetzten Plans ([`crate::plan_parts`]) — ohne Umweg
+//! direkt aus den Abschnitten eines zusammengesetzten Plans ([`crate::plan::parts`]) — ohne Umweg
 //! über `Primitive[]`. Texte setzt TS (Text-Layout bleibt dort) und gibt sie fertig mit.
 //!
 //! Bitgleich zur TS-Fassung: Farben wie `toRgba`, CSS-Klassen-Farben/-Deckkraft, Dimmen,
@@ -22,9 +22,9 @@
 use crate::hatch::{self, v2, HatchKind, Motif, Pattern, V2, DASH_MM_TO_M};
 use crate::jsnum;
 use crate::plan::overrides::js_trim;
-use crate::plan_buf::{js_parse_hex, whole, Rec, F_COLOR, F_DASH_LIST, F_DASH_NULL, F_MOTIF, F_NSE, F_ZIGZAG};
-use crate::plan_buf::{T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT};
-use crate::plan_parts::{greyed_of, in_ranges, pick_id, Part};
+use crate::plan::buf::{js_parse_hex, whole, Rec, F_COLOR, F_DASH_LIST, F_DASH_NULL, F_MOTIF, F_NSE, F_ZIGZAG};
+use crate::plan::buf::{T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT};
+use crate::plan::parts::{greyed_of, in_ranges, pick_id, Part};
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
@@ -622,7 +622,7 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
 
 // ── Ausgaben ─────────────────────────────────────────────────────────────────────────────────────
 
-/// Eine Textzeile (gesetzt in `plan_text::scene_texts`) für die render2d-Szene.
+/// Eine Textzeile (gesetzt in `plan::text::scene_texts`) für die render2d-Szene.
 pub struct SText {
     pub pos: V2,
     pub size_mm: f64,
@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn szene_bin_wie_fixture() {
-        const FIXTURE: &[u8] = include_bytes!("../../render2d/tests/fixtures/scene_v1.bin");
+        const FIXTURE: &[u8] = include_bytes!("../../../render2d/tests/fixtures/scene_v1.bin");
         let (s, t) = sample();
         assert_eq!(encode_scene_bin(&s, &t), FIXTURE);
         // Leere Szene = reiner Kopf; Landeskoordinaten bleiben f64.

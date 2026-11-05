@@ -187,7 +187,7 @@ pub fn underlay_primitives(line: Option<[Vec2; 2]>, direction_sign: Option<f64>,
 /// Primitive eines `planDomains`-Ergebnisses in Plan-Reihenfolge: Haupt-Puffer mit den Zeichnungs-
 /// Stücken an Stelle ihrer (leeren) Gruppe 7.
 pub fn plan_out_primitives(out: &super::domains::PlanOut) -> Result<Vec<Primitive>, String> {
-    use crate::plan_buf::View;
+    use crate::plan::buf::View;
     let bad = || "planUnderlay: Plan-Puffer unlesbar".to_string();
     let v = View::parse(&out.main).ok_or_else(bad)?;
     let main = v.prims().ok_or_else(bad)?;
@@ -215,7 +215,7 @@ pub fn parse_args(text: &str) -> Result<(Option<[Vec2; 2]>, Option<f64>, f64), S
 
 /// Plan-Puffer (eine Gruppe) der Unterlage.
 pub fn underlay_buf(prims: &[Primitive]) -> Vec<u8> {
-    let mut w = crate::plan_buf::Writer::new(false);
+    let mut w = crate::plan::buf::Writer::new(false);
     w.group(prims);
     w.finish()
 }
@@ -246,7 +246,7 @@ mod tests {
             for _ in 0..2 {
                 assert_eq!(crate::queries::run_bin_doc(&mut d, "planUnderlay", &[1.0], &args).unwrap(), plain);
             }
-            let n = crate::plan_buf::View::parse(&plain).unwrap().len();
+            let n = crate::plan::buf::View::parse(&plain).unwrap().len();
             assert!(n > 5, "{n}");
         }
     }

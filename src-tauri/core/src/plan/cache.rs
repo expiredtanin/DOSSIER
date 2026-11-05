@@ -16,7 +16,7 @@
 //! [`MAX_CONTEXTS`] bleiben. Laden eines Projekts (neue Epoche) leert alles.
 
 use super::domains::PlanArgs;
-use crate::plan_buf::{Kept, Segment, Tables};
+use crate::plan::buf::{Kept, Segment, Tables};
 use std::collections::HashMap;
 
 /// Felder, die die 2D-Zeichnungen nicht lesen (Bauteile, Studien, Ansichten).
@@ -185,7 +185,7 @@ pub(crate) mod tests {
     use crate::document::{Document, Op};
     use crate::plan::domains::{plan_domains_buf, plan_domains_cached, PlanArgs, PlanOut};
     use crate::plan::prim::Primitive;
-    use crate::plan_buf::View;
+    use crate::plan::buf::View;
     use serde_json::{json, Value};
     use std::collections::{HashMap, HashSet};
 
@@ -196,7 +196,7 @@ pub(crate) mod tests {
         for i in from..to {
             out.0.push(prims[i].clone());
             out.1.push(v.hash(i).unwrap_or(-1.0));
-            out.2.push(i > from && v.rec(i).is_some_and(|r| r.flags & crate::plan_buf::F_CHAIN != 0));
+            out.2.push(i > from && v.rec(i).is_some_and(|r| r.flags & crate::plan::buf::F_CHAIN != 0));
         }
     }
 

@@ -55,7 +55,7 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 bounds.acc(q.x, q.y);
             }
         }
-        let f = crate::plan_stairs::plan_stair(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled));
+        let f = crate::plan::stair_symbol::plan_stair(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled));
         if f.is_empty() {
             continue;
         }

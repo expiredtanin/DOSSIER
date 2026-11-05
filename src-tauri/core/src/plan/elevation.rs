@@ -518,7 +518,7 @@ fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[Ro
         }
     }
     let mut out = Vec::new();
-    for f in crate::plan_elevation::faces_full(frame, &w, &sl, &r).unwrap_or_default() {
+    for f in crate::plan::elevation_geom::faces_full(frame, &w, &sl, &r).unwrap_or_default() {
         let role = match f.role {
             0 => Role::Wall,
             1 => Role::Slab,
@@ -536,7 +536,7 @@ fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[Ro
 }
 
 /// Verschiebung der vier Wandecken längs der Achse bis auf die Schnittlinien (Anfang +n, Anfang −n,
-/// Ende +n, Ende −n; +n = rechte Normale wie in `plan_elevation::wall_faces`).
+/// Ende +n, Ende −n; +n = rechte Normale wie in `plan::elevation_geom::wall_faces`).
 pub(crate) fn corner_shifts(x: &RWall) -> [f64; 4] {
     let (dx, dy) = (x.end[0] - x.start[0], x.end[1] - x.start[1]);
     let l = hypot2(dx, dy);
@@ -692,7 +692,7 @@ fn extend_wall_corners(p: &Project, rwalls: &mut [RWall], u: (f64, f64)) {
         let thickness = p.wall_type(w).map_or(0.2, |t| t.layers.iter().fold(0.0, |s, l| s + l.thickness));
         b.extend([k as f64, w.start.x, w.start.y, w.end.x, w.end.y, thickness / 2.0]);
     }
-    let ext = crate::plan_elevation::wall_extensions(&b);
+    let ext = crate::plan::elevation_geom::wall_extensions(&b);
     if ext.is_empty() {
         return;
     }
@@ -958,7 +958,7 @@ fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
             b[0] += 1.0;
         }
     }
-    let f = crate::plan_elevation::openings(frame, &b);
+    let f = crate::plan::elevation_geom::openings(frame, &b);
     let mut out = Vec::new();
     if f.is_empty() {
         return out;
@@ -1281,7 +1281,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             let q = &op.pts;
             b.extend([(q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4.0, (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4.0, op.depth]);
         }
-        crate::plan_elevation::occluded_points(&occ, &b)
+        crate::plan::elevation_geom::occluded_points(&occ, &b)
     };
 
     let mut acc = Acc::new();
@@ -1341,7 +1341,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
                 q[0] += 1.0;
             }
         }
-        let r = crate::plan_elevation::clip_segments(&occ, &q);
+        let r = crate::plan::elevation_geom::clip_segments(&occ, &q);
         let mut i = 1;
         for pd in pending {
             match pd {
@@ -1382,7 +1382,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         let wall_faces: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Wall).collect();
         let mut casters: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Slab).collect();
         casters.extend(faces.iter().filter(|f| f.role == Role::Roof));
-        let f = crate::plan_elevation::shadows(&encode_shadow_faces(&wall_faces), &encode_shadow_faces(&casters));
+        let f = crate::plan::elevation_geom::shadows(&encode_shadow_faces(&wall_faces), &encode_shadow_faces(&casters));
         let mut i = 1;
         for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
             let depth = f[i];
@@ -1732,7 +1732,7 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     let shadows = args.get(1).is_some_and(|&x| x != 0.0);
     // Massstab für die Ausdünnung der Ansichtsschraffur (fehlt er: 1:100).
     let scale = args.get(2).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0);
-    let mut w = crate::plan_buf::Writer::new(true);
+    let mut w = crate::plan::buf::Writer::new(true);
     if let Some((mut prims, bounds)) = elevation_primitives(p, &level, shadows, mono, &vis, scale)? {
         super::extras::scale_line_weights(p, scale, &mut prims);
         w.group(&prims);

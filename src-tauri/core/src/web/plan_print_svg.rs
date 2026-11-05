@@ -1,9 +1,9 @@
-//! Bindung des Druck-SVG (`crate::plan_print_svg`) auf gehaltenen Plan-Puffern (Abschnitte wie
+//! Bindung des Druck-SVG (`crate::plan::print_svg`) auf gehaltenen Plan-Puffern (Abschnitte wie
 //! `plan_parts`). Ergebnis `"1"` + Anweisungsliste; leer = Puffer fehlt (TS legt neu ab und fragt
 //! nochmals) oder kaputte Eingabe — nie Panic.
 
-use crate::plan_parts::parts_from;
-use crate::plan_print_svg::{print_svg_ops, PrintOptions};
+use crate::plan::parts::parts_from;
+use crate::plan::print_svg::{print_svg_ops, PrintOptions};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 /// `opts` = `[Massstab-Nenner, Blattbreite mm, Blatthöhe mm, minX, minY, maxX, maxY]`.

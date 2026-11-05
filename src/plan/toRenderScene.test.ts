@@ -1,4 +1,4 @@
-// Render-Szene aus dem Kern ([K3d], `core/src/plan_scene.rs`): Verkettung der 2D-Zeichenlinien,
+// Render-Szene aus dem Kern ([K3d], `core/src/plan/scene.rs`): Verkettung der 2D-Zeichenlinien,
 // Kantennaht über Polygon-Grenzen, gedimmte Bereiche ohne Klonen, Binärszene passt zur
 // Objekt-Szene, verdrängte Puffer werden neu abgelegt. (Bitgleich zur früheren TS-Fassung
 // geprüft: Beispielprojekt, 400 Zufallslisten, grosses Projekt — s. TODO [K3d].)

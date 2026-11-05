@@ -325,7 +325,7 @@ pub fn line_weight_factor(p: &Project, scale: f64) -> f64 {
     jsnum::min(MAX_FACTOR, jsnum::max(MIN_FACTOR, f))
 }
 
-/// Nachbearbeitung beim Schreiben (`plan_buf::Writer::post`): Schwarz-Weiss (alle Farben auf Tinte
+/// Nachbearbeitung beim Schreiben (`plan::buf::Writer::post`): Schwarz-Weiss (alle Farben auf Tinte
 /// bzw. Papier; eine Vollpoché bleibt schwarz) und Strichstärken-Faktor — in dieser Reihenfolge wie
 /// früher `toMono` und `scalePrimitiveWeights`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -539,7 +539,7 @@ mod tests {
             let p: Project = serde_json::from_value(v.clone()).unwrap();
             let codes: Vec<String> = p.flat_categories().iter().map(|c| c.code.clone()).collect();
             let a = super::super::domains::PlanArgs::parse(1.0, &serde_json::json!({"floor": "eg", "show": codes}).to_string()).unwrap();
-            let (prims, _, _) = crate::plan_buf::decode(&super::super::domains::plan_domains_buf(&p, &a).unwrap()).unwrap();
+            let (prims, _, _) = crate::plan::buf::decode(&super::super::domains::plan_domains_buf(&p, &a).unwrap()).unwrap();
             prims.into_iter().filter(|q| matches!(q, Primitive::Polygon { wall_id: Some(_), .. })).collect::<Vec<_>>()
         };
         let before = walls(&v);

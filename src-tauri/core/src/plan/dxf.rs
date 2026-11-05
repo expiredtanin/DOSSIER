@@ -1,5 +1,5 @@
 //! DXF-/DWG-Sammler des Grundrisses ([K3d], früher `src/export/exportDxf.ts::collectPlanDrawing`
-//! und `dxfCadParts.ts`): liest den zusammengesetzten Plan ([`crate::plan_parts`]) und das Projekt
+//! und `dxfCadParts.ts`): liest den zusammengesetzten Plan ([`crate::plan::parts`]) und das Projekt
 //! und schreibt die flache Zeichnung, die `src-tauri/fileio/src/export.rs` zur Datei macht
 //! (Kodierung dort; Gegenstück der früheren TS-Klasse `FlatDrawing`). Modell-Space in echten
 //! Metern, Ebenen aus den Kategorien, Bemassungen als DIMENSION, Türen/Fenster und Blockinstanzen
@@ -8,7 +8,7 @@
 //! Gleiche Eingabe ⇒ dieselben Zahlen und Zeichenketten in derselben Reihenfolge wie die TS-Fassung
 //! (Zeichenketten-Indizes nach erstem Gebrauch, Definitionen an der Stelle ihres ersten Gebrauchs).
 //! Texte: die Zeilen der Raumstempel und die Absätze/Wörter der Einzeltexte setzt der Kern aus dem
-//! Text-JSON des Puffers ([`crate::plan_text::dxf_text`] → [`TextIn`]); der Zeilenumbruch nach
+//! Text-JSON des Puffers ([`crate::plan::text::dxf_text`] → [`TextIn`]); der Zeilenumbruch nach
 //! Spaltenbreite läuft hier (er hängt in Blöcken an der blocklokalen Grösse).
 
 use crate::hatch::{self, Hatch, HatchKind, Motif, Pattern, V2};
@@ -17,8 +17,8 @@ use crate::jsmath::hypot;
 use crate::jsnum;
 use crate::model::{Drawing2D, Drawing2DGeom, ElementKind, LayerCategory, LineStyle, LineStyleKind, Opening, OpeningDoorType, Project};
 use crate::plan::overrides::js_trim;
-use crate::plan_buf::{whole, View, F_DASH_NULL, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
-use crate::plan_parts::{pick_ids, Part};
+use crate::plan::buf::{whole, View, F_DASH_NULL, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
+use crate::plan::parts::{pick_ids, Part};
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 
@@ -82,7 +82,7 @@ pub struct DxfOptions {
     pub paper_layout: bool,
     /// Ausmass des Plans (`Plan.bounds`) für den Papierbereich.
     pub bounds: [f64; 4],
-    /// Standard-Schrift (erste Schrift der Projekt-Textstile, sonst Arial; [`crate::plan_text::default_font`]).
+    /// Standard-Schrift (erste Schrift der Projekt-Textstile, sonst Arial; [`crate::plan::text::default_font`]).
     pub default_font: String,
     /// Exportierte Ebene (Geschoss): Ansichtsfenster der Projekt-Layouts, die sie zeigen, kommen mit in
     /// den Papierbereich (`paper_layout`); leer = keine.
@@ -111,7 +111,7 @@ pub struct StampLine {
     pub down: f64,
 }
 
-/// Text-Eingabe je Text-Eintrag (aus dem Text-JSON gesetzt, s. [`crate::plan_text::dxf_text`]).
+/// Text-Eingabe je Text-Eintrag (aus dem Text-JSON gesetzt, s. [`crate::plan::text::dxf_text`]).
 #[derive(Clone, Debug, PartialEq)]
 pub enum TextIn {
     /// `text` (Raumstempel): Anker und Zeilen.
@@ -644,7 +644,7 @@ fn read_entry(part: &mut Part, i: usize, hatches: &[(i32, Hatch, i32)], text: Op
             _ => {}
         }
     }
-    let dash = |rec: &crate::plan_buf::Rec| -> Option<Vec<f64>> {
+    let dash = |rec: &crate::plan::buf::Rec| -> Option<Vec<f64>> {
         if rec.flags & F_DASH_NULL != 0 {
             return Some(Vec::new());
         }
@@ -1321,7 +1321,7 @@ fn read_entries(parts: &mut [Part], scale: f64, font: &str) -> Option<Vec<Entry>
     for part in parts.iter_mut() {
         let hatches = part.view.hatch_table()?;
         for i in part.from..part.to {
-            let text = crate::plan_text::read_text(part, i).map(|t| crate::plan_text::dxf_text(&t, scale, font));
+            let text = crate::plan::text::read_text(part, i).map(|t| crate::plan::text::dxf_text(&t, scale, font));
             entries.push(read_entry(part, i, &hatches, text.as_ref())?);
         }
     }

@@ -20,7 +20,7 @@
 // Vektorlinien direkt ins SVG. So bleibt das PDF rein vektoriell und scharf.
 //
 // Seit [K3d] (29.10.) rechnet der Kern die Knoten aus den Plan-Puffern
-// (`src-tauri/core/src/plan_print_svg.rs`, Anweisungsliste) samt gesetzter Einzeltexte;
+// (`src-tauri/core/src/plan/print_svg.rs`, Anweisungsliste) samt gesetzter Einzeltexte;
 // hier bleiben der <svg>-Rahmen und die Bild-<pattern> (laufende Ids). Ausgabe unverändert
 // (gleiche Knoten/Attribute).
 //

@@ -94,7 +94,7 @@ fn line_buf(out: &mut Vec<f64>, l: Option<&joins::Line>) {
     }
 }
 
-/// Eingabe von `plan_walls::wall_poche` (wie `encodeWallPoche` in TS).
+/// Eingabe von `plan::wall_poche::wall_poche` (wie `encodeWallPoche` in TS).
 #[allow(clippy::too_many_arguments)]
 fn encode_wall_poche(w: &Wall, layers: &[f64], total: f64, ref_off: f64, gaps: &[(f64, f64)], cuts: &WallCuts, grob: bool, view_only: bool, reveals: &[f64]) -> Vec<f64> {
     let mut b = vec![w.start.x, w.start.y, w.end.x, w.end.y, total, ref_off, if grob { 1.0 } else { 0.0 }, if view_only { 1.0 } else { 0.0 }];
@@ -178,7 +178,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     let outline_mm = wall_lw * detail.outline_factor();
     let layer_mm = LAYER_LINE_MM * detail.layer_factor();
     let thick: Vec<f64> = wt.layers.iter().map(|l| l.thickness).collect();
-    let f = crate::plan_walls::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, detail == Detail::Grob, view_only, reveals));
+    let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, detail == Detail::Grob, view_only, reveals));
     if f.is_empty() {
         return Ok(());
     }
@@ -467,7 +467,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     // [105] Anhang: Rahmenbreite rechts (Fenster), Drehpunkt des Türblatts im Falz (Einzug, Versatz).
     b.push(det.as_ref().filter(|f| wt.is_some() && (f.sides.right - f.sides.left).abs() > 1e-9).map_or(f64::NAN, |f| f.sides.right));
     b.extend(hinge.map_or([f64::NAN; 2], |(x, off)| [x, off]));
-    let f = crate::plan_openings::plan_opening(&b);
+    let f = crate::plan::openings::plan_opening(&b);
     if f.is_empty() {
         return Ok(());
     }

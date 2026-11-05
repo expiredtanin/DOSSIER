@@ -3,7 +3,7 @@
 // die schlanke, headless Variante: Koordinaten in Metern (Y nach oben → SVG gespiegelt),
 // Strichstärken aus Papier-mm über den Massstab umgerechnet. Schraffur-Muster werden nicht
 // ausgebreitet (nur Grundfüllung), Bilder fehlen — gedacht für Kontrolle und Diffs, nicht für Druck.
-// Geschrieben vom Kern direkt aus dem Plan-Puffer ([K3d], `src-tauri/core/src/plan_svg.rs`).
+// Geschrieben vom Kern direkt aus dem Plan-Puffer ([K3d], `src-tauri/core/src/plan/svg.rs`).
 
 import type { Plan } from "../plan/generatePlan";
 import { planParts, withPlanParts } from "../plan/planParts";

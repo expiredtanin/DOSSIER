@@ -1,4 +1,4 @@
-// Auswahl über den Kern ([K3d], `core/src/plan_pick.rs`): nächstes Segment, Segmente im Umkreis,
+// Auswahl über den Kern ([K3d], `core/src/plan/pick.rs`): nächstes Segment, Segmente im Umkreis,
 // Polygone unter dem Punkt (mit Pick-Feld), Symbol-Linien in Pixeln, Kreis-/Bogen-Ringe und
 // Besitzer — gegen einfache lineare Suchen. (Gleichheit zur früheren TS-Fassung — segmentIndex,
 // ownerIndex, PlanView-Schleifen — mit Beispielprojekt, 150 Zufallsplänen und grossem Projekt

@@ -53,7 +53,7 @@ fn pick_band(pts: Vec<Vec2>, context_id: Option<&str>, section_id: Option<&str>)
 
 /// Rahmen-Ecken eines Meshes (x/y), `None` ohne Punkte.
 fn bbox_corners(positions: &[f64]) -> Option<Vec<Vec2>> {
-    let b = crate::plan_misc::bbox(positions);
+    let b = crate::plan::misc::bbox(positions);
     (b.len() == 4).then(|| vec![v2(b[0], b[1]), v2(b[2], b[1]), v2(b[2], b[3]), v2(b[0], b[3])])
 }
 
@@ -84,7 +84,7 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
                 }
             }
             ContextObject::ImportedMesh(m) => {
-                let f = crate::plan_misc::context_footprint(&m.positions, &m.indices);
+                let f = crate::plan::misc::context_footprint(&m.positions, &m.indices);
                 let n = f.first().copied().unwrap_or(0.0) as usize;
                 for i in 0..n {
                     out.push(context_line(v2(f[1 + 4 * i], f[2 + 4 * i]), v2(f[3 + 4 * i], f[4 + 4 * i])));
@@ -239,7 +239,7 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
             continue;
         }
         let Some([p0, p1]) = level.line_points else { continue };
-        let f = crate::plan_misc::section_line(p0.x, p0.y, p1.x, p1.y, level.direction_sign.unwrap_or(1.0));
+        let f = crate::plan::misc::section_line(p0.x, p0.y, p1.x, p1.y, level.direction_sign.unwrap_or(1.0));
         if f.is_empty() {
             continue;
         }

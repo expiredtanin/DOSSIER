@@ -100,7 +100,7 @@ pub fn viewport_maps(p: &Project, layout: &Layout) -> Vec<VpMap> {
         }
         let scale = viewport_scale(vp, Some(snap));
         let Ok(buf) = plan_domains_buf(p, &viewport_args(snap, scale)) else { continue };
-        let Some(b) = crate::plan_buf::View::parse(&buf).and_then(|v| v.bounds()) else { continue };
+        let Some(b) = crate::plan::buf::View::parse(&buf).and_then(|v| v.bounds()) else { continue };
         out.push(VpMap {
             x_mm: vp.x_mm,
             y_mm: vp.y_mm,
@@ -149,7 +149,7 @@ pub fn viewport_snap_segments(p: &Project, layout: &Layout) -> Vec<[f64; 4]> {
     use crate::plan::prim::Primitive;
     let mut out = Vec::new();
     for m in viewport_maps(p, layout) {
-        let Some(prims) = crate::plan_buf::View::parse(&m.buf).and_then(|v| v.prims()) else { continue };
+        let Some(prims) = crate::plan::buf::View::parse(&m.buf).and_then(|v| v.prims()) else { continue };
         let clip = m.sheet_clip();
         let mut push = |a: (f64, f64), b: (f64, f64)| {
             let (a, b) = (m.to_sheet(a.0, a.1), m.to_sheet(b.0, b.1));

@@ -1,5 +1,5 @@
 //! Druck-SVG eines Plans für Layout-Viewports und den PDF-Altpfad ([K3d], früher der Primitiv-Teil
-//! von `src/export/planToPrintSvg.ts`): liest den zusammengesetzten Plan ([`crate::plan_parts`]) und
+//! von `src/export/planToPrintSvg.ts`): liest den zusammengesetzten Plan ([`crate::plan::parts`]) und
 //! liefert die SVG-Knoten in Papier-Millimetern als flache Anweisungsliste, die TS 1:1 als DOM-Knoten
 //! anlegt (gleiche Elemente, Attribute und Reihenfolge wie die TS-Fassung — die Zahlen formatiert wie
 //! `String(Math.round(v * 1000) / 1000)`). Schraffuren als geklippte Vektorlinien, Zickzack/Motiv als
@@ -24,9 +24,9 @@
 use crate::hatch::{self, Hatch, Motif, Pattern, V2};
 use crate::js_fmt::js_number;
 use crate::jsnum;
-use crate::plan_buf::{whole, Rec, View, F_COLOR, F_DASH_NULL, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT};
-use crate::plan_parts::{greyed_of, Part};
-use crate::plan_text::{SingleText, StampText};
+use crate::plan::buf::{whole, Rec, View, F_COLOR, F_DASH_NULL, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT};
+use crate::plan::parts::{greyed_of, Part};
+use crate::plan::text::{SingleText, StampText};
 use crate::text_layout::{place_lines, stamp_block, wrap_doc_to_lines, Line, LayoutOpts, LineAlign, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use std::f64::consts::PI;
 

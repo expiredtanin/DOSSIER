@@ -16,7 +16,7 @@
 
 use crate::jsmath::hypot;
 use crate::jsnum;
-use crate::plan_pick::{pad, BoxIndex};
+use crate::plan::pick::{pad, BoxIndex};
 
 /// Snap-Arten (Code in der Ausgabe).
 pub const K_PERPENDICULAR: f64 = 0.0;
