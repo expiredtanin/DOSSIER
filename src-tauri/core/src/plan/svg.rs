@@ -1,12 +1,14 @@
 //! Plan → SVG-Text ohne DOM ([K3d], früher `src/export/planToSvgString.ts`): für `dossier-cli plan`,
 //! MCP und Referenzbild-Tests, direkt aus den Abschnitten eines zusammengesetzten Plans
 //! ([`crate::plan::parts`]). Koordinaten in Metern (Y nach oben → SVG gespiegelt), Strichstärken
-//! aus Papier-mm über den Massstab; Schraffur-Muster werden nicht ausgebreitet (nur Grundfüllung),
+//! aus Papier-mm über den Massstab; Schraffur-Muster werden nur mit `hatch` ausgebreitet (sonst nur Grundfüllung),
 //! Bilder und Textpfade fehlen — gedacht für Kontrolle und Diffs, nicht für Druck. Byte-gleich zur
 //! TS-Fassung (Zahlen wie `String(Math.round(v·1e5)/1e5)`, Texte aus dem Text-JSON des Puffers).
 
 use crate::js_fmt::js_number;
+use crate::hatch::{self, Pattern, V2};
 use crate::jsnum;
+use crate::plan::print_svg::{hatch_dash_paper, hatch_lines, is_generated, quantize_pen};
 use crate::plan::buf::{whole, F_COLOR, F_DASH_LIST, F_GREYED, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
 use crate::plan::parts::Part;
 use serde_json::Value;
@@ -44,6 +46,8 @@ pub struct SvgOptions {
     pub min_y: f64,
     pub max_x: f64,
     pub max_y: f64,
+    /// Schraffurlinien ausbreiten (wie der Druckpfad, an der Fläche beschnitten); Standard aus.
+    pub hatch: bool,
 }
 
 /// Zahl aus JSON (null/fehlend → NaN wie `undefined`/`NaN` in JS-Rechnungen).
@@ -88,6 +92,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
     let ys = |y: f64| num(top - y);
     let mut out: Vec<String> = Vec::new();
     for part in parts.iter_mut() {
+        let hatches = if o.hatch { part.view.hatch_table()? } else { Vec::new() };
         for i in part.from..part.to {
             let rec = part.view.rec(i)?;
             let f = rec.f.clone();
@@ -150,6 +155,44 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                         num(f[2] * mm_to_m),
                         op(greyed, opacity(4))
                     ));
+                    if o.hatch && f[3] >= 0.0 {
+                        let (_, h, color) = hatches.get(whole(f[3])?)?.clone();
+                        if h.pattern != Pattern::None && h.pattern != Pattern::Solid && h.kind != hatch::HatchKind::Image {
+                            let hc = if color >= 0 { esc(&part.view.string(color as usize)?) } else { "#000".into() };
+                            let k = 1000.0 / n;
+                            let pen = num(quantize_pen(h.line_weight) * mm_to_m);
+                            let dash = hatch_dash_paper(&h, k);
+                            let da = if dash.is_empty() {
+                                String::new()
+                            } else {
+                                let cap = if dash.iter().any(|v| *v == 0.0) { " stroke-linecap=\"round\"" } else { "" };
+                                format!(" stroke-dasharray=\"{}\"{cap}", dash.iter().map(|v| num(v * mm_to_m)).collect::<Vec<_>>().join(" "))
+                            };
+                            let mut runs: Vec<Vec<V2>> = Vec::new();
+                            if h.random {
+                                runs.extend(hatch::build_random_hatch_runs(&pts, &h, None).into_iter().filter(|r| r.len() >= 2).map(|r| vec![r[0], r[r.len() - 1]]));
+                            } else if is_generated(h.pattern) {
+                                runs.extend(hatch::build_hatch_runs(&pts, &h));
+                            } else {
+                                let pts_mm: Vec<V2> = pts.iter().map(|q| V2 { x: q.x * k, y: q.y * k }).collect();
+                                runs.extend(hatch_lines(&pts_mm, &h, k).into_iter().map(|(a, b)| vec![V2 { x: a.x / k, y: a.y / k }, V2 { x: b.x / k, y: b.y / k }]));
+                            }
+                            for run in runs {
+                                match run.len() {
+                                    0 | 1 => {}
+                                    2 => out.push(format!(
+                                        "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{hc}\" stroke-width=\"{pen}\"{da}{}/>",
+                                        xs(run[0].x), ys(run[0].y), xs(run[1].x), ys(run[1].y), op(greyed, opacity(4))
+                                    )),
+                                    _ => out.push(format!(
+                                        "<polyline points=\"{}\" fill=\"none\" stroke=\"{hc}\" stroke-width=\"{pen}\"{da}{}/>",
+                                        run.iter().map(|q| format!("{},{}", xs(q.x), ys(q.y))).collect::<Vec<_>>().join(" "),
+                                        op(greyed, opacity(4))
+                                    )),
+                                }
+                            }
+                        }
+                    }
                 }
                 T_LINE => {
                     let color = if fl & F_COLOR != 0 { esc(part.str(f[1]).unwrap_or("")) } else { "#000".into() };
