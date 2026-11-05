@@ -2,7 +2,7 @@
 //
 // Eine Vorlage (`Project.viewTemplates`) bündelt Ansichts-Einstellungen. Sie wirkt auf
 //  • Ansichten (Geschoss/Schnitt/Ansicht = `DrawingLevel`): Schnitthöhe, Ansichtsbereich, Schatten,
-//    verdeckte Kanten stehen am Geschoss selbst; Detail, Massstab, Kategorien, Override-Regeln,
+//    verdeckte Kanten und Skizzenstil ([67]) stehen am Geschoss selbst; Detail, Massstab, Kategorien, Override-Regeln,
 //    Darstellungsmodus und Schwarz-Weiss sind Anzeigezustand (`ViewTemplateUi`, App setzt sie), und
 //  • Ausschnitte (`ViewSnapshot`): Detail, Massstab, Kategorien, Override-Regeln.
 // „Einmal anwenden" kopiert die Werte und merkt nur die Vorlage (`templateLinked: false`);
@@ -29,7 +29,7 @@ export interface ViewTemplateUi {
 }
 
 /** Geschoss-Felder, die eine Vorlage setzt (fehlt das Vorlagen-Feld, bleibt die Ansicht unberührt). */
-const LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines"] as const;
+const LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch"] as const;
 
 /** Teilobjekt für das Geschoss aus den gesetzten Feldern der Vorlage. */
 export function levelPatch(t: ViewTemplate): Partial<DrawingLevel> {

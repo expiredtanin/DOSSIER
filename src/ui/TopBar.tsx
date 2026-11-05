@@ -1047,6 +1047,10 @@ export interface ViewRibbonTabProps {
   /** Schlagschatten der aktiven Ansicht ein/aus (DrawingLevel.shadows). */
   shadows: boolean;
   onShadows: (v: boolean) => void;
+  /** [67] Skizzenstil der aktiven Ebene (DrawingLevel.sketch); Umschalter nur, wenn verfügbar. */
+  sketchAvailable?: boolean;
+  sketch?: boolean;
+  onSketch?: (v: boolean) => void;
   combos: ComboMenuHandlers;
   /** Text-/Font-Formatierung auf DERSELBEN Leiste (Raumstempel-Ziel; `null` =
    *  nur Defaults). Liegt bewusst im „Ansichten"-Tab (Nutzer-Wunsch). */
@@ -1117,6 +1121,9 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
   shadowsAvailable,
   shadows,
   onShadows,
+  sketchAvailable = false,
+  sketch = false,
+  onSketch,
   combos,
   textTarget,
   textStyles,
@@ -1342,6 +1349,23 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
               aria-pressed={shadows}
             >
               {t("elevation.shadows")}
+            </button>
+          </div>
+          <Sep />
+        </>
+      )}
+
+      {sketchAvailable && onSketch && (
+        <>
+          <div className="tb-group" role="group" aria-label={t("view.sketch")}>
+            <button
+              className={`tb-toggle${sketch ? " active" : ""}`}
+              onClick={() => onSketch(!sketch)}
+              title={t("view.sketch.hint")}
+              aria-pressed={sketch}
+              data-testid="toggle-sketch"
+            >
+              {t("view.sketch")}
             </button>
           </div>
           <Sep />

@@ -5,10 +5,10 @@
 //   dossier-cli <projekt.obp> info
 //   dossier-cli <projekt.obp> validate
 //   dossier-cli <projekt.obp> migrate [--out neu.obp]
-//   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--format svg|json] [--out eg.svg]
+//   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--sketch] [--format svg|json] [--out eg.svg]
 //                                                  json = render2d-Szene (planToRenderScene)
-//   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (--format json: render2d-Szene)
-//   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
+//   dossier-cli <projekt.obp> section <Name> [--sketch] [--out schnitt.svg]       (--format json: render2d-Szene)
+//   dossier-cli <projekt.obp> elevation <Name> [--sketch] [--out ansicht.svg]     (--sketch: Skizzenstil [67])
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
@@ -189,6 +189,12 @@ function findLevel(project: Project, kinds: string[], name: string | undefined) 
   if (!name) return levels[0];
   const n = name.toLowerCase();
   return levels.find((l) => l.id.toLowerCase() === n || l.name.toLowerCase() === n);
+}
+
+/** `--sketch` ([67]): die Ebene im Skizzenstil (wie `DrawingLevel.sketch`); sonst das Projekt unverändert. */
+function withSketch(project: Project, levelId: string, args: Args): Project {
+  if (!args.flags.has("sketch")) return project;
+  return { ...project, drawingLevels: project.drawingLevels.map((l) => (l.id === levelId ? { ...l, sketch: true } : l)) };
 }
 
 /** Zuletzt geschriebene Datei (für `{last}` in `--cmd`). */
@@ -592,7 +598,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       const lvl = findLevel(project, ["floor", "drawing"], args.flags.get("level"));
       if (!lvl) fail(`Geschoss nicht gefunden: ${args.flags.get("level") ?? "(erstes)"}`);
       // Massstab geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken nach Massstab).
-      const plan = generatePlan(project, lvl.id, allCodes, undefined, "mittel", false, false, true, scale);
+      const plan = generatePlan(withSketch(project, lvl.id, args), lvl.id, allCodes, undefined, "mittel", false, false, true, scale);
       if (args.flags.get("format") === "json") {
         out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
         return 0;
@@ -605,16 +611,18 @@ async function execute(project: Project, file: string, command: string, rest: st
     case "elevation": {
       const name = rest[0];
       const kind = command === "section" ? "section" : "elevation";
-      const lvl = findLevel(project, [kind], name);
-      if (!lvl) fail(`${command} nicht gefunden: ${name ?? "(erste)"}`);
+      const found = findLevel(project, [kind], name);
+      if (!found) fail(`${command} nicht gefunden: ${name ?? "(erste)"}`);
+      const sp = withSketch(project, found.id, args);
+      const lvl = sp.drawingLevels.find((l) => l.id === found.id) ?? found;
       let plan;
       if (kind === "section") {
-        const o = await computeSection(project, lvl);
+        const o = await computeSection(sp, lvl);
         if (!o) fail("keine gültige Schnittlinie");
         // Wie die App: verdeckte Kanten nach der Ebene, geschnittene Fenster/Türen.
         plan = generateSectionPlan(o, false, { visibleCodes: allCodes, hiddenLines: lvl.hiddenLines, openings: true, scaleDenominator: scale });
       } else {
-        plan = generateElevationPlan(project, lvl, { scaleDenominator: scale });
+        plan = generateElevationPlan(sp, lvl, { scaleDenominator: scale });
         if (!plan) fail("keine gültige Ansichtslinie");
       }
       if (args.flags.get("format") === "json") {
