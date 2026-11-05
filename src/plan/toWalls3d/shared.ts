@@ -158,6 +158,12 @@ export interface RWall {
    * der 3D-Live-Schnitt die Boolean-Dominanz + Fugenlinien wie der 2D-Schnitt macht.
    */
   cut?: RCutMeta;
+  /**
+   * Schnittlinie `[px, py, dx, dy]` (Grundriss) am Anfang/Ende: Gehrung, T-Stoss-Fläche oder schräge
+   * Aussparungs-Seite ([108], `RWall.startCut/endCut` im Kern).
+   */
+  startCut?: [number, number, number, number];
+  endCut?: [number, number, number, number];
 }
 
 /** Eine extrudierte Deckenplatte: geschlossener Grundriss-Umriss + Z-Ausdehnung. */

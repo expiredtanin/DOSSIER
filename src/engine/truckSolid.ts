@@ -103,6 +103,8 @@ export type SolidSpec =
       uAxis: [number, number, number];
       vAxis: [number, number, number];
       depth: number;
+      /** Ring auf der Rückseite (gleiche Punktzahl): schräge Stirnflächen an Gehrung/Stoss ([108]). */
+      pointsBack?: number[];
     }
   | { kind: "revolve"; profile: number[]; cx?: number; cy?: number; angleDeg?: number }
   | { kind: "loft"; sections: LoftSectionSpec[] }

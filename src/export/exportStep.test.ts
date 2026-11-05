@@ -86,4 +86,18 @@ describe("STEP-Export Ende-zu-Ende (truck-WASM)", () => {
     const step: string = mod.export_step(JSON.stringify({ solids: bools, fileName: "void.stp" }));
     expect(step.startsWith("ISO-10303-21;")).toBe(true);
   }, 60_000);
+
+  it("[108] Wände an Ecken: schräge Stirnflächen (pointsBack) werden zu geschlossenen Körpern", async () => {
+    const mod: any = await import("../engine/pkgTruck/trucksolid.js");
+    await mod.default({ module_or_path: readFileSync("src/engine/pkgTruck/trucksolid_bg.wasm") });
+    const skew = projectSolidSpecs(sampleProject).filter((s) => s.kind === "extrudePlane" && s.pointsBack);
+    expect(skew.length).toBeGreaterThan(0);
+    for (const spec of skew) {
+      const props = JSON.parse(mod.solid_props(JSON.stringify({ spec })));
+      expect(props.closed).toBe(true);
+      expect(props.volume).toBeGreaterThan(0);
+    }
+    const step: string = mod.export_step(JSON.stringify({ solids: skew, fileName: "ecken.stp" }));
+    expect(step).toContain("CLOSED_SHELL");
+  }, 60_000);
 });

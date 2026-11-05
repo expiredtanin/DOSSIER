@@ -80,6 +80,10 @@ pub enum SolidSpec {
         #[serde(rename = "vAxis")]
         v_axis: [f64; 3],
         depth: f64,
+        /// Ring auf der Rückseite (nach `depth`), gleiche Punktzahl wie `points` ([108]: Wand mit
+        /// schrägen Stirnflächen an Gehrung/schrägem Stoss). Leer = `points` (gerades Prisma).
+        #[serde(default, rename = "pointsBack")]
+        points_back: Vec<f64>,
     },
     /// Rotationskörper: Profil = geschlossener Ring aus (r, z)-Paaren in der
     /// Halbebene r ≥ 0, gedreht um die Z-Achse durch (cx, cy).
@@ -318,6 +322,80 @@ fn extrude_plane(
     Ok(builder::tsweep(&face, dir))
 }
 
+/// Wie [`extrude_plane`], aber mit eigenem Ring auf der Rückseite (gleiche Punktzahl, gleiche Löcher):
+/// Seitenflächen als Regelflächen zwischen entsprechenden Kanten (`try_wire_homotopy`, wie `loft`).
+/// Für Wände mit schrägen Stirnflächen ([108]) — ohne Boolean.
+fn extrude_plane_skew(
+    points: &[f64],
+    back: &[f64],
+    holes: &[Vec<f64>],
+    origin: [f64; 3],
+    u: [f64; 3],
+    v: [f64; 3],
+    depth: f64,
+) -> Res<Solid> {
+    if depth == 0.0 {
+        return Err("depth darf nicht 0 sein".into());
+    }
+    let (uu, vv) = (Vector3::new(u[0], u[1], u[2]), Vector3::new(v[0], v[1], v[2]));
+    let normal = uu.cross(vv);
+    if normal.magnitude() < 1e-9 {
+        return Err("uAxis und vAxis dürfen nicht parallel sein".into());
+    }
+    let o = Point3::new(origin[0], origin[1], origin[2]);
+    let o2 = o + normal.normalize() * depth;
+    let place = |r: &[(f64, f64)], at: Point3| -> Wire {
+        let verts: Vec<Vertex> = r.iter().map(|&(a, b)| builder::vertex(at + uu * a + vv * b)).collect();
+        let n = verts.len();
+        (0..n).map(|i| builder::line(&verts[i], &verts[(i + 1) % n])).collect()
+    };
+    let mut front = pairs(points)?;
+    let mut rear = pairs(back)?;
+    if front.len() != rear.len() {
+        return Err("pointsBack braucht dieselbe Punktanzahl wie points".into());
+    }
+    if signed_area(&front) < 0.0 {
+        front.reverse();
+        rear.reverse();
+    }
+    if signed_area(&rear) <= 0.0 {
+        return Err("pointsBack ist entartet oder anders orientiert".into());
+    }
+    let mut pairs_w = vec![(place(&front, o), place(&rear, o2))];
+    for h in holes {
+        let mut hole = pairs(h)?;
+        if signed_area(&hole) > 0.0 {
+            hole.reverse();
+        }
+        pairs_w.push((place(&hole, o), place(&hole, o2)));
+    }
+    let mut shell = Shell::new();
+    for (a, b) in &pairs_w {
+        shell.extend(builder::try_wire_homotopy(a, b).map_err(|e| format!("{e}"))?);
+    }
+    let fw: Vec<Wire> = pairs_w.iter().map(|p| p.0.clone()).collect();
+    let bw: Vec<Wire> = pairs_w.iter().map(|p| p.1.clone()).collect();
+    let cap0 = builder::try_attach_plane(&fw).map_err(|e| format!("{e}"))?;
+    let cap1 = builder::try_attach_plane(&bw).map_err(|e| format!("{e}"))?;
+    // Orientierung wie in `loft`: eine Kappen-Kombination ergibt einen geschlossenen Rand.
+    for (inv0, inv1) in [(true, false), (false, true), (false, false), (true, true)] {
+        let mut sh = shell.clone();
+        let (mut c0, mut c1) = (cap0.clone(), cap1.clone());
+        if inv0 {
+            c0.invert();
+        }
+        if inv1 {
+            c1.invert();
+        }
+        sh.push(c0);
+        sh.push(c1);
+        if let Ok(s) = Solid::try_new(vec![sh]) {
+            return Ok(s);
+        }
+    }
+    Err("Wand mit schrägen Stirnflächen ergibt keinen geschlossenen Körper".into())
+}
+
 fn revolve(profile: &[f64], cx: f64, cy: f64, angle_deg: f64) -> Res<Solid> {
     let ring = pairs(profile)?;
     if ring.iter().any(|&(r, _)| r < -1e-9) {
@@ -486,8 +564,12 @@ pub fn build_solid(spec: &SolidSpec) -> Res<Solid> {
         SolidSpec::Extrude { points, holes, height, z0, corner_radius, chamfer } => {
             extrude(points, holes, *height, *z0, *corner_radius, *chamfer)
         }
-        SolidSpec::ExtrudePlane { points, holes, origin, u_axis, v_axis, depth } => {
-            extrude_plane(points, holes, *origin, *u_axis, *v_axis, *depth)
+        SolidSpec::ExtrudePlane { points, holes, origin, u_axis, v_axis, depth, points_back } => {
+            if points_back.is_empty() {
+                extrude_plane(points, holes, *origin, *u_axis, *v_axis, *depth)
+            } else {
+                extrude_plane_skew(points, points_back, holes, *origin, *u_axis, *v_axis, *depth)
+            }
         }
         SolidSpec::Revolve { profile, cx, cy, angle_deg } => revolve(profile, *cx, *cy, *angle_deg),
         SolidSpec::Loft { sections } => loft(sections),
@@ -888,6 +970,32 @@ mod tests {
             .abs()
     }
 
+    /// [108] Wand mit schrägen Stirnflächen (`pointsBack`, wie `dossier-core::solid_specs::wall_spec`).
+    #[test]
+    fn wand_mit_schraegen_stirnflaechen() {
+        // 45°-Gehrung am Anfang, Fenster 1 × 1.2: Grundfläche Trapez 4 × 0.2, minus Fenster.
+        let spec: SolidSpec = serde_json::from_value(serde_json::json!({"kind": "extrudePlane",
+            "points": [0.0, 0.0, 4.1, 0.0, 4.1, 2.5, 0.0, 2.5], "pointsBack": [0.2, 0.0, 4.1, 0.0, 4.1, 2.5, 0.2, 2.5],
+            "holes": [[1.1, 0.9, 2.1, 0.9, 2.1, 2.1, 1.1, 2.1]], "origin": [-0.1, 0.1, 0.0], "uAxis": [1.0, 0.0, 0.0], "vAxis": [0.0, 0.0, 1.0], "depth": 0.2})).unwrap();
+        let m = solid_mesh_core(&spec, 0.01).unwrap();
+        assert!((volume(&m) - 1.76).abs() < 1e-6, "{}", volume(&m));
+        let props = solid_props_core(&spec, 0.01).unwrap();
+        assert!(props.closed && (props.volume - 1.76).abs() < 1e-6, "{:?}", props.volume);
+        assert!(export_step_core(&[spec], &StepHeader::default()).is_ok());
+        // Schräges L (60°): Wand (4,0)→(0,0), 0.3 dick, Gehrung am Ende; Volumen = 4 × 0.3 × 2.5.
+        let e = 0.15 * 3f64.sqrt();
+        let spec: SolidSpec = serde_json::from_value(serde_json::json!({"kind": "extrudePlane",
+            "points": [0.0, 0.0, 4.0 - e, 0.0, 4.0 - e, 2.5, 0.0, 2.5], "pointsBack": [0.0, 0.0, 4.0 + e, 0.0, 4.0 + e, 2.5, 0.0, 2.5],
+            "origin": [4.0, -0.15, 0.0], "uAxis": [-1.0, 0.0, 0.0], "vAxis": [0.0, 0.0, 1.0], "depth": 0.3})).unwrap();
+        let props = solid_props_core(&spec, 0.01).unwrap();
+        assert!(props.closed && (props.volume - 3.0).abs() < 1e-6, "{:?}", props.volume);
+        // Ungleiche Punktzahl: Fehler statt Panic.
+        let bad: SolidSpec = serde_json::from_value(serde_json::json!({"kind": "extrudePlane",
+            "points": [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0], "pointsBack": [0.0, 0.0, 1.0, 0.0, 1.0, 1.0],
+            "origin": [0.0, 0.0, 0.0], "uAxis": [1.0, 0.0, 0.0], "vAxis": [0.0, 0.0, 1.0], "depth": 0.3})).unwrap();
+        assert!(build_solid(&bad).is_err());
+    }
+
     fn ring(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<f64> {
         vec![x0, y0, x1, y0, x1, y1, x0, y1]
     }
@@ -1049,6 +1157,7 @@ mod tests {
             u_axis: [1.0, 0.0, 0.0],
             v_axis: [0.0, 0.0, 1.0],
             depth: -0.3, // u×v = −Y; negativ ⇒ +Y
+            points_back: vec![],
         }
     }
 
@@ -1102,7 +1211,7 @@ mod dbg_step {
             ("torus", SolidSpec::Torus { center: [0.0; 3], major: 2.0, minor: 0.5 }),
             ("revolve", SolidSpec::Revolve { profile: vec![0.0, 0.0, 1.0, 0.0, 1.0, 2.0, 0.0, 2.0], cx: 0.0, cy: 0.0, angle_deg: 360.0 }),
             ("loft", SolidSpec::Loft { sections: vec![LoftSection { z: 0.0, points: ring(0.0, 0.0, 2.0, 2.0) }, LoftSection { z: 3.0, points: ring(0.5, 0.5, 1.5, 1.5) }] }),
-            ("wall_window", SolidSpec::ExtrudePlane { points: vec![0.0, 0.0, 5.0, 0.0, 5.0, 2.6, 0.0, 2.6], holes: vec![vec![1.0, 0.9, 2.2, 0.9, 2.2, 2.1, 1.0, 2.1]], origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 0.0, 1.0], depth: -0.3 }),
+            ("wall_window", SolidSpec::ExtrudePlane { points: vec![0.0, 0.0, 5.0, 0.0, 5.0, 2.6, 0.0, 2.6], holes: vec![vec![1.0, 0.9, 2.2, 0.9, 2.2, 2.1, 1.0, 2.1]], origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 0.0, 1.0], depth: -0.3, points_back: vec![] }),
         ];
         for (name, spec) in cases {
             let step = export_step_core(&[spec], &StepHeader::default()).unwrap();

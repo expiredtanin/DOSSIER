@@ -191,7 +191,7 @@ fn push_wall_box(g: &mut Prim, w: &RWall) {
 /// Ecken an Wandanfang/-ende (Welt x, Höhe, y) längs der Achse auf die Schnittlinien schieben
 /// (`RWall::start_cut`/`end_cut`); die Mantelflächen bleiben eben, weil sich nur Endpunkte längs
 /// der Achse verschieben.
-fn shift_cut_ends(pos: &mut [f64], w: &RWall) {
+pub(crate) fn shift_cut_ends(pos: &mut [f64], w: &RWall) {
     if w.start_cut.is_none() && w.end_cut.is_none() {
         return;
     }
