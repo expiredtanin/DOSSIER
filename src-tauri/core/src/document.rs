@@ -1089,6 +1089,89 @@ mod tests {
         assert_eq!(d.to_json(), states[2]);
     }
 
+    /// Verlauf wie TS über einen Kern-Neustart ([118]): Index + Schritte als JSON, in ein frisch aus
+    /// dem JSON geöffnetes Dokument eingesetzt.
+    fn carry_history(d: &Document) -> Document {
+        let (undo, redo, last_key, last_at) = d.history().export_index();
+        let steps = |seqs: &[u64]| -> Vec<(String, Vec<Op>)> {
+            seqs.iter()
+                .map(|&s| {
+                    let v: Value = serde_json::from_str(&d.history().export_step(s, usize::MAX).unwrap()).unwrap();
+                    (v["label"].as_str().unwrap().to_string(), crate::ops::ops_from_json(&v["ops"]).unwrap())
+                })
+                .collect()
+        };
+        let mut e = Document::from_json(&d.to_json()).unwrap();
+        e.history_mut().import(steps(&undo), steps(&redo), last_key.map(str::to_owned), last_at);
+        e
+    }
+
+    #[test]
+    fn verlauf_export_import_wie_vorher() {
+        let mut d = doc();
+        set_name(&mut d, "A", "Eins", None, 0.0);
+        set_name(&mut d, "B", "Zwei", Some("drag"), 10.0);
+        set_name(&mut d, "C", "", Some("drag"), 20.0);
+        d.history_mut().begin_group();
+        set_name(&mut d, "D", "Gruppe", None, 30.0);
+        d.commit(ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"a","x":9}}])), None, 31.0, false).unwrap();
+        d.commit(ops(json!([{"kind":"add","collection":"walls","items":[{"id":"c"}]}])), None, 32.0, false).unwrap();
+        d.history_mut().end_group();
+        set_name(&mut d, "F", "Fünf", None, 40.0);
+        d.commit(ops(json!([{"kind":"remove","collection":"walls","ids":["b"]}])), None, 50.0, false).unwrap();
+        d.undo().unwrap();
+        d.undo().unwrap();
+        let mut e = carry_history(&d);
+        assert_eq!(e.to_json(), d.to_json());
+        assert_eq!(e.history().labels(), d.history().labels());
+        assert_eq!((e.history().undo_depth(), e.history().redo_depth()), (3, 2));
+        assert_eq!(e.history().bytes(), d.history().bytes());
+        // Neue Laufnummern (die alten gehören zur toten Instanz bzw. zu TS-Ständen).
+        assert!(e.history().top_seqs().0 > d.history().top_seqs().1);
+        // Undo bis zum Anfang, Redo bis zum Ende: Schritt für Schritt gleich.
+        while let Some(a) = d.undo() {
+            assert_eq!(e.undo().unwrap(), a);
+            assert_eq!(e.to_json(), d.to_json());
+        }
+        assert!(e.undo().is_none());
+        while let Some(a) = d.redo() {
+            assert_eq!(e.redo().unwrap(), a);
+            assert_eq!(e.to_json(), d.to_json());
+        }
+        assert!(e.redo().is_none());
+        assert_eq!(e.history().labels(), d.history().labels());
+        // Zu grosser Schritt wird nicht ausgeschrieben.
+        let (u, ..) = d.history().export_index();
+        assert!(d.history().export_step(u[0], 0).is_none());
+        assert!(d.history().export_step(999_999_999, usize::MAX).is_none());
+    }
+
+    #[test]
+    fn verlauf_import_koaleszenz_und_grenzen() {
+        let mut d = doc();
+        set_name(&mut d, "A", "", None, 0.0);
+        set_name(&mut d, "B", "", Some("tippen"), 1000.0);
+        let mut e = carry_history(&d);
+        // Die Serie läuft nach dem Neustart im selben Schritt weiter.
+        set_name(&mut d, "C", "", Some("tippen"), 1100.0);
+        set_name(&mut e, "C", "", Some("tippen"), 1100.0);
+        assert_eq!(e.history().undo_depth(), 2);
+        assert_eq!(e.history().undo_depth(), d.history().undo_depth());
+        e.undo().unwrap();
+        d.undo().unwrap();
+        assert_eq!(e.to_json(), d.to_json());
+        // Grenze: beim Einsetzen fallen die ältesten Schritte weg.
+        let mut f = Document::from_json(&d.to_json()).unwrap();
+        f.history_mut().max_steps = 1;
+        let (u, r, ..) = d.history().export_index();
+        let step = |s: u64| {
+            let v: Value = serde_json::from_str(&d.history().export_step(s, usize::MAX).unwrap()).unwrap();
+            (String::new(), crate::ops::ops_from_json(&v["ops"]).unwrap())
+        };
+        f.history_mut().import(u.iter().map(|&s| step(s)).collect(), r.iter().map(|&s| step(s)).collect(), None, 0.0);
+        assert_eq!((f.history().undo_depth(), f.history().redo_depth()), (1, 1));
+    }
+
     #[test]
     fn coalesce_key_ein_schritt_und_verdichtet() {
         let mut d = doc();

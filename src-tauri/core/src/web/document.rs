@@ -209,6 +209,52 @@ pub fn doc_history_limits(h: u32, steps: f64, bytes: f64) {
     });
 }
 
+/// Verlaufs-Index für die Sicherung über einen Kern-Neustart ([118]): JSON `{"undo":[seq…ältester
+/// zuerst],"redo":[seq…nächster zuletzt],"lastKey":null|"…","lastAt":ms}` (leer, wenn nicht offen).
+#[wasm_bindgen]
+pub fn doc_history_index(h: u32) -> String {
+    with_doc(h, |d| {
+        let (undo, redo, last_key, last_at) = d.history().export_index();
+        serde_json::json!({ "undo": undo, "redo": redo, "lastKey": last_key, "lastAt": last_at }).to_string()
+    })
+    .unwrap_or_default()
+}
+
+/// Ein Verlaufsschritt als JSON `{"label":…,"ops":[…]}` ([118]); leer = nicht da oder grösser als
+/// `max_bytes` (geschätzter Speicher).
+#[wasm_bindgen]
+pub fn doc_history_step(h: u32, seq: f64, max_bytes: f64) -> String {
+    if !(seq.is_finite() && seq >= 1.0) {
+        return String::new();
+    }
+    let max = if max_bytes.is_finite() && max_bytes >= 0.0 { max_bytes as usize } else { usize::MAX };
+    with_doc(h, |d| d.history().export_step(seq as u64, max)).flatten().unwrap_or_default()
+}
+
+/// Verlauf nach einem Kern-Neustart wieder einsetzen ([118]): JSON `{"undo":[{"label","ops"}…],
+/// "redo":[…],"lastKey","lastAt"}` (Reihenfolge wie `doc_history_index`). Das Dokument muss schon den
+/// Stand halten, zu dem der Verlauf gehört. `false` bei kaputtem JSON (Verlauf unverändert).
+#[wasm_bindgen]
+pub fn doc_history_import(h: u32, json: &str) -> bool {
+    let Some((undo, redo, last_key, last_at)) = parse_history(json) else { return false };
+    with_doc(h, |d| d.history_mut().import(undo, redo, last_key, last_at)).is_some()
+}
+
+type HistorySteps = Vec<(String, Vec<Op>)>;
+
+fn parse_history(json: &str) -> Option<(HistorySteps, HistorySteps, Option<String>, f64)> {
+    fn steps(v: &Value) -> Option<HistorySteps> {
+        v.as_array()?
+            .iter()
+            .map(|s| Some((s.get("label")?.as_str()?.to_string(), ops_from_json(s.get("ops")?).ok()?)))
+            .collect()
+    }
+    let v = serde_json::from_str::<Value>(json).ok()?;
+    let last_key = v["lastKey"].as_str().map(str::to_owned);
+    let last_at = v["lastAt"].as_f64().filter(|t| t.is_finite()).unwrap_or(0.0);
+    Some((steps(&v["undo"])?, steps(&v["redo"])?, last_key, last_at))
+}
+
 /// Gruppe öffnen: alle Änderungen bis `doc_group_end` werden ein Undo-Schritt (verschachtelbar).
 #[wasm_bindgen]
 pub fn doc_group_begin(h: u32) {
