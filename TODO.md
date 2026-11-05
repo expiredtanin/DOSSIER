@@ -2561,6 +2561,9 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Abweichungs-Abwahl mehr; Fussbereich/Vorlage-Wahl e2e repariert). Sichtbarkeit/Overrides sind Projektdaten: ein Wechsel
   setzt sie nur bei Abweichung, als ein Undo-Schritt. Kein Modellwechsel (Reiter waren nie im Modell). Tests
   `viewTabs.test.ts`, e2e `viewTabs.spec.ts`. Offen: Reiter nicht mit dem Projekt gespeichert; nicht in der Tauri-App geprüft. · S
+- ◐ **[137] Alles Sichtbare anwählbar.** (5.11., Mac-Befund am Musterhaus komplex: „Schatten und gewachsenes Terrain lassen sich
+  nicht anwählen und bearbeiten") In Arbeit: Kern-Picken für Baugrube (Wirkbereich zuoberst), Höhenlinien-Satz, Schatten/Baurecht
+  (`sitePick`), 3D-Picken der Baugrube; `TerrainMesh.smooth`/`sourceId`. · M
 
 ## Priorität 4 — später
 

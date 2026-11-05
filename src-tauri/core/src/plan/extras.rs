@@ -96,6 +96,37 @@ pub fn sun_shadow(p: &Project, floor: &str, when_ms: Option<f64>, out: &mut Vec<
     }
 }
 
+/// [137] Abgeleitete Lage-Darstellung unter dem Punkt (x, y) im Geschoss `floor` (dieselben Bedingungen
+/// wie die Zeichnung): `"siteRules"` näher als `tol` (m) an Parzellengrenze oder zulässiger Fläche,
+/// `"sunStudy"` in einer Schattenfläche zum Zeitpunkt `when_ms`, sonst `""`. Die Auswahl öffnet dann die
+/// Einstellungen der Quelle (Baurecht bzw. Sonnenstand) — Schatten und Baurechtslinien sind keine Elemente.
+pub fn site_pick(p: &Project, floor: &str, when_ms: Option<f64>, x: f64, y: f64, tol: f64) -> &'static str {
+    if !(x.is_finite() && y.is_finite()) {
+        return "";
+    }
+    let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.0 };
+    let near_ring = |r: &[Vec2]| (0..r.len()).any(|i| crate::plan::pick::point_seg_dist(x, y, r[i].x, r[i].y, r[(i + 1) % r.len()].x, r[(i + 1) % r.len()].y) <= tol);
+    if let (Some(check), Some(rules)) = (site_check(p, floor), p.site_rules.as_ref()) {
+        if near_ring(&rules.parcel) || check.allowed.iter().flatten().any(|r| near_ring(r)) {
+            return "siteRules";
+        }
+    }
+    let mut shadow = Vec::new();
+    sun_shadow(p, floor, when_ms, &mut shadow);
+    let inside = shadow.iter().any(|q| match q {
+        Primitive::Polygon { pts, .. } => {
+            let flat: Vec<f64> = pts.iter().flat_map(|v| [v.x, v.y]).collect();
+            crate::plan::pick::point_in_polygon(x, y, &flat)
+        }
+        _ => false,
+    });
+    if inside {
+        "sunStudy"
+    } else {
+        ""
+    }
+}
+
 /// Baurecht im Geschoss nächst ±0.00 (ohne `show: false`): Prüfung des Modells, `None` ohne
 /// gültiges Baurecht.
 fn site_check(p: &Project, floor: &str) -> Option<crate::site_rules::SiteCheckOut> {
@@ -534,6 +565,37 @@ mod tests {
         assert!(c.profile_exceeded);
         let n1 = site_and_shadow(&p, &floor, None).1.len();
         assert!(n1 > n0, "{n0} {n1}");
+    }
+
+    /// [137] Klick in eine Schattenfläche wählt den Sonnenstand, Klick auf eine Baurechtslinie das Baurecht;
+    /// ohne sichtbare Studie bzw. in einem anderen Geschoss nichts.
+    #[test]
+    fn klick_auf_schatten_und_baurecht() {
+        let mut p = sample();
+        let floor = ground_floor_id(&p).unwrap().to_string();
+        p.sun_study = Some(SunStudy { when: "2026-12-21T09:00:00Z".into(), show: true, ..Default::default() });
+        let when = Some(1_797_843_600_000.0); // 2026-12-21T09:00:00Z
+        let mut shadow = Vec::new();
+        sun_shadow(&p, &floor, when, &mut shadow);
+        assert!(!shadow.is_empty());
+        // Ein Punkt in einer Schattenfläche (Raster über die erste Fläche).
+        let Primitive::Polygon { pts, .. } = &shadow[0] else { panic!() };
+        let flat: Vec<f64> = pts.iter().flat_map(|v| [v.x, v.y]).collect();
+        let (x0, x1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, v| (a.0.min(v.x), a.1.max(v.x)));
+        let (y0, y1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, v| (a.0.min(v.y), a.1.max(v.y)));
+        let inside = (0..400).map(|k| (x0 + (x1 - x0) * ((k % 20) as f64 + 0.5) / 20.0, y0 + (y1 - y0) * ((k / 20) as f64 + 0.5) / 20.0)).find(|q| crate::plan::pick::point_in_polygon(q.0, q.1, &flat)).unwrap();
+        assert_eq!(site_pick(&p, &floor, when, inside.0, inside.1, 0.1), "sunStudy");
+        assert_eq!(site_pick(&p, &floor, when, 1e4, 1e4, 0.1), "");
+        assert_eq!(site_pick(&p, "anderes-geschoss", when, inside.0, inside.1, 0.1), "");
+        assert_eq!(site_pick(&p, &floor, None, inside.0, inside.1, 0.1), "");
+        assert_eq!(site_pick(&p, &floor, when, f64::NAN, 0.0, 0.1), "");
+        p.sun_study.as_mut().unwrap().show = false;
+        assert_eq!(site_pick(&p, &floor, when, inside.0, inside.1, 0.1), "");
+        // Baurecht: Parzellengrenze bei x = −30 (weit weg vom Gebäude, kein Schatten dort).
+        p.site_rules = Some(serde_json::from_value(serde_json::json!({"parcel": [{"x": -30, "y": -30}, {"x": 40, "y": -30}, {"x": 40, "y": 40}, {"x": -30, "y": 40}], "defaultSetback": 3.0})).unwrap());
+        assert_eq!(site_pick(&p, &floor, when, -30.05, 5.0, 0.1), "siteRules");
+        assert_eq!(site_pick(&p, &floor, when, -27.0, 5.0, 0.1), "siteRules", "zulässige Fläche 3 m innen");
+        assert_eq!(site_pick(&p, &floor, when, -28.5, 5.0, 0.1), "");
     }
 
     #[test]

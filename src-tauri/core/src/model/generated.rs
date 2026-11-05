@@ -5197,6 +5197,15 @@ pub struct TerrainMesh {
     #[serde(rename = "earthDepth", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub earth_depth: Option<f64>,
+    /// [137] Glättungsstufe, mit der das Netz aus Höhenlinien erzeugt wurde (0 = roh, 1–4 Kantenteilungen).
+    /// Fehlt bei importierten Netzen (swissALTI3D) — dann gibt es nichts neu zu glätten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub smooth: Option<f64>,
+    /// [137] Quelle: Id des Höhenlinien-Satzes (`contourSet`), aus dem das Netz erzeugt wurde.
+    #[serde(rename = "sourceId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

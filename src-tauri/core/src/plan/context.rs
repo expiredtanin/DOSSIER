@@ -59,6 +59,9 @@ fn bbox_corners(positions: &[f64]) -> Option<Vec<Vec2>> {
 
 /// Kontext-Schicht (`addContextContours`). Objekte ohne Kategorie bleiben immer sichtbar.
 pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
+    // [137] Pick-Flächen der Baugruben zuletzt (zuoberst): sie liegen im Rahmen des Geländes, das sonst
+    // jeden Klick in der Grube fängt.
+    let mut late: Vec<Primitive> = Vec::new();
     for obj in c.p.context.as_deref().unwrap_or(&[]) {
         let code = match obj {
             ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
@@ -72,6 +75,11 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
         }
         match obj {
             ContextObject::ContourSet(s) => {
+                // [137] Rahmen als Pick-Fläche (unter dem daraus erzeugten Gelände; Cmd+Klick schaltet durch).
+                let all: Vec<f64> = s.contours.iter().flat_map(|k| k.pts.iter().flat_map(|q| [q.x, q.y, 0.0])).collect();
+                if let Some(pts) = bbox_corners(&all) {
+                    out.push(pick_band(pts, Some(&s.id), None));
+                }
                 for k in &s.contours {
                     let pts = &k.pts;
                     if pts.len() < 2 {
@@ -102,10 +110,11 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
                 }
                 terrain_contours(c, t, out);
             }
-            ContextObject::Excavation(e) => excavation_lines(c, e, out),
+            ContextObject::Excavation(e) => excavation_lines(c, e, out, &mut late),
             ContextObject::Image(_) => {}
         }
     }
+    out.append(&mut late);
 }
 
 const TERRAIN_INK: &str = "#7a5b3a";
@@ -185,7 +194,7 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>) {
 }
 
 /// [68] Baugrube im Grundriss: Sohle (Böschungsfuss) und Böschungsoberkante, Böschungsschraffur.
-fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>) {
+fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &mut Vec<Primitive>) {
     let ring: Vec<Vec2> = e.outline.iter().copied().filter(|q| q.x.is_finite() && q.y.is_finite()).collect();
     if ring.len() < 3 {
         return;
@@ -193,7 +202,10 @@ fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>) {
     for i in 0..ring.len() {
         out.push(ink_line(ring[i], ring[(i + 1) % ring.len()], 0.25, EXCAVATION_INK, None));
     }
-    out.push(pick_band(ring.clone(), Some(&e.id), None));
+    // [137] Pick-Fläche = Wirkbereich (Sohle + Böschungen), ohne Gelände nur die Sohle.
+    let hull = crate::excavation::terrains(c.p).into_iter().map(|t| crate::excavation::affected_hull(&crate::excavation::site_terrain(c.p, t), &e.id)).find(|h| h.len() >= 3);
+    let band = hull.map_or_else(|| ring.clone(), |h| h.iter().map(|q| v2(q[0], q[1])).collect());
+    bands.push(pick_band(band, Some(&e.id), None));
     let spacing = (0.004 * c.a.scale.max(1.0)).max(0.2);
     for t in crate::excavation::terrains(c.p) {
         let st = crate::excavation::site_terrain(c.p, t);
@@ -291,6 +303,52 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Oberstes Kontext-Pick-Band unter dem Punkt (wie `PickIndex::polygons_at` mit Maske „Kontext").
+    fn top_context(out: &[Primitive], x: f64, y: f64) -> Option<String> {
+        out.iter().rev().find_map(|q| match q {
+            Primitive::Polygon { pts, context_object_id: Some(id), .. } => {
+                let flat: Vec<f64> = pts.iter().flat_map(|v| [v.x, v.y]).collect();
+                crate::plan::pick::point_in_polygon(x, y, &flat).then(|| id.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// [137] Auswahl im Grundriss: Klick in die Baugrube (Sohle und Böschung) wählt die Baugrube, auch wenn
+    /// das Gelände in der Liste später kommt; daneben das Gelände; ausserhalb des Geländes die Höhenlinien.
+    #[test]
+    fn auswahl_gelaende_baugrube_hoehenlinien() {
+        let t = TerrainMesh {
+            id: "t".into(),
+            positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0],
+            indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+            category_code: Some("02".into()),
+            ..Default::default()
+        };
+        let pit = Excavation {
+            id: "bg".into(),
+            outline: vec![v2(20.0, 15.0), v2(30.0, 15.0), v2(30.0, 25.0), v2(20.0, 25.0)],
+            bottom: 1.0,
+            ..Default::default()
+        };
+        let cs = ContourSet {
+            id: "hl".into(),
+            contours: vec![Contour { z: 0.0, pts: vec![v2(-20.0, -5.0), v2(80.0, 50.0)], ..Default::default() }],
+            ..Default::default()
+        };
+        // Reihenfolge wie im Musterhaus komplex: Höhenlinien, Baugrube, dann das daraus erzeugte Gelände.
+        let p = Project { context: Some(vec![ContextObject::ContourSet(cs), ContextObject::Excavation(pit), ContextObject::TerrainMesh(t)]), ..Default::default() };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "scale": 100}"#).unwrap();
+        let mut out = Vec::new();
+        plan_context(&Ctx::new(&p, &a), &mut out);
+        assert_eq!(top_context(&out, 25.0, 20.0).as_deref(), Some("bg"), "Sohle");
+        // Ostseite: Gelände 3 m bei x = 30, Sohle 1 m → 2 m Böschung (45°) bis x ≈ 32.
+        assert_eq!(top_context(&out, 31.0, 20.0).as_deref(), Some("bg"), "Böschung");
+        assert_eq!(top_context(&out, 50.0, 5.0).as_deref(), Some("t"), "Gelände");
+        assert_eq!(top_context(&out, -10.0, 0.0).as_deref(), Some("hl"), "Höhenlinien");
+        assert_eq!(top_context(&out, -30.0, 0.0), None);
+    }
 
     /// [T6]/[68] Höhenlinien (Zähllinien dicker + beschriftet) und Baugrube (Sohle, Oberkante, Schraffur).
     #[test]

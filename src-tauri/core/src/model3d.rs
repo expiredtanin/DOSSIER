@@ -2425,16 +2425,48 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         let (pos, idx) = (&*pos, &*idx);
         let vcount = pos.len() / 3;
         let at = |i: usize| -> V3 { [pos[i * 3], pos[i * 3 + 2], -pos[i * 3 + 1]] };
+        // [137] Dreiecke im Wirkbereich einer Baugrube (Sohle, Böschungen) wählen die Baugrube.
+        let site = match obj {
+            ContextObject::TerrainMesh(m) => Some(crate::excavation::site_terrain(p, m)),
+            _ => None,
+        };
+        let site = site.filter(|st| !st.items.is_empty());
+        let orig_idx = site.as_ref().map(|st| crate::terrain::TinIndex::new(&st.orig));
+        let boxes: Vec<[f64; 4]> = site.as_ref().map_or_else(Vec::new, |st| {
+            st.items
+                .iter()
+                .map(|(eid, ..)| crate::excavation::affected_hull(st, eid).iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]))
+                .collect()
+        });
         let mut tris: Vec<Tri> = Vec::new();
+        let mut owned: Vec<(String, Vec<Tri>)> = Vec::new();
         for t in idx.chunks_exact(3) {
             let ok = |v: f64| v >= 0.0 && v.fract() == 0.0 && (v as usize) < vcount;
             if !(ok(t[0]) && ok(t[1]) && ok(t[2])) {
                 continue;
             }
-            tris.push([at(t[0] as usize), at(t[1] as usize), at(t[2] as usize)]);
+            let tri = [at(t[0] as usize), at(t[1] as usize), at(t[2] as usize)];
+            let owner = match (&site, &orig_idx) {
+                (Some(st), Some(oi)) => {
+                    let (cx, cy) = ((tri[0][0] + tri[1][0] + tri[2][0]) / 3.0, -(tri[0][2] + tri[1][2] + tri[2][2]) / 3.0);
+                    let near = boxes.iter().any(|b| cx >= b[0] - 0.01 && cx <= b[2] + 0.01 && cy >= b[1] - 0.01 && cy <= b[3] + 0.01);
+                    if near { crate::excavation::owner_at(st, oi, cx, cy) } else { None }
+                }
+                _ => None,
+            };
+            match owner {
+                Some(eid) => match owned.iter_mut().find(|(i, _)| i == eid) {
+                    Some((_, l)) => l.push(tri),
+                    None => owned.push((eid.to_string(), vec![tri])),
+                },
+                None => tris.push(tri),
+            }
         }
         if !tris.is_empty() {
             context_meshes.push(PickContextMesh { tris, context_object_id: id.clone() });
+        }
+        for (eid, tris) in owned {
+            context_meshes.push(PickContextMesh { tris, context_object_id: eid });
         }
     }
     Ok(PickGeometry {
@@ -2498,6 +2530,31 @@ mod tests {
         let pp = |visible| Project { layers: vec![parent(visible)], ..mk(true) };
         assert_eq!(emit_context_meshes(&pp(true)).len(), 1);
         assert!(emit_context_meshes(&pp(false)).is_empty());
+    }
+
+    /// [137] 3D-Picken: Dreiecke der Baugrube (Sohle, Böschung) tragen die Id der Baugrube, das übrige
+    /// Gelände die des Netzes.
+    #[test]
+    fn pick_gelaende_und_baugrube_im_3d() {
+        let t = crate::model::TerrainMesh {
+            id: "t".into(),
+            positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0],
+            indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+            ..Default::default()
+        };
+        let v = |x: f64, y: f64| crate::model::Vec2 { x, y };
+        let pit = crate::model::Excavation { id: "bg".into(), outline: vec![v(20.0, 15.0), v(30.0, 15.0), v(30.0, 25.0), v(20.0, 25.0)], bottom: 1.0, ..Default::default() };
+        let p = Project { context: Some(vec![ContextObject::Excavation(pit), ContextObject::TerrainMesh(t)]), ..Default::default() };
+        let g = pick_geometry(&p).unwrap();
+        let of = |id: &str| g.context_meshes.iter().find(|m| m.context_object_id == id).map(|m| m.tris.clone()).unwrap_or_default();
+        let (bg, terr) = (of("bg"), of("t"));
+        assert!(!bg.is_empty() && !terr.is_empty(), "{} {}", bg.len(), terr.len());
+        // Welt (x, z, −y): alle Baugruben-Dreiecke liegen im Wirkbereich (x 18…32, y 13…27), Sohle auf 1 m dabei.
+        for tri in &bg {
+            let (cx, cy) = ((tri[0][0] + tri[1][0] + tri[2][0]) / 3.0, -(tri[0][2] + tri[1][2] + tri[2][2]) / 3.0);
+            assert!((17.0..=33.0).contains(&cx) && (12.0..=28.0).contains(&cy), "{cx} {cy}");
+        }
+        assert!(bg.iter().any(|tri| tri.iter().all(|q| (q[1] - 1.0).abs() < 1e-6)));
     }
 
     /// [T4] Import-Mesh glatt: Knickwinkel geht ans 3D (Vorgabe 30°), kantig ohne; JSON `creaseAngle`.

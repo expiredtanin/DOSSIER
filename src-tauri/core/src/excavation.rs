@@ -729,6 +729,54 @@ pub fn terrain_before(st: &SiteTerrain, id: &str) -> Option<Tin> {
     Some(cur)
 }
 
+// ── Auswahl ([137]) ──────────────────────────────────────────────────────────
+
+/// [137] Baugrube, die das Gelände am Punkt (x, y) ändert (Sohle oder Böschung/Schüttung), sonst `None`.
+/// `idx` = Index des gewachsenen Netzes (`st.orig`); die Baugruben wirken der Reihe nach wie im Netz.
+pub fn owner_at<'a>(st: &'a SiteTerrain, idx: &TinIndex, x: f64, y: f64) -> Option<&'a str> {
+    let p = [x, y];
+    let mut z = idx.z_at(x, y);
+    for (id, spec, _) in &st.items {
+        if point_in_ring(p, &spec.ring) {
+            return Some(id);
+        }
+        if let Some(t) = z {
+            let n = spec.apply(t, p);
+            if (n - t).abs() > 0.005 {
+                return Some(id);
+            }
+            z = Some(n);
+        }
+    }
+    None
+}
+
+/// [137] Wirkbereich einer Baugrube im Grundriss (Pick-Fläche): konvexe Hülle aus Sohle und
+/// Böschungsoberkante, gegen den Uhrzeigersinn. Leer, wenn sie kein Gelände trifft.
+pub fn affected_hull(st: &SiteTerrain, id: &str) -> Vec<P2> {
+    let Some((_, spec, daylight)) = st.items.iter().find(|(i, ..)| i == id) else { return Vec::new() };
+    let mut pts: Vec<P2> = spec.ring.iter().chain(daylight.iter().flatten()).copied().filter(|q| q[0].is_finite() && q[1].is_finite()).collect();
+    pts.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    pts.dedup();
+    if pts.len() < 3 {
+        return pts;
+    }
+    let cross = |o: P2, a: P2, b: P2| (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    let mut hull: Vec<P2> = Vec::with_capacity(pts.len() + 1);
+    for pass in 0..2 {
+        let start = hull.len();
+        let it: Box<dyn Iterator<Item = &P2>> = if pass == 0 { Box::new(pts.iter()) } else { Box::new(pts.iter().rev()) };
+        for &q in it {
+            while hull.len() >= start + 2 && cross(hull[hull.len() - 2], hull[hull.len() - 1], q) <= 0.0 {
+                hull.pop();
+            }
+            hull.push(q);
+        }
+        hull.pop();
+    }
+    hull
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

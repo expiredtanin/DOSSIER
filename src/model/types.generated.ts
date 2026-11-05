@@ -3112,6 +3112,13 @@ export type TerrainMesh = {
   contourIndexEvery?: number;
   /** [T6] Tiefe des Erdreich-Bands im Schnitt unter dem Gelände in m (Default 1.5). */
   earthDepth?: number;
+  /**
+   * [137] Glättungsstufe, mit der das Netz aus Höhenlinien erzeugt wurde (0 = roh, 1–4 Kantenteilungen).
+   * Fehlt bei importierten Netzen (swissALTI3D) — dann gibt es nichts neu zu glätten.
+   */
+  smooth?: number;
+  /** [137] Quelle: Id des Höhenlinien-Satzes (`contourSet`), aus dem das Netz erzeugt wurde. */
+  sourceId?: string;
 };
 
 /** Ein zusammenhängender Textabschnitt mit einheitlicher Formatierung. */
