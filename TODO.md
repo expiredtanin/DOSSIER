@@ -2018,8 +2018,11 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Grundriss spart sie aus Schichtflächen, Fugen und Wandumriss aus (Leibung an der Taschenmündung offen), 3D-Wandkörper
   quer/längs um die Tasche geteilt (bis Türhöhe, darüber Wand; Volumen −Hohlraum), Schnitt spart sie aus den
   Schichtbändern aus; Ansicht: Schiebepfeil zur Bandseite (Schiebe- und Taschentür), zweiflügelig zwei Pfeile nach aussen.
-  Geprüft: Rust-Tests (Fläche/Seite/Volumen/Schnitt/Pfeil), CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux). Offen:
-  Tasche in Bogenwänden und unter schrägen Wandoberkanten (`top_drop`) nicht ausgespart; nicht in der Tauri-App geprüft.
+  Geprüft: Rust-Tests (Fläche/Seite/Volumen/Schnitt/Pfeil), CLI-Grundriss/-Schnitt/-Ansicht angesehen (Linux). (05.11.)
+  Tasche auch in Bogenwänden ([T2]; folgt dem Bogen, Länge entlang der Achse: Grundriss über die abgewickelte Wand, 3D je
+  Sehnen-Teilwand, Schnitt mit Taschenring entlang des Bogens) und unter schrägen Wandoberkanten (Dachanschluss,
+  `top_plane`/`top_drop`: 3D-Teilkörper behalten die Dachebene, Höhe/Absenkung je Teil neu). Geprüft: Rust-Tests
+  (Fläche, Volumen, Schnitt; Bogen und Dach), CLI-Grundriss angesehen (Linux). Offen: nicht in der Tauri-App geprüft.
   Offen sonst: 3D/Ansicht ohne Hebeschiebe-Bandseite in der Ansicht, Brüstungs-/Riegel-Einteilung unten (nur
   Oberlicht), nicht in der Tauri-App geprüft.
 - ◐ **[103] Dachfenster und Öffnungen in Dach/Decke.** (29.10., Grundlage für Lukarnen) Wirt allgemein: `Opening`
