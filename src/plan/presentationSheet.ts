@@ -113,6 +113,37 @@ function templateVisibility(project: Project, t: ViewTemplate): Record<string, b
   return { ...vis, ...(t.layerVisibility ?? {}) };
 }
 
+/** Vermessung und Umgebung im Standard-Ebenenbaum (`01`, `05` mit Unterkategorien Situation/Strasse/Bäume …). */
+const SITE_ROOTS = ["01", "05"];
+
+/** Codes der Umgebung: Vermessung/Umgebung samt Unterkategorien und die Kategorien der Kontext-Objekte (Gelände …). */
+function siteCodes(project: Project): Set<string> {
+  const out = new Set<string>();
+  const walk = (cs: readonly LayerCategory[], inSite: boolean) => {
+    for (const c of cs) {
+      const site = inSite || SITE_ROOTS.includes(c.code);
+      if (site) out.add(c.code);
+      if (c.children) walk(c.children, site);
+    }
+  };
+  walk(project.layers, false);
+  for (const c of project.context ?? []) if (c.categoryCode) out.add(c.categoryCode);
+  return out;
+}
+
+/**
+ * Sichtbarkeit je Ebene: Grundrisse zeigen das Gebäude ohne Umgebung (Kataster, Strassen, Gelände, Höhenlinien —
+ * dafür gibt es den Situationsplan); sonst bestimmt die Parzelle Grösse und Massstab jedes Geschosses.
+ * Schnitte/Ansichten behalten das Gelände (Terrainlinie).
+ */
+function levelVisibility(project: Project, base: Record<string, boolean>, levelId: string): Record<string, boolean> {
+  const level = project.drawingLevels.find((l) => l.id === levelId);
+  if (!level || !isFloor(level)) return base;
+  const out = { ...base };
+  for (const c of siteCodes(project)) out[c] = false;
+  return out;
+}
+
 /** Die gewählten Ebenen in Blattreihenfolge mit Gruppe (0 Grundrisse, 1 Ansichten, 2 Schnitt). */
 function chosenLevels(project: Project, o: PresentationOptions): { id: string; group: number }[] {
   const byId = new Map(project.drawingLevels.map((l) => [l.id, l]));
@@ -135,10 +166,12 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
   const { template } = presentationTemplate(project);
   const size = sheetSizeMm(o.paper, o.orientation);
   const levels = chosenLevels(project, o);
+  const vis = templateVisibility(project, template);
   const text = JSON.stringify({
     levels: levels.map((l) => l.id),
     groups: levels.map((l) => l.group),
-    layerVisibility: templateVisibility(project, template),
+    layerVisibility: vis,
+    levelVisibility: Object.fromEntries(levels.map((l) => [l.id, levelVisibility(project, vis, l.id)])),
     detail: (template.detail ?? "mittel") satisfies DetailLevel,
     sheetW: size.w,
     sheetH: size.h,
@@ -253,7 +286,7 @@ export function presentationSheetOps(
       scaleDenominator: plan.scale,
       detail: template.detail ?? "mittel",
       activeLevelId: level.id,
-      layerVisibility: vis,
+      layerVisibility: levelVisibility(project, vis, level.id),
       drawingVisibility: {},
       ...(template.enabledOverrideRuleIds ? { enabledOverrideRuleIds: [...template.enabledOverrideRuleIds] } : {}),
       templateId: template.id,
