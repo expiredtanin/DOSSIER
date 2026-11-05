@@ -23,7 +23,7 @@ der [Anleitung](/docs/anleitung/).
   erzeugt den Umriss) – *teilweise* [77].
 - Blöcke (Symbole) definieren und einfügen, Gruppen.
 - Achsraster rechtwinklig oder radial mit Achsköpfen.
-- Rund 70 Befehle mit deutschen und englischen Kürzeln, getippte Koordinaten
+- Über 70 Befehle mit deutschen und englischen Kürzeln, getippte Koordinaten
   (`5,3`, `r5,3`, `5<45`), Fang, Griffe, Verlauf mit Sprung zu jedem früheren
   Schritt.
 
