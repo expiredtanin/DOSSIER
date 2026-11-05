@@ -1178,6 +1178,18 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   Bäume, Löschen, Nachfahren, Ordner-PDF, Titelblock) lag schon im Kern ([K4] S3); der Rest sind Fabriken und
   Listen-`map`/`filter` ohne Logik — bewusst in TS gelassen. **Offen: Griffe** (`useGripEditing.ts`, anderer Agent).
   Geprüft: cargo test (Kern), vitest; nicht in der Tauri-App.
+  5.11. Griffe, Teil 1: die Zug-Rechnung je Mausschritt liegt im Kern (`grip_drag.rs`, Bindungen `web/grip_drag.rs`,
+  Fassade `geometry/gripDrag.ts`): Länge/Winkel-Felder und Punkt aus Locks, Shift-Achsen-Lock (Welt-H/V + Flucht
+  der Nachbarkanten, Polygon-Nachbarn), Kanten-Ziel (geführt: Normale, Geometrie-Snap vor Raster; frei: Ortho/
+  Raster; gelockt), Höhen-Griffe im Schnitt (Mindestmasse, cm-Raster, mm-Rundung), Öffnung entlang der Wand
+  (Griff-Lage, Klemmen, im Schnitt mit u-Faktor), Bewegpunkt Treppe, Bogenwand-Scheitel, Baugruben-Griffe,
+  koinzidente Ecken beim Körper-Verschieben. TS-Fassungen gelöscht. `useGripEditing.ts` 1598 → 1395 Zeilen.
+  **Offen (bewusst TS):** Zusammenstellen der Griff-/Kanten-Listen je Auswahl (`gripOwners`, Bereiche; braucht
+  `drawingVertices` mit der Schrift-Metrik der Hülle für Textspalten), Höhen-Griff-Lagen aus `sheetOwnerOutlines`
+  (Hülle), Vorschau-Formen und das Aufschieben/Anwenden der Züge (Refs, `applyEdgeToward` additiv) — das ist
+  React-/Zustands-Leim. Möglicher nächster Schritt: Griff-Listen als Dokument-Abfrage (Text-Ecken als Eingabe).
+  Geprüft: cargo test (Kern), tsc, vitest, e2e (Griffe: aiBridge, dimAssoc, grid, kataster, layoutSheet, editing,
+  roof, renderCount); Golden unverändert; nicht in der Tauri-App.
 - ✅ **[129] Grenze schärfen.** (3.11.) `i18n/translate.ts` (React-frei: `t`, Sprache, Wörterbücher), `i18n/index.ts` re-exportiert
   und hält nur `useT`; Kern-Dateien importieren `i18n/translate`. `net/` in `CORE_DIRS`, neuer Test prüft transitive
   relative Importe (Ausnahmelisten leer). · S
