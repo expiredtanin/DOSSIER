@@ -1774,6 +1774,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   die Wand im Schnitt, Symbol strichpunktiert; über der Oberkante entfällt die Öffnung. Räume unberührt. Tests
   `ansichtsbereich_*` (domains.rs). Golden „komplex“ (hat Ansichtsbereiche) neu: hohe Fenster (ug-f3, eg-f7,
   eg-f8, og-f5, dg-f1) jetzt ohne Wandlücke. CLI-Plan + Chromium geprüft (Linux), nicht in der Tauri-App.
+  5.11.: Sichttiefe für Schnitt/Ansicht über das bestehende Feld `depth` (DrawingLevel): ein Bauteil, dessen
+  nächster Punkt weiter hinter der Ebene liegt, entfällt in der Projektion ganz (Schnitt: vor der HLR je
+  Eigentümer, `drop_far_owners`, ersetzt die alte Schwerpunkt-Filterung und erfasst jetzt auch Körper/Stützen;
+  Ansicht: `drop_far_faces` je Bauteil samt Öffnungen der weggelassenen Wände, Schatten und Musterlinien);
+  Schnittflächen bleiben. Eingabe „Sichttiefe“ im Geschoss-Editor (Schnitt/Ansicht). Öffnung ganz unter der
+  Schnittebene (Lüftungsschlitz) schliesst die geschnittene Wand wie das Oberlicht, Symbol gepunktet. Tests
+  `tiefe_blendet_ferne_bauteile_*`, `ansichtsbereich_lueftungsschlitz_unter_schnitt`; Golden unverändert.
+  CLI-Schnitt/-Ansicht + Chromium geprüft (Linux), nicht in der Tauri-App. Offen: Dach/Decke-Darstellung
+  über/unter Schnitt verfeinern, Raum/Fenster eigenständig, Tiefe nur ganzes Bauteil (kein Clip an der Ebene).
   Offen: Schnitt/Ansicht mit Ansichtsbereich; Öffnung ganz unter der Schnittebene (Lüftungsschlitz) bleibt wie
   bisher mit Lücke. · M
 - ✅ **[37] Beschriftung in Papiergrösse.** · M — 4.11.: Text `paperHeight` (mm auf dem Blatt, Rust-Modell): Plan rechnet

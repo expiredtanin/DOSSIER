@@ -1796,50 +1796,17 @@ fn append_earth(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) 
     }
 }
 
-fn centroid(pts: &[Vec2]) -> Option<(f64, f64)> {
-    if pts.is_empty() {
-        return None;
-    }
-    let (mut x, mut y) = (0.0, 0.0);
-    for q in pts {
-        x += q.x;
-        y += q.y;
-    }
-    let n = pts.len() as f64;
-    Some((x / n, y / n))
-}
-
-/// `filterByDepth`: Ansichtskanten weiter als `depth` hinter der Ebene ausblenden.
-fn filter_by_depth(out: &mut Output, p: &Project, plane: &Plane, depth: f64, walls: &[Option<&Wall>], slabs: &[SlabOwner], slabs_r: &[RSlab]) {
-    if !(depth > 0.0) {
-        return;
-    }
-    let (nx, ny) = (plane.normal[0], plane.normal[2]);
-    let l = hypot2(nx, ny);
-    let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };
-    let blick = (nx / l, ny / l);
-    let origin = plane.base();
-    let roofs = p.roofs.as_deref().unwrap_or(&[]);
-    let owner_point = |e: &Edge| -> Option<(f64, f64)> {
-        match e.kind {
-            Kind::Wall => walls.get(e.index).copied().flatten().map(|w| ((w.start.x + w.end.x) / 2.0, (w.start.y + w.end.y) / 2.0)),
-            Kind::Slab => match slabs.get(e.index) {
-                Some(SlabOwner::Ceiling(c, _)) => centroid(&c.outline),
-                // Treppe: Mitte des Tritts bzw. Podests selbst.
-                Some(SlabOwner::Stair(_)) => slabs_r.get(e.index).and_then(|s| centroid(&s.outline.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect::<Vec<_>>())),
-                _ => None,
-            },
-            _ => roofs.get(e.index).and_then(|r| centroid(&r.outline)),
+/// Ansichtsbereich ([36]): Flächen der Eigentümer weglassen, deren nächster Punkt (Tiefe `q[2]` hinter
+/// der Ebene) weiter als `depth` liegt. Ein Bauteil zählt als Ganzes: was in den Bereich hineinragt,
+/// bleibt vollständig.
+fn drop_far_owners(faces: Vec<crate::hlr::Face>, owners: usize, depth: f64) -> Vec<crate::hlr::Face> {
+    let mut near = vec![f64::INFINITY; owners];
+    for f in &faces {
+        if let Some(m) = near.get_mut(f.owner as usize) {
+            *m = f.pts.iter().fold(*m, |m, q| m.min(q[2]));
         }
-    };
-    let keep = |e: &Edge| -> bool {
-        match owner_point(e) {
-            None => true,
-            Some(q) => (q.0 - origin.0) * blick.0 + (q.1 - origin.1) * blick.1 <= depth + 1e-6,
-        }
-    };
-    out.visible.retain(keep);
-    out.hidden.retain(keep);
+    }
+    faces.into_iter().filter(|f| near.get(f.owner as usize).is_none_or(|&m| m <= depth + 1e-6)).collect()
 }
 
 // ── Schnitt ───────────────────────────────────────────────────────────────────
@@ -1875,7 +1842,7 @@ fn quad_of(t: &[[f64; 3]; 3], n: [f64; 3], next: &[u32], vert: &dyn Fn(u32) -> (
 /// Dreiecke (Wände samt Gehrung und Löchern wie im 3D-Modell, Platten, Treppen, Dächer, Körper),
 /// auf die Seite hinter der Ebene zugeschnitten; die Schnittflächen verdecken in Tiefe 0. Bogenwände,
 /// verschnittene Dächer und Körper glätten ihre Facetten (keine Fugen, nur Knicke und Silhouetten).
-fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[BodyMesh], cuts: &[Cut], hidden: bool) -> (Vec<Edge>, Vec<Edge>) {
+fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[BodyMesh], cuts: &[Cut], hidden: bool, max_depth: Option<f64>) -> (Vec<Edge>, Vec<Edge>) {
     use crate::hlr;
     let nl = crate::jsmath::hypot(&plane.normal);
     if !(nl > 1e-12) {
@@ -2005,6 +1972,11 @@ fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3
         model_tris(&mut faces, &b.positions, &mut idx, owner, group, &mut push);
         group += 1;
     }
+    // Ansichtsbereich ([36]): Bauteile, deren nächster Punkt weiter als `max_depth` hinter der Ebene
+    // liegt, entfallen ganz (auch als Verdecker — sie liegen ohnehin hinter allem Gezeigten).
+    if let Some(d) = max_depth.filter(|d| *d > 0.0) {
+        faces = drop_far_owners(faces, owners.len(), d);
+    }
     // Schnittflächen (Tiefe 0) verdecken nur.
     for c in cuts {
         if c.pts.len() >= 3 {
@@ -2072,13 +2044,10 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
     append_body_sections(&mut cuts, p, bodies, base, u);
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
-    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, bodies, &cuts, level.hidden_lines);
+    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, bodies, &cuts, level.hidden_lines, level.depth);
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new() };
     append_terrain_profiles(&mut out, p, base, u);
-    if let Some(d) = level.depth {
-        filter_by_depth(&mut out, p, &plane, d, &walls, &slabs, &slabs_r);
-    }
     Ok(Some(out))
 }
 
@@ -3396,24 +3365,31 @@ mod ts_faelle {
         assert_eq!(bbox(&by(&out, "w")[0].pts), [0.0, 0.3, 0.0, 3.0]);
     }
 
+    /// [36] Ansichtsbereich im Schnitt: Bauteile ganz hinter der Tiefe entfallen in der Projektion, der
+    /// Schnitt selbst bleibt; ohne Tiefe unverändert.
     #[test]
-    fn tiefe_blendet_ferne_kanten_aus() {
+    fn tiefe_blendet_ferne_bauteile_aus() {
+        let wall = |id: &str, a: (f64, f64), b: (f64, f64), h: f64| Wall {
+            id: id.into(),
+            start: Vec2 { x: a.0, y: a.1 },
+            end: Vec2 { x: b.0, y: b.1 },
+            height: h,
+            ..Default::default()
+        };
         let mut p = Project::default();
-        p.walls = vec![
-            Wall { id: "nah".into(), start: Vec2 { x: 0.0, y: 1.0 }, end: Vec2 { x: 4.0, y: 1.0 }, ..Default::default() },
-            Wall { id: "fern".into(), start: Vec2 { x: 0.0, y: 9.0 }, end: Vec2 { x: 4.0, y: 9.0 }, ..Default::default() },
-        ];
-        let walls: Vec<Option<&Wall>> = p.walls.iter().map(Some).collect();
-        let plane = Plane { point: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0] };
-        let e = |i: usize| Edge { kind: Kind::Wall, index: i, a: [0.0, 0.0], b: [1.0, 0.0] };
-        let mut out = Output { visible: vec![e(0), e(1)], hidden: vec![e(1)], ..Default::default() };
-        filter_by_depth(&mut out, &p, &plane, 3.0, &walls, &[], &[]);
-        assert_eq!(out.visible.len(), 1);
-        assert_eq!(out.visible[0].index, 0);
-        assert!(out.hidden.is_empty());
-        let mut all = Output { visible: vec![e(0), e(1)], ..Default::default() };
-        filter_by_depth(&mut all, &p, &plane, 0.0, &walls, &[], &[]);
-        assert_eq!(all.visible.len(), 2, "Tiefe 0 ist kein Filter");
+        // quer: von der Ebene geschnitten und weit nach hinten; nah: 3 m, fern: 10 m hinter der Ebene (höher).
+        p.walls = vec![wall("quer", (0.0, -1.0), (0.0, 12.0), 2.5), wall("nah", (2.0, 3.0), (6.0, 3.0), 2.5), wall("fern", (2.0, 10.0), (6.0, 10.0), 4.0)];
+        let lv = |depth: Option<f64>| LevelSpec { kind: "section".into(), line: Some([Vec2 { x: -1.0, y: 0.0 }, Vec2 { x: 8.0, y: 0.0 }]), direction_sign: Some(1.0), depth, shadows: false, hidden_lines: false };
+        let top = |o: &Output| o.visible.iter().map(|e| e.a[1].max(e.b[1])).fold(f64::NEG_INFINITY, f64::max);
+        let all = compute_section(&p, &lv(None), &[]).unwrap().unwrap();
+        assert!(top(&all) > 3.9, "ohne Tiefe ist die ferne Wand sichtbar: {}", top(&all));
+        let near = compute_section(&p, &lv(Some(5.0)), &[]).unwrap().unwrap();
+        assert!(top(&near) < 2.5 + 1e-6, "ferne Wand hinter der Tiefe: {}", top(&near));
+        assert!(!near.visible.is_empty(), "nahe Wand bleibt");
+        assert_eq!(near.cuts.len(), all.cuts.len(), "Schnitt bleibt");
+        // Tiefe 0 ist kein Filter.
+        let zero = compute_section(&p, &lv(Some(0.0)), &[]).unwrap().unwrap();
+        assert_eq!(zero.visible.len(), all.visible.len());
     }
 
     #[test]

@@ -674,8 +674,16 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             let (ob, ot) = super::view_range::opening_vertical_extent(p, w, o);
             (o, if range.custom { range.classify(ob, ot) } else { Zone::Cut })
         }).collect();
-        let overhead_opening = |oz: Zone| zone == Zone::Cut && oz == Zone::Above;
-        let openings: Vec<&Opening> = all_openings.iter().filter(|(_, oz)| *oz != Zone::Hidden && !overhead_opening(*oz)).map(|(o, _)| *o).collect();
+        // Gegenstück: ganz unter der Schnittebene (Lüftungsschlitz) schliesst die Wand ebenso, Symbol gepunktet.
+        let closed_dash = |oz: Zone| -> Option<&'static [f64]> {
+            match oz {
+                _ if zone != Zone::Cut => None,
+                Zone::Above => Some(&super::view_range::ABOVE_DASH),
+                Zone::Below | Zone::Under => Some(&super::view_range::UNDER_DASH),
+                _ => None,
+            }
+        };
+        let openings: Vec<&Opening> = all_openings.iter().filter(|(_, oz)| *oz != Zone::Hidden && closed_dash(*oz).is_none()).map(|(o, _)| *o).collect();
         let wr_total = p.wall_thickness(w, 0.2);
         let wr = crate::opening_geom::WallRef {
             start: crate::opening_geom::v(wv.start.x, wv.start.y),
@@ -744,8 +752,8 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 }
                 None => opening_symbol(c, out, w, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?,
             }
-            if overhead_opening(oz) {
-                super::view_range::restyle(out, sym_start, &super::view_range::ABOVE_DASH);
+            if let Some(d) = closed_dash(oz) {
+                super::view_range::restyle(out, sym_start, d);
             }
         }
         if let Some(d) = range.restyle_dash(zone) {

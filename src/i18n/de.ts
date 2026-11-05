@@ -1026,6 +1026,8 @@ export const de = {
   "editor.viewTop": "Oberkante Sicht",
   "editor.viewBottom": "Unterkante Sicht",
   "editor.viewDepth": "Darunter sichtbar bis",
+  "editor.sectionDepth": "Sichttiefe",
+  "editor.sectionDepth.hint": "Bauteile weiter hinter der Schnitt-/Ansichtsebene entfallen in der Projektion (leer = unbegrenzt).",
   "editor.unit.mm": "mm",
   "editor.unit.m": "m",
   "editor.noHeightDrawing": "Für Zeichnungen gibt es keine Geschoss-/Schnitthöhe.",

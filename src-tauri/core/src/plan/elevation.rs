@@ -57,7 +57,7 @@ fn rgb_to_hex(c: [f64; 3]) -> String {
     format!("#{}{}{}", b(c[0]), b(c[1]), b(c[2]))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Role {
     Wall,
     Slab,
@@ -1225,6 +1225,9 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     cull_under_roofs(p, &frame, &walls, &mut faces);
     faces.extend(collect_roof_faces(p, &frame, &walls)?);
     faces.extend(collect_column_faces(p, &frame));
+    // Ansichtsbereich ([36]): Bauteile, deren nächster Punkt weiter als `depth` hinter der Ansichtsebene
+    // liegt, entfallen ganz (samt ihren Öffnungen, s. unten).
+    let far = level.depth.filter(|d| *d > 0.0).map(|d| (d, drop_far_faces(&mut faces, d)));
 
     // Kategorie einer Fläche (erstes Element mit der id, wie `find`).
     let mut wall_cat: HashMap<&str, &str> = HashMap::new();
@@ -1261,7 +1264,14 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
 
     // Ansichtsfarbe und -schraffur ([100]) der sichtbaren Bauteilseite.
     let (pattern_lines, pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
-    let openings = collect_openings(p, &frame);
+    let mut openings = collect_openings(p, &frame);
+    if let Some((d, dropped)) = &far {
+        let host = |id: &str| p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == id).map(|o| o.host_wall_id.as_str());
+        openings.retain(|op| match host(&op.id) {
+            Some(w) if !w.is_empty() => !dropped.contains(&(Role::Wall, w.to_string())),
+            _ => op.depth <= d + 1e-6,
+        });
+    }
     let mut occ = vec![(faces.len() + openings.len()) as f64];
     for f in &faces {
         occ.extend([f.depth_max, f.pts.len() as f64]);
@@ -1532,6 +1542,20 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
 
 /// Bauteil der sichtbaren Wandseite: rechts der Achse (Anfang → Ende) liegt die äusserste Schicht
 /// (`layers[0]`), links die innerste; Stirnseiten haben keine.
+/// Ansichtsbereich ([36]): Flächen der Bauteile (Rolle + id) weglassen, deren nächster Punkt weiter als
+/// `depth` hinter der Ansichtsebene liegt; ein Bauteil zählt als Ganzes. Flächen ohne id zählen einzeln.
+/// Liefert die weggelassenen Bauteile.
+fn drop_far_faces(faces: &mut Vec<Face>, depth: f64) -> std::collections::HashSet<(Role, String)> {
+    let mut near: HashMap<(Role, &str), f64> = HashMap::new();
+    for f in faces.iter().filter(|f| !f.id.is_empty()) {
+        let m = near.entry((f.role, f.id.as_str())).or_insert(f64::INFINITY);
+        *m = m.min(f.depth_min);
+    }
+    let dropped: std::collections::HashSet<(Role, String)> = near.into_iter().filter(|(_, m)| *m > depth + 1e-6).map(|((r, id), _)| (r, id.to_string())).collect();
+    faces.retain(|f| if f.id.is_empty() { f.depth_min <= depth + 1e-6 } else { !dropped.contains(&(f.role, f.id.clone())) });
+    dropped
+}
+
 fn wall_side_component<'a>(p: &'a Project, wall: &Wall, normal: [f64; 3]) -> Option<&'a Component> {
     let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
     let len = hypot2(dx, dy);
@@ -2111,6 +2135,27 @@ mod tests {
         // Senkrechte Kanten: je Stütze genau zwei (links, rechts), keine Facettenfugen der runden.
         let verticals = outline_lines(&prims).into_iter().filter(|(a, b)| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() > 1.0).count();
         assert_eq!(verticals, 4);
+    }
+
+    /// [36] Ansichtsbereich in der Ansicht: Bauteile ganz hinter der Tiefe entfallen; ohne Tiefe alle da.
+    #[test]
+    fn tiefe_blendet_ferne_bauteile_in_der_ansicht_aus() {
+        let mut p = proj132(
+            serde_json::json!([]),
+            serde_json::json!([
+                {"id": "C1", "type": "column", "floorId": "F", "categoryCode": "25", "position": {"x": 2, "y": 2}, "profile": {"kind": "rect", "width": 0.2, "depth": 0.2}, "rotation": 0, "height": 2.5},
+                {"id": "C2", "type": "column", "floorId": "F", "categoryCode": "25", "position": {"x": 6, "y": 12}, "profile": {"kind": "rect", "width": 0.2, "depth": 0.2}, "rotation": 0, "height": 2.5}
+            ]),
+        );
+        let has = |prims: &[Primitive], id: &str| prims.iter().any(|q| matches!(q, Primitive::Polygon { column_id: Some(c), .. } if c == id));
+        let all = view132(&p, "s");
+        assert!(has(&all, "C1") && has(&all, "C2"));
+        let n_all = outline_lines(&all).len();
+        p.drawing_levels.iter_mut().find(|l| l.id == "s").unwrap().depth = Some(8.0);
+        let near = view132(&p, "s");
+        assert!(has(&near, "C1"), "C1 liegt 5 m hinter der Ebene");
+        assert!(!has(&near, "C2"), "C2 liegt 15 m hinter der Ebene");
+        assert!(outline_lines(&near).len() < n_all, "Kanten der fernen Stütze entfallen");
     }
 
 }
