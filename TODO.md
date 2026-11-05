@@ -2561,6 +2561,11 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Abweichungs-Abwahl mehr; Fussbereich/Vorlage-Wahl e2e repariert). Sichtbarkeit/Overrides sind Projektdaten: ein Wechsel
   setzt sie nur bei Abweichung, als ein Undo-Schritt. Kein Modellwechsel (Reiter waren nie im Modell). Tests
   `viewTabs.test.ts`, e2e `viewTabs.spec.ts`. Offen: Reiter nicht mit dem Projekt gespeichert; nicht in der Tauri-App geprüft. · S
+- ◐ **[138] Dokumentation und Website.** (5.11.) Inhalt von `website/` neu geschrieben (nur Markdown in
+  `website/content/`; Layouts/CSS/Startseiten-Design unverändert, weil der Maintainer eine Design-Vorlage liefert).
+  Bilder in `website/static/img` (WebP, ~0.7 MB): App aus `dist-test` (Playwright/Chromium, Linux, SVG-Rückfall statt
+  WebGPU) und CLI-Renders (`:musterhaus-komplex … --hatch/--sketch/--ceiling`); 3D headless leer → kein 3D-Bild.
+  Offen: Design-Vorlage einbauen; `hugo.toml` `repo`/`commitsApi` zeigen noch auf Gitea → auf GitHub umstellen. · M
 
 ## Priorität 4 — später
 
