@@ -97,6 +97,9 @@ function Chevron() {
   );
 }
 
+/** Feste Instanz: ein Neurendern des Dropdowns rendert den Pfeil nicht mit ([121]). */
+const CHEVRON = <Chevron />;
+
 /** Häkchen vor der aktiven Option. */
 function Check() {
   return (
@@ -322,7 +325,7 @@ export function Dropdown({
         onKeyDown={onTriggerKeyDown}
       >
         <span className="tb-dd-trigger-label">{triggerLabel}</span>
-        {triggerSuffix ?? <Chevron />}
+        {triggerSuffix ?? CHEVRON}
       </button>
       {menu && createPortal(menu, document.body)}
     </>

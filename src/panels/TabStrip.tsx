@@ -25,6 +25,7 @@
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
+import { memo } from "react";
 import { getPanel } from "./registry";
 import type { DockGroup, DockId } from "./types";
 import { t } from "../i18n";
@@ -48,7 +49,8 @@ export interface TabStripProps {
  * das Greifen eines Tabs meldet `onStartDrag` (Klick vs. Ziehen klärt der
  * Controller).
  */
-export function TabStrip({ side, groupIndex, group, onStartDrag }: TabStripProps) {
+// memo ([121]): rendert nur bei geänderter Gruppe; `onStartDrag` muss stabil sein (Dock: `useEvent`).
+export const TabStrip = memo(function TabStrip({ side, groupIndex, group, onStartDrag }: TabStripProps) {
   return (
     <div
       className="tabstrip"
@@ -80,4 +82,4 @@ export function TabStrip({ side, groupIndex, group, onStartDrag }: TabStripProps
       })}
     </div>
   );
-}
+});

@@ -24,6 +24,7 @@ import { PanelFrame } from "./PanelFrame";
 import { TabStrip } from "./TabStrip";
 import { getPanel } from "./registry";
 import { PanelHostProvider } from "./host";
+import { useEvent } from "../state/useEvent";
 import type {
   DisplayMode,
   DockId,
@@ -97,6 +98,8 @@ export function Dock({
 }: DockProps) {
   // Wurzelelement, um die Breite während des Ziehens aus clientX zu berechnen.
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // Stabile Identität für den memoisierten TabStrip ([121]).
+  const startTabDrag = useEvent(onStartTabDrag);
   // Container der Gruppen (für die Gesamthöhe beim Gruppen-Splitter).
   const stackRef = useRef<HTMLDivElement | null>(null);
   // Breite während des aktiven Ziehens; null = nicht im Ziehen (dock.size gilt).
@@ -220,7 +223,7 @@ export function Dock({
                 side={side}
                 groupIndex={gi}
                 group={group}
-                onStartDrag={onStartTabDrag}
+                onStartDrag={startTabDrag}
               />
               {def ? (
                 <PanelHostProvider value={buildHost(group.activeTab)}>

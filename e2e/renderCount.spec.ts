@@ -4,8 +4,9 @@
 // Eine Komponente zählt, wenn sich ihre Props oder ihr Hook-Zustand seit dem letzten Commit
 // geändert haben (= sie hat gerendert). Die Zahlen stehen in der Ausgabe (Namen nur lesbar ohne
 // Minifizierung: `vite build --minify false`). Gemessen 3.11. (Musterhaus): Wand-Änderung 413 → 290,
-// Zoom-Schritt 240 → 61 (davon ~200 bzw. ~45 im Grundriss selbst). Die Schranken unten fangen den
-// Rückfall ab, dass wieder die ganze App mitrendert.
+// Zoom-Schritt 240 → 61. 4.11.: Wand-Änderung 290 → 51 (Plan-Primitive/Schraffur-Muster mit
+// Strukturvergleich), Zoom-Schritt 61 → 8, 5 Zeiger-Schritte 75 → 20 (Live-Anzeigen abonnieren selbst).
+// Die Schranken unten fangen den Rückfall ab, dass wieder ganze Bäume mitrendern.
 import type { Page } from "@playwright/test";
 import { blurFocus, elementRows, expect, openSample, openTab, startNewProject, test } from "./app";
 
@@ -20,8 +21,10 @@ async function installCounter(page: Page): Promise<void> {
     const stats = { on: false, total: 0, byName: {} as Record<string, number> };
     window.__renderCounts = stats;
     const seen = new WeakMap<object, { p: unknown; s: unknown }>();
-    // Funktions-, Klassen-, forwardRef-, memo-Komponenten (React-18-Fiber-Tags).
-    const COMPOSITE = new Set([0, 1, 11, 14, 15]);
+    // Funktions-, Klassen-, forwardRef-, einfache memo-Komponenten (React-18-Fiber-Tags). Die Hülle
+    // von `memo(fn, vergleich)` (Tag 14) zählt nicht: sie trägt bei jedem Eltern-Render neue Props,
+    // auch wenn der Vergleich das Rendern verhindert; rendert sie, zählt ihr inneres Kind (Tag 0).
+    const COMPOSITE = new Set([0, 1, 11, 15]);
     type Fiber = {
       tag: number;
       type: { displayName?: string; name?: string; render?: { name?: string }; type?: { name?: string } } | null;
@@ -92,7 +95,7 @@ async function measure(page: Page, label: string, action: () => Promise<void>): 
   return stats.total;
 }
 
-test("Neurendern zählen: Wand-Änderung und Zoom-Schritt", async ({ page }) => {
+test("Neurendern zählen: Wand-Änderung, Zoom- und Zeiger-Schritt", async ({ page }) => {
   await installCounter(page);
   await startNewProject(page);
   await openSample(page);
@@ -120,6 +123,12 @@ test("Neurendern zählen: Wand-Änderung und Zoom-Schritt", async ({ page }) => 
     await page.mouse.wheel(0, -120);
   });
 
-  expect(edit, "Renders je Wand-Änderung").toBeLessThan(340);
-  expect(zoom, "Renders je Zoom-Schritt").toBeLessThan(110);
+  // Zeigerbewegung über den Grundriss (Fang/Koordinaten-Anzeige), 5 Schritte.
+  const pointer = await measure(page, "je 5 Zeiger-Schritte", async () => {
+    for (let k = 1; k <= 5; k++) await page.mouse.move(box.x + box.width / 2 + k * 7, box.y + box.height / 2 + k * 5);
+  });
+
+  expect(edit, "Renders je Wand-Änderung").toBeLessThan(90);
+  expect(zoom, "Renders je Zoom-Schritt").toBeLessThan(25);
+  expect(pointer, "Renders je 5 Zeiger-Schritte").toBeLessThan(40);
 });

@@ -46,7 +46,7 @@ export function useEventBundle<T extends Record<string, (...args: any[]) => any>
 }
 
 /** Strukturgleichheit für reine Daten (Zahlen, Strings, Arrays, flache Objekte). */
-function sameData(a: unknown, b: unknown): boolean {
+export function sameData(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
