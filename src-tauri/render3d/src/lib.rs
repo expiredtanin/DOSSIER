@@ -1380,5 +1380,12 @@ mod tests {
         Validator::new(ValidationFlags::all(), Capabilities::all())
             .validate(&aerial_module)
             .unwrap_or_else(|e| panic!("aerial: WGSL-Validierung fehlgeschlagen: {e:?}"));
+
+        // Durchscheinende Koerper ([63] zulaessige Huelle).
+        let ghost_module = naga::front::wgsl::parse_str(super::shaders::GHOST_WGSL)
+            .unwrap_or_else(|e| panic!("ghost: WGSL-Parse-Fehler: {e:?}"));
+        Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&ghost_module)
+            .unwrap_or_else(|e| panic!("ghost: WGSL-Validierung fehlgeschlagen: {e:?}"));
     }
 }

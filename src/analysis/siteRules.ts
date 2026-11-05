@@ -4,8 +4,11 @@
 //  • Grenzabstand: gesperrt ist alles, was näher als d_i an Kante i liegt (Puffer der Kante mit
 //    gerundeten Enden) — so stimmen auch konkave Parzellen und einspringende Ecken.
 //  • Baulinie: Halbebene auf der Seite des Parzellen-Schwerpunkts.
-//  • Gebäude-Grundfläche: Wände aller Geschosse und freie Körper (ohne Abzugskörper). Vorsprünge
-//    (Dachüberstand, Balkone) und ihre Sonderregeln zählen nicht.
+//  • Gebäude-Grundfläche: Wände aller Geschosse und freie Körper (ohne Abzugskörper).
+//  • Vorsprünge (nur mit `projectionDepth`): Dachüberstände und als Vorsprung markierte Decken/Körper
+//    (`siteProjection`) dürfen bis zur Tiefe in den Abstand ragen, markierte zusätzlich höchstens
+//    auf `projectionShare` der Fassadenlänge je Grenze.
+//  • Zulässige Hülle im 3D (`siteEnvelope3d`, mit `show3d`): durchscheinend in render3d.
 // Gerechnet wird im Rust-Kern (`src-tauri/core/src/site_rules.rs`), die Prüfung des Modells auf dem
 // Projekt-Dokument; die Flächen-Hilfen (`allowedArea`, `multiPolygonArea`) nehmen flache Daten.
 
@@ -69,4 +72,13 @@ export interface SiteCheck {
 export function checkSiteRules(project: Project): SiteCheck | null {
   if (!project.siteRules) return null;
   return documentFor(project).query<SiteCheck | null>("siteCheck");
+}
+
+/**
+ * Zulässige Hülle im 3D ([63], Kern `site_rules::envelope3d`) für render3d `set_ghost`:
+ * `[nDreieckWerte, Dreiecke (x y z r g b a)…, Kanten (x y z r g b)…]`; leer ohne Baurecht oder `show3d`.
+ */
+export function siteEnvelope3d(project: Project): Float32Array {
+  if (project.siteRules?.show3d !== true) return new Float32Array(0);
+  return documentFor(project).siteEnvelope();
 }

@@ -5,7 +5,7 @@
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
-import { checkSiteRules, setField } from "../core";
+import { checkSiteRules, patchItem, setField } from "../core";
 import type { Project, SiteRules } from "../model/types";
 import { lineFromDrawing, parcelFromDrawing } from "./siteRulesInput";
 
@@ -18,6 +18,28 @@ function parseLen(text: string): number | undefined | null {
   return Number.isFinite(v) && v >= 0 ? v : null;
 }
 
+/** Gewählte Decke/Körper, der als Vorsprung markiert werden kann, samt aktuellem Stand. */
+function projectionTarget(
+  p: Project,
+  sel: { kind: string; id: string } | null | undefined,
+): { kind: "ceiling" | "extrudedSolid"; id: string; flag: boolean } | null {
+  if (sel?.kind === "ceiling") {
+    const c = p.ceilings?.find((x) => x.id === sel.id);
+    return c ? { kind: "ceiling", id: c.id, flag: c.siteProjection === true } : null;
+  }
+  if (sel?.kind === "extrudedSolid") {
+    const x = p.extrudedSolids?.find((e) => e.id === sel.id);
+    return x && x.operation !== "subtract" ? { kind: "extrudedSolid", id: x.id, flag: x.siteProjection === true } : null;
+  }
+  return null;
+}
+
+/** Vorsprung-Markierung setzen (true) oder entfernen (Feld fehlt = normales Bauteil). */
+function withProjection<T extends { siteProjection?: boolean }>(e: T, on: boolean): T {
+  const { siteProjection: _old, ...rest } = e;
+  return (on ? { ...rest, siteProjection: true } : rest) as T;
+}
+
 export function SiteRulesSection() {
   const host = usePanelHost();
   const applyChange = useStore((s) => s.applyChange);
@@ -26,6 +48,8 @@ export function SiteRulesSection() {
   const selDrawing = sel?.kind === "drawing2d" ? host.project.drawings2d.find((d) => d.id === sel.id) : undefined;
   const selParcel = parcelFromDrawing(selDrawing);
   const selLine = lineFromDrawing(selDrawing);
+  // Vorsprung markieren: gewählte Decke (Balkon) oder freier Körper (Erker).
+  const selProjection = projectionTarget(host.project, sel);
 
   const write = (fn: (r: SiteRules) => SiteRules | undefined, key?: string) =>
     applyChange((p: Project) => {
@@ -70,6 +94,14 @@ export function SiteRulesSection() {
             onChange={(e) => write((r) => ({ ...r, show: e.target.checked }))}
           />
           <span>{t("siteRules.show")}</span>
+        </label>
+        <label className="sun-row" title={t("siteRules.show3d.hint")}>
+          <input
+            type="checkbox"
+            checked={rules.show3d === true}
+            onChange={(e) => write((r) => ({ ...r, show3d: e.target.checked }))}
+          />
+          <span>{t("siteRules.show3d")}</span>
         </label>
       </div>
 
@@ -130,6 +162,67 @@ export function SiteRulesSection() {
         />
         <span>m</span>
       </label>
+
+      <label className="kz-parcel" title={t("siteRules.projectionDepth.hint")}>
+        <span>{t("siteRules.projectionDepth")}</span>
+        <input
+          type="number"
+          min={0}
+          step={0.1}
+          className="kz-input kz-num"
+          value={rules.projectionDepth ?? ""}
+          placeholder="–"
+          onChange={(e) => {
+            const v = parseLen(e.target.value);
+            if (v === null) return;
+            write((r) => {
+              const { projectionDepth: _old, ...rest } = r;
+              return v === undefined ? rest : { ...rest, projectionDepth: v };
+            }, "siteRules:projectionDepth");
+          }}
+        />
+        <span>m</span>
+      </label>
+      {rules.projectionDepth !== undefined && (
+        <label className="kz-parcel" title={t("siteRules.projectionShare.hint")}>
+          <span>{t("siteRules.projectionShare")}</span>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={5}
+            className="kz-input kz-num"
+            value={rules.projectionShare === undefined ? "" : Math.round(rules.projectionShare * 1000) / 10}
+            placeholder="–"
+            onChange={(e) => {
+              const v = parseLen(e.target.value);
+              if (v === null) return;
+              write((r) => {
+                const { projectionShare: _old, ...rest } = r;
+                return v === undefined ? rest : { ...rest, projectionShare: v / 100 };
+              }, "siteRules:projectionShare");
+            }}
+          />
+          <span>%</span>
+        </label>
+      )}
+      {rules.projectionDepth !== undefined && selProjection && (
+        <label className="sun-row" title={t("siteRules.markProjection.hint")}>
+          <input
+            type="checkbox"
+            checked={selProjection.flag}
+            onChange={(e) => {
+              const v = e.target.checked;
+              applyChange((p: Project) =>
+                selProjection.kind === "ceiling"
+                  ? patchItem(p, "ceilings", selProjection.id, (c) => withProjection(c, v))
+                  : patchItem(p, "extrudedSolids", selProjection.id, (x) => withProjection(x, v)),
+              );
+            }}
+          />
+          <span>{t("siteRules.markProjection")}</span>
+        </label>
+      )}
 
       <details className="site-rules-edges">
         <summary>{t("siteRules.edges", { n })}</summary>
