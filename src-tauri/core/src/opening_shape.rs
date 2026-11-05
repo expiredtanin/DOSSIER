@@ -164,6 +164,18 @@ pub fn fill_quads(poly: &[P], w: f64, h: f64) -> Vec<[P; 4]> {
     out
 }
 
+/// Füllstreifen einer Wandschicht mit Schichteinzug `s = [links, rechts, oben, unten]` ([106]): zwischen
+/// dem geweiteten Rechteck-Loch der Schicht und dem ebenso versetzten Umriss (Öffnungskoordinaten).
+pub fn layer_fill_quads(poly: &[P], w: f64, h: f64, s: [f64; 4]) -> Vec<[P; 4]> {
+    let s = s.map(|v| if v.is_finite() { v.max(0.0) } else { 0.0 });
+    if s.iter().all(|v| *v <= MIN) {
+        return fill_quads(poly, w, h);
+    }
+    let (ww, hh) = (w + s[0] + s[1], h + s[2] + s[3]);
+    let moved: Vec<P> = outset_sides(poly, s).into_iter().map(|q| [(q[0] + s[0]).clamp(0.0, ww), (q[1] + s[3]).clamp(0.0, hh)]).collect();
+    fill_quads(&dedup(moved), ww, hh).into_iter().map(|q| q.map(|c| [c[0] - s[0], c[1] - s[3]])).collect()
+}
+
 /// Konvexes Polygon in senkrechte Streifen zerlegt (Glas).
 pub fn strip_quads(poly: &[P]) -> Vec<[P; 4]> {
     let mut out = Vec::new();
@@ -181,12 +193,51 @@ pub fn strip_quads(poly: &[P]) -> Vec<[P; 4]> {
 
 /// Konvexes Polygon (Gegenuhrzeigersinn) um `d` nach innen versetzt (Gehrung je Ecke).
 pub fn inset(poly: &[P], d: f64) -> Vec<P> {
+    offset_edges(poly, |_| d)
+}
+
+/// Seite einer Umriss-Kante `i` nach ihrer Aussennormalen: 0 links, 1 rechts, 2 oben, 3 unten
+/// (Seiten des Schichteinzugs [106]).
+pub fn edge_side(poly: &[P], i: usize) -> usize {
+    let n = poly.len();
+    let (a, b) = (poly[i % n], poly[(i + 1) % n]);
+    let (nx, ny) = (b[1] - a[1], a[0] - b[0]);
+    if ny.abs() >= nx.abs() {
+        if ny > 0.0 { 2 } else { 3 }
+    } else if nx < 0.0 {
+        0
+    } else {
+        1
+    }
+}
+
+/// Umriss je Seite verschieden weit nach aussen versetzt (Schichteinzug [106], `s = [links, rechts,
+/// oben, unten]`): Kantenabstand elliptisch nach der Aussennormalen — gleiches Mass ringsum gibt den
+/// Parallelversatz (Bogen mit gleichem Mittelpunkt), senkrechte Kanten wandern um links/rechts,
+/// waagrechte um oben/unten; der Umriss füllt danach das um `s` geweitete Rechteck aus.
+pub fn outset_sides(poly: &[P], s: [f64; 4]) -> Vec<P> {
+    let n = poly.len();
+    offset_edges(poly, |i| {
+        let (a, b) = (poly[i], poly[(i + 1) % n]);
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let l = (dx * dx + dy * dy).sqrt().max(1e-12);
+        let (nx, ny) = (dy / l, -dx / l);
+        let sx = if nx < 0.0 { s[0] } else { s[1] };
+        let sy = if ny > 0.0 { s[2] } else { s[3] };
+        let (ex, ey) = (sx * nx, sy * ny);
+        -(ex * ex + ey * ey).sqrt()
+    })
+}
+
+/// Konvexes Polygon (Gegenuhrzeigersinn), Kante `i` um `d(i)` nach innen versetzt (Gehrung je Ecke).
+fn offset_edges(poly: &[P], d: impl Fn(usize) -> f64) -> Vec<P> {
     let n = poly.len();
     let line = |i: usize| -> (P, P) {
         let (a, b) = (poly[i], poly[(i + 1) % n]);
         let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
         let l = (dx * dx + dy * dy).sqrt().max(1e-12);
         let nl = [-dy / l, dx / l];
+        let d = d(i);
         ([a[0] + nl[0] * d, a[1] + nl[1] * d], [dx / l, dy / l])
     };
     (0..n)

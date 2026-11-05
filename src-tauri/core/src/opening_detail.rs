@@ -920,6 +920,63 @@ mod tests {
         assert_eq!(colors.len(), 4);
     }
 
+    /// [106]/[G3] Schichteinzug an einer Rundbogen-Öffnung: der zurückspringende Innenputz folgt dem
+    /// Bogen (Umriss um 5 cm versetzt), auch oberhalb des Kämpfers — keine Lücke zwischen Rechteck-Loch
+    /// (geweitet) und Füllkörper; Zusatzstücke (Leibungsputz) laufen den Bogen entlang.
+    #[test]
+    fn formoeffnung_schichteinzug_folgt_dem_bogen() {
+        use crate::opening_shape::P;
+        let reveals = vec![LayerReveal { layer: -1.0, mode: RevealMode::Zurueck, amount: Some(0.05), ..Default::default() }, LayerReveal { layer: 0.0, mode: RevealMode::Leibung, ..Default::default() }];
+        let mut p = wand_mit(Some(WindowType { id: "t".into(), inset_from_face: Some(0.18), frame_depth: Some(0.08), layer_reveals: Some(reveals), ..Default::default() }), None);
+        for (i, c) in p.components.iter_mut().enumerate() {
+            c.color = ["#ff0000", "#00ff00", "#0000ff", "#ffffff"][i].into();
+        }
+        p.openings.as_mut().unwrap()[0].shape = Some(OpeningShape::Rundbogen);
+        let o = p.openings.as_ref().unwrap()[0].clone();
+        let total = 0.345;
+        let wr = crate::opening_geom::WallRef { start: crate::opening_geom::v(0.0, 0.0), end: crate::opening_geom::v(5.0, 0.0), total, ref_off: 0.0 };
+        // Öffnung u 0 … 1.2 (x 1.0 … 2.2), v 0 … 1.4 (z 0.9 … 2.3); Bogenmitte (0.6, 0.8), r = 0.6.
+        let m = crate::model3d::shaped_wall_opening_meshes(&p, &p.walls[0], &wr, &o, [1.0, 2.2, 0.9, 2.3]);
+        let n_fill = crate::model3d::shaped_fill_count(&p, &p.walls[0], &o, 1.2, 1.4);
+        // Körper der Wand (Füllkörper, Zusatzstücke) quer bei y (y = −n, aussen bei −half).
+        let solid_at = |u: f64, v: f64, y: f64| {
+            m.iter().take(n_fill).any(|mesh| {
+                let c: Vec<[f64; 3]> = mesh.positions.chunks(3).map(|q| [q[0], q[1], q[2]]).collect();
+                let (y0, y1) = (c.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min), c.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max));
+                if y < y0 || y > y1 {
+                    return false;
+                }
+                // Bits 0/1 = u/v: Viereck (0, 1, 3, 2) in (x, z).
+                let q: Vec<P> = [0, 1, 3, 2].iter().map(|&i| [c[i][0] - 1.0, c[i][2] - 0.9]).collect();
+                (0..4).all(|i| {
+                    let (a, b) = (q[i], q[(i + 1) % 4]);
+                    (b[0] - a[0]) * (v - a[1]) - (b[1] - a[1]) * (u - a[0]) >= -1e-9
+                })
+            })
+        };
+        let inner_y = total / 2.0 - 0.0075; // Innenputz (0.015, innen = +y).
+        let wall_hole = |u: f64, v: f64| u > -0.05 && u < 1.25 && v < 1.45; // Loch des Innenputzes (geweitet)
+        let at = |a: f64, r: f64| (0.6 + r * a.cos(), 0.8 + r * a.sin());
+        for deg in [5.0f64, 20.0, 45.0, 70.0, 90.0, 120.0, 160.0, 175.0] {
+            let a = deg.to_radians();
+            // Ausserhalb des versetzten Bogens (r > 0.65): Wand (Füllkörper oder Rest ausserhalb des Lochs).
+            let (u, v) = at(a, 0.67);
+            assert!(!wall_hole(u, v) || solid_at(u, v, inner_y), "Lücke im Innenputz bei {deg}°");
+            // Zwischen Bogen und versetztem Bogen: zurückgesprungen (leer).
+            let (u, v) = at(a, 0.63);
+            assert!(!solid_at(u, v, inner_y), "Innenputz nicht zurück bei {deg}°");
+        }
+        // Aussenputz (Leibung): Stück entlang des Bogens innerhalb des Umrisses (2 cm Putz + Rahmen-Streifen).
+        let outer_y = -total / 2.0 + 0.01;
+        for deg in [30.0f64, 90.0, 150.0] {
+            let (u, v) = at(deg.to_radians(), 0.59);
+            assert!(solid_at(u, v, outer_y), "kein Leibungsstück am Bogen bei {deg}°");
+        }
+        // Wandbänder: für Formöffnungen keine Rechteck-Zusatzstücke (sie laufen hier dem Bogen entlang).
+        let walls = crate::model3d::emit_walls(&p, true).unwrap();
+        assert!(walls.iter().all(|w| w.holes.is_some() || (w.end[0] - w.start[0] - 1.2).abs() > 1e-6), "Rechteck-Sturzstück bei Formöffnung");
+    }
+
     /// [106] Schnitt parallel zur Wand durch den Innenputz: Rücksprung 5 cm weitet das Loch je Seite,
     /// die Schnittfläche wird um (2 × 1.5 + 2 × 1.2) × 0.05 m² kleiner (mit Ecken) (links, rechts, oben, unten).
     #[test]
