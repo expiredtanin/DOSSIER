@@ -93,7 +93,7 @@ GitHub Actions (`.github/workflows/`):
 | Workflow | Wann | Was |
 |---|---|---|
 | `check.yml` | Push und PR auf `master` | WASM bauen, `npm run check`, `build:cli`; Lizenzprüfung mit `cargo deny`; e2e-Suite als eigener Job |
-| `macos.yml` | Push/PR mit Änderungen an Rust-Anzeige oder Tauri | Tauri-App mit `native2d` prüfen, render2d/render3d-Tests, Golden-Bild auf Metal, 3D-Rauchtest mit `render_png` |
+| `macos.yml` | Push auf `master`; PRs mit Änderungen an `src-tauri/**` oder `src/views/plan/**`; von Hand | Tauri-App mit `native2d` prüfen, render2d/render3d-Tests, Golden-Bild auf Metal, 3D-Rauchtest mit `render_png` |
 | `release.yml` | Tag `v*` | macOS-App (universal), Release-Entwurf mit Änderungsliste |
 
 Ein Release entsteht aus einem Tag: Version in `src-tauri/tauri.conf.json`
