@@ -206,6 +206,8 @@ pub struct Output {
     pub profiles: Vec<Profile>,
     /// [T6] Erdreich unter dem gestalteten Terrain (Band, ohne Gebäude-Inneres), mit Schraffur.
     pub earth: Vec<(Vec<[f64; 2]>, HatchRender)>,
+    /// [137] Gelände, zu dem das Erdreich-Band gehört (Pick-Id: Klick ins Band wählt das Gelände).
+    pub terrain_id: Option<String>,
 }
 
 /// Ein truck-Körper (aus TS, asynchron gebaut): Index in `extrudedSolids` + Netz.
@@ -1839,6 +1841,7 @@ fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (
         if t.positions.len() < 9 {
             continue;
         }
+        out.terrain_id.get_or_insert_with(|| t.id.clone());
         // [T6] Gelände samt Baugruben, Höhen im Modellbezug; das gewachsene Terrain gestrichelt dazu.
         let st = crate::excavation::site_terrain(p, t);
         let mut meshes = vec![(st.current().to_flat(-st.datum), false)];
@@ -2182,7 +2185,7 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
     let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &cuts, level.hidden_lines, level.depth);
     shaped_projection(&mut visible, p, &walls_r, &plane);
-    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new() };
+    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None };
     append_terrain_profiles(&mut out, p, base, u);
     Ok(Some(out))
 }
@@ -2267,7 +2270,11 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
     if terrain_shown {
         for (ring, hatch) in &out.earth {
             let hatch = if mono { HatchRender { color: SECTION_INK.into(), ..hatch.clone() } } else { hatch.clone() };
-            prims.push(polygon(ring.iter().map(|q| v2(q[0], q[1])).collect(), "none", "none", 0.0, hatch));
+            let mut q = polygon(ring.iter().map(|q| v2(q[0], q[1])).collect(), "none", "none", 0.0, hatch);
+            if let Primitive::Polygon { context_object_id, .. } = &mut q {
+                *context_object_id = out.terrain_id.clone();
+            }
+            prims.push(q);
         }
     }
     for cp in &out.cuts {
@@ -3318,13 +3325,14 @@ mod tests {
         assert!((designed_min + 2.0).abs() < 1e-6, "{designed_min}");
         assert!(!out.earth.is_empty());
         let (prims, _) = section_primitives(&out, false, false, &Visibility::default());
-        assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { hatch, .. } if hatch.pattern == HatchPattern::Earth)));
+        // [137] Das Erdreich-Band und die Geländefläche der Ansicht wählen das Gelände.
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { hatch, context_object_id: Some(id), .. } if hatch.pattern == HatchPattern::Earth && id == "t")));
         assert!(prims.iter().any(|q| matches!(q, Primitive::Line { cls, dash: Some(Some(_)), .. } if cls == "section-terrain")));
         let (ep, _) = super::super::elevation::elevation_primitives(&p, &level(&p, "ansicht-sued"), false, false, &Visibility::default(), 100.0).unwrap().unwrap();
         let sil: Vec<f64> = ep.iter().filter_map(|q| if let Primitive::Line { cls, a, b, .. } = q { (cls == "elevation-terrain").then_some(a.y.min(b.y)) } else { None }).collect();
         // Die Ansichtslinie (y = −2) liegt in der Böschung: die Silhouette taucht vor dem Gebäude ein, nie unter die Sohle.
         assert!(!sil.is_empty() && sil.iter().all(|z| *z <= 1e-6 && *z >= -2.0 - 1e-6) && sil.iter().any(|z| *z < -0.5), "{sil:?}");
-        assert!(ep.iter().any(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == "#ffffff")));
+        assert!(ep.iter().any(|q| matches!(q, Primitive::Polygon { fill, context_object_id: Some(id), .. } if fill == "#ffffff" && id == "t")));
         assert!(!ep.iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "elevation-ground")));
         let f = crate::site_rules::facade_terrain(&p);
         assert!(!f.is_empty() && f.iter().all(|q| q.natural == Some(0.0) && q.designed.is_some_and(|z| (z + 2.0).abs() < 1e-6)));

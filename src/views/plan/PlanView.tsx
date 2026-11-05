@@ -1414,9 +1414,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Trefferprüfung: liefert den Index des obersten Polygon-Primitivs unter dem
   // Cursor (Modellpunkt in einem Schicht-Polygon) oder null. In umgekehrter
   // Reihenfolge testen, damit das zuletzt gezeichnete (oberste) zuerst trifft.
+  // [137] Übersprungen werden Flächen ohne Bauteil: Darstellung ohne Id (Schlagschatten der Ansicht,
+  // Baurechts-Verstösse, Muster) und unsichtbare Pick-Bänder (Gelände-Rahmen, Baugrube, Schatten, Schnittlinie)
+  // — sie lagen sonst über Wänden und Decken und machten diese unwählbar. Eine sichtbare Kontext-Fläche
+  // (Gelände in der Ansicht) verdeckt dagegen wie bisher.
   const hitTest = (clientX: number, clientY: number): number | null => {
     const v = clientToView(clientX, clientY, view);
-    return getPick().topPolygon(viewToModel(v.x, v.y));
+    const pick = getPick();
+    for (const i of pick.polygonsAt(viewToModel(v.x, v.y))) {
+      const p = pick.prim(i);
+      if (p?.kind !== "polygon") continue;
+      if (p.wallId || p.drawingId || p.ceilingId || p.openingId || p.stairId || p.roomId || p.extrudedSolidId || p.columnId || p.roofId) return i;
+      if ((p.contextObjectId || p.sectionLineId) && p.fill !== "none") return i;
+    }
+    return null;
   };
 
   // Irgendein Element (Wand/Decke/Raum/Treppe/Stütze/Dach/2D) unter dem

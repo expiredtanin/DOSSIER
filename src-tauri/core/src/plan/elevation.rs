@@ -1524,7 +1524,12 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
                 let mut ring: Vec<Vec2> = l.iter().map(|q| v2(q[0], q[1])).collect();
                 ring.push(v2(l[l.len() - 1][0], low));
                 ring.push(v2(l[0][0], low));
-                prims.push(polygon(ring, "#ffffff", "none", 0.0, no_hatch()));
+                // [137] Die Geländefläche wählt das Gelände (Pick-Id).
+                let mut mask = polygon(ring, "#ffffff", "none", 0.0, no_hatch());
+                if let Primitive::Polygon { context_object_id, .. } = &mut mask {
+                    *context_object_id = Some(t.id.clone());
+                }
+                prims.push(mask);
                 for w in l.windows(2) {
                     acc.add(w[0][0], w[0][1]);
                     acc.add(w[1][0], w[1][1]);
