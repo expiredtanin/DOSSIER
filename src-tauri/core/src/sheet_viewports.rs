@@ -369,6 +369,27 @@ pub(crate) mod tests {
         assert!((x - 95.0).abs() < 1e-9 && (y - 70.0).abs() < 1e-9);
     }
 
+    /// [100] Deckenspiegel-Viewport: derselbe Inhalt wie die Deckenspiegel-Ebene (Wände, Untersicht).
+    #[test]
+    fn deckenspiegel_viewport() {
+        let mut v = json();
+        v["drawingLevels"].as_array_mut().unwrap().push(serde_json::json!({"id": "ds", "name": "DS", "kind": "ceiling", "visible": true, "locked": false, "ceilingOfId": "eg"}));
+        v["layers"].as_array_mut().unwrap().push(serde_json::json!({"code": "30", "name": "D", "color": "#000", "lw": 0.35, "visible": true, "locked": false}));
+        v["walls"] = serde_json::json!([{"id": "W", "type": "wall", "floorId": "eg", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 10, "y": 0}, "height": 2.6}]);
+        v["ceilings"] = serde_json::json!([{"id": "C", "type": "ceiling", "floorId": "eg", "categoryCode": "30", "thickness": 0.2, "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 6}, {"x": 0, "y": 6}]}]);
+        v["viewSnapshots"].as_array_mut().unwrap().push(serde_json::json!({"id": "sd", "name": "DS", "viewType": "grundriss", "view3d": "iso", "scaleDenominator": 50, "detail": "mittel", "activeLevelId": "ds", "layerVisibility": {"20": true, "30": true}, "drawingVisibility": {}}));
+        v["layouts"][0]["viewports"] = serde_json::json!([{"id": "vd", "snapshotId": "sd", "xMm": 20, "yMm": 20, "widthMm": 300, "heightMm": 200}]);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let maps = viewport_maps(&p, layout_of_level(&p, "sh").unwrap());
+        assert_eq!(maps.len(), 1);
+        assert_eq!(maps[0].scale, 50.0);
+        let snap = &p.view_snapshots.as_ref().unwrap()[1];
+        let direct = crate::plan::domains::plan_domains(&p, &viewport_args(snap, 50.0)).unwrap();
+        assert!(!direct.walls.is_empty() && !direct.ceilings.is_empty(), "Wände und Untersicht im Viewport");
+        let b = crate::plan::buf::View::parse(&maps[0].buf).unwrap().bounds().unwrap();
+        assert!(b[2] - b[0] > 9.9 && b[3] - b[1] > 5.9, "Ausmass der Decke: {b:?}");
+    }
+
     #[test]
     fn klippen() {
         let r = [0.0, 0.0, 1.0, 1.0];

@@ -281,6 +281,34 @@ pub fn view_templates() -> Vec<Value> {
     ]
 }
 
+/// [100] Symbole (2D-Blöcke): Deckenleuchte als Kreis mit Diagonalkreuz (Elektro-Sinnbild), Ø 30 cm,
+/// für den Deckenspiegel (Kategorie „Leuchten“, [`light_category`]).
+pub fn block_defs() -> Vec<Value> {
+    let k = 0.15 * std::f64::consts::FRAC_1_SQRT_2;
+    let p = |x: f64, y: f64| json!({"x": x, "y": y});
+    vec![json!({"id": "std-blk-deckenleuchte", "name": "Deckenleuchte", "geom2d": [
+        {"shape": "circle", "center": p(0.0, 0.0), "r": 0.15},
+        {"shape": "line", "a": p(-k, -k), "b": p(k, k)},
+        {"shape": "line", "a": p(-k, k), "b": p(k, -k)},
+    ]})]
+}
+
+/// [100] Grafik-Kategorie „Leuchten“ (Code 65) für Leuchten-Symbole im Deckenspiegel.
+pub const LIGHT_CATEGORY_CODE: &str = "65";
+
+pub fn light_category() -> Value {
+    json!({"code": LIGHT_CATEGORY_CODE, "name": "Leuchten", "color": "#b08020", "lw": 0.18, "visible": true, "locked": false})
+}
+
+/// Gibt es im Kategorie-Baum schon den Code oder den Namen der Leuchten-Kategorie?
+fn has_light_category(layers: &[Value]) -> bool {
+    layers.iter().any(|l| {
+        l["code"].as_str() == Some(LIGHT_CATEGORY_CODE)
+            || name_key(l).as_deref() == Some("leuchten")
+            || l["children"].as_array().is_some_and(|c| has_light_category(c))
+    })
+}
+
 pub fn library() -> Vec<(&'static str, Vec<Value>)> {
     vec![
         ("lineStyles", line_styles()),
@@ -290,6 +318,7 @@ pub fn library() -> Vec<(&'static str, Vec<Value>)> {
         ("ceilingTypes", ceiling_types()),
         ("roofTypes", roof_types()),
         ("viewTemplates", view_templates()),
+        ("blockDefs", block_defs()),
     ]
 }
 
@@ -348,6 +377,13 @@ fn merge_plan(root: &Map<String, Value>) -> (Vec<Value>, HashMap<String, String>
             ops.push(json!({"kind": "setField", "key": key, "value": add}));
         }
     }
+    // Kategorie „Leuchten“ (Kategorien haben keine id: ganze Liste setzen, ein Undo-Schritt).
+    let layers = root.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
+    if !has_light_category(&layers) {
+        let mut all = layers;
+        all.push(light_category());
+        ops.push(json!({"kind": "setField", "key": "layers", "value": all}));
+    }
     (ops, ids)
 }
 
@@ -378,6 +414,7 @@ fn managed(key: &str) -> &'static [&'static str] {
             "color", "background", "hatchId", "viewHatchId", "joinPriority", "fireClass", "elevationColor", "standardId", "lambda", "density", "material", "surfacePattern",
             "abbrev",
         ],
+        "blockDefs" => &["geom2d"],
         _ => &["layers"],
     }
 }
@@ -551,6 +588,26 @@ mod tests {
             }
         }
         r
+    }
+
+    /// [100] Leuchten: Symbol Deckenleuchte (Kreis mit Kreuz) und Kategorie „Leuchten“, nur einmal.
+    #[test]
+    fn leuchten_symbol_und_kategorie() {
+        let r = apply(&empty_root(), &merge_ops(&empty_root()));
+        let p: Project = serde_json::from_value(Value::Object(r.clone())).unwrap();
+        let b = p.block_defs.as_ref().unwrap().iter().find(|b| b.id == "std-blk-deckenleuchte").expect("Deckenleuchte");
+        assert_eq!(b.geom2d.len(), 3);
+        assert!(p.layers.iter().any(|l| l.code == "65" && l.name == "Leuchten"));
+        assert!(merge_ops(&r).is_empty(), "zweites Laden ergänzt nichts");
+        // Vorhandene Kategorie gleichen Namens (anderer Code, als Kind): keine zweite.
+        let mut own = empty_root();
+        own.insert("layers".into(), json!([{"code": "20", "name": "Wände", "color": "#000", "lw": 0.35, "visible": true, "locked": false,
+            "children": [{"code": "28", "name": "Leuchten", "color": "#000", "lw": 0.13, "visible": true, "locked": false}]}]));
+        assert!(!merge_ops(&own).iter().any(|o| o["key"] == "layers"));
+        // Andere Kategorien bleiben, die neue kommt ans Ende.
+        own.insert("layers".into(), json!([{"code": "20", "name": "Wände", "color": "#000", "lw": 0.35, "visible": true, "locked": false}]));
+        let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
+        assert_eq!(op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect::<Vec<_>>(), ["20", "65"]);
     }
 
     #[test]
