@@ -501,44 +501,6 @@ fn meshes_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
 
 type V3 = [f64; 3];
 
-/// Schlanker Quader zwischen zwei 3D-Punkten; `None` bei zu kurzem Segment.
-fn strut_box(a: V3, b: V3, half: f64) -> Option<(Vec<f64>, Vec<u32>)> {
-    let (dx, dy, dz) = (b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-    let len = hypot(&[dx, dy, dz]);
-    if !(len >= EPS) {
-        return None;
-    }
-    let d = [dx / len, dy / len, dz / len];
-    let up_ref: V3 = if d[2].abs() > 0.98 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
-    let mut rx = d[1] * up_ref[2] - d[2] * up_ref[1];
-    let mut ry = d[2] * up_ref[0] - d[0] * up_ref[2];
-    let mut rz = d[0] * up_ref[1] - d[1] * up_ref[0];
-    let rl = or(hypot(&[rx, ry, rz]), 1.0);
-    rx /= rl;
-    ry /= rl;
-    rz /= rl;
-    let ux = ry * d[2] - rz * d[1];
-    let uy = rz * d[0] - rx * d[2];
-    let uz = rx * d[1] - ry * d[0];
-    let mut positions = Vec::with_capacity(24);
-    for p in [a, b] {
-        for (sr, su) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-            positions.push(p[0] + rx * sr * half + ux * su * half);
-            positions.push(p[1] + ry * sr * half + uy * su * half);
-            positions.push(p[2] + rz * sr * half + uz * su * half);
-        }
-    }
-    let mut indices = Vec::with_capacity(36);
-    let mut quad = |a0: u32, b0: u32, c0: u32, d0: u32| indices.extend([a0, b0, c0, a0, c0, d0]);
-    quad(0, 1, 2, 3);
-    quad(7, 6, 5, 4);
-    quad(0, 4, 5, 1);
-    quad(1, 5, 6, 2);
-    quad(2, 6, 7, 3);
-    quad(3, 7, 4, 0);
-    Some((positions, indices))
-}
-
 /// Ecken des runden Handlauf-Profils.
 const TUBE_SEGMENTS: usize = 12;
 
@@ -699,12 +661,11 @@ fn railings_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
         }
         let start_pt = pt(&first.pts[i_start]);
         let end_pt = pt(&last.pts[i_end]);
-        push(strut_box(
-            [start_pt[0], start_pt[1], s.z_bottom + RAIL_HEIGHT],
-            [end_pt[0], end_pt[1], s.z_top + RAIL_HEIGHT],
+        push(tube_along(
+            &[[start_pt[0], start_pt[1], s.z_bottom + RAIL_HEIGHT], [end_pt[0], end_pt[1], s.z_top + RAIL_HEIGHT]],
             half,
         ));
-        let post = |p: P, top_z: f64| strut_box([p[0], p[1], top_z], [p[0], p[1], top_z + RAIL_HEIGHT], half);
+        let post = |p: P, top_z: f64| tube_along(&[[p[0], p[1], top_z], [p[0], p[1], top_z + RAIL_HEIGHT]], half * 0.75);
         push(post(start_pt, s.z_bottom));
         for tr in &geo.treads {
             if tr.pts.len() < 4 {
@@ -797,7 +758,7 @@ mod tests {
         let r = railings(&straight(2.0, 3.0, 0.0, 0.0));
         // je Seite 1 Handlauf + 1 Fusspfosten + 10 Pfosten
         assert_eq!(r.len(), 24);
-        assert!(r.iter().all(|m| m.positions.len() == 24 && m.indices.len() == 36));
+        assert!(r.iter().all(|m| m.positions.len() == 3 * (2 * TUBE_SEGMENTS + 2)));
         assert_eq!(railings(&straight(2.0, 1.0, 0.0, 0.0)).len(), 12);
         assert!(railings(&straight(2.0, 0.0, 0.0, 0.0)).is_empty());
     }
@@ -906,6 +867,17 @@ mod tests {
         let r: Vec<f64> = big.positions.chunks(3).map(|c| c[0].hypot(c[1])).collect();
         assert!(r.iter().all(|r| (r - 1.0).abs() < 0.05), "Radius streut");
         assert!(big.positions.chunks(3).any(|c| c[2] > 2.0) && big.positions.chunks(3).any(|c| c[2] < 1.2));
+    }
+
+    #[test]
+    fn gerade_treppe_handlauf_rund() {
+        // Handlauf + Pfosten sind Rohre (Profil mit TUBE_SEGMENTS Ecken, positives Volumen), keine Quader
+        let rs = railings(&straight(2.0, 1.0, 0.0, 0.0));
+        assert!(!rs.is_empty());
+        for m in &rs {
+            assert!(volume(m) > 0.0);
+            assert_eq!(m.positions.len() / 3, 2 * TUBE_SEGMENTS + 2, "Rohr mit 2 Ringen + 2 Deckelmitten");
+        }
     }
 
     #[test]

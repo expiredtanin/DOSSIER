@@ -154,6 +154,17 @@ pub fn concrete_flight_amounts(one: &Project) -> Option<(f64, f64)> {
     Some((mesh_volume(&m.positions, &m.indices), soffit_area(&m.positions, &m.indices)))
 }
 
+/// Untersicht (m²) der Treppe in `one` (Projekt nur mit dieser Treppe): Ortbeton-Netz oder Summe der
+/// Trittunterseiten; `None` ohne Untersicht.
+pub fn flight_soffit_area(one: &Project) -> Option<f64> {
+    if let Some(a) = concrete_flight_amounts(one) {
+        return Some(a.1);
+    }
+    let stair = one.stairs.as_ref()?.first()?;
+    let sum: f64 = stair_parts(one, stair, 0.0).flights.iter().filter_map(|f| f.soffit_area).sum();
+    (sum > 0.0).then_some(sum)
+}
+
 /// Lauflänge auf der Lauflinie: Wendel = Schraubenlinie im Laufradius, sonst Lauflänge; mit Steigung.
 fn walk_length(stair: &Stair, rise: f64) -> f64 {
     let run = if stair.shape == StairShape::Spiral {
@@ -246,6 +257,14 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
             let pts: Vec<Vec2> = x.outline.iter().map(|p| Vec2 { x: p[0], y: p[1] }).collect();
             volume += ring_area(&pts) * (x.z_top - x.z_bottom);
         }
+        // Untersicht der Einzeltritte (Spindel, Wange): Summe der Trittunterseiten samt Nase; Setzstufen-
+        // Platten (andere Dicke als der Tritt) zählen nicht mit.
+        let tread_t = one.stair_type(stair).map_or(0.0, |t| t.tread_thickness);
+        let soffit_sum: f64 = g
+            .iter()
+            .filter(|x| (x.z_top - x.z_bottom - tread_t).abs() < 1e-6)
+            .map(|x| ring_area(&x.outline.iter().map(|p| Vec2 { x: p[0], y: p[1] }).collect::<Vec<_>>()).abs())
+            .sum();
         flights.push(StairFlightParts {
             name: if n_groups > 1 { format!("Lauf {}", k + 1) } else { "Lauf".to_string() },
             risers: treads,
@@ -254,7 +273,7 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
             tread_length: tread_depth,
             predefined,
             quantities: flight_quantities(if stair.shape == StairShape::Spiral { walk_length(stair, rise) } else { hypot2(run, lift) }, volume),
-            soffit_area: None,
+            soffit_area: (soffit_sum > 0.0).then_some(soffit_sum),
             body: FlightBody::Solids(solids),
         });
     }
@@ -427,7 +446,10 @@ mod tests {
         let vol = |p: &StairParts| p.flights[0].quantities.iter().find(|q| q.name == "GrossVolume").unwrap().value;
         assert!((vol(&a) - vol(&b)).abs() < 1e-9, "Säule nicht im Laufvolumen");
         assert!(a.column.is_some() && b.column.is_none());
-        assert!(a.flights[0].soffit_area.is_none());
+        // Untersicht = Summe der Trittunterseiten (Ringsektor-Stufen, 14 × ~(270°/14)·(r²−0.5²)/2…) > 0
+        let sa = a.flights[0].soffit_area.expect("Untersicht der Tritte");
+        assert!(sa > 3.0 && sa < 0.75 * std::f64::consts::PI * (4.0 - 0.0) + 2.0, "Untersicht {sa}");
+        assert!((flight_soffit_area(&project_with(ohne.clone(), Some(StairType { id: "sp".into(), structure: StairTypeStructure::Spindel, tread_thickness: 0.05, default_width: 1.0, ..Default::default() }))).unwrap() - b.flights[0].soffit_area.unwrap()).abs() < 1e-9);
     }
 
     #[test]
