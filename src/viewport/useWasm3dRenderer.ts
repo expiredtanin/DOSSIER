@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextImage, Project } from "../model/types";
-import { emitDrawingLineVerts, emitSurfacePatternLines, projectToModel3d } from "../core";
+import { emitDrawingLineVerts, emitSurfacePatternLines, projectToModel3d, siteEnvelope3d } from "../core";
 import type { DetailLevel } from "../model/viewTypes";
 import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
@@ -96,6 +96,8 @@ interface WebModelRendererLike {
   set_drawing_lines?(vertices: Float32Array): void;
   /** Ansichtsschraffur auf den Flächen (`web::set_pattern_lines`), in den Kanten-Stilen gezeichnet. */
   set_pattern_lines?(data: Float32Array): void;
+  /** Durchscheinende Körper ([63] zulässige Hülle, `web::set_ghost`): Format von `siteEnvelope3d`; leer löscht. */
+  set_ghost?(data: Float32Array): void;
   /** Material-Farbkarten (Stil „textured") als Textur-Array hochladen
    * (`web::set_material_textures`). `rgba` = gepackte RGBA8-Bytes von
    * `layerCount` 256×256-Ebenen; Ebene 0 bleibt intern das Fallback-Schachbrett,
@@ -249,6 +251,13 @@ export function useWasm3dRenderer(
         r.set_drawing_lines(emitDrawingLineVerts(project, explode));
       } catch (e) {
         console.warn("render3d set_drawing_lines fehlgeschlagen:", e);
+      }
+    }
+    if (typeof r.set_ghost === "function") {
+      try {
+        r.set_ghost(siteEnvelope3d(project));
+      } catch (e) {
+        console.warn("render3d set_ghost fehlgeschlagen:", e);
       }
     }
     if (typeof r.set_pattern_lines === "function") {

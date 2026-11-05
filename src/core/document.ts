@@ -224,6 +224,11 @@ export class ProjectDocument {
     return this.handle ? core().doc_drawing_line_verts(this.handle, explode) : new Float32Array(0);
   }
 
+  /** Zulässige Hülle im 3D ([63]) für render3d `set_ghost`; leer ohne Baurecht oder `siteRules.show3d`. */
+  siteEnvelope(): Float32Array {
+    return this.handle ? core().doc_site_envelope(this.handle) : new Float32Array(0);
+  }
+
   /** Ansichtsschraffur auf den Flächen (Wände, Decken, Dächer) für render3d `set_pattern_lines`. */
   surfacePatternLines(explode = 0): Float32Array {
     return this.handle ? core().doc_surface_pattern_lines(this.handle, explode) : new Float32Array(0);

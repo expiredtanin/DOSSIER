@@ -1705,7 +1705,13 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[42] Varianten.** · L
 - ✅ **[63] Baulinien, Grenzabstände, zulässige Hülle.** (27.10.) Parzelle/Baulinien aus Auswahl,
   Grenzabstand pauschal und je Kante, Gesamthöhe; zulässige Fläche und Verstösse im Grundriss.
-  Offen: Vorsprünge (Dachüberstand, Balkone), Hülle im 3D.
+  5.11.: Vorsprünge — `SiteRules.projectionDepth` (Tiefe in Abstand/über Baulinie) und `projectionShare` (Anteil
+  der Fassadenlänge je Grenze/Baulinie); geprüft werden Dach-Traufumrisse (nur Tiefe) und als Vorsprung markierte
+  Decken/Körper (`siteProjection`, im Lage-Panel an der Auswahl; Tiefe + Anteil); ohne Tiefe wie bisher
+  (`site_rules.rs`, Tests). Zulässige Hülle im 3D (`show3d`, Lage-Panel „Hülle im 3D"): zulässige Fläche vom
+  massgebenden Terrain bis zur Gesamthöhe durchscheinend, Verstösse rot (`envelope3d` → render3d `set_ghost`,
+  Alpha-Pipeline). Offen: Hülle im 3D nur im Linux-Container gebaut, nicht angesehen (WebGPU/macOS); Höhenkurven/
+  Gebäudeprofil (Winkel) fehlen im Modell; Wände eines Erkers nicht markierbar; Anteil grob über Ausdehnung längs der Grenze.
 - ◐ **[64]+[59] Sonnenstand und Schatten.** (27.10.) Schatten im Grundriss mit Zeitregler (Lage-Panel),
   auch in CLI/PDF. Offen: Schatten im 3D.
 - ○ **[88] Nur-Lese-Link fürs Web.** · M
