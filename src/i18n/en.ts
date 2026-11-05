@@ -834,6 +834,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.stair.rise": "Total rise",
   "objinfo.stair.riser": "Riser height",
   "objinfo.stair.tread": "Tread depth",
+  "objinfo.stair.concreteVolume": "Concrete volume (flight)",
+  "objinfo.stair.soffitArea": "Soffit area (formwork)",
   "objinfo.stair.direction": "Run direction",
   "objinfo.stair.direction.up": "Upwards",
   "objinfo.stair.direction.down": "Downwards",
