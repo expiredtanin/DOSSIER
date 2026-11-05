@@ -45,7 +45,7 @@ describe("Standard-Bibliothek ([100]–[102])", () => {
     expect(hatchOf("Aussenputz").pattern).toBe("none");
     expect(hatchOf("Beton").pattern).toBe("crosshatch");
     expect(hatchOf("EPS").pattern).toBe("diagonal");
-    expect(hatchOf("EPS").angle).toBe(0);
+    expect(hatchOf("EPS").angle).toBe(90);
     expect(hatchOf("Holzwerkstoff (OSB/Spanplatte)").pattern).toBe("woodBased");
     expect(hatchOf("Keramikplatten").pattern).toBe("crosshatch");
     expect(hatchOf("Faserzementplatten").pattern).toBe("diagonal");
