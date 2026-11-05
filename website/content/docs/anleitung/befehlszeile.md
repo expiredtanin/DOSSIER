@@ -201,5 +201,6 @@ Hinweise:
   sie danach.
 - Beim Verschieben, Kopieren, Spiegeln und in Reihen gehen Fenster und Türen
   mit ihrer Wand mit [134].
-- Für Skripte: Dieselben Befehle laufen auch in der
-  [Kommandozeile](../kommandozeile/) mit `--cmd` und JSON-Parametern.
+- Für Skripte und KI-Assistenten laufen dieselben Befehle mit
+  JSON-Parametern über den MCP-Zugriff (siehe
+  [Kommandozeile](../kommandozeile/#ki-zugriff-mcp)).
