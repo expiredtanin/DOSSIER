@@ -7,7 +7,7 @@
 //! auf das Rechteck geklippt. Die Blatt-Ebene rechnet in Papier-Metern (Ursprung oben links,
 //! Papier-y nach unten = −y, s. `sheetMmToModel`).
 
-use crate::model::{DetailLevel, Layout, LayoutViewport, Project, ViewSnapshot};
+use crate::model::{DetailLevel, DrawingLevel, DrawingLevelKind, Layout, LayoutViewport, Project, ViewSnapshot};
 use crate::plan::domains::{plan_domains_buf, PlanArgs};
 use crate::plan::style::Detail;
 use std::collections::HashSet;
@@ -99,7 +99,12 @@ pub fn viewport_maps(p: &Project, layout: &Layout) -> Vec<VpMap> {
             continue;
         }
         let scale = viewport_scale(vp, Some(snap));
-        let Ok(buf) = plan_domains_buf(p, &viewport_args(snap, scale)) else { continue };
+        let level = p.drawing_levels.iter().find(|l| l.id == snap.active_level_id);
+        let buf = match level {
+            Some(l) if matches!(l.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation) => section_view_buf(p, l, snap, scale),
+            _ => plan_domains_buf(p, &viewport_args(snap, scale)).ok(),
+        };
+        let Some(buf) = buf else { continue };
         let Some(b) = crate::plan::buf::View::parse(&buf).and_then(|v| v.bounds()) else { continue };
         out.push(VpMap {
             x_mm: vp.x_mm,
@@ -114,6 +119,76 @@ pub fn viewport_maps(p: &Project, layout: &Layout) -> Vec<VpMap> {
         });
     }
     out
+}
+
+/// Kategorie-Codes, die Schnitt/Ansicht prüfen (`candidateCodes` in `toSection.ts`).
+fn candidate_codes(p: &Project) -> HashSet<String> {
+    let mut codes: HashSet<String> = p.flat_categories().iter().map(|c| c.code.clone()).collect();
+    codes.extend(p.walls.iter().map(|e| e.category_code.clone()));
+    codes.extend(p.ceilings.iter().flatten().map(|e| e.category_code.clone()));
+    codes.extend(p.roofs.iter().flatten().map(|e| e.category_code.clone()));
+    codes.extend(p.stairs.iter().flatten().map(|e| e.category_code.clone()));
+    codes.extend(p.openings.iter().flatten().map(|e| e.category_code.clone()));
+    for c in p.context.iter().flatten() {
+        if let crate::model::ContextObject::TerrainMesh(t) = c {
+            codes.extend(t.category_code.clone());
+        }
+    }
+    codes
+}
+
+/// [115] Inhalt eines Schnitt-/Ansicht-Viewports wie `viewportLevelPlan` (`plan/viewportPlan.ts`):
+/// abgeleitete Projektion (Schnitt mit geschnittenen Öffnungen bzw. Ansicht), automatische Koten und
+/// die eigenen 2D-Elemente der Ebene; Ausmass wie dort. Freie Körper (`extrudedSolids`, truck-Netze aus
+/// TS) fehlen im Schnitt — der Kern hat sie hier nicht.
+fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scale: f64) -> Option<Vec<u8>> {
+    use crate::plan::prim::Primitive;
+    let args = viewport_args(snap, scale);
+    let invisible: Vec<String> = candidate_codes(p).into_iter().filter(|c| !args.show.contains(c)).collect();
+    let text = serde_json::json!({
+        "level": serde_json::to_value(level).ok()?,
+        "hiddenLines": level.hidden_lines.unwrap_or(false),
+        "scale": scale,
+        "hasVis": true,
+        "invisible": invisible,
+    })
+    .to_string();
+    let raw = if level.kind == DrawingLevelKind::Section {
+        crate::plan::section::section_plan_buf(p, &[0.0, 1.0, 0.0], &text)
+    } else {
+        crate::plan::elevation::elevation_plan_buf(p, &[0.0, if level.shadows.unwrap_or(false) { 1.0 } else { 0.0 }, scale], &text)
+    }
+    .ok()?;
+    let rv = crate::plan::buf::View::parse(&raw)?;
+    let raw_prims = rv.prims()?;
+    if raw_prims.is_empty() {
+        return None;
+    }
+    let mut b = rv.bounds().unwrap_or([0.0, 0.0, 1.0, 1.0]);
+    let own_buf = plan_domains_buf(p, &PlanArgs { global: false, ..args }).ok()?;
+    let ov = crate::plan::buf::View::parse(&own_buf)?;
+    let own = ov.prims().unwrap_or_default();
+    let marks = if level.level_marks != Some(false) { crate::plan::drawings::level_markers(p, b) } else { Vec::new() };
+    let mut grow = |x: f64, y: f64| {
+        b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+    };
+    if !own.is_empty() {
+        if let Some(ob) = ov.bounds() {
+            grow(ob[0], ob[1]);
+            grow(ob[2], ob[3]);
+        }
+    }
+    for pr in &marks {
+        if let Primitive::Line { a, .. } = pr {
+            grow(a.x, a.y);
+        }
+    }
+    let mut w = crate::plan::buf::Writer::new(true);
+    w.group(&raw_prims);
+    w.group(&marks);
+    w.group(&own);
+    w.bounds = Some(b);
+    Some(w.finish())
 }
 
 /// Strecke auf ein Rechteck klippen (Liang–Barsky); `None` = ganz ausserhalb.
@@ -255,6 +330,43 @@ pub(crate) mod tests {
         // Alles im Rechteck.
         let c = m.sheet_clip();
         assert!(segs.iter().all(|s| s[0] >= c[0] - 1e-12 && s[2] <= c[2] + 1e-12 && s[1] >= c[1] - 1e-12 && s[3] <= c[3] + 1e-12));
+    }
+
+    /// [115] Schnitt- und Ansicht-Viewports liefern Fangstrecken ihrer Projektion (vorher nur Grundrisse).
+    #[test]
+    fn fang_auf_schnitt_und_ansicht_viewport() {
+        let mut v = json();
+        v["drawingLevels"].as_array_mut().unwrap().extend([
+            serde_json::json!({"id": "q", "name": "Q", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": 2, "y": -2}, {"x": 2, "y": 10}], "directionSign": 1, "levelMarks": false}),
+            serde_json::json!({"id": "a", "name": "A", "kind": "elevation", "visible": true, "locked": false, "linePoints": [{"x": -1, "y": -3}, {"x": 11, "y": -3}], "directionSign": 1}),
+        ]);
+        v["walls"] = serde_json::json!([{"id": "W", "type": "wall", "floorId": "eg", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 10, "y": 0}, "height": 3.0}]);
+        v["viewSnapshots"].as_array_mut().unwrap().extend([
+            serde_json::json!({"id": "sq", "name": "Q", "viewType": "grundriss", "view3d": "iso", "scaleDenominator": 100, "detail": "mittel", "activeLevelId": "q", "layerVisibility": {"20": true}, "drawingVisibility": {}}),
+            serde_json::json!({"id": "sa", "name": "A", "viewType": "grundriss", "view3d": "iso", "scaleDenominator": 100, "detail": "mittel", "activeLevelId": "a", "layerVisibility": {"20": true}, "drawingVisibility": {}}),
+        ]);
+        v["layouts"][0]["viewports"] = serde_json::json!([
+            {"id": "vq", "snapshotId": "sq", "xMm": 20, "yMm": 20, "widthMm": 150, "heightMm": 100},
+            {"id": "va", "snapshotId": "sa", "xMm": 200, "yMm": 20, "widthMm": 150, "heightMm": 100}
+        ]);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let l = layout_of_level(&p, "sh").unwrap();
+        let maps = viewport_maps(&p, l);
+        assert_eq!(maps.len(), 2, "beide Viewports abgebildet");
+        assert_eq!((maps[0].level.as_str(), maps[1].level.as_str()), ("q", "a"));
+        // Schnitt: Wand geschnitten bei u ≈ 2 (Abstand zum Linienanfang), 0 … 3 m hoch.
+        let b = crate::plan::buf::View::parse(&maps[0].buf).unwrap().bounds().unwrap();
+        assert!(b[1].abs() < 1e-6 && (b[3] - 3.0).abs() < 1e-6, "{b:?}");
+        let segs = viewport_snap_segments(&p, l);
+        let (c0, c1) = (maps[0].sheet_clip(), maps[1].sheet_clip());
+        let inside = |s: &[f64; 4], c: [f64; 4]| s[0] >= c[0] - 1e-12 && s[2] <= c[2] + 1e-12 && s[0].min(s[2]) >= c[0] - 1e-12 && s[1].min(s[3]) >= c[1] - 1e-12 && s[1].max(s[3]) <= c[3] + 1e-12;
+        // Senkrechte Schnittkante der Wand: 3 m bei 1:100 = 0.03 Papier-Meter.
+        let vertical = |s: &&[f64; 4]| (s[0] - s[2]).abs() < 1e-9 && ((s[1] - s[3]).abs() - 0.03).abs() < 1e-6;
+        assert!(segs.iter().filter(|s| inside(s, c0)).any(|s| vertical(&s)), "Schnittkante im Schnitt-Viewport");
+        assert!(segs.iter().filter(|s| inside(s, c1)).any(|s| vertical(&s)), "Wandkante im Ansicht-Viewport");
+        // Abbildung wie im Grundriss: Modell-Punkt (u, z) → Blatt.
+        let (x, y) = maps[0].to_mm(maps[0].cx, maps[0].cy);
+        assert!((x - 95.0).abs() < 1e-9 && (y - 70.0).abs() < 1e-9);
     }
 
     #[test]

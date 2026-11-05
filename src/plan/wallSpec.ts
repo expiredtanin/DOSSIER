@@ -7,11 +7,15 @@ import type { SolidSpec } from "../engine/truckSolid";
 import { core } from "../engine/coreWasm";
 import type { RWall } from "./toWalls3d/shared";
 
-type WallLike = Pick<RWall, "start" | "end" | "thickness" | "height" | "baseElevation" | "holes">;
+type WallLike = Pick<RWall, "start" | "end" | "thickness" | "height" | "baseElevation" | "holes" | "startCut" | "endCut">;
 
-/** Wand als `extrudePlane` (Profil in der Wandebene, Tiefe = Dicke); null bei entarteter Wand. */
+/**
+ * Wand als `extrudePlane` (Profil in der Wandebene, Tiefe = Dicke; mit Schnittlinien schräge
+ * Stirnflächen über `pointsBack`, [108]); null bei entarteter Wand.
+ */
 export function wallSpec(w: WallLike): SolidSpec | null {
   const f = [w.start[0], w.start[1], w.end[0], w.end[1], w.thickness, w.height, w.baseElevation];
+  for (const c of [w.startCut, w.endCut]) f.push(c ? 1 : 0, ...(c ?? [0, 0, 0, 0]));
   for (const h of w.holes ?? []) f.push(h.from, h.to, h.zBottom, h.zTop);
   const s = core().wall_spec_flat(Float64Array.from(f));
   return s ? (JSON.parse(s) as SolidSpec) : null;

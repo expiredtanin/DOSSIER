@@ -869,10 +869,16 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         f.num(bands.len() as f64);
         let base = base_of(structure);
         for b in &bands {
-            let (s, e) = (v2(b.start), v2(b.end));
-            let n = left_normal(normalize(sub(e, s)));
-            let h = b.thickness / 2.0;
-            w_pts(&mut f, &[add_scaled(s, n, -h), add_scaled(e, n, -h), add_scaled(e, n, h), add_scaled(s, n, h)]);
+            // Grundriss-Viereck an den Schnittlinien (Gehrung, schräger Stoss, [108]) wie das 3D.
+            match model3d::wall_footprint(b) {
+                Some(q) => w_pts(&mut f, &[v2(q[3]), v2(q[2]), v2(q[1]), v2(q[0])]),
+                None => {
+                    let (s, e) = (v2(b.start), v2(b.end));
+                    let n = left_normal(normalize(sub(e, s)));
+                    let h = b.thickness / 2.0;
+                    w_pts(&mut f, &[add_scaled(s, n, -h), add_scaled(e, n, -h), add_scaled(e, n, h), add_scaled(s, n, h)]);
+                }
+            }
             f.nums(&[b.base_elevation - base, b.height]);
         }
         host_extent.insert(wall.id.clone(), extent);
@@ -922,7 +928,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 }
                 continue;
             }
-            let cut = wall_cut_mesh_checked(&CutWall {
+            let mut cut = wall_cut_mesh_checked(&CutWall {
                 start: b.start,
                 end: b.end,
                 thickness: b.thickness,
@@ -930,6 +936,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 height: b.height,
                 holes: b.holes.as_deref().unwrap_or(&[]).iter().map(|h| [h.from, h.to, h.z_bottom, h.z_top]).collect(),
             });
+            // Enden auf die Schnittlinien (Gehrung, schräger Stoss, [108]) wie OBJ/STL/GLB.
+            crate::mesh_data::shift_cut_ends(&mut cut, b);
             let at = (positions.len() / 3) as u32;
             for c in cut.chunks_exact(3) {
                 positions.extend_from_slice(&[c[0], c[2], c[1] - base]);
@@ -1491,6 +1499,25 @@ mod tests {
             k += 15;
         }
         assert!(full >= 3, "{full}"); // Innenputz durch den T-Anschluss von W9 geteilt
+    }
+
+    /// [108] Schräges L (60°): die Wand-Profile (SweptSolid je Band) tragen die Gehrung des 3D-Körpers
+    /// statt Rechtecken; Summe der Extrusionen = Dicke × Höhe × (L1 + L2), keine Lücke an der Aussenecke.
+    #[test]
+    fn schraeges_l_profile_mit_gehrung() {
+        let p = crate::solid_specs::tests::schraeges_l();
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        // Profile: [4, x0, y0, …, x3, y3, z_rel, Tiefe] mit Tiefe 2.5.
+        let profiles: Vec<&[f64]> = f.nums.windows(11).filter(|w| w[0] == 4.0 && w[9] == 0.0 && w[10] == 2.5).collect();
+        assert_eq!(profiles.len(), 2, "zwei Wände, je ein Band");
+        let area = |w: &[f64]| (0..4).map(|i| { let j = (i + 1) % 4; w[1 + 2 * i] * w[2 + 2 * j] - w[1 + 2 * j] * w[2 + 2 * i] }).sum::<f64>() / 2.0;
+        let vol: f64 = profiles.iter().map(|w| area(w) * 2.5).sum();
+        assert!((vol - 0.3 * 2.5 * 7.0).abs() < 1e-9, "{vol}");
+        assert!(profiles.iter().all(|w| area(w) > 0.0), "CCW");
+        // Aussenecke der Gehrung (−0.15·√3, −0.15) in beiden Profilen, Innenecke (+0.15·√3, +0.15) auch.
+        let has = |w: &[f64], x: f64, y: f64| (0..4).any(|i| (w[1 + 2 * i] - x).abs() < 1e-9 && (w[2 + 2 * i] - y).abs() < 1e-9);
+        let (x, y) = (0.15 * 3f64.sqrt(), 0.15);
+        assert!(profiles.iter().all(|w| has(w, -x, -y) && has(w, x, y)), "{profiles:?}");
     }
 
     /// [71] U-Wert aus dem Schichtaufbau landet als ThermalTransmittance in Pset_WallCommon (nur mit λ).

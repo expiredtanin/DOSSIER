@@ -2307,8 +2307,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   rechtwinklig an der Band-Mitte (Dreieck-Lücke weg); OBJ/STL/GLB (`mesh_data.rs`) und Live-Schnitt ebenso.
   SVG-Export des Grundrisses beachtet jetzt `noStrokeEdges` (vorher Stossfugen/Gehrungen gestrichen).
   Tests: Winkel 15°–165° ein-/mehrschichtig (Joins, Grundriss-Primitive, 3D-Rasterprüfung lückenlos/ohne
-  Doppelung für T, Knoten-T, L, X). Geprüft: cargo/vitest, CLI-Grundriss-SVG angesehen (Linux). Offen: 3D nur
-  per Rust-Test (kein Metal-Render), IFC/truck-Körper noch rechtwinklig, nicht in der Tauri-App geprüft. · S
+  Doppelung für T, Knoten-T, L, X). Geprüft: cargo/vitest, CLI-Grundriss-SVG angesehen (Linux). (5.11.) IFC und
+  truck-Körper folgen: IFC-Wandprofile (SweptSolid je Band, `ifc_data.rs`) sind das Grundriss-Viereck des 3D
+  (`model3d::wall_footprint`), der Netz-Weg verschiebt die Enden wie OBJ (`mesh_data::shift_cut_ends`); truck
+  (`solid_specs::wall_spec` → STEP, Kennwerte, Kollision, Abzugskörper) baut schräge Stirnflächen ohne Boolean:
+  `extrudePlane.pointsBack` = Profilring der Rückseite, trucksolid verbindet beide Ringe mit Regelflächen
+  (`extrude_plane_skew`); Öffnung in der schrägen Endzone → dort rechtwinklig, STEP-Rückfall rechtwinklig.
+  Tests: Rust (schräges L 60°: Profil-Ecken = 3D, Volumen = d·h·(L1+L2), IFC-Gehrungsecken; truck: geschlossen,
+  Volumen mit Fenster, STEP), vitest Musterhaus-Ecken; `validate-ifc.py` grün (Linux). Offen: 3D nur per Rust-Test
+  (kein Metal-Render), nicht in der Tauri-App geprüft; Mesh-Rückfall der truck-Booleans (`boolean.rs`) verschweisst
+  nur bitgleiche Ecken und scheitert darum bei schräg liegenden Körpern (Befund, älter). · S
 - ✅ **[114] Musterhaus komplex.** (30.10.) Zweites Beispielprojekt (`src/model/sampleProjectComplex.ts`,
   `buildComplexSampleProject()`), in dem möglichst alle Funktionen vorkommen: Zweifamilienhaus am Südhang, UG (im
   Hang, Süden frei) / EG / OG / DG mit Sichtbereichen und Ansichtsvorlagen; Gelände aus Höhenlinien (Kern-Befehl
@@ -2339,9 +2347,12 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (`section3dCutId`, im 3D wie sonst aufhebbar). (2) Layout-Viewports rechneten nur Grundrisse — ein Schnitt-/
   Ansicht-Ausschnitt zeigte Höhenlinien und Schnittlinien-Symbole statt des Schnitts (seit dem ersten Stand so, keine
   Regression). `plan/viewportPlan.ts::viewportLevelPlan` (Blatt + PDF): Schnitt/Ansicht wie `SectionPlanView` mit Koten
-  und eigenen 2D-Elementen. vitest `viewportPlan.test.ts`, e2e `sectionViews.spec.ts`. Offen: Fang auf
-  Schnitt-Viewport-Inhalt (`sheet_viewports.rs` nur Grundriss), 3D-Ausschnitt im Viewport; nicht in der Tauri-App
-  geprüft (3D headless ohne Bild). · S
+  und eigenen 2D-Elementen. vitest `viewportPlan.test.ts`, e2e `sectionViews.spec.ts`. (5.11.) Fang auf
+  Schnitt-/Ansicht-Viewport-Inhalt: `sheet_viewports.rs::viewport_maps` rechnet für Schnitt-/Ansichtsebenen den
+  Inhalt wie `viewportLevelPlan` (Projektion mit geschnittenen Öffnungen, Koten, eigene 2D-Elemente, gleiches
+  Ausmass → gleiche Abbildung aufs Blatt); Rust-Test `fang_auf_schnitt_und_ansicht_viewport`. Offen: freie
+  Körper (`extrudedSolids`, truck-Netze aus TS) fehlen im Fang des Schnitt-Viewports, 3D-Ausschnitt im Viewport;
+  nicht in der Tauri-App geprüft (3D headless ohne Bild). · S
 - ◐ **[131] Untergeschosse unter ±0.00 (Bezugsgeschoss).** (04.11., Befund aus [114]) Bisher stapelten die Geschosse
   ab dem ersten (UG = ±0.00). Neu: `DrawingLevel.zeroLevel` (Rust-Modell) markiert das Bezugsgeschoss ±0.00 (wie
   ArchiCADs Projektnullpunkt); `levels.rs::recompute_floor_elevations` stapelt weiter nach `floorHeight`, verschiebt den
