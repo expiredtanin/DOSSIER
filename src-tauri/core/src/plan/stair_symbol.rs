@@ -52,7 +52,10 @@ impl Out {
     }
 }
 
-pub fn plan_stair(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, filled_arrow: bool) -> Vec<f64> {
+/// Ecken des Säulenkreises im Grundriss.
+const COLUMN_SEGMENTS: usize = 48;
+
+pub fn plan_stair(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, filled_arrow: bool, column_r: f64) -> Vec<f64> {
     let Some(p) = decode_params(params) else { return Vec::new() };
     if !(total_rise.is_finite() && cut_rise.is_finite() && lw_mm.is_finite()) {
         return Vec::new();
@@ -107,6 +110,20 @@ pub fn plan_stair(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, fi
         }
     }
 
+    // Mittelsäule (Spindel) der Wendel: reicht über die ganze Steighöhe, also geschnitten, sobald die
+    // Schnittebene innerhalb der Treppe liegt.
+    if let (true, Some(c)) = (p.shape == "spiral" && column_r.is_finite() && column_r > 0.0, p.center) {
+        let r = column_r.min(5.0);
+        let pts: Vec<Vec2> = (0..COLUMN_SEGMENTS)
+            .map(|k| {
+                let a = std::f64::consts::TAU * k as f64 / COLUMN_SEGMENTS as f64;
+                Vec2::new(c.x + r * jsnum::cos(a), c.y + r * jsnum::sin(a))
+            })
+            .collect();
+        let cut = cut_rise > 0.0 && cut_rise < total_rise;
+        o.polygon(&pts, lw_mm, cut);
+    }
+
     let mut out = Vec::with_capacity(o.buf.len() + 1);
     out.push(o.n as f64);
     out.extend(o.buf);
@@ -143,7 +160,7 @@ mod tests {
 
     #[test]
     fn gerade_treppe_hat_tritte_lauflinie_pfeil_und_aussenlinie() {
-        let b = plan_stair(&straight(), 2.8, 1.0, 0.25, false);
+        let b = plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0);
         let t = tags(&b);
         // 16 Tritte × (Polygon + Kante) + 2 Bruchstriche + Lauflinie + 2 Pfeilflügel + Aussenlinie
         assert_eq!(t.iter().filter(|x| **x == 1.0).count(), 16 + 1);
@@ -154,24 +171,62 @@ mod tests {
 
     #[test]
     fn gefuellter_pfeil_ist_ein_dreieck() {
-        let offen = tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false));
-        let voll = tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, true));
+        let offen = tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0));
+        let voll = tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, true, 0.0));
         assert_eq!(voll.len() + 1, offen.len());
     }
 
     #[test]
     fn wendel_liefert_boegen() {
         let p = vec![2.0, 0.0, 0.0, 1.0, 0.0, 3.0, NAN, NAN, 0.0, 0.0, 1.5, 270.0, 1.0, 14.0, NAN, 0.0];
-        let t = tags(&plan_stair(&p, 2.8, 1.0, 0.25, false));
+        let t = tags(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0));
         assert_eq!(t.iter().filter(|x| **x == 3.0).count(), 2);
+    }
+
+    /// Letztes Polygon im Puffer: (gefüllt, Punkte).
+    fn last_polygon(buf: &[f64]) -> Option<(bool, Vec<[f64; 2]>)> {
+        let n = buf[0] as usize;
+        let mut i = 1;
+        let mut last = None;
+        for _ in 0..n {
+            match buf[i] as i64 {
+                1 => {
+                    let k = buf[i + 3] as usize;
+                    last = Some((buf[i + 2] != 0.0, (0..k).map(|j| [buf[i + 4 + 2 * j], buf[i + 5 + 2 * j]]).collect()));
+                    i += 4 + 2 * k;
+                }
+                2 => i += 8,
+                _ => i += 9,
+            }
+        }
+        last
+    }
+
+    #[test]
+    fn wendel_saeule_geschnitten_gefuellt_sonst_umriss() {
+        let p = vec![2.0, 0.0, 0.0, 1.0, 0.0, 3.0, NAN, NAN, 0.0, 0.0, 1.5, 270.0, 1.0, 14.0, NAN, 0.0];
+        let ohne = tags(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0));
+        let mit = plan_stair(&p, 2.8, 1.0, 0.25, false, 0.15);
+        assert_eq!(tags(&mit).len(), ohne.len() + 1);
+        let (filled, pts) = last_polygon(&mit).unwrap();
+        assert!(filled, "Schnitthöhe in der Treppe: Säule geschnitten (Poché)");
+        assert_eq!(pts.len(), COLUMN_SEGMENTS);
+        assert!(pts.iter().all(|q| (q[0].hypot(q[1]) - 0.15).abs() < 1e-12), "Kreis um das Zentrum");
+        // Schnittebene über der Treppe: nur Umriss.
+        let (filled, _) = last_polygon(&plan_stair(&p, 2.8, 3.5, 0.25, false, 0.15)).unwrap();
+        assert!(!filled);
+        // Gerade Treppe: keine Säule.
+        assert_eq!(tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.15)).len(), tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0)).len());
+        // Unsinn-Radius: keine Säule, kein Panic.
+        assert_eq!(tags(&plan_stair(&p, 2.8, 1.0, 0.25, false, NAN)).len(), ohne.len());
     }
 
     #[test]
     fn unsinn_ergibt_leeres_ergebnis() {
-        assert!(plan_stair(&[1.0, 2.0], 2.8, 1.0, 0.25, false).is_empty());
-        assert!(plan_stair(&straight(), NAN, 1.0, 0.25, false).is_empty());
+        assert!(plan_stair(&[1.0, 2.0], 2.8, 1.0, 0.25, false, 0.1).is_empty());
+        assert!(plan_stair(&straight(), NAN, 1.0, 0.25, false, 0.0).is_empty());
         let mut kaputt = straight();
         kaputt[1] = NAN;
-        assert!(plan_stair(&kaputt, 2.8, 1.0, 0.25, false).is_empty());
+        assert!(plan_stair(&kaputt, 2.8, 1.0, 0.25, false, 0.0).is_empty());
     }
 }
