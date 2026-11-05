@@ -2308,7 +2308,14 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   SVG-Export des Grundrisses beachtet jetzt `noStrokeEdges` (vorher Stossfugen/Gehrungen gestrichen).
   Tests: Winkel 15°–165° ein-/mehrschichtig (Joins, Grundriss-Primitive, 3D-Rasterprüfung lückenlos/ohne
   Doppelung für T, Knoten-T, L, X). Geprüft: cargo/vitest, CLI-Grundriss-SVG angesehen (Linux). Offen: 3D nur
-  per Rust-Test (kein Metal-Render), IFC/truck-Körper noch rechtwinklig, nicht in der Tauri-App geprüft. · S
+  per Rust-Test (kein Metal-Render), IFC/truck-Körper noch rechtwinklig, nicht in der Tauri-App geprüft.
+  (5.11.) truck-Mesh-Fallback (`trucksolid/src/boolean.rs`) verschweisste Ecken nur bei bitgleichen Koordinaten —
+  truck vernetzt jede Fläche einzeln, bei schrägen/gedrehten Körpern sind gemeinsame Ecken nur fast gleich →
+  „Netz nicht geschlossen", Aussparungen in schrägen Wänden scheiterten. Jetzt Raster-Verschweissung mit Toleranz
+  1e-6 · grösste Koordinate (mind. 1e-7 m). Tests: 30°-Wand − bündige Aussparung über den Fallback, gehrte schräge
+  Wand (Trapez), gedrehter Quader mit getrennten Flächen-Ecken. Offen: truck-shapeops panikt bei der gehrten
+  schrägen Wand selbst („wire is not simple") — im WASM bricht `guarded()` dann ab, bevor der Mesh-Fallback greift
+  (Abhilfe: B-Rep-Boolean dort überspringen oder Manifold zuerst). · S
 - ✅ **[114] Musterhaus komplex.** (30.10.) Zweites Beispielprojekt (`src/model/sampleProjectComplex.ts`,
   `buildComplexSampleProject()`), in dem möglichst alle Funktionen vorkommen: Zweifamilienhaus am Südhang, UG (im
   Hang, Süden frei) / EG / OG / DG mit Sichtbereichen und Ansichtsvorlagen; Gelände aus Höhenlinien (Kern-Befehl
