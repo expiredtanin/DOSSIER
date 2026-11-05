@@ -284,6 +284,25 @@ fn mv_roof(r: &Value, xf: &Xf) -> Value {
     with(r, "outline", xf.pts(field(r, "outline")))
 }
 
+/// Dach-/Deckenöffnung ([103]): Mittelpunkt `hostPoint` und (falls gesetzt) Breitenrichtung `hostAngle`
+/// mit dem Wirt abbilden; Breite/Höhe bleiben (in der Dachebene gemessen).
+fn mv_surface_opening(o: &Value, xf: &Xf) -> Value {
+    let (bx, by) = xy(field(o, "hostPoint").unwrap_or(&Value::Null));
+    let nb = xf.apply(bx, by);
+    let mut f = vec![("hostPoint", pt(nb.0, nb.1))];
+    if let Some(a) = field(o, "hostAngle").and_then(Value::as_f64) {
+        let nt = xf.apply(bx + jsnum::cos(a), by + jsnum::sin(a));
+        f.push(("hostAngle", js_num(jsnum::atan2(nt.1 - nb.1, nt.0 - nb.0))));
+    }
+    with_all(o, f)
+}
+
+/// Wirt (Dach oder Decke) einer Flächenöffnung, sonst `None` (Wandöffnung).
+fn surface_host(o: &Value) -> Option<(&'static str, &str)> {
+    let s = |k: &str| field(o, k).and_then(Value::as_str).filter(|v| !v.is_empty());
+    s("hostRoofId").map(|id| ("hostRoofId", id)).or_else(|| s("hostCeilingId").map(|id| ("hostCeilingId", id)))
+}
+
 fn mv_room(r: &Value, xf: &Xf) -> Value {
     let mut f = vec![("boundary", xf.pts(field(r, "boundary")))];
     if truthy(field(r, "stampAnchor")) {
@@ -599,11 +618,18 @@ pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq)
         if !rooms.is_empty() {
             patch("rooms", &|r| rooms.has(r) && !locked(r), &|r| mv_room(r, &xf));
         }
+        // Öffnungen in bewegten Dächern/Decken ([103]) folgen ihrem Wirt.
+        let hosts: std::collections::HashSet<&str> =
+            items.iter().filter(|(k, _)| matches!(k, Kind::Roof | Kind::Ceiling)).filter_map(|(_, e)| id_of(e)).collect();
+        if !hosts.is_empty() {
+            patch("openings", &|o| surface_host(o).is_some_and(|(_, h)| hosts.contains(h)), &|o| mv_surface_opening(o, &xf));
+        }
     }
 
     // Kopien (Kopie/Reihe/Verteilen bzw. gespiegelte Kopie).
     let mut ids = IdGen::new(&req.stamp);
     let mut new: [Vec<Value>; 8] = Default::default();
+    let mut new_openings = Vec::new();
     for t in copy_ts(op, &req.mode, req.count.0) {
         let xf = Xf::of(op, &pts, t);
         let prefixes: Vec<&str> = items
@@ -635,11 +661,18 @@ pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq)
             };
             new[slot].push(with(&v, "id", Value::String(new_id.clone())));
         }
+        // Öffnungen kopierter Dächer/Decken ([103]) mit neuem Wirt mitkopieren.
+        for o in list(root, "openings") {
+            let Some((key, nh)) = surface_host(o).and_then(|(k, h)| Some((k, to_copy(h)?))) else { continue };
+            let v = with(&mv_surface_opening(o, &xf), key, Value::String(nh));
+            new_openings.push(with(&v, "id", Value::String(ids.next("O"))));
+        }
     }
     let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms"];
     for (key, items) in keys.iter().zip(new) {
         ops.extend(add(key, items));
     }
+    ops.extend(add("openings", new_openings));
     ops
 }
 
@@ -1071,6 +1104,47 @@ mod tests {
         assert_eq!(run("move", json!([[0, 0], [1, 1]]))["bulge"], json!(0.5));
         assert_eq!(run("rotate", json!([[0, 0], [1, 0], [0, 1]]))["bulge"], json!(0.5));
         assert_eq!(run("mirror", json!([[0, 0], [0, 1]]))["bulge"], json!(-0.5));
+    }
+
+    /// [103] Dach-/Deckenöffnungen folgen ihrem Wirt: Verschieben/Drehen bildet `hostPoint` (und
+    /// `hostAngle`) mit ab, Kopieren kopiert sie mit neuem Wirt; gesperrter Wirt bleibt stehen.
+    #[test]
+    fn dach_und_deckenoeffnungen_folgen_dem_wirt() {
+        let r = root(json!({
+            "roofs":[{"id":"r","outline":[{"x":0,"y":0},{"x":4,"y":0},{"x":4,"y":4},{"x":0,"y":4}]}],
+            "ceilings":[{"id":"c","outline":[{"x":0,"y":0},{"x":4,"y":0},{"x":4,"y":4}]},{"id":"c2","outline":[],"locked":true}],
+            "openings":[
+                {"id":"o1","hostWallId":"","hostRoofId":"r","hostPoint":{"x":1,"y":2}},
+                {"id":"o2","hostWallId":"","hostCeilingId":"c","hostPoint":{"x":1,"y":1},"hostAngle":0},
+                {"id":"o3","hostWallId":"w","position":1},
+                {"id":"o4","hostWallId":"","hostCeilingId":"c2","hostPoint":{"x":1,"y":1}}
+            ]}));
+        let run = |op: &str, pts: Value, mode: &str| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":{"roofIds":["r"],"ceilingIds":["c","c2"]},"op":op,"pts":pts,"mode":mode,"count":1,"stamp":"s"})).unwrap();
+            transform_ops(&r, &Project::default(), &req).iter().map(|o| o.to_json()).collect::<Vec<_>>()
+        };
+        let ops = run("move", json!([[0, 0], [2, 3]]), "move");
+        let op_of = |ops: &[Value], id: &str| ops.iter().find(|o| o["collection"] == "openings" && o["entity"]["id"] == id).cloned();
+        assert_eq!(op_of(&ops, "o1").unwrap()["entity"]["hostPoint"], json!({"x":3,"y":5}));
+        assert_eq!(op_of(&ops, "o2").unwrap()["entity"]["hostPoint"], json!({"x":3,"y":4}));
+        assert!(op_of(&ops, "o4").is_none(), "gesperrte Decke bewegt ihre Öffnung nicht");
+        assert!(op_of(&ops, "o3").is_none());
+        // Drehen um 90° um den Ursprung (Dächer drehen nicht): Decke (1,1) → (−1,1), hostAngle 0 → π/2.
+        let ops = run("rotate", json!([[0, 0], [1, 0], [0, 1]]), "move");
+        assert!(op_of(&ops, "o1").is_none());
+        let e = op_of(&ops, "o2").unwrap()["entity"].clone();
+        assert!((e["hostPoint"]["x"].as_f64().unwrap() + 1.0).abs() < 1e-9 && (e["hostPoint"]["y"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+        assert!((e["hostAngle"].as_f64().unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+        // Kopie: neue Öffnung am neuen Dach.
+        let ops = run("move", json!([[0, 0], [10, 0]]), "copy");
+        let roof_add = ops.iter().find(|o| o["collection"] == "roofs").unwrap();
+        let new_roof = roof_add["items"][0]["id"].as_str().unwrap().to_owned();
+        let op_add = ops.iter().find(|o| o["collection"] == "openings").expect("Öffnung mitkopiert");
+        let items = op_add["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2, "Dach- und Deckenöffnung, nicht die der gesperrten Decke");
+        assert_eq!(items[0]["hostRoofId"], json!(new_roof));
+        assert_ne!(items[0]["id"], json!("o1"));
+        assert_eq!(items[0]["hostPoint"], json!({"x":11,"y":2}));
     }
 
     #[test]
