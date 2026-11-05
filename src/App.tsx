@@ -937,6 +937,7 @@ export default function App() {
     addDrawing,
     addSection,
     addElevation,
+    addCeiling,
     addCategory,
     patchCategory,
     addSubCategory,
@@ -1644,7 +1645,7 @@ export default function App() {
   // das Handle ist null, Aktionen sind No-Ops).
   const planActive = activeLevel.kind === "floor" && viewType === "grundriss";
   // 3D gibt es aus Geschoss, Schnitt und Ansicht ([115]); eine freie Zeichnung hat keine Höhe.
-  const has3dView = activeLevel.kind !== "drawing";
+  const has3dView = activeLevel.kind !== "drawing" && activeLevel.kind !== "ceiling";
   // Start-Protokoll: war der letzte Lauf unsauber beendet, kurz darauf hinweisen (Autosave sichert
   // die Daten); beim Schliessen die Sitzung als sauber markieren.
   useEffect(() => {
@@ -1746,6 +1747,7 @@ export default function App() {
       onAddFloor: addFloor,
       onAddSection: addSection,
       onAddElevation: addElevation,
+      onAddCeiling: addCeiling,
       onAddDrawing: addDrawing,
       onSetDisplayMode: (mode) => setModeFor(BUILTIN_PANEL_IDS.drawingLevels, mode),
     },
@@ -1964,6 +1966,7 @@ export default function App() {
       addDrawing,
       addSection,
       addElevation,
+      addCeiling,
       addCategory,
       snapshotLayerVisibility,
       applyLayerVisibility,

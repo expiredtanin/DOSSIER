@@ -29,6 +29,7 @@ export function DrawingLevelsWindowApp() {
   const [collapsed, setCollapsed] = useState<Record<DrawingLevelKind, boolean>>({
     floor: false,
     section: false,
+    ceiling: false,
     elevation: false,
     drawing: false,
   });
@@ -91,6 +92,7 @@ export function DrawingLevelsWindowApp() {
     floor: handlers.onAddFloor,
     section: handlers.onAddSection,
     elevation: handlers.onAddElevation,
+    ceiling: handlers.onAddCeiling,
     drawing: handlers.onAddDrawing,
   };
 

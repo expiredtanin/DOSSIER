@@ -87,6 +87,8 @@ function kindBadgeKey(kind: DrawingLevelKind): TranslationKey {
       return "import.badge.section";
     case "elevation":
       return "import.badge.elevation";
+    case "ceiling":
+      return "import.badge.ceiling";
     case "drawing":
       return "import.badge.drawing";
   }

@@ -30,6 +30,7 @@ const KIND_BADGE_KEY: Record<DrawingLevelKind, string> = {
   floor: "badge.floor",
   section: "badge.section",
   elevation: "badge.elevation",
+  ceiling: "badge.ceiling",
   drawing: "badge.drawing",
 };
 
@@ -39,6 +40,7 @@ export const CATEGORY_ORDER: DrawingLevelKind[] = [
   "floor",
   "section",
   "elevation",
+  "ceiling",
   "drawing",
 ];
 
@@ -47,6 +49,7 @@ export const CATEGORY_TITLE_KEY: Record<DrawingLevelKind, string> = {
   floor: "levelCat.floor",
   section: "levelCat.section",
   elevation: "levelCat.elevation",
+  ceiling: "levelCat.ceiling",
   drawing: "levelCat.drawing",
 };
 
@@ -55,6 +58,7 @@ export const CATEGORY_ADD_KEY: Record<DrawingLevelKind, string> = {
   floor: "levels.addFloor",
   section: "levels.addSection",
   elevation: "levels.addElevation",
+  ceiling: "levels.addCeiling",
   drawing: "levels.addDrawing",
 };
 
@@ -65,7 +69,7 @@ export function DrawingLevelsPanel() {
 
   // Auf-/Zu-Zustand je Kategorie, lokal — Default: alle aufgeklappt.
   const [collapsed, setCollapsed] = useState<Record<DrawingLevelKind, boolean>>(
-    { floor: false, section: false, elevation: false, drawing: false },
+    { floor: false, section: false, elevation: false, ceiling: false, drawing: false },
   );
   const toggleCategory = (kind: DrawingLevelKind) =>
     setCollapsed((c) => ({ ...c, [kind]: !c[kind] }));
@@ -74,6 +78,7 @@ export function DrawingLevelsPanel() {
     floor: host.onAddFloor,
     section: host.onAddSection,
     elevation: host.onAddElevation,
+    ceiling: host.onAddCeiling,
     drawing: host.onAddDrawing,
   };
 

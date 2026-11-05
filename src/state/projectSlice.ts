@@ -123,6 +123,8 @@ export interface ProjectSlice {
   addSection: () => void;
   /** Legt eine neue Ansichts-Zeichnungsebene (kind:"elevation") als Platzhalter an. */
   addElevation: () => void;
+  /** Legt einen Deckenspiegel ([100], kind:"ceiling") des aktiven Geschosses an (sonst des ersten). */
+  addCeiling: () => void;
   patchLevel: (id: string, patch: Partial<DrawingLevel>) => void;
   duplicateLevel: (id: string) => void;
   deleteLevel: (id: string) => void;
@@ -683,6 +685,24 @@ export function createProjectSlice(
         };
         return addItems("drawingLevels", [elevation]);
       }),
+
+    addCeiling: () => {
+      const activeLevelId = get().activeLevelId;
+      applyChange((p) => {
+        const floors = p.drawingLevels.filter((z) => z.kind === "floor" && !z.layoutId);
+        const floor = floors.find((z) => z.id === activeLevelId) ?? floors[0];
+        if (!floor) return [];
+        const ceiling: DrawingLevel = {
+          id: `ceiling-${Date.now()}`,
+          name: t("default.ceilingName", { floor: floor.name }),
+          kind: "ceiling",
+          visible: true,
+          locked: false,
+          ceilingOfId: floor.id,
+        };
+        return addItems("drawingLevels", [ceiling]);
+      });
+    },
 
     patchLevel: (id, patch) =>
       applyChange((p) =>

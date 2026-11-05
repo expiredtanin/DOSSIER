@@ -5,7 +5,7 @@
 //   dossier-cli <projekt.obp> info
 //   dossier-cli <projekt.obp> validate
 //   dossier-cli <projekt.obp> migrate [--out neu.obp]
-//   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--sketch] [--hatch] [--format svg|json] [--out eg.svg]
+//   dossier-cli <projekt.obp> plan [--level EG] [--ceiling] [--scale 100] [--sketch] [--hatch] [--format svg|json] [--out eg.svg]
 //                                                  json = render2d-Szene (planToRenderScene)
 //   dossier-cli <projekt.obp> section <Name> [--sketch] [--hatch] [--out schnitt.svg]       (--format json: render2d-Szene)
 //   dossier-cli <projekt.obp> elevation <Name> [--sketch] [--hatch] [--out ansicht.svg]     (--sketch: Skizzenstil [67])
@@ -595,10 +595,18 @@ async function execute(project: Project, file: string, command: string, rest: st
       return 0;
     case "plan": {
       // Geschosse und freie 2D-Zeichnungsebenen (z. B. das Blatt „Raumprogramm").
-      const lvl = findLevel(project, ["floor", "drawing"], args.flags.get("level"));
+      let planProject = project;
+      let lvl = findLevel(project, ["floor", "drawing", "ceiling"], args.flags.get("level"));
       if (!lvl) fail(`Geschoss nicht gefunden: ${args.flags.get("level") ?? "(erstes)"}`);
+      // `--ceiling` ([100]): Deckenspiegel des Geschosses (vorhandene Ebene, sonst vorübergehend angelegt).
+      if (args.flags.has("ceiling") && lvl.kind === "floor") {
+        const floorId = lvl.id;
+        const own = project.drawingLevels.find((l) => l.kind === "ceiling" && l.ceilingOfId === floorId);
+        lvl = own ?? { id: `ceiling-${floorId}`, name: `Deckenspiegel ${lvl.name}`, kind: "ceiling", visible: true, locked: false, ceilingOfId: floorId };
+        if (!own) planProject = { ...project, drawingLevels: [...project.drawingLevels, lvl] };
+      }
       // Massstab geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken nach Massstab).
-      const plan = generatePlan(withSketch(project, lvl.id, args), lvl.id, allCodes, undefined, "mittel", false, false, true, scale);
+      const plan = generatePlan(withSketch(planProject, lvl.id, args), lvl.id, allCodes, undefined, "mittel", false, false, true, scale);
       if (args.flags.get("format") === "json") {
         out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
         return 0;
