@@ -62,6 +62,9 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
     // [137] Pick-Flächen der Baugruben zuletzt (zuoberst): sie liegen im Rahmen des Geländes, das sonst
     // jeden Klick in der Grube fängt.
     let mut late: Vec<Primitive> = Vec::new();
+    // [140] Höhenlinien enden an der Gebäudegrundfläche (statt quer durch die Räume zu laufen).
+    let mut house_cache: Option<Vec<Vec<Vec2>>> = None;
+    let mut house = || -> Vec<Vec<Vec2>> { house_cache.get_or_insert_with(|| building_rings(c.p)).clone() };
     for obj in c.p.context.as_deref().unwrap_or(&[]) {
         let code = match obj {
             ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
@@ -86,8 +89,11 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
                         continue;
                     }
                     let seg_end = if k.closed { pts.len() } else { pts.len() - 1 };
+                    let rings = house();
                     for i in 0..seg_end {
-                        out.push(context_line(pts[i], pts[(i + 1) % pts.len()]));
+                        for (a, b) in outside(pts[i], pts[(i + 1) % pts.len()], &rings) {
+                            out.push(context_line(a, b));
+                        }
                     }
                 }
             }
@@ -108,7 +114,7 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
                     }
                     out.push(pick_band(q, Some(&t.id), None));
                 }
-                terrain_contours(c, t, out);
+                terrain_contours(c, t, out, &house());
             }
             ContextObject::Excavation(e) => excavation_lines(c, e, out, &mut late),
             ContextObject::Image(_) => {}
@@ -118,6 +124,58 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
 }
 
 const TERRAIN_INK: &str = "#7a5b3a";
+
+/// [140] Aussenringe der Gebäudegrundfläche (Wände und Körper aller Geschosse vereinigt, ohne Innenhöfe/Räume).
+fn building_rings(p: &Project) -> Vec<Vec<Vec2>> {
+    crate::site_rules::building_footprint(p).into_iter().filter_map(|poly| poly.into_iter().next()).filter(|r| r.len() >= 3).collect()
+}
+
+fn inside(q: Vec2, ring: &[Vec2]) -> bool {
+    let mut c = false;
+    let n = ring.len();
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[(i + n - 1) % n]);
+        if (a.y > q.y) != (b.y > q.y) && q.x < (b.x - a.x) * (q.y - a.y) / (b.y - a.y) + a.x {
+            c = !c;
+        }
+    }
+    c
+}
+
+/// Teile der Strecke a–b ausserhalb aller `rings`.
+fn outside(a: Vec2, b: Vec2, rings: &[Vec<Vec2>]) -> Vec<(Vec2, Vec2)> {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let (lo_x, hi_x, lo_y, hi_y) = (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y));
+    let mut ts = vec![0.0, 1.0];
+    let mut near = false;
+    for r in rings {
+        let n = r.len();
+        for i in 0..n {
+            let (p, q) = (r[i], r[(i + 1) % n]);
+            if p.x.max(q.x) < lo_x || p.x.min(q.x) > hi_x || p.y.max(q.y) < lo_y || p.y.min(q.y) > hi_y {
+                continue;
+            }
+            near = true;
+            let (ex, ey) = (q.x - p.x, q.y - p.y);
+            let den = dx * ey - dy * ex;
+            if den.abs() < 1e-15 {
+                continue;
+            }
+            let t = ((p.x - a.x) * ey - (p.y - a.y) * ex) / den;
+            let u = ((p.x - a.x) * dy - (p.y - a.y) * dx) / den;
+            if t > 0.0 && t < 1.0 && (0.0..=1.0).contains(&u) {
+                ts.push(t);
+            }
+        }
+    }
+    let at = |t: f64| v2(a.x + dx * t, a.y + dy * t);
+    if !near {
+        // Ganz innerhalb (ohne Kantenberührung) oder ganz ausserhalb.
+        return if rings.iter().any(|r| inside(a, r)) { vec![] } else { vec![(a, b)] };
+    }
+    ts.sort_by(|x, y| x.total_cmp(y));
+    ts.windows(2).filter(|w| w[1] - w[0] > 1e-9 && !rings.iter().any(|r| inside(at((w[0] + w[1]) / 2.0), r))).map(|w| (at(w[0]), at(w[1]))).collect()
+}
 const EXCAVATION_INK: &str = "#1f242c";
 
 fn ink_line(a: Vec2, b: Vec2, w: f64, color: &str, dash: Option<Vec<f64>>) -> Primitive {
@@ -126,7 +184,7 @@ fn ink_line(a: Vec2, b: Vec2, w: f64, color: &str, dash: Option<Vec<f64>>) -> Pr
 
 /// [T6] Höhenlinien aus dem Gelände-Netz (samt Baugruben) in der Äquidistanz `contourInterval`; jede
 /// `contourIndexEvery`-te ist Zähllinie (dicker, mit Höhenangabe, lesbar gedreht).
-fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>) {
+fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &[Vec<Vec2>]) {
     let Some(iv) = t.contour_interval.filter(|v| v.is_finite() && *v > 0.0) else { return };
     let every = t.contour_index_every.filter(|v| v.is_finite() && *v >= 1.0).map_or(5, |v| v.round() as i64);
     let st = crate::excavation::site_terrain(c.p, t);
@@ -156,7 +214,9 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>) {
             }
             for (f0, f1) in spans {
                 let pt = |f: f64| v2(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
-                out.push(ink_line(pt(f0), pt(f1), w, TERRAIN_INK, None));
+                for (p0, p1) in outside(pt(f0), pt(f1), house) {
+                    out.push(ink_line(p0, p1, w, TERRAIN_INK, None));
+                }
             }
             acc += d;
         }
@@ -349,6 +409,35 @@ mod tests {
         assert_eq!(top_context(&out, 50.0, 5.0).as_deref(), Some("t"), "Gelände");
         assert_eq!(top_context(&out, -10.0, 0.0).as_deref(), Some("hl"), "Höhenlinien");
         assert_eq!(top_context(&out, -30.0, 0.0), None);
+    }
+
+    /// [140] Höhenlinien enden an der Gebäudegrundfläche (Wände vereinigt, ganzer Aussenring).
+    #[test]
+    fn hoehenlinien_enden_am_gebaeude() {
+        let ring = [v2(0.0, 0.0), v2(10.0, 0.0), v2(10.0, 8.0), v2(0.0, 8.0)];
+        let rings = vec![ring.to_vec()];
+        // Quer durch: nur die beiden Stücke ausserhalb bleiben.
+        let parts = outside(v2(-5.0, 4.0), v2(15.0, 4.0), &rings);
+        assert_eq!(parts.len(), 2);
+        assert!((parts[0].1.x - 0.0).abs() < 1e-9 && (parts[1].0.x - 10.0).abs() < 1e-9);
+        // Ganz innen (im Raum, keine Kante in der Nähe): weg; ganz aussen: bleibt.
+        assert!(outside(v2(4.0, 4.0), v2(5.0, 4.0), &rings).is_empty());
+        assert_eq!(outside(v2(20.0, 4.0), v2(25.0, 4.0), &rings).len(), 1);
+        // Im Plan: Gelände z = x/10, Haus aus vier Wänden 12..18 × 0..10 → keine Höhenlinie bei x = 15 im Haus.
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 30.0, 0.0, 3.0, 30.0, 10.0, 3.0, 0.0, 10.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.5), ..Default::default() };
+        let mut v: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+        let wall = |id: &str, a: [f64; 2], b: [f64; 2]| serde_json::json!({"id": id, "type": "wall", "floorId": v["drawingLevels"][0]["id"], "categoryCode": "20", "wallTypeId": v["walls"][0]["wallTypeId"], "start": {"x": a[0], "y": a[1]}, "end": {"x": b[0], "y": b[1]}, "height": 3});
+        let walls = serde_json::json!([wall("a", [12.0, -2.0], [18.0, -2.0]), wall("b", [18.0, -2.0], [18.0, 12.0]), wall("c", [18.0, 12.0], [12.0, 12.0]), wall("d", [12.0, 12.0], [12.0, -2.0])]);
+        v["walls"] = walls;
+        v["openings"] = serde_json::json!([]);
+        let mut p: Project = serde_json::from_value(v).unwrap();
+        p.context = Some(vec![ContextObject::TerrainMesh(t)]);
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"scale": 100}"#).unwrap();
+        let mut out = Vec::new();
+        plan_context(&Ctx::new(&p, &a), &mut out);
+        let lines: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK => Some((*a, *b)), _ => None }).collect();
+        assert!(lines.iter().any(|(a, _)| (a.x - 5.0).abs() < 1e-6), "Höhenlinie ausserhalb fehlt");
+        assert!(lines.iter().all(|(a, b)| !((a.x - 15.0).abs() < 1e-6 && (a.y + b.y) / 2.0 > 0.0 && (a.y + b.y) / 2.0 < 10.0)), "Höhenlinie im Haus");
     }
 
     /// [T6]/[68] Höhenlinien (Zähllinien dicker + beschriftet) und Baugrube (Sohle, Oberkante, Schraffur).
