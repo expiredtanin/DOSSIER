@@ -1218,4 +1218,63 @@ pub(crate) mod tests {
         assert!(inside(arc.point(3.5, 0.001)));
         assert!(inside(arc.point(0.5, 0.05)) && inside(arc.point(0.5, -0.07)));
     }
+
+    /// [G3] Projekt wie [`pocket_project`], statt der Tür ein Fenster 1.0..2.2 (Breite 1.2) mit Form.
+    fn shaped_window(shape: OpeningShape, sill: f64, height: f64) -> Project {
+        let mut p = pocket_project(DoorTypeKind::Dreh, None, 1.0);
+        p.openings = Some(vec![Opening { id: "o".into(), host_wall_id: "w".into(), kind: ElementKind::Window, category_code: "20".into(), position: 1.0, width: 1.2, height, sill_height: sill, shape: Some(shape), ..Default::default() }]);
+        p
+    }
+
+    /// x-Ausdehnung der Primitive des Fenstersymbols.
+    fn symbol_x(prims: &[Primitive]) -> (f64, f64) {
+        let mut r = (f64::INFINITY, f64::NEG_INFINITY);
+        for q in prims {
+            if let Primitive::Polygon { pts, opening_id: Some(_), .. } = q {
+                for p in pts {
+                    r = (r.0.min(p.x), r.1.max(p.x));
+                }
+            }
+        }
+        r
+    }
+
+    /// [G3] Formöffnung im Grundriss: die Wandlücke (samt Leibungen und Symbol) hat die Breite des
+    /// Umrisses auf Schnitthöhe (1.0 m), nicht die des umschreibenden Rechtecks. Unter dem Kämpfer
+    /// bleibt alles wie beim Rechteck.
+    #[test]
+    fn formoeffnung_sehne_auf_schnitthoehe() {
+        let full = 4.0 * 0.16;
+        let gap = |p: &Project| full - hatched(&wall_prims(p)).0;
+        let rect = gap(&shaped_window(OpeningShape::Rechteck, 0.7, 1.2));
+        assert!((rect - 1.2 * 0.16).abs() < 1e-9, "{rect}");
+        // Rund, Schnitt auf einem Viertel der Höhe (v = 0.3): Sehne 2 · 0.6 · √0.75.
+        let p = shaped_window(OpeningShape::Rund, 0.7, 1.2);
+        let poly = crate::opening_shape::outline(OpeningShape::Rund, None, 1.2, 1.2).unwrap();
+        let (u0, u1) = crate::opening_shape::u_range(&poly, 0.3).unwrap();
+        assert!((u1 - u0 - 1.2 * 0.75f64.sqrt()).abs() < 0.01);
+        let g = gap(&p);
+        assert!((g - (u1 - u0) * 0.16).abs() < 1e-6, "{g} {}", (u1 - u0) * 0.16);
+        let (x0, x1) = symbol_x(&wall_prims(&p));
+        assert!(x0 >= 1.0 + u0 - 1e-6 && x1 <= 1.0 + u1 + 1e-6, "{x0} {x1}");
+        // Rundbogen mit Kämpfer über der Schnitthöhe: wie Rechteck (gleiche Lücke).
+        let g = gap(&shaped_window(OpeningShape::Rundbogen, 0.2, 1.8));
+        assert!((g - rect).abs() < 1e-9, "{g}");
+        // Rundbogen, Schnitt im Bogen (Kämpfer 0.6 + 0.2, Schnitt 0.2 über dem Kämpfer).
+        let g = gap(&shaped_window(OpeningShape::Rundbogen, 0.2, 1.4));
+        assert!((g - 2.0 * (0.36f64 - 0.04).sqrt() * 0.16).abs() < 0.003, "{g}");
+    }
+
+    /// [G3][36] Bogen über der Schnitthöhe vorbei (Schräg: links bis 0.5 tief): die Wand bleibt
+    /// geschlossen, wo der Umriss die Schnittebene nicht erreicht; ganz verfehlt (Rund, Schnitt am
+    /// Scheitel) ⇒ Wand geschlossen, Symbol „über/unter Schnitt“.
+    #[test]
+    fn formoeffnung_verfehlt_schnitt() {
+        let full = 4.0 * 0.16;
+        // Rund 0.3..1.0 (Höhe 0.7) — Oberkante genau auf der Schnitthöhe: höchstens ein Punkt.
+        let p = shaped_window(OpeningShape::Rund, 0.3, 0.7);
+        let prims = wall_prims(&p);
+        assert!((hatched(&prims).0 - full).abs() < 1e-9, "Wand geschlossen");
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "view-range")), "Symbol gepunktet");
+    }
 }
