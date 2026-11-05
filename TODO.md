@@ -2607,6 +2607,24 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   „robust"/„Lösung"/„nicht nur" (Textprüfung des Pakets gilt bisher nur für die Startseite). Bilder der Fenster- und
   Türliste: das SVG von `schedule --openings --format svg` überlappt Spalten (Textbreiten), darum zeigt die Startseite dort
   einen Grundriss-Ausschnitt. Englisch: `[languages.en]`, `content.en/`. Mac-Screenshots (Metal, echtes 3D). · M
+- ◐ **[143] Baugrube erstellen.** (5.11., Mac-Befund „Die Baugrube lässt sich gar nicht erstellen“) Nachgestellt im
+  Browser-Build (Musterhaus komplex, leeres Projekt). **Ursachen:** (1) der Befehl legte die Baugrube in Kategorie „02
+  Gelände“ an — in den Grundriss-Ausschnitten/-Blättern (Vorlage blendet 02 aus) war sie unsichtbar; (2) die Sohle las
+  eine Liste `floors`, die es im Projekt nicht gibt (Geschosse = `drawingLevels`): Sohle immer −0.30, am Hang über dem
+  Gelände → nur Aufschüttung; (3) ohne Gelände, ausserhalb des Geländes oder in Schnitt/Ansicht/Blatt (floorOnly)
+  geschah still nichts; (4) Befehl `terrain` wartete auf eine Eingabe und schluckte die nächsten getippten Befehle;
+  (5) Gelände in m ü. M. ohne Höhenbezug: Sohle −0.30 gegen ≈ 500 m Gelände. **Neu** (Kern `cmd_solid.rs`): eigene
+  Kategorie „07 Baugrube“ (unter „05 Kontext“, wird bei Bedarf angelegt, `import_context.rs`/`contextCategories.ts`),
+  Sohle = tiefstes Geschoss − 0.30; Abfrage `excavationCheck` (Gelände da, Umriss über Gelände, Abtrag ja/nein,
+  neuer Bezug); liegt das Gelände in m ü. M. (Median > 100 m) und fehlt `referenceElevationMasl`, setzt derselbe
+  Undo-Schritt ±0.00 auf die Geländehöhe im Umriss. Befehls-Engine: `Command.precondition`, `CommandResult.notice`
+  (Toast mit Platzhaltern), Hinweis bei floorOnly ohne Geschoss; `terrain` läuft sofort (`autoRun`). Tests: Rust
+  (Sohle, Prüfung, Höhenbezug, Kategorie), vitest `commands/cmds/excavation.test.ts`, e2e `e2e/excavation.spec.ts`
+  (Musterhaus komplex im Ausschnitt EG 1:100: Panel-Knopf, Linien im Grundriss, Undo; leeres Projekt ohne Gelände:
+  Hinweise; leeres Projekt mit Höhenlinien in m ü. M.: Gelände erzeugen, Baugrube, ±0.00, Abtrag, Undo). Geprüft im
+  Linux-Container (Chromium, SVG-Plan), nicht in der Tauri-App/Metal; Schnitt/3D nur über die bestehenden Rust-Tests.
+  Offen: DXF-Höhenlinien landen als 2D-Zeichnung statt als `contourSet` (im leeren Projekt ohne Netz kein Weg zu
+  „Gelände erzeugen“ ausser Standort-Import); Option „Baugrube aus Gebäudegrundfläche“.
 - ◐ **[137] Alles Sichtbare anwählbar.** (5.11., Mac-Befund am Musterhaus komplex: „Schatten und gewachsenes Terrain lassen sich
   nicht anwählen und bearbeiten") **Bestand** (Klick im Plan / im 3D, Objekt-Info, Bearbeiten; vorher → jetzt):
   | Element | Grundriss | Schnitt/Ansicht | 3D | Objekt-Info / Bearbeiten |
