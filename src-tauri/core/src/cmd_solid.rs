@@ -489,9 +489,8 @@ pub fn terrain_from_contours_with(contours: &[Value], id: &str, o: crate::terrai
     ])
 }
 
-/// [68] Baugrube aus dem gezeichneten Umriss (≥ 3 Punkte; 2 Punkte = Rechteck). Sohle = Geschoss-
-/// Unterkante − 0.30 m (Magerbeton + Bodenplatte), Böschung 45°.
-fn excavation_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+/// [143] Umriss der Baugrube aus den Klicks (≥ 3 Punkte; 2 Punkte = Rechteck); entartet → leer.
+fn excavation_outline(v: &Value) -> Vec<V> {
     let mut pts: Vec<V> = pts_of(v, "pts").into_iter().filter(|p| p.0.is_finite() && p.1.is_finite()).collect();
     if pts.len() == 2 {
         pts = rect_corners(pts[0], pts[1]).to_vec();
@@ -500,22 +499,124 @@ fn excavation_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdG
     if pts.len() < 3 || area2.abs() < 0.02 {
         return Vec::new();
     }
-    let base = arr(root.get("floors")).iter().find(|f| field(f, "id").and_then(Value::as_str) == Some(ctx.level)).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0));
+    pts
+}
+
+/// [143] Rohhöhen des Geländes, ab denen es als „in m ü. M." gilt (ohne gesetzten Höhenbezug ±0.00).
+const ABSOLUTE_TERRAIN_M: f64 = 100.0;
+
+/// [143] Prüfung vor dem Anlegen einer Baugrube (Befehl, Abfrage `excavationCheck`).
+#[derive(Debug, PartialEq)]
+pub struct ExCheck {
+    /// Sohle (Modellhöhe): Oberkante des tiefsten Geschosses − 0.30 m.
+    pub bottom: f64,
+    /// Es gibt ein Gelände-Netz.
+    pub terrain: bool,
+    /// Der Umriss liegt (wenigstens teilweise) über dem Gelände.
+    pub over: bool,
+    /// Das Gelände liegt irgendwo im Umriss über der Sohle (sonst nur Aufschüttung).
+    pub cut: bool,
+    /// Neuer Höhenbezug ±0.00 (m ü. M.), wenn das Gelände in m ü. M. vorliegt und keiner gesetzt ist:
+    /// Geländehöhe im Schwerpunkt des Umrisses (sonst lägen 500 m Höhe zwischen Gelände und Sohle).
+    pub datum: Option<f64>,
+}
+
+fn excavation_check(root: &Map<String, Value>, p: &Project, pts: &[V], level: &str) -> ExCheck {
+    use crate::terrain::{datum, Tin, TinIndex};
+    // Sohle unter dem TIEFSTEN Geschoss: im EG gezeichnet lag sie sonst auf −0.30 m, am Hang über dem
+    // Gelände → nur Aufschüttung statt Grube.
+    let floors = arr(root.get("floors"));
+    let active = floors.iter().find(|f| field(f, "id").and_then(Value::as_str) == Some(level)).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0));
+    let base = floors.iter().map(|f| num_or(field(f, "baseElevation"), 0.0)).filter(|z| z.is_finite()).fold(active, f64::min);
+    let bottom = base - 0.3;
+    let terrains = crate::excavation::terrains(p);
+    let mut out = ExCheck { bottom, terrain: !terrains.is_empty(), over: false, cut: false, datum: None };
+    if pts.len() < 3 {
+        return out;
+    }
+    // Proben: Ecken, Schwerpunkt der Ecken, 6×6-Raster im Umriss.
+    let n = pts.len() as f64;
+    let c = (pts.iter().map(|p| p.0).sum::<f64>() / n, pts.iter().map(|p| p.1).sum::<f64>() / n);
+    let ring: Vec<[f64; 2]> = pts.iter().map(|p| [p.0, p.1]).collect();
+    let (x0, x1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| (a.min(p.0), b.max(p.0)));
+    let (y0, y1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| (a.min(p.1), b.max(p.1)));
+    let mut samples: Vec<V> = pts.to_vec();
+    samples.push(c);
+    for i in 0..6 {
+        for j in 0..6 {
+            let q = (x0 + (x1 - x0) * (i as f64 + 0.5) / 6.0, y0 + (y1 - y0) * (j as f64 + 0.5) / 6.0);
+            if crate::excavation::point_in_ring([q.0, q.1], &ring) {
+                samples.push(q);
+            }
+        }
+    }
+    let reference = p.reference_elevation_masl.filter(|r| r.is_finite() && *r != 0.0);
+    for t in terrains {
+        let tin = Tin::from_flat(&t.positions, &t.indices);
+        if tin.tris.is_empty() {
+            continue;
+        }
+        let idx = TinIndex::new(&tin);
+        let raw: Vec<f64> = samples.iter().filter_map(|q| idx.z_at(q.0, q.1)).collect();
+        if raw.is_empty() {
+            continue;
+        }
+        out.over = true;
+        let mut dz = datum(reference, &tin.z);
+        if reference.is_none() && out.datum.is_none() {
+            let mut zs: Vec<f64> = tin.z.iter().copied().filter(|z| z.is_finite()).collect();
+            zs.sort_by(|a, b| a.total_cmp(b));
+            if zs.get(zs.len() / 2).is_some_and(|m| m.abs() > ABSOLUTE_TERRAIN_M) {
+                let at = idx.z_at(c.0, c.1).unwrap_or(raw[0]);
+                let r = jsnum::round(at * 100.0) / 100.0;
+                out.datum = Some(r);
+                dz = r;
+            }
+        }
+        if raw.iter().any(|z| z - dz > bottom + 1e-6) {
+            out.cut = true;
+        }
+    }
+    out
+}
+
+/// [68] Baugrube aus dem gezeichneten Umriss (≥ 3 Punkte; 2 Punkte = Rechteck). Sohle = Oberkante des
+/// TIEFSTEN Geschosses − 0.30 m (Magerbeton + Bodenplatte), Böschung 45°. [143] Liegt das Gelände in
+/// m ü. M. und ist kein Höhenbezug gesetzt, setzt derselbe Schritt ±0.00 auf die Geländehöhe im Umriss.
+fn excavation_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let pts = excavation_outline(v);
+    if pts.is_empty() {
+        return Vec::new();
+    }
+    let check = excavation_check(root, p, &pts, ctx.level);
     let n = arr(root.get("context")).iter().filter(|o| field(o, "type").and_then(Value::as_str) == Some("excavation")).count();
-    add_op(
+    let mut out = Vec::new();
+    if let Some(d) = check.datum {
+        out.push(Op::SetField { key: "referenceElevationMasl".into(), value: Some(js_num(d)), at: None });
+    }
+    out.extend(add_op(
         "context",
         vec![obj(vec![
             ("id", s(&ids.next("excavation"))),
             ("type", s("excavation")),
             ("name", s(&format!("Baugrube {}", n + 1))),
             ("layer", s("Terrain")),
-            ("categoryCode", s("02")),
+            ("categoryCode", s(EXCAVATION_CATEGORY)),
             ("outline", pvs(&pts)),
-            ("bottom", js_num(base - 0.3)),
+            ("bottom", js_num(check.bottom)),
             ("slope", js_num(crate::excavation::DEFAULT_SLOPE)),
         ])],
-    )
+    ));
+    // [143] Kategorie „07 Baugrube" anlegen, falls sie fehlt (sonst wäre die Baugrube nirgends sichtbar).
+    let mut layers = arr(root.get("layers")).to_vec();
+    if crate::import_context::ensure_context_categories(&mut layers, [EXCAVATION_CATEGORY]) {
+        out.push(Op::SetField { key: "layers".into(), value: Some(Value::Array(layers)), at: None });
+    }
+    out
 }
+
+/// [143] Kategorie neuer Baugruben (wie im Musterhaus komplex): nicht „02 Gelände", das Grundrisse oft ausblenden.
+const EXCAVATION_CATEGORY: &str = "07";
 
 fn terrain_ops(root: &Map<String, Value>, ids: &mut IdGen) -> Vec<Op> {
     let Some(set) = arr(root.get("context")).iter().find(|o| field(o, "type").and_then(Value::as_str) == Some("contourSet")) else {
@@ -780,7 +881,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &m
         "solidbool" => solidbool_ops(root, v, ids),
         "voidbox" => voidbox_ops(v, ctx, ids),
         "terrain" => terrain_ops(root, ids),
-        "excavation" => excavation_ops(root, v, ctx, ids),
+        "excavation" => excavation_ops(root, p, v, ctx, ids),
         "ceilingOpening" => ceiling_opening_ops(root, v, ctx),
         "roofHole" => roof_hole_ops(root, v, ctx),
         "roofWindow" => roof_window_ops(root, p, v, ctx, ids),
@@ -816,9 +917,15 @@ pub fn preview(root: &Map<String, Value>, v: &Value, pts: &[V], p: &mut Preview)
     true
 }
 
-pub fn query(root: &Map<String, Value>, v: &Value) -> Option<Value> {
+pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Value> {
     Some(match s_of(v, "q") {
         "pickSolid" => json!({ "hit": pick_solid(root, s_of(v, "level"), p_of(v, "pt")).and_then(id_of) }),
+        // [143] Baugrube vor dem Anlegen prüfen (Meldungen im Befehl).
+        "excavationCheck" => {
+            let pts = excavation_outline(v);
+            let c = excavation_check(root, p, &pts, s_of(v, "level"));
+            json!({ "valid": !pts.is_empty(), "bottom": js_num(c.bottom), "terrain": c.terrain, "over": c.over, "cut": c.cut, "datum": c.datum.map(js_num) })
+        }
         _ => return None,
     })
 }
@@ -914,6 +1021,75 @@ mod tests {
         assert_eq!((items[0]["type"].as_str(), items[0]["bottom"].as_f64()), (Some("excavation"), Some(-3.3)));
         assert_eq!(items[0]["outline"].as_array().unwrap().len(), 4);
         assert!(run(json!([{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 2, "y": 0}])).is_empty());
+    }
+
+    /// [143] Im EG gezeichnet: Sohle unter dem tiefsten Geschoss (UG), nicht −0.30 unter dem EG.
+    #[test]
+    fn baugrube_sohle_unter_tiefstem_geschoss() {
+        let root = json!({"floors": [{"id": "eg", "baseElevation": 0.0}, {"id": "ug", "baseElevation": -2.7}, {"id": "og", "baseElevation": 2.9}]});
+        let root = root.as_object().unwrap();
+        let run = |level: &str| {
+            let mut ids = IdGen::new("s");
+            let ctx = Ctx { level, floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
+            let o = ops(root, &crate::model::lenient::typed_for_test(root), &json!({"cmd": "excavation", "pts": [{"x": 0, "y": 0}, {"x": 10, "y": 8}]}), &ctx, &mut ids).unwrap();
+            let Op::Add { items, .. } = &o[0] else { panic!() };
+            items[0]["bottom"].as_f64().unwrap()
+        };
+        for level in ["eg", "og", "ug"] {
+            assert!((run(level) - -3.0).abs() < 1e-9, "{level}");
+        }
+        // Ohne Geschosse: ±0.00 − 0.30.
+        let empty = json!({});
+        let mut ids = IdGen::new("s");
+        let ctx = Ctx { level: "x", floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
+        let o = ops(empty.as_object().unwrap(), &crate::model::lenient::typed_for_test(empty.as_object().unwrap()), &json!({"cmd": "excavation", "pts": [{"x": 0, "y": 0}, {"x": 10, "y": 8}]}), &ctx, &mut ids).unwrap();
+        let Op::Add { items, .. } = &o[0] else { panic!() };
+        assert_eq!(items[0]["bottom"].as_f64(), Some(-0.3));
+    }
+
+    /// [143] Prüfung: ohne Gelände, ausserhalb, nur Aufschüttung, Gelände in m ü. M. ohne Höhenbezug
+    /// (derselbe Schritt setzt ±0.00 auf die Geländehöhe im Umriss).
+    #[test]
+    fn baugrube_pruefung_und_hoehenbezug() {
+        let tri = |z: f64| json!({"type": "terrainMesh", "id": "t", "positions": [0, 0, z, 40, 0, z, 40, 40, z + 4.0, 0, 40, z + 4.0], "indices": [0, 1, 2, 0, 2, 3]});
+        let rect = json!([{"x": 10, "y": 10}, {"x": 20, "y": 18}]);
+        let check = |root: &Value, pts: &Value| {
+            let r = root.as_object().unwrap();
+            query(r, &crate::model::lenient::typed_for_test(r), &json!({"q": "excavationCheck", "pts": pts, "level": "eg"})).unwrap()
+        };
+        let floors = json!([{"id": "eg", "baseElevation": 0.0}, {"id": "ug", "baseElevation": -2.7}]);
+        // Kein Gelände.
+        let c = check(&json!({"floors": floors}), &rect);
+        assert_eq!((c["valid"].as_bool(), c["terrain"].as_bool(), c["over"].as_bool(), c["bottom"].as_f64()), (Some(true), Some(false), Some(false), Some(-3.0)));
+        // Gelände um ±0.00: Grube, kein neuer Bezug.
+        let c = check(&json!({"floors": floors, "context": [tri(0.0)]}), &rect);
+        assert_eq!((c["over"].as_bool(), c["cut"].as_bool(), c["datum"].is_null()), (Some(true), Some(true), true));
+        // Ausserhalb des Geländes.
+        let c = check(&json!({"floors": floors, "context": [tri(0.0)]}), &json!([{"x": 100, "y": 100}, {"x": 110, "y": 108}]));
+        assert_eq!((c["terrain"].as_bool(), c["over"].as_bool()), (Some(true), Some(false)));
+        // Gelände tief unter der Sohle: nur Aufschüttung.
+        let c = check(&json!({"floors": floors, "context": [tri(-10.0)]}), &rect);
+        assert_eq!((c["over"].as_bool(), c["cut"].as_bool()), (Some(true), Some(false)));
+        // Gelände in m ü. M., kein Bezug: ±0.00 = Höhe im Schwerpunkt (512 + 4·14/40 = 513.40).
+        let root = json!({"floors": floors, "context": [tri(512.0)]});
+        let c = check(&root, &rect);
+        assert_eq!((c["cut"].as_bool(), c["datum"].as_f64()), (Some(true), Some(513.4)));
+        let r = root.as_object().unwrap();
+        let mut ids = IdGen::new("s");
+        let ctx = Ctx { level: "eg", floor_height: None, cat: "", wall_type: "", text_height: 0.25, symbol: 1.0 };
+        let o = ops(r, &crate::model::lenient::typed_for_test(r), &json!({"cmd": "excavation", "pts": rect}), &ctx, &mut ids).unwrap();
+        assert!(matches!(&o[0], Op::SetField { key, value: Some(v), .. } if key == "referenceElevationMasl" && v.as_f64() == Some(513.4)));
+        assert!(matches!(&o[1], Op::Add { collection, items, .. } if collection == "context" && items[0]["categoryCode"] == "07"));
+        // Kategorie „07 Baugrube" unter „05 Kontext" ergänzt; vorhanden → keine Op.
+        assert!(matches!(&o[2], Op::SetField { key, value: Some(v), .. } if key == "layers" && v.to_string().contains("\"07\"")));
+        let r2 = json!({"layers": [{"code": "07", "name": "Grube", "color": "#000", "lw": 0.1, "visible": true, "locked": false}]});
+        let r2 = r2.as_object().unwrap();
+        let o2 = ops(r2, &crate::model::lenient::typed_for_test(r2), &json!({"cmd": "excavation", "pts": rect}), &ctx, &mut ids).unwrap();
+        assert_eq!(o2.len(), 1);
+        // Mit gesetztem Bezug: kein neuer.
+        let c = check(&json!({"floors": floors, "referenceElevationMasl": 512.5, "context": [tri(512.0)]}), &rect);
+        assert!(c["datum"].is_null());
+        assert_eq!(c["cut"].as_bool(), Some(true));
     }
 
     #[test]

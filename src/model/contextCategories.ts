@@ -57,6 +57,17 @@ export const TERRAIN_CATEGORY: ContextCategoryDef = {
   lw: 0.13,
 };
 
+/**
+ * [143] Baugrube (`excavation`): eigene Kategorie statt „02 Gelände" — Grundrisse blenden das Gelände oft aus,
+ * eine neu gezeichnete Baugrube war dort unsichtbar („lässt sich nicht erstellen").
+ */
+export const EXCAVATION_CATEGORY: ContextCategoryDef = {
+  code: "07",
+  name: "Baugrube",
+  color: "#4a4a4a",
+  lw: 0.18,
+};
+
 /** Georeferenziertes Luftbild (SWISSIMAGE/eingefügtes Bild). */
 export const IMAGE_CATEGORY: ContextCategoryDef = {
   code: "03",
