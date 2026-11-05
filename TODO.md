@@ -2775,6 +2775,19 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   (Linux/Chromium). Offen: Wand endet an Stütze (keine Verschneidung Wand–Stütze, im Beispiel kein Fall); überlappende
   kollineare Wände werden nicht vereinigt; Dämm-Muster (gerichtet) wechseln an der Gehrung die Richtung (gewollt), ihr
   Muster endet dort gezackt; Y-Knoten: der dritte Ast endet an nur einer Fläche; nicht in der Tauri-App/Metal geprüft. · M
+- ◐ **[142] Schatten in zwei Richtungen.** (5.11., Maintainer: Musterhaus komplex, EG 1:100 mit Sonnenstudie —
+  grosser Schatten nach Norden, weitere Schattenstücke nach Süden zur Sonne hin.) Ursache: `sun.rs` verschob jeden
+  Punkt um `k·z` auf die Bodenebene z = 0; Punkte unter ±0.00 (Untergeschoss-Wände, Stützmauer, Unterkanten im
+  Gelände) haben z < 0 und wanderten zur Sonne hin, die konvexe Hülle je Körper zog den Schatten über den Körper
+  hinaus Richtung Sonne. Keine zweite Schattenebene, keine Azimut-Konvention im Spiel (ein Durchgang, Nord = +y).
+  Geändert: `shadow_of_points` schneidet jede Punktwolke an ±0.00 (`above_ground`: Punkte darüber + Schnittpunkte
+  der Verbindungen über/unter der Ebene); ganz vergrabene oder bündig endende Körper werfen keinen Schatten,
+  teilweise vergrabene nur aus dem Teil über ±0.00. Tests: Rust `schatten_nur_von_der_sonne_weg` (Körper über
+  Boden, teilweise/ganz vergraben, Vereinigung + Punktwolke; Skalarprodukt mit der Sonnenrichtung, fünf Azimute),
+  vitest `sun.test.ts` (Musterhaus komplex: kein Schattenpunkt sonnenseitig der Körper). Geprüft: CLI-Grundriss EG
+  vorher/nachher (Linux/Chromium). Offen: Schatten fällt weiter auf die Ebene ±0.00, nicht auf das Gelände (am
+  Hang zu kurz/lang; freigelegte UG-Wände über tieferem Gelände werfen keinen Schatten); Bäume/Stützen werfen
+  keinen; nicht in der Tauri-App geprüft.
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

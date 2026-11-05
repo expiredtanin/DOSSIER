@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sunPosition, shadowOfPrism, shadowPolygons, withoutHoles } from "./sun";
+import { sunPosition, shadowOfPrism, shadowPolygons, withoutHoles, projectLatLon } from "./sun";
 import { polygonArea } from "../geometry/roomArea";
 import type { Vec2 } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
@@ -64,5 +64,26 @@ describe("Schatten mit Hof", () => {
   it("Projekt-Schatten: erster Ring je Polygon ist der Aussenring", () => {
     const polys = shadowPolygons(sampleProject, { azimuth: 200, elevation: 30 });
     for (const p of polys) expect(p[0].length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// [142] Musterhaus komplex, Studienzeitpunkt: alle Schatten von der Sonne weg — kein Schattenpunkt liegt
+// weiter zur Sonne hin als der sonnennächste Körperpunkt (früher warfen Untergeschoss-Wände und Stützmauer
+// unter ±0.00 Schattenstücke zur Sonne hin).
+describe("Schatten in eine Richtung (Musterhaus komplex)", () => {
+  it("kein Schattenpunkt auf der Sonnenseite der Körper", async () => {
+    const { buildComplexSampleProject } = await import("../model/sampleProjectComplex");
+    const p = buildComplexSampleProject();
+    const { lat, lon } = projectLatLon(p);
+    const sun = sunPosition(lat, lon, new Date(p.sunStudy!.when));
+    const az = (sun.azimuth * Math.PI) / 180;
+    const dot = (v: Vec2) => v.x * Math.sin(az) + v.y * Math.cos(az);
+    const casters: Vec2[] = [...p.walls.flatMap((w) => [w.start, w.end]), ...(p.extrudedSolids ?? []).flatMap((s) => s.points)];
+    const shadows = shadowPolygons(p, sun);
+    expect(shadows.length).toBeGreaterThan(0);
+    const pts = shadows.flatMap((poly) => poly[0]);
+    expect(Math.max(...pts.map(dot))).toBeLessThanOrEqual(Math.max(...casters.map(dot)) + 0.3);
+    // und die Schatten reichen deutlich von der Sonne weg (nicht nur Grundflächen)
+    expect(Math.min(...pts.map(dot))).toBeLessThan(Math.min(...casters.map(dot)) - 2);
   });
 });
