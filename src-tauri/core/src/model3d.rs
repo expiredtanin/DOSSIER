@@ -1467,6 +1467,15 @@ pub fn emit_stair_meshes(p: &Project) -> Vec<RMesh> {
     }
 }
 
+/// [G1] Laufplatten gerader Betontreppen je Treppe (Index in `p.stairs`): Netze mit exakter
+/// Untersicht, für den Schnitt (`plan::section`).
+pub fn stair_flight_meshes(p: &Project) -> Vec<(usize, crate::mesh3d::Mesh)> {
+    match stair_input(p, |s, st| st.is_some_and(|t| t.structure == StairTypeStructure::Beton) && matches!(s.shape, StairShape::Straight)) {
+        Some((stairs, buf)) => crate::stairs3d::slab_meshes(&buf).into_iter().filter_map(|m| stairs.get(m.src).map(|&(si, _)| (si, m))).collect(),
+        None => vec![],
+    }
+}
+
 /// Handlauf und Pfosten gerader Treppen (`emitStairRailings`); bei Wendeltreppen als Schraubensweep.
 pub fn emit_stair_railings(p: &Project) -> Vec<RMesh> {
     match stair_input(p, |s, st| matches!(s.shape, StairShape::Straight | StairShape::Spiral) && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) {

@@ -58,4 +58,29 @@ describe("Schnitt: Gelände und freie Körper", () => {
     const plan = generateSectionPlan((await computeSection(p, section))!);
     expect(plan.primitives.some((q) => q.kind === "polygon" && q.extrudedSolidId === "ball" && q.fill === "#d9dde2")).toBe(true);
   }, 30_000);
+
+  it("Abzugskörper beliebiger Form (Kugel, B-Rep) spart die Schnittflächen aus, ohne selbst zu erscheinen", async () => {
+    const floor = sampleProject.drawingLevels.find((l) => l.kind === "floor")!;
+    const [a, b] = section.linePoints!;
+    const cx = (a.x + b.x) / 2;
+    const cy = (a.y + b.y) / 2;
+    const r = 2;
+    const ball: ExtrudedSolid = {
+      id: "void-ball", type: "extrudedSolid", levelId: floor.id, height: 2 * r, operation: "subtract",
+      points: [{ x: cx - r, y: cy - r }, { x: cx + r, y: cy - r }, { x: cx + r, y: cy + r }, { x: cx - r, y: cy + r }],
+      brep: { spec: { kind: "sphere", center: [cx, cy, 1], r }, origin: { x: cx - r, y: cy - r } },
+    };
+    const cutArea = async (p: Project) => {
+      const plan = generateSectionPlan((await computeSection(p, section))!);
+      expect(plan.primitives.some((q) => q.kind === "polygon" && q.extrudedSolidId === "void-ball")).toBe(false);
+      return plan.primitives.reduce((s, q) => {
+        if (q.kind !== "polygon" || q.fill === "none") return s;
+        const n = q.pts.length;
+        return s + Math.abs(q.pts.reduce((t, v, i) => t + v.x * q.pts[(i + 1) % n].y - q.pts[(i + 1) % n].x * v.y, 0)) / 2;
+      }, 0);
+    };
+    const before = await cutArea(sampleProject);
+    const after = await cutArea({ ...sampleProject, extrudedSolids: [...(sampleProject.extrudedSolids ?? []), ball] });
+    expect(after).toBeLessThan(before - 0.1);
+  }, 30_000);
 });

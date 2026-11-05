@@ -36,10 +36,10 @@ const SECTION_SLAB_AXIS_ANGLE_DEG: f64 = 0.0;
 /// Seitenrand (m) der Geländelinie um den Inhalt des Schnitts.
 const TERRAIN_MARGIN: f64 = 6.0;
 /// Neutrale Füllung geschnittener freier Körper.
-const BODY_FILL: &str = "#d9dde2";
+pub(crate) const BODY_FILL: &str = "#d9dde2";
 
 /// Rückfall-Schraffur der Cut-Flächen ohne auflösbares Bauteil.
-fn section_hatch() -> HatchRender {
+pub(crate) fn section_hatch() -> HatchRender {
     HatchRender { pattern: HatchPattern::Diagonal, scale: 1.0, angle: 45.0, color: HATCH_INK.into(), line_weight: 0.13, ..no_hatch_base() }
 }
 
@@ -1261,7 +1261,7 @@ fn union_rect_outlines(rects: &[[f64; 4]]) -> Vec<Vec<[f64; 2]>> {
 }
 
 /// `mergeMonolithCuts`.
-fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab]) -> Vec<Cut> {
+fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab], exact: &HashMap<String, Vec<Vec<[f64; 2]>>>) -> Vec<Cut> {
     let mut order: Vec<String> = Vec::new();
     let mut groups: HashMap<String, Vec<Cut>> = HashMap::new();
     let mut out = Vec::new();
@@ -1279,6 +1279,13 @@ fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab]) -> Vec<Cut> {
     }
     for g in order {
         let list = groups.remove(&g).unwrap_or_default();
+        // [G1] Exakte Fläche (gerade Betontreppe: Untersicht als Gerade statt Scheiben-Sägezahn).
+        if let Some(rings) = exact.get(&g).filter(|r| !r.is_empty() && !list.is_empty()) {
+            for ring in rings {
+                out.push(Cut { pts: ring.clone(), nse: None, ..list[0].clone() });
+            }
+            continue;
+        }
         if list.len() == 1 {
             out.extend(list);
             continue;
@@ -1293,6 +1300,41 @@ fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab]) -> Vec<Cut> {
         }
     }
     out
+}
+
+/// [G1] Schnittflächen der Laufplatten gerader Betontreppen (je Treppen-ID vereinigt, Löcher als
+/// Schlüsselloch) aus ihren Netzen mit exakter Untersicht.
+fn stair_flight_sections(p: &Project, base: (f64, f64), u: (f64, f64)) -> HashMap<String, Vec<Vec<[f64; 2]>>> {
+    let stairs = p.stairs.as_deref().unwrap_or(&[]);
+    let mut polys: HashMap<String, Vec<crate::flat::Polygon>> = HashMap::new();
+    for (si, m) in model3d::stair_flight_meshes(p) {
+        let Some(st) = stairs.get(si) else { continue };
+        let idx: Vec<f64> = m.indices.iter().map(|&i| i as f64).collect();
+        let (rings, _) = cut_mesh(&m.positions, &idx, base, u);
+        polys.entry(st.id.clone()).or_default().extend(rings_to_polygons(&rings));
+    }
+    polys
+        .into_iter()
+        .map(|(id, list)| {
+            let rings = crate::polygon_bool::union(&list).into_iter().map(|poly| if poly.len() > 1 { keyhole(&poly).0 } else { poly.into_iter().next().unwrap_or_default() }).map(drop_collinear).filter(|r| r.len() >= 3).collect();
+            (id, rings)
+        })
+        .collect()
+}
+
+/// Ecken ohne Knick weglassen (Tritt-Fugen auf der Untersicht).
+fn drop_collinear(r: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+    let n = r.len();
+    if n < 4 {
+        return r;
+    }
+    let keep = |i: usize| {
+        let (a, b, c) = (r[(i + n - 1) % n], r[i], r[(i + 1) % n]);
+        let (ux, uy, vx, vy) = (b[0] - a[0], b[1] - a[1], c[0] - b[0], c[1] - b[1]);
+        let l = hypot2(ux, uy) * hypot2(vx, vy);
+        !(l > 0.0) || (ux * vy - uy * vx).abs() > 1e-6 * l || ux * vx + uy * vy < 0.0
+    };
+    (0..n).filter(|&i| keep(i)).map(|i| r[i]).collect()
 }
 
 fn is_void_solid(s: &ExtrudedSolid) -> bool {
@@ -1461,7 +1503,34 @@ fn subtract_voids_in_section(cuts: Vec<Cut>, p: &Project, base: (f64, f64), u: (
     if !any || rects.is_empty() {
         return cuts;
     }
-    let refs: Vec<&[[f64; 2]]> = rects.iter().map(|r| r.as_slice()).collect();
+    subtract_rings_from_cuts(cuts, &rects)
+}
+
+/// [G1] Ob ein Körper-Netz zu einem Abzugskörper gehört.
+fn is_subtract_body(p: &Project, b: &BodyMesh) -> bool {
+    p.extruded_solids.as_deref().and_then(|s| s.get(b.index)).is_some_and(|s| s.operation.as_deref() == Some("subtract"))
+}
+
+/// [G1] Abzugskörper beliebiger Form: Netz mit der Ebene schneiden, Flächen (Löcher als Schlüsselloch)
+/// von allen bisherigen Schnittflächen abziehen.
+fn subtract_body_voids_in_section(cuts: Vec<Cut>, voids: &[&BodyMesh], base: (f64, f64), u: (f64, f64)) -> Vec<Cut> {
+    let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
+    for b in voids {
+        let (r, _) = cut_mesh(&b.positions, &b.indices, base, u);
+        for poly in rings_to_polygons(&r) {
+            rings.push(if poly.len() > 1 { keyhole(&poly).0 } else { poly[0].clone() });
+        }
+    }
+    rings.retain(|r| r.len() >= 3);
+    if rings.is_empty() {
+        return cuts;
+    }
+    subtract_rings_from_cuts(cuts, &rings)
+}
+
+/// Zieht `rings` von jeder Schnittfläche ab (Ränder auf den Schnittkanten ohne Strich); Fehlschlag ⇒ unverändert.
+fn subtract_rings_from_cuts(cuts: Vec<Cut>, rings: &[Vec<[f64; 2]>]) -> Vec<Cut> {
+    let refs: Vec<&[[f64; 2]]> = rings.iter().map(|r| r.as_slice()).collect();
     let cutters = encode_rings(&refs);
     let mut out = Vec::with_capacity(cuts.len());
     for cp in cuts {
@@ -1630,7 +1699,7 @@ fn keyhole(poly: &[Vec<[f64; 2]>]) -> (Vec<[f64; 2]>, Vec<f64>) {
 }
 
 /// `appendBodySections` + `attachBodyOwners`: geschnittene freie Körper.
-fn append_body_sections(cuts: &mut Vec<Cut>, p: &Project, bodies: &[BodyMesh], base: (f64, f64), u: (f64, f64)) {
+fn append_body_sections(cuts: &mut Vec<Cut>, p: &Project, bodies: &[&BodyMesh], base: (f64, f64), u: (f64, f64)) {
     let solids = p.extruded_solids.as_deref().unwrap_or(&[]);
     for b in bodies {
         let (rings, _) = cut_mesh(&b.positions, &b.indices, base, u);
@@ -1845,7 +1914,7 @@ fn quad_of(t: &[[f64; 3]; 3], n: [f64; 3], next: &[u32], vert: &dyn Fn(u32) -> (
 /// Dreiecke (Wände samt Gehrung und Löchern wie im 3D-Modell, Platten, Treppen, Dächer, Körper),
 /// auf die Seite hinter der Ebene zugeschnitten; die Schnittflächen verdecken in Tiefe 0. Bogenwände,
 /// verschnittene Dächer und Körper glätten ihre Facetten (keine Fugen, nur Knicke und Silhouetten).
-fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[BodyMesh], cuts: &[Cut], hidden: bool, max_depth: Option<f64>) -> (Vec<Edge>, Vec<Edge>) {
+fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], cuts: &[Cut], hidden: bool, max_depth: Option<f64>) -> (Vec<Edge>, Vec<Edge>) {
     use crate::hlr;
     let nl = crate::jsmath::hypot(&plane.normal);
     if !(nl > 1e-12) {
@@ -2039,15 +2108,18 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let walls: Vec<Option<&Wall>> = owners.iter().zip(&virt).map(|(o, v)| v.as_ref().or(*o)).collect();
     let slabs = slab_owners(p, &slabs_r);
     let cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
-    let cuts = merge_monolith_cuts(cuts, &slabs_r);
+    let cuts = merge_monolith_cuts(cuts, &slabs_r, &stair_flight_sections(p, plane.base(), plane.u_model()));
     let base = plane.base();
     let u = plane.u_model();
     let cuts = subtract_voids_in_section(cuts, p, base, u);
+    // [G1] Abzugskörper beliebiger Form kommen als Netz mit (wie freie Körper): ausgespart, nicht gezeichnet.
+    let (void_bodies, bodies): (Vec<&BodyMesh>, Vec<&BodyMesh>) = bodies.iter().partition(|b| is_subtract_body(p, b));
+    let cuts = subtract_body_voids_in_section(cuts, &void_bodies, base, u);
     let cuts = subtract_pockets_in_section(cuts, p, base, u);
     let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
-    append_body_sections(&mut cuts, p, bodies, base, u);
+    append_body_sections(&mut cuts, p, &bodies, base, u);
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
-    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, bodies, &cuts, level.hidden_lines, level.depth);
+    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &cuts, level.hidden_lines, level.depth);
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new() };
     append_terrain_profiles(&mut out, p, base, u);
@@ -2746,6 +2818,59 @@ mod tests {
         assert!((full - wall_area(&p, 0.5)).abs() < 1e-4);
     }
 
+    /// [G1] Abzugskörper beliebiger Form (Netz, hier dreieckiges Prisma quer durch die Wand): seine
+    /// Schnittfläche wird aus der Wand-Poché ausgespart; er selbst erscheint weder als Schnittfläche
+    /// noch in der Projektion.
+    #[test]
+    fn abzugskoerper_beliebiger_form_im_schnitt() {
+        use crate::plan::walls::tests::pocket_project;
+        let mut p = pocket_project(DoorTypeKind::Tasche, Some(OpeningHinge::End), 1.0);
+        // Profil/Verjüngung nur, damit es kein senkrechtes Prisma ist (das ginge über `section_rects`).
+        let pts = vec![Vec2 { x: 3.2, y: -1.0 }, Vec2 { x: 3.8, y: -1.0 }, Vec2 { x: 3.8, y: 1.0 }, Vec2 { x: 3.2, y: 1.0 }];
+        p.extruded_solids = Some(vec![ExtrudedSolid { id: "v".into(), level_id: "eg".into(), points: pts, height: 1.0, base_offset: Some(1.0), taper: Some(0.5), operation: Some("subtract".into()), ..Default::default() }]);
+        // Dreieckiges Prisma längs x: Querschnitt (y, z) = (−1, 1), (1, 1), (0, 2).
+        let tri = [[-1.0, 1.0], [1.0, 1.0], [0.0, 2.0]];
+        let mut positions = Vec::new();
+        for x in [3.2, 3.8] {
+            for q in tri {
+                positions.extend([x, q[0], q[1]]);
+            }
+        }
+        let indices: Vec<f64> = [0, 2, 1, 3, 4, 5, 0, 1, 4, 0, 4, 3, 1, 2, 5, 1, 5, 4, 2, 0, 3, 2, 3, 5].iter().map(|&i| i as f64).collect();
+        let body = BodyMesh { index: 0, positions, indices };
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: 3.5, y: -1.0 }, Vec2 { x: 3.5, y: 1.0 }]), ..Default::default() };
+        let area = |c: &Cut| {
+            let n = c.pts.len();
+            (0..n).map(|i| c.pts[i][0] * c.pts[(i + 1) % n][1] - c.pts[(i + 1) % n][0] * c.pts[i][1]).sum::<f64>().abs() / 2.0
+        };
+        let full: f64 = compute_section(&p, &l, &[]).unwrap().unwrap().cuts.iter().filter(|c| c.kind == Kind::Wall).map(area).sum();
+        let out = compute_section(&p, &l, std::slice::from_ref(&body)).unwrap().unwrap();
+        let cut: f64 = out.cuts.iter().filter(|c| c.kind == Kind::Wall).map(area).sum();
+        // Wand 16 cm mittig auf y = 0: ∫ min(0.16, 2·(2 − z)) dz über 1…2 = 0.16·0.92 + 0.08².
+        assert!((full - cut - (0.16 * 0.92 + 0.0064)).abs() < 1e-5, "{full} {cut}");
+        assert!(out.cuts.iter().all(|c| c.kind != Kind::Body));
+        // Keine Kante des Abzugskörpers in der Projektion (Prisma-Enden bei x = 3.8 liegen hinter der Ebene).
+        let apex = |q: [f64; 2]| (q[0] - 1.0).abs() < 1e-6 && (q[1] - 2.0).abs() < 1e-6;
+        assert!(!out.visible.iter().chain(&out.hidden).any(|e| apex(e.a) || apex(e.b)));
+    }
+
+    /// [G1] Treppenuntersicht: gerade Betontreppe längs geschnitten — die Laufplatte unten als gerade
+    /// Linie (exakt, aus dem Laufplatten-Netz), nicht mehr als Sägezahn aus 1.5-cm-Scheiben.
+    #[test]
+    fn treppenuntersicht_exakt() {
+        let p = sample();
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: 3.2, y: -1.0 }, Vec2 { x: 3.2, y: 5.0 }]), ..Default::default() };
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let st: Vec<&Cut> = out.cuts.iter().filter(|c| c.stair_id.as_deref() == Some("ST1")).collect();
+        assert_eq!(st.len(), 1, "{:?}", out.cuts.iter().map(|c| (c.kind, c.index, c.stair_id.clone(), c.pts.len())).collect::<Vec<_>>());
+        let pts = &st[0].pts;
+        // ST1: Lauf 3.2 m ab y = 0.4, Steigung 2.6 m, 15 Stufen ⇒ Laufplatte 0.208 m senkrecht.
+        let soffit = |u: f64| (((u - 1.4) / 3.2) * 2.6 - 0.208).max(0.0);
+        assert!(pts.iter().all(|q| q[1] >= soffit(q[0]) - 1e-6), "{pts:?}");
+        assert!(pts.iter().filter(|q| q[1] > 0.1 && (q[1] - soffit(q[0])).abs() < 1e-6).count() >= 2, "{pts:?}");
+        assert!(pts.len() < 2 * 15 + 10, "{pts:?}");
+    }
+
     /// [95][T2] Schnitt durch die Tasche in der Bogenwand (radial) und unter schräger Oberkante.
     #[test]
     fn schnitt_durch_die_tasche_bogen_und_dach() {
@@ -3335,7 +3460,7 @@ mod ts_faelle {
         let slab = |m: Option<&str>| RSlab { outline: vec![], z_bottom: 0.0, z_top: 1.0, color: [0.0; 3], ceiling_id: String::new(), hatch: None, cut: None, monolith: m.map(String::from), source: SlabSource::None };
         let slabs = vec![slab(None), slab(Some("ST1")), slab(Some("ST1"))];
         let mk = |i: usize, u0: f64| Cut::new(Kind::Slab, i, vec![[u0, 0.0], [u0 + 1.0, 0.0], [u0 + 1.0, 1.0], [u0, 1.0]]);
-        let out = merge_monolith_cuts(vec![mk(0, 0.0), mk(1, 0.0), mk(2, 0.5)], &slabs);
+        let out = merge_monolith_cuts(vec![mk(0, 0.0), mk(1, 0.0), mk(2, 0.5)], &slabs, &HashMap::new());
         assert_eq!(out.len(), 2, "nur Bänder derselben Gruppe werden vereint");
     }
 

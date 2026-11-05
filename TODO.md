@@ -1387,6 +1387,21 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ◐ **[G1] Ebenenschnitt beliebiger Körper** — `plan/meshSection.ts` (Ringe, Löcher, offene Linienzüge),
   im Schnitt für Geländelinie und freie/B-Rep-Körper. Offen: Grundriss-Poché für Körper,
   Treppenuntersicht, Abzugskörper beliebiger Form im Schnitt. · L
+  - (5.11.) **Grundriss-Poché für Körper** (`plan/domains.rs` `body_cut_ring`): Profil-Extrusionen (auch
+    verjüngt; Ring auf Schnitthöhe zum Ecken-Schwerpunkt gestaucht wie die truck-Verjüngung), die die Schnitthöhe
+    durchdringen (Ansichtsbereich [36]: Zone „Cut"), bekommen eine Schnittfläche (Füllung/Schraffur wie geschnittene
+    Körper im Schnitt, Schnitt-Strichstärke 0.18) über dem Umriss; der Umriss bleibt als Projektion. **Abzugskörper
+    beliebiger Form im Schnitt**: nicht-prismatische Abzugskörper (verjüngt, B-Rep) kommen als truck-Netz mit
+    (`toSection.ts`), der Kern schneidet sie mit der Ebene und zieht die Flächen (Löcher als Schlüsselloch) von allen
+    Schnittflächen ab; sie selbst erscheinen weder als Schnittfläche noch in der Projektion. **Treppenuntersicht**:
+    gerade Betontreppen im Schnitt aus dem Laufplatten-Netz (`model3d::stair_flight_meshes`, vereinigt, Fugen-Ecken
+    weg) statt 1.5-cm-Scheiben — Untersicht als Gerade (Golden „muster" Schnitt: Treppe quer, UK 1.4 cm höher).
+    Geprüft: Rust-Tests (Poché Quader/Pyramide/über Schnitt/Abzug, Abzugsprisma dreieckig durch die Wand = Analytik,
+    Untersicht auf der Geraden), vitest (Kugel-Abzugskörper spart Schnittflächen aus), CLI-Grundriss/-Schnitte als
+    PNG angesehen (Linux; das SVG des CLI zeichnet keine Schraffuren, im Render-Scene sind sie da). Offen: Poché für
+    B-Rep-Körper im Grundriss (kein Netz im Kern, nur Umriss), Eckenradius/Fase in der Poché (Rohprofil),
+    ExtrudedSolid ohne Material-Feld (keine SIA-Schraffur je Material), Abzugskörper beliebiger Form im Grundriss,
+    Untersicht von Wendel-/Podesttreppen, nicht in der Tauri-App/Metal geprüft.
 - ◐ **[G2] Wand an Dach.** 27.10.: schräge Oberkante (`topDrop`) in render3d statt 15-cm-Treppung. Offen:
   Schnitt, exakte Lösung über [B6]. · M–L
   - (30.10.) **Exakt je Schicht, analytisch** (ohne Booleans, `wall_bands.rs`): Dach-Unterkante als Facetten

@@ -689,11 +689,38 @@ fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
             }
         } else {
             out.push(polygon(s.points.clone(), "none", EXTRUSION_STROKE, SYMBOL_HAIRLINE_MM, no_hatch(), None, None, Pick::Solid(&s.id)));
+            // [G1] Schnittfläche auf Schnitthöhe (Poché); der Umriss darunter bleibt als Projektion.
+            if zone == super::view_range::Zone::Cut {
+                if let Some(ring) = body_cut_ring(s, zb, range.cut) {
+                    out.push(polygon(ring, super::section::BODY_FILL, POCHE_STROKE, WALL_FALLBACK_MM, super::section::section_hatch(), None, None, Pick::Solid(&s.id)));
+                }
+            }
         }
         if let Some(d) = range.restyle_dash(zone) {
             super::view_range::restyle(out, out_start, d);
         }
     }
+}
+
+/// [G1] Schnittfläche eines Körpers (Profil-Extrusion, auch verjüngt) auf der Höhe `cut` (UK `zb`):
+/// das Profil, linear zum Ecken-Schwerpunkt gestaucht wie die truck-Verjüngung (`extruded_solid_spec`).
+/// `None` für B-Rep-Körper (kein Netz im Kern), Abzugskörper, entartete Profile und ausserhalb.
+fn body_cut_ring(s: &ExtrudedSolid, zb: f64, cut: f64) -> Option<Vec<Vec2>> {
+    let n = s.points.len();
+    if s.brep.is_some() || s.operation.as_deref() == Some("subtract") || n < 3 || !(s.height > 0.0) || !(cut > zb && cut < zb + s.height) {
+        return None;
+    }
+    let t = min(1.0, max(0.0, s.taper.unwrap_or(0.0)));
+    let k = 1.0 - t * (cut - zb) / s.height;
+    if !(k > 1e-9) || s.points.iter().any(|q| !q.x.is_finite() || !q.y.is_finite()) {
+        return None;
+    }
+    if t < 1e-6 {
+        return Some(s.points.clone());
+    }
+    let cx = s.points.iter().fold(0.0, |a, q| a + q.x) / n as f64;
+    let cy = s.points.iter().fold(0.0, |a, q| a + q.y) / n as f64;
+    Some(s.points.iter().map(|q| Vec2 { x: cx + (q.x - cx) * k, y: cy + (q.y - cy) * k }).collect())
 }
 
 /// Abfrage `planDomains`: Domänen als Listen (Tests); die 2D-Zeichnungen in `drawings`.
@@ -1363,5 +1390,48 @@ mod tests {
         assert!((band_area - exact).abs() < exact * 2e-3, "{band_area} ≠ {exact}");
         assert!(arcs >= 2 * 2, "Umriss innen/aussen als Bögen (≤ 90° je Stück): {arcs}");
         assert_eq!(polar, 4, "ein polar schraffiertes Band je Schicht");
+    }
+
+    /// [G1] Körper, die die Schnitthöhe durchdringen: Poché (Schnittfläche auf Schnitthöhe, Schraffur,
+    /// Schnitt-Strichstärke) über dem Umriss; verjüngt ⇒ kleinere Fläche; darüber/Abzug ⇒ keine Poché.
+    #[test]
+    fn koerper_poche_auf_schnitthoehe() {
+        let mut p = sample();
+        let mk = |id: &str, off: f64, h: f64, taper: Option<f64>, op: Option<&str>| ExtrudedSolid {
+            id: id.into(),
+            level_id: "eg".into(),
+            points: vec![Vec2 { x: 20.0, y: 0.0 }, Vec2 { x: 22.0, y: 0.0 }, Vec2 { x: 22.0, y: 2.0 }, Vec2 { x: 20.0, y: 2.0 }],
+            height: h,
+            base_offset: Some(off),
+            taper,
+            operation: op.map(Into::into),
+            ..Default::default()
+        };
+        p.extruded_solids = Some(vec![mk("block", 0.0, 2.0, None, None), mk("pyr", 0.0, 2.0, Some(1.0), None), mk("hoch", 1.5, 1.0, None, None), mk("void", 0.0, 2.0, None, Some("subtract"))]);
+        let cut = super::super::extras::cut_z(&p, "eg");
+        let base = p.floor("eg").and_then(|f| f.base_elevation).unwrap_or(0.0);
+        assert!(cut > base && cut < base + 1.5, "Schnitthöhe {cut}");
+        let r = plan_domains(&p, &args("eg", 1.0, &["20", "30", "60"])).unwrap();
+        let poche: Vec<(&str, Vec<Vec2>, f64)> = r
+            .solids
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Polygon { pts, hatch, stroke_width_mm, extruded_solid_id: Some(id), .. } if hatch.pattern != HatchPattern::None => Some((id.as_str(), pts.clone(), *stroke_width_mm)),
+                _ => None,
+            })
+            .collect();
+        let ids: Vec<&str> = poche.iter().map(|q| q.0).collect();
+        assert_eq!(ids, vec!["block", "pyr"], "{ids:?}");
+        let area = |pts: &[Vec2]| (pts.iter().enumerate().fold(0.0, |a, (i, q)| { let n = pts[(i + 1) % pts.len()]; a + q.x * n.y - n.x * q.y }) / 2.0).abs();
+        assert!((area(&poche[0].1) - 4.0).abs() < 1e-9);
+        // Pyramide (Spitze bei 2 m): auf Schnitthöhe um (1 − t) gestaucht.
+        let k = 1.0 - (cut - base) / 2.0;
+        assert!((area(&poche[1].1) - 4.0 * k * k).abs() < 1e-9, "{}", area(&poche[1].1));
+        assert!(poche.iter().all(|q| q.2 == WALL_FALLBACK_MM));
+        // Darunter bleibt der Umriss (Projektion) aller vier.
+        let s = serde_json::to_string(&r.solids).unwrap();
+        for id in ["block", "pyr", "hoch", "void"] {
+            assert!(s.contains(&format!("\"{id}\"")), "{id}");
+        }
     }
 }
