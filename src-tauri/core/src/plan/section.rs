@@ -1261,7 +1261,7 @@ fn union_rect_outlines(rects: &[[f64; 4]]) -> Vec<Vec<[f64; 2]>> {
 }
 
 /// `mergeMonolithCuts`.
-fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab]) -> Vec<Cut> {
+fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab], exact: &HashMap<String, Vec<Vec<[f64; 2]>>>) -> Vec<Cut> {
     let mut order: Vec<String> = Vec::new();
     let mut groups: HashMap<String, Vec<Cut>> = HashMap::new();
     let mut out = Vec::new();
@@ -1279,6 +1279,13 @@ fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab]) -> Vec<Cut> {
     }
     for g in order {
         let list = groups.remove(&g).unwrap_or_default();
+        // [G1] Exakte Fläche (gerade Betontreppe: Untersicht als Gerade statt Scheiben-Sägezahn).
+        if let Some(rings) = exact.get(&g).filter(|r| !r.is_empty() && !list.is_empty()) {
+            for ring in rings {
+                out.push(Cut { pts: ring.clone(), nse: None, ..list[0].clone() });
+            }
+            continue;
+        }
         if list.len() == 1 {
             out.extend(list);
             continue;
@@ -1293,6 +1300,41 @@ fn merge_monolith_cuts(cuts: Vec<Cut>, slabs: &[RSlab]) -> Vec<Cut> {
         }
     }
     out
+}
+
+/// [G1] Schnittflächen der Laufplatten gerader Betontreppen (je Treppen-ID vereinigt, Löcher als
+/// Schlüsselloch) aus ihren Netzen mit exakter Untersicht.
+fn stair_flight_sections(p: &Project, base: (f64, f64), u: (f64, f64)) -> HashMap<String, Vec<Vec<[f64; 2]>>> {
+    let stairs = p.stairs.as_deref().unwrap_or(&[]);
+    let mut polys: HashMap<String, Vec<crate::flat::Polygon>> = HashMap::new();
+    for (si, m) in model3d::stair_flight_meshes(p) {
+        let Some(st) = stairs.get(si) else { continue };
+        let idx: Vec<f64> = m.indices.iter().map(|&i| i as f64).collect();
+        let (rings, _) = cut_mesh(&m.positions, &idx, base, u);
+        polys.entry(st.id.clone()).or_default().extend(rings_to_polygons(&rings));
+    }
+    polys
+        .into_iter()
+        .map(|(id, list)| {
+            let rings = crate::polygon_bool::union(&list).into_iter().map(|poly| if poly.len() > 1 { keyhole(&poly).0 } else { poly.into_iter().next().unwrap_or_default() }).map(drop_collinear).filter(|r| r.len() >= 3).collect();
+            (id, rings)
+        })
+        .collect()
+}
+
+/// Ecken ohne Knick weglassen (Tritt-Fugen auf der Untersicht).
+fn drop_collinear(r: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+    let n = r.len();
+    if n < 4 {
+        return r;
+    }
+    let keep = |i: usize| {
+        let (a, b, c) = (r[(i + n - 1) % n], r[i], r[(i + 1) % n]);
+        let (ux, uy, vx, vy) = (b[0] - a[0], b[1] - a[1], c[0] - b[0], c[1] - b[1]);
+        let l = hypot2(ux, uy) * hypot2(vx, vy);
+        !(l > 0.0) || (ux * vy - uy * vx).abs() > 1e-6 * l || ux * vx + uy * vy < 0.0
+    };
+    (0..n).filter(|&i| keep(i)).map(|i| r[i]).collect()
 }
 
 fn is_void_solid(s: &ExtrudedSolid) -> bool {
@@ -2066,7 +2108,7 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let walls: Vec<Option<&Wall>> = owners.iter().zip(&virt).map(|(o, v)| v.as_ref().or(*o)).collect();
     let slabs = slab_owners(p, &slabs_r);
     let cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
-    let cuts = merge_monolith_cuts(cuts, &slabs_r);
+    let cuts = merge_monolith_cuts(cuts, &slabs_r, &stair_flight_sections(p, plane.base(), plane.u_model()));
     let base = plane.base();
     let u = plane.u_model();
     let cuts = subtract_voids_in_section(cuts, p, base, u);
@@ -2812,6 +2854,23 @@ mod tests {
         assert!(!out.visible.iter().chain(&out.hidden).any(|e| apex(e.a) || apex(e.b)));
     }
 
+    /// [G1] Treppenuntersicht: gerade Betontreppe längs geschnitten — die Laufplatte unten als gerade
+    /// Linie (exakt, aus dem Laufplatten-Netz), nicht mehr als Sägezahn aus 1.5-cm-Scheiben.
+    #[test]
+    fn treppenuntersicht_exakt() {
+        let p = sample();
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: 3.2, y: -1.0 }, Vec2 { x: 3.2, y: 5.0 }]), ..Default::default() };
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let st: Vec<&Cut> = out.cuts.iter().filter(|c| c.stair_id.as_deref() == Some("ST1")).collect();
+        assert_eq!(st.len(), 1, "{:?}", out.cuts.iter().map(|c| (c.kind, c.index, c.stair_id.clone(), c.pts.len())).collect::<Vec<_>>());
+        let pts = &st[0].pts;
+        // ST1: Lauf 3.2 m ab y = 0.4, Steigung 2.6 m, 15 Stufen ⇒ Laufplatte 0.208 m senkrecht.
+        let soffit = |u: f64| (((u - 1.4) / 3.2) * 2.6 - 0.208).max(0.0);
+        assert!(pts.iter().all(|q| q[1] >= soffit(q[0]) - 1e-6), "{pts:?}");
+        assert!(pts.iter().filter(|q| q[1] > 0.1 && (q[1] - soffit(q[0])).abs() < 1e-6).count() >= 2, "{pts:?}");
+        assert!(pts.len() < 2 * 15 + 10, "{pts:?}");
+    }
+
     /// [95][T2] Schnitt durch die Tasche in der Bogenwand (radial) und unter schräger Oberkante.
     #[test]
     fn schnitt_durch_die_tasche_bogen_und_dach() {
@@ -3401,7 +3460,7 @@ mod ts_faelle {
         let slab = |m: Option<&str>| RSlab { outline: vec![], z_bottom: 0.0, z_top: 1.0, color: [0.0; 3], ceiling_id: String::new(), hatch: None, cut: None, monolith: m.map(String::from), source: SlabSource::None };
         let slabs = vec![slab(None), slab(Some("ST1")), slab(Some("ST1"))];
         let mk = |i: usize, u0: f64| Cut::new(Kind::Slab, i, vec![[u0, 0.0], [u0 + 1.0, 0.0], [u0 + 1.0, 1.0], [u0, 1.0]]);
-        let out = merge_monolith_cuts(vec![mk(0, 0.0), mk(1, 0.0), mk(2, 0.5)], &slabs);
+        let out = merge_monolith_cuts(vec![mk(0, 0.0), mk(1, 0.0), mk(2, 0.5)], &slabs, &HashMap::new());
         assert_eq!(out.len(), 2, "nur Bänder derselben Gruppe werden vereint");
     }
 
