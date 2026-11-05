@@ -27,7 +27,9 @@ test("Ausschnitt: Ansichtsvorlage im Panel wählen und lösen", async ({ page })
   await discardIfAsked(page);
   await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
   await openTab(page, "Ausschnitte");
-  await page.getByText("EG 1:100", { exact: true }).first().click();
+  // Im Ausschnitte-Panel klicken, nicht auf den gleichnamigen Reiter der Zeichnungs-Tableiste.
+  const panel = page.getByRole("complementary").filter({ has: page.getByRole("tab", { name: "Ausschnitte" }) });
+  await panel.getByText("EG 1:100", { exact: true }).click();
   const sel = page.getByTestId("viewsnap-template");
   await expect(sel).toBeVisible();
   await expect(sel).toHaveValue("vt-gr100");
