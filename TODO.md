@@ -2006,8 +2006,20 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (aktives Geschoss), Bezugsgeschoss im Ebenen-Editor, Ansicht 2D wie Zeichnung (kein 3D); CLI
   `plan --level EG --ceiling`. Tests `deckenspiegel_*` (ceiling_plan.rs), `src/state/addCeiling.test.ts`; Goldens
   unverändert. CLI-Deckenspiegel EG/OG/DG des Musterhauses (komplex) mit `--hatch` + Chromium angesehen (Linux),
-  nicht in der Tauri-App. Offen Deckenspiegel: Unterzüge (kein Modell-Element), Leuchten-Symbole/Kategorie,
-  Deckenuntersicht ohne Treppe darunter, UK-Kote bei Dach als Decke, Layout-Viewport/Druck nicht eigens geprüft.
+  nicht in der Tauri-App. 5.11. (2): Aussparungen (Treppenloch, Deckenöffnung) im Deckenspiegel mit
+  Diagonalkreuz nach SIA 400 (fein 0.13 mm, `ceiling-opening-cross`; Vierecke Eckdiagonalen, sonst Diagonalen des
+  Umrechtecks auf die Aussparung geschnitten), Treppe darunter entfällt; der Grundriss hatte kein Kreuz für
+  Deckenöffnungen. Dach als Decke (keine Decke über dem Raumstempel): Kote „UK +7.52 … +11.31“ = tiefste und
+  höchste Dach-Unterkante über dem Raum (an Raumecken, Schnitten der Raumkanten mit First/Grat/Knick; Dicke
+  lotrecht = Schichtdicke/cos Neigung), am Raumstempel — klarer als zwei verstreute Koten; gleich hoch: eine Kote.
+  Leuchten: „Standards laden“ ergänzt das Symbol (2D-Block) „Deckenleuchte“ (Kreis Ø 30 cm mit Kreuz,
+  `std-blk-deckenleuchte`) und die Kategorie „Leuchten“ (Code 65, fehlt nur, wenn weder Code noch Name im Baum
+  ist); Leuchten = Block-Instanzen auf der Deckenspiegel-Ebene. Layout-Viewport/Druck: Deckenspiegel geht über
+  `viewportLevelPlan`/Kern `viewport_maps` wie jede Zeichnungsebene — gleicher Inhalt, Wand-Strichstärken wie im
+  Grundriss (Tests `deckenspiegel_viewport` in sheet_viewports.rs, `viewportPlan.test.ts`); PDF (jsPDF/svg2pdf)
+  selbst nicht durchlaufen. Tests `deckenspiegel_uk_unter_dach_*`, `aussparung_kreuz_*`, `leuchten_symbol_und_kategorie`.
+  CLI EG/OG/DG Musterhaus komplex + Chromium angesehen (Linux). Offen Deckenspiegel: Unterzüge (kein
+  Modell-Element); UK unter Gauben rechnet mit dem Hauptdach; kein eigenes Leuchten-Werkzeug (Block einfügen).
   Offen sonst: waagrechte Flächen sind in Schnitt/Ansicht nicht sichtbar; Decken ohne `surfacePatternAngle/Offset` (Muster am Plan ausgerichtet);
   Wandseiten im 3D ohne Rücksicht auf Eckverschnitt; 3D-Linien in der nativen macOS-Ansicht und im Browser
   (WebGPU) nicht angesehen; ambientCG-Kennungen CorrugatedSteel005, WoodSiding008, Chipboard001 ohne Netz nicht
