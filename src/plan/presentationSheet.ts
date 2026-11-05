@@ -175,6 +175,33 @@ function northArrow(stamp: string, levelId: string, cat: string, cx: number, cy:
   ];
 }
 
+/** Massstabsbalken-Längen (Modell-Meter), kleinste zuerst. */
+const SCALEBAR_TOTALS = [1, 2, 5, 10, 20, 50, 100, 200];
+
+/**
+ * Massstabsbalken auf der Blatt-Ebene (Papier-mm): fünf abwechselnd gefüllte Felder, rechtes Ende bei `rightMm`,
+ * Mitte bei `cyMm`; Gesamtlänge die grösste runde Länge bis 50 mm auf dem Papier. Ein Massstabsbalken-Element
+ * (`shape: "scalebar"`) passt nicht, weil die Blatt-Ebene 1:1 in Papier-mm rechnet.
+ */
+export function scaleBar(stamp: string, levelId: string, cat: string, rightMm: number, cyMm: number, scale: number): Drawing2D[] {
+  const total = [...SCALEBAR_TOTALS].reverse().find((m) => (m * 1000) / scale <= 50) ?? SCALEBAR_TOTALS[0];
+  const len = (total * 1000) / scale;
+  const n = 5;
+  const h = 1.6;
+  const x0 = rightMm - len;
+  const out: Drawing2D[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = x0 + (len * i) / n;
+    const b = x0 + (len * (i + 1)) / n;
+    const pts = [sheetMmToModel(a, cyMm - h / 2), sheetMmToModel(b, cyMm - h / 2), sheetMmToModel(b, cyMm + h / 2), sheetMmToModel(a, cyMm + h / 2)];
+    out.push(sheetShape(`d-pres-${stamp}-s${i}`, levelId, cat, { shape: "polyline", closed: true, pts }, { weightMm: 0.18, ...(i % 2 === 0 ? { fillColor: "#111111" } : {}) }));
+  }
+  out.push(sheetText(`d-pres-${stamp}-s${n}`, levelId, cat, x0 - 0.6, cyMm + h / 2 + 2.6, "0", 2));
+  const label = `${total} m`;
+  out.push(sheetText(`d-pres-${stamp}-s${n + 1}`, levelId, cat, rightMm - label.length * 1.2, cyMm + h / 2 + 2.6, label, 2));
+  return out;
+}
+
 /** Kategorie für Titel und Nordpfeil: „Text"/„Beschriftung", sonst die erste. */
 function annotationCategory(project: Project): string {
   const all: LayerCategory[] = [];
@@ -240,7 +267,15 @@ export function presentationSheetOps(
   // Nordpfeil rechts neben dem Titel des ersten Grundrisses.
   const firstFloor = plan.items.find((it) => it.group === 0);
   if (firstFloor) {
-    drawings.push(...northArrow(stamp, sheetLevel.id, cat, firstFloor.xMm + firstFloor.widthMm - 8, firstFloor.yMm + firstFloor.heightMm + 4.8, 3.6, labels.north));
+    const cx = firstFloor.xMm + firstFloor.widthMm - 8;
+    const cy = firstFloor.yMm + firstFloor.heightMm + 4.8;
+    drawings.push(...northArrow(stamp, sheetLevel.id, cat, cx, cy, 3.6, labels.north));
+    // Massstabsbalken links vom Nordpfeil, sofern er den Titel nicht berührt (Breite grob 0.65 × Schrifthöhe je Zeichen).
+    const bar = scaleBar(stamp, sheetLevel.id, cat, cx - 3.6 - 10, cy - 1, plan.scale);
+    const title = byId.get(firstFloor.levelId)!.name;
+    const titleEnd = firstFloor.xMm + FRAME_PAD_MM + (title.length + 8) * 4 * 0.65;
+    const barLeft = Math.min(...bar.flatMap((d) => (d.geom.shape === "polyline" ? d.geom.pts.map((p) => p.x * 1000) : [])));
+    if (barLeft - 6 > titleEnd) drawings.push(...bar);
   }
   ops.push(...addItems("layouts", [{ ...layout, viewports: vps }]), ...addItems("drawingLevels", [sheetLevel]));
   ops.push(...addItems("viewSnapshots", snaps), ...addItems("drawings2d", drawings));

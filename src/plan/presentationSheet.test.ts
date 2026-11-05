@@ -56,10 +56,18 @@ describe("[66] Präsentationsplan", () => {
       expect(snap.templateId).toBe(PRESENTATION_TEMPLATE_ID);
       expect(snap.templateLinked).toBe(true);
     }
-    // Titel je Viewport + Nordpfeil auf der Blatt-Ebene.
+    // Titel je Viewport + Nordpfeil + Massstabsbalken (2 Beschriftungen) auf der Blatt-Ebene.
     const sheet = p.drawingLevels.find((l) => l.layoutId === layoutId)!;
-    const texts = p.drawings2d.filter((d) => d.levelId === sheet.id && d.geom.shape === "text");
-    expect(texts.length).toBe(lay.viewports.length + 1);
+    const onSheet = p.drawings2d.filter((d) => d.levelId === sheet.id);
+    const texts = onSheet.filter((d) => d.geom.shape === "text");
+    expect(texts.length).toBe(lay.viewports.length + 1 + 2);
+    expect(onSheet.filter((d) => /-s\d$/.test(d.id) && d.geom.shape === "polyline").length).toBe(5);
+    // Titel und Balken liegen auf dem Blatt.
+    for (const d of onSheet) if (d.geom.shape === "text") {
+      expect(d.geom.at.x * 1000).toBeGreaterThan(0);
+      expect(d.geom.at.x * 1000).toBeLessThan(size.w);
+      expect(-d.geom.at.y * 1000).toBeLessThan(size.h);
+    }
     // Skizze aus: Ebenen unverändert; Ansichten mit Schatten (Vorlage).
     expect(p.drawingLevels.some((l) => l.sketch)).toBe(false);
     expect(p.drawingLevels.filter((l) => l.kind === "elevation").every((l) => l.shadows)).toBe(true);

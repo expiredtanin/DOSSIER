@@ -33,6 +33,7 @@ import { programStatusLabel } from "./panels/KennzahlenSection";
 import { sectionPlaneFromLevel, sectionUAxisModel } from "./core";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
 import { ImportDialog } from "./ui/ImportDialog";
+import { PresentationDialogHost } from "./ui/PresentationDialog";
 import { BusyOverlay } from "./ui/BusyOverlay";
 import { ExportPdfDialog } from "./ui/ExportPdfDialog";
 import { ExportDxfDialog } from "./ui/ExportDxfDialog";
@@ -2666,6 +2667,8 @@ export default function App() {
       {/* Modaler Import-Dialog (DXF/DWG) — offen, sobald eine Datei gewählt/
           fallengelassen wurde. Liefert eine strukturierte Entscheidung an
           runImport (Ebene anlegen / Drawings anhängen / Meshes als Kontext). */}
+      {/* [66] Präsentationsplan: Dialog (Befehl `praesentation`, Knopf im Layouts-Panel) */}
+      <PresentationDialogHost onCreated={setActiveLayoutId} />
       {importState && (
         <ImportDialog
           fileName={importState.fileName}
