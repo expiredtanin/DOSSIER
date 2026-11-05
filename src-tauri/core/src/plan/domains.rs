@@ -281,17 +281,28 @@ fn floor_finishes(c: &Ctx, out: &mut Vec<Primitive>) {
 fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<(), String> {
     let p = c.p;
     floor_finishes(c, out);
-    let list: Vec<&Ceiling> = p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| x.floor_id == c.a.floor && c.shown(&x.category_code)).collect();
+    let range = super::view_range::ViewRange::of(p, &c.a.floor);
+    // Ansichtsbereich ([36]): Decken anderer Geschosse „über Schnitt“ (bis Oberkante, z. B. Galerie
+    // darüber) bzw. „unter Schnitt“ (bis „darunter sichtbar bis“) kommen dazu.
+    let list: Vec<(&Ceiling, super::view_range::Zone)> = p
+        .ceilings
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|x| c.shown(&x.category_code))
+        .filter_map(|x| {
+            let (zb, zt) = p.ceiling_vertical_extent(x);
+            let zone = range.classify(zb, zt);
+            let keep = zone != super::view_range::Zone::Hidden && (x.floor_id == c.a.floor || range.admits_other_floor(zone));
+            keep.then_some((x, zone))
+        })
+        .collect();
     if list.is_empty() {
         return Ok(());
     }
     let fps = wall_footprints(c);
-    let range = super::view_range::ViewRange::of(p, &c.a.floor);
-    for ce in list {
-        let (zb, zt) = p.ceiling_vertical_extent(ce);
-        if range.classify(zb, zt) == super::view_range::Zone::Hidden {
-            continue;
-        }
+    for (ce, zone) in list {
+        let out_start = out.len();
         for q in &ce.outline {
             bounds.acc(q.x, q.y);
         }
@@ -328,6 +339,13 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         for [a, b] in ceiling_outline_lines(&merged.ring, &merged.bridge_edges, &fps) {
             out.push(line(pv(a), pv(b), "ceiling-outline", w, Some(Some(OVERHEAD_DASH.to_vec())), stroke, Some(greyed)));
         }
+        // Eigene Decke „über Schnitt“ bleibt wie bisher (Umriss ist schon strichpunktiert, die Fläche
+        // deckt wie gewohnt); umgezeichnet werden Decken unter dem Schnitt und solche anderer Geschosse.
+        if ce.floor_id != c.a.floor || zone != super::view_range::Zone::Above {
+            if let Some(d) = range.restyle_dash(zone) {
+                super::view_range::restyle(out, out_start, d);
+            }
+        }
     }
     Ok(())
 }
@@ -347,7 +365,9 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     let range = super::view_range::ViewRange::of(p, &c.a.floor);
     let floor_base = p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
     let below = |r: &Roof| r.floor_id != c.a.floor && p.floor(&r.floor_id).is_some_and(|f| f.base_elevation.unwrap_or(0.0) < floor_base - 1e-6);
-    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| (r.floor_id == c.a.floor || below(r)) && c.shown(&r.category_code)) {
+    // Ansichtsbereich ([36]): Dächer höherer Geschosse bis zur Oberkante „über Schnitt“ (Vordach, Dach darüber).
+    let above = |r: &Roof| range.custom && range.top.is_some() && r.floor_id != c.a.floor && p.floor(&r.floor_id).is_some_and(|f| f.base_elevation.unwrap_or(0.0) > floor_base + 1e-6);
+    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| (r.floor_id == c.a.floor || below(r) || above(r)) && c.shown(&r.category_code)) {
         let greyed = Some(c.greyed(&roof.category_code));
         let category = c.cat(&roof.category_code);
         let stroke = roof.color.as_deref().or(category.map(|k| k.color.as_str())).unwrap_or(POCHE_STROKE);
@@ -357,13 +377,17 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         let overhead: Option<Option<Vec<f64>>> = (!from_above).then(|| Some(OVERHEAD_DASH.to_vec()));
         // Ansichtsbereich ([36]): Dach ganz über der Oberkante bzw. unter der Unterkante entfällt.
         let rb = p.roof_base_elevation(roof);
-        if range.classify(rb, rb + max(0.0, geo.ridge_height)) == super::view_range::Zone::Hidden {
+        let zone = range.classify(rb, rb + max(0.0, geo.ridge_height));
+        if zone == super::view_range::Zone::Hidden {
             continue;
         }
-        // Dächer tieferer Geschosse nur als Dachaufsicht (ganz unter der Schnittebene).
-        if roof.floor_id != c.a.floor && !from_above {
+        // Dächer tieferer Geschosse nur als Dachaufsicht (ganz unter der Schnittebene), höherer nur „über Schnitt“.
+        if below(roof) && !from_above || above(roof) && !range.admits_other_floor(zone) {
             continue;
         }
+        let out_start = out.len();
+        // Eigenes Dach über dem Schnitt ist schon strichpunktiert (Bruchkanten, Dachfenster bleiben wie bisher).
+        let dash = if roof.floor_id == c.a.floor && zone == super::view_range::Zone::Above { None } else { range.restyle_dash(zone) };
         for q in &geo.eaves {
             bounds.acc(q[0], q[1]);
         }
@@ -386,7 +410,7 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             out.push(polygon(ring, "none", "none", 0.0, view_hatch, greyed, bridges, Pick::Roof(&roof.id)));
         }
         // Ansichtsschraffur ([100]) der Eindeckung je Dachfläche (traufparallel/Falllinie, verkürzt projiziert).
-        if let Some(comp) = layers.first().filter(|l| from_above && !l.component_id.is_empty()).and_then(|l| p.component(&l.component_id)) {
+        if let Some(comp) = layers.first().filter(|l| from_above && dash.is_none() && !l.component_id.is_empty()).and_then(|l| p.component(&l.component_id)) {
             if let Some((pat, spec)) = comp.surface_pattern.as_ref().and_then(|sp| Some((sp, crate::surface_pattern::spec_of(sp, roof.surface_pattern_angle.unwrap_or(0.0))?))) {
                 let off = roof.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
                 let w = pat.weight_mm.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(0.1);
@@ -415,6 +439,9 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 out.push(line(pv(*a), pv(*b), cls, w, overhead.clone(), stroke, greyed));
             }
             roof_windows(c, out, roof);
+            if let Some(d) = dash {
+                super::view_range::restyle(out, out_start, d);
+            }
             continue;
         }
         for ring in std::iter::once(&geo.eaves).chain(geo.eaves_holes.iter()) {
@@ -434,6 +461,9 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             out.push(line(pv(l[0]), pv(l[1]), "roof-break", ROOF_BREAK_MM, Some(Some(ROOF_BREAK_DASH.to_vec())), stroke, greyed));
         }
         roof_windows(c, out, roof);
+        if let Some(d) = dash {
+            super::view_range::restyle(out, out_start, d);
+        }
     }
 }
 
@@ -1024,6 +1054,104 @@ mod tests {
         p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_depth = Some(0.3);
         let (_, s4) = walls(&p);
         assert!(s4.contains("\"unten\"") && s4.contains("[0.04,0.08]"), "{s4}");
+    }
+
+    fn set_range(p: &mut Project, floor: &str, top: Option<f64>, bottom: Option<f64>, depth: Option<f64>) {
+        let l = p.drawing_levels.iter_mut().find(|l| l.id == floor).unwrap();
+        (l.view_top, l.view_bottom, l.view_depth) = (top, bottom, depth);
+    }
+
+    #[test]
+    fn ansichtsbereich_decke_ueber_und_unter_schnitt() {
+        let mut p = sample();
+        // Galerie-Decke im EG (OK Geschoss), frei von den Wänden.
+        let mut g = p.ceilings.as_ref().unwrap()[0].clone();
+        g.id = "GAL".into();
+        g.outline = vec![Vec2 { x: 20.0, y: 0.0 }, Vec2 { x: 22.0, y: 0.0 }, Vec2 { x: 22.0, y: 2.0 }, Vec2 { x: 20.0, y: 2.0 }];
+        p.ceilings.as_mut().unwrap().push(g);
+        let ceil = |p: &Project, floor: &str| serde_json::to_string(&plan_domains(p, &args(floor, 1.0, &["20", "30", "60"])).unwrap().ceilings).unwrap();
+        // Ohne Grenzen: wie bisher (Umriss strichpunktiert, kein „view-range“, nicht im OG).
+        let e0 = ceil(&p, "eg");
+        assert!(e0.contains("\"GAL\"") && e0.contains("ceiling-outline") && !e0.contains("view-range"), "{e0}");
+        assert!(!ceil(&p, "og").contains("\"GAL\""));
+        // Oberkante unter der Decke: entfällt; darüber: „über Schnitt“ strichpunktiert, ohne Füllung.
+        set_range(&mut p, "eg", Some(2.0), None, None);
+        assert!(!ceil(&p, "eg").contains("\"GAL\""));
+        set_range(&mut p, "eg", Some(3.0), None, None);
+        let e1 = ceil(&p, "eg");
+        assert!(e1.contains("\"GAL\"") && e1.contains("[0.4,0.12,0.0,0.12]"), "{e1}");
+        // OG mit Unterkante 0.1 m und Tiefe: EG-Decke (bis OK OG-Boden) gepunktet „unter Schnitt“.
+        set_range(&mut p, "og", None, Some(0.1), Some(0.5));
+        let o1 = ceil(&p, "og");
+        assert!(o1.contains("\"GAL\"") && o1.contains("[0.04,0.08]") && !o1.contains("[0.4,0.12,0.0,0.12]"), "{o1}");
+        // Ohne Tiefe: entfällt wieder.
+        set_range(&mut p, "og", None, Some(0.1), None);
+        assert!(!ceil(&p, "og").contains("\"GAL\""));
+    }
+
+    #[test]
+    fn ansichtsbereich_dach_ueber_und_unter_schnitt() {
+        let mut p = sample();
+        let roofs = |p: &Project, floor: &str| serde_json::to_string(&plan_domains(p, &args(floor, 1.0, &["31"])).unwrap().roofs).unwrap();
+        // Ohne Grenzen: das OG-Dach erscheint im EG nicht.
+        assert!(!roofs(&p, "eg").contains("RF1"));
+        // EG mit Oberkante bis über die Traufe: Dach des OG strichpunktiert (Vordach/Dach darüber).
+        set_range(&mut p, "eg", Some(9.0), None, None);
+        let e1 = roofs(&p, "eg");
+        assert!(e1.contains("RF1") && e1.contains("roof-eaves") && e1.contains("[0.4,0.12,0.0,0.12]"), "{e1}");
+        assert!(!e1.contains("[0.04,0.08]"));
+        // Oberkante darunter: weiterhin nicht.
+        set_range(&mut p, "eg", Some(3.0), None, None);
+        assert!(!roofs(&p, "eg").contains("RF1"));
+        // Dachaufsicht eines tieferen Geschosses unter der Unterkante, innerhalb der Tiefe: gepunktet.
+        let mut dg = p.drawing_levels.iter().find(|l| l.id == "og").unwrap().clone();
+        dg.id = "dg".into();
+        dg.base_elevation = Some(9.0);
+        dg.cut_height = Some(1.0);
+        p.drawing_levels.push(dg);
+        let d0 = roofs(&p, "dg");
+        assert!(d0.contains("RF1") && !d0.contains("[0.04,0.08]"), "{d0}");
+        set_range(&mut p, "dg", None, Some(0.0), Some(9.0));
+        let d1 = roofs(&p, "dg");
+        assert!(d1.contains("RF1") && d1.contains("[0.04,0.08]"), "{d1}");
+        set_range(&mut p, "dg", None, Some(0.0), None);
+        assert!(!roofs(&p, "dg").contains("RF1"));
+    }
+
+    #[test]
+    fn ansichtsbereich_oberlicht_eigene_zone() {
+        let mut p = sample();
+        // O1 als Oberlicht ganz über der Schnittebene (1.5–2.1 m).
+        let o1 = p.openings.as_mut().unwrap().iter_mut().find(|o| o.id == "O1").unwrap();
+        (o1.sill_height, o1.height) = (1.5, 0.6);
+        let codes = ["20", "21", "30", "60"];
+        let run = |p: &Project| {
+            let r = plan_domains(p, &args("eg", 1.0, &codes)).unwrap();
+            (serde_json::to_value(&r.walls).unwrap(), serde_json::to_string(&r.rooms).unwrap())
+        };
+        let of = |v: &serde_json::Value, id: &str| -> Vec<serde_json::Value> { v.as_array().unwrap().iter().filter(|x| x["openingId"] == id).cloned().collect() };
+        let w1_polys = |v: &serde_json::Value| v.as_array().unwrap().iter().filter(|x| x["kind"] == "polygon" && x["wallId"] == "W1").count();
+        let dashed = |xs: &[serde_json::Value]| xs.iter().filter(|x| x["kind"] == "line").all(|x| x["dash"] == serde_json::json!([0.4, 0.12, 0.0, 0.12]));
+        // Ohne Grenzen: wie bisher (Lücke in der Wand, Symbol ausgezogen).
+        let (w0, r0) = run(&p);
+        assert!(!of(&w0, "O1").is_empty() && !dashed(&of(&w0, "O1")));
+        assert!(!w0.to_string().contains("view-range"));
+        // Oberkante 2.5 m: Oberlicht „über Schnitt“ strichpunktiert, Wand im Schnitt ohne Lücke.
+        set_range(&mut p, "eg", Some(2.5), None, None);
+        let (w1, r1) = run(&p);
+        let s1 = of(&w1, "O1");
+        assert!(s1.iter().any(|x| x["kind"] == "line") && dashed(&s1), "{s1:?}");
+        assert!(w1_polys(&w1) < w1_polys(&w0), "{} {}", w1_polys(&w1), w1_polys(&w0));
+        // Tür und Fenster im Schnitt bleiben ausgezogen.
+        assert!(!dashed(&of(&w1, "D1")) && !dashed(&of(&w1, "O2")));
+        // Oberkante 1.2 m: Oberlicht entfällt, Wand bleibt geschlossen.
+        set_range(&mut p, "eg", Some(1.2), None, None);
+        let (w2, r2) = run(&p);
+        assert!(of(&w2, "O1").is_empty());
+        assert_eq!(w1_polys(&w2), w1_polys(&w1));
+        // Räume unberührt.
+        assert_eq!(r0, r1);
+        assert_eq!(r0, r2);
     }
 
     #[test]

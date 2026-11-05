@@ -666,7 +666,16 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         let greyed = c.greyed(&w.category_code);
         let category = c.cat(&w.category_code);
         let lw = resolve_stroke_weight(e.stroke_weight, w.stroke_weight_source, category, category.map_or(WALL_FALLBACK_MM, |k| k.lw));
-        let openings: Vec<&Opening> = p.openings_of_wall(&w.id).collect();
+        // Öffnungen mit eigener Zone ([36], nur mit eigenem Bereich): ausserhalb entfällt die Öffnung,
+        // ganz über der Schnittebene einer geschnittenen Wand (Oberlicht) schliesst die Wand im Schnitt
+        // und das Symbol wird „über Schnitt“ gezeichnet.
+        use super::view_range::Zone;
+        let all_openings: Vec<(&Opening, Zone)> = p.openings_of_wall(&w.id).map(|o| {
+            let (ob, ot) = super::view_range::opening_vertical_extent(p, w, o);
+            (o, if range.custom { range.classify(ob, ot) } else { Zone::Cut })
+        }).collect();
+        let overhead_opening = |oz: Zone| zone == Zone::Cut && oz == Zone::Above;
+        let openings: Vec<&Opening> = all_openings.iter().filter(|(_, oz)| *oz != Zone::Hidden && !overhead_opening(*oz)).map(|(o, _)| *o).collect();
         let wr_total = p.wall_thickness(w, 0.2);
         let wr = crate::opening_geom::WallRef {
             start: crate::opening_geom::v(wv.start.x, wv.start.y),
@@ -712,10 +721,11 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 }
             }
         }
-        for o in openings {
-            if !c.shown(&o.category_code) {
+        for &(o, oz) in &all_openings {
+            if !c.shown(&o.category_code) || oz == Zone::Hidden {
                 continue;
             }
+            let sym_start = out.len();
             let ov = c.overrides(&o.category_code, Some(&opening_label(o)));
             let olw = ov.lineweight.unwrap_or_else(|| c.cat(&o.category_code).map_or(LAYER_LINE_MM, |k| k.lw));
             let color = ov.color.as_deref().or(o.color.as_deref());
@@ -733,6 +743,9 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                     bend_prims(u, tmp, out);
                 }
                 None => opening_symbol(c, out, w, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?,
+            }
+            if overhead_opening(oz) {
+                super::view_range::restyle(out, sym_start, &super::view_range::ABOVE_DASH);
             }
         }
         if let Some(d) = range.restyle_dash(zone) {
