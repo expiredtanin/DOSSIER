@@ -1722,8 +1722,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Decken/Körper (`siteProjection`, im Lage-Panel an der Auswahl; Tiefe + Anteil); ohne Tiefe wie bisher
   (`site_rules.rs`, Tests). Zulässige Hülle im 3D (`show3d`, Lage-Panel „Hülle im 3D"): zulässige Fläche vom
   massgebenden Terrain bis zur Gesamthöhe durchscheinend, Verstösse rot (`envelope3d` → render3d `set_ghost`,
-  Alpha-Pipeline). Offen: Hülle im 3D nur im Linux-Container gebaut, nicht angesehen (WebGPU/macOS); Höhenkurven/
-  Gebäudeprofil (Winkel) fehlen im Modell; Wände eines Erkers nicht markierbar; Anteil grob über Ausdehnung längs der Grenze.
+  Alpha-Pipeline). 5.11.: Gebäudeprofil — `SiteRules.profileAngle`/`profileHeight` (Lage-Panel): zulässige Höhe =
+  Profilhöhe + tan(α)·Abstand zur Grenze (Strecke) bzw. Baulinie (Gerade) über massgebendem Terrain; geprüft werden obere
+  Punkte (Wandkronen, Körper-Deckel, Dachflächen/Giebel, Kanten ≤ 1 m abgetastet), Verstoss = ganzes Bauteil
+  (`profileExceeded`/`profileViolations`, im 3D rot vom tiefsten Profilpunkt bis Oberkante — Näherung, kein Volumen);
+  Hülle im 3D mit Profil-Oberseite (adaptiv verfeinert, Knicke auf ≤ 0.25 m genähert), gedeckelt durch Gesamthöhe.
+  Wände als Vorsprung markierbar (`Wall.siteProjection`, Erker; Tiefe + Anteil). Offen: Hülle im 3D nur im
+  Linux-Container gebaut, nicht angesehen (WebGPU/macOS); Profilverstösse nicht im Grundriss gezeichnet; Profil gilt
+  an allen Kanten (nicht je Kante wählbar), Fassaden-/Gesamthöhe nach IVHB nicht getrennt; Höhenkurven fehlen;
+  Anteil grob über Ausdehnung längs der Grenze.
 - ◐ **[64]+[59] Sonnenstand und Schatten.** (27.10.) Schatten im Grundriss mit Zeitregler (Lage-Panel),
   auch in CLI/PDF. Offen: Schatten im 3D.
 - ○ **[88] Nur-Lese-Link fürs Web.** · M

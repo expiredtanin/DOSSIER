@@ -1999,6 +1999,16 @@ pub struct SiteRules {
     #[serde(rename = "projectionShare", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub projection_share: Option<f64>,
+    /// Gebäudeprofil ([63]): Profilwinkel (Grad über der Horizontalen, 0 < α < 90); die zulässige
+    /// Höhe steigt von jeder Parzellengrenze und Baulinie nach innen mit tan(α). Fehlt ⇒ kein Profil.
+    #[serde(rename = "profileAngle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub profile_angle: Option<f64>,
+    /// Gebäudeprofil ([63]): Höhe (m) des Profils an der Grenze bzw. Baulinie über dem massgebenden
+    /// Terrain (ohne Gelände über ±0.00). Fehlt ⇒ 0.
+    #[serde(rename = "profileHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub profile_height: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2116,6 +2126,11 @@ pub struct Wall {
     /// Grafik-Kategorie (Ebene), z. B. "20" für Wände.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// Vorsprung im Baurecht ([63]: Wand eines Erkers): darf mit `SiteRules.projectionDepth`/
+    /// `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.
+    #[serde(rename = "siteProjection", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub site_projection: Option<bool>,
     /// Objekt-Sperre: gesperrte Elemente lassen sich nicht anwählen (daher
     ///  auch nicht verschieben/bearbeiten/löschen) — anders als der Ebenen-/
     ///  Geschoss-Sperrmodus (`DisplayMode`) ist das hier persistiert.
