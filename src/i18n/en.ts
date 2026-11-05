@@ -590,6 +590,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.ceiling.openings": "Openings",
   "objinfo.ceiling.removeOpening": "Remove opening",
   "objinfo.ceiling.area": "Area",
+  "objinfo.drawing.area": "Area",
   "objinfo.ceiling.anchorFloor": "Bound",
   "objinfo.ceiling.anchorCustom": "Custom",
   // ── Opening attributes (object info panel) ──────────────────────────────

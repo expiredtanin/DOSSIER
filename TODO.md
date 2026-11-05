@@ -1749,8 +1749,9 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Punkte (Wandkronen, Körper-Deckel, Dachflächen/Giebel, Kanten ≤ 1 m abgetastet), Verstoss = ganzes Bauteil
   (`profileExceeded`/`profileViolations`, im 3D rot vom tiefsten Profilpunkt bis Oberkante — Näherung, kein Volumen);
   Hülle im 3D mit Profil-Oberseite (adaptiv verfeinert, Knicke auf ≤ 0.25 m genähert), gedeckelt durch Gesamthöhe.
-  Wände als Vorsprung markierbar (`Wall.siteProjection`, Erker; Tiefe + Anteil). Offen: Hülle im 3D nur im
-  Linux-Container gebaut, nicht angesehen (WebGPU/macOS); Profilverstösse nicht im Grundriss gezeichnet; Profil gilt
+  Wände als Vorsprung markierbar (`Wall.siteProjection`, Erker; Tiefe + Anteil). 5.11.: Profilverstösse im Grundriss
+  (`plan/extras.rs`, wie Grenzabstands-Verstösse in der Verstoss-Gruppe, gleiches Rot, schwächer gefüllt; Test). Offen: Hülle im 3D nur im
+  Linux-Container gebaut, nicht angesehen (WebGPU/macOS); Profil gilt
   an allen Kanten (nicht je Kante wählbar), Fassaden-/Gesamthöhe nach IVHB nicht getrennt; Höhenkurven fehlen;
   Anteil grob über Ausdehnung längs der Grenze.
 - ◐ **[64]+[59] Sonnenstand und Schatten.** (27.10.) Schatten im Grundriss mit Zeitregler (Lage-Panel),
@@ -1849,7 +1850,9 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   verschieben", Geo-Verschiebung und Wand-Begrenzung nehmen `holes` mit. 4.11. Griffe: Loch-Ecken sind Eckgriffe (Index ab 2n, hinter den Bogen-Griffen; bestehende Indizes unverändert).
   Auflösen liefert zusätzlich die Lochkanten als Linien. Verrunden/Fasen behalten die Löcher; Versetzen, Bruch,
   Teilen, Trimmen/Verlängern und Verbinden bauen neue Ketten und lassen `holes` bewusst weg (Kopie ohne Löcher, kein
-  Panic). Offen: Fläche in der Objekt-Info (gibt es für Polylinien nicht); nicht in der App geklickt.
+  Panic). 5.11. Objekt-Info zeigt die Fläche (m², nur lesen) geschlossener Rechtecke, Kreise, Ellipsen und Polylinien
+  (Bögen aus `bulge` exakt als Kreissegmente, abzüglich `holes`; `selection_info.rs::geom_area`, Tests Rust + vitest;
+  Splines ohne). Offen: nicht in der App geklickt.
 - ✅ **[78] Autotext im Plankopf.** Titelblock löst Projekt/Blatt/Massstab/Datum auf; Plannummer laufend
   oder `Layout.planNumber` (27.10.).
 - ◐ **[79] Publikationssätze.** (30.10.) Modell (Rust, optional): `Project.publishSets` (`PublishSet`: Layouts in Reihenfolge,

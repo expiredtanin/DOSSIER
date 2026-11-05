@@ -42,6 +42,8 @@ describe("deriveSelection (Kern)", () => {
     expect(l.bbox).toEqual({ minX: 0, minY: -2, maxX: 3, maxY: 0 });
     const r = deriveSelection(p, { drawings: ["r"] })!;
     expect(r.closed).toBe(true);
+    expect(r.area).toBe(3);
+    expect(l.area).toBeUndefined();
     expect(r.fillHatchId).toBe("h");
     expect(r.effectiveHatchId).toBe("h");
     expect(deriveSelection(p, { drawings: ["nix"] })).toBeNull();

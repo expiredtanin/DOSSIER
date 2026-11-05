@@ -1106,6 +1106,48 @@ fn is_closed_geom(g: &Value) -> bool {
     }
 }
 
+/// Fläche einer geschlossenen 2D-Form in m² ([77]): Rechteck, Kreis, Ellipse, Polylinie (Bögen aus
+/// `bulge` exakt als Kreissegmente, abzüglich `holes`); sonst `None` (Spline u. a.).
+fn geom_area(g: &Value) -> Option<f64> {
+    let p = |k: &str| xy(g.get(k).unwrap_or(&Value::Null));
+    let shoelace = |pts: &[(f64, f64)]| -> f64 {
+        let n = pts.len();
+        (0..n).map(|i| (pts[i].0 * pts[(i + 1) % n].1 - pts[(i + 1) % n].0 * pts[i].1) / 2.0).sum()
+    };
+    let a = match str_of(field(g, "shape"))? {
+        "rect" => {
+            let (a, b) = (p("min"), p("max"));
+            ((b.0 - a.0) * (b.1 - a.1)).abs()
+        }
+        "circle" => std::f64::consts::PI * num_of(field(g, "r")).powi(2),
+        "ellipse" => std::f64::consts::PI * (num_of(field(g, "rx")) * num_of(field(g, "ry"))).abs(),
+        "polyline" if truthy(field(g, "closed")) => {
+            let pts = pts_of(field(g, "pts"));
+            if pts.len() < 3 {
+                return None;
+            }
+            let bulge = arr(field(g, "bulge")).iter().map(|v| num_of(Some(v))).collect::<Vec<_>>();
+            let mut signed = shoelace(&pts);
+            for (i, b) in bulge.iter().enumerate().take(pts.len()) {
+                if b.abs() < 1e-9 {
+                    continue;
+                }
+                let (u, v) = (pts[i], pts[(i + 1) % pts.len()]);
+                let c = hypot2(v.0 - u.0, v.1 - u.1);
+                let theta: f64 = 4.0 * jsnum::atan2(*b, 1.0);
+                let r = c / (2.0 * jsnum::sin(theta / 2.0).abs());
+                // Kreissegment zwischen Sehne und Bogen; Bogen links der Sehne (b > 0) ergibt eine im Uhrzeigersinn
+                // durchlaufene Schleife, wirkt also gegen die Ring-Orientierung (CCW positiv).
+                signed -= (r * r / 2.0) * (theta.abs() - jsnum::sin(theta.abs())) * b.signum();
+            }
+            let holes: f64 = arr(field(g, "holes")).iter().map(|h| shoelace(&pts_of(Some(h))).abs()).sum();
+            signed.abs() - holes
+        }
+        _ => return None,
+    };
+    (a.is_finite() && a >= 0.0).then_some(a)
+}
+
 /// Bounding-Box einer 2D-Form (`geomBBox`, auch für Ausrichten/Verteilen).
 pub fn geom_bbox(g: &Value) -> [f64; 4] {
     let p = |k: &str| xy(g.get(k).unwrap_or(&Value::Null));
@@ -1223,6 +1265,7 @@ fn drawing_selection(root: &Map<String, Value>, d: &Value) -> J {
         .raw("strokeWeightSource", d, "strokeWeightSource")
         .o("hatchSource", pick("hatchSource"))
         .v("closed", Value::Bool(closed))
+        .o("area", geom_area(g).map(js_num))
         .v("isImage", Value::Bool(is_image))
         .o("opacity", if is_image { Some(nn(field(g, "opacity")).cloned().unwrap_or_else(|| Value::from(1u64))) } else { field(d, "opacity").cloned() })
         .v("bbox", bbox_value(geom_bbox(g)))
@@ -1263,6 +1306,27 @@ mod tests {
 
     fn sel(r: &Map<String, Value>, a: Value) -> Result<Value, String> {
         derive(&Lookup::plain(r), &serde_json::from_value(a).unwrap()).map(|j| serde_json::from_str(&j.into_string()).unwrap())
+    }
+
+    /// [77] Fläche geschlossener 2D-Formen: Bögen exakt, Löcher abgezogen, offene Formen ohne Wert.
+    #[test]
+    fn flaeche_geschlossener_formen() {
+        let sq = json!([{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}]);
+        let a = |g: Value| geom_area(&g);
+        assert_eq!(a(json!({"shape": "rect", "min": {"x": 1, "y": 1}, "max": {"x": 3, "y": 4}})), Some(6.0));
+        assert!((a(json!({"shape": "circle", "center": {"x": 0, "y": 0}, "r": 2})).unwrap() - 4.0 * std::f64::consts::PI).abs() < 1e-12);
+        assert!((a(json!({"shape": "ellipse", "center": {"x": 0, "y": 0}, "rx": 2, "ry": 1, "rotation": 0})).unwrap() - 2.0 * std::f64::consts::PI).abs() < 1e-12);
+        assert_eq!(a(json!({"shape": "polyline", "closed": true, "pts": sq})), Some(16.0));
+        assert_eq!(a(json!({"shape": "polyline", "closed": false, "pts": sq})), None);
+        let hole = json!([{"x": 1, "y": 1}, {"x": 1, "y": 3}, {"x": 3, "y": 3}, {"x": 3, "y": 1}]);
+        assert_eq!(a(json!({"shape": "polyline", "closed": true, "pts": sq, "holes": [hole]})), Some(12.0));
+        // Halbkreis-Bogen (bulge 1) über der Sehne (0,0)-(2,0) + Gegenseite gerade: Fläche = Dreieck + Halbkreis.
+        let tri = json!([{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 1, "y": -1}]);
+        let g = json!({"shape": "polyline", "closed": true, "pts": tri, "bulge": [1.0, 0.0, 0.0]});
+        // Dreieck ist CW (Fläche 1); Bogen links der Sehne a→b liegt ausserhalb ⇒ 1 + π/2 (r = 1); gleiches CCW mit bulge -1.
+        assert!((a(g.clone()).unwrap() - (1.0 + std::f64::consts::FRAC_PI_2)).abs() < 1e-9);
+        let ccw = json!({"shape": "polyline", "closed": true, "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 1, "y": 1}], "bulge": [-1.0, 0.0, 0.0]});
+        assert!((a(ccw).unwrap() - (1.0 + std::f64::consts::FRAC_PI_2)).abs() < 1e-9);
     }
 
     #[test]
