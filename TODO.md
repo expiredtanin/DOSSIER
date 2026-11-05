@@ -1286,9 +1286,21 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
   (`ProjectDocument.model3dParts`). Tests: Kern `model3d_cache::tests` (gemischte Änderungen samt Undo/Redo, Byte-gleich
   mit voller Ableitung, Änderungs-Antwort = voll; 1 Wand → 1 Wand neu), `toWalls3d.incremental.test.ts`.
   Grossgebäude (Linux, WASM): projectToModel3d nach 1 Wand-Änderung 316 → 12 ms, nach 1 Öffnungs-Änderung 302 → 12 ms.
-  Offen: 3D-Viewer serialisiert das Modell weiter ganz (`JSON.stringify` → render3d `set_model`, eigener Schritt mit
-  Teil-Updates in render3d); Explosion (`explode > 0`) ohne Cache; Schnitt/Ansicht (je ~100 ms) und Plan-Szene
-  (`planToRenderScene` ~30 ms) noch voll.
+  5.11. (2): 3D-Viewer mit Teil-Updates. TS `projectToModel3dParts` (je Wand-/Öffnungs-Eintrag des Kern-Caches ein
+  unveränderlicher Teil, id mit Laufnummer + Kern-Epoche; Rest-Gruppen Decken/Kontext/Extrusionen/Stützen/Treppen/Dächer,
+  Abzugskörper je Wand zugeordnet), `viewport/model3dPartsSync.ts` schickt nur neue/geänderte/entfernte Teile an render3d
+  `set_parts` (Fallback `set_model`: Explosion, ältere WASM, Fehler). render3d `scene.rs`: Netz, Textur-Ebenen und
+  Wand-Kappen je Teil; Gehrung/freie Enden über alle Wände, neu vernetzt nur Teile mit neuer Eingabe oder geänderter
+  Gehrung; Kanten über einen Index aller Teile (teil-übergreifend koplanare Kanten bleiben unterdrückt); GPU-Puffer in
+  ≤ 96 Klumpen, hochgeladen nur geänderte. Schnitt-Eingaben erst bei aktivem Schnitt zusammengesetzt; `set_model` = 1 Teil.
+  Tests: render3d `scene::tests` (Teile = Vollaufbau; Teil-Updates mit Verschieben/Dicke/Entfernen/Hinzufügen = Vollaufbau
+  als Dreiecks-/Kanten-/Kappen-Mengen), `model3dPartsSync.test.ts`. Grossgebäude, Linux, nach 1 Wand-Änderung: TS bis
+  Daten für render3d 168 → 32 ms (2 Teile, 6 kB statt 13,8 MB JSON); render3d-CPU (nativ release, `scene::tests::bench`)
+  alter `set_model` 2,1 s → Teil-Update 29 ms, Upload 8,9 statt 216 MB; kalter Vollaufbau gleich (~2 s).
+  Offen: Upload/Frame im Browser mit echter GPU nicht gemessen (nur Linux-Container; ob die 3D-e2e dort WebGPU hatten, ungeprüft); Gehrung
+  über alle Wände je Update (~9 ms nativ) liesse sich auf die berührten Knoten beschränken; Rest-Gruppen werden je
+  Update als JSON verglichen (~20 ms TS); Explosion (`explode > 0`) ohne Cache; Schnitt/Ansicht (je ~100 ms) und
+  Plan-Szene (`planToRenderScene` ~30 ms) noch voll.
 
 ### Befehle, Undo, Validierung
 
