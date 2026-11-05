@@ -911,18 +911,17 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
     let bb = if b.len() < 4 { [0.0; 4] } else { [b[0], b[1], b[2], b[3]] };
     // Ortbeton (gerade/Wendel): Betonvolumen des Laufs und Untersicht (Schal-/Wendelfläche) aus
     // demselben Netz wie 3D und IFC — Projekt nur mit dieser Treppe und ihrem Typ.
-    let amounts = {
+    let (amounts, soffit) = {
         let ty: Option<crate::model::StairType> = typed.type_id.as_ref().and_then(|tid| {
             arr(root.get("stairTypes")).iter().find(|t| field(t, "id").and_then(Value::as_str) == Some(tid.as_str())).and_then(|t| serde_json::from_value(t.clone()).ok())
         });
-        ty.and_then(|ty| {
-            let one = crate::model::Project {
-                stairs: Some(vec![crate::model::Stair { total_rise: Some(total_rise), floor_id: String::new(), ..typed.clone() }]),
-                stair_types: Some(vec![ty]),
-                ..Default::default()
-            };
-            crate::ifc_stairs::concrete_flight_amounts(&one)
-        })
+        let one = ty.map(|ty| crate::model::Project {
+            stairs: Some(vec![crate::model::Stair { total_rise: Some(total_rise), floor_id: String::new(), ..typed.clone() }]),
+            stair_types: Some(vec![ty]),
+            ..Default::default()
+        });
+        // Untersicht auch für Einzeltritte (Spindel, Wange): Summe der Trittunterseiten
+        (one.as_ref().and_then(crate::ifc_stairs::concrete_flight_amounts), one.as_ref().and_then(crate::ifc_stairs::flight_soffit_area))
     };
     let info = O::default()
         .raw("shape", s, "shape")
@@ -941,7 +940,7 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
         .n("zBottom", zb)
         .n("zTop", zt)
         .o("concreteVolume", amounts.map(|a| js_num(a.0)))
-        .o("soffitArea", amounts.map(|a| js_num(a.1)))
+        .o("soffitArea", soffit.map(js_num))
         .done();
     Ok(O::default()
         .s("kind", "stair")
@@ -1387,11 +1386,13 @@ mod tests {
         let a = s["stair"]["soffitArea"].as_f64().unwrap();
         assert!(v > 1.5 && v < 3.2, "{v}");
         assert!(a > 7.0 && a < 9.5, "{a}");
-        // Holz-Wangentreppe: keine Betonmengen
+        // Holz-Wangentreppe: keine Betonmengen, aber Untersicht der Einzeltritte
         let mut h = r.clone();
         h["stairs"] = json!([stair("h")]);
         let s = sel(&h, json!({"stairId": "s"})).unwrap();
-        assert!(s["stair"].get("concreteVolume").is_none() && s["stair"].get("soffitArea").is_none());
+        assert!(s["stair"].get("concreteVolume").is_none());
+        let a = s["stair"]["soffitArea"].as_f64().unwrap();
+        assert!(a > 3.0 && a < 9.0, "{a}");
     }
 
     #[test]
