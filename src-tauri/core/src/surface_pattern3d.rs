@@ -76,6 +76,19 @@ pub fn floor_finish_segments(p: &Project, ce: &Ceiling, scale: f64) -> Option<(V
     Some((segs, w, ink))
 }
 
+/// Deckenuntersicht im Deckenspiegel ([100]): Muster der untersten Deckenschicht auf dem Deckenumriss
+/// mit den Aussparungen `holes` (auch gehostete Öffnungen), in Plan-Koordinaten wie
+/// [`floor_finish_segments`] (der Deckenspiegel deckt den Grundriss).
+pub fn soffit_segments(p: &Project, ce: &Ceiling, holes: &[Vec<P>], scale: f64) -> Option<(Vec<(P, P)>, f64, String)> {
+    let layers = crate::model3d::ceiling_type_ref(p, ce).map(|t| t.2)?;
+    let (pat, comp, spec) = spec_for(layers.last().and_then(|l| p.component(&l.component_id)), 0.0)?;
+    let (outer, _) = ceiling_rings(ce)?;
+    let segs = sp::segments(&ring_with_holes(&outer, holes), &spec, outer[0], scale);
+    let w = pat.weight_mm.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(0.1);
+    let ink = pat.color.as_deref().or(comp.foreground.as_deref()).filter(|c| !c.trim().is_empty()).unwrap_or(INK).to_string();
+    Some((segs, w, ink))
+}
+
 fn ceiling_rings(ce: &Ceiling) -> Option<(Vec<P>, Vec<Vec<P>>)> {
     let outer: Vec<P> = ce.outline.iter().map(|v| [v.x, v.y]).collect();
     if outer.len() < 3 || outer.iter().any(|q| !q[0].is_finite() || !q[1].is_finite()) {

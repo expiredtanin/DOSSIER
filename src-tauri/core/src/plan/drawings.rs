@@ -388,7 +388,7 @@ fn text(at: Vec2, s: String, h: f64, angle: f64, color: &str, greyed: bool, id: 
 }
 
 /// Höhenwert „+3.25" · „±0.00" · „-0.10" (SIA 400 B.5.4, Figur 18).
-fn kote_label(value: f64) -> String {
+pub(super) fn kote_label(value: f64) -> String {
     if value.abs() < 1e-6 {
         return "±0.00".into();
     }

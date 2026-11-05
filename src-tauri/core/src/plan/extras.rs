@@ -313,7 +313,8 @@ pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Pri
 
 /// Schnitthöhe des Geschosses (Welt): Basis + Schnitthöhe (Standard 1 m).
 pub fn cut_z(p: &Project, floor: &str) -> f64 {
-    let l = p.floor(floor);
+    // Deckenspiegel ([100]): Schnitthöhe des Bezugsgeschosses.
+    let l = super::ceiling_plan::source_floor(p, floor).or_else(|| p.floor(floor));
     l.and_then(|l| l.base_elevation).unwrap_or(0.0) + l.and_then(|l| l.cut_height).unwrap_or(1.0)
 }
 
