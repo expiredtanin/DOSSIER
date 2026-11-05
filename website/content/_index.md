@@ -71,10 +71,6 @@ steht unter [Stand](/stand/).
 - [Quellcode auf GitHub](https://github.com/expiredtanin/DOSSIER) – Issues,
   Pull Requests, Arbeitsliste `TODO.md`
 
-## Log
-
-{{< log >}}
-
 ## Lizenz
 
 © 2026 Karim Gabriele Varano, veröffentlicht unter der

@@ -10,11 +10,7 @@ Punkt (✅ vorhanden · ◐ teilweise · ○ offen) ist
 Repository; jeder Commit beginnt mit den Nummern der Punkte, die er betrifft.
 Die Nummern in eckigen Klammern unten verweisen dorthin.
 
-## Die letzten Commits
-
-{{< log >}}
-
-Alle Änderungen:
+Alle Änderungen im
 [Commit-Verlauf auf GitHub](https://github.com/expiredtanin/DOSSIER/commits/master).
 
 ## Meilensteine
