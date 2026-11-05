@@ -27,7 +27,7 @@ use crate::section::SectionPlane;
 use crate::section_fill::{
     build_cut_cap_lines, build_cut_caps, CAP_FLOATS_PER_VERTEX, CUT_LINE_FLOATS_PER_VERTEX,
 };
-use crate::shaders::{CAP_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL};
+use crate::shaders::{CAP_WGSL, GHOST_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL};
 use crate::types::{
     Camera, Mesh, MeshInput, RoofLayerInput, SlabInput, TexturedMesh, WallInput,
     FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
@@ -282,6 +282,13 @@ pub struct Renderer {
     /// (`depth_compare: Always`, kein Depth-Write): die Auswahl-Highlight-Linien
     /// liegen immer sichtbar obenauf und scheinen auch hinter Waenden durch.
     highlight_pipeline: wgpu::RenderPipeline,
+    /// Durchscheinende Koerper ([63] zulaessige Huelle): TriangleList, GHOST_WGSL, Vertex
+    /// `[pos vec3, rgba vec4]`, Alpha-Blending, Tiefentest ohne Tiefen-Write, kein Culling.
+    ghost_pipeline: wgpu::RenderPipeline,
+    /// Dreiecke (`GHOST_FLOATS_PER_VERTEX`) und Kanten (LineList wie das Gitter) der
+    /// durchscheinenden Koerper; None = nichts. Ueber `set_ghost`, gezeichnet nach allem Opaken.
+    ghost: Option<LineBuffers>,
+    ghost_lines: Option<LineBuffers>,
     /// Schnittflaechen-Kappen (TriangleList, CAP_WGSL, eigenes Vertex-Layout
     /// [pos vec3, uv vec2]). Teilt sich die `Globals`-Bind-Group; leichter
     /// Depth-Bias zur Kamera hin gegen Z-Fighting mit den an der Ebene
@@ -407,6 +414,9 @@ pub struct Renderer {
     /// Loeschfarbe (Hintergrund). Default heller Grauton wie die three.js-Sicht.
     pub clear_color: wgpu::Color,
 }
+
+/// Floats je Ecke der durchscheinenden Koerper: `[px,py,pz, r,g,b,a]`.
+pub const GHOST_FLOATS_PER_VERTEX: usize = 7;
 
 /// Tiefen-Textur samt View, an eine bestimmte Groesse gebunden.
 struct DepthTarget {
@@ -599,6 +609,56 @@ impl Renderer {
                 bias: wgpu::DepthBiasState::default(),
             },
         );
+
+        // Durchscheinende Koerper ([63]): nach dem Opaken gezeichnet, testen die Tiefe (Modell
+        // verdeckt), schreiben sie aber nicht (die Huelle verdeckt nichts), Alpha-Blending.
+        let ghost_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ghost.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(GHOST_WGSL.into()),
+        });
+        let ghost_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ghost.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &ghost_module,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: (GHOST_FLOATS_PER_VERTEX * 4) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &ghost_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
 
         // Schnitt-Umrisslinien-Pipeline (Cut-Cap-Kanten, P2): dasselbe schlanke
         // LineList-Vertex-Layout [pos vec3, color vec3] und `grid_module` (GRID_WGSL)
@@ -998,6 +1058,9 @@ impl Renderer {
             hidden_face_pipeline,
             grid_pipeline,
             highlight_pipeline,
+            ghost_pipeline,
+            ghost: None,
+            ghost_lines: None,
             cap_pipeline,
             cut_line_pipeline,
             textured_pipeline,
@@ -1305,6 +1368,30 @@ impl Renderer {
             vbo,
             vertex_count: (verts.len() / GRID_FLOATS_PER_VERTEX) as u32,
         });
+    }
+
+    /// Setzt/loescht die durchscheinenden Koerper ([63] zulaessige Huelle): `tris` = TriangleList
+    /// `[px,py,pz, r,g,b,a, ...]` (world, `GHOST_FLOATS_PER_VERTEX`), `lines` = LineList wie
+    /// `set_highlight_lines`. Leere Slices loeschen; unvollstaendige Ecken am Ende fallen weg.
+    pub fn set_ghost(&mut self, device: &wgpu::Device, tris: &[f32], lines: &[f32]) {
+        let buf = |label: &str, v: &[f32], stride: usize, per: usize| {
+            let n = v.len() / stride / per * per;
+            (n > 0).then(|| LineBuffers {
+                vbo: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: bytemuck::cast_slice(&v[..n * stride]),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+                vertex_count: n as u32,
+            })
+        };
+        self.ghost = buf("ghost.vbo", tris, GHOST_FLOATS_PER_VERTEX, 3);
+        self.ghost_lines = buf("ghost.lines.vbo", lines, GRID_FLOATS_PER_VERTEX, 2);
+    }
+
+    /// Ob durchscheinende Koerper gesetzt sind (Test/Diagnose).
+    pub fn has_ghost(&self) -> bool {
+        self.ghost.is_some() || self.ghost_lines.is_some()
     }
 
     /// Setzt die Ansichtsschraffur-Linien (`pattern_lines::PATTERN_STRIDE` Floats je Linie); leer löscht.
@@ -2013,6 +2100,21 @@ impl Renderer {
                     pass.set_vertex_buffer(0, g.vbo.slice(..));
                     pass.draw(0..g.vertex_count, 0..1);
                 }
+            }
+
+            // 3b) Durchscheinende Koerper ([63] zulaessige Huelle): Kanten tiefengetestet wie das
+            //     Gitter, dann die Flaechen mit Alpha-Blending (ohne Tiefen-Write) nach allem Opaken.
+            if let Some(gl) = &self.ghost_lines {
+                pass.set_pipeline(&self.grid_pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, gl.vbo.slice(..));
+                pass.draw(0..gl.vertex_count, 0..1);
+            }
+            if let Some(g) = &self.ghost {
+                pass.set_pipeline(&self.ghost_pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, g.vbo.slice(..));
+                pass.draw(0..g.vertex_count, 0..1);
             }
 
             // 4) Auswahl-Highlight-Linien als ALLERLETZTES — ohne Tiefentest

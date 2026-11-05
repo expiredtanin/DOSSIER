@@ -1984,6 +1984,21 @@ pub struct SiteRules {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub show: Option<bool>,
+    /// Zulässige Hülle (zulässige Fläche bis zur Gesamthöhe) im 3D durchscheinend zeigen (Default: nein).
+    #[serde(rename = "show3d", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub show3d: Option<bool>,
+    /// Vorsprünge ([63]): zulässige Tiefe (m) in den Grenzabstand bzw. über die Baulinie für
+    /// Dachüberstände und als Vorsprung markierte Bauteile (`siteProjection`). Fehlt ⇒ keine
+    /// Vorsprungsregel (Dächer und Decken werden nicht geprüft, wie bisher).
+    #[serde(rename = "projectionDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub projection_depth: Option<f64>,
+    /// Vorsprünge ([63]): höchster Anteil (0..1) der Fassadenlänge, den markierte Vorsprünge
+    /// (Balkone, Erker; nicht Dachüberstände) je Grenze/Baulinie einnehmen dürfen. Fehlt ⇒ unbegrenzt.
+    #[serde(rename = "projectionShare", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub projection_share: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2276,6 +2291,11 @@ pub struct Ceiling {
     /// Grafik-Kategorie (Ebene), z. B. "30" für Decken.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// Vorsprung im Baurecht ([63]: Balkon, Erker): darf mit `SiteRules.projectionDepth`/
+    /// `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.
+    #[serde(rename = "siteProjection", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub site_projection: Option<bool>,
     /// Objekt-Sperre, analog `Wall.locked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -3596,6 +3616,11 @@ pub struct ExtrudedSolid {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "\"subtract\"")]
     pub operation: Option<String>,
+    /// Vorsprung im Baurecht ([63]: Balkon, Erker): darf mit `SiteRules.projectionDepth`/
+    /// `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.
+    #[serde(rename = "siteProjection", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub site_projection: Option<bool>,
     /// Gesetzt, wenn das Profil ein Kreis ist (aus einem `Drawing2D` mit
     /// `shape:"circle"`) — `points` bleibt die Tessellierung, `toWalls3d.ts`
     /// (emitExtrudedSolids) nutzt `circle` für die runde 3D-Extrusion.

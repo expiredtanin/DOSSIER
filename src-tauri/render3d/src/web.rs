@@ -531,6 +531,16 @@ impl WebModelRenderer {
         Ok(())
     }
 
+    /// Durchscheinende Koerper ([63] zulaessige Huelle, Kern `doc_site_envelope`): `data` =
+    /// `[nDreieckWerte, Dreiecke (x y z r g b a)…, Kanten (x y z r g b)…]` (world-Meter). Leer
+    /// oder ungueltig loescht. Wirkt erst beim naechsten `render`.
+    pub fn set_ghost(&mut self, data: &[f32]) -> Result<(), JsValue> {
+        let (head, rest) = data.split_first().map_or((0.0, &[][..]), |(h, r)| (*h, r));
+        let n = if head.is_finite() && head >= 0.0 { (head as usize).min(rest.len()) } else { 0 };
+        self.renderer.set_ghost(&self.device, &rest[..n], &rest[n..]);
+        Ok(())
+    }
+
     /// Ansichtsschraffur auf den Flaechen ([100]): je Linie `ax ay az bx by bz r g b maske`
     /// (`pattern_lines::PATTERN_STRIDE`), Auswahl nach Abstand je Kamera; leer loescht.
     pub fn set_pattern_lines(&mut self, data: &[f32]) -> Result<(), JsValue> {

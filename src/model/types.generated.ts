@@ -70,6 +70,11 @@ export type Ceiling = {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "30" für Decken. */
   categoryCode: string;
+  /**
+   * Vorsprung im Baurecht ([63]: Balkon, Erker): darf mit `SiteRules.projectionDepth`/
+   * `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.
+   */
+  siteProjection?: boolean;
   /** Objekt-Sperre, analog `Wall.locked`. */
   locked?: boolean;
   /** Aussen (true) / innen (false); fehlt = nicht angegeben (IFC `IsExternal`). */
@@ -1230,6 +1235,11 @@ export type ExtrudedSolid = {
    * Fehlt = normaler Körper.
    */
   operation?: "subtract";
+  /**
+   * Vorsprung im Baurecht ([63]: Balkon, Erker): darf mit `SiteRules.projectionDepth`/
+   * `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.
+   */
+  siteProjection?: boolean;
   /**
    * Gesetzt, wenn das Profil ein Kreis ist (aus einem `Drawing2D` mit
    * `shape:"circle"`) — `points` bleibt die Tessellierung, `toWalls3d.ts`
@@ -2849,6 +2859,21 @@ export type SiteRules = {
   maxHeight?: number;
   /** Parzelle, zulässige Fläche und Verstösse im Grundriss zeigen (Default: ja). */
   show?: boolean;
+  /**
+   * Zulässige Hülle (zulässige Fläche bis zur Gesamthöhe) im 3D durchscheinend zeigen (Default: nein).
+   */
+  show3d?: boolean;
+  /**
+   * Vorsprünge ([63]): zulässige Tiefe (m) in den Grenzabstand bzw. über die Baulinie für
+   * Dachüberstände und als Vorsprung markierte Bauteile (`siteProjection`). Fehlt ⇒ keine
+   * Vorsprungsregel (Dächer und Decken werden nicht geprüft, wie bisher).
+   */
+  projectionDepth?: number;
+  /**
+   * Vorsprünge ([63]): höchster Anteil (0..1) der Fassadenlänge, den markierte Vorsprünge
+   * (Balkone, Erker; nicht Dachüberstände) je Grenze/Baulinie einnehmen dürfen. Fehlt ⇒ unbegrenzt.
+   */
+  projectionShare?: number;
 };
 
 /** Terminierungs-Regel einer Wand am Deckenanschluss (siehe {@link Wall.sliceTermination}). */
