@@ -16,6 +16,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "re
 import type {
   Layout,
   LayoutLegend,
+  LayoutTitleBlock,
   LayoutOrientation,
   LayoutPaperFormat,
   LayoutTable,
@@ -230,6 +231,16 @@ export interface LayoutSheetHandlers {
   /** Ändert eine Tabelle (Teil-Patch; gleiche `coalesceKey` fassen sich zu einem Undo-Schritt zusammen). */
   onPatchTable: (tableId: string, patch: Partial<Omit<LayoutTable, "id">>, coalesceKey?: string) => void;
   onRemoveTable: (tableId: string) => void;
+  /**
+   * [137] Schriftfeld bearbeiten: Blattname/Plan-Nr./Index am Blatt, Projekt/Bearbeiter/Datum am Master
+   * (gleiche `coalesceKey` = ein Undo-Schritt beim Tippen).
+   */
+  onPatchTitleBlock?: (layoutPatch: Partial<Pick<Layout, "name" | "planNumber" | "revision">>, masterPatch?: Partial<LayoutTitleBlock>) => void;
+}
+
+/** [137] Lage des Schriftfelds auf dem Blatt (mm, unten rechts; wie `TitleBlockSvg`). */
+export function titleBlockBox(sheet: { w: number; h: number }): { xMm: number; yMm: number; widthMm: number; heightMm: number } {
+  return { xMm: sheet.w - 76, yMm: sheet.h - 36, widthMm: 70, heightMm: 30 };
 }
 
 /** Was die Plan-Ansicht der Blatt-Ebene vom Blatt bekommt. */
@@ -302,6 +313,8 @@ export function LayoutSheetPane({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedLegendId, setSelectedLegendId] = useState<string | null>(null);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  // [137] Schriftfeld angeklickt → Felder bearbeiten.
+  const [titleBlockSelected, setTitleBlockSelected] = useState(false);
   // Tabellen-Verschiebung läuft (Versatz in mm), sonst null.
   const [tableDrag, setTableDrag] = useState<{ id: string; dx: number; dy: number } | null>(null);
   // „Viewport aufziehen" armiert; danach folgt ggf. die Ausschnitt-Bindung.
@@ -330,6 +343,7 @@ export function LayoutSheetPane({
     setSelectedId(null);
     setSelectedLegendId(null);
     setSelectedTableId(null);
+    setTitleBlockSelected(false);
     setPlacing(false);
     setPendingRect(null);
   }, [layout.id]);
@@ -472,6 +486,9 @@ export function LayoutSheetPane({
         {master && (
           <g pointerEvents="none">
             <TitleBlockSvg sheet={sheet} tb={titleBlock} paper={layout.paper} orientation={layout.orientation} />
+            {titleBlockSelected && (
+              <rect {...rectAttrs(titleBlockBox(sheet))} fill="none" stroke={ACCENT} strokeWidth={hair * 1.5} data-titleblock-selected />
+            )}
           </g>
         )}
         {layout.viewports.map((vp) => {
@@ -645,12 +662,18 @@ export function LayoutSheetPane({
             return mm.xMm >= b.xMm && mm.xMm <= b.xMm + b.widthMm && mm.yMm >= b.yMm && mm.yMm <= b.yMm + b.heightMm;
           });
       setSelectedLegendId(lg ? lg.id : null);
-      const hit = tableHit || lg ? null : pickViewport(layout.viewports, mm.xMm, mm.yMm, 0);
+      // Schriftfeld (liegt über den Viewports, nur mit Master gezeichnet).
+      const tbb = titleBlockBox(sheet);
+      const onTitle = !tableHit && !lg && !!master && !!handlers.onPatchTitleBlock &&
+        mm.xMm >= tbb.xMm && mm.xMm <= tbb.xMm + tbb.widthMm && mm.yMm >= tbb.yMm && mm.yMm <= tbb.yMm + tbb.heightMm;
+      setTitleBlockSelected(onTitle);
+      const hit = tableHit || lg || onTitle ? null : pickViewport(layout.viewports, mm.xMm, mm.yMm, 0);
       setSelectedId(hit ? hit.id : null);
     } else {
       setSelectedId(null);
       setSelectedTableId(null);
       setSelectedLegendId(null);
+      setTitleBlockSelected(false);
     }
     onPlanSelect(sel);
   };
@@ -770,6 +793,33 @@ export function LayoutSheetPane({
                 <span className="material-symbols-outlined" aria-hidden="true">delete</span>
               </button>
             </div>
+          </div>
+        )}
+
+        {/* [137] Schriftfeld: Felder direkt bearbeiten. */}
+        {titleBlockSelected && master && handlers.onPatchTitleBlock && (
+          <div className="layout-sheet-hud" data-sheet-ui data-testid="titleblock-hud">
+            <div className="layout-sheet-hud-title">{t("layouts.tb.title")}</div>
+            {([
+              ["sheetName", layout.name, (v: string) => handlers.onPatchTitleBlock!({ name: v })],
+              ["planNumber", layout.planNumber ?? "", (v: string) => handlers.onPatchTitleBlock!({ planNumber: v || undefined })],
+              ["revision", layout.revision ?? "", (v: string) => handlers.onPatchTitleBlock!({ revision: v || undefined })],
+              ["projectName", master.titleBlock.projectName ?? "", (v: string) => handlers.onPatchTitleBlock!({}, { projectName: v })],
+              ["author", master.titleBlock.author ?? "", (v: string) => handlers.onPatchTitleBlock!({}, { author: v })],
+              ["date", master.titleBlock.date ?? "", (v: string) => handlers.onPatchTitleBlock!({}, { date: v })],
+            ] as const).map(([key, value, set]) => (
+              <label key={key} className="layout-sheet-hud-row">
+                <span>{t(`layouts.tb.${key}`)}</span>
+                <input
+                  type="text"
+                  className="res-input"
+                  data-tb-field={key}
+                  value={value}
+                  placeholder={t("layouts.tb.autoPlaceholder")}
+                  onChange={(e) => set(e.target.value)}
+                />
+              </label>
+            ))}
           </div>
         )}
 

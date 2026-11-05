@@ -1438,7 +1438,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const emptyArea = p.drawingId && p.fill === "none" && (!p.hatch || p.hatch.pattern === "none");
         return underBand && emptyArea ? null : i;
       }
-      if ((p.contextObjectId || p.sectionLineId) && p.fill !== "none") return i;
+      // Lage-Darstellung (`@…`: Schlagschatten der Ansicht, Schatten, Baurecht) verdeckt nie — sie liegt auf den
+      // Bauteilen und wird erst nach ihnen gewählt (bzw. per erneutem Klick, [137] Klick-Zyklus).
+      if (((p.contextObjectId && !p.contextObjectId.startsWith("@")) || p.sectionLineId) && p.fill !== "none") return i;
       if (p.contextObjectId && !p.contextObjectId.startsWith("@")) underBand = true;
     }
     return null;
@@ -2300,7 +2302,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       const key = `${kind}:${id}`;
       if (seen.has(key)) return;
       seen.add(key);
-      const base = kind === "drawing" ? drawingLabel(id) : kind === "site" ? t(id === "siteRules" ? "pick.site.siteRules" : "pick.site.sunStudy") : t(`pick.kind.${kind}`);
+      const base = kind === "drawing" ? drawingLabel(id) : kind === "site" ? t(id === "siteRules" ? "pick.site.siteRules" : id === "viewShadows" ? "pick.site.viewShadows" : "pick.site.sunStudy") : t(`pick.kind.${kind}`);
       const cat = describePick?.(kind, id);
       out.push({ kind, id, hitIndex, label: cat ? `${base} · ${cat}` : base });
     };

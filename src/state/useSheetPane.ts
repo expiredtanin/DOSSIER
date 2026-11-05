@@ -5,7 +5,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useMemo, useRef } from "react";
-import type { Layout, LayoutLegend, LayoutTable, LayoutViewport, Project } from "../model/types";
+import type { Layout, LayoutLegend, LayoutTable, LayoutTitleBlock, LayoutViewport, Project } from "../model/types";
 import { addItems, patchItem } from "../core";
 import type { ProjectSlice } from "./projectSlice";
 import {
@@ -104,6 +104,19 @@ export function useSheetPane(opts: {
     onPatchLegend: (legendId: string, patch: Partial<Omit<LayoutLegend, "id">>) =>
       patchOpenLayout(openId(), (l) => patchLegend(l, legendId, patch), `legend-${legendId}`),
     onRemoveLegend: (legendId: string) => patchOpenLayout(openId(), (l) => removeLegend(l, legendId)),
+    // [137] Schriftfeld: Blatt-Felder am Layout, gemeinsame am Master (Tippen = ein Undo-Schritt je Feld).
+    onPatchTitleBlock: (layoutPatch: Partial<Pick<Layout, "name" | "planNumber" | "revision">>, masterPatch?: Partial<LayoutTitleBlock>) => {
+      const id = openId();
+      const key = `titleBlock:${id}:${Object.keys(layoutPatch).join()}${Object.keys(masterPatch ?? {}).join()}`;
+      if (Object.keys(layoutPatch).length > 0) patchOpenLayout(id, (l) => ({ ...l, ...layoutPatch }), key);
+      if (masterPatch) {
+        applyChange((p) => {
+          const lay = (p.layouts ?? []).find((l) => l.id === id);
+          const m = (p.masterLayouts ?? []).find((x) => x.id === lay?.masterId);
+          return m ? patchItem(p, "masterLayouts", m.id, { titleBlock: { ...m.titleBlock, ...masterPatch } }) : [];
+        }, key);
+      }
+    },
   });
   const open = !!activeLayout && !!sheetLevel && activeLevelId === sheetLevel.id;
   return useMemo(

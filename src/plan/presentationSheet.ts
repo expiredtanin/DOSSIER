@@ -9,6 +9,7 @@ import type {
   Drawing2D,
   Drawing2DGeom,
   DrawingLevel,
+  Group,
   LayerCategory,
   Layout,
   LayoutOrientation,
@@ -65,6 +66,9 @@ export interface PresentationLabels {
   /** Name eines neu angelegten Masters, z. B. „Planrahmen A1 quer". */
   masterName: string;
   north: string;
+  /** [137] Gruppen-Namen von Nordpfeil und Massstabsbalken (Objekt-Info). */
+  northGroup?: string;
+  scaleBarGroup?: string;
 }
 
 const isFloor = (l: DrawingLevel) => l.kind === "floor" && !l.layoutId;
@@ -267,6 +271,10 @@ export function presentationSheetOps(
   const snaps: ViewSnapshot[] = [];
   const vps: LayoutViewport[] = [];
   const drawings: Drawing2D[] = [];
+  // [137] Nordpfeil und Massstabsbalken als je eine Gruppe: ein Klick wählt, verschiebt und löscht sie als Ganzes.
+  const groups: Group[] = [];
+  const group = (id: string, name: string | undefined, members: Drawing2D[]) =>
+    groups.push({ id, name, wallIds: [], drawingIds: members.map((d) => d.id), ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] });
   plan.items.forEach((it, i) => {
     const level = byId.get(it.levelId)!;
     const snapId = `vs-pres-${stamp}-${i}`;
@@ -294,16 +302,22 @@ export function presentationSheetOps(
   if (firstFloor) {
     const cx = firstFloor.xMm + firstFloor.widthMm - 8;
     const cy = firstFloor.yMm + firstFloor.heightMm + 4.8;
-    drawings.push(...northArrow(stamp, sheetLevel.id, cat, cx, cy, 3.6, labels.north));
+    const north = northArrow(stamp, sheetLevel.id, cat, cx, cy, 3.6, labels.north);
+    drawings.push(...north);
+    group(`grp-pres-${stamp}-n`, labels.northGroup, north);
     // Massstabsbalken links vom Nordpfeil, sofern er den Titel nicht berührt (Breite grob 0.65 × Schrifthöhe je Zeichen).
     const bar = scaleBar(stamp, sheetLevel.id, cat, cx - 3.6 - 10, cy - 1, plan.scale);
     const title = byId.get(firstFloor.levelId)!.name;
     const titleEnd = firstFloor.xMm + FRAME_PAD_MM + (title.length + 8) * 4 * 0.65;
     const barLeft = Math.min(...bar.flatMap((d) => (d.geom.shape === "polyline" ? d.geom.pts.map((p) => p.x * 1000) : [])));
-    if (barLeft - 6 > titleEnd) drawings.push(...bar);
+    if (barLeft - 6 > titleEnd) {
+      drawings.push(...bar);
+      group(`grp-pres-${stamp}-s`, labels.scaleBarGroup, bar);
+    }
   }
   ops.push(...addItems("layouts", [{ ...layout, viewports: vps }]), ...addItems("drawingLevels", [sheetLevel]));
   ops.push(...addItems("viewSnapshots", snaps), ...addItems("drawings2d", drawings));
+  if (groups.length > 0) ops.push(...addItems("groups", groups));
   // Schatten (Vorlage) für Ansichten/Schnitt, Skizze nach Wahl für alle gezeigten Ebenen.
   for (const it of plan.items) {
     const level = byId.get(it.levelId)!;

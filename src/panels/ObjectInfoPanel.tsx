@@ -60,6 +60,7 @@ import type {
 } from "../state/selectionInfo";
 import type { MeasurementReadout } from "../tools/types";
 import { useStore } from "../state/appStore";
+import { patchItem } from "../core";
 import { excavationQuantities } from "../core";
 import { ContextObjectProps } from "./ContextObjectProps";
 import { SunStudySection } from "./SunStudySection";
@@ -105,6 +106,7 @@ export function ObjectInfoPanel() {
   );
 
   // ── Leerzustand ───────────────────────────────────────────────────────────
+  if (sel === null && site[0] === "viewShadows") return <ViewShadowsInfo />;
   if (sel === null && site.length > 0) {
     const sun = site[0] === "sunStudy";
     return (
@@ -2544,6 +2546,31 @@ function MeasurementSection({ m }: { m: MeasurementReadout }) {
         )}
       </div>
       <div className="objinfo-measure-hint">{t("objinfo.measure.hint")}</div>
+    </div>
+  );
+}
+
+/** [137] Schlagschatten der Ansicht angeklickt: Schalter der aktiven Ansicht (DrawingLevel.shadows, Undo). */
+function ViewShadowsInfo() {
+  const level = useStore((s) => s.project.drawingLevels.find((l) => l.id === s.activeLevelId));
+  const applyChange = useStore((s) => s.applyChange);
+  return (
+    <div className="objinfo-panel">
+      <div className="objinfo-head">
+        <span className="objinfo-kind">{t("objinfo.kind.viewShadows")}</span>
+      </div>
+      <div className="objinfo-muted objinfo-site-hint">{t("elevation.shadows.hint")}</div>
+      {level && (
+        <label className="objinfo-row" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            data-testid="view-shadows"
+            checked={!!level.shadows}
+            onChange={(e) => applyChange((p) => patchItem(p, "drawingLevels", level.id, { shadows: e.target.checked }))}
+          />
+          {t("elevation.shadows")}
+        </label>
+      )}
     </div>
   );
 }

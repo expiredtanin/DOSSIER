@@ -1406,7 +1406,12 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
                 })
                 .collect();
             i += 2 * count;
-            items.push(Item { depth: depth - EPS * 10.0, seq, rank: None, prim: polygon(pts, SHADOW_FILL, "none", 0.0, no_hatch()) });
+            let mut prim = polygon(pts, SHADOW_FILL, "none", 0.0, no_hatch());
+            // [137] Klick auf den Schlagschatten wählt die Schatten-Einstellung der Ansicht (keine Element-Id).
+            if let Primitive::Polygon { context_object_id, .. } = &mut prim {
+                *context_object_id = Some(crate::plan::extras::SITE_PICK_VIEW_SHADOWS.into());
+            }
+            items.push(Item { depth: depth - EPS * 10.0, seq, rank: None, prim });
             seq += 1;
         }
     }
@@ -1801,6 +1806,9 @@ mod tests {
         let json = serde_json::to_string(&prims).unwrap();
         assert!(json.contains("\"wallId\":\"W1\"") && json.contains("\"openingId\":\"O1\"") && json.contains("elevation-ground"), "{json}");
         assert!(json.contains("#8f959e"), "Schlagschatten fehlt");
+        // [137] Schlagschatten anwählbar: Pick-Id der Ansichts-Schatten (Objekt-Info schaltet sie)
+        let shadow: Vec<_> = prims.iter().filter(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == SHADOW_FILL)).collect();
+        assert!(!shadow.is_empty() && shadow.iter().all(|q| matches!(q, Primitive::Polygon { context_object_id: Some(id), .. } if id == crate::plan::extras::SITE_PICK_VIEW_SHADOWS)));
         assert!(b[2] > b[0]);
         // Painter: die Bodenlinie zuletzt
         assert!(matches!(prims.last(), Some(Primitive::Line { cls, .. }) if cls == "elevation-ground"));

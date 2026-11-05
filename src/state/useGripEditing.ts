@@ -186,7 +186,11 @@ export function useGripEditing(opts: {
   const gripOwnerRange: [number, number][] = [];
 
   // Die Einzel-ID leitet sich aus der Menge ab ([130]) — die Menge genügt.
-  const effectiveDrawingIds = selectedDrawingIds;
+  // [137] Im Schnitt/in der Ansicht nur die 2D-Elemente der Blatt-Ebene: ein dort angewähltes Achsraster
+  // (Grundriss-Element, im Blatt projiziert) hat keine Griffe/kein Verschieben in Blatt-Koordinaten.
+  const effectiveDrawingIds = modelEditable
+    ? selectedDrawingIds
+    : selectedDrawingIds.filter((id) => project.drawings2d.find((x) => x.id === id)?.levelId === levelId);
 
   // Griff-Grenzen (s. gripLimits.ts): grosse Mehrfachauswahlen ohne Griffe, ein einzeln gewähltes
   // Element immer mit Griffen (Kataster-Parzellen mit tausenden Stützpunkten).
@@ -1039,6 +1043,7 @@ export function useGripEditing(opts: {
         ? { x: prev.total.x + delta.x, y: prev.total.y + delta.y }
         : delta;
       if (!deferrableDrawing(target.drawingId)) return;
+      if (project.drawings2d.find((x) => x.id === target.drawingId)?.levelId !== sh.levelId) return; // [137] Achsraster
       pendingBodyRef.current = { drawingId: target.drawingId, total };
       setDraft({ preview: bodyPreviewShapes(), vertices: [], snap: null });
       return;
