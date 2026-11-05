@@ -194,14 +194,15 @@ pub fn build_mesh_edges(mesh: &Mesh) -> Vec<f32> {
 /// Konturen-Look) ohne die inneren Knickkanten (Dachgrate). `eye` = Kameraposition
 /// (world), `forward` = Blickrichtung (world, von der Kamera ins Bild); `perspective`
 /// waehlt die pro-Kante-Blickrichtung (Perspektive) vs. die konstante (ortho).
-pub fn build_silhouette_edges<'a>(
-    adj: impl IntoIterator<Item = &'a EdgeAdj>,
+pub fn build_silhouette_edges<A: std::borrow::Borrow<EdgeAdj>>(
+    adj: impl IntoIterator<Item = A>,
     eye: [f32; 3],
     forward: [f32; 3],
     perspective: bool,
 ) -> Vec<f32> {
     let mut verts: Vec<f32> = Vec::new();
     for a in adj {
+        let a: &EdgeAdj = a.borrow();
         let draw = match a.reps.len() {
             0 => false,
             1 => true, // offene Randkante -> immer Teil der Kontur

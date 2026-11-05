@@ -29,7 +29,7 @@ use crate::mesh::{
 use crate::types::{Mesh, MeshInput, MeshKind, RoofLayerInput, SlabInput, TexturedMesh, WallInput};
 
 /// Höchstzahl geteilter Klumpen (Draw-Calls je Pipeline); grosse Teile bekommen eigene.
-pub const MAX_SHARED_CHUNKS: usize = 48;
+pub const MAX_SHARED_CHUNKS: usize = 96;
 /// Ab so vielen Vertices bekommt ein Teil einen eigenen Klumpen (z. B. Gelände, ganzes Modell).
 const OWN_CHUNK_VERTS: usize = 150_000;
 
@@ -101,7 +101,7 @@ pub struct ChunkData {
 struct Part {
     input: PartInput,
     /// Eindeutige Nummer (Einfüge-Reihenfolge): Besitzer einer Kante ist der Teil mit kleinster Nummer.
-    slot: u64,
+    slot: u32,
     chunk: usize,
     meshed: bool,
     miters: Vec<WallMiters>,
@@ -115,14 +115,27 @@ struct Part {
     bounds: Option<Bounds3>,
 }
 
+/// Eine Kante im Index: Lage (erster Beitrag), Normalen aller angrenzenden Dreiecke, Entscheid.
 struct EdgeEntry {
-    adj: EdgeAdj,
-    /// (Teil-Nummer, laufende Nummer im Teil, Flächennormale) aller angrenzenden Dreiecke.
-    normals: Vec<(u64, u32, [f32; 3])>,
-    owner: u64,
+    p0: [f32; 3],
+    p1: [f32; 3],
+    /// (Teil-Nummer, laufende Nummer im Teil, Flächennormale); nach dem Entscheid in der Reihenfolge des
+    /// Vollaufbaus (Teile nach id, darin nach Dreieck) — die Rückseiten-Paarung hängt davon ab.
+    normals: Vec<(u32, u32, [f32; 3])>,
+    /// Teil, dessen Klumpen die Kante zeichnet (kleinste Teil-Nummer).
+    owner: u32,
     draw: bool,
-    /// Klumpen, der die Kante zuletzt gezeichnet hat (bzw. beim nächsten Aufbau zeichnet).
-    drawn_in: Option<usize>,
+    /// Klumpen, der die Kante zeichnet (`NONE` = keiner).
+    drawn_in: u32,
+}
+
+const NONE: u32 = u32::MAX;
+
+impl EdgeEntry {
+    fn reps(&self) -> Vec<[f32; 3]> {
+        let ns: Vec<[f32; 3]> = self.normals.iter().map(|x| x.2).collect();
+        representatives(&ns)
+    }
 }
 
 #[derive(Default)]
@@ -138,7 +151,7 @@ pub struct Scene {
     parts: BTreeMap<String, Part>,
     chunks: Vec<Chunk>,
     edges: HashMap<EdgeKey, EdgeEntry>,
-    next_slot: u64,
+    next_slot: u32,
     terrain: Mesh,
     bounds: Option<Bounds3>,
 }
@@ -170,9 +183,9 @@ impl Scene {
         !self.edges.is_empty()
     }
 
-    /// Kanten-Adjazenz (Silhouette im Stil „Contour").
-    pub fn edge_adj(&self) -> impl Iterator<Item = &EdgeAdj> {
-        self.edges.values().map(|e| &e.adj)
+    /// Kanten-Adjazenz (Silhouette im Stil „Contour", neu nur bei Kamera-Änderung).
+    pub fn edge_adj(&self) -> impl Iterator<Item = EdgeAdj> + '_ {
+        self.edges.values().map(|e| EdgeAdj { p0: e.p0, p1: e.p1, reps: e.reps() })
     }
 
     /// Alle Wände, Decken und Dach-Schichten in Teil-Reihenfolge (Live-Schnitt).
@@ -196,6 +209,8 @@ impl Scene {
         let mut ch = SceneChange::default();
         let mut dirty: BTreeSet<usize> = BTreeSet::new();
         let mut touched: HashSet<EdgeKey> = HashSet::new();
+        // Vollaufbau: berührte Kanten nicht einzeln merken, am Ende alle entscheiden.
+        let bulk = upd.reset;
         if upd.reset {
             *self = Scene { next_slot: self.next_slot, ..Scene::default() };
             ch.reset = true;
@@ -276,7 +291,7 @@ impl Scene {
             build_part_mesh(&mut p);
             p.meshed = true;
             ch.remeshed += 1;
-            self.link_edges(&mut p, &mut touched);
+            self.link_edges(&mut p, (!bulk).then_some(&mut touched));
             if p.chunk == usize::MAX {
                 p.chunk = self.pick_chunk(p.mesh.vertex_count());
                 self.chunks[p.chunk].parts.insert(id.clone());
@@ -286,33 +301,33 @@ impl Scene {
             self.parts.insert(id, p);
         }
         // 5) Berührte Kanten neu entscheiden.
-        let owner_chunk: HashMap<u64, usize> = self.parts.values().map(|p| (p.slot, p.chunk)).collect();
-        // Rang je Teil (id-Reihenfolge): die Normalen einer Kante in der Reihenfolge des Vollaufbaus
-        // (Teile nach id, darin nach Dreieck) — die Rückseiten-Paarung in `representatives` hängt davon ab.
-        let rank: HashMap<u64, usize> = self.parts.values().enumerate().map(|(i, p)| (p.slot, i)).collect();
-        for key in touched {
-            let Some(e) = self.edges.get_mut(&key) else { continue };
-            if e.normals.is_empty() {
-                if let Some(c) = e.drawn_in {
-                    dirty.insert(c);
-                }
-                self.edges.remove(&key);
-                continue;
+        // Teil-Nummer -> (Rang in id-Reihenfolge, Klumpen).
+        let info: HashMap<u32, (usize, usize)> =
+            self.parts.values().enumerate().map(|(i, p)| (p.slot, (i, p.chunk))).collect();
+        if bulk {
+            for e in self.edges.values_mut() {
+                // Klumpen sind nach einem Vollaufbau ohnehin alle neu.
+                decide_edge(e, &info);
             }
-            e.normals.sort_by_key(|x| (rank.get(&x.0).copied().unwrap_or(usize::MAX), x.1));
-            let ns: Vec<[f32; 3]> = e.normals.iter().map(|x| x.2).collect();
-            e.adj.reps = representatives(&ns);
-            e.owner = e.normals.iter().map(|x| x.0).min().unwrap();
-            e.draw = draws_crease(&e.adj.reps);
-            let now = if e.draw { owner_chunk.get(&e.owner).copied() } else { None };
-            if now != e.drawn_in {
-                if let Some(c) = e.drawn_in {
-                    dirty.insert(c);
+        } else {
+            for key in touched {
+                let Some(e) = self.edges.get_mut(&key) else { continue };
+                if e.normals.is_empty() {
+                    if e.drawn_in != NONE {
+                        dirty.insert(e.drawn_in as usize);
+                    }
+                    self.edges.remove(&key);
+                    continue;
                 }
-                if let Some(c) = now {
-                    dirty.insert(c);
+                let was = e.drawn_in;
+                decide_edge(e, &info);
+                if e.drawn_in != was {
+                    for c in [was, e.drawn_in] {
+                        if c != NONE {
+                            dirty.insert(c as usize);
+                        }
+                    }
                 }
-                e.drawn_in = now;
             }
         }
         // 6) Gelände und Ausdehnung.
@@ -350,7 +365,7 @@ impl Scene {
             for k in &p.edge_keys {
                 let e = &self.edges[k];
                 if e.draw && e.owner == p.slot {
-                    push_edge(&mut edges, e.adj.p0, e.adj.p1);
+                    push_edge(&mut edges, e.p0, e.p1);
                 }
             }
         }
@@ -390,33 +405,53 @@ impl Scene {
         }
     }
 
-    fn link_edges(&mut self, p: &mut Part, touched: &mut HashSet<EdgeKey>) {
+    fn link_edges(&mut self, p: &mut Part, mut touched: Option<&mut HashSet<EdgeKey>>) {
         let mut keys: Vec<EdgeKey> = Vec::new();
         let edges = &mut self.edges;
         let slot = p.slot;
         let mut seq = 0u32;
         for_each_tri_edge(&p.mesh, |key, p0, p1, n| {
             let e = edges.entry(key).or_insert_with(|| EdgeEntry {
-                adj: EdgeAdj { p0, p1, reps: Vec::new() },
-                normals: Vec::new(),
+                p0,
+                p1,
+                normals: Vec::with_capacity(2),
                 owner: slot,
                 draw: false,
-                drawn_in: None,
+                drawn_in: NONE,
             });
             if e.normals.is_empty() {
                 // Neue (oder verwaiste) Kante: Lage vom ersten Beitrag.
-                e.adj.p0 = p0;
-                e.adj.p1 = p1;
+                e.p0 = p0;
+                e.p1 = p1;
             }
             e.normals.push((slot, seq, n));
             seq += 1;
             keys.push(key);
-            touched.insert(key);
+            if let Some(t) = touched.as_deref_mut() {
+                t.insert(key);
+            }
         });
         keys.sort_unstable();
         keys.dedup();
         p.edge_keys = keys;
     }
+}
+
+/// Entscheidet eine Kante neu (Reihenfolge der Normalen, Rand/Knick, Besitzer, zeichnender Klumpen).
+fn decide_edge(e: &mut EdgeEntry, info: &HashMap<u32, (usize, usize)>) {
+    let first = e.normals[0].0;
+    if e.normals.iter().all(|x| x.0 == first) {
+        // Nur ein Teil: Beiträge liegen schon in Dreiecks-Reihenfolge.
+        e.owner = first;
+    } else {
+        e.normals.sort_by_key(|x| (info.get(&x.0).map_or(usize::MAX, |i| i.0), x.1));
+        e.owner = e.normals.iter().map(|x| x.0).min().unwrap();
+    }
+    e.draw = draws_crease(&e.reps());
+    e.drawn_in = match (e.draw, info.get(&e.owner)) {
+        (true, Some(&(_, c))) => c as u32,
+        _ => NONE,
+    };
 }
 
 /// Vernetzt einen Teil: Wände (mit Gehrung), Decken, Meshes; Ebenen je Vertex; Wand-Kappen.
@@ -700,4 +735,63 @@ mod tests {
         let ch = s.apply(PartsUpdate { reset: true, ..Default::default() });
         assert!(ch.reset && s.chunk_count() == 0 && s.bounds().is_none());
     }
+
+    /// Messung am Grossgebäude ([58]): Eingaben aus `model3dPartsSync.bench.test.ts`
+    /// (`BENCH_3D=1 BENCH_3D_OUT=<ordner>`), dann `SCENE_BENCH_DIR=<ordner> cargo test --release --lib
+    /// scene::tests::bench -- --ignored --nocapture`. Vorher = alter `set_model`-Pfad (Parsen, Szenen-Netz,
+    /// texturiertes Netz, Gelände, Kappen, Kanten-Adjazenz zweimal); jetzt = Teil-Update (Parsen, neu
+    /// vernetzen, Klumpen-Daten der geänderten Klumpen).
+    #[test]
+    #[ignore]
+    fn bench() {
+        use std::time::Instant;
+        let Ok(dir) = std::env::var("SCENE_BENCH_DIR") else { return };
+        let read = |f: &str| std::fs::read_to_string(format!("{dir}/{f}")).unwrap();
+        let (full, parts, delta) = (read("full.json"), read("parts.json"), read("delta.json"));
+        let ms = |t: Instant| t.elapsed().as_secs_f64() * 1e3;
+
+        let t = Instant::now();
+        let m: PartInput = serde_json::from_str(&full).unwrap();
+        let mesh = build_scene_mesh(&m.walls, &m.slabs, &m.meshes);
+        let _tex = build_scene_mesh_textured(&m.walls, &m.slabs, &m.meshes);
+        let _terrain = crate::mesh::build_terrain_mesh(&m.meshes);
+        let _caps = build_free_wall_end_caps(&m.walls);
+        let _adj = crate::edges::build_edge_adjacency(&mesh);
+        let _edges = build_mesh_edges(&mesh);
+        let old = ms(t);
+
+        let t = Instant::now();
+        let mut one = Scene::new();
+        one.set_model(serde_json::from_str(&full).unwrap());
+        let _d: Vec<ChunkData> = (0..one.chunk_count()).map(|c| one.chunk_data(c)).collect();
+        let new_full = ms(t);
+
+        let t = Instant::now();
+        let mut s = Scene::new();
+        let ch = s.apply(serde_json::from_str(&parts).unwrap());
+        let _d: Vec<ChunkData> = ch.dirty_chunks.iter().map(|&c| s.chunk_data(c)).collect();
+        let cold = ms(t);
+
+        let t = Instant::now();
+        let ch = s.apply(serde_json::from_str(&delta).unwrap());
+        let d: Vec<ChunkData> = ch.dirty_chunks.iter().map(|&c| s.chunk_data(c)).collect();
+        let inc = ms(t);
+        let up: usize = d.iter().map(|c| c.mesh.verts.len() + c.textured.verts.len() + c.edges.len() + c.caps.len()).sum();
+        let all: usize = (0..s.chunk_count())
+            .map(|c| s.chunk_data(c))
+            .map(|c| c.mesh.verts.len() + c.textured.verts.len() + c.edges.len() + c.caps.len())
+            .sum();
+        eprintln!(
+            "[58] render3d Grossgebäude: alter set_model {old:.0} ms; set_model als 1 Teil {new_full:.0} ms; \
+             Teile kalt {cold:.0} ms ({} Teile, {} Klumpen); Teil-Update {inc:.1} ms ({} Teile neu vernetzt, \
+             {} Klumpen, {:.1} von {:.1} MB Vertexdaten hochzuladen)",
+            s.part_count(),
+            s.chunk_count(),
+            ch.remeshed,
+            ch.dirty_chunks.len(),
+            up as f64 * 4e-6,
+            all as f64 * 4e-6,
+        );
+    }
 }
+
