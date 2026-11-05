@@ -50,6 +50,51 @@ export interface IfcFlatInput {
   elementData?: Float64Array;
 }
 
+/** Änderungs-Antwort des 3D-Modells (Kern `model3d_cache::write_delta`). */
+interface Model3dDelta {
+  mark: number;
+  wallKeys: number[];
+  wallNew: [number, unknown[]][];
+  openingKeys: number[];
+  openingNew: [number, unknown[], unknown[], unknown[], unknown[], unknown[]][];
+  openingTail: unknown[];
+  [rest: string]: unknown;
+}
+
+/** Gelesene Einträge der letzten Antwort (Laufnummer → Wandkörper bzw. 5 Listen Einbauteile). */
+interface Model3dDeltaCache {
+  mark: number;
+  walls: Map<number, unknown[]>;
+  openings: Map<number, unknown[][]>;
+}
+
+/** Setzt die Teile aus Antwort und gehaltenen Einträgen zusammen; `null`, wenn ein Eintrag fehlt. */
+function assembleModel3dDelta(r: Model3dDelta, cache: Model3dDeltaCache | undefined): { parts: Record<string, unknown>; cache: Model3dDeltaCache } | null {
+  const wallNew = new Map(r.wallNew);
+  const walls: unknown[] = [];
+  const wallMap = new Map<number, unknown[]>();
+  for (const k of r.wallKeys) {
+    const e = wallNew.get(k) ?? cache?.walls.get(k);
+    if (!e) return null;
+    for (const x of e) walls.push(x);
+    wallMap.set(k, e);
+  }
+  const openNew = new Map(r.openingNew.map(([k, ...lists]) => [k, lists] as const));
+  const openMap = new Map<number, unknown[][]>();
+  const entries: unknown[][][] = [];
+  for (const k of r.openingKeys) {
+    const e = openNew.get(k) ?? cache?.openings.get(k);
+    if (!e) return null;
+    entries.push(e);
+    openMap.set(k, e);
+  }
+  const openingMeshes: unknown[] = [];
+  for (let l = 0; l < 5; l++) for (const e of entries) for (const x of e[l]) openingMeshes.push(x);
+  for (const x of r.openingTail) openingMeshes.push(x);
+  const { mark, wallKeys: _wk, wallNew: _wn, openingKeys: _ok, openingNew: _on, openingTail: _ot, ...rest } = r;
+  return { parts: { ...rest, walls, openingMeshes }, cache: { mark, walls: wallMap, openings: openMap } };
+}
+
 /** Ergebnis des Ladens einer Projektdatei ({@link ProjectDocument.loadFile}). */
 export type LoadFileResult =
   | { ok: true; project: Project; warnings: string[]; migratedFrom: number | null }
@@ -93,6 +138,7 @@ export type QueryName =
   | "pickGeometry"
   | "explodeOffsets"
   | "model3dParts"
+  | "model3dPartsDelta"
   | "projectSolidSpecs"
   | "planDomains"
   | "ifcExportData"
@@ -118,6 +164,8 @@ export class ProjectDocument {
   private limits: [number, number] | null = null;
   /** Stände grosser Verlaufsschritte (Undo/Redo ohne Ops-Rückgabe, s. `stepStates.ts`). */
   private steps = new StepStates();
+  /** Gelieferte Einträge des 3D-Modells je Argument-Satz ([58], {@link model3dParts}). */
+  private m3d = new Map<string, Model3dDeltaCache>();
 
   constructor(project: Project) {
     this.mirror = project;
@@ -137,6 +185,7 @@ export class ProjectDocument {
    * Änderung, deren Aufruf den Panic auslöste, war noch nicht übernommen). Der Verlauf beginnt leer.
    */
   restoreAfterRestart(): void {
+    this.m3d.clear();
     const wasOpen = this.handle !== 0;
     this.handle = 0;
     this.steps.clear();
@@ -144,6 +193,7 @@ export class ProjectDocument {
   }
 
   private reopen(project: Project): void {
+    this.m3d.clear();
     if (this.handle) core().doc_close(this.handle);
     this.handle = core().doc_open(JSON.stringify(project));
     if (!this.handle) console.warn("Projekt-Dokument im Kern konnte nicht geöffnet werden.");
@@ -157,6 +207,32 @@ export class ProjectDocument {
    */
   query<T>(name: QueryName, args: number[] = [], text = ""): T {
     return JSON.parse(this.queryJson(name, args, text)) as T;
+  }
+
+  /**
+   * Teile des 3D-Modells (`model3dParts` ohne Explosion, `args` = deren 5 Zahlen) über Änderungs-Antworten
+   * ([58], Kern `model3d_cache.rs`): der Kern schreibt nur die Wände/Öffnungs-Einbauteile aus, die seit der
+   * letzten Antwort für dieselben Argumente neu sind; die übrigen kommen aus den hier gehaltenen, schon
+   * gelesenen Einträgen. Ergebnis wie `query("model3dParts", args)`. Die Einträge werden zwischen den
+   * Ergebnissen geteilt — nicht verändern.
+   */
+  model3dParts<T>(args: number[]): T {
+    const a = [0, 0, 0, 0, 0].map((d, i) => args[i] ?? d);
+    const key = a.join(",");
+    let cache = this.m3d.get(key);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const r = JSON.parse(this.queryJson("model3dPartsDelta", [...a, cache?.mark ?? 0])) as Model3dDelta;
+      const out = assembleModel3dDelta(r, cache);
+      if (out) {
+        this.m3d.delete(key);
+        this.m3d.set(key, out.cache);
+        if (this.m3d.size > 4) this.m3d.delete(this.m3d.keys().next().value!);
+        return out.parts as T;
+      }
+      // Ein Eintrag fehlt (sollte nicht vorkommen): einmal alles neu anfordern.
+      cache = undefined;
+    }
+    throw new Error("Kern-Abfrage „model3dPartsDelta“: Einträge fehlen");
   }
 
   /** Wie {@link query}, aber das JSON als Text (spart das Parsen, wenn es nur weitergereicht wird). */
@@ -194,6 +270,7 @@ export class ProjectDocument {
   load(project: Project): void {
     this.mirror = project;
     this.steps.clear();
+    this.m3d.clear();
     if (!this.handle || !core().doc_load_json(this.handle, JSON.stringify(project))) this.reopen(project);
   }
 

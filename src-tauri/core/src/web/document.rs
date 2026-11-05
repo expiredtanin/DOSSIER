@@ -240,10 +240,7 @@ pub fn doc_json(h: u32) -> String {
 /// `\u{1}`. Abfragen s. `crate::queries`.
 #[wasm_bindgen]
 pub fn doc_query_args(h: u32, name: &str, args: &[f64], text: &str) -> String {
-    let result = with_doc(h, |d| {
-        let p = d.project().map_err(|e| format!("Projekt passt nicht zum Kern-Modell: {e}"))?;
-        crate::queries::run(&p, name, args, text)
-    })
+    let result = with_doc(h, |d| crate::queries::run_doc(d, name, args, text))
     .unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
     match result {
         Ok(json) => json,

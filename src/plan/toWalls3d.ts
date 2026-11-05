@@ -169,10 +169,10 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   // Mit `voids` liefert der Kern zusätzlich die getroffenen Wände/Decken als truck-Spezifikationen.
   const explode = explodeGap(opts.explode);
   const voids = !!opts.voids && typeof window !== "undefined";
-  const parts = documentFor(project).query<Model3dParts>(
-    "model3dParts",
-    [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, explode],
-  );
+  const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, explode];
+  // Ohne Explosion inkrementell ([58]): nur geänderte Wände reisen aus dem Kern und werden gelesen.
+  const doc = documentFor(project);
+  const parts = explode > 0 ? doc.query<Model3dParts>("model3dParts", args) : doc.model3dParts<Model3dParts>(args);
   // Die truck-Körper (asynchron, mit Cache) kommen zwischen Kontext-Meshes und Stützen.
   const meshes: RMesh[] = [...parts.contextMeshes];
   for (const m of emitExtrudedSolids(project, parts.floorOffsets)) meshes.push(m);

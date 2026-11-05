@@ -62,6 +62,7 @@ pub mod ops;
 pub mod mesh_section;
 pub mod model;
 pub mod model3d;
+pub mod model3d_cache;
 pub mod explode3d;
 pub mod style;
 pub mod hlr;

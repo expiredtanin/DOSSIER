@@ -858,7 +858,16 @@ async function execute(project: Project, file: string, command: string, rest: st
         await time("planToRenderScene", () => planToRenderScene(plan));
         await time("planToSvgString", () => planToSvgString(plan, { scaleDenominator: scale }));
       }
-      await time("projectToModel3d", () => projectToModel3d(project));
+      {
+        // Erstes Mal auf einem frischen Dokument (ohne Cache, [58]); die Zeile darunter misst die Wiederholung.
+        const cold = structuredClone(project);
+        withDocument(cold, () => {
+          const t0 = performance.now();
+          projectToModel3d(cold);
+          rows.push(["projectToModel3d (kalt)", performance.now() - t0]);
+        });
+      }
+      await time("projectToModel3d (unverändert)", () => projectToModel3d(project));
       if (sec) await time("Schnitt (Kern)", async () => generateSectionPlan((await computeSection(project, sec))!, false, { visibleCodes: allCodes }), Math.max(3, runs / 2));
       if (elev) await time("generateElevationPlan", () => generateElevationPlan(project, elev), Math.max(3, runs / 2));
       if (project.walls.length) {
@@ -896,6 +905,27 @@ async function execute(project: Project, file: string, command: string, rest: st
             const r = doc.commit(cur, opsFor({ ...cur, walls: cur.walls.slice(0, 1) } as Project, 0.01 * ++k).slice(0, 1), undefined, Date.now());
             if ("project" in r) cur = r.project;
           }, runs * 5);
+          // [58] Inkrementelle 3D-Ableitung (Cache im Dokument, Änderungs-Antworten): eine Änderung, dann das ganze
+          // 3D-Modell neu abfragen; zum Vergleich die volle Abfrage ohne Cache-Weg in TS.
+          lap("projectToModel3d (Dokument)", () => projectToModel3d(cur));
+          lap("  model3dParts voll: Kern (JSON)", () => doc.queryJson("model3dParts", [1, 2, 0, 0, 0]));
+          const partsJson = doc.queryJson("model3dParts", [1, 2, 0, 0, 0]);
+          lap("  model3dParts voll: JSON.parse", () => JSON.parse(partsJson));
+          lap("projectToModel3d nach 1 Wand-Änderung", () => {
+            const w = cur.walls[++k % cur.walls.length];
+            const r = doc.commit(cur, patchItem(cur, "walls", w.id, { height: (w.height ?? 2.6) + (k % 2 ? 0.01 : -0.01) }), undefined, Date.now());
+            if ("project" in r) cur = r.project;
+            projectToModel3d(cur);
+          });
+          const ops = cur.openings ?? [];
+          if (ops.length) {
+            lap("projectToModel3d nach 1 Öffnungs-Änderung", () => {
+              const o = (cur.openings ?? [])[++k % ops.length];
+              const r = doc.commit(cur, patchItem(cur, "openings", o.id, { width: o.width + (k % 2 ? 0.01 : -0.01) }), undefined, Date.now());
+              if ("project" in r) cur = r.project;
+              projectToModel3d(cur);
+            });
+          }
         });
       }
       for (const [n, ms] of rows) process.stdout.write(`${n.padEnd(28)} ${ms.toFixed(2).padStart(9)} ms\n`);

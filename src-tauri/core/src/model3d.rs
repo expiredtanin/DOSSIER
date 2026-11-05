@@ -481,62 +481,71 @@ fn wall_reveals(p: &Project, w: &Wall, openings: &[&Opening], n_bands: usize) ->
 
 /// Verschneidung je Geschoss (`computeJoinsByFloor`); Fehler = unbekannter Wandtyp/Bauteil.
 fn compute_joins_by_floor(p: &Project) -> Result<HashMap<String, WallCuts>, String> {
-    let mut groups: Vec<(String, Vec<&Wall>)> = Vec::new();
-    for w in &p.walls {
-        match groups.iter_mut().find(|g| g.0 == w.floor_id) {
-            Some(g) => g.1.push(w),
-            None => groups.push((w.floor_id.clone(), vec![w])),
-        }
-    }
     let mut merged = HashMap::new();
-    for (_, walls) in &groups {
-        let mut comp_index: HashMap<&str, u32> = HashMap::new();
-        let mut jw: Vec<JoinWall> = Vec::with_capacity(walls.len());
-        let mut finite = true;
-        for w in walls {
-            // Hängende Wandtypen/Bauteile (Datei/Import) verschneiden mit den Rückfall-Werten.
-            let layers = Some(
-                p.wall_type_or_fallback(w)
-                    .layers
-                    .iter()
-                    .map(|l| {
-                        let comp = p.component_or_fallback(&l.component_id);
-                        let n = comp_index.len() as u32;
-                        let idx = *comp_index.entry(comp.id.as_str()).or_insert(n);
-                        JoinLayer { thickness: l.thickness, component: Some(idx), priority: comp.join_priority }
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let reference = wall_reference(w);
-            finite &= [w.start.x, w.start.y, w.end.x, w.end.y].iter().all(|v| v.is_finite())
-                && !matches!(reference, Reference::Offset(v) if !v.is_finite())
-                && layers.as_ref().is_none_or(|l| l.iter().all(|x| x.thickness.is_finite()));
-            jw.push(JoinWall { start: kv(w.start), end: kv(w.end), reference, layers, bulge: w.bulge });
-        }
-        if !finite {
-            for w in walls {
-                merged.insert(w.id.clone(), WallCuts::default());
-            }
-            continue;
-        }
-        match joins::compute_joins(&jw) {
-            Ok(cuts) => {
-                for (w, c) in walls.iter().zip(cuts) {
-                    merged.insert(w.id.clone(), c);
-                }
-            }
-            // Mit den Rückfällen oben nicht mehr erwartet: dann eben ohne Verschneidung.
-            Err(_) => {
-                for w in walls {
-                    merged.insert(w.id.clone(), WallCuts::default());
-                }
-            }
+    for (_, idx) in floor_groups(p) {
+        let (jw, finite) = floor_join_input(p, &idx);
+        for (&i, c) in idx.iter().zip(floor_join_cuts(&jw, finite)) {
+            merged.insert(p.walls[i].id.clone(), c);
         }
     }
     Ok(merged)
 }
 
-fn floor_context(p: &Project, floor_id: &str, with_ceilings: bool) -> FloorContext {
+/// Wände je Geschoss (Positionen in `p.walls`), Geschosse in der Reihenfolge ihres ersten Auftretens.
+pub(crate) fn floor_groups(p: &Project) -> Vec<(&str, Vec<usize>)> {
+    let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
+    let mut at: HashMap<&str, usize> = HashMap::new();
+    for (i, w) in p.walls.iter().enumerate() {
+        match at.get(w.floor_id.as_str()) {
+            Some(&g) => groups[g].1.push(i),
+            None => {
+                at.insert(w.floor_id.as_str(), groups.len());
+                groups.push((w.floor_id.as_str(), vec![i]));
+            }
+        }
+    }
+    groups
+}
+
+/// Eingabe der Verschneidung eines Geschosses (Wände `idx`) und ob sie endlich ist.
+pub(crate) fn floor_join_input(p: &Project, idx: &[usize]) -> (Vec<JoinWall>, bool) {
+    let mut comp_index: HashMap<&str, u32> = HashMap::new();
+    let mut jw: Vec<JoinWall> = Vec::with_capacity(idx.len());
+    let mut finite = true;
+    for &i in idx {
+        let w = &p.walls[i];
+        // Hängende Wandtypen/Bauteile (Datei/Import) verschneiden mit den Rückfall-Werten.
+        let layers = Some(
+            p.wall_type_or_fallback(w)
+                .layers
+                .iter()
+                .map(|l| {
+                    let comp = p.component_or_fallback(&l.component_id);
+                    let n = comp_index.len() as u32;
+                    let idx = *comp_index.entry(comp.id.as_str()).or_insert(n);
+                    JoinLayer { thickness: l.thickness, component: Some(idx), priority: comp.join_priority }
+                })
+                .collect::<Vec<_>>(),
+        );
+        let reference = wall_reference(w);
+        finite &= [w.start.x, w.start.y, w.end.x, w.end.y].iter().all(|v| v.is_finite())
+            && !matches!(reference, Reference::Offset(v) if !v.is_finite())
+            && layers.as_ref().is_none_or(|l| l.iter().all(|x| x.thickness.is_finite()));
+        jw.push(JoinWall { start: kv(w.start), end: kv(w.end), reference, layers, bulge: w.bulge });
+    }
+    (jw, finite)
+}
+
+/// Schnittlinien je Wand eines Geschosses (gleich lang wie `jw`); nicht endlich oder Fehler = ohne.
+pub(crate) fn floor_join_cuts(jw: &[JoinWall], finite: bool) -> Vec<WallCuts> {
+    if !finite {
+        return vec![WallCuts::default(); jw.len()];
+    }
+    // Mit den Rückfällen oben nicht mehr erwartet: dann eben ohne Verschneidung.
+    joins::compute_joins(jw).unwrap_or_else(|_| vec![WallCuts::default(); jw.len()])
+}
+
+pub(crate) fn floor_context(p: &Project, floor_id: &str, with_ceilings: bool) -> FloorContext {
     let ceilings: Vec<CeilingIn> = p
         .ceilings
         .as_deref()
@@ -598,10 +607,24 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
     let mut out = Vec::new();
     let by_wall = p.openings_by_wall();
     for wall in &p.walls {
-        let (bands, stacked) = resolve_wall_bands(p, &maps, wall, layered);
-        let (z_bottom, z_top) = p.wall_vertical_extent(wall);
         // Schnitt-Eingabe: nur die Dächer ([G2]); Decken rechnet der Schnitt selbst (Dominanz).
         let ctx = contexts.entry(wall.floor_id.as_str()).or_insert_with(|| floor_context(p, &wall.floor_id, layered));
+        let openings = by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice());
+        let cuts = if layered { joins.as_ref().and_then(|j| j.get(&wall.id)).cloned().unwrap_or_default() } else { WallCuts::default() };
+        wall_pieces(p, &maps, wall, ctx, openings, cuts, layered, pockets, &mut out);
+    }
+    Ok(out)
+}
+
+/// Die Körper EINER Wand (Schleifenrumpf von [`emit_walls_with`], hinten an `out` angehängt): hängt nur
+/// von der Wand, ihren Öffnungen, ihren Schnittlinien `cuts` (Verschneidung mit den Nachbarn), dem
+/// Geschoss-Kontext und den Typen/Materialien/Geschossen ab — der 3D-Cache ([58], `model3d_cache.rs`)
+/// behält das Ergebnis je Wand.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContext, openings: &[&Opening], cuts: WallCuts, layered: bool, pockets: bool, out: &mut Vec<RWall>) {
+    {
+        let (bands, stacked) = resolve_wall_bands(p, maps, wall, layered);
+        let (z_bottom, z_top) = p.wall_vertical_extent(wall);
         let win = wall_bands::WallIn {
             start: kv(wall.start),
             end: kv(wall.end),
@@ -617,10 +640,10 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
                 _ => Termination::Both,
             },
             bands: bands.iter().map(|b| BandIn { thickness: b.thickness, priority: b.priority }).collect(),
-            openings: wall_openings(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), true),
-            cuts: if layered { joins.as_ref().and_then(|j| j.get(&wall.id)).cloned().unwrap_or_default() } else { WallCuts::default() },
+            openings: wall_openings(p, wall, openings, true),
+            cuts,
             roof_attach: wall.roof_attach,
-            reveals: if layered && stacked { wall_reveals(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), bands.len()) } else { Vec::new() },
+            reveals: if layered && stacked { wall_reveals(p, wall, openings, bands.len()) } else { Vec::new() },
         };
         // Bogenwand ([T2]): Sehnen-Teilwände mit radialen Gehrungen.
         let arc = crate::wall_arc::WallArc::of_wall(wall);
@@ -635,7 +658,7 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
         };
         let first_piece = out.len();
         // [95] Taschen (Achsmass; bei Bogenwänden = Bogenlänge, je Sehnen-Teilwand abgebildet).
-        let pocket_cuts = if pockets { wall_pocket_cuts(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice())) } else { Vec::new() };
+        let pocket_cuts = if pockets { wall_pocket_cuts(p, wall, openings) } else { Vec::new() };
         for win in &wins {
         let win_first = out.len();
         let (dx, dy) = (win.end.x - win.start.x, win.end.y - win.start.y);
@@ -676,16 +699,14 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
             if (sb - sa).abs() > 1e-9 {
                 let m = |u: f64| (u - sa) / (sb - sa) * chord;
                 let cuts: Vec<[f64; 6]> = pocket_cuts.iter().map(|c| [m(c[0]), m(c[1]), c[2], c[3], c[4], c[5]]).collect();
-                cut_wall_pockets([win.start.x, win.start.y], [dx, dy], &cuts, &mut out, win_first);
+                cut_wall_pockets([win.start.x, win.start.y], [dx, dy], &cuts, out, win_first);
             }
         }
         }
         if arc.is_none() && !pocket_cuts.is_empty() {
-            cut_wall_pockets([wall.start.x, wall.start.y], [wall.end.x - wall.start.x, wall.end.y - wall.start.y], &pocket_cuts, &mut out, first_piece);
+            cut_wall_pockets([wall.start.x, wall.start.y], [wall.end.x - wall.start.x, wall.end.y - wall.start.y], &pocket_cuts, out, first_piece);
         }
     }
-    let _ = hypot2;
-    Ok(out)
 }
 
 /// [95] Taschen der Taschen-Schiebetüren einer Wand: je Tasche `[u0, u1, n0, n1, z0, z1]` im Wandrahmen
@@ -1106,21 +1127,66 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
 }
 
 fn emit_opening_meshes_plain(p: &Project, detail: f64) -> Vec<RMesh> {
+    let by_wall = p.openings_by_wall();
+    let per: Vec<WallOpeningMeshes> = p.walls.iter().map(|wall| wall_opening_meshes(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), detail)).collect();
+    let mut out = assemble_opening_meshes(per);
+    out.extend(surface_window_meshes(p));
+    out
+}
+
+/// Öffnungs-Einbauteile EINER Wand ([58]: der 3D-Cache behält sie je Wand): die Quader je Durchgang
+/// (`openings3d::wall_mesh_passes`), Türzargen und Formöffnungen.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct WallOpeningMeshes {
+    pub passes: [Vec<RMesh>; 3],
+    pub zargen: Vec<RMesh>,
+    pub shaped: Vec<RMesh>,
+}
+
+/// Reihenfolge des ganzen Modells: alle Wände je Durchgang, dann alle Zargen, dann alle Formöffnungen
+/// (ohne die Dach-/Deckenfenster, s. [`surface_window_meshes`]).
+pub(crate) fn assemble_opening_meshes(per: Vec<WallOpeningMeshes>) -> Vec<RMesh> {
+    let mut lists: [Vec<RMesh>; 5] = Default::default();
+    for m in per {
+        let [a, b, c] = m.passes;
+        for (k, v) in [a, b, c, m.zargen, m.shaped].into_iter().enumerate() {
+            lists[k].extend(v);
+        }
+    }
+    lists.into_iter().flatten().collect()
+}
+
+/// Dach-/Deckenfenster ([103]).
+pub(crate) fn surface_window_meshes(p: &Project) -> Vec<RMesh> {
+    let mut out = Vec::new();
+    for op in p.openings.as_deref().unwrap_or(&[]) {
+        if let Some(f) = crate::opening_shape::host_frame(p, op) {
+            for (part, positions) in crate::opening_shape::surface_window_boxes(p, op, &f) {
+                out.push(box_mesh(positions, PART_RGB[part as usize]));
+            }
+        }
+    }
+    out
+}
+
+/// Einbauteile der Öffnungen `openings` (in Projekt-Reihenfolge) der Wand `wall`.
+pub(crate) fn wall_opening_meshes(p: &Project, wall: &Wall, openings: &[&Opening], detail: f64) -> WallOpeningMeshes {
     let mut shaped: Vec<RMesh> = Vec::new();
     let mut w = FlatWriter::new();
-    w.num(detail).num(p.walls.len() as f64);
+    w.num(detail).num(1.0);
     // [105] Anhang: Rahmen-Detail je (Wand, Öffnung); Türzargen als eigene Quader.
     let mut details: Vec<f64> = Vec::new();
     let mut n_details = 0.0;
     let mut zargen: Vec<RMesh> = Vec::new();
-    for (wi, wall) in p.walls.iter().enumerate() {
+    let wi = 0usize;
+    {
         w.nums(&[wall.start.x, wall.start.y, wall.end.x, wall.end.y]);
         let slot = w.slot();
         let mut count = 0.0;
         let wr = wall_ref(p, wall);
         let (zb, zt) = p.wall_vertical_extent(wall);
         let mut thickness: Option<f64> = None;
-        for op in p.openings_of_wall(&wall.id) {
+        for &op in openings {
             let Some((from, to)) = opening_geom::opening_interval(&wr, op.position, op.width) else { continue };
             let o_bottom = zb + op.sill_height.max(0.0);
             let o_top = zt.min(o_bottom + op.height);
@@ -1152,7 +1218,12 @@ fn emit_opening_meshes_plain(p: &Project, detail: f64) -> Vec<RMesh> {
     }
     w.num(n_details);
     w.nums(&details);
-    let buf = crate::openings3d::opening_meshes_flat(&w.done());
+    let passes = crate::openings3d::opening_mesh_passes_flat(&w.done()).map(|buf| box_meshes_of_flat(&buf));
+    WallOpeningMeshes { passes, zargen, shaped }
+}
+
+/// Quader aus dem flachen Puffer von `openings3d` (`[n, je Quader: Bauteil, 24 Koordinaten]`).
+fn box_meshes_of_flat(buf: &[f64]) -> Vec<RMesh> {
     let n = buf.first().copied().unwrap_or(0.0).max(0.0) as usize;
     let mut out = Vec::new();
     let mut i = 1;
@@ -1171,16 +1242,6 @@ fn emit_opening_meshes_plain(p: &Project, detail: f64) -> Vec<RMesh> {
             material_index: None,
         });
         i += 25;
-    }
-    out.extend(zargen);
-    out.extend(shaped);
-    // Dach-/Deckenfenster ([103]).
-    for op in p.openings.as_deref().unwrap_or(&[]) {
-        if let Some(f) = crate::opening_shape::host_frame(p, op) {
-            for (part, positions) in crate::opening_shape::surface_window_boxes(p, op, &f) {
-                out.push(box_mesh(positions, PART_RGB[part as usize]));
-            }
-        }
     }
     out
 }
