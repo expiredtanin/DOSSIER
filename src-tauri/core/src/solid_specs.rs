@@ -144,11 +144,11 @@ fn hitting<'a>(voids: &'a [VoidPrism], foot: &[f64; 4], z0: f64, z1: f64) -> Vec
         .collect()
 }
 
-/// Bauteil minus alle Körper (verkettete Differenzen).
-fn subtract(base: Value, voids: &[&VoidPrism]) -> Value {
+/// Bauteil minus alle Körper (verkettete Differenzen); Körper um `dz` angehoben (Explosion [65]).
+fn subtract(base: Value, voids: &[&VoidPrism], dz: f64) -> Value {
     voids.iter().fold(base, |acc, v| {
         let pts: Vec<f64> = v.pts.iter().flat_map(|p| [p.x, p.y]).collect();
-        json!({"kind": "boolean", "op": "difference", "a": acc, "b": {"kind": "extrude", "points": pts, "height": v.z1 - v.z0, "z0": v.z0}})
+        json!({"kind": "boolean", "op": "difference", "a": acc, "b": {"kind": "extrude", "points": pts, "height": v.z1 - v.z0, "z0": v.z0 + dz}})
     })
 }
 
@@ -162,31 +162,40 @@ pub struct VoidCuts {
 
 /// Abzugskörper auf Wände und Decken des Modells anwenden (früher `applyVoids3d`, Spezifikationsteil).
 pub fn void_cuts(p: &Project, walls: &[RWall], slabs: &[RSlab]) -> VoidCuts {
+    void_cuts_lifted(p, walls, slabs, &|_| 0.0, &|_| 0.0)
+}
+
+/// Wie [`void_cuts`] für ein auseinandergezogenes Modell ([65], `explode3d.rs`): Bauteil `i` liegt um
+/// `wall_dz(i)` bzw. `slab_dz(i)` höher als im Modell. Getroffen wird am ursprünglichen Ort, der Körper
+/// wandert mit dem Bauteil (ein geschossübergreifender Körper schneidet so jedes Geschoss für sich).
+pub fn void_cuts_lifted(p: &Project, walls: &[RWall], slabs: &[RSlab], wall_dz: &dyn Fn(usize) -> f64, slab_dz: &dyn Fn(usize) -> f64) -> VoidCuts {
     let voids = void_prisms(p);
     let mut out = VoidCuts::default();
     if voids.is_empty() {
         return out;
     }
     for (i, w) in walls.iter().enumerate() {
-        let hits = hitting(&voids, &bbox(wall_corners(w).into_iter()), w.base_elevation, w.base_elevation + w.height);
+        let dz = wall_dz(i);
+        let hits = hitting(&voids, &bbox(wall_corners(w).into_iter()), w.base_elevation - dz, w.base_elevation + w.height - dz);
         if hits.is_empty() {
             continue;
         }
         if let Some(base) = wall_spec(&WallIn::of(w)) {
-            out.walls.push((i, subtract(base, &hits)));
+            out.walls.push((i, subtract(base, &hits, dz)));
         }
     }
     for (i, s) in slabs.iter().enumerate() {
         if s.outline.len() < 3 {
             continue;
         }
-        let hits = hitting(&voids, &bbox(s.outline.iter().map(|q| (q[0], q[1]))), s.z_bottom, s.z_top);
+        let dz = slab_dz(i);
+        let hits = hitting(&voids, &bbox(s.outline.iter().map(|q| (q[0], q[1]))), s.z_bottom - dz, s.z_top - dz);
         if hits.is_empty() {
             continue;
         }
         let pts: Vec<f64> = s.outline.iter().flat_map(|q| [q[0], q[1]]).collect();
         let base = json!({"kind": "extrude", "points": pts, "height": s.z_top - s.z_bottom, "z0": s.z_bottom});
-        out.slabs.push((i, subtract(base, &hits)));
+        out.slabs.push((i, subtract(base, &hits, dz)));
     }
     out
 }
