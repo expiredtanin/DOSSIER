@@ -2562,8 +2562,37 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   setzt sie nur bei Abweichung, als ein Undo-Schritt. Kein Modellwechsel (Reiter waren nie im Modell). Tests
   `viewTabs.test.ts`, e2e `viewTabs.spec.ts`. Offen: Reiter nicht mit dem Projekt gespeichert; nicht in der Tauri-App geprüft. · S
 - ◐ **[137] Alles Sichtbare anwählbar.** (5.11., Mac-Befund am Musterhaus komplex: „Schatten und gewachsenes Terrain lassen sich
-  nicht anwählen und bearbeiten") In Arbeit: Kern-Picken für Baugrube (Wirkbereich zuoberst), Höhenlinien-Satz, Schatten/Baurecht
-  (`sitePick`), 3D-Picken der Baugrube; `TerrainMesh.smooth`/`sourceId`. · M
+  nicht anwählen und bearbeiten") **Bestand** (Klick im Plan / im 3D, Objekt-Info, Bearbeiten; vorher → jetzt):
+  | Element | Grundriss | Schnitt/Ansicht | 3D | Objekt-Info / Bearbeiten |
+  |---|---|---|---|---|
+  | Wand, Öffnung, Decke, Dach, Treppe | ✓ (in Situation/mit sichtbarem Gelände: Wand/Decke vom Gelände-Rahmen verdeckt ✗ → ✓) | ✓ (Ansicht: Wand unter Schlagschatten ✗ → ✓) | ✓ | ✓ Felder, Griffe |
+  | Raum | ✓ | – | – (nicht dargestellt) | ✓ |
+  | Stütze | ✓ | ✓ | ✗ → ✓ | ✓ |
+  | Freie Körper (Loft, Rotation, Abzug) | ✓ (Umriss) | ✓ | ✗ (truck-Netze in TS, offen) | ✓ |
+  | 2D: Bemassung, Koten, Text, Hinweis, Wolke, Nordpfeil-Block, Detail, Kataster, Strasse, Bäume | ✓ (Linien; leere Kreise/Konturen am Rand, leere Konturfläche unter Gelände meint das Gelände) | ✓ eigene | Linien-Spur | ✓ |
+  | Achsraster | ✓ | ✗ (Projektion ohne Id, offen) | Spur (`show3d`) | ✓ |
+  | Gelände (TerrainMesh) | Rahmen-Band, Objekt-Info nur LV95 → ✓ mit Optionen | ✗ → ✓ (Erdreich-Band, Geländefläche) | ✓ | ✗ → ✓ Sichtbar (Kategorie), Glättung, Äquidistanz, Zähllinie, Erdreich-Band |
+  | Höhenlinien-Satz (contourSet) | ✗ → ✓ (Rahmen unter dem Gelände, Cmd/Strg+Klick-Liste) | – | – | Typ, LV95 |
+  | Baugrube, Böschungen, Rühlwand (excavation) | ✗ (Band nur Sohle, unter dem Gelände-Rahmen) → ✓ Wirkbereich zuoberst | über Gelände | ✗ → ✓ (Dreiecke im Wirkbereich) | Typ ohne Übersetzung → ✓ alle Felder, Mengen; Griffe (bestehend) |
+  | Schatten (Sonnenstudie) | ✗ → ✓ Pseudo-Auswahl `site` | – | – (kein Schatten im 3D, [64]) | ✓ Sonnenstand: Schalter, Datum, Uhrzeit (Undo) |
+  | Baurecht: Parzelle, zulässige Fläche, Baulinie | ✗ → ✓ (unsichtbare Bänder ±1.5 mm) | – | – | ✓ Baurecht-Einstellungen; Verstösse (rot) bleiben Anzeige, Klick geht hindurch |
+  | Schnitt-/Ansichtsmarker | ✓ | – | – | ✓ |
+  **Umsetzung:** Kern `plan/context.rs` (Pick-Bänder: Baugrube = konvexe Hülle aus Sohle und Böschungsoberkante
+  `excavation::affected_hull`, zuletzt gezeichnet; Höhenlinien-Rahmen), `plan/extras.rs` (Schattenflächen mit Pick-Id
+  `@sunStudy`, Baurechts-Bänder `@siteRules` — im Feld `contextObjectId`, `@` = keine Element-Id), `plan/section.rs`/
+  `elevation.rs` (Erdreich-Band bzw. Geländefläche mit Gelände-Id), `model3d::pick_geometry` (Baugruben-Dreiecke über
+  `excavation::owner_at`, Stützen `columns`). `TerrainMesh.smooth`/`sourceId` (Rust-Modell, Befehl `terrain` setzt sie);
+  `siteSlice.regenerateTerrain` erzeugt das Netz mit anderer Glättung neu (gleiche Id, ein Undo-Schritt). TS: Auswahl-Art
+  `site` (`"sunStudy"`/`"siteRules"`), Objekt-Info zeigt `SunStudySection`/`SiteRulesSection` bzw. `ContextObjectProps`
+  (gemeinsam mit dem Panel „Gelände & Kontext"); `PlanView.hitTest` überspringt Flächen ohne Bauteil-Id und unsichtbare
+  Pick-Bänder (vorher verdeckten Gelände-Rahmen, Schlagschatten der Ansicht und Verstoss-Flächen die Bauteile).
+  Tests: Rust (Pick-Bänder Gelände/Baugrube/Höhenlinien, Schatten/Baurecht, 3D Baugrube und Stützen, Schnitt/Ansicht),
+  vitest `siteSelection.test.ts` (Plan-Pick im Musterhaus komplex, Objekt-Info Baugrube, Neu-Glätten mit Undo), e2e
+  `siteSelect.spec.ts` (Gelände in der Situation wählen, Glättung ändern, Undo; Schatten im EG wählen, Uhrzeit ändern,
+  Undo); Goldens EG (unsichtbare Bänder). Geprüft im Linux-Container (Chromium), 3D-Pick nur als Unit-Test (headless kein
+  WebGPU), nicht in der Tauri-App. Offen: freie Körper im 3D-Pick; Achsraster in Schnitt/Ansicht; „Gelände sichtbar"
+  schaltet die ganze Kategorie; Glättung nur mit Höhenlinien-Satz (swissALTI3D-Netze nicht); in der dichten Situation
+  1:500 gehen 2D-Elemente (Bemassung) vor — Schatten/Gelände dort per Cmd/Strg+Klick-Liste. · M
 
 ## Priorität 4 — später
 
