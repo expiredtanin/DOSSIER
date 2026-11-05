@@ -2552,6 +2552,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   nutzt Generator und Beschnitt des Druckpfads (`hatch_lines`, `build_hatch_runs`, Zufall; Bild/Vollfläche bleiben Füllung).
   Standard aus: Ausgabe, Goldens, KI-Werkzeuge, Öffnungsvorschau byte-gleich. Test `planToSvgString.hatch.test.ts`;
   Beispiel-EG angesehen (Chromium). Offen: Vollflächen-/Bildschraffur und Schraffur-Löcher nicht ausgebreitet; nicht in der Tauri-App geprüft. · S
+- ◐ **[136] Reiter und Ausschnitte entkoppelt.** (5.11.) Zeichnungs-Reiter sind reiner UI-Zustand (`state/viewTabs.ts`,
+  nicht im Projekt, kein Undo-Schritt, beim Öffnen/Neu ein Reiter): jeder merkt seinen Darstellungszustand und optional den
+  Ausschnitt, aus dem er kam (nur Titel). Beliebig viele, auch mehrere aus einem Ausschnitt; „+" = neuer Reiter mit der
+  aktuellen Ansicht, „×" schliesst nur den Reiter (nie den letzten, nie einen Ausschnitt). Ausschnitte nur im Panel: Klick =
+  im aktiven Reiter zeigen, Doppelklick/„↗" = neuer Reiter, „Ausschnitt aktualisieren" schreibt die Ansicht ausdrücklich
+  zurück; gelöschter Ausschnitt lässt seine Reiter offen (letzter Name als Titel). Panel-Wahl bleibt stabil (keine
+  Abweichungs-Abwahl mehr; Fussbereich/Vorlage-Wahl e2e repariert). Sichtbarkeit/Overrides sind Projektdaten: ein Wechsel
+  setzt sie nur bei Abweichung, als ein Undo-Schritt. Kein Modellwechsel (Reiter waren nie im Modell). Tests
+  `viewTabs.test.ts`, e2e `viewTabs.spec.ts`. Offen: Reiter nicht mit dem Projekt gespeichert; nicht in der Tauri-App geprüft. · S
 
 ## Priorität 4 — später
 

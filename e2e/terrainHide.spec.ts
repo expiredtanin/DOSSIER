@@ -1,6 +1,6 @@
 // [T6][114] Gelände ausblenden (Musterhaus komplex): Kategorie „Gelände" im Ebenen-Panel aus → das Terrain
 // verschwindet im Grundriss, im Schnitt und in der Ansicht (3D: Unit-Test `sampleProjectComplex.terrainHide`).
-import { discardIfAsked, expect, fileMenu, openTab, startNewProject, test } from "./app";
+import { discardIfAsked, drawingTab, expect, fileMenu, openSnapshotInNewTab, openTab, startNewProject, test } from "./app";
 
 
 test("Musterhaus komplex: Gelände lässt sich ausblenden (Grundriss, Schnitt, Ansicht)", async ({ page }) => {
@@ -21,8 +21,9 @@ test("Musterhaus komplex: Gelände lässt sich ausblenden (Grundriss, Schnitt, A
     }
     return last;
   };
-  const tabs = page.getByRole("tablist", { name: "Zeichnungen" });
-  const tab = (name: string) => tabs.getByRole("tab", { name: `${name} Ausschnitt-Tab löschen`, exact: true });
+  // [136] Die drei Ausschnitte als eigene Reiter öffnen; danach wechselt die Reiterleiste (das Ebenen-Panel bleibt offen).
+  for (const name of ["Schnitt A-A", "Ansicht Süd", "Situation 1:500"]) await openSnapshotInNewTab(page, name);
+  const tab = (name: string) => drawingTab(page, name);
 
   await openTab(page, "Ebenen");
   const gelaende = page.getByRole("button", { name: /^Gelände sichtbar$/ });

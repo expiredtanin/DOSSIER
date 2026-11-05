@@ -338,8 +338,8 @@ export const en: Record<TranslationKey, string> = {
 
   // Document tabs (drawings/sheets).
   "tabs.drawings": "Drawings",
-  "tabs.add": "New view-snapshot tab",
-  "tabs.delete": "Delete view-snapshot tab",
+  "tabs.add": "New tab with the current view",
+  "tabs.close": "Close tab “{name}”",
 
   // Navigator panels.
   "nav.drawingLevels": "Drawing levels",
@@ -2836,7 +2836,10 @@ export const en: Record<TranslationKey, string> = {
   "viewsnap.copyName": "{name} copy",
   "viewsnap.deleteConfirm": "Delete view “{name}”?",
   "viewsnap.empty": "No views yet. Set up a view and save it.",
-  "viewsnap.applyHint": "Restore view “{name}”",
+  "viewsnap.applyHint": "Click: show “{name}” in the active tab · Double-click: open in a new tab",
+  "viewsnap.openNewTab": "Open in new tab",
+  "viewsnap.update": "Update view",
+  "viewsnap.updateHint": "Write the current view into this saved view (name, folder and template stay)",
   "viewsnap.add.folder": "Create folder",
   "viewsnap.add.snapshot": "Save view",
   "viewsnap.folder.defaultName": "New folder",

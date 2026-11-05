@@ -130,49 +130,6 @@ export function matchingComboName(
   return null;
 }
 
-/** Mengengleichheit zweier Id-Listen (Reihenfolge egal, Duplikate ignoriert). */
-function idSetEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const sa = new Set(a);
-  for (const id of b) {
-    if (!sa.has(id)) return false;
-  }
-  return sa.size === new Set(b).size;
-}
-
-/**
- * Prüft, ob ein Ausschnitt-Kernzustand EXAKT dem aktuellen Live-Zustand
- * entspricht — Grundlage der „angewählt bleibt bis zur Abweichung"-Logik im
- * Ausschnitte-Panel. Vergleicht ALLE erfassten Felder feldweise (Enums/Zahlen
- * strikt, Sichtbarkeits-Maps deep-equal, Override-Ids als Menge). Weicht auch
- * nur EIN Feld ab → `false`. Pure/testbar; der Aufrufer (App.tsx) normalisiert
- * den gespeicherten Snapshot vorher über `readViewSnapshot`, damit fehlende
- * optionale Felder (fov/overrides) fair verglichen werden.
- *
- * ABSICHTLICH ausgenommen: `cameraCenter`/`cameraPxPerMeter`. Anders als die
- * übrigen (diskreten) Felder ändert sich die Kamera bei jedem Pan/Zoom in
- * winzigen Fliesskomma-Schritten — eine strikte Gleichheitsprüfung würde die
- * „bleibt angewählt, bis etwas abweicht"-Anzeige praktisch bei jeder
- * Mausbewegung sofort auflösen. Die Kamera wird beim Erfassen/Wiederherstellen
- * mitgenommen, zählt aber nicht zur „entspricht exakt"-Definition.
- */
-export function snapshotMatchesLiveState(
-  snap: ViewSnapshotState,
-  live: ViewSnapshotState,
-): boolean {
-  return (
-    snap.viewType === live.viewType &&
-    snap.view3d === live.view3d &&
-    snap.fov === live.fov &&
-    snap.scaleDenominator === live.scaleDenominator &&
-    snap.detail === live.detail &&
-    snap.activeLevelId === live.activeLevelId &&
-    boolMapEqual(snap.layerVisibility, live.layerVisibility) &&
-    boolMapEqual(snap.drawingVisibility, live.drawingVisibility) &&
-    idSetEqual(snap.enabledOverrideRuleIds, live.enabledOverrideRuleIds)
-  );
-}
-
 /**
  * Setzt bei jeder Override-Regel `enabled = enabledIds.includes(rule.id)`
  * (immutabel). Reproduziert die Aktiv-Menge, die ein Ausschnitt gespeichert hat.

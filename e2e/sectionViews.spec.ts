@@ -1,7 +1,7 @@
 // [115] Maintainer-Befund am Musterhaus komplex: aus Schnitt/Ansicht liess sich nicht ins 3D wechseln, und ein
 // Schnitt liess sich nicht wie ein Grundriss auf ein Layout-Blatt legen (Viewport zeigte nur die 2D-Elemente).
 import type { Page } from "@playwright/test";
-import { discardIfAsked, expect, fileMenu, openTab, startNewProject, test } from "./app";
+import { discardIfAsked, expect, fileMenu, openTab, showSnapshot, startNewProject, test } from "./app";
 
 async function openComplex(page: Page) {
   await startNewProject(page);
@@ -11,10 +11,7 @@ async function openComplex(page: Page) {
 }
 
 async function openViewTab(page: Page, name: string) {
-  await page
-    .getByRole("tablist", { name: "Zeichnungen" })
-    .getByRole("tab", { name: `${name} Ausschnitt-Tab löschen`, exact: true })
-    .click();
+  await showSnapshot(page, name);
   await expect(page.locator("svg.plan-svg").first()).toBeVisible({ timeout: 30_000 });
 }
 

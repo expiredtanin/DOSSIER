@@ -1,43 +1,26 @@
-// Ausschnitt-Tab-Leiste — Kopfzeile über der Zeichenfläche.
+// Zeichnungs-Reiterleiste — Kopfzeile über der Zeichenfläche ([136]).
 //
-// Jeder Tab ist ein gespeicherter Ausschnitt (ViewSnapshot, DOSSIER A2,
-// s. state/viewSnapshots.ts + panels/ViewSnapshotsPanel.tsx): aktive
-// Zeichnungsebene + Ebenen-/Zeichnungsebenen-Sichtbarkeit + Overrides + Ansicht.
-// Ein Klick lädt ihn — identisch zum Panel „Ausschnitte" (dieselben Handler).
-// „+" sichert den aktuellen Stand als neuen Tab; der Name wird automatisch
-// bestimmt (aktive Zeichnungskombination, falls ihre Sichtbarkeits-Map exakt
-// passt, sonst das aktive Blatt) — kein Tipp-Dialog, wie ein Browser-Tab.
-// „×" löscht einen Tab; mindestens einer bleibt immer erhalten. Hat das Projekt
-// noch keinen Ausschnitt, zeigt die Leiste einen Tab für den aktuellen Stand, ohne
-// ihn ins Projekt zu schreiben (das früher automatische Anlegen war eine
-// Projektänderung: nach jedem Rückgängig bis zum Anfang landete sie neu im Verlauf
-// und verwarf den Redo-Stapel). Erst „+" legt einen echten Ausschnitt an.
-//
-// Ersetzt die frühere Ein-Tab-je-Geschoss-Leiste: ein Ausschnitt kann JEDE
-// Zeichnungsebenen-Art referenzieren (Geschoss, Schnitt, Ansicht, Zeichnung),
-// nicht nur Geschosse — man kann also in einem Tab im Schnitt arbeiten und im
-// nächsten im Grundriss, jeweils mit eigener Ebenen-/Zeichnungssichtbarkeit.
+// Ein Reiter ist eine OFFENE Ansicht (UI-Zustand, state/viewTabs.ts), kein Ausschnitt: beliebig viele,
+// auch mehrere aus demselben Ausschnitt oder ganz ohne Ausschnitt. Jeder Reiter merkt sich seinen
+// Darstellungszustand (Geschoss/Schnitt/Ansicht, Massstab, Sichtbarkeit, Overrides, Kamera); ein Klick
+// wechselt dorthin. „+" öffnet einen neuen Reiter mit der aktuellen Ansicht, „×" schliesst nur den Reiter
+// (nie den letzten) — Ausschnitte werden ausschliesslich im Panel „Ausschnitte" angelegt/gelöscht. Der
+// Titel ist der Name des Ausschnitts, aus dem der Reiter geöffnet wurde, sonst der Name der Zeichnungsebene.
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import type { Project } from "./model/types";
+import { tabTitle, type ViewTab, type ViewTabsState } from "./state/viewTabs";
 import { t } from "./i18n";
 
-/** Handler-Bündel der Ausschnitt-Tab-Leiste — identische Semantik wie die
- *  gleichnamigen Host-Handler in panels/host.ts (dieselbe Quelle der Wahrheit). */
+/** Handler-Bündel der Reiterleiste (Host-Handler in state/usePanelHostBase.ts). */
 export interface ViewSnapshotTabsHandlers {
-  /** Id des aktuell angewählten Ausschnitts (aktiver Tab) oder `null`, wenn
-   *  der Live-Zustand von jedem gespeicherten Ausschnitt abweicht. */
-  selectedId: string | null;
-  /** Lädt einen Ausschnitt (Klick auf einen Tab). */
-  onApply: (id: string) => void;
-  /** Sichert den aktuellen Stand als neuen Ausschnitt (automatischer Name);
-   *  liefert dessen Id. */
-  onCaptureAuto: () => string;
-  /** Löscht einen Ausschnitt. */
-  onDelete: (id: string) => void;
-  /** Name für den Tab des aktuellen Stands, solange das Projekt keinen Ausschnitt hat. */
-  autoName: () => string;
+  tabs: ViewTabsState;
+  onActivate: (tabId: string) => void;
+  onNew: () => void;
+  onClose: (tabId: string) => void;
+  /** Titel eines Reiters ohne Ausschnitt (Zeichnungskombination bzw. Zeichnungsebene). */
+  autoName: (levelId?: string) => string;
 }
 
 export function DrawingTabs({
@@ -48,64 +31,48 @@ export function DrawingTabs({
   handlers: ViewSnapshotTabsHandlers;
 }) {
   const snapshots = project.viewSnapshots ?? [];
-  const { selectedId, onApply, onCaptureAuto, onDelete } = handlers;
-
-  // Es muss immer mindestens ein Tab sichtbar sein (Nutzer-Vorgabe): ohne gespeicherten
-  // Ausschnitt einer für den aktuellen Stand (nur Anzeige, keine Projektänderung).
-  if (snapshots.length === 0) {
-    return (
-      <div className="drawing-tabs" role="tablist" aria-label={t("tabs.drawings")}>
-        <button type="button" role="tab" aria-selected className="drawing-tab active" title={handlers.autoName()}>
-          <span className="drawing-tab-label">{handlers.autoName()}</span>
-        </button>
-        <button
-          type="button"
-          className="drawing-tab-add"
-          aria-label={t("tabs.add")}
-          title={t("tabs.add")}
-          onClick={() => onCaptureAuto()}
-        >
-          +
-        </button>
-      </div>
-    );
-  }
+  const { tabs, onActivate, onNew, onClose, autoName } = handlers;
+  const title = (tab: ViewTab) =>
+    tabTitle(tab, snapshots, (tb) => autoName(tb.id === tabs.activeId ? undefined : tb.state?.activeLevelId));
+  const closable = tabs.tabs.length > 1;
 
   return (
     <div className="drawing-tabs" role="tablist" aria-label={t("tabs.drawings")}>
-      {snapshots.map((s) => (
-        <button
-          key={s.id}
-          type="button"
-          role="tab"
-          aria-selected={s.id === selectedId}
-          className={`drawing-tab${s.id === selectedId ? " active" : ""}`}
-          onClick={() => onApply(s.id)}
-          title={s.name}
-        >
-          <span className="drawing-tab-label">{s.name}</span>
-          {snapshots.length > 1 && (
-            <span
-              className="drawing-tab-close"
-              role="button"
-              aria-label={t("tabs.delete")}
-              title={t("tabs.delete")}
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(s.id);
-              }}
+      {tabs.tabs.map((tab) => {
+        const active = tab.id === tabs.activeId;
+        const name = title(tab);
+        return (
+          <div key={tab.id} className={`drawing-tab${active ? " active" : ""}`} data-tab-id={tab.id}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className="drawing-tab-label"
+              onClick={() => onActivate(tab.id)}
+              title={name}
             >
-              ×
-            </span>
-          )}
-        </button>
-      ))}
+              {name}
+            </button>
+            {closable && (
+              <button
+                type="button"
+                className="drawing-tab-close"
+                aria-label={t("tabs.close", { name })}
+                title={t("tabs.close", { name })}
+                onClick={() => onClose(tab.id)}
+              >
+                ×
+              </button>
+            )}
+          </div>
+        );
+      })}
       <button
         type="button"
         className="drawing-tab-add"
         aria-label={t("tabs.add")}
         title={t("tabs.add")}
-        onClick={() => onCaptureAuto()}
+        onClick={() => onNew()}
       >
         +
       </button>
