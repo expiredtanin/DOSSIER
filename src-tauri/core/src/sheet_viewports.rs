@@ -64,9 +64,10 @@ fn detail_of(d: DetailLevel) -> Detail {
 
 /// Plan-Argumente eines Viewports (wie `ViewportPlanSvg`: projektglobal, nicht für den Druck).
 pub fn viewport_args(snap: &ViewSnapshot, scale: f64) -> PlanArgs {
+    let (detail, auto_coarse) = crate::plan::domains::effective_detail(detail_of(snap.detail), scale);
     PlanArgs {
         floor: snap.active_level_id.clone(),
-        detail: detail_of(snap.detail),
+        detail,
         show: snap.layer_visibility.iter().filter(|(_, v)| **v).map(|(k, _)| k.clone()).collect::<HashSet<String>>(),
         grey: HashSet::new(),
         reference_lines: false,
@@ -76,6 +77,7 @@ pub fn viewport_args(snap: &ViewSnapshot, scale: f64) -> PlanArgs {
         compact: false,
         mono: false,
         sun_when: None,
+        auto_coarse,
     }
 }
 

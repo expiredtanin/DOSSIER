@@ -1372,6 +1372,7 @@ fn sheets(cx: &mut Ctx, main: &mut Buf, layer_by_code: &HashMap<&str, String>) {
                     compact: false,
                     mono: false,
                     sun_when: None,
+                    auto_coarse: false,
                 };
                 if let Some(entries) = plan_domains_buf(p, &args).ok().and_then(|buf| {
                     let view = View::parse(&buf)?;

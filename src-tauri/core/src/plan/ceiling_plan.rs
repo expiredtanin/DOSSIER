@@ -50,6 +50,7 @@ fn floor_args(a: &PlanArgs, floor: &str) -> PlanArgs {
         compact: a.compact,
         mono: a.mono,
         sun_when: None,
+        auto_coarse: a.auto_coarse,
     }
 }
 

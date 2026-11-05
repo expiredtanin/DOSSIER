@@ -90,21 +90,25 @@ fn one(spec: &Spec, plane: &Plane, level: &LevelSpec, bounds: [f64; 4], scale: f
         if x < lo - 1e-9 || x > hi + 1e-9 {
             continue;
         }
-        out.push(Primitive::Line {
-            a: v2(x, y0),
-            b: v2(x, y1),
-            cls: "draw2d".into(),
-            weight_mm: AXIS_MM,
-            dash: Some(Some(dash.clone())),
-            zigzag: None,
-            motif: None,
-            color: Some(INK.into()),
-            drawing_id: None,
-            opening_id: None,
-            stair_id: None,
-            greyed: None,
-            opacity: None,
-        });
+        // [140] Ansicht: die Achse läuft nicht über die Fassade, nur Stummel unter und über dem Bild.
+        let spans: &[(f64, f64)] = if level.kind == "elevation" { &[(y0, bounds[1]), (bounds[3], y1)] } else { &[(y0, y1)] };
+        for &(ya, yb) in spans {
+            out.push(Primitive::Line {
+                a: v2(x, ya),
+                b: v2(x, yb),
+                cls: "draw2d".into(),
+                weight_mm: AXIS_MM,
+                dash: Some(Some(dash.clone())),
+                zigzag: None,
+                motif: None,
+                color: Some(INK.into()),
+                drawing_id: None,
+                opening_id: None,
+                stair_id: None,
+                greyed: None,
+                opacity: None,
+            });
+        }
         let (y, dir) = if bubbles == GridBubbles::Start { (y0, -1.0) } else { (y1, 1.0) };
         let c = v2(x, y + dir * r);
         out.push(Primitive::DrawingCircle { center: c, r, fill: "none".into(), stroke: INK.into(), weight_mm: 0.25, dash: None, drawing_id: None, greyed: None, opacity: None });
@@ -164,6 +168,11 @@ mod tests {
         assert!(union_bounds([0.0, 0.0, 9.0, 6.0], &prims)[3] > 6.0);
         // Ansicht von Süden (y = -3): Achsen 1, 2 stehen senkrecht zur Ebene und erscheinen an ihrer Lage.
         let level = LevelSpec { kind: "elevation".into(), line: Some([v2(-1.0, -3.0), v2(8.0, -3.0)]), ..Default::default() };
-        assert_eq!(texts(&grid_prims(&p, &level, [0.0, 0.0, 9.0, 6.0], 100.0)), ["1", "2"]);
+        let prims = grid_prims(&p, &level, [0.0, 0.0, 9.0, 6.0], 100.0);
+        assert_eq!(texts(&prims), ["1", "2"]);
+        // [140] In der Ansicht laufen die Achsen nicht über die Fassade: nur Stummel unter und über dem Bild.
+        let lines: Vec<(f64, f64)> = prims.iter().filter_map(|q| if let Primitive::Line { a, b, .. } = q { Some((a.y.min(b.y), a.y.max(b.y))) } else { None }).collect();
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        assert!(lines.iter().all(|(lo, hi)| *hi <= 0.0 + 1e-9 || *lo >= 6.0 - 1e-9), "{lines:?}");
     }
 }

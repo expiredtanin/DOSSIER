@@ -20,7 +20,8 @@ pub const SITE_PICK_VIEW_SHADOWS: &str = "@viewShadows";
 
 /// Füllfarbe der Schattenflächen.
 pub const SUN_SHADOW_FILL: &str = "#3a4a66";
-const SUN_SHADOW_OPACITY: f64 = 0.28;
+/// [140] Schatten heller (0.28 → 0.16): Bemassung und Stempel darüber bleiben lesbar.
+const SUN_SHADOW_OPACITY: f64 = 0.16;
 /// Linien-Klassen und Füllfarbe des Baurechts.
 pub const SITE_PARCEL_CLS: &str = "site-parcel";
 pub const SITE_ALLOWED_CLS: &str = "site-allowed";
