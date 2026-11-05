@@ -3,7 +3,9 @@
 // Renderer. Bekommt `toScreen`/Massstab-Parameter gereicht, kein eigener
 // Zugriff auf PlanView-internen State.
 
+import { memo } from "react";
 import type { HatchRender, Primitive } from "../../../core";
+import { sameData } from "../../../state/useEvent";
 import { NO_HATCH } from "../../../core";
 import { layoutText, stampBlockLines, wrapPlainText } from "../../../text/renderHtml";
 import type { Vec2 } from "../../../model/types";
@@ -72,7 +74,11 @@ export function polyUsesPattern(h: HatchRender): boolean {
  * `renderPrimitive`: Display = konstante Haarlinie (Bildschirm-px, via
  * non-scaling-stroke), Print = echte, PEN_STEPS-gequantelte Papier-mm.
  */
-export function HatchPattern({
+export const HatchPattern = memo(HatchPatternImpl, (a, b) =>
+  a.id === b.id && a.hairline === b.hairline && a.paperScale === b.paperScale && sameData(a.hatch, b.hatch),
+);
+
+function HatchPatternImpl({
   id,
   hatch,
   hairline,
@@ -438,7 +444,17 @@ export function DrawingRunShape({
   return shape;
 }
 
-export function PrimitiveShape({
+// [121] Eine Wand-Änderung erzeugt den ganzen Plan neu (neue Primitiv-Objekte, gleicher Inhalt):
+// memo mit Strukturvergleich, damit nur die wirklich geänderten Primitive neu rendern.
+export const PrimitiveShape = memo(PrimitiveShapeImpl, (a, b) =>
+  a.index === b.index &&
+  a.toScreen === b.toScreen &&
+  a.hairline === b.hairline &&
+  a.paperScale === b.paperScale &&
+  sameData(a.p, b.p),
+);
+
+function PrimitiveShapeImpl({
   p,
   index,
   toScreen,

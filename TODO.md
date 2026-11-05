@@ -1090,7 +1090,15 @@ Prüfung des ganzen Programms (Rust-Kern, TS-Hülle, Build/Sicherheit), nur Code
   Plan-Primitive, Objekt-Info, Elemente-Baum), Zoom-Schritt 240 → 61. Nicht in der Tauri-App geprüft (Ressourcen-
   Fenster nur Unit-Test). Offen: App abonniert weiter das ganze Projekt (rendert je Op 1×, Kinder nicht); übrige
   Panels lesen noch den ganzen Host (`usePanelHost`); `usePanelHostBase` (1515 Z.) und Kontextmenü-Verdrahtung
-  noch in App; andere Nebenfenster (Zeichnungsebenen, Ebenen) senden weiter ihren ganzen Zustand ([130]). · L
+  noch in App; andere Nebenfenster (Zeichnungsebenen, Ebenen) senden weiter ihren ganzen Zustand ([130]).
+  (5.11.) Plan-Primitive und Schraffur-Muster `memo` mit Strukturvergleich (`sameData`): ein neu erzeugter Plan
+  rendert nur die geänderten Primitive. Massstab/Zoom-Anzeige (`LiveScaleStat`) und Koordinaten-Feld der
+  Statusleiste (`CursorField`) abonnieren selbst; TabStrip `memo`, Dropdown-Pfeil feste Instanz. Zähler zählt
+  die Hülle von `memo(fn, vergleich)` nicht mehr (trug neue Props auch ohne Rendern). Gemessen: Wand-Änderung
+  290 → 51, Zoom-Schritt 61 → 8, 5 Zeiger-Schritte 75 → 20. Rest bei der Wand-Änderung fast nur Objekt-Info
+  (Dropdowns, Masseingaben), Elemente-Baum, Attribute — die brauchen das geänderte Projekt; Panels lesen
+  weiter `usePanelHost` (Umstellung auf `usePanelHostSelect` brächte hier wenig, die sichtbaren hängen am
+  Projekt). PanelFrame/Dock rendern je App-Render mit (je 4/2). · L
 - ✅ **[122] Zweites Kern-Dokument (`documentFor` → `shared`, Differenz-Abgleich) abschaffen.** (3.11.) `sync`/
   Differenz-Abgleich gestrichen; `documentFor` findet nur offene Dokumente über die Leseansicht (Store, CLI,
   `withDocument`). Abgewandelte Projekte: Fang beim Ziehen (`App.tsx` 3D-Griff, `useGripEditing`) über

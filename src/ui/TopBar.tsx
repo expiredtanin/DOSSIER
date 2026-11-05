@@ -1056,6 +1056,39 @@ export interface ViewRibbonTabProps {
 }
 
 /**
+ * Live-Massstab/Zoom-Anzeige der Ansichten-Leiste. Abonniert den Live-Massstab selbst: ein
+ * Zoom-Schritt rendert nur diese Anzeige neu, nicht die ganze Leiste ([121]).
+ */
+const LiveScaleStat = memo(function LiveScaleStat({
+  zoomEnabled,
+  scaleDenominator,
+}: {
+  zoomEnabled: boolean;
+  scaleDenominator: number;
+}) {
+  const liveScaleRaw = useLiveScale();
+  const liveScale = zoomEnabled ? liveScaleRaw : null;
+  const zoomPercent = zoomPercentOf(scaleDenominator, liveScaleRaw);
+  return (
+    <div
+      className={`tb-stat${
+        zoomEnabled && liveScale != null && Math.round(liveScale) === scaleDenominator
+          ? " tb-stat-atscale"
+          : ""
+      }`}
+      title={`${t("topbar.scale.live")} · ${t("topbar.zoom.current")}`}
+    >
+      <span className="tb-stat-scale">
+        {zoomEnabled && liveScale != null ? `1:${Math.round(liveScale)}` : "—"}
+      </span>
+      <span className="tb-stat-zoom">
+        {zoomEnabled ? `${Math.round(zoomPercent)}%` : "—"}
+      </span>
+    </div>
+  );
+});
+
+/**
  * „Ansichten"-Tab des Ribbons — trägt die aus der TopBar gemergten Mittelcluster:
  * 2D/3D-Ansichts-Raster (+ Kamera-FOV), Sichtbarkeits-Kombinationen, Detailgrad,
  * Massstab/Zoom-Cluster und Darstellungsart. EIN Ribbon für alles; Handler/Setter
@@ -1088,10 +1121,6 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
   textTarget,
   textStyles,
 }: ViewRibbonTabProps) {
-  // Live-Massstab direkt abonnieren: ein Zoom-Schritt rendert nur diese Leiste neu ([121]).
-  const liveScaleRaw = useLiveScale();
-  const liveScale = zoomEnabled ? liveScaleRaw : null;
-  const zoomPercent = zoomPercentOf(scaleDenominator, liveScaleRaw);
   // „frei" wird über einen In-App-Dialog erfasst (window.prompt ist im Tauri-
   // WKWebView deaktiviert); akzeptiert „1:35" ODER „35".
   const [scalePromptOpen, setScalePromptOpen] = useState(false);
@@ -1259,21 +1288,7 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
       {/* Massstab/Zoom + Text-Formatierung OHNE Trennstriche, gleich gross wie
           die Dropdowns (Mockup). */}
       <div className="tb-group tb-zoomcluster" role="group" aria-label={t("topbar.scaleGroup")}>
-        <div
-          className={`tb-stat${
-            zoomEnabled && liveScale != null && Math.round(liveScale) === scaleDenominator
-              ? " tb-stat-atscale"
-              : ""
-          }`}
-          title={`${t("topbar.scale.live")} · ${t("topbar.zoom.current")}`}
-        >
-          <span className="tb-stat-scale">
-            {zoomEnabled && liveScale != null ? `1:${Math.round(liveScale)}` : "—"}
-          </span>
-          <span className="tb-stat-zoom">
-            {zoomEnabled ? `${Math.round(zoomPercent)}%` : "—"}
-          </span>
-        </div>
+        <LiveScaleStat zoomEnabled={zoomEnabled} scaleDenominator={scaleDenominator} />
         <div className="tb-zoomcluster-right">
           <Dropdown
             value={inPresets ? String(scaleDenominator) : "__current__"}

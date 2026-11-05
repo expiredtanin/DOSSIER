@@ -18,7 +18,7 @@ export interface StatusBarProps {
   /** Kontextueller Werkzeug-Hinweis links (z. B. „Auswahl"). */
   hint: string;
   /** Cursor-Koordinaten anzeigen (nur bei aktiver Plan-Ansicht). Der Wert selbst
-   *  kommt aus `cursorStore` — so rendert bei Mausbewegung nur die Statusleiste. */
+   *  kommt aus `cursorStore` — so rendert bei Mausbewegung nur das Koordinaten-Feld. */
   showCursor: boolean;
   /** Einheit aus dem Projekt (vorerst fix „m"). */
   unit: string;
@@ -357,6 +357,27 @@ function Sep() {
 /** Eine Meterzahl für die Statusleiste (3 Nachkommastellen, ohne Einheit). */
 const fmt = (n: number): string => n.toFixed(3);
 
+/**
+ * Koordinaten-Feld: abonniert den Zeiger selbst — eine Mausbewegung rendert nur dieses Feld,
+ * nicht die ganze Statusleiste ([121]).
+ */
+const CursorField = memo(function CursorField({
+  showCursor,
+  units,
+}: {
+  showCursor: boolean;
+  units: DisplayUnits;
+}) {
+  const liveCursor = useCursor();
+  const cursor = showCursor ? liveCursor : null;
+  const coords = cursor
+    ? units === MODEL_UNITS
+      ? `${fmt(cursor.x)}, ${fmt(cursor.y)}`
+      : `${fmtDisplay(units, xToDisplay(units, cursor.x))}, ${fmtDisplay(units, yToDisplay(units, cursor.y))}`
+    : "—";
+  return <Field label={t("status.xy")} value={coords} />;
+});
+
 export const StatusBar = memo(function StatusBar({
   hint,
   showCursor,
@@ -373,14 +394,6 @@ export const StatusBar = memo(function StatusBar({
   snap,
   onSnapChange,
 }: StatusBarProps) {
-  const liveCursor = useCursor();
-  const cursor = showCursor ? liveCursor : null;
-  const coords = cursor
-    ? units === MODEL_UNITS
-      ? `${fmt(cursor.x)}, ${fmt(cursor.y)}`
-      : `${fmtDisplay(units, xToDisplay(units, cursor.x))}, ${fmtDisplay(units, yToDisplay(units, cursor.y))}`
-    : "—";
-
   return (
     <footer className="statusbar">
       {/* Links: Werkzeug-Hinweis. */}
@@ -413,7 +426,7 @@ export const StatusBar = memo(function StatusBar({
           {t("status.referenceLines")}
         </button>
         <Sep />
-        <Field label={t("status.xy")} value={coords} />
+        <CursorField showCursor={showCursor} units={units} />
         <Sep />
         <Field label={t("status.unit")} value={units === MODEL_UNITS ? unit : units.suffix} />
         <Sep />
