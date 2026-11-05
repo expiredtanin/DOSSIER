@@ -2360,12 +2360,21 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   und Fugen aus dem Teilflächen-Raster), Schnitt (Sturz/Brüstung je Schicht in `split_wall_layers`), 3D (`wall_bands.rs`:
   Loch je Schicht geweitet, Zusatzstücke als eigene Körper) — damit auch IFC-Wandkörper/Netto-Volumen. Geprüft: Rust-Tests,
   CLI-Grundriss/-Schnitt einer Aussenwand Putz/Dämmung/Backstein/Putz mit vier Varianten angesehen. Offen: Schnitt quer
-  durch eine Leibung (Ebene parallel zur Wand) ohne Rücksprung; Mengen (Leibungsflächen je Schicht) nicht in der Fenster-
-  liste; keine Rundbogen-/Dachfenster-Leibungen; nicht in der Tauri-App geprüft.
+  durch eine Leibung (Ebene parallel zur Wand) ohne Rücksprung [erledigt 30.10.]; Mengen (Leibungsflächen je Schicht) nicht in der Fenster-
+  liste [erledigt 5.11.]; keine Rundbogen-/Dachfenster-Leibungen; nicht in der Tauri-App geprüft.
   - (30.10.) Schnitt parallel zur Wand durch die Leibung (`parallel_reveal_cuts`): die geschnittene Schicht springt
     um ihren Rücksprung zurück (Loch je Seite geweitet), Zusatzstücke, die die Ebene queren, als Schnittfläche im
     Stil der Schicht. Geprüft: Rust-Test (Fläche), CLI-Schnitt durch die Leibungen angesehen (Linux). Offen:
     schräg zur Wand stehende Ebenen ohne Rücksprung, Formöffnungen (Rechteck-Loch).
+  - (5.11.) Fenster-/Türliste: Leibungsflächen je Schicht (`opening_schedule::reveal_areas`, Feld `revealAreas`):
+    zur Öffnung gewandte Stirn der Schicht (Stücke: quer belegte Breite; nur zurück: Schichtdicke) × Leibung
+    links/rechts (Höhe), Sturz/Brüstung (Breite), Türen ohne Brüstung; im Panel, CSV und PDF als optionale Spalten
+    „Leibung <Bauteil> m²“ (nur wenn eine Öffnung Schichteinzug hat) mit Fussnote. Der Schnitt parallel zur Wand
+    (s. 30.10.) war schon erledigt — erneut per CLI angesehen (Tür, Innenputz 5 cm zurück: Loch je Seite und Sturz
+    geweitet). Geprüft: Rust-Test, vitest, CLI-Liste/-Schnitt (Linux). Offen: Plantabelle (`sheet_table.rs`) ohne
+    Leibungsspalten; Stufen-Fläche der Nachbarschicht beim Rücksprung nicht gezählt; Rundbogen-/Formöffnungen:
+    Leibungen nur auf dem Rechteck (3D-Füllkörper `shaped_wall_opening_meshes` folgen dem Schichteinzug nicht,
+    Zusatzstücke nicht entlang des Bogens); Dachfenster ohne Schichteinzug (Dachschichten, `roof_assembly`).
 - ◐ **[108] Schräge Wandanschlüsse exakt (T/L/X, ein- und mehrschichtig).** (30.10., Maintainer-Bug: schräger
   T-Stoss) Die Nah-Putz-Aussparung der Durchgangswand (`joins::SpanCutout`) ist jetzt ein Parallelogramm
   (`from/to` auf der Fläche, `from_b/to_b` auf der Rückgrat-Fläche) aus den echten Kern-Kanten des Abzweigs
