@@ -394,7 +394,7 @@ fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scal
         })
     };
     // Fassadenstücke (a, b): Aussennormale rechts der Laufrichtung (CCW-Ring).
-    let mut edges: Vec<(Vec2, Vec2)> = vec![];
+    let mut edges: Vec<(Vec2, Vec2, Vec2)> = vec![];
     for ring in rings {
         // Gerade durchlaufende Zwischenpunkte (Stösse der Wandflächen) weglassen.
         let k = ring.len();
@@ -413,7 +413,7 @@ fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scal
         for i in 0..ring.len() {
             let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
             if (b[0] - a[0]).hypot(b[1] - a[1]) >= min_len && !on_arc(a, b) {
-                edges.push((a, b));
+                edges.push((a, b, a));
             }
         }
     }
@@ -423,10 +423,10 @@ fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scal
         let (a, b) = ([p.x, p.y], [q.x, q.y]);
         // Laufrichtung so, dass die Wölbung rechts (aussen) liegt.
         let right = [b[1] - a[1], a[0] - b[0]];
-        edges.push(if dot(right, [m.x - a[0], m.y - a[1]]) >= 0.0 { (a, b) } else { (b, a) });
+        edges.push(if dot(right, [m.x - a[0], m.y - a[1]]) >= 0.0 { (a, b, [m.x, m.y]) } else { (b, a, [m.x, m.y]) });
     }
-    let mut groups: Vec<(Vec2, Vec<(Vec2, Vec2)>)> = vec![];
-    for (a, b) in edges {
+    let mut groups: Vec<(Vec2, Vec<(Vec2, Vec2, Vec2)>)> = vec![];
+    for (a, b, apex) in edges {
         let len = (b[0] - a[0]).hypot(b[1] - a[1]);
         if !(len >= EPS) {
             continue;
@@ -436,19 +436,44 @@ fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scal
             continue; // achsparallel: Sache der vier Seiten
         }
         match groups.iter_mut().find(|g| dot(g.0, n) >= 1.0 - 1e-6) {
-            Some(g) => g.1.push((a, b)),
-            None => groups.push((n, vec![(a, b)])),
+            Some(g) => g.1.push((a, b, apex)),
+            None => groups.push((n, vec![(a, b, apex)])),
         }
     }
+    // Freistehende schiefe Wand (Stützmauer): ihre beiden Flächen liegen eine Wanddicke auseinander und
+    // gegenüber. Nur die vom Gebäude abgewandte bekommt Ketten (die andere läge im Gebäude bzw. im Hof).
+    let pts: Vec<Vec2> = rings.iter().flatten().copied().collect();
+    let centroid = [pts.iter().map(|p| p[0]).sum::<f64>() / pts.len() as f64, pts.iter().map(|p| p[1]).sum::<f64>() / pts.len() as f64];
+    let summary = |g: &(Vec2, Vec<(Vec2, Vec2, Vec2)>)| {
+        let (n, u) = (g.0, [g.0[1], -g.0[0]]);
+        let s = g.1.iter().map(|f| dot(f.0, n)).fold(f64::NEG_INFINITY, f64::max);
+        let ts = g.1.iter().flat_map(|f| [dot(f.0, u), dot(f.1, u)]);
+        let (t0, t1) = ts.fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), t| (l.min(t), h.max(t)));
+        let mid = g.1.iter().map(|f| dot([(f.0[0] + f.1[0]) / 2.0 - centroid[0], (f.0[1] + f.1[1]) / 2.0 - centroid[1]], n)).fold(f64::NEG_INFINITY, f64::max);
+        (s, t0, t1, mid)
+    };
+    let sums: Vec<(f64, f64, f64, f64)> = groups.iter().map(summary).collect();
+    let inner = |i: usize| {
+        let (si, t0, t1, mi) = sums[i];
+        groups.iter().enumerate().any(|(j, h)| {
+            let (sj, u0, u1, mj) = sums[j];
+            // Gegenüber: n_j = −n_i, also t_j = −t_i; Abstand der Flächen si + sj.
+            j != i && dot(groups[i].0, h.0) <= -1.0 + 1e-6 && si + sj > 0.0 && si + sj <= min_len && -u1 < t1 && -u0 > t0 && (mi < mj || (mi == mj && i > j))
+        })
+    };
+    let keep: Vec<bool> = (0..groups.len()).map(|i| !inner(i)).collect();
     let mut out = vec![];
     let mut side = SIDES.len();
-    for (n, faces) in groups {
+    for (gi, (n, faces)) in groups.into_iter().enumerate() {
+        if !keep[gi] {
+            continue;
+        }
         let u = [n[1], -n[0]];
         let (mut s_line, mut t_min, mut t_max) = (f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
         let (mut corners, mut feats, mut spans) = (vec![], vec![], vec![]);
-        for &(a, b) in &faces {
+        for &(a, b, apex) in &faces {
             let (ta, tb) = (dot(a, u), dot(b, u));
-            s_line = s_line.max(dot(a, n)).max(dot(b, n));
+            s_line = s_line.max(dot(a, n)).max(dot(b, n)).max(dot(apex, n));
             t_min = t_min.min(ta).min(tb);
             t_max = t_max.max(ta).max(tb);
             corners.extend([ta, tb]);
@@ -750,6 +775,43 @@ mod tests {
         let steps = south.iter().find(|d| d.chain == CHAIN_STEPS).expect("Stufen-Kette");
         assert_eq!(steps.pts.len(), 4, "{steps:?}");
         assert!((total(steps) - 10.3).abs() < 1e-6);
+    }
+
+    /// Bogenwand mit schiefer Sehne: Sehnen-Kette parallel zur Sehne, Masslinie vor dem Bogenscheitel
+    /// (nicht vor der Sehne, sonst kreuzte sie die Bogenmass-Kette); keine Ketten auf den Bogen-Facetten.
+    #[test]
+    fn bogenwand_schief_als_sehne() {
+        let mut walls = rotated_rect(10.0, 6.0, 30.0);
+        walls[3].bulge = -0.35;
+        let a = walls[3].arc().unwrap();
+        let dims = auto_exterior_dimensions(&walls, &[], 100.0);
+        let cu = { let (p, q) = (walls[3].start, walls[3].end); let l = (q[0] - p[0]).hypot(q[1] - p[1]); [(q[0] - p[0]) / l, (q[1] - p[1]) / l] };
+        let chord: Vec<&DimChain> = dims.iter().filter(|d| d.side >= 4 && parallel(dir(d), cu) && d.pts[0][0] < 1.0).collect();
+        assert_eq!(chord.len(), 1, "{chord:?}");
+        let d = chord[0];
+        assert_eq!(d.chain, CHAIN_TOTAL);
+        let dd = dir(d);
+        let n = [-dd[1], dd[0]];
+        let apex = a.point(a.length() / 2.0, if a.radius_at(0.15) > a.radius_at(-0.15) { 0.15 } else { -0.15 });
+        assert!((dot(d.pts[0], n) - dot([apex.x, apex.y], n)).abs() < 1e-6, "{d:?}");
+        // Sehne kürzer als der Bogen, länger als die Achs-Sehne (6 m).
+        assert!(total(d) > 6.0 && total(d) < a.length() + 0.3, "{}", total(d));
+        // Vier Fassaden-Richtungen (Sehne ersetzt die Westseite), keine weiteren.
+        assert_eq!(dims.iter().filter(|d| d.side >= 4 && d.chain == CHAIN_TOTAL).count(), 4);
+    }
+
+    /// Freistehende schiefe Mauer neben dem Gebäude: nur die abgewandte Fläche wird bemasst.
+    #[test]
+    fn freistehende_schiefe_mauer_einmal() {
+        let mut walls = l_walls();
+        walls.push(WallIn { start: [-3.0, 2.0], end: [-6.0, 6.0], thickness: 0.3, shift: 0.0, bulge: 0.0 });
+        let dims = auto_exterior_dimensions(&walls, &[], 100.0);
+        let obl: Vec<&DimChain> = dims.iter().filter(|d| d.side >= 4).collect();
+        assert_eq!(obl.len(), 1, "{obl:?}");
+        // Abgewandte Seite: Normale zeigt nach Westen/Süden (weg vom Gebäude bei x > 0).
+        let dd = dir(obl[0]);
+        assert!(-dd[1] < 0.0, "{obl:?}");
+        assert!((total(obl[0]) - 5.0).abs() < 1e-6);
     }
 
     /// Achsparallele Grundrisse: keine schiefen Ketten.
