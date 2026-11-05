@@ -2454,6 +2454,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (`floor_finish_pattern`, [100]), kein Dach — richtig so (Boden des DG). (3) Aussenbemassung: Teilstrecken unter
   1,5 mm Papier (Bogenfacetten am Erkerscheitel, Mauerversprünge) werden zusammengefasst (`auto_dimensions::thin`); Test
   `keine_kleinmasse`. · S
+- ✅ **[134] Wandöffnungen beim Kopieren mitnehmen.** (5.11.) Kopie/Reihe/Verteilen/gespiegelte Kopie (Bewegen,
+  Drehen, Spiegeln, Skalieren) kopieren die Türen/Fenster der kopierten Wände mit (neue ids, `hostWallId` = Wandkopie,
+  `position` unverändert, da die Wand starr mitgeht); mitmarkierte Öffnungen entstehen nur einmal (Öffnungen sind keine
+  eigenen Transformations-Elemente). Spiegeln kehrt den Türaufschlag (`swing` links ↔ rechts, Scharnier bleibt) — jetzt
+  auch beim Verschieben-Spiegeln (vorher blieb die Tür ungespiegelt). Assoziative Bemassung, mit der Wand kopiert:
+  Bezüge auf deren Öffnungen zeigen auf die kopierten Öffnungen (bei starrer Kopie). Einfügen (`cmd_paste`) hängt nun
+  auch Dach-/Deckenöffnungen an Dach-/Deckenkopie (Zwischenablage sammelt sie mit). Tests: `wandoeffnungen_werden_mitkopiert`,
+  `oeffnungen_folgen_kopiertem_wirt`, vitest `elementClipboard`. Offen: Skalieren-Kopie lässt `position`/Breite
+  unverändert (wie Skalieren-Verschieben); nicht in der Tauri-App geprüft. · S
 
 ## Priorität 4 — später
 

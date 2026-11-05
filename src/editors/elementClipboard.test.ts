@@ -116,6 +116,13 @@ describe("collectElementClipboard", () => {
     expect(clip.ceilings.length).toBe(1);
     expect(isClipboardEmpty(clip)).toBe(false);
   });
+
+  it("[134] kopiert Deckenöffnungen mit ihrer Decke, nicht ohne sie", () => {
+    const p = project();
+    p.openings!.push({ ...opening("oc", ""), hostCeilingId: "c1", hostPoint: { x: 1, y: 1 } });
+    expect(collectElementClipboard(p, { ...emptySel(), ceilingIds: ["c1"] })!.openings.map((o) => o.id)).toEqual(["oc"]);
+    expect(collectElementClipboard(p, { ...emptySel(), wallIds: ["w1"] })!.openings.map((o) => o.id)).toEqual(["o1"]);
+  });
 });
 
 describe("pasteElementClipboard", () => {

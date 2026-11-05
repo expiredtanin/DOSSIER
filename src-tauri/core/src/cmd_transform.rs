@@ -303,6 +303,23 @@ fn surface_host(o: &Value) -> Option<(&'static str, &str)> {
     s("hostRoofId").map(|id| ("hostRoofId", id)).or_else(|| s("hostCeilingId").map(|id| ("hostCeilingId", id)))
 }
 
+/// Wandöffnung ([134]): `position` (ab Wand-Start) bleibt gültig, weil die Wand starr mitgeht; eine
+/// Spiegelung kehrt den Aufschlag einer Tür (`swing` links ↔ rechts der Wandachse), damit die Tür
+/// gespiegelt aufschlägt (Händigkeit wechselt). Das Scharnier bleibt am selben Pfosten (Start ↦ Start).
+fn mv_wall_opening(o: &Value, xf: &Xf) -> Value {
+    let door = field(o, "kind").and_then(Value::as_str) == Some("door") || field(o, "swing").is_some();
+    if !(door && xf.reverses()) {
+        return o.clone();
+    }
+    let right = field(o, "swing").and_then(Value::as_str) == Some("right");
+    with(o, "swing", Value::String(if right { "left" } else { "right" }.into()))
+}
+
+/// Wirtswand einer Wandöffnung (leer bei Dach-/Deckenöffnungen).
+fn wall_host(o: &Value) -> Option<&str> {
+    field(o, "hostWallId").and_then(Value::as_str).filter(|v| !v.is_empty())
+}
+
 fn mv_room(r: &Value, xf: &Xf) -> Value {
     let mut f = vec![("boundary", xf.pts(field(r, "boundary")))];
     if truthy(field(r, "stampAnchor")) {
@@ -594,6 +611,14 @@ pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq)
         };
         let walls = Ids::of(sel.wall_ids.iter().map(String::as_str));
         patch("walls", &|w| walls.has(w) && !locked(w), &|w| mv_wall(w, &xf));
+        // Gespiegelte Wände ([134]): Türen ihrer Öffnungen schlagen gespiegelt auf.
+        if xf.reverses() {
+            let mirrored: std::collections::HashSet<&str> =
+                list(root, "walls").iter().filter(|w| walls.has(w) && !locked(w)).filter_map(|w| id_of(w)).collect();
+            if !mirrored.is_empty() {
+                patch("openings", &|o| wall_host(o).is_some_and(|h| mirrored.contains(h)) && mv_wall_opening(o, &xf) != *o, &|o| mv_wall_opening(o, &xf));
+            }
+        }
         let draw = Ids::of(sel.drawings());
         if !draw.is_empty() {
             let same = |id: &str| (moved.contains(id) || moved_openings.contains(id)).then(|| id.to_owned());
@@ -646,8 +671,17 @@ pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq)
             })
             .collect();
         let new_ids: Vec<String> = prefixes.iter().map(|p| ids.next(p)).collect();
-        let copied: std::collections::HashMap<&str, &str> = items.iter().zip(&new_ids).filter_map(|((_, e), n)| Some((id_of(e)?, n.as_str()))).collect();
-        let to_copy = |id: &str| copied.get(id).map(|n| (*n).to_owned());
+        let mut copied: std::collections::HashMap<&str, String> = items.iter().zip(&new_ids).filter_map(|((_, e), n)| Some((id_of(e)?, n.clone()))).collect();
+        // Öffnungen kopierter Wände ([134]) mit neuer id an der neuen Wand — vor den Zeichnungen, damit
+        // Bemassungs-Bezüge auf diese Öffnungen auf die Kopie umgeschrieben werden. Öffnungen sind keine
+        // eigenen Transformations-Elemente; mitmarkierte entstehen so nur einmal.
+        for o in list(root, "openings") {
+            let (Some(oid), Some(nh)) = (id_of(o), wall_host(o).and_then(|h| copied.get(h)).cloned()) else { continue };
+            let nid = ids.next("O");
+            new_openings.push(with_all(&mv_wall_opening(o, &xf), vec![("id", Value::String(nid.clone())), ("hostWallId", Value::String(nh))]));
+            copied.insert(oid, nid);
+        }
+        let to_copy = |id: &str| copied.get(id).cloned();
         for ((kind, e), new_id) in items.iter().zip(&new_ids) {
             let (slot, v) = match kind {
                 Kind::Wall => (0, mv_wall(e, &xf)),
@@ -1145,6 +1179,66 @@ mod tests {
         assert_eq!(items[0]["hostRoofId"], json!(new_roof));
         assert_ne!(items[0]["id"], json!("o1"));
         assert_eq!(items[0]["hostPoint"], json!({"x":11,"y":2}));
+    }
+
+    /// [134] Wandöffnungen werden mit ihrer Wand kopiert (Kopie, Reihe, gespiegelte Kopie): neue ids,
+    /// neue Wirtswand, gleiche Lage entlang der Wand; Spiegeln kehrt den Türaufschlag wie beim
+    /// Verschieben-Spiegeln; mitmarkierte Öffnungen entstehen nur einmal; Bemassungs-Bezüge folgen.
+    #[test]
+    fn wandoeffnungen_werden_mitkopiert() {
+        let r = root(json!({
+            "walls":[{"id":"w","start":{"x":0,"y":0},"end":{"x":5,"y":0}},{"id":"w2","start":{"x":0,"y":3},"end":{"x":5,"y":3}}],
+            "openings":[
+                {"id":"d","hostWallId":"w","kind":"door","position":1,"width":0.9,"swing":"left","hinge":"start"},
+                {"id":"f","hostWallId":"w","kind":"window","position":3,"width":1.2},
+                {"id":"x","hostWallId":"w2","kind":"door","position":1,"width":0.9},
+                {"id":"r","hostWallId":"","hostRoofId":"rf","hostPoint":{"x":1,"y":1}}
+            ],
+            "drawings2d":[{"id":"m","geom":{"shape":"dimension","pts":[{"x":1,"y":0},{"x":1.9,"y":0}],"refs":[{"id":"d","feature":"opening","index":0},{"id":"d","feature":"opening","index":1}]}}]}));
+        let run = |op: &str, pts: Value, mode: &str, sel: Value, count: f64| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":sel,"op":op,"pts":pts,"mode":mode,"count":count,"stamp":"s"})).unwrap();
+            transform_ops(&r, &Project::default(), &req).iter().map(|o| o.to_json()).collect::<Vec<_>>()
+        };
+        let added = |ops: &[Value], c: &str| ops.iter().find(|o| o["kind"] == "add" && o["collection"] == c).map(|o| o["items"].as_array().unwrap().clone()).unwrap_or_default();
+        // Kopie (Tür + Fenster mitmarkiert): 2 neue Öffnungen an der neuen Wand, nicht doppelt.
+        let ops = run("move", json!([[0, 0], [0, 10]]), "copy", json!({"wallIds":["w"],"openingIds":["d","f"]}), 1.0);
+        let nw = added(&ops, "walls")[0]["id"].as_str().unwrap().to_owned();
+        let os = added(&ops, "openings");
+        assert_eq!(os.len(), 2);
+        for (o, (old, pos)) in os.iter().zip([("d", 1), ("f", 3)]) {
+            assert_eq!(o["hostWallId"], json!(nw));
+            assert_ne!(o["id"], json!(old));
+            assert_eq!(o["position"], json!(pos));
+        }
+        assert_eq!(os[0]["swing"], "left", "Verschieben-Kopie behält den Aufschlag");
+        // Reihe ×3: je Wand Tür + Fenster.
+        let ops = run("move", json!([[0, 0], [0, 10]]), "array", json!({"wallIds":["w"]}), 3.0);
+        let (ws, os) = (added(&ops, "walls"), added(&ops, "openings"));
+        assert_eq!((ws.len(), os.len()), (3, 6));
+        for w in &ws {
+            assert_eq!(os.iter().filter(|o| o["hostWallId"] == w["id"]).count(), 2);
+        }
+        let mut ids: Vec<&str> = os.iter().map(|o| o["id"].as_str().unwrap()).collect();
+        ids.dedup();
+        assert_eq!(ids.len(), 6, "eindeutige ids");
+        // Gespiegelte Kopie: Tür schlägt gespiegelt auf (links → rechts), Scharnier/Lage bleiben.
+        let ops = run("mirror", json!([[0, 1], [5, 1]]), "copy", json!({"wallIds":["w","w2"]}), 1.0);
+        let os = added(&ops, "openings");
+        assert_eq!(os.len(), 3);
+        assert_eq!((&os[0]["swing"], &os[0]["hinge"], &os[0]["position"]), (&json!("right"), &json!("start"), &json!(1)));
+        assert!(os[1].get("swing").is_none(), "Fenster ohne Aufschlag");
+        assert_eq!(os[2]["swing"], "right", "fehlender Aufschlag gilt als links");
+        // Verschieben-Spiegeln kehrt denselben Aufschlag (gleiches Ergebnis wie die gespiegelte Kopie).
+        let ops = run("mirror", json!([[0, 1], [5, 1]]), "move", json!({"wallIds":["w"]}), 1.0);
+        let rep: Vec<&Value> = ops.iter().filter(|o| o["kind"] == "replace" && o["collection"] == "openings").collect();
+        assert_eq!(rep.len(), 1, "nur die Tür ändert sich");
+        assert_eq!((&rep[0]["entity"]["id"], &rep[0]["entity"]["swing"]), (&json!("d"), &json!("right")));
+        // Bemassung auf die Tür, mit der Wand kopiert: Bezug zeigt auf die kopierte Tür.
+        let ops = run("move", json!([[0, 0], [0, 10]]), "copy", json!({"wallIds":["w"],"drawingIds":["m"]}), 1.0);
+        let nd = added(&ops, "openings")[0]["id"].clone();
+        let dim = &added(&ops, "drawings2d")[0];
+        assert_eq!(dim["geom"]["refs"][0]["id"], nd);
+        assert_eq!(dim["geom"]["refs"][1]["id"], nd);
     }
 
     #[test]

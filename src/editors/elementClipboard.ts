@@ -107,7 +107,13 @@ export function collectElementClipboard(
   // Öffnungen: automatisch mitkopiert, wenn ihre Wirtswand mitkopiert wird
   // (kaskadiert wie beim Löschen einer Wand/Ebene, unabhängig davon, ob die
   // Öffnung selbst zusätzlich explizit markiert war, s. Kopfkommentar).
-  const openings = (project.openings ?? []).filter((o) => wallIds.has(o.hostWallId));
+  // Dach-/Deckenöffnungen ([134]) ebenso mit ihrem Dach/ihrer Decke.
+  const openings = (project.openings ?? []).filter(
+    (o) =>
+      wallIds.has(o.hostWallId) ||
+      (o.hostRoofId != null && roofIds.has(o.hostRoofId)) ||
+      (o.hostCeilingId != null && ceilingIds.has(o.hostCeilingId)),
+  );
   const stairIds = new Set(sel.stairIds);
   const stairs = (project.stairs ?? []).filter((s) => stairIds.has(s.id));
   const roomIds = new Set(sel.roomIds);
