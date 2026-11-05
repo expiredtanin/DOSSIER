@@ -1425,6 +1425,7 @@ export const de = {
   "resources.loadStandards.n.viewTemplates": "{n} Ansichtsvorlagen",
   "resources.loadStandards.n.hatches": "{n} Schraffuren",
   "resources.loadStandards.n.lineStyles": "{n} Linientypen",
+  "resources.loadStandards.n.blockDefs": "{n} Symbole",
   "resources.col.lambda": "Wärmeleitfähigkeit λ [W/mK]",
   "resources.col.density": "Rohdichte [kg/m³]",
   "resources.col.fireClass": "Brandverhalten (VKF)",

@@ -31,3 +31,35 @@ describe("viewportLevelPlan", () => {
     expect(plan.primitives.length).toBe(0);
   });
 });
+
+// [100] Deckenspiegel auf dem Blatt: derselbe Plan wie die Deckenspiegel-Ebene (Blattansicht und PDF rufen
+// beide `viewportLevelPlan`), Strichstärken der geschnittenen Wände wie im Grundriss.
+describe("viewportLevelPlan: Deckenspiegel ([100])", () => {
+  const q = structuredClone(p);
+  q.drawingLevels.push({ id: "ds-og", name: "Deckenspiegel OG", kind: "ceiling", visible: true, locked: false, ceilingOfId: "og" });
+  type Prim = { kind: string; wallId?: string; ceilingId?: string; cls?: string; weightMm?: number; a?: { x: number; y: number }; b?: { x: number; y: number } };
+
+  it("gleicher Inhalt wie die Ebene, auch im Druck", async () => {
+    for (const forPrint of [false, true]) {
+      const vp = await viewportLevelPlan(q, "ds-og", codes, "mittel", 50, forPrint);
+      const own = generatePlan(q, "ds-og", codes, undefined, "mittel", false, false, true, 50, forPrint);
+      expect(vp.primitives.length).toBe(own.primitives.length);
+      expect(vp.bounds).toEqual(own.bounds);
+      const prims = vp.primitives as Prim[];
+      expect(prims.some((x) => x.wallId)).toBe(true);
+      expect(prims.some((x) => x.ceilingId || x.cls === "roof-eaves")).toBe(true);
+      expect(prims.some((x) => x.cls === "door-swing" || x.cls === "door-leaf")).toBe(false);
+    }
+  });
+
+  it("Wand-Strichstärken wie im Grundriss (gleicher Massstab)", async () => {
+    const ds = (await viewportLevelPlan(q, "ds-og", codes, "mittel", 50, true)).primitives as Prim[];
+    const gr = (await viewportLevelPlan(q, "og", codes, "mittel", 50, true)).primitives as Prim[];
+    const wallLine = (x: Prim) => x.kind === "line" && (x.cls === "wall-outline" || x.cls === "layer-joint");
+    const key = (x: Prim) => `${x.cls}|${x.a?.x.toFixed(4)}|${x.a?.y.toFixed(4)}|${x.b?.x.toFixed(4)}|${x.b?.y.toFixed(4)}`;
+    const widths = new Map(gr.filter(wallLine).map((x) => [key(x), x.weightMm]));
+    const shared = ds.filter((x) => wallLine(x) && widths.has(key(x)));
+    expect(shared.length).toBeGreaterThan(100);
+    for (const x of shared) expect(x.weightMm, key(x)).toBe(widths.get(key(x)));
+  });
+});

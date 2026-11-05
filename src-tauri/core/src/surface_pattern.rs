@@ -73,7 +73,7 @@ pub fn thin_factor(period_m: f64, scale: f64) -> Option<u32> {
     Some(m)
 }
 
-fn point_in(pt: P, poly: &[P]) -> bool {
+pub(crate) fn point_in(pt: P, poly: &[P]) -> bool {
     let mut inside = false;
     let n = poly.len();
     let mut j = n - 1;

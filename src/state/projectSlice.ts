@@ -1055,7 +1055,7 @@ export function createProjectSlice(
       // Rückmeldung, was hinzukam ([101]); ein Undo-Schritt.
       const ops = standardsMergeOps(get().project);
       const c = standardsMergeCounts(ops);
-      const parts = (["components", "wallTypes", "ceilingTypes", "roofTypes", "hatches", "lineStyles", "viewTemplates"] as const)
+      const parts = (["components", "wallTypes", "ceilingTypes", "roofTypes", "hatches", "lineStyles", "viewTemplates", "blockDefs"] as const)
         .filter((k) => c[k] > 0)
         .map((k) => t(`resources.loadStandards.n.${k}`, { n: c[k] }));
       if (ops.length) applyChange(ops);

@@ -1418,6 +1418,7 @@ export const en: Record<TranslationKey, string> = {
   "resources.loadStandards.n.viewTemplates": "{n} view templates",
   "resources.loadStandards.n.hatches": "{n} hatches",
   "resources.loadStandards.n.lineStyles": "{n} line types",
+  "resources.loadStandards.n.blockDefs": "{n} symbols",
   "resources.col.lambda": "Thermal conductivity λ [W/mK]",
   "resources.col.density": "Density [kg/m³]",
   "resources.col.fireClass": "Reaction to fire (VKF)",
