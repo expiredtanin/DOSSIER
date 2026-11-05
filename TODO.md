@@ -2483,6 +2483,11 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   auch Dach-/Deckenöffnungen an Dach-/Deckenkopie (Zwischenablage sammelt sie mit). Tests: `wandoeffnungen_werden_mitkopiert`,
   `oeffnungen_folgen_kopiertem_wirt`, vitest `elementClipboard`. Offen: Skalieren-Kopie lässt `position`/Breite
   unverändert (wie Skalieren-Verschieben); nicht in der Tauri-App geprüft. · S
+- ✅ **[135] CLI-SVG mit Schraffur.** (5.11.) `dossier-cli … plan|section|elevation --hatch` (Option `hatch` von
+  `planToSvgString`, 7. Eintrag in `plan_svg_string`-Optionen) breitet die Schraffurlinien im SVG aus: Kern `plan/svg.rs`
+  nutzt Generator und Beschnitt des Druckpfads (`hatch_lines`, `build_hatch_runs`, Zufall; Bild/Vollfläche bleiben Füllung).
+  Standard aus: Ausgabe, Goldens, KI-Werkzeuge, Öffnungsvorschau byte-gleich. Test `planToSvgString.hatch.test.ts`;
+  Beispiel-EG angesehen (Chromium). Offen: Vollflächen-/Bildschraffur und Schraffur-Löcher nicht ausgebreitet; nicht in der Tauri-App geprüft. · S
 
 ## Priorität 4 — später
 

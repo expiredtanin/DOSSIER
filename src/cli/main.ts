@@ -5,10 +5,10 @@
 //   dossier-cli <projekt.obp> info
 //   dossier-cli <projekt.obp> validate
 //   dossier-cli <projekt.obp> migrate [--out neu.obp]
-//   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--sketch] [--format svg|json] [--out eg.svg]
+//   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--sketch] [--hatch] [--format svg|json] [--out eg.svg]
 //                                                  json = render2d-Szene (planToRenderScene)
-//   dossier-cli <projekt.obp> section <Name> [--sketch] [--out schnitt.svg]       (--format json: render2d-Szene)
-//   dossier-cli <projekt.obp> elevation <Name> [--sketch] [--out ansicht.svg]     (--sketch: Skizzenstil [67])
+//   dossier-cli <projekt.obp> section <Name> [--sketch] [--hatch] [--out schnitt.svg]       (--format json: render2d-Szene)
+//   dossier-cli <projekt.obp> elevation <Name> [--sketch] [--hatch] [--out ansicht.svg]     (--sketch: Skizzenstil [67])
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
@@ -603,7 +603,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
         return 0;
       }
-      out(args, planToSvgString(plan, { scaleDenominator: scale }), `${lvl.name}.svg`);
+      out(args, planToSvgString(plan, { scaleDenominator: scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }), `${lvl.name}.svg`);
       return 0;
     }
       return 0;
@@ -629,7 +629,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
         return 0;
       }
-      out(args, planToSvgString(plan, { scaleDenominator: scale }), `${lvl.name}.svg`);
+      out(args, planToSvgString(plan, { scaleDenominator: scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }), `${lvl.name}.svg`);
       return 0;
     }
     case "dxf":
@@ -856,7 +856,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         await time("generatePlan", () => generatePlan(project, floor.id, allCodes));
         const plan = generatePlan(project, floor.id, allCodes);
         await time("planToRenderScene", () => planToRenderScene(plan));
-        await time("planToSvgString", () => planToSvgString(plan, { scaleDenominator: scale }));
+        await time("planToSvgString", () => planToSvgString(plan, { scaleDenominator: scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }));
       }
       {
         // Erstes Mal auf einem frischen Dokument (ohne Cache, [58]); die Zeile darunter misst die Wiederholung.

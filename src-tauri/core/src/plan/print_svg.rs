@@ -43,7 +43,7 @@ const PEN_STEPS: [f64; 7] = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0];
 const MIN_PEN_MM: f64 = 0.13;
 
 /// Mm-Strichstärke auf die nächste Stift-Stufe (`quantizePen`).
-fn quantize_pen(mm: f64) -> f64 {
+pub(super) fn quantize_pen(mm: f64) -> f64 {
     let w = jsnum::max(MIN_PEN_MM, mm);
     for s in PEN_STEPS {
         if w <= s + 1e-6 {
@@ -246,7 +246,7 @@ fn fill_parallel(poly: &[V2], angle: f64, spacing: f64, out: &mut Vec<(V2, V2)>)
 }
 
 /// Muster, die der Kern-Generator als Linien/Polylinien erzeugt (Schichtmuster, Streu-/Punktmuster, Doppellinien).
-fn is_generated(p: Pattern) -> bool {
+pub(super) fn is_generated(p: Pattern) -> bool {
     matches!(
         p,
         Pattern::Insulation | Pattern::InsulationHard | Pattern::InsulationWave | Pattern::Timber | Pattern::Earth | Pattern::Gravel | Pattern::Stone | Pattern::Dots | Pattern::WoodBased | Pattern::Wood | Pattern::Barrier
@@ -254,7 +254,7 @@ fn is_generated(p: Pattern) -> bool {
 }
 
 /// Schraffurlinien in Papier-mm (`hatchLines`).
-fn hatch_lines(poly_mm: &[V2], h: &Hatch, mm_per_m: f64) -> Vec<(V2, V2)> {
+pub(super) fn hatch_lines(poly_mm: &[V2], h: &Hatch, mm_per_m: f64) -> Vec<(V2, V2)> {
     let unit_mm = (1.0 / 90.0) * mm_per_m;
     let tile_mm = 8.0 * h.scale * unit_mm;
     let spacing = jsnum::max(0.5, tile_mm);
@@ -269,7 +269,7 @@ fn hatch_lines(poly_mm: &[V2], h: &Hatch, mm_per_m: f64) -> Vec<(V2, V2)> {
 
 /// Strichmuster der Schraffurlinien in Papier-mm: dieselben Modell-Längen wie Szene/Chunk-Pfad
 /// (`hatch::hatch_dash` × `DASH_MM_TO_M`), nur auf das Blatt (`mm_per_m`) abgebildet.
-fn hatch_dash_paper(h: &Hatch, mm_per_m: f64) -> Vec<f64> {
+pub(super) fn hatch_dash_paper(h: &Hatch, mm_per_m: f64) -> Vec<f64> {
     hatch::hatch_dash(h).iter().map(|d| jsnum::max(0.0, *d) * hatch::DASH_MM_TO_M * mm_per_m).collect()
 }
 
