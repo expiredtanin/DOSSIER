@@ -12,9 +12,12 @@ fn json<T: serde::Serialize>(v: &T) -> Result<String, String> {
 /// Dokuments ([58], `model3d_cache`) — gleiches JSON wie [`run`].
 pub fn run_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text: &str) -> Result<String, String> {
     let explode = args.get(4).copied().is_some_and(|g| g.is_finite() && g > 0.0);
-    if name == "model3dParts" && args.len() >= 3 && !explode {
+    // `model3dPartsDelta`: wie `model3dParts` (ohne Explosion), `args[5]` = Laufnummer der letzten Antwort
+    // des Aufrufers (0 = alles), Antwort als Änderung (`model3d_cache::write_delta`).
+    let delta = (name == "model3dPartsDelta").then(|| args.get(5).copied().filter(|m| m.is_finite() && *m >= 0.0).unwrap_or(0.0) as u64);
+    if (name == "model3dParts" || delta.is_some()) && args.len() >= 3 && !explode {
         let voids = args.get(3).is_some_and(|v| *v != 0.0);
-        let out = d.model3d_parts(args[0] != 0.0, args[1], args[2] != 0.0, voids)?;
+        let out = d.model3d_parts(args[0] != 0.0, args[1], args[2] != 0.0, voids, delta)?;
         if voids {
             let p = d.project()?;
             let cuts = crate::solid_specs::void_cuts(p, &out.parts.walls, &out.parts.slabs);

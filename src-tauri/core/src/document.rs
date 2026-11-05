@@ -794,13 +794,13 @@ impl Document {
 
     /// 3D-Modell in Teilen ([58]) wie `model3d::parts`, Wände und Öffnungs-Einbauteile je Wand aus dem
     /// Cache (`model3d_cache`); `structs` wie dort.
-    pub fn model3d_parts(&mut self, layered: bool, detail: f64, for_section: bool, structs: bool) -> Result<crate::model3d_cache::CachedParts, String> {
+    pub fn model3d_parts(&mut self, layered: bool, detail: f64, for_section: bool, structs: bool, delta: Option<u64>) -> Result<crate::model3d_cache::CachedParts, String> {
         self.project()?;
         let p = self.typed.as_ref().expect("gerade gelesen");
         let n_open = p.openings.as_ref().map_or(0, Vec::len);
         let walls = self.revs.items("walls", p.walls.len()).to_vec();
         let openings = self.revs.items("openings", n_open).to_vec();
-        self.model3d_cache.parts(p, &self.revs, &walls, &openings, layered, detail, for_section, structs)
+        self.model3d_cache.parts(p, &self.revs, &walls, &openings, layered, detail, for_section, structs, delta)
     }
 
     /// Letzte Statistik des 3D-Caches (Tests): neu gerechnete Wände / Öffnungs-Wände.

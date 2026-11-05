@@ -56,6 +56,48 @@ fn profile_model3d() {
     });
 }
 
+/// Inkrementell über das Dokument: erste Abfrage, ohne Änderung, nach 1 Wand-Änderung; gleich wie voll.
+#[test]
+#[ignore]
+fn incremental_model3d() {
+    for f in std::env::var("DUMP_FILES").expect("DUMP_FILES").split(',') {
+        for args in [[1.0, 2.0, 0.0, 0.0, 0.0], [1.0, 2.0, 0.0, 1.0, 0.0]] {
+            let text = std::fs::read_to_string(f).unwrap();
+            let mut d = dossier_core::document::Document::from_json(&text).unwrap();
+            let t0 = Instant::now();
+            dossier_core::queries::run_doc(&mut d, "model3dParts", &args, "").unwrap();
+            let first = t0.elapsed().as_secs_f64() * 1000.0;
+            let t0 = Instant::now();
+            dossier_core::queries::run_doc(&mut d, "model3dParts", &args, "").unwrap();
+            let same = t0.elapsed().as_secs_f64() * 1000.0;
+            let mut w = d.root()["walls"][3].clone();
+            w["height"] = serde_json::json!(w["height"].as_f64().unwrap_or(2.6) + 0.1);
+            d.commit(
+                vec![dossier_core::ops::Op::Replace {
+                    collection: "walls".into(),
+                    entity: w,
+                }],
+                None,
+                0.0,
+                false,
+            )
+            .unwrap();
+            let t0 = Instant::now();
+            let inc = dossier_core::queries::run_doc(&mut d, "model3dParts", &args, "").unwrap();
+            let edit = t0.elapsed().as_secs_f64() * 1000.0;
+            let p = d.project().unwrap().clone();
+            let t0 = Instant::now();
+            let full = dossier_core::queries::run(&p, "model3dParts", &args, "").unwrap();
+            let full_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            assert!(inc == full, "{f}: inkrementell ≠ voll");
+            println!(
+                "{args:?} {f}: erste {first:.1} ms, gleich {same:.1} ms, nach 1 Wand {edit:.1} ms (neu {:?}), voll {full_ms:.1} ms",
+                d.model3d_rebuilt()
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore]
 fn dump_parts() {
