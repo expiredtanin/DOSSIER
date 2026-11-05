@@ -42,8 +42,57 @@ pub struct BooleanMeshF64 {
     pub indices: Vec<u32>,
 }
 
+/// Schweiss-Toleranz: relativ zur grössten Koordinate (Eingaben kommen oft als f32 — eine
+/// f32-Einheit in der letzten Stelle ist bis 2⁻²³ ≈ 1,2e-7 relativ, je Achse; Spielraum ×8),
+/// mindestens 1e-7 m.
+fn weld_tolerance(positions: &[f64]) -> f64 {
+    let m = positions.iter().fold(0.0f64, |m, x| m.max(x.abs()));
+    (1e-6 * m).max(1e-7)
+}
+
+/// Verschweisst Ecken, die näher als die Toleranz beieinander liegen (räumliches Raster mit
+/// Nachbarzellen). Truck vernetzt jede Fläche für sich; bei nicht achsparallelen Körpern sind
+/// gemeinsame Ecken dann nur fast gleich ([108], [G7]). Liefert die vereinten Ecken und je
+/// Eingabe-Ecke den neuen Index. Reihenfolge-stabil: die erste Ecke einer Gruppe bleibt.
+fn weld(positions: &[f64]) -> (Vec<f64>, Vec<u32>) {
+    let tol = weld_tolerance(positions);
+    let tol2 = tol * tol;
+    let cell = |x: f64| (x / tol).floor() as i64;
+    let mut grid: HashMap<[i64; 3], Vec<u32>> = HashMap::new();
+    let mut verts: Vec<f64> = Vec::new();
+    let mut map: Vec<u32> = Vec::with_capacity(positions.len() / 3);
+    for c in positions.chunks_exact(3) {
+        let p = [c[0] + 0.0, c[1] + 0.0, c[2] + 0.0];
+        let k = [cell(p[0]), cell(p[1]), cell(p[2])];
+        let near = |id: &u32| {
+            let j = *id as usize * 3;
+            let d = [verts[j] - p[0], verts[j + 1] - p[1], verts[j + 2] - p[2]];
+            d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= tol2
+        };
+        let mut found: Option<u32> = None;
+        for n in 0..27i64 {
+            let key = [k[0] + n % 3 - 1, k[1] + (n / 3) % 3 - 1, k[2] + n / 9 - 1];
+            if let Some(id) = grid.get(&key).and_then(|ids| ids.iter().find(|id| near(id))) {
+                found = Some(*id);
+                break;
+            }
+        }
+        let id = match found {
+            Some(id) => id,
+            None => {
+                let id = (verts.len() / 3) as u32;
+                verts.extend_from_slice(&p);
+                grid.entry(k).or_default().push(id);
+                id
+            }
+        };
+        map.push(id);
+    }
+    (verts, map)
+}
+
 /// Prüft ein Eingabe-Mesh und liefert ein verschweisstes, nach aussen orientiertes Netz
-/// (gleiche Koordinaten werden vereint; Null-Flächen-Dreiecke entfallen).
+/// (Ecken innerhalb der Schweiss-Toleranz werden vereint; Null-Flächen-Dreiecke entfallen).
 fn checked_mesh(positions: &[f64], indices: &[u32], what: &str) -> Result<MeshGL64, String> {
     if positions.len() % 3 != 0 || indices.len() % 3 != 0 {
         return Err(format!("{what}: Positionen/Indizes müssen Dreier-Gruppen sein"));
@@ -58,19 +107,7 @@ fn checked_mesh(positions: &[f64], indices: &[u32], what: &str) -> Result<MeshGL
         return Err(format!("{what}: nicht endliche Koordinaten"));
     }
     let n_in = positions.len() / 3;
-    // Verschweissen über exakt gleiche Koordinaten (-0.0 == 0.0).
-    let mut ids: HashMap<[u64; 3], u32> = HashMap::new();
-    let mut verts: Vec<f64> = Vec::new();
-    let mut map: Vec<u32> = Vec::with_capacity(n_in);
-    for c in positions.chunks_exact(3) {
-        let key = [(c[0] + 0.0).to_bits(), (c[1] + 0.0).to_bits(), (c[2] + 0.0).to_bits()];
-        let next = ids.len() as u32;
-        let id = *ids.entry(key).or_insert_with(|| {
-            verts.extend_from_slice(&[c[0] + 0.0, c[1] + 0.0, c[2] + 0.0]);
-            next
-        });
-        map.push(id);
-    }
+    let (verts, map) = weld(positions);
     let mut tris: Vec<u32> = Vec::with_capacity(indices.len());
     for t in indices.chunks_exact(3) {
         let mut m = [0u32; 3];
@@ -280,6 +317,38 @@ mod tests {
         let r = boolean_mesh_core(&a.0, &a.1, &b.0, &b.1, "union").unwrap();
         assert!(!r.empty);
         assert!((volume_of(&r.positions, &r.indices) - 2.0).abs() < 1e-6);
+    }
+
+    /// Gedrehter Quader, jede Fläche mit eigenen Ecken (wie truck vernetzt) und Rundungs-
+    /// fehlern in der Grössenordnung von f32: wird mit Toleranz zu einem geschlossenen Netz ([108]).
+    fn rotated_cuboid_per_face(w: f64, l: f64, h: f64, deg: f64, jitter: f64) -> (Vec<f64>, Vec<u32>) {
+        let (p, i) = cuboid(0.0, 0.0, 0.0, w, l, h);
+        let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
+        let mut pos = Vec::new();
+        let mut idx = Vec::new();
+        for (n, &v) in i.iter().enumerate() {
+            let j = v as usize * 3;
+            let e = jitter * (((n * 7919) % 13) as f64 - 6.0) / 6.0;
+            pos.extend_from_slice(&[p[j] * c - p[j + 1] * s + e, p[j] * s + p[j + 1] * c - e, p[j + 2] + e]);
+            idx.push(n as u32);
+        }
+        (pos, idx)
+    }
+
+    #[test]
+    fn rotated_unshared_corners_are_welded_with_tolerance() {
+        let a = rotated_cuboid_per_face(5.0, 0.3, 2.6, 30.0, 2e-7);
+        let b = rotated_cuboid_per_face(1.2, 0.3, 1.2, 30.0, 2e-7);
+        let b: Vec<f64> = b.0.chunks(3).flat_map(|q| {
+            let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+            [q[0] + c, q[1] + s, q[2] + 0.9]
+        }).collect();
+        let bi: Vec<u32> = (0..36).collect();
+        let r = boolean_mesh_core(&a.0, &a.1, &b, &bi, "difference").unwrap();
+        let expect = 5.0 * 0.3 * 2.6 - 1.2 * 0.3 * 1.2;
+        assert!((volume_of(&r.positions, &r.indices) - expect).abs() < 1e-4);
+        // Wirklich offene Netze bleiben abgelehnt.
+        assert!(boolean_mesh_core(&a.0[..a.0.len() - 9], &a.1[..33], &b, &bi, "union").is_err());
     }
 
     #[test]
