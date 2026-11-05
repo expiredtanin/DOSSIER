@@ -21,7 +21,7 @@
 //              2 = IfcPositiveRatioMeasure (value = Zahl), 6 = IfcLabel (Zeichenketten-Index),
 //              7 = IfcThermalTransmittanceMeasure (Zahl),
 //              3 = IfcQuantityLength, 4 = IfcQuantityArea, 5 = IfcQuantityVolume (value = Zahl, ≥ 0).
-//              Heisst der Satz `Qto_…`, entsteht je Bauteil ein eigener IfcElementQuantity (Basismengen,
+//              Heisst der Satz `Qto_…` (auch `CH_Qto_…`, `Dossier_Qto_…`), entsteht je Bauteil ein eigener IfcElementQuantity (Basismengen,
 //              nie geteilt); sonst ein IfcPropertySet (gleicher Inhalt = ein Pset für alle Bauteile).
 //   structure= Geschoss-Index oder −1 (Gebäude)
 //
@@ -911,7 +911,7 @@ impl Builder {
         if pset.props.is_empty() {
             return; // IfcPropertySet verlangt mindestens eine Eigenschaft
         }
-        if pset.name.starts_with("Qto_") || pset.name.starts_with("CH_Qto_") {
+        if pset.name.starts_with("Qto_") || pset.name.starts_with("CH_Qto_") || pset.name.starts_with("Dossier_Qto_") {
             let quantities: Vec<(&'static str, String, f64)> = pset
                 .props
                 .iter()
@@ -3187,7 +3187,18 @@ mod tests {
             b.str(name);
             b.n(&[7.0, 7.0, 0.1857, 0.28]);
             b.str("STRAIGHT");
-            b.qto("Qto_StairFlightBaseQuantities", &[("Length", 3.0, 2.0), ("GrossVolume", 5.0, 1.0)]);
+            if k == 0 {
+                // Zwei Mengensätze: Basismengen + eigene Dossier-Mengen (Untersicht).
+                b.f.push(2.0);
+                for (set, (n, kind, v)) in [("Qto_StairFlightBaseQuantities", ("Length", 3.0, 2.0)), ("Dossier_Qto_StairFlight", ("SoffitArea", 4.0, 7.5))] {
+                    b.str(set);
+                    b.f.push(1.0);
+                    b.str(n);
+                    b.n(&[kind, v]);
+                }
+            } else {
+                b.qto("Qto_StairFlightBaseQuantities", &[("Length", 3.0, 2.0), ("GrossVolume", 5.0, 1.0)]);
+            }
             b.n(&[0.0, 2.0]);
             b.pts(&SQUARE);
             b.n(&[0.0, 0.2 * (k + 1) as f64]);
@@ -3230,7 +3241,9 @@ mod tests {
         let flight = first_line(&ifc, "IFCSTAIRFLIGHT");
         assert!(flight.contains(",7,7,0.1857,0.28,.STRAIGHT.);"), "{flight}");
         // Beide Läufe + Spindel: Menge je Teil; Treppe, Läufe, Podest, Geländer, Spindel in EINER Aggregation, nur die Treppe im Geschoss/Gebäude.
-        assert_eq!(count(&ifc, "IFCELEMENTQUANTITY"), 3);
+        assert_eq!(count(&ifc, "IFCELEMENTQUANTITY"), 4);
+        assert!(ifc.contains("IFCQUANTITYAREA('SoffitArea',$,$,7.5,$)"), "Dossier_Qto_… als Menge");
+        assert_eq!(count(&ifc, "IFCPROPERTYSINGLEVALUE"), 0);
         let agg = ifc.lines().find(|l| l.contains("IFCRELAGGREGATES(") && l.matches('#').count() == 8).expect("Aggregation der Treppe");
         assert!(agg.contains(",#"), "{agg}");
         let contained = first_line(&ifc, "IFCRELCONTAINEDINSPATIALSTRUCTURE");

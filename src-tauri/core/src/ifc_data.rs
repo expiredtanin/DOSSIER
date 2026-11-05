@@ -1391,7 +1391,7 @@ fn w_stair(f: &mut Flat, structure: f64, id: &str, predefined: &str, footprint: 
         f.num(p);
         let mut psets = qto("Qto_StairFlightBaseQuantities", fl.quantities.clone());
         if let Some(a) = fl.soffit_area {
-            psets.extend(qto("Dossier_StairFlightQuantities", vec![Qty { name: "SoffitArea", kind: QtyKind::Area, value: a }]));
+            psets.extend(qto("Dossier_Qto_StairFlight", vec![Qty { name: "SoffitArea", kind: QtyKind::Area, value: a }]));
         }
         w_psets(f, &psets);
         match &fl.body {

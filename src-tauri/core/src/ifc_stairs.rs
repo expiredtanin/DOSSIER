@@ -11,7 +11,7 @@
 //! zweiten Lauf. Gerade und Wendeltreppen haben einen Lauf (die Wendel-Mitte bleibt Teil davon).
 //! Die Mittelsäule (Spindel, `Stair.centerColumn`) einer Wendel ist kein Tritt: eigener Teil
 //! (IfcColumn) mit Stützen-Basismengen. Ortbeton-Läufe (Netz) tragen zusätzlich die Untersicht
-//! (Schalfläche, bei der Wendel die Wendelfläche) in `Dossier_StairFlightQuantities`.
+//! (Schalfläche, bei der Wendel die Wendelfläche) in `Dossier_Qto_StairFlight`.
 
 use crate::export_flat::{js_key, mesh_volume, orient_outward};
 use crate::ifc_quantities::{column_quantities, flight_quantities, railing_quantities, ring_area, slab_quantities, Qty};
