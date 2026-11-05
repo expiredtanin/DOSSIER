@@ -7,7 +7,7 @@
 import { useMemo } from "react";
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
-import { areaReportToCsv, buildAreaReportPdf, buildOpeningReport, externalText, openingSchedule, patchItem, roomsText, swingText } from "../core";
+import { areaReportToCsv, buildAreaReportPdf, buildOpeningReport, externalText, openingSchedule, patchItem, revealArea, revealColumns, roomsText, swingText } from "../core";
 import type { OpeningScheduleRow } from "../core";
 import type { Opening, Project } from "../model/types";
 import { downloadCsv } from "./downloadFile";
@@ -23,6 +23,8 @@ export function OpeningScheduleSection() {
   const applyChange = useStore((s) => s.applyChange);
   const notify = useStore((s) => s.notify);
   const rows = useMemo(() => openingSchedule(project), [project]);
+  // [106] Leibungsflächen je Schicht: Spalten nur, wenn eine Öffnung Schichteinzug hat.
+  const reveals = useMemo(() => revealColumns(rows), [rows]);
   const stem = `${project.name || "projekt"}-fenster-tueren`;
 
   const patch = (id: string, change: Partial<Opening>, field: string) =>
@@ -84,6 +86,11 @@ export function OpeningScheduleSection() {
                 <th>{t("openings.col.rc")}</th>
                 <th>{t("openings.col.ext")}</th>
                 <th>{t("openings.col.notes")}</th>
+                {reveals.map((k) => (
+                  <th key={k} className="num">
+                    {t("openings.col.reveal", { name: k })}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -132,6 +139,14 @@ export function OpeningScheduleSection() {
                       </select>
                     </td>
                     <td>{textInput(r, "notes", r.notes)}</td>
+                    {reveals.map((k) => {
+                      const a = revealArea(r, k);
+                      return (
+                        <td key={k} className="num">
+                          {a === null ? "" : m2(a)}
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })}
@@ -141,6 +156,7 @@ export function OpeningScheduleSection() {
       )}
       <ul className="area-notes">
         <li>{t("openings.foot")}</li>
+        {reveals.length > 0 && <li>{t("openings.revealFoot")}</li>}
       </ul>
     </div>
   );

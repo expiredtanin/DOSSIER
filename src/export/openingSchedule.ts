@@ -41,6 +41,17 @@ export interface OpeningScheduleRow {
   /** `null` = nicht bestimmbar. */
   external: boolean | null;
   notes: string;
+  /** Leibungsflächen je Wandschicht mit Schichteinzug ([106]), m²; leer ohne Regeln. */
+  revealAreas: RevealArea[];
+}
+
+/** Leibungsfläche einer Wandschicht (Form wie `RevealArea` im Kern). */
+export interface RevealArea {
+  /** Schicht-Index ab aussen. */
+  layer: number;
+  /** Bauteil-Name der Schicht (leer ohne Bauteil). */
+  name: string;
+  area: number;
 }
 
 /** Alle Fenster und Türen des Projekts (Kern-Abfrage). */
@@ -66,7 +77,45 @@ export function swingText(r: Pick<OpeningScheduleRow, "hinge" | "swing" | "dir">
   return `${t(`openings.hinge.${r.hinge}`)} · ${t(`openings.swing.${r.swing}`)} · ${t(`openings.dir.${r.dir}`)}`;
 }
 
+/** Spaltenschlüssel einer Leibungsfläche: Bauteil-Name, sonst „Schicht n". */
+export function revealKey(a: RevealArea): string {
+  return a.name || t("openings.layerN", { n: a.layer + 1 });
+}
+
+/** Optionale Spalten „Leibung <Schicht> m²" ([106]): ein Schlüssel je vorkommender Schicht (Reihenfolge des ersten Auftretens). */
+export function revealColumns(rows: OpeningScheduleRow[]): string[] {
+  const keys: string[] = [];
+  for (const r of rows) for (const a of r.revealAreas ?? []) if (!keys.includes(revealKey(a))) keys.push(revealKey(a));
+  return keys;
+}
+
+/** Fläche einer Zeile für den Spaltenschlüssel (`null` = keine). */
+export function revealArea(r: OpeningScheduleRow, key: string): number | null {
+  const hits = (r.revealAreas ?? []).filter((a) => revealKey(a) === key);
+  return hits.length ? hits.reduce((s, a) => s + a.area, 0) : null;
+}
+
+/** Hängt die Leibungs-Spalten an einen Abschnitt an (nur wenn es Flächen gibt). */
+function withReveals(sec: ReportSection, rows: OpeningScheduleRow[]): ReportSection {
+  const keys = revealColumns(rows);
+  if (!keys.length) return sec;
+  return {
+    ...sec,
+    columns: [...sec.columns, ...keys.map((name) => t("openings.col.reveal", { name }))],
+    widths: [...sec.widths, ...keys.map(() => 1.4)],
+    rows: sec.rows.map((row, i) => ({ ...row, cells: [...row.cells, ...keys.map((k) => num(revealArea(rows[i]!, k), 2))] })),
+  };
+}
+
 function windowSection(rows: OpeningScheduleRow[]): ReportSection {
+  return withReveals(windowBase(rows), rows);
+}
+
+function doorSection(rows: OpeningScheduleRow[]): ReportSection {
+  return withReveals(doorBase(rows), rows);
+}
+
+function windowBase(rows: OpeningScheduleRow[]): ReportSection {
   return {
     heading: t("openings.windows"),
     columns: [t("openings.col.mark"), t("openings.col.type"), t("openings.col.floor"), t("openings.col.rooms"), t("openings.col.width"), t("openings.col.height"), t("openings.col.sill"), t("openings.col.sound"), t("openings.col.u"), t("openings.col.rc"), t("openings.col.ext"), t("openings.col.notes")],
@@ -75,7 +124,7 @@ function windowSection(rows: OpeningScheduleRow[]): ReportSection {
   };
 }
 
-function doorSection(rows: OpeningScheduleRow[]): ReportSection {
+function doorBase(rows: OpeningScheduleRow[]): ReportSection {
   return {
     heading: t("openings.doors"),
     columns: [t("openings.col.mark"), t("openings.col.type"), t("openings.col.floor"), t("openings.col.rooms"), t("openings.col.width"), t("openings.col.height"), t("openings.col.clearWidth"), t("openings.col.clearHeight"), t("openings.col.swing"), t("openings.col.fire"), t("openings.col.sound"), t("openings.col.u"), t("openings.col.rc"), t("openings.col.ext"), t("openings.col.notes")],
@@ -92,5 +141,5 @@ export function buildOpeningReport(project: Project): AreaReport {
   const doors = rows.filter((r) => r.kind === "door");
   if (windows.length) sections.push(windowSection(windows));
   if (doors.length) sections.push(doorSection(doors));
-  return { title: t("openings.title"), projectName: project.name ?? "", sections, notes: [t("openings.foot")] };
+  return { title: t("openings.title"), projectName: project.name ?? "", sections, notes: rows.some((r) => r.revealAreas?.length) ? [t("openings.foot"), t("openings.revealFoot")] : [t("openings.foot")] };
 }

@@ -29,6 +29,22 @@ describe("Fenster- und Türliste", () => {
     expect(all.length).toBe((p.openings ?? []).length);
     expect(all.some((r) => r[0] === "T-Haus" && r.includes('Eingang; mit "Zusatz"'))).toBe(true);
   });
+  it("[106] Leibungsflächen je Schicht als optionale Spalten", () => {
+    const plain = buildOpeningReport(p);
+    const o0 = p.openings![0]!;
+    const withRev: Project = { ...p, openings: p.openings!.map((o) => (o.id === o0.id ? { ...o, layerReveals: [{ layer: 0, mode: "zurueck" as const }] } : o)) };
+    const rows = openingSchedule(withRev);
+    const r0 = rows.find((r) => r.id === o0.id)!;
+    expect(r0.revealAreas.length).toBe(1);
+    expect(r0.revealAreas[0]!.area).toBeGreaterThan(0);
+    for (const r of rows.filter((r) => r.id !== o0.id)) expect(r.revealAreas).toEqual([]);
+    const rep = buildOpeningReport(withRev);
+    const sec = rep.sections.find((s) => s.rows.some((row) => row.cells[0] === "T-Haus"))!;
+    const plainSec = plain.sections.find((s) => s.heading === sec.heading)!;
+    expect(sec.columns.length).toBe(plainSec.columns.length + 1);
+    expect(sec.widths.length).toBe(sec.columns.length);
+    expect(rep.notes.length).toBe(plain.notes.length + 1);
+  });
   it("leeres Projekt: kein Abschnitt", () => {
     expect(buildOpeningReport({ ...p, openings: [] }).sections).toEqual([]);
   });

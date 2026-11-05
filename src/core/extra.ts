@@ -33,6 +33,8 @@ export type { SheetData, SheetCell, Mapping, ColumnMap, ProgramField, ImportLine
 export { buildProgramReport } from "../export/programReport";
 export { openingSchedule, buildOpeningReport, roomsText, externalText, swingText } from "../export/openingSchedule";
 export type { OpeningScheduleRow } from "../export/openingSchedule";
+export { revealColumns, revealArea } from "../export/openingSchedule";
+export type { RevealArea } from "../export/openingSchedule";
 export { elementSchedule, uValueOf, uValueText, buildElementReport } from "../export/elementSchedule";
 export type { ElementScheduleRow, UValueResult, ElementKind } from "../export/elementSchedule";
 export { sheetTables, createTable, drawTablesPdf, tableCatalog, tableLabels, tableSourceLabel, TABLE_SOURCES } from "../export/sheetTable";
