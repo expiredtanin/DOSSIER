@@ -670,9 +670,21 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         // ganz über der Schnittebene einer geschnittenen Wand (Oberlicht) schliesst die Wand im Schnitt
         // und das Symbol wird „über Schnitt“ gezeichnet.
         use super::view_range::Zone;
-        let all_openings: Vec<(&Opening, Zone)> = p.openings_of_wall(&w.id).map(|o| {
+        let wr_total = p.wall_thickness(w, 0.2);
+        let wr = crate::opening_geom::WallRef {
+            start: crate::opening_geom::v(wv.start.x, wv.start.y),
+            end: crate::opening_geom::v(wv.end.x, wv.end.y),
+            total: wr_total,
+            ref_off: joins::reference_offset(crate::model3d::wall_reference(w), wr_total),
+        };
+        let all_openings: Vec<(std::borrow::Cow<Opening>, Zone)> = p.openings_of_wall(&w.id).map(|o| {
             let (ob, ot) = super::view_range::opening_vertical_extent(p, w, o);
-            (o, if range.custom { range.classify(ob, ot) } else { Zone::Cut })
+            let oz = if range.custom { range.classify(ob, ot) } else { Zone::Cut };
+            match shaped_plan_cut(&wr, o, ob, ot, cut_z).filter(|_| oz == Zone::Cut && zone == Zone::Cut) {
+                Some(Ok(chord)) => (std::borrow::Cow::Owned(chord), oz),
+                Some(Err(miss)) => (std::borrow::Cow::Borrowed(o), miss),
+                None => (std::borrow::Cow::Borrowed(o), oz),
+            }
         }).collect();
         // Gegenstück: ganz unter der Schnittebene (Lüftungsschlitz) schliesst die Wand ebenso, Symbol gepunktet.
         let closed_dash = |oz: Zone| -> Option<&'static [f64]> {
@@ -683,14 +695,7 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 _ => None,
             }
         };
-        let openings: Vec<&Opening> = all_openings.iter().filter(|(_, oz)| *oz != Zone::Hidden && closed_dash(*oz).is_none()).map(|(o, _)| *o).collect();
-        let wr_total = p.wall_thickness(w, 0.2);
-        let wr = crate::opening_geom::WallRef {
-            start: crate::opening_geom::v(wv.start.x, wv.start.y),
-            end: crate::opening_geom::v(wv.end.x, wv.end.y),
-            total: wr_total,
-            ref_off: joins::reference_offset(crate::model3d::wall_reference(w), wr_total),
-        };
+        let openings: Vec<&Opening> = all_openings.iter().filter(|(_, oz)| *oz != Zone::Hidden && closed_dash(*oz).is_none()).map(|(o, _)| o.as_ref()).collect();
         let mut gaps: Vec<(f64, f64)> = openings.iter().filter_map(|o| crate::opening_geom::opening_interval(&wr, o.position, o.width)).collect();
         gaps.sort_by(|a, b| (a.0 - b.0).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
         let empty = WallCuts::default();
@@ -729,7 +734,8 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 }
             }
         }
-        for &(o, oz) in &all_openings {
+        for (o, oz) in &all_openings {
+            let (o, oz) = (o.as_ref(), *oz);
             if !c.shown(&o.category_code) || oz == Zone::Hidden {
                 continue;
             }
@@ -761,6 +767,32 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         }
     }
     Ok(())
+}
+
+/// [G3] Formöffnung im Grundriss: Umriss auf Schnitthöhe `cut_z` statt des umschreibenden Rechtecks
+/// (Schweizer Praxis: der Grundriss zeigt die Öffnung, wie die Schnittebene sie trifft — beim Rundfenster
+/// auf einem Viertel der Höhe schmaler, beim Rundbogen unter dem Kämpfer volle Breite). `None`:
+/// Rechteck oder die Schnittebene liegt ausserhalb `ob..ot` (Ansichtsbereich wie bisher). `Ok`: Öffnung
+/// mit Lage/Breite der Sehne (Lücke, Leibungen, Symbol folgen ihr). `Err`: der Umriss verfehlt die
+/// Schnittebene (nur Berührung) ⇒ Wand geschlossen, Symbol „über“ bzw. „unter Schnitt“ ([36]).
+fn shaped_plan_cut(wr: &crate::opening_geom::WallRef, o: &Opening, ob: f64, ot: f64, cut_z: f64) -> Option<Result<Opening, super::view_range::Zone>> {
+    use super::view_range::Zone;
+    if !crate::opening_shape::is_shaped(o) || !(cut_z >= ob && cut_z <= ot) {
+        return None;
+    }
+    let (from, to) = crate::opening_geom::opening_interval(wr, o.position, o.width)?;
+    let poly = crate::opening_shape::opening_outline(o, to - from, ot - ob)?;
+    let v = cut_z - ob;
+    let miss = if v > (ot - ob) / 2.0 { Zone::Below } else { Zone::Above };
+    match crate::opening_shape::u_range(&poly, v) {
+        Some((u0, u1)) if u1 - u0 >= 1e-3 => {
+            if u0 <= 1e-9 && u1 >= to - from - 1e-9 {
+                return None;
+            }
+            Some(Ok(Opening { position: from + u0, width: u1 - u0, ..o.clone() }))
+        }
+        _ => Some(Err(miss)),
+    }
 }
 
 /// [95] Taschen der Taschen-Schiebetüren einer Wand: Wandrahmen (Start, Achse, Normale) und je Tasche
@@ -1260,8 +1292,8 @@ pub(crate) mod tests {
         // Rundbogen mit Kämpfer über der Schnitthöhe: wie Rechteck (gleiche Lücke).
         let g = gap(&shaped_window(OpeningShape::Rundbogen, 0.2, 1.8));
         assert!((g - rect).abs() < 1e-9, "{g}");
-        // Rundbogen, Schnitt im Bogen (Kämpfer 0.6 + 0.2, Schnitt 0.2 über dem Kämpfer).
-        let g = gap(&shaped_window(OpeningShape::Rundbogen, 0.2, 1.4));
+        // Rundbogen, Schnitt im Bogen (Kämpfer auf 0.2 + 0.6, Schnitt 0.2 darüber).
+        let g = gap(&shaped_window(OpeningShape::Rundbogen, 0.2, 1.2));
         assert!((g - 2.0 * (0.36f64 - 0.04).sqrt() * 0.16).abs() < 0.003, "{g}");
     }
 
