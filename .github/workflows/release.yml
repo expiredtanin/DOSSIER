@@ -40,7 +40,7 @@ jobs:
             src-tauri/fileio
       - uses: taiki-e/install-action@v2
         with: { tool: wasm-pack }
-      - run: npm ci
+      - run: npm ci || (sleep 30 && npm ci) || (sleep 90 && npm ci)  # Netz-Aussetzer (z. B. 504 beim wasm-pack-Download)
       - name: Secrets prüfen
         run: |
           # Ohne Updater-Schlüssel keine Updater-Artefakte (sonst bricht tauri build wegen createUpdaterArtifacts ab).

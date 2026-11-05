@@ -34,7 +34,7 @@ jobs:
             src-tauri/render3d
       - uses: taiki-e/install-action@v2
         with: { tool: wasm-pack }
-      - run: npm ci
+      - run: npm ci || (sleep 30 && npm ci) || (sleep 90 && npm ci)  # Netz-Aussetzer (z. B. 504 beim wasm-pack-Download)
       # tauri::generate_context! verlangt, dass frontendDist (../dist) existiert; für cargo check genügt ein leerer Ordner.
       - name: Platzhalter für frontendDist
         run: mkdir -p dist && [ -f dist/index.html ] || echo '<!doctype html>' > dist/index.html
