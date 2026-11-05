@@ -124,8 +124,8 @@ describe.skipIf(!hasEzdxf)("Fachplaner-Export gegen ezdxf", { timeout: 60_000 },
     }
     const st = r.dimstyles["DOSSIER_1-100"];
     expect(st).toMatchObject({ dimscale: 100, dimtad: 1, dimdec: 2, dimlfac: 1, dimtxsty: "DOSSIER" });
-    expect(st.dimtxt as number).toBeCloseTo(0.004, 9); // 4 mm Papier
-    expect(st.dimtsz as number).toBeCloseTo(0.0015, 9); // Architekturstrich 3 mm
+    expect(st.dimtxt as number).toBeCloseTo(0.0025, 9); // 2.5 mm Papier ([140])
+    expect(st.dimtsz as number).toBeCloseTo(0.001, 9); // Architekturstrich 2 mm ([140])
   });
 
   it("Bemassungsstil im Massstab 1:50 und in cm", () => {

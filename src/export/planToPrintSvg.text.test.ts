@@ -131,10 +131,10 @@ describe("Druck-SVG: Textgrössen in Papier-mm", () => {
     expect(t.xs[0] - t.xs[1]).toBeCloseTo((4 * K) / 2, 3);
   });
 
-  it("Masszahl in der Papier-Schrifthöhe (4 mm), Höhenkote lesbar gross", () => {
+  it("Masszahl in der Papier-Schrifthöhe (2.5 mm, [140]), Höhenkote lesbar gross", () => {
     const all = print();
     const dim = all.find((x) => x.text === "5.00")!;
-    expect(dim.sizes[0]).toBeCloseTo(4, 3);
+    expect(dim.sizes[0]).toBeCloseTo(2.5, 3);
     const kote = all.find((x) => /0[.,]00/.test(x.text) && x !== dim);
     expect(kote).toBeDefined();
     expect(kote!.sizes[0]).toBeGreaterThan(1);

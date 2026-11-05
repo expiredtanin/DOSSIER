@@ -633,8 +633,8 @@ describe("2D-Zeichnung — Bemassung: Papier-mm statt Modellmass", () => {
     const lens = out
       .filter((p) => p.kind === "line")
       .map((p) => (p.kind === "line" ? Math.hypot(p.b.x - p.a.x, p.b.y - p.a.y) : 0));
-    // Default 3 mm bei 1:50 = 0.15 m (der frühere feste Modellwert).
-    expect(Math.min(...lens)).toBeCloseTo(0.15, 9);
+    // Default 2 mm bei 1:50 = 0.1 m ([140], vorher 3 mm).
+    expect(Math.min(...lens)).toBeCloseTo(0.1, 9);
   });
 });
 

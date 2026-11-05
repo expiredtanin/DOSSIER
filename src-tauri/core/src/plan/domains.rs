@@ -23,6 +23,9 @@ const COLUMN_FALLBACK_FILL: &str = "#3a3f47";
 const ROOM_FILL_ALPHA: &str = "00";
 /// Basis-Schriftgrösse des Raumstempels (pt).
 const ROOM_STAMP_PT: f64 = 10.0;
+/// [140] Raumstempel ab 1:200 (2.5 mm statt 3.5 mm, ohne SIA-Zeile): kleine Räume überlappen sonst.
+const ROOM_STAMP_SMALL_PT: f64 = 7.0;
+const ROOM_STAMP_SMALL_FROM: f64 = 200.0;
 const NAME_PT: f64 = 12.0;
 const NUMBER_PT: f64 = 9.0;
 const LINE2_PT: f64 = 9.0;
@@ -605,17 +608,18 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             continue;
         }
         let at = room.stamp_anchor.unwrap_or(pv(res.centroid));
+        let small = c.a.scale >= ROOM_STAMP_SMALL_FROM;
         let (doc, extra_lines) = match &room.stamp {
             Some(s) => (room_stamp_to_doc(s), room_stamp_extra_lines(s, res.net, room.sia_category)),
-            None => (
-                room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)),
-                vec![
-                    StampLine { text: format!("{} m²", to_fixed(res.net, 2)), align: Align::Center },
-                    StampLine { text: format!("{} · {}", sia_key(room.sia_category), sia_label(room.sia_category)), align: Align::Center },
-                ],
-            ),
+            None => {
+                let mut lines = vec![StampLine { text: format!("{} m²", to_fixed(res.net, 2)), align: Align::Center }];
+                if !small {
+                    lines.push(StampLine { text: format!("{} · {}", sia_key(room.sia_category), sia_label(room.sia_category)), align: Align::Center });
+                }
+                (room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)), lines)
+            }
         };
-        out.push(Primitive::Text { at, doc, extra_lines, base_pt: ROOM_STAMP_PT, color: color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
+        out.push(Primitive::Text { at, doc, extra_lines, base_pt: if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, color: color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
     }
 }
 
@@ -983,6 +987,19 @@ mod tests {
     fn args(floor: &str, detail: f64, codes: &[&str]) -> PlanArgs {
         let t = serde_json::json!({ "floor": floor, "show": codes, "grey": [] }).to_string();
         PlanArgs::parse(detail, &t).unwrap()
+    }
+
+    /// [140] Raumstempel ab 1:200 kleiner (7 pt) und ohne SIA-Zeile; bis 1:100 10 pt mit zwei Zusatzzeilen.
+    #[test]
+    fn raumstempel_je_massstab() {
+        let p = sample();
+        let stamp = |scale: f64| {
+            let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": scale }).to_string();
+            let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            r.rooms.iter().find_map(|q| match q { Primitive::Text { base_pt, extra_lines, .. } => Some((*base_pt, extra_lines.len())), _ => None }).unwrap()
+        };
+        assert_eq!(stamp(100.0), (ROOM_STAMP_PT, 2));
+        assert_eq!(stamp(200.0), (ROOM_STAMP_SMALL_PT, 1));
     }
 
     #[test]
