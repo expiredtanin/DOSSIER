@@ -1,93 +1,82 @@
 ---
 title: "DOSSIER"
+description: "Dossier ist ein quelloffenes CAD für Architektur: ein Gebäudemodell aus Bauteilen, aus dem Grundriss, Schnitt, Ansicht, 3D und Planblätter berechnet werden. Für die Praxis in der Schweiz, AGPL-3.0."
 ---
 
-DOSSIER ist ein CAD-Programm für Architektur. Man zeichnet in 2D wie in
-anderen CAD-Programmen und modelliert das Gebäude aus Bauteilen: Wände, Decken,
-Dächer, Treppen, Öffnungen, Räume. Grundriss, Schnitt, Ansicht, 3D und PDF
-werden aus diesem Modell berechnet und nicht separat gezeichnet.
+Dossier ist ein CAD-Programm für Architektinnen und Architekten. Man modelliert
+ein Gebäude aus Bauteilen – Wände, Decken, Dächer, Treppen, Fenster, Türen,
+Räume – und erhält daraus Grundrisse, Deckenspiegel, Schnitte, Ansichten, ein
+3D-Modell, Mengen und fertige Planblätter. Dazu kommt ein vollwertiges
+2D-Zeichenprogramm mit Befehlszeile, wie man es von AutoCAD oder Rhino kennt.
 
-Es ist die eigenständige Neuimplementierung des Rhino-Plugins
-[DOSSIER](https://git.openbureau.ch/karim/dossier), mit eigenem Datenmodell
-und eigenen Renderern in Rust. Teil von [openbureau](https://openbureau.ch).
+![Dossier mit dem Musterhaus: Grundriss Erdgeschoss 1:100, links die Werkzeuge, rechts Objekt-Info und Ausschnitte](/img/app-grundriss.webp)
 
-```text
-                    ┌──────────────────────────┐
-                    │  Projekt (semantisches   │
-                    │  Modell, intern Meter)   │
-                    └────────────┬─────────────┘
-       ┌──────────────┬──────────┼───────────┬───────────────┐
-       ▼              ▼          ▼           ▼               ▼
-  Grundriss       Schnitt     Ansicht       3D       Export (IFC, STEP,
- (analytisch    (Rust-WASM,  (Projektion) (WebGPU)    DXF, PDF, SVG, …)
-  aus Para-      Prioritäts-
-  metern)        logik)
-```
+## Ein Modell, alle Pläne
+
+Es gibt genau ein Modell. Alles andere wird daraus abgeleitet und nie von Hand
+nachgeführt: Verschiebt man eine Wand, stimmen Grundriss, Schnitt, Ansicht, 3D,
+Flächenbilanz, Fenster- und Türliste und IFC sofort wieder. Bemassungen, die
+an Bauteilen gefangen wurden, wandern mit.
+
+Der Grundriss wird nicht aus einem 3D-Netz geschnitten, sondern aus den
+Bauteilen berechnet: Wandachse und Schichten ergeben Linien und Füllungen,
+Öffnungen ergeben Lücke, Leibung und Symbol. Strichstärken, Schraffuren und
+Detailgrad kommen erst beim Zeichnen dazu – das PDF ist derselbe Plan wie am
+Bildschirm, mit echten Stiftstärken in Millimetern.
+
+![Schnitt A-A aus dem Musterhaus, mit Schraffuren der Schichten und Gelände](/img/cli-schnitt-aa.webp)
+
+## Für wen
+
+- **Architekturbüros in der Schweiz:** Landeskoordinaten LV95, Daten von
+  swisstopo, Kataster als DWG/DXF, Flächen nach SIA 416, Kennzahlen nach IVHB,
+  Darstellung in Anlehnung an SIA 400 (Baustoffe, Schraffuren, Linientypen).
+- **Wettbewerb bis Ausführung:** Baurecht und Lage prüfen, Massenmodelle und
+  Raumprogramm, Eingabepläne 1:100, Ausführungspläne 1:50, Plansätze als PDF,
+  DXF/DWG und IFC für die Fachplaner.
+- **Wer offene Werkzeuge will:** Dossier ist freie Software unter der
+  AGPL-3.0. Das Dateiformat `.obp` ist offenes JSON, die Kommandozeile
+  `dossier-cli` erzeugt Pläne und Exporte ohne Fenster.
+
+## Was es kann
+
+- **Bauteile:** mehrschichtige Wände (auch gebogen) mit sauberen Anschlüssen,
+  Fenster und Türen mit Typen, Anschlag und Leibung, Decken mit Aussparungen,
+  Dächer über beliebigen Grundrissen mit Gauben und Dachfenstern, Treppen,
+  Stützen, Räume, Volumenkörper.
+- **Pläne:** Grundriss je Geschoss, Deckenspiegel, Schnitte und Ansichten aus
+  Schnittlinien, Ansichtsbereich, Detailgrad, Ansichtsvorlagen, Skizzenstil.
+- **Layout:** Blätter mit Ansichtsfenstern, Masterlayouts mit Plankopf,
+  Legenden, Tabellen, Publikationssätze mit Index, Vektor-PDF mit Ebenen.
+- **Ort:** Georeferenz, Gelände aus Höhenlinien, Baugrube, Baulinien und
+  Grenzabstände, Sonnenstand und Schatten.
+- **Austausch:** DXF/DWG, IFC4/IFC2x3, STEP, OBJ/STL/glTF, PDF, SVG, CSV.
+
+Alle Funktionen, gegliedert und mit ehrlichem Stand: [Funktionen](/funktionen/).
+
+![Ansicht Süd im Skizzenstil](/img/cli-ansicht-skizze.webp)
 
 ## Stand
 
-Version 0.1.0. Es gibt noch keine Installer, DOSSIER wird aus dem Quellcode
-gebaut. Es läuft auf macOS (Tauri) und Linux (Electron), im Browser mit
-Einschränkungen.
+Dossier ist in aktiver Entwicklung und noch vor der ersten öffentlichen Beta.
+Es gibt keine fertigen Installer; man baut es aus dem Quellcode
+([Download und Installation](/download/)). Hauptplattform ist macOS (Tauri,
+Anzeige über Metal), Linux läuft über Electron. Was fertig ist und was nicht,
+steht unter [Stand](/stand/).
 
-Rund 119 000 Zeilen TypeScript und 23 000 Zeilen Rust, etwa 1 900 Vitest- und
-180 Rust-Tests.
+## Weiter
 
-## Bauen
-
-Voraussetzungen: Node.js, Rust mit dem Target `wasm32-unknown-unknown`, für
-Tauri die [Tauri-Voraussetzungen](https://tauri.app/start/prerequisites/).
-
-```bash
-git clone https://git.openbureau.ch/karim/DOSSIER-STANDALONE.git
-cd DOSSIER-STANDALONE
-npm install
-npm run build:engine && npm run build:engine3d && npm run build:truck
-npm run tauri:dev     # macOS
-npm run electron      # Linux
-```
-
-Details unter [Installation](/docs/anleitung/installation/).
-
-## Was drin ist
-
-- **Bauteile:** Wände mit Schichten und Verschneidung nach Priorität, Fenster
-  und Türen, Decken, Dächer, Treppen, Stützen, Räume nach SIA 416
-- **2D:** Zeichnen und Bearbeiten, Bemassung, Text, Schraffuren
-- **Befehlszeile** mit rund 55 Befehlen und getippten Koordinaten: `5,3`,
-  `r5,3`, `5<45`
-- **Ansichten:** Grundriss je Geschoss, Schnitt, Ansicht, 3D mit Schnittebene
-- **Pläne:** Layouts mit mehreren Ansichtsfenstern, Plankopf, mehrseitiges PDF
-- **Volumenkörper:** B-Rep über [truck](https://github.com/ricosjp/truck),
-  Booleans, Kollisionsprüfung
-- **Import:** DXF, DWG, STEP, PDF, Bilder, swisstopo, OpenStreetMap
-- **Export:** PDF, SVG, DXF, IFC4, STEP, STL, OBJ, CSV
-
-Die vollständige Liste steht im
-[README](https://git.openbureau.ch/karim/DOSSIER-STANDALONE).
-
-## Was fehlt
-
-- DWG und DXF werden gelesen, aber noch nicht in Wände und Öffnungen
-  übersetzt. DWG schreiben geht nicht.
-- `make2D`: eine 3D-Sicht als flache 2D-Zeichnung ausgeben.
-- Öffnungen werden als achsparallele Löcher aus der Wand geschnitten, nicht
-  über allgemeine Booleans.
-- Dachfenster.
-
-## Log
-
-{{< log >}}
-
-## Kontakt
-
-Fehler und Wünsche als
-[Issue](https://git.openbureau.ch/karim/DOSSIER-STANDALONE/issues), Fragen im
-[Forum](https://dossier.openbureau.ch/forum).
+- [Anleitung](/docs/anleitung/) – Bedienung, Schritt für Schritt
+- [Für Entwickler](/docs/entwickler/) – Aufbau, Bauen, Testen, Mitarbeiten
+- [Quellcode auf GitHub](https://github.com/expiredtanin/DOSSIER) – Issues,
+  Pull Requests, Arbeitsliste `TODO.md`
 
 ## Lizenz
 
-[AGPL-3.0-or-later](https://git.openbureau.ch/karim/DOSSIER-STANDALONE/src/branch/master/LICENSE).
-Wer DOSSIER verändert und als Netzwerkdienst betreibt, muss den geänderten
-Quellcode den Nutzern zugänglich machen. Die mitgelieferten Materialien von
-ambientCG stehen unter CC0.
+© 2026 Karim Gabriele Varano, veröffentlicht unter der
+[GNU Affero General Public License v3.0 oder später](https://github.com/expiredtanin/DOSSIER/blob/master/LICENSE).
+Wer Dossier verändert und als Netzwerkdienst anbietet, muss den geänderten
+Quellcode ebenfalls offenlegen. Fremdkomponenten behalten ihre Lizenzen
+(siehe [`NOTICE`](https://github.com/expiredtanin/DOSSIER/blob/master/NOTICE)).
+Dossier ist Teil von [openbureau](https://openbureau.ch) und entstand aus dem
+gleichnamigen Rhino-Plugin.

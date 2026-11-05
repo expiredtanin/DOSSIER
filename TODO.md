@@ -2561,6 +2561,25 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Abweichungs-Abwahl mehr; Fussbereich/Vorlage-Wahl e2e repariert). Sichtbarkeit/Overrides sind Projektdaten: ein Wechsel
   setzt sie nur bei Abweichung, als ein Undo-Schritt. Kein Modellwechsel (Reiter waren nie im Modell). Tests
   `viewTabs.test.ts`, e2e `viewTabs.spec.ts`. Offen: Reiter nicht mit dem Projekt gespeichert; nicht in der Tauri-App geprüft. · S
+- ◐ **[138] Dokumentation und Website.** (5.11.) Inhalt von `website/` neu geschrieben (nur Markdown in
+  `website/content/`; Layouts/CSS/Startseiten-Design unverändert, weil der Maintainer eine Design-Vorlage liefert).
+  Bilder in `website/static/img` (WebP, ~0.7 MB): App aus `dist-test` (Playwright/Chromium, Linux, SVG-Rückfall statt
+  WebGPU) und CLI-Renders (`:musterhaus-komplex … --hatch/--sketch/--ceiling`); 3D headless leer → kein 3D-Bild.
+  Struktur: Startseite `content/_index.md`; `/funktionen/` (nach Gruppen, ◐ mit Nummern); `/download/`; `/stand/`
+  (Meilensteine, bekannte Lücken); `/docs/anleitung/` (15 Kapitel: Erste Schritte, Oberfläche, Befehlszeile mit allen
+  74 Befehlen + Kürzeln aus `registry.ts`, Zeichnen, Bauteile, Geschosse/±0.00, Ansichten/Ansichtsbereich/Vorlagen,
+  Layout/Publikation, Bemassung, Lage/Baurecht/Gelände/Sonne, Kennzahlen, Import/Export, Kommandozeile/MCP,
+  Tastenkürzel, Probleme); `/docs/entwickler/` (Architektur, Rust-Kern, Anzeige/Geometrie, Bauen/Testen/CI,
+  Mitarbeiten). Alte Seiten (Gitea-Links, three.js/WebGL-Stand) entfernt. Gebaut mit Hugo 0.147.9 extended (Linux,
+  ohne Warnungen), interne Links und Anker geprüft. Nicht in der Tauri-App gegengelesen; Bedienangaben aus Code/i18n.
+  Offen: Design-Vorlage einbauen (Layouts/CSS; Bilder laufen in der alten CSS über die Textbreite, `img{max-width:100%}`
+  fehlt); `hugo.toml` `repo`/`commitsApi` und Fusszeile/`log`-Shortcode zeigen auf `git.openbureau.ch/karim/
+  DOSSIER-STANDALONE` — dort letzter Commit 23.10., also kein Spiegel → auf GitHub umstellen (GitHub-Commits-API hat
+  dieselben Felder; Pfade `/blob/master/…`, `/commits/master`), „Letzter Commit" im Plankopf der Startseite ist bis
+  dahin veraltet; `{{< log >}}` aus dem Inhalt genommen. Ungenutztes Theme `website/themes/hextra` (1.6 MB) löschen.
+  Englisch: `[languages.de]`/`[languages.en]` in `hugo.toml`, `contentDir` je Sprache (`content/`, `content.en/`), gleiche
+  Dateinamen, UI-Texte in `website/i18n/`. Build-Prüfung in der CI (nur `hugo --minify` bei `website/**`). Mac-Screenshots
+  (Metal, echtes 3D) nachliefern. · M
 
 ## Priorität 4 — später
 
