@@ -27,6 +27,15 @@ function key(
   } as KeyboardEvent;
 }
 
+describe("Speichern-Kürzel", () => {
+  it("Mod+S und Mod+Shift+S sind für Speichern/Speichern unter frei (Teilen = Mod+Shift+J)", () => {
+    const combos = SHORTCUT_DEFS.map((d) => d.defaultCombo);
+    expect(combos).not.toContain("mod+s");
+    expect(combos).not.toContain("mod+shift+s");
+    expect(SHORTCUT_DEFS.find((d) => d.id === "split")?.defaultCombo).toBe("mod+shift+j");
+  });
+});
+
 describe("SHORTCUT_DEFS", () => {
   it("hat für jede Id eine eindeutige Default-Kombination (keine eingebaute Kollision)", () => {
     const seen = new Map<string, string>();

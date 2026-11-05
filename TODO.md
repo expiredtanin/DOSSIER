@@ -2636,6 +2636,8 @@ Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugr
 (◐, DXF-Parser, IFC-Import) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
 Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
 
+- ✅ **[139] Kleine Fehler aus der Doku.** (5.11.) Beim Schreiben der Doku gefunden: (1) Befehl `wand` startete den Zauberstab statt der Wand; der Zauberstab heisst jetzt `zauberstab` (Kürzel `zs`), `wand` = Wand, Kern-Befehl `wand` unverändert. (2) Cmd/Strg+S war doppelt belegt: jetzt Speichern (bekannter Pfad ohne Dialog, sonst Dialog), Cmd/Strg+Shift+S = Speichern unter, Teilen auf Cmd/Strg+Shift+J. (3) `schedule --openings --format svg`: Zellen werden in der Blattaufteilung (`area_report.rs`, gilt auch für PDF) auf Spaltenbreite umbrochen statt zu überlappen, Spaltenbreiten der Liste angepasst. Offen: Speichern/Speichern unter nur per vitest geprüft, nicht in der Tauri-App.
+
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

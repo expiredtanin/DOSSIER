@@ -22,8 +22,7 @@ ohne Fokus in der Befehlszeile sind dagegen Tastenkürzel (`m` Verschieben,
 - Eigene Kürzel legt man unter *Einstellungen → Allgemein →
   Befehlszeilen-Kürzel* an.
 
-Kürzel werden vor dem Vervollständigen geprüft. Darum startet `wand` die
-**Wand** und nicht den Zauberstab – für den gibt es `zs` oder `zauberstab`.
+`wand` startet die **Wand**; der Zauberstab heisst `zauberstab` (Kürzel `zs`).
 Den Einzelbuchstaben `r` gibt es absichtlich nicht: er ist für relative
 Koordinaten reserviert.
 
@@ -135,7 +134,7 @@ Stand 5.11.2026, aus der Befehlsliste des Programms (`src/commands/registry.ts`)
 | `spline` | Spline | `sp` | Glatte Kurve durch Punkte |
 | `bezier` | Bezier | `bz` | Bézierkurve |
 | `wipeout` | Maskenregion | `wo`, `maske`, `maskierung` | Fläche, die Darunterliegendes abdeckt |
-| `wand` | Zauberstab | `zs`, `zauberstab` | Klick in umschlossene Fläche → Umriss mit Schraffur (Kürzel `zs`, nicht `wand`!) |
+| `zauberstab` | Zauberstab | `zs` | Klick in umschlossene Fläche → Umriss mit Schraffur |
 | `grid` | Achsraster | `axes`, `achsraster`, `achsen` | Rechtwinkliges oder radiales Achsraster mit Achsköpfen |
 | `block` | Block einfügen | `bl`, `symbol` | Block (Symbol) platzieren |
 | `defblock` | Block definieren | `db`, `blockdef` | Auswahl als Block speichern |

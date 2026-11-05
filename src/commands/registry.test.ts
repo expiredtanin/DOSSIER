@@ -71,4 +71,10 @@ describe("Körper-Befehle (truck)", () => {
     expect(resolveCommand("bool")?.name).toBe("solidbool");
     expect(resolveCommand("verschneiden")?.name).toBe("solidbool");
   });
+
+  it("wand startet die Wand, zauberstab/zs den Zauberstab", () => {
+    expect(resolveCommand("wand")?.name).toBe("wall");
+    expect(resolveCommand("zauberstab")?.name).toBe("zauberstab");
+    expect(resolveCommand("zs")?.name).toBe("zauberstab");
+  });
 });

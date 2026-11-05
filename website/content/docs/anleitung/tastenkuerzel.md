@@ -15,7 +15,8 @@ ab. Einzeltasten (ohne Mod) gelten nur, solange kein Textfeld den Fokus hat.
 |---|---|
 | Mod+N | Neues Projekt (Menü der Desktop-App) |
 | Mod+O | Öffnen (Menü der Desktop-App) |
-| Mod+S | Speichern unter … (Menü der Desktop-App; bei gewählten 2D-Elementen: Teilen, siehe unten) |
+| Mod+S | Speichern (Datei der Desktop-App ohne Dialog überschreiben; neues Projekt: Zielwahl) |
+| Mod+Shift+S | Speichern unter … |
 | Mod+Z | Rückgängig |
 | Mod+Shift+Z, Strg+Y | Wiederholen |
 | Entf | Auswahl löschen |
@@ -49,15 +50,14 @@ ab. Einzeltasten (ohne Mod) gelten nur, solange kein Textfeld den Fokus hat.
 
 | Taste | Aktion |
 |---|---|
-| Mod+S | Teilen der gewählten 2D-Elemente |
+| Mod+Shift+J | Teilen der gewählten 2D-Elemente |
 | Mod+J | Verbinden der gewählten 2D-Elemente |
 | Mod+Shift+U | Vereinigen (Boolean) |
 | Mod+Shift+D | Abziehen (Boolean) |
 | Mod+Shift+I | Schneiden (Boolean) |
 
-Mod+S ist doppelt belegt: Sind 2D-Elemente gewählt, teilt es sie; sonst
-speichert es. Wer das nicht mag, legt *Teilen* in den Einstellungen auf eine
-andere Kombination.
+Mod+S speichert immer; *Teilen* liegt auf Mod+Shift+J und lässt sich in den
+Einstellungen umlegen.
 
 ## Maus
 

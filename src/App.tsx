@@ -1191,6 +1191,7 @@ export default function App() {
     loadImportLayout,
     setImportPdfOptions,
     onSaveProject,
+    onSaveProjectAs,
     onNewProject,
     onNewProjectFromSample,
     onNewProjectFromComplexSample,
@@ -1373,6 +1374,7 @@ export default function App() {
       onNewProjectFromTemplate,
       onOpenProject,
       onSaveProject,
+      onSaveProjectAs,
       onImport: () => dxfInputRef.current?.click(),
       onExportPdf: () => setExportOpen(true),
       onExportDxf: () => setExportDxfOpen(true),
@@ -2003,6 +2005,7 @@ export default function App() {
     onNewProjectFromTemplate,
     onOpenProject,
     onSaveProject,
+    onSaveProjectAs,
     onImport: () => dxfInputRef.current?.click(),
     onImportPointCloud: () => openPointCloudFileDialog(),
     onImportMesh: () => openMeshFileDialog(),
@@ -2172,6 +2175,7 @@ export default function App() {
           onNewProjectFromTemplate={ev.onNewProjectFromTemplate}
           onOpenProject={ev.onOpenProject}
           onSaveProject={ev.onSaveProject}
+          onSaveProjectAs={ev.onSaveProjectAs}
           onImport={ev.onImport}
           onImportPointCloud={ev.onImportPointCloud}
           onImportMesh={ev.onImportMesh}

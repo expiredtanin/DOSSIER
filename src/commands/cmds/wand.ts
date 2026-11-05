@@ -22,7 +22,7 @@ const hatchOf = (s: WandState, ctx: CommandContext): string | undefined =>
   s.sticky.hatch === NONE ? undefined : (usable(ctx)[s.sticky.hatch] ?? usable(ctx)[0])?.id;
 
 export const wandCommand: Command = {
-  name: "wand",
+  name: "zauberstab",
   labelKey: "cmd.wand.label",
   prompt: () => "cmd.wand.point",
   accepts: () => ["point", "option"],

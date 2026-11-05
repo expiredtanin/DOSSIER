@@ -134,6 +134,7 @@ export const de = {
   "menu.native.newFromComplexSample": "Musterhaus (komplex)",
   "menu.native.newFromTemplateFile": "Vorlagendatei wählen …",
   "menu.native.open": "Öffnen …",
+  "menu.native.save": "Speichern",
   "menu.native.saveAs": "Speichern unter …",
   "menu.native.import": "Importieren …",
   "menu.native.export": "Exportieren",

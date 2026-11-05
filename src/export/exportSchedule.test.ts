@@ -302,3 +302,29 @@ describe("scheduleRows — Dächer und Stützen (bisher fehlten sie in Liste/Ele
     expect(scheduleRows(proj).some((r) => r.id === "RM1")).toBe(false);
   });
 });
+
+describe("Fenster- und Türliste als Blatt ([139])", () => {
+  it("keine zwei Texte derselben Zeile überlappen (Musterhaus komplex)", async () => {
+    const { buildComplexSampleProject } = await import("../model/sampleProjectComplex");
+    const { buildOpeningReport } = await import("./openingSchedule");
+    const { layoutAreaReport } = await import("./areaReport");
+    const lay = layoutAreaReport(buildOpeningReport(buildComplexSampleProject()));
+    let texts = 0;
+    for (const page of lay.pages) {
+      const rows = new Map<number, [number, number][]>();
+      for (const p of page) {
+        if (p.k !== "text") continue;
+        texts++;
+        const w = p.s.length * p.size * 0.3528 * 0.45; // untere Schätzung der Breite
+        const box: [number, number] = p.align === "right" ? [p.x - w, p.x] : [p.x, p.x + w];
+        const key = Math.round(p.y * 100);
+        rows.set(key, [...(rows.get(key) ?? []), box]);
+      }
+      for (const boxes of rows.values()) {
+        boxes.sort((a, b) => a[0] - b[0]);
+        for (let i = 1; i < boxes.length; i++) expect(boxes[i - 1]![1]).toBeLessThanOrEqual(boxes[i]![0] + 1e-6);
+      }
+    }
+    expect(texts).toBeGreaterThan(50);
+  });
+});

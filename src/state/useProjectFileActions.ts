@@ -104,6 +104,8 @@ export function useProjectFileActions(
   // Pfad + Lock-Status der aktuell offenen .obp/.json-Datei (nur Tauri; sonst
   // bleibt beides null/false — Browser-Blob-Pfad hat keinen echten Pfad).
   const openedProjectPathRef = useRef<string | null>(null);
+  // Zielpfad für „Speichern" (Cmd/Ctrl+S): gesetzt beim Öffnen und nach „Speichern unter".
+  const savePathRef = useRef<string | null>(null);
   const projectLockOwnedRef = useRef(false);
   // Konflikt-Zustand: Datei ist in einer anderen Instanz gesperrt → Dialog mit
   // „Schreibgeschützt öffnen"/„Trotzdem erzwingen"/„Abbrechen" (kein window.confirm!).
@@ -371,11 +373,14 @@ export function useProjectFileActions(
   // Liefert `true`, wenn wirklich gespeichert wurde (nicht bei abgebrochenem
   // nativem Dialog) — `guardDiscard`-Aufrufer verlassen sich darauf, um NICHT
   // zu verwerfen, wenn der Nutzer den Speichern-Dialog abbricht.
-  const onSaveProject = (): Promise<boolean> => {
+  // Cmd/Ctrl+S „Speichern": bekannter Pfad → ohne Dialog; sonst wie „Speichern unter".
+  // Cmd/Ctrl+Shift+S „Speichern unter" fragt immer nach dem Ziel.
+  const saveProjectTo = (asNew: boolean): Promise<boolean> => {
     const json = serializeProject(project);
-    return saveProjectFile(json, project.name, (path) =>
-      addRecentProject(path, project.name || "modell"),
-    ).then(
+    return saveProjectFile(json, project.name, (path) => {
+      savePathRef.current = path;
+      addRecentProject(path, project.name || "modell");
+    }, asNew ? null : savePathRef.current).then(
       (saved) => {
         if (saved) {
           lastSavedProjectRef.current = project;
@@ -392,6 +397,8 @@ export function useProjectFileActions(
       },
     );
   };
+  const onSaveProject = (): Promise<boolean> => saveProjectTo(false);
+  const onSaveProjectAs = (): Promise<boolean> => saveProjectTo(true);
   // „Neu" (Datei-Menü): leeres Projekt, wie am Startbildschirm — löst dabei
   // einen evtl. gehaltenen Datei-Lock der bisherigen Projektdatei und vergisst
   // deren Pfad (das leere Projekt ist noch NICHT gespeichert). Über
@@ -467,6 +474,7 @@ export function useProjectFileActions(
       void releaseProjectLock(openedProjectPathRef.current);
     }
     openedProjectPathRef.current = null;
+    savePathRef.current = null;
     projectLockOwnedRef.current = false;
   };
   // Übernimmt ein per Pfad geöffnetes Projekt (Tauri-Fluss): parst, prüft grob
@@ -482,6 +490,7 @@ export function useProjectFileActions(
       releaseCurrentProjectLock();
       lastSavedProjectRef.current = loaded;
       openedProjectPathRef.current = path;
+      savePathRef.current = path;
       projectLockOwnedRef.current = lockOwned;
       addRecentProject(path, loaded.name || "modell");
       offerRecovery(path);
@@ -670,6 +679,7 @@ export function useProjectFileActions(
     setImportPdfOptions,
     loadImportLayout,
     onSaveProject,
+    onSaveProjectAs,
     onNewProject,
     onNewProjectFromSample,
     onNewProjectFromComplexSample,

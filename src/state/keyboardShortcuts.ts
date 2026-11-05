@@ -82,7 +82,7 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
     labelKey: "shortcut.deleteSelection",
     defaultCombo: "Delete",
   },
-  { id: "split", category: "edit", labelKey: "shortcut.split", defaultCombo: "mod+s" },
+  { id: "split", category: "edit", labelKey: "shortcut.split", defaultCombo: "mod+shift+j" },
   { id: "join", category: "edit", labelKey: "shortcut.join", defaultCombo: "mod+j" },
   { id: "copyElements", category: "edit", labelKey: "shortcut.copyElements", defaultCombo: "mod+c" },
   { id: "pasteElements", category: "edit", labelKey: "shortcut.pasteElements", defaultCombo: "mod+v" },
