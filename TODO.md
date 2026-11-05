@@ -2330,9 +2330,12 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   (`section3dCutId`, im 3D wie sonst aufhebbar). (2) Layout-Viewports rechneten nur Grundrisse — ein Schnitt-/
   Ansicht-Ausschnitt zeigte Höhenlinien und Schnittlinien-Symbole statt des Schnitts (seit dem ersten Stand so, keine
   Regression). `plan/viewportPlan.ts::viewportLevelPlan` (Blatt + PDF): Schnitt/Ansicht wie `SectionPlanView` mit Koten
-  und eigenen 2D-Elementen. vitest `viewportPlan.test.ts`, e2e `sectionViews.spec.ts`. Offen: Fang auf
-  Schnitt-Viewport-Inhalt (`sheet_viewports.rs` nur Grundriss), 3D-Ausschnitt im Viewport; nicht in der Tauri-App
-  geprüft (3D headless ohne Bild). · S
+  und eigenen 2D-Elementen. vitest `viewportPlan.test.ts`, e2e `sectionViews.spec.ts`. (5.11.) Fang auf
+  Schnitt-/Ansicht-Viewport-Inhalt: `sheet_viewports.rs::viewport_maps` rechnet für Schnitt-/Ansichtsebenen den
+  Inhalt wie `viewportLevelPlan` (Projektion mit geschnittenen Öffnungen, Koten, eigene 2D-Elemente, gleiches
+  Ausmass → gleiche Abbildung aufs Blatt); Rust-Test `fang_auf_schnitt_und_ansicht_viewport`. Offen: freie
+  Körper (`extrudedSolids`, truck-Netze aus TS) fehlen im Fang des Schnitt-Viewports, 3D-Ausschnitt im Viewport;
+  nicht in der Tauri-App geprüft (3D headless ohne Bild). · S
 - ◐ **[131] Untergeschosse unter ±0.00 (Bezugsgeschoss).** (04.11., Befund aus [114]) Bisher stapelten die Geschosse
   ab dem ersten (UG = ±0.00). Neu: `DrawingLevel.zeroLevel` (Rust-Modell) markiert das Bezugsgeschoss ±0.00 (wie
   ArchiCADs Projektnullpunkt); `levels.rs::recompute_floor_elevations` stapelt weiter nach `floorHeight`, verschiebt den
