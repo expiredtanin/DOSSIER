@@ -1,9 +1,9 @@
 <a class="skip" href="#main">Zum Inhalt</a>
 <header class="top">
-  <a class="mark" href="/" aria-label="Dossier, Startseite">dossier<span>.</span></a>
+  <a class="mark" href="{{ "" | relURL }}" aria-label="Dossier, Startseite">dossier<span>.</span></a>
   <nav aria-label="Hauptnavigation">
-    <a href="/docs/"{{ if hasPrefix .RelPermalink "/docs/" }} aria-current="page"{{ end }}>doku</a>
-    <a href="/stand/"{{ if hasPrefix .RelPermalink "/stand/" }} aria-current="page"{{ end }}>stand</a>
+    <a href="{{ "docs/" | relURL }}"{{ if hasPrefix .RelPermalink ("docs/" | relURL) }} aria-current="page"{{ end }}>doku</a>
+    <a href="{{ "stand/" | relURL }}"{{ if hasPrefix .RelPermalink ("stand/" | relURL) }} aria-current="page"{{ end }}>stand</a>
     <a href="{{ site.Params.repo }}">quellcode</a>
     <button class="theme-toggle" type="button" aria-label="Hell oder dunkel">
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor"/></svg>

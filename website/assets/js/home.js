@@ -4,8 +4,8 @@ import { initCommon } from "./common.js";
 
 initCommon();
 
-const VIDEO_URL = "/hero/hero-scrub.mp4";
-const POSTER_URL = "/hero/hero-poster.jpg";
+const VIDEO_URL = "hero/hero-scrub.mp4"; // relativ zur Startseite (GitHub Pages kann unter /DOSSIER/ liegen)
+const POSTER_URL = "hero/hero-poster.jpg";
 // Die fünf Bedingungen für die ruhige Startseite, Zeichen für Zeichen wie in home.css
 const GATES = [
   "(max-width: 720px)",

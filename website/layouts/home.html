@@ -42,12 +42,12 @@
       <p class="sub only-static">Dossier ist ein freies CAD für Architektur. Du baust ein Gebäude aus Bauteilen, Grundriss, Schnitt und Ansicht werden daraus berechnet.</p>
       <div class="cta">
         <a class="btn" href="{{ site.Params.releases }}">Dossier herunterladen</a>
-        <a class="link only-scrub" href="/docs/anleitung/">Anleitung lesen</a>
+        <a class="link only-scrub" href="{{ "docs/anleitung/" | relURL }}">Anleitung lesen</a>
       </div>
     </div>
   </div>
   <figure class="static-sheet">
-    <img src="/hero/hero-sheet.webp" width="1110" height="596" loading="lazy" decoding="async"
+    <img src="{{ "hero/hero-sheet.webp" | relURL }}" width="1110" height="596" loading="lazy" decoding="async"
       alt="Blatt aus Dossier: Grundriss Erdgeschoss und Ansicht Süd des Musterhauses, 1:100">
   </figure>
 </section>
@@ -60,19 +60,19 @@
     <div class="dimline" aria-hidden="true"><i></i><span>17.39</span><i></i></div>
     <ol class="step-list reveal">
       <li class="step">
-        <figure><img src="/img/app-grundriss.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="Dossier mit dem Grundriss Erdgeschoss, Werkzeuge links, Objekt-Info rechts"></figure>
+        <figure><img src="{{ "img/app-grundriss.webp" | relURL }}" width="1600" height="1000" loading="lazy" decoding="async" alt="Dossier mit dem Grundriss Erdgeschoss, Werkzeuge links, Objekt-Info rechts"></figure>
         <p class="num">01</p>
         <h3>Zeichnen.</h3>
         <p>Linien, Wände, Öffnungen, mit Fang und Befehlszeile.</p>
       </li>
       <li class="step">
-        <figure><img src="/img/app-schnitt.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="Dossier mit einem Schnitt durch das Musterhaus, Decken und Dach geschnitten"></figure>
+        <figure><img src="{{ "img/app-schnitt.webp" | relURL }}" width="1600" height="1000" loading="lazy" decoding="async" alt="Dossier mit einem Schnitt durch das Musterhaus, Decken und Dach geschnitten"></figure>
         <p class="num">02</p>
         <h3>Modellieren.</h3>
         <p>Wandtypen mit Schichten, Decken, Dächer, Treppen, Gelände.</p>
       </li>
       <li class="step">
-        <figure><img src="/img/app-layout-blatt.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="Dossier mit einem Planblatt: Ansichtsfenster, Plankopf und Massstab"></figure>
+        <figure><img src="{{ "img/app-layout-blatt.webp" | relURL }}" width="1600" height="1000" loading="lazy" decoding="async" alt="Dossier mit einem Planblatt: Ansichtsfenster, Plankopf und Massstab"></figure>
         <p class="num">03</p>
         <h3>Publizieren.</h3>
         <p>Pläne auf Blätter legen, PDF mit Ebenen, DXF, IFC.</p>
@@ -99,14 +99,14 @@
       </ul>
     </div>
     <div class="shots" aria-live="polite">
-      <img class="on plan-img" src="/img/cli-deckenspiegel-eg.webp" width="1400" height="908" loading="lazy" decoding="async" alt="Deckenspiegel Erdgeschoss aus Dossier, 1:100">
-      <img class="plan-img" src="/img/cli-grundriss-eg.webp" width="1500" height="1000" loading="lazy" decoding="async" alt="Grundriss Erdgeschoss mit Bemassung und Raumstempeln">
-      <img class="plan-img" src="/img/fenster.webp" width="1200" height="673" loading="lazy" decoding="async" alt="Fenster und Türen im Grundriss mit ihren Massen, aus denen die Liste entsteht">
-      <img src="/img/app-situation.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="Situation in Dossier mit Parzelle, Grenzabständen und Baulinie">
-      <img class="plan-img" src="/img/gelaende.webp" width="1200" height="638" loading="lazy" decoding="async" alt="Schnitt durch das Musterhaus mit Gelände aus Höhenlinien">
-      <img class="plan-img" src="/img/lage.webp" width="1200" height="864" loading="lazy" decoding="async" alt="Lageplan mit Schatten am 21. Juni, Höhenlinien und Grenzabständen">
-      <img class="plan-img" src="/img/cli-schnitt-aa.webp" width="1600" height="851" loading="lazy" decoding="async" alt="Schnitt A-A als Vektorplan, wie er als PDF oder DXF hinausgeht">
-      <img class="plan-img" src="/img/cli-ansicht-skizze.webp" width="1600" height="768" loading="lazy" decoding="async" alt="Ansicht Süd im Skizzenstil">
+      <img class="on plan-img" src="{{ "img/cli-deckenspiegel-eg.webp" | relURL }}" width="1400" height="908" loading="lazy" decoding="async" alt="Deckenspiegel Erdgeschoss aus Dossier, 1:100">
+      <img class="plan-img" src="{{ "img/cli-grundriss-eg.webp" | relURL }}" width="1500" height="1000" loading="lazy" decoding="async" alt="Grundriss Erdgeschoss mit Bemassung und Raumstempeln">
+      <img class="plan-img" src="{{ "img/fenster.webp" | relURL }}" width="1200" height="673" loading="lazy" decoding="async" alt="Fenster und Türen im Grundriss mit ihren Massen, aus denen die Liste entsteht">
+      <img src="{{ "img/app-situation.webp" | relURL }}" width="1600" height="1000" loading="lazy" decoding="async" alt="Situation in Dossier mit Parzelle, Grenzabständen und Baulinie">
+      <img class="plan-img" src="{{ "img/gelaende.webp" | relURL }}" width="1200" height="638" loading="lazy" decoding="async" alt="Schnitt durch das Musterhaus mit Gelände aus Höhenlinien">
+      <img class="plan-img" src="{{ "img/lage.webp" | relURL }}" width="1200" height="864" loading="lazy" decoding="async" alt="Lageplan mit Schatten am 21. Juni, Höhenlinien und Grenzabständen">
+      <img class="plan-img" src="{{ "img/cli-schnitt-aa.webp" | relURL }}" width="1600" height="851" loading="lazy" decoding="async" alt="Schnitt A-A als Vektorplan, wie er als PDF oder DXF hinausgeht">
+      <img class="plan-img" src="{{ "img/cli-ansicht-skizze.webp" | relURL }}" width="1600" height="768" loading="lazy" decoding="async" alt="Ansicht Süd im Skizzenstil">
     </div>
   </div>
 </section>
@@ -132,12 +132,12 @@
       </div>
       <div class="cut-body">
         <figure class="cut-plan">
-          <img src="/img/schnitt/grundriss-eg.webp" width="1200" height="981" loading="lazy" decoding="async" alt="Grundriss Erdgeschoss des Musterhauses mit einer verschiebbaren Schnittlinie">
+          <img src="{{ "img/schnitt/grundriss-eg.webp" | relURL }}" width="1200" height="981" loading="lazy" decoding="async" alt="Grundriss Erdgeschoss des Musterhauses mit einer verschiebbaren Schnittlinie">
           <div class="cut-line" aria-hidden="true"><b>A</b><b>A</b></div>
         </figure>
         <figure class="cut-view">
           {{- range $i, $_ := seq 0 11 }}
-          <img src="/img/schnitt/schnitt-{{ printf "%02d" $i }}.webp" width="1200" height="799" loading="lazy" decoding="async" alt="Schnitt durch das Musterhaus an Stelle {{ add $i 1 }} von 12">
+          <img src="{{ printf "img/schnitt/schnitt-%02d.webp" $i | relURL }}" width="1200" height="799" loading="lazy" decoding="async" alt="Schnitt durch das Musterhaus an Stelle {{ add $i 1 }} von 12">
           {{- end }}
         </figure>
       </div>
@@ -164,7 +164,7 @@
   <div class="wrap narrow">
     <h2 id="h-state" class="sec-title"><span class="snap" aria-hidden="true"></span>Ehrlicher Stand</h2>
     <p class="reveal">Dossier ist jung. Vieles ist fertig, einiges erst halb. Hier steht genau, was.</p>
-    <p><a class="btn ghost" href="/stand/">Zum Stand</a></p>
+    <p><a class="btn ghost" href="{{ "stand/" | relURL }}">Zum Stand</a></p>
   </div>
 </section>
 
@@ -176,7 +176,7 @@
     <div class="faq-list">
       <details>
         <summary>Läuft Dossier auf meinem Rechner?</summary>
-        <p>macOS ist die Hauptplattform, mit Anzeige über Metal. Linux läuft über Electron. Windows ist bisher nicht geprüft. Fertige Installer gibt es noch nicht; bis dahin wird Dossier aus dem Quellcode gebaut, siehe <a href="/download/">Download und Installation</a>.</p>
+        <p>macOS ist die Hauptplattform, mit Anzeige über Metal. Linux läuft über Electron. Windows ist bisher nicht geprüft. Fertige Installer gibt es noch nicht; bis dahin wird Dossier aus dem Quellcode gebaut, siehe <a href="{{ "download/" | relURL }}">Download und Installation</a>.</p>
       </details>
       <details>
         <summary>Kann ich DWG und DXF öffnen?</summary>
@@ -192,7 +192,7 @@
       </details>
       <details>
         <summary>Ist es fertig?</summary>
-        <p>Nein, aber brauchbar für Entwurf und Eingabe. Was fehlt, steht im <a href="/stand/">Stand</a>.</p>
+        <p>Nein, aber brauchbar für Entwurf und Eingabe. Was fehlt, steht im <a href="{{ "stand/" | relURL }}">Stand</a>.</p>
       </details>
     </div>
   </div>
@@ -206,7 +206,7 @@
     <h2 id="h-end" class="end-title">Fang mit einer Wand an.</h2>
     <div class="cta">
       <a class="btn" href="{{ site.Params.releases }}">Dossier herunterladen</a>
-      <a class="link" href="/docs/anleitung/">Anleitung lesen</a>
+      <a class="link" href="{{ "docs/anleitung/" | relURL }}">Anleitung lesen</a>
     </div>
   </div>
 </section>

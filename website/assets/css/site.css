@@ -2,12 +2,12 @@
    Farben und Schriften aus dem Design-Paket (website/_design/DESIGN-PAKET.md): Planpapier, Tusche,
    Schraffurgrau und das Öffnungsrot aus den Dossier-Plänen. Schriften liegen in /fonts (OFL). */
 
-@font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 600; font-display: swap; src: url("/fonts/schibsted-grotesk-600.woff2") format("woff2"); }
-@font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 800; font-display: swap; src: url("/fonts/schibsted-grotesk-800.woff2") format("woff2"); }
+@font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 600; font-display: swap; src: url("../fonts/schibsted-grotesk-600.woff2") format("woff2"); }
+@font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 800; font-display: swap; src: url("../fonts/schibsted-grotesk-800.woff2") format("woff2"); }
 /* IBM Plex Sans/Mono, beschnitten und darum umbenannt (reservierter Name, s. NOTICE) */
-@font-face { font-family: "Dossier Text"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/ibm-plex-sans-400.woff2") format("woff2"); }
-@font-face { font-family: "Dossier Text"; font-style: normal; font-weight: 500; font-display: swap; src: url("/fonts/ibm-plex-sans-500.woff2") format("woff2"); }
-@font-face { font-family: "Dossier Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/ibm-plex-mono-400.woff2") format("woff2"); }
+@font-face { font-family: "Dossier Text"; font-style: normal; font-weight: 400; font-display: swap; src: url("../fonts/ibm-plex-sans-400.woff2") format("woff2"); }
+@font-face { font-family: "Dossier Text"; font-style: normal; font-weight: 500; font-display: swap; src: url("../fonts/ibm-plex-sans-500.woff2") format("woff2"); }
+@font-face { font-family: "Dossier Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../fonts/ibm-plex-mono-400.woff2") format("woff2"); }
 
 :root {
   --canvas: #f2f0e9;
