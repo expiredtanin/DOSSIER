@@ -215,7 +215,7 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             a.scale = args[0];
             let c = domains::Ctx::new(p, &a);
             // Strichstärken nach Massstab wie im übrigen Plan.
-            let post = Some(crate::plan::extras::Post { mono: false, lw: crate::plan::extras::line_weight_factor(p, args[0]) }).filter(crate::plan::extras::Post::active);
+            let post = Some(crate::plan::extras::Post { mono: false, lw: crate::plan::extras::line_weight_factor(p, args[0]), sketch: 0.0 }).filter(crate::plan::extras::Post::active);
             buf_with(post, |sink| drawings::underlay_lines(&c, &args[2..], args[1] != 0.0, sink))
         }
         // Primitive einer Zeichnung (JSON in `text`, ohne Override-Regeln) beim Massstab `args[0]`.

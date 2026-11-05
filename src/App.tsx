@@ -2069,6 +2069,7 @@ export default function App() {
     fitSelection,
     zoomToApplied,
     onShadows: (v: boolean) => applyChange((p) => patchItem(p, "drawingLevels", activeLevel.id, { shadows: v })),
+    onSketch: (v: boolean) => applyChange((p) => patchItem(p, "drawingLevels", activeLevel.id, { sketch: v })),
     // Ebenen-Kombinationen: Speichern = Snapshot des Layer-Baums → localStorage; Laden = Map
     // lesen → Sichtbarkeits-Flags anwenden. Zeichnungs-Kombinationen analog über drawingLevels[].visible.
     saveLayerCombo: (name: string) => saveLayerCombo(name, snapshotLayerVisibility()),
@@ -2263,6 +2264,9 @@ export default function App() {
   const textStyles = project.textStyles ?? DEFAULT_PRESETS;
   const shadowsAvailable = activeLevel.kind === "elevation";
   const shadows = activeLevel.shadows ?? false;
+  // [67] Skizzenstil: Grundriss, Schnitt, Ansicht (nicht auf Blättern).
+  const sketchAvailable = !activeLevel.layoutId && (activeLevel.kind === "floor" || activeLevel.kind === "section" || activeLevel.kind === "elevation");
+  const sketch = activeLevel.sketch ?? false;
   const viewControlsEl = useMemo(
     () => (
       <ViewRibbonTab
@@ -2290,6 +2294,9 @@ export default function App() {
         shadowsAvailable={shadowsAvailable}
         shadows={shadows}
         onShadows={ev.onShadows}
+        sketchAvailable={sketchAvailable}
+        sketch={sketch}
+        onSketch={ev.onSketch}
         combos={combos}
         textTarget={textTarget}
         textStyles={textStyles}
@@ -2313,6 +2320,8 @@ export default function App() {
       setPlanColorMode,
       shadowsAvailable,
       shadows,
+      sketchAvailable,
+      sketch,
       textTarget,
       textStyles,
     ],

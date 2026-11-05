@@ -1996,7 +1996,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   laden/aktualisieren"): „Präsentation" (farbig, Schatten, ohne Referenzen/Konstruktion), „Eingabeplan 1:100" und
   „Ausführungsplan 1:50" (schwarz-weiss, fein, Strichstärken nach Massstab) — an Geschoss/Schnitt/Ansicht binden ([34]).
   Offen: eigener Knopf „Präsentationsplan" (Blatt mit Grundrissen/Ansichten und Vorlage in einem Schritt).
-- ○ **[67] Skizzenstil.** · M
+- ◐ **[67] Skizzenstil.** · M — 5.11.: `DrawingLevel.sketch` (+ `ViewTemplate.sketch`, über `LEVEL_KEYS` an verknüpfte
+  Ansichten): Kern `plan/sketch.rs` bearbeitet beim Schreiben des Plan-Puffers (`extras::Post::sketch`, Grundriss
+  `post_for`, Schnitt/Ansicht `sketch_post`) Linien und Polygon-Umrisse nach — leicht gebogen/gewellt, an Enden und
+  Ecken überzogen (feine Muster-/Schraffurlinien ohne Überzug), Striche ab 0.35 mm zweimal; Masse in Papier-mm,
+  deterministisch (Kennung + Strich-Index + Lage), Flächen/Schraffuren/Bögen/Text unverändert, gestrichelte Linien nur
+  Enden versetzt. Bildschirm und SVG/PDF lesen denselben Puffer. Umschalter „Skizze" im Ansichten-Ribbon, Feld im
+  Vorlagen-Tab, CLI `--sketch` (plan/section/elevation). Aus = Puffer unverändert (Goldens gleich).
+  Offen: nur Linux-Container (CLI-SVG + Chromium; kein render2d-/Metal-Bild, nicht in Tauri); kompakte
+  Linien-Unterlage (`drawingLines`, grosse DXF-Unterlagen) und Bögen/Kreise bleiben exakt; DXF-Export ohne Skizze
+  (gewollt); keine Intensitäts-Einstellung; keine Hand-Schraffur.
 - ◐ **[25] IFC-Import** → [B3] ✅ (Mesh), [B4] ◐ (Bauteile). · L
 - ◐ **[26] Dächer über beliebige Grundrisse.** `geometry/roofSkeleton.ts` (Walm/Sattel/Mansarde/
   Krüppelwalm auf L/T/U, Kehlen, Giebel); Port nach Rust läuft [K2]. Offen: Innenhöfe, schiefwinklige

@@ -53,7 +53,7 @@ function TemplateDetail({
       <NumberField value={tpl[key] ?? dflt} step={0.1} onChange={(v) => patch({ [key]: v })} />
     </Optional>
   );
-  const bool = (key: "mono" | "shadows" | "hiddenLines" | "scaleLineWeights", label: string) => (
+  const bool = (key: "mono" | "shadows" | "hiddenLines" | "scaleLineWeights" | "sketch", label: string) => (
     <Optional label={label} on={tpl[key] !== undefined} onToggle={(on) => patch({ [key]: on ? false : null })}>
       <input type="checkbox" checked={tpl[key] === true} onChange={(e) => patch({ [key]: e.target.checked })} />
     </Optional>
@@ -92,6 +92,7 @@ function TemplateDetail({
       {bool("shadows", t("resources.viewTemplates.shadows"))}
       {bool("hiddenLines", t("resources.viewTemplates.hiddenLines"))}
       {bool("scaleLineWeights", t("resources.viewTemplates.scaleLineWeights"))}
+      {bool("sketch", t("resources.viewTemplates.sketch"))}
       <div className="res-hint">{t("resources.viewTemplates.rangeHint")}</div>
       {num("cutHeight", t("resources.viewTemplates.cutHeight"), 1.0)}
       {num("viewTop", t("resources.viewTemplates.viewTop"), 2.5)}

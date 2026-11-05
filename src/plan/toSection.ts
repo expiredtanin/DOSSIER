@@ -109,6 +109,7 @@ export function levelArg(level: DrawingLevel) {
     depth: level.depth,
     shadows: level.shadows,
     hiddenLines: level.hiddenLines,
+    sketch: level.sketch,
   };
 }
 

@@ -30,3 +30,4 @@ pub mod openings;
 pub mod parts;
 pub mod elevation_geom;
 pub mod pick;
+pub mod sketch;

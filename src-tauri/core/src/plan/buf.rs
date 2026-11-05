@@ -62,6 +62,9 @@ use crate::model::{HatchPattern, HatchStyleKind, HatchStyleLines, LineStyleMotif
 use crate::plan::overrides::js_trim;
 use crate::plan::prim::{Dash, HatchRender, Primitive};
 use std::collections::HashMap;
+
+/// [67] Linienklasse der Skizzen-Striche eines Polygon-Umrisses (Farbe aus dem Umriss).
+pub const SKETCH_CLS: &str = "sketch";
 use std::hash::{BuildHasherDefault, Hasher};
 
 /// Schneller Hasher für die Tabellen des Schreibers (FNV-1a über die Bytes; kein Schutz gegen
@@ -1661,6 +1664,9 @@ impl Writer {
             if !matches!(p, Primitive::Line { .. }) {
                 let mut q = p.clone();
                 post.apply(&mut q);
+                if post.sketch > 0.0 && matches!(q, Primitive::Polygon { .. }) {
+                    return self.sketch_polygon(q, dash_ref, post.sketch);
+                }
                 return self.push_ref_raw(&q, dash_ref);
             }
         }
@@ -1787,8 +1793,9 @@ impl Writer {
     /// Eine Linie aus geliehenen Feldern anhängen (wie [`Writer::push_ref`] mit `Primitive::Line`,
     /// ohne das Primitiv erst zu bauen — die 2D-Zeichnungen schreiben so direkt in den Puffer).
     pub fn line_ref(&mut self, l: &LineRef, dash_ref: u32) {
+        let post = self.post.filter(|q| q.active());
         let posted;
-        let l = match self.post.filter(|q| q.active()) {
+        let l = match post {
             Some(q) => {
                 let (color, weight_mm) = q.line(l.color, l.weight_mm);
                 posted = LineRef { color, weight_mm, ..*l };
@@ -1796,6 +1803,79 @@ impl Writer {
             }
             None => l,
         };
+        if let Some(k) = post.map(|q| q.sketch).filter(|k| *k > 0.0) {
+            if l.zigzag.is_none() && l.motif.is_none() {
+                return self.sketch_line(l, dash_ref, k);
+            }
+        }
+        self.line_raw(l, dash_ref)
+    }
+
+    /// [67] Skizzenstil einer Linie: gestrichelt nur die Enden versetzt, sonst als gewellter,
+    /// überzogener Linienzug (Teilstücke verketten sich), kräftige Linien zweimal.
+    fn sketch_line(&mut self, l: &LineRef, dash_ref: u32, k: f64) {
+        use super::sketch;
+        let tag = l.drawing_id.or(l.opening_id).or(l.stair_id).unwrap_or(l.cls);
+        let seed = sketch::seed(tag, 0, l.a, l.b);
+        if matches!(l.dash, Some(Some(_))) {
+            let (a, b) = sketch::jitter_ends(l.a, l.b, k, seed);
+            return self.line_raw(&LineRef { a, b, ..*l }, dash_ref);
+        }
+        self.sketch_strokes(&[l.a, l.b], l, dash_ref, k, seed);
+    }
+
+    /// Ein Strich (Linienzug `pts`) im Stil von `l` als Skizze, ggf. zweimal.
+    fn sketch_strokes(&mut self, pts: &[Vec2], l: &LineRef, dash_ref: u32, k: f64, seed: u64) {
+        use super::sketch;
+        let passes = if sketch::doubled(pts, k, l.weight_mm) { 2 } else { 1 };
+        for pass in 0..passes {
+            let s = sketch::stroke(pts, k, seed ^ (pass as u64).wrapping_mul(0xA24B_AED4_963E_E407), sketch::overshoot_for(l.weight_mm));
+            let weight_mm = if pass == 0 { l.weight_mm } else { l.weight_mm * sketch::DOUBLE_WEIGHT };
+            for w in s.windows(2) {
+                self.line_raw(&LineRef { a: w[0], b: w[1], weight_mm, ..*l }, dash_ref);
+            }
+        }
+    }
+
+    /// [67] Skizzenstil eines Polygons: Fläche exakt ohne Umriss, der Umriss als Skizzen-Striche
+    /// (neuer Strich an jeder Ecke, Kanten ohne Strich bleiben frei).
+    fn sketch_polygon(&mut self, mut q: Primitive, dash_ref: u32, k: f64) {
+        let Primitive::Polygon { pts, stroke, stroke_width_mm, no_stroke_edges, greyed, opacity, wall_id, drawing_id, ceiling_id, opening_id, stair_id, room_id, extruded_solid_id, context_object_id, column_id, roof_id, section_line_id, .. } = &mut q else {
+            return self.push_ref_raw(&q, dash_ref);
+        };
+        let visible = *stroke_width_mm > 0.0 && stroke.as_str() != "none" && !stroke.is_empty() && stroke.as_str() != "transparent";
+        if !visible {
+            return self.push_ref_raw(&q, dash_ref);
+        }
+        let runs = super::sketch::polygon_runs(pts, no_stroke_edges.as_deref());
+        let color = std::mem::replace(stroke, "none".into());
+        *no_stroke_edges = None;
+        let tag = [&*wall_id, &*drawing_id, &*ceiling_id, &*opening_id, &*stair_id, &*room_id, &*extruded_solid_id, &*context_object_id, &*column_id, &*roof_id, &*section_line_id].into_iter().find_map(|x| x.clone()).unwrap_or_default();
+        let (weight_mm, greyed, opacity, drawing_id, opening_id, stair_id) = (*stroke_width_mm, *greyed, *opacity, drawing_id.clone(), opening_id.clone(), stair_id.clone());
+        self.push_ref_raw(&q, dash_ref);
+        let l = LineRef {
+            a: Vec2 { x: 0.0, y: 0.0 },
+            b: Vec2 { x: 0.0, y: 0.0 },
+            cls: SKETCH_CLS,
+            weight_mm,
+            dash: None,
+            zigzag: None,
+            motif: None,
+            color: Some(&color),
+            drawing_id: drawing_id.as_deref(),
+            opening_id: opening_id.as_deref(),
+            stair_id: stair_id.as_deref(),
+            greyed,
+            opacity,
+        };
+        for (i, run) in runs.iter().enumerate() {
+            let seed = super::sketch::seed(&tag, i as u64, run[0], run[run.len() - 1]);
+            self.sketch_strokes(run, &l, 0, k, seed);
+        }
+    }
+
+    /// Eine Linie ohne Nachbearbeitung anhängen.
+    fn line_raw(&mut self, l: &LineRef, dash_ref: u32) {
         let plain = l.zigzag.is_none() && l.motif.is_none();
         let di = l.drawing_id.map(|s| self.intern(s).0);
         let ci = l.color.map(|s| self.intern(s).0);
