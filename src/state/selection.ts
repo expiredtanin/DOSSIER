@@ -33,6 +33,11 @@ export interface Selection {
   /** Schnitt-/Ansichtslinien (DrawingLevel-Ids). */
   sectionLines: string[];
   /**
+   * [137] Abgeleitete Lage-Darstellung (kein Modellelement): `"sunStudy"` (Schattenfläche angeklickt)
+   * bzw. `"siteRules"` (Baurechtslinie) — die Objekt-Info zeigt die Einstellungen der Quelle.
+   */
+  site: string[];
+  /**
    * Gewählte Gruppen — rein informativ (Bounding-Box, Doppelklick-Ziel); die
    * Mitglieder stehen zusätzlich in den übrigen Arten (s. `groupActions.ts`).
    */
@@ -54,6 +59,7 @@ export const SELECTION_KINDS: readonly SelectionKind[] = [
   "roofs",
   "contextObjects",
   "sectionLines",
+  "site",
   "groups",
 ];
 

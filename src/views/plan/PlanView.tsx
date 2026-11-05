@@ -189,7 +189,7 @@ export interface PlanViewHandle {
 
 const PICK_ORDER: readonly PickKind[] = [
   "section", "opening", "wall", "column", "drawing", "solid",
-  "ceiling", "stair", "room", "roof", "context",
+  "ceiling", "stair", "room", "roof", "site", "context",
 ];
 
 /** Ein Objekt unter dem Cursor — für das Durchschalten übereinanderliegender Objekte. */
@@ -218,6 +218,7 @@ const EMPTY_PICK: PickIds = {
   roofId: null,
   sectionLineId: null,
   contextObjectId: null,
+  siteId: null,
 };
 
 /** Mac: Cmd+Klick; sonst Strg+Klick (Alt+Klick ist die Schere, Ctrl+Klick unter macOS das Kontextmenü). */
@@ -292,6 +293,11 @@ export interface PlanSelection {
    * (alle anderen gehen vor, analog `roofId`); sonst `null`.
    */
   contextObjectId: string | null;
+  /**
+   * [137] Getroffene Lage-Darstellung (Schattenfläche → `"sunStudy"`, Baurechtslinie → `"siteRules"`),
+   * wenn kein Element höherer Priorität getroffen wurde; Vorrang vor Kontext-Objekten (sie liegt darüber).
+   */
+  siteId?: string | null;
   /**
    * War beim Klick Shift gedrückt? Dann ERWEITERT der Aufrufer (App) die
    * Auswahl um das getroffene Element (bzw. schaltet es ab/zu), statt sie zu
@@ -675,6 +681,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     columns: selectedColumnIds,
     groups: selectedGroupIds,
     drawings: selectedDrawingIds,
+    site: selectedSite,
   } = selection;
   const selectedDrawingId = single(selection, "drawings");
   // Linke Maustaste liegt beim Werkzeug/der Transformation, wenn App das meldet
@@ -1565,11 +1572,23 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Grundriss-Pick-Band (Bounding-Box) per Punkt-in-Polygon — macht es wie eine
   // Wand irgendwo innerhalb seiner Fläche anklickbar, nicht nur exakt auf der
   // dünnen Umrisslinie.
-  const pickContextObject = (clientX: number, clientY: number): string | null => {
+  // Pick-Ids unter dem Cursor im Feld `contextObjectId`, oberste zuerst. Die abgeleitete Lage-Darstellung
+  // ([137], Kern `plan/extras.rs`) trägt dort `@sunStudy`/`@siteRules` (Schattenflächen, Baurechts-Bänder).
+  const contextIdsAt = (clientX: number, clientY: number): string[] => {
     const v = clientToView(clientX, clientY, view);
-    const i = getPick().topPolygon(viewToModel(v.x, v.y), "contextObjectId");
-    return i === null ? null : (planPrimAt(plan, i) as { contextObjectId?: string }).contextObjectId!;
+    const pick = getPick();
+    return pick.polygonsAt(viewToModel(v.x, v.y), "contextObjectId").map((i) => (pick.prim(i) as { contextObjectId?: string }).contextObjectId!);
   };
+
+  // [137] Getroffene Lage-Darstellung: Quelle `"sunStudy"`/`"siteRules"` (Baurechtslinie vor Schatten) oder null.
+  const pickSiteAt = (clientX: number, clientY: number): string | null => {
+    const ids = contextIdsAt(clientX, clientY).filter((id) => id.startsWith("@"));
+    const id = ids.find((x) => x === "@siteRules") ?? ids[0];
+    return id ? id.slice(1) : null;
+  };
+
+  const pickContextObject = (clientX: number, clientY: number): string | null =>
+    contextIdsAt(clientX, clientY).find((id) => !id.startsWith("@")) ?? null;
 
   // Getroffener extrudierter Körper (truck-Integration): der Footprint-Umriss
   // ist ein reiner Haarlinien-Umriss (fill:"none"), aber per Punkt-in-Polygon
@@ -2119,8 +2138,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // Kontext-Objekt (Gebäude/Terrain) als ALLERLETZTE Priorität — seine
     // Bbox-Pick-Fläche kann grosszügig überlappen, daher erst wenn wirklich
     // nichts anderes getroffen wurde.
-    const contextObjectId =
+    // [137] Schatten/Baurechtslinien (Lage-Darstellung) über dem Gelände, unter allen Bauteilen.
+    const siteId =
       openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId || roofId
+        ? null
+        : pickSiteAt(clientX, clientY);
+    const contextObjectId =
+      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId || roofId || siteId
         ? null
         : pickContextObject(clientX, clientY);
     return {
@@ -2136,6 +2160,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       roofId,
       sectionLineId: null,
       contextObjectId,
+      siteId,
     };
   };
 
@@ -2236,7 +2261,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       const key = `${kind}:${id}`;
       if (seen.has(key)) return;
       seen.add(key);
-      const base = kind === "drawing" ? drawingLabel(id) : t(`pick.kind.${kind}`);
+      const base = kind === "drawing" ? drawingLabel(id) : kind === "site" ? t(id === "siteRules" ? "pick.site.siteRules" : "pick.site.sunStudy") : t(`pick.kind.${kind}`);
       const cat = describePick?.(kind, id);
       out.push({ kind, id, hitIndex, label: cat ? `${base} · ${cat}` : base });
     };
@@ -2251,6 +2276,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     add("stair", dp.stairId, dp.hitIndex);
     add("room", dp.roomId, dp.hitIndex);
     add("roof", dp.roofId, dp.hitIndex);
+    add("site", dp.siteId, dp.hitIndex);
     add("context", dp.contextObjectId, dp.hitIndex);
     const first = out.slice();
     // 2) Alles Übrige an dieser Stelle, nach Standard-Priorität sortiert.
@@ -2272,7 +2298,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       addRest("stair", p.stairId, idx);
       addRest("room", p.roomId, idx);
       addRest("roof", p.roofId, idx);
-      addRest("context", p.contextObjectId, idx);
+      if (p.contextObjectId?.startsWith("@")) addRest("site", p.contextObjectId.slice(1), idx);
+      else addRest("context", p.contextObjectId, idx);
       addRest("section", p.sectionLineId, idx);
     }
     for (const id of nearDrawingIds(clientX, clientY)) addRest("drawing", id, null);
@@ -2282,6 +2309,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     addRest("stair", pickStair(clientX, clientY), null);
     addRest("room", pickRoom(clientX, clientY), null);
     addRest("roof", pickRoof(clientX, clientY), null);
+    addRest("site", pickSiteAt(clientX, clientY), null);
     addRest("context", pickContextObject(clientX, clientY), null);
     addRest("section", pickSectionLine(clientX, clientY), null);
     // Stabil nach Standard-Priorität ordnen (innerhalb einer Art bleibt die Fundreihenfolge).
@@ -2317,6 +2345,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       roofId: c.kind === "roof" ? c.id : null,
       sectionLineId: c.kind === "section" ? c.id : null,
       contextObjectId: c.kind === "context" ? c.id : null,
+      siteId: c.kind === "site" ? c.id : null,
     });
   };
 
@@ -2794,14 +2823,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Hervorhebung der selektierten Kontext-Objekte (Gebäude/Terrain): das
   // (unsichtbare) Bbox-Pick-Band mit contextObjectId als Akzentkontur
   // überzeichnen — analog zur Dach-/Raum-Auswahl.
+  // [137] Gewählte Lage-Darstellung (Schatten/Baurecht): ihre Flächen bzw. Bänder (`@…`-Ids) ebenso.
   const highlightContextObjectPolys = useMemo(() => {
-    const ids =
-      selectedContextObjectIds && selectedContextObjectIds.length
-        ? new Set(selectedContextObjectIds)
-        : null;
-    if (!ids) return [];
-    return primsOwnedBy("contextObjectId", selectedContextObjectIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
-  }, [plan, selectedContextObjectIds]);
+    const ids = [...(selectedContextObjectIds ?? []), ...(selectedSite ?? []).map((s) => "@" + s)];
+    if (!ids.length) return [];
+    return primsOwnedBy("contextObjectId", ids, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
+  }, [plan, selectedContextObjectIds, selectedSite]);
 
   // Hervorhebung der selektierten Schnitt-/Ansichtslinie: das (unsichtbare)
   // Pick-Band (Polygon mit sectionLineId) mit Akzentkontur überzeichnen.
@@ -2838,7 +2865,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Primitive des per Listen-Hover vorgemerkten Objekts (Vorschau-Hervorhebung).
   const hoverPrims = useMemo((): Primitive[] => {
     if (!hoverPick) return [];
-    const field: Record<PickKind, OwnerField> = {
+    if (hoverPick.kind === "site") return primsOwnedBy("contextObjectId", ["@" + hoverPick.id], (_p): _p is Primitive => true);
+    const field: Record<Exclude<PickKind, "site">, OwnerField> = {
       wall: "wallId", drawing: "drawingId", ceiling: "ceilingId", opening: "openingId",
       stair: "stairId", room: "roomId", roof: "roofId", context: "contextObjectId",
       section: "sectionLineId", solid: "extrudedSolidId", column: "columnId",

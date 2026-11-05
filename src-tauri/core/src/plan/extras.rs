@@ -11,6 +11,11 @@ use crate::jsnum;
 use crate::model::*;
 use std::collections::HashMap;
 
+/// [137] Pick-Ids der abgeleiteten Lage-Darstellung (im Feld `contextObjectId`, mit `@` — keine Element-Id
+/// beginnt so): Schattenflächen wählen den Sonnenstand, die Baurechtslinien (unsichtbare Bänder) das Baurecht.
+pub const SITE_PICK_SUN: &str = "@sunStudy";
+pub const SITE_PICK_RULES: &str = "@siteRules";
+
 /// Füllfarbe der Schattenflächen.
 pub const SUN_SHADOW_FILL: &str = "#3a4a66";
 const SUN_SHADOW_OPACITY: f64 = 0.28;
@@ -91,39 +96,12 @@ pub fn sun_shadow(p: &Project, floor: &str, when_ms: Option<f64>, out: &mut Vec<
     let sun = crate::sun::sun_position(lat, lon, t);
     for poly in crate::sun::shadow_polygons_project(p, sun) {
         for r in crate::sun::without_holes(&poly) {
-            out.push(flat_polygon(ring_pts(&r), SUN_SHADOW_FILL, SUN_SHADOW_OPACITY));
+            let mut q = flat_polygon(ring_pts(&r), SUN_SHADOW_FILL, SUN_SHADOW_OPACITY);
+            if let Primitive::Polygon { context_object_id, .. } = &mut q {
+                *context_object_id = Some(SITE_PICK_SUN.into());
+            }
+            out.push(q);
         }
-    }
-}
-
-/// [137] Abgeleitete Lage-Darstellung unter dem Punkt (x, y) im Geschoss `floor` (dieselben Bedingungen
-/// wie die Zeichnung): `"siteRules"` näher als `tol` (m) an Parzellengrenze oder zulässiger Fläche,
-/// `"sunStudy"` in einer Schattenfläche zum Zeitpunkt `when_ms`, sonst `""`. Die Auswahl öffnet dann die
-/// Einstellungen der Quelle (Baurecht bzw. Sonnenstand) — Schatten und Baurechtslinien sind keine Elemente.
-pub fn site_pick(p: &Project, floor: &str, when_ms: Option<f64>, x: f64, y: f64, tol: f64) -> &'static str {
-    if !(x.is_finite() && y.is_finite()) {
-        return "";
-    }
-    let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.0 };
-    let near_ring = |r: &[Vec2]| (0..r.len()).any(|i| crate::plan::pick::point_seg_dist(x, y, r[i].x, r[i].y, r[(i + 1) % r.len()].x, r[(i + 1) % r.len()].y) <= tol);
-    if let (Some(check), Some(rules)) = (site_check(p, floor), p.site_rules.as_ref()) {
-        if near_ring(&rules.parcel) || check.allowed.iter().flatten().any(|r| near_ring(r)) {
-            return "siteRules";
-        }
-    }
-    let mut shadow = Vec::new();
-    sun_shadow(p, floor, when_ms, &mut shadow);
-    let inside = shadow.iter().any(|q| match q {
-        Primitive::Polygon { pts, .. } => {
-            let flat: Vec<f64> = pts.iter().flat_map(|v| [v.x, v.y]).collect();
-            crate::plan::pick::point_in_polygon(x, y, &flat)
-        }
-        _ => false,
-    });
-    if inside {
-        "sunStudy"
-    } else {
-        ""
     }
 }
 
@@ -160,10 +138,27 @@ fn ring_lines(out: &mut Vec<(Primitive, u32)>, pts: &[Vec2], cls: &str, color: &
     }
 }
 
+/// [137] Unsichtbares Rechteck der halben Breite `half` um die Strecke a–b mit der Pick-Id des Baurechts.
+fn seg_band(a: Vec2, b: Vec2, half: f64) -> Option<Primitive> {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let l = dx.hypot(dy);
+    if !(l > 1e-9) {
+        return None;
+    }
+    let (nx, ny) = (-dy / l * half, dx / l * half);
+    let pts = vec![Vec2 { x: a.x + nx, y: a.y + ny }, Vec2 { x: b.x + nx, y: b.y + ny }, Vec2 { x: b.x - nx, y: b.y - ny }, Vec2 { x: a.x - nx, y: a.y - ny }];
+    let mut q = flat_polygon(pts, "none", 1.0);
+    if let Primitive::Polygon { context_object_id, opacity, .. } = &mut q {
+        *context_object_id = Some(SITE_PICK_RULES.into());
+        *opacity = None;
+    }
+    Some(q)
+}
+
 /// Unterste Gruppe: Schatten, dann Parzellengrenze (Strich-Punkt) und zulässige Fläche
 /// (gestrichelt); mit Strichmuster-Kennung je Primitiv. Dazu die Verstösse (Gebäude-Grundfläche
 /// ausserhalb der zulässigen Fläche) für die oberste Gruppe.
-pub fn site_and_shadow(p: &Project, floor: &str, when_ms: Option<f64>) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
+pub fn site_and_shadow(p: &Project, floor: &str, when_ms: Option<f64>, scale: f64) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
     let mut shadow = Vec::new();
     sun_shadow(p, floor, when_ms, &mut shadow);
     let mut under: Vec<(Primitive, u32)> = shadow.into_iter().map(|q| (q, 0)).collect();
@@ -175,6 +170,16 @@ pub fn site_and_shadow(p: &Project, floor: &str, when_ms: Option<f64>) -> (Vec<(
             for ring in poly {
                 r += 1;
                 ring_lines(&mut under, ring, SITE_ALLOWED_CLS, ALLOWED_COLOR, 0.25, &ALLOWED_DASH, r);
+            }
+        }
+        // [137] Unsichtbare Pick-Bänder (±1.5 mm Papier) über den Linien: ein Klick wählt das Baurecht.
+        let half = 0.0015 * if scale.is_finite() && scale > 0.0 { scale } else { 100.0 };
+        let rings = std::iter::once(rules.parcel.as_slice()).chain(check.allowed.iter().flatten().map(|r| r.as_slice()));
+        for ring in rings {
+            for i in 0..ring.len() {
+                if let Some(band) = seg_band(ring[i], ring[(i + 1) % ring.len()], half) {
+                    under.push((band, 0));
+                }
             }
         }
         for poly in &check.violations {
@@ -559,43 +564,57 @@ mod tests {
             serde_json::from_value(v).unwrap()
         };
         p.site_rules = Some(rules(serde_json::json!({})));
-        let n0 = site_and_shadow(&p, &floor, None).1.len();
+        let n0 = site_and_shadow(&p, &floor, None, 100.0).1.len();
         p.site_rules = Some(rules(serde_json::json!({"profileAngle": 10.0, "profileHeight": 0.01})));
         let c = crate::site_rules::check_project(&p).unwrap();
         assert!(c.profile_exceeded);
-        let n1 = site_and_shadow(&p, &floor, None).1.len();
+        let n1 = site_and_shadow(&p, &floor, None, 100.0).1.len();
         assert!(n1 > n0, "{n0} {n1}");
     }
 
-    /// [137] Klick in eine Schattenfläche wählt den Sonnenstand, Klick auf eine Baurechtslinie das Baurecht;
-    /// ohne sichtbare Studie bzw. in einem anderen Geschoss nichts.
+    /// Oberste Fläche mit Pick-Id unter dem Punkt (wie `PickIndex::polygons_at`, Maske „Kontext").
+    fn top_pick(prims: &[(Primitive, u32)], x: f64, y: f64) -> Option<String> {
+        prims.iter().rev().find_map(|(q, _)| match q {
+            Primitive::Polygon { pts, context_object_id: Some(id), .. } => {
+                let flat: Vec<f64> = pts.iter().flat_map(|v| [v.x, v.y]).collect();
+                crate::plan::pick::point_in_polygon(x, y, &flat).then(|| id.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// [137] Schattenflächen tragen die Pick-Id des Sonnenstands, die Baurechtslinien unsichtbare Bänder mit der
+    /// des Baurechts (Klick darauf öffnet deren Einstellungen); ohne sichtbare Studie bzw. in einem anderen
+    /// Geschoss nichts.
     #[test]
     fn klick_auf_schatten_und_baurecht() {
         let mut p = sample();
         let floor = ground_floor_id(&p).unwrap().to_string();
         p.sun_study = Some(SunStudy { when: "2026-12-21T09:00:00Z".into(), show: true, ..Default::default() });
         let when = Some(1_797_843_600_000.0); // 2026-12-21T09:00:00Z
-        let mut shadow = Vec::new();
-        sun_shadow(&p, &floor, when, &mut shadow);
-        assert!(!shadow.is_empty());
-        // Ein Punkt in einer Schattenfläche (Raster über die erste Fläche).
-        let Primitive::Polygon { pts, .. } = &shadow[0] else { panic!() };
+        let (under, _) = site_and_shadow(&p, &floor, when, 100.0);
+        let shadows: Vec<&Primitive> = under.iter().map(|(q, _)| q).filter(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == SUN_SHADOW_FILL)).collect();
+        assert!(!shadows.is_empty());
+        assert!(shadows.iter().all(|q| matches!(q, Primitive::Polygon { context_object_id: Some(id), .. } if id == SITE_PICK_SUN)));
+        // Ein Punkt in der ersten Schattenfläche (Raster über ihr Ausmass).
+        let Primitive::Polygon { pts, .. } = shadows[0] else { panic!() };
         let flat: Vec<f64> = pts.iter().flat_map(|v| [v.x, v.y]).collect();
         let (x0, x1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, v| (a.0.min(v.x), a.1.max(v.x)));
         let (y0, y1) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, v| (a.0.min(v.y), a.1.max(v.y)));
         let inside = (0..400).map(|k| (x0 + (x1 - x0) * ((k % 20) as f64 + 0.5) / 20.0, y0 + (y1 - y0) * ((k / 20) as f64 + 0.5) / 20.0)).find(|q| crate::plan::pick::point_in_polygon(q.0, q.1, &flat)).unwrap();
-        assert_eq!(site_pick(&p, &floor, when, inside.0, inside.1, 0.1), "sunStudy");
-        assert_eq!(site_pick(&p, &floor, when, 1e4, 1e4, 0.1), "");
-        assert_eq!(site_pick(&p, "anderes-geschoss", when, inside.0, inside.1, 0.1), "");
-        assert_eq!(site_pick(&p, &floor, None, inside.0, inside.1, 0.1), "");
-        assert_eq!(site_pick(&p, &floor, when, f64::NAN, 0.0, 0.1), "");
+        assert_eq!(top_pick(&under, inside.0, inside.1).as_deref(), Some(SITE_PICK_SUN));
+        assert_eq!(top_pick(&under, 1e4, 1e4), None);
+        assert!(site_and_shadow(&p, "anderes-geschoss", when, 100.0).0.is_empty());
         p.sun_study.as_mut().unwrap().show = false;
-        assert_eq!(site_pick(&p, &floor, when, inside.0, inside.1, 0.1), "");
-        // Baurecht: Parzellengrenze bei x = −30 (weit weg vom Gebäude, kein Schatten dort).
+        assert_eq!(top_pick(&site_and_shadow(&p, &floor, when, 100.0).0, inside.0, inside.1), None);
+        // Baurecht: Parzellengrenze bei x = −30, Grenzabstand 3 m → zulässige Fläche ab x = −27; Band ±0.15 m bei 1:100.
         p.site_rules = Some(serde_json::from_value(serde_json::json!({"parcel": [{"x": -30, "y": -30}, {"x": 40, "y": -30}, {"x": 40, "y": 40}, {"x": -30, "y": 40}], "defaultSetback": 3.0})).unwrap());
-        assert_eq!(site_pick(&p, &floor, when, -30.05, 5.0, 0.1), "siteRules");
-        assert_eq!(site_pick(&p, &floor, when, -27.0, 5.0, 0.1), "siteRules", "zulässige Fläche 3 m innen");
-        assert_eq!(site_pick(&p, &floor, when, -28.5, 5.0, 0.1), "");
+        let (under, _) = site_and_shadow(&p, &floor, when, 100.0);
+        assert_eq!(top_pick(&under, -30.1, 5.0).as_deref(), Some(SITE_PICK_RULES));
+        assert_eq!(top_pick(&under, -27.0, 5.0).as_deref(), Some(SITE_PICK_RULES), "zulässige Fläche");
+        assert_eq!(top_pick(&under, -28.5, 5.0), None);
+        // Massstab 1:500: Band ±0.75 m.
+        assert_eq!(top_pick(&site_and_shadow(&p, &floor, when, 500.0).0, -29.4, 5.0).as_deref(), Some(SITE_PICK_RULES));
     }
 
     #[test]

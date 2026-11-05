@@ -35,6 +35,12 @@ export interface SiteSlice {
   generateTerrain: (contourSetId: string, opts?: TerrainOptions) => string | null;
   /** [T6]/[68] Ändert Felder eines Kontext-Objekts (Gelände, Baugrube) in einem Schritt; `coalesceKey` für Tippen. */
   patchContextObject: (id: string, patch: Record<string, unknown>, coalesceKey?: string) => void;
+  /**
+   * [137] Gelände `terrainId` aus seinen Höhenlinien (`sourceId`, sonst dem ersten Höhenlinien-Satz) mit
+   * Glättungsstufe `smooth` (0 = roh) neu erzeugen — gleiche Id und Einstellungen, ein Undo-Schritt.
+   * `false`, wenn es keine Quelle gibt oder kein Netz entsteht.
+   */
+  regenerateTerrain: (terrainId: string, smooth: number) => boolean;
   /** Leert die gesamte Kontext-Schicht. */
   clearContext: () => void;
 }
@@ -94,8 +100,23 @@ export function createSiteSlice(
       if (!set || set.type !== "contourSet") return null;
       const terrain = generateTerrainFromContours(set.contours, opts);
       if (terrain.indices.length === 0) return null; // kein sinnvolles TIN
-      addToContext([terrain]);
+      addToContext([{ ...terrain, sourceId: set.id }]);
       return terrain.id;
+    },
+
+    regenerateTerrain: (terrainId, smooth) => {
+      const ctx = get().project.context ?? [];
+      const terrain = ctx.find((o) => o.id === terrainId && o.type === "terrainMesh");
+      if (!terrain || terrain.type !== "terrainMesh") return false;
+      const sets = ctx.filter((o) => o.type === "contourSet");
+      const set = sets.find((o) => o.id === terrain.sourceId) ?? sets[0];
+      if (!set || set.type !== "contourSet") return false;
+      const fresh = generateTerrainFromContours(set.contours, { smooth });
+      if (fresh.indices.length === 0) return false;
+      get().applyChange((p) =>
+        patchItem(p, "context", terrainId, (o) => ({ ...o, positions: fresh.positions, indices: fresh.indices, smooth, sourceId: set.id }) as ContextObject),
+      );
+      return true;
     },
 
     clearContext: () => get().applyChange((p) => fieldOps(p, "context", [])),

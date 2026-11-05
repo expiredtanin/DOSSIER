@@ -798,7 +798,7 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
 /// beim projektglobalen Aufruf (`global`).
 fn extras_of(p: &Project, a: &PlanArgs) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
     if a.global {
-        super::extras::site_and_shadow(p, &a.floor, a.sun_when)
+        super::extras::site_and_shadow(p, &a.floor, a.sun_when, a.scale)
     } else {
         (Vec::new(), Vec::new())
     }

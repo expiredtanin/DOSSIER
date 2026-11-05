@@ -57,8 +57,6 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("siteCheck", _) => json(&site_rules::check_project(p)),
         ("dormerStatus", _) => json(&crate::dormer::status(p)),
         ("excavationQuantities", _) => json(&crate::excavation::quantities(p)),
-        // [137] Klick auf Schatten/Baurechtslinien: args = [x, y, Toleranz m, Zeitpunkt ms (NaN = keiner)], text = Geschoss.
-        ("sitePick", 4) => json(&crate::plan::extras::site_pick(p, text, Some(args[3]).filter(|t| t.is_finite()), args[0], args[1], args[2])),
         ("buildingFootprint", _) => json(&site_rules::building_footprint(p)),
         ("modelTop", _) => json(&site_rules::model_top(p)),
         ("shadows", 2) => json(&site_rules::area_out(&sun::shadow_polygons_project(p, sun::SunPosition { azimuth: args[0], elevation: args[1] }))),
