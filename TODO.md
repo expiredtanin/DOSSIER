@@ -1277,7 +1277,18 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
   3D-Pfade. Mit `native2d` zusammen planen; [K3] liefert die Primitive direkt aus Rust. · L
 - ✅ **[4] Kern headless als `dossier-cli`.** info/validate/migrate/plan/section/elevation/dxf/ifc/step/
   obj/stl/schedule/kennzahlen/sun/model3d/mcp/bench. · S–M
-- ○ **[58] Inkrementelle Ableitung.** Teilweise über Caches. · L
+- ◐ **[58] Inkrementelle Ableitung.** Teilweise über Caches. · L
+  5.11.: 3D-Modell inkrementell. Kern `model3d_cache.rs` (im Dokument): Wandkörper und Öffnungs-Einbauteile je Wand
+  (Schlüssel Element-Stand der Wand aus `Revs::items`, gültig bei gleichen Ständen der gehosteten Öffnungen und gleichen
+  Schnittlinien), Verschneidung je Geschoss (neu nur bei geänderter Eingabe), fertiges JSON je Eintrag; jedes andere
+  Feld (Typen, Geschosse, Decken, Dächer …) oder eine andere Material-Liste verwirft alles; Bogenwände: Einbauteile
+  ohne Cache. `model3dPartsDelta`: nur Einträge, die TS noch nicht hat (Laufnummern), TS setzt zusammen
+  (`ProjectDocument.model3dParts`). Tests: Kern `model3d_cache::tests` (gemischte Änderungen samt Undo/Redo, Byte-gleich
+  mit voller Ableitung, Änderungs-Antwort = voll; 1 Wand → 1 Wand neu), `toWalls3d.incremental.test.ts`.
+  Grossgebäude (Linux, WASM): projectToModel3d nach 1 Wand-Änderung 316 → 12 ms, nach 1 Öffnungs-Änderung 302 → 12 ms.
+  Offen: 3D-Viewer serialisiert das Modell weiter ganz (`JSON.stringify` → render3d `set_model`, eigener Schritt mit
+  Teil-Updates in render3d); Explosion (`explode > 0`) ohne Cache; Schnitt/Ansicht (je ~100 ms) und Plan-Szene
+  (`planToRenderScene` ~30 ms) noch voll.
 
 ### Befehle, Undo, Validierung
 
@@ -1327,7 +1338,8 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
   zusätzlich DXF (1 Geschoss), IFC und Doc-commit/undo/redo (200 Wände = 1 Schritt). Frame-Zeiten: `e2e/bigBuilding.spec.ts`
   (`npm run e2e:perf`, nur mit `E2E_PERF=1`; rAF-Abstände bei Rad-Zoom und Schwenken, p50/p95, grosse Obergrenze).
   Messung 5.11., **Linux-Container (nicht macOS), Mittel über 5 Läufe, Software-Rendering, Plan über SVG-Rückfall**:
-  generatePlan 3,1 ms (Cache) · planToRenderScene 34,7 · planToSvgString 36,2 · projectToModel3d 327 · Schnitt 110 ·
+  generatePlan 3,1 ms (Cache) · planToRenderScene 34,7 · planToSvgString 36,2 · projectToModel3d 327 (5.11. nach [58]:
+  kalt ~530 einmalig, unverändert 18–24, nach 1 Wand-/Öffnungs-Änderung 12) · Schnitt 110 ·
   Ansicht 124 · DXF 73 · IFC 548 ms; Doc-commit 200 Wände 2,7 ms, undo 2,0, redo 0,8; commit 1 Wand 0,10 ms.
   Frames im Plan (Chromium headless, SVG): Zoom p50 16,7 / p95 450 / max 650 ms; Schwenken p50 150 / p95 550 / max 617 ms —
   Plan-Ansicht mit ~4000 Elementen im SVG-Rückfall ruckelt deutlich (ein Rad-Schritt ≈ 1 s Wartezeit). Offen: Messung auf macOS
