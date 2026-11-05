@@ -2332,9 +2332,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   truck vernetzt jede Fläche einzeln, bei schrägen/gedrehten Körpern sind gemeinsame Ecken nur fast gleich →
   „Netz nicht geschlossen", Aussparungen in schrägen Wänden scheiterten. Jetzt Raster-Verschweissung mit Toleranz
   1e-6 · grösste Koordinate (mind. 1e-7 m). Tests: 30°-Wand − bündige Aussparung über den Fallback, gehrte schräge
-  Wand (Trapez), gedrehter Quader mit getrennten Flächen-Ecken. Offen: truck-shapeops panikt bei der gehrten
-  schrägen Wand selbst („wire is not simple") — im WASM bricht `guarded()` dann ab, bevor der Mesh-Fallback greift
-  (Abhilfe: B-Rep-Boolean dort überspringen oder Manifold zuerst). · S
+  Wand (Trapez), gedrehter Quader mit getrennten Flächen-Ecken.
+  (5.11.) truck-shapeops panikte bei Booleans auf gehrten schrägen Wänden („This wire is not simple"; Absturz-Suche:
+  14 von 150 Lagen, auch rechtwinklige Wand mit Körper knapp daneben) — im WASM ist Panic = Abbruch
+  (`catch_unwind` unmöglich), `guarded()` startet neu und gibt auf, der Mesh-Fallback kam nie dran. Jetzt:
+  `solid_mesh_core` (Mesh, Kennwerte, Kollision, Abzugskörper, Körper-Booleans) rechnet Booleans immer mit Manifold
+  über die tessellierten Operanden, nie mit truck-shapeops; `build_solid` (STEP) lehnt Booleans mit schrägen Stirnflächen
+  (`pointsBack`) vorab mit Fehler ab → `exportStep.ts` exportiert das Bauteil ohne Abzug und rechtwinklig (bekannte
+  Einschränkung). Andere B-Rep-Booleans im STEP-Export können weiter panicken (dann Neustart + Rückfall je Körper).
+  Tests: Rust (30°-Wand mit 30°-Gehrung − Abzugskörper in 16 Lagen gegen Integral-Volumen, verschoben, STEP-Fehler;
+  rechtwinklige Wand − Körper daneben), vitest gegen das truck-WASM. · S
 - ✅ **[114] Musterhaus komplex.** (30.10.) Zweites Beispielprojekt (`src/model/sampleProjectComplex.ts`,
   `buildComplexSampleProject()`), in dem möglichst alle Funktionen vorkommen: Zweifamilienhaus am Südhang, UG (im
   Hang, Süden frei) / EG / OG / DG mit Sichtbereichen und Ansichtsvorlagen; Gelände aus Höhenlinien (Kern-Befehl
