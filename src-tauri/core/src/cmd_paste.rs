@@ -4,8 +4,9 @@
 //!
 //! Einfügen = Klone mit neuen ids (`prefix-stamp-k`, [`IdGen`]) auf dem aktiven Geschoss, an
 //! denselben Modell-Koordinaten (kein Versatz, wie das bisherige Verhalten). Verweise: eine Öffnung
-//! hängt an ihrer Wirtswand (`hostWallId`) und wird auf die neue Wand umgehängt; ohne mitkopierte
-//! Wirtswand fällt sie weg (keine Öffnung ohne Wirt). Gruppen-Mitgliedschaften werden nicht
+//! hängt an ihrer Wirtswand (`hostWallId`) bzw. ihrem Dach/ihrer Decke (`hostRoofId`/`hostCeilingId`,
+//! [134]) und wird auf die Kopie des Wirts umgehängt; ohne mitkopierten Wirt fällt sie weg (keine
+//! Öffnung ohne Wirt). Gruppen-Mitgliedschaften werden nicht
 //! mitkopiert (die Klone sind neue, ungruppierte Elemente).
 //!
 //! Rechnung auf rohem JSON (`{...e, id, floorId}`: vorhandene Schlüssel behalten ihre Stelle,
@@ -34,24 +35,28 @@ const LISTS: [(&str, &str, &str, &str); 9] = [
 /// Ops des Einfügens: je Liste ein `add` (leere Listen ohne Op).
 pub fn paste_ops(clip: &Value, level_id: &str, stamp: &str) -> Vec<Op> {
     let mut ids = IdGen::new(stamp);
-    let mut wall_ids: HashMap<String, String> = HashMap::new();
+    // Alte → neue ids der Wirte (Wände, Decken, Dächer; ids sind projektweit eindeutig).
+    let mut host_ids: HashMap<String, String> = HashMap::new();
     let level = Value::String(level_id.to_owned());
     let mut ops = Vec::new();
     for (key, collection, prefix, level_field) in LISTS {
         let mut items = Vec::new();
         for e in arr(field(clip, key)) {
             if level_field.is_empty() {
-                // Öffnung: nur mit mitkopierter Wirtswand, umgehängt.
-                let host = field(e, "hostWallId").and_then(Value::as_str).and_then(|h| wall_ids.get(h));
-                let Some(host) = host else { continue };
+                // Öffnung: nur mit mitkopiertem Wirt (Wand, Dach oder Decke), umgehängt.
+                let host = ["hostWallId", "hostRoofId", "hostCeilingId"].into_iter().find_map(|k| {
+                    let h = field(e, k).and_then(Value::as_str).filter(|h| !h.is_empty())?;
+                    Some((k, host_ids.get(h)?))
+                });
+                let Some((key, host)) = host else { continue };
                 let host = Value::String(host.clone());
-                items.push(with_all(e, vec![("id", Value::String(ids.next(prefix))), ("hostWallId", host)]));
+                items.push(with_all(e, vec![("id", Value::String(ids.next(prefix))), (key, host)]));
                 continue;
             }
             let id = ids.next(prefix);
-            if key == "walls" {
+            if matches!(key, "walls" | "ceilings" | "roofs") {
                 if let Some(old) = id_of(e) {
-                    wall_ids.insert(old.to_owned(), id.clone());
+                    host_ids.insert(old.to_owned(), id.clone());
                 }
             }
             items.push(with_all(e, vec![("id", Value::String(id)), (level_field, level.clone())]));
@@ -98,6 +103,27 @@ mod tests {
         assert_eq!(ops[2]["items"], json!([{"id": "O-s-4", "hostWallId": "W-s-1", "position": 1.5}]));
         assert_eq!(ops[3]["collection"], "columns");
         assert_eq!(ops[3]["items"][0], json!({"id": "column-s-5", "floorId": "og"}));
+    }
+
+    /// [134] Wand mit Tür und Fenster, Dach mit Dachfenster: alle Öffnungen an den neuen Wirten.
+    #[test]
+    fn oeffnungen_folgen_kopiertem_wirt() {
+        let clip = json!({
+            "walls": [{"id": "w", "start": {"x": 0, "y": 0}, "end": {"x": 5, "y": 0}}],
+            "roofs": [{"id": "r", "outline": []}],
+            "openings": [
+                {"id": "d", "hostWallId": "w", "kind": "door", "position": 1},
+                {"id": "f", "hostWallId": "w", "kind": "window", "position": 3},
+                {"id": "o", "hostWallId": "", "hostRoofId": "r", "hostPoint": {"x": 1, "y": 1}},
+                {"id": "c", "hostWallId": "", "hostCeilingId": "c9"}
+            ]
+        });
+        let ops: Vec<Value> = paste_ops(&clip, "eg", "s").iter().map(Op::to_json).collect();
+        let os = ops.iter().find(|o| o["collection"] == "openings").unwrap()["items"].as_array().unwrap().clone();
+        assert_eq!(os.len(), 3, "Deckenöffnung ohne kopierte Decke fällt weg");
+        assert_eq!((&os[0]["hostWallId"], &os[1]["hostWallId"]), (&json!("W-s-1"), &json!("W-s-1")));
+        assert_eq!((&os[0]["position"], &os[1]["position"]), (&json!(1), &json!(3)));
+        assert_eq!((&os[2]["hostRoofId"], &os[2]["hostWallId"]), (&json!("RF-s-2"), &json!("")));
     }
 
     #[test]
