@@ -85,7 +85,7 @@ export const IMPORTED_ROOF_CATEGORY: ContextCategoryDef = {
   code: "31",
   name: "Dächer",
   color: "#7a4a3a",
-  lw: 0.35,
+  lw: 0.18,
 };
 
 /**

@@ -32,7 +32,7 @@ const END_MM: f64 = 0.08;
 /// Ab diesem Knick (Grad) beginnt am Umriss ein neuer Strich (mit Überzug an der Ecke).
 const CORNER_DEG: f64 = 28.0;
 /// Zweiter Zug: ab dieser Strichstärke (Papier-mm) und Länge, mit diesem Stärke-Anteil.
-pub const DOUBLE_MIN_WEIGHT_MM: f64 = 0.35;
+pub const DOUBLE_MIN_WEIGHT_MM: f64 = 0.25;
 const DOUBLE_MIN_MM: f64 = 5.0;
 pub const DOUBLE_WEIGHT: f64 = 0.55;
 
@@ -385,7 +385,8 @@ mod tests {
     #[test]
     fn writer_linie_verkettet_mit_ueberzug() {
         use crate::plan::buf::{LineRef, Writer};
-        let l = LineRef { a: v(0.0, 0.0), b: v(4.0, 0.0), cls: "x", weight_mm: 0.25, dash: None, zigzag: None, motif: None, color: None, drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None };
+        // Unter `DOUBLE_MIN_WEIGHT_MM` (ein Zug).
+        let l = LineRef { a: v(0.0, 0.0), b: v(4.0, 0.0), cls: "x", weight_mm: 0.18, dash: None, zigzag: None, motif: None, color: None, drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None };
         let mut plain = Writer::new(false);
         plain.line_ref(&l, 0);
         let mut w = Writer::new(false);

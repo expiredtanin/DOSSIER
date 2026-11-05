@@ -15,7 +15,7 @@ const CONTEXT_LINE_MM: f64 = 0.1;
 const SECTION_LINE_CATEGORY: &str = "90";
 const SECTION_LINE_INK: &str = "#1f242c";
 const SECTION_LINE_MM: f64 = 0.18;
-const SECTION_LINE_MARK_MM: f64 = 0.5;
+const SECTION_LINE_MARK_MM: f64 = 0.25;
 const SECTION_LINE_DASH: [f64; 4] = [6.0, 1.5, 0.4, 1.5];
 const SECTION_LABEL_H: f64 = 0.5;
 

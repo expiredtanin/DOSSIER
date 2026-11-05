@@ -380,7 +380,7 @@ export const sampleProject: Project = {
       children: [
         { code: "10", name: "Situation", color: "#909090", lw: 0.18, visible: true, locked: false },
         { code: "11", name: "Strasse", color: "#a89070", lw: 0.18, visible: true, locked: false },
-        { code: "12", name: "Gebäude", color: "#888888", lw: 0.25, visible: true, locked: false },
+        { code: "12", name: "Gebäude", color: "#888888", lw: 0.18, visible: true, locked: false },
         { code: "13", name: "Bäume", color: "#50a050", lw: 0.13, visible: true, locked: false },
         { code: "14", name: "Höhenlinien", color: "#909050", lw: 0.18, visible: true, locked: false },
       ],
@@ -389,20 +389,21 @@ export const sampleProject: Project = {
       code: "20",
       name: "Wände",
       color: "#0a0a0a",
-      // [140] Schnittkante 0.5 bei 1:100 (mit `scaleLineWeights` ≈ 0.7 bei 1:50, ≈ 0.35 bei 1:200).
-      lw: 0.5,
+      // [140] Schnittkante 0.25 bei 1:100 = grösste Standard-Stärke (Entscheid Maintainer; mit
+      // `scaleLineWeights` ≈ 0.32 bei 1:50, ≈ 0.2 bei 1:200).
+      lw: 0.25,
       visible: true,
       locked: false,
       children: [
-        { code: "21", name: "Türen/Fenster", color: "#5080c8", lw: 0.25, visible: true, locked: false },
+        { code: "21", name: "Türen/Fenster", color: "#5080c8", lw: 0.18, visible: true, locked: false },
         { code: "22", name: "Möbel", color: "#909090", lw: 0.13, visible: true, locked: false },
-        { code: "25", name: "Stützen", color: "#c87050", lw: 0.5, visible: true, locked: false },
+        { code: "25", name: "Stützen", color: "#c87050", lw: 0.25, visible: true, locked: false },
       ],
     },
-    { code: "30", name: "Decken", color: "#605850", lw: 0.35, visible: true, locked: false },
-    { code: "31", name: "Dächer", color: "#7a4a3a", lw: 0.35, visible: true, locked: false },
-    { code: "40", name: "Treppen", color: "#4a6a58", lw: 0.25, visible: true, locked: false },
-    { code: "35", name: "Träger", color: "#a87858", lw: 0.5, visible: true, locked: false },
+    { code: "30", name: "Decken", color: "#605850", lw: 0.18, visible: true, locked: false },
+    { code: "31", name: "Dächer", color: "#7a4a3a", lw: 0.18, visible: true, locked: false },
+    { code: "40", name: "Treppen", color: "#4a6a58", lw: 0.18, visible: true, locked: false },
+    { code: "35", name: "Träger", color: "#a87858", lw: 0.25, visible: true, locked: false },
     { code: "50", name: "Text", color: "#d0d0d0", lw: 0.13, visible: true, locked: false },
     { code: "60", name: "Räume", color: "#5a7a9a", lw: 0.13, visible: true, locked: false },
     { code: "90", name: "Referenzen", color: "#585860", lw: 0.13, visible: true, locked: false },

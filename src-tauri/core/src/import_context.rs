@@ -27,7 +27,7 @@ struct Def {
 /// „05 Kontext" — Elternkategorie der Kontext-Kategorien.
 const CONTEXT_PARENT: Def = Def { code: "05", name: "Kontext", color: "#707078", lw: 0.13 };
 /// „31 Dächer" bleibt oberste Ebene.
-const IMPORTED_ROOF: Def = Def { code: "31", name: "Dächer", color: "#7a4a3a", lw: 0.35 };
+const IMPORTED_ROOF: Def = Def { code: "31", name: "Dächer", color: "#7a4a3a", lw: 0.18 };
 /// Kinder von „05 Kontext", in dieser Reihenfolge (`NESTED_CONTEXT_CATEGORIES`).
 const NESTED: [Def; 10] = [
     Def { code: "02", name: "Gelände", color: "#8a9478", lw: 0.13 },
