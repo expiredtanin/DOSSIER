@@ -286,7 +286,7 @@ pub fn doc_serialize(h: u32) -> String {
 #[wasm_bindgen]
 pub fn doc_query_bin(h: u32, name: &str, args: &[f64], text: &str) -> Vec<u8> {
     let result = with_doc(h, |d| crate::queries::run_bin_doc(d, name, args, text)).unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
-    result.unwrap_or_else(|e| crate::plan_buf::encode_error(&e))
+    result.unwrap_or_else(|e| crate::plan::buf::encode_error(&e))
 }
 
 /// Je Op der zuletzt angewendeten Folge (`doc_commit`, `doc_apply`, `doc_grip_commit`, `doc_undo`,

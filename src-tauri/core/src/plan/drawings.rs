@@ -16,7 +16,7 @@ use crate::js_fmt::{js_number, to_fixed};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::model::*;
-use crate::plan_buf::{LineRef, Writer};
+use crate::plan::buf::{LineRef, Writer};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -492,7 +492,7 @@ impl Em<'_, '_, '_> {
             Some(EndMark::Unknown) => f64::NAN,
         };
         let size = self.marks.and_then(|m| m.size_mm).unwrap_or(END_MARK_DEFAULT_SIZE_MM);
-        let f = crate::plan_misc::end_mark(at.x, at.y, dir.x, dir.y, code, size, self.scale);
+        let f = crate::plan::misc::end_mark(at.x, at.y, dir.x, dir.y, code, size, self.scale);
         if f.is_empty() {
             return 0.0;
         }
@@ -1614,7 +1614,7 @@ pub fn underlay_lines(c: &Ctx, indices: &[f64], greyed: bool, sink: &mut Sink) -
     sink.keep = Keep::OnlyLines;
     let mut memo = Memo::default();
     for &i in indices {
-        let Some(d) = crate::plan_buf::whole(i).and_then(|i| c.p.drawings2d.get(i)) else { continue };
+        let Some(d) = crate::plan::buf::whole(i).and_then(|i| c.p.drawings2d.get(i)) else { continue };
         let m = memo.get(c, d);
         emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, greyed, c.a.scale, sink, 0)?;
     }
@@ -1954,7 +1954,7 @@ mod tests {
                 out
             };
             let buf = || {
-                let mut w = crate::plan_buf::Writer::new(true);
+                let mut w = crate::plan::buf::Writer::new(true);
                 let s = w.begin_group();
                 plan_drawings(&c, &mut Sink::new(Target::Buf(&mut w), Keep::All), &mut Bounds::new()).unwrap();
                 w.end_group(s);

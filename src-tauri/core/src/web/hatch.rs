@@ -16,7 +16,7 @@ fn opt(v: f64) -> Option<f64> {
 
 #[wasm_bindgen]
 pub fn hatch_runs_flat(poly: &[f64], hatch_buf: &[f64]) -> Vec<f64> {
-    match crate::plan_buf::decode_hatch(hatch_buf) {
+    match crate::plan::buf::decode_hatch(hatch_buf) {
         Some((h, _)) => runs_out(&hatch::build_hatch_runs(&pts(poly), &h)),
         None => Vec::new(),
     }
@@ -25,7 +25,7 @@ pub fn hatch_runs_flat(poly: &[f64], hatch_buf: &[f64]) -> Vec<f64> {
 /// `scale` NaN = aus der Schraffur.
 #[wasm_bindgen]
 pub fn random_hatch_runs_flat(poly: &[f64], hatch_buf: &[f64], scale: f64) -> Vec<f64> {
-    match crate::plan_buf::decode_hatch(hatch_buf) {
+    match crate::plan::buf::decode_hatch(hatch_buf) {
         Some((h, _)) => runs_out(&hatch::build_random_hatch_runs(&pts(poly), &h, opt(scale))),
         None => Vec::new(),
     }

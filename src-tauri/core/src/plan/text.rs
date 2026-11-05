@@ -9,10 +9,10 @@
 
 use crate::model::{Marks, RichTextDoc};
 use crate::plan::prim::StampLine;
-use crate::plan_buf::{whole, T_DRAWING_TEXT, T_TEXT};
-use crate::plan_dxf::{StampLine as DxfLine, TextIn, TextStyleIn};
-use crate::plan_parts::{in_ranges, Part};
-use crate::plan_scene::{to_rgba, Rgba, SText};
+use crate::plan::buf::{whole, T_DRAWING_TEXT, T_TEXT};
+use crate::plan::dxf::{StampLine as DxfLine, TextIn, TextStyleIn};
+use crate::plan::parts::{in_ranges, Part};
+use crate::plan::scene::{to_rgba, Rgba, SText};
 use crate::text_layout::{doc_from_text, doc_to_lines, font_name_of, is_blank, plain_text, split_ws, stamp_block, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use serde::{Deserialize, Deserializer};
 

@@ -1197,7 +1197,7 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
                 pl.extend([q[0], q[1], q[2]]);
             }
         }
-        let sg = crate::plan_section::roof_segments(bx, by, ux, uy, &pl);
+        let sg = crate::plan::section_bands::roof_segments(bx, by, ux, uy, &pl);
         // Dachfenster ([103]): Lochkörper in der Schnittebene, aus jeder Schicht ausgeschnitten.
         let holes: Vec<Vec<[f64; 2]>> = crate::opening_shape::roof_openings(p, index)
             .iter()
@@ -1239,13 +1239,13 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
 
 // ── Monolith, Abzugskörper, Körper, Gelände, Tiefe ───────────────────────────
 
-/// `unionRectOutlines` (Rechnung: `plan_section::union_outlines`).
+/// `unionRectOutlines` (Rechnung: `plan::section_bands::union_outlines`).
 fn union_rect_outlines(rects: &[[f64; 4]]) -> Vec<Vec<[f64; 2]>> {
     let mut b = vec![rects.len() as f64];
     for r in rects {
         b.extend(r);
     }
-    let f = crate::plan_section::union_outlines(&b);
+    let f = crate::plan::section_bands::union_outlines(&b);
     let mut rings = Vec::new();
     let mut i = 1;
     for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
@@ -2672,7 +2672,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let mono = args.first().is_some_and(|&x| x != 0.0);
     let openings = args.get(1).is_some_and(|&x| x != 0.0);
     let key = args.get(2).copied().unwrap_or(0.0);
-    let mut w = crate::plan_buf::Writer::new(true);
+    let mut w = crate::plan::buf::Writer::new(true);
     // Der Schnitt selbst hängt nur am Projektstand, an der Ebene und den Körpern (= ein Aufruf von
     // `computeSection` in TS, Schlüssel `key`); Schwarz-Weiss, Sichtbarkeit und verdeckte Kanten nur an
     // der Darstellung. Darum die zuletzt berechneten Schnitte merken (Umschalten ohne Neurechnen).
@@ -3186,12 +3186,12 @@ mod tests {
         let p = sample();
         let text = serde_json::json!({ "level": serde_json::to_value(p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap()).unwrap() }).to_string();
         let buf = section_plan_buf(&p, &[0.0, 1.0, 0.0, 0.0], &text).unwrap();
-        let (prims, groups, bounds) = crate::plan_buf::decode(&buf).unwrap();
+        let (prims, groups, bounds) = crate::plan::buf::decode(&buf).unwrap();
         assert_eq!(groups.len(), 2);
         assert!(bounds.is_some() && !prims.is_empty());
         // Ohne Schnittlinie: leerer Puffer ohne Gruppen.
         let none = section_plan_buf(&p, &[0.0, 0.0], r#"{"level":{"kind":"section"}}"#).unwrap();
-        assert!(crate::plan_buf::decode(&none).unwrap().1.is_empty());
+        assert!(crate::plan::buf::decode(&none).unwrap().1.is_empty());
     }
 }
 

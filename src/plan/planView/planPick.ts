@@ -1,4 +1,4 @@
-// Auswahl/Picken im Grundriss über den Kern ([K3d], `src-tauri/core/src/plan_pick.rs`): ein
+// Auswahl/Picken im Grundriss über den Kern ([K3d], `src-tauri/core/src/plan/pick.rs`): ein
 // räumlicher Index je Plan (2D-Zeichenlinien, Polygone, Symbol-Linien, Kreise/Bögen, Besitzer),
 // gebaut direkt aus den Plan-Puffern (`planParts.ts`). TS fragt nur ab; Ergebnisse sind Indizes in
 // `plan.primitives`. Ersetzt `segmentIndex.ts`, `ownerIndex.ts` und die Schleifen über alle

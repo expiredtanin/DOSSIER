@@ -35,7 +35,7 @@
 use crate::hatch::{self, v2, Hatch, HatchKind, Pattern, Run, V2, DASH_MM_TO_M};
 use crate::jsmath::hypot2;
 use crate::jsnum;
-use crate::plan_buf::{self, PlanBuf, Prim, Style};
+use crate::plan::buf::{self, PlanBuf, Prim, Style};
 use std::f64::consts::PI;
 
 const PX_PER_M: f64 = 90.0;
@@ -933,7 +933,7 @@ fn draw_circle_like(
 /// Flache Ausgabe (s. Modulkopf) für die Primitive `[from, to)` eines Plan-Puffers (v2); leer bei
 /// unlesbarem Puffer oder ungültigem Bereich.
 pub fn compile_flat(bytes: &[u8], from: usize, to: usize, px_per_meter: f64, packed: bool) -> Vec<u32> {
-    let Some(plan) = plan_buf::View::parse(bytes).and_then(|v| v.gpu(from, to)) else { return Vec::new() };
+    let Some(plan) = buf::View::parse(bytes).and_then(|v| v.gpu(from, to)) else { return Vec::new() };
     let o = compile(&plan, px_per_meter, packed);
     let mut meta: Vec<f64> = vec![
         o.origin.0,
@@ -988,7 +988,7 @@ pub fn compile_flat(bytes: &[u8], from: usize, to: usize, px_per_meter: f64, pac
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan_buf::HatchEntry;
+    use crate::plan::buf::HatchEntry;
 
     fn st() -> Style {
         Style { greyed: false, opacity: None }
@@ -1108,7 +1108,7 @@ mod tests {
     #[test]
     fn kaputter_puffer_leer() {
         assert!(compile_flat(&[1, 2, 3], 0, 0, 90.0, true).is_empty());
-        let mut w = plan_buf::Writer::new(false);
+        let mut w = buf::Writer::new(false);
         w.push(&crate::plan::prim::Primitive::Line {
             a: crate::model::Vec2 { x: 0.0, y: 0.0 },
             b: crate::model::Vec2 { x: f64::NAN, y: 0.0 },
@@ -1280,7 +1280,7 @@ mod tests {
 
     #[test]
     fn flache_ausgabe_traegt_strich_instanzen() {
-        let mut w = plan_buf::Writer::new(false);
+        let mut w = buf::Writer::new(false);
         w.push(&crate::plan::prim::Primitive::Line {
             a: crate::model::Vec2 { x: 0.0, y: 0.0 },
             b: crate::model::Vec2 { x: 2.0, y: 0.0 },

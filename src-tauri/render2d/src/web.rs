@@ -208,7 +208,7 @@ impl WebPlanRenderer {
     }
 
     /// Setzt die zu zeichnende Szene aus dem Binaerformat von `scene_bin.rs` (Schreiber:
-    /// `src-tauri/core/src/plan_scene.rs`). Fremde Version/kaputte Daten → Fehler, die alte
+    /// `src-tauri/core/src/plan/scene.rs`). Fremde Version/kaputte Daten → Fehler, die alte
     /// Szene bleibt. Re-tesselliert + laedt die GPU-Puffer; ruft NICHT selbst `render`.
     pub fn set_scene_bin(&mut self, bytes: &[u8]) -> Result<(), JsValue> {
         let scene = decode_scene(bytes).map_err(|e| JsValue::from_str(&format!("Szene lesen: {e}")))?;

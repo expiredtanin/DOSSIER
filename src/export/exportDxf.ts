@@ -8,7 +8,7 @@
 // direkten Kategorie-Bezug (Tür-Symbole, Kontext, Schraffuren) landen auf
 // sprechenden Sammel-Layern.
 //
-// Seit [K3d] (29.10.) sammelt der Kern (`src-tauri/core/src/plan_dxf.rs`) Ebenen und Entitäten
+// Seit [K3d] (29.10.) sammelt der Kern (`src-tauri/core/src/plan/dxf.rs`) Ebenen und Entitäten
 // direkt aus den Plan-Puffern und dem Projekt-Dokument in die flache Zeichnung (Kodierung s.
 // `src-tauri/fileio/src/export.rs`); Rust (acadrust, fileio) schreibt die Datei ([C1]/[C2]).
 // DXF = R2018 ASCII (UTF-8), DWG = R2018. Auch die Texte (Zeilen der Raumstempel, Absätze/Wörter

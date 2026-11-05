@@ -1,9 +1,9 @@
-//! Bindungen der Auswahl (`crate::plan_pick`). Ein Index wird einmal je Plan gebaut
+//! Bindungen der Auswahl (`crate::plan::pick`). Ein Index wird einmal je Plan gebaut
 //! (`pick_index_build`, Abschnitte wie `plan_parts`) und bleibt, bis TS ihn freigibt
 //! (`pick_index_release`); er hält seine Puffer selbst, Verdrängen im Puffer-Speicher stört ihn
 //! nicht. Unbekannter Index oder kaputte Eingabe → leeres Ergebnis bzw. −1, nie Panic.
 
-use crate::plan_pick::{ClientMap, PickIndex, Rect};
+use crate::plan::pick::{ClientMap, PickIndex, Rect};
 use std::cell::RefCell;
 use wasm_bindgen::prelude::wasm_bindgen;
 

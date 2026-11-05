@@ -1,14 +1,14 @@
 //! Plan → SVG-Text ohne DOM ([K3d], früher `src/export/planToSvgString.ts`): für `dossier-cli plan`,
 //! MCP und Referenzbild-Tests, direkt aus den Abschnitten eines zusammengesetzten Plans
-//! ([`crate::plan_parts`]). Koordinaten in Metern (Y nach oben → SVG gespiegelt), Strichstärken
+//! ([`crate::plan::parts`]). Koordinaten in Metern (Y nach oben → SVG gespiegelt), Strichstärken
 //! aus Papier-mm über den Massstab; Schraffur-Muster werden nicht ausgebreitet (nur Grundfüllung),
 //! Bilder und Textpfade fehlen — gedacht für Kontrolle und Diffs, nicht für Druck. Byte-gleich zur
 //! TS-Fassung (Zahlen wie `String(Math.round(v·1e5)/1e5)`, Texte aus dem Text-JSON des Puffers).
 
 use crate::js_fmt::js_number;
 use crate::jsnum;
-use crate::plan_buf::{whole, F_COLOR, F_DASH_LIST, F_GREYED, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
-use crate::plan_parts::Part;
+use crate::plan::buf::{whole, F_COLOR, F_DASH_LIST, F_GREYED, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
+use crate::plan::parts::Part;
 use serde_json::Value;
 use std::f64::consts::PI;
 

@@ -406,7 +406,7 @@ pub fn opening_reveal(p: &Project, w: &Wall, o: &Opening) -> Option<OpeningRevea
     Some(OpeningReveal { from, to, thick, sides })
 }
 
-/// Grundriss-Block für `plan_walls::wall_poche` (Leibungen links/rechts aller Öffnungen der Wand):
+/// Grundriss-Block für `plan::wall_poche::wall_poche` (Leibungen links/rechts aller Öffnungen der Wand):
 /// `[n, (jamb, dir, schicht, rücksprung, nStücke, (x0, x1, o0, o1)×)×n]`.
 pub fn plan_reveal_block(p: &Project, w: &Wall, openings: &[&Opening]) -> Vec<f64> {
     let mut b = vec![0.0];

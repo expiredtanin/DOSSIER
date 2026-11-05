@@ -12,7 +12,7 @@ use super::style::*;
 use crate::js_fmt::{js_number, to_fixed};
 use crate::jsnum::{max, min, round};
 use crate::model::*;
-use crate::plan_walls::{ceiling_outline_lines, wall_footprint, WallFootprint};
+use crate::plan::wall_poche::{ceiling_outline_lines, wall_footprint, WallFootprint};
 use std::collections::{HashMap, HashSet};
 
 /// Footprint-Farbe der Extrusionen (wie das 3D-Orange).
@@ -712,7 +712,7 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     let mut d = DomainPrims::default();
     let mut bounds = Bounds::new();
     domains_before(&c, &mut d, &mut bounds)?;
-    let mut w = crate::plan_buf::Writer::new(true);
+    let mut w = crate::plan::buf::Writer::new(true);
     w.post = super::extras::post_for(p, a);
     let (under, violations) = extras_of(p, a);
     group_refs(&mut w, &under);
@@ -744,7 +744,7 @@ fn extras_of(p: &Project, a: &PlanArgs) -> (Vec<(Primitive, u32)>, Vec<Primitive
 }
 
 /// Eine Gruppe aus Primitiven mit Strichmuster-Kennung.
-fn group_refs(w: &mut crate::plan_buf::Writer, prims: &[(Primitive, u32)]) {
+fn group_refs(w: &mut crate::plan::buf::Writer, prims: &[(Primitive, u32)]) {
     let start = w.begin_group();
     for (q, r) in prims {
         w.push_ref(q, *r);
@@ -802,7 +802,7 @@ impl PlanOut {
 /// Inhalt gleich [`plan_domains_buf`] (Haupt-Puffer mit den Stücken an Stelle der Gruppe 6).
 pub fn plan_domains_cached(p: &Project, revs: &crate::document::Revs, cache: &mut super::cache::PlanCache, a: &PlanArgs, have: &HashSet<u64>) -> Result<PlanOut, String> {
     use super::cache::NOT_FOR_DRAWINGS;
-    use crate::plan_buf::Writer;
+    use crate::plan::buf::Writer;
     let c = Ctx::new(p, a);
     let cc = cache.context(a, revs.epoch());
     cc.trim();
@@ -832,7 +832,7 @@ pub fn plan_domains_cached(p: &Project, revs: &crate::document::Revs, cache: &mu
 
 /// Gruppen in Puffer-Reihenfolge (die Zeichnungen als Stücke daneben), die übrigen Domänen aus dem
 /// Cache bzw. neu (dann aufgenommen).
-fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache::CtxCache, w: &mut crate::plan_buf::Writer, have: &HashSet<u64>) -> Result<Vec<super::drawings::ChunkOut>, String> {
+fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache::CtxCache, w: &mut crate::plan::buf::Writer, have: &HashSet<u64>) -> Result<Vec<super::drawings::ChunkOut>, String> {
     use super::cache::{selection_sig, RestEntry, NOT_FOR_REST};
     let sig = (revs.max_except(NOT_FOR_REST), format!("{}\u{3}{}", selection_sig(c.a), c.a.sun_when.unwrap_or(f64::NAN).to_bits()));
     if cc.rest.as_ref().is_some_and(|r| r.sig != sig) {
@@ -857,9 +857,9 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         lists.push(plain(violations));
         fresh = Some((lists, b, extra));
     }
-    let mut segs: Vec<crate::plan_buf::Segment> = Vec::new();
+    let mut segs: Vec<crate::plan::buf::Segment> = Vec::new();
     // Liste `k`: 0 Schatten/Baurecht, 1–9 Domänen (ohne Zeichnungen), 10 Verstösse.
-    let put = |w: &mut crate::plan_buf::Writer, k: usize, segs: &mut Vec<crate::plan_buf::Segment>| {
+    let put = |w: &mut crate::plan::buf::Writer, k: usize, segs: &mut Vec<crate::plan::buf::Segment>| {
         let start = w.begin_group();
         match (&fresh, &cc.rest) {
             (Some((lists, _, _)), _) => {
@@ -1049,7 +1049,7 @@ mod tests {
         let a = args("eg", 1.0, &["20", "21", "30", "40", "60"]);
         let d = plan_domains(&p, &a).unwrap();
         let buf = plan_domains_buf(&p, &a).unwrap();
-        let (prims, groups, bounds) = crate::plan_buf::decode(&buf).unwrap();
+        let (prims, groups, bounds) = crate::plan::buf::decode(&buf).unwrap();
         assert_eq!(groups.len(), GROUPS.len());
         let lists = [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.drawings.prims, &d.solids, &d.context, &d.sections];
         for ((a, b), l) in groups[1..11].iter().zip(lists) {
@@ -1147,7 +1147,7 @@ mod tests {
         });
         let d = plan_domains(&p, &a).unwrap();
         time("Puffer schreiben", &mut || {
-            let mut w = crate::plan_buf::Writer::new(true);
+            let mut w = crate::plan::buf::Writer::new(true);
             for g in [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.drawings.prims, &d.solids, &d.context, &d.sections] {
                 w.group(g);
             }

@@ -1,9 +1,9 @@
-//! Bindung des DXF-Sammlers (`crate::plan_dxf`) auf gehaltenen Plan-Puffern (Abschnitte wie
+//! Bindung des DXF-Sammlers (`crate::plan::dxf`) auf gehaltenen Plan-Puffern (Abschnitte wie
 //! `plan_parts`) und dem Projekt-Dokument. Leeres Ergebnis = Puffer fehlt (TS legt neu ab und
 //! fragt nochmals), Dokument nicht offen/unpassend oder kaputte Eingabe — nie Panic.
 
-use crate::plan_dxf::{collect, encode, DxfOptions};
-use crate::plan_parts::parts_from;
+use crate::plan::dxf::{collect, encode, DxfOptions};
+use crate::plan::parts::parts_from;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 /// Flache Zeichnung (Format `plan_dxf::encode`). `opts` = `[Massstab, Schraffuren 0/1, cm 0/1,
@@ -25,7 +25,7 @@ pub fn plan_dxf_flat(doc: u32, segs: &[f64], opts: &[f64], floor: &str, table_la
             dim_cm: cm != 0.0,
             paper_layout: layout != 0.0,
             bounds: [min_x, min_y, max_x, max_y],
-            default_font: crate::plan_text::default_font(p),
+            default_font: crate::plan::text::default_font(p),
             floor: floor.to_string(),
             table_labels: table_labels.to_string(),
         };

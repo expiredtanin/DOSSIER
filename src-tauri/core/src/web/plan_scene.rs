@@ -1,12 +1,12 @@
-//! Bindungen der Render-Szene (`crate::plan_scene`) auf gehaltenen Plan-Puffern. Abschnitte als
+//! Bindungen der Render-Szene (`crate::plan::scene`) auf gehaltenen Plan-Puffern. Abschnitte als
 //! `[Puffer-Nr, von, bis, …]`, gedimmte Bereiche als `[von, bis, …]` (s. `plan_parts`). Fehlt
 //! ein Puffer (verdrängt) oder ist eine Eingabe kaputt, ist das Ergebnis leer — TS legt die
 //! Puffer dann neu ab und fragt nochmals.
 
-use crate::plan_parts::{parts_from, ranges_from};
-use crate::plan_scene::SText;
-use crate::plan_text::scene_texts;
-use crate::plan_scene::{build_scene, encode_scene_bin, encode_scene_f64, Scene};
+use crate::plan::parts::{parts_from, ranges_from};
+use crate::plan::scene::SText;
+use crate::plan::text::scene_texts;
+use crate::plan::scene::{build_scene, encode_scene_bin, encode_scene_f64, Scene};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 fn scene_of(segs: &[f64], greyed: &[f64]) -> Option<Scene> {

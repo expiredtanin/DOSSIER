@@ -6,7 +6,7 @@
 //!
 //! Byte-Hülle (little endian, alles f64 bis auf die Zeichenketten):
 //! `[MAGIC, nZahlen, nBytes, Zahlen…, UTF-8 der Zeichenketten durch \0 getrennt]`. Fehler kommen als
-//! Fehlerpuffer des Plan-Puffers (`plan_buf::encode_error`, `[ERR_MAGIC, n, UTF-16…]`).
+//! Fehlerpuffer des Plan-Puffers (`plan::buf::encode_error`, `[ERR_MAGIC, n, UTF-16…]`).
 
 use std::collections::HashMap;
 

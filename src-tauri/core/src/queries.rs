@@ -190,7 +190,7 @@ struct GroupArgs {
     raw: crate::groups::Membership,
 }
 
-/// Abfragen mit binärer Antwort (Plan-Puffer v2, s. `plan_buf.rs`).
+/// Abfragen mit binärer Antwort (Plan-Puffer v2, s. `plan/buf.rs`).
 pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
     use crate::plan::{domains, drawings};
     match (name, args.len()) {
@@ -227,7 +227,7 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
         }
         // Automatische Höhenkoten im Schnitt/in der Ansicht für das Ausmass `[minX, minY, maxX, maxY]`.
         ("levelMarkers", 4) => {
-            let mut w = crate::plan_buf::Writer::new(false);
+            let mut w = crate::plan::buf::Writer::new(false);
             w.group(&drawings::level_markers(p, [args[0], args[1], args[2], args[3]]));
             Ok(w.finish())
         }
@@ -236,7 +236,7 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             let a = domains::PlanArgs::parse(args[0], text)?;
             let (line, sign, min_y) = crate::plan::underlay::parse_args(text)?;
             let bytes = domains::plan_domains_buf(p, &a)?;
-            let prims = crate::plan_buf::View::parse(&bytes).and_then(|v| v.prims()).ok_or("planUnderlay: Plan-Puffer unlesbar")?;
+            let prims = crate::plan::buf::View::parse(&bytes).and_then(|v| v.prims()).ok_or("planUnderlay: Plan-Puffer unlesbar")?;
             Ok(crate::plan::underlay::underlay_buf(&crate::plan::underlay::underlay_primitives(line, sign, prims, min_y)))
         }
         // Umriss-Linien der 3D-Auswahl (`highlight3d.rs`): `text` = JSON der ids je Art + `rgb`; Antwort f32-LE.
@@ -283,7 +283,7 @@ fn buf_of(f: impl FnOnce(&mut crate::plan::drawings::Sink) -> Result<(), String>
 /// Wie [`buf_of`] mit Nachbearbeitung (`extras::Post`).
 fn buf_with(post: Option<crate::plan::extras::Post>, f: impl FnOnce(&mut crate::plan::drawings::Sink) -> Result<(), String>) -> Result<Vec<u8>, String> {
     use crate::plan::drawings::{Keep, Sink, Target};
-    let mut w = crate::plan_buf::Writer::new(false);
+    let mut w = crate::plan::buf::Writer::new(false);
     w.post = post;
     let start = w.begin_group();
     f(&mut Sink::new(Target::Buf(&mut w), Keep::All))?;

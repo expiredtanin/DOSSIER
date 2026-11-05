@@ -1,6 +1,6 @@
 //! Auswahl/Picken im Grundriss ([K3d], früher `segmentIndex.ts`, `ownerIndex.ts` und die
 //! Schleifen über `plan.primitives` in `PlanView.tsx`): ein räumlicher Index über einem
-//! zusammengesetzten Plan ([`crate::plan_parts`]), den TS nur noch abfragt. Ergebnisse sind
+//! zusammengesetzten Plan ([`crate::plan::parts`]), den TS nur noch abfragt. Ergebnisse sind
 //! Indizes in `plan.primitives`.
 //!
 //! - 2D-Zeichenlinien (`line` mit nicht-leerer `drawingId`): gleichförmiges Raster wie die frühere
@@ -19,8 +19,8 @@
 
 use crate::jsmath::hypot;
 use crate::jsnum;
-use crate::plan_buf::{whole, View, F_IDS, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT_PATH};
-use crate::plan_parts::pick_ids;
+use crate::plan::buf::{whole, View, F_IDS, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT_PATH};
+use crate::plan::parts::pick_ids;
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::rc::Rc;

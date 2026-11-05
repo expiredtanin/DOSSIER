@@ -104,7 +104,7 @@ pub fn text_frame(doc_json: &str, opts: &[f64]) -> Vec<f64> {
 /// als Absatz Absatzzahl + `i`). Leer = kaputte Eingabe.
 #[wasm_bindgen]
 pub fn text_stamp_block(prim_json: &str, unit_per_pt: f64, x0: f64, y0: f64) -> Vec<f64> {
-    let Ok(p) = serde_json::from_str::<crate::plan_text::StampText>(prim_json) else { return Vec::new() };
+    let Ok(p) = serde_json::from_str::<crate::plan::text::StampText>(prim_json) else { return Vec::new() };
     let extra: Vec<(&str, LineAlign)> = p.extra_lines.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
     let color = p.color.as_deref().unwrap_or("#000000");
     let placed = stamp_block_refs(&p.doc, &extra, p.base_pt, unit_per_pt, color, y0);

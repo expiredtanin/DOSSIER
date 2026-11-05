@@ -1,5 +1,5 @@
 /**
- * Zusammengesetzter Plan für Kern-Verbraucher ([K3d], Rust: `src-tauri/core/src/plan_parts.rs`):
+ * Zusammengesetzter Plan für Kern-Verbraucher ([K3d], Rust: `src-tauri/core/src/plan/parts.rs`):
  * die Primitive eines {@link Plan} als Abschnitte gehaltener Plan-Puffer, in Zeichenreihenfolge.
  * Was unverändert aus einem Kern-Puffer stammt (`Plan.bufRuns`, Objekt-Identität geprüft), geht
  * ohne Umweg über Objekte; der Rest (2D-Zeichnungen, Schatten, Baurecht, zerlegte Polygone,

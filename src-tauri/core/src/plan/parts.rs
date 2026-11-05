@@ -9,7 +9,7 @@
 //! Puffer, s. `web/plan_buf.rs`), gedimmte Bereiche als Paare `[von, bis)` im zusammengesetzten
 //! Index (wie `Plan.greyedRanges`: dort gilt `greyed = true`).
 
-use crate::plan_buf::{whole, Rec, View, F_GREYED, F_GREYED_SET, F_IDS};
+use crate::plan::buf::{whole, Rec, View, F_GREYED, F_GREYED_SET, F_IDS};
 
 /// Ein Abschnitt `[from, to)` eines Puffers.
 pub struct Part<'a> {
