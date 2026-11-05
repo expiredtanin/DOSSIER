@@ -277,6 +277,10 @@ export interface StairInfo {
   /** Aufgelöste absolute UK/OK (Meter). */
   zBottom: number;
   zTop: number;
+  /** Nur Ortbeton (gerade/Wendel): Betonvolumen des Laufs (m³, ohne Säule). */
+  concreteVolume?: number;
+  /** Nur Ortbeton: Untersicht (m², Schalfläche; bei der Wendel die Wendelfläche). */
+  soffitArea?: number;
 }
 
 /**

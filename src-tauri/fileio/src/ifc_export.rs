@@ -21,7 +21,7 @@
 //              2 = IfcPositiveRatioMeasure (value = Zahl), 6 = IfcLabel (Zeichenketten-Index),
 //              7 = IfcThermalTransmittanceMeasure (Zahl),
 //              3 = IfcQuantityLength, 4 = IfcQuantityArea, 5 = IfcQuantityVolume (value = Zahl, ≥ 0).
-//              Heisst der Satz `Qto_…`, entsteht je Bauteil ein eigener IfcElementQuantity (Basismengen,
+//              Heisst der Satz `Qto_…` (auch `CH_Qto_…`, `Dossier_Qto_…`), entsteht je Bauteil ein eigener IfcElementQuantity (Basismengen,
 //              nie geteilt); sonst ein IfcPropertySet (gleicher Inhalt = ein Pset für alle Bauteile).
 //   structure= Geschoss-Index oder −1 (Gebäude)
 //
@@ -66,11 +66,13 @@
 //     IfcOpeningElement = Profil-Extrusion entlang z_dir (Position origin/x_dir/z_dir) im Geschoss-
 //     Placement, IfcRelVoidsElement zum Wirt; IfcWindow/IfcDoor mit dem Netz, IfcRelFillsElement.
 //   STAIR       = 5, structure, id, predefined (Text), PTS, z_rel, depth (Ersatzkörper, nur ohne Läufe/Podest),
-//                 PSETS, n_flights, FLIGHT × n_flights, has_landing, [LANDING], has_rail, [RAIL]
+//                 PSETS, n_flights, FLIGHT × n_flights, has_landing, [LANDING], has_rail, [RAIL],
+//                 has_column, [COLUMN]
 //     FLIGHT  = name, n_risers, n_treads, riser_height, tread_length, predefined (Text, IfcStairFlightTypeEnum),
 //               PSETS, shape (0 = Extrusionen, 1 = Dreiecks-Mesh), 0: n, (PTS, z_rel, depth) × n | 1: MESH
 //     LANDING = name, PTS, z_rel, depth, PSETS                  (IfcSlab, PredefinedType LANDING)
 //     RAIL    = name, predefined (Text, IfcRailingTypeEnum), PSETS, MESH
+//     COLUMN  = name, PTS, z_rel, depth, PSETS                 (Mittelsäule/Spindel: IfcColumn, COLUMN)
 //     Mit mindestens einem Lauf/Podest/Geländer ist die IfcStair selbst ohne Darstellung und fasst Läufe,
 //     Podest und Geländer per IfcRelAggregates zusammen (nur die Treppe liegt im Geschoss).
 //   EXTRUSION   = 6, structure, id, PTS, z_rel, depth
@@ -909,7 +911,7 @@ impl Builder {
         if pset.props.is_empty() {
             return; // IfcPropertySet verlangt mindestens eine Eigenschaft
         }
-        if pset.name.starts_with("Qto_") || pset.name.starts_with("CH_Qto_") {
+        if pset.name.starts_with("Qto_") || pset.name.starts_with("CH_Qto_") || pset.name.starts_with("Dossier_Qto_") {
             let quantities: Vec<(&'static str, String, f64)> = pset
                 .props
                 .iter()
@@ -1901,10 +1903,11 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 }
                 let landing = if r.flag()? { Some(r.stair_landing()?) } else { None };
                 let rail = if r.flag()? { Some(r.stair_rail()?) } else { None };
+                let column = if r.flag()? { Some(r.stair_landing()?) } else { None };
                 let key = format!("stair/{id}");
                 let parent = w.placement_of(structure);
                 let g = w.gid(&key);
-                let entity = if flights.is_empty() && landing.is_none() && rail.is_none() {
+                let entity = if flights.is_empty() && landing.is_none() && rail.is_none() && column.is_none() {
                     // Ohne Teile: ein Ersatzkörper (Fussabdruck) wie bisher.
                     let (placement, shape) = w.emit_box_product(&pts, z_rel, depth, parent);
                     w.emit_building_element("IFCSTAIR", g, "Treppe", placement, shape, Some(enum_(&predefined)))
@@ -1965,6 +1968,16 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                             w.add_pset(p, railing, &rkey);
                         }
                         parts.push(railing);
+                    }
+                    if let Some(c) = &column {
+                        let (placement, shape) = w.emit_box_product(&c.pts, c.z_rel, c.depth, stair_placement);
+                        let ckey = format!("{key}/column");
+                        let guid = w.gid(&ckey);
+                        let col = w.emit_building_element("IFCCOLUMN", guid, &c.name, placement, shape, Some(enum_("COLUMN")));
+                        for p in &c.psets {
+                            w.add_pset(p, col, &ckey);
+                        }
+                        parts.push(col);
                     }
                     let g = w.gid(&format!("aggregates/{key}"));
                     w.add("IFCRELAGGREGATES", format!("{g},#{},$,$,#{stair},{}", w.owner_history, refs(&parts)));
@@ -2633,7 +2646,7 @@ mod tests {
         b.pts(&SQUARE);
         b.n(&[0.0, 2.6]);
         b.no_psets();
-        b.n(&[0.0, 0.0, 0.0]);
+        b.n(&[0.0, 0.0, 0.0, 0.0]);
         b.n(&[REC_EXTRUSION, -1.0]);
         b.str("X1");
         b.pts(&SQUARE);
@@ -3174,7 +3187,18 @@ mod tests {
             b.str(name);
             b.n(&[7.0, 7.0, 0.1857, 0.28]);
             b.str("STRAIGHT");
-            b.qto("Qto_StairFlightBaseQuantities", &[("Length", 3.0, 2.0), ("GrossVolume", 5.0, 1.0)]);
+            if k == 0 {
+                // Zwei Mengensätze: Basismengen + eigene Dossier-Mengen (Untersicht).
+                b.f.push(2.0);
+                for (set, (n, kind, v)) in [("Qto_StairFlightBaseQuantities", ("Length", 3.0, 2.0)), ("Dossier_Qto_StairFlight", ("SoffitArea", 4.0, 7.5))] {
+                    b.str(set);
+                    b.f.push(1.0);
+                    b.str(n);
+                    b.n(&[kind, v]);
+                }
+            } else {
+                b.qto("Qto_StairFlightBaseQuantities", &[("Length", 3.0, 2.0), ("GrossVolume", 5.0, 1.0)]);
+            }
             b.n(&[0.0, 2.0]);
             b.pts(&SQUARE);
             b.n(&[0.0, 0.2 * (k + 1) as f64]);
@@ -3191,6 +3215,11 @@ mod tests {
         b.str("HANDRAIL");
         b.no_psets();
         b.mesh_tetra();
+        b.n(&[1.0]);
+        b.str("Spindel");
+        b.pts(&SQUARE);
+        b.n(&[0.0, 2.6]);
+        b.qto("Qto_ColumnBaseQuantities", &[("NetVolume", 5.0, 0.1)]);
     }
 
     #[test]
@@ -3205,18 +3234,22 @@ mod tests {
         assert_eq!(count(&ifc, "IFCRAILING"), 1);
         assert_eq!(count(&ifc, "IFCSLAB"), 1);
         assert!(ifc.contains(".LANDING.);"), "Podest als IfcSlab(LANDING)");
+        assert_eq!(count(&ifc, "IFCCOLUMN"), 1, "Spindel als IfcColumn");
+        assert!(first_line(&ifc, "IFCCOLUMN").contains("'Spindel'"));
         let stair = first_line(&ifc, "IFCSTAIR");
         assert!(stair.contains(",$,$,.QUARTER_TURN_STAIR.);") && !stair.contains("#,#"), "{stair}");
         let flight = first_line(&ifc, "IFCSTAIRFLIGHT");
         assert!(flight.contains(",7,7,0.1857,0.28,.STRAIGHT.);"), "{flight}");
-        // Beide Läufe: Menge je Lauf; Treppe, Läufe, Podest, Geländer in EINER Aggregation, nur die Treppe im Geschoss/Gebäude.
-        assert_eq!(count(&ifc, "IFCELEMENTQUANTITY"), 2);
-        let agg = ifc.lines().find(|l| l.contains("IFCRELAGGREGATES(") && l.matches('#').count() == 7).expect("Aggregation der Treppe");
+        // Beide Läufe + Spindel: Menge je Teil; Treppe, Läufe, Podest, Geländer, Spindel in EINER Aggregation, nur die Treppe im Geschoss/Gebäude.
+        assert_eq!(count(&ifc, "IFCELEMENTQUANTITY"), 4);
+        assert!(ifc.contains("IFCQUANTITYAREA('SoffitArea',$,$,7.5,$)"), "Dossier_Qto_… als Menge");
+        assert_eq!(count(&ifc, "IFCPROPERTYSINGLEVALUE"), 0);
+        let agg = ifc.lines().find(|l| l.contains("IFCRELAGGREGATES(") && l.matches('#').count() == 8).expect("Aggregation der Treppe");
         assert!(agg.contains(",#"), "{agg}");
         let contained = first_line(&ifc, "IFCRELCONTAINEDINSPATIALSTRUCTURE");
         assert_eq!(contained.matches('#').count(), 4, "nur die Treppe (Nummer, Owner, Treppe, Gebäude): {contained}");
         // Läufe als Prismen, Geländer als Dreiecks-Netz.
-        assert_eq!(count(&ifc, "IFCEXTRUDEDAREASOLID"), 5); // 2 Läufe × 2 Prismen + Podest
+        assert_eq!(count(&ifc, "IFCEXTRUDEDAREASOLID"), 6); // 2 Läufe × 2 Prismen + Podest + Spindel
         assert_eq!(count(&ifc, "IFCTRIANGULATEDFACESET"), 1);
         // Ohne Teile: Ersatzkörper (Fussabdruck) wie vorher.
         let fallback = build(&b).unwrap();
@@ -3237,7 +3270,7 @@ mod tests {
         g.no_psets();
         g.n(&[1.0]);
         g.mesh_tetra();
-        g.n(&[0.0, 0.0]);
+        g.n(&[0.0, 0.0, 0.0]);
         let mesh = build(&g).unwrap();
         check_structure(&mesh);
         assert_eq!(count(&mesh, "IFCSTAIRFLIGHT"), 1);

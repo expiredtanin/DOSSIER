@@ -837,6 +837,8 @@ export const de = {
   "objinfo.stair.rise": "Steighöhe (gesamt)",
   "objinfo.stair.riser": "Steigungshöhe",
   "objinfo.stair.tread": "Auftrittstiefe",
+  "objinfo.stair.concreteVolume": "Betonvolumen Lauf",
+  "objinfo.stair.soffitArea": "Untersicht (Schalfläche)",
   "objinfo.stair.direction": "Laufrichtung",
   "objinfo.stair.direction.up": "Aufwärts",
   "objinfo.stair.direction.down": "Abwärts",

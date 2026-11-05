@@ -909,6 +909,21 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
     }
     let b = crate::stair::bbox(&geo);
     let bb = if b.len() < 4 { [0.0; 4] } else { [b[0], b[1], b[2], b[3]] };
+    // Ortbeton (gerade/Wendel): Betonvolumen des Laufs und Untersicht (Schal-/Wendelfläche) aus
+    // demselben Netz wie 3D und IFC — Projekt nur mit dieser Treppe und ihrem Typ.
+    let amounts = {
+        let ty: Option<crate::model::StairType> = typed.type_id.as_ref().and_then(|tid| {
+            arr(root.get("stairTypes")).iter().find(|t| field(t, "id").and_then(Value::as_str) == Some(tid.as_str())).and_then(|t| serde_json::from_value(t.clone()).ok())
+        });
+        ty.and_then(|ty| {
+            let one = crate::model::Project {
+                stairs: Some(vec![crate::model::Stair { total_rise: Some(total_rise), floor_id: String::new(), ..typed.clone() }]),
+                stair_types: Some(vec![ty]),
+                ..Default::default()
+            };
+            crate::ifc_stairs::concrete_flight_amounts(&one)
+        })
+    };
     let info = O::default()
         .raw("shape", s, "shape")
         .raw("width", s, "width")
@@ -925,6 +940,8 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
         .o("floorName", floor_name(floor, field(s, "floorId")))
         .n("zBottom", zb)
         .n("zTop", zt)
+        .o("concreteVolume", amounts.map(|a| js_num(a.0)))
+        .o("soffitArea", amounts.map(|a| js_num(a.1)))
         .done();
     Ok(O::default()
         .s("kind", "stair")
@@ -1353,6 +1370,28 @@ mod tests {
         let mut bad = r.clone();
         bad["walls"][0]["wallTypeId"] = json!("x");
         assert_eq!(sel(&bad, json!({"wallIds": ["w"]})).unwrap_err(), "Unbekannter Wandtyp: x");
+    }
+
+    #[test]
+    fn betonwendel_mit_volumen_und_wendelflaeche() {
+        let stair = |ty: &str| json!({"id": "s", "floorId": "eg", "shape": "spiral", "start": {"x": 2, "y": 0}, "dir": {"x": 0, "y": 1},
+            "runLength": 0, "center": {"x": 0, "y": 0}, "radius": 1.5, "sweep": 270, "width": 1, "totalRise": 2.8, "stepCount": 14, "typeId": ty});
+        let r = root(json!({
+            "drawingLevels": [{"id": "eg", "name": "EG", "kind": "floor", "baseElevation": 0}],
+            "stairTypes": [{"id": "b", "name": "Beton", "structure": "beton", "closedRisers": false, "treadThickness": 0.04, "defaultWidth": 1},
+                           {"id": "h", "name": "Holz", "structure": "wange", "closedRisers": false, "treadThickness": 0.04, "defaultWidth": 1}],
+            "stairs": [stair("b")],
+        }));
+        let s = sel(&r, json!({"stairId": "s"})).unwrap();
+        let v = s["stair"]["concreteVolume"].as_f64().unwrap();
+        let a = s["stair"]["soffitArea"].as_f64().unwrap();
+        assert!(v > 1.5 && v < 3.2, "{v}");
+        assert!(a > 7.0 && a < 9.5, "{a}");
+        // Holz-Wangentreppe: keine Betonmengen
+        let mut h = r.clone();
+        h["stairs"] = json!([stair("h")]);
+        let s = sel(&h, json!({"stairId": "s"})).unwrap();
+        assert!(s["stair"].get("concreteVolume").is_none() && s["stair"].get("soffitArea").is_none());
     }
 
     #[test]

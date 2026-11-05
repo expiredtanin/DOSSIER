@@ -1515,6 +1515,18 @@ export function StairSection({
         <span className="objinfo-flabel">{t("objinfo.stair.tread")}</span>
         <span className="objinfo-fval">{formatM(stair.treadDepth)}</span>
       </div>
+      {stair.concreteVolume !== undefined && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.stair.concreteVolume")}</span>
+          <span className="objinfo-fval">{stair.concreteVolume.toFixed(2)} m³</span>
+        </div>
+      )}
+      {stair.soffitArea !== undefined && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.stair.soffitArea")}</span>
+          <span className="objinfo-fval">{stair.soffitArea.toFixed(2)} m²</span>
+        </div>
+      )}
 
       {/* Referenzgeschoss (read-only). */}
       <div className="objinfo-field">

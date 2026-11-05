@@ -9,9 +9,12 @@
 //! Zuordnung der Tritt-Prismen: bei "L" ist das Podest das Prisma mit dem Umriss des Podest-Polygons
 //! der Treppengeometrie; Tritte bis zur Podest-Oberkante gehören zum ersten, die darüber zum
 //! zweiten Lauf. Gerade und Wendeltreppen haben einen Lauf (die Wendel-Mitte bleibt Teil davon).
+//! Die Mittelsäule (Spindel, `Stair.centerColumn`) einer Wendel ist kein Tritt: eigener Teil
+//! (IfcColumn) mit Stützen-Basismengen. Ortbeton-Läufe (Netz) tragen zusätzlich die Untersicht
+//! (Schalfläche, bei der Wendel die Wendelfläche) in `Dossier_Qto_StairFlight`.
 
 use crate::export_flat::{js_key, mesh_volume, orient_outward};
-use crate::ifc_quantities::{flight_quantities, railing_quantities, ring_area, slab_quantities, Qty};
+use crate::ifc_quantities::{column_quantities, flight_quantities, railing_quantities, ring_area, slab_quantities, Qty};
 use crate::jsmath::hypot2;
 use crate::jsnum::round;
 use crate::model::*;
@@ -48,6 +51,8 @@ pub struct StairFlightParts {
     /// IfcStairFlightTypeEnum.
     pub predefined: &'static str,
     pub quantities: Vec<Qty>,
+    /// Untersicht (m²) eines Ortbeton-Laufs (Netz); `None` bei Tritt-Prismen.
+    pub soffit_area: Option<f64>,
     pub body: FlightBody,
 }
 
@@ -70,6 +75,8 @@ pub struct StairParts {
     pub flights: Vec<StairFlightParts>,
     pub landing: Option<Landing>,
     pub rail: Option<Rail>,
+    /// Mittelsäule (Spindel) einer Wendel: Prisma + Stützen-Basismengen.
+    pub column: Option<Landing>,
 }
 
 const EPS: f64 = 1e-6;
@@ -112,6 +119,53 @@ fn ifc_mesh(mut positions: Vec<f64>, indices: &[u32], base: f64) -> IfcMesh {
     IfcMesh { positions, indices }
 }
 
+/// Untersicht eines geschlossenen, nach aussen orientierten Netzes: Summe der Dreiecke, deren
+/// Normale nach unten zeigt (Schalfläche; bei der Wendel die Wendelfläche samt flachem Anlauf).
+pub fn soffit_area(positions: &[f64], indices: &[u32]) -> f64 {
+    let p = |i: u32| {
+        let k = 3 * i as usize;
+        [positions[k], positions[k + 1], positions[k + 2]]
+    };
+    let mut sum = 0.0;
+    for t in indices.chunks_exact(3) {
+        if t.iter().any(|&i| 3 * i as usize + 2 >= positions.len()) {
+            continue;
+        }
+        let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+        let (u, v) = ([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
+        let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        let len = crate::jsmath::hypot(&[n[0], n[1], n[2]]);
+        if len > 0.0 && n[2] < -1e-9 * len {
+            sum += len / 2.0;
+        }
+    }
+    sum
+}
+
+/// Ortbeton-Lauf (Netz) einer Treppe: (Betonvolumen m³, Untersicht m²); `None` ohne Netz (keine
+/// Beton-Gerade/-Wendel). `one` wie bei [`stair_parts`]. Ohne Mittelsäule.
+pub fn concrete_flight_amounts(one: &Project) -> Option<(f64, f64)> {
+    let meshes = model3d::emit_stair_meshes(one);
+    if meshes.is_empty() {
+        return None;
+    }
+    let (positions, indices) = concat(&meshes);
+    let m = ifc_mesh(positions, &indices, 0.0);
+    Some((mesh_volume(&m.positions, &m.indices), soffit_area(&m.positions, &m.indices)))
+}
+
+/// Lauflänge auf der Lauflinie: Wendel = Schraubenlinie im Laufradius, sonst Lauflänge; mit Steigung.
+fn walk_length(stair: &Stair, rise: f64) -> f64 {
+    let run = if stair.shape == StairShape::Spiral {
+        let half_w = 0.05_f64.max(stair.width / 2.0);
+        let radius = (half_w + 0.1).max(stair.radius.unwrap_or(stair.width));
+        stair.sweep.unwrap_or(270.0).to_radians().abs() * radius
+    } else {
+        stair.run_length
+    };
+    hypot2(run, rise)
+}
+
 fn solid_of(s: &RSlab, base: f64) -> StairSolid {
     StairSolid { pts: s.outline.iter().map(|p| Vec2 { x: p[0], y: p[1] }).collect(), z_rel: s.z_bottom - base, depth: s.z_top - s.z_bottom }
 }
@@ -125,7 +179,16 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
     let geo = crate::stair::decode_geometry(&crate::stair::geometry(&stair.encode(), rise));
     let (riser_height, tread_depth, n_treads) = geo.as_ref().map_or((0.0, 0.0, 0), |g| (g.riser_height, g.tread_depth, g.treads.len()));
     let geo_landing = geo.as_ref().and_then(|g| g.landing.as_ref());
-    let slabs = model3d::emit_stairs(one, false);
+    let mut slabs = model3d::emit_stairs(one, false);
+    // Mittelsäule: `slabs_of` hängt sie bei einer Wendel mit Säule als letzte Platte an.
+    let column = (stair.shape == StairShape::Spiral && stair.center.is_some() && stair.center_column.is_some_and(|r| r.is_finite() && r > 0.0))
+        .then(|| slabs.pop())
+        .flatten()
+        .map(|c| {
+            let s = solid_of(&c, base);
+            let quantities = column_quantities(&s.pts, s.depth);
+            Landing { pts: s.pts, z_rel: s.z_rel, depth: s.depth, quantities }
+        });
     let meshes = model3d::emit_stair_meshes(one);
     let predefined = if stair.shape == StairShape::Spiral { "SPIRAL" } else { "STRAIGHT" };
 
@@ -190,7 +253,8 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
             riser_height,
             tread_length: tread_depth,
             predefined,
-            quantities: flight_quantities(hypot2(run, lift), volume),
+            quantities: flight_quantities(if stair.shape == StairShape::Spiral { walk_length(stair, rise) } else { hypot2(run, lift) }, volume),
+            soffit_area: None,
             body: FlightBody::Solids(solids),
         });
     }
@@ -199,6 +263,7 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
         let (positions, indices) = concat(&meshes);
         let mesh = ifc_mesh(positions, &indices, base);
         let volume = mesh_volume(&mesh.positions, &mesh.indices);
+        let soffit = soffit_area(&mesh.positions, &mesh.indices);
         flights.push(StairFlightParts {
             name: if flights.is_empty() { "Lauf".to_string() } else { format!("Lauf {}", flights.len() + 1) },
             risers: n_treads as f64,
@@ -206,7 +271,8 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
             riser_height,
             tread_length: tread_depth,
             predefined,
-            quantities: flight_quantities(hypot2(stair.run_length, rise), volume),
+            quantities: flight_quantities(walk_length(stair, rise), volume),
+            soffit_area: Some(soffit),
             body: FlightBody::Mesh(mesh),
         });
     }
@@ -221,9 +287,9 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
     let rail = (!rail_meshes.is_empty()).then(|| {
         let (positions, indices) = concat(&rail_meshes);
         let sides = if one.stair_type(stair).and_then(|t| t.railing) == Some(StairTypeRailing::Beide) { 2.0 } else { 1.0 };
-        Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(hypot2(stair.run_length, rise) * sides) }
+        Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(walk_length(stair, rise) * sides) }
     });
-    StairParts { flights, landing, rail }
+    StairParts { flights, landing, rail, column }
 }
 
 #[cfg(test)]
@@ -295,5 +361,80 @@ mod tests {
         let rail = parts.rail.expect("Handlauf");
         let len = rail.quantities[0].value;
         assert!((len - 2.0 * hypot2(3.0, 2.6)).abs() < 1e-9);
+        // Gerade Laufplatte: Untersicht = schräge Platte + flacher Anlauf ≈ Breite × Lauflänge (geneigt)
+        let soffit = parts.flights.iter().find_map(|f| f.soffit_area).unwrap();
+        assert!(soffit > 3.0 && soffit < 1.0 * hypot2(3.0, 2.6) + 0.5, "Untersicht {soffit}");
+    }
+
+    fn wendel(type_id: &str, column: Option<f64>) -> Stair {
+        Stair {
+            id: "W".into(),
+            floor_id: "eg".into(),
+            shape: StairShape::Spiral,
+            start: Vec2 { x: 2.0, y: 0.0 },
+            dir: Vec2 { x: 0.0, y: 1.0 },
+            center: Some(Vec2 { x: 0.0, y: 0.0 }),
+            radius: Some(1.5),
+            sweep: Some(270.0),
+            width: 1.0,
+            total_rise: Some(2.8),
+            step_count: 14.0,
+            type_id: Some(type_id.into()),
+            center_column: column,
+            ..Default::default()
+        }
+    }
+
+    fn beton() -> StairType {
+        StairType { id: "b".into(), structure: StairTypeStructure::Beton, railing: Some(StairTypeRailing::Rechts), default_width: 1.0, ..Default::default() }
+    }
+
+    #[test]
+    fn beton_wendel_ein_lauf_als_netz_mit_wendelflaeche() {
+        let st = wendel("b", Some(0.12));
+        let p = project_with(st.clone(), Some(beton()));
+        let parts = stair_parts(&p, &st, 0.0);
+        // genau ein Lauf (das Netz) — die Säule ist kein Lauf
+        assert_eq!(parts.flights.len(), 1, "{:?}", parts.flights.iter().map(|f| &f.name).collect::<Vec<_>>());
+        let f = &parts.flights[0];
+        assert_eq!(f.predefined, "SPIRAL");
+        let FlightBody::Mesh(m) = &f.body else { panic!("Wendel aus Ortbeton als Netz") };
+        let v = mesh_volume(&m.positions, &m.indices);
+        let gv = f.quantities.iter().find(|q| q.name == "GrossVolume").unwrap().value;
+        assert!(v > 1.5 && (gv - v).abs() < 1e-9, "Volumen {v} / {gv}");
+        assert_eq!(concrete_flight_amounts(&p).map(|a| a.0), Some(v));
+        // Wendelfläche: Ringsektor 270° r 1…2 = 7.07 m² im Grundriss, geneigt etwas grösser
+        let soffit = f.soffit_area.unwrap();
+        let plan = 0.75 * std::f64::consts::PI * (4.0 - 1.0);
+        assert!(soffit > plan && soffit < 1.3 * plan, "Untersicht {soffit} vs. {plan}");
+        // Länge auf der Lauflinie (r 1.5, 270°) mit Steigung
+        let len = f.quantities.iter().find(|q| q.name == "Length").unwrap().value;
+        assert!((len - hypot2(1.5 * 1.5 * std::f64::consts::PI, 2.8)).abs() < 1e-9, "{len}");
+        // Säule: eigener Teil mit Stützenmengen
+        let c = parts.column.expect("Spindel");
+        assert!((c.depth - 2.8).abs() < 1e-9);
+        let cv = c.quantities.iter().find(|q| q.name == "NetVolume").unwrap().value;
+        assert!((cv - std::f64::consts::PI * 0.0144 * 2.8).abs() < 0.01, "{cv}");
+    }
+
+    #[test]
+    fn spindeltreppe_saeule_nicht_im_lauf() {
+        let ty = StairType { id: "sp".into(), structure: StairTypeStructure::Spindel, tread_thickness: 0.05, default_width: 1.0, ..Default::default() };
+        let mit = wendel("sp", Some(0.1));
+        let ohne = wendel("sp", None);
+        let a = stair_parts(&project_with(mit.clone(), Some(ty.clone())), &mit, 0.0);
+        let b = stair_parts(&project_with(ohne.clone(), Some(ty)), &ohne, 0.0);
+        let vol = |p: &StairParts| p.flights[0].quantities.iter().find(|q| q.name == "GrossVolume").unwrap().value;
+        assert!((vol(&a) - vol(&b)).abs() < 1e-9, "Säule nicht im Laufvolumen");
+        assert!(a.column.is_some() && b.column.is_none());
+        assert!(a.flights[0].soffit_area.is_none());
+    }
+
+    #[test]
+    fn untersicht_eines_wuerfels_ist_seine_bodenflaeche() {
+        let pos = [0., 0., 0., 1., 0., 0., 1., 1., 0., 0., 1., 0., 0., 0., 1., 1., 0., 1., 1., 1., 1., 0., 1., 1.];
+        let idx = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7];
+        assert!((soffit_area(&pos, &idx) - 1.0).abs() < 1e-12);
+        assert_eq!(soffit_area(&pos, &[0, 1, 99]), 0.0);
     }
 }

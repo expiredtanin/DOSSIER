@@ -539,8 +539,85 @@ fn strut_box(a: V3, b: V3, half: f64) -> Option<(Vec<f64>, Vec<u32>)> {
     Some((positions, indices))
 }
 
-/// Handlauf einer Wendeltreppe als Schraubensweep (Quader-Stücke auf der Schraubenlinie) samt
-/// Pfosten auf den Trittmitten, in einem Netz je Treppe.
+/// Ecken des runden Handlauf-Profils.
+const TUBE_SEGMENTS: usize = 12;
+
+/// Rohr (Kreisprofil, Radius `radius`) entlang eines Polygonzugs, mit Deckeln; geschlossenes,
+/// nach aussen orientiertes Netz. Profil-Ebene je Punkt senkrecht zur gemittelten Tangente; die
+/// Profil-Lage wird mitgeführt (Doppelspiegelung, ohne Verdrillen). `None` bei < 2 Punkten oder
+/// entarteten (zu kurzen/NaN-) Segmenten.
+fn tube_along(path: &[V3], radius: f64) -> Option<(Vec<f64>, Vec<u32>)> {
+    let n = path.len();
+    if n < 2 || !(radius > 0.0) {
+        return None;
+    }
+    let sub = |a: V3, b: V3| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: V3, b: V3| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: V3, b: V3| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let unit = |a: V3| {
+        let l = hypot(&[a[0], a[1], a[2]]);
+        (l >= EPS).then(|| [a[0] / l, a[1] / l, a[2] / l])
+    };
+    let seg: Vec<V3> = path.windows(2).map(|w| unit(sub(w[1], w[0]))).collect::<Option<_>>()?;
+    let tangents: Vec<V3> = (0..n)
+        .map(|i| match (i.checked_sub(1).map(|k| seg[k]), seg.get(i).copied()) {
+            (Some(a), Some(b)) => unit([a[0] + b[0], a[1] + b[1], a[2] + b[2]]).unwrap_or(b),
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => [0.0, 0.0, 1.0],
+        })
+        .collect();
+    // Start-Normale: quer zur Tangente, möglichst waagrecht.
+    let t0 = tangents[0];
+    let up: V3 = if t0[2].abs() > 0.98 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
+    let mut normal = unit(cross(cross(t0, up), t0))?;
+    let mut positions = Vec::with_capacity(3 * (n * TUBE_SEGMENTS + 2));
+    for i in 0..n {
+        if i > 0 {
+            // Doppelspiegelung (Wang et al. 2008): rotationsminimierende Rahmen.
+            let v1 = sub(path[i], path[i - 1]);
+            let c1 = dot(v1, v1);
+            let r_l = sub(normal, v1.map(|x| x * 2.0 / c1 * dot(v1, normal)));
+            let t_l = sub(tangents[i - 1], v1.map(|x| x * 2.0 / c1 * dot(v1, tangents[i - 1])));
+            let v2 = sub(tangents[i], t_l);
+            let c2 = dot(v2, v2);
+            normal = if c2 > 1e-24 { sub(r_l, v2.map(|x| x * 2.0 / c2 * dot(v2, r_l))) } else { r_l };
+            normal = unit(normal)?;
+        }
+        let bi = cross(tangents[i], normal);
+        for k in 0..TUBE_SEGMENTS {
+            let a = std::f64::consts::TAU * k as f64 / TUBE_SEGMENTS as f64;
+            let (c, s) = (crate::jsnum::cos(a) * radius, crate::jsnum::sin(a) * radius);
+            for d in 0..3 {
+                positions.push(path[i][d] + normal[d] * c + bi[d] * s);
+            }
+        }
+    }
+    for d in 0..3 {
+        positions.push(path[0][d]);
+    }
+    for d in 0..3 {
+        positions.push(path[n - 1][d]);
+    }
+    let m = TUBE_SEGMENTS as u32;
+    let ring = |i: usize, k: u32| i as u32 * m + k % m;
+    let (c0, c1) = ((n * TUBE_SEGMENTS) as u32, (n * TUBE_SEGMENTS) as u32 + 1);
+    let mut indices = Vec::with_capacity(6 * TUBE_SEGMENTS * n);
+    for i in 0..n - 1 {
+        for k in 0..m {
+            let (a, b, c, d) = (ring(i, k), ring(i, k + 1), ring(i + 1, k + 1), ring(i + 1, k));
+            indices.extend([a, b, c, a, c, d]);
+        }
+    }
+    for k in 0..m {
+        indices.extend([c0, ring(0, k + 1), ring(0, k)]);
+        indices.extend([c1, ring(n - 1, k), ring(n - 1, k + 1)]);
+    }
+    Some((positions, indices))
+}
+
+/// Handlauf einer Wendeltreppe als Schraubensweep mit rundem Profil (Rohr Ø `RAIL_THICK`) samt
+/// runden Pfosten auf den Trittmitten, in einem Netz je Treppe.
 fn spiral_railing(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
     let Some((geo, total_rise)) = geometry_of(s) else { return };
     let Some(h) = helix_of(s) else { return };
@@ -569,18 +646,18 @@ fn spiral_railing(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
     for &left in sides {
         let r = if left == ccw { h.r_in } else { h.r_out };
         let total_seg = n * HELIX_SEGMENTS;
-        let pt_at = |k: usize| {
-            let f = k as f64 / total_seg as f64;
-            let q = h.at(r, h.a0 + f * h.sweep);
-            [q[0], q[1], rail_z(f)]
-        };
-        for k in 0..total_seg {
-            push(strut_box(pt_at(k), pt_at(k + 1), half));
-        }
+        let path: Vec<V3> = (0..=total_seg)
+            .map(|k| {
+                let f = k as f64 / total_seg as f64;
+                let q = h.at(r, h.a0 + f * h.sweep);
+                [q[0], q[1], rail_z(f)]
+            })
+            .collect();
+        push(tube_along(&path, half));
         for (i, tr) in geo.treads.iter().enumerate() {
             let f = (i as f64 + 0.5) / n as f64;
             let q = h.at(r, h.a0 + f * h.sweep);
-            push(strut_box([q[0], q[1], s.z_bottom + tr.top_rise], [q[0], q[1], rail_z(f)], half));
+            push(tube_along(&[[q[0], q[1], s.z_bottom + tr.top_rise], [q[0], q[1], rail_z(f)]], half * 0.75));
         }
     }
     if !indices.is_empty() {
@@ -829,6 +906,47 @@ mod tests {
         let r: Vec<f64> = big.positions.chunks(3).map(|c| c[0].hypot(c[1])).collect();
         assert!(r.iter().all(|r| (r - 1.0).abs() < 0.05), "Radius streut");
         assert!(big.positions.chunks(3).any(|c| c[2] > 2.0) && big.positions.chunks(3).any(|c| c[2] < 1.2));
+    }
+
+    #[test]
+    fn rohr_ist_rund_geschlossen_und_aussen_orientiert() {
+        // Schraubenlinie r = 1, Steigung 1 m je Umdrehung
+        let path: Vec<V3> = (0..=48).map(|k| {
+            let a = std::f64::consts::TAU * k as f64 / 48.0;
+            [a.cos(), a.sin(), a / std::f64::consts::TAU]
+        }).collect();
+        let (positions, indices) = tube_along(&path, 0.02).unwrap();
+        // jeder Profilpunkt liegt genau im Rohrradius um seinen Bahnpunkt
+        for (i, c) in positions.chunks(3).take(path.len() * TUBE_SEGMENTS).enumerate() {
+            let q = path[i / TUBE_SEGMENTS];
+            assert!((hypot(&[c[0] - q[0], c[1] - q[1], c[2] - q[2]]) - 0.02).abs() < 1e-12);
+        }
+        let len: f64 = path.windows(2).map(|w| hypot(&[w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]])).sum();
+        let v = volume(&Mesh { src: 0, positions, indices });
+        // Polygon-Querschnitt (12 Ecken) ≈ 95.5 % des Kreises
+        let ideal = std::f64::consts::PI * 0.02 * 0.02 * len;
+        assert!(v > 0.9 * ideal && v < 1.01 * ideal, "Volumen {v} vs. {ideal}");
+        assert!(tube_along(&[[0.0; 3]], 0.02).is_none());
+        assert!(tube_along(&[[0.0; 3], [0.0; 3]], 0.02).is_none());
+        assert!(tube_along(&[[0.0; 3], [f64::NAN, 0.0, 0.0]], 0.02).is_none());
+    }
+
+    #[test]
+    fn wendel_handlauf_rund() {
+        let rs = railings(&spiral(0.0, 1.0, 0.0));
+        let m = &rs[0];
+        // Netz geschlossen und nach aussen (Rohr + Pfosten, alle positiv)
+        assert!(volume(m) > 0.0);
+        // Querschnitt rund: Punkte des Handlaufs (oberhalb aller Pfosten-Fusspunkte im Mittelteil) streuen
+        // im Abstand zur Schraubenachse r = 1 um ± Rohrradius, auch schräg (nicht nur Quaderecken).
+        let near: Vec<f64> = m.positions.chunks(3).map(|c| c[0].hypot(c[1]) - 1.0).collect();
+        let distinct = {
+            let mut v: Vec<i64> = near.iter().map(|d| (d * 1e5).round() as i64).collect();
+            v.sort();
+            v.dedup();
+            v.len()
+        };
+        assert!(distinct > 8, "nur {distinct} verschiedene Radien: Profil nicht rund");
     }
 
     #[test]
