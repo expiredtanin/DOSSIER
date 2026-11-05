@@ -23,6 +23,9 @@ pub struct Args {
     pub stairs: Vec<String>,
     pub roofs: Vec<String>,
     pub context: Vec<String>,
+    /// [137] Stützen und freie Körper (Prisma über dem Grundriss).
+    pub columns: Vec<String>,
+    pub solids: Vec<String>,
     pub rgb: [f64; 3],
     /// Explosionsabstand ([65], `explode3d.rs`; fehlt/0 = aus): Linien folgen dem auseinandergezogenen Modell.
     #[serde(default)]
@@ -170,6 +173,25 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
             lift(&mut out, n, &roof.id);
         }
     }
+    let (columns, solids) = (set(&a.columns), set(&a.solids));
+    for col in p.columns.as_deref().unwrap_or(&[]) {
+        if columns.contains(col.id.as_str()) {
+            let (z0, z1) = p.column_vertical_extent(col);
+            let foot: Vec<[f64; 2]> = crate::model3d::column_footprint(col).iter().map(|q| [q.x, q.y]).collect();
+            let n = out.v.len();
+            out.prism_edges(&foot, z0, z1);
+            lift(&mut out, n, &col.id);
+        }
+    }
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        if solids.contains(s.id.as_str()) {
+            let z0 = crate::model3d::solid_base_z(p, s);
+            let foot: Vec<[f64; 2]> = s.points.iter().map(|q| [q.x, q.y]).collect();
+            let n = out.v.len();
+            out.prism_edges(&foot, z0, z0 + s.height);
+            lift(&mut out, n, &s.id);
+        }
+    }
     if !context.is_empty() {
         for obj in p.context.as_deref().unwrap_or(&[]) {
             let (pos, id) = match obj {
@@ -249,5 +271,22 @@ mod tests {
         let l = lines(&p, serde_json::json!({"ceilings": [s.ceiling_id]}));
         assert_eq!(l.len() % (3 * 12) , 0);
         assert!(!l.is_empty());
+    }
+
+    /// [137] Gewählte Stützen und freie Körper bekommen im 3D einen Umriss (Prisma: 3 Kanten je Ecke).
+    #[test]
+    fn stuetze_und_freier_koerper() {
+        let p: Project = serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+            "drawingLevels": [{"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0.0}],
+            "columns": [{"id": "k1", "type": "column", "floorId": "EG", "categoryCode": "25", "position": {"x": 2, "y": 3}, "profile": {"kind": "rect", "width": 0.3, "depth": 0.3}, "rotation": 0, "height": 2.5}],
+            "extrudedSolids": [{"id": "s1", "type": "extrudedSolid", "levelId": "EG", "points": [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 1, "y": 1}], "height": 2.0}],
+            "drawings2d": []
+        }))
+        .unwrap();
+        assert_eq!(lines(&p, serde_json::json!({"columns": ["k1"]})).len(), 4 * 3 * 12);
+        let l = lines(&p, serde_json::json!({"solids": ["s1"]}));
+        assert_eq!(l.len(), 3 * 3 * 12);
+        assert!(l.chunks_exact(6).any(|v| (v[1] - 2.0).abs() < 1e-6));
     }
 }

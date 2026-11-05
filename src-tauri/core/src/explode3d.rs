@@ -48,6 +48,10 @@ impl<'a> Explode<'a> {
         for c in p.columns.as_deref().unwrap_or(&[]) {
             floor_of.insert(&c.id, &c.floor_id);
         }
+        // [137] Freie Körper (Pick, Hervorhebung) folgen ihrem Geschoss.
+        for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+            floor_of.insert(&s.id, &s.level_id);
+        }
         for o in p.openings.as_deref().unwrap_or(&[]) {
             if let Some(f) = floor_of.get(o.host_wall_id.as_str()).copied() {
                 floor_of.insert(&o.id, f);
@@ -210,6 +214,12 @@ pub fn pick_geometry(p: &Project, gap: f64) -> Result<PickGeometry, String> {
     for c in &mut g.columns {
         let dz = ex.of(&c.column_id);
         for v in c.tris.iter_mut().flatten() {
+            v[1] += dz;
+        }
+    }
+    for s in &mut g.solids {
+        let dz = ex.of(&s.solid_id);
+        for v in s.tris.iter_mut().flatten() {
             v[1] += dz;
         }
     }

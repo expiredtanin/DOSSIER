@@ -1515,7 +1515,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     if acc.min_x.is_finite() && depth_max.is_finite() && !crate::excavation::terrains(p).is_empty() {
         let terrain_shown = |c: Option<&str>| c.is_none_or(|c| vis.visible(c) && vis.render(c));
         for t in crate::excavation::terrains(p) {
-            if !terrain_shown(t.category_code.as_deref()) {
+            if !terrain_shown(t.category_code.as_deref()) || t.hidden == Some(true) {
                 continue;
             }
             for l in terrain_silhouette(p, t, &frame, (acc.min_x - 6.0, acc.max_x + 6.0), depth_max) {

@@ -92,6 +92,14 @@ pub fn terrain_from_contours_opts_json(contours_json: &str, id: &str, smooth: f6
     crate::cmd_solid::terrain_from_contours_with(c.as_array().map(Vec::as_slice).unwrap_or(&[]), id, o).to_string()
 }
 
+/// [137] Raster-Gelände (swissALTI3D) um `passes` Durchgänge nachglätten (`crate::terrain::resmooth_grid_mesh`):
+/// neue `positions` (nur z geändert), leer, wenn das Netz kein Raster ist (`passes` 0 = nur prüfen).
+#[wasm_bindgen]
+pub fn terrain_resmooth_grid(positions: &[f64], passes: f64) -> Vec<f64> {
+    let passes = if passes.is_finite() && passes > 0.0 { passes.min(20.0) as u32 } else { 0 };
+    crate::terrain::resmooth_grid_mesh(positions, passes).unwrap_or_default()
+}
+
 /// Höhenraster glätten ([T6], `crate::terrain::smooth_grid`): `z` zeilenweise (`nx` Spalten, NaN = kein Wert).
 #[wasm_bindgen]
 pub fn terrain_smooth_grid(z: &[f64], nx: f64, ny: f64, passes: f64) -> Vec<f64> {

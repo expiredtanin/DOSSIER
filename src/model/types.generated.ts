@@ -3119,6 +3119,11 @@ export type TerrainMesh = {
   smooth?: number;
   /** [137] Quelle: Id des Höhenlinien-Satzes (`contourSet`), aus dem das Netz erzeugt wurde. */
   sourceId?: string;
+  /**
+   * [137] Nur dieses Netz ausblenden (Grundriss, Schnitt, Ansicht, 3D, Pick); die Kategorie bleibt
+   * davon unberührt. Fehlt/false = sichtbar.
+   */
+  hidden?: boolean;
 };
 
 /** Ein zusammenhängender Textabschnitt mit einheitlicher Formatierung. */

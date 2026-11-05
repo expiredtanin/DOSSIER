@@ -5206,6 +5206,11 @@ pub struct TerrainMesh {
     #[serde(rename = "sourceId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub source_id: Option<String>,
+    /// [137] Nur dieses Netz ausblenden (Grundriss, Schnitt, Ansicht, 3D, Pick); die Kategorie bleibt
+    /// davon unberührt. Fehlt/false = sichtbar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hidden: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
