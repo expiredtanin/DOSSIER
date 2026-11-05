@@ -88,9 +88,16 @@ fn unit(v: Vec2) -> Option<Vec2> {
     (l > 1e-12 && l.is_finite()).then(|| Vec2 { x: v.x / l, y: v.y / l })
 }
 
-/// Ein Strich (Linienzug, mind. 2 Punkte) als Skizzen-Linienzug. `k` = Meter je Papier-mm.
+/// Anteil des Überzugs für eine Strichstärke: feine Linien (Schraffur-, Musterlinien ≤ 0.1 mm) ohne,
+/// voll ab 0.25 mm — sonst stehen an jedem Rand eines Musters Härchen über.
+pub fn overshoot_for(weight_mm: f64) -> f64 {
+    ((weight_mm - 0.1) / 0.15).clamp(0.0, 1.0)
+}
+
+/// Ein Strich (Linienzug, mind. 2 Punkte) als Skizzen-Linienzug. `k` = Meter je Papier-mm,
+/// `over` = Anteil des Überzugs an den Enden (0…1, s. [`overshoot_for`]).
 /// Zu kurze oder unbrauchbare Striche kommen unverändert zurück.
-pub fn stroke(pts: &[Vec2], k: f64, seed: u64) -> Vec<Vec2> {
+pub fn stroke(pts: &[Vec2], k: f64, seed: u64, over: f64) -> Vec<Vec2> {
     if pts.len() < 2 || !(k > 0.0) || !k.is_finite() || pts.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
         return pts.to_vec();
     }
@@ -111,8 +118,9 @@ pub fn stroke(pts: &[Vec2], k: f64, seed: u64) -> Vec<Vec2> {
     }
     let mut r = Rng(seed);
     let over_max = OVER_FRAC * total_mm;
-    let ov0 = (OVER_MM + OVER_RAND_MM * r.next()).min(over_max);
-    let ov1 = (OVER_MM + OVER_RAND_MM * r.next()).min(over_max);
+    let over = if over.is_finite() { over.clamp(0.0, 1.0) } else { 0.0 };
+    let ov0 = (OVER_MM + OVER_RAND_MM * r.next()).min(over_max) * over;
+    let ov1 = (OVER_MM + OVER_RAND_MM * r.next()).min(over_max) * over;
     let bow = BOW_MM * r.sym() * (total_mm / BOW_FULL_MM).min(1.0);
     let wave = WAVE_MM * (0.5 + 0.5 * r.next());
     let wave_len = WAVE_LEN_MM * (0.7 + 0.6 * r.next());
@@ -254,9 +262,9 @@ mod tests {
     fn deterministisch() {
         let pts = [v(0.0, 0.0), v(5.0, 0.0)];
         let s = seed("w1", 0, pts[0], pts[1]);
-        assert_eq!(stroke(&pts, 0.1, s), stroke(&pts, 0.1, s));
+        assert_eq!(stroke(&pts, 0.1, s, 1.0), stroke(&pts, 0.1, s, 1.0));
         // Anderer Startwert: andere Wellung.
-        assert_ne!(stroke(&pts, 0.1, s), stroke(&pts, 0.1, seed("w2", 0, pts[0], pts[1])));
+        assert_ne!(stroke(&pts, 0.1, s, 1.0), stroke(&pts, 0.1, seed("w2", 0, pts[0], pts[1]), 1.0));
     }
 
     #[test]
@@ -265,7 +273,7 @@ mod tests {
         let k = 0.1;
         let (a, b) = (v(0.0, 0.0), v(5.0, 0.0));
         for i in 0..50 {
-            let s = stroke(&[a, b], k, seed("x", i, a, b));
+            let s = stroke(&[a, b], k, seed("x", i, a, b), 1.0);
             assert!(s.len() > 10, "lange Kante wird unterteilt");
             let tol_end = (OVER_MM + OVER_RAND_MM + END_MM) * k + 1e-9;
             assert!(len(sub(s[0], a)) <= tol_end && len(sub(*s.last().unwrap(), b)) <= tol_end);
@@ -277,9 +285,19 @@ mod tests {
     }
 
     #[test]
+    fn feine_linien_ohne_ueberzug() {
+        let (a, b) = (v(0.0, 0.0), v(5.0, 0.0));
+        assert_eq!(overshoot_for(0.1), 0.0);
+        assert_eq!(overshoot_for(0.5), 1.0);
+        let s = stroke(&[a, b], 0.1, 9, overshoot_for(0.1));
+        assert!((s[0].x - a.x).abs() < 1e-12 && (s[s.len() - 1].x - b.x).abs() < 1e-12);
+        assert!(len(sub(s[0], a)) <= END_MM * 0.1 + 1e-12);
+    }
+
+    #[test]
     fn massstab_skaliert_die_abweichung() {
         let (a, b) = (v(0.0, 0.0), v(20.0, 0.0));
-        let dev = |k: f64| stroke(&[a, b], k, 7).iter().map(|p| p.y.abs()).fold(0.0, f64::max);
+        let dev = |k: f64| stroke(&[a, b], k, 7, 1.0).iter().map(|p| p.y.abs()).fold(0.0, f64::max);
         let (d100, d200) = (dev(0.1), dev(0.2));
         assert!(d100 > 0.0 && (d200 / d100 - 2.0).abs() < 0.6, "{d100} {d200}");
     }
@@ -287,9 +305,9 @@ mod tests {
     #[test]
     fn kurze_striche_bleiben() {
         let pts = [v(0.0, 0.0), v(0.03, 0.0)];
-        assert_eq!(stroke(&pts, 0.1, 1), pts.to_vec());
-        assert_eq!(stroke(&[v(f64::NAN, 0.0), v(1.0, 0.0)], 0.1, 1).len(), 2);
-        assert_eq!(stroke(&pts, f64::NAN, 1), pts.to_vec());
+        assert_eq!(stroke(&pts, 0.1, 1, 1.0), pts.to_vec());
+        assert_eq!(stroke(&[v(f64::NAN, 0.0), v(1.0, 0.0)], 0.1, 1, 1.0).len(), 2);
+        assert_eq!(stroke(&pts, f64::NAN, 1, 1.0), pts.to_vec());
     }
 
     #[test]
@@ -309,7 +327,7 @@ mod tests {
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].len(), 33);
         // Der skizzierte Kreis bleibt ein Kreis (Punkte nahe am Umriss), nicht ein Vieleck aus langen Sehnen.
-        let s = stroke(&runs[0], 0.1, 3);
+        let s = stroke(&runs[0], 0.1, 3, 1.0);
         assert!(s.len() >= 33);
         let mid = &s[1..s.len() - 1];
         assert!(mid.iter().all(|p| (len(*p) - 0.15).abs() < 0.04), "{mid:?}");
@@ -318,7 +336,7 @@ mod tests {
     #[test]
     fn strich_folgt_dem_linienzug() {
         let pts = [v(0.0, 0.0), v(3.0, 0.0), v(6.0, 0.3)];
-        let s = stroke(&pts, 0.05, 11);
+        let s = stroke(&pts, 0.05, 11, 1.0);
         let tol = (BOW_MM + WAVE_MM + END_MM + OVER_MM + OVER_RAND_MM) * 0.05;
         assert!(s.iter().all(|p| dist_seg(*p, pts[0], pts[1]).min(dist_seg(*p, pts[1], pts[2])) <= tol));
     }

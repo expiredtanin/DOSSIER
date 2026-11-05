@@ -61,6 +61,14 @@ describe("viewTemplates", () => {
     expect(p.viewSnapshots![0].detail).toBe("grob");
   });
 
+  it("[67] Skizzenstil: verknüpfte Vorlage schaltet ihn an der Ansicht", () => {
+    let p = withTemplate(base());
+    p = applyOps(p, applyToLevelOps(p, "t1", "eg", true));
+    p = applyOps(p, patchTemplateOps(p, "t1", { sketch: true }));
+    expect(p.drawingLevels.find((l) => l.id === "eg")!.sketch).toBe(true);
+    expect(captureTemplate("t2", "S", p.drawingLevels.find((l) => l.id === "eg"), ui).sketch).toBe(true);
+  });
+
   it("Feld entfernen (undefined) gibt die Einstellung frei", () => {
     let p = withTemplate(base());
     p = applyOps(p, patchTemplateOps(p, "t1", { viewBottom: undefined }));

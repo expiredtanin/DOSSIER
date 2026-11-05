@@ -1829,7 +1829,7 @@ impl Writer {
         use super::sketch;
         let passes = if sketch::doubled(pts, k, l.weight_mm) { 2 } else { 1 };
         for pass in 0..passes {
-            let s = sketch::stroke(pts, k, seed ^ (pass as u64).wrapping_mul(0xA24B_AED4_963E_E407));
+            let s = sketch::stroke(pts, k, seed ^ (pass as u64).wrapping_mul(0xA24B_AED4_963E_E407), sketch::overshoot_for(l.weight_mm));
             let weight_mm = if pass == 0 { l.weight_mm } else { l.weight_mm * sketch::DOUBLE_WEIGHT };
             for w in s.windows(2) {
                 self.line_raw(&LineRef { a: w[0], b: w[1], weight_mm, ..*l }, dash_ref);
