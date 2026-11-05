@@ -1,5 +1,5 @@
-viewBox -16.5 0 49 35.22
-bytes 424473
+viewBox -4.055 0 25.109 23.11
+bytes 416536
 circle 14
 line 4009
 path 40
@@ -7,4 +7,4 @@ polygon 226
 rect 1
 svg 1
 text 91
-hash c04769d56ef373e5
+hash 63761ac76b26d6f6
