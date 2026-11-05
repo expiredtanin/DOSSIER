@@ -48,6 +48,15 @@ test("Musterhaus komplex: Gelände und Schatten anwählen und bearbeiten (mit Un
   await blurFocus(page);
   await page.keyboard.press("ControlOrMeta+z");
   await expect(smooth).toHaveValue("2");
+  // Nur dieses Netz ausblenden (Kategorie bleibt an), Undo blendet es wieder ein.
+  const meshVisible = objInfo(page).getByTestId("terrain-mesh-visible");
+  await expect(meshVisible).toBeChecked();
+  await meshVisible.uncheck();
+  await expect(meshVisible).not.toBeChecked();
+  await expect(objInfo(page).getByTestId("terrain-visible")).toBeChecked();
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(meshVisible).toBeChecked();
 
   // Schatten: EG 1:100, Klick nördlich des Eingangs (Schlagschatten am 21. Juni, 10 Uhr).
   await showSnapshot(page, "EG 1:100");
