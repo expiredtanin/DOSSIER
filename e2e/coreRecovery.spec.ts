@@ -23,7 +23,7 @@ test("Kern-Panic: Kern startet neu, Projekt bleibt, weitere Änderung geht", asy
   expect(await page.evaluate(() => window.__dossierTest!.coreEpoch())).toBe(epoch + 1);
 
   // Meldung an den Benutzer, Projekt (Store und Kern-Dokument) unverändert.
-  await expect(page.getByText(/Interner Fehler im Kern/)).toBeVisible();
+  await expect(page.getByText(/Interner Fehler im Kern.*Projekt und Rückgängig-Verlauf sind wiederhergestellt/)).toBeVisible();
   expect(await page.evaluate(() => window.__dossierTest!.counts())).toEqual(before);
   await expect(page.locator(".project-name")).toHaveText("Demo-Haus");
 
