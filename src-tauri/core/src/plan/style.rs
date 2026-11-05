@@ -95,6 +95,27 @@ pub fn poche_fill(p: HatchPattern) -> &'static str {
     }
 }
 
+/// [141] Drehung einer wandbezogenen Schraffur. Kreuzschraffur und Diagonale unter 45° zur Achse sehen
+/// um 90° gedreht gleichwertig aus (45° zur Achse bleibt 45° zur Achse); sie drehen nur um den Rest der
+/// Wandrichtung modulo 90° mit — so laufen sie an rechtwinkligen Ecken, T- und Kreuzstössen (und zwischen
+/// gleich schräg gestellten Wänden) ohne Fischgrat-Knick durch. Gerichtete Muster (Dämmung, Holz …)
+/// und Linien längs/quer zur Achse (Dämmung, Putz als Längsstriche) folgen weiter der vollen Wandrichtung.
+pub fn wall_turn(pattern: HatchPattern, base_angle_deg: f64, wall_angle_deg: f64) -> f64 {
+    let diagonal = ((base_angle_deg.rem_euclid(90.0)) - 45.0).abs() < 1e-6;
+    match pattern {
+        HatchPattern::Crosshatch | HatchPattern::Diagonal if wall_angle_deg.is_finite() && (diagonal || pattern == HatchPattern::Crosshatch) => {
+            let r = wall_angle_deg.rem_euclid(90.0);
+            // Rundungsrest knapp unter 90° (z. B. 89.9999999) zählt als 0.
+            if 90.0 - r < 1e-9 {
+                0.0
+            } else {
+                r
+            }
+        }
+        _ => wall_angle_deg,
+    }
+}
+
 /// `resolveHatch`: `None`, wenn die Schraffur fehlt. Ein hängender Linienstil der Schraffur
 /// (Datei/Import) zählt wie keiner (Vorgabe-Strichstärke 0.13, durchgezogen).
 pub fn resolve_hatch(p: &Project, hatch_id: &str, wall_angle_deg: Option<f64>, foreground: Option<&str>, placement: Option<(Option<f64>, Option<f64>, Option<Vec2>)>) -> Option<HatchRender> {
@@ -103,7 +124,7 @@ pub fn resolve_hatch(p: &Project, hatch_id: &str, wall_angle_deg: Option<f64>, f
     let (p_angle, p_scale, p_origin) = placement.unwrap_or((None, None, None));
     let base_angle = p_angle.unwrap_or(h.angle);
     let angle = match wall_angle_deg {
-        Some(w) if h.relative_to_wall == Some(true) => base_angle - w,
+        Some(w) if h.relative_to_wall == Some(true) => base_angle - wall_turn(h.pattern, base_angle, w),
         _ => base_angle,
     };
     Some(HatchRender {
@@ -173,6 +194,20 @@ pub fn resolve_stroke_weight(override_: Option<f64>, source: Option<AttributeSou
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn diagonale_dreht_modulo_90_daemmung_voll() {
+        assert_eq!(wall_turn(HatchPattern::Diagonal, 45.0, 90.0), 0.0);
+        assert_eq!(wall_turn(HatchPattern::Diagonal, 45.0, -90.0), 0.0);
+        assert_eq!(wall_turn(HatchPattern::Diagonal, -45.0, 180.0), 0.0);
+        assert!((wall_turn(HatchPattern::Crosshatch, 0.0, 120.0) - 30.0).abs() < 1e-12);
+        assert!((wall_turn(HatchPattern::Diagonal, 45.0, 89.99999999999) - 0.0).abs() < 1e-12);
+        // Längsstriche (Dämmung als Linien längs der Wand) und gerichtete Muster: volle Drehung.
+        assert_eq!(wall_turn(HatchPattern::Diagonal, 0.0, 90.0), 90.0);
+        assert_eq!(wall_turn(HatchPattern::Insulation, 45.0, 90.0), 90.0);
+        assert_eq!(wall_turn(HatchPattern::Timber, 0.0, -90.0), -90.0);
+    }
+
     use super::*;
     use serde_json::json;
 

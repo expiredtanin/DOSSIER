@@ -317,10 +317,27 @@ fn subtract_holes(s: f64, e: f64, holes: &[Hole], s_cut: Option<Line>, e_cut: Op
             s_cut = Some(h.lb);
         }
     }
-    let mut clipped: Vec<Hole> = holes.iter().map(|h| Hole { a: max(s, h.a), b: min(e, h.b), ..*h }).filter(|h| h.b > h.a + CUTOUT_EPS).collect();
+    // [141] Reichweite des Bands über die Endschnitte hinaus (Gehrung verlängert die Fläche über das
+    // Achsende): ein Loch nahe der Ecke darf das Reststück zwischen Loch und Gehrung nicht schlucken
+    // (vorher fehlte dort die Umrisslinie, z. B. Innenwand-Stoss an einer Aussenwand-Ecke).
+    let reach = |cut: Option<Line>, base: f64, far: bool| {
+        let mut r = base;
+        if let Some(l) = cut {
+            for off in [lo, hi] {
+                if let Some(p) = f.pos(&l, off) {
+                    r = if far { max(r, p) } else { min(r, p) };
+                }
+            }
+        }
+        r
+    };
+    let (s_reach, e_reach) = (reach(s_cut, s, false), reach(e_cut, e, true));
+    let mut clipped: Vec<Hole> = holes.iter().map(|h| Hole { a: max(s_reach, h.a), b: min(e_reach, h.b), ..*h }).filter(|h| h.b > h.a + CUTOUT_EPS).collect();
     clipped.sort_by(|p, q| p.a.partial_cmp(&q.a).unwrap_or(std::cmp::Ordering::Equal));
     let mut parts = Vec::new();
-    let (mut cursor, mut cursor_line) = (s, s_cut);
+    // Loch vor dem Achsanfang (in der Gehrungs-Verlängerung): das Stück davor beginnt an der Gehrung.
+    let first_before = clipped.first().is_some_and(|h| h.a < s - CUTOUT_EPS);
+    let (mut cursor, mut cursor_line) = (if first_before { s_reach } else { s }, s_cut);
     for h in clipped {
         if h.a > cursor + CUTOUT_EPS {
             parts.push((cursor, h.a, cursor_line, Some(h.la)));
@@ -332,6 +349,8 @@ fn subtract_holes(s: f64, e: f64, holes: &[Hole], s_cut: Option<Line>, e_cut: Op
     }
     if cursor < e - CUTOUT_EPS {
         parts.push((cursor, e, cursor_line, e_cut));
+    } else if cursor < e_reach - CUTOUT_EPS {
+        parts.push((cursor, e_reach, cursor_line, e_cut));
     }
     if !holes.is_empty() {
         parts.retain(|&(a, b, sc, ec)| {
@@ -647,9 +666,27 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
         offs.push(last + t);
     }
     let (off_lo, off_hi) = (off0, offs[n_layers]);
+    // [141] Ragt eine Aussparung über ein Wandende mit Gehrung hinaus, rechnet das Raster ab der
+    // Gehrungs-Spitze (die Bänder werden an den Schnittlinien beschnitten), sonst fehlt das Stück
+    // zwischen Gehrung und Aussparung samt Umriss.
+    let u_w = normalize(sub(g.wend, g.wstart));
+    let fr = Frame { o: g.wstart, u: u_w, n: left_normal(u_w) };
+    let ends_at = |cut: Option<Line>, base: f64, far: bool| {
+        let mut r = base;
+        if let Some(l) = cut {
+            for off in [off_lo, off_hi] {
+                if let Some(p) = fr.pos(&l, off) {
+                    r = if far { max(r, p) } else { min(r, p) };
+                }
+            }
+        }
+        r
+    };
+    let x_lo = if cutouts.iter().any(|c| c.lo() < s - CUTOUT_EPS) { ends_at(g.sc, s, false) } else { s };
+    let x_hi = if cutouts.iter().any(|c| c.hi() > e + CUTOUT_EPS) { ends_at(g.ec, e, true) } else { e };
     let mut rects: Vec<(f64, f64, f64, f64, usize)> = Vec::new();
     for li in 0..n_layers {
-        let (mut a, mut b) = (s, e);
+        let (mut a, mut b) = (x_lo, x_hi);
         for ad in adj.iter().filter(|ad| ad.layer == li) {
             if ad.dir > 0.0 {
                 b = min(b, e - ad.shift);
@@ -697,7 +734,7 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
         }
     }
     // Raster der Teilflächen.
-    let mut xs: Vec<f64> = vec![s, e];
+    let mut xs: Vec<f64> = vec![x_lo, x_hi];
     let mut ys: Vec<f64> = offs.clone();
     for r in &rects {
         xs.extend([r.0, r.1]);
@@ -778,7 +815,10 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
             while j1 < ny && kind(at(i as i64 - 1, j1 as i64), at(i as i64, j1 as i64)) == k {
                 j1 += 1;
             }
-            if k != 0 {
+            // [141] Verschnittenes Wandende (Gehrung, Stoss): dort läuft die Nachbarwand weiter —
+            // keine Umriss-Linie quer über die Ecke (wie die nicht gestrichenen Kanten im Normalfall).
+            let joined_end = (i == 0 && g.sc.is_some()) || (i == nx && g.ec.is_some());
+            if k != 0 && !(k == 1 && joined_end) {
                 let (y0, y1) = (ys[j], ys[j1]);
                 if (x - s).abs() < CUTOUT_EPS && g.sc.is_some() {
                     let q = clipped_band(g.p1, g.p2, y0, y1, g.sc, None);
@@ -1055,6 +1095,65 @@ mod tests {
         assert!(step);
         // Ohne Block wie bisher.
         assert_eq!(count(&wall_poche(&wall(4.0, false, &[(1.0, 2.0)])), 1.0), 6);
+    }
+
+    /// [141] Schichteinzug an einer Wand mit Gehrung an beiden Enden: keine Umriss-Linie auf den
+    /// Gehrungen (vorher ein Strich quer über jede Ecke, deren Wand ein Fenster mit Einzug hat).
+    #[test]
+    fn schichteinzug_ohne_umriss_auf_der_gehrung() {
+        let mut b = vec![0.0, 0.0, 4.0, 0.0, 0.3, 0.0, 0.0, 0.0, 2.0, 0.1, 0.2];
+        // Gehrung 45° am Start (durch (0,0), Richtung (1,1)), am Ende (durch (4,0), Richtung (-1,1)).
+        b.extend([1.0, 0.0, 0.0, 1.0, 1.0]);
+        b.extend([1.0, 4.0, 0.0, -1.0, 1.0]);
+        b.extend([0.0, 0.0, 1.0, 1.0, 2.0]);
+        b.extend([2.0, 1.0, 1.0, 1.0, 0.05, 0.0, 2.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.03, 0.0, 0.1]);
+        let o = wall_poche(&b);
+        let sm = |a: V| (a.x - a.y).abs() < 1e-9;
+        let em = |a: V| (4.0 - a.x - a.y).abs() < 1e-9;
+        let mut outlines = 0;
+        for p in parse(&o) {
+            if let Prim::Line(art, a, c) = p {
+                if art == LINE_OUTLINE {
+                    outlines += 1;
+                    assert!(!(sm(a) && sm(c)) && !(em(a) && em(c)), "Umriss auf der Gehrung: {a:?} {c:?}");
+                }
+            }
+        }
+        assert!(outlines >= 4);
+    }
+
+    /// [141] Innenwand stösst nahe einer Aussenwand-Ecke an (Anbau-Knoten): die Aussparung im Umriss
+    /// der Eckwand reicht über deren Achsende hinaus, die Gehrung verlängert die Fläche bis zur
+    /// Innenecke — das Reststück zwischen Aussparung und Innenecke wird gezeichnet (vorher Lücke).
+    #[test]
+    fn umriss_zwischen_aussparung_und_gehrung() {
+        use crate::joins::{compute_joins, JoinLayer, JoinWall, Reference};
+        let l = |t: f64, c: u32, p: f64| JoinLayer { thickness: t, component: Some(c), priority: p };
+        let ext = || Some(vec![l(0.02, 3, 10.0), l(0.18, 2, 22.0), l(0.175, 1, 50.0), l(0.015, 0, 10.0)]);
+        let iw = || Some(vec![l(0.01, 0, 10.0), l(0.125, 1, 50.0), l(0.01, 0, 10.0)]);
+        let w = |s: (f64, f64), e: (f64, f64), layers| JoinWall { start: kernel2d::Vec2::new(s.0, s.1), end: kernel2d::Vec2::new(e.0, e.1), reference: Reference::Center, layers, bulge: None };
+        let walls = vec![w((5.0, 10.0), (0.0, 10.0), ext()), w((5.0, 15.0), (5.0, 10.0), ext()), w((10.0, 10.0), (5.0, 10.0), iw())];
+        let c = compute_joins(&walls).unwrap();
+        assert!(!c[1].span_cutouts.is_empty(), "{:?}", c[1]);
+        let out = wall_poche(&poche_of(&walls[1], &c[1]));
+        let corner = super::v(5.195, 9.805);
+        let near = |p: V| hypot2(p.x - corner.x, p.y - corner.y) < 1e-9;
+        let hit = parse(&out).into_iter().any(|p| matches!(p, Prim::Line(art, a, b) if art == LINE_OUTLINE && (near(a) || near(b))));
+        assert!(hit, "keine Umrisslinie bis zur Innenecke");
+        // Gleich am Wandanfang (Loch vor dem Achsanfang): Eckwand beginnt im Knoten.
+        let walls = vec![w((5.0, 10.0), (0.0, 10.0), ext()), w((5.0, 10.0), (5.0, 15.0), ext()), w((10.0, 10.0), (5.0, 10.0), iw())];
+        let c = compute_joins(&walls).unwrap();
+        let out = wall_poche(&poche_of(&walls[1], &c[1]));
+        let hit = parse(&out).into_iter().any(|p| matches!(p, Prim::Line(art, a, b) if art == LINE_OUTLINE && (near(a) || near(b))));
+        assert!(hit, "keine Umrisslinie bis zur Innenecke (Wandanfang)");
+        // Dasselbe mit Fenster samt Schichteinzug im ersten Stück (Raster-Pfad `adjusted_segment`).
+        let mut b = poche_of(&walls[1], &c[1]);
+        b.pop();
+        b.extend([1.0, 2.0, 3.0]);
+        b.extend([1.0, 2.0, 1.0, 3.0, 0.05, 0.0]);
+        let out = wall_poche(&b);
+        let hit = parse(&out).into_iter().any(|p| matches!(p, Prim::Line(art, a, b) if art == LINE_OUTLINE && (near(a) || near(b))));
+        assert!(hit, "keine Umrisslinie bis zur Innenecke (Schichteinzug)");
     }
 
     #[test]

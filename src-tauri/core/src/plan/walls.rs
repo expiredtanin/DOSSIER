@@ -75,6 +75,39 @@ fn plan_joins(p: &Project, walls: &[EffWall]) -> Result<Vec<WallCuts>, String> {
     Ok(joins::compute_joins(&jw).unwrap_or_else(|_| vec![WallCuts::default(); walls.len()]))
 }
 
+/// [141] Verschneidung nach Ansichtsbereich: geschnittene Wände verschneiden nur untereinander — eine
+/// Wand ganz unter oder über der Schnittebene (Fundament, Brüstung, Wand im Ansichtsbereich) spart
+/// keine Schichten der geschnittenen Wand aus (vorher Lücke in Dämmung/Putz über einem Fundament-
+/// Anschluss). Die nicht geschnittenen Wände verschneiden mit allen sichtbaren (sie enden an den
+/// Flächen der geschnittenen). Ausgeblendete Wände nehmen nicht teil.
+fn plan_joins_by_zone(p: &Project, walls: &[EffWall], range: &super::view_range::ViewRange) -> Result<Vec<WallCuts>, String> {
+    use super::view_range::Zone;
+    let zones: Vec<Zone> = walls.iter().map(|e| {
+        let (zb, zt) = p.wall_vertical_extent(e.w);
+        range.classify(zb, zt)
+    }).collect();
+    if zones.iter().all(|z| *z == Zone::Cut) {
+        return plan_joins(p, walls);
+    }
+    let pick = |keep: &dyn Fn(Zone) -> bool| -> (Vec<usize>, Vec<EffWall>) {
+        let idx: Vec<usize> = (0..walls.len()).filter(|&i| keep(zones[i])).collect();
+        let sub = idx.iter().map(|&i| EffWall { w: walls[i].w, color: walls[i].color.clone(), stroke_weight: walls[i].stroke_weight }).collect();
+        (idx, sub)
+    };
+    let mut out = vec![WallCuts::default(); walls.len()];
+    let (vis_idx, vis) = pick(&|z| z != Zone::Hidden);
+    for (k, c) in vis_idx.into_iter().zip(plan_joins(p, &vis)?) {
+        if zones[k] != Zone::Cut {
+            out[k] = c;
+        }
+    }
+    let (cut_idx, cut) = pick(&|z| z == Zone::Cut);
+    for (k, c) in cut_idx.into_iter().zip(plan_joins(p, &cut)?) {
+        out[k] = c;
+    }
+    Ok(out)
+}
+
 /// Wand mit angewandten Override-Regeln (Farbe → Umriss/Fugen, Strichstärke).
 struct EffWall<'a> {
     w: &'a Wall,
@@ -679,10 +712,10 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             EffWall { w, color: ov.color.or_else(|| w.color.clone()), stroke_weight: ov.lineweight.or(w.stroke_weight) }
         })
         .collect();
-    let cuts = plan_joins(p, &walls)?;
     let floor = p.floor(&c.a.floor);
     let cut_z = floor.and_then(|f| f.base_elevation).unwrap_or(0.0) + floor.and_then(|f| f.cut_height).unwrap_or(1.0);
     let range = super::view_range::ViewRange::of(p, &c.a.floor);
+    let cuts = plan_joins_by_zone(p, &walls, &range)?;
     // Bei doppelten Wand-ids gewinnt in TS (Map) die letzte Verschneidung.
     let mut cut_by_id: HashMap<&str, &WallCuts> = HashMap::new();
     for (e, k) in walls.iter().zip(&cuts) {
@@ -1219,6 +1252,26 @@ pub(crate) mod tests {
             })
             .collect();
         (polys.iter().map(|q| area(q)).sum(), polys)
+    }
+
+    /// [141] Eine Wand unter der Schnittebene (Fundament, Brüstungsmauer) stösst an eine geschnittene
+    /// Wand: deren Putz bleibt ganz (vorher Nah-Putz-Aussparung wie bei einem geschnittenen Abzweig).
+    #[test]
+    fn niedrige_wand_spart_geschnittene_nicht_aus() {
+        let mut p = pocket_project(DoorTypeKind::Schiebe, None, 1.0);
+        p.openings = None;
+        p.components[0].join_priority = 10.0;
+        p.components[1].join_priority = 50.0;
+        let full = 4.0 * 0.16;
+        let low = Wall { id: "f".into(), floor_id: "eg".into(), wall_type_id: "iw".into(), category_code: "20".into(), start: Vec2 { x: 2.0, y: 0.0 }, end: Vec2 { x: 2.0, y: -2.0 }, height: 0.5, ..Default::default() };
+        p.walls.push(low.clone());
+        let (a, _) = hatched(&wall_prims(&p));
+        assert!((a - full).abs() < 1e-9, "{a} {full}");
+        // Gegenprobe: geschnittener Abzweig spart den Nah-Putz über die Kernbreite aus.
+        p.walls[1].height = 2.6;
+        let (a, _) = hatched(&wall_prims(&p));
+        let branch = 2.0 * 0.16 - 0.08 * 0.16;
+        assert!((a - (full - 0.12 * 0.02 + branch + 0.12 * 0.02)).abs() < 1e-3, "{a}");
     }
 
     /// [95] Taschen-Schiebetür: die Tasche (Blattbreite + 5 cm × 7 cm) fehlt in der Schraffur, auf der
