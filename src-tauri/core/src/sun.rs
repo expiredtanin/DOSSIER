@@ -79,9 +79,35 @@ pub fn hull(points: &[[f64; 2]]) -> Ring {
     lower
 }
 
-/// Schatten einer Punktwolke (x, y, z): Hülle der um `k·z` verschobenen Punkte.
+/// Höhe der schattenempfangenden Ebene (Geländenullpunkt ±0.00).
+pub const GROUND_Z: f64 = 0.0;
+
+/// [142] Teil einer (als konvex behandelten) Punktwolke über der Bodenebene: Punkte darüber plus die
+/// Schnittpunkte jeder Verbindung über/unter der Ebene mit ihr. Ohne diesen Schnitt verschiebt `k·z`
+/// Punkte unter ±0.00 (Untergeschoss, Stützmauer, im Gelände steckende Teile) zur Sonne hin —
+/// Schatten in zwei Richtungen. Ganz vergrabene Körper werfen keinen Schatten.
+fn above_ground(points: &[[f64; 3]]) -> Vec<[f64; 3]> {
+    let (up, down): (Vec<[f64; 3]>, Vec<[f64; 3]>) = points.iter().copied().filter(|p| p[2].is_finite()).partition(|p| p[2] >= GROUND_Z);
+    if !up.iter().any(|p| p[2] > GROUND_Z + 1e-9) {
+        return vec![];
+    }
+    if down.is_empty() {
+        return up;
+    }
+    let mut out = up.clone();
+    for a in &up {
+        for b in &down {
+            let t = (a[2] - GROUND_Z) / (a[2] - b[2]);
+            out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, GROUND_Z]);
+        }
+    }
+    out
+}
+
+/// Schatten einer Punktwolke (x, y, z) auf der Bodenebene: Hülle des Teils über ±0.00 und seiner um
+/// `k·(z − GROUND_Z)` verschobenen Punkte (alle von der Sonne weg).
 fn shadow_of_points(points: &[[f64; 3]], k: [f64; 2]) -> Ring {
-    let moved: Vec<[f64; 2]> = points.iter().map(|p| [p[0] + k[0] * p[2], p[1] + k[1] * p[2]]).collect();
+    let moved: Vec<[f64; 2]> = above_ground(points).iter().map(|p| [p[0] + k[0] * (p[2] - GROUND_Z), p[1] + k[1] * (p[2] - GROUND_Z)]).collect();
     hull(&moved)
 }
 
@@ -263,6 +289,40 @@ mod tests {
         assert!(s.elevation.is_nan());
         assert!(without_holes(&vec![]).is_empty());
         assert!(without_holes(&vec![vec![[f64::NAN, 0.0], [1.0, 0.0], [0.0, 1.0]], vec![[0.1, 0.1]]]).is_empty());
+    }
+
+    /// [142] Alle Schattenpunkte liegen von der Sonne weg (Skalarprodukt mit der waagrechten
+    /// Sonnenrichtung höchstens das des Körpers); ganz vergrabene Körper werfen keinen Schatten.
+    #[test]
+    fn schatten_nur_von_der_sonne_weg() {
+        for az in [90.0, 135.0, 180.0, 250.0, 300.0] {
+            let sun = SunPosition { azimuth: az, elevation: 35.0 };
+            let to_sun = [(az * RAD).sin(), (az * RAD).cos()];
+            let dot = |p: &[f64; 2]| p[0] * to_sun[0] + p[1] * to_sun[1];
+            let near = SQ.iter().map(dot).fold(f64::NEG_INFINITY, f64::max);
+            let far = SQ.iter().map(dot).fold(f64::INFINITY, f64::min);
+            let k = 1.0 / (35.0 * RAD).tan();
+            // Über Boden, teilweise vergraben (Untergeschoss bis −3, 1 m über Terrain), ganz vergraben.
+            let above = shadow_of_prism(&SQ, 0.0, 4.0, sun);
+            let partly = shadow_of_prism(&SQ, -3.0, 1.0, sun);
+            let buried = shadow_of_prism(&SQ, -3.0, -0.2, sun);
+            let flush = shadow_of_prism(&SQ, -3.0, 0.0, sun);
+            assert!(buried.is_empty() && flush.is_empty(), "vergraben wirft keinen Schatten (az {az})");
+            for (sh, h) in [(&above, 4.0), (&partly, 1.0)] {
+                assert!(sh.len() >= 3);
+                assert!(sh.iter().all(|p| dot(p) <= near + 1e-9), "Schatten zur Sonne hin (az {az})");
+                let lo = sh.iter().map(dot).fold(f64::INFINITY, f64::min);
+                assert!((lo - (far - h * k)).abs() < 1e-9, "Schattenlänge nur aus dem Teil über Boden (az {az})");
+            }
+            // Vereinigung und Punktwolke: dasselbe; der vergrabene Körper fügt nichts hinzu.
+            let deep = Prism { footprint: SQ.iter().map(|p| [p[0] + 10.0, p[1]]).collect(), z_bottom: -3.0, z_top: -0.5 };
+            let box_ = Prism { footprint: SQ.to_vec(), z_bottom: -3.0, z_top: 4.0 };
+            let cloud = vec![[0.0, 0.0, -2.0], [2.0, 0.0, -2.0], [1.0, 2.0, 3.0]];
+            let u = shadow_union(&[box_, deep], &[cloud], sun);
+            assert_eq!(u.len(), 1);
+            assert!(u[0][0].iter().all(|p| dot(p) <= near + 1e-6));
+            assert!(u[0][0].iter().all(|p| p[0] < 2.0 + 4.0 * k + 1e-6), "vergrabener Körper bei x ≥ 10 ohne Schatten");
+        }
     }
 
     fn square(x0: f64, y0: f64, s: f64) -> Ring {
