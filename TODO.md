@@ -1749,7 +1749,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   oder unter der Unterkante entfällt das Bauteil, darüber bis Oberkante gestrichelt („über Schnitt"), unter der
   Unterkante bis „darunter sichtbar bis" gepunktet. Wirkt auf Wände (samt Öffnungen), Stützen, Treppen, Decken
   (nur ausblenden), Dächer (nur ausblenden) und Extrusionen. Ohne Grenzen unverändert. CLI-Plan geprüft (Linux).
-  Offen: Dach/Decke über/unter gestrichelt statt nur ausblenden, Schnitt/Ansicht, Raum/Fenster eigenständig. · M
+  5.11.: Decken und Dächer mit eigener Zone: unter der Unterkante bis „darunter sichtbar bis“ gepunktet (auch
+  Decken/Dachaufsichten tieferer Geschosse, z. B. Terrasse/Vordach unten), Decken und Dächer höherer Geschosse
+  bis zur Oberkante „über Schnitt“ strichpunktiert (nur mit gesetzter Oberkante; `ViewRange::admits_other_floor`);
+  eigene Decke/eigenes Dach über dem Schnitt wie bisher. Öffnungen eigene Zone (`opening_vertical_extent`,
+  Brüstung bis Sturz): ganz über der Schnittebene einer geschnittenen Wand (Oberlicht, Kellerfenster) schliesst
+  die Wand im Schnitt, Symbol strichpunktiert; über der Oberkante entfällt die Öffnung. Räume unberührt. Tests
+  `ansichtsbereich_*` (domains.rs). Golden „komplex“ (hat Ansichtsbereiche) neu: hohe Fenster (ug-f3, eg-f7,
+  eg-f8, og-f5, dg-f1) jetzt ohne Wandlücke. CLI-Plan + Chromium geprüft (Linux), nicht in der Tauri-App.
+  Offen: Schnitt/Ansicht mit Ansichtsbereich; Öffnung ganz unter der Schnittebene (Lüftungsschlitz) bleibt wie
+  bisher mit Lücke. · M
 - ✅ **[37] Beschriftung in Papiergrösse.** · M — 4.11.: Text `paperHeight` (mm auf dem Blatt, Rust-Modell): Plan rechnet
   die Modellhöhe je Massstab (`drawings.rs`, Test `text_in_papiergroesse`), Textrahmen-Griffe ebenso; Objekt-Info
   „Papiergrösse" (0 = aus). Neue Texte im Grundriss entstehen mit 2.5 mm Papiergrösse (bei 1:100 wie bisher 0.25 m), auf dem Blatt nicht. Koten, Detailverweise, Punktmarken gehen mit dem Massstab mit (`symbol_factor_at`, bei 1:100 unverändert); Raumstempel rechnen ohnehin in pt (Papier). DXF/PDF/SVG folgen automatisch (Plan-Primitive).

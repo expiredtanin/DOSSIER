@@ -339,8 +339,12 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         for [a, b] in ceiling_outline_lines(&merged.ring, &merged.bridge_edges, &fps) {
             out.push(line(pv(a), pv(b), "ceiling-outline", w, Some(Some(OVERHEAD_DASH.to_vec())), stroke, Some(greyed)));
         }
-        if let Some(d) = range.restyle_dash(zone) {
-            super::view_range::restyle(out, out_start, d);
+        // Eigene Decke „über Schnitt“ bleibt wie bisher (Umriss ist schon strichpunktiert, die Fläche
+        // deckt wie gewohnt); umgezeichnet werden Decken unter dem Schnitt und solche anderer Geschosse.
+        if ce.floor_id != c.a.floor || zone != super::view_range::Zone::Above {
+            if let Some(d) = range.restyle_dash(zone) {
+                super::view_range::restyle(out, out_start, d);
+            }
         }
     }
     Ok(())
@@ -382,7 +386,8 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             continue;
         }
         let out_start = out.len();
-        let dash = range.restyle_dash(zone);
+        // Eigenes Dach über dem Schnitt ist schon strichpunktiert (Bruchkanten, Dachfenster bleiben wie bisher).
+        let dash = if roof.floor_id == c.a.floor && zone == super::view_range::Zone::Above { None } else { range.restyle_dash(zone) };
         for q in &geo.eaves {
             bounds.acc(q[0], q[1]);
         }
