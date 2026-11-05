@@ -1084,6 +1084,12 @@ export type DrawingLevel = {
    * der Bezug (Verhalten vor Format 5).
    */
   zeroLevel?: boolean;
+  /**
+   * Deckenspiegel ([100], nur kind "ceiling"): ID des Geschosses, dessen Untersicht gezeigt wird
+   * (Wände geschnitten auf seiner Schnitthöhe, Decken-/Dachuntersicht darüber). Eigene 2D-Elemente
+   * der Ebene (z. B. Leuchten) kommen dazu.
+   */
+  ceilingOfId?: string;
   /** Schnitt-/Ansichtslinie im Grundriss (nur Schnitt/Ansicht). */
   linePoints?:[Vec2, Vec2];
   /** Blickrichtung relativ zur Schnittlinie (nur Schnitt/Ansicht). */
@@ -1167,8 +1173,10 @@ export type DrawingLevel = {
  *   • "section"   — Schnitt (abgeleitete Projektion entlang einer Linie).
  *   • "elevation" — Ansicht (abgeleitete Projektion entlang einer Linie).
  *   • "drawing"   — freie 2D-Zeichnung, nicht an ein Geschoss gebunden.
+ *   • "ceiling"   — Deckenspiegel ([100]): Untersicht eines Geschosses (`ceilingOfId`), von der
+ *                   Schnitthöhe nach oben gesehen, in Grundriss-Lage gespiegelt (deckt den Grundriss).
  */
-export type DrawingLevelKind = "floor" | "section" | "elevation" | "drawing";
+export type DrawingLevelKind = "floor" | "section" | "elevation" | "drawing" | "ceiling";
 
 /**
  * Geometrie-Form eines 2D-Zeichenelements.

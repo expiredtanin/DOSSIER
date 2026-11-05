@@ -922,6 +922,7 @@ export const de = {
   "levels.addFloor": "+ Geschoss",
   "levels.addSection": "+ Schnitt",
   "levels.addElevation": "+ Ansicht",
+  "levels.addCeiling": "+ Deckenspiegel",
   "levels.addDrawing": "+ Zeichnung",
   "layers.addCategory": "+ Ebene",
 
@@ -929,6 +930,7 @@ export const de = {
   "levelCat.floor": "Geschosse",
   "levelCat.section": "Schnitte",
   "levelCat.elevation": "Ansichten",
+  "levelCat.ceiling": "Deckenspiegel",
   "levelCat.drawing": "2D-Zeichnungen",
   "levelCat.collapse": "Kategorie ein-/ausklappen",
   "nav.visibility": "Sichtbarkeit",
@@ -943,6 +945,7 @@ export const de = {
   "badge.floor": "Geschoss",
   "badge.section": "Schnitt",
   "badge.elevation": "Ansicht",
+  "badge.ceiling": "Deckenspiegel",
   "badge.drawing": "Zeichnung",
 
   // ── Darstellungsmodus-Umschalter ─────────────────────────────────────────
@@ -1029,6 +1032,7 @@ export const de = {
   "editor.viewTop": "Oberkante Sicht",
   "editor.viewBottom": "Unterkante Sicht",
   "editor.viewDepth": "Darunter sichtbar bis",
+  "editor.ceilingOf": "Deckenspiegel von",
   "editor.sectionDepth": "Sichttiefe",
   "editor.sectionDepth.hint": "Bauteile weiter hinter der Schnitt-/Ansichtsebene entfallen in der Projektion (leer = unbegrenzt).",
   "editor.unit.mm": "mm",
@@ -1066,6 +1070,7 @@ export const de = {
   "default.floorName": "Geschoss {n}",
   "default.sectionName": "Schnitt {n}",
   "default.elevationName": "Ansicht {n}",
+  "default.ceilingName": "Deckenspiegel {floor}",
   "default.drawingName": "Zeichnung {n}",
   "default.categoryName": "Neue Ebene",
   "default.subCategoryName": "Neue Sub-Ebene",
@@ -2180,6 +2185,7 @@ export const de = {
   "import.badge.floor": "Geschoss",
   "import.badge.section": "Schnitt",
   "import.badge.elevation": "Ansicht",
+  "import.badge.ceiling": "Deckenspiegel",
   "import.badge.drawing": "Zeichnung",
 
   // ── PDF-Export ───────────────────────────────────────────────────────────

@@ -80,6 +80,7 @@ export function useProjectActions(
   const addDrawing = useStore((s) => s.addDrawing);
   const addSection = useStore((s) => s.addSection);
   const addElevation = useStore((s) => s.addElevation);
+  const addCeiling = useStore((s) => s.addCeiling);
   const addCategory = useStore((s) => s.addCategory);
   const patchCategory = useStore((s) => s.patchCategory);
   const addSubCategory = useStore((s) => s.addSubCategory);
@@ -395,6 +396,7 @@ export function useProjectActions(
     addDrawing,
     addSection,
     addElevation,
+    addCeiling,
     addCategory,
     patchCategory,
     addSubCategory,

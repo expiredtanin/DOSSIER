@@ -917,6 +917,7 @@ export const en: Record<TranslationKey, string> = {
   "levels.addFloor": "+ Floor",
   "levels.addSection": "+ Section",
   "levels.addElevation": "+ Elevation",
+  "levels.addCeiling": "+ Reflected ceiling plan",
   "levels.addDrawing": "+ Drawing",
   "layers.addCategory": "+ Layer",
 
@@ -924,6 +925,7 @@ export const en: Record<TranslationKey, string> = {
   "levelCat.floor": "Floors",
   "levelCat.section": "Sections",
   "levelCat.elevation": "Elevations",
+  "levelCat.ceiling": "Reflected ceiling plans",
   "levelCat.drawing": "2D drawings",
   "levelCat.collapse": "Collapse/expand category",
   "nav.visibility": "Visibility",
@@ -938,6 +940,7 @@ export const en: Record<TranslationKey, string> = {
   "badge.floor": "Floor",
   "badge.section": "Section",
   "badge.elevation": "Elevation",
+  "badge.ceiling": "RCP",
   "badge.drawing": "Drawing",
 
   // Display mode select.
@@ -1023,6 +1026,7 @@ export const en: Record<TranslationKey, string> = {
   "editor.viewTop": "View top",
   "editor.viewBottom": "View bottom",
   "editor.viewDepth": "Visible below down to",
+  "editor.ceilingOf": "Ceiling plan of",
   "editor.sectionDepth": "View depth",
   "editor.sectionDepth.hint": "Elements farther behind the section/view plane are not projected (empty = unlimited).",
   "editor.unit.mm": "mm",
@@ -1060,6 +1064,7 @@ export const en: Record<TranslationKey, string> = {
   "default.floorName": "Floor {n}",
   "default.sectionName": "Section {n}",
   "default.elevationName": "Elevation {n}",
+  "default.ceilingName": "Reflected ceiling plan {floor}",
   "default.drawingName": "Drawing {n}",
   "default.categoryName": "New layer",
   "default.subCategoryName": "New sub-layer",
@@ -2168,6 +2173,7 @@ export const en: Record<TranslationKey, string> = {
   "import.badge.floor": "Floor",
   "import.badge.section": "Section",
   "import.badge.elevation": "Elevation",
+  "import.badge.ceiling": "RCP",
   "import.badge.drawing": "Drawing",
 
   // PDF export.

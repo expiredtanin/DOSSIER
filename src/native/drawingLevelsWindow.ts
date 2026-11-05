@@ -36,6 +36,7 @@ export interface DrawingLevelsCommandHandlers {
   onAddFloor: () => void;
   onAddSection: () => void;
   onAddElevation: () => void;
+  onAddCeiling: () => void;
   onAddDrawing: () => void;
   onSetDisplayMode: (mode: DisplayMode) => void;
 }

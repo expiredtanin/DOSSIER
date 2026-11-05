@@ -1690,6 +1690,8 @@ pub struct BuiltinPaletteBanks {
 ///   • "section"   — Schnitt (abgeleitete Projektion entlang einer Linie).
 ///   • "elevation" — Ansicht (abgeleitete Projektion entlang einer Linie).
 ///   • "drawing"   — freie 2D-Zeichnung, nicht an ein Geschoss gebunden.
+///   • "ceiling"   — Deckenspiegel ([100]): Untersicht eines Geschosses (`ceilingOfId`), von der
+///                   Schnitthöhe nach oben gesehen, in Grundriss-Lage gespiegelt (deckt den Grundriss).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 pub enum DrawingLevelKind {
     #[default]
@@ -1701,6 +1703,8 @@ pub enum DrawingLevelKind {
     Elevation,
     #[serde(rename = "drawing")]
     Drawing,
+    #[serde(rename = "ceiling")]
+    Ceiling,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -1735,6 +1739,12 @@ pub struct DrawingLevel {
     #[serde(rename = "zeroLevel", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub zero_level: Option<bool>,
+    /// Deckenspiegel ([100], nur kind "ceiling"): ID des Geschosses, dessen Untersicht gezeigt wird
+    /// (Wände geschnitten auf seiner Schnitthöhe, Decken-/Dachuntersicht darüber). Eigene 2D-Elemente
+    /// der Ebene (z. B. Leuchten) kommen dazu.
+    #[serde(rename = "ceilingOfId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ceiling_of_id: Option<String>,
     /// Schnitt-/Ansichtslinie im Grundriss (nur Schnitt/Ansicht).
     #[serde(rename = "linePoints", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

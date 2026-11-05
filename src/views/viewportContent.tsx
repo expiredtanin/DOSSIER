@@ -409,7 +409,8 @@ export const Content = memo(function Content({
   // `drawings2d` nach `level.id`), nur OHNE Geschoss-Eigenschaftsleiste und ohne
   // 3D-Umschaltung — eine Zeichnung hat keine Höhe/3D. So sind importierte
   // DXF-Polylinien hier sofort sichtbar und mit den 2D-Werkzeugen bearbeitbar.
-  if (level.kind === "drawing") {
+  // Deckenspiegel ([100]): wie eine Zeichnung (2D, Inhalt aus dem Kern), ohne 3D-Umschaltung.
+  if (level.kind === "drawing" || level.kind === "ceiling") {
     // Blatt-Ebene eines offenen Layouts: Papier 1:1 (Massstab 1), Hintergrund + Viewports vom Blatt.
     const plan = (sheetPlan?: SheetPlanProps) => (
         <LevelPlanView

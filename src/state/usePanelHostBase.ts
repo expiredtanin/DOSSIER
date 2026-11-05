@@ -139,6 +139,7 @@ export function usePanelHostBase(opts: {
     | "addDrawing"
     | "addSection"
     | "addElevation"
+    | "addCeiling"
     | "addCategory"
     | "snapshotLayerVisibility"
     | "applyLayerVisibility"
@@ -253,6 +254,7 @@ export function usePanelHostBase(opts: {
     addDrawing,
     addSection,
     addElevation,
+    addCeiling,
     addCategory,
     snapshotLayerVisibility,
     applyLayerVisibility,
@@ -350,6 +352,7 @@ export function usePanelHostBase(opts: {
       onAddDrawing: addDrawing,
       onAddSection: addSection,
       onAddElevation: addElevation,
+      onAddCeiling: addCeiling,
       onLevelContextMenu: (id, x, y) =>
         setMenu({ kind: "level", id, x, y }),
       activeCategoryCode,

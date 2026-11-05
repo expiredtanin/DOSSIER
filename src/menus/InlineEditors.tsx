@@ -271,6 +271,24 @@ export function LevelInlineEditor({
           ))}
         </>
       )}
+      {/* Deckenspiegel ([100]): Geschoss, dessen Untersicht gezeigt wird. */}
+      {level.kind === "ceiling" && (
+        <EditorField label={t("editor.ceilingOf")}>
+          <select
+            data-testid="level-ceiling-of"
+            value={level.ceilingOfId ?? ""}
+            onChange={(e) => patchLevel(level.id, { ceilingOfId: e.target.value || undefined })}
+          >
+            {project.drawingLevels
+              .filter((z) => z.kind === "floor" && !z.layoutId)
+              .map((z) => (
+                <option key={z.id} value={z.id}>
+                  {z.name}
+                </option>
+              ))}
+          </select>
+        </EditorField>
+      )}
       {/* Sichttiefe ([36]) für Schnitt/Ansicht: leer = unbegrenzt (Darstellung wie bisher). */}
       {(level.kind === "section" || level.kind === "elevation") && (
         <EditorField label={t("editor.sectionDepth")}>
@@ -293,7 +311,7 @@ export function LevelInlineEditor({
       )}
       {!isFloor && (
         <div className="editor-note">
-          {level.kind === "drawing"
+          {level.kind === "drawing" || level.kind === "ceiling"
             ? t("editor.noHeightDrawing")
             : t("editor.noHeightSection")}
         </div>

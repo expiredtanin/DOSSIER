@@ -166,7 +166,7 @@ impl Bounds {
 }
 
 /// Pick-Bezug eines Polygons.
-enum Pick<'a> {
+pub(super) enum Pick<'a> {
     Ceiling(&'a str),
     Roof(&'a str),
     Room(&'a str),
@@ -175,7 +175,7 @@ enum Pick<'a> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn polygon(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, hatch: HatchRender, greyed: Option<bool>, no_stroke_edges: Option<Vec<f64>>, pick: Pick) -> Primitive {
+pub(super) fn polygon(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, hatch: HatchRender, greyed: Option<bool>, no_stroke_edges: Option<Vec<f64>>, pick: Pick) -> Primitive {
     let (mut ceiling_id, mut roof_id, mut room_id, mut column_id, mut extruded_solid_id) = (None, None, None, None, None);
     match pick {
         Pick::Ceiling(s) => ceiling_id = Some(s.to_string()),
@@ -207,16 +207,16 @@ fn polygon(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, hatch: HatchRender,
     }
 }
 
-fn line(a: Vec2, b: Vec2, cls: &str, w: f64, dash: super::prim::Dash, color: &str, greyed: Option<bool>) -> Primitive {
+pub(super) fn line(a: Vec2, b: Vec2, cls: &str, w: f64, dash: super::prim::Dash, color: &str, greyed: Option<bool>) -> Primitive {
     Primitive::Line { a, b, cls: cls.into(), weight_mm: w, dash, zigzag: None, motif: None, color: Some(color.into()), drawing_id: None, opening_id: None, stair_id: None, greyed, opacity: None }
 }
 
-fn pv(p: [f64; 2]) -> Vec2 {
+pub(super) fn pv(p: [f64; 2]) -> Vec2 {
     Vec2 { x: p[0], y: p[1] }
 }
 
 /// `getComponent`; hängender Verweis (Datei/Import) → neutrales Rückfall-Bauteil statt Abbruch.
-fn component<'a>(p: &'a Project, id: &str) -> Result<&'a Component, String> {
+pub(super) fn component<'a>(p: &'a Project, id: &str) -> Result<&'a Component, String> {
     Ok(p.component_or_fallback(id))
 }
 
@@ -242,7 +242,7 @@ pub fn wall_footprints(c: &Ctx) -> Vec<WallFootprint> {
 // ── Decken ──────────────────────────────────────────────────────────────────
 
 /// Schichten des Deckentyps (`getCeilingType`; wirft ohne Typ).
-fn ceiling_layers<'a>(p: &'a Project, c: &Ceiling) -> Result<&'a [Layer], String> {
+pub(super) fn ceiling_layers<'a>(p: &'a Project, c: &Ceiling) -> Result<&'a [Layer], String> {
     if let Some(id) = c.ceiling_type_id.as_deref().filter(|s| !s.is_empty()) {
         if let Some(ct) = p.ceiling_types.as_deref().unwrap_or(&[]).iter().find(|t| t.id == id) {
             return Ok(&ct.layers);
@@ -469,7 +469,7 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
 
 /// Dachfenster ([103]) im Grundriss des Dach-Geschosses: Rahmen-Umriss und Glas als Projektion der
 /// Dachfläche, gestrichelt (über der Schnitthöhe); Pick über die Öffnungs-id.
-fn roof_windows(c: &Ctx, out: &mut Vec<Primitive>, roof: &Roof) {
+pub(super) fn roof_windows(c: &Ctx, out: &mut Vec<Primitive>, roof: &Roof) {
     let p = c.p;
     let Some(ri) = p.roofs.as_deref().and_then(|r| r.iter().position(|x| x.id == roof.id)) else { return };
     for (o, f) in crate::opening_shape::roof_openings(p, ri) {
@@ -629,7 +629,7 @@ pub fn column_label(col: &Column) -> String {
     }
 }
 
-fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
+pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
     let p = c.p;
     let range = super::view_range::ViewRange::of(p, &c.a.floor);
     for col in p.columns.as_deref().unwrap_or(&[]).iter().filter(|k| k.floor_id == c.a.floor && c.shown(&k.category_code)) {
@@ -739,6 +739,10 @@ pub fn plan_domains(p: &Project, a: &PlanArgs) -> Result<DomainPrims, String> {
 
 /// Decken bis Extrusionen (alles vor den 2D-Zeichnungen gerechnet).
 fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result<(), String> {
+    // Deckenspiegel ([100]): eigene Domänen aus dem Bezugsgeschoss.
+    if super::ceiling_plan::domains(c, out, bounds)? {
+        return Ok(());
+    }
     ceilings(c, &mut out.ceilings, bounds)?;
     roofs(c, &mut out.roofs, bounds);
     rooms(c, &mut out.rooms, bounds);
@@ -751,7 +755,7 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
 
 /// Kontext und Schnittlinien (projektglobal, nur mit `global`).
 fn domains_after(c: &Ctx, out: &mut DomainPrims) {
-    if c.a.global {
+    if c.a.global && !super::ceiling_plan::is_ceiling_level(c.p, &c.a.floor) {
         super::context::plan_context(c, &mut out.context);
         super::context::plan_section_lines(c, &mut out.sections);
     }
