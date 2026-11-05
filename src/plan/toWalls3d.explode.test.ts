@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { sampleProject } from "../model/sampleProject";
-import { projectToModel3d, pickGeometry, selectionHighlightLines } from "./toWalls3d";
+import { projectToModel3d, pickGeometry, selectionHighlightLines, explodeFloorOffsets, emitDrawingLineVerts } from "./toWalls3d";
 
 const floors = sampleProject.drawingLevels
   .filter((l) => l.kind === "floor")
@@ -40,5 +40,29 @@ describe("Explosionsaxonometrie", () => {
     const b = selectionHighlightLines(sampleProject, [w.id], [], [1, 0, 0], [], [], [], [], 2);
     expect(b.length).toBe(a.length);
     expect(b[1] - a[1]).toBeCloseTo(2 * wallIndex(w.id), 4);
+  });
+
+  it("Versatz je Geschoss (3D-Griffe, Arbeitsebene)", () => {
+    expect(explodeFloorOffsets(sampleProject, 0)).toEqual({});
+    expect(explodeFloorOffsets(sampleProject, Number.NaN)).toEqual({});
+    const off = explodeFloorOffsets(sampleProject, 2.5);
+    floors.forEach((f, i) => expect(off[f.id]).toBeCloseTo(i * 2.5, 9));
+  });
+
+  it("2D-Boden-Spuren heben sich mit ihrem Geschoss", () => {
+    const top = floors[floors.length - 1];
+    const p = {
+      ...sampleProject,
+      drawings2d: [
+        { id: "dx", type: "drawing2d", levelId: top.id, categoryCode: "", geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 3, y: 0 } } },
+      ],
+    } as unknown as typeof sampleProject;
+    const a = emitDrawingLineVerts(p);
+    const b = emitDrawingLineVerts(p, 2);
+    expect(a.length).toBeGreaterThan(0);
+    expect(b.length).toBe(a.length);
+    const dz = (floors.length - 1) * 2;
+    for (let i = 1; i < a.length; i += 6) expect(b[i] - a[i]).toBeCloseTo(dz, 4);
+    expect(pickGeometry(p, 2).drawings[0].baseElevation - pickGeometry(p).drawings[0].baseElevation).toBeCloseTo(dz, 9);
   });
 });

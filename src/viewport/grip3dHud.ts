@@ -324,3 +324,17 @@ export function findMoveCoincidentVertices(project: Project, self: Grip3dTarget)
   }
   return out;
 }
+
+/**
+ * Explosionsaxonometrie ([65]): Höhenversatz (m), um den das Ziel eines 3D-Griffs im
+ * auseinandergezogenen Modell liegt (`offsets` = Versatz je Geschoss-id, s. `explodeFloorOffsets`).
+ * Griffe sitzen um diesen Betrag höher; gezogene Höhen ziehen ihn wieder ab (Modell bleibt
+ * unversetzt). Zeichnungen: 0 — ihre Ebene ist die (bereits versetzte) Arbeitsebene.
+ */
+export function explodeGripDz(project: Project, offsets: Readonly<Record<string, number>>, target: Grip3dTarget): number {
+  let floorId: string | undefined;
+  if (target.wallId) floorId = project.walls.find((w) => w.id === target.wallId)?.floorId;
+  else if (target.ceilingId) floorId = (project.ceilings ?? []).find((c) => c.id === target.ceilingId)?.floorId;
+  else if (target.roofId) floorId = (project.roofs ?? []).find((r) => r.id === target.roofId)?.floorId;
+  return (floorId && offsets[floorId]) || 0;
+}

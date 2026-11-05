@@ -42,10 +42,10 @@
 // Die Orbit-/Pan-Mathematik folgt den OrbitControls-Konventionen (Winkel je
 // Pixel an der Viewport-Höhe normiert), damit sich beide Pfade gleich anfühlen.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
 import { roofBaseElevation, roofGeometry, verticalExtents } from "../core";
-import { projectToModel3d, pickGeometry, draftWorldLines, TRUCK_MESH_READY_EVENT } from "../core";
+import { projectToModel3d, pickGeometry, draftWorldLines, explodeFloorOffsets, TRUCK_MESH_READY_EVENT } from "../core";
 import type { DetailLevel, RenderMode, View3d } from "../model/viewTypes";
 import type { ToolDraft } from "../tools/types";
 import { hudSegments, type HudFieldsState } from "../tools/hudFormat";
@@ -55,6 +55,7 @@ import {
   neighbor3dVertex,
   findCoincidentVertices,
   findMoveCoincidentVertices,
+  explodeGripDz,
   type CoincidentVertex,
   type MoveCoincidentVertex,
 } from "./grip3dHud";
@@ -176,6 +177,25 @@ function dormerGripFrame(
  * auf der Ebene des aktiven Geschosses (`drawingElevation`).
  */
 function computeGrips(
+  project: Project,
+  walls: readonly Wall[],
+  drawings: readonly Drawing2D[],
+  ceilings: readonly Ceiling[],
+  roofs: readonly Roof[],
+  drawingElevation: number,
+  /** Explosionsaxonometrie ([65]): Versatz je Geschoss-id; Griffe sitzen auf den gehobenen Bauteilen. */
+  floorOffsets: Readonly<Record<string, number>> = {},
+): Grip[] {
+  const out = computeGripsAt(project, walls, drawings, ceilings, roofs, drawingElevation);
+  for (const g of out) {
+    const dz = explodeGripDz(project, floorOffsets, g.target);
+    if (dz !== 0) g.pos = [g.pos[0], g.pos[1] + dz, g.pos[2]];
+  }
+  return out;
+}
+
+/** Griffe am unversetzten Modell (s. {@link computeGrips}). */
+function computeGripsAt(
   project: Project,
   walls: readonly Wall[],
   drawings: readonly Drawing2D[],
@@ -571,6 +591,12 @@ export function Wasm3DViewport({
   const explode = explodeOn ? explodeGap : 0;
   const explodeRef = useRef(explode);
   explodeRef.current = explode;
+  // Versatz je Geschoss ([65]) für Griffe und gezogene Höhen (Modell bleibt unversetzt).
+  const floorOffsets = useMemo(() => explodeFloorOffsets(project, explode), [project, explode]);
+  const floorOffsetsRef = useRef(floorOffsets);
+  floorOffsetsRef.current = floorOffsets;
+  const gripDz = (target: { wallId?: string; ceilingId?: string; roofId?: string; drawingId?: string }) =>
+    explodeGripDz(projectRef.current, floorOffsetsRef.current, target);
   const {
     render,
     updateModel,
@@ -839,6 +865,7 @@ export function Wasm3DViewport({
             editCeilingsRef.current,
             editRoofsRef.current,
             groundElevationRef.current,
+            floorOffsetsRef.current,
           );
           const next: { grip: Grip; x: number; y: number }[] = [];
           for (const g of grips) {
@@ -993,15 +1020,15 @@ export function Wasm3DViewport({
   const gripPlaneY = (target: GripTarget): number | null => {
     if (target.wallId) {
       const wall = editWallsRef.current.find((w) => w.id === target.wallId);
-      return wall ? verticalExtents(projectRef.current, [wall]).walls[0].zBottom : null;
+      return wall ? verticalExtents(projectRef.current, [wall]).walls[0].zBottom + gripDz(target) : null;
     }
     if (target.ceilingId) {
       const c = editCeilingsRef.current.find((x) => x.id === target.ceilingId);
-      return c ? verticalExtents(projectRef.current, [], [c]).ceilings[0].zTop : null;
+      return c ? verticalExtents(projectRef.current, [], [c]).ceilings[0].zTop + gripDz(target) : null;
     }
     if (target.roofId) {
       const r = editRoofsRef.current.find((x) => x.id === target.roofId);
-      return r ? roofBaseElevation(projectRef.current, r) : null;
+      return r ? roofBaseElevation(projectRef.current, r) + gripDz(target) : null;
     }
     return groundElevationRef.current;
   };
@@ -1110,7 +1137,8 @@ export function Wasm3DViewport({
       nz /= nlen;
       const hit = rayPlane(ray, [midX, 0, midY], [nx, 0, nz]);
       if (!hit) return;
-      onEditWallTopRef.current?.(drag.wallId, hit[1]);
+      // Explosion ([65]): Griff sitzt gehoben, das Modell bekommt die unversetzte Höhe.
+      onEditWallTopRef.current?.(drag.wallId, hit[1] - gripDz({ wallId: drag.wallId }));
       return;
     }
 
@@ -1126,7 +1154,7 @@ export function Wasm3DViewport({
       nz /= nlen;
       const hitR = rayPlane(ray, [drag.apexXZ[0], 0, drag.apexXZ[1]], [nx, 0, nz]);
       if (!hitR) return;
-      onEditRoofPitchRef.current?.(drag.roofId, hitR[1]);
+      onEditRoofPitchRef.current?.(drag.roofId, hitR[1] - gripDz({ roofId: drag.roofId }));
       return;
     }
 

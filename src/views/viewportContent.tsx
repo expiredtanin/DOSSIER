@@ -36,7 +36,7 @@ import { levelMarkerPrimitives, levelMarksEnabled } from "../core";
 import { unitsForLevel } from "../tools/displayUnits";
 import { setSheetOwnerOutlines, setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
-import { selectionHighlightLines } from "../core";
+import { explodeFloorOffsets, selectionHighlightLines } from "../core";
 import { clashHighlightLines } from "../analysis/clash";
 import { useClashSession } from "../panels/clashSession";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
@@ -274,6 +274,11 @@ export const Content = memo(function Content({
   const clashes = useClashSession().clashes;
   // Explosionsaxonometrie ([65]): Hervorhebung folgt dem auseinandergezogenen 3D-Modell.
   const explode = useStore((s) => (s.explode3d ? s.explode3dGap : 0));
+  // Arbeitsebene/Raster/Zeichnen-Vorschau auf dem gehobenen aktiven Geschoss.
+  const explodeLift = useMemo(
+    () => (explode > 0 ? (explodeFloorOffsets(project, explode)[level.id] ?? 0) : 0),
+    [project, explode, level.id],
+  );
   const { walls, ceilings, openings, stairs, roofs, contextObjects } = selection;
   const selectionLines = useMemo(
     () =>
@@ -310,7 +315,7 @@ export const Content = memo(function Content({
         renderMode={renderMode}
         detail={detail}
         view3d={view3d}
-        groundElevation={level.baseElevation ?? 0}
+        groundElevation={(level.baseElevation ?? 0) + explodeLift}
         gridVisible={grid3dVisible}
         onToggleGrid={onToggleGrid3d}
         section3d={section3d}
@@ -828,9 +833,11 @@ function LevelPlanView({
   useEffect(() => {
     pushNativeScene(plan);
   }, [plan]);
+  // Explosionsaxonometrie ([65]) auch im nativen 3D-Fenster.
+  const explode = useStore((s) => (s.explode3d ? s.explode3dGap : 0));
   useEffect(() => {
-    pushNativeWalls(project);
-  }, [project]);
+    pushNativeWalls(project, explode);
+  }, [project, explode]);
 
   return (
     <section className="pane">

@@ -246,6 +246,7 @@ export {
   draftWorldLines,
   emitDrawingLineVerts,
   emitSurfacePatternLines,
+  explodeFloorOffsets,
   pickGeometry,
   projectToModel3d,
   selectionHighlightLines,
