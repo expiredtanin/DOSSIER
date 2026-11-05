@@ -194,7 +194,9 @@ export function useGripEditing(opts: {
 
   // Griff-Grenzen (s. gripLimits.ts): grosse Mehrfachauswahlen ohne Griffe, ein einzeln gewähltes
   // Element immer mit Griffen (Kataster-Parzellen mit tausenden Stützpunkten).
-  const gripDrawingIds = gripDrawingIdsFor(effectiveDrawingIds, (id) => {
+  // [137] Gewählte Gruppe: keine Mitglieds-Griffe (Vectorworks: erst die Gruppe betreten) — ein Ziehen am
+  // Körper verschiebt die Gruppe als Ganzes, statt einen der dicht liegenden Griffe zu erwischen.
+  const gripDrawingIds = gripDrawingIdsFor(selection.groups.length > 0 ? [] : effectiveDrawingIds, (id) => {
     const d = project.drawings2d.find((x) => x.id === id);
     return d ? drawingVertices(d, scaleDenominator).length : 0;
   });
