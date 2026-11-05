@@ -46,6 +46,73 @@ pub struct OpeningScheduleRow {
     /// Aussen (true) / innen (false); `None` = nicht bestimmbar.
     pub external: Option<bool>,
     pub notes: String,
+    /// Leibungsflächen je Wandschicht mit Schichteinzug ([106]), m² — leer ohne Regeln.
+    pub reveal_areas: Vec<RevealArea>,
+}
+
+/// Leibungsfläche einer Wandschicht ([106]): die zur Öffnung gewandte Stirn der Schicht, summiert über
+/// die Seiten (Leibung links/rechts je Höhe, Sturz/Brüstung je Breite; Türen ohne Brüstung). Schichten
+/// mit Stücken in der Leibung (Leibung, überdämmt): Tiefe = quer belegte Breite der Stücke; nur
+/// zurückspringende Schichten: ihre Dicke (zurückgesetzte Stirn).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealArea {
+    /// Schicht-Index ab aussen.
+    pub layer: usize,
+    /// Bauteil-Name der Schicht (leer ohne Bauteil).
+    pub name: String,
+    pub area: f64,
+}
+
+/// Quer belegte Breite einer Menge von Intervallen (Vereinigung).
+fn union_len(mut iv: Vec<(f64, f64)>) -> f64 {
+    iv.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut sum, mut cur): (f64, Option<(f64, f64)>) = (0.0, None);
+    for (a, b) in iv {
+        cur = match cur {
+            Some((c0, c1)) if a <= c1 => Some((c0, c1.max(b))),
+            Some((c0, c1)) => {
+                sum += c1 - c0;
+                Some((a, b))
+            }
+            None => Some((a, b)),
+        };
+    }
+    sum + cur.map_or(0.0, |(c0, c1)| c1 - c0)
+}
+
+/// Leibungsflächen je Schicht einer Wand-Öffnung (s. [`RevealArea`]).
+pub fn reveal_areas(p: &Project, w: &Wall, o: &Opening) -> Vec<RevealArea> {
+    use crate::opening_detail::{opening_reveal, Side, SIDES};
+    let Some(r) = opening_reveal(p, w, o) else { return Vec::new() };
+    let layers = p.wall_type(w).map(|t| t.layers.as_slice()).unwrap_or(&[]);
+    let mut acc: Vec<RevealArea> = Vec::new();
+    for (k, side) in SIDES.iter().enumerate() {
+        if *side == Side::Bottom && o.kind != ElementKind::Window {
+            continue;
+        }
+        let len = match side {
+            Side::Left | Side::Right => o.height,
+            Side::Top | Side::Bottom => o.width,
+        };
+        for a in &r.sides[k] {
+            let depth = if a.pieces.is_empty() { r.thick.get(a.layer).copied().unwrap_or(0.0) } else { union_len(a.pieces.iter().map(|pc| (pc[2], pc[3])).collect()) };
+            let area = len.max(0.0) * depth.max(0.0);
+            if !(area > 1e-9) {
+                continue;
+            }
+            match acc.iter_mut().find(|x| x.layer == a.layer) {
+                Some(x) => x.area += area,
+                None => acc.push(RevealArea {
+                    layer: a.layer,
+                    name: layers.get(a.layer).and_then(|l| p.component(&l.component_id)).map(|c| c.name.clone()).unwrap_or_default(),
+                    area,
+                }),
+            }
+        }
+    }
+    acc.sort_by_key(|x| x.layer);
+    acc
 }
 
 fn in_ring(x: f64, y: f64, ring: &[Vec2]) -> bool {
@@ -157,6 +224,7 @@ fn surface_row(p: &Project, o: &Opening) -> Option<OpeningScheduleRow> {
         burglary_class: nz(&o.burglary_class),
         external: o.is_external.or(external),
         notes: nz(&o.notes),
+        reveal_areas: Vec::new(),
     })
 }
 
@@ -215,6 +283,7 @@ pub fn opening_schedule(p: &Project) -> Vec<OpeningScheduleRow> {
             u_value: o.u_value.filter(|u| *u > 0.0),
             burglary_class: nz(&o.burglary_class),
             notes: nz(&o.notes),
+            reveal_areas: reveal_areas(p, w, o),
         });
     }
     // Reihenfolge: Geschoss (Ebenen-Reihenfolge, unbekannte zuletzt), Fenster vor Türen, Dokument.
@@ -318,5 +387,39 @@ mod tests {
         assert_eq!(rows.len(), 1);
         let r = &rows[0];
         assert_eq!((r.host_kind, r.wall_id.as_str(), r.floor.as_str(), r.external, r.mark.as_str()), ("roof", "r", "DG", Some(true), "F1.01"));
+    }
+
+    /// [106] Leibungsflächen je Schicht: Putz 0.02 / Dämmung 0.16 / Backstein 0.15 / Putz 0.01, Fenster
+    /// 1.2 × 1.4, Rahmen innen bündig an der Dämmung (aussen 0.18, Tiefe 0.07). Aussenputz „zurück“,
+    /// Dämmung überdämmt 3 cm (vor dem Rahmen: 0.02..0.18 → 0.16 tief), Innenputz in die Leibung.
+    #[test]
+    fn leibungsflaechen_je_schicht() {
+        let mut p = sample();
+        p.components = vec![
+            Component { id: "putz".into(), name: "Putz".into(), ..Default::default() },
+            Component { id: "daemm".into(), name: "Dämmung".into(), ..Default::default() },
+        ];
+        let l = |c: &str, t: f64| Layer { component_id: c.into(), thickness: t, ..Default::default() };
+        p.wall_types[0].layers = vec![l("putz", 0.02), l("daemm", 0.16), l("bs", 0.15), l("putz", 0.01)];
+        let rule = |layer: f64, mode: RevealMode| LayerReveal { layer, mode, ..Default::default() };
+        let o = &mut p.openings.as_mut().unwrap()[1];
+        o.width = 1.2;
+        o.height = 1.4;
+        o.layer_reveals = Some(vec![rule(0.0, RevealMode::Zurueck), rule(1.0, RevealMode::Ueberdaemmt), rule(-1.0, RevealMode::Leibung)]);
+        let rows = opening_schedule(&p);
+        let f1 = rows.iter().find(|x| x.id == "f1").unwrap();
+        let per = 2.0 * 1.4 + 2.0 * 1.2;
+        let got: Vec<(usize, &str, f64)> = f1.reveal_areas.iter().map(|a| (a.layer, a.name.as_str(), (a.area * 1e6).round() / 1e6)).collect();
+        // Vorgabe-Rahmen: aussen bündig, 0..0.07 → Dämmung vor dem Rahmen gibt es nicht, hinter dem Rahmen 0.07..0.18.
+        // Innenputz in der Leibung: Tiefe von der Schicht bis an den Rahmen (0.07..0.34).
+        assert_eq!(got, vec![(0, "Putz", (per * 0.02 * 1e6f64).round() / 1e6), (1, "Dämmung", (per * 0.11 * 1e6f64).round() / 1e6), (3, "Putz", (per * 0.27 * 1e6f64).round() / 1e6)]);
+        // Türen ohne Regeln: keine Flächen; Türen zählen keine Brüstung.
+        assert!(rows.iter().find(|x| x.id == "t1").unwrap().reveal_areas.is_empty());
+        let t = &mut p.openings.as_mut().unwrap()[0];
+        t.layer_reveals = Some(vec![rule(0.0, RevealMode::Zurueck)]);
+        let rows = opening_schedule(&p);
+        let a = &rows.iter().find(|x| x.id == "t1").unwrap().reveal_areas;
+        assert_eq!(a.len(), 1);
+        assert!((a[0].area - (2.0 * 2.1 + 1.0) * 0.02).abs() < 1e-9, "{a:?}");
     }
 }
