@@ -1498,9 +1498,7 @@ fn subtract_pockets_in_section(cuts: Vec<Cut>, p: &Project, base: (f64, f64), u:
     let mut rects: Vec<Vec<[f64; 2]>> = Vec::new();
     for w in &p.walls {
         let Some(ops) = by_wall.get(w.id.as_str()) else { continue };
-        if crate::wall_arc::WallArc::of_wall(w).is_some() {
-            continue;
-        }
+        let arc = crate::wall_arc::WallArc::of_wall(w);
         let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
         let l = hypot2(dx, dy);
         if !(l > 1e-9) {
@@ -1508,9 +1506,20 @@ fn subtract_pockets_in_section(cuts: Vec<Cut>, p: &Project, base: (f64, f64), u:
         }
         let (ux, uy) = (dx / l, dy / l);
         for [u0, u1, n0, n1, z0, z1] in model3d::wall_pocket_cuts(p, w, ops) {
-            let at = |a: f64, n: f64| [w.start.x + ux * a - uy * n, w.start.y + uy * a + ux * n];
-            let mut pts = vec![4.0];
-            for q in [at(u0, n0), at(u1, n0), at(u1, n1), at(u0, n1)] {
+            // Grundriss der Tasche; Bogenwand ([T2]): Ring entlang des Bogens (Achsmass = Bogenlänge).
+            let ring: Vec<[f64; 2]> = match arc {
+                Some(a) => {
+                    let st = a.stations(u0, u1, a.r_max(n0, n1));
+                    let side = |n: f64| st.iter().map(move |&s| a.point(s, n)).map(|q| [q.x, q.y]);
+                    side(n0).chain(side(n1).rev()).collect()
+                }
+                None => {
+                    let at = |a: f64, n: f64| [w.start.x + ux * a - uy * n, w.start.y + uy * a + ux * n];
+                    vec![at(u0, n0), at(u1, n0), at(u1, n1), at(u0, n1)]
+                }
+            };
+            let mut pts = vec![ring.len() as f64];
+            for q in ring {
                 pts.extend(q);
             }
             let f = crate::voids::section_rects_flat(&pts, &[base.0, base.1, u.0, u.1]);
@@ -2762,6 +2771,41 @@ mod tests {
         assert!((full - wall_area(&p, 2.4) - 0.07 * 2.0).abs() < 1e-4);
         // Gegenseite (Anschlag, x = 0.5) ohne Tasche.
         assert!((full - wall_area(&p, 0.5)).abs() < 1e-4);
+    }
+
+    /// [95][T2] Schnitt durch die Tasche in der Bogenwand (radial) und unter schräger Oberkante.
+    #[test]
+    fn schnitt_durch_die_tasche_bogen_und_dach() {
+        use crate::plan::walls::tests::{pocket_project_with, POCKET_BULGE};
+        let wall_area = |p: &Project, a: Vec2, b: Vec2| {
+            let l = LevelSpec { kind: "section".into(), line: Some([a, b]), ..Default::default() };
+            let out = compute_section(p, &l, &[]).unwrap().unwrap();
+            out.cuts
+                .iter()
+                .filter(|c| c.kind == Kind::Wall)
+                .map(|c| {
+                    let n = c.pts.len();
+                    (0..n).map(|i| c.pts[i][0] * c.pts[(i + 1) % n][1] - c.pts[(i + 1) % n][0] * c.pts[i][1]).sum::<f64>().abs() / 2.0
+                })
+                .sum::<f64>()
+        };
+        let arc = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(0.0, 0.0), kernel2d::Vec2::new(4.0, 0.0), Some(POCKET_BULGE)).unwrap();
+        let radial = |s: f64| {
+            let (c, n) = (arc.point(s, 0.0), arc.normal(s));
+            (Vec2 { x: c.x - n.x, y: c.y - n.y }, Vec2 { x: c.x + n.x, y: c.y + n.y })
+        };
+        let flat = |x: f64| (Vec2 { x, y: -1.0 }, Vec2 { x, y: 1.0 });
+        for (bulge, roof) in [(Some(POCKET_BULGE), false), (None, true)] {
+            let line = |s: f64| if bulge.is_some() { radial(s) } else { flat(s) };
+            let full = pocket_project_with(DoorTypeKind::Schiebe, None, 1.0, bulge, roof);
+            let p = pocket_project_with(DoorTypeKind::Tasche, None, 1.0, bulge, roof);
+            for (s, k) in [(0.5, 0.07 * 2.0), (3.5, 0.0)] {
+                let (a, b) = line(s);
+                let (fa, pa) = (wall_area(&full, a, b), wall_area(&p, a, b));
+                assert!(fa > 0.3, "{bulge:?} {roof} {fa}");
+                assert!((fa - pa - k).abs() < 1e-3, "{bulge:?} {roof} s={s}: {fa} {pa}");
+            }
+        }
     }
 
     #[test]

@@ -1068,6 +1068,23 @@ pub(crate) mod tests {
         p
     }
 
+    /// Bogen von 90° (Bulge tan 22.5°) über dieselbe Sehne 0..4: Achsmass = Bogenlänge ([T2]).
+    pub(crate) const POCKET_BULGE: f64 = 0.414_213_562_373_095_1;
+
+    /// [95] Wie [`pocket_project`], Wand als Bogen (`bulge`) oder unter einem Satteldach mit First quer
+    /// zur Wand (`roof`: Wand an Dach angeschlossen, schräge Oberkante, Tür bleibt darunter).
+    pub(crate) fn pocket_project_with(kind: DoorTypeKind, hinge: Option<OpeningHinge>, leaves: f64, bulge: Option<f64>, roof: bool) -> Project {
+        let mut p = pocket_project(kind, hinge, leaves);
+        p.walls[0].bulge = bulge;
+        if roof {
+            p.walls[0].roof_attach = Some(true);
+            let rect = serde_json::json!([{"x":-0.5,"y":-2},{"x":4.5,"y":-2},{"x":4.5,"y":2},{"x":-0.5,"y":2}]);
+            p.roofs = Some(vec![serde_json::from_value(serde_json::json!({"id": "R", "type": "roof", "floorId": "eg", "categoryCode": "35",
+                "outline": rect, "shape": "sattel", "pitchDeg": 30, "overhang": 0, "ridgeAxis": "y", "baseElevation": 2.4, "thickness": 0.2})).unwrap()]);
+        }
+        p
+    }
+
     fn wall_prims(p: &Project) -> Vec<Primitive> {
         let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [] }).to_string();
         super::super::domains::plan_domains(p, &super::super::domains::PlanArgs::parse(1.0, &t).unwrap()).unwrap().walls
@@ -1145,5 +1162,39 @@ pub(crate) mod tests {
         // Zweiflügelig: Taschen beidseitig (je halbe Breite + 5 cm).
         let (a, _) = hatched(&wall_prims(&pocket_project(DoorTypeKind::Tasche, None, 2.0)));
         assert!((full - a - 2.0 * (0.45 + 0.05) * 0.07).abs() < 1e-5, "{full} {a}");
+    }
+
+    /// [95][T2] Bogenwand: die Tasche folgt dem Bogen (Länge entlang der Achse); unter schräger
+    /// Oberkante wie gerade.
+    #[test]
+    fn tasche_in_bogenwand_und_unter_dach_ausgespart() {
+        let cavity = (0.9 + 0.05) * 0.07;
+        for (bulge, roof) in [(Some(POCKET_BULGE), false), (None, true)] {
+            for (hinge, leaves, k) in [(None, 1.0, cavity), (Some(OpeningHinge::End), 1.0, cavity), (None, 2.0, 2.0 * (0.45 + 0.05) * 0.07)] {
+                let (full, _) = hatched(&wall_prims(&pocket_project_with(DoorTypeKind::Schiebe, hinge, leaves, bulge, roof)));
+                let (a, _) = hatched(&wall_prims(&pocket_project_with(DoorTypeKind::Tasche, hinge, leaves, bulge, roof)));
+                assert!((full - a - k).abs() < 2e-4, "{bulge:?} {roof} {hinge:?} {leaves}: {full} {a} {k}");
+            }
+        }
+        // Bogen: die Wandmitte am Taschenpunkt (Achsmass 0.5) ist hohl, an der Gegenseite (3.5) massiv.
+        let arc = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(0.0, 0.0), kernel2d::Vec2::new(4.0, 0.0), Some(POCKET_BULGE)).unwrap();
+        let (_, polys) = hatched(&wall_prims(&pocket_project_with(DoorTypeKind::Tasche, None, 1.0, Some(POCKET_BULGE), false)));
+        let inside = |q: kernel2d::Vec2| {
+            let q = v2(q.x, q.y);
+            polys.iter().any(|pts| {
+                let n = pts.len();
+                let mut c = false;
+                for i in 0..n {
+                    let (a, b) = (pts[i], pts[(i + 1) % n]);
+                    if (a.y > q.y) != (b.y > q.y) && q.x < (b.x - a.x) * (q.y - a.y) / (b.y - a.y) + a.x {
+                        c = !c;
+                    }
+                }
+                c
+            })
+        };
+        assert!(!inside(arc.point(0.5, 0.001)));
+        assert!(inside(arc.point(3.5, 0.001)));
+        assert!(inside(arc.point(0.5, 0.05)) && inside(arc.point(0.5, -0.07)));
     }
 }
