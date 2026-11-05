@@ -2874,6 +2874,16 @@ export type SiteRules = {
    * (Balkone, Erker; nicht Dachüberstände) je Grenze/Baulinie einnehmen dürfen. Fehlt ⇒ unbegrenzt.
    */
   projectionShare?: number;
+  /**
+   * Gebäudeprofil ([63]): Profilwinkel (Grad über der Horizontalen, 0 < α < 90); die zulässige
+   * Höhe steigt von jeder Parzellengrenze und Baulinie nach innen mit tan(α). Fehlt ⇒ kein Profil.
+   */
+  profileAngle?: number;
+  /**
+   * Gebäudeprofil ([63]): Höhe (m) des Profils an der Grenze bzw. Baulinie über dem massgebenden
+   * Terrain (ohne Gelände über ±0.00). Fehlt ⇒ 0.
+   */
+  profileHeight?: number;
 };
 
 /** Terminierungs-Regel einer Wand am Deckenanschluss (siehe {@link Wall.sliceTermination}). */
@@ -3263,6 +3273,11 @@ export type Wall = {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "20" für Wände. */
   categoryCode: string;
+  /**
+   * Vorsprung im Baurecht ([63]: Wand eines Erkers): darf mit `SiteRules.projectionDepth`/
+   * `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.
+   */
+  siteProjection?: boolean;
   /**
    * Objekt-Sperre: gesperrte Elemente lassen sich nicht anwählen (daher
    *  auch nicht verschieben/bearbeiten/löschen) — anders als der Ebenen-/

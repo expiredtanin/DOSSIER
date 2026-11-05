@@ -495,6 +495,15 @@ pub(crate) fn wall_corners(start: Vec2, end: Vec2, thickness: f64) -> Vec<[f64; 
     ]
 }
 
+/// Grundriss einer Wand (Bogenwand [T2]: Kreisringsektor); `None` bei Länge 0.
+fn wall_footprint(p: &Project, w: &crate::model::Wall) -> Option<Ring> {
+    if hypot2(w.end.x - w.start.x, w.end.y - w.start.y) < 1e-9 {
+        return None;
+    }
+    let t = p.wall_thickness(w, 0.2);
+    Some(crate::wall_arc::arc_footprint(w, t).unwrap_or_else(|| wall_corners(w.start, w.end, t)))
+}
+
 /// Teile der Gebäude-Grundfläche (Wände aller Geschosse, freie Körper ohne Abzugskörper). Mit
 /// `skip_projections` fehlen die als Vorsprung markierten Körper (sie prüft die Vorsprungsregel).
 fn footprint_parts(p: &Project) -> Vec<Polygon> {
@@ -504,13 +513,11 @@ fn footprint_parts(p: &Project) -> Vec<Polygon> {
 fn footprint_parts_with(p: &Project, skip_projections: bool) -> Vec<Polygon> {
     let mut parts: Vec<Polygon> = Vec::new();
     for w in &p.walls {
-        if hypot2(w.end.x - w.start.x, w.end.y - w.start.y) < 1e-9 {
+        if skip_projections && w.site_projection == Some(true) {
             continue;
         }
-        // Bogenwand ([T2]): Kreisringsektor.
-        match crate::wall_arc::arc_footprint(w, p.wall_thickness(w, 0.2)) {
-            Some(f) => parts.push(vec![f]),
-            None => parts.push(vec![wall_corners(w.start, w.end, p.wall_thickness(w, 0.2))]),
+        if let Some(f) = wall_footprint(p, w) {
+            parts.push(vec![f]);
         }
     }
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
@@ -542,6 +549,12 @@ fn projection_parts(p: &Project) -> Vec<ProjectionPart> {
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
         if s.site_projection == Some(true) && s.operation.as_deref() != Some("subtract") && s.points.len() >= 3 {
             out.push(ProjectionPart { poly: vec![s.points.iter().map(|v| [v.x, v.y]).collect()], share_limited: true });
+        }
+    }
+    // Wände eines Erkers: je Wand ein Teil, der Fassadenanteil vereinigt ihre Ausdehnungen längs der Grenze.
+    for w in p.walls.iter().filter(|w| w.site_projection == Some(true)) {
+        if let Some(f) = wall_footprint(p, w) {
+            out.push(ProjectionPart { poly: vec![f], share_limited: true });
         }
     }
     out
@@ -598,6 +611,10 @@ pub struct SiteCheckOut {
     pub terrain_min: Option<f64>,
     /// Gesamthöhe über dem massgebenden Terrain (`maxTop − terrainMin`); ohne Gelände `None` (dann gilt ±0.00).
     pub height_above_terrain: Option<f64>,
+    /// Gebäudeprofil ([63]): ein Bauteil ragt über das Profil (nur mit `profileAngle`).
+    pub profile_exceeded: bool,
+    /// Grundrisse der Bauteile, deren obere Punkte über dem Profil liegen (Näherung: ganzes Bauteil).
+    pub profile_violations: AreaOut,
 }
 
 /// Fassadenpunkt mit gewachsenem und gestaltetem Terrain (Modellbezug; `None` ausserhalb des Geländes).
@@ -631,15 +648,19 @@ pub fn facade_terrain(p: &Project) -> Vec<FacadePoint> {
     out
 }
 
+fn flat_rules(r: &crate::model::SiteRules) -> SiteRules {
+    SiteRules {
+        parcel: r.parcel.iter().map(|v| [v.x, v.y]).collect(),
+        setbacks: (0..r.parcel.len()).map(|i| r.setbacks.as_ref().and_then(|s| s.get(i)).copied().unwrap_or(r.default_setback)).collect(),
+        lines: r.building_lines.as_deref().unwrap_or(&[]).iter().map(|l| BuildingLine { a: [l.a.x, l.a.y], b: [l.b.x, l.b.y] }).collect(),
+    }
+}
+
 /// Prüft das Modell gegen `siteRules`; `None` ohne (gültiges) Baurecht.
 pub fn check_project(p: &Project) -> Option<SiteCheckOut> {
     let r = p.site_rules.as_ref()?;
     let max_top = model_top(p);
-    let rules = SiteRules {
-        parcel: r.parcel.iter().map(|v| [v.x, v.y]).collect(),
-        setbacks: (0..r.parcel.len()).map(|i| r.setbacks.as_ref().and_then(|s| s.get(i)).copied().unwrap_or(r.default_setback)).collect(),
-        lines: r.building_lines.as_deref().unwrap_or(&[]).iter().map(|l| BuildingLine { a: [l.a.x, l.a.y], b: [l.b.x, l.b.y] }).collect(),
-    };
+    let rules = flat_rules(r);
     let facade = facade_terrain(p);
     let terrain_min = facade.iter().filter_map(|f| f.natural).reduce(f64::min);
     let height_above_terrain = max_top.zip(terrain_min).map(|(t, g)| t - g);
@@ -658,7 +679,11 @@ pub fn check_project(p: &Project) -> Option<SiteCheckOut> {
             c.violation_area = multi_polygon_area(&c.violations);
         }
     }
+    let prof = profile_of(r, terrain_min.unwrap_or(0.0));
+    let pv: Vec<Polygon> = prof.map_or(vec![], |pf| top_parts(p).into_iter().filter(|t| part_above_profile(&rules, pf, t)).map(|t| t.foot).collect());
     Some(SiteCheckOut {
+        profile_exceeded: !pv.is_empty(),
+        profile_violations: area_out(&pv),
         parcel_area: c.parcel_area,
         allowed: area_out(&c.allowed),
         allowed_area: c.allowed_area,
@@ -670,6 +695,109 @@ pub fn check_project(p: &Project) -> Option<SiteCheckOut> {
         terrain_min,
         height_above_terrain,
     })
+}
+
+// ── Gebäudeprofil ([63]) ────────────────────────────────────────────────────
+//
+// Zulässige Höhe am Punkt p: h0 + tan(α)·d(p), d = Abstand zur nächsten Parzellengrenze (Strecke)
+// oder Baulinie (Gerade); h0 = Profilhöhe an der Grenze über dem massgebenden Terrain (ohne
+// Gelände ±0.00). Geprüft werden die oberen Punkte der Bauteile (Wandkronen, Körper-Deckel,
+// Dachflächen und Giebel; Kanten alle ≤ 1 m abgetastet) — nicht das Volumen: ragt ein Punkt
+// über das Profil, gilt das ganze Bauteil als Verstoss (Grundriss rot).
+
+/// Profil: Höhe an der Grenze (absolut, Modellbezug) und Steigung tan(α).
+#[derive(Clone, Copy, Debug)]
+pub struct Profile {
+    pub h0: f64,
+    pub slope: f64,
+}
+
+/// Profil des Baurechts mit Bezugshöhe `base`; `None` ohne gültigen Winkel (0 < α < 90).
+fn profile_of(r: &crate::model::SiteRules, base: f64) -> Option<Profile> {
+    let a = r.profile_angle.filter(|a| a.is_finite() && *a > 0.0 && *a < 90.0)?;
+    let h = r.profile_height.filter(|h| h.is_finite()).unwrap_or(0.0);
+    Some(Profile { h0: base + h, slope: a.to_radians().tan() })
+}
+
+/// Zulässige Höhe (absolut) des Profils am Punkt p.
+pub fn profile_limit(r: &SiteRules, pf: Profile, p: [f64; 2]) -> f64 {
+    let n = r.parcel.len();
+    let d = (0..n)
+        .map(|i| seg_dist(p, r.parcel[i], r.parcel[(i + 1) % n], false))
+        .chain(r.lines.iter().map(|l| seg_dist(p, l.a, l.b, true)))
+        .fold(f64::INFINITY, f64::min);
+    pf.h0 + pf.slope * if d.is_finite() { d } else { 0.0 }
+}
+
+/// Bauteil von oben: Grundriss und obere Punkte (x, y, z absolut).
+pub struct TopPart {
+    pub foot: Polygon,
+    pub pts: Vec<[f64; 3]>,
+}
+
+/// Ring auf Höhe z mit Zwischenpunkten alle ≤ 1 m.
+fn ring_at(ring: &[[f64; 2]], z: f64, out: &mut Vec<[f64; 3]>) {
+    let n = ring.len();
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[(i + 1) % n]);
+        let k = ((b[0] - a[0]).hypot(b[1] - a[1])).ceil().clamp(1.0, 1000.0) as usize;
+        for j in 0..k {
+            let f = j as f64 / k as f64;
+            out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, z]);
+        }
+    }
+}
+
+/// 3D-Polygon mit Zwischenpunkten alle ≤ 1 m.
+fn poly3_pts(ring: &[[f64; 3]], out: &mut Vec<[f64; 3]>) {
+    let n = ring.len();
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[(i + 1) % n]);
+        let k = ((b[0] - a[0]).hypot(b[1] - a[1])).ceil().clamp(1.0, 1000.0) as usize;
+        for j in 0..k {
+            let f = j as f64 / k as f64;
+            out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]);
+        }
+    }
+}
+
+/// Wände (Krone), freie Körper (Deckel) und Dächer (Flächen, Giebel) mit ihren oberen Punkten.
+pub fn top_parts(p: &Project) -> Vec<TopPart> {
+    let mut out = Vec::new();
+    for w in &p.walls {
+        let Some(f) = wall_footprint(p, w) else { continue };
+        let mut pts = Vec::new();
+        ring_at(&f, p.wall_vertical_extent(w).1, &mut pts);
+        out.push(TopPart { foot: vec![f], pts });
+    }
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        if s.operation.as_deref() == Some("subtract") || s.points.len() < 3 {
+            continue;
+        }
+        let base = p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
+        let f: Ring = s.points.iter().map(|v| [v.x, v.y]).collect();
+        let mut pts = Vec::new();
+        ring_at(&f, base + s.base_offset.unwrap_or(0.0) + s.height, &mut pts);
+        out.push(TopPart { foot: vec![f], pts });
+    }
+    for r in p.roofs.as_deref().unwrap_or(&[]) {
+        let g = crate::roof::roof_geometry(&r.params(), p.roof_base_elevation(r));
+        if g.eaves.len() < 3 {
+            continue;
+        }
+        let mut pts = Vec::new();
+        for f in g.planes.iter().chain(g.gables.iter()) {
+            poly3_pts(f, &mut pts);
+        }
+        let mut foot = vec![g.eaves.clone()];
+        foot.extend(g.eaves_holes.iter().cloned());
+        out.push(TopPart { foot, pts });
+    }
+    out
+}
+
+fn part_above_profile(r: &SiteRules, pf: Profile, t: &TopPart) -> bool {
+    t.pts.iter().any(|q| q[2].is_finite() && q[2] > profile_limit(r, pf, [q[0], q[1]]) + 1e-6)
 }
 
 // ── Zulässige Hülle im 3D ([63]) ───────────────────────────────────────────
@@ -752,6 +880,110 @@ fn push_prisms(out: &mut Envelope3d, polys: &[Polygon], z0: f64, z1: f64, rgba: 
     }
 }
 
+/// Kantenlänge, bis zu der die Profil-Oberseite mindestens verfeinert wird, und Abbruch der Verfeinerung.
+const PROFILE_COARSE: f64 = 3.0;
+const PROFILE_FINE: f64 = 0.25;
+const PROFILE_TOL: f64 = 0.01;
+
+/// Körper über der Mehrfach-Fläche von `z0` bis zur Oberseite `ztop(p)` (Gebäudeprofil, gedeckelt):
+/// Boden flach, Oberseite aus der Triangulierung verfeinert (bis Kanten ≤ 3 m, dann wo die Höhe von
+/// der linearen Näherung um > 1 cm abweicht, höchstens bis 0.25 m — Knicke im Profil sind so
+/// genähert), Seiten alle ≤ 0.5 m abgetastet.
+fn push_profile_body(out: &mut Envelope3d, polys: &[Polygon], z0: f64, ztop: impl Fn([f64; 2]) -> f64) {
+    if !z0.is_finite() {
+        return;
+    }
+    let rgba = ENVELOPE_RGBA;
+    let tris = &mut out.tris;
+    let mut put = |q: [f64; 3]| tris.extend([q[0] as f32, q[2] as f32, q[1] as f32, rgba[0], rgba[1], rgba[2], rgba[3]]);
+    let at = |q: [f64; 2]| {
+        let z = ztop(q);
+        [q[0], q[1], if z.is_finite() { z } else { z0 }]
+    };
+    fn refine(a: [f64; 3], b: [f64; 3], c: [f64; 3], at: &dyn Fn([f64; 2]) -> [f64; 3], put: &mut dyn FnMut([f64; 3]), depth: u32) {
+        let mid = |p: [f64; 3], q: [f64; 3]| at([(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0]);
+        let (ab, bc, ca) = (mid(a, b), mid(b, c), mid(c, a));
+        let len = |p: [f64; 3], q: [f64; 3]| (p[0] - q[0]).hypot(p[1] - q[1]);
+        let longest = len(a, b).max(len(b, c)).max(len(c, a));
+        let g = at([(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0]);
+        let err = [(ab, a, b), (bc, b, c), (ca, c, a)]
+            .iter()
+            .map(|(m, p, q)| (m[2] - (p[2] + q[2]) / 2.0).abs())
+            .fold((g[2] - (a[2] + b[2] + c[2]) / 3.0).abs(), f64::max);
+        let split = depth < 14 && (longest > PROFILE_COARSE || (err > PROFILE_TOL && longest > PROFILE_FINE));
+        if !split {
+            for v in [a, b, c] {
+                put(v);
+            }
+            return;
+        }
+        for (p, q, r) in [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)] {
+            refine(p, q, r, at, put, depth + 1);
+        }
+    }
+    for poly in polys {
+        let Some(outer) = poly.first() else { continue };
+        if outer.len() < 3 {
+            continue;
+        }
+        let ring = crate::polygon_holes::merge_holes(outer, &poly[1..], 1e-4).ring;
+        let pts: Vec<_> = ring.iter().map(|q| crate::hatch::v2(q[0], q[1])).collect();
+        for k in crate::gpu_compile::triangulate(&pts).chunks_exact(3) {
+            let [i, j, l] = [k[0] as usize, k[1] as usize, k[2] as usize];
+            for &m in &[i, j, l] {
+                put([ring[m][0], ring[m][1], z0]);
+            }
+            refine(at(ring[i]), at(ring[j]), at(ring[l]), &at, &mut put, 0);
+        }
+        for r in poly {
+            let n = r.len();
+            if n < 3 {
+                continue;
+            }
+            for i in 0..n {
+                let (p, q) = (r[i], r[(i + 1) % n]);
+                let k = ((q[0] - p[0]).hypot(q[1] - p[1]) / 0.5).ceil().clamp(1.0, 2000.0) as usize;
+                for j in 0..k {
+                    let (f0, f1) = (j as f64 / k as f64, (j + 1) as f64 / k as f64);
+                    let u = at([p[0] + (q[0] - p[0]) * f0, p[1] + (q[1] - p[1]) * f0]);
+                    let v = at([p[0] + (q[0] - p[0]) * f1, p[1] + (q[1] - p[1]) * f1]);
+                    let (ub, vb) = ([u[0], u[1], z0], [v[0], v[1], z0]);
+                    for w in [ub, vb, v, ub, v, u] {
+                        put(w);
+                    }
+                }
+            }
+        }
+    }
+    // Kanten: Boden- und Oberkante der Ringe, Senkrechte an echten Ecken.
+    let e = ENVELOPE_EDGE;
+    let mut line = |q: [f64; 3]| out.lines.extend([q[0] as f32, q[2] as f32, q[1] as f32, e[0], e[1], e[2]]);
+    for poly in polys {
+        for r in poly {
+            let n = r.len();
+            if n < 3 {
+                continue;
+            }
+            for i in 0..n {
+                let (o, p, q) = (r[(i + n - 1) % n], r[i], r[(i + 1) % n]);
+                line([p[0], p[1], z0]);
+                line([q[0], q[1], z0]);
+                let k = ((q[0] - p[0]).hypot(q[1] - p[1]) / 0.5).ceil().clamp(1.0, 2000.0) as usize;
+                for j in 0..k {
+                    let (f0, f1) = (j as f64 / k as f64, (j + 1) as f64 / k as f64);
+                    line(at([p[0] + (q[0] - p[0]) * f0, p[1] + (q[1] - p[1]) * f0]));
+                    line(at([p[0] + (q[0] - p[0]) * f1, p[1] + (q[1] - p[1]) * f1]));
+                }
+                let (ax, ay, bx, by) = (p[0] - o[0], p[1] - o[1], q[0] - p[0], q[1] - p[1]);
+                if crate::jsnum::atan2(ax * by - ay * bx, ax * bx + ay * by).abs() > 0.2 {
+                    line([p[0], p[1], z0]);
+                    line(at(p));
+                }
+            }
+        }
+    }
+}
+
 /// Zulässige Hülle (zulässige Fläche vom massgebenden Terrain bzw. ±0.00 bis zur Gesamthöhe;
 /// ohne Gesamthöhe bis zur Modellhöhe, mind. 3 m) und rote Verstösse (Grundfläche ausserhalb bis
 /// zur Modellhöhe, Teil über der Gesamthöhe). Leer ohne Baurecht oder mit `show3d` ≠ true.
@@ -764,8 +996,20 @@ pub fn envelope3d(p: &Project) -> Envelope3d {
         Some(h) if h.is_finite() && h > 0.0 => base + h,
         _ => c.max_top.map_or(base + 10.0, |t| t.max(base + 3.0)),
     };
-    push_prisms(&mut out, &polys_in(&c.allowed), base, top, ENVELOPE_RGBA, Some(ENVELOPE_EDGE));
+    let rules = flat_rules(r);
     let model_top = c.max_top.unwrap_or(top);
+    match profile_of(r, base) {
+        Some(pf) => {
+            push_profile_body(&mut out, &polys_in(&c.allowed), base, |q| profile_limit(&rules, pf, q).min(top).max(base + 0.01));
+            // Bauteile über dem Profil: Grundriss rot vom tiefsten Profilpunkt darüber bis zur Oberkante (Näherung).
+            for t in top_parts(p).iter().filter(|t| part_above_profile(&rules, pf, t)) {
+                let lo = t.pts.iter().map(|q| profile_limit(&rules, pf, [q[0], q[1]])).fold(f64::INFINITY, f64::min).max(base);
+                let hi = t.pts.iter().map(|q| q[2]).fold(f64::NEG_INFINITY, f64::max);
+                push_prisms(&mut out, std::slice::from_ref(&t.foot), lo, hi, VIOLATION_RGBA, None);
+            }
+        }
+        None => push_prisms(&mut out, &polys_in(&c.allowed), base, top, ENVELOPE_RGBA, Some(ENVELOPE_EDGE)),
+    }
     push_prisms(&mut out, &polys_in(&c.violations), base, model_top.max(base + 0.1), VIOLATION_RGBA, None);
     if c.height_exceeded {
         // Teil über der Hülle (die Hülle steht auf `base`, die Höhe ist gegen das Terrain geprüft).
@@ -836,6 +1080,104 @@ mod project_tests {
         let p = project(json!({"extrudedSolids": solids, "siteRules": {"projectionDepth": 1.5, "projectionShare": 0.2}}));
         let c = check_project(&p).unwrap();
         assert!((c.violation_area - 4.0).abs() < 1e-6, "{}", c.violation_area);
+    }
+
+    fn wall(id: &str, a: [f64; 2], b: [f64; 2], projection: bool) -> serde_json::Value {
+        let mut w = json!({"id": id, "type": "wall", "floorId": "eg", "categoryCode": "20", "start": {"x": a[0], "y": a[1]},
+                           "end": {"x": b[0], "y": b[1]}, "wallTypeId": "", "height": 3.0});
+        if projection {
+            w["siteProjection"] = json!(true);
+        }
+        w
+    }
+
+    #[test]
+    fn erkerwaende_als_vorsprung() {
+        let solids = json!([solid("h", rect(6.0, 6.0, 24.0, 16.0), false)]);
+        let erker = |m: bool| json!([wall("a", [10.0, 16.0], [10.0, 17.0], m), wall("b", [10.0, 17.0], [14.0, 17.0], m), wall("c", [14.0, 17.0], [14.0, 16.0], m)]);
+        // Nicht markiert: die Wände zählen zur Grundfläche und liegen im Abstand.
+        let c = check_project(&project(json!({"extrudedSolids": solids, "walls": erker(false), "siteRules": {"projectionDepth": 1.5}}))).unwrap();
+        assert!(c.violation_area > 0.5, "{}", c.violation_area);
+        // Markiert, Tiefe 1.5 m (Erker bis 17.1): keine Verstösse.
+        let c = check_project(&project(json!({"extrudedSolids": solids, "walls": erker(true), "siteRules": {"projectionDepth": 1.5}}))).unwrap();
+        assert!(c.violations.is_empty(), "{}", c.violation_area);
+        // Anteil 0.2 von 18 m = 3.6 m < 4.2 m Erkerbreite: alle Erkerwände im Abstand rot.
+        let c = check_project(&project(json!({"extrudedSolids": solids, "walls": erker(true), "siteRules": {"projectionDepth": 1.5, "projectionShare": 0.2}}))).unwrap();
+        assert!(c.violation_area > 0.5, "{}", c.violation_area);
+        // Anteil 0.3 = 5.4 m: erlaubt.
+        let c = check_project(&project(json!({"extrudedSolids": solids, "walls": erker(true), "siteRules": {"projectionDepth": 1.5, "projectionShare": 0.3}}))).unwrap();
+        assert!(c.violations.is_empty(), "{}", c.violation_area);
+    }
+
+    #[test]
+    fn gebaeudeprofil_pruefung() {
+        let tall = |h: f64| {
+            let mut s = solid("h", rect(6.0, 6.0, 24.0, 16.0), false);
+            s["height"] = json!(h);
+            json!([s])
+        };
+        // Ohne Profil: nichts.
+        let c = check_project(&project(json!({"extrudedSolids": tall(10.0)}))).unwrap();
+        assert!(!c.profile_exceeded && c.profile_violations.is_empty());
+        // 45° ab 2 m an der Grenze: Nordkante 4 m von der Grenze ⇒ 6 m zulässig.
+        let rules = json!({"profileAngle": 45.0, "profileHeight": 2.0});
+        let c = check_project(&project(json!({"extrudedSolids": tall(5.9), "siteRules": rules}))).unwrap();
+        assert!(!c.profile_exceeded);
+        let c = check_project(&project(json!({"extrudedSolids": tall(6.1), "siteRules": rules}))).unwrap();
+        assert!(c.profile_exceeded);
+        assert!((multi_polygon_area(&polys_in(&c.profile_violations)) - 180.0).abs() < 1e-6);
+        // Baulinie bei y = 18: Profil ab der Baulinie, Nordkante 2 m dahinter ⇒ 4 m.
+        let r2 = json!({"profileAngle": 45.0, "profileHeight": 2.0, "buildingLines": [{"a": {"x": 0, "y": 18}, "b": {"x": 30, "y": 18}}]});
+        let c = check_project(&project(json!({"extrudedSolids": tall(4.5), "siteRules": r2}))).unwrap();
+        assert!(c.profile_exceeded);
+        // Ungültiger Winkel: kein Profil.
+        let c = check_project(&project(json!({"extrudedSolids": tall(50.0), "siteRules": {"profileAngle": 90.0}}))).unwrap();
+        assert!(!c.profile_exceeded);
+    }
+
+    #[test]
+    fn gebaeudeprofil_dach() {
+        // Satteldach 45° über 10 m (Traufe 3 m, First 8 m, Giebel bei x = 6 und 24, 6 m von der Grenze).
+        let mut r = roof(0.0);
+        r["shape"] = json!("sattel");
+        r["pitchDeg"] = json!(45.0);
+        let solids = json!([solid("h", rect(6.0, 6.0, 24.0, 16.0), false)]);
+        let check = |h0: f64| check_project(&project(json!({"extrudedSolids": solids, "roofs": [r], "siteRules": {"profileAngle": 45.0, "profileHeight": h0}}))).unwrap();
+        let c = check(4.0);
+        assert!((c.max_top.unwrap() - 8.0).abs() < 1e-6, "{:?}", c.max_top);
+        // Firstende (6, 11) zulässig 4 + 6 = 10 m, Traufe (y = 16) 4 + 4 = 8 m: ok.
+        assert!(!c.profile_exceeded);
+        // 1.5 m: Firstende 7.5 m < 8 m ⇒ Dach rot, Körper (3 m, Traufe 5.5 m zulässig) nicht.
+        let c = check(1.5);
+        assert!(c.profile_exceeded);
+        assert_eq!(c.profile_violations.len(), 1);
+    }
+
+    #[test]
+    fn gebaeudeprofil_huelle_3d() {
+        let solids = json!([solid("h", rect(6.0, 6.0, 24.0, 16.0), false)]);
+        let p = project(json!({"extrudedSolids": solids, "siteRules": {"maxHeight": 12.0, "show3d": true, "profileAngle": 45.0, "profileHeight": 4.0}}));
+        let e = envelope3d(&p);
+        let rules = flat_rules(p.site_rules.as_ref().unwrap());
+        let pf = Profile { h0: 4.0, slope: 1.0 };
+        assert!(!e.tris.is_empty() && e.tris.iter().all(|v| v.is_finite()));
+        let mut ys: Vec<f32> = vec![];
+        for v in e.tris.chunks_exact(7) {
+            assert!((v[6] - ENVELOPE_RGBA[3]).abs() < 1e-6, "keine Verstösse erwartet");
+            let lim = profile_limit(&rules, pf, [v[0] as f64, v[2] as f64]).min(12.0);
+            assert!(v[1] as f64 <= lim + 1e-3, "{v:?} über {lim}");
+            ys.push(v[1]);
+        }
+        // Rand der zulässigen Fläche (4 m von der Grenze): 8 m; Mitte gedeckelt auf 12 m; Boden 0.
+        assert!(ys.iter().any(|&y| (y - 8.0).abs() < 1e-4));
+        assert!(ys.iter().any(|&y| (y - 12.0).abs() < 1e-4));
+        assert!(ys.iter().any(|&y| y == 0.0));
+        // Körper 11 m: an der Nordkante (4 m von der Grenze) gelten 8 m ⇒ rot.
+        let mut s = solid("h", rect(6.0, 6.0, 24.0, 16.0), false);
+        s["height"] = json!(11.0);
+        let p = project(json!({"extrudedSolids": [s], "siteRules": {"maxHeight": 12.0, "show3d": true, "profileAngle": 45.0, "profileHeight": 4.0}}));
+        let e = envelope3d(&p);
+        assert!(e.tris.chunks_exact(7).any(|v| (v[6] - VIOLATION_RGBA[3]).abs() < 1e-6 && (v[1] - 11.0).abs() < 1e-4));
     }
 
     #[test]
