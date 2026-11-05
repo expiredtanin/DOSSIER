@@ -1201,6 +1201,7 @@ mod tests {
             u_axis: [c, s, 0.0],
             v_axis: [0.0, 0.0, 1.0],
             depth,
+            points_back: vec![],
         }
     }
 
