@@ -137,6 +137,18 @@ export interface CommandResult {
    * sie, bestimmt allein der Inhalt die Höhe (Text-Werkzeug ohne Rahmen).
    */
   focusMinHeightM?: number;
+  /**
+   * [143] Hinweis an den Nutzer (Toast über `EngineHost.notify`), z. B. warum nichts entstand oder was
+   * angenommen wurde. Ohne ihn scheitern Befehle still.
+   */
+  notice?: CommandNotice;
+}
+
+/** [143] Hinweis eines Befehls: i18n-Key, Platzhalter, Art. */
+export interface CommandNotice {
+  key: TranslationKey;
+  params?: Record<string, string | number>;
+  kind?: "info" | "warning" | "error";
 }
 
 // ── Befehls-Zustand ──────────────────────────────────────────────────────────
@@ -193,6 +205,11 @@ export interface Command {
    * Befehl nicht, die Engine meldet diesen Hinweis über `EngineHost.notify`.
    */
   needsSelection?: TranslationKey;
+  /**
+   * [143] Voraussetzung (optional): liefert einen Hinweis-Key, wenn der Befehl jetzt nicht sinnvoll ist
+   * (z. B. Baugrube ohne Gelände); die Engine startet ihn dann nicht und meldet den Hinweis.
+   */
+  precondition?(ctx: CommandContext): TranslationKey | null;
   /** Initialer Schritt-Zustand. */
   init(): CommandState;
   /** Eine Eingabe (Punkt/Zahl/Option/Auswahl) verarbeiten. */

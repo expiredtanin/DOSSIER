@@ -22,6 +22,15 @@ const commitDone = (ctx: CommandContext): CommandResult => ({ draft: null, done:
 
 const IDLE: CommandState = { phase: "idle", lastPoint: null };
 
+/**
+ * [143] Sofort ausführen (vorher wartete der Befehl auf eine Eingabe und schluckte die nächsten getippten
+ * Befehle); ohne Höhenlinien ein Hinweis statt stillem Nichts.
+ */
+const run = (ctx: CommandContext): CommandResult =>
+  (ctx.project.context ?? []).some((o) => o.type === "contourSet")
+    ? commitDone(ctx)
+    : { draft: null, done: true, notice: { key: "cmd.terrain.noContours", kind: "warning" } };
+
 export const terrainCommand: Command = {
   name: "terrain",
   labelKey: "cmd.terrain.label",
@@ -30,6 +39,7 @@ export const terrainCommand: Command = {
   accepts: () => [],
   options: () => [],
   init: () => ({ ...IDLE }),
+  autoRun: run,
 
   // Jeglicher Input beendet den Befehl mit dem Commit (es gibt keine Schritte).
   onInput: (_s, _i, ctx): [CommandState, CommandResult] => [{ ...IDLE }, commitDone(ctx)],

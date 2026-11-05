@@ -521,13 +521,19 @@ pub struct ExCheck {
     pub datum: Option<f64>,
 }
 
-fn excavation_check(root: &Map<String, Value>, p: &Project, pts: &[V], level: &str) -> ExCheck {
+fn excavation_check(p: &Project, pts: &[V], level: &str) -> ExCheck {
     use crate::terrain::{datum, Tin, TinIndex};
     // Sohle unter dem TIEFSTEN Geschoss: im EG gezeichnet lag sie sonst auf −0.30 m, am Hang über dem
-    // Gelände → nur Aufschüttung statt Grube.
-    let floors = arr(root.get("floors"));
-    let active = floors.iter().find(|f| field(f, "id").and_then(Value::as_str) == Some(level)).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0));
-    let base = floors.iter().map(|f| num_or(field(f, "baseElevation"), 0.0)).filter(|z| z.is_finite()).fold(active, f64::min);
+    // Gelände → nur Aufschüttung statt Grube. (Vorher las der Befehl eine Liste `floors`, die es im
+    // Projekt nicht gibt — Geschosse sind `drawingLevels` —, die Sohle lag darum IMMER auf −0.30 m.)
+    use crate::model::DrawingLevelKind;
+    let base = p
+        .drawing_levels
+        .iter()
+        .filter(|l| l.kind == DrawingLevelKind::Floor || l.id == level)
+        .filter_map(|l| l.base_elevation.filter(|z| z.is_finite()))
+        .fold(f64::INFINITY, f64::min);
+    let base = if base.is_finite() { base } else { 0.0 };
     let bottom = base - 0.3;
     let terrains = crate::excavation::terrains(p);
     let mut out = ExCheck { bottom, terrain: !terrains.is_empty(), over: false, cut: false, datum: None };
@@ -588,7 +594,7 @@ fn excavation_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, 
     if pts.is_empty() {
         return Vec::new();
     }
-    let check = excavation_check(root, p, &pts, ctx.level);
+    let check = excavation_check(p, &pts, ctx.level);
     let n = arr(root.get("context")).iter().filter(|o| field(o, "type").and_then(Value::as_str) == Some("excavation")).count();
     let mut out = Vec::new();
     if let Some(d) = check.datum {
@@ -923,7 +929,7 @@ pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Value>
         // [143] Baugrube vor dem Anlegen prüfen (Meldungen im Befehl).
         "excavationCheck" => {
             let pts = excavation_outline(v);
-            let c = excavation_check(root, p, &pts, s_of(v, "level"));
+            let c = excavation_check(p, &pts, s_of(v, "level"));
             json!({ "valid": !pts.is_empty(), "bottom": js_num(c.bottom), "terrain": c.terrain, "over": c.over, "cut": c.cut, "datum": c.datum.map(js_num) })
         }
         _ => return None,
@@ -1008,7 +1014,7 @@ mod tests {
     /// [68] Baugrube: Umriss (2 Punkte = Rechteck), Sohle = Geschoss − 0.30, als Kontext-Objekt.
     #[test]
     fn baugrube_befehl() {
-        let root = json!({"floors": [{"id": "ug", "baseElevation": -3.0}]});
+        let root = json!({"drawingLevels": [{"id": "ug", "name": "UG", "kind": "floor", "visible": true, "locked": false, "baseElevation": -3.0}]});
         let root = root.as_object().unwrap();
         let run = |pts: Value| {
             let mut ids = IdGen::new("s");
@@ -1026,7 +1032,7 @@ mod tests {
     /// [143] Im EG gezeichnet: Sohle unter dem tiefsten Geschoss (UG), nicht −0.30 unter dem EG.
     #[test]
     fn baugrube_sohle_unter_tiefstem_geschoss() {
-        let root = json!({"floors": [{"id": "eg", "baseElevation": 0.0}, {"id": "ug", "baseElevation": -2.7}, {"id": "og", "baseElevation": 2.9}]});
+        let root = json!({"drawingLevels": json!([{"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "baseElevation": 0.0}, {"id": "ug", "name": "UG", "kind": "floor", "visible": true, "locked": false, "baseElevation": -2.7}, {"id": "og", "name": "OG", "kind": "floor", "visible": true, "locked": false, "baseElevation": 2.9}])});
         let root = root.as_object().unwrap();
         let run = |level: &str| {
             let mut ids = IdGen::new("s");
@@ -1057,21 +1063,21 @@ mod tests {
             let r = root.as_object().unwrap();
             query(r, &crate::model::lenient::typed_for_test(r), &json!({"q": "excavationCheck", "pts": pts, "level": "eg"})).unwrap()
         };
-        let floors = json!([{"id": "eg", "baseElevation": 0.0}, {"id": "ug", "baseElevation": -2.7}]);
+        let floors = json!([{"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "baseElevation": 0.0}, {"id": "ug", "name": "UG", "kind": "floor", "visible": true, "locked": false, "baseElevation": -2.7}, {"id": "og", "name": "OG", "kind": "floor", "visible": true, "locked": false, "baseElevation": 2.9}]);
         // Kein Gelände.
-        let c = check(&json!({"floors": floors}), &rect);
+        let c = check(&json!({"drawingLevels": floors}), &rect);
         assert_eq!((c["valid"].as_bool(), c["terrain"].as_bool(), c["over"].as_bool(), c["bottom"].as_f64()), (Some(true), Some(false), Some(false), Some(-3.0)));
         // Gelände um ±0.00: Grube, kein neuer Bezug.
-        let c = check(&json!({"floors": floors, "context": [tri(0.0)]}), &rect);
+        let c = check(&json!({"drawingLevels": floors, "context": [tri(0.0)]}), &rect);
         assert_eq!((c["over"].as_bool(), c["cut"].as_bool(), c["datum"].is_null()), (Some(true), Some(true), true));
         // Ausserhalb des Geländes.
-        let c = check(&json!({"floors": floors, "context": [tri(0.0)]}), &json!([{"x": 100, "y": 100}, {"x": 110, "y": 108}]));
+        let c = check(&json!({"drawingLevels": floors, "context": [tri(0.0)]}), &json!([{"x": 100, "y": 100}, {"x": 110, "y": 108}]));
         assert_eq!((c["terrain"].as_bool(), c["over"].as_bool()), (Some(true), Some(false)));
         // Gelände tief unter der Sohle: nur Aufschüttung.
-        let c = check(&json!({"floors": floors, "context": [tri(-10.0)]}), &rect);
+        let c = check(&json!({"drawingLevels": floors, "context": [tri(-10.0)]}), &rect);
         assert_eq!((c["over"].as_bool(), c["cut"].as_bool()), (Some(true), Some(false)));
         // Gelände in m ü. M., kein Bezug: ±0.00 = Höhe im Schwerpunkt (512 + 4·14/40 = 513.40).
-        let root = json!({"floors": floors, "context": [tri(512.0)]});
+        let root = json!({"drawingLevels": floors, "context": [tri(512.0)]});
         let c = check(&root, &rect);
         assert_eq!((c["cut"].as_bool(), c["datum"].as_f64()), (Some(true), Some(513.4)));
         let r = root.as_object().unwrap();
@@ -1087,7 +1093,7 @@ mod tests {
         let o2 = ops(r2, &crate::model::lenient::typed_for_test(r2), &json!({"cmd": "excavation", "pts": rect}), &ctx, &mut ids).unwrap();
         assert_eq!(o2.len(), 1);
         // Mit gesetztem Bezug: kein neuer.
-        let c = check(&json!({"floors": floors, "referenceElevationMasl": 512.5, "context": [tri(512.0)]}), &rect);
+        let c = check(&json!({"drawingLevels": floors, "referenceElevationMasl": 512.5, "context": [tri(512.0)]}), &rect);
         assert!(c["datum"].is_null());
         assert_eq!(c["cut"].as_bool(), Some(true));
     }

@@ -67,7 +67,7 @@ export interface EngineHost {
    */
   inputUnits?(): DisplayUnits;
   /** Optional: Hinweis zeigen (i18n-Key), z. B. „erst Objekte wählen" (`Command.needsSelection`). */
-  notify?(key: string): void;
+  notify?(key: string, params?: Record<string, string | number>, kind?: "info" | "warning" | "error"): void;
 }
 
 /** Öffentlicher Schnappschuss für die Command-Line-UI (rein lesend). */
@@ -323,7 +323,16 @@ export class CommandEngine {
 
   /** Startet einen konkreten Befehl (z. B. zur Wiederholung). */
   startCommand(cmd: Command): boolean {
-    if (cmd.floorOnly && !this.host.isFloor()) return false;
+    if (cmd.floorOnly && !this.host.isFloor()) {
+      // [143] Nicht still scheitern (Schnitt/Ansicht/Blatt aktiv).
+      this.host.notify?.("cmd.needsFloor", undefined, "info");
+      return false;
+    }
+    const blocked = cmd.precondition?.(this.host.context(null));
+    if (blocked) {
+      this.host.notify?.(blocked, undefined, "warning");
+      return false;
+    }
     if (cmd.needsSelection && !hasTransformSelection(this.host.context(null).selection)) {
       this.host.notify?.(cmd.needsSelection);
       return false;
@@ -624,6 +633,7 @@ export class CommandEngine {
   private applyResult(res: CommandResult): void {
     if (res.commit) this.host.commit(res.commit);
     if (res.focusDrawingId) this.host.focusDrawing?.(res.focusDrawingId, res.focusMinHeightM);
+    if (res.notice) this.host.notify?.(res.notice.key, res.notice.params, res.notice.kind ?? "info");
     if (res.draft) this.host.setDraft(res.draft);
     else this.host.setDraft(null);
     if (res.done) {
