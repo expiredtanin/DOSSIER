@@ -2632,6 +2632,8 @@ export const de = {
   "program.generate.done": "{n} Räume auf Blatt «{name}» angelegt.",
   "program.generate.none": "Das Raumprogramm hat keine Zeile mit Name und Fläche.",
   "sun.show": "Schatten im Grundriss zeigen",
+  "sun.shadows3d": "Schatten im 3D zeigen",
+  "sun.shadows3d.hint": "Sonne aus Datum und Uhrzeit; alle Bauteile werfen Schatten, Glas nicht. Ohne Einstellung wie im Grundriss.",
   "sun.time": "Uhrzeit",
   "sun.equinox": "Tagundnachtgleiche",
   "sun.summer": "Sommersonnenwende",

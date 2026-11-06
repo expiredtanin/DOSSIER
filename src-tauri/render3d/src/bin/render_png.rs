@@ -2,7 +2,7 @@
 // wie im Viewer, aber auf ein Offscreen-Texture (Metal/Vulkan/DX12 — keine Fenster-Session nötig).
 // Dient Referenzbildern und der Prüfung des 3D ohne Nutzer-App.
 //
-//   cargo run --release --features png --bin render_png -- modell.json aus.png [--view iso] [--style shaded] [--size 1200x800] [--target x,y,z] [--dist 12]
+//   cargo run --release --features png --bin render_png -- modell.json aus.png [--view iso] [--style shaded] [--size 1200x800] [--target x,y,z] [--dist 12] [--sun 135,30]
 //     [--points wolke.txt] [--point-size 3] [--point-color rgb|intensity|class|height]
 //
 // `--points` ([27]): Textdatei mit einem Punkt je Zeile `x y z [r g b [intensitaet [klasse]]]` in
@@ -221,6 +221,11 @@ fn main() {
     let mut renderer = Renderer::new(&device, format);
     renderer.set_render_style(RenderStyle::from_str_or_shaded(&flag("--style", "shaded")));
     renderer.upload_model(&device, &model.walls, &model.slabs, &model.meshes);
+    // Sonne + Schatten ([64]): `--sun AZIMUT,HOEHE` (Grad, wie `dossier-cli sun`).
+    let sun: Vec<f64> = flag("--sun", "").split(',').filter_map(|v| v.trim().parse().ok()).collect();
+    if sun.len() == 2 {
+        renderer.set_sun(render3d::shadow::sun_dir_world(sun[0], sun[1]), true);
+    }
     let points_path = flag("--points", "");
     if !points_path.is_empty() {
         let cloud = read_points_txt(&points_path);

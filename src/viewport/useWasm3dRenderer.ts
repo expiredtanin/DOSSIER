@@ -52,6 +52,9 @@ interface WebModelRendererLike {
    * "textured" faellt engine-seitig vorerst auf "shaded" zurueck). */
   set_render_style(style: string): void;
   set_view_preset(preset: string): void;
+  /** Sonne der Sonnenstudie ([64], `web::set_sun`): Azimut/Höhe in Grad, `shadows` = Schatten im 3D.
+   *  `active=false` oder Sonne unter dem Horizont: Standardlicht, keine Schatten. Optional — ältere WASM-Builds. */
+  set_sun?(active: boolean, azimuthDeg: number, elevationDeg: number, shadows: boolean): void;
   /** Formatfüllendes Ziel + Abstand für Modell UND sichtbare Punktwolken: `[tx, ty, tz, dist]`
    *  (world, Y-oben; `web::view_fit`). Optional — ältere WASM-Builds. */
   view_fit?(): Float32Array | number[];
@@ -431,6 +434,17 @@ export function useWasm3dRenderer(
     }
   }, []);
 
+  /** Sonne + Schatten im 3D setzen ([64], s. `sun3d.ts`). Wirkt erst beim nächsten `render`. */
+  const setSun = useCallback((active: boolean, azimuthDeg: number, elevationDeg: number) => {
+    const r = rendererRef.current;
+    if (!r?.set_sun) return;
+    try {
+      r.set_sun(active, azimuthDeg, elevationDeg, active);
+    } catch (e) {
+      console.warn("render3d set_sun fehlgeschlagen:", e);
+    }
+  }, []);
+
   /**
    * Boden-Referenzraster ein-/ausblenden (Overlay-Umschalter im Viewport,
    * s. Wasm3DViewport.tsx). `elevationM` = OKFF des aktiven Geschosses
@@ -632,6 +646,7 @@ export function useWasm3dRenderer(
     render,
     updateModel,
     setRenderStyle,
+    setSun,
     applyViewPreset,
     viewFit,
     readRustCamera,
