@@ -523,7 +523,7 @@ export function AttributesPanel() {
               </span>
               <span className="attr-key">{t("attr.grid.bubbleMm")}</span>
               <span className="attr-val">
-                <input className="attr-num" style={{ width: 72 }} type="number" step={0.5} min={2} value={geom.bubbleMm ?? 8}
+                <input className="attr-num" style={{ width: 72 }} type="number" step={0.5} min={2} value={geom.bubbleMm ?? 5}
                   onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 2) host.onSetGridProps(drawing.id, { bubbleMm: v }); }} />
               </span>
               <span className="attr-key">{t("attr.grid.show3d")}</span>

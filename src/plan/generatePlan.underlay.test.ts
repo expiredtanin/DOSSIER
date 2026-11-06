@@ -80,9 +80,16 @@ describe("kompakte Linien-Unterlage", () => {
     expect(compact.primitives.some((q) => q.kind === "polygon" && (q as any).drawingId === "filled")).toBe(true);
   });
 
-  it("mono und Export (forPrint) bleiben beim normalen Pfad", () => {
+  it("Export (forPrint) bleibt beim normalen Pfad; Schwarz-Weiss ([140] Standard) nutzt die Unterlage in Tinte", () => {
     const p = project(drawings);
-    expect(generatePlan(p, "L1", visible, undefined, "mittel", false, true, true, 100, false, true).underlay).toBeUndefined();
+    const mono = generatePlan(p, "L1", visible, undefined, "mittel", false, true, true, 100, false, true);
+    expect(mono.underlay).toBeDefined();
+    const lines = mono.underlay!.flatMap((g) => g.build(g.drawings));
+    expect(lines.length).toBeGreaterThan(0);
+    // Kategorie „Rot" (61) wird Tinte.
+    expect(JSON.stringify(lines)).not.toContain("#ff0000");
+    const color = generatePlan(p, "L1", visible, undefined, "mittel", false, false, true, 100, false, true);
+    expect(JSON.stringify(color.underlay!.flatMap((g) => g.build(g.drawings)))).toContain("#ff0000");
     expect(generatePlan(p, "L1", visible, undefined, "mittel", false, false, true, 100, true, true).underlay).toBeUndefined();
   });
 

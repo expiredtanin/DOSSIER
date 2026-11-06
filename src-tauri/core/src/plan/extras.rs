@@ -416,7 +416,11 @@ impl Post {
 
     fn hatch(&self, h: &mut HatchRender) {
         if self.mono && h.pattern != HatchPattern::None {
-            h.color = (if h.pattern == HatchPattern::Solid { HATCH_INK } else { MONO_INK }).into();
+            if h.pattern == HatchPattern::Solid {
+                h.color = HATCH_INK.into();
+            } else if !is_neutral(&h.color) {
+                h.color = MONO_INK.into();
+            }
         }
         if self.lw != 1.0 {
             h.line_weight = scale_weight(h.line_weight, self.lw);
@@ -430,9 +434,16 @@ impl Post {
                 if self.mono {
                     let solid = hatch.pattern == HatchPattern::Solid;
                     if *fill != "none" {
-                        *fill = (if solid { HATCH_INK } else { "#ffffff" }).into();
+                        if solid {
+                            *fill = HATCH_INK.into();
+                        } else if !is_neutral(fill) {
+                            *fill = "#ffffff".into();
+                        }
                     }
-                    *stroke = MONO_INK.into();
+                    // [140] „none" bleibt (Wandschichten ohne Umriss: sonst Kontur statt Schraffur).
+                    if *stroke != "none" && !is_neutral(stroke) {
+                        *stroke = MONO_INK.into();
+                    }
                 }
                 self.hatch(hatch);
                 if self.lw != 1.0 {
@@ -445,7 +456,7 @@ impl Post {
                 }
             }
             Primitive::Line { weight_mm, color, .. } => {
-                if self.mono {
+                if self.mono && !color.as_deref().is_some_and(is_neutral) {
                     *color = Some(MONO_INK.into());
                 }
                 if self.lw != 1.0 {
@@ -463,8 +474,22 @@ impl Post {
 
     /// Farbe und Stärke einer Linie.
     pub fn line<'a>(&self, color: Option<&'a str>, w: f64) -> (Option<&'a str>, f64) {
-        (if self.mono { Some(MONO_INK) } else { color }, scale_weight(w, self.lw))
+        (if self.mono && !color.is_some_and(is_neutral) { Some(MONO_INK) } else { color }, scale_weight(w, self.lw))
     }
+}
+
+/// [140] Unbunte Farbe (Grau/Schwarz/Weiss, `#rgb`/`#rrggbb`/`#rrggbbaa`): bleibt in Schwarz-Weiss erhalten
+/// (Schatten, Gelände-Grau, Treppen-Grau); bunte Farben werden Tinte bzw. Papier.
+pub fn is_neutral(c: &str) -> bool {
+    let h = c.trim().trim_start_matches('#');
+    let ch = |i: usize, n: usize| u8::from_str_radix(h.get(i..i + n)?, 16).ok().map(|v| if n == 1 { v * 17 } else { v });
+    let rgb = match h.len() {
+        3 | 4 => (ch(0, 1), ch(1, 1), ch(2, 1)),
+        6 | 8 => (ch(0, 2), ch(2, 2), ch(4, 2)),
+        _ => return false,
+    };
+    let (Some(r), Some(g), Some(b)) = rgb else { return false };
+    r.max(g).max(b) - r.min(g).min(b) <= 20
 }
 
 /// [32] Strichstärken nach Massstab auf Schnitt-/Ansichts-Primitive (wie im Grundriss über [`post_for`]):
@@ -784,5 +809,43 @@ mod tests {
             _ => unreachable!(),
         }
         assert_eq!(post.line(None, 0.25), (Some(MONO_INK), 0.25));
+    }
+
+    /// [140] Schwarz-Weiss als Tusche-Standard: Wandschichten ohne Umriss bleiben ohne Umriss (sonst verdrängt
+    /// die Kontur die Schraffur), Grautöne (Schatten, Gelände, Treppe) bleiben, bunte Farben werden Tinte/Papier.
+    #[test]
+    fn mono_behaelt_grau_und_ohne_umriss() {
+        let post = Post { mono: true, lw: 1.0, sketch: 0.0 };
+        let mut p = flat_polygon(vec![], "#3c3c3c", 0.0);
+        if let Primitive::Polygon { stroke, hatch, .. } = &mut p {
+            *stroke = "none".into();
+            *hatch = HatchRender { pattern: HatchPattern::Diagonal, color: "#808080".into(), ..no_hatch() };
+        }
+        post.apply(&mut p);
+        match &p {
+            Primitive::Polygon { fill, stroke, hatch, .. } => {
+                assert_eq!(fill, "#3c3c3c");
+                assert_eq!(stroke, "none");
+                assert_eq!(hatch.color, "#808080");
+            }
+            _ => unreachable!(),
+        }
+        let mut q = flat_polygon(vec![], "#e8dcc0", 0.0);
+        if let Primitive::Polygon { stroke, hatch, .. } = &mut q {
+            *stroke = "#b06030".into();
+            *hatch = HatchRender { pattern: HatchPattern::Diagonal, color: "#c04020".into(), ..no_hatch() };
+        }
+        post.apply(&mut q);
+        match &q {
+            Primitive::Polygon { fill, stroke, hatch, .. } => {
+                assert_eq!(fill, "#ffffff");
+                assert_eq!(stroke, MONO_INK);
+                assert_eq!(hatch.color, MONO_INK);
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(post.line(Some("#8a8a8a"), 0.13), (Some("#8a8a8a"), 0.13));
+        assert_eq!(post.line(Some("#a05a2c"), 0.13), (Some(MONO_INK), 0.13));
+        assert!(is_neutral("#fff") && is_neutral("#1a1a1aff") && !is_neutral("#ff0000") && !is_neutral("rot"));
     }
 }

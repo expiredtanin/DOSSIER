@@ -545,7 +545,7 @@ function annotations(): Drawing2D[] {
     shape: "grid", origin: P(0, 0), angle: 0,
     a: [{ label: "1", pos: 0 }, { label: "2", pos: 6 }, { label: "3", pos: 10 }, { label: "4", pos: 15 }],
     b: [{ label: "A", pos: 0 }, { label: "B", pos: 5 }, { label: "C", pos: 10 }],
-    extend: 2.5, bubbles: "both", bubbleMm: 6, levels: ["ug", "eg", "og", "dg"], show3d: true,
+    extend: 2.5, bubbles: "both", levels: ["ug", "eg", "og", "dg"], show3d: true,
   }, { lineStyleId: "std-ls-strichpunkt" });
 
   // Assoziative Bemassung: Innenmasse an Wandflächen (Schichtgrenze 0/letzte) und Öffnungsleibungen.

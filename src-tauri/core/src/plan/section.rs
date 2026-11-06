@@ -2265,8 +2265,119 @@ impl Acc {
     }
 }
 
+/// [140] Ab diesem Massstab (1:75 und kleiner) gehen dünne geschnittene Schichten in der Nachbarschicht auf
+/// (Detail „mittel" ab 1:100 wie die Wände im Grundriss, `walls::thin_layer_targets`); 1:50 zeigt alle.
+const THIN_MERGE_FROM: f64 = 75.0;
+
+fn ring_len(r: &[[f64; 2]]) -> f64 {
+    (0..r.len()).map(|i| { let (a, b) = (r[i], r[(i + 1) % r.len()]); hypot2(b[0] - a[0], b[1] - a[1]) }).sum()
+}
+
+fn ring_area(r: &[[f64; 2]]) -> f64 {
+    let mut a = 0.0;
+    for i in 0..r.len() {
+        let (p, q) = (r[i], r[(i + 1) % r.len()]);
+        a += p[0] * q[1] - q[0] * p[1];
+    }
+    (a / 2.0).abs()
+}
+
+fn ring_bbox(r: &[[f64; 2]]) -> [f64; 4] {
+    r.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
+}
+
+/// [140] Dünne Schnitt-Schichten (Putz, Parkett, Trittschall, Folien) bei 1:`scale` zusammenfassen: eine Schicht
+/// unter [`walls::THIN_LAYER_PAPER_MM`] Papierdicke (Dicke ≈ Fläche / halber Umfang) übernimmt Füllung und
+/// Schraffur der dickeren Nachbarschicht desselben Bauteils, mit der sie die längste Kante teilt, und wird mit
+/// ihr zu einer Fläche vereinigt (keine Fuge dazwischen). Unter 1:75 (oder `scale` 0) unverändert.
+pub fn merge_thin_cuts(cuts: &[Cut], scale: f64) -> Vec<Cut> {
+    if !(scale >= THIN_MERGE_FROM) || !scale.is_finite() {
+        return cuts.to_vec();
+    }
+    let n = cuts.len();
+    let mergeable = |c: &Cut| matches!(c.kind, Kind::Wall | Kind::Slab | Kind::Roof) && c.stair_id.is_none() && c.pts.len() >= 3;
+    let thick: Vec<f64> = cuts.iter().map(|c| { let half = ring_len(&c.pts) / 2.0; if half > 0.0 { ring_area(&c.pts) / half } else { 0.0 } }).collect();
+    let thin: Vec<bool> = (0..n).map(|i| mergeable(&cuts[i]) && thick[i] > 0.0 && thick[i] * 1000.0 / scale < super::walls::THIN_LAYER_PAPER_MM).collect();
+    if !thin.iter().any(|t| *t) {
+        return cuts.to_vec();
+    }
+    let bbox: Vec<[f64; 4]> = cuts.iter().map(|c| ring_bbox(&c.pts)).collect();
+    let same_part = |a: &Cut, b: &Cut| a.kind == b.kind && a.index == b.index && a.source_id == b.source_id;
+    let touch = |i: usize, j: usize| {
+        let (a, b) = (bbox[i], bbox[j]);
+        a[0] <= b[2] + 1e-4 && b[0] <= a[2] + 1e-4 && a[1] <= b[3] + 1e-4 && b[1] <= a[3] + 1e-4
+    };
+    // Gemeinsame Kantenlänge zweier Flächen über die Vereinigung (0, wenn sie nicht zu einer Fläche verschmelzen).
+    let shared = |i: usize, j: usize| -> f64 {
+        let u = crate::polygon_bool::union(&[vec![cuts[i].pts.clone()], vec![cuts[j].pts.clone()]]);
+        if u.len() != 1 || u[0].len() != 1 {
+            return 0.0;
+        }
+        (ring_len(&cuts[i].pts) + ring_len(&cuts[j].pts) - ring_len(&u[0][0])) / 2.0
+    };
+    // Ziel je Fläche; dünne Ketten (dünn an dünn an dick) in wenigen Durchgängen.
+    let mut target: Vec<Option<usize>> = (0..n).map(|i| (!thin[i]).then_some(i)).collect();
+    for _ in 0..3 {
+        let mut changed = false;
+        let open: Vec<usize> = (0..n).filter(|&i| thin[i] && target[i].is_none()).collect();
+        for i in open {
+            let best = (0..n)
+                .filter(|&j| j != i && target[j].is_some() && mergeable(&cuts[j]) && same_part(&cuts[i], &cuts[j]) && touch(i, j))
+                .map(|j| (j, shared(i, j)))
+                .filter(|(_, l)| *l > 1e-4)
+                // Längste gemeinsame Kante; bei gleicher Länge die dickere Schicht (wie `thin_layer_targets`).
+                .max_by(|a, b| {
+                    if (a.1 - b.1).abs() <= 1e-3 * a.1.max(b.1) {
+                        thick[a.0].total_cmp(&thick[b.0])
+                    } else {
+                        a.1.total_cmp(&b.1)
+                    }
+                });
+            if let Some((j, _)) = best {
+                target[i] = target[j];
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut groups: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for i in 0..n {
+        groups[target[i].unwrap_or(i)].push(i);
+    }
+    let mut out = Vec::with_capacity(n);
+    for (t, g) in groups.into_iter().enumerate() {
+        match g.len() {
+            0 => {}
+            1 => out.push(cuts[g[0]].clone()),
+            _ => {
+                let polys: Vec<crate::flat::Polygon> = g.iter().map(|&i| vec![cuts[i].pts.clone()]).collect();
+                let u = crate::polygon_bool::union(&polys);
+                if u.iter().all(|poly| poly.len() == 1) {
+                    for poly in u {
+                        out.push(Cut { pts: poly.into_iter().next().unwrap_or_default(), nse: None, ..cuts[t].clone() });
+                    }
+                } else {
+                    // Löcher: Flächen einzeln lassen, nur den Stil der Zielschicht übernehmen.
+                    for &i in &g {
+                        out.push(Cut { fill: cuts[t].fill.clone(), hatch: cuts[t].hatch.clone(), ..cuts[i].clone() });
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// `generateSectionPlan`: Primitive (u → x, Höhe → y) und Ausmass.
 pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility) -> (Vec<Primitive>, [f64; 4]) {
+    section_primitives_at(out, mono, hidden_lines, vis, 0.0)
+}
+
+/// [`section_primitives`] beim Massstab 1:`scale` (dünne Schichten zusammengefasst, [`merge_thin_cuts`]).
+pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64) -> (Vec<Primitive>, [f64; 4]) {
+    let merged = merge_thin_cuts(&out.cuts, scale);
     let mut prims = Vec::new();
     let mut acc = Acc::new();
     let shown = |code: &str| vis.visible(code) && vis.render(code);
@@ -2283,7 +2394,7 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
             prims.push(q);
         }
     }
-    for cp in &out.cuts {
+    for cp in &merged {
         if cp.pts.len() < 3 {
             continue;
         }
@@ -2820,7 +2931,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     };
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
-    let (mut prims, bounds) = section_primitives(&out, mono, hidden, &vis);
+    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale);
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     super::extras::scale_line_weights(p, scale, &mut prims);
@@ -2992,6 +3103,38 @@ mod tests {
                 assert!((fa - pa - k).abs() < 1e-3, "{bulge:?} {roof} s={s}: {fa} {pa}");
             }
         }
+    }
+
+    /// [140] Dünne Schichten (Parkett, Putz) im Schnitt ab 1:100 in der Nachbarschicht, 1:50 alle; der
+    /// Umriss der Fläche bleibt gleich (nur die Fuge entfällt).
+    #[test]
+    fn duenne_schnittschichten_je_massstab_zusammengefasst() {
+        let rect = |v0: f64, v1: f64| vec![[0.0, v1], [5.0, v1], [5.0, v0], [0.0, v0]];
+        let mk = |v0: f64, v1: f64, fill: &str| {
+            let mut c = Cut::new(Kind::Slab, 0, rect(v0, v1));
+            c.fill = Some(fill.into());
+            c.source_id = Some("D1".into());
+            c
+        };
+        // Parkett 1 cm, Unterlagsboden 8 cm, Trittschall 2 cm, Beton 22 cm, Putz 1 cm
+        let cuts = vec![mk(0.32, 0.33, "#a"), mk(0.24, 0.32, "#b"), mk(0.22, 0.24, "#c"), mk(0.0, 0.22, "#d"), mk(-0.01, 0.0, "#e")];
+        assert_eq!(merge_thin_cuts(&cuts, 50.0).len(), 5, "1:50: alle Schichten");
+        let m = merge_thin_cuts(&cuts, 100.0);
+        assert_eq!(m.len(), 2, "{:?}", m.iter().map(|c| (c.fill.clone(), ring_bbox(&c.pts))).collect::<Vec<_>>());
+        let total: f64 = m.iter().map(|c| ring_area(&c.pts)).sum();
+        assert!((total - 5.0 * 0.34).abs() < 1e-4, "{total}");
+        let b = m.iter().find(|c| c.fill.as_deref() == Some("#b")).unwrap();
+        let bb = ring_bbox(&b.pts);
+        assert!((bb[1] - 0.24).abs() < 1e-5 && (bb[3] - 0.33).abs() < 1e-5, "Parkett geht im Unterlagsboden auf: {bb:?}");
+        let d = m.iter().find(|c| c.fill.as_deref() == Some("#d")).unwrap();
+        let bd = ring_bbox(&d.pts);
+        assert!((bd[1] + 0.01).abs() < 1e-5 && (bd[3] - 0.24).abs() < 1e-5, "Putz und Trittschall im Beton: {bd:?}");
+        // Trittschall 2 cm = 0.2 mm bei 1:100 → dünn, gleich lange Kanten: zur dickeren Nachbarschicht (Beton).
+        assert!(m.iter().all(|c| c.fill.as_deref() != Some("#c")));
+        // Anderes Bauteil verschmilzt nicht.
+        let mut other = cuts.clone();
+        other[0].source_id = Some("D2".into());
+        assert!(merge_thin_cuts(&other, 100.0).iter().any(|c| c.fill.as_deref() == Some("#a")));
     }
 
     #[test]

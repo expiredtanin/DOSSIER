@@ -21,7 +21,10 @@ const SILHOUETTE_MM: f64 = 0.18;
 /// [140] Abstand (m), bis zu dem eine Kante als Teil der Silhouette gilt.
 const SILHOUETTE_TOL: f64 = 2e-3;
 const FRAME_MM: f64 = 0.13;
-const GLASS_FILL_MONO: &str = "#c4c8cd";
+/// [140] Tusche (Schwarz-Weiss, Standard): Glas hellgrau, Schatten neutral grau und hell.
+const GLASS_FILL_MONO: &str = "#dcdcdc";
+const SHADOW_FILL_MONO: &str = "#c4c4c4";
+const OPENING_SHADOW_FILL_MONO: &str = "#d2d2d2";
 /// [140] Glas hellgrau statt blau (Farbe nur, wo der Nutzer sie setzt).
 const GLASS_FILL_COLOR: &str = "#d3d8dd";
 const SHADOW_FILL: &str = "#8f959e";
@@ -1433,7 +1436,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
                 })
                 .collect();
             i += 2 * count;
-            let mut prim = polygon(pts, SHADOW_FILL, "none", 0.0, no_hatch());
+            let mut prim = polygon(pts, if mono { SHADOW_FILL_MONO } else { SHADOW_FILL }, "none", 0.0, no_hatch());
             // [137] Klick auf den Schlagschatten wählt die Schatten-Einstellung der Ansicht (keine Element-Id).
             if let Primitive::Polygon { context_object_id, .. } = &mut prim {
                 *context_object_id = Some(crate::plan::extras::SITE_PICK_VIEW_SHADOWS.into());
@@ -1497,7 +1500,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             let f_v = min(0.3, 0.08 / max(h_v, 1e-6));
             for (fa0, fa1, fz0, fz1) in [(0.0, 1.0, 1.0 - f_v, 1.0), (0.0, f_u, 0.0, 1.0 - f_v)] {
                 let r = [quad_at(fa0, fz0), quad_at(fa1, fz0), quad_at(fa1, fz1), quad_at(fa0, fz1)];
-                push(polygon(to_vec(&r), OPENING_SHADOW_FILL, "none", 0.0, no_hatch()));
+                push(polygon(to_vec(&r), if mono { OPENING_SHADOW_FILL_MONO } else { OPENING_SHADOW_FILL }, "none", 0.0, no_hatch()));
             }
         }
         for (a, b) in &op.divisions {
@@ -1623,6 +1626,8 @@ fn pattern_style(sp: &SurfacePattern, comp: &Component) -> (f64, String) {
 }
 
 const PATTERN_INK: &str = "#3a3f47";
+/// [140] Ansichtsschraffur in Tusche: feines Grau (Materialstruktur tritt hinter die Kanten zurück).
+const MONO_PATTERN_INK: &str = "#8c8c8c";
 
 /// Linie der Ansichtsschraffur: Endpunkte, Verdeckungstiefe, Maler-Tiefe, Stil-Index.
 type PatternLine = (Pt, Pt, f64, f64, usize);
@@ -1740,7 +1745,7 @@ fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9], scale: f6
     }
     if mono {
         for s in &mut styles {
-            s.1 = PATTERN_INK.into();
+            s.1 = MONO_PATTERN_INK.into();
         }
     }
     (lines, styles)
@@ -1973,6 +1978,43 @@ mod tests {
         let n_mid = render(&p, 200.0).matches("elevation-surface-pattern").count();
         assert!(n_mid < n_fine && n_mid > 0, "{n_mid} vs {n_fine}");
         assert_eq!(render(&p, 2000.0).matches("elevation-surface-pattern").count(), 0, "grob: weggelassen");
+    }
+
+    /// [140] Tusche-Ansicht (Schwarz-Weiss, Standard): keine Materialfarben, Flächen weiss, Glas hellgrau,
+    /// Schatten und Ansichtsschraffur in neutralem Grau (Schatten bleiben).
+    #[test]
+    fn tusche_ansicht_ohne_materialfarben() {
+        let mut p = sample();
+        let outer = p.wall_types.iter().find(|t| t.id == "aw").unwrap().layers[0].component_id.clone();
+        let c = p.components.iter_mut().find(|c| c.id == outer).unwrap();
+        c.elevation_color = Some("#c0603a".into());
+        c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Lines, spacing: 0.1, color: Some("#a0522d".into()), ..Default::default() });
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let (prims, _) = elevation_primitives(&p, &level, true, true, &Visibility::default(), 50.0).unwrap().unwrap();
+        let neutral = |c: &str| c == "none" || crate::plan::extras::is_neutral(c);
+        let mut shadow = false;
+        let mut pattern = false;
+        for q in &prims {
+            match q {
+                Primitive::Polygon { fill, stroke, context_object_id, .. } => {
+                    assert!(neutral(fill) && neutral(stroke), "bunt: {fill} {stroke}");
+                    shadow |= context_object_id.as_deref() == Some(crate::plan::extras::SITE_PICK_VIEW_SHADOWS);
+                }
+                Primitive::Line { cls, color, .. } => {
+                    let c = color.as_deref().unwrap_or("#000");
+                    assert!(neutral(c), "bunte Linie {cls}: {c}");
+                    if cls == "elevation-surface-pattern" {
+                        pattern = true;
+                        assert_eq!(c, MONO_PATTERN_INK, "Muster grau, nicht schwarz");
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(shadow && pattern);
+        let json = serde_json::to_string(&prims).unwrap();
+        assert!(json.contains(GLASS_FILL_MONO) && !json.contains("#c0603a"));
     }
 
     /// [G3] Formöffnung: Rahmen als Umriss (viele Ecken), Glas eingerückt; [103] Dachfenster auf der

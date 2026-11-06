@@ -5,10 +5,11 @@
 //   dossier-cli <projekt.obp> info
 //   dossier-cli <projekt.obp> validate
 //   dossier-cli <projekt.obp> migrate [--out neu.obp]
-//   dossier-cli <projekt.obp> plan [--level EG] [--ceiling] [--scale 100] [--sketch] [--hatch] [--format svg|json] [--out eg.svg]
+//   dossier-cli <projekt.obp> plan [--level EG] [--ceiling] [--scale 100] [--sketch] [--hatch] [--color] [--format svg|json] [--out eg.svg]
 //                                                  json = render2d-Szene (planToRenderScene)
-//   dossier-cli <projekt.obp> section <Name> [--sketch] [--hatch] [--out schnitt.svg]       (--format json: render2d-Szene)
-//   dossier-cli <projekt.obp> elevation <Name> [--sketch] [--hatch] [--out ansicht.svg]     (--sketch: Skizzenstil [67])
+//   dossier-cli <projekt.obp> section <Name> [--sketch] [--hatch] [--color] [--out schnitt.svg]       (--format json: render2d-Szene)
+//   dossier-cli <projekt.obp> elevation <Name> [--sketch] [--hatch] [--color] [--out ansicht.svg]     (--sketch: Skizzenstil [67])
+//                                                  --color: Darstellung „Farbig" statt Tusche (Standard, [140])
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
@@ -446,6 +447,11 @@ async function importAny(path: string, args: Args): Promise<Project> {
   return fail(`Eingabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc, pdf, obj, stl, gltf, glb, ply)`);
 }
 
+/** [140] Darstellung wie der App-Standard „Tusche" (Schwarz-Weiss); `--color` = „Farbig". */
+function inkArg(args: Args): boolean {
+  return !(args.flags.has("color") && args.flags.get("color") !== "false");
+}
+
 /** `convert <eingabe> <ausgabe>`: Eingabe nach Endung lesen, Ausgabe nach Endung schreiben, dann `--cmd` ausführen. */
 async function convert(input: string | undefined, output: string | undefined, args: Args): Promise<number> {
   if (!input || !output) {
@@ -606,7 +612,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         if (!own) planProject = { ...project, drawingLevels: [...project.drawingLevels, lvl] };
       }
       // Massstab geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken nach Massstab).
-      const plan = generatePlan(withSketch(planProject, lvl.id, args), lvl.id, allCodes, undefined, "mittel", false, false, true, scale);
+      const plan = generatePlan(withSketch(planProject, lvl.id, args), lvl.id, allCodes, undefined, "mittel", false, inkArg(args), true, scale);
       if (args.flags.get("format") === "json") {
         out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
         return 0;
@@ -628,9 +634,9 @@ async function execute(project: Project, file: string, command: string, rest: st
         const o = await computeSection(sp, lvl);
         if (!o) fail("keine gültige Schnittlinie");
         // Wie die App: verdeckte Kanten nach der Ebene, geschnittene Fenster/Türen.
-        plan = generateSectionPlan(o, false, { visibleCodes: allCodes, hiddenLines: lvl.hiddenLines, openings: true, scaleDenominator: scale });
+        plan = generateSectionPlan(o, inkArg(args), { visibleCodes: allCodes, hiddenLines: lvl.hiddenLines, openings: true, scaleDenominator: scale });
       } else {
-        plan = generateElevationPlan(sp, lvl, { scaleDenominator: scale });
+        plan = generateElevationPlan(sp, lvl, { scaleDenominator: scale, mono: inkArg(args) });
         if (!plan) fail("keine gültige Ansichtslinie");
       }
       if (args.flags.get("format") === "json") {

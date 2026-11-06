@@ -11,8 +11,11 @@ pub type P = (f64, f64);
 
 /// Überstand der Achsen über die äusserste Querachse (Meter).
 pub const DEFAULT_EXTEND: f64 = 1.5;
-/// Blasen-Durchmesser (Papier-mm).
-pub const DEFAULT_BUBBLE_MM: f64 = 8.0;
+/// Blasen-Durchmesser (Papier-mm, bei 1:100; [140] 5 statt 8 mm).
+pub const DEFAULT_BUBBLE_MM: f64 = 5.0;
+/// [140] Ab 1:200 schrumpft die Blase samt Text auf 4/5 (5 → 4 mm): der Plan ist dort kleiner, eine
+/// feste Papiergrösse wirkte in 1:500 übergross.
+pub const SMALL_SCALE_BUBBLE: f64 = 0.8;
 
 /// Verlauf einer Achse: Strecke oder Kreisbogen (gegen den Uhrzeigersinn von `a0` nach `a1`).
 #[derive(Clone, Debug, PartialEq)]
@@ -301,7 +304,8 @@ pub fn visible_on(d: &Drawing2D, level: &str) -> bool {
 
 /// Bildmass der Blase (Durchmesser, Modell-Meter) aus Papier-mm und Massstab.
 pub fn bubble_diameter(mm: Option<f64>, scale: f64) -> f64 {
-    mm.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(DEFAULT_BUBBLE_MM) * scale / 1000.0
+    let k = if scale >= 200.0 { SMALL_SCALE_BUBBLE } else { 1.0 };
+    mm.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(DEFAULT_BUBBLE_MM) * k * scale / 1000.0
 }
 
 /// Senkrechte Achsen eines Schnitts/einer Ansicht: Raster-Achsen (nur Strecken) als (Beschriftung,
@@ -347,6 +351,15 @@ pub fn polyline(ax: &Axis) -> Vec<P> {
 
 #[cfg(test)]
 mod tests {
+    /// [140] Achsblase: 5 mm Papier bei 1:100 (und 1:50), 4 mm ab 1:200; eigene Grösse ebenso verkleinert.
+    #[test]
+    fn blase_papiergroesse_je_massstab() {
+        let paper = |mm: Option<f64>, n: f64| super::bubble_diameter(mm, n) * 1000.0 / n;
+        assert!((paper(None, 100.0) - 5.0).abs() < 1e-9 && (paper(None, 50.0) - 5.0).abs() < 1e-9);
+        assert!((paper(None, 200.0) - 4.0).abs() < 1e-9 && (paper(None, 500.0) - 4.0).abs() < 1e-9);
+        assert!((paper(Some(6.0), 500.0) - 4.8).abs() < 1e-9);
+    }
+
     use super::*;
     use crate::model::Vec2;
 
