@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { ModelRect } from "./geometry";
+import { defaultViewFor, MIN_FIT_EXTENT_M, PAD, PX_PER_M, type ModelRect } from "./geometry";
 import type { Primitive } from "../generatePlan";
 import { PlanPickIndex } from "./planPick";
 
@@ -109,5 +109,28 @@ describe("marqueeHitDrawings — Kreis/Bogen/Text/Bild", () => {
     const rightRect: ModelRect = { minX: 10, minY: -10, maxX: 20, maxY: 10 };
     expect(marqueeHitDrawings(prims, rightRect, true)).toEqual(["c2"]);
     expect(marqueeHitDrawings(prims, rightRect, false)).toEqual([]);
+  });
+});
+
+describe("defaultViewFor [147]", () => {
+  it("leeres Projekt (Platzhalter 0,0–1,1) → Standardausschnitt von 30 m statt 1 m", () => {
+    const v = defaultViewFor({ minX: 0, minY: 0, maxX: 1, maxY: 1 });
+    expect(v.w).toBeCloseTo(MIN_FIT_EXTENT_M * PX_PER_M + 2 * PAD);
+    expect(v.h).toBeCloseTo(MIN_FIT_EXTENT_M * PX_PER_M + 2 * PAD);
+    expect(v.x + v.w / 2).toBeCloseTo(0.5 * PX_PER_M);
+    expect(v.y + v.h / 2).toBeCloseTo(-0.5 * PX_PER_M);
+  });
+  it("ungültige Grenzen (NaN/Infinity) → endlicher Standardausschnitt", () => {
+    const v = defaultViewFor({ minX: NaN, minY: 0, maxX: Infinity, maxY: 1 });
+    expect([v.x, v.y, v.w, v.h].every(Number.isFinite)).toBe(true);
+    expect(v.w).toBeGreaterThan(0);
+  });
+  it("normales Modell bleibt unverändert eingepasst (Rand PAD)", () => {
+    const v = defaultViewFor({ minX: 0, minY: 0, maxX: 40, maxY: 35 });
+    expect(v).toEqual({ x: -PAD, y: -35 * PX_PER_M - PAD, w: 40 * PX_PER_M + 2 * PAD, h: 35 * PX_PER_M + 2 * PAD });
+  });
+  it("ohne Mindestkante (Blatt) keine Erweiterung", () => {
+    const v = defaultViewFor({ minX: 0, minY: 0, maxX: 2, maxY: 1 }, 0, 0);
+    expect(v.w).toBeCloseTo(2 * PX_PER_M);
   });
 });

@@ -77,6 +77,8 @@ import type { NotifyKind } from "./notifySlice";
 /** Felder, die diese Slice in den RootState beisteuert. */
 export interface ProjectSlice {
   project: Project;
+  /** Zählt Projektwechsel ({@link loadProject}/{@link openProjectFile}); Ansichten passen sich dann neu ein ([147]). */
+  projectEpoch: number;
 
   // ── Projekt direkt setzen (für Werkzeuge/Transformationen aus App) ────────
   /**
@@ -575,6 +577,7 @@ export function createProjectSlice(
     // bevor eine der drei Optionen (Neu/Öffnen/Zuletzt) das echte Projekt
     // setzt. Der konkrete Wert spielt daher praktisch keine Rolle mehr.
     project: sampleProject,
+    projectEpoch: 0,
 
     setProject,
     applyChange,
@@ -604,7 +607,7 @@ export function createProjectSlice(
     loadProject: (next) => {
       const doc = storeDocument(get().project);
       doc.load(next);
-      set({ project: next, ...historyPatch(doc) });
+      set({ project: next, projectEpoch: get().projectEpoch + 1, ...historyPatch(doc) });
       resetViewTabs(); // [136] neues Projekt: ein Reiter mit der aktuellen Ansicht
     },
 
@@ -612,7 +615,7 @@ export function createProjectSlice(
       const doc = storeDocument(get().project);
       const r = doc.loadFile(text);
       if (r.ok) {
-        set({ project: r.project, ...historyPatch(doc) });
+        set({ project: r.project, projectEpoch: get().projectEpoch + 1, ...historyPatch(doc) });
         resetViewTabs(); // [136]
       }
       return r;
