@@ -1416,10 +1416,20 @@ pub fn is_stamp_obstacle(g: &Drawing2DGeom) -> bool {
 /// [140] Primitive der gezeichneten Zeichnungen des Geschosses, denen Raumstempel ausweichen
 /// ([`is_stamp_obstacle`]), wie [`plan_drawings`] sie zeichnet.
 pub fn stamp_obstacle_prims(c: &Ctx) -> Vec<Primitive> {
+    prims_where(c, is_stamp_obstacle)
+}
+
+/// [150] Blasen und Beschriftungen der Achsraster des Geschosses (ohne die Achsen): Höhenlinien-Beschriftungen
+/// weichen ihnen aus.
+pub fn grid_bubble_prims(c: &Ctx) -> Vec<Primitive> {
+    prims_where(c, |g| matches!(g, Drawing2DGeom::Grid { .. })).into_iter().filter(|q| matches!(q, Primitive::DrawingCircle { .. } | Primitive::DrawingText { .. })).collect()
+}
+
+fn prims_where(c: &Ctx, pred: impl Fn(&Drawing2DGeom) -> bool) -> Vec<Primitive> {
     let mut out = Out::default();
     let mut memo = Memo::default();
     let mut sink = Sink::new(Target::Vec(&mut out), Keep::All);
-    for d in c.p.drawings2d.iter().filter(|d| is_stamp_obstacle(&d.geom) && on_floor(c, d)) {
+    for d in c.p.drawings2d.iter().filter(|d| pred(&d.geom) && on_floor(c, d)) {
         let m = memo.get(c, d);
         if !m.shown {
             continue;
