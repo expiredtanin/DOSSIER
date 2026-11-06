@@ -76,8 +76,8 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
         if code.is_some_and(|k| !c.shown(k)) {
             continue;
         }
-        // [137] Einzeln ausgeblendetes Gelände (Kategorie bleibt sichtbar).
-        if matches!(obj, ContextObject::TerrainMesh(t) if t.hidden == Some(true)) {
+        // [137] Einzeln ausgeblendetes Gelände bzw. importiertes Netz (Kategorie bleibt sichtbar).
+        if matches!(obj, ContextObject::TerrainMesh(t) if t.hidden == Some(true)) || matches!(obj, ContextObject::ImportedMesh(m) if m.hidden == Some(true)) {
             continue;
         }
         match obj {

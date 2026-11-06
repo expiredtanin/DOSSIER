@@ -5120,6 +5120,11 @@ pub struct ImportedMesh {
     #[serde(rename = "creaseAngle", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub crease_angle: Option<f64>,
+    /// [137] Nur dieses Netz ausblenden (Grundriss, Schnitt, Ansicht, 3D, Pick); die Kategorie bleibt
+    /// davon unberührt. Fehlt/false = sichtbar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hidden: Option<bool>,
     pub positions: Vec<f64>,
     pub indices: Vec<f64>,
     #[serde(flatten)]

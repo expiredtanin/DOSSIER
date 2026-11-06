@@ -2131,6 +2131,7 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
         match obj {
             // [137] Einzeln ausgeblendetes Gelände.
             ContextObject::TerrainMesh(m) if m.hidden == Some(true) => {}
+            ContextObject::ImportedMesh(m) if m.hidden == Some(true) => {}
             ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => {
                 // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben auf das geänderte Netz übertragen).
                 let (pos, idx, _) = crate::excavation::terrain_model_mesh(p, m);
@@ -2357,6 +2358,24 @@ pub struct PickSolid {
     pub solid_id: String,
 }
 
+/// [137] Treppen-Geländer (Handlauf, Pfosten) für den 3D-Pick: Welt-Dreiecke; ragen über die Hülle
+/// ([`PickStair`]) hinaus (oberes Podest).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickStairMesh {
+    pub tris: Vec<Tri>,
+    pub stair_id: String,
+}
+
+/// [137] Flächige Pick-Form eines 2D-Elements, das im 3D keine Linie ist (Kreis, Bogen, Ellipse, Text): Welt-Dreiecke
+/// auf Geschosshöhe.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickDrawingMesh {
+    pub tris: Vec<Tri>,
+    pub drawing_id: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PickGeometry {
     pub walls: Vec<RWall>,
@@ -2374,6 +2393,12 @@ pub struct PickGeometry {
     #[serde(rename = "openingMeshes")]
     pub opening_meshes: Vec<PickOpeningMesh>,
     pub drawings: Vec<PickDrawingSeg>,
+    /// [137] Treppengeländer.
+    #[serde(rename = "stairMeshes")]
+    pub stair_meshes: Vec<PickStairMesh>,
+    /// [137] Kreise, Bögen, Ellipsen und Texte als flache Pick-Flächen.
+    #[serde(rename = "drawingMeshes")]
+    pub drawing_meshes: Vec<PickDrawingMesh>,
 }
 
 /// Öffnungen als Quader (Laibung zu Laibung, Wanddicke, Brüstung bis Sturz) für Pick und Hervorhebung.
@@ -2456,7 +2481,7 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
             ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
             _ => None,
         };
-        if code.is_some_and(|c| hidden.contains(c)) || matches!(obj, ContextObject::TerrainMesh(m) if m.hidden == Some(true)) {
+        if code.is_some_and(|c| hidden.contains(c)) || matches!(obj, ContextObject::TerrainMesh(m) if m.hidden == Some(true)) || matches!(obj, ContextObject::ImportedMesh(m) if m.hidden == Some(true)) {
             continue;
         }
         let (pos, idx, id) = match obj {
@@ -2525,7 +2550,83 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         solids: pick_solids(p),
         opening_meshes: pick_hosted_openings(p),
         drawings: pick_drawing_segs(p, &HashMap::new()),
+        stair_meshes: pick_stair_railings(p),
+        drawing_meshes: pick_drawing_meshes(p, &HashMap::new()),
     })
+}
+
+/// [137] Handläufe und Pfosten der Treppen als Welt-Dreiecke je Treppe (wie [`emit_stair_railings`]).
+pub fn pick_stair_railings(p: &Project) -> Vec<PickStairMesh> {
+    let Some((stairs, buf)) = stair_input(p, |s, st| matches!(s.shape, StairShape::Straight | StairShape::Spiral) && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) else { return vec![] };
+    let mut out: Vec<PickStairMesh> = Vec::new();
+    for m in crate::stairs3d::railings(&buf) {
+        let Some(&(_, stair)) = stairs.get(m.src) else { continue };
+        let tris = extrusion_tris(&m.positions, &m.indices);
+        match out.iter_mut().find(|o| o.stair_id == stair.id) {
+            Some(o) => o.tris.extend(tris),
+            None => out.push(PickStairMesh { tris, stair_id: stair.id.clone() }),
+        }
+    }
+    out.retain(|o| !o.tris.is_empty());
+    out
+}
+
+/// [137] Kreis, Bogen, Ellipse und Text (im 3D nicht als Linie gezeichnet, z. B. Bäume und Symbole) als flache
+/// Pick-Flächen auf Geschosshöhe (+ `lift` der Explosion): Kreis/Ellipse als Scheibe, Bogen als Band der
+/// Pick-Toleranz, Text als gedrehtes Rechteck (Breite ≈ 0.6 · Höhe je Zeichen bzw. Spaltenbreite).
+pub(crate) fn pick_drawing_meshes(p: &Project, lift: &HashMap<String, f64>) -> Vec<PickDrawingMesh> {
+    const N: usize = 32;
+    let mut out = Vec::new();
+    for d in &p.drawings2d {
+        let elev = p.floor(&d.level_id).map_or(0.0, |l| l.base_elevation.unwrap_or(0.0)) + DRAWING_LINE_ELEVATION_EPS + lift.get(d.level_id.as_str()).copied().unwrap_or(0.0);
+        let mut tris: Vec<Tri> = Vec::new();
+        let at = |x: f64, y: f64| -> V3 { [x, elev, y] };
+        let fan = |c: Vec2, rx: f64, ry: f64, rot: f64, tris: &mut Vec<Tri>| {
+            let (sr, cr) = (rot.sin(), rot.cos());
+            let pt = |i: usize| {
+                let a = std::f64::consts::TAU * (i % N) as f64 / N as f64;
+                let (x, y) = (rx * a.cos(), ry * a.sin());
+                at(c.x + x * cr - y * sr, c.y + x * sr + y * cr)
+            };
+            for i in 0..N {
+                tris.push([at(c.x, c.y), pt(i), pt(i + 1)]);
+            }
+        };
+        match &d.geom {
+            Drawing2DGeom::Circle { center, r } if r.is_finite() && *r > 0.0 => fan(*center, r.max(DRAWING_PICK_TOLERANCE), r.max(DRAWING_PICK_TOLERANCE), 0.0, &mut tris),
+            Drawing2DGeom::Ellipse { center, rx, ry, rotation } if rx.is_finite() && ry.is_finite() && rotation.is_finite() && *rx > 0.0 && *ry > 0.0 => fan(*center, rx.max(DRAWING_PICK_TOLERANCE), ry.max(DRAWING_PICK_TOLERANCE), *rotation, &mut tris),
+            Drawing2DGeom::Arc { center, r, a0, a1 } if [r, a0, a1].iter().all(|v| v.is_finite()) && *r > 0.0 => {
+                let mut sweep = (a1 - a0) % std::f64::consts::TAU;
+                if sweep <= 0.0 {
+                    sweep += std::f64::consts::TAU;
+                }
+                let (ri, ro) = ((r - DRAWING_PICK_TOLERANCE).max(0.0), r + DRAWING_PICK_TOLERANCE);
+                let pt = |i: usize, rr: f64| {
+                    let a = a0 + sweep * i as f64 / N as f64;
+                    at(center.x + rr * a.cos(), center.y + rr * a.sin())
+                };
+                for i in 0..N {
+                    tris.push([pt(i, ri), pt(i, ro), pt(i + 1, ro)]);
+                    tris.push([pt(i, ri), pt(i + 1, ro), pt(i + 1, ri)]);
+                }
+            }
+            Drawing2DGeom::Text { at: pos, text, height, angle, width, .. } if height.is_finite() && *height > 0.0 && angle.is_finite() => {
+                let lines = text.lines().count().max(1) as f64;
+                let longest = text.lines().map(|l| l.chars().count()).max().unwrap_or(0).max(1) as f64;
+                let w = width.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(longest * 0.6 * height).max(*height);
+                let h = (lines * height * 1.2).max(*height);
+                let (sa, ca) = (angle.sin(), angle.cos());
+                let c = |x: f64, y: f64| at(pos.x + x * ca - y * sa, pos.y + x * sa + y * ca);
+                tris.push([c(0.0, 0.0), c(w, 0.0), c(w, h)]);
+                tris.push([c(0.0, 0.0), c(w, h), c(0.0, h)]);
+            }
+            _ => {}
+        }
+        if !tris.is_empty() {
+            out.push(PickDrawingMesh { tris, drawing_id: d.id.clone() });
+        }
+    }
+    out
 }
 
 /// [137] Öffnungen in Dach, Decke oder Gaube (Dachfenster, Deckenöffnung, Gaubenfenster): ihre 3D-Teile
@@ -3053,5 +3154,80 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn pick_base(extra: serde_json::Value) -> Project {
+        let mut v = serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+            "drawingLevels": [{"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 1.0}],
+            "drawings2d": []
+        });
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// [137] Treppengeländer sind im 3D anwählbar: Handlauf-Dreiecke tragen die Treppen-Id und reichen über die Hülle.
+    #[test]
+    fn pick_treppengelaender_im_3d() {
+        let mk = |railing: &str| {
+            pick_base(serde_json::json!({
+                "stairTypes": [{"id": "t", "name": "T", "structure": "massiv", "closedRisers": false, "treadThickness": 0.04, "railing": railing, "defaultWidth": 1.0}],
+                "stairs": [{"id": "s1", "type": "stair", "floorId": "EG", "categoryCode": "35", "shape": "straight", "start": {"x": 0, "y": 0}, "dir": {"x": 1, "y": 0},
+                    "runLength": 3.0, "width": 1.0, "stepCount": 16, "totalRise": 2.8, "typeId": "t"}]
+            }))
+        };
+        assert!(pick_geometry(&mk("keine")).unwrap().stair_meshes.is_empty());
+        let g = pick_geometry(&mk("beide")).unwrap();
+        assert_eq!(g.stair_meshes.len(), 1);
+        assert_eq!(g.stair_meshes[0].stair_id, "s1");
+        assert!(!g.stair_meshes[0].tris.is_empty());
+        let top = g.stair_meshes[0].tris.iter().flatten().map(|q| q[1]).fold(f64::MIN, f64::max);
+        assert!(top > g.stairs[0].z_top, "Geländer über der OK der Treppe: {top} > {}", g.stairs[0].z_top);
+    }
+
+    /// [137] Kreis, Bogen und Text (Bäume, Symbole) bekommen flache Pick-Flächen auf Geschosshöhe.
+    #[test]
+    fn pick_kreis_bogen_text_im_3d() {
+        let d = |id: &str, geom: serde_json::Value| serde_json::json!({"id": id, "type": "drawing2d", "levelId": "EG", "categoryCode": "20", "geom": geom});
+        let p = pick_base(serde_json::json!({"drawings2d": [
+            d("c", serde_json::json!({"shape": "circle", "center": {"x": 2, "y": 3}, "r": 1.5})),
+            d("a", serde_json::json!({"shape": "arc", "center": {"x": 10, "y": 0}, "r": 2.0, "a0": 0.0, "a1": std::f64::consts::FRAC_PI_2})),
+            d("t", serde_json::json!({"shape": "text", "at": {"x": 20, "y": 0}, "text": "Baum", "height": 0.5, "angle": 0.0})),
+            d("l", serde_json::json!({"shape": "line", "a": {"x": 0, "y": 0}, "b": {"x": 1, "y": 0}}))
+        ]}));
+        let g = pick_geometry(&p).unwrap();
+        let ids: Vec<&str> = g.drawing_meshes.iter().map(|m| m.drawing_id.as_str()).collect();
+        assert_eq!(ids, ["c", "a", "t"]);
+        for m in &g.drawing_meshes {
+            assert!(m.tris.iter().flatten().all(|q| (q[1] - 1.01).abs() < 1e-9), "Geschosshöhe + EPS");
+        }
+        // Scheibe: Mittelpunkt (2, 3) liegt in einem Dreieck, ein Punkt ausserhalb nicht.
+        let inside = |tris: &[Tri], x: f64, z: f64| {
+            tris.iter().any(|t| {
+                let s = |a: V3, b: V3| (b[0] - a[0]) * (z - a[2]) - (b[2] - a[2]) * (x - a[0]);
+                let (d1, d2, d3) = (s(t[0], t[1]), s(t[1], t[2]), s(t[2], t[0]));
+                !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
+            })
+        };
+        assert!(inside(&g.drawing_meshes[0].tris, 2.5, 3.5) && !inside(&g.drawing_meshes[0].tris, 4.0, 3.0));
+        // Bogen: auf dem Bogen ja, im Zentrum nein.
+        assert!(inside(&g.drawing_meshes[1].tris, 10.0 + 2.0 * 0.5f64.sqrt(), 2.0 * 0.5f64.sqrt()) && !inside(&g.drawing_meshes[1].tris, 10.0, 0.0));
+        // Text: 4 Zeichen · 0.6 · 0.5 = 1.2 m breit.
+        assert!(inside(&g.drawing_meshes[2].tris, 21.0, 0.2) && !inside(&g.drawing_meshes[2].tris, 22.0, 0.2));
+    }
+
+    /// [137] Einzeln ausgeblendetes importiertes Netz: weder im 3D noch als Pick-Dreiecke.
+    #[test]
+    fn importiertes_netz_einzeln_ausgeblendet() {
+        let mk = |hidden: Option<bool>| Project {
+            context: Some(vec![ContextObject::ImportedMesh(ImportedMesh { id: "m".into(), hidden, positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], ..Default::default() })]),
+            ..Default::default()
+        };
+        assert_eq!(emit_context_meshes(&mk(None)).len(), 1);
+        assert_eq!(pick_geometry(&mk(None)).unwrap().context_meshes.len(), 1);
+        assert!(emit_context_meshes(&mk(Some(true))).is_empty());
+        assert!(pick_geometry(&mk(Some(true))).unwrap().context_meshes.is_empty());
     }
 }

@@ -18,7 +18,7 @@
 
 
 import { DRAWING_PICK_TOLERANCE } from "../core";
-import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh } from "../core";
+import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickStairMesh, PickDrawingMesh } from "../core";
 
 /** Kamera-Parameter für den Pick-Strahl (Teilmenge von Camera3d). */
 export interface RayCamera {
@@ -360,6 +360,8 @@ export function pickNearest(
   columns?: readonly PickColumnMesh[],
   solids?: readonly PickSolidMesh[],
   openingMeshes?: readonly PickOpeningMesh[],
+  stairMeshes?: readonly PickStairMesh[],
+  drawingMeshes?: readonly PickDrawingMesh[],
 ): PickHit | null;
 /**
  * Nächstes getroffenes Bauteil (kleinstes t) über Wände, Decken, Öffnungen und
@@ -382,6 +384,8 @@ export function pickNearest(
   columns: readonly PickColumnMesh[] = [],
   solids: readonly PickSolidMesh[] = [],
   openingMeshes: readonly PickOpeningMesh[] = [],
+  stairMeshes: readonly PickStairMesh[] = [],
+  drawingMeshes: readonly PickDrawingMesh[] = [],
 ): PickHit | null {
   const TIE_EPS = 1e-6;
   let hit: PickHit | null = null;
@@ -446,6 +450,16 @@ export function pickNearest(
   for (const o of openingMeshes) {
     const t = rayContextMeshTris(ray, { tris: o.tris, contextObjectId: o.openingId });
     if (t !== null) consider({ kind: "opening", id: o.openingId, t, openingId: o.openingId }, 0);
+  }
+  // [137] Treppengeländer (über der Hülle, oberes Podest): Rang wie Treppe.
+  for (const m of stairMeshes) {
+    const t = rayContextMeshTris(ray, { tris: m.tris, contextObjectId: m.stairId });
+    if (t !== null) consider({ kind: "stair", id: m.stairId, t, stairId: m.stairId }, 0);
+  }
+  // [137] Kreise/Bögen/Texte (Bäume, Symbole): flache Fläche, Rang wie die Linien-Spur.
+  for (const m of drawingMeshes) {
+    const t = rayContextMeshTris(ray, { tris: m.tris, contextObjectId: m.drawingId });
+    if (t !== null) consider({ kind: "drawing", id: m.drawingId, t, drawingId: m.drawingId }, 0);
   }
   return hit;
 }

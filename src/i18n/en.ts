@@ -2097,6 +2097,8 @@ export const en: Record<TranslationKey, string> = {
   "site.terrain.smooth.hint": "Regenerate the terrain from its contour lines (breaklines kept, one undo step)",
   "site.terrain.smooth.raw": "raw (no smoothing)",
   "site.terrain.smooth.level": "Level {n}",
+  "site.mesh.visible": "This mesh visible",
+  "site.mesh.visible.hint": "Hides only this imported mesh (plan, 3D, selection); the category stays on",
   "site.terrain.meshVisible": "This terrain visible",
   "site.terrain.meshVisible.hint": "Hides only this terrain mesh (plan, section, elevation, 3D); the category stays on",
   "site.terrain.resmooth.hint": "Smooth grid terrain (swissALTI3D) further — acts on the grid heights, one undo step",

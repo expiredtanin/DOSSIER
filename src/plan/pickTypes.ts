@@ -114,6 +114,18 @@ export interface PickSolidMesh {
   solidId: string;
 }
 
+/** [137] Treppengeländer (Handlauf, Pfosten): WORLD-Dreiecke; ragen über die Treppen-Hülle hinaus. */
+export interface PickStairMesh {
+  tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
+  stairId: string;
+}
+
+/** [137] Flache Pick-Fläche eines 2D-Elements ohne Linien-Spur (Kreis, Bogen, Ellipse, Text) auf Geschosshöhe. */
+export interface PickDrawingMesh {
+  tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
+  drawingId: string;
+}
+
 /** [137] Öffnung ohne Wand (Dachfenster, Deckenöffnung, Gaubenfenster): WORLD-Dreiecke ihrer 3D-Teile. */
 export interface PickOpeningMesh {
   tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;

@@ -189,7 +189,9 @@ pub fn drawing_line_verts(p: &Project, gap: f64) -> Vec<f32> {
 pub fn pick_geometry(p: &Project, gap: f64) -> Result<PickGeometry, String> {
     let mut g = model3d::pick_geometry(p)?;
     let Some(ex) = Explode::new(p, gap) else { return Ok(g) };
-    g.drawings = model3d::pick_drawing_segs(p, &floor_offsets(p, gap));
+    let offsets = floor_offsets(p, gap);
+    g.drawings = model3d::pick_drawing_segs(p, &offsets);
+    g.drawing_meshes = model3d::pick_drawing_meshes(p, &offsets);
     for w in &mut g.walls {
         shift_wall(w, ex.of(&w.wall_id));
     }
@@ -208,6 +210,12 @@ pub fn pick_geometry(p: &Project, gap: f64) -> Result<PickGeometry, String> {
     for r in &mut g.roofs {
         let dz = ex.of(&r.roof_id);
         for v in r.tris.iter_mut().flatten() {
+            v[1] += dz;
+        }
+    }
+    for m in &mut g.stair_meshes {
+        let dz = ex.of(&m.stair_id);
+        for v in m.tris.iter_mut().flatten() {
             v[1] += dz;
         }
     }

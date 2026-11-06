@@ -1406,7 +1406,7 @@ export function Wasm3DViewport({
       const ndc = toNdc(clientX, clientY);
       if (!cb || !o || !ndc) return;
       const ray = cameraRay(orbitCamera(o), ndc.ndcX, ndc.ndcY, ndc.aspect);
-      const { walls, slabs, openings, stairs, roofs, contextMeshes, drawings, columns, solids, openingMeshes } = pickGeometry(
+      const { walls, slabs, openings, stairs, roofs, contextMeshes, drawings, columns, solids, openingMeshes, stairMeshes, drawingMeshes } = pickGeometry(
         projectRef.current,
         explodeRef.current,
       );
@@ -1414,7 +1414,7 @@ export function Wasm3DViewport({
       // Meshes + freie 2D-Zeichnungen (Linie/Polylinie/Rechteck, s.
       // `pickDrawingSegs`) — sonst wären im WASM-Viewport 2D-Elemente NIE
       // anwählbar gewesen (Nutzer-Report).
-      const hit = pickNearest(ray, walls, slabs, openings, stairs, roofs, contextMeshes, drawings, columns, solids, openingMeshes);
+      const hit = pickNearest(ray, walls, slabs, openings, stairs, roofs, contextMeshes, drawings, columns, solids, openingMeshes, stairMeshes, drawingMeshes);
       cb(hit ? { kind: hit.kind, id: hit.id } : null, additive);
     };
 

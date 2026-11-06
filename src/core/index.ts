@@ -164,6 +164,8 @@ export {
   type PickColumnMesh,
   type PickSolidMesh,
   type PickOpeningMesh,
+  type PickStairMesh,
+  type PickDrawingMesh,
   type PickDrawingSeg,
   type PickOpening,
   type PickRoof,

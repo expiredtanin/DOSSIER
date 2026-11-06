@@ -44,7 +44,7 @@ import type { Project, Vec2 } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 import { documentFor } from "../core/document";
 import { coreEpoch } from "../engine/coreWasm";
-import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickDrawingSeg } from "./pickTypes";
+import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickDrawingSeg, PickStairMesh, PickDrawingMesh } from "./pickTypes";
 import {
   type RMesh,
   type RModel3d,
@@ -332,6 +332,8 @@ export function pickGeometry(
   solids: PickSolidMesh[];
   openingMeshes: PickOpeningMesh[];
   drawings: PickDrawingSeg[];
+  stairMeshes: PickStairMesh[];
+  drawingMeshes: PickDrawingMesh[];
 } {
   const g = documentFor(project).query("pickGeometry", [explodeGap(explode)]) as ReturnType<typeof pickGeometry>;
   // [137] Freie Körper: das geladene truck-Netz (Loft, Rotation, Verjüngung, Rundung) statt der Prisma-Näherung des Kerns.

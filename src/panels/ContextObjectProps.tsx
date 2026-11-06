@@ -75,6 +75,15 @@ export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; qu
     // [T4] Glatt oder kantig schattieren, Knickwinkel je Mesh (Vorgabe 30°).
     return (
       <div className="site-props">
+        <label className="site-check" title={t("site.mesh.visible.hint")}>
+          <input
+            type="checkbox"
+            data-testid="imported-mesh-visible"
+            checked={obj.hidden !== true}
+            onChange={(e) => host.onPatchContextObject(obj.id, { hidden: e.target.checked ? undefined : true }, `site-${obj.id}-hidden`)}
+          />
+          {t("site.mesh.visible")}
+        </label>
         <label className="site-check">
           <input
             type="checkbox"

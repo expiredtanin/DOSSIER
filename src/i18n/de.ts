@@ -2111,6 +2111,8 @@ export const de = {
   "site.terrain.smooth.hint": "Gelände aus den Höhenlinien neu erzeugen (Bruchkanten bleiben, ein Undo-Schritt)",
   "site.terrain.smooth.raw": "roh (ohne Glättung)",
   "site.terrain.smooth.level": "Stufe {n}",
+  "site.mesh.visible": "Dieses Netz sichtbar",
+  "site.mesh.visible.hint": "Blendet nur dieses importierte Netz aus (Grundriss, 3D, Auswahl); die Kategorie bleibt eingeschaltet",
   "site.terrain.meshVisible": "Dieses Gelände sichtbar",
   "site.terrain.meshVisible.hint": "Blendet nur dieses Geländenetz aus (Grundriss, Schnitt, Ansicht, 3D); die Kategorie bleibt eingeschaltet",
   "site.terrain.resmooth.hint": "Raster-Gelände (swissALTI3D) zusätzlich glätten — wirkt auf die Höhen des Rasters, ein Undo-Schritt",

@@ -2670,11 +2670,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Hervorhebung), vitest `toWalls3d.pickSolids.test.ts` (Strahl auf Körper, truck-Netz statt Prisma, Stütze lagerichtig,
   Hervorhebung, Gelände ausgeblendet), `siteSelection.test.ts` (Nachglätten mit Undo), e2e `siteSelect.spec.ts`
   (Netz ausblenden + Undo). Linux-Container; 3D-Pick nur als Unit-Test (headless kein WebGPU), nicht in der Tauri-App.
-  Offen: im 3D nicht anwählbar: Treppengeländer über der Treppen-Hülle
-  (oberes Podest), 2D-Kreise/Bögen/Texte (Bäume, Symbole: keine Pick-Box), Punktwolken, Baurechts-Hüllkörper und
-  Schnittbox (Hilfsdarstellung, Klick geht hindurch), Gauben nur als Teil des Dachs (keine eigene Auswahl);
-  importierte Meshes nur über die Kategorie ausblendbar; Raster-Gelände nur stärker glätten (rohe Höhen nicht
-  gespeichert). · M
+  (6.11., 3D-Rest) **Treppengeländer:** `model3d::pick_stair_railings` (Handlauf/Pfosten aus `stairs3d::railings`) →
+  `stairMeshes` der Pick-Geometrie, Treffer = Treppe (Rang wie Treppe; Explosion hebt mit). **2D-Kreise/Bögen/Ellipsen/Texte**
+  (Bäume, Symbole): `pick_drawing_meshes` → `drawingMeshes` (Scheibe bzw. Bogenband ±12 cm bzw. Text-Rechteck auf Geschosshöhe),
+  Treffer = Zeichnung. **Importierte Netze:** `ImportedMesh.hidden` (Rust-Modell, gen:types), Objekt-Info „Dieses Netz
+  sichtbar" (`imported-mesh-visible`); wirkt in Grundriss, 3D, Pick. **Gauben:** haben kein eigenes Auswahlmodell; der Klick
+  wählt das Dach, dessen Objekt-Info zeigt die Gauben-Felder (`DormersSection`) — so belassen. Tests: Rust (`pick_treppengelaender_im_3d`,
+  `pick_kreis_bogen_text_im_3d`, `importiertes_netz_einzeln_ausgeblendet`), vitest `toWalls3d.pickExtras.test.ts`. Linux-Container,
+  3D-Pick nur als Unit-Test (kein WebGPU), nicht in der Tauri-App; das Geländer (Rohr ~4 cm) ist schwer zu treffen.
+  Offen: Punktwolken, Baurechts-Hüllkörper und Schnittbox (Hilfsdarstellung, Klick geht hindurch); Raster-Gelände nur stärker
+  glätten (rohe Höhen nicht gespeichert); Texte im 3D weiterhin nur anwählbar, nicht gezeichnet. · M
   **(5.11., Plan und Blätter)** Klick-Zyklus wie in CAD üblich: ein erneuter einfacher Klick an derselben Stelle
   (≤ 5 px, kein Doppelklick < 400 ms, Auswahl unverändert) wählt das nächste Objekt darunter, Reihenfolge wie die
   Cmd/Strg+Klick-Liste; Statusleiste „2/8 Treffer — erneut klicken zum Wechseln". Gilt auch, wenn der Klick auf einen

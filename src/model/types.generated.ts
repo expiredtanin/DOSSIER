@@ -1549,6 +1549,11 @@ export type ImportedMesh = {
   smoothShading?: boolean;
   /** [T4] Knickwinkel in Grad für das glatte Schattieren (Default 30°). */
   creaseAngle?: number;
+  /**
+   * [137] Nur dieses Netz ausblenden (Grundriss, Schnitt, Ansicht, 3D, Pick); die Kategorie bleibt
+   * davon unberührt. Fehlt/false = sichtbar.
+   */
+  hidden?: boolean;
   positions: Array<number>;
   indices: Array<number>;
 };
