@@ -8,6 +8,7 @@
 //!
 //! Einheiten: Meter; Ausgabe in (u, v) = (entlang der Ebene, absolute Höhe).
 
+use super::overrides::RuleView;
 use super::prim::{HatchRender, Primitive};
 use super::style::*;
 use crate::jsmath::hypot2;
@@ -227,16 +228,17 @@ pub struct CutRules {
 }
 
 impl CutRules {
-    pub fn of(p: &Project, out: &Output) -> CutRules {
-        CutRules { loose: loose_fill_components(p), ov: cut_overrides(p, &out.cuts) }
+    /// `v`: Massstab und eingeschaltete Regeln der Darstellung ([`super::overrides::RuleView`]).
+    pub fn of(p: &Project, out: &Output, v: RuleView) -> CutRules {
+        CutRules { loose: loose_fill_components(p), ov: cut_overrides(p, &out.cuts, v) }
     }
 }
 
 /// [33] Overrides je Schnittfläche: Bauteil (Wand, Decke/Bodenplatte, Dach) und Schicht der Fläche, dann
 /// `overrides::layer_actions`. Ohne aktive Regel mit Schicht-Aktionen leer.
-pub fn cut_overrides(p: &Project, cuts: &[Cut]) -> Vec<Option<CutOv>> {
+pub fn cut_overrides(p: &Project, cuts: &[Cut], v: RuleView) -> Vec<Option<CutOv>> {
     use super::overrides::{has_layer_actions, is_ground_slab, layer_actions, LayerActions};
-    if !has_layer_actions(p) {
+    if !has_layer_actions(p, v) {
         return Vec::new();
     }
     let mut memo: HashMap<(u8, String), (Vec<Layer>, Vec<LayerActions>)> = HashMap::new();
@@ -260,18 +262,18 @@ pub fn cut_overrides(p: &Project, cuts: &[Cut]) -> Vec<Option<CutOv>> {
                     Kind::Wall => {
                         let w = p.walls.iter().find(|w| w.id == src)?;
                         let wt = p.wall_type_or_fallback(w);
-                        (wt.layers.clone(), layer_actions(p, "wall", &w.category_code, Some(&wt.name), &wt.layers))
+                        (wt.layers.clone(), layer_actions(p, v, "wall", &w.category_code, Some(&wt.name), &wt.layers))
                     }
                     Kind::Slab => {
                         let ce = ceilings.iter().find(|x| x.id == src)?;
                         let (name, layers) = model3d::ceiling_type_ref(p, ce).map_or((None, Project::fallback_layers()), |t| (Some(t.1), t.2));
                         let kind = if is_ground_slab(p, ce, layers) { "ground_slab" } else { "slab" };
-                        (layers.to_vec(), layer_actions(p, kind, &ce.category_code, name, layers))
+                        (layers.to_vec(), layer_actions(p, v, kind, &ce.category_code, name, layers))
                     }
                     _ => {
                         let r = roofs.iter().find(|x| x.id == src)?;
                         let layers = p.roof_layers(r);
-                        let acts = layer_actions(p, "roof", &r.category_code, None, &layers);
+                        let acts = layer_actions(p, v, "roof", &r.category_code, None, &layers);
                         (layers, acts)
                     }
                 };
@@ -3184,7 +3186,10 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
     let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
-    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out));
+    // [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (`rules`: ids; fehlt = Schalter im Projekt).
+    let on: Option<HashSet<String>> = v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect());
+    let rv = RuleView::at(scale, on.as_ref());
+    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out, rv));
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     super::extras::scale_line_weights(p, scale, &mut prims);
@@ -3444,7 +3449,7 @@ mod tests {
         let out = compute_section(&p, &l, &[]).unwrap().unwrap();
         let vis = Visibility::default();
         let stat = |scale: f64, detail: Detail, cut_hatch: bool| {
-            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, detail, cut_hatch, &CutRules::of(&p, &out));
+            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, detail, cut_hatch, &CutRules::of(&p, &out, RuleView::at(scale, None)));
             let cuts: Vec<_> = prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, stroke, wall_id, ceiling_id, .. } if wall_id.is_some() || ceiling_id.is_some() => Some((fill.clone(), hatch.pattern, stroke.clone())), _ => None }).collect();
             let outline = prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "section-cut-outline")).count();
             (cuts, outline)
@@ -3469,7 +3474,7 @@ mod tests {
         let out = compute_section(&p, &l, &[]).unwrap().unwrap();
         let vis = Visibility::default();
         let slab = |p: &Project, scale: f64| {
-            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, Detail::Mittel, false, &CutRules::of(p, &out));
+            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, Detail::Mittel, false, &CutRules::of(p, &out, RuleView::at(scale, None)));
             prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, stroke, ceiling_id: Some(_), .. } => Some((fill.clone(), hatch.pattern, stroke.clone())), _ => None }).collect::<Vec<_>>()
         };
         let before = slab(&p, 100.0);
@@ -3482,19 +3487,23 @@ mod tests {
         // Standardregel geladen, aber aus: nichts ändert sich.
         p.override_rules = Some(crate::standards::override_rules().into_iter().map(|v| serde_json::from_value(v).unwrap()).collect());
         assert_eq!(slab(&p, 100.0), before);
-        assert!(cut_overrides(&p, &out.cuts).is_empty());
+        assert!(cut_overrides(&p, &out.cuts, RuleView::at(100.0, None)).is_empty());
         p.override_rules.as_mut().unwrap()[0].enabled = true;
         let after = slab(&p, 100.0);
         let white: Vec<_> = after.iter().filter(|(f, _, _)| f == "#ffffff").collect();
         assert_eq!(white.len(), screed, "Estrich + Dämmung je Stück als eine Fläche: {after:?}");
         assert!(white.iter().all(|w| (w.1, w.2.as_str()) == (HatchPattern::None, SECTION_INK)));
         assert_eq!(after.iter().filter(|(f, _, s)| f == HATCH_INK && s == "none").count(), concrete, "Betondecke bleibt schwarz");
+        // Massstab-Kriterium der Standardregel: erst ab 1:100 — im 1:50 bleibt der Aufbau schraffiert.
+        let at50 = slab(&p, 50.0);
+        assert!(at50.iter().all(|(f, _, _)| f != "#ffffff"), "1:50 ohne Regel: {at50:?}");
+        p.override_rules.as_mut().unwrap()[0].min_scale = None;
         let at50 = slab(&p, 50.0);
         assert_eq!(at50.iter().filter(|(f, h, _)| f == "#ffffff" && *h == HatchPattern::None).count(), screed);
         assert!(at50.iter().any(|(f, h, _)| f != "#ffffff" && *h != HatchPattern::None), "Beton 1:50 schraffiert");
         // Wände unberührt (Regel gilt nur für Decken).
         let walls = |p: &Project| {
-            let (prims, _) = section_primitives_at(&out, true, false, &vis, 100.0, Detail::Mittel, false, &CutRules::of(p, &out));
+            let (prims, _) = section_primitives_at(&out, true, false, &vis, 100.0, Detail::Mittel, false, &CutRules::of(p, &out, RuleView::at(100.0, None)));
             prims.iter().filter(|q| matches!(q, Primitive::Polygon { wall_id: Some(_), fill, .. } if fill != HATCH_INK)).count()
         };
         assert_eq!(walls(&p), 0);

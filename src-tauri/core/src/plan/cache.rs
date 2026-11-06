@@ -133,7 +133,13 @@ impl Clone for PlanCache {
 
 /// Schlüssel eines Argument-Satzes ohne Sichtbarkeit/Dimmen (die wirken je Element).
 pub fn ctx_key(a: &PlanArgs) -> String {
-    format!("{}\u{1}{:?}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}", a.floor, a.detail, a.reference_lines, a.global, a.scale.to_bits(), a.for_print, a.compact, a.mono, a.auto_coarse)
+    // [33] Eingeschaltete Override-Regeln eines Viewports (sortiert; "-" = Schalter im Projekt).
+    let rules = a.rules.as_ref().map_or_else(|| "-".to_string(), |r| {
+        let mut v: Vec<&str> = r.iter().map(String::as_str).collect();
+        v.sort_unstable();
+        v.join("\u{2}")
+    });
+    format!("{}\u{1}{:?}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}", a.floor, a.detail, a.reference_lines, a.global, a.scale.to_bits(), a.for_print, a.compact, a.mono, a.auto_coarse, rules)
 }
 
 /// Sichtbarkeit und Dimmen als vergleichbarer Text (Mengen sortiert).

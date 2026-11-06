@@ -68,4 +68,31 @@ test("Override-Baustein „Deckenaufbau weiss“ in eine Ansichtsvorlage überne
   // Aktion „Umriss / Fuge“ an (Schalter) und eingeschaltet (Wert).
   await expect(detail.getByRole("checkbox", { name: "Umriss / Fuge" })).toHaveCount(2);
   for (const c of await detail.getByRole("checkbox", { name: "Umriss / Fuge" }).all()) await expect(c).toBeChecked();
+  // Massstab-Kriterium: der Baustein gilt ab 1:100 (Liste zeigt es in der Zusammenfassung).
+  const scale = detail.getByTestId("override-scale");
+  await expect(scale.getByRole("checkbox", { name: "ab Massstab" })).toBeChecked();
+  await expect(scale.getByRole("spinbutton")).toHaveValue("100");
+  await expect(page.locator(".res-ov-row", { hasText: "Deckenaufbau weiss" })).toContainText("ab 1:100");
+  // Bereich bis 1:200 ergänzen.
+  await scale.getByRole("checkbox", { name: "bis Massstab" }).check();
+  await scale.getByRole("spinbutton").last().fill("200");
+  await expect(page.locator(".res-ov-row", { hasText: "Deckenaufbau weiss" })).toContainText("1:100 bis 1:200");
+});
+
+test("Aufbau-Editor: Schichtfunktion wählen, Vorgabe aus dem Baustoff ([33])", async ({ page }) => {
+  await startNewProject(page);
+  await openSample(page);
+  await page.getByRole("button", { name: "Fenster", exact: true }).first().click();
+  await page.getByRole("option", { name: /Ressourcen/ }).click();
+  await page.getByRole("tab", { name: "Deckenstile" }).click();
+  const fn = page.getByTestId("layer-function").first().locator(".tb-dd-trigger");
+  // Vorgabe: aus dem Baustoff abgeleitet, mit Anzeige des Werts.
+  await expect(fn).toHaveText(/^aus Baustoff: \S/);
+  await fn.click();
+  await page.getByRole("option", { name: "Dämmung", exact: true }).click();
+  await expect(fn).toHaveText("Dämmung");
+  // Zurück auf die Vorgabe.
+  await fn.click();
+  await page.getByRole("option", { name: /^aus Baustoff: / }).click();
+  await expect(fn).toHaveText(/^aus Baustoff: /);
 });

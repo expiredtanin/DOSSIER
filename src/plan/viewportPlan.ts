@@ -20,6 +20,19 @@ export function snapshotMono(project: Pick<Project, "viewTemplates">, snap: { te
   return project.viewTemplates?.find((t) => t.id === snap.templateId)?.mono !== false;
 }
 
+/**
+ * [33] Eingeschaltete Override-Regeln eines Viewports (Kern: `sheet_viewports::snapshot_rule_ids`): die der
+ * verknüpften Ansichtsvorlage, sonst die des Ausschnitts; legen beide nichts fest, `undefined` = Schalter im
+ * Projekt. So zeigt ein Blatt seinen Ausschnitt mit dessen Regeln, nicht mit denen der aktiven Ansicht.
+ */
+export function snapshotOverrideRuleIds(
+  project: Pick<Project, "viewTemplates">,
+  snap: { templateId?: string | null; templateLinked?: boolean | null; enabledOverrideRuleIds?: string[] | null },
+): string[] | undefined {
+  const tpl = snap.templateId && snap.templateLinked ? project.viewTemplates?.find((t) => t.id === snap.templateId) : undefined;
+  return tpl?.enabledOverrideRuleIds ?? snap.enabledOverrideRuleIds ?? undefined;
+}
+
 const EMPTY: Plan = { primitives: [], bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
 
 /**
@@ -34,23 +47,25 @@ export async function viewportLevelPlan(
   scaleDenominator: number,
   forPrint = false,
   mono = true,
+  /** [33] Eingeschaltete Override-Regeln ({@link snapshotOverrideRuleIds}); fehlt = Schalter im Projekt. */
+  overrideRuleIds?: readonly string[] | null,
 ): Promise<Plan> {
   const level = project.drawingLevels.find((l) => l.id === levelId);
   if (!level) return EMPTY;
   if (level.kind !== "section" && level.kind !== "elevation") {
-    return generatePlan(project, levelId, visibleCodes, undefined, detail, false, mono, true, scaleDenominator, forPrint);
+    return generatePlan(project, levelId, visibleCodes, undefined, detail, false, mono, true, scaleDenominator, forPrint, false, overrideRuleIds);
   }
   let raw: Plan | null;
   if (level.kind === "section") {
     const out = await computeSection(project, level);
     raw = out
-      ? generateSectionPlan(out, mono, { hiddenLines: level.hiddenLines, visibleCodes, openings: true, scaleDenominator, detail })
+      ? generateSectionPlan(out, mono, { hiddenLines: level.hiddenLines, visibleCodes, openings: true, scaleDenominator, detail, overrideRuleIds })
       : null;
   } else {
     raw = generateElevationPlan(project, level, { visibleCodes, scaleDenominator, mono });
   }
   if (!raw || raw.primitives.length === 0) return EMPTY;
-  const own = generatePlan(project, level.id, visibleCodes, undefined, detail, false, mono, false, scaleDenominator, forPrint);
+  const own = generatePlan(project, level.id, visibleCodes, undefined, detail, false, mono, false, scaleDenominator, forPrint, false, overrideRuleIds);
   const marks = levelMarksEnabled(level) ? levelMarkerPrimitives(project, raw.bounds) : [];
   const b = { ...raw.bounds };
   const grow = (x: number, y: number) => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyProject, sampleProject } from "./sampleProject";
-import { standardsChangeKey, standardsMergeCounts, standardsMergeOps, standardsUpdateOps, standardsUpdatePlan, withStandards } from "./standards";
+import { componentLayerFunctions, LAYER_FUNCTIONS, standardsChangeKey, standardsMergeCounts, standardsMergeOps, standardsUpdateOps, standardsUpdatePlan, withStandards } from "./standards";
 import { applyOps } from "../core/ops";
 
 describe("Standard-Bibliothek ([100]–[102])", () => {
@@ -81,5 +81,15 @@ describe("Standard-Bibliothek ([100]–[102])", () => {
     expect(after.hatches.find((h) => h.id === "std-h-kalksandstein")!.pattern).toBe("crosshatch");
     expect(after.components.find((c) => c.id === "std-c-innenputz")!.hatchId).toBe("std-h-putz");
     expect(standardsUpdatePlan(after).changes.map((c) => c.id)).toEqual(["std-h-kalksandstein"]);
+  });
+});
+
+describe("[33] Schichtfunktion aus dem Baustoff", () => {
+  it("Vorgabe je Bauteil wie im Kern (Estrich, Beton, Trittschall)", () => {
+    const p = withStandards({ ...emptyProject, components: [], hatches: [], lineStyles: [], wallTypes: [], ceilingTypes: [], roofTypes: [] });
+    const f = componentLayerFunctions(p);
+    expect([f["std-c-zementestrich"], f["std-c-stahlbeton"], f["std-c-trittschall"], f["std-c-innenputz"]]).toEqual(["screed", "structure", "insulation", "plaster"]);
+    expect(Object.keys(f).length).toBe(p.components.length);
+    for (const v of Object.values(f)) expect(v === null || LAYER_FUNCTIONS.includes(v)).toBe(true);
   });
 });

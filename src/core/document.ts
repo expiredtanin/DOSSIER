@@ -148,6 +148,7 @@ export type QueryName =
   | "openingSchedule"
   | "elementSchedule"
   | "uValue"
+  | "componentLayerFunctions"
   | "sheetTables"
   | "sheetTableCatalog"
   | "openingPreview"

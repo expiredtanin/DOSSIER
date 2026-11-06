@@ -2,8 +2,8 @@
 // Linien/Wandstile: Liste links = Regeln in PRIORITÄTS-Reihenfolge (oben
 // gewinnt pro Aktions-Feld) mit Aktiv-Checkbox, Auf/Ab und Löschen; Detail
 // rechts = Bedingungen (Kriterium/Operator/Wert, weitere Bedingungen mit UND)
-// + optionale Aktionen (Farbe/Strichstärke/Linienstil; [33] Füllung, Schraffur,
-// Umriss geschnittener Flächen/Schichten). Reines Rendering-Overlay — die
+// + Massstab-Kriterium ([33], ab/bis 1:n) + optionale Aktionen (Farbe/Strichstärke/
+// Linienstil; [33] Füllung, Schraffur, Umriss geschnittener Flächen/Schichten). Reines Rendering-Overlay — die
 // Auswertung liegt im Kern (`src-tauri/core/src/plan/overrides.rs`);
 // Elementdaten bleiben unverändert.
 
@@ -43,14 +43,29 @@ const OVERRIDE_OP_OPTIONS: { value: OverrideOperator; labelKey: string }[] = [
 const valueLabel = (type: OverrideConditionType, value: string): string =>
   ENUM_VALUES[type]?.includes(value) ? t(`resources.overrides.val.${type}.${value}`) : `„${value}"`;
 
+/** [33] Vorschläge für das Massstab-Kriterium (Nenner 1:n). */
+const SCALE_SUGGESTIONS = [5, 10, 20, 50, 100, 200, 500, 1000, 2000];
+
+/** [33] Massstab-Kriterium als Text („ab 1:100“, „1:50 bis 1:200“); leer ohne Kriterium. */
+export function overrideScaleSummary(rule: Pick<OverrideRule, "minScale" | "maxScale">): string {
+  const lo = rule.minScale;
+  const hi = rule.maxScale;
+  if (lo && hi) return t("resources.overrides.scale.range", { from: lo, to: hi });
+  if (lo) return t("resources.overrides.scale.from", { n: lo });
+  if (hi) return t("resources.overrides.scale.to", { n: hi });
+  return "";
+}
+
 /** Kompakte Bedingungs-Zusammenfassung für die Listenzeile (weitere Bedingungen mit „und"). */
 function overrideConditionSummary(rule: OverrideRule): string {
+  const scale = overrideScaleSummary(rule);
   return [rule.condition, ...(rule.conditions ?? [])]
     .map((c) => {
       const type = OVERRIDE_TYPE_OPTIONS.find((o) => o.value === c.type);
       const op = OVERRIDE_OP_OPTIONS.find((o) => o.value === c.operator);
       return `${type ? t(type.labelKey) : c.type} ${op ? t(op.labelKey) : c.operator} ${valueLabel(c.type, c.value)}`;
     })
+    .concat(scale ? [scale] : [])
     .join(` ${t("resources.overrides.and")} `);
 }
 
@@ -209,6 +224,36 @@ function OverrideRuleDetail({
         <span className="res-add-plus">+</span> {t("resources.overrides.addCondition")}
       </button>
       <div className="res-hint">{t("resources.overrides.layerHint")}</div>
+
+      {/* [33] Massstab-Kriterium: Regel nur im Bereich 1:von … 1:bis (Nenner, Grenzen inklusive). */}
+      <div className="res-hint">{t("resources.overrides.scale")}</div>
+      <datalist id="ov-scales">
+        {SCALE_SUGGESTIONS.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+      <div data-testid="override-scale">
+        <OptionalAction
+          label={t("resources.overrides.scale.min")}
+          active={rule.minScale !== undefined}
+          onToggle={(on) => onPatch({ minScale: on ? 100 : undefined })}
+        >
+          <span className="res-ov-scale" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            1:{" "}
+            <NumberField value={rule.minScale ?? 100} onChange={(n) => n > 0 && onPatch({ minScale: n })} step={10} min={1} list="ov-scales" />
+          </span>
+        </OptionalAction>
+        <OptionalAction
+          label={t("resources.overrides.scale.max")}
+          active={rule.maxScale !== undefined}
+          onToggle={(on) => onPatch({ maxScale: on ? 100 : undefined })}
+        >
+          <span className="res-ov-scale" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            1:{" "}
+            <NumberField value={rule.maxScale ?? 100} onChange={(n) => n > 0 && onPatch({ maxScale: n })} step={10} min={1} list="ov-scales" />
+          </span>
+        </OptionalAction>
+      </div>
 
       <div className="res-hint">{t("resources.overrides.actions")}</div>
       {/* Vorschlagswerte für die Strichstärke (Standard-Stiftbreiten in mm). */}

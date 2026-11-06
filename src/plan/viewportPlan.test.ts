@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { collectVisibleCodes } from "../model/types";
 import { generatePlan } from "./generatePlan";
-import { snapshotMono, viewportLevelPlan } from "./viewportPlan";
+import { snapshotMono, snapshotOverrideRuleIds, viewportLevelPlan } from "./viewportPlan";
 
 const p = buildComplexSampleProject();
 const codes = collectVisibleCodes(p.layers);
@@ -84,5 +84,48 @@ describe("viewportLevelPlan: Deckenspiegel ([100])", () => {
     const shared = ds.filter((x) => wallLine(x) && widths.has(key(x)));
     expect(shared.length).toBeGreaterThan(100);
     for (const x of shared) expect(x.weightMm, key(x)).toBe(widths.get(key(x)));
+  });
+});
+
+// [33] Blatt-Viewports zeichnen mit den Override-Regeln ihres Ausschnitts bzw. ihrer verknüpften Ansichtsvorlage
+// (Bildschirm `LayoutSheet` und PDF `layoutPdf` rufen beide `viewportLevelPlan` mit `snapshotOverrideRuleIds`),
+// nicht mit den gerade im Projekt eingeschalteten; das Massstab-Kriterium folgt dem Viewport-Massstab.
+describe("viewportLevelPlan: Override-Regeln des Ausschnitts ([33])", () => {
+  const q = structuredClone(p);
+  q.overrideRules = [
+    ...(q.overrideRules ?? []),
+    {
+      id: "weiss",
+      name: "Deckenaufbau weiss",
+      enabled: false,
+      minScale: 100,
+      condition: { type: "layer_position", operator: "equals", value: "above" },
+      conditions: [{ type: "element_kind", operator: "contains", value: "slab" }],
+      actions: { fillColor: "#ffffff", hatch: "none", outline: true },
+    },
+  ];
+  type Prim = { kind: string; ceilingId?: string; fill?: string };
+  const white = (plan: { primitives: unknown[] }) =>
+    (plan.primitives as Prim[]).filter((x) => x.kind === "polygon" && x.ceilingId && x.fill === "#ffffff").length;
+
+  it("Schnitt: Regel des Ausschnitts wirkt, auch wenn sie im Projekt aus ist", async () => {
+    expect(white(await viewportLevelPlan(q, "schnitt-a", codes, "mittel", 100, true, true))).toBe(0);
+    expect(white(await viewportLevelPlan(q, "schnitt-a", codes, "mittel", 100, true, true, ["weiss"]))).toBeGreaterThan(0);
+    // Ausschnitt ohne Regeln: auch eine im Projekt eingeschaltete Regel wirkt nicht.
+    const q2 = structuredClone(q);
+    q2.overrideRules!.find((r) => r.id === "weiss")!.enabled = true;
+    expect(white(await viewportLevelPlan(q2, "schnitt-a", codes, "mittel", 100, true, true))).toBeGreaterThan(0);
+    expect(white(await viewportLevelPlan(q2, "schnitt-a", codes, "mittel", 100, true, true, []))).toBe(0);
+    // Massstab-Kriterium „ab 1:100“: im 1:50-Viewport nicht.
+    expect(white(await viewportLevelPlan(q, "schnitt-a", codes, "mittel", 50, true, true, ["weiss"]))).toBe(0);
+  });
+
+  it("snapshotOverrideRuleIds: verknüpfte Vorlage vor Ausschnitt, sonst Schalter im Projekt", () => {
+    const r = { viewTemplates: [{ id: "t", name: "T", enabledOverrideRuleIds: ["a"] }, { id: "leer", name: "L" }] };
+    expect(snapshotOverrideRuleIds(r, {})).toBeUndefined();
+    expect(snapshotOverrideRuleIds(r, { enabledOverrideRuleIds: ["b"] })).toEqual(["b"]);
+    expect(snapshotOverrideRuleIds(r, { templateId: "t", templateLinked: true, enabledOverrideRuleIds: ["b"] })).toEqual(["a"]);
+    expect(snapshotOverrideRuleIds(r, { templateId: "t", templateLinked: false, enabledOverrideRuleIds: ["b"] })).toEqual(["b"]);
+    expect(snapshotOverrideRuleIds(r, { templateId: "leer", templateLinked: true, enabledOverrideRuleIds: [] })).toEqual([]);
   });
 });

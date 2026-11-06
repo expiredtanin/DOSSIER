@@ -2243,6 +2243,12 @@ export type OverrideRule = {
   condition: OverrideCondition;
   /** [33] Weitere Bedingungen; die Regel trifft nur, wenn ALLE zutreffen. */
   conditions?: Array<OverrideCondition>;
+  /**
+   * [33] Massstab-Kriterium: Regel wirkt nur ab Massstab 1:`minScale` (Nenner ≥, z. B. 100 = „ab 1:100“).
+   */
+  minScale?: number;
+  /** [33] Massstab-Kriterium: Regel wirkt nur bis Massstab 1:`maxScale` (Nenner ≤). */
+  maxScale?: number;
   actions: OverrideActions;
 };
 

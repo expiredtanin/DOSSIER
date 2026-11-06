@@ -3,7 +3,7 @@
 // Linientypen nach SIA 400 / ISO 128 und Standard-Aufbauten. Hier nur dünne Fassaden: der Kern liefert die
 // Ops, die fehlende Einträge anhängen (gleiche id oder gleicher Name gilt als vorhanden).
 
-import type { OverrideRule, Project } from "./types";
+import type { LayerFunction, OverrideRule, Project } from "./types";
 import type { CoreOp } from "../core/ops";
 import { applyOps } from "../core/ops";
 import { addedItems } from "../core/opsBuild";
@@ -83,4 +83,15 @@ export function standardsUpdatePlan(project: Project): StandardsUpdatePlan {
 /** Ops: fehlende Standards anhängen und die gewählten Einträge (`standardsChangeKey`) auf den heutigen Stand bringen. */
 export function standardsUpdateOps(project: Project, selected: readonly string[]): CoreOp[] {
   return documentFor(project).queryRoot<CoreOp[]>("standardsUpdateOps", JSON.stringify(selected));
+}
+
+/** [33] Schichtfunktionen (Werte wie im Rust-Modell, `LayerFunction`), Reihenfolge der Auswahl im Aufbau-Editor. */
+export const LAYER_FUNCTIONS: readonly LayerFunction[] = ["structure", "insulation", "screed", "finish", "plaster", "substructure", "membrane", "cladding", "air"];
+
+/**
+ * [33] Aus dem Baustoff abgeleitete Schichtfunktion je Bauteil-id (Kern `overrides::component_functions`, über
+ * `standards::material_category`); gilt, solange eine Schicht kein eigenes `function` hat. `null` = keine.
+ */
+export function componentLayerFunctions(project: Project): Record<string, LayerFunction | null> {
+  return documentFor(project).query<Record<string, LayerFunction | null>>("componentLayerFunctions");
 }

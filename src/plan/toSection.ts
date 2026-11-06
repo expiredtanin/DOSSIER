@@ -132,6 +132,8 @@ export function generateSectionPlan(
     scaleDenominator?: number;
     /** [140] Detailgrad: „fein" zeigt auch ab 1:100 alle dünnen Schichten (Standard „mittel"). */
     detail?: DetailLevel;
+    /** [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (fehlt = Schalter im Projekt). */
+    overrideRuleIds?: readonly string[] | null;
   } = {},
 ): Plan {
   const { project, level } = output;
@@ -141,6 +143,7 @@ export function generateSectionPlan(
     // Massstabsnenner für die Achsblasen des Rasters ([112]); Default 100.
     scale: opts.scaleDenominator ?? 100,
     detail: opts.detail,
+    ...(opts.overrideRuleIds ? { rules: [...opts.overrideRuleIds] } : {}),
     ...visibilityArgs(project, opts.visibleCodes, opts.categoryDisplay),
   });
   const args = output.bodies.slice();

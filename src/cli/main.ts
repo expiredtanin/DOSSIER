@@ -12,7 +12,8 @@
 //                                                  --color: Darstellung „Farbig" statt Tusche (Standard, [140])
 //                                                  plan/section/elevation: --template <Vorlage> wendet eine Ansichtsvorlage an
 //                                                  (Override-Regeln, Schnittflächen schraffiert …), --rule <Regel> schaltet eine
-//                                                  Override-Regel ein (auch Standard-Baustein, z. B. --rule "Deckenaufbau weiss") [33]
+//                                                  Override-Regel ein (auch Standard-Baustein, z. B. --rule "Deckenaufbau weiss") [33];
+//                                                  das Massstab-Kriterium einer Regel (ab/bis 1:n) gilt nach --scale
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]

@@ -246,7 +246,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     let layer_mm = LAYER_JOINT_MM * detail.layer_factor();
     let thick: Vec<f64> = wt.layers.iter().map(|l| l.thickness).collect();
     // [33] Overrides auf Schichten (Füllung, Schraffur, Umriss); ohne aktive Regel lauter leere Aktionen.
-    let lov = super::overrides::layer_actions(p, "wall", &w.category_code, Some(&wt.name), &wt.layers);
+    let lov = super::overrides::layer_actions(p, c.rule_view(), "wall", &w.category_code, Some(&wt.name), &wt.layers);
     let solid = c.solid_cut();
     // [140] Ab 1:100 (und „grob") schwarze Sammelfläche mit Umriss, ohne Schichten (`style::solid_cut`) —
     // [33] ausser eine Regel stylt eine Schicht: dann Schichten, die übrigen schwarz ohne Fugen dazwischen.

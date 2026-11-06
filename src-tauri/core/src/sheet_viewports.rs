@@ -70,8 +70,17 @@ pub fn snapshot_mono(p: &Project, snap: &ViewSnapshot) -> bool {
     t.and_then(|t| t.mono) != Some(false)
 }
 
+/// [33] Eingeschaltete Override-Regeln eines Viewports (`snapshotOverrideRuleIds` in `plan/viewportPlan.ts`):
+/// die der verknüpften Ansichtsvorlage, sonst die des Ausschnitts; legen beide nichts fest, die Schalter im
+/// Projekt (`None`). So zeigt jedes Blatt seinen Ausschnitt mit dessen Regeln, unabhängig von der aktiven Ansicht.
+pub fn snapshot_rule_ids(p: &Project, snap: &ViewSnapshot) -> Option<HashSet<String>> {
+    let tpl = snap.template_id.as_deref().filter(|_| snap.template_linked == Some(true)).and_then(|id| p.view_templates.iter().flatten().find(|t| t.id == id));
+    let ids = tpl.and_then(|t| t.enabled_override_rule_ids.as_ref()).or(snap.enabled_override_rule_ids.as_ref())?;
+    Some(ids.iter().cloned().collect())
+}
+
 /// Plan-Argumente eines Viewports (wie `ViewportPlanSvg`: projektglobal, nicht für den Druck).
-pub fn viewport_args(snap: &ViewSnapshot, scale: f64, mono: bool) -> PlanArgs {
+pub fn viewport_args(p: &Project, snap: &ViewSnapshot, scale: f64, mono: bool) -> PlanArgs {
     let (detail, auto_coarse) = crate::plan::domains::effective_detail(detail_of(snap.detail), scale);
     PlanArgs {
         floor: snap.active_level_id.clone(),
@@ -86,6 +95,7 @@ pub fn viewport_args(snap: &ViewSnapshot, scale: f64, mono: bool) -> PlanArgs {
         mono,
         sun_when: None,
         auto_coarse,
+        rules: snapshot_rule_ids(p, snap),
     }
 }
 
@@ -134,7 +144,7 @@ pub fn snapshot_buf(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: Optio
             Some(s) => section_view_buf(p, &DrawingLevel { shadows: Some(s), ..l.clone() }, snap, scale),
             None => section_view_buf(p, l, snap, scale),
         },
-        _ => plan_domains_buf(p, &viewport_args(snap, scale, snapshot_mono(p, snap))).ok(),
+        _ => plan_domains_buf(p, &viewport_args(p, snap, scale, snapshot_mono(p, snap))).ok(),
     }
 }
 
@@ -168,7 +178,7 @@ fn candidate_codes(p: &Project) -> HashSet<String> {
 fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scale: f64) -> Option<Vec<u8>> {
     use crate::plan::prim::Primitive;
     let mono = snapshot_mono(p, snap);
-    let args = viewport_args(snap, scale, mono);
+    let args = viewport_args(p, snap, scale, mono);
     let invisible: Vec<String> = candidate_codes(p).into_iter().filter(|c| !args.show.contains(c)).collect();
     let text = serde_json::json!({
         "level": serde_json::to_value(level).ok()?,
@@ -176,6 +186,7 @@ fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scal
         "scale": scale,
         "hasVis": true,
         "invisible": invisible,
+        "rules": args.rules.as_ref().map(|r| r.iter().cloned().collect::<Vec<_>>()),
     })
     .to_string();
     let raw = if level.kind == DrawingLevelKind::Section {
@@ -410,6 +421,52 @@ pub(crate) mod tests {
         assert!(snapshot_mono(&p, &snap));
     }
 
+    /// [33] Viewports zeichnen mit den Override-Regeln ihres Ausschnitts (`enabledOverrideRuleIds`) bzw. ihrer
+    /// verknüpften Ansichtsvorlage — nicht mit den gerade im Projekt eingeschalteten; Massstab-Kriterium nach
+    /// dem Viewport-Massstab. Ohne Festlegung gelten die Schalter im Projekt.
+    #[test]
+    fn viewport_mit_override_regeln_des_ausschnitts() {
+        let red = |p: &Project| {
+            let l = layout_of_level(p, "sh").unwrap();
+            let m = &viewport_maps(p, l)[0];
+            let prims = crate::plan::buf::View::parse(&m.buf).unwrap().prims().unwrap();
+            serde_json::to_string(&prims).unwrap().contains("#ff0000")
+        };
+        let mut v = json();
+        v["viewTemplates"] = serde_json::json!([{"id": "farbig", "name": "F", "mono": false}, {"id": "mit", "name": "M", "mono": false, "enabledOverrideRuleIds": ["r"]}]);
+        v["overrideRules"] = serde_json::json!([{"id": "r", "name": "Rot", "enabled": false, "condition": {"type": "layer_name", "operator": "equals", "value": "20"}, "actions": {"color": "#ff0000"}}]);
+        v["viewSnapshots"][0]["templateId"] = serde_json::json!("farbig");
+        let mut p: Project = serde_json::from_value(v.clone()).unwrap();
+        assert!(!red(&p), "ohne Festlegung: Schalter im Projekt (aus)");
+        p.override_rules.as_mut().unwrap()[0].enabled = true;
+        assert!(red(&p), "ohne Festlegung: Schalter im Projekt (an)");
+        // Ausschnitt legt fest: nur seine Regeln, unabhängig vom Projekt-Schalter.
+        let snap = |p: &mut Project| p.view_snapshots.as_mut().unwrap()[0].clone();
+        let mut s = snap(&mut p);
+        s.enabled_override_rule_ids = Some(vec![]);
+        p.view_snapshots.as_mut().unwrap()[0] = s.clone();
+        assert!(!red(&p), "Ausschnitt ohne Regeln");
+        p.override_rules.as_mut().unwrap()[0].enabled = false;
+        s.enabled_override_rule_ids = Some(vec!["r".into()]);
+        p.view_snapshots.as_mut().unwrap()[0] = s.clone();
+        assert!(red(&p), "Ausschnitt mit Regel, im Projekt aus");
+        // Massstab-Kriterium nach dem Viewport-Massstab (1:100).
+        p.override_rules.as_mut().unwrap()[0].min_scale = Some(200.0);
+        assert!(!red(&p), "Regel erst ab 1:200");
+        p.layouts.as_mut().unwrap()[0].viewports[0].scale_denominator = Some(200.0);
+        assert!(red(&p), "Viewport 1:200");
+        p.override_rules.as_mut().unwrap()[0].min_scale = None;
+        // Verknüpfte Vorlage geht dem Ausschnitt vor.
+        s.enabled_override_rule_ids = Some(vec![]);
+        s.template_id = Some("mit".into());
+        s.template_linked = Some(true);
+        p.view_snapshots.as_mut().unwrap()[0] = s.clone();
+        assert!(red(&p), "verknüpfte Vorlage mit Regel");
+        s.template_linked = Some(false);
+        p.view_snapshots.as_mut().unwrap()[0] = s;
+        assert!(!red(&p), "nicht verknüpft: Ausschnitt");
+    }
+
     /// [100] Deckenspiegel-Viewport: derselbe Inhalt wie die Deckenspiegel-Ebene (Wände, Untersicht).
     #[test]
     fn deckenspiegel_viewport() {
@@ -425,7 +482,7 @@ pub(crate) mod tests {
         assert_eq!(maps.len(), 1);
         assert_eq!(maps[0].scale, 50.0);
         let snap = &p.view_snapshots.as_ref().unwrap()[1];
-        let direct = crate::plan::domains::plan_domains(&p, &viewport_args(snap, 50.0, snapshot_mono(&p, snap))).unwrap();
+        let direct = crate::plan::domains::plan_domains(&p, &viewport_args(&p, snap, 50.0, snapshot_mono(&p, snap))).unwrap();
         assert!(!direct.walls.is_empty() && !direct.ceilings.is_empty(), "Wände und Untersicht im Viewport");
         let b = crate::plan::buf::View::parse(&maps[0].buf).unwrap().bounds().unwrap();
         assert!(b[2] - b[0] > 9.9 && b[3] - b[1] > 5.9, "Ausmass der Decke: {b:?}");

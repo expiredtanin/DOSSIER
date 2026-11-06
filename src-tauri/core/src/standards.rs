@@ -664,11 +664,12 @@ pub fn layer_function_of_category(cat: &str) -> Option<crate::model::LayerFuncti
 /// [33] Mitgelieferte Override-Regeln (Bausteine für Ansichtsvorlagen). Ausgeschaltet: sie wirken erst, wenn
 /// eine Ansichtsvorlage sie einschaltet (`enabledOverrideRuleIds`) — ohne Regel bleibt jede Darstellung, wie
 /// sie ist. „Deckenaufbau weiss“: die Schichten über der tragenden Schicht von Decken und Bodenplatten
-/// (Unterlagsboden, Trittschall, Belag) im Schnitt als weisse Fläche mit Umriss, auch ab 1:100 (statt schwarz).
+/// (Unterlagsboden, Trittschall, Belag) im Schnitt als weisse Fläche mit Umriss, ab 1:100 (statt schwarz;
+/// Massstab-Kriterium `minScale`, im 1:50 bleiben die Schichten schraffiert).
 pub const STD_RULE_FLOOR_BUILDUP_WHITE: &str = "std-or-deckenaufbau-weiss";
 
 pub fn override_rules() -> Vec<Value> {
-    vec![json!({"id": STD_RULE_FLOOR_BUILDUP_WHITE, "name": "Deckenaufbau weiss", "enabled": false,
+    vec![json!({"id": STD_RULE_FLOOR_BUILDUP_WHITE, "name": "Deckenaufbau weiss", "enabled": false, "minScale": 100,
         "condition": {"type": "layer_position", "operator": "equals", "value": "above"},
         "conditions": [{"type": "element_kind", "operator": "contains", "value": "slab"}],
         "actions": {"fillColor": "#ffffff", "hatch": "none", "outline": true}})]

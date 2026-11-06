@@ -1845,10 +1845,27 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   noch der Rust-Kern). Tests: `schicht_regeln`, `lage_zur_tragenden_schicht`, `override_deckenaufbau_weiss`,
   `override_auf_wandschichten_im_grundriss`, vitest `viewTemplates`/`standards`, e2e `viewTemplates.spec.ts`
   (Baustein übernehmen). Geprüft: cargo test Kern, tsc, vitest, e2e viewTemplates, CLI-SVG Musterhaus komplex
-  Schnitt A-A 1:100 mit/ohne `--rule "Deckenaufbau weiss"` in Chromium. Offen: kein UI für `Layer.function` im
-  Aufbau-Editor; Overrides gelten projektweit (Vorlage schaltet sie beim Anwenden um, wie bisher) — nicht geprüft, ob
-  Blatt-Viewports die Regeln ihres Ausschnitts (`enabledOverrideRuleIds`) berücksichtigen; Decken im Grundriss (nicht geschnitten) ohne
-  Schicht-Overrides; Kriterium Massstab fehlt (Regel wirkt in 1:50 ebenso); nicht in der Tauri-App geprüft.
+  Schnitt A-A 1:100 mit/ohne `--rule "Deckenaufbau weiss"` in Chromium.
+  (6.11., Folgearbeiten) **Schichtfunktion im Aufbau-Editor** (Wand-/Decken-/Dachstile): Auswahl „Funktion“ je Schicht
+  (tragend, Dämmung, Unterlagsboden, Belag, Putz, Unterbau, Abdichtung, Bekleidung, Luftschicht); Vorgabe „aus Baustoff:
+  <Wert>“ zeigt die abgeleitete Funktion (Kern-Abfrage `componentLayerFunctions` → `overrides::component_functions`,
+  Fassade `model/standards.ts`). **Massstab-Kriterium** `OverrideRule.minScale`/`maxScale` (Nenner, Grenzen inklusive,
+  Rust-Modell): `overrides::RuleView` (Massstab + eingeschaltete Regeln) für Element- und Schicht-Regeln in Grundriss,
+  Deckenspiegel und Schnitt; Overrides-Tab „ab/bis Massstab 1:n“, Zusammenfassung in der Liste; CLI über `--scale`. Baustein
+  „Deckenaufbau weiss“ neu „ab 1:100“ (nur die Bibliothek; vorhandene Projekte unverändert). **Blatt-Viewports** zeichnen
+  mit den Regeln ihres Ausschnitts bzw. der verknüpften Ansichtsvorlage (`snapshotOverrideRuleIds` /
+  `sheet_viewports::snapshot_rule_ids`; Plan-Argument `rules`, im Plan-Cache-Schlüssel; Schnitt-Argument `rules`): Blatt
+  am Bildschirm (`LayoutSheet`), PDF (`layoutPdf`) und Kern-Viewports (Fang, DXF-Papierbereich); ohne Festlegung wie bisher
+  die Schalter im Projekt. **Decken ohne Schnitt**: Schicht-Overrides auf die sichtbare Schicht (Grundriss: oberste,
+  Deckenspiegel: unterste) — Füllung, Schraffur (ohne/eigene unterdrückt auch Belags-/Untersichtsmuster), Umriss aus.
+  Auswahllisten (`.tb-dd-menu`) liegen jetzt über dem schwebenden Ressourcen-Fenster (öffneten im Browser dahinter).
+  Tests: `massstab_und_ausschnitt_regeln`, `viewport_mit_override_regeln_des_ausschnitts`,
+  `decken_ohne_schnitt_mit_schicht_overrides`, `override_deckenaufbau_weiss` (1:50 ohne), vitest `viewportPlan`
+  (Schnitt-Viewport mit Regel-ids, Massstab), `standards` (Funktion aus Baustoff), e2e `viewTemplates.spec.ts`
+  (Massstab im Overrides-Tab, Funktions-Auswahl). Geprüft: cargo test Kern, tsc, vitest (Goldens unverändert), e2e
+  viewTemplates, CLI Schnitt A-A 1:50/1:100 mit `--rule`. Offen: nicht in der Tauri-App geprüft (macOS-Ressourcenfenster,
+  Metal); Ansichten (Fassaden) kennen keine Schicht-Overrides; PDF-Export nur über den Test von `viewportLevelPlan`, nicht als
+  Datei angesehen.
 - ◐ **[34] Ansichtsvorlagen.** (30.10.) `Project.viewTemplates` (Rust-Modell): benannter Satz aus Detailgrad,
   Massstab, Kategorien, Override-Regeln, Darstellungsmodus, Schwarz-Weiss, Schatten, verdeckte Kanten,
   Strichstärken-Skalierung und Ansichtsbereich; Ansicht (`DrawingLevel.templateId/templateLinked`) und

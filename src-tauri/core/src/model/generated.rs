@@ -4069,6 +4069,14 @@ pub struct OverrideRule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub conditions: Option<Vec<OverrideCondition>>,
+    /// [33] Massstab-Kriterium: Regel wirkt nur ab Massstab 1:`minScale` (Nenner ≥, z. B. 100 = „ab 1:100“).
+    #[serde(rename = "minScale", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub min_scale: Option<f64>,
+    /// [33] Massstab-Kriterium: Regel wirkt nur bis Massstab 1:`maxScale` (Nenner ≤).
+    #[serde(rename = "maxScale", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_scale: Option<f64>,
     pub actions: OverrideActions,
     #[serde(flatten)]
     #[ts(skip)]

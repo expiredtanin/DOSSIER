@@ -1237,7 +1237,7 @@ export const de = {
   "resources.overrides.addCondition": "Bedingung (und)",
   "resources.overrides.removeCondition": "Bedingung entfernen",
   "resources.overrides.layerHint":
-    "Schichtfunktion, Lage, Baustoff und Baustoff-Kategorie treffen Bauteilschichten (Schnittflächen im Schnitt, Wandschichten im Grundriss), nicht ganze Elemente.",
+    "Schichtfunktion, Lage, Baustoff und Baustoff-Kategorie treffen Bauteilschichten (Schnittflächen im Schnitt, Wandschichten im Grundriss, sichtbare Deckenschicht im Grundriss und Deckenspiegel), nicht ganze Elemente.",
   "resources.overrides.cutActions": "Schnittflächen und Schichten (Vorrang vor „1:100 schwarz“)",
   "resources.overrides.action.fill": "Füllung",
   "resources.overrides.action.hatch": "Schraffur",
@@ -1275,6 +1275,12 @@ export const de = {
   "resources.overrides.val.material_category.cladding": "Bekleidung",
   "resources.overrides.val.material_category.stone": "Naturstein",
   "resources.overrides.val.material_category.other": "andere",
+  "resources.overrides.scale": "Massstab (Regel wirkt nur in diesem Bereich)",
+  "resources.overrides.scale.min": "ab Massstab",
+  "resources.overrides.scale.max": "bis Massstab",
+  "resources.overrides.scale.from": "ab 1:{n}",
+  "resources.overrides.scale.to": "bis 1:{n}",
+  "resources.overrides.scale.range": "1:{from} bis 1:{to}",
 
   "resources.wallStyles.hint":
     "Je Wandtyp die Schichtfugen (zwischen benachbarten Schichten) als wählbaren Linienstil. Ohne Zuweisung: Haarlinie 0.02 mm.",
@@ -1400,6 +1406,9 @@ export const de = {
   "resources.col.hatchLineWeight.hint": "Stärke der Musterlinien auf dem Papier; der Linienstil legt nur das Muster fest.",
   "resources.joint.default": "— (Haarlinie)",
   "resources.layer.add": "Schicht hinzufügen",
+  "resources.col.function": "Funktion",
+  "resources.layer.functionAuto": "aus Baustoff: {f}",
+  "resources.layer.functionNone": "keine",
   "resources.layer.remove": "Schicht entfernen",
   "resources.layer.moveUp": "Schicht nach oben",
   "resources.layer.moveDown": "Schicht nach unten",

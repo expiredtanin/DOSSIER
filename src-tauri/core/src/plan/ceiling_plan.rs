@@ -51,6 +51,7 @@ fn floor_args(a: &PlanArgs, floor: &str) -> PlanArgs {
         mono: a.mono,
         sun_when: None,
         auto_coarse: a.auto_coarse,
+        rules: a.rules.clone(),
     }
 }
 
@@ -138,16 +139,21 @@ fn soffits(c: &Ctx, cut: f64, limit: f64, out: &mut Vec<Primitive>, bounds: &mut
             _ => no_hatch(),
         };
         let fill = ce.color.as_deref().or(comp.and_then(|k| k.elevation_color.as_deref())).filter(|s| !s.trim().is_empty()).unwrap_or("#ffffff");
+        // [33] Schicht-Override der untersten (von unten sichtbaren) Schicht: Füllung, Schraffur, Umriss.
+        let lov = super::domains::ceiling_view_override(c, ce, false);
+        let (hatch, no_pattern) = super::domains::view_hatch_override(p, lov.as_ref(), hatch);
+        let fill = lov.as_ref().and_then(|o| o.fill_color.as_deref()).unwrap_or(fill);
+        let outline = lov.as_ref().and_then(|o| o.outline) != Some(false);
         let ring: Vec<Vec2> = merged.ring.iter().map(|q| pv(*q)).collect();
         let bridges = (!merged.bridge_edges.is_empty()).then(|| merged.bridge_edges.iter().map(|&k| k as f64).collect());
         out.push(polygon(ring, fill, "none", 0.0, hatch, greyed, bridges, Pick::Ceiling(&ce.id)));
-        if let Some((segs, w, ink)) = pattern {
+        if let Some((segs, w, ink)) = pattern.filter(|_| !no_pattern) {
             for (a, b) in segs {
                 out.push(line(pv(a), pv(b), "ceiling-soffit-pattern", w, None, &ink, greyed));
             }
         }
         let stroke = ce.color.as_deref().unwrap_or(POCHE_STROKE);
-        for [a, b] in crate::plan::wall_poche::ceiling_outline_lines(&merged.ring, &merged.bridge_edges, &fps) {
+        for [a, b] in crate::plan::wall_poche::ceiling_outline_lines(&merged.ring, &merged.bridge_edges, &fps).into_iter().filter(|_| outline) {
             out.push(line(pv(a), pv(b), "ceiling-soffit-outline", SOFFIT_OUTLINE_MM, None, stroke, greyed));
         }
         // Aussparungen (Treppenloch, Deckenöffnung) mit Diagonalkreuz (SIA 400); die Treppe darunter
@@ -376,6 +382,45 @@ mod tests {
 
     fn json(v: &[Primitive]) -> String {
         serde_json::to_string(v).unwrap()
+    }
+
+    /// [33] Nicht geschnittene Decken: Schicht-Overrides auf die sichtbare Schicht — im Grundriss die
+    /// oberste (Estrich: Lage „darüber“), im Deckenspiegel die unterste (Beton: tragend). Massstab-Kriterium
+    /// nach dem Plan-Massstab; ohne Regel unverändert.
+    #[test]
+    fn decken_ohne_schnitt_mit_schicht_overrides() {
+        let mut p = sample();
+        let fills = |p: &Project, floor: &str, scale: f64| {
+            let mut a = args(floor);
+            a.scale = scale;
+            let r = plan_domains(p, &a).unwrap();
+            let v = serde_json::to_value(&r.ceilings).unwrap();
+            let polys: Vec<(String, String)> = v.as_array().unwrap().iter().filter(|q| q["ceilingId"] == "C1" && q["kind"] == "polygon").map(|q| (q["fill"].as_str().unwrap_or("").to_string(), q["hatch"]["pattern"].as_str().unwrap_or("").to_string())).collect();
+            let outlines = v.as_array().unwrap().iter().filter(|q| q["cls"] == "ceiling-outline" || q["cls"] == "ceiling-soffit-outline").count();
+            (polys, outlines)
+        };
+        let (plan0, ol0) = fills(&p, "eg", 100.0);
+        let (ds0, dol0) = fills(&p, "ds-eg", 100.0);
+        assert!(!plan0.is_empty() && !ds0.is_empty(), "{plan0:?} {ds0:?}");
+        let rule = |cond: serde_json::Value, min: Option<f64>| -> OverrideRule {
+            let mut r: OverrideRule = serde_json::from_value(serde_json::json!({"id": "w", "name": "W", "enabled": true, "condition": cond, "actions": {"fillColor": "#00ff00", "hatch": "none", "outline": false}})).unwrap();
+            r.min_scale = min;
+            r
+        };
+        // Lage „darüber“: nur der Grundriss (oberste Schicht Estrich), nicht der Deckenspiegel (Beton).
+        p.override_rules = Some(vec![rule(serde_json::json!({"type": "layer_position", "operator": "equals", "value": "above"}), None)]);
+        let (plan, ol) = fills(&p, "eg", 100.0);
+        assert!(plan.iter().all(|(f, h)| f == "#00ff00" && h == "none"), "{plan:?}");
+        assert_eq!(ol, 0, "Umriss aus (Kanten der Decke liegen hier ohnehin unter Wänden)");
+        assert_eq!(fills(&p, "ds-eg", 100.0), (ds0.clone(), dol0), "Deckenspiegel: unterste Schicht ist tragend");
+        // Tragende Schicht: Deckenspiegel.
+        p.override_rules = Some(vec![rule(serde_json::json!({"type": "layer_function", "operator": "equals", "value": "structure"}), None)]);
+        assert!(fills(&p, "ds-eg", 100.0).0.iter().all(|(f, _)| f == "#00ff00"));
+        assert_eq!(fills(&p, "eg", 100.0), (plan0.clone(), ol0));
+        // Massstab: Regel ab 1:200 wirkt im 1:100 nicht.
+        p.override_rules = Some(vec![rule(serde_json::json!({"type": "element_kind", "operator": "contains", "value": "slab"}), Some(200.0))]);
+        assert_eq!(fills(&p, "eg", 100.0), (plan0, ol0));
+        assert!(fills(&p, "eg", 200.0).0.iter().all(|(f, _)| f == "#00ff00"));
     }
 
     #[test]

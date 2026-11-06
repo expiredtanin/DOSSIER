@@ -12,6 +12,39 @@
 //! Schüttungen (`standards::is_loose_fill`).
 
 use crate::model::*;
+use std::collections::HashSet;
+
+/// [33] Darstellung, für die Regeln ausgewertet werden: Massstab (Kriterium `minScale`/`maxScale`) und
+/// die eingeschalteten Regeln eines Ausschnitts/einer Ansichtsvorlage (Blatt-Viewport). `on: None` =
+/// Schalter `enabled` der Regeln im Projekt; `scale: None` = Massstab unbekannt (Kriterium ignoriert).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RuleView<'a> {
+    pub scale: Option<f64>,
+    pub on: Option<&'a HashSet<String>>,
+}
+
+impl<'a> RuleView<'a> {
+    pub fn at(scale: f64, on: Option<&'a HashSet<String>>) -> Self {
+        RuleView { scale: Some(scale), on }
+    }
+
+    /// Wirkt die Regel in dieser Darstellung (eingeschaltet und im Massstabsbereich)?
+    pub fn active(&self, r: &OverrideRule) -> bool {
+        let on = match self.on {
+            Some(ids) => ids.contains(&r.id),
+            None => r.enabled,
+        };
+        on && scale_ok(r, self.scale)
+    }
+}
+
+/// [33] Massstab-Kriterium: Nenner `n` im Bereich `minScale`..=`maxScale` (fehlende Grenze = offen).
+pub fn scale_ok(r: &OverrideRule, scale: Option<f64>) -> bool {
+    let Some(n) = scale.filter(|n| n.is_finite() && *n > 0.0) else { return true };
+    let lo = r.min_scale.filter(|x| x.is_finite() && *x > 0.0);
+    let hi = r.max_scale.filter(|x| x.is_finite() && *x > 0.0);
+    lo.is_none_or(|lo| n >= lo - 1e-9) && hi.is_none_or(|hi| n <= hi + 1e-9)
+}
 
 /// Die vergleichbaren Eigenschaften eines Elements bzw. einer Schicht (Schicht-Felder `None` = Element).
 #[derive(Clone, Copy, Debug, Default)]
@@ -138,11 +171,11 @@ pub fn rule_matches(rule: &OverrideRule, s: &Subject) -> bool {
 }
 
 /// `effectiveOverrides`: kollabiert die Regelliste für ein Element (Schicht-Regeln zählen nicht).
-pub fn effective(rules: Option<&[OverrideRule]>, s: &Subject) -> Actions {
+pub fn effective(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView) -> Actions {
     let mut out = Actions::default();
     let Some(rules) = rules else { return out };
     for rule in rules {
-        if !rule.enabled || is_layer_rule(rule) || !rule_matches(rule, s) {
+        if !v.active(rule) || is_layer_rule(rule) || !rule_matches(rule, s) {
             continue;
         }
         let a = &rule.actions;
@@ -163,12 +196,12 @@ pub fn effective(rules: Option<&[OverrideRule]>, s: &Subject) -> Actions {
 }
 
 /// [33] Schicht-Aktionen für eine Schicht (alle aktiven Regeln, deren Bedingungen passen).
-pub fn effective_layer(rules: Option<&[OverrideRule]>, s: &Subject) -> LayerActions {
+pub fn effective_layer(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView) -> LayerActions {
     let mut out = LayerActions::default();
     let Some(rules) = rules else { return out };
     for rule in rules {
         let a = &rule.actions;
-        if !rule.enabled || (a.fill_color.is_none() && a.hatch.is_none() && a.outline.is_none()) || !rule_matches(rule, s) {
+        if !v.active(rule) || (a.fill_color.is_none() && a.hatch.is_none() && a.outline.is_none()) || !rule_matches(rule, s) {
             continue;
         }
         if out.fill_color.is_none() {
@@ -185,8 +218,8 @@ pub fn effective_layer(rules: Option<&[OverrideRule]>, s: &Subject) -> LayerActi
 }
 
 /// Gibt es überhaupt aktive Regeln mit Schicht-Aktionen? (Schnellpfad: sonst nichts auswerten.)
-pub fn has_layer_actions(p: &Project) -> bool {
-    p.override_rules.iter().flatten().any(|r| r.enabled && (r.actions.fill_color.is_some() || r.actions.hatch.is_some() || r.actions.outline.is_some()))
+pub fn has_layer_actions(p: &Project, v: RuleView) -> bool {
+    p.override_rules.iter().flatten().any(|r| v.active(r) && (r.actions.fill_color.is_some() || r.actions.hatch.is_some() || r.actions.outline.is_some()))
 }
 
 /// Schlüssel einer Schichtfunktion (wie im JSON).
@@ -208,6 +241,12 @@ pub fn function_key(f: LayerFunction) -> Option<&'static str> {
 /// Funktion einer Schicht: eigenes Feld, sonst aus dem Baustoff.
 pub fn layer_function(p: &Project, l: &Layer) -> Option<LayerFunction> {
     l.function.filter(|f| *f != LayerFunction::Unknown).or_else(|| crate::standards::layer_function_of_category(crate::standards::material_category(p.component_or_fallback(&l.component_id))))
+}
+
+/// [33] Aus dem Baustoff abgeleitete Schichtfunktion je Bauteil-id (Schlüssel wie im JSON; `None` = keine) —
+/// die Vorgabe, die gilt, solange eine Schicht kein eigenes `function` hat (Anzeige im Aufbau-Editor).
+pub fn component_functions(p: &Project) -> std::collections::BTreeMap<&str, Option<&'static str>> {
+    p.components.iter().map(|c| (c.id.as_str(), crate::standards::layer_function_of_category(crate::standards::material_category(c)).and_then(function_key))).collect()
 }
 
 /// [33] Lage jeder Schicht zur tragenden Schicht: Schichten liegen aussen/oben → innen/unten; die tragende
@@ -244,8 +283,8 @@ pub fn is_ground_slab(p: &Project, c: &Ceiling, layers: &[Layer]) -> bool {
 
 /// [33] Schicht-Aktionen je Schicht eines Bauteils (`kind` "wall"/"slab"/"ground_slab"/"roof"). Ohne aktive
 /// Regel mit Schicht-Aktionen: lauter leere Aktionen (Schnellpfad).
-pub fn layer_actions(p: &Project, kind: &str, category_code: &str, object_name: Option<&str>, layers: &[Layer]) -> Vec<LayerActions> {
-    if !has_layer_actions(p) {
+pub fn layer_actions(p: &Project, v: RuleView, kind: &str, category_code: &str, object_name: Option<&str>, layers: &[Layer]) -> Vec<LayerActions> {
+    if !has_layer_actions(p, v) {
         return vec![LayerActions::default(); layers.len()];
     }
     let rules = p.override_rules.as_deref();
@@ -268,7 +307,7 @@ pub fn layer_actions(p: &Project, kind: &str, category_code: &str, object_name: 
                 material_name: Some(comp.name.as_str()),
                 material_category: Some(crate::standards::material_category(comp)),
             };
-            effective_layer(rules, &s)
+            effective_layer(rules, &s, v)
         })
         .collect()
 }
@@ -333,10 +372,10 @@ mod tests {
             rule(true, cond(ObjectName, Contains, "aw"), Some("#0f0"), Some(0.7), None),
             rule(true, cond(LayerName, Equals, "Wände"), None, Some(0.1), Some("dashed")),
         ];
-        let a = effective(Some(&rules), &WALL);
+        let a = effective(Some(&rules), &WALL, RuleView::default());
         assert_eq!(a, Actions { color: Some("#f00".into()), lineweight: Some(0.7), linetype_id: Some("dashed".into()) });
-        assert!(!effective(None, &WALL).any());
-        assert!(!effective(Some(&[]), &WALL).any());
+        assert!(!effective(None, &WALL, RuleView::default()).any());
+        assert!(!effective(Some(&[]), &WALL, RuleView::default()).any());
     }
 
     /// [33] Schicht-Regeln: wirken nur auf Schichten (nicht aufs ganze Element), alle Bedingungen müssen
@@ -361,12 +400,12 @@ mod tests {
         white.actions.outline = Some(true);
         assert!(is_layer_rule(&white));
         // Nicht aufs Element (auch nicht die Farbe).
-        assert!(!effective(Some(std::slice::from_ref(&white)), &WALL).any());
-        let a = effective_layer(Some(std::slice::from_ref(&white)), &screed);
+        assert!(!effective(Some(std::slice::from_ref(&white)), &WALL, RuleView::default()).any());
+        let a = effective_layer(Some(std::slice::from_ref(&white)), &screed, RuleView::default());
         assert_eq!(a, LayerActions { fill_color: Some("#ffffff".into()), hatch: Some("none".into()), outline: Some(true) });
-        assert!(!effective_layer(Some(std::slice::from_ref(&white)), &core).any());
+        assert!(!effective_layer(Some(std::slice::from_ref(&white)), &core, RuleView::default()).any());
         // Weitere Bedingung verfehlt: Wand.
-        assert!(!effective_layer(Some(std::slice::from_ref(&white)), &Subject { element_kind: Some("wall"), ..screed }).any());
+        assert!(!effective_layer(Some(std::slice::from_ref(&white)), &Subject { element_kind: Some("wall"), ..screed }, RuleView::default()).any());
         // Material: Standard-Kennung oder Name; Kategorie.
         assert!(matches_condition(&cond(Material, Equals, "std-c-zementestrich"), &screed));
         assert!(matches_condition(&cond(Material, Contains, "estrich"), &screed));
@@ -376,11 +415,42 @@ mod tests {
         let mut by_layer = rule(true, cond(LayerName, Equals, "20"), None, None, None);
         by_layer.actions.hatch = Some("material".into());
         let rules = vec![white.clone(), by_layer];
-        assert_eq!(effective_layer(Some(&rules), &screed).hatch.as_deref(), Some("none"));
-        assert_eq!(effective_layer(Some(&rules), &core).hatch.as_deref(), Some("material"));
+        assert_eq!(effective_layer(Some(&rules), &screed, RuleView::default()).hatch.as_deref(), Some("none"));
+        assert_eq!(effective_layer(Some(&rules), &core, RuleView::default()).hatch.as_deref(), Some("material"));
         // Ausgeschaltet: nichts.
         white.enabled = false;
-        assert!(!effective_layer(Some(&[white]), &screed).any());
+        assert!(!effective_layer(Some(&[white]), &screed, RuleView::default()).any());
+    }
+
+    /// [33] Massstab-Kriterium (Nenner von–bis, Grenzen inklusive) und eingeschaltete Regeln eines
+    /// Ausschnitts (übersteuern `enabled`).
+    #[test]
+    fn massstab_und_ausschnitt_regeln() {
+        let mut r = rule(true, cond(LayerName, Equals, "20"), Some("#f00"), None, None);
+        r.id = "r1".into();
+        r.min_scale = Some(100.0);
+        let rules = std::slice::from_ref(&r);
+        let at = |n: f64| effective(Some(rules), &WALL, RuleView::at(n, None)).color;
+        assert_eq!(at(50.0), None, "1:50 unter „ab 1:100“");
+        assert_eq!(at(100.0).as_deref(), Some("#f00"));
+        assert_eq!(at(200.0).as_deref(), Some("#f00"));
+        // Unbekannter Massstab: Kriterium wirkt nicht.
+        assert!(effective(Some(rules), &WALL, RuleView::default()).any());
+        let mut r2 = r.clone();
+        r2.max_scale = Some(200.0);
+        assert!(scale_ok(&r2, Some(150.0)) && scale_ok(&r2, Some(200.0)) && !scale_ok(&r2, Some(500.0)) && !scale_ok(&r2, Some(20.0)));
+        // Unsinnige Grenzen (0, NaN) = offen.
+        r2.min_scale = Some(f64::NAN);
+        r2.max_scale = Some(0.0);
+        assert!(scale_ok(&r2, Some(1.0)) && scale_ok(&r2, Some(1000.0)));
+        // Ausschnitt: eingeschaltete Regeln nach id, unabhängig von `enabled`.
+        let none = HashSet::new();
+        let only: HashSet<String> = ["r1".to_string()].into();
+        assert!(!effective(Some(rules), &WALL, RuleView::at(100.0, Some(&none))).any());
+        let mut off = r.clone();
+        off.enabled = false;
+        assert!(effective(Some(std::slice::from_ref(&off)), &WALL, RuleView::at(100.0, Some(&only))).any());
+        assert!(!effective(Some(std::slice::from_ref(&off)), &WALL, RuleView::at(50.0, Some(&only))).any(), "Massstab gilt auch im Ausschnitt");
     }
 
     /// [33] Lage zur tragenden Schicht und Funktion aus dem Baustoff (Standard-Deckenaufbau).
@@ -393,6 +463,9 @@ mod tests {
         assert_eq!(layer_positions(&p, &deck), ["above", "above", "above", "structure", "below"]);
         let f: Vec<_> = deck.iter().map(|x| layer_function(&p, x).and_then(function_key)).collect();
         assert_eq!(f, [Some("finish"), Some("screed"), Some("insulation"), Some("structure"), Some("plaster")]);
+        // Vorgabe je Bauteil (Aufbau-Editor).
+        let cf = component_functions(&p);
+        assert_eq!((cf["std-c-zementestrich"], cf["std-c-stahlbeton"], cf["std-c-trittschall"]), (Some("screed"), Some("structure"), Some("insulation")));
         // Eigene Funktion schlägt den Baustoff.
         let mut own = l("std-c-holz", 0.03);
         own.function = Some(crate::model::LayerFunction::Finish);
@@ -400,13 +473,13 @@ mod tests {
         // Ohne tragenden Baustoff: höchster Rang (Estrich vor Dämmung).
         assert_eq!(layer_positions(&p, &[l("std-c-zementestrich", 0.05), l("std-c-eps", 0.1)]), ["structure", "below"]);
         // Ohne aktive Regel: Schnellpfad, lauter leere Aktionen.
-        assert!(layer_actions(&p, "slab", "30", None, &deck).iter().all(|a| !a.any()));
+        assert!(layer_actions(&p, RuleView::default(), "slab", "30", None, &deck).iter().all(|a| !a.any()));
         p.override_rules = Some(crate::standards::override_rules().into_iter().map(|v| serde_json::from_value(v).unwrap()).collect());
-        assert!(layer_actions(&p, "slab", "30", None, &deck).iter().all(|a| !a.any()), "Standardregel ist aus");
+        assert!(layer_actions(&p, RuleView::default(), "slab", "30", None, &deck).iter().all(|a| !a.any()), "Standardregel ist aus");
         p.override_rules.as_mut().unwrap()[0].enabled = true;
-        let a = layer_actions(&p, "slab", "30", None, &deck);
+        let a = layer_actions(&p, RuleView::default(), "slab", "30", None, &deck);
         assert_eq!(a.iter().map(|x| x.styles()).collect::<Vec<_>>(), [true, true, true, false, false]);
-        assert!(layer_actions(&p, "ground_slab", "30", None, &deck)[1].plain());
-        assert!(!layer_actions(&p, "wall", "20", None, &deck)[1].any());
+        assert!(layer_actions(&p, RuleView::default(), "ground_slab", "30", None, &deck)[1].plain());
+        assert!(!layer_actions(&p, RuleView::default(), "wall", "20", None, &deck)[1].any());
     }
 }

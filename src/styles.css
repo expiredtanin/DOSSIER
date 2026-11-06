@@ -4198,6 +4198,11 @@ body {
 .tb-dd-menu {
   max-width: 360px;
 }
+/* [33] Über schwebenden Fenstern (Ressourcen-Fenster z-index 700, Overlay 1000): sonst öffnet die Auswahl
+   dahinter (Bauteil/Funktion im Aufbau-Editor im Browser). Spezifischer als `.ctx-menu` (z-index 300). */
+.ctx-menu.tb-dd-menu {
+  z-index: 1100;
+}
 .tb-dd-item.is-active:not(:disabled) {
   background: var(--ctx-hover);
   color: var(--ctx-hover-text);

@@ -54,6 +54,9 @@ pub struct PlanArgs {
     /// [140] Detailgrad „mittel" ab 1:200 automatisch als „grob" gezeichnet (Raumstempel bleiben, nur
     /// knapper; ab 1:500 ohne Masslinien).
     pub auto_coarse: bool,
+    /// [33] Eingeschaltete Override-Regeln (ids) eines Ausschnitts/einer Ansichtsvorlage (Blatt-Viewport);
+    /// `None` = Schalter `enabled` der Regeln im Projekt.
+    pub rules: Option<HashSet<String>>,
 }
 
 /// [140] Ab diesem Massstab (1:N) zeichnet der Detailgrad „mittel" wie „grob".
@@ -73,7 +76,7 @@ pub fn effective_detail(requested: Detail, scale: f64) -> (Detail, bool) {
 impl PlanArgs {
     /// `detail`: 0 grob, 1 mittel, 2 fein; `text`: `{"floor": id, "show": [code…], "grey": [code…],
     /// "referenceLines": bool, "global": bool, "scale": N, "forPrint": bool, "compact": bool,
-    /// "mono": bool, "sunWhen": ms | null}`.
+    /// "mono": bool, "sunWhen": ms | null, "rules": [id…] (optional, [33])}`.
     pub fn parse(detail: f64, text: &str) -> Result<PlanArgs, String> {
         let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("Plan-Argumente: {e}"))?;
         let set = |k: &str| -> HashSet<String> { v.get(k).and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_default() };
@@ -97,6 +100,7 @@ impl PlanArgs {
             mono: v.get("mono").and_then(|b| b.as_bool()).unwrap_or(false),
             sun_when: v.get("sunWhen").and_then(|b| b.as_f64()),
             auto_coarse,
+            rules: v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()),
         })
     }
 }
@@ -136,9 +140,14 @@ impl<'a> Ctx<'a> {
         self.cats.get(code).copied()
     }
 
+    /// [33] Massstab und eingeschaltete Regeln dieser Plan-Erzeugung für die Override-Auswertung.
+    pub fn rule_view(&self) -> overrides::RuleView<'_> {
+        overrides::RuleView::at(self.a.scale, self.a.rules.as_ref())
+    }
+
     /// Effektive Override-Aktionen eines Elements (`overrideFor` in TS).
     pub fn overrides(&self, code: &str, object_name: Option<&str>) -> Actions {
-        overrides::effective(self.p.override_rules.as_deref(), &Subject { layer_name: self.cat(code).map(|c| c.name.as_str()), layer_code: Some(code), object_name, ..Default::default() })
+        overrides::effective(self.p.override_rules.as_deref(), &Subject { layer_name: self.cat(code).map(|c| c.name.as_str()), layer_code: Some(code), object_name, ..Default::default() }, self.rule_view())
     }
 }
 
@@ -289,6 +298,31 @@ fn ceiling_type_name<'a>(p: &'a Project, c: &Ceiling) -> Option<&'a str> {
     ct.map(|t| t.name.as_str()).or_else(|| p.wall_types.iter().rev().find(|t| t.id == c.wall_type_id).map(|t| t.name.as_str()))
 }
 
+/// [33] Schicht-Override der sichtbaren Schicht einer nicht geschnittenen Decke (Grundriss: oberste
+/// Schicht `top`, Deckenspiegel: unterste) — dieselben Regeln wie für die Schnittflächen im Schnitt
+/// (Bauteilart Decke/Bodenplatte, Funktion, Lage, Baustoff). `None` ohne wirksame Regel (Schnellpfad).
+pub(super) fn ceiling_view_override(c: &Ctx, ce: &Ceiling, top: bool) -> Option<overrides::LayerActions> {
+    let p = c.p;
+    let v = c.rule_view();
+    if !overrides::has_layer_actions(p, v) {
+        return None;
+    }
+    let layers = ceiling_layers(p, ce).ok()?;
+    let li = if top { 0 } else { layers.len().checked_sub(1)? };
+    let kind = if overrides::is_ground_slab(p, ce, layers) { "ground_slab" } else { "slab" };
+    overrides::layer_actions(p, v, kind, &ce.category_code, ceiling_type_name(p, ce), layers).into_iter().nth(li).filter(|a| a.any())
+}
+
+/// [33] Ansichtsschraffur `hatch` einer Fläche mit Schicht-Override: "none" ohne, "material" wie ohne
+/// Regel, sonst die Schraffur des Projekts. Zweiter Wert: Ansichtsmuster (Linien) weglassen?
+pub(super) fn view_hatch_override(p: &Project, o: Option<&overrides::LayerActions>, hatch: HatchRender) -> (HatchRender, bool) {
+    match o.and_then(|o| o.hatch.as_deref()) {
+        None | Some("material") => (hatch, false),
+        Some("none") => (no_hatch(), true),
+        Some(id) => (resolve_hatch_or_none(p, id, None, None), true),
+    }
+}
+
 /// Bodenbeläge ([100]): Ansichtsmuster der obersten Schicht der Decke, auf der das Geschoss steht (OK
 /// Decke zwischen 0.3 m unter dem Geschossboden und der Schnitthöhe) — von oben gesehen, unter Wänden
 /// und Räumen gezeichnet.
@@ -299,6 +333,10 @@ fn floor_finishes(c: &Ctx, out: &mut Vec<Primitive>) {
     for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| c.shown(&x.category_code)) {
         let top = p.ceiling_vertical_extent(ce).1;
         if !(top >= base - 0.3 && top <= cut) {
+            continue;
+        }
+        // [33] Schicht-Override mit eigener Schraffur bzw. ohne Muster: kein Belagsmuster.
+        if view_hatch_override(p, ceiling_view_override(c, ce, true).as_ref(), no_hatch()).1 {
             continue;
         }
         let Some((segs, w, ink)) = crate::surface_pattern3d::floor_finish_segments(p, ce, c.a.scale) else { continue };
@@ -363,11 +401,16 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
             Some(k) => resolve_background(k, ce.background.as_deref(), category, ce.background_source).unwrap_or(poche_fill(hatch.pattern)).to_string(),
             None => "none".to_string(),
         };
+        // [33] Schicht-Override der obersten (von oben sichtbaren) Schicht: Füllung, Schraffur, Umriss.
+        let lov = ceiling_view_override(c, ce, true);
+        let (hatch, _) = view_hatch_override(p, lov.as_ref(), hatch);
+        let fill = lov.as_ref().and_then(|o| o.fill_color.clone()).unwrap_or(fill);
         let ring: Vec<Vec2> = merged.ring.iter().map(|q| pv(*q)).collect();
         let bridges = (!merged.bridge_edges.is_empty()).then(|| merged.bridge_edges.iter().map(|&k| k as f64).collect());
         out.push(polygon(ring, &fill, "none", 0.0, hatch, Some(greyed), bridges, Pick::Ceiling(&ce.id)));
         let w = lw * c.a.detail.layer_factor();
-        for [a, b] in ceiling_outline_lines(&merged.ring, &merged.bridge_edges, &fps) {
+        let outline = lov.as_ref().and_then(|o| o.outline) != Some(false);
+        for [a, b] in ceiling_outline_lines(&merged.ring, &merged.bridge_edges, &fps).into_iter().filter(|_| outline) {
             out.push(line(pv(a), pv(b), "ceiling-outline", w, Some(Some(OVERHEAD_DASH.to_vec())), stroke, Some(greyed)));
         }
         // Eigene Decke „über Schnitt“ bleibt wie bisher (Umriss ist schon strichpunktiert, die Fläche

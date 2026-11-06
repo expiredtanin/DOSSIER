@@ -249,6 +249,7 @@ export {
 } from "../plan/toSection";
 export { viewportLevelPlan } from "../plan/viewportPlan";
 export { snapshotMono } from "../plan/viewportPlan";
+export { snapshotOverrideRuleIds } from "../plan/viewportPlan";
 
 export {
   TRUCK_MESH_READY_EVENT,

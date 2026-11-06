@@ -1231,7 +1231,7 @@ export const en: Record<TranslationKey, string> = {
   "resources.overrides.addCondition": "Condition (and)",
   "resources.overrides.removeCondition": "Remove condition",
   "resources.overrides.layerHint":
-    "Layer function, position, material and material category match component layers (cut areas in sections, wall layers in plans), not whole elements.",
+    "Layer function, position, material and material category match component layers (cut areas in sections, wall layers in plans, visible slab layer in plans and reflected ceiling plans), not whole elements.",
   "resources.overrides.cutActions": "Cut areas and layers (take precedence over “1:100 solid black”)",
   "resources.overrides.action.fill": "Fill",
   "resources.overrides.action.hatch": "Hatch",
@@ -1269,6 +1269,12 @@ export const en: Record<TranslationKey, string> = {
   "resources.overrides.val.material_category.cladding": "Cladding",
   "resources.overrides.val.material_category.stone": "Natural stone",
   "resources.overrides.val.material_category.other": "other",
+  "resources.overrides.scale": "Scale (rule applies only in this range)",
+  "resources.overrides.scale.min": "from scale",
+  "resources.overrides.scale.max": "up to scale",
+  "resources.overrides.scale.from": "from 1:{n}",
+  "resources.overrides.scale.to": "up to 1:{n}",
+  "resources.overrides.scale.range": "1:{from} to 1:{to}",
 
   "resources.wallStyles.hint":
     "Per wall type, the layer joints (between adjacent layers) as a selectable line style. Unassigned: 0.02 mm hairline.",
@@ -1394,6 +1400,9 @@ export const en: Record<TranslationKey, string> = {
   "resources.col.hatchLineWeight.hint": "Weight of the pattern lines on paper; the line style only sets the pattern.",
   "resources.joint.default": "— (hairline)",
   "resources.layer.add": "Add layer",
+  "resources.col.function": "Function",
+  "resources.layer.functionAuto": "from material: {f}",
+  "resources.layer.functionNone": "none",
   "resources.layer.remove": "Remove layer",
   "resources.layer.moveUp": "Move layer up",
   "resources.layer.moveDown": "Move layer down",

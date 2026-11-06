@@ -246,6 +246,11 @@ export function generatePlan(
    * Export/Druck.
    */
   compactUnderlay = false,
+  /**
+   * [33] Eingeschaltete Override-Regeln (ids) eines Blatt-Viewports (Ausschnitt/Ansichtsvorlage,
+   * `snapshotOverrideRuleIds`); fehlt = Schalter `enabled` der Regeln im Projekt.
+   */
+  overrideRuleIds?: readonly string[] | null,
 ): Plan {
   const compact = compactUnderlay && !forPrint;
   // Blatt-Ebene eines Layouts (Papier 1:1): ohne projektglobale Zutaten (Kontext, Luftbilder,
@@ -261,7 +266,7 @@ export function generatePlan(
   // Zeitpunkt der Schattenstudie: `Date` nimmt das Datum, wie es in der Datei steht (Ortszeit ohne Zone).
   const study = project.sunStudy;
   const sunWhen = includeGlobal && study?.show ? new Date(study.when).getTime() : NaN;
-  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, mono, sunWhen);
+  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, mono, sunWhen, overrideRuleIds);
   const pieces: PlanPiece[] = [];
   const pushGroups = (first: number, last: number): void => {
     const from = dom.buf.groups[first][0];
@@ -465,6 +470,7 @@ function planDomainsArgs(
   compact: boolean,
   mono: boolean,
   sunWhen: number,
+  rules?: readonly string[] | null,
 ): Record<string, unknown> {
   // Sichtbar und gezeichnet bzw. gedimmt: über die sichtbaren Codes (wenige), nicht über alle
   // Elemente — der Kern zeichnet ein Element genau dann, wenn sein Code in `show` steht.
@@ -476,7 +482,9 @@ function planDomainsArgs(
     show.push(c);
     if (d.greyed) grey.push(c);
   }
-  return { floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact, mono, sunWhen: Number.isNaN(sunWhen) ? null : sunWhen };
+  const out: Record<string, unknown> = { floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact, mono, sunWhen: Number.isNaN(sunWhen) ? null : sunWhen };
+  if (rules) out.rules = [...rules];
+  return out;
 }
 
 /**
@@ -542,8 +550,9 @@ function planDomains(
   mono: boolean,
   /** Zeitpunkt der Schattenstudie (Unix-ms, NaN = keiner). */
   sunWhen: number,
+  rules?: readonly string[] | null,
 ): DomainPrims {
-  const args = JSON.stringify(planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, global, scale, forPrint, compact, mono, sunWhen));
+  const args = JSON.stringify(planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, global, scale, forPrint, compact, mono, sunWhen, rules));
   const held = chunkStores.get(args);
   const query = held && held.size ? `${args.slice(0, -1)},"have":[${[...held.keys()].join(",")}]}` : args;
   const res = readPlanMulti(documentFor(project).queryBin("planDomains", [DETAIL_CODE[detail] ?? 1], query), held);

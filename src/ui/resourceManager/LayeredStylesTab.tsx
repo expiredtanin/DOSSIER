@@ -8,12 +8,17 @@
 // Orientierung (Wand: Bänder nebeneinander / Decke+Dach: liegend gestapelt)
 // und die jeweiligen Handler.
 //
+// Funktion ([33]): `layer.function` (tragend, Dämmung, Unterlagsboden …) für Override-Regeln
+// („Deckenaufbau weiss", Lage zur tragenden Schicht); ohne Feld gilt die aus dem Baustoff
+// abgeleitete Funktion (Kern), die die Auswahl als Vorgabe anzeigt.
+//
 // Fugen: `layer[i].jointLineStyleId` ist der Linienstil der INNEREN Kante der
 // Schicht i (Fuge zur nächst-inneren Schicht). Die innerste Schicht hat keine
 // innere Fuge (ihre Kante ist der Innenumriss) → dort kein Dropdown.
 
-import { useState } from "react";
-import type { CeilingType, Layer, Project, RoofType, WallType } from "../../model/types";
+import { useMemo, useState } from "react";
+import type { CeilingType, Layer, LayerFunction, Project, RoofType, WallType } from "../../model/types";
+import { componentLayerFunctions, LAYER_FUNCTIONS } from "../../model/standards";
 import { WallTypeSwatch } from "../hatchPreview";
 import { UValueLine } from "../../panels/UValueRow";
 import type { SwatchLayer } from "../hatchPreview";
@@ -69,6 +74,17 @@ function LayeredStyleDetail({
     project.components.length > 0
       ? project.components.map((c) => ({ value: c.id, label: c.name }))
       : [{ value: "", label: "—" }];
+  // [33] Schichtfunktion: Sentinel „aus Baustoff" (kein Feld) zeigt den abgeleiteten Wert.
+  const AUTO = "__auto__";
+  const derived = useMemo(() => componentLayerFunctions(project), [project]);
+  const fnLabel = (f: LayerFunction) => t(`resources.overrides.val.layer_function.${f}`);
+  const functionOptions = (componentId: string) => {
+    const d = derived[componentId];
+    return [
+      { value: AUTO, label: t("resources.layer.functionAuto", { f: d ? fnLabel(d) : t("resources.layer.functionNone") }) },
+      ...LAYER_FUNCTIONS.map((f) => ({ value: f, label: fnLabel(f) })),
+    ];
+  };
 
   const layers = style.layers;
   const setLayers = (next: Layer[]) => onPatch({ layers: next });
@@ -146,6 +162,15 @@ function LayeredStyleDetail({
                     onChange={(componentId) => patchLayer(i, { componentId })}
                     options={compOptions}
                   />
+                </FieldRow>
+                <FieldRow label={t("resources.col.function")}>
+                  <span data-testid="layer-function">
+                    <SelectField
+                      value={layer.function ?? AUTO}
+                      onChange={(v) => patchLayer(i, { function: v === AUTO ? undefined : (v as LayerFunction) })}
+                      options={functionOptions(layer.componentId)}
+                    />
+                  </span>
                 </FieldRow>
                 <FieldRow label={t("resources.col.thickness")}>
                   <NumberField

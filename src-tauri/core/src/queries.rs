@@ -78,6 +78,8 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("sheetTableCatalog", _) => Ok(crate::sheet_table::catalog_json().to_string()),
         ("presentationSheet", _) => Ok(crate::presentation_sheet::query(p, text)?.to_string()),
         ("uValue", _) => json(&crate::u_value::query(p, text)),
+        // [33] Schichtfunktion je Bauteil, aus dem Baustoff abgeleitet (Vorgabe im Aufbau-Editor, wenn `Layer.function` fehlt).
+        ("componentLayerFunctions", _) => json(&crate::plan::overrides::component_functions(p)),
         ("surfaceOpening", _) => json(&crate::opening_shape::surface_opening_info(p, text)),
         ("openingPreview", _) => json(&crate::opening_preview::opening_preview(p, text)),
         ("scheduleCsv", 1) => Ok(export_schedule::export_schedule_csv(p, text, args[0] != 0.0)),
