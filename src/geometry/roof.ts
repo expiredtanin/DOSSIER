@@ -139,7 +139,8 @@ function decodeGeometry(b: Float64Array): RoofGeometry {
 /**
  * Dach-Geometrie aus Form/Neigung/Überstand + Traufhöhe `eavesZ` (Rust-Kern). Rechteck: auf der
  * Bounding-Box des Umrisses, um den Überstand geweitet, First entlang `ridgeAxis`; L/T/U und
- * schiefe Umrisse: Skelett mit Graten, Kehlen und Giebeln.
+ * schiefe Umrisse: Skelett mit Graten, Kehlen und Giebeln; Flach/Pult: eine Ebene über dem echten
+ * Umriss (konvexe Teilflächen, [148]).
  */
 export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
   // Memo je Dach-Objekt: Dächer sind immutabel (structural sharing), die Geometrie wird je

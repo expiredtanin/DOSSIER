@@ -2598,7 +2598,8 @@ pub struct Roof {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub locked: Option<bool>,
-    /// Geschlossener Grundriss-Umriss (Meter); Geometrie nutzt die Bounding-Box.
+    /// Geschlossener Grundriss-Umriss (Meter). Flach/Pult/Walm/Zelt folgen dem Umriss, Sattel/Mansarde einem
+    /// rechtwinkligen; nur Giebelformen auf schiefem Umriss nutzen die Bounding-Box.
     pub outline: Vec<Vec2>,
     /// Innenhöfe/Lichthöfe als Ringe (Meter, jeder Ring geschlossen, Drehsinn egal). Das Dach
     /// ist an dieser Stelle ausgespart (3D, Grundriss, Schnitt, Ansicht, IFC); die Hofkanten sind

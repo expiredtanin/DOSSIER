@@ -5,8 +5,9 @@
 //!   entlang einer Hauptachse — deckt alle Standardformen (Flach/Pult/Sattel/Walm/Mansarde/
 //!   Zelt, Krüppelwalm) exakt ab.
 //! - Rechtwinklig, nicht rechteckig (L/T/U …): Walm/Sattel/Mansarde/Zelt über das Skelett
-//!   ([`crate::roof_skeleton`]), Pult als eine Ebene über dem Umriss.
-//! - Beliebiger einfacher Umriss: allseitig gleich geneigte Formen über das Skelett.
+//!   ([`crate::roof_skeleton`]).
+//! - Beliebiger einfacher Umriss: allseitig gleich geneigte Formen über das Skelett; Flach und Pult
+//!   als EINE Ebene über dem echten Umriss (konvexe Teilflächen, [148]).
 //!
 //! Koordinaten: Grundriss (x, y) in Metern; 3D-Punkte [x, y, z] mit z = Höhe.
 //! Portiert aus `src/geometry/roof.ts` (dort bleiben Typen, Memo und `roofBaseElevation`).
@@ -293,6 +294,11 @@ pub fn roof_geometry(p: &RoofParams, eaves_z: f64) -> RoofGeometry {
     if let Some(g) = custom_roof(p, e) {
         return g;
     }
+    // Flach/Pult auf jedem nicht-rechteckigen einfachen Umriss (L/U/schief/Bogen, [148]): eine Ebene über
+    // dem echten Umriss statt der Bounding-Box.
+    if matches!(p.shape, Shape::Flach | Shape::Pult) && is_skeleton_roofable(&p.outline) {
+        return planar_roof(p, e);
+    }
     // Walm/Sattel/Mansarde/Zelt über einem rechtwinkligen, nicht-rechteckigen Grundriss
     // (L/T/U …): echte Flächen mit Graten und Kehlen statt Bounding-Box. Zelt/Mansard-Zelt:
     // eine einzelne Spitze gibt es dort nicht — Gegenstück ist das allseitig geneigte Skelett.
@@ -304,9 +310,6 @@ pub fn roof_geometry(p: &RoofParams, eaves_z: f64) -> RoofGeometry {
     let allround = matches!(p.shape, Shape::Walm | Shape::Zelt) || (p.shape == Shape::Mansarde && p.mansard_type != MansardType::Giebel);
     if allround && is_skeleton_roofable(&p.outline) {
         return skeleton_roof(p, e);
-    }
-    if p.shape == Shape::Pult && is_rectilinear_non_rect(&p.outline) {
-        return rectilinear_pult(p, e);
     }
     let (mut x0, mut y0, mut x1, mut y1) = bbox(&p.outline);
     let oe = nn(p.overhang); // Traufüberstand (senkrecht zum First)
@@ -535,30 +538,47 @@ fn custom_roof(p: &RoofParams, e: f64) -> Option<RoofGeometry> {
     let sk = weighted_roof(&eaves_rings, &slopes, e, knee, None).ok()?;
     let mut it = eaves_rings.into_iter();
     let eaves = it.next()?;
-    Some(RoofGeometry { eaves, eaves_holes: it.collect(), ridges: sk.ridges, hips: sk.hips, breaks: sk.breaks, planes: sk.planes, gables: sk.gables, ridge_height: sk.ridge_height })
+    // Flachdach mit Höfen ([148]): Skelett-Flächen können einspringende Ecken haben — als konvexe
+    // Teilflächen ausgeben (3D-Platten, Schnittspur und Dachfenster rechnen je Fläche konvex).
+    let planes = if flat {
+        sk.planes.iter().flat_map(|pl| convex_pieces(&pl.iter().map(|q| [q[0], q[1]]).collect::<Vec<_>>())).map(|pc| pc.into_iter().map(|q| [q[0], q[1], e]).collect()).collect()
+    } else {
+        sk.planes
+    };
+    Some(RoofGeometry { eaves, eaves_holes: it.collect(), ridges: sk.ridges, hips: sk.hips, breaks: sk.breaks, planes, gables: sk.gables, ridge_height: sk.ridge_height })
 }
 
-/// Pultdach auf rechtwinkligem Grundriss: EINE Ebene über dem (um Traufe/Ortgang geweiteten)
-/// Umriss. Tief bei kleinstem y (First entlang x) bzw. x (First entlang y); Kanten quer zum
-/// First bekommen senkrechte Giebel.
-fn rectilinear_pult(p: &RoofParams, e: f64) -> RoofGeometry {
+/// Flach- oder Pultdach auf einem beliebigen einfachen Umriss ([148]; L/T/U, schief, Bogen als Polygon):
+/// EINE Ebene über dem (um Traufe/Ortgang geweiteten) Umriss, als konvexe Teilflächen (die Verbraucher —
+/// 3D-Platten, Schnittspur, Dachfenster — rechnen je Fläche konvex). Pult: tief bei kleinstem y (First
+/// entlang x) bzw. x (First entlang y); jede Kante, entlang der die Höhe wechselt, bekommt einen
+/// senkrechten Giebel. Überstand wie beim Rechteck: Kanten entlang der Firstachse Traufe, quer dazu
+/// Ortgang. Führt der Überstand zu einem sich selbst
+/// schneidenden Ring (kurze Kanten an einspringenden Ecken), gilt der Umriss ohne Überstand.
+fn planar_roof(p: &RoofParams, e: f64) -> RoofGeometry {
     let ring = ccw_ring(&p.outline);
+    let pult = p.shape == Shape::Pult;
     let oe = nn(p.overhang);
     let og = nn(p.overhang_gable.unwrap_or(p.overhang));
     let per_edge = |a: P2, b: P2| if along_ridge(a, b, p.ridge_axis) { oe } else { og };
     let eaves = offset_ring(&ring, Offset::PerEdge(&per_edge));
-    let tan = (nn(p.pitch_deg) * DEG).tan();
+    let eaves = if is_simple_ring(&eaves) { eaves } else { ring };
+    let tan = if pult { (nn(p.pitch_deg) * DEG).tan() } else { 0.0 };
     let s = |q: P2| if p.ridge_axis == Axis::X { q[1] } else { q[0] };
     let smin = eaves.iter().map(|&q| s(q)).fold(f64::INFINITY, f64::min);
     let smax = eaves.iter().map(|&q| s(q)).fold(f64::NEG_INFINITY, f64::max);
     let up = |q: P2| -> P3 { [q[0], q[1], e + tan * (s(q) - smin)] };
     let n = eaves.len();
-    let gables = (0..n)
-        .filter_map(|i| {
-            let (a, b) = (eaves[i], eaves[(i + 1) % n]);
-            (!along_ridge(a, b, p.ridge_axis)).then(|| vec![[a[0], a[1], e], [b[0], b[1], e], up(b), up(a)])
-        })
-        .collect();
+    let gables = if pult {
+        (0..n)
+            .filter_map(|i| {
+                let (a, b) = (eaves[i], eaves[(i + 1) % n]);
+                ((s(a) - s(b)).abs() > 1e-9).then(|| vec![[a[0], a[1], e], [b[0], b[1], e], up(b), up(a)])
+            })
+            .collect()
+    } else {
+        vec![]
+    };
     let planes = convex_pieces(&eaves).into_iter().map(|pc| pc.into_iter().map(up).collect()).collect();
     RoofGeometry { eaves, eaves_holes: vec![], ridges: vec![], hips: vec![], breaks: vec![], planes, gables, ridge_height: (smax - smin) * tan }
 }
@@ -1011,5 +1031,84 @@ mod tests {
         assert!(decode_params(&buf[..10 + 8 + 3]).is_none());
         let g = roof_geometry(&d, 0.0);
         assert!(g.eaves_holes.is_empty());
+    }
+
+    // ── Flach-/Pultdach auf beliebigem Umriss ([148]) ────────────────────────
+
+    fn ring2(pl: &[P3]) -> Vec<P2> {
+        pl.iter().map(|v| [v[0], v[1]]).collect()
+    }
+
+    fn all_convex(g: &RoofGeometry) -> bool {
+        g.planes.iter().all(|pl| convex_pieces(&ring2(pl)).len() == 1)
+    }
+
+    /// Bogen-Umriss (Halbkreis + Rechteck, wie ein Erker) als Polygon.
+    fn arc_outline() -> Vec<P2> {
+        let mut pts = vec![[0.0, 0.0], [4.0, 0.0]];
+        for k in 0..=16 {
+            let a = -std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * k as f64 / 16.0;
+            pts.push([4.0 + 2.0 * a.cos(), 2.0 + 2.0 * a.sin()]);
+        }
+        pts.push([0.0, 4.0]);
+        clean_ring(&pts)
+    }
+
+    #[test]
+    fn flachdach_folgt_dem_umriss_statt_bounding_box() {
+        let g = roof_geometry(&params(&L, Shape::Flach), 3.0);
+        // L = 60 m² (Bounding-Box wäre 66 m²); Aussparung (10, 5) bleibt frei.
+        assert!(close(plan_area(&g), 60.0), "{}", plan_area(&g));
+        assert_eq!(g.eaves.len(), 6);
+        assert!(all_convex(&g));
+        assert!(g.planes.iter().flatten().all(|v| v[2] == 3.0));
+        assert!(z_at(&g, 10.0, 5.0).is_none());
+        assert!(z_at(&g, 2.0, 5.0).is_some() && z_at(&g, 10.0, 2.0).is_some());
+        assert!(g.ridges.is_empty() && g.hips.is_empty() && g.gables.is_empty() && g.ridge_height == 0.0);
+        // Überstand 0.5 ringsum: 60 + Umfang 34 · 0.5 + (5 aussen − 1 innen) · 0.25 = 78 m².
+        let o = roof_geometry(&RoofParams { overhang: 0.5, ..params(&L, Shape::Flach) }, 3.0);
+        assert!(close(plan_area(&o), 78.0), "{}", plan_area(&o));
+        assert!(o.eaves.contains(&[-0.5, -0.5]) && o.eaves.contains(&[8.5, 4.5]));
+        // Rechteck bleibt wie bisher eine Fläche.
+        assert_eq!(roof_geometry(&params(&RECT, Shape::Flach), 0.0).planes.len(), 1);
+    }
+
+    #[test]
+    fn flachdach_auf_bogen_schief_und_mit_hof() {
+        let arc = arc_outline();
+        let g = roof_geometry(&params(&arc, Shape::Flach), 2.0);
+        assert!(close(plan_area(&g), signed_area(&arc).abs()), "{}", plan_area(&g));
+        assert!(all_convex(&g));
+        assert!(z_at(&g, 5.9, 0.2).is_none(), "Ecke der Bounding-Box ausserhalb des Bogens");
+        // Schiefes Viereck (gedrehtes Rechteck).
+        let rot: Vec<P2> = vec![[0.0, 0.0], [4.0, 3.0], [1.0, 7.0], [-3.0, 4.0]];
+        let r = roof_geometry(&params(&rot, Shape::Flach), 0.0);
+        assert!(close(plan_area(&r), 25.0), "{}", plan_area(&r));
+        // L mit Hof: Fläche = L − Hof, alle Teilflächen konvex.
+        let hole: Vec<P2> = vec![[2.0, 1.0], [2.0, 3.0], [4.0, 3.0], [4.0, 1.0]];
+        let h = roof_geometry(&RoofParams { holes: vec![hole], ..params(&L, Shape::Flach) }, 0.0);
+        assert!(close(plan_area(&h), 56.0), "{}", plan_area(&h));
+        assert!(all_convex(&h));
+        assert!(z_at(&h, 3.0, 2.0).is_none() && z_at(&h, 10.0, 5.0).is_none());
+    }
+
+    #[test]
+    fn pultdach_auf_beliebigem_umriss() {
+        // Trapez mit schrägen Seiten: eine Ebene, Fläche des Umrisses, Giebel an den schrägen Kanten.
+        let trap: Vec<P2> = vec![[0.0, 0.0], [8.0, 0.0], [6.0, 4.0], [2.0, 4.0]];
+        let g = roof_geometry(&RoofParams { pitch_deg: 45.0, ..params(&trap, Shape::Pult) }, 1.0);
+        assert!(close(plan_area(&g), 24.0), "{}", plan_area(&g));
+        assert!(close(g.ridge_height, 4.0));
+        assert_eq!(g.gables.len(), 2);
+        assert!(close(z_at(&g, 4.0, 2.0).unwrap(), 3.0));
+        assert!(z_at(&g, 7.5, 3.5).is_none());
+        // Bogen: alle Kanten mit Höhenänderung bekommen einen Giebel, Fläche = Umriss.
+        let arc = arc_outline();
+        let a = roof_geometry(&params(&arc, Shape::Pult), 0.0);
+        assert!(close(plan_area(&a), signed_area(&arc).abs()));
+        assert!(all_convex(&a));
+        assert!(a.gables.len() >= 16);
+        // Rechteck wie bisher (zwei Giebel).
+        assert_eq!(roof_geometry(&params(&RECT, Shape::Pult), 0.0).planes.len(), 1);
     }
 }

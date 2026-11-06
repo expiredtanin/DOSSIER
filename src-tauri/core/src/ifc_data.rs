@@ -575,6 +575,23 @@ const BOX_TRIS: [u32; 36] = [0, 1, 3, 0, 3, 2, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 
 
 /// Gauben eines Dachs (Index) für die Mengen ([G5]): je Gaube Breite, Stirnhöhe, geneigte Fläche des
 /// Ausschnitts im Hauptdach, Volumen der Wände (Stirn/Wangen) und des Gaubendachs aus den Körpern.
+/// Dach-Basismengen (IfcRoof) aus denselben Dachflächen wie 3D/Schnitt ([148]: Flach-/Pultdach auf dem
+/// echten Umriss) und die Gaubenmengen. Nettofläche ohne Gauben-Ausschnitte und Dachfenster.
+fn roof_base_quantities(p: &Project, roof: &Roof) -> (Vec<qty::Qty>, Vec<qty::Qty>) {
+    let planes = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof)).planes;
+    let mut roof_q = qty::roof_quantities(&planes);
+    let ri = p.roofs.as_deref().unwrap_or(&[]).iter().position(|r| r.id == roof.id);
+    // Gauben ([G5]): Ausschnitt im Hauptdach (geneigt) von der Nettofläche ab, eigene Mengen der Gauben.
+    let dormer_q = ri.map_or_else(Vec::new, |ri| qty::dormer_quantities(&dormer_parts(p, ri, roof)));
+    let mut cut = dormer_q.iter().find(|q| q.name == "OpeningArea").map_or(0.0, |q| q.value);
+    // Dachfenster ([103]): Loch in der Dachfläche (Breite × Höhe auf der Fläche).
+    cut += ri.map_or(0.0, |ri| crate::opening_shape::roof_openings(p, ri).iter().map(|(o, _)| max(0.0, o.width) * max(0.0, o.height)).sum());
+    if let Some(net) = roof_q.iter_mut().find(|q| q.name == "NetArea") {
+        net.value = max(0.0, net.value - cut);
+    }
+    (roof_q, dormer_q)
+}
+
 fn dormer_parts(p: &Project, ri: usize, roof: &Roof) -> Vec<qty::DormerIn> {
     let solids = crate::roof_assembly::roof_solids(p, ri);
     let vol = |id: &str, role: crate::roof_assembly::Role| -> f64 {
@@ -1254,16 +1271,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         }
         props.push(Prop::Bool("IsExternal", true));
         props.extend(crate::u_value::roof_u_value(&p, roof).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
-        let planes = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof)).planes;
         let mut psets = vec![Pset { name: "Pset_RoofCommon", props }];
-        let mut roof_q = qty::roof_quantities(&planes);
-        // Gauben ([G5]): Ausschnitt im Hauptdach (geneigt) von der Nettofläche ab, eigene Mengen der Gauben.
-        let dormer_q = p.roofs.as_deref().unwrap_or(&[]).iter().position(|r| r.id == roof.id).map_or_else(Vec::new, |ri| qty::dormer_quantities(&dormer_parts(&p, ri, roof)));
-        if let Some(cut) = dormer_q.iter().find(|q| q.name == "OpeningArea").map(|q| q.value) {
-            if let Some(net) = roof_q.iter_mut().find(|q| q.name == "NetArea") {
-                net.value = max(0.0, net.value - cut);
-            }
-        }
+        let (roof_q, dormer_q) = roof_base_quantities(&p, roof);
         psets.extend(qto("Qto_RoofBaseQuantities", roof_q));
         psets.extend(qto("Qto_DossierDormerQuantities", dormer_q));
         let ty = roof_type.map(|t| (t.id.clone(), t.name.clone(), t.layers.iter().map(|l| (l.component_id.clone(), component_name(&p, &l.component_id), l.thickness)).collect::<Vec<_>>()));
@@ -1478,6 +1487,26 @@ mod tests {
         let s = strings(&f);
         assert!(s.iter().any(|x| x == "wall/W1") && s.iter().any(|x| x == "roof/RF1"));
         assert_eq!(f.nums.iter().filter(|v| **v == REC_OPENING_SOLID).count() >= 2, true);
+    }
+
+    /// [148] Flachdach auf L-Umriss: IFC-Mengen aus dem echten Umriss (60 m², nicht 66 m² Bounding-Box),
+    /// Nettofläche ohne Dachfenster.
+    #[test]
+    fn flachdach_l_mengen() {
+        let mut p = sample();
+        {
+            let r = &mut p.roofs.as_mut().unwrap()[0];
+            r.outline = [(0.0, 0.0), (11.0, 0.0), (11.0, 4.0), (8.0, 4.0), (8.0, 6.0), (0.0, 6.0)].iter().map(|&(x, y)| Vec2 { x, y }).collect();
+            r.shape = crate::model::RoofShape::Flach;
+            r.pitch_deg = 0.0;
+            r.overhang = 0.0;
+        }
+        p.openings.as_mut().unwrap().push(Opening { id: "DF".into(), kind: ElementKind::Window, width: 1.0, height: 1.5, host_roof_id: Some("RF1".into()), host_point: Some(Vec2 { x: 3.0, y: 4.5 }), ..Default::default() });
+        let (q, _) = roof_base_quantities(&p, &p.roofs.as_ref().unwrap()[0]);
+        let get = |n: &str| q.iter().find(|x| x.name == n).map(|x| x.value).unwrap();
+        assert!((get("ProjectedArea") - 60.0).abs() < 1e-6 && (get("GrossArea") - 60.0).abs() < 1e-6, "{q:?}");
+        assert!((get("NetArea") - 58.5).abs() < 1e-6, "{q:?}");
+        assert!(ifc_export_data(&p, &IfcOptions::default()).is_ok());
     }
 
     /// [G5] Gauben-Mengen: Ausschnitt geneigt, Wand- und Dachvolumen aus den Körpern.

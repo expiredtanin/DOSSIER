@@ -3163,6 +3163,32 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   wieder gelesen, Standard ohne Datensatz). Nicht in AutoCAD/BricsCAD geöffnet (CAD wendet die Variablen nur auf
   Strichstärken-Darstellung an). **Offen:** Druck-SVG streicht Polygone weiter rundum (keine `noStrokeEdges`); Nähen in den
   Metal-Chunks nur innerhalb eines Chunks; nicht in der Tauri-App/Metal und nicht im WebGPU-Browser angesehen. · M
+- ◐ **[148] Flach- und Pultdach auf beliebigem Umriss.** (6.11., Befund aus [142]: `roof_geometry` rechnete ein Flachdach
+  mit L-/U-/Polygon-/Bogen-Umriss als Bounding-Box — 3D, Schnitt, Ansicht, Grundriss, Mengen, IFC und Schatten; Pultdach
+  ebenso, ausser auf rechtwinkligem Umriss.) Neu: `roof.rs::planar_roof` — Flach und Pult auf jedem nicht-rechteckigen
+  einfachen Umriss als EINE Ebene über dem echten (um Traufe/Ortgang geweiteten) Umriss, ausgegeben als konvexe
+  Teilflächen (Ohr-Schnitt + Hertel–Mehlhorn; alle Verbraucher — Schicht-Platten mit Gehrung, Schnittspur, Dachfenster,
+  Höhenfeld — rechnen je Fläche konvex, koplanare Fugen verschmelzen im Schnitt und zeigen in 3D keine Stirn). Pult: Giebel
+  an jeder Kante mit Höhenwechsel (ersetzt `rectilinear_pult`, gleiche Ausgabe auf L/T/U). Rechtecke unverändert (Bounding-Box
+  = Umriss). Flachdach mit Höfen (bisher Skelett-Flächen, z. T. einspringend) jetzt ebenfalls in konvexe Teile zerlegt.
+  Alle Ableitungen nutzen dieselbe Geometrie (3D/IFC-Körper, Kern-Schnitt, Ansicht, Grundriss-Traufe, Mengen, Schatten).
+  **Dachfenster über einer Fuge** (`model3d::roof_holes_by_plane`): das Loch gehört zusätzlich jeder koplanaren Teilfläche,
+  die es überdeckt; die Laibung je Fläche nur, soweit ihre Kante über dieser Fläche liegt (`clip_segment_xy`) — Schicht bleibt
+  dicht. **IFC:** `NetArea` zieht jetzt auch Dachfenster ab (vorher nur Gauben). **Schatten:** Flachdach (jeder Umriss) und
+  Pult auf nicht-rechteckigem Umriss werfen je Teilfläche eine Wolke (Fläche + Fusspunkte auf Traufhöhe) statt der konvexen
+  Hülle des Ganzen; `Receiver.owner` ist dafür ein Bereich von Wolken. Kein Attika-/Gefälle-Feld im Modell (Flachdach eben,
+  Aufbau aus dem Dachtyp). Tests: Rust `roof` (`flachdach_folgt_dem_umriss_statt_bounding_box` L 60 m² + Überstand 78 m²,
+  `flachdach_auf_bogen_schief_und_mit_hof`, `pultdach_auf_beliebigem_umriss`), `model3d`
+  (`flachdach_l_volumen_und_dachfenster_ueber_der_fuge`: Volumen = 60 m² × Aufbau, Loch über der Fuge dicht, Abzug = Fläche
+  × Dicke), `section` (`flachdach_l_schnitt_durch_die_schenkel`: Länge/Fläche quer durch beide Schenkel, oberer Schenkel,
+  Schenkel neben der Aussparung), `ifc_data` (`flachdach_l_mengen`: 60 m², netto ohne Dachfenster), `sun`
+  (`flachdach_l_schatten`: L verschoben, 60 m², Aussparung hell). Goldens neu nur Musterhaus komplex (Erker-Flachdach mit
+  Bogen-Umriss): Grundriss EG/OG (Traufe als Bogen statt Rechteck, Hauptschatten 286.50 → 286.24 m²), Ansicht Süd, 3D.
+  Geprüft: cargo test Kern, WASM gebaut (Linux, `--no-opt`), tsc, vitest, CLI-Grundriss/-Schnitte/-Ansichten
+  vorher/nachher in Chromium (Testprojekt L-Flachdach mit Dachfenster, Erker Musterhaus komplex), IFC mit
+  `validate-ifc.py` (0 Befunde; Mengen 133.56 → 103.56 m²). **Offen:** Pult mit Höfen (Höfe weiter ignoriert); Pult auf
+  schiefem Umriss neigt weiter nur entlang x/y (`ridgeAxis`); Attika/Gefälle fehlen im Modell; Dachfenster-Laibung genau
+  auf einer Fuge doppelt; nicht in der Tauri-App/Metal angesehen. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

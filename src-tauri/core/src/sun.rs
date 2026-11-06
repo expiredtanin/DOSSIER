@@ -172,7 +172,7 @@ enum Top {
 }
 
 /// [142] Schattenempfangende Gebäudefläche (Decke, Dach) als Höhenfeld: Umriss mit Löchern,
-/// Oberseite, Dicke (darunter geht der Strahl durch). `owner` = Index der Punktwolke, die diese
+/// Oberseite, Dicke (darunter geht der Strahl durch). `owner` = Indizes der Punktwolken, die diese
 /// Fläche selbst wirft (ein Dach fängt nicht seinen eigenen Strahl).
 pub struct Receiver {
     outline: Ring,
@@ -182,7 +182,7 @@ pub struct Receiver {
     z_max: f64,
     thick: f64,
     top: Top,
-    owner: Option<usize>,
+    owner: Option<std::ops::Range<usize>>,
 }
 
 fn in_ring(x: f64, y: f64, r: &[[f64; 2]]) -> bool {
@@ -199,7 +199,7 @@ fn in_ring(x: f64, y: f64, r: &[[f64; 2]]) -> bool {
 }
 
 impl Receiver {
-    fn make(outline: Ring, holes: Vec<Ring>, (z_min, z_max): (f64, f64), thick: f64, top: Top, owner: Option<usize>) -> Option<Receiver> {
+    fn make(outline: Ring, holes: Vec<Ring>, (z_min, z_max): (f64, f64), thick: f64, top: Top, owner: Option<std::ops::Range<usize>>) -> Option<Receiver> {
         let outline: Ring = outline.into_iter().filter(|q| q[0].is_finite() && q[1].is_finite()).collect();
         if outline.len() < 3 || !z_min.is_finite() || !z_max.is_finite() || !(thick > 0.0) {
             return None;
@@ -215,6 +215,11 @@ impl Receiver {
 
     /// Dach: Traufumriss (mit Hof-Löchern) und Dachflächen; `owner` = Index seiner Punktwolke.
     pub fn roof(eaves: Ring, holes: Vec<Ring>, planes: Vec<Vec<[f64; 3]>>, thick: f64, owner: Option<usize>) -> Option<Receiver> {
+        Receiver::roof_owned(eaves, holes, planes, thick, owner.map(|i| i..i + 1))
+    }
+
+    /// Wie [`Receiver::roof`], das Dach wirft mehrere Punktwolken (`owner` = ihre Indizes).
+    pub fn roof_owned(eaves: Ring, holes: Vec<Ring>, planes: Vec<Vec<[f64; 3]>>, thick: f64, owner: Option<std::ops::Range<usize>>) -> Option<Receiver> {
         let z = planes.iter().flatten().map(|q| q[2]).fold((f64::INFINITY, f64::NEG_INFINITY), |m, z| (m.0.min(z), m.1.max(z)));
         Receiver::make(eaves, holes, z, thick, Top::Planes(planes), owner)
     }
@@ -308,7 +313,7 @@ impl<'a> Ground<'a> {
         let cand: Vec<(&Receiver, f64, f64)> = self
             .receivers
             .iter()
-            .filter(|r| (cloud.is_none() || r.owner != cloud) && r.z_min < p[2] && r.bbox[0] <= rb[2] && r.bbox[2] >= rb[0] && r.bbox[1] <= rb[3] && r.bbox[3] >= rb[1])
+            .filter(|r| cloud.is_none_or(|c| !r.owner.as_ref().is_some_and(|o| o.contains(&c))) && r.z_min < p[2] && r.bbox[0] <= rb[2] && r.bbox[2] >= rb[0] && r.bbox[1] <= rb[3] && r.bbox[3] >= rb[1])
             .filter_map(|r| span(r).map(|(a, b)| (r, a, b)))
             .collect();
         let zr_at = |s: f64| p[2] - s / kl;
@@ -729,9 +734,34 @@ pub fn shadow_polygons_project(p: &Project, sun: SunPosition, cut: Option<f64>) 
         let eaves_z = p.roof_base_elevation(r);
         let geo = crate::roof::roof_geometry(&r.params(), eaves_z);
         let top = eaves_z + geo.ridge_height;
+        // [148] Flachdach (jeder Umriss) und Pultdach auf nicht-rechteckigem Umriss: je konvexe Teilfläche
+        // eine Wolke (Fläche + Fusspunkte auf Traufhöhe) — der Schatten folgt dem echten Umriss (L, Bogen,
+        // Höfe) statt seiner konvexen Hülle.
+        let planar = r.shape == crate::model::RoofShape::Flach || (r.shape == crate::model::RoofShape::Pult && geo.planes.len() > 1);
+        let own = clouds.len()..clouds.len() + if planar { geo.planes.len().max(1) } else { 1 };
         if cut.is_some_and(|c| top <= c + 1e-9) {
             let holes = geo.eaves_holes.clone();
-            receivers.extend(Receiver::roof(geo.eaves.clone(), holes, geo.planes.clone(), ROOF_RECEIVER_THICKNESS, Some(clouds.len())));
+            receivers.extend(Receiver::roof_owned(geo.eaves.clone(), holes, geo.planes.clone(), ROOF_RECEIVER_THICKNESS, Some(own)));
+        }
+        if planar && !geo.planes.is_empty() {
+            for pl in &geo.planes {
+                let mut pts: Vec<[f64; 3]> = Vec::new();
+                for i in 0..pl.len() {
+                    let (a, b) = (pl[i], pl[(i + 1) % pl.len()]);
+                    // Auf dem Gelände/Empfängern ist die Schattenkante gekrümmt: Zwischenpunkte.
+                    let n = if site.is_some() || cut.is_some() { (hypot2(b[0] - a[0], b[1] - a[1]) / EDGE_SAMPLE).ceil().clamp(1.0, 10_000.0) as usize } else { 1 };
+                    for j in 0..n {
+                        let t = j as f64 / n as f64;
+                        let q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+                        pts.push(q);
+                        if q[2] > eaves_z + 1e-9 {
+                            pts.push([q[0], q[1], eaves_z]);
+                        }
+                    }
+                }
+                clouds.push(pts);
+            }
+            continue;
         }
         let mut pts: Vec<[f64; 3]> = Vec::new();
         for e in &geo.eaves {
@@ -961,6 +991,24 @@ mod terrain_tests {
         assert!((g.project_from([2.0, 0.0, 6.0], k, Some(0))[1] - 6.0).abs() < 1e-6);
         // Unter dem Dach startend (Traufe innen, unterhalb der Dicke): nicht abgefangen.
         assert!((g.project([2.0, 6.0, 1.0], k)[1] - 7.0).abs() < 1e-6);
+    }
+
+    /// [148] Flachdach auf L-Umriss wirft einen L-förmigen Schatten (nicht Bounding-Box, nicht konvexe
+    /// Hülle): OK 3 m, Sonne 45° aus Süden ⇒ L um 3 m nach Norden verschoben, 60 m².
+    #[test]
+    fn flachdach_l_schatten() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let l = serde_json::json!([{"x": 0, "y": 0}, {"x": 11, "y": 0}, {"x": 11, "y": 4}, {"x": 8, "y": 4}, {"x": 8, "y": 6}, {"x": 0, "y": 6}]);
+        let roof = serde_json::json!([{"id": "r", "type": "roof", "floorId": "eg", "categoryCode": "35", "outline": l, "shape": "flach", "pitchDeg": 0, "overhang": 0, "ridgeAxis": "x", "baseElevation": 3.0, "thickness": 0.3}]);
+        let p = project_json(serde_json::json!({ "roofs": roof }));
+        let s = shadow_polygons_project(&p, sun, None);
+        let a: f64 = s.iter().map(|q| signed_area(&q[0]).abs() - q[1..].iter().map(|h| signed_area(h).abs()).sum::<f64>()).sum();
+        assert!((a - 60.0).abs() < 0.05, "{a}");
+        let b = bbox(&s);
+        assert!((b[1] - 3.0).abs() < 1e-6 && (b[3] - 9.0).abs() < 1e-6, "{b:?}");
+        // Aussparung (10, 8) bleibt hell.
+        let hit = s.iter().any(|q| in_ring(10.0, 8.0, &q[0]));
+        assert!(!hit, "Schatten in der Aussparung");
     }
 
     /// Bäume (Kreis auf der Ebene „Bäume", Höhe aus `sunStudy.treeHeight`) und Stützen werfen Schatten.

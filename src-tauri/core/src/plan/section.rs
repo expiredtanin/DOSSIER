@@ -4520,4 +4520,35 @@ mod wand_an_dach {
         assert!(seen, "Flachdach fehlt im Schnitt");
     }
 
+    /// [148] Flachdach auf L-Umriss: der Schnitt trifft nur die Schenkel, nie die Aussparung (früher
+    /// Bounding-Box). Schnitte quer durch beide Schenkel, durch einen Schenkel neben der Aussparung.
+    #[test]
+    fn flachdach_l_schnitt_durch_die_schenkel() {
+        let line = |id: &str, a: (f64, f64), b: (f64, f64)| serde_json::json!({"id": id, "name": id, "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": a.0, "y": a.1}, {"x": b.0, "y": b.1}], "directionSign": 1});
+        let p: Project = serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "drawings2d": [], "openings": [], "walls": [],
+            "drawingLevels": [
+                {"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0},
+                line("beide", (4.0, -2.0), (4.0, 9.0)),
+                line("oben", (-2.0, 5.0), (14.0, 5.0)),
+                line("rechts", (9.5, -2.0), (9.5, 9.0))
+            ],
+            "roofs": [{"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35",
+                "outline": [{"x": 0, "y": 0}, {"x": 11, "y": 0}, {"x": 11, "y": 4}, {"x": 8, "y": 4}, {"x": 8, "y": 6}, {"x": 0, "y": 6}],
+                "shape": "flach", "pitchDeg": 0, "overhang": 0, "ridgeAxis": "x", "baseElevation": 3.0, "thickness": 0.4}]
+        }))
+        .unwrap();
+        for (id, len) in [("beide", 6.0), ("oben", 8.0), ("rechts", 4.0)] {
+            let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
+            let out = compute_section(&p, &LevelSpec::from_json(&serde_json::to_value(l).unwrap()), &[]).unwrap().unwrap();
+            let roof: Vec<&Cut> = out.cuts.iter().filter(|c| c.kind == Kind::Roof).collect();
+            assert!(!roof.is_empty(), "{id}: Dach geschnitten");
+            let us = roof.iter().flat_map(|c| c.pts.iter().map(|q| q[0]));
+            let (lo, hi) = us.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), u| (lo.min(u), hi.max(u)));
+            assert!(((hi - lo) - len).abs() < 1e-6, "{id}: Schnittlänge {} statt {len}", hi - lo);
+            let area: f64 = roof.iter().map(|c| crate::roof_skeleton::signed_area(&c.pts).abs()).sum();
+            assert!((area - len * 0.4).abs() < 1e-6, "{id}: Schnittfläche {area}");
+        }
+    }
+
 }

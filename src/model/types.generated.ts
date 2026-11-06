@@ -2666,7 +2666,10 @@ export type Roof = {
   categoryCode: string;
   /** Objekt-Sperre, analog `Wall.locked`. */
   locked?: boolean;
-  /** Geschlossener Grundriss-Umriss (Meter); Geometrie nutzt die Bounding-Box. */
+  /**
+   * Geschlossener Grundriss-Umriss (Meter). Flach/Pult/Walm/Zelt folgen dem Umriss, Sattel/Mansarde einem
+   * rechtwinkligen; nur Giebelformen auf schiefem Umriss nutzen die Bounding-Box.
+   */
   outline: Array<Vec2>;
   /**
    * Innenhöfe/Lichthöfe als Ringe (Meter, jeder Ring geschlossen, Drehsinn egal). Das Dach
