@@ -2838,6 +2838,15 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Offen: Bogenwände (Öffnung bleibt stehen), keine Überlappungsprüfung zwischen Öffnungen, Dach-/Deckenöffnungen
   allein nicht über Verschieben (nur Griffe), Bemassungs-Bezüge auf die gleitende Öffnung werden nicht nachgeführt;
   nur Linux/Chromium geprüft, nicht in der Tauri-App. · S
+- ✅ **[147] Plan öffnet zu stark gezoomt.** (6.11., zwei e2e-Läufe: nach „Neues Projekt" und beim Öffnen von Musterhaus
+  stand die Statusleiste auf „1:9 · 1111 %".) Ursachen: (1) leeres Projekt liefert den Platzhalter-Umriss 0,0–1,1; die
+  eingepasste Ansicht war damit ~1 m breit. (2) Die Ansicht wird nur bei Geschoss-Wechsel (`resetKey = level.id`) neu
+  eingepasst — Projektwechsel mit gleicher Geschoss-Id (Neu → Muster) behielt den alten Ausschnitt. Behoben:
+  `defaultViewFor` (`plan/planView/geometry.ts`) erweitert zu kurze/ungültige Grenzen um die Mitte auf 30 m (≈ 1:100;
+  Blatt-`fitBounds` unverändert); Store zählt `projectEpoch` (`loadProject`/`openProjectFile`), `resetKey` =
+  `<Geschoss>#<Epoche>`, Projektwechsel passt also neu ein. Tests: vitest `geometry.test.ts` (leer/NaN/normal),
+  e2e `initialZoom.spec.ts` (Massstab 1:30–1:400 und Inhalt sichtbar nach Neu, Musterhaus, Musterhaus komplex).
+  Nur Linux/Chromium geprüft, nicht in der Tauri-App.
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

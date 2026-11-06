@@ -200,6 +200,7 @@ export {
   scaleFromView,
   toScreen,
   viewForCamera,
+  defaultViewFor,
   viewForScale,
   visibleEdgeRuns,
 } from "../plan/planView/geometry";

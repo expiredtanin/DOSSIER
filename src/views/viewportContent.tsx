@@ -768,6 +768,7 @@ function LevelPlanView({
   edgeGrips: EdgeGrip[];
   gripHandlers: GripHandlers;
 }) {
+  const projectEpoch = useStore((s) => s.projectEpoch);
   // Fremd-Art-Referenz-Unterlage (Nutzer-Wunsch: "will mal etwas vom Schnitt
   // abzeichnen" — UND umgekehrt "in der Ansicht auch mal einen Grundriss
   // zeigen"): jede andere sichtbare Zeichnungsebene ANDERER Art (Auge an,
@@ -861,7 +862,7 @@ function LevelPlanView({
         plan={plan}
         describePick={describePick}
         onPickHint={setPickHint}
-        resetKey={level.id}
+        resetKey={`${level.id}#${projectEpoch}`}
         onCursor={onCursor}
         onScale={onScale}
         selection={selection}
@@ -1001,6 +1002,7 @@ function SectionPlanView({
   edgeGrips: EdgeGrip[];
   gripHandlers: GripHandlers;
 }) {
+  const projectEpoch = useStore((s) => s.projectEpoch);
   // Kontext-Objekte hebt der Schnitt (wie bisher) nicht hervor.
   const sectionSelection = useMemo(
     () => (selection.contextObjects.length ? { ...selection, contextObjects: [] } : selection),
@@ -1222,7 +1224,7 @@ function SectionPlanView({
       <PlanView
         ref={planViewRef}
         plan={plan}
-        resetKey={level.id}
+        resetKey={`${level.id}#${projectEpoch}`}
         onCursor={onCursor}
         onScale={onScale}
         selection={sectionSelection}

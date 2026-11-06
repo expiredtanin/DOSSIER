@@ -14,6 +14,8 @@ export interface ViewBox {
 
 export const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutzerraum)
 export const PAD = 60; // Rand in viewBox-Einheiten
+/** Kleinste Kantenlänge (m) des Einpass-Bereichs: leeres/winziges Modell öffnet bei ca. 1:100 statt extrem nah ([147]). */
+export const MIN_FIT_EXTENT_M = 30;
 
 /**
  * Modell-Meter → SVG-Benutzerraum (viewBox-Einheiten) mit FIXEM Welt-Ursprung
@@ -300,4 +302,34 @@ export function polyTouchesRect(poly: Vec2[], r: ModelRect): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Eingepasste Standard-Ansicht (viewBox) für Modell-Grenzen in Metern. Ist eine Kante kürzer als
+ * {@link MIN_FIT_EXTENT_M} (leeres Projekt: Platzhalter 0,0–1,1; einzelner Punkt/kurze Linie) oder
+ * ungültig (NaN/∞), wird der Bereich um den Mittelpunkt auf diese Länge erweitert ([147]).
+ * `pad` = Rand in viewBox-Einheiten (Standard {@link PAD}).
+ */
+export function defaultViewFor(
+  b: { minX: number; minY: number; maxX: number; maxY: number },
+  pad: number = PAD,
+  minExtent: number = MIN_FIT_EXTENT_M,
+): ViewBox {
+  const ok = [b.minX, b.minY, b.maxX, b.maxY].every(Number.isFinite);
+  let { minX, minY, maxX, maxY } = ok ? b : { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  if (maxX < minX) [minX, maxX] = [maxX, minX];
+  if (maxY < minY) [minY, maxY] = [maxY, minY];
+  const grow = (lo: number, hi: number): [number, number] => {
+    if (hi - lo >= minExtent) return [lo, hi];
+    const c = (lo + hi) / 2;
+    return [c - minExtent / 2, c + minExtent / 2];
+  };
+  [minX, maxX] = grow(minX, maxX);
+  [minY, maxY] = grow(minY, maxY);
+  return {
+    x: minX * PX_PER_M - pad,
+    y: -maxY * PX_PER_M - pad,
+    w: (maxX - minX) * PX_PER_M + pad * 2,
+    h: (maxY - minY) * PX_PER_M + pad * 2,
+  };
 }

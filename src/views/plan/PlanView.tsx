@@ -33,7 +33,7 @@ import { LiveMeet, LiveValue, createMeetStore, createValueStore } from "./planVi
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../../theme/accents";
 import { PLAN_DASH_VAR } from "../../core";
-import { type ViewBox__plan_planView_geometry as ViewBox, PX_PER_M, PAD, toScreen, clamp, meetScale, scaleFromView, viewForScale, viewForCamera, fitBoxFor, type ModelRect } from "../../core";
+import { type ViewBox__plan_planView_geometry as ViewBox, PX_PER_M, PAD, toScreen, clamp, meetScale, scaleFromView, viewForScale, viewForCamera, fitBoxFor, defaultViewFor, type ModelRect } from "../../core";
 import {
   polyUsesPattern,
   HatchPattern,
@@ -700,15 +700,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // toScreen-Abbildung. Reset-/Einpassen-Ziel + Bezug für die Zoom-Grenzen; wird
   // NICHT automatisch angewandt (nur bei resetKey-Wechsel und „Einpassen").
   const defaultView = useMemo<ViewBox>(() => {
-    const { minX, minY, maxX, maxY } = fitBounds ?? planRaw.bounds;
+    const b = fitBounds ?? planRaw.bounds;
     // Fester Einpass-Bereich (Blatt): Rand relativ zu seiner Grösse statt der festen Modell-Marge.
-    const pad = fitBounds ? Math.max(maxX - minX, maxY - minY) * PX_PER_M * 0.04 : PAD;
-    return {
-      x: minX * PX_PER_M - pad,
-      y: -maxY * PX_PER_M - pad,
-      w: (maxX - minX) * PX_PER_M + pad * 2,
-      h: (maxY - minY) * PX_PER_M + pad * 2,
-    };
+    const pad = fitBounds ? Math.max(b.maxX - b.minX, b.maxY - b.minY) * PX_PER_M * 0.04 : PAD;
+    return defaultViewFor(b, pad, fitBounds ? 0 : undefined);
   }, [planRaw, fitBounds]);
 
   // Aktueller Ausschnitt; treibt die viewBox des SVG. Initial = eingepasst.
