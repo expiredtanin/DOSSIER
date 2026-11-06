@@ -1407,6 +1407,29 @@ pub fn plan_drawings(c: &Ctx, sink: &mut Sink, bounds: &mut Bounds) -> Result<()
     Ok(())
 }
 
+/// [140] Zeichnungsarten, denen Raumstempel ausweichen (Bemassung, Koten, Texte, Symbole/Möbel als Blöcke,
+/// Detailverweise, Punktmarken). Linien, Flächen, Raster und Bilder nicht: sie laufen oft durch ganze Räume.
+pub fn is_stamp_obstacle(g: &Drawing2DGeom) -> bool {
+    matches!(g, Drawing2DGeom::Dimension { .. } | Drawing2DGeom::Kote { .. } | Drawing2DGeom::Text { .. } | Drawing2DGeom::Block { .. } | Drawing2DGeom::Detailref { .. } | Drawing2DGeom::Pointmarker { .. })
+}
+
+/// [140] Primitive der gezeichneten Zeichnungen des Geschosses, denen Raumstempel ausweichen
+/// ([`is_stamp_obstacle`]), wie [`plan_drawings`] sie zeichnet.
+pub fn stamp_obstacle_prims(c: &Ctx) -> Vec<Primitive> {
+    let mut out = Out::default();
+    let mut memo = Memo::default();
+    let mut sink = Sink::new(Target::Vec(&mut out), Keep::All);
+    for d in c.p.drawings2d.iter().filter(|d| is_stamp_obstacle(&d.geom) && on_floor(c, d)) {
+        let m = memo.get(c, d);
+        if !m.shown {
+            continue;
+        }
+        // Fehler einer Zeichnung: ohne sie weiter (Hindernisse sind nur ein Hinweis für die Lage).
+        let _ = emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, m.greyed, c.a.scale, &mut sink, 0);
+    }
+    out.prims
+}
+
 /// Mittlere Grösse eines Stücks der 2D-Zeichnungen (Elemente) und Obergrenze.
 const CHUNK_MEAN: u64 = 256;
 const CHUNK_MAX: usize = 2048;

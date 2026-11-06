@@ -17,6 +17,50 @@ use std::collections::HashMap;
 use serde_json::Value;
 use std::f64::consts::PI;
 
+/// [140] Raumstempel (Text-JSON eines `text`-Primitivs) als `<text>`-Block wie gemessen und wie die Plan-Ansicht
+/// ([`crate::text_layout::stamp_block`]): Name mit seinen Auszeichnungen (Stempel: 12 pt fett), Zusatzzeilen
+/// 0.8 × Grundgrösse, Zeilenvorschub 1.3, Block um den Anker zentriert; Schrift Inter (Rückfall sans-serif).
+/// `x`/`y0` = Anker in SVG-Koordinaten, `mm_to_m` = Modell-Meter je Papier-mm.
+fn stamp_svg(v: &Value, x: f64, y0: f64, mm_to_m: f64) -> String {
+    use crate::model::RichTextDoc;
+    use crate::text_layout::{stamp_block, stamp_line_offsets, LineAlign, PT_TO_MM};
+    let doc: RichTextDoc = v.get("doc").and_then(|d| serde_json::from_value(d.clone()).ok()).unwrap_or_default();
+    let extra: Vec<crate::plan::prim::StampLine> = v.get("extraLines").and_then(|d| serde_json::from_value(d.clone()).ok()).unwrap_or_default();
+    let rows: Vec<(&str, LineAlign)> = extra.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
+    let color = jstr(v, "color").unwrap_or("");
+    let o = op_json(v);
+    // In Papier-mm setzen (Schriftgrössen auf 1/1000 gerundet), dann in Modell-Meter umrechnen.
+    let placed = stamp_block(&doc, &rows, jnum(v, "basePt"), PT_TO_MM, color, 0.0);
+    let dx = stamp_line_offsets(&placed);
+    placed
+        .iter()
+        .zip(dx)
+        .filter(|(p, _)| p.line.tspans.iter().any(|t| !t.text.is_empty()))
+        .map(|(p, dx)| {
+            let spans: String = p
+                .line
+                .tspans
+                .iter()
+                .map(|t| {
+                    let mut a = format!(" font-size=\"{}\" fill=\"{}\"", num(t.font_size * mm_to_m), esc(&t.fill));
+                    if let Some(w) = t.font_weight() {
+                        a.push_str(&format!(" font-weight=\"{w}\""));
+                    }
+                    if let Some(st) = t.font_style() {
+                        a.push_str(&format!(" font-style=\"{st}\""));
+                    }
+                    if let Some(f) = &t.font_family {
+                        a.push_str(&format!(" font-family=\"{}\"", esc(f)));
+                    }
+                    format!("<tspan{a}>{}</tspan>", esc(&t.text))
+                })
+                .collect();
+            format!("<text x=\"{}\" y=\"{}\" font-family=\"Inter, sans-serif\" text-anchor=\"{}\"{o}>{spans}</text>", num(x + dx * mm_to_m), num(y0 + p.y * mm_to_m), p.line.align.anchor())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// `num()`: gerundet auf 1e-5, nicht endlich → "0".
 fn num(v: f64) -> String {
     if v.is_finite() {
@@ -335,34 +379,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                             esc(jstr(&v, "text").unwrap_or(""))
                         ));
                     } else {
-                        let size = (jnum(&v, "basePt") * 0.3528) * mm_to_m;
-                        // plainText(doc): Absätze (Runs verkettet) mit "\n".
-                        let doc = v.get("doc").and_then(|d| d.get("paragraphs")).and_then(Value::as_array);
-                        let plain = doc
-                            .map(|ps| {
-                                ps.iter()
-                                    .map(|p| p.get("runs").and_then(Value::as_array).map(|rs| rs.iter().map(|r| jstr(r, "text").unwrap_or("")).collect::<String>()).unwrap_or_default())
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
-                            })
-                            .unwrap_or_default();
-                        let mut lines = vec![plain];
-                        if let Some(ex) = v.get("extraLines").and_then(Value::as_array) {
-                            for l in ex {
-                                lines.push(jstr(l, "text").unwrap_or("").to_owned());
-                            }
-                        }
-                        let color = esc(jstr(&v, "color").unwrap_or(""));
-                        let o = op_json(&v);
-                        for (k, ln) in lines.iter().filter(|s| !s.is_empty()).enumerate() {
-                            out.push(format!(
-                                "<text x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{color}\" font-family=\"sans-serif\" text-anchor=\"middle\"{o}>{}</text>",
-                                xs(ax),
-                                num(top - ay + k as f64 * size * 1.2),
-                                num(size),
-                                esc(ln)
-                            ));
-                        }
+                        out.push(stamp_svg(&v, ax, top - ay, mm_to_m));
                     }
                 }
                 _ => {}
@@ -399,6 +416,41 @@ mod tests {
         assert_eq!(op(false, Some(0.5)), " opacity=\"0.5\"");
         assert_eq!(op(true, Some(0.5)), " opacity=\"0.35\"");
         assert_eq!(op(false, Some(1.0)), "");
+    }
+
+    /// [140] Raumstempel wie gemessen (`stamp_block`): Name in seinen Auszeichnungen (fett, eigene Grösse),
+    /// Zusatzzeilen 0.8 ×, Block um den Anker zentriert, Schrift Inter mit sans-serif-Rückfall.
+    #[test]
+    fn raumstempel_wie_gemessen() {
+        use crate::model::{Align, Marks, Vec2};
+        use crate::plan::buf::{View, Writer};
+        use crate::plan::prim::{Primitive, StampLine};
+        let bold = Marks { bold: Some(true), size_pt: Some(12.0), ..Default::default() };
+        let doc = crate::text_layout::doc_from_text("Wohnen", &bold);
+        let mut w = Writer::new(true);
+        let g = w.begin_group();
+        w.push(&Primitive::Text { at: Vec2 { x: 2.0, y: 2.0 }, doc, extra_lines: vec![StampLine { text: "20.00 m²".into(), align: Align::Center }], base_pt: 10.0, color: "#111111".into(), room_id: Some("r".into()), greyed: None, opacity: None });
+        w.end_group(g);
+        let bytes = w.finish();
+        let view = View::parse(&bytes).unwrap();
+        let n = view.len();
+        let mut parts = vec![Part::new(view, 0, n).unwrap()];
+        let o = SvgOptions { scale_denominator: 100.0, margin_m: 0.0, min_x: 0.0, min_y: 0.0, max_x: 4.0, max_y: 4.0, hatch: false, line_ends: LineEnds::default() };
+        let svg = plan_svg(&mut parts, &o).unwrap();
+        let texts: Vec<&str> = svg.lines().filter(|l| l.starts_with("<text")).collect();
+        assert_eq!(texts.len(), 2, "{svg}");
+        assert!(texts.iter().all(|t| t.contains("font-family=\"Inter, sans-serif\"")), "{texts:?}");
+        // 12 pt = 4.233 mm Papier = 0.4233 m bei 1:100; Zusatzzeile 0.8 × 10 pt = 0.28222 m.
+        assert!(texts[0].contains("font-size=\"0.4233\"") && texts[0].contains("font-weight=\"700\""), "{}", texts[0]);
+        assert!(texts[1].contains("font-size=\"0.28222\"") && !texts[1].contains("font-weight") && texts[1].contains("text-anchor=\"middle\""), "{}", texts[1]);
+        let x = |t: &str| t.split("x=\"").nth(1).unwrap().split('"').next().unwrap().parse::<f64>().unwrap();
+        // Linksbündiger Name beginnt am linken Rand des um den Anker zentrierten Blocks (breiteste Zeile).
+        let w = crate::text_layout::text_width_em("Wohnen", true) * 0.4233;
+        assert!(texts[0].contains("text-anchor=\"start\"") && (x(texts[0]) - (2.0 - w / 2.0)).abs() < 1e-4, "{}", texts[0]);
+        assert_eq!(x(texts[1]), 2.0);
+        // Block um den Anker (SVG y = 4 − 2 = 2) zentriert: erste Grundlinie darüber, zweite darunter.
+        let y = |t: &str| t.split("y=\"").nth(1).unwrap().split('"').next().unwrap().parse::<f64>().unwrap();
+        assert!(y(texts[0]) < 2.0 && y(texts[1]) > 2.0, "{texts:?}");
     }
 
     /// [146] Wand-Umrisse als volle Linie bzw. offene Kantenläufe (Stossfugen nicht gestrichen) werden

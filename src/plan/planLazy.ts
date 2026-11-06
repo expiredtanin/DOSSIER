@@ -11,6 +11,7 @@
  */
 
 import type { Plan, PlanBufRun, Primitive } from "./generatePlan";
+import type { Vec2 } from "../model/types";
 import type { DecodedPlanBuf } from "./planBuf";
 
 /** Abschnitt `[from, to)` eines Kern-Puffers. */
@@ -195,6 +196,18 @@ export function planTextEntries(plan: Plan): ReadonlyArray<{ i: number; p: TextE
   out = list;
   textCache.set(plan, out);
   return out;
+}
+
+/**
+ * [140] Tatsächliche Lage des Raumstempels von `roomId` im Plan (Anker des Stempel-Texts): ohne eigenen
+ * `stampAnchor` rückt der Kern den Stempel vom Pol weg (L-Raum, Hindernisse) — Griff und Ziehen gehen von
+ * hier aus. `undefined`, wenn der Plan keinen Stempel dieses Raums zeigt.
+ */
+export function roomStampAt(plan: Plan, roomId: string): Vec2 | undefined {
+  for (const e of planTextEntries(plan)) {
+    if (e.p.kind === "text" && e.p.roomId === roomId) return e.p.at;
+  }
+  return undefined;
 }
 
 /**

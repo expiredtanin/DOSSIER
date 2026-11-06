@@ -13,7 +13,7 @@ use crate::plan::buf::{whole, T_DRAWING_TEXT, T_TEXT};
 use crate::plan::dxf::{StampLine as DxfLine, TextIn, TextStyleIn};
 use crate::plan::parts::{in_ranges, Part};
 use crate::plan::scene::{to_rgba, Rgba, SText};
-use crate::text_layout::{doc_from_text, doc_to_lines, font_name_of, is_blank, plain_text, split_ws, stamp_block, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
+use crate::text_layout::{doc_from_text, doc_to_lines, font_name_of, is_blank, plain_text, split_ws, stamp_block, stamp_line_offsets, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use serde::{Deserialize, Deserializer};
 
 fn num<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
@@ -169,11 +169,15 @@ fn stamp_scene(t: &StampText, forced: bool, mm_to_m: f64, out: &mut Vec<SText>) 
     let base_h = base_mm * mm_to_m;
     let line_gap = base_h * 1.3;
     let total_h = base_h + (flat.len() - 1) as f64 * line_gap;
+    // [140] Zeilen im gemessenen, um den Anker zentrierten Block (`stamp_line_offsets`, Papier-mm).
+    let extra: Vec<(&str, LineAlign)> = t.extra_lines.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
+    let offsets = stamp_line_offsets(&stamp_block(&t.doc, &extra, t.base_pt, PT_TO_MM, "#000000", 0.0));
     for (k, (content, size, c, align)) in flat.into_iter().enumerate() {
         if is_blank(&content) {
             continue;
         }
-        push(out, t.at.x, t.at.y + total_h / 2.0 - base_h * 0.8 - k as f64 * line_gap, content, size, c, align);
+        let dx = offsets.get(k).copied().unwrap_or(0.0) * mm_to_m;
+        push(out, t.at.x + dx, t.at.y + total_h / 2.0 - base_h * 0.8 - k as f64 * line_gap, content, size, c, align);
     }
 }
 
@@ -248,7 +252,9 @@ fn stamp_lines(p: &StampText, scale: f64, family: &dyn Fn(Option<&str>) -> Strin
     let unit_per_pt = (0.0254 / 72.0) * scale;
     let extra: Vec<(&str, LineAlign)> = p.extra_lines.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
     let mut out = Vec::new();
-    for Placed { line, y } in stamp_block(&p.doc, &extra, p.base_pt, unit_per_pt, p.color.as_deref().unwrap_or("#000000"), 0.0) {
+    let placed = stamp_block(&p.doc, &extra, p.base_pt, unit_per_pt, p.color.as_deref().unwrap_or("#000000"), 0.0);
+    let offsets = stamp_line_offsets(&placed);
+    for (Placed { line, y }, dx) in placed.into_iter().zip(offsets) {
         let text = line.content();
         let Some(first) = line.tspans.first() else { continue };
         if is_blank(&text) {
@@ -259,6 +265,7 @@ fn stamp_lines(p: &StampText, scale: f64, family: &dyn Fn(Option<&str>) -> Strin
             align: line.align.code() as f64,
             style: TextStyleIn { family: family(first.font_family.as_deref()), bold: first.bold, italic: first.italic },
             down: y,
+            dx,
             text,
         });
     }

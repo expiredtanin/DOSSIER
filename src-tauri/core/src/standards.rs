@@ -564,6 +564,21 @@ pub fn update_ops(root: &Map<String, Value>, selected: &[String]) -> Vec<Value> 
     ops
 }
 
+/// [140] Baustoffe, die nicht tragen und keinen Raum bilden: lose bzw. ungebundene Schüttungen und Unterbau
+/// (Kies, Schotter, Splitt, Sand, Sauberkeitsschicht/Magerbeton, Erdreich, Humus). Im Schnitt 1:100 bleiben
+/// sie schraffiert statt schwarz (`plan::section`). Erkannt an der Standard-Kennung (`std-c-kies`,
+/// `std-c-erdreich`) oder an Name/Kürzel (Gross-/Kleinschreibung egal, deutsch und englisch).
+pub fn is_loose_fill(c: &crate::model::Component) -> bool {
+    const STD: [&str; 2] = ["std-c-kies", "std-c-erdreich"];
+    const WORDS: [&str; 16] = ["kies", "schotter", "splitt", "sand", "sauberkeit", "magerbeton", "erdreich", "humus", "rollierung", "koffer", "gravel", "ballast", "soil", "lean concrete", "blinding", "hardcore"];
+    if STD.contains(&c.id.as_str()) || c.standard_id.as_deref().is_some_and(|s| STD.contains(&s)) {
+        return true;
+    }
+    let name = c.name.to_lowercase();
+    // „Sandstein“, „Kalksandstein“ sind Mauerwerk, keine Schüttung.
+    WORDS.iter().any(|w| name.contains(w)) && !name.contains("stein")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,6 +604,22 @@ mod tests {
             }
         }
         r
+    }
+
+    /// [140] Lose Schüttungen/Unterbau erkannt, tragende und raumbildende Baustoffe (auch Dämmung) nicht.
+    #[test]
+    fn lose_schuettungen() {
+        let comps: Vec<crate::model::Component> = components().into_iter().map(|v| serde_json::from_value(v).unwrap()).collect();
+        let loose: Vec<&str> = comps.iter().filter(|c| is_loose_fill(c)).map(|c| c.id.as_str()).collect();
+        assert_eq!(loose, ["std-c-erdreich", "std-c-kies"]);
+        let named = |n: &str| crate::model::Component { id: "x".into(), name: n.into(), ..comps[0].clone() };
+        assert!(is_loose_fill(&named("Magerbeton C8/10")));
+        assert!(is_loose_fill(&named("Schotter / Koffer")));
+        assert!(!is_loose_fill(&named("Kalksandstein")));
+        assert!(!is_loose_fill(&named("Stahlbeton")));
+        let mut renamed = named("Unterlage");
+        renamed.standard_id = Some("std-c-kies".into());
+        assert!(is_loose_fill(&renamed));
     }
 
     /// [100] Leuchten: Symbol Deckenleuchte (Kreis mit Kreuz) und Kategorie „Leuchten“, nur einmal.

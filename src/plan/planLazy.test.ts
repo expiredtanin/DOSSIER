@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generatePlan, generateVisibleLevelsPlan, materializeUnderlay, type Primitive } from "./generatePlan";
-import { isLazyUnread, planCount, planPrimAt, planTextEntries, planWithExtra } from "./planLazy";
+import { isLazyUnread, planCount, planPrimAt, planTextEntries, planWithExtra, roomStampAt } from "./planLazy";
 import { planSceneBin, planToRenderScene } from "./toRenderScene";
 import { planToSvgString } from "../export/planToSvgString";
 import { PlanPickIndex } from "./planView/planPick";
@@ -49,6 +49,19 @@ describe("lazy Plan", () => {
     expect(planTextEntries(plan).length).toBeGreaterThan(0);
     expect(planPrimAt(plan, 0)).toBeDefined();
     expect(isLazyUnread(plan)).toBe(true);
+  });
+
+  it("[140] Lage des Raumstempels aus dem Plan (auch weggerückt vom Pol)", () => {
+    const room = (sampleProject.rooms ?? []).find((r) => r.floorId === "eg")!;
+    // L-Raum ohne eigenen Anker mit langem Namen: der Kern rückt den Stempel vom Pol weg.
+    const l = [[0, 0], [8, 0], [8, 1.2], [1.2, 1.2], [1.2, 8], [0, 8]].map(([x, y]) => ({ x: x + 50, y: y + 50 }));
+    const p: Project = { ...sampleProject, rooms: (sampleProject.rooms ?? []).map((r) => (r.id === room.id ? { ...r, boundary: l, stampAnchor: undefined, stamp: undefined, name: "Wohnen Essen Kochen" } : r)) };
+    const plan = generatePlan(p, "eg", codes(p));
+    const at = roomStampAt(plan, room.id)!;
+    expect(at).toBeDefined();
+    const text = planTextEntries(plan).find((e) => e.p.kind === "text" && e.p.roomId === room.id)!;
+    expect(at).toEqual((text.p as { at: { x: number; y: number } }).at);
+    expect(roomStampAt(plan, "gibt-es-nicht")).toBeUndefined();
   });
 
   it("Einzelzugriff, Text-Einträge und Anzahl == gelesene Liste (dieselben Objekte)", () => {

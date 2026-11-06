@@ -111,6 +111,9 @@ pub struct StampLine {
     pub style: TextStyleIn,
     /// Versatz der Grundlinie vom Anker nach unten (Meter).
     pub down: f64,
+    /// [140] Versatz der Zeile vom Anker nach rechts (Meter; Block um den Anker zentriert,
+    /// `text_layout::stamp_line_offsets`).
+    pub dx: f64,
 }
 
 /// Text-Eingabe je Text-Eintrag (aus dem Text-JSON gesetzt, s. [`crate::plan::text::dxf_text`]).
@@ -899,7 +902,7 @@ impl Ctx<'_> {
             Prim::Stamp { at, lines } => {
                 for l in lines {
                     let st = self.style_of(Some(&l.style));
-                    self.flat.add_text2(b, layer, V2 { x: at.x, y: at.y - l.down }, l.height, 0.0, &l.text, l.align, st);
+                    self.flat.add_text2(b, layer, V2 { x: at.x + l.dx, y: at.y - l.down }, l.height, 0.0, &l.text, l.align, st);
                 }
             }
             Prim::Polygon { pts, fill, stroke, hatch } => {

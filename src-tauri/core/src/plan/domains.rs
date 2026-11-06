@@ -707,6 +707,11 @@ fn stamp_candidates(ring: &[[f64; 2]], pole: Vec2) -> Vec<Vec2> {
     out
 }
 
+/// Ausmass eines Rings `[x0, y0, x1, y1]`.
+fn ring_bounds(ring: &[[f64; 2]]) -> [f64; 4] {
+    ring.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
+}
+
 /// Namenszeilen auf `n` Zeichen kürzen (n − 1 Zeichen und Punkt), Leerzeichen am Schnitt weg.
 fn abbreviate(text: &str, n: usize) -> String {
     text.split('\n')
@@ -715,7 +720,71 @@ fn abbreviate(text: &str, n: usize) -> String {
         .join("\n")
 }
 
-fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
+/// [140] Hindernisse für Raumstempel aus den schon erzeugten Domänen: Treppen (alle Striche), Türschwenk-Bögen,
+/// Stützen, Beschriftungen des Kontexts (Höhenlinien-Koten) und die Zeichnungen, denen Stempel ausweichen
+/// (Bemassung, Koten, Texte, Symbole; `drawings::stamp_obstacle_prims`).
+fn stamp_obstacles(c: &Ctx, d: &DomainPrims) -> super::stamp_place::Obstacles {
+    let mut o = super::stamp_place::Obstacles::default();
+    for q in d.stairs.iter().chain(&d.columns) {
+        o.add_prim(q);
+    }
+    for q in &d.walls {
+        if matches!(q, Primitive::Arc { opening_id: Some(_), .. }) {
+            o.add_prim(q);
+        }
+    }
+    for q in &d.context {
+        if matches!(q, Primitive::DrawingText { .. }) {
+            o.add_prim(q);
+        }
+    }
+    for q in super::drawings::stamp_obstacle_prims(c) {
+        o.add_prim(&q);
+    }
+    o
+}
+
+/// [140] Bis zu diesem Abstand (Papier-mm) zum nächsten Hindernis zählt eine Stempel-Lage als frei; freiere
+/// Lagen gewinnen nichts mehr (der Stempel bleibt am Pol, wenn er dort so viel Luft hat).
+const STAMP_CLEAR_MM: f64 = 2.0;
+
+/// [140] Lage eines Stempels (`w` × `h`) unter `candidates` (Pol zuerst, dann nach Abstand zum Pol): erst mit
+/// Luft (1.3 × Breite/Höhe), dann knapp im Raum; unter diesen die freieste Lage (Abstand zu `obst` bis
+/// `clear`, Gleichstand → näher am Pol). Liegt jede Lage auf einem Hindernis, die mit der geringsten
+/// Überdeckung (`Obstacles::overlap`, Gleichstand → mit Luft, dann näher am Pol); ohne Hindernisse wie bisher.
+fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place::Obstacles, clear: f64, w: f64, h: f64) -> Option<Vec2> {
+    let inside = |q: &Vec2, k: f64| crate::room_area::rect_in_ring(ring, q.x, q.y, k * w / 2.0, k * h / 2.0);
+    if !obst.is_empty() {
+        for k in [1.3, 1.0] {
+            let mut best: Option<(f64, Vec2)> = None;
+            for q in candidates.iter().filter(|q| inside(q, k)) {
+                let d = obst.clearance(*q, w / 2.0, h / 2.0).min(clear);
+                if d > 0.0 && best.is_none_or(|(b, _)| d > b) {
+                    best = Some((d, *q));
+                }
+            }
+            if let Some((_, q)) = best {
+                return Some(q);
+            }
+        }
+        let mut best: Option<(f64, Vec2)> = None;
+        for k in [1.3, 1.0] {
+            for q in candidates.iter().filter(|q| inside(q, k)) {
+                let n = obst.overlap(*q, w / 2.0, h / 2.0);
+                if best.is_none_or(|(b, _)| n < b) {
+                    best = Some((n, *q));
+                }
+            }
+        }
+        if let Some((_, q)) = best {
+            return Some(q);
+        }
+    }
+    let fit = |k: f64| candidates.iter().copied().find(|q| inside(q, k));
+    fit(1.3).or_else(|| fit(1.0))
+}
+
+fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &super::stamp_place::Obstacles) {
     for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.shown(&r.category_code)) {
         for q in &room.boundary {
             bounds.acc(q.x, q.y);
@@ -756,11 +825,10 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             }
         };
         let candidates = if room.stamp_anchor.is_some() { vec![at] } else { stamp_candidates(&pts, pole) };
-        // Mit Luft (1.3 × Breite/Höhe) zuerst, damit der Stempel nicht an der Wand klebt; sonst knapp.
-        let place = |w: f64, h: f64| {
-            let fit = |k: f64| candidates.iter().copied().find(|q| crate::room_area::rect_in_ring(&pts, q.x, q.y, k * w / 2.0, k * h / 2.0));
-            fit(1.3).or_else(|| fit(1.0))
-        };
+        // [140] Teil 6: ohne eigenen Anker weicht der Stempel anderem Planinhalt im Raum aus (`place_stamp`).
+        let obst = if room.stamp_anchor.is_some() { Default::default() } else { obstacles.within(ring_bounds(&pts)) };
+        let clear = STAMP_CLEAR_MM * c.a.scale / 1000.0;
+        let place = |w: f64, h: f64| place_stamp(&pts, &candidates, &obst, clear, w, h);
         let (extra_lines, base_pt, name, placed) = fit_room_stamp(&doc, extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, &place);
         let at = placed.unwrap_or(at);
         let doc = name.unwrap_or(doc);
@@ -951,7 +1019,7 @@ pub fn plan_domains(p: &Project, a: &PlanArgs) -> Result<DomainPrims, String> {
     let mut drawings = super::drawings::Out::default();
     super::drawings::plan_drawings(&c, &mut super::drawings::Sink::new(super::drawings::Target::Vec(&mut drawings), super::drawings::Keep::All), &mut bounds)?;
     out.drawings = drawings;
-    domains_after(&c, &mut out);
+    domains_after(&c, &mut out, &mut bounds);
     out.bounds = bounds.get();
     Ok(out)
 }
@@ -964,7 +1032,6 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
     }
     ceilings(c, &mut out.ceilings, bounds)?;
     roofs(c, &mut out.roofs, bounds);
-    rooms(c, &mut out.rooms, bounds);
     super::walls::plan_walls(c, c.a.reference_lines, &mut out.walls, bounds)?;
     super::stairs::plan_stairs(c, &mut out.stairs, bounds);
     columns(c, &mut out.columns);
@@ -972,11 +1039,17 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
     Ok(())
 }
 
-/// Kontext und Schnittlinien (projektglobal, nur mit `global`).
-fn domains_after(c: &Ctx, out: &mut DomainPrims) {
-    if c.a.global && !super::ceiling_plan::is_ceiling_level(c.p, &c.a.floor) {
+/// Kontext und Schnittlinien (projektglobal, nur mit `global`), zuletzt die Räume: ihre Stempel weichen dem
+/// übrigen Inhalt aus ([`stamp_obstacles`]), darum nach allen anderen Domänen (Gruppen-Reihenfolge bleibt).
+fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
+    let ceiling = super::ceiling_plan::is_ceiling_level(c.p, &c.a.floor);
+    if c.a.global && !ceiling {
         super::context::plan_context(c, &mut out.context);
         super::context::plan_section_lines(c, &mut out.sections);
+    }
+    if !ceiling {
+        let obstacles = stamp_obstacles(c, out);
+        rooms(c, &mut out.rooms, bounds, &obstacles);
     }
 }
 
@@ -992,6 +1065,7 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     let mut d = DomainPrims::default();
     let mut bounds = Bounds::new();
     domains_before(&c, &mut d, &mut bounds)?;
+    domains_after(&c, &mut d, &mut bounds);
     let mut w = crate::plan::buf::Writer::new(true);
     w.post = super::extras::post_for(p, a);
     let (under, violations) = extras_of(p, a);
@@ -1003,8 +1077,6 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     let start = w.begin_group();
     super::drawings::plan_drawings(&c, &mut super::drawings::Sink::new(super::drawings::Target::Buf(&mut w), super::drawings::Keep::All), &mut bounds)?;
     w.end_group(start);
-    domains_after(&c, &mut d);
-    apply_voids(p, a, &mut d);
     for g in [&d.solids, &d.context, &d.sections] {
         w.group(g);
     }
@@ -1116,7 +1188,17 @@ pub fn plan_domains_cached(p: &Project, revs: &crate::document::Revs, cache: &mu
 /// Cache bzw. neu (dann aufgenommen).
 fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache::CtxCache, w: &mut crate::plan::buf::Writer, have: &HashSet<u64>) -> Result<Vec<super::drawings::ChunkOut>, String> {
     use super::cache::{selection_sig, RestEntry, NOT_FOR_REST};
-    let sig = (revs.max_except(NOT_FOR_REST), format!("{}\u{3}{}", selection_sig(c.a), c.a.sun_when.unwrap_or(f64::NAN).to_bits()));
+    // [140] Raumstempel weichen Zeichnungen aus (Bemassung, Koten, Texte, Symbole): deren Stand gehört in den
+    // Schlüssel, die übrigen Zeichnungen nicht.
+    let stamps = revs.item_stamps("drawings2d").filter(|s| s.len() == c.p.drawings2d.len());
+    let obstacle_sig = c.p.drawings2d.iter().enumerate().filter(|(_, d)| super::drawings::is_stamp_obstacle(&d.geom)).fold(0u64, |h, (i, d)| {
+        let v = match stamps {
+            Some(s) => s[i],
+            None => serde_json::to_string(d).map_or(0, |t| t.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))),
+        };
+        (h ^ v).wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(17)
+    });
+    let sig = (revs.max_except(NOT_FOR_REST), format!("{}\u{3}{}\u{3}{obstacle_sig}", selection_sig(c.a), c.a.sun_when.unwrap_or(f64::NAN).to_bits()));
     if cc.rest.as_ref().is_some_and(|r| r.sig != sig) {
         cc.rest = None;
     }
@@ -1127,7 +1209,7 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         let mut d = DomainPrims::default();
         let mut b = Bounds::new();
         domains_before(c, &mut d, &mut b)?;
-        domains_after(c, &mut d);
+        domains_after(c, &mut d, &mut b);
         let (under, violations) = extras_of(c.p, c.a);
         let extra = super::extras::extra_bounds(c.p, &under, |k| c.shown(k));
         apply_voids(c.p, c.a, &mut d);
@@ -1302,6 +1384,73 @@ mod tests {
         assert_eq!(crate::text_layout::plain_text(&doc), "Wohnen Essen Kochen");
         let (w, _) = stamp_size_m(&doc, &[], ROOM_STAMP_PT, 100.0);
         assert!(crate::room_area::rect_in_ring(&ring, at.x, at.y, w / 2.0, 0.1), "{at:?} {w}");
+    }
+
+    /// [140] Teil 6: Raumstempel ohne eigenen Anker weichen Koten, Texten, Bemassung und Treppen im Raum aus;
+    /// ohne Hindernis bleibt er am Pol, mit eigenem Anker auch mit Hindernis.
+    #[test]
+    fn raumstempel_weicht_hindernissen_aus() {
+        let mut p = sample();
+        let r = p.rooms.as_mut().unwrap().iter_mut().find(|r| r.floor_id == "eg").unwrap();
+        let q = [(0.0, 0.0), (7.0, 0.0), (7.0, 5.0), (0.0, 5.0)];
+        r.boundary = q.iter().map(|&(x, y)| Vec2 { x: x + 50.0, y: y + 50.0 }).collect();
+        r.stamp_anchor = None;
+        r.stamp = None;
+        let id = r.id.clone();
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "60", "80"], "grey": [], "scale": 100 }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let stamp = |p: &Project| {
+            let out = plan_domains(p, &a).unwrap();
+            out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, extra_lines, base_pt, .. } if *rid == id => Some((*at, doc.clone(), extra_lines.clone(), *base_pt)), _ => None }).unwrap()
+        };
+        let (pole, ..) = stamp(&p);
+        assert!((pole.x - 53.5).abs() < 1e-9 && (pole.y - 52.5).abs() < 1e-9, "ohne Hindernis am Pol: {pole:?}");
+        let mk = |geom: serde_json::Value| -> Drawing2D { serde_json::from_value(serde_json::json!({ "id": "k", "type": "drawing2d", "levelId": "eg", "categoryCode": "80", "geom": geom })).unwrap() };
+        // Kote und Text mitten im Raum, eine Bemassung quer durch den Raum knapp unter der Mitte.
+        p.drawings2d.push(mk(serde_json::json!({ "shape": "kote", "at": { "x": 53.4, "y": 52.4 }, "value": 0.0, "kind": "okFertig", "rotation": 0.0 })));
+        p.drawings2d.push(mk(serde_json::json!({ "shape": "text", "at": { "x": 53.0, "y": 52.7 }, "text": "Hinweis", "height": 0.25, "angle": 0.0 })));
+        p.drawings2d.push(mk(serde_json::json!({ "shape": "dimension", "pts": [{ "x": 50.0, "y": 52.0 }, { "x": 57.0, "y": 52.0 }], "offset": 0.0 })));
+        let (at, doc, extra, pt) = stamp(&p);
+        assert!((at.x - pole.x).hypot(at.y - pole.y) > 0.3, "weggerückt: {at:?}");
+        let (w, h) = stamp_size_m(&doc, &extra, pt, 100.0);
+        let ring: Vec<[f64; 2]> = q.iter().map(|&(x, y)| [x + 50.0, y + 50.0]).collect();
+        assert!(crate::room_area::rect_in_ring(&ring, at.x, at.y, w / 2.0, h / 2.0));
+        let c = Ctx::new(&p, &a);
+        let mut o = super::super::stamp_place::Obstacles::default();
+        for q in super::super::drawings::stamp_obstacle_prims(&c) {
+            o.add_prim(&q);
+        }
+        assert!(!o.is_empty());
+        assert!(o.clearance(at, w / 2.0, h / 2.0) > 0.0, "frei: {at:?}");
+        assert_eq!(extra.len(), 2, "Stempel bleibt vollständig");
+        // Eigener Anker: bleibt, auch auf dem Hindernis.
+        p.rooms.as_mut().unwrap().iter_mut().find(|r| r.id == id).unwrap().stamp_anchor = Some(pole);
+        assert_eq!(stamp(&p).0, pole);
+        // Kein freier Platz (Text über den ganzen Raum): wie bisher am Pol.
+        p.rooms.as_mut().unwrap().iter_mut().find(|r| r.id == id).unwrap().stamp_anchor = None;
+        p.drawings2d.clear();
+        p.drawings2d.push(mk(serde_json::json!({ "shape": "text", "at": { "x": 49.0, "y": 49.0 }, "text": "XXXXXXXXXXXXXXXXXXXXXXXXXX", "height": 6.0, "angle": 0.0 })));
+        assert_eq!(stamp(&p).0, pole);
+    }
+
+    /// [140] Teil 6: Treppe und Türschwenk sind Hindernisse (Strecken bzw. Sektor), Bogenwände nicht.
+    #[test]
+    fn stempel_hindernisse_aus_domaenen() {
+        let p = sample();
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "21", "30", "40", "50", "60"], "grey": [], "scale": 100 }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let c = Ctx::new(&p, &a);
+        let d = plan_domains(&p, &a).unwrap();
+        let o = stamp_obstacles(&c, &d);
+        let doors = d.walls.iter().filter(|q| matches!(q, Primitive::Arc { opening_id: Some(_), .. })).count();
+        assert!(doors > 0 && !o.is_empty());
+        // Jeder Schwenk-Mittelpunkt (Bogenmitte zur Angel hin) liegt im Hindernis.
+        for q in &d.walls {
+            if let Primitive::Arc { center, from, to, opening_id: Some(_), .. } = q {
+                let m = Vec2 { x: (center.x * 2.0 + from.x + to.x) / 4.0, y: (center.y * 2.0 + from.y + to.y) / 4.0 };
+                assert_eq!(o.clearance(m, 0.001, 0.001), 0.0);
+            }
+        }
     }
 
     /// [140] Teil 5: Schnittflächen ab 1:100 schwarz (Wände als Sammelfläche ohne Fugen/Schraffur, Stützen

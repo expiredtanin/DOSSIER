@@ -2820,7 +2820,36 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   nicht Inter) — Breiten weichen dort von der Messung ab; IFC-Import setzt den Stempel-Anker weiter auf den
   Eckenmittelwert; Bodenplatte samt Kies/Magerbeton im Schnitt 1:100 schwarz (kein Materialfilter); Stempel-Editor/
   Griff zeigen auf den Pol, auch wenn der Stempel im L-Raum weggerückt ist; Präsentations-Dialog ohne eigenen
-  Farb-Schalter (nur über die Vorlage). Nur Linux/CLI-SVG + Chromium geprüft, nicht in der Tauri-App. · M
+  Farb-Schalter (nur über die Vorlage). Nur Linux/CLI-SVG + Chromium geprüft, nicht in der Tauri-App.
+  (6.11., Teil 6) **Raumstempel weichen aus:** ohne eigenen Anker sucht der Stempel unter Pol + Raster (24 × 24
+  über dem Raum) die freieste Lage — Abstand zu anderem Planinhalt im Raum maximiert (bis 2 mm Papier, sonst
+  bleibt er am Pol), erst mit Luft, dann knapp; Hindernisse (`plan/stamp_place.rs`): Treppen (alle Striche),
+  Türschwenk als Kreissektor (Bögen mit Öffnung, nicht Bogenwände), Stützen, Höhenlinien-Beschriftungen des
+  Kontexts, Zeichnungen Bemassung/Kote/Text/Block (Symbole, Möbel)/Detailverweis/Punktmarke
+  (`drawings::stamp_obstacle_prims`; Linien/Flächen/Raster nicht). Ist keine Lage frei, die mit der geringsten
+  Überdeckung (Strecke 1, Text/Schwenk 8); ohne Hindernisse wie bisher. Räume werden dazu nach allen anderen
+  Domänen erzeugt (`domains_after`, Gruppen-Reihenfolge unverändert); der Domänen-Cache trägt den Stand dieser
+  Zeichnungen im Schlüssel. **Schnitt 1:100:** Schichten aus losen Schüttungen/Unterbau bleiben schraffiert mit
+  Fuge statt schwarz (`standards::is_loose_fill`: Standard Kies/Erdreich oder Name Kies/Schotter/Splitt/Sand/
+  Sauberkeitsschicht/Magerbeton/Erdreich/Humus/Rollierung/Koffer, ohne „…stein"; zusätzlich Schraffur Erdreich/
+  Kies; `section::loose_cut`) — Kies unter der Bodenplatte, Bekiesung auf dem Flachdach; Wände/Decken sonst ganz
+  schwarz (auch Dämmung). **CLI-SVG** (`plan/svg.rs`) setzt Stempel wie gemessen (`stamp_block`: Name in seinen
+  Auszeichnungen, 12 pt fett, Nummer klein, Zusatzzeilen 0.8 ×, Vorschub 1.3, Block um den Anker zentriert,
+  `font-family="Inter, sans-serif"`). **Zeilen im Block:** links-/rechtsbündige Stempelzeilen beginnen/enden am
+  Rand des um den Anker zentrierten, gemessenen Blocks (`text_layout::stamp_line_offsets`) statt am Anker — in
+  Plan-Ansicht (SVG/Szene), Druck-SVG, DXF und CLI; vorher begann ein Name ohne Ausrichtung („links") am Anker
+  und ragte rechts aus dem gemessenen Rechteck. **Stempel-Griff** in der Plan-Ansicht an der gezeichneten Lage
+  (`roomStampAt` aus dem Plan), Ziehen ohne Sprung zum Pol. Tests: `raumstempel_weicht_hindernissen_aus`,
+  `stempel_hindernisse_aus_domaenen`, `stamp_place` (Abstand, Sektor, Text, Überdeckung),
+  `unterbau_im_schnitt_1_100_nicht_schwarz`, `lose_schuettungen`, `raumstempel_wie_gemessen` (SVG), TS
+  `roomStampAt`. Goldens neu (Stempel-Lage/-Zeilen; Schnitte mit Kies). Geprüft: cargo test Kern, vitest, tsc,
+  CLI-SVG Musterhaus komplex EG 1:100 und Schnitt A-A 1:100 vorher/nachher in Chromium. Offen: „E.06
+  Treppenhaus" liegt weiter auf der Treppe (der Raum hat neben der Treppe keinen Platz für den ganzen Stempel —
+  nur weniger Überdeckung; Zeilen werden dafür nicht weggelassen); in „E.07 Eingang" stapeln sich
+  Höhenlinien-Beschriftungen (Höhenlinien laufen durch den Eingangs-Anbau — die Gebäudegrundfläche schliesst ihn
+  nicht ab), der Stempel weicht nur teilweise aus; Fang-Punkt des Stempels (`snap_model`) und der Kern-Griff
+  `roomStamp` rechnen weiter vom Pol (die Ansicht gleicht beim Ziehen aus); Stempel-Editor hat keine Lage;
+  Deckenspiegel-Stempel ohne Hindernisse; nicht in der Tauri-App/Metal geprüft (nur Linux, CLI-SVG). · M
   Höhenlinien). Offen: dünne Schichten (Putz, Parkett) laufen in 1:100 zu einem Balken zusammen (Detailgrad sollte
   sie zusammenfassen); Achsen laufen in Ansicht/Grundriss durch das Gebäude; Raumstempel farbig statt schwarz im
   Druck ohne Schwarz-Weiss; Schatten im EG-Grundriss überdeckt Bemassung; eigene Stempel (`Room.stamp`) behalten in

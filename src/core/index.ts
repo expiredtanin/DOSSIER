@@ -220,6 +220,7 @@ export {
   planPrimAt,
   planTextEntries,
   planWithExtra,
+  roomStampAt,
   type TextEntryPrim,
 } from "../plan/planLazy";
 

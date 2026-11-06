@@ -596,6 +596,24 @@ pub fn text_width_em(text: &str, bold: bool) -> f64 {
     w as f64 / 1000.0 * if bold { 1.05 } else { 1.0 }
 }
 
+/// [140] Waagrechte Lage jeder Zeile eines Raumstempels relativ zum Anker (gleiche Einheiten wie die Zeilen):
+/// der Block ist so breit wie seine breiteste Zeile ([`stamp_block_size`]) und um den Anker zentriert; eine
+/// linksbündige Zeile beginnt am linken Blockrand (−Breite/2), eine rechtsbündige endet am rechten (+Breite/2),
+/// eine zentrierte steht am Anker. So liegt der gezeichnete Stempel im gemessenen Rechteck, mit dem
+/// `plan::domains` ihn im Raum einpasst (vorher begann eine linksbündige Namenszeile am Anker).
+pub fn stamp_line_offsets(placed: &[Placed]) -> Vec<f64> {
+    let width = |p: &Placed| p.line.tspans.iter().map(|t| text_width_em(&t.text, t.bold) * t.font_size).sum::<f64>();
+    let w = placed.iter().map(width).fold(0.0, f64::max);
+    placed
+        .iter()
+        .map(|p| match p.line.align {
+            LineAlign::Left => -w / 2.0,
+            LineAlign::Center => 0.0,
+            LineAlign::Right => w / 2.0,
+        })
+        .collect()
+}
+
 /// [140] Ausmass eines Raumstempels ([`stamp_block`]) in Einheiten von `unit_per_pt`: Breite der breitesten
 /// Zeile (Summe der Tspans mit echter Metrik, [`text_width_em`]) und Höhe des Blocks (erste Zeile plus
 /// Zeilenvorschübe, wie die Zentrierung in [`stamp_block_refs`]).

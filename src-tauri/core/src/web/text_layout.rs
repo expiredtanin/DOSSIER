@@ -108,7 +108,9 @@ pub fn text_stamp_block(prim_json: &str, unit_per_pt: f64, x0: f64, y0: f64) -> 
     let extra: Vec<(&str, LineAlign)> = p.extra_lines.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
     let color = p.color.as_deref().unwrap_or("#000000");
     let placed = stamp_block_refs(&p.doc, &extra, p.base_pt, unit_per_pt, color, y0);
-    let at: Vec<(f64, f64)> = placed.iter().map(|q| (x0, q.1)).collect();
+    // [140] Zeilen im gemessenen, um den Anker zentrierten Block (`stamp_line_offsets`).
+    let dx = crate::text_layout::stamp_line_offsets(&crate::text_layout::stamp_block(&p.doc, &extra, p.base_pt, unit_per_pt, color, y0));
+    let at: Vec<(f64, f64)> = placed.iter().enumerate().map(|(k, q)| (x0 + dx.get(k).copied().unwrap_or(0.0), q.1)).collect();
     let lines: Vec<LineRef> = placed.into_iter().map(|q| q.0).collect();
     let n = p.doc.paragraphs.len();
     encode_lines(&lines, &at, |t| {

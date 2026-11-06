@@ -2392,13 +2392,27 @@ pub fn merge_thin_cuts(cuts: &[Cut], scale: f64) -> Vec<Cut> {
 
 /// `generateSectionPlan`: Primitive (u → x, Höhe → y) und Ausmass.
 pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility) -> (Vec<Primitive>, [f64; 4]) {
-    section_primitives_at(out, mono, hidden_lines, vis, 0.0, Detail::Mittel, false)
+    section_primitives_at(out, mono, hidden_lines, vis, 0.0, Detail::Mittel, false, &HashSet::new())
+}
+
+/// [140] Bauteile (ids) aus losen Schüttungen/Unterbau (`standards::is_loose_fill`: Kies, Magerbeton,
+/// Erdreich …): im Schnitt ab 1:100 nicht schwarz.
+pub fn loose_fill_components(p: &Project) -> HashSet<String> {
+    p.components.iter().filter(|c| crate::standards::is_loose_fill(c)).map(|c| c.id.clone()).collect()
+}
+
+/// [140] Bleibt eine Schnittfläche ab 1:100 schraffiert? Schichten aus losen Schüttungen/Unterbau
+/// (`loose`, Bauteil-ids) bzw. mit Schraffur Erdreich/Kies — sie tragen nicht und bilden keinen Raum.
+fn loose_cut(cp: &Cut, loose: &HashSet<String>) -> bool {
+    cp.component_id.as_deref().is_some_and(|id| loose.contains(id)) || cp.hatch.as_ref().is_some_and(|h| matches!(h.pattern, HatchPattern::Earth | HatchPattern::Gravel))
 }
 
 /// [`section_primitives`] beim Massstab 1:`scale` (dünne Schichten zusammengefasst, [`merge_thin_cuts`];
 /// Detail „fein" zeigt alle Schichten, `style::simplify_thin_layers`). Ab 1:100 (`style::solid_cut`, ausser
-/// `cut_hatch`/„fein") sind die geschnittenen Flächen schwarz ohne Fugen und Schraffur, nur mit dem Umriss.
-pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64, detail: Detail, cut_hatch: bool) -> (Vec<Primitive>, [f64; 4]) {
+/// `cut_hatch`/„fein") sind die geschnittenen Flächen schwarz ohne Fugen und Schraffur, nur mit dem Umriss —
+/// ausser Schichten aus losen Schüttungen/Unterbau (`loose`, s. [`loose_cut`]): die bleiben schraffiert.
+#[allow(clippy::too_many_arguments)]
+pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64, detail: Detail, cut_hatch: bool, loose: &HashSet<String>) -> (Vec<Primitive>, [f64; 4]) {
     let black = solid_cut(detail, scale, cut_hatch);
     let thin_scale = if simplify_thin_layers(detail, scale) && !black { scale } else { 0.0 };
     let merged = plain_thin_insulation(merge_thin_cuts(&out.cuts, thin_scale), thin_scale);
@@ -2438,6 +2452,7 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
         let fill = cp.fill.as_deref().unwrap_or(HATCH_PAPER);
         let hatch = cp.hatch.clone().unwrap_or_else(section_hatch);
         let solid = hatch.pattern == HatchPattern::Solid;
+        let black = black && !loose_cut(cp, loose);
         let (fill, hatch) = if black {
             (HATCH_INK.to_string(), no_hatch())
         } else if mono {
@@ -2958,7 +2973,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
     let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
-    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch);
+    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &loose_fill_components(p));
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     super::extras::scale_line_weights(p, scale, &mut prims);
@@ -3172,6 +3187,43 @@ mod tests {
         assert_eq!(merge_thin_cuts(&cuts, 20.0).len(), 4);
     }
 
+    /// [140] Teil 6: Unterbau-Schichten (Kies, Magerbeton, Erdreich) bleiben im Schnitt 1:100 schraffiert mit
+    /// Fuge; die Bodenplatte darüber schwarz. Erkannt am Bauteil (`loose_fill_components`) oder an der Schraffur.
+    #[test]
+    fn unterbau_im_schnitt_1_100_nicht_schwarz() {
+        let rect = |v0: f64, v1: f64| vec![[0.0, v1], [5.0, v1], [5.0, v0], [0.0, v0]];
+        let cut = |comp: &str, v0: f64, v1: f64, pattern: HatchPattern| {
+            let mut c = Cut::new(Kind::Slab, 0, rect(v0, v1));
+            c.component_id = Some(comp.into());
+            c.source_id = Some("c-bodenplatte".into());
+            c.hatch = Some(HatchRender { pattern, ..section_hatch() });
+            c.fill = Some(HATCH_PAPER.into());
+            c
+        };
+        let out = Output {
+            cuts: vec![cut("std-c-stahlbeton", -0.25, 0.0, HatchPattern::Diagonal), cut("mager", -0.3, -0.25, HatchPattern::Diagonal), cut("std-c-kies", -0.4, -0.3, HatchPattern::Gravel)],
+            ..Default::default()
+        };
+        let loose: HashSet<String> = ["mager".to_string()].into();
+        let fills = |scale: f64, loose: &HashSet<String>| -> Vec<(String, HatchPattern, String)> {
+            let (prims, _) = section_primitives_at(&out, true, false, &Visibility::default(), scale, Detail::Mittel, false, loose);
+            prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, stroke, ceiling_id: Some(_), .. } => Some((fill.clone(), hatch.pattern, stroke.clone())), _ => None }).collect()
+        };
+        let f = fills(100.0, &loose);
+        assert_eq!(f[0], (HATCH_INK.to_string(), HatchPattern::None, "none".to_string()), "Platte schwarz");
+        assert_eq!(f[1].1, HatchPattern::Diagonal, "Magerbeton (Bauteil) schraffiert");
+        assert_ne!(f[1].0, HATCH_INK);
+        assert_eq!(f[2].1, HatchPattern::Gravel, "Kies (Schraffur) schraffiert");
+        assert_ne!(f[2].2, "none", "mit Fuge");
+        // Ohne Bauteil-Liste: nur die Kies-Schraffur erkannt.
+        let f = fills(100.0, &HashSet::new());
+        assert_eq!(f[1].0, HATCH_INK);
+        assert_eq!(f[2].1, HatchPattern::Gravel);
+        // Musterhaus komplex: die Kies-Schicht der Bodenplatte ist ein loses Bauteil.
+        let p = sample();
+        assert!(loose_fill_components(&p).iter().all(|id| p.components.iter().any(|c| &c.id == id && crate::standards::is_loose_fill(c))));
+    }
+
     /// [140] Teil 5: Schnitt 1:100 — geschnittene Flächen schwarz ohne Fuge/Schraffur, Umriss bleibt;
     /// 1:50, „fein" und `cutHatch` mit Schraffur und Fugen.
     #[test]
@@ -3181,7 +3233,7 @@ mod tests {
         let out = compute_section(&p, &l, &[]).unwrap().unwrap();
         let vis = Visibility::default();
         let stat = |scale: f64, detail: Detail, cut_hatch: bool| {
-            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, detail, cut_hatch);
+            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, detail, cut_hatch, &loose_fill_components(&p));
             let cuts: Vec<_> = prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, stroke, wall_id, ceiling_id, .. } if wall_id.is_some() || ceiling_id.is_some() => Some((fill.clone(), hatch.pattern, stroke.clone())), _ => None }).collect();
             let outline = prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "section-cut-outline")).count();
             (cuts, outline)

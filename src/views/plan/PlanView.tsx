@@ -51,7 +51,7 @@ import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, indexedInRegion, regionContains, type Bounds } from "../../core";
 import { PlanPickIndex, type ClientMap, type OwnerField } from "../../core";
-import { planPrimAt, planTextEntries } from "../../core";
+import { planPrimAt, planTextEntries, roomStampAt } from "../../core";
 import { buildDrawingIndex, drawingsWithinDistance, marqueeHitUnderlay, nearestInDrawings, type DrawingIndex } from "../../core";
 import { endBusyAfterPaint } from "../../state/busyStore";
 import { EMPTY_SELECTION, single } from "../../state/selection";
@@ -814,6 +814,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const lines = !useGpuRenderer || wantWasm;
     return materializeGreyed(lines ? materializeUnderlay(planRaw) : planRaw, lines);
   }, [planRaw, useGpuRenderer, wantWasm]);
+  // [140] Stempel-Griff an der tatsächlichen Lage des Stempels im Plan (ohne eigenen Anker rückt der Kern
+  // ihn vom Pol weg: L-Raum, Hindernisse); sonst am Anker.
+  const stampAt = useMemo(
+    () => (roomStamp ? (roomStampAt(planRaw, roomStamp.roomId) ?? roomStamp.anchor) : null),
+    [planRaw, roomStamp],
+  );
   // Kompakte Linien-Unterlage (nur im reinen WebGL-Modus noch als `plan.underlay`
   // vorhanden): Hover/Pick/Marquee/Hervorhebung greifen direkt auf die Zeichnungen
   // zu, Strukturen entstehen LAZY je Plan (s. planView/underlayAccess.ts).
@@ -1240,7 +1246,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   } | null>(null);
   // Transiente Stempel-Griff-Zieh-Daten: letzter Modellpunkt, gegen den das
   // inkrementelle Delta gebildet wird (verschiebt NUR den Raum-Stempel-Anker).
-  const stampDrag = useRef<{ pointerId: number; roomId: string; last: Vec2 } | null>(
+  // `offset` ([140]): Abstand der gezeichneten Lage vom Anker (Pol), einmal mit dem ersten Delta
+  // übergeben — der Kern setzt den Anker auf Pol + Delta, der Stempel springt so nicht zum Pol.
+  const stampDrag = useRef<{ pointerId: number; roomId: string; last: Vec2; offset: Vec2 } | null>(
     null,
   );
   // Letzter Links-Klick (Zeit + Bildschirmposition) für die manuelle Doppelklick-
@@ -1284,8 +1292,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
 
   /** Bildschirm-px-Distanz Cursor → Stempel-Griff; null = kein einzelner Raum. */
   const stampHandleAt = (clientX: number, clientY: number): string | null => {
-    if (!roomStamp) return null;
-    const s = vbToClient(toScreen(roomStamp.anchor).x, toScreen(roomStamp.anchor).y);
+    if (!roomStamp || !stampAt) return null;
+    const s = vbToClient(toScreen(stampAt).x, toScreen(stampAt).y);
     const d = Math.hypot(clientX - s.x, clientY - s.y);
     return d <= GRIP_HIT_PX ? roomStamp.roomId : null;
   };
@@ -1774,6 +1782,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           pointerId: e.pointerId,
           roomId: rid,
           last: rawModelAt(e.clientX, e.clientY),
+          offset: stampAt && roomStamp ? { x: stampAt.x - roomStamp.anchor.x, y: stampAt.y - roomStamp.anchor.y } : { x: 0, y: 0 },
         };
         return;
       }
@@ -1992,7 +2001,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (sd && sd.pointerId === p.pointerId) {
       const delta = { x: raw.x - sd.last.x, y: raw.y - sd.last.y };
       if ((delta.x !== 0 || delta.y !== 0) && onStampMove) {
-        onStampMove(sd.roomId, delta);
+        onStampMove(sd.roomId, { x: delta.x + sd.offset.x, y: delta.y + sd.offset.y });
+        sd.offset = { x: 0, y: 0 };
         sd.last = raw;
       }
       return;
@@ -3564,9 +3574,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {/* Raum-Stempel-Griff: eine ziehbare Raute am Anker des gewählten Raums.
           Verschiebt NUR den Stempel (nicht die Kontur); Doppelklick öffnet den
           Editor. Bildschirmkonstante Größe. */}
-      {roomStamp && (
+      {stampAt && (
         <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>{(meet) => {
-          const s = toLocal(roomStamp.anchor);
+          const s = toLocal(stampAt);
           const size = 4 / meet;
           const pts = [
             `${s.x},${s.y - size}`,
