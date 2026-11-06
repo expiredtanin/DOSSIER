@@ -313,6 +313,36 @@ pub fn emit_columns(p: &Project) -> Vec<RMesh> {
     out
 }
 
+/// [149] Bäume als Meshes: je Baum Stamm (Zylinder, 8 Seiten) und Krone (Rotationskörper, 8 Ringe × 12
+/// Seiten; Form nach `shape`), Fuss auf dem Gelände (`tree::bases`). Im 3D bei den Stützen eingereiht.
+pub fn emit_trees(p: &Project) -> Vec<RMesh> {
+    let mut out = Vec::new();
+    let trees = p.trees.as_deref().unwrap_or(&[]);
+    for (i, g) in crate::tree::geoms(p) {
+        let (trunk_rgb, crown_rgb) = crate::tree::colors(&trees[i]);
+        let (positions, indices) = g.trunk_mesh(8);
+        out.push(RMesh { crease_angle: None, positions, indices, kind: "extrusion", color: trunk_rgb, vertex_colors: None, material_index: None });
+        let (positions, indices) = g.crown_mesh(8, 12);
+        out.push(RMesh { crease_angle: None, positions, indices, kind: "extrusion", color: crown_rgb, vertex_colors: None, material_index: None });
+    }
+    out
+}
+
+/// [149] Bäume als Welt-Dreiecke (Stamm + Krone, wie [`emit_trees`]) für den 3D-Pick.
+pub fn pick_trees(p: &Project) -> Vec<PickTree> {
+    let trees = p.trees.as_deref().unwrap_or(&[]);
+    crate::tree::geoms(p)
+        .into_iter()
+        .map(|(i, g)| {
+            let (tp, ti) = g.trunk_mesh(8);
+            let (cp, ci) = g.crown_mesh(8, 12);
+            let mut tris = extrusion_tris(&tp, &ti);
+            tris.extend(extrusion_tris(&cp, &ci));
+            PickTree { tris, tree_id: trees[i].id.clone() }
+        })
+        .collect()
+}
+
 // ── Wände ───────────────────────────────────────────────────────────────────
 
 use crate::joins::{self, JoinLayer, JoinWall, Reference, WallCuts};
@@ -2378,7 +2408,7 @@ pub fn parts(p: &Project, layered: bool, detail: f64, for_section: bool) -> Resu
         walls: emit_walls(p, layered)?,
         slabs,
         context_meshes: emit_context_meshes(p),
-        column_meshes: emit_columns(p),
+        column_meshes: { let mut m = emit_columns(p); m.extend(emit_trees(p)); m },
         opening_meshes: emit_opening_meshes(p, detail),
         stair_meshes: emit_stair_meshes(p),
         stair_railings: emit_stair_railings(p),
@@ -2537,6 +2567,14 @@ pub struct PickColumn {
     pub column_id: String,
 }
 
+/// [149] Baum für den 3D-Pick.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickTree {
+    pub tris: Vec<Tri>,
+    pub tree_id: String,
+}
+
 /// [137] Öffnung ohne Wand (Dach, Decke, Gaube) für den 3D-Pick: Welt-Dreiecke ihrer Teile.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2594,6 +2632,8 @@ pub struct PickGeometry {
     /// [137] Kreise, Bögen, Ellipsen und Texte als flache Pick-Flächen.
     #[serde(rename = "drawingMeshes")]
     pub drawing_meshes: Vec<PickDrawingMesh>,
+    /// [149] Bäume (Stamm + Krone).
+    pub trees: Vec<PickTree>,
 }
 
 /// Öffnungen als Quader (Laibung zu Laibung, Wanddicke, Brüstung bis Sturz) für Pick und Hervorhebung.
@@ -2747,6 +2787,7 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         drawings: pick_drawing_segs(p, &HashMap::new()),
         stair_meshes: pick_stair_railings(p),
         drawing_meshes: pick_drawing_meshes(p, &HashMap::new()),
+        trees: pick_trees(p),
     })
 }
 
@@ -2899,6 +2940,32 @@ fn pick_columns(p: &Project) -> Vec<PickColumn> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [149] Bäume im 3D (Stamm + Krone bei den Stützen-Meshes), im Pick und mit Fuss auf dem Gelände.
+    #[test]
+    fn baeume_im_3d_und_pick() {
+        let mut p = sample();
+        let n0 = parts(&p, true, 1.0, false).unwrap().column_meshes.len();
+        p.trees = Some(vec![Tree { id: "T1".into(), r#type: "tree".into(), floor_id: "eg".into(), category_code: "13".into(), position: Vec2 { x: 20.0, y: 5.0 }, trunk_diameter: 0.4, crown_diameter: 6.0, crown_base: 3.0, height: 12.0, species: Some("Quercus robur".into()), ..Default::default() }, Tree { id: "T2".into(), shape: TreeShape::Conical, foliage: TreeFoliage::Conifer, base_offset: Some(0.5), ..Tree { id: "T1".into(), r#type: "tree".into(), floor_id: "eg".into(), category_code: "13".into(), position: Vec2 { x: 20.0, y: 5.0 }, trunk_diameter: 0.4, crown_diameter: 6.0, crown_base: 3.0, height: 12.0, species: Some("Quercus robur".into()), ..Default::default() } }]);
+        let m = parts(&p, true, 1.0, false).unwrap().column_meshes;
+        assert_eq!(m.len(), n0 + 4);
+        let crown = &m[n0 + 1];
+        assert_eq!(crown.color, crate::tree::CROWN_RGB);
+        assert_eq!(m[n0 + 3].color, crate::tree::CONIFER_RGB);
+        let zmax = crown.positions.chunks_exact(3).map(|q| q[2]).fold(f64::NEG_INFINITY, f64::max);
+        let base = p.floor("eg").map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
+        assert!((zmax - (base + 12.0)).abs() < 1e-9, "{zmax}");
+        let z2 = m[n0 + 2].positions.chunks_exact(3).map(|q| q[2]).fold(f64::INFINITY, f64::min);
+        assert!((z2 - (base + 0.5)).abs() < 1e-9, "Fuss mit Versatz: {z2}");
+        // Wenige Dreiecke je Baum.
+        assert!(m[n0..].iter().map(|x| x.indices.len() / 3).sum::<usize>() < 2 * 250);
+        let g = pick_geometry(&p).unwrap();
+        assert_eq!(g.trees.len(), 2);
+        assert_eq!(g.trees[0].tree_id, "T1");
+        // Welt-Dreiecke (x, Höhe, y): Höhe bis zur Spitze.
+        let h = g.trees[0].tris.iter().flatten().map(|v| v[1]).fold(f64::NEG_INFINITY, f64::max);
+        assert!((h - (base + 12.0)).abs() < 1e-9);
+    }
 
     /// [112] Achsraster mit `show3d` erscheint als Boden-Spur (eine Strecke je Achse), ohne Flag nicht.
     #[test]

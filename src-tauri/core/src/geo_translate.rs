@@ -9,7 +9,7 @@
 use serde_json::{json, Map, Value};
 
 /// Projekt-Listen, die verschoben werden (jedes Element hat eine `id`), in Op-Reihenfolge.
-pub const TRANSLATED_LISTS: [&str; 10] = ["walls", "ceilings", "roofs", "stairs", "rooms", "columns", "extrudedSolids", "drawings2d", "context", "drawingLevels"];
+pub const TRANSLATED_LISTS: [&str; 11] = ["walls", "ceilings", "roofs", "stairs", "rooms", "columns", "extrudedSolids", "drawings2d", "context", "drawingLevels", "trees"];
 
 fn shift(p: &Value, dx: f64, dy: f64) -> Value {
     let c = |k: &str| p.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
@@ -161,6 +161,7 @@ fn shift_element(key: &str, e: &Value, dx: f64, dy: f64) -> (Value, bool) {
             set(&mut m, "stampAnchor", c);
         }
         "columns" => shift_pts_fields(&mut m, &["position"], dx, dy, &[]),
+        "trees" => shift_pts_fields(&mut m, &["position"], dx, dy, &[]),
         "extrudedSolids" => {
             shift_pts_fields(&mut m, &[], dx, dy, &["points"]);
             let c = if truthy(e.get("circle")) {

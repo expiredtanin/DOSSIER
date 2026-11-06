@@ -272,6 +272,13 @@ fn mv_column(c: &Value, xf: &Xf) -> Value {
     with_all(c, vec![("position", pt(nb.0, nb.1)), ("rotation", js_num(jsnum::atan2(nt.1 - nb.1, nt.0 - nb.0)))])
 }
 
+/// [149] Baum: nur die Stammmitte (die Krone ist rund).
+fn mv_tree(t: &Value, xf: &Xf) -> Value {
+    let (x, y) = xy(field(t, "position").unwrap_or(&Value::Null));
+    let n = xf.apply(x, y);
+    with(t, "position", pt(n.0, n.1))
+}
+
 fn mv_ceiling(c: &Value, xf: &Xf) -> Value {
     let mut f = vec![("outline", xf.pts(field(c, "outline")))];
     if truthy(field(c, "openings")) {
@@ -532,6 +539,8 @@ pub struct Sel {
     pub room_ids: Option<Vec<String>>,
     /// Gewählte Öffnungen ([144]): Wandöffnungen gleiten beim Verschieben entlang ihrer Wand.
     pub opening_ids: Option<Vec<String>>,
+    /// [149] Gewählte Bäume.
+    pub tree_ids: Option<Vec<String>>,
 }
 
 fn nonempty(s: &Option<String>) -> Option<&str> {
@@ -586,6 +595,7 @@ enum Kind {
     Roof,
     Stair,
     Room,
+    Tree,
 }
 
 /// Dächer nur bei Verschieben/Skalieren (der Umriss ist an die Weltachsen gebunden, der First folgt
@@ -620,6 +630,7 @@ fn gather<'a>(root: &'a Map<String, Value>, sel: &Sel, op: &str, ignore_lock: bo
     }
     each("stairs", Ids::opt(&sel.stair_ids), Kind::Stair);
     each("rooms", Ids::opt(&sel.room_ids), Kind::Room);
+    each("trees", Ids::opt(&sel.tree_ids), Kind::Tree);
     out
 }
 
@@ -794,6 +805,10 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         if !rooms.is_empty() {
             patch("rooms", &|r| rooms.has(r) && !locked(r), &|r| mv_room(r, &xf));
         }
+        let trees = Ids::opt(&sel.tree_ids);
+        if !trees.is_empty() {
+            patch("trees", &|t| trees.has(t) && !locked(t), &|t| mv_tree(t, &xf));
+        }
         // Öffnungen in bewegten Dächern/Decken ([103]) folgen ihrem Wirt.
         let hosts: std::collections::HashSet<&str> =
             items.iter().filter(|(k, _)| matches!(k, Kind::Roof | Kind::Ceiling)).filter_map(|(_, e)| id_of(e)).collect();
@@ -809,7 +824,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
 
     // Kopien (Kopie/Reihe/Verteilen bzw. gespiegelte Kopie).
     let mut ids = IdGen::new(&req.stamp);
-    let mut new: [Vec<Value>; 8] = Default::default();
+    let mut new: [Vec<Value>; 9] = Default::default();
     let mut new_openings = Vec::new();
     for t in copy_ts(op, &req.mode, req.count.0) {
         let xf = Xf::of(op, &pts, t);
@@ -824,6 +839,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Roof => "RF",
                 Kind::Stair => "ST",
                 Kind::Room => "RM",
+                Kind::Tree => "tree",
             })
             .collect();
         let new_ids: Vec<String> = prefixes.iter().map(|p| ids.next(p)).collect();
@@ -848,6 +864,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Roof => (5, mv_roof(e, &xf)),
                 Kind::Stair => (6, mv_stair(e, &xf, k_at(t))),
                 Kind::Room => (7, mv_room(e, &xf)),
+                Kind::Tree => (8, mv_tree(e, &xf)),
             };
             new[slot].push(with(&v, "id", Value::String(new_id.clone())));
         }
@@ -869,7 +886,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
             }
         }
     }
-    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms"];
+    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms", "trees"];
     for (key, items) in keys.iter().zip(new) {
         ops.extend(add(key, items));
     }
@@ -1177,6 +1194,14 @@ fn item_preview(p: &Project, kind: Kind, e: &Value, xf: &Xf, out: &mut Pending) 
         Kind::Ceiling | Kind::Roof => s.poly(&mapped(&pts_of(field(e, "outline")), xf)),
         Kind::Room => s.poly(&mapped(&pts_of(field(e, "boundary")), xf)),
         Kind::Stair => stair_preview(e, xf, s),
+        Kind::Tree => {
+            // [149] Kronenkreis um die verschobene Stammmitte.
+            let (x, y) = pt("position");
+            let c = xf.apply(x, y);
+            let d = field(e, "crownDiameter").and_then(Value::as_f64).filter(|d| *d > 0.0 && d.is_finite()).unwrap_or(crate::tree::DEFAULT_CROWN_DIAMETER);
+            let ring: Vec<(f64, f64)> = crate::tree::circle([c.0, c.1], d / 2.0, 24).into_iter().map(|q| (q[0], q[1])).collect();
+            s.poly(&ring);
+        }
         Kind::Drawing => {
             let at = s.buf.len();
             out.drawings.push((at, with_geom(e, mv_geom(field(e, "geom").unwrap_or(&Value::Null), xf))));
@@ -1335,6 +1360,25 @@ mod tests {
 
     fn root(v: Value) -> Map<String, Value> {
         v.as_object().unwrap().clone()
+    }
+
+    /// [149] Bäume: Verschieben (gesperrte bleiben), Kopieren mit neuer id.
+    #[test]
+    fn baeume_verschieben_und_kopieren() {
+        let r = root(json!({"trees":[{"id":"t","position":{"x":1,"y":2},"crownDiameter":5},{"id":"z","position":{"x":0,"y":0},"locked":true}]}));
+        let run = |mode: &str| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":[],"treeIds":["t","z"]},"op":"move","pts":[[0, 0], [3, 1]],"mode":mode,"count":1,"stamp":"s"})).unwrap();
+            transform_ops(&r, &Project::default(), &req).iter().map(|o| o.to_json()).collect::<Vec<_>>()
+        };
+        let ops = run("move");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["entity"]["position"], json!({"x":4,"y":3}));
+        assert_eq!(ops[0]["entity"]["crownDiameter"], json!(5));
+        let ops = run("copy");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["collection"], "trees");
+        assert_eq!(ops[0]["items"][0]["id"], "tree-s-1");
+        assert_eq!(ops[0]["items"][0]["position"], json!({"x":4,"y":3}));
     }
 
     /// [T2] Bogenwand: Verschieben/Drehen behalten den Bulge, Spiegeln kehrt ihn um.

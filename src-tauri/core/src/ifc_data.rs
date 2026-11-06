@@ -50,6 +50,7 @@ const REC_OPENING_SOLID: f64 = 15.0;
 const REC_WALL_ARC: f64 = 16.0;
 const REC_WALL_ARC_SOLID: f64 = 17.0;
 const REC_GRID: f64 = 18.0;
+const REC_TREE: f64 = 19.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -1354,6 +1355,46 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     }
     f.num(REC_END_COLUMNS);
 
+    // ── Bäume ([149]) → IfcGeographicElement (IFC2x3: IfcBuildingElementProxy), Netz Stamm + Krone ──
+    let trees = p.trees.as_deref().unwrap_or(&[]);
+    for (i, g) in crate::tree::geoms(&p) {
+        let t = &trees[i];
+        let structure = structure_of(&t.floor_id);
+        let base = base_of(structure);
+        let (mut positions, mut indices) = g.trunk_mesh(8);
+        let (cp, ci) = g.crown_mesh(8, 12);
+        let at = (positions.len() / 3) as u32;
+        positions.extend(cp);
+        indices.extend(ci.iter().map(|k| at + k));
+        for z in positions.iter_mut().skip(2).step_by(3) {
+            *z -= base;
+        }
+        let status = match t.status {
+            TreeStatus::New => "new",
+            TreeStatus::Remove => "remove",
+            _ => "existing",
+        };
+        let mut props = vec![ident("Status", status), ident("Foliage", if t.foliage == TreeFoliage::Conifer { "conifer" } else { "deciduous" })];
+        if let Some(sp) = t.species.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            props.push(Prop::Label("Species", sp.to_string()));
+        }
+        let mut psets = vec![Pset { name: "Dossier_Tree", props }];
+        psets.extend(qto(
+            "Dossier_Qto_Tree",
+            vec![
+                Qty { name: "Height", kind: QtyKind::Length, value: g.top - g.base },
+                Qty { name: "CrownDiameter", kind: QtyKind::Length, value: 2.0 * g.crown_r },
+                Qty { name: "TrunkDiameter", kind: QtyKind::Length, value: 2.0 * g.trunk_r },
+                Qty { name: "CrownBaseHeight", kind: QtyKind::Length, value: g.crown_bottom - g.base },
+            ],
+        ));
+        let (id, name) = (f.str(&t.id), f.str(&crate::tree::label(t)));
+        f.nums(&[REC_TREE, structure, id, name]);
+        w_psets(&mut f, &psets);
+        // Zwei getrennte geschlossene Körper: nicht als ein dichtes Netz melden (IFC2x3: Flächenmodell).
+        w_mesh(&mut f, &positions, &indices, false);
+    }
+
     // ── Achsraster ([112]) → IfcGrid (U-/V-Achsen als Linienzüge in Welt-XY) ──
     for d in &p.drawings2d {
         let Some(spec) = crate::grid::Spec::of(&d.geom) else { continue };
@@ -1473,6 +1514,24 @@ mod tests {
     fn strings(f: &Flat) -> Vec<String> {
         let (_, text) = from_bytes(&f.to_bytes()).unwrap();
         text.split('\0').map(String::from).collect()
+    }
+
+    /// [149] Baum als eigener Datensatz (nach den Stützen): Name = Art, Netz Stamm + Krone relativ zur
+    /// Geschoss-UK, Höhe als Menge.
+    #[test]
+    fn baum_datensatz() {
+        let mut p = sample();
+        let floor = p.drawing_levels.iter().find(|l| l.kind == DrawingLevelKind::Floor).unwrap().id.clone();
+        let mut t = Tree { id: "T1".into(), r#type: "tree".into(), floor_id: "eg".into(), category_code: "13".into(), position: Vec2 { x: 20.0, y: 5.0 }, trunk_diameter: 0.4, crown_diameter: 6.0, crown_base: 3.0, height: 12.0, species: Some("Quercus robur".into()), ..Default::default() };
+        t.floor_id = floor;
+        p.trees = Some(vec![t]);
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        let s = strings(&f);
+        assert!(s.iter().any(|x| x == "T1") && s.iter().any(|x| x == "Quercus robur") && s.iter().any(|x| x == "Dossier_Qto_Tree"));
+        assert!(f.nums.windows(2).any(|w| w == [REC_END_COLUMNS, REC_TREE]), "Baum direkt nach den Stützen");
+        // Ohne Bäume kein Datensatz.
+        p.trees = None;
+        assert!(!strings(&ifc_export_data(&p, &IfcOptions::default()).unwrap()).iter().any(|x| x == "Dossier_Qto_Tree"));
     }
 
     /// [G3]/[103] Formöffnung und Dachfenster als Öffnungskörper-Datensatz mit Wirt.

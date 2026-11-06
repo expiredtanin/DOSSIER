@@ -175,6 +175,24 @@ export const CommandIcon = memo(function CommandIcon({ name }: { name: string })
           <line x1="12.5" y1="9.5" x2="12.5" y2="13.5" />
         </svg>
       );
+    case "tree":
+      // [149] Baum: Krone (Kreis) mit Stamm.
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="6.5" r="4.5" />
+          <line x1="8" y1="11" x2="8" y2="14" />
+        </svg>
+      );
+    case "circlestotrees":
+      // [149] Kreis → Baum.
+      return (
+        <svg {...common}>
+          <circle cx="4.5" cy="8" r="2.5" strokeDasharray="1.4 1.2" />
+          <line x1="7.5" y1="8" x2="9" y2="8" />
+          <circle cx="12" cy="6.5" r="2.5" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+        </svg>
+      );
     case "column":
       // Stütze: Quadrat-Querschnitt mit vertikalen Kanten (Pfeiler).
       return (

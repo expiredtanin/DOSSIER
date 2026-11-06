@@ -37,6 +37,8 @@ export interface Selection {
    * bzw. `"siteRules"` (Baurechtslinie) — die Objekt-Info zeigt die Einstellungen der Quelle.
    */
   site: string[];
+  /** [149] Bäume (`Project.trees`). */
+  trees: string[];
   /**
    * Gewählte Gruppen — rein informativ (Bounding-Box, Doppelklick-Ziel); die
    * Mitglieder stehen zusätzlich in den übrigen Arten (s. `groupActions.ts`).
@@ -60,6 +62,7 @@ export const SELECTION_KINDS: readonly SelectionKind[] = [
   "contextObjects",
   "sectionLines",
   "site",
+  "trees",
   "groups",
 ];
 
@@ -138,6 +141,7 @@ export function toCommandSelection(sel: Selection): CommandSelection {
     stairIds: sel.stairs,
     roomIds: sel.rooms,
     openingIds: sel.openings,
+    treeIds: sel.trees,
   };
 }
 
@@ -157,7 +161,8 @@ export function hasTransformable(sel: Selection): boolean {
     sel.roofs.length > 0 ||
     sel.stairs.length > 0 ||
     sel.rooms.length > 0 ||
-    sel.openings.length > 0
+    sel.openings.length > 0 ||
+    sel.trees.length > 0
   );
 }
 
@@ -175,6 +180,8 @@ export interface SelectionIdLists {
   contextObjectIds: string[];
   sectionLineIds: string[];
   groupIds: string[];
+  /** [149] Bäume (nicht gruppierbar; Zwischenablage, Nachauswahl). */
+  treeIds?: string[];
 }
 
 const ID_LIST_KEYS: [SelectionKind, keyof SelectionIdLists][] = [
@@ -190,6 +197,7 @@ const ID_LIST_KEYS: [SelectionKind, keyof SelectionIdLists][] = [
   ["contextObjects", "contextObjectIds"],
   ["sectionLines", "sectionLineIds"],
   ["groups", "groupIds"],
+  ["trees", "treeIds"],
 ];
 
 /** Auswahl → `…Ids`-Listen (passt strukturell auf `GroupMembership` und `BcfSelection`). */

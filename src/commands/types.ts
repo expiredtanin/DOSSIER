@@ -86,6 +86,8 @@ export interface CommandSelection {
   roomIds?: string[];
   /** Gewählte Öffnungen ([144]): Wandöffnungen gleiten beim Verschieben entlang ihrer Wand. */
   openingIds?: string[];
+  /** [149] Gewählte Bäume (Verschieben/Kopieren/Spiegeln/Drehen: Stammmitte). */
+  treeIds?: string[];
 }
 
 /** Live-Kontext, den ein Befehl bei jedem Schritt erhält (analog ToolContext). */

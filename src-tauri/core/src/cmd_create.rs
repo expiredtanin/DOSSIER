@@ -879,6 +879,81 @@ fn column_ops(v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     )
 }
 
+/// [149] Baum am Punkt `at`: Ebene „13" (Bäume), falls vorhanden, sonst die aktive; Abmessungen, Form,
+/// Bestand und Laub/Nadel aus den Werkzeug-Vorgaben (fehlende/unsinnige Werte: Vorgaben aus `tree.rs`).
+fn tree_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    use crate::tree::*;
+    let num = |k: &str, d: f64| opt_n(v, k).filter(|x| *x > 0.0 && x.is_finite()).unwrap_or(d);
+    let height = num("height", DEFAULT_HEIGHT);
+    let crown_base = opt_n(v, "crownBase").filter(|x| *x >= 0.0 && x.is_finite()).unwrap_or(DEFAULT_CROWN_BASE).min(0.9 * height);
+    let pick = |k: &str, allowed: &[&str]| -> Value { s(allowed.iter().copied().find(|a| *a == s_of(v, k)).unwrap_or(allowed[0])) };
+    let cat = if p.layer_category(TREE_CATEGORY).is_some() { TREE_CATEGORY } else { ctx.cat };
+    let mut f = vec![
+        ("id", s(&ids.next("tree"))),
+        ("type", s("tree")),
+        ("floorId", s(ctx.level)),
+        ("categoryCode", s(cat)),
+        ("position", pv(p_of(v, "at"))),
+        ("trunkDiameter", js_num(num("trunkDiameter", DEFAULT_TRUNK_DIAMETER))),
+        ("crownDiameter", js_num(num("crownDiameter", DEFAULT_CROWN_DIAMETER))),
+        ("crownBase", js_num(crown_base)),
+        ("height", js_num(height)),
+        ("shape", pick("shape", &["round", "oval", "columnar", "conical"])),
+        ("status", pick("status", &["existing", "new", "remove"])),
+        ("foliage", pick("foliage", &["deciduous", "conifer"])),
+    ];
+    let species = s_of(v, "species").trim();
+    if !species.is_empty() {
+        f.push(("species", s(species)));
+    }
+    add_op("trees", vec![obj(f)])
+}
+
+/// [149] „Kreise in Bäume umwandeln": die gewählten Kreise (`ids`), sonst alle Kreise der Baum-Ebene auf der
+/// aktiven Ebene, werden Baum-Objekte (Kronendurchmesser = Kreisdurchmesser, Höhe = `sunStudy.treeHeight`
+/// bzw. Vorgabe, Ebene und Geschoss des Kreises); die Kreise entfallen. Ein Undo-Schritt.
+fn circles_to_trees_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    use crate::tree::*;
+    let chosen: Vec<&str> = arr(field(v, "ids")).iter().filter_map(Value::as_str).collect();
+    let is_tree_cat = |code: &str| {
+        code == TREE_CATEGORY || p.layer_category(code).is_some_and(|c| {
+            let n = c.name.to_lowercase();
+            n.contains("baum") || n.contains("bäume") || n.contains("tree")
+        })
+    };
+    let h = p.sun_study.as_ref().and_then(|s| s.tree_height).filter(|h| *h > 0.0 && h.is_finite()).unwrap_or(crate::sun::DEFAULT_TREE_HEIGHT);
+    let (mut src, mut out) = (Vec::new(), Vec::new());
+    for d in &p.drawings2d {
+        let crate::model::Drawing2DGeom::Circle { center, r } = &d.geom else { continue };
+        let pick = if chosen.is_empty() { d.level_id == ctx.level && is_tree_cat(&d.category_code) } else { chosen.contains(&d.id.as_str()) };
+        if !pick || !(*r > 0.0 && r.is_finite() && center.x.is_finite() && center.y.is_finite()) {
+            continue;
+        }
+        let cat = if is_tree_cat(&d.category_code) { d.category_code.as_str() } else if p.layer_category(TREE_CATEGORY).is_some() { TREE_CATEGORY } else { d.category_code.as_str() };
+        src.push(d.id.as_str());
+        out.push(obj(vec![
+            ("id", s(&ids.next("tree"))),
+            ("type", s("tree")),
+            ("floorId", s(&d.level_id)),
+            ("categoryCode", s(cat)),
+            ("position", pv((center.x, center.y))),
+            ("trunkDiameter", js_num(DEFAULT_TRUNK_DIAMETER.min(*r))),
+            ("crownDiameter", js_num(2.0 * r)),
+            ("crownBase", js_num(DEFAULT_CROWN_BASE.min(0.4 * h))),
+            ("height", js_num(h)),
+            ("shape", s("round")),
+            ("status", s("existing")),
+            ("foliage", s("deciduous")),
+        ]));
+    }
+    if out.is_empty() {
+        return vec![];
+    }
+    let mut ops = remove_op(root, "drawings2d", &src);
+    ops.extend(add_op("trees", out));
+    ops
+}
+
 /// Grundriss einer Stütze ohne Drehung (`columnFootprint`: rund 32 Punkte, sonst 4 Ecken).
 fn column_footprint(at: V, v: &Value) -> Vec<V> {
     let size = n_of(v, "size");
@@ -988,6 +1063,8 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "opening" => opening_ops(root, p, v, &ctx, ids),
         "roof" => roof_ops(p, v, &ctx, ids),
         "column" => column_ops(v, &ctx, ids),
+        "tree" => tree_ops(p, v, &ctx, ids),
+        "circlesToTrees" => circles_to_trees_ops(root, p, v, &ctx, ids),
         "extrude" => extrude_ops(root, v, &ctx, ids),
         _ => return crate::cmd_draw::ops(root, p, v, &ctx, ids).or_else(|| crate::cmd_solid::ops(root, p, v, &ctx, ids)),
     })
@@ -1065,6 +1142,15 @@ pub fn preview_req(root: &Map<String, Value>, project: &Project, req: &Req, pts:
         "column" => {
             if let Some(at) = pts.first() {
                 out.poly(&column_footprint(*at, v));
+            }
+        }
+        "tree" => {
+            // [149] Kronenkreis und Stamm am Cursor.
+            if let Some(at) = pts.first() {
+                let d = opt_n(v, "crownDiameter").filter(|x| *x > 0.0 && x.is_finite()).unwrap_or(crate::tree::DEFAULT_CROWN_DIAMETER);
+                let t = opt_n(v, "trunkDiameter").filter(|x| *x > 0.0 && x.is_finite()).unwrap_or(crate::tree::DEFAULT_TRUNK_DIAMETER);
+                out.poly(&circle_pts(*at, d / 2.0, 32));
+                out.poly(&circle_pts(*at, t / 2.0, 12));
             }
         }
         "rect4" => {
@@ -1211,6 +1297,39 @@ mod tests {
         let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "thick": 0.3}))).unwrap();
         assert_eq!(items(&o, 0)[0], json!({"id": "WT-s-1", "name": "Beton 30 cm", "layers": [{"componentId": "c", "thickness": 0.3}]}));
         assert_eq!(items(&o, 1)[0]["wallTypeId"], "WT-s-1");
+    }
+
+    /// [149] Baum setzen (Ebene 13, Vorgaben, Unsinn verworfen) und Kreise in Bäume umwandeln.
+    #[test]
+    fn baum_setzen_und_kreise_umwandeln() {
+        let r = root(json!({"layers": [{"code": "13", "name": "Bäume", "color": "#000"}], "drawings2d": [
+            {"id": "k1", "type": "drawing2d", "levelId": "F1", "categoryCode": "13", "geom": {"shape": "circle", "center": {"x": 3, "y": 4}, "r": 2.5}},
+            {"id": "k2", "type": "drawing2d", "levelId": "F1", "categoryCode": "20", "geom": {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 1}},
+            {"id": "k3", "type": "drawing2d", "levelId": "F2", "categoryCode": "13", "geom": {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 1}}
+        ], "sunStudy": {"when": "2026-06-21T10:00:00Z", "show": true, "treeHeight": 14}}));
+        let p = crate::model::lenient::typed_for_test(&r);
+        let o = ops(&r, &p, &req(json!({"cmd": "tree", "at": [1, 2], "crownDiameter": 7, "height": 15, "shape": "conical", "status": "new", "foliage": "conifer", "species": " Picea abies "}))).unwrap();
+        let t = &items(&o, 0)[0];
+        assert_eq!(t["categoryCode"], "13");
+        assert_eq!((t["crownDiameter"].as_f64(), t["height"].as_f64(), t["trunkDiameter"].as_f64()), (Some(7.0), Some(15.0), Some(crate::tree::DEFAULT_TRUNK_DIAMETER)));
+        assert_eq!((t["shape"].as_str(), t["status"].as_str(), t["foliage"].as_str(), t["species"].as_str()), (Some("conical"), Some("new"), Some("conifer"), Some("Picea abies")));
+        let _: crate::model::Tree = serde_json::from_value(t.clone()).unwrap();
+        // Unsinn: Vorgaben, unbekannte Form → rund.
+        let o = ops(&r, &p, &req(json!({"cmd": "tree", "at": [0, 0], "height": -3, "shape": "weide"}))).unwrap();
+        let t = &items(&o, 0)[0];
+        assert_eq!((t["height"].as_f64(), t["shape"].as_str()), (Some(crate::tree::DEFAULT_HEIGHT), Some("round")));
+        // Umwandeln ohne Auswahl: nur Kreise der Baum-Ebene auf der aktiven Ebene.
+        let o = ops(&r, &p, &req(json!({"cmd": "circlesToTrees"}))).unwrap();
+        assert_eq!(o[0].to_json()["ids"], json!(["k1"]));
+        let t = &items(&o, 1)[0];
+        assert_eq!((t["crownDiameter"].as_f64(), t["height"].as_f64(), t["floorId"].as_str()), (Some(5.0), Some(14.0), Some("F1")));
+        assert_eq!(t["position"], json!({"x": 3, "y": 4}));
+        // Mit Auswahl: genau die gewählten Kreise (auch anderer Ebene).
+        let o = ops(&r, &p, &req(json!({"cmd": "circlesToTrees", "ids": ["k2", "k3"]}))).unwrap();
+        assert_eq!(o[0].to_json()["ids"], json!(["k2", "k3"]));
+        assert_eq!(items(&o, 1)[1]["floorId"], "F2");
+        // Nichts zu tun: keine Ops.
+        assert!(ops(&r, &p, &req(json!({"cmd": "circlesToTrees", "ids": ["fehlt"]}))).unwrap().is_empty());
     }
 
     #[test]

@@ -3265,6 +3265,45 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   `validate-ifc.py` (0 Befunde; Mengen 133.56 → 103.56 m²). **Offen:** Pult mit Höfen (Höfe weiter ignoriert); Pult auf
   schiefem Umriss neigt weiter nur entlang x/y (`ridgeAxis`); Attika/Gefälle fehlen im Modell; Dachfenster-Laibung genau
   auf einer Fuge doppelt; nicht in der Tauri-App/Metal angesehen. · M
+- ◐ **[149] Baum als eigenes Objekt.** (6.11., Befund aus [142]: Bäume waren nur Kreise der Ebene 13 mit einer Höhe
+  `sunStudy.treeHeight` für alle.) **Modell** (Rust, `model/generated.rs`): `Tree` (Stammmitte `position`, `trunkDiameter`,
+  `crownDiameter`, `crownBase` = Kronenansatz, `height`, `shape` rund/oval/säulenförmig/kegelförmig, `status`
+  bestehend/neu/zu fällen, `foliage` Laub/Nadel, optional `species`, `baseOffset`, `color`, `locked`), `Project.trees`
+  (+ `KNOWN_KEYS`, `set_item`, Typen neu erzeugt); Ops/Prüfung wie die übrigen Listen. Geometrie `core/src/tree.rs`:
+  Vorgaben für Unsinn (NaN, ≤ 0, Ansatz ≤ 90 % der Höhe, Stamm ≤ Krone), Kronenprofil je Form (Ellipsoid, Eiform mit
+  breitester Stelle bei 40 %, Superellipse ^4, Kegel), Fuss auf dem sichtbaren Gelände (inkl. Baugruben, wie [142]) sonst
+  Geschoss-UK, + `baseOffset`. **Grundriss** (`plan/trees.rs`, mit den Stützen in einer Gruppe): Laubbaum Wellenkranz,
+  Nadelbaum Zackenkranz, Stamm als Kreis; bestehend Ebenenfarbe/Tusche mit gefülltem Stamm, neu rot (offener Stamm), zu
+  fällen gelb, gestrichelt und durchgekreuzt (Kreuz trägt die Aussage im Schwarz-Weiss-Druck). Pick: unsichtbare
+  Kronenfläche mit `contextObjectId = "@tree:<id>"` (kein neues Id-Feld im Plan-Puffer). **Schnitt/Ansicht**: Silhouette
+  (Kronenprofil gespiegelt + Stamm), Ansicht in der Maler-Reihenfolge (Krone hellgrün bzw. weiss in Tusche, Kanten der
+  Bauteile bleiben darüber), Schnitt transparent unter dem Schnittbild (Bäume hinter der Ebene, Bounds erweitert).
+  **3D** (`model3d::emit_trees`, bei den Stützen-Meshes): Stamm-Zylinder (8 Seiten) + Krone als Rotationskörper (8 Ringe ×
+  12 Seiten, < 250 Dreiecke je Baum), wirft/empfängt im Shadow-Mapping ([64]) wie jedes Netz; Pick `pickGeometry.trees`,
+  Hervorhebung, Explosion, glTF/OBJ-Gruppe `Baum_<id>`. **IFC**: Datensatz `TREE` (19) → IFC4 `IfcGeographicElement`
+  (ObjectType „Baum“, USERDEFINED), IFC2x3 `IfcBuildingElementProxy`; Netz Stamm + Krone, Pset `Dossier_Tree`
+  (Status, Foliage, Species) und `Dossier_Qto_Tree` (Height, CrownDiameter, TrunkDiameter, CrownBaseHeight).
+  **Schatten** (`sun.rs`): je Baum Stamm-Prisma + Kronen-Punktwolke nach eigener Höhe/Krone/Form; Kreise der Ebene 13
+  bleiben Fallback mit `treeHeight`. **Werkzeug „Baum“** (`commands/cmds/tree.ts`, Kern `cmd_create.rs` „tree“; Werkzeug-
+  Palette, Kürzel `baum`): Klick setzt (mehrere nacheinander), Zahl = Kronendurchmesser, Optionen Form/Bestand/Laub-Nadel;
+  Objekt-Info `TreeSection` (Art, Bestand, Form, Laub/Nadel, Höhe, Kronen-Ø, Kronenansatz, Stamm-Ø, X/Y; je Änderung ein
+  Undo-Schritt); Griffe Stammmitte (verschieben) und Kronenrand (Durchmesser), je Zug ein Undo-Schritt. Auswahl-Art
+  `trees` (Plan, Klick-Zyklus, 3D), Verschieben/Kopieren/Spiegeln/Drehen (`cmd_transform`, `treeIds`), Löschen,
+  Zwischenablage (`cmd_paste`), Geo-Verschiebung. **Musterhaus komplex unverändert** (Kreise bleiben); Befehl „Kreise in
+  Bäume umwandeln“ (`circlestotrees`): gewählte Kreise, sonst alle Kreise der Baum-Ebene im aktiven Geschoss → Bäume
+  (Kronen-Ø = Kreis-Ø, Höhe `treeHeight`), Kreise entfallen, ein Undo-Schritt.
+  Tests: Rust `tree::tests` (Modell/Vorgaben, Netz dicht und aussen orientiert, Kegelvolumen, Silhouette), `plan::trees`
+  (Planzeichen je Bestand/Laub, Ebene aus, Ansicht-Silhouette), `sun::baum_objekt_schatten_nach_hoehe` (Länge nach
+  Höhe, Breite nach Krone), `model3d::baeume_im_3d_und_pick`, `ifc_data::baum_datensatz`, fileio
+  `baum_als_geografisches_element` (IFC4/2x3), `cmd_create::baum_setzen_und_kreise_umwandeln`,
+  `cmd_transform::baeume_verschieben_und_kopieren`; vitest `tree.test.ts` (Werkzeug, Umwandeln); e2e `tree.spec.ts`
+  (setzen, im Plan wählen, Höhe ändern, Undo, löschen). Geprüft: CLI Situation EG 1:200 (Tusche und Farbe, mit Schatten),
+  Ansicht Süd, Schnitt B-B (Linux/Chromium); 3D mit `render_png` (Linux/lavapipe, iso, Sonne SO: Bäume mit Schatten);
+  IFC mit `validate-ifc.py` (0 Befunde, 5 IfcGeographicElement). Goldens unverändert (Musterhäuser ohne Baum-Objekte).
+  **Offen:** nicht auf Metal und nicht in der Tauri-App geprüft (3D-Pick nur Unit-Test); Bäume nicht gruppierbar und
+  nicht im Auswahlrechteck; keine Art-Beschriftung im Plan; Krone im Schatten als konvexe Hülle; Schnitt durch die Krone zeigt die ganze Silhouette (kein Schnittbild); Fuss
+  am Gelände der Stammmitte (Hang unter der Krone nicht berücksichtigt); Kreise der Ebene 13 zusätzlich zum Baum-Objekt
+  werfen weiter Schatten (doppelt, wenn beide gezeichnet sind). · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

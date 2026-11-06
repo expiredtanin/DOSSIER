@@ -93,6 +93,9 @@
 //                 IfcZone mit IfcRelAssignsToGroup der Räume (`space/<id>`-Entitäten; unbekannte ids werden
 //                 übersprungen, ohne Raum keine Zone). GlobalId aus `zone/<key>`; Psets/Mengen wie bei Bauteilen.
 //   ATTACH      = 14, key, PSETS   (Psets/Mengen an ein schon geschriebenes Bauteil/Geschoss, Schlüssel wie oben)
+//   TREE        = 19 ([149] Baum), structure, id, name, PSETS, MESH (Stamm + Krone, Welt rel. Geschoss-UK)
+//                 IFC4: IfcGeographicElement (ObjectType „Baum", PredefinedType USERDEFINED); IFC2x3 (kennt die
+//                 Klasse nicht): IfcBuildingElementProxy mit ObjectType „Baum". GlobalId aus `tree/<id>`.
 //
 // Schema IFC2x3 (Coordination View 2.0, TC1; [B5] 28.10.): gleiche Datensätze, GUIDs, Psets und Mengen, aber
 // die Entitäten des Schemas — Netze als IfcFacetedBrep (dicht) bzw. IfcShellBasedSurfaceModel (offen) statt
@@ -143,6 +146,7 @@ pub const REC_OPENING_SOLID: f64 = 15.0;
 pub const REC_WALL_ARC: f64 = 16.0;
 pub const REC_WALL_ARC_SOLID: f64 = 17.0;
 pub const REC_GRID: f64 = 18.0;
+pub const REC_TREE: f64 = 19.0;
 
 // ── IFC-GUID (Kompression nach IfcOpenShell `guid.compress`) ────────────────
 
@@ -1351,6 +1355,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_ZONE => "ZONE",
         c if c == REC_ATTACH => "ATTACH",
         c if c == REC_GRID => "GRID",
+        c if c == REC_TREE => "TREE",
         _ => "?",
     }
 }
@@ -2076,6 +2081,26 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                         "IFCRELAGGREGATES",
                         format!("{g},#{},$,$,#{},{}", w.owner_history, w.entity_of(structure), refs(&ids)),
                     );
+                }
+            }
+            c if c == REC_TREE => {
+                let structure = r.structure(n_storeys)?;
+                let id = r.string()?;
+                let name = r.string()?;
+                let psets = r.psets()?;
+                let mesh = r.mesh()?;
+                let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
+                let key = format!("tree/{id}");
+                let g = w.gid(&key);
+                let entity = if w.v2() {
+                    w.add("IFCBUILDINGELEMENTPROXY", format!("{g},#{},{},$,{},#{placement},#{shape},$,$", w.owner_history, ifc_string(&name), ifc_string("Baum")))
+                } else {
+                    w.add("IFCGEOGRAPHICELEMENT", format!("{g},#{},{},$,{},#{placement},#{shape},$,{}", w.owner_history, ifc_string(&name), ifc_string("Baum"), enum_("USERDEFINED")))
+                };
+                w.add_to_containment(structure, entity);
+                w.elements.insert(key.clone(), entity);
+                for p in &psets {
+                    w.add_pset(p, entity, &key);
                 }
             }
             c if c == REC_ROOF => {
@@ -3455,6 +3480,33 @@ mod tests {
         assert_eq!(count(&ifc, "IFCCARTESIANPOINT"), 6); // Ursprung, 4 Ecken (je einmal), Placement
         assert!(ifc.contains("'Body','SurfaceModel'"));
         assert_eq!(count(&ifc, "IFCFACETEDBREP"), 0);
+    }
+
+    /// [149] Baum: IFC4 IfcGeographicElement (USERDEFINED, ObjectType „Baum"), IFC2x3 IfcBuildingElementProxy;
+    /// Netz und Höhe (Mengen) am Element, GlobalId aus `tree/<id>`.
+    #[test]
+    fn baum_als_geografisches_element() {
+        for v2 in [false, true] {
+            let mut b = mini_in(if v2 { B::v2() } else { B::new() });
+            b.n(&[REC_TREE, -1.0]);
+            b.str("T1");
+            b.str("Quercus robur");
+            b.qto("Dossier_Qto_Tree", &[("Height", 3.0, 12.0), ("CrownDiameter", 3.0, 6.0)]);
+            // Tetraeder (geschlossen).
+            b.n(&[4.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 12.0]);
+            b.n(&[4.0, 0.0, 2.0, 1.0, 0.0, 1.0, 3.0, 1.0, 2.0, 3.0, 0.0, 3.0, 2.0, 0.0]);
+            let ifc = build(&b).unwrap();
+            check_structure(&ifc);
+            let (ty, other) = if v2 { ("IFCBUILDINGELEMENTPROXY", "IFCGEOGRAPHICELEMENT") } else { ("IFCGEOGRAPHICELEMENT", "IFCBUILDINGELEMENTPROXY") };
+            assert_eq!(count(&ifc, ty), 1, "{ifc}");
+            assert_eq!(count(&ifc, other), 0);
+            let line = ifc.lines().find(|l| l.contains(&format!("={ty}("))).unwrap();
+            assert!(line.contains("'Quercus robur'") && line.contains("'Baum'"), "{line}");
+            assert_eq!(line.ends_with(".USERDEFINED.);"), !v2, "{line}");
+            assert!(line.contains(&ifc_guid("t/tree/T1")), "{line}");
+            assert!(ifc.contains("'Height'") && ifc.contains("IFCQUANTITYLENGTH"));
+            assert_eq!(count(&ifc, "IFCRELCONTAINEDINSPATIALSTRUCTURE"), 1);
+        }
     }
 
     #[test]

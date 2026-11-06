@@ -698,6 +698,8 @@ export default function App() {
     const colids = new Set(notLocked("columnIds", selection.columns));
     const rfids = new Set(notLocked("roofIds", selection.roofs));
     const ctxids = new Set(selection.contextObjects);
+    // [149] Bäume (gesperrte bleiben).
+    const treeids = new Set(selection.trees.filter((id) => !(project.trees ?? []).find((t) => t.id === id)?.locked));
     setProject(
       opsMutation((p) => [
         ...removeItems(p, "drawings2d", dids),
@@ -711,6 +713,7 @@ export default function App() {
         // Öffnungen: eigene Auswahl löschen UND alle, deren Wirt (Wand, Dach, Decke [103]) entfällt.
         ...removeItems(p, "openings", (o) => oids.has(o.id) || wids.has(o.hostWallId) || (!!o.hostRoofId && rfids.has(o.hostRoofId)) || (!!o.hostCeilingId && cids.has(o.hostCeilingId))),
         ...removeItems(p, "context", ctxids),
+        ...removeItems(p, "trees", treeids),
       ]),
     );
   };

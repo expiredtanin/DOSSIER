@@ -36,6 +36,7 @@ impl Project {
             "context" => put_opt(&mut self.context, i, v),
             "extrudedSolids" => put_opt(&mut self.extruded_solids, i, v),
             "columns" => put_opt(&mut self.columns, i, v),
+            "trees" => put_opt(&mut self.trees, i, v),
             "groups" => put_opt(&mut self.groups, i, v),
             "layouts" => put_opt(&mut self.layouts, i, v),
             _ => Ok(false),

@@ -207,6 +207,7 @@ export function useMouseSelectionHandlers(opts: {
         roof: "roofs",
         context: "contextObjects",
         site: "site",
+        tree: "trees",
       } as const satisfies Record<string, SelectionKind>;
       type Kind = keyof typeof channels;
       const target: { kind: Kind; id: string } | null = sel.sectionLineId
@@ -225,7 +226,9 @@ export function useMouseSelectionHandlers(opts: {
                     ? { kind: "room", id: sel.roomId }
                     : sel.extrudedSolidId
                       ? { kind: "solid", id: sel.extrudedSolidId }
-                      : sel.columnId
+                      : sel.treeId
+                        ? { kind: "tree", id: sel.treeId }
+                        : sel.columnId
                         ? { kind: "column", id: sel.columnId }
                         : sel.roofId
                           ? { kind: "roof", id: sel.roofId }
@@ -289,7 +292,9 @@ export function useMouseSelectionHandlers(opts: {
                           ? ["contextObjects", sel.contextObjectId]
                           : sel.siteId
                             ? ["site", sel.siteId]
-                            : null;
+                            : sel.treeId
+                              ? ["trees", sel.treeId]
+                              : null;
     setSelection({ ...clearKinds(), groups: [], ...(one ? { [one[0]]: [one[1]] } : {}) });
   };
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
@@ -385,6 +390,11 @@ export function useMouseSelectionHandlers(opts: {
     }
     if (hit.kind === "column") {
       setSelection({ ...clearKinds(), columns: [hit.id] });
+      return;
+    }
+    // [149] Baum: Objekt-Info wie im Grundriss.
+    if (hit.kind === "tree") {
+      setSelection({ ...clearKinds(), trees: [hit.id] });
       return;
     }
     // [137] Freier Körper (Loft, Rotation, Extrusion): Objekt-Info wie im Grundriss.

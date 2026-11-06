@@ -2475,6 +2475,11 @@ export type Project = {
    */
   columns?: Array<Column>;
   /**
+   * Bäume ([149]) — eigene Objekte mit Stamm, Krone und Höhe, siehe {@link Tree}. Optional, damit
+   * bestehende Projekte ohne `trees` gültig bleiben (Default: leer behandeln).
+   */
+  trees?: Array<Tree>;
+  /**
    * Gruppen (Vectorworks-artig: Cmd+G fasst die Auswahl zu einer Einheit
    * zusammen; Doppelklick betritt die Gruppe zum Bearbeiten, alles andere
    * wird dabei gedimmt/gesperrt — s. `state/useGroupState.ts`). Eine Gruppe
@@ -3245,6 +3250,62 @@ export type TextStylePreset = {
   /** Marks, die der Stil auf die Auswahl (oder das ganze Dokument) legt. */
   marks: Marks;
 };
+
+/**
+ * Ein Baum ([149]) — eigenes Objekt der Umgebung mit Stamm, Krone und Höhe. Grundriss/Situation
+ * (Kronenkreis mit Planzeichen, Stamm), Schnitt/Ansicht (Silhouette nach Form), 3D (Stamm-Zylinder +
+ * Krone), Schatten (Sonnenstudie), IFC (IfcGeographicElement). Fuss auf dem Gelände an `position`
+ * (sonst auf der Geschoss-UK) plus `baseOffset`.
+ */
+export type Tree = {
+  id: string;
+  type: "tree";
+  /** Zugehörige Zeichnungsebene (Geschoss), auf der der Baum im Grundriss erscheint. */
+  floorId: string;
+  /** Grafik-Kategorie (Ebene), Vorgabe "13" (Bäume). */
+  categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
+  /** Stammmitte im Grundriss (Meter). */
+  position: Vec2;
+  /** Stammdurchmesser (m, > 0). */
+  trunkDiameter: number;
+  /** Kronendurchmesser (m, > 0). */
+  crownDiameter: number;
+  /** Höhe des Kronenansatzes über dem Fuss (m, ≥ 0, < `height`). */
+  crownBase: number;
+  /** Gesamthöhe über dem Fuss (m, > 0). */
+  height: number;
+  /** Kronenform. */
+  shape: TreeShape;
+  /** Bestehend / neu / zu fällen. */
+  status: TreeStatus;
+  /** Laub- oder Nadelbaum. */
+  foliage: TreeFoliage;
+  /** Optionaler Art-Name (z. B. „Quercus robur"), erscheint als Beschriftung im Grundriss. */
+  species?: string;
+  /** Höhenversatz des Fusses gegenüber Gelände bzw. Geschoss-UK (m, Vorgabe 0). */
+  baseOffset?: number;
+  /**
+   * Optionale Übersteuerung der Strichfarbe; sonst gilt die Kategorie-Farbe bzw. die Bestandsfarbe.
+   */
+  color?: string;
+};
+
+/** Laub- oder Nadelbaum ([149]) — Planzeichen der Krone (Laub: Wellenkranz, Nadel: Zacken). */
+export type TreeFoliage = "deciduous" | "conifer";
+
+/**
+ * Kronenform eines Baums ([149]): Grundform der Silhouette (Schnitt/Ansicht), des 3D-Körpers und
+ * des Schattenwerfers.
+ */
+export type TreeShape = "round" | "oval" | "columnar" | "conical";
+
+/**
+ * Bestand eines Baums ([149]) nach Plankonvention: bestehend (schwarz), neu (rot/Planung),
+ * zu fällen (gelb bzw. durchgekreuzt).
+ */
+export type TreeStatus = "existing" | "new" | "remove";
 
 export type Vec2 = { x: number; y: number };
 
