@@ -9,13 +9,13 @@
 //!
 //! ## Wand-Poché
 //! Eingabe (alles `f64`): `[sx, sy, ex, ey, dicke, refOff, grob (0|1), nurAnsicht (0|1), nSchichten,
-//! dicke × n, startCut, endCut, hatLayerCuts, (je Schicht: start, end, startSide, endSide)×n,
+//! dicke × n, startCut, endCut, startCut2, endCut2 ([141] Y-Knoten), hatLayerCuts, (je Schicht: start, end, startSide, endSide)×n,
 //! nAussparungen, (from, to, offA, offB)×m, nLuecken, (from, to)×k]` mit einer Linie als
 //! `[vorhanden (0|1), px, py, dx, dy]`.
 //!
 //! Ausgabe `[n, Eintrag × n]` in Zeichenreihenfolge:
 //! ```text
-//! 1 polygon  [1, art, schicht, nOhneStrich, kante…, x0,y0 … x3,y3]
+//! 1 polygon  [1, art, schicht, nOhneStrich, kante…, nPunkte, x0,y0 …]  (4 Punkte, mit Knick bis 6)
 //!            art 0 Ansichts-Umriss · 1 Sammelfläche (grob) · 2 Schichtband · 3 Wand-Umriss
 //! 2 line     [2, art, schicht, ax, ay, bx, by]
 //!            art 0 layer-joint-l · 1 layer-joint · 2 wall-outline
@@ -75,10 +75,81 @@ fn line_intersect(a: V, da: V, b: V, db: V) -> Option<V> {
     Some(add(a, scale(da, t)))
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Line {
     point: V,
     dir: V,
+}
+
+/// [141] Zweite Schnittlinie an Segmentanfang/-ende (Y-Knoten, `joins::WallCuts::start_cut2`): gilt im
+/// Querversatz über dem Knick (Schnittpunkt mit der ersten Linie), sobald das Band mit der ersten
+/// Linie des Segmentendes endet.
+#[derive(Clone, Copy, Default)]
+struct Knees {
+    sc: Option<(Line, Line)>,
+    ec: Option<(Line, Line)>,
+}
+
+/// Band mit Knick an den Enden: Punkte (4–6) und die Kantenindizes je logischer Kante
+/// (0 Seite `off_a`, 1 Ende, 2 Seite `off_b`, 3 Anfang).
+struct KneeBand {
+    pts: Vec<V>,
+    edges: [Vec<usize>; 4],
+}
+
+impl KneeBand {
+    fn map(&self, logical: &[f64]) -> Vec<f64> {
+        let mut out = Vec::new();
+        for &l in logical {
+            if let Some(e) = self.edges.get(l as usize) {
+                out.extend(e.iter().map(|i| *i as f64));
+            }
+        }
+        out
+    }
+}
+
+/// Wie [`clipped_band`], an einem Ende mit Knick (`kn`) die zweite Linie über dem Knick.
+fn knee_band(start: V, end: V, off_a: f64, off_b: f64, sc: Option<Line>, ec: Option<Line>, kn: &Knees) -> KneeBand {
+    let u = normalize(sub(end, start));
+    let n = left_normal(u);
+    // Knick (Querversatz, Punkt), wenn die Linie des Endes die erste Linie des Knicks ist.
+    let knee = |c: Option<Line>, k: Option<(Line, Line)>| -> Option<(f64, Line, Line, V)> {
+        let (l1, l2) = k?;
+        if c? != l1 {
+            return None;
+        }
+        let p = line_intersect(l1.point, l1.dir, l2.point, l2.dir)?;
+        Some((dot(sub(p, start), n), l1, l2, p))
+    };
+    let (ks, ke) = (knee(sc, kn.sc), knee(ec, kn.ec));
+    let at = |base: V, off: f64, c: Option<Line>, k: Option<(f64, Line, Line, V)>| {
+        let pt = add(base, scale(n, off));
+        let line = match k {
+            Some((ko, l1, l2, _)) => Some(if off > ko { l2 } else { l1 }),
+            None => c,
+        };
+        match line {
+            None => pt,
+            Some(l) => line_intersect(pt, u, l.point, l.dir).unwrap_or(pt),
+        }
+    };
+    let between = |k: Option<(f64, Line, Line, V)>| k.filter(|k| (k.0 - off_a) * (k.0 - off_b) < -1e-18).map(|k| k.3);
+    let mut pts = vec![at(start, off_a, sc, ks), at(end, off_a, ec, ke)];
+    let mut edges: [Vec<usize>; 4] = [vec![0], vec![1], vec![], vec![]];
+    if let Some(p) = between(ke) {
+        pts.push(p);
+        edges[1].push(2);
+    }
+    edges[2].push(pts.len());
+    pts.push(at(end, off_b, ec, ke));
+    edges[3].push(pts.len());
+    pts.push(at(start, off_b, sc, ks));
+    if let Some(p) = between(ks) {
+        edges[3].push(pts.len());
+        pts.push(p);
+    }
+    KneeBand { pts, edges }
 }
 
 fn clipped_band(start: V, end: V, off_a: f64, off_b: f64, sc: Option<Line>, ec: Option<Line>) -> [V; 4] {
@@ -377,13 +448,18 @@ struct Out {
 }
 
 impl Out {
-    fn polygon(&mut self, art: f64, layer: usize, no_stroke: &[f64], pts: &[V; 4]) {
+    fn polygon(&mut self, art: f64, layer: usize, no_stroke: &[f64], pts: &[V]) {
         self.n += 1;
         self.buf.extend([1.0, art, layer as f64, no_stroke.len() as f64]);
         self.buf.extend_from_slice(no_stroke);
+        self.buf.push(pts.len() as f64);
         for p in pts {
             self.buf.extend([p.x, p.y]);
         }
+    }
+    /// Band mit Knick: logische Kanten ohne Strich auf die Punktkanten abgebildet.
+    fn knee_polygon(&mut self, art: f64, layer: usize, no_stroke: &[f64], kb: &KneeBand) {
+        self.polygon(art, layer, &kb.map(no_stroke), &kb.pts);
     }
     fn line(&mut self, art: f64, layer: usize, a: V, b: V) {
         self.n += 1;
@@ -427,6 +503,8 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
     }
     let start_cut = read_line(&mut r)?;
     let end_cut = read_line(&mut r)?;
+    let start_cut2 = read_line(&mut r)?;
+    let end_cut2 = read_line(&mut r)?;
     let has_layer_cuts = r.num()? != 0.0;
     let mut layer_cuts = None;
     if has_layer_cuts {
@@ -489,13 +567,14 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
         let p2 = along(wstart, wend, e);
         let sc = if s <= 1e-6 { start_cut } else { None };
         let ec = if e >= axis_len - 1e-6 { end_cut } else { None };
+        let kn = Knees { sc: sc.zip(start_cut2), ec: ec.zip(end_cut2) };
 
         if view_only {
-            o.polygon(ART_VIEW, 0, &join_edges(sc, ec), &clipped_band(p1, p2, ref_off - total / 2.0, ref_off + total / 2.0, sc, ec));
+            o.knee_polygon(ART_VIEW, 0, &join_edges(sc, ec), &knee_band(p1, p2, ref_off - total / 2.0, ref_off + total / 2.0, sc, ec, &kn));
             continue;
         }
         if grob {
-            o.polygon(ART_GROB, 0, &join_edges(sc, ec), &clipped_band(p1, p2, ref_off - total / 2.0, ref_off + total / 2.0, sc, ec));
+            o.knee_polygon(ART_GROB, 0, &join_edges(sc, ec), &knee_band(p1, p2, ref_off - total / 2.0, ref_off + total / 2.0, sc, ec, &kn));
             continue;
         }
 
@@ -515,7 +594,8 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
         for li in 0..n_layers {
             let layer_start_cut = if s <= 1e-6 {
                 match &layer_cuts {
-                    Some(lc) => lc.start[li],
+                    // [141] Ohne eigenen Schicht-Schnitt (T-Stoss nur am anderen Ende) gilt der Endschnitt.
+                    Some(lc) => lc.start[li].or(sc),
                     None => sc,
                 }
             } else {
@@ -523,7 +603,7 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
             };
             let layer_end_cut = if e >= axis_len - 1e-6 {
                 match &layer_cuts {
-                    Some(lc) => lc.end[li],
+                    Some(lc) => lc.end[li].or(ec),
                     None => ec,
                 }
             } else {
@@ -538,7 +618,7 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
                 .collect();
             let band_holes = holes_at(&band_cs, band_lo, band_hi, fr);
             for (a, b, bsc, bec) in subtract_holes(s, e, &band_holes, layer_start_cut, layer_end_cut, fr, band_lo, band_hi) {
-                o.polygon(ART_BAND, li, &band_join_edges, &clipped_band(axis_pt(a), axis_pt(b), off, off + thick[li], bsc, bec));
+                o.knee_polygon(ART_BAND, li, &band_join_edges, &knee_band(axis_pt(a), axis_pt(b), off, off + thick[li], bsc, bec, &kn));
             }
             let side_start = if s <= 1e-6 { layer_cuts.as_ref().and_then(|lc| lc.start_side[li]) } else { None };
             let side_end = if e >= axis_len - 1e-6 { layer_cuts.as_ref().and_then(|lc| lc.end_side[li]) } else { None };
@@ -588,7 +668,7 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
                     None => (sc, ec),
                 };
                 for (a, b, jsc, jec) in subtract_holes(s, e, &holes_at(&fuge_cs, off, off, fr), fsc, fec, fr, off, off) {
-                    let jq = clipped_band(axis_pt(a), axis_pt(b), off, off, jsc, jec);
+                    let jq = knee_band(axis_pt(a), axis_pt(b), off, off, jsc, jec, &kn).pts;
                     o.line(LINE_JOINT, li, jq[0], jq[1]);
                 }
             }
@@ -607,10 +687,10 @@ fn wall_poche_inner(buf: &[f64]) -> Option<Vec<f64>> {
         if !holes_lo.is_empty() {
             outline_no_stroke.push(0.0);
         }
-        o.polygon(ART_OUTLINE, 0, &outline_no_stroke, &clipped_band(p1, p2, off_lo, off_hi, sc, ec));
+        o.knee_polygon(ART_OUTLINE, 0, &outline_no_stroke, &knee_band(p1, p2, off_lo, off_hi, sc, ec, &kn));
         let mut near_edge = |edge_off: f64, holes: &[Hole]| {
             for (a, b, nsc, nec) in subtract_holes(s, e, holes, sc, ec, fr, edge_off, edge_off) {
-                let jq = clipped_band(axis_pt(a), axis_pt(b), edge_off, edge_off, nsc, nec);
+                let jq = knee_band(axis_pt(a), axis_pt(b), edge_off, edge_off, nsc, nec, &kn).pts;
                 o.line(LINE_OUTLINE, 0, jq[0], jq[1]);
             }
         };
@@ -696,8 +776,8 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
         }
         let (lo, hi) = (offs[li], offs[li + 1]);
         let holes: Vec<(f64, f64)> = cutouts.iter().filter(|c| lo < max(c.off_a, c.off_b) - CUTOUT_EPS && hi > min(c.off_a, c.off_b) + CUTOUT_EPS).map(|c| (c.from, c.to)).collect();
-        let start_cut = if s <= 1e-6 { layer_cuts.as_ref().map_or(g.sc, |lc| lc.start[li]) } else { None };
-        let end_cut = if e >= g.axis_len - 1e-6 { layer_cuts.as_ref().map_or(g.ec, |lc| lc.end[li]) } else { None };
+        let start_cut = if s <= 1e-6 { layer_cuts.as_ref().map_or(g.sc, |lc| lc.start[li].or(g.sc)) } else { None };
+        let end_cut = if e >= g.axis_len - 1e-6 { layer_cuts.as_ref().map_or(g.ec, |lc| lc.end[li].or(g.ec)) } else { None };
         if b - a > CUTOUT_EPS {
             for (pa, pb) in subtract_intervals(a, b, &holes) {
                 let bsc = if pa <= s + CUTOUT_EPS { start_cut } else { None };
@@ -848,6 +928,8 @@ mod tests {
         let mut b = vec![0.0, 0.0, len, 0.0, 0.3, 0.0, grob as u8 as f64, 0.0, 2.0, 0.1, 0.2];
         b.extend(NO_LINE);
         b.extend(NO_LINE);
+        b.extend(NO_LINE);
+        b.extend(NO_LINE);
         b.extend([0.0, 0.0, gaps.len() as f64]);
         for g in gaps {
             b.extend([g.0, g.1]);
@@ -862,7 +944,7 @@ mod tests {
             if t == tag {
                 n += 1;
             }
-            i += if t == 1.0 { 4 + out[i + 3] as usize + 8 } else { 7 };
+            i += if t == 1.0 { 5 + out[i + 3] as usize + 2 * out[i + 4 + out[i + 3] as usize] as usize } else { 7 };
         }
         assert_eq!(i, out.len());
         n
@@ -879,9 +961,10 @@ mod tests {
         let (mut i, mut v) = (1, Vec::new());
         for _ in 0..out[0] as usize {
             if out[i] == 1.0 {
-                let q = i + 4 + out[i + 3] as usize;
-                v.push(Prim::Poly(out[i + 1], out[i + 2] as usize, (0..4).map(|j| super::v(out[q + 2 * j], out[q + 2 * j + 1])).collect()));
-                i = q + 8;
+                let np = out[i + 4 + out[i + 3] as usize] as usize;
+                let q = i + 5 + out[i + 3] as usize;
+                v.push(Prim::Poly(out[i + 1], out[i + 2] as usize, (0..np).map(|j| super::v(out[q + 2 * j], out[q + 2 * j + 1])).collect()));
+                i = q + 2 * np;
             } else {
                 v.push(Prim::Line(out[i + 1], super::v(out[i + 3], out[i + 4]), super::v(out[i + 5], out[i + 6])));
                 i += 7;
@@ -902,6 +985,8 @@ mod tests {
         };
         line(&mut b, c.start_cut);
         line(&mut b, c.end_cut);
+        line(&mut b, c.start_cut2);
+        line(&mut b, c.end_cut2);
         match &c.layer_cuts {
             Some(lc) => {
                 b.push(1.0);
@@ -1058,9 +1143,10 @@ mod tests {
         let (mut i, mut v) = (1, Vec::new());
         for _ in 0..out[0] as usize {
             if out[i] == 1.0 {
-                let q = i + 4 + out[i + 3] as usize;
-                v.push((out[i + 1], out[i + 2] as usize, (0..4).map(|k| (out[q + 2 * k], out[q + 2 * k + 1])).collect()));
-                i = q + 8;
+                let np = out[i + 4 + out[i + 3] as usize] as usize;
+                let q = i + 5 + out[i + 3] as usize;
+                v.push((out[i + 1], out[i + 2] as usize, (0..np).map(|k| (out[q + 2 * k], out[q + 2 * k + 1])).collect()));
+                i = q + 2 * np;
             } else {
                 i += 7;
             }
@@ -1084,7 +1170,7 @@ mod tests {
         let mut step = false;
         for _ in 0..o[0] as usize {
             if o[i] == 1.0 {
-                i += 4 + o[i + 3] as usize + 8;
+                i += 5 + o[i + 3] as usize + 2 * o[i + 4 + o[i + 3] as usize] as usize;
             } else {
                 if o[i + 1] == LINE_OUTLINE && (o[i + 3] - 0.95).abs() < 1e-9 && (o[i + 5] - 0.95).abs() < 1e-9 {
                     step = true;
@@ -1105,6 +1191,7 @@ mod tests {
         // Gehrung 45° am Start (durch (0,0), Richtung (1,1)), am Ende (durch (4,0), Richtung (-1,1)).
         b.extend([1.0, 0.0, 0.0, 1.0, 1.0]);
         b.extend([1.0, 4.0, 0.0, -1.0, 1.0]);
+        b.extend([0.0; 10]);
         b.extend([0.0, 0.0, 1.0, 1.0, 2.0]);
         b.extend([2.0, 1.0, 1.0, 1.0, 0.05, 0.0, 2.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.03, 0.0, 0.1]);
         let o = wall_poche(&b);

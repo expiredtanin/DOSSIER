@@ -103,6 +103,20 @@ pub struct WallCuts {
     pub end_cut: Option<Line>,
     pub layer_cuts: Option<LayerCuts>,
     pub span_cutouts: Vec<SpanCutout>,
+    /// [141] Zweite Schnittlinie am Anfang/Ende (Y-Knoten: der dritte Ast stösst an die Flächen beider
+    /// Eckwände). `start_cut`/`end_cut` gilt im Querversatz (links der Laufrichtung) unter dem
+    /// Schnittpunkt beider Linien, `*_cut2` darüber. Nur der Grundriss wertet sie aus; 3D bleibt an
+    /// der ersten Linie.
+    pub start_cut2: Option<Line>,
+    pub end_cut2: Option<Line>,
+    /// [141] Die Wand liegt ganz in einer kollinearen Wand gleichen Typs (gleiches Band): im Grundriss
+    /// nicht zeichnen, die umfassende Wand zeigt den Körper.
+    pub covered: bool,
+    /// [141] Gerichtete Schichtmuster dieser Wand um 180° gedreht: Gehrung/Stossfuge zweier gleich
+    /// orientierter Enden (Anfang an Anfang, Ende an Ende) spiegelt die Laufrichtung; gedreht gehen die
+    /// Muster an der Schnittlinie spiegelbildlich ineinander über. Über die Ketten verbundener Wände
+    /// zweifarbig verteilt (bei ungerader Masche gewinnt die erste Zuordnung).
+    pub pattern_flip: bool,
 }
 
 /// Eine benötigte Angabe fehlt: Wandtyp oder Bauteil der Wand mit diesem Index ist unbekannt
@@ -318,6 +332,52 @@ fn set_cut(result: &mut [WallCuts], we: WallEnd, cut: Line) {
     }
 }
 
+/// Gemeinsame Schnittlinie zweier Enden (Gehrung, Stossfuge).
+fn set_pair(result: &mut [WallCuts], a: WallEnd, b: WallEnd, cut: Line) {
+    set_cut(result, a, cut);
+    set_cut(result, b, cut);
+}
+
+/// [141] Drehung der Schichtmuster (`pattern_flip`): Enden mit derselben Schnittlinie sind gekoppelt
+/// (Gehrung, Stossfuge); Ende an Anfang behält die Richtung, gleich orientierte Enden drehen. Zweifarbig
+/// über die Kopplungen, Konflikte (ungerade Maschen) bleiben bei der ersten Zuordnung.
+fn assign_pattern_flip(result: &mut [WallCuts]) {
+    let key = |l: &Line| [l.point.x, l.point.y, l.dir.x, l.dir.y].map(f64::to_bits);
+    let mut by_line: HashMap<[u64; 4], Vec<(usize, End)>> = HashMap::new();
+    for (i, c) in result.iter().enumerate() {
+        for (cut, end) in [(&c.start_cut, End::Start), (&c.end_cut, End::End)] {
+            if let Some(l) = cut {
+                by_line.entry(key(l)).or_default().push((i, end));
+            }
+        }
+    }
+    let mut links: Vec<Vec<(usize, bool)>> = vec![Vec::new(); result.len()];
+    let mut groups: Vec<&Vec<(usize, End)>> = by_line.values().filter(|g| g.len() == 2 && g[0].0 != g[1].0).collect();
+    groups.sort_by_key(|g| (g[0].0, g[1].0));
+    for g in groups {
+        let flip = g[0].1 == g[1].1;
+        links[g[0].0].push((g[1].0, flip));
+        links[g[1].0].push((g[0].0, flip));
+    }
+    let mut seen = vec![false; result.len()];
+    for root in 0..result.len() {
+        if seen[root] {
+            continue;
+        }
+        seen[root] = true;
+        let mut stack = vec![root];
+        while let Some(w) = stack.pop() {
+            for &(o, flip) in &links[w] {
+                if !seen[o] {
+                    seen[o] = true;
+                    result[o].pattern_flip = result[w].pattern_flip != flip;
+                    stack.push(o);
+                }
+            }
+        }
+    }
+}
+
 /// Berechnet für jede Wand (Index = Eingabe-Reihenfolge) die Gehrungs-/Anschluss-Schnittlinien.
 /// `walls` ist die bereits gefilterte Wandmenge (z. B. ein Geschoss).
 pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
@@ -353,8 +413,7 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
         match ends.len() {
             2 => {
                 if let Some(cut) = miter_line(walls, ends[0].wall, ends[0].end, ends[1].wall)? {
-                    set_cut(&mut result, ends[0], cut);
-                    set_cut(&mut result, ends[1], cut);
+                    set_pair(&mut result, ends[0], ends[1], cut);
                 }
             }
             3.. => apply_node(walls, ends, &mut result)?,
@@ -362,6 +421,8 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
             _ => {}
         }
     }
+
+    merge_collinear(walls, &mut result);
 
     // Fall 2: jedes noch ungeschnittene Ende gegen die Mittelspanne aller anderen Wände prüfen
     // (Mittelspannen-T und „+"-Kreuzung). Bereits geschnittene Enden bleiben unangetastet.
@@ -372,12 +433,102 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
                 End::Start => c.start_cut,
                 End::End => c.end_cut,
             };
-            if cut.is_none() {
+            if cut.is_none() && !c.covered {
                 apply_mid_span_tee(walls, we, &mut result)?;
             }
         }
     }
+    assign_pattern_flip(&mut result);
     Ok(result)
+}
+
+/// [141] Zwei gerade Wände liegen im selben Band: parallele Achsen, gleiche Schichtfolge (gegenläufig
+/// gespiegelt) und deckungsgleiche Flächen. `Some(gegenläufig)`.
+fn same_band(walls: &[JoinWall], a: usize, b: usize) -> Option<bool> {
+    let (wa, wb) = (&walls[a], &walls[b]);
+    if is_arc(wa) || is_arc(wb) || len(sub(wa.end, wa.start)) < 1e-9 || len(sub(wb.end, wb.start)) < 1e-9 {
+        return None;
+    }
+    let (ua, ub) = (dir_of(wa), dir_of(wb));
+    if kernel2d::cross(ua, ub).abs() > 1e-6 {
+        return None;
+    }
+    let reversed = dot(ua, ub) < 0.0;
+    let (la, lb) = (wa.layers.as_deref()?, wb.layers.as_deref()?);
+    if la.is_empty() || la.len() != lb.len() {
+        return None;
+    }
+    let same = |x: &JoinLayer, y: &JoinLayer| (x.thickness - y.thickness).abs() < 1e-9 && x.component.is_some() && x.component == y.component;
+    let ok = if reversed { la.iter().zip(lb.iter().rev()).all(|(x, y)| same(x, y)) } else { la.iter().zip(lb).all(|(x, y)| same(x, y)) };
+    if !ok {
+        return None;
+    }
+    let t = la.iter().fold(0.0, |s, l| s + l.thickness);
+    let na = left_normal(ua);
+    let ca = add(wa.start, scale(na, reference_offset(wa.reference, t)));
+    let cb = add(wb.start, scale(left_normal(ub), reference_offset(wb.reference, t)));
+    (dot(sub(cb, ca), na).abs() < 1e-6).then_some(reversed)
+}
+
+/// [141] Kollineare Wände gleichen Typs im selben Band verschmelzen zu einem Körper: stumpf aneinander
+/// (Enden im Knoten ohne Gehrung) eine Stossfuge als Schnitt (keine Trennlinie), überlappend wird die
+/// spätere Wand an der früheren gestutzt, eine ganz enthaltene Wand ist verdeckt (`covered`). Enden
+/// mit schon gesetztem Schnitt (Ecke, T) bleiben unangetastet.
+fn merge_collinear(walls: &[JoinWall], result: &mut [WallCuts]) {
+    let cut_of = |c: &WallCuts, e: End| match e {
+        End::Start => c.start_cut,
+        End::End => c.end_cut,
+    };
+    for a in 0..walls.len() {
+        for b in a + 1..walls.len() {
+            if result[a].covered || result[b].covered || same_band(walls, a, b).is_none() {
+                continue;
+            }
+            let wa = &walls[a];
+            let u = dir_of(wa);
+            let a1 = len(sub(wa.end, wa.start));
+            let tb = |p: Vec2| dot(sub(p, wa.start), u);
+            let (s, e) = (tb(walls[b].start), tb(walls[b].end));
+            // b im Rahmen von a: unteres/oberes Ende.
+            let (lo, lo_end, hi, hi_end) = if s <= e { (s, End::Start, e, End::End) } else { (e, End::End, s, End::Start) };
+            if hi < -JOIN_SNAP || lo > a1 + JOIN_SNAP {
+                continue;
+            }
+            if lo >= -JOIN_SNAP && hi <= a1 + JOIN_SNAP {
+                result[b].covered = true;
+                continue;
+            }
+            if lo <= JOIN_SNAP && hi >= a1 - JOIN_SNAP {
+                result[a].covered = true;
+                continue;
+            }
+            // Teilüberlappung oder Stoss: die Fuge liegt am Ende von a, das in b liegt.
+            let (a_end, t, b_end) = if lo > 0.0 { (End::End, a1, lo_end) } else { (End::Start, 0.0, hi_end) };
+            if cut_of(&result[a], a_end).is_some() || cut_of(&result[b], b_end).is_some() {
+                continue;
+            }
+            let joint = Line { point: add(wa.start, scale(u, t)), dir: left_normal(u) };
+            // Stoss mitten auf einer dritten Wand („+"-Kreuzung): die beiden stossen dort an (Fall 2).
+            if ((lo - a1).abs() <= JOIN_SNAP || hi.abs() <= JOIN_SNAP) && (0..walls.len()).any(|w| w != a && w != b && inside_span(walls, w, joint.point)) {
+                continue;
+            }
+            set_pair(result, WallEnd { wall: a, end: a_end }, WallEnd { wall: b, end: b_end }, joint);
+        }
+    }
+}
+
+/// Punkt liegt in der inneren Spanne des Wandbands `wi` (gerade Wand, Fangtoleranz wie Fall 2).
+fn inside_span(walls: &[JoinWall], wi: usize, p: Vec2) -> bool {
+    let w = &walls[wi];
+    let l = len(sub(w.end, w.start));
+    if is_arc(w) || l < 1e-9 {
+        return false;
+    }
+    let Ok(t) = thickness(walls, wi) else { return false };
+    let u = dir_of(w);
+    let along = dot(sub(p, w.start), u);
+    let perp = dot(sub(p, w.start), left_normal(u));
+    along > 1e-4 && along < l - 1e-4 && (perp - reference_offset(w.reference, t)).abs() <= t / 2.0 + JOIN_SNAP
 }
 
 /// [141] Fangtoleranz der Verschneidung (m): Enden mit kleinerem Abstand bilden einen Knoten, ein
@@ -409,8 +560,7 @@ fn apply_node(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts]) -> 
     }
     if n == 2 {
         if let Some(cut) = miter_line(walls, ends[0].wall, ends[0].end, ends[1].wall)? {
-            set_cut(result, ends[0], cut);
-            set_cut(result, ends[1], cut);
+            set_pair(result, ends[0], ends[1], cut);
         }
         return Ok(());
     }
@@ -461,12 +611,16 @@ fn apply_node(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts]) -> 
         return Ok(());
     }
     if let Some(cut) = miter_line(walls, ends[i].wall, ends[i].end, ends[k].wall)? {
-        set_cut(result, ends[i], cut);
-        set_cut(result, ends[k], cut);
+        set_pair(result, ends[i], ends[k], cut);
     }
     for b in others {
         let bw = &walls[ends[b].wall];
         let p = point_of(bw, ends[b].end);
+        // [141] Y-Knoten: liegt die Ecke der beiden zugewandten Flächen im Band des Asts, endet er an
+        // beiden (Kerbe bzw. Spitze) statt nur an einer (vorher überlappte er die andere Eckwand).
+        if !arcs && y_notch(walls, ends, &into, i, k, b, result)? {
+            continue;
+        }
         // Zugewandte Fläche jeder Eckwand; der Abzweig endet an der, die er (von seinem fernen Ende
         // her) zuerst trifft.
         let mut pick: Option<(usize, f64)> = None;
@@ -494,6 +648,54 @@ fn apply_node(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts]) -> 
         }
     }
     Ok(())
+}
+
+/// [141] Y-Knoten (gerade Wände): der Ast `b` stösst an das Eckpaar `i`/`k`. Die beiden ihm
+/// zugewandten Flächen treffen sich in der Ecke K (Aussenecke: Kerbe, Innenecke: Spitze). Liegt K im
+/// Band des Asts, bekommt er beide Flächen als Schnitt — je Seite von K die Fläche der Eckwand, die
+/// auf dieser Seite liegt (`*_cut` unter, `*_cut2` über K im Querversatz des Asts). `false`: K liegt
+/// ausserhalb (eine Fläche genügt, Stoss wie bisher).
+fn y_notch(walls: &[JoinWall], ends: &[WallEnd], into: &[Vec2], i: usize, k: usize, b: usize, result: &mut [WallCuts]) -> R<bool> {
+    let bi = ends[b].wall;
+    let bw = &walls[bi];
+    let mut faces: Vec<(Line, f64)> = Vec::with_capacity(2);
+    for &q in &[i, k] {
+        let qi = ends[q].wall;
+        let qw = &walls[qi];
+        let tq = thickness(walls, qi)?;
+        let uq = dir_of(qw);
+        let nq = left_normal(uq);
+        let facing = dot(nq, into[b]);
+        if facing.abs() < 1e-6 {
+            return Ok(false);
+        }
+        let sign = if facing > 0.0 { 1.0 } else { -1.0 };
+        let point = add(point_of(qw, ends[q].end), scale(nq, reference_offset(qw.reference, tq) + sign * tq / 2.0));
+        faces.push((Line { point, dir: uq }, dot(into[q], left_normal(dir_of(bw)))));
+    }
+    let (lo, hi) = match (faces[0].1 > 1e-6, faces[1].1 > 1e-6, faces[0].1 < -1e-6, faces[1].1 < -1e-6) {
+        (false, true, true, _) => (faces[0].0, faces[1].0),
+        (true, false, _, true) => (faces[1].0, faces[0].0),
+        _ => return Ok(false),
+    };
+    let Some(corner) = line_intersect(lo.point, lo.dir, hi.point, hi.dir) else { return Ok(false) };
+    let tb = thickness(walls, bi)?;
+    let node = point_of(bw, ends[b].end);
+    if len(sub(corner, node)) > 4.0 * (tb + thickness(walls, ends[i].wall)? + thickness(walls, ends[k].wall)?) {
+        return Ok(false);
+    }
+    let ob = reference_offset(bw.reference, tb);
+    let perp = dot(sub(corner, bw.start), left_normal(dir_of(bw)));
+    if perp <= ob - tb / 2.0 + 1e-6 || perp >= ob + tb / 2.0 - 1e-6 {
+        return Ok(false);
+    }
+    set_cut(result, ends[b], lo);
+    let c = &mut result[bi];
+    match ends[b].end {
+        End::Start => c.start_cut2 = Some(hi),
+        End::End => c.end_cut2 = Some(hi),
+    }
+    Ok(true)
 }
 
 /// Gemeinsame Gehrungslinie zweier Wände A, B im Knoten (orientierungsbasierte Flächen-Paarung:
@@ -627,8 +829,7 @@ fn t_branch(walls: &[JoinWall], through_end: WallEnd, other_end: WallEnd, branch
     // Die Durchgangs-Hälften stossen rechtwinklig aneinander; als Schnitt markiert, damit die
     // Stossfuge nicht als Umriss gezeichnet wird (eine durchlaufende Wand).
     let joint = Line { point: j, dir: n_t };
-    set_cut(result, through_end, joint);
-    set_cut(result, other_end, joint);
+    set_pair(result, through_end, other_end, joint);
     apply_layer_cuts(walls, result, branch_end, ti, Some(other_end.wall), face_cut, j, u_t, sign)
 }
 
@@ -817,7 +1018,8 @@ fn apply_mid_span_tee(walls: &[JoinWall], free: WallEnd, result: &mut [WallCuts]
     // (Wand, perp, dist, distAlong)
     let mut best: Option<(usize, f64, f64, f64)> = None;
     for (wi, w) in walls.iter().enumerate() {
-        if wi == fi {
+        // [141] Verdeckte Wand (in einer kollinearen gleichen Typs): der Stoss gilt der umfassenden.
+        if wi == fi || result[wi].covered {
             continue;
         }
         if let Some(a) = arc_of(w) {
@@ -1038,7 +1240,7 @@ pub fn decode_cuts(r: &mut crate::flat_read::Reader) -> Option<WallCuts> {
         }
         span_cutouts.push(s);
     }
-    Some(WallCuts { start_cut, end_cut, layer_cuts, span_cutouts })
+    Some(WallCuts { start_cut, end_cut, layer_cuts, span_cutouts, ..Default::default() })
 }
 
 /// Ergebnis flach: `[0, (cuts je Wand)…]`; Fehler `[1, wandIndex]` (Wandtyp bzw. Bauteil

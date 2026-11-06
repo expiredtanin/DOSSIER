@@ -621,6 +621,25 @@ fn insulation_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     runs
 }
 
+/// [141] Teilung (Länge einer Musterperiode entlang der Laufrichtung) eines Schichtmusters in einem
+/// Band der Dicke `t` (wie die Generatoren unten); `None` für andere Muster. Wandschichten richten
+/// damit das Muster an Gehrungen aus (Phase und Teilung, `plan/walls.rs`).
+pub fn band_period(pattern: Pattern, t: f64, scale: f64) -> Option<f64> {
+    let scale = if scale > 1e-6 { scale } else { 1.0 };
+    if !(t > 1e-6) || !t.is_finite() {
+        return None;
+    }
+    let rows = if t <= BAND_MAX_M * scale { 1.0 } else { (t / (BAND_ROW_M * scale)).ceil() };
+    let half = t / rows / 2.0;
+    match pattern {
+        Pattern::Insulation => Some((INSULATION_PITCH * 2.0 * half * scale).max(BAND_MIN_PITCH_M)),
+        Pattern::InsulationHard => Some(2.0 * (0.5 * 2.0 * half * scale).max(BAND_MIN_PITCH_M)),
+        Pattern::InsulationWave => Some((1.2 * 2.0 * half * scale).max(BAND_MIN_PITCH_M)),
+        Pattern::Timber => Some(2.0 * (2.0 * half * scale).max(BAND_MIN_PITCH_M)),
+        _ => None,
+    }
+}
+
 /// Teilung der Dämmschlange je Schichtdicke (bei scale 1); Vorlage: 6 Schlaufen auf 1.27 Dicken.
 pub const INSULATION_PITCH: f64 = 0.22;
 /// Abstand der Bögen von den Schichtkanten, Anteil der Dicke (≈ halbe Musterlinie in 1:50).

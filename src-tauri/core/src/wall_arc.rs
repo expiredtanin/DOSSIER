@@ -509,6 +509,7 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
             end_cut: if last { w.cuts.end_cut } else { Some(radial(sb)) },
             layer_cuts,
             span_cutouts,
+            ..Default::default()
         };
         // [106] Teilwand über einer Öffnung mit Schichteinzug: Loch und Einzug auf der Sehne.
         if let Some((_, o, r)) = zones.iter().find(|((a, b), _, _)| (a - sa).abs() < 1e-6 && (b - sb).abs() < 1e-6) {

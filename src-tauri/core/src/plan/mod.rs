@@ -33,3 +33,6 @@ pub mod pick;
 pub mod sketch;
 pub mod ceiling_plan;
 pub mod line_ends;
+mod wall_columns;
+#[cfg(test)]
+mod wall_join_tests;

@@ -742,7 +742,71 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
                 hatch = h;
             }
         }
-        out.push(polygon(crate::model3d::column_footprint(col), &fill, stroke, lw, hatch, greyed, None, Pick::Column(&col.id)));
+        let fp = crate::model3d::column_footprint(col);
+        // [141] Geschnittene Wände, die in der (geschnittenen) Stütze enden: prioritärere Wand beschneidet
+        // die Stütze, gleiches Bauteil verschmilzt (Kontur über diesen Schichten fehlt).
+        let (mut clip, mut merge): (Vec<Vec<Vec2>>, Vec<crate::plan::wall_poche::WallFootprint>) = (Vec::new(), Vec::new());
+        if zone == super::view_range::Zone::Cut {
+            use super::wall_columns::{band_rect, end_in_column, relation, Rel};
+            for w in p.walls.iter().filter(|w| w.floor_id == c.a.floor && c.shown(&w.category_code)) {
+                let (zb, zt) = p.wall_vertical_extent(w);
+                if range.classify(zb, zt) != super::view_range::Zone::Cut || end_in_column(w, &fp).is_none() {
+                    continue;
+                }
+                match relation(p, w, col) {
+                    Rel::Column => {}
+                    Rel::Wall => {
+                        let total = p.wall_thickness(w, 0.2);
+                        let ro = crate::joins::reference_offset(crate::model3d::wall_reference(w), total);
+                        clip.push(band_rect(w, ro - total / 2.0, ro + total / 2.0));
+                    }
+                    Rel::Merge(lo, hi) => {
+                        // Footprint ohne Verlängerung über die Achsenden, knapp schmaler (bündige Stützenseiten bleiben).
+                        let h = (hi - lo) / 2.0 - 1e-6;
+                        let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
+                        let l = dx.hypot(dy);
+                        if l > 2.0 * h && h > 0.0 {
+                            let (ux, uy) = (dx / l, dy / l);
+                            merge.push(crate::plan::wall_poche::wall_footprint([w.start.x + ux * h, w.start.y + uy * h], [w.end.x - ux * h, w.end.y - uy * h], 2.0 * h, (lo + hi) / 2.0));
+                        }
+                    }
+                }
+            }
+        }
+        let pieces: Vec<Vec<Vec2>> = if clip.is_empty() {
+            vec![fp]
+        } else {
+            let to = |q: &Vec<Vec2>| vec![q.iter().map(|v| [v.x, v.y]).collect::<Vec<[f64; 2]>>()];
+            crate::polygon_bool::difference(&[to(&fp)], &clip.iter().map(to).collect::<Vec<_>>())
+                .into_iter()
+                .map(|pl| pl[0].iter().map(|v| Vec2 { x: v[0], y: v[1] }).collect())
+                .collect()
+        };
+        for piece in pieces {
+            if merge.is_empty() {
+                out.push(polygon(piece, &fill, stroke, lw, hatch.clone(), greyed, None, Pick::Column(&col.id)));
+                continue;
+            }
+            let ring: Vec<[f64; 2]> = piece.iter().map(|v| [v.x, v.y]).collect();
+            out.push(polygon(piece, &fill, "none", 0.0, hatch.clone(), greyed, None, Pick::Column(&col.id)));
+            for [a, b] in crate::plan::wall_poche::ceiling_outline_lines(&ring, &[], &merge) {
+                out.push(Primitive::Line {
+                    a: Vec2 { x: a[0], y: a[1] },
+                    b: Vec2 { x: b[0], y: b[1] },
+                    cls: "column-outline".into(),
+                    weight_mm: lw,
+                    dash: None,
+                    zigzag: None,
+                    motif: None,
+                    color: Some(stroke.to_string()),
+                    drawing_id: None,
+                    opening_id: None,
+                    stair_id: None,
+                    greyed,
+                    opacity: None,
+                });
+            }
+        }
         if let Some(d) = range.restyle_dash(zone) {
             super::view_range::restyle(out, out_start, d);
         }

@@ -2828,9 +2828,30 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   `umriss_zwischen_aussparung_und_gehrung`, `niedrige_wand_spart_geschnittene_nicht_aus`,
   `diagonale_dreht_modulo_90_daemmung_voll`, `umriss_mit_runder_kappe`). Goldens neu (Plan/Schnitt/Ansicht: Kappen im
   SVG, Knoten; `komplex-model3d`: mehr verschnittene Enden). Geprüft: cargo test Kern, vitest, tsc, CLI-SVG angesehen
-  (Linux/Chromium). Offen: Wand endet an Stütze (keine Verschneidung Wand–Stütze, im Beispiel kein Fall); überlappende
-  kollineare Wände werden nicht vereinigt; Dämm-Muster (gerichtet) wechseln an der Gehrung die Richtung (gewollt), ihr
-  Muster endet dort gezackt; Y-Knoten: der dritte Ast endet an nur einer Fläche; nicht in der Tauri-App/Metal geprüft. · M
+  (Linux/Chromium). 6.11. Reste: (a) Y-Knoten: der dritte Ast endet an BEIDEN zugewandten Flächen des Eckpaars
+  (`joins.rs` `y_notch`, zweite Schnittlinie `WallCuts::start_cut2/end_cut2` je Seite der Ecke, im Grundriss
+  `wall_poche.rs` `knee_band`: Band/Umriss mit Knick, Polygone mit 4–6 Punkten, Ausgabe trägt die Punktzahl); vorher
+  überlappte er die andere Eckwand. (b) Kollineare Wände gleichen Typs im selben Band (`merge_collinear`): stumpf →
+  Stossfuge als Schnitt (keine Trennlinie), überlappend → spätere Wand an der früheren gestutzt, ganz enthalten →
+  `covered` (im Grundriss nicht gezeichnet); Stoss mitten auf einer dritten Wand bleibt „+"-Kreuzung. Gegenläufige
+  Wände mit unsymmetrischem Typ bleiben getrennt (Schichten gespiegelt = anderes Material). (c) Wand endet in einer
+  geschnittenen Stütze (`plan/wall_columns.rs`): Stütze prioritärer (`joinPriority`, ohne Bauteil immer) → Wand endet an
+  der Kontur (Schnitt durch die Eintrittspunkte beider Flächen, Ende ohne Umriss); gleiches Bauteil → zusätzlich keine
+  Stützenkontur über diesen Schichten (Linien `column-outline`); Wand prioritärer → Stütze um das Wandband beschnitten
+  (`domains.rs`). (d) Gerichtete Schichtmuster (Dämmschlange, Zickzack, Welle, Holzkreuz) mit Phase auf dem Ankerpunkt
+  der Schnittlinie und auf beide Enden gestreckter Teilung (`walls.rs` `anchor_band_pattern`, `hatch::band_period`),
+  gleich orientierte Enden drehen das Muster um 180° (`pattern_flip`, zweifarbig über die Kopplungen): die Läufe gehen
+  an der Gehrung/Stossfuge spiegelbildlich ineinander über statt gezackt zu enden. (e) Nebenbefund: Wand mit T-Stoss
+  (Schichtverschmelzung) am einen und Gehrung am anderen Ende — die Schichtbänder ignorierten die Gehrung (fehlender
+  Schicht-Schnitt statt Endschnitt), sichtbar im Musterhaus komplex; behoben. Tests `plan/wall_join_tests.rs` (je Fall ein
+  Testprojekt: Polygonzahl, keine Überlappung, ein Körper ohne Lücke, Umriss geschlossen, keine Linie durch eine Fläche,
+  Musterläufe an der Gehrung fortgesetzt). Goldens: `komplex-grundriss-*` (nur (e)). Geprüft: cargo test Kern/hatchgen,
+  vitest, tsc, CLI-SVG 1:50 mit Schraffur angesehen (Linux/Chromium). Offen: Y-Knoten ohne Schichtverschmelzung (der Ast
+  stösst stumpf, auch bei gleichem Kernmaterial); Bogenwände: kein Y-Knick, keine kollineare Vereinigung, kein
+  Stützenanschluss; runde Stütze: Sehne, die Linse unter der Stütze bleibt (von der Stützenfüllung verdeckt); Wand
+  breiter als die Stütze oder mitten durch die Stütze: unverändert; 3D/IFC kennen nur die erste Y-Linie und `covered`
+  nicht; Muster bei ungeraden Maschen gleich orientierter Enden nicht überall passend; nicht in der Tauri-App/Metal
+  geprüft. · M
 - ◐ **[142] Schatten in zwei Richtungen.** (5.11., Maintainer: Musterhaus komplex, EG 1:100 mit Sonnenstudie —
   grosser Schatten nach Norden, weitere Schattenstücke nach Süden zur Sonne hin.) Ursache: `sun.rs` verschob jeden
   Punkt um `k·z` auf die Bodenebene z = 0; Punkte unter ±0.00 (Untergeschoss-Wände, Stützmauer, Unterkanten im

@@ -135,6 +135,8 @@ fn encode_wall_poche(w: &Wall, layers: &[f64], total: f64, ref_off: f64, gaps: &
     b.extend_from_slice(layers);
     line_buf(&mut b, cuts.start_cut.as_ref());
     line_buf(&mut b, cuts.end_cut.as_ref());
+    line_buf(&mut b, cuts.start_cut2.as_ref());
+    line_buf(&mut b, cuts.end_cut2.as_ref());
     match &cuts.layer_cuts {
         Some(lc) => {
             b.push(1.0);
@@ -256,7 +258,10 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
         if let Some(s) = styles.get(&li) {
             return Ok(s.clone());
         }
-        let (hatch, fill) = layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, angle)?;
+        let (mut hatch, fill) = layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, angle)?;
+        if bend.is_none() {
+            anchor_band_pattern(&mut hatch, w, cuts, thick.get(li).copied().unwrap_or(0.0));
+        }
         styles.insert(li, (hatch.clone(), fill.clone()));
         Ok((hatch, fill))
     };
@@ -268,9 +273,10 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             let li = f[i + 2] as usize;
             let n_no = f[i + 3] as usize;
             let no_stroke = f[i + 4..i + 4 + n_no].to_vec();
-            let q = i + 4 + n_no;
-            let pts: Vec<Vec2> = (0..4).map(|j| v2(f[q + 2 * j], f[q + 2 * j + 1])).collect();
-            i = q + 8;
+            let n_pts = f[i + 4 + n_no] as usize;
+            let q = i + 5 + n_no;
+            let pts: Vec<Vec2> = (0..n_pts).map(|j| v2(f[q + 2 * j], f[q + 2 * j + 1])).collect();
+            i = q + 2 * n_pts;
             if let (Some(u), true) = (bend, art == 2.0) {
                 // [T2] Bogenwand: polare Schraffur — das Muster folgt der Krümmung stetig (Abwicklung
                 // im Uhrzeigersinn: Laufrichtung 0° bzw. 180° im Gegenuhrzeigersinn; gebogen wird das
@@ -329,6 +335,53 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
         }
     }
     Ok(())
+}
+
+/// [141] Gerichtete Schichtmuster (Dämmschlange, Zickzack, Welle, Holzkreuz) an den Wandenden
+/// ausrichten: die Phase sitzt auf dem Ankerpunkt der Schnittlinie (Gehrung, Stossfuge — beide Wände
+/// teilen dieselbe Linie und denselben Punkt), mit Schnitten an beiden Enden wird die Teilung leicht
+/// gestreckt, damit beide Enden passen. Die Muster sind um ihre Phase spiegelsymmetrisch, die Gehrung
+/// spiegelt die eine Wand auf die andere: die Läufe gehen an der Schnittlinie ineinander über (vorher
+/// endeten sie dort gezackt). Gleich orientierte Enden (Anfang an Anfang) drehen das Muster der einen
+/// Wand um 180° (`pattern_flip`).
+fn anchor_band_pattern(h: &mut HatchRender, w: &Wall, cuts: &WallCuts, layer_t: f64) {
+    use crate::hatch::Pattern as P;
+    let pat = match h.pattern {
+        HatchPattern::Insulation => P::Insulation,
+        HatchPattern::InsulationHard => P::InsulationHard,
+        HatchPattern::InsulationWave => P::InsulationWave,
+        HatchPattern::Timber => P::Timber,
+        _ => return,
+    };
+    if h.polar.is_some() || h.kind.is_some_and(|k| k != HatchStyleKind::Vector) || h.lines == Some(HatchStyleLines::Random) {
+        return;
+    }
+    let rot = -h.angle * std::f64::consts::PI / 180.0;
+    let u = v2(crate::jsnum::cos(rot), crate::jsnum::sin(rot));
+    let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
+    let l = dx.hypot(dy);
+    if !(l > 1e-9) || (u.x * dy - u.y * dx).abs() / l > 1e-6 {
+        return;
+    }
+    let Some(period) = crate::hatch::band_period(pat, layer_t, h.scale) else { return };
+    if cuts.pattern_flip {
+        h.angle += 180.0;
+    }
+    let anchor = |x: &joins::Line| v2(x.point.x, x.point.y);
+    match (&cuts.start_cut, &cuts.end_cut) {
+        (Some(s), Some(e)) => {
+            h.origin = Some(anchor(s));
+            let xe = ((e.point.x - s.point.x) * u.x + (e.point.y - s.point.y) * u.y).abs();
+            let k = xe / (xe / period).round().max(1.0) / period;
+            let scale = if h.scale > 1e-6 { h.scale } else { 1.0 };
+            // Nur kleine Streckung, und nur wo die Teilung linear mit der Skala geht.
+            if (0.75..=1.34).contains(&k) && crate::hatch::band_period(pat, layer_t, scale * k).is_some_and(|q| (q - period * k).abs() < 1e-9) {
+                h.scale = scale * k;
+            }
+        }
+        (Some(x), None) | (None, Some(x)) => h.origin = Some(anchor(x)),
+        (None, None) => {}
+    }
 }
 
 /// Schraffur und Füllung der Schicht `li` im Wandschnitt (Bauteil, Wand- und Kategorie-Übersteuerung).
@@ -717,7 +770,24 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
     let floor = p.floor(&c.a.floor);
     let cut_z = floor.and_then(|f| f.base_elevation).unwrap_or(0.0) + floor.and_then(|f| f.cut_height).unwrap_or(1.0);
     let range = super::view_range::ViewRange::of(p, &c.a.floor);
-    let cuts = plan_joins_by_zone(p, &walls, &range)?;
+    let mut cuts = plan_joins_by_zone(p, &walls, &range)?;
+    // [141] Geschnittene Wände, die in einer geschnittenen Stütze enden: an deren Kontur stutzen.
+    {
+        use super::view_range::Zone;
+        let cols = cut_columns(c, &range);
+        if !cols.is_empty() {
+            let idx: Vec<usize> = (0..walls.len()).filter(|&i| {
+                let (zb, zt) = p.wall_vertical_extent(walls[i].w);
+                range.classify(zb, zt) == Zone::Cut
+            }).collect();
+            let ws: Vec<&Wall> = idx.iter().map(|&i| walls[i].w).collect();
+            let mut sub: Vec<WallCuts> = idx.iter().map(|&i| cuts[i].clone()).collect();
+            super::wall_columns::trim_walls_at_columns(p, &ws, &cols, &mut sub);
+            for (k, i) in idx.into_iter().enumerate() {
+                cuts[i] = std::mem::take(&mut sub[k]);
+            }
+        }
+    }
     // Bei doppelten Wand-ids gewinnt in TS (Map) die letzte Verschneidung.
     let mut cut_by_id: HashMap<&str, &WallCuts> = HashMap::new();
     for (e, k) in walls.iter().zip(&cuts) {
@@ -803,7 +873,10 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             }
             None => {
                 let at = out.len();
-                wall_poche(c, out, e, &gaps, cut, greyed, lw, category, view_only, &reveals, None)?;
+                // [141] Ganz in einer kollinearen Wand gleichen Typs: deren Körper zeigt sie mit.
+                if !cut.covered {
+                    wall_poche(c, out, e, &gaps, cut, greyed, lw, category, view_only, &reveals, None)?;
+                }
                 cut_pockets(out, at, &pockets);
                 if reference_lines {
                     out.push(mk_line(w.start, w.end, "wall-axis", 0.13, Some(Some(vec![0.18, 0.06, 0.04, 0.06])), None, greyed, None));
@@ -843,6 +916,22 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         }
     }
     Ok(())
+}
+
+/// [141] Geschnittene, sichtbare Stützen des Geschosses mit ihrer Kontur.
+pub(super) fn cut_columns<'a>(c: &Ctx<'a>, range: &super::view_range::ViewRange) -> Vec<(&'a Column, Vec<Vec2>)> {
+    let p = c.p;
+    p.columns
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|k| k.floor_id == c.a.floor && c.shown(&k.category_code))
+        .filter(|k| {
+            let (zb, zt) = p.column_vertical_extent(k);
+            range.classify(zb, zt) == super::view_range::Zone::Cut
+        })
+        .map(|k| (k, crate::model3d::column_footprint(k)))
+        .collect()
 }
 
 /// [G3] Formöffnung im Grundriss: Umriss auf Schnitthöhe `cut_z` statt des umschreibenden Rechtecks
@@ -1070,7 +1159,7 @@ fn unroll_cuts(u: &mut Unroll, c: &WallCuts, lo: f64, hi: f64) -> WallCuts {
         start_side: lc.start_side.iter().map(|l| one(l, 0.0)).collect(),
         end_side: lc.end_side.iter().map(|l| one(l, len)).collect(),
     });
-    WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone() }
+    WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone(), ..Default::default() }
 }
 
 fn kv(p: Vec2) -> kernel2d::Vec2 {
