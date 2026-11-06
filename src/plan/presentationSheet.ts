@@ -97,7 +97,7 @@ export function presentationTemplate(project: Project): { template: ViewTemplate
   if (own) return { template: own, isNew: false };
   const std = (addedItems(standardsMergeOps(project), "viewTemplates") as ViewTemplate[]).find((t) => t.id === PRESENTATION_TEMPLATE_ID);
   return {
-    template: std ?? { id: PRESENTATION_TEMPLATE_ID, name: "Präsentation", detail: "mittel", mono: false, shadows: true, hiddenLines: false },
+    template: std ?? { id: PRESENTATION_TEMPLATE_ID, name: "Präsentation", detail: "mittel", mono: true, shadows: true, hiddenLines: false },
     isNew: true,
   };
 }

@@ -2286,6 +2286,30 @@ fn ring_bbox(r: &[[f64; 2]]) -> [f64; 4] {
     r.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
 }
 
+/// [140] Dämmschichten (Dämmschlange, Zickzack, Welle) unter [`THIN_INSULATION_PAPER_MM`] Papierdicke ab 1:75
+/// ohne Muster (nur Füllung und feine Fuge): die Schlange einer 3–4 cm Trittschalldämmung wäre in 1:100 ein
+/// dichter Zickzack-Balken. 1:50 (und `scale` 0) zeichnet sie immer.
+pub fn plain_thin_insulation(mut cuts: Vec<Cut>, scale: f64) -> Vec<Cut> {
+    if !(scale >= THIN_MERGE_FROM) || !scale.is_finite() {
+        return cuts;
+    }
+    for c in &mut cuts {
+        let Some(h) = c.hatch.as_mut() else { continue };
+        if !matches!(h.pattern, HatchPattern::Insulation | HatchPattern::InsulationHard | HatchPattern::InsulationWave) || h.kind.is_some() {
+            continue;
+        }
+        let half = ring_len(&c.pts) / 2.0;
+        let thick = if half > 0.0 { ring_area(&c.pts) / half } else { 0.0 };
+        if thick * 1000.0 / scale < THIN_INSULATION_PAPER_MM {
+            h.pattern = HatchPattern::None;
+        }
+    }
+    cuts
+}
+
+/// [140] Papierdicke (mm), unter der Dämmschichten ab 1:75 ohne Muster gezeichnet werden.
+pub const THIN_INSULATION_PAPER_MM: f64 = 0.5;
+
 /// [140] Dünne Schnitt-Schichten (Putz, Parkett, Trittschall, Folien) bei 1:`scale` zusammenfassen: eine Schicht
 /// unter [`walls::THIN_LAYER_PAPER_MM`] Papierdicke (Dicke ≈ Fläche / halber Umfang) übernimmt Füllung und
 /// Schraffur der dickeren Nachbarschicht desselben Bauteils, mit der sie die längste Kante teilt, und wird mit
@@ -2377,7 +2401,7 @@ pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Vi
 
 /// [`section_primitives`] beim Massstab 1:`scale` (dünne Schichten zusammengefasst, [`merge_thin_cuts`]).
 pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64) -> (Vec<Primitive>, [f64; 4]) {
-    let merged = merge_thin_cuts(&out.cuts, scale);
+    let merged = plain_thin_insulation(merge_thin_cuts(&out.cuts, scale), scale);
     let mut prims = Vec::new();
     let mut acc = Acc::new();
     let shown = |code: &str| vis.visible(code) && vis.render(code);
@@ -3135,6 +3159,23 @@ mod tests {
         let mut other = cuts.clone();
         other[0].source_id = Some("D2".into());
         assert!(merge_thin_cuts(&other, 100.0).iter().any(|c| c.fill.as_deref() == Some("#a")));
+    }
+
+    /// [140] Trittschall 4 cm: 1:100 (0.4 mm Papier) ohne Zickzack, 1:50 mit; dicke Dämmung bleibt.
+    #[test]
+    fn duenne_daemmung_ohne_muster_ab_1_100() {
+        let rect = |v0: f64, v1: f64| vec![[0.0, v1], [5.0, v1], [5.0, v0], [0.0, v0]];
+        let mk = |v0: f64, v1: f64, pattern: HatchPattern| {
+            let mut c = Cut::new(Kind::Slab, 0, rect(v0, v1));
+            c.hatch = Some(HatchRender { pattern, ..section_hatch() });
+            c
+        };
+        let cuts = vec![mk(0.0, 0.04, HatchPattern::Insulation), mk(0.1, 0.26, HatchPattern::Insulation), mk(0.3, 0.33, HatchPattern::InsulationHard), mk(0.4, 0.43, HatchPattern::Diagonal)];
+        let pat = |cs: &[Cut]| cs.iter().map(|c| c.hatch.as_ref().unwrap().pattern).collect::<Vec<_>>();
+        use HatchPattern as P;
+        assert_eq!(pat(&plain_thin_insulation(cuts.clone(), 50.0)), [P::Insulation, P::Insulation, P::InsulationHard, P::Diagonal], "1:50 alle Muster");
+        assert_eq!(pat(&plain_thin_insulation(cuts.clone(), 100.0)), [P::None, P::Insulation, P::None, P::Diagonal], "1:100");
+        assert_eq!(pat(&plain_thin_insulation(cuts, 0.0)), [P::Insulation, P::Insulation, P::InsulationHard, P::Diagonal]);
     }
 
     #[test]

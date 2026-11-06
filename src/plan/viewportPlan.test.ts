@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { collectVisibleCodes } from "../model/types";
 import { generatePlan } from "./generatePlan";
-import { viewportLevelPlan } from "./viewportPlan";
+import { snapshotMono, viewportLevelPlan } from "./viewportPlan";
 
 const p = buildComplexSampleProject();
 const codes = collectVisibleCodes(p.layers);
@@ -23,7 +23,30 @@ describe("viewportLevelPlan", () => {
 
   it("Geschoss: wie bisher generatePlan", async () => {
     const plan = await viewportLevelPlan(p, "eg", codes, "mittel", 100);
-    expect(plan.primitives.length).toBe(generatePlan(p, "eg", codes, undefined, "mittel", false, false, true, 100).primitives.length);
+    expect(plan.primitives.length).toBe(generatePlan(p, "eg", codes, undefined, "mittel", false, true, true, 100).primitives.length);
+  });
+
+  // [140] Blatt und PDF folgen dem Tusche-Standard der App: keine bunten Farben (Ziegelrot …), ausser
+  // die Vorlage des Ausschnitts wählt Farbe (`mono: false`).
+  it("Tusche als Standard, Farbe nur auf Wunsch", async () => {
+    const bunt = (plan: { primitives: unknown[] }) => {
+      const hex = JSON.stringify(plan.primitives).match(/#[0-9a-fA-F]{6}\b/g) ?? [];
+      return hex.filter((h) => {
+        const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+        return Math.max(r, g, b) - Math.min(r, g, b) > 24;
+      });
+    };
+    expect(bunt(await viewportLevelPlan(p, "ansicht-sued", codes, "mittel", 100))).toEqual([]);
+    expect(bunt(await viewportLevelPlan(p, "ansicht-sued", codes, "mittel", 100, false, false)).length).toBeGreaterThan(0);
+  });
+
+  it("snapshotMono: Vorlage mit mono: false = farbig, sonst Tusche", () => {
+    const q = { ...p, viewTemplates: [{ id: "f", name: "F", mono: false }, { id: "t", name: "T", mono: true }] };
+    const snap = { templateId: undefined as string | undefined };
+    expect(snapshotMono(q, snap)).toBe(true);
+    expect(snapshotMono(q, { templateId: "f" })).toBe(false);
+    expect(snapshotMono(q, { templateId: "t" })).toBe(true);
+    expect(snapshotMono(q, { templateId: "weg" })).toBe(true);
   });
 
   it("unbekannte Ebene: leer, kein Fehler", async () => {

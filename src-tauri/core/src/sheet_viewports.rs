@@ -62,8 +62,16 @@ fn detail_of(d: DetailLevel) -> Detail {
     }
 }
 
+/// [140] Tusche (Schwarz-Weiss) im Viewport: Standard wie in der App; Farbe nur, wenn die Ansichtsvorlage
+/// des Ausschnitts ausdrücklich `mono: false` setzt (z. B. „Präsentation" farbig gewählt).
+pub fn snapshot_mono(p: &Project, snap: &ViewSnapshot) -> bool {
+    let Some(id) = snap.template_id.as_deref() else { return true };
+    let t = p.view_templates.iter().flatten().find(|t| t.id == id);
+    t.and_then(|t| t.mono) != Some(false)
+}
+
 /// Plan-Argumente eines Viewports (wie `ViewportPlanSvg`: projektglobal, nicht für den Druck).
-pub fn viewport_args(snap: &ViewSnapshot, scale: f64) -> PlanArgs {
+pub fn viewport_args(snap: &ViewSnapshot, scale: f64, mono: bool) -> PlanArgs {
     let (detail, auto_coarse) = crate::plan::domains::effective_detail(detail_of(snap.detail), scale);
     PlanArgs {
         floor: snap.active_level_id.clone(),
@@ -75,7 +83,7 @@ pub fn viewport_args(snap: &ViewSnapshot, scale: f64) -> PlanArgs {
         scale,
         for_print: false,
         compact: false,
-        mono: false,
+        mono,
         sun_when: None,
         auto_coarse,
     }
@@ -126,7 +134,7 @@ pub fn snapshot_buf(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: Optio
             Some(s) => section_view_buf(p, &DrawingLevel { shadows: Some(s), ..l.clone() }, snap, scale),
             None => section_view_buf(p, l, snap, scale),
         },
-        _ => plan_domains_buf(p, &viewport_args(snap, scale)).ok(),
+        _ => plan_domains_buf(p, &viewport_args(snap, scale, snapshot_mono(p, snap))).ok(),
     }
 }
 
@@ -159,7 +167,8 @@ fn candidate_codes(p: &Project) -> HashSet<String> {
 /// TS) fehlen im Schnitt — der Kern hat sie hier nicht.
 fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scale: f64) -> Option<Vec<u8>> {
     use crate::plan::prim::Primitive;
-    let args = viewport_args(snap, scale);
+    let mono = snapshot_mono(p, snap);
+    let args = viewport_args(snap, scale, mono);
     let invisible: Vec<String> = candidate_codes(p).into_iter().filter(|c| !args.show.contains(c)).collect();
     let text = serde_json::json!({
         "level": serde_json::to_value(level).ok()?,
@@ -170,9 +179,9 @@ fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scal
     })
     .to_string();
     let raw = if level.kind == DrawingLevelKind::Section {
-        crate::plan::section::section_plan_buf(p, &[0.0, 1.0, 0.0], &text)
+        crate::plan::section::section_plan_buf(p, &[f64::from(u8::from(mono)), 1.0, 0.0], &text)
     } else {
-        crate::plan::elevation::elevation_plan_buf(p, &[0.0, if level.shadows.unwrap_or(false) { 1.0 } else { 0.0 }, scale], &text)
+        crate::plan::elevation::elevation_plan_buf(p, &[f64::from(u8::from(mono)), if level.shadows.unwrap_or(false) { 1.0 } else { 0.0 }, scale], &text)
     }
     .ok()?;
     let rv = crate::plan::buf::View::parse(&raw)?;
@@ -385,6 +394,22 @@ pub(crate) mod tests {
         assert!((x - 95.0).abs() < 1e-9 && (y - 70.0).abs() < 1e-9);
     }
 
+    /// [140] Viewports zeichnen in Tusche wie die App; Farbe nur über die Vorlage (`mono: false`).
+    #[test]
+    fn viewport_tusche_ausser_vorlage_farbig() {
+        let mut v = json();
+        v["viewTemplates"] = serde_json::json!([{"id": "farbig", "name": "F", "mono": false}, {"id": "tusche", "name": "T", "mono": true}, {"id": "offen", "name": "O"}]);
+        let mut p: Project = serde_json::from_value(v).unwrap();
+        let mut snap = p.view_snapshots.as_ref().unwrap()[0].clone();
+        assert!(snapshot_mono(&p, &snap), "ohne Vorlage: Tusche");
+        for (id, mono) in [("farbig", false), ("tusche", true), ("offen", true), ("fehlt", true)] {
+            snap.template_id = Some(id.into());
+            assert_eq!(snapshot_mono(&p, &snap), mono, "{id}");
+        }
+        p.view_templates = None;
+        assert!(snapshot_mono(&p, &snap));
+    }
+
     /// [100] Deckenspiegel-Viewport: derselbe Inhalt wie die Deckenspiegel-Ebene (Wände, Untersicht).
     #[test]
     fn deckenspiegel_viewport() {
@@ -400,7 +425,7 @@ pub(crate) mod tests {
         assert_eq!(maps.len(), 1);
         assert_eq!(maps[0].scale, 50.0);
         let snap = &p.view_snapshots.as_ref().unwrap()[1];
-        let direct = crate::plan::domains::plan_domains(&p, &viewport_args(snap, 50.0)).unwrap();
+        let direct = crate::plan::domains::plan_domains(&p, &viewport_args(snap, 50.0, snapshot_mono(&p, snap))).unwrap();
         assert!(!direct.walls.is_empty() && !direct.ceilings.is_empty(), "Wände und Untersicht im Viewport");
         let b = crate::plan::buf::View::parse(&maps[0].buf).unwrap().bounds().unwrap();
         assert!(b[2] - b[0] > 9.9 && b[3] - b[1] > 5.9, "Ausmass der Decke: {b:?}");

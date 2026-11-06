@@ -73,26 +73,32 @@ pub fn free_color_palette() -> Vec<String> {
     out
 }
 
-/// 255 Stifte + Stile der Standardpalette (`generateStandardPenPalette`): `(pens, styles)`.
+/// [140] Strichstärken-Rangfolge der Plandarstellung bei 1:100 (mm): Schnittkante Wände 0.25, Decken/Öffnungen
+/// 0.18, Symbole/Ansicht 0.13, Schraffur/Bemassung 0.1, Haarlinie 0.02.
+pub const PEN_WEIGHT_STEPS: [f64; 5] = [0.25, 0.18, 0.13, 0.1, 0.02];
+
+/// 255 Stifte + Stile der Standardpalette (`generateStandardPenPalette`): `(pens, styles)`. Strichstärken nach
+/// [`PEN_WEIGHT_STEPS`]: je Farbton die dunkelste Stufe am stärksten (wie die Plan-Rangfolge), Schwarz 0.25.
 pub fn standard_pen_palette() -> (Vec<Value>, Map<String, Value>) {
     let mut pens = Vec::with_capacity(255);
     let mut styles = Map::new();
-    let mut add = |id: u32, name: String, color: String| {
+    let mut add = |id: u32, name: String, color: String, weight: f64| {
         pens.push(json!({"id": id.to_string(), "name": name}));
-        styles.insert(id.to_string(), json!({"color": color, "weight": PEN_FALLBACK_WEIGHT}));
+        styles.insert(id.to_string(), json!({"color": color, "weight": weight}));
     };
-    for (id, name, color) in [
-        (1, "Rot", "#ff0000"),
-        (2, "Gelb", "#ffff00"),
-        (3, "Grün", "#00ff00"),
-        (4, "Cyan", "#00ffff"),
-        (5, "Blau", "#0000ff"),
-        (6, "Magenta", "#ff00ff"),
-        (7, "Schwarz", "#000000"),
-        (8, "Dunkelgrau", "#414141"),
-        (9, "Grau", "#808080"),
+    let [w25, w18, w13, w10, w02] = PEN_WEIGHT_STEPS;
+    for (id, name, color, w) in [
+        (1, "Rot", "#ff0000", w18),
+        (2, "Gelb", "#ffff00", w18),
+        (3, "Grün", "#00ff00", w18),
+        (4, "Cyan", "#00ffff", w18),
+        (5, "Blau", "#0000ff", w18),
+        (6, "Magenta", "#ff00ff", w18),
+        (7, "Schwarz", "#000000", w25),
+        (8, "Dunkelgrau", "#414141", w13),
+        (9, "Grau", "#808080", w10),
     ] {
-        add(id, name.to_string(), color.to_string());
+        add(id, name.to_string(), color.to_string(), w);
     }
     let mut id = 10;
     for hue in 0..24 {
@@ -102,12 +108,13 @@ pub fn standard_pen_palette() -> (Vec<Value>, Map<String, Value>) {
             let level = (step % 5) as f64;
             let l = 0.75 - level * 0.14;
             let s = if saturated { 0.85 } else { 0.4 };
-            add(id, format!("Stift {id}"), hsl_to_hex(h, s, l));
+            // Stufe 0 (hell) … 4 (dunkel): dunkler = stärker.
+            add(id, format!("Stift {id}"), hsl_to_hex(h, s, l), PEN_WEIGHT_STEPS[4 - (step % 5)]);
             id += 1;
         }
     }
-    for (gid, color) in [(250, "#333333"), (251, "#5b5b5b"), (252, "#848484"), (253, "#adadad"), (254, "#d6d6d6"), (255, "#ffffff")] {
-        add(gid, format!("Grau {gid}"), color.to_string());
+    for (gid, color, w) in [(250, "#333333", w25), (251, "#5b5b5b", w18), (252, "#848484", w13), (253, "#adadad", w10), (254, "#d6d6d6", w02), (255, "#ffffff", w18)] {
+        add(gid, format!("Grau {gid}"), color.to_string(), w);
     }
     (pens, styles)
 }
@@ -342,6 +349,13 @@ mod tests {
         assert_eq!(styles.len(), 255);
         assert_eq!(styles["7"]["color"], "#000000");
         assert_eq!(pens[9]["name"], "Stift 10");
+        // [140] Stärken nach der Plan-Rangfolge, alle fünf Stufen vertreten.
+        assert_eq!(styles["7"]["weight"], 0.25);
+        assert_eq!((styles["10"]["weight"].as_f64(), styles["14"]["weight"].as_f64()), (Some(0.02), Some(0.25)));
+        for w in PEN_WEIGHT_STEPS {
+            assert!(styles.values().filter(|s| s["weight"].as_f64() == Some(w)).count() >= 10, "{w}");
+        }
+        assert!(styles.values().all(|s| PEN_WEIGHT_STEPS.contains(&s["weight"].as_f64().unwrap())));
     }
 
     #[test]

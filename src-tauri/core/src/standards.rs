@@ -268,11 +268,12 @@ pub fn roof_types() -> Vec<Value> {
 
 /// Alle Standard-Ressourcen je Projekt-Liste, in Abhängigkeitsreihenfolge.
 /// [66] Ansichtsvorlagen für Pläne „mit einem Klick" (an Geschoss/Schnitt/Ansicht binden oder anwenden):
-/// Präsentation (farbig, Schatten, ohne Referenz- und Konstruktionslinien), Eingabe 1:100 und Ausführung 1:50
+/// Präsentation (Tusche wie alle Pläne [140], Farbe über `mono: false` wählbar; Schatten, ohne Referenz- und
+/// Konstruktionslinien), Eingabe 1:100 und Ausführung 1:50
 /// (schwarz-weiss nach SIA 400).
 pub fn view_templates() -> Vec<Value> {
     vec![
-        json!({"id": "std-vt-praesentation", "name": "Präsentation", "detail": "mittel", "mono": false, "shadows": true, "hiddenLines": false,
+        json!({"id": "std-vt-praesentation", "name": "Präsentation", "detail": "mittel", "mono": true, "shadows": true, "hiddenLines": false,
                "layerVisibility": {"90": false, "99": false}}),
         json!({"id": "std-vt-eingabe-100", "name": "Eingabeplan 1:100", "detail": "mittel", "scaleDenominator": 100, "mono": true, "shadows": false,
                "layerVisibility": {"99": false}}),
