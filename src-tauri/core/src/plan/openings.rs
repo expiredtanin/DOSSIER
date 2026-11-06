@@ -85,8 +85,11 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
     let (sx, sy, ex, ey, total, ref_off) = (r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?);
     let (position, width) = (r.num()?, r.num()?);
     let is_door = r.num()? != 0.0;
-    let detail = match r.num()? as i64 {
-        0 => Detail::Grob,
+    // [140] Code −1 = Übersicht (grob ab 1:500): Türen ohne Aufschlag-Bogen.
+    let detail_code = r.num()? as i64;
+    let overview = detail_code < 0;
+    let detail = match detail_code {
+        i64::MIN..=0 => Detail::Grob,
         1 => Detail::Mittel,
         _ => Detail::Fein,
     };
@@ -185,7 +188,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             };
             for leaf in leaves(&door) {
                 o.line(C_LEAF, hair, 0.0, 0.0, leaf.hinge, leaf.open_end);
-                if detail != Detail::Grob {
+                if !overview {
                     o.arc(hair, leaf.hinge, leaf.closed_end, leaf.open_end, leaf.radius);
                 }
             }
@@ -194,7 +197,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
                 let other = DoorParams { swing_right: !door.swing_right, ..door };
                 for leaf in leaves(&other) {
                     o.line(C_LEAF, hair, 0.0, 3.0, leaf.hinge, leaf.open_end);
-                    if detail != Detail::Grob {
+                    if !overview {
                         // Bögen laufen gegen den Uhrzeigersinn von `from` nach `to`: kurzen Bogen wählen.
                         let (a, b) = (sub(leaf.closed_end, leaf.hinge), sub(leaf.open_end, leaf.hinge));
                         let (from, to) = if a.x * b.y - a.y * b.x >= 0.0 { (leaf.closed_end, leaf.open_end) } else { (leaf.open_end, leaf.closed_end) };
@@ -257,14 +260,16 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
         }
         None => (ref_off - total / 2.0, ref_off + total / 2.0),
     };
-    if has_type {
+    if has_type && detail != Detail::Grob {
         let zone = if win_inset_side == 1.0 { (f_hi, ref_off + total / 2.0) } else { (ref_off - total / 2.0, f_lo) };
         rebate_nibs(&mut o, &w, position, width, rebate, Some(zone));
     }
     if detail == Detail::Grob {
-        let idx = sym.glass_lines.len() / 2;
-        if let Some(g) = sym.glass_lines.get(idx).or_else(|| sym.glass_lines.first()) {
-            o.line(C_GLASS, sash_w, 4.0, 0.0, g.0, g.1);
+        // [140] Grob: zwei Striche quer durch die Öffnung in den Wandfluchten (kein Rahmen, Glas, Bank).
+        if let Some((js, je)) = opening_jambs(&w, position, width) {
+            for off in [ref_off - total / 2.0, ref_off + total / 2.0] {
+                o.line(C_WINDOW_FRAME, frame_hair, 2.0, 0.0, add(js, scale(wn, off)), add(je, scale(wn, off)));
+            }
         }
     } else {
         o.polygon(1.0, frame_view_w, 3.0, &sym.frame);
@@ -586,9 +591,13 @@ mod tests {
         t
     }
 
+    /// [140] Grob (auch automatisch ab 1:200): Tür mit Blatt UND Aufschlag-Bogen; Übersicht (1:500, Code −1)
+    /// nur das Blatt.
     #[test]
-    fn tuer_grob_hat_pick_blatt_und_zwei_sturzlinien() {
+    fn tuer_grob_hat_pick_blatt_bogen_und_zwei_sturzlinien() {
         let t = tags(&plan_opening(&input(true, 0.0, false, &[])));
+        assert_eq!(t, vec![1.0, 2.0, 3.0, 2.0, 2.0]);
+        let t = tags(&plan_opening(&input(true, -1.0, false, &[])));
         assert_eq!(t, vec![1.0, 2.0, 2.0, 2.0]);
     }
 
@@ -599,10 +608,24 @@ mod tests {
         assert_eq!(t.len(), 1 + 1 + 1 + 2 + 2);
     }
 
+    /// [140] Fenster grob: nur zwei Striche quer durch die Öffnung in den Wandfluchten (kein Rahmen, kein Glas,
+    /// keine Bank, kein Anschlag) — auch mit Fenstertyp, Anschlag und Bank.
     #[test]
-    fn fenster_grob_hat_eine_glaslinie() {
-        let t = tags(&plan_opening(&input(false, 0.0, false, &[])));
-        assert_eq!(t, vec![1.0, 2.0]);
+    fn fenster_grob_zwei_striche_in_der_wandflucht() {
+        let sashes = [[0.0, 1.0, NAN, NAN, 1.0], [0.0, 1.0, NAN, NAN, 1.0]];
+        for (has_type, sa) in [(false, &[][..]), (true, &sashes[..])] {
+            let mut b = input(false, 0.0, has_type, sa);
+            b[DETAILS] = 0.04; // Anschlag
+            b[DETAILS + 1] = 3.0; // Bank beidseitig
+            let f = plan_opening(&b);
+            assert_eq!(tags(&f), vec![1.0, 2.0, 2.0], "Lücke + zwei Striche");
+            let mut ys: Vec<f64> = lines(&f).iter().map(|l| {
+                assert!((l.3 - l.5).abs() < 1e-9 && (l.2 - 1.0).abs() < 1e-9 && (l.4 - 1.9).abs() < 1e-9, "quer durch die Öffnung: {l:?}");
+                l.3
+            }).collect();
+            ys.sort_by(f64::total_cmp);
+            assert!((ys[0] + 0.15).abs() < 1e-9 && (ys[1] - 0.15).abs() < 1e-9, "Wandfluchten: {ys:?}");
+        }
     }
 
     #[test]
@@ -751,8 +774,12 @@ mod tests {
         assert_eq!(count_cls(&f, C_GLASS), 2);
         b[KIND] = 3.0;
         assert_eq!(arcs(&plan_opening(&b)), 2);
-        // Grob: keine Bögen, aber beide Blätter.
+        // Grob: Bögen und beide Blätter; Übersicht (1:500): keine Bögen.
         b[9] = 0.0;
+        let f = plan_opening(&b);
+        assert_eq!(arcs(&f), 2);
+        assert_eq!(count_cls(&f, C_LEAF), 2);
+        b[9] = -1.0;
         let f = plan_opening(&b);
         assert_eq!(arcs(&f), 0);
         assert_eq!(count_cls(&f, C_LEAF), 2);

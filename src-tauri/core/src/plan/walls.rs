@@ -388,6 +388,8 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     ];
     let b01 = |b: bool| if b { 1.0 } else { 0.0 };
     let detail_code = match detail {
+        // [140] Übersicht (1:500 und kleiner): Türen ohne Aufschlag-Bogen.
+        Detail::Grob if c.a.scale >= super::domains::OVERVIEW_FROM => -1.0,
         Detail::Grob => 0.0,
         Detail::Mittel => 1.0,
         Detail::Fein => 2.0,

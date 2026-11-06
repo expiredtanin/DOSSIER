@@ -187,13 +187,14 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                             out.push(String::new());
                             stitch.add(attrs.clone(), run, out.len() - 1);
                         }
-                        continue;
+                    } else {
+                        out.push(format!(
+                            "<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\"{}/>",
+                            num(f[2] * mm_to_m),
+                            op(greyed, opacity(4))
+                        ));
                     }
-                    out.push(format!(
-                        "<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\"{}/>",
-                        num(f[2] * mm_to_m),
-                        op(greyed, opacity(4))
-                    ));
+                    // [140] Schraffur auch bei Kantenläufen (Wandschichten mit offenen Kanten).
                     if o.hatch && f[3] >= 0.0 {
                         let (_, h, color) = hatches.get(whole(f[3])?)?.clone();
                         if h.pattern != Pattern::None && h.pattern != Pattern::Solid && h.kind != hatch::HatchKind::Image {

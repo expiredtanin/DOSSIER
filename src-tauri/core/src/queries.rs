@@ -240,14 +240,16 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             let a = domains::PlanArgs::parse(args[0], text)?;
             Ok(drawings::underlay_groups(&domains::Ctx::new(p, &a)).iter().flat_map(|v| v.to_le_bytes()).collect())
         }
-        // Linien der Zeichnungen `[Massstab, gedimmt, Index…]` (Index in `drawings2d`), mit Override-Regeln.
+        // Linien der Zeichnungen `[Massstab, Schalter, Index…]` (Index in `drawings2d`), mit Override-Regeln;
+        // Schalter: Bit 1 = gedimmt, Bit 2 = Schwarz-Weiss ([140]).
         ("drawingLines", n) if n >= 2 => {
             let mut a = domains::PlanArgs::parse(1.0, "{}")?;
             a.scale = args[0];
             let c = domains::Ctx::new(p, &a);
+            let flags = if args[1].is_finite() && args[1] >= 0.0 { args[1] as u32 } else { 0 };
             // Strichstärken nach Massstab wie im übrigen Plan.
-            let post = Some(crate::plan::extras::Post { mono: false, lw: crate::plan::extras::line_weight_factor(p, args[0]), sketch: 0.0 }).filter(crate::plan::extras::Post::active);
-            buf_with(post, |sink| drawings::underlay_lines(&c, &args[2..], args[1] != 0.0, sink))
+            let post = Some(crate::plan::extras::Post { mono: flags & 2 != 0, lw: crate::plan::extras::line_weight_factor(p, args[0]), sketch: 0.0 }).filter(crate::plan::extras::Post::active);
+            buf_with(post, |sink| drawings::underlay_lines(&c, &args[2..], flags & 1 != 0, sink))
         }
         // Primitive einer Zeichnung (JSON in `text`, ohne Override-Regeln) beim Massstab `args[0]`.
         ("drawingPrims", 1) => {

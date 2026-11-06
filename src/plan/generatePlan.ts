@@ -243,11 +243,11 @@ export function generatePlan(
   /**
    * Kompakte Linien-Unterlage statt dauerhafter 'line'-Primitive (s.
    * {@link UnderlayGroup}) — NUR für die interaktive GPU-Ansicht. Aus bei
-   * Export/mono (reiner Schwarz-Weiss-Plan ohne Unterlage).
+   * Export/Druck.
    */
   compactUnderlay = false,
 ): Plan {
-  const compact = compactUnderlay && !mono && !forPrint;
+  const compact = compactUnderlay && !forPrint;
   // Blatt-Ebene eines Layouts (Papier 1:1): ohne projektglobale Zutaten (Kontext, Luftbilder,
   // Schnittlinien, Schatten, Baurecht) — die gehören zum Modell, nicht aufs Papier.
   if (project.drawingLevels.some((l) => l.id === floorId && l.layoutId)) includeGlobal = false;
@@ -275,12 +275,12 @@ export function generatePlan(
   // Kompakte Linien-Unterlage (s. {@link UnderlayGroup}): die Linien einfacher Zeichnungen fehlen
   // im Puffer und entstehen erst bei Bedarf, PRO KATEGORIE gruppiert — das Ein-/Ausblenden einer
   // Ebene entfernt dann nur deren Gruppe, die Chunks aller anderen Ebenen bleiben gültig.
-  const underlay = compact ? underlayGroups(project, dom, scaleDenominator) : [];
+  const underlay = compact ? underlayGroups(project, dom, scaleDenominator, mono) : [];
 
   // Georeferenzierte Luftbilder als Hintergrund-Ebenen (nur interaktive Ansicht,
-  // nicht Teil der Vektor-Primitive) — im Mono-Modus ausgeblendet (reiner S/W-Plan).
+  // nicht Teil der Vektor-Primitive) — auch in Schwarz-Weiss, dem Standard ([140]).
   // Projektglobal (nicht je Geschoss), s. `includeGlobal` oben.
-  const backgroundImages: PlanImage[] = !includeGlobal || mono
+  const backgroundImages: PlanImage[] = !includeGlobal
     ? []
     : (project.context ?? [])
         .filter((o): o is Extract<ContextObject, { type: "image" }> => o.type === "image")
@@ -599,7 +599,7 @@ function readPlanMulti(
  * Domäne der 2D-Zeichnungen): je (gedimmt, Ebene) die Zeichnungen, deren Linien der Plan-Puffer
  * nicht enthält. `build` holt die Linien einer Teilmenge bei Bedarf (`drawingLines`).
  */
-function underlayGroups(project: Project, dom: DomainPrims, scaleDenominator: number): UnderlayGroup[] {
+function underlayGroups(project: Project, dom: DomainPrims, scaleDenominator: number, mono: boolean): UnderlayGroup[] {
   const bytes = documentFor(project).queryBin("drawingUnderlay", [1], dom.args);
   if (bytes.byteLength % 8 !== 0) throw new Error("drawingUnderlay: unerwartete Antwort");
   const f = new Float64Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
@@ -614,7 +614,7 @@ function underlayGroups(project: Project, dom: DomainPrims, scaleDenominator: nu
     return index.get(d);
   };
   // Alles, wovon `build` abhängt: ändert sich eine davon, werden die GPU-Chunks neu erzeugt.
-  const ctx = [project.lineStyles, project.hatches, layersStyleSig(project.layers), scaleDenominator, project.overrideRules, project.scaleLineWeights];
+  const ctx = [project.lineStyles, project.hatches, layersStyleSig(project.layers), scaleDenominator, project.overrideRules, project.scaleLineWeights, mono];
   const out: UnderlayGroup[] = [];
   let k = 1;
   for (let g = 0; g < f[0]; g++) {
@@ -624,7 +624,8 @@ function underlayGroups(project: Project, dom: DomainPrims, scaleDenominator: nu
     for (let i = 0; i < n; i++) drawings[i] = all[f[k + 2 + i]];
     k += 2 + n;
     const buildBuf = (list: Drawing2D[]): DecodedPlanBuf => {
-      const args = [scaleDenominator, catGreyed ? 1 : 0];
+      // Schalter: Bit 1 = gedimmt, Bit 2 = Schwarz-Weiss ([140]).
+      const args = [scaleDenominator, (catGreyed ? 1 : 0) + (mono ? 2 : 0)];
       for (const d of list) {
         const i = indexOf(d);
         if (i !== undefined) args.push(i);

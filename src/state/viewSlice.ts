@@ -41,8 +41,8 @@ export interface ViewSlice {
   // nicht im Projekt) und der Abstand je Geschoss in Metern.
   explode3d: boolean;
   explode3dGap: number;
-  // Farb-Modus des Grundrisses: "color" = Kategorie-/Element-Farben (heute),
-  // "mono" = reiner Schwarz-Weiss-Plan (Tinte, keine Farb-/Schraffurfarben).
+  // Farb-Modus von Grundriss/Schnitt/Ansicht: "mono" = Tusche (Standard, [140]: Schwarz/Grau, bunte
+  // Farben werden Tinte bzw. Papier, Grautöne wie Schatten bleiben), "color" = „Farbig" (Materialfarben).
   planColorMode: "color" | "mono";
   // Wand-Achslinien im Grundriss.
   referenceLines: boolean;
@@ -97,7 +97,7 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     grid3dVisible: true,
     explode3d: false,
     explode3dGap: 3,
-    planColorMode: "color",
+    planColorMode: "mono",
     referenceLines: false,
     lineMode: "display",
     scaleDenominator: 100,
