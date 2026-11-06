@@ -839,6 +839,8 @@ fn opening_selection(lk: &Lookup, o: &Value) -> Result<J, String> {
         .raw("hostAngle", o, "hostAngle")
         .o("hostWallName", floor.map_or_else(|| field(o, "hostWallId").cloned(), |f| Some(Value::from(field(f, "name").map_or("undefined".into(), js_text)))))
         .raw("position", o, "position")
+        // Länge der (geraden) Wirtswand ([144]): Objekt-Info rechnet „Abstand ab Wandende“ und klemmt.
+        .o("wallLength", wall.and_then(straight_len).map(js_num))
         .raw("width", o, "width")
         .raw("height", o, "height")
         .raw("sillHeight", o, "sillHeight")
@@ -868,6 +870,16 @@ fn opening_selection(lk: &Lookup, o: &Value) -> Result<J, String> {
         .v("bbox", bbox_value(bb))
         .v("opening", info)
         .done())
+}
+
+/// Achslänge einer geraden Wand; `None` bei Bogenwänden (dort ist `position` keine Sehnenlänge).
+fn straight_len(w: &Value) -> Option<f64> {
+    if field(w, "bulge").and_then(Value::as_f64).is_some_and(|b| b.abs() > 1e-12) {
+        return None;
+    }
+    let (s, e) = (xy(field(w, "start")?), xy(field(w, "end")?));
+    let len = crate::jsmath::hypot2(e.0 - s.0, e.1 - s.1);
+    len.is_finite().then_some(len)
 }
 
 /// Achsversatz der Schichtstapelung (`wallReferenceOffset`): freier Versatz (auf die Dicke geklemmt),
@@ -1368,7 +1380,12 @@ mod tests {
         // Unbekannter Wandtyp: dieselbe Meldung wie TS.
         let mut bad = r.clone();
         bad["walls"][0]["wallTypeId"] = json!("x");
-        assert_eq!(sel(&bad, json!({"wallIds": ["w"]})).unwrap_err(), "Unbekannter Wandtyp: x");
+        assert_eq!(sel(&bad, json!({"wallIds": ["w"]})).unwrap_err(), "Unbekannter Wandtyp: x");        // [144] Öffnung: Länge der Wirtswand für „Abstand ab Wandende“ (Bogenwand: keine).
+        let o = sel(&r, json!({"openingId": "o"})).unwrap();
+        assert_eq!(o["opening"]["wallLength"], json!(5));
+        let mut arc = r.clone();
+        arc["walls"][0]["bulge"] = json!(0.4);
+        assert!(sel(&arc, json!({"openingId": "o"})).unwrap()["opening"].get("wallLength").is_none());
     }
 
     #[test]

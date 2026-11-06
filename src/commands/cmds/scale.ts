@@ -95,7 +95,7 @@ export const scaleCommand: Command = {
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as ScState;
     if (s.phase === "done") return idle();
-    if (!hasTransformSelection(ctx.selection)) {
+    if (!hasTransformSelection(ctx.selection, "scale")) {
       return [{ phase: "done", lastPoint: null } as ScDone, { draft: null, done: true }];
     }
 

@@ -84,6 +84,7 @@ describe("Selection", () => {
       roofIds: ["r"],
       stairIds: [],
       roomIds: [],
+      openingIds: [],
     });
     expect(toTransformSelection(s)).toEqual(c);
   });

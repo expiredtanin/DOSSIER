@@ -93,7 +93,7 @@ export function makeTransformCommand(op: TransformCmdOp, labelKey: TranslationKe
 
   const input = (state: CommandState, inp: CmdInput, ctx: CommandContext): [CommandState, CommandResult] => {
     const s = state as TrState;
-    if (s.phase === "done" || !hasTransformSelection(ctx.selection)) return done();
+    if (s.phase === "done" || !hasTransformSelection(ctx.selection, op)) return done();
     if (inp.kind === "option") {
       const mode = MODES.find((m) => m.id === inp.id);
       if (!mode) return [s, { draft: s.cursor ? preview(s, s.cursor, ctx).draft : null }];

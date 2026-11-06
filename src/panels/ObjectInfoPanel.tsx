@@ -1650,6 +1650,14 @@ export function OpeningSection({
         value={opening.position}
         onCommit={(v) => host.onSetOpeningPosition(v)}
       />
+      {/* [144] Gegenstück: Abstand des zweiten Pfostens vom Wandende (nur gerade Wand). */}
+      {opening.wallLength != null && (
+        <DimensionField
+          label={t("objinfo.opening.positionEnd")}
+          value={opening.wallLength - opening.position - opening.width}
+          onCommit={(v) => host.onSetOpeningPosition(opening.wallLength! - v - opening.width)}
+        />
+      )}
       <DimensionField
         label={t("objinfo.opening.width")}
         value={opening.width}

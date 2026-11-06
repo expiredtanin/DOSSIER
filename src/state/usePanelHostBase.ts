@@ -101,6 +101,8 @@ function singleTransformSel(kind: string, id: string): TransformSelection | null
   if (kind === "roof") return { wallIds: [], drawingId: null, roofIds: [id] };
   if (kind === "stair") return { wallIds: [], drawingId: null, stairIds: [id] };
   if (kind === "room") return { wallIds: [], drawingId: null, roomIds: [id] };
+  // [144] Öffnung: X/Y im Objekt-Info verschiebt sie entlang (bzw. in eine andere) Wand.
+  if (kind === "opening") return { wallIds: [], drawingId: null, openingIds: [id] };
   return null;
 }
 
@@ -949,8 +951,11 @@ export function usePanelHostBase(opts: {
           updateOpening(selection.id, { sillHeight });
       },
       onSetOpeningPosition: (position) => {
-        if (selection?.kind === "opening" && position >= 0)
-          updateOpening(selection.id, { position });
+        if (selection?.kind !== "opening" || !Number.isFinite(position)) return;
+        // [144] In der Wand halten: auf [0, Wandlänge − Breite] klemmen (Bogenwand: nur ≥ 0).
+        const o = selection.opening;
+        const max = o?.wallLength != null ? Math.max(0, o.wallLength - o.width) : Infinity;
+        updateOpening(selection.id, { position: Math.min(max, Math.max(0, position)) });
       },
       onSetOpeningSwingAngle: (swingAngle) => {
         if (selection?.kind === "opening" && swingAngle > 0)

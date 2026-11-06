@@ -380,6 +380,18 @@ export function useGripEditing(opts: {
     return out;
   })();
 
+  // Einheitsrichtung der Wirtswand, wenn eine Wandöffnung gewählt ist (sonst null).
+  const openingWallDir = (): Vec2 | null => {
+    if (!selectedOpeningId) return null;
+    const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
+    const w = op && !op.hostRoofId && !op.hostCeilingId ? project.walls.find((x) => x.id === op.hostWallId) : undefined;
+    if (!w) return null;
+    const dx = w.end.x - w.start.x;
+    const dy = w.end.y - w.start.y;
+    const len = Math.hypot(dx, dy);
+    return len > 1e-9 ? { x: dx / len, y: dy / len } : null;
+  };
+
   // Nachbar-Griff-Index INNERHALB desselben Elements (für Anker-Auflösung).
   // null = kein Nachbar möglich (Einzelgriff-Element wie Kreis/Öffnung/Treppe).
   const neighborGripIndex = (index: number): number | null => {
@@ -564,6 +576,10 @@ export function useGripEditing(opts: {
   // Gemeinsam genutzt vom Tab-Feld-Controller UND dem Shift-Ortho-Bezug UND
   // dem Cursor-HUD (Länge/Winkel-Anzeige neben der Maus).
   const resolveGripAnchor = (index: number): Vec2 | null => {
+    // Wandöffnung ([144]): einziger Griff (Mitte) — Bezug ist seine Lage beim Greifen, die getippte
+    // Länge ist also die Verschiebung entlang der Wand.
+    const wallOpening = openingWallDir();
+    if (wallOpening) return gripOriginRef.current ?? grips[index] ?? null;
     // Bei Mehrfachauswahl gehört der gezogene Griff evtl. NICHT dem einzeln
     // selektierten `selectedDrawing`, sondern einem anderen Element der
     // Auswahl — das eigentliche Element über `gripOwners` auflösen.
@@ -626,7 +642,16 @@ export function useGripEditing(opts: {
     if (!info) return;
     const anchor = resolveGripAnchor(info.index);
     if (!anchor) return; // ohne Anker keine polare Eingabe möglich
+    const wallDir = openingWallDir();
     setGripEdit((prev) => {
+      if (!prev && wallDir) {
+        // Öffnung ([144]): Richtung = Wandrichtung (bzw. Gegenrichtung, je nach bisherigem Zug), damit
+        // die getippte Länge genau die Strecke entlang der Wand ist.
+        const g = grips[info.index];
+        const along = (g.x - anchor.x) * wallDir.x + (g.y - anchor.y) * wallDir.y;
+        const deg = (Math.atan2(wallDir.y, wallDir.x) * 180) / Math.PI + (along < 0 ? 180 : 0);
+        return { anchor, active: "length", locks: { length: Math.abs(along), angle: ((deg % 360) + 360) % 360 } };
+      }
       if (!prev) {
         const { length, angleDeg: angle } = gripPolar(anchor, grips[info.index]);
         return { anchor, active: "length", locks: { length, angle } };

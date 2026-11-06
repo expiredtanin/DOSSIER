@@ -333,7 +333,7 @@ export class CommandEngine {
       this.host.notify?.(blocked, undefined, "warning");
       return false;
     }
-    if (cmd.needsSelection && !hasTransformSelection(this.host.context(null).selection)) {
+    if (cmd.needsSelection && !hasTransformSelection(this.host.context(null).selection, cmd.name)) {
       this.host.notify?.(cmd.needsSelection);
       return false;
     }

@@ -44,6 +44,7 @@ function sheetOnlySelection(level: DrawingLevel, sel: TransformSelection): Trans
     roofIds: [],
     stairIds: [],
     roomIds: [],
+    openingIds: [],
   };
 }
 
