@@ -1148,6 +1148,7 @@ export const de = {
   "resources.viewTemplates.mono": "Tusche",
   "resources.viewTemplates.shadows": "Schatten",
   "resources.viewTemplates.hiddenLines": "Verdeckte Kanten",
+  "resources.viewTemplates.cutHatch": "Schnittflächen 1:100 schraffiert (statt schwarz)",
   "resources.viewTemplates.sketch": "Skizzenstil",
   "resources.viewTemplates.scaleLineWeights": "Strichstärken skalieren",
   "resources.viewTemplates.rangeHint": "Ansichtsbereich (Meter über OKFF): Schnitthöhe, Oberkante und Unterkante der Sichtweite, darunter sichtbar bis.",

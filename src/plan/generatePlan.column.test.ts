@@ -69,9 +69,9 @@ function column(overrides: Partial<Column> = {}): Column {
   };
 }
 
-/** Grundriss des Geschosses „eg" mit genau dieser Stütze. */
+/** Grundriss des Geschosses „eg" mit genau dieser Stütze (1:50 — ab 1:100 ist die Schnittfläche schwarz, [140]). */
 function planColumn(p: Project, col: Column): Primitive[] {
-  return generatePlan({ ...p, columns: [col] }, "eg", new Set(["50"])).primitives;
+  return generatePlan({ ...p, columns: [col] }, "eg", new Set(["50"]), undefined, "mittel", false, false, true, 50).primitives;
 }
 
 function polygonOf(out: Primitive[]): Extract<Primitive, { kind: "polygon" }> {

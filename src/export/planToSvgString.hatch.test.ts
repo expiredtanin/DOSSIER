@@ -6,7 +6,8 @@ import { sampleProject as project } from "../model/sampleProject";
 describe("planToSvgString hatch", () => {
   const floor = project.drawingLevels.find((l) => l.kind === "floor")!;
   const codes = new Set(project.layers.map((l) => l.code));
-  const plan = generatePlan(project, floor.id, codes);
+  // 1:50: Schraffuren in den Wänden (ab 1:100 schwarz, [140]).
+  const plan = generatePlan(project, floor.id, codes, undefined, "mittel", false, false, true, 50);
   it("Standard und hatch:false sind byte-gleich", () => {
     const a = planToSvgString(plan, { scaleDenominator: 100 });
     expect(planToSvgString(plan, { scaleDenominator: 100, hatch: false })).toBe(a);

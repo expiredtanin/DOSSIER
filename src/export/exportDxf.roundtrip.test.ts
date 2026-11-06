@@ -31,7 +31,8 @@ const visiblePolys = (polys: Extract<Plan["primitives"][number], { kind: "polygo
   polys.filter((p) => !p.openingId && !(p.stroke === "none" && p.fill === "none" && p.hatch.pattern === "none" && p.hatch.kind !== "gradient"));
 
 describe("DXF-Export (R2018 über acadrust)", () => {
-  const plan = generatePlan(sampleProject, "eg", allCodes(sampleProject));
+  // 1:50: Wände mit Schichten und Schraffur (ab 1:100 schwarz, [140]).
+  const plan = generatePlan(sampleProject, "eg", allCodes(sampleProject), undefined, "mittel", false, false, true, 50);
 
   it("Version R2018, Einheit Meter, alle Kategorie-Ebenen", () => {
     const text = buildPlanDxf(plan, sampleProject);

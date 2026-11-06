@@ -1119,6 +1119,11 @@ export type DrawingLevel = {
    */
   sketch?: boolean;
   /**
+   * [140] Schnittflächen (Wände, Stützen, Decken) auch ab 1:100 mit Schichten und Schraffur statt als
+   * schwarze Fläche (Poché). Fehlt/aus: ab 1:100 schwarz, 1:50 und Detail „fein" schraffiert.
+   */
+  cutHatch?: boolean;
+  /**
    * Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
    * Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
    * linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
@@ -3299,6 +3304,8 @@ export type ViewTemplate = {
   hiddenLines?: boolean;
   /** Skizzenstil ([67]). */
   sketch?: boolean;
+  /** [140] Schnittflächen ab 1:100 schraffiert statt schwarz (s. `DrawingLevel::cut_hatch`). */
+  cutHatch?: boolean;
   /** Strichstärken mit dem Massstab skalieren. */
   scaleLineWeights?: boolean;
   /** Schnitthöhe über OKFF ([36]). */

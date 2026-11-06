@@ -44,7 +44,7 @@ export async function viewportLevelPlan(
   if (level.kind === "section") {
     const out = await computeSection(project, level);
     raw = out
-      ? generateSectionPlan(out, mono, { hiddenLines: level.hiddenLines, visibleCodes, openings: true, scaleDenominator })
+      ? generateSectionPlan(out, mono, { hiddenLines: level.hiddenLines, visibleCodes, openings: true, scaleDenominator, detail })
       : null;
   } else {
     raw = generateElevationPlan(project, level, { visibleCodes, scaleDenominator, mono });

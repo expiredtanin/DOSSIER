@@ -550,6 +550,66 @@ pub fn text_frame_corners(doc: &RichTextDoc, at: (f64, f64), height_m: f64, angl
     local.map(|(x, y)| (at.0 + x * c - y * s, at.1 + x * s + y * c))
 }
 
+// ── Schriftmetrik ───────────────────────────────────────────────────────────
+
+/// [140] Vorschubbreiten (1/1000 em) der Plan-Schrift Inter (Regular, `render2d/assets/Inter.ttf`, Tabelle
+/// `hmtx`, mit fontTools ausgelesen; SIL OFL 1.1, s. `NOTICE`) für U+0020–U+007E und U+00A0–U+00FF.
+/// Echte Metrik statt der Schätzung [`CHAR_WIDTH_FACTOR`] für Breiten, die passen müssen (Raumstempel).
+const INTER_ASCII: [u16; 95] = [
+    281, 288, 466, 633, 642, 982, 644, 300, 365, 365, 501, 662, 288, 460, 288, 360,
+    631, 407, 610, 618, 646, 593, 620, 566, 619, 620, 288, 302, 662, 662, 662, 511,
+    966, 690, 654, 730, 722, 601, 590, 746, 743, 269, 571, 672, 565, 903, 753, 765,
+    639, 765, 644, 642, 646, 744, 690, 985, 682, 679, 629, 365, 360, 365, 471, 456,
+    323, 562, 612, 571, 612, 583, 370, 613, 591, 242, 242, 549, 242, 876, 591, 600,
+    612, 612, 376, 528, 327, 591, 562, 818, 546, 562, 552, 426, 333, 426, 662,
+];
+const INTER_LATIN1: [u16; 96] = [
+    281, 288, 571, 611, 725, 550, 270, 568, 591, 914, 454, 583, 662, 560, 666, 478,
+    456, 662, 442, 446, 323, 586, 603, 288, 268, 304, 482, 583, 802, 847, 882, 511,
+    690, 690, 690, 690, 690, 690, 994, 730, 601, 601, 601, 601, 269, 269, 269, 269,
+    735, 753, 765, 765, 765, 765, 765, 662, 765, 744, 744, 744, 744, 679, 636, 616,
+    562, 562, 562, 562, 562, 562, 917, 571, 583, 583, 583, 583, 242, 242, 242, 242,
+    583, 591, 600, 600, 600, 600, 600, 662, 600, 591, 591, 591, 591, 562, 612, 562,
+];
+
+/// [140] Breite eines Texts in em (Inter Regular, ohne Kerning wie `render2d::vtext`). Zeichen ausserhalb
+/// der Tabelle: Gedankenstrich 0.5, Geviertstrich/Ellipse/Euro aus der Schrift, sonst
+/// [`CHAR_WIDTH_FACTOR`]; Fett etwa 5 % breiter.
+pub fn text_width_em(text: &str, bold: bool) -> f64 {
+    let w: u32 = text
+        .chars()
+        .map(|ch| {
+            let c = ch as u32;
+            match c {
+                0x20..=0x7e => INTER_ASCII[(c - 0x20) as usize] as u32,
+                0xa0..=0xff => INTER_LATIN1[(c - 0xa0) as usize] as u32,
+                0x2013 => 500,
+                0x2014 => 1000,
+                0x2026 => 864,
+                0x20ac => 667,
+                0x2018 | 0x2019 | 0x201a => 261,
+                0x201c | 0x201d | 0x201e => 455,
+                _ => (CHAR_WIDTH_FACTOR * 1000.0) as u32,
+            }
+        })
+        .sum();
+    w as f64 / 1000.0 * if bold { 1.05 } else { 1.0 }
+}
+
+/// [140] Ausmass eines Raumstempels ([`stamp_block`]) in Einheiten von `unit_per_pt`: Breite der breitesten
+/// Zeile (Summe der Tspans mit echter Metrik, [`text_width_em`]) und Höhe des Blocks (erste Zeile plus
+/// Zeilenvorschübe, wie die Zentrierung in [`stamp_block_refs`]).
+pub fn stamp_block_size(doc: &RichTextDoc, extra: &[(&str, LineAlign)], base_pt: f64, unit_per_pt: f64) -> (f64, f64) {
+    let placed = stamp_block(doc, extra, base_pt, unit_per_pt, "#000000", 0.0);
+    if placed.is_empty() {
+        return (0.0, 0.0);
+    }
+    let w = placed.iter().map(|p| p.line.tspans.iter().map(|t| text_width_em(&t.text, t.bold) * t.font_size).sum::<f64>()).fold(0.0, f64::max);
+    let base_fs = base_pt * unit_per_pt;
+    let h = base_fs + placed[1..].iter().map(|p| p.line.line_height).sum::<f64>();
+    (w, h)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -676,5 +736,18 @@ mod tests {
         assert_eq!(w[1].0, 1.5);
         let r = text_frame_corners(&d, (0.0, 0.0), 0.2, std::f64::consts::FRAC_PI_2, None, 0.9);
         assert!((r[0].0 + 0.18).abs() < 1e-12 && r[0].1.abs() < 1e-12);
+    }
+    /// [140] Echte Metrik: „Bad" schmaler als „WWW", Leerzeichen schmal; Stempelblock misst Name und Zeilen.
+    #[test]
+    fn schriftmetrik_inter() {
+        assert!((text_width_em("Bad", false) - (0.654 + 0.562 + 0.612)).abs() < 1e-9);
+        assert!(text_width_em("WWW", false) > 2.9 && text_width_em("iii", false) < 0.75);
+        assert!(text_width_em("m²", false) > text_width_em("m", false));
+        assert!(text_width_em("Bad", true) > text_width_em("Bad", false));
+        let d = doc_from_text("Bad", &Marks::default());
+        let (w, h) = stamp_block_size(&d, &[("4.60 m²", LineAlign::Center)], 10.0, 1.0);
+        // Zweite Zeile 8 pt: 4.60 m² ≈ 3.6 em · 8; Höhe 10 + 13.
+        assert!((h - 23.0).abs() < 1e-9, "{h}");
+        assert!((w - text_width_em("4.60 m²", false) * 8.0).abs() < 1e-9, "{w}");
     }
 }

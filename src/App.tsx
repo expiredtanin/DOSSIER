@@ -171,7 +171,7 @@ import { DragOverlay } from "./panels/panelDrag";
 import { hostWithMode, PanelHostProvider } from "./panels/host";
 import { deriveSelection } from "./state/selectionInfo";
 import type { SelectionInfo } from "./state/selectionInfo";
-import { centroid as roomCentroid } from "./core";
+import { roomLabelPoint } from "./core";
 import { docFromText, plainText, DEFAULT_PRESETS } from "./text/richText";
 import type { RichTextDoc } from "./text/richText";
 import { revealPanel, saveLayout } from "./panels/layout";
@@ -655,7 +655,7 @@ export default function App() {
       selectedRoom
         ? {
             roomId: selectedRoom.id,
-            anchor: selectedRoom.stampAnchor ?? roomCentroid(selectedRoom.boundary),
+            anchor: selectedRoom.stampAnchor ?? roomLabelPoint(selectedRoom.boundary),
           }
         : null,
     [selectedRoom],

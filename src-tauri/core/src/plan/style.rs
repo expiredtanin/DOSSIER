@@ -65,6 +65,39 @@ impl Detail {
     }
 }
 
+/// [140] Dünne Schichten (Putz, Parkett, Trittschall, Folien, dünne Dämmung) unter dieser Papierdicke (mm)
+/// werden ab [`THIN_FROM_SCALE`] nicht als eigene Schicht mit Fugen gezeichnet: sonst laufen Umriss, Fuge und
+/// Schraffur in 1:100 zu einem schwarzen Balken zusammen. Eine Regel für Wände im Grundriss
+/// (`walls::thin_layer_targets`) und Schnitt-Schichten (`section::merge_thin_cuts`, `plain_thin_insulation`).
+pub const THIN_LAYER_PAPER_MM: f64 = 0.5;
+/// [140] Ab diesem Massstab (1:50 und kleiner) werden dünne Schichten vereinfacht (Teil 5: ab 1:100 sind
+/// Schnittflächen ohnehin schwarz, [`solid_cut`] — die Regel wirkt v. a. im 1:50); 1:20/1:25 zeigt alle.
+pub const THIN_FROM_SCALE: f64 = 50.0;
+
+/// [140] Werden bei Detailgrad `detail` und 1:`scale` dünne Schichten vereinfacht? „fein" zeigt immer alle,
+/// ebenso Massstäbe grösser als 1:50 (und ein unbekannter Massstab 0/NaN).
+pub fn simplify_thin_layers(detail: Detail, scale: f64) -> bool {
+    detail != Detail::Fein && scale.is_finite() && scale >= THIN_FROM_SCALE
+}
+
+/// [140] Ab diesem Massstab (1:75 und kleiner, also 1:100) sind Schnittflächen schwarz.
+pub const SOLID_CUT_FROM: f64 = 75.0;
+
+/// [140] Schnittflächen (Wände, Stützen, Körper im Grundriss; alle geschnittenen Bauteile im Schnitt) als
+/// volle schwarze Fläche ohne Schichtfugen und Schraffur, nur mit Umriss (Vorgabe Maintainer: „Schraffur-
+/// Bauteile im 1:50 zeigen, das 1:100 wird i. d. R. schwarz angezeigt")? Ab 1:100 ja, Detail „grob" immer;
+/// „fein" und `cut_hatch` (Feld der Ebene/Ansichtsvorlage „Schnittflächen schraffiert") behalten die
+/// Schichten mit Schraffur.
+pub fn solid_cut(detail: Detail, scale: f64, cut_hatch: bool) -> bool {
+    detail == Detail::Grob || (!cut_hatch && detail != Detail::Fein && scale.is_finite() && scale >= SOLID_CUT_FROM)
+}
+
+/// [140] Ist eine Schicht der Dicke `thickness_m` (Meter) bei 1:`scale` auf dem Papier dünn
+/// (unter [`THIN_LAYER_PAPER_MM`])? Nur zusammen mit [`simplify_thin_layers`] verwenden.
+pub fn is_thin_layer(thickness_m: f64, scale: f64) -> bool {
+    !(thickness_m * 1000.0 / scale >= THIN_LAYER_PAPER_MM)
+}
+
 /// Schraffur-Platzhalter „ohne" (für reine Umriss-/Sammelflächen).
 pub fn no_hatch() -> HatchRender {
     HatchRender {
@@ -270,5 +303,31 @@ mod tests {
         assert_eq!(d.angle, -60.0);
         assert_eq!(resolve_hatch(&p, "h-diag", None, None, None).unwrap().angle, 30.0);
         assert_eq!(d.color, HATCH_INK);
+    }
+}
+
+#[cfg(test)]
+mod thin_tests {
+    use super::*;
+
+    /// [140] Eine Regel: unter 0.5 mm Papier ist dünn (5 cm in 1:100, 10 cm in 1:200), ab 1:75 ausser „fein".
+    #[test]
+    fn duenne_schicht_regel() {
+        assert!(simplify_thin_layers(Detail::Mittel, 100.0) && simplify_thin_layers(Detail::Grob, 200.0));
+        assert!(simplify_thin_layers(Detail::Mittel, 50.0), "Teil 5: auch 1:50");
+        assert!(!simplify_thin_layers(Detail::Mittel, 20.0) && !simplify_thin_layers(Detail::Fein, 100.0));
+        assert!(!simplify_thin_layers(Detail::Mittel, 0.0) && !simplify_thin_layers(Detail::Mittel, f64::NAN));
+        assert!(is_thin_layer(0.015, 100.0) && is_thin_layer(0.04, 100.0) && is_thin_layer(0.0499, 100.0));
+        assert!(!is_thin_layer(0.06, 100.0) && !is_thin_layer(0.05, 100.0));
+        assert!(is_thin_layer(0.08, 200.0) && !is_thin_layer(0.04, 50.0) && is_thin_layer(0.02, 50.0));
+    }
+
+    /// [140] Schnittflächen: 1:100 schwarz, 1:50 schraffiert; „fein" und `cutHatch` schraffiert, „grob" schwarz.
+    #[test]
+    fn schnittflaeche_schwarz_ab_1_100() {
+        assert!(solid_cut(Detail::Mittel, 100.0, false) && solid_cut(Detail::Mittel, 200.0, false));
+        assert!(!solid_cut(Detail::Mittel, 50.0, false) && !solid_cut(Detail::Fein, 100.0, false));
+        assert!(!solid_cut(Detail::Mittel, 100.0, true), "Vorlage: schraffiert");
+        assert!(solid_cut(Detail::Grob, 50.0, true) && !solid_cut(Detail::Mittel, f64::NAN, false));
     }
 }

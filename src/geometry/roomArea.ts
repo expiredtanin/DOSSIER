@@ -34,6 +34,16 @@ export function centroid(pts: Vec2[]): Vec2 {
   return { x: c[0], y: c[1] };
 }
 
+/**
+ * [140] Ankerpunkt des Raumstempels ohne eigenen Anker: Pol der Unzugänglichkeit (Kern
+ * `room_area::label_point`) — liegt auch in L-förmigen/konkaven Räumen im Raum, bei
+ * Rechtecken in der Mitte. Gleicher Punkt wie Plan, Griff und Fang.
+ */
+export function roomLabelPoint(pts: Vec2[]): Vec2 {
+  const c = core().room_label_point(new FlatWriter().pts(pts).done());
+  return { x: c[0], y: c[1] };
+}
+
 // ── SIA-416-Kategorie-Hierarchie ─────────────────────────────────────────────
 //
 // SIA 416 gliedert die Geschossfläche (GF) eines Gebäudes hierarchisch:

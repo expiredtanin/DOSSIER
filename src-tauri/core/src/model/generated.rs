@@ -1807,6 +1807,11 @@ pub struct DrawingLevel {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub sketch: Option<bool>,
+    /// [140] Schnittflächen (Wände, Stützen, Decken) auch ab 1:100 mit Schichten und Schraffur statt als
+    /// schwarze Fläche (Poché). Fehlt/aus: ab 1:100 schwarz, 1:50 und Detail „fein" schraffiert.
+    #[serde(rename = "cutHatch", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cut_hatch: Option<bool>,
     /// Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
     /// Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
     /// linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
@@ -1902,6 +1907,10 @@ pub struct ViewTemplate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub sketch: Option<bool>,
+    /// [140] Schnittflächen ab 1:100 schraffiert statt schwarz (s. `DrawingLevel::cut_hatch`).
+    #[serde(rename = "cutHatch", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cut_hatch: Option<bool>,
     /// Strichstärken mit dem Massstab skalieren.
     #[serde(rename = "scaleLineWeights", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

@@ -257,13 +257,15 @@ describe('GpuChunkCache: Kern-Abschnitte (Plan-Puffer v2, Inhalts-Hash)', () => 
     const p = bigSampleProject(8);
     const { gl } = makeGl();
     const cache = new GpuChunkCache(gl);
-    const a = generatePlan(p, 'eg', codes(p));
+    // 1:50: Wände mit Schichten (ab 1:100 eine schwarze Fläche je Wand, [140]) → genug Chunks.
+    const gen = (q: typeof p) => generatePlan(q, 'eg', codes(q), undefined, 'mittel', false, false, true, 50);
+    const a = gen(p);
     cache.update(a.primitives, 90, 6, a.greyedRanges, a.underlay, a.bufRuns);
     const total = cache.lastStats.chunks;
     expect(total).toBeGreaterThan(8);
     const walls = p.walls.slice();
     walls[200] = { ...walls[200], end: { x: walls[200].end.x + 0.05, y: walls[200].end.y } };
-    const b = generatePlan({ ...p, walls }, 'eg', codes(p));
+    const b = gen({ ...p, walls });
     cache.update(b.primitives, 90, 6, b.greyedRanges, b.underlay, b.bufRuns);
     expect(cache.lastStats.recompiled).toBeGreaterThan(0);
     expect(cache.lastStats.recompiled).toBeLessThanOrEqual(3);
