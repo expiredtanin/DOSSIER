@@ -26,6 +26,10 @@ declare global {
       openings: () => { id: string; hostWallId: string; position: number }[];
       /** [144] Auswahl setzen (wie ein Klick), z. B. `{ openings: ["D1"] }`. */
       select: (patch: Record<string, string[]>) => void;
+      /** [144] Punkte einer Bemassung (Kette) — folgt sie der Öffnung? */
+      dimPts: (id: string) => { x: number; y: number }[];
+      /** [144] Texte der Hinweise (Benachrichtigungen). */
+      notices: () => string[];
     };
   }
 }
@@ -52,6 +56,11 @@ export function installTestHooks(): void {
       getState().project.drawings2d.flatMap((d) => (d.id.startsWith(prefix) && d.geom.shape === "polyline" ? [{ id: d.id, pts: d.geom.pts }] : [])),
     openings: () => (getState().project.openings ?? []).map((o) => ({ id: o.id, hostWallId: o.hostWallId, position: o.position })),
     select: (patch) => getState().setSelection(patch),
+    dimPts: (id) => {
+      const g = getState().project.drawings2d.find((d) => d.id === id)?.geom;
+      return g?.shape === "dimension" ? g.pts.map((p) => ({ x: p.x, y: p.y })) : [];
+    },
+    notices: () => getState().notifications.map((n) => n.message),
     selected: () => ({ drawings: [...getState().selection.drawings], groups: [...getState().selection.groups], all: JSON.stringify(getState().selection) }),
   };
 }
