@@ -2561,6 +2561,8 @@ export const de = {
   "sun.belowHorizon": "Sonne unter dem Horizont",
   "sun.noAnchor": "Standort Zürich angenommen",
   "sun.noAnchor.hint": "Ohne Georeferenz rechnet die Studie mit Zürich. Standort über «Standort importieren» oder «Neuer Bezugspunkt» festlegen.",
+  "sun.treeHeight": "Baumhöhe (m)",
+  "sun.treeHeight.hint": "Höhe der Bäume (Kreise auf der Ebene 13 «Bäume») über Terrain für den Schattenwurf.",
   "siteRules.title": "Baurecht der Parzelle",
   "siteRules.show": "im Grundriss",
   "siteRules.fromSelection": "Parzelle aus Auswahl",

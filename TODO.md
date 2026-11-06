@@ -2803,9 +2803,25 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   teilweise vergrabene nur aus dem Teil über ±0.00. Tests: Rust `schatten_nur_von_der_sonne_weg` (Körper über
   Boden, teilweise/ganz vergraben, Vereinigung + Punktwolke; Skalarprodukt mit der Sonnenrichtung, fünf Azimute),
   vitest `sun.test.ts` (Musterhaus komplex: kein Schattenpunkt sonnenseitig der Körper). Geprüft: CLI-Grundriss EG
-  vorher/nachher (Linux/Chromium). Offen: Schatten fällt weiter auf die Ebene ±0.00, nicht auf das Gelände (am
-  Hang zu kurz/lang; freigelegte UG-Wände über tieferem Gelände werfen keinen Schatten); Bäume/Stützen werfen
-  keinen; nicht in der Tauri-App geprüft.
+  vorher/nachher (Linux/Chromium).
+  6.11.: **Schatten aufs Gelände.** Gibt es ein (sichtbares) Geländenetz, fällt der Schatten auf das aktuelle Gelände
+  (inkl. Baugruben, `site_terrain`), sonst wie bisher auf ±0.00 (unveränderter Pfad). `sun::Ground::project`: Strahl
+  von jedem Stützpunkt von der Sonne weg, Gelände über `TinIndex` alle 0.25 m abgetastet, Schnitt linear zwischen den
+  Stützstellen. Prismen (Wände, Körper, Stützen) als Umriss, Kanten alle 0.5 m abgetastet: Unterkante auf
+  max(UK, örtliches Gelände) — Schattenwerfer ist nur der Teil über dem örtlichen Terrain, freigelegte UG-Wände über
+  tieferem Gelände werfen nun Schatten — Ober-/Unterseite projiziert + je von der Sonne abgewandter Seitenkante die
+  Fläche dazwischen; Dächer/Kronen als Hülle der projizierten Punkte (Traufe verdichtet). Vereinigung über i_overlay,
+  Teile/Löcher < 0.05 m² fallen weg (keine Splitter). **Stützen** werfen Schatten (Prisma); **Bäume** = Kreise der
+  Ebene 13 «Bäume» (oder Ebenenname mit Baum/Tree): Stamm Ø 0.3 m + Krone (Ellipsoid, Radius = Kreis), Höhe
+  `sunStudy.treeHeight` (neu, Feld im Sonnenstudien-Panel), sonst 8 m, ab Terrain. Tests: Rust `sun::terrain_tests`
+  (Körper am Hang auf- und abwärts gegen die analytische Länge, freigelegte UG-Wand, ohne Gelände = bisher, welliges
+  Gelände = eine Fläche ohne Löcher und nur von der Sonne weg, Baum mit/ohne Höhe, Stütze, Kreis anderer Ebene);
+  vitest `sun.test.ts` (Stützen/Bäume als Schattenwerfer ergänzt). Zeit Musterhaus komplex (WASM ohne wasm-opt,
+  Node): 21.6. 10:00 UTC 19.5 ms (vorher 0.8 ms, nur Ebene), 21.12. 14:30 UTC (Sonne 7.8°) 45.5 ms. Goldens
+  `komplex-grundriss-eg-50/100` neu (Schattenflächen 1 → 7 Polygone: Bäume, Stützmauer, Pflanzgefässe). Geprüft:
+  CLI-Grundriss EG vorher/nachher (Linux/Chromium). Offen: Schatten auf Gebäudeteile (Decken, Dächer) bleibt
+  unberücksichtigt (Strahl geht bis ins Gelände, auch unter dem Gebäude); Dach-/Kronenschatten als konvexe Hülle;
+  Bäume nur als Kreise erkannt (kein Baum-Objekt mit eigener Höhe); nicht in der Tauri-App geprüft.
 - ◐ **[145] Texte beim Zoomen synchron.** (6.11., Maintainer macOS: „Beim Zoomen sind die Texte nicht synchron, sie
   folgen jeder Bewegung mit leichter Verzögerung.") Ursache: auf macOS zeichnet die native Metal-Fläche (`native2d`)
   die Geometrie; Raumstempel (`text`), Textfelder/mehrzeilige `drawingText` und Griffe liegen im SVG-Overlay der

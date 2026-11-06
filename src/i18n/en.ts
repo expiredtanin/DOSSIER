@@ -2511,6 +2511,8 @@ export const en: Record<TranslationKey, string> = {
   "sun.belowHorizon": "Sun below the horizon",
   "sun.noAnchor": "Location assumed: Zurich",
   "sun.noAnchor.hint": "Without georeference the study uses Zurich. Set the location via “Import location” or “New reference point”.",
+  "sun.treeHeight": "Tree height (m)",
+  "sun.treeHeight.hint": "Height of the trees (circles on layer 13 “Trees”) above terrain for the shadow cast.",
   "siteRules.title": "Zoning of the parcel",
   "siteRules.show": "in plan",
   "siteRules.fromSelection": "Parcel from selection",

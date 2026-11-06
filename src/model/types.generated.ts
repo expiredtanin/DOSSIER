@@ -3067,6 +3067,11 @@ export type SunStudy = {
   /** Zeitpunkt als ISO-8601-Text in UTC, z. B. "2026-12-21T11:00:00Z". */
   when: string;
   show: boolean;
+  /**
+   * [142] Höhe der Bäume (2D-Kreise der Ebene „Bäume", Code 13) in m über Terrain für den
+   * Schattenwurf; fehlt der Wert, gilt 8 m.
+   */
+  treeHeight?: number;
 };
 
 /**
