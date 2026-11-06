@@ -2752,11 +2752,32 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   `duenne_schichten_je_massstab_zusammengefasst`, `achsraster_unterbrochen_im_gebaeude`, `senkrechte_achsen_mit_blase`
   (Stummel), `raumstempel_je_massstab` (1:500, Tinte, eigene Stempel), `mittel_ab_1_200_automatisch_grob`,
   `hoehenlinien_ausgeduennt_wo_zu_eng`, WGSL-Validierung. Goldens neu (Strichstärken, Farben, Schichten, Achsen).
-  Offen: Schnitt fasst dünne Decken-/Dachschichten (Parkett, Putz) noch nicht zusammen; Ansicht zeigt im Modus
-  „Farbig" weiter Materialfarben (Ziegelrot, Fassade) — für Tusche-Ansicht braucht es einen eigenen Modus oder einen
-  brauchbaren „Schwarz-Weiss"-Modus; Achsblasen in 1:500 gross (Papiermass fest); in 1:200 („grob") keine
-  Türaufschläge; enge Räume (Bad/Réduit) Stempel überlappen; Stifte (`penSets`) nicht angepasst. Nur Linux/CLI-SVG +
-  Chromium geprüft, nicht in der Tauri-App (Bildschirm-Deckung nur per WGSL-Validierung geprüft, nicht angesehen). · M
+  (6.11., Teil 3) **Tusche als Standard:** Darstellung „Schwarz-Weiss" ist jetzt Standard der App (`viewSlice`
+  `planColorMode: "mono"`) und der CLI (`--color` = „Farbig"); „Farbig" bleibt wählbar. Schwarz-Weiss repariert
+  (`extras::Post`, `is_neutral`): Grautöne bleiben (Schatten, Gelände, Höhenlinien, Treppe), nur bunte Farben werden
+  Tinte bzw. Papier; Umriss „none" bleibt „none" (vorher bekam jede Wandschicht eine Kontur, der SVG-Kantenlauf-Pfad
+  übersprang dann die Schraffur — `svg.rs` zeichnet sie jetzt auch dort); Luftbilder bleiben; kompakte
+  Linien-Unterlage auch in Schwarz-Weiss (`drawingLines` Schalter-Bit 2). Ansicht in Tusche: Flächen weiss, keine
+  Materialfarben, Ansichtsschraffur grau (#8c8c8c), Glas hellgrau, Schatten neutral hell. **Schnitt:** dünne
+  Schichten (< 0.25 mm Papier, Dicke ≈ Fläche/halber Umfang) gehen ab 1:75 in der Nachbarschicht desselben Bauteils
+  auf (längste gemeinsame Kante, Gleichstand → dickere; vereinigt, keine Fuge; `section::merge_thin_cuts`, Wände,
+  Decken, Dächer), 1:50 alle Schichten. **Achsblasen** 5 mm (Standard statt 8, Beispiel ohne eigene 6 mm), ab 1:200
+  ×0.8 (4 mm), Text mit. **Detail grob** (auch automatisch ab 1:200, Vorgabe Maintainer): Türen mit Blatt und
+  Aufschlag-Bogen, erst ab 1:500 ohne Bogen (Öffnungs-Code −1); Fenster nur zwei Striche quer durch die Öffnung in
+  den Wandfluchten (kein Rahmen/Glas/Bank/Anschlag). **Raumstempel** passen sich an (Schätzung 0.55 × Schrifthöhe
+  je Zeichen, 1.25 je Zeile, gegen die Raum-Bounding-Box): erst ohne Nutzungszeile, dann ohne Fläche, dann 2 mm
+  Schrift, zuletzt Name gekürzt („Trep."). Tests: `mono_behaelt_grau_und_ohne_umriss`,
+  `tusche_ansicht_ohne_materialfarben`, `duenne_schnittschichten_je_massstab_zusammengefasst`,
+  `blase_papiergroesse_je_massstab`, `tuer_grob_hat_pick_blatt_bogen_und_zwei_sturzlinien`,
+  `fenster_grob_zwei_striche_in_der_wandflucht`, `raumstempel_passt_in_engen_raum`; TS-Tests (Luftbild, Unterlage,
+  Detailgrad-Übersteuerung, Fenster grob) angepasst. Goldens neu (Grundrisse: Blasen, Stempelzeilen; Schnitte:
+  zusammengefasste Schichten; CLI-Schnitt in Tusche). Geprüft: cargo test Kern, vitest, tsc, CLI-SVG (EG
+  1:100/200/500, Schnitt A-A 1:100/1:50, Ansicht Süd) in Chromium angesehen.
+  Offen: Layout-Viewports (`sheet_viewports.rs`, `viewportPlan.ts`) und Präsentationsblatt zeichnen weiter „Farbig"
+  (Ansicht mit Ziegelrot auf dem Blatt); Ansichtsvorlage „Präsentation" setzt `mono: false`; dünne
+  Trittschalldämmung (2–3 cm) bleibt in 1:100 als dichter Zickzack-Balken; Stempel-Breite nur geschätzt (keine
+  Schriftmetrik), L-förmige Räume über die Bounding-Box; Stifte (`penSets`) nicht angepasst; Fenster grob ohne
+  Brüstungs-/Sturzlinie. Nur Linux/CLI-SVG + Chromium geprüft, nicht in der Tauri-App (Bildschirm nicht angesehen). · M
   Höhenlinien). Offen: dünne Schichten (Putz, Parkett) laufen in 1:100 zu einem Balken zusammen (Detailgrad sollte
   sie zusammenfassen); Achsen laufen in Ansicht/Grundriss durch das Gebäude; Raumstempel farbig statt schwarz im
   Druck ohne Schwarz-Weiss; Schatten im EG-Grundriss überdeckt Bemassung; eigene Stempel (`Room.stamp`) behalten in
