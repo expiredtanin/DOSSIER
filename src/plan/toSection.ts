@@ -5,7 +5,7 @@
 // Sichtbarkeit (UI-Zustand) und die asynchron gebauten truck-Körper hinein. Einheiten: Meter; u entlang
 // der Ebene (Blickrichtungs-RECHTS), v = absolute Höhe.
 
-import type { DrawingLevel, Project, Vec2 } from "../model/types";
+import type { DetailLevel, DrawingLevel, Project, Vec2 } from "../model/types";
 import { flattenCategories, getFloor } from "../model/types";
 import { withDocument } from "../core/document";
 import { buildSolidMesh } from "../engine/truckSolid";
@@ -113,6 +113,7 @@ export function levelArg(level: DrawingLevel) {
     shadows: level.shadows,
     hiddenLines: level.hiddenLines,
     sketch: level.sketch,
+    cutHatch: level.cutHatch,
   };
 }
 
@@ -123,7 +124,15 @@ export function levelArg(level: DrawingLevel) {
 export function generateSectionPlan(
   output: SectionOutput,
   mono = false,
-  opts: { hiddenLines?: boolean; visibleCodes?: Set<string>; categoryDisplay?: CategoryDisplayResolver; openings?: boolean; scaleDenominator?: number } = {},
+  opts: {
+    hiddenLines?: boolean;
+    visibleCodes?: Set<string>;
+    categoryDisplay?: CategoryDisplayResolver;
+    openings?: boolean;
+    scaleDenominator?: number;
+    /** [140] Detailgrad: „fein" zeigt auch ab 1:100 alle dünnen Schichten (Standard „mittel"). */
+    detail?: DetailLevel;
+  } = {},
 ): Plan {
   const { project, level } = output;
   const text = JSON.stringify({
@@ -131,6 +140,7 @@ export function generateSectionPlan(
     hiddenLines: !!opts.hiddenLines,
     // Massstabsnenner für die Achsblasen des Rasters ([112]); Default 100.
     scale: opts.scaleDenominator ?? 100,
+    detail: opts.detail,
     ...visibilityArgs(project, opts.visibleCodes, opts.categoryDisplay),
   });
   const args = output.bodies.slice();

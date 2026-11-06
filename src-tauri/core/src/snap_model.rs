@@ -200,7 +200,7 @@ pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>, skip: &H
             anchors.push(match &r.stamp_anchor {
                 Some(a) => (a.x, a.y),
                 None => {
-                    let c = crate::room_area::evaluate(&r.boundary.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>(), 0.0).centroid;
+                    let c = crate::room_area::label_point(&r.boundary.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>());
                     (c[0], c[1])
                 }
             });

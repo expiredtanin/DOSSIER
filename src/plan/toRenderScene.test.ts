@@ -53,7 +53,7 @@ describe("planToRenderScene (Kern)", () => {
   });
 
   it("Binärszene: Zähler wie die Objekt-Szene", () => {
-    const plan = generatePlan(sampleProject, "eg", codes);
+    const plan = generatePlan(sampleProject, "eg", codes, undefined, "mittel", false, false, true, 50);
     const s = planToRenderScene(plan);
     const b = planSceneBin(plan);
     const h = new Uint32Array(b.buffer, b.byteOffset, 12);

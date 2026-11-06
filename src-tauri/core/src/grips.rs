@@ -315,7 +315,7 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
                     Some(a) if !a.is_null() => xy(a),
                     _ => {
                         let ring: Vec<[f64; 2]> = arr(field(rm, "boundary")).iter().map(|p| xy(p).into()).collect();
-                        let c = crate::room_area::evaluate(&ring, 0.0).centroid;
+                        let c = crate::room_area::label_point(&ring);
                         (c[0], c[1])
                     }
                 };

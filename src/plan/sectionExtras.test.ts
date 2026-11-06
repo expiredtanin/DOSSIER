@@ -55,7 +55,8 @@ describe("Schnitt: Gelände und freie Körper", () => {
       brep: { spec: { kind: "sphere", center: [px, pz, 1], r: 1 }, origin: { x: px - 1, y: pz - 1 } },
     };
     const p: Project = { ...sampleProject, extrudedSolids: [...(sampleProject.extrudedSolids ?? []), sphere] };
-    const plan = generateSectionPlan((await computeSection(p, section))!);
+    // 1:50 (ab 1:100 sind Schnittflächen schwarz, [140])
+    const plan = generateSectionPlan((await computeSection(p, section))!, false, { scaleDenominator: 50 });
     expect(plan.primitives.some((q) => q.kind === "polygon" && q.extrudedSolidId === "ball" && q.fill === "#d9dde2")).toBe(true);
   }, 30_000);
 

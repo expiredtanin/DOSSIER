@@ -56,10 +56,10 @@ fn polar(o: (f64, f64), r: f64, deg: f64) -> (f64, f64) {
     (o.0 + r * a.cos(), o.1 + r * a.sin())
 }
 
-/// Wand- und Stützen-Primitive des Erdgeschosses (1:50, Detail mittel).
+/// Wand- und Stützen-Primitive des Erdgeschosses (1:50, Detail fein, alle Schichten).
 fn prims(p: &Project) -> Vec<Primitive> {
     let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": 50 }).to_string();
-    let d = plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+    let d = plan_domains(p, &PlanArgs::parse(2.0, &t).unwrap()).unwrap();
     d.walls.into_iter().chain(d.columns).collect()
 }
 

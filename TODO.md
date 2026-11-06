@@ -2792,9 +2792,35 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Palette (Rust + `penSets.test.ts`), `viewportPlan.test.ts` (keine bunten Farben, Farbe auf Wunsch). Goldens
   unverändert. Geprüft: cargo test Kern, vitest, tsc, e2e presentationSheet/layoutSheet/publish/viewTemplates,
   Präsentationsblatt (Browser) und CLI-Schnitt 1:100 vorher/nachher angesehen.
-  Offen: Stempel-Breite nur geschätzt (keine Schriftmetrik), L-förmige Räume über die Bounding-Box; Präsentations-
-  Dialog ohne eigenen Farb-Schalter (nur über die Vorlage); dünne Dämmung im Grundriss nicht behandelt (Wände selten
-  < 5 cm). Nur Linux/CLI-SVG + Chromium geprüft, nicht in der Tauri-App. · M
+  (6.11., Teil 5) **Schnittflächen 1:100 schwarz** (Vorgabe Maintainer: „Schraffur-Bauteile im 1:50 zeigen, das
+  1:100 wird i. d. R. schwarz angezeigt"): ab 1:100 (Detail mittel; „grob" immer) sind geschnittene Wände, Stützen und
+  Körper im Grundriss und alle geschnittenen Bauteile im Schnitt eine volle schwarze Fläche ohne Schichtfugen und
+  Schraffur, nur der Umriss (`style::solid_cut`, Grundriss über die Sammelfläche wie „grob", Schnitt: Füllung Tinte,
+  Umriss der vereinigten Flächen bleibt); Öffnungen unverändert, auch im Modus „Farbig" schwarz. 1:50 und „fein"
+  schraffiert. Übersteuerbar je Ebene/Ansichtsvorlage: neues Feld `cutHatch` („Schnittflächen 1:100 schraffiert",
+  `DrawingLevel`/`ViewTemplate`, Vorlagen-Dialog; Schnitt über `levelArg`, Detail des Schnitts neu über
+  `generateSectionPlan(…, { detail })`). **Dünne Schichten:** eine Regel in `plan/style.rs` (`simplify_thin_layers`,
+  `is_thin_layer`): unter 0.5 mm Papierdicke (statt 0.25) ab 1:50 in „mittel" (auch „grob"), „fein" und 1:20 zeigen
+  alle; gilt für Wände im Grundriss (`walls::thin_layer_targets`), Schnitt-Schichten (`section::merge_thin_cuts`) und
+  dünne Dämmung ohne Muster (`plain_thin_insulation`) — wirkt jetzt v. a. im 1:50 (Putz/Parkett 1–2 cm, Lattung)
+  und im 1:100 mit `cutHatch`. **Raumstempel:** Anker ohne eigenen `stampAnchor` = Pol der Unzugänglichkeit
+  (`room_area::label_point`, polylabel; Rechteck/Korridor behält die Mitte), auch für Deckenspiegel, Fang, Griff,
+  Stempel-Editor (`roomLabelPoint`); neue Räume (Befehl „Raum") setzen keinen festen Anker mehr. Platz aus dem
+  Raumumriss (`room_area::rect_in_ring`) statt der Bounding-Box; passt der Stempel am Pol nicht (L-Raum), rückt er im
+  Raum auf einen Rasterpunkt, wo er (mit Luft) ganz drin liegt. Breite aus echter Schriftmetrik
+  (`text_layout::text_width_em`, Inter-Vorschübe aus `render2d/assets/Inter.ttf`; `stamp_block_size` misst den
+  gesetzten Block mit Name 12 pt fett / Zusatzzeilen 0.8×); Stufen: Zusatzzeilen weg → Name ohne eigene Grössen →
+  2 mm → gekürzt. Tests: `duenne_schicht_regel`, `schnittflaechen_schwarz_ab_1_100` (style, Grundriss, Schnitt),
+  `stempel_anker_pol_der_unzugaenglichkeit`, `rechteck_im_ring`, `schriftmetrik_inter`, `raumstempel_im_l_raum`,
+  `raumstempel_passt_in_engen_raum`, angepasst `duenne_schichten_*`, `raumstempel_je_massstab` (1:500 „Wohnen" jetzt
+  2 mm); TS `roomLabelPoint`; TS-Tests mit Schichten/Schraffur rechnen in 1:50 bzw. mit `cutHatch`. Goldens neu
+  (Grundrisse 1:100 schwarz, 1:50 zusammengefasste Schichten, Stempel-Lage; Schnitte; CLI). Geprüft: cargo test
+  Kern, vitest, tsc, CLI-SVG Musterhaus komplex EG und Schnitt A-A 1:100/1:50 vorher/nachher in Chromium.
+  Offen: CLI-SVG (`plan/svg.rs`) setzt alle Stempelzeilen in der Grundgrösse und „sans-serif" (nicht 12 pt/0.8×,
+  nicht Inter) — Breiten weichen dort von der Messung ab; IFC-Import setzt den Stempel-Anker weiter auf den
+  Eckenmittelwert; Bodenplatte samt Kies/Magerbeton im Schnitt 1:100 schwarz (kein Materialfilter); Stempel-Editor/
+  Griff zeigen auf den Pol, auch wenn der Stempel im L-Raum weggerückt ist; Präsentations-Dialog ohne eigenen
+  Farb-Schalter (nur über die Vorlage). Nur Linux/CLI-SVG + Chromium geprüft, nicht in der Tauri-App. · M
   Höhenlinien). Offen: dünne Schichten (Putz, Parkett) laufen in 1:100 zu einem Balken zusammen (Detailgrad sollte
   sie zusammenfassen); Achsen laufen in Ansicht/Grundriss durch das Gebäude; Raumstempel farbig statt schwarz im
   Druck ohne Schwarz-Weiss; Schatten im EG-Grundriss überdeckt Bemassung; eigene Stempel (`Room.stamp`) behalten in

@@ -343,7 +343,7 @@ fn room_labels(c: &Ctx, soffits: &[Soffit], roofs: &[RoofUnder], out: &mut Vec<P
     }
     for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.shown(&r.category_code) && r.boundary.len() >= 3) {
         let pts: Vec<[f64; 2]> = room.boundary.iter().map(|v| [v.x, v.y]).collect();
-        let at = room.stamp_anchor.unwrap_or(pv(crate::room_area::evaluate(&pts, 0.0).centroid));
+        let at = room.stamp_anchor.unwrap_or(pv(crate::room_area::label_point(&pts)));
         let z = soffits.iter().filter(|s| super::pick::point_in_polygon(at.x, at.y, &s.ring)).map(|s| s.z).fold(f64::INFINITY, f64::min);
         let mut lines = Vec::new();
         let kote = super::drawings::kote_label;

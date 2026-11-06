@@ -199,20 +199,17 @@ fn v2(x: f64, y: f64) -> Vec2 {
     Vec2 { x, y }
 }
 
-/// [140] Dünne Schichten unter dieser Papierdicke (mm) gehen im Detailgrad mittel ab 1:100 in der
-/// Nachbarschicht auf (Putz, Parkett, Folien): sonst liegen Umriss, Fuge und Schraffur in 1:100 als
-/// schwarzer Balken übereinander. In 1:50 und im Detailgrad fein bleiben alle Schichten.
-pub const THIN_LAYER_PAPER_MM: f64 = 0.25;
-
 /// Ziel-Schicht je Schicht: dünne Schichten zeigen auf die nächste nicht dünne (bei gleichem Abstand
 /// die dickere), alle anderen auf sich selbst. Fugen zwischen Schichten mit gleichem Ziel entfallen.
+/// [140] Regel und Schwelle: `style::simplify_thin_layers` / `is_thin_layer` (unter 0.5 mm Papier ab 1:75,
+/// nicht im Detail „fein"); die dünne Schicht trägt dann Füllung/Schraffur der Zielschicht.
 pub fn thin_layer_targets(thick: &[f64], detail: Detail, scale: f64) -> Vec<usize> {
     let n = thick.len();
     let ident: Vec<usize> = (0..n).collect();
-    if detail != Detail::Mittel || !(scale >= 75.0) {
+    if !simplify_thin_layers(detail, scale) {
         return ident;
     }
-    let thin: Vec<bool> = thick.iter().map(|t| !(t * 1000.0 / scale >= THIN_LAYER_PAPER_MM)).collect();
+    let thin: Vec<bool> = thick.iter().map(|t| is_thin_layer(*t, scale)).collect();
     if thin.iter().all(|t| *t) {
         return ident;
     }
@@ -248,7 +245,8 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     let outline_mm = wall_lw * detail.outline_factor();
     let layer_mm = LAYER_JOINT_MM * detail.layer_factor();
     let thick: Vec<f64> = wt.layers.iter().map(|l| l.thickness).collect();
-    let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, detail == Detail::Grob, view_only, reveals));
+    // [140] Ab 1:100 (und „grob") schwarze Sammelfläche mit Umriss, ohne Schichten (`style::solid_cut`).
+    let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, c.solid_cut(), view_only, reveals));
     let target = thin_layer_targets(&thick, detail, c.a.scale);
     if f.is_empty() {
         return Ok(());
@@ -1308,24 +1306,34 @@ pub(crate) mod tests {
         super::super::domains::plan_domains(p, &super::super::domains::PlanArgs::parse(1.0, &t).unwrap()).unwrap().walls
     }
 
-    /// [140] Dünne Schichten (Putz 2 cm) gehen in 1:100 (mittel) in der Nachbarschicht auf: keine
-    /// Schichtfuge zwischen Putz und Backstein, das Putzband trägt den Stil des Backsteins. In 1:50
-    /// und im Detailgrad fein bleiben alle Schichten mit Fugen.
+    /// [140] Dünne Schichten (Putz 2 cm = 0.4 mm in 1:50) gehen im 1:50 (mittel) in der Nachbarschicht auf:
+    /// keine Schichtfuge zwischen Putz und Backstein, das Putzband trägt den Stil des Backsteins. Im 1:20
+    /// und im Detailgrad fein bleiben alle Schichten mit Fugen; 1:100 ist schwarz (keine Fugen, s.
+    /// `schnittflaechen_schwarz_ab_1_100`), mit „Schnittflächen schraffiert" wieder zusammengefasst.
     #[test]
     fn duenne_schichten_je_massstab_zusammengefasst() {
-        let p = pocket_project(DoorTypeKind::Schiebe, None, 1.0);
-        let joints = |detail: f64, scale: f64| {
+        let mut p = pocket_project(DoorTypeKind::Schiebe, None, 1.0);
+        let joints = |p: &Project, detail: f64, scale: f64| {
             let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": scale }).to_string();
-            let prims = super::super::domains::plan_domains(&p, &super::super::domains::PlanArgs::parse(detail, &t).unwrap()).unwrap().walls;
+            let prims = super::super::domains::plan_domains(p, &super::super::domains::PlanArgs::parse(detail, &t).unwrap()).unwrap().walls;
             prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "layer-joint")).count()
         };
-        assert_eq!(joints(1.0, 100.0), 0, "1:100 mittel: Putz ohne Fuge");
-        assert!(joints(1.0, 50.0) >= 4, "1:50: alle Fugen");
-        assert!(joints(2.0, 100.0) >= 4, "fein: alle Fugen");
+        assert_eq!(joints(&p, 1.0, 100.0), 0, "1:100 mittel: schwarz");
+        assert_eq!(joints(&p, 1.0, 50.0), 0, "1:50 mittel: Putz ohne Fuge");
+        assert!(joints(&p, 1.0, 20.0) >= 4, "1:20: alle Fugen");
+        assert!(joints(&p, 2.0, 50.0) >= 4, "fein: alle Fugen");
+        assert!(joints(&p, 2.0, 100.0) >= 4, "fein 1:100: schraffiert, alle Fugen");
+        p.drawing_levels[0].cut_hatch = Some(true);
+        assert_eq!(joints(&p, 1.0, 100.0), 0, "1:100 schraffiert: Putz zusammengefasst");
         assert_eq!(thin_layer_targets(&[0.02, 0.12, 0.02], Detail::Mittel, 100.0), vec![1, 1, 1]);
         assert_eq!(thin_layer_targets(&[0.02, 0.18, 0.003, 0.16, 0.015], Detail::Mittel, 100.0), vec![1, 1, 1, 3, 3]);
         assert_eq!(thin_layer_targets(&[0.01, 0.01], Detail::Mittel, 100.0), vec![0, 1], "nur dünne: unverändert");
         assert_eq!(thin_layer_targets(&[0.02, 0.12], Detail::Fein, 100.0), vec![0, 1]);
+        // [140] Teil 5: Schwelle 0.5 mm Papier — 4 cm Dämmung/Lattung (0.4 mm) geht in 1:100 auf, 6 cm bleibt;
+        // 1:200 (grob) fasst bis 10 cm zusammen.
+        assert_eq!(thin_layer_targets(&[0.04, 0.06, 0.18], Detail::Mittel, 100.0), vec![1, 1, 2]);
+        assert_eq!(thin_layer_targets(&[0.08, 0.18], Detail::Grob, 200.0), vec![1, 1]);
+        assert_eq!(thin_layer_targets(&[0.04, 0.18], Detail::Mittel, 50.0), vec![0, 1]);
     }
 
     fn area(pts: &[Vec2]) -> f64 {

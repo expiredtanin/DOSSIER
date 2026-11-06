@@ -25,6 +25,13 @@ pub fn room_centroid(pts: &[f64]) -> Vec<f64> {
     vec![c[0], c[1]]
 }
 
+/// [140] Ring `[x0, y0, …]` → Stempel-Anker `[x, y]` (Pol der Unzugänglichkeit, `room_area::label_point`).
+#[wasm_bindgen]
+pub fn room_label_point(pts: &[f64]) -> Vec<f64> {
+    let c = ra::label_point(&pairs(pts));
+    vec![c[0], c[1]]
+}
+
 /// Kategorie-Indizes und Flächen je Raum (gleich lang) →
 /// `[6 Flächen je Blatt-Kategorie, 6 Raumzahlen, 3 Flächen NF/NGF/GF, 3 Raumzahlen]`.
 /// Ungültige Indizes (NaN, ausserhalb) werden übergangen.

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { core } from "../engine/coreWasm";
-import { balance, centroid, evaluateRoom, polygonArea, roomsToCsv, SIA_CATEGORIES, siaLabel } from "./roomArea";
+import { balance, centroid, evaluateRoom, polygonArea, roomLabelPoint, roomsToCsv, SIA_CATEGORIES, siaLabel } from "./roomArea";
 
 describe("Kern-Anbindung", () => {
   it("Kategorie-Namen und -Reihenfolge stimmen mit dem Rust-Kern überein", () => {
@@ -121,5 +121,17 @@ describe("roomsToCsv() — Bilanzblock mit AGF", () => {
     const gfLine = lines.find((l) => l.includes(";GF;"));
     expect(gfLine).toBeDefined();
     expect(gfLine).toContain("26.00");
+  });
+});
+
+describe("roomLabelPoint", () => {
+  it("[140] liegt im L-Raum, nicht am Schwerpunkt ausserhalb", () => {
+    // schmales L: Schwerpunkt (≈ 1.4/1.4) liegt ausserhalb
+    const l = [{ x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 6 }, { x: 0, y: 6 }];
+    const c = centroid(l);
+    expect(c.x > 1 && c.y > 1).toBe(true);
+    const q = roomLabelPoint(l);
+    expect((q.x < 1 && q.y > 0 && q.y < 6) || (q.y < 1 && q.x > 0 && q.x < 6)).toBe(true);
+    expect(roomLabelPoint([{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 2 }, { x: 0, y: 2 }])).toEqual({ x: 2, y: 1 });
   });
 });

@@ -1,12 +1,12 @@
 viewBox -4.055 0 25.109 23.11
-bytes 374960
+bytes 369846
 circle 14
 g 1
-line 3350
-path 27
+line 3333
+path 21
 polygon 227
-polyline 195
+polyline 169
 rect 1
 svg 1
 text 91
-hash 6e48062b617631c7
+hash be529b7ce07ecad8

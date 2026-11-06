@@ -81,6 +81,7 @@ export {
   SIA_CATEGORIES,
   balance,
   centroid,
+  roomLabelPoint,
   evaluateRoom,
   polygonArea,
   roomsToCsv,

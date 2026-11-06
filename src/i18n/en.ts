@@ -1142,6 +1142,7 @@ export const en: Record<TranslationKey, string> = {
   "resources.viewTemplates.mono": "Ink",
   "resources.viewTemplates.shadows": "Shadows",
   "resources.viewTemplates.hiddenLines": "Hidden lines",
+  "resources.viewTemplates.cutHatch": "Hatched cut areas at 1:100 (instead of solid black)",
   "resources.viewTemplates.sketch": "Sketch style",
   "resources.viewTemplates.scaleLineWeights": "Scale line weights",
   "resources.viewTemplates.rangeHint": "View range (metres above finished floor): cut plane, top and bottom of the view depth, visible below down to.",

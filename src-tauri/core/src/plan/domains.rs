@@ -122,6 +122,12 @@ impl<'a> Ctx<'a> {
         self.a.show.contains(code)
     }
 
+    /// [140] Schnittflächen dieser Ebene schwarz (`style::solid_cut`; Feld `cutHatch` der Ebene).
+    pub fn solid_cut(&self) -> bool {
+        let cut_hatch = self.p.floor(&self.a.floor).and_then(|l| l.cut_hatch).unwrap_or(false);
+        solid_cut(self.a.detail, self.a.scale, cut_hatch)
+    }
+
     pub fn greyed(&self, code: &str) -> bool {
         self.a.grey.contains(code)
     }
@@ -614,37 +620,91 @@ fn with_alpha(color: &str, alpha: &str) -> String {
 
 /// [140] Kleinste Stempelschrift (2 mm Papier) für enge Räume.
 const ROOM_STAMP_MIN_PT: f64 = 2.0 / PT_MM;
-const PT_MM: f64 = 0.3528;
-/// Geschätzte Zeichenbreite und Zeilenhöhe je Schrifthöhe (Sans, Ziffern/Kleinbuchstaben).
-const STAMP_CHAR_W: f64 = 0.55;
-const STAMP_LINE_H: f64 = 1.25;
+const PT_MM: f64 = crate::text_layout::PT_TO_MM;
+/// [140] Rand um den Stempel: 5 % der Blockgrösse plus 0.5 mm Papier je Seite (Bildschirm-/Druckschrift
+/// weicht von Inter ab, z. B. Helvetica schmaler, DejaVu breiter).
+const STAMP_MARGIN: f64 = 1.05;
+const STAMP_PAD_MM: f64 = 0.5;
 
-/// [140] Raumstempel einpassen: passt der geschätzte Stempel (Zeichen × Zeilen bei `pt`) nicht in den
-/// Raum (`room_w` × `room_h`, Meter, Bounding-Box mit 5 % Rand), entfallen erst die Nutzungszeile, dann die
-/// Flächenzeile (Zusatzzeilen von hinten), danach sinkt die Schrift auf 2 mm Papier. `name_chars` = Zeichen
-/// je Namenszeile. Ergebnis: verbleibende Zusatzzeilen, Schriftgrösse (pt) und — passt selbst der Name in 2 mm
-/// nicht in die Breite — die Zeichenzahl, auf die er gekürzt wird (`Some(n)`, n ≥ 2, mit Punkt).
-fn fit_room_stamp(name_chars: &[usize], mut extra: Vec<StampLine>, pt: f64, scale: f64, room_w: f64, room_h: f64) -> (Vec<StampLine>, f64, Option<usize>) {
-    let fits = |extra: &[StampLine], pt: f64| {
-        let h = pt * PT_MM * scale / 1000.0;
-        let chars = name_chars.iter().copied().chain(extra.iter().map(|l| l.text.chars().count())).max().unwrap_or(0) as f64;
-        let rows = (name_chars.len() + extra.len()) as f64;
-        chars * STAMP_CHAR_W * h <= room_w * 0.95 && rows * STAMP_LINE_H * h <= room_h * 0.95
+/// [140] Ausmass des Stempels in Metern bei 1:`scale` (echte Schriftmetrik, `text_layout::stamp_block_size`)
+/// samt Rand.
+fn stamp_size_m(doc: &RichTextDoc, extra: &[StampLine], pt: f64, scale: f64) -> (f64, f64) {
+    let rows: Vec<(&str, crate::text_layout::LineAlign)> = extra.iter().map(|l| (l.text.as_str(), crate::text_layout::LineAlign::of(Some(l.align)))).collect();
+    let (w, h) = crate::text_layout::stamp_block_size(doc, &rows, pt, PT_MM * scale / 1000.0);
+    let pad = 2.0 * STAMP_PAD_MM * scale / 1000.0;
+    (w * STAMP_MARGIN + pad, h * STAMP_MARGIN + pad)
+}
+
+/// [140] Raumstempel einpassen. `place(breite, höhe)` sucht eine Lage im Raum, an der das Rechteck des
+/// Stempels ganz im Raumumriss liegt (auch L-förmige Räume, `room_area::rect_in_ring`), und gibt sie zurück.
+/// Passt der Stempel (Breite aus der Schriftmetrik, Höhe aus den Zeilen) bei `pt` nirgends, entfallen erst
+/// die Nutzungszeile, dann die Flächenzeile (Zusatzzeilen von hinten), danach sinkt die Schrift auf 2 mm
+/// Papier (je Schrift zuerst der Name mit, dann ohne eigene Schriftgrössen; mit kleinerer Schrift dürfen
+/// Zusatzzeilen wieder dazu), zuletzt wird der Name gekürzt. Ergebnis: Zusatzzeilen,
+/// Schriftgrösse (pt), Ersatz für den Namen (`Some`: ohne Auszeichnungen bzw. gekürzt, „Trep.") und die
+/// Lage (`None`: passt nirgends, der Aufrufer behält seinen Anker).
+fn fit_room_stamp(doc: &RichTextDoc, extra: Vec<StampLine>, pt: f64, scale: f64, place: &dyn Fn(f64, f64) -> Option<Vec2>) -> (Vec<StampLine>, f64, Option<RichTextDoc>, Option<Vec2>) {
+    if !(scale > 0.0) || !scale.is_finite() {
+        return (extra, pt, None, None);
+    }
+    let at = |doc: &RichTextDoc, extra: &[StampLine], pt: f64| {
+        let (w, h) = stamp_size_m(doc, extra, pt, scale);
+        place(w, h)
     };
-    if !(scale > 0.0) || !(room_w > 0.0) || !(room_h > 0.0) {
-        return (extra, pt, None);
+    let text = crate::text_layout::plain_text(doc);
+    // Name mit eigenen Schriftgrössen (Stempel: Name 12 pt fett) schrumpft nicht mit `pt`: dann ohne
+    // Auszeichnungen in der Grundschrift (Ersatz `Some`).
+    let plain = doc_from_text(&text);
+    let mut steps: Vec<(Option<&RichTextDoc>, f64)> = vec![(None, pt), (Some(&plain), pt)];
+    if pt > ROOM_STAMP_MIN_PT {
+        steps.extend([(None, ROOM_STAMP_MIN_PT), (Some(&plain), ROOM_STAMP_MIN_PT)]);
     }
-    while !fits(&extra, pt) && !extra.is_empty() {
-        extra.pop();
+    for (variant, pt) in steps {
+        let mut e = extra.clone();
+        loop {
+            if let Some(q) = at(variant.unwrap_or(doc), &e, pt) {
+                return (e, pt, variant.cloned(), Some(q));
+            }
+            if e.pop().is_none() {
+                break;
+            }
+        }
     }
-    if fits(&extra, pt) || pt <= ROOM_STAMP_MIN_PT {
-        return (extra, pt, None);
+    let pt = pt.min(ROOM_STAMP_MIN_PT);
+    let longest = text.split('\n').map(|l| l.chars().count()).max().unwrap_or(0);
+    for n in (2..longest).rev() {
+        let d = doc_from_text(&abbreviate(&text, n));
+        if let Some(q) = at(&d, &[], pt) {
+            return (Vec::new(), pt, Some(d), Some(q));
+        }
     }
-    let pt = ROOM_STAMP_MIN_PT;
-    let h = pt * PT_MM * scale / 1000.0;
-    let max_chars = (room_w * 0.95 / (STAMP_CHAR_W * h)).floor() as usize;
-    let longest = name_chars.iter().copied().max().unwrap_or(0);
-    (extra, pt, (longest > max_chars).then_some(max_chars.max(2)))
+    (Vec::new(), pt, Some(doc_from_text(&abbreviate(&text, 2))), None)
+}
+
+/// [140] Lagen für einen Raumstempel ohne eigenen Anker: zuerst der Pol der Unzugänglichkeit, dann Punkte
+/// eines Rasters über dem Raum (nach Abstand zum Pol) — passt der Stempel am Pol nicht (L-Raum, Name breiter
+/// als der Flügel um den Pol), rückt er dorthin, wo er ganz im Raum liegt.
+fn stamp_candidates(ring: &[[f64; 2]], pole: Vec2) -> Vec<Vec2> {
+    const N: usize = 24;
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for q in ring {
+        x0 = x0.min(q[0]);
+        y0 = y0.min(q[1]);
+        x1 = x1.max(q[0]);
+        y1 = y1.max(q[1]);
+    }
+    let mut out = vec![pole];
+    if !(x1 > x0 && y1 > y0) {
+        return out;
+    }
+    let mut grid: Vec<Vec2> = (0..N)
+        .flat_map(|i| (0..N).map(move |j| Vec2 { x: x0 + (x1 - x0) * (i as f64 + 0.5) / N as f64, y: y0 + (y1 - y0) * (j as f64 + 0.5) / N as f64 }))
+        .filter(|q| crate::room_area::rect_in_ring(ring, q.x, q.y, 0.0, 0.0))
+        .collect();
+    let d = |q: &Vec2| (q.x - pole.x) * (q.x - pole.x) + (q.y - pole.y) * (q.y - pole.y);
+    grid.sort_by(|a, b| d(a).total_cmp(&d(b)));
+    out.extend(grid);
+    out
 }
 
 /// Namenszeilen auf `n` Zeichen kürzen (n − 1 Zeichen und Punkt), Leerzeichen am Schnitt weg.
@@ -672,7 +732,10 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         if c.a.detail == Detail::Grob && !c.a.auto_coarse {
             continue;
         }
-        let at = room.stamp_anchor.unwrap_or(pv(res.centroid));
+        // [140] Ohne eigenen Anker: Pol der Unzugänglichkeit (liegt auch in L-Räumen im Raum); passt der
+        // Stempel dort nicht, rückt er im Raum dorthin, wo er passt (`stamp_candidates`).
+        let pole = pv(crate::room_area::label_point(&pts));
+        let at = room.stamp_anchor.unwrap_or(pole);
         let small = c.a.scale >= ROOM_STAMP_SMALL_FROM;
         // [140] Übersicht (ab 1:500, automatisch grob): nur der Name.
         let overview = c.a.auto_coarse && c.a.scale >= OVERVIEW_FROM;
@@ -692,15 +755,15 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 (room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)), lines)
             }
         };
-        let (x0, x1) = room.boundary.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q.x), a.1.max(q.x)));
-        let (y0, y1) = room.boundary.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q.y), a.1.max(q.y)));
-        let name_chars: Vec<usize> = crate::text_layout::plain_text(&doc).split('\n').map(|l| l.chars().count()).collect();
-        let (extra_lines, base_pt, cut) = fit_room_stamp(&name_chars, extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, x1 - x0, y1 - y0);
-        // Passt der Name selbst in 2 mm nicht: gekürzt (z. B. „Treppenh."), ohne Auszeichnungen.
-        let doc = match cut {
-            Some(n) => doc_from_text(&abbreviate(&crate::text_layout::plain_text(&doc), n)),
-            None => doc,
+        let candidates = if room.stamp_anchor.is_some() { vec![at] } else { stamp_candidates(&pts, pole) };
+        // Mit Luft (1.3 × Breite/Höhe) zuerst, damit der Stempel nicht an der Wand klebt; sonst knapp.
+        let place = |w: f64, h: f64| {
+            let fit = |k: f64| candidates.iter().copied().find(|q| crate::room_area::rect_in_ring(&pts, q.x, q.y, k * w / 2.0, k * h / 2.0));
+            fit(1.3).or_else(|| fit(1.0))
         };
+        let (extra_lines, base_pt, name, placed) = fit_room_stamp(&doc, extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, &place);
+        let at = placed.unwrap_or(at);
+        let doc = name.unwrap_or(doc);
         out.push(Primitive::Text { at, doc, extra_lines, base_pt, color: text_color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
     }
 }
@@ -741,6 +804,11 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
                 fill = bg.unwrap_or(if h.pattern == HatchPattern::Solid { HATCH_INK } else { HATCH_PAPER }).to_string();
                 hatch = h;
             }
+        }
+        // [140] Geschnittene Stütze ab 1:100 schwarz ohne Schraffur (`style::solid_cut`).
+        if zone == super::view_range::Zone::Cut && c.solid_cut() {
+            fill = HATCH_INK.to_string();
+            hatch = no_hatch();
         }
         let fp = crate::model3d::column_footprint(col);
         // [141] Geschnittene Wände, die in der (geschnittenen) Stütze enden: prioritärere Wand beschneidet
@@ -842,7 +910,8 @@ fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
             // [G1] Schnittfläche auf Schnitthöhe (Poché); der Umriss darunter bleibt als Projektion.
             if zone == super::view_range::Zone::Cut {
                 if let Some(ring) = body_cut_ring(s, zb, range.cut) {
-                    out.push(polygon(ring, super::section::BODY_FILL, POCHE_STROKE, WALL_FALLBACK_MM, super::section::section_hatch(), None, None, Pick::Solid(&s.id)));
+                    let (fill, hatch) = if c.solid_cut() { (HATCH_INK, no_hatch()) } else { (super::section::BODY_FILL, super::section::section_hatch()) };
+                    out.push(polygon(ring, fill, POCHE_STROKE, WALL_FALLBACK_MM, hatch, None, None, Pick::Solid(&s.id)));
                 }
             }
         }
@@ -1154,8 +1223,9 @@ mod tests {
         };
         assert_eq!(stamp(100.0), (ROOM_STAMP_PT, 2));
         assert_eq!(stamp(200.0), (ROOM_STAMP_SMALL_PT, 1));
-        // [140] 1:500 (mittel → automatisch grob): nur der Name; Stempel in Tinte.
-        assert_eq!(stamp(500.0), (ROOM_STAMP_SMALL_PT, 0));
+        // [140] 1:500 (mittel → automatisch grob): nur der Name; Stempel in Tinte. „Wohnen" ist in 7 pt
+        // (Inter-Metrik 3.9 em ≈ 9.7 mm) breiter als der 9.3 mm breite Raum → 2 mm Schrift.
+        assert_eq!(stamp(500.0), (ROOM_STAMP_MIN_PT, 0));
         let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 100 }).to_string();
         let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
         assert!(r.rooms.iter().all(|q| !matches!(q, Primitive::Text { color, .. } if color != MONO_INK)), "Stempel in Tinte");
@@ -1172,24 +1242,96 @@ mod tests {
     }
 
     /// [140] Enger Raum: erst ohne Nutzungszeile, dann ohne Fläche, dann 2 mm Schrift; grosser Raum unverändert.
+    /// Breite aus der Schriftmetrik (Inter), Platz aus dem Raumumriss um den Anker.
     #[test]
     fn raumstempel_passt_in_engen_raum() {
         let extra = || vec![StampLine { text: "4.6 m²".into(), align: Align::Center }, StampLine { text: "NNF · Nebennutzfläche".into(), align: Align::Center }];
-        let name = [8usize]; // „E.04 Bad"
-        let (e, pt, cut) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, 6.0, 4.0);
-        assert_eq!((e.len(), pt, cut), (2, ROOM_STAMP_PT, None));
-        let (e, pt, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, 1.8, 2.4);
+        let name = doc_from_text("E.04 Bad");
+        let room = |w: f64, h: f64| move |sw: f64, sh: f64| (sw <= w && sh <= h).then_some(Vec2 { x: 0.0, y: 0.0 });
+        let (e, pt, d, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(6.0, 4.0));
+        assert_eq!((e.len(), pt, d.is_none()), (2, ROOM_STAMP_PT, true));
+        let (e, pt, _, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(1.8, 2.4));
         assert_eq!((e.len(), pt), (1, ROOM_STAMP_PT), "ohne Nutzung");
-        let (e, pt, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, 1.8, 0.8);
+        let (e, pt, _, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(1.8, 0.6));
         assert_eq!((e.len(), pt), (0, ROOM_STAMP_PT), "nur der Name");
-        let (e, pt, cut) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, 1.2, 0.8);
-        assert_eq!((e.len(), cut), (0, None));
+        let (e, pt, d, at) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(1.2, 0.8));
+        // In 2 mm passt die Flächenzeile wieder dazu.
+        assert_eq!((e.len(), d.is_none(), at.is_some()), (1, true, true));
         assert!((pt * PT_MM - 2.0).abs() < 1e-9, "2 mm Papier");
-        // 1:500, „Treppenhaus" in 3 m: auch 2 mm (1 m Schrift) zu breit → gekürzt.
-        let (_, _, cut) = fit_room_stamp(&[11], vec![], ROOM_STAMP_SMALL_PT, 500.0, 3.0, 4.0);
-        assert_eq!(cut, Some(5));
+        // 1:500, „Treppenhaus" in 3 m: auch 2 mm (1 m Schrift) zu breit → gekürzt, so dass es passt.
+        let (_, _, d, _) = fit_room_stamp(&doc_from_text("Treppenhaus"), vec![], ROOM_STAMP_SMALL_PT, 500.0, &room(3.0, 4.0));
+        let t = crate::text_layout::plain_text(&d.unwrap());
+        assert!(t.ends_with('.') && t.len() >= 4 && t.len() <= 7, "{t}");
+        let (w, _) = stamp_size_m(&doc_from_text(&t), &[], ROOM_STAMP_MIN_PT, 500.0);
+        assert!(w <= 3.0, "{w}");
+        // Name mit eigener Grösse (12 pt fett) schrumpft nicht mit der Schrift: in 2 mm ohne Auszeichnung.
+        let s = RoomStamp { number: Some("E.03".into()), name: "Wohnen/Essen".into(), ..Default::default() };
+        let (_, _, d, _) = fit_room_stamp(&room_stamp_to_doc(&s), vec![], ROOM_STAMP_PT, 100.0, &room(3.0, 2.0));
+        assert_eq!(crate::text_layout::plain_text(&d.unwrap()), "E.03 Wohnen/Essen");
+        // Schmale Zeichen passen besser als breite (echte Metrik statt fester Zeichenbreite).
+        let (wi, _) = stamp_size_m(&doc_from_text("Lift"), &[], ROOM_STAMP_PT, 100.0);
+        let (ww, _) = stamp_size_m(&doc_from_text("WMWM"), &[], ROOM_STAMP_PT, 100.0);
+        assert!(wi < 0.6 * ww, "{wi} {ww}");
         assert_eq!(abbreviate("Treppenhaus", 5), "Trep.");
         assert_eq!(abbreviate("Bad", 5), "Bad");
+    }
+
+    /// [140] L-förmiger Raum ohne eigenen Anker: Stempel im Raum (Pol der Unzugänglichkeit), nicht am
+    /// Schwerpunkt ausserhalb; Platz für den Stempel aus dem Flügel, nicht aus der Bounding-Box.
+    #[test]
+    fn raumstempel_im_l_raum() {
+        let mut p = sample();
+        let rooms = p.rooms.as_mut().unwrap();
+        let r = rooms.iter_mut().find(|r| r.floor_id == "eg").unwrap();
+        let l = [(0.0, 0.0), (8.0, 0.0), (8.0, 1.2), (1.2, 1.2), (1.2, 8.0), (0.0, 8.0)];
+        r.boundary = l.iter().map(|&(x, y)| Vec2 { x: x + 50.0, y: y + 50.0 }).collect();
+        r.stamp_anchor = None;
+        r.stamp = None;
+        let id = r.id.clone();
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 100 }).to_string();
+        let out = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        let (at, extra) = out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), extra_lines, .. } if *rid == id => Some((*at, extra_lines.len())), _ => None }).unwrap();
+        let ring: Vec<[f64; 2]> = l.iter().map(|&(x, y)| [x + 50.0, y + 50.0]).collect();
+        assert!(crate::room_area::rect_in_ring(&ring, at.x, at.y, 0.01, 0.01), "Anker im Raum: {at:?}");
+        // Die Bounding-Box (8 × 8 m) hätte alle Zeilen erlaubt; der 1.2 m breite Flügel weniger.
+        assert!(extra < 2, "{extra}");
+        // Langer Name: rückt im Flügel vom Pol weg, bis er ganz im Raum liegt (statt gekürzt zu werden).
+        p.rooms.as_mut().unwrap().iter_mut().find(|r| r.id == id).unwrap().name = "Wohnen Essen Kochen".into();
+        let out = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        let (at, doc) = out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, .. } if *rid == id => Some((*at, doc.clone())), _ => None }).unwrap();
+        assert_eq!(crate::text_layout::plain_text(&doc), "Wohnen Essen Kochen");
+        let (w, _) = stamp_size_m(&doc, &[], ROOM_STAMP_PT, 100.0);
+        assert!(crate::room_area::rect_in_ring(&ring, at.x, at.y, w / 2.0, 0.1), "{at:?} {w}");
+    }
+
+    /// [140] Teil 5: Schnittflächen ab 1:100 schwarz (Wände als Sammelfläche ohne Fugen/Schraffur, Stützen
+    /// schwarz), 1:50 mit Schichten und Schraffur; Ebene „Schnittflächen schraffiert" übersteuert das 1:100.
+    #[test]
+    fn schnittflaechen_schwarz_ab_1_100() {
+        let mut p = sample();
+        p.columns = Some(vec![Column { id: "S1".into(), floor_id: "eg".into(), category_code: "20".into(), position: Vec2 { x: 2.0, y: 2.0 }, profile: ColumnProfile::Rect { width: 0.3, depth: 0.3 }, height: 2.6, component_id: p.components.first().map(|c| c.id.clone()), ..Default::default() }]);
+        let run = |p: &Project, scale: f64| {
+            let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": scale }).to_string();
+            plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap()
+        };
+        let walls = |r: &DomainPrims| {
+            let hatched = r.walls.iter().filter(|q| matches!(q, Primitive::Polygon { hatch, .. } if hatch.pattern != HatchPattern::None)).count();
+            let ink = r.walls.iter().filter(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == HATCH_INK)).count();
+            let joints = r.walls.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls.starts_with("layer-joint"))).count();
+            (hatched, ink, joints)
+        };
+        let col_fill = |r: &DomainPrims| r.columns.iter().find_map(|q| match q { Primitive::Polygon { fill, hatch, column_id: Some(_), .. } => Some((fill.clone(), hatch.pattern)), _ => None }).unwrap();
+        let r100 = run(&p, 100.0);
+        let (h, ink, j) = walls(&r100);
+        assert!(h == 0 && ink > 0 && j == 0, "1:100 schwarz: {h} {ink} {j}");
+        assert_eq!(col_fill(&r100), (HATCH_INK.to_string(), HatchPattern::None));
+        let r50 = run(&p, 50.0);
+        let (h, ink, _) = walls(&r50);
+        assert!(h > 0 && ink == 0, "1:50 schraffiert: {h} {ink}");
+        assert_ne!(col_fill(&r50).0, HATCH_INK);
+        p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().cut_hatch = Some(true);
+        let (h, ink, _) = walls(&run(&p, 100.0));
+        assert!(h > 0 && ink == 0, "Ebene schraffiert: {h} {ink}");
     }
 
     /// [140] „mittel" ab 1:200 wie „grob" (Wände als Sammelfläche), „fein" bleibt; explizit „grob" ohne Stempel.
@@ -1579,8 +1721,9 @@ mod tests {
         p.ceilings = Some(vec![]);
         p.rooms = Some(vec![]);
         p.walls[0].bulge = Some(1.0); // Halbkreis (0,0)→(5,0), Mitte (2.5,0), r 2.5, Scheitel oben
+        // Detail „fein": alle Schichten (mittel fasst ab 1:50 dünne Schichten zusammen, [140]).
         let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": 50 }).to_string();
-        let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        let r = plan_domains(&p, &PlanArgs::parse(2.0, &t).unwrap()).unwrap();
         let (r_in, r_out) = (2.5 - 0.345 / 2.0, 2.5 + 0.345 / 2.0);
         let mut band_area = 0.0;
         let mut arcs = 0;
@@ -1636,6 +1779,8 @@ mod tests {
             ..Default::default()
         };
         p.extruded_solids = Some(vec![mk("block", 0.0, 2.0, None, None), mk("pyr", 0.0, 2.0, Some(1.0), None), mk("hoch", 1.5, 1.0, None, None), mk("void", 0.0, 2.0, None, Some("subtract"))]);
+        // [140] Ebene „Schnittflächen schraffiert" (sonst ab 1:100 schwarz, s. unten).
+        p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().cut_hatch = Some(true);
         let cut = super::super::extras::cut_z(&p, "eg");
         let base = p.floor("eg").and_then(|f| f.base_elevation).unwrap_or(0.0);
         assert!(cut > base && cut < base + 1.5, "Schnitthöhe {cut}");

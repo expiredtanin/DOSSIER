@@ -83,6 +83,8 @@ pub struct LevelSpec {
     pub hidden_lines: bool,
     /// Skizzenstil ([67]).
     pub sketch: bool,
+    /// [140] Schnittflächen auch ab 1:100 schraffiert statt schwarz (`style::solid_cut`).
+    pub cut_hatch: bool,
 }
 
 impl LevelSpec {
@@ -98,6 +100,7 @@ impl LevelSpec {
             shadows: v.get("shadows").and_then(|b| b.as_bool()).unwrap_or(false),
             hidden_lines: v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false),
             sketch: v.get("sketch").and_then(|b| b.as_bool()).unwrap_or(false),
+            cut_hatch: v.get("cutHatch").and_then(|b| b.as_bool()).unwrap_or(false),
         }
     }
 
@@ -2265,10 +2268,6 @@ impl Acc {
     }
 }
 
-/// [140] Ab diesem Massstab (1:75 und kleiner) gehen dünne geschnittene Schichten in der Nachbarschicht auf
-/// (Detail „mittel" ab 1:100 wie die Wände im Grundriss, `walls::thin_layer_targets`); 1:50 zeigt alle.
-const THIN_MERGE_FROM: f64 = 75.0;
-
 fn ring_len(r: &[[f64; 2]]) -> f64 {
     (0..r.len()).map(|i| { let (a, b) = (r[i], r[(i + 1) % r.len()]); hypot2(b[0] - a[0], b[1] - a[1]) }).sum()
 }
@@ -2286,11 +2285,11 @@ fn ring_bbox(r: &[[f64; 2]]) -> [f64; 4] {
     r.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
 }
 
-/// [140] Dämmschichten (Dämmschlange, Zickzack, Welle) unter [`THIN_INSULATION_PAPER_MM`] Papierdicke ab 1:75
+/// [140] Dämmschichten (Dämmschlange, Zickzack, Welle) unter der gemeinsamen Schwelle (`style::is_thin_layer`, 0.5 mm Papier) ab 1:75
 /// ohne Muster (nur Füllung und feine Fuge): die Schlange einer 3–4 cm Trittschalldämmung wäre in 1:100 ein
 /// dichter Zickzack-Balken. 1:50 (und `scale` 0) zeichnet sie immer.
 pub fn plain_thin_insulation(mut cuts: Vec<Cut>, scale: f64) -> Vec<Cut> {
-    if !(scale >= THIN_MERGE_FROM) || !scale.is_finite() {
+    if !simplify_thin_layers(Detail::Mittel, scale) {
         return cuts;
     }
     for c in &mut cuts {
@@ -2300,28 +2299,25 @@ pub fn plain_thin_insulation(mut cuts: Vec<Cut>, scale: f64) -> Vec<Cut> {
         }
         let half = ring_len(&c.pts) / 2.0;
         let thick = if half > 0.0 { ring_area(&c.pts) / half } else { 0.0 };
-        if thick * 1000.0 / scale < THIN_INSULATION_PAPER_MM {
+        if is_thin_layer(thick, scale) {
             h.pattern = HatchPattern::None;
         }
     }
     cuts
 }
 
-/// [140] Papierdicke (mm), unter der Dämmschichten ab 1:75 ohne Muster gezeichnet werden.
-pub const THIN_INSULATION_PAPER_MM: f64 = 0.5;
-
 /// [140] Dünne Schnitt-Schichten (Putz, Parkett, Trittschall, Folien) bei 1:`scale` zusammenfassen: eine Schicht
-/// unter [`walls::THIN_LAYER_PAPER_MM`] Papierdicke (Dicke ≈ Fläche / halber Umfang) übernimmt Füllung und
+/// unter 0.5 mm Papierdicke (`style::is_thin_layer`; Dicke ≈ Fläche / halber Umfang) übernimmt Füllung und
 /// Schraffur der dickeren Nachbarschicht desselben Bauteils, mit der sie die längste Kante teilt, und wird mit
 /// ihr zu einer Fläche vereinigt (keine Fuge dazwischen). Unter 1:75 (oder `scale` 0) unverändert.
 pub fn merge_thin_cuts(cuts: &[Cut], scale: f64) -> Vec<Cut> {
-    if !(scale >= THIN_MERGE_FROM) || !scale.is_finite() {
+    if !simplify_thin_layers(Detail::Mittel, scale) {
         return cuts.to_vec();
     }
     let n = cuts.len();
     let mergeable = |c: &Cut| matches!(c.kind, Kind::Wall | Kind::Slab | Kind::Roof) && c.stair_id.is_none() && c.pts.len() >= 3;
     let thick: Vec<f64> = cuts.iter().map(|c| { let half = ring_len(&c.pts) / 2.0; if half > 0.0 { ring_area(&c.pts) / half } else { 0.0 } }).collect();
-    let thin: Vec<bool> = (0..n).map(|i| mergeable(&cuts[i]) && thick[i] > 0.0 && thick[i] * 1000.0 / scale < super::walls::THIN_LAYER_PAPER_MM).collect();
+    let thin: Vec<bool> = (0..n).map(|i| mergeable(&cuts[i]) && thick[i] > 0.0 && is_thin_layer(thick[i], scale)).collect();
     if !thin.iter().any(|t| *t) {
         return cuts.to_vec();
     }
@@ -2396,12 +2392,16 @@ pub fn merge_thin_cuts(cuts: &[Cut], scale: f64) -> Vec<Cut> {
 
 /// `generateSectionPlan`: Primitive (u → x, Höhe → y) und Ausmass.
 pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility) -> (Vec<Primitive>, [f64; 4]) {
-    section_primitives_at(out, mono, hidden_lines, vis, 0.0)
+    section_primitives_at(out, mono, hidden_lines, vis, 0.0, Detail::Mittel, false)
 }
 
-/// [`section_primitives`] beim Massstab 1:`scale` (dünne Schichten zusammengefasst, [`merge_thin_cuts`]).
-pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64) -> (Vec<Primitive>, [f64; 4]) {
-    let merged = plain_thin_insulation(merge_thin_cuts(&out.cuts, scale), scale);
+/// [`section_primitives`] beim Massstab 1:`scale` (dünne Schichten zusammengefasst, [`merge_thin_cuts`];
+/// Detail „fein" zeigt alle Schichten, `style::simplify_thin_layers`). Ab 1:100 (`style::solid_cut`, ausser
+/// `cut_hatch`/„fein") sind die geschnittenen Flächen schwarz ohne Fugen und Schraffur, nur mit dem Umriss.
+pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64, detail: Detail, cut_hatch: bool) -> (Vec<Primitive>, [f64; 4]) {
+    let black = solid_cut(detail, scale, cut_hatch);
+    let thin_scale = if simplify_thin_layers(detail, scale) && !black { scale } else { 0.0 };
+    let merged = plain_thin_insulation(merge_thin_cuts(&out.cuts, thin_scale), thin_scale);
     let mut prims = Vec::new();
     let mut acc = Acc::new();
     let shown = |code: &str| vis.visible(code) && vis.render(code);
@@ -2438,7 +2438,9 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
         let fill = cp.fill.as_deref().unwrap_or(HATCH_PAPER);
         let hatch = cp.hatch.clone().unwrap_or_else(section_hatch);
         let solid = hatch.pattern == HatchPattern::Solid;
-        let (fill, hatch) = if mono {
+        let (fill, hatch) = if black {
+            (HATCH_INK.to_string(), no_hatch())
+        } else if mono {
             let mono_fill = if solid { HATCH_INK } else { HATCH_PAPER };
             let mono_hatch = if !solid && hatch.pattern != HatchPattern::None { HatchRender { color: SECTION_INK.into(), ..hatch } } else { hatch };
             (mono_fill.to_string(), mono_hatch)
@@ -2446,7 +2448,7 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
             (fill.to_string(), hatch)
         };
         let src = cp.source_id.clone();
-        let mut pr = polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch);
+        let mut pr = if black { polygon(pts, &fill, "none", 0.0, hatch) } else { polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch) };
         if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, no_stroke_edges, greyed, .. } = &mut pr {
             *wall_id = if cp.kind == Kind::Wall { src.clone() } else { None };
             *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() { src.clone() } else { None };
@@ -2955,7 +2957,8 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     };
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
-    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale);
+    let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
+    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch);
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     super::extras::scale_line_weights(p, scale, &mut prims);
@@ -3142,7 +3145,8 @@ mod tests {
         };
         // Parkett 1 cm, Unterlagsboden 8 cm, Trittschall 2 cm, Beton 22 cm, Putz 1 cm
         let cuts = vec![mk(0.32, 0.33, "#a"), mk(0.24, 0.32, "#b"), mk(0.22, 0.24, "#c"), mk(0.0, 0.22, "#d"), mk(-0.01, 0.0, "#e")];
-        assert_eq!(merge_thin_cuts(&cuts, 50.0).len(), 5, "1:50: alle Schichten");
+        assert_eq!(merge_thin_cuts(&cuts, 20.0).len(), 5, "1:20: alle Schichten");
+        assert_eq!(merge_thin_cuts(&cuts, 50.0).len(), 2, "1:50 (Teil 5): dünne Schichten zusammengefasst");
         let m = merge_thin_cuts(&cuts, 100.0);
         assert_eq!(m.len(), 2, "{:?}", m.iter().map(|c| (c.fill.clone(), ring_bbox(&c.pts))).collect::<Vec<_>>());
         let total: f64 = m.iter().map(|c| ring_area(&c.pts)).sum();
@@ -3159,6 +3163,36 @@ mod tests {
         let mut other = cuts.clone();
         other[0].source_id = Some("D2".into());
         assert!(merge_thin_cuts(&other, 100.0).iter().any(|c| c.fill.as_deref() == Some("#a")));
+        // [140] Teil 5: Trittschall 4 cm (0.4 mm Papier) geht in 1:100 auf, Unterlagsboden 6.5 cm bleibt.
+        let cuts = vec![mk(0.30, 0.315, "#a"), mk(0.235, 0.30, "#b"), mk(0.195, 0.235, "#c"), mk(0.0, 0.195, "#d")];
+        let m = merge_thin_cuts(&cuts, 100.0);
+        assert_eq!(m.len(), 2);
+        assert!(m.iter().all(|c| c.fill.as_deref() != Some("#c") && c.fill.as_deref() != Some("#a")));
+        assert_eq!(merge_thin_cuts(&cuts, 50.0).len(), 3, "1:50: Trittschall (0.8 mm) bleibt, Parkett nicht");
+        assert_eq!(merge_thin_cuts(&cuts, 20.0).len(), 4);
+    }
+
+    /// [140] Teil 5: Schnitt 1:100 — geschnittene Flächen schwarz ohne Fuge/Schraffur, Umriss bleibt;
+    /// 1:50, „fein" und `cutHatch` mit Schraffur und Fugen.
+    #[test]
+    fn schnittflaechen_schwarz_ab_1_100() {
+        let p = sample();
+        let l = level(&p, "schnitt-a");
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let vis = Visibility::default();
+        let stat = |scale: f64, detail: Detail, cut_hatch: bool| {
+            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, detail, cut_hatch);
+            let cuts: Vec<_> = prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, stroke, wall_id, ceiling_id, .. } if wall_id.is_some() || ceiling_id.is_some() => Some((fill.clone(), hatch.pattern, stroke.clone())), _ => None }).collect();
+            let outline = prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "section-cut-outline")).count();
+            (cuts, outline)
+        };
+        let (c, o) = stat(100.0, Detail::Mittel, false);
+        assert!(!c.is_empty() && o > 0);
+        assert!(c.iter().all(|(f, h, s)| f == HATCH_INK && *h == HatchPattern::None && s == "none"), "{c:?}");
+        for (scale, detail, ch) in [(50.0, Detail::Mittel, false), (100.0, Detail::Fein, false), (100.0, Detail::Mittel, true)] {
+            let (c, _) = stat(scale, detail, ch);
+            assert!(c.iter().any(|(f, h, s)| f != HATCH_INK && *h != HatchPattern::None && s != "none"), "{scale} {detail:?} {ch}");
+        }
     }
 
     /// [140] Trittschall 4 cm: 1:100 (0.4 mm Papier) ohne Zickzack, 1:50 mit; dicke Dämmung bleibt.
@@ -3817,7 +3851,7 @@ mod ts_faelle {
         let mut p = Project::default();
         // quer: von der Ebene geschnitten und weit nach hinten; nah: 3 m, fern: 10 m hinter der Ebene (höher).
         p.walls = vec![wall("quer", (0.0, -1.0), (0.0, 12.0), 2.5), wall("nah", (2.0, 3.0), (6.0, 3.0), 2.5), wall("fern", (2.0, 10.0), (6.0, 10.0), 4.0)];
-        let lv = |depth: Option<f64>| LevelSpec { sketch: false, kind: "section".into(), line: Some([Vec2 { x: -1.0, y: 0.0 }, Vec2 { x: 8.0, y: 0.0 }]), direction_sign: Some(1.0), depth, shadows: false, hidden_lines: false };
+        let lv = |depth: Option<f64>| LevelSpec { sketch: false, cut_hatch: false, kind: "section".into(), line: Some([Vec2 { x: -1.0, y: 0.0 }, Vec2 { x: 8.0, y: 0.0 }]), direction_sign: Some(1.0), depth, shadows: false, hidden_lines: false };
         let top = |o: &Output| o.visible.iter().map(|e| e.a[1].max(e.b[1])).fold(f64::NEG_INFINITY, f64::max);
         let all = compute_section(&p, &lv(None), &[]).unwrap().unwrap();
         assert!(top(&all) > 3.9, "ohne Tiefe ist die ferne Wand sichtbar: {}", top(&all));
