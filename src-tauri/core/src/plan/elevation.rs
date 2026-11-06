@@ -103,18 +103,23 @@ struct SurfOv {
     outline: Option<bool>,
     color: Option<String>,
     lineweight: Option<f64>,
+    /// Linienstil der Regel (Strichmuster; `Some(None)` = durchgezogen).
+    dash: Option<Option<Vec<f64>>>,
     hide: bool,
 }
 
 impl SurfOv {
-    /// Linie in Regel-Farbe/-Stärke.
+    /// Linie in Regel-Farbe/-Stärke/-Linienstil.
     fn restyle(&self, mut l: Primitive) -> Primitive {
-        if let Primitive::Line { color, weight_mm, .. } = &mut l {
+        if let Primitive::Line { color, weight_mm, dash, .. } = &mut l {
             if let Some(c) = &self.color {
                 *color = Some(c.clone());
             }
             if let Some(w) = self.lineweight {
                 *weight_mm = w;
+            }
+            if let Some(d) = &self.dash {
+                *dash = Some(d.clone());
             }
         }
         l
@@ -141,8 +146,9 @@ fn surf_ov(p: &Project, v: RuleView, kind: &str, code: &str, name: Option<&str>,
         Some("none") => (true, None),
         Some(id) => super::style::resolve_hatch(p, id, None, None, None).map_or((false, None), |h| (true, Some(h))),
     };
-    let o = SurfOv { fill: ly.fill_color, no_pattern, hatch, outline: ly.outline, color: el.color, lineweight: el.lineweight, hide: hide == Some(true) };
-    (o.fill.is_some() || o.no_pattern || o.outline.is_some() || o.color.is_some() || o.lineweight.is_some() || o.hide).then(|| Rc::new(o))
+    let dash = ovr::linetype_dash(p, el.linetype_id.as_deref());
+    let o = SurfOv { fill: ly.fill_color, no_pattern, hatch, outline: ly.outline, color: el.color, lineweight: el.lineweight, dash, hide: hide == Some(true) };
+    (o.fill.is_some() || o.no_pattern || o.outline.is_some() || o.color.is_some() || o.lineweight.is_some() || o.dash.is_some() || o.hide).then(|| Rc::new(o))
 }
 
 /// [33] Override-Regeln je Ansichtsfläche: Wand (Wandtyp, sichtbare Seite = äusserste bzw. innerste
@@ -1527,6 +1533,21 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         }
     }
 
+    // [33] Schlagschatten über Regeln (Bauteilart „Schatten“): Ausblenden, Füllung, Linie (Umriss).
+    let sov = if shadows { super::overrides::shadow_override(p, rv) } else { None };
+    let shadows = shadows && !sov.as_ref().is_some_and(|(a, _)| a.hidden());
+    let shadow_style = |mut q: Primitive| -> Primitive {
+        if let (Some((a, l)), Primitive::Polygon { fill, stroke, stroke_width_mm, .. }) = (&sov, &mut q) {
+            if let Some(f) = &l.fill_color {
+                *fill = f.clone();
+            }
+            if a.color.is_some() || a.lineweight.is_some() {
+                *stroke = a.color.clone().unwrap_or_else(|| EDGE_INK.into());
+                *stroke_width_mm = a.lineweight.unwrap_or(EDGE_MM);
+            }
+        }
+        q
+    };
     if shadows {
         let wall_faces: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Wall).collect();
         let mut casters: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Slab).collect();
@@ -1550,7 +1571,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
             if let Primitive::Polygon { context_object_id, .. } = &mut prim {
                 *context_object_id = Some(crate::plan::extras::SITE_PICK_VIEW_SHADOWS.into());
             }
-            items.push(Item { depth: depth - EPS * 10.0, seq, rank: None, prim });
+            items.push(Item { depth: depth - EPS * 10.0, seq, rank: None, prim: shadow_style(prim) });
             seq += 1;
         }
     }
@@ -1616,11 +1637,12 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
             let f_v = min(0.3, 0.08 / max(h_v, 1e-6));
             for (fa0, fa1, fz0, fz1) in [(0.0, 1.0, 1.0 - f_v, 1.0), (0.0, f_u, 0.0, 1.0 - f_v)] {
                 let r = [quad_at(fa0, fz0), quad_at(fa1, fz0), quad_at(fa1, fz1), quad_at(fa0, fz1)];
-                push(polygon(to_vec(&r), if mono { OPENING_SHADOW_FILL_MONO } else { OPENING_SHADOW_FILL }, "none", 0.0, no_hatch()));
+                push(shadow_style(polygon(to_vec(&r), if mono { OPENING_SHADOW_FILL_MONO } else { OPENING_SHADOW_FILL }, "none", 0.0, no_hatch())));
             }
         }
         for (a, b) in &op.divisions {
-            push(line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-division", edge_mm, ink));
+            let l = line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-division", edge_mm, ink);
+            push(match &ov { Some(o) => o.restyle(l), None => l });
         }
         for (a, b) in &op.symbol {
             let mut l = line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-opening-symbol", 0.1, SYMBOL_INK);
@@ -1679,6 +1701,12 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
             if !terrain_shown(t.category_code.as_deref()) || t.hidden == Some(true) {
                 continue;
             }
+            // [33] Gelände über Regeln (Bauteilart „Gelände“): Ausblenden, Füllung der Geländefläche, Linie.
+            let tov = super::overrides::terrain_override(p, rv, t.category_code.as_deref(), &t.name);
+            if tov.as_ref().is_some_and(|(a, _)| a.hidden()) {
+                continue;
+            }
+            let tfill = tov.as_ref().and_then(|(_, l)| l.fill_color.clone()).unwrap_or_else(|| "#ffffff".into());
             for l in terrain_silhouette(p, t, &frame, (acc.min_x - 6.0, acc.max_x + 6.0), depth_max) {
                 has_terrain = true;
                 let low = l.iter().map(|q| q[1]).fold(acc.min_y, f64::min) - 1.0;
@@ -1686,7 +1714,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
                 ring.push(v2(l[l.len() - 1][0], low));
                 ring.push(v2(l[0][0], low));
                 // [137] Die Geländefläche wählt das Gelände (Pick-Id).
-                let mut mask = polygon(ring, "#ffffff", "none", 0.0, no_hatch());
+                let mut mask = polygon(ring, &tfill, "none", 0.0, no_hatch());
                 if let Primitive::Polygon { context_object_id, .. } = &mut mask {
                     *context_object_id = Some(t.id.clone());
                 }
@@ -1694,7 +1722,11 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
                 for w in l.windows(2) {
                     acc.add(w[0][0], w[0][1]);
                     acc.add(w[1][0], w[1][1]);
-                    prims.push(line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), "elevation-terrain", GROUND_MM, GROUND_INK));
+                    let mut tl = [line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), "elevation-terrain", GROUND_MM, GROUND_INK)];
+                    if let Some((a, _)) = &tov {
+                        super::context::restyle_lines(p, a, &mut tl);
+                    }
+                    prims.extend(tl);
                 }
             }
         }
@@ -2449,6 +2481,58 @@ mod tests {
         let n_edges = |prims: &[Primitive]| prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "elevation-outline")).count();
         p.override_rules.as_mut().unwrap()[1].enabled = false;
         assert!(n_edges(&prims) < n_edges(&render_rules(&p, false, None)), "Wandkanten ohne Umriss");
+    }
+
+    /// [33] Linienstil in der Ansicht (Element- und Schicht-Regel), Schlagschatten und Gelände über Regeln
+    /// (Bauteilart „Schatten“/„Gelände“: Füllung, Linie, Ausblenden); allgemeine Regeln lassen beide in Ruhe.
+    #[test]
+    fn linienstil_schatten_und_gelaende_in_der_ansicht() {
+        let mut p = sample();
+        p.context = Some(vec![ContextObject::TerrainMesh(TerrainMesh {
+            id: "t".into(),
+            name: "Gelände".into(),
+            positions: vec![-50.0, -50.0, -0.5, 50.0, -50.0, -0.5, 50.0, 50.0, 0.3, -50.0, 50.0, 0.3],
+            indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+            ..Default::default()
+        })]);
+        let render = |p: &Project| {
+            let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+            elevation_primitives_with(p, &LevelSpec::from_json(&serde_json::to_value(l).unwrap()), true, false, &Visibility::default(), 50.0, None).unwrap().unwrap().0
+        };
+        let dashed = |prims: &[Primitive]| prims.iter().filter(|q| matches!(q, Primitive::Line { cls, dash: Some(Some(m)), .. } if cls.starts_with("elevation-outline") && m == &vec![0.35, 0.3])).count();
+        let shadows = |prims: &[Primitive]| prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, context_object_id: Some(id), .. } if id == crate::plan::extras::SITE_PICK_VIEW_SHADOWS => Some(fill.clone()), _ => None }).collect::<Vec<_>>();
+        let terrain = |prims: &[Primitive]| prims.iter().filter_map(|q| match q { Primitive::Line { cls, color, dash, .. } if cls == "elevation-terrain" => Some((color.clone(), dash.clone())), _ => None }).collect::<Vec<_>>();
+        let mask = |prims: &[Primitive]| prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, context_object_id: Some(id), .. } if id == "t" => Some(fill.clone()), _ => None }).collect::<Vec<_>>();
+        let base = render(&p);
+        assert_eq!(dashed(&base), 0);
+        assert!(!shadows(&base).is_empty() && !terrain(&base).is_empty() && !mask(&base).is_empty());
+        // Linienstil: Element-Regel (Wand) und Schicht-Regel (Baustoff der sichtbaren Schicht).
+        p.override_rules = Some(vec![ov_rule("w", serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "wall"}]), serde_json::json!({"linetypeId": "hatch-dash"}))]);
+        assert!(dashed(&render(&p)) > 0);
+        p.override_rules = Some(vec![ov_rule("m", serde_json::json!([{"type": "material", "operator": "equals", "value": "Aussenputz"}]), serde_json::json!({"linetypeId": "hatch-dash"}))]);
+        assert!(dashed(&render(&p)) > 0);
+        // Allgemeine Regel („Ansicht ohne Materialschraffur“-artig): Schatten und Gelände bleiben.
+        p.override_rules = Some(vec![ov_rule("g", serde_json::json!([{"type": "element_kind", "operator": "not_equals", "value": "opening"}]), serde_json::json!({"fillColor": "#ffffff", "color": "#ff0000"}))]);
+        let prims = render(&p);
+        assert_eq!(shadows(&prims), shadows(&base));
+        assert_eq!(terrain(&prims), terrain(&base));
+        // Schatten: Füllung, dann ausblenden.
+        p.override_rules = Some(vec![ov_rule("s", serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "shadow"}]), serde_json::json!({"fillColor": "#3355ff"}))]);
+        let s = shadows(&render(&p));
+        assert!(!s.is_empty() && s.iter().all(|f| f == "#3355ff"));
+        p.override_rules.as_mut().unwrap()[0].actions.hide = Some(true);
+        let prims = render(&p);
+        assert!(shadows(&prims).is_empty());
+        assert!(!prims.iter().any(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == OPENING_SHADOW_FILL)), "Leibungsschatten auch");
+        // Gelände: Linie (Farbe, Linienstil) und Füllung, dann ausblenden (Grundlinie statt Silhouette).
+        p.override_rules = Some(vec![ov_rule("t", serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "terrain"}]), serde_json::json!({"color": "#00aa00", "linetypeId": "hatch-dash", "fillColor": "#eeeeee"}))]);
+        let prims = render(&p);
+        assert!(terrain(&prims).iter().all(|(c, d)| c.as_deref() == Some("#00aa00") && d == &Some(Some(vec![0.35, 0.3]))));
+        assert!(mask(&prims).iter().all(|f| f == "#eeeeee"));
+        p.override_rules.as_mut().unwrap()[0].actions.hide = Some(true);
+        let prims = render(&p);
+        assert!(terrain(&prims).is_empty() && mask(&prims).is_empty());
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "elevation-ground")));
     }
 
     /// [33] Baustoff-Kriterium greift auf die sichtbare Oberflächenschicht (äusserste Wandschicht, Dachdeckung);

@@ -80,6 +80,16 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
         if matches!(obj, ContextObject::TerrainMesh(t) if t.hidden == Some(true)) || matches!(obj, ContextObject::ImportedMesh(m) if m.hidden == Some(true)) {
             continue;
         }
+        // [33] Gelände und Höhenlinien über Regeln (Bauteilart „Gelände“): Ausblenden, Linie (Farbe, Stärke, Linienstil).
+        let tov = match obj {
+            ContextObject::TerrainMesh(t) => super::overrides::terrain_override(c.p, c.rule_view(), code, &t.name),
+            ContextObject::ContourSet(s) => super::overrides::terrain_override(c.p, c.rule_view(), code, &s.name),
+            _ => None,
+        };
+        if tov.as_ref().is_some_and(|(a, _)| a.hidden()) {
+            continue;
+        }
+        let start = out.len();
         match obj {
             ContextObject::ContourSet(s) => {
                 // [137] Rahmen als Pick-Fläche (unter dem daraus erzeugten Gelände; Cmd+Klick schaltet durch).
@@ -123,8 +133,37 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
             ContextObject::Excavation(e) => excavation_lines(c, e, out, &mut late),
             ContextObject::Image(_) => {}
         }
+        if let Some((a, _)) = &tov {
+            restyle_lines(c.p, a, &mut out[start..]);
+        }
     }
     out.append(&mut late);
+}
+
+/// [33] Linien (und Beschriftungen) nach den Element-Aktionen einer Regel: Farbe, Strichstärke, Linienstil.
+pub(super) fn restyle_lines(p: &Project, a: &super::overrides::Actions, prims: &mut [Primitive]) {
+    let dash = super::overrides::linetype_dash(p, a.linetype_id.as_deref());
+    for q in prims {
+        match q {
+            Primitive::Line { color, weight_mm, dash: d, .. } => {
+                if let Some(c) = &a.color {
+                    *color = Some(c.clone());
+                }
+                if let Some(w) = a.lineweight.filter(|w| w.is_finite() && *w >= 0.0) {
+                    *weight_mm = w;
+                }
+                if let Some(x) = &dash {
+                    *d = Some(x.clone());
+                }
+            }
+            Primitive::DrawingText { color, .. } => {
+                if let Some(c) = &a.color {
+                    *color = c.clone();
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// [140] Gelände/Höhenlinien grau statt braun.
@@ -468,6 +507,19 @@ mod tests {
         let lines: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK => Some((*a, *b)), _ => None }).collect();
         assert!(lines.iter().any(|(a, _)| (a.x - 5.0).abs() < 1e-6), "Höhenlinie ausserhalb fehlt");
         assert!(lines.iter().all(|(a, b)| !((a.x - 15.0).abs() < 1e-6 && (a.y + b.y) / 2.0 > 0.0 && (a.y + b.y) / 2.0 < 10.0)), "Höhenlinie im Haus");
+        // [33] Regel für Gelände (Bauteilart „Gelände“): Linie umgefärbt/gestrichelt, dann ausgeblendet.
+        let rule = |actions: serde_json::Value| -> OverrideRule {
+            serde_json::from_value(serde_json::json!({"id": "t", "name": "t", "enabled": true, "condition": {"type": "element_kind", "operator": "equals", "value": "terrain"}, "actions": actions})).unwrap()
+        };
+        p.override_rules = Some(vec![rule(serde_json::json!({"color": "#00aa00", "linetypeId": "hatch-dash"}))]);
+        let mut out = Vec::new();
+        plan_context(&Ctx::new(&p, &a), &mut out);
+        let ls: Vec<_> = out.iter().filter_map(|q| match q { Primitive::Line { color, dash, .. } => Some((color.clone(), dash.clone())), _ => None }).collect();
+        assert!(!ls.is_empty() && ls.iter().all(|(c, d)| c.as_deref() == Some("#00aa00") && d == &Some(Some(vec![0.35, 0.3]))));
+        p.override_rules = Some(vec![rule(serde_json::json!({"hide": true}))]);
+        let mut out = Vec::new();
+        plan_context(&Ctx::new(&p, &a), &mut out);
+        assert!(out.is_empty(), "Gelände samt Höhenlinien und Pick-Fläche ausgeblendet");
     }
 
     /// [140] Steile Stellen (Stützmauer, Böschung): Höhenlinien enger als 0.6 mm auf dem Papier werden

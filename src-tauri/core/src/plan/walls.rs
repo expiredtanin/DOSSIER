@@ -336,8 +336,10 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             if (art == 1.0 && skip_joint(li, Some(li + 1))) || (art == 0.0 && skip_joint(li, None)) {
                 continue;
             }
+            // [33] Linienstil aus einer Schicht-Regel (Fuge: eine der beiden Schichten).
+            let ov_dash = |k: usize| super::overrides::linetype_dash(p, ov_of(k).and_then(|o| o.linetype_id.as_deref()));
             if art == 0.0 {
-                out.push(mk_line(a, b, "layer-joint-l", layer_mm, None, Some(stroke), greyed, None));
+                out.push(mk_line(a, b, "layer-joint-l", layer_mm, ov_dash(li), Some(stroke), greyed, None));
             } else if art == 1.0 {
                 let jls = wt.layers.get(li).and_then(|l| l.joint_line_style_id.as_deref()).filter(|s| !s.is_empty()).and_then(|id| p.line_style(id));
                 let mut l = mk_line(
@@ -357,6 +359,11 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
                     if s.kind == Some(LineStyleKind::Custom) {
                         *motif = s.motif.clone();
                     }
+                }
+                if let (Primitive::Line { dash, zigzag, motif, .. }, Some(d)) = (&mut l, ov_dash(li).or_else(|| ov_dash(li + 1))) {
+                    *dash = Some(d);
+                    *zigzag = None;
+                    *motif = None;
                 }
                 out.push(l);
             } else {
@@ -791,9 +798,9 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
     let walls: Vec<EffWall> = p
         .walls
         .iter()
-        .filter(|w| w.floor_id == c.a.floor && c.shown(&w.category_code))
+        .filter(|w| w.floor_id == c.a.floor && c.vis(&w.category_code, &w.id))
         .map(|w| {
-            let ov = c.overrides(&w.category_code, type_names.get(w.wall_type_id.as_str()).copied());
+            let ov = c.overrides(Some("wall"), &w.category_code, type_names.get(w.wall_type_id.as_str()).copied());
             EffWall { w, color: ov.color.or_else(|| w.color.clone()), stroke_weight: ov.lineweight.or(w.stroke_weight) }
         })
         .collect();
@@ -918,11 +925,11 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         }
         for (o, oz) in &all_openings {
             let (o, oz) = (o.as_ref(), *oz);
-            if !c.shown(&o.category_code) || oz == Zone::Hidden {
+            if !c.vis(&o.category_code, &o.id) || oz == Zone::Hidden {
                 continue;
             }
             let sym_start = out.len();
-            let ov = c.overrides(&o.category_code, Some(&opening_label(o)));
+            let ov = c.overrides(Some("opening"), &o.category_code, Some(&opening_label(o)));
             let olw = ov.lineweight.unwrap_or_else(|| c.cat(&o.category_code).map_or(LAYER_LINE_MM, |k| k.lw));
             let color = ov.color.as_deref().or(o.color.as_deref());
             let detail = match o.detail_level {
@@ -958,7 +965,7 @@ pub(super) fn cut_columns<'a>(c: &Ctx<'a>, range: &super::view_range::ViewRange)
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter(|k| k.floor_id == c.a.floor && c.shown(&k.category_code))
+        .filter(|k| k.floor_id == c.a.floor && c.vis(&k.category_code, &k.id))
         .filter(|k| {
             let (zb, zt) = p.column_vertical_extent(k);
             range.classify(zb, zt) == super::view_range::Zone::Cut

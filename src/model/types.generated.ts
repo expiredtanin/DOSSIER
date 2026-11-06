@@ -2191,8 +2191,8 @@ export type OverrideActions = {
    */
   outline?: boolean;
   /**
-   * [33] Bauteil ausblenden (wirkt in der Ansicht: Flächen, Kanten, Ansichtsschraffur und — bei Wänden —
-   * deren Öffnungen entfallen und verdecken nichts).
+   * [33] Bauteil ausblenden (Grundriss, Deckenspiegel, Schnitt, Ansicht: Element samt Linien, Schraffur und
+   * Beschriftung entfällt und verdeckt nichts; eine Wand nimmt ihre Öffnungen mit; Bemassung bleibt).
    */
   hide?: boolean;
 };

@@ -111,6 +111,8 @@ pub struct Ctx<'a> {
     pub a: &'a PlanArgs,
     /// Code → Kategorie (bei doppeltem Code gewinnt die letzte, wie `Map.set` in TS).
     cats: HashMap<&'a str, &'a LayerCategory>,
+    /// [33] Von einer Regel „Ausblenden“ ausgeblendete Elemente (`overrides::hidden_elements`).
+    hidden: HashSet<String>,
 }
 
 impl<'a> Ctx<'a> {
@@ -119,11 +121,17 @@ impl<'a> Ctx<'a> {
         for c in p.flat_categories() {
             cats.insert(c.code.as_str(), c);
         }
-        Ctx { p, a, cats }
+        let hidden = overrides::hidden_elements(p, overrides::RuleView::at(a.scale, a.rules.as_ref()).view("plan"));
+        Ctx { p, a, cats, hidden }
     }
 
     pub fn shown(&self, code: &str) -> bool {
         self.a.show.contains(code)
+    }
+
+    /// [33] Element sichtbar: Kategorie eingeblendet und keine Regel „Ausblenden“ trifft es.
+    pub fn vis(&self, code: &str, id: &str) -> bool {
+        self.shown(code) && !self.hidden.contains(id)
     }
 
     /// [140] Schnittflächen dieser Ebene schwarz (`style::solid_cut`; Feld `cutHatch` der Ebene).
@@ -145,9 +153,9 @@ impl<'a> Ctx<'a> {
         overrides::RuleView::at(self.a.scale, self.a.rules.as_ref()).view("plan")
     }
 
-    /// Effektive Override-Aktionen eines Elements (`overrideFor` in TS).
-    pub fn overrides(&self, code: &str, object_name: Option<&str>) -> Actions {
-        overrides::effective(self.p.override_rules.as_deref(), &Subject { layer_name: self.cat(code).map(|c| c.name.as_str()), layer_code: Some(code), object_name, ..Default::default() }, self.rule_view())
+    /// Effektive Override-Aktionen eines Elements (`overrideFor` in TS); `kind` = Bauteilart ([33]).
+    pub fn overrides(&self, kind: Option<&str>, code: &str, object_name: Option<&str>) -> Actions {
+        overrides::effective(self.p.override_rules.as_deref(), &Subject { layer_name: self.cat(code).map(|c| c.name.as_str()), layer_code: Some(code), object_name, element_kind: kind, ..Default::default() }, self.rule_view())
     }
 }
 
@@ -270,7 +278,7 @@ pub(super) fn resolve_hatch_or_none(p: &Project, hatch_id: &str, wall_angle_deg:
 pub fn wall_footprints(c: &Ctx) -> Vec<WallFootprint> {
     c.p.walls
         .iter()
-        .filter(|w| w.floor_id == c.a.floor && c.shown(&w.category_code))
+        .filter(|w| w.floor_id == c.a.floor && c.vis(&w.category_code, &w.id))
         .map(|w| {
             let t = c.p.wall_thickness(w, 0.2);
             let ref_off = crate::joins::reference_offset(crate::model3d::wall_reference(w), t);
@@ -290,6 +298,11 @@ pub(super) fn ceiling_layers<'a>(p: &'a Project, c: &Ceiling) -> Result<&'a [Lay
     }
     // Hängender Typ (Datei/Import): Rückfall-Schicht statt Abbruch.
     Ok(p.wall_types.iter().find(|t| t.id == c.wall_type_id).map_or(Project::fallback_layers(), |t| t.layers.as_slice()))
+}
+
+/// [33] Bauteilart einer Decke für die Override-Regeln: "ground_slab" oder "slab".
+pub(crate) fn ceiling_kind(p: &Project, c: &Ceiling) -> &'static str {
+    if ceiling_layers(p, c).is_ok_and(|l| overrides::is_ground_slab(p, c, l)) { "ground_slab" } else { "slab" }
 }
 
 /// Typname einer Decke für `object_name` (Maps in TS: letzter Eintrag je id gewinnt).
@@ -330,7 +343,7 @@ fn floor_finishes(c: &Ctx, out: &mut Vec<Primitive>) {
     let p = c.p;
     let base = p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
     let cut = super::extras::cut_z(p, &c.a.floor);
-    for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| c.shown(&x.category_code)) {
+    for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| c.vis(&x.category_code, &x.id)) {
         let top = p.ceiling_vertical_extent(ce).1;
         if !(top >= base - 0.3 && top <= cut) {
             continue;
@@ -358,7 +371,7 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter(|x| c.shown(&x.category_code))
+        .filter(|x| c.vis(&x.category_code, &x.id))
         .filter_map(|x| {
             let (zb, zt) = p.ceiling_vertical_extent(x);
             let zone = range.classify(zb, zt);
@@ -375,7 +388,7 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         for q in &ce.outline {
             bounds.acc(q.x, q.y);
         }
-        let ov = c.overrides(&ce.category_code, ceiling_type_name(p, ce));
+        let ov = c.overrides(Some(ceiling_kind(p, ce)), &ce.category_code, ceiling_type_name(p, ce));
         let color = ov.color.as_deref().or(ce.color.as_deref());
         let greyed = c.greyed(&ce.category_code);
         let category = c.cat(&ce.category_code);
@@ -441,7 +454,7 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     let below = |r: &Roof| r.floor_id != c.a.floor && p.floor(&r.floor_id).is_some_and(|f| f.base_elevation.unwrap_or(0.0) < floor_base - 1e-6);
     // Ansichtsbereich ([36]): Dächer höherer Geschosse bis zur Oberkante „über Schnitt“ (Vordach, Dach darüber).
     let above = |r: &Roof| range.custom && range.top.is_some() && r.floor_id != c.a.floor && p.floor(&r.floor_id).is_some_and(|f| f.base_elevation.unwrap_or(0.0) > floor_base + 1e-6);
-    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| (r.floor_id == c.a.floor || below(r) || above(r)) && c.shown(&r.category_code)) {
+    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| (r.floor_id == c.a.floor || below(r) || above(r)) && c.vis(&r.category_code, &r.id)) {
         let greyed = Some(c.greyed(&roof.category_code));
         let category = c.cat(&roof.category_code);
         let stroke = roof.color.as_deref().or(category.map(|k| k.color.as_str())).unwrap_or(POCHE_STROKE);
@@ -547,7 +560,7 @@ pub(super) fn roof_windows(c: &Ctx, out: &mut Vec<Primitive>, roof: &Roof) {
     let p = c.p;
     let Some(ri) = p.roofs.as_deref().and_then(|r| r.iter().position(|x| x.id == roof.id)) else { return };
     for (o, f) in crate::opening_shape::roof_openings(p, ri) {
-        if !c.shown(&o.category_code) {
+        if !c.vis(&o.category_code, &o.id) {
             continue;
         }
         let greyed = Some(c.greyed(&o.category_code));
@@ -828,11 +841,11 @@ fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place
 }
 
 fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &super::stamp_place::Obstacles) {
-    for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.shown(&r.category_code)) {
+    for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.vis(&r.category_code, &r.id)) {
         for q in &room.boundary {
             bounds.acc(q.x, q.y);
         }
-        let ov = c.overrides(&room.category_code, Some(&room.name));
+        let ov = c.overrides(Some("room"), &room.category_code, Some(&room.name));
         let color = ov.color.as_deref().unwrap_or(&room.color);
         let greyed = Some(c.greyed(&room.category_code));
         if room.boundary.len() < 3 {
@@ -892,7 +905,7 @@ pub fn column_label(col: &Column) -> String {
 pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
     let p = c.p;
     let range = super::view_range::ViewRange::of(p, &c.a.floor);
-    for col in p.columns.as_deref().unwrap_or(&[]).iter().filter(|k| k.floor_id == c.a.floor && c.shown(&k.category_code)) {
+    for col in p.columns.as_deref().unwrap_or(&[]).iter().filter(|k| k.floor_id == c.a.floor && c.vis(&k.category_code, &k.id)) {
         let (zb, zt) = p.column_vertical_extent(col);
         let zone = range.classify(zb, zt);
         if zone == super::view_range::Zone::Hidden {
@@ -901,7 +914,7 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
         let out_start = out.len();
         let greyed = Some(c.greyed(&col.category_code));
         let category = c.cat(&col.category_code);
-        let ov = c.overrides(&col.category_code, Some(&column_label(col)));
+        let ov = c.overrides(Some("column"), &col.category_code, Some(&column_label(col)));
         let lw = ov.lineweight.unwrap_or_else(|| resolve_stroke_weight(col.stroke_weight, col.stroke_weight_source, category, category.map_or(WALL_FALLBACK_MM, |k| k.lw)));
         let color = ov.color.as_deref().or(col.color.as_deref());
         let cat_color = category.map(|k| k.color.as_str());
@@ -927,7 +940,7 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
         let (mut clip, mut merge): (Vec<Vec<Vec2>>, Vec<crate::plan::wall_poche::WallFootprint>) = (Vec::new(), Vec::new());
         if zone == super::view_range::Zone::Cut {
             use super::wall_columns::{band_polys, end_in_column, relation, Rel};
-            for w in p.walls.iter().filter(|w| w.floor_id == c.a.floor && c.shown(&w.category_code)) {
+            for w in p.walls.iter().filter(|w| w.floor_id == c.a.floor && c.vis(&w.category_code, &w.id)) {
                 let (zb, zt) = p.wall_vertical_extent(w);
                 if range.classify(zb, zt) != super::view_range::Zone::Cut || end_in_column(w, &fp).is_none() {
                     continue;
@@ -1562,6 +1575,46 @@ mod tests {
         let f50 = fills(&run(&p, 50.0));
         assert_eq!(f50.len(), before50.len());
         assert!(f50.iter().zip(&before50).any(|(a, b)| a.0 == "#ffffff" && a.1 == HatchPattern::None && b.1 != HatchPattern::None));
+    }
+
+    /// [33] „Ausblenden“ im Grundriss: Wände samt ihren Öffnungen (Symbole) weg, Decken/Räume bleiben; eine
+    /// Regel nur für den Schnitt wirkt nicht; Bauteilart wirkt auch auf Farbe; Linienstil einer Schicht-Regel
+    /// auf die Fugen der Wandschicht.
+    #[test]
+    fn ausblenden_und_linienstil_im_grundriss() {
+        let mut p = sample();
+        let run = |p: &Project| {
+            let t = serde_json::json!({ "floor": "eg", "show": ["20", "21", "30", "60"], "grey": [], "scale": 50 }).to_string();
+            plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap()
+        };
+        let wall_polys = |d: &DomainPrims| d.walls.iter().filter(|q| matches!(q, Primitive::Polygon { wall_id: Some(_), .. })).count();
+        let opening_prims = |d: &DomainPrims| d.walls.iter().filter(|q| matches!(q, Primitive::Line { opening_id: Some(_), .. } | Primitive::Arc { opening_id: Some(_), .. } | Primitive::Polygon { opening_id: Some(_), .. })).count();
+        let before = run(&p);
+        assert!(wall_polys(&before) > 0 && opening_prims(&before) > 0);
+        let rule = |view: &str, actions: serde_json::Value| -> OverrideRule {
+            serde_json::from_value(serde_json::json!({"id": "h", "name": "h", "enabled": true,
+                "condition": {"type": "element_kind", "operator": "equals", "value": "wall"},
+                "conditions": [{"type": "view_kind", "operator": "equals", "value": view}], "actions": actions})).unwrap()
+        };
+        p.override_rules = Some(vec![rule("section", serde_json::json!({"hide": true}))]);
+        assert_eq!(wall_polys(&run(&p)), wall_polys(&before), "Regel nur für den Schnitt");
+        p.override_rules = Some(vec![rule("plan", serde_json::json!({"hide": true}))]);
+        let d = run(&p);
+        assert_eq!(wall_polys(&d), 0, "Wände ausgeblendet");
+        assert_eq!(opening_prims(&d), 0, "Öffnungen der Wände mit");
+        // Decken bleiben (ihre Umrisslinien laufen ohne die Wände durch).
+        let ceiling_polys = |d: &DomainPrims| d.ceilings.iter().filter(|q| matches!(q, Primitive::Polygon { ceiling_id: Some(_), .. })).count();
+        assert!(ceiling_polys(&d) > 0 && ceiling_polys(&d) == ceiling_polys(&before));
+        assert_eq!(d.rooms.len(), before.rooms.len());
+        // Bauteilart wirkt im Grundriss auch auf die Farbe.
+        p.override_rules = Some(vec![rule("plan", serde_json::json!({"color": "#ff0000"}))]);
+        assert!(run(&p).walls.iter().any(|q| matches!(q, Primitive::Line { color: Some(c), .. } if c == "#ff0000") || matches!(q, Primitive::Polygon { stroke, .. } if stroke == "#ff0000")));
+        // Linienstil aus einer Schicht-Regel: Fugen an der Dämmschicht gestrichelt.
+        let dashed = |d: &DomainPrims| d.walls.iter().filter(|q| matches!(q, Primitive::Line { cls, dash: Some(Some(m)), .. } if cls == "layer-joint" && m == &vec![0.35, 0.3])).count();
+        assert_eq!(dashed(&before), 0);
+        p.override_rules = Some(vec![serde_json::from_value(serde_json::json!({"id": "l", "name": "l", "enabled": true,
+            "condition": {"type": "material_category", "operator": "equals", "value": "insulation"}, "actions": {"linetypeId": "hatch-dash"}})).unwrap()]);
+        assert!(dashed(&run(&p)) > 0);
     }
 
     /// [140] „mittel" ab 1:200 wie „grob" (Wände als Sammelfläche), „fein" bleibt; explizit „grob" ohne Stempel.

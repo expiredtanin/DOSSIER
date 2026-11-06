@@ -1889,6 +1889,34 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `--color`) in Chromium (Linux). Offen: nicht in der Tauri-App und nicht im Overrides-Tab per e2e geprüft; „Ausblenden“
   wirkt in Grundriss/Schnitt noch nicht, Öffnungen selbst ausblenden nicht (Wandloch); Linienstil-Aktion in der Ansicht
   ohne Wirkung; Schlagschatten und Gelände nicht über Regeln steuerbar.
+  (6.11., Ausblenden überall) **„Ausblenden“ in Grundriss, Deckenspiegel und Schnitt** (`overrides::hidden_elements`, nur
+  Element-Regeln): Wände, Öffnungen, Decken/Bodenplatten, Dächer, Treppen, Stützen, Räume; eine ausgeblendete Wand nimmt
+  ihre Öffnungen mit. Grundriss: wie eine ausgeblendete Kategorie (`Ctx::vis`, Element samt Poché, Schraffur, Symbol,
+  Raumstempel; Wandanschlüsse rechnen ohne die Wand, die Nachbarwand zeigt ihr Ende). Schnitt: Projekt ohne die Elemente
+  (`section::without_elements`) — sie verdecken nichts; der Schnitt-Cache trägt eine Kennung der ausgeblendeten ids.
+  Bemassung bleibt (2D-Zeichnungen werden nicht angefasst, auch wenn sie nur an ausgeblendeten Elementen hängen); eine
+  allein ausgeblendete Öffnung lässt im Grundriss das Wandloch stehen (nur Symbol weg). Im Grundriss trägt das Subjekt
+  jetzt auch die **Bauteilart** (Wand, Öffnung, Decke/Bodenplatte, Treppe, Stütze, Raum): Farbe/Strichstärke-Regeln mit
+  Bauteilart wirken dort. **Linienstil** (`linetypeId`): in der Ansicht auf Kanten der Flächen und Öffnungsteilungen
+  (Element- und Schicht-Regeln, `SurfOv::dash`); aus Schicht-Regeln (`LayerActions::linetype_id`, nur Regeln mit
+  Schicht-Bedingung — Element-Regeln mit Linienstil lösen keine geschichtete Wand aus) auf die Fugen der Schicht im
+  Grundriss (`layer-joint`) und im Schnitt (Fugen als eigene gestrichelte Linien `section-joint`; die schwere
+  Schnittkante bleibt durchgezogen). **Schatten und Gelände** als Bauteilart („Schatten“, „Gelände“, dazu „Raum“ in der
+  Auswahl): Schlagschatten der Ansicht samt Leibungsschatten (Ausblenden, Füllung, Linie = Umriss), Gelände/Höhenlinien im
+  Grundriss (Ausblenden, Linie samt Höhenkoten-Farbe), Geländelinie/Erdreich im Schnitt (Ausblenden → Grundlinie,
+  Linie, Füllung/Schraffur des Erdreichs) und Gelände-Silhouette der Ansicht (Ausblenden, Füllung der Geländefläche,
+  Linie). Sie folgen nur Regeln, die die Bauteilart ausdrücklich nennen (`overrides::SPECIAL_KINDS`, gleich/enthält/
+  beginnt mit) — allgemeine Regeln wie „Ansicht ohne Materialschraffur“ (Bauteilart ≠ Fenster/Tür) lassen sie in Ruhe.
+  Overrides-Tab: Aktion heisst nur noch „Ausblenden“. Ohne Regeln unverändert (Goldens unverändert). Tests:
+  `ausgeblendete_elemente`, `schatten_gelaende_und_linienstil`, `ausblenden_und_linienstil_im_grundriss`,
+  `ausblenden_gelaende_und_linienstil_im_schnitt`, `linienstil_schatten_und_gelaende_in_der_ansicht`, Gelände-Regel in
+  `context.rs` (Höhenlinien), e2e `overridesTab.spec.ts` (Regel Darstellung = Ansicht + Ausblenden im Overrides-Tab →
+  Ansicht Süd verliert ihre Bauteile). Geprüft: cargo test Kern, tsc, vitest, e2e overridesTab + viewTemplates, CLI
+  Musterhaus komplex EG/Schnitt A-A/Ansicht Süd 1:100 mit Prüfregeln (Innenwände aus, Wandkanten gestrichelt, Schatten
+  aus, Gelände grün gestrichelt) in Chromium (Linux). Offen: nicht in der Tauri-App (Metal) geprüft; ausgeblendete
+  Elemente bleiben im Grundriss anwählbar/fangbar (Pick/Fang fragen das Modell); Schlagschatten im Grundriss
+  (Sonnenstudie) nicht über Regeln; Linienstil auf Polygon-Umrissen im Grundriss (Wand-Umriss, Decken) ohne Wirkung;
+  kurze Geländesegmente zeigen das Strichmuster je Segment neu beginnend.
 - ◐ **[34] Ansichtsvorlagen.** (30.10.) `Project.viewTemplates` (Rust-Modell): benannter Satz aus Detailgrad,
   Massstab, Kategorien, Override-Regeln, Darstellungsmodus, Schwarz-Weiss, Schatten, verdeckte Kanten,
   Strichstärken-Skalierung und Ansichtsbereich; Ansicht (`DrawingLevel.templateId/templateLinked`) und

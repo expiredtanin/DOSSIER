@@ -114,7 +114,7 @@ fn soffits(c: &Ctx, cut: f64, limit: f64, out: &mut Vec<Primitive>, bounds: &mut
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter(|x| c.shown(&x.category_code) && x.outline.len() >= 3)
+        .filter(|x| c.vis(&x.category_code, &x.id) && x.outline.len() >= 3)
         .map(|x| (x, p.ceiling_vertical_extent(x).0))
         .filter(|(_, zb)| *zb > cut + 1e-6 && *zb < limit)
         .collect();
@@ -233,7 +233,7 @@ impl RoofUnder {
 fn roof_soffits(c: &Ctx, cut: f64, limit: f64, soffits: &[Soffit], out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Vec<RoofUnder> {
     let p = c.p;
     let mut unders = Vec::new();
-    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| c.shown(&r.category_code)) {
+    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| c.vis(&r.category_code, &r.id)) {
         let rb = p.roof_base_elevation(roof);
         let geo = crate::roof::roof_geometry(&roof.params(), 0.0);
         let top = rb + max(0.0, geo.ridge_height);
@@ -347,7 +347,7 @@ fn room_labels(c: &Ctx, soffits: &[Soffit], roofs: &[RoofUnder], out: &mut Vec<P
     if c.a.detail == Detail::Grob {
         return;
     }
-    for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.shown(&r.category_code) && r.boundary.len() >= 3) {
+    for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.vis(&r.category_code, &r.id) && r.boundary.len() >= 3) {
         let pts: Vec<[f64; 2]> = room.boundary.iter().map(|v| [v.x, v.y]).collect();
         let at = room.stamp_anchor.unwrap_or(pv(crate::room_area::label_point(&pts)));
         let z = soffits.iter().filter(|s| super::pick::point_in_polygon(at.x, at.y, &s.ring)).map(|s| s.z).fold(f64::INFINITY, f64::min);

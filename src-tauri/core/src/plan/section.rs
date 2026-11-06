@@ -210,6 +210,8 @@ pub struct CutOv {
     pub fill: Option<String>,
     pub hatch: HatchOv,
     pub outline: Option<bool>,
+    /// [33] Linienstil der Fugen/Umrisse (Schicht-Regel): `Some(None)` durchgezogen, `Some(Some(m))` Muster.
+    pub dash: Option<Option<Vec<f64>>>,
 }
 
 impl CutOv {
@@ -225,13 +227,49 @@ impl CutOv {
 pub struct CutRules {
     pub loose: HashSet<String>,
     pub ov: Vec<Option<CutOv>>,
+    /// [33] Regeln für Gelände (Geländelinie, Erdreich): Ausblenden, Linie, Füllung/Schraffur.
+    pub terrain: Option<(super::overrides::Actions, super::overrides::LayerActions)>,
+    /// [33] Strichmuster der Gelände-Regel (Linienstil).
+    pub terrain_dash: Option<Option<Vec<f64>>>,
+    /// [33] Projekt-Schraffur der Gelände-Regel fürs Erdreich.
+    pub terrain_hatch: Option<HatchRender>,
 }
 
 impl CutRules {
     /// `v`: Massstab und eingeschaltete Regeln der Darstellung ([`super::overrides::RuleView`]).
     pub fn of(p: &Project, out: &Output, v: RuleView) -> CutRules {
-        CutRules { loose: loose_fill_components(p), ov: cut_overrides(p, &out.cuts, v) }
+        let ts = crate::excavation::terrains(p);
+        let t = out.terrain_id.as_deref().and_then(|id| ts.iter().find(|t| t.id == id)).or(ts.first());
+        let terrain = if out.profiles.is_empty() && out.earth.is_empty() { None } else { t.and_then(|t| super::overrides::terrain_override(p, v, t.category_code.as_deref(), &t.name)) };
+        let terrain_dash = terrain.as_ref().and_then(|(a, _)| super::overrides::linetype_dash(p, a.linetype_id.as_deref()));
+        let terrain_hatch = terrain.as_ref().and_then(|(_, l)| l.hatch.as_deref()).filter(|h| !matches!(*h, "none" | "material")).and_then(|id| resolve_hatch(p, id, None, None, None));
+        CutRules { loose: loose_fill_components(p), ov: cut_overrides(p, &out.cuts, v), terrain, terrain_dash, terrain_hatch }
     }
+}
+
+/// [33] Projekt ohne die Elemente `ids` (Regel „Ausblenden“ im Schnitt): verdecken dann auch nichts.
+pub fn without_elements(p: &Project, ids: &HashSet<String>) -> Project {
+    let mut q = p.clone();
+    q.walls.retain(|w| !ids.contains(&w.id));
+    if let Some(v) = &mut q.openings {
+        v.retain(|x| !ids.contains(&x.id));
+    }
+    if let Some(v) = &mut q.ceilings {
+        v.retain(|x| !ids.contains(&x.id));
+    }
+    if let Some(v) = &mut q.roofs {
+        v.retain(|x| !ids.contains(&x.id));
+    }
+    if let Some(v) = &mut q.stairs {
+        v.retain(|x| !ids.contains(&x.id));
+    }
+    if let Some(v) = &mut q.columns {
+        v.retain(|x| !ids.contains(&x.id));
+    }
+    if let Some(v) = &mut q.rooms {
+        v.retain(|x| !ids.contains(&x.id));
+    }
+    q
 }
 
 /// [33] Overrides je Schnittfläche: Bauteil (Wand, Decke/Bodenplatte, Dach) und Schicht der Fläche, dann
@@ -289,7 +327,7 @@ pub fn cut_overrides(p: &Project, cuts: &[Cut], v: RuleView) -> Vec<Option<CutOv
                 Some("material") => HatchOv::Material,
                 Some(id) => resolve_hatch(p, id, angle, None, None).map_or(HatchOv::Keep, HatchOv::Pattern),
             };
-            Some(CutOv { fill: a.fill_color.clone(), hatch, outline: a.outline })
+            Some(CutOv { fill: a.fill_color.clone(), hatch, outline: a.outline, dash: super::overrides::linetype_dash(p, a.linetype_id.as_deref()) })
         })
         .collect()
 }
@@ -2615,12 +2653,21 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
     let mut acc = Acc::new();
     let shown = |code: &str| vis.visible(code) && vis.render(code);
     let mut cut_rings: Vec<crate::flat::Polygon> = Vec::new();
+    let mut late_joints: Vec<Primitive> = Vec::new();
     // [T6] Erdreich zuerst (unter allem), ohne Umriss; Kategorie wie das Gelände.
-    let terrain_shown = out.profiles.iter().all(|pr| pr.category.as_deref().is_none_or(shown));
+    // [33] Regel für Gelände: Ausblenden, Füllung/Schraffur des Erdreichs, Linie der Geländelinie.
+    let tov = rules.terrain.as_ref();
+    let terrain_shown = out.profiles.iter().all(|pr| pr.category.as_deref().is_none_or(shown)) && !tov.is_some_and(|(a, _)| a.hidden());
     if terrain_shown {
         for (ring, hatch) in &out.earth {
-            let hatch = if mono { HatchRender { color: SECTION_INK.into(), ..hatch.clone() } } else { hatch.clone() };
-            let mut q = polygon(ring.iter().map(|q| v2(q[0], q[1])).collect(), "none", "none", 0.0, hatch);
+            let hatch = match tov.and_then(|(_, l)| l.hatch.as_deref()) {
+                Some("none") => no_hatch(),
+                Some("material") | None => hatch.clone(),
+                Some(_) => rules.terrain_hatch.clone().unwrap_or_else(|| hatch.clone()),
+            };
+            let hatch = if mono { HatchRender { color: SECTION_INK.into(), ..hatch } } else { hatch };
+            let fill = tov.and_then(|(_, l)| l.fill_color.as_deref()).unwrap_or("none");
+            let mut q = polygon(ring.iter().map(|q| v2(q[0], q[1])).collect(), fill, "none", 0.0, hatch);
             if let Primitive::Polygon { context_object_id, .. } = &mut q {
                 *context_object_id = out.terrain_id.clone();
             }
@@ -2676,7 +2723,21 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
         let outline = ov.and_then(|o| o.outline);
         let src = cp.source_id.clone();
         let stroked = if black { outline == Some(true) } else { outline != Some(false) };
-        let mut pr = if stroked { polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
+        // [33] Linienstil aus einer Schicht-Regel: Fugen der Fläche als eigene Linien mit Strichmuster.
+        let dash = ov.and_then(|o| o.dash.clone()).filter(|_| stroked);
+        if let Some(d) = &dash {
+            let n = cp.pts.len();
+            let skip: Vec<usize> = cp.nse.iter().flatten().map(|x| *x as usize).collect();
+            for i in (0..n).filter(|i| !skip.contains(i)) {
+                let (a, b) = (cp.pts[i], cp.pts[(i + 1) % n]);
+                let mut l = line(v2(a[0], a[1]), v2(b[0], b[1]), "section-joint", SECTION_JOINT_MM, SECTION_INK);
+                if let Primitive::Line { dash: ld, .. } = &mut l {
+                    *ld = Some(d.clone());
+                }
+                late_joints.push(l);
+            }
+        }
+        let mut pr = if stroked && dash.is_none() { polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
         if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, no_stroke_edges, greyed, .. } = &mut pr {
             *wall_id = if cp.kind == Kind::Wall { src.clone() } else { None };
             *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() { src.clone() } else { None };
@@ -2689,6 +2750,7 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
         cut_rings.push(vec![cp.pts.clone()]);
         prims.push(pr);
     }
+    prims.append(&mut late_joints);
     // [140] Schnittkante: Umriss der vereinigten Schnittflächen schwer, Fugen dazwischen bleiben fein.
     for poly in crate::polygon_bool::union(&cut_rings) {
         for ring in &poly {
@@ -2704,6 +2766,9 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
                 continue;
             }
         }
+        if !terrain_shown {
+            continue;
+        }
         for w in pr.pts.windows(2) {
             acc.add(w[0][0], w[0][1]);
             acc.add(w[1][0], w[1][1]);
@@ -2711,6 +2776,19 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
             if pr.natural {
                 if let Primitive::Line { dash, .. } = &mut l {
                     *dash = Some(Some(SECTION_NATURAL_DASH.to_vec()));
+                }
+            }
+            if let Some((a, _)) = tov.filter(|_| !pr.natural) {
+                if let Primitive::Line { color, weight_mm, dash, .. } = &mut l {
+                    if let Some(c) = &a.color {
+                        *color = Some(c.clone());
+                    }
+                    if let Some(w) = a.lineweight.filter(|w| w.is_finite() && *w >= 0.0) {
+                        *weight_mm = w;
+                    }
+                    if let Some(d) = &rules.terrain_dash {
+                        *dash = Some(d.clone());
+                    }
                 }
             }
             prims.push(l);
@@ -3126,11 +3204,12 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
 const CACHE_SLOTS: usize = 6;
 
 thread_local! {
-    static CACHE: std::cell::RefCell<Vec<(f64, std::rc::Rc<Output>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static CACHE: std::cell::RefCell<Vec<((f64, u64), std::rc::Rc<Output>)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-fn cache_get(key: f64) -> Option<std::rc::Rc<Output>> {
-    if !(key > 0.0) {
+/// Schlüssel: (Schlüssel des Aufrufers, [33] Kennung der ausgeblendeten Elemente, 0 = keine).
+fn cache_get(key: (f64, u64)) -> Option<std::rc::Rc<Output>> {
+    if !(key.0 > 0.0) {
         return None;
     }
     CACHE.with(|c| {
@@ -3143,8 +3222,8 @@ fn cache_get(key: f64) -> Option<std::rc::Rc<Output>> {
     })
 }
 
-fn cache_put(key: f64, o: std::rc::Rc<Output>) {
-    if !(key > 0.0) {
+fn cache_put(key: (f64, u64), o: std::rc::Rc<Output>) {
+    if !(key.0 > 0.0) {
         return;
     }
     CACHE.with(|c| {
@@ -3169,6 +3248,20 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let mono = args.first().is_some_and(|&x| x != 0.0);
     let openings = args.get(1).is_some_and(|&x| x != 0.0);
     let key = args.get(2).copied().unwrap_or(0.0);
+    let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
+    // [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (`rules`: ids; fehlt = Schalter im Projekt).
+    let on: Option<HashSet<String>> = v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect());
+    let rv = RuleView::at(scale, on.as_ref()).view("section");
+    // [33] Regel „Ausblenden“: Schnitt ohne diese Elemente (sie verdecken nichts, Wände samt Öffnungen).
+    let hidden_ids = super::overrides::hidden_elements(p, rv);
+    let filtered = (!hidden_ids.is_empty()).then(|| without_elements(p, &hidden_ids));
+    let p = filtered.as_ref().unwrap_or(p);
+    let hkey = {
+        let mut ids: Vec<&String> = hidden_ids.iter().collect();
+        ids.sort();
+        ids.iter().flat_map(|s| s.bytes().chain([0u8])).fold(if ids.is_empty() { 0 } else { 0xcbf2_9ce4_8422_2325u64 }, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
+    };
+    let key = (key, hkey);
     let mut w = crate::plan::buf::Writer::new(true);
     // Der Schnitt selbst hängt nur am Projektstand, an der Ebene und den Körpern (= ein Aufruf von
     // `computeSection` in TS, Schlüssel `key`); Schwarz-Weiss, Sichtbarkeit und verdeckte Kanten nur an
@@ -3184,11 +3277,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
         }
     };
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
-    let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
     let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
-    // [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (`rules`: ids; fehlt = Schalter im Projekt).
-    let on: Option<HashSet<String>> = v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect());
-    let rv = RuleView::at(scale, on.as_ref()).view("section");
     let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out, rv));
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
@@ -3422,7 +3511,7 @@ mod tests {
         };
         let loose: HashSet<String> = ["mager".to_string()].into();
         let fills = |scale: f64, loose: &HashSet<String>| -> Vec<(String, HatchPattern, String)> {
-            let (prims, _) = section_primitives_at(&out, true, false, &Visibility::default(), scale, Detail::Mittel, false, &CutRules { loose: loose.clone(), ov: Vec::new() });
+            let (prims, _) = section_primitives_at(&out, true, false, &Visibility::default(), scale, Detail::Mittel, false, &CutRules { loose: loose.clone(), ..Default::default() });
             prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, stroke, ceiling_id: Some(_), .. } => Some((fill.clone(), hatch.pattern, stroke.clone())), _ => None }).collect()
         };
         let f = fills(100.0, &loose);
@@ -3892,6 +3981,61 @@ mod tests {
         assert!(!ep.iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "elevation-ground")));
         let f = crate::site_rules::facade_terrain(&p);
         assert!(!f.is_empty() && f.iter().all(|q| q.natural == Some(0.0) && q.designed.is_some_and(|z| (z + 2.0).abs() < 1e-6)));
+    }
+
+    fn ov_rule(conds: serde_json::Value, actions: serde_json::Value) -> OverrideRule {
+        let c = conds.as_array().unwrap();
+        serde_json::from_value(serde_json::json!({"id": "r", "name": "r", "enabled": true, "condition": c[0], "conditions": c[1..].to_vec(), "actions": actions})).unwrap()
+    }
+
+    /// [33] „Ausblenden“ im Schnitt: Wände samt Öffnungen weg (auch nicht im Schnitt-Cache vom Lauf ohne Regel),
+    /// Decken bleiben; Gelände über Regeln (ausblenden, Linie, Füllung); Linienstil einer Schicht-Regel als
+    /// gestrichelte Fugen.
+    #[test]
+    fn ausblenden_gelaende_und_linienstil_im_schnitt() {
+        let mut p = sample();
+        p.context = Some(vec![ContextObject::TerrainMesh(TerrainMesh {
+            id: "t".into(),
+            name: "Gelände".into(),
+            positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0],
+            indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+            ..Default::default()
+        })]);
+        let l = p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap();
+        let text = serde_json::json!({ "level": serde_json::to_value(l).unwrap(), "scale": 50 }).to_string();
+        // Gleicher Schlüssel (7) wie ein vorbereiteter Schnitt: die Regel darf nicht den gemerkten Schnitt treffen.
+        let run = |p: &Project| -> Vec<Vec<Primitive>> {
+            let (prims, groups, _) = crate::plan::buf::decode(&section_plan_buf(p, &[0.0, 1.0, 7.0, 0.0], &text).unwrap()).unwrap();
+            groups.iter().map(|&(a, b)| prims[a..b].to_vec()).collect()
+        };
+        let walls = |g: &[Vec<Primitive>]| g[0].iter().filter(|q| matches!(q, Primitive::Polygon { wall_id: Some(_), .. })).count();
+        let slabs = |g: &[Vec<Primitive>]| g[0].iter().filter(|q| matches!(q, Primitive::Polygon { ceiling_id: Some(_), .. })).count();
+        let before = run(&p);
+        assert!(walls(&before) > 0 && slabs(&before) > 0);
+        p.override_rules = Some(vec![ov_rule(serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "wall"}, {"type": "view_kind", "operator": "equals", "value": "section"}]), serde_json::json!({"hide": true}))]);
+        let g = run(&p);
+        assert_eq!(walls(&g), 0, "Wände ausgeblendet");
+        assert!(slabs(&g) > 0);
+        assert!(g.get(1).is_none_or(|ops| ops.is_empty()), "Öffnungen der Wände mit");
+        p.override_rules.as_mut().unwrap()[0].enabled = false;
+        assert_eq!(walls(&run(&p)), walls(&before));
+        // Gelände: Linie und Erdreich-Füllung, dann ausblenden.
+        let terrain = |g: &[Vec<Primitive>]| g[0].iter().filter_map(|q| match q { Primitive::Line { cls, color, weight_mm, .. } if cls == "section-terrain" => Some((color.clone(), *weight_mm)), _ => None }).collect::<Vec<_>>();
+        let earth = |g: &[Vec<Primitive>]| g[0].iter().filter_map(|q| match q { Primitive::Polygon { context_object_id: Some(id), fill, .. } if id == "t" => Some(fill.clone()), _ => None }).collect::<Vec<_>>();
+        assert!(!terrain(&before).is_empty() && !earth(&before).is_empty());
+        p.override_rules = Some(vec![ov_rule(serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "terrain"}]), serde_json::json!({"color": "#00aa00", "lineweight": 0.7, "fillColor": "#eeeeee"}))]);
+        let g = run(&p);
+        assert!(terrain(&g).iter().all(|(c, w)| c.as_deref() == Some("#00aa00") && (*w - 0.7).abs() < 1e-9));
+        assert!(earth(&g).iter().all(|f| f == "#eeeeee"));
+        p.override_rules = Some(vec![ov_rule(serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "terrain"}]), serde_json::json!({"hide": true}))]);
+        let g = run(&p);
+        assert!(terrain(&g).is_empty() && earth(&g).is_empty());
+        assert!(g[0].iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "section-ground")), "ohne Gelände die Grundlinie");
+        // Linienstil einer Schicht-Regel (Dämmung): Fugen der Schicht gestrichelt.
+        let dashed = |g: &[Vec<Primitive>]| g[0].iter().filter(|q| matches!(q, Primitive::Line { cls, dash: Some(Some(m)), .. } if cls == "section-joint" && m == &vec![0.35, 0.3])).count();
+        assert_eq!(dashed(&before), 0);
+        p.override_rules = Some(vec![ov_rule(serde_json::json!([{"type": "material_category", "operator": "equals", "value": "insulation"}]), serde_json::json!({"linetypeId": "hatch-dash"}))]);
+        assert!(dashed(&run(&p)) > 0);
     }
 
     #[test]

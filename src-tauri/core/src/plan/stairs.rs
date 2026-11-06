@@ -32,9 +32,9 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     let p = c.p;
     let cut_height = p.floor(&c.a.floor).and_then(|f| f.cut_height).unwrap_or(1.0);
     let range = super::view_range::ViewRange::of(p, &c.a.floor);
-    for s in p.stairs.as_deref().unwrap_or(&[]).iter().filter(|s| s.floor_id == c.a.floor && c.shown(&s.category_code)) {
+    for s in p.stairs.as_deref().unwrap_or(&[]).iter().filter(|s| s.floor_id == c.a.floor && c.vis(&s.category_code, &s.id)) {
         let greyed = Some(c.greyed(&s.category_code));
-        let ov = c.overrides(&s.category_code, Some(&stair_label(s)));
+        let ov = c.overrides(Some("stair"), &s.category_code, Some(&stair_label(s)));
         let lw = ov.lineweight.unwrap_or_else(|| c.cat(&s.category_code).map_or(WALL_FALLBACK_MM, |k| k.lw));
         let stroke = ov.color.as_deref().or(s.color.as_deref()).unwrap_or(POCHE_STROKE).to_string();
         let (zb, zt) = p.stair_vertical_extent(s);
