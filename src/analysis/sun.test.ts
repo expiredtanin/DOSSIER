@@ -78,7 +78,14 @@ describe("Schatten in eine Richtung (Musterhaus komplex)", () => {
     const sun = sunPosition(lat, lon, new Date(p.sunStudy!.when));
     const az = (sun.azimuth * Math.PI) / 180;
     const dot = (v: Vec2) => v.x * Math.sin(az) + v.y * Math.cos(az);
-    const casters: Vec2[] = [...p.walls.flatMap((w) => [w.start, w.end]), ...(p.extrudedSolids ?? []).flatMap((s) => s.points)];
+    // [142] auch Stützen und Bäume (Kreise der Ebene 13) werfen Schatten; Baum: sonnennächster Kronenpunkt.
+    const trees = p.drawings2d.flatMap((d) => (d.categoryCode === "13" && d.geom.shape === "circle" ? [{ x: d.geom.center.x + d.geom.r * Math.sin(az), y: d.geom.center.y + d.geom.r * Math.cos(az) }] : []));
+    const casters: Vec2[] = [
+      ...p.walls.flatMap((w) => [w.start, w.end]),
+      ...(p.extrudedSolids ?? []).flatMap((s) => s.points),
+      ...(p.columns ?? []).map((c) => c.position),
+      ...trees,
+    ];
     const shadows = shadowPolygons(p, sun);
     expect(shadows.length).toBeGreaterThan(0);
     const pts = shadows.flatMap((poly) => poly[0]);
