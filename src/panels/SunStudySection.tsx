@@ -64,6 +64,21 @@ export function SunStudySection() {
         />
         <span className="sun-time">{formatMinutes(local.minutes)}</span>
       </div>
+      <label className="sun-row" title={t("sun.treeHeight.hint")}>
+        <span>{t("sun.treeHeight")}</span>
+        <input
+          type="number"
+          className="kz-input"
+          min={1}
+          max={60}
+          step={0.5}
+          value={study.treeHeight ?? 8}
+          onChange={(e) => {
+            const h = Number(e.target.value);
+            if (Number.isFinite(h) && h > 0) write({ ...study, treeHeight: h }, "sunStudy:treeHeight");
+          }}
+        />
+      </label>
       <div className="sun-readout">
         {sun.elevation > 0
           ? t("sun.position", { az: sun.azimuth.toFixed(0), el: sun.elevation.toFixed(1) })
