@@ -2806,6 +2806,23 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   vorher/nachher (Linux/Chromium). Offen: Schatten fällt weiter auf die Ebene ±0.00, nicht auf das Gelände (am
   Hang zu kurz/lang; freigelegte UG-Wände über tieferem Gelände werfen keinen Schatten); Bäume/Stützen werfen
   keinen; nicht in der Tauri-App geprüft.
+- ◐ **[144] Öffnungen verschieben.** (6.11., Maintainer: „Türen lassen sich nicht nach Mass oder mit Verschieben
+  bewegen.") Befund (Browser-Build, Musterhaus): Öffnungen waren keine Transformations-Elemente — Verschieben/m mit
+  nur einer Tür gewählt meldete „Erst Objekte wählen"; Objekt-Info X/Y (Bezugspunkt) tat nichts (`singleTransformSel`
+  ohne Öffnung); Griff-Zug: Tab öffnete kein Längenfeld (Einzelgriff ohne Nachbar → kein Anker), die getippte Zahl
+  ging an die Befehlszeile; „Position" ungeklemmt, kein Mass ab Wandende. Geändert: Kern `cmd_transform`
+  (`Sel.openingIds`, `slide_opening`): eine allein gewählte Wandöffnung gleitet beim Verschieben um die auf die
+  Wandachse projizierte Strecke (auf [0, Länge − Breite] geklemmt); liegt das Ziel in einer anderen geraden Wand
+  desselben Geschosses (halbe Dicke + 5 cm) und nicht mehr in der eigenen, wechselt sie den Wirt; Kopie/Reihe/Verteilen
+  setzen Kopien in dieselbe Wand; Vorschau zeigt die Lücke; mit der Wand gewählt geht sie starr mit (wie bisher).
+  Drehen/Spiegeln/Skalieren lehnen eine Öffnung allein mit Hinweis ab. Objekt-Info: X/Y verschiebt, neues Feld
+  „Abstand ab Wandende" (`wallLength` aus `selection_info`), Position geklemmt. Griff-Zug: Tab → Länge entlang der
+  Wand ab Greifpunkt. Tests: Rust `oeffnung_gleitet_entlang_der_wand`, `wand_mit_typ_volumen_und_fuge` (wallLength);
+  vitest `transform.test.ts` (Engine, getippte Distanz/`@x,y`), `transform.openings.test.ts` (alle Öffnungen
+  Musterhaus komplex); e2e `openingMove.spec.ts` (Befehl getippt + Klick, Undo, Objekt-Info, Griff mit Länge).
+  Offen: Bogenwände (Öffnung bleibt stehen), keine Überlappungsprüfung zwischen Öffnungen, Dach-/Deckenöffnungen
+  allein nicht über Verschieben (nur Griffe), Bemassungs-Bezüge auf die gleitende Öffnung werden nicht nachgeführt;
+  nur Linux/Chromium geprüft, nicht in der Tauri-App. · S
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

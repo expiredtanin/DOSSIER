@@ -101,6 +101,8 @@ function singleTransformSel(kind: string, id: string): TransformSelection | null
   if (kind === "roof") return { wallIds: [], drawingId: null, roofIds: [id] };
   if (kind === "stair") return { wallIds: [], drawingId: null, stairIds: [id] };
   if (kind === "room") return { wallIds: [], drawingId: null, roomIds: [id] };
+  // [144] Öffnung: X/Y im Objekt-Info verschiebt sie entlang (bzw. in eine andere) Wand.
+  if (kind === "opening") return { wallIds: [], drawingId: null, openingIds: [id] };
   return null;
 }
 
