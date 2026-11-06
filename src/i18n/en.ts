@@ -800,6 +800,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.opening.slope": "Surface slope",
   "objinfo.opening.position": "Position (from wall start)",
   "objinfo.opening.positionEnd": "Distance from wall end",
+  "opening.overlapClamped": "Opening stops at the neighbouring opening (5 cm web).",
+  "opening.noRoom": "No room for the opening in the target wall.",
   "objinfo.opening.width": "Width",
   "objinfo.opening.height": "Height",
   "objinfo.opening.sill": "Sill height",

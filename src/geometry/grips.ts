@@ -31,7 +31,10 @@ export type GripRequest =
   | { op: "insertPoint"; id: string; seg: number; pt: P }
   | { op: "deletePoint"; id: string; index: number }
   | { op: "vertexType"; id: string; index: number; vertexType: "corner" | "arc" | "spline" }
-  | { op: "wallThickness" | "ceilingThickness"; id: string; thickness: number; newId: string; newName: string };
+  | { op: "wallThickness" | "ceilingThickness"; id: string; thickness: number; newId: string; newName: string }
+  // [144] Wandöffnung gleiten lassen (Kern `opening_slide`): Griff-Zug nach `pt` bzw. Position `a` ab Wandanfang.
+  | { op: "openingSlide"; id: string; pt: P }
+  | { op: "openingPosition"; id: string; a: number };
 
 /** Punkt als Anfrage-Paar. */
 export const gripPt = (p: Vec2): P => [p.x, p.y];

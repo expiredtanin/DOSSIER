@@ -209,6 +209,7 @@ export function usePanelHostBase(opts: {
     | "updateWall"
     | "setWallThickness"
     | "updateOpening"
+    | "slideOpening"
     | "updateCeiling"
     | "setCeilingThickness"
     | "updateStair"
@@ -324,6 +325,7 @@ export function usePanelHostBase(opts: {
     updateWall,
     setWallThickness,
     updateOpening,
+    slideOpening,
     updateCeiling,
     setCeilingThickness,
     updateStair,
@@ -952,10 +954,10 @@ export function usePanelHostBase(opts: {
       },
       onSetOpeningPosition: (position) => {
         if (selection?.kind !== "opening" || !Number.isFinite(position)) return;
-        // [144] In der Wand halten: auf [0, Wandlänge − Breite] klemmen (Bogenwand: nur ≥ 0).
-        const o = selection.opening;
-        const max = o?.wallLength != null ? Math.max(0, o.wallLength - o.width) : Infinity;
-        updateOpening(selection.id, { position: Math.min(max, Math.max(0, position)) });
+        // [144] Dach-/Deckenöffnung: Feld frei; Wandöffnung: der Kern klemmt auf [0, Wandlänge − Breite]
+        // (Bogenwand: Bogenlänge) und hält 5 cm vor der Nachbaröffnung an (mit Hinweis).
+        if (selection.opening?.wallLength == null) updateOpening(selection.id, { position: Math.max(0, position) });
+        else slideOpening(selection.id, { position });
       },
       onSetOpeningSwingAngle: (swingAngle) => {
         if (selection?.kind === "opening" && swingAngle > 0)

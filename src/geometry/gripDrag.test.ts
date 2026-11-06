@@ -9,7 +9,6 @@ import {
   gripPolarPoint,
   openingGripPoint,
   openingSheetSlide,
-  openingSlidePosition,
   sheetHeightDrag,
   wallGripPoints,
 } from "./gripDrag";
@@ -49,8 +48,10 @@ describe("Griff-Zug (Kern)", () => {
 
   it("Öffnung entlang der Wand und im Schnitt", () => {
     expect(openingGripPoint(wall, { position: 1, width: 1.2 })).toEqual({ x: 1.6, y: 0 });
-    expect(openingSlidePosition(wall, { width: 1.2 }, { x: 2.6, y: 3 })).toBe(2);
-    expect(openingSlidePosition({ start: wall.start, end: wall.start }, { width: 1.2 }, { x: 1, y: 0 })).toBeNull();
+    // Bogenwand (Halbkreis, Radius 2.5): Mitte bei der Bogenlänge 2.5·π/2 liegt im Scheitel.
+    const g = openingGripPoint({ ...wall, bulge: 1 }, { position: 2.5 * Math.PI / 2 - 0.6, width: 1.2 });
+    expect(g.x).toBeCloseTo(2.5, 9);
+    expect(Math.abs(g.y)).toBeCloseTo(2.5, 9);
     expect(openingSheetSlide(wall, { position: 1, width: 1.2 }, { x: -1, y: 0 }, 0.5)).toEqual({ position: 0.5, du: 0.5 });
     expect(openingSheetSlide(wall, { position: 1, width: 1.2 }, { x: 0.1, y: 0.995 }, 1)).toBeNull();
   });

@@ -9,7 +9,7 @@
 //! - Kanten-Griff: geführte Kante (nur entlang der Aussennormale, Raster/Geometrie-Snap) bzw. freie Kante
 //!   (Ortho, Raster), mit oder ohne gelockte Felder ([`edge_target`]);
 //! - Höhen-Griffe im Schnitt (Wand-Oberkante, Fenster Ober-/Unterkante, [`sheet_height`]);
-//! - Öffnung entlang der Wirtswand ([`opening_slide`], [`opening_slide_sheet`]), Griff-Lagen von
+//! - Öffnung entlang der Wirtswand ([`opening_slide_sheet`]; der Griff-Zug selbst: `crate::opening_slide`), Griff-Lagen von
 //!   Öffnung, Treppe, Bogenwand und Baugrube;
 //! - koinzidente Ecken anderer gewählter Elemente beim Körper-Verschieben ([`coincident`]).
 //!
@@ -211,21 +211,13 @@ pub fn sheet_height(kind: HeightGrip, base: f64, top: f64, bottom: f64, y: f64, 
 }
 
 /// Mittelpunkt-Griff einer Öffnung (Breite `width`, `position` = Abstand des ersten Pfostens) auf der Wandachse.
-pub fn opening_wall_grip(ws: P, we: P, position: f64, width: f64) -> P {
-    add(ws, scale(normalize(sub(we, ws)), position + width / 2.0))
-}
-
-/// Neue `position` einer Öffnung, deren Mittelpunkt-Griff nach `pt` gezogen wird: auf die Wandachse
-/// projiziert und auf [0, Wandlänge − Breite] geklemmt. `None` bei einer Wand ohne Länge.
-pub fn opening_slide(ws: P, we: P, width: f64, pt: P) -> Option<f64> {
-    let d = sub(we, ws);
-    let len = hypot2(d.0, d.1);
-    if !(len > 1e-9) {
-        return None;
+pub fn opening_wall_grip(ws: P, we: P, bulge: f64, position: f64, width: f64) -> P {
+    // Bogenwand ([T2], [144]): Punkt auf dem Bogen bei der Bogenlänge der Öffnungsmitte.
+    if let Some(a) = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ws.0, ws.1), kernel2d::Vec2::new(we.0, we.1), Some(bulge)) {
+        let q = a.point(position + width / 2.0, 0.0);
+        return (q.x, q.y);
     }
-    let axis = scale(d, 1.0 / len);
-    let t = dot(sub(pt, ws), axis);
-    Some(jsnum::max(0.0, jsnum::min(len - width, t - width / 2.0)))
+    add(ws, scale(normalize(sub(we, ws)), position + width / 2.0))
 }
 
 /// Öffnung im Schnitt-Blatt waagrecht ziehen: Blatt-Delta `du` (gesamt, entlang der Schnitt-Achse `u_axis`)
@@ -398,12 +390,10 @@ mod tests {
     #[test]
     fn oeffnung_entlang_der_wand() {
         let (s, e) = ((0.0, 0.0), (5.0, 0.0));
-        assert!(close(opening_wall_grip(s, e, 1.0, 1.2), (1.6, 0.0)));
-        assert_eq!(opening_slide(s, e, 1.2, (2.6, 3.0)), Some(2.0));
-        // Geklemmt an beide Enden.
-        assert_eq!(opening_slide(s, e, 1.2, (-3.0, 0.0)), Some(0.0));
-        assert_eq!(opening_slide(s, e, 1.2, (9.0, 0.0)), Some(3.8));
-        assert_eq!(opening_slide(s, s, 1.2, (1.0, 0.0)), None);
+        assert!(close(opening_wall_grip(s, e, 0.0, 1.0, 1.2), (1.6, 0.0)));
+        // Bogenwand (Halbkreis, Radius 2.5): Mitte bei Bogenlänge 2.5·π/2 = Scheitel.
+        let q = opening_wall_grip(s, e, 1.0, 2.5 * std::f64::consts::FRAC_PI_2 - 0.6, 1.2);
+        assert!(close((q.0, q.1.abs()), (2.5, 2.5)), "{q:?}");
     }
 
     #[test]

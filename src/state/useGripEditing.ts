@@ -22,7 +22,6 @@ import {
   gripPolarPoint,
   openingGripPoint,
   openingSheetSlide,
-  openingSlidePosition,
   sheetHeightDrag,
   stairMoveHandle,
   wallGripPoints,
@@ -93,6 +92,8 @@ export function useGripEditing(opts: {
   engineRef: RefObject<CommandEngine | null>;
   commandLineRef: RefObject<CommandLineHandle | null>;
   updateOpening: (id: string, patch: Record<string, unknown>) => void;
+  /** [144] Wandöffnung gleiten lassen (Kern: Wand, Bogenwand, Nachbaröffnungen). */
+  slideOpening: (id: string, to: { position: number } | { pt: Vec2 }, coalesceKey?: string) => void;
   /** Wand ändern (Höhen-Griff im Schnitt); `coalesceKey` fasst einen Zug zu EINEM Undo-Schritt. */
   updateWall: (id: string, patch: Partial<import("../model/types").Wall>, coalesceKey?: string) => void;
   moveStairBy: (id: string, delta: Vec2) => void;
@@ -143,6 +144,7 @@ export function useGripEditing(opts: {
     engineRef,
     commandLineRef,
     updateOpening,
+    slideOpening,
     updateWall,
     moveStairBy,
     moveRoomGrip,
@@ -385,9 +387,12 @@ export function useGripEditing(opts: {
     if (!selectedOpeningId) return null;
     const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
     const w = op && !op.hostRoofId && !op.hostCeilingId ? project.walls.find((x) => x.id === op.hostWallId) : undefined;
-    if (!w) return null;
-    const dx = w.end.x - w.start.x;
-    const dy = w.end.y - w.start.y;
+    if (!w || !op) return null;
+    // Sehne über die Öffnung (gerade Wand: Wandrichtung; Bogenwand: ≈ Tangente in der Öffnungsmitte).
+    const a = openingGripPoint(w, { position: op.position - op.width / 2, width: op.width });
+    const b = openingGripPoint(w, { position: op.position + op.width / 2, width: op.width });
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
     const len = Math.hypot(dx, dy);
     return len > 1e-9 ? { x: dx / len, y: dy / len } : null;
   };
@@ -796,9 +801,9 @@ export function useGripEditing(opts: {
         if (patch) updateOpening(op.id, patch);
         return;
       }
-      const w = op && project.walls.find((x) => x.id === op.hostWallId);
-      const pos = op && w ? openingSlidePosition(w, op, pt) : null;
-      if (op && pos != null) updateOpening(op.id, { position: pos });
+      // Wandöffnung ([144]): der Kern projiziert auf die Achse (Bogenwand: auf den Bogen), klemmt auf
+      // die Wand und hält vor der Nachbaröffnung an.
+      if (op && !op.locked) slideOpening(op.id, { pt }, `slideOpening:${op.id}`);
       return;
     }
     // Treppe: den Bewegpunkt verfolgen → ganze Treppe um das Delta (Ziel −
@@ -959,7 +964,7 @@ export function useGripEditing(opts: {
     }
     const pom = pendingOpeningMoveRef.current;
     pendingOpeningMoveRef.current = null;
-    if (pom) updateOpening(pom.id, { position: pom.position });
+    if (pom) slideOpening(pom.id, { position: pom.position });
     const pa = pendingAreaMoveRef.current;
     pendingAreaMoveRef.current = null;
     if (pa && (pa.total.x !== 0 || pa.total.y !== 0)) {

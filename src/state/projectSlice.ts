@@ -403,6 +403,12 @@ export interface ProjectSlice {
     id: string,
     patch: Partial<import("../model/types").Opening>,
   ) => void;
+  /**
+   * [144] Wandöffnung in ihrer Wand verschieben (Kern `opening_slide`): auf `position` (ab Wandanfang,
+   * Bogenwand: Bogenlänge) bzw. zum Griff-Punkt `pt`; geklemmt auf die Wand und 5 cm vor der Nachbar-
+   * öffnung (mit Hinweis). `coalesceKey` fasst einen Griff-Zug zu einem Undo-Schritt.
+   */
+  slideOpening: (id: string, to: { position: number } | { pt: Vec2 }, coalesceKey?: string) => void;
 
   /**
    * Immutable Änderung eines Dachs (Form/Neigung/Überstand/Firstrichtung/
@@ -1253,6 +1259,8 @@ export function createProjectSlice(
 
     // ── Öffnungs-Editieren ────────────────────────────────────────────────
     updateOpening: (id, patch) => applyChange((p) => patchItem(p, "openings", id, patch)),
+    slideOpening: (id, to, coalesceKey) =>
+      applyGrip("pt" in to ? { op: "openingSlide", id, pt: gripPt(to.pt) } : { op: "openingPosition", id, a: to.position }, coalesceKey),
 
     // ── Dach-Editieren ─────────────────────────────────────────────────────
     updateRoof: (id, patch, coalesceKey) => applyChange((p) => patchItem(p, "roofs", id, patch), coalesceKey),
