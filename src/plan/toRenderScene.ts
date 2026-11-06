@@ -123,6 +123,8 @@ export interface RScene {
    * Felder ohne `deny_unknown_fields`), also rückwirkungsfrei fürs GPU-Backend.
    */
   bounds: RBounds;
+  /** Linienenden und -ecken ([146], `Plan.lineEnds`); fehlt = flach + Gehrung. */
+  lineEnds?: number;
 }
 
 /**
@@ -182,7 +184,7 @@ function emptySceneBin(): Uint8Array {
  */
 export function planSceneBin(plan: Plan, paperScaleN: number = STAMP_DEFAULT_N): Uint8Array {
   const greyed = greyedFlat(plan);
-  const out = withPlanParts(planParts(plan), (segs) => core().plan_scene_bin(segs, greyed, paperScaleN));
+  const out = withPlanParts(planParts(plan), (segs) => core().plan_scene_bin(segs, greyed, paperScaleN, plan.lineEnds ?? 0));
   return out.length ? out : emptySceneBin();
 }
 
@@ -260,5 +262,5 @@ function decodeSceneF64(f: Float64Array): SceneGeometry {
 export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAULT_N): RScene {
   const greyed = greyedFlat(plan);
   const geo = decodeSceneF64(withPlanParts(planParts(plan), (segs) => core().plan_scene_f64(segs, greyed)));
-  return { ...geo, texts: sceneTexts(plan, paperScaleN), images: sceneImages(plan), bounds: { ...plan.bounds } };
+  return { ...geo, texts: sceneTexts(plan, paperScaleN), images: sceneImages(plan), bounds: { ...plan.bounds }, lineEnds: plan.lineEnds ?? 0 };
 }

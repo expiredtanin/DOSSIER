@@ -180,6 +180,10 @@ pub struct Scene {
     pub lines: Vec<Line>,
     #[serde(default)]
     pub texts: Vec<Text>,
+    /// Linienenden und -ecken ([146]) `cap | join << 2`: cap 0 flach, 1 rund, 2 vorstehend;
+    /// join 0 Gehrung (Grenze 4, sonst gefast), 1 rund, 2 gefast. 0 = Standard.
+    #[serde(default)]
+    pub line_ends: u32,
 }
 
 /// Rechteckiger Ausschnitt in BILDSCHIRM-Einheiten (viewBox), analog `ViewBox`

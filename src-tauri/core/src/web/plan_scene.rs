@@ -7,6 +7,7 @@ use crate::plan::parts::{parts_from, ranges_from};
 use crate::plan::scene::SText;
 use crate::plan::text::scene_texts;
 use crate::plan::scene::{build_scene, encode_scene_bin, encode_scene_f64, Scene};
+use crate::plan::line_ends::LineEnds;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 fn scene_of(segs: &[f64], greyed: &[f64]) -> Option<Scene> {
@@ -23,12 +24,16 @@ fn texts_of(segs: &[f64], greyed: &[f64], paper_scale_n: f64) -> Option<Vec<STex
 }
 
 /// render2d-Szene v1 (Bytes für `set_scene_bin`/`push_native_scene`) samt Texten, gesetzt beim
-/// Massstab 1:`paper_scale_n` (die Abschnitte tragen das Text-JSON). Leer = Fehler.
+/// Massstab 1:`paper_scale_n` (die Abschnitte tragen das Text-JSON). `line_ends` = Linienenden
+/// und -ecken `cap | join << 2` ([146]). Leer = Fehler.
 #[wasm_bindgen]
-pub fn plan_scene_bin(segs: &[f64], greyed: &[f64], paper_scale_n: f64) -> Vec<u8> {
+pub fn plan_scene_bin(segs: &[f64], greyed: &[f64], paper_scale_n: f64, line_ends: u32) -> Vec<u8> {
     let Some(texts) = texts_of(segs, greyed, paper_scale_n) else { return Vec::new() };
     match scene_of(segs, greyed) {
-        Some(s) => encode_scene_bin(&s, &texts),
+        Some(mut s) => {
+            s.line_ends = LineEnds::from_code(line_ends as f64).code();
+            encode_scene_bin(&s, &texts)
+        }
         None => Vec::new(),
     }
 }

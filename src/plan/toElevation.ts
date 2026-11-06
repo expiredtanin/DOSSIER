@@ -5,6 +5,7 @@
 
 import type { DrawingLevel, Project } from "../model/types";
 import { documentFor } from "../core/document";
+import { lineEndsCode } from "../model/lineEnds";
 import { decodePlanBuf } from "./planBuf";
 import { lazyPlan } from "./planLazy";
 import { hasLine, levelArg, visibilityArgs } from "./toSection";
@@ -38,7 +39,7 @@ export function generateElevationPlan(project: Project, level: DrawingLevel, opt
   if (buf.groups.length === 0) return null;
   const b = buf.bounds ?? [0, 0, 1, 1];
   return lazyPlan(
-    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] } },
+    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] }, lineEnds: lineEndsCode(project) },
     buf.groups.map(([from, to]) => ({ buf, from, to })),
   );
 }

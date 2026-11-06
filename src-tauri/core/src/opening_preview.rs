@@ -74,6 +74,8 @@ pub fn opening_preview(p: &Project, opening_id: &str) -> Option<Project> {
         walls: vec![wall],
         openings: Some(vec![op]),
         scale_line_weights: p.scale_line_weights,
+        line_cap: p.line_cap,
+        line_join: p.line_join,
         ..Default::default()
     })
 }

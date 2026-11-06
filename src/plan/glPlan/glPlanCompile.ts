@@ -42,7 +42,7 @@ export function compilePrimitivesToGpu(
   pxPerMeter = 0,
 ): GpuGeometry {
   const packed = gl.packedLineVertices === true;
-  const out = core().gpu_compile_flat(encodePlanBuf(primitives, { lean: true }), 0, primitives.length, pxPerMeter, packed);
+  const out = core().gpu_compile_flat(encodePlanBuf(primitives, { lean: true }), 0, primitives.length, pxPerMeter, packed, gl.lineEnds ?? 0);
   return uploadCompiled(gl, out);
 }
 
@@ -53,13 +53,14 @@ export function compilePrimitivesToGpu(
  */
 export function compilePlanBufRange(gl: BufferGl, src: DecodedPlanBuf, from: number, to: number, pxPerMeter = 0): GpuGeometry {
   const packed = gl.packedLineVertices === true;
+  const ends = gl.lineEnds ?? 0;
   const c = core();
   if (src.holdEpoch !== coreEpoch()) src.hold = 0; // Nummer aus einer Kern-Instanz vor dem Neustart ([118])
-  let out = src.hold ? c.gpu_compile_held(src.hold, from, to, pxPerMeter, packed) : new Uint32Array(0);
+  let out = src.hold ? c.gpu_compile_held(src.hold, from, to, pxPerMeter, packed, ends) : new Uint32Array(0);
   if (out.length === 0) {
     src.hold = c.plan_buf_hold(src.bytes);
     src.holdEpoch = coreEpoch();
-    out = src.hold ? c.gpu_compile_held(src.hold, from, to, pxPerMeter, packed) : c.gpu_compile_flat(src.bytes, from, to, pxPerMeter, packed);
+    out = src.hold ? c.gpu_compile_held(src.hold, from, to, pxPerMeter, packed, ends) : c.gpu_compile_flat(src.bytes, from, to, pxPerMeter, packed, ends);
   }
   return uploadCompiled(gl, out);
 }

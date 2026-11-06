@@ -211,7 +211,6 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     // 1) Radiale Kante (Strichbreite quer zum Bogen), analytisch antialiased.
     let d_ring_px = abs(dist - r_s) * pps;
     let half_w_px = 0.5 * max(1.0, width_mm * g.stroke_scale);
-    let cov_radial = 1.0 - smoothstep(half_w_px - 0.6, half_w_px + 0.6, d_ring_px);
 
     // 2) Winkel-Clamp auf [min(0,sweep), max(0,sweep)] mit Butt-Cap an den Enden.
     let theta = atan2(rel.y, rel.x);
@@ -228,7 +227,17 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
         sd = -min(da - lo, hi - da);
     }
     let cap_px = sd * r_s * pps;          // signierter Abstand zur Kappe (Geraete-px)
-    let cov_cap = 1.0 - smoothstep(-0.5, 0.5, cap_px);
+    // [146] Linienende: 0 flach, 1 rund (Abstand zum Endpunkt), 2 vorstehend (um halbe Breite).
+    let cap_kind = i32(in.wdash.w + 0.5);
+    var cov_cap = 1.0 - smoothstep(-0.5, 0.5, cap_px);
+    var cov_radial = 1.0 - smoothstep(half_w_px - 0.6, half_w_px + 0.6, d_ring_px);
+    if (cap_kind == 2) {
+        cov_cap = 1.0 - smoothstep(-0.5, 0.5, cap_px - half_w_px);
+    } else if (cap_kind == 1 && cap_px > 0.0) {
+        cov_cap = 1.0;
+        let d_end = length(vec2<f32>(cap_px, d_ring_px));
+        cov_radial = 1.0 - smoothstep(half_w_px - 0.6, half_w_px + 0.6, d_end);
+    }
 
     // 3) Dash: Bogenlaenge ab a0 (Modell-Meter) modulo Muster, weicher Uebergang.
     var cov_dash = 1.0;
@@ -359,7 +368,10 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let sc = clamp(s, in.seg.x, in.seg.y);
     let e_out = abs(s - sc);
     let total = in.pat.x;
-    let n = i32(in.pat.y + 0.5);
+    // `count` traegt `16 · cap` ([146]): 0 flach, 1 rund, 2 vorstehend.
+    let nc = i32(in.pat.y + 0.5);
+    let n = nc % 16;
+    let cap_kind = nc / 16;
     var e_in = 0.0;
     if (n > 0 && total > 1e-6) {
         let k = floor(sc / total);
@@ -391,9 +403,17 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     // [140] Deckung unter 1 Geraete-px wie `LINE_WGSL`.
     var a = globals.color.a * clamp(globals.stroke_px * globals.stroke_scale, 0.35, 1.0);
     if (e > 0.0) {
-        // Rundes Strich-Ende (Abstand zum Strich), Kante ~1 px weich wie die Boegen.
-        let d = sqrt(e * e + y * y);
-        a = a * (1.0 - smoothstep(hw - 0.5, hw + 0.5, d));
+        // Innere Ecke eines Zugs (nicht in einer Luecke): rund verbunden wie bisher.
+        let inner = e_in <= 0.0 && sc > 1e-3 && sc < in.seg.z - 1e-3;
+        if (cap_kind == 1 || inner) {
+            // Rundes Strich-Ende (Abstand zum Strich), Kante ~1 px weich wie die Boegen.
+            let d = sqrt(e * e + y * y);
+            a = a * (1.0 - smoothstep(hw - 0.5, hw + 0.5, d));
+        } else if (cap_kind == 2) {
+            a = a * (1.0 - smoothstep(hw - 0.5, hw + 0.5, max(e, abs(y))));
+        } else {
+            a = a * (1.0 - smoothstep(0.0, 1.0, e));
+        }
     }
     if (a <= 0.002) {
         discard;

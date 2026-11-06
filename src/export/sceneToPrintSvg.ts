@@ -22,6 +22,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { lineEndsSvgAttrs } from "../model/lineEnds";
 import type {
   RArc,
   RFill,
@@ -134,6 +135,8 @@ export function sceneToPrintSvg(scene: RScene, opts: PrintSceneOptions): PrintSc
   svg.setAttribute("width", String(opts.pageWidthMm));
   svg.setAttribute("height", String(opts.pageHeightMm));
   svg.setAttribute("viewBox", `0 0 ${opts.pageWidthMm} ${opts.pageHeightMm}`);
+  // Linienenden und -ecken des Projekts ([146]): einmal am Wurzelelement, alle Striche erben sie.
+  for (const [k, v] of Object.entries(lineEndsSvgAttrs(scene.lineEnds))) svg.setAttribute(k, v);
 
   const bg = document.createElementNS(SVG_NS, "rect");
   bg.setAttribute("x", "0");
@@ -269,12 +272,12 @@ function appendStroke(
   el.setAttribute("stroke", rgbCss(color));
   setOpacityAttr(el, "stroke-opacity", color[3]);
   el.setAttribute("stroke-width", String(strokeMm));
-  el.setAttribute("stroke-linejoin", "round");
-  el.setAttribute("stroke-linecap", "round");
   if (dash && dash.length) {
     // Strichmuster ist bereits in Papier-mm definiert (siehe `toRenderScene.ts`:
     // „unveraendert durchgereicht"), also direkt uebernehmen.
     el.setAttribute("stroke-dasharray", dash.map((d) => round(d)).join(" "));
+    // Punkte (Strich 0) brauchen runde Enden, sonst unsichtbar ([96]).
+    if (dash.some((d) => d === 0)) el.setAttribute("stroke-linecap", "round");
   }
   svg.appendChild(el);
 }
@@ -292,9 +295,9 @@ function appendLine(svg: SVGSVGElement, l: RLine, map: Mapper, _mmPerM: number):
   el.setAttribute("stroke", rgbCss(l.color));
   setOpacityAttr(el, "stroke-opacity", l.color[3]);
   el.setAttribute("stroke-width", String(quantizePen(l.widthMm)));
-  el.setAttribute("stroke-linecap", "round");
   if (l.dash && l.dash.length) {
     el.setAttribute("stroke-dasharray", l.dash.map((d) => round(d)).join(" "));
+    if (l.dash.some((d) => d === 0)) el.setAttribute("stroke-linecap", "round");
   }
   svg.appendChild(el);
 }

@@ -65,17 +65,61 @@ fn dash_attr(d: &[f64]) -> String {
 
 /// Anweisungsliste.
 struct Out {
-    s: String,
-    first: bool,
+    recs: Vec<String>,
+    /// Volle Einzel-Linien je (Farbe, Stift, Deckkraft) zum Zusammennähen ([146]): Wand-Umrisse zweier
+    /// Wände treffen sich als EIN Zug mit Ecke; jeder Zug steht an der Stelle seiner spätesten Linie.
+    solid: Vec<((String, String, String), Vec<Vec<V2>>, Vec<usize>)>,
 }
 
 impl Out {
     fn rec(&mut self, fields: &[&str]) {
-        if !self.first {
-            self.s.push('\u{1e}');
+        self.recs.push(fields.join("\u{1f}"));
+    }
+
+    fn defer_solid(&mut self, key: (String, String, String), a: V2, b: V2) {
+        self.recs.push(String::new());
+        let slot = self.recs.len() - 1;
+        let gi = match self.solid.iter().position(|g| g.0 == key) {
+            Some(g) => g,
+            None => {
+                self.solid.push((key, Vec::new(), Vec::new()));
+                self.solid.len() - 1
+            }
+        };
+        self.solid[gi].1.push(vec![a, b]);
+        self.solid[gi].2.push(slot);
+    }
+
+    fn finish(mut self) -> String {
+        for ((color, pen, o), runs, slots) in std::mem::take(&mut self.solid) {
+            for (pts, closed, members) in crate::plan::scene::stitch_runs_members(&runs) {
+                let slot = members.iter().map(|&m| slots[m]).max().unwrap_or(0);
+                let line = pts.len() == 2 && !closed;
+                let mut attrs = if line {
+                    vec![("x1", r3(pts[0].x)), ("y1", r3(pts[0].y)), ("x2", r3(pts[1].x)), ("y2", r3(pts[1].y)), ("stroke", color.clone()), ("stroke-width", pen.clone())]
+                } else {
+                    vec![("points", pts_attr(&pts)), ("fill", "none".to_string()), ("stroke", color.clone()), ("stroke-width", pen.clone())]
+                };
+                if !o.is_empty() {
+                    attrs.push(("opacity", o.clone()));
+                }
+                let tag = if line { "line" } else if closed { "polygon" } else { "polyline" };
+                let mut f: Vec<&str> = vec!["E", "0", tag];
+                for (k, v) in &attrs {
+                    f.push(k);
+                    f.push(v);
+                }
+                let r = f.join("\u{1f}");
+                if self.recs[slot].is_empty() {
+                    self.recs[slot] = r;
+                } else {
+                    self.recs[slot].push('\u{1e}');
+                    self.recs[slot].push_str(&r);
+                }
+            }
         }
-        self.first = false;
-        self.s.push_str(&fields.join("\u{1f}"));
+        self.recs.retain(|r| !r.is_empty());
+        self.recs.join("\u{1e}")
     }
 
     /// Datensatz aus festen Feldern und Name/Wert-Paaren.
@@ -140,7 +184,6 @@ fn poly_node(pts: &str, fill: &str, stroke: &str, stroke_mm: f64) -> Vec<(&'stat
     if stroke != "none" && stroke_mm > 0.0 {
         a.push(("stroke", stroke.to_string()));
         a.push(("stroke-width", js_number(stroke_mm)));
-        a.push(("stroke-linejoin", "round".to_string()));
     } else {
         a.push(("stroke", "none".to_string()));
     }
@@ -155,11 +198,8 @@ fn line_attrs(a: V2, b: V2, color: &str, stroke_mm: f64, dash: Option<&[f64]>) -
         ("y2", r3(b.y)),
         ("stroke", color.to_string()),
         ("stroke-width", js_number(stroke_mm)),
-        ("stroke-linecap", "round".to_string()),
     ];
-    if let Some(d) = dash.filter(|d| !d.is_empty()) {
-        v.push(("stroke-dasharray", dash_attr(d)));
-    }
+    push_dash(&mut v, dash);
     v
 }
 
@@ -169,16 +209,13 @@ fn polyline_attrs(pts: &[V2], color: &str, stroke_mm: f64, dash: Option<&[f64]>)
         ("fill", "none".to_string()),
         ("stroke", color.to_string()),
         ("stroke-width", js_number(stroke_mm)),
-        ("stroke-linecap", "round".to_string()),
-        ("stroke-linejoin", "round".to_string()),
     ];
-    if let Some(d) = dash.filter(|d| !d.is_empty()) {
-        v.push(("stroke-dasharray", dash_attr(d)));
-    }
+    push_dash(&mut v, dash);
     v
 }
 
-/// Strichmuster + runde Kappe bei Punkten (Bögen, Kreise).
+/// Strichmuster + runde Kappe bei Punkten. Sonst erben Enden und Ecken die Projekt-Einstellung
+/// ([146]) vom `<svg>`, das TS anlegt (`planToPrintSvg.ts`).
 fn push_dash(v: &mut Vec<(&'static str, String)>, dash: Option<&[f64]>) {
     if let Some(d) = dash.filter(|d| !d.is_empty()) {
         v.push(("stroke-dasharray", dash_attr(d)));
@@ -392,6 +429,11 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                 let p = hatch::motif_points_opt(a, b, &Motif { points: pts, length }, 1.0).unwrap_or_else(|| vec![a, b]);
                 polyline_attrs(&p, &color, pen, d.as_deref())
             } else {
+                let o = opacity_of(greyed, obj(3));
+                if d.as_deref().is_none_or(|d| d.is_empty()) && pen > 0.0 {
+                    out.defer_solid((color, js_number(pen), o), a, b);
+                    return Some(());
+                }
                 line_attrs(a, b, &color, pen, d.as_deref())
             };
             let tag = if rec.zigzag.is_some() || rec.motif.is_some() { "polyline" } else { "line" };
@@ -601,14 +643,14 @@ pub fn print_svg_ops(parts: &mut [Part], o: &PrintOptions) -> Option<String> {
     let content_w = (max_x - min_x) * k;
     let content_h = (max_y - min_y) * k;
     let m = Map { off_x: (o.page_w - content_w) / 2.0, off_y: (o.page_h - content_h) / 2.0, min_x, max_y, k };
-    let mut out = Out { s: String::new(), first: true };
+    let mut out = Out { recs: Vec::new(), solid: Vec::new() };
     for part in parts.iter_mut() {
         let hatches = part.view.hatch_table()?;
         for i in part.from..part.to {
             entry(&mut out, &part.view, i, &hatches, m)?;
         }
     }
-    Some(out.s)
+    Some(out.finish())
 }
 
 #[cfg(test)]
@@ -646,9 +688,10 @@ mod tests {
         let js = "{\"kind\":\"drawingText\",\"at\":{\"x\":1,\"y\":2},\"text\":\"aa bb\",\"heightM\":0.5,\"angle\":0.5,\"color\":\"#123\",\"wrapWidth\":2,\"marks\":{\"bold\":true}}";
         let t: SingleText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
-        let mut out = Out { s: String::new(), first: true };
+        let mut out = Out { recs: Vec::new(), solid: Vec::new() };
         text_node(&mut out, &t, m, "0.5".into());
-        let recs: Vec<Vec<&str>> = out.s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
+        let s = out.finish();
+        let recs: Vec<Vec<&str>> = s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
         // Drehung um den Anker (10, 80 mm), eine Zeile (Spalte 20 mm), je Wort/Leerraum ein Run.
         assert_eq!(recs[0], ["X", "transform", "rotate(-28.648 10 80)", "opacity", "0.5"]);
         assert_eq!(recs[1], ["L", "", "x", "10", "y", "80", "text-anchor", "start"]);
@@ -664,9 +707,10 @@ mod tests {
         let js = r##"{"at":{"x":0,"y":10},"text":"","heightM":0.25,"angle":0,"wrapWidth":2,"doc":{"version":1,"paragraphs":[{"runs":[{"text":"aaaa bbbb","marks":{}}]},{"runs":[{"text":"c","marks":{"sizePt":72}}],"lineHeight":2}]}}"##;
         let t: SingleText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
-        let mut out = Out { s: String::new(), first: true };
+        let mut out = Out { recs: Vec::new(), solid: Vec::new() };
         text_node(&mut out, &t, m, String::new());
-        let recs: Vec<Vec<&str>> = out.s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
+        let s = out.finish();
+        let recs: Vec<Vec<&str>> = s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
         let lines: Vec<&Vec<&str>> = recs.iter().filter(|r| r[0] == "L").collect();
         assert_eq!(lines.len(), 2);
         // Absatz-Zeilenhöhe 2 × Basisgrösse (2.5 mm).
@@ -680,9 +724,10 @@ mod tests {
         let js = r##"{"at":{"x":2,"y":3},"doc":{"version":1,"paragraphs":[{"runs":[{"text":"Wohnen","marks":{"bold":true}}],"align":"center"}]},"extraLines":[{"text":"17.01 m²","align":"center"}],"basePt":10,"color":"#333"}"##;
         let t: StampText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 20.0 };
-        let mut out = Out { s: String::new(), first: true };
+        let mut out = Out { recs: Vec::new(), solid: Vec::new() };
         stamp_node(&mut out, &t, m, "0.3".into());
-        let recs: Vec<Vec<&str>> = out.s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
+        let s = out.finish();
+        let recs: Vec<Vec<&str>> = s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
         assert_eq!(recs[0], ["X", "opacity", "0.3"]);
         // Anker (40, 140 mm); 10 pt = 3.528 mm, Live-Zeile 0.8 ×; Block um den Anker zentriert.
         assert_eq!(&recs[1][..4], ["L", "", "x", "40"]);

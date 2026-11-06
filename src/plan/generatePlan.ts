@@ -25,6 +25,7 @@ import type {
   Vec2,
 } from "../model/types";
 import { documentFor } from "../core/document";
+import { lineEndsCode } from "../model/lineEnds";
 import { registerCoreRestore } from "../engine/coreWasm";
 import { decodePlanBuf, type DecodedPlanBuf } from "./planBuf";
 import {
@@ -86,6 +87,11 @@ export interface Plan {
    * Verbraucher prüft die Objekt-Identität und fällt sonst auf die Objekte zurück.
    */
   bufRuns?: PlanBufRun[];
+  /**
+   * Linienenden und -ecken des Projekts ([146], `cap | join << 2`, s. `model/lineEnds.ts`); fehlt = 0
+   * (flach + Gehrung). Alle Ausgabewege (Szene, GPU-Chunks, Plan-SVG, Druck) lesen es von hier.
+   */
+  lineEnds?: number;
 }
 
 /** `primitives[at + k]` ist (solange nicht ersetzt) `buf.prims[from + k]`, `k < to − from`. */
@@ -288,7 +294,7 @@ export function generatePlan(
         }));
   // Ausmass samt Schatten, Baurecht und Kontext (immer gesetzt, ohne Punkte 0,0–1,1).
   const [minX, minY, maxX, maxY] = dom.buf.bounds ?? [0, 0, 1, 1];
-  return lazyPlan({ bounds: { minX, minY, maxX, maxY }, backgroundImages, ...(underlay.length ? { underlay } : {}) }, pieces);
+  return lazyPlan({ bounds: { minX, minY, maxX, maxY }, backgroundImages, lineEnds: lineEndsCode(project), ...(underlay.length ? { underlay } : {}) }, pieces);
 }
 
 /**
@@ -404,6 +410,7 @@ export function generateVisibleLevelsPlan(
     {
       bounds,
       backgroundImages: activePlan.backgroundImages,
+      lineEnds: lineEndsCode(project),
       ...(greyedRanges.length ? { greyedRanges } : {}),
       ...(underlay.length ? { underlay } : {}),
     },

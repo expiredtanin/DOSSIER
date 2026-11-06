@@ -1787,6 +1787,14 @@ export type LayoutViewport = {
   scaleDenominator?: number;
 };
 
+/** Linienenden aller Striche im Plan/Schnitt/Ansicht und in den Exporten ([146]); fehlt = flach. */
+export type LineCap = "butt" | "round" | "square";
+
+/**
+ * Linienecken (Stoss zweier Segmente eines Zugs) ([146]); fehlt = Gehrung (Grenze 4, sonst gefast).
+ */
+export type LineJoin = "miter" | "round" | "bevel";
+
 /** Ein wiederverwendbarer Linienstil (Line Manager). */
 export type LineStyle = {
   id: string;
@@ -2330,6 +2338,10 @@ export type Project = {
    * Strichstärken im Grundriss mit dem Massstab skalieren, (100/n)^0.25 (`plan/lineWeightScale.ts`).
    */
   scaleLineWeights?: boolean;
+  /** Linienenden aller Striche ([146]); fehlt = flach (`butt`). */
+  lineCap?: LineCap;
+  /** Linienecken aller Striche ([146]); fehlt = Gehrung (`miter`, Grenze 4). */
+  lineJoin?: LineJoin;
   /** Grafik-Kategorie-Baum (geschossübergreifend). */
   layers: Array<LayerCategory>;
   walls: Array<Wall>;

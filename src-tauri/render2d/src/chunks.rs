@@ -31,7 +31,7 @@ const GREY: f32 = 0.549;
 const PX_PER_M: f64 = 90.0;
 
 /// Linien-Shader fuer das KOMPAKTE Vertex-Format der Webview (12 statt 24 Byte):
-/// `position` (2 x f32) + `packed` (4 x snorm8 = bisector.xy, side, miter).
+/// `position` (2 x f32) + `packed` (4 x snorm8 = bisector.xy, side, (miter − 1) / 3).
 /// Rechnung identisch zu `shaders::LINE_WGSL`.
 const LINE_PACKED_WGSL: &str = r#"
 struct Globals {
@@ -58,7 +58,9 @@ fn vs_main(in : VsIn) -> @builtin(position) vec4<f32> {
     if (len > 1e-6) {
         unit_px = dir_px / len;
     }
-    let width_px = max(1.0, globals.stroke_px * globals.stroke_scale) * in.packed.w;
+    // Laengenfaktor ([146]): Byte 0 = 1 (normale Kante), bis 4 (Gehrungsspitze, Ecke der Kappe).
+    let miter = 1.0 + max(in.packed.w, 0.0) * 3.0;
+    let width_px = max(1.0, globals.stroke_px * globals.stroke_scale) * miter;
     let offset_px = unit_px * (width_px * 0.5) * in.packed.z;
     return vec4<f32>(clip_p.xy + offset_px / (globals.viewport_px * 0.5), clip_p.z, clip_p.w);
 }

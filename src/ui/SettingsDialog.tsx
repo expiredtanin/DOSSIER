@@ -17,6 +17,7 @@ import { LayoutMenu } from "./LayoutMenu";
 import { AiAccessSection, type AiAccessView } from "./AiAccessSection";
 import { APP_VERSION } from "./TopBar";
 import type { LayoutState } from "../panels/types";
+import type { LineCap, LineEnds, LineJoin } from "../core";
 import type { ThemeMode } from "../theme/themeMode";
 import { checkForUpdate, getUpdateSnoozeUntil, setUpdateSnooze } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
@@ -77,6 +78,9 @@ export interface SettingsDialogProps {
   /** Projekt-Option: Strichstärken nach Massstab ([32]). */
   scaleLineWeights: boolean;
   onScaleLineWeightsChange: (on: boolean) => void;
+  /** Projekt-Option: Linienenden und -ecken aller Striche ([146]). */
+  lineEnds: LineEnds;
+  onLineEndsChange: (ends: LineEnds) => void;
   /** Offline-Modus: sperrt alle entfernten Abrufe (Materialbibliothek, swisstopo, OSM). */
   offline: boolean;
   onOfflineChange: (offline: boolean) => void;
@@ -126,6 +130,8 @@ export function SettingsDialog({
   onReferenceElevationChange,
   scaleLineWeights,
   onScaleLineWeightsChange,
+  lineEnds,
+  onLineEndsChange,
   offline,
   onOfflineChange,
   aiAccess,
@@ -292,6 +298,7 @@ export function SettingsDialog({
             />
             <div className="imp-note">{t("settings.referenceElevation.hint")}</div>
             <LineWeightScaleField enabled={scaleLineWeights} onChange={onScaleLineWeightsChange} />
+            <LineEndsField value={lineEnds} onChange={onLineEndsChange} />
           </section>
         </>
         )}
@@ -728,6 +735,38 @@ function ShortcutRemapSection({
         </button>
       )}
     </div>
+  );
+}
+
+const LINE_CAPS: readonly LineCap[] = ["butt", "round", "square"];
+const LINE_JOINS: readonly LineJoin[] = ["miter", "round", "bevel"];
+
+/** Projekt-Option „Linienenden und -ecken" ([146], `model/lineEnds.ts`): gilt in allen Ausgaben. */
+function LineEndsField({ value, onChange }: { value: LineEnds; onChange: (e: LineEnds) => void }) {
+  return (
+    <>
+      <label className="settings-check">
+        <span>{t("settings.lineCap")}</span>
+        <select className="settings-select" value={value.cap} onChange={(e) => onChange({ ...value, cap: e.target.value as LineCap })}>
+          {LINE_CAPS.map((c) => (
+            <option key={c} value={c}>
+              {t(`settings.lineCap.${c}` as TranslationKey)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="settings-check">
+        <span>{t("settings.lineJoin")}</span>
+        <select className="settings-select" value={value.join} onChange={(e) => onChange({ ...value, join: e.target.value as LineJoin })}>
+          {LINE_JOINS.map((j) => (
+            <option key={j} value={j}>
+              {t(`settings.lineJoin.${j}` as TranslationKey)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="imp-note">{t("settings.lineEnds.hint")}</div>
+    </>
   );
 }
 

@@ -95,6 +95,8 @@ pub struct Scene {
     pub polylines: Vec<SStroke>,
     pub arcs: Vec<SArc>,
     pub lines: Vec<SLine>,
+    /// Linienenden und -ecken ([146], `LineEnds::code`), im Kopfwort der Binärszene.
+    pub line_ends: u32,
 }
 
 // ── Farben (wie `toRgba`/`withOpacity` der TS-Fassung) ──────────────────────────────────────────
@@ -259,8 +261,14 @@ fn stitch_key(p: V2) -> (u64, u64) {
 /// Ergebnis: (Punkte, geschlossen). Gleiche Wahl wie die lineare Suche der TS-Fassung (der
 /// erste passende Lauf in Pool-Reihenfolge); ein Raster über den Endpunkten findet die Kandidaten.
 pub fn stitch_runs(runs: Vec<Vec<V2>>) -> Vec<(Vec<V2>, bool)> {
+    stitch_runs_members(&runs).into_iter().map(|(c, closed, _)| (c, closed)).collect()
+}
+
+/// Wie [`stitch_runs`], zusätzlich die Indizes der beteiligten Läufe je Zug ([146]: Zeichen-
+/// Reihenfolge je Zug statt je Gruppe).
+pub fn stitch_runs_members(runs: &[Vec<V2>]) -> Vec<(Vec<V2>, bool, Vec<usize>)> {
     let mut end_count: HashMap<(u64, u64), u32> = HashMap::new();
-    for r in &runs {
+    for r in runs {
         for p in [r[0], r[r.len() - 1]] {
             *end_count.entry(stitch_key(p)).or_insert(0) += 1;
         }
@@ -291,6 +299,7 @@ pub fn stitch_runs(runs: Vec<Vec<V2>>) -> Vec<(Vec<V2>, bool)> {
             continue;
         }
         used[seed] = true;
+        let mut members = vec![seed];
         let mut chain = runs[seed].clone();
         let mut extended = true;
         while extended && !(chain.len() > 2 && same_pt(chain[0], chain[chain.len() - 1])) {
@@ -337,6 +346,7 @@ pub fn stitch_runs(runs: Vec<Vec<V2>>) -> Vec<(Vec<V2>, bool)> {
                     continue;
                 }
                 used[ci] = true;
+                members.push(ci);
                 extended = true;
                 break;
             }
@@ -345,7 +355,7 @@ pub fn stitch_runs(runs: Vec<Vec<V2>>) -> Vec<(Vec<V2>, bool)> {
         if closed {
             chain.pop();
         }
-        out.push((chain, closed));
+        out.push((chain, closed, members));
     }
     out
 }
@@ -365,7 +375,8 @@ struct EdgeGroup {
     color: Rgba,
     width_mm: f64,
     runs: Vec<Vec<V2>>,
-    z: f64,
+    /// Zeichen-Stelle je Lauf; ein genähter Zug liegt an der spätesten seiner Läufe ([146]).
+    zs: Vec<f64>,
 }
 
 struct Builder {
@@ -409,14 +420,14 @@ impl Builder {
         let gi = match self.group_of.get(&k) {
             Some(&g) => g,
             None => {
-                self.groups.push(EdgeGroup { color, width_mm, runs: Vec::new(), z });
+                self.groups.push(EdgeGroup { color, width_mm, runs: Vec::new(), zs: Vec::new() });
                 self.group_of.insert(k, self.groups.len() - 1);
                 self.groups.len() - 1
             }
         };
         let g = &mut self.groups[gi];
         g.runs.push(run);
-        g.z = jsnum::max(g.z, z);
+        g.zs.push(z);
     }
 }
 
@@ -562,7 +573,18 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                             b.flush();
                             let col = with_opacity(stroke_color_for(cls.as_deref(), col_s.as_deref()), cls.as_deref(), greyed);
                             let z = b.z();
-                            b.s.lines.push(SLine { a, b: bb, color: col, width_mm: w, dash, z });
+                            let solid = match &dash {
+                                SDash::List(d) => d.is_empty(),
+                                _ => true,
+                            };
+                            if solid && w > 0.0 {
+                                // [146] Volle Einzel-Linien (Wand-Umrisse im Raster-Pfad u. a.) mit den
+                                // Kantenläufen gleicher Farbe/Breite zusammennähen: an Ecken EIN Zug mit
+                                // Gehrung statt zweier flacher Enden (keine Kerbe).
+                                b.edge_run(vec![a, bb], col, w, z);
+                            } else {
+                                b.s.lines.push(SLine { a, b: bb, color: col, width_mm: w, dash, z });
+                            }
                         }
                     }
                 }
@@ -605,11 +627,12 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
     b.flush();
     let groups = std::mem::take(&mut b.groups);
     for g in groups {
-        for (pts, closed) in stitch_runs(g.runs) {
+        for (pts, closed, members) in stitch_runs_members(&g.runs) {
             if pts.len() < 2 {
                 continue;
             }
-            let s = SStroke { pts, color: g.color, width_mm: g.width_mm, dash: SDash::Absent, z: g.z, width_screen: false };
+            let z = members.iter().fold(f64::NEG_INFINITY, |m, &i| jsnum::max(m, g.zs[i]));
+            let s = SStroke { pts, color: g.color, width_mm: g.width_mm, dash: SDash::Absent, z, width_screen: false };
             if closed {
                 b.s.outlines.push(s);
             } else {
@@ -742,7 +765,7 @@ pub fn encode_scene_bin(s: &Scene, texts: &[SText]) -> Vec<u8> {
     }
     let mut out = Vec::with_capacity(total);
     out.extend_from_slice(b"DR2S");
-    for v in [1u32, s.fills.len() as u32, s.outlines.len() as u32, s.polylines.len() as u32, s.arcs.len() as u32, s.lines.len() as u32, texts.len() as u32, n_pts as u32, n_dash as u32, str_bytes as u32, 0] {
+    for v in [1u32, s.fills.len() as u32, s.outlines.len() as u32, s.polylines.len() as u32, s.arcs.len() as u32, s.lines.len() as u32, texts.len() as u32, n_pts as u32, n_dash as u32, str_bytes as u32, s.line_ends] {
         out.extend_from_slice(&v.to_le_bytes());
     }
     out.extend_from_slice(&pts);
@@ -830,6 +853,7 @@ mod tests {
             ],
             arcs: vec![SArc { center: v2(1.0, 1.0), from: v2(2.0, 1.0), to: v2(1.0, 2.0), r: 1.0, color: [1.0, 0.0, 0.0, 1.0], width_mm: 0.125, dash: SDash::Absent }],
             lines: vec![SLine { a: v2(0.0, 0.0), b: v2(2600000.5, 1200000.25), color: [0.0, 0.5, 0.0, 1.0], width_mm: 0.35, dash: SDash::List(vec![3.0, 1.0, 0.5, 1.0]), z: 4.0 }],
+            line_ends: 0,
         };
         let t = |x: f64, y: f64, content: &str, size_mm: f64, color: Rgba, align: u32| SText { pos: v2(x, y), size_mm, color, align, content: content.as_bytes().to_vec() };
         let texts = vec![
@@ -847,6 +871,9 @@ mod tests {
         assert_eq!(encode_scene_bin(&s, &t), FIXTURE);
         // Leere Szene = reiner Kopf; Landeskoordinaten bleiben f64.
         assert_eq!(encode_scene_bin(&Scene::default(), &[]).len(), 48);
+        // [146] Linienenden im letzten Kopfwort (früher 0).
+        let le = encode_scene_bin(&Scene { line_ends: 9, ..Scene::default() }, &[]);
+        assert_eq!(&le[44..48], &9u32.to_le_bytes());
         let mut l = Scene::default();
         l.lines.push(SLine { a: v2(2600000.123456, 1200000.654321), b: v2(0.0, 0.0), color: [0.0; 4], width_mm: 0.1, dash: SDash::Null, z: 0.0 });
         let b = encode_scene_bin(&l, &[]);

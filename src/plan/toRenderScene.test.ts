@@ -21,8 +21,9 @@ const line = (ax: number, ay: number, bx: number, by: number, extra: Partial<Pri
 describe("planToRenderScene (Kern)", () => {
   it("verkettet 2D-Zeichenlinien zu Polylinie bzw. Umriss", () => {
     const open = planToRenderScene(planOf([line(0, 0, 1, 0), line(1, 0, 1, 1), line(5, 5, 6, 6, { drawingId: undefined })]));
-    expect(open.polylines.map((p) => p.pts.length)).toEqual([3]);
-    expect(open.lines.length).toBe(1);
+    // [146] Die volle Einzel-Linie ohne Zeichnung läuft über die Naht-Gruppen (Ecken statt Enden).
+    expect(open.polylines.map((p) => p.pts.length)).toEqual([3, 2]);
+    expect(open.lines.length).toBe(0);
     const ring = planToRenderScene(planOf([line(0, 0, 1, 0), line(1, 0, 1, 1), line(1, 1, 0, 0)]));
     expect(ring.outlines.map((o) => o.pts.length)).toEqual([3]);
     expect(ring.outlines[0].dash).toBeNull();

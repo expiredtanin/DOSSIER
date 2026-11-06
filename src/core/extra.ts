@@ -84,3 +84,6 @@ export { callAiTool } from "./aiTools";
 export type { AiHost } from "./aiTools";
 export { PRESENTATION_TEMPLATE_ID, presentationDefaults, presentationSheetOps, planPresentationSheet } from "../plan/presentationSheet";
 export type { PresentationOptions, PresentationPlan, PresentationLabels } from "../plan/presentationSheet";
+export { lineEndsOf, lineEndsCode, lineEndsFromCode, lineEndsSvgAttrs, planLineEndsProps, MITER_LIMIT as LINE_MITER_LIMIT } from "../model/lineEnds";
+export type { LineEnds } from "../model/lineEnds";
+export type { LineCap, LineJoin } from "../model/types";

@@ -18,6 +18,7 @@ import {
 import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import type { HatchRender, Plan, PlanImage, Primitive } from "../../core";
 import { materializeGreyed, materializeUnderlay, type UnderlayGroup } from "../../core";
+import { planLineEndsProps } from "../../core";
 import type { Drawing2D, EdgeGrip, Vec2 } from "../../model/types";
 import { t } from "../../i18n";
 import type { ToolHandlers, ToolId, ToolMods } from "../../tools/types";
@@ -3249,11 +3250,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       })}
       {/* 2D-Zeichen-Linien mit drawingId werden gemergt (drawingRuns) als EIN Zug
           gezeichnet → gehrte Ecken statt Butt-Cap-Stufe; im Memo übersprungen. */}
+      {/* Linienenden und -ecken des Projekts ([146], `Plan.lineEnds`) für alle Plan-Striche. */}
+      <g {...planLineEndsProps(plan.lineEnds)}>
       {primitiveEls}
       {/* Zusammenhängende 2D-Zeichen-Linienzüge als EIN <polyline>/<polygon>:
           CAD-typische Gehrung an den Ecken (stroke-linejoin), keine Stufe bei
           dicken Linien. Nach der Haupt-Ebene gezeichnet (2D liegt ohnehin oben). */}
       {drawingRunEls}
+      </g>
       {/* Ist eine GRUPPE gewählt, ersetzt die Bounding-Box unten die einzelnen
           Mitglieds-Hervorhebungen (s. `groupBBox`) — dieser ganze Block bleibt
           dann aus. */}
