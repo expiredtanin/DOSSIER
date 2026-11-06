@@ -1,13 +1,14 @@
 // Tab „Overrides" (grafische Overrides, Regel-Engine A1) — Master-Detail wie
 // Linien/Wandstile: Liste links = Regeln in PRIORITÄTS-Reihenfolge (oben
 // gewinnt pro Aktions-Feld) mit Aktiv-Checkbox, Auf/Ab und Löschen; Detail
-// rechts = Bedingung (Kriterium/Operator/Wert) + optionale Aktionen (Farbe/
-// Strichstärke/Linienstil). Reines Rendering-Overlay — die Auswertung liegt in
-// src/overrides/engine.ts, der Einhängepunkt in plan/generatePlan.ts;
+// rechts = Bedingungen (Kriterium/Operator/Wert, weitere Bedingungen mit UND)
+// + optionale Aktionen (Farbe/Strichstärke/Linienstil; [33] Füllung, Schraffur,
+// Umriss geschnittener Flächen/Schichten). Reines Rendering-Overlay — die
+// Auswertung liegt im Kern (`src-tauri/core/src/plan/overrides.rs`);
 // Elementdaten bleiben unverändert.
 
 import { useState } from "react";
-import type { OverrideConditionType, OverrideOperator, OverrideRule, Project } from "../../model/types";
+import type { OverrideCondition, OverrideConditionType, OverrideOperator, OverrideRule, Project } from "../../model/types";
 import { PEN_WEIGHTS } from "../../model/types";
 import { t } from "../../i18n";
 import { ColorField, DeleteButton, FieldRow, NumberField, SelectField, TextField } from "./fields";
@@ -16,7 +17,20 @@ import { ColorField, DeleteButton, FieldRow, NumberField, SelectField, TextField
 const OVERRIDE_TYPE_OPTIONS: { value: OverrideConditionType; labelKey: string }[] = [
   { value: "layer_name", labelKey: "resources.overrides.condType.layer" },
   { value: "object_name", labelKey: "resources.overrides.condType.object" },
+  { value: "element_kind", labelKey: "resources.overrides.condType.elementKind" },
+  { value: "layer_function", labelKey: "resources.overrides.condType.layerFunction" },
+  { value: "layer_position", labelKey: "resources.overrides.condType.layerPosition" },
+  { value: "material", labelKey: "resources.overrides.condType.material" },
+  { value: "material_category", labelKey: "resources.overrides.condType.materialCategory" },
 ];
+
+/** [33] Feste Werte je Kriterium (Auswahl statt Freitext); Beschriftung `resources.overrides.val.<typ>.<wert>`. */
+const ENUM_VALUES: Partial<Record<OverrideConditionType, readonly string[]>> = {
+  element_kind: ["wall", "slab", "ground_slab", "roof"],
+  layer_function: ["structure", "insulation", "screed", "finish", "plaster", "substructure", "membrane", "cladding", "air"],
+  layer_position: ["above", "structure", "below"],
+  material_category: ["concrete", "masonry", "timber", "insulation", "screed", "flooring", "plaster", "loose_fill", "metal", "glass", "membrane", "air", "cladding", "stone", "other"],
+};
 
 /** Vergleichs-Operatoren (UI-Beschriftung übersetzt, Werte englisch). */
 const OVERRIDE_OP_OPTIONS: { value: OverrideOperator; labelKey: string }[] = [
@@ -26,13 +40,18 @@ const OVERRIDE_OP_OPTIONS: { value: OverrideOperator; labelKey: string }[] = [
   { value: "not_equals", labelKey: "resources.overrides.op.notEquals" },
 ];
 
-/** Kompakte Bedingungs-Zusammenfassung für die Listenzeile. */
+const valueLabel = (type: OverrideConditionType, value: string): string =>
+  ENUM_VALUES[type]?.includes(value) ? t(`resources.overrides.val.${type}.${value}`) : `„${value}"`;
+
+/** Kompakte Bedingungs-Zusammenfassung für die Listenzeile (weitere Bedingungen mit „und"). */
 function overrideConditionSummary(rule: OverrideRule): string {
-  const type = OVERRIDE_TYPE_OPTIONS.find((o) => o.value === rule.condition.type);
-  const op = OVERRIDE_OP_OPTIONS.find((o) => o.value === rule.condition.operator);
-  return `${type ? t(type.labelKey) : rule.condition.type} ${
-    op ? t(op.labelKey) : rule.condition.operator
-  } „${rule.condition.value}"`;
+  return [rule.condition, ...(rule.conditions ?? [])]
+    .map((c) => {
+      const type = OVERRIDE_TYPE_OPTIONS.find((o) => o.value === c.type);
+      const op = OVERRIDE_OP_OPTIONS.find((o) => o.value === c.operator);
+      return `${type ? t(type.labelKey) : c.type} ${op ? t(op.labelKey) : c.operator} ${valueLabel(c.type, c.value)}`;
+    })
+    .join(` ${t("resources.overrides.and")} `);
 }
 
 /** Optionale Aktion: Checkbox (an/aus) + Steuerelement, solange sie an ist. */
@@ -66,6 +85,71 @@ function OptionalAction({
   );
 }
 
+/** Eine Bedingung: Kriterium, Operator, Wert (feste Werte als Auswahl, Baustoff mit Vorschlägen). */
+function ConditionFields({
+  cond,
+  project,
+  onChange,
+}: {
+  cond: OverrideCondition;
+  project: Project;
+  onChange: (c: OverrideCondition) => void;
+}) {
+  const values = ENUM_VALUES[cond.type];
+  const setType = (type: OverrideConditionType) => {
+    const vals = ENUM_VALUES[type];
+    onChange({ ...cond, type, value: vals && !vals.includes(cond.value) ? vals[0] : cond.value });
+  };
+  return (
+    <>
+      <FieldRow label={t("resources.overrides.condType")}>
+        <SelectField
+          value={cond.type}
+          onChange={setType}
+          options={OVERRIDE_TYPE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+        />
+      </FieldRow>
+      <FieldRow label={t("resources.overrides.operator")}>
+        <SelectField
+          value={cond.operator}
+          onChange={(operator) => onChange({ ...cond, operator })}
+          options={OVERRIDE_OP_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+        />
+      </FieldRow>
+      <FieldRow label={t("resources.overrides.value")}>
+        {values ? (
+          <SelectField
+            value={values.includes(cond.value) ? cond.value : values[0]}
+            onChange={(value) => onChange({ ...cond, value })}
+            options={values.map((v) => ({ value: v, label: t(`resources.overrides.val.${cond.type}.${v}`) }))}
+          />
+        ) : cond.type === "material" ? (
+          <>
+            <input
+              className="res-input"
+              list="ov-materials"
+              value={cond.value}
+              placeholder={t("resources.overrides.value.material")}
+              onChange={(e) => onChange({ ...cond, value: e.target.value })}
+            />
+            <datalist id="ov-materials">
+              {project.components.map((c) => (
+                <option key={c.id} value={c.name} />
+              ))}
+            </datalist>
+          </>
+        ) : (
+          <TextField
+            value={cond.value}
+            placeholder={t("resources.overrides.value.placeholder")}
+            onChange={(value) => onChange({ ...cond, value })}
+          />
+        )}
+      </FieldRow>
+    </>
+  );
+}
+
 /** Detail-Panel EINER Override-Regel (rechte Seite des Master-Detail-Layouts). */
 function OverrideRuleDetail({
   rule,
@@ -78,19 +162,24 @@ function OverrideRuleDetail({
   onPatch: (patch: Partial<OverrideRule>) => void;
   onDelete: () => void;
 }) {
-  const patchCondition = (patch: Partial<OverrideRule["condition"]>) =>
-    onPatch({ condition: { ...rule.condition, ...patch } });
   const patchActions = (patch: Partial<OverrideRule["actions"]>) =>
     onPatch({ actions: { ...rule.actions, ...patch } });
+  const more = rule.conditions ?? [];
+  const setMore = (next: OverrideCondition[]) => onPatch({ conditions: next.length ? next : undefined });
   // Sentinel „—": kein Linienstil-Override.
   const NONE = "__none__";
   const lineOptions = [
     { value: NONE, label: t("resources.overrides.linetype.none") },
     ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
   ];
+  const hatchOptions = [
+    { value: "none", label: t("resources.overrides.hatch.none") },
+    { value: "material", label: t("resources.overrides.hatch.material") },
+    ...project.hatches.map((h) => ({ value: h.id, label: h.name })),
+  ];
 
   return (
-    <div className="res-md-detail-inner">
+    <div className="res-md-detail-inner" data-testid="override-rule-detail">
       <div className="res-md-head">
         <input
           className="res-input res-md-rename"
@@ -102,33 +191,24 @@ function OverrideRuleDetail({
       </div>
 
       <div className="res-hint">{t("resources.overrides.condition")}</div>
-      <FieldRow label={t("resources.overrides.condType")}>
-        <SelectField
-          value={rule.condition.type}
-          onChange={(type) => patchCondition({ type })}
-          options={OVERRIDE_TYPE_OPTIONS.map((o) => ({
-            value: o.value,
-            label: t(o.labelKey),
-          }))}
-        />
-      </FieldRow>
-      <FieldRow label={t("resources.overrides.operator")}>
-        <SelectField
-          value={rule.condition.operator}
-          onChange={(operator) => patchCondition({ operator })}
-          options={OVERRIDE_OP_OPTIONS.map((o) => ({
-            value: o.value,
-            label: t(o.labelKey),
-          }))}
-        />
-      </FieldRow>
-      <FieldRow label={t("resources.overrides.value")}>
-        <TextField
-          value={rule.condition.value}
-          placeholder={t("resources.overrides.value.placeholder")}
-          onChange={(value) => patchCondition({ value })}
-        />
-      </FieldRow>
+      <ConditionFields cond={rule.condition} project={project} onChange={(condition) => onPatch({ condition })} />
+      {more.map((c, i) => (
+        <div key={i} className="res-ov-more" data-testid="override-more-condition">
+          <div className="res-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ flex: 1 }}>{t("resources.overrides.andCondition")}</span>
+            <DeleteButton onClick={() => setMore(more.filter((_, j) => j !== i))} title={t("resources.overrides.removeCondition")} />
+          </div>
+          <ConditionFields cond={c} project={project} onChange={(nc) => setMore(more.map((x, j) => (j === i ? nc : x)))} />
+        </div>
+      ))}
+      <button
+        className="res-add"
+        data-testid="override-add-condition"
+        onClick={() => setMore([...more, { type: "element_kind", operator: "equals", value: "slab" }])}
+      >
+        <span className="res-add-plus">+</span> {t("resources.overrides.addCondition")}
+      </button>
+      <div className="res-hint">{t("resources.overrides.layerHint")}</div>
 
       <div className="res-hint">{t("resources.overrides.actions")}</div>
       {/* Vorschlagswerte für die Strichstärke (Standard-Stiftbreiten in mm). */}
@@ -175,6 +255,33 @@ function OverrideRuleDetail({
             patchActions({ linetypeId: v === NONE ? undefined : v })
           }
           options={lineOptions}
+        />
+      </OptionalAction>
+      <div className="res-hint">{t("resources.overrides.cutActions")}</div>
+      <OptionalAction
+        label={t("resources.overrides.action.fill")}
+        active={rule.actions.fillColor !== undefined}
+        onToggle={(on) => patchActions({ fillColor: on ? "#ffffff" : undefined })}
+      >
+        <ColorField color={rule.actions.fillColor ?? "#ffffff"} onChange={(fillColor) => patchActions({ fillColor })} />
+      </OptionalAction>
+      <OptionalAction
+        label={t("resources.overrides.action.hatch")}
+        active={rule.actions.hatch !== undefined}
+        onToggle={(on) => patchActions({ hatch: on ? "none" : undefined })}
+      >
+        <SelectField value={rule.actions.hatch ?? "none"} onChange={(hatch) => patchActions({ hatch })} options={hatchOptions} />
+      </OptionalAction>
+      <OptionalAction
+        label={t("resources.overrides.action.outline")}
+        active={rule.actions.outline !== undefined}
+        onToggle={(on) => patchActions({ outline: on ? true : undefined })}
+      >
+        <input
+          type="checkbox"
+          aria-label={t("resources.overrides.action.outline")}
+          checked={rule.actions.outline === true}
+          onChange={(e) => patchActions({ outline: e.target.checked })}
         />
       </OptionalAction>
     </div>

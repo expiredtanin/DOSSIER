@@ -10,6 +10,9 @@
 //   dossier-cli <projekt.obp> section <Name> [--sketch] [--hatch] [--color] [--out schnitt.svg]       (--format json: render2d-Szene)
 //   dossier-cli <projekt.obp> elevation <Name> [--sketch] [--hatch] [--color] [--out ansicht.svg]     (--sketch: Skizzenstil [67])
 //                                                  --color: Darstellung „Farbig" statt Tusche (Standard, [140])
+//                                                  plan/section/elevation: --template <Vorlage> wendet eine Ansichtsvorlage an
+//                                                  (Override-Regeln, Schnittflächen schraffiert …), --rule <Regel> schaltet eine
+//                                                  Override-Regel ein (auch Standard-Baustein, z. B. --rule "Deckenaufbau weiss") [33]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
@@ -114,6 +117,7 @@ import {
   buildBigSampleProject,
   withDocument,
   AI_BRIDGE_DEFAULT_PORT,
+  standardOverrideRules,
 } from "../core";
 import type { Project } from "../core";
 import { serveStdio } from "./mcp";
@@ -190,6 +194,42 @@ function findLevel(project: Project, kinds: string[], name: string | undefined) 
   if (!name) return levels[0];
   const n = name.toLowerCase();
   return levels.find((l) => l.id.toLowerCase() === n || l.name.toLowerCase() === n);
+}
+
+/** Ansichts-Felder einer Vorlage, die am Geschoss/Schnitt/Ansicht stehen (wie `state/viewTemplates.ts`). */
+const TEMPLATE_LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch"] as const;
+
+/**
+ * [33]/[34] `--template <Name|id>`: Ansichtsvorlage auf die Ebene anwenden (Override-Regeln nach
+ * `enabledOverrideRuleIds`, Ebenen-Felder wie „Schnittflächen schraffiert"); `--rule <Name|id>`: eine
+ * Override-Regel einschalten — fehlt sie im Projekt, aus den Standard-Bausteinen (z. B. „Deckenaufbau weiss").
+ */
+function withTemplate(project: Project, levelId: string, args: Args): Project {
+  let p = project;
+  const tName = args.flags.get("template");
+  if (tName) {
+    const n = tName.toLowerCase();
+    const tpl = (p.viewTemplates ?? []).find((x) => x.id.toLowerCase() === n || x.name.toLowerCase() === n);
+    if (!tpl) fail(`Ansichtsvorlage nicht gefunden: ${tName}`);
+    const ids = tpl.enabledOverrideRuleIds;
+    if (ids) p = { ...p, overrideRules: (p.overrideRules ?? []).map((r) => ({ ...r, enabled: ids.includes(r.id) })) };
+    const patch: Record<string, unknown> = {};
+    for (const k of TEMPLATE_LEVEL_KEYS) if (tpl[k] !== undefined) patch[k] = tpl[k];
+    p = { ...p, drawingLevels: p.drawingLevels.map((l) => (l.id === levelId ? { ...l, ...patch } : l)) };
+  }
+  const rName = args.flags.get("rule");
+  if (rName) {
+    const n = rName.toLowerCase();
+    const hit = (r: { id: string; name: string }) => r.id.toLowerCase() === n || r.name.toLowerCase() === n;
+    const rules = p.overrideRules ?? [];
+    if (rules.some(hit)) p = { ...p, overrideRules: rules.map((r) => (hit(r) ? { ...r, enabled: true } : r)) };
+    else {
+      const std = standardOverrideRules(p).find(hit);
+      if (!std) fail(`Override-Regel nicht gefunden: ${rName}`);
+      p = { ...p, overrideRules: [...rules, { ...std, enabled: true }] };
+    }
+  }
+  return p;
 }
 
 /** `--sketch` ([67]): die Ebene im Skizzenstil (wie `DrawingLevel.sketch`); sonst das Projekt unverändert. */
@@ -612,7 +652,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         if (!own) planProject = { ...project, drawingLevels: [...project.drawingLevels, lvl] };
       }
       // Massstab geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken nach Massstab).
-      const plan = generatePlan(withSketch(planProject, lvl.id, args), lvl.id, allCodes, undefined, "mittel", false, inkArg(args), true, scale);
+      const plan = generatePlan(withSketch(withTemplate(planProject, lvl.id, args), lvl.id, args), lvl.id, allCodes, undefined, "mittel", false, inkArg(args), true, scale);
       if (args.flags.get("format") === "json") {
         out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
         return 0;
@@ -627,7 +667,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       const kind = command === "section" ? "section" : "elevation";
       const found = findLevel(project, [kind], name);
       if (!found) fail(`${command} nicht gefunden: ${name ?? "(erste)"}`);
-      const sp = withSketch(project, found.id, args);
+      const sp = withSketch(withTemplate(project, found.id, args), found.id, args);
       const lvl = sp.drawingLevels.find((l) => l.id === found.id) ?? found;
       let plan;
       if (kind === "section") {

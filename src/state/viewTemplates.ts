@@ -10,9 +10,9 @@
 // (`patchTemplateOps` schreibt sie in einem Schritt in alle verknüpften Ansichten/Ausschnitte).
 // Alles liefert Ops (`applyChange`); eine Änderung = ein Undo-Schritt.
 
-import { addItems, findItem, itemsOf, patchItem, removeItems } from "../core";
+import { addItems, fieldOps, findItem, itemsOf, patchItem, removeItems } from "../core";
 import type { CoreOp } from "../core";
-import type { DrawingLevel, Project, ViewSnapshot, ViewTemplate } from "../model/types";
+import type { DrawingLevel, OverrideRule, Project, ViewSnapshot, ViewTemplate } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 
 /** Anzeigezustand, den Vorlagen zusätzlich steuern (liegt nicht am Geschoss). */
@@ -122,6 +122,21 @@ export function patchTemplateOps(p: Project, id: string, patch: Partial<ViewTemp
   for (const s of itemsOf(p, "viewSnapshots")) {
     if (s.templateId === id && s.templateLinked) ops.push(...patchItem(p, "viewSnapshots", s.id, snapshotPatch(next, s)));
   }
+  return ops;
+}
+
+/**
+ * [33] Override-Baustein (z. B. Standardregel „Deckenaufbau weiss") in eine Vorlage übernehmen: fehlt die
+ * Regel im Projekt, wird sie (ausgeschaltet) angehängt; die Vorlage schaltet sie ein (`enabledOverrideRuleIds`,
+ * ohne festgelegte Liste ausgehend von den heute aktiven Regeln). Ein Undo-Schritt.
+ */
+export function addRuleBlockOps(p: Project, templateId: string, rule: OverrideRule): CoreOp[] {
+  const t = findItem(p, "viewTemplates", templateId);
+  if (!t) return [];
+  const rules = p.overrideRules ?? [];
+  const ops = rules.some((r) => r.id === rule.id) ? [] : fieldOps(p, "overrideRules", [...rules, { ...rule, enabled: false }]);
+  const ids = t.enabledOverrideRuleIds ?? rules.filter((r) => r.enabled).map((r) => r.id);
+  if (!ids.includes(rule.id)) ops.push(...patchTemplateOps(p, templateId, { enabledOverrideRuleIds: [...ids, rule.id] }));
   return ops;
 }
 

@@ -3,9 +3,10 @@
 // Linientypen nach SIA 400 / ISO 128 und Standard-Aufbauten. Hier nur dünne Fassaden: der Kern liefert die
 // Ops, die fehlende Einträge anhängen (gleiche id oder gleicher Name gilt als vorhanden).
 
-import type { Project } from "./types";
+import type { OverrideRule, Project } from "./types";
 import type { CoreOp } from "../core/ops";
 import { applyOps } from "../core/ops";
+import { addedItems } from "../core/opsBuild";
 import { documentFor, withDocument } from "../core/document";
 
 /** Ops, die die fehlenden Standard-Ressourcen anhängen („Standards laden"); leer, wenn alles da ist. */
@@ -29,16 +30,28 @@ export interface StandardsMergeCounts {
   viewTemplates: number;
   /** Symbole (2D-Blöcke, z. B. Deckenleuchte [100]). */
   blockDefs: number;
+  /** [33] Override-Bausteine (z. B. „Deckenaufbau weiss"), ausgeschaltet. */
+  overrideRules: number;
 }
 
 export function standardsMergeCounts(ops: readonly CoreOp[]): StandardsMergeCounts {
-  const out: StandardsMergeCounts = { lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0, viewTemplates: 0, blockDefs: 0 };
+  const out: StandardsMergeCounts = { lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0, viewTemplates: 0, blockDefs: 0, overrideRules: 0 };
   for (const op of ops) {
     const key = op.kind === "add" ? op.collection : op.kind === "setField" ? op.key : null;
     const n = op.kind === "add" ? op.items.length : op.kind === "setField" && Array.isArray(op.value) ? op.value.length : 0;
     if (key && key in out) out[key as keyof StandardsMergeCounts] += n;
   }
   return out;
+}
+
+/**
+ * [33] Mitgelieferte Override-Regeln (Bausteine für Ansichtsvorlagen, z. B. „Deckenaufbau weiss"): die im
+ * Projekt vorhandenen (Standard-Kennung `std-or-…`) und die noch fehlenden aus der Bibliothek.
+ */
+export function standardOverrideRules(project: Project): OverrideRule[] {
+  const present = (project.overrideRules ?? []).filter((r) => r.id.startsWith("std-or-"));
+  const missing = addedItems(standardsMergeOps(project), "overrideRules") as OverrideRule[];
+  return [...present, ...missing];
 }
 
 /** Ein Standard-Eintrag des Projekts, der von der heutigen Bibliothek abweicht („Standards aktualisieren"). */

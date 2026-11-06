@@ -138,7 +138,7 @@ impl<'a> Ctx<'a> {
 
     /// Effektive Override-Aktionen eines Elements (`overrideFor` in TS).
     pub fn overrides(&self, code: &str, object_name: Option<&str>) -> Actions {
-        overrides::effective(self.p.override_rules.as_deref(), &Subject { layer_name: self.cat(code).map(|c| c.name.as_str()), layer_code: Some(code), object_name })
+        overrides::effective(self.p.override_rules.as_deref(), &Subject { layer_name: self.cat(code).map(|c| c.name.as_str()), layer_code: Some(code), object_name, ..Default::default() })
     }
 }
 
@@ -1481,6 +1481,40 @@ mod tests {
         p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().cut_hatch = Some(true);
         let (h, ink, _) = walls(&run(&p, 100.0));
         assert!(h > 0 && ink == 0, "Ebene schraffiert: {h} {ink}");
+    }
+
+    /// [33] Override auf Wandschichten im Grundriss: „Dämmung weiss, ohne Schraffur“ (Baustoff-Kategorie) zeigt
+    /// im 1:100 die Dämmschicht als weisses Band, die übrigen Schichten schwarz ohne Fugen dazwischen; im 1:50
+    /// ohne Schraffur statt der Dämmschlange. Ausgeschaltet bzw. ohne Regel wie bisher (Sammelfläche).
+    #[test]
+    fn override_auf_wandschichten_im_grundriss() {
+        let mut p = sample();
+        let run = |p: &Project, scale: f64| {
+            let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": scale }).to_string();
+            plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().walls
+        };
+        let fills = |prims: &[Primitive]| prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, .. } => Some((fill.clone(), hatch.pattern)), _ => None }).collect::<Vec<_>>();
+        let before100 = fills(&run(&p, 100.0));
+        let before50 = fills(&run(&p, 50.0));
+        let mut rule: OverrideRule = serde_json::from_value(serde_json::json!({"id": "d", "name": "Dämmung weiss", "enabled": false,
+            "condition": {"type": "material_category", "operator": "equals", "value": "insulation"},
+            "conditions": [{"type": "element_kind", "operator": "equals", "value": "wall"}],
+            "actions": {"fillColor": "#ffffff", "hatch": "none"}})).unwrap();
+        p.override_rules = Some(vec![rule.clone()]);
+        assert_eq!(fills(&run(&p, 100.0)), before100, "Regel aus");
+        rule.enabled = true;
+        p.override_rules = Some(vec![rule]);
+        let r100 = run(&p, 100.0);
+        let f = fills(&r100);
+        assert!(f.iter().any(|(c, h)| c == "#ffffff" && *h == HatchPattern::None), "{f:?}");
+        assert!(f.iter().any(|(c, _)| c == HATCH_INK));
+        assert!(f.iter().all(|(_, h)| *h == HatchPattern::None), "1:100 ohne Schraffur");
+        // Fugen nur an der weissen Schicht (Backstein|Putz schwarz an schwarz ohne Fuge).
+        let joints = r100.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "layer-joint")).count();
+        assert!(joints > 0);
+        let f50 = fills(&run(&p, 50.0));
+        assert_eq!(f50.len(), before50.len());
+        assert!(f50.iter().zip(&before50).any(|(a, b)| a.0 == "#ffffff" && a.1 == HatchPattern::None && b.1 != HatchPattern::None));
     }
 
     /// [140] „mittel" ab 1:200 wie „grob" (Wände als Sammelfläche), „fein" bleibt; explizit „grob" ohne Stempel.

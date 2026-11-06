@@ -1,11 +1,19 @@
-//! Grafische Overrides ([K3d]): wertet `Project.overrideRules` für ein Element aus — Rust-Gegenstück
-//! zu `src/overrides/engine.ts`. Pro Aktions-Feld gewinnt die OBERSTE aktive Regel, deren Bedingung
-//! passt; spätere Regeln füllen nur noch offene Felder. Vergleiche ohne Gross-/Kleinschreibung, Werte
+//! Grafische Overrides ([K3d], [33]): wertet `Project.overrideRules` für ein Element bzw. eine
+//! Bauteilschicht aus. Pro Aktions-Feld gewinnt die OBERSTE aktive Regel, deren Bedingungen passen;
+//! spätere Regeln füllen nur noch offene Felder. Vergleiche ohne Gross-/Kleinschreibung, Werte
 //! getrimmt (wie JS `trim()`/`toLowerCase()`).
+//!
+//! [33] Schicht-Regeln: Eine Regel mit einer Schicht-Bedingung (Funktion, Lage zur tragenden Schicht,
+//! Baustoff, Baustoff-Kategorie) wirkt nur auf Bauteilschichten (Schnittflächen im Schnitt, Wandschichten
+//! im Grundriss), nie auf ganze Elemente ([`effective`] überspringt sie). Schicht-Aktionen (Füllung,
+//! Schraffur, Umriss) wertet [`effective_layer`] aus — dort zählen auch Element-Regeln (Ebene, Name,
+//! Bauteilart), deren Bedingungen auf das Bauteil der Schicht passen. Die Aktionen haben Vorrang vor der
+//! Massstabsregel „Schnittflächen 1:100 schwarz“ (`style::solid_cut`) und der Ausnahme für lose
+//! Schüttungen (`standards::is_loose_fill`).
 
 use crate::model::*;
 
-/// Die vergleichbaren Eigenschaften eines Elements.
+/// Die vergleichbaren Eigenschaften eines Elements bzw. einer Schicht (Schicht-Felder `None` = Element).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Subject<'a> {
     /// Name der Ebene (`LayerCategory.name`).
@@ -14,6 +22,18 @@ pub struct Subject<'a> {
     pub layer_code: Option<&'a str>,
     /// Element-/Typ-Name (Wandtyp, Raum, Öffnungs-Label …).
     pub object_name: Option<&'a str>,
+    /// [33] Bauteilart: "wall", "slab", "ground_slab", "roof".
+    pub element_kind: Option<&'a str>,
+    /// [33] Funktion der Schicht ([`function_key`]).
+    pub layer_function: Option<&'a str>,
+    /// [33] Lage zur tragenden Schicht: "above", "structure", "below".
+    pub layer_position: Option<&'a str>,
+    /// [33] Baustoff: id, Standard-Kennung, Name.
+    pub material_id: Option<&'a str>,
+    pub material_standard: Option<&'a str>,
+    pub material_name: Option<&'a str>,
+    /// [33] Baustoff-Kategorie (`standards::material_category`).
+    pub material_category: Option<&'a str>,
 }
 
 /// Effektive Aktionen (alle `None` = kein Override).
@@ -27,6 +47,29 @@ pub struct Actions {
 impl Actions {
     pub fn any(&self) -> bool {
         self.color.is_some() || self.lineweight.is_some() || self.linetype_id.is_some()
+    }
+}
+
+/// [33] Effektive Schicht-Aktionen (Füllung, Schraffur, Umriss) einer Schicht.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LayerActions {
+    pub fill_color: Option<String>,
+    /// "none", "material" oder id einer Schraffur.
+    pub hatch: Option<String>,
+    pub outline: Option<bool>,
+}
+
+impl LayerActions {
+    /// Ändert die Regel Füllung oder Schraffur (und hebt damit „schwarz ab 1:100“ auf)?
+    pub fn styles(&self) -> bool {
+        self.fill_color.is_some() || self.hatch.is_some()
+    }
+    pub fn any(&self) -> bool {
+        self.styles() || self.outline.is_some()
+    }
+    /// Fläche ohne Muster (Schraffur "none")?
+    pub fn plain(&self) -> bool {
+        self.hatch.as_deref() == Some("none")
     }
 }
 
@@ -44,18 +87,39 @@ fn norm(s: &str) -> String {
     js_trim(s).to_lowercase()
 }
 
+/// [33] Bedingung auf eine Schicht-Eigenschaft (Regel wirkt dann nur auf Schichten)?
+pub fn is_layer_condition(t: OverrideConditionType) -> bool {
+    use OverrideConditionType as T;
+    matches!(t, T::LayerFunction | T::LayerPosition | T::Material | T::MaterialCategory)
+}
+
+/// Alle Bedingungen einer Regel (Haupt- und weitere).
+fn conditions(rule: &OverrideRule) -> impl Iterator<Item = &OverrideCondition> {
+    std::iter::once(&rule.condition).chain(rule.conditions.iter().flatten())
+}
+
+/// [33] Wirkt die Regel nur auf Schichten?
+pub fn is_layer_rule(rule: &OverrideRule) -> bool {
+    conditions(rule).any(|c| is_layer_condition(c.r#type))
+}
+
 /// `matchesCondition`: `layer_name` vergleicht Name UND Code (positive Operatoren: einer passt;
-/// `not_equals`: keiner gleich), `object_name` den Element-Namen. Fehlt die Eigenschaft, trifft nur
-/// `not_equals`.
+/// `not_equals`: keiner gleich), `object_name` den Element-Namen, `material` id, Standard-Kennung und
+/// Name. Fehlt die Eigenschaft, trifft nur `not_equals`.
 pub fn matches_condition(c: &OverrideCondition, s: &Subject) -> bool {
+    use OverrideConditionType as T;
     let value = norm(&c.value);
-    let mut cands: Vec<String> = Vec::with_capacity(2);
-    if c.r#type == OverrideConditionType::LayerName {
-        cands.extend(s.layer_name.map(norm));
-        cands.extend(s.layer_code.map(norm));
-    } else {
-        cands.extend(s.object_name.map(norm));
-    }
+    let raw: [Option<&str>; 3] = match c.r#type {
+        T::LayerName => [s.layer_name, s.layer_code, None],
+        T::ObjectName => [s.object_name, None, None],
+        T::ElementKind => [s.element_kind, None, None],
+        T::LayerFunction => [s.layer_function, None, None],
+        T::LayerPosition => [s.layer_position, None, None],
+        T::Material => [s.material_id, s.material_standard, s.material_name],
+        T::MaterialCategory => [s.material_category, None, None],
+        T::Unknown => [None, None, None],
+    };
+    let cands: Vec<String> = raw.iter().flatten().map(|x| norm(x)).collect();
     if cands.is_empty() {
         return c.operator == OverrideOperator::NotEquals;
     }
@@ -68,12 +132,17 @@ pub fn matches_condition(c: &OverrideCondition, s: &Subject) -> bool {
     }
 }
 
-/// `effectiveOverrides`: kollabiert die Regelliste für ein Subjekt.
+/// Treffen alle Bedingungen der Regel?
+pub fn rule_matches(rule: &OverrideRule, s: &Subject) -> bool {
+    conditions(rule).all(|c| matches_condition(c, s))
+}
+
+/// `effectiveOverrides`: kollabiert die Regelliste für ein Element (Schicht-Regeln zählen nicht).
 pub fn effective(rules: Option<&[OverrideRule]>, s: &Subject) -> Actions {
     let mut out = Actions::default();
     let Some(rules) = rules else { return out };
     for rule in rules {
-        if !rule.enabled || !matches_condition(&rule.condition, s) {
+        if !rule.enabled || is_layer_rule(rule) || !rule_matches(rule, s) {
             continue;
         }
         let a = &rule.actions;
@@ -93,11 +162,133 @@ pub fn effective(rules: Option<&[OverrideRule]>, s: &Subject) -> Actions {
     out
 }
 
+/// [33] Schicht-Aktionen für eine Schicht (alle aktiven Regeln, deren Bedingungen passen).
+pub fn effective_layer(rules: Option<&[OverrideRule]>, s: &Subject) -> LayerActions {
+    let mut out = LayerActions::default();
+    let Some(rules) = rules else { return out };
+    for rule in rules {
+        let a = &rule.actions;
+        if !rule.enabled || (a.fill_color.is_none() && a.hatch.is_none() && a.outline.is_none()) || !rule_matches(rule, s) {
+            continue;
+        }
+        if out.fill_color.is_none() {
+            out.fill_color = a.fill_color.as_deref().map(js_trim).filter(|x| !x.is_empty()).map(String::from);
+        }
+        if out.hatch.is_none() {
+            out.hatch = a.hatch.as_deref().map(js_trim).filter(|x| !x.is_empty()).map(String::from);
+        }
+        if out.outline.is_none() {
+            out.outline = a.outline;
+        }
+    }
+    out
+}
+
+/// Gibt es überhaupt aktive Regeln mit Schicht-Aktionen? (Schnellpfad: sonst nichts auswerten.)
+pub fn has_layer_actions(p: &Project) -> bool {
+    p.override_rules.iter().flatten().any(|r| r.enabled && (r.actions.fill_color.is_some() || r.actions.hatch.is_some() || r.actions.outline.is_some()))
+}
+
+/// Schlüssel einer Schichtfunktion (wie im JSON).
+pub fn function_key(f: LayerFunction) -> Option<&'static str> {
+    Some(match f {
+        LayerFunction::Structure => "structure",
+        LayerFunction::Insulation => "insulation",
+        LayerFunction::Screed => "screed",
+        LayerFunction::Finish => "finish",
+        LayerFunction::Plaster => "plaster",
+        LayerFunction::Substructure => "substructure",
+        LayerFunction::Membrane => "membrane",
+        LayerFunction::Cladding => "cladding",
+        LayerFunction::Air => "air",
+        LayerFunction::Unknown => return None,
+    })
+}
+
+/// Funktion einer Schicht: eigenes Feld, sonst aus dem Baustoff.
+pub fn layer_function(p: &Project, l: &Layer) -> Option<LayerFunction> {
+    l.function.filter(|f| *f != LayerFunction::Unknown).or_else(|| crate::standards::layer_function_of_category(crate::standards::material_category(p.component_or_fallback(&l.component_id))))
+}
+
+/// [33] Lage jeder Schicht zur tragenden Schicht: Schichten liegen aussen/oben → innen/unten; die tragende
+/// ist die mit Funktion „tragend“ und dem höchsten Verschneidungs-Rang (Gleichstand: die dickere), ohne
+/// tragende die mit dem höchsten Rang. Davor "above", danach "below".
+pub fn layer_positions(p: &Project, layers: &[Layer]) -> Vec<&'static str> {
+    let rank = |i: usize| {
+        let l = &layers[i];
+        let st = layer_function(p, l) == Some(LayerFunction::Structure);
+        (st, p.component_or_fallback(&l.component_id).join_priority, l.thickness)
+    };
+    let core = (0..layers.len()).max_by(|&a, &b| {
+        let (x, y) = (rank(a), rank(b));
+        x.0.cmp(&y.0).then(x.1.total_cmp(&y.1)).then(x.2.total_cmp(&y.2)).then(b.cmp(&a))
+    });
+    (0..layers.len())
+        .map(|i| match core {
+            Some(c) if i < c => "above",
+            Some(c) if i > c => "below",
+            _ => "structure",
+        })
+        .collect()
+}
+
+/// [33] Bodenplatte: Decke mit Unterbau-Schicht (Kies, Magerbeton, Erdreich) oder auf dem untersten
+/// Geschoss mit Oberkante auf dessen Boden.
+pub fn is_ground_slab(p: &Project, c: &Ceiling, layers: &[Layer]) -> bool {
+    if layers.iter().any(|l| crate::standards::is_loose_fill(p.component_or_fallback(&l.component_id))) {
+        return true;
+    }
+    let lowest = p.drawing_levels.iter().filter(|l| l.kind == DrawingLevelKind::Floor).min_by(|a, b| a.base_elevation.unwrap_or(0.0).total_cmp(&b.base_elevation.unwrap_or(0.0)));
+    lowest.is_some_and(|lv| lv.id == c.floor_id && matches!(&c.top, Some(VerticalAnchor::Floor { floor_id, offset }) if *floor_id == c.floor_id && offset.unwrap_or(0.0) <= 1e-6))
+}
+
+/// [33] Schicht-Aktionen je Schicht eines Bauteils (`kind` "wall"/"slab"/"ground_slab"/"roof"). Ohne aktive
+/// Regel mit Schicht-Aktionen: lauter leere Aktionen (Schnellpfad).
+pub fn layer_actions(p: &Project, kind: &str, category_code: &str, object_name: Option<&str>, layers: &[Layer]) -> Vec<LayerActions> {
+    if !has_layer_actions(p) {
+        return vec![LayerActions::default(); layers.len()];
+    }
+    let rules = p.override_rules.as_deref();
+    let cat = p.layer_category(category_code);
+    let pos = layer_positions(p, layers);
+    layers
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let comp = p.component_or_fallback(&l.component_id);
+            let s = Subject {
+                layer_name: cat.map(|c| c.name.as_str()),
+                layer_code: Some(category_code),
+                object_name,
+                element_kind: Some(kind),
+                layer_function: layer_function(p, l).and_then(function_key),
+                layer_position: Some(pos[i]),
+                material_id: Some(comp.id.as_str()),
+                material_standard: comp.standard_id.as_deref(),
+                material_name: Some(comp.name.as_str()),
+                material_category: Some(crate::standards::material_category(comp)),
+            };
+            effective_layer(rules, &s)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const WALL: Subject = Subject { layer_name: Some("Wände"), layer_code: Some("20"), object_name: Some("AW 24") };
+    const WALL: Subject = Subject {
+        layer_name: Some("Wände"),
+        layer_code: Some("20"),
+        object_name: Some("AW 24"),
+        element_kind: None,
+        layer_function: None,
+        layer_position: None,
+        material_id: None,
+        material_standard: None,
+        material_name: None,
+        material_category: None,
+    };
 
     fn cond(t: OverrideConditionType, op: OverrideOperator, v: &str) -> OverrideCondition {
         OverrideCondition { r#type: t, operator: op, value: v.into(), ..Default::default() }
@@ -146,5 +337,76 @@ mod tests {
         assert_eq!(a, Actions { color: Some("#f00".into()), lineweight: Some(0.7), linetype_id: Some("dashed".into()) });
         assert!(!effective(None, &WALL).any());
         assert!(!effective(Some(&[]), &WALL).any());
+    }
+
+    /// [33] Schicht-Regeln: wirken nur auf Schichten (nicht aufs ganze Element), alle Bedingungen müssen
+    /// passen, Material nach id/Standard/Name; Element-Regeln mit Schicht-Aktionen gelten für alle Schichten.
+    #[test]
+    fn schicht_regeln() {
+        let screed = Subject {
+            element_kind: Some("slab"),
+            layer_function: Some("screed"),
+            layer_position: Some("above"),
+            material_id: Some("c7"),
+            material_standard: Some("std-c-zementestrich"),
+            material_name: Some("Zementestrich"),
+            material_category: Some("screed"),
+            ..WALL
+        };
+        let core = Subject { layer_function: Some("structure"), layer_position: Some("structure"), material_id: Some("c1"), material_standard: None, material_name: Some("STB"), material_category: Some("concrete"), ..screed };
+        let mut white = rule(true, cond(LayerPosition, Equals, "above"), Some("#00f"), None, None);
+        white.conditions = Some(vec![cond(ElementKind, Contains, "slab")]);
+        white.actions.fill_color = Some("#ffffff".into());
+        white.actions.hatch = Some("none".into());
+        white.actions.outline = Some(true);
+        assert!(is_layer_rule(&white));
+        // Nicht aufs Element (auch nicht die Farbe).
+        assert!(!effective(Some(std::slice::from_ref(&white)), &WALL).any());
+        let a = effective_layer(Some(std::slice::from_ref(&white)), &screed);
+        assert_eq!(a, LayerActions { fill_color: Some("#ffffff".into()), hatch: Some("none".into()), outline: Some(true) });
+        assert!(!effective_layer(Some(std::slice::from_ref(&white)), &core).any());
+        // Weitere Bedingung verfehlt: Wand.
+        assert!(!effective_layer(Some(std::slice::from_ref(&white)), &Subject { element_kind: Some("wall"), ..screed }).any());
+        // Material: Standard-Kennung oder Name; Kategorie.
+        assert!(matches_condition(&cond(Material, Equals, "std-c-zementestrich"), &screed));
+        assert!(matches_condition(&cond(Material, Contains, "estrich"), &screed));
+        assert!(matches_condition(&cond(MaterialCategory, Equals, "screed"), &screed));
+        assert!(!matches_condition(&cond(MaterialCategory, Equals, "screed"), &core));
+        // Element-Regel (Ebene) mit Schicht-Aktion: auf jede Schicht; oberste Regel gewinnt je Feld.
+        let mut by_layer = rule(true, cond(LayerName, Equals, "20"), None, None, None);
+        by_layer.actions.hatch = Some("material".into());
+        let rules = vec![white.clone(), by_layer];
+        assert_eq!(effective_layer(Some(&rules), &screed).hatch.as_deref(), Some("none"));
+        assert_eq!(effective_layer(Some(&rules), &core).hatch.as_deref(), Some("material"));
+        // Ausgeschaltet: nichts.
+        white.enabled = false;
+        assert!(!effective_layer(Some(&[white]), &screed).any());
+    }
+
+    /// [33] Lage zur tragenden Schicht und Funktion aus dem Baustoff (Standard-Deckenaufbau).
+    #[test]
+    fn lage_zur_tragenden_schicht() {
+        let mut p: Project = serde_json::from_value(serde_json::json!({"id": "p", "name": "P", "drawingLevels": [], "walls": [], "openings": [], "wallTypes": [], "lineStyles": [], "hatches": []})).unwrap();
+        p.components = crate::standards::components().into_iter().map(|v| serde_json::from_value(v).unwrap()).collect();
+        let l = |c: &str, t: f64| Layer { component_id: c.into(), thickness: t, ..Default::default() };
+        let deck = [l("std-c-parkett", 0.015), l("std-c-zementestrich", 0.07), l("std-c-trittschall", 0.04), l("std-c-stahlbeton", 0.24), l("std-c-innenputz", 0.01)];
+        assert_eq!(layer_positions(&p, &deck), ["above", "above", "above", "structure", "below"]);
+        let f: Vec<_> = deck.iter().map(|x| layer_function(&p, x).and_then(function_key)).collect();
+        assert_eq!(f, [Some("finish"), Some("screed"), Some("insulation"), Some("structure"), Some("plaster")]);
+        // Eigene Funktion schlägt den Baustoff.
+        let mut own = l("std-c-holz", 0.03);
+        own.function = Some(crate::model::LayerFunction::Finish);
+        assert_eq!(layer_function(&p, &own), Some(crate::model::LayerFunction::Finish));
+        // Ohne tragenden Baustoff: höchster Rang (Estrich vor Dämmung).
+        assert_eq!(layer_positions(&p, &[l("std-c-zementestrich", 0.05), l("std-c-eps", 0.1)]), ["structure", "below"]);
+        // Ohne aktive Regel: Schnellpfad, lauter leere Aktionen.
+        assert!(layer_actions(&p, "slab", "30", None, &deck).iter().all(|a| !a.any()));
+        p.override_rules = Some(crate::standards::override_rules().into_iter().map(|v| serde_json::from_value(v).unwrap()).collect());
+        assert!(layer_actions(&p, "slab", "30", None, &deck).iter().all(|a| !a.any()), "Standardregel ist aus");
+        p.override_rules.as_mut().unwrap()[0].enabled = true;
+        let a = layer_actions(&p, "slab", "30", None, &deck);
+        assert_eq!(a.iter().map(|x| x.styles()).collect::<Vec<_>>(), [true, true, true, false, false]);
+        assert!(layer_actions(&p, "ground_slab", "30", None, &deck)[1].plain());
+        assert!(!layer_actions(&p, "wall", "20", None, &deck)[1].any());
     }
 }

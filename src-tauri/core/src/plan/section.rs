@@ -178,12 +178,118 @@ pub struct Cut {
     pub source_id: Option<String>,
     pub category: Option<String>,
     pub stair_id: Option<String>,
+    /// [33] Index der Schicht im Aufbau des Bauteils (Wand-, Decken-, Dachtyp), wo bekannt.
+    pub layer_index: Option<usize>,
+    /// [33] Override der Schicht (nur beim Zeichnen gesetzt, [`cut_overrides`]).
+    pub ov: Option<CutOv>,
 }
 
 impl Cut {
     fn new(kind: Kind, index: usize, pts: Vec<[f64; 2]>) -> Cut {
-        Cut { kind, index, pts, nse: None, fill: None, hatch: None, join_priority: None, component_id: None, source_id: None, category: None, stair_id: None }
+        Cut { kind, index, pts, nse: None, fill: None, hatch: None, join_priority: None, component_id: None, source_id: None, category: None, stair_id: None, layer_index: None, ov: None }
     }
+}
+
+/// [33] Schraffur-Aktion eines Overrides auf eine Schnittfläche.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HatchOv {
+    /// Wie ohne Regel (schwarz ab 1:100 nur, wenn die Regel auch keine Füllung setzt).
+    Keep,
+    /// Ohne Muster.
+    None,
+    /// Schraffur des Baustoffs, auch ab 1:100.
+    Material,
+    /// Eine Schraffur des Projekts.
+    Pattern(HatchRender),
+}
+
+/// [33] Override einer Schnittfläche (aus `plan::overrides::layer_actions`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CutOv {
+    pub fill: Option<String>,
+    pub hatch: HatchOv,
+    pub outline: Option<bool>,
+}
+
+impl CutOv {
+    /// Hebt die Regel „schwarz ab 1:100“ auf?
+    fn styles(&self) -> bool {
+        self.fill.is_some() || self.hatch != HatchOv::Keep
+    }
+}
+
+/// [33] Zeichen-Regeln der Schnittflächen: lose Schüttungen (Bauteil-ids, s. [`loose_fill_components`]) und
+/// Overrides je Fläche von `Output::cuts` (gleiche Reihenfolge; leer = keine).
+#[derive(Default)]
+pub struct CutRules {
+    pub loose: HashSet<String>,
+    pub ov: Vec<Option<CutOv>>,
+}
+
+impl CutRules {
+    pub fn of(p: &Project, out: &Output) -> CutRules {
+        CutRules { loose: loose_fill_components(p), ov: cut_overrides(p, &out.cuts) }
+    }
+}
+
+/// [33] Overrides je Schnittfläche: Bauteil (Wand, Decke/Bodenplatte, Dach) und Schicht der Fläche, dann
+/// `overrides::layer_actions`. Ohne aktive Regel mit Schicht-Aktionen leer.
+pub fn cut_overrides(p: &Project, cuts: &[Cut]) -> Vec<Option<CutOv>> {
+    use super::overrides::{has_layer_actions, is_ground_slab, layer_actions, LayerActions};
+    if !has_layer_actions(p) {
+        return Vec::new();
+    }
+    let mut memo: HashMap<(u8, String), (Vec<Layer>, Vec<LayerActions>)> = HashMap::new();
+    let roofs = p.roofs.as_deref().unwrap_or(&[]);
+    let ceilings = p.ceilings.as_deref().unwrap_or(&[]);
+    cuts.iter()
+        .map(|c| {
+            let src = c.source_id.as_deref()?;
+            if c.stair_id.is_some() {
+                return None;
+            }
+            let tag = match c.kind {
+                Kind::Wall => 0u8,
+                Kind::Slab => 1,
+                Kind::Roof => 2,
+                Kind::Body => return None,
+            };
+            let key = (tag, src.to_string());
+            if !memo.contains_key(&key) {
+                let entry = match c.kind {
+                    Kind::Wall => {
+                        let w = p.walls.iter().find(|w| w.id == src)?;
+                        let wt = p.wall_type_or_fallback(w);
+                        (wt.layers.clone(), layer_actions(p, "wall", &w.category_code, Some(&wt.name), &wt.layers))
+                    }
+                    Kind::Slab => {
+                        let ce = ceilings.iter().find(|x| x.id == src)?;
+                        let (name, layers) = model3d::ceiling_type_ref(p, ce).map_or((None, Project::fallback_layers()), |t| (Some(t.1), t.2));
+                        let kind = if is_ground_slab(p, ce, layers) { "ground_slab" } else { "slab" };
+                        (layers.to_vec(), layer_actions(p, kind, &ce.category_code, name, layers))
+                    }
+                    _ => {
+                        let r = roofs.iter().find(|x| x.id == src)?;
+                        let layers = p.roof_layers(r);
+                        let acts = layer_actions(p, "roof", &r.category_code, None, &layers);
+                        (layers, acts)
+                    }
+                };
+                memo.insert(key.clone(), entry);
+            }
+            let (layers, acts) = memo.get(&key)?;
+            let li = c.layer_index.or_else(|| if layers.len() == 1 { Some(0) } else { c.component_id.as_deref().and_then(|id| layers.iter().position(|l| l.component_id == id)) })?;
+            let a = acts.get(li).filter(|a| a.any())?;
+            let angle = if c.kind == Kind::Wall { Some(SECTION_WALL_AXIS_ANGLE_DEG) } else { Some(SECTION_SLAB_AXIS_ANGLE_DEG) };
+            let hatch = match a.hatch.as_deref() {
+                None => HatchOv::Keep,
+                Some("none") => HatchOv::None,
+                Some("material") => HatchOv::Material,
+                Some(id) => resolve_hatch(p, id, angle, None, None).map_or(HatchOv::Keep, HatchOv::Pattern),
+            };
+            Some(CutOv { fill: a.fill_color.clone(), hatch, outline: a.outline })
+        })
+        .collect()
 }
 
 /// Eine projizierte Kante (`SectionEdge`).
@@ -672,6 +778,7 @@ fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_wo
             c.component_id = Some(comp.id.clone());
             c.source_id = cp.source_id.clone();
             c.category = cp.category.clone();
+            c.layer_index = Some(li);
             c
         };
         let shift = |s: &Option<EdgeJoin>| s.as_ref().map_or(0.0, |e| e.shift(li));
@@ -928,6 +1035,7 @@ fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option
                             // Schicht-Platte: Stil genau dieser Schicht; ohne Schicht (Dicke 0) ohne Stil.
                             if let Some(l) = layer.and_then(|i| layers.get(i)) {
                                 style_slab_layer(&mut cp, p, l, o)?;
+                                cp.layer_index = layer;
                             }
                         } else {
                             if let Some((fill, hatch)) = ceiling_section_style(p, o) {
@@ -1060,6 +1168,7 @@ fn subtract_dominant_bands(bands: Vec<Cut>) -> Vec<Cut> {
             // Herkunft bleibt am Stück (Ebenen-Sichtbarkeit, Treppen-Pick).
             c.category = src.category.clone();
             c.stair_id = src.stair_id.clone();
+            c.layer_index = src.layer_index;
             c
         })
         .collect();
@@ -1254,7 +1363,9 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
     for (index, roof) in roofs.iter().enumerate() {
         // Verschnittene Dächer und Gauben ([G5]): Schnitt durch die Körper je Schicht.
         if let Some(solids) = crate::roof_assembly::roof_solids_with(p, index, &nb) {
+            let rl = p.roof_layers(roof);
             for part in &solids.parts {
+                let li = rl.iter().position(|l| !part.component_id.is_empty() && l.component_id == part.component_id);
                 let rings = crate::roof_assembly::section_rings(&part.mesh, (bx, by), (ux, uy));
                 if rings.is_empty() {
                     continue;
@@ -1265,6 +1376,7 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
                     let slope = if wall { None } else { Some(ring_slope_deg(&pts)) };
                     let hatch = if part.component_id.is_empty() { None } else { p.component(&part.component_id).and_then(|comp| resolve_hatch(p, &comp.hatch_id, slope, None, None)) };
                     let mut c = Cut::new(Kind::Roof, index, pts);
+                    c.layer_index = li;
                     if let Some(h) = &hatch {
                         c.fill = Some(poche_fill(h.pattern).to_string());
                         c.hatch = Some(h.clone());
@@ -1299,7 +1411,7 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
             let o = 1 + 5 * k;
             let (t_lo, t_hi, z0, z1, cos_t) = (sg[o], sg[o + 1], sg[o + 2], sg[o + 3], sg[o + 4]);
             let mut prefix = 0.0;
-            for layer in &layers {
+            for (li, layer) in layers.iter().enumerate() {
                 let t = max(0.0, layer.thickness);
                 if t <= 1e-9 {
                     continue;
@@ -1317,6 +1429,7 @@ fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Plane) {
                 let hatch = if layer.component_id.is_empty() { None } else { p.component(&layer.component_id).and_then(|comp| resolve_hatch(p, &comp.hatch_id, Some(slope_deg), None, None)) };
                 for pts in pieces {
                     let mut c = Cut::new(Kind::Roof, index, pts);
+                    c.layer_index = Some(li);
                     if let Some(h) = &hatch {
                         c.fill = Some(poche_fill(h.pattern).to_string());
                         c.hatch = Some(h.clone());
@@ -1550,6 +1663,7 @@ fn parallel_reveal_cuts(mut cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &
             c.component_id = Some(comp.id.clone());
             c.source_id = Some(w.id.clone());
             c.category = Some(w.category_code.clone());
+            c.layer_index = Some(li);
             cuts.push(c);
         }
     }
@@ -2342,7 +2456,8 @@ pub fn merge_thin_cuts(cuts: &[Cut], scale: f64) -> Vec<Cut> {
         return cuts.to_vec();
     }
     let bbox: Vec<[f64; 4]> = cuts.iter().map(|c| ring_bbox(&c.pts)).collect();
-    let same_part = |a: &Cut, b: &Cut| a.kind == b.kind && a.index == b.index && a.source_id == b.source_id;
+    // [33] Nur Schichten mit gleichem Override (eine weisse Schicht geht nicht in der schwarzen auf).
+    let same_part = |a: &Cut, b: &Cut| a.kind == b.kind && a.index == b.index && a.source_id == b.source_id && a.ov == b.ov;
     let touch = |i: usize, j: usize| {
         let (a, b) = (bbox[i], bbox[j]);
         a[0] <= b[2] + 1e-4 && b[0] <= a[2] + 1e-4 && a[1] <= b[3] + 1e-4 && b[1] <= a[3] + 1e-4
@@ -2410,9 +2525,58 @@ pub fn merge_thin_cuts(cuts: &[Cut], scale: f64) -> Vec<Cut> {
     out
 }
 
+/// [33] Schichten desselben Bauteils mit gleichem Override ohne Muster (Schraffur "none", z. B. „Deckenaufbau
+/// weiss“) zu einer Fläche vereinigen: ein Umriss um den ganzen Aufbau, keine Fugen dazwischen. Flächen mit
+/// Loch bleiben einzeln.
+fn merge_override_groups(cuts: Vec<Cut>) -> Vec<Cut> {
+    let plain = |c: &Cut| c.ov.as_ref().is_some_and(|o| o.hatch == HatchOv::None) && c.stair_id.is_none() && c.pts.len() >= 3;
+    if !cuts.iter().any(plain) {
+        return cuts;
+    }
+    // Gleiches Bauteil: Decken-Schichten sind je eine eigene Platte (eigener `index`), darum über `source_id`.
+    let same = |a: &Cut, b: &Cut| a.kind == b.kind && a.source_id.is_some() && a.source_id == b.source_id && a.ov == b.ov;
+    let n = cuts.len();
+    let mut group: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
+        if !plain(&cuts[i]) || group[i].is_some() {
+            continue;
+        }
+        group[i] = Some(i);
+        for j in i + 1..n {
+            if group[j].is_none() && plain(&cuts[j]) && same(&cuts[i], &cuts[j]) {
+                group[j] = Some(i);
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        match group[i] {
+            None => out.push(cuts[i].clone()),
+            Some(g) if g != i => {}
+            Some(_) => {
+                let members: Vec<usize> = (i..n).filter(|&j| group[j] == Some(i)).collect();
+                if members.len() == 1 {
+                    out.push(cuts[i].clone());
+                    continue;
+                }
+                let polys: Vec<crate::flat::Polygon> = members.iter().map(|&j| vec![cuts[j].pts.clone()]).collect();
+                let u = crate::polygon_bool::union(&polys);
+                if !u.is_empty() && u.iter().all(|poly| poly.len() == 1) {
+                    for poly in u {
+                        out.push(Cut { pts: poly.into_iter().next().unwrap_or_default(), nse: None, ..cuts[i].clone() });
+                    }
+                } else {
+                    out.extend(members.iter().map(|&j| cuts[j].clone()));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// `generateSectionPlan`: Primitive (u → x, Höhe → y) und Ausmass.
 pub fn section_primitives(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility) -> (Vec<Primitive>, [f64; 4]) {
-    section_primitives_at(out, mono, hidden_lines, vis, 0.0, Detail::Mittel, false, &HashSet::new())
+    section_primitives_at(out, mono, hidden_lines, vis, 0.0, Detail::Mittel, false, &CutRules::default())
 }
 
 /// [140] Bauteile (ids) aus losen Schüttungen/Unterbau (`standards::is_loose_fill`: Kies, Magerbeton,
@@ -2430,12 +2594,21 @@ fn loose_cut(cp: &Cut, loose: &HashSet<String>) -> bool {
 /// [`section_primitives`] beim Massstab 1:`scale` (dünne Schichten zusammengefasst, [`merge_thin_cuts`];
 /// Detail „fein" zeigt alle Schichten, `style::simplify_thin_layers`). Ab 1:100 (`style::solid_cut`, ausser
 /// `cut_hatch`/„fein") sind die geschnittenen Flächen schwarz ohne Fugen und Schraffur, nur mit dem Umriss —
-/// ausser Schichten aus losen Schüttungen/Unterbau (`loose`, s. [`loose_cut`]): die bleiben schraffiert.
+/// ausser Schichten aus losen Schüttungen/Unterbau (`rules.loose`, s. [`loose_cut`]): die bleiben schraffiert.
+/// [33] Overrides (`rules.ov`) haben Vorrang vor beidem: Füllung, Schraffur und Umriss der Regel.
 #[allow(clippy::too_many_arguments)]
-pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64, detail: Detail, cut_hatch: bool, loose: &HashSet<String>) -> (Vec<Primitive>, [f64; 4]) {
+pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64, detail: Detail, cut_hatch: bool, rules: &CutRules) -> (Vec<Primitive>, [f64; 4]) {
+    let loose = &rules.loose;
     let black = solid_cut(detail, scale, cut_hatch);
     let thin_scale = if simplify_thin_layers(detail, scale) && !black { scale } else { 0.0 };
-    let merged = plain_thin_insulation(merge_thin_cuts(&out.cuts, thin_scale), thin_scale);
+    let with_ov: Vec<Cut>;
+    let cuts: &[Cut] = if rules.ov.is_empty() {
+        &out.cuts
+    } else {
+        with_ov = out.cuts.iter().zip(rules.ov.iter().chain(std::iter::repeat(&None))).map(|(c, o)| Cut { ov: o.clone(), ..c.clone() }).collect();
+        &with_ov
+    };
+    let merged = merge_override_groups(plain_thin_insulation(merge_thin_cuts(cuts, thin_scale), thin_scale));
     let mut prims = Vec::new();
     let mut acc = Acc::new();
     let shown = |code: &str| vis.visible(code) && vis.render(code);
@@ -2472,8 +2645,12 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
         let fill = cp.fill.as_deref().unwrap_or(HATCH_PAPER);
         let hatch = cp.hatch.clone().unwrap_or_else(section_hatch);
         let solid = hatch.pattern == HatchPattern::Solid;
-        let black = black && !loose_cut(cp, loose);
-        let (fill, hatch) = if black {
+        let ov = cp.ov.as_ref();
+        // Ohne Override: schwarz ab 1:100 (ausser lose Schüttungen). Mit Override, der Füllung oder Schraffur
+        // setzt, gilt die Regel ([33]); eine Regel, die nur den Umriss setzt, lässt die Fläche schwarz.
+        let base_black = black && !loose_cut(cp, loose);
+        let black = base_black && !ov.is_some_and(|o| o.styles());
+        let (mut fill, mut hatch) = if black {
             (HATCH_INK.to_string(), no_hatch())
         } else if mono {
             let mono_fill = if solid { HATCH_INK } else { HATCH_PAPER };
@@ -2482,8 +2659,22 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
         } else {
             (fill.to_string(), hatch)
         };
+        if let Some(o) = ov.filter(|o| o.styles()) {
+            match &o.hatch {
+                // Nur Füllung gesetzt: ab 1:100 (sonst schwarz) ohne Muster, sonst Muster wie gehabt.
+                HatchOv::Keep if base_black => hatch = no_hatch(),
+                HatchOv::Keep | HatchOv::Material => {}
+                HatchOv::None => hatch = no_hatch(),
+                HatchOv::Pattern(h) => hatch = if mono { HatchRender { color: SECTION_INK.into(), ..h.clone() } } else { h.clone() },
+            }
+            if let Some(f) = &o.fill {
+                fill = f.clone();
+            }
+        }
+        let outline = ov.and_then(|o| o.outline);
         let src = cp.source_id.clone();
-        let mut pr = if black { polygon(pts, &fill, "none", 0.0, hatch) } else { polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch) };
+        let stroked = if black { outline == Some(true) } else { outline != Some(false) };
+        let mut pr = if stroked { polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
         if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, no_stroke_edges, greyed, .. } = &mut pr {
             *wall_id = if cp.kind == Kind::Wall { src.clone() } else { None };
             *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() { src.clone() } else { None };
@@ -2993,7 +3184,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
     let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
-    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &loose_fill_components(p));
+    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out));
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     super::extras::scale_line_weights(p, scale, &mut prims);
@@ -3226,7 +3417,7 @@ mod tests {
         };
         let loose: HashSet<String> = ["mager".to_string()].into();
         let fills = |scale: f64, loose: &HashSet<String>| -> Vec<(String, HatchPattern, String)> {
-            let (prims, _) = section_primitives_at(&out, true, false, &Visibility::default(), scale, Detail::Mittel, false, loose);
+            let (prims, _) = section_primitives_at(&out, true, false, &Visibility::default(), scale, Detail::Mittel, false, &CutRules { loose: loose.clone(), ov: Vec::new() });
             prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, stroke, ceiling_id: Some(_), .. } => Some((fill.clone(), hatch.pattern, stroke.clone())), _ => None }).collect()
         };
         let f = fills(100.0, &loose);
@@ -3253,7 +3444,7 @@ mod tests {
         let out = compute_section(&p, &l, &[]).unwrap().unwrap();
         let vis = Visibility::default();
         let stat = |scale: f64, detail: Detail, cut_hatch: bool| {
-            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, detail, cut_hatch, &loose_fill_components(&p));
+            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, detail, cut_hatch, &CutRules::of(&p, &out));
             let cuts: Vec<_> = prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, stroke, wall_id, ceiling_id, .. } if wall_id.is_some() || ceiling_id.is_some() => Some((fill.clone(), hatch.pattern, stroke.clone())), _ => None }).collect();
             let outline = prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "section-cut-outline")).count();
             (cuts, outline)
@@ -3265,6 +3456,56 @@ mod tests {
             let (c, _) = stat(scale, detail, ch);
             assert!(c.iter().any(|(f, h, s)| f != HATCH_INK && *h != HatchPattern::None && s != "none"), "{scale} {detail:?} {ch}");
         }
+    }
+
+    /// [33] „Deckenaufbau weiss“ (Standardregel, über eine Ansichtsvorlage eingeschaltet): im Schnitt 1:100 sind
+    /// Unterlagsboden und Dämmung über der Betondecke EINE weisse Fläche ohne Schraffur mit Umriss, die Decke
+    /// selbst und die Wände bleiben schwarz; 1:50 ebenso weiss statt schraffiert. Ohne Regel (oder Regel aus)
+    /// unverändert. Eine Regel nach Baustoff-Kategorie mit Schraffur „material“ zeigt die Schraffur auch ab 1:100.
+    #[test]
+    fn override_deckenaufbau_weiss() {
+        let mut p = sample();
+        let l = level(&p, "schnitt-a");
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let vis = Visibility::default();
+        let slab = |p: &Project, scale: f64| {
+            let (prims, _) = section_primitives_at(&out, true, false, &vis, scale, Detail::Mittel, false, &CutRules::of(p, &out));
+            prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, stroke, ceiling_id: Some(_), .. } => Some((fill.clone(), hatch.pattern, stroke.clone())), _ => None }).collect::<Vec<_>>()
+        };
+        let before = slab(&p, 100.0);
+        // Estrich-Stücke (Dämmung liegt jeweils darunter, gleich breit oder fehlt am Wandanschluss) und Beton.
+        let n = |comp: &str| out.cuts.iter().filter(|c| c.kind == Kind::Slab && c.component_id.as_deref() == Some(comp)).count();
+        let (screed, insulation, concrete) = (n("screed"), n("insulation"), n("concrete"));
+        assert!(screed >= insulation && insulation > 0 && concrete > 0);
+        assert_eq!(before.len(), screed + insulation + concrete);
+        assert!(before.iter().all(|(f, _, s)| f == HATCH_INK && s == "none"));
+        // Standardregel geladen, aber aus: nichts ändert sich.
+        p.override_rules = Some(crate::standards::override_rules().into_iter().map(|v| serde_json::from_value(v).unwrap()).collect());
+        assert_eq!(slab(&p, 100.0), before);
+        assert!(cut_overrides(&p, &out.cuts).is_empty());
+        p.override_rules.as_mut().unwrap()[0].enabled = true;
+        let after = slab(&p, 100.0);
+        let white: Vec<_> = after.iter().filter(|(f, _, _)| f == "#ffffff").collect();
+        assert_eq!(white.len(), screed, "Estrich + Dämmung je Stück als eine Fläche: {after:?}");
+        assert!(white.iter().all(|w| (w.1, w.2.as_str()) == (HatchPattern::None, SECTION_INK)));
+        assert_eq!(after.iter().filter(|(f, _, s)| f == HATCH_INK && s == "none").count(), concrete, "Betondecke bleibt schwarz");
+        let at50 = slab(&p, 50.0);
+        assert_eq!(at50.iter().filter(|(f, h, _)| f == "#ffffff" && *h == HatchPattern::None).count(), screed);
+        assert!(at50.iter().any(|(f, h, _)| f != "#ffffff" && *h != HatchPattern::None), "Beton 1:50 schraffiert");
+        // Wände unberührt (Regel gilt nur für Decken).
+        let walls = |p: &Project| {
+            let (prims, _) = section_primitives_at(&out, true, false, &vis, 100.0, Detail::Mittel, false, &CutRules::of(p, &out));
+            prims.iter().filter(|q| matches!(q, Primitive::Polygon { wall_id: Some(_), fill, .. } if fill != HATCH_INK)).count()
+        };
+        assert_eq!(walls(&p), 0);
+        // Baustoff-Kategorie „insulation“ mit Materialschraffur: Dämmung der Wände auch 1:100 schraffiert.
+        let mut r: OverrideRule = serde_json::from_value(serde_json::json!({"id": "d", "name": "Dämmung", "enabled": true,
+            "condition": {"type": "material_category", "operator": "equals", "value": "insulation"}, "actions": {"hatch": "material"}})).unwrap();
+        p.override_rules = Some(vec![r.clone()]);
+        assert!(walls(&p) > 0);
+        r.enabled = false;
+        p.override_rules = Some(vec![r]);
+        assert_eq!(walls(&p), 0);
     }
 
     /// [140] Trittschall 4 cm: 1:100 (0.4 mm Papier) ohne Zickzack, 1:50 mit; dicke Dämmung bleibt.

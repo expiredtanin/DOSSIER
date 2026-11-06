@@ -46,3 +46,26 @@ test("Ansichtsvorlage: Kategorie ausblenden, anwenden, Vorlage ändern, Ansicht 
   await page.getByTitle("Vorlage löschen").last().click();
   await expect(rows).toHaveCount(base + 1);
 });
+
+test("Override-Baustein „Deckenaufbau weiss“ in eine Ansichtsvorlage übernehmen ([33])", async ({ page }) => {
+  await startNewProject(page);
+  await openSample(page);
+  await page.getByRole("button", { name: "Fenster", exact: true }).first().click();
+  await page.getByRole("option", { name: /Ressourcen/ }).click();
+  await page.getByRole("tab", { name: "Ansichtsvorlagen" }).click();
+  await page.getByTestId("view-template-add").click();
+  await page.getByTestId("view-template-row").last().click();
+  // Baustein wählen und übernehmen: Regel ins Projekt, in der Vorlage eingeschaltet.
+  await page.getByRole("combobox", { name: "Baustein übernehmen" }).selectOption({ label: "Deckenaufbau weiss" });
+  await page.getByTestId("view-template-rule-block-add").click();
+  await expect(page.getByTestId("view-template-rules").getByRole("checkbox", { name: "Deckenaufbau weiss" })).toBeChecked();
+  await expect(page.getByTestId("view-template-rule-block-add")).toBeDisabled();
+  // Overrides-Tab: Regel mit Schicht-Bedingungen und Schnittflächen-Aktionen.
+  await page.getByRole("tab", { name: "Overrides" }).click();
+  await page.locator(".res-ov-row", { hasText: "Deckenaufbau weiss" }).click();
+  const detail = page.getByTestId("override-rule-detail");
+  await expect(detail.getByTestId("override-more-condition")).toHaveCount(1);
+  // Aktion „Umriss / Fuge“ an (Schalter) und eingeschaltet (Wert).
+  await expect(detail.getByRole("checkbox", { name: "Umriss / Fuge" })).toHaveCount(2);
+  for (const c of await detail.getByRole("checkbox", { name: "Umriss / Fuge" }).all()) await expect(c).toBeChecked();
+});
