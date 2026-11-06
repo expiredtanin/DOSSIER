@@ -17,9 +17,11 @@ export function hitTestWall(
   floorId: string,
   visibleCodes: Set<string>,
   m: Vec2,
+  /** [33] Per Regel „Ausblenden“ ausgeblendete Elemente (nicht anwählbar). */
+  hidden?: ReadonlySet<string>,
 ): string | null {
   const walls = project.walls.filter(
-    (w) => w.floorId === floorId && visibleCodes.has(w.categoryCode),
+    (w) => w.floorId === floorId && visibleCodes.has(w.categoryCode) && !hidden?.has(w.id),
   );
   for (let i = walls.length - 1; i >= 0; i--) {
     const w = walls[i];

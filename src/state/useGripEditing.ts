@@ -1255,6 +1255,7 @@ export function useGripEditing(opts: {
         raw,
         project,
         excludeIds,
+        scale: scaleDenominator,
         levelId,
         visibleCodes,
         settings: snap,

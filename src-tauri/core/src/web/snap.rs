@@ -21,9 +21,12 @@ fn lines(s: &str) -> Vec<String> {
 /// Dokument `h`, ohne die Elemente mit den ids `skip` (durch `\n` getrennt; gezogene Elemente, [122]);
 /// Nummer ≥ 1 für [`snap_query`] (0 = Dokument nicht offen).
 #[wasm_bindgen]
-pub fn doc_snap_hold(h: u32, level: &str, codes: &str, skip: &str) -> u32 {
+/// `scale`: Massstab 1:N der Plan-Ansicht (NaN = ohne Ansicht): [33] Elemente, die eine Regel „Ausblenden“
+/// dort ausblendet, fangen nicht.
+pub fn doc_snap_hold(h: u32, level: &str, codes: &str, skip: &str, scale: f64) -> u32 {
     let (codes, skip) = (lines(codes), lines(skip));
-    with_doc(h, |d| CACHE.with(|c| c.borrow_mut().hold_except(h, d, level, &codes, &skip))).unwrap_or(0)
+    let scale = (scale.is_finite() && scale > 0.0).then_some(scale);
+    with_doc(h, |d| CACHE.with(|c| c.borrow_mut().hold_view(h, d, level, &codes, &skip, scale))).unwrap_or(0)
 }
 
 fn push(out: &mut Vec<f64>, c: Option<Cand>) {

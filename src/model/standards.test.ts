@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyProject, sampleProject } from "./sampleProject";
-import { componentLayerFunctions, LAYER_FUNCTIONS, standardsChangeKey, standardsMergeCounts, standardsMergeOps, standardsUpdateOps, standardsUpdatePlan, withStandards } from "./standards";
+import { componentLayerFunctions, hiddenElementIds, LAYER_FUNCTIONS, standardsChangeKey, standardsMergeCounts, standardsMergeOps, standardsUpdateOps, standardsUpdatePlan, withStandards } from "./standards";
 import { applyOps } from "../core/ops";
 
 describe("Standard-Bibliothek ([100]–[102])", () => {
@@ -91,5 +91,28 @@ describe("[33] Schichtfunktion aus dem Baustoff", () => {
     expect([f["std-c-zementestrich"], f["std-c-stahlbeton"], f["std-c-trittschall"], f["std-c-innenputz"]]).toEqual(["screed", "structure", "insulation", "plaster"]);
     expect(Object.keys(f).length).toBe(p.components.length);
     for (const v of Object.values(f)) expect(v === null || LAYER_FUNCTIONS.includes(v)).toBe(true);
+  });
+});
+
+describe("[33] hiddenElementIds", () => {
+  it("liefert die per Regel ausgeblendeten Wände samt ihren Öffnungen, nur in der genannten Darstellung", () => {
+    expect(hiddenElementIds(sampleProject, 100).size).toBe(0);
+    const p = {
+      ...sampleProject,
+      overrideRules: [
+        {
+          id: "h",
+          name: "Wände aus",
+          enabled: true,
+          condition: { type: "element_kind" as const, operator: "equals" as const, value: "wall" },
+          conditions: [{ type: "view_kind" as const, operator: "equals" as const, value: "plan" }],
+          actions: { hide: true },
+        },
+      ],
+    } as typeof sampleProject;
+    const ids = hiddenElementIds(p, 100);
+    for (const w of p.walls) expect(ids.has(w.id)).toBe(true);
+    for (const o of p.openings ?? []) expect(ids.has(o.id)).toBe(true);
+    expect(hiddenElementIds(p, 100, "section").size).toBe(0);
   });
 });

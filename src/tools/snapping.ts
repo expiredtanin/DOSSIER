@@ -45,6 +45,8 @@ export interface SnapInput {
   ctrl: boolean;
   /** ids der Elemente, die nicht fangen (gerade gezogen; sonst fängt der Punkt an sich selbst). */
   excludeIds?: readonly string[];
+  /** Massstab 1:N der Plan-Ansicht: [33] per Regel ausgeblendete Elemente fangen dort nicht (fehlt = 3D/ohne Ansicht). */
+  scale?: number;
 }
 
 /** Eine Strecke als Snap-Quelle (Entwurf, Blatt-Geometrie, Verweil-Referenz). */
@@ -69,17 +71,18 @@ interface LevelHold {
   levelId: string;
   codes: Set<string>;
   skip: string;
+  scale: number | undefined;
   held: number;
 }
 const levelHolds: LevelHold[] = [];
 const MAX_LEVEL_HOLDS = 4;
 function levelHold(input: SnapInput, fresh: boolean): number {
   const skip = input.excludeIds?.length ? input.excludeIds.join("\n") : "";
-  let e = levelHolds.find((h) => h.project === input.project && h.levelId === input.levelId && h.codes === input.visibleCodes && h.skip === skip);
+  let e = levelHolds.find((h) => h.project === input.project && h.levelId === input.levelId && h.codes === input.visibleCodes && h.skip === skip && h.scale === input.scale);
   if (e && !fresh) return e.held;
-  const held = holdModelSnap(input.project, input.levelId, input.visibleCodes, input.excludeIds ?? []);
+  const held = holdModelSnap(input.project, input.levelId, input.visibleCodes, input.excludeIds ?? [], input.scale);
   if (!e) {
-    e = { project: input.project, levelId: input.levelId, codes: input.visibleCodes, skip, held };
+    e = { project: input.project, levelId: input.levelId, codes: input.visibleCodes, skip, scale: input.scale, held };
     levelHolds.push(e);
     if (levelHolds.length > MAX_LEVEL_HOLDS) levelHolds.shift();
   }

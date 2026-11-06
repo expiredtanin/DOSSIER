@@ -768,3 +768,36 @@ describe("computeSnap — grosse Projekte", () => {
     expect(perCall).toBeLessThan(50);
   });
 });
+
+describe("[33] Override „Ausblenden“ im Fang", () => {
+  it("ausgeblendete Wand fängt in der Plan-Ansicht nicht, ohne Ansicht schon", () => {
+    const project = {
+      ...wallProject(wall("w", { x: 0, y: 0 }, { x: 10, y: 0 })),
+      overrideRules: [
+        {
+          id: "h",
+          name: "Wände aus",
+          enabled: true,
+          condition: { type: "element_kind", operator: "equals", value: "wall" },
+          actions: { hide: true },
+        },
+      ],
+    } as unknown as Project;
+    const at = (scale?: number) =>
+      computeSnap({
+        raw: { x: 0.02, y: 0.01 },
+        project,
+        levelId: "eg",
+        visibleCodes: new Set(["20"]),
+        settings: { ...DEFAULT_SNAP, grid: false, commonAngles: false, ortho: false },
+        draftPoints: [],
+        lastPoint: null,
+        pxPerMeter: 100,
+        shift: false,
+        ctrl: false,
+        scale,
+      });
+    expect(at()?.kind).toBe("endpoint");
+    expect(at(100)?.kind ?? null).not.toBe("endpoint");
+  });
+});

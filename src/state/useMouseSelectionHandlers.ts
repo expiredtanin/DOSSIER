@@ -14,6 +14,8 @@ import type { Pick3dHit } from "../viewport/Wasm3DViewport";
 import type { RichTextDoc } from "../text/richText";
 import { plainText } from "../text/richText";
 import { hitTestWall } from "../viewport/planHitTest";
+import { hiddenElementIds } from "../model/standards";
+import { getState } from "./appStore";
 import type { useSelectionState } from "./useSelectionState";
 import { ELEMENT_KINDS, clearKinds, fromIdLists } from "./selection";
 import type { Selection, SelectionKind } from "./selection";
@@ -354,7 +356,8 @@ export function useMouseSelectionHandlers(opts: {
     clientY: number;
     model: Vec2;
   }) => {
-    const wallId = hitTestWall(project, activeLevelId, visibleCodes, info.model);
+    // [33] Per Regel ausgeblendete Wände sind im Grundriss nicht anwählbar (wie über den Plan-Pick).
+    const wallId = hitTestWall(project, activeLevelId, visibleCodes, info.model, hiddenElementIds(project, getState().scaleDenominator));
     if (wallId && !selection.walls.includes(wallId)) setSelection({ walls: [wallId] });
     setMenu({ kind: "plan", x: info.clientX, y: info.clientY, wallId, model: info.model });
   };

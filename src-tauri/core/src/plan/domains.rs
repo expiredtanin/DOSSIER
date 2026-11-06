@@ -134,6 +134,11 @@ impl<'a> Ctx<'a> {
         self.shown(code) && !self.hidden.contains(id)
     }
 
+    /// [33] Element von einer Regel „Ausblenden“ getroffen (unabhängig von der Kategorie-Sichtbarkeit).
+    pub fn rule_hidden(&self, id: &str) -> bool {
+        self.hidden.contains(id)
+    }
+
     /// [140] Schnittflächen dieser Ebene schwarz (`style::solid_cut`; Feld `cutHatch` der Ebene).
     pub fn solid_cut(&self) -> bool {
         let cut_hatch = self.p.floor(&self.a.floor).and_then(|l| l.cut_hatch).unwrap_or(false);
@@ -1617,6 +1622,42 @@ mod tests {
         p.override_rules = Some(vec![serde_json::from_value(serde_json::json!({"id": "l", "name": "l", "enabled": true,
             "condition": {"type": "material_category", "operator": "equals", "value": "insulation"}, "actions": {"linetypeId": "hatch-dash"}})).unwrap()]);
         assert!(dashed(&run(&p)) > 0);
+    }
+
+    /// [33] Eine per Regel ausgeblendete Öffnung schliesst ihr Wandloch (Wand-Poché ohne Lücke); eine
+    /// ausgeblendete Öffnungs-Kategorie lässt das Loch stehen.
+    #[test]
+    fn ausgeblendete_oeffnung_schliesst_wandloch() {
+        let mut p = sample();
+        let run = |p: &Project, show: &[&str]| {
+            let t = serde_json::json!({ "floor": "eg", "show": show, "grey": [], "scale": 50 }).to_string();
+            plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap()
+        };
+        let area = |d: &DomainPrims| -> f64 {
+            d.walls
+                .iter()
+                .filter_map(|q| match q {
+                    Primitive::Polygon { pts, wall_id: Some(_), fill, .. } if fill != "none" => Some(pts),
+                    _ => None,
+                })
+                .map(|pts| (0..pts.len()).map(|i| { let (a, b) = (&pts[i], &pts[(i + 1) % pts.len()]); a.x * b.y - b.x * a.y }).sum::<f64>().abs() / 2.0)
+                .sum()
+        };
+        let opening_prims = |d: &DomainPrims| d.walls.iter().filter(|q| matches!(q, Primitive::Line { opening_id: Some(_), .. } | Primitive::Arc { opening_id: Some(_), .. } | Primitive::Polygon { opening_id: Some(_), .. })).count();
+        let all = ["20", "21", "30", "60"];
+        let before = run(&p, &all);
+        assert!(opening_prims(&before) > 0);
+        let a0 = area(&before);
+        // Kategorie aus: Symbol weg, Loch bleibt.
+        let codes: Vec<&str> = all.iter().copied().filter(|c| p.openings.iter().flatten().all(|o| o.category_code != *c)).collect();
+        let off = run(&p, &codes);
+        assert_eq!(opening_prims(&off), 0);
+        assert!((area(&off) - a0).abs() < 1e-9, "Loch bleibt bei ausgeblendeter Kategorie");
+        p.override_rules = Some(vec![serde_json::from_value(serde_json::json!({"id": "h", "name": "h", "enabled": true,
+            "condition": {"type": "element_kind", "operator": "equals", "value": "opening"}, "actions": {"hide": true}})).unwrap()]);
+        let d = run(&p, &all);
+        assert_eq!(opening_prims(&d), 0, "Symbole weg");
+        assert!(area(&d) > a0 + 0.1, "Wandloch geschlossen: {} → {}", a0, area(&d));
     }
 
     /// [140] „mittel" ab 1:200 wie „grob" (Wände als Sammelfläche), „fein" bleibt; explizit „grob" ohne Stempel.

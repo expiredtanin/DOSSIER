@@ -514,6 +514,19 @@ impl SnapCache {
     /// Wie [`SnapCache::hold`], ohne die Elemente mit den ids `skip` (Fang beim Ziehen: das gezogene
     /// Element fängt nicht an sich selbst, [122] — statt eines abgewandelten Projekts).
     pub fn hold_except(&mut self, doc_id: u32, doc: &mut crate::document::Document, level: &str, codes: &[String], skip: &[String]) -> u32 {
+        self.hold_view(doc_id, doc, level, codes, skip, None)
+    }
+
+    /// Wie [`SnapCache::hold_except`] für die Plan-Ansicht im Massstab 1:`scale` (`None` = ohne Ansicht):
+    /// [33] Elemente, die eine Regel „Ausblenden“ dort ausblendet (`overrides::hidden_elements`), fangen nicht.
+    pub fn hold_view(&mut self, doc_id: u32, doc: &mut crate::document::Document, level: &str, codes: &[String], skip: &[String], scale: Option<f64>) -> u32 {
+        let mut skip: Vec<String> = skip.to_vec();
+        if let Some(sc) = scale.filter(|s| s.is_finite() && *s > 0.0) {
+            if let Ok(p) = doc.project() {
+                let v = crate::plan::overrides::RuleView::at(sc, None).view("plan");
+                skip.extend(crate::plan::overrides::hidden_elements(p, v));
+            }
+        }
         let mut skip_sorted: Vec<&str> = skip.iter().map(String::as_str).filter(|s| !s.is_empty()).collect();
         skip_sorted.sort_unstable();
         skip_sorted.dedup();
@@ -724,6 +737,27 @@ mod tests {
         assert!(cache.get(no_line).unwrap().drawings.segs.segs.is_empty());
         // Leere Ausnahme = ohne Ausnahme.
         assert_eq!(cache.hold_except(1, &mut d, "eg", &codes(), &[]), all);
+    }
+
+    /// [33] Eine Regel „Ausblenden“ (Grundriss) nimmt die Wand aus dem Fang der Plan-Ansicht; ohne Ansicht
+    /// (3D, Massstab unbekannt) und mit ausgeschalteter Regel fängt sie weiter.
+    #[test]
+    fn ausgeblendete_elemente_fangen_nicht() {
+        let mut v = base();
+        v["walls"] = json!([wall(None)]);
+        v["overrideRules"] = json!([{"id": "h", "name": "h", "enabled": true,
+            "condition": {"type": "element_kind", "operator": "equals", "value": "wall"},
+            "conditions": [{"type": "view_kind", "operator": "equals", "value": "plan"}], "actions": {"hide": true}}]);
+        let mut d = doc(v.clone());
+        let mut cache = SnapCache::default();
+        let plan = cache.hold_view(1, &mut d, "eg", &codes(), &[], Some(100.0));
+        assert!(cache.get(plan).unwrap().model.segs.segs.is_empty(), "ausgeblendete Wand fängt nicht");
+        let free = cache.hold_view(1, &mut d, "eg", &codes(), &[], None);
+        assert!(!cache.get(free).unwrap().model.segs.segs.is_empty());
+        v["overrideRules"][0]["enabled"] = json!(false);
+        let mut d = doc(v);
+        let off = cache.hold_view(2, &mut d, "eg", &codes(), &[], Some(100.0));
+        assert!(!cache.get(off).unwrap().model.segs.segs.is_empty(), "Regel aus: fängt");
     }
 
     #[test]

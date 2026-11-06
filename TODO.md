@@ -1938,6 +1938,19 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Elemente bleiben im Grundriss anwählbar/fangbar (Pick/Fang fragen das Modell); Schlagschatten im Grundriss
   (Sonnenstudie) nicht über Regeln; Linienstil auf Polygon-Umrissen im Grundriss (Wand-Umriss, Decken) ohne Wirkung;
   kurze Geländesegmente zeigen das Strichmuster je Segment neu beginnend.
+  (6.11., Ausblenden: Pick/Fang/Wandloch) **Ausgeblendete Elemente nicht mehr anwähl-/fangbar:** Klick, Rahmen und
+  Hover laufen im Grundriss/Schnitt über die Plan-Primitive (dort fehlen ausgeblendete Elemente schon); was noch das
+  Modell fragte: der **Objektfang** (`snap_model::SnapCache::hold_view`, `doc_snap_hold(…, scale)`: in der Plan-Ansicht
+  im Massstab 1:N fangen die von `overrides::hidden_elements` getroffenen Elemente nicht — Wand samt Öffnungen,
+  Decke, Dach, Treppe, Stütze, Raum; `SnapInput.scale` von App/Befehlen/Griffen; 3D ohne Massstab unverändert) und
+  der **Wand-Treffer des Kontextmenüs** (`hitTestWall` mit Kern-Abfrage `hiddenElements`, Fassade
+  `model/standards.ts::hiddenElementIds`). **Einzeln ausgeblendete Öffnung schliesst das Wandloch** im Grundriss
+  (Wand ohne diese Öffnung gezeichnet, `Ctx::rule_hidden` in `walls.rs`; Taschen/Leibungen ebenso); eine
+  ausgeblendete Öffnungs-Kategorie lässt das Loch stehen (nur Symbol weg, wie bisher). Tests:
+  `ausgeblendete_oeffnung_schliesst_wandloch`, `snap_model::ausgeblendete_elemente_fangen_nicht`, vitest
+  `snapping.test.ts` ([33] Fang), `standards.test.ts` (`hiddenElementIds`). Geprüft: cargo test Kern, tsc, vitest.
+  Offen: nicht in der Tauri-App geprüft (nur Unit-Tests, kein e2e); Fang im Schnitt sammelt ohnehin nur
+  2D-Zeichnungen; Fang auf Blättern (Viewport-Strecken) nicht angefasst.
 - ◐ **[34] Ansichtsvorlagen.** (30.10.) `Project.viewTemplates` (Rust-Modell): benannter Satz aus Detailgrad,
   Massstab, Kategorien, Override-Regeln, Darstellungsmodus, Schwarz-Weiss, Schatten, verdeckte Kanten,
   Strichstärken-Skalierung und Ansichtsbereich; Ansicht (`DrawingLevel.templateId/templateLinked`) und

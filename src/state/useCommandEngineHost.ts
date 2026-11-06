@@ -147,6 +147,7 @@ export function useCommandEngineHost(opts: {
           settings: c.snap,
           draftPoints,
           lastPoint: draftPoints.length ? draftPoints[draftPoints.length - 1] : null,
+          scale: getState().scaleDenominator,
           pxPerMeter: planViewRef.current?.pxPerMeter() ?? 90,
           // Shift = Ortho, Ctrl = Snap aus — auch für den ERSTEN Punkt (ohne
           // Draft): so fängt der Startpunkt einer neuen Linie/Polylinie/Wand an

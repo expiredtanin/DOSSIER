@@ -490,6 +490,7 @@ export default function App() {
       settings: snap,
       draftPoints: pts,
       lastPoint: pts.length ? pts[pts.length - 1] : null,
+      scale: planScale,
       pxPerMeter,
       shift: mods.shift,
       ctrl: mods.ctrl,

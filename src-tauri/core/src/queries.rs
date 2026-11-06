@@ -111,6 +111,20 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         }
         // STEP-Export: alle Bauteile als truck-Spezifikationen (`solid_specs::project_solid_specs`).
         ("projectSolidSpecs", _) => json(&crate::solid_specs::project_solid_specs(p)?),
+        // [33] Von einer Regel „Ausblenden“ ausgeblendete Elemente (ids, sortiert): `args[0]` = Massstab 1:N
+        // (fehlt/NaN = ohne Massstab-Kriterium), `text` = Darstellung ("plan", "section", "elevation").
+        ("hiddenElements", _) => {
+            let view = match text {
+                "section" => "section",
+                "elevation" => "elevation",
+                _ => "plan",
+            };
+            let scale = args.first().copied().filter(|s| s.is_finite() && *s > 0.0);
+            let v = crate::plan::overrides::RuleView { scale, on: None, view: Some(view) };
+            let mut ids: Vec<String> = crate::plan::overrides::hidden_elements(p, v).into_iter().collect();
+            ids.sort_unstable();
+            json(&ids)
+        }
         // Gruppen ([K4] S3, `groups.rs`): `text` = Gruppen-id bzw. JSON der Argumente.
         ("groupMembership", _) => json(&crate::groups::transitive_membership(p, text)),
         ("containingGroup", _) => {

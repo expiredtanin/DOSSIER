@@ -95,3 +95,13 @@ export const LAYER_FUNCTIONS: readonly LayerFunction[] = ["structure", "insulati
 export function componentLayerFunctions(project: Project): Record<string, LayerFunction | null> {
   return documentFor(project).query<Record<string, LayerFunction | null>>("componentLayerFunctions");
 }
+
+/**
+ * [33] Elemente, die eine Regel „Ausblenden“ in der Darstellung `view` ausblendet (Kern
+ * `overrides::hidden_elements`; Massstab 1:`scale` für das Massstab-Kriterium). Für Treffer, die nicht über
+ * den Plan laufen (Kontextmenü): ausgeblendete Elemente sind dort nicht anwählbar.
+ */
+export function hiddenElementIds(project: Project, scale: number, view: "plan" | "section" | "elevation" = "plan"): Set<string> {
+  if (!project.overrideRules?.some((r) => r.enabled && r.actions.hide)) return new Set();
+  return new Set(documentFor(project).query<string[]>("hiddenElements", [scale], view));
+}

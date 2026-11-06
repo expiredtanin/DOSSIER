@@ -878,7 +878,9 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 _ => None,
             }
         };
-        let openings: Vec<&Opening> = all_openings.iter().filter(|(_, oz)| *oz != Zone::Hidden && closed_dash(*oz).is_none()).map(|(o, _)| o.as_ref()).collect();
+        // [33] Eine per Regel „Ausblenden“ ausgeblendete Öffnung schliesst ihr Wandloch (die Wand wird ohne sie
+        // gezeichnet); eine ausgeblendete Kategorie lässt das Loch stehen (nur das Symbol fehlt).
+        let openings: Vec<&Opening> = all_openings.iter().filter(|(o, oz)| *oz != Zone::Hidden && closed_dash(*oz).is_none() && !c.rule_hidden(&o.id)).map(|(o, _)| o.as_ref()).collect();
         let mut gaps: Vec<(f64, f64)> = openings.iter().filter_map(|o| crate::opening_geom::opening_interval(&wr, o.position, o.width)).collect();
         gaps.sort_by(|a, b| (a.0 - b.0).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
         let empty = WallCuts::default();
