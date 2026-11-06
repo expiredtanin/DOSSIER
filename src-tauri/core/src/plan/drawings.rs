@@ -1777,13 +1777,13 @@ mod tests {
         let texts: Vec<String> = prims.iter().filter_map(|q| if let Primitive::DrawingText { text, .. } = q { Some(text.clone()) } else { None }).collect();
         assert_eq!(lines, 4);
         assert_eq!(circles.len(), 8);
-        // 8 mm Durchmesser bei 1:100 = 0.8 m → Radius 0.4.
-        assert!(circles.iter().all(|r| (r - 0.4).abs() < 1e-9), "{circles:?}");
+        // [140] 5 mm Durchmesser bei 1:100 = 0.5 m → Radius 0.25.
+        assert!(circles.iter().all(|r| (r - 0.25).abs() < 1e-9), "{circles:?}");
         assert_eq!(texts.len(), 8);
         assert!(["1", "2", "A", "B"].iter().all(|t| texts.iter().any(|x| x == t)));
         // Halber Massstab → halbe Blase.
         let half: Vec<f64> = render(&p, grid(false), 50.0).iter().filter_map(|q| if let Primitive::DrawingCircle { r, .. } = q { Some(*r) } else { None }).collect();
-        assert!((half[0] - 0.2).abs() < 1e-9);
+        assert!((half[0] - 0.125).abs() < 1e-9);
         // Radial: 2 Strahlen (Linien) und 2 Ringe (Bögen, Ring A mit Radius 0 entfällt als Vollkreis-Punkt).
         let prims = render(&p, grid(true), 100.0);
         assert_eq!(prims.iter().filter(|q| matches!(q, Primitive::Line { .. })).count(), 2);

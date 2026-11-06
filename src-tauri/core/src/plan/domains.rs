@@ -612,6 +612,36 @@ fn with_alpha(color: &str, alpha: &str) -> String {
     }
 }
 
+/// [140] Kleinste Stempelschrift (2 mm Papier) für enge Räume.
+const ROOM_STAMP_MIN_PT: f64 = 2.0 / PT_MM;
+const PT_MM: f64 = 0.3528;
+/// Geschätzte Zeichenbreite und Zeilenhöhe je Schrifthöhe (Sans, Ziffern/Kleinbuchstaben).
+const STAMP_CHAR_W: f64 = 0.55;
+const STAMP_LINE_H: f64 = 1.25;
+
+/// [140] Raumstempel einpassen: passt der geschätzte Stempel (Zeichen × Zeilen bei `pt`) nicht in den
+/// Raum (`room_w` × `room_h`, Meter, Bounding-Box mit 5 % Rand), entfallen erst die Nutzungszeile, dann die
+/// Flächenzeile (Zusatzzeilen von hinten), danach sinkt die Schrift auf 2 mm Papier. `name_chars` = Zeichen
+/// je Namenszeile. Ergebnis: verbleibende Zusatzzeilen und Schriftgrösse (pt).
+fn fit_room_stamp(name_chars: &[usize], mut extra: Vec<StampLine>, pt: f64, scale: f64, room_w: f64, room_h: f64) -> (Vec<StampLine>, f64) {
+    let fits = |extra: &[StampLine], pt: f64| {
+        let h = pt * PT_MM * scale / 1000.0;
+        let chars = name_chars.iter().copied().chain(extra.iter().map(|l| l.text.chars().count())).max().unwrap_or(0) as f64;
+        let rows = (name_chars.len() + extra.len()) as f64;
+        chars * STAMP_CHAR_W * h <= room_w * 0.95 && rows * STAMP_LINE_H * h <= room_h * 0.95
+    };
+    if !(scale > 0.0) || !(room_w > 0.0) || !(room_h > 0.0) {
+        return (extra, pt);
+    }
+    while !fits(&extra, pt) && !extra.is_empty() {
+        extra.pop();
+    }
+    if !fits(&extra, pt) && pt > ROOM_STAMP_MIN_PT {
+        return (extra, ROOM_STAMP_MIN_PT);
+    }
+    (extra, pt)
+}
+
 fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.shown(&r.category_code)) {
         for q in &room.boundary {
@@ -649,7 +679,11 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 (room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)), lines)
             }
         };
-        out.push(Primitive::Text { at, doc, extra_lines, base_pt: if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, color: text_color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
+        let (x0, x1) = room.boundary.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q.x), a.1.max(q.x)));
+        let (y0, y1) = room.boundary.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q.y), a.1.max(q.y)));
+        let name_chars: Vec<usize> = crate::text_layout::plain_text(&doc).split('\n').map(|l| l.chars().count()).collect();
+        let (extra_lines, base_pt) = fit_room_stamp(&name_chars, extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, x1 - x0, y1 - y0);
+        out.push(Primitive::Text { at, doc, extra_lines, base_pt, color: text_color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
     }
 }
 
@@ -1053,6 +1087,22 @@ mod tests {
             plan_domains(&q, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().rooms.iter().find_map(|q| match q { Primitive::Text { extra_lines, .. } => Some(extra_lines.len()), _ => None }).unwrap()
         };
         assert_eq!((lines(100.0), lines(200.0), lines(500.0)), (3, 1, 0));
+    }
+
+    /// [140] Enger Raum: erst ohne Nutzungszeile, dann ohne Fläche, dann 2 mm Schrift; grosser Raum unverändert.
+    #[test]
+    fn raumstempel_passt_in_engen_raum() {
+        let extra = || vec![StampLine { text: "4.6 m²".into(), align: Align::Center }, StampLine { text: "NNF · Nebennutzfläche".into(), align: Align::Center }];
+        let name = [8usize]; // „E.04 Bad"
+        let (e, pt) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, 6.0, 4.0);
+        assert_eq!((e.len(), pt), (2, ROOM_STAMP_PT));
+        let (e, pt) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, 1.8, 2.4);
+        assert_eq!((e.len(), pt), (1, ROOM_STAMP_PT), "ohne Nutzung");
+        let (e, pt) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, 1.8, 0.8);
+        assert_eq!((e.len(), pt), (0, ROOM_STAMP_PT), "nur der Name");
+        let (e, pt) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, 1.2, 0.8);
+        assert_eq!(e.len(), 0);
+        assert!((pt * PT_MM - 2.0).abs() < 1e-9, "2 mm Papier");
     }
 
     /// [140] „mittel" ab 1:200 wie „grob" (Wände als Sammelfläche), „fein" bleibt; explizit „grob" ohne Stempel.
