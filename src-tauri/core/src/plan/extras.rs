@@ -89,17 +89,20 @@ fn project_lat_lon(p: &Project) -> (f64, f64) {
     }
 }
 
-/// Boden-Schatten zum Zeitpunkt `when_ms` (Unix-ms der Studie, `None`/NaN = ungültig) als
-/// halbtransparente Flächen; nur mit sichtbarer Studie und im Geschoss nächst ±0.00.
+/// Schatten zum Zeitpunkt `when_ms` (Unix-ms der Studie, `None`/NaN = ungültig) als
+/// halbtransparente Flächen; nur mit sichtbarer Studie, in Geschoss-Grundrissen. [142] Auf den im
+/// Grundriss sichtbaren Flächen im Freien (Terrassen, Dächer tieferer Geschosse unter dem Schnitt),
+/// auf dem Gelände nur im Geschoss nächst ±0.00.
 pub fn sun_shadow(p: &Project, floor: &str, when_ms: Option<f64>, out: &mut Vec<Primitive>) {
     let Some(study) = &p.sun_study else { return };
-    if !study.show || ground_floor_id(p) != Some(floor) {
+    if !study.show || !p.drawing_levels.iter().any(|l| l.id == floor && l.kind == DrawingLevelKind::Floor) {
         return;
     }
     let Some(t) = when_ms.filter(|t| !t.is_nan()) else { return };
     let (lat, lon) = project_lat_lon(p);
     let sun = crate::sun::sun_position(lat, lon, t);
-    for poly in crate::sun::shadow_polygons_project(p, sun, Some(cut_z(p, floor))) {
+    let with_ground = ground_floor_id(p) == Some(floor);
+    for poly in crate::sun::shadow_polygons_plan(p, sun, cut_z(p, floor), with_ground) {
         for r in crate::sun::without_holes(&poly) {
             let mut q = flat_polygon(ring_pts(&r), SUN_SHADOW_FILL, SUN_SHADOW_OPACITY);
             if let Primitive::Polygon { context_object_id, .. } = &mut q {
