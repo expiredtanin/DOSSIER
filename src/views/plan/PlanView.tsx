@@ -1910,10 +1910,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const v0 = panStartView.current;
     if (!v || !v0) return;
     viewRef.current = v; // abgeleitete Reads (Snap-Toleranz etc.) frisch halten
-    // Overlay (SVG-Ausschnitt, Griffe/Fangpunkt-Grösse, Lineal) wird im SELBEN
-    // Takt wie die Geometrie angewendet: die native Fläche bestätigt ihren Frame
-    // erst nach dem Schnittstellen-Aufruf — liefe das Overlay voraus, würden
-    // Pfeile/Griffe sichtbar gegen die Linien wandern ("spinnen").
+    // Overlay (SVG-Ausschnitt mit Raumstempeln/Textfeldern, Griffe/Fangpunkt-Grösse,
+    // Lineal) wird im SELBEN Takt wie die Geometrie angewendet ([145]): bei der
+    // nativen Fläche in dem Moment, in dem ihr Frame abgeschickt wird (sie zeichnet
+    // ihn sofort) — NICHT erst bei der Antwort, sonst malte die Webview das Overlay
+    // einen Frame später und die Texte liefen beim Zoomen hinter den Linien her.
+    // Wartet ein Frame (Fläche noch beschäftigt), folgt das Overlay erst mit dessen
+    // Versand; verworfene Zwischen-Frames setzen es nie.
     const apply = () => {
       if (panPending.current !== v) return; // überholt oder bereits festgeschrieben
       applySvgTransform(v0, v); // SVG: echter viewBox (scharf) bzw. CSS-Transform
@@ -1922,7 +1925,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       viewStore.set(v);
     };
     if (wantNative) {
-      (renderGl as (vb: ViewBox, ps: number, ts: number, onApplied: () => void) => void)(
+      (renderGl as (vb: ViewBox, ps: number, ts: number, onSent: () => void) => void)(
         v,
         paperScaleForGl(v),
         textScaleForGl(),

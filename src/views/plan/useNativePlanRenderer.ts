@@ -16,6 +16,7 @@ import type { GpuGeometry, ViewBox__plan_glPlan_glPlanTypes as ViewBox } from ".
 import type { Primitive } from "../../core";
 import { NativeGl, type NativeInvoke } from './nativeGl';
 import { readCssColor } from './cssColor';
+import { NativeFrameQueue } from './nativeFrameQueue';
 import { NativeTextSync } from "../../core";
 import { planTextEntries } from "../../core";
 
@@ -118,27 +119,10 @@ export function useNativePlanRenderer(
     [pushTexts],
   );
 
-  // Frame-Aufrufe zusammenfassen: höchstens einer in der Luft, der letzte gewinnt.
-  const frameBusy = useRef(false);
-  const frameNext = useRef<(() => Promise<unknown>) | null>(null);
-  const sendFrame = useCallback((job: () => Promise<unknown>) => {
-    if (frameBusy.current) {
-      frameNext.current = job;
-      return;
-    }
-    frameBusy.current = true;
-    const run = (j: () => Promise<unknown>) => {
-      void j()
-        .catch((e) => console.debug('native2d_frame fehlgeschlagen', e))
-        .finally(() => {
-          const next = frameNext.current;
-          frameNext.current = null;
-          if (next) run(next);
-          else frameBusy.current = false;
-        });
-    };
-    run(job);
-  }, []);
+  // Frame-Aufrufe zusammenfassen: höchstens einer in der Luft, der letzte gewinnt ([145]: das
+  // Overlay folgt beim Versand, nicht bei der Antwort, s. nativeFrameQueue.ts).
+  const frames = useRef<NativeFrameQueue | null>(null);
+  frames.current ??= new NativeFrameQueue((e) => console.debug('native2d_frame fehlgeschlagen', e));
 
   const syncRect = useCallback((force = false) => {
     const invoke = invokeRef.current;
@@ -287,7 +271,7 @@ export function useNativePlanRenderer(
     lastPxPerMeter.current = pxPerMeter;
     const { layout, delete: del, unchanged } = takeFullLayout();
     lastPlan.current = plan;
-    // Direkt (nicht über sendFrame): Reihenfolge nach den Puffer-Uploads ist wichtig.
+    // Direkt (nicht über die Frame-Schlange): Reihenfolge nach den Puffer-Uploads ist wichtig.
     // Unverändertes Layout (kein Chunk neu, nichts freigegeben) nicht erneut senden.
     if (!unchanged) {
       void invoke('native2d_layout', { layout, delete: del }).catch((e) =>
@@ -303,33 +287,30 @@ export function useNativePlanRenderer(
     dashScaleRef.current = n > 0 && isFinite(n) ? n : 0;
   }, []);
   const render = useCallback(
-    (viewBox: ViewBox, paperScaleN = 100, _textScale?: number, onApplied?: () => void) => {
+    /**
+     * `onSent`: läuft synchron, sobald der Frame an die Fläche geht (gleicher Takt wie deren
+     * Zeichnen) — dort setzt die Ansicht das SVG-Overlay (Texte, Griffe) auf denselben Ausschnitt.
+     */
+    (viewBox: ViewBox, paperScaleN = 100, _textScale?: number, onSent?: () => void) => {
       const invoke = invokeRef.current;
       if (!invoke) {
-        onApplied?.();
+        onSent?.();
         return;
       }
       syncRect();
       const sheet = readCssColor('--sheet');
-      sendFrame(() =>
-        invoke('native2d_frame', {
-          view: viewBox,
-          paperScale: paperScaleN,
-          dashScale: dashScaleRef.current || null,
-          clear: sheet ? [sheet[0], sheet[1], sheet[2]] : null,
-        }).then(
-          (r) => {
-            onApplied?.();
-            return r;
-          },
-          (e) => {
-            onApplied?.();
-            throw e;
-          },
-        ),
+      frames.current!.send(
+        () =>
+          invoke('native2d_frame', {
+            view: viewBox,
+            paperScale: paperScaleN,
+            dashScale: dashScaleRef.current || null,
+            clear: sheet ? [sheet[0], sheet[1], sheet[2]] : null,
+          }),
+        onSent,
       );
     },
-    [sendFrame, syncRect],
+    [syncRect],
   );
 
   return { render, updateGeometry, ready, gpuTexts, setExcludedText, setHighlight, setDashScale };
