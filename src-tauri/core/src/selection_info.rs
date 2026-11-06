@@ -840,7 +840,7 @@ fn opening_selection(lk: &Lookup, o: &Value) -> Result<J, String> {
         .o("hostWallName", floor.map_or_else(|| field(o, "hostWallId").cloned(), |f| Some(Value::from(field(f, "name").map_or("undefined".into(), js_text)))))
         .raw("position", o, "position")
         // Länge der (geraden) Wirtswand ([144]): Objekt-Info rechnet „Abstand ab Wandende“ und klemmt.
-        .o("wallLength", wall.and_then(straight_len).map(js_num))
+        .o("wallLength", wall.and_then(axis_len).map(js_num))
         .raw("width", o, "width")
         .raw("height", o, "height")
         .raw("sillHeight", o, "sillHeight")
@@ -873,13 +873,8 @@ fn opening_selection(lk: &Lookup, o: &Value) -> Result<J, String> {
 }
 
 /// Achslänge einer geraden Wand; `None` bei Bogenwänden (dort ist `position` keine Sehnenlänge).
-fn straight_len(w: &Value) -> Option<f64> {
-    if field(w, "bulge").and_then(Value::as_f64).is_some_and(|b| b.abs() > 1e-12) {
-        return None;
-    }
-    let (s, e) = (xy(field(w, "start")?), xy(field(w, "end")?));
-    let len = crate::jsmath::hypot2(e.0 - s.0, e.1 - s.1);
-    len.is_finite().then_some(len)
+fn axis_len(w: &Value) -> Option<f64> {
+    crate::opening_slide::Axis::of(w).map(|a| a.len()).filter(|l| l.is_finite())
 }
 
 /// Achsversatz der Schichtstapelung (`wallReferenceOffset`): freier Versatz (auf die Dicke geklemmt),
@@ -1380,12 +1375,14 @@ mod tests {
         // Unbekannter Wandtyp: dieselbe Meldung wie TS.
         let mut bad = r.clone();
         bad["walls"][0]["wallTypeId"] = json!("x");
-        assert_eq!(sel(&bad, json!({"wallIds": ["w"]})).unwrap_err(), "Unbekannter Wandtyp: x");        // [144] Öffnung: Länge der Wirtswand für „Abstand ab Wandende“ (Bogenwand: keine).
+        assert_eq!(sel(&bad, json!({"wallIds": ["w"]})).unwrap_err(), "Unbekannter Wandtyp: x");        // [144] Öffnung: Länge der Wirtswand für „Abstand ab Wandende“ (Bogenwand: Bogenlänge).
         let o = sel(&r, json!({"openingId": "o"})).unwrap();
         assert_eq!(o["opening"]["wallLength"], json!(5));
         let mut arc = r.clone();
         arc["walls"][0]["bulge"] = json!(0.4);
-        assert!(sel(&arc, json!({"openingId": "o"})).unwrap()["opening"].get("wallLength").is_none());
+        let len = sel(&arc, json!({"openingId": "o"})).unwrap()["opening"]["wallLength"].as_f64().unwrap();
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(0.0, 0.0), kernel2d::Vec2::new(4.0, 3.0), Some(0.4)).unwrap();
+        assert!(len > 5.0 && (len - a.length()).abs() < 1e-9, "{len}");
     }
 
     #[test]

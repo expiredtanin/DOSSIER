@@ -801,6 +801,8 @@ export const de = {
   "objinfo.opening.slope": "Neigung der Fläche",
   "objinfo.opening.position": "Position (ab Wandanfang)",
   "objinfo.opening.positionEnd": "Abstand ab Wandende",
+  "opening.overlapClamped": "Öffnung hält vor der Nachbaröffnung an (Steg 5 cm).",
+  "opening.noRoom": "In der Zielwand ist kein Platz für die Öffnung.",
   "objinfo.opening.width": "Breite",
   "objinfo.opening.height": "Höhe",
   "objinfo.opening.sill": "Brüstung",

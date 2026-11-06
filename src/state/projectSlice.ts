@@ -403,6 +403,12 @@ export interface ProjectSlice {
     id: string,
     patch: Partial<import("../model/types").Opening>,
   ) => void;
+  /**
+   * [144] Wandöffnung in ihrer Wand verschieben (Kern `opening_slide`): auf `position` (ab Wandanfang,
+   * Bogenwand: Bogenlänge) bzw. zum Griff-Punkt `pt`; geklemmt auf die Wand und 5 cm vor der Nachbar-
+   * öffnung (mit Hinweis). `coalesceKey` fasst einen Griff-Zug zu einem Undo-Schritt.
+   */
+  slideOpening: (id: string, to: { position: number } | { pt: Vec2 }, coalesceKey?: string) => void;
 
   /**
    * Immutable Änderung eines Dachs (Form/Neigung/Überstand/Firstrichtung/
@@ -522,7 +528,8 @@ export function createProjectSlice(
 
   // Befehl ([K4] S3, `commands.rs`): der Kern rechnet ihn auf dem Dokument und wendet ihn im selben
   // Aufruf an (`cmdMutation`); Prüfung, Verlauf und Meldungen wie `commitOps`.
-  const applyCmd = (req: object, coalesceKey?: string) =>
+  const applyCmd = (req: object, coalesceKey?: string) => {
+    let notice: string | undefined;
     set((s) => {
       const doc = storeDocument(s.project);
       const cmd = (req as { cmd?: unknown }).cmd;
@@ -535,17 +542,30 @@ export function createProjectSlice(
         queueMicrotask(() => get().notify(`${t("project.change.rejected")} ${problems[0]}`, "error"));
         return {};
       }
+      notice = res.notice;
       if (res.ops.length === 0) return {};
       opLog.push(res.ops);
       if (opLog.length > OP_LOG_LIMIT) opLog.shift();
       return { project: res.project, ...historyPatch(doc) };
     });
+    noticeOnce(notice);
+  };
 
   // Änderung direkt als Ops (ohne Differenz), s. `ProjectSlice.applyChange`.
   const applyChange = (
     ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]),
     coalesceKey?: string,
   ) => set((s) => commitOps(s, typeof ops === "function" ? ops(s.project) : ops, coalesceKey));
+
+  // Hinweis aus dem Kern (i18n-Schlüssel) melden — derselbe höchstens alle 2 s (Griff-Zug: je Mausschritt).
+  let lastNotice = { key: "", at: 0 };
+  const noticeOnce = (notice: string | undefined) => {
+    if (!notice) return;
+    const now = Date.now();
+    if (notice === lastNotice.key && now - lastNotice.at < 2000) return;
+    lastNotice = { key: notice, at: now };
+    get().notify(t(notice as Parameters<typeof t>[0]), "warning");
+  };
 
   // Griff-Änderung ([K4] S3): der Kern rechnet sie auf dem Dokument und wendet sie im selben Aufruf an
   // (`grips.rs`, ein WASM-Aufruf je Mausschritt); Prüfung, Verlauf und Meldungen wie `commitOps`.
@@ -566,7 +586,7 @@ export function createProjectSlice(
       if (opLog.length > OP_LOG_LIMIT) opLog.shift();
       return { project: res.project, ...historyPatch(doc) };
     });
-    if (notice) get().notify(t(notice as Parameters<typeof t>[0]), "warning");
+    noticeOnce(notice);
   };
 
   return {
@@ -1239,6 +1259,8 @@ export function createProjectSlice(
 
     // ── Öffnungs-Editieren ────────────────────────────────────────────────
     updateOpening: (id, patch) => applyChange((p) => patchItem(p, "openings", id, patch)),
+    slideOpening: (id, to, coalesceKey) =>
+      applyGrip("pt" in to ? { op: "openingSlide", id, pt: gripPt(to.pt) } : { op: "openingPosition", id, a: to.position }, coalesceKey),
 
     // ── Dach-Editieren ─────────────────────────────────────────────────────
     updateRoof: (id, patch, coalesceKey) => applyChange((p) => patchItem(p, "roofs", id, patch), coalesceKey),

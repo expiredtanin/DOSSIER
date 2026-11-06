@@ -344,59 +344,87 @@ fn free_openings<'a>(root: &'a Map<String, Value>, sel: &Sel, op: &str, walls: &
 }
 
 /// Wandöffnung um `d` verschieben ([144]): die Öffnungsmitte geht nach `Mitte + d`. Liegt das Ziel in
-/// einer anderen geraden Wand desselben Geschosses (innerhalb der halben Dicke + 5 cm) und nicht mehr in
-/// der eigenen, wechselt die Öffnung dorthin; sonst gleitet sie um die auf die Wandachse projizierte
-/// Strecke. `position` auf [0, Wandlänge − Breite] geklemmt. `None`: Wirt fehlt, Bogenwand oder die
-/// Öffnung passt nicht in die Wand.
-fn slide_opening(root: &Map<String, Value>, p: &Project, o: &Value, d: (f64, f64)) -> Option<Value> {
+/// einer anderen Wand desselben Geschosses (innerhalb der halben Dicke + 5 cm) und nicht mehr in der
+/// eigenen, wechselt die Öffnung dorthin; sonst gleitet sie entlang der Achse (gerade Wand: um die
+/// projizierte Strecke; Bogenwand [T2]: zum Lotfuss auf dem Bogen, `position` = Bogenlänge). Geklemmt auf
+/// die Wand und vor Nachbaröffnungen (`opening_slide::place`, Steg 5 cm). `skip`: mitbewegte Öffnungen.
+/// `None`: Wirt fehlt, die Öffnung passt nicht in die Wand oder dort ist kein Platz. Das `bool` meldet,
+/// dass eine Nachbaröffnung die Lage begrenzt hat.
+fn slide_opening(root: &Map<String, Value>, p: &Project, o: &Value, d: (f64, f64), copy: bool, skip: &dyn Fn(&str) -> bool) -> Option<(Value, bool)> {
+    use crate::opening_slide::{place, Axis};
     let walls = list(root, "walls");
     let host = walls.iter().find(|w| id_of(w) == wall_host(o))?;
     let width = num_of(field(o, "width"));
-    let frame = |w: &Value| {
-        let (s, e) = straight_wall(w)?;
-        let len = hypot2(e.0 - s.0, e.1 - s.1);
-        (len > 1e-9 && len.is_finite()).then(|| (s, ((e.0 - s.0) / len, (e.1 - s.1) / len), len))
-    };
-    let (s, u, len) = frame(host)?;
-    let c = (s.0 + u.0 * (num_of(field(o, "position")) + width / 2.0), s.1 + u.1 * (num_of(field(o, "position")) + width / 2.0));
+    let axis = Axis::of(host)?;
+    let pos0 = num_of(field(o, "position"));
+    let c = axis.point(pos0 + width / 2.0, 0.0);
     let target = (c.0 + d.0, c.1 + d.1);
     if !(target.0.is_finite() && target.1.is_finite() && width.is_finite()) {
         return None;
     }
-    // Abstand des Ziels zur Wandachse (Strecke) und Lage entlang der Achse.
-    let reach = |w: &Value| -> Option<(f64, f64, f64)> {
-        let (s, u, len) = frame(w)?;
-        let t = (target.0 - s.0) * u.0 + (target.1 - s.1) * u.1;
-        let tc = jsnum::max(0.0, jsnum::min(len, t));
-        let dist = hypot2(target.0 - (s.0 + u.0 * tc), target.1 - (s.1 + u.1 * tc));
-        Some((dist, t, len))
-    };
     let tol = |w: &Value| wall_thickness(p, w) / 2.0 + 0.05;
-    let in_host = reach(host).is_some_and(|(dist, _, _)| dist <= tol(host));
+    let (t_host, dist_host) = axis.local(target);
+    let in_host = dist_host <= tol(host);
     let floor = field(host, "floorId");
     let other = (!in_host)
         .then(|| {
             walls
                 .iter()
                 .filter(|w| id_of(w) != id_of(host) && field(w, "floorId") == floor)
-                .filter_map(|w| reach(w).filter(|(dist, _, _)| *dist <= tol(w)).map(|r| (w, r)))
-                .min_by(|a, b| a.1 .0.total_cmp(&b.1 .0))
+                .filter_map(|w| {
+                    let ax = Axis::of(w)?;
+                    let (t, dist) = ax.local(target);
+                    (dist <= tol(w)).then_some((w, ax, t, dist))
+                })
+                .min_by(|a, b| a.3.total_cmp(&b.3))
         })
         .flatten();
-    // Neue Lage des ersten Pfostens; in der eigenen Wand direkt `position + d·u` (ohne Rundung über die Mitte).
-    let (wall, start, wlen) = match other {
-        Some((w, (_, t, l))) => (w, t - width / 2.0, l),
-        None => (host, num_of(field(o, "position")) + d.0 * u.0 + d.1 * u.1, len),
+    let me = id_of(o).unwrap_or("");
+    // Kopie: Originale bleiben stehen und sind Nachbarn wie jede andere (Kopie rückt an die nächste freie Stelle).
+    let skip_me = |id: &str| !copy && (id == me || skip(id));
+    let from = (!copy && pos0.is_finite()).then_some(pos0);
+    // Neue Lage des ersten Pfostens; gerade eigene Wand direkt `position + d·u` (ohne Rundung über die Mitte).
+    let (wall, placed) = match other {
+        Some((w, ax, t, _)) => (w, place(root, id_of(w)?, ax.len(), width, None, t - width / 2.0, &skip_me)?),
+        None => {
+            let want = match &axis {
+                Axis::Line { u, .. } => pos0 + d.0 * u.0 + d.1 * u.1,
+                Axis::Arc(_) => t_host - width / 2.0,
+            };
+            (host, place(root, id_of(host)?, axis.len(), width, from, want, &skip_me)?)
+        }
     };
-    if width > wlen + 1e-9 {
-        return None;
-    }
-    let pos = jsnum::max(0.0, jsnum::min(wlen - width, start));
-    let mut v = with(o, "position", js_num(pos));
+    let mut v = with(o, "position", js_num(placed.position));
     if id_of(wall) != id_of(host) {
         v = with(&v, "hostWallId", Value::String(id_of(wall)?.to_owned()));
     }
-    Some(v)
+    Some((v, placed.clamped))
+}
+
+/// Frei gewählte Dach-/Deckenöffnungen ([144]): gewählt, nicht gesperrt, Wirt nicht mitbewegt; nur
+/// beim Verschieben. Sie gleiten in der Wirtsfläche (Mitte im Umriss gehalten).
+fn free_surface_openings<'a>(root: &'a Map<String, Value>, sel: &Sel, op: &str, hosts: &std::collections::HashSet<&str>, ignore_lock: bool) -> Vec<&'a Value> {
+    let ids = Ids::opt(&sel.opening_ids);
+    if op != "move" || ids.is_empty() {
+        return vec![];
+    }
+    list(root, "openings")
+        .iter()
+        .filter(|o| ids.has(o) && (ignore_lock || !locked(o)))
+        .filter(|o| surface_host(o).is_some_and(|(_, h)| !hosts.contains(h)))
+        .collect()
+}
+
+/// Dach-/Deckenöffnung um `d` verschieben: `hostPoint + d`, im Umriss des Wirts gehalten
+/// (`opening_slide::clamp_inside`). `None`: Wirt fehlt.
+fn slide_surface_opening(root: &Map<String, Value>, o: &Value, d: (f64, f64)) -> Option<Value> {
+    let (key, h) = surface_host(o)?;
+    let coll = if key == "hostRoofId" { "roofs" } else { "ceilings" };
+    let host = list(root, coll).iter().find(|e| id_of(e) == Some(h))?;
+    let ring = pts_of(field(host, "outline"));
+    let (bx, by) = xy(field(o, "hostPoint").unwrap_or(&Value::Null));
+    let q = crate::opening_slide::clamp_inside((bx + d.0, by + d.1), &ring);
+    (q.0.is_finite() && q.1.is_finite()).then(|| with(o, "hostPoint", pt(q.0, q.1)))
 }
 
 /// Verschiebung der Klickpunkte zum Anteil `t` (Bewegen).
@@ -665,14 +693,47 @@ fn add(collection: &str, items: Vec<Value>) -> Option<Op> {
 /// Die Transformation als Ops: `replace` je bewegtem Original (Modus „move“), dann `add` der Kopien je
 /// Liste (Wände, 2D, Körper, Stützen, Decken, Dächer, Treppen, Räume).
 pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq) -> Vec<Op> {
+    transform_result(root, p, req).ops
+}
+
+/// Gemeinsame Mengen von Ops und Vorschau: (bewegte Wände, Wirte von Dach-/Deckenöffnungen) → frei
+/// gewählte Wand- und Flächenöffnungen ([144]).
+fn free_sets<'a>(root: &'a Map<String, Value>, sel: &Sel, op: &str, items: &[(Kind, &'a Value)], ignore_lock: bool) -> (Vec<&'a Value>, Vec<&'a Value>) {
+    let ids_of = |f: &dyn Fn(&Kind) -> bool| -> std::collections::HashSet<&'a str> { items.iter().filter(|(k, _)| f(k)).filter_map(|(_, e)| id_of(e)).collect() };
+    let walls = ids_of(&|k| matches!(k, Kind::Wall));
+    let hosts = ids_of(&|k| matches!(k, Kind::Roof | Kind::Ceiling));
+    (free_openings(root, sel, op, &walls, ignore_lock), free_surface_openings(root, sel, op, &hosts, ignore_lock))
+}
+
+/// Wie [`transform_ops`], mit Hinweis ([144]: eine Öffnung hielt an der Nachbaröffnung an bzw. fand in
+/// der Zielwand keinen Platz).
+pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformReq) -> crate::grips::GripResult {
     let (sel, op) = (&req.sel, req.op.as_str());
     let items = gather(root, sel, op, false);
-    let moved_walls: std::collections::HashSet<&str> =
-        items.iter().filter(|(k, _)| matches!(k, Kind::Wall)).filter_map(|(_, e)| id_of(e)).collect();
-    let free = free_openings(root, sel, op, &moved_walls, false);
-    if items.is_empty() && free.is_empty() {
-        return vec![];
+    let (free, free_surf) = free_sets(root, sel, op, &items, false);
+    if items.is_empty() && free.is_empty() && free_surf.is_empty() {
+        return Default::default();
     }
+    let notice: std::cell::Cell<Option<&'static str>> = Default::default();
+    let free_ids: std::collections::HashSet<&str> = free.iter().filter_map(|o| id_of(o)).collect();
+    let skip = |id: &str| free_ids.contains(id);
+    // Gleiten mit Hinweis: Anschlag an der Nachbaröffnung bzw. kein Platz.
+    let slide = |o: &Value, d: (f64, f64), copy: bool| -> Option<Value> {
+        match slide_opening(root, p, o, d, copy, &skip) {
+            Some((v, clamped)) => {
+                if clamped {
+                    notice.set(Some(crate::opening_slide::NOTICE_OVERLAP));
+                }
+                Some(v)
+            }
+            None => {
+                if d != (0.0, 0.0) && wall_host(o).is_some() {
+                    notice.set(notice.get().or(Some(crate::opening_slide::NOTICE_NO_ROOM)));
+                }
+                None
+            }
+        }
+    };
     let pts = req.points();
     let scaling = op == "scale";
     let k_at = |t: f64| if scaling { scale_factor(&pts, t) } else { 1.0 };
@@ -741,7 +802,9 @@ pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq)
         }
         // Frei gewählte Wandöffnungen ([144]) gleiten entlang ihrer Wand (bzw. wechseln die Wand).
         let d = move_delta(&pts, 1.0);
-        ops.extend(free.iter().filter_map(|o| slide_opening(root, p, o, d).filter(|v| v != *o)).map(|v| replace("openings", v)));
+        ops.extend(free.iter().filter_map(|o| slide(o, d, false).filter(|v| v != *o)).map(|v| replace("openings", v)));
+        // Frei gewählte Dach-/Deckenöffnungen ([144]) gleiten in ihrer Fläche.
+        ops.extend(free_surf.iter().filter_map(|o| slide_surface_opening(root, o, d).filter(|v| v != *o)).map(|v| replace("openings", v)));
     }
 
     // Kopien (Kopie/Reihe/Verteilen bzw. gespiegelte Kopie).
@@ -796,7 +859,12 @@ pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq)
         }
         // Kopien frei gewählter Wandöffnungen ([144]) in der Wand versetzt.
         for o in &free {
-            if let Some(v) = slide_opening(root, p, o, move_delta(&pts, t)) {
+            if let Some(v) = slide(o, move_delta(&pts, t), true) {
+                new_openings.push(with(&v, "id", Value::String(ids.next("O"))));
+            }
+        }
+        for o in &free_surf {
+            if let Some(v) = slide_surface_opening(root, o, move_delta(&pts, t)) {
                 new_openings.push(with(&v, "id", Value::String(ids.next("O"))));
             }
         }
@@ -806,7 +874,7 @@ pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq)
         ops.extend(add(key, items));
     }
     ops.extend(add("openings", new_openings));
-    ops
+    crate::grips::GripResult { ops, notice: notice.get() }
 }
 
 // ── Ausrichten/Verteilen, Block definieren ───────────────────────────────────
@@ -1155,9 +1223,9 @@ pub fn preview_pending(root: &Map<String, Value>, p: &Project, req: &TransformRe
     if req.mode == "move" {
         ts.push(1.0);
     }
-    let moved_walls: std::collections::HashSet<&str> =
-        items.iter().filter(|(k, _)| matches!(k, Kind::Wall)).filter_map(|(_, e)| id_of(e)).collect();
-    let free = free_openings(root, &req.sel, op, &moved_walls, req.ignore_lock);
+    let (free, free_surf) = free_sets(root, &req.sel, op, &items, req.ignore_lock);
+    let free_ids: std::collections::HashSet<&str> = free.iter().filter_map(|o| id_of(o)).collect();
+    let skip = |id: &str| free_ids.contains(id);
     let mut out = Pending::default();
     for t in ts {
         let xf = Xf::of(op, &pts, t);
@@ -1165,7 +1233,12 @@ pub fn preview_pending(root: &Map<String, Value>, p: &Project, req: &TransformRe
             item_preview(p, *kind, e, &xf, &mut out);
         }
         for o in &free {
-            if let Some(q) = slide_opening(root, p, o, move_delta(&pts, t)).and_then(|v| opening_quad(root, p, &v)) {
+            if let Some(q) = slide_opening(root, p, o, move_delta(&pts, t), req.mode != "move", &skip).and_then(|(v, _)| opening_quad(root, p, &v)) {
+                out.shapes.poly(&q);
+            }
+        }
+        for o in &free_surf {
+            if let Some(q) = slide_surface_opening(root, o, move_delta(&pts, t)).map(|v| surface_quad(&v)) {
                 out.shapes.poly(&q);
             }
         }
@@ -1173,10 +1246,30 @@ pub fn preview_pending(root: &Map<String, Value>, p: &Project, req: &TransformRe
     out
 }
 
-/// Lücke einer Wandöffnung (Vorschau, [144]): Rechteck über die volle Wanddicke um die Achse.
+/// Dach-/Deckenöffnung als Rechteck um `hostPoint` (Vorschau, [144]; Breite quer, Höhe im Grundriss
+/// ungekürzt, gedreht um `hostAngle`).
+fn surface_quad(o: &Value) -> Vec<(f64, f64)> {
+    let (cx, cy) = xy(field(o, "hostPoint").unwrap_or(&Value::Null));
+    let (w, h) = (num_or(field(o, "width"), 1.0) / 2.0, num_or(field(o, "height"), 1.0) / 2.0);
+    let a = field(o, "hostAngle").and_then(Value::as_f64).unwrap_or(0.0);
+    let (c, s) = (jsnum::cos(a), jsnum::sin(a));
+    [(-w, -h), (w, -h), (w, h), (-w, h)].iter().map(|(x, y)| (cx + x * c - y * s, cy + x * s + y * c)).collect()
+}
+
+/// Lücke einer Wandöffnung (Vorschau, [144]): Rechteck über die volle Wanddicke um die Achse; in einer
+/// Bogenwand der Ringsektor-Abschnitt (Sehnen).
 fn opening_quad(root: &Map<String, Value>, p: &Project, o: &Value) -> Option<Vec<(f64, f64)>> {
     use crate::opening_geom::{opening_gap_quad, v, WallRef};
     let w = list(root, "walls").iter().find(|w| id_of(w) == wall_host(o))?;
+    if let Some(ax @ crate::opening_slide::Axis::Arc(_)) = crate::opening_slide::Axis::of(w) {
+        let (a, b) = (num_of(field(o, "position")), num_of(field(o, "width")));
+        let half = wall_thickness(p, w) / 2.0;
+        let n = 8;
+        let ts: Vec<f64> = (0..=n).map(|i| a + b * i as f64 / n as f64).collect();
+        let mut q: Vec<(f64, f64)> = ts.iter().map(|t| ax.point(*t, half)).collect();
+        q.extend(ts.iter().rev().map(|t| ax.point(*t, -half)));
+        return q.iter().all(|c| c.0.is_finite() && c.1.is_finite()).then_some(q);
+    }
     let (s, e) = straight_wall(w)?;
     let wr = WallRef { start: v(s.0, s.1), end: v(e.0, e.1), total: wall_thickness(p, w), ref_off: 0.0 };
     let q = opening_gap_quad(&wr, num_of(field(o, "position")), num_of(field(o, "width")))?;
@@ -1396,8 +1489,17 @@ mod tests {
         assert_eq!((&o["hostWallId"], &o["position"]), (&json!("v"), &json!(1.55)));
         // Wand im anderen Geschoss zählt nicht: ausserhalb jeder Wand → nur Gleiten (projiziert).
         assert_eq!(one(&run(json!([[1.45, 0], [2.45, 3]]), "move", sel.clone()))["hostWallId"], json!("w"));
-        // Gesperrte Öffnung und Öffnung in Bogenwand bleiben.
-        assert!(run(json!([[0, 0], [1, 0]]), "move", json!({"wallIds":[],"openingIds":["z","a"]})).is_empty());
+        // Gesperrte Öffnung bleibt.
+        assert!(run(json!([[0, 0], [1, 0]]), "move", json!({"wallIds":[],"openingIds":["z"]})).is_empty());
+        // Bogenwand ([T2]): Ziel = Lotfuss auf dem Bogen, `position` = Bogenlänge; geklemmt an den Bogenenden.
+        let arc = crate::opening_slide::Axis::of(&r["walls"][3]).unwrap();
+        let (c, tg) = (arc.point(1.5, 0.0), arc.tangent(1.5));
+        let mv = |k: f64| json!([[c.0, c.1], [c.0 + tg.0 * k, c.1 + tg.1 * k]]);
+        let pos = one(&run(mv(0.3), "move", json!({"wallIds":[],"openingIds":["a"]})))["position"].as_f64().unwrap();
+        assert!((pos - 1.3).abs() < 0.01, "{pos}");
+        let o = one(&run(mv(20.0), "move", json!({"wallIds":[],"openingIds":["a"]})));
+        assert!((o["position"].as_f64().unwrap() - (arc.len() - 1.0)).abs() < 1e-9 && o["hostWallId"] == "b");
+        assert_eq!(one(&run(mv(-20.0), "move", json!({"wallIds":[],"openingIds":["a"]})))["position"], json!(0));
         // Drehen einer Öffnung allein: nichts.
         let req: TransformReq = serde_json::from_value(json!({"sel":sel,"op":"rotate","pts":[[0,0],[1,0],[0,1]],"mode":"move","count":1,"stamp":"s"})).unwrap();
         assert!(transform_ops(&r, &Project::default(), &req).is_empty());
@@ -1412,6 +1514,115 @@ mod tests {
         assert!(ops.iter().all(|o| o["collection"] != "openings"), "{ops:?}");
         // Vorschau: eine Lücke je Öffnung.
         let req: TransformReq = serde_json::from_value(json!({"sel":sel,"op":"move","pts":[[0,0],[0.5,0]],"mode":"move","count":1,"stamp":"s"})).unwrap();
+        assert!(!preview_pending(&r, &Project::default(), &req).shapes.buf.is_empty());
+    }
+
+    /// [144] Überlappung: gleitend hält die Öffnung 5 cm vor der Nachbaröffnung an (mit Hinweis), Kopie
+    /// rückt an die nächste freie Stelle; Bestand bleibt; mitbewegte Öffnungen zählen nicht.
+    #[test]
+    fn oeffnung_haelt_vor_der_nachbaroeffnung() {
+        let r = root(json!({
+            "walls":[{"id":"w","floorId":"eg","start":{"x":0,"y":0},"end":{"x":10,"y":0}}],
+            "openings":[
+                {"id":"d","hostWallId":"w","kind":"door","position":1,"width":1},
+                {"id":"f","hostWallId":"w","kind":"window","position":4,"width":1}
+            ]}));
+        let run = |pts: Value, mode: &str, ids: Value| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":[],"openingIds":ids},"op":"move","pts":pts,"mode":mode,"count":1,"stamp":"s"})).unwrap();
+            transform_result(&r, &Project::default(), &req)
+        };
+        let res = run(json!([[0, 0], [5, 0]]), "move", json!(["d"]));
+        assert_eq!(res.notice, Some(crate::opening_slide::NOTICE_OVERLAP));
+        assert_eq!(res.ops[0].to_json()["entity"]["position"], json!(2.95));
+        // Frei: kein Hinweis.
+        let res = run(json!([[0, 0], [1, 0]]), "move", json!(["d"]));
+        assert_eq!((res.notice, res.ops[0].to_json()["entity"]["position"].clone()), (None, json!(2)));
+        // Beide gewählt: gleiten zusammen, ohne Anschlag aneinander.
+        let res = run(json!([[0, 0], [2.5, 0]]), "move", json!(["d", "f"]));
+        assert_eq!(res.notice, None);
+        let pos: Vec<Value> = res.ops.iter().map(|o| o.to_json()["entity"]["position"].clone()).collect();
+        assert_eq!(pos, vec![json!(3.5), json!(6.5)]);
+        // Kopie um 0.5 überlappte das Original: rückt an die nächste freie Stelle (2.05).
+        let res = run(json!([[0, 0], [0.5, 0]]), "copy", json!(["d"]));
+        let items = res.ops[0].to_json()["items"].clone();
+        assert_eq!(items[0]["position"], json!(2.05));
+        assert_eq!(res.notice, Some(crate::opening_slide::NOTICE_OVERLAP));
+    }
+
+    /// [144] Bemassungs-Bezüge auf eine gleitende Öffnung (Leibung, gerade und Bogenwand) folgen über das
+    /// Nachführen im Dokument — beim Verschieben-Befehl, beim Griff-Zug und bei der Objekt-Info-Position.
+    #[test]
+    fn bemassung_folgt_der_gleitenden_oeffnung() {
+        use crate::document::Document;
+        let r = json!({
+            "walls":[{"id":"w","floorId":"eg","start":{"x":0,"y":0},"end":{"x":10,"y":0}},
+                     {"id":"b","floorId":"eg","start":{"x":0,"y":5},"end":{"x":4,"y":5},"bulge":1}],
+            "openings":[{"id":"d","hostWallId":"w","kind":"door","position":1,"width":1},
+                        {"id":"a","hostWallId":"b","kind":"window","position":1,"width":1}],
+            "drawings2d":[
+                {"id":"m","levelId":"eg","geom":{"shape":"dimension","pts":[{"x":0,"y":-1},{"x":1,"y":-1},{"x":2,"y":-1}],"offset":0,
+                 "refs":[{"id":"w","feature":"wall","t":0,"d":1},{"id":"d","feature":"opening","index":0,"d":1},{"id":"d","feature":"opening","index":1,"d":1}]}},
+                {"id":"k","levelId":"eg","geom":{"shape":"dimension","pts":[{"x":0,"y":5},{"x":1,"y":6}],"offset":0,
+                 "refs":[{"id":"a","feature":"opening","index":0},{"id":"a","feature":"opening","index":1}]}}
+            ]});
+        let mut doc = Document::from_json(&r.to_string()).unwrap();
+        let pts = |doc: &Document, id: &str| -> Vec<(f64, f64)> {
+            let d = doc.root()["drawings2d"].as_array().unwrap().iter().find(|d| d["id"] == id).unwrap().clone();
+            d["geom"]["pts"].as_array().unwrap().iter().map(|p| (p["x"].as_f64().unwrap(), p["y"].as_f64().unwrap())).collect()
+        };
+        let close = |a: (f64, f64), b: (f64, f64)| assert!((a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9, "{a:?} != {b:?}");
+        // Bogen-Leibungen: erst einmal nachführen (Bogenpunkte statt Sehne).
+        let arc = crate::opening_slide::Axis::of(&r["walls"][1]).unwrap();
+        doc.commit(crate::dim_assoc::sync_ops(&doc.lookup()), None, 0.0, false).unwrap();
+        close(pts(&doc, "k")[0], arc.point(1.0, 0.0));
+        close(pts(&doc, "k")[1], arc.point(2.0, 0.0));
+        // Verschieben-Befehl: Tür um 2 m → Kette folgt (Wandende bleibt).
+        let req = json!({"cmd":"transform","sel":{"wallIds":[],"drawingId":null,"openingIds":["d"]},"op":"move","pts":[[0,0],[2,0]],"mode":"move","count":1,"stamp":"s"});
+        let res = { let (p, lk) = doc.project_lookup().unwrap(); crate::commands::result(lk.root, p, &req.to_string()).unwrap() };
+        doc.commit(res.ops, None, 1.0, false).unwrap();
+        let q = pts(&doc, "m");
+        close(q[0], (0.0, -1.0));
+        close(q[1], (3.0, -1.0));
+        close(q[2], (4.0, -1.0));
+        // Griff-Zug und Objekt-Info-Position (grips.rs): gleicher Weg.
+        let grip = |doc: &mut Document, req: Value| {
+            let req: crate::grips::Request = serde_json::from_value(req).unwrap();
+            let res = crate::grips::run(&doc.lookup(), &req).unwrap();
+            doc.commit(res.ops, None, 2.0, false).unwrap();
+        };
+        grip(&mut doc, json!({"op":"openingSlide","id":"d","pt":[6.5,0.3]}));
+        close(pts(&doc, "m")[1], (6.0, -1.0));
+        grip(&mut doc, json!({"op":"openingPosition","id":"d","a":5}));
+        close(pts(&doc, "m")[2], (6.0, -1.0));
+        // Bogenwand: Fenster entlang des Bogens → Leibungen auf dem Bogen.
+        grip(&mut doc, json!({"op":"openingPosition","id":"a","a":2.5}));
+        close(pts(&doc, "k")[0], arc.point(2.5, 0.0));
+        close(pts(&doc, "k")[1], arc.point(3.5, 0.0));
+        // Rückgängig: Kette wieder bei der alten Lage.
+        doc.undo();
+        close(pts(&doc, "k")[0], arc.point(1.0, 0.0));
+    }
+
+    /// [144] Dach-/Deckenöffnung allein verschieben: `hostPoint` wandert, im Umriss des Wirts gehalten.
+    #[test]
+    fn dachoeffnung_allein_verschieben() {
+        let r = root(json!({
+            "roofs":[{"id":"rf","outline":[{"x":0,"y":0},{"x":6,"y":0},{"x":6,"y":4},{"x":0,"y":4}]}],
+            "openings":[{"id":"o","hostWallId":"","hostRoofId":"rf","hostPoint":{"x":1,"y":1},"width":0.8,"height":1.2}]}));
+        let run = |pts: Value, mode: &str| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":[],"openingIds":["o"]},"op":"move","pts":pts,"mode":mode,"count":1,"stamp":"s"})).unwrap();
+            transform_ops(&r, &Project::default(), &req).iter().map(|o| o.to_json()).collect::<Vec<_>>()
+        };
+        let ops = run(json!([[0, 0], [2, 1]]), "move");
+        assert_eq!(ops[0]["entity"]["hostPoint"], json!({"x":3,"y":2}));
+        // Ausserhalb: an den Rand, 5 cm nach innen.
+        let hp = run(json!([[0, 0], [20, 0]]), "move")[0]["entity"]["hostPoint"].clone();
+        assert!((hp["x"].as_f64().unwrap() - 5.95).abs() < 0.02 && (hp["y"].as_f64().unwrap() - 1.0).abs() < 0.05, "{hp}");
+        // Kopie: neue Öffnung im selben Dach.
+        let ops = run(json!([[0, 0], [2, 0]]), "copy");
+        assert_eq!((&ops[0]["items"][0]["hostRoofId"], &ops[0]["items"][0]["hostPoint"]), (&json!("rf"), &json!({"x":3,"y":1})));
+        // Vorschau zeigt sie.
+        let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":[],"openingIds":["o"]},"op":"move","pts":[[0,0],[1,0]],"mode":"move","count":1,"stamp":"s"})).unwrap();
         assert!(!preview_pending(&r, &Project::default(), &req).shapes.buf.is_empty());
     }
 

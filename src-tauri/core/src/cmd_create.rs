@@ -721,7 +721,9 @@ fn pick_wall<'a>(root: &'a Map<String, Value>, level: &str, p: V) -> Option<(&'a
 }
 
 /// Öffnung in eine Wand (`start`/`end` der Host-Wand beim Picken, `pos` = Abstand vom Wandanfang).
-fn opening_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+/// [144] Überlappt sie eine Öffnung derselben Wand, rückt sie an die nächste freie Stelle (Steg 5 cm,
+/// `opening_slide::place`); ist keine frei, entsteht keine.
+fn opening_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let (st, en) = (p_of(v, "start"), p_of(v, "end"));
     let len = match arc_of(st, en, opt_n(v, "bulge")) {
         Some(a) => a.length(),
@@ -729,6 +731,8 @@ fn opening_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     };
     let width = jsnum::max(0.1, jsnum::min(n_of(v, "width"), len));
     let position = jsnum::max(0.0, jsnum::min(n_of(v, "pos"), jsnum::max(0.0, len - width)));
+    let Some(placed) = crate::opening_slide::place(root, s_of(v, "wall"), len, width, None, position, &|_| false) else { return vec![] };
+    let position = if placed.clamped { placed.position } else { position };
     let door = s_of(v, "kind") == "door";
     // Erster Typ der Bibliothek (leere id = keiner, JS-Wahrheitswert).
     let first = if door { p.door_types.as_ref().and_then(|l| l.first()).map(|t| &t.id) } else { p.window_types.as_ref().and_then(|l| l.first()).map(|t| &t.id) };
@@ -982,7 +986,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "room" => room_ops(p, v, &ctx, ids),
         "wand" => wand_ops(p, v, &ctx, ids),
         "stair" => stair_ops(p, v, &ctx, ids),
-        "opening" => opening_ops(p, v, &ctx, ids),
+        "opening" => opening_ops(root, p, v, &ctx, ids),
         "roof" => roof_ops(p, v, &ctx, ids),
         "column" => column_ops(v, &ctx, ids),
         "extrude" => extrude_ops(root, v, &ctx, ids),
@@ -1269,6 +1273,17 @@ mod tests {
         let op = &items(&o, 0)[0];
         assert_eq!(op["position"], 4.8);
         assert_eq!(op["typeId"], "FT");
+        // [144] Neben eine bestehende Öffnung (2–3) gesetzt: rückt an die nächste freie Stelle; ohne Platz keine.
+        let mut r2 = r.clone();
+        r2.insert("openings".into(), json!([{"id": "a", "hostWallId": "w", "position": 2, "width": 1}]));
+        let place = |pos: f64, width: f64| {
+            let o = ops(&r2, &crate::model::lenient::typed_for_test(&r2), &req(json!({"cmd": "opening", "wall": "w", "start": [0, 0], "end": [6, 0], "kind": "window", "pos": pos, "width": width, "height": 1.2, "sill": 0.9}))).unwrap();
+            o.first().map(|_| items(&o, 0)[0]["position"].as_f64().unwrap())
+        };
+        assert_eq!(place(2.6, 1.0), Some(3.05));
+        assert_eq!(place(1.5, 1.0), Some(0.95));
+        assert_eq!(place(4.0, 1.0), Some(4.0));
+        assert_eq!(place(0.0, 3.0), None);
         let p = preview(&r, &crate::model::lenient::typed_for_test(&r), &json!({"cmd": "opening", "start": [0, 0], "end": [6, 0], "kind": "window", "width": 1.2, "pos": null}), &[2.0, 1.0]);
         assert_eq!(p.info[0], 2.0);
         assert_eq!(p.shapes.count, 2);

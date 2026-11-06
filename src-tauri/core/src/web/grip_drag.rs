@@ -89,15 +89,10 @@ pub fn grip_sheet_height(kind: u32, base: f64, top: f64, bottom: f64, y: f64, fr
 
 /// Mittelpunkt-Griff einer Öffnung auf der Wandachse `s → e`: `[x, y]`.
 #[wasm_bindgen]
-pub fn grip_opening_point(sx: f64, sy: f64, ex: f64, ey: f64, position: f64, width: f64) -> Vec<f64> {
-    let p = gd::opening_wall_grip((sx, sy), (ex, ey), position, width);
+#[allow(clippy::too_many_arguments)]
+pub fn grip_opening_point(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64, position: f64, width: f64) -> Vec<f64> {
+    let p = gd::opening_wall_grip((sx, sy), (ex, ey), bulge, position, width);
     vec![p.0, p.1]
-}
-
-/// Neue Öffnungs-`position` beim Ziehen des Mittelpunkt-Griffs nach `(px, py)`: `[position]`, `[]` = Wand ohne Länge.
-#[wasm_bindgen]
-pub fn grip_opening_slide(sx: f64, sy: f64, ex: f64, ey: f64, width: f64, px: f64, py: f64) -> Vec<f64> {
-    gd::opening_slide((sx, sy), (ex, ey), width, (px, py)).map(|p| vec![p]).unwrap_or_default()
 }
 
 /// Öffnung im Schnitt-Blatt (`grip_drag::opening_slide_sheet`): `[position, wirksames du]`, `[]` = keine Bewegung.

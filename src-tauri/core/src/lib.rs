@@ -120,6 +120,7 @@ pub mod surface_pattern;
 pub mod surface_pattern3d;
 pub mod standards;
 pub mod dim_assoc;
+pub mod opening_slide;
 
 #[cfg(feature = "web")]
 mod web;

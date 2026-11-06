@@ -96,15 +96,12 @@ export function sheetHeightDrag(
   return { top: f[0], bottom: f[1], patch };
 }
 
-/** Mittelpunkt-Griff einer Öffnung auf der Achse ihrer Wirtswand. */
-export function openingGripPoint(w: Pick<Wall, "start" | "end">, op: Pick<Opening, "position" | "width">): Vec2 {
-  return v(core().grip_opening_point(w.start.x, w.start.y, w.end.x, w.end.y, op.position, op.width));
-}
-
-/** Neue `position` beim Ziehen des Öffnungs-Griffs nach `pt` (auf die Wand geklemmt); null = Wand ohne Länge. */
-export function openingSlidePosition(w: Pick<Wall, "start" | "end">, op: Pick<Opening, "width">, pt: Vec2): number | null {
-  const f = core().grip_opening_slide(w.start.x, w.start.y, w.end.x, w.end.y, op.width, pt.x, pt.y);
-  return f.length ? f[0] : null;
+/**
+ * Mittelpunkt-Griff einer Öffnung auf der Achse ihrer Wirtswand (Bogenwand [T2]: auf dem Bogen, `position`
+ * = Bogenlänge). Den Zug selbst rechnet der Kern (`slideOpening`, Griff-Anfrage `openingSlide`).
+ */
+export function openingGripPoint(w: Pick<Wall, "start" | "end" | "bulge">, op: Pick<Opening, "position" | "width">): Vec2 {
+  return v(core().grip_opening_point(w.start.x, w.start.y, w.end.x, w.end.y, w.bulge ?? 0, op.position, op.width));
 }
 
 /**

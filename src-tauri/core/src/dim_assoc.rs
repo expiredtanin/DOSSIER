@@ -154,12 +154,13 @@ impl WallGeo {
     }
 }
 
-/// Leibungs-/Mittelpunkt einer Öffnung auf der Linie `layer` der Wirtswand (wie `autodim`).
+/// Leibungs-/Mittelpunkt einer Öffnung auf der Linie `layer` der Wirtswand (wie `autodim`). Bogenwand
+/// ([T2], [144]): `position` ist Bogenlänge auf der Achse, der Punkt liegt auf dem Versatzbogen.
 fn opening_point(lk: &Lookup, o: &Value, side: u32, layer: Option<u32>) -> Option<P> {
     let w = lk.find("walls", str_of(o, "hostWallId")?)?;
     let g = wall_geo(lk, w)?;
     let (a, b) = g.line(layer)?;
-    let axis = dist(g.a, g.b);
+    let axis = g.warc.as_ref().map_or_else(|| dist(g.a, g.b), |w| w.length());
     let (pos, width) = (num(o.get("position"))?, num(o.get("width"))?);
     let from = pos.min(axis).max(0.0);
     let to = (pos + width).min(axis).max(from);
@@ -169,6 +170,10 @@ fn opening_point(lk: &Lookup, o: &Value, side: u32, layer: Option<u32>) -> Optio
         2 => (from + to) / 2.0,
         _ => return None,
     };
+    if let Some(w) = &g.warc {
+        let q = w.point(s, g.offset(layer)?);
+        return Some((q.x, q.y));
+    }
     let u = unit(a, b)?;
     Some(add(a, u, s))
 }

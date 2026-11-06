@@ -372,6 +372,7 @@ export function useProjectActions(
   const updateWall = useStore((s) => s.updateWall);
   const setWallThickness = useStore((s) => s.setWallThickness);
   const updateOpening = useStore((s) => s.updateOpening);
+  const slideOpening = useStore((s) => s.slideOpening);
   const moveCeilingGrip = useStore((s) => s.moveCeilingGrip);
   const moveExcavationGrip = useStore((s) => s.moveExcavationGrip);
   const moveExcavationEdge = useStore((s) => s.moveExcavationEdge);
@@ -490,6 +491,7 @@ export function useProjectActions(
     updateWall,
     setWallThickness,
     updateOpening,
+    slideOpening,
     moveCeilingGrip,
     moveExcavationGrip,
     moveExcavationEdge,

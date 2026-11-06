@@ -157,11 +157,16 @@ describe("Transformations-Befehle", () => {
     expect(engine.isActive()).toBe(false);
     expect(door().position).toBeCloseTo(1.3, 9);
     expect(door().hostWallId).toBe("W1");
-    // Relative Koordinate quer zur Wand: nur der Anteil längs zählt; am Wandende geklemmt.
+    // Relative Koordinate quer zur Wand: nur der Anteil längs zählt; 5 cm vor dem Fenster O1 (3.0–4.0)
+    // angehalten ([144] Überlappung), zurück am Wandanfang geklemmt.
     engine.start("move");
     engine.pick({ x: 0, y: 0 });
     engine.submitText("@9,0.05");
-    expect(door().position).toBeCloseTo(5 - 0.9, 9);
+    expect(door().position).toBeCloseTo(3 - 0.05 - 0.9, 9);
+    engine.start("move");
+    engine.pick({ x: 0, y: 0 });
+    engine.submitText("@-9,0");
+    expect(door().position).toBe(0);
     for (const op of ["rotate", "mirror"]) {
       expect(engine.start(op)).toBe(false);
     }

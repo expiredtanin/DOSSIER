@@ -2837,7 +2837,7 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   vorher 16/18 Frames hinterher, nachher 0. Nur im Linux-Container (Chromium) geprüft, NICHT in der Tauri-App/Metal:
   ob Metal-Present und Webview-Commit dort im selben vsync landen, muss der Mac zeigen. Offen, falls es dort noch
   nachläuft: Raumstempel nativ zeichnen (vtext kann bisher nur einzeilig/linksbündig, eine Schrift, kein Fett).
-- ◐ **[144] Öffnungen verschieben.** (6.11., Maintainer: „Türen lassen sich nicht nach Mass oder mit Verschieben
+- ✅ **[144] Öffnungen verschieben.** (6.11., Maintainer: „Türen lassen sich nicht nach Mass oder mit Verschieben
   bewegen.") Befund (Browser-Build, Musterhaus): Öffnungen waren keine Transformations-Elemente — Verschieben/m mit
   nur einer Tür gewählt meldete „Erst Objekte wählen"; Objekt-Info X/Y (Bezugspunkt) tat nichts (`singleTransformSel`
   ohne Öffnung); Griff-Zug: Tab öffnete kein Längenfeld (Einzelgriff ohne Nachbar → kein Anker), die getippte Zahl
@@ -2851,9 +2851,31 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Wand ab Greifpunkt. Tests: Rust `oeffnung_gleitet_entlang_der_wand`, `wand_mit_typ_volumen_und_fuge` (wallLength);
   vitest `transform.test.ts` (Engine, getippte Distanz/`@x,y`), `transform.openings.test.ts` (alle Öffnungen
   Musterhaus komplex); e2e `openingMove.spec.ts` (Befehl getippt + Klick, Undo, Objekt-Info, Griff mit Länge).
-  Offen: Bogenwände (Öffnung bleibt stehen), keine Überlappungsprüfung zwischen Öffnungen, Dach-/Deckenöffnungen
-  allein nicht über Verschieben (nur Griffe), Bemassungs-Bezüge auf die gleitende Öffnung werden nicht nachgeführt;
-  nur Linux/Chromium geprüft, nicht in der Tauri-App. · S
+  **Nachtrag 6.11.:** Gemeinsamer Kern-Weg `opening_slide.rs` für Befehl, Griff-Zug (Griff-Anfrage `openingSlide`)
+  und Objekt-Info-Position (`openingPosition`; Store `slideOpening`, ersetzt `grip_opening_slide`/`openingSlidePosition`):
+  (1) Bemassung: Bezüge auf Leibungen/Mitte (auch Autodim-Ketten [81]) folgen über das Nachführen im Dokument
+  (`dim_assoc::sync_ops`) in derselben Undo-Stufe; `opening_point` rechnet in Bogenwänden jetzt auf dem Bogen statt
+  auf der Sehne. (2) Bogenwände [T2]: `position` = Bogenlänge; Verschieben nimmt den Lotfuss des Ziels auf dem Bogen,
+  Griff-Zug ebenso, Griffpunkt auf dem Bogen (`grip_opening_point` mit Bulge), geklemmt an den Bogenenden;
+  Wandwechsel auch in/aus Bogenwände; Vorschau als Ringsektor; Objekt-Info `wallLength` = Bogenlänge.
+  (3) Überlappung: gleitend hält eine Öffnung `MIN_WEB` = 5 cm vor der Nachbaröffnung derselben Wand an
+  (Hinweis „Öffnung hält vor der Nachbaröffnung an"), mitbewegte Öffnungen zählen nicht, schon überlappender
+  Bestand bleibt unverändert und blockiert nicht; Wandwechsel, Kopie und neu gesetzte Öffnungen (`cmd_create`)
+  rücken an die nächste freie Stelle, ohne Platz keine Änderung (Hinweis „kein Platz" beim Wandwechsel). Hinweise
+  aus Befehlen: `commands::result` → `doc_cmd_commit` → `commitCmd.notice`; im Store höchstens alle 2 s derselbe.
+  (4) Dach-/Deckenöffnungen allein: Verschieben/Kopie/Reihe verschieben `hostPoint`, im Umriss des Wirts gehalten
+  (`clamp_inside`, wie der Griff), Vorschau-Rechteck. Tests: Rust `opening_slide` (Anschlag, Bestand, freie Stelle,
+  Bogenlänge), `oeffnung_haelt_vor_der_nachbaroeffnung`, `bemassung_folgt_der_gleitenden_oeffnung` (Befehl, Griff,
+  Objekt-Info, Bogen, Undo), `dachoeffnung_allein_verschieben`, Bogen-Fall in `oeffnung_gleitet_entlang_der_wand`,
+  `oeffnung_pick_und_vorschau` (Setzen), `selection_info` (Bogenlänge); vitest `transform.openings.test.ts` (Store:
+  Bemassung folgt, Erker f5/f6, Dachöffnung), `transform.test.ts` (Anschlag an O1); e2e `openingMove.spec.ts`
+  (Musterhaus: Anschlag an O1 mit Hinweis; Musterhaus komplex: Kette `mass-fenster-eg` folgt Befehl und Objekt-Info,
+  Erker: Abstand ab Wandende aus Bogenlänge, Anschlag f5 vor f6, Verschieben auf dem Bogen). Klick-Zug im alten
+  e2e auf 0.5 m (0.25 m fing seit [147] der Fang am Basispunkt).
+  Offen: Öffnung im Schnitt-Blatt ziehen rechnet weiter auf der Sehne (Bogenwand) — der Commit klemmt aber über den
+  Kern; Tab-Länge beim Griff an Bogenwänden entlang der Sehne über der Öffnung; Vorschau beim Setzen zeigt den
+  Cursor-Ort, nicht die verrückte Lage; `clampInside` steht noch in TS (Griff) und Rust (Befehl); nur Linux/Chromium
+  geprüft, nicht in der Tauri-App. · S
 - ✅ **[147] Plan öffnet zu stark gezoomt.** (6.11., zwei e2e-Läufe: nach „Neues Projekt" und beim Öffnen von Musterhaus
   stand die Statusleiste auf „1:9 · 1111 %".) Ursachen: (1) leeres Projekt liefert den Platzhalter-Umriss 0,0–1,1; die
   eingepasste Ansicht war damit ~1 m breit. (2) Die Ansicht wird nur bei Geschoss-Wechsel (`resetKey = level.id`) neu
