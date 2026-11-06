@@ -119,10 +119,17 @@ export interface IfcElementsSummary {
   ceilings: number;
   columns: number;
   rooms: number;
+  /** Dächer (Flach/Pult/Sattel/Walm) und gerade Treppen ([B4]). */
+  roofs: number;
+  stairs: number;
   /** Neu angelegte Geschosse. */
   floors: number;
   wallTypes: number;
   ceilingTypes: number;
+  roofTypes: number;
+  /** Neue Tür-/Fenstertypen nach dem Typnamen der Datei (IfcDoorType/IfcWindowType). */
+  doorTypes: number;
+  windowTypes: number;
   components: number;
   /** Bauteile als Kontext-Mesh. */
   meshes: number;
@@ -130,6 +137,8 @@ export interface IfcElementsSummary {
   classified: number;
   /** Davon Kandidaten, die nicht sicher abbildbar waren. */
   kept: number;
+  /** Je IFC-Klasse die Gründe (Kennwort → Anzahl), weshalb Kandidaten Mesh blieben; Text `ifc.reason.<kennwort>`. */
+  keptReasons: Record<string, Record<string, number>>;
 }
 
 /** IFC-Import als Ops im Kern ([K4] S4): Antwort von `ProjectDocument.importIfc`. */
@@ -171,6 +180,8 @@ export function formatIfcElementsSummary(
       ceilings: s.ceilings,
       columns: s.columns,
       rooms: s.rooms,
+      roofs: s.roofs ?? 0,
+      stairs: s.stairs ?? 0,
       floors: s.floors,
       meshes: s.meshes,
     }),

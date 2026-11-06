@@ -24,6 +24,7 @@ mod web_pointcloud;
 pub mod ifc_step;
 pub mod ifc_import;
 pub mod ifc_semantic;
+mod ifc_shapes;
 pub mod ifc_export;
 pub mod ifc_openings;
 pub mod mesh_export;

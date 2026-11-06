@@ -3359,6 +3359,31 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   SIA-416-Kategorie des Raums, wenn er keine eigene `CH_Raum`-Eigenschaft hat: `CH_Zone.SIA416`, sonst der
   Zonenname (HNF, NNF, VF, FF, KGF/KF, AGF; kein Raten bei anderen Namen). Rundreise Export → Import
   geprüft. Offen: Klassifikation als Feld am Bauteil, IfcGrid (Modell ohne Raster).
+  (6.11., ArchiCAD-Exporte) Testdaten (nur lokal, nicht im Repo): KIT-Beispiele aus ArchiCAD 20, IFC4 („for unrestricted
+  use", Quelle IAI/KIT nennen: AC20-FZK-Haus, AC20-Institute-Var-2, AC-20-Smiley-West-10-Bldg) und Schependomlaan
+  (ArchiCAD 18, IFC2x3, TU Eindhoven, Datenfreigabe nur für Forschung/Lehre). Frei lizenzierte Vectorworks-Exporte
+  nicht gefunden. Neu in Rust (`fileio/src/ifc_shapes.rs`, `ifc_semantic.rs`): Dach aus IfcRoof (Platten) bzw.
+  IfcSlab ROOF (je Geschoss nach Berührung gruppiert) → Dossier-Dach Flach/Pult/Sattel/Walm (achsparalleles Rechteck,
+  gleiche Neigung, jede Dachflächen-Ecke ±3 cm auf der Dossier-Fläche, Dicke senkrecht, Traufhöhe, Dachtyp nur mit
+  Material); Giebel-/Pultwände = Wand bis zum höchsten Punkt, wenn ein erkanntes Dach die Krone genau so kappt wie
+  Dossier (Volumenvergleich, Dachanschluss automatisch); gerade Treppe (IfcStair ohne Geländer/IfcStairFlight:
+  Trittflächen gleichmässig, Belag über Rohbau zusammengefasst) → Antritt, Richtung, Laufbreite, Steigung, Auftritt;
+  Bogenwand (Ringausschnitt ohne Öffnungen) → `bulge`; runde Öffnung → `shape: "rund"`; Türen/Fenster ohne
+  IfcRelFillsElement → Wirt über die Lage (Loch schon im Wandkörper: fehlendes Volumen = Kästen der Füllungen);
+  IfcSpace nur mit „FootPrint"/„Box" (ArchiCAD 2x3) → Raum; Dreiecksnetze mit T-Stössen (Kanten an Punkten geteilt);
+  IfcMapConversion (Bericht `mapConversion`) → Rückschub auf den LV95-Projektnullpunkt (ungedreht, Massstab 1).
+  Kern (`import_ifc.rs`): Dächer, Treppen, `bulge`, `shape`, Tür-/Fenstertyp nach Typnamen der Datei (gleichnamig
+  wiederverwendet, sonst Kopie des passenden; „Tür …"/„Fenster …" des eigenen Exports zählen nicht), Gründe je Klasse
+  (`keptReasons`). Dialog: Bericht nach dem Import (`IfcImportReportDialog`: erkannt je Bauteilart, als Mesh geblieben
+  mit Grund, `ifc.reason.*`). Quote (Bauteile vorher → nachher): FZK-Haus Wände 9 → 13/13, Öffnungen 14 → 16/16,
+  Dach 0 → 1 (2 Platten), Räume 5/7 (Dachraum kein Prisma), Wendeltreppe Mesh; Institute Wände 111/121 (8 unter dem
+  Tonnendach, 2 nicht rechteckig), Dächer 6, 15 Tonnendach-Platten Mesh, Podesttreppen 4 Mesh; Smiley West Wände
+  270/281 (11 Ständerwände), Dächer 11 (10 Pult + 1 Flach), 30 Podesttreppen Mesh; Schependomlaan Wände 770 → 795,
+  Öffnungen 60 → 93, Räume 6 → 100, Dächer 19, Treppen 6/9. Rundreise Demo-Haus jetzt auch Dach und Treppe als
+  Bauteile. Bilder (lokal): FZK-Haus Grundriss EG/DG und Schnitt, vorher Meshes/nachher Bauteile. Offen: Pultdach
+  fallend nach +x/+y (Dossier-Pult steigt nur dorthin), gedrehte/nicht rechteckige Dächer, Tonnen-/Mansarddächer,
+  Podest-, L- und Wendeltreppen, Bogenwände mit Öffnungen, Ständerwände (Rahmen + Beplankung), gedrehte Georeferenz,
+  Träger/Geländer; nur Linux-Container (CLI-SVG + Chromium), nicht in der Tauri-App, Dialog nur per tsc.
 - ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 28.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).
   - ✅ Materialschichten: Wand-/Decken-/Dachtypen als IfcWallType/IfcSlabType/IfcRoofType mit

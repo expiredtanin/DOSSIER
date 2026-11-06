@@ -48,8 +48,8 @@ import { RecoverAutosaveDialog } from "./ui/RecoverAutosaveDialog";
 import { Toast } from "./ui/Toast";
 import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./native/projectFile";
 import { readStepFlat } from "./engine/truckSolid";
-import { formatIfcElementsSummary, formatIfcReport, readIfcFlat } from "./io/ifcImport";
-import { IfcImportDialog, type IfcImportMode } from "./ui/IfcImportDialog";
+import { formatIfcElementsSummary, formatIfcReport, readIfcFlat, type IfcElementsSummary } from "./io/ifcImport";
+import { IfcImportDialog, IfcImportReportDialog, type IfcImportMode } from "./ui/IfcImportDialog";
 import { MeshImportHost } from "./ui/MeshImportDialog";
 import { openMeshFileDialog, requestMeshImport, splitMeshFiles } from "./state/meshImportStore";
 import { formatMeshReport, isMeshFile, type MeshPlacement, type MeshRead } from "./io/meshImport";
@@ -1050,6 +1050,8 @@ export default function App() {
   // IFC-Import: erst die Wahl Mesh/Bauteile (`IfcImportDialog`), dann liest das Format-Modul (Web-Worker) und der
   // Kern übernimmt [B3] Kontext-Meshes oder [B4] echte Bauteile als EINEN Undo-Schritt ([K4] S4, `importIfc`).
   const [pendingIfc, setPendingIfc] = useState<File | null>(null);
+  // Bericht nach dem Bauteil-Import ([B4]): erkannt je Bauteilart, als Mesh geblieben mit Grund.
+  const [ifcReport, setIfcReport] = useState<{ fileName: string; summary: IfcElementsSummary } | null>(null);
   const importIfcFile = (f: File) => setPendingIfc(f);
   const runIfcImport = (f: File, mode: IfcImportMode) => {
     const elements = mode === "elements";
@@ -1066,6 +1068,7 @@ export default function App() {
           const s = r.summary;
           const empty = s.walls + s.ceilings + s.columns + s.rooms + s.meshes === 0;
           notify(formatIfcElementsSummary(s, report, t), empty || report.truncated ? "warning" : "info");
+          setIfcReport({ fileName: f.name, summary: s });
           return;
         }
         fitToContextObjects(addedItems(r.ops, "context") as ContextObject[]);
@@ -2802,6 +2805,10 @@ export default function App() {
             runIfcImport(f, mode);
           }}
         />
+      )}
+
+      {ifcReport && (
+        <IfcImportReportDialog fileName={ifcReport.fileName} summary={ifcReport.summary} onClose={() => setIfcReport(null)} />
       )}
 
       {pendingDiscard && (

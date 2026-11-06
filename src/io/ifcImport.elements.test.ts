@@ -33,9 +33,25 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
     const { project: p, summary, report } = await importInto(emptyProject, sampleProject);
     expect(report.parseErrors).toBe(0);
     expect(summary).toMatchObject({ walls: 9, openings: 3, ceilings: 1, columns: 0, rooms: 1, floors: 0, wallTypes: 0, ceilingTypes: 0, components: 0, kept: 0 });
-    // Dach und Treppenlauf (die IfcStair selbst hat keine Darstellung) bleiben Kontext-Mesh.
-    expect((p.context ?? []).map((c) => (c as { layer?: string }).layer).sort()).toEqual(["IfcRoof", "IfcStairFlight"]);
+    // (6.11.) Dach und Treppe kommen als Bauteile zurück, kein Kontext-Mesh mehr.
+    expect(summary).toMatchObject({ roofs: 1, stairs: 1, roofTypes: 0, doorTypes: 0, windowTypes: 0 });
+    expect(p.context ?? []).toEqual([]);
     expect(validateProject(p)).toEqual([]);
+    // Satteldach: Umriss = Traufe samt Überstand (0.4), Überstand 0, Traufhöhe = OK OG (5.2), 30°, First x.
+    const roof = p.roofs![0];
+    expect([roof.shape, roof.ridgeAxis, roof.overhang]).toEqual(["sattel", "x", 0]);
+    expect(roof.pitchDeg).toBeCloseTo(30, 4);
+    expect(roof.baseElevation!).toBeCloseTo(5.2, 6);
+    expect(roof.thickness).toBeCloseTo(0.2, 6);
+    for (const q of [{ x: -0.4, y: -0.4 }, { x: 5.4, y: 4.4 }]) expect(roof.outline.some((g) => near(g, q, 1e-6)), JSON.stringify(roof.outline)).toBe(true);
+    // Gerade Treppe: gleicher Antritt, Richtung, Breite, Stufen, Steighöhe und Lauflänge.
+    const st0 = sampleProject.stairs![0];
+    const st = p.stairs![0];
+    expect([st.shape, st.floorId, st.stepCount]).toEqual(["straight", st0.floorId, st0.stepCount]);
+    expect(near(st.start, st0.start, 1e-6) && near(st.dir, st0.dir, 1e-9), JSON.stringify(st)).toBe(true);
+    expect(st.width).toBeCloseTo(st0.width, 6);
+    expect(st.runLength).toBeCloseTo(st0.runLength, 6);
+    expect(st.totalRise!).toBeCloseTo(st0.totalRise!, 5);
 
     const byOrig = new Map<string, Wall>();
     for (const w of sampleProject.walls) {
