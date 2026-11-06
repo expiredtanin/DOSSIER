@@ -2093,7 +2093,9 @@ fn push_roof_slab_with_holes(positions: &mut Vec<f64>, indices: &mut Vec<u32>, t
         let at = |q: V3, d: f64| [q[0] - h.n[0] * d, q[1] - h.n[1] * d, q[2] - h.n[2] * d];
         let center = [0, 1, 2].map(|k| h.corners.iter().map(|c| c[k]).sum::<f64>() / 4.0);
         for k in 0..4 {
-            let (a, b) = (h.corners[k], h.corners[(k + 1) % 4]);
+            // Laibung nur, soweit die Kante über DIESER Fläche liegt ([148]: ein Loch über mehreren
+            // koplanaren Teilflächen eines Flach-/Pultdachs bekommt jede Laibung genau einmal).
+            let Some((a, b)) = clip_segment_xy(h.corners[k], h.corners[(k + 1) % 4], top) else { continue };
             let quad = [at(a, d0), at(b, d0), at(b, d1), at(a, d1)];
             let nrm = cross3(sub3(quad[1], quad[0]), sub3(quad[3], quad[0]));
             let mid = [0, 1, 2].map(|c| (a[c] + b[c]) / 2.0);
@@ -2111,12 +2113,72 @@ fn push_roof_slab_with_holes(positions: &mut Vec<f64>, indices: &mut Vec<u32>, t
     }
 }
 
-/// Dachfenster-Löcher je Dachfläche eines Dachs (Index in `Project::roofs`).
-pub(crate) fn roof_holes_by_plane(p: &Project, roof_index: usize, planes: usize) -> Vec<Vec<RoofHoleRect>> {
-    let mut out: Vec<Vec<RoofHoleRect>> = (0..planes).map(|_| Vec::new()).collect();
+/// Strecke a→b (auf der Dachebene) auf die konvexe Fläche `poly` beschnitten (Aufsicht); `None`, wenn
+/// nichts (Länge > 1e-9) übrig bleibt.
+fn clip_segment_xy(a: V3, b: V3, poly: &[V3]) -> Option<(V3, V3)> {
+    let n = poly.len();
+    let area: f64 = (0..n).map(|i| poly[i][0] * poly[(i + 1) % n][1] - poly[(i + 1) % n][0] * poly[i][1]).sum();
+    let sign = if area < 0.0 { -1.0 } else { 1.0 };
+    let (mut t0, mut t1) = (0.0f64, 1.0f64);
+    for i in 0..n {
+        let (p, q) = (poly[i], poly[(i + 1) % n]);
+        // Abstand links der Kante p→q (innen bei CCW), linear in t.
+        let side = |r: V3| sign * ((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+        let (fa, fb) = (side(a), side(b));
+        let tol = 1e-9 * (q[0] - p[0]).hypot(q[1] - p[1]).max(1.0);
+        if fa < -tol && fb < -tol {
+            return None;
+        }
+        if fa < -tol || fb < -tol {
+            let t = fa / (fa - fb);
+            if fa < fb {
+                t0 = t0.max(t);
+            } else {
+                t1 = t1.min(t);
+            }
+        }
+    }
+    let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+    if (t1 - t0) * len <= 1e-9 {
+        return None;
+    }
+    let lerp = |t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+    Some((if t0 <= 0.0 { a } else { lerp(t0) }, if t1 >= 1.0 { b } else { lerp(t1) }))
+}
+
+/// Ob sich zwei konvexe Polygone in der Aufsicht mit Fläche überdecken (Trennachsen).
+fn convex_overlap_xy(a: &[V3], b: &[V3]) -> bool {
+    let separated = |p: &[V3], q: &[V3]| {
+        (0..p.len()).any(|i| {
+            let (u, v) = (p[i], p[(i + 1) % p.len()]);
+            let ax = [-(v[1] - u[1]), v[0] - u[0]];
+            let proj = |r: &V3| ax[0] * r[0] + ax[1] * r[1];
+            let (pmin, pmax) = p.iter().map(proj).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(x), hi.max(x)));
+            let (qmin, qmax) = q.iter().map(proj).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(x), hi.max(x)));
+            let tol = 1e-9 * ax[0].hypot(ax[1]).max(1.0);
+            pmax <= qmin + tol || qmax <= pmin + tol
+        })
+    };
+    a.len() >= 3 && b.len() >= 3 && !separated(a, b) && !separated(b, a)
+}
+
+/// Dachfenster-Löcher je Dachfläche eines Dachs (Index in `Project::roofs`). Ein Loch gehört zu seiner
+/// Wirtsfläche und zu jeder koplanaren Nachbarfläche, die es überdeckt ([148]: Flach-/Pultdach als
+/// konvexe Teilflächen einer Ebene).
+pub(crate) fn roof_holes_by_plane(p: &Project, roof_index: usize, planes: &[Vec<V3>]) -> Vec<Vec<RoofHoleRect>> {
+    let mut out: Vec<Vec<RoofHoleRect>> = (0..planes.len()).map(|_| Vec::new()).collect();
     for (o, f) in crate::opening_shape::roof_openings(p, roof_index) {
-        if let Some(list) = f.plane.and_then(|i| out.get_mut(i)) {
-            list.push(RoofHoleRect { corners: crate::opening_shape::host_rect_plan(&f, o.width, o.height), n: f.n });
+        let Some(host) = f.plane.filter(|&i| i < planes.len()) else { continue };
+        let corners = crate::opening_shape::host_rect_plan(&f, o.width, o.height);
+        let (hn, h0) = (plane_normal_up(&planes[host]), planes[host][0]);
+        for (i, pl) in planes.iter().enumerate() {
+            let coplanar = || {
+                let n = plane_normal_up(pl);
+                pl.len() >= 3 && dot3(n, hn) > 1.0 - 1e-9 && dot3(hn, sub3(pl[0], h0)).abs() < 1e-6
+            };
+            if i == host || (coplanar() && convex_overlap_xy(pl, &corners)) {
+                out[i].push(RoofHoleRect { corners, n: f.n });
+            }
         }
     }
     out
@@ -2159,7 +2221,7 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
         let eaves_z = p.roof_base_elevation(roof);
         let g = crate::roof::roof_geometry(&roof.params(), eaves_z);
         let mitre = Mitre::new(&g.planes);
-        let holes = roof_holes_by_plane(p, ri, g.planes.len());
+        let holes = roof_holes_by_plane(p, ri, &g.planes);
         let mut offset_above = 0.0;
         for layer in p.roof_layers(roof) {
             let t = layer.thickness.max(0.0);
@@ -2198,7 +2260,7 @@ pub fn emit_roof_cut_layers(p: &Project) -> Result<Vec<RRoofLayer>, String> {
         let eaves_z = p.roof_base_elevation(roof);
         let g = crate::roof::roof_geometry(&roof.params(), eaves_z);
         let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
-        let holes = roof_holes_by_plane(p, ri, g.planes.len());
+        let holes = roof_holes_by_plane(p, ri, &g.planes);
         let mut offset_above = 0.0;
         for layer in p.roof_layers(roof) {
             let t = layer.thickness.max(0.0);
@@ -3099,6 +3161,49 @@ mod tests {
         assert!(parts >= 9, "Rahmen, Glas, Eindeckrahmen: {parts}");
         let layers = emit_roof_cut_layers(&p).unwrap().len();
         assert!(layers > emit_roof_cut_layers(&sample()).unwrap().len());
+    }
+
+    /// Flachdach auf L-Umriss ([148]): Körper = L × Dachaufbau (nicht Bounding-Box), jede Schicht dicht;
+    /// ein Dachfenster genau über der Fuge zweier Teilflächen schneidet beide, Laibung nur einmal.
+    #[test]
+    fn flachdach_l_volumen_und_dachfenster_ueber_der_fuge() {
+        let mut p = sample();
+        let l = [(0.0, 0.0), (11.0, 0.0), (11.0, 4.0), (8.0, 4.0), (8.0, 6.0), (0.0, 6.0)];
+        {
+            let r = &mut p.roofs.as_mut().unwrap()[0];
+            r.outline = l.iter().map(|&(x, y)| Vec2 { x, y }).collect();
+            r.shape = crate::model::RoofShape::Flach;
+            r.pitch_deg = 0.0;
+            r.overhang = 0.0;
+            r.overhang_gable = None;
+        }
+        let t: f64 = p.roof_layers(&p.roofs.as_ref().unwrap()[0]).iter().map(|l| l.thickness).sum();
+        let vol = |ms: &[RMesh]| ms.iter().map(|m| crate::export_flat::mesh_volume(&m.positions, &m.indices)).sum::<f64>();
+        let before = emit_roofs(&p, None).unwrap();
+        assert!((vol(&before) - 60.0 * t).abs() < 1e-6, "L-Fläche × Dicke: {} statt {}", vol(&before), 60.0 * t);
+        for m in &before {
+            assert!(crate::wall_mesh_cut::is_watertight(&m.positions, &m.indices, 1e-6), "Schicht dicht");
+            assert!(m.positions.chunks_exact(3).all(|c| !(c[0] > 8.0 + 1e-9 && c[1] > 4.0 + 1e-9)), "nichts über der Aussparung");
+        }
+        // Fuge = gemeinsame Kante zweier Teilflächen; Dachfenster mitten darauf.
+        let g = crate::roof::roof_geometry(&p.roofs.as_ref().unwrap()[0].params(), 0.0);
+        assert!(g.planes.len() >= 2);
+        let (a, b) = (0..g.planes.len())
+            .flat_map(|i| (0..g.planes[i].len()).map(move |k| (i, k)))
+            .find_map(|(i, k)| {
+                let pl = &g.planes[i];
+                let (u, v) = (pl[k], pl[(k + 1) % pl.len()]);
+                g.planes.iter().enumerate().any(|(j, q)| j != i && q.contains(&u) && q.contains(&v)).then_some((u, v))
+            })
+            .expect("Fuge");
+        let mid = Vec2 { x: (a[0] + b[0]) / 2.0, y: (a[1] + b[1]) / 2.0 };
+        p.openings.as_mut().unwrap().push(Opening { id: "DF".into(), kind: ElementKind::Window, width: 0.6, height: 0.6, host_roof_id: Some("RF1".into()), host_point: Some(mid), ..Default::default() });
+        let after = emit_roofs(&p, None).unwrap();
+        for m in &after {
+            assert!(crate::wall_mesh_cut::is_watertight(&m.positions, &m.indices, 1e-6), "Schicht mit Loch über der Fuge dicht");
+        }
+        let removed = vol(&before) - vol(&after);
+        assert!((removed - 0.36 * t).abs() < 1e-6, "Loch = Fläche × Dicke: {removed}");
     }
 
     /// [103] Deckenöffnung: Aussparung im Slab.

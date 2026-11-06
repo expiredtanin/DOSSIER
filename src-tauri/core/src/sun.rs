@@ -393,6 +393,7 @@ mod tests {
     use super::*;
     use crate::flat_read::signed_area;
 
+
     /// Millisekunden seit 1970 (UTC) für Datum/Uhrzeit.
     fn utc(y: i64, mo: i64, d: i64, h: i64, mi: i64) -> f64 {
         // Tage seit 1970-01-01 (proleptischer Gregorianischer Kalender).
@@ -1008,6 +1009,19 @@ mod terrain_tests {
     use crate::flat_read::signed_area;
     use crate::terrain::Tin;
 
+    fn in_ring(x: f64, y: f64, r: &[[f64; 2]]) -> bool {
+        let mut inside = false;
+        let mut j = r.len().wrapping_sub(1);
+        for i in 0..r.len() {
+            let (a, b) = (r[i], r[j]);
+            if (a[1] > y) != (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0] {
+                inside = !inside;
+            }
+            j = i;
+        }
+        inside
+    }
+
     /// Rasternetz über [x0, x0 + (n−1)·step]² mit Höhe `f(x, y)`.
     fn grid_tin(n: usize, step: f64, x0: f64, f: impl Fn(f64, f64) -> f64) -> Tin {
         let (mut pos, mut idx) = (vec![], vec![]);
@@ -1256,6 +1270,24 @@ mod terrain_tests {
         let p = project_json(serde_json::json!({ "drawingLevels": levels(), "ceilings": [slab("t", "eg", rect(0.0, 2.0, f64::MAX, 4.0))] }));
         let _ = shadow_polygons_plan(&p, SunPosition { azimuth: 180.0, elevation: 45.0 }, f64::NAN, true);
         assert!(shadow_polygons_plan(&p, SunPosition { azimuth: 180.0, elevation: -5.0 }, 4.0, true).is_empty());
+    }
+
+    /// [148] Flachdach auf L-Umriss wirft einen L-förmigen Schatten (nicht Bounding-Box, nicht konvexe
+    /// Hülle): OK 3 m, Sonne 45° aus Süden ⇒ L um 3 m nach Norden verschoben, 60 m².
+    #[test]
+    fn flachdach_l_schatten() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let l = serde_json::json!([{"x": 0, "y": 0}, {"x": 11, "y": 0}, {"x": 11, "y": 4}, {"x": 8, "y": 4}, {"x": 8, "y": 6}, {"x": 0, "y": 6}]);
+        let roof = serde_json::json!([{"id": "r", "type": "roof", "floorId": "eg", "categoryCode": "35", "outline": l, "shape": "flach", "pitchDeg": 0, "overhang": 0, "ridgeAxis": "x", "baseElevation": 3.0, "thickness": 0.3}]);
+        let p = project_json(serde_json::json!({ "roofs": roof }));
+        let s = shadow_polygons_project(&p, sun, None);
+        let a: f64 = s.iter().map(|q| signed_area(&q[0]).abs() - q[1..].iter().map(|h| signed_area(h).abs()).sum::<f64>()).sum();
+        assert!((a - 60.0).abs() < 0.05, "{a}");
+        let b = bbox(&s);
+        assert!((b[1] - 3.0).abs() < 1e-6 && (b[3] - 9.0).abs() < 1e-6, "{b:?}");
+        // Aussparung (10, 8) bleibt hell.
+        let hit = s.iter().any(|q| in_ring(10.0, 8.0, &q[0]));
+        assert!(!hit, "Schatten in der Aussparung");
     }
 
     /// Bäume (Kreis auf der Ebene „Bäume", Höhe aus `sunStudy.treeHeight`) und Stützen werfen Schatten.
