@@ -16,6 +16,7 @@ import type { DisplayMode } from "../panels/types";
 import type { ViewTemplateHandlers, ViewTemplateTarget } from "../ui/resourceManager/ViewTemplatesTab";
 import type { PlanViewHandle } from "../views/plan/PlanView";
 import {
+  addRuleBlockOps,
   addTemplateOps,
   applyToLevelOps,
   applyToSnapshotOps,
@@ -120,5 +121,7 @@ export function useViewTemplateHandlers(d: Deps): ViewTemplateHandlers {
     },
     onDeleteViewTemplate: (id) => applyChange((p) => deleteTemplateOps(p, id)),
     onApplyViewTemplate: onApply,
+    // [33] Override-Baustein (z. B. „Deckenaufbau weiss“) übernehmen: ein Undo-Schritt.
+    onAddRuleBlock: (id, rule) => applyChange((p) => addRuleBlockOps(p, id, rule)),
   };
 }

@@ -1578,6 +1578,11 @@ export type Layer = {
   jointLineStyleId?: string;
   /** Strichstärke der Schichtfuge in Papier-mm ([110]); fehlt sie, gilt die Standard-Fuge. */
   jointWeightMm?: number;
+  /**
+   * [33] Funktion der Schicht im Aufbau (tragend, Dämmung, Unterlagsboden …) für Grafik-Overrides auf
+   * Schichten. Fehlt sie, leitet der Kern sie aus dem Baustoff ab (`plan::overrides::layer_function`).
+   */
+  function?: LayerFunction;
 };
 
 /**
@@ -1607,6 +1612,29 @@ export type LayerCategory = {
   /** Unterkategorien (Baum). */
   children?: Array<LayerCategory>;
 };
+
+/**
+ * [33] Funktion einer Bauteilschicht (für Override-Regeln auf Schichten).
+ *   • "structure"    — tragend (Beton, Mauerwerk, Holz-/Stahltragwerk)
+ *   • "insulation"   — Wärme-/Trittschalldämmung
+ *   • "screed"       — Unterlagsboden/Estrich
+ *   • "finish"       — Belag (Parkett, Platten)
+ *   • "plaster"      — Putz, Gipsbekleidung
+ *   • "substructure" — Unterbau (Kies, Magerbeton, Erdreich)
+ *   • "membrane"     — Abdichtung, Dampfbremse
+ *   • "cladding"     — Bekleidung, Eindeckung, Lattung
+ *   • "air"          — Luftschicht, Hinterlüftung
+ */
+export type LayerFunction =
+  | "structure"
+  | "insulation"
+  | "screed"
+  | "finish"
+  | "plaster"
+  | "substructure"
+  | "membrane"
+  | "cladding"
+  | "air";
 
 /**
  * Schichteinzug einer Wandschicht an der Öffnung ([106]): Regel für alle Seiten, je Seite
@@ -2147,6 +2175,21 @@ export type OverrideActions = {
   lineweight?: number;
   /** Linienstil (Line Manager) — wirkt, wo Elemente einen LineStyle tragen (Drawing2D). */
   linetypeId?: string;
+  /**
+   * [33] Füllfarbe geschnittener Flächen/Schichten (hex) — hat Vorrang vor der
+   * Massstabsregel „Schnittflächen 1:100 schwarz“.
+   */
+  fillColor?: string;
+  /**
+   * [33] Schraffur geschnittener Flächen/Schichten: "none" (ohne), "material"
+   * (Schraffur des Baustoffs, auch ab 1:100) oder die id einer Schraffur.
+   */
+  hatch?: string;
+  /**
+   * [33] Umriss/Fugenlinie geschnittener Flächen/Schichten: an (true) oder aus.
+   * Benachbarte Schichten mit gleicher Darstellung ohne Muster bilden eine Fläche.
+   */
+  outline?: boolean;
 };
 
 /** Bedingung einer Override-Regel. */
@@ -2162,10 +2205,28 @@ export type OverrideCondition = {
  *   • "layer_name"  — Name ODER Code der Ebene (LayerCategory) des Elements.
  *   • "object_name" — Element-/Typ-Name (z. B. Wandtyp-Name, Raum-Name,
  *     Öffnungs-Label, Drawing2D-Formname).
+ *   • "element_kind" — [33] Bauteilart: "wall", "slab" (Decke), "ground_slab"
+ *     (Bodenplatte), "roof".
+ *   Schicht-Bedingungen ([33]; eine Regel mit einer davon wirkt nur auf
+ *   Bauteilschichten, nicht auf ganze Elemente):
+ *   • "layer_function" — Funktion der Schicht (`LayerFunction`, sonst aus dem Baustoff).
+ *   • "layer_position" — Lage zur tragenden Schicht: "above" (oben/aussen),
+ *     "structure", "below" (unten/innen).
+ *   • "material" — Baustoff: id, Standard-Kennung (`std-c-…`) oder Name.
+ *   • "material_category" — Baustoff-Kategorie (aus Standard-Kennung/Name abgeleitet:
+ *     "concrete", "masonry", "timber", "insulation", "screed", "flooring", "plaster",
+ *     "loose_fill", "metal", "glass", "membrane", "air", "cladding", "stone", "other").
  * Ein `user_string`-Tag (DOSSIER-Rhino) existiert am Element noch nicht und
  * ist deshalb bewusst NICHT enthalten (kein Schein-Feature).
  */
-export type OverrideConditionType = "layer_name" | "object_name";
+export type OverrideConditionType =
+  | "layer_name"
+  | "object_name"
+  | "element_kind"
+  | "layer_function"
+  | "layer_position"
+  | "material"
+  | "material_category";
 
 /** Vergleichs-Operator einer Override-Bedingung (case-insensitiv). */
 export type OverrideOperator = "equals" | "contains" | "starts_with" | "not_equals";
@@ -2180,6 +2241,8 @@ export type OverrideRule = {
   /** Deaktivierte Regeln werden bei der Auswertung übersprungen. */
   enabled: boolean;
   condition: OverrideCondition;
+  /** [33] Weitere Bedingungen; die Regel trifft nur, wenn ALLE zutreffen. */
+  conditions?: Array<OverrideCondition>;
   actions: OverrideActions;
 };
 

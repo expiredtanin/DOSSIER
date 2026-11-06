@@ -12,10 +12,12 @@ import {
   deleteTemplateOps,
   duplicateTemplateOps,
   linkedTemplate,
+  addRuleBlockOps,
   patchTemplateOps,
   uiPatch,
   type ViewTemplateUi,
 } from "./viewTemplates";
+import { standardOverrideRules } from "../model/standards";
 
 const ui: ViewTemplateUi = { detail: "mittel", scaleDenominator: 100, layerVisibility: { "20": true, "30": true }, enabledOverrideRuleIds: [], displayMode: "all", mono: false, scaleLineWeights: false };
 
@@ -99,5 +101,22 @@ describe("viewTemplates", () => {
     const t = withTemplate(base()).viewTemplates![0];
     expect(uiPatch(t, ui)).toEqual({ layerVisibility: { "30": false } });
     expect(uiPatch(t, { ...ui, layerVisibility: { "20": true } })).toEqual({});
+  });
+
+  it("[33] Baustein „Deckenaufbau weiss“: Regel aus den Standards ins Projekt (aus), in der Vorlage eingeschaltet", () => {
+    let p = withTemplate(base());
+    const blocks = standardOverrideRules(p);
+    const block = blocks.find((r) => r.id === "std-or-deckenaufbau-weiss")!;
+    expect(block).toMatchObject({ name: "Deckenaufbau weiss", enabled: false, actions: { fillColor: "#ffffff", hatch: "none", outline: true } });
+    p = applyOps(p, addRuleBlockOps(p, "t1", block));
+    expect(p.overrideRules!.find((r) => r.id === block.id)).toMatchObject({ enabled: false });
+    expect(p.viewTemplates![0].enabledOverrideRuleIds).toEqual([block.id]);
+    // Zweimal: nichts doppelt; Baustein bleibt in der Liste (jetzt aus dem Projekt).
+    p = applyOps(p, addRuleBlockOps(p, "t1", block));
+    expect(p.overrideRules!.filter((r) => r.id === block.id)).toHaveLength(1);
+    expect(p.viewTemplates![0].enabledOverrideRuleIds).toEqual([block.id]);
+    expect(standardOverrideRules(p).map((r) => r.id)).toContain(block.id);
+    // Vorlage anwenden schaltet die Regel ein (Anzeigezustand).
+    expect(uiPatch(p.viewTemplates![0], ui).enabledOverrideRuleIds).toEqual([block.id]);
   });
 });

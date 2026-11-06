@@ -3,9 +3,10 @@
 // Die Logik (Ops, Weitergabe an verknüpfte Ansichten) liegt in `state/viewTemplates.ts`; die
 // Handler kommen aus der App, ein Aufruf = ein Undo-Schritt.
 
-import { useState } from "react";
-import type { Project, ViewTemplate } from "../../model/types";
+import { useMemo, useState } from "react";
+import type { OverrideRule, Project, ViewTemplate } from "../../model/types";
 import { flattenCategories } from "../../model/layers";
+import { standardOverrideRules } from "../../model/standards";
 import { t } from "../../i18n";
 import { DeleteButton, FieldRow, NumberField } from "./fields";
 
@@ -19,6 +20,8 @@ export interface ViewTemplateHandlers {
   onPatchViewTemplate?: (id: string, patch: Record<string, unknown>) => void;
   onDeleteViewTemplate?: (id: string) => void;
   onApplyViewTemplate?: (id: string, target: ViewTemplateTarget, linked: boolean) => void;
+  /** [33] Override-Baustein (Standardregel) ins Projekt holen und in der Vorlage einschalten. */
+  onAddRuleBlock?: (id: string, rule: OverrideRule) => void;
 }
 
 const DISPLAY_MODES = ["all_force", "all", "active", "grey", "grey_locked", "locked"] as const;
@@ -34,6 +37,66 @@ function Optional({ label, on, onToggle, children }: { label: string; on: boolea
       </span>
       <span className="res-field-control">{on ? children : <span className="res-joint-none">–</span>}</span>
     </div>
+  );
+}
+
+/**
+ * [33] Override-Regeln der Vorlage (`enabledOverrideRuleIds`): an = die Vorlage legt fest, welche Regeln gelten.
+ * Bausteine (mitgelieferte Regeln wie „Deckenaufbau weiss") lassen sich übernehmen: Regel ins Projekt, in der
+ * Vorlage eingeschaltet.
+ */
+function RulesSection({ tpl, project, h }: { tpl: ViewTemplate; project: Project; h: ViewTemplateHandlers }) {
+  const rules = project.overrideRules ?? [];
+  const blocks = useMemo(() => standardOverrideRules(project), [project]);
+  const [block, setBlock] = useState("");
+  const ids = tpl.enabledOverrideRuleIds;
+  const patch = (p: Record<string, unknown>) => h.onPatchViewTemplate?.(tpl.id, p);
+  const chosen = blocks.find((b) => b.id === block) ?? blocks[0];
+  return (
+    <>
+      <Optional
+        label={t("resources.viewTemplates.rules")}
+        on={ids !== undefined}
+        onToggle={(on) => patch({ enabledOverrideRuleIds: on ? rules.filter((r) => r.enabled).map((r) => r.id) : null })}
+      >
+        <span className="res-joint-none">{t("resources.viewTemplates.rulesHint")}</span>
+      </Optional>
+      {ids !== undefined && (
+        <div className="res-vt-rules" data-testid="view-template-rules">
+          {rules.map((r) => (
+            <FieldRow key={r.id} label={r.name || r.id}>
+              <input
+                type="checkbox"
+                aria-label={r.name || r.id}
+                checked={ids.includes(r.id)}
+                onChange={(e) => patch({ enabledOverrideRuleIds: e.target.checked ? [...ids, r.id] : ids.filter((x) => x !== r.id) })}
+              />
+            </FieldRow>
+          ))}
+        </div>
+      )}
+      {chosen && (
+        <FieldRow label={t("resources.viewTemplates.ruleBlock")}>
+          <span style={{ display: "flex", gap: 6 }}>
+            <select className="res-input" aria-label={t("resources.viewTemplates.ruleBlock")} value={chosen.id} onChange={(e) => setBlock(e.target.value)}>
+              {blocks.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+            <button
+              className="res-add"
+              data-testid="view-template-rule-block-add"
+              disabled={!h.onAddRuleBlock || ids?.includes(chosen.id)}
+              onClick={() => h.onAddRuleBlock?.(tpl.id, chosen)}
+            >
+              {t("resources.viewTemplates.ruleBlockAdd")}
+            </button>
+          </span>
+        </FieldRow>
+      )}
+    </>
   );
 }
 
@@ -94,6 +157,7 @@ function TemplateDetail({
       {bool("scaleLineWeights", t("resources.viewTemplates.scaleLineWeights"))}
       {bool("sketch", t("resources.viewTemplates.sketch"))}
       {bool("cutHatch", t("resources.viewTemplates.cutHatch"))}
+      <RulesSection tpl={tpl} project={project} h={h} />
       <div className="res-hint">{t("resources.viewTemplates.rangeHint")}</div>
       {num("cutHeight", t("resources.viewTemplates.cutHeight"), 1.0)}
       {num("viewTop", t("resources.viewTemplates.viewTop"), 2.5)}

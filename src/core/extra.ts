@@ -87,3 +87,4 @@ export type { PresentationOptions, PresentationPlan, PresentationLabels } from "
 export { lineEndsOf, lineEndsCode, lineEndsFromCode, lineEndsSvgAttrs, planLineEndsProps, MITER_LIMIT as LINE_MITER_LIMIT } from "../model/lineEnds";
 export type { LineEnds } from "../model/lineEnds";
 export type { LineCap, LineJoin } from "../model/types";
+export { standardOverrideRules } from "../model/standards";

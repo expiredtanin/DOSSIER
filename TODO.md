@@ -1820,6 +1820,35 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 ## Priorität 3 — Planproduktion und Darstellung
 
 - ◐ **[33] Objektstile mit Rangfolge.** Regelbasierte Overrides vorhanden. · M
+  (6.11., Wunsch Maintainer: „Deckenaufbau weiss … soll mit Overrides gemacht werden") **Overrides auf
+  Bauteilschichten:** neue Kriterien Bauteilart (`element_kind`: Wand/Decke/Bodenplatte/Dach), Schichtfunktion
+  (`layer_function`), Lage zur tragenden Schicht (`layer_position`: darüber/aussen, tragend, darunter/innen), Baustoff
+  (`material`: id, `std-c-…`, Name) und Baustoff-Kategorie (`material_category`); weitere Bedingungen mit UND
+  (`OverrideRule.conditions`). Funktion: neues Feld `Layer.function` (Rust-Modell, ohne UI), sonst aus dem Baustoff
+  abgeleitet (`standards::material_category` nach Standard-Kennung/Name → `layer_function_of_category`); tragende
+  Schicht = Funktion tragend mit höchstem Verschneidungs-Rang; Bodenplatte = Decke mit Unterbau-Schicht oder OK auf dem
+  untersten Geschoss. Neue Aktionen `fillColor`, `hatch` ("none"/"material"/Schraffur-id), `outline`; sie wirken auf
+  Schnittflächen im Schnitt (`section::cut_overrides`, beim Zeichnen, nicht im Schnitt-Cache) und auf Wandschichten im
+  Grundriss (`walls::wall_poche`), mit Vorrang vor `style::solid_cut` (1:100 schwarz) und `is_loose_fill`. Schichten
+  mit gleichem Override ohne Muster werden je Bauteil zu einer Fläche vereinigt (ein Umriss, keine Fugen); im Grundriss
+  1:100 wird eine Wand mit Schicht-Override geschichtet gezeichnet, die übrigen Schichten schwarz ohne Fugen.
+  Schicht-Regeln wirken nie aufs ganze Element (`effective` überspringt sie). Ohne aktive Regel mit Schicht-Aktion
+  unverändert (Schnellpfad; Goldens unverändert). **Baustein „Deckenaufbau weiss"** (`std-or-deckenaufbau-weiss`,
+  `standards::override_rules`, ausgeschaltet; neue Projekte/„Standards laden"): Lage darüber + Bauteilart enthält
+  „slab" → weiss, ohne Schraffur, mit Umriss. Ansichtsvorlagen-Dialog: Abschnitt „Override-Regeln festlegen"
+  (`enabledOverrideRuleIds` je Regel) und „Baustein übernehmen" (`addRuleBlockOps`, ein Undo-Schritt). Overrides-Tab:
+  neue Kriterien (feste Werte als Auswahl), weitere Bedingungen, Aktionen Füllung/Schraffur/Umriss. CLI `--template
+  <Vorlage>` und `--rule <Regel>` (auch Standard-Baustein) für plan/section/elevation. `is_loose_fill` bleibt fest
+  verdrahtet: als mitgelieferte Regel müsste sie in jedem bestehenden Projekt stehen und eingeschaltet sein, sonst
+  würden Kies/Magerbeton dort plötzlich schwarz; sie wirkt wie eine unterste Standardregel, jede Regel übersteuert sie,
+  und die Kategorie `loose_fill` nutzt dieselbe Erkennung. Toter TS-Code `src/overrides/engine.ts` entfernt (nur
+  noch der Rust-Kern). Tests: `schicht_regeln`, `lage_zur_tragenden_schicht`, `override_deckenaufbau_weiss`,
+  `override_auf_wandschichten_im_grundriss`, vitest `viewTemplates`/`standards`, e2e `viewTemplates.spec.ts`
+  (Baustein übernehmen). Geprüft: cargo test Kern, tsc, vitest, e2e viewTemplates, CLI-SVG Musterhaus komplex
+  Schnitt A-A 1:100 mit/ohne `--rule "Deckenaufbau weiss"` in Chromium. Offen: kein UI für `Layer.function` im
+  Aufbau-Editor; Overrides gelten projektweit (Vorlage schaltet sie beim Anwenden um, wie bisher) — nicht geprüft, ob
+  Blatt-Viewports die Regeln ihres Ausschnitts (`enabledOverrideRuleIds`) berücksichtigen; Decken im Grundriss (nicht geschnitten) ohne
+  Schicht-Overrides; Kriterium Massstab fehlt (Regel wirkt in 1:50 ebenso); nicht in der Tauri-App geprüft.
 - ◐ **[34] Ansichtsvorlagen.** (30.10.) `Project.viewTemplates` (Rust-Modell): benannter Satz aus Detailgrad,
   Massstab, Kategorien, Override-Regeln, Darstellungsmodus, Schwarz-Weiss, Schatten, verdeckte Kanten,
   Strichstärken-Skalierung und Ansichtsbereich; Ansicht (`DrawingLevel.templateId/templateLinked`) und

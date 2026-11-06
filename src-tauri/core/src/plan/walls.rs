@@ -245,18 +245,46 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     let outline_mm = wall_lw * detail.outline_factor();
     let layer_mm = LAYER_JOINT_MM * detail.layer_factor();
     let thick: Vec<f64> = wt.layers.iter().map(|l| l.thickness).collect();
-    // [140] Ab 1:100 (und „grob") schwarze Sammelfläche mit Umriss, ohne Schichten (`style::solid_cut`).
-    let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, c.solid_cut(), view_only, reveals));
+    // [33] Overrides auf Schichten (Füllung, Schraffur, Umriss); ohne aktive Regel lauter leere Aktionen.
+    let lov = super::overrides::layer_actions(p, "wall", &w.category_code, Some(&wt.name), &wt.layers);
+    let solid = c.solid_cut();
+    // [140] Ab 1:100 (und „grob") schwarze Sammelfläche mit Umriss, ohne Schichten (`style::solid_cut`) —
+    // [33] ausser eine Regel stylt eine Schicht: dann Schichten, die übrigen schwarz ohne Fugen dazwischen.
+    let layered_solid = solid && lov.iter().any(|a| a.styles());
+    let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, solid && !layered_solid, view_only, reveals));
     let target = thin_layer_targets(&thick, detail, c.a.scale);
     if f.is_empty() {
         return Ok(());
     }
+    let ov_of = |li: usize| lov.get(target.get(li).copied().unwrap_or(li));
+    // Stil einer Schicht mit Override bzw. schwarz (Schicht ohne Override in `layered_solid`).
+    let apply_ov = |li: usize, (hatch, fill): (HatchRender, String)| -> (HatchRender, String) {
+        let Some(o) = ov_of(li).filter(|o| o.styles()) else {
+            return if layered_solid { (no_hatch(), HATCH_INK.to_string()) } else { (hatch, fill) };
+        };
+        let hatch = match o.hatch.as_deref() {
+            None if solid => no_hatch(),
+            None | Some("material") => hatch,
+            Some("none") => no_hatch(),
+            Some(id) => super::domains::resolve_hatch_or_none(p, id, Some(angle), None),
+        };
+        (hatch, o.fill_color.clone().unwrap_or(fill))
+    };
+    // Fuge zwischen Schicht `a` und `b` weglassen: beide schwarz, gleicher Override ohne Muster, oder Umriss aus.
+    let skip_joint = |a: usize, b: Option<usize>| {
+        let (oa, ob) = (ov_of(a), b.and_then(ov_of));
+        let styled = |o: Option<&super::overrides::LayerActions>| o.is_some_and(|o| o.styles());
+        (layered_solid && !styled(oa) && b.is_none_or(|_| !styled(ob)))
+            || (b.is_some() && oa.is_some_and(|o| o.styles() && o.plain()) && oa == ob)
+            || oa.is_some_and(|o| o.outline == Some(false))
+            || ob.is_some_and(|o| o.outline == Some(false))
+    };
     let mut styles: HashMap<usize, (HatchRender, String)> = HashMap::new();
     let mut style_of = |li: usize| -> Result<(HatchRender, String), String> {
         if let Some(s) = styles.get(&li) {
             return Ok(s.clone());
         }
-        let (mut hatch, fill) = layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, angle)?;
+        let (mut hatch, fill) = apply_ov(li, layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, angle)?);
         if bend.is_none() {
             anchor_band_pattern(&mut hatch, w, cuts, thick.get(li).copied().unwrap_or(0.0));
         }
@@ -280,7 +308,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
                 // im Uhrzeigersinn: Laufrichtung 0° bzw. 180° im Gegenuhrzeigersinn; gebogen wird das
                 // Band danach in `bend_prims`).
                 let local = if u.arc.sigma() > 0.0 { 180.0 } else { 0.0 };
-                let (mut hatch, fill) = layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, local)?;
+                let (mut hatch, fill) = apply_ov(li, layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, local)?);
                 hatch.polar = Some([u.arc.center.x, u.arc.center.y, u.arc.r]);
                 out.push(wall_polygon(pts, &fill, "none", 0.0, hatch, greyed, Some(no_stroke), Some(&w.id), None));
                 continue;
@@ -302,6 +330,10 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             // [140] Fuge zwischen zusammengefassten Schichten bzw. quer über eine dünne Schicht entfällt.
             let merged = |k: usize| target.get(k).is_some_and(|t| *t != k);
             if (art == 1.0 && target.get(li).is_some() && target.get(li) == target.get(li + 1)) || (art == 0.0 && merged(li)) {
+                continue;
+            }
+            // [33] Fugen um Schichten mit Override (bzw. zwischen schwarzen Schichten) nach der Regel.
+            if (art == 1.0 && skip_joint(li, Some(li + 1))) || (art == 0.0 && skip_joint(li, None)) {
                 continue;
             }
             if art == 0.0 {

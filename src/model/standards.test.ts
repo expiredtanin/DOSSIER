@@ -35,7 +35,8 @@ describe("Standard-Bibliothek ([100]–[102])", () => {
     expect(c.components).toBe(35);
     expect(c.lineStyles).toBeGreaterThan(5);
     expect(c.wallTypes + c.ceilingTypes + c.roofTypes).toBe(5);
-    expect(standardsMergeCounts(standardsMergeOps(withStandards(empty)))).toEqual({ lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0, viewTemplates: 0, blockDefs: 0 });
+    expect(c.overrideRules).toBe(1);
+    expect(standardsMergeCounts(standardsMergeOps(withStandards(empty)))).toEqual({ lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0, viewTemplates: 0, blockDefs: 0, overrideRules: 0 });
   });
 
   it("Sinnbilder nach SIA 400 Fig. 34: Putz leer, Dämmung quer, Beton gekreuzt", () => {

@@ -320,6 +320,7 @@ pub fn library() -> Vec<(&'static str, Vec<Value>)> {
         ("roofTypes", roof_types()),
         ("viewTemplates", view_templates()),
         ("blockDefs", block_defs()),
+        ("overrideRules", override_rules()),
     ]
 }
 
@@ -416,6 +417,7 @@ fn managed(key: &str) -> &'static [&'static str] {
             "abbrev",
         ],
         "blockDefs" => &["geom2d"],
+        "overrideRules" => &["condition", "conditions", "actions"],
         _ => &["layers"],
     }
 }
@@ -577,6 +579,99 @@ pub fn is_loose_fill(c: &crate::model::Component) -> bool {
     let name = c.name.to_lowercase();
     // „Sandstein“, „Kalksandstein“ sind Mauerwerk, keine Schüttung.
     WORDS.iter().any(|w| name.contains(w)) && !name.contains("stein")
+}
+
+/// [33] Baustoff-Kategorie eines Bauteils (für Override-Regeln „Materialkategorie“): an der Standard-Kennung
+/// (`std-c-…`), sonst am Namen (deutsch/englisch, Gross-/Kleinschreibung egal). Werte: "concrete", "masonry",
+/// "timber", "insulation", "screed", "flooring", "plaster", "loose_fill", "metal", "glass", "membrane", "air",
+/// "cladding", "stone", "other". Lose Schüttungen wie [`is_loose_fill`].
+pub fn material_category(c: &crate::model::Component) -> &'static str {
+    let std = c.standard_id.as_deref().filter(|s| s.starts_with("std-c-")).unwrap_or(c.id.as_str());
+    let by_std = match std {
+        "std-c-beton" | "std-c-stahlbeton" => Some("concrete"),
+        "std-c-backstein" | "std-c-kalksandstein" | "std-c-porenbeton" => Some("masonry"),
+        "std-c-holz" | "std-c-bsp" | "std-c-holzwerkstoff" => Some("timber"),
+        "std-c-mineralwolle" | "std-c-steinwolle" | "std-c-eps" | "std-c-xps" | "std-c-holzfaser" | "std-c-trittschall" => Some("insulation"),
+        "std-c-gipskarton" | "std-c-innenputz" | "std-c-aussenputz" => Some("plaster"),
+        "std-c-zementestrich" => Some("screed"),
+        "std-c-parkett" | "std-c-keramik" => Some("flooring"),
+        "std-c-glas" => Some("glass"),
+        "std-c-stahl" | "std-c-aluminium" => Some("metal"),
+        "std-c-naturstein" => Some("stone"),
+        "std-c-erdreich" | "std-c-kies" => Some("loose_fill"),
+        "std-c-sperrschicht" => Some("membrane"),
+        "std-c-luft" => Some("air"),
+        "std-c-lattung-v" | "std-c-lattung-h" | "std-c-boden-deckel" | "std-c-schindeln" | "std-c-trapezblech" | "std-c-faserzement" | "std-c-tonziegel" => Some("cladding"),
+        _ => None,
+    };
+    if let Some(k) = by_std {
+        return k;
+    }
+    if is_loose_fill(c) {
+        return "loose_fill";
+    }
+    let n = c.name.to_lowercase();
+    let has = |ws: &[&str]| ws.iter().any(|w| n.contains(w));
+    // Reihenfolge: spezifische Wörter vor allgemeinen („Faserzementplatten“ ist Bekleidung, nicht Belag).
+    if has(&["estrich", "unterlagsboden", "anhydrit", "screed"]) {
+        "screed"
+    } else if has(&["lattung", "schalung", "schindel", "blech", "faserzement", "ziegel", "eindeckung", "bekleidung", "verkleidung", "cladding", "shingle"]) {
+        "cladding"
+    } else if has(&["dämm", "daemm", "wolle", "eps", "xps", "holzfaser", "trittschall", "insulation"]) {
+        "insulation"
+    } else if has(&["parkett", "platten", "belag", "linoleum", "teppich", "fliesen", "keramik", "flooring", "parquet", "tiles"]) {
+        "flooring"
+    } else if has(&["putz", "gips", "plaster"]) {
+        "plaster"
+    } else if has(&["abdicht", "sperr", "folie", "dampf", "bitumen", "membran"]) {
+        "membrane"
+    } else if has(&["luft", "hinterlüft", "air gap", "cavity"]) {
+        "air"
+    } else if has(&["beton", "concrete"]) {
+        "concrete"
+    } else if has(&["naturstein", "granit", "marmor", "kalkstein", "natural stone"]) {
+        "stone"
+    } else if has(&["stein", "mauerwerk", "brick", "masonry", "block"]) {
+        "masonry"
+    } else if has(&["holz", "bsp", "osb", "brettschicht", "timber", "wood", "clt", "glulam"]) {
+        "timber"
+    } else if has(&["stahl", "alu", "metall", "steel", "metal"]) {
+        "metal"
+    } else if has(&["glas", "glass"]) {
+        "glass"
+    } else {
+        "other"
+    }
+}
+
+/// [33] Funktion einer Schicht, abgeleitet aus der Baustoff-Kategorie ([`material_category`]); "other" ohne.
+pub fn layer_function_of_category(cat: &str) -> Option<crate::model::LayerFunction> {
+    use crate::model::LayerFunction as F;
+    Some(match cat {
+        "concrete" | "masonry" | "timber" | "metal" | "stone" => F::Structure,
+        "insulation" => F::Insulation,
+        "screed" => F::Screed,
+        "flooring" => F::Finish,
+        "plaster" => F::Plaster,
+        "loose_fill" => F::Substructure,
+        "membrane" => F::Membrane,
+        "air" => F::Air,
+        "cladding" | "glass" => F::Cladding,
+        _ => return None,
+    })
+}
+
+/// [33] Mitgelieferte Override-Regeln (Bausteine für Ansichtsvorlagen). Ausgeschaltet: sie wirken erst, wenn
+/// eine Ansichtsvorlage sie einschaltet (`enabledOverrideRuleIds`) — ohne Regel bleibt jede Darstellung, wie
+/// sie ist. „Deckenaufbau weiss“: die Schichten über der tragenden Schicht von Decken und Bodenplatten
+/// (Unterlagsboden, Trittschall, Belag) im Schnitt als weisse Fläche mit Umriss, auch ab 1:100 (statt schwarz).
+pub const STD_RULE_FLOOR_BUILDUP_WHITE: &str = "std-or-deckenaufbau-weiss";
+
+pub fn override_rules() -> Vec<Value> {
+    vec![json!({"id": STD_RULE_FLOOR_BUILDUP_WHITE, "name": "Deckenaufbau weiss", "enabled": false,
+        "condition": {"type": "layer_position", "operator": "equals", "value": "above"},
+        "conditions": [{"type": "element_kind", "operator": "contains", "value": "slab"}],
+        "actions": {"fillColor": "#ffffff", "hatch": "none", "outline": true}})]
 }
 
 #[cfg(test)]
