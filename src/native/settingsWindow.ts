@@ -12,6 +12,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import type { LineEnds } from "../core";
 import type { AiAccessView } from "../ui/AiAccessSection";
 import type { LayoutState } from "../panels/types";
 import type { ThemeMode } from "../theme/themeMode";
@@ -27,6 +28,8 @@ export interface SettingsSyncState {
   snapColor: string;
   referenceElevationMasl: number | undefined;
   scaleLineWeights: boolean;
+  /** Projekt-Option: Linienenden und -ecken ([146]). */
+  lineEnds: LineEnds;
   offline: boolean;
   /** [9] KI-Zugriff (Schalter, Sitzungsschlüssel, Stand). */
   aiAccess: AiAccessView;
@@ -40,6 +43,7 @@ export interface SettingsCommandHandlers {
   onSnapColorChange: (hex: string) => void;
   onReferenceElevationChange: (n: number | undefined) => void;
   onScaleLineWeightsChange: (on: boolean) => void;
+  onLineEndsChange: (ends: LineEnds) => void;
   onOfflineChange: (offline: boolean) => void;
   onAiAccessChange: (on: boolean) => void;
   onApplyLayout: (layout: LayoutState) => void;

@@ -142,8 +142,8 @@ describe("Plan-Puffer v2", () => {
     expect(lean.byteLength).toBeLessThan(encodePlanBuf(prims).byteLength);
     expect(() => decodePlanBuf(lean).prims).toThrow();
     // Die GPU-Kompilierung liest beide gleich.
-    const a = core().gpu_compile_flat(lean, 0, prims.length, 90, true);
-    const b = core().gpu_compile_flat(encodePlanBuf(prims), 0, prims.length, 90, true);
+    const a = core().gpu_compile_flat(lean, 0, prims.length, 90, true, 0);
+    const b = core().gpu_compile_flat(encodePlanBuf(prims), 0, prims.length, 90, true, 0);
     expect(a.length).toBeGreaterThan(30);
     expect(Array.from(a)).toEqual(Array.from(b));
   });
@@ -170,13 +170,13 @@ describe("Plan-Puffer v2", () => {
     const wrong = buf.slice();
     new Float64Array(wrong.buffer, 0, 2)[1] = PLAN_BUF_VERSION + 1;
     expect(core().plan_buf_recode(wrong).length).toBe(0);
-    expect(core().gpu_compile_flat(wrong, 0, 1, 90, true).length).toBe(0);
+    expect(core().gpu_compile_flat(wrong, 0, 1, 90, true, 0).length).toBe(0);
     expect(() => decodePlanBuf(wrong)).toThrow(/Version/);
     expect(core().plan_buf_recode(buf.subarray(0, buf.length - 3)).length).toBe(0);
     expect(() => decodePlanBuf(buf.subarray(0, buf.length - 2))).toThrow();
-    expect(core().gpu_compile_flat(new Uint8Array([1, 2, 3]), 0, 0, 90, false).length).toBe(0);
-    expect(core().gpu_compile_flat(buf, 0, prims.length + 1, 90, false).length).toBe(0);
-    expect(core().gpu_compile_held(424242, 0, 1, 90, false).length).toBe(0);
+    expect(core().gpu_compile_flat(new Uint8Array([1, 2, 3]), 0, 0, 90, false, 0).length).toBe(0);
+    expect(core().gpu_compile_flat(buf, 0, prims.length + 1, 90, false, 0).length).toBe(0);
+    expect(core().gpu_compile_held(424242, 0, 1, 90, false, 0).length).toBe(0);
     expect(core().plan_buf_hold(wrong)).toBe(0);
     // Danach arbeitet der Kern normal weiter.
     expect(canon(decodePlanBuf(core().plan_buf_recode(buf)).prims)).toBe(canon(prims));
@@ -187,9 +187,9 @@ describe("Plan-Puffer v2", () => {
     const buf = encodePlanBuf(prims);
     const id = core().plan_buf_hold(buf);
     expect(id).toBeGreaterThan(0);
-    expect(Array.from(core().gpu_compile_held(id, 1, 5, 90, true))).toEqual(Array.from(core().gpu_compile_flat(buf, 1, 5, 90, true)));
+    expect(Array.from(core().gpu_compile_held(id, 1, 5, 90, true, 0))).toEqual(Array.from(core().gpu_compile_flat(buf, 1, 5, 90, true, 0)));
     core().plan_buf_release(id);
-    expect(core().gpu_compile_held(id, 1, 5, 90, true).length).toBe(0);
+    expect(core().gpu_compile_held(id, 1, 5, 90, true, 0).length).toBe(0);
   });
 
   it("Puffer einer Runde verdrängen sich nicht gegenseitig (viele Zeichnungs-Stücke)", () => {

@@ -299,6 +299,17 @@ export class GpuChunkCache {
   /** Geometrien in Zeichenreihenfolge (nur bei `update`/`dispose` neu aufgebaut). */
   geometries: GpuGeometry[] = [];
 
+  /**
+   * Linienenden und -ecken ([146], `Plan.lineEnds`): bei einem Wechsel sind alle Chunks veraltet
+   * (andere Tessellierung) — verwerfen, das nächste `update` kompiliert neu.
+   */
+  setLineEnds(code: number | undefined): void {
+    const c = code ?? 0;
+    if ((this.gl.lineEnds ?? 0) === c) return;
+    this.dispose();
+    (this.gl as { lineEnds?: number }).lineEnds = c;
+  }
+
   update(
     primitives: readonly Primitive[],
     pxPerMeter: number,

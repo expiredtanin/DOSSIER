@@ -2146,17 +2146,16 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
-/* CAD-typische Ecken: alle Plan-Striche gehren (miter) statt an dicken Ecken eine
-   Stufe/Butt-Cap-Lücke zu zeigen. Der Miter-Grenzwert verhindert überlange Spitzen
-   bei sehr spitzen Winkeln (dann kappen die Enden rund). Gilt für Poché-Umrisse
-   (polygon), Wand-/Tür-/2D-Linien und Bögen gleichermaßen. */
+/* Linienenden und -ecken der Plan-Striche ([146]): Projekt-Einstellung, gesetzt als Attribute am
+   umschliessenden <g> in PlanView (`planLineEndsProps`); die Elemente erben sie. Ausserhalb dieser
+   Gruppe gelten die SVG-Standardwerte (flach, Gehrung, Grenze 4) bzw. die eigenen Klassen. */
 .plan-svg polygon,
 .plan-svg polyline,
 .plan-svg line,
 .plan-svg path {
-  stroke-linejoin: miter;
-  stroke-linecap: round;
-  stroke-miterlimit: 8;
+  stroke-linejoin: inherit;
+  stroke-linecap: inherit;
+  stroke-miterlimit: inherit;
 }
 
 /* Tür-/Fenster- + Referenz-Linien: NUR Farbe + fill hier. Strichstärke und

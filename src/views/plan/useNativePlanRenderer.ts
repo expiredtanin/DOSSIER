@@ -256,6 +256,7 @@ export function useNativePlanRenderer(
     const invoke = invokeRef.current;
     if (!cache || !gl || !invoke || !plan) return;
     try {
+      cache.setLineEnds(plan.lineEnds);
       cache.update(
         plan.primitives,
         pxPerMeter,

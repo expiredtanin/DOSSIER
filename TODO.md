@@ -2821,6 +2821,29 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   vorher 16/18 Frames hinterher, nachher 0. Nur im Linux-Container (Chromium) geprüft, NICHT in der Tauri-App/Metal:
   ob Metal-Present und Webview-Commit dort im selben vsync landen, muss der Mac zeigen. Offen, falls es dort noch
   nachläuft: Raumstempel nativ zeichnen (vtext kann bisher nur einzeilig/linksbündig, eine Schrift, kein Fett).
+- ◐ **[146] Linienenden und -ecken einstellbar.** (6.11., Maintainer: „Manche Linienenden sind rund, manche eckig.
+  Globale Einstellung.") Bestand vorher: render2d (WebGPU-Szene) und Kern `gpu_compile` (Metal-Chunks) zeichneten volle
+  Striche mit runden Kappen/Ecken, Strich-Shader runde Strichenden, Bögen (SDF) flach; Plan-SVG rund nur bei vollen
+  Linien/Kantenläufen ([141]), Polygone `linejoin=round`; Druck-SVG (`print_svg.rs`, `sceneToPrintSvg.ts`) rund; React-SVG
+  über CSS `linecap: round`, `miterlimit 8`. Neu: Projekt-Felder `lineCap` (`butt`/`round`/`square`) und `lineJoin`
+  (`miter`/`round`/`bevel`), fehlt = flach + Gehrung (Grenze 4, darüber gefast); Kodierung `cap | join << 2`
+  (`plan/line_ends.rs`, `model/lineEnds.ts`), reist als `Plan.lineEnds` (generatePlan/Schnitt/Ansicht). Wirkt in:
+  render2d (Gehrungs-/Fasen-Dreiecke, vorstehende Kappe; Szenenkopf-Wort 44 statt Reserve-0; Strich-Shader `count + 16·cap`,
+  innere Ecken gestrichelter Züge bleiben rund; Bogen-Kappe in `wdash.w`), `gpu_compile` (gleich; gepacktes Miter-Byte jetzt
+  `(m−1)/3`, Byte 0 = 1, `chunks.rs` dekodiert; Chunk-Cache verwirft bei Wechsel), Plan-SVG (`<g>` mit den Attributen),
+  Druck-SVG/PDF (Attribute am `<svg>`), React-SVG-Ansicht (`<g>`, CSS `inherit`). Punkt-Muster bleiben überall rund ([96]).
+  Kerben an Wandecken: volle Einzel-Linien und Kantenläufe gleicher Farbe/Breite(/Deckkraft) werden an Enden, an denen
+  genau zwei zusammentreffen, zu Zügen genäht (`stitch_runs_members`; Szene, `gpu_compile` bis zum nächsten Strich-Muster,
+  Plan-SVG, Druck-SVG), ein Zug steht an der Stelle seines spätesten Teils. UI: Einstellungen → Projekt („Linienenden",
+  „Linienecken"), beide Felder ein Undo-Schritt. Tests: Rust `line_ends` (Kodierung), render2d (`flach_mit_gehrung_ist_standard`,
+  `spitzer_winkel_ueber_gehrungsgrenze_wird_gefast`, `vorstehende_und_runde_kappen`, `strich_instanzen_tragen_die_kappe`,
+  `linienenden_im_kopf`), Kern (`ecke_aus_zwei_linien_wird_ein_zug_mit_gehrung`, `umriss_ecke_als_zug`), vitest
+  `plan/lineEnds.test.ts`. Goldens neu (Plan/Schnitt/Ansicht + CLI: `<g>` mit Attributen, genähte `<polyline>` statt
+  Einzel-`<line>`/`<path>`, keine `linecap=round` mehr; Komplex-EG 1:50 mit Schraffur 4.95 → 1.05 MB, v. a. Höhenlinien).
+  Geprüft: cargo test Kern + render2d, WASM gebaut (Linux, `--no-opt`), tsc, vitest, CLI-SVG vorher/nachher in Chromium
+  (Ecke, T-Stoss, Tür, Masslinie). **Offen:** DXF/DWG ohne Einstellung (acadrust schreibt `$ENDCAPS/$JOINSTYLE` nur in DWG;
+  CAD zeichnet Stiftbreiten selbst); Druck-SVG streicht Polygone weiter rundum (keine `noStrokeEdges`); Nähen in den
+  Metal-Chunks nur innerhalb eines Chunks; nicht in der Tauri-App/Metal und nicht im WebGPU-Browser angesehen. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

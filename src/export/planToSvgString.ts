@@ -16,10 +16,12 @@ export interface SvgStringOptions {
   marginM?: number;
   /** Schraffurlinien ausbreiten (wie im Druck); Standard aus. */
   hatch?: boolean;
+  /** Linienenden und -ecken ([146], `cap | join << 2`); Standard `plan.lineEnds`. */
+  lineEnds?: number;
 }
 
 export function planToSvgString(plan: Plan, opts: SvgStringOptions = {}): string {
   const b = plan.bounds;
-  const o = Float64Array.from([opts.scaleDenominator ?? 100, opts.marginM ?? 0.5, b.minX, b.minY, b.maxX, b.maxY, ...(opts.hatch ? [1] : [])]);
+  const o = Float64Array.from([opts.scaleDenominator ?? 100, opts.marginM ?? 0.5, b.minX, b.minY, b.maxX, b.maxY, opts.hatch ? 1 : 0, opts.lineEnds ?? plan.lineEnds ?? 0]);
   return withPlanParts(planParts(plan, true), (segs) => core().plan_svg_string(segs, o));
 }

@@ -95,6 +95,8 @@ export function SettingsWindowApp() {
       onReferenceElevationChange={handlers.onReferenceElevationChange}
       scaleLineWeights={state.scaleLineWeights}
       onScaleLineWeightsChange={handlers.onScaleLineWeightsChange}
+      lineEnds={state.lineEnds}
+      onLineEndsChange={handlers.onLineEndsChange}
       offline={state.offline}
       onOfflineChange={handlers.onOfflineChange}
       aiAccess={state.aiAccess}

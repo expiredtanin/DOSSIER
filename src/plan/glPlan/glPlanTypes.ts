@@ -121,6 +121,11 @@ export interface BufferGl {
    * der WebGL-Pfad bleibt beim 6-Float-Layout.
    */
   readonly packedLineVertices?: boolean;
+  /**
+   * Linienenden und -ecken ([146], `cap | join << 2`, `Plan.lineEnds`) für die Kompilierung;
+   * gesetzt über `GpuChunkCache.setLineEnds` (verwirft bei Wechsel alle Chunks). Fehlt = 0.
+   */
+  lineEnds?: number;
   readonly ARRAY_BUFFER: number;
   readonly ELEMENT_ARRAY_BUFFER: number;
   readonly STATIC_DRAW: number;

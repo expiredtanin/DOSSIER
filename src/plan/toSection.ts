@@ -12,6 +12,7 @@ import { buildSolidMesh } from "../engine/truckSolid";
 import { extrudedSolidSpec } from "./extrudedSolidSpec";
 import { decodePlanBuf } from "./planBuf";
 import { lazyPlan } from "./planLazy";
+import { lineEndsCode } from "../model/lineEnds";
 import type { CategoryDisplayResolver, Plan } from "./generatePlan";
 
 /** Vorbereitete Eingabe eines Schnitts: Projekt, Ebene und die truck-Körper (flach). */
@@ -141,7 +142,7 @@ export function generateSectionPlan(
   if (buf.groups.length === 0) return { primitives: [], bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
   const b = buf.bounds ?? [0, 0, 1, 1];
   return lazyPlan(
-    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] } },
+    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] }, lineEnds: lineEndsCode(project) },
     buf.groups.map(([from, to]) => ({ buf, from, to })),
   );
 }

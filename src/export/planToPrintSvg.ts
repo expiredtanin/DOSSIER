@@ -28,6 +28,7 @@
 
 import type { HatchRender, Plan } from "../plan/generatePlan";
 import { core } from "../engine/coreWasm";
+import { lineEndsSvgAttrs } from "../model/lineEnds";
 import { planParts, withPlanParts } from "../plan/planParts";
 
 /** SVG-Namespace für die programmatisch erzeugten Knoten. */
@@ -107,6 +108,8 @@ export interface PrintSvgOptions {
   bounds?: { minX: number; minY: number; maxX: number; maxY: number };
   /** Ohne weisses Blatt dahinter (als Schicht über anderem Inhalt). */
   transparent?: boolean;
+  /** Linienenden und -ecken ([146], `cap | join << 2`); Standard `plan.lineEnds`. */
+  lineEnds?: number;
 }
 
 /** Modell-Meter → Papier-Millimeter im Massstab 1:N. */
@@ -150,6 +153,9 @@ export function planToPrintSvg(plan: Plan, opts: PrintSvgOptions): PrintSvg {
   svg.setAttribute("width", String(opts.pageWidthMm));
   svg.setAttribute("height", String(opts.pageHeightMm));
   svg.setAttribute("viewBox", `0 0 ${opts.pageWidthMm} ${opts.pageHeightMm}`);
+  // Linienenden und -ecken des Projekts ([146]): einmal am Wurzelelement, alle Striche erben sie
+  // (der Kern setzt nur bei Punkt-Mustern eine eigene runde Kappe).
+  for (const [k, v] of Object.entries(lineEndsSvgAttrs(opts.lineEnds ?? plan.lineEnds))) svg.setAttribute(k, v);
 
   // Weisses Blatt (deckt die volle Seite).
   const bg = document.createElementNS(SVG_NS, "rect");

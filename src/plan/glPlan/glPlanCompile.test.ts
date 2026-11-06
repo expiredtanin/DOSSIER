@@ -18,8 +18,9 @@ const glStub = {
   STATIC_DRAW: 3,
 } as unknown as WebGL2RenderingContext;
 
+// Runde Enden/Ecken ([146] `lineEnds` 1 | 1 << 2): nur dort kosten Kappen eigene Dreiecke.
 const lineIndexCount = (prims: Primitive[]): number =>
-  compilePrimitivesToGpu(glStub, prims, 90).line.batches.reduce((s, b) => s + b.indexCount, 0);
+  compilePrimitivesToGpu({ ...glStub, lineEnds: 1 | (1 << 2) }, prims, 90).line.batches.reduce((s, b) => s + b.indexCount, 0);
 
 const seg = (ax: number, ay: number, bx: number, by: number, drawingId: string): Primitive => ({
   kind: 'line',
@@ -43,10 +44,11 @@ describe('compilePrimitivesToGpu: zusammenhängende Linien-Segmente', () => {
     expect(merged).toBe(single + 2 * 6);
   });
 
-  it('verkettet NICHT über Elementgrenzen, auch bei gemeinsamem Eckpunkt', () => {
+  it('[146] näht gleich gestylte volle Linien auch über Elementgrenzen (Ecke statt zweier Enden)', () => {
     const single = lineIndexCount([seg(0, 0, 1, 0, 'a')]);
     const twoDrawings = lineIndexCount([seg(0, 0, 1, 0, 'a'), seg(1, 0, 2, 0, 'b')]);
-    expect(twoDrawings).toBe(2 * single);
+    // Ein Zug: zweites Quad, aber keine Kappen am gemeinsamen Punkt (Wandecken ohne Kerbe).
+    expect(twoDrawings).toBe(single + 6);
   });
 
   it('verkettet NICHT bei unterschiedlichem Stil', () => {

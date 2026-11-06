@@ -39,3 +39,9 @@ export function lineEndsSvgAttrs(code: number | undefined): Record<"stroke-linec
   const e = lineEndsFromCode(code);
   return { "stroke-linecap": e.cap, "stroke-linejoin": e.join, "stroke-miterlimit": String(MITER_LIMIT) };
 }
+
+/** Wie {@link lineEndsSvgAttrs} als React-SVG-Eigenschaften (PlanView-Gruppe der Plan-Striche). */
+export function planLineEndsProps(code: number | undefined): { strokeLinecap: LineCap; strokeLinejoin: LineJoin; strokeMiterlimit: number } {
+  const e = lineEndsFromCode(code);
+  return { strokeLinecap: e.cap, strokeLinejoin: e.join, strokeMiterlimit: MITER_LIMIT };
+}

@@ -29,6 +29,7 @@ import type {
 } from "./model/types";
 import { generatePlan, computeKennzahlen, checkRoomProgram } from "./core";
 import { addedItems } from "./core";
+import { lineEndsOf, type LineEnds } from "./core";
 import { programStatusLabel } from "./panels/KennzahlenSection";
 import { sectionPlaneFromLevel, sectionUAxisModel } from "./core";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
@@ -1634,6 +1635,12 @@ export default function App() {
   // Befehle auf die echten Setter an (siehe native/settingsWindow.ts).
   const setScaleLineWeights = (on: boolean) =>
     applyChange((p) => setFieldIfChanged(p, "scaleLineWeights", on ? true : undefined));
+  // [146] Linienenden/-ecken: Standard (flach, Gehrung) = Feld weglassen; beide Felder ein Undo-Schritt.
+  const setLineEnds = (e: LineEnds) =>
+    groupChanges(() => {
+      applyChange((p) => setFieldIfChanged(p, "lineCap", e.cap === "butt" ? undefined : e.cap));
+      applyChange((p) => setFieldIfChanged(p, "lineJoin", e.join === "miter" ? undefined : e.join));
+    });
   useSettingsWindowHost(
     {
       themeMode,
@@ -1641,6 +1648,7 @@ export default function App() {
       snapColor,
       referenceElevationMasl: project.referenceElevationMasl,
       scaleLineWeights: project.scaleLineWeights === true,
+      lineEnds: lineEndsOf(project),
       offline,
       aiAccess,
       layout,
@@ -1651,6 +1659,7 @@ export default function App() {
       onSnapColorChange: setSnapColor,
       onReferenceElevationChange: (n) => applyChange((p) => setFieldIfChanged(p, "referenceElevationMasl", n)),
       onScaleLineWeightsChange: setScaleLineWeights,
+      onLineEndsChange: setLineEnds,
       onOfflineChange,
       onAiAccessChange: setAiAccessEnabled,
       onApplyLayout: (l) => setLayout(reconcileLayout(l)),
@@ -2728,6 +2737,8 @@ export default function App() {
           onReferenceElevationChange={(n) => applyChange((p) => setFieldIfChanged(p, "referenceElevationMasl", n))}
           scaleLineWeights={project.scaleLineWeights === true}
           onScaleLineWeightsChange={setScaleLineWeights}
+          lineEnds={lineEndsOf(project)}
+          onLineEndsChange={setLineEnds}
           offline={offline}
           onOfflineChange={onOfflineChange}
           aiAccess={aiAccess}
