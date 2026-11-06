@@ -105,12 +105,17 @@ test("Bewegen, Drehen, Spiegeln über Knopf, getippten Befehl und Taste; Esc/Ent
   expect(await lines(page)).toHaveLength(2);
 
   // Enter = Punkt an der letzten Mausposition: Kopie (Taste I im Befehlsfeld) nach rechts.
+  // Neu wählen: je nach Timing beendet schon das erste Esc den Befehl, dann hebt das zweite die Auswahl auf.
+  await selectAll(page);
   await page.getByRole("button", { name: "Verschieben", exact: true }).click();
   await commandInput(page).press("i");
   await typeCommand(page, "0,0");
   const p = await screenOf(page, 4, 0);
+  await page.mouse.move(p.x - 2, p.y);
   await page.mouse.move(p.x, p.y);
   await blurFocus(page);
+  // Mausposition muss beim Befehl angekommen sein (Zeigerereignis läuft über rAF), sonst nimmt Enter den alten Punkt.
+  await page.waitForTimeout(200);
   await page.keyboard.press("Enter");
   await expect(prompt(page)).toHaveText("Befehl:");
   expect(await lines(page)).toHaveLength(4);

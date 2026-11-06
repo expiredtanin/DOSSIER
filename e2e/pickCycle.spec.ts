@@ -41,10 +41,11 @@ test("Situation 1:500: erneuter Klick schaltet durch Bemassung, Schatten und Gel
   await showSnapshot(page, "Situation 1:500");
   await expect(page.locator("svg.plan-svg").first()).toBeVisible({ timeout: 30_000 });
   const hint = page.getByTestId("status-hint");
-  // Südfassade: Fensterbemassung über Baugrube, Schatten, Gelände, Höhenlinien und Parzelle.
+  // Nordwestlich des Hauses (Schatten fällt nach Nordwesten, [142]): Bemassung, Schatten, Gelände, Höhenlinien.
+  const [PX, PY] = [2, 16];
   await expect(async () => {
     await page.keyboard.press("Escape");
-    const p = await screenAt(page, 9.2, -1.19);
+    const p = await screenAt(page, PX, PY);
     await page.mouse.click(p.x, p.y);
     await expect(hint).toContainText(/^1\/\d+ Treffer/, { timeout: 1000 });
   }).toPass({ timeout: 30_000 });
@@ -53,7 +54,7 @@ test("Situation 1:500: erneuter Klick schaltet durch Bemassung, Schatten und Gel
   const seen: string[] = [];
   for (let i = 2; i <= n; i++) {
     await page.waitForTimeout(450); // kein Doppelklick
-    const p = await screenAt(page, 9.2, -1.19);
+    const p = await screenAt(page, PX, PY);
     await page.mouse.click(p.x, p.y);
     await expect(hint).toContainText(`${i}/${n} Treffer`);
     seen.push((await objInfo(page).locator(".objinfo-kind").first().textContent().catch(() => "")) ?? "");
@@ -63,7 +64,7 @@ test("Situation 1:500: erneuter Klick schaltet durch Bemassung, Schatten und Gel
   expect(seen).toContain("terrain");
   // Nach dem letzten wieder der erste Treffer.
   await page.waitForTimeout(450);
-  const p = await screenAt(page, 9.2, -1.19);
+  const p = await screenAt(page, PX, PY);
   await page.mouse.click(p.x, p.y);
   await expect(hint).toContainText(`1/${n} Treffer`);
   // Escape hebt die Auswahl auf, der Hinweis verschwindet.
