@@ -105,13 +105,19 @@ pub struct WallCuts {
     pub span_cutouts: Vec<SpanCutout>,
     /// [141] Zweite Schnittlinie am Anfang/Ende (Y-Knoten: der dritte Ast stösst an die Flächen beider
     /// Eckwände). `start_cut`/`end_cut` gilt im Querversatz (links der Laufrichtung) unter dem
-    /// Schnittpunkt beider Linien, `*_cut2` darüber. Nur der Grundriss wertet sie aus; 3D bleibt an
-    /// der ersten Linie.
+    /// Schnittpunkt beider Linien, `*_cut2` darüber. Grundriss (`wall_poche.rs` `knee_band`) und 3D
+    /// (`wall_bands.rs`: das Band über den Knick wird quer geteilt, je Teil eine Linie).
     pub start_cut2: Option<Line>,
     pub end_cut2: Option<Line>,
     /// [141] Die Wand liegt ganz in einer kollinearen Wand gleichen Typs (gleiches Band): im Grundriss
     /// nicht zeichnen, die umfassende Wand zeigt den Körper.
     pub covered: bool,
+    /// [141] Anfang/Ende liegt an der Stossfuge einer kollinearen Wand gleichen Typs (`merge_collinear`):
+    /// ein Körper mit der Nachbarwand, in der Ansicht keine Stirnfläche, im Schnitt-Pfad dort gestutzt.
+    pub collinear: [bool; 2],
+    /// [141] Anfang/Ende endet an einer Stützenkontur (`plan::wall_columns`, Stütze prioritärer oder
+    /// gleiches Bauteil): auch der Schnitt-Pfad stutzt dort.
+    pub at_column: [bool; 2],
     /// [141] Gerichtete Schichtmuster dieser Wand um 180° gedreht: Gehrung/Stossfuge zweier gleich
     /// orientierter Enden (Anfang an Anfang, Ende an Ende) spiegelt die Laufrichtung; gedreht gehen die
     /// Muster an der Schnittlinie spiegelbildlich ineinander über. Über die Ketten verbundener Wände
@@ -513,6 +519,8 @@ fn merge_collinear(walls: &[JoinWall], result: &mut [WallCuts]) {
                 continue;
             }
             set_pair(result, WallEnd { wall: a, end: a_end }, WallEnd { wall: b, end: b_end }, joint);
+            result[a].collinear[(a_end == End::End) as usize] = true;
+            result[b].collinear[(b_end == End::End) as usize] = true;
         }
     }
 }

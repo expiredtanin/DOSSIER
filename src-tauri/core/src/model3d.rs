@@ -56,6 +56,8 @@ pub enum SlabSource {
     Ceiling { index: usize, layer: Option<usize> },
     /// Index in `Project::stairs`.
     Stair { index: usize },
+    /// [141] Index in `Project::columns` (Stützen-Prisma, je Höhenabschnitt von [`column_pieces`]).
+    Column { index: usize },
 }
 
 /// Ein rohes Dreiecks-Mesh (`RMesh`).
@@ -198,37 +200,117 @@ pub fn column_footprint(col: &Column) -> Vec<Vec2> {
     }
 }
 
+/// [141] Körper einer Stütze als Prismen `(Querschnitt, z_unten, z_oben)`: in der Regel der volle
+/// Querschnitt; endet eine prioritärere Wand in der Stütze (`plan::wall_columns::Rel::Wall`, wie im
+/// Grundriss), ist das Wandband über deren Höhe ausgespart (Höhe in Abschnitte geteilt). Löcher im
+/// Rest (Wand endet ganz innen) bleiben unbeschnitten.
+pub fn column_pieces(p: &Project, col: &Column) -> Vec<(Vec<Vec2>, f64, f64)> {
+    use crate::plan::wall_columns::{band_rect, end_in_column, relation, Rel};
+    let fp = column_footprint(col);
+    let (zb, zt) = p.column_vertical_extent(col);
+    let full = vec![(fp.clone(), zb, zt)];
+    if fp.len() < 3 || !(zt > zb) {
+        return full;
+    }
+    let mut clips: Vec<(Vec<Vec2>, f64, f64)> = Vec::new();
+    for w in p.walls.iter().filter(|w| w.floor_id == col.floor_id) {
+        if end_in_column(w, &fp).is_none() || relation(p, w, col) != Rel::Wall {
+            continue;
+        }
+        let (wb, wt) = p.wall_vertical_extent(w);
+        let (z0, z1) = (wb.max(zb), wt.min(zt));
+        if z1 - z0 <= 1e-6 {
+            continue;
+        }
+        let total = p.wall_thickness(w, 0.2);
+        let ro = joins::reference_offset(wall_reference(w), total);
+        clips.push((band_rect(w, ro - total / 2.0, ro + total / 2.0), z0, z1));
+    }
+    if clips.is_empty() {
+        return full;
+    }
+    let mut zs: Vec<f64> = vec![zb, zt];
+    for c in &clips {
+        zs.extend([c.1, c.2]);
+    }
+    zs.sort_by(f64::total_cmp);
+    zs.dedup_by(|a, b| (*a - *b).abs() <= 1e-6);
+    let ring = |q: &[Vec2]| vec![q.iter().map(|v| [v.x, v.y]).collect::<Vec<[f64; 2]>>()];
+    let mut out = Vec::new();
+    for z in zs.windows(2) {
+        let mid = (z[0] + z[1]) / 2.0;
+        let active: Vec<crate::flat::Polygon> = clips.iter().filter(|c| c.1 <= mid && c.2 >= mid).map(|c| ring(&c.0)).collect();
+        if active.is_empty() {
+            out.push((fp.clone(), z[0], z[1]));
+            continue;
+        }
+        for pl in crate::polygon_bool::difference(&[ring(&fp)], &active) {
+            if pl.len() > 1 {
+                return full;
+            }
+            out.push((pl[0].iter().map(|v| Vec2 { x: v[0], y: v[1] }).collect(), z[0], z[1]));
+        }
+    }
+    out
+}
+
+/// Netz einer Stütze (Modell x, y, z): ein Prisma über dem Querschnitt; beschnittene Stützen
+/// ([`column_pieces`]) je Abschnitt mit Ohrenschnitt-Deckel (Querschnitt nicht mehr konvex).
+fn column_mesh(p: &Project, col: &Column) -> Option<(Vec<f64>, Vec<u32>)> {
+    let pieces = column_pieces(p, col);
+    let ok = |foot: &[[f64; 2]], z0: f64, z1: f64| z0.is_finite() && z1.is_finite() && foot.iter().all(|q| q[0].is_finite() && q[1].is_finite()) && foot.len() >= 3 && z1 - z0 > 1e-4;
+    let fr = |q: &[Vec2]| q.iter().map(|v| [v.x, v.y]).collect::<Vec<[f64; 2]>>();
+    if let [(foot, z0, z1)] = pieces.as_slice() {
+        if foot.len() == column_footprint(col).len() {
+            let foot = fr(foot);
+            return ok(&foot, *z0, *z1).then(|| crate::columns3d::prism(&foot, *z0, *z1));
+        }
+    }
+    let mut m = crate::solid_bool::Mesh::default();
+    for (foot, z0, z1) in &pieces {
+        let foot = fr(foot);
+        if ok(&foot, *z0, *z1) {
+            m.append(&crate::solid_bool::Mesh::prism(&foot, *z0, *z1));
+        }
+    }
+    (!m.is_empty()).then_some((m.positions, m.indices))
+}
+
+/// [141] Stützen als lotrechte Prismen-Platten (Schnitt, Ansicht): je Höhenabschnitt der Querschnitt aus
+/// [`column_pieces`], Herkunft `SlabSource::Column`.
+pub fn column_slabs(p: &Project) -> Vec<RSlab> {
+    let mut out = Vec::new();
+    for (index, c) in p.columns.as_deref().unwrap_or(&[]).iter().enumerate() {
+        if !(c.height > 0.0) {
+            continue;
+        }
+        let color = c.component_id.as_deref().and_then(|id| p.component(id)).map_or(COLUMN_RGB, |k| hex_to_rgb(&k.color, COLUMN_RGB));
+        for (foot, z_bottom, z_top) in column_pieces(p, c) {
+            let outline: Vec<RVec2> = foot.iter().map(|q| [q.x, q.y]).collect();
+            if z_top - z_bottom > 1e-6 && outline.iter().flatten().all(|v| v.is_finite()) {
+                out.push(RSlab { outline, z_bottom, z_top, color, ceiling_id: c.id.clone(), hatch: None, cut: None, monolith: None, source: SlabSource::Column { index } });
+            }
+        }
+    }
+    out
+}
+
 /// Stützen als Prisma-Meshes (`emitColumns`).
 pub fn emit_columns(p: &Project) -> Vec<RMesh> {
-    let mut cols: Vec<&Column> = Vec::new();
-    let mut w = FlatWriter::new();
-    let count = w.slot();
+    let mut out = Vec::new();
     for col in p.columns.as_deref().unwrap_or(&[]) {
         if col.height <= 0.0 {
             continue;
         }
-        let (z_bottom, z_top) = p.column_vertical_extent(col);
-        let foot = column_footprint(col);
-        w.num(z_bottom).num(z_top).ring(&foot);
-        cols.push(col);
+        let Some((positions, indices)) = column_mesh(p, col) else { continue };
+        let color = col
+            .component_id
+            .as_deref()
+            .and_then(|id| p.component(id))
+            .map_or(COLUMN_RGB, |c| hex_to_rgb(&c.color, COLUMN_RGB));
+        out.push(RMesh { crease_angle: None, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index: None });
     }
-    if cols.is_empty() {
-        return vec![];
-    }
-    w.set(count, cols.len() as f64);
-    crate::columns3d::columns(&w.done())
-        .into_iter()
-        .map(|m| {
-            let col = cols[m.src];
-            let color = col
-                .component_id
-                .as_deref()
-                .and_then(|id| p.component(id))
-                .map_or(COLUMN_RGB, |c| hex_to_rgb(&c.color, COLUMN_RGB));
-            RMesh {
-                crease_angle: None, positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None }
-        })
-        .collect()
+    out
 }
 
 // ── Wände ───────────────────────────────────────────────────────────────────
@@ -485,11 +567,58 @@ fn compute_joins_by_floor(p: &Project) -> Result<HashMap<String, WallCuts>, Stri
     let mut merged = HashMap::new();
     for (_, idx) in floor_groups(p) {
         let (jw, finite) = floor_join_input(p, &idx);
-        for (&i, c) in idx.iter().zip(floor_join_cuts(&jw, finite)) {
+        let mut cuts = floor_join_cuts(&jw, finite);
+        trim_at_columns(p, &idx, &mut cuts);
+        for (&i, c) in idx.iter().zip(cuts) {
             merged.insert(p.walls[i].id.clone(), c);
         }
     }
     Ok(merged)
+}
+
+/// [141] Wand endet in einer Stütze desselben Geschosses (wie im Grundriss, `plan::wall_columns`):
+/// Stütze prioritärer oder gleiches Bauteil → das Wandende folgt der Stützenkontur. Nur wenn die Stütze
+/// die ganze Wandhöhe deckt (sonst bliebe über/unter ihr eine Lücke); die prioritärere Wand beschneidet
+/// umgekehrt die Stütze ([`column_pieces`]).
+pub(crate) fn trim_at_columns(p: &Project, idx: &[usize], cuts: &mut [WallCuts]) {
+    let Some(&first) = idx.first() else { return };
+    let floor = p.walls[first].floor_id.as_str();
+    let cols: Vec<(&Column, Vec<Vec2>, (f64, f64))> = p
+        .columns
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|c| c.floor_id == floor && c.height > 0.0)
+        .map(|c| (c, column_footprint(c), p.column_vertical_extent(c)))
+        .collect();
+    if cols.is_empty() {
+        return;
+    }
+    for (k, &i) in idx.iter().enumerate() {
+        let w = &p.walls[i];
+        if cuts[k].covered {
+            continue;
+        }
+        let (wb, wt) = p.wall_vertical_extent(w);
+        let cover: Vec<(&Column, Vec<Vec2>)> = cols.iter().filter(|c| c.2 .0 <= wb + 1e-6 && c.2 .1 >= wt - 1e-6).map(|c| (c.0, c.1.clone())).collect();
+        if !cover.is_empty() {
+            crate::plan::wall_columns::trim_walls_at_columns(p, &[w], &cover, &mut cuts[k..k + 1]);
+        }
+    }
+}
+
+/// Schnitt-/Ansichts-Eingabe (ungeschichtet): von der Verschneidung nur, was den Körper ändert, ohne
+/// Gehrungen (die vereinigt der Schnitt selbst) — verdeckte Wand, kollineare Stossfuge, Ende an einer
+/// Stütze ([141]).
+pub(crate) fn section_cuts(c: &WallCuts) -> WallCuts {
+    WallCuts {
+        covered: c.covered,
+        collinear: c.collinear,
+        at_column: c.at_column,
+        start_cut: c.start_cut.filter(|_| c.collinear[0] || c.at_column[0]),
+        end_cut: c.end_cut.filter(|_| c.collinear[1] || c.at_column[1]),
+        ..Default::default()
+    }
 }
 
 /// Wände je Geschoss (Positionen in `p.walls`), Geschosse in der Reihenfolge ihres ersten Auftretens.
@@ -602,7 +731,7 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
 /// Wie [`emit_walls`]; `pockets = false` lässt die Taschen der Taschen-Schiebetüren im Körper ([95]) —
 /// für Schnitt/Ansicht, die die Wand nach Schichten aufteilen und die Tasche selbst aussparen.
 pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<RWall>, String> {
-    let joins = if layered { Some(compute_joins_by_floor(p)?) } else { None };
+    let joins = compute_joins_by_floor(p)?;
     let maps = wall_material_color_maps(p);
     let mut contexts: HashMap<&str, FloorContext> = HashMap::new();
     let mut out = Vec::new();
@@ -611,7 +740,7 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
         // Schnitt-Eingabe: nur die Dächer ([G2]); Decken rechnet der Schnitt selbst (Dominanz).
         let ctx = contexts.entry(wall.floor_id.as_str()).or_insert_with(|| floor_context(p, &wall.floor_id, layered));
         let openings = by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice());
-        let cuts = if layered { joins.as_ref().and_then(|j| j.get(&wall.id)).cloned().unwrap_or_default() } else { WallCuts::default() };
+        let cuts = joins.get(&wall.id).map_or_else(WallCuts::default, |c| if layered { c.clone() } else { section_cuts(c) });
         wall_pieces(p, &maps, wall, ctx, openings, cuts, layered, pockets, &mut out);
     }
     Ok(out)
@@ -623,6 +752,10 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
 /// behält das Ergebnis je Wand.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContext, openings: &[&Opening], cuts: WallCuts, layered: bool, pockets: bool, out: &mut Vec<RWall>) {
+    // [141] Ganz in einer kollinearen Wand gleichen Typs: deren Körper zeigt sie mit (nicht doppelt).
+    if cuts.covered {
+        return;
+    }
     {
         let (bands, stacked) = resolve_wall_bands(p, maps, wall, layered);
         let (z_bottom, z_top) = p.wall_vertical_extent(wall);
@@ -2692,12 +2825,7 @@ fn pick_columns(p: &Project) -> Vec<PickColumn> {
         if !(col.height > 0.0) {
             continue;
         }
-        let (z0, z1) = p.column_vertical_extent(col);
-        let foot: Vec<[f64; 2]> = column_footprint(col).iter().map(|q| [q.x, q.y]).collect();
-        if foot.len() < 3 || !(z0.is_finite() && z1.is_finite()) {
-            continue;
-        }
-        let (pos, idx) = crate::columns3d::prism(&foot, z0, z1);
+        let Some((pos, idx)) = column_mesh(p, col) else { continue };
         let tris = extrusion_tris(&pos, &idx);
         if !tris.is_empty() {
             out.push(PickColumn { tris, column_id: col.id.clone() });

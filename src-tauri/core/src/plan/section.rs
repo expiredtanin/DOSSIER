@@ -455,6 +455,7 @@ pub enum SlabOwner<'a> {
     None,
     Ceiling(&'a Ceiling, Option<usize>),
     Stair(&'a Stair),
+    Column(&'a Column),
 }
 
 /// Je emittierter Platte (Deckenschicht, Treppentritt, Podest) ihre Herkunft (`RSlab::source`).
@@ -466,6 +467,7 @@ pub fn slab_owners<'a>(p: &'a Project, slabs: &[RSlab]) -> Vec<SlabOwner<'a>> {
         .map(|s| match s.source {
             SlabSource::Ceiling { index, layer } => ceilings.get(index).map_or(SlabOwner::None, |c| SlabOwner::Ceiling(c, layer)),
             SlabSource::Stair { index } => stairs.get(index).map_or(SlabOwner::None, SlabOwner::Stair),
+            SlabSource::Column { index } => p.columns.as_deref().and_then(|c| c.get(index)).map_or(SlabOwner::None, SlabOwner::Column),
             SlabSource::None => SlabOwner::None,
         })
         .collect()
@@ -940,6 +942,22 @@ fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option
                     SlabOwner::Stair(st) => {
                         cp.stair_id = Some(st.id.clone());
                         cp.category = Some(st.category_code.clone());
+                    }
+                    // [141] Stütze: Stil und Rang ihres Bauteils (wie im Grundriss); ohne Bauteil dominiert sie.
+                    SlabOwner::Column(c) => {
+                        cp.source_id = Some(c.id.clone());
+                        cp.category = Some(c.category_code.clone());
+                        let comp = c.component_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.component(id));
+                        if let Some(k) = comp {
+                            let category = p.layer_category(&c.category_code);
+                            let hid = resolve_hatch_id(c.hatch_id.as_deref(), c.hatch_source, category, Some(&k.hatch_id)).unwrap_or(&k.hatch_id);
+                            if let Some(h) = resolve_hatch(p, hid, None, resolve_foreground(k, c.foreground.as_deref(), category, c.foreground_source), None) {
+                                cp.fill = Some(poche_fill(h.pattern).to_string());
+                                cp.hatch = Some(h);
+                            }
+                            cp.component_id = Some(k.id.clone());
+                        }
+                        cp.join_priority = Some(comp.map_or(f64::MAX, |k| k.join_priority));
                     }
                     SlabOwner::None => {}
                 }
@@ -2149,6 +2167,8 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let walls_r = model3d::emit_walls_with(p, false, false)?;
     let mut slabs_r = model3d::emit_slabs(p);
     slabs_r.extend(model3d::emit_stairs(p, true));
+    // [141] Stützen: geschnitten mit Bauteil-Stil (Rang gegen die Wände wie im Grundriss) und in der Projektion.
+    slabs_r.extend(model3d::column_slabs(p));
     let wi: Vec<render3d::WallInput> = walls_r.iter().map(wall_input).collect();
     let si: Vec<render3d::SlabInput> = slabs_r.iter().map(slab_input).collect();
     // Die Ebene ging als Zahl-Argument (wasm-bindgen, `Math.fround`) hinein, nicht über JSON.

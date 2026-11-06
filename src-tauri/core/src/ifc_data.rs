@@ -1311,11 +1311,18 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
 
     // ── Stützen → IfcColumn (Profil-Extrusion, Material = Bauteil) ──────────
     for col in p.columns.as_deref().unwrap_or(&[]) {
-        let footprint = model3d::column_footprint(col);
+        // [141] Von einer prioritäreren Wand beschnitten: Querschnitt ohne das Wandband (wie im 3D), wenn
+        // die Aussparung über die ganze Höhe geht (ein Abschnitt); sonst der volle Querschnitt.
+        let (footprint, z_bottom, z_top) = match model3d::column_pieces(&p, col).as_slice() {
+            [one] => one.clone(),
+            _ => {
+                let (zb, zt) = p.column_vertical_extent(col);
+                (model3d::column_footprint(col), zb, zt)
+            }
+        };
         if footprint.len() < 3 {
             continue;
         }
-        let (z_bottom, z_top) = p.column_vertical_extent(col);
         if !(z_top > z_bottom) {
             continue;
         }
