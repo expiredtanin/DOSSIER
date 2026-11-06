@@ -2819,9 +2819,23 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   vitest `sun.test.ts` (Stützen/Bäume als Schattenwerfer ergänzt). Zeit Musterhaus komplex (WASM ohne wasm-opt,
   Node): 21.6. 10:00 UTC 19.5 ms (vorher 0.8 ms, nur Ebene), 21.12. 14:30 UTC (Sonne 7.8°) 45.5 ms. Goldens
   `komplex-grundriss-eg-50/100` neu (Schattenflächen 1 → 7 Polygone: Bäume, Stützmauer, Pflanzgefässe). Geprüft:
-  CLI-Grundriss EG vorher/nachher (Linux/Chromium). Offen: Schatten auf Gebäudeteile (Decken, Dächer) bleibt
-  unberücksichtigt (Strahl geht bis ins Gelände, auch unter dem Gebäude); Dach-/Kronenschatten als konvexe Hülle;
-  Bäume nur als Kreise erkannt (kein Baum-Objekt mit eigener Höhe); nicht in der Tauri-App geprüft.
+  CLI-Grundriss EG vorher/nachher (Linux/Chromium).
+  6.11.: **Schatten auf Gebäudeteile.** Im Grundriss (Schnitthöhe `cut_z` des Geschosses) fangen Decken und Dächer,
+  deren Oberkante nicht über dem Schnitt liegt (im Plan sichtbar: Bodenplatten, Terrassen, Dächer tieferer Geschosse),
+  den Strahl vor dem Gelände ab: `sun::Receiver` = Höhenfeld (Decke eben mit Aussparungen/Deckenöffnungen, Dach über die
+  Dachflächen `roof_underside_at`, Dicke 0.3 m), Treffer = Strahl kreuzt die Oberseite von oben oder trifft die Stirn
+  innerhalb der Dicke (darunter geht er durch), Eintritt per Halbieren zwischen den Abtastpunkten; ein Dach fängt seinen
+  eigenen Strahl nicht. Vorfilter je Strahl: Rechteck-Abschnitt und höchste Oberkante. Ohne Geländenetz läuft der Strahl
+  dann über der Ebene ±0.00 (`Ground::plane`). Abfrage `shadows` nimmt optional die Schnitthöhe (TS
+  `shadowPolygons(p, sun, cutZ?)`); ohne sie wie bisher. Tests: Rust `schatten_auf_tiefere_platte` (Körper OK 6 m neben
+  Platte OK 1 m, 45°: Schatten endet bei 5 statt 6 m, Fläche 14 m²; Platte über dem Schnitt / zu kurze Platte fangen
+  nichts), `schatten_auf_pultdach_als_hoehenfeld` (geneigte Fläche, eigenes Dach, Start unter dem Dach). Zeit Musterhaus
+  komplex EG (WASM ohne wasm-opt, Node, Median): 21.6. 10:00 UTC 22.8 → 25.8 ms, 21.12. 14:30 UTC (7.8°) 52.6 → 52.2 ms,
+  21.3. 16:00 UTC (15.8°) 44.9 → 44.6 ms. Goldens `komplex-grundriss-eg-50/100` neu: Hauptschatten 363.86 → 364.32 m²
+  (Strahlen enden auf der Bodenplatte ±0.00 statt im tieferen Gelände daneben). Nicht angesehen (nur Zahlen/Tests),
+  nicht in der Tauri-App geprüft. Offen: Schatten nur im Geschoss nächst ±0.00 (Dächer tieferer Geschosse zeigt erst
+  ein OG-Plan); Decken/Dächer werfen selbst keinen Schatten (Auskragungen, Balkone); Dach-/Kronenschatten als konvexe
+  Hülle; Bäume nur als Kreise erkannt (kein Baum-Objekt mit eigener Höhe).
 - ◐ **[145] Texte beim Zoomen synchron.** (6.11., Maintainer macOS: „Beim Zoomen sind die Texte nicht synchron, sie
   folgen jeder Bewegung mit leichter Verzögerung.") Ursache: auf macOS zeichnet die native Metal-Fläche (`native2d`)
   die Geometrie; Raumstempel (`text`), Textfelder/mehrzeilige `drawingText` und Griffe liegen im SVG-Overlay der

@@ -99,7 +99,7 @@ pub fn sun_shadow(p: &Project, floor: &str, when_ms: Option<f64>, out: &mut Vec<
     let Some(t) = when_ms.filter(|t| !t.is_nan()) else { return };
     let (lat, lon) = project_lat_lon(p);
     let sun = crate::sun::sun_position(lat, lon, t);
-    for poly in crate::sun::shadow_polygons_project(p, sun) {
+    for poly in crate::sun::shadow_polygons_project(p, sun, Some(cut_z(p, floor))) {
         for r in crate::sun::without_holes(&poly) {
             let mut q = flat_polygon(ring_pts(&r), SUN_SHADOW_FILL, SUN_SHADOW_OPACITY);
             if let Primitive::Polygon { context_object_id, .. } = &mut q {

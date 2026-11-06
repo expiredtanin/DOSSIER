@@ -45,10 +45,11 @@ export type ShadowPolygon = Vec2[][];
 
 /**
  * Vereinigter Schatten aller Wände, Körper und Dächer (leer bei Nacht). Rechnet der Kern auf dem
- * Projekt-Dokument (`sun.rs`): Wände und freie Körper als Prismen, Dächer als Punktwolke.
+ * Projekt-Dokument (`sun.rs`): Wände und freie Körper als Prismen, Dächer als Punktwolke. Mit `cutZ`
+ * (Schnitthöhe eines Grundrisses) fangen Decken/Dächer bis zu dieser Höhe den Schatten ab ([142]).
  */
-export function shadowPolygons(project: Project, sun: SunPosition): ShadowPolygon[] {
-  return documentFor(project).query<ShadowPolygon[]>("shadows", [sun.azimuth, sun.elevation]);
+export function shadowPolygons(project: Project, sun: SunPosition, cutZ?: number): ShadowPolygon[] {
+  return documentFor(project).query<ShadowPolygon[]>("shadows", cutZ == null ? [sun.azimuth, sun.elevation] : [sun.azimuth, sun.elevation, cutZ]);
 }
 
 /**
