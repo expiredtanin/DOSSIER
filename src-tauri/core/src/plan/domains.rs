@@ -790,8 +790,24 @@ fn abbreviate(text: &str, n: usize) -> String {
 /// [140] Hindernisse für Raumstempel aus den schon erzeugten Domänen: Treppen (alle Striche), Türschwenk-Bögen,
 /// Stützen, Beschriftungen des Kontexts (Höhenlinien-Koten) und die Zeichnungen, denen Stempel ausweichen
 /// (Bemassung, Koten, Texte, Symbole; `drawings::stamp_obstacle_prims`).
+#[cfg(test)]
 fn stamp_obstacles(c: &Ctx, d: &DomainPrims) -> super::stamp_place::Obstacles {
+    stamp_obstacles_with(d, drawing_obstacles(c))
+}
+
+/// [150] Hindernisse der Zeichnungen des Geschosses (Bemassung, Koten, Texte, Symbole) — für Raumstempel und
+/// Höhenlinien-Beschriftungen, einmal gerechnet.
+fn drawing_obstacles(c: &Ctx) -> super::stamp_place::Obstacles {
     let mut o = super::stamp_place::Obstacles::default();
+    for q in super::drawings::stamp_obstacle_prims(c) {
+        o.add_prim(&q);
+    }
+    o
+}
+
+/// Hindernisse der Raumstempel: `drawn` (Zeichnungen) und die Domänen.
+fn stamp_obstacles_with(d: &DomainPrims, drawn: super::stamp_place::Obstacles) -> super::stamp_place::Obstacles {
+    let mut o = drawn;
     for q in d.stairs.iter().chain(&d.columns) {
         o.add_prim(q);
     }
@@ -804,9 +820,6 @@ fn stamp_obstacles(c: &Ctx, d: &DomainPrims) -> super::stamp_place::Obstacles {
         if matches!(q, Primitive::DrawingText { .. }) {
             o.add_prim(q);
         }
-    }
-    for q in super::drawings::stamp_obstacle_prims(c) {
-        o.add_prim(&q);
     }
     o
 }
@@ -1140,14 +1153,21 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
 /// übrigen Inhalt aus ([`stamp_obstacles`]), darum nach allen anderen Domänen (Gruppen-Reihenfolge bleibt).
 fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
     let ceiling = super::ceiling_plan::is_ceiling_level(c.p, &c.a.floor);
-    if c.a.global && !ceiling {
-        super::context::plan_context(c, &mut out.context);
+    if ceiling {
+        return;
+    }
+    let drawn = drawing_obstacles(c);
+    if c.a.global {
+        // [150] Schnittführungen zuerst: ihre Beschriftungen sind Hindernisse der Höhenlinien-Beschriftungen.
         super::context::plan_section_lines(c, &mut out.sections);
+        let mut o = drawn.clone();
+        for q in out.sections.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })) {
+            o.add_prim(q);
+        }
+        super::context::plan_context_with(c, &mut out.context, &o);
     }
-    if !ceiling {
-        let obstacles = stamp_obstacles(c, out);
-        rooms(c, &mut out.rooms, bounds, &obstacles);
-    }
+    let obstacles = stamp_obstacles_with(out, drawn);
+    rooms(c, &mut out.rooms, bounds, &obstacles);
 }
 
 /// Reihenfolge der Gruppen im Plan-Puffer der Abfrage `planDomains`: Schatten und Baurecht
@@ -1288,7 +1308,7 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
     // [140] Raumstempel weichen Zeichnungen aus (Bemassung, Koten, Texte, Symbole): deren Stand gehört in den
     // Schlüssel, die übrigen Zeichnungen nicht.
     let stamps = revs.item_stamps("drawings2d").filter(|s| s.len() == c.p.drawings2d.len());
-    let obstacle_sig = c.p.drawings2d.iter().enumerate().filter(|(_, d)| super::drawings::is_stamp_obstacle(&d.geom)).fold(0u64, |h, (i, d)| {
+    let obstacle_sig = c.p.drawings2d.iter().enumerate().filter(|(_, d)| super::drawings::is_stamp_obstacle(&d.geom) || matches!(d.geom, Drawing2DGeom::Grid { .. })).fold(0u64, |h, (i, d)| {
         let v = match stamps {
             Some(s) => s[i],
             None => serde_json::to_string(d).map_or(0, |t| t.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))),

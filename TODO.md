@@ -3345,6 +3345,29 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   EG 1:100 mit Baum-Objekten samt Beschriftung in Chromium. Offen: Rahmen/Gruppen nicht per e2e und nicht in der
   Tauri-App geprüft; Beschriftung fest rechts vom Stamm (kein Ausweichen, kein Griff); 3D-Klick erweitert nicht auf
   die Gruppe; Krone im Schatten als konvexe Hülle; Schnitt durch die Krone zeigt die ganze Silhouette.
+- ◐ **[150] Gelände im Grundriss sauber am Gebäude.** (6.11., Rest aus [140] Teil 6: in „E.07 Eingang“ stapelten sich
+  Höhenlinien-Beschriftungen, die Beschriftung lag stets in der Linienmitte, auch im Gebäude.) **Fussabdruck je
+  Geschoss** (`plan/context.rs::terrain_footprint`): Wände (Bogenwände über `arc_footprint`, gerade Wände an
+  angeschlossenen Enden um die halbe Dicke verlängert → Ecken geschlossen), Decken/Bodenplatten, Räume und Körper des
+  Geschosses und des Erdgeschosses, vereinigt über den Kern (i_overlay); je Teil nur der Aussenring, so zählen von
+  Wänden umschlossene Bereiche ohne Raum/Decke (Anbau, Innenhof) dazu. Wände anderer Geschosse (z. B. OG-Auskragung,
+  UG-Stützmauer) schneiden die Höhenlinien im Geschoss nicht mehr (vorher alle Geschosse). Höhenlinien,
+  Böschungsoberkante und Böschungsschraffur der Baugrube enden daran (Sohle bleibt); Achsraster weiter am
+  Fussabdruck aller Geschosse. **Beschriftungen** (`terrain_contours`): je Zähllinie alle 150 mm Papier eine, je
+  Abschnitt nahe der Mitte gesucht (1-mm-Schritte): Linie gerade genug (Sehnenabweichung ≤ 0.3 · Schrifthöhe),
+  Rechteck (+0.3 h) ausserhalb des Fussabdrucks, nicht auf Bemassung/Koten/Texten/Symbolen
+  (`drawings::stamp_obstacle_prims`), Achsraster-Blasen (`grid_bubble_prims`) und Schnittführungs-Beschriftungen,
+  nicht über anderen Beschriftungen (+0.5 h), Abstand entlang der Linie ≥ 60 mm; kreuzt das Rechteck mehr als eine
+  andere Höhenlinie (Bündel an Stützmauer/Baugrubenwand), keine Beschriftung. Raumstempel liegen im Fussabdruck
+  (Räume gehören dazu). Hindernisse der Zeichnungen einmal je Plan gerechnet (Stempel und Höhenlinien); der
+  Domänen-Cache trägt nun auch den Stand der Achsraster. Neu `Obstacles::hits_convex`, `convex_overlap`,
+  `seg_hits_ring` (`plan/stamp_place.rs`). Gilt für jeden Geschoss-Grundriss samt Situation 1:200/1:500; Deckenspiegel
+  zeichnet kein Gelände, Schnitt/Ansicht unverändert. Tests: `hoehenlinie_durch_umschlossenen_anbau_ausgespart`
+  (Anbau ohne Raum, OG-Wand schneidet nicht), `hoehenlinien_beschriftungen_kollisionsfrei` (steiles Gelände,
+  Bemassung); beide schlugen auf dem alten Stand fehl. Goldens unverändert (enthalten kein Gelände). Geprüft: cargo test
+  Kern, tsc, vitest, CLI-SVG Musterhaus komplex EG 1:100/1:200/1:500 vorher/nachher in Chromium (nur Linux). Offen:
+  Raumstempel ausserhalb ihres Raums sind kein Hindernis; Beschriftungen an Bündeln fehlen ganz statt versetzt; nicht
+  in der Tauri-App/Metal geprüft.
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

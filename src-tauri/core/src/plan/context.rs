@@ -57,14 +57,25 @@ fn bbox_corners(positions: &[f64]) -> Option<Vec<Vec2>> {
     (b.len() == 4).then(|| vec![v2(b[0], b[1]), v2(b[2], b[1]), v2(b[2], b[3]), v2(b[0], b[3])])
 }
 
-/// Kontext-Schicht (`addContextContours`). Objekte ohne Kategorie bleiben immer sichtbar.
+/// Kontext-Schicht (`addContextContours`). Objekte ohne Kategorie bleiben immer sichtbar. Die
+/// Höhenlinien-Beschriftungen weichen den Zeichnungen des Geschosses aus (`drawings::stamp_obstacle_prims`).
 pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
+    let mut o = super::stamp_place::Obstacles::default();
+    for q in super::drawings::stamp_obstacle_prims(c) {
+        o.add_prim(&q);
+    }
+    plan_context_with(c, out, &o);
+}
+
+/// Wie [`plan_context`], mit den schon gesammelten Hindernissen der Zeichnungen (Bemassung, Koten, Texte …).
+pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &super::stamp_place::Obstacles) {
     // [137] Pick-Flächen der Baugruben zuletzt (zuoberst): sie liegen im Rahmen des Geländes, das sonst
     // jeden Klick in der Grube fängt.
     let mut late: Vec<Primitive> = Vec::new();
-    // [140] Höhenlinien enden an der Gebäudegrundfläche (statt quer durch die Räume zu laufen).
+    // [140]/[150] Höhenlinien, Böschungsschraffur und Beschriftungen enden am Fussabdruck des Geschosses.
     let mut house_cache: Option<Vec<Vec<Vec2>>> = None;
-    let mut house = || -> Vec<Vec<Vec2>> { house_cache.get_or_insert_with(|| building_rings(c.p)).clone() };
+    let mut house = || -> Vec<Vec<Vec2>> { house_cache.get_or_insert_with(|| terrain_footprint(c.p, &c.a.floor)).clone() };
+    let mut label_obst: Option<super::stamp_place::Obstacles> = None;
     for obj in c.p.context.as_deref().unwrap_or(&[]) {
         let code = match obj {
             ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
@@ -128,9 +139,17 @@ pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
                     }
                     out.push(pick_band(q, Some(&t.id), None));
                 }
-                terrain_contours(c, t, out, &house());
+                // [150] Beschriftungen weichen auch den Blasen der Achsraster aus.
+                let obst = label_obst.get_or_insert_with(|| {
+                    let mut o = drawing_obstacles.clone();
+                    for q in super::drawings::grid_bubble_prims(c) {
+                        o.add_prim(&q);
+                    }
+                    o
+                });
+                terrain_contours(c, t, out, &house(), obst);
             }
-            ContextObject::Excavation(e) => excavation_lines(c, e, out, &mut late),
+            ContextObject::Excavation(e) => excavation_lines(c, e, out, &mut late, &house()),
             ContextObject::Image(_) => {}
         }
         if let Some((a, _)) = &tov {
@@ -174,6 +193,60 @@ const CONTOUR_MIN_GAP_MM: f64 = 0.6;
 /// [140] Aussenringe der Gebäudegrundfläche (Wände und Körper aller Geschosse vereinigt, ohne Innenhöfe/Räume).
 pub(super) fn building_rings(p: &Project) -> Vec<Vec<Vec2>> {
     crate::site_rules::building_footprint(p).into_iter().filter_map(|poly| poly.into_iter().next()).filter(|r| r.len() >= 3).collect()
+}
+
+/// [150] Fussabdruck des Gebäudes für das Gelände im Grundriss von `floor`: Wände (auch Bogenwände; gerade
+/// Wände an angeschlossenen Enden um die halbe Dicke verlängert, damit Ecken geschlossen sind), Decken/
+/// Bodenplatten, Räume und Körper des Geschosses und des Erdgeschosses (Geschoss nächst ±0.00), vereinigt
+/// über den Kern (i_overlay). Je Teil nur der Aussenring: von Wänden umschlossene Bereiche ohne Raum/Decke
+/// (Anbau, Innenhof) zählen dazu. Ohne Geschoss-Ebenen alle Bauteile.
+pub(super) fn terrain_footprint(p: &Project, floor: &str) -> Vec<Vec<Vec2>> {
+    let mut floors: Vec<&str> = Vec::new();
+    if p.drawing_levels.iter().any(|l| l.id == floor && l.kind == DrawingLevelKind::Floor) {
+        floors.push(floor);
+    }
+    if let Some(g) = super::extras::ground_floor_id(p) {
+        floors.push(g);
+    }
+    let on = |f: &str| floors.is_empty() || floors.contains(&f);
+    let ok = |q: &Vec2| q.x.is_finite() && q.y.is_finite();
+    let mut parts: Vec<crate::flat::Polygon> = Vec::new();
+    let walls: Vec<(&Wall, f64)> = p.walls.iter().filter(|w| on(&w.floor_id) && ok(&w.start) && ok(&w.end)).map(|w| (w, p.wall_thickness(w, 0.2))).filter(|(w, t)| t.is_finite() && *t >= 0.0 && (w.end.x - w.start.x).hypot(w.end.y - w.start.y) > 1e-9).collect();
+    let plain: Vec<Vec<[f64; 2]>> = walls.iter().map(|(w, t)| crate::wall_arc::arc_footprint(w, *t).unwrap_or_else(|| crate::site_rules::wall_corners(w.start, w.end, *t))).collect();
+    let plain_v: Vec<Vec<Vec2>> = plain.iter().map(|r| r.iter().map(|a| v2(a[0], a[1])).collect()).collect();
+    // Ende angeschlossen: liegt (1 cm Toleranz) auf/in einer anderen Wand.
+    let joined = |i: usize, q: Vec2| plain.iter().enumerate().any(|(j, r)| j != i && (inside(q, &plain_v[j]) || (0..r.len()).any(|k| seg_dist(q, r[k], r[(k + 1) % r.len()]) < 0.01)));
+    for (i, (w, t)) in walls.iter().enumerate() {
+        if w.bulge.is_some_and(|b| b.abs() > 1e-9) {
+            parts.push(vec![plain[i].clone()]);
+            continue;
+        }
+        let l = (w.end.x - w.start.x).hypot(w.end.y - w.start.y);
+        let (ux, uy) = ((w.end.x - w.start.x) / l, (w.end.y - w.start.y) / l);
+        let (e0, e1) = (if joined(i, w.start) { t / 2.0 } else { 0.0 }, if joined(i, w.end) { t / 2.0 } else { 0.0 });
+        parts.push(vec![crate::site_rules::wall_corners(v2(w.start.x - ux * e0, w.start.y - uy * e0), v2(w.end.x + ux * e1, w.end.y + uy * e1), *t)]);
+    }
+    let ring = |pts: &[Vec2]| -> Option<crate::flat::Polygon> { (pts.len() >= 3 && pts.iter().all(ok)).then(|| vec![pts.iter().map(|q| [q.x, q.y]).collect()]) };
+    for c in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|c| on(&c.floor_id)) {
+        parts.extend(ring(&c.outline));
+    }
+    for r in p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| on(&r.floor_id)) {
+        parts.extend(ring(&r.boundary));
+    }
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]).iter().filter(|s| on(&s.level_id) && s.operation.as_deref() != Some("subtract")) {
+        parts.extend(ring(&s.points));
+    }
+    if parts.is_empty() {
+        return Vec::new();
+    }
+    crate::polygon_bool::union(&parts).into_iter().filter_map(|poly| poly.into_iter().next()).filter(|r| r.len() >= 3).map(|r| r.iter().map(|q| v2(q[0], q[1])).collect()).collect()
+}
+
+fn seg_dist(q: Vec2, a: [f64; 2], b: [f64; 2]) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let l2 = dx * dx + dy * dy;
+    let t = if l2 > 0.0 { (((q.x - a[0]) * dx + (q.y - a[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    (q.x - a[0] - t * dx).hypot(q.y - a[1] - t * dy)
 }
 
 fn inside(q: Vec2, ring: &[Vec2]) -> bool {
@@ -228,13 +301,116 @@ fn ink_line(a: Vec2, b: Vec2, w: f64, color: &str, dash: Option<Vec<f64>>) -> Pr
     Primitive::Line { a, b, cls: "context-line".into(), weight_mm: w, dash: dash.map(Some), zigzag: None, motif: None, color: Some(color.into()), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None }
 }
 
+/// [150] Abstand (Papier-mm) der Beschriftungen entlang einer Zähllinie: je volle Strecke dieser Länge eine.
+const CONTOUR_LABEL_SPACING_MM: f64 = 150.0;
+
+/// [150] Eine Höhenlinie als Linienzug mit Bogenlänge (geschlossen: erster Punkt am Ende wiederholt).
+struct Iso {
+    level: f64,
+    index: bool,
+    pts: Vec<[f64; 2]>,
+    cum: Vec<f64>,
+    closed: bool,
+}
+
+impl Iso {
+    fn len(&self) -> f64 {
+        *self.cum.last().unwrap_or(&0.0)
+    }
+
+    /// Punkt bei Bogenlänge `s` (geschlossen: modulo Länge).
+    fn at(&self, s: f64) -> [f64; 2] {
+        let l = self.len();
+        let s = if self.closed && l > 0.0 { s.rem_euclid(l) } else { s.clamp(0.0, l) };
+        let i = self.cum.partition_point(|c| *c <= s).clamp(1, self.pts.len() - 1);
+        let (a, b) = (self.pts[i - 1], self.pts[i]);
+        let d = self.cum[i] - self.cum[i - 1];
+        let f = if d > 0.0 { (s - self.cum[i - 1]) / d } else { 0.0 };
+        [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]
+    }
+
+    /// Grösster Abstand der Ecken zwischen `s0` und `s1` von der Sehne (gerade genug für eine Beschriftung?).
+    fn bend(&self, s0: f64, s1: f64) -> f64 {
+        let (a, b) = (self.at(s0), self.at(s1));
+        let l = self.len();
+        let mut d: f64 = 0.0;
+        for (i, q) in self.pts.iter().enumerate() {
+            let c = self.cum[i];
+            let within = if self.closed && l > 0.0 { (c - s0).rem_euclid(l) < s1 - s0 } else { c > s0 && c < s1 };
+            if within {
+                d = d.max(seg_dist(v2(q[0], q[1]), a, b));
+            }
+        }
+        d
+    }
+}
+
+/// [150] Rechteck um `m` (Richtung `u`, halbe Länge `hu`, halbe Höhe `hv`).
+fn rot_rect(m: [f64; 2], u: [f64; 2], hu: f64, hv: f64) -> Vec<[f64; 2]> {
+    let n = [-u[1], u[0]];
+    [(-hu, -hv), (hu, -hv), (hu, hv), (-hu, hv)].iter().map(|(a, b)| [m[0] + u[0] * a + n[0] * b, m[1] + u[1] * a + n[1] * b]).collect()
+}
+
+/// [150] Strecken der gezeichneten Höhenlinien in einem Raster (Zelle `cell`) für die Frage „wie viele andere
+/// Linien kreuzt diese Beschriftung?“.
+struct SegGrid {
+    cell: f64,
+    map: std::collections::HashMap<(i64, i64), Vec<usize>>,
+    segs: Vec<([f64; 2], [f64; 2], usize)>,
+}
+
+impl SegGrid {
+    fn new(cell: f64) -> Self {
+        SegGrid { cell, map: Default::default(), segs: Vec::new() }
+    }
+
+    fn key(&self, x: f64, y: f64) -> (i64, i64) {
+        ((x / self.cell).floor() as i64, (y / self.cell).floor() as i64)
+    }
+
+    fn add(&mut self, a: [f64; 2], b: [f64; 2], line: usize) {
+        let i = self.segs.len();
+        self.segs.push((a, b, line));
+        let (k0, k1) = (self.key(a[0].min(b[0]), a[1].min(b[1])), self.key(a[0].max(b[0]), a[1].max(b[1])));
+        if (k1.0 - k0.0 + 1).saturating_mul(k1.1 - k0.1 + 1) > 10_000 {
+            return;
+        }
+        for x in k0.0..=k1.0 {
+            for y in k0.1..=k1.1 {
+                self.map.entry((x, y)).or_default().push(i);
+            }
+        }
+    }
+
+    /// Anzahl Strecken anderer Linien als `line`, die den Ring berühren.
+    fn crossings(&self, ring: &[[f64; 2]], line: usize) -> usize {
+        let b = super::stamp_place::ring_bbox(ring);
+        let (k0, k1) = (self.key(b[0], b[1]), self.key(b[2], b[3]));
+        let mut ids: Vec<usize> = Vec::new();
+        for x in k0.0..=k1.0 {
+            for y in k0.1..=k1.1 {
+                if let Some(v) = self.map.get(&(x, y)) {
+                    ids.extend(v.iter().copied().filter(|i| self.segs[*i].2 != line));
+                }
+            }
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids.iter().filter(|i| super::stamp_place::seg_hits_ring(self.segs[**i].0, self.segs[**i].1, ring)).count()
+    }
+}
+
 /// [T6] Höhenlinien aus dem Gelände-Netz (samt Baugruben) in der Äquidistanz `contourInterval`; jede
-/// `contourIndexEvery`-te ist Zähllinie (dicker, mit Höhenangabe, lesbar gedreht).
-fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &[Vec<Vec2>]) {
+/// `contourIndexEvery`-te ist Zähllinie (dicker, mit Höhenangabe, lesbar gedreht). [150] Linien enden am
+/// Fussabdruck `house`; Beschriftungen liegen ausserhalb davon, nicht auf `obst` (Bemassung, Koten, Texte),
+/// nicht übereinander, je Zähllinie alle [`CONTOUR_LABEL_SPACING_MM`] eine (nahe der Abschnittsmitte, wo sie
+/// am wenigsten andere Linien kreuzt und die Linie gerade genug ist).
+fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &[Vec<Vec2>], obst: &super::stamp_place::Obstacles) {
     let Some(iv) = t.contour_interval.filter(|v| v.is_finite() && *v > 0.0) else { return };
     let every = t.contour_index_every.filter(|v| v.is_finite() && *v >= 1.0).map_or(5, |v| v.round() as i64);
     let st = crate::excavation::site_terrain(c.p, t);
-    let text_h = 0.002 * c.a.scale.max(1.0);
+    let scale = c.a.scale.max(1.0);
+    let text_h = 0.002 * scale;
     let tin = st.current();
     let idx = crate::terrain::TinIndex::new(tin);
     // [140] Papierabstand (mm) benachbarter Höhenlinien am Punkt: Äquidistanz / Gefälle des Dreiecks.
@@ -248,83 +424,187 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
             return f64::INFINITY;
         }
         let g = ((uz * vy - vz * uy) / d).hypot((ux * vz - vx * uz) / d);
-        if g > 1e-12 { iv / g * 1000.0 / c.a.scale.max(1.0) } else { f64::INFINITY }
+        if g > 1e-12 { iv / g * 1000.0 / scale } else { f64::INFINITY }
     };
+    // Linien, je Strecke gezeichnet oder (zu eng) ausgelassen.
+    let mut isos: Vec<Iso> = Vec::new();
+    let mut drawn: Vec<Vec<bool>> = Vec::new();
     for l in crate::terrain::isolines(tin, iv, 0.0) {
+        if l.pts.len() < 2 {
+            continue;
+        }
         let k = (l.level / iv).round() as i64;
         let index = k.rem_euclid(every) == 0;
-        // [140] Zähllinie mittel (0.18), Höhenlinie fein (0.1): Gelände bleibt unter dem Gebäude zurück.
-        let w = if index { 0.18 } else { 0.1 };
-        let n = l.pts.len();
-        let segs = if l.closed { n } else { n - 1 };
-        let seg_len = |i: usize| (l.pts[(i + 1) % n][0] - l.pts[i][0]).hypot(l.pts[(i + 1) % n][1] - l.pts[i][1]);
-        let len: f64 = (0..segs).map(seg_len).sum();
-        // Beschriftung in der Mitte der Zähllinie (nur, wenn sie lang genug ist); die Linie wird dort unterbrochen.
-        let text = crate::js_fmt::to_fixed(l.level, if iv.fract() == 0.0 { 0 } else { 1 });
-        let half = 0.3 * text_h * text.chars().count() as f64;
-        let gap = (index && len >= 12.0 * text_h).then(|| (len / 2.0 - half - 0.4 * text_h, len / 2.0 + half + 0.4 * text_h));
-        let mut acc = 0.0;
-        for i in 0..segs {
-            let (a, b) = (l.pts[i], l.pts[(i + 1) % n]);
-            let d = seg_len(i);
-            // [140] Zu eng (< 0.6 mm auf dem Papier): nur jede zweite, bei < 0.3 mm nur die Zähllinien.
-            if !index {
-                let s = spacing_mm((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0);
-                if s < CONTOUR_MIN_GAP_MM && (k.rem_euclid(2) != 0 || 2.0 * s < CONTOUR_MIN_GAP_MM) {
-                    acc += d;
+        let mut pts = l.pts.clone();
+        if l.closed {
+            pts.push(pts[0]);
+        }
+        let mut cum = vec![0.0];
+        for w in pts.windows(2) {
+            cum.push(cum[cum.len() - 1] + (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]));
+        }
+        // [140] Zu eng (< 0.6 mm auf dem Papier): nur jede zweite, bei < 0.3 mm nur die Zähllinien.
+        let d: Vec<bool> = pts
+            .windows(2)
+            .map(|w| {
+                index || {
+                    let s = spacing_mm((w[0][0] + w[1][0]) / 2.0, (w[0][1] + w[1][1]) / 2.0);
+                    !(s < CONTOUR_MIN_GAP_MM && (k.rem_euclid(2) != 0 || 2.0 * s < CONTOUR_MIN_GAP_MM))
+                }
+            })
+            .collect();
+        isos.push(Iso { level: l.level, index, pts, cum, closed: l.closed });
+        drawn.push(d);
+    }
+    let mut grid = SegGrid::new((4.0 * text_h).max(1e-6));
+    for (li, (l, d)) in isos.iter().zip(&drawn).enumerate() {
+        for (i, w) in l.pts.windows(2).enumerate() {
+            if d[i] {
+                grid.add(w[0], w[1], li);
+            }
+        }
+    }
+    let house_p: Vec<Vec<[f64; 2]>> = house.iter().map(|r| r.iter().map(|q| [q.x, q.y]).collect()).collect();
+    let house_b: Vec<[f64; 4]> = house_p.iter().map(|r| super::stamp_place::ring_bbox(r)).collect();
+    let in_house = |ring: &[[f64; 2]]| {
+        let b = super::stamp_place::ring_bbox(ring);
+        house_p.iter().zip(&house_b).any(|(h, hb)| hb[2] >= b[0] && hb[0] <= b[2] && hb[3] >= b[1] && hb[1] <= b[3] && super::stamp_place::convex_overlap(h, ring))
+    };
+    // Beschriftungen: Zähllinien, längste zuerst.
+    let digits = if iv.fract() == 0.0 { 0 } else { 1 };
+    let mut order: Vec<usize> = (0..isos.len()).filter(|i| isos[*i].index && isos[*i].len() >= 12.0 * text_h).collect();
+    order.sort_by(|a, b| isos[*b].len().total_cmp(&isos[*a].len()).then(isos[*a].level.total_cmp(&isos[*b].level)));
+    let spacing = CONTOUR_LABEL_SPACING_MM / 1000.0 * scale;
+    let step = 0.001 * scale;
+    let (pad_house, pad_label) = (0.3 * text_h, 0.5 * text_h);
+    let mut placed: Vec<Vec<[f64; 2]>> = Vec::new();
+    // Je Linie: Lücken (Bogenlänge) unter den Beschriftungen.
+    let mut gaps: Vec<Vec<(f64, f64)>> = vec![Vec::new(); isos.len()];
+    for li in order {
+        let l = &isos[li];
+        let len = l.len();
+        let text = crate::js_fmt::to_fixed(l.level, digits);
+        let hw = crate::text_layout::text_width_em(&text, false) * text_h / 2.0;
+        let hv = 0.6 * text_h;
+        let reserve = hw + 0.4 * text_h;
+        let n = ((len / spacing).floor() as usize).max(1);
+        let sec = len / n as f64;
+        let mut mine: Vec<f64> = Vec::new();
+        for i in 0..n {
+            let target = (i as f64 + 0.5) * sec;
+            let (lo, hi) = if l.closed { (i as f64 * sec, (i + 1) as f64 * sec) } else { ((i as f64 * sec).max(reserve), ((i + 1) as f64 * sec).min(len - reserve)) };
+            if hi < lo {
+                continue;
+            }
+            let mut cands: Vec<f64> = Vec::new();
+            let mut s = lo;
+            while s <= hi + 1e-12 && cands.len() < 20_000 {
+                cands.push(s);
+                s += step;
+            }
+            cands.sort_by(|a, b| (a - target).abs().total_cmp(&(b - target).abs()));
+            let mut best: Option<(usize, f64, [f64; 2], [f64; 2])> = None;
+            for s in cands {
+                if mine.iter().any(|m| {
+                    let d = (s - m).abs();
+                    (if l.closed { d.min(len - d) } else { d }) < spacing / 2.5
+                }) {
                     continue;
                 }
+                let (a, b) = (l.at(s - hw), l.at(s + hw));
+                let cl = (b[0] - a[0]).hypot(b[1] - a[1]);
+                if !(cl > 1.6 * hw) || l.bend(s - hw, s + hw) > 0.3 * text_h {
+                    continue;
+                }
+                let u = [(b[0] - a[0]) / cl, (b[1] - a[1]) / cl];
+                let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+                let padded = rot_rect(m, u, hw + pad_house, hv + pad_house);
+                if in_house(&padded) || obst.hits_convex(&padded) {
+                    continue;
+                }
+                let grown = rot_rect(m, u, hw + pad_label, hv + pad_label / 2.0);
+                if placed.iter().any(|r| super::stamp_place::convex_overlap(r, &grown)) {
+                    continue;
+                }
+                let x = grid.crossings(&rot_rect(m, u, hw, hv), li);
+                // Auf einem Bündel (Stützmauer, Baugrubenwand): lieber keine Beschriftung.
+                if x > 1 {
+                    continue;
+                }
+                if best.as_ref().is_none_or(|b| x < b.0) {
+                    best = Some((x, s, m, u));
+                }
+                if x == 0 {
+                    break;
+                }
             }
-            // Anteile (Bruchteile 0..1) des Segments ausserhalb der Lücke.
-            let mut spans = vec![(0.0, 1.0)];
-            if let (Some((g0, g1)), true) = (gap, d > 0.0) {
-                let (f0, f1) = (((g0 - acc) / d).clamp(0.0, 1.0), ((g1 - acc) / d).clamp(0.0, 1.0));
-                spans = [(0.0, f0), (f1, 1.0)].into_iter().filter(|(x, y)| y - x > 1e-9).collect();
+            let Some((_, s, m, u)) = best else { continue };
+            mine.push(s);
+            placed.push(rot_rect(m, u, hw, hv));
+            gaps[li].push((s - reserve, s + reserve));
+            // Lesbar gedreht; Text mittig auf die Linie (Grundlinie ≈ −0.35 · Höhe).
+            let mut ang = u[1].atan2(u[0]);
+            if ang > std::f64::consts::FRAC_PI_2 || ang <= -std::f64::consts::FRAC_PI_2 {
+                ang += std::f64::consts::PI;
             }
+            let (cs, sn) = (ang.cos(), ang.sin());
+            out.push(Primitive::DrawingText {
+                at: v2(m[0] - cs * hw + sn * 0.35 * text_h, m[1] - sn * hw - cs * 0.35 * text_h),
+                text: text.clone(),
+                height_m: text_h,
+                angle: ang,
+                color: TERRAIN_INK.into(),
+                marks: None,
+                wrap_width: None,
+                doc: None,
+                drawing_id: None,
+                greyed: None,
+                opacity: None,
+            });
+        }
+    }
+    // Linien: ohne die Lücken unter den Beschriftungen, ausserhalb des Fussabdrucks.
+    for (li, l) in isos.iter().enumerate() {
+        // [140] Zähllinie mittel (0.18), Höhenlinie fein (0.1): Gelände bleibt unter dem Gebäude zurück.
+        let w = if l.index { 0.18 } else { 0.1 };
+        let len = l.len();
+        let mut g: Vec<(f64, f64)> = Vec::new();
+        for &(g0, g1) in &gaps[li] {
+            g.push((g0, g1));
+            if l.closed {
+                g.push((g0 + len, g1 + len));
+                g.push((g0 - len, g1 - len));
+            }
+        }
+        for (i, seg) in l.pts.windows(2).enumerate() {
+            if !drawn[li][i] {
+                continue;
+            }
+            let (s0, d) = (l.cum[i], l.cum[i + 1] - l.cum[i]);
+            let mut spans = vec![(0.0f64, 1.0f64)];
+            if d > 0.0 {
+                for &(g0, g1) in &g {
+                    let (f0, f1) = (((g0 - s0) / d).clamp(0.0, 1.0), ((g1 - s0) / d).clamp(0.0, 1.0));
+                    if f1 - f0 <= 1e-12 {
+                        continue;
+                    }
+                    spans = spans.into_iter().flat_map(|(x, y)| [(x, y.min(f0)), (x.max(f1), y)]).filter(|(x, y)| y - x > 1e-9).collect();
+                }
+            }
+            let (a, b) = (seg[0], seg[1]);
             for (f0, f1) in spans {
                 let pt = |f: f64| v2(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
                 for (p0, p1) in outside(pt(f0), pt(f1), house) {
                     out.push(ink_line(p0, p1, w, TERRAIN_INK, None));
                 }
             }
-            acc += d;
-        }
-        let Some(_) = gap else { continue };
-        let mut acc = 0.0;
-        for i in 0..segs {
-            let (a, b) = (l.pts[i], l.pts[(i + 1) % n]);
-            let d = seg_len(i);
-            if acc + d >= len / 2.0 && d > 0.0 {
-                let f = (len / 2.0 - acc) / d;
-                let mut ang = (b[1] - a[1]).atan2(b[0] - a[0]);
-                if ang > std::f64::consts::FRAC_PI_2 || ang <= -std::f64::consts::FRAC_PI_2 {
-                    ang += std::f64::consts::PI;
-                }
-                // Text mittig auf die Linie (Breite ≈ 0.6 · Höhe je Zeichen, Grundlinie ≈ −0.35 · Höhe).
-                let (c, s) = (ang.cos(), ang.sin());
-                let m = (a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
-                out.push(Primitive::DrawingText {
-                    at: v2(m.0 - c * half + s * 0.35 * text_h, m.1 - s * half - c * 0.35 * text_h),
-                    text,
-                    height_m: text_h,
-                    angle: ang,
-                    color: TERRAIN_INK.into(),
-                    marks: None,
-                    wrap_width: None,
-                    doc: None,
-                    drawing_id: None,
-                    greyed: None,
-                    opacity: None,
-                });
-                break;
-            }
-            acc += d;
         }
     }
 }
 
 /// [68] Baugrube im Grundriss: Sohle (Böschungsfuss) und Böschungsoberkante, Böschungsschraffur.
-fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &mut Vec<Primitive>) {
+/// [150] Böschungsoberkante und -schraffur (Gelände) enden am Fussabdruck `house`; die Sohle bleibt.
+fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &mut Vec<Primitive>, house: &[Vec<Vec2>]) {
     let ring: Vec<Vec2> = e.outline.iter().copied().filter(|q| q.x.is_finite() && q.y.is_finite()).collect();
     if ring.len() < 3 {
         return;
@@ -342,12 +622,16 @@ fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &m
         let Some((_, spec, daylight)) = st.items.iter().find(|(id, ..)| *id == e.id) else { continue };
         for l in daylight {
             for w in l.windows(2) {
-                out.push(ink_line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), 0.18, EXCAVATION_INK, None));
+                for (a, b) in outside(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), house) {
+                    out.push(ink_line(a, b, 0.18, EXCAVATION_INK, None));
+                }
             }
         }
         if let Some(before) = crate::excavation::terrain_before(&st, &e.id) {
             for (a, b) in crate::excavation::slope_hatch(&before, spec, spacing) {
-                out.push(ink_line(v2(a[0], a[1]), v2(b[0], b[1]), 0.1, EXCAVATION_INK, None));
+                for (a, b) in outside(v2(a[0], a[1]), v2(b[0], b[1]), house) {
+                    out.push(ink_line(a, b, 0.1, EXCAVATION_INK, None));
+                }
             }
         }
         break;
@@ -580,6 +864,108 @@ mod tests {
         let near = out.iter().filter(|q| matches!(q, Primitive::Line { a, b, weight_mm, color: Some(c), .. }
             if *weight_mm == 0.18 && c == TERRAIN_INK && (a.x.min(b.x) - 0.01..=a.x.max(b.x) + 0.01).contains(&at.x) && (a.y.min(b.y) - 0.01..=a.y.max(b.y) + 0.01).contains(&at.y))).count();
         assert_eq!(near, 0, "Linie läuft durch das Etikett bei {at:?}");
+    }
+
+    /// Gedrehtes Rechteck einer Höhenlinien-Beschriftung (wie `Obstacles::text`).
+    fn label_rect(q: &Primitive) -> Option<(String, Vec<[f64; 2]>)> {
+        let Primitive::DrawingText { at, text, height_m: h, angle, .. } = q else { return None };
+        let w = crate::text_layout::text_width_em(text, false) * h;
+        let (c, s) = (angle.cos(), angle.sin());
+        let ring = [[0.0, -0.25 * h], [w, -0.25 * h], [w, 0.95 * h], [0.0, 0.95 * h]].iter().map(|q| [at.x + q[0] * c - q[1] * s, at.y + q[0] * s + q[1] * c]).collect();
+        Some((text.clone(), ring))
+    }
+
+    fn sample_with_walls(walls: serde_json::Value) -> Project {
+        let mut v: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+        let wt = v["walls"][0]["wallTypeId"].clone();
+        let mut ws = Vec::new();
+        for w in walls.as_array().unwrap() {
+            ws.push(serde_json::json!({"id": w[0], "type": "wall", "floorId": w[1], "categoryCode": "20", "wallTypeId": wt, "start": {"x": w[2], "y": w[3]}, "end": {"x": w[4], "y": w[5]}, "height": 3}));
+        }
+        v["walls"] = serde_json::Value::Array(ws);
+        for k in ["openings", "rooms", "ceilings", "stairs", "roofs", "extrudedSolids", "columns", "drawings2d"] {
+            if v.get(k).is_some() {
+                v[k] = serde_json::json!([]);
+            }
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// [150] Ein Anbau, der nur von Wänden umschlossen ist (kein Raum, keine Decke), gehört zum Fussabdruck:
+    /// keine Höhenlinie und keine Beschriftung darin. Wände anderer Geschosse (ausser dem Erdgeschoss) schneiden
+    /// die Höhenlinien des Geschosses nicht.
+    #[test]
+    fn hoehenlinie_durch_umschlossenen_anbau_ausgespart() {
+        let mut p = sample_with_walls(serde_json::json!([
+            ["h1", "eg", 14.0, 0.0, 26.0, 0.0], ["h2", "eg", 26.0, 0.0, 26.0, 8.0], ["h3", "eg", 26.0, 8.0, 14.0, 8.0], ["h4", "eg", 14.0, 8.0, 14.0, 0.0],
+            // Anbau Nord: drei Wände an die Hausmauer, innen kein Raum.
+            ["a1", "eg", 18.5, 8.0, 18.5, 12.0], ["a2", "eg", 18.5, 12.0, 21.5, 12.0], ["a3", "eg", 21.5, 12.0, 21.5, 8.0],
+            // Obergeschoss: Wand frei über dem Gelände (Auskragung) — im EG-Grundriss kein Schnitt.
+            ["o1", "og", 30.0, 20.0, 38.0, 20.0]
+        ]));
+        // Gelände z = y/10 über 40 × 30 m: Höhenlinien waagrecht je 1 m, Zähllinien je 5 m (z = 0.5, 1.0 …).
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 30.0, 3.0, 0.0, 30.0, 3.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        p.context = Some(vec![ContextObject::TerrainMesh(t)]);
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100}"#).unwrap();
+        let mut out = Vec::new();
+        plan_context(&Ctx::new(&p, &a), &mut out);
+        let lines: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK => Some((*a, *b)), _ => None }).collect();
+        let in_annex = |x: f64, y: f64| x > 18.4 && x < 21.6 && y > 7.9 && y < 12.1;
+        let in_house = |x: f64, y: f64| (x > 13.9 && x < 26.1 && y > -0.1 && y < 8.1) || in_annex(x, y);
+        assert!(lines.iter().any(|(a, b)| (a.y - 10.0).abs() < 1e-6 && (b.y - 10.0).abs() < 1e-6), "Höhenlinie y = 10 fehlt ganz");
+        for (a, b) in &lines {
+            let m = ((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+            assert!(!in_annex(m.0, m.1), "Höhenlinie im Anbau: {a:?}–{b:?}");
+            assert!(!in_house(m.0, m.1), "Höhenlinie im Haus: {a:?}–{b:?}");
+        }
+        // Die OG-Wand bei y = 20 schneidet die Höhenlinie im EG nicht.
+        assert!(lines.iter().any(|(a, b)| (a.y - 20.0).abs() < 1e-6 && a.x.min(b.x) < 34.0 && a.x.max(b.x) > 34.0), "Höhenlinie unter der OG-Wand fehlt");
+        // Beschriftungen ausserhalb des Gebäudes; die Zähllinie y = 10 (z = 1.0) ist trotzdem beschriftet.
+        let labels: Vec<(String, Vec<[f64; 2]>)> = out.iter().filter_map(label_rect).collect();
+        assert!(labels.iter().any(|(t, _)| t == "1.0"), "{:?}", labels.iter().map(|l| &l.0).collect::<Vec<_>>());
+        for (t, r) in &labels {
+            assert!(r.iter().all(|q| !in_house(q[0], q[1])), "Beschriftung {t} im Gebäude: {r:?}");
+        }
+    }
+
+    /// [150] Beschriftungen der Höhenlinien überdecken sich nicht (auch wo die Zähllinien eng liegen), halten
+    /// Abstand entlang der Linie und liegen nicht auf der Bemassung.
+    #[test]
+    fn hoehenlinien_beschriftungen_kollisionsfrei() {
+        // Steil: z = 4·y über 40 × 10 m → Zähllinien (z = 0.5 k) alle 0.125 m = 1.25 mm Papier.
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 10.0, 40.0, 0.0, 10.0, 40.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let dim: Drawing2D = serde_json::from_value(serde_json::json!({ "id": "d", "type": "drawing2d", "levelId": "eg", "categoryCode": "80", "geom": { "shape": "dimension", "pts": [{ "x": 2.0, "y": 5.0 }, { "x": 38.0, "y": 5.0 }], "offset": 0.0 } })).unwrap();
+        let p = Project { context: Some(vec![ContextObject::TerrainMesh(t)]), drawings2d: vec![dim], ..Default::default() };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["80"], "scale": 100}"#).unwrap();
+        let c = Ctx::new(&p, &a);
+        let mut out = Vec::new();
+        plan_context(&c, &mut out);
+        let labels: Vec<(String, Vec<[f64; 2]>)> = out.iter().filter_map(label_rect).collect();
+        assert!(labels.len() >= 6, "zu wenige Beschriftungen: {}", labels.len());
+        for i in 0..labels.len() {
+            for j in i + 1..labels.len() {
+                assert!(!super::super::stamp_place::convex_overlap(&labels[i].1, &labels[j].1), "{} über {}", labels[i].0, labels[j].0);
+            }
+        }
+        // Gleiche Linie: mindestens 50 mm Papier (5 m) auseinander.
+        let mid = |r: &[[f64; 2]]| ((r[0][0] + r[2][0]) / 2.0, (r[0][1] + r[2][1]) / 2.0);
+        for i in 0..labels.len() {
+            for j in i + 1..labels.len() {
+                if labels[i].0 == labels[j].0 {
+                    let (a, b) = (mid(&labels[i].1), mid(&labels[j].1));
+                    assert!((a.0 - b.0).hypot(a.1 - b.1) > 5.0, "{} doppelt zu nah", labels[i].0);
+                }
+            }
+        }
+        // Nicht auf der Bemassung.
+        let mut o = super::super::stamp_place::Obstacles::default();
+        for q in super::super::drawings::stamp_obstacle_prims(&c) {
+            o.add_prim(&q);
+        }
+        assert!(!o.is_empty());
+        for (t, r) in &labels {
+            assert!(!o.hits_convex(r), "Beschriftung {t} auf der Bemassung");
+        }
     }
 
     #[test]

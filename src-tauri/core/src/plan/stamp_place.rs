@@ -177,6 +177,53 @@ impl Obstacles {
     }
 }
 
+impl Obstacles {
+    /// [150] Berührt der (einfache) Ring `ring` — z. B. ein gedrehtes Beschriftungs-Rechteck — ein Hindernis
+    /// (Strecke schneidet oder liegt darin; Fläche überlappt)?
+    pub fn hits_convex(&self, ring: &[P]) -> bool {
+        let b = ring_bbox(ring);
+        let near = |pts: &[P]| {
+            let q = ring_bbox(pts);
+            q[2] >= b[0] && q[0] <= b[2] && q[3] >= b[1] && q[1] <= b[3]
+        };
+        self.segs.iter().any(|s| near(&s[..]) && seg_hits_ring(s[0], s[1], ring)) || self.areas.iter().any(|a| near(a) && convex_overlap(a, ring))
+    }
+}
+
+/// Achsparalleles Rechteck `[x0, y0, x1, y1]` um die Punkte.
+pub fn ring_bbox(pts: &[P]) -> [f64; 4] {
+    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for q in pts {
+        b = [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])];
+    }
+    b
+}
+
+/// Schneiden (oder berühren) sich die Strecken a–b und c–d?
+fn segs_cross(a: P, b: P, c: P, d: P) -> bool {
+    let o = |p: P, q: P, r: P| (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+    let (d1, d2, d3, d4) = (o(c, d, a), o(c, d, b), o(a, b, c), o(a, b, d));
+    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) {
+        return true;
+    }
+    let on = |p: P, q: P, r: P| r[0] >= p[0].min(q[0]) && r[0] <= p[0].max(q[0]) && r[1] >= p[1].min(q[1]) && r[1] <= p[1].max(q[1]);
+    (d1 == 0.0 && on(c, d, a)) || (d2 == 0.0 && on(c, d, b)) || (d3 == 0.0 && on(a, b, c)) || (d4 == 0.0 && on(a, b, d))
+}
+
+/// [150] Schneidet die Strecke a–b den einfachen Ring oder liegt sie darin?
+pub fn seg_hits_ring(a: P, b: P, ring: &[P]) -> bool {
+    let n = ring.len();
+    n >= 3 && (point_in_ring(ring, a) || (0..n).any(|i| segs_cross(a, b, ring[i], ring[(i + 1) % n])))
+}
+
+/// [150] Überlappen (oder berühren) sich zwei einfache Ringe?
+pub fn convex_overlap(a: &[P], b: &[P]) -> bool {
+    if a.len() < 3 || b.len() < 3 {
+        return false;
+    }
+    point_in_ring(b, a[0]) || point_in_ring(a, b[0]) || (0..a.len()).any(|i| (0..b.len()).any(|j| segs_cross(a[i], a[(i + 1) % a.len()], b[j], b[(j + 1) % b.len()])))
+}
+
 fn point_in_ring(ring: &[P], p: P) -> bool {
     let mut inside = false;
     let n = ring.len();
