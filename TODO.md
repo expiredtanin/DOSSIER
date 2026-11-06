@@ -2971,11 +2971,33 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Schnitt Wand/Stütze ohne Überlappung/Lücke; Ansicht ohne Kante an der Stossfuge. `scripts/validate-ifc.py` auf den drei
   Testprojekten: 0 Befunde. Golden `komplex-schnitt-schnitt-a` (Stützen in der Projektion). Geprüft: cargo test Kern,
   vitest, tsc, CLI-Schnitt/-Ansicht vorher/nachher (Linux/Chromium); 3D-Bild nicht (render_png nur macOS).
+  6.11. Teil 4 — **Bogenwände an Wandknoten** (Grundriss, 3D, Schnitt, IFC). (a) Y-Knoten: `joins.rs` `y_notch` auch mit
+  Bögen — Seiten über die Tangenten am Knoten, Knick K als Schnitt der Flächenkurven (Gerade/Kreis); Fläche einer
+  Bogen-Eckwand am Ast als Gerade durch K und den Treffer der Ast-Fläche dieser Seite (Sehne wie am T-Stoss auf einen
+  Bogen). Grundriss: `walls.rs` `unroll_cuts` wickelt `*_cut2` ab (beide Linien durch das abgewickelte K, K bildet exakt
+  ab); 3D: `wall_arc::chord_walls` gibt `*_cut2`, `collinear`, `at_column` an die erste/letzte Sehnen-Teilwand.
+  (b) Gleicher Kreis und Typ (`same_band` für Bögen: Mitte, Radius der Bandmitte, Drehsinn = Laufsinn): überlappend →
+  radiale Fuge am Ende der früheren, enthalten → `covered` (auch im Grundriss-Bogenpfad nicht gezeichnet), stumpf im
+  Knoten (auch Ring aus zwei Halbkreisen) → `collinear` (3D ohne Stirn). Tangentialer Übergang ungleichen Typs/Kreises
+  jetzt mit freien radialen Enden und Stosslinie (vorher stets „ohne Fuge"). (c) Bogenwand endet in Stütze:
+  `wall_columns.rs` `end_in_column` ohne Bogen-Ausschluss, `contour_cut` über die Eintritte beider Flächenkreise
+  (`arc_entry`); Wand prioritärer → `band_polys` (Vierecke der Sehnen-Teilwände; 3D freie Enden rechtwinklig zur Sehne,
+  Grundriss radial) aus der Stütze ausgespart (`domains.rs`, `model3d::column_pieces`); gleiches Bauteil → schmaler
+  Footprint um das Stück der Schnittlinie (`arc_merge_footprint`, Kontur fehlt dort). Tests: `joins.rs`
+  (`bogen_y_knoten_ast_an_beiden_flaechen`, `bogen_kollinear_gleicher_kreis`), `plan/wall_join_tests.rs`
+  (`y_knoten_mit_bogenwand` 6 Fälle, `bogenwande_gleichen_kreises_ein_koerper` 7 Fälle + Gegenproben,
+  `bogenwand_endet_an_stuetze` 5 Fälle), `wall_join3d_tests.rs` (Manifold: Summe = Vereinigung, Schnitt je Paar leer,
+  ≈ Grundriss × Höhe; IFC enthält Wände/Stütze, verdeckte Bogenwand fehlt). Gerade Eckwände/Bogen-Ast, kollineare Bögen
+  und Stütze exakt (< 1e-6); Bogen-Eckwand im Y: Sehne statt Bogen am Ast, Überlappung/Lücke ≤ 2.2e-4 m² im Grundriss,
+  ≤ 1.2e-4 m³ im 3D (Sehnenpfeil × Astbreite). Nebenbefund: Manifold (exakt) verlor beim Vereinigen der Teilkörper in
+  Eingabereihenfolge am Y-Knick Volumen, obwohl jeder Schnitt leer war (reihenfolgeabhängig); der Test vereinigt je
+  Wand. `scripts/validate-ifc.py` auf den drei Testprojekten: 0 Befunde. Goldens unverändert. Geprüft: cargo test Kern,
+  vitest, tsc, CLI-Grundriss 1:50 mit Schraffur vorher/nachher (Linux/Chromium); nicht in der Tauri-App/Metal.
   Offen: Y-Knoten ohne Schichtverschmelzung (der Ast stösst stumpf, auch bei gleichem Kernmaterial); Y-Knoten im
-  Schnitt-Pfad weiter ohne Schnittlinien (Vereinigung im Schnitt deckt es); **Bogenwände**: kein Y-Knick, keine
-  kollineare Vereinigung, kein Stützenanschluss (auch nicht im Grundriss — `y_notch`/`end_in_column` nur gerade Wände;
-  braucht Knick-Linien gegen Bogenflächen); runde Stütze: Sehne, die Linse unter der Stütze bleibt (von der
-  Stützenfüllung verdeckt); Wand breiter als die Stütze oder mitten durch die Stütze: unverändert; Stütze kürzer als
+  Schnitt-Pfad weiter ohne Schnittlinien (Vereinigung im Schnitt deckt es); Bogen-Eckwand im Y und T-Stoss auf einen
+  Bogen: Sehne statt Bogen am Ast (mm-Spalt/Überlappung); Bogenwand-Ende an rechteckiger Stütze nur exakt, wenn beide
+  Flächen dieselbe Stützenkante treffen; runde Stütze: Sehne statt Kontur, die Linse unter der Stütze bleibt (von der
+  Stützenfüllung verdeckt; Teil 4 Punkt 4 nicht umgesetzt); Wand breiter als die Stütze oder mitten durch die Stütze: unverändert; Stütze kürzer als
   die Wand: Wand nicht gestutzt (Überlappung bleibt); Stütze mit mehreren Höhenabschnitten: IFC-Profil voll; Längsschnitt
   genau in einer Wand (`split_wall_layers` setzt die Schichten quer in u, Nebenbefund, vorbestehend); Muster bei
   ungeraden Maschen gleich orientierter Enden nicht überall passend; nicht in der Tauri-App/Metal geprüft. · M
