@@ -515,6 +515,52 @@ pub struct IfcImport {
     pub truncated: bool,
     /// Erkannte Bauteile ([B4]), nur mit [`import_ifc_opts`]`(…, true)`.
     pub elements: Option<crate::ifc_semantic::Semantic>,
+    /// Georeferenz (IfcMapConversion, IFC4): Kartenkoordinaten = Drehung·Massstab·lokal + Versatz.
+    pub map_conversion: Option<MapConversion>,
+}
+
+/// IfcMapConversion ([B4]): Versatz in Kartenmetern, Drehung der lokalen x-Achse, Massstab, Zielsystem.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MapConversion {
+    pub eastings: f64,
+    pub northings: f64,
+    pub height: f64,
+    /// Richtung der lokalen x-Achse im Kartensystem (Abszisse, Ordinate; normiert).
+    pub x_axis: [f64; 2],
+    pub scale: f64,
+    /// Name des Zielsystems (IfcProjectedCRS.Name, z. B. `EPSG:2056`).
+    pub crs: Option<String>,
+}
+
+/// Erste IfcMapConversion der Datei; Kartenwerte in Metern (MapUnit des IfcProjectedCRS, sonst m).
+fn map_conversion(f: &StepFile, ids: &[u64]) -> Option<MapConversion> {
+    let e = ids.iter().filter_map(|i| f.get(*i)).find(|e| e.ty == "IFCMAPCONVERSION")?;
+    let num = |k: usize| e.arg(k).and_then(|v| v.as_f64());
+    let crs = e.arg(1).and_then(|v| v.as_ref_id()).and_then(|i| f.get(i));
+    // MapUnit (IfcProjectedCRS, 7. Attribut): IfcSIUnit mit Vorsatz.
+    let unit = crs
+        .and_then(|c| c.arg(6))
+        .and_then(|v| v.as_ref_id())
+        .and_then(|u| f.get(u))
+        .filter(|u| u.ty == "IFCSIUNIT")
+        .map(|u| match u.arg(2).and_then(|v| v.as_enum()) {
+            Some("MILLI") => 0.001,
+            Some("CENTI") => 0.01,
+            Some("KILO") => 1000.0,
+            _ => 1.0,
+        })
+        .unwrap_or(1.0);
+    let (ax, ay) = (num(5).unwrap_or(1.0), num(6).unwrap_or(0.0));
+    let l = ax.hypot(ay);
+    let m = MapConversion {
+        eastings: num(2)? * unit,
+        northings: num(3)? * unit,
+        height: num(4).unwrap_or(0.0) * unit,
+        x_axis: if l > 1e-12 { [ax / l, ay / l] } else { [1.0, 0.0] },
+        scale: num(7).filter(|s| *s > 0.0).unwrap_or(1.0),
+        crs: crs.and_then(|c| c.arg(0)).and_then(|v| v.as_str()).map(str::to_string),
+    };
+    (m.eastings.is_finite() && m.northings.is_finite() && m.height.is_finite() && m.scale.is_finite()).then_some(m)
 }
 
 /// Bauteilklassen, die als Mesh keinen Sinn ergeben (Volumen-Hilfskörper, Beschriftung).
@@ -1557,6 +1603,37 @@ impl<'a> Reader<'a> {
         Some((mesh, color))
     }
 
+    /// Grundriss eines Bauteils ohne Körper ([B4], z. B. ArchiCAD-IfcSpace nur mit „FootPrint" und „Box"):
+    /// geschlossener Umriss in Weltkoordinaten (erste Kurve der FootPrint-Darstellung) und Höhenbereich
+    /// aus der BoundingBox-Darstellung.
+    pub(crate) fn product_footprint(&mut self, id: u64) -> Option<(Vec<V2>, f64, f64)> {
+        let f = self.f;
+        let e = f.get(id)?;
+        let shape = f.get(e.arg(6)?.as_ref_id()?)?;
+        if shape.ty != "IFCPRODUCTDEFINITIONSHAPE" {
+            return None;
+        }
+        let reps: Vec<&Entity> = shape.arg(2)?.as_list()?.iter().filter_map(|x| f.get(x.as_ref_id()?)).filter(|r| r.ty == "IFCSHAPEREPRESENTATION").collect();
+        let ident = |r: &Entity| r.arg(1).and_then(|v| v.as_str()).unwrap_or("").to_ascii_uppercase();
+        let first = |r: &Entity| r.arg(3).and_then(|v| v.as_list()).and_then(|l| l.first()).and_then(|v| v.as_ref_id());
+        let foot = reps.iter().find(|r| ident(r) == "FOOTPRINT").and_then(|r| first(r))?;
+        let bbox = reps.iter().find(|r| ident(r) == "BOX").and_then(|r| first(r)).and_then(|b| f.get(b)).filter(|b| b.ty == "IFCBOUNDINGBOX")?;
+        let corner = self.point(bbox.arg(0))?;
+        let zdim = bbox.arg(3)?.as_f64()? * self.len_scale;
+        let curve_id = match f.get(foot)? {
+            c if c.ty == "IFCGEOMETRICCURVESET" || c.ty == "IFCGEOMETRICSET" => c.arg(0)?.as_list()?.first()?.as_ref_id()?,
+            _ => foot,
+        };
+        let pts = self.curve2d(Some(&Value::Ref(curve_id)), 0)?;
+        let place = match e.arg(5).and_then(|v| v.as_ref_id()) {
+            Some(p) => self.object_placement(p, 0),
+            None => Xf::IDENTITY,
+        };
+        let ring: Vec<V2> = pts.iter().map(|p| place.apply([p[0], p[1], corner[2]])).map(|q| [q[0], q[1]]).collect();
+        let z0 = place.apply([0.0, 0.0, corner[2]])[2];
+        (ring.len() >= 3 && zdim.is_finite() && zdim > 0.0 && ring.iter().all(|p| p[0].is_finite() && p[1].is_finite())).then_some((ring, z0, z0 + zdim))
+    }
+
     /// Wie [`Self::product_body`], aber je Darstellungselement ein eigenes Netz (Weltkoordinaten) —
     /// für den Bauteil-Import ([B4]), der z. B. die Schicht-Bänder einer Wand einzeln braucht.
     pub(crate) fn product_item_meshes(&mut self, id: u64, max_tris: usize) -> Vec<Mesh> {
@@ -1879,7 +1956,7 @@ pub fn import_ifc_opts(bytes: &[u8], elements: bool) -> Result<IfcImport, String
         edge_cache: HashMap::new(),
         grid_axes: None,
     };
-    let mut result = IfcImport { schema: f.schema.clone(), length_scale: len_scale, parse_errors: f.errors, ..Default::default() };
+    let mut result = IfcImport { schema: f.schema.clone(), length_scale: len_scale, parse_errors: f.errors, map_conversion: map_conversion(&f, &ids), ..Default::default() };
 
     // Beziehungen: Geschoss-Zugehörigkeit, Aggregation, Material, Farben.
     let rels = Rels::gather(&f, &ids, &mut r);
@@ -2150,6 +2227,12 @@ mod web {
             "parseErrors": r.parse_errors,
             "truncated": r.truncated,
         });
+        if let Some(m) = &r.map_conversion {
+            meta["mapConversion"] = serde_json::json!({
+                "eastings": m.eastings, "northings": m.northings, "height": m.height,
+                "xAxis": m.x_axis, "scale": m.scale, "crs": m.crs,
+            });
+        }
         let mut element_data = Vec::new();
         if let Some(sem) = &r.elements {
             let (v, data) = crate::ifc_semantic::encode(sem);

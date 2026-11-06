@@ -105,8 +105,9 @@ describe("Rundreise Export → Import", () => {
     expect(window.classifications?.map((c) => `${c.system}:${c.code}`).sort()).toEqual(["Dossier-Ebenen:21", "eBKP-H:E"]);
     const door = raw.find((o) => o.kind === "opening" && o.openingKind === "door")!;
     expect(door.classifications?.map((c) => c.system)).toEqual(["Dossier-Ebenen"]);
-    // Dach bleibt Mesh, trägt aber seine Klassifikation.
-    const roof = products.find((p) => p.ifcClass === "IfcRoof")!;
+    // Dach wird Bauteil ([B4], 6.11.) und trägt seine Klassifikation.
+    expect(products.find((p) => p.ifcClass === "IfcRoof")).toBeUndefined();
+    const roof = raw.find((e) => e.kind === "roof")!;
     expect(roof.classifications?.map((c) => c.code).sort()).toEqual(["31", "F"]);
     // Räume: Kategorie bleibt (auch über die Zone).
     expect(raw.filter((e) => e.kind === "space").map((s) => s.sia).sort()).toEqual(["HNF", "HNF", "NNF", "VF"]);

@@ -22,6 +22,8 @@ const OPENING_CATEGORY: &str = "21";
 const CEILING_CATEGORY: &str = "30";
 const COLUMN_CATEGORY: &str = "50";
 const ROOM_CATEGORY: &str = "60";
+const ROOF_CATEGORY: &str = "35";
+const STAIR_CATEGORY: &str = "40";
 const ROOM_COLOR: &str = "#6b7280";
 const SIA: [&str; 6] = ["HNF", "NNF", "VF", "FF", "KGF", "AGF"];
 const LEVEL_TOL: f64 = 0.005;
@@ -69,6 +71,8 @@ struct WallData {
     z0: f64,
     z1: f64,
     thickness: f64,
+    /// Bogenwand ([T2]), 0 = gerade.
+    bulge: f64,
 }
 
 struct OpeningData {
@@ -82,6 +86,8 @@ struct OpeningData {
     operation: Option<String>,
     swing: f64,
     hinge: f64,
+    /// Umriss in der Wandebene (`Opening.shape`), z. B. "rund".
+    shape: Option<String>,
 }
 
 struct SlabData {
@@ -112,6 +118,27 @@ struct SpaceData {
     z0: f64,
 }
 
+struct RoofData {
+    info: Info,
+    outline: Vec<[f64; 2]>,
+    shape: String,
+    ridge_axis: String,
+    pitch_deg: f64,
+    eave_z: f64,
+    thickness: f64,
+}
+
+struct StairData {
+    info: Info,
+    start: [f64; 2],
+    dir: [f64; 2],
+    run_length: f64,
+    width: f64,
+    step_count: f64,
+    z0: f64,
+    total_rise: f64,
+}
+
 struct Storey {
     name: String,
     elevation: f64,
@@ -125,7 +152,11 @@ struct Elements {
     slabs: Vec<SlabData>,
     columns: Vec<ColumnData>,
     spaces: Vec<SpaceData>,
+    roofs: Vec<RoofData>,
+    stairs: Vec<StairData>,
     kept: Map<String, Value>,
+    /// Je Klasse die Gründe, weshalb Kandidaten Mesh blieben (`{"IfcWall": {"slopedTop": 3}}`).
+    kept_reasons: Map<String, Value>,
 }
 
 fn s_of(v: Option<&Value>) -> Option<String> {
@@ -189,6 +220,7 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
         })
         .unwrap_or_default();
     out.kept = raw.get("kept").and_then(Value::as_object).cloned().unwrap_or_default();
+    out.kept_reasons = raw.get("keptReasons").and_then(Value::as_object).cloned().unwrap_or_default();
     let mut wall_index: HashMap<i64, usize> = HashMap::new();
     let mut rust_wall: i64 = 0;
     for e in raw.get("elements").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
@@ -206,9 +238,10 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
         let info = info_of(e);
         match kind {
             "wall" => {
-                if v.len() == 7 {
+                if v.len() == 7 || v.len() == 8 {
                     wall_index.insert(rust_wall, out.walls.len());
-                    out.walls.push(WallData { info, start: [v[0], v[1]], end: [v[2], v[3]], z0: v[4], z1: v[5], thickness: v[6] });
+                    let bulge = v.get(7).copied().filter(|b| b.abs() <= 1e6).unwrap_or(0.0);
+                    out.walls.push(WallData { info, start: [v[0], v[1]], end: [v[2], v[3]], z0: v[4], z1: v[5], thickness: v[6], bulge });
                 }
                 rust_wall += 1;
             }
@@ -227,6 +260,7 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
                         operation: s_of(e.get("operation")),
                         swing: v[4].signum() * (v[4] != 0.0) as u8 as f64,
                         hinge: v[5].signum() * (v[5] != 0.0) as u8 as f64,
+                        shape: s_of(e.get("shape")),
                     });
                 }
             }
@@ -241,6 +275,29 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
                 if v.len() == 7 {
                     let round = e.get("profile").and_then(Value::as_str) == Some("round");
                     out.columns.push(ColumnData { info, center: [v[0], v[1]], rotation: v[2], z0: v[3], z1: v[4], round, a: v[5], b: v[6] });
+                }
+            }
+            "roof" => {
+                if let Some(mut r) = rings(v, 3, 1.0) {
+                    let shape = s_of(e.get("shape")).filter(|x| ["flach", "pult", "sattel", "walm"].contains(&x.as_str()));
+                    let axis = s_of(e.get("ridgeAxis")).filter(|x| x == "x" || x == "y");
+                    if let (Some(shape), Some(ridge_axis)) = (shape, axis) {
+                        out.roofs.push(RoofData { info, outline: r.remove(0), shape, ridge_axis, eave_z: v[0], pitch_deg: v[1], thickness: v[2] });
+                    }
+                }
+            }
+            "stair" => {
+                if v.len() == 9 && v[6] >= 2.0 && v[6] <= 200.0 && v[4] > 0.0 && v[5] > 0.0 {
+                    out.stairs.push(StairData {
+                        info,
+                        start: [v[0], v[1]],
+                        dir: [v[2], v[3]],
+                        run_length: v[4],
+                        width: v[5],
+                        step_count: v[6].round(),
+                        z0: v[7],
+                        total_rise: v[8],
+                    });
                 }
             }
             "space" => {
@@ -424,18 +481,41 @@ fn type_for(ctx: &mut Ctx, types: &mut Vec<(Value, bool)>, e: &Info, t: f64, kin
     id
 }
 
+/// Allgemeiner Name eines Tür-/Fensterstils (eigener Export: "Tür", "Fenster SINGLE_PANEL" …).
+fn generic_fill_name(n: &str) -> bool {
+    let rest = n.strip_prefix("Tür").or_else(|| n.strip_prefix("Fenster")).or_else(|| n.strip_prefix("Door")).or_else(|| n.strip_prefix("Window"));
+    rest.is_some_and(|r| r.is_empty() || (r.starts_with(' ') && r.trim().chars().all(|c| c.is_ascii_uppercase() || c == '_')))
+}
+
+/// Tür-/Fenstertyp nach Namen: vorhanden (ohne Gross-/Kleinschreibung) oder neu als Kopie von `template`.
+fn typed_by_name(ctx: &mut Ctx, types: &mut Vec<(Value, bool)>, name: Option<&str>, template: Option<&Value>, kind: &str, counter: &str) -> Option<String> {
+    let Some(name) = name else { return template.and_then(|t| t.get("id")).and_then(Value::as_str).map(str::to_string) };
+    let key = name.to_lowercase();
+    if let Some((t, _)) = types.iter().find(|(t, _)| t.get("name").and_then(Value::as_str).is_some_and(|n| n.trim().to_lowercase() == key)) {
+        return Some(id_of(t).to_string());
+    }
+    let mut t = template?.clone();
+    let id = ctx.new_id(kind);
+    t["id"] = id.clone().into();
+    t["name"] = name.into();
+    types.push((t, true));
+    ctx.bump(counter);
+    Some(id)
+}
+
 fn list_of(root: &Map<String, Value>, key: &str) -> Vec<(Value, bool)> {
     root.get(key).and_then(Value::as_array).map(|a| a.iter().map(|v| (v.clone(), false)).collect()).unwrap_or_default()
 }
 
 /// Bauteile + übrige Kontext-Meshes ins Projekt `root` (vorher `ifcElementsToProject`).
-fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Elements, opts: &IfcOptions, now: f64) -> (Vec<Op>, Value, usize) {
+fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct], el: &Elements, opts: &IfcOptions, now: f64) -> (Vec<Op>, Value, usize) {
     let kept: f64 = el.kept.values().map(|v| v.as_f64().unwrap_or(f64::NAN)).sum();
     let mut summary = Map::new();
-    for k in ["walls", "openings", "ceilings", "columns", "rooms", "floors", "wallTypes", "ceilingTypes", "components", "meshes", "classified"] {
+    for k in ["walls", "openings", "ceilings", "columns", "rooms", "roofs", "stairs", "floors", "wallTypes", "ceilingTypes", "roofTypes", "doorTypes", "windowTypes", "components", "meshes", "classified"] {
         summary.insert(k.into(), 0.into());
     }
     summary.insert("kept".into(), js_num(kept));
+    summary.insert("keptReasons".into(), Value::Object(el.kept_reasons.clone()));
     let hatches = root.get("hatches").and_then(Value::as_array).cloned().unwrap_or_default();
     let hatch_id = hatches.iter().find(|h| id_of(h) == "none").or(hatches.first()).and_then(|h| h.get("id").and_then(Value::as_str)).unwrap_or("none").to_string();
     let mut ctx = Ctx { stamp: stamp36(now), summary, levels: list_of(root, "drawingLevels"), components: list_of(root, "components"), hatch_id, root };
@@ -454,7 +534,13 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
     for s in &el.spaces {
         s.boundary.iter().for_each(|p| extra.extend(p));
     }
-    let [dx, dy] = geo_shift(products, project_geo_origin(root), &extra);
+    for r in &el.roofs {
+        r.outline.iter().for_each(|p| extra.extend(p));
+    }
+    for s in &el.stairs {
+        extra.extend(s.start);
+    }
+    let [dx, dy] = map_shift(meta, root).unwrap_or_else(|| geo_shift(products, project_geo_origin(root), &extra));
     let mv = |p: [f64; 2]| pt([round(p[0] + dx, 1e-9), round(p[1] + dy, 1e-9)]);
 
     // ── Geschosse ──
@@ -528,6 +614,9 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
         let id = ctx.new_id("wall");
         let wt = type_for(&mut ctx, &mut wall_types, &w.info, w.thickness, "walltype", "wallTypes");
         let mut o = json!({"id": id, "type": "wall", "floorId": fid, "categoryCode": WALL_CATEGORY, "start": mv(w.start), "end": mv(w.end), "wallTypeId": wt, "height": js_num(height)});
+        if w.bulge.abs() > 1e-9 {
+            o["bulge"] = js_num(round(w.bulge, 1e-9));
+        }
         if bottom.abs() > LEVEL_TOL {
             o["bottom"] = json!({"mode": "floor", "floorId": fid, "offset": js_num(bottom)});
         }
@@ -539,8 +628,8 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
         }
         walls.push(o);
     }
-    let door_types = root.get("doorTypes").and_then(Value::as_array).cloned().unwrap_or_default();
-    let window_types = root.get("windowTypes").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut door_types: Vec<(Value, bool)> = list_of(root, "doorTypes");
+    let mut window_types: Vec<(Value, bool)> = list_of(root, "windowTypes");
     let mut openings: Vec<Value> = Vec::new();
     for o in &el.openings {
         let Some(host) = walls.get(o.host) else { continue };
@@ -550,23 +639,35 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
         let leaves = if op.starts_with("DOUBLE_DOOR") { 2.0 } else { 1.0 };
         let door_type = (!op.is_empty())
             .then(|| {
-                door_types.iter().find(|t| {
+                door_types.iter().map(|x| &x.0).find(|t| {
                     t.get("kind").and_then(Value::as_str) == Some(if sliding { "schiebe" } else { "dreh" }) && t.get("leafCount").and_then(Value::as_f64) == Some(leaves)
                 })
             })
             .flatten()
-            .or(door_types.first());
+            .or(door_types.first().map(|x| &x.0))
+            .cloned();
         let wings: Option<f64> = match op {
             "SINGLE_PANEL" => Some(1.0),
             "DOUBLE_PANEL_VERTICAL" => Some(2.0),
             "TRIPLE_PANEL_VERTICAL" => Some(3.0),
             _ => None,
         };
-        let window_type = wings.and_then(|w| window_types.iter().find(|t| t.get("wingCount").and_then(Value::as_f64) == Some(w))).or(window_types.first());
-        let type_id = match o.kind.as_str() {
-            "door" => door_type.and_then(|t| t.get("id")).and_then(Value::as_str),
-            "window" => window_type.and_then(|t| t.get("id")).and_then(Value::as_str),
+        let window_type = wings
+            .and_then(|w| window_types.iter().map(|x| &x.0).find(|t| t.get("wingCount").and_then(Value::as_f64) == Some(w)))
+            .or(window_types.first().map(|x| &x.0))
+            .cloned();
+        // Typ aus der Datei (IfcDoorType/IfcWindowType, IFC2x3 Style): gleichnamiger Dossier-Typ, sonst ein
+        // neuer nach dem Vorbild des passenden ([B4]). Allgemeine Namen ("Tür", "Fenster SINGLE_PANEL" aus
+        // dem eigenen Export) zählen nicht.
+        let named = o.info.type_name.as_deref().map(str::trim).filter(|n| !n.is_empty() && !generic_fill_name(n)).map(str::to_string);
+        let type_id: Option<String> = match o.kind.as_str() {
+            "door" => typed_by_name(&mut ctx, &mut door_types, named.as_deref(), door_type.as_ref(), "doortype", "doorTypes"),
+            "window" => typed_by_name(&mut ctx, &mut window_types, named.as_deref(), window_type.as_ref(), "windowtype", "windowTypes"),
             _ => None,
+        };
+        let window_type = match (&type_id, o.kind.as_str()) {
+            (Some(id), "window") => window_types.iter().map(|x| &x.0).find(|t| id_of(t) == id).cloned(),
+            _ => window_type,
         };
         let mut v = Map::new();
         v.insert("id".into(), ctx.new_id("opening").into());
@@ -581,6 +682,9 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
         if o.kind == "hole" {
             v.insert("doorType".into(), "wandoeffnung".into());
         }
+        if let Some(sh) = o.shape.as_deref().filter(|x| ["rund", "rundbogen", "segmentbogen", "spitzbogen", "schraeg", "giebel"].contains(x)) {
+            v.insert("shape".into(), sh.into());
+        }
         if let Some(t) = type_id.filter(|t| !t.is_empty()) {
             v.insert("typeId".into(), t.into());
         }
@@ -593,7 +697,7 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
             }
         }
         if let (true, Some(w)) = (o.kind == "window", wings) {
-            if window_type.and_then(|t| t.get("wingCount")).and_then(Value::as_f64).unwrap_or(1.0) != w {
+            if window_type.as_ref().and_then(|t| t.get("wingCount")).and_then(Value::as_f64).unwrap_or(1.0) != w {
                 v.insert("wingCount".into(), js_num(w));
             }
         }
@@ -698,6 +802,33 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
         }));
     }
 
+    let mut roof_types = list_of(root, "roofTypes");
+    let mut roofs: Vec<Value> = Vec::new();
+    for r in &el.roofs {
+        let (fid, _, _) = floor_of(&mut ctx, r.info.storey, r.eave_z);
+        let mut v = json!({
+            "id": ctx.new_id("roof"), "type": "roof", "floorId": fid, "categoryCode": ROOF_CATEGORY,
+            "outline": r.outline.iter().map(|&p| mv(p)).collect::<Vec<_>>(),
+            "shape": r.shape, "pitchDeg": js_num(round(r.pitch_deg, 1e-6)), "overhang": 0, "ridgeAxis": r.ridge_axis,
+            "baseElevation": js_num(round(r.eave_z, 1e-6)), "thickness": js_num(round(r.thickness, 1e-6)),
+        });
+        // Dachtyp nur mit Material aus der Datei; sonst einschichtig über `thickness`.
+        if r.info.layers.iter().any(|l| !l.material.trim().is_empty()) {
+            v["roofTypeId"] = type_for(&mut ctx, &mut roof_types, &r.info, r.thickness, "rooftype", "roofTypes").into();
+        }
+        roofs.push(v);
+    }
+    let mut stairs: Vec<Value> = Vec::new();
+    for s in &el.stairs {
+        let (fid, _, _) = floor_of(&mut ctx, s.info.storey, s.z0);
+        stairs.push(json!({
+            "id": ctx.new_id("stair"), "type": "stair", "floorId": fid, "categoryCode": STAIR_CATEGORY, "shape": "straight",
+            "start": mv(s.start), "dir": {"x": js_num(round(s.dir[0], 1e-9)), "y": js_num(round(s.dir[1], 1e-9))},
+            "runLength": js_num(round(s.run_length, 1e-6)), "width": js_num(round(s.width, 1e-6)),
+            "totalRise": js_num(round(s.total_rise, 1e-6)), "stepCount": js_num(s.step_count), "up": true,
+        }));
+    }
+
     // ── Übrige Bauteile als Kontext-Mesh ──
     let meshes = ifc_meshes(products, &opts.file_name, opts.group.as_deref().unwrap_or("auto"), [dx, dy], now);
     let n_meshes = meshes.len();
@@ -706,8 +837,10 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
         + el.slabs.iter().filter(|s| s.info.classified).count()
         + el.columns.iter().filter(|c| c.info.classified).count()
         + el.spaces.iter().filter(|s| s.info.classified).count()
+        + el.roofs.iter().filter(|r| r.info.classified).count()
+        + el.stairs.iter().filter(|s| s.info.classified).count()
         + products.iter().filter(|p| !p.classifications.is_empty()).count();
-    for (k, n) in [("walls", walls.len()), ("openings", openings.len()), ("ceilings", ceilings.len()), ("columns", columns.len()), ("rooms", rooms.len()), ("meshes", n_meshes), ("classified", classified)] {
+    for (k, n) in [("walls", walls.len()), ("openings", openings.len()), ("ceilings", ceilings.len()), ("columns", columns.len()), ("rooms", rooms.len()), ("roofs", roofs.len()), ("stairs", stairs.len()), ("meshes", n_meshes), ("classified", classified)] {
         ctx.summary.insert(k.into(), n.into());
     }
 
@@ -718,10 +851,15 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
     if !ceiling_types.is_empty() || root.get("ceilingTypes").is_some_and(|v| crate::json_util::truthy(Some(v))) {
         ops.extend(grown_list_ops("ceilingTypes", root.get("ceilingTypes"), ceiling_types));
     }
+    for (key, list) in [("roofTypes", roof_types), ("doorTypes", door_types), ("windowTypes", window_types)] {
+        if list.iter().any(|x| x.1) {
+            ops.extend(grown_list_ops(key, root.get(key), list));
+        }
+    }
     if !walls.is_empty() {
         ops.push(Op::Add { collection: "walls".into(), items: walls, at: None });
     }
-    for (key, items) in [("openings", openings), ("ceilings", ceilings), ("columns", columns), ("rooms", rooms)] {
+    for (key, items) in [("openings", openings), ("ceilings", ceilings), ("columns", columns), ("rooms", rooms), ("roofs", roofs), ("stairs", stairs)] {
         if root.get(key).is_some_and(|v| crate::json_util::truthy(Some(v))) {
             if !items.is_empty() {
                 ops.push(Op::Add { collection: key.into(), items, at: None });
@@ -737,6 +875,23 @@ fn elements_ops(root: &Map<String, Value>, products: &[IfcProduct], el: &Element
     (ops, Value::Object(ctx.summary), n_meshes)
 }
 
+/// Rückschub über die Georeferenz der Datei (IfcMapConversion, [B4]): die Datei liegt lokal, die Karte
+/// = lokal + (Ost, Nord). Hat das Projekt einen LV95-Bezug, landet das Modell an seinem Kartenort
+/// relativ zum Projekt-Nullpunkt. Nur ungedreht und Massstab 1 und nur bei LV95 (EPSG:2056) oder ohne
+/// Angabe des Systems; sonst `None` (dann wie bisher über die Lage der Punkte).
+fn map_shift(meta: &Value, root: &Map<String, Value>) -> Option<[f64; 2]> {
+    let m = meta.get("mapConversion")?;
+    let num = |k: &str| m.get(k).and_then(Value::as_f64);
+    let (e, n) = (num("eastings")?, num("northings")?);
+    let axis = m.get("xAxis").and_then(Value::as_array)?;
+    let ax = [axis.first()?.as_f64()?, axis.get(1)?.as_f64()?];
+    let crs = m.get("crs").and_then(Value::as_str).unwrap_or("");
+    let lv95 = crs.is_empty() || crs.contains("2056") || crs.to_uppercase().contains("LV95");
+    let plain = (ax[0] - 1.0).abs() < 1e-9 && ax[1].abs() < 1e-9 && (num("scale").unwrap_or(1.0) - 1.0).abs() < 1e-9;
+    let o = project_geo_origin(root)?;
+    (lv95 && plain && o[0].is_finite() && o[1].is_finite() && e.is_finite() && n.is_finite()).then(|| [e - o[0], n - o[1]])
+}
+
 /// IFC ins Projekt `root`: als Kontext-Meshes oder (mit `opts.elements`) als Bauteile.
 pub fn ifc_import(root: &Map<String, Value>, meta_json: &str, positions: &[f64], indices: &[f64], element_data: &[f64], opts: &IfcOptions, now: f64) -> Result<IfcResult, String> {
     let meta: Value = serde_json::from_str(meta_json).map_err(|e| format!("IFC-Bericht: {e}"))?;
@@ -745,7 +900,7 @@ pub fn ifc_import(root: &Map<String, Value>, meta_json: &str, positions: &[f64],
     if opts.elements {
         let el = decode_elements(&meta, element_data);
         let kept = el.kept.clone();
-        let (ops, summary, n) = elements_ops(root, &products, &el, opts, now);
+        let (ops, summary, n) = elements_ops(root, &meta, &products, &el, opts, now);
         // Statt der Roh-Bauteile die Zusammenfassung (an derselben Stelle des Berichts).
         let mut report = report;
         if let Some(r) = report.as_object_mut() {
@@ -753,8 +908,132 @@ pub fn ifc_import(root: &Map<String, Value>, meta_json: &str, positions: &[f64],
         }
         return Ok(IfcResult { ops, summary: Some(summary), report, kept, context_objects: n });
     }
-    let shift = geo_shift(&products, project_geo_origin(root), &[]);
+    let shift = map_shift(&meta, root).unwrap_or_else(|| geo_shift(&products, project_geo_origin(root), &[]));
     let meshes = ifc_meshes(&products, &opts.file_name, opts.group.as_deref().unwrap_or("auto"), shift, now);
     let n = meshes.len();
     Ok(IfcResult { ops: context_ops(root, meshes), summary: None, report, kept: Map::new(), context_objects: n })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn added<'a>(ops: &'a [Op], key: &str) -> Vec<&'a Value> {
+        let mut out = Vec::new();
+        for op in ops {
+            match op {
+                Op::Add { collection, items, .. } if collection == key => out.extend(items.iter()),
+                Op::SetField { key: k, value: Some(Value::Array(a)), .. } if k == key => out.extend(a.iter()),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    fn at(v: &Value, x: f64, y: f64) -> bool {
+        (v["x"].as_f64().unwrap_or(f64::NAN) - x).abs() < 1e-9 && (v["y"].as_f64().unwrap_or(f64::NAN) - y).abs() < 1e-9
+    }
+
+    /// Erkannte Bauteile wie aus `fileio` (`ifc_semantic::encode`): Bogenwand mit runder Öffnung,
+    /// Satteldach, gerade Treppe, Tür mit eigenem Typnamen; Georeferenz LV95.
+    fn meta(door_type: &str) -> (Value, Vec<f64>) {
+        let data = vec![
+            // Wand: sx, sy, ex, ey, z0, z1, t, bulge
+            5.0, 0.0, 0.0, 5.0, 0.0, 2.5, 0.3, -0.41421356237,
+            // Öffnung: position, width, sill, height, swing, hinge
+            1.0, 1.0, 1.0, 1.0, 0.0, 0.0,
+            // Gerade Wand für die Tür
+            0.0, -2.0, 4.0, -2.0, 0.0, 2.5, 0.2, 0.0,
+            1.0, 0.9, 0.0, 2.1, 0.0, 0.0,
+            // Dach: eaveZ, pitch, t, n, Ring
+            3.0, 45.0, 0.2, 4.0, 0.0, 0.0, 10.0, 0.0, 10.0, 8.0, 0.0, 8.0,
+            // Treppe: sx, sy, dx, dy, lauf, breite, stufen, z0, steighöhe
+            1.0, 2.55, 1.0, 0.0, 1.68, 1.1, 6.0, 0.0, 1.05,
+        ];
+        let info = |kind: &str, at: usize, n: usize| json!({"kind": kind, "at": at, "n": n, "storey": 0, "layers": [], "classifications": [], "common": {}});
+        let mut op1 = info("opening", 8, 6);
+        op1["host"] = 0.into();
+        op1["openingKind"] = "hole".into();
+        op1["shape"] = "rund".into();
+        let mut op2 = info("opening", 22, 6);
+        op2["host"] = 1.into();
+        op2["openingKind"] = "door".into();
+        op2["typeName"] = door_type.into();
+        let mut roof = info("roof", 28, 12);
+        roof["shape"] = "sattel".into();
+        roof["ridgeAxis"] = "x".into();
+        let meta = json!({
+            "schema": "IFC4", "lengthScale": 1, "products": [], "skippedItems": {}, "skippedProducts": {},
+            "productsWithoutGeometry": 0, "simplifiedBooleans": 0, "voidsApplied": 0, "voidsIgnored": 0, "parseErrors": 0, "truncated": false,
+            "mapConversion": {"eastings": 2600100.0, "northings": 1200050.0, "height": 0.0, "xAxis": [1.0, 0.0], "scale": 1.0, "crs": "EPSG:2056"},
+            "elements": {
+                "storeys": [{"globalId": "s", "name": "EG", "elevation": 0.0}],
+                "elements": [info("wall", 0, 8), op1, info("wall", 14, 8), op2, roof, info("stair", 40, 9)],
+                "kept": {"IfcStair": 1},
+                "keptReasons": {"IfcStair": {"stairForm": 1}},
+            },
+        });
+        (meta, data)
+    }
+
+    fn root() -> Map<String, Value> {
+        json!({
+            "drawingLevels": [], "components": [], "wallTypes": [], "hatches": [{"id": "none"}],
+            "doorTypes": [{"id": "dt1", "name": "Drehtür", "kind": "dreh", "leafCount": 1, "leafStyle": "glatt", "frameThickness": 0.05}],
+            "windowTypes": [{"id": "wt1", "name": "Fenster", "kind": "dreh", "wingCount": 1}],
+            "geoAnchor": {"lv95": {"e": 2600000.0, "n": 1200000.0}, "model": {"x": 0.0, "y": 0.0}},
+        })
+        .as_object()
+        .cloned()
+        .unwrap()
+    }
+
+    #[test]
+    fn roof_stair_arc_wall_round_opening_type_by_name_and_map_shift() {
+        let (m, data) = meta("Haustür Eiche");
+        let opts = IfcOptions { file_name: "a.ifc".into(), group: None, elements: true };
+        let r = ifc_import(&root(), &m.to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+        let walls = added(&r.ops, "walls");
+        assert_eq!(walls.len(), 2);
+        // Verschiebung aus der Georeferenz: Karte − Projekt-Nullpunkt = (100, 50).
+        assert!(at(&walls[0]["start"], 105.0, 50.0), "{}", walls[0]);
+        assert!((walls[0]["bulge"].as_f64().unwrap() + 0.41421356237).abs() < 1e-9);
+        assert!(walls[1].get("bulge").is_none());
+        let openings = added(&r.ops, "openings");
+        assert_eq!(openings[0]["shape"], "rund");
+        // Neuer Türtyp mit dem Namen aus der Datei, nach dem Vorbild des vorhandenen.
+        let doors = added(&r.ops, "doorTypes");
+        assert_eq!(doors.len(), 1, "{:?}", r.ops);
+        assert_eq!((doors[0]["name"].as_str(), doors[0]["kind"].as_str()), (Some("Haustür Eiche"), Some("dreh")));
+        assert_eq!(openings[1]["typeId"], doors[0]["id"]);
+        let roofs = added(&r.ops, "roofs");
+        assert_eq!(roofs.len(), 1);
+        assert_eq!(
+            (roofs[0]["shape"].as_str(), roofs[0]["ridgeAxis"].as_str(), roofs[0]["pitchDeg"].as_f64(), roofs[0]["baseElevation"].as_f64()),
+            (Some("sattel"), Some("x"), Some(45.0), Some(3.0))
+        );
+        assert!(at(&roofs[0]["outline"][2], 110.0, 58.0));
+        // Ohne Material in der Datei: kein Dachtyp, einschichtig über die Dicke.
+        assert!(added(&r.ops, "roofTypes").is_empty() && roofs[0].get("roofTypeId").is_none());
+        assert!((roofs[0]["thickness"].as_f64().unwrap() - 0.2).abs() < 1e-9);
+        let stairs = added(&r.ops, "stairs");
+        assert_eq!((stairs[0]["stepCount"].as_f64(), stairs[0]["shape"].as_str()), (Some(6.0), Some("straight")));
+        assert!(at(&stairs[0]["start"], 101.0, 52.55));
+        let s = r.summary.unwrap();
+        assert_eq!((s["roofs"].as_f64(), s["stairs"].as_f64(), s["doorTypes"].as_f64()), (Some(1.0), Some(1.0), Some(1.0)));
+        assert_eq!(s["keptReasons"], json!({"IfcStair": {"stairForm": 1}}));
+
+        // Allgemeiner Stilname aus dem eigenen Export: kein neuer Typ; vorhandener Name: wiederverwendet.
+        for name in ["Tür SINGLE_SWING_LEFT", "drehtür"] {
+            let (m, data) = meta(name);
+            let r = ifc_import(&root(), &m.to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+            assert!(added(&r.ops, "doorTypes").is_empty(), "{name}");
+            assert_eq!(added(&r.ops, "openings")[1]["typeId"], "dt1");
+        }
+        // Ohne Projekt-Bezug: lokal (keine Verschiebung).
+        let mut bare = root();
+        bare.remove("geoAnchor");
+        let r = ifc_import(&bare, &m.to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+        assert!(at(&added(&r.ops, "walls")[0]["start"], 5.0, 0.0));
+    }
 }

@@ -23,6 +23,16 @@
 //   - Raum (IfcSpace): Prisma mit einem Umriss ohne Löcher; Name (LongName), SIA-416-Kategorie aus
 //     der Eigenschaft `SIA416` (Dossier-Export) falls vorhanden.
 //   - Geschosse (IfcBuildingStorey): Name, Höhe (Platzierung, sonst Elevation).
+//   - (6.11.) Dach (IfcRoof samt Platten, frei stehende IfcSlab ROOF je Geschoss nach Berührung):
+//     achsparalleles Rechteck, Flach/Pult/Sattel/Walm (`ifc_shapes::fit_roof`) → Dossier-Dach. Wände mit
+//     schräger Krone (Giebel) werden Wand bis zum höchsten Punkt, wenn ein erkanntes Dach die Krone genau
+//     so kappt wie Dossier (Dachanschluss automatisch, Volumenvergleich). Gerade Treppe (IfcStair ohne
+//     Geländer, IfcStairFlight) → Dossier-Treppe (Steigung, Auftritt, Laufbreite). Bogenwand
+//     (Ringausschnitt ohne Öffnungen) → `bulge`. Runde Öffnung → `shape: "rund"`. Türen/Fenster ohne
+//     IfcRelFillsElement: Wirt über die Lage (Loch schon im Wandkörper: fehlendes Volumen = ihre Kästen).
+//     Raum ohne Körper: Umriss aus „FootPrint", Höhe aus „Box" (ArchiCAD IFC2x3). Dreiecksnetze mit
+//     T-Stössen: Kanten werden an Punkten darauf geteilt. Grund je Mesh gebliebenem Kandidaten
+//     (`kept_reasons`, Kennwort → Dialog `ifc.reason.*`).
 //   - Klassifikation (IfcRelAssociatesClassification → IfcClassificationReference, Bauteil oder Typ) an jedem
 //     erkannten Bauteil (`Info::classifications`); IfcZone (IfcRelAssignsToGroup) liefert dem Raum die
 //     SIA-416-Kategorie, wenn er keine eigene `SIA416`-Eigenschaft trägt.
@@ -94,6 +104,8 @@ pub struct Wall {
     pub z0: f64,
     pub z1: f64,
     pub thickness: f64,
+    /// Bogenwand ([T2]): `tan(Öffnungswinkel/4)`, + = Scheitel links der Sehne; 0 = gerade.
+    pub bulge: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -127,6 +139,8 @@ pub struct Opening {
     /// Tür: Scharnier am Wandanfang (+1) bzw. -ende (−1) nach LEFT/RIGHT der Ausführung (IFC: von der
     /// Aufschlagseite gesehen; LEFT = Scharnier auf +X der Tür-Platzierung); 0 = unbekannt.
     pub hinge: i8,
+    /// Umriss in der Wandebene (Dossier `Opening.shape`), `None` = Rechteck.
+    pub shape: Option<&'static str>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -165,6 +179,40 @@ pub struct Space {
     pub z1: f64,
 }
 
+/// Dach ([B4]): Dossier-Dach aus IfcRoof (samt Platten) bzw. IfcSlab ROOF.
+#[derive(Clone, Debug, Default)]
+pub struct Roof {
+    pub info: Info,
+    /// Umriss der Traufe (aussen, gegen den Uhrzeigersinn, Rechteck bei Sattel/Walm/Pult).
+    pub outline: Vec<V2>,
+    /// Dossier-Dachform: "flach", "pult", "sattel", "walm".
+    pub shape: &'static str,
+    pub pitch_deg: f64,
+    /// Firstrichtung ("x"/"y"), bei Pult die Richtung der Traufkanten.
+    pub ridge_axis: &'static str,
+    /// Höhe der Traufe (Unterkante der Dachhaut an der Aussenkante).
+    pub eave_z: f64,
+    /// Dachdicke senkrecht zur Fläche.
+    pub thickness: f64,
+    /// Bauteile, aus denen das Dach besteht (IfcRoof + Platten).
+    pub parts: Vec<u64>,
+}
+
+/// Gerade Treppe ([B4]) aus IfcStair/IfcStairFlight.
+#[derive(Clone, Debug, Default)]
+pub struct Stair {
+    pub info: Info,
+    /// Mitte der Antrittskante (unten).
+    pub start: V2,
+    /// Einheits-Laufrichtung (aufwärts).
+    pub dir: V2,
+    pub run_length: f64,
+    pub width: f64,
+    pub step_count: usize,
+    pub z0: f64,
+    pub total_rise: f64,
+}
+
 /// Erkannte Bauteile einer Datei.
 #[derive(Clone, Debug, Default)]
 pub struct Semantic {
@@ -175,11 +223,45 @@ pub struct Semantic {
     pub slabs: Vec<Slab>,
     pub columns: Vec<Column>,
     pub spaces: Vec<Space>,
-    /// Kandidaten (Wand, Decke, Stütze, Raum), die nicht sicher abbildbar waren, je Klasse.
+    pub roofs: Vec<Roof>,
+    pub stairs: Vec<Stair>,
+    /// Kandidaten (Wand, Decke, Stütze, Raum, Dach, Treppe), die nicht sicher abbildbar waren, je Klasse.
     pub kept: BTreeMap<String, usize>,
+    /// Dieselben je Klasse und Grund (Kennwort, s. [`Reason`]).
+    pub kept_reasons: BTreeMap<String, BTreeMap<String, usize>>,
     /// Bauteile, die nicht mehr als Mesh kommen (erkannte Bauteile, Füllungen, Öffnungen).
     pub converted: HashSet<u64>,
 }
+
+impl Semantic {
+    /// Kandidat bleibt Mesh: zählt je Klasse und Grund.
+    fn keep(&mut self, class: &str, why: &str) {
+        *self.kept.entry(class.to_string()).or_insert(0) += 1;
+        *self.kept_reasons.entry(class.to_string()).or_default().entry(why.to_string()).or_insert(0) += 1;
+    }
+}
+
+// Gründe, weshalb ein Kandidat Mesh bleibt (Kennwörter; die Hülle übersetzt `ifc.reason.<kennwort>`).
+/// Kein lesbarer Körper.
+const R_NO_BODY: &str = "noBody";
+/// Körper unbrauchbar (zu flach, kaputt).
+const R_SHAPE: &str = "shape";
+/// Masse ausserhalb des Plausiblen (Wand > 2 m dick, Decke > 3 m …).
+const R_DIMENSIONS: &str = "dimensions";
+/// Grundriss kein Rechteck (Wand) bzw. Körper kein Quader.
+const R_NOT_RECT: &str = "notRectangular";
+/// Wand mit schräger/abgetreppter Krone ohne erkanntes Dach darüber.
+const R_SLOPED_TOP: &str = "slopedTop";
+/// Kein senkrechtes Prisma (Decke, Stütze, Raum).
+const R_NOT_PRISM: &str = "notPrism";
+/// Öffnung nicht abbildbar (Nische, schräg, mehrere Füllungen …).
+const R_OPENING: &str = "opening";
+/// Querschnitt weder Rechteck noch Kreis.
+const R_PROFILE: &str = "profile";
+/// Raum mit Loch.
+const R_HOLES: &str = "holes";
+/// Teil eines anderen Bauteils (Vorhangfassade, Baugruppe …).
+const R_PART: &str = "part";
 
 // ---------------------------------------------------------------------------
 // 2D-Hilfen
@@ -248,7 +330,7 @@ fn convex_hull(pts: &[V2]) -> Vec<V2> {
 
 /// Kleinstes umschliessendes Rechteck: Richtung `d` (entlang der längeren Seite, nach +x bzw. +y
 /// gedreht) und Ausdehnung [u0,u1] × [v0,v1] in (d, left(d)).
-fn min_area_rect(pts: &[V2]) -> Option<(V2, f64, f64, f64, f64)> {
+pub(crate) fn min_area_rect(pts: &[V2]) -> Option<(V2, f64, f64, f64, f64)> {
     let hull = convex_hull(pts);
     if hull.len() < 3 {
         return None;
@@ -381,16 +463,46 @@ fn boundary_loops(tris: &[[V2; 3]]) -> Vec<Vec<V2>> {
             pts.len() - 1
         })
     };
-    let mut edges: HashMap<(usize, usize), i32> = HashMap::new();
+    let mut idx: Vec<[usize; 3]> = Vec::with_capacity(tris.len());
     for t in tris {
         let (a, b, c) = (id(t[0]), id(t[1]), id(t[2]));
-        if a == b || b == c || a == c {
-            continue;
+        if a != b && b != c && a != c {
+            idx.push([a, b, c]);
         }
+    }
+    // T-Stösse (Dreiecksnetze aus Exporten): Punkte, die auf einer Kante liegen, teilen sie, damit sich
+    // die Teilkanten mit den Gegenkanten aufheben. Bis 3000 Punkte (sonst ohne Teilung).
+    let split = |u: usize, v: usize| -> Vec<usize> {
+        let mut on: Vec<(f64, usize)> = Vec::new();
+        if pts.len() <= 3000 {
+            let (a, b) = (pts[u], pts[v]);
+            let ab = sub2(b, a);
+            let l2 = dot2(ab, ab);
+            for (w, &p) in pts.iter().enumerate() {
+                if w == u || w == v {
+                    continue;
+                }
+                let s = dot2(sub2(p, a), ab) / l2;
+                if s > 1e-9 && s < 1.0 - 1e-9 && cross2(ab, sub2(p, a)).abs() <= 1e-5 * l2.sqrt() {
+                    on.push((s, w));
+                }
+            }
+            on.sort_by(|x, y| x.0.total_cmp(&y.0));
+        }
+        let mut chain = vec![u];
+        chain.extend(on.into_iter().map(|x| x.1));
+        chain.push(v);
+        chain
+    };
+    let mut edges: HashMap<(usize, usize), i32> = HashMap::new();
+    for [a, b, c] in idx {
         for (u, v) in [(a, b), (b, c), (c, a)] {
-            match edges.get_mut(&(v, u)) {
-                Some(n) if *n > 0 => *n -= 1,
-                _ => *edges.entry((u, v)).or_insert(0) += 1,
+            for w in split(u, v).windows(2) {
+                let (u, v) = (w[0], w[1]);
+                match edges.get_mut(&(v, u)) {
+                    Some(n) if *n > 0 => *n -= 1,
+                    _ => *edges.entry((u, v)).or_insert(0) += 1,
+                }
             }
         }
     }
@@ -491,11 +603,13 @@ struct WallCand {
     z1: f64,
     thickness: f64,
     /// Öffnungen: (IfcOpeningElement, Füllung, Art, Körper).
-    openings: Vec<(u64, Option<u64>, OpeningKind, Mesh)>,
+    openings: Vec<(u64, Option<u64>, OpeningKind, Mesh, Option<&'static str>)>,
     /// Seite der ersten Schicht laut IfcMaterialLayerSetUsage: Richtung in Weltkoordinaten.
     usage_side: Option<V2>,
     /// Darstellungselemente einzeln (Schicht-Bänder).
     items: Vec<Mesh>,
+    /// Bogenwand: Bulge der Achse start → end (Modell-Konvention, + = Scheitel links); 0 = gerade.
+    bulge: f64,
 }
 
 struct Ctx<'r, 'a> {
@@ -506,6 +620,10 @@ struct Ctx<'r, 'a> {
     sia: HashMap<u64, String>,
     common: HashMap<u64, BTreeMap<String, String>>,
     storey_index: HashMap<u64, usize>,
+    /// Erkannte Dächer (vor den Wänden): schräge Wandkronen darunter sind Dachanschluss.
+    roofs: Vec<crate::ifc_shapes::RoofFit>,
+    /// Türen/Fenster ohne IfcRelFillsElement mit Körper (Kandidaten für ausgeschnittene Wandlöcher).
+    loose: Vec<(u64, OpeningKind, Mesh)>,
 }
 
 impl Ctx<'_, '_> {
@@ -669,24 +787,60 @@ impl Ctx<'_, '_> {
 
     fn body(&mut self, id: u64) -> Option<(Mesh, Option<[f64; 4]>)> {
         let (m, c) = self.r.product_body(id, MAX_BODY_TRIS)?;
+        #[cfg(test)]
+        if std::env::var("DOSSIER_IFC_DEBUG").is_ok() && (m.is_empty() || m.triangle_count() > MAX_BODY_TRIS) {
+            eprintln!("Körper #{id}: {} Dreiecke", m.triangle_count());
+        }
         (!m.is_empty() && m.triangle_count() <= MAX_BODY_TRIS).then_some((m, c))
     }
 
     /// Wand aus dem Körper; `None` = nicht sicher abbildbar.
-    fn wall(&mut self, id: u64) -> Option<WallCand> {
-        let (mesh, color) = self.body(id)?;
-        let s = shape(&mesh)?;
-        let (d, u0, u1, v0, v1) = min_area_rect(&s.plan)?;
+    fn wall(&mut self, id: u64) -> Result<WallCand, &'static str> {
+        let (mesh, color) = self.body(id).ok_or(R_NO_BODY)?;
+        let s = shape(&mesh).ok_or(R_SHAPE)?;
+        let (d, u0, u1, v0, v1) = min_area_rect(&s.plan).ok_or(R_SHAPE)?;
         let (len, t, h) = (u1 - u0, v1 - v0, s.z1 - s.z0);
         if !(t >= 0.01 && t <= 2.0 && len >= t.max(0.05) && h >= 0.05) {
-            return None;
+            return Err(R_DIMENSIONS);
         }
         let rect = len * t;
         let ratio = s.volume / (rect * h);
-        if !((0.7..=1.0 + 1e-3).contains(&ratio) && s.top_area >= 0.35 * rect && s.bottom_area >= 0.6 * rect) {
-            return None;
-        }
         let n = left(d);
+        let vc0 = (v0 + v1) / 2.0;
+        let o = lerp_dir([n[0] * vc0, n[1] * vc0], d, u0);
+        let mut loose_in: Vec<usize> = Vec::new();
+        if !((0.7..=1.0 + 1e-3).contains(&ratio) && s.top_area >= 0.35 * rect && s.bottom_area >= 0.6 * rect) {
+            // Türen/Fenster ohne Öffnungsbeziehung, deren Löcher schon im Wandkörper sind: das fehlende
+            // Volumen muss genau ihren Kästen über die Wanddicke entsprechen.
+            let mut cut = 0.0;
+            for (k, (_, _, m)) in self.loose.iter().enumerate() {
+                let Some((b, _)) = box_in_frame(m, o, d) else { continue };
+                // Rahmen dürfen über die Wand stehen, die Mitte liegt in der Wanddicke.
+                let inside = b[0] >= -0.01
+                    && b[1] <= len + 0.01
+                    && b[4] >= s.z0 - 0.01
+                    && b[5] <= s.z1 + 0.01
+                    && ((b[2] + b[3]) / 2.0).abs() <= t / 2.0 + 0.02
+                    && b[3] - b[2] <= t + 0.3;
+                if inside {
+                    loose_in.push(k);
+                    cut += (b[1].min(len) - b[0].max(0.0)) * t * (b[5].min(s.z1) - b[4].max(s.z0));
+                }
+            }
+            let explained = !loose_in.is_empty() && s.top_area >= 0.35 * rect && (rect * h - cut - s.volume).abs() <= 0.03 * rect * h;
+            if explained {
+                // Wand mit den Löchern der Füllungen (unten).
+            } else if s.bottom_area >= 0.6 * rect && ratio <= 1.0 + 1e-3 && ratio >= 0.2 {
+                // Schräge Krone (Giebel, Pult): abbildbar, wenn ein erkanntes Dach sie genau so kappt
+                // (Dossier schneidet die Wand an der Dach-Unterkante, `Wall.roofAttach` automatisch).
+                let capped = crate::ifc_shapes::capped_volume(o, d, len, t, s.z0, s.z1, &self.roofs);
+                if self.roofs.is_empty() || (capped - s.volume).abs() > 0.03 * s.volume.max(1e-6) {
+                    return Err(R_SLOPED_TOP);
+                }
+            } else {
+                return self.arc_wall(id, &s, color);
+            }
+        }
         let vc = (v0 + v1) / 2.0;
         let base = [n[0] * vc, n[1] * vc];
         let start = lerp_dir(base, d, u0);
@@ -695,12 +849,18 @@ impl Ctx<'_, '_> {
         // Öffnungen: quaderförmig, durch die ganze Wand, Füllung Tür/Fenster oder keine.
         let mut openings = Vec::new();
         for &o in self.rels.voids.get(&id).map(Vec::as_slice).unwrap_or(&[]) {
-            let (om, _) = self.body(o)?;
-            let (b, fill) = box_in_frame(&om, start, d)?;
+            let (om, _) = self.body(o).ok_or(R_OPENING)?;
+            let (b, fill) = box_in_frame(&om, start, d).ok_or(R_OPENING)?;
             let through = b[2] <= -t / 2.0 + 1e-3 && b[3] >= t / 2.0 - 1e-3;
             let inside = b[0] >= -0.01 && b[1] <= len + 0.01 && b[5] > s.z0 + 0.01 && b[4] < s.z1 - 0.01;
-            if !(through && inside && (0.95..=1.0 + 1e-3).contains(&fill)) {
-                return None;
+            // Rund (Dossier `shape: "rund"`, Ellipse im Rechteck): Füllgrad π/4, alle Punkte auf der Ellipse.
+            let round = (0.76..=0.81).contains(&fill) && on_ellipse(&om, start, d, &b);
+            if !(through && inside && ((0.95..=1.0 + 1e-3).contains(&fill) || round)) {
+                #[cfg(test)]
+                if std::env::var("DOSSIER_IFC_DEBUG").is_ok() {
+                    eprintln!("Öffnung #{o} in #{id}: Quader {b:?} Füllgrad {fill:.3} Wand len {len:.3} t {t:.3} z {:.3}..{:.3}", s.z0, s.z1);
+                }
+                return Err(R_OPENING);
             }
             let fillings = self.fills.get(&o).cloned().unwrap_or_default();
             let (filling, kind) = match fillings.as_slice() {
@@ -712,12 +872,16 @@ impl Ctx<'_, '_> {
                     } else if ty.starts_with("IFCWINDOW") {
                         (Some(*x), OpeningKind::Window)
                     } else {
-                        return None;
+                        return Err(R_OPENING);
                     }
                 }
-                _ => return None,
+                _ => return Err(R_OPENING),
             };
-            openings.push((o, filling, kind, om));
+            openings.push((o, filling, kind, om, round.then_some("rund")));
+        }
+        for k in loose_in {
+            let (x, kind, m) = &self.loose[k];
+            openings.push((*x, Some(*x), *kind, m.clone(), None));
         }
 
         let (layers, sense, _) = self.layers(id);
@@ -736,40 +900,56 @@ impl Ctx<'_, '_> {
             _ => None,
         };
         let items = if layers.len() > 1 && usage_side.is_none() { self.r.product_item_meshes(id, MAX_BODY_TRIS) } else { Vec::new() };
-        Some(WallCand { info: self.info(id, color), start, end, z0: s.z0, z1: s.z1, thickness: t, openings, usage_side, items })
+        Ok(WallCand { info: self.info(id, color), start, end, z0: s.z0, z1: s.z1, thickness: t, openings, usage_side, items, bulge: 0.0 })
     }
 
-    fn slab(&mut self, id: u64) -> Option<Slab> {
-        let (mesh, color) = self.body(id)?;
-        let s = shape(&mesh)?;
-        if s.z1 - s.z0 > 3.0 {
-            return None;
+    /// Bogenwand ([T2]): senkrechtes Prisma mit einem Ringausschnitt als Grundriss, ohne Öffnungen.
+    fn arc_wall(&mut self, id: u64, s: &Shape, color: Option<[f64; 4]>) -> Result<WallCand, &'static str> {
+        let (ring, holes) = prism(s).ok_or(R_NOT_RECT)?;
+        if !holes.is_empty() {
+            return Err(R_NOT_RECT);
         }
-        let (outline, mut holes) = prism(&s)?;
+        let a = crate::ifc_shapes::fit_arc_ring(&ring).ok_or(R_NOT_RECT)?;
+        if self.rels.voids.get(&id).is_some_and(|v| !v.is_empty()) {
+            return Err(R_OPENING);
+        }
+        let at = |w: f64| [a.center[0] + a.radius * w.cos(), a.center[1] + a.radius * w.sin()];
+        // Gegen den Uhrzeigersinn: Scheitel rechts der Sehne → Bulge negativ.
+        let bulge = -((a.a1 - a.a0) / 4.0).tan();
+        Ok(WallCand { info: self.info(id, color), start: at(a.a0), end: at(a.a1), z0: s.z0, z1: s.z1, thickness: a.thickness, openings: Vec::new(), usage_side: None, items: Vec::new(), bulge })
+    }
+
+    fn slab(&mut self, id: u64) -> Result<Slab, &'static str> {
+        let (mesh, color) = self.body(id).ok_or(R_NO_BODY)?;
+        let s = shape(&mesh).ok_or(R_SHAPE)?;
+        if s.z1 - s.z0 > 3.0 {
+            return Err(R_DIMENSIONS);
+        }
+        let (outline, mut holes) = prism(&s).ok_or(R_NOT_PRISM)?;
         for &o in self.rels.voids.get(&id).map(Vec::as_slice).unwrap_or(&[]) {
             if self.fills.get(&o).is_some_and(|l| !l.is_empty()) {
-                return None;
+                return Err(R_OPENING);
             }
-            let (om, _) = self.body(o)?;
-            let os = shape(&om)?;
+            let (om, _) = self.body(o).ok_or(R_OPENING)?;
+            let os = shape(&om).ok_or(R_OPENING)?;
             if !(os.z0 <= s.z0 + 1e-3 && os.z1 >= s.z1 - 1e-3) {
-                return None;
+                return Err(R_OPENING);
             }
-            let (ring, inner) = prism(&os)?;
+            let (ring, inner) = prism(&os).ok_or(R_OPENING)?;
             if !inner.is_empty() {
-                return None;
+                return Err(R_OPENING);
             }
             holes.push(ring);
         }
-        Some(Slab { info: self.info(id, color), outline, holes, z0: s.z0, z1: s.z1 })
+        Ok(Slab { info: self.info(id, color), outline, holes, z0: s.z0, z1: s.z1 })
     }
 
-    fn column(&mut self, id: u64) -> Option<Column> {
-        let (mesh, color) = self.body(id)?;
-        let s = shape(&mesh)?;
-        let (ring, holes) = prism(&s)?;
+    fn column(&mut self, id: u64) -> Result<Column, &'static str> {
+        let (mesh, color) = self.body(id).ok_or(R_NO_BODY)?;
+        let s = shape(&mesh).ok_or(R_SHAPE)?;
+        let (ring, holes) = prism(&s).ok_or(R_NOT_PRISM)?;
         if !holes.is_empty() {
-            return None;
+            return Err(R_PROFILE);
         }
         let n = ring.len();
         let c = ring.iter().fold([0.0, 0.0], |a, p| [a[0] + p[0] / n as f64, a[1] + p[1] / n as f64]);
@@ -780,14 +960,15 @@ impl Ctx<'_, '_> {
             let e: Vec<V2> = (0..4).map(|i| sub2(ring[(i + 1) % 4], ring[i])).collect();
             let square = (0..4).all(|i| dot2(e[i], e[(i + 1) % 4]).abs() <= 1e-6 * len2(e[i]) * len2(e[(i + 1) % 4]));
             if !square {
-                return None;
+                return Err(R_PROFILE);
             }
             // Breite entlang der Kante, deren Winkel am nächsten bei 0 liegt.
             let pick = (0..2).min_by(|&i, &j| {
                 let a = |k: usize| e[k][1].atan2(e[k][0]).rem_euclid(std::f64::consts::PI);
                 let dist = |x: f64| x.min(std::f64::consts::PI - x);
                 dist(a(i)).total_cmp(&dist(a(j)))
-            })?;
+            })
+            .ok_or(R_PROFILE)?;
             let mut ang = e[pick][1].atan2(e[pick][0]).rem_euclid(std::f64::consts::PI);
             if ang > std::f64::consts::FRAC_PI_2 {
                 ang -= std::f64::consts::PI;
@@ -798,27 +979,53 @@ impl Ctx<'_, '_> {
             let rs: Vec<f64> = ring.iter().map(|p| len2(sub2(*p, c))).collect();
             let r = rs.iter().sum::<f64>() / n as f64;
             if !(r > 1e-3 && rs.iter().all(|x| (x - r).abs() <= 0.01 * r)) {
-                return None;
+                return Err(R_PROFILE);
             }
             center = c;
             profile = Profile::Round { radius: rs.iter().copied().fold(0.0, f64::max) };
         } else {
-            return None;
+            return Err(R_PROFILE);
         }
-        Some(Column { info: self.info(id, color), center, rotation, profile, z0: s.z0, z1: s.z1 })
+        Ok(Column { info: self.info(id, color), center, rotation, profile, z0: s.z0, z1: s.z1 })
     }
 
-    fn space(&mut self, id: u64) -> Option<Space> {
-        let (mesh, color) = self.body(id)?;
-        let s = shape(&mesh)?;
-        let (boundary, holes) = prism(&s)?;
-        if !holes.is_empty() {
-            return None;
-        }
+    fn space(&mut self, id: u64) -> Result<Space, &'static str> {
+        let (boundary, z0, z1, color) = match self.body(id) {
+            Some((mesh, color)) => {
+                let s = shape(&mesh).ok_or(R_SHAPE)?;
+                let (boundary, holes) = prism(&s).ok_or(R_NOT_PRISM)?;
+                if !holes.is_empty() {
+                    return Err(R_HOLES);
+                }
+                (boundary, s.z0, s.z1, color)
+            }
+            // Ohne Körper (ArchiCAD IFC2x3: nur „FootPrint" + „Box"): Grundriss-Umriss.
+            None => {
+                let (ring, z0, z1) = self.r.product_footprint(id).ok_or(R_NO_BODY)?;
+                let mut ring = simplify_ring(&ring);
+                if area2(&ring) < 0.0 {
+                    ring.reverse();
+                }
+                if ring.len() < 3 || area2(&ring) < 1e-4 {
+                    return Err(R_SHAPE);
+                }
+                (ring, z0, z1, None)
+            }
+        };
         let f = self.r.f;
         let long_name = f.get(id).and_then(|e| e.arg(7)).and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
-        Some(Space { info: self.info(id, color), long_name, sia: self.sia.get(&id).cloned().or_else(|| self.zone_sia(id)), boundary, z0: s.z0, z1: s.z1 })
+        Ok(Space { info: self.info(id, color), long_name, sia: self.sia.get(&id).cloned().or_else(|| self.zone_sia(id)), boundary, z0, z1 })
     }
+}
+
+/// Alle Punkte eines Öffnungskörpers liegen (in der Wandebene u/z) auf der Ellipse im Rechteck `b`.
+fn on_ellipse(m: &Mesh, o: V2, d: V2, b: &[f64; 6]) -> bool {
+    let (uc, zc, a, c) = ((b[0] + b[1]) / 2.0, (b[4] + b[5]) / 2.0, (b[1] - b[0]) / 2.0, (b[5] - b[4]) / 2.0);
+    a > 0.01 && c > 0.01 && m.positions.chunks_exact(3).all(|p| {
+        let u = dot2(sub2([p[0], p[1]], o), d);
+        let r = ((u - uc) / a).powi(2) + ((p[2] - zc) / c).powi(2);
+        (r - 1.0).abs() <= 0.03
+    })
 }
 
 /// Zieht Wand-Enden, die in einer anderen Wand desselben Geschosses liegen, auf deren Achse.
@@ -826,6 +1033,9 @@ fn snap_ends(walls: &mut [WallCand]) {
     let orig: Vec<(V2, V2, f64)> = walls.iter().map(|w| (w.start, w.end, w.thickness)).collect();
     for i in 0..walls.len() {
         let (a, b, ti) = orig[i];
+        if walls[i].bulge != 0.0 {
+            continue;
+        }
         let Some(di) = unit2(sub2(b, a)) else { continue };
         let li = len2(sub2(b, a));
         for end in 0..2 {
@@ -833,6 +1043,7 @@ fn snap_ends(walls: &mut [WallCand]) {
             let mut best: Option<(f64, V2)> = None;
             for (j, &(c, e, tj)) in orig.iter().enumerate() {
                 if i == j
+                    || walls[j].bulge != 0.0
                     || walls[i].info.storey != walls[j].info.storey
                     || walls[i].z1.min(walls[j].z1) - walls[i].z0.max(walls[j].z0) < 0.01
                 {
@@ -902,6 +1113,187 @@ fn side_from_bands(w: &WallCand, d: V2) -> i32 {
     };
     let (l, r) = (score(&bands(1.0)), score(&bands(-1.0)));
     (l as i32 - r as i32).signum()
+}
+
+/// Körper der Bauteile, die einen haben.
+fn bodies(cx: &mut Ctx, ids: &[u64]) -> Vec<(u64, Mesh, Option<[f64; 4]>)> {
+    let f = cx.r.f;
+    ids.iter()
+        .filter(|&&id| f.get(id).and_then(|e| e.arg(6)).and_then(|v| v.as_ref_id()).and_then(|i| f.get(i)).is_some_and(|s| s.ty == "IFCPRODUCTDEFINITIONSHAPE"))
+        .filter_map(|&id| cx.body(id).map(|(m, c)| (id, m, c)))
+        .collect()
+}
+
+fn is_spatial(f: &crate::ifc_step::StepFile, id: u64) -> bool {
+    f.get(id).is_some_and(|e| matches!(e.ty.as_str(), "IFCBUILDINGSTOREY" | "IFCBUILDING" | "IFCSITE" | "IFCSPACE"))
+}
+
+/// Dächer ([B4]): IfcRoof (eigener Körper, sonst seine Platten) und frei stehende IfcSlab ROOF (je
+/// Geschoss die sich berührenden zusammen). Liefert für Platten, die kein Dach wurden, den Grund.
+fn roofs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64, Vec<u64>>) -> HashMap<u64, &'static str> {
+    let f = cx.r.f;
+    let rels = cx.rels;
+    let is_roof_slab = |id: u64| f.get(id).is_some_and(|e| matches!(e.ty.as_str(), "IFCSLAB" | "IFCSLABSTANDARDCASE") && e.arg(8).and_then(|v| v.as_enum()) == Some("ROOF"));
+    let free_standing = |id: u64| !rels.parent.get(&id).is_some_and(|p| !is_spatial(f, *p));
+    // (Hauptbauteil, Teile mit Körper, IfcRoof?)
+    let mut groups: Vec<(u64, Vec<u64>, bool)> = Vec::new();
+    for &id in ids {
+        let Some(e) = f.get(id) else { continue };
+        if e.ty != "IFCROOF" || !free_standing(id) {
+            continue;
+        }
+        let own = e.arg(6).and_then(|v| v.as_ref_id()).is_some();
+        let parts: Vec<u64> = if own {
+            vec![id]
+        } else {
+            let plate = |c: &u64| f.get(*c).is_some_and(|e| matches!(e.ty.as_str(), "IFCSLAB" | "IFCSLABSTANDARDCASE" | "IFCPLATE"));
+            children.get(&id).map(|c| c.iter().copied().filter(plate).collect()).unwrap_or_default()
+        };
+        if !parts.is_empty() {
+            groups.push((id, parts, true));
+        }
+    }
+    // Frei stehende Dachplatten: je Geschoss nach Berührung (±5 cm im Grundriss) gruppiert.
+    let free: Vec<u64> = ids.iter().copied().filter(|&id| is_roof_slab(id) && free_standing(id)).collect();
+    let mut boxes: Vec<(u64, Option<u64>, [f64; 4])> = Vec::new();
+    for (id, m, _) in bodies(cx, &free) {
+        let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        for c in m.positions.chunks_exact(3) {
+            b = [b[0].min(c[0]), b[1].min(c[1]), b[2].max(c[0]), b[3].max(c[1])];
+        }
+        boxes.push((id, rels.storey_id(f, id), b));
+    }
+    fn root(g: &mut [usize], mut i: usize) -> usize {
+        while g[i] != i {
+            g[i] = g[g[i]];
+            i = g[i];
+        }
+        i
+    }
+    let mut group_of: Vec<usize> = (0..boxes.len()).collect();
+    for i in 0..boxes.len() {
+        for j in i + 1..boxes.len() {
+            let (a, b) = (boxes[i].2, boxes[j].2);
+            if boxes[i].1 == boxes[j].1 && a[0] <= b[2] + 0.05 && b[0] <= a[2] + 0.05 && a[1] <= b[3] + 0.05 && b[1] <= a[3] + 0.05 {
+                let (ri, rj) = (root(&mut group_of, i), root(&mut group_of, j));
+                group_of[ri.max(rj)] = ri.min(rj);
+            }
+        }
+    }
+    let mut by_root: BTreeMap<usize, Vec<u64>> = BTreeMap::new();
+    for i in 0..boxes.len() {
+        let r = root(&mut group_of, i);
+        by_root.entry(r).or_default().push(boxes[i].0);
+    }
+    for (_, parts) in by_root {
+        groups.push((parts[0], parts, false));
+    }
+
+    let mut fail = HashMap::new();
+    for (main, parts, is_roof) in groups {
+        let mut todo = vec![parts];
+        // Mehrere frei stehende Platten, die zusammen kein Dach ergeben: jede einzeln versuchen.
+        let mut tried_single = false;
+        while let Some(group) = todo.pop() {
+            let main = if is_roof { main } else { group[0] };
+            let has_voids = group.iter().chain([&main]).any(|p| rels.voids.get(p).is_some_and(|v| !v.is_empty()));
+            let b = if has_voids { Vec::new() } else { bodies(cx, &group) };
+            let color = b.iter().find_map(|x| x.2);
+            let res = if has_voids {
+                Err(R_OPENING)
+            } else if b.len() != group.len() {
+                Err(R_NO_BODY)
+            } else {
+                let meshes: Vec<Mesh> = b.into_iter().map(|x| x.1).collect();
+                crate::ifc_shapes::fit_roof(&meshes)
+            };
+            match res {
+                Ok(fit) => {
+                    let [x0, y0, x1, y1] = fit.bbox;
+                    let mut info = cx.info(main, color);
+                    if info.storey.is_none() {
+                        info.storey = group.iter().find_map(|p| cx.info(*p, None).storey);
+                    }
+                    if info.layers.is_empty() {
+                        let l = cx.info(group[0], None);
+                        info.layers = l.layers;
+                        info.type_name = info.type_name.or(l.type_name);
+                    }
+                    out.converted.insert(main);
+                    out.converted.extend(group.iter().copied());
+                    out.roofs.push(Roof {
+                        info,
+                        outline: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                        shape: fit.shape,
+                        pitch_deg: fit.pitch_deg,
+                        ridge_axis: fit.ridge_axis,
+                        eave_z: fit.eave_z,
+                        thickness: fit.thickness,
+                        parts: group.clone(),
+                    });
+                    cx.roofs.push(fit);
+                }
+                Err(why) => {
+                    if !is_roof && group.len() > 1 && !tried_single {
+                        tried_single = true;
+                        todo.extend(group.iter().map(|p| vec![*p]));
+                        continue;
+                    }
+                    for p in &group {
+                        fail.insert(*p, why);
+                    }
+                    if is_roof {
+                        out.keep("IfcRoof", why);
+                    }
+                }
+            }
+        }
+    }
+    fail
+}
+
+/// Treppen ([B4]): IfcStair (eigener Körper und Teile ausser Geländern) bzw. frei stehender
+/// IfcStairFlight → gerade Dossier-Treppe.
+fn stairs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64, Vec<u64>>) {
+    let f = cx.r.f;
+    let rels = cx.rels;
+    let elevations: Vec<f64> = out.storeys.iter().map(|s| s.elevation).collect();
+    for &id in ids {
+        let Some(e) = f.get(id) else { continue };
+        if !matches!(e.ty.as_str(), "IFCSTAIR" | "IFCSTAIRFLIGHT") || rels.parent.get(&id).is_some_and(|p| !is_spatial(f, *p)) {
+            continue;
+        }
+        let mut parts = vec![id];
+        parts.extend(children.get(&id).map(Vec::as_slice).unwrap_or(&[]).iter().copied().filter(|c| f.get(*c).is_some_and(|e| e.ty != "IFCRAILING")));
+        let b = bodies(cx, &parts);
+        if b.is_empty() {
+            continue;
+        }
+        let color = b.iter().find_map(|x| x.2);
+        let used: Vec<u64> = b.iter().map(|x| x.0).collect();
+        let meshes: Vec<Mesh> = b.into_iter().map(|x| x.1).collect();
+        match crate::ifc_shapes::fit_stair(&meshes) {
+            Ok(st) => {
+                // Oberster Tritt auf Geschosshöhe: er ist der Austritt; sonst kommt dieser noch dazu.
+                let top = st.z0 + st.riser * st.treads as f64;
+                let steps = if st.top_is_exit || elevations.iter().any(|z| (z - top).abs() <= 0.02) { st.treads } else { st.treads + 1 };
+                out.converted.insert(id);
+                out.converted.extend(used);
+                let info = cx.info(id, color);
+                out.stairs.push(Stair {
+                    info,
+                    start: st.start,
+                    dir: st.dir,
+                    run_length: st.going * steps as f64,
+                    width: st.width,
+                    step_count: steps,
+                    z0: st.z0,
+                    total_rise: st.riser * steps as f64,
+                });
+            }
+            Err(why) => out.keep(&class_name(&e.ty), why),
+        }
+    }
 }
 
 /// Erkennt alle sicher abbildbaren Bauteile.
@@ -989,8 +1381,19 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
     }
     storeys.sort_by(|a, b| a.elevation.total_cmp(&b.elevation));
     let storey_index = storeys.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
-    let mut cx = Ctx { r, rels, type_of, fills, sia, common, storey_index };
+    let mut cx = Ctx { r, rels, type_of, fills, sia, common, storey_index, roofs: Vec::new(), loose: Vec::new() };
     let mut out = Semantic { storeys, ..Default::default() };
+    let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
+    for (&c, &p) in &rels.parent {
+        children.entry(p).or_default().push(c);
+    }
+    for v in children.values_mut() {
+        v.sort_unstable();
+    }
+    cx.loose = loose_fillings(&mut cx, ids);
+    // Dächer zuerst: schräge Wandkronen darunter werden zum Dachanschluss.
+    let roof_fail = roofs(&mut cx, &mut out, ids, &children);
+    stairs(&mut cx, &mut out, ids, &children);
 
     let spatial = |id: u64| f.get(id).is_some_and(|e| matches!(e.ty.as_str(), "IFCBUILDINGSTOREY" | "IFCBUILDING" | "IFCSITE" | "IFCSPACE"));
     let mut walls = Vec::new();
@@ -999,23 +1402,27 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
         let ty = e.ty.as_str();
         let candidate = matches!(ty, "IFCWALL" | "IFCWALLSTANDARDCASE" | "IFCSLAB" | "IFCSLABSTANDARDCASE" | "IFCCOLUMN" | "IFCCOLUMNSTANDARDCASE" | "IFCSPACE");
         let has_shape = e.arg(6).and_then(|v| v.as_ref_id()).and_then(|i| f.get(i)).is_some_and(|s| s.ty == "IFCPRODUCTDEFINITIONSHAPE");
-        if !candidate || !has_shape {
+        if !candidate || !has_shape || out.converted.contains(&id) {
             continue;
         }
         // Teil eines anderen Bauteils (Dachplatte, Wand einer Vorhangfassade …) bleibt Mesh.
         let part = rels.parent.get(&id).is_some_and(|p| !spatial(*p));
-        let ok = !part
-            && match ty {
-                "IFCWALL" | "IFCWALLSTANDARDCASE" => cx.wall(id).map(|w| walls.push(w)).is_some(),
-                "IFCSLAB" | "IFCSLABSTANDARDCASE" => cx.slab(id).map(|s| out.slabs.push(s)).is_some(),
-                "IFCCOLUMN" | "IFCCOLUMNSTANDARDCASE" => cx.column(id).map(|c| out.columns.push(c)).is_some(),
-                _ => cx.space(id).map(|s| out.spaces.push(s)).is_some(),
-            };
-        if ok {
-            out.converted.insert(id);
-            out.converted.extend(rels.voids.get(&id).map(Vec::as_slice).unwrap_or(&[]));
+        let res = if part {
+            Err(roof_fail.get(&id).copied().unwrap_or(R_PART))
         } else {
-            *out.kept.entry(class_name(ty)).or_insert(0) += 1;
+            match ty {
+                "IFCWALL" | "IFCWALLSTANDARDCASE" => cx.wall(id).map(|w| walls.push(w)),
+                "IFCSLAB" | "IFCSLABSTANDARDCASE" => cx.slab(id).map(|s| out.slabs.push(s)),
+                "IFCCOLUMN" | "IFCCOLUMNSTANDARDCASE" => cx.column(id).map(|c| out.columns.push(c)),
+                _ => cx.space(id).map(|s| out.spaces.push(s)),
+            }
+        };
+        match res {
+            Ok(()) => {
+                out.converted.insert(id);
+                out.converted.extend(rels.voids.get(&id).map(Vec::as_slice).unwrap_or(&[]));
+            }
+            Err(why) => out.keep(&class_name(ty), roof_fail.get(&id).copied().unwrap_or(why)),
         }
     }
 
@@ -1058,7 +1465,7 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
         let d = if side > 0 { [-d[0], -d[1]] } else { d };
         let host = out.walls.len();
         let len = len2(sub2(end, start));
-        for (o, filling, kind, mesh) in &w.openings {
+        for (o, filling, kind, mesh, form) in &w.openings {
             let Some((b, _)) = box_in_frame(mesh, start, d) else { continue };
             let u0 = b[0].max(0.0);
             let u1 = b[1].min(len);
@@ -1083,20 +1490,103 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
                 operation,
                 swing,
                 hinge,
+                shape: *form,
             });
         }
-        out.walls.push(Wall { info: w.info, start, end, z0: w.z0, z1: w.z1, thickness: w.thickness });
+        let bulge = if side > 0 { -w.bulge } else { w.bulge };
+        out.walls.push(Wall { info: w.info, start, end, z0: w.z0, z1: w.z1, thickness: w.thickness, bulge });
+    }
+    unhosted_fillings(&mut cx, &mut out, ids);
+    out
+}
+
+/// Türen/Fenster ohne IfcRelFillsElement, mit Körper.
+fn loose_fillings(cx: &mut Ctx, ids: &[u64]) -> Vec<(u64, OpeningKind, Mesh)> {
+    let f = cx.r.f;
+    let filled: HashSet<u64> = cx.fills.values().flatten().copied().collect();
+    let mut out = Vec::new();
+    for &id in ids {
+        let Some(e) = f.get(id) else { continue };
+        let kind = match e.ty.as_str() {
+            "IFCDOOR" | "IFCDOORSTANDARDCASE" => OpeningKind::Door,
+            "IFCWINDOW" | "IFCWINDOWSTANDARDCASE" => OpeningKind::Window,
+            _ => continue,
+        };
+        if filled.contains(&id) {
+            continue;
+        }
+        if let Some((_, m, _)) = bodies(cx, &[id]).pop() {
+            out.push((id, kind, m));
+        }
     }
     out
 }
 
+/// Türen/Fenster ohne IfcRelFillsElement (z. B. ArchiCAD-IFC2x3 mit ausgeschnittenen Wandkörpern): Wirt
+/// ist die erkannte gerade Wand, in deren Körper das Bauteil liegt (Mitte in der Wanddicke, ganz
+/// innerhalb von Länge und Höhe); Öffnung = Ausdehnung des Bauteils. Überlappt sie eine vorhandene
+/// Öffnung derselben Wand, bleibt das Bauteil Mesh.
+fn unhosted_fillings(cx: &mut Ctx, out: &mut Semantic, ids: &[u64]) {
+    let f = cx.r.f;
+    let filled: HashSet<u64> = cx.fills.values().flatten().copied().collect();
+    for &id in ids {
+        let Some(e) = f.get(id) else { continue };
+        let kind = match e.ty.as_str() {
+            "IFCDOOR" | "IFCDOORSTANDARDCASE" => OpeningKind::Door,
+            "IFCWINDOW" | "IFCWINDOWSTANDARDCASE" => OpeningKind::Window,
+            _ => continue,
+        };
+        if filled.contains(&id) || out.converted.contains(&id) {
+            continue;
+        }
+        let Some((m, _)) = bodies(cx, &[id]).pop().map(|x| (x.1, x.2)) else { continue };
+        let mut best: Option<(f64, usize, [f64; 6])> = None;
+        for (i, w) in out.walls.iter().enumerate() {
+            let Some(d) = unit2(sub2(w.end, w.start)) else { continue };
+            if w.bulge != 0.0 {
+                continue;
+            }
+            let Some((b, _)) = box_in_frame(&m, w.start, d) else { continue };
+            let len = len2(sub2(w.end, w.start));
+            let vc = (b[2] + b[3]) / 2.0;
+            let fits = vc.abs() <= w.thickness / 2.0 + 0.02
+                && b[3] - b[2] <= w.thickness + 0.3
+                && b[0] >= -0.01
+                && b[1] <= len + 0.01
+                && b[4] >= w.z0 - 0.01
+                && b[5] <= w.z1 + 0.01
+                && b[1] - b[0] >= 0.1
+                && b[5] - b[4] >= 0.1;
+            if fits && best.is_none_or(|(bv, _, _)| vc.abs() < bv) {
+                best = Some((vc.abs(), i, b));
+            }
+        }
+        let Some((_, host, b)) = best else { continue };
+        let w = &out.walls[host];
+        let (u0, u1) = (b[0].max(0.0), b[1].min(len2(sub2(w.end, w.start))));
+        let (z0, z1) = (b[4].max(w.z0), b[5].min(w.z1));
+        let overlaps = out.openings.iter().any(|o| o.host == host && o.position < u1 - 0.01 && o.position + o.width > u0 + 0.01 && w.z0 + o.sill < z1 - 0.01 && w.z0 + o.sill + o.height > z0 + 0.01);
+        if overlaps {
+            continue;
+        }
+        let Some(d) = unit2(sub2(w.end, w.start)) else { continue };
+        let wz0 = w.z0;
+        let info = cx.info(id, None);
+        let (operation, swing, hinge) = cx.operation(id, d);
+        out.converted.insert(id);
+        out.openings.push(Opening { info, host, kind, position: u0, width: u1 - u0, sill: z0 - wz0, height: z1 - z0, operation, swing, hinge, shape: None });
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Flache Kodierung für JS: Texte/Verweise als JSON, Zahlen in einem Float64Array.
-//   wall:    sx, sy, ex, ey, z0, z1, thickness
+//   wall:    sx, sy, ex, ey, z0, z1, thickness, bulge
 //   opening: position, width, sill, height, swing (±1/0), hinge (±1/0)
 //   slab:    z0, z1, nRings, (nPts, x, y, …)*   (erster Ring = Umriss)
 //   column:  cx, cy, rotation, z0, z1, a, b      (rect: Breite, Tiefe; round: Radius, 0)
 //   space:   z0, z1, nPts, x, y, …
+//   roof:    eaveZ, pitchDeg, thickness, nPts, x, y, …   (Form, Firstrichtung im JSON)
+//   stair:   sx, sy, dx, dy, runLength, width, stepCount, z0, totalRise
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "web")]
@@ -1138,7 +1628,7 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
         }
     };
     for w in &s.walls {
-        push("wall", &w.info, json!({}), vec![w.start[0], w.start[1], w.end[0], w.end[1], w.z0, w.z1, w.thickness], &mut data);
+        push("wall", &w.info, json!({}), vec![w.start[0], w.start[1], w.end[0], w.end[1], w.z0, w.z1, w.thickness, w.bulge], &mut data);
     }
     for o in &s.openings {
         let kind = match o.kind {
@@ -1149,7 +1639,7 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
         push(
             "opening",
             &o.info,
-            json!({ "host": o.host, "openingKind": kind, "operation": o.operation }),
+            json!({ "host": o.host, "openingKind": kind, "operation": o.operation, "shape": o.shape }),
             vec![o.position, o.width, o.sill, o.height, o.swing as f64, o.hinge as f64],
             &mut data,
         );
@@ -1174,6 +1664,15 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
         ring(&sp.boundary, &mut nums);
         push("space", &sp.info, json!({ "longName": sp.long_name, "sia": sp.sia }), nums, &mut data);
     }
+    for r in &s.roofs {
+        let mut nums = vec![r.eave_z, r.pitch_deg, r.thickness];
+        ring(&r.outline, &mut nums);
+        push("roof", &r.info, json!({ "shape": r.shape, "ridgeAxis": r.ridge_axis }), nums, &mut data);
+    }
+    for st in &s.stairs {
+        let nums = vec![st.start[0], st.start[1], st.dir[0], st.dir[1], st.run_length, st.width, st.step_count as f64, st.z0, st.total_rise];
+        push("stair", &st.info, json!({}), nums, &mut data);
+    }
     let storeys: Vec<_> = s.storeys.iter().map(|st| json!({ "globalId": st.global_id, "name": st.name, "elevation": st.elevation })).collect();
     // Nicht endliche Zahlen gäbe es nur bei Unsinn; JSON/JS-Seite verwirft sie.
     for v in data.iter_mut() {
@@ -1181,7 +1680,7 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
             *v = 0.0;
         }
     }
-    (json!({ "storeys": storeys, "elements": elements, "kept": s.kept }), data)
+    (json!({ "storeys": storeys, "elements": elements, "kept": s.kept, "keptReasons": s.kept_reasons }), data)
 }
 
 // ---------------------------------------------------------------------------
@@ -1517,9 +2016,9 @@ ENDSEC;\nEND-ISO-10303-21;\n"
     #[test]
     fn classification_references_of_element_type_and_mesh() {
         // Stütze (Bauteil) mit eBKP-H, Raum mit Klassifikation über verschachtelte Referenz, BKP am Typ,
-        // dazu ein Dach (bleibt Mesh) mit Klassifikation.
+        // dazu ein Geländer (bleibt Mesh) mit Klassifikation.
         let col = rect_product(40, "IFCCOLUMN", (1.0, 1.0, 0.0), (1.0, 0.0), (0.4, 0.4), 2.75, "");
-        let roof = rect_product(41, "IFCROOF", (1.0, 1.0, 3.0), (1.0, 0.0), (4.0, 3.0), 0.3, "");
+        let roof = rect_product(41, "IFCRAILING", (1.0, 1.0, 3.0), (1.0, 0.0), (4.0, 3.0), 0.3, "");
         let cls = "#700=IFCCLASSIFICATION('CRB','2020',$,'eBKP-H',$,$,$);\
 #701=IFCCLASSIFICATIONREFERENCE($,'C','Konstruktion Geb\\X2\\00E4\\X0\\ude',#700,$,$);\
 #702=IFCRELASSOCIATESCLASSIFICATION('c1',$,$,$,(#40),#701);\
@@ -1534,8 +2033,8 @@ ENDSEC;\nEND-ISO-10303-21;\n"
         // Leerer Code und ein blosses IfcClassification (ohne Code) zählen nicht.
         assert_eq!(c.len(), 1, "{c:?}");
         assert_eq!((c[0].system.as_str(), c[0].code.as_str(), c[0].name.as_deref()), ("eBKP-H", "C", Some("Konstruktion Gebäude")));
-        // Roof bleibt Mesh, die Klassifikation kommt trotzdem mit (verschachtelte Referenz: System von oben).
-        let p = r.products.iter().find(|p| p.class == "IfcRoof").expect("Dach als Mesh");
+        // Geländer bleibt Mesh, die Klassifikation kommt trotzdem mit (verschachtelte Referenz: System von oben).
+        let p = r.products.iter().find(|p| p.class == "IfcRailing").expect("Geländer als Mesh");
         assert_eq!(p.classifications.len(), 1);
         assert_eq!((p.classifications[0].system.as_str(), p.classifications[0].code.as_str(), p.classifications[0].name.as_deref()), ("eBKP-H", "C02", None));
     }
@@ -1586,6 +2085,249 @@ ENDSEC;\nEND-ISO-10303-21;\n"
             file(METRE, "#100=IFCBUILDINGSTOREY('x',$,$,$,$,#100,$,$,$,1e400);"),
         ] {
             let _ = import_ifc_opts(src.as_bytes(), true);
+        }
+    }
+
+    /// Bauteil `class` mit id `#n` als IfcFacetedBrep aus Flächen (je Polygon, von aussen gegen den
+    /// Uhrzeigersinn), Platzierung = EG (#22), im EG enthalten; `extra` = Attribute ab dem 9.
+    fn brep_product(n: u64, class: &str, faces: &[Vec<[f64; 3]>], extra: &str) -> String {
+        let mut s = String::new();
+        let mut k = n * 100;
+        let mut face_ids = Vec::new();
+        for f in faces {
+            let mut pids = Vec::new();
+            for p in f {
+                k += 1;
+                s += &format!("#{k}=IFCCARTESIANPOINT(({:?},{:?},{:?}));", p[0], p[1], p[2]);
+                pids.push(format!("#{k}"));
+            }
+            k += 1;
+            s += &format!("#{k}=IFCPOLYLOOP(({}));", pids.join(","));
+            k += 1;
+            s += &format!("#{k}=IFCFACEOUTERBOUND(#{},.T.);", k - 1);
+            k += 1;
+            s += &format!("#{k}=IFCFACE((#{}));", k - 1);
+            face_ids.push(format!("#{k}"));
+        }
+        let (sh, br, rep, pds) = (k + 1, k + 2, k + 3, k + 4);
+        s += &format!(
+            "#{sh}=IFCCLOSEDSHELL(({}));#{br}=IFCFACETEDBREP(#{sh});#{rep}=IFCSHAPEREPRESENTATION($,'Body','Brep',(#{br}));\
+#{pds}=IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}));#{n}={class}('g{n}',$,'E{n}',$,$,#22,#{pds},$,{extra});\
+#{rc}=IFCRELCONTAINEDINSPATIALSTRUCTURE('r{n}',$,$,$,(#{n}),#23);\n",
+            face_ids.join(","),
+            rc = k + 5
+        );
+        s
+    }
+
+    /// Flächen eines Körpers über dem Grundriss-Polygon `ring` (gegen den Uhrzeigersinn) zwischen z0 und
+    /// der Oberkante `top(x, y)` (eben je Fläche: Ring-Punkte direkt).
+    fn prism_faces(ring: &[[f64; 2]], z0: f64, top: impl Fn(f64, f64) -> f64) -> Vec<Vec<[f64; 3]>> {
+        let n = ring.len();
+        let mut f = vec![ring.iter().map(|p| [p[0], p[1], top(p[0], p[1])]).collect::<Vec<_>>(), ring.iter().rev().map(|p| [p[0], p[1], z0]).collect()];
+        for i in 0..n {
+            let (a, b) = (ring[i], ring[(i + 1) % n]);
+            f.push(vec![[a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], top(b[0], b[1])], [a[0], a[1], top(a[0], a[1])]]);
+        }
+        f
+    }
+
+    /// Geneigte Dachplatte über [x0,x1] × [ya,yb] (Traufe bei ya auf `ze`, steigt mit `tan` zur Mitte),
+    /// Dicke senkrecht `t`, Stirnseiten senkrecht.
+    fn roof_plate(x0: f64, x1: f64, ya: f64, yb: f64, ze: f64, tan: f64, t: f64) -> Vec<Vec<[f64; 3]>> {
+        let zt = |y: f64| ze + (y - ya).abs() * tan;
+        let dz = t * (1.0 + tan * tan).sqrt();
+        let (lo, hi) = (ya.min(yb), ya.max(yb));
+        let ring = [[x0, lo], [x1, lo], [x1, hi], [x0, hi]];
+        let mut f = vec![ring.iter().map(|p| [p[0], p[1], zt(p[1])]).collect::<Vec<_>>(), ring.iter().rev().map(|p| [p[0], p[1], zt(p[1]) - dz]).collect()];
+        for i in 0..4 {
+            let (a, b) = (ring[i], ring[(i + 1) % 4]);
+            f.push(vec![[a[0], a[1], zt(a[1]) - dz], [b[0], b[1], zt(b[1]) - dz], [b[0], b[1], zt(b[1])], [a[0], a[1], zt(a[1])]]);
+        }
+        f
+    }
+
+    #[test]
+    fn saddle_roof_from_roof_slabs_and_gable_wall() {
+        // Satteldach 10 × 8 (First entlang x in y = 4), Traufe z = 3, 45°, Dicke 0.2; Giebelwand
+        // x ∈ [0, 0.3], y ∈ [0, 8], Krone an der Dach-Unterkante.
+        let (t, dz) = (0.2, 0.2 * 2f64.sqrt());
+        let a = brep_product(100, "IFCSLAB", &roof_plate(0.0, 10.0, 0.0, 4.0, 3.0, 1.0, t), ".ROOF.");
+        let b = brep_product(200, "IFCSLAB", &roof_plate(0.0, 10.0, 8.0, 4.0, 3.0, 1.0, t), ".ROOF.");
+        let under = |_: f64, y: f64| 3.0 + y.min(8.0 - y) - dz;
+        // Giebelwand als Fünfeck-Prisma (Grundriss Rechteck, Krone unter dem Dach).
+        let mut gable = Vec::new();
+        let ring = [[0.0, 0.0], [0.3, 0.0], [0.3, 8.0], [0.0, 8.0]];
+        gable.push(vec![[0.3, 0.0, 0.0], [0.3, 8.0, 0.0], [0.3, 8.0, under(0.0, 8.0)], [0.3, 4.0, under(0.0, 4.0)], [0.3, 0.0, under(0.0, 0.0)]]);
+        gable.push(vec![[0.0, 8.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, under(0.0, 0.0)], [0.0, 4.0, under(0.0, 4.0)], [0.0, 8.0, under(0.0, 8.0)]]);
+        gable.push(ring.iter().rev().map(|p| [p[0], p[1], 0.0]).collect());
+        gable.push(vec![[0.0, 0.0, 0.0], [0.3, 0.0, 0.0], [0.3, 0.0, under(0.0, 0.0)], [0.0, 0.0, under(0.0, 0.0)]]);
+        gable.push(vec![[0.3, 8.0, 0.0], [0.0, 8.0, 0.0], [0.0, 8.0, under(0.0, 8.0)], [0.3, 8.0, under(0.0, 8.0)]]);
+        gable.push(vec![[0.0, 0.0, under(0.0, 0.0)], [0.3, 0.0, under(0.0, 0.0)], [0.3, 4.0, under(0.0, 4.0)], [0.0, 4.0, under(0.0, 4.0)]]);
+        gable.push(vec![[0.0, 4.0, under(0.0, 4.0)], [0.3, 4.0, under(0.0, 4.0)], [0.3, 8.0, under(0.0, 8.0)], [0.0, 8.0, under(0.0, 8.0)]]);
+        let w = brep_product(300, "IFCWALL", &gable, "$");
+        let (r, s) = sem(&file(METRE, &format!("{a}{b}{w}")));
+        assert_eq!(s.roofs.len(), 1, "{:?}", s.kept_reasons);
+        let rf = &s.roofs[0];
+        assert_eq!((rf.shape, rf.ridge_axis), ("sattel", "x"));
+        assert!(close(rf.pitch_deg, 45.0) && close(rf.eave_z, 3.0) && close(rf.thickness, 0.2), "{rf:?}");
+        assert!(close(area2(&rf.outline), 80.0));
+        assert_eq!(rf.parts.len(), 2);
+        // Giebelwand: Rechteck bis zum First (Dossier kappt sie an der Dach-Unterkante).
+        assert_eq!(s.walls.len(), 1, "{:?}", s.kept_reasons);
+        assert!(close(s.walls[0].z1, under(0.0, 4.0)) && close(s.walls[0].thickness, 0.3));
+        assert!(r.products.is_empty(), "{:?}", r.products.iter().map(|p| &p.class).collect::<Vec<_>>());
+        // Ohne Dach bleibt die Giebelwand Mesh (Grund: schräge Krone).
+        let (_, s) = sem(&file(METRE, &w));
+        assert_eq!(s.kept_reasons.get("IfcWall").and_then(|m| m.get("slopedTop")), Some(&1));
+    }
+
+    #[test]
+    fn straight_stair_from_ifc_stair() {
+        // 6 Klötze à 0.175 × 0.28, Breite 1.1, Lauf in +x ab x = 1; 7. Steigung führt aufs OG? Nein: OG
+        // liegt auf 3.0, oberster Tritt 1.05 → Austritt kommt dazu (7 Steigungen).
+        let mut faces = Vec::new();
+        for i in 0..6 {
+            let (x0, x1) = (1.0 + 0.28 * i as f64, 1.0 + 0.28 * (i + 1) as f64);
+            let z = 0.175 * (i + 1) as f64;
+            faces.extend(prism_faces(&[[x0, 2.0], [x1, 2.0], [x1, 3.1], [x0, 3.1]], 0.0, |_, _| z));
+        }
+        let st = brep_product(100, "IFCSTAIR", &faces, "$");
+        let (r, s) = sem(&file(METRE, &st));
+        assert_eq!(s.stairs.len(), 1, "{:?}", s.kept_reasons);
+        let t = &s.stairs[0];
+        assert!(close2(t.start, [1.0, 2.55]) && close2(t.dir, [1.0, 0.0]) && close(t.width, 1.1), "{t:?}");
+        // Oberster Tritt ist die höchste Stelle des Körpers → er ist der Austritt (6 Steigungen).
+        assert_eq!(t.step_count, 6);
+        assert!(close(t.total_rise, 1.05) && close(t.run_length, 6.0 * 0.28) && close(t.z0, 0.0));
+        assert!(r.products.is_empty());
+    }
+
+    #[test]
+    fn arc_wall_round_opening_footprint_space_loose_door() {
+        // Bogenwand: Viertelring um (0,0), Radien 4.85 … 5.15, 2.5 hoch (Polygon aus 33 Punkten je Bogen).
+        let mut ring = Vec::new();
+        for i in 0..=32 {
+            let a = std::f64::consts::FRAC_PI_2 * i as f64 / 32.0;
+            ring.push([5.15 * a.cos(), 5.15 * a.sin()]);
+        }
+        for i in (0..=32).rev() {
+            let a = std::f64::consts::FRAC_PI_2 * i as f64 / 32.0;
+            ring.push([4.85 * a.cos(), 4.85 * a.sin()]);
+        }
+        let arc = brep_product(100, "IFCWALL", &prism_faces(&ring, 0.0, |_, _| 2.5), "$");
+        let (r, s) = sem(&file(METRE, &arc));
+        assert_eq!(s.walls.len(), 1, "{:?}", s.kept_reasons);
+        let w = &s.walls[0];
+        assert!(close(w.thickness, 0.3) && close(w.z1, 2.5));
+        let (a, b) = (w.start, w.end);
+        // Achse R = 5 von (5, 0) nach (0, 5) (oder umgekehrt), Viertelkreis: |bulge| = tan(22.5°).
+        assert!((close2(a, [5.0, 0.0]) && close2(b, [0.0, 5.0])) || (close2(a, [0.0, 5.0]) && close2(b, [5.0, 0.0])), "{w:?}");
+        assert!(close(w.bulge.abs(), (std::f64::consts::PI / 8.0).tan()));
+        // Scheitel (3.54, 3.54) liegt links der Sehne start → end bei bulge > 0.
+        let chord = sub2(b, a);
+        let apex_left = cross2(chord, sub2([5.0 * 0.5f64.sqrt(), 5.0 * 0.5f64.sqrt()], a)) > 0.0;
+        assert_eq!(apex_left, w.bulge > 0.0);
+        assert!(r.products.is_empty());
+
+        // Runde Öffnung (Durchmesser 1, Mitte auf 1.5 m) in einer geraden Wand.
+        let wall = rect_product(200, "IFCWALL", (0.0, 0.0, 0.0), (1.0, 0.0), (4.0, 0.3), 2.5, "");
+        let round = "#501=IFCCARTESIANPOINT((2.,0.4,1.5));#502=IFCDIRECTION((0.,-1.,0.));#503=IFCAXIS2PLACEMENT3D(#501,#502,#12);\
+#504=IFCLOCALPLACEMENT(#22,#503);#505=IFCCIRCLEPROFILEDEF(.AREA.,$,$,0.5);#506=IFCEXTRUDEDAREASOLID(#505,#13,#11,0.8);\
+#507=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#506));#508=IFCPRODUCTDEFINITIONSHAPE($,$,(#507));\
+#500=IFCOPENINGELEMENT('o',$,$,$,$,#504,#508,$,.OPENING.);#509=IFCRELVOIDSELEMENT('v',$,$,$,#200,#500);";
+        let (_, s) = sem(&file(METRE, &format!("{wall}{round}")));
+        assert_eq!((s.walls.len(), s.openings.len()), (1, 1), "{:?}", s.kept_reasons);
+        let o = &s.openings[0];
+        assert_eq!((o.kind, o.shape), (OpeningKind::Hole, Some("rund")));
+        assert!((o.width - 1.0).abs() < 0.01 && (o.height - 1.0).abs() < 0.01 && (o.sill - 1.0).abs() < 0.01, "{o:?}");
+
+        // Raum nur mit „FootPrint" + „Box" (ArchiCAD IFC2x3), in mm.
+        let space = "#601=IFCCARTESIANPOINT((0.,0.));#602=IFCCARTESIANPOINT((3000.,0.));#603=IFCCARTESIANPOINT((3000.,2000.));\
+#604=IFCCARTESIANPOINT((1000.,2000.));#605=IFCCARTESIANPOINT((0.,1000.));#606=IFCPOLYLINE((#601,#602,#603,#604,#605,#601));\
+#607=IFCGEOMETRICCURVESET((#606));#608=IFCSHAPEREPRESENTATION($,'FootPrint','GeometricCurveSet',(#607));\
+#609=IFCCARTESIANPOINT((0.,0.,0.));#610=IFCBOUNDINGBOX(#609,3000.,2000.,2600.);#611=IFCSHAPEREPRESENTATION($,'Box','BoundingBox',(#610));\
+#612=IFCPRODUCTDEFINITIONSHAPE($,$,(#611,#608));#613=IFCCARTESIANPOINT((1000.,500.,0.));#614=IFCAXIS2PLACEMENT3D(#613,$,$);\
+#615=IFCLOCALPLACEMENT(#22,#614);#600=IFCSPACE('sp',$,'0.01',$,$,#615,#612,'Bad',.ELEMENT.,.INTERNAL.,$);\
+#616=IFCRELAGGREGATES('as',$,$,$,#23,(#600));";
+        let (_, s) = sem(&file(MILLI, space));
+        assert_eq!(s.spaces.len(), 1, "{:?}", s.kept_reasons);
+        let sp = &s.spaces[0];
+        assert!(close(area2(&sp.boundary), 5.5) && close(sp.z1 - sp.z0, 2.6) && close2(sp.boundary[0], [1.0, 0.5]), "{sp:?}");
+
+        // Tür ohne Öffnungsbeziehung, Loch schon im Wandkörper (Wand 4 × 0.3 × 2.5, Loch x ∈ [1, 2], z ≤ 2).
+        let mut faces = prism_faces(&[[0.0, 0.0], [1.0, 0.0], [1.0, 0.3], [0.0, 0.3]], 0.0, |_, _| 2.5);
+        faces.extend(prism_faces(&[[2.0, 0.0], [4.0, 0.0], [4.0, 0.3], [2.0, 0.3]], 0.0, |_, _| 2.5));
+        faces.extend(prism_faces(&[[1.0, 0.0], [2.0, 0.0], [2.0, 0.3], [1.0, 0.3]], 2.0, |_, _| 2.5));
+        let holed = brep_product(300, "IFCWALL", &faces, "$");
+        let door = brep_product(400, "IFCDOOR", &prism_faces(&[[1.0, 0.1], [2.0, 0.1], [2.0, 0.2], [1.0, 0.2]], 0.0, |_, _| 2.0), "$,$,$,$,$");
+        let (r, s) = sem(&file(METRE, &format!("{holed}{door}")));
+        assert_eq!((s.walls.len(), s.openings.len()), (1, 1), "{:?}", s.kept_reasons);
+        let o = &s.openings[0];
+        assert_eq!(o.kind, OpeningKind::Door);
+        assert!(close(o.width, 1.0) && close(o.height, 2.0) && close(o.sill, 0.0), "{o:?}");
+        assert!(r.products.is_empty(), "{:?}", r.products.iter().map(|p| &p.class).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn map_conversion_is_read() {
+        let geo = "#700=IFCPROJECTEDCRS('EPSG:2056',$,$,$,$,$,#701);#701=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);\
+#702=IFCMAPCONVERSION(#5,#700,2600000.,1200000.,400.,0.,1.,$);";
+        let col = rect_product(40, "IFCCOLUMN", (1.0, 1.0, 0.0), (1.0, 0.0), (0.4, 0.4), 2.75, "");
+        let (r, _) = sem(&file(METRE, &format!("{col}{geo}")));
+        let m = r.map_conversion.expect("Georeferenz");
+        assert_eq!((m.eastings, m.northings, m.height, m.x_axis, m.scale, m.crs.as_deref()), (2600000.0, 1200000.0, 400.0, [0.0, 1.0], 1.0, Some("EPSG:2056")));
+        let (r, _) = sem(&file(METRE, &col));
+        assert!(r.map_conversion.is_none());
+    }
+
+    #[test]
+    fn slab_from_mesh_with_t_junctions() {
+        // Decke 4 × 2, 0.2 dick: Oberseite aus zwei Dreiecken links und vier rechts (T-Stoss bei x = 2,
+        // y = 1 auf der langen Diagonale gibt es nicht, aber auf der Kante x = 2).
+        let top = vec![
+            vec![[0.0, 0.0, 3.0], [2.0, 0.0, 3.0], [2.0, 2.0, 3.0]],
+            vec![[0.0, 0.0, 3.0], [2.0, 2.0, 3.0], [0.0, 2.0, 3.0]],
+            vec![[2.0, 0.0, 3.0], [4.0, 0.0, 3.0], [2.0, 1.0, 3.0]],
+            vec![[4.0, 0.0, 3.0], [4.0, 2.0, 3.0], [2.0, 1.0, 3.0]],
+            vec![[4.0, 2.0, 3.0], [2.0, 2.0, 3.0], [2.0, 1.0, 3.0]],
+        ];
+        let mut faces = top;
+        let ring = [[0.0, 0.0], [4.0, 0.0], [4.0, 2.0], [0.0, 2.0]];
+        faces.push(ring.iter().rev().map(|p| [p[0], p[1], 2.8]).collect());
+        for i in 0..4 {
+            let (a, b) = (ring[i], ring[(i + 1) % 4]);
+            faces.push(vec![[a[0], a[1], 2.8], [b[0], b[1], 2.8], [b[0], b[1], 3.0], [a[0], a[1], 3.0]]);
+        }
+        let slab = brep_product(100, "IFCSLAB", &faces, ".FLOOR.");
+        let (_, s) = sem(&file(METRE, &slab));
+        assert_eq!(s.slabs.len(), 1, "{:?}", s.kept_reasons);
+        assert_eq!(s.slabs[0].outline.len(), 4);
+        assert!(close(area2(&s.slabs[0].outline), 8.0));
+    }
+
+    /// Freie Beispieldateien (ArchiCAD/Vectorworks-Exporte …), nur wenn `DOSSIER_IFC_ELEMENT_SAMPLES` auf
+    /// ein Verzeichnis zeigt: je Datei erkannte Bauteile, als Mesh gebliebene Kandidaten mit Grund und
+    /// übrige Meshes je Klasse (Ausgabe mit `--nocapture`). Prüft nur, dass nichts scheitert.
+    #[test]
+    fn element_samples_if_present() {
+        let Ok(dir) = std::env::var("DOSSIER_IFC_ELEMENT_SAMPLES") else { return };
+        let mut files: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("ifc"))).collect();
+        files.sort();
+        for f in files {
+            let t = std::time::Instant::now();
+            let r = import_ifc_opts(&std::fs::read(&f).unwrap(), true).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
+            let s = r.elements.as_ref().unwrap();
+            let mut meshes: BTreeMap<&str, usize> = BTreeMap::new();
+            for p in &r.products {
+                *meshes.entry(p.class.as_str()).or_insert(0) += 1;
+            }
+            eprintln!(
+                "== {} ({}, {:.1}s{})\n  Geschosse {} · Wände {} · Öffnungen {} · Decken {} · Stützen {} · Räume {} · Dächer {} · Treppen {}\n  als Mesh behalten (Grund): {:?}\n  Meshes je Klasse: {:?}",
+                f.file_name().unwrap().to_string_lossy(), r.schema, t.elapsed().as_secs_f64(), if r.truncated { ", abgebrochen" } else { "" },
+                s.storeys.len(), s.walls.len(), s.openings.len(), s.slabs.len(), s.columns.len(), s.spaces.len(), s.roofs.len(), s.stairs.len(),
+                s.kept_reasons, meshes
+            );
         }
     }
 }
