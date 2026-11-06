@@ -47,9 +47,19 @@ pub fn ops(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Vec<Op>
     })
 }
 
-/// Wie [`ops`], als Antwort-JSON `{"ops": […]}` (Zahlen mit Nicht-endlich-Marken).
+/// Wie [`ops`], mit Hinweis-Schlüssel (i18n) für die Hülle; bisher nur Verschieben ([144]: Öffnung an
+/// der Nachbaröffnung angehalten).
+pub fn result(root: &Map<String, Value>, p: &Project, text: &str) -> Result<GripResult, String> {
+    let v: Value = serde_json::from_str(text).map_err(|e| format!("cmdOps: {e}"))?;
+    if v.get("group").is_none() && v.get("cmd").and_then(Value::as_str) == Some("transform") {
+        return Ok(crate::cmd_transform::transform_result(root, p, &parse(&v, "transform")?));
+    }
+    Ok(GripResult { ops: ops(root, p, text)?, notice: None })
+}
+
+/// Wie [`result`], als Antwort-JSON `{"ops": […], "notice": …}` (Zahlen mit Nicht-endlich-Marken).
 pub fn ops_json(root: &Map<String, Value>, p: &Project, text: &str) -> Result<String, String> {
-    Ok(result_json(&GripResult { ops: ops(root, p, text)?, notice: None }))
+    Ok(result_json(&result(root, p, text)?))
 }
 
 /// Schneller Hasher für id-Mengen der Befehle (FNV-1a; je Mausschritt werden Tausende ids geprüft,

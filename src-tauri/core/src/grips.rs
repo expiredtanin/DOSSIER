@@ -358,6 +358,18 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
         }
         "wallThickness" => wall_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.new_name.clone()).into(),
         "ceilingThickness" => ceiling_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.new_name.clone()).into(),
+        // [144] Wandöffnung gleiten lassen: Griff-Zug nach `pt` bzw. Objekt-Info-Position `a` (ab
+        // Wandanfang; Bogenwand: Bogenlänge). Geklemmt auf die Wand und vor der Nachbaröffnung.
+        "openingSlide" | "openingPosition" => {
+            let Some(o) = r.s("id").and_then(|id| lk.find("openings", id)).filter(|o| !crate::json_util::truthy(field(o, "locked"))) else {
+                return Ok(GripResult::default());
+            };
+            let want = if op == "openingSlide" { crate::opening_slide::grip_want(root, o, r.p("pt")) } else { Some(r.n("a")).filter(|v| v.is_finite()) };
+            let Some(placed) = want.and_then(|w| crate::opening_slide::slide_to(root, o, w)) else { return Ok(GripResult::default()) };
+            let v = with(o, "position", js_num(placed.position));
+            let ops = if v == *o { vec![] } else { vec![replace("openings", v)] };
+            GripResult { ops, notice: placed.clamped.then_some(crate::opening_slide::NOTICE_OVERLAP) }
+        }
         other => return Err(format!("Unbekannte Griff-Änderung: {other}")),
     })
 }

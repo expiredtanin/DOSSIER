@@ -458,20 +458,21 @@ export class ProjectDocument {
   /**
    * Befehl rechnen und anwenden ([K4] S3, `doc_cmd_commit`): wie {@link commitGrip} — ein Kern-Aufruf
    * statt Ops hin (Rechnung) und zurück (Commit). Ergebnis: neues Projekt und die angewendeten Ops (leer
-   * = nichts zu tun, dann `project === base`) oder die Meldungen der Prüfung.
+   * = nichts zu tun, dann `project === base`), ein Hinweis-Schlüssel (i18n, z. B. [144] Öffnung an der
+   * Nachbaröffnung angehalten) oder die Meldungen der Prüfung.
    */
-  commitCmd(base: Project, req: object, coalesceKey: string | undefined, now: number): { project: Project; ops: CoreOp[] } | { problems: string[] } {
+  commitCmd(base: Project, req: object, coalesceKey: string | undefined, now: number): { project: Project; ops: CoreOp[]; notice?: string } | { problems: string[] } {
     this.ensure(base);
     if (!this.handle) return { problems: ["Projekt-Dokument im Kern nicht offen."] };
     const out = core().doc_cmd_commit(this.handle, toMarkedJson(req), coalesceKey ?? "", now);
     if (out.startsWith("\u0001")) throw new Error(out.slice(1));
-    const r = fromMarkedJson<{ ops: CoreOp[] } | { problems: string[] }>(out);
+    const r = fromMarkedJson<{ ops: CoreOp[]; notice?: string } | { problems: string[] }>(out);
     if ("problems" in r) return r;
-    if (r.ops.length === 0) return { project: base, ops: r.ops };
+    if (r.ops.length === 0) return { project: base, ops: r.ops, notice: r.notice };
     const extra = this.lastExtra();
     const project = this.withExtra(applyOps(base, r.ops), extra);
     this.setMirror(project);
-    return { project, ops: extra.length ? [...r.ops, ...extra] : r.ops };
+    return { project, ops: extra.length ? [...r.ops, ...extra] : r.ops, notice: r.notice };
   }
 
   /**
