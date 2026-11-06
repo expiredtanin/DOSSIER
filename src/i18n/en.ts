@@ -1797,6 +1797,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.tree.section": "Tree",
   "objinfo.tree.species": "Species",
   "objinfo.tree.speciesHint": "e.g. Quercus robur",
+  "objinfo.tree.showLabel": "Show label",
+  "objinfo.tree.showLabelHint": "Species name next to the trunk in plan",
   "objinfo.tree.status": "Status",
   "objinfo.tree.status.existing": "existing",
   "objinfo.tree.status.new": "new",

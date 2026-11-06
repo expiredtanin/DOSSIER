@@ -336,6 +336,8 @@ export interface MarqueeSelection {
   ceilingIds: string[];
   roomIds: string[];
   stairIds: string[];
+  /** [149] Getroffene Bäume (Kronenfläche, gleiche Konvention). */
+  treeIds?: string[];
   /**
    * Zieh-Richtung: `false` = links→rechts (positiv Δx) → nur VOLLSTÄNDIG
    * eingeschlossene Wände; `true` = rechts→links (negativ Δx) → auch berührte/
@@ -2619,6 +2621,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             ceilingIds: getPick().marquee("ceilingId", rect, crossing),
             roomIds: getPick().marquee("roomId", rect, crossing),
             stairIds: getPick().marquee("stairId", rect, crossing),
+            // [149] Bäume: Kronen-Pickfläche (`contextObjectId = "@tree:<id>"`).
+            treeIds: getPick()
+              .marquee("contextObjectId", rect, crossing)
+              .filter((id) => id.startsWith(TREE_PICK))
+              .map((id) => id.slice(TREE_PICK.length)),
             crossing,
           });
         }

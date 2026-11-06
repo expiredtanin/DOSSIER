@@ -904,12 +904,17 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
             }
         }
     }
-    // [142] Bäume (2D-Kreise der Ebene „Bäume", Code 13): Stamm + Krone.
+    // [142] Bäume (2D-Kreise der Ebene „Bäume", Code 13): Stamm + Krone. [149] Steht ein Baum-Objekt am selben
+    // Ort (Stamm nahe der Kreismitte), zählt nur das Objekt — sonst fiele der Schatten doppelt.
     let mut clouds: Vec<Vec<[f64; 3]>> = Vec::new();
     let tree_h = p.sun_study.as_ref().and_then(|s| s.tree_height).filter(|h| *h > 0.0).unwrap_or(DEFAULT_TREE_HEIGHT);
+    let objects = crate::tree::geoms(p);
     for d in &p.drawings2d {
         let crate::model::Drawing2DGeom::Circle { center, r } = &d.geom else { continue };
         if !is_tree_category(p, &d.category_code) {
+            continue;
+        }
+        if objects.iter().any(|(_, g)| circle_is_tree_object(center.x, center.y, *r, g.c)) {
             continue;
         }
         if let Some((trunk, crown)) = tree_caster([center.x, center.y], *r, tree_h, gz(center.x, center.y)) {
@@ -918,7 +923,7 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
         }
     }
     // [149] Bäume als eigene Objekte: Stamm (Prisma) + Krone (Punktwolke) nach eigener Höhe, Krone und Form.
-    for (_, g) in crate::tree::geoms(p) {
+    for (_, g) in objects {
         prisms.push((Prism { footprint: g.trunk_ring(8), z_bottom: g.base, z_top: g.trunk_top() }, vec![]));
         clouds.push(g.crown_points());
     }
@@ -987,6 +992,13 @@ fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, with_ground: boo
         return vec![];
     }
     without_slivers(polygon_bool::union(&out), if site.is_some() { SLIVER_AREA } else { 1e-4 })
+}
+
+/// [149] Kreis der Baum-Ebene am Ort eines Baum-Objekts (Stammmitte höchstens eine halbe Kreisbreite, mindestens
+/// 0.5 m, von der Kreismitte): der Kreis ist dann nur die alte Darstellung desselben Baums.
+fn circle_is_tree_object(cx: f64, cy: f64, r: f64, stem: [f64; 2]) -> bool {
+    let tol = (0.5 * r).max(0.5);
+    hypot2(stem[0] - cx, stem[1] - cy) <= tol
 }
 
 /// Baumhöhe ohne `sunStudy.treeHeight` (m).
@@ -1343,5 +1355,25 @@ mod terrain_tests {
         assert!(a_wide > 2.0 * a_small, "{a_small} {a_wide}");
         // Kein Baum: kein Schatten.
         assert!(shadow_polygons_project(&project_json(serde_json::json!({"trees": []})), sun, None).is_empty());
+    }
+
+    /// [149] Kreis der Baum-Ebene am Ort eines Baum-Objekts wirft keinen zweiten Schatten (sonst hier mit
+    /// `treeHeight` 30 m bis y = 30); ein Kreis anderswo wirft weiter.
+    #[test]
+    fn kreis_am_baum_objekt_nicht_doppelt() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let mk = |circle_x: f64| {
+            project_json(serde_json::json!({
+                "sunStudy": {"when": "2026-06-21T10:00:00Z", "show": true, "treeHeight": 30.0},
+                "drawings2d": [{"id": "k", "type": "drawing2d", "levelId": "eg", "categoryCode": "13", "geom": {"shape": "circle", "center": {"x": circle_x, "y": 0.2}, "r": 2.0}}],
+                "trees": [{"id": "t", "type": "tree", "floorId": "eg", "categoryCode": "13", "position": {"x": 0, "y": 0},
+                    "trunkDiameter": 0.4, "crownDiameter": 4.0, "crownBase": 2.0, "height": 12.0, "shape": "conical",
+                    "status": "existing", "foliage": "deciduous"}]
+            }))
+        };
+        let same = bbox(&shadow_polygons_project(&mk(0.3), sun, None));
+        assert!((same[3] - 12.0).abs() < 0.05, "nur das Objekt: {same:?}");
+        let apart = bbox(&shadow_polygons_project(&mk(20.0), sun, None));
+        assert!(apart[3] > 25.0, "Kreis anderswo wirft weiter: {apart:?}");
     }
 }

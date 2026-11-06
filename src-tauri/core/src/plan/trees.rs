@@ -125,8 +125,34 @@ pub(super) fn plan_trees(c: &Ctx, out: &mut Vec<Primitive>) {
         if t.floor_id != c.a.floor || !c.vis(&t.category_code, &t.id) {
             continue;
         }
-        out.extend(tree_symbol(t, &g, c.cat(&t.category_code), Some(c.greyed(&t.category_code))));
+        let greyed = Some(c.greyed(&t.category_code));
+        out.extend(tree_symbol(t, &g, c.cat(&t.category_code), greyed));
+        if let Some(l) = tree_label(t, &g, c.a.scale, greyed) {
+            out.push(l);
+        }
     }
+}
+
+/// [149] Schrift der Baum-Beschriftung (pt): wie die Zusatzzeile des Raumstempels (0.8 × Stempelschrift,
+/// ab 1:200 die kleine Stempelschrift).
+pub fn label_pt(scale: f64) -> f64 {
+    let base = if scale >= super::domains::ROOM_STAMP_SMALL_FROM { super::domains::ROOM_STAMP_SMALL_PT } else { super::domains::ROOM_STAMP_PT };
+    0.8 * base
+}
+
+/// [149] Beschriftung mit dem Art-Namen (`showLabel` und `species` gesetzt): Tusche, rechts neben dem Stamm
+/// (linker Rand 1 mm Papier neben dem Stamm, auf Stammhöhe zentriert).
+pub fn tree_label(t: &Tree, g: &TreeGeom, scale: f64, greyed: Option<bool>) -> Option<Primitive> {
+    let name = t.species.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
+    if t.show_label != Some(true) || !(scale > 0.0) || !scale.is_finite() {
+        return None;
+    }
+    let doc = super::domains::doc_from_text(name);
+    let pt = label_pt(scale);
+    let (w, _) = crate::text_layout::stamp_block_size(&doc, &[], pt, crate::text_layout::PT_TO_MM * scale / 1000.0);
+    let gap = 1.0 * scale / 1000.0;
+    let at = v(g.c[0] + g.trunk_r + gap + w / 2.0, g.c[1]);
+    Some(Primitive::Text { at, doc, extra_lines: vec![], base_pt: pt, color: MONO_INK.into(), room_id: None, greyed, opacity: None })
 }
 
 /// Planzeichen eines Baums (Grundriss): Pick-Fläche, Kronenumriss, Stamm, ggf. Kreuz.
@@ -243,6 +269,27 @@ mod tests {
         let text = serde_json::json!({"floor": "eg", "show": codes, "global": true}).to_string();
         let a = PlanArgs::parse(1.0, &text).unwrap();
         plan_domains(p, &a).unwrap().columns
+    }
+
+    /// [149] Art-Name als Beschriftung: nur mit `showLabel` und Art, Tusche, rechts neben dem Stamm, Schrift wie
+    /// die Zusatzzeile des Raumstempels.
+    #[test]
+    fn beschriftung_mit_art_name() {
+        let mut t = tree("a", 0.0, "new", "deciduous");
+        t["species"] = serde_json::json!("Quercus robur");
+        let texts = |p: &Project| plan(p, &["13"]).into_iter().filter(|q| matches!(q, Primitive::Text { .. })).collect::<Vec<_>>();
+        assert!(texts(&project(serde_json::json!([t.clone()]))).is_empty(), "ohne showLabel keine Beschriftung");
+        t["showLabel"] = serde_json::json!(true);
+        let got = texts(&project(serde_json::json!([t.clone()])));
+        assert_eq!(got.len(), 1);
+        let Primitive::Text { at, doc, base_pt, color, room_id, .. } = &got[0] else { unreachable!() };
+        assert_eq!(crate::text_layout::plain_text(doc), "Quercus robur");
+        assert_eq!((color.as_str(), room_id.is_none()), (MONO_INK, true));
+        assert!((base_pt - 8.0).abs() < 1e-9, "1:100: 0.8 × 10 pt");
+        assert!(at.x > 0.2 && at.x < 3.0 && at.y.abs() < 1e-9, "rechts neben dem Stamm: {at:?}");
+        assert!((label_pt(200.0) - 5.6).abs() < 1e-9);
+        t["species"] = serde_json::json!("  ");
+        assert!(texts(&project(serde_json::json!([t]))).is_empty(), "ohne Art keine Beschriftung");
     }
 
     #[test]

@@ -3317,6 +3317,20 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   nicht im Auswahlrechteck; keine Art-Beschriftung im Plan; Krone im Schatten als konvexe Hülle; Schnitt durch die Krone zeigt die ganze Silhouette (kein Schnittbild); Fuss
   am Gelände der Stammmitte (Hang unter der Krone nicht berücksichtigt); Kreise der Ebene 13 zusätzlich zum Baum-Objekt
   werfen weiter Schatten (doppelt, wenn beide gezeichnet sind). · M
+  (6.11., Reste) **Auswahlrechteck:** Bäume im Fenster/Kreuzen (Kronen-Pickfläche, `PlanPickIndex.marquee
+  ("contextObjectId")` → `MarqueeSelection.treeIds`). **Gruppierbar:** `Group.treeIds` (Rust-Modell, optional — ältere
+  Dateien unverändert), Kern `groups::Membership.tree_ids` (transitiv, sichtbare Gruppe, Erweitern), TS
+  `GroupMembership.treeIds` (Gruppieren/Auflösen, Klick und Rahmen erweitern auf die Gruppe, Isolation dimmt Bäume
+  ausserhalb über `@tree:`), Objekt-Sperre `treeIds`, Projekt-Prüfung (`project_refs`). **Beschriftung:** neues Feld
+  `Tree.showLabel` („Beschriftung zeigen“ in der Objekt-Info): Art-Name rechts neben dem Stamm (1 mm Papier Abstand),
+  Tusche, Schrift wie die Zusatzzeile des Raumstempels (0.8 × 10 pt, ab 1:200 0.8 × 7 pt; `plan/trees.rs::tree_label`).
+  **Schatten nicht doppelt:** ein Kreis der Baum-Ebene, dessen Mitte höchstens eine halbe Kreisbreite (mind. 0.5 m)
+  vom Stamm eines Baum-Objekts liegt, wirft keinen Schatten mehr (`sun::circle_is_tree_object`). Tests:
+  `groups::baeume_in_gruppen`, `plan::trees::beschriftung_mit_art_name`, `sun::kreis_am_baum_objekt_nicht_doppelt`,
+  vitest `groupActions.test.ts` (Bäume in Gruppen). Geprüft: cargo test Kern, tsc, vitest, CLI-SVG Musterhaus komplex
+  EG 1:100 mit Baum-Objekten samt Beschriftung in Chromium. Offen: Rahmen/Gruppen nicht per e2e und nicht in der
+  Tauri-App geprüft; Beschriftung fest rechts vom Stamm (kein Ausweichen, kein Griff); 3D-Klick erweitert nicht auf
+  die Gruppe; Krone im Schatten als konvexe Hülle; Schnitt durch die Krone zeigt die ganze Silhouette.
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

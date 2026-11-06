@@ -34,6 +34,8 @@ export function isLocked(project: Project, kind: MemberKind, id: string): boolea
       return !!(project.roofs ?? []).find((r) => r.id === id)?.locked;
     case "openingIds":
       return !!(project.openings ?? []).find((o) => o.id === id)?.locked;
+    case "treeIds":
+      return !!(project.trees ?? []).find((t) => t.id === id)?.locked;
   }
 }
 
@@ -56,6 +58,8 @@ export function lockOps(project: Project, kind: MemberKind, id: string, locked: 
       return patchItem(project, "roofs", id, { locked });
     case "openingIds":
       return patchItem(project, "openings", id, { locked });
+    case "treeIds":
+      return patchItem(project, "trees", id, { locked });
   }
 }
 

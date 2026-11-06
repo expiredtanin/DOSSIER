@@ -228,5 +228,6 @@ export function toMembership(sel: Selection): GroupMembership {
     columnIds: sel.columns,
     roofIds: sel.roofs,
     openingIds: sel.openings,
+    treeIds: sel.trees,
   };
 }

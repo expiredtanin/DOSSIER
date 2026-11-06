@@ -23,10 +23,10 @@ const COLUMN_FALLBACK_FILL: &str = "#3a3f47";
 /// Alpha-Suffix der (unsichtbaren) Raumfüllung.
 const ROOM_FILL_ALPHA: &str = "00";
 /// Basis-Schriftgrösse des Raumstempels (pt).
-const ROOM_STAMP_PT: f64 = 10.0;
+pub(super) const ROOM_STAMP_PT: f64 = 10.0;
 /// [140] Raumstempel ab 1:200 (2.5 mm statt 3.5 mm, ohne SIA-Zeile): kleine Räume überlappen sonst.
-const ROOM_STAMP_SMALL_PT: f64 = 7.0;
-const ROOM_STAMP_SMALL_FROM: f64 = 200.0;
+pub(super) const ROOM_STAMP_SMALL_PT: f64 = 7.0;
+pub(super) const ROOM_STAMP_SMALL_FROM: f64 = 200.0;
 const NAME_PT: f64 = 12.0;
 const NUMBER_PT: f64 = 9.0;
 const LINE2_PT: f64 = 9.0;
@@ -689,7 +689,7 @@ const STAMP_PAD_MM: f64 = 0.5;
 
 /// [140] Ausmass des Stempels in Metern bei 1:`scale` (echte Schriftmetrik, `text_layout::stamp_block_size`)
 /// samt Rand.
-fn stamp_size_m(doc: &RichTextDoc, extra: &[StampLine], pt: f64, scale: f64) -> (f64, f64) {
+pub(super) fn stamp_size_m(doc: &RichTextDoc, extra: &[StampLine], pt: f64, scale: f64) -> (f64, f64) {
     let rows: Vec<(&str, crate::text_layout::LineAlign)> = extra.iter().map(|l| (l.text.as_str(), crate::text_layout::LineAlign::of(Some(l.align)))).collect();
     let (w, h) = crate::text_layout::stamp_block_size(doc, &rows, pt, PT_MM * scale / 1000.0);
     let pad = 2.0 * STAMP_PAD_MM * scale / 1000.0;

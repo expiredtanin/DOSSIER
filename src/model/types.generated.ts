@@ -1399,6 +1399,8 @@ export type Group = {
   columnIds: Array<string>;
   roofIds: Array<string>;
   openingIds: Array<string>;
+  /** [149] Bäume (fehlt in älteren Dateien). */
+  treeIds?: Array<string>;
   /** Verschachtelte Gruppen (diese Gruppe enthält andere Gruppen als Ganzes). */
   groupIds: Array<string>;
 };
@@ -3284,6 +3286,8 @@ export type Tree = {
   foliage: TreeFoliage;
   /** Optionaler Art-Name (z. B. „Quercus robur"), erscheint als Beschriftung im Grundriss. */
   species?: string;
+  /** [149] Art-Name als Beschriftung im Grundriss zeigen (nahe am Stamm; Vorgabe aus). */
+  showLabel?: boolean;
   /** Höhenversatz des Fusses gegenüber Gelände bzw. Geschoss-UK (m, Vorgabe 0). */
   baseOffset?: number;
   /**

@@ -154,7 +154,7 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
     // Gruppen: Mitglieder und Zyklen.
     let groups = p.groups.as_deref().unwrap_or(&[]);
     let group_ids = ids(groups, |g| g.id.as_str());
-    let members: [(&str, HashSet<&str>); 7] = [
+    let members: [(&str, HashSet<&str>); 8] = [
         ("Zeichnung", ids(&p.drawings2d, |d| d.id.as_str())),
         ("Decke", ids(p.ceilings.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Raum", ids(p.rooms.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
@@ -162,12 +162,14 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
         ("Stütze", ids(p.columns.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Dach", ids(p.roofs.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Öffnung", ids(p.openings.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
+        ("Baum", ids(p.trees.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
     ];
     for g in groups {
         for w in &g.wall_ids {
             miss(&mut out, "Gruppe", &g.id, "Wand", w, &walls);
         }
-        let lists = [&g.drawing_ids, &g.ceiling_ids, &g.room_ids, &g.stair_ids, &g.column_ids, &g.roof_ids, &g.opening_ids];
+        let no_trees = Vec::new();
+        let lists = [&g.drawing_ids, &g.ceiling_ids, &g.room_ids, &g.stair_ids, &g.column_ids, &g.roof_ids, &g.opening_ids, g.tree_ids.as_ref().unwrap_or(&no_trees)];
         for (list, (kind, known)) in lists.into_iter().zip(&members) {
             for id in list {
                 miss(&mut out, "Gruppe", &g.id, kind, id, known);

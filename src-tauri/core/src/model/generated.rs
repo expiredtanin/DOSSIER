@@ -3974,6 +3974,10 @@ pub struct Tree {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub species: Option<String>,
+    /// [149] Art-Name als Beschriftung im Grundriss zeigen (nahe am Stamm; Vorgabe aus).
+    #[serde(rename = "showLabel", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub show_label: Option<bool>,
     /// Höhenversatz des Fusses gegenüber Gelände bzw. Geschoss-UK (m, Vorgabe 0).
     #[serde(rename = "baseOffset", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -4014,6 +4018,10 @@ pub struct Group {
     pub roof_ids: Vec<String>,
     #[serde(rename = "openingIds")]
     pub opening_ids: Vec<String>,
+    /// [149] Bäume (fehlt in älteren Dateien).
+    #[serde(rename = "treeIds", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tree_ids: Option<Vec<String>>,
     /// Verschachtelte Gruppen (diese Gruppe enthält andere Gruppen als Ganzes).
     #[serde(rename = "groupIds")]
     pub group_ids: Vec<String>,

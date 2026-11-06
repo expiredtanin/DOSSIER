@@ -2437,6 +2437,17 @@ export function TreeSection({ ids }: { ids: readonly string[] }) {
         />
       </label>
       <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.tree.showLabel")}</span>
+        <input
+          type="checkbox"
+          checked={tree.showLabel === true}
+          disabled={locked}
+          onChange={(e) => set({ showLabel: e.target.checked }, true)}
+          title={t("objinfo.tree.showLabelHint")}
+          data-testid="tree-show-label"
+        />
+      </div>
+      <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.tree.status")}</span>
         <Dropdown
           value={tree.status}

@@ -1808,6 +1808,8 @@ export const de = {
   "objinfo.tree.section": "Baum",
   "objinfo.tree.species": "Art",
   "objinfo.tree.speciesHint": "z. B. Quercus robur",
+  "objinfo.tree.showLabel": "Beschriftung zeigen",
+  "objinfo.tree.showLabelHint": "Art-Name im Grundriss neben dem Stamm",
   "objinfo.tree.status": "Bestand",
   "objinfo.tree.status.existing": "bestehend",
   "objinfo.tree.status.new": "neu",

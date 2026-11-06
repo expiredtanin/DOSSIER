@@ -191,7 +191,7 @@ export class PlanPickIndex {
    * Rahmen-Auswahl über Polygone mit Id im Feld `field` (CAD-Konvention): `crossing` = ein Band
    * berührt das Rechteck, sonst liegen alle Bänder ganz darin. Ids in Auftreten-Reihenfolge.
    */
-  marquee(field: "wallId" | "ceilingId" | "roomId" | "stairId" | "columnId" | "roofId", rect: ModelRect, crossing: boolean): string[] {
+  marquee(field: "wallId" | "ceilingId" | "roomId" | "stairId" | "columnId" | "roofId" | "contextObjectId", rect: ModelRect, crossing: boolean): string[] {
     const r = Float64Array.of(rect.minX, rect.minY, rect.maxX, rect.maxY);
     return splitIds(core().pick_marquee_polygons(this.ix(), KIND[field], r, crossing));
   }

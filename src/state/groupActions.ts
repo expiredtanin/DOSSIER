@@ -26,6 +26,7 @@ const KEYS: MemberKind[] = [
   "columnIds",
   "roofIds",
   "openingIds",
+  "treeIds",
 ];
 
 /** Vereinigung je Art (erste Vorkommen in Reihenfolge) — für Auswahl-Mengen in der Hülle. */
@@ -34,6 +35,9 @@ export function mergeMembership(a: GroupMembership, b: GroupMembership): GroupMe
   for (const k of KEYS) out[k] = [...new Set([...a[k], ...b[k]])];
   return out;
 }
+
+/** [149] Präfix der Baum-Pick-Id im Feld `contextObjectId` (Kern `tree::TREE_PICK_PREFIX`). */
+const TREE_PICK = "@tree:";
 
 /** Primitiv-ID-Feld → zugehörige `MemberKind` (Reihenfolge irrelevant). */
 const ID_FIELD_TO_KIND: [string, MemberKind][] = [
@@ -73,6 +77,7 @@ export function applyGroupDimming(
     columnIds: new Set(mem.columnIds),
     roofIds: new Set(mem.roofIds),
     openingIds: new Set(mem.openingIds),
+    treeIds: new Set(mem.treeIds),
   };
   return primitives.map((p) => {
     const rec = p as unknown as Record<string, unknown>;
@@ -83,6 +88,12 @@ export function applyGroupDimming(
       if (typeof v !== "string") continue;
       hasId = true;
       if (sets[kind].has(v)) inside = true;
+    }
+    // [149] Bäume tragen ihre id als `contextObjectId = "@tree:<id>"`.
+    const ctx = rec.contextObjectId;
+    if (typeof ctx === "string" && ctx.startsWith(TREE_PICK)) {
+      hasId = true;
+      if (sets.treeIds.has(ctx.slice(TREE_PICK.length))) inside = true;
     }
     return hasId && !inside ? { ...p, greyed: true } : p;
   });
@@ -135,6 +146,7 @@ export function groupSelection(
     columnIds: sel.columnIds,
     roofIds: sel.roofIds,
     openingIds: sel.openingIds,
+    ...(sel.treeIds.length ? { treeIds: sel.treeIds } : {}),
     groupIds: [...selectedGroupIds],
   };
   return { ops: addItems("groups", [g]), groupId: id };
@@ -164,6 +176,7 @@ export function ungroup(
       columnIds: g.columnIds,
       roofIds: g.roofIds,
       openingIds: g.openingIds,
+      treeIds: g.treeIds ?? [],
     },
     subGroupIds: g.groupIds,
   };

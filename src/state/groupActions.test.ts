@@ -32,6 +32,7 @@ const EMPTY_MEM = {
   columnIds: [] as string[],
   roofIds: [] as string[],
   openingIds: [] as string[],
+  treeIds: [] as string[],
 };
 
 function project(groups: Group[]): Project {
@@ -181,6 +182,24 @@ describe("applyGroupDimming", () => {
   it("Primitive ohne jede ID (Raster o. Ä.) werden nie gedimmt", () => {
     const out = applyGroupDimming([noOwner], p, ["g1"]);
     expect(out[0].greyed).toBeUndefined();
+  });
+});
+
+describe("[149] Bäume in Gruppen", () => {
+  it("gruppieren, erweitern, auflösen und dimmen", () => {
+    const res = groupSelection({ ...EMPTY_MEM, wallIds: ["w1"], treeIds: ["b1", "b2"] }, []);
+    expect(res).not.toBeNull();
+    const p = applyOps(project([]), res!.ops);
+    expect(p.groups![0].treeIds).toEqual(["b1", "b2"]);
+    // Gruppe ohne Bäume schreibt kein leeres Feld (ältere Dateien bleiben gleich).
+    expect(groupSelection({ ...EMPTY_MEM, wallIds: ["w1", "w2"] }, [])!.ops.length).toBe(1);
+    const { expanded, groupIds } = expandToGroups(p, { ...EMPTY_MEM, treeIds: ["b2"] }, []);
+    expect([expanded.wallIds, expanded.treeIds, groupIds]).toEqual([["w1"], ["b1", "b2"], [res!.groupId]]);
+    expect(ungroup(p, res!.groupId)!.members.treeIds).toEqual(["b1", "b2"]);
+    const inside = { kind: "polygon", pts: [], contextObjectId: "@tree:b1" } as unknown as Primitive;
+    const outside = { kind: "polygon", pts: [], contextObjectId: "@tree:b9" } as unknown as Primitive;
+    const out = applyGroupDimming([inside, outside], p, [res!.groupId]);
+    expect([out[0].greyed, out[1].greyed]).toEqual([undefined, true]);
   });
 });
 

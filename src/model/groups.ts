@@ -16,6 +16,8 @@ export interface GroupMembership {
   columnIds: string[];
   roofIds: string[];
   openingIds: string[];
+  /** [149] Bäume. */
+  treeIds: string[];
 }
 
 export type MemberKind = keyof GroupMembership;
@@ -29,6 +31,7 @@ export const EMPTY_MEMBERSHIP: GroupMembership = {
   columnIds: [],
   roofIds: [],
   openingIds: [],
+  treeIds: [],
 };
 
 /** Letzte transitive Mitgliedschaft (Projekt + Gruppe): Klick-/Rahmen-Filter fragen je Element. */

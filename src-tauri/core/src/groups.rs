@@ -19,10 +19,12 @@ pub struct Membership {
     pub column_ids: Vec<String>,
     pub roof_ids: Vec<String>,
     pub opening_ids: Vec<String>,
+    /// [149] Bäume.
+    pub tree_ids: Vec<String>,
 }
 
 /// Elementart (`MemberKind` in TS: `"wallIds"` …).
-pub const KINDS: [&str; 8] = ["wallIds", "drawingIds", "ceilingIds", "roomIds", "stairIds", "columnIds", "roofIds", "openingIds"];
+pub const KINDS: [&str; 9] = ["wallIds", "drawingIds", "ceilingIds", "roomIds", "stairIds", "columnIds", "roofIds", "openingIds", "treeIds"];
 
 impl Membership {
     pub fn list(&self, kind: &str) -> Option<&Vec<String>> {
@@ -35,6 +37,7 @@ impl Membership {
             "columnIds" => &self.column_ids,
             "roofIds" => &self.roof_ids,
             "openingIds" => &self.opening_ids,
+            "treeIds" => &self.tree_ids,
             _ => return None,
         })
     }
@@ -49,6 +52,7 @@ impl Membership {
             "columnIds" => &mut self.column_ids,
             "roofIds" => &mut self.roof_ids,
             "openingIds" => &mut self.opening_ids,
+            "treeIds" => &mut self.tree_ids,
             _ => return None,
         })
     }
@@ -63,6 +67,7 @@ impl Membership {
             column_ids: g.column_ids.clone(),
             roof_ids: g.roof_ids.clone(),
             opening_ids: g.opening_ids.clone(),
+            tree_ids: g.tree_ids.clone().unwrap_or_default(),
         }
     }
 
@@ -189,5 +194,19 @@ mod tests {
         let (e, ids) = expand_to_groups(&p, &raw, &[]);
         assert_eq!(e.wall_ids, ["w5", "w2", "w1"]);
         assert_eq!(ids, ["outer"]);
+    }
+
+    /// [149] Bäume gehören zu Gruppen wie die übrigen Arten (Feld fehlt in älteren Dateien).
+    #[test]
+    fn baeume_in_gruppen() {
+        let mut t = g("t", &["w1"], &[]);
+        t["treeIds"] = json!(["b1", "b2"]);
+        let p = project(json!([t, g("alt", &["w2"], &[])]));
+        assert_eq!(transitive_membership(&p, "t").tree_ids, ["b1", "b2"]);
+        assert!(transitive_membership(&p, "alt").tree_ids.is_empty());
+        assert_eq!(containing_group_id(&p, "treeIds", "b2", &[]), Some("t".into()));
+        let raw = Membership { tree_ids: vec!["b1".into()], ..Default::default() };
+        let (e, ids) = expand_to_groups(&p, &raw, &[]);
+        assert_eq!((e.wall_ids, e.tree_ids, ids), (vec!["w1".to_string()], vec!["b1".to_string(), "b2".to_string()], vec!["t".to_string()]));
     }
 }
