@@ -320,6 +320,91 @@ fn wall_host(o: &Value) -> Option<&str> {
     field(o, "hostWallId").and_then(Value::as_str).filter(|v| !v.is_empty())
 }
 
+/// Gerade Wand als (Start, Ende); `None` bei Bogenwänden (dort ist `position` keine Sehnenlänge).
+fn straight_wall(w: &Value) -> Option<((f64, f64), (f64, f64))> {
+    if field(w, "bulge").and_then(Value::as_f64).is_some_and(|b| b.abs() > 1e-12) {
+        return None;
+    }
+    Some((xy(field(w, "start")?), xy(field(w, "end")?)))
+}
+
+/// Frei gewählte Wandöffnungen ([144]): gewählt, an einer Wand, nicht gesperrt und ohne mitbewegte
+/// Wirtswand (die nimmt ihre Öffnungen starr mit). Nur beim Verschieben — Drehen/Spiegeln/Skalieren
+/// einer Öffnung allein ergibt in der Wand keinen Sinn.
+fn free_openings<'a>(root: &'a Map<String, Value>, sel: &Sel, op: &str, walls: &std::collections::HashSet<&str>, ignore_lock: bool) -> Vec<&'a Value> {
+    let ids = Ids::opt(&sel.opening_ids);
+    if op != "move" || ids.is_empty() {
+        return vec![];
+    }
+    list(root, "openings")
+        .iter()
+        .filter(|o| ids.has(o) && (ignore_lock || !locked(o)))
+        .filter(|o| wall_host(o).is_some_and(|h| !walls.contains(h)))
+        .collect()
+}
+
+/// Wandöffnung um `d` verschieben ([144]): die Öffnungsmitte geht nach `Mitte + d`. Liegt das Ziel in
+/// einer anderen geraden Wand desselben Geschosses (innerhalb der halben Dicke + 5 cm) und nicht mehr in
+/// der eigenen, wechselt die Öffnung dorthin; sonst gleitet sie um die auf die Wandachse projizierte
+/// Strecke. `position` auf [0, Wandlänge − Breite] geklemmt. `None`: Wirt fehlt, Bogenwand oder die
+/// Öffnung passt nicht in die Wand.
+fn slide_opening(root: &Map<String, Value>, p: &Project, o: &Value, d: (f64, f64)) -> Option<Value> {
+    let walls = list(root, "walls");
+    let host = walls.iter().find(|w| id_of(w) == wall_host(o))?;
+    let width = num_of(field(o, "width"));
+    let frame = |w: &Value| {
+        let (s, e) = straight_wall(w)?;
+        let len = hypot2(e.0 - s.0, e.1 - s.1);
+        (len > 1e-9 && len.is_finite()).then(|| (s, ((e.0 - s.0) / len, (e.1 - s.1) / len), len))
+    };
+    let (s, u, len) = frame(host)?;
+    let c = (s.0 + u.0 * (num_of(field(o, "position")) + width / 2.0), s.1 + u.1 * (num_of(field(o, "position")) + width / 2.0));
+    let target = (c.0 + d.0, c.1 + d.1);
+    if !(target.0.is_finite() && target.1.is_finite() && width.is_finite()) {
+        return None;
+    }
+    // Abstand des Ziels zur Wandachse (Strecke) und Lage entlang der Achse.
+    let reach = |w: &Value| -> Option<(f64, f64, f64)> {
+        let (s, u, len) = frame(w)?;
+        let t = (target.0 - s.0) * u.0 + (target.1 - s.1) * u.1;
+        let tc = jsnum::max(0.0, jsnum::min(len, t));
+        let dist = hypot2(target.0 - (s.0 + u.0 * tc), target.1 - (s.1 + u.1 * tc));
+        Some((dist, t, len))
+    };
+    let tol = |w: &Value| wall_thickness(p, w) / 2.0 + 0.05;
+    let in_host = reach(host).is_some_and(|(dist, _, _)| dist <= tol(host));
+    let floor = field(host, "floorId");
+    let other = (!in_host)
+        .then(|| {
+            walls
+                .iter()
+                .filter(|w| id_of(w) != id_of(host) && field(w, "floorId") == floor)
+                .filter_map(|w| reach(w).filter(|(dist, _, _)| *dist <= tol(w)).map(|r| (w, r)))
+                .min_by(|a, b| a.1 .0.total_cmp(&b.1 .0))
+        })
+        .flatten();
+    // Neue Lage des ersten Pfostens; in der eigenen Wand direkt `position + d·u` (ohne Rundung über die Mitte).
+    let (wall, start, wlen) = match other {
+        Some((w, (_, t, l))) => (w, t - width / 2.0, l),
+        None => (host, num_of(field(o, "position")) + d.0 * u.0 + d.1 * u.1, len),
+    };
+    if width > wlen + 1e-9 {
+        return None;
+    }
+    let pos = jsnum::max(0.0, jsnum::min(wlen - width, start));
+    let mut v = with(o, "position", js_num(pos));
+    if id_of(wall) != id_of(host) {
+        v = with(&v, "hostWallId", Value::String(id_of(wall)?.to_owned()));
+    }
+    Some(v)
+}
+
+/// Verschiebung der Klickpunkte zum Anteil `t` (Bewegen).
+fn move_delta(pts: &[(f64, f64)], t: f64) -> (f64, f64) {
+    let (a, b) = (p_at(pts, 0), p_at(pts, 1));
+    ((b.0 - a.0) * t, (b.1 - a.1) * t)
+}
+
 fn mv_room(r: &Value, xf: &Xf) -> Value {
     let mut f = vec![("boundary", xf.pts(field(r, "boundary")))];
     if truthy(field(r, "stampAnchor")) {
@@ -417,6 +502,8 @@ pub struct Sel {
     pub roof_ids: Option<Vec<String>>,
     pub stair_ids: Option<Vec<String>>,
     pub room_ids: Option<Vec<String>>,
+    /// Gewählte Öffnungen ([144]): Wandöffnungen gleiten beim Verschieben entlang ihrer Wand.
+    pub opening_ids: Option<Vec<String>>,
 }
 
 fn nonempty(s: &Option<String>) -> Option<&str> {
@@ -580,7 +667,10 @@ fn add(collection: &str, items: Vec<Value>) -> Option<Op> {
 pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq) -> Vec<Op> {
     let (sel, op) = (&req.sel, req.op.as_str());
     let items = gather(root, sel, op, false);
-    if items.is_empty() {
+    let moved_walls: std::collections::HashSet<&str> =
+        items.iter().filter(|(k, _)| matches!(k, Kind::Wall)).filter_map(|(_, e)| id_of(e)).collect();
+    let free = free_openings(root, sel, op, &moved_walls, false);
+    if items.is_empty() && free.is_empty() {
         return vec![];
     }
     let pts = req.points();
@@ -649,6 +739,9 @@ pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq)
         if !hosts.is_empty() {
             patch("openings", &|o| surface_host(o).is_some_and(|(_, h)| hosts.contains(h)), &|o| mv_surface_opening(o, &xf));
         }
+        // Frei gewählte Wandöffnungen ([144]) gleiten entlang ihrer Wand (bzw. wechseln die Wand).
+        let d = move_delta(&pts, 1.0);
+        ops.extend(free.iter().filter_map(|o| slide_opening(root, p, o, d).filter(|v| v != *o)).map(|v| replace("openings", v)));
     }
 
     // Kopien (Kopie/Reihe/Verteilen bzw. gespiegelte Kopie).
@@ -700,6 +793,12 @@ pub fn transform_ops(root: &Map<String, Value>, p: &Project, req: &TransformReq)
             let Some((key, nh)) = surface_host(o).and_then(|(k, h)| Some((k, to_copy(h)?))) else { continue };
             let v = with(&mv_surface_opening(o, &xf), key, Value::String(nh));
             new_openings.push(with(&v, "id", Value::String(ids.next("O"))));
+        }
+        // Kopien frei gewählter Wandöffnungen ([144]) in der Wand versetzt.
+        for o in &free {
+            if let Some(v) = slide_opening(root, p, o, move_delta(&pts, t)) {
+                new_openings.push(with(&v, "id", Value::String(ids.next("O"))));
+            }
         }
     }
     let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms"];
@@ -1056,14 +1155,32 @@ pub fn preview_pending(root: &Map<String, Value>, p: &Project, req: &TransformRe
     if req.mode == "move" {
         ts.push(1.0);
     }
+    let moved_walls: std::collections::HashSet<&str> =
+        items.iter().filter(|(k, _)| matches!(k, Kind::Wall)).filter_map(|(_, e)| id_of(e)).collect();
+    let free = free_openings(root, &req.sel, op, &moved_walls, req.ignore_lock);
     let mut out = Pending::default();
     for t in ts {
         let xf = Xf::of(op, &pts, t);
         for (kind, e) in &items {
             item_preview(p, *kind, e, &xf, &mut out);
         }
+        for o in &free {
+            if let Some(q) = slide_opening(root, p, o, move_delta(&pts, t)).and_then(|v| opening_quad(root, p, &v)) {
+                out.shapes.poly(&q);
+            }
+        }
     }
     out
+}
+
+/// Lücke einer Wandöffnung (Vorschau, [144]): Rechteck über die volle Wanddicke um die Achse.
+fn opening_quad(root: &Map<String, Value>, p: &Project, o: &Value) -> Option<Vec<(f64, f64)>> {
+    use crate::opening_geom::{opening_gap_quad, v, WallRef};
+    let w = list(root, "walls").iter().find(|w| id_of(w) == wall_host(o))?;
+    let (s, e) = straight_wall(w)?;
+    let wr = WallRef { start: v(s.0, s.1), end: v(e.0, e.1), total: wall_thickness(p, w), ref_off: 0.0 };
+    let q = opening_gap_quad(&wr, num_of(field(o, "position")), num_of(field(o, "width")))?;
+    Some(q.iter().map(|c| (c.x, c.y)).collect())
 }
 
 /// Teil 2: Zeichnungen über dieselbe Primitiv-Erzeugung wie der Plan (ohne Override-Regeln), Rückfall
@@ -1239,6 +1356,63 @@ mod tests {
         let dim = &added(&ops, "drawings2d")[0];
         assert_eq!(dim["geom"]["refs"][0]["id"], nd);
         assert_eq!(dim["geom"]["refs"][1]["id"], nd);
+    }
+
+    /// [144] Gewählte Wandöffnung allein verschieben: gleitet um die projizierte Strecke entlang der Wand
+    /// (geklemmt), wechselt in eine getroffene andere Wand, Kopie in derselben Wand; mit der Wand: starr.
+    #[test]
+    fn oeffnung_gleitet_entlang_der_wand() {
+        let r = root(json!({
+            "walls":[
+                {"id":"w","floorId":"eg","start":{"x":0,"y":0},"end":{"x":5,"y":0}},
+                {"id":"v","floorId":"eg","start":{"x":5,"y":0},"end":{"x":5,"y":4}},
+                {"id":"og","floorId":"og","start":{"x":0,"y":3},"end":{"x":5,"y":3}},
+                {"id":"b","floorId":"eg","start":{"x":0,"y":6},"end":{"x":4,"y":6},"bulge":0.3}
+            ],
+            "openings":[
+                {"id":"d","hostWallId":"w","kind":"door","position":1,"width":0.9},
+                {"id":"z","hostWallId":"w","kind":"door","position":1,"width":0.9,"locked":true},
+                {"id":"a","hostWallId":"b","kind":"window","position":1,"width":1}
+            ]}));
+        let run = |pts: Value, mode: &str, sel: Value| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":sel,"op":"move","pts":pts,"mode":mode,"count":2,"stamp":"s"})).unwrap();
+            transform_ops(&r, &Project::default(), &req).iter().map(|o| o.to_json()).collect::<Vec<_>>()
+        };
+        let one = |ops: &[Value]| {
+            assert_eq!(ops.len(), 1, "{ops:?}");
+            ops[0]["entity"].clone()
+        };
+        let sel = json!({"wallIds":[],"openingIds":["d"]});
+        // Getippt „@0.5,0": 0.5 m entlang der Wand.
+        let o = one(&run(json!([[0, 0], [0.5, 0]]), "move", sel.clone()));
+        assert_eq!((&o["id"], &o["position"], &o["hostWallId"]), (&json!("d"), &json!(1.5), &json!("w")));
+        // Schräg: nur der Anteil längs der Wand zählt (quer bleibt in der Wanddicke).
+        assert_eq!(one(&run(json!([[0, 0], [-0.5, 0.08]]), "move", sel.clone()))["position"], json!(0.5));
+        // Geklemmt an Wandanfang/-ende.
+        assert_eq!(one(&run(json!([[0, 0], [-9, 0]]), "move", sel.clone()))["position"], json!(0));
+        assert_eq!(one(&run(json!([[0, 0], [9, 0]]), "move", sel.clone()))["position"], json!(4.1));
+        // Ziel in der Querwand v (Mitte 1.45 → (5, 2)): Wirt wechselt, position = 2 − 0.45.
+        let o = one(&run(json!([[1.45, 0], [5, 2]]), "move", sel.clone()));
+        assert_eq!((&o["hostWallId"], &o["position"]), (&json!("v"), &json!(1.55)));
+        // Wand im anderen Geschoss zählt nicht: ausserhalb jeder Wand → nur Gleiten (projiziert).
+        assert_eq!(one(&run(json!([[1.45, 0], [2.45, 3]]), "move", sel.clone()))["hostWallId"], json!("w"));
+        // Gesperrte Öffnung und Öffnung in Bogenwand bleiben.
+        assert!(run(json!([[0, 0], [1, 0]]), "move", json!({"wallIds":[],"openingIds":["z","a"]})).is_empty());
+        // Drehen einer Öffnung allein: nichts.
+        let req: TransformReq = serde_json::from_value(json!({"sel":sel,"op":"rotate","pts":[[0,0],[1,0],[0,1]],"mode":"move","count":1,"stamp":"s"})).unwrap();
+        assert!(transform_ops(&r, &Project::default(), &req).is_empty());
+        // Reihe ×2 um 1.2: zwei neue Türen in derselben Wand bei 2.2 und 3.4.
+        let ops = run(json!([[0, 0], [1.2, 0]]), "array", sel.clone());
+        let items = ops.iter().find(|o| o["kind"] == "add" && o["collection"] == "openings").unwrap()["items"].as_array().unwrap().clone();
+        let pos: Vec<f64> = items.iter().map(|o| o["position"].as_f64().unwrap()).collect();
+        assert!((pos[0] - 2.2).abs() < 1e-9 && (pos[1] - 3.4).abs() < 1e-9, "{pos:?}");
+        assert!(items.iter().all(|o| o["hostWallId"] == "w" && o["id"] != "d"));
+        // Mit der Wand gewählt: die Wand geht, die Öffnung bleibt bei position 1 (starr mit).
+        let ops = run(json!([[0, 0], [0.5, 0]]), "move", json!({"wallIds":["w"],"openingIds":["d"]}));
+        assert!(ops.iter().all(|o| o["collection"] != "openings"), "{ops:?}");
+        // Vorschau: eine Lücke je Öffnung.
+        let req: TransformReq = serde_json::from_value(json!({"sel":sel,"op":"move","pts":[[0,0],[0.5,0]],"mode":"move","count":1,"stamp":"s"})).unwrap();
+        assert!(!preview_pending(&r, &Project::default(), &req).shapes.buf.is_empty());
     }
 
     #[test]

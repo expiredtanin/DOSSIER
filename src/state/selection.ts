@@ -137,6 +137,7 @@ export function toCommandSelection(sel: Selection): CommandSelection {
     roofIds: sel.roofs,
     stairIds: sel.stairs,
     roomIds: sel.rooms,
+    openingIds: sel.openings,
   };
 }
 
@@ -155,7 +156,8 @@ export function hasTransformable(sel: Selection): boolean {
     sel.ceilings.length > 0 ||
     sel.roofs.length > 0 ||
     sel.stairs.length > 0 ||
-    sel.rooms.length > 0
+    sel.rooms.length > 0 ||
+    sel.openings.length > 0
   );
 }
 

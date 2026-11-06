@@ -582,8 +582,8 @@ export function useTransformShortcuts(
         return;
       }
       // Transformierbar sind Wände, 2D-Zeichnungen, extrudierte Körper, Stützen,
-      // Decken/Dächer/Treppen/Räume. Öffnungen laufen bewusst NICHT hierüber, sondern über ihre
-      // eigenen Bewegpunkte (Grips) — sie sind wandgebunden. Ohne Auswahl: still.
+      // Decken/Dächer/Treppen/Räume und ([144]) Öffnungen — die gleiten beim Verschieben entlang ihrer
+      // Wand; Drehen/Spiegeln lehnt die Engine für sie allein mit Hinweis ab. Ohne Auswahl: still.
       if (!hasTransformSelection) return;
       const op = matchesShortcut(e, "transformMove", overrides)
         ? "move"

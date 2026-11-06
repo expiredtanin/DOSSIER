@@ -799,6 +799,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.opening.hostAngle": "Rotation (level surface)",
   "objinfo.opening.slope": "Surface slope",
   "objinfo.opening.position": "Position (from wall start)",
+  "objinfo.opening.positionEnd": "Distance from wall end",
   "objinfo.opening.width": "Width",
   "objinfo.opening.height": "Height",
   "objinfo.opening.sill": "Sill height",

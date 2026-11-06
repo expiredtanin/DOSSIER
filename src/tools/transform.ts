@@ -51,6 +51,8 @@ export interface TransformSelection {
   stairIds?: string[];
   /** Gewählte Räume (Mehrfachauswahl). */
   roomIds?: string[];
+  /** Gewählte Öffnungen ([144]): nur Verschieben, entlang der Wirtswand (Kern `slide_opening`). */
+  openingIds?: string[];
 }
 
 /** Auswahl (Befehlskontext) → TransformSelection (gleiche Form, alle Elementarten). */
@@ -65,12 +67,18 @@ export function toTransformSel(sel: CommandSelection): TransformSelection {
     roofIds: sel.roofIds,
     stairIds: sel.stairIds,
     roomIds: sel.roomIds,
+    openingIds: sel.openingIds,
   };
 }
 
-/** Hat die Auswahl überhaupt etwas Transformierbares? */
-export function hasTransformSelection(sel: CommandSelection): boolean {
+/**
+ * Hat die Auswahl überhaupt etwas Transformierbares? Öffnungen zählen nur beim Verschieben/Kopieren
+ * ([144]); für Drehen/Spiegeln/Skalieren (`op`) nicht — eine Öffnung allein gleitet nur in der Wand.
+ */
+export function hasTransformSelection(sel: CommandSelection, op?: string): boolean {
+  const openings = op !== "rotate" && op !== "mirror" && op !== "scale" && (sel.openingIds?.length ?? 0) > 0;
   return (
+    openings ||
     sel.wallIds.length > 0 ||
     sel.drawingId !== null ||
     (sel.drawingIds?.length ?? 0) > 0 ||

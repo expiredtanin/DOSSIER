@@ -143,4 +143,28 @@ describe("Transformations-Befehle", () => {
     expect(engine.isActive()).toBe(false);
     expect(lines(log.project)[0].b).toEqual({ x: 2, y: 0 });
   });
+
+  // [144] Tür allein gewählt: Bewegen startet, getippte Distanz schiebt sie entlang der Wand (W1: x 0…5).
+  it("Öffnung: Bewegen mit getippter Distanz gleitet entlang der Wand; Drehen/Spiegeln lehnen ab", () => {
+    const sel: CommandSelection = { wallIds: [], drawingId: null, openingIds: ["D1"] };
+    const { engine, log } = setup(sel);
+    const door = () => log.project.openings!.find((o) => o.id === "D1")!;
+    expect(door().position).toBe(0.8);
+    expect(engine.start("move")).toBe(true);
+    engine.pick({ x: 1.25, y: 0 });
+    engine.move({ x: 3, y: 0 });
+    engine.submitText("0.5");
+    expect(engine.isActive()).toBe(false);
+    expect(door().position).toBeCloseTo(1.3, 9);
+    expect(door().hostWallId).toBe("W1");
+    // Relative Koordinate quer zur Wand: nur der Anteil längs zählt; am Wandende geklemmt.
+    engine.start("move");
+    engine.pick({ x: 0, y: 0 });
+    engine.submitText("@9,0.05");
+    expect(door().position).toBeCloseTo(5 - 0.9, 9);
+    for (const op of ["rotate", "mirror"]) {
+      expect(engine.start(op)).toBe(false);
+    }
+    expect(log.notes).toEqual(["transform.needSelection", "transform.needSelection"]);
+  });
 });

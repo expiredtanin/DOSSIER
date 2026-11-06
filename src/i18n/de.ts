@@ -800,6 +800,7 @@ export const de = {
   "objinfo.opening.hostAngle": "Drehung (waagrechte Fläche)",
   "objinfo.opening.slope": "Neigung der Fläche",
   "objinfo.opening.position": "Position (ab Wandanfang)",
+  "objinfo.opening.positionEnd": "Abstand ab Wandende",
   "objinfo.opening.width": "Breite",
   "objinfo.opening.height": "Höhe",
   "objinfo.opening.sill": "Brüstung",

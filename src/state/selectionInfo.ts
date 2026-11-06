@@ -211,6 +211,8 @@ export interface OpeningInfo {
   hostWallName: string;
   /** Abstand vom Wand-Startpunkt (Meter). */
   position: number;
+  /** Achslänge der geraden Wirtswand (fehlt bei Bogenwand) — „Abstand ab Wandende“ ([144]). */
+  wallLength?: number;
   width: number;
   height: number;
   /** Brüstungshöhe (Meter); 0 bei Türen. */

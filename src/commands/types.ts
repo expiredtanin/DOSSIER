@@ -84,6 +84,8 @@ export interface CommandSelection {
   stairIds?: string[];
   /** Gewählte Räume (Mehrfachauswahl). */
   roomIds?: string[];
+  /** Gewählte Öffnungen ([144]): Wandöffnungen gleiten beim Verschieben entlang ihrer Wand. */
+  openingIds?: string[];
 }
 
 /** Live-Kontext, den ein Befehl bei jedem Schritt erhält (analog ToolContext). */

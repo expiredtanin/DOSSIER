@@ -22,6 +22,10 @@ declare global {
       polylines: (prefix: string) => { id: string; pts: { x: number; y: number }[] }[];
       /** [137] Gewählte 2D-Elemente und Gruppen. */
       selected: () => { drawings: string[]; groups: string[]; all: string };
+      /** [144] Öffnungen (id, Wirtswand, Lage ab Wandanfang). */
+      openings: () => { id: string; hostWallId: string; position: number }[];
+      /** [144] Auswahl setzen (wie ein Klick), z. B. `{ openings: ["D1"] }`. */
+      select: (patch: Record<string, string[]>) => void;
     };
   }
 }
@@ -46,6 +50,8 @@ export function installTestHooks(): void {
       getState().project.drawings2d.flatMap((d) => (d.geom.shape === "line" ? [{ a: d.geom.a, b: d.geom.b }] : [])),
     polylines: (prefix) =>
       getState().project.drawings2d.flatMap((d) => (d.id.startsWith(prefix) && d.geom.shape === "polyline" ? [{ id: d.id, pts: d.geom.pts }] : [])),
+    openings: () => (getState().project.openings ?? []).map((o) => ({ id: o.id, hostWallId: o.hostWallId, position: o.position })),
+    select: (patch) => getState().setSelection(patch),
     selected: () => ({ drawings: [...getState().selection.drawings], groups: [...getState().selection.groups], all: JSON.stringify(getState().selection) }),
   };
 }
