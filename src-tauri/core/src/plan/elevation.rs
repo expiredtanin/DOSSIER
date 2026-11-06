@@ -574,29 +574,8 @@ pub(crate) fn corner_shifts(x: &RWall) -> [f64; 4] {
 
 /// Stützen ([132]) als lotrechte Prismen aus dem Querschnitt (wie im 3D, `model3d::emit_columns`).
 fn collect_column_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
-    let slabs: Vec<RSlab> = p
-        .columns
-        .as_deref()
-        .unwrap_or(&[])
-        .iter()
-        .filter(|c| c.height > 0.0)
-        .map(|c| {
-            let (z_bottom, z_top) = p.column_vertical_extent(c);
-            let color = c.component_id.as_deref().and_then(|id| p.component(id)).map_or(model3d::COLUMN_RGB, |k| crate::style::hex_to_rgb(&k.color, model3d::COLUMN_RGB));
-            RSlab {
-                outline: model3d::column_footprint(c).iter().map(|q| [q.x, q.y]).collect(),
-                z_bottom,
-                z_top,
-                color,
-                ceiling_id: c.id.clone(),
-                hatch: None,
-                cut: None,
-                monolith: None,
-                source: Default::default(),
-            }
-        })
-        .filter(|s| s.z_top - s.z_bottom > 1e-6 && s.outline.iter().flatten().all(|v| v.is_finite()))
-        .collect();
+    // [141] Von einer prioritäreren Wand beschnitten: je Höhenabschnitt der Rest-Querschnitt (wie im 3D).
+    let slabs = model3d::column_slabs(p);
     let mut faces = project_faces(frame, &[], &slabs, &[]);
     for f in &mut faces {
         f.role = Role::Column;
@@ -728,7 +707,8 @@ fn extend_wall_corners(p: &Project, rwalls: &mut [RWall], u: (f64, f64)) {
             continue;
         }
         if e_start > EPS {
-            if let Some(&i) = pieces.iter().find(|&&i| close(rwalls[i].start, w.start)) {
+            // [141] Kollineare Stossfuge (`joint`): die Nachbarwand setzt fort, nicht verlängern.
+            if let Some(&i) = pieces.iter().find(|&&i| close(rwalls[i].start, w.start) && !rwalls[i].joint[0]) {
                 let s = rwalls[i].start;
                 rwalls[i].start = [s[0] - ux * e_start, s[1] - uz * e_start];
                 // Ebene Oberkante bezieht sich auf den Anfang ([G2]).
@@ -738,7 +718,7 @@ fn extend_wall_corners(p: &Project, rwalls: &mut [RWall], u: (f64, f64)) {
             }
         }
         if e_end > EPS {
-            if let Some(&i) = pieces.iter().find(|&&i| close(rwalls[i].end, w.end)) {
+            if let Some(&i) = pieces.iter().find(|&&i| close(rwalls[i].end, w.end) && !rwalls[i].joint[1]) {
                 let e = rwalls[i].end;
                 rwalls[i].end = [e[0] + ux * e_end, e[1] + uz * e_end];
             }

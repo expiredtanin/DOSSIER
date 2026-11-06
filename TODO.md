@@ -2901,12 +2901,38 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Schicht-Schnitt statt Endschnitt), sichtbar im Musterhaus komplex; behoben. Tests `plan/wall_join_tests.rs` (je Fall ein
   Testprojekt: Polygonzahl, keine Überlappung, ein Körper ohne Lücke, Umriss geschlossen, keine Linie durch eine Fläche,
   Musterläufe an der Gehrung fortgesetzt). Goldens: `komplex-grundriss-*` (nur (e)). Geprüft: cargo test Kern/hatchgen,
-  vitest, tsc, CLI-SVG 1:50 mit Schraffur angesehen (Linux/Chromium). Offen: Y-Knoten ohne Schichtverschmelzung (der Ast
-  stösst stumpf, auch bei gleichem Kernmaterial); Bogenwände: kein Y-Knick, keine kollineare Vereinigung, kein
-  Stützenanschluss; runde Stütze: Sehne, die Linse unter der Stütze bleibt (von der Stützenfüllung verdeckt); Wand
-  breiter als die Stütze oder mitten durch die Stütze: unverändert; 3D/IFC kennen nur die erste Y-Linie und `covered`
-  nicht; Muster bei ungeraden Maschen gleich orientierter Enden nicht überall passend; nicht in der Tauri-App/Metal
-  geprüft. · M
+  vitest, tsc, CLI-SVG 1:50 mit Schraffur angesehen (Linux/Chromium).
+  6.11. Teil 3 — **Wandknoten in 3D, Schnitt, Ansicht, IFC, Mengen.** (a) Y-Knoten: `wall_bands.rs` (geschichteter
+  Pfad = 3D-Viewer, IFC, Netze) teilt ein Band, das über den Knick (Schnittpunkt `start_cut`/`start_cut2`) reicht, quer
+  in zwei Körper mit eigener Dicke, je einer an seiner Linie (wie `knee_band` im Grundriss); Bänder ganz über dem Knick
+  nehmen `*_cut2`. Kein Umbau von `RWall` (bleibt Viereck), IFC-Profile und `wall_quantities` stimmen damit von selbst.
+  (b) Kollinear: `WallCuts::collinear` (Stossfuge aus `merge_collinear`); `covered` → `model3d::wall_pieces` liefert
+  nichts (3D, IFC ohne IfcWall, Mengen nicht doppelt). Schnitt-/Ansichts-Pfad (ungeschichtet) bekommt jetzt ebenfalls
+  die Verschneidung, aber nur `model3d::section_cuts` (verdeckt, Stossfuge, Stütze — keine Gehrungen): Wand an der
+  Stossfuge gestutzt, Körper dort `joint` (keine Stirn); `elevation.rs` `extend_wall_corners` verlängert an einer
+  Stossfuge nicht mehr (vorher zwei Kanten ±Dicke/2 neben der Fuge). (c) Wand an Stütze: `model3d::trim_at_columns`
+  (nach der Verschneidung, auch im 3D-Cache) stutzt Wandenden in Stützen desselben Geschosses wie der Grundriss
+  (`plan/wall_columns.rs`, jetzt `pub(crate)`), nur wenn die Stütze die ganze Wandhöhe deckt; `WallCuts::at_column`
+  stutzt auch den Schnitt-Pfad. Prioritärere Wand: `model3d::column_pieces` spart das Wandband aus dem Stützen-
+  Querschnitt aus (Höhe in Abschnitte geteilt; 2D-Differenz, Prismen mit Ohrenschnitt) → 3D (`emit_columns`, Pick),
+  Ansicht, IFC (Profil = Rest-Querschnitt, wenn ein Abschnitt; Mengen daraus). **Stützen im Schnitt** (bisher fehlten
+  sie ganz): `model3d::column_slabs` (`SlabSource::Column`) gehen als Platten in `compute_section` — geschnitten mit
+  Bauteil-Stil und Rang (`joinPriority`, ohne Bauteil dominant; Wand/Stütze über `subtract_dominant_bands`), in der
+  Projektion sichtbar (Musterhaus komplex: Carport-Stützen unter dem Carportdach). Tests `wall_join3d_tests.rs`: Y-Knoten
+  (4 Winkelsätze), kollinear (7 Fälle, beide Pfade), Wand an Stütze (3 Fälle + gleiches Bauteil + Wand dominant):
+  Summe der Körpervolumen = Volumen der Manifold-Vereinigung, Manifold-Schnitt je Bauteilpaar leer, Vereinigung =
+  Grundriss-Fläche × Höhe; IFC-GrossVolume = Körper, verdeckte Wand fehlt im IFC, IfcColumn-Profil beschnitten;
+  Schnitt Wand/Stütze ohne Überlappung/Lücke; Ansicht ohne Kante an der Stossfuge. `scripts/validate-ifc.py` auf den drei
+  Testprojekten: 0 Befunde. Golden `komplex-schnitt-schnitt-a` (Stützen in der Projektion). Geprüft: cargo test Kern,
+  vitest, tsc, CLI-Schnitt/-Ansicht vorher/nachher (Linux/Chromium); 3D-Bild nicht (render_png nur macOS).
+  Offen: Y-Knoten ohne Schichtverschmelzung (der Ast stösst stumpf, auch bei gleichem Kernmaterial); Y-Knoten im
+  Schnitt-Pfad weiter ohne Schnittlinien (Vereinigung im Schnitt deckt es); **Bogenwände**: kein Y-Knick, keine
+  kollineare Vereinigung, kein Stützenanschluss (auch nicht im Grundriss — `y_notch`/`end_in_column` nur gerade Wände;
+  braucht Knick-Linien gegen Bogenflächen); runde Stütze: Sehne, die Linse unter der Stütze bleibt (von der
+  Stützenfüllung verdeckt); Wand breiter als die Stütze oder mitten durch die Stütze: unverändert; Stütze kürzer als
+  die Wand: Wand nicht gestutzt (Überlappung bleibt); Stütze mit mehreren Höhenabschnitten: IFC-Profil voll; Längsschnitt
+  genau in einer Wand (`split_wall_layers` setzt die Schichten quer in u, Nebenbefund, vorbestehend); Muster bei
+  ungeraden Maschen gleich orientierter Enden nicht überall passend; nicht in der Tauri-App/Metal geprüft. · M
 - ◐ **[142] Schatten in zwei Richtungen.** (5.11., Maintainer: Musterhaus komplex, EG 1:100 mit Sonnenstudie —
   grosser Schatten nach Norden, weitere Schattenstücke nach Süden zur Sonne hin.) Ursache: `sun.rs` verschob jeden
   Punkt um `k·z` auf die Bodenebene z = 0; Punkte unter ±0.00 (Untergeschoss-Wände, Stützmauer, Unterkanten im

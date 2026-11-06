@@ -14,7 +14,7 @@ fn layer(c: &str, t: f64) -> Layer {
 
 /// Bauteile wie im Beispiel (Priorität: Putz 10, Dämmung 20, Backstein 50, Beton 100) und die
 /// Wandtypen `aw` (Aussenwand 36.5 cm), `iw` (Innenwand 15 cm), `bw` (Beton 20 cm).
-fn base() -> Project {
+pub(crate) fn base() -> Project {
     let mut p = Project::default();
     for (id, prio, hatch) in [("render-ext", 10.0, "none"), ("insulation", 20.0, "ins"), ("brick", 50.0, "diag"), ("render-int", 10.0, "none"), ("concrete", 100.0, "cross"), ("xps", 20.0, "ins-hard")] {
         p.components.push(Component { id: id.into(), join_priority: prio, hatch_id: hatch.into(), ..Default::default() });
@@ -32,12 +32,12 @@ fn base() -> Project {
     p
 }
 
-fn add_wall(p: &mut Project, t: &str, s: (f64, f64), e: (f64, f64)) {
+pub(crate) fn add_wall(p: &mut Project, t: &str, s: (f64, f64), e: (f64, f64)) {
     let id = format!("W{}", p.walls.len() + 1);
     p.walls.push(Wall { id, floor_id: "eg".into(), wall_type_id: t.into(), category_code: "20".into(), start: Vec2 { x: s.0, y: s.1 }, end: Vec2 { x: e.0, y: e.1 }, height: 2.6, ..Default::default() });
 }
 
-fn add_column(p: &mut Project, id: &str, at: (f64, f64), profile: ColumnProfile, comp: Option<&str>) {
+pub(crate) fn add_column(p: &mut Project, id: &str, at: (f64, f64), profile: ColumnProfile, comp: Option<&str>) {
     p.columns.get_or_insert_with(Vec::new).push(Column {
         id: id.into(),
         r#type: "column".into(),
@@ -51,20 +51,20 @@ fn add_column(p: &mut Project, id: &str, at: (f64, f64), profile: ColumnProfile,
     });
 }
 
-fn polar(o: (f64, f64), r: f64, deg: f64) -> (f64, f64) {
+pub(crate) fn polar(o: (f64, f64), r: f64, deg: f64) -> (f64, f64) {
     let a = deg.to_radians();
     (o.0 + r * a.cos(), o.1 + r * a.sin())
 }
 
 /// Wand- und Stützen-Primitive des Erdgeschosses (1:50, Detail fein, alle Schichten).
-fn prims(p: &Project) -> Vec<Primitive> {
+pub(crate) fn prims(p: &Project) -> Vec<Primitive> {
     let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": 50 }).to_string();
     let d = plan_domains(p, &PlanArgs::parse(2.0, &t).unwrap()).unwrap();
     d.walls.into_iter().chain(d.columns).collect()
 }
 
 /// Gefüllte Flächen (Schichtbänder, Stützen).
-fn filled(ps: &[Primitive]) -> Vec<Vec<Vec2>> {
+pub(crate) fn filled(ps: &[Primitive]) -> Vec<Vec<Vec2>> {
     ps.iter()
         .filter_map(|q| match q {
             Primitive::Polygon { pts, fill, opening_id: None, .. } if fill != "none" => Some(pts.clone()),
@@ -94,7 +94,7 @@ fn outline(ps: &[Primitive]) -> Vec<(Vec2, Vec2)> {
     out
 }
 
-fn area(pts: &[Vec2]) -> f64 {
+pub(crate) fn area(pts: &[Vec2]) -> f64 {
     let n = pts.len();
     (0..n).map(|i| pts[i].x * pts[(i + 1) % n].y - pts[(i + 1) % n].x * pts[i].y).sum::<f64>().abs() / 2.0
 }
@@ -103,7 +103,7 @@ fn to_poly(pts: &[Vec2]) -> Polygon {
     vec![pts.iter().map(|p| [p.x, p.y]).collect()]
 }
 
-fn ring_area(r: &[[f64; 2]]) -> f64 {
+pub(crate) fn ring_area(r: &[[f64; 2]]) -> f64 {
     let n = r.len();
     (0..n).map(|i| r[i][0] * r[(i + 1) % n][1] - r[(i + 1) % n][0] * r[i][1]).sum::<f64>().abs() / 2.0
 }
@@ -133,7 +133,7 @@ fn grow(pts: &[Vec2], eps: f64) -> Vec<Vec2> {
 
 /// Summe der Flächen − Fläche der Vereinigung (Überlappung) und die Vereinigung der um 1e-7 m
 /// versetzten Flächen (Körper, Lücken).
-fn overlap(polys: &[Vec<Vec2>]) -> (f64, Vec<Polygon>) {
+pub(crate) fn overlap(polys: &[Vec<Vec2>]) -> (f64, Vec<Polygon>) {
     let sum: f64 = polys.iter().map(|q| area(q)).sum();
     let u = crate::polygon_bool::union(&polys.iter().map(|q| to_poly(q)).collect::<Vec<_>>());
     let ua: f64 = u.iter().map(|pl| ring_area(&pl[0]) - pl[1..].iter().map(|h| ring_area(h)).sum::<f64>()).sum();

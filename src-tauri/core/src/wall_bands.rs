@@ -952,28 +952,50 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
                 }
             }
         };
-        if cutouts.is_empty() {
-            seg(&mut em, 0.0, axis_len, z_bottom, z_top);
+        // [141] Kollineare Stossfuge (`WallCuts::collinear`, rechtwinklig): die Wand endet dort, die
+        // Nachbarwand gleichen Typs setzt den Körper fort (keine Doppelung, keine Stirnfläche).
+        // Ebenso ein Ende an einer Stützenkontur (`at_column`, Schnittlinie auch schräg).
+        let trim = [w.cuts.collinear[0] || w.cuts.at_column[0], w.cuts.collinear[1] || w.cuts.at_column[1]];
+        let at = |c: Option<Line>, on: bool| c.filter(|_| on).and_then(|c| band_cut_distance(w, u, n, 0.0, &c));
+        let lo = at(w.cuts.start_cut, trim[0]).unwrap_or(0.0).max(0.0);
+        let hi = at(w.cuts.end_cut, trim[1]).unwrap_or(axis_len).min(axis_len);
+        if hi - lo <= EPS {
             return em.out;
         }
-        let mut cursor = 0.0f64;
-        for c in &cutouts {
-            let seg_from = cursor.max(c.from);
-            if c.from > cursor {
-                seg(&mut em, cursor, c.from, z_bottom, z_top);
-            }
-            if c.to > seg_from {
-                if c.z_bottom > z_bottom + EPS {
-                    seg(&mut em, seg_from, c.to, z_bottom, c.z_bottom);
+        if cutouts.is_empty() {
+            seg(&mut em, lo, hi, z_bottom, z_top);
+        } else {
+            let mut cursor = lo;
+            for c in &cutouts {
+                let (cf, ct) = (c.from.clamp(lo, hi), c.to.clamp(lo, hi));
+                let seg_from = cursor.max(cf);
+                if cf > cursor {
+                    seg(&mut em, cursor, cf, z_bottom, z_top);
                 }
-                if c.z_top < z_top - EPS {
-                    seg(&mut em, seg_from, c.to, c.z_top, z_top);
+                if ct > seg_from {
+                    if c.z_bottom > z_bottom + EPS {
+                        seg(&mut em, seg_from, ct, z_bottom, c.z_bottom);
+                    }
+                    if c.z_top < z_top - EPS {
+                        seg(&mut em, seg_from, ct, c.z_top, z_top);
+                    }
                 }
+                cursor = cursor.max(ct);
             }
-            cursor = cursor.max(c.to);
+            if cursor < hi {
+                seg(&mut em, cursor, hi, z_bottom, z_top);
+            }
         }
-        if cursor < axis_len {
-            seg(&mut em, cursor, axis_len, z_bottom, z_top);
+        for pc in &mut em.out {
+            let (at_lo, at_hi) = ((dot(sub(pc.start, w.start), u) - lo).abs() < EPS, (dot(sub(pc.end, w.start), u) - hi).abs() < EPS);
+            pc.joint[0] |= w.cuts.collinear[0] && at_lo;
+            pc.joint[1] |= w.cuts.collinear[1] && at_hi;
+            if w.cuts.at_column[0] && at_lo {
+                pc.start_cut = w.cuts.start_cut;
+            }
+            if w.cuts.at_column[1] && at_hi {
+                pc.end_cut = w.cuts.end_cut;
+            }
         }
         return em.out;
     }
@@ -985,12 +1007,40 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
     let n_bands = w.bands.len();
 
     for (li, b) in w.bands.iter().enumerate() {
-        let off = offsets[li];
         // (1) Cuts an den Achsenenden (pro Schicht, falls materialbewusst).
-        let (s_cut, e_cut) = match &cuts.layer_cuts {
+        let (s_cut_l, e_cut_l) = match &cuts.layer_cuts {
             Some(lc) => (lc.start.get(li).copied().flatten(), lc.end.get(li).copied().flatten()),
             None => (cuts.start_cut, cuts.end_cut),
         };
+        // [141] Y-Knoten: zweite Schnittlinie über dem Knick (Querversatz ≥ Knick, wie `knee_band` im
+        // Grundriss). Ein Band über den Knick wird quer geteilt, jeder Teil endet an einer Linie.
+        let knee = |c: Option<Line>, l1: Option<Line>, l2: Option<Line>| -> Option<(f64, Line, Line)> {
+            let (l1, l2) = (l1?, l2?);
+            if c? != l1 {
+                return None;
+            }
+            let k = line_intersect(l1.point, l1.dir, l2.point, l2.dir)?;
+            Some((dot(sub(k, w.start), n), l1, l2))
+        };
+        let (ks, ke) = (knee(s_cut_l, cuts.start_cut, cuts.start_cut2), knee(e_cut_l, cuts.end_cut, cuts.end_cut2));
+        let (blo, bhi) = (offsets[li] - b.thickness / 2.0, offsets[li] + b.thickness / 2.0);
+        let mut splits = vec![blo, bhi];
+        for k in [ks, ke].into_iter().flatten() {
+            if k.0 > blo + EPS && k.0 < bhi - EPS {
+                splits.push(k.0);
+            }
+        }
+        splits.sort_by(f64::total_cmp);
+        splits.dedup_by(|p, q| (*p - *q).abs() <= EPS);
+        for sw in splits.windows(2) {
+        let strip_from = em.out.len();
+        let off = (sw[0] + sw[1]) / 2.0;
+        let strip_th = sw[1] - sw[0];
+        let pick = |k: Option<(f64, Line, Line)>, c: Option<Line>| match k {
+            Some((ko, l1, l2)) => Some(if off > ko { l2 } else { l1 }),
+            None => c,
+        };
+        let (s_cut, e_cut) = (pick(ks, s_cut_l), pick(ke, e_cut_l));
         let mut from0 = 0.0;
         let mut to0 = axis_len;
         if let Some(c) = s_cut {
@@ -1005,8 +1055,8 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
         }
 
         // (2) Nah-Putz-Aussparungen, die dieses Band quer treffen.
-        let band_lo = off - b.thickness / 2.0;
-        let band_hi = off + b.thickness / 2.0;
+        let band_lo = off - strip_th / 2.0;
+        let band_hi = off + strip_th / 2.0;
         let axis_holes: Vec<BandHole> = cuts
             .span_cutouts
             .iter()
@@ -1044,7 +1094,7 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
         let recess = b.thickness;
         for ([a, bb], cut_a, cut_b) in axis_pieces {
             let n0 = em.out.len();
-            let th = b.thickness;
+            let th = strip_th;
             let mut emit_piece = |a: f64, bb: f64, ca: Option<Line>, cb: Option<Line>, zb: f64, zt: f64| match roof_tops(w, ctx, u, n, off, th, a, bb, ca, cb, zb, zt) {
                 None => emit_band_piece(&mut em, li, off, &cutouts, innermost, recess, a, bb, zb, zt),
                 Some(tops) => {
@@ -1083,8 +1133,20 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
             }
             set_piece_cuts(&mut em.out[n0..], w, u, a, bb, cut_a, cut_b);
         }
+        // Geteiltes Band: jeder Teil trägt seine Dicke.
+        if splits.len() > 2 {
+            for pc in &mut em.out[strip_from..] {
+                pc.thickness.get_or_insert(strip_th);
+            }
+        }
+        }
     }
     reveal_pieces(&mut em, &offsets);
+    // [141] Kollineare Stossfuge: ein Körper mit der Nachbarwand, keine Stirnfläche.
+    for pc in &mut em.out {
+        pc.joint[0] |= cuts.collinear[0] && pc.start_cut.is_some() && pc.start_cut == cuts.start_cut;
+        pc.joint[1] |= cuts.collinear[1] && pc.end_cut.is_some() && pc.end_cut == cuts.end_cut;
+    }
     em.out
 }
 

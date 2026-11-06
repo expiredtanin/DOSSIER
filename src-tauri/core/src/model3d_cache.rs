@@ -121,8 +121,10 @@ impl Model3dCache {
                     JoinEntry { input, finite, cuts }
                 }
             };
-            for (&i, c) in idx.iter().zip(&e.cuts) {
-                merged.insert(p.walls[i].id.clone(), c.clone());
+            let mut cuts = e.cuts.clone();
+            model3d::trim_at_columns(p, &idx, &mut cuts);
+            for (&i, c) in idx.iter().zip(cuts) {
+                merged.insert(p.walls[i].id.clone(), c);
             }
             keep.insert(floor.to_owned(), e);
         }
@@ -160,7 +162,7 @@ impl Model3dCache {
         let hosted = |id: &str| by_wall.get(id).map_or(&[][..], |v| v.as_slice());
 
         // Wandkörper.
-        let joins = if layered { Some(self.joins(p)) } else { None };
+        let joins = self.joins(p);
         let mut contexts: HashMap<&str, crate::wall_bands::FloorContext> = HashMap::new();
         let mut old = std::mem::take(&mut self.walls[layered as usize]);
         let mut fresh: HashMap<u64, WallEntry> = HashMap::with_capacity(p.walls.len());
@@ -168,11 +170,7 @@ impl Model3dCache {
         for (wi, wall) in p.walls.iter().enumerate() {
             let stamp = wall_stamps[wi];
             let os: Vec<u64> = hosted(&wall.id).iter().map(|&i| opening_stamps[i]).collect();
-            let cuts = if layered {
-                joins.as_ref().and_then(|j| j.get(&wall.id)).cloned().unwrap_or_default()
-            } else {
-                WallCuts::default()
-            };
+            let cuts = joins.get(&wall.id).map_or_else(WallCuts::default, |c| if layered { c.clone() } else { model3d::section_cuts(c) });
             let e = match old.remove(&stamp) {
                 Some(e) if e.openings == os && e.cuts == cuts => e,
                 _ => {

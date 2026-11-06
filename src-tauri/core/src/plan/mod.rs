@@ -34,6 +34,6 @@ pub mod sketch;
 pub mod ceiling_plan;
 pub mod line_ends;
 pub mod stamp_place;
-mod wall_columns;
+pub(crate) mod wall_columns;
 #[cfg(test)]
-mod wall_join_tests;
+pub(crate) mod wall_join_tests;

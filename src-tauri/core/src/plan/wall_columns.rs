@@ -9,7 +9,7 @@ use crate::model::*;
 
 /// Wer im Schnitt dominiert.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum Rel {
+pub(crate) enum Rel {
     /// Stütze prioritärer: die Wand endet an der Kontur.
     Column,
     /// Gleiches Bauteil wie Schichten der Wand (Querversatz `lo..hi`): Wand endet an der Kontur, die
@@ -43,7 +43,7 @@ fn near_or_inside(poly: &[Vec2], p: Vec2) -> bool {
 }
 
 /// Endet die Wand (mit genau einem Ende) in der Stütze: `Some(true)` = Ende, `Some(false)` = Anfang.
-pub(super) fn end_in_column(w: &Wall, fp: &[Vec2]) -> Option<bool> {
+pub(crate) fn end_in_column(w: &Wall, fp: &[Vec2]) -> Option<bool> {
     if w.bulge.is_some_and(|b| b.abs() > 1e-9) || fp.len() < 3 {
         return None;
     }
@@ -56,7 +56,7 @@ pub(super) fn end_in_column(w: &Wall, fp: &[Vec2]) -> Option<bool> {
 
 /// Rangfolge Wand–Stütze: Stütze ohne Bauteil dominiert; sonst `joinPriority` der Stütze gegen die
 /// höchste Schicht der Wand (Gleichstand: Stütze), gleiches Bauteil verschmilzt.
-pub(super) fn relation(p: &Project, w: &Wall, col: &Column) -> Rel {
+pub(crate) fn relation(p: &Project, w: &Wall, col: &Column) -> Rel {
     let wt = p.wall_type_or_fallback(w);
     let comp = col.component_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.component(id));
     let Some(comp) = comp else { return Rel::Column };
@@ -103,7 +103,7 @@ fn entry(fp: &[Vec2], o: Vec2, d: Vec2) -> Option<Vec2> {
 
 /// Schnittlinie der Wand an der Stützenkontur: Gerade durch die Eintrittspunkte beider Wandflächen
 /// (Rechteckstütze: die Stützenkante). `None`, wenn eine Fläche die Stütze verfehlt (Wand breiter).
-pub(super) fn contour_cut(p: &Project, w: &Wall, fp: &[Vec2], at_end: bool) -> Option<Line> {
+pub(crate) fn contour_cut(p: &Project, w: &Wall, fp: &[Vec2], at_end: bool) -> Option<Line> {
     let total = p.wall_thickness(w, 0.2);
     let ref_off = joins::reference_offset(crate::model3d::wall_reference(w), total);
     let (from, to) = if at_end { (w.start, w.end) } else { (w.end, w.start) };
@@ -124,7 +124,7 @@ pub(super) fn contour_cut(p: &Project, w: &Wall, fp: &[Vec2], at_end: bool) -> O
 
 /// Wand-Enden in dominanten bzw. gleichen Stützen an der Kontur stutzen (überschreibt Gehrung/Stoss
 /// dieses Endes; Schicht-Schnitte des Endes folgen der Kontur).
-pub(super) fn trim_walls_at_columns(p: &Project, walls: &[&Wall], cut_cols: &[(&Column, Vec<Vec2>)], cuts: &mut [WallCuts]) {
+pub(crate) fn trim_walls_at_columns(p: &Project, walls: &[&Wall], cut_cols: &[(&Column, Vec<Vec2>)], cuts: &mut [WallCuts]) {
     for (wi, w) in walls.iter().enumerate() {
         for (col, fp) in cut_cols {
             let Some(at_end) = end_in_column(w, fp) else { continue };
@@ -136,9 +136,13 @@ pub(super) fn trim_walls_at_columns(p: &Project, walls: &[&Wall], cut_cols: &[(&
             if at_end {
                 c.end_cut = Some(cut);
                 c.end_cut2 = None;
+                c.collinear[1] = false;
+                c.at_column[1] = true;
             } else {
                 c.start_cut = Some(cut);
                 c.start_cut2 = None;
+                c.collinear[0] = false;
+                c.at_column[0] = true;
             }
             if let Some(lc) = c.layer_cuts.as_mut() {
                 let (face, side) = if at_end { (&mut lc.end, &mut lc.end_side) } else { (&mut lc.start, &mut lc.start_side) };
@@ -150,7 +154,7 @@ pub(super) fn trim_walls_at_columns(p: &Project, walls: &[&Wall], cut_cols: &[(&
 }
 
 /// Rechteck des Wandbands im Querversatz `lo..hi` über die ganze Achse (für die Stützen-Seite).
-pub(super) fn band_rect(w: &Wall, lo: f64, hi: f64) -> Vec<Vec2> {
+pub(crate) fn band_rect(w: &Wall, lo: f64, hi: f64) -> Vec<Vec2> {
     let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
     let l = dx.hypot(dy).max(1e-30);
     let n = Vec2 { x: -dy / l, y: dx / l };

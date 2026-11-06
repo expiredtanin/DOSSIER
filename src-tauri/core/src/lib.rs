@@ -125,3 +125,5 @@ pub mod opening_slide;
 #[cfg(feature = "web")]
 mod web;
 pub mod presentation_sheet;
+#[cfg(test)]
+mod wall_join3d_tests;
