@@ -2919,8 +2919,13 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   `plan/lineEnds.test.ts`. Goldens neu (Plan/Schnitt/Ansicht + CLI: `<g>` mit Attributen, genähte `<polyline>` statt
   Einzel-`<line>`/`<path>`, keine `linecap=round` mehr; Komplex-EG 1:50 mit Schraffur 4.95 → 1.05 MB, v. a. Höhenlinien).
   Geprüft: cargo test Kern + render2d, WASM gebaut (Linux, `--no-opt`), tsc, vitest, CLI-SVG vorher/nachher in Chromium
-  (Ecke, T-Stoss, Tür, Masslinie). **Offen:** DXF/DWG ohne Einstellung (acadrust schreibt `$ENDCAPS/$JOINSTYLE` nur in DWG;
-  CAD zeichnet Stiftbreiten selbst); Druck-SVG streicht Polygone weiter rundum (keine `noStrokeEdges`); Nähen in den
+  (Ecke, T-Stoss, Tür, Masslinie). 6.11.: **DXF/DWG** tragen die Einstellung im Kopf: Kern `plan/dxf.rs` schreibt den
+  flachen Datensatz `LINE_ENDS = 23` (`cap | join << 2`), fileio setzt `$ENDCAPS` (flach 0, rund 1, vorstehend 3) und
+  `$JOINSTYLE` (Gehrung 2 „Angle", rund 1, gefast 3 „Flat"); ohne Datensatz 0/2. DWG schreibt acadrust selbst; im DXF
+  (ASCII und binär, Gruppe 280, gültig ab R2000) fehlen sie bei acadrust, `with_line_end_vars` ergänzt sie hinter
+  `$LWDISPLAY`. Test: fileio `linienenden_im_kopf` (ASCII/binär byte-genau und über den acadrust-Leser, DWG R2000/R2018
+  wieder gelesen, Standard ohne Datensatz). Nicht in AutoCAD/BricsCAD geöffnet (CAD wendet die Variablen nur auf
+  Strichstärken-Darstellung an). **Offen:** Druck-SVG streicht Polygone weiter rundum (keine `noStrokeEdges`); Nähen in den
   Metal-Chunks nur innerhalb eines Chunks; nicht in der Tauri-App/Metal und nicht im WebGPU-Browser angesehen. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`

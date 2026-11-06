@@ -44,6 +44,8 @@ const REC_LAYOUT: f64 = 19.0;
 const REC_SHEET: f64 = 20.0;
 const REC_SHEET_VP: f64 = 21.0;
 const REC_SHEET_INSERT: f64 = 22.0;
+/// [146] Linienenden/-ecken des Projekts `[cap | join << 2]` → `$ENDCAPS`/`$JOINSTYLE`.
+const REC_LINE_ENDS: f64 = 23.0;
 
 /// Sammel-Ebenen für Primitive ohne eigene Kategorie.
 const LAYER_HATCH: &str = "HATCH";
@@ -1133,6 +1135,8 @@ pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<
 
     let mut cx = Ctx { project, o, flat: Flat::new() };
     let mut main = Buf::main();
+    // [146] Projekt-Einstellung Linienenden/-ecken in den DXF-/DWG-Kopf.
+    cx.flat.root.extend_from_slice(&[REC_LINE_ENDS, crate::plan::line_ends::LineEnds::of(project).code() as f64]);
 
     // 1) Ebenen aus den Kategorien (Code_Name, Farbe, Strichstärke), dann die Sammel-Ebenen.
     let mut cats = Vec::new();

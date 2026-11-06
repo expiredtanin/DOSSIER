@@ -105,6 +105,9 @@ pub const REC_SHEET: f64 = 20.0;
 pub const REC_SHEET_VP: f64 = 21.0;
 /// Blockeinfügung in einem Papierbereich (Blatt-Zeichnung): `[Name, Block, x, y (mm), Faktor]`.
 pub const REC_SHEET_INSERT: f64 = 22.0;
+/// [146] Linienenden/-ecken des Projekts: `[cap | join << 2]` (Kern `plan/line_ends.rs`) →
+/// Kopfvariablen `$ENDCAPS`/`$JOINSTYLE` (DXF und DWG).
+pub const REC_LINE_ENDS: f64 = 23.0;
 
 /// DXF-Ausgabeversion (s. Kopf).
 pub const DXF_VERSION: DxfVersion = DxfVersion::AC1032;
@@ -369,6 +372,8 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
     let mut doc = CadDocument::new();
     doc.header.insertion_units = 6; // Meter
     doc.header.measurement = 1; // metrisch
+    // [146] Ohne Datensatz LINE_ENDS: flach + Gehrung (Standard des Projekts).
+    (doc.header.end_caps, doc.header.join_style) = line_end_vars(0.0);
     // Ebenen-Index (Datensatzreihenfolge) → bereinigter Name.
     let mut layers: Vec<String> = Vec::new();
     // Linientypen, Textstile, Bemassungsstile: Index (Datensatzreihenfolge) → Name bzw. Definition.
@@ -574,6 +579,12 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             }
             continue;
         }
+        if tag == REC_LINE_ENDS {
+            let (caps, join) = line_end_vars(r.f()?);
+            doc.header.end_caps = caps;
+            doc.header.join_style = join;
+            continue;
+        }
         if tag == REC_SHEET {
             let name = sanitize_layer_name(str_at(r.idx()?)?);
             let v = r.take(2)?;
@@ -768,12 +779,70 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
     Ok(doc)
 }
 
+/// [146] Kodierung `cap | join << 2` (cap 0 flach, 1 rund, 2 vorstehend; join 0 Gehrung, 1 rund,
+/// 2 gefast) → AutoCAD `$ENDCAPS` (0 keine, 1 rund, 2 Winkel, 3 Quadrat) und `$JOINSTYLE` (0 keine,
+/// 1 rund, 2 Winkel = Gehrung, 3 flach = gefast). Unsinn → flach + Gehrung.
+pub fn line_end_vars(code: f64) -> (i16, i16) {
+    let c = if code.is_finite() && (0.0..16.0).contains(&code) { code as u32 } else { 0 };
+    let caps = match c & 3 {
+        1 => 1,
+        2 => 3,
+        _ => 0,
+    };
+    let join = match (c >> 2) & 3 {
+        1 => 1,
+        2 => 3,
+        _ => 2,
+    };
+    (caps, join)
+}
+
+/// [146] acadrust schreibt `$ENDCAPS`/`$JOINSTYLE` nur ins DWG; im DXF-Kopf (ab R2000 gültig, Gruppe
+/// 280) ergänzen wir sie hinter `$LWDISPLAY`. Unverändert, wenn schon vorhanden oder der Anker fehlt.
+fn with_line_end_vars(mut out: Vec<u8>, binary: bool, caps: i16, join: i16) -> Vec<u8> {
+    let has = |name: &[u8]| out.windows(name.len()).any(|w| w == name);
+    if has(b"$ENDCAPS") {
+        return out;
+    }
+    let anchor: &[u8] = if binary { b"$LWDISPLAY\0" } else { b"$LWDISPLAY\r\n" };
+    let Some(at) = out.windows(anchor.len()).position(|w| w == anchor) else { return out };
+    let mut pos = at + anchor.len();
+    let mut ins = Vec::new();
+    if binary {
+        pos += 3; // Gruppencode 290 (2 Byte) + Wert (1 Byte)
+        for (name, v) in [("$ENDCAPS", caps), ("$JOINSTYLE", join)] {
+            ins.extend_from_slice(&9i16.to_le_bytes());
+            ins.extend_from_slice(name.as_bytes());
+            ins.push(0);
+            ins.extend_from_slice(&280i16.to_le_bytes());
+            ins.extend_from_slice(&v.to_le_bytes());
+        }
+    } else {
+        // Zwei Zeilen weiter: Gruppencode 290 und Wert.
+        for _ in 0..2 {
+            match out[pos..].windows(2).position(|w| w == b"\r\n") {
+                Some(i) => pos += i + 2,
+                None => return out,
+            }
+        }
+        for (name, v) in [("$ENDCAPS", caps), ("$JOINSTYLE", join)] {
+            ins.extend_from_slice(format!("  9\r\n{name}\r\n280\r\n{v:>6}\r\n").as_bytes());
+        }
+    }
+    if pos > out.len() {
+        return out;
+    }
+    out.splice(pos..pos, ins);
+    out
+}
+
 /// Flache Zeichnung → DXF-Bytes (ASCII, R2018, UTF-8).
 pub fn export_dxf(flat: &[f64], strings: &str) -> Result<Vec<u8>, String> {
     let doc = build_document(flat, strings)?;
     DxfWriter::new(&doc)
         .with_version(DXF_VERSION)
         .write_to_vec()
+        .map(|b| with_line_end_vars(b, false, doc.header.end_caps, doc.header.join_style))
         .map_err(|e| format!("DXF schreiben: {e}"))
 }
 
@@ -784,6 +853,7 @@ pub fn export_dxf_binary(flat: &[f64], strings: &str) -> Result<Vec<u8>, String>
     DxfWriter::new_binary(&doc)
         .with_version(DXF_VERSION)
         .write_to_vec()
+        .map(|b| with_line_end_vars(b, true, doc.header.end_caps, doc.header.join_style))
         .map_err(|e| format!("Binär-DXF schreiben: {e}"))
 }
 
@@ -965,6 +1035,47 @@ mod tests {
         let line = doc.entities().find_map(|e| if let EntityType::Line(l) = e { Some(l.clone()) } else { None }).unwrap();
         assert_eq!((line.start.x, line.start.y), (E, N));
         assert_eq!(doc.entities().count(), 6);
+    }
+
+    /// [146] Linienenden/-ecken: `$ENDCAPS`/`$JOINSTYLE` im DXF-Kopf (ASCII und binär, wieder gelesen)
+    /// und im DWG; ohne Datensatz flach + Gehrung (0/2).
+    #[test]
+    fn linienenden_im_kopf() {
+        let flat = |code: Option<f64>| {
+            let mut v = vec![FLAT_VERSION];
+            if let Some(c) = code {
+                v.extend([REC_LINE_ENDS, c]);
+            }
+            v.extend([REC_LAYER, 0.0, -1.0, 25.0, REC_LINE, 0.0, 0.0, 0.0, 1.0, 1.0]);
+            v
+        };
+        let ascii = |b: &[u8], name: &str, v: i16| {
+            let needle = format!("  9\r\n{name}\r\n280\r\n{v:>6}\r\n");
+            b.windows(needle.len()).filter(|w| *w == needle.as_bytes()).count()
+        };
+        // rund + gefast (1 | 2 << 2 = 9) → 1 / 3.
+        let dxf = export_dxf(&flat(Some(9.0)), "0").unwrap();
+        assert_eq!((ascii(&dxf, "$ENDCAPS", 1), ascii(&dxf, "$JOINSTYLE", 3)), (1, 1));
+        let doc = DxfReader::from_reader(Cursor::new(dxf)).unwrap().read().unwrap();
+        assert_eq!(doc.entities().count(), 1);
+        assert_eq!((doc.header.end_caps, doc.header.join_style), (1, 3));
+        let bin = export_dxf_binary(&flat(Some(2.0)), "0").unwrap();
+        let mut needle = 9i16.to_le_bytes().to_vec();
+        needle.extend_from_slice(b"$ENDCAPS\0");
+        needle.extend_from_slice(&280i16.to_le_bytes());
+        needle.extend_from_slice(&3i16.to_le_bytes());
+        assert!(bin.windows(needle.len()).any(|w| w == needle.as_slice()), "binär $ENDCAPS = 3");
+        let doc = DxfReader::from_reader(Cursor::new(bin)).unwrap().read().unwrap();
+        assert_eq!(doc.entities().count(), 1);
+        assert_eq!((doc.header.end_caps, doc.header.join_style), (3, 2));
+        for v in [DxfVersion::AC1015, DWG_VERSION] {
+            let d = read_dwg(export_dwg_version(&flat(Some(9.0)), "0", v).unwrap());
+            assert_eq!((d.header.end_caps, d.header.join_style), (1, 3), "{v:?}");
+        }
+        let dxf = export_dxf(&flat(None), "0").unwrap();
+        assert_eq!((ascii(&dxf, "$ENDCAPS", 0), ascii(&dxf, "$JOINSTYLE", 2)), (1, 1));
+        assert_eq!(line_end_vars(f64::NAN), (0, 2));
+        assert_eq!(line_end_vars(4.0 + 2.0), (3, 1));
     }
 
     #[test]
