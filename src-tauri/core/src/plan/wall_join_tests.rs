@@ -181,32 +181,45 @@ fn union_edges(u: &[Polygon]) -> Vec<(Vec2, Vec2)> {
 
 /// Der Umriss schliesst: jeder Randpunkt der Vereinigung liegt auf einer gezeichneten Umriss-Strecke.
 fn assert_closed(u: &[Polygon], lines: &[(Vec2, Vec2)], what: &str) {
+    assert_closed_tol(u, lines, what, 1e-6);
+}
+
+/// [`assert_closed`] mit Toleranz (Bogenwände: Umriss als Kreisbogen, Flächen als Sehnenzug).
+fn assert_closed_tol(u: &[Polygon], lines: &[(Vec2, Vec2)], what: &str, tol: f64) {
     for (a, b) in union_edges(u) {
         for k in 1..10 {
             let t = k as f64 / 10.0;
             let p = Vec2 { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-            assert!(lines.iter().any(|(c, d)| dist_seg(p, *c, *d) < 1e-6), "{what}: Umriss offen bei {p:?}");
+            assert!(lines.iter().any(|(c, d)| dist_seg(p, *c, *d) < tol), "{what}: Umriss offen bei {p:?}");
         }
     }
 }
 
 /// Keine Umrisslinie läuft durch eine Fläche (Überlappungs-/Trennlinie).
 fn assert_no_line_through(polys: &[Vec<Vec2>], lines: &[(Vec2, Vec2)], what: &str) {
+    assert_no_line_through_tol(polys, lines, what, 1e-6);
+}
+
+fn assert_no_line_through_tol(polys: &[Vec<Vec2>], lines: &[(Vec2, Vec2)], what: &str, tol: f64) {
     for (a, b) in lines {
         for k in 1..8 {
             let t = k as f64 / 8.0;
             let p = Vec2 { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-            assert!(!strictly_in(polys, p, 1e-6), "{what}: Umrisslinie durch eine Fläche bei {p:?} ({a:?}–{b:?})");
+            assert!(!strictly_in(polys, p, tol), "{what}: Umrisslinie durch eine Fläche bei {p:?} ({a:?}–{b:?})");
         }
     }
 }
 
 /// Keine Umrisslinie im Inneren der Vereinigung (gleiches Material: ein Körper ohne Trennlinie).
 fn assert_no_inner_line(u: &[Polygon], lines: &[(Vec2, Vec2)], what: &str) {
+    assert_no_inner_line_tol(u, lines, what, 1e-6);
+}
+
+fn assert_no_inner_line_tol(u: &[Polygon], lines: &[(Vec2, Vec2)], what: &str, tol: f64) {
     let edges = union_edges(u);
     for (a, b) in lines {
         let m = Vec2 { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 };
-        assert!(edges.iter().any(|(c, d)| dist_seg(m, *c, *d) < 1e-6), "{what}: Linie im Körper {a:?}–{b:?}");
+        assert!(edges.iter().any(|(c, d)| dist_seg(m, *c, *d) < tol), "{what}: Linie im Körper {a:?}–{b:?}");
     }
 }
 
@@ -444,4 +457,209 @@ fn ecke_am_anfang_t_stoss_am_ende() {
     let (ov, u) = overlap(&polys);
     assert!(ov.abs() < 1e-6, "Überlappung an der Ecke {ov}");
     assert_eq!((u.len(), holes(&u)), (1, 0));
+}
+
+// ── (5) Bogenwände an Wandknoten (Teil 4) ───────────────────────────────────
+
+pub(crate) fn add_arc(p: &mut Project, t: &str, s: (f64, f64), e: (f64, f64), bulge: f64) {
+    add_wall(p, t, s, e);
+    p.walls.last_mut().unwrap().bulge = Some(bulge);
+}
+
+/// Bogen um `o` mit Radius `r` von `a0`° nach `a1`° (Modell-Bulge: positiv = Scheitel links, also im
+/// Gegenuhrzeigersinn negativ).
+pub(crate) fn add_arc_deg(p: &mut Project, t: &str, o: (f64, f64), r: f64, a0: f64, a1: f64) {
+    add_arc(p, t, polar(o, r, a0), polar(o, r, a1), -((a1 - a0).to_radians() / 4.0).tan());
+}
+
+/// Umriss samt Bögen (Arc-Primitive in kurze Strecken zerlegt, Gegenuhrzeigersinn von → nach).
+fn outline_arcs(ps: &[Primitive]) -> Vec<(Vec2, Vec2)> {
+    let mut out = outline(ps);
+    for q in ps {
+        if let Primitive::Arc { center, from, to, r, cls, opening_id: None, .. } = q {
+            if cls != "wall-outline" && cls != "column-outline" {
+                continue;
+            }
+            let a0 = (from.y - center.y).atan2(from.x - center.x);
+            let mut a1 = (to.y - center.y).atan2(to.x - center.x);
+            while a1 < a0 {
+                a1 += 2.0 * std::f64::consts::PI;
+            }
+            let k = 64;
+            let at = |t: f64| Vec2 { x: center.x + r * t.cos(), y: center.y + r * t.sin() };
+            for i in 0..k {
+                out.push((at(a0 + (a1 - a0) * i as f64 / k as f64), at(a0 + (a1 - a0) * (i + 1) as f64 / k as f64)));
+            }
+        }
+    }
+    out
+}
+
+/// Fläche der Löcher einer Vereinigung.
+fn hole_area(u: &[Polygon]) -> f64 {
+    u.iter().flat_map(|pl| pl[1..].iter()).map(|h| ring_area(h)).sum()
+}
+
+/// Bogen-Toleranz der Grundriss-Prüfungen: Flächen sind Sehnenzüge (Pfeil ≤ 1 mm), Umrisse Kreisbögen.
+const ARC_TOL: f64 = 1.5e-3;
+
+/// Y-Knoten mit Bogenwand (Teil 4): der dritte Ast endet an beiden Flächen des Eckpaars, auch wenn er
+/// oder eine Eckwand ein Bogen ist. Gerade Eckwände: exakt (keine Überlappung, keine Lücke); Bogen-
+/// Eckwand: ihre Fläche ist am Ast eine Sehne (wie am T-Stoss auf einen Bogen) — Überlappung/Lücke höchstens
+/// Sehnenpfeil × Astbreite.
+#[test]
+fn y_knoten_mit_bogenwand() {
+    // (Typ, Fall, exakt?)
+    let cases: [(&str, u8, bool); 6] = [("aw", 0, true), ("iw", 1, true), ("aw", 2, false), ("iw", 2, false), ("aw", 3, false), ("iw", 3, false)];
+    for (t, case, exact) in cases {
+        let p = y_bogen_projekt(t, case);
+        let ps = prims(&p);
+        let polys = filled(&ps);
+        let what = format!("{t} Fall {case}");
+        let n_layers = p.wall_types.iter().find(|w| w.id == t).unwrap().layers.len();
+        let (ov, u) = overlap(&polys);
+        let lines = outline_arcs(&ps);
+        eprintln!("{what}: Polygone {} Überlappung {ov:e} Körper {} Löcher {} ({:e})", polys.len(), u.len(), holes(&u), hole_area(&u));
+        assert!(polys.len() >= 3 * n_layers, "{what}: ein Band je Schicht und Wand");
+        assert_eq!(u.len(), 1, "{what}: ein Körper");
+        if exact {
+            assert!(ov.abs() < 1e-6, "{what}: Überlappung {ov}");
+            assert_eq!(holes(&u), 0, "{what}: keine Lücke im Knoten");
+        } else {
+            // Sehnenpfeil (≤ 6 mm bei 0.4 m Sehne auf R ≈ 3 m) × Astbreite.
+            assert!(ov.abs() < 5e-4 && hole_area(&u) < 5e-4, "{what}: Überlappung {ov}, Lücke {}", hole_area(&u));
+        }
+        assert_closed_tol(&u, &lines, &what, ARC_TOL);
+        assert_no_line_through_tol(&polys, &lines, &what, ARC_TOL);
+    }
+}
+
+/// Testprojekte der Y-Knoten mit Bogenwand: 0/1 Ast als Bogen (gerade Eckwände, auch gegenläufig),
+/// 2 eine Eckwand als Bogen, 3 alle drei Bogen.
+pub(crate) fn y_bogen_projekt(t: &str, case: u8) -> Project {
+    let mut p = base();
+    let o = (0.0, 0.0);
+    match case {
+        0 => {
+            add_wall(&mut p, t, o, polar(o, 3.0, 0.0));
+            add_wall(&mut p, t, o, polar(o, 3.0, 120.0));
+            add_arc(&mut p, t, o, polar(o, 3.0, 240.0), 0.2);
+        }
+        1 => {
+            add_wall(&mut p, t, o, polar(o, 3.0, 10.0));
+            add_wall(&mut p, t, polar(o, 3.0, 130.0), o);
+            add_arc(&mut p, t, polar(o, 3.0, 250.0), o, -0.25);
+        }
+        2 => {
+            add_arc(&mut p, t, o, polar(o, 3.0, 0.0), 0.15);
+            add_wall(&mut p, t, o, polar(o, 3.0, 120.0));
+            add_wall(&mut p, t, o, polar(o, 3.0, 240.0));
+        }
+        _ => {
+            add_arc(&mut p, t, o, polar(o, 3.0, 0.0), -0.15);
+            add_arc(&mut p, t, polar(o, 3.0, 120.0), o, 0.2);
+            add_arc(&mut p, t, o, polar(o, 3.0, 240.0), 0.1);
+        }
+    }
+    p
+}
+
+/// Bogenpaare gleichen Kreises (Mitte Ursprung, R 4), Winkel in Grad: stumpf, überlappend, enthalten,
+/// gegenläufig, Aussenwand stumpf/überlappend, Ring.
+pub(crate) const BOGEN_KOLLINEAR: [(&str, (f64, f64), (f64, f64)); 7] = [
+    ("iw", (0.0, 60.0), (60.0, 120.0)),
+    ("iw", (0.0, 80.0), (50.0, 120.0)),
+    ("iw", (0.0, 120.0), (30.0, 60.0)),
+    ("iw", (0.0, 80.0), (120.0, 50.0)),
+    ("aw", (0.0, 60.0), (60.0, 120.0)),
+    ("aw", (40.0, 120.0), (0.0, 70.0)),
+    ("aw", (0.0, 180.0), (180.0, 360.0)),
+];
+
+/// Bogenwände mit gleichem Kreis und Typ (Teil 4): stumpf, überlappend, ganz enthalten, gegenläufig
+/// (symmetrischer Typ), Ring aus zwei Halbkreisen — ein Körper ohne Trennlinie wie kollineare gerade Wände.
+#[test]
+fn bogenwande_gleichen_kreises_ein_koerper() {
+    for (t, a, b) in BOGEN_KOLLINEAR {
+        let mut p = base();
+        add_arc_deg(&mut p, t, (0.0, 0.0), 4.0, a.0, a.1);
+        add_arc_deg(&mut p, t, (0.0, 0.0), 4.0, b.0, b.1);
+        let ps = prims(&p);
+        let polys = filled(&ps);
+        let what = format!("{t} {a:?} / {b:?}");
+        let (ov, u) = overlap(&polys);
+        let lines = outline_arcs(&ps);
+        eprintln!("{what}: Polygone {} Überlappung {ov:e} Körper {} Löcher {}", polys.len(), u.len(), holes(&u));
+        assert!(ov.abs() < 1e-6, "{what}: Überlappung {ov}");
+        assert_eq!(u.len(), 1, "{what}: ein Körper");
+        assert_eq!(holes(&u), if b.1 - b.0 > 179.0 { 1 } else { 0 }, "{what}: Löcher (Ring: der Innenraum)");
+        assert_no_inner_line_tol(&u, &lines, &what, ARC_TOL);
+        assert_closed_tol(&u, &lines, &what, ARC_TOL);
+    }
+    // Gegenprobe: anderer Typ bzw. anderer Radius bleibt getrennt (Stosslinie radial bei 60°).
+    for (r2, t2) in [(4.0, "bw"), (4.3, "iw")] {
+        let mut p = base();
+        add_arc_deg(&mut p, "iw", (0.0, 0.0), 4.0, 0.0, 60.0);
+        add_arc_deg(&mut p, t2, (0.0, 0.0), r2, 60.0, 120.0);
+        let ps = prims(&p);
+        let (_, u) = overlap(&filled(&ps));
+        let lines = outline_arcs(&ps);
+        let edges = union_edges(&u);
+        let inner = lines.iter().any(|(a, b)| {
+            let m = Vec2 { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 };
+            !edges.iter().any(|(c, d)| dist_seg(m, *c, *d) < ARC_TOL)
+        });
+        assert!(inner || u.len() > 1, "r {r2} {t2}: Stosslinie bleibt");
+    }
+}
+
+/// Bogenwand an Stütze: Viertelkreis um den Ursprung (R 4) von (4,0) nach (0,4) bzw. umgekehrt, Stütze in
+/// (0,4); die Wand läuft waagrecht in die Stütze.
+pub(crate) fn bogen_stuetze_projekt(t: &str, prof: ColumnProfile, rev: bool, comp: &str) -> Project {
+    let mut p = base();
+    if rev {
+        add_arc(&mut p, t, (0.0, 4.0), (4.0, 0.0), (22.5f64).to_radians().tan());
+    } else {
+        add_arc_deg(&mut p, t, (0.0, 0.0), 4.0, 0.0, 90.0);
+    }
+    add_column(&mut p, "C", (0.0, 4.0), prof, Some(comp));
+    p
+}
+
+/// Bogenwand endet in einer Stütze (Teil 4): Stütze dominiert → die Wand endet an der Kontur (Schnitt durch
+/// die Eintrittspunkte beider Flächenkreise); gleiches Bauteil → ein Körper ohne Trennlinie; Wand
+/// dominiert → die Stütze wird um das Wandband beschnitten.
+#[test]
+fn bogenwand_endet_an_stuetze() {
+    let rect = |w: f64, d: f64| ColumnProfile::Rect { width: w, depth: d };
+    for (t, prof, rev) in [("iw", rect(0.3, 0.4), false), ("aw", rect(0.3, 0.5), false), ("iw", rect(0.3, 0.4), true)] {
+        let p = bogen_stuetze_projekt(t, prof.clone(), rev, "concrete");
+        let ps = prims(&p);
+        let polys = filled(&ps);
+        let what = format!("{t} {prof:?} {rev}");
+        let (ov, u) = overlap(&polys);
+        eprintln!("{what}: Überlappung {ov:e} Körper {}", u.len());
+        assert!(ov.abs() < 1e-6, "{what}: Überlappung {ov}");
+        assert_eq!(u.len(), 1, "{what}: Wand schliesst an die Stütze an");
+        let lines = outline_arcs(&ps);
+        assert_no_line_through_tol(&polys, &lines, &what, ARC_TOL);
+        assert_closed_tol(&u, &lines, &what, ARC_TOL);
+    }
+    // Gleiches Material (Beton): ein Körper ohne Trennlinie.
+    let p = bogen_stuetze_projekt("bw", rect(0.3, 0.4), false, "concrete");
+    let ps = prims(&p);
+    let polys = filled(&ps);
+    let (ov, u) = overlap(&polys);
+    assert!(ov.abs() < 1e-6, "Beton/Beton: Überlappung {ov}");
+    let lines = outline_arcs(&ps);
+    assert_no_inner_line_tol(&u, &lines, "Beton/Beton", ARC_TOL);
+    assert_closed_tol(&u, &lines, "Beton/Beton", ARC_TOL);
+    // Wand dominiert: Backsteinstütze an der Betonwand — Stütze um das Band (Sehnen-Teilwände) beschnitten.
+    let p = bogen_stuetze_projekt("bw", rect(0.3, 0.3), false, "brick");
+    let ps = prims(&p);
+    let polys = filled(&ps);
+    let (ov, u) = overlap(&polys);
+    eprintln!("Beton-Bogen/Backstein-Stütze: Überlappung {ov:e} Körper {}", u.len());
+    assert!(ov.abs() < 1e-6, "Beton-Bogen/Backstein-Stütze: Überlappung {ov}");
+    assert_eq!(u.len(), 1);
 }

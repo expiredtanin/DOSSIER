@@ -883,7 +883,7 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
         // die Stütze, gleiches Bauteil verschmilzt (Kontur über diesen Schichten fehlt).
         let (mut clip, mut merge): (Vec<Vec<Vec2>>, Vec<crate::plan::wall_poche::WallFootprint>) = (Vec::new(), Vec::new());
         if zone == super::view_range::Zone::Cut {
-            use super::wall_columns::{band_rect, end_in_column, relation, Rel};
+            use super::wall_columns::{band_polys, end_in_column, relation, Rel};
             for w in p.walls.iter().filter(|w| w.floor_id == c.a.floor && c.shown(&w.category_code)) {
                 let (zb, zt) = p.wall_vertical_extent(w);
                 if range.classify(zb, zt) != super::view_range::Zone::Cut || end_in_column(w, &fp).is_none() {
@@ -894,7 +894,11 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
                     Rel::Wall => {
                         let total = p.wall_thickness(w, 0.2);
                         let ro = crate::joins::reference_offset(crate::model3d::wall_reference(w), total);
-                        clip.push(band_rect(w, ro - total / 2.0, ro + total / 2.0));
+                        clip.extend(band_polys(w, ro - total / 2.0, ro + total / 2.0, false));
+                    }
+                    Rel::Merge(lo, hi) if crate::wall_arc::WallArc::of_wall(w).is_some() => {
+                        // Bogenwand: schmaler Streifen um das Stück der Schnittlinie über diesen Schichten.
+                        merge.extend(super::wall_columns::arc_merge_footprint(p, w, &fp, lo, hi));
                     }
                     Rel::Merge(lo, hi) => {
                         // Footprint ohne Verlängerung über die Achsenden, knapp schmaler (bündige Stützenseiten bleiben).

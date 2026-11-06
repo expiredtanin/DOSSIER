@@ -446,8 +446,8 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
         ext
     };
     let lc = w.cuts.layer_cuts.as_ref();
-    let starts: Vec<Line> = w.cuts.start_cut.into_iter().chain(lc.into_iter().flat_map(|l| l.start.iter().chain(l.start_side.iter()).flatten().copied())).collect();
-    let ends: Vec<Line> = w.cuts.end_cut.into_iter().chain(lc.into_iter().flat_map(|l| l.end.iter().chain(l.end_side.iter()).flatten().copied())).collect();
+    let starts: Vec<Line> = w.cuts.start_cut.into_iter().chain(w.cuts.start_cut2).chain(lc.into_iter().flat_map(|l| l.start.iter().chain(l.start_side.iter()).flatten().copied())).collect();
+    let ends: Vec<Line> = w.cuts.end_cut.into_iter().chain(w.cuts.end_cut2).chain(lc.into_iter().flat_map(|l| l.end.iter().chain(l.end_side.iter()).flatten().copied())).collect();
     let z0 = reach(starts, false) + 1e-3;
     let z1 = reach(ends, true) - 1e-3;
     st.retain(|&s| s <= 0.0 || s >= len || (s > z0 && s < z1));
@@ -509,6 +509,11 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
             end_cut: if last { w.cuts.end_cut } else { Some(radial(sb)) },
             layer_cuts,
             span_cutouts,
+            // [141] Y-Knick, Stossfuge gleichen Kreises, Stützenkontur: nur an den echten Enden.
+            start_cut2: w.cuts.start_cut2.filter(|_| first),
+            end_cut2: w.cuts.end_cut2.filter(|_| last),
+            collinear: [w.cuts.collinear[0] && first, w.cuts.collinear[1] && last],
+            at_column: [w.cuts.at_column[0] && first, w.cuts.at_column[1] && last],
             ..Default::default()
         };
         // [106] Teilwand über einer Öffnung mit Schichteinzug: Loch und Einzug auf der Sehne.

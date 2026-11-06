@@ -248,3 +248,113 @@ fn column_ifc_area(p: &Project) -> f64 {
         ring_area(&r)
     }).sum()
 }
+
+// ── [141] Teil 4: Bogenwände an Wandknoten ──────────────────────────────────
+
+/// Wie [`assert_tight`] mit Toleranz `tol` (m³) für Überlappung und Schnitte; Bogenwände sind im 3D
+/// Sehnen-Teilwände, im Grundriss feinere Sehnenzüge — die Vereinigung wird gegen Grundriss × Höhe nur
+/// grob verglichen (`plan_tol`, relativ). Liefert das Volumen der Vereinigung.
+fn assert_tight_tol(p: &Project, layered: bool, tol: f64, plan_tol: Option<f64>, what: &str) -> f64 {
+    let bs = bodies(p, layered);
+    let sum: f64 = bs.iter().map(|(_, m)| m.volume().abs()).sum();
+    let mut ids: Vec<&str> = bs.iter().map(|(id, _)| id.as_str()).collect();
+    ids.sort();
+    ids.dedup();
+    // Je Bauteil vereinigt, dann gesamt: die Teilkörper aller Wände in Eingabereihenfolge einzeln
+    // vereinigt verlor Manifold (exakt) am Y-Knick mit Bogen-Ast Volumen, obwohl jeder Schnitt leer war
+    // (reihenfolgeabhängig; je Wand oder rückwärts stimmt die Summe).
+    let mut per: Vec<Solid> = Vec::new();
+    for id in &ids {
+        let (s, bad) = Solid::union_all(&bs.iter().filter(|(k, _)| k == id).map(|(_, m)| m.clone()).collect::<Vec<_>>());
+        assert_eq!(bad, 0, "{what}: Körper nicht mannigfaltig");
+        per.push(s);
+    }
+    let u = per.iter().fold(Solid::empty(), |a, s| a.union(s).unwrap());
+    let uv = u.volume();
+    eprintln!("{what}: Summe {sum} Vereinigung {uv} Überlappung {:e}", sum - uv);
+    assert!((sum - uv).abs() < tol, "{what}: Überlappung {} (Summe {sum}, Vereinigung {uv})", sum - uv);
+    for i in 0..per.len() {
+        for j in i + 1..per.len() {
+            let v = per[i].intersection(&per[j]).unwrap().volume();
+            assert!(v.abs() < tol, "{what}: {} ∩ {} = {v}", ids[i], ids[j]);
+        }
+    }
+    if let Some(rel) = plan_tol {
+        let want = plan_area(p) * H;
+        eprintln!("{what}: Grundriss × Höhe {want} (Abweichung {:e})", (uv - want) / want);
+        assert!(((uv - want) / want).abs() < rel, "{what}: 3D {uv} ≠ Grundriss {want}");
+    }
+    uv
+}
+
+/// Y-Knoten mit Bogenwand (Testprojekte wie im Grundriss): gerade Eckwände und Bogen-Ast exakt dicht;
+/// Bogen-Eckwand mit Sehne am Ast (Überlappung ≤ Sehnenpfeil × Astbreite × Höhe).
+#[test]
+fn y_knoten_bogenwand_3d() {
+    use crate::plan::wall_join_tests::y_bogen_projekt;
+    for (t, case, tol) in [("aw", 0, 1e-6), ("iw", 1, 1e-6), ("aw", 2, 2e-3), ("iw", 3, 2e-3)] {
+        let p = y_bogen_projekt(t, case);
+        let what = format!("{t} Fall {case}");
+        // Nur der geschichtete Pfad: der Schnitt-Pfad trägt keine Gehrungen/Knicke (vereinigt im Schnitt).
+        assert_tight_tol(&p, true, tol, Some(2e-3), &what);
+        let s = ifc_strings(&p);
+        for id in ["W1", "W2", "W3"] {
+            assert!(s.iter().any(|x| x == id), "{what}: {id} im IFC");
+        }
+    }
+}
+
+/// Bogenwände gleichen Kreises und Typs: ein Körper ohne Doppelung (beide Pfade), an der Stossfuge
+/// keine Stirnfläche; die verdeckte fehlt in 3D und IFC.
+#[test]
+fn bogenwande_gleichen_kreises_3d() {
+    use crate::plan::wall_join_tests::{add_arc_deg, BOGEN_KOLLINEAR};
+    for (t, a, b) in BOGEN_KOLLINEAR {
+        let mut p = base();
+        add_arc_deg(&mut p, t, (0.0, 0.0), 4.0, a.0, a.1);
+        add_arc_deg(&mut p, t, (0.0, 0.0), 4.0, b.0, b.1);
+        let what = format!("{t} {a:?} / {b:?}");
+        assert_tight_tol(&p, true, 1e-6, Some(2e-3), &what);
+        assert_tight_tol(&p, false, 1e-6, Some(2e-3), &format!("{what} (Schnitt-Pfad)"));
+    }
+    // Ganz enthalten: die innere Wand hat keinen Körper und fehlt im IFC.
+    let mut p = base();
+    add_arc_deg(&mut p, "iw", (0.0, 0.0), 4.0, 0.0, 120.0);
+    add_arc_deg(&mut p, "iw", (0.0, 0.0), 4.0, 30.0, 60.0);
+    assert!(model3d::emit_walls(&p, true).unwrap().iter().all(|w| w.wall_id == "W1"));
+    assert!(model3d::emit_walls(&p, false).unwrap().iter().all(|w| w.wall_id == "W1"));
+    let s = ifc_strings(&p);
+    assert!(s.iter().any(|x| x == "W1") && !s.iter().any(|x| x == "W2"), "verdeckte Bogenwand nicht im IFC");
+    // Stumpfe Stossfuge bei 60°: Teilkörper dort ohne Stirn (beide Pfade).
+    let mut p = base();
+    add_arc_deg(&mut p, "iw", (0.0, 0.0), 4.0, 0.0, 60.0);
+    add_arc_deg(&mut p, "iw", (0.0, 0.0), 4.0, 60.0, 120.0);
+    let at_joint = |q: [f64; 2]| (q[1].atan2(q[0]).to_degrees() - 60.0).abs() < 1e-6;
+    for layered in [true, false] {
+        let ws = model3d::emit_walls(&p, layered).unwrap();
+        assert!(ws.iter().any(|w| at_joint(w.start) || at_joint(w.end)), "{layered}: Teilkörper an der Fuge");
+        for w in &ws {
+            assert!(!at_joint(w.start) || w.joint[0], "{layered}: Anfang an der Fuge ohne Stirn");
+            assert!(!at_joint(w.end) || w.joint[1], "{layered}: Ende an der Fuge ohne Stirn");
+        }
+    }
+}
+
+/// Bogenwand endet an einer Stütze: Stütze dominiert bzw. gleiches Bauteil → Wand endet an der Kontur;
+/// Wand dominiert → Stütze um die Sehnen-Teilwände beschnitten. Dicht ohne Überlappung, auch im
+/// Schnitt-Pfad; IFC enthält Wand und Stütze.
+#[test]
+fn bogenwand_endet_an_stuetze_3d() {
+    use crate::plan::wall_join_tests::bogen_stuetze_projekt;
+    let rect = |w: f64, d: f64| ColumnProfile::Rect { width: w, depth: d };
+    for (t, prof, rev, comp) in [("iw", rect(0.3, 0.4), false, "concrete"), ("aw", rect(0.3, 0.5), false, "concrete"), ("iw", rect(0.3, 0.4), true, "concrete"), ("bw", rect(0.3, 0.4), false, "concrete"), ("bw", rect(0.3, 0.3), false, "brick")] {
+        let p = bogen_stuetze_projekt(t, prof.clone(), rev, comp);
+        let what = format!("{t} {prof:?} {rev} {comp}");
+        assert_tight_tol(&p, true, 1e-6, Some(2e-3), &what);
+        assert_tight_tol(&p, false, 1e-6, None, &format!("{what} (Schnitt-Pfad)"));
+        let s = ifc_strings(&p);
+        assert!(s.iter().any(|x| x == "W1") && s.iter().any(|x| x == "C"), "{what}: IFC");
+    }
+}
+
+

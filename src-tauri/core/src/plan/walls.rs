@@ -894,7 +894,10 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         match &unroll {
             Some(u) => {
                 let mut tmp = Vec::new();
-                wall_poche(c, &mut tmp, &ev, &gaps, &cut_u, greyed, lw, category, view_only, &reveals, Some(u))?;
+                // [141] Ganz in einer Bogenwand gleichen Kreises und Typs: deren Körper zeigt sie mit.
+                if !cut.covered {
+                    wall_poche(c, &mut tmp, &ev, &gaps, &cut_u, greyed, lw, category, view_only, &reveals, Some(u))?;
+                }
                 cut_pockets(&mut tmp, 0, &pockets);
                 if reference_lines {
                     tmp.push(mk_line(wv.start, wv.end, "wall-axis", 0.13, Some(Some(vec![0.18, 0.06, 0.04, 0.06])), None, greyed, None));
@@ -1178,18 +1181,48 @@ fn cut_pockets(prims: &mut Vec<Primitive>, from: usize, wp: &WallPockets) {
 
 /// Schnittlinien einer Bogenwand in den abgewickelten Rahmen ([T2]); Aussparungen sind schon in
 /// Bogenlänge. Nicht abwickelbare Linien fallen weg (Ende bleibt radial).
+///
+/// [141] Y-Knoten (`*_cut2`): beide Linien abgewickelt als Geraden durch den abgewickelten Knick K und
+/// ihren Treffer auf der Fläche ihrer Seite — K bildet exakt auf den Welt-Knick ab, die Bänder schliessen
+/// an die Eckwände an.
 fn unroll_cuts(u: &mut Unroll, c: &WallCuts, lo: f64, hi: f64) -> WallCuts {
     let len = u.arc.length();
+    let mut knee = |l1: &Option<joins::Line>, l2: &Option<joins::Line>| -> Option<(joins::Line, joins::Line)> {
+        let (l1, l2) = ((*l1)?, (*l2)?);
+        let k = kernel2d::line_intersect(l1.point, l1.dir, l2.point, l2.dir)?;
+        let (ks, kn) = u.arc.local(k);
+        if !(kn > lo && kn < hi) {
+            return None;
+        }
+        let kp = kernel2d::Vec2::new(ks, kn);
+        let edge = |l: &joins::Line, n: f64| -> Option<joins::Line> {
+            let (s, _) = u.arc.local(u.arc.line_hit_near(n, l, k)?);
+            let d = kernel2d::sub(kernel2d::Vec2::new(s, n), kp);
+            (d.x.hypot(d.y) > 1e-12).then_some(joins::Line { point: kp, dir: d })
+        };
+        let (a, b) = (edge(&l1, lo)?, edge(&l2, hi)?);
+        u.pair(a, l1);
+        u.pair(b, l2);
+        Some((a, b))
+    };
+    let ks = knee(&c.start_cut, &c.start_cut2);
+    let ke = knee(&c.end_cut, &c.end_cut2);
     let mut one = |l: &Option<joins::Line>, s: f64| l.as_ref().and_then(|l| u.unroll_line(l, lo, hi, s));
-    let start_cut = one(&c.start_cut, 0.0);
-    let end_cut = one(&c.end_cut, len);
+    let (start_cut, start_cut2) = match ks {
+        Some((a, b)) => (Some(a), Some(b)),
+        None => (one(&c.start_cut, 0.0), None),
+    };
+    let (end_cut, end_cut2) = match ke {
+        Some((a, b)) => (Some(a), Some(b)),
+        None => (one(&c.end_cut, len), None),
+    };
     let layer_cuts = c.layer_cuts.as_ref().map(|lc| joins::LayerCuts {
         start: lc.start.iter().map(|l| one(l, 0.0)).collect(),
         end: lc.end.iter().map(|l| one(l, len)).collect(),
         start_side: lc.start_side.iter().map(|l| one(l, 0.0)).collect(),
         end_side: lc.end_side.iter().map(|l| one(l, len)).collect(),
     });
-    WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone(), ..Default::default() }
+    WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone(), start_cut2, end_cut2, covered: c.covered, collinear: c.collinear, at_column: c.at_column, pattern_flip: false }
 }
 
 fn kv(p: Vec2) -> kernel2d::Vec2 {

@@ -450,30 +450,49 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
 
 /// [141] Zwei gerade Wände liegen im selben Band: parallele Achsen, gleiche Schichtfolge (gegenläufig
 /// gespiegelt) und deckungsgleiche Flächen. `Some(gegenläufig)`.
+/// Bogenwände (Teil 4): gleicher Kreis (Mitte, Radius der Bandmitte), Laufsinn = Drehsinn.
 fn same_band(walls: &[JoinWall], a: usize, b: usize) -> Option<bool> {
     let (wa, wb) = (&walls[a], &walls[b]);
-    if is_arc(wa) || is_arc(wb) || len(sub(wa.end, wa.start)) < 1e-9 || len(sub(wb.end, wb.start)) < 1e-9 {
+    if len(sub(wa.end, wa.start)) < 1e-9 || len(sub(wb.end, wb.start)) < 1e-9 {
         return None;
+    }
+    let (arc_a, arc_b) = (arc_of(wa), arc_of(wb));
+    if arc_a.is_some() != arc_b.is_some() {
+        return None;
+    }
+    if let (Some(ca), Some(cb)) = (arc_a, arc_b) {
+        let reversed = ca.sigma() != cb.sigma();
+        if len(sub(ca.center, cb.center)) > 1e-6 || !same_layers(wa, wb, reversed)? {
+            return None;
+        }
+        let t = wa.layers.as_deref()?.iter().fold(0.0, |s, l| s + l.thickness);
+        let mid = |w: &JoinWall, c: &WallArc| c.radius_at(reference_offset(w.reference, t));
+        return ((mid(wa, &ca) - mid(wb, &cb)).abs() < 1e-6).then_some(reversed);
     }
     let (ua, ub) = (dir_of(wa), dir_of(wb));
     if kernel2d::cross(ua, ub).abs() > 1e-6 {
         return None;
     }
     let reversed = dot(ua, ub) < 0.0;
-    let (la, lb) = (wa.layers.as_deref()?, wb.layers.as_deref()?);
-    if la.is_empty() || la.len() != lb.len() {
+    if !same_layers(wa, wb, reversed)? {
         return None;
     }
-    let same = |x: &JoinLayer, y: &JoinLayer| (x.thickness - y.thickness).abs() < 1e-9 && x.component.is_some() && x.component == y.component;
-    let ok = if reversed { la.iter().zip(lb.iter().rev()).all(|(x, y)| same(x, y)) } else { la.iter().zip(lb).all(|(x, y)| same(x, y)) };
-    if !ok {
-        return None;
-    }
+    let la = wa.layers.as_deref()?;
     let t = la.iter().fold(0.0, |s, l| s + l.thickness);
     let na = left_normal(ua);
     let ca = add(wa.start, scale(na, reference_offset(wa.reference, t)));
     let cb = add(wb.start, scale(left_normal(ub), reference_offset(wb.reference, t)));
     (dot(sub(cb, ca), na).abs() < 1e-6).then_some(reversed)
+}
+
+/// Gleiche Schichtfolge (gegenläufig gespiegelt), alle Bauteile bekannt.
+fn same_layers(wa: &JoinWall, wb: &JoinWall, reversed: bool) -> Option<bool> {
+    let (la, lb) = (wa.layers.as_deref()?, wb.layers.as_deref()?);
+    if la.is_empty() || la.len() != lb.len() {
+        return None;
+    }
+    let same = |x: &JoinLayer, y: &JoinLayer| (x.thickness - y.thickness).abs() < 1e-9 && x.component.is_some() && x.component == y.component;
+    Some(if reversed { la.iter().zip(lb.iter().rev()).all(|(x, y)| same(x, y)) } else { la.iter().zip(lb).all(|(x, y)| same(x, y)) })
 }
 
 /// [141] Kollineare Wände gleichen Typs im selben Band verschmelzen zu einem Körper: stumpf aneinander
@@ -492,9 +511,30 @@ fn merge_collinear(walls: &[JoinWall], result: &mut [WallCuts]) {
             }
             let wa = &walls[a];
             let u = dir_of(wa);
-            let a1 = len(sub(wa.end, wa.start));
-            let tb = |p: Vec2| dot(sub(p, wa.start), u);
-            let (s, e) = (tb(walls[b].start), tb(walls[b].end));
+            // Bogen (Teil 4): Achsmass = Bogenlänge, Fuge radial.
+            let arc = arc_of(wa);
+            let a1 = arc.map_or_else(|| len(sub(wa.end, wa.start)), |c| c.length());
+            let tb = |p: Vec2| arc.map_or_else(|| dot(sub(p, wa.start), u), |c| c.local(p).0);
+            let (s, e) = match (arc, arc_of(&walls[b])) {
+                // Bogen: Ende über die eigene Bogenlänge (der Rahmen von a wickelt sonst beim Ring um).
+                (Some(ca), Some(cb)) => {
+                    let s = tb(walls[b].start);
+                    (s, s + if ca.sigma() == cb.sigma() { cb.length() } else { -cb.length() })
+                }
+                _ => (tb(walls[b].start), tb(walls[b].end)),
+            };
+            if arc.is_some() {
+                // Stumpf im Knoten (auch beide Enden, Ring aus zwei Bögen): schon radial gestossen.
+                for ea in [End::Start, End::End] {
+                    for eb in [End::Start, End::End] {
+                        let (ca, cb) = (cut_of(&result[a], ea), cut_of(&result[b], eb));
+                        if len(sub(point_of(wa, ea), point_of(&walls[b], eb))) <= JOIN_SNAP && ca.is_some() && ca == cb {
+                            result[a].collinear[(ea == End::End) as usize] = true;
+                            result[b].collinear[(eb == End::End) as usize] = true;
+                        }
+                    }
+                }
+            }
             // b im Rahmen von a: unteres/oberes Ende.
             let (lo, lo_end, hi, hi_end) = if s <= e { (s, End::Start, e, End::End) } else { (e, End::End, s, End::Start) };
             if hi < -JOIN_SNAP || lo > a1 + JOIN_SNAP {
@@ -510,10 +550,13 @@ fn merge_collinear(walls: &[JoinWall], result: &mut [WallCuts]) {
             }
             // Teilüberlappung oder Stoss: die Fuge liegt am Ende von a, das in b liegt.
             let (a_end, t, b_end) = if lo > 0.0 { (End::End, a1, lo_end) } else { (End::Start, 0.0, hi_end) };
+            let joint = match arc {
+                Some(c) => Line { point: c.point(t, 0.0), dir: c.normal(t) },
+                None => Line { point: add(wa.start, scale(u, t)), dir: left_normal(u) },
+            };
             if cut_of(&result[a], a_end).is_some() || cut_of(&result[b], b_end).is_some() {
                 continue;
             }
-            let joint = Line { point: add(wa.start, scale(u, t)), dir: left_normal(u) };
             // Stoss mitten auf einer dritten Wand („+"-Kreuzung): die beiden stossen dort an (Fall 2).
             if ((lo - a1).abs() <= JOIN_SNAP || hi.abs() <= JOIN_SNAP) && (0..walls.len()).any(|w| w != a && w != b && inside_span(walls, w, joint.point)) {
                 continue;
@@ -626,7 +669,7 @@ fn apply_node(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts]) -> 
         let p = point_of(bw, ends[b].end);
         // [141] Y-Knoten: liegt die Ecke der beiden zugewandten Flächen im Band des Asts, endet er an
         // beiden (Kerbe bzw. Spitze) statt nur an einer (vorher überlappte er die andere Eckwand).
-        if !arcs && y_notch(walls, ends, &into, i, k, b, result)? {
+        if y_notch(walls, ends, &into, i, k, b, arcs, result)? {
             continue;
         }
         // Zugewandte Fläche jeder Eckwand; der Abzweig endet an der, die er (von seinem fernen Ende
@@ -658,50 +701,72 @@ fn apply_node(walls: &[JoinWall], ends: &[WallEnd], result: &mut [WallCuts]) -> 
     Ok(())
 }
 
-/// [141] Y-Knoten (gerade Wände): der Ast `b` stösst an das Eckpaar `i`/`k`. Die beiden ihm
-/// zugewandten Flächen treffen sich in der Ecke K (Aussenecke: Kerbe, Innenecke: Spitze). Liegt K im
-/// Band des Asts, bekommt er beide Flächen als Schnitt — je Seite von K die Fläche der Eckwand, die
-/// auf dieser Seite liegt (`*_cut` unter, `*_cut2` über K im Querversatz des Asts). `false`: K liegt
-/// ausserhalb (eine Fläche genügt, Stoss wie bisher).
-fn y_notch(walls: &[JoinWall], ends: &[WallEnd], into: &[Vec2], i: usize, k: usize, b: usize, result: &mut [WallCuts]) -> R<bool> {
+/// [141] Y-Knoten: der Ast `b` stösst an das Eckpaar `i`/`k`. Die beiden ihm zugewandten Flächen
+/// treffen sich in der Ecke K (Aussenecke: Kerbe, Innenecke: Spitze). Liegt K im Band des Asts, bekommt
+/// er beide Flächen als Schnitt — je Seite von K die Fläche der Eckwand, die auf dieser Seite liegt
+/// (`*_cut` unter, `*_cut2` über K im Querversatz des Asts). `false`: K liegt ausserhalb (eine Fläche
+/// genügt, Stoss wie bisher).
+///
+/// Bogenwände (`arcs`, Teil 4): Seiten über die Tangenten am Knoten, K als Schnitt der Flächenkurven
+/// (Gerade/Kreis). Die Fläche einer Bogen-Eckwand wird zur Geraden durch K und den Treffer der Ast-Fläche
+/// dieser Seite (Sehne wie am T-Stoss auf einen Bogen, exakt an beiden Ast-Flächen und in K).
+#[allow(clippy::too_many_arguments)]
+fn y_notch(walls: &[JoinWall], ends: &[WallEnd], into: &[Vec2], i: usize, k: usize, b: usize, arcs: bool, result: &mut [WallCuts]) -> R<bool> {
     let bi = ends[b].wall;
     let bw = &walls[bi];
-    let mut faces: Vec<(Line, f64)> = Vec::with_capacity(2);
+    let u_b = if arcs { dir_at(bw, ends[b].end) } else { dir_of(bw) };
+    // (Gerade der Fläche am Knoten, Seite, Flächenkurve, Bogen?)
+    let mut faces: Vec<(Line, f64, Curve, bool)> = Vec::with_capacity(2);
     for &q in &[i, k] {
         let qi = ends[q].wall;
         let qw = &walls[qi];
         let tq = thickness(walls, qi)?;
-        let uq = dir_of(qw);
+        let uq = if arcs { dir_at(qw, ends[q].end) } else { dir_of(qw) };
         let nq = left_normal(uq);
         let facing = dot(nq, into[b]);
         if facing.abs() < 1e-6 {
             return Ok(false);
         }
         let sign = if facing > 0.0 { 1.0 } else { -1.0 };
-        let point = add(point_of(qw, ends[q].end), scale(nq, reference_offset(qw.reference, tq) + sign * tq / 2.0));
-        faces.push((Line { point, dir: uq }, dot(into[q], left_normal(dir_of(bw)))));
+        let off = reference_offset(qw.reference, tq) + sign * tq / 2.0;
+        let point = add(point_of(qw, ends[q].end), scale(nq, off));
+        faces.push((Line { point, dir: uq }, dot(into[q], left_normal(u_b)), offset_curve(qw, off), is_arc(qw)));
     }
     let (lo, hi) = match (faces[0].1 > 1e-6, faces[1].1 > 1e-6, faces[0].1 < -1e-6, faces[1].1 < -1e-6) {
-        (false, true, true, _) => (faces[0].0, faces[1].0),
-        (true, false, _, true) => (faces[1].0, faces[0].0),
+        (false, true, true, _) => (faces[0].clone(), faces[1].clone()),
+        (true, false, _, true) => (faces[1].clone(), faces[0].clone()),
         _ => return Ok(false),
     };
-    let Some(corner) = line_intersect(lo.point, lo.dir, hi.point, hi.dir) else { return Ok(false) };
+    let Some(mut corner) = line_intersect(lo.0.point, lo.0.dir, hi.0.point, hi.0.dir) else { return Ok(false) };
+    if lo.3 || hi.3 {
+        let Some(c) = hit_near(&lo.2, &hi.2, corner) else { return Ok(false) };
+        corner = c;
+    }
     let tb = thickness(walls, bi)?;
     let node = point_of(bw, ends[b].end);
     if len(sub(corner, node)) > 4.0 * (tb + thickness(walls, ends[i].wall)? + thickness(walls, ends[k].wall)?) {
         return Ok(false);
     }
     let ob = reference_offset(bw.reference, tb);
-    let perp = dot(sub(corner, bw.start), left_normal(dir_of(bw)));
+    let perp = if arcs { local_of(bw, corner).1 } else { dot(sub(corner, bw.start), left_normal(dir_of(bw))) };
     if perp <= ob - tb / 2.0 + 1e-6 || perp >= ob + tb / 2.0 - 1e-6 {
         return Ok(false);
     }
-    set_cut(result, ends[b], lo);
+    // Fläche einer Bogen-Eckwand: Gerade durch K und den Treffer der Ast-Fläche dieser Seite.
+    let line_of = |f: &(Line, f64, Curve, bool), side_off: f64| -> Option<Line> {
+        if !f.3 {
+            return Some(f.0);
+        }
+        let h = hit_near(&offset_curve(bw, side_off), &f.2, corner)?;
+        let d = sub(h, corner);
+        (len(d) > 1e-9).then_some(Line { point: corner, dir: d })
+    };
+    let (Some(lo_l), Some(hi_l)) = (line_of(&lo, ob - tb / 2.0), line_of(&hi, ob + tb / 2.0)) else { return Ok(false) };
+    set_cut(result, ends[b], lo_l);
     let c = &mut result[bi];
     match ends[b].end {
-        End::Start => c.start_cut2 = Some(hi),
-        End::End => c.end_cut2 = Some(hi),
+        End::Start => c.start_cut2 = Some(hi_l),
+        End::End => c.end_cut2 = Some(hi_l),
     }
     Ok(true)
 }
@@ -770,7 +835,9 @@ fn miter_line_arc(walls: &[JoinWall], ai: usize, a_end: End, bi: usize) -> R<Opt
     let d_b = if b_at_start { u_b } else { scale(u_b, -1.0) };
     if kernel2d::cross(u_a, u_b).abs() < 1e-6 {
         // Tangentialer Übergang: rechtwinklig (radial) stossen, als Schnitt markiert (keine Fuge).
-        return Ok((dot(d_a, d_b) < 0.0).then_some(Line { point: j, dir: n_a }));
+        // [141] Nur im selben Band (gleicher Kreis und Typ); sonst freie radiale Enden mit Stosslinie
+        // (Materialwechsel wie bei kollinearen geraden Wänden ungleichen Typs).
+        return Ok((dot(d_a, d_b) < 0.0 && (!(is_arc(a) && is_arc(b)) || same_band(walls, ai, bi).is_some())).then_some(Line { point: j, dir: n_a }));
     }
     let (lb, rb) = (off_b + t_b / 2.0, off_b - t_b / 2.0);
     let (b_outer, b_inner) = if dot(n_b, d_a) < 0.0 { (lb, rb) } else { (rb, lb) };
@@ -1676,5 +1743,87 @@ mod tests {
         assert_eq!(c[0].span_cutouts.len(), 1);
         let s = c[0].span_cutouts[0];
         assert!(s.to > s.from && s.from > 4.5 && s.to < 6.0, "{s:?}");
+    }
+
+    // ── [141] Teil 4: Bogenwände an Wandknoten ──
+
+    fn polar(r: f64, deg: f64) -> (f64, f64) {
+        let a = deg.to_radians();
+        (r * a.cos(), r * a.sin())
+    }
+    /// Querversatz eines Punkts zur Achse der Wand (Bogen: zur Kreisachse).
+    fn perp_of(w: &JoinWall, p: Vec2) -> f64 {
+        local_of(w, p).1
+    }
+
+    /// Y-Knoten mit Bogenwand: der dritte Ast endet an BEIDEN zugewandten Flächen des Eckpaars (Knick K
+    /// auf beiden Flächen), auch wenn der Ast oder eine Eckwand ein Bogen ist.
+    #[test]
+    fn bogen_y_knoten_ast_an_beiden_flaechen() {
+        let t = 0.3;
+        let cases: Vec<(&str, Vec<JoinWall>)> = vec![
+            ("Ast Bogen", vec![mono((0.0, 0.0), polar(3.0, 0.0), t), mono((0.0, 0.0), polar(3.0, 120.0), t), arc_wall((0.0, 0.0), polar(3.0, 240.0), 0.2, t)]),
+            ("Ast Bogen gegenläufig", vec![mono((0.0, 0.0), polar(3.0, 0.0), t), mono((0.0, 0.0), polar(3.0, 120.0), t), arc_wall(polar(3.0, 240.0), (0.0, 0.0), -0.25, t)]),
+            ("Eckwand Bogen", vec![arc_wall((0.0, 0.0), polar(3.0, 0.0), 0.15, t), mono((0.0, 0.0), polar(3.0, 120.0), t), mono((0.0, 0.0), polar(3.0, 240.0), t)]),
+            ("alle Bogen", vec![arc_wall((0.0, 0.0), polar(3.0, 0.0), -0.15, t), arc_wall(polar(3.0, 120.0), (0.0, 0.0), 0.2, t), arc_wall((0.0, 0.0), polar(3.0, 240.0), 0.1, t)]),
+        ];
+        for (what, w) in cases {
+            let c = compute_joins(&w).unwrap();
+            let b = &c[2];
+            let (lo, hi) = if w[2].start == Vec2::new(0.0, 0.0) { (b.start_cut, b.start_cut2) } else { (b.end_cut, b.end_cut2) };
+            let (lo, hi) = (lo.expect(what), hi.unwrap_or_else(|| panic!("{what}: zweite Schnittlinie")));
+            let k = line_intersect(lo.point, lo.dir, hi.point, hi.dir).unwrap();
+            // K liegt auf je einer Fläche beider Eckwände und im Band des Asts.
+            for q in 0..2 {
+                assert!(close(perp_of(&w[q], k).abs(), t / 2.0), "{what}: K {k:?} nicht auf Fläche von {q}");
+            }
+            assert!(perp_of(&w[2], k).abs() < t / 2.0, "{what}: K ausserhalb des Asts");
+            // Jede Linie trifft die Ast-Fläche auf ihrer Seite dort, wo diese die Eckwand-Fläche trifft.
+            for (l, side) in [(lo, -1.0), (hi, 1.0)] {
+                let face = offset_curve(&w[2], side * t / 2.0);
+                let hits = match face {
+                    Curve::Line(f) => line_intersect(l.point, l.dir, f.point, f.dir).into_iter().collect::<Vec<_>>(),
+                    Curve::Circle(cc, r) => crate::wall_arc::circle_line(cc, r, &l),
+                };
+                let h = nearest(hits, k).expect("Treffer");
+                let on = (0..2).filter(|&q| close(perp_of(&w[q], h).abs(), t / 2.0)).count();
+                assert!(on >= 1, "{what}: Linie {side} trifft die Astfläche nicht auf einer Eckwand-Fläche ({h:?})");
+            }
+        }
+    }
+
+    /// Bogen um den Ursprung im Gegenuhrzeigersinn (Modell-Bulge: positiv = Scheitel links → hier negativ).
+    fn arc_ccw(r: f64, a0: f64, a1: f64, t: f64) -> JoinWall {
+        arc_wall(polar(r, a0), polar(r, a1), -((a1 - a0).to_radians() / 4.0).tan(), t)
+    }
+
+    /// Bogenwände mit gleichem Kreis und Typ: stumpf (Stossfuge, beide Enden `collinear`), überlappend
+    /// (die spätere an der früheren gestutzt, radial), ganz enthalten (`covered`); anderer Radius bleibt
+    /// getrennt.
+    #[test]
+    fn bogen_kollinear_gleicher_kreis() {
+        let t = 0.2;
+        // Stumpf.
+        let c = compute_joins(&[arc_ccw(4.0, 0.0, 60.0, t), arc_ccw(4.0, 60.0, 120.0, t)]).unwrap();
+        assert!(c[0].collinear[1] && c[1].collinear[0], "{c:?}");
+        // Überlappend: Fuge radial am Ende der ersten (80°).
+        let c = compute_joins(&[arc_ccw(4.0, 0.0, 80.0, t), arc_ccw(4.0, 50.0, 120.0, t)]).unwrap();
+        let j = c[0].end_cut.expect("Fuge");
+        assert_eq!(c[1].start_cut, Some(j));
+        assert!(c[0].collinear[1] && c[1].collinear[0]);
+        let (px, py) = polar(4.0, 80.0);
+        assert!(dist(&j, Vec2::new(px, py)) < 1e-9 && dist(&j, Vec2::new(0.0, 0.0)) < 1e-9, "radial: {j:?}");
+        // Gegenläufig (symmetrischer Typ).
+        let c = compute_joins(&[arc_ccw(4.0, 0.0, 80.0, t), arc_wall(polar(4.0, 120.0), polar(4.0, 50.0), (70f64.to_radians() / 4.0).tan(), t)]).unwrap();
+        assert!(c[0].collinear[1] && c[1].collinear[1], "{c:?}");
+        // Ganz enthalten.
+        let c = compute_joins(&[arc_ccw(4.0, 0.0, 120.0, t), arc_ccw(4.0, 30.0, 60.0, t)]).unwrap();
+        assert!(c[1].covered && !c[0].covered);
+        // Ring aus zwei Halbkreisen: beide Stösse sind Stossfugen, keine Wand verdeckt.
+        let c = compute_joins(&[arc_ccw(4.0, 0.0, 180.0, t), arc_ccw(4.0, 180.0, 360.0, t)]).unwrap();
+        assert!(c.iter().all(|k| !k.covered && k.collinear == [true; 2]), "{c:?}");
+        // Anderer Radius: getrennt.
+        let c = compute_joins(&[arc_ccw(4.0, 0.0, 80.0, t), arc_ccw(4.5, 50.0, 120.0, t)]).unwrap();
+        assert!(!c[0].covered && !c[1].covered && c[0].collinear == [false; 2] && c[1].collinear == [false; 2]);
     }
 }

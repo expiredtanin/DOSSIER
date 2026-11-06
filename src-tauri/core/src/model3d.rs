@@ -205,7 +205,7 @@ pub fn column_footprint(col: &Column) -> Vec<Vec2> {
 /// Grundriss), ist das Wandband über deren Höhe ausgespart (Höhe in Abschnitte geteilt). Löcher im
 /// Rest (Wand endet ganz innen) bleiben unbeschnitten.
 pub fn column_pieces(p: &Project, col: &Column) -> Vec<(Vec<Vec2>, f64, f64)> {
-    use crate::plan::wall_columns::{band_rect, end_in_column, relation, Rel};
+    use crate::plan::wall_columns::{band_polys, end_in_column, relation, Rel};
     let fp = column_footprint(col);
     let (zb, zt) = p.column_vertical_extent(col);
     let full = vec![(fp.clone(), zb, zt)];
@@ -224,7 +224,7 @@ pub fn column_pieces(p: &Project, col: &Column) -> Vec<(Vec<Vec2>, f64, f64)> {
         }
         let total = p.wall_thickness(w, 0.2);
         let ro = joins::reference_offset(wall_reference(w), total);
-        clips.push((band_rect(w, ro - total / 2.0, ro + total / 2.0), z0, z1));
+        clips.extend(band_polys(w, ro - total / 2.0, ro + total / 2.0, true).into_iter().map(|q| (q, z0, z1)));
     }
     if clips.is_empty() {
         return full;
