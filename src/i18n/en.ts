@@ -2579,6 +2579,8 @@ export const en: Record<TranslationKey, string> = {
   "program.generate.done": "{n} rooms created on sheet “{name}”.",
   "program.generate.none": "The room program has no row with a name and an area.",
   "sun.show": "Show shadows in plan",
+  "sun.shadows3d": "Show shadows in 3D",
+  "sun.shadows3d.hint": "Sun from date and time; all elements cast shadows, glass does not. Unset: same as in plan.",
   "sun.time": "Time of day",
   "sun.equinox": "Equinox",
   "sun.summer": "Summer solstice",

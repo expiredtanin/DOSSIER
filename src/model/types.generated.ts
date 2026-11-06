@@ -3157,6 +3157,8 @@ export type SunStudy = {
    * Schattenwurf; fehlt der Wert, gilt 8 m.
    */
   treeHeight?: number;
+  /** [64] Schatten im 3D (Sonne aus `when`); fehlt der Wert, gilt `show`. */
+  shadows3d?: boolean;
 };
 
 /**

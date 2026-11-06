@@ -1811,6 +1811,27 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Anteil grob über Ausdehnung längs der Grenze.
 - ◐ **[64]+[59] Sonnenstand und Schatten.** (27.10.) Schatten im Grundriss mit Zeitregler (Lage-Panel),
   auch in CLI/PDF. Offen: Schatten im 3D.
+  6.11.: **Schatten im 3D** (render3d, Wunsch Maintainer). Shadow-Mapping für die Sonne: Tiefenpass
+  orthografisch aus der Sonnenrichtung (`SHADOW_WGSL`, Depth32Float 2048², Option `set_shadow_map_size`), Licht-Frustum
+  seitlich auf die eigenen Bauteile (ohne Gelände/Importe), in der Tiefe auf die ganze Szene (`shadow::light_view_proj`;
+  ein Schatten liegt im Lichtraum an derselben Stelle wie sein Werfer → eine Kaskade genügt, ≈ 1–2 cm/Texel; ausserhalb
+  gilt besonnt). PCF 3×3 mit Vergleichs-Sampler, Steigungs-Bias im Tiefenpass + Normalen-Verschiebung + kleiner
+  Tiefen-Bias gegen Akne/Peter-Panning. Mesh-, Textur- und Luftbild-Shader dunkeln nur den Sonnen-Anteil ab (Umgebung
+  ausserhalb der Sonne leicht gedämpft, Sonne etwas kräftiger, damit Schatten lesbar sind). Alle Körper werfen und
+  empfangen (Wände, Decken, Dächer, Gelände, Stützen/Bäume, Importe); Glas nicht (Vertexfarbe = Kern `PART_RGB[0]`,
+  `shadow::caster_indices`); weggeschnittene Teile im Live-Schnitt werfen nicht. Tiefenpass nur nach Änderung (Sonne,
+  Schalter, Geometrie, Schnitt, Grösse), nie je Kamera-Frame; Linien-Stile (Verdeckt, Konturen, Draht) ohne Schatten.
+  Sonne aus der Sonnenstudie (`viewport/sun3d.ts`: Ort `geoAnchor`, `when`, Kern `sun_position`) → `web::set_sun`;
+  der Zeitregler im Lage-Panel aktualisiert das 3D live; unter dem Horizont Standardlicht ohne Schatten. Schalter
+  „Schatten im 3D zeigen" im Lage-Panel = neues Feld `SunStudy.shadows3d` (Rust-Modell, ohne Wert wie „Schatten im
+  Grundriss"). `render_png --sun AZ,EL`. Nebenbei: `native.rs`/`spike3d` kompilierten nicht mehr (fehlende
+  `WallInput`-Felder `top_drop`/`top_plane`) → ergänzt. Tests: Rust `shadow::tests` (Sonnenrichtung, Szene im
+  Licht-Frustum, Werfer/Schatten gleiche Lichtraum-Stelle, Texelgrösse, Glas), `scene::schatten_ausdehnung_ohne_gelaende`,
+  `gpu::shadow_gpu_tests` (echte GPU: Tiefenpass nur bei Änderung; ohne Adapter übersprungen), WGSL per naga; vitest
+  `sun3d.test.ts`. Geprüft: `render_png` auf Linux/Vulkan (lavapipe), Musterhaus komplex Sommermorgen/Winternachmittag,
+  an/aus; `cargo check --features native3d`. **Offen:** nicht auf Metal und nicht in der App angesehen (WebGPU in
+  Chromium im Container präsentiert keine 3D-Frames, auch ohne diese Änderung); die Lichtrichtung folgt der Achsabbildung
+  der Bauteile (world = Ost, Höhe, Nord); mehrere Kaskaden erst, wenn grosse Lagepläne es brauchen.
 - ○ **[88] Nur-Lese-Link fürs Web.** · M
 - ✅ **[31] Stiftstärken in Papier-mm.**
 - ✅ **[32] Linienstärken pro Massstab.** (27.10.) Projekt-Option skaliert Grundriss-Stärken mit

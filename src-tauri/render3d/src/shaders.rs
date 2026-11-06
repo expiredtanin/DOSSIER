@@ -27,6 +27,14 @@
 // Flaechen an, damit sie nicht in reinem Schwarz absaufen. Dezent (≈ 0.28 der
 // Sonne, leicht kuehl), physikalisch als Himmels-/Bounce-Fuellung plausibel.
 
+// SCHATTEN ([64]): Die drei beleuchteten Flaechen-Shader (Mesh, texturiert, Luftbild) haengen an
+// `Globals` zwei Felder an — `light_view_proj` (world -> Licht-Clip, `shadow::light_view_proj`) und
+// `shadow` (x = an/aus, y = Normalen-Verschiebung in m, z = PCF-Schritt in UV = 1/Texturgroesse,
+// w = Tiefen-Bias im Licht-NDC) — und lesen die Tiefentextur aus `SHADOW_WGSL` (group 0, binding 1/2,
+// Vergleichs-Sampler). Nur der Sonnen-Anteil (Lambert) wird abgeschattet; Himmels-Ambient und
+// Gegen-Fuelllicht bleiben, Schatten sind also hell genug zum Lesen. Die uebrigen Shader deklarieren
+// `Globals` ohne die Anhaengsel (gueltig: ihr Struct ist ein Praefix des Puffers).
+
 /// Der einzige Shader (Vertex + Fragment). Hemisphaerisches Ambient (Himmel/Boden)
 /// + Lambert-Directional — GPU-Aequivalent eines Architektur-Massenmodell-Lichts.
 pub const MESH_WGSL: &str = r#"
@@ -38,8 +46,53 @@ struct Globals {
     sun_color     : vec4<f32>,
     mode          : vec4<f32>,
     section_plane : vec4<f32>,
+    light_view_proj : mat4x4<f32>,
+    shadow        : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
+@group(0) @binding(1) var shadow_map  : texture_depth_2d;
+@group(0) @binding(2) var shadow_samp : sampler_comparison;
+
+// Sonnen-Sichtbarkeit [0,1] aus der Schattentextur ([64], s. Kopf von shaders.rs).
+fn sun_visibility(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> f32 {
+    if (globals.shadow.x < 0.5) {
+        return 1.0;
+    }
+    let ndl = dot(n, l);
+    if (ndl <= 0.0) {
+        return 1.0;
+    }
+    // Normalen-Verschiebung gegen Schattenakne: flach beschienene Flaechen etwas mehr.
+    let offset = globals.shadow.y * (1.0 + 2.0 * (1.0 - ndl));
+    let p = globals.light_view_proj * vec4<f32>(world_pos + n * offset, 1.0);
+    let ndc = p.xyz / p.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0) {
+        return 1.0;
+    }
+    let depth = ndc.z - globals.shadow.w;
+    // PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand.
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy += 1) {
+        for (var dx = -1; dx <= 1; dx += 1) {
+            let o = vec2<f32>(f32(dx), f32(dy)) * globals.shadow.z;
+            sum += textureSampleCompareLevel(shadow_map, shadow_samp, uv + o, depth);
+        }
+    }
+    return sum / 9.0;
+}
+
+// Faktoren (Sonne, Umgebung) mit Schatten: x = Sonnen-Anteil (abgeschattet, bei aktiven Schatten
+// kraeftiger), y = Umgebungslicht (ausserhalb der Sonne etwas gedaempft, damit Schatten lesbar sind —
+// auch auf sonnenabgewandten Flaechen gleich, sonst waeren Schlagschatten dunkler als Eigenschatten).
+fn sun_shadow(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> vec2<f32> {
+    if (globals.shadow.x < 0.5) {
+        return vec2<f32>(1.0, 1.0);
+    }
+    let vis = sun_visibility(world_pos, n, l);
+    let sunlit = vis * smoothstep(0.0, 0.08, dot(n, l));
+    return vec2<f32>(vis * 1.35, 0.78 + 0.22 * sunlit);
+}
 
 struct VsIn {
     @location(0) position : vec3<f32>,
@@ -85,7 +138,8 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let ambient = mix(globals.ground_color.rgb, globals.sky_color.rgb, hemi_t);
 
     // Gerichteter Lambert-Anteil (Sonne); Rueckseiten (n.l < 0) tragen nichts bei.
-    let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb;
+    let sk = sun_shadow(in.world_pos, n, l);
+    let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb * sk.x;
 
     // Schwaches Gegen-Fuelllicht: aus entgegengesetztem Azimut, leicht von oben,
     // aus der Sonnenrichtung abgeleitet — hebt abgewandte Flaechen an (kein
@@ -106,7 +160,7 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
         albedo = clay;
     }
 
-    var shaded = albedo * (ambient + diffuse + fill);
+    var shaded = albedo * (ambient * sk.y + diffuse + fill);
 
     // Sanfte Kantenbetonung: senkrechte Flaechen (n.y nahe 0) minimal abdunkeln,
     // damit sich Waende vom hellen Deckel/Boden abheben (ohne Postprocessing).
@@ -141,8 +195,53 @@ struct Globals {
     sun_color     : vec4<f32>,
     mode          : vec4<f32>,
     section_plane : vec4<f32>,
+    light_view_proj : mat4x4<f32>,
+    shadow        : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
+@group(0) @binding(1) var shadow_map  : texture_depth_2d;
+@group(0) @binding(2) var shadow_samp : sampler_comparison;
+
+// Sonnen-Sichtbarkeit [0,1] aus der Schattentextur ([64], s. Kopf von shaders.rs).
+fn sun_visibility(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> f32 {
+    if (globals.shadow.x < 0.5) {
+        return 1.0;
+    }
+    let ndl = dot(n, l);
+    if (ndl <= 0.0) {
+        return 1.0;
+    }
+    // Normalen-Verschiebung gegen Schattenakne: flach beschienene Flaechen etwas mehr.
+    let offset = globals.shadow.y * (1.0 + 2.0 * (1.0 - ndl));
+    let p = globals.light_view_proj * vec4<f32>(world_pos + n * offset, 1.0);
+    let ndc = p.xyz / p.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0) {
+        return 1.0;
+    }
+    let depth = ndc.z - globals.shadow.w;
+    // PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand.
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy += 1) {
+        for (var dx = -1; dx <= 1; dx += 1) {
+            let o = vec2<f32>(f32(dx), f32(dy)) * globals.shadow.z;
+            sum += textureSampleCompareLevel(shadow_map, shadow_samp, uv + o, depth);
+        }
+    }
+    return sum / 9.0;
+}
+
+// Faktoren (Sonne, Umgebung) mit Schatten: x = Sonnen-Anteil (abgeschattet, bei aktiven Schatten
+// kraeftiger), y = Umgebungslicht (ausserhalb der Sonne etwas gedaempft, damit Schatten lesbar sind —
+// auch auf sonnenabgewandten Flaechen gleich, sonst waeren Schlagschatten dunkler als Eigenschatten).
+fn sun_shadow(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> vec2<f32> {
+    if (globals.shadow.x < 0.5) {
+        return vec2<f32>(1.0, 1.0);
+    }
+    let vis = sun_visibility(world_pos, n, l);
+    let sunlit = vis * smoothstep(0.0, 0.08, dot(n, l));
+    return vec2<f32>(vis * 1.35, 0.78 + 0.22 * sunlit);
+}
 
 // Material-Textur-ARRAY + Sampler (group 1). Sampler mit Repeat/Linear (siehe
 // gpu.rs) -> das weltmassstaebliche UV-Raster kachelt sich ueber die Wandflaechen.
@@ -195,7 +294,8 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let ambient = mix(globals.ground_color.rgb, globals.sky_color.rgb, hemi_t);
 
     // Gerichteter Lambert-Anteil (Sonne).
-    let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb;
+    let sk = sun_shadow(in.world_pos, n, l);
+    let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb * sk.x;
 
     // Gegen-Fuelllicht (identisch zu MESH_WGSL).
     let fill_l = normalize(vec3<f32>(-l.x, abs(l.y) * 0.35 + 0.15, -l.z));
@@ -210,7 +310,7 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let li = clamp(i32(round(in.layer)), 0, max_layer);
     let albedo = textureSample(tex, samp, in.uv, li).rgb;
 
-    var shaded = albedo * (ambient + diffuse + fill);
+    var shaded = albedo * (ambient * sk.y + diffuse + fill);
 
     // Sanfte Kantenbetonung (identisch zu MESH_WGSL).
     let edge = 0.90 + 0.10 * abs(n.y);
@@ -242,8 +342,53 @@ struct Globals {
     sun_color     : vec4<f32>,
     mode          : vec4<f32>,
     section_plane : vec4<f32>,
+    light_view_proj : mat4x4<f32>,
+    shadow        : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
+@group(0) @binding(1) var shadow_map  : texture_depth_2d;
+@group(0) @binding(2) var shadow_samp : sampler_comparison;
+
+// Sonnen-Sichtbarkeit [0,1] aus der Schattentextur ([64], s. Kopf von shaders.rs).
+fn sun_visibility(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> f32 {
+    if (globals.shadow.x < 0.5) {
+        return 1.0;
+    }
+    let ndl = dot(n, l);
+    if (ndl <= 0.0) {
+        return 1.0;
+    }
+    // Normalen-Verschiebung gegen Schattenakne: flach beschienene Flaechen etwas mehr.
+    let offset = globals.shadow.y * (1.0 + 2.0 * (1.0 - ndl));
+    let p = globals.light_view_proj * vec4<f32>(world_pos + n * offset, 1.0);
+    let ndc = p.xyz / p.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0) {
+        return 1.0;
+    }
+    let depth = ndc.z - globals.shadow.w;
+    // PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand.
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy += 1) {
+        for (var dx = -1; dx <= 1; dx += 1) {
+            let o = vec2<f32>(f32(dx), f32(dy)) * globals.shadow.z;
+            sum += textureSampleCompareLevel(shadow_map, shadow_samp, uv + o, depth);
+        }
+    }
+    return sum / 9.0;
+}
+
+// Faktoren (Sonne, Umgebung) mit Schatten: x = Sonnen-Anteil (abgeschattet, bei aktiven Schatten
+// kraeftiger), y = Umgebungslicht (ausserhalb der Sonne etwas gedaempft, damit Schatten lesbar sind —
+// auch auf sonnenabgewandten Flaechen gleich, sonst waeren Schlagschatten dunkler als Eigenschatten).
+fn sun_shadow(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> vec2<f32> {
+    if (globals.shadow.x < 0.5) {
+        return vec2<f32>(1.0, 1.0);
+    }
+    let vis = sun_visibility(world_pos, n, l);
+    let sunlit = vis * smoothstep(0.0, 0.08, dot(n, l));
+    return vec2<f32>(vis * 1.35, 0.78 + 0.22 * sunlit);
+}
 
 // Luftbild-Textur + Sampler + Bounding-Box (group 1). `bbox = (min_x, min_y,
 // max_x, max_y)` in Modell-Metern (x = Ost/world.x, y = Nord/world.z).
@@ -287,7 +432,8 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     // Hemisphaerisches Ambient (identisch zu MESH_WGSL).
     let hemi_t = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
     let ambient = mix(globals.ground_color.rgb, globals.sky_color.rgb, hemi_t);
-    let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb;
+    let sk = sun_shadow(in.world_pos, n, l);
+    let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb * sk.x;
     let fill_l = normalize(vec3<f32>(-l.x, abs(l.y) * 0.35 + 0.15, -l.z));
     let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
         * vec3<f32>(0.24, 0.27, 0.30);
@@ -305,7 +451,7 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     // uebernimmt der Sampler mit ClampToEdge).
     let albedo = textureSample(tex, samp, vec2<f32>(u, 1.0 - v)).rgb;
 
-    var shaded = albedo * (ambient + diffuse + fill);
+    var shaded = albedo * (ambient * sk.y + diffuse + fill);
     let edge = 0.90 + 0.10 * abs(n.y);
     shaded = shaded * edge;
     return vec4<f32>(shaded, 1.0);
@@ -551,5 +697,40 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
         }
     }
     return in.color;
+}
+"#;
+
+/// WGSL des Schatten-Tiefenpasses ([64], `gpu::shadow_pipeline`): rendert alle schattenwerfenden
+/// Dreiecke (Haupt-Mesh-Layout, nur `position`) orthografisch aus der Sonnenrichtung in die
+/// Tiefentextur. Eigenes Uniform (group 0): Licht-Matrix + Live-Schnitt (weggeschnittene Teile werfen
+/// keinen Schatten, wie sie auch nicht zu sehen sind). Kein Farbziel.
+pub const SHADOW_WGSL: &str = r#"
+struct ShadowGlobals {
+    light_view_proj : mat4x4<f32>,
+    section_plane   : vec4<f32>,
+    mode            : vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> sg : ShadowGlobals;
+
+struct VsOut {
+    @builtin(position) clip_pos : vec4<f32>,
+    @location(0) world_pos : vec3<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) position : vec3<f32>) -> VsOut {
+    var out : VsOut;
+    out.clip_pos = sg.light_view_proj * vec4<f32>(position, 1.0);
+    out.world_pos = position;
+    return out;
+}
+
+@fragment
+fn fs_main(in : VsOut) {
+    if (sg.mode.y > 0.5) {
+        if (dot(in.world_pos, sg.section_plane.xyz) + sg.section_plane.w > 0.0) {
+            discard;
+        }
+    }
 }
 "#;

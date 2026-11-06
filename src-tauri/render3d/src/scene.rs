@@ -113,6 +113,9 @@ struct Part {
     edge_keys: Vec<EdgeKey>,
     has_terrain: bool,
     bounds: Option<Bounds3>,
+    /// Schatten ([64]): Ausdehnung der eigenen Bauteile (ohne Gelände/Importe) und des ganzen Netzes, world.
+    shadow_focus: Option<Bounds3>,
+    shadow_all: Option<Bounds3>,
 }
 
 /// Eine Kante im Index: Lage (erster Beitrag), Normalen aller angrenzenden Dreiecke, Entscheid.
@@ -172,6 +175,14 @@ impl Scene {
 
     pub fn bounds(&self) -> Option<Bounds3> {
         self.bounds
+    }
+
+    /// Ausdehnung für das Licht-Frustum der Schatten ([64], `shadow::light_view_proj`): (Fokus, alles).
+    /// Fokus = eigene Bauteile ohne Gelände und Importe; fehlen sie, das ganze Modell.
+    pub fn shadow_bounds(&self) -> Option<(Bounds3, Bounds3)> {
+        let all = self.parts.values().fold(None, |acc, p| merge_bounds(acc, p.shadow_all))?;
+        let focus = self.parts.values().fold(None, |acc, p| merge_bounds(acc, p.shadow_focus)).unwrap_or(all);
+        Some((focus, all))
     }
 
     /// Gelände-Dreiecke aller Teile (Luftbild-Überlagerung).
@@ -262,6 +273,8 @@ impl Scene {
                     edge_keys: Vec::new(),
                     has_terrain,
                     bounds,
+                    shadow_focus: None,
+                    shadow_all: None,
                 },
             );
         }
@@ -463,6 +476,7 @@ fn build_part_mesh(p: &mut Part) {
         layers.extend(std::iter::repeat(layer).take(added));
     };
     let mut caps = Vec::new();
+    let mut focus: Option<Bounds3> = None;
     for (i, w) in p.input.walls.iter().enumerate() {
         extrude_wall_with_miters(&mut mesh, w, p.miters[i]);
         fill(&mesh, &mut layers, w.material_index.map(|i| i as f32).unwrap_or(-1.0));
@@ -472,10 +486,17 @@ fn build_part_mesh(p: &mut Part) {
         extrude_slab(&mut mesh, s);
         fill(&mesh, &mut layers, -1.0);
     }
+    focus = merge_bounds(focus, crate::shadow::verts_bounds(&mesh.verts, 0));
     for m in &p.input.meshes {
+        let from = mesh.vertex_count();
         append_context_mesh(&mut mesh, m);
         fill(&mesh, &mut layers, m.material_index.map(|i| i as f32).unwrap_or(-1.0));
+        if !matches!(m.kind, MeshKind::Terrain | MeshKind::Imported) {
+            focus = merge_bounds(focus, crate::shadow::verts_bounds(&mesh.verts, from));
+        }
     }
+    p.shadow_focus = focus;
+    p.shadow_all = crate::shadow::verts_bounds(&mesh.verts, 0);
     p.mesh = mesh;
     p.layers = layers;
     p.caps = caps;
@@ -793,5 +814,25 @@ mod tests {
             all as f64 * 4e-6,
         );
     }
-}
 
+    /// Schatten ([64]): das Licht-Frustum passt seitlich auf die eigenen Bauteile, nicht aufs Gelände.
+    #[test]
+    fn schatten_ausdehnung_ohne_gelaende() {
+        let terrain: MeshInput = serde_json::from_str(
+            r#"{"positions":[-500,-500,0, 500,-500,0, 500,500,2, -500,500,0],"indices":[0,1,2, 0,2,3],"kind":"terrain"}"#,
+        )
+        .unwrap();
+        let mut s = Scene::new();
+        s.set_model(PartInput { walls: vec![wall([0.0, 0.0], [6.0, 0.0], 0.0)], slabs: Vec::new(), meshes: vec![terrain.clone(), roof()], roof_layers: Vec::new() });
+        let (focus, all) = s.shadow_bounds().expect("Ausdehnung");
+        assert!(focus.0[0] > -1.0 && focus.1[0] < 7.0, "Fokus ohne Gelände: {focus:?}");
+        assert!(focus.1[1] >= 6.9, "Dach im Fokus: {focus:?}");
+        assert!(all.0[0] <= -500.0 && all.1[0] >= 500.0, "Tiefe über alles: {all:?}");
+        // Nur Gelände: Fokus = alles.
+        s.set_model(PartInput { walls: Vec::new(), slabs: Vec::new(), meshes: vec![terrain], roof_layers: Vec::new() });
+        let (focus, all) = s.shadow_bounds().unwrap();
+        assert_eq!(focus, all);
+        s.set_model(PartInput::default());
+        assert!(s.shadow_bounds().is_none());
+    }
+}

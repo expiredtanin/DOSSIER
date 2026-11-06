@@ -2038,6 +2038,10 @@ pub struct SunStudy {
     #[serde(rename = "treeHeight", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tree_height: Option<f64>,
+    /// [64] Schatten im 3D (Sonne aus `when`); fehlt der Wert, gilt `show`.
+    #[serde(rename = "shadows3d", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shadows3d: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

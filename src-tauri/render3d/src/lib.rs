@@ -27,6 +27,7 @@ pub mod section;
 pub mod section_boolean;
 pub mod section_fill;
 pub mod shaders;
+pub mod shadow;
 pub mod types;
 
 #[cfg(feature = "render")]
@@ -1388,5 +1389,12 @@ mod tests {
         Validator::new(ValidationFlags::all(), Capabilities::all())
             .validate(&ghost_module)
             .unwrap_or_else(|e| panic!("ghost: WGSL-Validierung fehlgeschlagen: {e:?}"));
+
+        // Schatten-Tiefenpass ([64]).
+        let shadow_module = naga::front::wgsl::parse_str(super::shaders::SHADOW_WGSL)
+            .unwrap_or_else(|e| panic!("shadow: WGSL-Parse-Fehler: {e:?}"));
+        Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&shadow_module)
+            .unwrap_or_else(|e| panic!("shadow: WGSL-Validierung fehlgeschlagen: {e:?}"));
     }
 }

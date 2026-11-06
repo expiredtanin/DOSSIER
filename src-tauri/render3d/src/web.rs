@@ -441,6 +441,25 @@ impl WebModelRenderer {
         self.renderer.set_white_mode(white);
     }
 
+    /// Sonne der Sonnenstudie ([64]): Azimut (° von Nord im Uhrzeigersinn) und Hoehe (°) aus dem
+    /// Kern (`sun_position`), `shadows` = Schatten im 3D zeichnen. `active = false` (keine Studie)
+    /// oder Sonne unter dem Horizont: Standardlicht, keine Schatten. Der Schattenpass laeuft nur
+    /// nach einer Aenderung, nicht je Kamera-Frame. Wirkt beim naechsten `render`.
+    pub fn set_sun(&mut self, active: bool, azimuth_deg: f64, elevation_deg: f64, shadows: bool) {
+        let dir = if active { crate::shadow::sun_dir_world(azimuth_deg, elevation_deg) } else { None };
+        self.renderer.set_sun(dir, shadows);
+    }
+
+    /// Kantenlaenge der Schattentextur (Standard 2048, geklemmt 256…8192).
+    pub fn set_shadow_map_size(&mut self, size: u32) {
+        self.renderer.set_shadow_map_size(size);
+    }
+
+    /// Diagnose: Zahl der bisher gerenderten Schatten-Tiefenpaesse (bleibt beim Kamera-Drehen gleich).
+    pub fn shadow_pass_count(&self) -> u32 {
+        self.renderer.shadow_pass_count()
+    }
+
     /// Schaltet das Referenz-Bodengitter (grid.rs) ein/aus und setzt seine
     /// Parameter. `elevation_m` = Hoehe der XZ-Gitterebene (world-Meter, i. d. R.
     /// die z=0-Ebene des aktiven Geschosses); `extent_m` = quadratische Kantenlaenge

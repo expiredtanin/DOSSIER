@@ -1,6 +1,6 @@
 // Schattenstudie im Lage-Panel ([64]/[59]): Schalter, Datum, Zeitregler (Ortszeit) und
 // Sonnenstand. Der Schatten selbst entsteht im Grundriss (`plan/generatePlan/sunShadow.ts`)
-// aus `Project.sunStudy`; der Regler schreibt mit coalesceKey (ein Undo-Schritt je Ziehen).
+// und im 3D (render3d-Shadow-Mapping, `viewport/sun3d.ts`, [64]) aus `Project.sunStudy`; der Regler schreibt mit coalesceKey (ein Undo-Schritt je Ziehen).
 
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
@@ -37,6 +37,14 @@ export function SunStudySection() {
       <label className="sun-row">
         <input type="checkbox" checked={study.show} onChange={(e) => write({ ...study, show: e.target.checked })} />
         <span>{t("sun.show")}</span>
+      </label>
+      <label className="sun-row" title={t("sun.shadows3d.hint")}>
+        <input
+          type="checkbox"
+          checked={study.shadows3d ?? study.show}
+          onChange={(e) => write({ ...study, shadows3d: e.target.checked })}
+        />
+        <span>{t("sun.shadows3d")}</span>
       </label>
       <div className="sun-row">
         <input

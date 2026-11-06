@@ -66,6 +66,7 @@ import type { Vec3 } from "../core";
 import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
 import { pointCloudSyncItems } from "./pointCloudSync";
 import { usePointClouds } from "../state/pointCloudStore";
+import { sun3dFor, sun3dKey } from "./sun3d";
 import { useStore } from "../state/appStore";
 import { projectGeoOrigin } from "../core";
 import {
@@ -601,6 +602,7 @@ export function Wasm3DViewport({
     render,
     updateModel,
     setRenderStyle,
+    setSun,
     applyViewPreset,
     viewFit,
     readRustCamera,
@@ -772,6 +774,20 @@ export function Wasm3DViewport({
     setRenderStyle(renderMode);
     redrawRef.current();
   }, [ready, renderMode, setRenderStyle]);
+
+  // Sonne + Schatten im 3D ([64]) aus der Sonnenstudie: der Zeitregler im Lage-Panel ändert
+  // `sunStudy.when`, hier wird neu gesetzt und gezeichnet. Der Schlüssel hält Modelländerungen ohne
+  // neue Sonne draussen; die Schattentextur rendert die Engine selbst nur nach einer Änderung neu.
+  const sun3d = sun3dFor(project);
+  const sunKey = sun3dKey(sun3d);
+  const sun3dRef = useRef(sun3d);
+  sun3dRef.current = sun3d;
+  useEffect(() => {
+    if (!ready) return;
+    const s = sun3dRef.current;
+    setSun(s.active, s.azimuth, s.elevation);
+    redrawRef.current();
+  }, [ready, sunKey, setSun]);
 
   // Boden-Referenzraster: bei Bereitschaft oder Wechsel von Sichtbarkeit/
   // Geschoss-Hoehe neu setzen + zeichnen. Fixe Ausdehnung/Abstand (300 m /

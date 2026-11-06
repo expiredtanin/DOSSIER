@@ -22,7 +22,8 @@ use crate::section::SectionPlane;
 use crate::section_fill::{
     build_cut_cap_lines, build_cut_caps, CAP_FLOATS_PER_VERTEX, CUT_LINE_FLOATS_PER_VERTEX,
 };
-use crate::shaders::{CAP_WGSL, GHOST_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL};
+use crate::shaders::{CAP_WGSL, GHOST_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL, SHADOW_WGSL};
+use crate::shadow::{caster_indices, light_view_proj, texel_world_size, DEFAULT_SHADOW_MAP_SIZE};
 use crate::types::{
     Camera, MeshInput, RoofLayerInput, SlabInput, WallInput,
     FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
@@ -143,7 +144,23 @@ struct Globals {
     /// w = -dot(normal, point). Ein Fragment mit `dot(world, xyz) + w > 0` liegt
     /// hinter der Ebene und wird (bei aktivem Schnitt, mode.y > 0.5) verworfen.
     section_plane: [f32; 4],
+    /// Schatten ([64]): world -> Licht-Clip (`shadow::light_view_proj`).
+    light_view_proj: [f32; 16],
+    /// Schatten: x = an (1)/aus (0), y = Normalen-Verschiebung (m), z = PCF-Schritt (UV), w = Tiefen-Bias.
+    shadow: [f32; 4],
 }
+
+/// Uniform des Schatten-Tiefenpasses, 1:1 zu `ShadowGlobals` in `SHADOW_WGSL`.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ShadowGlobals {
+    light_view_proj: [f32; 16],
+    section_plane: [f32; 4],
+    mode: [f32; 4],
+}
+
+/// Tiefenformat der Schattentextur (vergleichs-sampelbar auf WebGPU, Metal, Vulkan).
+const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 impl Default for Globals {
     fn default() -> Self {
@@ -160,6 +177,8 @@ impl Default for Globals {
             mode: [0.0, 0.0, 0.0, 0.0],
             // Default: kein Schnitt (mode.y = 0). Neutrale Ebene.
             section_plane: [0.0, 0.0, 1.0, 0.0],
+            light_view_proj: crate::math::identity(),
+            shadow: [0.0; 4],
         }
     }
 }
@@ -267,6 +286,10 @@ struct ChunkBuffers {
     edges: Option<LineBuffers>,
     /// Schraffur-Kappen an Wand-Oberseiten und freien Wandenden (statisch, unabhaengig vom Live-Schnitt).
     caps: Option<CapBuffers>,
+    /// Schatten ([64]): Indizes der schattenwerfenden Dreiecke (ohne Glas) und ihre Zahl. `None` mit
+    /// Zahl > 0 = alle Dreiecke werfen, der Haupt-Indexpuffer `mesh.ibo` genuegt.
+    caster_ibo: Option<wgpu::Buffer>,
+    caster_count: u32,
 }
 
 fn vertex_buffer(device: &wgpu::Device, label: &str, data: &[f32]) -> wgpu::Buffer {
@@ -303,6 +326,11 @@ fn upload_chunk(device: &wgpu::Device, d: ChunkData) -> ChunkBuffers {
     if d.mesh.indices.is_empty() {
         return out;
     }
+    let casters = caster_indices(&d.mesh.verts, &d.mesh.indices);
+    out.caster_count = casters.len() as u32;
+    if !casters.is_empty() && casters.len() != d.mesh.indices.len() {
+        out.caster_ibo = Some(index_buffer(device, "mesh.shadow.ibo", &casters));
+    }
     out.mesh = Some(MeshBuffers {
         vbo: vertex_buffer(device, "mesh.vbo", &d.mesh.verts),
         ibo: index_buffer(device, "mesh.ibo", &d.mesh.indices),
@@ -320,6 +348,40 @@ fn upload_chunk(device: &wgpu::Device, d: ChunkData) -> ChunkBuffers {
     })
     ;
     out
+}
+
+/// Schattentextur ([64]) der Kantenlaenge `size` als View (Tiefe, als Ziel und vergleichs-sampelbar).
+fn create_shadow_view(device: &wgpu::Device, size: u32) -> wgpu::TextureView {
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("shadow.map"),
+        size: wgpu::Extent3d { width: size.max(1), height: size.max(1), depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: SHADOW_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    tex.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// Bind-Group 0 aller Pipelines: Globals-Uniform + Schattentextur + Vergleichs-Sampler.
+fn create_globals_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    uniform: &wgpu::Buffer,
+    shadow_view: &wgpu::TextureView,
+    shadow_sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("globals.bind"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(shadow_view) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(shadow_sampler) },
+        ],
+    })
 }
 
 /// Der native 3D-Renderer: haelt die Pipeline, das Uniform (View-Projektion +
@@ -410,6 +472,29 @@ pub struct Renderer {
     texture_uploaded: bool,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
+    /// Layout von group 0 (Globals + Schattentextur + Vergleichs-Sampler), fuer den Neubau der
+    /// Bind-Group, wenn die Schattentextur neu angelegt wird.
+    bind_group_layout: wgpu::BindGroupLayout,
+    /// Schatten ([64]): Tiefenpass-Pipeline, ihr Uniform/Bind-Group, die Schattentextur (zuerst 1x1
+    /// als Platzhalter, beim ersten Einschalten in voller Groesse) und der Vergleichs-Sampler.
+    shadow_pipeline: wgpu::RenderPipeline,
+    shadow_uniform: wgpu::Buffer,
+    shadow_bind_group: wgpu::BindGroup,
+    shadow_view: wgpu::TextureView,
+    shadow_sampler: wgpu::Sampler,
+    /// Kantenlaenge der angelegten Schattentextur und die gewuenschte (Option, Standard 2048).
+    shadow_alloc: u32,
+    shadow_size: u32,
+    /// Richtung ZUR Sonne (world) oder None (keine Sonnenstudie / Nacht) und der Schalter.
+    sun: Option<[f32; 3]>,
+    shadows_on: bool,
+    /// Licht ohne Sonne (`set_light`), gilt wieder, sobald die Sonne wegfaellt.
+    base_light: [f32; 4],
+    /// Schattentextur muss neu gerendert werden (Sonne, Geometrie, Schnitt, Groesse geaendert) —
+    /// nicht je Kamera-Frame.
+    shadow_dirty: bool,
+    /// Zahl der Schatten-Tiefenpaesse seit dem Start (Test/Diagnose).
+    shadow_passes: u32,
     /// Das Modell als Teile ([58], `scene.rs`): CPU-Netze je Teil, Kanten-Index, Klumpen-Zuordnung.
     scene: Scene,
     /// GPU-Puffer je Klumpen der Szene (Flächen, texturiert, Kanten, Wand-Kappen); ein Teil-Update
@@ -490,18 +575,38 @@ impl Renderer {
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("globals.layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(
-                            std::mem::size_of::<Globals>() as u64
-                        ),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                std::mem::size_of::<Globals>() as u64
+                            ),
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    // Schatten ([64]): Tiefentextur + Vergleichs-Sampler (nur die beleuchteten
+                    // Flaechen-Shader lesen sie; die uebrigen ignorieren die Bindungen).
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                ],
             });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1086,13 +1191,92 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals.bind"),
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
+        // Schatten ([64]): Platzhalter-Textur 1x1 bis zum ersten Einschalten, Vergleichs-Sampler
+        // (LessEqual: Fragment-Tiefe <= gespeicherte -> besonnt; linear = 2x2-PCF je Abtastung).
+        let shadow_view = create_shadow_view(device, 1);
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        let bind_group = create_globals_bind_group(device, &bind_group_layout, &uniform, &shadow_view, &shadow_sampler);
+
+        // Schatten-Tiefenpass: eigenes Uniform (Licht-Matrix + Schnitt), nur Positionen des
+        // Haupt-Mesh-Layouts, kein Farbziel, kein Culling (doppelseitige/duenne Teile werfen auch),
+        // Steigungs-Bias gegen Akne (klein: zu viel Bias loest den Schatten vom Werfer, Peter-Panning).
+        let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow.layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                resource: uniform.as_entire_binding(),
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<ShadowGlobals>() as u64),
+                },
+                count: None,
             }],
+        });
+        let shadow_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shadow.globals"),
+            size: std::mem::size_of::<ShadowGlobals>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow.bind"),
+            layout: &shadow_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: shadow_uniform.as_entire_binding() }],
+        });
+        let shadow_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shadow.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(SHADOW_WGSL.into()),
+        });
+        let shadow_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("shadow.pipeline.layout"),
+            bind_group_layouts: &[Some(&shadow_layout)],
+            immediate_size: 0,
+        });
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shadow.pipeline"),
+            layout: Some(&shadow_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shadow_module,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: (FLOATS_PER_VERTEX * 4) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shadow_module,
+                entry_point: Some("fs_main"),
+                targets: &[],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: SHADOW_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState { constant: 2, slope_scale: 1.5, clamp: 0.0 },
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
         });
 
         let points =
@@ -1125,6 +1309,19 @@ impl Renderer {
             texture_uploaded: false,
             bind_group,
             uniform,
+            bind_group_layout,
+            shadow_pipeline,
+            shadow_uniform,
+            shadow_bind_group,
+            shadow_view,
+            shadow_sampler,
+            shadow_alloc: 1,
+            shadow_size: DEFAULT_SHADOW_MAP_SIZE,
+            sun: None,
+            shadows_on: false,
+            base_light: Globals::default().light_dir,
+            shadow_dirty: true,
+            shadow_passes: 0,
             scene: Scene::new(),
             chunks: Vec::new(),
             grid: None,
@@ -1212,6 +1409,7 @@ impl Renderer {
     /// Gelaende-Overlay nur, wenn sich Gelaende geaendert hat). `reset` = ganzes Modell neu.
     pub fn update_parts(&mut self, device: &wgpu::Device, upd: PartsUpdate) -> SceneChange {
         let ch = self.scene.apply(upd);
+        self.shadow_dirty = true;
         // Silhouette-Cache verwerfen (neues Modell) — wird bei Bedarf neu gebaut.
         self.silhouette = None;
         self.silhouette_key = None;
@@ -1245,7 +1443,52 @@ impl Renderer {
     /// Setzt die Richtung ZUM Directional-Light (Sonne, world). Das hemisphaerische
     /// Ambient (Himmel/Boden) bleibt bei den Default-Farben.
     pub fn set_light(&mut self, dir_to_light: [f32; 3]) {
-        self.globals.light_dir = normalize4(dir_to_light);
+        self.base_light = normalize4(dir_to_light);
+        if self.sun.is_none() {
+            self.globals.light_dir = self.base_light;
+        }
+    }
+
+    /// Sonne der Sonnenstudie ([64]): Richtung ZUR Sonne (world, `shadow::sun_dir_world`) oder
+    /// `None` (keine Studie, Sonne unter dem Horizont) und ob Schatten gezeichnet werden. Mit Sonne
+    /// kommt das Licht aus ihrer Richtung; ohne gilt wieder `set_light`. Der Schattenpass laeuft
+    /// erst im naechsten `render` und nur, wenn sich etwas geaendert hat.
+    pub fn set_sun(&mut self, dir_to_sun: Option<[f32; 3]>, shadows: bool) {
+        let dir = dir_to_sun.filter(|d| d.iter().all(|v| v.is_finite()) && d[1] > 0.0);
+        if dir != self.sun || shadows != self.shadows_on {
+            self.shadow_dirty = true;
+        }
+        self.sun = dir;
+        self.shadows_on = shadows;
+        self.globals.light_dir = match dir {
+            Some(d) => normalize4(d),
+            None => self.base_light,
+        };
+    }
+
+    /// Kantenlaenge der Schattentextur (Option, Standard 2048; geklemmt 256…8192 und aufs
+    /// Geraete-Limit beim Anlegen).
+    pub fn set_shadow_map_size(&mut self, size: u32) {
+        let s = size.clamp(256, 8192);
+        if s != self.shadow_size {
+            self.shadow_size = s;
+            self.shadow_dirty = true;
+        }
+    }
+
+    /// Werden im naechsten Frame Schatten gezeichnet (Sonne ueber dem Horizont, Schalter an,
+    /// beleuchteter Stil, Modell vorhanden)?
+    pub fn shadows_active(&self) -> bool {
+        self.sun.is_some()
+            && self.shadows_on
+            && self.style.draws_faces()
+            && self.style.mesh_mode() < 1.5
+            && self.scene.shadow_bounds().is_some()
+    }
+
+    /// Zahl der bisher gerenderten Schatten-Tiefenpaesse (Diagnose: nicht je Kamera-Frame).
+    pub fn shadow_pass_count(&self) -> u32 {
+        self.shadow_passes
     }
 
     /// Uebersteuert die hemisphaerischen Ambient-Farben (Himmel oben, Boden unten)
@@ -1392,8 +1635,12 @@ impl Renderer {
     pub fn set_section_plane(&mut self, active: bool, point: [f32; 3], normal: [f32; 3]) {
         let n = crate::math::normalize(normal);
         let w = -(n[0] * point[0] + n[1] * point[1] + n[2] * point[2]);
+        let mode = if active { 1.0 } else { 0.0 };
+        if self.globals.section_plane != [n[0], n[1], n[2], w] || self.globals.mode[1] != mode {
+            self.shadow_dirty = true;
+        }
         self.globals.section_plane = [n[0], n[1], n[2], w];
-        self.globals.mode[1] = if active { 1.0 } else { 0.0 };
+        self.globals.mode[1] = mode;
     }
 
     /// Setzt/loescht die Schnittflaechen-Kappen (Cut-Caps). `verts` = interleaved
@@ -1666,6 +1913,76 @@ impl Renderer {
         self.texture_uploaded = true;
     }
 
+    /// Schatten vorbereiten ([64]): setzt `globals.shadow`/`light_view_proj`, legt die Schattentextur
+    /// bei Bedarf in voller Groesse an und schreibt das Uniform des Tiefenpasses. `true` = in diesem
+    /// Frame einen Tiefenpass rendern (nur nach einer Aenderung, nicht je Kamera-Frame).
+    fn prepare_shadows(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+        self.globals.shadow = [0.0; 4];
+        if !self.shadows_active() {
+            return false;
+        }
+        let (Some(sun), Some((focus, all))) = (self.sun, self.scene.shadow_bounds()) else {
+            return false;
+        };
+        let Some(light) = light_view_proj(sun, focus, all) else {
+            return false;
+        };
+        let size = self.shadow_size.min(device.limits().max_texture_dimension_2d).max(1);
+        if self.shadow_alloc != size {
+            self.shadow_view = create_shadow_view(device, size);
+            self.shadow_alloc = size;
+            self.bind_group = create_globals_bind_group(
+                device,
+                &self.bind_group_layout,
+                &self.uniform,
+                &self.shadow_view,
+                &self.shadow_sampler,
+            );
+            self.shadow_dirty = true;
+        }
+        // Normalen-Verschiebung ≈ 1.5 Texel, Tiefen-Bias ≈ 2 cm im Licht-NDC.
+        let texel = texel_world_size(&light, size);
+        let depth_range = 1.0 / light[10].abs().max(1e-9);
+        self.globals.light_view_proj = light;
+        self.globals.shadow = [1.0, texel * 1.5, 1.0 / size as f32, 0.02 / depth_range];
+        if !self.shadow_dirty {
+            return false;
+        }
+        let sg = ShadowGlobals { light_view_proj: light, section_plane: self.globals.section_plane, mode: self.globals.mode };
+        queue.write_buffer(&self.shadow_uniform, 0, bytemuck::bytes_of(&sg));
+        self.shadow_dirty = false;
+        self.shadow_passes += 1;
+        true
+    }
+
+    /// Rendert die schattenwerfenden Dreiecke aller Klumpen in die Schattentextur.
+    fn encode_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("shadow.pass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.shadow_view,
+                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.shadow_pipeline);
+        pass.set_bind_group(0, &self.shadow_bind_group, &[]);
+        for c in &self.chunks {
+            let Some(m) = &c.mesh else { continue };
+            if c.caster_count == 0 {
+                continue;
+            }
+            pass.set_vertex_buffer(0, m.vbo.slice(..));
+            let ibo = c.caster_ibo.as_ref().unwrap_or(&m.ibo);
+            pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..c.caster_count, 0, 0..1);
+        }
+    }
+
     /// Stellt sicher, dass ein Tiefenpuffer passend zur Ziel-Groesse existiert.
     fn ensure_depth(&mut self, device: &wgpu::Device, w: u32, h: u32) {
         let ok = matches!(&self.depth, Some(d) if d.width == w && d.height == h);
@@ -1746,6 +2063,8 @@ impl Renderer {
         self.globals.mode[0] = self.style.mesh_mode();
         // `mode.z` = Anzahl gueltiger Textur-Array-Ebenen (Klemmung im Textur-Shader).
         self.globals.mode[2] = self.material_layer_count as f32;
+        // Schatten ([64]): Tiefenpass nur bei Aenderung (Sonne, Geometrie, Schnitt, Groesse).
+        let shadow_pass = self.prepare_shadows(device, queue);
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&self.globals));
 
         // Prozedurale Schachbrett-Textur einmalig hochladen (lazy, weil `new` keine
@@ -1858,6 +2177,9 @@ impl Renderer {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("3d.encoder"),
         });
+        if shadow_pass {
+            self.encode_shadow_pass(&mut encoder);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d.pass"),
@@ -2132,5 +2454,82 @@ mod render_style_tests {
     fn plain_shaded_style_unaffected_by_new_variant() {
         assert!(!RenderStyle::Shaded.draws_edges());
         assert!(RenderStyle::Shaded.draws_faces());
+    }
+}
+
+/// Schatten ([64]) auf einer echten GPU: im Linux-Container über Vulkan/lavapipe, auf macOS Metal.
+/// Ohne Adapter (CI ohne Grafik) wird der Test still übersprungen.
+#[cfg(test)]
+mod shadow_gpu_tests {
+    use super::{RenderStyle, Renderer};
+    use crate::types::{Camera, WallInput};
+
+    fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    }
+
+    fn walls() -> Vec<WallInput> {
+        let w = |a: [f32; 2], b: [f32; 2]| -> WallInput {
+            let mut w: WallInput = serde_json::from_str(r#"{"start":[0,0],"end":[1,0],"thickness":0.2,"height":6}"#).unwrap();
+            w.start = a;
+            w.end = b;
+            w
+        };
+        vec![w([0.0, 0.0], [8.0, 0.0]), w([8.0, 0.0], [8.0, 6.0]), w([8.0, 6.0], [0.0, 6.0]), w([0.0, 6.0], [0.0, 0.0])]
+    }
+
+    /// Der Tiefenpass läuft nur nach einer Änderung (Sonne, Geometrie, Schalter), nicht je Kamera-Frame;
+    /// unter dem Horizont und in den Linien-Stilen gar nicht.
+    #[test]
+    fn schattenpass_nur_bei_aenderung() {
+        let Some((device, queue)) = device() else {
+            eprintln!("kein GPU-Adapter: Test übersprungen");
+            return;
+        };
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let mut r = Renderer::new(&device, format);
+        r.upload_walls(&device, &walls());
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: 64, height: 48, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        let mut cam = Camera { eye: [20.0, 15.0, 20.0], target: [4.0, 2.0, 3.0], ..Camera::default() };
+        let frame = |r: &mut Renderer, cam: &Camera| r.render(&device, &queue, &view, cam, (64, 48));
+
+        frame(&mut r, &cam);
+        assert_eq!(r.shadow_pass_count(), 0, "ohne Sonne kein Schattenpass");
+        r.set_sun(crate::shadow::sun_dir_world(135.0, 30.0), true);
+        assert!(r.shadows_active());
+        frame(&mut r, &cam);
+        assert_eq!(r.shadow_pass_count(), 1);
+        for k in 0..5 {
+            cam.eye[0] += k as f32;
+            frame(&mut r, &cam);
+        }
+        assert_eq!(r.shadow_pass_count(), 1, "Kamera bewegt: kein neuer Schattenpass");
+        r.set_sun(crate::shadow::sun_dir_world(150.0, 32.0), true);
+        frame(&mut r, &cam);
+        assert_eq!(r.shadow_pass_count(), 2, "neue Sonne");
+        r.upload_walls(&device, &walls()[..2]);
+        frame(&mut r, &cam);
+        assert_eq!(r.shadow_pass_count(), 3, "neue Geometrie");
+        r.set_render_style(RenderStyle::Hidden);
+        r.set_sun(crate::shadow::sun_dir_world(160.0, 33.0), true);
+        frame(&mut r, &cam);
+        assert_eq!(r.shadow_pass_count(), 3, "Verdeckt: keine Schatten");
+        r.set_render_style(RenderStyle::Shaded);
+        r.set_sun(crate::shadow::sun_dir_world(160.0, -4.0), true);
+        assert!(!r.shadows_active(), "Sonne unter dem Horizont");
+        frame(&mut r, &cam);
+        assert_eq!(r.shadow_pass_count(), 3);
     }
 }
