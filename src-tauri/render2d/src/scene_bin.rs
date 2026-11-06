@@ -3,7 +3,8 @@
 //
 // Aufbau (alle Abschnitte lueckenlos hintereinander, kein Fuellmaterial):
 //   Kopf, 48 Byte:  magic "DR2S" | version u32 | n_fills n_outlines n_polylines n_arcs
-//                   n_lines n_texts (je u32) | n_pts u32 | n_dash u32 | str_bytes u32 | 0 u32
+//                   n_lines n_texts (je u32) | n_pts u32 | n_dash u32 | str_bytes u32 |
+//                   line_ends u32 ([146] `cap | join << 2`, frueher 0 = flach + Gehrung)
 //   Punkte:         n_pts x (x f64, y f64) in Modell-Metern (LV95-gross moeglich). Gemeinsamer
 //                   Pool, der der Reihe nach verbraucht wird: Fuellungen, Umrisse, Polylinien
 //                   (je `n` Punkte), Boegen (je 3: Mitte, von, nach), Linien (je 2), Texte (je 1).
@@ -123,7 +124,8 @@ pub fn decode_scene(bytes: &[u8]) -> Result<Scene, String> {
     let n_pts = r.u32() as u64;
     let n_dash = r.u32() as u64;
     let str_bytes = r.u32() as u64;
-    let _reserved = r.u32();
+    // Frueher reserviert (0), seit [146] Linienenden/-ecken `cap | join << 2`.
+    let line_ends = r.u32() & 0xf;
 
     // Gesamtlaenge in u64 vorab pruefen (u32-Zaehler * kleine Faktoren laufen nicht
     // ueber), bevor irgendetwas alloziert wird.
@@ -207,6 +209,7 @@ pub fn decode_scene(bytes: &[u8]) -> Result<Scene, String> {
     if pts.next != n_pts || dashes.next != dashes.v.len() {
         return Err("Pools nicht vollstaendig verbraucht".into());
     }
+    scene.line_ends = line_ends;
     Ok(scene)
 }
 
@@ -240,6 +243,7 @@ mod tests {
                 Text { pos: [3.0, 4.0], content: String::new(), size_mm: 2.0, color: [0.0, 0.0, 0.0, 1.0], align: TextAlign::Right },
                 Text { pos: [5.0, 6.0], content: "A".into(), size_mm: 1.0, color: [0.0, 0.0, 1.0, 1.0], align: TextAlign::Left },
             ],
+            line_ends: 0,
         }
     }
 
@@ -262,6 +266,15 @@ mod tests {
         b.extend_from_slice(&VERSION.to_le_bytes());
         b.extend_from_slice(&[0u8; 40]);
         assert_same(&decode_scene(&b).unwrap(), &Scene::default());
+    }
+
+    #[test]
+    fn linienenden_im_kopf() {
+        // [146] Das frühere Reservewort trägt `cap | join << 2`; alte Szenen (0) = flach + Gehrung.
+        assert_eq!(decode_scene(FIXTURE).unwrap().line_ends, 0);
+        let mut v = FIXTURE.to_vec();
+        v[44..48].copy_from_slice(&(1u32 | 2 << 2).to_le_bytes());
+        assert_eq!(decode_scene(&v).unwrap().line_ends, 9);
     }
 
     #[test]
@@ -417,7 +430,7 @@ mod roundtrip {
             (pts.len() / 16) as u32,
             (dash.len() / 4) as u32,
             strs.len() as u32,
-            0,
+            s.line_ends,
         ] {
             out.extend_from_slice(&v.to_le_bytes());
         }

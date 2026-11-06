@@ -36,6 +36,8 @@ use crate::hatch::{self, v2, Hatch, HatchKind, Pattern, Run, V2, DASH_MM_TO_M};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::plan::buf::{self, PlanBuf, Prim, Style};
+use crate::plan::line_ends::{LineEnds, MITER_LIMIT};
+use crate::plan::scene::stitch_runs;
 use std::f64::consts::PI;
 
 const PX_PER_M: f64 = 90.0;
@@ -285,14 +287,21 @@ fn snorm8(v: f64) -> u32 {
     ((r as i32) & 0xff) as u32
 }
 
-/// Gepacktes Normalen-Wort: snorm8 nx | ny | side | miter (=127).
+/// Gepacktes Normalen-Wort: snorm8 nx | ny | side | miter-Byte (0 = Faktor 1, s. [`miter_word`]).
 #[inline]
 fn normal_word(nx: f64, ny: f64, side: f64) -> u32 {
-    snorm8(nx) | (snorm8(ny) << 8) | (snorm8(side) << 16) | (127 << 24)
+    snorm8(nx) | (snorm8(ny) << 8) | (snorm8(side) << 16)
+}
+
+/// Wie [`normal_word`] mit Längenfaktor `m` in [1, 4] ([146] Gehrungsspitze, vorstehende Kappe):
+/// Byte = snorm8((m − 1) / 3), der Shader (`render2d/chunks.rs`) rechnet `1 + max(w, 0) · 3`.
+#[inline]
+fn miter_word(nx: f64, ny: f64, side: f64, m: f64) -> u32 {
+    normal_word(nx, ny, side) | (snorm8((m - 1.0) / 3.0) << 24)
 }
 
 /// Fächer-Zentrum (1, 0, 0) gepackt.
-const CENTER_WORD: u32 = 127 | (127 << 24);
+const CENTER_WORD: u32 = 127;
 
 #[inline]
 fn left_normal(d: V2) -> V2 {
@@ -322,6 +331,12 @@ struct Compiler {
     scratch: Vec<V2>,
     seg_dir: Vec<Option<V2>>,
     seg_ang: Vec<[Option<f64>; 2]>,
+    /// Linienenden und -ecken ([146]).
+    ends: LineEnds,
+    /// Volle, offene Züge je (Farbe, Breite), am Ende zusammengenäht ([146]): Wand-Umrisse zweier
+    /// Wände treffen sich an der Ecke als EIN Zug mit Ecke statt zwei Enden (keine Kerbe).
+    solid: Vec<(Rgba, f64, Vec<Vec<V2>>)>,
+    solid_of: std::collections::HashMap<[u64; 5], usize>,
 }
 
 impl Compiler {
@@ -390,8 +405,37 @@ impl Compiler {
 
     /// Linienzug mit Strichmuster `dash` (Papier-mm): gültiges Muster bis [`MAX_LINE_DASH`]
     /// Einträge → Shader-Instanzen; längeres → CPU-Zerlegung; ungültiges/fehlendes → durchgezogen.
+    /// Vollen offenen Zug zum Zusammennähen vormerken (gezeichnet am Ende von `compile`).
+    fn defer_solid(&mut self, pts_m: &[V2], color: Rgba, stroke_mm: f64) {
+        if pts_m.len() < 2 {
+            return;
+        }
+        let k = [color[0].to_bits(), color[1].to_bits(), color[2].to_bits(), color[3].to_bits(), stroke_mm.to_bits()];
+        let gi = match self.solid_of.get(&k) {
+            Some(&g) => g,
+            None => {
+                self.solid.push((color, stroke_mm, Vec::new()));
+                self.solid_of.insert(k, self.solid.len() - 1);
+                self.solid.len() - 1
+            }
+        };
+        self.solid[gi].2.push(pts_m.to_vec());
+    }
+
+    fn flush_solid(&mut self) {
+        for (color, stroke_mm, runs) in std::mem::take(&mut self.solid) {
+            for (pts, closed) in stitch_runs(runs) {
+                self.stroke_polyline(&pts, closed, color, stroke_mm, false);
+            }
+        }
+        self.solid_of.clear();
+    }
+
     fn stroke_styled(&mut self, pts_m: &[V2], closed: bool, dash: Option<&[f64]>, color: Rgba, stroke_mm: f64) {
         let Some(d) = dash.filter(|d| !d.is_empty()) else {
+            if !closed {
+                return self.defer_solid(pts_m, color, stroke_mm);
+            }
             return self.stroke_polyline(pts_m, closed, color, stroke_mm, false);
         };
         match dash_cycle_m(d) {
@@ -401,9 +445,15 @@ impl Compiler {
                 if closed && pts_m.len() > 2 {
                     run.push(pts_m[0]);
                 }
+                // Punkte im Muster brauchen runde Enden ([96]), auch bei flacher Einstellung.
+                let saved = self.ends;
+                if d.iter().step_by(2).any(|v| *v <= 0.0) {
+                    self.ends.cap = 1;
+                }
                 for piece in hatch::apply_dash_runs(vec![run], &line_dash_for_runs(d)) {
                     self.stroke_polyline(&piece, false, color, stroke_mm, false);
                 }
+                self.ends = saved;
             }
             None => self.stroke_polyline(pts_m, closed, color, stroke_mm, false),
         }
@@ -416,8 +466,12 @@ impl Compiler {
         if pts_m.len() < 2 {
             return;
         }
+        // Maler-Reihenfolge: vorgemerkte volle Züge vor diesem Strich zeichnen ([146]).
+        self.flush_solid();
         let close = closed && pts_m.len() > 2 && (pts_m[0].x != pts_m[pts_m.len() - 1].x || pts_m[0].y != pts_m[pts_m.len() - 1].y);
         let n_seg = pts_m.len() - 1 + usize::from(close);
+        // [146] Linienende im Muster-Zähler (`count + 16 · cap`); Punkte (Länge 0) immer rund ([96]).
+        let cap = if cycle_m.iter().step_by(2).any(|d| *d <= 0.0) { 1 } else { self.ends.cap as u32 };
         let seg = |i: usize| (pts_m[i], pts_m[(i + 1) % pts_m.len()]);
         let mut run = 0.0f64;
         for i in 0..n_seg {
@@ -455,7 +509,7 @@ impl Compiler {
                 (s0 * PX_PER_M) as f32,
                 (run * PX_PER_M) as f32,
                 total as f32,
-                cycle_m.len() as f32,
+                (cycle_m.len() as u32 + 16 * cap) as f32,
             ]);
             self.dash_inst.extend_from_slice(&dash);
             s0 += l;
@@ -475,6 +529,12 @@ impl Compiler {
     /// Wie `push_vert`, mit bereits gepacktem Normalen-Wort `w` (nur im gepackten Layout benutzt).
     #[inline]
     fn push_vert_w(&mut self, p: V2, w: u32, nx: f64, ny: f64, side: f64) -> u32 {
+        self.push_vert_m(p, w, nx, ny, side, 1.0)
+    }
+
+    /// Wie `push_vert_w` mit Längenfaktor `m` (Gehrungsspitze, Ecke der vorstehenden Kappe).
+    #[inline]
+    fn push_vert_m(&mut self, p: V2, w: u32, nx: f64, ny: f64, side: f64, m: f64) -> u32 {
         if self.packed {
             self.line_verts.extend_from_slice(&[(p.x as f32).to_bits(), (p.y as f32).to_bits(), w]);
             (self.line_verts.len() / 3 - 1) as u32
@@ -485,7 +545,7 @@ impl Compiler {
                 (nx as f32).to_bits(),
                 (ny as f32).to_bits(),
                 (side as f32).to_bits(),
-                1.0f32.to_bits(),
+                (m as f32).to_bits(),
             ]);
             (self.line_verts.len() / 6 - 1) as u32
         }
@@ -582,7 +642,55 @@ impl Compiler {
             let d_in = if has_in { seg_dir[i_in] } else { None };
             let d_out = if has_out { seg_dir[i_out] } else { None };
             let p = s_pts[v];
+            let ends = self.ends;
             match (d_in, d_out) {
+                (Some(d1), Some(d2)) if ends.join != 1 => {
+                    // [146] Gehrung (bis `MITER_LIMIT`, sonst gefast) bzw. Fase auf der Aussenseite.
+                    let turn = d1.x * d2.y - d1.y * d2.x;
+                    let dot = d1.x * d2.x + d1.y * d2.y;
+                    if (turn.abs() < 1e-6 && dot > 0.0) || dot < -0.9999 {
+                        continue;
+                    }
+                    let outer = if turn > 0.0 { -1.0 } else { 1.0 };
+                    let n1 = left_normal(d1);
+                    let n2 = left_normal(d2);
+                    let u1 = v2(outer * n1.x, outer * n1.y);
+                    let u2 = v2(outer * n2.x, outer * n2.y);
+                    let i_c = self.push_vert_w(p, CENTER_WORD, 1.0, 0.0, 0.0);
+                    let i1 = self.push_vert(p, u1.x, u1.y, 1.0);
+                    let i2 = self.push_vert(p, u2.x, u2.y, 1.0);
+                    let cos_half = ((1.0 + dot) * 0.5).sqrt();
+                    let m = if cos_half > 1e-9 { 1.0 / cos_half } else { f64::INFINITY };
+                    if ends.join == 0 && m <= MITER_LIMIT {
+                        let bx = u1.x + u2.x;
+                        let by = u1.y + u2.y;
+                        let bl = hypot2(bx, by);
+                        let (bx, by) = (bx / bl, by / bl);
+                        let w = if self.packed { miter_word(bx, by, 1.0, m) } else { 0 };
+                        let it = self.push_vert_m(p, w, bx, by, 1.0, m);
+                        self.line_idx.extend_from_slice(&[i_c, i1, it, i_c, it, i2]);
+                    } else {
+                        self.line_idx.extend_from_slice(&[i_c, i1, i2]);
+                    }
+                }
+                (None, Some(d)) | (Some(d), None) if ends.cap != 1 => {
+                    // [146] Flach: nichts; vorstehend: Rechteck um die halbe Breite nach aussen.
+                    if ends.cap == 2 {
+                        let e = if d_in.is_none() { v2(-d.x, -d.y) } else { d };
+                        let n = left_normal(d);
+                        let r2 = std::f64::consts::FRAC_1_SQRT_2;
+                        let ia = self.push_vert(p, n.x, n.y, 1.0);
+                        let ib = self.push_vert(p, n.x, n.y, -1.0);
+                        let (ax, ay) = ((n.x + e.x) * r2, (n.y + e.y) * r2);
+                        let (cx, cy) = ((-n.x + e.x) * r2, (-n.y + e.y) * r2);
+                        let m = std::f64::consts::SQRT_2;
+                        let wa = if self.packed { miter_word(ax, ay, 1.0, m) } else { 0 };
+                        let wc = if self.packed { miter_word(cx, cy, 1.0, m) } else { 0 };
+                        let ic = self.push_vert_m(p, wa, ax, ay, 1.0, m);
+                        let id = self.push_vert_m(p, wc, cx, cy, 1.0, m);
+                        self.line_idx.extend_from_slice(&[ia, ic, id, ia, id, ib]);
+                    }
+                }
                 (Some(d1), Some(d2)) => {
                     // Runder Übergang nur auf der äusseren Seite der Ecke.
                     let turn = d1.x * d2.y - d1.y * d2.x;
@@ -680,7 +788,7 @@ impl Compiler {
                     break;
                 }
             }
-            self.stroke_polyline(&run, false, color, stroke_mm, false);
+            self.defer_solid(&run, color, stroke_mm);
         }
     }
 
@@ -734,8 +842,11 @@ fn hatch_draws_lines(h: &Hatch) -> bool {
 
 /// Kompiliert die Primitive eines Plan-Puffers. `px_per_meter` steuert nur die Bogen-
 /// Tessellierung (0 = zoomunabhängig). `packed` = kompakte Linien-Vertices (nativer Renderer).
-pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
+pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool, ends: LineEnds) -> GpuOut {
     let mut c = Compiler {
+        ends,
+        solid: Vec::new(),
+        solid_of: std::collections::HashMap::new(),
         packed,
         fill_pos: Vec::new(),
         fill_idx: Vec::new(),
@@ -868,6 +979,7 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool) -> GpuOut {
             }
         }
     }
+    c.flush_solid();
 
     GpuOut {
         fill_pos: c.fill_pos,
@@ -932,9 +1044,9 @@ fn draw_circle_like(
 
 /// Flache Ausgabe (s. Modulkopf) für die Primitive `[from, to)` eines Plan-Puffers (v2); leer bei
 /// unlesbarem Puffer oder ungültigem Bereich.
-pub fn compile_flat(bytes: &[u8], from: usize, to: usize, px_per_meter: f64, packed: bool) -> Vec<u32> {
+pub fn compile_flat(bytes: &[u8], from: usize, to: usize, px_per_meter: f64, packed: bool, ends: LineEnds) -> Vec<u32> {
     let Some(plan) = buf::View::parse(bytes).and_then(|v| v.gpu(from, to)) else { return Vec::new() };
-    let o = compile(&plan, px_per_meter, packed);
+    let o = compile(&plan, px_per_meter, packed, ends);
     let mut meta: Vec<f64> = vec![
         o.origin.0,
         o.origin.1,
@@ -1012,8 +1124,36 @@ mod tests {
         PlanBuf { colors: vec![[0.0, 0.0, 0.0, 1.0], [0.5, 0.5, 0.5, 1.0]], hatches: vec![], prims }
     }
 
+    /// [146] Zwei einzelne volle Linien mit gemeinsamem Ende (Wand-Umrisse zweier Wände an der
+    /// Ecke) werden EIN Zug: Gehrung statt zweier flacher Enden (keine Kerbe); andere Enden/Ecken je
+    /// Einstellung.
+    #[test]
+    fn ecke_aus_zwei_linien_wird_ein_zug_mit_gehrung() {
+        let corner = |ends: LineEnds, packed: bool| {
+            let mut b = line(1.0, 1.0, false);
+            if let Prim::Line { b: bb, .. } = &mut b {
+                *bb = v2(1.0, 1.0);
+            }
+            compile(&plan(vec![line(0.0, 1.0, false), b]), 90.0, packed, ends)
+        };
+        let o = corner(LineEnds::default(), false);
+        assert_eq!(o.line_idx.len(), 2 * 6 + 2 * 3, "zwei Quads + Gehrung, keine Kappen");
+        let m: Vec<f32> = o.line_verts.chunks_exact(6).map(|v| f32::from_bits(v[5])).filter(|m| *m != 1.0).collect();
+        assert_eq!(m.len(), 1);
+        assert!((m[0] - std::f32::consts::SQRT_2).abs() < 1e-6);
+        // Gepackt: Faktor im obersten Byte als snorm8((m − 1) / 3), 0 = 1.
+        let p = corner(LineEnds::default(), true);
+        let bytes: Vec<i8> = p.line_verts.chunks_exact(3).map(|v| (v[2] >> 24) as u8 as i8).collect();
+        let tips: Vec<f32> = bytes.iter().filter(|b| **b != 0).map(|b| 1.0 + (*b as f32 / 127.0).max(0.0) * 3.0).collect();
+        assert_eq!(tips.len(), 1);
+        assert!((tips[0] - std::f32::consts::SQRT_2).abs() < 0.02, "{tips:?}");
+        // Gefast: ein Dreieck; vorstehend: je offenes Ende ein Rechteck.
+        assert_eq!(corner(LineEnds { cap: 0, join: 2 }, false).line_idx.len(), 2 * 6 + 3);
+        assert_eq!(corner(LineEnds { cap: 2, join: 0 }, false).line_idx.len(), 2 * 6 + 2 * 3 + 2 * 6);
+    }
+
     fn line_idx_count(p: &PlanBuf) -> u32 {
-        compile(p, 90.0, false).line_batches.iter().map(|b| b.count).sum()
+        compile(p, 90.0, false, LineEnds::default()).line_batches.iter().map(|b| b.count).sum()
     }
 
     #[test]
@@ -1080,7 +1220,7 @@ mod tests {
             },
             color: -1,
         });
-        let o = compile(&p, 90.0, true);
+        let o = compile(&p, 90.0, true, LineEnds::default());
         assert_eq!(o.fill_idx.len(), 6);
         assert_eq!(o.fill_batches[0].color, [1.0, 1.0, 1.0, 0.5]);
         // Schraffur (0.13 mm, grau) und Umriss (0.5 mm) als eigene Batches.
@@ -1099,7 +1239,7 @@ mod tests {
             Prim::DrawingArc { style: st(), stroke: 0, weight_mm: 0.5, center: v2(0.0, 0.0), r: 1.0, a0: 0.0, a1: 0.0, dash: None },
             Prim::Placeholder,
         ]);
-        let o = compile(&p, 0.0, false);
+        let o = compile(&p, 0.0, false, LineEnds::default());
         assert!(!o.fill_idx.is_empty());
         assert_eq!(o.line_batches.len(), 2);
         assert_eq!(o.bounds, (-1.0, -1.0, 2.0, 2.0));
@@ -1107,7 +1247,7 @@ mod tests {
 
     #[test]
     fn kaputter_puffer_leer() {
-        assert!(compile_flat(&[1, 2, 3], 0, 0, 90.0, true).is_empty());
+        assert!(compile_flat(&[1, 2, 3], 0, 0, 90.0, true, LineEnds::default()).is_empty());
         let mut w = buf::Writer::new(false);
         w.push(&crate::plan::prim::Primitive::Line {
             a: crate::model::Vec2 { x: 0.0, y: 0.0 },
@@ -1125,9 +1265,9 @@ mod tests {
             opacity: None,
         });
         let enc = w.finish();
-        assert!(!compile_flat(&enc, 0, 1, 90.0, true).is_empty());
-        assert!(compile_flat(&enc, 0, 2, 90.0, true).is_empty(), "Bereich ausserhalb");
-        assert!(!compile_flat(&enc, 1, 1, 90.0, true).is_empty(), "leerer Bereich = leere Geometrie");
+        assert!(!compile_flat(&enc, 0, 1, 90.0, true, LineEnds::default()).is_empty());
+        assert!(compile_flat(&enc, 0, 2, 90.0, true, LineEnds::default()).is_empty(), "Bereich ausserhalb");
+        assert!(!compile_flat(&enc, 1, 1, 90.0, true, LineEnds::default()).is_empty(), "leerer Bereich = leere Geometrie");
     }
     // --- Strichmuster im Shader (Chunk-Pfad, gleiche Instanzen wie render2d `DashSegment`) ---
 
@@ -1142,7 +1282,7 @@ mod tests {
 
     #[test]
     fn gestrichelte_linie_als_shader_instanz() {
-        let o = compile(&plan(vec![dashed(1.0, 4.0, false, vec![0.12, 0.08])]), 90.0, true);
+        let o = compile(&plan(vec![dashed(1.0, 4.0, false, vec![0.12, 0.08])]), 90.0, true, LineEnds::default());
         assert!(o.line_idx.is_empty() && o.line_verts.is_empty(), "keine durchgezogenen Striche mehr");
         assert_eq!(o.dash_inst.len(), DASH_INST_FLOATS);
         let d = inst(&o, 0);
@@ -1162,7 +1302,7 @@ mod tests {
     #[test]
     fn gestrichelter_zug_phase_laeuft_durch() {
         // Verkettete Linien: ein Zug, Phase über die Ecke, ungerades Muster verdoppelt.
-        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![1.0]), dashed(1.0, 3.0, true, vec![1.0])]), 90.0, true);
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![1.0]), dashed(1.0, 3.0, true, vec![1.0])]), 90.0, true, LineEnds::default());
         assert_eq!(o.dash_inst.len(), 2 * DASH_INST_FLOATS);
         assert_eq!(inst(&o, 1)[4], 90.0);
         assert_eq!(inst(&o, 1)[5], 270.0);
@@ -1170,21 +1310,21 @@ mod tests {
         assert_eq!(o.dash_batches.len(), 1);
         assert_eq!(o.dash_batches[0].count, 2);
         // Einzeln (nicht verkettet): jede Linie beginnt ihr Muster neu.
-        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![1.0]), dashed(1.0, 3.0, false, vec![1.0])]), 90.0, true);
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![1.0]), dashed(1.0, 3.0, false, vec![1.0])]), 90.0, true, LineEnds::default());
         assert_eq!(inst(&o, 1)[4], 0.0);
         assert_eq!(inst(&o, 1)[5], 180.0);
     }
 
     #[test]
     fn ungueltiges_muster_durchgezogen_langes_muster_zerlegt() {
-        let solid = compile(&plan(vec![line(0.0, 1.0, false)]), 90.0, true);
-        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![0.0, -1.0])]), 90.0, true);
+        let solid = compile(&plan(vec![line(0.0, 1.0, false)]), 90.0, true, LineEnds::default());
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![0.0, -1.0])]), 90.0, true, LineEnds::default());
         assert!(o.dash_inst.is_empty());
         assert_eq!(o.line_idx.len(), solid.line_idx.len(), "Nullmuster = durchgezogen");
-        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![])]), 90.0, true);
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![])]), 90.0, true, LineEnds::default());
         assert!(o.dash_inst.is_empty() && o.line_idx.len() == solid.line_idx.len());
         // 9 Einträge → verdoppelt 18 > MAX_LINE_DASH: CPU-Zerlegung (mehrere Stücke).
-        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![1.0; 9])]), 90.0, true);
+        let o = compile(&plan(vec![dashed(0.0, 1.0, false, vec![1.0; 9])]), 90.0, true, LineEnds::default());
         assert!(o.dash_inst.is_empty());
         assert!(o.line_idx.len() > 2 * solid.line_idx.len());
     }
@@ -1197,7 +1337,7 @@ mod tests {
             Prim::Circle { style: st(), fill: 1, stroke: 0, weight_mm: 0.18, center: v2(3.0, 0.0), r: 1.0, dash: d.clone() },
             Prim::DrawingArc { style: st(), stroke: 0, weight_mm: 0.18, center: v2(0.0, 0.0), r: 2.0, a0: 0.0, a1: 1.0, dash: d },
         ]);
-        let o = compile(&p, 90.0, true);
+        let o = compile(&p, 90.0, true, LineEnds::default());
         assert!(o.line_idx.is_empty(), "alle Striche gestrichelt");
         assert!(!o.fill_idx.is_empty(), "Kreisfüllung bleibt");
         let n = o.dash_inst.len() / DASH_INST_FLOATS;
@@ -1229,7 +1369,7 @@ mod tests {
                 xs.push(xs[xs.len() - 1] + 0.05 + rnd() * 1.5);
             }
             let prims: Vec<Prim> = xs.windows(2).enumerate().map(|(i, w)| dashed(w[0], w[1], i > 0, pat.clone())).collect();
-            let o = compile(&plan(prims), 90.0, true);
+            let o = compile(&plan(prims), 90.0, true, LineEnds::default());
             let runs = hatch::apply_dash_runs(vec![xs.iter().map(|&x| v2(x, 0.0)).collect()], &line_dash_for_runs(&pat));
             let total_len = xs[xs.len() - 1];
             for _ in 0..300 {
@@ -1267,14 +1407,14 @@ mod tests {
     /// dieser Folge — die zweite Linie deckt die gestrichelte (z. B. verdeckte Kante unter einer Wand).
     #[test]
     fn strich_batches_in_maler_reihenfolge() {
-        let o = compile(&plan(vec![line(0.0, 1.0, false), dashed(0.0, 1.0, false, vec![2.0, 1.0]), dashed(0.0, 2.0, false, vec![2.0, 1.0]), line(2.0, 3.0, false)]), 90.0, true);
+        let o = compile(&plan(vec![line(0.0, 1.0, false), dashed(0.0, 1.0, false, vec![2.0, 1.0]), dashed(0.0, 2.0, false, vec![2.0, 1.0]), line(2.0, 3.0, false)]), 90.0, true, LineEnds::default());
         assert_eq!(o.line_batches.len(), 2, "keine Zusammenfassung über den Strich-Batch hinweg");
         assert_eq!(o.dash_batches.len(), 1, "zwei gestrichelte ohne Linie dazwischen = ein Batch");
         assert_eq!(o.dash_batches[0].count, 2);
         assert_eq!(o.dash_batches[0].line_at, o.line_batches[0].count);
         assert_eq!(o.line_batches[1].start, o.dash_batches[0].line_at);
         // Ohne Strich dazwischen werden gleich gestylte Linien weiter zusammengefasst.
-        let o = compile(&plan(vec![line(0.0, 1.0, false), line(2.0, 3.0, false)]), 90.0, true);
+        let o = compile(&plan(vec![line(0.0, 1.0, false), line(2.0, 3.0, false)]), 90.0, true, LineEnds::default());
         assert_eq!(o.line_batches.len(), 1);
     }
 
@@ -1297,7 +1437,7 @@ mod tests {
             opacity: None,
         });
         let enc = w.finish();
-        let out = compile_flat(&enc, 0, 1, 90.0, true);
+        let out = compile_flat(&enc, 0, 1, 90.0, true, LineEnds::default());
         let m = out[0] as usize;
         let meta: Vec<f64> = (0..m).map(|i| f64::from_bits(out[2 + 2 * i] as u64 | ((out[3 + 2 * i] as u64) << 32))).collect();
         let (n_fill, n_line) = (meta[10] as usize, meta[11] as usize);

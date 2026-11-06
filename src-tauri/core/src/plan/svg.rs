@@ -10,7 +10,10 @@ use crate::hatch::{self, Pattern, V2};
 use crate::jsnum;
 use crate::plan::print_svg::{hatch_dash_paper, hatch_lines, is_generated, quantize_pen};
 use crate::plan::buf::{whole, F_COLOR, F_DASH_LIST, F_GREYED, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
+use crate::plan::line_ends::LineEnds;
 use crate::plan::parts::Part;
+use crate::plan::scene::stitch_runs_members;
+use std::collections::HashMap;
 use serde_json::Value;
 use std::f64::consts::PI;
 
@@ -48,6 +51,53 @@ pub struct SvgOptions {
     pub max_y: f64,
     /// Schraffurlinien ausbreiten (wie der Druckpfad, an der Fläche beschnitten); Standard aus.
     pub hatch: bool,
+    /// Linienenden und -ecken ([146]) als Attribute eines umschliessenden `<g>`.
+    pub line_ends: LineEnds,
+}
+
+/// Volle, offene Striche gleicher Farbe/Breite/Deckkraft, am Ende zusammengenäht ([146]): Wand-Umrisse
+/// zweier Wände treffen sich an der Ecke als EIN Zug mit Ecke (Gehrung) statt mit zwei flachen Enden.
+/// Jeder Zug steht an der Stelle seines spätesten Laufs (Zeichen-Reihenfolge wie bisher).
+#[derive(Default)]
+struct Stitcher {
+    groups: Vec<(String, Vec<Vec<V2>>, Vec<usize>)>,
+    of: HashMap<String, usize>,
+}
+
+impl Stitcher {
+    /// `attrs` = ` stroke=… stroke-width=…{op}`; `slot` = Platzhalter in `out`.
+    fn add(&mut self, attrs: String, run: Vec<V2>, slot: usize) {
+        let gi = *self.of.entry(attrs.clone()).or_insert_with(|| {
+            self.groups.push((attrs, Vec::new(), Vec::new()));
+            self.groups.len() - 1
+        });
+        self.groups[gi].1.push(run);
+        self.groups[gi].2.push(slot);
+    }
+
+    fn finish(self, out: &mut [String], xs: &dyn Fn(f64) -> String, ys: &dyn Fn(f64) -> String) {
+        for (attrs, runs, slots) in self.groups {
+            for (pts, closed, members) in stitch_runs_members(&runs) {
+                if pts.len() < 2 {
+                    continue;
+                }
+                let slot = members.iter().map(|&m| slots[m]).max().unwrap_or(0);
+                let el = if !closed && pts.len() == 2 {
+                    format!("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{attrs}/>", xs(pts[0].x), ys(pts[0].y), xs(pts[1].x), ys(pts[1].y))
+                } else {
+                    let pl = pts.iter().map(|q| format!("{},{}", xs(q.x), ys(q.y))).collect::<Vec<_>>().join(" ");
+                    let tag = if closed { "polygon" } else { "polyline" };
+                    format!("<{tag} points=\"{pl}\" fill=\"none\"{attrs}/>")
+                };
+                if out[slot].is_empty() {
+                    out[slot] = el;
+                } else {
+                    out[slot].push('\n');
+                    out[slot].push_str(&el);
+                }
+            }
+        }
+    }
 }
 
 /// Zahl aus JSON (null/fehlend → NaN wie `undefined`/`NaN` in JS-Rechnungen).
@@ -91,6 +141,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
     let xs = |x: f64| num(x);
     let ys = |y: f64| num(top - y);
     let mut out: Vec<String> = Vec::new();
+    let mut stitch = Stitcher::default();
     for part in parts.iter_mut() {
         let hatches = if o.hatch { part.view.hatch_table()? } else { Vec::new() };
         for i in part.from..part.to {
@@ -128,30 +179,18 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                         None => Vec::new(),
                     };
                     if !nse.is_empty() && stroke != "none" && !stroke.is_empty() {
-                        let k = pts.len();
-                        let mut d = String::new();
-                        for e in 0..k {
-                            if nse.contains(&e) {
-                                continue;
-                            }
-                            if e == 0 || nse.contains(&(e - 1)) {
-                                d.push_str(&format!("M{},{}", xs(pts[e].x), ys(pts[e].y)));
-                            }
-                            let q = pts[(e + 1) % k];
-                            d.push_str(&format!(" L{},{}", xs(q.x), ys(q.y)));
-                        }
                         out.push(format!("<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"none\"{}/>", op(greyed, opacity(4))));
-                        if !d.is_empty() {
-                            out.push(format!(
-                                "<path d=\"{d}\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{}\" stroke-linejoin=\"round\" stroke-linecap=\"round\"{}/>",
-                                num(f[2] * mm_to_m),
-                                op(greyed, opacity(4))
-                            ));
+                        // Sichtbare Kantenläufe zum Zusammennähen ([146]), Kanten in Ring-Reihenfolge.
+                        let nse_f: Vec<f64> = nse.iter().map(|&e| e as f64).collect();
+                        let attrs = format!(" stroke=\"{stroke}\" stroke-width=\"{}\"{}", num(f[2] * mm_to_m), op(greyed, opacity(4)));
+                        for run in crate::plan::scene::visible_edge_runs(&pts, &nse_f) {
+                            out.push(String::new());
+                            stitch.add(attrs.clone(), run, out.len() - 1);
                         }
                         continue;
                     }
                     out.push(format!(
-                        "<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\" stroke-linejoin=\"round\"{}/>",
+                        "<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\"{}/>",
                         num(f[2] * mm_to_m),
                         op(greyed, opacity(4))
                     ));
@@ -196,11 +235,14 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                 }
                 T_LINE => {
                     let color = if fl & F_COLOR != 0 { esc(part.str(f[1]).unwrap_or("")) } else { "#000".into() };
-                    let mut dash = dash_attr(part)?;
-                    // [141] Volle Linien mit runder Kappe wie Bildschirm (render2d) und Druck: Wand-Umrisse
-                    // zweier Wände treffen sich an der Ecke ohne Kerbe (Stumpf-Kappe liess sie offen).
-                    if dash.is_empty() {
-                        dash = " stroke-linecap=\"round\"".into();
+                    let dash = dash_attr(part)?;
+                    // [146] Volle Linien: mit Kantenläufen gleicher Farbe/Breite zusammennähen (Ecke statt
+                    // zweier Enden); Enden und Ecken erben die Projekt-Einstellung vom `<g>`.
+                    if dash.is_empty() && f[2] > 0.0 {
+                        out.push(String::new());
+                        let attrs = format!(" stroke=\"{color}\" stroke-width=\"{}\"{}", num(f[2] * mm_to_m), op(greyed, opacity(3)));
+                        stitch.add(attrs, vec![V2 { x: f[4], y: f[5] }, V2 { x: f[6], y: f[7] }], out.len() - 1);
+                        continue;
                     }
                     out.push(format!(
                         "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{color}\" stroke-width=\"{}\"{dash}{}/>",
@@ -326,8 +368,10 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
             }
         }
     }
+    stitch.finish(&mut out, &xs, &ys);
+    out.retain(|s| !s.is_empty());
     Some(format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} 0 {} {}\" width=\"{}mm\" height=\"{}mm\">\n<rect x=\"{}\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"#ffffff\"/>\n{}\n</svg>\n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} 0 {} {}\" width=\"{}mm\" height=\"{}mm\">\n<rect x=\"{}\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"#ffffff\"/>\n<g {}>\n{}\n</g>\n</svg>\n",
         num(x0),
         num(w),
         num(h),
@@ -336,6 +380,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
         num(x0),
         num(w),
         num(h),
+        o.line_ends.svg_attrs(),
         out.join("\n")
     ))
 }
@@ -355,10 +400,11 @@ mod tests {
         assert_eq!(op(false, Some(1.0)), "");
     }
 
-    /// [141] Wand-Umrisse als volle Linien bzw. offene Kantenläufe (Stossfugen nicht gestrichen) tragen
-    /// runde Kappen: an der Ecke zweier Wände bleibt keine Kerbe (Stumpf-Kappe, halbe Strichbreite).
+    /// [146] Wand-Umrisse als volle Linie bzw. offene Kantenläufe (Stossfugen nicht gestrichen) werden
+    /// an der gemeinsamen Ecke zu EINEM Zug genäht (Gehrung statt zweier flacher Enden = keine Kerbe);
+    /// Enden und Ecken stehen einmal am umschliessenden `<g>`.
     #[test]
-    fn umriss_mit_runder_kappe() {
+    fn umriss_ecke_als_zug() {
         use crate::model::Vec2;
         use crate::plan::buf::{View, Writer};
         use crate::plan::prim::Primitive;
@@ -392,10 +438,16 @@ mod tests {
         let view = View::parse(&bytes).unwrap();
         let n = view.len();
         let mut parts = vec![Part::new(view, 0, n).unwrap()];
-        let svg = plan_svg(&mut parts, &SvgOptions { scale_denominator: 50.0, margin_m: 0.5, min_x: 0.0, min_y: 0.0, max_x: 4.0, max_y: 4.0, hatch: false }).unwrap();
-        let path = svg.lines().find(|l| l.starts_with("<path")).unwrap();
-        assert!(path.contains("stroke-linecap=\"round\""), "{path}");
-        let line = svg.lines().find(|l| l.starts_with("<line")).unwrap();
-        assert!(line.contains("stroke-linecap=\"round\""), "{line}");
+        let opts = |line_ends| SvgOptions { scale_denominator: 50.0, margin_m: 0.5, min_x: 0.0, min_y: 0.0, max_x: 4.0, max_y: 4.0, hatch: false, line_ends };
+        let svg = plan_svg(&mut parts, &opts(LineEnds::default())).unwrap();
+        assert!(svg.contains("<g stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"4\">"), "{svg}");
+        assert!(!svg.contains("<path"), "keine einzelnen Kantenläufe mehr: {svg}");
+        // Lauf (4,0)→(0,0) des Polygons und die Linie (0,0)→(0,4) bilden einen Zug mit Ecke in (0,0).
+        let pl = svg.lines().find(|l| l.starts_with("<polyline")).unwrap();
+        assert!(pl.contains("points=\"4,4.5 0,4.5 0,0.5\"") || pl.contains("points=\"0,0.5 0,4.5 4,4.5\""), "{pl}");
+        assert!(!pl.contains("linecap"), "{pl}");
+        let mut parts = vec![Part::new(View::parse(&bytes).unwrap(), 0, n).unwrap()];
+        let svg = plan_svg(&mut parts, &opts(LineEnds { cap: 1, join: 2 })).unwrap();
+        assert!(svg.contains("<g stroke-linecap=\"round\" stroke-linejoin=\"bevel\""), "{svg}");
     }
 }

@@ -81,7 +81,7 @@ struct ArcInstance {
     /// (r_screen, a0, sweep, r_model)
     geom: [f32; 4],
     color: [f32; 4],
-    /// (width_mm, dash_total, dash_count, _pad)
+    /// (width_mm, dash_total, dash_count, cap) — cap [146]: 0 flach, 1 rund, 2 vorstehend
     wdash: [f32; 4],
     /// bis zu MAX_ARC_DASH An/Aus-Laengen (Modell-Meter).
     dash: [f32; 4],
@@ -95,7 +95,7 @@ impl ArcInstance {
             center: a.center,
             geom: [a.r_screen, a.a0, a.sweep, a.r_model],
             color: a.color,
-            wdash: [a.width_mm, a.dash_total, a.dash_count as f32, 0.0],
+            wdash: [a.width_mm, a.dash_total, a.dash_count as f32, a.cap as f32],
             dash: a.dash,
         }
     }

@@ -62,6 +62,8 @@ pub struct ArcInstanceData {
     pub dash_count: u32,
     /// Summe der gueltigen `dash`-Eintraege (Zykluslaenge, Modell-Meter).
     pub dash_total: f32,
+    /// Linienende ([146]): 0 flach, 1 rund, 2 vorstehend.
+    pub cap: u32,
 }
 
 /// Hoechstzahl Eintraege eines Linien-Strichmusters (nach Verdoppeln ungerader Muster), die der
@@ -84,7 +86,8 @@ pub struct DashSegment {
     pub run_len: f32,
     /// Zykluslaenge (Bildschirm-Einheiten).
     pub total: f32,
-    /// Gueltige Eintraege in `dash` (gerade Indizes = Strich, ungerade = Luecke).
+    /// Gueltige Eintraege in `dash` (gerade Indizes = Strich, ungerade = Luecke) plus
+    /// `16 · cap` ([146] Linienende: 0 flach, 1 rund, 2 vorstehend; Muster mit Punkten immer rund).
     pub count: u32,
     /// An/Aus-Laengen (Bildschirm-Einheiten).
     pub dash: [f32; MAX_LINE_DASH],
@@ -315,11 +318,17 @@ fn stroke_dashed_or_solid(
             // Ungueltiges Muster: ein offener Zug (wie `split_dash` → ein Stueck); sehr lange
             // Muster zerlegt weiter die CPU.
             _ => {
+                // Punkte im Muster brauchen runde Enden ([96]), auch bei flacher Einstellung ([146]).
+                let saved = geo.ends;
+                if d.iter().step_by(2).any(|v| *v <= 0.0) {
+                    geo.ends.cap = 1;
+                }
                 for piece in split_dash(pts, d) {
                     if piece.len() >= 2 {
                         geo.stroke_polyline(&piece, false, color, stroke_mm, width_screen, bounds);
                     }
                 }
+                geo.ends = saved;
             }
         },
         _ => geo.stroke_polyline(pts, closed, color, stroke_mm, width_screen, bounds),
@@ -508,6 +517,27 @@ pub struct GpuGeometry {
     pub draw_sequence: Vec<(BatchKind, u32)>,
     /// Modell-Bounds (Meter) fuer Debug/Einpassen; nicht render-kritisch.
     pub bounds: [f32; 4], // [min_x, min_y, max_x, max_y]
+    /// Linienenden und -ecken der Szene ([146]).
+    pub ends: LineEnds,
+}
+
+/// Linienenden und -ecken ([146], `Scene::line_ends`): cap 0 flach, 1 rund, 2 vorstehend;
+/// join 0 Gehrung (bis [`MITER_LIMIT`], sonst gefast), 1 rund, 2 gefast.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LineEnds {
+    pub cap: u32,
+    pub join: u32,
+}
+
+/// Gehrungsgrenze wie SVG `stroke-miterlimit` (Gehrungslaenge / Strichbreite).
+pub const MITER_LIMIT: f32 = 4.0;
+
+impl LineEnds {
+    pub fn from_code(c: u32) -> Self {
+        let cap = c & 3;
+        let join = (c >> 2) & 3;
+        Self { cap: if cap > 2 { 0 } else { cap }, join: if join > 2 { 0 } else { join } }
+    }
 }
 
 #[inline]
@@ -599,6 +629,8 @@ impl GpuGeometry {
             *d = c * PX_PER_M;
         }
         let total: f32 = cycle_m.iter().sum::<f32>() * PX_PER_M;
+        // Punkte (Strich der Laenge 0) brauchen runde Enden, sonst sind sie unsichtbar ([96]).
+        let cap = if cycle_m.iter().step_by(2).any(|d| *d <= 0.0) { 1 } else { self.ends.cap };
         let before = self.dash_segments.len();
         let mut s0 = 0.0f32;
         for (w, &l) in pts.windows(2).zip(&lens) {
@@ -613,7 +645,7 @@ impl GpuGeometry {
                 s0: s0 * PX_PER_M,
                 run_len: run * PX_PER_M,
                 total,
-                count: cycle_m.len() as u32,
+                count: cycle_m.len() as u32 + 16 * cap,
                 dash,
             });
             s0 += l;
@@ -772,6 +804,52 @@ impl GpuGeometry {
             add_fan_arc(verts, idx, p, a0, a0 + sweep_sign * std::f32::consts::PI);
         }
 
+        // [146] Gehrung (bis `MITER_LIMIT`, sonst gefast) bzw. Fase: Dreiecke auf der Aussenseite,
+        // Spitze mit Laengenfaktor `m` im 6. Vertex-Wert (Shader: Breite · miter).
+        #[inline]
+        fn add_miter_join(verts: &mut Vec<f32>, idx: &mut Vec<u32>, p: Point, d1: Point, d2: Point, miter: bool) {
+            let turn = d1[0] * d2[1] - d1[1] * d2[0];
+            let dot = d1[0] * d2[0] + d1[1] * d2[1];
+            if (turn.abs() < 1e-6 && dot > 0.0) || dot < -0.9999 {
+                return; // gerade bzw. Umkehr (flach wie SVG bei ueberschrittener Grenze)
+            }
+            let outer = if turn > 0.0 { -1.0 } else { 1.0 };
+            let n1 = left_normal_of(d1);
+            let n2 = left_normal_of(d2);
+            let u1 = [outer * n1[0], outer * n1[1]];
+            let u2 = [outer * n2[0], outer * n2[1]];
+            let ic = push_vert(verts, p, [1.0, 0.0], 0.0);
+            let i1 = push_vert(verts, p, u1, 1.0);
+            let i2 = push_vert(verts, p, u2, 1.0);
+            let cos_half = ((1.0 + dot) * 0.5).max(0.0).sqrt();
+            let m = if cos_half > 1e-6 { 1.0 / cos_half } else { f32::INFINITY };
+            if miter && m <= MITER_LIMIT {
+                let b = [u1[0] + u2[0], u1[1] + u2[1]];
+                let bl = (b[0] * b[0] + b[1] * b[1]).sqrt();
+                verts.extend_from_slice(&[p[0], p[1], b[0] / bl, b[1] / bl, 1.0, m]);
+                let it = (verts.len() / 6 - 1) as u32;
+                idx.extend_from_slice(&[ic, i1, it, ic, it, i2]);
+            } else {
+                idx.extend_from_slice(&[ic, i1, i2]);
+            }
+        }
+
+        // [146] Vorstehende Kappe: Rechteck um die halbe Breite nach aussen (`e` = Richtung weg
+        // von der Linie); Ecken diagonal mit Faktor sqrt(2).
+        #[inline]
+        fn add_square_cap(verts: &mut Vec<f32>, idx: &mut Vec<u32>, p: Point, n: Point, e: Point) {
+            let r = std::f32::consts::FRAC_1_SQRT_2;
+            let m = std::f32::consts::SQRT_2;
+            let ia = push_vert(verts, p, n, 1.0);
+            let ib = push_vert(verts, p, n, -1.0);
+            verts.extend_from_slice(&[p[0], p[1], (n[0] + e[0]) * r, (n[1] + e[1]) * r, 1.0, m]);
+            let ic = (verts.len() / 6 - 1) as u32;
+            verts.extend_from_slice(&[p[0], p[1], (-n[0] + e[0]) * r, (-n[1] + e[1]) * r, 1.0, m]);
+            let id = (verts.len() / 6 - 1) as u32;
+            idx.extend_from_slice(&[ia, ic, id, ia, id, ib]);
+        }
+
+        let ends = self.ends;
         for v in 0..k {
             let has_in = closed || v > 0;
             let has_out = closed || v < k - 1;
@@ -782,6 +860,19 @@ impl GpuGeometry {
             };
             let d_out = if has_out { seg_dir[v % segs] } else { None };
             match (d_in, d_out) {
+                (Some(di), Some(do_)) if ends.join != 1 => {
+                    add_miter_join(&mut self.line_verts, &mut self.line_idx, s[v], di, do_, ends.join == 0)
+                }
+                (None, Some(d)) if ends.cap != 1 => {
+                    if ends.cap == 2 {
+                        add_square_cap(&mut self.line_verts, &mut self.line_idx, s[v], left_normal_of(d), [-d[0], -d[1]]);
+                    }
+                }
+                (Some(d), None) if ends.cap != 1 => {
+                    if ends.cap == 2 {
+                        add_square_cap(&mut self.line_verts, &mut self.line_idx, s[v], left_normal_of(d), d);
+                    }
+                }
                 (Some(di), Some(do_)) => {
                     add_round_join(&mut self.line_verts, &mut self.line_idx, s[v], di, do_)
                 }
@@ -857,7 +948,7 @@ impl Bounds {
 /// ist zoom-INVARIANT: Papier-mm-Striche wie auch die Bogen-Kanten werden erst im
 /// Shader auf Geraete-px abgebildet — keine Neu-Tessellierung bei Zoom noetig.
 pub fn compile_scene(scene: &Scene) -> GpuGeometry {
-    let mut geo = GpuGeometry::default();
+    let mut geo = GpuGeometry { ends: LineEnds::from_code(scene.line_ends), ..GpuGeometry::default() };
     let mut bounds = Bounds::new();
 
     // Maler-Reihenfolge herstellen: alle Elemente (Fuellungen, Umrisse, offene
@@ -982,6 +1073,7 @@ fn compile_arc(geo: &mut GpuGeometry, a: &Arc, bounds: &mut Bounds) {
         dash,
         dash_count,
         dash_total,
+        cap: geo.ends.cap,
     });
     // Modell-Bounds: Bounding-Box des vollen Kreises (grosszuegig, aber sicher
     // fuer "Einpassen"; der sichtbare Bogen liegt stets darin).
@@ -1077,6 +1169,74 @@ mod tests {
 
     // --- Strichmuster im Shader (DashSegment, dash_coverage) -------------------
 
+    // --- [146] Linienenden und -ecken -------------------------------------------
+
+    fn poly_scene(pts: Vec<Point>, line_ends: u32) -> GpuGeometry {
+        compile_scene(&Scene {
+            polylines: vec![crate::types::Polyline { pts, color: [0.0, 0.0, 0.0, 1.0], width_mm: 0.5, dash: None, z: 0, width_screen: false }],
+            line_ends,
+            ..Scene::default()
+        })
+    }
+
+    /// Längenfaktoren (6. Wert) aller Vertices.
+    fn miters(g: &GpuGeometry) -> Vec<f32> {
+        g.line_verts.chunks_exact(6).map(|v| v[5]).collect()
+    }
+
+    #[test]
+    fn flach_mit_gehrung_ist_standard() {
+        // Rechter Winkel: zwei Segment-Quads + Gehrung (2 Dreiecke, Spitze mit Faktor sqrt(2)),
+        // keine Kappen an den offenen Enden.
+        let g = poly_scene(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], 0);
+        assert_eq!(g.line_idx.len(), 2 * 6 + 2 * 3);
+        let tip: Vec<f32> = miters(&g).into_iter().filter(|m| *m != 1.0).collect();
+        assert_eq!(tip.len(), 1);
+        assert!((tip[0] - std::f32::consts::SQRT_2).abs() < 1e-5, "{tip:?}");
+        // Gerade Linie: nur das Quad.
+        assert_eq!(poly_scene(vec![[0.0, 0.0], [1.0, 0.0]], 0).line_idx.len(), 6);
+    }
+
+    #[test]
+    fn spitzer_winkel_ueber_gehrungsgrenze_wird_gefast() {
+        // ~10 Grad Innenwinkel: Gehrungsfaktor ~11.5 > 4 → nur das Fasen-Dreieck.
+        let a = 10f32.to_radians();
+        let g = poly_scene(vec![[1.0, 0.0], [0.0, 0.0], [a.cos(), a.sin()]], 0);
+        assert_eq!(g.line_idx.len(), 2 * 6 + 3);
+        assert!(miters(&g).iter().all(|m| *m == 1.0));
+        // Gefast (join 2) auch im rechten Winkel.
+        let g = poly_scene(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], 2 << 2);
+        assert_eq!(g.line_idx.len(), 2 * 6 + 3);
+    }
+
+    #[test]
+    fn vorstehende_und_runde_kappen() {
+        // Vorstehend: je Ende ein Rechteck (2 Dreiecke) mit zwei Ecken im Faktor sqrt(2).
+        let g = poly_scene(vec![[0.0, 0.0], [1.0, 0.0]], 2);
+        assert_eq!(g.line_idx.len(), 6 + 2 * 6);
+        assert_eq!(miters(&g).iter().filter(|m| (**m - std::f32::consts::SQRT_2).abs() < 1e-5).count(), 4);
+        // Rund (Kappe + Ecke rund): Halbkreis-Fächer an beiden Enden, Fächer an der Ecke.
+        let r = poly_scene(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]], 1 | 1 << 2);
+        assert!(r.line_idx.len() > 2 * 6 + 2 * 3 * 10, "{}", r.line_idx.len());
+        assert!(miters(&r).iter().all(|m| *m == 1.0));
+    }
+
+    #[test]
+    fn strich_instanzen_tragen_die_kappe() {
+        let scene = |line_ends, dash: Vec<f32>| Scene {
+            lines: vec![Line { a: [0.0, 0.0], b: [3.0, 0.0], color: [0.0; 4], width_mm: 0.25, dash: Some(dash), z: 0 }],
+            line_ends,
+            ..Scene::default()
+        };
+        assert_eq!(compile_scene(&scene(0, vec![2.0, 1.0])).dash_segments[0].count, 2);
+        assert_eq!(compile_scene(&scene(2, vec![2.0, 1.0])).dash_segments[0].count, 2 + 32);
+        // Punkte bleiben rund, auch bei flacher Einstellung.
+        assert_eq!(compile_scene(&scene(0, vec![2.0, 1.0, 0.0, 1.0])).dash_segments[0].count, 4 + 16);
+        // Bögen: Kappe im Instanz-Feld.
+        let arc = Scene { arcs: vec![Arc { center: [0.0, 0.0], from: [1.0, 0.0], to: [0.0, 1.0], r: 1.0, color: [0.0; 4], width_mm: 0.25, dash: None }], line_ends: 1, ..Scene::default() };
+        assert_eq!(compile_scene(&arc).arcs[0].cap, 1);
+    }
+
     fn dashed_line(a: Point, b: Point, dash: Vec<f32>) -> Scene {
         Scene { lines: vec![Line { a, b, color: [0.2, 0.2, 0.2, 1.0], width_mm: 0.13, dash: Some(dash), z: 0 }], ..Scene::default() }
     }
@@ -1136,7 +1296,7 @@ mod tests {
         assert!((c[0] - 12.0 * DASH_MM_TO_M).abs() < 1e-6);
         let geo = compile_scene(&dashed_line([0.0, 0.0], [5.0, 0.0], vec![12.0, 1.5, 0.0, 1.5]));
         assert_eq!(geo.dash_segments.len(), 1);
-        assert_eq!(geo.dash_segments[0].count, 4);
+        assert_eq!(geo.dash_segments[0].count, 4 + 16, "Punkte: Kappe rund ([146])");
         // Deckung: der Punkt liegt bei 13.5 mm (Muster-Raum) und ist rund sichtbar, die Luecken nicht.
         let px = PX_PER_M; // 1 Bildschirm-Einheit = 1 px
         let cyc: Vec<f32> = c.iter().map(|d| d * px).collect();

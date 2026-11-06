@@ -6,6 +6,36 @@ use super::manual::*;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Linienenden aller Striche im Plan/Schnitt/Ansicht und in den Exporten ([146]); fehlt = flach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum LineCap {
+    #[default]
+    #[serde(rename = "butt")]
+    Butt,
+    #[serde(rename = "round")]
+    Round,
+    #[serde(rename = "square")]
+    Square,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Linienecken (Stoss zweier Segmente eines Zugs) ([146]); fehlt = Gehrung (Grenze 4, sonst gefast).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum LineJoin {
+    #[default]
+    #[serde(rename = "miter")]
+    Miter,
+    #[serde(rename = "round")]
+    Round,
+    #[serde(rename = "bevel")]
+    Bevel,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 pub enum LineStyleKind {
     #[default]
@@ -4690,6 +4720,14 @@ pub struct Project {
     #[serde(rename = "scaleLineWeights", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub scale_line_weights: Option<bool>,
+    /// Linienenden aller Striche ([146]); fehlt = flach (`butt`).
+    #[serde(rename = "lineCap", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line_cap: Option<LineCap>,
+    /// Linienecken aller Striche ([146]); fehlt = Gehrung (`miter`, Grenze 4).
+    #[serde(rename = "lineJoin", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line_join: Option<LineJoin>,
     /// Grafik-Kategorie-Baum (geschossübergreifend).
     pub layers: Vec<LayerCategory>,
     pub walls: Vec<Wall>,
@@ -5490,6 +5528,18 @@ impl Project {
             "scaleLineWeights" => {
                 self.scale_line_weights = match v {
                     Some(v) => <Option<bool>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "lineCap" => {
+                self.line_cap = match v {
+                    Some(v) => <Option<LineCap>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "lineJoin" => {
+                self.line_join = match v {
+                    Some(v) => <Option<LineJoin>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }
