@@ -2806,6 +2806,21 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   vorher/nachher (Linux/Chromium). Offen: Schatten fällt weiter auf die Ebene ±0.00, nicht auf das Gelände (am
   Hang zu kurz/lang; freigelegte UG-Wände über tieferem Gelände werfen keinen Schatten); Bäume/Stützen werfen
   keinen; nicht in der Tauri-App geprüft.
+- ◐ **[145] Texte beim Zoomen synchron.** (6.11., Maintainer macOS: „Beim Zoomen sind die Texte nicht synchron, sie
+  folgen jeder Bewegung mit leichter Verzögerung.") Ursache: auf macOS zeichnet die native Metal-Fläche (`native2d`)
+  die Geometrie; Raumstempel (`text`), Textfelder/mehrzeilige `drawingText` und Griffe liegen im SVG-Overlay der
+  Webview. Bei Rad-Zoom/Schwenken setzte `flushPan` den Overlay-Ausschnitt erst, wenn `native2d_frame` BEANTWORTET
+  war (Rückruf nach der IPC-Antwort) — die Fläche zeigte den Frame sofort, die Webview malte das Overlay erst im
+  nächsten Rendering-Update: Texte einen Frame hinter den Linien (bei gestauten Aufrufen mehr). Geändert: Frame-
+  Schlange `views/plan/nativeFrameQueue.ts` (einer unterwegs, der letzte gewinnt) ruft `onSent` synchron beim
+  Versand; PlanView setzt dort viewBox/CSS-Transform, meet-/view-Store — gleicher Takt wie das Zeichnen der Fläche,
+  verworfene Zwischen-Frames setzen das Overlay nie. WebGPU-Pfad (Browser) unverändert (Geometrie, Stempel-Texte
+  über glyphon und Overlay schon im selben rAF). Tests: vitest `nativeFrameQueue.test.ts`; e2e
+  `nativeOverlaySync.spec.ts` stellt die native Fläche per `__TAURI_INTERNALS__`-Attrappe nach (Antwort nach 12 ms)
+  und vergleicht je Zoom-/Schwenk-Frame den Overlay-Ausschnitt am Ende des Versand-Tasks mit dem Frame-Ausschnitt:
+  vorher 16/18 Frames hinterher, nachher 0. Nur im Linux-Container (Chromium) geprüft, NICHT in der Tauri-App/Metal:
+  ob Metal-Present und Webview-Commit dort im selben vsync landen, muss der Mac zeigen. Offen, falls es dort noch
+  nachläuft: Raumstempel nativ zeichnen (vtext kann bisher nur einzeilig/linksbündig, eine Schrift, kein Fett).
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
