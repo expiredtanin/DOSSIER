@@ -104,6 +104,12 @@ export interface PickColumnMesh {
   columnId: string;
 }
 
+/** [149] Baum für den Raycast: WORLD-Dreiecke von Stamm und Krone (x, Höhe, y). */
+export interface PickTreeMesh {
+  tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
+  treeId: string;
+}
+
 /**
  * [137] Freier Körper (`extrudedSolids`, Loft/Rotation/Abzug/B-Rep) für den Raycast: WORLD-Dreiecke
  * (x, Höhe, y). Der Kern liefert das Prisma über dem Umriss; sobald das truck-Netz geladen ist, ersetzt

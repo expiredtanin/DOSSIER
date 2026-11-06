@@ -28,6 +28,7 @@ import type {
   Roof,
   Room,
   Stair,
+  Tree,
   Wall,
 } from "../model/types";
 import { uniqueStamp } from "../tools/types";
@@ -45,6 +46,8 @@ export interface ElementSelectionIds {
   roomIds: string[];
   extrudedSolidIds: string[];
   columnIds: string[];
+  /** [149] Bäume (optional: ältere Aufrufer kennen sie nicht). */
+  treeIds?: string[];
 }
 
 /** Tiefe Kopie der gewählten Elemente über alle Bauteil-Arten hinweg. */
@@ -58,6 +61,8 @@ export interface ElementClipboard {
   rooms: Room[];
   extrudedSolids: ExtrudedSolid[];
   columns: Column[];
+  /** [149] Bäume (optional: Zwischenablagen älterer Fenster haben sie nicht). */
+  trees?: Tree[];
 }
 
 const EMPTY_CLIPBOARD: ElementClipboard = {
@@ -83,7 +88,8 @@ export function isClipboardEmpty(c: ElementClipboard): boolean {
     c.stairs.length === 0 &&
     c.rooms.length === 0 &&
     c.extrudedSolids.length === 0 &&
-    c.columns.length === 0
+    c.columns.length === 0 &&
+    (c.trees?.length ?? 0) === 0
   );
 }
 
@@ -122,6 +128,8 @@ export function collectElementClipboard(
   const extrudedSolids = (project.extrudedSolids ?? []).filter((s) => extrudedSolidIds.has(s.id));
   const columnIds = new Set(sel.columnIds);
   const columns = (project.columns ?? []).filter((c) => columnIds.has(c.id));
+  const treeIds = new Set(sel.treeIds ?? []);
+  const trees = (project.trees ?? []).filter((t) => treeIds.has(t.id));
 
   const clip: ElementClipboard = {
     walls: walls.map((w) => structuredClone(w)),
@@ -133,6 +141,7 @@ export function collectElementClipboard(
     rooms: rooms.map((r) => structuredClone(r)),
     extrudedSolids: extrudedSolids.map((s) => structuredClone(s)),
     columns: columns.map((c) => structuredClone(c)),
+    trees: trees.map((t) => structuredClone(t)),
   };
   return isClipboardEmpty(clip) ? null : clip;
 }
@@ -148,6 +157,7 @@ export interface PastedIds {
   roomIds: string[];
   extrudedSolidIds: string[];
   columnIds: string[];
+  treeIds: string[];
 }
 
 /** Projekt-Liste → Feld in {@link PastedIds}. */
@@ -161,6 +171,7 @@ const PASTED_KEY: Record<string, keyof PastedIds> = {
   rooms: "roomIds",
   extrudedSolids: "extrudedSolidIds",
   columns: "columnIds",
+  trees: "treeIds",
 };
 
 /**
@@ -185,6 +196,7 @@ export function pasteElementClipboard(
     roomIds: [],
     extrudedSolidIds: [],
     columnIds: [],
+    treeIds: [],
   };
   for (const op of ops) {
     const key = op.kind === "add" ? PASTED_KEY[op.collection] : undefined;

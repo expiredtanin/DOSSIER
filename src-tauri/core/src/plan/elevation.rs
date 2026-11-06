@@ -1481,6 +1481,17 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         };
         pending.push(Pending::Item { depth: f.depth, rank: Some(rank), prim });
     }
+    // [149] Bäume: Silhouette (Krone gefüllt, Stamm) in der Maler-Reihenfolge; Bauteile davor verdecken sie.
+    for (depth, tree) in super::trees::view_trees(p, level, vis, Some(super::trees::view_crown_fill(mono))) {
+        for prim in tree {
+            if let Primitive::Polygon { pts, .. } = &prim {
+                for q in pts {
+                    acc.add(q.x, q.y);
+                }
+            }
+            pending.push(Pending::Item { depth, rank: None, prim });
+        }
+    }
     // Kanten exakt ([G4]): Umriss, Knicke und Silhouetten der Flächen, verdeckt durch Flächen und
     // Öffnungen davor; Facetten-Fugen der Bogenwände ([T2]) fallen über die Glättungsgruppe weg.
     let edges = elevation_edges(p, &faces, &openings, &frame, level.hidden_lines);

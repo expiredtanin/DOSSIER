@@ -190,7 +190,7 @@ export interface PlanViewHandle {
 
 
 const PICK_ORDER: readonly PickKind[] = [
-  "section", "opening", "wall", "column", "drawing", "solid",
+  "section", "opening", "wall", "column", "drawing", "solid", "tree",
   "ceiling", "stair", "room", "roof", "site", "context",
 ];
 
@@ -221,9 +221,13 @@ const EMPTY_PICK: PickIds = {
   sectionLineId: null,
   contextObjectId: null,
   siteId: null,
+  treeId: null,
 };
 
 /** Mac: Cmd+Klick; sonst Strg+Klick (Alt+Klick ist die Schere, Ctrl+Klick unter macOS das Kontextmenü). */
+/** [149] Präfix der Baum-Pick-Id im Feld `contextObjectId` (Kern `tree::TREE_PICK_PREFIX`). */
+const TREE_PICK = "@tree:";
+
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 const cycleModifier = (e: { metaKey: boolean; ctrlKey: boolean }): boolean => (IS_MAC ? e.metaKey : e.ctrlKey);
 
@@ -300,6 +304,11 @@ export interface PlanSelection {
    * wenn kein Element höherer Priorität getroffen wurde; Vorrang vor Kontext-Objekten (sie liegt darüber).
    */
   siteId?: string | null;
+  /**
+   * [149] Getroffener Baum (Kronenfläche, Pick-Id `@tree:<id>` im Feld `contextObjectId`), wenn keine
+   * Öffnung/Wand/Stütze/2D-Element/Körper getroffen wurde; Vorrang vor Decke, Raum, Dach und Gelände.
+   */
+  treeId?: string | null;
   /**
    * War beim Klick Shift gedrückt? Dann ERWEITERT der Aufrufer (App) die
    * Auswahl um das getroffene Element (bzw. schaltet es ab/zu), statt sie zu
@@ -687,6 +696,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     groups: selectedGroupIds,
     drawings: selectedDrawingIds,
     site: selectedSite,
+    trees: selectedTreeIds,
   } = selection;
   const selectedDrawingId = single(selection, "drawings");
   // Linke Maustaste liegt beim Werkzeug/der Transformation, wenn App das meldet
@@ -1613,9 +1623,15 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
 
   // [137] Getroffene Lage-Darstellung: Quelle `"sunStudy"`/`"siteRules"` (Baurechtslinie vor Schatten) oder null.
   const pickSiteAt = (clientX: number, clientY: number): string | null => {
-    const ids = contextIdsAt(clientX, clientY).filter((id) => id.startsWith("@"));
+    const ids = contextIdsAt(clientX, clientY).filter((id) => id.startsWith("@") && !id.startsWith(TREE_PICK));
     const id = ids.find((x) => x === "@siteRules") ?? ids[0];
     return id ? id.slice(1) : null;
+  };
+
+  // [149] Getroffener Baum (oberste Kronenfläche) oder null.
+  const pickTree = (clientX: number, clientY: number): string | null => {
+    const id = contextIdsAt(clientX, clientY).find((x) => x.startsWith(TREE_PICK));
+    return id ? id.slice(TREE_PICK.length) : null;
   };
 
   const pickContextObject = (clientX: number, clientY: number): string | null =>
@@ -2148,27 +2164,30 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       openingId || wallId || columnId || drawingId
         ? null
         : polyExtrudedSolidId ?? pickExtrudedSolid(clientX, clientY);
+    // [149] Baum (Kronenfläche) vor Decke, Raum, Dach und Gelände.
+    const treeId =
+      openingId || wallId || columnId || drawingId || extrudedSolidId ? null : pickTree(clientX, clientY);
     // Decke nur, wenn weder Öffnung/Wand noch 2D-Element getroffen wurde. Da die
     // Decken-Polygone UNTER der Wand-Poché liegen, trifft ein direkter Klick
     // auf die Wand zuerst die Wand; freie Deckenfläche trifft die Decke.
     const hitCeilingId =
       hit && hit.kind === "polygon" ? hit.ceilingId ?? null : null;
     const ceilingId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId ? null : hitCeilingId;
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId ? null : hitCeilingId;
     // Treppe nur, wenn nichts anderes getroffen wurde (Tritte liegen frei).
     const stairId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId
         ? null
         : pickStair(clientX, clientY);
     // Raum als vorletzte Priorität: die Raum-Fläche liegt UNTER allem anderen.
     const roomId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId || stairId
         ? null
         : pickRoom(clientX, clientY);
     // Dach als LETZTE Priorität: die Traufe-Fläche deckt den ganzen Grundriss
     // ab, daher erst wählen, wenn wirklich nichts anderes getroffen wurde.
     const roofId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId || stairId || roomId
         ? null
         : pickRoof(clientX, clientY);
     // Kontext-Objekt (Gebäude/Terrain) als ALLERLETZTE Priorität — seine
@@ -2176,11 +2195,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // nichts anderes getroffen wurde.
     // [137] Schatten/Baurechtslinien (Lage-Darstellung) über dem Gelände, unter allen Bauteilen.
     const siteId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId || roofId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId || stairId || roomId || roofId
         ? null
         : pickSiteAt(clientX, clientY);
     const contextObjectId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId || roofId || siteId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId || stairId || roomId || roofId || siteId
         ? null
         : pickContextObject(clientX, clientY);
     return {
@@ -2197,6 +2216,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       sectionLineId: null,
       contextObjectId,
       siteId,
+      treeId,
     };
   };
 
@@ -2327,6 +2347,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     add("column", dp.columnId, dp.hitIndex);
     add("drawing", dp.drawingId, dp.hitIndex);
     add("solid", dp.extrudedSolidId, dp.hitIndex);
+    add("tree", dp.treeId, dp.hitIndex);
     add("ceiling", dp.ceilingId, dp.hitIndex);
     add("stair", dp.stairId, dp.hitIndex);
     add("room", dp.roomId, dp.hitIndex);
@@ -2353,7 +2374,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       addRest("stair", p.stairId, idx);
       addRest("room", p.roomId, idx);
       addRest("roof", p.roofId, idx);
-      if (p.contextObjectId?.startsWith("@")) addRest("site", p.contextObjectId.slice(1), idx);
+      if (p.contextObjectId?.startsWith(TREE_PICK)) addRest("tree", p.contextObjectId.slice(TREE_PICK.length), idx);
+      else if (p.contextObjectId?.startsWith("@")) addRest("site", p.contextObjectId.slice(1), idx);
       else addRest("context", p.contextObjectId, idx);
       addRest("section", p.sectionLineId, idx);
     }
@@ -2364,6 +2386,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     addRest("stair", pickStair(clientX, clientY), null);
     addRest("room", pickRoom(clientX, clientY), null);
     addRest("roof", pickRoof(clientX, clientY), null);
+    addRest("tree", pickTree(clientX, clientY), null);
     addRest("site", pickSiteAt(clientX, clientY), null);
     addRest("context", pickContextObject(clientX, clientY), null);
     addRest("section", pickSectionLine(clientX, clientY), null);
@@ -2401,6 +2424,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       sectionLineId: c.kind === "section" ? c.id : null,
       contextObjectId: c.kind === "context" ? c.id : null,
       siteId: c.kind === "site" ? c.id : null,
+      treeId: c.kind === "tree" ? c.id : null,
     });
   };
 
@@ -2930,10 +2954,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // überzeichnen — analog zur Dach-/Raum-Auswahl.
   // [137] Gewählte Lage-Darstellung (Schatten/Baurecht): ihre Flächen bzw. Bänder (`@…`-Ids) ebenso.
   const highlightContextObjectPolys = useMemo(() => {
-    const ids = [...(selectedContextObjectIds ?? []), ...(selectedSite ?? []).map((s) => "@" + s)];
+    const ids = [
+      ...(selectedContextObjectIds ?? []),
+      ...(selectedSite ?? []).map((s) => "@" + s),
+      ...(selectedTreeIds ?? []).map((s) => TREE_PICK + s),
+    ];
     if (!ids.length) return [];
     return primsOwnedBy("contextObjectId", ids, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
-  }, [plan, selectedContextObjectIds, selectedSite]);
+  }, [plan, selectedContextObjectIds, selectedSite, selectedTreeIds]);
 
   // Hervorhebung der selektierten Schnitt-/Ansichtslinie: das (unsichtbare)
   // Pick-Band (Polygon mit sectionLineId) mit Akzentkontur überzeichnen.
@@ -2971,7 +2999,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const hoverPrims = useMemo((): Primitive[] => {
     if (!hoverPick) return [];
     if (hoverPick.kind === "site") return primsOwnedBy("contextObjectId", ["@" + hoverPick.id], (_p): _p is Primitive => true);
-    const field: Record<Exclude<PickKind, "site">, OwnerField> = {
+    if (hoverPick.kind === "tree") return primsOwnedBy("contextObjectId", [TREE_PICK + hoverPick.id], (_p): _p is Primitive => true);
+    const field: Record<Exclude<PickKind, "site" | "tree">, OwnerField> = {
       wall: "wallId", drawing: "drawingId", ceiling: "ceilingId", opening: "openingId",
       stair: "stairId", room: "roomId", roof: "roofId", context: "contextObjectId",
       section: "sectionLineId", solid: "extrudedSolidId", column: "columnId",

@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 /// Listen der Zwischenablage: (Schlüssel in `clip`, Projekt-Liste, id-Präfix, Geschoss-Feld).
 /// Reihenfolge = Reihenfolge der ids und der Ops (Wände vor Öffnungen).
-const LISTS: [(&str, &str, &str, &str); 9] = [
+const LISTS: [(&str, &str, &str, &str); 10] = [
     ("walls", "walls", "W", "floorId"),
     ("drawings", "drawings2d", "dr2d", "levelId"),
     ("ceilings", "ceilings", "C", "floorId"),
@@ -30,6 +30,7 @@ const LISTS: [(&str, &str, &str, &str); 9] = [
     ("rooms", "rooms", "RM", "floorId"),
     ("extrudedSolids", "extrudedSolids", "extrude", "levelId"),
     ("columns", "columns", "column", "floorId"),
+    ("trees", "trees", "tree", "floorId"),
 ];
 
 /// Ops des Einfügens: je Liste ein `add` (leere Listen ohne Op).

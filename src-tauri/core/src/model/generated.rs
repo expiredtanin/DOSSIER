@@ -3880,6 +3880,113 @@ pub struct Column {
     pub extra: Extra,
 }
 
+/// Kronenform eines Baums ([149]): Grundform der Silhouette (Schnitt/Ansicht), des 3D-Körpers und
+/// des Schattenwerfers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum TreeShape {
+    /// Kugelig (Laubbaum, Krone ≈ Kugel/Ellipsoid über dem Kronenansatz).
+    #[default]
+    #[serde(rename = "round")]
+    Round,
+    /// Oval (Krone höher als breit, Ellipsoid).
+    #[serde(rename = "oval")]
+    Oval,
+    /// Säulenförmig (schlanker, hoher Zylinder mit gerundeten Enden).
+    #[serde(rename = "columnar")]
+    Columnar,
+    /// Kegel (Nadelbaum, Spitze oben).
+    #[serde(rename = "conical")]
+    Conical,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Bestand eines Baums ([149]) nach Plankonvention: bestehend (schwarz), neu (rot/Planung),
+/// zu fällen (gelb bzw. durchgekreuzt).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum TreeStatus {
+    #[default]
+    #[serde(rename = "existing")]
+    Existing,
+    #[serde(rename = "new")]
+    New,
+    #[serde(rename = "remove")]
+    Remove,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Laub- oder Nadelbaum ([149]) — Planzeichen der Krone (Laub: Wellenkranz, Nadel: Zacken).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum TreeFoliage {
+    #[default]
+    #[serde(rename = "deciduous")]
+    Deciduous,
+    #[serde(rename = "conifer")]
+    Conifer,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Ein Baum ([149]) — eigenes Objekt der Umgebung mit Stamm, Krone und Höhe. Grundriss/Situation
+/// (Kronenkreis mit Planzeichen, Stamm), Schnitt/Ansicht (Silhouette nach Form), 3D (Stamm-Zylinder +
+/// Krone), Schatten (Sonnenstudie), IFC (IfcGeographicElement). Fuss auf dem Gelände an `position`
+/// (sonst auf der Geschoss-UK) plus `baseOffset`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Tree {
+    pub id: String,
+    #[ts(type = "\"tree\"")]
+    pub r#type: String,
+    /// Zugehörige Zeichnungsebene (Geschoss), auf der der Baum im Grundriss erscheint.
+    #[serde(rename = "floorId")]
+    pub floor_id: String,
+    /// Grafik-Kategorie (Ebene), Vorgabe "13" (Bäume).
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
+    /// Objekt-Sperre, analog `Wall.locked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub locked: Option<bool>,
+    /// Stammmitte im Grundriss (Meter).
+    pub position: Vec2,
+    /// Stammdurchmesser (m, > 0).
+    #[serde(rename = "trunkDiameter")]
+    pub trunk_diameter: f64,
+    /// Kronendurchmesser (m, > 0).
+    #[serde(rename = "crownDiameter")]
+    pub crown_diameter: f64,
+    /// Höhe des Kronenansatzes über dem Fuss (m, ≥ 0, < `height`).
+    #[serde(rename = "crownBase")]
+    pub crown_base: f64,
+    /// Gesamthöhe über dem Fuss (m, > 0).
+    pub height: f64,
+    /// Kronenform.
+    pub shape: TreeShape,
+    /// Bestehend / neu / zu fällen.
+    pub status: TreeStatus,
+    /// Laub- oder Nadelbaum.
+    pub foliage: TreeFoliage,
+    /// Optionaler Art-Name (z. B. „Quercus robur"), erscheint als Beschriftung im Grundriss.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub species: Option<String>,
+    /// Höhenversatz des Fusses gegenüber Gelände bzw. Geschoss-UK (m, Vorgabe 0).
+    #[serde(rename = "baseOffset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub base_offset: Option<f64>,
+    /// Optionale Übersteuerung der Strichfarbe; sonst gilt die Kategorie-Farbe bzw. die Bestandsfarbe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Gruppe (Vectorworks-artig) — reine Mitgliedschaft je Elementart, siehe
 /// {@link Project.groups}. Alle ID-Listen sind additiv; ein Element gehört
 /// NIE zu mehr als einer Gruppe auf derselben Ebene (das Werkzeug/der Befehl
@@ -4892,6 +4999,11 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub columns: Option<Vec<Column>>,
+    /// Bäume ([149]) — eigene Objekte mit Stamm, Krone und Höhe, siehe {@link Tree}. Optional, damit
+    /// bestehende Projekte ohne `trees` gültig bleiben (Default: leer behandeln).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub trees: Option<Vec<Tree>>,
     /// Gruppen (Vectorworks-artig: Cmd+G fasst die Auswahl zu einer Einheit
     /// zusammen; Doppelklick betritt die Gruppe zum Bearbeiten, alles andere
     /// wird dabei gedimmt/gesperrt — s. `state/useGroupState.ts`). Eine Gruppe
@@ -5726,6 +5838,12 @@ impl Project {
             "columns" => {
                 self.columns = match v {
                     Some(v) => <Option<Vec<Column>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "trees" => {
+                self.trees = match v {
+                    Some(v) => <Option<Vec<Tree>>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

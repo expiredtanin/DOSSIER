@@ -3282,6 +3282,12 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     super::extras::scale_line_weights(p, scale, &mut prims);
+    // [149] Bäume hinter der Schnittebene: transparente Silhouette unter dem Schnitt (Bauteile verdecken sie).
+    let mut trees: Vec<Primitive> = super::trees::view_trees(p, &level, &vis, None).into_iter().flat_map(|(_, t)| t).collect();
+    let bounds = super::trees::union_bounds(bounds, &trees);
+    super::extras::scale_line_weights(p, scale, &mut trees);
+    trees.extend(prims);
+    let prims = trees;
     w.group(&prims);
     let mut ops = if openings { section_opening_primitives(p, &level, &vis)? } else { Vec::new() };
     super::extras::scale_line_weights(p, scale, &mut ops);

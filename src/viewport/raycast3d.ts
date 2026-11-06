@@ -18,7 +18,7 @@
 
 
 import { DRAWING_PICK_TOLERANCE } from "../core";
-import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickStairMesh, PickDrawingMesh } from "../core";
+import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickStairMesh, PickDrawingMesh, PickTreeMesh } from "../core";
 
 /** Kamera-Parameter für den Pick-Strahl (Teilmenge von Camera3d). */
 export interface RayCamera {
@@ -42,7 +42,7 @@ export interface Ray {
 
 /** Ergebnis eines Picks: getroffenes Bauteil + Distanz entlang des Strahls. */
 export interface PickHit {
-  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing" | "column" | "solid";
+  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing" | "column" | "solid" | "tree";
   id: string;
   t: number;
   /** Bei `kind:"opening"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
@@ -362,6 +362,7 @@ export function pickNearest(
   openingMeshes?: readonly PickOpeningMesh[],
   stairMeshes?: readonly PickStairMesh[],
   drawingMeshes?: readonly PickDrawingMesh[],
+  trees?: readonly PickTreeMesh[],
 ): PickHit | null;
 /**
  * Nächstes getroffenes Bauteil (kleinstes t) über Wände, Decken, Öffnungen und
@@ -386,6 +387,7 @@ export function pickNearest(
   openingMeshes: readonly PickOpeningMesh[] = [],
   stairMeshes: readonly PickStairMesh[] = [],
   drawingMeshes: readonly PickDrawingMesh[] = [],
+  trees: readonly PickTreeMesh[] = [],
 ): PickHit | null {
   const TIE_EPS = 1e-6;
   let hit: PickHit | null = null;
@@ -440,6 +442,11 @@ export function pickNearest(
   for (const c of columns) {
     const t = rayContextMeshTris(ray, { tris: c.tris, contextObjectId: c.columnId });
     if (t !== null) consider({ kind: "column", id: c.columnId, t }, 1);
+  }
+  // [149] Bäume (Stamm + Krone), Rang wie Wand/Decke.
+  for (const tr of trees) {
+    const t = rayContextMeshTris(ray, { tris: tr.tris, contextObjectId: tr.treeId });
+    if (t !== null) consider({ kind: "tree", id: tr.treeId, t }, 1);
   }
   // [137] Freie Körper (truck-Netz bzw. Prisma-Näherung), Rang wie Wand/Decke.
   for (const s of solids) {

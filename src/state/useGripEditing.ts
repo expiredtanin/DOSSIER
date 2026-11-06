@@ -37,6 +37,8 @@ import type { BodyTarget } from "../views/plan/PlanView";
 import type { CommandLineHandle } from "../ui/CommandLine";
 import type { CommandEngine } from "../commands/engine";
 import { single } from "./selection";
+import { getState as storeState } from "./appStore";
+import { patchItem } from "../core";
 import type { Selection } from "./selection";
 
 export interface GripEditFieldsState {
@@ -162,6 +164,13 @@ export function useGripEditing(opts: {
   } = opts;
   const selectedOpeningId = single(selection, "openings");
   const selectedStairId = single(selection, "stairs");
+  // [149] Baum: Griff in der Stammmitte (verschieben) und am Kronenrand (Kronendurchmesser).
+  const selectedTreeId = single(selection, "trees");
+  const selectedTree = selectedTreeId ? (project.trees ?? []).find((x) => x.id === selectedTreeId) : undefined;
+  const treeGrips = (tr: NonNullable<typeof selectedTree>): Vec2[] => [
+    tr.position,
+    { x: tr.position.x + tr.crownDiameter / 2, y: tr.position.y },
+  ];
   const selectedRoomId = single(selection, "rooms");
   const selectedCeilingId = single(selection, "ceilings");
   const selectedDrawingId = single(selection, "drawings");
@@ -292,6 +301,11 @@ export function useGripEditing(opts: {
       gripOwners.push({ localIndex: 0 });
       gripOwnerRange.push([0, 0]);
       return [stairMoveHandle(st)];
+    }
+    if (selectedTree && modelEditable && !selectedTree.locked) {
+      const pts = treeGrips(selectedTree);
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
     }
     // [68] Baugrube: Umriss-Ecken + Sohlen-Griff (Lage: Schwerpunkt, y um die Sohlenhöhe versetzt).
     if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
@@ -831,6 +845,17 @@ export function useGripEditing(opts: {
     if (selectedStairId) {
       const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
       if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
+      return;
+    }
+    // [149] Baum: Stammmitte bzw. Kronenrand live, ein Undo-Schritt je Zug (gleicher coalesceKey).
+    if (selectedTree) {
+      const tr = selectedTree;
+      if (tr.locked) return;
+      const patch =
+        index === 0
+          ? { position: { x: pt.x, y: pt.y } }
+          : { crownDiameter: Math.max(0.2, 2 * Math.hypot(pt.x - tr.position.x, pt.y - tr.position.y)) };
+      storeState().applyChange((p) => patchItem(p, "trees", tr.id, patch), `treeGrip:${tr.id}:${index}`);
       return;
     }
     // [68] Baugrube: Sohlen-Griff sofort (Höhe), Ecken als Vorschau bis zum Setzen.

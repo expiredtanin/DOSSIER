@@ -53,6 +53,8 @@ export interface TransformSelection {
   roomIds?: string[];
   /** Gewählte Öffnungen ([144]): nur Verschieben, entlang der Wirtswand (Kern `slide_opening`). */
   openingIds?: string[];
+  /** [149] Gewählte Bäume (Stammmitte wird transformiert). */
+  treeIds?: string[];
 }
 
 /** Auswahl (Befehlskontext) → TransformSelection (gleiche Form, alle Elementarten). */
@@ -68,6 +70,7 @@ export function toTransformSel(sel: CommandSelection): TransformSelection {
     stairIds: sel.stairIds,
     roomIds: sel.roomIds,
     openingIds: sel.openingIds,
+    treeIds: sel.treeIds,
   };
 }
 
@@ -87,7 +90,8 @@ export function hasTransformSelection(sel: CommandSelection, op?: string): boole
     (sel.ceilingIds?.length ?? 0) > 0 ||
     (sel.roofIds?.length ?? 0) > 0 ||
     (sel.stairIds?.length ?? 0) > 0 ||
-    (sel.roomIds?.length ?? 0) > 0
+    (sel.roomIds?.length ?? 0) > 0 ||
+    (sel.treeIds?.length ?? 0) > 0
   );
 }
 

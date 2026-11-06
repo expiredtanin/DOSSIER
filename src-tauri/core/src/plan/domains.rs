@@ -1095,6 +1095,8 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
     super::walls::plan_walls(c, c.a.reference_lines, &mut out.walls, bounds)?;
     super::stairs::plan_stairs(c, &mut out.stairs, bounds);
     columns(c, &mut out.columns);
+    // [149] Bäume (Planzeichen) mit den Stützen in einer Gruppe.
+    super::trees::plan_trees(c, &mut out.columns);
     solids(c, &mut out.solids);
     Ok(())
 }

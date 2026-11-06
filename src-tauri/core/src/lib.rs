@@ -17,6 +17,7 @@ pub mod roof;
 pub mod roof_skeleton;
 pub mod flat_read;
 pub mod sun;
+pub mod tree;
 pub mod site_rules;
 pub mod auto_dimensions;
 pub mod kennzahlen;

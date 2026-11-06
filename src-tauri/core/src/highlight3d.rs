@@ -26,6 +26,8 @@ pub struct Args {
     /// [137] Stützen und freie Körper (Prisma über dem Grundriss).
     pub columns: Vec<String>,
     pub solids: Vec<String>,
+    /// [149] Bäume (Umriss-Prisma Kronendurchmesser × Fuss bis Spitze).
+    pub trees: Vec<String>,
     pub rgb: [f64; 3],
     /// Explosionsabstand ([65], `explode3d.rs`; fehlt/0 = aus): Linien folgen dem auseinandergezogenen Modell.
     #[serde(default)]
@@ -212,6 +214,17 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
             let n = out.v.len();
             out.prism_edges(&foot, z0, z1);
             lift(&mut out, n, &col.id);
+        }
+    }
+    let trees = set(&a.trees);
+    if !trees.is_empty() {
+        let list = p.trees.as_deref().unwrap_or(&[]);
+        for (i, g) in crate::tree::geoms(p) {
+            if trees.contains(list[i].id.as_str()) {
+                let n = out.v.len();
+                out.prism_edges(&crate::tree::circle(g.c, g.crown_r, 12), g.base, g.top);
+                lift(&mut out, n, &list[i].id);
+            }
         }
     }
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {

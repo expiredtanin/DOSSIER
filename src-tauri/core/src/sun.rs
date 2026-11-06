@@ -917,6 +917,11 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
             clouds.push(crown);
         }
     }
+    // [149] Bäume als eigene Objekte: Stamm (Prisma) + Krone (Punktwolke) nach eigener Höhe, Krone und Form.
+    for (_, g) in crate::tree::geoms(p) {
+        prisms.push((Prism { footprint: g.trunk_ring(8), z_bottom: g.base, z_top: g.trunk_top() }, vec![]));
+        clouds.push(g.crown_points());
+    }
     // Nur zur Sonne gewandte Dachflächen (Aussennormale): durch sie verlässt jeder Strahl den Körper.
     roof_faces.retain(|f| f.first().is_some_and(|r| {
         let n = newell(r);
@@ -1311,5 +1316,32 @@ mod terrain_tests {
             "drawings2d": [{"id": "k", "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 2.0}}]
         }));
         assert!(shadow_polygons_project(&p4, sun, None).is_empty());
+    }
+
+    /// [149] Baum-Objekt: Schattenlänge nach eigener Höhe und Krone (nicht `sunStudy.treeHeight`), Form zählt.
+    #[test]
+    fn baum_objekt_schatten_nach_hoehe() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let mk = |h: f64, d: f64, shape: &str| {
+            project_json(serde_json::json!({
+                "sunStudy": {"when": "2026-06-21T10:00:00Z", "show": true, "treeHeight": 30.0},
+                "trees": [{"id": "t", "type": "tree", "floorId": "eg", "categoryCode": "13", "position": {"x": 0, "y": 0},
+                    "trunkDiameter": 0.4, "crownDiameter": d, "crownBase": 2.0, "height": h, "shape": shape,
+                    "status": "existing", "foliage": "deciduous"}]
+            }))
+        };
+        // 45°: Spitze (Kegel) wirft bis y = h, Kronenbreite ±r.
+        let b = bbox(&shadow_polygons_project(&mk(12.0, 4.0, "conical"), sun, None));
+        assert!((b[3] - 12.0).abs() < 0.05 && (b[2] - 2.0).abs() < 0.05 && b[1] > -0.3, "{b:?}");
+        let b6 = bbox(&shadow_polygons_project(&mk(6.0, 4.0, "conical"), sun, None));
+        assert!((b6[3] - 6.0).abs() < 0.05, "{b6:?}");
+        // Breitere Krone, breiterer Schatten; runde Krone endet vor der Spitze-Länge (Kugel: z_c + r·√2).
+        let wide = bbox(&shadow_polygons_project(&mk(12.0, 8.0, "round"), sun, None));
+        assert!((wide[2] - 4.0).abs() < 0.05, "{wide:?}");
+        let a_small = area(&shadow_polygons_project(&mk(12.0, 4.0, "round"), sun, None));
+        let a_wide = area(&shadow_polygons_project(&mk(12.0, 8.0, "round"), sun, None));
+        assert!(a_wide > 2.0 * a_small, "{a_small} {a_wide}");
+        // Kein Baum: kein Schatten.
+        assert!(shadow_polygons_project(&project_json(serde_json::json!({"trees": []})), sun, None).is_empty());
     }
 }

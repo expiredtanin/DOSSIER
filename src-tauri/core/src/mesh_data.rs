@@ -438,6 +438,15 @@ pub fn mesh_export_data(src: &Project, opt: &MeshOptions) -> Result<Flat, String
         groups.push(g);
     }
     p.columns = columns;
+    // [149] Bäume: je Baum eine Gruppe (Stamm + Krone).
+    let trees = p.trees.take();
+    for t in trees.as_deref().unwrap_or(&[]) {
+        let mut g = Group::new(format!("Baum_{}", sanitize_name(&t.id)), "tree", &t.id, level_of(Some(&t.floor_id)));
+        p.trees = Some(vec![t.clone()]);
+        add_meshes(&mut g, &mut mats, &model3d::emit_trees(&p), "Baum");
+        groups.push(g);
+    }
+    p.trees = trees;
     let stairs = p.stairs.take();
     for st in stairs.as_deref().unwrap_or(&[]) {
         let mut g = Group::new(format!("Treppe_{}", sanitize_name(&st.id)), "stair", &st.id, level_of(Some(&st.floor_id)));
