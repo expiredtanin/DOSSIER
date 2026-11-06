@@ -19,7 +19,8 @@ if server_is_up; then
   echo "electron-shell: Dev-Server läuft bereits auf ${URL}."
 else
   echo "electron-shell: starte Vite-Dev-Server (Port ${PORT}) …"
-  npm run dev >/tmp/cad-electron-shell-dev.log 2>&1 &
+  # vite direkt starten: bei "npm run dev" wäre $! nur npm, und vite bliebe beim Beenden übrig.
+  node_modules/.bin/vite >/tmp/cad-electron-shell-dev.log 2>&1 &
   DEV_SERVER_PID=$!
 
   ATTEMPTS=0

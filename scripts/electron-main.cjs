@@ -18,7 +18,7 @@ Menu.setApplicationMenu(null);
 // Gleiche Flags wie scripts/chromium-shell.sh — WebGPU liegt unter Linux
 // hinter --enable-unsafe-webgpu, und WebGPU braucht das Vulkan-Backend.
 app.commandLine.appendSwitch("enable-unsafe-webgpu");
-app.commandLine.appendSwitch("enable-features", "Vulkan");
+app.commandLine.appendSwitch("enable-features", "Vulkan,VulkanFromANGLE,DefaultANGLEVulkan");
 
 const DEV_URL = "http://localhost:5187";
 const isDev = !app.isPackaged;
