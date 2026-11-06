@@ -171,13 +171,23 @@ describe("generatePlan — Opening.detailLevel (Per-Element-Übersteuerung der A
       (pr) => pr.kind === "arc",
     ).length;
 
+  /** Anschlagstriche der Tür (cls "door-frame", nur Detailgrad fein). */
+  const doorRevealCount = (opening: Opening, viewDetail: "grob" | "mittel" | "fein") =>
+    generatePlan(projectWithOpening(opening), "eg", visible, undefined, viewDetail).primitives.filter(
+      (pr) => pr.kind === "line" && pr.cls === "door-frame",
+    ).length;
+
   it("ohne detailLevel gilt weiterhin die Ansichts-Detailstufe (rückwärtskompatibel)", () => {
-    expect(doorArcCount(baseDoor, "grob")).toBe(0); // grob: kein Schwenkbogen
-    expect(doorArcCount(baseDoor, "mittel")).toBe(1); // mittel+: Schwenkbogen
+    // [140] grob (auch automatisch ab 1:200) mit Schwenkbogen, erst 1:500 ohne.
+    expect(doorArcCount(baseDoor, "grob")).toBe(1);
+    expect(doorArcCount(baseDoor, "mittel")).toBe(1);
+    expect(generatePlan(projectWithOpening(baseDoor), "eg", visible, undefined, "grob", false, false, true, 500).primitives.filter((pr) => pr.kind === "arc").length).toBe(0);
+    expect(doorRevealCount(baseDoor, "fein")).toBe(2);
+    expect(doorRevealCount(baseDoor, "mittel")).toBe(0);
   });
 
-  it("detailLevel='grob' unterdrückt den Schwenkbogen, AUCH wenn die Ansicht 'fein' zeigt", () => {
-    expect(doorArcCount({ ...baseDoor, detailLevel: "grob" }, "fein")).toBe(0);
+  it("detailLevel='grob' zeichnet grob (ohne Anschlagstriche), AUCH wenn die Ansicht 'fein' zeigt", () => {
+    expect(doorRevealCount({ ...baseDoor, detailLevel: "grob" }, "fein")).toBe(0);
   });
 
   it("detailLevel='fein' zeigt den Schwenkbogen, AUCH wenn die Ansicht 'grob' zeigt", () => {
@@ -199,6 +209,6 @@ describe("generatePlan — Opening.detailLevel (Per-Element-Übersteuerung der A
     const doorPlain: Opening = { ...baseDoor, id: "T2", position: 3.0 };
     const p: Project = { ...projectWithOpening(doorFein), walls: [wall], openings: [doorFein, doorPlain] };
     const plan = generatePlan(p, "eg", visible, undefined, "grob");
-    expect(plan.primitives.filter((pr) => pr.kind === "arc").length).toBe(1);
+    expect(plan.primitives.filter((pr) => pr.kind === "line" && pr.cls === "door-frame").length).toBe(2);
   });
 });

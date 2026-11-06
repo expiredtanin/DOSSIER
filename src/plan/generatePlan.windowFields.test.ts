@@ -201,17 +201,18 @@ describe("generatePlan — Verglasung glazingPanes (Item 2)", () => {
     expect(glassLineCount(p1, "fein")).toBe(0);
   });
 
-  it("ohne typeId bleibt die alte Detailgrad-Regel (grob/mittel=1, fein=2) unverändert — Regression", () => {
+  it("ohne typeId: mittel=1, fein=2 Glaslinien; grob keine ([140]: zwei Striche in der Wandflucht)", () => {
     const p = project({ ...baseWindow });
-    expect(glassLineCount(p, "grob")).toBe(1);
+    expect(glassLineCount(p, "grob")).toBe(0);
     expect(glassLineCount(p, "mittel")).toBe(1);
     expect(glassLineCount(p, "fein")).toBe(2);
   });
 
-  it("glazingPanes wirkt bei 'grob' NICHT (bleibt bei 1 Glaslinie)", () => {
+  it("glazingPanes wirkt bei 'grob' NICHT (keine Glaslinie, nur die zwei Striche)", () => {
     const wt: WindowType = { ...baseWindowType, glazingPanes: 3 };
     const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
-    expect(glassLineCount(p, "grob")).toBe(1);
+    expect(glassLineCount(p, "grob")).toBe(0);
+    expect(linesOfClass(p, "window-frame", "grob").length).toBe(2);
   });
 });
 
@@ -432,14 +433,15 @@ describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine
     }
   });
 
-  it("sashLine wirkt auch bei 'grob' (1:100) auf die einzige dort sichtbare Glaslinie", () => {
+  it("frameLine wirkt bei 'grob' (1:100) auf die zwei Striche in der Wandflucht ([140])", () => {
     const p = project(
-      { ...baseWindow, typeId: "wt1", sashLine: { color: "#00ff00", weight: 0.3 } },
+      { ...baseWindow, typeId: "wt1", frameLine: { color: "#00ff00", weight: 0.3 } },
       [twoSashType],
     );
-    const g = linesOfClass(p, "window-glass", "grob");
-    expect(g.length).toBe(1);
-    expect(g[0].kind === "line" && g[0].color).toBe("#00ff00");
+    expect(linesOfClass(p, "window-glass", "grob").length).toBe(0);
+    const g = linesOfClass(p, "window-frame", "grob");
+    expect(g.length).toBe(2);
+    expect(g.every((q) => q.kind === "line" && q.color === "#00ff00")).toBe(true);
     expect(g[0].kind === "line" && g[0].weightMm).toBeCloseTo(0.3, 6);
   });
 });

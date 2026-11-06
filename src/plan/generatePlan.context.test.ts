@@ -224,7 +224,7 @@ describe("generatePlan — Luftbild (ContextImage)", () => {
     expect(plan.backgroundImages![0].filters).toBeUndefined();
   });
 
-  it("im Mono-Modus wird das Luftbild ausgeblendet (reiner S/W-Plan)", () => {
+  it("[140] auch im Schwarz-Weiss-Modus (Tusche-Standard) bleibt das Luftbild", () => {
     const p = projectWith([
       {
         id: "IMG1",
@@ -236,7 +236,7 @@ describe("generatePlan — Luftbild (ContextImage)", () => {
       },
     ]);
     const plan = generatePlan(p, "eg", visible, undefined, "mittel", false, true);
-    expect(plan.backgroundImages).toHaveLength(0);
+    expect(plan.backgroundImages).toHaveLength(1);
   });
 });
 
