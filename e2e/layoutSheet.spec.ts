@@ -183,14 +183,18 @@ for (const where of ["Grundriss", "Layout-Blatt"] as const) {
     await page.screenshot({ path: `test-results/layout-sheet-${where === "Grundriss" ? "plan" : "sheet"}.png` });
 
     // Griff: Rechteck wählen, Ecke ziehen (Klick-Ziehen-Klick wie im Grundriss) → breiter; Undo.
-    const rectEdge = at(0.9, 0.3);
+    // Obere Kante (Startecke at(0.55, 0.15) liegt fest); die rechte Ecke kann beim Zeichnen am Raster
+    // einrasten, darum Ecke über den echten Griff statt über die geklickte Stelle suchen.
+    const rectEdge = at(0.7, 0.15);
     await page.mouse.click(rectEdge.x, rectEdge.y);
     await expect(page.locator(".plan-grip").first()).toBeVisible();
     const width = page.locator(".objinfo-field").filter({ hasText: "Breite" }).locator("input");
     await openTab(page, "Objekt-Info");
     const w0 = Number(await width.inputValue());
-    const corner = at(0.9, 0.5);
-    const to = at(0.97, 0.5);
+    const want = at(0.9, 0.5);
+    const grips = await gripCenters(page);
+    const corner = grips.reduce((b, p) => (Math.hypot(p.x - want.x, p.y - want.y) < Math.hypot(b.x - want.x, b.y - want.y) ? p : b));
+    const to = { x: corner.x + (at(0.97, 0.5).x - want.x), y: corner.y };
     await page.mouse.move(corner.x, corner.y);
     await page.mouse.down();
     await page.mouse.move((corner.x + to.x) / 2, corner.y, { steps: 4 });
