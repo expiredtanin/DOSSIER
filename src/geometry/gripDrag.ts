@@ -105,16 +105,27 @@ export function openingGripPoint(w: Pick<Wall, "start" | "end" | "bulge">, op: P
 }
 
 /**
+ * [144] Getippte Länge beim Griff-Zug einer Öffnung in einer Bogenwand: neue `position` = Lage beim Greifen
+ * `pos0` ± `length` als BOGENLÄNGE (nicht entlang der Sehne). Richtung aus dem Zielpunkt `pt` des
+ * Feld-Controllers relativ zum Bezug `anchor`, gemessen an der Wandrichtung `wallDir`.
+ */
+export function openingTypedPosition(pos0: number, length: number, anchor: Vec2, pt: Vec2, wallDir: Vec2): number {
+  const along = (pt.x - anchor.x) * wallDir.x + (pt.y - anchor.y) * wallDir.y;
+  return pos0 + (along < 0 ? -length : length);
+}
+
+/**
  * Öffnung im Schnitt-Blatt waagrecht ziehen: Blatt-Delta `du` (gesamt, entlang `uAxis`) → neue `position`
  * und das wirksame Delta (nach dem Klemmen); null, wenn die Wand fast quer zur Schnittlinie steht.
+ * Bogenwand ([144]): `position` = Bogenlänge, die Öffnungsmitte folgt dem Delta auf dem Bogen.
  */
 export function openingSheetSlide(
-  w: Pick<Wall, "start" | "end">,
+  w: Pick<Wall, "start" | "end" | "bulge">,
   op: Pick<Opening, "position" | "width">,
   uAxis: Vec2,
   du: number,
 ): { position: number; du: number } | null {
-  const f = core().grip_opening_slide_sheet(w.start.x, w.start.y, w.end.x, w.end.y, uAxis.x, uAxis.y, op.position, op.width, du);
+  const f = core().grip_opening_slide_sheet(w.start.x, w.start.y, w.end.x, w.end.y, w.bulge ?? 0, uAxis.x, uAxis.y, op.position, op.width, du);
   return f.length ? { position: f[0], du: f[1] } : null;
 }
 

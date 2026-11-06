@@ -2819,9 +2819,23 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   vitest `sun.test.ts` (Stützen/Bäume als Schattenwerfer ergänzt). Zeit Musterhaus komplex (WASM ohne wasm-opt,
   Node): 21.6. 10:00 UTC 19.5 ms (vorher 0.8 ms, nur Ebene), 21.12. 14:30 UTC (Sonne 7.8°) 45.5 ms. Goldens
   `komplex-grundriss-eg-50/100` neu (Schattenflächen 1 → 7 Polygone: Bäume, Stützmauer, Pflanzgefässe). Geprüft:
-  CLI-Grundriss EG vorher/nachher (Linux/Chromium). Offen: Schatten auf Gebäudeteile (Decken, Dächer) bleibt
-  unberücksichtigt (Strahl geht bis ins Gelände, auch unter dem Gebäude); Dach-/Kronenschatten als konvexe Hülle;
-  Bäume nur als Kreise erkannt (kein Baum-Objekt mit eigener Höhe); nicht in der Tauri-App geprüft.
+  CLI-Grundriss EG vorher/nachher (Linux/Chromium).
+  6.11.: **Schatten auf Gebäudeteile.** Im Grundriss (Schnitthöhe `cut_z` des Geschosses) fangen Decken und Dächer,
+  deren Oberkante nicht über dem Schnitt liegt (im Plan sichtbar: Bodenplatten, Terrassen, Dächer tieferer Geschosse),
+  den Strahl vor dem Gelände ab: `sun::Receiver` = Höhenfeld (Decke eben mit Aussparungen/Deckenöffnungen, Dach über die
+  Dachflächen `roof_underside_at`, Dicke 0.3 m), Treffer = Strahl kreuzt die Oberseite von oben oder trifft die Stirn
+  innerhalb der Dicke (darunter geht er durch), Eintritt per Halbieren zwischen den Abtastpunkten; ein Dach fängt seinen
+  eigenen Strahl nicht. Vorfilter je Strahl: Rechteck-Abschnitt und höchste Oberkante. Ohne Geländenetz läuft der Strahl
+  dann über der Ebene ±0.00 (`Ground::plane`). Abfrage `shadows` nimmt optional die Schnitthöhe (TS
+  `shadowPolygons(p, sun, cutZ?)`); ohne sie wie bisher. Tests: Rust `schatten_auf_tiefere_platte` (Körper OK 6 m neben
+  Platte OK 1 m, 45°: Schatten endet bei 5 statt 6 m, Fläche 14 m²; Platte über dem Schnitt / zu kurze Platte fangen
+  nichts), `schatten_auf_pultdach_als_hoehenfeld` (geneigte Fläche, eigenes Dach, Start unter dem Dach). Zeit Musterhaus
+  komplex EG (WASM ohne wasm-opt, Node, Median): 21.6. 10:00 UTC 22.8 → 25.8 ms, 21.12. 14:30 UTC (7.8°) 52.6 → 52.2 ms,
+  21.3. 16:00 UTC (15.8°) 44.9 → 44.6 ms. Goldens `komplex-grundriss-eg-50/100` neu: Hauptschatten 363.86 → 364.32 m²
+  (Strahlen enden auf der Bodenplatte ±0.00 statt im tieferen Gelände daneben). Nicht angesehen (nur Zahlen/Tests),
+  nicht in der Tauri-App geprüft. Offen: Schatten nur im Geschoss nächst ±0.00 (Dächer tieferer Geschosse zeigt erst
+  ein OG-Plan); Decken/Dächer werfen selbst keinen Schatten (Auskragungen, Balkone); Dach-/Kronenschatten als konvexe
+  Hülle; Bäume nur als Kreise erkannt (kein Baum-Objekt mit eigener Höhe).
 - ◐ **[145] Texte beim Zoomen synchron.** (6.11., Maintainer macOS: „Beim Zoomen sind die Texte nicht synchron, sie
   folgen jeder Bewegung mit leichter Verzögerung.") Ursache: auf macOS zeichnet die native Metal-Fläche (`native2d`)
   die Geometrie; Raumstempel (`text`), Textfelder/mehrzeilige `drawingText` und Griffe liegen im SVG-Overlay der
@@ -2872,8 +2886,13 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   (Musterhaus: Anschlag an O1 mit Hinweis; Musterhaus komplex: Kette `mass-fenster-eg` folgt Befehl und Objekt-Info,
   Erker: Abstand ab Wandende aus Bogenlänge, Anschlag f5 vor f6, Verschieben auf dem Bogen). Klick-Zug im alten
   e2e auf 0.5 m (0.25 m fing seit [147] der Fang am Basispunkt).
-  Offen: Öffnung im Schnitt-Blatt ziehen rechnet weiter auf der Sehne (Bogenwand) — der Commit klemmt aber über den
-  Kern; Tab-Länge beim Griff an Bogenwänden entlang der Sehne über der Öffnung; Vorschau beim Setzen zeigt den
+  6.11.: **Bogenwände beim Griff-Zug:** Tab-Länge = Bogenlänge ab der Lage beim Greifen (`openingTypedPosition`, über
+  `slideOpening({ position })`, also geklemmt und mit Anschlag; Richtung aus Winkel-Feld/Maus gegen die Wandrichtung beim
+  Greifen; beim Öffnen des Feldes steht die bisher gezogene Bogenlänge drin). Schnitt-Blatt: Kern `opening_slide_sheet`
+  mit `bulge` — die Öffnungsmitte folgt dem Blatt-Delta auf dem Bogen (Lage nächst der Ausgangslage mit gleicher
+  Blatt-Koordinate, sonst die mit kleinster Abweichung), `position` = Bogenlänge. Tests: Rust `oeffnung_im_schnitt_bogenwand`,
+  vitest `gripDrag.test.ts` (Schnitt-Blatt Bogenwand, getippte Bogenlänge). Nicht im Browser/e2e durchgespielt.
+  Offen: Vorschau beim Setzen zeigt den
   Cursor-Ort, nicht die verrückte Lage; `clampInside` steht noch in TS (Griff) und Rust (Befehl); nur Linux/Chromium
   geprüft, nicht in der Tauri-App. · S
 - ✅ **[147] Plan öffnet zu stark gezoomt.** (6.11., zwei e2e-Läufe: nach „Neues Projekt" und beim Öffnen von Musterhaus
@@ -2905,8 +2924,13 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   `plan/lineEnds.test.ts`. Goldens neu (Plan/Schnitt/Ansicht + CLI: `<g>` mit Attributen, genähte `<polyline>` statt
   Einzel-`<line>`/`<path>`, keine `linecap=round` mehr; Komplex-EG 1:50 mit Schraffur 4.95 → 1.05 MB, v. a. Höhenlinien).
   Geprüft: cargo test Kern + render2d, WASM gebaut (Linux, `--no-opt`), tsc, vitest, CLI-SVG vorher/nachher in Chromium
-  (Ecke, T-Stoss, Tür, Masslinie). **Offen:** DXF/DWG ohne Einstellung (acadrust schreibt `$ENDCAPS/$JOINSTYLE` nur in DWG;
-  CAD zeichnet Stiftbreiten selbst); Druck-SVG streicht Polygone weiter rundum (keine `noStrokeEdges`); Nähen in den
+  (Ecke, T-Stoss, Tür, Masslinie). 6.11.: **DXF/DWG** tragen die Einstellung im Kopf: Kern `plan/dxf.rs` schreibt den
+  flachen Datensatz `LINE_ENDS = 23` (`cap | join << 2`), fileio setzt `$ENDCAPS` (flach 0, rund 1, vorstehend 3) und
+  `$JOINSTYLE` (Gehrung 2 „Angle", rund 1, gefast 3 „Flat"); ohne Datensatz 0/2. DWG schreibt acadrust selbst; im DXF
+  (ASCII und binär, Gruppe 280, gültig ab R2000) fehlen sie bei acadrust, `with_line_end_vars` ergänzt sie hinter
+  `$LWDISPLAY`. Test: fileio `linienenden_im_kopf` (ASCII/binär byte-genau und über den acadrust-Leser, DWG R2000/R2018
+  wieder gelesen, Standard ohne Datensatz). Nicht in AutoCAD/BricsCAD geöffnet (CAD wendet die Variablen nur auf
+  Strichstärken-Darstellung an). **Offen:** Druck-SVG streicht Polygone weiter rundum (keine `noStrokeEdges`); Nähen in den
   Metal-Chunks nur innerhalb eines Chunks; nicht in der Tauri-App/Metal und nicht im WebGPU-Browser angesehen. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
