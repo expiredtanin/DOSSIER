@@ -3067,6 +3067,33 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   nicht in der Tauri-App geprüft. Offen: Schatten nur im Geschoss nächst ±0.00 (Dächer tieferer Geschosse zeigt erst
   ein OG-Plan); Decken/Dächer werfen selbst keinen Schatten (Auskragungen, Balkone); Dach-/Kronenschatten als konvexe
   Hülle; Bäume nur als Kreise erkannt (kein Baum-Objekt mit eigener Höhe).
+  6.11. (Rest): **Schatten je Fläche, alle Bauteile, echte Dachform, alle Geschosse.** Umgestellt von „Strahl endet auf
+  Empfänger" (`sun::Receiver`, Höhenfeld, entfernt) auf Schatten je Empfänger-Ebene: Schatten eines geschlossenen Körpers
+  auf einer Ebene = Vereinigung der entlang der Sonne projizierten Flächen über der Ebene (Sutherland–Hodgman-Schnitt an
+  der Ebene, affine Projektion; jeder Strahl verlässt den Körper durch eine zur Sonne gewandte Fläche) — exakt auch für
+  nicht-konvexe Körper, ohne Hülle; Abschattung durch höhere Flächen ergibt sich von selbst. **Werfer**: Wände, Körper
+  (Auskragungen), Stützen, Baumstämme, neu **Decken** (Balkone, Vordächer, mit Aussparungen) als Prismen (Oberseite +
+  sonnenseitige Seiten), **Dächer** als Körper Traufhöhe → Dachfläche (Dachflächen + Stirnen an Randkanten) bzw.
+  verschnittene Dächer/Gauben (`roof_assembly`) als Hülle `skin` (`planar_faces`), nur sonnenseitige Flächen; Baumkronen
+  bleiben konvexe Punktwolken. **Empfänger** im Grundriss (Schnitthöhe `cut_z`): Decken und Dachflächen (geneigt: Ebene
+  der Fläche, von der Sonne abgewandt = ganz im Eigenschatten) mit OK ≤ Schnitt und nicht im Gelände vergraben; sichtbar
+  ist eine Fläche nur, wo keine höhere Decke/kein Dach (Unterkante darüber) und kein höherer Empfänger liegt — Innenräume
+  und Flächen unter Balkonen/Vordächern zeigen keinen Sonnenschatten. Gelände (TIN wie bisher, Dachflächen abgetastet,
+  gemeinsame Kanten nur an den Ecken, Projektions-Cache) bzw. ±0.00 nur im Geschoss nächst ±0.00, abzüglich Gebäude-
+  flächen. `extras::sun_shadow` jetzt in **jedem Geschoss-Grundriss** (`sun::shadow_polygons_plan(p, sun, cut,
+  with_ground)`; Deckenspiegel/Schnitte ohne): im OG-/DG-Plan Schatten auf Dächern/Terrassen tieferer Geschosse (Musterhaus
+  komplex: Carport-Dach), im EG-Plan nichts auf höheren Flächen. Abfrage `shadows` ohne Schnitthöhe: Boden-Schatten aller
+  Werfer ohne Abzug. Tests Rust: `schatten_einer_auskragung_und_eines_balkons` (Fläche 4 × 2.3 bzw. 4 × (2 + Dicke)),
+  `nichtkonvexes_dach` (L-Walmdach: Innenwinkel hell, auf ebenem TIN dieselbe Fläche), `schatten_auf_tieferem_dach_im_og_plan`
+  (Terrasse im OG-Plan ganz/teilweise beschattet, im EG-Plan darunter nichts, dahinter Gelände), `schatten_auf_tiefere_platte`
+  neu (Platte wirft selbst, Gelände unter ihr ohne Schatten, Fläche 26 m²), `plan_unsinn_ohne_panik`. Zeit Musterhaus komplex
+  (`shadowPolygons(p, sun, 1)`, WASM ohne wasm-opt, Node): 21.6. 10:00 UTC 38 ms (vorher ≈ 20–26), 21.12. 14:30 UTC 70 ms
+  (vorher ≈ 50), 21.3. 15:00 UTC 57 ms. Goldens `komplex-grundriss-eg/og/dg-50/100` neu (EG: Giebelform statt Hülle; OG/DG:
+  Schatten auf dem Carport-Dach). Geprüft: CLI-Grundriss EG/OG/DG 1:100 vorher/nachher (Linux/Chromium, 21.6. 10:00,
+  21.3. 08:00 und 15:00 UTC); nicht in der Tauri-App geprüft. **Bäume:** Kreise der Ebene 13 + `sunStudy.treeHeight` reichen
+  für die Studie (eine Höhe für alle Bäume); offen: Baum als eigenes Objekt mit Höhe/Kronendurchmesser je Baum (Rust-Modell
+  + Werkzeug + 3D/Plan — nicht klein). Offen ausserdem: Flachdach mit nicht-rechteckigem Umriss rechnet `roof_geometry` als
+  Rechteck (auch im 3D); Wandöffnungen lassen kein Licht durch; Schatten im 3D ([64]).
 - ◐ **[145] Texte beim Zoomen synchron.** (6.11., Maintainer macOS: „Beim Zoomen sind die Texte nicht synchron, sie
   folgen jeder Bewegung mit leichter Verzögerung.") Ursache: auf macOS zeichnet die native Metal-Fläche (`native2d`)
   die Geometrie; Raumstempel (`text`), Textfelder/mehrzeilige `drawingText` und Griffe liegen im SVG-Overlay der

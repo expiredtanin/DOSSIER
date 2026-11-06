@@ -5,6 +5,8 @@
 //!  • [`shadow_of_prism`] / [`shadow_union`]: Boden-Schatten (z = 0) als Vereinigung konvexer
 //!    Hüllen (Körper ∪ verschobener Körper). Modell: x = Ost, y = Nord, Höhen in Metern über dem
 //!    Geländenullpunkt. TS sammelt die Prismen (Wände, Körper) und Punktwolken (Dächer).
+//!  • [`shadow_polygons_plan`] ([142]): Schatten im Grundriss aus dem Projekt — alle Bauteile als
+//!    Flächen-Körper, je Empfänger (Gelände, Decken, Dachflächen unter dem Schnitt) projiziert.
 //!  • [`without_holes`]: Polygon mit Löchern → lochfreie Teile gleicher Fläche (Plan-Primitiv).
 
 use crate::flat::{Polygon, Ring};
@@ -153,83 +155,13 @@ pub fn shadow_union(prisms: &[Prism], clouds: &[Vec<[f64; 3]>], sun: SunPosition
 
 // ── Schatten auf dem Gelände ([142]) ─────────────────────────────────────────
 
-/// Schattenempfangendes Gelände: TIN mit Raster-Index (oder ohne Netz die Ebene ±0.00); Höhen im
-/// Projekt-Bezug (TIN-Höhe − `datum`). Ausserhalb des Netzes gilt die zuletzt getroffene Geländehöhe
-/// (bzw. ±0.00, wenn der Strahl ausserhalb beginnt). Dazu Gebäudeflächen (`receivers`), auf die der
-/// Strahl vor dem Gelände treffen kann.
+/// Schattenempfangendes Gelände: TIN mit Raster-Index; Höhen im Projekt-Bezug (TIN-Höhe − `datum`).
+/// Ausserhalb des Netzes gilt die zuletzt getroffene Geländehöhe (bzw. ±0.00, wenn der Strahl
+/// ausserhalb beginnt). Gebäudeflächen als Empfänger rechnet [`shadow_polygons_plan`] je Fläche.
 pub struct Ground<'a> {
-    idx: Option<crate::terrain::TinIndex<'a>>,
+    idx: crate::terrain::TinIndex<'a>,
     datum: f64,
     z_min: f64,
-    receivers: Vec<Receiver>,
-}
-
-/// Oberseite einer schattenempfangenden Gebäudefläche.
-enum Top {
-    Flat(f64),
-    /// Dachflächen (absolute Höhen); Höhe am Punkt über die Ebene der enthaltenden Fläche.
-    Planes(Vec<Vec<[f64; 3]>>),
-}
-
-/// [142] Schattenempfangende Gebäudefläche (Decke, Dach) als Höhenfeld: Umriss mit Löchern,
-/// Oberseite, Dicke (darunter geht der Strahl durch). `owner` = Index der Punktwolke, die diese
-/// Fläche selbst wirft (ein Dach fängt nicht seinen eigenen Strahl).
-pub struct Receiver {
-    outline: Ring,
-    holes: Vec<Ring>,
-    bbox: [f64; 4],
-    z_min: f64,
-    z_max: f64,
-    thick: f64,
-    top: Top,
-    owner: Option<usize>,
-}
-
-fn in_ring(x: f64, y: f64, r: &[[f64; 2]]) -> bool {
-    let mut inside = false;
-    let mut j = r.len().wrapping_sub(1);
-    for i in 0..r.len() {
-        let (a, b) = (r[i], r[j]);
-        if (a[1] > y) != (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0] {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside
-}
-
-impl Receiver {
-    fn make(outline: Ring, holes: Vec<Ring>, (z_min, z_max): (f64, f64), thick: f64, top: Top, owner: Option<usize>) -> Option<Receiver> {
-        let outline: Ring = outline.into_iter().filter(|q| q[0].is_finite() && q[1].is_finite()).collect();
-        if outline.len() < 3 || !z_min.is_finite() || !z_max.is_finite() || !(thick > 0.0) {
-            return None;
-        }
-        let bbox = outline.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]);
-        Some(Receiver { outline, holes, bbox, z_min, z_max, thick, top, owner })
-    }
-
-    /// Ebene Platte (Decke) mit Oberkante `z_top` und Dicke `thick`.
-    pub fn flat(outline: Ring, holes: Vec<Ring>, z_top: f64, thick: f64) -> Option<Receiver> {
-        Receiver::make(outline, holes, (z_top, z_top), thick, Top::Flat(z_top), None)
-    }
-
-    /// Dach: Traufumriss (mit Hof-Löchern) und Dachflächen; `owner` = Index seiner Punktwolke.
-    pub fn roof(eaves: Ring, holes: Vec<Ring>, planes: Vec<Vec<[f64; 3]>>, thick: f64, owner: Option<usize>) -> Option<Receiver> {
-        let z = planes.iter().flatten().map(|q| q[2]).fold((f64::INFINITY, f64::NEG_INFINITY), |m, z| (m.0.min(z), m.1.max(z)));
-        Receiver::make(eaves, holes, z, thick, Top::Planes(planes), owner)
-    }
-
-    /// Oberkante am Punkt; `None` ausserhalb (oder in einem Loch).
-    fn top_at(&self, x: f64, y: f64) -> Option<f64> {
-        let b = self.bbox;
-        if x < b[0] || x > b[2] || y < b[1] || y > b[3] || !in_ring(x, y, &self.outline) || self.holes.iter().any(|h| in_ring(x, y, h)) {
-            return None;
-        }
-        match &self.top {
-            Top::Flat(z) => Some(*z),
-            Top::Planes(pl) => crate::roof::roof_underside_at(pl, 0.0, x, y),
-        }
-    }
 }
 
 /// Schrittweite (m, waagrecht) beim Abtasten des Sonnenstrahls über dem Gelände.
@@ -242,35 +174,18 @@ const SLIVER_AREA: f64 = 0.05;
 impl<'a> Ground<'a> {
     pub fn new(tin: &'a crate::terrain::Tin, datum: f64) -> Ground<'a> {
         let z_min = tin.z_range().0 - datum;
-        Ground { idx: Some(crate::terrain::TinIndex::new(tin)), datum, z_min: if z_min.is_finite() { z_min } else { GROUND_Z }, receivers: vec![] }
-    }
-
-    /// Ohne Geländenetz: Ebene ±0.00 (für Gebäudeflächen als Empfänger).
-    pub fn plane() -> Ground<'a> {
-        Ground { idx: None, datum: 0.0, z_min: GROUND_Z, receivers: vec![] }
-    }
-
-    /// [142] Gebäudeflächen, auf die der Schatten vor dem Gelände fallen kann.
-    pub fn with_receivers(mut self, receivers: Vec<Receiver>) -> Ground<'a> {
-        self.receivers = receivers;
-        self
+        Ground { idx: crate::terrain::TinIndex::new(tin), datum, z_min: if z_min.is_finite() { z_min } else { GROUND_Z } }
     }
 
     /// Geländehöhe am Punkt; `None` ausserhalb des Netzes.
     pub fn z(&self, x: f64, y: f64) -> Option<f64> {
-        self.idx.as_ref()?.z_at(x, y).map(|z| z - self.datum)
+        self.idx.z_at(x, y).map(|z| z - self.datum)
     }
 
     /// Erster Schnitt des Sonnenstrahls ab `p` (von der Sonne weg, `k` = waagrechte Verschiebung je
     /// Meter Abstieg) mit dem Gelände, als Grundrisspunkt. Punkte auf/unter dem Gelände bleiben, wo
     /// sie sind. Abtasten in `RAY_STEP`, Schnitt linear zwischen den Stützstellen.
     pub fn project(&self, p: [f64; 3], k: [f64; 2]) -> [f64; 2] {
-        self.project_from(p, k, None)
-    }
-
-    /// Wie [`Ground::project`]; trifft der Strahl vorher eine Gebäudefläche (ausser denen der
-    /// Punktwolke `cloud`), endet er dort: auf der Oberseite oder an der Stirn (innerhalb der Dicke).
-    fn project_from(&self, p: [f64; 3], k: [f64; 2], cloud: Option<usize>) -> [f64; 2] {
         let kl = hypot2(k[0], k[1]);
         let g0 = self.z(p[0], p[1]).unwrap_or(GROUND_Z);
         if !(p[2] > g0) || !(kl > 1e-12) || !kl.is_finite() {
@@ -283,62 +198,11 @@ impl<'a> Ground<'a> {
         if p[2] - floor > 1_000.0 {
             return at((p[2] - g0) * kl);
         }
-        // Empfänger, die der Strahl erreichen kann: tiefste Oberkante unter dem Startpunkt, Umriss im
-        // Rechteck des Strahls (bis zur tiefsten möglichen Höhe).
-        let end = at((p[2] - floor) * kl);
-        let rb = [p[0].min(end[0]), p[1].min(end[1]), p[0].max(end[0]), p[1].max(end[1])];
-        // Je Empfänger der Strahl-Abschnitt [s0, s1] über seinem Rechteck (bis Abstieg unter die tiefste
-        // Oberkante − Dicke); ausserhalb wird nicht gefragt.
-        let span = |r: &Receiver| -> Option<(f64, f64)> {
-            let (mut lo, mut hi) = (0.0f64, (p[2] - (r.z_min - r.thick)) * kl);
-            for ax in 0..2 {
-                let (o, d, a, b) = (p[ax], dir[ax], r.bbox[ax], r.bbox[ax + 2]);
-                if d.abs() < 1e-12 {
-                    if o < a || o > b {
-                        return None;
-                    }
-                    continue;
-                }
-                let (t0, t1) = ((a - o) / d, (b - o) / d);
-                lo = lo.max(t0.min(t1));
-                hi = hi.min(t0.max(t1));
-            }
-            (lo <= hi).then_some((lo - RAY_STEP, hi + RAY_STEP))
-        };
-        let cand: Vec<(&Receiver, f64, f64)> = self
-            .receivers
-            .iter()
-            .filter(|r| (cloud.is_none() || r.owner != cloud) && r.z_min < p[2] && r.bbox[0] <= rb[2] && r.bbox[2] >= rb[0] && r.bbox[1] <= rb[3] && r.bbox[3] >= rb[1])
-            .filter_map(|r| span(r).map(|(a, b)| (r, a, b)))
-            .collect();
-        let zr_at = |s: f64| p[2] - s / kl;
         let (mut s, mut prev, mut last_g) = (0.0, p[2] - g0, g0);
         loop {
             let s1 = s + RAY_STEP;
-            let zr = zr_at(s1);
+            let zr = p[2] - s1 / kl;
             let q = at(s1);
-            for &(r, a, b) in &cand {
-                // Strahl noch über der höchsten Oberkante oder ausserhalb des Rechtecks: kein Treffer möglich.
-                if s1 < a || s1 > b || zr > r.z_max {
-                    continue;
-                }
-                let Some(top) = r.top_at(q[0], q[1]) else { continue };
-                // Auf der Oberseite (von oben gekreuzt) oder an der Stirn innerhalb der Dicke.
-                if zr <= top && (zr >= top - r.thick || zr_at(s) > top) {
-                    // Eintritt genauer: halbieren zwischen den Stützstellen (innen und auf/unter der Oberseite).
-                    let (mut lo, mut hi) = (s, s1);
-                    for _ in 0..8 {
-                        let m = 0.5 * (lo + hi);
-                        let qm = at(m);
-                        if r.top_at(qm[0], qm[1]).is_some_and(|t| zr_at(m) <= t) {
-                            hi = m;
-                        } else {
-                            lo = m;
-                        }
-                    }
-                    return at(hi);
-                }
-            }
             let g = self.z(q[0], q[1]).unwrap_or(last_g);
             last_g = g;
             let d = zr - g;
@@ -417,22 +281,21 @@ fn prism_parts_on(footprint: &[[f64; 2]], z_bottom: f64, z_top: f64, k: [f64; 2]
 }
 
 /// Geländeschatten einer Punktwolke: Hülle der projizierten Punkte über dem Gelände.
-fn cloud_part_on(points: &[[f64; 3]], k: [f64; 2], g: &Ground, cloud: usize) -> Ring {
+fn cloud_part_on(points: &[[f64; 3]], k: [f64; 2], g: &Ground) -> Ring {
     let moved: Vec<[f64; 2]> = points
         .iter()
         .filter(|p| p.iter().all(|v| v.is_finite()) && p[2] > g.z(p[0], p[1]).unwrap_or(GROUND_Z) + 1e-9)
-        .map(|p| g.project_from(*p, k, Some(cloud)))
+        .map(|p| g.project(*p, k))
         .collect();
     hull(&moved)
 }
 
-/// Splitter weg: Teile und Löcher unter `SLIVER_AREA`.
-fn without_slivers(polys: Vec<Polygon>) -> Vec<Polygon> {
-    use crate::flat_read::signed_area;
+/// Splitter weg: Teile und Löcher unter `min_area` (m²).
+fn without_slivers(polys: Vec<Polygon>, min_area: f64) -> Vec<Polygon> {
     polys
         .into_iter()
-        .filter(|p| p.first().is_some_and(|o| signed_area(o).abs() >= SLIVER_AREA))
-        .map(|p| p.into_iter().enumerate().filter(|(i, r)| *i == 0 || signed_area(r).abs() >= SLIVER_AREA).map(|(_, r)| r).collect())
+        .filter(|p| p.first().is_some_and(|o| signed_area(o).abs() >= min_area))
+        .map(|p| p.into_iter().enumerate().filter(|(i, r)| *i == 0 || signed_area(r).abs() >= min_area).map(|(_, r)| r).collect())
         .collect()
 }
 
@@ -441,11 +304,11 @@ pub fn shadow_union_on(prisms: &[Prism], clouds: &[Vec<[f64; 3]>], sun: SunPosit
     let Some(g) = ground else { return shadow_union(prisms, clouds, sun) };
     let Some(k) = shadow_shift(sun) else { return vec![] };
     let mut parts: Vec<Polygon> = prisms.iter().flat_map(|p| prism_parts_on(&p.footprint, p.z_bottom, p.z_top, k, g)).collect();
-    parts.extend(clouds.iter().enumerate().map(|(i, c)| cloud_part_on(c, k, g, i)).filter(|r| r.len() >= 3).map(|r| vec![r]));
+    parts.extend(clouds.iter().map(|c| cloud_part_on(c, k, g)).filter(|r| r.len() >= 3).map(|r| vec![r]));
     if parts.is_empty() {
         return vec![];
     }
-    without_slivers(polygon_bool::union(&parts))
+    without_slivers(polygon_bool::union(&parts), SLIVER_AREA)
 }
 
 /// Baum als Schattenwerfer ([142]): Stamm (Prisma, Ø 0.3 m) und Krone (Ellipsoid aus drei Ringen und
@@ -662,49 +525,314 @@ mod tests {
     }
 }
 
-// ── Schatten aus dem Projekt-Dokument ([K4] S2) ─────────────────────────────
+// ── Schatten aus dem Projekt-Dokument ([K4] S2, [142]) ──────────────────────
 
+use crate::flat_read::signed_area;
 use crate::jsmath::hypot2;
 use crate::model::Project;
 
-/// Vereinigter Boden-Schatten aller Wände, freien Körper und Dächer des Projekts (leer bei Nacht).
-/// Wände und Körper als Prismen, Dächer als Punktwolke (Traufe auf Traufhöhe, Traufe/First/Grate
-/// auf Firsthöhe). Mit `cut` (Schnitthöhe des Grundrisses) fangen Decken und Dächer, deren
-/// Oberkante nicht über dem Schnitt liegt (im Grundriss sichtbar), den Schatten vor dem Gelände ab.
-pub fn shadow_polygons_project(p: &Project, sun: SunPosition, cut: Option<f64>) -> Vec<Polygon> {
-    if shadow_shift(sun).is_none() {
+/// Ebene Fläche eines Schattenwerfers (3D; Ring 0 aussen, weitere Ringe Löcher im Gegensinn).
+type Face = Vec<Vec<[f64; 3]>>;
+
+/// Ebene `z = a·x + b·y + c` als `[a, b, c]`.
+type Plane = [f64; 3];
+
+/// Höhenabstand (m), ab dem eine Fläche über einer anderen liegt.
+const LEVEL_EPS: f64 = 0.01;
+
+/// Schattenwerfer des Projekts. Der Schatten eines geschlossenen Körpers auf einer Ebene ist die
+/// Vereinigung der Projektionen seiner Flächen über der Ebene (jeder Strahl durch den Körper verlässt
+/// ihn durch eine Fläche über der Ebene) — exakt auch für nicht-konvexe Körper.
+struct Casters {
+    /// Prismen mit Löchern (Wände, Körper, Stützen, Decken, Baumstämme); fürs Gelände abgetastet.
+    prisms: Vec<(Prism, Vec<Ring>)>,
+    /// Dachflächen in ihrer echten Form (Dachflächen + Stirnen bis Traufhöhe, verschnittene Dächer
+    /// und Gauben als Hülle des Körpers).
+    roof_faces: Vec<Face>,
+    /// Konvexe Punktwolken (Baumkronen).
+    clouds: Vec<Vec<[f64; 3]>>,
+    /// Alle ebenen Flächen für Empfänger-Ebenen: zur Sonne gewandte Prismenflächen + Dachflächen.
+    faces: Vec<Face>,
+}
+
+/// Gebäudefläche (Decke, Dach): darunter ist nicht im Freien — kein Sonnenschatten auf Tieferem.
+struct Cover {
+    region: Polygon,
+    bottom: f64,
+}
+
+/// Schattenempfangende Gebäudefläche im Grundriss (Decke/Terrasse, Dachfläche eines tieferen Geschosses).
+struct Recv {
+    region: Polygon,
+    plane: Plane,
+    top: f64,
+}
+
+/// Aussenring gegen, Löcher im Uhrzeigersinn; Ringe unter drei Punkten fallen weg.
+fn oriented(poly: Polygon) -> Polygon {
+    let mut out: Polygon = poly.into_iter().filter(|r| r.len() >= 3 && r.iter().all(|q| q[0].is_finite() && q[1].is_finite())).collect();
+    for (i, r) in out.iter_mut().enumerate() {
+        if (i == 0) == (signed_area(r) < 0.0) {
+            r.reverse();
+        }
+    }
+    out
+}
+
+fn bbox2<'a>(pts: impl Iterator<Item = &'a [f64; 2]>) -> [f64; 4] {
+    pts.fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
+}
+
+fn overlaps(a: [f64; 4], b: [f64; 4]) -> bool {
+    a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
+}
+
+fn plane_h(pl: Plane, p: [f64; 3]) -> f64 {
+    p[2] - (pl[0] * p[0] + pl[1] * p[1] + pl[2])
+}
+
+/// Normale nach Newell (nicht normiert).
+fn newell(r: &[[f64; 3]]) -> [f64; 3] {
+    let mut n = [0.0; 3];
+    for i in 0..r.len() {
+        let (a, b) = (r[i], r[(i + 1) % r.len()]);
+        n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+        n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+        n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    n
+}
+
+/// Ebene einer Fläche; `None` für (fast) lotrechte oder entartete Flächen.
+fn face_plane(r: &[[f64; 3]]) -> Option<Plane> {
+    let n = newell(r);
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    let p0 = *r.first()?;
+    if !(len > 1e-12) || n[2].abs() / len < 0.05 {
+        return None;
+    }
+    Some([-n[0] / n[2], -n[1] / n[2], p0[2] + (n[0] * p0[0] + n[1] * p0[1]) / n[2]])
+}
+
+/// Teil eines Rings mit `h ≥ 0` über der Ebene (Sutherland–Hodgman).
+fn clip_ring(r: &[[f64; 3]], pl: Plane) -> Vec<[f64; 3]> {
+    let mut out = Vec::with_capacity(r.len() + 2);
+    for i in 0..r.len() {
+        let (a, b) = (r[i], r[(i + 1) % r.len()]);
+        let (ha, hb) = (plane_h(pl, a), plane_h(pl, b));
+        if ha >= 0.0 {
+            out.push(a);
+        }
+        if (ha >= 0.0) != (hb >= 0.0) {
+            let t = ha / (ha - hb);
+            out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
+        }
+    }
+    out
+}
+
+/// Punkt entlang des Sonnenstrahls (von der Sonne weg) auf die Ebene; `den` = 1 + a·kx + b·ky.
+fn onto(pl: Plane, k: [f64; 2], den: f64, p: [f64; 3]) -> [f64; 2] {
+    let t = plane_h(pl, p) / den;
+    [p[0] + k[0] * t, p[1] + k[1] * t]
+}
+
+/// Schatten einer Fläche auf der Ebene: ihr Teil über der Ebene, entlang der Sonne projiziert.
+fn project_face(face: &Face, pl: Plane, k: [f64; 2], den: f64) -> Option<Polygon> {
+    let outer = face.first()?;
+    if !outer.iter().any(|p| plane_h(pl, *p) > 1e-6) {
+        return None;
+    }
+    let mut poly: Polygon = Vec::with_capacity(face.len());
+    for (i, r) in face.iter().enumerate() {
+        let c = clip_ring(r, pl);
+        if c.len() < 3 {
+            if i == 0 {
+                return None;
+            }
+            continue;
+        }
+        poly.push(c.into_iter().map(|p| onto(pl, k, den, p)).collect());
+    }
+    let a = signed_area(&poly[0]);
+    if !(a.abs() > 1e-9) {
+        return None;
+    }
+    if a < 0.0 {
+        poly.iter_mut().for_each(|r| r.reverse());
+    }
+    Some(poly)
+}
+
+/// Schatten einer konvexen Punktwolke auf der Ebene: Hülle des projizierten Teils über ihr.
+fn project_cloud(points: &[[f64; 3]], pl: Plane, k: [f64; 2], den: f64) -> Ring {
+    let (up, down): (Vec<[f64; 3]>, Vec<[f64; 3]>) = points.iter().copied().filter(|p| p.iter().all(|v| v.is_finite())).partition(|p| plane_h(pl, *p) >= 0.0);
+    if !up.iter().any(|p| plane_h(pl, *p) > 1e-9) {
         return vec![];
     }
-    // [142] Mit Geländenetz fällt der Schatten aufs Gelände (inkl. Baugruben), sonst auf ±0.00.
-    let site = shadow_terrain(p);
-    let mut receivers: Vec<Receiver> = Vec::new();
-    let mut prisms: Vec<Prism> = Vec::new();
+    let mut pts: Vec<[f64; 2]> = up.iter().map(|p| onto(pl, k, den, *p)).collect();
+    for a in &up {
+        for b in &down {
+            let (ha, hb) = (plane_h(pl, *a), plane_h(pl, *b));
+            let t = ha / (ha - hb);
+            pts.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+        }
+    }
+    hull(&pts)
+}
+
+/// Zur Sonne gewandte Flächen eines Prismas mit Löchern: Oberseite und die Seiten, deren
+/// Aussennormale zur Sonne zeigt (durch sie verlässt jeder Strahl den Körper).
+fn prism_faces(fp: &[[f64; 2]], holes: &[Ring], zb: f64, zt: f64, k: [f64; 2]) -> Vec<Face> {
+    if !(zt > zb) || !zb.is_finite() || !zt.is_finite() {
+        return vec![];
+    }
+    let poly = oriented(std::iter::once(fp.to_vec()).chain(holes.iter().cloned()).collect());
+    if poly.first().is_none_or(|r| r.len() < 3 || fp.len() < 3) {
+        return vec![];
+    }
+    let at = |r: &Ring, z: f64| r.iter().map(|q| [q[0], q[1], z]).collect::<Vec<_>>();
+    let mut out: Vec<Face> = vec![poly.iter().map(|r| at(r, zt)).collect()];
+    for r in &poly {
+        for i in 0..r.len() {
+            let (a, b) = (r[i], r[(i + 1) % r.len()]);
+            if (b[1] - a[1]) * k[0] - (b[0] - a[0]) * k[1] >= 0.0 {
+                continue;
+            }
+            out.push(vec![vec![[a[0], a[1], zb], [b[0], b[1], zb], [b[0], b[1], zt], [a[0], a[1], zt]]]);
+        }
+    }
+    out
+}
+
+/// Schatten aller Werfer auf der Ebene (nur Teile, deren Rechteck `within` schneidet); `None`, wenn
+/// die Ebene von der Sonne abgewandt ist (ganz im Eigenschatten).
+fn plane_shadow(c: &Casters, pl: Plane, k: [f64; 2], within: Option<[f64; 4]>) -> Option<Vec<Polygon>> {
+    let den = 1.0 + pl[0] * k[0] + pl[1] * k[1];
+    if !(den > 1e-6) {
+        return None;
+    }
+    let keep = |r: &Ring| within.is_none_or(|b| overlaps(bbox2(r.iter()), b));
+    let mut parts: Vec<Polygon> = c.faces.iter().filter_map(|f| project_face(f, pl, k, den)).filter(|p| keep(&p[0])).collect();
+    parts.extend(c.clouds.iter().map(|cl| project_cloud(cl, pl, k, den)).filter(|r| r.len() >= 3 && keep(r)).map(|r| vec![r]));
+    Some(if parts.is_empty() { vec![] } else { polygon_bool::union(&parts) })
+}
+
+fn key3(p: [f64; 3]) -> [i64; 3] {
+    [(p[0] * 1e6).round() as i64, (p[1] * 1e6).round() as i64, (p[2] * 1e6).round() as i64]
+}
+
+/// Ungerichtete Kante zwischen zwei Ecken (gerundet).
+fn edge_key(a: [f64; 3], b: [f64; 3]) -> ([i64; 3], [i64; 3]) {
+    let (ka, kb) = (key3(a), key3(b));
+    if ka <= kb { (ka, kb) } else { (kb, ka) }
+}
+
+/// Wie oft jede Kante in den Flächen vorkommt (2 = innere Kante zwischen zwei Flächen).
+type EdgeCount = std::collections::HashMap<([i64; 3], [i64; 3]), usize>;
+
+/// Bereits aufs Gelände projizierte Stützpunkte (gemeinsame Ecken benachbarter Flächen).
+type ProjCache = std::collections::HashMap<[i64; 3], [f64; 2]>;
+
+/// Geländeschatten einer Dachfläche: Rand, jeder Punkt über dem Gelände entlang der Sonne aufs Gelände
+/// (Bild des Randes = Rand des Bildes). Aussenkanten im Abstand ≤ `EDGE_SAMPLE` abgetastet (aufs
+/// Gelände gekrümmt); Kanten zwischen zwei Flächen nur an den Ecken (liegen im Innern der Vereinigung,
+/// beide Flächen nehmen dieselbe Sehne — keine Fuge).
+fn face_part_on(face: &Face, k: [f64; 2], g: &Ground, edges: &EdgeCount, cache: &mut ProjCache) -> Option<Polygon> {
+    let outer = face.first()?;
+    if !outer.iter().all(|p| p.iter().all(|v| v.is_finite())) {
+        return None;
+    }
+    let mut proj = |p: [f64; 3]| -> [f64; 2] { *cache.entry(key3(p)).or_insert_with(|| if p[2] > g.z(p[0], p[1]).unwrap_or(GROUND_Z) + 1e-9 { g.project(p, k) } else { [p[0], p[1]] }) };
+    let mut ring: Ring = Vec::new();
+    for i in 0..outer.len() {
+        let (a, b) = (outer[i], outer[(i + 1) % outer.len()]);
+        let n = if edges.get(&edge_key(a, b)).copied().unwrap_or(0) > 1 { 1 } else { (hypot2(b[0] - a[0], b[1] - a[1]) / EDGE_SAMPLE).ceil().clamp(1.0, 10_000.0) as usize };
+        for j in 0..n {
+            let t = j as f64 / n as f64;
+            ring.push(proj([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]));
+        }
+    }
+    (signed_area(&ring).abs() > 1e-9).then(|| oriented(vec![ring]))
+}
+
+/// Schatten aller Werfer auf dem Gelände.
+fn terrain_shadow(c: &Casters, k: [f64; 2], g: &Ground) -> Vec<Polygon> {
+    let mut parts: Vec<Polygon> = c.prisms.iter().flat_map(|(p, _)| prism_parts_on(&p.footprint, p.z_bottom, p.z_top, k, g)).collect();
+    let mut edges = EdgeCount::new();
+    for r in c.roof_faces.iter().filter_map(|f| f.first()) {
+        for i in 0..r.len() {
+            *edges.entry(edge_key(r[i], r[(i + 1) % r.len()])).or_default() += 1;
+        }
+    }
+    let mut cache = ProjCache::new();
+    parts.extend(c.roof_faces.iter().filter_map(|f| face_part_on(f, k, g, &edges, &mut cache)));
+    parts.extend(c.clouds.iter().map(|cl| cloud_part_on(cl, k, g)).filter(|r| r.len() >= 3).map(|r| vec![r]));
+    if parts.is_empty() {
+        return vec![];
+    }
+    polygon_bool::union(&parts)
+}
+
+/// Dach als Körper von der Traufhöhe bis zur Dachfläche: Dachflächen (nach oben gerichtet) und an
+/// jeder Randkante (nicht mit einer anderen Fläche geteilt) die lotrechte Stirn bis auf Traufhöhe.
+fn roof_body_faces(planes: &[Vec<[f64; 3]>], eaves_z: f64) -> Vec<Face> {
+    use std::collections::HashMap;
+    let key = |q: [f64; 3]| ((q[0] * 1e5).round() as i64, (q[1] * 1e5).round() as i64);
+    let mut count: HashMap<((i64, i64), (i64, i64)), usize> = HashMap::new();
+    for pl in planes {
+        for i in 0..pl.len() {
+            let (a, b) = (key(pl[i]), key(pl[(i + 1) % pl.len()]));
+            *count.entry(if a <= b { (a, b) } else { (b, a) }).or_default() += 1;
+        }
+    }
+    let mut out = Vec::new();
+    for pl in planes.iter().filter(|pl| pl.len() >= 3) {
+        out.push(vec![pl.clone()]);
+        for i in 0..pl.len() {
+            let (a, b) = (pl[i], pl[(i + 1) % pl.len()]);
+            let (ka, kb) = (key(a), key(b));
+            if count.get(&if ka <= kb { (ka, kb) } else { (kb, ka) }).copied().unwrap_or(0) > 1 || (a[2] - eaves_z).max(b[2] - eaves_z) < 1e-6 {
+                continue;
+            }
+            out.push(vec![vec![[a[0], a[1], eaves_z], [b[0], b[1], eaves_z], [b[0], b[1], b[2].max(eaves_z)], [a[0], a[1], a[2].max(eaves_z)]]]);
+        }
+    }
+    out
+}
+
+/// Werfer, Abdeckungen und (mit Schnitthöhe `cut`) Empfänger des Projekts.
+fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) -> (Casters, Vec<Cover>, Vec<Recv>) {
+    let gz = |x: f64, y: f64| ground.and_then(|g| g.z(x, y)).unwrap_or(GROUND_Z);
+    let mut prisms: Vec<(Prism, Vec<Ring>)> = Vec::new();
+    let mut covers: Vec<Cover> = Vec::new();
+    let mut recvs: Vec<Recv> = Vec::new();
+    // Empfänger nur im Grundriss sichtbar (OK nicht über dem Schnitt) und nicht im Gelände vergraben.
+    let mut receive = |region: Polygon, plane: Plane, top: f64| {
+        let Some(c) = cut else { return };
+        let region = oriented(region);
+        let Some(outer) = region.first() else { return };
+        let b = bbox2(outer.iter());
+        if top <= c + 1e-9 && top >= gz(0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])) - 0.05 {
+            recvs.push(Recv { region, plane, top });
+        }
+    };
     for w in &p.walls {
         let (z_bottom, z_top) = p.wall_vertical_extent(w);
         // Bogenwand ([T2]): Kreisringsektor als Prisma.
         if let Some(footprint) = crate::wall_arc::arc_footprint(w, p.wall_thickness(w, 0.2)) {
-            prisms.push(Prism { footprint, z_bottom, z_top });
+            prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
             continue;
         }
-        let dx = w.end.x - w.start.x;
-        let dy = w.end.y - w.start.y;
+        let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
         let len = hypot2(dx, dy);
         if len < 1e-9 {
             continue;
         }
         let t = p.wall_thickness(w, 0.2) / 2.0;
-        let nx = (-dy / len) * t;
-        let ny = (dx / len) * t;
-        prisms.push(Prism {
-            footprint: vec![
-                [w.start.x + nx, w.start.y + ny],
-                [w.end.x + nx, w.end.y + ny],
-                [w.end.x - nx, w.end.y - ny],
-                [w.start.x - nx, w.start.y - ny],
-            ],
-            z_bottom,
-            z_top,
-        });
+        let (nx, ny) = ((-dy / len) * t, (dx / len) * t);
+        let footprint = vec![[w.start.x + nx, w.start.y + ny], [w.end.x + nx, w.end.y + ny], [w.end.x - nx, w.end.y - ny], [w.start.x - nx, w.start.y - ny]];
+        prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
     }
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
         if s.operation.as_deref() == Some("subtract") {
@@ -712,74 +840,148 @@ pub fn shadow_polygons_project(p: &Project, sun: SunPosition, cut: Option<f64>) 
         }
         let base = p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
         let z0 = base + s.base_offset.unwrap_or(0.0);
-        prisms.push(Prism { footprint: s.points.iter().map(|v| [v.x, v.y]).collect(), z_bottom: z0, z_top: z0 + s.height });
+        prisms.push((Prism { footprint: s.points.iter().map(|v| [v.x, v.y]).collect(), z_bottom: z0, z_top: z0 + s.height }, vec![]));
     }
-    if let Some(c) = cut {
-        for ce in p.ceilings.as_deref().unwrap_or(&[]) {
-            let (zb, zt) = p.ceiling_vertical_extent(ce);
-            if zt <= c + 1e-9 {
-                let ring = |r: &[crate::model::Vec2]| r.iter().map(|v| [v.x, v.y]).collect::<Ring>();
-                let holes = crate::opening_shape::ceiling_hole_rings(p, ce).iter().map(|h| ring(h)).collect();
-                receivers.extend(Receiver::flat(ring(&ce.outline), holes, zt, (zt - zb).max(0.05)));
-            }
-        }
-    }
-    let mut clouds: Vec<Vec<[f64; 3]>> = Vec::new();
-    for r in p.roofs.as_deref().unwrap_or(&[]) {
-        let eaves_z = p.roof_base_elevation(r);
-        let geo = crate::roof::roof_geometry(&r.params(), eaves_z);
-        let top = eaves_z + geo.ridge_height;
-        if cut.is_some_and(|c| top <= c + 1e-9) {
-            let holes = geo.eaves_holes.clone();
-            receivers.extend(Receiver::roof(geo.eaves.clone(), holes, geo.planes.clone(), ROOF_RECEIVER_THICKNESS, Some(clouds.len())));
-        }
-        let mut pts: Vec<[f64; 3]> = Vec::new();
-        for e in &geo.eaves {
-            pts.push([e[0], e[1], eaves_z]);
-            pts.push([e[0], e[1], top]);
-        }
-        for l in &geo.ridges {
-            pts.push([l[0][0], l[0][1], top]);
-            pts.push([l[1][0], l[1][1], top]);
-        }
-        for l in &geo.hips {
-            pts.push([l[1][0], l[1][1], top]);
-        }
-        // Auf dem Gelände ist der Schatten der Traufkante gekrümmt: Zwischenpunkte entlang der Traufe.
-        if site.is_some() || cut.is_some() {
-            let (s, _) = sample_ring(&geo.eaves);
-            pts.extend(s.iter().flat_map(|e| [[e[0], e[1], eaves_z], [e[0], e[1], top]]));
-        }
-        clouds.push(pts);
-    }
-    // [142] Stützen (Prismen) und Bäume (2D-Kreise der Ebene „Bäume", Code 13): Stamm + Krone.
     for c in p.columns.as_deref().unwrap_or(&[]) {
         let (z_bottom, z_top) = p.column_vertical_extent(c);
         let footprint = crate::model3d::column_footprint(c).iter().map(|v| [v.x, v.y]).collect();
-        prisms.push(Prism { footprint, z_bottom, z_top });
+        prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
     }
-    let ground = match site.as_ref() {
-        Some(st) => Some(Ground::new(st.current(), st.datum).with_receivers(receivers)),
-        None if !receivers.is_empty() => Some(Ground::plane().with_receivers(receivers)),
-        None => None,
-    };
+    // [142] Decken (auch Balkone, Auskragungen) werfen Schatten, decken Tieferes ab und empfangen ihn.
+    for ce in p.ceilings.as_deref().unwrap_or(&[]) {
+        let (zb, zt) = p.ceiling_vertical_extent(ce);
+        let ring = |r: &[crate::model::Vec2]| r.iter().map(|v| [v.x, v.y]).collect::<Ring>();
+        let outline = ring(&ce.outline);
+        let holes: Vec<Ring> = crate::opening_shape::ceiling_hole_rings(p, ce).iter().map(|h| ring(h)).collect();
+        let region = oriented(std::iter::once(outline.clone()).chain(holes.iter().cloned()).collect());
+        if region.first().is_none_or(|r| r.len() < 3) || !(zt > zb) {
+            continue;
+        }
+        covers.push(Cover { region: region.clone(), bottom: zb });
+        receive(region, [0.0, 0.0, zt], zt);
+        prisms.push((Prism { footprint: outline, z_bottom: zb, z_top: zt }, holes));
+    }
+    // [142] Dächer in ihrer echten Form: verschnittene Dächer (Gauben, Anbauten) als Hülle ihres
+    // Körpers, sonst Dachflächen + Stirnen bis Traufhöhe.
+    let mut roof_faces: Vec<Face> = Vec::new();
+    let nb = crate::roof_assembly::neighbors_rc(p);
+    for (ri, r) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate() {
+        let eaves_z = p.roof_base_elevation(r);
+        let geo = crate::roof::roof_geometry(&r.params(), eaves_z);
+        let tops: Vec<Vec<[f64; 3]>> = match crate::roof_assembly::roof_solids_with(p, ri, &nb) {
+            Some(solids) if !solids.skin.indices.is_empty() => {
+                let tris: Vec<usize> = (0..solids.skin.indices.len() / 3).collect();
+                let faces = crate::roof_assembly::planar_faces(&solids.skin, &tris);
+                let up: Vec<Vec<[f64; 3]>> = faces.iter().filter(|f| face_plane(f).is_some() && newell(f)[2] > 0.0).cloned().collect();
+                roof_faces.extend(faces.into_iter().map(|f| vec![f]));
+                up
+            }
+            _ => {
+                let planes: Vec<Vec<[f64; 3]>> = geo
+                    .planes
+                    .iter()
+                    .map(|pl| {
+                        let mut pl = pl.clone();
+                        if newell(&pl)[2] < 0.0 {
+                            pl.reverse();
+                        }
+                        pl
+                    })
+                    .collect();
+                roof_faces.extend(roof_body_faces(&planes, eaves_z));
+                planes
+            }
+        };
+        let region = oriented(std::iter::once(geo.eaves.clone()).chain(geo.eaves_holes.iter().cloned()).collect());
+        if !region.is_empty() {
+            covers.push(Cover { region, bottom: eaves_z });
+        }
+        for f in &tops {
+            if let Some(pl) = face_plane(f) {
+                let top = f.iter().map(|q| q[2]).fold(f64::NEG_INFINITY, f64::max);
+                receive(vec![f.iter().map(|q| [q[0], q[1]]).collect()], pl, top);
+            }
+        }
+    }
+    // [142] Bäume (2D-Kreise der Ebene „Bäume", Code 13): Stamm + Krone.
+    let mut clouds: Vec<Vec<[f64; 3]>> = Vec::new();
     let tree_h = p.sun_study.as_ref().and_then(|s| s.tree_height).filter(|h| *h > 0.0).unwrap_or(DEFAULT_TREE_HEIGHT);
     for d in &p.drawings2d {
         let crate::model::Drawing2DGeom::Circle { center, r } = &d.geom else { continue };
         if !is_tree_category(p, &d.category_code) {
             continue;
         }
-        let base = ground.as_ref().and_then(|g| g.z(center.x, center.y)).unwrap_or(GROUND_Z);
-        if let Some((trunk, crown)) = tree_caster([center.x, center.y], *r, tree_h, base) {
-            prisms.push(trunk);
+        if let Some((trunk, crown)) = tree_caster([center.x, center.y], *r, tree_h, gz(center.x, center.y)) {
+            prisms.push((trunk, vec![]));
             clouds.push(crown);
         }
     }
-    shadow_union_on(&prisms, &clouds, sun, ground.as_ref())
+    // Nur zur Sonne gewandte Dachflächen (Aussennormale): durch sie verlässt jeder Strahl den Körper.
+    roof_faces.retain(|f| f.first().is_some_and(|r| {
+        let n = newell(r);
+        n[2] - n[0] * k[0] - n[1] * k[1] > 1e-12
+    }));
+    let mut faces: Vec<Face> = prisms.iter().flat_map(|(pr, holes)| prism_faces(&pr.footprint, holes, pr.z_bottom, pr.z_top, k)).collect();
+    faces.extend(roof_faces.iter().cloned());
+    (Casters { prisms, roof_faces, clouds, faces }, covers, recvs)
 }
 
-/// Dicke eines Dachs als Schattenempfänger (m): darunter geht der Strahl durch.
-const ROOF_RECEIVER_THICKNESS: f64 = 0.3;
+/// Vereinigter Boden-Schatten aller Wände, Körper, Stützen, Decken, Dächer und Bäume des Projekts
+/// (leer bei Nacht); mit `cut` wie [`shadow_polygons_plan`] im Geschoss am Gelände.
+pub fn shadow_polygons_project(p: &Project, sun: SunPosition, cut: Option<f64>) -> Vec<Polygon> {
+    shadow_plan(p, sun, cut, true)
+}
+
+/// [142] Schatten im Grundriss mit Schnitthöhe `cut`: auf den sichtbaren Flächen im Freien — Decken,
+/// Terrassen und Dachflächen, deren Oberkante nicht über dem Schnitt liegt, und (`with_ground`, Geschoss
+/// am Gelände) auf dem Gelände bzw. ±0.00. Flächen unter einer höheren Decke oder einem Dach (Innenräume,
+/// unter Balkonen) und unter einer höheren sichtbaren Fläche zeigen keinen Schatten.
+pub fn shadow_polygons_plan(p: &Project, sun: SunPosition, cut: f64, with_ground: bool) -> Vec<Polygon> {
+    shadow_plan(p, sun, Some(cut), with_ground)
+}
+
+fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, with_ground: bool) -> Vec<Polygon> {
+    let Some(k) = shadow_shift(sun) else { return vec![] };
+    // [142] Mit Geländenetz fällt der Schatten aufs Gelände (inkl. Baugruben), sonst auf ±0.00.
+    let site = shadow_terrain(p);
+    let ground = site.as_ref().map(|st| Ground::new(st.current(), st.datum));
+    let (casters, covers, recvs) = collect(p, k, cut, ground.as_ref());
+    let mask = |above: f64| -> Vec<Polygon> {
+        covers.iter().filter(|c| c.bottom > above + LEVEL_EPS).map(|c| c.region.clone()).chain(recvs.iter().filter(|r| r.top > above + LEVEL_EPS).map(|r| r.region.clone())).collect()
+    };
+    let mut out: Vec<Polygon> = Vec::new();
+    if with_ground {
+        let mut sh = match &ground {
+            Some(g) => terrain_shadow(&casters, k, g),
+            None => plane_shadow(&casters, [0.0, 0.0, GROUND_Z], k, None).unwrap_or_default(),
+        };
+        if cut.is_some() {
+            // Gelände unter Gebäudeflächen und unter sichtbaren Empfängern zeigt keinen Schatten.
+            let m: Vec<Polygon> = mask(GROUND_Z).into_iter().chain(recvs.iter().map(|r| r.region.clone())).collect();
+            if !m.is_empty() && !sh.is_empty() {
+                sh = polygon_bool::difference(&sh, &m);
+            }
+        }
+        out.extend(sh);
+    }
+    for r in &recvs {
+        let m = mask(r.top);
+        let vis = if m.is_empty() { vec![r.region.clone()] } else { polygon_bool::difference(&[r.region.clone()], &m) };
+        if vis.is_empty() {
+            continue;
+        }
+        let b = bbox2(vis.iter().flat_map(|q| q[0].iter()));
+        match plane_shadow(&casters, r.plane, k, Some(b)) {
+            None => out.extend(vis),
+            Some(sh) if !sh.is_empty() => out.extend(polygon_bool::intersection(&sh, &vis)),
+            Some(_) => {}
+        }
+    }
+    if out.is_empty() {
+        return vec![];
+    }
+    without_slivers(polygon_bool::union(&out), if site.is_some() { SLIVER_AREA } else { 1e-4 })
+}
 
 /// Baumhöhe ohne `sunStudy.treeHeight` (m).
 pub const DEFAULT_TREE_HEIGHT: f64 = 8.0;
@@ -910,57 +1112,150 @@ mod terrain_tests {
         serde_json::from_value(v).unwrap()
     }
 
-    /// [142] Schatten auf tiefere Gebäudeteile: Körper (OK 6 m) neben einer Platte mit OK 1 m — der
-    /// Schatten endet auf der Platte (Länge 5 statt 6 bei 45°); Platte über dem Schnitt fängt nichts.
-    #[test]
-    fn schatten_auf_tiefere_platte() {
-        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
-        let r = |x0: f64, y0: f64, x1: f64, y1: f64| serde_json::json!([{"x": x0, "y": y0}, {"x": x1, "y": y0}, {"x": x1, "y": y1}, {"x": x0, "y": y1}]);
-        let levels = serde_json::json!([
+    /// Liegt (x, y) im Schatten (gerade/ungerade über alle Ringe)?
+    fn shaded(polys: &[Polygon], x: f64, y: f64) -> bool {
+        let mut inside = false;
+        for r in polys.iter().flatten() {
+            let mut j = r.len() - 1;
+            for i in 0..r.len() {
+                let (a, b) = (r[i], r[j]);
+                if (a[1] > y) != (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0] {
+                    inside = !inside;
+                }
+                j = i;
+            }
+        }
+        inside
+    }
+
+    fn area(polys: &[Polygon]) -> f64 {
+        polys.iter().flatten().map(|r| signed_area(r)).sum::<f64>().abs()
+    }
+
+    fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> serde_json::Value {
+        serde_json::json!([{"x": x0, "y": y0}, {"x": x1, "y": y0}, {"x": x1, "y": y1}, {"x": x0, "y": y1}])
+    }
+
+    fn levels() -> serde_json::Value {
+        serde_json::json!([
             {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "cutHeight": 1.0, "baseElevation": 0},
             {"id": "t", "name": "T", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "cutHeight": 1.0, "baseElevation": -2},
             {"id": "og", "name": "OG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "cutHeight": 1.0, "baseElevation": 3}
-        ]);
-        let solid = serde_json::json!([{"id": "s", "type": "extrudedSolid", "levelId": "eg", "points": r(0.0, 0.0, 2.0, 2.0), "height": 6.0}]);
-        let slab = |floor: &str| serde_json::json!([{"id": "c", "type": "ceiling", "floorId": floor, "categoryCode": "21", "wallTypeId": "x", "outline": r(-5.0, 2.5, 7.0, 20.0)}]);
-        let p = project_json(serde_json::json!({ "drawingLevels": levels, "extrudedSolids": solid, "ceilings": slab("t") }));
-        let top = p.ceiling_vertical_extent(&p.ceilings.as_ref().unwrap()[0]).1;
-        assert!((top - 1.0).abs() < 1e-9, "{top}");
-        // Ohne Schnitt (bisher): Boden ±0.00, 6 m.
-        assert!((bbox(&shadow_polygons_project(&p, sun, None))[3] - 8.0).abs() < 1e-6);
-        // Mit Schnitt 1.0: Platte fängt ab, 5 m.
-        let on = shadow_polygons_project(&p, sun, Some(1.0));
-        assert_eq!(on.len(), 1);
-        let b = bbox(&on);
-        assert!((b[3] - 7.0).abs() < 0.01 && (b[0]).abs() < 1e-6 && (b[2] - 2.0).abs() < 1e-6, "{b:?}");
-        // Fläche: Körper 2×2 + Band 2×5.
-        let a: f64 = on.iter().map(|q| signed_area(&q[0]).abs()).sum();
-        assert!((a - 14.0).abs() < 0.05, "{a}");
-        // Platte über dem Schnitt (OG-Decke, OK 6.0) fängt nichts.
-        let p2 = project_json(serde_json::json!({ "drawingLevels": levels, "extrudedSolids": solid, "ceilings": slab("og") }));
-        assert!((bbox(&shadow_polygons_project(&p2, sun, Some(1.0)))[3] - 8.0).abs() < 0.01);
-        // Platte endet bei y = 5: Strahl ist dort noch über der Platte (z = 3) und geht bis zum Boden.
-        let short = serde_json::json!([{"id": "c", "type": "ceiling", "floorId": "t", "categoryCode": "21", "wallTypeId": "x", "outline": r(-5.0, 2.5, 7.0, 5.0)}]);
-        let p3 = project_json(serde_json::json!({ "drawingLevels": levels, "extrudedSolids": solid, "ceilings": short }));
-        assert!((bbox(&shadow_polygons_project(&p3, sun, Some(1.0)))[3] - 8.0).abs() < 0.01);
+        ])
     }
 
-    /// [142] Dach als Empfänger (Höhenfeld der Dachflächen); das eigene Dach fängt seinen Strahl nicht.
+    fn slab(id: &str, floor: &str, outline: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"id": id, "type": "ceiling", "floorId": floor, "categoryCode": "21", "wallTypeId": "x", "outline": outline})
+    }
+
+    /// [142] Schatten auf tiefere Gebäudeteile: Körper (OK 6 m) neben einer Platte mit OK 1 m — im
+    /// Grundriss (Schnitt 1.0) endet der Schatten auf der Platte (Länge 5 statt 6 bei 45°); die Platte
+    /// wirft selbst Schatten; das Gelände unter ihr zeigt keinen.
     #[test]
-    fn schatten_auf_pultdach_als_hoehenfeld() {
-        let sq: Ring = vec![[0.0, 3.0], [4.0, 3.0], [4.0, 7.0], [0.0, 7.0]];
-        // Fläche steigt nach Norden von 1 auf 3 m.
-        let plane = vec![vec![[0.0, 3.0, 1.0], [4.0, 3.0, 1.0], [4.0, 7.0, 3.0], [0.0, 7.0, 3.0]]];
-        let rec = Receiver::roof(sq.clone(), vec![], plane, 0.3, Some(0)).unwrap();
-        let g = Ground::plane().with_receivers(vec![rec]);
-        let k = [0.0, 1.0];
-        // Strahl ab (2, 0, 6) nach Norden, Abstieg 1/m; Dach z = 1 + (y − 3)/2 → 6 − y = 1 + (y − 3)/2 → y = 13/3.
-        let q = g.project([2.0, 0.0, 6.0], k);
-        assert!((q[1] - 13.0 / 3.0).abs() < 0.01, "{q:?}");
-        // Gleicher Strahl als Punkt der Dach-Wolke 0: geht durch bis zum Boden.
-        assert!((g.project_from([2.0, 0.0, 6.0], k, Some(0))[1] - 6.0).abs() < 1e-6);
-        // Unter dem Dach startend (Traufe innen, unterhalb der Dicke): nicht abgefangen.
-        assert!((g.project([2.0, 6.0, 1.0], k)[1] - 7.0).abs() < 1e-6);
+    fn schatten_auf_tiefere_platte() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let solid = serde_json::json!([{"id": "s", "type": "extrudedSolid", "levelId": "eg", "points": rect(0.0, 0.0, 2.0, 2.0), "height": 6.0}]);
+        let p = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": solid, "ceilings": [slab("c", "t", rect(-5.0, 2.5, 7.0, 20.0))] }));
+        let (zb, zt) = p.ceiling_vertical_extent(&p.ceilings.as_ref().unwrap()[0]);
+        assert!((zt - 1.0).abs() < 1e-9 && zb < 1.0 && zb > 0.0, "{zb} {zt}");
+        // Ohne Schnitt: Boden ±0.00 — Körper 6 m, Platte 1 m (ihr Schatten bis y = 21).
+        let raw = shadow_polygons_project(&p, sun, None);
+        assert!(shaded(&raw, 1.0, 7.5) && shaded(&raw, 0.0, 20.5) && !shaded(&raw, 0.0, 21.2));
+        // Mit Schnitt 1.0: Platte fängt ab, 5 m.
+        let on = shadow_polygons_project(&p, sun, Some(1.0));
+        assert!(shaded(&on, 1.0, 6.9) && !shaded(&on, 1.0, 7.2) && shaded(&on, 1.0, 2.2), "Körperschatten auf der Platte bis y = 7");
+        assert!(shaded(&on, -4.0, 20.5) && !shaded(&on, -4.0, 19.0), "Plattenschatten nur ausserhalb der Platte");
+        // Fläche: Körper + Band bis 7 (2 × 7) und Plattenschatten jenseits ihrer Kante (12 × 1).
+        assert!((area(&on) - 26.0).abs() < 0.05, "{}", area(&on));
+        // Decke über dem Schnitt (OG, OK 6): fängt nichts, deckt das Gelände darunter ab (kein Schatten im
+        // Innern) und wirft ihren Schatten jenseits der Kante.
+        let p2 = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": solid, "ceilings": [slab("c", "og", rect(-5.0, 2.5, 7.0, 20.0))] }));
+        let on2 = shadow_polygons_project(&p2, sun, Some(1.0));
+        assert!(shaded(&on2, 1.0, 2.2) && !shaded(&on2, 1.0, 5.0) && shaded(&on2, 0.0, 25.0) && !shaded(&on2, 0.0, 26.5));
+        // Platte endet bei y = 5: Strahl ist dort noch über der Platte (z = 3) und geht bis zum Boden.
+        let p3 = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": solid, "ceilings": [slab("c", "t", rect(-5.0, 2.5, 7.0, 5.0))] }));
+        let on3 = shadow_polygons_project(&p3, sun, Some(1.0));
+        assert!(shaded(&on3, 1.0, 4.9) && shaded(&on3, 1.0, 7.5) && !shaded(&on3, 1.0, 8.2) && shaded(&on3, -4.0, 5.5));
+    }
+
+    /// [142] Auskragung (Körper über dem Boden) und Balkon (Decke) werfen Schatten; der Boden unter der
+    /// Auskragung bleibt hell.
+    #[test]
+    fn schatten_einer_auskragung_und_eines_balkons() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let solid = serde_json::json!([{"id": "s", "type": "extrudedSolid", "levelId": "eg", "points": rect(0.0, 0.0, 4.0, 2.0), "height": 0.3, "baseOffset": 3.0}]);
+        let p = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": solid }));
+        let sh = shadow_polygons_project(&p, sun, None);
+        assert!(shaded(&sh, 1.0, 4.0) && !shaded(&sh, 1.0, 1.0) && !shaded(&sh, 1.0, 5.4));
+        assert!((area(&sh) - 4.0 * 2.3).abs() < 1e-6, "{}", area(&sh));
+        // Balkon: Decke des EG (OK 3.0) ohne Wände.
+        let p = project_json(serde_json::json!({ "drawingLevels": levels(), "ceilings": [slab("b", "eg", rect(10.0, 0.0, 14.0, 2.0))] }));
+        let (zb, zt) = p.ceiling_vertical_extent(&p.ceilings.as_ref().unwrap()[0]);
+        assert!(zb >= 2.0 && zt > zb);
+        for cut in [None, Some(1.0)] {
+            let sh = shadow_polygons_project(&p, sun, cut);
+            assert!((area(&sh) - 4.0 * (2.0 + zt - zb)).abs() < 1e-6, "{cut:?}: {}", area(&sh));
+            assert!(shaded(&sh, 12.0, 4.0) && !shaded(&sh, 12.0, 1.0));
+        }
+    }
+
+    /// [142] Nicht-konvexe Dächer: Schatten aus der echten Dachform statt aus der konvexen Hülle —
+    /// L-förmiges Walmdach lässt den Innenwinkel hell.
+    #[test]
+    fn nichtkonvexes_dach() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let l = serde_json::json!([{"x": 0, "y": 0}, {"x": 6, "y": 0}, {"x": 6, "y": 2}, {"x": 2, "y": 2}, {"x": 2, "y": 6}, {"x": 0, "y": 6}]);
+        let roof = |shape: &str, pitch: f64| {
+            serde_json::json!([{"id": "r", "type": "roof", "floorId": "eg", "categoryCode": "31", "outline": l, "shape": shape, "pitchDeg": pitch, "overhang": 0, "ridgeAxis": "x", "baseElevation": 3.0}])
+        };
+        // Walmdach 45°: Arme 2 m breit, First 1 m über der Traufe; der Ostarm wirft bis y = 5, der
+        // Westarm (Walm, Firstende y = 5 auf 4 m) bis y = 9.
+        let sh = shadow_polygons_project(&project_json(serde_json::json!({ "roofs": roof("walm", 45.0) })), sun, None);
+        assert!(shaded(&sh, 4.0, 4.5) && shaded(&sh, 1.0, 8.5) && !shaded(&sh, 1.0, 9.2));
+        assert!(!shaded(&sh, 4.5, 5.5), "Innenwinkel bleibt hell");
+        // Auf ebenem Gelände (TIN auf ±0.00) dasselbe: Dachflächen abgetastet aufs Gelände projiziert.
+        let p = project_json(serde_json::json!({ "roofs": roof("walm", 45.0) }));
+        let tin = plane_tin(0.0, 0.0);
+        let g = Ground::new(&tin, 0.0);
+        let k = shadow_shift(sun).unwrap();
+        let (c, _, _) = collect(&p, k, None, Some(&g));
+        let on = terrain_shadow(&c, k, &g);
+        assert!(shaded(&on, 4.0, 4.5) && shaded(&on, 1.0, 8.5) && !shaded(&on, 1.0, 9.2) && !shaded(&on, 4.5, 5.5));
+        assert!((area(&on) - area(&sh)).abs() < 0.05, "{} {}", area(&on), area(&sh));
+    }
+
+    /// [142] Schatten im Plan eines höheren Geschosses: auf Dach/Terrasse des tieferen Geschosses; im
+    /// EG-Plan nicht auf der (höher liegenden) Terrasse, nur auf dem Gelände.
+    #[test]
+    fn schatten_auf_tieferem_dach_im_og_plan() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        // Turm 0..2 × 0..2, 6 m hoch; Terrasse (Decke EG, OK 3.0) nördlich davon, 0..2 × 2..4.
+        let solid = serde_json::json!([{"id": "s", "type": "extrudedSolid", "levelId": "eg", "points": rect(0.0, 0.0, 2.0, 2.0), "height": 6.0}]);
+        let p = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": solid, "ceilings": [slab("t", "eg", rect(0.0, 2.0, 2.0, 4.0))] }));
+        let zt = p.ceiling_vertical_extent(&p.ceilings.as_ref().unwrap()[0]).1;
+        assert!((zt - 3.0).abs() < 1e-9);
+        // OG-Plan (Schnitt 4.0, ohne Gelände): Schatten nur auf der Terrasse (ganz, Turm wirft bis y = 2 + 3).
+        let og = shadow_polygons_plan(&p, sun, 4.0, false);
+        assert!((area(&og) - 4.0).abs() < 1e-6, "{}", area(&og));
+        assert!(shaded(&og, 1.0, 3.0) && !shaded(&og, 1.0, 6.0) && !shaded(&og, 3.0, 3.0));
+        // Teilweise: Turm nur 4 m hoch → Schatten auf der Terrasse bis y = 2 + 1.
+        let low = serde_json::json!([{"id": "s", "type": "extrudedSolid", "levelId": "eg", "points": rect(0.0, 0.0, 2.0, 2.0), "height": 4.0}]);
+        let p_low = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": low, "ceilings": [slab("t", "eg", rect(0.0, 2.0, 2.0, 4.0))] }));
+        let og = shadow_polygons_plan(&p_low, sun, 4.0, false);
+        assert!((area(&og) - 2.0).abs() < 1e-6 && shaded(&og, 1.0, 2.5) && !shaded(&og, 1.0, 3.5), "{}", area(&og));
+        // EG-Plan (Schnitt 1.0, mit Gelände): unter der Terrasse kein Schatten, dahinter schon.
+        let eg = shadow_polygons_plan(&p, sun, 1.0, true);
+        assert!(!shaded(&eg, 1.0, 3.0) && shaded(&eg, 1.0, 5.0) && shaded(&eg, 1.0, 7.5) && !shaded(&eg, 1.0, 8.5));
+        // Schnitt unter der Terrasse fängt auf ihr nichts; Flächen sind dort keine Empfänger.
+        assert!(shadow_polygons_plan(&p, sun, 1.0, false).is_empty());
+    }
+
+    /// Nicht endliche Werte und Nacht: leer, ohne Panik.
+    #[test]
+    fn plan_unsinn_ohne_panik() {
+        let p = project_json(serde_json::json!({ "drawingLevels": levels(), "ceilings": [slab("t", "eg", rect(0.0, 2.0, f64::MAX, 4.0))] }));
+        let _ = shadow_polygons_plan(&p, SunPosition { azimuth: 180.0, elevation: 45.0 }, f64::NAN, true);
+        assert!(shadow_polygons_plan(&p, SunPosition { azimuth: 180.0, elevation: -5.0 }, 4.0, true).is_empty());
     }
 
     /// Bäume (Kreis auf der Ebene „Bäume", Höhe aus `sunStudy.treeHeight`) und Stützen werfen Schatten.
