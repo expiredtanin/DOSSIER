@@ -76,6 +76,7 @@ const RECOGNIZED: ReadonlyArray<[string, (s: IfcElementsSummary) => number]> = [
   ["ifc.importReport.ceilings", (s) => s.ceilings],
   ["ifc.importReport.roofs", (s) => s.roofs ?? 0],
   ["ifc.importReport.stairs", (s) => s.stairs ?? 0],
+  ["ifc.importReport.beams", (s) => s.beams ?? 0],
   ["ifc.importReport.columns", (s) => s.columns],
   ["ifc.importReport.rooms", (s) => s.rooms],
   ["ifc.importReport.floors", (s) => s.floors],

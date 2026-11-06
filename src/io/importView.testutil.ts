@@ -87,7 +87,7 @@ export interface IfcProductView {
 
 /** Roh erkanntes Bauteil (`meta.elements.elements` des Lesers). */
 export interface IfcRawElement {
-  kind: "wall" | "opening" | "slab" | "column" | "space" | "roof" | "stair";
+  kind: "wall" | "opening" | "slab" | "column" | "space" | "roof" | "stair" | "beam";
   globalId: string;
   ifcClass: string;
   name: string | null;

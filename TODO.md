@@ -3566,6 +3566,29 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   fallend nach +x/+y (Dossier-Pult steigt nur dorthin), gedrehte/nicht rechteckige Dächer, Tonnen-/Mansarddächer,
   Podest-, L- und Wendeltreppen, Bogenwände mit Öffnungen, Ständerwände (Rahmen + Beplankung), gedrehte Georeferenz,
   Träger/Geländer; nur Linux-Container (CLI-SVG + Chromium), nicht in der Tauri-App, Dialog nur per tsc.
+  (6.11., Teil 2) Treppen (`ifc_shapes.rs`): Tritte je Höhe mit Schwerpunkt (Belag über Rohbau nur zusammengefasst,
+  wenn an derselben Stelle); Wendel → Dossier-Wendel (Zentrum aus den Tritt-Schwerpunkten, gleicher Winkelschritt,
+  Radius/Breite aus Innen-/Aussenkante, Drehsinn, Spindel aus senkrechten Flächen ringsum im Auge); L (zwei
+  rechtwinklige Läufe gleicher Breite, quadratisches Podest an der Ecke, Stufenaufteilung wie Dossier) → `shape: "L"`;
+  andere Podesttreppen (U mit Halbpodest, zwei Viertelpodeste) → Grund `stairTurn` (Dossier kennt nur gerade/L/Wendel,
+  gerade Treppe ohne Podest, keine Höhenlage je Lauf). Dächer: Rechteck auch gedreht (kleinstes umschliessendes);
+  Flach/Walm gedreht als Umriss, sonst (gedreht, Pult fallend nach +x/+y, Flächen über Eck) Sattel mit
+  `edgePitchDeg` (Traufe je Kante, Giebel `null`; Kern-Test: Dossier-Fläche = IFC-Fläche); Tonnendach aus ebenen
+  Streifen (≥ 4 Neigungen um eine waagrechte Achse) bleibt ganz Mesh statt Flickwerk aus Einzelstreifen. Bogenwand mit
+  Öffnungen: Kasten in der Tangente, durch die ganze Dicke auch an den Laibungen → Lage nach Bogenlänge (Laibungen
+  radial wie Dossier). IfcBeam als senkrechtes Prisma → `extrudedSolids` (Grundriss, Höhe, `baseOffset`); schräge/
+  liegende Profile bleiben Mesh. Gedrehte Georeferenz (XAxisAbscissa/-Ordinate, LV95-Bezug, Massstab 1): Bauteile
+  und Meshes kartenparallel gedreht (+y = Nord, Stützen drehen mit, Dächer mit Neigung je Kante), dann
+  zurückgeschoben; ohne Projekt-Bezug lokal und ungedreht. Dialog: Zeile „Träger", Gründe `stairTurn`, Texte.
+  Quote (vorher → nachher): FZK-Haus Wendeltreppe 0 → 1, Träger 0 → 4/4 (Pfetten); Smiley West unverändert (Wände
+  270/281, Dächer 11), 30 U-Treppen jetzt mit Grund `stairTurn`, 10 Träger nicht prismatisch; Institute Dächer 6 → 0
+  (die 6 waren Streifen der Tonnendächer, jetzt ganz Mesh), 4 Treppen mit zwei Viertelpodesten `stairTurn`;
+  Schependomlaan Dächer 19 → 22 (Pult fallend), Wände 795 → 797, Träger 0 → 85/174 (89 schräg/Profil). In den
+  Beispielen keine L-Treppe, keine Bogenwand mit Öffnung und keine gedrehte Georeferenz — nur synthetisch geprüft
+  (Rust-Tests fileio + Kern). Bilder (lokal): FZK EG-Grundriss und Schnitt durch die Wendeltreppe, Institute Schnitt.
+  Offen: U-/Mehrpodest-Treppen (Modell bräuchte Form „U" oder Höhenlage je Lauf; 34 in den Beispielen), Podest allein
+  (Schependomlaan „trapbordes"), Tonnen-/Mansarddach, Träger schräg/als Profil (Modell ohne Träger), Extrusionskörper
+  über der Schnitthöhe im Grundriss nicht sichtbar; nur Linux-Container, nicht in der Tauri-App.
 - ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 28.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).
   - ✅ Materialschichten: Wand-/Decken-/Dachtypen als IfcWallType/IfcSlabType/IfcRoofType mit

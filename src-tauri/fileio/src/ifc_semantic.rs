@@ -33,6 +33,9 @@
 //     Raum ohne Körper: Umriss aus „FootPrint", Höhe aus „Box" (ArchiCAD IFC2x3). Dreiecksnetze mit
 //     T-Stössen: Kanten werden an Punkten darauf geteilt. Grund je Mesh gebliebenem Kandidaten
 //     (`kept_reasons`, Kennwort → Dialog `ifc.reason.*`).
+//   - (6.11., Teil 2) Treppe auch als L (Podest an der Ecke) und Wendel; Dach auch gedreht bzw. mit Neigung je
+//     Kante (Pult fallend …), Tonnendach-Streifen bleiben ganz Mesh; Bogenwand mit Öffnungen (Lage nach
+//     Bogenlänge); Träger (IfcBeam) als senkrechtes Prisma → Extrusionskörper.
 //   - Klassifikation (IfcRelAssociatesClassification → IfcClassificationReference, Bauteil oder Typ) an jedem
 //     erkannten Bauteil (`Info::classifications`); IfcZone (IfcRelAssignsToGroup) liefert dem Raum die
 //     SIA-416-Kategorie, wenn er keine eigene `SIA416`-Eigenschaft trägt.
@@ -183,8 +186,12 @@ pub struct Space {
 #[derive(Clone, Debug, Default)]
 pub struct Roof {
     pub info: Info,
-    /// Umriss der Traufe (aussen, gegen den Uhrzeigersinn, Rechteck bei Sattel/Walm/Pult).
+    /// Umriss der Traufe (aussen, gegen den Uhrzeigersinn, Rechteck, auch gedreht).
     pub outline: Vec<V2>,
+    /// Je Umrisskante (Punkt i → i+1) die Neigung (Grad) einer Traufe, `None` = Giebel bzw. Flachdach.
+    pub edge_pitch: Vec<Option<f64>>,
+    /// Die Dossier-Standardform passt nicht (gedreht, Pult fallend …): `edge_pitch` gilt (Form "sattel").
+    pub custom: bool,
     /// Dossier-Dachform: "flach", "pult", "sattel", "walm".
     pub shape: &'static str,
     pub pitch_deg: f64,
@@ -198,19 +205,38 @@ pub struct Roof {
     pub parts: Vec<u64>,
 }
 
-/// Gerade Treppe ([B4]) aus IfcStair/IfcStairFlight.
+/// Treppe ([B4]) aus IfcStair/IfcStairFlight: gerade, L (Podest an der Ecke) oder Wendel.
 #[derive(Clone, Debug, Default)]
 pub struct Stair {
     pub info: Info,
-    /// Mitte der Antrittskante (unten).
+    /// Dossier-Grundform: "straight", "L", "spiral".
+    pub shape: &'static str,
+    /// Mitte der Antrittskante (unten); Wendel: Punkt der Lauflinie an der Antrittskante.
     pub start: V2,
-    /// Einheits-Laufrichtung (aufwärts).
+    /// Einheits-Laufrichtung (aufwärts) des ersten Laufs; Wendel: Tangente am Antritt.
     pub dir: V2,
     pub run_length: f64,
     pub width: f64,
     pub step_count: usize,
     pub z0: f64,
     pub total_rise: f64,
+    /// L: Länge des zweiten Laufs und Abbiegerichtung (+1 links, −1 rechts).
+    pub run2_length: f64,
+    pub turn: f64,
+    /// Wendel: Zentrum, Radius der Lauflinie, Gesamtwinkel (Grad, + = gegen den Uhrzeigersinn), Spindel (0 = keine).
+    pub center: V2,
+    pub radius: f64,
+    pub sweep_deg: f64,
+    pub center_column: f64,
+}
+
+/// Träger ([B4], IfcBeam) als senkrechtes Prisma: Dossier-Extrusionskörper (Grundriss + Höhe).
+#[derive(Clone, Debug, Default)]
+pub struct Beam {
+    pub info: Info,
+    pub outline: Vec<V2>,
+    pub z0: f64,
+    pub z1: f64,
 }
 
 /// Erkannte Bauteile einer Datei.
@@ -225,6 +251,8 @@ pub struct Semantic {
     pub spaces: Vec<Space>,
     pub roofs: Vec<Roof>,
     pub stairs: Vec<Stair>,
+    /// Träger als senkrechte Prismen (Dossier-Extrusionskörper).
+    pub beams: Vec<Beam>,
     /// Kandidaten (Wand, Decke, Stütze, Raum, Dach, Treppe), die nicht sicher abbildbar waren, je Klasse.
     pub kept: BTreeMap<String, usize>,
     /// Dieselben je Klasse und Grund (Kennwort, s. [`Reason`]).
@@ -590,6 +618,42 @@ fn box_in_frame(m: &Mesh, o: V2, d: V2) -> Option<([f64; 6], f64)> {
     Some((b, signed_volume(&m.positions, &m.indices) / bv))
 }
 
+/// Öffnung einer Bogenwand: Winkelbereich (rad, gegen den Uhrzeigersinn, im Bogen `a0 … a1`) der Laibungen auf
+/// der Achse und Höhenbereich. Der Körper ist ein Kasten in der Tangente an seiner Mitte, durch die ganze
+/// Wanddicke (auch an den Laibungen, wo der Ring zur Tangente hin abfällt); sonst `None`.
+fn arc_span(m: &Mesh, a: &crate::ifc_shapes::ArcFit, z0: f64, z1: f64) -> Option<(f64, f64, f64, f64)> {
+    let n = m.positions.len() / 3;
+    if n == 0 {
+        return None;
+    }
+    let (sx, sy) = m.positions.chunks_exact(3).fold((0.0, 0.0), |s, c| (s.0 + c[0], s.1 + c[1]));
+    let mid = (sy / n as f64 - a.center[1]).atan2(sx / n as f64 - a.center[0]);
+    // Winkel in den Bogen legen.
+    let mut mid = mid;
+    while mid < a.a0 - 1e-9 {
+        mid += std::f64::consts::TAU;
+    }
+    let r = a.radius;
+    let (ri, ro) = (r - a.thickness / 2.0, r + a.thickness / 2.0);
+    let o = [a.center[0] + r * mid.cos(), a.center[1] + r * mid.sin()];
+    let d = [-mid.sin(), mid.cos()];
+    // Rahmen: u entlang der Tangente (gegen den Uhrzeigersinn), v = left(d) zeigt zum Zentrum.
+    let (b, fill) = box_in_frame(m, o, d)?;
+    let umax = b[0].abs().max(b[1].abs());
+    if !(umax < ri) {
+        return None;
+    }
+    let outer = r - ro; // v der Aussenfläche an der Mitte (am weitesten aussen)
+    let inner = r - (ri * ri - umax * umax).sqrt(); // v der Innenfläche an der Laibung (am weitesten innen)
+    let through = b[2] <= outer + 1e-3 && b[3] >= inner - 1e-3;
+    let (p0, p1) = (mid + (b[0] / r).asin(), mid + (b[1] / r).asin());
+    let inside = p0 >= a.a0 - 1e-6 && p1 <= a.a1 + 1e-6 && b[5] > z0 + 0.01 && b[4] < z1 - 0.01;
+    if !(through && inside && (0.95..=1.0 + 1e-3).contains(&fill)) {
+        return None;
+    }
+    Some((p0, p1, b[4].max(z0), b[5].min(z1)))
+}
+
 // ---------------------------------------------------------------------------
 // Erkennung
 // ---------------------------------------------------------------------------
@@ -610,6 +674,8 @@ struct WallCand {
     items: Vec<Mesh>,
     /// Bogenwand: Bulge der Achse start → end (Modell-Konvention, + = Scheitel links); 0 = gerade.
     bulge: f64,
+    /// Bogenwand: Kreis der Achse (Öffnungen liegen nach Winkel).
+    arc: Option<crate::ifc_shapes::ArcFit>,
 }
 
 struct Ctx<'r, 'a> {
@@ -900,23 +966,39 @@ impl Ctx<'_, '_> {
             _ => None,
         };
         let items = if layers.len() > 1 && usage_side.is_none() { self.r.product_item_meshes(id, MAX_BODY_TRIS) } else { Vec::new() };
-        Ok(WallCand { info: self.info(id, color), start, end, z0: s.z0, z1: s.z1, thickness: t, openings, usage_side, items, bulge: 0.0 })
+        Ok(WallCand { info: self.info(id, color), start, end, z0: s.z0, z1: s.z1, thickness: t, openings, usage_side, items, bulge: 0.0, arc: None })
     }
 
-    /// Bogenwand ([T2]): senkrechtes Prisma mit einem Ringausschnitt als Grundriss, ohne Öffnungen.
+    /// Bogenwand ([T2]): senkrechtes Prisma mit einem Ringausschnitt als Grundriss. (6.11.) Öffnungen:
+    /// quaderförmig (Kasten in der Tangente an ihrer Mitte), durch die ganze Wanddicke, innerhalb von Bogen
+    /// und Höhe; Dossier legt sie nach Bogenlänge auf die Achse (Laibungen radial).
     fn arc_wall(&mut self, id: u64, s: &Shape, color: Option<[f64; 4]>) -> Result<WallCand, &'static str> {
         let (ring, holes) = prism(s).ok_or(R_NOT_RECT)?;
         if !holes.is_empty() {
             return Err(R_NOT_RECT);
         }
         let a = crate::ifc_shapes::fit_arc_ring(&ring).ok_or(R_NOT_RECT)?;
-        if self.rels.voids.get(&id).is_some_and(|v| !v.is_empty()) {
-            return Err(R_OPENING);
+        let mut openings = Vec::new();
+        for &o in self.rels.voids.get(&id).map(Vec::as_slice).unwrap_or(&[]) {
+            let (om, _) = self.body(o).ok_or(R_OPENING)?;
+            if arc_span(&om, &a, s.z0, s.z1).is_none() {
+                return Err(R_OPENING);
+            }
+            let (filling, kind) = match self.fills.get(&o).map(Vec::as_slice).unwrap_or(&[]) {
+                [] => (None, OpeningKind::Hole),
+                [x] => match self.r.f.get(*x).map(|e| e.ty.as_str()).unwrap_or("") {
+                    t if t.starts_with("IFCDOOR") => (Some(*x), OpeningKind::Door),
+                    t if t.starts_with("IFCWINDOW") => (Some(*x), OpeningKind::Window),
+                    _ => return Err(R_OPENING),
+                },
+                _ => return Err(R_OPENING),
+            };
+            openings.push((o, filling, kind, om, None));
         }
         let at = |w: f64| [a.center[0] + a.radius * w.cos(), a.center[1] + a.radius * w.sin()];
         // Gegen den Uhrzeigersinn: Scheitel rechts der Sehne → Bulge negativ.
         let bulge = -((a.a1 - a.a0) / 4.0).tan();
-        Ok(WallCand { info: self.info(id, color), start: at(a.a0), end: at(a.a1), z0: s.z0, z1: s.z1, thickness: a.thickness, openings: Vec::new(), usage_side: None, items: Vec::new(), bulge })
+        Ok(WallCand { info: self.info(id, color), start: at(a.a0), end: at(a.a1), z0: s.z0, z1: s.z1, thickness: a.thickness, openings, usage_side: None, items: Vec::new(), bulge, arc: Some(a) })
     }
 
     fn slab(&mut self, id: u64) -> Result<Slab, &'static str> {
@@ -987,6 +1069,21 @@ impl Ctx<'_, '_> {
             return Err(R_PROFILE);
         }
         Ok(Column { info: self.info(id, color), center, rotation, profile, z0: s.z0, z1: s.z1 })
+    }
+
+    /// Träger: senkrechtes Prisma (waagrechter Rechteck- oder Plattenträger) ohne Loch; schräge Träger und
+    /// Profile (I, U …) liegend bleiben Mesh.
+    fn beam(&mut self, id: u64) -> Result<Beam, &'static str> {
+        let (mesh, color) = self.body(id).ok_or(R_NO_BODY)?;
+        let s = shape(&mesh).ok_or(R_SHAPE)?;
+        let (outline, holes) = prism(&s).ok_or(R_NOT_PRISM)?;
+        if !holes.is_empty() {
+            return Err(R_NOT_PRISM);
+        }
+        if !(s.z1 - s.z0 >= 0.01 && s.z1 - s.z0 <= 5.0) {
+            return Err(R_DIMENSIONS);
+        }
+        Ok(Beam { info: self.info(id, color), outline, z0: s.z0, z1: s.z1 })
     }
 
     fn space(&mut self, id: u64) -> Result<Space, &'static str> {
@@ -1191,66 +1288,88 @@ fn roofs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64, 
 
     let mut fail = HashMap::new();
     for (main, parts, is_roof) in groups {
-        let mut todo = vec![parts];
-        // Mehrere frei stehende Platten, die zusammen kein Dach ergeben: jede einzeln versuchen.
-        let mut tried_single = false;
-        while let Some(group) = todo.pop() {
+        let try_fit = |cx: &mut Ctx, group: &[u64]| -> Result<(crate::ifc_shapes::RoofFit, Option<[f64; 4]>), &'static str> {
             let main = if is_roof { main } else { group[0] };
-            let has_voids = group.iter().chain([&main]).any(|p| rels.voids.get(p).is_some_and(|v| !v.is_empty()));
-            let b = if has_voids { Vec::new() } else { bodies(cx, &group) };
+            if group.iter().chain([&main]).any(|p| rels.voids.get(p).is_some_and(|v| !v.is_empty())) {
+                return Err(R_OPENING);
+            }
+            let b = bodies(cx, group);
+            if b.len() != group.len() {
+                return Err(R_NO_BODY);
+            }
             let color = b.iter().find_map(|x| x.2);
-            let res = if has_voids {
-                Err(R_OPENING)
-            } else if b.len() != group.len() {
-                Err(R_NO_BODY)
-            } else {
-                let meshes: Vec<Mesh> = b.into_iter().map(|x| x.1).collect();
-                crate::ifc_shapes::fit_roof(&meshes)
-            };
-            match res {
-                Ok(fit) => {
-                    let [x0, y0, x1, y1] = fit.bbox;
-                    let mut info = cx.info(main, color);
-                    if info.storey.is_none() {
-                        info.storey = group.iter().find_map(|p| cx.info(*p, None).storey);
+            let meshes: Vec<Mesh> = b.into_iter().map(|x| x.1).collect();
+            crate::ifc_shapes::fit_roof(&meshes).map(|f| (f, color))
+        };
+        type Fit = (crate::ifc_shapes::RoofFit, Option<[f64; 4]>);
+        let fits: Result<Vec<(Vec<u64>, Fit)>, &'static str> = match try_fit(cx, &parts) {
+            Ok(f) => Ok(vec![(parts.clone(), f)]),
+            // Mehrere frei stehende Platten, die zusammen kein Dach ergeben: jede einzeln — ausser bei einem
+            // Tonnendach aus ebenen Streifen (sonst Flickwerk aus Pult- und Flachdächern).
+            Err(why) if !is_roof && parts.len() > 1 => {
+                let meshes: Vec<Mesh> = bodies(cx, &parts).into_iter().map(|x| x.1).collect();
+                if crate::ifc_shapes::is_barrel(&meshes) {
+                    Err(why)
+                } else {
+                    let mut ok = Vec::new();
+                    for p in &parts {
+                        match try_fit(cx, &[*p]) {
+                            Ok(f) => ok.push((vec![*p], f)),
+                            Err(w) => {
+                                fail.insert(*p, w);
+                            }
+                        }
                     }
-                    if info.layers.is_empty() {
-                        let l = cx.info(group[0], None);
-                        info.layers = l.layers;
-                        info.type_name = info.type_name.or(l.type_name);
-                    }
-                    out.converted.insert(main);
-                    out.converted.extend(group.iter().copied());
-                    out.roofs.push(Roof {
-                        info,
-                        outline: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
-                        shape: fit.shape,
-                        pitch_deg: fit.pitch_deg,
-                        ridge_axis: fit.ridge_axis,
-                        eave_z: fit.eave_z,
-                        thickness: fit.thickness,
-                        parts: group.clone(),
-                    });
-                    cx.roofs.push(fit);
-                }
-                Err(why) => {
-                    if !is_roof && group.len() > 1 && !tried_single {
-                        tried_single = true;
-                        todo.extend(group.iter().map(|p| vec![*p]));
-                        continue;
-                    }
-                    for p in &group {
-                        fail.insert(*p, why);
-                    }
-                    if is_roof {
-                        out.keep("IfcRoof", why);
-                    }
+                    Ok(ok)
                 }
             }
+            Err(why) => Err(why),
+        };
+        let fits = match fits {
+            Ok(f) => f,
+            Err(why) => {
+                for p in &parts {
+                    fail.insert(*p, why);
+                }
+                if is_roof {
+                    out.keep("IfcRoof", why);
+                }
+                continue;
+            }
+        };
+        for (group, (fit, color)) in fits {
+            let main = if is_roof { main } else { group[0] };
+            let outline = fit.outline().to_vec();
+            let edge_pitch: Vec<Option<f64>> = fit.eaves.iter().map(|&e| e.then_some(fit.pitch_deg)).collect();
+            let mut info = cx.info(main, color);
+            if info.storey.is_none() {
+                info.storey = group.iter().find_map(|p| cx.info(*p, None).storey);
+            }
+            if info.layers.is_empty() {
+                let l = cx.info(group[0], None);
+                info.layers = l.layers;
+                info.type_name = info.type_name.or(l.type_name);
+            }
+            out.converted.insert(main);
+            out.converted.extend(group.iter().copied());
+            out.roofs.push(Roof {
+                info,
+                outline,
+                edge_pitch,
+                custom: fit.edge_pitch.is_some(),
+                shape: fit.shape,
+                pitch_deg: fit.pitch_deg,
+                ridge_axis: fit.ridge_axis,
+                eave_z: fit.eave_z,
+                thickness: fit.thickness,
+                parts: group.clone(),
+            });
+            cx.roofs.push(fit);
         }
     }
     fail
 }
+
 
 /// Treppen ([B4]): IfcStair (eigener Körper und Teile ausser Geländern) bzw. frei stehender
 /// IfcStairFlight → gerade Dossier-Treppe.
@@ -1272,24 +1391,58 @@ fn stairs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64,
         let color = b.iter().find_map(|x| x.2);
         let used: Vec<u64> = b.iter().map(|x| x.0).collect();
         let meshes: Vec<Mesh> = b.into_iter().map(|x| x.1).collect();
-        match crate::ifc_shapes::fit_stair(&meshes) {
+        // Oberster Tritt auf Geschosshöhe: er ist der Austritt; sonst kommt dieser noch dazu.
+        let exits = |z0: f64, riser: f64, treads: usize, top_is_exit: bool| {
+            let top = z0 + riser * treads as f64;
+            top_is_exit || elevations.iter().any(|z| (z - top).abs() <= 0.02)
+        };
+        let fit = match crate::ifc_shapes::fit_stair(&meshes) {
             Ok(st) => {
-                // Oberster Tritt auf Geschosshöhe: er ist der Austritt; sonst kommt dieser noch dazu.
-                let top = st.z0 + st.riser * st.treads as f64;
-                let steps = if st.top_is_exit || elevations.iter().any(|z| (z - top).abs() <= 0.02) { st.treads } else { st.treads + 1 };
+                let steps = if exits(st.z0, st.riser, st.treads, st.top_is_exit) { st.treads } else { st.treads + 1 };
+                Ok(Stair { shape: "straight", start: st.start, dir: st.dir, run_length: st.going * steps as f64, width: st.width, step_count: steps, z0: st.z0, total_rise: st.riser * steps as f64, ..Default::default() })
+            }
+            Err(_) => match crate::ifc_shapes::fit_spiral(&meshes) {
+                Ok(sp) => {
+                    let steps = if exits(sp.z0, sp.riser, sp.treads, sp.top_is_exit) { sp.treads } else { sp.treads + 1 };
+                    let sweep = sp.step * steps as f64;
+                    let (c, s) = (sp.a0.cos(), sp.a0.sin());
+                    let sense = sp.step.signum();
+                    Ok(Stair {
+                        shape: "spiral",
+                        start: [sp.center[0] + sp.radius * c, sp.center[1] + sp.radius * s],
+                        dir: [-s * sense, c * sense],
+                        run_length: sp.radius * sweep.abs(),
+                        width: sp.width,
+                        step_count: steps,
+                        z0: sp.z0,
+                        total_rise: sp.riser * steps as f64,
+                        center: sp.center,
+                        radius: sp.radius,
+                        sweep_deg: sweep.to_degrees(),
+                        center_column: sp.column.unwrap_or(0.0),
+                        ..Default::default()
+                    })
+                }
+                Err(_) => crate::ifc_shapes::fit_l_stair(&meshes).and_then(|l| {
+                    // Dossier: Lauf 1 = n1 Tritte, Podest = ein Tritt, Lauf 2 bis zum Austritt; die Aufteilung der
+                    // Stufen auf die Läufe folgt den Lauflängen und muss die der Datei ergeben.
+                    let z_top = l.z0 + l.riser * (l.n1 + 1 + l.n2) as f64;
+                    let s2 = if l.top_is_exit || elevations.iter().any(|z| (z - z_top).abs() <= 0.02) { l.n2 } else { l.n2 + 1 };
+                    let (run1, run2) = (l.going1 * l.n1 as f64, l.going2 * s2 as f64);
+                    let body = (l.n1 + s2) as f64;
+                    if (body * run1 / (run1 + run2)).round() as usize != l.n1 || s2 < 1 {
+                        return Err(crate::ifc_shapes::R_STAIR_TURN);
+                    }
+                    let steps = l.n1 + 1 + s2;
+                    Ok(Stair { shape: "L", start: l.start, dir: l.dir, run_length: run1, width: l.width, step_count: steps, z0: l.z0, total_rise: l.riser * steps as f64, run2_length: run2, turn: l.turn, ..Default::default() })
+                }),
+            },
+        };
+        match fit {
+            Ok(st) => {
                 out.converted.insert(id);
                 out.converted.extend(used);
-                let info = cx.info(id, color);
-                out.stairs.push(Stair {
-                    info,
-                    start: st.start,
-                    dir: st.dir,
-                    run_length: st.going * steps as f64,
-                    width: st.width,
-                    step_count: steps,
-                    z0: st.z0,
-                    total_rise: st.riser * steps as f64,
-                });
+                out.stairs.push(Stair { info: cx.info(id, color), ..st });
             }
             Err(why) => out.keep(&class_name(&e.ty), why),
         }
@@ -1400,7 +1553,7 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
     for &id in ids {
         let Some(e) = f.get(id) else { continue };
         let ty = e.ty.as_str();
-        let candidate = matches!(ty, "IFCWALL" | "IFCWALLSTANDARDCASE" | "IFCSLAB" | "IFCSLABSTANDARDCASE" | "IFCCOLUMN" | "IFCCOLUMNSTANDARDCASE" | "IFCSPACE");
+        let candidate = matches!(ty, "IFCWALL" | "IFCWALLSTANDARDCASE" | "IFCSLAB" | "IFCSLABSTANDARDCASE" | "IFCCOLUMN" | "IFCCOLUMNSTANDARDCASE" | "IFCSPACE" | "IFCBEAM" | "IFCBEAMSTANDARDCASE");
         let has_shape = e.arg(6).and_then(|v| v.as_ref_id()).and_then(|i| f.get(i)).is_some_and(|s| s.ty == "IFCPRODUCTDEFINITIONSHAPE");
         if !candidate || !has_shape || out.converted.contains(&id) {
             continue;
@@ -1414,6 +1567,7 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
                 "IFCWALL" | "IFCWALLSTANDARDCASE" => cx.wall(id).map(|w| walls.push(w)),
                 "IFCSLAB" | "IFCSLABSTANDARDCASE" => cx.slab(id).map(|s| out.slabs.push(s)),
                 "IFCCOLUMN" | "IFCCOLUMNSTANDARDCASE" => cx.column(id).map(|c| out.columns.push(c)),
+                "IFCBEAM" | "IFCBEAMSTANDARDCASE" => cx.beam(id).map(|b| out.beams.push(b)),
                 _ => cx.space(id).map(|s| out.spaces.push(s)),
             }
         };
@@ -1466,11 +1620,20 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
         let host = out.walls.len();
         let len = len2(sub2(end, start));
         for (o, filling, kind, mesh, form) in &w.openings {
-            let Some((b, _)) = box_in_frame(mesh, start, d) else { continue };
-            let u0 = b[0].max(0.0);
-            let u1 = b[1].min(len);
-            let z0 = b[4].max(w.z0);
-            let z1 = b[5].min(w.z1);
+            // Lage entlang der Achse (Bogenwand: Bogenlänge ab dem Dossier-Anfang) und Richtung der Wand dort.
+            let (u0, u1, z0, z1, d) = match &w.arc {
+                Some(a) => {
+                    let Some((p0, p1, z0, z1)) = arc_span(mesh, a, w.z0, w.z1) else { continue };
+                    let (s0, s1) = if side > 0 { (a.radius * (a.a1 - p1), a.radius * (a.a1 - p0)) } else { (a.radius * (p0 - a.a0), a.radius * (p1 - a.a0)) };
+                    let pm = (p0 + p1) / 2.0;
+                    let t = if side > 0 { [pm.sin(), -pm.cos()] } else { [-pm.sin(), pm.cos()] };
+                    (s0.max(0.0), s1.min(a.radius * (a.a1 - a.a0)), z0, z1, t)
+                }
+                None => {
+                    let Some((b, _)) = box_in_frame(mesh, start, d) else { continue };
+                    (b[0].max(0.0), b[1].min(len), b[4].max(w.z0), b[5].min(w.z1), d)
+                }
+            };
             let info = cx.info(filling.unwrap_or(*o), None);
             let (operation, swing, hinge) = match filling {
                 Some(x) => cx.operation(*x, d),
@@ -1585,8 +1748,10 @@ fn unhosted_fillings(cx: &mut Ctx, out: &mut Semantic, ids: &[u64]) {
 //   slab:    z0, z1, nRings, (nPts, x, y, …)*   (erster Ring = Umriss)
 //   column:  cx, cy, rotation, z0, z1, a, b      (rect: Breite, Tiefe; round: Radius, 0)
 //   space:   z0, z1, nPts, x, y, …
-//   roof:    eaveZ, pitchDeg, thickness, nPts, x, y, …   (Form, Firstrichtung im JSON)
-//   stair:   sx, sy, dx, dy, runLength, width, stepCount, z0, totalRise
+//   roof:    eaveZ, pitchDeg, thickness, nPts, x, y, …   (Form, Firstrichtung, Neigung je Kante im JSON)
+//   stair:   sx, sy, dx, dy, runLength, width, stepCount, z0, totalRise, run2Length, turn, cx, cy, radius,
+//            sweepDeg, centerColumn   (Grundform im JSON)
+//   beam:    z0, z1, nPts, x, y, …
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "web")]
@@ -1667,11 +1832,18 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
     for r in &s.roofs {
         let mut nums = vec![r.eave_z, r.pitch_deg, r.thickness];
         ring(&r.outline, &mut nums);
-        push("roof", &r.info, json!({ "shape": r.shape, "ridgeAxis": r.ridge_axis }), nums, &mut data);
+        push("roof", &r.info, json!({ "shape": r.shape, "ridgeAxis": r.ridge_axis, "edgePitch": r.edge_pitch, "custom": r.custom }), nums, &mut data);
+    }
+    for b in &s.beams {
+        let mut nums = vec![b.z0, b.z1];
+        ring(&b.outline, &mut nums);
+        push("beam", &b.info, json!({}), nums, &mut data);
     }
     for st in &s.stairs {
-        let nums = vec![st.start[0], st.start[1], st.dir[0], st.dir[1], st.run_length, st.width, st.step_count as f64, st.z0, st.total_rise];
-        push("stair", &st.info, json!({}), nums, &mut data);
+        let nums = vec![
+            st.start[0], st.start[1], st.dir[0], st.dir[1], st.run_length, st.width, st.step_count as f64, st.z0, st.total_rise, st.run2_length, st.turn, st.center[0], st.center[1], st.radius, st.sweep_deg, st.center_column,
+        ];
+        push("stair", &st.info, json!({ "shape": st.shape }), nums, &mut data);
     }
     let storeys: Vec<_> = s.storeys.iter().map(|st| json!({ "globalId": st.global_id, "name": st.name, "elevation": st.elevation })).collect();
     // Nicht endliche Zahlen gäbe es nur bei Unsinn; JSON/JS-Seite verwirft sie.
@@ -2230,6 +2402,25 @@ ENDSEC;\nEND-ISO-10303-21;\n"
         assert_eq!(apex_left, w.bulge > 0.0);
         assert!(r.products.is_empty());
 
+        // Dieselbe Bogenwand mit Öffnung (Kasten 1.0 entlang der Tangente bei 45°, 0.6 tief, Brüstung 0.9,
+        // 1.2 hoch): Lage nach Bogenlänge auf der Achse, Laibungen bei 45° ± asin(0.5/5).
+        let (c, s45) = (0.5f64.sqrt(), 0.5f64.sqrt());
+        let at = (5.0 * c + 0.5 * s45, 5.0 * s45 - 0.5 * c, 0.9);
+        let hole = rect_product(500, "IFCOPENINGELEMENT", at, (-s45, c), (1.0, 0.6), 1.2, "");
+        let arc = brep_product(100, "IFCWALL", &prism_faces(&ring, 0.0, |_, _| 2.5), "$");
+        let (r, s) = sem(&file(METRE, &format!("{arc}{hole}#509=IFCRELVOIDSELEMENT('v',$,$,$,#100,#500);")));
+        assert_eq!((s.walls.len(), s.openings.len()), (1, 1), "{:?}", s.kept_reasons);
+        let o = &s.openings[0];
+        let half = (0.5f64 / 5.0).asin();
+        assert_eq!(o.kind, OpeningKind::Hole);
+        assert!((o.position - 5.0 * (std::f64::consts::FRAC_PI_4 - half)).abs() < 1e-6 && (o.width - 10.0 * half).abs() < 1e-6, "{o:?}");
+        assert!(close(o.sill, 0.9) && close(o.height, 1.2), "{o:?}");
+        assert!(r.products.is_empty(), "{:?}", r.products.iter().map(|p| &p.class).collect::<Vec<_>>());
+        // Nische (nicht durch die ganze Dicke): Wand bleibt Mesh.
+        let niche = rect_product(500, "IFCOPENINGELEMENT", (at.0 - 0.2 * c, at.1 - 0.2 * s45, 0.9), (-s45, c), (1.0, 0.2), 1.2, "");
+        let (_, s) = sem(&file(METRE, &format!("{arc}{niche}#509=IFCRELVOIDSELEMENT('v',$,$,$,#100,#500);")));
+        assert_eq!(s.kept_reasons.get("IfcWall").and_then(|m| m.get("opening")), Some(&1), "{:?}", s.kept_reasons);
+
         // Runde Öffnung (Durchmesser 1, Mitte auf 1.5 m) in einer geraden Wand.
         let wall = rect_product(200, "IFCWALL", (0.0, 0.0, 0.0), (1.0, 0.0), (4.0, 0.3), 2.5, "");
         let round = "#501=IFCCARTESIANPOINT((2.,0.4,1.5));#502=IFCDIRECTION((0.,-1.,0.));#503=IFCAXIS2PLACEMENT3D(#501,#502,#12);\
@@ -2267,6 +2458,26 @@ ENDSEC;\nEND-ISO-10303-21;\n"
         assert_eq!(o.kind, OpeningKind::Door);
         assert!(close(o.width, 1.0) && close(o.height, 2.0) && close(o.sill, 0.0), "{o:?}");
         assert!(r.products.is_empty(), "{:?}", r.products.iter().map(|p| &p.class).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn horizontal_beam_becomes_prism_sloped_stays_mesh() {
+        // Waagrechter Träger 4 × 0.2, 0.4 hoch auf 2.6 m, um 30° gedreht.
+        let (s, c) = 30f64.to_radians().sin_cos();
+        let beam = rect_product(100, "IFCBEAM", (1.0, 2.0, 2.6), (c, s), (4.0, 0.2), 0.4, "");
+        let (r, sm) = sem(&file(METRE, &beam));
+        assert_eq!(sm.beams.len(), 1, "{:?}", sm.kept_reasons);
+        let b = &sm.beams[0];
+        assert!(close(b.z0, 2.6) && close(b.z1, 3.0) && close(area2(&b.outline).abs(), 0.8), "{b:?}");
+        assert!(b.outline.iter().any(|p| close2(*p, [1.0 - 0.1 * -s, 2.0 - 0.1 * c])), "{b:?}");
+        assert!(r.products.is_empty());
+        // Schräger Träger (Sparren): bleibt Mesh.
+        let mut faces = Vec::new();
+        let ring = [[0.0, 0.0], [4.0, 0.0], [4.0, 0.2], [0.0, 0.2]];
+        faces.extend(prism_faces(&ring, 0.0, |x, _| 0.3 + 0.5 * x).into_iter().map(|f| f.into_iter().map(|p| if p[2] == 0.0 { [p[0], p[1], 0.5 * p[0]] } else { p }).collect()));
+        let (_, sm) = sem(&file(METRE, &brep_product(200, "IFCBEAM", &faces, "$")));
+        assert!(sm.beams.is_empty());
+        assert_eq!(sm.kept.get("IfcBeam"), Some(&1), "{:?}", sm.kept_reasons);
     }
 
     #[test]
@@ -2323,11 +2534,22 @@ ENDSEC;\nEND-ISO-10303-21;\n"
                 *meshes.entry(p.class.as_str()).or_insert(0) += 1;
             }
             eprintln!(
-                "== {} ({}, {:.1}s{})\n  Geschosse {} · Wände {} · Öffnungen {} · Decken {} · Stützen {} · Räume {} · Dächer {} · Treppen {}\n  als Mesh behalten (Grund): {:?}\n  Meshes je Klasse: {:?}",
+                "== {} ({}, {:.1}s{})\n  Geschosse {} · Wände {} · Öffnungen {} · Decken {} · Stützen {} · Räume {} · Dächer {} · Treppen {} · Träger {}\n  als Mesh behalten (Grund): {:?}\n  Meshes je Klasse: {:?}",
                 f.file_name().unwrap().to_string_lossy(), r.schema, t.elapsed().as_secs_f64(), if r.truncated { ", abgebrochen" } else { "" },
-                s.storeys.len(), s.walls.len(), s.openings.len(), s.slabs.len(), s.columns.len(), s.spaces.len(), s.roofs.len(), s.stairs.len(),
+                s.storeys.len(), s.walls.len(), s.openings.len(), s.slabs.len(), s.columns.len(), s.spaces.len(), s.roofs.len(), s.stairs.len(), s.beams.len(),
                 s.kept_reasons, meshes
             );
+            let mut forms: BTreeMap<String, usize> = BTreeMap::new();
+            for r in &s.roofs {
+                *forms.entry(format!("Dach {}{}", r.shape, if r.custom { " je Kante" } else { "" })).or_insert(0) += 1;
+                if r.custom && std::env::var("DOSSIER_IFC_DEBUG").is_ok() {
+                    eprintln!("  Dach je Kante {:?} {:.1}° Traufe {:.2} Umriss {:?} Kanten {:?}", r.info.name, r.pitch_deg, r.eave_z, r.outline, r.edge_pitch);
+                }
+            }
+            for st in &s.stairs {
+                *forms.entry(format!("Treppe {}", st.shape)).or_insert(0) += 1;
+            }
+            eprintln!("  Formen: {forms:?}");
         }
     }
 }
