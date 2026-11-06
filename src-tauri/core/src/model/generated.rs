@@ -4053,8 +4053,8 @@ pub struct OverrideActions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub outline: Option<bool>,
-    /// [33] Bauteil ausblenden (wirkt in der Ansicht: Flächen, Kanten, Ansichtsschraffur und — bei Wänden —
-    /// deren Öffnungen entfallen und verdecken nichts).
+    /// [33] Bauteil ausblenden (Grundriss, Deckenspiegel, Schnitt, Ansicht: Element samt Linien, Schraffur und
+    /// Beschriftung entfällt und verdeckt nichts; eine Wand nimmt ihre Öffnungen mit; Bemassung bleibt).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hide: Option<bool>,

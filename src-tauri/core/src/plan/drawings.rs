@@ -289,7 +289,7 @@ impl<'a> Memo<'a> {
             self.last = i;
             return &self.entries[i];
         }
-        let e = MemoEntry { key, shown: c.shown(key.0), greyed: c.greyed(key.0), cat: c.cat(key.0), ov: c.overrides(key.0, Some(key.1)) };
+        let e = MemoEntry { key, shown: c.shown(key.0), greyed: c.greyed(key.0), cat: c.cat(key.0), ov: c.overrides(None, key.0, Some(key.1)) };
         let i = if self.entries.len() < Self::MAX {
             self.entries.push(e);
             self.entries.len() - 1

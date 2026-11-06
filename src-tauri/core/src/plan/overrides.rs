@@ -62,7 +62,8 @@ pub struct Subject<'a> {
     pub layer_code: Option<&'a str>,
     /// Element-/Typ-Name (Wandtyp, Raum, Öffnungs-Label …).
     pub object_name: Option<&'a str>,
-    /// [33] Bauteilart: "wall", "slab", "ground_slab", "roof".
+    /// [33] Bauteilart: "wall", "slab", "ground_slab", "roof", "stair", "column", "opening", "room", dazu
+    /// [`SPECIAL_KINDS`] "shadow" (Schlagschatten der Ansicht) und "terrain" (Gelände/Höhenlinien).
     pub element_kind: Option<&'a str>,
     /// [33] Funktion der Schicht ([`function_key`]).
     pub layer_function: Option<&'a str>,
@@ -84,12 +85,34 @@ pub struct Actions {
     pub color: Option<String>,
     pub lineweight: Option<f64>,
     pub linetype_id: Option<String>,
+    /// [33] Ausblenden (Element samt Linien, Schraffur, Beschriftung).
+    pub hide: Option<bool>,
 }
 
 impl Actions {
     pub fn any(&self) -> bool {
         self.color.is_some() || self.lineweight.is_some() || self.linetype_id.is_some()
     }
+    pub fn hidden(&self) -> bool {
+        self.hide == Some(true)
+    }
+}
+
+/// [33] Bauteilarten ohne eigenes Element im Modell (Schlagschatten der Ansicht, Gelände/Höhenlinien): Sie
+/// folgen nur Regeln, die die Bauteilart ausdrücklich nennen (gleich/enthält/beginnt mit) — sonst würden
+/// allgemeine Regeln („Ebene ≠ …“, „Bauteilart ≠ Fenster/Tür“) sie plötzlich mitfärben.
+pub const SPECIAL_KINDS: [&str; 2] = ["shadow", "terrain"];
+
+/// [33] Wirkt die Regel auf diese Bauteilart? Für [`SPECIAL_KINDS`] nur mit positiver Bauteilart-Bedingung.
+fn kind_ok(rule: &OverrideRule, s: &Subject) -> bool {
+    !s.element_kind.is_some_and(|k| SPECIAL_KINDS.contains(&k)) || conditions(rule).any(|c| c.r#type == OverrideConditionType::ElementKind && matches!(c.operator, OverrideOperator::Equals | OverrideOperator::Contains | OverrideOperator::StartsWith))
+}
+
+/// [33] Strichmuster eines Linienstils (Aktion `linetypeId`) als `dash` einer Linie: `Some(None)` =
+/// durchgezogen, `None` = kein bzw. unbekannter Linienstil.
+pub fn linetype_dash(p: &Project, id: Option<&str>) -> Option<Option<Vec<f64>>> {
+    let id = id.map(js_trim).filter(|s| !s.is_empty())?;
+    p.line_styles.iter().find(|l| l.id == id).map(|l| l.dash.clone().filter(|d| !d.is_empty()))
 }
 
 /// [33] Effektive Schicht-Aktionen (Füllung, Schraffur, Umriss) einer Schicht.
@@ -99,6 +122,8 @@ pub struct LayerActions {
     /// "none", "material" oder id einer Schraffur.
     pub hatch: Option<String>,
     pub outline: Option<bool>,
+    /// [33] Linienstil der Fugen/Umrisse der Schicht (nur aus Schicht-Regeln, [`is_layer_rule`]).
+    pub linetype_id: Option<String>,
 }
 
 impl LayerActions {
@@ -107,7 +132,7 @@ impl LayerActions {
         self.fill_color.is_some() || self.hatch.is_some()
     }
     pub fn any(&self) -> bool {
-        self.styles() || self.outline.is_some()
+        self.styles() || self.outline.is_some() || self.linetype_id.is_some()
     }
     /// Fläche ohne Muster (Schraffur "none")?
     pub fn plain(&self) -> bool {
@@ -186,7 +211,7 @@ pub fn effective(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView) -> Ac
     let Some(rules) = rules else { return out };
     let s = &Subject { view_kind: v.view, ..*s };
     for rule in rules {
-        if !v.active(rule) || is_layer_rule(rule) || !rule_matches(rule, s) {
+        if !v.active(rule) || is_layer_rule(rule) || !kind_ok(rule, s) || !rule_matches(rule, s) {
             continue;
         }
         let a = &rule.actions;
@@ -199,7 +224,10 @@ pub fn effective(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView) -> Ac
         if out.linetype_id.is_none() {
             out.linetype_id = a.linetype_id.clone();
         }
-        if out.color.is_some() && out.lineweight.is_some() && out.linetype_id.is_some() {
+        if out.hide.is_none() {
+            out.hide = a.hide;
+        }
+        if out.color.is_some() && out.lineweight.is_some() && out.linetype_id.is_some() && out.hide.is_some() {
             break;
         }
     }
@@ -213,8 +241,12 @@ pub fn effective_layer(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView)
     let s = &Subject { view_kind: v.view, ..*s };
     for rule in rules {
         let a = &rule.actions;
-        if !v.active(rule) || (a.fill_color.is_none() && a.hatch.is_none() && a.outline.is_none()) || !rule_matches(rule, s) {
+        let lt = if is_layer_rule(rule) { a.linetype_id.as_deref().map(js_trim).filter(|x| !x.is_empty()) } else { None };
+        if !v.active(rule) || (a.fill_color.is_none() && a.hatch.is_none() && a.outline.is_none() && lt.is_none()) || !rule_matches(rule, s) {
             continue;
+        }
+        if out.linetype_id.is_none() {
+            out.linetype_id = lt.map(String::from);
         }
         if out.fill_color.is_none() {
             out.fill_color = a.fill_color.as_deref().map(js_trim).filter(|x| !x.is_empty()).map(String::from);
@@ -238,7 +270,7 @@ pub fn effective_surface(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleVie
     let s = &Subject { view_kind: v.view, ..*s };
     let text = |x: &Option<String>| x.as_deref().map(js_trim).filter(|x| !x.is_empty()).map(String::from);
     for rule in rules {
-        if !v.active(rule) || !rule_matches(rule, s) {
+        if !v.active(rule) || !kind_ok(rule, s) || !rule_matches(rule, s) {
             continue;
         }
         let a = &rule.actions;
@@ -260,7 +292,90 @@ pub fn has_active(p: &Project, v: RuleView) -> bool {
 
 /// Gibt es überhaupt aktive Regeln mit Schicht-Aktionen? (Schnellpfad: sonst nichts auswerten.)
 pub fn has_layer_actions(p: &Project, v: RuleView) -> bool {
-    p.override_rules.iter().flatten().any(|r| v.active(r) && (r.actions.fill_color.is_some() || r.actions.hatch.is_some() || r.actions.outline.is_some()))
+    p.override_rules.iter().flatten().any(|r| v.active(r) && (r.actions.fill_color.is_some() || r.actions.hatch.is_some() || r.actions.outline.is_some() || (r.actions.linetype_id.is_some() && is_layer_rule(r))))
+}
+
+/// [33] Gibt es aktive Element-Regeln mit „Ausblenden“? (Schnellpfad für [`hidden_elements`].)
+pub fn has_hide(p: &Project, v: RuleView) -> bool {
+    p.override_rules.iter().flatten().any(|r| v.active(r) && r.actions.hide == Some(true) && !is_layer_rule(r))
+}
+
+/// [33] Elemente, die eine Regel „Ausblenden“ in Grundriss/Deckenspiegel/Schnitt ausblendet (ids): Wände,
+/// Öffnungen, Decken/Bodenplatten, Dächer, Treppen, Stützen, Räume — Bedingungen wie bei [`effective`]
+/// (Element-Regeln: Ebene, Name, Bauteilart, Darstellung, Massstab). Eine ausgeblendete Wand nimmt ihre
+/// Öffnungen mit. Leer ohne aktive Regel mit „Ausblenden“.
+pub fn hidden_elements(p: &Project, v: RuleView) -> HashSet<String> {
+    let mut out = HashSet::new();
+    if !has_hide(p, v) {
+        return out;
+    }
+    let rules = p.override_rules.as_deref();
+    let mut memo: std::collections::HashMap<(&'static str, String, Option<String>), bool> = std::collections::HashMap::new();
+    let mut test = |kind: &'static str, code: &str, name: Option<&str>| -> bool {
+        *memo.entry((kind, code.to_string(), name.map(String::from))).or_insert_with(|| {
+            let s = Subject { layer_name: p.layer_category(code).map(|c| c.name.as_str()), layer_code: Some(code), object_name: name, element_kind: Some(kind), ..Default::default() };
+            effective(rules, &s, v).hidden()
+        })
+    };
+    for w in &p.walls {
+        if test("wall", &w.category_code, Some(&p.wall_type_or_fallback(w).name)) {
+            out.insert(w.id.clone());
+        }
+    }
+    for o in p.openings.iter().flatten() {
+        if out.contains(&o.host_wall_id) || test("opening", &o.category_code, Some(&super::walls::opening_label(o))) {
+            out.insert(o.id.clone());
+        }
+    }
+    for c in p.ceilings.iter().flatten() {
+        let layers = super::domains::ceiling_layers(p, c).unwrap_or(&[]);
+        let kind = if is_ground_slab(p, c, layers) { "ground_slab" } else { "slab" };
+        if test(kind, &c.category_code, super::domains::ceiling_type_name(p, c)) {
+            out.insert(c.id.clone());
+        }
+    }
+    for r in p.roofs.iter().flatten() {
+        if test("roof", &r.category_code, None) {
+            out.insert(r.id.clone());
+        }
+    }
+    for s in p.stairs.iter().flatten() {
+        if test("stair", &s.category_code, Some(&super::stairs::stair_label(s))) {
+            out.insert(s.id.clone());
+        }
+    }
+    for c in p.columns.iter().flatten() {
+        if test("column", &c.category_code, Some(&super::domains::column_label(c))) {
+            out.insert(c.id.clone());
+        }
+    }
+    for r in p.rooms.iter().flatten() {
+        if test("room", &r.category_code, Some(&r.name)) {
+            out.insert(r.id.clone());
+        }
+    }
+    out
+}
+
+/// [33] Override für Gelände/Höhenlinien (Bauteilart "terrain", s. [`SPECIAL_KINDS`]): Linie (Farbe, Stärke,
+/// Linienstil), Füllung, Ausblenden (`Actions::hide`). `None` ohne wirksame Regel.
+pub fn terrain_override(p: &Project, v: RuleView, code: Option<&str>, name: &str) -> Option<(Actions, LayerActions)> {
+    special_override(p, v, "terrain", code, Some(name))
+}
+
+/// [33] Override für den Schlagschatten der Ansicht (Bauteilart "shadow").
+pub fn shadow_override(p: &Project, v: RuleView) -> Option<(Actions, LayerActions)> {
+    special_override(p, v, "shadow", None, None)
+}
+
+fn special_override(p: &Project, v: RuleView, kind: &str, code: Option<&str>, name: Option<&str>) -> Option<(Actions, LayerActions)> {
+    if !has_active(p, v) {
+        return None;
+    }
+    let s = Subject { layer_name: code.and_then(|c| p.layer_category(c)).map(|c| c.name.as_str()), layer_code: code, object_name: name, element_kind: Some(kind), ..Default::default() };
+    let (mut el, ly, hide) = effective_surface(p.override_rules.as_deref(), &s, v);
+    el.hide = hide;
+    (el.any() || el.hidden() || ly.fill_color.is_some()).then_some((el, ly))
 }
 
 /// Schlüssel einer Schichtfunktion (wie im JSON).
@@ -416,7 +531,7 @@ mod tests {
             rule(true, cond(LayerName, Equals, "Wände"), None, Some(0.1), Some("dashed")),
         ];
         let a = effective(Some(&rules), &WALL, RuleView::default());
-        assert_eq!(a, Actions { color: Some("#f00".into()), lineweight: Some(0.7), linetype_id: Some("dashed".into()) });
+        assert_eq!(a, Actions { color: Some("#f00".into()), lineweight: Some(0.7), linetype_id: Some("dashed".into()), hide: None });
         assert!(!effective(None, &WALL, RuleView::default()).any());
         assert!(!effective(Some(&[]), &WALL, RuleView::default()).any());
     }
@@ -445,7 +560,7 @@ mod tests {
         // Nicht aufs Element (auch nicht die Farbe).
         assert!(!effective(Some(std::slice::from_ref(&white)), &WALL, RuleView::default()).any());
         let a = effective_layer(Some(std::slice::from_ref(&white)), &screed, RuleView::default());
-        assert_eq!(a, LayerActions { fill_color: Some("#ffffff".into()), hatch: Some("none".into()), outline: Some(true) });
+        assert_eq!(a, LayerActions { fill_color: Some("#ffffff".into()), hatch: Some("none".into()), outline: Some(true), linetype_id: None });
         assert!(!effective_layer(Some(std::slice::from_ref(&white)), &core, RuleView::default()).any());
         // Weitere Bedingung verfehlt: Wand.
         assert!(!effective_layer(Some(std::slice::from_ref(&white)), &Subject { element_kind: Some("wall"), ..screed }, RuleView::default()).any());
@@ -524,5 +639,69 @@ mod tests {
         assert_eq!(a.iter().map(|x| x.styles()).collect::<Vec<_>>(), [true, true, true, false, false]);
         assert!(layer_actions(&p, RuleView::default(), "ground_slab", "30", None, &deck)[1].plain());
         assert!(!layer_actions(&p, RuleView::default(), "wall", "20", None, &deck)[1].any());
+    }
+
+    fn sample() -> Project {
+        serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap()
+    }
+
+    /// [33] „Ausblenden“ für Grundriss/Schnitt: Element-Regeln (Bauteilart, Ebene, Darstellung), eine
+    /// ausgeblendete Wand nimmt ihre Öffnungen mit; Schicht-Regeln blenden nichts aus.
+    #[test]
+    fn ausgeblendete_elemente() {
+        let mut p = sample();
+        assert!(hidden_elements(&p, RuleView::default()).is_empty());
+        let mut r = rule(true, cond(ElementKind, Equals, "wall"), None, None, None);
+        r.actions.hide = Some(true);
+        r.conditions = Some(vec![cond(ViewKind, Equals, "section")]);
+        p.override_rules = Some(vec![r.clone()]);
+        assert!(hidden_elements(&p, RuleView::default().view("plan")).is_empty(), "nur im Schnitt");
+        let h = hidden_elements(&p, RuleView::default().view("section"));
+        assert!(p.walls.iter().all(|w| h.contains(&w.id)));
+        assert!(p.openings.iter().flatten().all(|o| h.contains(&o.id)), "Öffnungen der Wand mit");
+        assert!(p.ceilings.iter().flatten().all(|c| !h.contains(&c.id)));
+        // Nur die Öffnungen (Ebene 21): Wände bleiben.
+        r.condition = cond(LayerName, Equals, "21");
+        r.conditions = None;
+        p.override_rules = Some(vec![r.clone()]);
+        let h = hidden_elements(&p, RuleView::default().view("plan"));
+        assert!(p.walls.iter().all(|w| !h.contains(&w.id)) && p.openings.iter().flatten().all(|o| h.contains(&o.id)));
+        // Schicht-Regel: blendet keine Elemente aus.
+        r.condition = cond(MaterialCategory, Equals, "insulation");
+        p.override_rules = Some(vec![r]);
+        assert!(hidden_elements(&p, RuleView::default().view("plan")).is_empty());
+    }
+
+    /// [33] Schatten und Gelände folgen nur Regeln, die die Bauteilart ausdrücklich nennen; Linienstil und
+    /// Ausblenden wirken; Linienstil aus Schicht-Regeln auf Schichten.
+    #[test]
+    fn schatten_gelaende_und_linienstil() {
+        let mut p = sample();
+        let mut general = rule(true, cond(ElementKind, NotEquals, "opening"), Some("#ff0000"), None, None);
+        general.actions.fill_color = Some("#ffffff".into());
+        p.override_rules = Some(vec![general.clone()]);
+        assert!(shadow_override(&p, RuleView::default()).is_none(), "allgemeine Regel lässt Schatten in Ruhe");
+        assert!(terrain_override(&p, RuleView::default(), Some("02"), "Gelände").is_none());
+        let mut sh = rule(true, cond(ElementKind, Equals, "shadow"), None, None, None);
+        sh.actions.hide = Some(true);
+        let mut te = rule(true, cond(ElementKind, Equals, "terrain"), Some("#00aa00"), Some(0.5), Some("hatch-dash"));
+        te.actions.fill_color = Some("#eeeeee".into());
+        p.override_rules = Some(vec![sh, te, general]);
+        assert!(shadow_override(&p, RuleView::default()).is_some_and(|(a, _)| a.hidden()));
+        let (a, l) = terrain_override(&p, RuleView::default(), None, "Gelände").unwrap();
+        assert_eq!((a.color.as_deref(), a.lineweight, a.linetype_id.as_deref(), l.fill_color.as_deref(), a.hidden()), (Some("#00aa00"), Some(0.5), Some("hatch-dash"), Some("#eeeeee"), false));
+        assert_eq!(linetype_dash(&p, Some("hatch-dash")), Some(Some(vec![0.35, 0.3])));
+        assert_eq!(linetype_dash(&p, Some("thin")), Some(None), "durchgezogen");
+        assert_eq!(linetype_dash(&p, Some("gibts-nicht")), None);
+        // Linienstil: aus Schicht-Regeln auf die Schicht, Element-Regeln nicht (Wandschichten blieben sonst neu gezeichnet).
+        let s = Subject { element_kind: Some("wall"), material_category: Some("insulation"), ..WALL };
+        let el = rule(true, cond(LayerName, Equals, "20"), None, None, Some("hatch-dash"));
+        assert_eq!(effective_layer(Some(std::slice::from_ref(&el)), &s, RuleView::default()).linetype_id, None);
+        let ly = rule(true, cond(MaterialCategory, Equals, "insulation"), None, None, Some("hatch-dash"));
+        assert_eq!(effective_layer(Some(std::slice::from_ref(&ly)), &s, RuleView::default()).linetype_id.as_deref(), Some("hatch-dash"));
+        p.override_rules = Some(vec![el]);
+        assert!(!has_layer_actions(&p, RuleView::default()));
+        p.override_rules = Some(vec![ly]);
+        assert!(has_layer_actions(&p, RuleView::default()));
     }
 }
