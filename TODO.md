@@ -2981,6 +2981,20 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   nicht ab), der Stempel weicht nur teilweise aus; Fang-Punkt des Stempels (`snap_model`) und der Kern-Griff
   `roomStamp` rechnen weiter vom Pol (die Ansicht gleicht beim Ziehen aus); Stempel-Editor hat keine Lage;
   Deckenspiegel-Stempel ohne Hindernisse; nicht in der Tauri-App/Metal geprüft (nur Linux, CLI-SVG). · M
+  (6.11., Teil 6 Reste) **Weniger vor Überdeckung:** `fit_room_stamp` sucht die ganze Einpass-Reihenfolge (ohne
+  Nutzungs-, dann ohne Flächenzeile, dann 2 mm Schrift, je mit/ohne Auszeichnungen) zuerst nur unter freien Lagen
+  (`place_stamp(…, frei)`); erst wenn keine Stufe frei liegt, dieselbe Reihenfolge mit geringster Überdeckung (Kürzen
+  danach wie bisher). „E.06 Treppenhaus“ (Musterhaus komplex, EG 1:100) steht jetzt in 2 mm Schrift mit allen Zeilen
+  frei neben der Treppe. **Fang-Punkt des Stempels** an der gezeichneten Lage: `domains::room_stamp_spots` (dieselbe
+  Einpassung, Detail „mittel“, Massstab der Plan-Ansicht) → `snap_model::collect_model_at` (nur mit Massstab,
+  `hold_view`; neu gesammelt bei jedem Dokument-Stand, wenn ein Raum des Geschosses keinen Anker hat). **Kern-Griff
+  `roomStamp`** verschiebt ab `pt` (gezeichnete Lage aus dem Plan, `roomStampAt`), solange der Raum keinen eigenen
+  Anker hat; die Plan-Ansicht gleicht beim Ziehen nicht mehr selbst aus (`moveRoomStamp(id, delta, from)`). Tests:
+  `raumstempel_passt_in_engen_raum` (frei vor Überdeckung), `grips::raumstempel_ab_gezeichneter_lage`,
+  `snap_model::stempel_fangpunkt_an_gezeichneter_lage`. Golden `komplex-grundriss-eg-100` neu (nur Stempel E.06).
+  Geprüft: cargo test Kern, tsc, vitest, CLI-SVG EG 1:100 vorher/nachher in Chromium. Offen: Fang-Punkt rechnet mit
+  Detail „mittel“ (bei „fein“/„grob“ kann der Plan leicht abweichen); Ziehen des Stempels nicht in der Tauri-App
+  geprüft; „E.07 Eingang“ (Höhenlinien-Beschriftungen) unverändert.
   Höhenlinien). Offen: dünne Schichten (Putz, Parkett) laufen in 1:100 zu einem Balken zusammen (Detailgrad sollte
   sie zusammenfassen); Achsen laufen in Ansicht/Grundriss durch das Gebäude; Raumstempel farbig statt schwarz im
   Druck ohne Schwarz-Weiss; Schatten im EG-Grundriss überdeckt Bemassung; eigene Stempel (`Room.stamp`) behalten in

@@ -308,11 +308,15 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             })
             .into()
         }
+        // Stempel verschieben: ab dem eigenen Anker, sonst ab der gezeichneten Lage `pt` ([140]: ohne Anker rückt
+        // der Plan den Stempel vom Pol weg — L-Raum, Hindernisse), fehlt sie, ab dem Pol.
         "roomStamp" => {
             let (dx, dy) = r.p("delta");
+            let drawn = Some(r.p("pt")).filter(|q| q.0.is_finite() && q.1.is_finite());
             patch("rooms", r.s("id"), &|rm| {
                 let base = match field(rm, "stampAnchor") {
                     Some(a) if !a.is_null() => xy(a),
+                    _ if drawn.is_some() => drawn.unwrap_or_default(),
                     _ => {
                         let ring: Vec<[f64; 2]> = arr(field(rm, "boundary")).iter().map(|p| xy(p).into()).collect();
                         let c = crate::room_area::label_point(&ring);
@@ -1278,6 +1282,24 @@ mod tests {
         assert_eq!(num_of(Some(&json!("\u{1}Infinity"))), f64::INFINITY);
         assert_eq!(num_of(Some(&Value::Null)), 0.0);
         assert!(num_of(None).is_nan());
+    }
+
+    /// [140] Stempel-Griff: ohne eigenen Anker ab der gezeichneten Lage `pt` (sonst ab dem Pol), mit Anker ab ihm.
+    #[test]
+    fn raumstempel_ab_gezeichneter_lage() {
+        let room = json!({"id": "r", "boundary": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}]});
+        let r = root(json!({"rooms": [room.clone()]}));
+        let anchor = |q: Value| {
+            let e = run(&Lookup::plain(&r), &rq(q)).unwrap().ops[0].to_json()["entity"]["stampAnchor"].clone();
+            (e["x"].as_f64().unwrap(), e["y"].as_f64().unwrap())
+        };
+        assert_eq!(anchor(json!({"op": "roomStamp", "id": "r", "delta": [1, 0]})), (3.0, 2.0), "ab dem Pol");
+        assert_eq!(anchor(json!({"op": "roomStamp", "id": "r", "delta": [1, 0], "pt": [0.5, 3]})), (1.5, 3.0), "ab der gezeichneten Lage");
+        let mut fixed = room;
+        fixed["stampAnchor"] = json!({"x": 1, "y": 1});
+        let r2 = root(json!({"rooms": [fixed]}));
+        let e = run(&Lookup::plain(&r2), &rq(json!({"op": "roomStamp", "id": "r", "delta": [1, 0], "pt": [0.5, 3]}))).unwrap().ops[0].to_json()["entity"]["stampAnchor"].clone();
+        assert_eq!((e["x"].as_f64(), e["y"].as_f64()), (Some(2.0), Some(1.0)), "eigener Anker gewinnt");
     }
 
     /// [T2] Bogenwand: Griff 2 setzt den Scheitel (Bulge), Endpunkt-Griffe behalten ihn; gerade

@@ -129,6 +129,12 @@ pub fn wall_layer_segments(p: &Project, w: &crate::model::Wall, out: &mut Vec<Se
 /// Modell-Teil eines Geschosses (alles ausser den 2D-Zeichnungen).
 /// `skip`: ids der Elemente, die nicht fangen (z. B. die gerade gezogenen, [122]).
 pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>, skip: &HashSet<String>) -> SnapPart {
+    collect_model_at(p, level, codes, skip, &std::collections::HashMap::new())
+}
+
+/// Wie [`collect_model`]; `stamps`: gezeichnete Lage der Raumstempel je Raum-id ([140], `domains::room_stamp_spots`)
+/// — der Stempel-Fangpunkt liegt dort statt am Pol.
+pub fn collect_model_at(p: &Project, level: &str, codes: &HashSet<String>, skip: &HashSet<String>, stamps: &std::collections::HashMap<String, Vec2>) -> SnapPart {
     let vis_el = |id: &str, floor: &str, code: &str| floor == level && codes.contains(code) && !skip.contains(id);
     let mut segs: Vec<Seg> = Vec::new();
     for w in &p.walls {
@@ -197,7 +203,7 @@ pub fn collect_model(p: &Project, level: &str, codes: &HashSet<String>, skip: &H
     circles.extend(stair_arcs);
     for r in p.rooms.as_deref().unwrap_or(&[]) {
         if vis_el(&r.id, &r.floor_id, &r.category_code) && r.boundary.len() >= 3 {
-            anchors.push(match &r.stamp_anchor {
+            anchors.push(match r.stamp_anchor.as_ref().or_else(|| stamps.get(&r.id)) {
                 Some(a) => (a.x, a.y),
                 None => {
                     let c = crate::room_area::label_point(&r.boundary.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>());
@@ -464,6 +470,8 @@ struct PartKey {
     codes: String,
     /// Ausgenommene ids (sortiert, `\n`-getrennt).
     skip: String,
+    /// Massstab der Plan-Ansicht (Bits; 0 = ohne): [140] Stempel-Fangpunkte an der gezeichneten Lage.
+    scale: u64,
 }
 
 /// Felder, aus denen der Modell-Teil sammelt (ändert sich eines, wird neu gesammelt).
@@ -545,8 +553,18 @@ impl SnapCache {
             level: level.to_owned(),
             codes: codes_key.clone(),
             skip: skip_key.clone(),
+            scale: 0,
         };
         let (mut mk, dk) = (key(&MODEL_FIELDS, doc.revs()), key(&DRAWING_FIELDS, doc.revs()));
+        // [140] Raumstempel ohne eigenen Anker: Fangpunkt an der im Plan gezeichneten Lage (weicht Hindernissen aus)
+        // — sie hängt an allem, was im Raum liegt: neu gesammelt bei jedem neuen Stand des Dokuments.
+        let stamp_scale = scale.filter(|s| s.is_finite() && *s > 0.0).filter(|_| {
+            doc.project().is_ok_and(|p| p.rooms.iter().flatten().any(|r| r.floor_id == level && r.stamp_anchor.is_none() && set.contains(&r.category_code)))
+        });
+        if let Some(sc) = stamp_scale {
+            mk.revs = vec![u64::MAX - 1, doc.revs().max_except(&[])];
+            mk.scale = sc.to_bits();
+        }
         // Blatt-Ebene eines Layouts ([93]): statt des (leeren) Modells die Inhalte der Viewports, auf das
         // Blatt abgebildet und geklippt (`sheet_viewports.rs`). Sie hängen am ganzen Projekt: neu
         // gesammelt bei jedem neuen Stand des Dokuments.
@@ -558,7 +576,10 @@ impl SnapCache {
             doc.project()
                 .map(|p| match crate::sheet_viewports::layout_of_level(p, level).filter(|_| sheet) {
                     Some(l) => SnapPart { segs: SnapSet::new(crate::sheet_viewports::viewport_snap_segments(p, l)), ..SnapPart::default() },
-                    None => collect_model(p, level, &set, &skip_set),
+                    None => {
+                        let stamps = stamp_scale.map(|sc| crate::plan::domains::room_stamp_spots(p, level, &set, sc)).unwrap_or_default();
+                        collect_model_at(p, level, &set, &skip_set, &stamps)
+                    }
                 })
                 .unwrap_or_default()
         });
@@ -758,6 +779,34 @@ mod tests {
         let mut d = doc(v);
         let off = cache.hold_view(2, &mut d, "eg", &codes(), &[], Some(100.0));
         assert!(!cache.get(off).unwrap().model.segs.segs.is_empty(), "Regel aus: fängt");
+    }
+
+    /// [140] Fangpunkt des Raumstempels an der im Plan gezeichneten Lage: ein Text am Pol schiebt den Stempel weg,
+    /// der Fang (Plan-Ansicht mit Massstab) folgt; ohne Ansicht am Pol.
+    #[test]
+    fn stempel_fangpunkt_an_gezeichneter_lage() {
+        let mut v: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        let rooms = v["rooms"].as_array_mut().unwrap();
+        let k = rooms.iter().position(|r| r["floorId"] == "eg").unwrap();
+        let room = &mut rooms[k];
+        room["boundary"] = json!([{"x": 50, "y": 50}, {"x": 57, "y": 50}, {"x": 57, "y": 55}, {"x": 50, "y": 55}]);
+        room.as_object_mut().unwrap().remove("stampAnchor");
+        room.as_object_mut().unwrap().remove("stamp");
+        let code = room["categoryCode"].as_str().unwrap().to_string();
+        v["drawings2d"].as_array_mut().unwrap().push(json!({"id": "k", "type": "drawing2d", "levelId": "eg", "categoryCode": "80",
+            "geom": {"shape": "text", "at": {"x": 52.6, "y": 52.3}, "text": "Hinweis", "height": 0.4, "angle": 0.0}}));
+        let mut d = doc(v);
+        let codes: Vec<String> = vec![code, "80".into()];
+        let mut cache = SnapCache::default();
+        let pole = (53.5, 52.5);
+        let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1) < 1e-6;
+        let free = cache.hold_view(1, &mut d, "eg", &codes, &[], None);
+        assert!(cache.get(free).unwrap().model.anchors.iter().any(|a| near(*a, pole)), "ohne Ansicht am Pol");
+        let plan = cache.hold_view(1, &mut d, "eg", &codes, &[], Some(100.0));
+        let anchors = &cache.get(plan).unwrap().model.anchors;
+        assert!(!anchors.iter().any(|a| near(*a, pole)), "weggerückt: {anchors:?}");
+        let spots = crate::plan::domains::room_stamp_spots(d.project().unwrap(), "eg", &codes.iter().cloned().collect(), 100.0);
+        assert!(spots.values().any(|q| anchors.iter().any(|a| near(*a, (q.x, q.y)))), "wie im Plan");
     }
 
     #[test]

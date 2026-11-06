@@ -704,13 +704,17 @@ pub(super) fn stamp_size_m(doc: &RichTextDoc, extra: &[StampLine], pt: f64, scal
 /// Zusatzzeilen wieder dazu), zuletzt wird der Name gekürzt. Ergebnis: Zusatzzeilen,
 /// Schriftgrösse (pt), Ersatz für den Namen (`Some`: ohne Auszeichnungen bzw. gekürzt, „Trep.") und die
 /// Lage (`None`: passt nirgends, der Aufrufer behält seinen Anker).
-fn fit_room_stamp(doc: &RichTextDoc, extra: Vec<StampLine>, pt: f64, scale: f64, place: &dyn Fn(f64, f64) -> Option<Vec2>) -> (Vec<StampLine>, f64, Option<RichTextDoc>, Option<Vec2>) {
+///
+/// `place(breite, höhe, frei)`: mit `frei` nur Lagen ohne Überdeckung anderen Planinhalts ([140] Teil 6).
+/// Zuerst sucht die ganze Reihenfolge (ohne Kürzen) eine freie Lage — weniger Zeilen und kleinere Schrift
+/// gehen vor Überdeckung; erst wenn keine Stufe frei liegt, dieselbe Reihenfolge mit Überdeckung.
+fn fit_room_stamp(doc: &RichTextDoc, extra: Vec<StampLine>, pt: f64, scale: f64, place: &dyn Fn(f64, f64, bool) -> Option<Vec2>) -> (Vec<StampLine>, f64, Option<RichTextDoc>, Option<Vec2>) {
     if !(scale > 0.0) || !scale.is_finite() {
         return (extra, pt, None, None);
     }
-    let at = |doc: &RichTextDoc, extra: &[StampLine], pt: f64| {
+    let at = |doc: &RichTextDoc, extra: &[StampLine], pt: f64, free: bool| {
         let (w, h) = stamp_size_m(doc, extra, pt, scale);
-        place(w, h)
+        place(w, h, free)
     };
     let text = crate::text_layout::plain_text(doc);
     // Name mit eigenen Schriftgrössen (Stempel: Name 12 pt fett) schrumpft nicht mit `pt`: dann ohne
@@ -720,14 +724,16 @@ fn fit_room_stamp(doc: &RichTextDoc, extra: Vec<StampLine>, pt: f64, scale: f64,
     if pt > ROOM_STAMP_MIN_PT {
         steps.extend([(None, ROOM_STAMP_MIN_PT), (Some(&plain), ROOM_STAMP_MIN_PT)]);
     }
-    for (variant, pt) in steps {
-        let mut e = extra.clone();
-        loop {
-            if let Some(q) = at(variant.unwrap_or(doc), &e, pt) {
-                return (e, pt, variant.cloned(), Some(q));
-            }
-            if e.pop().is_none() {
-                break;
+    for free in [true, false] {
+        for &(variant, pt) in &steps {
+            let mut e = extra.clone();
+            loop {
+                if let Some(q) = at(variant.unwrap_or(doc), &e, pt, free) {
+                    return (e, pt, variant.cloned(), Some(q));
+                }
+                if e.pop().is_none() {
+                    break;
+                }
             }
         }
     }
@@ -735,7 +741,7 @@ fn fit_room_stamp(doc: &RichTextDoc, extra: Vec<StampLine>, pt: f64, scale: f64,
     let longest = text.split('\n').map(|l| l.chars().count()).max().unwrap_or(0);
     for n in (2..longest).rev() {
         let d = doc_from_text(&abbreviate(&text, n));
-        if let Some(q) = at(&d, &[], pt) {
+        if let Some(q) = at(&d, &[], pt, false) {
             return (Vec::new(), pt, Some(d), Some(q));
         }
     }
@@ -813,7 +819,8 @@ const STAMP_CLEAR_MM: f64 = 2.0;
 /// Luft (1.3 × Breite/Höhe), dann knapp im Raum; unter diesen die freieste Lage (Abstand zu `obst` bis
 /// `clear`, Gleichstand → näher am Pol). Liegt jede Lage auf einem Hindernis, die mit der geringsten
 /// Überdeckung (`Obstacles::overlap`, Gleichstand → mit Luft, dann näher am Pol); ohne Hindernisse wie bisher.
-fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place::Obstacles, clear: f64, w: f64, h: f64) -> Option<Vec2> {
+/// `free`: nur eine freie Lage (Abstand > 0), sonst `None`.
+fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place::Obstacles, clear: f64, w: f64, h: f64, free: bool) -> Option<Vec2> {
     let inside = |q: &Vec2, k: f64| crate::room_area::rect_in_ring(ring, q.x, q.y, k * w / 2.0, k * h / 2.0);
     if !obst.is_empty() {
         for k in [1.3, 1.0] {
@@ -827,6 +834,9 @@ fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place
             if let Some((_, q)) = best {
                 return Some(q);
             }
+        }
+        if free {
+            return None;
         }
         let mut best: Option<(f64, Vec2)> = None;
         for k in [1.3, 1.0] {
@@ -889,12 +899,32 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         // [140] Teil 6: ohne eigenen Anker weicht der Stempel anderem Planinhalt im Raum aus (`place_stamp`).
         let obst = if room.stamp_anchor.is_some() { Default::default() } else { obstacles.within(ring_bounds(&pts)) };
         let clear = STAMP_CLEAR_MM * c.a.scale / 1000.0;
-        let place = |w: f64, h: f64| place_stamp(&pts, &candidates, &obst, clear, w, h);
+        let place = |w: f64, h: f64, free: bool| place_stamp(&pts, &candidates, &obst, clear, w, h, free);
         let (extra_lines, base_pt, name, placed) = fit_room_stamp(&doc, extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, &place);
         let at = placed.unwrap_or(at);
         let doc = name.unwrap_or(doc);
         out.push(Primitive::Text { at, doc, extra_lines, base_pt, color: text_color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
     }
+}
+
+/// [140] Gezeichnete Lage der Raumstempel ohne eigenen Anker (Geschoss `floor`, sichtbare Ebenen `show`,
+/// Massstab 1:`scale`, Detail „mittel"): dieselbe Einpassung wie im Grundriss (`rooms`, weicht Hindernissen aus).
+/// Für den Fang-Punkt des Stempels (`snap_model`). Leer, wenn alle Räume des Geschosses einen Anker haben.
+pub fn room_stamp_spots(p: &Project, floor: &str, show: &HashSet<String>, scale: f64) -> HashMap<String, Vec2> {
+    let mut out = HashMap::new();
+    let free = |r: &&Room| r.floor_id == floor && r.stamp_anchor.is_none() && r.boundary.len() >= 3 && show.contains(&r.category_code);
+    if !(scale.is_finite() && scale > 0.0) || !p.rooms.as_deref().unwrap_or(&[]).iter().any(|r| free(&r)) {
+        return out;
+    }
+    let (detail, auto_coarse) = effective_detail(Detail::Mittel, scale);
+    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None };
+    let Ok(d) = plan_domains(p, &a) else { return out };
+    for q in &d.rooms {
+        if let Primitive::Text { at, room_id: Some(id), .. } = q {
+            out.insert(id.clone(), *at);
+        }
+    }
+    out
 }
 
 // ── Stützen ─────────────────────────────────────────────────────────────────
@@ -1396,7 +1426,7 @@ mod tests {
     fn raumstempel_passt_in_engen_raum() {
         let extra = || vec![StampLine { text: "4.6 m²".into(), align: Align::Center }, StampLine { text: "NNF · Nebennutzfläche".into(), align: Align::Center }];
         let name = doc_from_text("E.04 Bad");
-        let room = |w: f64, h: f64| move |sw: f64, sh: f64| (sw <= w && sh <= h).then_some(Vec2 { x: 0.0, y: 0.0 });
+        let room = |w: f64, h: f64| move |sw: f64, sh: f64, _free: bool| (sw <= w && sh <= h).then_some(Vec2 { x: 0.0, y: 0.0 });
         let (e, pt, d, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(6.0, 4.0));
         assert_eq!((e.len(), pt, d.is_none()), (2, ROOM_STAMP_PT, true));
         let (e, pt, _, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(1.8, 2.4));
@@ -1422,6 +1452,19 @@ mod tests {
         let (ww, _) = stamp_size_m(&doc_from_text("WMWM"), &[], ROOM_STAMP_PT, 100.0);
         assert!(wi < 0.6 * ww, "{wi} {ww}");
         assert_eq!(abbreviate("Treppenhaus", 5), "Trep.");
+        // [140] Teil 6: Frei liegt nur ein niedriger Stempel (neben der Treppe), überdeckt passt alles an den Pol:
+        // erst Zeilen weglassen, dann Schrift verkleinern — bevor Überdeckung in Kauf genommen wird.
+        let pole = Vec2 { x: 0.0, y: 0.0 };
+        let side = Vec2 { x: 3.0, y: 0.0 };
+        let (_, h_name) = stamp_size_m(&name, &[], ROOM_STAMP_PT, 100.0);
+        let (_, h_one) = stamp_size_m(&name, &extra()[..1], ROOM_STAMP_PT, 100.0);
+        let narrow = move |h_free: f64| move |_w: f64, h: f64, free: bool| if free { (h <= h_free).then_some(side) } else { Some(pole) };
+        let (e, pt, _, at) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_one + 1e-9));
+        assert_eq!((e.len(), pt, at), (1, ROOM_STAMP_PT, Some(side)), "ohne Nutzungszeile frei");
+        let (e, pt, _, at) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_name - 1e-6));
+        assert!(pt < ROOM_STAMP_PT && at == Some(side), "kleinere Schrift frei: {} {:?} {}", pt, at, e.len());
+        let (e, pt, _, at) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &narrow(0.0));
+        assert_eq!((e.len(), pt, at), (2, ROOM_STAMP_PT, Some(pole)), "nirgends frei: ganzer Stempel mit Überdeckung");
         assert_eq!(abbreviate("Bad", 5), "Bad");
     }
 

@@ -24,7 +24,9 @@ export type GripRequest =
   | { op: "moveEdge"; drawingId: string | null; wallId: string | null; a: number; b: number; delta: P }
   | { op: "resize"; kind: string; id: string; w: number; h: number; fx: number; fy: number }
   | { op: "ceilingGrip" | "roomGrip" | "roofGrip"; id: string; index: number; pt: P }
-  | { op: "ceilingBy" | "roofBy" | "stairBy" | "roomBy" | "roomStamp"; id: string; delta: P }
+  | { op: "ceilingBy" | "roofBy" | "stairBy" | "roomBy"; id: string; delta: P }
+  // [140] Stempel: `pt` = gezeichnete Lage (Basis, solange der Raum keinen eigenen Anker hat; fehlt = Pol).
+  | { op: "roomStamp"; id: string; delta: P; pt?: P }
   | { op: "ceilingEdge" | "roomEdge"; id: string; a: number; b: number; delta: P }
   | { op: "excavationGrip"; id: string; index: number; pt: P }
   | { op: "excavationEdge"; id: string; a: number; b: number; delta: P }

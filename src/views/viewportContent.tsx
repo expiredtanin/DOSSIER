@@ -199,7 +199,7 @@ export const Content = memo(function Content({
   /** Die Auswahl ([130]). */
   selection: Selection;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
-  onStampMove: (roomId: string, delta: Vec2) => void;
+  onStampMove: (roomId: string, delta: Vec2, from?: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
   onEnterGroup?: (hit: GroupableHit) => boolean;
@@ -741,7 +741,7 @@ function LevelPlanView({
   /** Die Auswahl ([130]). */
   selection: Selection;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
-  onStampMove: (roomId: string, delta: Vec2) => void;
+  onStampMove: (roomId: string, delta: Vec2, from?: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
   onEnterGroup?: (hit: GroupableHit) => boolean;
@@ -979,7 +979,7 @@ function SectionPlanView({
   /** Die Auswahl ([130]). */
   selection: Selection;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
-  onStampMove: (roomId: string, delta: Vec2) => void;
+  onStampMove: (roomId: string, delta: Vec2, from?: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
   onEnterGroup?: (hit: GroupableHit) => boolean;

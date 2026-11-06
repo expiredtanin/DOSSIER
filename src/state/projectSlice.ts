@@ -452,7 +452,7 @@ export interface ProjectSlice {
     patch: Partial<import("../model/types").Room>,
   ) => void;
   /** Verschiebt NUR den Stempel-Anker eines Raums um `delta` (Kontur bleibt). */
-  moveRoomStamp: (roomId: string, delta: Vec2) => void;
+  moveRoomStamp: (roomId: string, delta: Vec2, from?: Vec2) => void;
   /** Setzt den Stempel-Anker eines Raums absolut. */
   setRoomStampAnchor: (roomId: string, anchor: Vec2) => void;
   /** Setzt den Rich-Text des Raum-Stempels. */
@@ -1297,7 +1297,8 @@ export function createProjectSlice(
     updateRoom: (id, patch) =>
       applyChange((p) => mapRoom(p, id, (r) => ({ ...r, ...patch }))),
 
-    moveRoomStamp: (roomId, delta) => applyGrip({ op: "roomStamp", id: roomId, delta: gripPt(delta) }),
+    moveRoomStamp: (roomId, delta, from) =>
+      applyGrip({ op: "roomStamp", id: roomId, delta: gripPt(delta), ...(from ? { pt: gripPt(from) } : {}) }),
 
     setRoomStampAnchor: (roomId, anchor) =>
       applyChange((p) => mapRoom(p, roomId, (r) => ({ ...r, stampAnchor: anchor }))),

@@ -419,7 +419,8 @@ export interface PlanViewProps {
    */
   roomStamp?: { roomId: string; anchor: Vec2 } | null;
   /** Der Stempel-Griff wurde verschoben (inkrementelles Modell-Delta). */
-  onStampMove?: (roomId: string, delta: Vec2) => void;
+  /** `from`: gezeichnete Lage des Stempels (der Kern verschiebt ab ihr, solange der Raum keinen eigenen Anker hat). */
+  onStampMove?: (roomId: string, delta: Vec2, from?: Vec2) => void;
   /** Doppelklick auf einen Raum-Stempel: Editor öffnen. */
   onStampEdit?: (roomId: string) => void;
   /** Doppelklick auf ein Text-2D-Element: Inhalt bearbeiten (Editor öffnen). */
@@ -1260,7 +1261,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // inkrementelle Delta gebildet wird (verschiebt NUR den Raum-Stempel-Anker).
   // `offset` ([140]): Abstand der gezeichneten Lage vom Anker (Pol), einmal mit dem ersten Delta
   // übergeben — der Kern setzt den Anker auf Pol + Delta, der Stempel springt so nicht zum Pol.
-  const stampDrag = useRef<{ pointerId: number; roomId: string; last: Vec2; offset: Vec2 } | null>(
+  const stampDrag = useRef<{ pointerId: number; roomId: string; last: Vec2; from: Vec2 | null } | null>(
     null,
   );
   // Letzter Links-Klick (Zeit + Bildschirmposition) für die manuelle Doppelklick-
@@ -1800,7 +1801,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           pointerId: e.pointerId,
           roomId: rid,
           last: rawModelAt(e.clientX, e.clientY),
-          offset: stampAt && roomStamp ? { x: stampAt.x - roomStamp.anchor.x, y: stampAt.y - roomStamp.anchor.y } : { x: 0, y: 0 },
+          // [140] Der Kern verschiebt ab der gezeichneten Lage (ohne eigenen Anker rückt der Plan den Stempel vom Pol weg).
+          from: stampAt,
         };
         return;
       }
@@ -2019,8 +2021,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (sd && sd.pointerId === p.pointerId) {
       const delta = { x: raw.x - sd.last.x, y: raw.y - sd.last.y };
       if ((delta.x !== 0 || delta.y !== 0) && onStampMove) {
-        onStampMove(sd.roomId, { x: delta.x + sd.offset.x, y: delta.y + sd.offset.y });
-        sd.offset = { x: 0, y: 0 };
+        onStampMove(sd.roomId, delta, sd.from ?? undefined);
+        sd.from = null;
         sd.last = raw;
       }
       return;
