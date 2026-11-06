@@ -1984,6 +1984,11 @@ pub struct SunStudy {
     /// Zeitpunkt als ISO-8601-Text in UTC, z. B. "2026-12-21T11:00:00Z".
     pub when: String,
     pub show: bool,
+    /// [142] Höhe der Bäume (2D-Kreise der Ebene „Bäume", Code 13) in m über Terrain für den
+    /// Schattenwurf; fehlt der Wert, gilt 8 m.
+    #[serde(rename = "treeHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tree_height: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

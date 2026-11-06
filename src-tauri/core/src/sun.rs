@@ -151,6 +151,189 @@ pub fn shadow_union(prisms: &[Prism], clouds: &[Vec<[f64; 3]>], sun: SunPosition
     polygon_bool::union(&parts)
 }
 
+// ── Schatten auf dem Gelände ([142]) ─────────────────────────────────────────
+
+/// Schattenempfangendes Gelände: TIN mit Raster-Index; Höhen im Projekt-Bezug (TIN-Höhe − `datum`).
+/// Ausserhalb des Netzes gilt die zuletzt getroffene Geländehöhe (bzw. ±0.00, wenn der Strahl
+/// ausserhalb beginnt).
+pub struct Ground<'a> {
+    idx: crate::terrain::TinIndex<'a>,
+    datum: f64,
+    z_min: f64,
+}
+
+/// Schrittweite (m, waagrecht) beim Abtasten des Sonnenstrahls über dem Gelände.
+const RAY_STEP: f64 = 0.25;
+/// Abstand der Stützpunkte auf den Kanten der Schattenwerfer (m).
+const EDGE_SAMPLE: f64 = 0.5;
+/// Kleinere Löcher/Teile (m²) im vereinigten Geländeschatten sind Abtast-Splitter und fallen weg.
+const SLIVER_AREA: f64 = 0.05;
+
+impl<'a> Ground<'a> {
+    pub fn new(tin: &'a crate::terrain::Tin, datum: f64) -> Ground<'a> {
+        let z_min = tin.z_range().0 - datum;
+        Ground { idx: crate::terrain::TinIndex::new(tin), datum, z_min: if z_min.is_finite() { z_min } else { GROUND_Z } }
+    }
+
+    /// Geländehöhe am Punkt; `None` ausserhalb des Netzes.
+    pub fn z(&self, x: f64, y: f64) -> Option<f64> {
+        self.idx.z_at(x, y).map(|z| z - self.datum)
+    }
+
+    /// Erster Schnitt des Sonnenstrahls ab `p` (von der Sonne weg, `k` = waagrechte Verschiebung je
+    /// Meter Abstieg) mit dem Gelände, als Grundrisspunkt. Punkte auf/unter dem Gelände bleiben, wo
+    /// sie sind. Abtasten in `RAY_STEP`, Schnitt linear zwischen den Stützstellen.
+    pub fn project(&self, p: [f64; 3], k: [f64; 2]) -> [f64; 2] {
+        let kl = hypot2(k[0], k[1]);
+        let g0 = self.z(p[0], p[1]).unwrap_or(GROUND_Z);
+        if !(p[2] > g0) || !(kl > 1e-12) || !kl.is_finite() {
+            return [p[0], p[1]];
+        }
+        let dir = [k[0] / kl, k[1] / kl];
+        let at = |s: f64| [p[0] + dir[0] * s, p[1] + dir[1] * s];
+        let floor = self.z_min.min(g0) - 1.0;
+        // Unsinnig hohe Punkte: Schnitt mit der Ebene der Ausgangshöhe statt tausender Schritte.
+        if p[2] - floor > 1_000.0 {
+            return at((p[2] - g0) * kl);
+        }
+        let (mut s, mut prev, mut last_g) = (0.0, p[2] - g0, g0);
+        loop {
+            let s1 = s + RAY_STEP;
+            let zr = p[2] - s1 / kl;
+            let q = at(s1);
+            let g = self.z(q[0], q[1]).unwrap_or(last_g);
+            last_g = g;
+            let d = zr - g;
+            if d <= 0.0 {
+                return at(s + RAY_STEP * prev / (prev - d));
+            }
+            if zr < floor {
+                return at((p[2] - g) * kl);
+            }
+            prev = d;
+            s = s1;
+        }
+    }
+}
+
+/// Stützpunkte auf dem Rand eines Rings: je Kante der Startpunkt und Zwischenpunkte im Abstand
+/// ≤ `EDGE_SAMPLE`; dazu je Kante der Index ihres Startpunkts.
+fn sample_ring(r: &[[f64; 2]]) -> (Vec<[f64; 2]>, Vec<usize>) {
+    let (mut pts, mut starts) = (Vec::new(), Vec::new());
+    for i in 0..r.len() {
+        let (a, b) = (r[i], r[(i + 1) % r.len()]);
+        let n = (hypot2(b[0] - a[0], b[1] - a[1]) / EDGE_SAMPLE).ceil().clamp(1.0, 10_000.0) as usize;
+        starts.push(pts.len());
+        for j in 0..n {
+            let t = j as f64 / n as f64;
+            pts.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+        }
+    }
+    (pts, starts)
+}
+
+/// Geländeschatten eines Prismas als Teilflächen: Unter- und Oberseite (auf das Gelände
+/// projiziert) und je von der Sonne abgewandter Seitenkante die Fläche zwischen projizierter Unter-
+/// und Oberkante. Schattenwerfer ist nur der Teil über dem örtlichen Gelände.
+fn prism_parts_on(footprint: &[[f64; 2]], z_bottom: f64, z_top: f64, k: [f64; 2], g: &Ground) -> Vec<Polygon> {
+    let mut fp: Ring = footprint.iter().copied().filter(|q| q[0].is_finite() && q[1].is_finite()).collect();
+    if !(z_top > z_bottom) || fp.len() < 3 || !z_top.is_finite() {
+        return vec![];
+    }
+    if crate::flat_read::signed_area(&fp) < 0.0 {
+        fp.reverse();
+    }
+    let (pts, starts) = sample_ring(&fp);
+    let mut bot = Vec::with_capacity(pts.len());
+    let mut top = Vec::with_capacity(pts.len());
+    let mut any = false;
+    for q in &pts {
+        let zb = z_bottom.max(g.z(q[0], q[1]).unwrap_or(GROUND_Z));
+        if zb >= z_top {
+            bot.push(*q);
+            top.push(*q);
+            continue;
+        }
+        any = true;
+        bot.push(g.project([q[0], q[1], zb], k));
+        top.push(g.project([q[0], q[1], z_top], k));
+    }
+    if !any {
+        return vec![];
+    }
+    let mut out: Vec<Polygon> = vec![vec![bot.clone()], vec![top.clone()]];
+    let n = pts.len();
+    for (i, &s) in starts.iter().enumerate() {
+        let (a, b) = (fp[i], fp[(i + 1) % fp.len()]);
+        // Aussennormale (b − a, im Uhrzeigersinn gedreht) zeigt von der Sonne weg → Kante begrenzt den Schatten.
+        if (b[1] - a[1]) * k[0] - (b[0] - a[0]) * k[1] <= 0.0 {
+            continue;
+        }
+        let e = starts.get(i + 1).copied().unwrap_or(n);
+        let idx: Vec<usize> = (s..=e).map(|j| j % n).collect();
+        let mut ring: Ring = idx.iter().map(|&j| bot[j]).collect();
+        ring.extend(idx.iter().rev().map(|&j| top[j]));
+        out.push(vec![ring]);
+    }
+    out
+}
+
+/// Geländeschatten einer Punktwolke: Hülle der projizierten Punkte über dem Gelände.
+fn cloud_part_on(points: &[[f64; 3]], k: [f64; 2], g: &Ground) -> Ring {
+    let moved: Vec<[f64; 2]> = points
+        .iter()
+        .filter(|p| p.iter().all(|v| v.is_finite()) && p[2] > g.z(p[0], p[1]).unwrap_or(GROUND_Z) + 1e-9)
+        .map(|p| g.project(*p, k))
+        .collect();
+    hull(&moved)
+}
+
+/// Splitter weg: Teile und Löcher unter `SLIVER_AREA`.
+fn without_slivers(polys: Vec<Polygon>) -> Vec<Polygon> {
+    use crate::flat_read::signed_area;
+    polys
+        .into_iter()
+        .filter(|p| p.first().is_some_and(|o| signed_area(o).abs() >= SLIVER_AREA))
+        .map(|p| p.into_iter().enumerate().filter(|(i, r)| *i == 0 || signed_area(r).abs() >= SLIVER_AREA).map(|(_, r)| r).collect())
+        .collect()
+}
+
+/// Wie [`shadow_union`], aber auf das Gelände `ground` projiziert (ohne Gelände: Ebene ±0.00).
+pub fn shadow_union_on(prisms: &[Prism], clouds: &[Vec<[f64; 3]>], sun: SunPosition, ground: Option<&Ground>) -> Vec<Polygon> {
+    let Some(g) = ground else { return shadow_union(prisms, clouds, sun) };
+    let Some(k) = shadow_shift(sun) else { return vec![] };
+    let mut parts: Vec<Polygon> = prisms.iter().flat_map(|p| prism_parts_on(&p.footprint, p.z_bottom, p.z_top, k, g)).collect();
+    parts.extend(clouds.iter().map(|c| cloud_part_on(c, k, g)).filter(|r| r.len() >= 3).map(|r| vec![r]));
+    if parts.is_empty() {
+        return vec![];
+    }
+    without_slivers(polygon_bool::union(&parts))
+}
+
+/// Baum als Schattenwerfer ([142]): Stamm (Prisma, Ø 0.3 m) und Krone (Ellipsoid aus drei Ringen und
+/// den Scheitelpunkten), Kronenradius `r`, Gesamthöhe `h` ab `base`.
+pub fn tree_caster(center: [f64; 2], r: f64, h: f64, base: f64) -> Option<(Prism, Vec<[f64; 3]>)> {
+    if !(r > 0.0 && h > 0.0 && r.is_finite() && h.is_finite()) || !center.iter().chain([&base]).all(|v| v.is_finite()) {
+        return None;
+    }
+    let a = r.min(0.35 * h);
+    let zc = base + h - a;
+    let ring = |rad: f64, n: usize| -> Vec<[f64; 2]> {
+        (0..n)
+            .map(|i| {
+                let t = i as f64 / n as f64 * std::f64::consts::TAU;
+                [center[0] + rad * crate::jsnum::cos(t), center[1] + rad * crate::jsnum::sin(t)]
+            })
+            .collect()
+    };
+    let mut crown: Vec<[f64; 3]> = vec![[center[0], center[1], zc + a], [center[0], center[1], zc - a]];
+    for (f, dz) in [(1.0, 0.0), (0.75, 0.66), (0.75, -0.66)] {
+        crown.extend(ring(r * f, 24).into_iter().map(|q| [q[0], q[1], zc + dz * a]));
+    }
+    let trunk = Prism { footprint: ring(0.15, 8), z_bottom: base, z_top: zc - a * 0.5 };
+    Some((trunk, crown))
+}
+
 /// Zerlegt ein Polygon mit Löchern in lochfreie Teile gleicher Gesamtfläche. Jedes Loch wird
 /// von einer senkrechten Schnittlinie durch seinen Mittelpunkt geteilt; in den Streifen dazwischen
 /// berührt jeder Lochrest den Streifenrand und ist damit kein Loch mehr.
@@ -350,6 +533,12 @@ use crate::model::Project;
 /// Wände und Körper als Prismen, Dächer als Punktwolke (Traufe auf Traufhöhe, Traufe/First/Grate
 /// auf Firsthöhe).
 pub fn shadow_polygons_project(p: &Project, sun: SunPosition) -> Vec<Polygon> {
+    if shadow_shift(sun).is_none() {
+        return vec![];
+    }
+    // [142] Mit Geländenetz fällt der Schatten aufs Gelände (inkl. Baugruben), sonst auf ±0.00.
+    let site = shadow_terrain(p);
+    let ground = site.as_ref().map(|st| Ground::new(st.current(), st.datum));
     let mut prisms: Vec<Prism> = Vec::new();
     for w in &p.walls {
         let (z_bottom, z_top) = p.wall_vertical_extent(w);
@@ -403,7 +592,183 @@ pub fn shadow_polygons_project(p: &Project, sun: SunPosition) -> Vec<Polygon> {
         for l in &geo.hips {
             pts.push([l[1][0], l[1][1], top]);
         }
+        // Auf dem Gelände ist der Schatten der Traufkante gekrümmt: Zwischenpunkte entlang der Traufe.
+        if ground.is_some() {
+            let (s, _) = sample_ring(&geo.eaves);
+            pts.extend(s.iter().flat_map(|e| [[e[0], e[1], eaves_z], [e[0], e[1], top]]));
+        }
         clouds.push(pts);
     }
-    shadow_union(&prisms, &clouds, sun)
+    // [142] Stützen (Prismen) und Bäume (2D-Kreise der Ebene „Bäume", Code 13): Stamm + Krone.
+    for c in p.columns.as_deref().unwrap_or(&[]) {
+        let (z_bottom, z_top) = p.column_vertical_extent(c);
+        let footprint = crate::model3d::column_footprint(c).iter().map(|v| [v.x, v.y]).collect();
+        prisms.push(Prism { footprint, z_bottom, z_top });
+    }
+    let tree_h = p.sun_study.as_ref().and_then(|s| s.tree_height).filter(|h| *h > 0.0).unwrap_or(DEFAULT_TREE_HEIGHT);
+    for d in &p.drawings2d {
+        let crate::model::Drawing2DGeom::Circle { center, r } = &d.geom else { continue };
+        if !is_tree_category(p, &d.category_code) {
+            continue;
+        }
+        let base = ground.as_ref().and_then(|g| g.z(center.x, center.y)).unwrap_or(GROUND_Z);
+        if let Some((trunk, crown)) = tree_caster([center.x, center.y], *r, tree_h, base) {
+            prisms.push(trunk);
+            clouds.push(crown);
+        }
+    }
+    shadow_union_on(&prisms, &clouds, sun, ground.as_ref())
+}
+
+/// Baumhöhe ohne `sunStudy.treeHeight` (m).
+pub const DEFAULT_TREE_HEIGHT: f64 = 8.0;
+
+/// Ebene der Bäume: Code 13 (SIA-Ebenenliste) oder ein Ebenenname mit „Baum"/„Tree".
+fn is_tree_category(p: &Project, code: &str) -> bool {
+    code == "13" || p.layer_category(code).is_some_and(|c| {
+        let n = c.name.to_lowercase();
+        n.contains("baum") || n.contains("bäume") || n.contains("tree")
+    })
+}
+
+/// Gelände für den Schattenwurf: erstes sichtbares Geländenetz des Kontexts (inkl. Baugruben).
+fn shadow_terrain(p: &Project) -> Option<std::rc::Rc<crate::excavation::SiteTerrain>> {
+    let t = crate::excavation::terrains(p).into_iter().find(|t| t.hidden != Some(true))?;
+    let st = crate::excavation::site_terrain(p, t);
+    (!st.current().tris.is_empty()).then_some(st)
+}
+
+#[cfg(test)]
+mod terrain_tests {
+    //! [142] Schatten auf dem Gelände, Bäume und Stützen.
+    use super::*;
+    use crate::flat_read::signed_area;
+    use crate::terrain::Tin;
+
+    /// Rasternetz über [x0, x0 + (n−1)·step]² mit Höhe `f(x, y)`.
+    fn grid_tin(n: usize, step: f64, x0: f64, f: impl Fn(f64, f64) -> f64) -> Tin {
+        let (mut pos, mut idx) = (vec![], vec![]);
+        for j in 0..n {
+            for i in 0..n {
+                let (x, y) = (x0 + i as f64 * step, x0 + j as f64 * step);
+                pos.extend([x, y, f(x, y)]);
+            }
+        }
+        for j in 0..n - 1 {
+            for i in 0..n - 1 {
+                let a = (j * n + i) as f64;
+                let m = n as f64;
+                idx.extend([a, a + 1.0, a + m + 1.0, a, a + m + 1.0, a + m]);
+            }
+        }
+        Tin::from_flat(&pos, &idx)
+    }
+
+    /// Ebenes Gelände z = z0 + s·y über [−30, 30]².
+    fn plane_tin(z0: f64, s: f64) -> Tin {
+        grid_tin(61, 1.0, -30.0, |_, y| z0 + s * y)
+    }
+
+    const SQ: [[f64; 2]; 4] = [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]];
+
+    fn bbox(polys: &[Polygon]) -> [f64; 4] {
+        polys.iter().flat_map(|p| p[0].iter()).fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
+    }
+
+    /// Körper am Hang: hangaufwärts kürzer, hangabwärts länger als auf der Ebene — wie analytisch.
+    #[test]
+    fn koerper_am_hang() {
+        let s = 0.2; // Gelände steigt nach Norden um 20 %
+        let tin = plane_tin(0.0, s);
+        let g = Ground::new(&tin, 0.0);
+        let (h, el) = (4.0, 40.0);
+        let kl = 1.0 / (el * RAD).tan();
+        let boxp = || Prism { footprint: SQ.to_vec(), z_bottom: -5.0, z_top: h };
+        // Sonne im Süden → Schatten hangaufwärts (Nord) ab der Nordkante (y = 2, Gelände 0.4).
+        let up = shadow_union_on(&[boxp()], &[], SunPosition { azimuth: 180.0, elevation: el }, Some(&g));
+        assert_eq!(up.len(), 1);
+        let d_up = (h - 2.0 * s) * kl / (1.0 + s * kl);
+        assert!((bbox(&up)[3] - (2.0 + d_up)).abs() < 1e-6, "hangaufwärts {} statt {}", bbox(&up)[3], 2.0 + d_up);
+        // Sonne im Norden → Schatten hangabwärts (Süd) ab der Südkante (y = 0, Gelände 0).
+        let down = shadow_union_on(&[boxp()], &[], SunPosition { azimuth: 0.0, elevation: el }, Some(&g));
+        let d_down = h * kl / (1.0 - s * kl);
+        assert!((bbox(&down)[1] + d_down).abs() < 1e-6, "hangabwärts {} statt {}", bbox(&down)[1], -d_down);
+        assert!(d_up < h * kl && d_down > h * kl);
+        // Fläche = Grundriss + Schattenband (Breite 2).
+        let a: f64 = up.iter().map(|p| signed_area(&p[0]).abs()).sum();
+        assert!((a - 2.0 * (2.0 + d_up)).abs() < 1e-3, "{a}");
+    }
+
+    /// Freigelegte Untergeschoss-Wand über tieferem Gelände: wirft Schatten, obwohl sie ganz unter
+    /// ±0.00 liegt; ohne Gelände (Ebene ±0.00) nicht; ganz im Gelände auch nicht.
+    #[test]
+    fn freigelegte_ug_wand() {
+        let tin = plane_tin(-3.0, 0.0);
+        let g = Ground::new(&tin, 0.0);
+        let wall = || Prism { footprint: vec![[0.0, 0.0], [6.0, 0.0], [6.0, 0.3], [0.0, 0.3]], z_bottom: -3.0, z_top: -0.2 };
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let on = shadow_union_on(&[wall()], &[], sun, Some(&g));
+        assert_eq!(on.len(), 1);
+        assert!((bbox(&on)[3] - (0.3 + 2.8)).abs() < 1e-6, "{:?}", bbox(&on));
+        assert!(shadow_union_on(&[wall()], &[], sun, None).is_empty());
+        let tin2 = plane_tin(0.5, 0.0);
+        assert!(shadow_union_on(&[wall()], &[], sun, Some(&Ground::new(&tin2, 0.0))).is_empty());
+    }
+
+    /// Ohne Gelände unverändert; auf welligem Gelände eine saubere Fläche ohne Splitter-Löcher, nur
+    /// von der Sonne weg.
+    #[test]
+    fn ohne_gelaende_wie_bisher_und_ohne_splitter() {
+        let sun = SunPosition { azimuth: 215.0, elevation: 28.0 };
+        let ps = || {
+            vec![
+                Prism { footprint: SQ.to_vec(), z_bottom: 0.0, z_top: 5.0 },
+                Prism { footprint: vec![[1.0, 0.0], [9.0, 0.0], [9.0, 0.25], [1.0, 0.25]], z_bottom: -3.0, z_top: 3.0 },
+            ]
+        };
+        assert_eq!(shadow_union_on(&ps(), &[], sun, None), shadow_union(&ps(), &[], sun));
+        let tin = grid_tin(81, 0.5, -20.0, |x, y| 0.6 * (x / 2.0).sin() * (y / 3.0).cos() - 0.5);
+        let u = shadow_union_on(&ps(), &[], sun, Some(&Ground::new(&tin, 0.0)));
+        assert_eq!(u.len(), 1, "eine zusammenhängende Fläche");
+        assert_eq!(u[0].len(), 1, "keine Löcher");
+        let to_sun = [(215.0 * RAD).sin(), (215.0 * RAD).cos()];
+        let near = ps().iter().flat_map(|p| p.footprint.clone()).map(|q| q[0] * to_sun[0] + q[1] * to_sun[1]).fold(f64::MIN, f64::max);
+        assert!(u[0][0].iter().all(|q| q[0] * to_sun[0] + q[1] * to_sun[1] <= near + 1e-6), "nur von der Sonne weg");
+    }
+
+    fn project_json(extra: serde_json::Value) -> Project {
+        let mut v = serde_json::json!({
+            "id": "p", "name": "P", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [],
+            "drawingLevels": [{"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "cutHeight": 1.0, "baseElevation": 0}],
+            "layers": [{"code": "13", "name": "Bäume", "color": "#000", "lw": 0.13, "visible": true, "locked": false}],
+            "walls": [], "openings": [], "ceilings": [], "stairs": [], "rooms": [], "drawings2d": [], "context": []
+        });
+        for (k, val) in extra.as_object().unwrap() {
+            v[k] = val.clone();
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// Bäume (Kreis auf der Ebene „Bäume", Höhe aus `sunStudy.treeHeight`) und Stützen werfen Schatten.
+    #[test]
+    fn baum_und_stuetze() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let tree = serde_json::json!([{"id": "b", "type": "drawing2d", "levelId": "eg", "categoryCode": "13", "geom": {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 2.0}}]);
+        let p = project_json(serde_json::json!({ "drawings2d": tree, "sunStudy": {"when": "2026-06-21T10:00:00Z", "show": true, "treeHeight": 10.0} }));
+        let b = bbox(&shadow_polygons_project(&p, sun));
+        // Krone ≈ Kugel r = 2 um z = 8: Schatten bis y = 8 + 2·√2 (45°), Kronenbreite ±2.
+        assert!((b[3] - (8.0 + 2.0 * 2f64.sqrt())).abs() < 0.05 && (b[2] - 2.0).abs() < 0.05 && b[1] > -0.2, "{b:?}");
+        let p2 = project_json(serde_json::json!({ "drawings2d": tree }));
+        assert!((bbox(&shadow_polygons_project(&p2, sun))[3] - (DEFAULT_TREE_HEIGHT - 2.0 + 2.0 * 2f64.sqrt())).abs() < 0.05);
+        let p3 = project_json(serde_json::json!({
+            "columns": [{"id": "c", "type": "column", "floorId": "eg", "categoryCode": "25", "position": {"x": 5, "y": 5}, "profile": {"kind": "rect", "width": 0.2, "depth": 0.2}, "rotation": 0, "height": 3.0}]
+        }));
+        let b = bbox(&shadow_polygons_project(&p3, sun));
+        assert!((b[3] - 8.1).abs() < 1e-6 && (b[0] - 4.9).abs() < 1e-6, "{b:?}");
+        // Kreis auf einer anderen Ebene ist kein Baum.
+        let p4 = project_json(serde_json::json!({
+            "drawings2d": [{"id": "k", "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 2.0}}]
+        }));
+        assert!(shadow_polygons_project(&p4, sun).is_empty());
+    }
 }
