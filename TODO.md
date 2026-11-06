@@ -2778,11 +2778,23 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Detailgrad-Übersteuerung, Fenster grob) angepasst. Goldens neu (Grundrisse: Blasen, Stempelzeilen; Schnitte:
   zusammengefasste Schichten; CLI-Schnitt in Tusche). Geprüft: cargo test Kern, vitest, tsc, CLI-SVG (EG
   1:100/200/500, Schnitt A-A 1:100/1:50, Ansicht Süd) in Chromium angesehen.
-  Offen: Layout-Viewports (`sheet_viewports.rs`, `viewportPlan.ts`) und Präsentationsblatt zeichnen weiter „Farbig"
-  (Ansicht mit Ziegelrot auf dem Blatt); Ansichtsvorlage „Präsentation" setzt `mono: false`; dünne
-  Trittschalldämmung (2–3 cm) bleibt in 1:100 als dichter Zickzack-Balken; Stempel-Breite nur geschätzt (keine
-  Schriftmetrik), L-förmige Räume über die Bounding-Box; Stifte (`penSets`) nicht angepasst; Fenster grob ohne
-  Brüstungs-/Sturzlinie. Nur Linux/CLI-SVG + Chromium geprüft, nicht in der Tauri-App (Bildschirm nicht angesehen). · M
+  (6.11., Teil 4) **Blätter in Tusche:** Layout-Viewports (Blatt, PDF/Druck, Präsentationsblatt; Kern
+  `sheet_viewports::snapshot_mono` für Fang/DXF, TS `snapshotMono` → `viewportLevelPlan(…, mono)`) zeichnen Grundriss,
+  Schnitt und Ansicht in Tusche; Farbe nur, wenn die Ansichtsvorlage des Ausschnitts `mono: false` setzt. Vorlage
+  „Präsentation" jetzt `mono: true` (Feld „Tusche" in der Vorlage abwählen = farbig; bestehende Projekte mit der
+  alten Vorlage `mono: false` bleiben farbig). Eigene Blatt-Zeichnung (Planrahmen, Logos) unverändert. **Anzeige**
+  heisst in Kopfleiste und Vorlagen „Tusche" / „Ink" (Wert `mono` unverändert). **Dünne Dämmung:** Dämmschichten
+  (Schlange/Zickzack/Welle) unter 0.5 mm Papierdicke ab 1:75 ohne Muster, nur Füllung + Fuge
+  (`section::plain_thin_insulation`; 4 cm Trittschall in 1:100), 1:50 mit Muster. **Stifte:** Standardpalette mit
+  Stärken der Rangfolge 0.25/0.18/0.13/0.1/0.02 (`pens::PEN_WEIGHT_STEPS`; je Farbton dunkel = stark, Schwarz 0.25)
+  statt überall 0.18 — nur neu angelegte Stiftsätze, bestehende behalten ihre Stärken. Fenster grob bleibt bei zwei
+  Strichen (Wunsch Maintainer). Tests: `viewport_tusche_ausser_vorlage_farbig`, `duenne_daemmung_ohne_muster_ab_1_100`,
+  Palette (Rust + `penSets.test.ts`), `viewportPlan.test.ts` (keine bunten Farben, Farbe auf Wunsch). Goldens
+  unverändert. Geprüft: cargo test Kern, vitest, tsc, e2e presentationSheet/layoutSheet/publish/viewTemplates,
+  Präsentationsblatt (Browser) und CLI-Schnitt 1:100 vorher/nachher angesehen.
+  Offen: Stempel-Breite nur geschätzt (keine Schriftmetrik), L-förmige Räume über die Bounding-Box; Präsentations-
+  Dialog ohne eigenen Farb-Schalter (nur über die Vorlage); dünne Dämmung im Grundriss nicht behandelt (Wände selten
+  < 5 cm). Nur Linux/CLI-SVG + Chromium geprüft, nicht in der Tauri-App. · M
   Höhenlinien). Offen: dünne Schichten (Putz, Parkett) laufen in 1:100 zu einem Balken zusammen (Detailgrad sollte
   sie zusammenfassen); Achsen laufen in Ansicht/Grundriss durch das Gebäude; Raumstempel farbig statt schwarz im
   Druck ohne Schwarz-Weiss; Schatten im EG-Grundriss überdeckt Bemassung; eigene Stempel (`Room.stamp`) behalten in

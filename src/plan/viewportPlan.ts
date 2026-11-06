@@ -11,11 +11,20 @@ import { computeSection, generateSectionPlan } from "./toSection";
 import { generateElevationPlan } from "./toElevation";
 import { levelMarkerPrimitives, levelMarksEnabled } from "./levelMarkers";
 
+/**
+ * [140] Tusche (Schwarz-Weiss) für einen Viewport: Standard wie in der App; Farbe nur, wenn die
+ * Ansichtsvorlage des Ausschnitts ausdrücklich `mono: false` setzt (Kern: `sheet_viewports::snapshot_mono`).
+ */
+export function snapshotMono(project: Pick<Project, "viewTemplates">, snap: { templateId?: string | null }): boolean {
+  if (!snap.templateId) return true;
+  return project.viewTemplates?.find((t) => t.id === snap.templateId)?.mono !== false;
+}
+
 const EMPTY: Plan = { primitives: [], bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
 
 /**
  * Plan der Ebene `levelId` für einen Layout-Viewport bzw. dessen PDF (`forPrint`: `noPrint`-Elemente
- * entfallen). Schnitte brauchen die truck-Körper und sind darum asynchron.
+ * entfallen; `mono`: Tusche, s. {@link snapshotMono}). Schnitte brauchen die truck-Körper und sind darum asynchron.
  */
 export async function viewportLevelPlan(
   project: Project,
@@ -24,23 +33,24 @@ export async function viewportLevelPlan(
   detail: DetailLevel | undefined,
   scaleDenominator: number,
   forPrint = false,
+  mono = true,
 ): Promise<Plan> {
   const level = project.drawingLevels.find((l) => l.id === levelId);
   if (!level) return EMPTY;
   if (level.kind !== "section" && level.kind !== "elevation") {
-    return generatePlan(project, levelId, visibleCodes, undefined, detail, false, false, true, scaleDenominator, forPrint);
+    return generatePlan(project, levelId, visibleCodes, undefined, detail, false, mono, true, scaleDenominator, forPrint);
   }
   let raw: Plan | null;
   if (level.kind === "section") {
     const out = await computeSection(project, level);
     raw = out
-      ? generateSectionPlan(out, false, { hiddenLines: level.hiddenLines, visibleCodes, openings: true, scaleDenominator })
+      ? generateSectionPlan(out, mono, { hiddenLines: level.hiddenLines, visibleCodes, openings: true, scaleDenominator })
       : null;
   } else {
-    raw = generateElevationPlan(project, level, { visibleCodes, scaleDenominator });
+    raw = generateElevationPlan(project, level, { visibleCodes, scaleDenominator, mono });
   }
   if (!raw || raw.primitives.length === 0) return EMPTY;
-  const own = generatePlan(project, level.id, visibleCodes, undefined, detail, false, false, false, scaleDenominator, forPrint);
+  const own = generatePlan(project, level.id, visibleCodes, undefined, detail, false, mono, false, scaleDenominator, forPrint);
   const marks = levelMarksEnabled(level) ? levelMarkerPrimitives(project, raw.bounds) : [];
   const b = { ...raw.bounds };
   const grow = (x: number, y: number) => {

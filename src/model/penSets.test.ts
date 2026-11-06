@@ -309,8 +309,10 @@ describe("Standardpalette (Kern)", () => {
     expect(new Set(pens.map((p) => p.id)).size).toBe(255);
     for (let i = 1; i <= 255; i++) {
       expect(styles[String(i)].color).toMatch(/^#[0-9a-f]{6}$/);
-      expect(styles[String(i)].weight).toBe(PEN_FALLBACK_WEIGHT);
+      // [140] Strichstärken nach der Plan-Rangfolge (0.25 / 0.18 / 0.13 / 0.1 / 0.02).
+      expect([0.25, 0.18, 0.13, 0.1, 0.02]).toContain(styles[String(i)].weight);
     }
+    expect(styles["7"].weight).toBe(0.25);
   });
 
   it("nutzt für 1-9 die klassischen Grundfarben (Rot/Gelb/.../Grau)", () => {
