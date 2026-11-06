@@ -98,8 +98,8 @@ pub fn grip_opening_point(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64, positi
 /// Öffnung im Schnitt-Blatt (`grip_drag::opening_slide_sheet`): `[position, wirksames du]`, `[]` = keine Bewegung.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
-pub fn grip_opening_slide_sheet(sx: f64, sy: f64, ex: f64, ey: f64, ux: f64, uy: f64, position: f64, width: f64, du: f64) -> Vec<f64> {
-    gd::opening_slide_sheet((sx, sy), (ex, ey), (ux, uy), position, width, du).map(|(p, d)| vec![p, d]).unwrap_or_default()
+pub fn grip_opening_slide_sheet(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64, ux: f64, uy: f64, position: f64, width: f64, du: f64) -> Vec<f64> {
+    gd::opening_slide_sheet((sx, sy), (ex, ey), bulge, (ux, uy), position, width, du).map(|(p, d)| vec![p, d]).unwrap_or_default()
 }
 
 /// Bewegpunkt einer Treppe (Zentrum NaN = keines): `[x, y]`.

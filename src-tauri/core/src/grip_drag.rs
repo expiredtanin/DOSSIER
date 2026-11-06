@@ -222,8 +222,12 @@ pub fn opening_wall_grip(ws: P, we: P, bulge: f64, position: f64, width: f64) ->
 
 /// Öffnung im Schnitt-Blatt waagrecht ziehen: Blatt-Delta `du` (gesamt, entlang der Schnitt-Achse `u_axis`)
 /// → neue `position` (geklemmt) und das dazu passende, tatsächlich wirksame Blatt-Delta. `None`, wenn die
-/// Wand fast quer zur Schnittlinie steht (|u · Wandrichtung| < 0.15).
-pub fn opening_slide_sheet(ws: P, we: P, u_axis: P, position: f64, width: f64, du: f64) -> Option<(f64, f64)> {
+/// Wand fast quer zur Schnittlinie steht (|u · Wandrichtung| < 0.15). Bogenwand ([144], `bulge`):
+/// `position` = Bogenlänge; die Öffnungsmitte folgt dem Blatt-Delta auf dem Bogen (s. [`arc_slide_sheet`]).
+pub fn opening_slide_sheet(ws: P, we: P, bulge: f64, u_axis: P, position: f64, width: f64, du: f64) -> Option<(f64, f64)> {
+    if let Some(a) = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ws.0, ws.1), kernel2d::Vec2::new(we.0, we.1), Some(bulge)) {
+        return arc_slide_sheet(&a, u_axis, position, width, du);
+    }
     let axis = normalize(sub(we, ws));
     let factor = dot(u_axis, axis);
     if factor.abs() < 0.15 {
@@ -232,6 +236,69 @@ pub fn opening_slide_sheet(ws: P, we: P, u_axis: P, position: f64, width: f64, d
     let len = hypot2(we.0 - ws.0, we.1 - ws.1);
     let pos = jsnum::max(0.0, jsnum::min(len - width, position + du * factor));
     Some((pos, (pos - position) / factor))
+}
+
+/// [144] Öffnung in einer Bogenwand im Schnitt-Blatt ziehen: Blatt-Lage der Öffnungsmitte
+/// u(p) = (Bogenpunkt bei p + Breite/2) · `u_axis`; gesucht ist die Lage p ∈ [0, Bogenlänge − Breite]
+/// mit u(p) = u(position) + `du`, die `position` am nächsten liegt (Abtasten + Halbieren). Ohne Lösung
+/// (Ziel jenseits der Blatt-Ausdehnung des Bogens) die Lage mit der kleinsten Abweichung. `None`, wenn
+/// der Bogen im Blatt keine Ausdehnung hat oder die Öffnung nicht hineinpasst.
+fn arc_slide_sheet(a: &crate::wall_arc::WallArc, u: P, position: f64, width: f64, du: f64) -> Option<(f64, f64)> {
+    let hi = a.length() - width;
+    if !(hi >= 0.0) || !hi.is_finite() || ![u.0, u.1, position, width, du].iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let u_at = |p: f64| {
+        let q = a.point(p + width / 2.0, 0.0);
+        q.x * u.0 + q.y * u.1
+    };
+    let p0 = position.clamp(0.0, hi);
+    if du == 0.0 {
+        return Some((p0, 0.0));
+    }
+    let target = u_at(p0) + du;
+    const N: usize = 256;
+    let ps: Vec<f64> = (0..=N).map(|i| hi * i as f64 / N as f64).collect();
+    let fs: Vec<f64> = ps.iter().map(|&p| u_at(p) - target).collect();
+    let (lo_u, hi_u) = fs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |m, f| (m.0.min(*f), m.1.max(*f)));
+    if !(hi_u - lo_u > 1e-6) {
+        return None;
+    }
+    let mut best: Option<f64> = None;
+    for i in 0..N {
+        let (f0, f1) = (fs[i], fs[i + 1]);
+        if f0 == 0.0 || (f0 < 0.0) != (f1 < 0.0) {
+            let (mut l, mut r, mut fl) = (ps[i], ps[i + 1], f0);
+            for _ in 0..50 {
+                let m = 0.5 * (l + r);
+                let fm = u_at(m) - target;
+                if (fm < 0.0) == (fl < 0.0) && fm != 0.0 {
+                    l = m;
+                    fl = fm;
+                } else {
+                    r = m;
+                }
+            }
+            let root = if f0 == 0.0 { ps[i] } else { 0.5 * (l + r) };
+            if best.is_none_or(|b| (root - p0).abs() < (b - p0).abs()) {
+                best = Some(root);
+            }
+        }
+    }
+    if fs[N] == 0.0 && best.is_none_or(|b| (hi - p0).abs() < (b - p0).abs()) {
+        best = Some(hi);
+    }
+    let pos = best.unwrap_or_else(|| {
+        // Keine Lösung: kleinste Abweichung, bei Gleichstand die nähere Lage.
+        let mut j = 0;
+        for i in 1..=N {
+            if fs[i].abs() < fs[j].abs() - 1e-12 || ((fs[i].abs() - fs[j].abs()).abs() <= 1e-12 && (ps[i] - p0).abs() < (ps[j] - p0).abs()) {
+                j = i;
+            }
+        }
+        ps[j]
+    });
+    Some((pos, u_at(pos) - u_at(p0)))
 }
 
 /// Bewegpunkt einer Treppe: Wendeltreppe im Zentrum (sonst Start), sonst Mitte des ersten Laufs.
@@ -400,11 +467,35 @@ mod tests {
     fn oeffnung_im_schnitt() {
         let (s, e) = ((0.0, 0.0), (5.0, 0.0));
         // Schnitt-Achse gegen die Wand: Faktor −1.
-        assert_eq!(opening_slide_sheet(s, e, (-1.0, 0.0), 1.0, 1.2, 0.5), Some((0.5, 0.5)));
+        assert_eq!(opening_slide_sheet(s, e, 0.0, (-1.0, 0.0), 1.0, 1.2, 0.5), Some((0.5, 0.5)));
         // Geklemmt: wirksames Delta passt zur Klemmung.
-        assert_eq!(opening_slide_sheet(s, e, (1.0, 0.0), 1.0, 1.2, 10.0), Some((3.8, 2.8)));
+        assert_eq!(opening_slide_sheet(s, e, 0.0, (1.0, 0.0), 1.0, 1.2, 10.0), Some((3.8, 2.8)));
         // Quer geschnittene Wand: keine Bewegung.
-        assert_eq!(opening_slide_sheet(s, e, (0.1, 0.995), 1.0, 1.2, 1.0), None);
+        assert_eq!(opening_slide_sheet(s, e, 0.0, (0.1, 0.995), 1.0, 1.2, 1.0), None);
+    }
+
+    /// [144] Bogenwand im Schnitt-Blatt: Öffnungsmitte folgt dem Blatt-Delta auf dem Bogen (Bogenlänge),
+    /// nicht der Sehne; jenseits des Bogens am Ende angehalten, wirksames Delta passend.
+    #[test]
+    fn oeffnung_im_schnitt_bogenwand() {
+        // Halbkreis r = 2.5 über (0,0)–(5,0) (bulge 1), Bogenlänge 2.5·π; Schnitt-Achse +x.
+        let (s, e) = ((0.0, 0.0), (5.0, 0.0));
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(0.0, 0.0), kernel2d::Vec2::new(5.0, 0.0), Some(1.0)).unwrap();
+        let (w, p0) = (1.0, 3.0);
+        let mid_u = |p: f64| a.point(p + w / 2.0, 0.0).x;
+        let (pos, du) = opening_slide_sheet(s, e, 1.0, (1.0, 0.0), p0, w, 0.4).unwrap();
+        assert!((mid_u(pos) - mid_u(p0) - 0.4).abs() < 1e-6 && (du - 0.4).abs() < 1e-6, "{pos} {du}");
+        // Bogenlänge statt Sehne: der Weg auf dem Bogen ist länger als die 0.4 m im Blatt.
+        assert!((pos - p0).abs() > 0.4 + 1e-3, "{pos}");
+        assert_eq!(opening_slide_sheet(s, e, 1.0, (1.0, 0.0), p0, w, 0.0).map(|r| r.0), Some(p0));
+        // Weit über das Bogenende hinaus: an einem Ende angehalten, wirksames Delta = erreichte Strecke.
+        let (pos, du) = opening_slide_sheet(s, e, 1.0, (1.0, 0.0), p0, w, 50.0).unwrap();
+        let hi = a.length() - w;
+        assert!(pos < 1e-9 || (pos - hi).abs() < 1e-9, "{pos}");
+        assert!((du - (mid_u(pos) - mid_u(p0))).abs() < 1e-9 && du > 0.0);
+        // Unsinn: keine Bewegung, kein Panic.
+        assert_eq!(opening_slide_sheet(s, e, 1.0, (f64::NAN, 0.0), p0, w, 1.0), None);
+        assert_eq!(opening_slide_sheet(s, e, 1.0, (1.0, 0.0), p0, 100.0, 1.0), None);
     }
 
     #[test]

@@ -22,6 +22,7 @@ import {
   gripPolarPoint,
   openingGripPoint,
   openingSheetSlide,
+  openingTypedPosition,
   sheetHeightDrag,
   stairMoveHandle,
   wallGripPoints,
@@ -561,6 +562,8 @@ export function useGripEditing(opts: {
   // Position gemessen werden, sonst würde die Richtung während des Ziehens
   // mitdriften).
   const gripOriginRef = useRef<Vec2 | null>(null);
+  // [144] Lage (`position`) der gewählten Wandöffnung beim Greifen: Bezug der getippten Bogenlänge.
+  const gripOpeningPos0Ref = useRef<{ position: number; dir: Vec2 } | null>(null);
 
   // Endpunkt aus Anker + (gelockten/Live-)Länge/Winkel (Kern `gripPolarPoint`) — wie lineEndFromFields.
   const gripEditPoint = gripPolarPoint;
@@ -652,9 +655,14 @@ export function useGripEditing(opts: {
       if (!prev && wallDir) {
         // Öffnung ([144]): Richtung = Wandrichtung (bzw. Gegenrichtung, je nach bisherigem Zug), damit
         // die getippte Länge genau die Strecke entlang der Wand ist.
+        // Bogenwand: Länge = bisher gezogene Bogenlänge, Richtung = Wandrichtung beim Greifen.
+        const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
+        const arc = !!project.walls.find((x) => x.id === op?.hostWallId)?.bulge;
+        const at0 = gripOpeningPos0Ref.current;
+        const dir = arc && at0 ? at0.dir : wallDir;
         const g = grips[info.index];
-        const along = (g.x - anchor.x) * wallDir.x + (g.y - anchor.y) * wallDir.y;
-        const deg = (Math.atan2(wallDir.y, wallDir.x) * 180) / Math.PI + (along < 0 ? 180 : 0);
+        const along = arc && at0 && op ? op.position - at0.position : (g.x - anchor.x) * wallDir.x + (g.y - anchor.y) * wallDir.y;
+        const deg = (Math.atan2(dir.y, dir.x) * 180) / Math.PI + (along < 0 ? 180 : 0);
         return { anchor, active: "length", locks: { length: Math.abs(along), angle: ((deg % 360) + 360) % 360 } };
       }
       if (!prev) {
@@ -680,7 +688,18 @@ export function useGripEditing(opts: {
     setGripEdit({ ...ge, locks, active: next });
     // Zielpunkt mit dem frischen Lock anwenden (live, ohne Maus-Bewegung).
     const pt = gripEditPoint(ge.anchor, locks, info.raw);
-    applyGrip(info.index, pt);
+    applyGripEdit(info.index, pt, ge.anchor, locks.length);
+  };
+
+  // Zielpunkt des Feld-Controllers anwenden. [144] Öffnung in einer Bogenwand: die getippte Länge ist
+  // die Bogenlänge ab der Lage beim Greifen (nicht die Strecke entlang der Sehne).
+  const applyGripEdit = (index: number, pt: Vec2, anchor: Vec2, length: number | undefined) => {
+    const op = selectedOpeningId ? (project.openings ?? []).find((o) => o.id === selectedOpeningId) : undefined;
+    const host = op && !op.hostRoofId && !op.hostCeilingId ? project.walls.find((x) => x.id === op.hostWallId) : undefined;
+    const at0 = gripOpeningPos0Ref.current;
+    if (op && !op.locked && host?.bulge && at0 && length != null) {
+      slideOpening(op.id, { position: openingTypedPosition(at0.position, length, anchor, pt, at0.dir) }, `slideOpening:${op.id}`);
+    } else applyGrip(index, pt);
   };
 
   // Feld-Controller schließen (Escape MIT Fokus in der Befehlszeile, s.
@@ -1054,6 +1073,7 @@ export function useGripEditing(opts: {
     pendingBodyRef.current = null;
     pendingEdgeRef.current = null;
     gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
+    gripOpeningPos0Ref.current = null;
     setGripEdit(null); // (c) Feld-Controller schließen
     edgeDragInfoRef.current = null; // Kanten-Drag-Info verwerfen
     setEdgeEdit(null); // Kanten-Feld-Controller schließen
@@ -1157,7 +1177,12 @@ export function useGripEditing(opts: {
       // Erster Move-Event nach dem Grab (gripDragInfoRef noch leer): die
       // AKTUELLE — hier noch unveränderte — Position als Flucht-Bezugspunkt
       // verankern (s. Kommentar an gripOriginRef).
-      if (gripDragInfoRef.current === null) gripOriginRef.current = grips[index];
+      if (gripDragInfoRef.current === null) {
+        gripOriginRef.current = grips[index];
+        const op0 = selectedOpeningId ? (project.openings ?? []).find((o) => o.id === selectedOpeningId) : undefined;
+        const dir0 = op0 ? openingWallDir() : null;
+        gripOpeningPos0Ref.current = op0 && dir0 ? { position: op0.position, dir: dir0 } : null;
+      }
       // (c) Vertex-Drag mit aktivem Feld-Controller: `locks` ist ab dem
       // ÖFFNEN (Tab) immer für BEIDE Felder befüllt (s. cycleGripEditField),
       // die Maus wirkt also erst wieder, sobald ein Feld per Tab explizit
@@ -1166,7 +1191,7 @@ export function useGripEditing(opts: {
       gripDragInfoRef.current = { index, raw };
       if (ge && (ge.locks.length != null || ge.locks.angle != null)) {
         const pt = gripEditPoint(ge.anchor, ge.locks, raw);
-        applyGrip(index, pt);
+        applyGripEdit(index, pt, ge.anchor, ge.locks.length);
         setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, pt) });
         return;
       }

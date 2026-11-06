@@ -2886,8 +2886,13 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   (Musterhaus: Anschlag an O1 mit Hinweis; Musterhaus komplex: Kette `mass-fenster-eg` folgt Befehl und Objekt-Info,
   Erker: Abstand ab Wandende aus Bogenlänge, Anschlag f5 vor f6, Verschieben auf dem Bogen). Klick-Zug im alten
   e2e auf 0.5 m (0.25 m fing seit [147] der Fang am Basispunkt).
-  Offen: Öffnung im Schnitt-Blatt ziehen rechnet weiter auf der Sehne (Bogenwand) — der Commit klemmt aber über den
-  Kern; Tab-Länge beim Griff an Bogenwänden entlang der Sehne über der Öffnung; Vorschau beim Setzen zeigt den
+  6.11.: **Bogenwände beim Griff-Zug:** Tab-Länge = Bogenlänge ab der Lage beim Greifen (`openingTypedPosition`, über
+  `slideOpening({ position })`, also geklemmt und mit Anschlag; Richtung aus Winkel-Feld/Maus gegen die Wandrichtung beim
+  Greifen; beim Öffnen des Feldes steht die bisher gezogene Bogenlänge drin). Schnitt-Blatt: Kern `opening_slide_sheet`
+  mit `bulge` — die Öffnungsmitte folgt dem Blatt-Delta auf dem Bogen (Lage nächst der Ausgangslage mit gleicher
+  Blatt-Koordinate, sonst die mit kleinster Abweichung), `position` = Bogenlänge. Tests: Rust `oeffnung_im_schnitt_bogenwand`,
+  vitest `gripDrag.test.ts` (Schnitt-Blatt Bogenwand, getippte Bogenlänge). Nicht im Browser/e2e durchgespielt.
+  Offen: Vorschau beim Setzen zeigt den
   Cursor-Ort, nicht die verrückte Lage; `clampInside` steht noch in TS (Griff) und Rust (Befehl); nur Linux/Chromium
   geprüft, nicht in der Tauri-App. · S
 - ✅ **[147] Plan öffnet zu stark gezoomt.** (6.11., zwei e2e-Läufe: nach „Neues Projekt" und beim Öffnen von Musterhaus

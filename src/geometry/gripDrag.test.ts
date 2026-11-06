@@ -9,6 +9,7 @@ import {
   gripPolarPoint,
   openingGripPoint,
   openingSheetSlide,
+  openingTypedPosition,
   sheetHeightDrag,
   wallGripPoints,
 } from "./gripDrag";
@@ -54,6 +55,19 @@ describe("Griff-Zug (Kern)", () => {
     expect(Math.abs(g.y)).toBeCloseTo(2.5, 9);
     expect(openingSheetSlide(wall, { position: 1, width: 1.2 }, { x: -1, y: 0 }, 0.5)).toEqual({ position: 0.5, du: 0.5 });
     expect(openingSheetSlide(wall, { position: 1, width: 1.2 }, { x: 0.1, y: 0.995 }, 1)).toBeNull();
+    // [144] Bogenwand im Schnitt: die Öffnungsmitte folgt dem Blatt-Delta auf dem Bogen (Bogenlänge > Blatt-Weg).
+    const arc = { ...wall, bulge: 1 };
+    const s = openingSheetSlide(arc, { position: 3, width: 1 }, { x: 1, y: 0 }, 0.4)!;
+    expect(s.du).toBeCloseTo(0.4, 6);
+    expect(openingGripPoint(arc, { position: s.position, width: 1 }).x - openingGripPoint(arc, { position: 3, width: 1 }).x).toBeCloseTo(0.4, 6);
+    expect(s.position - 3).toBeGreaterThan(0.4);
+  });
+
+  it("[144] getippte Länge an der Bogenwand = Bogenlänge ab der Lage beim Greifen", () => {
+    const dir = { x: 1, y: 0 };
+    const a = { x: 0, y: 0 };
+    expect(openingTypedPosition(2, 1.5, a, { x: 1.5, y: 0 }, dir)).toBe(3.5);
+    expect(openingTypedPosition(2, 1.5, a, { x: -1.5, y: 0.1 }, dir)).toBe(0.5);
   });
 
   it("Wand-Griffe und koinzidente Ecken", () => {
