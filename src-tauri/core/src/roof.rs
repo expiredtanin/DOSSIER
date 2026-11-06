@@ -979,6 +979,30 @@ mod tests {
         assert!((z_at(&g, 3.0, 3.5).unwrap() - 0.5).abs() < 1e-9);
     }
 
+    /// IFC-Import [B4]: Pult fallend nach +y und gedrehtes Satteldach als Sattel mit Neigung je Kante.
+    #[test]
+    fn pult_und_gedrehter_sattel_ueber_neigung_je_kante() {
+        let tan = 30f64.to_radians().tan();
+        // Pult über RECT, Traufe an Kante 2 (y = 4), höchste Stelle bei y = 0, drei Giebel.
+        let p = RoofParams { pitch_deg: 30.0, edge_pitch_deg: Some(vec![None, None, Some(30.0), None]), ..params(&RECT, Shape::Sattel) };
+        let g = roof_geometry(&p, 3.0);
+        for (x, y) in [(1.0, 0.5), (3.0, 2.0), (5.5, 3.5)] {
+            assert!((z_at(&g, x, y).unwrap() - (3.0 + (4.0 - y) * tan)).abs() < 1e-9, "{x} {y}");
+        }
+        assert_eq!(g.gables.len(), 3);
+        // Satteldach 6 × 4 um 30° gedreht: Traufen an den langen Kanten, Giebel an den kurzen.
+        let (s, c) = 30f64.to_radians().sin_cos();
+        let rot = |p: P2| [c * p[0] - s * p[1], s * p[0] + c * p[1]];
+        let outline: Vec<P2> = RECT.iter().map(|&p| rot(p)).collect();
+        let p = RoofParams { pitch_deg: 30.0, edge_pitch_deg: Some(vec![Some(30.0), None, Some(30.0), None]), ..params(&outline, Shape::Sattel) };
+        let g = roof_geometry(&p, 0.0);
+        for (u, v) in [(1.0, 0.5), (3.0, 2.0), (5.5, 3.5), (0.2, 1.0)] {
+            let q = rot([u, v]);
+            assert!((z_at(&g, q[0], q[1]).unwrap() - v.min(4.0 - v) * tan).abs() < 1e-9, "{u} {v}");
+        }
+        assert_eq!(g.gables.len(), 2);
+    }
+
     #[test]
     fn giebel_je_kante_wie_satteldach() {
         // Walm mit Giebel an den beiden Kanten quer zur X-Achse = Satteldach entlang X.

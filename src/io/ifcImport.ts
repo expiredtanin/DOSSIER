@@ -119,9 +119,11 @@ export interface IfcElementsSummary {
   ceilings: number;
   columns: number;
   rooms: number;
-  /** Dächer (Flach/Pult/Sattel/Walm) und gerade Treppen ([B4]). */
+  /** Dächer (Flach/Pult/Sattel/Walm, auch mit Neigung je Kante) und Treppen (gerade, L, Wendel) ([B4]). */
   roofs: number;
   stairs: number;
+  /** Träger (IfcBeam) als Extrusionskörper ([B4]). */
+  beams?: number;
   /** Neu angelegte Geschosse. */
   floors: number;
   wallTypes: number;

@@ -1,5 +1,6 @@
 //! IFC-Import zu echten Bauteilen ([B4], [K4] S4; vorher `io/ifcElements.ts`): baut aus dem, was das
-//! Format-Modul erkannt hat (`fileio/src/ifc_semantic.rs`: Achse, Dicke, Höhe, Umriss … in Metern),
+//! Format-Modul erkannt hat (`fileio/src/ifc_semantic.rs`: Achse, Dicke, Höhe, Umriss … in Metern; dazu Dächer
+//! auch mit Neigung je Kante, Treppen gerade/L/Wendel, Träger als Extrusionskörper, gedrehte Georeferenz),
 //! Dossier-Objekte — Geschosse, Wände (Wandtyp aus den Materialschichten, wiederverwendet oder neu),
 //! Türen/Fenster/Wanddurchbrüche, Decken (Deckentyp), Stützen, Räume; der Rest kommt als Kontext-Mesh
 //! (`import_context`). Ergebnis sind Ops auf dem Projekt (ein Undo-Schritt) und eine Zusammenfassung.
@@ -126,10 +127,15 @@ struct RoofData {
     pitch_deg: f64,
     eave_z: f64,
     thickness: f64,
+    /// Neigung je Umrisskante (`None` = Giebel); gilt, wenn `custom` (Form dann Sattel bzw. Walm).
+    edge_pitch: Vec<Option<f64>>,
+    custom: bool,
 }
 
 struct StairData {
     info: Info,
+    /// "straight", "L", "spiral".
+    shape: String,
     start: [f64; 2],
     dir: [f64; 2],
     run_length: f64,
@@ -137,6 +143,20 @@ struct StairData {
     step_count: f64,
     z0: f64,
     total_rise: f64,
+    run2_length: f64,
+    turn: f64,
+    center: [f64; 2],
+    radius: f64,
+    sweep: f64,
+    center_column: f64,
+}
+
+/// Träger als senkrechtes Prisma → Extrusionskörper.
+struct BeamData {
+    info: Info,
+    outline: Vec<[f64; 2]>,
+    z0: f64,
+    z1: f64,
 }
 
 struct Storey {
@@ -154,6 +174,7 @@ struct Elements {
     spaces: Vec<SpaceData>,
     roofs: Vec<RoofData>,
     stairs: Vec<StairData>,
+    beams: Vec<BeamData>,
     kept: Map<String, Value>,
     /// Je Klasse die Gründe, weshalb Kandidaten Mesh blieben (`{"IfcWall": {"slopedTop": 3}}`).
     kept_reasons: Map<String, Value>,
@@ -281,15 +302,30 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
                 if let Some(mut r) = rings(v, 3, 1.0) {
                     let shape = s_of(e.get("shape")).filter(|x| ["flach", "pult", "sattel", "walm"].contains(&x.as_str()));
                     let axis = s_of(e.get("ridgeAxis")).filter(|x| x == "x" || x == "y");
+                    let outline = r.remove(0);
+                    // Neigung je Kante: Zahl ≥ 0 (Traufe) oder null (Giebel), eine je Umrisskante.
+                    let edge_pitch: Option<Vec<Option<f64>>> = e.get("edgePitch").and_then(Value::as_array).map(|a| a.iter().map(|x| x.as_f64().filter(|p| p.is_finite() && *p >= 0.0 && *p < 89.0)).collect());
+                    let edge_pitch = edge_pitch.filter(|a| a.len() == outline.len()).unwrap_or_default();
+                    let custom = e.get("custom").and_then(Value::as_bool).unwrap_or(false) && !edge_pitch.is_empty();
                     if let (Some(shape), Some(ridge_axis)) = (shape, axis) {
-                        out.roofs.push(RoofData { info, outline: r.remove(0), shape, ridge_axis, eave_z: v[0], pitch_deg: v[1], thickness: v[2] });
+                        out.roofs.push(RoofData { info, outline, shape, ridge_axis, eave_z: v[0], pitch_deg: v[1], thickness: v[2], edge_pitch, custom });
                     }
                 }
             }
             "stair" => {
-                if v.len() == 9 && v[6] >= 2.0 && v[6] <= 200.0 && v[4] > 0.0 && v[5] > 0.0 {
+                let shape = s_of(e.get("shape")).unwrap_or_else(|| "straight".into());
+                let ok = (v.len() == 9 || v.len() == 16) && v[6] >= 2.0 && v[6] <= 200.0 && v[4] > 0.0 && v[5] > 0.0;
+                let x = |i: usize| v.get(i).copied().unwrap_or(0.0);
+                let shape_ok = match shape.as_str() {
+                    "straight" => true,
+                    "L" => x(9) > 0.0 && x(10).abs() == 1.0,
+                    "spiral" => x(13) > 0.0 && x(14) != 0.0 && x(14).abs() <= 3600.0,
+                    _ => false,
+                };
+                if ok && shape_ok {
                     out.stairs.push(StairData {
                         info,
+                        shape,
                         start: [v[0], v[1]],
                         dir: [v[2], v[3]],
                         run_length: v[4],
@@ -297,7 +333,18 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
                         step_count: v[6].round(),
                         z0: v[7],
                         total_rise: v[8],
+                        run2_length: x(9),
+                        turn: x(10),
+                        center: [x(11), x(12)],
+                        radius: x(13),
+                        sweep: x(14),
+                        center_column: x(15),
                     });
+                }
+            }
+            "beam" => {
+                if let (Some(mut r), true) = (rings(v, 2, 1.0), v.len() >= 2 && v[1] > v[0]) {
+                    out.beams.push(BeamData { info, outline: r.remove(0), z0: v[0], z1: v[1] });
                 }
             }
             "space" => {
@@ -511,7 +558,7 @@ fn list_of(root: &Map<String, Value>, key: &str) -> Vec<(Value, bool)> {
 fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct], el: &Elements, opts: &IfcOptions, now: f64) -> (Vec<Op>, Value, usize) {
     let kept: f64 = el.kept.values().map(|v| v.as_f64().unwrap_or(f64::NAN)).sum();
     let mut summary = Map::new();
-    for k in ["walls", "openings", "ceilings", "columns", "rooms", "roofs", "stairs", "floors", "wallTypes", "ceilingTypes", "roofTypes", "doorTypes", "windowTypes", "components", "meshes", "classified"] {
+    for k in ["walls", "openings", "ceilings", "columns", "rooms", "roofs", "stairs", "beams", "floors", "wallTypes", "ceilingTypes", "roofTypes", "doorTypes", "windowTypes", "components", "meshes", "classified"] {
         summary.insert(k.into(), 0.into());
     }
     summary.insert("kept".into(), js_num(kept));
@@ -539,6 +586,9 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
     }
     for s in &el.stairs {
         extra.extend(s.start);
+    }
+    for b in &el.beams {
+        b.outline.iter().for_each(|p| extra.extend(p));
     }
     let [dx, dy] = map_shift(meta, root).unwrap_or_else(|| geo_shift(products, project_geo_origin(root), &extra));
     let mv = |p: [f64; 2]| pt([round(p[0] + dx, 1e-9), round(p[1] + dy, 1e-9)]);
@@ -812,6 +862,11 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
             "shape": r.shape, "pitchDeg": js_num(round(r.pitch_deg, 1e-6)), "overhang": 0, "ridgeAxis": r.ridge_axis,
             "baseElevation": js_num(round(r.eave_z, 1e-6)), "thickness": js_num(round(r.thickness, 1e-6)),
         });
+        // Standardform passt nicht (gedreht, Pult fallend …): Neigung je Kante, Giebel wo keine Traufe ist.
+        if r.custom && r.shape != "flach" {
+            v["shape"] = (if r.edge_pitch.iter().all(Option::is_some) { "walm" } else { "sattel" }).into();
+            v["edgePitchDeg"] = r.edge_pitch.iter().map(|p| p.map_or(Value::Null, |x| js_num(round(x, 1e-6)))).collect();
+        }
         // Dachtyp nur mit Material aus der Datei; sonst einschichtig über `thickness`.
         if r.info.layers.iter().any(|l| !l.material.trim().is_empty()) {
             v["roofTypeId"] = type_for(&mut ctx, &mut roof_types, &r.info, r.thickness, "rooftype", "roofTypes").into();
@@ -821,12 +876,42 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
     let mut stairs: Vec<Value> = Vec::new();
     for s in &el.stairs {
         let (fid, _, _) = floor_of(&mut ctx, s.info.storey, s.z0);
-        stairs.push(json!({
-            "id": ctx.new_id("stair"), "type": "stair", "floorId": fid, "categoryCode": STAIR_CATEGORY, "shape": "straight",
+        let mut v = json!({
+            "id": ctx.new_id("stair"), "type": "stair", "floorId": fid, "categoryCode": STAIR_CATEGORY, "shape": s.shape,
             "start": mv(s.start), "dir": {"x": js_num(round(s.dir[0], 1e-9)), "y": js_num(round(s.dir[1], 1e-9))},
             "runLength": js_num(round(s.run_length, 1e-6)), "width": js_num(round(s.width, 1e-6)),
             "totalRise": js_num(round(s.total_rise, 1e-6)), "stepCount": js_num(s.step_count), "up": true,
-        }));
+        });
+        match s.shape.as_str() {
+            "L" => {
+                v["run2Length"] = js_num(round(s.run2_length, 1e-6));
+                v["turn"] = js_num(s.turn.signum());
+            }
+            "spiral" => {
+                v["center"] = mv(s.center);
+                v["radius"] = js_num(round(s.radius, 1e-6));
+                v["sweep"] = js_num(round(s.sweep, 1e-6));
+                if s.center_column > 0.0 {
+                    v["centerColumn"] = js_num(round(s.center_column, 1e-6));
+                }
+            }
+            _ => {}
+        }
+        stairs.push(v);
+    }
+    // Träger als Extrusionskörper (Grundriss + Höhe über der Geschoss-UK).
+    let mut solids: Vec<Value> = Vec::new();
+    for b in &el.beams {
+        let (fid, base, _) = floor_of(&mut ctx, b.info.storey, b.z0);
+        let mut v = json!({
+            "id": ctx.new_id("solid"), "type": "extrudedSolid", "levelId": fid,
+            "points": b.outline.iter().map(|&p| mv(p)).collect::<Vec<_>>(), "height": js_num(round(b.z1 - b.z0, 1e-6)),
+        });
+        let off = anchor_offset(b.z0, base);
+        if off.abs() > 1e-9 {
+            v["baseOffset"] = js_num(off);
+        }
+        solids.push(v);
     }
 
     // ── Übrige Bauteile als Kontext-Mesh ──
@@ -840,7 +925,7 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         + el.roofs.iter().filter(|r| r.info.classified).count()
         + el.stairs.iter().filter(|s| s.info.classified).count()
         + products.iter().filter(|p| !p.classifications.is_empty()).count();
-    for (k, n) in [("walls", walls.len()), ("openings", openings.len()), ("ceilings", ceilings.len()), ("columns", columns.len()), ("rooms", rooms.len()), ("roofs", roofs.len()), ("stairs", stairs.len()), ("meshes", n_meshes), ("classified", classified)] {
+    for (k, n) in [("walls", walls.len()), ("openings", openings.len()), ("ceilings", ceilings.len()), ("columns", columns.len()), ("rooms", rooms.len()), ("roofs", roofs.len()), ("stairs", stairs.len()), ("beams", solids.len()), ("meshes", n_meshes), ("classified", classified)] {
         ctx.summary.insert(k.into(), n.into());
     }
 
@@ -859,12 +944,12 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
     if !walls.is_empty() {
         ops.push(Op::Add { collection: "walls".into(), items: walls, at: None });
     }
-    for (key, items) in [("openings", openings), ("ceilings", ceilings), ("columns", columns), ("rooms", rooms), ("roofs", roofs), ("stairs", stairs)] {
+    for (key, items) in [("openings", openings), ("ceilings", ceilings), ("columns", columns), ("rooms", rooms), ("roofs", roofs), ("stairs", stairs), ("extrudedSolids", solids)] {
         if root.get(key).is_some_and(|v| crate::json_util::truthy(Some(v))) {
             if !items.is_empty() {
                 ops.push(Op::Add { collection: key.into(), items, at: None });
             }
-        } else {
+        } else if !(key == "extrudedSolids" && items.is_empty()) {
             ops.push(Op::SetField { key: key.into(), value: Some(Value::Array(items)), at: None });
         }
     }
@@ -887,18 +972,80 @@ fn map_shift(meta: &Value, root: &Map<String, Value>) -> Option<[f64; 2]> {
     let ax = [axis.first()?.as_f64()?, axis.get(1)?.as_f64()?];
     let crs = m.get("crs").and_then(Value::as_str).unwrap_or("");
     let lv95 = crs.is_empty() || crs.contains("2056") || crs.to_uppercase().contains("LV95");
-    let plain = (ax[0] - 1.0).abs() < 1e-9 && ax[1].abs() < 1e-9 && (num("scale").unwrap_or(1.0) - 1.0).abs() < 1e-9;
+    let plain = ax[0].is_finite() && ax[1].is_finite() && ax[0].hypot(ax[1]) > 1e-12 && (num("scale").unwrap_or(1.0) - 1.0).abs() < 1e-9;
     let o = project_geo_origin(root)?;
     (lv95 && plain && o[0].is_finite() && o[1].is_finite() && e.is_finite() && n.is_finite()).then(|| [e - o[0], n - o[1]])
+}
+
+/// Drehung der Georeferenz ([B4], XAxisAbscissa/-Ordinate: Richtung der lokalen x-Achse in der Karte) als
+/// (cos, sin), wenn [`map_shift`] gilt und die Datei gedreht ist; das Dossier-Modell ist kartenparallel
+/// (+y = Nord), die Bauteile werden also vor dem Rückschub um diesen Winkel gedreht.
+fn map_rotation(meta: &Value, root: &Map<String, Value>) -> Option<[f64; 2]> {
+    map_shift(meta, root)?;
+    let axis = meta.get("mapConversion")?.get("xAxis").and_then(Value::as_array)?;
+    let (x, y) = (axis.first()?.as_f64()?, axis.get(1)?.as_f64()?);
+    let l = x.hypot(y);
+    let (c, s) = (x / l, y / l);
+    (s.abs() > 1e-12 || c < 0.0).then_some([c, s])
+}
+
+/// Alle erkannten Bauteile um den Nullpunkt drehen (`cs` = cos, sin). Dächer mit Neigung werden „je Kante"
+/// (die Standardformen hängen an den Achsen); Stützen drehen mit.
+fn rotate_elements(el: &mut Elements, cs: [f64; 2]) {
+    let [c, s] = cs;
+    let rot = |p: &mut [f64; 2]| *p = [c * p[0] - s * p[1], s * p[0] + c * p[1]];
+    let ring = |r: &mut Vec<[f64; 2]>| r.iter_mut().for_each(rot);
+    for w in &mut el.walls {
+        rot(&mut w.start);
+        rot(&mut w.end);
+    }
+    for sl in &mut el.slabs {
+        ring(&mut sl.outline);
+        sl.holes.iter_mut().for_each(ring);
+    }
+    for col in &mut el.columns {
+        rot(&mut col.center);
+        col.rotation += s.atan2(c);
+    }
+    for sp in &mut el.spaces {
+        ring(&mut sp.boundary);
+    }
+    for r in &mut el.roofs {
+        ring(&mut r.outline);
+        if r.shape != "flach" && r.edge_pitch.len() == r.outline.len() {
+            r.custom = true;
+        }
+    }
+    for st in &mut el.stairs {
+        rot(&mut st.start);
+        rot(&mut st.dir);
+        rot(&mut st.center);
+    }
+    for b in &mut el.beams {
+        ring(&mut b.outline);
+    }
 }
 
 /// IFC ins Projekt `root`: als Kontext-Meshes oder (mit `opts.elements`) als Bauteile.
 pub fn ifc_import(root: &Map<String, Value>, meta_json: &str, positions: &[f64], indices: &[f64], element_data: &[f64], opts: &IfcOptions, now: f64) -> Result<IfcResult, String> {
     let meta: Value = serde_json::from_str(meta_json).map_err(|e| format!("IFC-Bericht: {e}"))?;
+    // Gedrehte Georeferenz: Meshes und Bauteile kartenparallel drehen.
+    let rotation = map_rotation(&meta, root);
+    let rotated: Vec<f64>;
+    let positions = match rotation {
+        Some([c, s]) => {
+            rotated = positions.chunks(3).flat_map(|p| if p.len() == 3 { vec![c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]] } else { p.to_vec() }).collect();
+            &rotated[..]
+        }
+        None => positions,
+    };
     let products = crate::import_context::decode_ifc_products(&meta, positions, indices)?;
     let report = crate::import_context::ifc_report(&meta, &products);
     if opts.elements {
-        let el = decode_elements(&meta, element_data);
+        let mut el = decode_elements(&meta, element_data);
+        if let Some(cs) = rotation {
+            rotate_elements(&mut el, cs);
+        }
         let kept = el.kept.clone();
         let (ops, summary, n) = elements_ops(root, &meta, &products, &el, opts, now);
         // Statt der Roh-Bauteile die Zusammenfassung (an derselben Stelle des Berichts).
@@ -1035,5 +1182,85 @@ mod tests {
         bare.remove("geoAnchor");
         let r = ifc_import(&bare, &m.to_string(), &[], &[], &data, &opts, 0.0).unwrap();
         assert!(at(&added(&r.ops, "walls")[0]["start"], 5.0, 0.0));
+    }
+
+    /// L- und Wendeltreppe, Dach mit Neigung je Kante, Träger; Georeferenz um 90° gedreht (lokal x = Nord).
+    fn meta_rotated(x_axis: [f64; 2]) -> (Value, Vec<f64>) {
+        let data = vec![
+            // Wand
+            0.0, 0.0, 4.0, 0.0, 0.0, 2.5, 0.2, 0.0,
+            // Pultdach fallend nach +y: Traufe an Kante 2 (y = 8), sonst Giebel
+            3.0, 30.0, 0.2, 4.0, 0.0, 0.0, 10.0, 0.0, 10.0, 8.0, 0.0, 8.0,
+            // L-Treppe: sx, sy, dx, dy, lauf1, breite, stufen, z0, steighöhe, lauf2, turn, cx, cy, r, sweep, spindel
+            1.0, 2.0, 1.0, 0.0, 1.12, 1.0, 9.0, 0.0, 1.53, 1.12, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            // Wendeltreppe
+            2.8, 3.0, 0.0, 1.0, 4.54, 1.0, 13.0, 0.0, 2.34, 0.0, 0.0, 2.0, 3.0, 0.8, 325.0, 0.3,
+            // Träger: z0, z1, Ring
+            2.6, 3.0, 4.0, 0.0, 0.0, 4.0, 0.0, 4.0, 0.2, 0.0, 0.2,
+        ];
+        let info = |kind: &str, at: usize, n: usize| json!({"kind": kind, "at": at, "n": n, "storey": 0, "layers": [], "classifications": [], "common": {}});
+        let mut roof = info("roof", 8, 12);
+        roof["shape"] = "sattel".into();
+        roof["ridgeAxis"] = "x".into();
+        roof["edgePitch"] = json!([null, null, 30.0, null]);
+        roof["custom"] = true.into();
+        let mut l = info("stair", 20, 16);
+        l["shape"] = "L".into();
+        let mut sp = info("stair", 36, 16);
+        sp["shape"] = "spiral".into();
+        let meta = json!({
+            "schema": "IFC4", "lengthScale": 1, "products": [], "skippedItems": {}, "skippedProducts": {},
+            "productsWithoutGeometry": 0, "simplifiedBooleans": 0, "voidsApplied": 0, "voidsIgnored": 0, "parseErrors": 0, "truncated": false,
+            "mapConversion": {"eastings": 2600100.0, "northings": 1200050.0, "height": 0.0, "xAxis": x_axis, "scale": 1.0, "crs": "EPSG:2056"},
+            "elements": {
+                "storeys": [{"globalId": "s", "name": "EG", "elevation": 0.0}],
+                "elements": [info("wall", 0, 8), roof, l, sp, info("beam", 52, 11)],
+                "kept": {}, "keptReasons": {},
+            },
+        });
+        (meta, data)
+    }
+
+    #[test]
+    fn l_and_spiral_stair_edge_pitch_roof_beam_and_rotated_map() {
+        let opts = IfcOptions { file_name: "a.ifc".into(), group: None, elements: true };
+        // Ungedreht: Werte wie erkannt.
+        let (m, data) = meta_rotated([1.0, 0.0]);
+        let r = ifc_import(&root(), &m.to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+        let roofs = added(&r.ops, "roofs");
+        assert_eq!((roofs[0]["shape"].as_str(), &roofs[0]["edgePitchDeg"]), (Some("sattel"), &json!([null, null, 30, null])));
+        let stairs = added(&r.ops, "stairs");
+        let l = stairs[0];
+        assert_eq!((l["shape"].as_str(), l["turn"].as_f64(), l["stepCount"].as_f64()), (Some("L"), Some(1.0), Some(9.0)));
+        assert!((l["run2Length"].as_f64().unwrap() - 1.12).abs() < 1e-9);
+        assert!(at(&l["start"], 101.0, 52.0));
+        let s = stairs[1];
+        assert_eq!((s["shape"].as_str(), s["sweep"].as_f64()), (Some("spiral"), Some(325.0)));
+        assert!((s["radius"].as_f64().unwrap() - 0.8).abs() < 1e-9 && (s["centerColumn"].as_f64().unwrap() - 0.3).abs() < 1e-9);
+        assert!(at(&s["center"], 102.0, 53.0) && at(&s["start"], 102.8, 53.0));
+        let solids = added(&r.ops, "extrudedSolids");
+        assert_eq!(solids.len(), 1);
+        assert_eq!(solids[0]["type"].as_str(), Some("extrudedSolid"));
+        assert!((solids[0]["height"].as_f64().unwrap() - 0.4).abs() < 1e-9 && (solids[0]["baseOffset"].as_f64().unwrap() - 2.6).abs() < 1e-9);
+        assert!(at(&solids[0]["points"][2], 104.0, 50.2));
+        assert_eq!(r.summary.unwrap()["beams"].as_f64(), Some(1.0));
+
+        // Lokal x zeigt nach Norden (90°): alles um 90° gedreht, dann verschoben.
+        let (m, data) = meta_rotated([0.0, 1.0]);
+        let r = ifc_import(&root(), &m.to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+        let w = added(&r.ops, "walls")[0];
+        assert!(at(&w["start"], 100.0, 50.0) && at(&w["end"], 100.0, 54.0), "{w}");
+        let roof = added(&r.ops, "roofs")[0];
+        assert!(at(&roof["outline"][2], 92.0, 60.0) && at(&roof["outline"][3], 92.0, 50.0), "{roof}");
+        assert_eq!((roof["shape"].as_str(), &roof["edgePitchDeg"]), (Some("sattel"), &json!([null, null, 30, null])));
+        let stairs = added(&r.ops, "stairs");
+        assert!(at(&stairs[0]["start"], 98.0, 51.0) && at(&stairs[0]["dir"], 0.0, 1.0), "{}", stairs[0]);
+        assert!(at(&stairs[1]["center"], 97.0, 52.0) && at(&stairs[1]["start"], 97.0, 52.8), "{}", stairs[1]);
+        assert!(at(&added(&r.ops, "extrudedSolids")[0]["points"][2], 99.8, 54.0));
+        // Ohne Projekt-Bezug bleibt die Datei lokal und ungedreht.
+        let mut bare = root();
+        bare.remove("geoAnchor");
+        let r = ifc_import(&bare, &m.to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+        assert!(at(&added(&r.ops, "walls")[0]["end"], 4.0, 0.0));
     }
 }
