@@ -119,4 +119,15 @@ describe("viewTemplates", () => {
     // Vorlage anwenden schaltet die Regel ein (Anzeigezustand).
     expect(uiPatch(p.viewTemplates![0], ui).enabledOverrideRuleIds).toEqual([block.id]);
   });
+
+  it("[33] Baustein „Ansicht ohne Materialschraffur“: nur in Ansichten, Öffnungen ausgenommen, ausgeschaltet", () => {
+    const block = standardOverrideRules(withTemplate(base())).find((r) => r.id === "std-or-ansicht-ohne-materialschraffur")!;
+    expect(block).toMatchObject({
+      name: "Ansicht ohne Materialschraffur",
+      enabled: false,
+      condition: { type: "view_kind", operator: "equals", value: "elevation" },
+      conditions: [{ type: "element_kind", operator: "not_equals", value: "opening" }],
+      actions: { fillColor: "#ffffff", hatch: "none" },
+    });
+  });
 });

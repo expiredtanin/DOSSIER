@@ -142,7 +142,7 @@ impl<'a> Ctx<'a> {
 
     /// [33] Massstab und eingeschaltete Regeln dieser Plan-Erzeugung für die Override-Auswertung.
     pub fn rule_view(&self) -> overrides::RuleView<'_> {
-        overrides::RuleView::at(self.a.scale, self.a.rules.as_ref())
+        overrides::RuleView::at(self.a.scale, self.a.rules.as_ref()).view("plan")
     }
 
     /// Effektive Override-Aktionen eines Elements (`overrideFor` in TS).
@@ -293,7 +293,7 @@ pub(super) fn ceiling_layers<'a>(p: &'a Project, c: &Ceiling) -> Result<&'a [Lay
 }
 
 /// Typname einer Decke für `object_name` (Maps in TS: letzter Eintrag je id gewinnt).
-fn ceiling_type_name<'a>(p: &'a Project, c: &Ceiling) -> Option<&'a str> {
+pub(crate) fn ceiling_type_name<'a>(p: &'a Project, c: &Ceiling) -> Option<&'a str> {
     let ct = c.ceiling_type_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.ceiling_types.as_deref().unwrap_or(&[]).iter().rev().find(|t| t.id == id));
     ct.map(|t| t.name.as_str()).or_else(|| p.wall_types.iter().rev().find(|t| t.id == c.wall_type_id).map(|t| t.name.as_str()))
 }

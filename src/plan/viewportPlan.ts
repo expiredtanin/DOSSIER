@@ -62,7 +62,7 @@ export async function viewportLevelPlan(
       ? generateSectionPlan(out, mono, { hiddenLines: level.hiddenLines, visibleCodes, openings: true, scaleDenominator, detail, overrideRuleIds })
       : null;
   } else {
-    raw = generateElevationPlan(project, level, { visibleCodes, scaleDenominator, mono });
+    raw = generateElevationPlan(project, level, { visibleCodes, scaleDenominator, mono, overrideRuleIds });
   }
   if (!raw || raw.primitives.length === 0) return EMPTY;
   const own = generatePlan(project, level.id, visibleCodes, undefined, detail, false, mono, false, scaleDenominator, forPrint, false, overrideRuleIds);

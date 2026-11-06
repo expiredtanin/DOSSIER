@@ -467,6 +467,23 @@ pub(crate) mod tests {
         assert!(!red(&p), "nicht verknüpft: Ausschnitt");
     }
 
+    /// [33] Ansichts-Viewport: die Regeln des Ausschnitts wirken auf die Fassade (wie Grundriss/Schnitt).
+    #[test]
+    fn ansichts_viewport_mit_override_regeln() {
+        let mut p: Project = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        p.override_rules = Some(vec![serde_json::from_value(serde_json::json!({"id": "r", "name": "Rot", "enabled": false,
+            "condition": {"type": "view_kind", "operator": "equals", "value": "elevation"}, "actions": {"fillColor": "#ff0000"}})).unwrap()]);
+        let mut snap: ViewSnapshot = serde_json::from_value(serde_json::json!({"id": "s", "name": "S", "viewType": "grundriss", "view3d": "iso", "scaleDenominator": 100,
+            "detail": "mittel", "activeLevelId": "ansicht-sued", "layerVisibility": {"20": true, "31": true}, "drawingVisibility": {}})).unwrap();
+        let red = |p: &Project, s: &ViewSnapshot| {
+            let buf = snapshot_buf(p, s, 100.0, None).unwrap();
+            serde_json::to_string(&crate::plan::buf::View::parse(&buf).unwrap().prims().unwrap()).unwrap().contains("#ff0000")
+        };
+        assert!(!red(&p, &snap), "Regel im Projekt aus, Ausschnitt legt nichts fest");
+        snap.enabled_override_rule_ids = Some(vec!["r".into()]);
+        assert!(red(&p, &snap), "Ausschnitt schaltet die Regel ein");
+    }
+
     /// [100] Deckenspiegel-Viewport: derselbe Inhalt wie die Deckenspiegel-Ebene (Wände, Untersicht).
     #[test]
     fn deckenspiegel_viewport() {

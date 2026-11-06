@@ -3,7 +3,8 @@
 // gewinnt pro Aktions-Feld) mit Aktiv-Checkbox, Auf/Ab und Löschen; Detail
 // rechts = Bedingungen (Kriterium/Operator/Wert, weitere Bedingungen mit UND)
 // + Massstab-Kriterium ([33], ab/bis 1:n) + optionale Aktionen (Farbe/Strichstärke/
-// Linienstil; [33] Füllung, Schraffur, Umriss geschnittener Flächen/Schichten). Reines Rendering-Overlay — die
+// Linienstil; [33] Füllung, Schraffur, Umriss geschnittener Flächen/Schichten und Ansichtsflächen, Ausblenden in
+// der Ansicht). Reines Rendering-Overlay — die
 // Auswertung liegt im Kern (`src-tauri/core/src/plan/overrides.rs`);
 // Elementdaten bleiben unverändert.
 
@@ -22,13 +23,15 @@ const OVERRIDE_TYPE_OPTIONS: { value: OverrideConditionType; labelKey: string }[
   { value: "layer_position", labelKey: "resources.overrides.condType.layerPosition" },
   { value: "material", labelKey: "resources.overrides.condType.material" },
   { value: "material_category", labelKey: "resources.overrides.condType.materialCategory" },
+  { value: "view_kind", labelKey: "resources.overrides.condType.viewKind" },
 ];
 
 /** [33] Feste Werte je Kriterium (Auswahl statt Freitext); Beschriftung `resources.overrides.val.<typ>.<wert>`. */
 const ENUM_VALUES: Partial<Record<OverrideConditionType, readonly string[]>> = {
-  element_kind: ["wall", "slab", "ground_slab", "roof"],
+  element_kind: ["wall", "slab", "ground_slab", "roof", "stair", "column", "opening"],
   layer_function: ["structure", "insulation", "screed", "finish", "plaster", "substructure", "membrane", "cladding", "air"],
   layer_position: ["above", "structure", "below"],
+  view_kind: ["plan", "section", "elevation"],
   material_category: ["concrete", "masonry", "timber", "insulation", "screed", "flooring", "plaster", "loose_fill", "metal", "glass", "membrane", "air", "cladding", "stone", "other"],
 };
 
@@ -327,6 +330,18 @@ function OverrideRuleDetail({
           aria-label={t("resources.overrides.action.outline")}
           checked={rule.actions.outline === true}
           onChange={(e) => patchActions({ outline: e.target.checked })}
+        />
+      </OptionalAction>
+      <OptionalAction
+        label={t("resources.overrides.action.hide")}
+        active={rule.actions.hide !== undefined}
+        onToggle={(on) => patchActions({ hide: on ? true : undefined })}
+      >
+        <input
+          type="checkbox"
+          aria-label={t("resources.overrides.action.hide")}
+          checked={rule.actions.hide === true}
+          onChange={(e) => patchActions({ hide: e.target.checked })}
         />
       </OptionalAction>
     </div>

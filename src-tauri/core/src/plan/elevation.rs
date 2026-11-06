@@ -10,8 +10,9 @@ use crate::jsmath::{hypot, hypot2};
 use crate::jsnum::{max, min, round};
 use crate::model::*;
 use crate::model3d::{self, RSlab, RWall};
-use crate::plan::overrides::js_trim;
-use std::collections::HashMap;
+use crate::plan::overrides::{js_trim, RuleView, Subject};
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 const EDGE_INK: &str = "#2b3039";
 const EDGE_MM: f64 = 0.13;
@@ -86,6 +87,112 @@ struct Face {
     id: String,
     fill: [f64; 3],
     normal: [f64; 3],
+    /// [33] Override-Regeln dieser Fläche (Bauteil + sichtbare Schicht); `None` = keine.
+    ov: Option<Rc<SurfOv>>,
+}
+
+/// [33] Override einer Ansichtsfläche bzw. Öffnung (`overrides::effective_surface`).
+#[derive(Debug, Default)]
+struct SurfOv {
+    fill: Option<String>,
+    /// Ansichtsschraffur weglassen (Schraffur „ohne“ oder eine Projekt-Schraffur auf der Fläche).
+    no_pattern: bool,
+    /// Projekt-Schraffur auf der Fläche.
+    hatch: Option<super::prim::HatchRender>,
+    /// Kanten der Fläche an/aus.
+    outline: Option<bool>,
+    color: Option<String>,
+    lineweight: Option<f64>,
+    hide: bool,
+}
+
+impl SurfOv {
+    /// Linie in Regel-Farbe/-Stärke.
+    fn restyle(&self, mut l: Primitive) -> Primitive {
+        if let Primitive::Line { color, weight_mm, .. } = &mut l {
+            if let Some(c) = &self.color {
+                *color = Some(c.clone());
+            }
+            if let Some(w) = self.lineweight {
+                *weight_mm = w;
+            }
+        }
+        l
+    }
+}
+
+/// [33] Aktionen für ein Bauteil (`kind`, Ebene `code`, Name) und — mit `li` — seine sichtbare Schicht.
+fn surf_ov(p: &Project, v: RuleView, kind: &str, code: &str, name: Option<&str>, layers: &[Layer], li: Option<usize>) -> Option<Rc<SurfOv>> {
+    use super::overrides as ovr;
+    let mut s = Subject { layer_name: p.layer_category(code).map(|c| c.name.as_str()), layer_code: Some(code), object_name: name, element_kind: Some(kind), ..Default::default() };
+    if let Some(i) = li.filter(|&i| i < layers.len()) {
+        let l = &layers[i];
+        let c = p.component_or_fallback(&l.component_id);
+        s.layer_function = ovr::layer_function(p, l).and_then(ovr::function_key);
+        s.layer_position = ovr::layer_positions(p, layers).get(i).copied();
+        s.material_id = Some(c.id.as_str());
+        s.material_standard = c.standard_id.as_deref();
+        s.material_name = Some(c.name.as_str());
+        s.material_category = Some(crate::standards::material_category(c));
+    }
+    let (el, ly, hide) = ovr::effective_surface(p.override_rules.as_deref(), &s, v);
+    let (no_pattern, hatch) = match ly.hatch.as_deref() {
+        None | Some("material") => (false, None),
+        Some("none") => (true, None),
+        Some(id) => super::style::resolve_hatch(p, id, None, None, None).map_or((false, None), |h| (true, Some(h))),
+    };
+    let o = SurfOv { fill: ly.fill_color, no_pattern, hatch, outline: ly.outline, color: el.color, lineweight: el.lineweight, hide: hide == Some(true) };
+    (o.fill.is_some() || o.no_pattern || o.outline.is_some() || o.color.is_some() || o.lineweight.is_some() || o.hide).then(|| Rc::new(o))
+}
+
+/// [33] Override-Regeln je Ansichtsfläche: Wand (Wandtyp, sichtbare Seite = äusserste bzw. innerste
+/// Schicht), Decke/Bodenplatte, Treppe, Dach (Eindeckung = erste Schicht), Stütze. Ohne aktive Regel nichts.
+fn face_overrides(p: &Project, faces: &mut [Face], v: RuleView) {
+    if !super::overrides::has_active(p, v) {
+        return;
+    }
+    let mut memo: HashMap<(Role, String, Option<bool>), Option<Rc<SurfOv>>> = HashMap::new();
+    for f in faces.iter_mut().filter(|f| !f.id.is_empty()) {
+        let wall = if f.role == Role::Wall { p.walls.iter().find(|w| w.id == f.id) } else { None };
+        let side = wall.and_then(|w| wall_side(w, f.normal));
+        let key = (f.role, f.id.clone(), side);
+        if let Some(o) = memo.get(&key) {
+            f.ov = o.clone();
+            continue;
+        }
+        let id = f.id.as_str();
+        let o = match f.role {
+            Role::Wall => wall.and_then(|w| {
+                let wt = p.wall_type_or_fallback(w);
+                let li = side.map(|outer| if outer { 0 } else { wt.layers.len().saturating_sub(1) });
+                surf_ov(p, v, "wall", &w.category_code, Some(&wt.name), &wt.layers, li)
+            }),
+            Role::Slab => {
+                if let Some(ce) = p.ceilings.as_deref().unwrap_or(&[]).iter().find(|c| c.id == id) {
+                    let layers = model3d::ceiling_type_ref(p, ce).map_or(Project::fallback_layers(), |t| t.2);
+                    let kind = if super::overrides::is_ground_slab(p, ce, layers) { "ground_slab" } else { "slab" };
+                    surf_ov(p, v, kind, &ce.category_code, super::domains::ceiling_type_name(p, ce), layers, None)
+                } else if let Some(st) = p.stairs.as_deref().unwrap_or(&[]).iter().find(|s| s.id == id) {
+                    surf_ov(p, v, "stair", &st.category_code, Some(&super::stairs::stair_label(st)), &[], None)
+                } else {
+                    None
+                }
+            }
+            Role::Roof => p.roofs.as_deref().unwrap_or(&[]).iter().find(|r| r.id == id).and_then(|r| {
+                let layers = p.roof_layers(r);
+                surf_ov(p, v, "roof", &r.category_code, None, &layers, Some(0))
+            }),
+            Role::Column => p.columns.as_deref().unwrap_or(&[]).iter().find(|c| c.id == id).and_then(|c| surf_ov(p, v, "column", &c.category_code, Some(&super::domains::column_label(c)), &[], None)),
+        };
+        memo.insert(key, o.clone());
+        f.ov = o;
+    }
+}
+
+/// [33] Override-Regeln einer Öffnung (Bauteilart „opening“, Name wie im Grundriss).
+fn opening_override(p: &Project, v: RuleView, id: &str) -> Option<Rc<SurfOv>> {
+    let o = p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == id)?;
+    surf_ov(p, v, "opening", &o.category_code, Some(&super::walls::opening_label(o)), &[], None)
 }
 
 /// Stirnflächen der Dachscheibe an den freien Rändern der Dachflächen (Traufe, Ortgang): je Rand ein
@@ -539,7 +646,7 @@ fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[Ro
             Role::Roof => (roofs[f.src].id.clone(), roofs[f.src].fill),
         };
         let pts = f.pts.iter().map(|q| [q.0, q.1]).collect();
-        out.push(Face { pts, pd: f.pd, depth: f.depth, depth_min: f.depth_min, depth_max: f.depth_max, role, id, fill, normal: f.normal });
+        out.push(Face { pts, pd: f.pd, depth: f.depth, depth_min: f.depth_min, depth_max: f.depth_max, role, id, fill, normal: f.normal, ov: None });
     }
     out
 }
@@ -1119,6 +1226,8 @@ struct EdgeSeg {
     a: Pt,
     b: Pt,
     hidden: bool,
+    /// Fläche (Index + 1 in `faces`), 0 = keine.
+    owner: u32,
 }
 
 /// Exakte Sichtbarkeit ([G4]) der Flächenkanten: Flächen in Ansichtskoordinaten (u, Höhe, Tiefe),
@@ -1128,11 +1237,11 @@ fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpening], frame:
     let round_cols: HashMap<&str, u32> = p.columns.as_deref().unwrap_or(&[]).iter().filter(|c| matches!(c.profile, ColumnProfile::Round { .. })).enumerate().map(|(i, c)| (c.id.as_str(), i as u32)).collect();
     let (n, u) = ([frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
     let mut hf: Vec<crate::hlr::Face> = Vec::with_capacity(faces.len() + openings.len());
-    for f in faces {
+    for (fi, f) in faces.iter().enumerate() {
         let pts = f.pts.iter().zip(&f.pd).map(|(q, &d)| [q[0], q[1], d]).collect();
         let m = f.normal;
         let normal = [m[0] * u[0] + m[1] * u[1] + m[2] * u[2], m[1], m[0] * n[0] + m[1] * n[1] + m[2] * n[2]];
-        let mut h = crate::hlr::Face::new(pts, normal, 0);
+        let mut h = crate::hlr::Face::new(pts, normal, fi as u32 + 1);
         if f.role == Role::Wall {
             h.smooth = arc_ids.get(f.id.as_str()).copied().unwrap_or(0);
         }
@@ -1148,7 +1257,7 @@ fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpening], frame:
         hf.push(h);
     }
     let opts = crate::hlr::Opts { hidden, ..crate::hlr::Opts::default() };
-    crate::hlr::hidden_lines(&hf, &opts).into_iter().map(|s| EdgeSeg { a: s.a, b: s.b, hidden: s.hidden }).collect()
+    crate::hlr::hidden_lines(&hf, &opts).into_iter().map(|s| EdgeSeg { a: s.a, b: s.b, hidden: s.hidden, owner: s.owner }).collect()
 }
 
 /// [T6] Obere Hüllkurve des Geländes (samt Baugruben) in der Ansicht: Dreiecke mit Tiefe in [0, `depth_max`]
@@ -1225,6 +1334,13 @@ fn terrain_silhouette(p: &Project, t: &TerrainMesh, frame: &[f64; 9], range: (f6
 
 /// `generateElevationPlan`: Primitive und Ausmass; `None` ohne Ansichtslinie.
 pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
+    elevation_primitives_with(p, level, shadows, mono, vis, scale, None)
+}
+
+/// Wie [`elevation_primitives`], mit den eingeschalteten Override-Regeln eines Blatt-Viewports (`rules`: ids;
+/// `None` = Schalter im Projekt). [33] Regeln wirken auf Flächen (Füllung, Schraffur, ausblenden), Kanten
+/// (Farbe, Stärke, Umriss aus) und Öffnungen (Linien, Glasfüllung).
+pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64, rules: Option<&HashSet<String>>) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
     let frame = frame_of(&plane);
     let mut walls = model3d::emit_walls_with(p, false, false)?;
@@ -1271,10 +1387,20 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         faces.retain(|f| category(f).is_none_or(|c| vis.visible(c) && vis.render(c)));
     }
     let greyed = |f: &Face| vis.has_display && category(f).is_some_and(|c| vis.greyed(c));
+    // [33] Override-Regeln: ausgeblendete Bauteile entfallen wie ausgeblendete Kategorien (verdecken nichts),
+    // Wände samt ihren Öffnungen.
+    let rv = RuleView::at(scale, rules).view("elevation");
+    face_overrides(p, &mut faces, rv);
+    let hidden_walls: HashSet<String> = faces.iter().filter(|f| f.role == Role::Wall && f.ov.as_ref().is_some_and(|o| o.hide)).map(|f| f.id.clone()).collect();
+    faces.retain(|f| !f.ov.as_ref().is_some_and(|o| o.hide));
 
     // Ansichtsfarbe und -schraffur ([100]) der sichtbaren Bauteilseite.
     let (pattern_lines, pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
     let mut openings = collect_openings(p, &frame);
+    if !hidden_walls.is_empty() {
+        let host = |id: &str| p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == id).map(|o| o.host_wall_id.as_str());
+        openings.retain(|op| !host(&op.id).is_some_and(|w| hidden_walls.contains(w)));
+    }
     if let Some((d, dropped)) = &far {
         let host = |id: &str| p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == id).map(|o| o.host_wall_id.as_str());
         openings.retain(|op| match host(&op.id) {
@@ -1307,6 +1433,8 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     let mut acc = Acc::new();
     // Jede Fläche trägt ihre Bauteilfarbe (Wand/Decke aus dem 3D-Modell, Dach aus der Eindeckung).
     let fill_for = |fill: [f64; 3]| -> String { if mono { "#ffffff".into() } else { rgb_to_hex(fill) } };
+    // [33] Füllung aus einer Regel hat Vorrang (auch in Tusche).
+    let face_fill = |f: &Face| -> String { f.ov.as_ref().and_then(|o| o.fill.clone()).unwrap_or_else(|| fill_for(f.fill)) };
     let mut items: Vec<Item> = Vec::new();
     let mut seq = 0usize;
     let mut pending: Vec<Pending> = Vec::new();
@@ -1325,9 +1453,10 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         let is_roof = f.role == Role::Roof;
         // Verschnittene Dächer ([G5]) kommen teils als Dreiecke: ein Hauch Kontur in der Füllfarbe deckt
         // die Haarfugen zwischen ihnen.
-        let fill = fill_for(f.fill);
+        let fill = face_fill(f);
         let seam = is_roof && assembled.contains(f.id.as_str());
-        let mut prim = if seam { polygon(pts, &fill, &fill, 0.15, no_hatch()) } else { polygon(pts, &fill, "none", 0.0, no_hatch()) };
+        let hatch = f.ov.as_ref().and_then(|o| o.hatch.clone()).unwrap_or_else(no_hatch);
+        let mut prim = if seam { polygon(pts, &fill, &fill, 0.15, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
         if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, column_id, .. } = &mut prim {
             *g = Some(greyed(f));
             if !f.id.is_empty() {
@@ -1426,6 +1555,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         }
     }
 
+    let op_rules = super::overrides::has_active(p, rv);
     for (k, op) in openings.iter().enumerate() {
         if occluded.get(1 + k) == Some(&1.0) {
             continue;
@@ -1442,7 +1572,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
         let id = Some(op.id.as_str());
         // Formöffnung: das Rechteck-Loch der Wand ausserhalb des Umrisses in Wandfarbe schliessen.
         if let Some((_, _, fills, wid)) = &op.shape {
-            let wall_fill = faces.iter().find(|f| f.role == Role::Wall && f.id == *wid).map_or("#ffffff".to_string(), |f| fill_for(f.fill));
+            let wall_fill = faces.iter().find(|f| f.role == Role::Wall && f.id == *wid).map_or("#ffffff".to_string(), face_fill);
             for q in fills {
                 let pts = to_vec(q);
                 items.push(Item { depth: d + EPS * 10.0, seq, rank: None, prim: polygon(pts, &wall_fill, "none", 0.0, no_hatch()) });
@@ -1453,22 +1583,28 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             items.push(Item { depth: d, seq, rank: None, prim });
             seq += 1;
         };
+        // [33] Regeln der Öffnung: Linienfarbe/-stärke, Füllung für Glas und Türblatt.
+        let ov = if op_rules { opening_override(p, rv, &op.id) } else { None };
+        let ink = ov.as_ref().and_then(|o| o.color.as_deref()).unwrap_or(EDGE_INK);
+        let (frame_mm, edge_mm) = ov.as_ref().and_then(|o| o.lineweight).map_or((FRAME_MM, EDGE_MM), |w| (w, w));
+        let glass_fill = ov.as_ref().and_then(|o| o.fill.as_deref()).unwrap_or(if mono { GLASS_FILL_MONO } else { GLASS_FILL_COLOR });
+        let leaf_fill = ov.as_ref().and_then(|o| o.fill.as_deref()).unwrap_or(if mono { "#ffffff" } else { DOOR_LEAF_FILL_COLOR });
         let frame_pts = op.shape.as_ref().map_or(op.frame.as_ref().map_or(&op.pts[..], |f| &f[..]), |(o, _, _, _)| &o[..]);
-        push(poly_prim(to_vec(frame_pts), if mono { "#ffffff" } else { FRAME_FILL_COLOR }, EDGE_INK, FRAME_MM, id));
+        push(poly_prim(to_vec(frame_pts), if mono { "#ffffff" } else { FRAME_FILL_COLOR }, ink, frame_mm, id));
         if let Some((_, g, _, _)) = &op.shape {
-            push(poly_prim(to_vec(g), if mono { GLASS_FILL_MONO } else { GLASS_FILL_COLOR }, EDGE_INK, EDGE_MM, id));
+            push(poly_prim(to_vec(g), glass_fill, ink, edge_mm, id));
         }
         for r in &op.sill {
-            push(poly_prim(to_vec(r), if mono { "#ffffff" } else { SILL_FILL_COLOR }, EDGE_INK, EDGE_MM, id));
+            push(poly_prim(to_vec(r), if mono { "#ffffff" } else { SILL_FILL_COLOR }, ink, edge_mm, id));
         }
         for r in &op.sash_rects {
-            push(poly_prim(to_vec(r), "none", EDGE_INK, EDGE_MM, id));
+            push(poly_prim(to_vec(r), "none", ink, edge_mm, id));
         }
         for r in &op.glass {
-            push(poly_prim(to_vec(r), if mono { GLASS_FILL_MONO } else { GLASS_FILL_COLOR }, EDGE_INK, EDGE_MM, id));
+            push(poly_prim(to_vec(r), glass_fill, ink, edge_mm, id));
         }
         for r in &op.door_leaf {
-            push(poly_prim(to_vec(r), if mono { "#ffffff" } else { DOOR_LEAF_FILL_COLOR }, EDGE_INK, EDGE_MM, id));
+            push(poly_prim(to_vec(r), leaf_fill, ink, edge_mm, id));
         }
         if shadows && op.shape.is_none() {
             let q = &op.pts;
@@ -1484,7 +1620,7 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             }
         }
         for (a, b) in &op.divisions {
-            push(line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-division", EDGE_MM, EDGE_INK));
+            push(line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-division", edge_mm, ink));
         }
         for (a, b) in &op.symbol {
             let mut l = line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-opening-symbol", 0.1, SYMBOL_INK);
@@ -1514,6 +1650,11 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
     for e in &edges {
         acc.add(e.a[0], e.a[1]);
         acc.add(e.b[0], e.b[1]);
+        // [33] Regeln der Fläche: Umriss aus, Linienfarbe/-stärke.
+        let ov = (e.owner > 0).then(|| faces.get(e.owner as usize - 1)).flatten().and_then(|f| f.ov.as_deref());
+        if ov.is_some_and(|o| o.outline == Some(false)) {
+            continue;
+        }
         if e.hidden {
             let mut l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "elevation-hidden", HIDDEN_MM, HIDDEN_INK);
             if let Primitive::Line { dash, .. } = &mut l {
@@ -1521,9 +1662,11 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
             }
             prims.push(l);
         } else if on_rings(&silhouette, [(e.a[0] + e.b[0]) / 2.0, (e.a[1] + e.b[1]) / 2.0]) {
-            prims.push(line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "elevation-outline", SILHOUETTE_MM, EDGE_INK));
+            let l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "elevation-outline", SILHOUETTE_MM, EDGE_INK);
+            prims.push(match ov { Some(o) => o.restyle(l), None => l });
         } else {
-            prims.push(outline_line(e.a, e.b));
+            let l = outline_line(e.a, e.b);
+            prims.push(match ov { Some(o) => o.restyle(l), None => l });
         }
     }
     // [T6] Gelände-Silhouette (gestaltetes Terrain) zwischen Ansichtsebene und vorderster Gebäudefläche; was
@@ -1580,6 +1723,15 @@ fn drop_far_faces(faces: &mut Vec<Face>, depth: f64) -> std::collections::HashSe
 }
 
 fn wall_side_component<'a>(p: &'a Project, wall: &Wall, normal: [f64; 3]) -> Option<&'a Component> {
+    let outer = wall_side(wall, normal)?;
+    let layers = &p.wall_type(wall)?.layers;
+    let l = if outer { layers.first() } else { layers.last() }?;
+    p.component(&l.component_id)
+}
+
+/// Sichtbare Wandseite einer Fläche: `Some(true)` = rechts der Achse (äusserste Schicht), `Some(false)` =
+/// links (innerste), `None` = Stirnseite.
+fn wall_side(wall: &Wall, normal: [f64; 3]) -> Option<bool> {
     let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
     let len = hypot2(dx, dy);
     if !(len > 1e-9) {
@@ -1587,15 +1739,13 @@ fn wall_side_component<'a>(p: &'a Project, wall: &Wall, normal: [f64; 3]) -> Opt
     }
     // Plan (x, y) → Welt (x, Höhe, y); rechte Normale (dy, −dx).
     let side = (dy * normal[0] - dx * normal[2]) / len;
-    let layers = &p.wall_type(wall)?.layers;
-    let l = if side > 0.7 {
-        layers.first()
+    if side > 0.7 {
+        Some(true)
     } else if side < -0.7 {
-        layers.last()
+        Some(false)
     } else {
         None
-    }?;
-    p.component(&l.component_id)
+    }
 }
 
 /// Strichstärke und Farbe einer Ansichtsschraffur.
@@ -1640,6 +1790,9 @@ fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9], scale: f6
                 f.fill = hex_to_rgb(c, f.fill);
             }
         }
+        if f.ov.as_ref().is_some_and(|o| o.no_pattern) {
+            continue; // [33] Regel: Schraffur ohne/eigene
+        }
         let Some(pat) = comp.surface_pattern.as_ref() else { continue };
         let Some(spec) = sp::spec_of(pat, wall.surface_pattern_angle.unwrap_or(0.0)) else { continue };
         let (dx, dy) = (wall.end.x - wall.start.x, wall.end.y - wall.start.y);
@@ -1677,6 +1830,9 @@ fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9], scale: f6
                     f.fill = hex_to_rgb(c, f.fill);
                 }
             }
+        }
+        if faces.iter().any(|f| f.role == Role::Roof && f.id == roof.id && f.ov.as_ref().is_some_and(|o| o.no_pattern)) {
+            continue; // [33] Regel: Schraffur ohne/eigene
         }
         let Some(pat) = comp.surface_pattern.as_ref() else { continue };
         let Some(spec) = sp::spec_of(pat, roof.surface_pattern_angle.unwrap_or(0.0)) else { continue };
@@ -1783,7 +1939,9 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     let scale = args.get(2).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0);
     let mut w = crate::plan::buf::Writer::new(true);
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
-    if let Some((mut prims, bounds)) = elevation_primitives(p, &level, shadows, mono, &vis, scale)? {
+    // [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (`rules`: ids; fehlt = Schalter im Projekt).
+    let on: Option<HashSet<String>> = v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect());
+    if let Some((mut prims, bounds)) = elevation_primitives_with(p, &level, shadows, mono, &vis, scale, on.as_ref())? {
         super::extras::scale_line_weights(p, scale, &mut prims);
         w.group(&prims);
         // Achsraster ([112]): Achsen quer zur Blickebene.
@@ -2243,4 +2401,122 @@ mod tests {
         assert!(outline_lines(&near).len() < n_all, "Kanten der fernen Stütze entfallen");
     }
 
+    fn ov_rule(id: &str, conds: serde_json::Value, actions: serde_json::Value) -> OverrideRule {
+        let c = conds.as_array().unwrap();
+        serde_json::from_value(serde_json::json!({"id": id, "name": id, "enabled": true, "condition": c[0], "conditions": c[1..].to_vec(), "actions": actions})).unwrap()
+    }
+
+    fn render_rules(p: &Project, mono: bool, on: Option<&HashSet<String>>) -> Vec<Primitive> {
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        elevation_primitives_with(p, &level, false, mono, &Visibility::default(), 50.0, on).unwrap().unwrap().0
+    }
+
+    fn wall_fills(prims: &[Primitive]) -> Vec<String> {
+        prims.iter().filter_map(|q| match q { Primitive::Polygon { wall_id: Some(_), fill, .. } => Some(fill.clone()), _ => None }).collect()
+    }
+
+    /// [33] Element-Regeln wirken auf Ansichtsflächen und -kanten: Füllung, Linienfarbe/-stärke, Umriss aus,
+    /// ausblenden; Kriterium Darstellung (`view_kind`). Ohne passende Regel unverändert.
+    #[test]
+    fn override_regeln_in_der_ansicht() {
+        let mut p = sample();
+        let base = serde_json::to_string(&render_rules(&p, false, None)).unwrap();
+        // Regel nur für den Grundriss: Ansicht unverändert.
+        p.override_rules = Some(vec![ov_rule("r-plan", serde_json::json!([{"type": "view_kind", "operator": "equals", "value": "plan"}]), serde_json::json!({"fillColor": "#ff0000", "hide": true}))]);
+        assert_eq!(serde_json::to_string(&render_rules(&p, false, None)).unwrap(), base);
+        // Ausgeschaltet: unverändert.
+        p.override_rules = Some(vec![ov_rule("r1", serde_json::json!([{"type": "view_kind", "operator": "equals", "value": "elevation"}, {"type": "element_kind", "operator": "equals", "value": "wall"}]), serde_json::json!({"fillColor": "#ff0000", "color": "#00aa00", "lineweight": 0.5}))]);
+        p.override_rules.as_mut().unwrap()[0].enabled = false;
+        assert_eq!(serde_json::to_string(&render_rules(&p, false, None)).unwrap(), base);
+        // Eingeschaltet (auch über die Regel-ids eines Ausschnitts).
+        let on: HashSet<String> = ["r1".to_string()].into();
+        for prims in [render_rules(&p, true, Some(&on)), { p.override_rules.as_mut().unwrap()[0].enabled = true; render_rules(&p, true, None) }] {
+            let fills = wall_fills(&prims);
+            assert!(!fills.is_empty() && fills.iter().all(|f| f == "#ff0000"), "{fills:?}");
+            assert!(prims.iter().any(|q| matches!(q, Primitive::Line { color: Some(c), weight_mm, .. } if c == "#00aa00" && (*weight_mm - 0.5).abs() < 1e-9)));
+            // Dach unverändert (Bauteilart Wand).
+            assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { roof_id: Some(_), fill, .. } if fill == "#ffffff")));
+        }
+        // Umriss aus: keine Kanten in der Regelfarbe; Dach ausblenden: keine Dachflächen.
+        p.override_rules = Some(vec![
+            ov_rule("r2", serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "roof"}]), serde_json::json!({"hide": true})),
+            ov_rule("r3", serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "wall"}]), serde_json::json!({"outline": false})),
+        ]);
+        let prims = render_rules(&p, false, None);
+        assert!(!prims.iter().any(|q| matches!(q, Primitive::Polygon { roof_id: Some(_), .. })), "Dach ausgeblendet");
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { wall_id: Some(_), .. })));
+        let n_edges = |prims: &[Primitive]| prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "elevation-outline")).count();
+        p.override_rules.as_mut().unwrap()[1].enabled = false;
+        assert!(n_edges(&prims) < n_edges(&render_rules(&p, false, None)), "Wandkanten ohne Umriss");
+    }
+
+    /// [33] Baustoff-Kriterium greift auf die sichtbare Oberflächenschicht (äusserste Wandschicht, Dachdeckung);
+    /// Schraffur „ohne“ unterdrückt die Ansichtsschraffur, eine Projekt-Schraffur legt sie auf die Fläche.
+    #[test]
+    fn override_baustoff_der_oberflaeche_und_schraffur() {
+        let mut p = sample();
+        let c = p.components.iter_mut().find(|c| c.id == "render-ext").unwrap();
+        c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Lines, spacing: 0.1, ..Default::default() });
+        let n_pat = |prims: &[Primitive]| prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "elevation-surface-pattern")).count();
+        assert!(n_pat(&render_rules(&p, false, None)) > 20);
+        // Tragende Schicht (Backstein) ist nicht sichtbar: Regel greift nicht.
+        p.override_rules = Some(vec![ov_rule("b", serde_json::json!([{"type": "material", "operator": "equals", "value": "Backstein"}]), serde_json::json!({"fillColor": "#ff0000"}))]);
+        assert!(!wall_fills(&render_rules(&p, false, None)).iter().any(|f| f == "#ff0000"));
+        p.override_rules = Some(vec![ov_rule("a", serde_json::json!([{"type": "material", "operator": "equals", "value": "Aussenputz"}]), serde_json::json!({"fillColor": "#ff0000", "hatch": "none"}))]);
+        let prims = render_rules(&p, false, None);
+        assert!(wall_fills(&prims).iter().any(|f| f == "#ff0000"), "Aussenputz = sichtbare Schicht");
+        assert_eq!(n_pat(&prims), 0, "Schraffur ohne");
+        // Dachdeckung (erste Schicht des Dachtyps).
+        p.roof_types = Some(vec![serde_json::from_value(serde_json::json!({"id": "rt", "name": "Ziegeldach", "layers": [{"componentId": "roof-tiles", "thickness": 0.05}, {"componentId": "concrete", "thickness": 0.2}]})).unwrap()]);
+        p.roofs.as_mut().unwrap()[0].roof_type_id = Some("rt".into());
+        p.override_rules = Some(vec![ov_rule("d", serde_json::json!([{"type": "material", "operator": "equals", "value": "Dachziegel"}]), serde_json::json!({"fillColor": "#0000ff"}))]);
+        let prims = render_rules(&p, false, None);
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { roof_id: Some(_), fill, .. } if fill == "#0000ff")));
+        assert!(!wall_fills(&prims).iter().any(|f| f == "#0000ff"));
+        // Projekt-Schraffur auf der Fläche statt Ansichtsschraffur.
+        let hid = p.hatches.iter().find(|h| h.id == "diagonal").map(|h| h.id.clone()).expect("Schraffur im Beispiel");
+        p.override_rules = Some(vec![ov_rule("h", serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "wall"}]), serde_json::json!({"hatch": hid}))]);
+        let prims = render_rules(&p, false, None);
+        assert_eq!(n_pat(&prims), 0);
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { wall_id: Some(_), hatch, .. } if hatch.pattern != HatchPattern::None)));
+    }
+
+    /// [33] Öffnungen: Linienfarbe/-stärke und Glasfüllung aus Regeln; ausgeblendete Wand nimmt ihre Öffnungen mit.
+    #[test]
+    fn override_oeffnungen_in_der_ansicht() {
+        let mut p = sample();
+        p.override_rules = Some(vec![ov_rule("o", serde_json::json!([{"type": "element_kind", "operator": "equals", "value": "opening"}]), serde_json::json!({"color": "#00aa00", "fillColor": "#999999"}))]);
+        let prims = render_rules(&p, true, None);
+        let ops: Vec<&Primitive> = prims.iter().filter(|q| matches!(q, Primitive::Polygon { opening_id: Some(_), .. })).collect();
+        assert!(!ops.is_empty() && ops.iter().all(|q| matches!(q, Primitive::Polygon { stroke, .. } if stroke == "#00aa00" || stroke == "none")));
+        assert!(ops.iter().any(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == "#999999")));
+        p.override_rules = Some(vec![ov_rule("w", serde_json::json!([{"type": "object_name", "operator": "contains", "value": "Aussenwand"}]), serde_json::json!({"hide": true}))]);
+        let prims = render_rules(&p, true, None);
+        assert!(!prims.iter().any(|q| matches!(q, Primitive::Polygon { opening_id: Some(_), .. })), "Öffnungen der ausgeblendeten Wände entfallen");
+    }
+
+    /// [33] Mitgelieferter Baustein „Ansicht ohne Materialschraffur“: Flächen weiss ohne Ansichtsschraffur und
+    /// Ansichtsfarbe, Fenster bleiben grau; im Grundriss/Schnitt wirkungslos (Kriterium Darstellung).
+    #[test]
+    fn baustein_ansicht_ohne_materialschraffur() {
+        let mut p = sample();
+        let c = p.components.iter_mut().find(|c| c.id == "render-ext").unwrap();
+        c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Lines, spacing: 0.1, ..Default::default() });
+        c.elevation_color = Some("#c0603a".into());
+        let mut rules: Vec<OverrideRule> = crate::standards::override_rules().into_iter().map(|v| serde_json::from_value(v).unwrap()).collect();
+        let r = rules.iter_mut().find(|r| r.id == crate::standards::STD_RULE_ELEVATION_PLAIN).unwrap();
+        assert!(!r.enabled, "ausgeschaltet geliefert");
+        r.enabled = true;
+        p.override_rules = Some(rules);
+        let prims = render_rules(&p, false, None);
+        let json = serde_json::to_string(&prims).unwrap();
+        assert!(!json.contains("elevation-surface-pattern") && !json.contains("#c0603a"), "ohne Schraffur und Ansichtsfarbe");
+        assert!(wall_fills(&prims).iter().all(|f| f == "#ffffff"));
+        assert!(json.contains(GLASS_FILL_COLOR), "Fenster grau");
+        let rv = super::super::overrides::RuleView::at(100.0, None);
+        let s = super::super::overrides::Subject { element_kind: Some("wall"), ..Default::default() };
+        assert!(super::super::overrides::effective_layer(p.override_rules.as_deref(), &s, rv.view("section")).fill_color.is_none());
+        assert!(super::super::overrides::effective_layer(p.override_rules.as_deref(), &s, rv.view("plan")).fill_color.is_none());
+    }
 }

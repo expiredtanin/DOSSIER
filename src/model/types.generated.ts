@@ -2190,6 +2190,11 @@ export type OverrideActions = {
    * Benachbarte Schichten mit gleicher Darstellung ohne Muster bilden eine Fläche.
    */
   outline?: boolean;
+  /**
+   * [33] Bauteil ausblenden (wirkt in der Ansicht: Flächen, Kanten, Ansichtsschraffur und — bei Wänden —
+   * deren Öffnungen entfallen und verdecken nichts).
+   */
+  hide?: boolean;
 };
 
 /** Bedingung einer Override-Regel. */
@@ -2226,7 +2231,8 @@ export type OverrideConditionType =
   | "layer_function"
   | "layer_position"
   | "material"
-  | "material_category";
+  | "material_category"
+  | "view_kind";
 
 /** Vergleichs-Operator einer Override-Bedingung (case-insensitiv). */
 export type OverrideOperator = "equals" | "contains" | "starts_with" | "not_equals";

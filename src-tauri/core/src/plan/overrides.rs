@@ -21,11 +21,18 @@ use std::collections::HashSet;
 pub struct RuleView<'a> {
     pub scale: Option<f64>,
     pub on: Option<&'a HashSet<String>>,
+    /// Darstellung für das Kriterium `view_kind`: "plan", "section", "elevation" (`None` = unbekannt).
+    pub view: Option<&'static str>,
 }
 
 impl<'a> RuleView<'a> {
     pub fn at(scale: f64, on: Option<&'a HashSet<String>>) -> Self {
-        RuleView { scale: Some(scale), on }
+        RuleView { scale: Some(scale), on, view: None }
+    }
+
+    /// Dieselbe Auswertung für die Darstellung `view` ("plan", "section", "elevation").
+    pub fn view(self, view: &'static str) -> Self {
+        RuleView { view: Some(view), ..self }
     }
 
     /// Wirkt die Regel in dieser Darstellung (eingeschaltet und im Massstabsbereich)?
@@ -67,6 +74,8 @@ pub struct Subject<'a> {
     pub material_name: Option<&'a str>,
     /// [33] Baustoff-Kategorie (`standards::material_category`).
     pub material_category: Option<&'a str>,
+    /// [33] Darstellung (die Auswertung setzt sie aus [`RuleView::view`]).
+    pub view_kind: Option<&'a str>,
 }
 
 /// Effektive Aktionen (alle `None` = kein Override).
@@ -150,6 +159,7 @@ pub fn matches_condition(c: &OverrideCondition, s: &Subject) -> bool {
         T::LayerPosition => [s.layer_position, None, None],
         T::Material => [s.material_id, s.material_standard, s.material_name],
         T::MaterialCategory => [s.material_category, None, None],
+        T::ViewKind => [s.view_kind, None, None],
         T::Unknown => [None, None, None],
     };
     let cands: Vec<String> = raw.iter().flatten().map(|x| norm(x)).collect();
@@ -174,6 +184,7 @@ pub fn rule_matches(rule: &OverrideRule, s: &Subject) -> bool {
 pub fn effective(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView) -> Actions {
     let mut out = Actions::default();
     let Some(rules) = rules else { return out };
+    let s = &Subject { view_kind: v.view, ..*s };
     for rule in rules {
         if !v.active(rule) || is_layer_rule(rule) || !rule_matches(rule, s) {
             continue;
@@ -199,6 +210,7 @@ pub fn effective(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView) -> Ac
 pub fn effective_layer(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView) -> LayerActions {
     let mut out = LayerActions::default();
     let Some(rules) = rules else { return out };
+    let s = &Subject { view_kind: v.view, ..*s };
     for rule in rules {
         let a = &rule.actions;
         if !v.active(rule) || (a.fill_color.is_none() && a.hatch.is_none() && a.outline.is_none()) || !rule_matches(rule, s) {
@@ -215,6 +227,35 @@ pub fn effective_layer(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView)
         }
     }
     out
+}
+
+/// [33] Alle Aktionen einer Ansichtsfläche ([`super::elevation`]): Die sichtbare Fläche IST eine Schicht
+/// (äusserste Wandschicht, Dachdeckung), darum zählen Element- und Schicht-Regeln gleich; `s` trägt die
+/// Element- und — wo bekannt — die Schicht-Eigenschaften. Pro Feld gewinnt die oberste passende Regel.
+pub fn effective_surface(rules: Option<&[OverrideRule]>, s: &Subject, v: RuleView) -> (Actions, LayerActions, Option<bool>) {
+    let (mut el, mut ly, mut hide) = (Actions::default(), LayerActions::default(), None);
+    let Some(rules) = rules else { return (el, ly, hide) };
+    let s = &Subject { view_kind: v.view, ..*s };
+    let text = |x: &Option<String>| x.as_deref().map(js_trim).filter(|x| !x.is_empty()).map(String::from);
+    for rule in rules {
+        if !v.active(rule) || !rule_matches(rule, s) {
+            continue;
+        }
+        let a = &rule.actions;
+        el.color = el.color.take().or_else(|| text(&a.color));
+        el.lineweight = el.lineweight.or(a.lineweight.filter(|w| w.is_finite() && *w >= 0.0));
+        el.linetype_id = el.linetype_id.take().or_else(|| a.linetype_id.clone());
+        ly.fill_color = ly.fill_color.take().or_else(|| text(&a.fill_color));
+        ly.hatch = ly.hatch.take().or_else(|| text(&a.hatch));
+        ly.outline = ly.outline.or(a.outline);
+        hide = hide.or(a.hide);
+    }
+    (el, ly, hide)
+}
+
+/// Gibt es überhaupt eine aktive Regel (Schnellpfad der Ansicht)?
+pub fn has_active(p: &Project, v: RuleView) -> bool {
+    p.override_rules.iter().flatten().any(|r| v.active(r))
 }
 
 /// Gibt es überhaupt aktive Regeln mit Schicht-Aktionen? (Schnellpfad: sonst nichts auswerten.)
@@ -306,6 +347,7 @@ pub fn layer_actions(p: &Project, v: RuleView, kind: &str, category_code: &str, 
                 material_standard: comp.standard_id.as_deref(),
                 material_name: Some(comp.name.as_str()),
                 material_category: Some(crate::standards::material_category(comp)),
+                view_kind: None,
             };
             effective_layer(rules, &s, v)
         })
@@ -327,6 +369,7 @@ mod tests {
         material_standard: None,
         material_name: None,
         material_category: None,
+        view_kind: None,
     };
 
     fn cond(t: OverrideConditionType, op: OverrideOperator, v: &str) -> OverrideCondition {

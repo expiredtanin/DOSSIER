@@ -3983,6 +3983,9 @@ pub enum OverrideConditionType {
     Material,
     #[serde(rename = "material_category")]
     MaterialCategory,
+    /// [33] Darstellung: "plan" (Grundriss, Deckenspiegel), "section" (Schnitt), "elevation" (Ansicht).
+    #[serde(rename = "view_kind")]
+    ViewKind,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -4050,6 +4053,11 @@ pub struct OverrideActions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub outline: Option<bool>,
+    /// [33] Bauteil ausblenden (wirkt in der Ansicht: Flächen, Kanten, Ansichtsschraffur und — bei Wänden —
+    /// deren Öffnungen entfallen und verdecken nichts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hide: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

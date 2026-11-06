@@ -3188,7 +3188,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
     // [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (`rules`: ids; fehlt = Schalter im Projekt).
     let on: Option<HashSet<String>> = v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect());
-    let rv = RuleView::at(scale, on.as_ref());
+    let rv = RuleView::at(scale, on.as_ref()).view("section");
     let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out, rv));
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.

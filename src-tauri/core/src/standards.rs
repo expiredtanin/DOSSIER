@@ -668,11 +668,21 @@ pub fn layer_function_of_category(cat: &str) -> Option<crate::model::LayerFuncti
 /// Massstab-Kriterium `minScale`, im 1:50 bleiben die Schichten schraffiert).
 pub const STD_RULE_FLOOR_BUILDUP_WHITE: &str = "std-or-deckenaufbau-weiss";
 
+/// [33] „Ansicht ohne Materialschraffur“: in Ansichten (Kriterium Darstellung) alle Bauteilflächen weiss ohne
+/// Ansichtsschraffur/-farbe, nur die Kanten; Öffnungen ausgenommen (Glas bleibt grau).
+pub const STD_RULE_ELEVATION_PLAIN: &str = "std-or-ansicht-ohne-materialschraffur";
+
 pub fn override_rules() -> Vec<Value> {
-    vec![json!({"id": STD_RULE_FLOOR_BUILDUP_WHITE, "name": "Deckenaufbau weiss", "enabled": false, "minScale": 100,
+    vec![
+        json!({"id": STD_RULE_FLOOR_BUILDUP_WHITE, "name": "Deckenaufbau weiss", "enabled": false, "minScale": 100,
         "condition": {"type": "layer_position", "operator": "equals", "value": "above"},
         "conditions": [{"type": "element_kind", "operator": "contains", "value": "slab"}],
-        "actions": {"fillColor": "#ffffff", "hatch": "none", "outline": true}})]
+        "actions": {"fillColor": "#ffffff", "hatch": "none", "outline": true}}),
+        json!({"id": STD_RULE_ELEVATION_PLAIN, "name": "Ansicht ohne Materialschraffur", "enabled": false,
+        "condition": {"type": "view_kind", "operator": "equals", "value": "elevation"},
+        "conditions": [{"type": "element_kind", "operator": "not_equals", "value": "opening"}],
+        "actions": {"fillColor": "#ffffff", "hatch": "none"}}),
+    ]
 }
 
 #[cfg(test)]

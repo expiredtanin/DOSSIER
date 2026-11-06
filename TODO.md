@@ -1866,6 +1866,29 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   viewTemplates, CLI Schnitt A-A 1:50/1:100 mit `--rule`. Offen: nicht in der Tauri-App geprüft (macOS-Ressourcenfenster,
   Metal); Ansichten (Fassaden) kennen keine Schicht-Overrides; PDF-Export nur über den Test von `viewportLevelPlan`, nicht als
   Datei angesehen.
+  (6.11., Ansichten) **Overrides in Ansichten** (`plan/elevation.rs`, `elevation_primitives_with`): Regeln wirken auf
+  Fassadenflächen (Füllung, Schraffur „ohne“ unterdrückt die Ansichtsschraffur/Ansichtsfarbe, eine Projekt-Schraffur liegt
+  als Muster auf der Fläche), ihre Kanten (Farbe, Strichstärke, Umriss aus; Kante gehört über die HLR-Besitzer-Kennung
+  ihrer Fläche) und Öffnungen (Linienfarbe/-stärke, Füllung von Glas/Türblatt). Bauteil-Subjekt je Fläche: Wand (Wandtyp,
+  sichtbare Seite = äusserste bzw. innerste Schicht, Stirnseite ohne Schicht), Decke/Bodenplatte, Treppe, Dach
+  (Eindeckung = erste Schicht des Dachtyps), Stütze, Öffnung — Baustoff/Funktion/Lage/Kategorie greifen auf die sichtbare
+  Oberflächenschicht (`overrides::effective_surface`: Element- und Schicht-Regeln zählen gleich). Neue Aktion
+  `OverrideActions.hide` „Ausblenden“ (Rust-Modell): Flächen entfallen samt Kanten/Schraffur und verdecken nichts, eine
+  ausgeblendete Wand nimmt ihre Öffnungen mit — wirkt NUR in der Ansicht. Neues Kriterium **Darstellung**
+  (`view_kind`: plan/section/elevation; `RuleView::view`, Grundriss/Deckenspiegel „plan“, Schnitt „section“). Neue
+  Bauteilarten in der Auswahl: Treppe, Stütze, Fenster/Tür. Massstab-Kriterium und Ausschnitt-/Vorlagen-Regeln wie
+  Grundriss/Schnitt: Ansichts-Viewports auf Blättern über `rules` (`generateElevationPlan` Option `overrideRuleIds`,
+  `viewportLevelPlan`; Kern `section_view_buf` reichte sie schon). CLI `elevation` mit `--rule`/`--template` (über
+  `withTemplate`, wirkt jetzt). **Baustein „Ansicht ohne Materialschraffur“** (`std-or-ansicht-ohne-materialschraffur`,
+  ausgeschaltet): Darstellung = Ansicht UND Bauteilart ≠ Fenster/Tür → weiss, Schraffur ohne; nur Kanten, Glas bleibt grau,
+  Schlagschatten bleiben. Ohne aktive Regel Schnellpfad (Goldens unverändert). Tests: `override_regeln_in_der_ansicht`,
+  `override_baustoff_der_oberflaeche_und_schraffur`, `override_oeffnungen_in_der_ansicht`,
+  `baustein_ansicht_ohne_materialschraffur`, `ansichts_viewport_mit_override_regeln`, vitest `viewportPlan` (Ansicht mit
+  Regel-ids), `viewTemplates` (Baustein), `standards` (2 Bausteine). Geprüft: cargo test Kern, tsc, vitest (Goldens
+  unverändert), CLI Musterhaus komplex Ansicht Süd 1:100 ohne/mit `--rule "Ansicht ohne Materialschraffur"` (Tusche und
+  `--color`) in Chromium (Linux). Offen: nicht in der Tauri-App und nicht im Overrides-Tab per e2e geprüft; „Ausblenden“
+  wirkt in Grundriss/Schnitt noch nicht, Öffnungen selbst ausblenden nicht (Wandloch); Linienstil-Aktion in der Ansicht
+  ohne Wirkung; Schlagschatten und Gelände nicht über Regeln steuerbar.
 - ◐ **[34] Ansichtsvorlagen.** (30.10.) `Project.viewTemplates` (Rust-Modell): benannter Satz aus Detailgrad,
   Massstab, Kategorien, Override-Regeln, Darstellungsmodus, Schwarz-Weiss, Schatten, verdeckte Kanten,
   Strichstärken-Skalierung und Ansichtsbereich; Ansicht (`DrawingLevel.templateId/templateLinked`) und

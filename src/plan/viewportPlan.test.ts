@@ -120,6 +120,26 @@ describe("viewportLevelPlan: Override-Regeln des Ausschnitts ([33])", () => {
     expect(white(await viewportLevelPlan(q, "schnitt-a", codes, "mittel", 50, true, true, ["weiss"]))).toBe(0);
   });
 
+  it("Ansicht: Regel des Ausschnitts wirkt auf Fassadenflächen und -kanten", async () => {
+    const r = structuredClone(q);
+    r.overrideRules!.push({
+      id: "rot",
+      name: "Wände rot",
+      enabled: false,
+      condition: { type: "view_kind", operator: "equals", value: "elevation" },
+      conditions: [{ type: "element_kind", operator: "equals", value: "wall" }],
+      actions: { fillColor: "#ff0000", color: "#00aa00" },
+    });
+    type P = { kind: string; wallId?: string; fill?: string; color?: string };
+    const red = (plan: { primitives: unknown[] }) => (plan.primitives as P[]).filter((x) => x.kind === "polygon" && x.wallId && x.fill === "#ff0000").length;
+    const green = (plan: { primitives: unknown[] }) => (plan.primitives as P[]).filter((x) => x.kind === "line" && x.color === "#00aa00").length;
+    const off = await viewportLevelPlan(r, "ansicht-sued", codes, "mittel", 100, true, true);
+    expect(red(off) + green(off)).toBe(0);
+    const on = await viewportLevelPlan(r, "ansicht-sued", codes, "mittel", 100, true, true, ["rot"]);
+    expect(red(on)).toBeGreaterThan(0);
+    expect(green(on)).toBeGreaterThan(0);
+  });
+
   it("snapshotOverrideRuleIds: verknüpfte Vorlage vor Ausschnitt, sonst Schalter im Projekt", () => {
     const r = { viewTemplates: [{ id: "t", name: "T", enabledOverrideRuleIds: ["a"] }, { id: "leer", name: "L" }] };
     expect(snapshotOverrideRuleIds(r, {})).toBeUndefined();
