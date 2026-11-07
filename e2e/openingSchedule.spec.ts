@@ -6,7 +6,7 @@ test("Fenster- und Türliste: Zeilen, Nummer und Brandschutz eintragen", async (
   await startNewProject(page);
   await openSample(page);
   await openTab(page, "Flächenbilanz");
-  const table = page.locator(".opening-table");
+  const table = page.locator(".opening-table:not(.room-book-table)");
   await expect(table).toBeVisible();
   const rows = table.locator("tbody tr");
   expect(await rows.count()).toBeGreaterThan(1);

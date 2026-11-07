@@ -45,7 +45,7 @@ export function RoomBookSection() {
         <div className="balance-empty">{t("roomBook.empty")}</div>
       ) : (
         <div className="area-scroll">
-          <table className="area-table opening-table">
+          <table className="area-table opening-table room-book-table">
             <thead>
               <tr>
                 <th>{t("openings.col.floor")}</th>
@@ -78,7 +78,7 @@ export function RoomBookSection() {
             </tbody>
           </table>
           {book.quantities.length > 0 && (
-            <table className="area-table opening-table">
+            <table className="area-table opening-table room-book-table">
               <thead>
                 <tr>
                   <th>{t("roomBook.col.surface")}</th>
