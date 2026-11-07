@@ -3446,6 +3446,11 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   an einer anderen Wand um die halbe Dicke verlängert; Öffnungen und Deckenaussparungen bleiben unberücksichtigt (Netz
   unter einer Tür ist verdeckt). Test `mesh_plan::bauteile_verdecken_die_aufsicht` (Wand geschnitten/niedrig/zu niedrig,
   Stütze, Decke). FZK-DG: Pfetten-Linie endet an der Giebelwand.
+  **Ansicht grosser Netze** (`elevation::mesh_faces_needed`): Netz-Flächen, die im fertigen Maler-Bild überall von
+  später gemalten Flächen zugedeckt sind, entfallen aus der Füllungs-Liste (Raster ≤ 2 Mio. Zellen, je Zelle der späteste
+  Maler-Platz über der Zellmitte, Kacheln 16×16 zum schnellen Ausschluss; Kanten weiter exakt aus allen Flächen).
+  Schependomlaan Ansicht Süd 1:100 (CLI, WASM ohne Opt.): nur Netze 27.0 → 2.2 MB, mit `--elements` 19.3 → 2.4 MB, Bild
+  bei 2400 px pixelgleich (bzw. 1 Pixel), Zeit 6.3 → 6.8 s. Test `elevation::verdeckte_netzflaechen_entfallen`.
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
