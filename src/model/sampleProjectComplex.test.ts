@@ -32,6 +32,12 @@ describe("Musterhaus komplex", () => {
     if (process.env.MK_OUT) writeFileSync(process.env.MK_OUT, text);
   });
 
+  it("[157] Schnitte ohne verdeckte Kanten (nur sichtbare Projektion); verdeckt über eine eigene Vorlage", () => {
+    for (const l of p.drawingLevels.filter((l) => l.kind === "section")) expect(l.hiddenLines ?? false).toBe(false);
+    expect(p.viewTemplates!.find((t) => t.id === "vt-schnitt")?.hiddenLines ?? false).toBe(false);
+    expect(p.viewTemplates!.some((t) => t.hiddenLines === true)).toBe(true);
+  });
+
   it("enthält alle Bauteil-Arten", () => {
     expect(p.drawingLevels.filter((l) => l.kind === "floor").map((l) => l.id)).toEqual(["ug", "eg", "og", "dg"]);
     expect(p.rooms!.length).toBeGreaterThanOrEqual(20);

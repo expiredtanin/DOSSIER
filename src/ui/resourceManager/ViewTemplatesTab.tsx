@@ -116,7 +116,7 @@ function TemplateDetail({
       <NumberField value={tpl[key] ?? dflt} step={0.1} onChange={(v) => patch({ [key]: v })} />
     </Optional>
   );
-  const bool = (key: "mono" | "shadows" | "hiddenLines" | "scaleLineWeights" | "sketch" | "cutHatch", label: string) => (
+  const bool = (key: "mono" | "shadows" | "hiddenLines" | "scaleLineWeights" | "sketch" | "cutHatch" | "showTerrain", label: string) => (
     <Optional label={label} on={tpl[key] !== undefined} onToggle={(on) => patch({ [key]: on ? false : null })}>
       <input type="checkbox" checked={tpl[key] === true} onChange={(e) => patch({ [key]: e.target.checked })} />
     </Optional>
@@ -157,6 +157,7 @@ function TemplateDetail({
       {bool("scaleLineWeights", t("resources.viewTemplates.scaleLineWeights"))}
       {bool("sketch", t("resources.viewTemplates.sketch"))}
       {bool("cutHatch", t("resources.viewTemplates.cutHatch"))}
+      {bool("showTerrain", t("resources.viewTemplates.showTerrain"))}
       <Optional label={t("resources.viewTemplates.floorFinish")} on={tpl.floorFinish !== undefined} onToggle={(on) => patch({ floorFinish: on ? "off" : null })}>
         <select className="res-input" aria-label={t("resources.viewTemplates.floorFinish")} value={tpl.floorFinish ?? "off"} onChange={(e) => patch({ floorFinish: e.target.value })}>
           {(["off", "wet", "all"] as const).map((v) => (

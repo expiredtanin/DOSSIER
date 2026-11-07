@@ -40,6 +40,11 @@ describe("viewTemplates", () => {
     const q = applyOps(p, applyToLevelOps(p, "tb", "eg", false));
     expect(q.drawingLevels.find((l) => l.id === "eg")?.floorFinish).toBe("wet");
   });
+  it("[157] setzt „Gelände zeigen“ am Geschoss", () => {
+    const p = applyOps(base(), addTemplateOps({ id: "tg", name: "Umgebung", showTerrain: true }));
+    const q = applyOps(p, applyToLevelOps(p, "tg", "og", false));
+    expect(q.drawingLevels.find((l) => l.id === "og")?.showTerrain).toBe(true);
+  });
   it("erfasst Geschoss- und Anzeigewerte", () => {
     const p = base();
     const t = captureTemplate("t", "V", p.drawingLevels.find((l) => l.id === "eg"), ui);

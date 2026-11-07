@@ -43,21 +43,21 @@
 <polyline points="-1,2.9725 -1,2.3725 -1,1.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="-1" y1="1.7725" x2="-0.85" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="-1" y1="1.7725" x2="-1.15" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
-<text x="-1.1725" y="1.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.1725 1.5925)">A</text>
 <polyline points="6,2.9725 6,2.3725 6,1.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="6" y1="1.7725" x2="6.15" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="6" y1="1.7725" x2="5.85" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
-<text x="5.8275" y="1.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.8275 1.5925)">A</text>
 <polygon points="-1,2.3725 6,2.3725 6,2.9725 -1,2.9725" fill="none" stroke="none" stroke-width="0"/>
 <line x1="-1" y1="6.6725" x2="6" y2="6.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15" stroke-dashoffset="0.09"/>
 <polyline points="-1,6.9725 -1,6.3725 -1,5.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="-1" y1="5.7725" x2="-0.85" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="-1" y1="5.7725" x2="-1.15" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>
-<text x="-1.46125" y="5.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.46125 5.5925)">Süd</text>
 <polyline points="6,6.9725 6,6.3725 6,5.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="6" y1="5.7725" x2="6.15" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="6" y1="5.7725" x2="5.85" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>
-<text x="5.53875" y="5.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.53875 5.5925)">Süd</text>
 <polygon points="-1,6.3725 6,6.3725 6,6.9725 -1,6.9725" fill="none" stroke="none" stroke-width="0"/>
+<text x="-1.1725" y="1.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.1725 1.5925)">A</text>
+<text x="5.8275" y="1.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.8275 1.5925)">A</text>
+<text x="-1.46125" y="5.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.46125 5.5925)">Süd</text>
+<text x="5.53875" y="5.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.53875 5.5925)">Süd</text>
 </g>
 </svg>

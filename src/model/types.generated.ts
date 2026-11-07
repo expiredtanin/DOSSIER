@@ -1128,6 +1128,11 @@ export type DrawingLevel = {
    */
   floorFinish?: FloorFinishDisplay;
   /**
+   * [157] Gelände, Höhenlinien und Baugruben im Grundriss: fehlt = automatisch (nur im Geschoss nächst ±0.00
+   * und ab 1:500), `true` immer, `false` nie. Schatten der Sonnenstudie bleiben davon unberührt.
+   */
+  showTerrain?: boolean;
+  /**
    * Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
    * Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
    * linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
@@ -3494,6 +3499,8 @@ export type ViewTemplate = {
   cutHatch?: boolean;
   /** [156] Bodenbelag-Muster im Grundriss (s. `DrawingLevel::floor_finish`). */
   floorFinish?: FloorFinishDisplay;
+  /** [157] Gelände im Grundriss zeigen (s. `DrawingLevel::show_terrain`). */
+  showTerrain?: boolean;
   /** Strichstärken mit dem Massstab skalieren. */
   scaleLineWeights?: boolean;
   /** Schnitthöhe über OKFF ([36]). */

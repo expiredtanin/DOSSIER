@@ -92,6 +92,9 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
         if code.is_some_and(|k| !c.shown(k)) {
             continue;
         }
+        if matches!(obj, ContextObject::TerrainMesh(_) | ContextObject::ContourSet(_) | ContextObject::Excavation(_)) && !terrain_shown(c) {
+            continue;
+        }
         // [137] Einzeln ausgeblendetes Gelände bzw. importiertes Netz (Kategorie bleibt sichtbar).
         if matches!(obj, ContextObject::TerrainMesh(t) if t.hidden == Some(true)) || matches!(obj, ContextObject::ImportedMesh(m) if m.hidden == Some(true)) {
             continue;
@@ -166,6 +169,25 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
         }
     }
     out.append(&mut late);
+}
+
+/// [157] Gelände, Höhenlinien und Baugruben in diesem Grundriss: Feld `showTerrain` der Ebene, sonst nur im
+/// Geschoss nächst ±0.00 (`extras::ground_floor_id`) und in der Situation (ab 1:500). Ohne Geschoss-Ebenen
+/// bzw. für eine unbekannte Ebene immer (Ausschnitte, Tests).
+pub(super) fn terrain_shown(c: &Ctx) -> bool {
+    terrain_shown_on(c.p, &c.a.floor, c.a.scale)
+}
+
+/// [`terrain_shown`] für Ebene `floor` im Massstab 1:`scale`.
+fn terrain_shown_on(p: &Project, floor: &str, scale: f64) -> bool {
+    let lvl = p.drawing_levels.iter().find(|l| l.id == floor && l.kind == DrawingLevelKind::Floor);
+    if let Some(v) = lvl.and_then(|l| l.show_terrain) {
+        return v;
+    }
+    match (lvl, super::extras::ground_floor_id(p)) {
+        (Some(l), Some(g)) => l.id == g || scale >= 500.0 - 1e-9,
+        _ => true,
+    }
 }
 
 /// [33] Linien (und Beschriftungen) nach den Element-Aktionen einer Regel: Farbe, Strichstärke, Linienstil.
@@ -677,6 +699,10 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     // 1:100 (Situation 1:200/1:500) auf dem Papier mit (100/n)^0.5 kleiner, sonst stehen die Marken ineinander.
     let n = if c.a.scale.is_finite() && c.a.scale > 0.0 { c.a.scale } else { 100.0 };
     let k = if n <= 100.0 { n / 100.0 } else { (n / 100.0).sqrt() };
+    // [157] Beschriftungen zuletzt: sie weichen Masszahlen, Texten, Achsblasen, allen Linien und Marken der
+    // Schnittführungen und den schon gesetzten Beschriftungen aus.
+    let mut labels: Vec<(Vec2, String, Vec2, Vec2)> = Vec::new();
+    let mut obst = super::stamp_place::Obstacles::default();
     for level in &c.p.drawing_levels {
         if !matches!(level.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation) {
             continue;
@@ -684,16 +710,22 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
         let Some([p0, p1]) = level.line_points else { continue };
         let tag = section_label_tag(&level.name);
         let label_w = crate::text_layout::text_width_em(&tag, false) * SECTION_LABEL_H * k;
-        let f = crate::plan::misc::section_line_sized(p0.x, p0.y, p1.x, p1.y, level.direction_sign.unwrap_or(1.0), k, label_w);
+        let sign = level.direction_sign.unwrap_or(1.0);
+        let f = crate::plan::misc::section_line_sized(p0.x, p0.y, p1.x, p1.y, sign, k, label_w);
         if f.is_empty() {
             continue;
         }
+        // Richtungen je Ende: Blickrichtung (Pfeil) und entlang der Linie nach aussen.
+        let len = (p1.x - p0.x).hypot(p1.y - p0.y);
+        let (ux, uy) = ((p1.x - p0.x) / len, (p1.y - p0.y) / len);
+        let bn = v2(-uy * sign, ux * sign);
+        let mut end_no = 0;
         let n = f[0] as usize;
         let mut i = 1;
         for _ in 0..n {
             if f[i] == 2.0 {
                 let main = f[i + 1] == 0.0;
-                out.push(Primitive::Line {
+                let line = Primitive::Line {
                     a: v2(f[i + 2], f[i + 3]),
                     b: v2(f[i + 4], f[i + 5]),
                     cls: "section-line".into(),
@@ -707,22 +739,14 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
                     stair_id: None,
                     greyed,
                     opacity: None,
-                });
+                };
+                obst.add_prim(&line);
+                out.push(line);
                 i += 6;
             } else if f[i] == 5.0 {
-                out.push(Primitive::DrawingText {
-                    at: v2(f[i + 1], f[i + 2]),
-                    text: tag.clone(),
-                    height_m: SECTION_LABEL_H * k,
-                    angle: 0.0,
-                    color: SECTION_LINE_INK.into(),
-                    marks: None,
-                    wrap_width: None,
-                    doc: None,
-                    drawing_id: None,
-                    greyed,
-                    opacity: None,
-                });
+                let outward = if end_no == 0 { v2(-ux, -uy) } else { v2(ux, uy) };
+                end_no += 1;
+                labels.push((v2(f[i + 1], f[i + 2]), tag.clone(), bn, outward));
                 i += 3;
             } else {
                 let pts = (0..4).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
@@ -730,6 +754,45 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
                 i += 9;
             }
         }
+    }
+    if labels.is_empty() {
+        return;
+    }
+    for q in super::drawings::stamp_obstacle_prims(c).iter().chain(super::drawings::grid_bubble_prims(c).iter()) {
+        obst.add_prim(q);
+    }
+    let h = SECTION_LABEL_H * k;
+    // Kandidaten (Vielfache der Schrifthöhe): vor der Spitze, weiter hinaus entlang der Linie bzw. des Pfeils.
+    const STEPS: [(f64, f64); 13] = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (2.0, 0.0), (1.0, 1.0), (0.0, 2.0), (3.0, 0.0), (2.0, 1.0), (1.0, 2.0), (4.0, 0.0), (0.0, 3.0), (3.0, 2.0), (-1.0, 0.0)];
+    for (at, tag, bn, outward) in labels {
+        let w = crate::text_layout::text_width_em(&tag, false) * h;
+        let rect = |a: Vec2| -> Vec<[f64; 2]> {
+            let pad = 0.1 * h;
+            vec![[a.x - pad, a.y - pad], [a.x + w + pad, a.y - pad], [a.x + w + pad, a.y + 0.75 * h + pad], [a.x - pad, a.y + 0.75 * h + pad]]
+        };
+        let cand = |(s_out, s_bn): (f64, f64)| v2(at.x + (outward.x * s_out + bn.x * s_bn) * h, at.y + (outward.y * s_out + bn.y * s_bn) * h);
+        let best = STEPS.iter().map(|&st| cand(st)).find(|&a| !obst.hits_convex(&rect(a))).unwrap_or_else(|| {
+            STEPS
+                .iter()
+                .map(|&st| cand(st))
+                .map(|a| (a, obst.overlap(v2(a.x + w / 2.0, a.y + 0.375 * h), w / 2.0, 0.375 * h)))
+                .fold((at, f64::INFINITY), |b, x| if x.1 < b.1 { x } else { b })
+                .0
+        });
+        obst.area(rect(best));
+        out.push(Primitive::DrawingText {
+            at: best,
+            text: tag,
+            height_m: h,
+            angle: 0.0,
+            color: SECTION_LINE_INK.into(),
+            marks: None,
+            wrap_width: None,
+            doc: None,
+            drawing_id: None,
+            greyed,
+            opacity: None,
+        });
     }
 }
 
@@ -828,6 +891,66 @@ mod tests {
         let d = super::super::domains::plan_domains(&p, &a).unwrap();
         let top = out_top(&run(100.0));
         assert!(d.bounds.is_some_and(|b| b[3] >= top - 1e-9), "{:?} < {top}", d.bounds);
+    }
+
+    /// [157] Beschriftung der Schnitt-/Ansichtsmarken weicht Masszahlen und Texten des Geschosses aus („B-B“ lag
+    /// auf „15.39“) sowie den Marken und Beschriftungen anderer Schnittlinien (Situation 1:500: „West“/„Nord“ an
+    /// der Ecke ineinander).
+    #[test]
+    fn schnittmarke_weicht_masszahl_und_nachbarmarke_aus() {
+        let level = |name: &str, a: [f64; 2], b: [f64; 2]| -> DrawingLevel {
+            serde_json::from_value(serde_json::json!({ "id": name, "name": name, "kind": "elevation", "visible": true, "locked": false,
+                "linePoints": [{ "x": a[0], "y": a[1] }, { "x": b[0], "y": b[1] }] })).unwrap()
+        };
+        let labels = |out: &[Primitive]| -> Vec<(String, Vec<[f64; 2]>)> {
+            out.iter()
+                .filter_map(|q| match q {
+                    Primitive::DrawingText { at, text, height_m, .. } => {
+                        let w = crate::text_layout::text_width_em(text, false) * height_m;
+                        let h = 0.75 * height_m;
+                        Some((text.clone(), vec![[at.x, at.y], [at.x + w, at.y], [at.x + w, at.y + h], [at.x, at.y + h]]))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let run = |p: &Project, scale: f64| {
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"floor": "eg", "show": ["90", "80"], "scale": {scale}}}"#)).unwrap();
+            let mut out = Vec::new();
+            plan_section_lines(&Ctx::new(p, &a), &mut out);
+            out
+        };
+        // 1) Schnitt B-B: Masszahl genau dort, wo die Beschriftung ohne Hindernis stünde.
+        let mut p = Project { drawing_levels: vec![level("Schnitt B-B", [0.0, 5.0], [20.0, 5.0])], ..Default::default() };
+        let free = labels(&run(&p, 100.0));
+        let (_, r) = free.iter().find(|(t, _)| t == "B-B").unwrap().clone();
+        let txt: Drawing2D = serde_json::from_value(serde_json::json!({ "id": "m", "type": "drawing2d", "levelId": "eg", "categoryCode": "80",
+            "geom": { "shape": "text", "at": { "x": r[0][0], "y": r[0][1] }, "text": "15.39", "height": 0.25, "angle": 0 } })).unwrap();
+        p.drawings2d = vec![txt];
+        let mut o = super::super::stamp_place::Obstacles::default();
+        o.text(v2(r[0][0], r[0][1]), "15.39", 0.25, 0.0);
+        let moved = labels(&run(&p, 100.0));
+        assert_eq!(moved.len(), 2);
+        for (t, r2) in &moved {
+            assert!(!o.hits_convex(r2), "{t} auf der Masszahl: {r2:?}");
+            // Bleibt bei seiner Marke (höchstens 3 m vom freien Platz).
+            let near = free.iter().filter(|(t0, _)| t0 == t).map(|(_, r0)| (r0[0][0] - r2[0][0]).hypot(r0[0][1] - r2[0][1])).fold(f64::INFINITY, f64::min);
+            assert!(near < 3.0, "{t} zu weit weg: {near}");
+        }
+        // 2) Situation 1:500: Ansichten Nord (Pfeil nach unten) und West (Pfeil nach rechts) treffen sich an der Ecke.
+        let p = Project { drawing_levels: vec![level("Ansicht Nord", [12.0, 20.0], [0.0, 20.0]), level("Ansicht West", [-0.5, 19.0], [-0.5, 0.0]), level("Ansicht Süd", [0.0, -1.0], [12.0, -1.0]), level("Ansicht Ost", [12.5, 0.0], [12.5, 19.0])], ..Default::default() };
+        let out = run(&p, 500.0);
+        let ls = labels(&out);
+        assert_eq!(ls.len(), 8);
+        let marks: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, dash: None, .. } => Some((*a, *b)), _ => None }).collect();
+        for i in 0..ls.len() {
+            for j in i + 1..ls.len() {
+                assert!(!super::super::stamp_place::convex_overlap(&ls[i].1, &ls[j].1), "{} über {}", ls[i].0, ls[j].0);
+            }
+            for (a, b) in &marks {
+                assert!(!super::super::stamp_place::seg_hits_ring([a.x, a.y], [b.x, b.y], &ls[i].1), "{} auf Marke {a:?}–{b:?}", ls[i].0);
+            }
+        }
     }
 
     fn out_top(out: &[Primitive]) -> f64 {
@@ -1021,6 +1144,30 @@ mod tests {
             assert!(!(m > 18.5 && m < 21.5), "Sohle im Anbau: {a:?}–{b:?}");
         }
         assert_eq!(sohle.iter().filter(|(a, b)| (a.x - 12.0).abs() < 1e-9 && (b.x - 12.0).abs() < 1e-9).count(), 1, "Westrand ganz");
+    }
+
+    /// [157] Gelände, Höhenlinien und Baugrube erscheinen standardmässig nur im Geschoss nächst ±0.00 (und in der
+    /// Situation ab 1:500), nicht im Obergeschoss; das Feld `showTerrain` der Ebene übersteuert beides.
+    #[test]
+    fn gelaende_nur_im_erdgeschoss() {
+        let mut p = sample_with_walls(serde_json::json!([["h1", "eg", 14.0, 0.0, 26.0, 0.0]]));
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 30.0, 3.0, 0.0, 30.0, 3.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let pit = Excavation { id: "bg".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, ..Default::default() };
+        let cs = ContourSet { id: "hl".into(), contours: vec![Contour { pts: vec![v2(0.0, 20.0), v2(40.0, 20.0)], ..Default::default() }], ..Default::default() };
+        p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit), ContextObject::ContourSet(cs)]);
+        let count = |p: &Project, floor: &str, scale: f64| {
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"floor": "{floor}", "scale": {scale}}}"#)).unwrap();
+            let mut out = Vec::new();
+            plan_context(&Ctx::new(p, &a), &mut out);
+            out.iter().filter(|q| matches!(q, Primitive::Line { color: Some(c), .. } if c == TERRAIN_INK || c == EXCAVATION_INK || c == CONTEXT_LINE_COLOR)).count()
+        };
+        assert!(count(&p, "eg", 100.0) > 10, "EG zeigt das Gelände");
+        assert_eq!(count(&p, "og", 100.0), 0, "OG ohne Gelände");
+        assert!(count(&p, "og", 500.0) > 10, "Situation 1:500 mit Gelände");
+        p.drawing_levels.iter_mut().find(|l| l.id == "og").unwrap().show_terrain = Some(true);
+        assert!(count(&p, "og", 100.0) > 10, "OG mit „Gelände zeigen“");
+        p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().show_terrain = Some(false);
+        assert_eq!(count(&p, "eg", 100.0), 0, "EG mit „Gelände zeigen“ aus");
     }
 
     /// [157] Höhenkoten nicht auf der Baugrube: die Beschriftung einer Höhenlinie liegt nicht auf Sohle,

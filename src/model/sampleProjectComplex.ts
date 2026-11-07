@@ -102,8 +102,8 @@ const LEVELS: DrawingLevel[] = [
   { id: "og", name: "Obergeschoss", kind: "floor", visible: true, locked: false, floorHeight: H.og, cutHeight: 1.0, baseElevation: Z.og, viewTop: 2.8, viewBottom: 0, viewDepth: -0.3, templateId: "vt-gr100", templateLinked: false },
   { id: "dg", name: "Dachgeschoss", kind: "floor", visible: true, locked: false, floorHeight: H.dg, cutHeight: 1.0, baseElevation: Z.dg, viewTop: 2.6, viewBottom: 0, viewDepth: -0.3, templateId: "vt-gr100", templateLinked: false },
   // Schnitte: A längs durch Schleppgaube und Dachfenster (Blick nach Westen), B quer durch Treppen und Erker (Blick nach Norden).
-  { id: "schnitt-a", name: "Schnitt A-A", kind: "section", visible: true, locked: false, linePoints: [P(3, -9), P(3, 21)], directionSign: 1, hiddenLines: true, levelMarks: true, templateId: "vt-schnitt" },
-  { id: "schnitt-b", name: "Schnitt B-B", kind: "section", visible: true, locked: false, linePoints: [P(-9, 5.6), P(20, 5.6)], directionSign: 1, hiddenLines: true, levelMarks: true, templateId: "vt-schnitt" },
+  { id: "schnitt-a", name: "Schnitt A-A", kind: "section", visible: true, locked: false, linePoints: [P(3, -9), P(3, 21)], directionSign: 1, levelMarks: true, templateId: "vt-schnitt" },
+  { id: "schnitt-b", name: "Schnitt B-B", kind: "section", visible: true, locked: false, linePoints: [P(-9, 5.6), P(20, 5.6)], directionSign: 1, levelMarks: true, templateId: "vt-schnitt" },
   // Ansichten: Linie so, dass die Blickrichtung (linke Normale der Linie) zum Haus zeigt.
   { id: "ansicht-sued", name: "Ansicht Süd", kind: "elevation", visible: true, locked: false, linePoints: [P(-9, -10), P(20, -10)], directionSign: 1, shadows: true, levelMarks: true, templateId: "vt-ansicht" },
   { id: "ansicht-ost", name: "Ansicht Ost", kind: "elevation", visible: true, locked: false, linePoints: [P(24, -6), P(24, 20)], directionSign: 1, shadows: true, levelMarks: true, templateId: "vt-ansicht" },
@@ -586,7 +586,8 @@ function annotations(): Drawing2D[] {
   const cloud = [...arcPts(P(12.6, 0), 1.9, -Math.PI, Math.PI, 18).slice(0, 18)].map((q) => P(q.x, r3(q.y * 0.6)));
   add("revision-a", "eg", "90", { shape: "polyline", closed: true, pts: cloud, bulge: cloud.map(() => -0.45) }, { color: "#c0392b", weightMm: 0.35 });
   add("revision-a-text", "eg", "90", { shape: "text", at: P(14.6, -1.4), text: "△A  Pfosten-Riegel statt Fenstertür", height: 0.22, angle: 0 }, { color: "#c0392b" });
-  add("nordpfeil", "eg", "50", { shape: "block", blockDefId: "blk-nord", at: P(24, -10), rotation: 0, scale: 1.5 });
+  // [157] Nordpfeil am Ostrand der Parzelle zwischen den Bäumen (vorher auf „Kat.-Nr. 2417“ und der Ansichtslinie Ost).
+  add("nordpfeil", "eg", "50", { shape: "block", blockDefId: "blk-nord", at: P(26.8, 2.5), rotation: 0, scale: 1.2 });
 
   // Detail Deckenauflager (2D, Massstab 1:10): Schichten mit SIA-Schraffuren, Achse, Bruchlinie, Beschriftung.
   const dl = "detail-traufe";
@@ -693,7 +694,9 @@ function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapsho
     viewTemplates: [
       { id: "vt-gr100", name: "Grundriss 1:100", detail: "mittel", scaleDenominator: 100, scaleLineWeights: true, cutHeight: 1.0 },
       { id: "vt-gr50", name: "Grundriss 1:50 fein", detail: "fein", scaleDenominator: 50, scaleLineWeights: true },
-      { id: "vt-schnitt", name: "Schnitt 1:100", detail: "mittel", scaleDenominator: 100, hiddenLines: true },
+      // [157] Schnitte zeigen nur die sichtbare Projektion; verdeckte Kanten über die eigene Vorlage.
+      { id: "vt-schnitt", name: "Schnitt 1:100", detail: "mittel", scaleDenominator: 100 },
+      { id: "vt-schnitt-verdeckt", name: "Schnitt mit verdeckten Kanten", detail: "mittel", scaleDenominator: 100, hiddenLines: true },
       { id: "vt-ansicht", name: "Ansicht 1:100 mit Schatten", detail: "mittel", scaleDenominator: 100, shadows: true },
       { id: "vt-brand", name: "Brandschutzplan", detail: "grob", scaleDenominator: 100, enabledOverrideRuleIds: ["or-brand"], mono: true },
     ],

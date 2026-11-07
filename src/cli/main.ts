@@ -105,6 +105,7 @@ import {
   patchItem,
   generatePlan,
   generateSectionPlan,
+  viewportLevelPlan,
   planToRenderScene,
   projectToModel3d,
   parseProjectFile,
@@ -204,7 +205,7 @@ function findLevel(project: Project, kinds: string[], name: string | undefined) 
 }
 
 /** Ansichts-Felder einer Vorlage, die am Geschoss/Schnitt/Ansicht stehen (wie `state/viewTemplates.ts`). */
-const TEMPLATE_LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch", "floorFinish"] as const;
+const TEMPLATE_LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch", "floorFinish", "showTerrain"] as const;
 
 /**
  * [33]/[34] `--template <Name|id>`: Ansichtsvorlage auf die Ebene anwenden (Override-Regeln nach
@@ -676,16 +677,10 @@ async function execute(project: Project, file: string, command: string, rest: st
       if (!found) fail(`${command} nicht gefunden: ${name ?? "(erste)"}`);
       const sp = withSketch(withTemplate(project, found.id, args), found.id, args);
       const lvl = sp.drawingLevels.find((l) => l.id === found.id) ?? found;
-      let plan;
-      if (kind === "section") {
-        const o = await computeSection(sp, lvl);
-        if (!o) fail("keine gültige Schnittlinie");
-        // Wie die App: verdeckte Kanten nach der Ebene, geschnittene Fenster/Türen.
-        plan = generateSectionPlan(o, inkArg(args), { visibleCodes: allCodes, hiddenLines: lvl.hiddenLines, openings: true, scaleDenominator: scale });
-      } else {
-        plan = generateElevationPlan(sp, lvl, { scaleDenominator: scale, mono: inkArg(args) });
-        if (!plan) fail("keine gültige Ansichtslinie");
-      }
+      // [157] Wie die App (`viewportLevelPlan`): verdeckte Kanten nach der Ebene, geschnittene Fenster/Türen,
+      // automatische Höhenkoten (`levelMarks`) und die eigenen 2D-Elemente der Schnitt-/Ansichtsebene.
+      const plan = await viewportLevelPlan(sp, lvl.id, allCodes, undefined, scale, false, inkArg(args));
+      if (plan.primitives.length === 0) fail(kind === "section" ? "keine gültige Schnittlinie" : "keine gültige Ansichtslinie");
       if (args.flags.get("format") === "json") {
         out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
         return 0;

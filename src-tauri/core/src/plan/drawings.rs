@@ -881,7 +881,12 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             if let Some(spec) = crate::grid::Spec::of(geom) {
                 // [140] Achsen enden an der Gebäudegrundfläche (alle Geschosse vereinigt).
                 let house = super::context::building_rings(p);
-                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), &house);
+                // [157] Blasen nicht auf den Massketten des Geschosses.
+                let mut dims = super::stamp_place::Obstacles::default();
+                for q in prims_where(c, |g| matches!(g, Drawing2DGeom::Dimension { .. })) {
+                    dims.add_prim(&q);
+                }
+                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), &house, &dims);
             }
         }
         Drawing2DGeom::Text { at, text: s, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts, paper_height } => {
@@ -1040,15 +1045,16 @@ fn scalebar_labels(labels: Vec<(f64, String)>, seg: f64, text_h: f64) -> Vec<(f6
 }
 
 /// [157] Wie weit die Blase (Radius `r`) am Achsende `end` in Richtung `dir` hinaus muss, damit sie mit Luft
-/// (10 % des Radius) ausserhalb jedes Gebäuderings liegt; 0, wenn sie schon frei ist (höchstens 60 m).
-fn bubble_shift(end: Vec2, dir: Vec2, r: f64, house: &[Vec<Vec2>]) -> f64 {
-    if !(r > 0.0) || house.is_empty() || !(end.x.is_finite() && end.y.is_finite() && dir.x.is_finite() && dir.y.is_finite()) {
+/// (10 % des Radius) ausserhalb jedes Gebäuderings und frei von den Massketten `dims` liegt; 0, wenn sie schon
+/// frei ist (höchstens 60 m).
+fn bubble_shift(end: Vec2, dir: Vec2, r: f64, house: &[Vec<Vec2>], dims: &super::stamp_place::Obstacles) -> f64 {
+    if !(r > 0.0) || (house.is_empty() && dims.is_empty()) || !(end.x.is_finite() && end.y.is_finite() && dir.x.is_finite() && dir.y.is_finite()) {
         return 0.0;
     }
     let clear = |c: Vec2| {
         house.iter().all(|ring| {
             !super::context::inside(c, ring) && (0..ring.len()).all(|k| super::context::seg_dist(c, [ring[k].x, ring[k].y], [ring[(k + 1) % ring.len()].x, ring[(k + 1) % ring.len()].y]) > r * 1.1)
-        })
+        }) && (dims.is_empty() || dims.clearance(c, r * 1.1, r * 1.1) > 0.0)
     };
     let step = r / 4.0;
     let mut t = 0.0;
@@ -1061,7 +1067,7 @@ fn bubble_shift(end: Vec2, dir: Vec2, r: f64, house: &[Vec<Vec2>]) -> f64 {
     0.0
 }
 
-fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<Vec2>]) {
+fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<Vec2>], dims: &super::stamp_place::Obstacles) {
     use crate::grid::Shape;
     // [153] Achsen strichpunktiert in Papier-mm (vorher mit dem Massstab in Modell-Meter vorskaliert).
     let dash = super::line_pattern::AXIS;
@@ -1076,7 +1082,7 @@ fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<
     let mut shift: HashMap<(i64, i64), f64> = HashMap::new();
     for ax in axes.iter().filter(|ax| matches!(ax.shape, Shape::Line { .. })) {
         for (end, dir) in ax.bubbles.iter().flatten() {
-            let t = bubble_shift(v(end.0, end.1), v(dir.0, dir.1), r, house);
+            let t = bubble_shift(v(end.0, end.1), v(dir.0, dir.1), r, house, dims);
             let e = shift.entry(side(*dir)).or_insert(0.0);
             *e = e.max(t);
         }
@@ -1974,6 +1980,25 @@ mod tests {
         let segs: Vec<(Vec2, Vec2)> = prims.iter().filter_map(|q| match q { Primitive::Line { a, b, dash: Some(Some(_)), .. } => Some((*a, *b)), _ => None }).collect();
         let r = circles[0].1;
         assert!(segs.iter().any(|(a, b)| (a.x - 2.5).abs() < 1e-9 && (a.y.max(b.y) - (top[0] - r)).abs() < 1e-6 && a.y.min(b.y) >= 6.5 - 1e-9), "{segs:?}");
+    }
+
+    /// [157] Blasen stehen nicht auf einer Masskette des Geschosses (EG: die Aussenbemassung rückt vor die
+    /// Baugrube und lag dann unter den Blasen A/B/C): die Reihe rückt hinter die Kette.
+    #[test]
+    fn achsblasen_nicht_auf_der_bemassung() {
+        let grid = serde_json::json!({"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+            "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 5}], "b": [{"label": "A", "pos": 0}, {"label": "B", "pos": 4}], "extend": 1});
+        let free = render(&project(serde_json::json!({})), drawing(grid.clone()), 100.0);
+        let (c0, r) = free.iter().find_map(|q| if let Primitive::DrawingCircle { center, r, .. } = q { (center.y < 0.0).then_some((*center, *r)) } else { None }).unwrap();
+        // Masskette waagrecht genau durch die untere Blasenreihe.
+        let y = c0.y;
+        let dim = serde_json::json!({"id": "m", "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "dimension", "pts": [{"x": -2.0, "y": y}, {"x": 7.0, "y": y}], "offset": 0.0}});
+        let p = project(serde_json::json!({"drawings2d": [dim]}));
+        let prims = render(&p, drawing(grid), 100.0);
+        let low: Vec<Vec2> = prims.iter().filter_map(|q| if let Primitive::DrawingCircle { center, .. } = q { (center.y < 0.0).then_some(*center) } else { None }).collect();
+        assert_eq!(low.len(), 2);
+        assert!(low.iter().all(|c| (c.y - y).abs() > r && c.y < y), "{low:?} Kette bei {y}");
+        assert!(low.iter().all(|c| (c.y - low[0].y).abs() < 1e-9), "eine Reihe: {low:?}");
     }
 
     /// [157] Massstabsbalken im kleinen Massstab: die Zahlen (3 mm Papier) stehen nicht ineinander — liegen

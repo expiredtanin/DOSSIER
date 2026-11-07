@@ -1856,6 +1856,11 @@ pub struct DrawingLevel {
     #[serde(rename = "floorFinish", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub floor_finish: Option<FloorFinishDisplay>,
+    /// [157] Gelände, Höhenlinien und Baugruben im Grundriss: fehlt = automatisch (nur im Geschoss nächst ±0.00
+    /// und ab 1:500), `true` immer, `false` nie. Schatten der Sonnenstudie bleiben davon unberührt.
+    #[serde(rename = "showTerrain", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub show_terrain: Option<bool>,
     /// Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
     /// Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
     /// linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
@@ -1959,6 +1964,10 @@ pub struct ViewTemplate {
     #[serde(rename = "floorFinish", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub floor_finish: Option<FloorFinishDisplay>,
+    /// [157] Gelände im Grundriss zeigen (s. `DrawingLevel::show_terrain`).
+    #[serde(rename = "showTerrain", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub show_terrain: Option<bool>,
     /// Strichstärken mit dem Massstab skalieren.
     #[serde(rename = "scaleLineWeights", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

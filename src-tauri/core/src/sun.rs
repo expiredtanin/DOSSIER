@@ -970,7 +970,7 @@ fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, with_ground: boo
             // Gelände unter Gebäudeflächen und unter sichtbaren Empfängern zeigt keinen Schatten.
             let m: Vec<Polygon> = mask(GROUND_Z).into_iter().chain(recvs.iter().map(|r| r.region.clone())).collect();
             if !m.is_empty() && !sh.is_empty() {
-                sh = polygon_bool::difference(&sh, &m);
+                sh = drop_cover_rests(polygon_bool::difference(&sh, &m), &m);
             }
         }
         out.extend(sh);
@@ -992,6 +992,44 @@ fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, with_ground: boo
         return vec![];
     }
     without_slivers(polygon_bool::union(&out), if site.is_some() { SLIVER_AREA } else { 1e-4 })
+}
+
+/// Grösster Rest (m²), der als Rest an Abdeckungen wegfällt ([`drop_cover_rests`]).
+const COVER_REST_AREA: f64 = 0.25;
+
+/// [157] Schattenstücke unter [`COVER_REST_AREA`], deren Umfang zu mehr als der Hälfte auf Rändern der
+/// Abdeckungen `masks` liegt, entfallen: Reste in Ecken zwischen Decke, Dachvorsprung und Bogenwand (EG
+/// Musterhaus komplex: grauer Keil neben dem Erker), die als Schattenfleck ohne Werfer erscheinen.
+fn drop_cover_rests(polys: Vec<Polygon>, masks: &[Polygon]) -> Vec<Polygon> {
+    const TOL: f64 = 1e-3;
+    let edges: Vec<([f64; 2], [f64; 2])> = masks.iter().flatten().flat_map(|r| (0..r.len()).map(move |i| (r[i], r[(i + 1) % r.len()]))).collect();
+    let on_mask = |q: [f64; 2]| {
+        edges.iter().any(|(a, b)| {
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let l2 = dx * dx + dy * dy;
+            let t = if l2 > 0.0 { (((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+            hypot2(q[0] - a[0] - t * dx, q[1] - a[1] - t * dy) < TOL
+        })
+    };
+    polys
+        .into_iter()
+        .filter(|p| {
+            let Some(o) = p.first() else { return false };
+            if signed_area(o).abs() >= COVER_REST_AREA {
+                return true;
+            }
+            let (mut total, mut shared) = (0.0, 0.0);
+            for i in 0..o.len() {
+                let (a, b) = (o[i], o[(i + 1) % o.len()]);
+                let l = hypot2(b[0] - a[0], b[1] - a[1]);
+                total += l;
+                if on_mask([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]) {
+                    shared += l;
+                }
+            }
+            !(total > 0.0 && shared > 0.5 * total)
+        })
+        .collect()
 }
 
 /// [149] Kreis der Baum-Ebene am Ort eines Baum-Objekts (Stammmitte höchstens eine halbe Kreisbreite, mindestens
@@ -1025,6 +1063,22 @@ mod terrain_tests {
     use super::*;
     use crate::flat_read::signed_area;
     use crate::terrain::Tin;
+
+    /// [157] Kleine Schattenreste, die fast ganz von Abdeckungen begrenzt sind (Keil zwischen Bogenwand, Decke und
+    /// Dachvorsprung), entfallen; ein ebenso kleiner freier Schatten (Stütze) und ein grosser Rest bleiben.
+    #[test]
+    fn schattenrest_an_abdeckung_entfaellt() {
+        let sq = |x0: f64, y0: f64, x1: f64, y1: f64| -> Polygon { vec![vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]] };
+        // Abdeckung: L um die Ecke (0..10 × 0..10 ohne das Quadrat 4..4.4 × 4..4.4 in der Ecke einer Aussparung).
+        let mask = vec![sq(0.0, 0.0, 10.0, 4.0), sq(0.0, 4.0, 4.0, 10.0), sq(4.4, 4.0, 10.0, 10.0), sq(4.0, 4.4, 4.4, 10.0)];
+        let shadow = vec![sq(-2.0, -2.0, 12.0, 12.0), sq(20.0, 0.0, 20.2, 0.3)];
+        let diff = polygon_bool::difference(&shadow, &mask);
+        let kept = drop_cover_rests(diff, &mask);
+        let areas: Vec<f64> = kept.iter().map(|p| signed_area(&p[0]).abs()).collect();
+        assert!(!areas.iter().any(|a| (a - 0.16).abs() < 1e-6), "Rest in der Aussparung bleibt: {areas:?}");
+        assert!(areas.iter().any(|a| (a - 0.06).abs() < 1e-6), "freier Stützen-Schatten fehlt: {areas:?}");
+        assert!(areas.iter().any(|a| *a > 50.0), "Schatten rund um die Abdeckung fehlt: {areas:?}");
+    }
 
     fn in_ring(x: f64, y: f64, r: &[[f64; 2]]) -> bool {
         let mut inside = false;

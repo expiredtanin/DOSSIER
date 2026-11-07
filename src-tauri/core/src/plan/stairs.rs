@@ -172,6 +172,10 @@ fn arriving(c: &Ctx, out: &mut Vec<Primitive>, double: bool) {
     use crate::stair_rail::P;
     let p = c.p;
     let Some(floor) = p.floor(&c.a.floor) else { return };
+    // [157] Nur Geschoss-Grundrisse (nicht die 2D-Ebene eines Schnitts/einer Ansicht, Bezugshöhe sonst 0).
+    if floor.kind != DrawingLevelKind::Floor {
+        return;
+    }
     let base = floor.base_elevation.unwrap_or(0.0);
     // Löcher der Decken unter dem Geschossboden (Oberkante wie bei den Bodenbelägen).
     let holes: Vec<Vec<P>> = p

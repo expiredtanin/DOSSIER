@@ -1,28 +1,13 @@
-<<<<<<< HEAD
-viewBox -10.004 0 31.058 26.958
-bytes 61927
+viewBox -12.65 0 37.3 33.3
+bytes 62538
 circle 14
 g 1
-line 120
+line 117
 path 15
 polygon 89
-polyline 87
-=======
-viewBox -12.65 0 37.3 33.3
-bytes 59530
-circle 14
-g 1
-line 115
-path 13
-polygon 105
-polyline 89
->>>>>>> bbef69e
+polyline 92
 rect 1
 svg 1
 text 75
 tspan 20
-<<<<<<< HEAD
-hash 313f8c57cbd6ef78
-=======
-hash d4a194ff968a66e0
->>>>>>> bbef69e
+hash 0a0d09cb775a502b

@@ -349,6 +349,10 @@ pub(super) fn view_hatch_override(p: &Project, o: Option<&overrides::LayerAction
 fn floor_finishes(c: &Ctx, rooms: &[Primitive], out: &mut Vec<Primitive>) {
     use super::floor_finish as ff;
     let p = c.p;
+    // [157] Nur Geschoss-Grundrisse (nicht die 2D-Ebene eines Schnitts/einer Ansicht).
+    if p.floor(&c.a.floor).is_none_or(|l| l.kind != DrawingLevelKind::Floor) {
+        return;
+    }
     let setting = p.floor(&c.a.floor).and_then(|l| l.floor_finish);
     let mode = ff::show(setting, c.a.detail, c.a.scale);
     let ceilings: Vec<&Ceiling> = {
@@ -848,7 +852,7 @@ fn abbreviate(text: &str, n: usize) -> String {
 }
 
 /// [140] Hindernisse für Raumstempel aus den schon erzeugten Domänen: Treppen (alle Striche), Türschwenk-Bögen,
-/// Stützen, Beschriftungen des Kontexts (Höhenlinien-Koten), Schnittführungen ([157]) und die Zeichnungen, denen Stempel ausweichen
+/// Stützen, Beschriftungen des Kontexts (Höhenlinien-Koten), Schnittführungen und Dachlinien ([157]) und die Zeichnungen, denen Stempel ausweichen
 /// (Bemassung, Koten, Texte, Symbole; `drawings::stamp_obstacle_prims`).
 #[cfg(test)]
 fn stamp_obstacles(c: &Ctx, d: &DomainPrims) -> super::stamp_place::Obstacles {
@@ -878,6 +882,12 @@ fn stamp_obstacles_with(d: &DomainPrims, drawn: super::stamp_place::Obstacles) -
     }
     for q in &d.context {
         if matches!(q, Primitive::DrawingText { .. }) {
+            o.add_prim(q);
+        }
+    }
+    // [157] Dachlinien (First, Grat, Kehle, Traufe, Bruch; ohne Flächenmuster): kein Stempel auf dem First.
+    for q in &d.roofs {
+        if matches!(q, Primitive::Line { cls, .. } if cls.starts_with("roof-") && cls != "roof-surface-pattern") {
             o.add_prim(q);
         }
     }
@@ -1679,6 +1689,41 @@ mod tests {
         assert!((at.x - 53.5).abs() > w / 2.0, "Stempel auf der Schnittlinie: {at:?} (Pol {pole:?}, Breite {w})");
     }
 
+    /// [157] Firstlinie quer durch den Raum: der Stempel steht neben dem First (vorher „D.03 Galerie“ auf der
+    /// Firstlinie, Musterhaus komplex DG).
+    #[test]
+    fn raumstempel_weicht_firstlinie_aus() {
+        let mut p = sample();
+        let r = p.rooms.as_mut().unwrap().iter_mut().find(|r| r.floor_id == "eg").unwrap();
+        let q = [(0.0, 0.0), (7.0, 0.0), (7.0, 5.0), (0.0, 5.0)];
+        r.boundary = q.iter().map(|&(x, y)| Vec2 { x: x + 50.0, y: y + 50.0 }).collect();
+        r.stamp_anchor = None;
+        r.stamp = None;
+        let id = r.id.clone();
+        p.drawing_levels.retain(|l| !matches!(l.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation));
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "31", "60", "80"], "grey": [], "scale": 100 }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let stamp = |p: &Project| {
+            let out = plan_domains(p, &a).unwrap();
+            out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, extra_lines, base_pt, .. } if *rid == id => Some((*at, doc.clone(), extra_lines.clone(), *base_pt)), _ => None }).unwrap()
+        };
+        p.roofs = None;
+        let (pole, ..) = stamp(&p);
+        // Satteldach über dem Raum, First waagrecht durch den Pol.
+        let roof: Roof = serde_json::from_value(serde_json::json!({ "id": "RFx", "type": "roof", "floorId": "eg", "categoryCode": "31",
+            "outline": [{ "x": 49.0, "y": pole.y - 3.0 }, { "x": 58.0, "y": pole.y - 3.0 }, { "x": 58.0, "y": pole.y + 3.0 }, { "x": 49.0, "y": pole.y + 3.0 }],
+            "shape": "sattel", "pitchDeg": 30, "overhang": 0.0, "ridgeAxis": "x", "thickness": 0.2 })).unwrap();
+        p.roofs = Some(vec![roof]);
+        let out = plan_domains(&p, &a).unwrap();
+        let ridge_y: Vec<f64> = out.roofs.iter().filter_map(|q| match q { Primitive::Line { a, b, cls, .. } if cls == "roof-ridge" && (a.y - b.y).abs() < 1e-6 => Some(a.y), _ => None }).collect();
+        assert!(!ridge_y.is_empty(), "kein First");
+        let (at, doc, extra, pt) = stamp(&p);
+        let (_, h) = stamp_size_m(&doc, &extra, pt, 100.0);
+        for y in ridge_y {
+            assert!((at.y - y).abs() > h / 2.0, "Stempel auf dem First: {at:?} (Pol {pole:?}, Höhe {h}, First {y})");
+        }
+    }
+
     /// [140] Teil 6: Treppe und Türschwenk sind Hindernisse (Strecken bzw. Sektor), Bogenwände nicht.
     #[test]
     fn stempel_hindernisse_aus_domaenen() {
@@ -2157,6 +2202,12 @@ mod tests {
         let print = belag(&p, "og", 1.0, 50.0, serde_json::json!({ "forPrint": true }));
         assert_eq!(screen.len(), print.len());
         assert!(!screen.is_empty());
+        // [157] Nur in Geschoss-Grundrissen: die 2D-Ebene eines Schnitts (Bezugshöhe ±0.00) bekam sonst im 1:50 das
+        // Belagsmuster der Decke auf ±0.00 (Musterhaus komplex Schnitt A-A 1:50).
+        let sec = p.drawing_levels.iter().find(|l| l.kind == DrawingLevelKind::Section).map(|l| l.id.clone()).unwrap();
+        let og_base = p.floor("og").and_then(|l| l.base_elevation);
+        p.drawing_levels.iter_mut().find(|l| l.id == sec).unwrap().base_elevation = og_base;
+        assert!(belag(&p, &sec, 1.0, 50.0, none.clone()).is_empty());
     }
 
     /// [156] „Nassräume": im 1:100 nur Plattenbeläge, nur in Bad/WC/Dusche; Parkett nicht.
@@ -2356,6 +2407,13 @@ mod tests {
         let mut q = p.clone();
         q.ceilings.as_mut().unwrap()[0].openings = None;
         assert!(run(&q).iter().all(|x| !matches!(x, Primitive::Line { stair_id, .. } if stair_id.as_deref() == Some("ST1"))));
+        // [157] Nur in Geschoss-Grundrissen: die 2D-Ebene eines Schnitts (Bezugshöhe wie das OG) zeigt keine
+        // ankommende Treppe (vorher Wendeltreppen-Symbol mitten im Schnitt A-A, Musterhaus komplex).
+        let mut q = p.clone();
+        q.drawing_levels.iter_mut().find(|l| l.id == "schnitt-a").unwrap().base_elevation = Some(2.6);
+        let t = serde_json::json!({ "floor": "schnitt-a", "show": ["30", "40"], "grey": [], "scale": 50 }).to_string();
+        let st = plan_domains(&q, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().stairs;
+        assert!(st.iter().all(|x| !matches!(x, Primitive::Line { stair_id, .. } if stair_id.as_deref() == Some("ST1"))), "{st:?}");
     }
 
     #[test]

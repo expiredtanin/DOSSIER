@@ -16,7 +16,8 @@ const count = (pl: { primitives: unknown[] }, cls: string) => pl.primitives.filt
 
 async function probe(proj: typeof p) {
   const codes = collectVisibleCodes(proj.layers);
-  const ug = generatePlan(proj, "ug", codes, undefined, "mittel", false, true, true, 100);
+  // [157] Gelände im Grundriss nur im Geschoss nächst ±0.00 (EG).
+  const ug = generatePlan(proj, "eg", codes, undefined, "mittel", false, true, true, 100);
   const sec = await computeSection(proj, proj.drawingLevels.find((l) => l.id === "schnitt-a")!);
   const sp = generateSectionPlan(sec!, false, { visibleCodes: codes, hiddenLines: true, openings: true, scaleDenominator: 100 });
   const ep = generateElevationPlan(proj, proj.drawingLevels.find((l) => l.id === "ansicht-sued")!, { visibleCodes: codes, scaleDenominator: 100 })!;

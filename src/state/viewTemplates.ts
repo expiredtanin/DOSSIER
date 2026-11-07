@@ -29,7 +29,7 @@ export interface ViewTemplateUi {
 }
 
 /** Geschoss-Felder, die eine Vorlage setzt (fehlt das Vorlagen-Feld, bleibt die Ansicht unberührt). */
-const LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch", "floorFinish"] as const;
+const LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch", "floorFinish", "showTerrain"] as const;
 
 /** Teilobjekt für das Geschoss aus den gesetzten Feldern der Vorlage. */
 export function levelPatch(t: ViewTemplate): Partial<DrawingLevel> {

@@ -7,4 +7,4 @@ polyline 5
 rect 1
 svg 1
 text 4
-hash c255eeef055bcda6
+hash aa64b436ceb679c4
