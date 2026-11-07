@@ -89,6 +89,19 @@ pub(crate) fn point_in(pt: P, poly: &[P]) -> bool {
 
 /// Teilstücke der Strecke a–b innerhalb des Polygons (gerade-ungerade-Regel).
 pub fn clip_to_poly(a: P, b: P, poly: &[P], out: &mut Vec<(P, P)>) {
+    clip_poly(a, b, poly, true, out);
+}
+
+/// [155] Teilstücke der Strecke a–b ausserhalb des Polygons (Gegenstück zu [`clip_to_poly`]).
+pub fn clip_outside_poly(a: P, b: P, poly: &[P], out: &mut Vec<(P, P)>) {
+    if poly.len() < 3 {
+        out.push((a, b));
+        return;
+    }
+    clip_poly(a, b, poly, false, out);
+}
+
+fn clip_poly(a: P, b: P, poly: &[P], keep_inside: bool, out: &mut Vec<(P, P)>) {
     let n = poly.len();
     if n < 3 {
         return;
@@ -115,7 +128,7 @@ pub fn clip_to_poly(a: P, b: P, poly: &[P], out: &mut Vec<(P, P)>) {
         if w[1] - w[0] < 1e-12 {
             continue;
         }
-        if point_in(at((w[0] + w[1]) / 2.0), poly) {
+        if point_in(at((w[0] + w[1]) / 2.0), poly) == keep_inside {
             run = Some(match run {
                 Some((s, e)) if (e - w[0]).abs() < 1e-12 => (s, w[1]),
                 Some((s, e)) => {

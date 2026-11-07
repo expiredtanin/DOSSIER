@@ -3486,6 +3486,36 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   (beginnen mit Strich); DXF/DWG ohne Phase je Objekt (Linientyp beginnt am Anfang, Massstab stimmt); Metal-Pfad verkettet
   abgeleitete gestrichelte Linien nur über das Ketten-Flag (Zeichnungen), React-SVG-Ansicht ohne Phase; nur Linux, nicht in
   der Tauri-App/Metal angesehen. · M
+- ◐ **[155] Treppensymbol im Grundriss bereinigt.** (7.11., Befund Musterhaus komplex EG 1:50, Treppenhaus: unter
+  gestrichelten Tritten lag deckungsgleich die volle Kante des Tritt-Vielecks, Wange voll und gestrichelt übereinander,
+  Plattenraster durch die Treppe, Bruchlinie als zwei Querstriche neben der Trittkante; Wendel: Trittkanten als Sehnen auf
+  dem Aussenbogen und 12-Eck des Auges über dem Innenbogen; OG ohne Spur der ankommenden Treppe.) `plan/stair_symbol.rs`
+  neu aufgebaut: keine Tritt-/Podest-Vielecke mehr (nur eine unsichtbare Pick-Fläche = Grundfläche), jede Kante genau
+  einmal (Aussenlinie vor Trittkanten vor Podestkanten, deckungsgleiche Stücke entfallen); das erste Element über der
+  Schnitthöhe (Tritt oder Podest) trägt die **Bruchlinie** quer über den Lauf mit Zickzack in der Mitte (Wendel radial auf
+  der Trittmitte, Podest einen halben Auftritt hinter der Antrittskante); Wange, Tritt-/Podestkanten und Handlauf ([151])
+  sind davor ausgezogen, dahinter gestrichelt — dieselbe geometrische Teilung für alle (Handlauf vorher nach Gehhöhe;
+  `stair_rail::plan_pieces` → `plan_path`). Wendel: Trittkanten radial, Innen-/Aussenbogen an der Bruchlinie geteilt
+  (Bogen-Kodierung mit Strich-Flag, 10 Zahlen). **Linienhierarchie** relativ zur Kategorie (Treppen 0.18 @1:100): Tritte,
+  Podest, Lauflinie, Pfeil 0.1, Umriss/Wange und Bruchlinie 0.13 (`TREAD_FACTOR`/`OUTLINE_FACTOR`); Pfeilflügel als ein
+  Zug über die Spitze, Lauflinie endet in der Spitze. **Belag:** Treppen des Geschosses sparen das Bodenbelag-Muster aus
+  (`stair_symbol::footprint`, `surface_pattern::clip_outside_poly`). **Eigene Decke über der Schnittebene deckt nicht
+  mehr** (Füllung/Schraffur nur noch über Regeln): vorher verdeckte sie den Bodenbelag überall ausser im Treppenloch —
+  der Belag erscheint jetzt in allen Räumen von EG/OG (Musterhaus komplex: Parkett/Platten), wie bisher schon im DG.
+  **Treppenloch oben:** Treppen tieferer Geschosse, die auf dem Geschoss ankommen, erscheinen im Loch der Decke, auf der
+  das Geschoss steht (ausgezogen, auf das Loch beschnitten, ohne Bruchlinie, mit Handlauf), dazu die **Absturzsicherung**
+  (`stair-guard`, 0.1 mm, 4 cm auf der Decke, ab 1:50/fein doppelt) an den freien Lochrändern — nicht unter Wänden, nicht
+  an der Austrittskante (15 cm Toleranz). Tests: `keine_deckungsgleichen_linien` (alle Formen, 8 Schnitthöhen, mit/ohne
+  Handlauf, sichtbare Vieleck-Kanten mitgezählt), `vor_der_bruchlinie_voll_dahinter_gestrichelt`, `bruch_auf_dem_podest`,
+  `strichstaerken_tritte_fein_umriss_mittel`, `pfeil_schliesst_an_der_spitze`, `wendel_radiale_trittkanten_und_geteilte_boegen`,
+  `beschnitten_auf_das_loch`, `belag_ausgespart_unter_treppe`, `ankommende_treppe_im_deckenloch_mit_absturzsicherung`,
+  `eigene_decke_ueber_schnitt_deckt_nicht`. Goldens neu (Grundrisse Muster EG, komplex UG–DG, CLI EG). Geprüft: cargo test
+  Kern, WASM (`--no-opt`), tsc, vitest, CLI-SVG Musterhaus komplex EG/OG 1:50/1:100, UG-Wendel und Formen-Testprojekt
+  (U, U mit Mittellauf, gerade mit Podest, L, gerade, Wendel) vorher/nachher in Chromium. **Offen:** Raumstempel weichen
+  den neuen Linien aus (OG 1:100: „O.05 Treppenhaus“ eine Stufe kleiner); Lauflinie bleibt über der Bruchlinie ausgezogen;
+  Absturzsicherung nur im Grundriss (kein Geländer-Bauteil in 3D/IFC am Deckenloch); Ende eines ganz freien Lochrings
+  ohne Gehrung; dichtes Belagsmuster im 1:100 (Musterhaus: Parkett 60×10) ggf. Ausdünnung prüfen; nur Linux, nicht in der
+  Tauri-App/Metal angesehen. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

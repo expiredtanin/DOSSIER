@@ -348,6 +348,16 @@ fn floor_finishes(c: &Ctx, out: &mut Vec<Primitive>) {
     let p = c.p;
     let base = p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
     let cut = super::extras::cut_z(p, &c.a.floor);
+    // [155] Treppen des Geschosses stehen auf dem Belag: ihre Grundfläche spart ihn aus.
+    let stairs: Vec<Vec<[f64; 2]>> = p
+        .stairs
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|s| s.floor_id == c.a.floor && c.vis(&s.category_code, &s.id))
+        .filter_map(|s| crate::stair::decode_params(&s.encode()))
+        .flat_map(|sp| super::stair_symbol::footprint(&sp))
+        .collect();
     for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| c.vis(&x.category_code, &x.id)) {
         let top = p.ceiling_vertical_extent(ce).1;
         if !(top >= base - 0.3 && top <= cut) {
@@ -357,7 +367,14 @@ fn floor_finishes(c: &Ctx, out: &mut Vec<Primitive>) {
         if view_hatch_override(p, ceiling_view_override(c, ce, true).as_ref(), no_hatch()).1 {
             continue;
         }
-        let Some((segs, w, ink)) = crate::surface_pattern3d::floor_finish_segments(p, ce, c.a.scale) else { continue };
+        let Some((mut segs, w, ink)) = crate::surface_pattern3d::floor_finish_segments(p, ce, c.a.scale) else { continue };
+        for fp in &stairs {
+            let mut rest = Vec::with_capacity(segs.len());
+            for (a, b) in segs {
+                crate::surface_pattern::clip_outside_poly(a, b, fp, &mut rest);
+            }
+            segs = rest;
+        }
         let greyed = Some(c.greyed(&ce.category_code));
         for (a, b) in segs {
             out.push(line(pv(a), pv(b), "floor-finish-pattern", w, None, &ink, greyed));
@@ -411,11 +428,15 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         };
         let stroke = color.unwrap_or(POCHE_STROKE);
         let view_hatch_id = resolve_hatch_id(ce.hatch_id.as_deref(), ce.hatch_source, category, comp.and_then(|k| k.view_hatch_id.as_deref()));
-        let hatch = match (c.a.detail != Detail::Grob, comp, view_hatch_id.filter(|s| !s.is_empty())) {
+        // [155] Eigene Decke über der Schnittebene: nur der strichpunktierte Umriss, die Fläche deckt nicht
+        // (sonst verschwänden Bodenbelag und Treppen darunter ausser im Deckenloch); Regeln wirken weiter.
+        let overhead = ce.floor_id == c.a.floor && zone == super::view_range::Zone::Above;
+        let hatch = match (c.a.detail != Detail::Grob && !overhead, comp, view_hatch_id.filter(|s| !s.is_empty())) {
             (true, Some(k), Some(id)) => resolve_hatch_or_none(p, id, None, resolve_foreground(k, ce.foreground.as_deref(), category, ce.foreground_source)),
             _ => no_hatch(),
         };
         let fill = match comp {
+            _ if overhead => "none".to_string(),
             Some(k) => resolve_background(k, ce.background.as_deref(), category, ce.background_source).unwrap_or(poche_fill(hatch.pattern)).to_string(),
             None => "none".to_string(),
         };
@@ -1992,6 +2013,94 @@ mod tests {
         // Decke C1 (über dem EG) ist der Boden des OG: Belag im OG, nicht im EG.
         assert!(count("og") > 10);
         assert_eq!(count("eg"), 0);
+    }
+
+    /// [155] Die eigene Decke über der Schnittebene deckt nicht (Bodenbelag und Treppen bleiben sichtbar).
+    #[test]
+    fn eigene_decke_ueber_schnitt_deckt_nicht() {
+        let p = sample();
+        let poly = |floor: &str| {
+            let t = serde_json::json!({ "floor": floor, "show": ["30"], "grey": [], "scale": 50 }).to_string();
+            let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            let v = serde_json::to_value(&r.ceilings).unwrap();
+            v.as_array().unwrap().iter().find(|q| q["ceilingId"] == "C1" && q["kind"] == "polygon").map(|q| q["fill"].as_str().unwrap_or("").to_string())
+        };
+        assert_eq!(poly("eg").as_deref(), Some("none"));
+    }
+
+    /// [155] Treppen sparen den Bodenbelag aus: kein Musterstück schneidet die Treppen-Grundfläche.
+    #[test]
+    fn belag_ausgespart_unter_treppe() {
+        let mut p = sample();
+        let ce = p.ceilings.as_ref().unwrap()[0].clone();
+        let top = crate::model3d::ceiling_type_ref(&p, &ce).unwrap().2[0].component_id.clone();
+        let c = p.components.iter_mut().find(|c| c.id == top).unwrap();
+        c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Grid, spacing: 0.3, height: Some(0.3), ..Default::default() });
+        // Treppe im OG (steht auf C1)
+        let mut st = p.stairs.as_ref().unwrap()[0].clone();
+        st.id = "ST2".into();
+        st.floor_id = "og".into();
+        p.stairs.as_mut().unwrap().push(st.clone());
+        let t = serde_json::json!({ "floor": "og", "show": ["30", "40"], "grey": [], "scale": 50 }).to_string();
+        let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        let fp = super::super::stair_symbol::footprint(&crate::stair::decode_params(&st.encode()).unwrap()).remove(0);
+        let mut n = 0;
+        for q in &r.ceilings {
+            if let Primitive::Line { a, b, cls, .. } = q {
+                if cls != "floor-finish-pattern" {
+                    continue;
+                }
+                n += 1;
+                for k in 1..10 {
+                    let t = k as f64 / 10.0;
+                    let m = [a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t];
+                    let edge = (0..fp.len()).any(|i| {
+                        let (u, w) = (fp[i], fp[(i + 1) % fp.len()]);
+                        let d = [w[0] - u[0], w[1] - u[1]];
+                        let s = (((m[0] - u[0]) * d[0] + (m[1] - u[1]) * d[1]) / (d[0] * d[0] + d[1] * d[1])).clamp(0.0, 1.0);
+                        (m[0] - u[0] - d[0] * s).hypot(m[1] - u[1] - d[1] * s) < 1e-6
+                    });
+                    assert!(!crate::surface_pattern::point_in(m, &fp) || edge, "Belag in der Treppe: {a:?}–{b:?}");
+                }
+            }
+        }
+        assert!(n > 10, "Belag ausserhalb bleibt");
+    }
+
+    /// [155] Treppe aus dem Geschoss darunter im Deckenloch: ausgezogen, auf das Loch beschnitten, mit
+    /// Absturzsicherung an den freien Lochrändern, nicht an der Austrittskante.
+    #[test]
+    fn ankommende_treppe_im_deckenloch_mit_absturzsicherung() {
+        let mut p = sample();
+        // ST1: x 3.2 … 4.2, y 0.4 → 3.6 (Austritt bei y = 3.6); Loch in C1 darüber
+        let hole = vec![Vec2 { x: 3.2, y: 1.6 }, Vec2 { x: 4.2, y: 1.6 }, Vec2 { x: 4.2, y: 3.6 }, Vec2 { x: 3.2, y: 3.6 }];
+        p.ceilings.as_mut().unwrap()[0].openings = Some(vec![hole]);
+        let run = |p: &Project| {
+            let t = serde_json::json!({ "floor": "og", "show": ["30", "40"], "grey": [], "scale": 50 }).to_string();
+            plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().stairs
+        };
+        let st = run(&p);
+        let lines: Vec<(String, Vec2, Vec2, bool)> = st
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Line { a, b, cls, dash, stair_id, .. } if stair_id.as_deref() == Some("ST1") => Some((cls.clone(), *a, *b, dash.as_ref().is_some_and(|d| d.is_some()))),
+                _ => None,
+            })
+            .collect();
+        let sym: Vec<_> = lines.iter().filter(|l| l.0 != "stair-guard").collect();
+        assert!(sym.iter().any(|l| l.0 == "stair-tread"), "Tritte im Loch sichtbar");
+        assert!(sym.iter().all(|l| !l.3), "von oben: alles ausgezogen");
+        assert!(sym.iter().all(|l| l.1.y >= 1.6 - 1e-9 && l.2.y >= 1.6 - 1e-9), "auf das Loch beschnitten");
+        assert!(sym.iter().all(|l| l.0 != "stair-break"));
+        let guard: Vec<_> = lines.iter().filter(|l| l.0 == "stair-guard").collect();
+        assert!(!guard.is_empty(), "Absturzsicherung");
+        // nicht an der Austrittskante (y = 3.6), aber an der Lochkante y = 1.6 (ausserhalb des Lochs)
+        assert!(guard.iter().all(|l| !((l.1.y - 3.6).abs() < 0.1 && (l.2.y - 3.6).abs() < 0.1 && (l.1.x - l.2.x).abs() > 0.2)), "{guard:?}");
+        assert!(guard.iter().any(|l| l.1.y < 1.6 && l.2.y < 1.6 && (l.1.x - l.2.x).abs() > 0.5));
+        // ohne Loch: nichts von ST1 im OG
+        let mut q = p.clone();
+        q.ceilings.as_mut().unwrap()[0].openings = None;
+        assert!(run(&q).iter().all(|x| !matches!(x, Primitive::Line { stair_id, .. } if stair_id.as_deref() == Some("ST1"))));
     }
 
     #[test]
