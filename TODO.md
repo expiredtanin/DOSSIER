@@ -3691,17 +3691,33 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Daten, keine Ausweich-Logik für Blöcke). DG-Bodenbelag: seit [156] im 1:100 kein Muster mehr — erledigt. Goldens neu
   (Grundrisse beider Muster, komplex Schnitt/Ansicht Süd, CLI EG). Vorher/Nachher-Bilder lokal. Geprüft: cargo test Kern,
   WASM `--no-opt`, tsc, vitest, CLI-SVG in Chromium (nur Linux, nicht in Tauri/Metal).
-  **Offen:** Masskette der Baugrube in der Böschungsschraffur (EG West/Ost) — versucht: Aussenbemassung (`autodim`) rückt
-  hinter die Böschung; verworfen, weil die Ketten statisch im Modell liegen und auch dort weit draussen stehen, wo das
-  Gelände nicht gezeigt wird (Präsentationsplan fiel von 1:200 auf 1:500); braucht einen Versatz beim Zeichnen (nur wenn
-  die Baugrube sichtbar ist) für Ketten der Aussenbemassung. „B-B“ liegt jetzt neben „15.39“, aber auf der
-  Böschungsschraffur (Baugrube kein Hindernis der Marken-Beschriftung). Situation 1:500: die Marken selbst (Pfeile,
-  Striche) der Ansichten Nord/West bzw. Süd/Ost treffen sich weiter an den Ecken (nur die Beschriftungen weichen aus).
-  Schnitt B-B: Wendeltreppe UG zeigt nur die geschnittenen Stufen, die Stufen hinter dem Schnitt fehlen in der Projektion
-  (Ursache nicht gefunden: die Stufen gehen als Platten in `projection_edges` ein) — grösser, eigener Punkt; Treppe EG→OG
-  als graue Streifen. Ansicht Erker: Schlagschatten weiter treppig, weil die Empfänger (Facetten der Bogenwand) je eine
-  Tiefe haben — braucht Schatten mit Tiefe je Punkt der Empfängerfläche; Schichtbänder der Erker-Deckenstirn als
-  Bruchstücke (Flächen je Schicht und Facette ohne Fugenlinie). Weiter offen aus Teil 1: „Detail und Situation“ auf
+  **Teil 3 (7.11.)**, behoben (Kern, je ein Test): (20) **Schnitt B-B, Treppen:** Analyse Wendeltreppe UG: hinter der
+  Ebene (y > 5.6, Blick nach Norden) liegt nur die Kappe des Kreises; deren Stufen sind alle geschnitten und verdecken,
+  was dahinter liegt — die „fehlenden Stufen“ liegen vor der Ebene (richtig weggelassen). Behoben: Wangen der
+  Wangentreppen (gerade Läufe, 5 cm aussen an den Tritten, 5 cm über / 30 cm unter der Steigungslinie) und Handlauf/
+  Pfosten aller Treppen mit Geländer als Ansichtskanten mit Verdeckung (`model3d::stair_view_meshes`,
+  `stairs3d::stringers`, Rohre im Schnitt dünn = eine Linie; `wangentreppe_hinter_dem_schnitt_mit_wange_und_handlauf`)
+  — die OG-Holztreppe stand vorher als schwebende „graue Streifen“ ohne Wange; Seiten einer Platte als Glättungsgruppe:
+  das runde Treppenloch der Wendeltreppe in der EG-Decke ohne senkrechte Facettenfugen (`runde_platte_ohne_facettenfugen`).
+  (21) **Aussenbemassung vs. Böschung:** Ketten der automatischen Aussenbemassung rücken beim Zeichnen (nicht im
+  Modell) seitenweise hinter Sohle/Böschungsoberkante, wenn der Grundriss die Baugrube zeigt (`drawings::autodim_shift`;
+  Zeichnungs-Cache liest jetzt `context`; `aussenbemassung_rueckt_hinter_die_boeschung`); Präsentationsplan-Test grün.
+  (22) „B-B“ nicht auf der Böschung: Sohle, Böschungsoberkante und -schraffur sind Hindernisse der Marken-Beschriftung,
+  Kandidaten bis 6 Schrifthöhen hinaus (`schnittmarke_nicht_auf_der_boeschung`). (23) **Ansicht Erker:** Schlagschatten
+  mit Tiefe je Punkt (Empfänger- und Werfertiefe linear über u, Versatz je Stirn-Ende exakt aus der Facettenebene;
+  streifend beschienene Flächen und bündige Stirnen < 5 mm ohne Schatten; `schatten_auf_gekruemmter_wand_mit_tiefe_je_punkt`)
+  — die Kante unter dem Erkerdach läuft glatt; die Schichtband-Stücke an den Decken des Erkers waren keine Fugen,
+  sondern die bündige, gröber facettierte Deckenstirn, die an jeder Ecke um Millimeter vor die Bogenwand trat (samt
+  Schatten): Facetten gekrümmter Deckenstirnen gelten bis 2 cm hinter einer gleich tiefen Wand als verdeckt
+  (`SLAB_BEHIND_WALL`, `curved_slab_facets`; ebene Fassaden unverändert; `buendige_deckenstirn_hinter_bogenwand`).
+  Golden Ansicht Süd (komplex) neu. Vorher/Nachher-Bilder lokal. Geprüft: cargo test Kern, WASM `--no-opt`, tsc, vitest,
+  CLI-SVG in Chromium (nur Linux, nicht in Tauri/Metal; Bildschirm-Renderer nicht angesehen).
+  **Offen:** Erker in der Ansicht zeigt keine Geschosslinie (Deckenstirn hinter der Erkerwand), die ebene Fassade daneben
+  schon (bündige Stirn gleich tief wie die Wand) — Regel für bündige Stirnen vereinheitlichen; Schatten unter dem
+  Erkerdach hat an den Facetten der Dach-Stirn noch kleine Absätze (Dachflächen als Werfer); Wangen nur im Schnitt
+  (3D, Ansicht und Schnittfläche ohne Wangen; Wendel-/Podestwangen fehlen); „B-B“ steht bis ~2.5 m neben seiner Marke,
+  wenn Ketten und Böschung dazwischen liegen. Situation 1:500: die Marken selbst (Pfeile, Striche) der Ansichten
+  Nord/West bzw. Süd/Ost treffen sich weiter an den Ecken. Weiter offen aus Teil 1: „Detail und Situation“ auf
   Masskette/Höhenkote; Baum-Kreis über der Haustür (Daten); Raumstempel verlieren beim Ausweichen die Nutzungszeile;
   Achsblasen ab 1:200 über Höhenkoten; dünne schwebende Linie unter Fenster OG (Süd); Bogenwand-Fenster im Schnitt 1:50
   nur Umriss; Höhenkoten im CLI-Schnitt weit links (wie in der App: links von Gelände-Ausmass).
