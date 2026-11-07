@@ -1467,6 +1467,10 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
 }
 
 #[cfg(test)]
+#[path = "perf_tests.rs"]
+mod perf_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

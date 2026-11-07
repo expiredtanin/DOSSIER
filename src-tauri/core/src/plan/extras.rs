@@ -270,6 +270,16 @@ pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Pri
     let cutters_for = |z0: f64, z1: f64| -> Vec<&[Vec2]> { voids.iter().filter(|v| v.z0 < z1 - EPS && v.z1 > z0 + EPS).map(|v| v.pts.as_slice()).collect() };
     let wall_cutters = cutters_for(cut_z - 1e-4, cut_z + 1e-4);
     let wall_flat = encode_rings(&wall_cutters);
+    // [159] Nichts zu tun (z. B. Kontext mit zehntausenden Höhenlinien): die Liste unverändert, ohne Umkopieren.
+    let nonempty = |s: &Option<String>| s.as_deref().is_some_and(|s| !s.is_empty());
+    let touched = |q: &Primitive| match q {
+        Primitive::Line { cls, .. } => WALL_LINE_CLS.contains(&cls.as_str()) && !wall_cutters.is_empty(),
+        Primitive::Polygon { wall_id, ceiling_id, column_id, extruded_solid_id, .. } => !nonempty(extruded_solid_id) && (nonempty(wall_id) || nonempty(ceiling_id) || nonempty(column_id)),
+        _ => false,
+    };
+    if !prims.iter().any(touched) {
+        return prims;
+    }
     let mut out = Vec::with_capacity(prims.len());
     for pr in prims {
         if let Primitive::Line { a, b, cls, .. } = &pr {
@@ -332,6 +342,13 @@ pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Pri
             out.push(pr);
             continue;
         }
+        // [159] Weit neben allen Abzugskörpern (Rechtecke getrennt): unverändert wie mit leerer Schnittmenge
+        // (`subtract_rings` → `None`), ohne die Booleans je Polygon.
+        let pb = bbox_of(pts.iter().map(|q| [q.x, q.y]));
+        if cutters.iter().all(|c| apart(pb, bbox_of(c.iter().map(|q| [q.x, q.y])))) {
+            out.push(pr);
+            continue;
+        }
         let ring = encode_rings(&[pts]);
         let ns = no_stroke_edges.as_deref().unwrap_or(&[]);
         let mut nsf = vec![ns.len() as f64];
@@ -360,6 +377,24 @@ pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Pri
         }
     }
     out
+}
+
+/// [159] Rechteck `[x0, y0, x1, y1]` um die Punkte (NaN bleibt NaN, s. [`apart`]).
+fn bbox_of(pts: impl Iterator<Item = [f64; 2]>) -> [f64; 4] {
+    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for q in pts {
+        if !(q[0].is_finite() && q[1].is_finite()) {
+            return [f64::NAN; 4];
+        }
+        b = [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])];
+    }
+    b
+}
+
+/// [159] Zwei Rechtecke mit sicherem Abstand (1 mm, über dem Raster der Booleans) getrennt; NaN → nein.
+fn apart(a: [f64; 4], b: [f64; 4]) -> bool {
+    const GAP: f64 = 1e-3;
+    a[2] + GAP < b[0] || b[2] + GAP < a[0] || a[3] + GAP < b[1] || b[3] + GAP < a[1]
 }
 
 /// Schnitthöhe des Geschosses (Welt): Basis + Schnitthöhe (Standard 1 m).

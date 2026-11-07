@@ -2748,7 +2748,7 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
             _ => None,
         };
         let site = site.filter(|st| !st.items.is_empty());
-        let orig_idx = site.as_ref().map(|st| crate::terrain::TinIndex::new(&st.orig));
+        let orig_idx = site.as_ref().map(|st| st.index_orig());
         let boxes: Vec<[f64; 4]> = site.as_ref().map_or_else(Vec::new, |st| {
             st.items
                 .iter()

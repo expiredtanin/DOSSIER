@@ -43,6 +43,25 @@ impl Obstacles {
         self.segs.iter().flat_map(|s| s.iter().copied()).chain(self.areas.iter().flatten().copied()).collect()
     }
 
+    /// [159] Inhalts-Schlüssel (Strecken und Flächen) für Zwischenspeicher.
+    pub fn sig(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.segs.len().hash(&mut h);
+        for s in &self.segs {
+            for q in s {
+                (q[0].to_bits(), q[1].to_bits()).hash(&mut h);
+            }
+        }
+        for a in &self.areas {
+            a.len().hash(&mut h);
+            for q in a {
+                (q[0].to_bits(), q[1].to_bits()).hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.segs.is_empty() && self.areas.is_empty()
     }
@@ -192,6 +211,86 @@ impl Obstacles {
             q[2] >= b[0] && q[0] <= b[2] && q[3] >= b[1] && q[1] <= b[3]
         };
         self.segs.iter().any(|s| near(&s[..]) && seg_hits_ring(s[0], s[1], ring)) || self.areas.iter().any(|a| near(a) && convex_overlap(a, ring))
+    }
+}
+
+/// [159] Raster über die Hindernisse für viele Fragen [`Obstacles::hits_convex`] (Höhenlinien-Beschriftungen):
+/// je Zelle die Strecken und Flächen, deren Rechteck sie berührt. Antwort wie ohne Raster.
+pub struct ObstacleGrid<'a> {
+    o: &'a Obstacles,
+    cell: f64,
+    map: std::collections::HashMap<(i64, i64), (Vec<u32>, Vec<u32>)>,
+    /// Zu gross für das Raster: immer prüfen.
+    big: (Vec<u32>, Vec<u32>),
+}
+
+impl<'a> ObstacleGrid<'a> {
+    pub fn new(o: &'a Obstacles, cell: f64) -> Self {
+        let cell = if cell.is_finite() && cell > 0.0 { cell } else { 1.0 };
+        let mut g = ObstacleGrid { o, cell, map: Default::default(), big: Default::default() };
+        for (i, s) in o.segs.iter().enumerate() {
+            g.put(ring_bbox(&s[..]), i as u32, true);
+        }
+        for (i, a) in o.areas.iter().enumerate() {
+            g.put(ring_bbox(a), i as u32, false);
+        }
+        g
+    }
+
+    fn key(&self, x: f64, y: f64) -> (i64, i64) {
+        ((x / self.cell).floor() as i64, (y / self.cell).floor() as i64)
+    }
+
+    fn put(&mut self, b: [f64; 4], i: u32, seg: bool) {
+        let (k0, k1) = (self.key(b[0], b[1]), self.key(b[2], b[3]));
+        let n = (k1.0 - k0.0 + 1).saturating_mul(k1.1 - k0.1 + 1);
+        if !b.iter().all(|v| v.is_finite()) || !(1..=4096).contains(&n) {
+            if seg { self.big.0.push(i) } else { self.big.1.push(i) }
+            return;
+        }
+        for x in k0.0..=k1.0 {
+            for y in k0.1..=k1.1 {
+                let e = self.map.entry((x, y)).or_default();
+                if seg { e.0.push(i) } else { e.1.push(i) }
+            }
+        }
+    }
+
+    /// Wie [`Obstacles::hits_convex`].
+    pub fn hits_convex(&self, ring: &[P]) -> bool {
+        let b = ring_bbox(ring);
+        let near = |pts: &[P]| {
+            let q = ring_bbox(pts);
+            q[2] >= b[0] && q[0] <= b[2] && q[3] >= b[1] && q[1] <= b[3]
+        };
+        let seg = |i: &u32| {
+            let s = &self.o.segs[*i as usize];
+            near(&s[..]) && seg_hits_ring(s[0], s[1], ring)
+        };
+        let area = |i: &u32| {
+            let a = &self.o.areas[*i as usize];
+            near(a) && convex_overlap(a, ring)
+        };
+        if self.big.0.iter().any(seg) || self.big.1.iter().any(area) {
+            return true;
+        }
+        if !b.iter().all(|v| v.is_finite()) {
+            return self.o.hits_convex(ring);
+        }
+        let (k0, k1) = (self.key(b[0], b[1]), self.key(b[2], b[3]));
+        if (k1.0 - k0.0 + 1).saturating_mul(k1.1 - k0.1 + 1) > 4096 {
+            return self.o.hits_convex(ring);
+        }
+        for x in k0.0..=k1.0 {
+            for y in k0.1..=k1.1 {
+                if let Some((ss, aa)) = self.map.get(&(x, y)) {
+                    if ss.iter().any(seg) || aa.iter().any(area) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 }
 
@@ -351,5 +450,33 @@ mod tests {
         t.text(v(0.0, 0.0), "±0.00", 0.2, 0.0);
         assert_eq!(t.clearance(v(0.3, 0.05), 0.01, 0.01), 0.0);
         assert!(t.clearance(v(0.3, 1.0), 0.01, 0.01) > 0.5);
+    }
+
+    /// [159] Raster über die Hindernisse antwortet wie die lineare Suche (zufällige Strecken, Flächen, Rechtecke).
+    #[test]
+    fn raster_wie_ohne() {
+        let mut r = crate::plan::cache::tests::Rng(5);
+        let mut o = Obstacles::default();
+        for _ in 0..300 {
+            let (x, y) = (r.next() * 50.0, r.next() * 30.0);
+            o.seg([x, y], [x + r.next() * 4.0 - 2.0, y + r.next() * 4.0 - 2.0]);
+        }
+        o.seg([-10.0, -10.0], [80.0, 50.0]);
+        for _ in 0..60 {
+            o.text(v(r.next() * 50.0, r.next() * 30.0), "12.5", 0.2 + r.next() * 0.3, r.next() * 6.0);
+        }
+        for cell in [0.3, 0.8, 5.0] {
+            let g = ObstacleGrid::new(&o, cell);
+            let mut hits = 0;
+            for _ in 0..4000 {
+                let (m, a, hu, hv) = ([r.next() * 56.0 - 3.0, r.next() * 36.0 - 3.0], r.next() * 6.3, r.next() * 1.5, r.next() * 0.4);
+                let (c, sn) = (a.cos(), a.sin());
+                let ring: Vec<P> = [(-hu, -hv), (hu, -hv), (hu, hv), (-hu, hv)].iter().map(|(p, q)| [m[0] + c * p - sn * q, m[1] + sn * p + c * q]).collect();
+                let want = o.hits_convex(&ring);
+                assert_eq!(g.hits_convex(&ring), want, "{ring:?}");
+                hits += want as usize;
+            }
+            assert!(hits > 100 && hits < 3900, "{hits}");
+        }
     }
 }

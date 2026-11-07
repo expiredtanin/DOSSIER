@@ -120,8 +120,9 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
                     }
                     let seg_end = if k.closed { pts.len() } else { pts.len() - 1 };
                     let rings = house();
+                    let bb = rings_bbox(&rings);
                     for i in 0..seg_end {
-                        for (a, b) in outside(pts[i], pts[(i + 1) % pts.len()], &rings) {
+                        for (a, b) in outside_bb(pts[i], pts[(i + 1) % pts.len()], &rings, bb) {
                             out.push(context_line(a, b));
                         }
                     }
@@ -268,6 +269,24 @@ fn inside(q: Vec2, ring: &[Vec2]) -> bool {
 
 /// Teile der Strecke a–b ausserhalb aller `rings`.
 pub(super) fn outside(a: Vec2, b: Vec2, rings: &[Vec<Vec2>]) -> Vec<(Vec2, Vec2)> {
+    outside_bb(a, b, rings, rings_bbox(rings))
+}
+
+/// [159] Achsparalleles Rechteck `[x0, y0, x1, y1]` um alle Ringe (für [`outside_bb`]).
+pub(super) fn rings_bbox(rings: &[Vec<Vec2>]) -> [f64; 4] {
+    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for q in rings.iter().flatten() {
+        b = [b[0].min(q.x), b[1].min(q.y), b[2].max(q.x), b[3].max(q.y)];
+    }
+    b
+}
+
+/// Wie [`outside`] mit dem vorab gerechneten Rechteck `bb` um alle `rings` ([`rings_bbox`]): eine Strecke ganz
+/// daneben bleibt ohne Kantentest ganz (dasselbe Ergebnis: keine Kante in der Nähe, Anfang in keinem Ring).
+pub(super) fn outside_bb(a: Vec2, b: Vec2, rings: &[Vec<Vec2>], bb: [f64; 4]) -> Vec<(Vec2, Vec2)> {
+    if a.x.max(b.x) < bb[0] || a.x.min(b.x) > bb[2] || a.y.max(b.y) < bb[1] || a.y.min(b.y) > bb[3] {
+        return vec![(a, b)];
+    }
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     let (lo_x, hi_x, lo_y, hi_y) = (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y));
     let mut ts = vec![0.0, 1.0];
@@ -339,12 +358,33 @@ impl Iso {
         let (a, b) = (self.at(s0), self.at(s1));
         let l = self.len();
         let mut d: f64 = 0.0;
-        for (i, q) in self.pts.iter().enumerate() {
-            let c = self.cum[i];
-            let within = if self.closed && l > 0.0 { (c - s0).rem_euclid(l) < s1 - s0 } else { c > s0 && c < s1 };
-            if within {
-                d = d.max(seg_dist(v2(q[0], q[1]), a, b));
+        let mut visit = |r: std::ops::Range<usize>| {
+            for i in r {
+                let (c, q) = (self.cum[i], self.pts[i]);
+                let within = if self.closed && l > 0.0 { (c - s0).rem_euclid(l) < s1 - s0 } else { c > s0 && c < s1 };
+                if within {
+                    d = d.max(seg_dist(v2(q[0], q[1]), a, b));
+                }
             }
+        };
+        // [159] Nur die Ecken in Frage (Bogenlänge sortiert; Obermenge mit Spiel, die Bedingung oben entscheidet
+        // wie zuvor) statt aller Ecken je Kandidat.
+        let eps = 1e-6 * l.max(1.0);
+        let range = |lo: f64, hi: f64| self.cum.partition_point(|c| *c < lo)..self.cum.partition_point(|c| *c <= hi);
+        if self.closed && l > 0.0 {
+            if s1 - s0 >= l - eps {
+                visit(0..self.pts.len());
+            } else {
+                let a0 = s0.rem_euclid(l);
+                let a1 = a0 + (s1 - s0);
+                // Der Bogen [a0, a1) und sein Stück über das Ende hinaus (Bogenlängen ab 0 wieder); doppelt
+                // besuchte Ecken ändern das Maximum nicht.
+                visit(range(a0 - eps, a1 + eps));
+                visit(range(a0 - l - eps, a1 - l + eps));
+                visit(range(a0 + l - eps, a1 + l + eps));
+            }
+        } else {
+            visit(range(s0 - eps, s1 + eps));
         }
         d
     }
@@ -401,23 +441,32 @@ impl SegGrid {
         }
         ids.sort_unstable();
         ids.dedup();
-        ids.iter().filter(|i| super::stamp_place::seg_hits_ring(self.segs[**i].0, self.segs[**i].1, ring)).count()
+        // [159] Rechteck zuerst: eine Strecke neben dem Rechteck des Rings berührt ihn nicht.
+        let hit = |a: [f64; 2], c: [f64; 2]| a[0].max(c[0]) >= b[0] && a[0].min(c[0]) <= b[2] && a[1].max(c[1]) >= b[1] && a[1].min(c[1]) <= b[3];
+        ids.iter().filter(|i| {
+            let (a, c, _) = self.segs[**i];
+            hit(a, c) && super::stamp_place::seg_hits_ring(a, c, ring)
+        }).count()
     }
 }
 
-/// [T6] Höhenlinien aus dem Gelände-Netz (samt Baugruben) in der Äquidistanz `contourInterval`; jede
-/// `contourIndexEvery`-te ist Zähllinie (dicker, mit Höhenangabe, lesbar gedreht). [150] Linien enden am
-/// Fussabdruck `house`; Beschriftungen liegen ausserhalb davon, nicht auf `obst` (Bemassung, Koten, Texte),
-/// nicht übereinander, je Zähllinie alle [`CONTOUR_LABEL_SPACING_MM`] eine (nahe der Abschnittsmitte, wo sie
-/// am wenigsten andere Linien kreuzt und die Linie gerade genug ist).
-fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &[Vec<Vec2>], obst: &super::stamp_place::Obstacles) {
-    let Some(iv) = t.contour_interval.filter(|v| v.is_finite() && *v > 0.0) else { return };
-    let every = t.contour_index_every.filter(|v| v.is_finite() && *v >= 1.0).map_or(5, |v| v.round() as i64);
-    let st = crate::excavation::site_terrain(c.p, t);
-    let scale = c.a.scale.max(1.0);
+/// [159] Höhenlinien eines Geländes für den Grundriss: Linienzüge, je Strecke gezeichnet (Ausdünnung nach
+/// Massstab) und das Raster der gezeichneten Strecken für die Beschriftung.
+struct ContourData {
+    isos: Vec<Iso>,
+    drawn: Vec<Vec<bool>>,
+    grid: SegGrid,
+}
+
+type ContourKey = (u64, u64, i64, u64);
+thread_local! {
+    static CONTOURS: std::cell::RefCell<Vec<(ContourKey, std::rc::Rc<ContourData>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn contour_data(st: &crate::excavation::SiteTerrain, iv: f64, every: i64, scale: f64) -> ContourData {
     let text_h = 0.002 * scale;
     let tin = st.current();
-    let idx = crate::terrain::TinIndex::new(tin);
+    let idx = st.index_current();
     // [140] Papierabstand (mm) benachbarter Höhenlinien am Punkt: Äquidistanz / Gefälle des Dreiecks.
     let spacing_mm = |x: f64, y: f64| -> f64 {
         let Some(([a, b, cc], _)) = idx.bary_at(x, y) else { return f64::INFINITY };
@@ -469,6 +518,65 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
             }
         }
     }
+    ContourData { isos, drawn, grid }
+}
+
+/// [T6] Höhenlinien aus dem Gelände-Netz (samt Baugruben) in der Äquidistanz `contourInterval`; jede
+/// `contourIndexEvery`-te ist Zähllinie (dicker, mit Höhenangabe, lesbar gedreht). [150] Linien enden am
+/// Fussabdruck `house`; Beschriftungen liegen ausserhalb davon, nicht auf `obst` (Bemassung, Koten, Texte),
+/// nicht übereinander, je Zähllinie alle [`CONTOUR_LABEL_SPACING_MM`] eine (nahe der Abschnittsmitte, wo sie
+/// am wenigsten andere Linien kreuzt und die Linie gerade genug ist).
+fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &[Vec<Vec2>], obst: &super::stamp_place::Obstacles) {
+    let Some(iv) = t.contour_interval.filter(|v| v.is_finite() && *v > 0.0) else { return };
+    let every = t.contour_index_every.filter(|v| v.is_finite() && *v >= 1.0).map_or(5, |v| v.round() as i64);
+    let st = crate::excavation::site_terrain(c.p, t);
+    use std::hash::{Hash, Hasher};
+    // [159] Das Ergebnis hängt nur am Gelände, an Äquidistanz/Zähllinien, am Massstab, am Fussabdruck und an den
+    // Hindernissen: bei gleichen Eingaben (z. B. eine Innenwand verschoben) aus dem Zwischenspeicher.
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for r in house {
+        r.len().hash(&mut h);
+        for q in r {
+            (q.x.to_bits(), q.y.to_bits()).hash(&mut h);
+        }
+    }
+    let key: LinesKey = (st.key, iv.to_bits(), every, c.a.scale.max(1.0).to_bits(), h.finish(), obst.sig());
+    if let Some(v) = CONTOUR_LINES.with(|m| m.borrow().iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
+        out.extend(v.iter().cloned());
+        return;
+    }
+    let start = out.len();
+    contour_prims(c, &st, iv, every, out, house, obst);
+    let v = std::rc::Rc::new(out[start..].to_vec());
+    CONTOUR_LINES.with(|m| {
+        let mut m = m.borrow_mut();
+        m.insert(0, (key, v));
+        m.truncate(2);
+    });
+}
+
+type LinesKey = (u64, u64, i64, u64, u64, u64);
+thread_local! {
+    static CONTOUR_LINES: std::cell::RefCell<Vec<(LinesKey, std::rc::Rc<Vec<Primitive>>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// [`terrain_contours`] ohne Zwischenspeicher.
+fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i64, out: &mut Vec<Primitive>, house: &[Vec<Vec2>], obst: &super::stamp_place::Obstacles) {
+    let scale = c.a.scale.max(1.0);
+    let text_h = 0.002 * scale;
+    // [159] Linien, Ausdünnung und Raster hängen nur am Gelände, an der Äquidistanz und am Massstab: zwischengespeichert.
+    let key = (st.key, iv.to_bits(), every, scale.to_bits());
+    let data = CONTOURS.with(|m| m.borrow().iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())).unwrap_or_else(|| {
+        let v = std::rc::Rc::new(contour_data(st, iv, every, scale));
+        CONTOURS.with(|m| {
+            let mut m = m.borrow_mut();
+            m.insert(0, (key, v.clone()));
+            m.truncate(4);
+        });
+        v
+    });
+    let ContourData { isos, drawn, grid } = &*data;
+    let obst_grid = super::stamp_place::ObstacleGrid::new(obst, 4.0 * text_h);
     let house_p: Vec<Vec<[f64; 2]>> = house.iter().map(|r| r.iter().map(|q| [q.x, q.y]).collect()).collect();
     let house_b: Vec<[f64; 4]> = house_p.iter().map(|r| super::stamp_place::ring_bbox(r)).collect();
     let in_house = |ring: &[[f64; 2]]| {
@@ -482,7 +590,7 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
     let spacing = CONTOUR_LABEL_SPACING_MM / 1000.0 * scale;
     let step = 0.001 * scale;
     let (pad_house, pad_label) = (0.3 * text_h, 0.5 * text_h);
-    let mut placed: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut placed: Vec<(Vec<[f64; 2]>, [f64; 4])> = Vec::new();
     // Je Linie: Lücken (Bogenlänge) unter den Beschriftungen.
     let mut gaps: Vec<Vec<(f64, f64)>> = vec![Vec::new(); isos.len()];
     for li in order {
@@ -524,11 +632,13 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
                 let u = [(b[0] - a[0]) / cl, (b[1] - a[1]) / cl];
                 let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
                 let padded = rot_rect(m, u, hw + pad_house, hv + pad_house);
-                if in_house(&padded) || obst.hits_convex(&padded) {
+                if in_house(&padded) || obst_grid.hits_convex(&padded) {
                     continue;
                 }
                 let grown = rot_rect(m, u, hw + pad_label, hv + pad_label / 2.0);
-                if placed.iter().any(|r| super::stamp_place::convex_overlap(r, &grown)) {
+                // [159] Rechteck zuerst (getrennte Rechtecke überlappen nicht).
+                let gb = super::stamp_place::ring_bbox(&grown);
+                if placed.iter().any(|(r, rb)| rb[2] >= gb[0] && rb[0] <= gb[2] && rb[3] >= gb[1] && rb[1] <= gb[3] && super::stamp_place::convex_overlap(r, &grown)) {
                     continue;
                 }
                 let x = grid.crossings(&rot_rect(m, u, hw, hv), li);
@@ -545,7 +655,9 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
             }
             let Some((_, s, m, u)) = best else { continue };
             mine.push(s);
-            placed.push(rot_rect(m, u, hw, hv));
+            let r = rot_rect(m, u, hw, hv);
+            let rb = super::stamp_place::ring_bbox(&r);
+            placed.push((r, rb));
             gaps[li].push((s - reserve, s + reserve));
             // Lesbar gedreht; Text mittig auf die Linie (Grundlinie ≈ −0.35 · Höhe).
             let mut ang = u[1].atan2(u[0]);
@@ -569,6 +681,7 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
         }
     }
     // Linien: ohne die Lücken unter den Beschriftungen, ausserhalb des Fussabdrucks.
+    let house_bb = rings_bbox(house);
     for (li, l) in isos.iter().enumerate() {
         // [140] Zähllinie mittel (0.18), Höhenlinie fein (0.1): Gelände bleibt unter dem Gebäude zurück.
         let w = if l.index { 0.18 } else { 0.1 };
@@ -599,7 +712,7 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
             let (a, b) = (seg[0], seg[1]);
             for (f0, f1) in spans {
                 let pt = |f: f64| v2(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
-                for (p0, p1) in outside(pt(f0), pt(f1), house) {
+                for (p0, p1) in outside_bb(pt(f0), pt(f1), house, house_bb) {
                     out.push(ink_line(p0, p1, w, TERRAIN_INK, None));
                 }
             }
@@ -622,19 +735,20 @@ fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &m
     let band = hull.map_or_else(|| ring.clone(), |h| h.iter().map(|q| v2(q[0], q[1])).collect());
     bands.push(pick_band(band, Some(&e.id), None));
     let spacing = (0.004 * c.a.scale.max(1.0)).max(0.2);
+    let house_bb = rings_bbox(house);
     for t in crate::excavation::terrains(c.p) {
         let st = crate::excavation::site_terrain(c.p, t);
         let Some((_, spec, daylight)) = st.items.iter().find(|(id, ..)| *id == e.id) else { continue };
         for l in daylight {
             for w in l.windows(2) {
-                for (a, b) in outside(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), house) {
+                for (a, b) in outside_bb(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), house, house_bb) {
                     out.push(ink_line(a, b, 0.18, EXCAVATION_INK, None));
                 }
             }
         }
-        if let Some(before) = crate::excavation::terrain_before(&st, &e.id) {
-            for (a, b) in crate::excavation::slope_hatch(&before, spec, spacing) {
-                for (a, b) in outside(v2(a[0], a[1]), v2(b[0], b[1]), house) {
+        if let Some(hatch) = crate::excavation::slope_hatch_of(&st, &e.id, spec, spacing) {
+            for &(a, b) in hatch.iter() {
+                for (a, b) in outside_bb(v2(a[0], a[1]), v2(b[0], b[1]), house, house_bb) {
                     out.push(ink_line(a, b, 0.1, EXCAVATION_INK, None));
                 }
             }
@@ -980,5 +1094,116 @@ mod tests {
         assert_eq!(section_label_tag("Längsschnitt"), "Längsschnitt");
         assert_eq!(section_label_tag("   "), "");
         assert_eq!(section_label_tag("a\u{A0}b"), "b");
+    }
+
+    /// [159] Zwischengespeicherte Höhenlinien = neu gerechnete: gleiches Ergebnis beim zweiten Aufruf (aus dem
+    /// Speicher), nach einem anderen Massstab und ohne Speicher (`contour_prims`).
+    #[test]
+    fn hoehenlinien_aus_dem_zwischenspeicher_wie_neu() {
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 2.0, 40.0, 30.0, 9.0, 0.0, 30.0, 4.0, 20.0, 15.0, 7.5], indices: vec![0.0, 1.0, 4.0, 1.0, 2.0, 4.0, 2.0, 3.0, 4.0, 3.0, 0.0, 4.0], contour_interval: Some(0.1), ..Default::default() };
+        let mut p = sample_with_walls(serde_json::json!([["w1", "eg", 5, 5, 15, 5], ["w2", "eg", 15, 5, 15, 12], ["w3", "eg", 15, 12, 5, 12], ["w4", "eg", 5, 12, 5, 5]]));
+        p.context = Some(vec![ContextObject::TerrainMesh(t.clone())]);
+        let run = |scale: f64| {
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"floor": "eg", "show": ["80"], "scale": {scale}}}"#)).unwrap();
+            let c = Ctx::new(&p, &a);
+            let mut out = Vec::new();
+            plan_context(&c, &mut out);
+            let (house, mut fresh) = (terrain_footprint(&p, "eg"), Vec::new());
+            let st = crate::excavation::site_terrain(&p, &t);
+            contour_prims(&c, &st, 0.1, 5, &mut fresh, &house, &Default::default());
+            (out, fresh)
+        };
+        let (a1, f1) = run(100.0);
+        assert!(a1.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })).count() >= 2 && a1.len() > 100);
+        let (a2, _) = run(50.0);
+        let (a3, f3) = run(100.0);
+        assert_eq!(a1, a3, "aus dem Speicher wie beim ersten Mal");
+        assert_ne!(a1, a2);
+        assert_eq!(f1, f3);
+        // Ohne Zwischenspeicher: dieselben Höhenlinien-Primitive (nach dem Rahmen und der Pick-Fläche).
+        let tail: Vec<&Primitive> = a3.iter().skip(5).collect();
+        assert_eq!(tail, f3.iter().collect::<Vec<_>>());
+    }
+
+    /// [159] Rechteck-Vortest in `outside_bb` = ohne: zufällige Strecken um zwei Ringe.
+    #[test]
+    fn ausserhalb_mit_rechteck_wie_ohne() {
+        let rings = vec![vec![v2(0.0, 0.0), v2(4.0, 0.0), v2(4.0, 3.0), v2(0.0, 3.0)], vec![v2(6.0, 1.0), v2(9.0, 1.0), v2(7.5, 4.0)]];
+        let old = |a: Vec2, b: Vec2| -> Vec<(Vec2, Vec2)> {
+            // Fassung vor [159]: immer alle Kanten.
+            let (dx, dy) = (b.x - a.x, b.y - a.y);
+            let (lo_x, hi_x, lo_y, hi_y) = (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y));
+            let mut ts = vec![0.0, 1.0];
+            let mut near = false;
+            for r in &rings {
+                for i in 0..r.len() {
+                    let (p, q) = (r[i], r[(i + 1) % r.len()]);
+                    if p.x.max(q.x) < lo_x || p.x.min(q.x) > hi_x || p.y.max(q.y) < lo_y || p.y.min(q.y) > hi_y {
+                        continue;
+                    }
+                    near = true;
+                    let (ex, ey) = (q.x - p.x, q.y - p.y);
+                    let den = dx * ey - dy * ex;
+                    if den.abs() < 1e-15 {
+                        continue;
+                    }
+                    let t = ((p.x - a.x) * ey - (p.y - a.y) * ex) / den;
+                    let u = ((p.x - a.x) * dy - (p.y - a.y) * dx) / den;
+                    if t > 0.0 && t < 1.0 && (0.0..=1.0).contains(&u) {
+                        ts.push(t);
+                    }
+                }
+            }
+            let at = |t: f64| v2(a.x + dx * t, a.y + dy * t);
+            if !near {
+                return if rings.iter().any(|r| inside(a, r)) { vec![] } else { vec![(a, b)] };
+            }
+            ts.sort_by(|x, y| x.total_cmp(y));
+            ts.windows(2).filter(|w| w[1] - w[0] > 1e-9 && !rings.iter().any(|r| inside(at((w[0] + w[1]) / 2.0), r))).map(|w| (at(w[0]), at(w[1]))).collect()
+        };
+        let mut r = super::super::cache::tests::Rng(7);
+        let bb = rings_bbox(&rings);
+        for _ in 0..20_000 {
+            let mut c = || r.next() * 16.0 - 3.0;
+            let (a, b) = (v2(c(), c()), v2(c(), c()));
+            assert_eq!(outside_bb(a, b, &rings, bb), old(a, b), "{a:?} {b:?}");
+        }
+    }
+
+    /// [159] `Iso::bend` über den Bereich der Bogenlänge = über alle Ecken (offen und geschlossen, auch über das Ende).
+    #[test]
+    fn knick_ueber_bereich_wie_ueber_alle() {
+        let mut r = super::super::cache::tests::Rng(3);
+        for closed in [false, true] {
+            let mut pts: Vec<[f64; 2]> = (0..40).map(|i| [i as f64 * 0.7 + r.next() * 0.3, (i as f64 * 0.4).sin() * 2.0 + r.next() * 0.2]).collect();
+            if closed {
+                pts.push(pts[0]);
+            }
+            let mut cum = vec![0.0];
+            for w in pts.windows(2) {
+                cum.push(cum[cum.len() - 1] + (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]));
+            }
+            let iso = Iso { level: 0.0, index: true, pts, cum, closed };
+            let l = iso.len();
+            let all = |s0: f64, s1: f64| {
+                let (a, b) = (iso.at(s0), iso.at(s1));
+                let mut d: f64 = 0.0;
+                for (i, q) in iso.pts.iter().enumerate() {
+                    let c = iso.cum[i];
+                    let within = if iso.closed && l > 0.0 { (c - s0).rem_euclid(l) < s1 - s0 } else { c > s0 && c < s1 };
+                    if within {
+                        d = d.max(seg_dist(v2(q[0], q[1]), a, b));
+                    }
+                }
+                d
+            };
+            for k in 0..5000 {
+                let s = r.next() * l * 1.2 - 0.1 * l;
+                let h = if k % 50 == 0 { l * (0.9 + r.next() * 0.2) } else { r.next() * 3.0 };
+                // Auch genau auf Ecken.
+                let s = if k % 7 == 0 { iso.cum[k % iso.cum.len()] + h } else { s };
+                assert_eq!(iso.bend(s - h, s + h).to_bits(), all(s - h, s + h).to_bits(), "closed={closed} s={s} h={h}");
+            }
+        }
     }
 }
