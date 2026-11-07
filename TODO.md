@@ -3440,6 +3440,12 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Dreiecksflächen (Schependomlaan-SVG 20–27 MB); Schnitt-Projektion ohne Zellen-Cache je Netz (Topologie gemerkt, Sichtbarkeit
   je Aufruf); Gelände-Netze aus IFC („Gelaende") erscheinen als Körper statt als Geländelinie; nicht in der Tauri-App/Metal
   geprüft. · M
+  (7.11., Reste) **Bauteile verdecken die Aufsicht** (`mesh_plan::component_occluders`): Wände, Stützen und Decken des
+  Grundrisses sind Verdecker der Netz-Aufsicht — geschnitten in Tiefe 0 (Netz-Linien laufen nicht mehr durch die Poché),
+  ganz unter der Schnitthöhe in Höhe ihrer Oberkante (Brüstung, Platte über dem Netz); darüber verdeckt nichts. Wand-Enden
+  an einer anderen Wand um die halbe Dicke verlängert; Öffnungen und Deckenaussparungen bleiben unberücksichtigt (Netz
+  unter einer Tür ist verdeckt). Test `mesh_plan::bauteile_verdecken_die_aufsicht` (Wand geschnitten/niedrig/zu niedrig,
+  Stütze, Decke). FZK-DG: Pfetten-Linie endet an der Giebelwand.
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
