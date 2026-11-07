@@ -2,9 +2,11 @@
 //   1) „Startpunkt der Treppe:" → Punkt (Antritt, unterste Stufe).
 //   2) „Laufrichtung / Ende:" → Punkt: definiert Richtung + Lauflänge des ersten
 //      Laufs. Bei L folgt ein zweiter Lauf (Ende des zweiten Laufs); bei Wendel
-//      ist der zweite Punkt der äußere Rand (Radius). Committet die Treppe.
+//      ist der zweite Punkt der äußere Rand (Radius). U: gleich langer Gegenlauf links
+//      daneben (Auge 0.1, Halbpodest = Laufbreite); gerade mit Podest: der Punkt ist das
+//      Ende der ganzen Treppe (zwei gleiche Läufe, Podest = Laufbreite). Committet die Treppe.
 //
-// Optionen (togglebar, IMMER sichtbar): Grundform gerade/L/Wendel, Auf-/Ab-
+// Optionen (togglebar, IMMER sichtbar): Grundform gerade/L/U/gerade mit Podest/Wendel, Auf-/Ab-
 // Umschalter, Referenz (links/mitte/rechts), Trittmass-Modus (mit/ohne).
 // Tab-Felder in BEIDEN Phasen: Breite (idle + run). Im Laufschritt zusätzlich:
 //   • Trittmass-Modus „ohne": Stufen + Steighöhe (heutiges Verhalten).
@@ -222,7 +224,9 @@ export const stairCommand: Command = {
     if (input.kind === "option") {
       const next = { ...s } as StairCmdState;
       if (input.id === "shape") {
-        next.shape = s.shape === "straight" ? "L" : s.shape === "L" ? "spiral" : "straight";
+        // gerade → L → U → gerade mit Podest → Wendel → gerade
+        const cycle: StairShape[] = ["straight", "L", "U", "straightLanding", "spiral"];
+        next.shape = cycle[(cycle.indexOf(s.shape) + 1) % cycle.length];
       } else if (input.id === "updown") {
         next.up = !s.up;
       } else if (input.id === "referenz") {

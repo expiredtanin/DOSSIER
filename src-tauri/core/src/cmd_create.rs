@@ -553,7 +553,7 @@ pub fn steps_from_tread(auftritt: f64, run_length: f64) -> f64 {
 /// Aufgelöste Treppe des Befehls (`buildStair`): Felder in der Reihenfolge des früheren Literals.
 struct StairBuilt {
     fields: Vec<(&'static str, Value)>,
-    params: [f64; 16],
+    params: [f64; crate::stair::PARAMS],
     rise: f64,
     steps: f64,
 }
@@ -574,11 +574,20 @@ fn build_stair(p: &Project, v: &Value, ctx: &Ctx, id: Value) -> StairBuilt {
     } else {
         (1.0, 0.0)
     };
-    let run_length = if shape == "spiral" { jsnum::max(0.5, dist) } else { dist };
+    // [151] Gerade mit Podest: Start → Cursor = ganze Länge (zwei gleiche Läufe, Podest = Laufbreite);
+    // U: Start → Cursor = Lauf 1, der Gegenlauf gleich lang.
+    let landing = jsnum::max(0.1, width);
+    let run_length = match shape {
+        "spiral" => jsnum::max(0.5, dist),
+        "straightLanding" => jsnum::max(0.3, (dist - landing) / 2.0),
+        _ => dist,
+    };
+    // Weg für Stufenzahl und Trittmass: bei zwei gleichen Läufen beide.
+    let walk = if matches!(shape, "U" | "straightLanding") { 2.0 * run_length } else { run_length };
     let steps = if s_of(v, "treadMode") == "with" {
-        steps_from_tread(n_of(v, "auftritt"), run_length)
+        steps_from_tread(n_of(v, "auftritt"), walk) + if matches!(shape, "U" | "straightLanding") { 1.0 } else { 0.0 }
     } else {
-        opt_n(v, "steps").unwrap_or_else(|| crate::stair::default_step_count(rise, run_length) as f64)
+        opt_n(v, "steps").unwrap_or_else(|| crate::stair::default_step_count(rise, walk) as f64)
     };
     let up = b_of(v, "up");
     let mut f: Vec<(&'static str, Value)> = vec![
@@ -600,6 +609,8 @@ fn build_stair(p: &Project, v: &Value, ctx: &Ctx, id: Value) -> StairBuilt {
     let form = match shape {
         "L" => 1.0,
         "spiral" => 2.0,
+        "U" => 3.0,
+        "straightLanding" => 4.0,
         _ => 0.0,
     };
     let refz = match referenz {
@@ -607,12 +618,27 @@ fn build_stair(p: &Project, v: &Value, ctx: &Ctx, id: Value) -> StairBuilt {
         "rechts" => 2.0,
         _ => 0.0,
     };
-    let mut params = [form, start.0, start.1, dir.0, dir.1, run_length, nan, nan, nan, nan, nan, nan, width, steps, if up { 1.0 } else { 0.0 }, refz];
+    let mut params = [form, start.0, start.1, dir.0, dir.1, run_length, nan, nan, nan, nan, nan, nan, width, steps, if up { 1.0 } else { 0.0 }, refz, nan, nan, nan, nan, nan];
     if shape == "L" {
         f.push(("run2Length", js_num(run_length)));
         f.push(("turn", js_num(1.0)));
         params[6] = run_length;
         params[7] = 1.0;
+    } else if shape == "U" {
+        const GAP: f64 = 0.1;
+        f.push(("run2Length", js_num(run_length)));
+        f.push(("turn", js_num(1.0)));
+        f.push(("gap", js_num(GAP)));
+        f.push(("landingLength", js_num(landing)));
+        params[6] = run_length;
+        params[7] = 1.0;
+        params[16] = GAP;
+        params[17] = landing;
+    } else if shape == "straightLanding" {
+        f.push(("run2Length", js_num(run_length)));
+        f.push(("landingLength", js_num(landing)));
+        params[6] = run_length;
+        params[17] = landing;
     } else if shape == "spiral" {
         f.push(("center", pv(start)));
         f.push(("radius", js_num(dist)));
@@ -661,6 +687,14 @@ fn stair_preview(p: &Project, v: &Value, ctx: &Ctx, out: &mut Shapes, info: &mut
     i += 1;
     if n_run >= 2 {
         out.poly_open(&pts_at(i, n_run));
+    }
+    // zweites Podest (U mit Mittellauf) nach Lauflinie und Pfeil
+    i += 2 * n_run + 10;
+    if let Some(&nl2) = f.get(i).filter(|n| **n >= 3.0) {
+        let n = nl2 as usize;
+        if f.len() >= i + 1 + 2 * n {
+            out.poly(&pts_at(i + 1, n));
+        }
     }
 }
 

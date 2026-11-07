@@ -5,6 +5,7 @@
 
 import type { EdgeGrip, Excavation, Opening, Stair, Vec2, Wall } from "../model/types";
 import { core } from "../engine/coreWasm";
+import { encodeStair } from "./stair";
 
 const v = (f: ArrayLike<number>, i = 0): Vec2 => ({ x: f[i], y: f[i + 1] });
 
@@ -133,6 +134,14 @@ export function openingSheetSlide(
 export function stairMoveHandle(st: Stair): Vec2 {
   const c = st.center;
   return v(core().grip_stair_handle(st.shape === "spiral", c?.x ?? NaN, c?.y ?? NaN, st.start.x, st.start.y, st.dir?.x ?? 0, st.dir?.y ?? 0, st.runLength));
+}
+
+/**
+ * [151] Parameter-Griffe einer Podesttreppe (L, U, gerade mit Podest): Ende Lauf 1, Ende letzter Lauf, bei
+ * U / gerade mit Podest der Podestrand. Andere Formen: keine. Den Zug rechnet der Kern (Griff `stairParam`).
+ */
+export function stairParamPoints(st: Stair): Vec2[] {
+  return points(core().grip_stair_param_points(encodeStair(st)));
 }
 
 /** Griffe einer Wand: Start, Ende, bei einer Bogenwand ([T2]) der Bogenscheitel. */

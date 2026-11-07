@@ -271,6 +271,18 @@ export interface StairInfo {
   referenz?: "links" | "mitte" | "rechts";
   /** Nur Wendel: Radius der Mittelsäule (Meter); fehlt → keine Säule. */
   centerColumn?: number;
+  /** Länge des (ersten) Laufs (Meter). */
+  runLength?: number;
+  /** [151] L / U / gerade mit Podest: Länge des zweiten bzw. letzten Laufs; Drehsinn (+1 links, −1 rechts). */
+  run2Length?: number;
+  turn?: 1 | -1;
+  /** [151] U: Treppenauge; U / gerade mit Podest: Podesttiefe (Meter). */
+  gap?: number;
+  landingLength?: number;
+  /** [151] Steigungen im ersten Lauf (fehlt → nach Lauflängen), im Mittellauf (U), Versatz des Gegenlaufs (U). */
+  run1Steps?: number;
+  midSteps?: number;
+  run2Offset?: number;
   /** Zugewiesener Treppentyp (Bibliothek, `Stair.typeId`) oder undefined. */
   typeId?: string;
   /** Geschoss, dem die Treppe zugeordnet ist. */
@@ -279,7 +291,7 @@ export interface StairInfo {
   /** Aufgelöste absolute UK/OK (Meter). */
   zBottom: number;
   zTop: number;
-  /** Nur Ortbeton (gerade/Wendel): Betonvolumen des Laufs (m³, ohne Säule). */
+  /** Nur Ortbeton: Betonvolumen der Läufe (m³, ohne Säule und Podest). */
   concreteVolume?: number;
   /** Nur Ortbeton: Untersicht (m², Schalfläche; bei der Wendel die Wendelfläche). */
   soffitArea?: number;

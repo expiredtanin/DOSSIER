@@ -1351,7 +1351,8 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     let frame = frame_of(&plane);
     let mut walls = model3d::emit_walls_with(p, false, false)?;
     let mut slabs = model3d::emit_slabs(p);
-    slabs.extend(model3d::emit_stairs(p, false));
+    // Ortbeton-Läufe kommen im 3D als Netz; in der Ansicht als ein Block je Tritt ([151]).
+    slabs.extend(model3d::emit_stairs_elevation(p));
     extend_wall_corners(p, &mut walls, (frame[6], frame[8]));
     let mut faces = project_faces(&frame, &walls, &slabs, &[]);
     cull_under_roofs(p, &frame, &walls, &mut faces);

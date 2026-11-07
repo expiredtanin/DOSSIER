@@ -1066,6 +1066,9 @@ export function usePanelHostBase(opts: {
       onSetStairReferenz: (referenz) => {
         if (selection?.kind === "stair") updateStair(selection.id, { referenz });
       },
+      onSetStairPatch: (patch) => {
+        if (selection?.kind === "stair") updateStair(selection.id, patch);
+      },
       // Typ-Zuweisung (Bibliothek): Treppentyp per typeId; leerer String löst die
       // Zuweisung (Inline-Verhalten). Treibt u. a. die 3D-Tragart (massiv/offen).
       onSetStairType: (typeId) => {

@@ -18,6 +18,8 @@ pub fn stair_label(s: &Stair) -> String {
     let shape = match s.shape {
         StairShape::Straight => "Gerade",
         StairShape::L => "L-Treppe",
+        StairShape::U => "U-Treppe",
+        StairShape::StraightLanding => "Podesttreppe",
         _ => "Wendel",
     };
     format!("{shape} {} STG", js_number(s.step_count))
@@ -51,7 +53,7 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                     bounds.acc(q.x, q.y);
                 }
             }
-            for q in geo.landing.iter().flatten() {
+            for q in geo.landing.iter().chain(geo.landing2.iter()).flatten() {
                 bounds.acc(q.x, q.y);
             }
         }

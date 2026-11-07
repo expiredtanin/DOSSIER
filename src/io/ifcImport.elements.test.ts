@@ -10,7 +10,7 @@ import { applyOps, validateProject } from "../core/ops";
 import { projectDiffOps } from "../core/projectDiff.testutil";
 import { exportIfcSpf } from "../export/exportIfc";
 import { emptyProject, sampleProject } from "../model/sampleProject";
-import type { Column, Opening, Project, Vec2, Wall } from "../model/types";
+import type { Column, Opening, Project, Stair, Vec2, Wall } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { formatIfcElementsSummary, type IfcElementsSummary } from "./ifcImport";
 import { importIfcInto } from "./importView.testutil";
@@ -213,6 +213,34 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
     expect(near(s2.position, { x: 3, y: 2 }, 1e-4)).toBe(true);
     expect(s2.profile.kind === "round" && s2.profile.radius).toBeCloseTo(0.15, 6);
   });
+
+  // [151] U (Halbpodest, versetzter Gegenlauf; zwei Viertelpodeste mit Mittellauf) und gerade mit
+  // Zwischenpodest: Export (IfcStair mit IfcStairFlight + IfcSlab LANDING) → Import → gleiche Form und Masse.
+  const base: Stair = sampleProject.stairs![0];
+  const cases: [string, string, Partial<Stair>][] = [
+    ["U Halbpodest, Beton", "stair-standard", { shape: "U", start: { x: 0.6, y: 2.3 }, dir: { x: 1, y: 0 }, runLength: 2.4, run2Length: 2.4, turn: -1, gap: 0.15, landingLength: 1.0, stepCount: 15 }],
+    ["U versetzt, massiv", "stair-massiv", { shape: "U", start: { x: 0.6, y: 0.6 }, dir: { x: 1, y: 0 }, runLength: 2.1, run2Length: 1.8, turn: 1, gap: 0.2, landingLength: 1.2, run2Offset: 0.3, run1Steps: 8, stepCount: 15 }],
+    ["U Mittellauf, massiv", "stair-massiv", { shape: "U", start: { x: 0.8, y: 0.4 }, dir: { x: 0, y: 1 }, runLength: 1.5, run2Length: 1.5, turn: -1, gap: 1.2, landingLength: 1.0, midSteps: 4, run1Steps: 5, stepCount: 16 }],
+    ["gerade mit Podest, Beton", "stair-standard", { shape: "straightLanding", start: { x: 0.5, y: 0.6 }, dir: { x: 1, y: 0 }, runLength: 1.5, run2Length: 1.5, landingLength: 1.0, run1Steps: 7, stepCount: 15 }],
+  ];
+  for (const [name, typeId, patch] of cases) {
+    it(`[151] Treppe ${name}: Rundreise`, async () => {
+      const st0: Stair = { ...base, ...patch, typeId };
+      const { project: p, summary } = await importInto(emptyProject, { ...sampleProject, stairs: [st0] });
+      expect(summary.stairs).toBe(1);
+      const st = p.stairs![0];
+      expect([st.shape, st.stepCount, st.turn ?? null, st.midSteps ?? null], JSON.stringify(st)).toEqual([st0.shape, st0.stepCount, st0.turn ?? null, st0.midSteps ?? null]);
+      expect(near(st.start, st0.start, 1e-4) && near(st.dir, st0.dir, 1e-6), JSON.stringify(st)).toBe(true);
+      expect(st.width).toBeCloseTo(st0.width, 4);
+      expect(st.runLength).toBeCloseTo(st0.runLength, 4);
+      expect(st.run2Length!).toBeCloseTo(st0.run2Length!, 4);
+      expect(st.landingLength!).toBeCloseTo(st0.landingLength!, 4);
+      if (st0.shape === "U") expect(st.gap!).toBeCloseTo(st0.gap!, 4);
+      expect(st.run2Offset ?? 0).toBeCloseTo(st0.run2Offset ?? 0, 4);
+      expect(st.totalRise!).toBeCloseTo(st0.totalRise!, 4);
+      expect(validateProject(p)).toEqual([]);
+    });
+  }
 });
 
 describe("Kontext-Mesh: Farbe und GlobalId", () => {

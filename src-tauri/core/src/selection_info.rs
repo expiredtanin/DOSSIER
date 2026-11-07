@@ -916,7 +916,7 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
     }
     let b = crate::stair::bbox(&geo);
     let bb = if b.len() < 4 { [0.0; 4] } else { [b[0], b[1], b[2], b[3]] };
-    // Ortbeton (gerade/Wendel): Betonvolumen des Laufs und Untersicht (Schal-/Wendelfläche) aus
+    // Ortbeton (alle Formen): Betonvolumen der Läufe und Untersicht (Schal-/Wendelfläche) aus
     // demselben Netz wie 3D und IFC — Projekt nur mit dieser Treppe und ihrem Typ.
     let (amounts, soffit) = {
         let ty: Option<crate::model::StairType> = typed.type_id.as_ref().and_then(|tid| {
@@ -941,6 +941,14 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
         .raw("arrowStyle", s, "arrowStyle")
         .raw("referenz", s, "referenz")
         .raw("centerColumn", s, "centerColumn")
+        .raw("runLength", s, "runLength")
+        .raw("run2Length", s, "run2Length")
+        .raw("turn", s, "turn")
+        .raw("gap", s, "gap")
+        .raw("landingLength", s, "landingLength")
+        .raw("run1Steps", s, "run1Steps")
+        .raw("midSteps", s, "midSteps")
+        .raw("run2Offset", s, "run2Offset")
         .raw("typeId", s, "typeId")
         .raw("floorId", s, "floorId")
         .o("floorName", floor_name(floor, field(s, "floorId")))

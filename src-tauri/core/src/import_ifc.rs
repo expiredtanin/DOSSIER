@@ -134,7 +134,7 @@ struct RoofData {
 
 struct StairData {
     info: Info,
-    /// "straight", "L", "spiral".
+    /// "straight", "L", "spiral", "U", "straightLanding".
     shape: String,
     start: [f64; 2],
     dir: [f64; 2],
@@ -149,6 +149,13 @@ struct StairData {
     radius: f64,
     sweep: f64,
     center_column: f64,
+    /// [151] U: Treppenauge; U/gerade mit Podest: Podesttiefe; Tritte Lauf 1 (0 = nach Lauflängen); U:
+    /// Tritte Mittellauf (0 = Halbpodest), Versatz des letzten Laufs.
+    gap: f64,
+    landing_length: f64,
+    run1_steps: f64,
+    mid_steps: f64,
+    run2_offset: f64,
 }
 
 /// Träger als senkrechtes Prisma → Extrusionskörper.
@@ -314,12 +321,14 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
             }
             "stair" => {
                 let shape = s_of(e.get("shape")).unwrap_or_else(|| "straight".into());
-                let ok = (v.len() == 9 || v.len() == 16) && v[6] >= 2.0 && v[6] <= 200.0 && v[4] > 0.0 && v[5] > 0.0;
+                let ok = (v.len() == 9 || v.len() == 16 || v.len() == 21) && v[6] >= 2.0 && v[6] <= 200.0 && v[4] > 0.0 && v[5] > 0.0;
                 let x = |i: usize| v.get(i).copied().unwrap_or(0.0);
                 let shape_ok = match shape.as_str() {
                     "straight" => true,
                     "L" => x(9) > 0.0 && x(10).abs() == 1.0,
                     "spiral" => x(13) > 0.0 && x(14) != 0.0 && x(14).abs() <= 3600.0,
+                    "U" => x(9) > 0.0 && x(10).abs() == 1.0 && x(16) >= 0.0 && x(17) > 0.0 && x(19) >= 0.0 && x(18) + x(19) < v[6],
+                    "straightLanding" => x(9) > 0.0 && x(17) > 0.0 && x(18) < v[6],
                     _ => false,
                 };
                 if ok && shape_ok {
@@ -339,6 +348,11 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
                         radius: x(13),
                         sweep: x(14),
                         center_column: x(15),
+                        gap: x(16),
+                        landing_length: x(17),
+                        run1_steps: x(18).round(),
+                        mid_steps: x(19).round(),
+                        run2_offset: x(20),
                     });
                 }
             }
@@ -886,6 +900,27 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
             "L" => {
                 v["run2Length"] = js_num(round(s.run2_length, 1e-6));
                 v["turn"] = js_num(s.turn.signum());
+                if s.run1_steps >= 1.0 {
+                    v["run1Steps"] = js_num(s.run1_steps);
+                }
+            }
+            // [151] U (Halbpodest oder Mittellauf) und gerade mit Zwischenpodest.
+            "U" | "straightLanding" => {
+                v["run2Length"] = js_num(round(s.run2_length, 1e-6));
+                v["landingLength"] = js_num(round(s.landing_length, 1e-6));
+                if s.run1_steps >= 1.0 {
+                    v["run1Steps"] = js_num(s.run1_steps);
+                }
+                if s.shape == "U" {
+                    v["turn"] = js_num(s.turn.signum());
+                    v["gap"] = js_num(round(s.gap, 1e-6));
+                    if s.mid_steps >= 1.0 {
+                        v["midSteps"] = js_num(s.mid_steps);
+                    }
+                    if s.run2_offset.abs() > 1e-6 {
+                        v["run2Offset"] = js_num(round(s.run2_offset, 1e-6));
+                    }
+                }
             }
             "spiral" => {
                 v["center"] = mv(s.center);
@@ -1197,6 +1232,8 @@ mod tests {
             2.8, 3.0, 0.0, 1.0, 4.54, 1.0, 13.0, 0.0, 2.34, 0.0, 0.0, 2.0, 3.0, 0.8, 325.0, 0.3,
             // Träger: z0, z1, Ring
             2.6, 3.0, 4.0, 0.0, 0.0, 4.0, 0.0, 4.0, 0.2, 0.0, 0.2,
+            // [151] U-Treppe mit Mittellauf: … wie L, dazu Auge, Podesttiefe, Tritte Lauf 1, Mittellauf, Versatz
+            5.0, 0.0, 0.0, 1.0, 2.1, 1.2, 18.0, 0.0, 3.06, 1.5, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.6, 1.2, 7.0, 4.0, 0.0,
         ];
         let info = |kind: &str, at: usize, n: usize| json!({"kind": kind, "at": at, "n": n, "storey": 0, "layers": [], "classifications": [], "common": {}});
         let mut roof = info("roof", 8, 12);
@@ -1208,13 +1245,15 @@ mod tests {
         l["shape"] = "L".into();
         let mut sp = info("stair", 36, 16);
         sp["shape"] = "spiral".into();
+        let mut u = info("stair", 63, 21);
+        u["shape"] = "U".into();
         let meta = json!({
             "schema": "IFC4", "lengthScale": 1, "products": [], "skippedItems": {}, "skippedProducts": {},
             "productsWithoutGeometry": 0, "simplifiedBooleans": 0, "voidsApplied": 0, "voidsIgnored": 0, "parseErrors": 0, "truncated": false,
             "mapConversion": {"eastings": 2600100.0, "northings": 1200050.0, "height": 0.0, "xAxis": x_axis, "scale": 1.0, "crs": "EPSG:2056"},
             "elements": {
                 "storeys": [{"globalId": "s", "name": "EG", "elevation": 0.0}],
-                "elements": [info("wall", 0, 8), roof, l, sp, info("beam", 52, 11)],
+                "elements": [info("wall", 0, 8), roof, l, sp, info("beam", 52, 11), u],
                 "kept": {}, "keptReasons": {},
             },
         });
@@ -1238,6 +1277,12 @@ mod tests {
         assert_eq!((s["shape"].as_str(), s["sweep"].as_f64()), (Some("spiral"), Some(325.0)));
         assert!((s["radius"].as_f64().unwrap() - 0.8).abs() < 1e-9 && (s["centerColumn"].as_f64().unwrap() - 0.3).abs() < 1e-9);
         assert!(at(&s["center"], 102.0, 53.0) && at(&s["start"], 102.8, 53.0));
+        // [151] U mit zwei Viertelpodesten
+        let u = stairs[2];
+        assert_eq!((u["shape"].as_str(), u["turn"].as_f64(), u["midSteps"].as_f64(), u["run1Steps"].as_f64()), (Some("U"), Some(-1.0), Some(4.0), Some(7.0)), "{u}");
+        assert!((u["gap"].as_f64().unwrap() - 1.6).abs() < 1e-9 && (u["landingLength"].as_f64().unwrap() - 1.2).abs() < 1e-9 && u.get("run2Offset").is_none());
+        let typed: crate::model::Stair = serde_json::from_value(u.clone()).unwrap();
+        assert_eq!(typed.shape, crate::model::StairShape::U);
         let solids = added(&r.ops, "extrudedSolids");
         assert_eq!(solids.len(), 1);
         assert_eq!(solids[0]["type"].as_str(), Some("extrudedSolid"));

@@ -110,6 +110,12 @@ pub fn grip_stair_handle(spiral: bool, cx: f64, cy: f64, sx: f64, sy: f64, dx: f
     vec![p.0, p.1]
 }
 
+/// [151] Parameter-Griffe einer Podesttreppe (Treppen-Parameter, `stair.rs`): `[x0, y0, …]`.
+#[wasm_bindgen]
+pub fn grip_stair_param_points(params: &[f64]) -> Vec<f64> {
+    flat(&gd::stair_param_points(params))
+}
+
 /// Griffe einer Wand (Bogenwand mit Scheitel-Griff): `[x0, y0, …]`.
 #[wasm_bindgen]
 pub fn grip_wall_points(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64) -> Vec<f64> {

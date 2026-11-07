@@ -33,6 +33,7 @@ import type {
   Project,
   SiaCategory,
   SliceTermination,
+  Stair,
   StairShape,
   Vec2,
   VerticalAnchor,
@@ -538,7 +539,7 @@ export interface PanelHostValue {
   onDeleteSectionLine: () => void;
 
   // ── Treppen-Attribute (Object-Info-Panel; nur die selektierte Treppe) ───
-  /** Setzt die Grundform (gerade/L/Wendel). */
+  /** Setzt die Grundform (gerade/L/Wendel/U/gerade mit Podest). */
   onSetStairShape: (shape: StairShape) => void;
   /** Setzt die Laufbreite (Meter). */
   onSetStairWidth: (width: number) => void;
@@ -556,6 +557,8 @@ export interface PanelHostValue {
   onSetStairColumn: (radius: number) => void;
   /** Weist der Treppe einen Treppentyp (Bibliothek) zu; "" löst die Zuweisung. */
   onSetStairType: (typeId: string) => void;
+  /** [151] Lauf-/Podest-Parameter (Lauflängen, Drehsinn, Auge, Podesttiefe, Stufen je Lauf, Versatz). */
+  onSetStairPatch: (patch: Partial<Pick<Stair, "runLength" | "run2Length" | "turn" | "gap" | "landingLength" | "run1Steps" | "midSteps" | "run2Offset">>) => void;
 
   // ── Raum-Attribute (Object-Info-Panel; nur der selektierte Raum) ────────
   /** Setzt den Raum-Namen. */

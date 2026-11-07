@@ -3,7 +3,7 @@
 //! kommt aus `kernel2d` (`stair_geometry`, `stair_cut`, `stair_outline`), Farbe, Pick-ID und
 //! Graustufen setzt der Aufrufer (`plan/stairs.rs`, [K3d]).
 //!
-//! Eingabe: Treppen-Parameter (16 Zahlen, s. `stair.rs`), Gesamt-Steighöhe, Schnitthöhe über der
+//! Eingabe: Treppen-Parameter (21 Zahlen, s. `stair.rs`), Gesamt-Steighöhe, Schnitthöhe über der
 //! Treppen-UK, Strichstärke `lw_mm` (Papier-mm), `filled_arrow` (0/1).
 //!
 //! Ausgabe `[n, Eintrag × n]`, Reihenfolge = Zeichenreihenfolge:
@@ -72,7 +72,7 @@ pub fn plan_stair(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, fi
             o.line(CLS_TREAD, tr.pts[1], tr.pts[2], lw_mm * if is_below { 1.0 } else { 0.6 }, !is_below);
         }
     }
-    if let Some(l) = &geo.landing {
+    for l in geo.landing.iter().chain(geo.landing2.iter()) {
         if l.len() >= 3 {
             o.polygon(l, lw_mm * 0.7, false);
         }

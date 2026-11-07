@@ -3048,10 +3048,28 @@ export type Stair = {
   dir: Vec2;
   /** Lauflänge des (ersten) Laufs in Metern (entlang `dir`). */
   runLength: number;
-  /** Nur L: Lauflänge des zweiten Laufs in Metern. */
+  /** Nur L / U / gerade mit Podest: Lauflänge des zweiten (bei U: des letzten) Laufs in Metern. */
   run2Length?: number;
-  /** Nur L: Abbiegerichtung des zweiten Laufs (+1 = links, −1 = rechts). */
+  /** Nur L / U: Abbiegerichtung des zweiten Laufs bzw. Drehsinn (+1 = links, −1 = rechts). */
   turn?: 1 | -1;
+  /**
+   * [151] Nur U: lichte Weite des Treppenauges zwischen erstem und letztem Lauf (Meter; fehlt = 0.1).
+   */
+  gap?: number;
+  /** [151] Nur U / gerade mit Podest: Podesttiefe in Laufrichtung (Meter; fehlt = Laufbreite). */
+  landingLength?: number;
+  /**
+   * [151] Nur L / U / gerade mit Podest: Steigungen im ersten Lauf bis zum Podest (fehlt = nach
+   * Lauflängen aufgeteilt). Jedes Podest zählt als eine Steigung.
+   */
+  run1Steps?: number;
+  /**
+   * [151] Nur U: Steigungen im Mittellauf quer über das Auge (zwei Viertelpodeste); fehlt/0 =
+   * Halbpodest. Auftritt wie Lauf 1, höchstens Augenweite / Steigungen.
+   */
+  midSteps?: number;
+  /** [151] Nur U: Versatz des letzten Laufs ins Podest hinein (Meter, entlang Lauf 1; fehlt = 0). */
+  run2Offset?: number;
   /** Nur Wendel: Zentrum der Wendeltreppe (Meter). */
   center?: Vec2;
   /** Nur Wendel: Radius (Meter) von der Mitte zur Lauflinie. */
@@ -3120,12 +3138,15 @@ export type Stair = {
 };
 
 /**
- * Grundform einer Treppe (DOSSIER: gerade / L / Wendel).
+ * Grundform einer Treppe (DOSSIER: gerade / L / Wendel / U / gerade mit Podest).
  *   • "straight" — ein gerader Lauf (Lauflinie = Start → Richtung).
  *   • "L"        — zwei rechtwinklige Läufe mit Zwischenpodest an der Ecke.
  *   • "spiral"   — Wendeltreppe um ein Zentrum (keilförmige Tritte).
+ *   • "U"        — [151] zwei gegenläufige Läufe mit Halbpodest (Treppenauge `gap`, Drehsinn `turn`),
+ *                  wahlweise mit Mittellauf quer über das Auge und zwei Viertelpodesten (`midSteps`).
+ *   • "straightLanding" — [151] zwei Läufe in einer Richtung mit Zwischenpodest (`landingLength`).
  */
-export type StairShape = "straight" | "L" | "spiral";
+export type StairShape = "straight" | "L" | "spiral" | "U" | "straightLanding";
 
 /**
  * Ein Treppentyp (Treppenstil) — wiederverwendbares Preset für {@link Stair}.

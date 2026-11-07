@@ -1321,6 +1321,9 @@ pub struct TreadRect {
 pub struct StairGeometry {
     pub treads: Vec<TreadRect>,
     pub landing: Option<Vec<Vec2>>,
+    /// [151] Zweites Podest (U-Treppe mit Mittellauf: zweites Viertelpodest).
+    #[serde(default)]
+    pub landing2: Option<Vec<Vec2>>,
     pub riser_height: f64,
     pub tread_depth: f64,
     pub run_line: Vec<Vec2>,
@@ -1421,6 +1424,21 @@ pub struct StairParams {
     /// Bezugskante der gespeicherten Achse: "links" | "mitte" | "rechts" (fehlend = Mitte).
     #[serde(default)]
     pub referenz: Option<String>,
+    /// [151] U: lichte Weite des Treppenauges zwischen erstem und letztem Lauf (Meter).
+    #[serde(default)]
+    pub gap: Option<f64>,
+    /// [151] U / gerade mit Podest: Podesttiefe in Laufrichtung (Meter; fehlend = Laufbreite).
+    #[serde(default)]
+    pub landing_length: Option<f64>,
+    /// [151] L / U / gerade mit Podest: Steigungen im ersten Lauf (fehlend = nach Lauflängen).
+    #[serde(default)]
+    pub run1_steps: Option<i64>,
+    /// [151] U: Steigungen im Mittellauf quer über das Auge (zwei Viertelpodeste); fehlend/0 = Halbpodest.
+    #[serde(default)]
+    pub mid_steps: Option<i64>,
+    /// [151] U: Versatz des letzten Laufs ins Podest hinein (Meter, entlang Lauf 1).
+    #[serde(default)]
+    pub run2_offset: Option<f64>,
 }
 
 /// Achse auf die visuelle Treppen-MITTE versetzen (Referenz links/rechts): `start` und `center`
@@ -1469,6 +1487,7 @@ fn straight_geometry(
         arrow: arrow_for(&run_line, up),
         treads,
         landing: None,
+        landing2: None,
         riser_height,
         tread_depth,
         run_line,
@@ -1489,15 +1508,7 @@ fn l_geometry(
     let run1 = stair.run_length.max(0.1);
     let run2 = stair.run2_length.unwrap_or(stair.run_length).max(0.1);
     let turn = stair.turn.unwrap_or(1);
-    let body_steps = steps - 1;
-    let s1 = {
-        let v = ((body_steps as f64 * run1) / (run1 + run2)).round() as i64;
-        if v < 1 { 1 } else { v }
-    };
-    let s2 = {
-        let v = body_steps - s1;
-        if v < 1 { 1 } else { v }
-    };
+    let (s1, s2) = split_steps(steps - 1, run1, run2, stair.run1_steps);
     let td1 = run1 / s1 as f64;
     let td2 = run2 / s2 as f64;
 
@@ -1542,11 +1553,253 @@ fn l_geometry(
         arrow: arrow_for(&run_line, up),
         treads,
         landing: Some(landing),
+        landing2: None,
         riser_height,
         tread_depth: td1,
         run_line,
         total_rise,
     }
+}
+
+/// Stufen zweier Läufe: `body` Steigungen ohne Podest, Lauf 1 vorgegeben (auf 1 … body−1 begrenzt) oder
+/// nach Lauflängen (wie bisher bei L), Lauf 2 der Rest (mindestens 1).
+fn split_steps(body: i64, run1: f64, run2: f64, run1_steps: Option<i64>) -> (i64, i64) {
+    let s1 = match run1_steps {
+        Some(n) => n.min(body - 1).max(1),
+        None => {
+            let v = ((body as f64 * run1) / (run1 + run2)).round() as i64;
+            if v < 1 { 1 } else { v }
+        }
+    };
+    let s2 = {
+        let v = body - s1;
+        if v < 1 { 1 } else { v }
+    };
+    (s1, s2)
+}
+
+/// Endliche, nicht negative Länge oder Vorgabe.
+fn len_or(v: Option<f64>, fallback: f64) -> f64 {
+    match v {
+        Some(x) if x.is_finite() && x >= 0.0 => x,
+        _ => fallback,
+    }
+}
+
+/// Vieleck gegen den Uhrzeigersinn, ohne doppelte und ohne kollineare Ecken.
+fn clean_ccw(pts: Vec<Vec2>) -> Vec<Vec2> {
+    let same = |a: Vec2, b: Vec2| (a.x - b.x).abs() <= 1e-9 && (a.y - b.y).abs() <= 1e-9;
+    let mut v: Vec<Vec2> = Vec::with_capacity(pts.len());
+    for p in pts {
+        if v.last().map_or(true, |q| !same(*q, p)) {
+            v.push(p);
+        }
+    }
+    while v.len() > 1 && same(v[0], v[v.len() - 1]) {
+        v.pop();
+    }
+    let mut changed = true;
+    while changed && v.len() > 3 {
+        changed = false;
+        let n = v.len();
+        for i in 0..n {
+            let (a, b, c) = (v[(i + n - 1) % n], v[i], v[(i + 1) % n]);
+            let cr = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+            if cr.abs() <= 1e-9 {
+                v.remove(i);
+                changed = true;
+                break;
+            }
+        }
+    }
+    let area: f64 = (0..v.len())
+        .map(|i| {
+            let (a, b) = (v[i], v[(i + 1) % v.len()]);
+            a.x * b.y - b.x * a.y
+        })
+        .sum();
+    if area < 0.0 {
+        v.reverse();
+    }
+    v
+}
+
+/// [151] Stufen der U-Treppe: (Mittellauf, Lauf 1, letzter Lauf); jedes Podest belegt eine Steigung.
+fn u_counts(stair: &StairParams, steps: i64, run1: f64, run2: f64) -> (i64, i64, i64) {
+    let want_mid = stair.mid_steps.unwrap_or(0).max(0);
+    // Mittellauf: mindestens eine Steigung je Lauf und zwei Podeste übrig lassen.
+    let mid = if want_mid > 0 { want_mid.min(steps - 4).max(0) } else { 0 };
+    let landings = if mid > 0 { 2 } else { 1 };
+    let (s1, s2) = split_steps(steps - landings - mid, run1, run2, stair.run1_steps);
+    (mid, s1, s2)
+}
+
+/// [151] Masse einer U-Treppe im Laufsystem (u entlang Lauf 1, v zur Wendeseite).
+struct UFrame {
+    start: Vec2,
+    u: Vec2,
+    side: Vec2,
+    half_w: f64,
+    run1: f64,
+    run2: f64,
+    landing: f64,
+    gap: f64,
+    /// Abstand der Mittellinien von Lauf 1 und letztem Lauf.
+    off: f64,
+    /// Versatz des letzten Laufs ins Podest hinein.
+    offset: f64,
+    /// Steigungen im Mittellauf (0 = Halbpodest), Auftritt dort, Verlängerung der Podeste ins Auge.
+    mid: i64,
+    td_mid: f64,
+    ext: f64,
+}
+
+impl UFrame {
+    fn at(&self, u: f64, v: f64) -> Vec2 {
+        add(add(self.start, scale(self.u, u)), scale(self.side, v))
+    }
+    fn of(stair: &StairParams, half_w: f64, u: Vec2, n: Vec2, td1: f64, mid: i64) -> Self {
+        let w = 2.0 * half_w;
+        let run1 = stair.run_length.max(0.1);
+        let run2 = stair.run2_length.unwrap_or(stair.run_length).max(0.1);
+        let gap = len_or(stair.gap, 0.1);
+        let mut landing = len_or(stair.landing_length, w).max(0.1);
+        let (td_mid, ext) = if mid > 0 {
+            landing = landing.max(w);
+            let td = td1.min(gap / mid as f64);
+            (td, (gap - mid as f64 * td).max(0.0) / 2.0)
+        } else {
+            (0.0, 0.0)
+        };
+        let offset = stair.run2_offset.filter(|o| o.is_finite()).unwrap_or(0.0).max(-run1).min(landing);
+        let side = if stair.turn.unwrap_or(1) > 0 { n } else { scale(n, -1.0) };
+        UFrame { start: stair.start, u, side, half_w, run1, run2, landing, gap, off: w + gap, offset, mid, td_mid, ext }
+    }
+    fn from_params(stair: &StairParams, half_w: f64, u: Vec2, n: Vec2) -> Self {
+        let run1 = stair.run_length.max(0.1);
+        let run2 = stair.run2_length.unwrap_or(stair.run_length).max(0.1);
+        let (mid, s1, _) = u_counts(stair, stair.step_count.max(MIN_STEPS), run1, run2);
+        UFrame::of(stair, half_w, u, n, run1 / s1 as f64, mid)
+    }
+    /// u der Wende (Lauflinie quer): Podestmitte bzw. Mitte des Mittellaufs.
+    fn turn_u(&self) -> f64 {
+        if self.mid > 0 {
+            self.run1 + self.landing - self.half_w
+        } else {
+            self.run1 + self.landing / 2.0
+        }
+    }
+    /// Podeste: Halbpodest (über beide Läufe und das Auge) bzw. zwei Viertelpodeste.
+    fn landings(&self) -> (Vec<Vec2>, Option<Vec<Vec2>>) {
+        let (hw, r1, o, off) = (self.half_w, self.run1, self.offset, self.off);
+        let end = r1 + self.landing;
+        if self.mid > 0 {
+            let a = clean_ccw(vec![self.at(r1, -hw), self.at(end, -hw), self.at(end, hw + self.ext), self.at(r1, hw + self.ext)]);
+            let v0 = off - hw - self.ext;
+            let b = clean_ccw(vec![self.at(r1 + o, v0), self.at(end, v0), self.at(end, off + hw), self.at(r1 + o, off + hw)]);
+            return (a, Some(b));
+        }
+        let mid_v = hw + self.gap / 2.0;
+        let a = vec![self.at(r1, -hw), self.at(end, -hw), self.at(end, off + hw), self.at(r1 + o, off + hw), self.at(r1 + o, mid_v), self.at(r1, mid_v)];
+        (clean_ccw(a), None)
+    }
+    /// Aussenlinie: aussen um Lauf 1, Podest(e), letzten Lauf; innen um das Auge.
+    fn outline(&self) -> Vec<Vec2> {
+        let (hw, r1, o, off) = (self.half_w, self.run1, self.offset, self.off);
+        let end = r1 + self.landing;
+        let back = r1 + o - self.run2;
+        let mut pts = vec![self.at(0.0, -hw), self.at(end, -hw), self.at(end, off + hw), self.at(back, off + hw), self.at(back, off - hw), self.at(r1 + o, off - hw)];
+        if self.mid > 0 {
+            // Innenkante des Mittellaufs (Podeste sind mindestens so tief wie der Lauf breit).
+            let inner = end - 2.0 * hw;
+            let (v0, v1) = (off - hw - self.ext, hw + self.ext);
+            pts.extend([self.at(r1 + o, v0), self.at(inner, v0), self.at(inner, v1), self.at(r1, v1)]);
+        } else {
+            let mid_v = hw + self.gap / 2.0;
+            pts.extend([self.at(r1 + o, mid_v), self.at(r1, mid_v)]);
+        }
+        pts.extend([self.at(r1, hw), self.at(0.0, hw)]);
+        clean_ccw(pts)
+    }
+}
+
+/// [151] U-Treppe: Lauf 1, Halbpodest (oder zwei Viertelpodeste mit Mittellauf quer über das Auge),
+/// letzter Lauf gegenläufig daneben. Tritt-Indizes wie bei L: jedes Podest belegt eine Steigung.
+fn u_geometry(stair: &StairParams, total_rise: f64, steps: i64, riser_height: f64, half_w: f64, u: Vec2, n: Vec2) -> StairGeometry {
+    let run1 = stair.run_length.max(0.1);
+    let run2 = stair.run2_length.unwrap_or(stair.run_length).max(0.1);
+    let (mid, s1, s2) = u_counts(stair, steps, run1, run2);
+    let td1 = run1 / s1 as f64;
+    let td2 = run2 / s2 as f64;
+    let f = UFrame::of(stair, half_w, u, n, td1, mid);
+    let mut treads: Vec<TreadRect> = Vec::new();
+    let mut k = 0_i64;
+    let mut push = |pts: Vec<Vec2>, k: &mut i64| {
+        treads.push(TreadRect { pts, index: *k, base_rise: *k as f64 * riser_height, top_rise: (*k + 1) as f64 * riser_height });
+        *k += 1;
+    };
+    for i in 0..s1 {
+        push(tread_rect_pts(stair.start, u, n, i as f64 * td1, (i + 1) as f64 * td1, half_w), &mut k);
+    }
+    k += 1; // Podest
+    if mid > 0 {
+        // Mittellauf zur Wendeseite, mittig auf der Lauflinie der Wende.
+        let mid_start = f.at(f.turn_u(), half_w + f.ext);
+        let n_mid = stair_left_n(f.side);
+        for i in 0..mid {
+            push(tread_rect_pts(mid_start, f.side, n_mid, i as f64 * f.td_mid, (i + 1) as f64 * f.td_mid, half_w), &mut k);
+        }
+        k += 1; // zweites Podest
+    }
+    let u2 = scale(u, -1.0);
+    let n2 = stair_left_n(u2);
+    let run2_start = f.at(f.run1 + f.offset, f.off);
+    for i in 0..s2 {
+        push(tread_rect_pts(run2_start, u2, n2, i as f64 * td2, (i + 1) as f64 * td2, half_w), &mut k);
+    }
+    let tu = f.turn_u();
+    let run_line: Vec<Vec2> = vec![
+        add(stair.start, scale(u, td1 * 0.5)),
+        f.at(tu, 0.0),
+        f.at(tu, f.off),
+        add(run2_start, scale(u2, run2 - td2 * 0.15)),
+    ];
+    let (l1, l2) = f.landings();
+    let up = stair.up.unwrap_or(true);
+    StairGeometry { arrow: arrow_for(&run_line, up), treads, landing: Some(l1), landing2: l2, riser_height, tread_depth: td1, run_line, total_rise }
+}
+
+/// [151] Gerade Treppe mit Zwischenpodest: Lauf 1, Podest, Lauf 2 in derselben Richtung.
+fn landing_geometry(stair: &StairParams, total_rise: f64, steps: i64, riser_height: f64, half_w: f64, u: Vec2, n: Vec2) -> StairGeometry {
+    let run1 = stair.run_length.max(0.1);
+    let run2 = stair.run2_length.unwrap_or(stair.run_length).max(0.1);
+    let land = len_or(stair.landing_length, 2.0 * half_w).max(0.1);
+    let (s1, s2) = split_steps(steps - 1, run1, run2, stair.run1_steps);
+    let td1 = run1 / s1 as f64;
+    let td2 = run2 / s2 as f64;
+    let mut treads: Vec<TreadRect> = Vec::new();
+    for i in 0..s1 {
+        treads.push(TreadRect {
+            pts: tread_rect_pts(stair.start, u, n, i as f64 * td1, (i + 1) as f64 * td1, half_w),
+            index: i,
+            base_rise: i as f64 * riser_height,
+            top_rise: (i + 1) as f64 * riser_height,
+        });
+    }
+    let run2_start = add(stair.start, scale(u, run1 + land));
+    for i in 0..s2 {
+        let k = s1 + 1 + i;
+        treads.push(TreadRect {
+            pts: tread_rect_pts(run2_start, u, n, i as f64 * td2, (i + 1) as f64 * td2, half_w),
+            index: k,
+            base_rise: k as f64 * riser_height,
+            top_rise: (k + 1) as f64 * riser_height,
+        });
+    }
+    let landing = tread_rect_pts(stair.start, u, n, run1, run1 + land, half_w);
+    let run_line: Vec<Vec2> = vec![add(stair.start, scale(u, td1 * 0.5)), add(run2_start, scale(u, run2 - td2 * 0.15))];
+    let up = stair.up.unwrap_or(true);
+    StairGeometry { arrow: arrow_for(&run_line, up), treads, landing: Some(landing), landing2: None, riser_height, tread_depth: td1, run_line, total_rise }
 }
 
 /// Wendeltreppe (Port von `spiralGeometry`).
@@ -1595,6 +1848,7 @@ fn spiral_geometry(
         arrow: arrow_for(&run_line, up),
         treads,
         landing: Some(eye_polygon(center, r_in)),
+        landing2: None,
         riser_height,
         tread_depth,
         run_line,
@@ -1617,6 +1871,12 @@ pub fn stair_geometry(stair: &StairParams, total_rise: f64) -> StairGeometry {
     }
     if stair.shape == "L" {
         return l_geometry(stair, total_rise, steps, riser_height, half_w, u, n);
+    }
+    if stair.shape == "U" {
+        return u_geometry(stair, total_rise, steps, riser_height, half_w, u, n);
+    }
+    if stair.shape == "straightLanding" {
+        return landing_geometry(stair, total_rise, steps, riser_height, half_w, u, n);
     }
     straight_geometry(stair, total_rise, steps, riser_height, half_w, u, n)
 }
@@ -1693,7 +1953,15 @@ pub fn stair_outline(stair: &StairParams) -> StairOutline {
             .unwrap_or_else(|| add(corner, scale(n, -half_w)));
         return StairOutline { polygon: Some(vec![p0l, p0r, corner_r, p3r, p3l, corner_l]), spiral: None };
     }
-    let l = s.run_length.max(1e-4);
+    if s.shape == "U" {
+        let f = UFrame::from_params(s, half_w, u, n);
+        return StairOutline { polygon: Some(f.outline()), spiral: None };
+    }
+    let l = if s.shape == "straightLanding" {
+        s.run_length.max(0.1) + len_or(s.landing_length, 2.0 * half_w).max(0.1) + s.run2_length.unwrap_or(s.run_length).max(0.1)
+    } else {
+        s.run_length.max(1e-4)
+    };
     let end = add(s.start, scale(u, l));
     StairOutline {
         polygon: Some(vec![
@@ -1775,7 +2043,7 @@ pub fn stair_bbox(geo: &StairGeometry) -> StairBBox {
             max_y = max_y.max(p.y);
         }
     }
-    if let Some(land) = &geo.landing {
+    for land in geo.landing.iter().chain(geo.landing2.iter()) {
         for p in land {
             min_x = min_x.min(p.x);
             min_y = min_y.min(p.y);
@@ -1796,7 +2064,7 @@ pub fn point_hits_stair(p: Vec2, geo: &StairGeometry) -> bool {
             return true;
         }
     }
-    if let Some(land) = &geo.landing {
+    for land in geo.landing.iter().chain(geo.landing2.iter()) {
         if point_in_polygon(p, land) {
             return true;
         }
@@ -2653,6 +2921,11 @@ mod tests {
             step_count: 16,
             up: None,
             referenz: None,
+            gap: None,
+            landing_length: None,
+            run1_steps: None,
+            mid_steps: None,
+            run2_offset: None,
         }
     }
 
@@ -2695,6 +2968,138 @@ mod tests {
         assert_eq!(g.treads[g.treads.len() - 1].index, 15);
         p.turn = Some(-1);
         assert!(stair_geometry(&p, 2.8).run_line[2].y < -1.0);
+    }
+
+    /// Läufe einer Podesttreppe: Tritte vor und nach dem Index-Sprung (Podest).
+    fn runs_of(g: &StairGeometry) -> (Vec<&TreadRect>, Vec<&TreadRect>) {
+        let split = (1..g.treads.len()).find(|&k| g.treads[k].index != g.treads[k - 1].index + 1).unwrap();
+        (g.treads[..split].iter().collect(), g.treads[split..].iter().collect())
+    }
+
+    #[test]
+    fn stair_u_halbpodest_und_gegenlauf() {
+        // [151] U: Lauf 1 nach +x, Halbpodest, Lauf 2 links daneben zurück (Auge 0.2).
+        let mut p = stair("U");
+        p.run2_length = Some(3.0);
+        p.gap = Some(0.2);
+        p.step_count = 17;
+        let g = stair_geometry(&p, 2.89);
+        let (r1, r2) = runs_of(&g);
+        assert_eq!(r1.len() + r2.len(), 16); // 17 Steigungen − 1 Podest
+        assert_eq!((r1.len(), r2.len()), (8, 8));
+        // gleiche Steigung überall, Podest = eine Steigung über dem letzten Tritt von Lauf 1
+        for t in &g.treads {
+            assert!((t.top_rise - t.base_rise - 0.17).abs() < 1e-12);
+        }
+        assert!((r2[0].base_rise - r1[7].top_rise - 0.17).abs() < 1e-12);
+        assert!((r2[7].top_rise - 2.89).abs() < 1e-12);
+        // Podest über beide Läufe und das Auge: u 3 … 4.2, v −0.6 … 2.0
+        let land = g.landing.as_ref().unwrap();
+        let (mut lo, mut hi) = (Vec2 { x: 9.0, y: 9.0 }, Vec2 { x: -9.0, y: -9.0 });
+        for q in land {
+            lo = Vec2 { x: lo.x.min(q.x), y: lo.y.min(q.y) };
+            hi = Vec2 { x: hi.x.max(q.x), y: hi.y.max(q.y) };
+        }
+        assert!(near(lo, 3.0, -0.6) && near(hi, 4.2, 2.0), "{lo:?} {hi:?}");
+        // Lauf 2 läuft nach −x, Mitte bei y = 1.4 (Breite + Auge)
+        let c = |t: &TreadRect| Vec2 { x: (t.pts[0].x + t.pts[2].x) / 2.0, y: (t.pts[0].y + t.pts[2].y) / 2.0 };
+        assert!((c(r2[0]).y - 1.4).abs() < 1e-9 && c(r2[7]).x < c(r2[0]).x);
+        assert!((c(r2[0]).x - (3.0 - 3.0 / 16.0)).abs() < 1e-9);
+        // Lauflinie: Lauf 1 → Podestmitte → hinüber → Lauf 2
+        assert_eq!(g.run_line.len(), 4);
+        assert!(near(g.run_line[1], 3.6, 0.0) && near(g.run_line[2], 3.6, 1.4));
+        // Drehsinn rechts: Lauf 2 bei y = −1.4
+        p.turn = Some(-1);
+        let g = stair_geometry(&p, 2.89);
+        assert!(near(g.run_line[2], 3.6, -1.4));
+        // Aussenlinie: 8 Ecken, das Auge bleibt frei
+        p.turn = Some(1);
+        let poly = stair_outline(&p).polygon.unwrap();
+        assert_eq!(poly.len(), 8);
+        assert!(!point_in_polygon(Vec2 { x: 1.5, y: 0.7 }, &poly));
+        assert!(point_in_polygon(Vec2 { x: 1.5, y: 1.4 }, &poly) && point_in_polygon(Vec2 { x: 3.5, y: 0.7 }, &poly));
+        // Podestlänge und Stufen je Lauf vorgegeben
+        p.landing_length = Some(1.5);
+        p.run1_steps = Some(10);
+        let g = stair_geometry(&p, 2.89);
+        let (r1, r2) = runs_of(&g);
+        assert_eq!((r1.len(), r2.len()), (10, 6));
+        assert!(near(g.run_line[1], 3.75, 0.0));
+    }
+
+    #[test]
+    fn stair_u_versatz_und_mittellauf() {
+        // Gegenlauf um einen Auftritt ins Podest versetzt: Podest auf seiner Seite ausgeklinkt.
+        let mut p = stair("U");
+        p.run2_length = Some(3.0);
+        p.gap = Some(0.2);
+        p.step_count = 17;
+        p.run2_offset = Some(0.375);
+        let g = stair_geometry(&p, 2.89);
+        let (_, r2) = runs_of(&g);
+        assert!((r2[0].pts[0].x - 3.375).abs() < 1e-9, "{:?}", r2[0].pts);
+        let land = g.landing.as_ref().unwrap();
+        assert_eq!(land.len(), 6);
+        assert!(point_in_polygon(Vec2 { x: 3.2, y: 0.5 }, land) && !point_in_polygon(Vec2 { x: 3.2, y: 1.4 }, land));
+        assert!(stair_outline(&p).polygon.unwrap().len() >= 8);
+        // Zwei Viertelpodeste und ein Mittellauf quer über das Auge (1.5 m, 4 Steigungen)
+        let mut q = stair("U");
+        q.run2_length = Some(2.0);
+        q.gap = Some(2.0);
+        q.mid_steps = Some(4);
+        q.step_count = 18;
+        q.run1_steps = Some(7);
+        let g = stair_geometry(&q, 3.06);
+        let jumps: Vec<usize> = (1..g.treads.len()).filter(|&k| g.treads[k].index != g.treads[k - 1].index + 1).collect();
+        assert_eq!(jumps, vec![7, 11]); // Lauf 1: 7, Mittellauf: 4, Lauf 3: 5
+        assert_eq!(g.treads.len(), 16);
+        assert!((g.treads[15].top_rise - 3.06).abs() < 1e-12);
+        let mid = &g.treads[7..11];
+        // Mittellauf nach +y, Auftritt wie Lauf 1 (3/7), mittig im Auge (0.6 … 2.6)
+        let td = 3.0 / 7.0;
+        let y0 = mid[0].pts.iter().map(|q| q.y).fold(f64::INFINITY, f64::min);
+        assert!((y0 - (0.6 + (2.0 - 4.0 * td) / 2.0)).abs() < 1e-9, "{y0}");
+        assert!((mid[3].top_rise - mid[3].base_rise - 0.17).abs() < 1e-12);
+        assert!(mid.iter().all(|t| t.pts.iter().all(|q| q.x > 2.99 && q.x < 4.21)));
+        let l2 = g.landing2.as_ref().unwrap();
+        assert!(l2.iter().all(|q| q.y > 2.4) && g.landing.as_ref().unwrap().iter().all(|q| q.y < 1.0));
+        // Lauf 3 zurück nach −x bei y = 3.2
+        let last = &g.treads[15];
+        assert!(last.pts.iter().all(|q| (q.y - 3.2).abs() < 0.61) && last.pts.iter().all(|q| q.x < 3.0 + 1e-9));
+        assert_eq!(g.run_line.len(), 4);
+        let poly = stair_outline(&q).polygon.unwrap();
+        assert!(!point_in_polygon(Vec2 { x: 1.0, y: 1.6 }, &poly) && point_in_polygon(Vec2 { x: 3.6, y: 1.6 }, &poly));
+    }
+
+    #[test]
+    fn stair_gerade_mit_zwischenpodest() {
+        let mut p = stair("straightLanding");
+        p.run2_length = Some(2.0);
+        p.landing_length = Some(1.0);
+        p.run1_steps = Some(9);
+        let g = stair_geometry(&p, 2.8);
+        let (r1, r2) = runs_of(&g);
+        assert_eq!((r1.len(), r2.len()), (9, 6));
+        assert!((r1[8].top_rise - 9.0 * 0.175).abs() < 1e-12 && (r2[0].base_rise - 10.0 * 0.175).abs() < 1e-12);
+        let land = g.landing.as_ref().unwrap();
+        assert!(land.iter().all(|q| (q.x - 3.0).abs() < 1e-9 || (q.x - 4.0).abs() < 1e-9));
+        // Lauf 2 schliesst nach dem Podest an und endet bei 6 m
+        assert!((r2[0].pts[0].x - 4.0).abs() < 1e-9 && (r2[5].pts[1].x - 6.0).abs() < 1e-9);
+        assert!((g.tread_depth - 3.0 / 9.0).abs() < 1e-12);
+        let poly = stair_outline(&p).polygon.unwrap();
+        assert!(near(poly[2], 6.0, -0.6));
+        // ohne Vorgaben: Podest = Laufbreite, Aufteilung nach Lauflängen
+        let mut q = stair("straightLanding");
+        q.run2_length = Some(3.0);
+        let g = stair_geometry(&q, 2.8);
+        let (r1, r2) = runs_of(&g);
+        assert_eq!((r1.len(), r2.len()), (8, 7)); // round(15·½) = 8
+        assert!((r2[0].pts[0].x - 4.2).abs() < 1e-9);
+        // Unsinn bei der Stufenvorgabe: auf 1 … Läufe−1 begrenzt
+        q.run1_steps = Some(99);
+        let g = stair_geometry(&q, 2.8);
+        let (r1, r2) = runs_of(&g);
+        assert_eq!((r1.len(), r2.len()), (14, 1));
     }
 
     #[test]
@@ -2758,8 +3163,10 @@ mod tests {
         assert_eq!(g.treads.len(), 16);
         p.step_count = -5;
         assert_eq!(stair_geometry(&p, 2.8).treads.len(), 2);
-        for shape in ["L", "spiral"] {
+        for shape in ["L", "spiral", "U", "straightLanding"] {
             let mut q = stair(shape);
+            q.gap = Some(f64::NAN);
+            q.landing_length = Some(-1.0);
             q.width = f64::NAN;
             q.step_count = 0;
             let _ = stair_geometry(&q, 1.0);
@@ -2780,7 +3187,7 @@ mod tests {
         assert!(point_hits_stair(Vec2 { x: 1.0, y: 0.0 }, &g));
         assert!(!point_hits_stair(Vec2 { x: 1.0, y: 5.0 }, &g));
         let leer = StairGeometry {
-            treads: vec![], landing: None, riser_height: 0.0, tread_depth: 0.0,
+            treads: vec![], landing: None, landing2: None, riser_height: 0.0, tread_depth: 0.0,
             run_line: vec![], arrow: StairArrow { shaft: (Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 0.0, y: 0.0 }), head: (Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 0.0, y: 0.0 }) },
             total_rise: 0.0,
         };

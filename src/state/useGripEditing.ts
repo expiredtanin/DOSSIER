@@ -25,6 +25,7 @@ import {
   openingTypedPosition,
   sheetHeightDrag,
   stairMoveHandle,
+  stairParamPoints,
   wallGripPoints,
   type GripLocks,
 } from "../core";
@@ -100,6 +101,8 @@ export function useGripEditing(opts: {
   /** Wand ändern (Höhen-Griff im Schnitt); `coalesceKey` fasst einen Zug zu EINEM Undo-Schritt. */
   updateWall: (id: string, patch: Partial<import("../model/types").Wall>, coalesceKey?: string) => void;
   moveStairBy: (id: string, delta: Vec2) => void;
+  /** [151] Parameter-Griff einer Podesttreppe ziehen (Index ohne den Bewegpunkt). */
+  dragStairParam?: (id: string, index: number, pt: Vec2) => void;
   moveRoomGrip: (id: string, index: number, pt: Vec2) => void;
   moveCeilingGrip: (id: string, index: number, pt: Vec2) => void;
   moveExcavationGrip: (id: string, index: number, pt: Vec2) => void;
@@ -298,9 +301,10 @@ export function useGripEditing(opts: {
     if (selectedStairId && modelEditable) {
       const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
       if (!st) return [];
-      gripOwners.push({ localIndex: 0 });
-      gripOwnerRange.push([0, 0]);
-      return [stairMoveHandle(st)];
+      // [151] Podesttreppen: dazu die Parameter-Griffe (Lauf-Enden, Podestrand).
+      const pts = [stairMoveHandle(st), ...stairParamPoints(st)];
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
     }
     if (selectedTree && modelEditable && !selectedTree.locked) {
       const pts = treeGrips(selectedTree);
@@ -844,7 +848,8 @@ export function useGripEditing(opts: {
     // sodass er nach dem Move exakt unter dem Cursor sitzt.
     if (selectedStairId) {
       const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
-      if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
+      if (st && index > 0) opts.dragStairParam?.(st.id, index - 1, pt);
+      else if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
       return;
     }
     // [149] Baum: Stammmitte bzw. Kronenrand live, ein Undo-Schritt je Zug (gleicher coalesceKey).

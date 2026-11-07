@@ -219,14 +219,17 @@ impl Roof {
 }
 
 impl Stair {
-    /// Treppen-Parameter als 16 Zahlen (Aufbau: `stair.rs`, `encodeStair` in TS); fehlend = NaN.
-    pub fn encode(&self) -> [f64; 16] {
+    /// Treppen-Parameter als [`crate::stair::PARAMS`] Zahlen (Aufbau: `stair.rs`, `encodeStair` in TS);
+    /// fehlend = NaN.
+    pub fn encode(&self) -> [f64; crate::stair::PARAMS] {
         let n = |v: Option<f64>| v.unwrap_or(f64::NAN);
         [
             match self.shape {
                 StairShape::Straight | StairShape::Unknown => 0.0,
                 StairShape::L => 1.0,
                 StairShape::Spiral => 2.0,
+                StairShape::U => 3.0,
+                StairShape::StraightLanding => 4.0,
             },
             self.start.x,
             self.start.y,
@@ -247,6 +250,11 @@ impl Stair {
                 Some(StairReferenz::Rechts) => 2.0,
                 _ => 0.0,
             },
+            n(self.gap),
+            n(self.landing_length),
+            n(self.run1_steps),
+            n(self.mid_steps),
+            n(self.run2_offset),
         ]
     }
 }

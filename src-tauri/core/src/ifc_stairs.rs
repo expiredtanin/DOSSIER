@@ -6,9 +6,10 @@
 //! nur diese Treppe enthält (die Ableitungen liefern keine ids). Hier: Zuordnung und Basismengen;
 //! die Entitäten schreibt `fileio` (`ifc_export.rs`, STAIR).
 //!
-//! Zuordnung der Tritt-Prismen: bei "L" ist das Podest das Prisma mit dem Umriss des Podest-Polygons
-//! der Treppengeometrie; Tritte bis zur Podest-Oberkante gehören zum ersten, die darüber zum
-//! zweiten Lauf. Gerade und Wendeltreppen haben einen Lauf (die Wendel-Mitte bleibt Teil davon).
+//! Zuordnung der Tritt-Prismen: bei Podesttreppen (L, U, gerade mit Podest; [151]) ist ein Podest das
+//! Prisma mit dem Umriss eines Podest-Polygons der Treppengeometrie; die Tritte zwischen zwei
+//! Podest-Oberkanten bilden einen Lauf. Ortbeton-Läufe kommen je Lauf als Netz. Gerade und
+//! Wendeltreppen haben einen Lauf (die Wendel-Mitte bleibt Teil davon).
 //! Die Mittelsäule (Spindel, `Stair.centerColumn`) einer Wendel ist kein Tritt: eigener Teil
 //! (IfcColumn) mit Stützen-Basismengen. Ortbeton-Läufe (Netz) tragen zusätzlich die Untersicht
 //! (Schalfläche, bei der Wendel die Wendelfläche) in `Dossier_Qto_StairFlight`.
@@ -73,7 +74,8 @@ pub struct Rail {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StairParts {
     pub flights: Vec<StairFlightParts>,
-    pub landing: Option<Landing>,
+    /// Podeste (IfcSlab LANDING), unteres zuerst; U mit Mittellauf: zwei.
+    pub landings: Vec<Landing>,
     pub rail: Option<Rail>,
     /// Mittelsäule (Spindel) einer Wendel: Prisma + Stützen-Basismengen.
     pub column: Option<Landing>,
@@ -165,8 +167,55 @@ pub fn flight_soffit_area(one: &Project) -> Option<f64> {
     (sum > 0.0).then_some(sum)
 }
 
-/// Lauflänge auf der Lauflinie: Wendel = Schraubenlinie im Laufradius, sonst Lauflänge; mit Steigung.
+/// [151] Läufe einer Treppe aus geraden Läufen: je Lauf (Tritte, waagrechte Länge Antritt → Hinterkante
+/// des letzten Tritts, Höhe) und die Mitten von Antritts- und Austrittskante; getrennt am Podest
+/// (Sprung im Tritt-Index).
+struct RunInfo {
+    treads: usize,
+    run: f64,
+    lift: f64,
+    from: Vec2,
+    to: Vec2,
+}
+
+fn runs_of(geo: &kernel2d::StairGeometry) -> Vec<RunInfo> {
+    let tr = &geo.treads;
+    let mut out: Vec<RunInfo> = Vec::new();
+    let mut a = 0;
+    for k in 1..=tr.len() {
+        if k < tr.len() && tr[k].index == tr[k - 1].index + 1 {
+            continue;
+        }
+        let (first, last) = (&tr[a], &tr[k - 1]);
+        if first.pts.len() >= 4 && last.pts.len() >= 4 {
+            let mid = |p: kernel2d::Vec2, q: kernel2d::Vec2| Vec2 { x: (p.x + q.x) / 2.0, y: (p.y + q.y) / 2.0 };
+            let (from, to) = (mid(first.pts[0], first.pts[3]), mid(last.pts[1], last.pts[2]));
+            out.push(RunInfo { treads: k - a, run: hypot2(to.x - from.x, to.y - from.y), lift: last.top_rise - first.base_rise, from, to });
+        }
+        a = k;
+    }
+    out
+}
+
+/// Lauflänge auf der Lauflinie mit Steigung: Wendel = Schraubenlinie im Laufradius; Podesttreppen
+/// (L, U, gerade mit Podest) = Läufe geneigt plus der Weg über die Podeste (über deren Mitte); sonst
+/// die Lauflänge.
 fn walk_length(stair: &Stair, rise: f64) -> f64 {
+    if matches!(stair.shape, StairShape::L | StairShape::U | StairShape::StraightLanding) {
+        if let Some(g) = crate::stair::decode_geometry(&crate::stair::geometry(&stair.encode(), rise)) {
+            let runs = runs_of(&g);
+            let lands: Vec<&Vec<kernel2d::Vec2>> = g.landing.iter().chain(g.landing2.iter()).collect();
+            if !runs.is_empty() && runs.len() == lands.len() + 1 {
+                let mut sum: f64 = runs.iter().map(|r| hypot2(r.run, r.lift)).sum();
+                for (k, l) in lands.iter().enumerate() {
+                    let c = centroid(&l.iter().map(|p| Vec2 { x: p.x, y: p.y }).collect::<Vec<_>>());
+                    let (a, b) = (runs[k].to, runs[k + 1].from);
+                    sum += hypot2(c.x - a.x, c.y - a.y) + hypot2(b.x - c.x, b.y - c.y);
+                }
+                return sum;
+            }
+        }
+    }
     let run = if stair.shape == StairShape::Spiral {
         let half_w = 0.05_f64.max(stair.width / 2.0);
         let radius = (half_w + 0.1).max(stair.radius.unwrap_or(stair.width));
@@ -181,15 +230,27 @@ fn solid_of(s: &RSlab, base: f64) -> StairSolid {
     StairSolid { pts: s.outline.iter().map(|p| Vec2 { x: p[0], y: p[1] }).collect(), z_rel: s.z_bottom - base, depth: s.z_top - s.z_bottom }
 }
 
+/// IFC-Typ der Treppe (IfcStairTypeEnum) nach Grundform.
+pub fn stair_predefined(stair: &Stair) -> &'static str {
+    match stair.shape {
+        StairShape::Straight | StairShape::Unknown => "STRAIGHT_RUN_STAIR",
+        StairShape::Spiral => "SPIRAL_STAIR",
+        StairShape::L => "QUARTER_TURN_STAIR",
+        StairShape::U if stair.mid_steps.is_some_and(|m| m >= 0.5) => "TWO_QUARTER_TURN_STAIR",
+        StairShape::U => "HALF_TURN_STAIR",
+        StairShape::StraightLanding => "TWO_STRAIGHT_RUN_STAIR",
+    }
+}
+
 /// Teile einer Treppe für den IFC-Export. `one` = Projekt, das NUR diese Treppe enthält (sonst wie
 /// das ganze Projekt), `base` = Geschoss-UK, auf die Z-Werte bezogen werden. Leere Teile ergeben
-/// `flights: []`, `landing: None`, `rail: None`.
+/// `flights: []`, `landings: []`, `rail: None`.
 pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
     let (z_bottom, z_top) = one.stair_vertical_extent(stair);
     let rise = z_top - z_bottom;
     let geo = crate::stair::decode_geometry(&crate::stair::geometry(&stair.encode(), rise));
     let (riser_height, tread_depth, n_treads) = geo.as_ref().map_or((0.0, 0.0, 0), |g| (g.riser_height, g.tread_depth, g.treads.len()));
-    let geo_landing = geo.as_ref().and_then(|g| g.landing.as_ref());
+    let runs = geo.as_ref().map(runs_of).unwrap_or_default();
     let mut slabs = model3d::emit_stairs(one, false);
     // Mittelsäule: `slabs_of` hängt sie bei einer Wendel mit Säule als letzte Platte an.
     let column = (stair.shape == StairShape::Spiral && stair.center.is_some() && stair.center_column.is_some_and(|r| r.is_finite() && r > 0.0))
@@ -203,29 +264,32 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
     let meshes = model3d::emit_stair_meshes(one);
     let predefined = if stair.shape == StairShape::Spiral { "SPIRAL" } else { "STRAIGHT" };
 
-    // Podest nur bei "L" (bei der Wendel ist das Polygon die Treppenmitte, Teil des Laufs).
-    let landing_idx = match (stair.shape, geo_landing) {
-        (StairShape::L, Some(l)) => slabs.iter().position(|s| same_ring(&s.outline, l)),
-        _ => None,
-    };
-    let tread_slabs: Vec<&RSlab> = slabs.iter().enumerate().filter(|(i, _)| Some(*i) != landing_idx).map(|(_, s)| s).collect();
-
-    let mut groups: Vec<Vec<&RSlab>> = Vec::new();
-    if let Some(li) = landing_idx {
-        let top = slabs[li].z_top + EPS;
-        let lower: Vec<&RSlab> = tread_slabs.iter().copied().filter(|s| s.z_top <= top).collect();
-        let upper: Vec<&RSlab> = tread_slabs.iter().copied().filter(|s| s.z_top > top).collect();
-        for g in [lower, upper] {
-            if !g.is_empty() {
-                groups.push(g);
+    // Podeste der Podesttreppen (bei der Wendel ist das Polygon die Treppenmitte, Teil des Laufs).
+    let mut landing_idx: Vec<usize> = Vec::new();
+    if matches!(stair.shape, StairShape::L | StairShape::U | StairShape::StraightLanding) {
+        if let Some(g) = &geo {
+            for l in g.landing.iter().chain(g.landing2.iter()) {
+                if let Some(i) = slabs.iter().position(|s| same_ring(&s.outline, l)) {
+                    landing_idx.push(i);
+                }
             }
         }
-    } else if !tread_slabs.is_empty() {
-        groups.push(tread_slabs);
     }
+    let tread_slabs: Vec<&RSlab> = slabs.iter().enumerate().filter(|(i, _)| !landing_idx.contains(i)).map(|(_, s)| s).collect();
+
+    // Tritte je Lauf: zwischen den Podest-Oberkanten.
+    let mut tops: Vec<f64> = landing_idx.iter().map(|&i| slabs[i].z_top + EPS).collect();
+    tops.sort_by(f64::total_cmp);
+    let mut groups: Vec<Vec<&RSlab>> = vec![Vec::new(); tops.len() + 1];
+    for s in &tread_slabs {
+        let k = tops.iter().filter(|t| s.z_top > **t).count();
+        groups[k].push(s);
+    }
+    groups.retain(|g| !g.is_empty());
 
     let mut flights: Vec<StairFlightParts> = Vec::new();
-    let n_groups = groups.len();
+    let n_groups = groups.len().max(if meshes.is_empty() { 0 } else { meshes.len() });
+    let name = |k: usize| if n_groups > 1 { format!("Lauf {}", k + 1) } else { "Lauf".to_string() };
     for (k, g) in groups.iter().enumerate() {
         // Tritte = verschiedene Oberkanten (Setzstufen-Platten und Nasen teilen die Höhe ihres Tritts).
         let mut tops: Vec<u64> = Vec::new();
@@ -266,7 +330,7 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
             .map(|x| ring_area(&x.outline.iter().map(|p| Vec2 { x: p[0], y: p[1] }).collect::<Vec<_>>()).abs())
             .sum();
         flights.push(StairFlightParts {
-            name: if n_groups > 1 { format!("Lauf {}", k + 1) } else { "Lauf".to_string() },
+            name: name(k),
             risers: treads,
             treads,
             riser_height,
@@ -277,30 +341,41 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
             body: FlightBody::Solids(solids),
         });
     }
-    // Glatte Ortbeton-Laufplatte (gerade Betontreppe): ein Lauf als Netz.
+    // Glatte Ortbeton-Laufplatten: Wendel ein Netz; Läufe je ein Netz (gerade: eines; Podesttreppen: je Lauf).
+    let per_run = meshes.len() > 1 && meshes.len() == runs.len();
     if !meshes.is_empty() {
-        let (positions, indices) = concat(&meshes);
-        let mesh = ifc_mesh(positions, &indices, base);
-        let volume = mesh_volume(&mesh.positions, &mesh.indices);
-        let soffit = soffit_area(&mesh.positions, &mesh.indices);
-        flights.push(StairFlightParts {
-            name: if flights.is_empty() { "Lauf".to_string() } else { format!("Lauf {}", flights.len() + 1) },
-            risers: n_treads as f64,
-            treads: n_treads as f64,
-            riser_height,
-            tread_length: tread_depth,
-            predefined,
-            quantities: flight_quantities(walk_length(stair, rise), volume),
-            soffit_area: Some(soffit),
-            body: FlightBody::Mesh(mesh),
-        });
+        let mesh_groups: Vec<Vec<RMesh>> = if per_run { meshes.into_iter().map(|m| vec![m]).collect() } else { vec![meshes] };
+        for (k, ms) in mesh_groups.iter().enumerate() {
+            let (positions, indices) = concat(ms);
+            let mesh = ifc_mesh(positions, &indices, base);
+            let volume = mesh_volume(&mesh.positions, &mesh.indices);
+            let soffit = soffit_area(&mesh.positions, &mesh.indices);
+            let (n, length) = if per_run { (runs[k].treads, hypot2(runs[k].run, runs[k].lift)) } else { (n_treads, walk_length(stair, rise)) };
+            flights.push(StairFlightParts {
+                name: name(flights.len()),
+                risers: n as f64,
+                treads: n as f64,
+                riser_height,
+                tread_length: tread_depth,
+                predefined,
+                quantities: flight_quantities(length, volume),
+                soffit_area: Some(soffit),
+                body: FlightBody::Mesh(mesh),
+            });
+        }
     }
 
-    let landing = landing_idx.map(|li| {
-        let s = solid_of(&slabs[li], base);
-        let quantities = slab_quantities(&s.pts, &[], s.depth);
-        Landing { pts: s.pts, z_rel: s.z_rel, depth: s.depth, quantities }
-    });
+    // Podeste nach Höhe (unteres zuerst).
+    let mut landing_idx = landing_idx;
+    landing_idx.sort_by(|a, b| slabs[*a].z_top.total_cmp(&slabs[*b].z_top));
+    let landings = landing_idx
+        .iter()
+        .map(|&li| {
+            let s = solid_of(&slabs[li], base);
+            let quantities = slab_quantities(&s.pts, &[], s.depth);
+            Landing { pts: s.pts, z_rel: s.z_rel, depth: s.depth, quantities }
+        })
+        .collect();
 
     let rail_meshes = model3d::emit_stair_railings(one);
     let rail = (!rail_meshes.is_empty()).then(|| {
@@ -308,7 +383,7 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
         let sides = if one.stair_type(stair).and_then(|t| t.railing) == Some(StairTypeRailing::Beide) { 2.0 } else { 1.0 };
         Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(walk_length(stair, rise) * sides) }
     });
-    StairParts { flights, landing, rail, column }
+    StairParts { flights, landings, rail, column }
 }
 
 #[cfg(test)]
@@ -352,7 +427,7 @@ mod tests {
         assert_eq!(f.name, "Lauf");
         assert!(f.treads > 0.0 && f.riser_height > 0.0);
         assert!(matches!(&f.body, FlightBody::Solids(s) if !s.is_empty()));
-        assert!(parts.landing.is_none() && parts.rail.is_none());
+        assert!(parts.landings.is_empty() && parts.rail.is_none());
     }
 
     #[test]
@@ -361,7 +436,8 @@ mod tests {
         let p = project_with(st.clone(), None);
         let parts = stair_parts(&p, &st, 0.0);
         assert_eq!(parts.flights.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Lauf 1", "Lauf 2"]);
-        let l = parts.landing.expect("Podest");
+        assert_eq!(parts.landings.len(), 1);
+        let l = &parts.landings[0];
         assert!(l.depth > 0.0 && l.quantities.iter().any(|q| q.name == "NetArea" && q.value > 0.0));
     }
 

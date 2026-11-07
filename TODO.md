@@ -1704,7 +1704,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   `Dimension.arcCenter`: Masslinie als Bogen, radiale Hilfslinien, Masszahl = Bogenlänge; DXF als Linien/Text).
   Geprüft: Rust-Tests, CLI-SVG Grundriss/Schnitte/Ansicht angesehen, IFC validiert (Linux), nicht in der
   Tauri-App. Offen: Wände teilen/trimmen (fehlt auch für gerade); Bogenmass-Griffe verschieben Punkte frei (nicht auf dem Kreis).
-- ◐ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M — 30.10.: Ortbeton-Wendeltreppe mit echter Wendelfläche (Schraubenuntersicht, ebene Tritte, `stairs3d::spiral_mesh`), Handlauf als Schraubensweep samt Pfosten (links/rechts/beide nach Drehsinn), Mittelsäule `Stair.centerColumn` (Radius, Objekt-Info; als Block in 3D/Schnitt). Tests Rust (Volumen, Punkte auf der Schraube, Sweep-Radius, Säule). Plansymbol (Bögen, Schnittlinie, Pfeil) war schon da und im CLI-SVG geprüft; nicht in der Tauri-App. 5.11.: Spindel im Grundriss (`plan_stair`, Kreis; von der Schnitthöhe geschnitten = gefüllt, sonst Umriss); IFC: Spindel als eigene IfcColumn mit `Qto_ColumnBaseQuantities` (vorher als Tritt-Prisma im Lauf mitgezählt bzw. bei Beton als falscher 2. Lauf), Lauflänge auf der Schraubenlinie, Ortbeton-Lauf (Netz) mit Untersicht `Dossier_Qto_StairFlight.SoffitArea`; Objekt-Info Treppe zeigt Betonvolumen und Untersicht (Ortbeton gerade/Wendel); Handlauf der Wendel als runder Rohr-Sweep (12 Ecken, rotationsminimierende Rahmen) mit runden Pfosten. Tests Rust (Plan-Säule, Rohr, IFC-Teile/Mengen, fileio COLUMN, Objekt-Info); IFC mit `validate-ifc.py` geprüft; nur Linux, nicht in der Tauri-App. 5.11. (später): Handlauf und Pfosten gerader Treppen ebenfalls rund (`tube_along`; `strut_box` entfernt; Golden `komplex-model3d` nur Geländer-Netze); Untersicht der Einzeltritt-Wendel (Spindel, Wange) = Summe der Trittunterseiten samt Nase im selben Feld `SoffitArea` / Objekt-Info `soffitArea` (`ifc_stairs::flight_soffit_area`). 5.11. (spät): L-Treppen mit Geländer (`stairs3d::l_railing`): durchgehender Rohr-Handlauf je Gehseite (Lauf 1 ansteigend, Podest eben über Aussenecken, Lauf 2 ansteigend, Sprung um eine Steighöhe an der Innenecke), runde Pfosten an Lauf-Anfang, Tritten und Podestecken; Seiten links/rechts/beide je Lauf nach Gehrichtung; Tests Rust (beide Wendungen, Höhe 0.9 über Nase, Podestebene, lückenlos). Es gibt nur die Formen gerade/L/Wendel (kein U im Modell); der Plan zeigt für keine Treppe einen Handlauf, daher keine Planänderung; Goldens unverändert (keine L-Treppe mit Geländer in den Beispielen). Offen: kein Handlauf-Profil im Modell (rund fest); nur Linux, nicht in der Tauri-App.
+- ◐ **[T3] Wendeltreppe/Wendelfläche** + Handlauf-Sweep. · M — 30.10.: Ortbeton-Wendeltreppe mit echter Wendelfläche (Schraubenuntersicht, ebene Tritte, `stairs3d::spiral_mesh`), Handlauf als Schraubensweep samt Pfosten (links/rechts/beide nach Drehsinn), Mittelsäule `Stair.centerColumn` (Radius, Objekt-Info; als Block in 3D/Schnitt). Tests Rust (Volumen, Punkte auf der Schraube, Sweep-Radius, Säule). Plansymbol (Bögen, Schnittlinie, Pfeil) war schon da und im CLI-SVG geprüft; nicht in der Tauri-App. 5.11.: Spindel im Grundriss (`plan_stair`, Kreis; von der Schnitthöhe geschnitten = gefüllt, sonst Umriss); IFC: Spindel als eigene IfcColumn mit `Qto_ColumnBaseQuantities` (vorher als Tritt-Prisma im Lauf mitgezählt bzw. bei Beton als falscher 2. Lauf), Lauflänge auf der Schraubenlinie, Ortbeton-Lauf (Netz) mit Untersicht `Dossier_Qto_StairFlight.SoffitArea`; Objekt-Info Treppe zeigt Betonvolumen und Untersicht (Ortbeton gerade/Wendel); Handlauf der Wendel als runder Rohr-Sweep (12 Ecken, rotationsminimierende Rahmen) mit runden Pfosten. Tests Rust (Plan-Säule, Rohr, IFC-Teile/Mengen, fileio COLUMN, Objekt-Info); IFC mit `validate-ifc.py` geprüft; nur Linux, nicht in der Tauri-App. 5.11. (später): Handlauf und Pfosten gerader Treppen ebenfalls rund (`tube_along`; `strut_box` entfernt; Golden `komplex-model3d` nur Geländer-Netze); Untersicht der Einzeltritt-Wendel (Spindel, Wange) = Summe der Trittunterseiten samt Nase im selben Feld `SoffitArea` / Objekt-Info `soffitArea` (`ifc_stairs::flight_soffit_area`). 5.11. (spät): L-Treppen mit Geländer (`stairs3d::l_railing`): durchgehender Rohr-Handlauf je Gehseite (Lauf 1 ansteigend, Podest eben über Aussenecken, Lauf 2 ansteigend, Sprung um eine Steighöhe an der Innenecke), runde Pfosten an Lauf-Anfang, Tritten und Podestecken; Seiten links/rechts/beide je Lauf nach Gehrichtung; Tests Rust (beide Wendungen, Höhe 0.9 über Nase, Podestebene, lückenlos). (6.11.: Formen U und gerade mit Podest → [151], Geländer aller Podesttreppen über `flight_railing`.) Der Plan zeigt für keine Treppe einen Handlauf, daher keine Planänderung; Goldens unverändert (keine L-Treppe mit Geländer in den Beispielen). Offen: kein Handlauf-Profil im Modell (rund fest); nur Linux, nicht in der Tauri-App.
 - ◐ **[T4] Import-Meshes glätten oder kantig** (30.10.) `ImportedMesh.smoothShading`/`creaseAngle` (Vorgabe 30°,
   auch STEP-Körper), Schalter + Knickwinkel im Panel „Gelände & Kontext"; `RMesh.creaseAngle` → render3d
   `MeshInput.creaseAngle`: geteilte Normalen je Ecke (über die Lage verschweisst, flächengewichtet, nur Nachbarn
@@ -3368,6 +3368,44 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Kern, tsc, vitest, CLI-SVG Musterhaus komplex EG 1:100/1:200/1:500 vorher/nachher in Chromium (nur Linux). Offen:
   Raumstempel ausserhalb ihres Raums sind kein Hindernis; Beschriftungen an Bündeln fehlen ganz statt versetzt; nicht
   in der Tauri-App/Metal geprüft.
+- ◐ **[151] Treppenformen U und gerade mit Podest.** (6.11.) Rust-Modell `Stair`: Formen `"U"` (zwei gegenläufige
+  Läufe, Halbpodest über beide Läufe und das Auge) und `"straightLanding"` (gerade mit Zwischenpodest), neue Felder `gap`
+  (Treppenauge, Vorgabe 0.1), `landingLength` (Podesttiefe, Vorgabe Laufbreite), `run1Steps` (Steigungen Lauf 1, auch für L;
+  fehlt = Aufteilung nach Lauflängen wie bisher), `midSteps` (U: Mittellauf quer über das Auge mit zwei Viertelpodesten,
+  Auftritt wie Lauf 1, mittig im Auge), `run2Offset` (U: Gegenlauf ins Podest versetzt, Podest ausgeklinkt); `turn`/
+  `run2Length` wie bei L. Rückwärtskompatibel (alle neu optional; bestehende Projekte unverändert), `gen:types`, kein
+  neues `Project`-Feld. Geometrie in `kernel2d` (`u_geometry`, `landing_geometry`, Aussenlinie innen um das Auge,
+  `StairGeometry.landing2`); Parameter-Puffer 16 → 21 Zahlen (`stair.rs::PARAMS`, TS `encodeStair`), Geometrie-Puffer
+  hängt `landing2` an. Jedes Podest belegt eine Steigung (Höhe = Antritt des Folgelaufs). Überall wie L: Grundriss (Tritte,
+  Podest(e), Lauflinie mit Wende und Pfeil, Bruchlinie), Schnitt/Ansicht, 3D. 3D/Schnitt neu je Lauf (`stairs3d`):
+  Ortbeton-Laufplatte je Lauf als Netz mit Untersicht (gerade, L, U, gerade mit Podest; L vorher Tritt-Blöcke),
+  Podestplatte als Slab; im Schnitt exakte Untersicht samt Podestplatte (`stair_flight_sections`; vorher ersetzte die
+  Laufplatte die Podest-Schnittfläche). Geländer: ein Rohr-Handlauf je Gehseite über alle Läufe, auf dem Podestrand
+  (aussen über die Ecken, innen um das Auge, Sprung um eine Steighöhe an der Podestkante), Pfosten an Lauf-Anfang, Tritten
+  und Podestecken (`flight_railing` ersetzt `l_railing`). **Fehler behoben:** L-Podest lag auf halber Steighöhe statt auf
+  der Höhe nach Lauf 1 (Musterhaus komplex `tr-kern`: 8.5 statt 12 Steigungen); L-Geländer kam nie ins 3D/IFC (Filter nur
+  gerade/Wendel; Test `toWalls3d` „L bewusst kein Geländer“ umgestellt). IFC-Export: IfcStair HALF_TURN_STAIR /
+  TWO_QUARTER_TURN_STAIR / TWO_STRAIGHT_RUN_STAIR, je Lauf ein IfcStairFlight (Ortbeton je Lauf ein Netz mit
+  `SoffitArea`), Podeste als IfcSlab LANDING (Flat-Format: Anzahl statt Flag, erstes Podest behält den Schlüssel),
+  Lauflänge je Lauf, Handlauf-Länge über die Podestmitten. Objekt-Info: Grundform (5), Lauf 1/letzter Lauf, Steigungen
+  Lauf 1, Drehsinn, Podesttiefe, Auge, Mittellauf, Versatz; Ortbeton-Volumen/Untersicht auch für die neuen Formen.
+  Werkzeug: Grundform-Zyklus gerade → L → U → gerade mit Podest → Wendel (U: Gegenlauf links, Auge 0.1, Podest =
+  Breite; gerade mit Podest: Punkt = Ende der ganzen Treppe). Griffe: Podesttreppen (L, U, gerade mit Podest) neben dem
+  Bewegpunkt Ende Lauf 1, Ende letzter Lauf (U: quer = Auge und Drehsinn), Podestrand (Kern `grip_drag::stair_param_*`,
+  Griff `stairParam`). Spiegeln/Skalieren: `gap`/`landingLength`/`run2Offset` skalieren mit. Ansicht: Treppen über
+  `emit_stairs_elevation` (Ortbeton-Läufe als ein Block je Tritt, vorher fehlten gerade Betonläufe ganz). Bemassung:
+  beide Podeste anhängbar. Tests: Rust kernel2d (U Halbpodest/Versatz/Mittellauf, gerade mit Podest: Stufenzahl, gleiche
+  Steigung, Podesthöhe, Lage, Aussenlinie), `stairs3d` (Stufen/Steigung/Podesthöhe, Laufplatten-Volumen = n·a·(h/2+w),
+  Geländer lückenlos innen um das Auge/aussen über die Ecken, gerade mit Podest), `section` (U längs: Lauf + Podest),
+  `grip_drag`, `import_ifc`; vitest IFC-Rundreise (U Beton, U versetzt massiv, U Mittellauf, gerade mit Podest: Form,
+  Antritt, Läufe, Auge, Podest, Versatz, Steigungen gleich). Goldens: Musterhaus komplex 3D (L-Laufplatten als Netz,
+  Podest auf richtiger Höhe, L-Geländer) und Ansicht Süd beider Beispiele (Betontreppe als Blöcke, im Bild verdeckt,
+  pixelgleich geprüft). Geprüft: cargo test Kern/kernel2d/fileio, WASM (`--no-opt`), tsc, vitest, CLI-Grundriss 1:50 und
+  Schnitte in Chromium, IFC mit `validate-ifc.py` (U und U mit Mittellauf: 0 Befunde). Bilder (lokal): U-Treppe Grundriss,
+  Schnitt quer/längs je Lauf, U mit Mittellauf. **Offen:** Podest-Handlauf der U-Treppe mit Sprung statt Kropfstück;
+  Mittellauf immer mittig im Auge (ungleiche Viertelpodeste nicht abbildbar); kein Wendelpodest/Wendelstufen am
+  Podest; Plan zeigt weiterhin keinen Handlauf; Griffe nur per tsc (nicht in der App gezogen); nur Linux, nicht in der
+  Tauri-App/Metal angesehen. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
@@ -3609,9 +3647,20 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   Schependomlaan Dächer 19 → 22 (Pult fallend), Wände 795 → 797, Träger 0 → 85/174 (89 schräg/Profil). In den
   Beispielen keine L-Treppe, keine Bogenwand mit Öffnung und keine gedrehte Georeferenz — nur synthetisch geprüft
   (Rust-Tests fileio + Kern). Bilder (lokal): FZK EG-Grundriss und Schnitt durch die Wendeltreppe, Institute Schnitt.
-  Offen: U-/Mehrpodest-Treppen (Modell bräuchte Form „U" oder Höhenlage je Lauf; 34 in den Beispielen), Podest allein
+  Offen: ~~U-/Mehrpodest-Treppen~~ (→ [151]: 34/34), Podest allein
   (Schependomlaan „trapbordes"), Tonnen-/Mansarddach, Träger schräg/als Profil (Modell ohne Träger), Extrusionskörper
   über der Schnitthöhe im Grundriss nicht sichtbar; nur Linux-Container, nicht in der Tauri-App.
+  (6.11., [151]) Podesttreppen ohne Ecke (`ifc_shapes::fit_turn_stair`, nach L): Trittflächen ausser Takt (Wangen-/
+  Rahmenstücke zwischen den Steigungen) fallen weg, Läufe zwischen den Podesten; U mit Halbpodest (Auge, Podesttiefe,
+  Versatz des Gegenlaufs, Drehsinn) bzw. zwei Viertelpodesten (Mittellauf quer, Auftritt wie Lauf 1, mittig im Auge ±12 cm),
+  gerade mit Zwischenpodest; Steigungen je Lauf als `run1Steps`/`midSteps` (L jetzt ebenfalls mit `run1Steps`, die
+  Prüfung „Aufteilung nach Lauflängen“ entfällt). Grund `stairTurn` nur noch für Podesttreppen, die Dossier nicht abbildet
+  (drei und mehr Podeste, rechtwinklig ohne Eckpodest, ungleiche Läufe). Quote: Smiley West Treppen 0 → 30/30 (U mit
+  Halbpodest, Gegenlauf einen Auftritt ins Podest versetzt, Auge 1 cm), Institute 0 → 4/4 (U mit zwei Viertelpodesten,
+  Mittellauf 6 Steigungen); FZK-Haus und Schependomlaan unverändert. Rundreise U/gerade mit Podest (Export → Import)
+  vitest. Bilder (lokal): Smiley West KG vorher (Mesh, im Grundriss kaum sichtbar) / nachher (U-Treppe). Offen: Treppen
+  mit drei und mehr Podesten, Podest allein (Schependomlaan „trapbordes“); Institute-Mittellauf in der Datei nicht mittig
+  (bis 9 cm verschoben); nur Linux, nicht in der Tauri-App.
 - ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 28.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).
   - ✅ Materialschichten: Wand-/Decken-/Dachtypen als IfcWallType/IfcSlabType/IfcRoofType mit

@@ -428,6 +428,8 @@ export interface ProjectSlice {
   // ── Treppen-Editieren ──────────────────────────────────────────────────────
   /** Verschiebt eine Treppe (Antritt) um `delta`. */
   moveStairBy: (stairId: string, delta: Vec2) => void;
+  /** [151] Parameter-Griff `index` einer Podesttreppe nach `pt` ziehen (Kern `stairParam`). */
+  dragStairParam: (stairId: string, index: number, pt: Vec2) => void;
   /** Generischer immutabler Patch auf eine Treppe (per ID). */
   updateStair: (
     id: string,
@@ -1277,6 +1279,7 @@ export function createProjectSlice(
     // ── Treppen-Editieren ──────────────────────────────────────────────────
     // (coalesceKey: siehe Kommentar bei moveGripOf.)
     moveStairBy: (stairId, delta) => applyGrip({ op: "stairBy", id: stairId, delta: gripPt(delta) }, `moveStairBy:${stairId}`),
+    dragStairParam: (stairId, index, pt) => applyGrip({ op: "stairParam", id: stairId, index, pt: gripPt(pt) }, `dragStairParam:${stairId}:${index}`),
 
     updateStair: (id, patch) =>
       applyChange((p) => mapStair(p, id, (s) => ({ ...s, ...patch }))),

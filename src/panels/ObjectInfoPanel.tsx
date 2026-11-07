@@ -1417,6 +1417,81 @@ function RoofEdgesSection({
   );
 }
 
+/**
+ * [151] Läufe und Podest einer Podesttreppe (L, U, gerade mit Podest): Lauflängen, Steigungen im ersten
+ * Lauf, Drehsinn (L/U), Treppenauge, Mittellauf und Versatz (U), Podesttiefe (U, gerade mit Podest).
+ */
+function StairFlightFields({ stair, host }: { stair: StairInfo; host: ReturnType<typeof usePanelHost> }) {
+  const isU = stair.shape === "U";
+  const turn = stair.turn ?? 1;
+  return (
+    <>
+      <DimensionField
+        label={t("objinfo.stair.run1")}
+        value={stair.runLength ?? 0}
+        onCommit={(v) => v > 0.1 && host.onSetStairPatch({ runLength: v })}
+      />
+      <DimensionField
+        label={t("objinfo.stair.run2")}
+        value={stair.run2Length ?? stair.runLength ?? 0}
+        onCommit={(v) => v > 0.1 && host.onSetStairPatch({ run2Length: v })}
+      />
+      <DimensionField
+        label={t("objinfo.stair.run1Steps")}
+        unit="" step={1} digits={0} value={stair.run1Steps ?? 0}
+        onCommit={(v) => host.onSetStairPatch({ run1Steps: v >= 1 ? Math.round(v) : undefined })}
+      />
+      {stair.shape !== "straightLanding" && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.stair.turn")}</span>
+          <div className="objinfo-segment">
+            <button
+              type="button"
+              className={"objinfo-seg-btn" + (turn > 0 ? " active" : "")}
+              onClick={() => host.onSetStairPatch({ turn: 1 })}
+            >
+              {t("objinfo.stair.turn.left")}
+            </button>
+            <button
+              type="button"
+              className={"objinfo-seg-btn" + (turn < 0 ? " active" : "")}
+              onClick={() => host.onSetStairPatch({ turn: -1 })}
+            >
+              {t("objinfo.stair.turn.right")}
+            </button>
+          </div>
+        </div>
+      )}
+      {stair.shape !== "L" && (
+        <DimensionField
+          label={t("objinfo.stair.landing")}
+          value={stair.landingLength ?? stair.width}
+          onCommit={(v) => v > 0.1 && host.onSetStairPatch({ landingLength: v })}
+        />
+      )}
+      {isU && (
+        <>
+          <DimensionField
+            label={t("objinfo.stair.gap")}
+            value={stair.gap ?? 0.1}
+            onCommit={(v) => v >= 0 && host.onSetStairPatch({ gap: v })}
+          />
+          <DimensionField
+            label={t("objinfo.stair.midSteps")}
+            unit="" step={1} digits={0} value={stair.midSteps ?? 0}
+            onCommit={(v) => host.onSetStairPatch({ midSteps: v >= 1 ? Math.round(v) : undefined })}
+          />
+          <DimensionField
+            label={t("objinfo.stair.run2Offset")}
+            min={-10} value={stair.run2Offset ?? 0}
+            onCommit={(v) => host.onSetStairPatch({ run2Offset: v !== 0 ? v : undefined })}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
 export function StairSection({
   stair,
   host,
@@ -1456,6 +1531,8 @@ export function StairSection({
           options={[
             { value: "straight", label: t("objinfo.stair.shape.straight") },
             { value: "L", label: t("objinfo.stair.shape.L") },
+            { value: "U", label: t("objinfo.stair.shape.U") },
+            { value: "straightLanding", label: t("objinfo.stair.shape.straightLanding") },
             { value: "spiral", label: t("objinfo.stair.shape.spiral") },
           ]}
           title={t("objinfo.stair.shape")}
@@ -1534,6 +1611,7 @@ export function StairSection({
           onCommit={(v) => host.onSetStairColumn(v)}
         />
       )}
+      {stair.shape !== "spiral" && stair.shape !== "straight" && <StairFlightFields stair={stair} host={host} />}
       <DimensionField
         label={t("objinfo.stair.steps")}
         value={stair.stepCount}

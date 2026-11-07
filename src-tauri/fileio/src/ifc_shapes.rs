@@ -14,7 +14,9 @@
 //     Vorderkanten linear entlang der Laufrichtung fortschreiten. (6.11.) Wendel — Tritt-Schwerpunkte auf
 //     einem Kreis in gleichen Winkelschritten, jeder Tritt über die ganze Breite, Spindel aus senkrechten
 //     Flächen ringsum im Auge. L — zwei rechtwinklige Läufe gleicher Breite, quadratisches Podest an der
-//     Ecke (wie Dossier); andere Podesttreppen (U, mehrere Podeste) → Grund `stairTurn`.
+//     Ecke (wie Dossier). (6.11., [151]) U — Halbpodest (auch mit versetztem Gegenlauf) oder zwei
+//     Viertelpodeste mit Mittellauf quer über das Auge; gerade mit Zwischenpodest. Trittflächen ausser Takt
+//     (Wangen-/Rahmenstücke zwischen den Steigungen) zählen dort nicht. Andere Podesttreppen → `stairTurn`.
 //   - Bogenwand: senkrechtes Prisma, Umriss auf zwei konzentrischen Kreisen (Ringausschnitt).
 //
 // Unsinn ergibt `Err(Grund)`, nie Panic.
@@ -709,7 +711,7 @@ pub(crate) fn fit_l_stair(meshes: &[Mesh]) -> Result<LFit, &'static str> {
     let inner: Vec<usize> = landings.iter().copied().filter(|&i| i > 0 && i + 1 < k).collect();
     #[cfg(test)]
     if std::env::var("DOSSIER_IFC_DEBUG").is_ok() {
-        eprintln!("L-Treppe: Ebenen {:?}, Podeste {landings:?}", levels.iter().map(|l| (l.z as f32, l.area as f32)).collect::<Vec<_>>());
+        eprintln!("L-Treppe: Ebenen {:?}, Podeste {landings:?}", levels.iter().map(|l| (l.z as f32, l.area as f32, l.c[0] as f32, l.c[1] as f32)).collect::<Vec<_>>());
     }
     if inner.is_empty() {
         return Err(R_STAIR_FORM);
@@ -755,6 +757,184 @@ pub(crate) fn fit_l_stair(meshes: &[Mesh]) -> Result<LFit, &'static str> {
     // Ein Austrittspodest oben ist kein Tritt des zweiten Laufs: der Austritt kommt dazu.
     let top_is_exit = top == k && (z_hi - levels[k - 1].z).abs() <= 0.03;
     Ok(LFit { start, dir: r1.dir, width: w, n1: n_1, n2: n_2, going1: g1, going2: g2, riser, turn: cross.signum(), z0: levels[0].z - riser, top_is_exit })
+}
+
+/// [151] Podesttreppe ohne Ecke: U (Wende um 180°, Halbpodest oder zwei Viertelpodeste mit Mittellauf
+/// quer über das Auge) oder gerade mit Zwischenpodest. Masse im System des ersten Laufs.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TurnFit {
+    /// "U" oder "straightLanding".
+    pub shape: &'static str,
+    /// Mitte der Antrittskante.
+    pub start: V2,
+    pub dir: V2,
+    pub width: f64,
+    /// Tritte im ersten Lauf, im Mittellauf (0 = Halbpodest) und im letzten Lauf (ohne Podeste).
+    pub n1: usize,
+    pub n_mid: usize,
+    pub n2: usize,
+    pub going1: f64,
+    pub going2: f64,
+    pub riser: f64,
+    /// U: +1 = letzter Lauf links, −1 = rechts.
+    pub turn: f64,
+    /// U: lichte Weite des Treppenauges.
+    pub gap: f64,
+    /// Podesttiefe in Laufrichtung (Lauf 1).
+    pub landing: f64,
+    /// U: Versatz des letzten Laufs ins Podest hinein (entlang Lauf 1).
+    pub offset: f64,
+    pub z0: f64,
+    pub top_is_exit: bool,
+}
+
+/// U-Treppe bzw. gerade Treppe mit Zwischenpodest aus den Körpern ihrer Teile. Trittflächen ausser
+/// Takt (Wangen-, Rahmen-, Belagstücke zwischen den Steigungen) zählen nicht; jedes Podest belegt eine
+/// Steigung. Andere Podesttreppen (Ecke ausserhalb L, drei und mehr Podeste) ergeben [`R_STAIR_TURN`].
+pub(crate) fn fit_turn_stair(meshes: &[Mesh]) -> Result<TurnFit, &'static str> {
+    let tris: Vec<_> = meshes.iter().flat_map(triangles).collect();
+    let (levels, _, z_hi) = stair_levels(&tris);
+    if levels.len() < 5 {
+        return Err(R_STAIR_FORM);
+    }
+    // Steigung: Median der Höhenschritte über 6 cm; dann nur Flächen im Takt der Steigung.
+    let mut diffs: Vec<f64> = levels.windows(2).map(|w| w[1].z - w[0].z).filter(|d| *d > 0.06).collect();
+    if diffs.len() < 3 {
+        return Err(R_STAIR_FORM);
+    }
+    diffs.sort_by(f64::total_cmp);
+    let h0 = diffs[diffs.len() / 2];
+    let z_first = levels[0].z;
+    let levels: Vec<Level> = levels
+        .into_iter()
+        .filter(|l| {
+            let q = (l.z - z_first) / h0;
+            (q - q.round()).abs() <= 0.05
+        })
+        .collect();
+    let k = levels.len();
+    if k < 5 {
+        return Err(R_STAIR_FORM);
+    }
+    let mut areas: Vec<f64> = levels.iter().map(|l| l.area).collect();
+    areas.sort_by(f64::total_cmp);
+    let median = areas[k / 2];
+    let landings: Vec<usize> = (0..k).filter(|&i| levels[i].area >= 2.0 * median).collect();
+    let inner: Vec<usize> = landings.iter().copied().filter(|&i| i > 0 && i + 1 < k).collect();
+    let Some(&li_last) = inner.last() else { return Err(R_STAIR_FORM) };
+    // Austrittspodest oben (grosse Fläche nach dem letzten Lauf) ist kein Tritt.
+    let top = if landings.contains(&(k - 1)) && k - 1 > li_last + 1 { k - 1 } else { k };
+    let inner: Vec<usize> = inner.into_iter().filter(|&i| i + 1 < top).collect();
+    if inner.is_empty() || inner.len() > 2 {
+        return Err(R_STAIR_TURN);
+    }
+    let riser = uniform_riser(&levels[..top]).ok_or(R_STAIR_TURN)?;
+    // Läufe zwischen den Podesten (je mindestens zwei Tritte).
+    let mut bounds = vec![0];
+    for &i in &inner {
+        bounds.push(i);
+        bounds.push(i + 1);
+    }
+    bounds.push(top);
+    let runs: Vec<Run> = bounds.chunks(2).map(|b| run_of(&levels[b[0]..b[1]])).collect::<Option<_>>().ok_or(R_STAIR_TURN)?;
+    let dot = |a: V2, b: V2| a[0] * b[0] + a[1] * b[1];
+    let (r1, rl) = (&runs[0], &runs[runs.len() - 1]);
+    let u = r1.dir;
+    let n = [-u[1], u[0]];
+    if (r1.width - rl.width).abs() > 0.03 {
+        return Err(R_STAIR_TURN);
+    }
+    let w = (r1.width + rl.width) / 2.0;
+    let hw = w / 2.0;
+    let n1 = inner[0];
+    let n2 = top - inner[inner.len() - 1] - 1;
+    let start = [u[0] * r1.front + n[0] * r1.mid, u[1] * r1.front + n[1] * r1.mid];
+    let e1 = r1.front + n1 as f64 * r1.going;
+    // Ausdehnung eines Podests im System von Lauf 1 (u längs, v quer).
+    let extent = |l: &Level| {
+        l.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY), |(a, b, c, d), p| {
+            let (pu, pv) = (dot(*p, u), dot(*p, n));
+            (a.min(pu), b.max(pu), c.min(pv), d.max(pv))
+        })
+    };
+    let (u0, u1, v0, v1) = extent(&levels[inner[0]]);
+    if (u0 - e1).abs() > 0.05 {
+        return Err(R_STAIR_TURN);
+    }
+    let z0 = levels[0].z - riser;
+    let top_is_exit = top == k && (z_hi - levels[k - 1].z).abs() <= 0.03;
+    let fit = |shape, turn, gap, landing, offset, n_mid| TurnFit {
+        shape,
+        start,
+        dir: u,
+        width: w,
+        n1,
+        n_mid,
+        n2,
+        going1: r1.going,
+        going2: rl.going,
+        riser,
+        turn,
+        gap,
+        landing,
+        offset,
+        z0,
+        top_is_exit,
+    };
+    let same_dir = dot(u, rl.dir);
+    if inner.len() == 1 && same_dir > 0.98 {
+        // Gerade mit Zwischenpodest: gleiche Achse, Podest zwischen den Läufen über die Laufbreite.
+        let landing = rl.front - e1;
+        let ok = (rl.mid - r1.mid).abs() <= 0.03 && landing >= 0.1 && (u1 - rl.front).abs() <= 0.05 && (v0 - (r1.mid - hw)).abs() <= 0.05 && (v1 - (r1.mid + hw)).abs() <= 0.05;
+        return if ok { Ok(fit("straightLanding", 0.0, 0.0, landing, 0.0, 0)) } else { Err(R_STAIR_TURN) };
+    }
+    if same_dir > -0.98 {
+        return Err(R_STAIR_TURN);
+    }
+    // U: letzter Lauf gegenläufig daneben (Mitte im System von Lauf 1: −rl.mid, da links(−u) = −n).
+    let side = -rl.mid - r1.mid;
+    let turn = side.signum();
+    let off = side.abs();
+    let gap = (off - w).max(0.0);
+    if off - w < -0.02 {
+        return Err(R_STAIR_TURN);
+    }
+    // Lage im System „Wendeseite“: v' = (v − Mitte Lauf 1)·turn.
+    let vs = |a: f64, b: f64| {
+        let (p, q) = ((a - r1.mid) * turn, (b - r1.mid) * turn);
+        (p.min(q), p.max(q))
+    };
+    // Antritt des letzten Laufs entlang u (Vorderkante liegt bei −front, da er in −u läuft).
+    let offset = -rl.front - e1;
+    if inner.len() == 1 {
+        let landing = u1 - e1;
+        let (a, b) = vs(v0, v1);
+        let ok = landing >= 0.3 && offset >= -(n1 as f64) * r1.going - 0.05 && offset <= landing + 0.05 && (a + hw).abs() <= 0.05 && (b - (off + hw)).abs() <= 0.05;
+        return if ok { Ok(fit("U", turn, gap, landing, offset, 0)) } else { Err(R_STAIR_TURN) };
+    }
+    // Zwei Viertelpodeste, Mittellauf quer über das Auge zur Wendeseite.
+    let rm = &runs[1];
+    let n_mid = inner[1] - inner[0] - 1;
+    let (_, u1b, _, _) = extent(&levels[inner[1]]);
+    let landing = u1.max(u1b) - e1;
+    let td_mid = r1.going.min(gap / n_mid as f64);
+    let ext = (gap - n_mid as f64 * td_mid).max(0.0) / 2.0;
+    let mid_u = e1 + landing.max(w) - hw;
+    let side_dir = [n[0] * turn, n[1] * turn];
+    // Mittellauf: Richtung zur Wendeseite, Auftritt wie Dossier, mittig auf der Wende-Lauflinie, Antritt am Auge.
+    let rm_center_u = -rm.mid * turn; // links(side) = −u·turn … Mitte quer zum Mittellauf = Lage entlang u
+    let ok = dot(rm.dir, side_dir) > 0.98
+        && (rm.width - w).abs() <= 0.03
+        && (rm.going - td_mid).abs() <= 0.03
+        && (rm_center_u - mid_u).abs() <= 0.06
+        && ((rm.front - dot(start, side_dir)) - (hw + ext)).abs() <= 0.12
+        && landing >= w - 0.05
+        && offset.abs() <= 0.05;
+    if ok {
+        Ok(fit("U", turn, gap, landing, 0.0, n_mid))
+    } else {
+        Err(R_STAIR_TURN)
+    }
 }
 
 /// Bogen einer Bogenwand: Achse (Mitte der Dicke) von `start` nach `end` gegen den Uhrzeigersinn um
@@ -1064,7 +1244,74 @@ mod tests {
             let (x1, x0) = (2.12 - 0.28 * i as f64, 2.12 - 0.28 * (i + 1) as f64);
             block(&mut m, &[[x0, 2.5], [x1, 2.5], [x1, 3.5], [x0, 3.5]], 0.0, h * (6 + i) as f64);
         }
-        assert_eq!(fit_l_stair(&[m]), Err(R_STAIR_TURN));
+        assert_eq!(fit_l_stair(&[m.clone()]), Err(R_STAIR_TURN));
+        // [151] … als Dossier-U: Halbpodest 1 m tief über beide Läufe (Auge 0), Gegenlauf links.
+        let u = fit_turn_stair(&[m]).unwrap();
+        assert_eq!((u.shape, u.n1, u.n_mid, u.n2, u.turn, u.top_is_exit), ("U", 4, 0, 4, 1.0, true));
+        assert!((u.start[0] - 1.0).abs() < 1e-9 && (u.start[1] - 2.0).abs() < 1e-9 && (u.width - 1.0).abs() < 1e-9, "{u:?}");
+        assert!(u.gap.abs() < 1e-9 && (u.landing - 1.0).abs() < 1e-9 && u.offset.abs() < 1e-9 && (u.riser - h).abs() < 1e-9);
+    }
+
+    /// [151] Treppe aus Tritt-Blöcken: Läufe als (Antritt, Richtung, Tritte), Podeste als Rechtecke; jede
+    /// Fläche eine Steigung höher; dazu Flächen ausser Takt (Wangenstücke).
+    fn flight_blocks(runs: &[(V2, V2, usize, f64)], landings: &[[V2; 2]], width: f64, h: f64) -> Mesh {
+        let mut m = Mesh::default();
+        let mut z = 0.0;
+        for (k, (s, d, n, g)) in runs.iter().enumerate() {
+            let nl = [-d[1], d[0]];
+            for i in 0..*n {
+                let at = |a: f64, b: f64| [s[0] + d[0] * a + nl[0] * b, s[1] + d[1] * a + nl[1] * b];
+                let (a0, a1) = (g * i as f64, g * (i + 1) as f64);
+                z += h;
+                block(&mut m, &[at(a0, -width / 2.0), at(a1, -width / 2.0), at(a1, width / 2.0), at(a0, width / 2.0)], 0.0, z);
+            }
+            if let Some([p, q]) = landings.get(k) {
+                z += h;
+                block(&mut m, &[[p[0], p[1]], [q[0], p[1]], [q[0], q[1]], [p[0], q[1]]], z - 0.2, z);
+                // Wangenstück ausser Takt (0.4 Steigungen über dem Podest)
+                block(&mut m, &[[p[0], p[1]], [p[0] + 0.3, p[1]], [p[0] + 0.3, p[1] + 0.3], [p[0], p[1] + 0.3]], 0.0, z + 0.4 * h);
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn u_stair_half_landing_offset_and_two_quarter_landings() {
+        let h = 0.17;
+        // Halbpodest, Gegenlauf um einen Auftritt ins Podest versetzt (Smiley-West-Art), Rechtswendung:
+        // Lauf 1 in +y ab (5, 0), 6 × 0.28; Podest y 1.68 … 3.0, x 4.4 … 6.9 (Auge 0.1); Lauf 2 in −y bei
+        // x = 6.3, Antritt bei y = 1.96 (ein Auftritt im Podest).
+        let m = flight_blocks(
+            &[([5.0, 0.0], [0.0, 1.0], 6, 0.28), ([6.3, 1.96], [0.0, -1.0], 6, 0.28)],
+            &[[[4.4, 1.68], [6.9, 3.0]]],
+            1.2,
+            h,
+        );
+        // Podest mit ausgeklinkter Ecke (Gegenlauf-Antritt): Fläche als Rechteck stört die Kanten nicht.
+        let u = fit_turn_stair(&[m]).unwrap();
+        assert_eq!((u.shape, u.n1, u.n_mid, u.n2, u.turn), ("U", 6, 0, 6, -1.0), "{u:?}");
+        assert!((u.start[0] - 5.0).abs() < 1e-9 && u.start[1].abs() < 1e-9 && (u.width - 1.2).abs() < 1e-9);
+        assert!((u.gap - 0.1).abs() < 1e-9 && (u.landing - 1.32).abs() < 1e-9 && (u.offset - 0.28).abs() < 1e-9, "{u:?}");
+        // Zwei Viertelpodeste (Institute-Art): Lauf 1 +y bei x = 0 (7 Tritte), Podest 1, Mittellauf +x
+        // (4 Tritte, mittig im Auge 1.6), Podest 2, Lauf 3 −y bei x = 2.8 (5 Tritte).
+        let g = 0.3;
+        let m = flight_blocks(
+            &[([0.0, 0.0], [0.0, 1.0], 7, g), ([0.6 + 0.2, 2.7], [1.0, 0.0], 4, g), ([2.8, 2.1], [0.0, -1.0], 5, g)],
+            &[[[-0.6, 2.1], [0.8, 3.3]], [[2.0, 2.1], [3.4, 3.3]]],
+            1.2,
+            h,
+        );
+        let u = fit_turn_stair(&[m]).unwrap();
+        assert_eq!((u.shape, u.n1, u.n_mid, u.n2, u.turn), ("U", 7, 4, 5, -1.0), "{u:?}");
+        assert!((u.gap - 1.6).abs() < 1e-9 && (u.landing - 1.2).abs() < 1e-9 && u.offset.abs() < 1e-9, "{u:?}");
+        // gerade mit Zwischenpodest
+        let m = flight_blocks(&[([0.0, 0.0], [1.0, 0.0], 5, 0.3), ([2.5, 0.0], [1.0, 0.0], 6, 0.3)], &[[[1.5, -0.5], [2.5, 0.5]]], 1.0, h);
+        let s = fit_turn_stair(&[m]).unwrap();
+        assert_eq!((s.shape, s.n1, s.n2), ("straightLanding", 5, 6), "{s:?}");
+        assert!((s.landing - 1.0).abs() < 1e-9);
+        // rechtwinklig, Podest nicht an der Ecke (kein L): keine Dossier-Form
+        let m = flight_blocks(&[([0.0, 0.0], [0.0, 1.0], 6, 0.28), ([1.5, 2.5], [1.0, 0.0], 6, 0.28)], &[[[-0.6, 1.68], [1.5, 3.0]]], 1.2, h);
+        assert_eq!(fit_turn_stair(&[m]), Err(R_STAIR_TURN));
     }
 
     #[test]
