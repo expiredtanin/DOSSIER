@@ -1,7 +1,7 @@
 //! Verschiebung des ganzen Projekts um einen festen Vektor ([K4] S3, vorher `translateProject` in
 //! `src/model/geoRebase.ts`; Befehl „Neuer Bezugspunkt", Welt-Koordinaten für DXF/IFC-Export): reine
 //! Translation aller Modell-Koordinaten (Wände, Decken, Dächer, Treppen, Räume, Stützen, Extrusionen,
-//! 2D-Zeichnungen, Kontext-Schicht, Schnitt-/Ansichtslinien, Geo-Anker). Richtungsvektoren und Winkel
+//! 2D-Zeichnungen, Kontext-Schicht inkl. Baugrube, Bäume, Schnitt-/Ansichtslinien, Baurecht, Geo-Anker). Richtungsvektoren und Winkel
 //! bleiben, Höhen (z) auch. Rechnung auf der rohen Projekt-Wurzel (`serde_json`).
 //!
 //! Wie in TS bestehen verschobene Punkte nur aus `x`/`y` (weitere Felder eines Punkts entfallen).
@@ -104,7 +104,7 @@ fn shift_contour(c: &Value, dx: f64, dy: f64) -> Value {
     Value::Object(m)
 }
 
-/// Kontext-Objekt: Konturen-Satz, Bild (min/max) oder Mesh (`positions` = flache `[x, y, z]`-Tripel, nur x/y).
+/// Kontext-Objekt: Konturen-Satz, Bild (min/max), Baugrube (Umriss) oder Mesh (`positions` = flache `[x, y, z]`-Tripel, nur x/y).
 fn shift_context(o: &Value, dx: f64, dy: f64) -> Value {
     let mut m = obj(o);
     match o.get("type").and_then(Value::as_str) {
@@ -113,6 +113,8 @@ fn shift_context(o: &Value, dx: f64, dy: f64) -> Value {
             set(&mut m, "contours", Some(Value::Array(cs)));
         }
         Some("image") => shift_pts_fields(&mut m, &["min", "max"], dx, dy, &[]),
+        // Baugrube ([68]): Sohle-Umriss (Böschungen/Bermen sind Abstände, keine Lage).
+        Some("excavation") => shift_pts_fields(&mut m, &[], dx, dy, &["outline"]),
         _ => {
             let mut pos: Vec<Value> = o.get("positions").and_then(Value::as_array).cloned().unwrap_or_default();
             let mut i = 0;
@@ -228,6 +230,27 @@ pub fn translate_anchor(root: &Map<String, Value>, dx: f64, dy: f64) -> Option<V
     Some(Value::Object(m))
 }
 
+/// Baurecht verschoben (`siteRules.parcel`, `buildingLines[].a/b`; Grenzabstände/Höhen bleiben), `None` ohne.
+pub fn translate_site_rules(root: &Map<String, Value>, dx: f64, dy: f64) -> Option<Value> {
+    let r = root.get("siteRules").filter(|v| truthy(Some(v)))?;
+    let mut m = obj(r);
+    if m.contains_key("parcel") {
+        shift_pts_fields(&mut m, &[], dx, dy, &["parcel"]);
+    }
+    if let Some(Value::Array(ls)) = r.get("buildingLines") {
+        let n: Vec<Value> = ls
+            .iter()
+            .map(|l| {
+                let mut lm = obj(l);
+                shift_pts_fields(&mut lm, &["a", "b"], dx, dy, &[]);
+                Value::Object(lm)
+            })
+            .collect();
+        m.insert("buildingLines".into(), Value::Array(n));
+    }
+    Some(Value::Object(m))
+}
+
 /// Patch für `{...project, ...patch}`: verschobene Listen und Geo-Anker (`translateProject`). Leer bei `dx = dy = 0`.
 pub fn project_patch(root: &Map<String, Value>, dx: f64, dy: f64) -> Map<String, Value> {
     let mut out = Map::new();
@@ -237,6 +260,9 @@ pub fn project_patch(root: &Map<String, Value>, dx: f64, dy: f64) -> Map<String,
     }
     if let Some(a) = translate_anchor(root, dx, dy) {
         out.insert("geoAnchor".into(), a);
+    }
+    if let Some(r) = translate_site_rules(root, dx, dy) {
+        out.insert("siteRules".into(), r);
     }
     out
 }
@@ -254,6 +280,9 @@ pub fn translate_ops(root: &Map<String, Value>, dx: f64, dy: f64) -> Vec<Value> 
     }
     if let Some(a) = translate_anchor(root, dx, dy) {
         ops.push(json!({"kind": "setField", "key": "geoAnchor", "value": a}));
+    }
+    if let Some(r) = translate_site_rules(root, dx, dy) {
+        ops.push(json!({"kind": "setField", "key": "siteRules", "value": r}));
     }
     ops
 }
@@ -302,6 +331,25 @@ mod tests {
         assert_eq!(patch["geoAnchor"]["model"], json!({"x": 15.0, "y": 5.0}));
         assert_eq!(patch["geoAnchor"]["lv95"], json!({"e": 1, "n": 2}));
         assert!(project_patch(&p, 0.0, 0.0).is_empty());
+    }
+
+    #[test]
+    fn baugrube_und_baurecht_wandern_mit() {
+        // Befund [154]: Baugrube (Kontext `excavation`) und Parzelle/Baulinien (`siteRules`) blieben beim
+        // georeferenzierten DXF-Export lokal und lagen nach dem Import neben dem Gebäude.
+        let p = root(json!({
+            "context": [{"id": "b", "type": "excavation", "outline": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 2, "y": 1}], "bottom": -3}],
+            "siteRules": {"parcel": [{"x": -1, "y": -1}, {"x": 5, "y": -1}, {"x": 5, "y": 4}], "defaultSetback": 5, "buildingLines": [{"a": {"x": 0, "y": 3}, "b": {"x": 4, "y": 3}}]},
+        }));
+        let patch = project_patch(&p, 100.0, 200.0);
+        assert_eq!(patch["context"][0]["outline"][1], json!({"x": 102.0, "y": 200.0}));
+        assert!(patch["context"][0].get("positions").is_none());
+        assert_eq!(patch["context"][0]["bottom"], -3);
+        assert_eq!(patch["siteRules"]["parcel"][0], json!({"x": 99.0, "y": 199.0}));
+        assert_eq!(patch["siteRules"]["buildingLines"][0]["b"], json!({"x": 104.0, "y": 203.0}));
+        assert_eq!(patch["siteRules"]["defaultSetback"], 5);
+        let ops = translate_ops(&p, 1.0, 1.0);
+        assert!(ops.iter().any(|o| o["kind"] == "setField" && o["key"] == "siteRules" && o["value"]["parcel"][0] == json!({"x": 0.0, "y": 0.0})));
     }
 
     #[test]

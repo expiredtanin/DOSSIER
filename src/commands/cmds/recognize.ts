@@ -1,5 +1,5 @@
 // [154] Bauteile aus Zeichnung erkennen: aus den 2D-Linien eines Grundrisses (DXF/DWG-Import aus ArchiCAD,
-// Vectorworks, AutoCAD) Wände, Öffnungen und Räume. Quelle: die gewählten 2D-Elemente, sonst die Zeichnung des
+// Vectorworks, AutoCAD) Wände, Öffnungen (Dreh-, Schiebe-, Hebeschiebetüren, Fenster, Durchbrüche), Stützen und Räume. Quelle: die gewählten 2D-Elemente, sonst die Zeichnung des
 // aktiven Geschosses, sonst die erste Ebene mit Zeichnung (Option E schaltet durch). Beim Start zeigt die Vorschau
 // alles Erkannte (Wandbänder, Türen/Fenster/Durchbrüche, Räume, unklare Stellen als Kreuz), die Meldung zählt;
 // B zeigt den Bericht (unklar, mit Grund). Enter übernimmt als EIN Undo-Schritt ins aktive Geschoss (Höhe =
@@ -38,6 +38,8 @@ function optionsOf(s: RecognizeState, ctx: CommandContext): RecognizeOptions {
     wallTypeId: ctx.activeWallTypeId,
     typeName: t("cmd.recognize.typeName"),
     roomName: t("cmd.recognize.roomName"),
+    slideTypeName: t("cmd.recognize.slideTypeName"),
+    liftSlideTypeName: t("cmd.recognize.liftSlideTypeName"),
   };
 }
 
@@ -65,6 +67,8 @@ const countParams = (r: RecognizeReport) => ({
   doors: r.doors,
   windows: r.windows,
   voids: r.voids,
+  sliding: r.slidingDoors,
+  columns: r.columns,
   rooms: r.rooms,
   unclear: r.unclear.length,
 });

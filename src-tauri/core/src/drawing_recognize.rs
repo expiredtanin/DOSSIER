@@ -16,13 +16,18 @@
 //!    = rechts = aussen, wie [B4]).
 //! 5. **Öffnungen**: was auf der Achse weder von Wandstücken noch vom Band einer kreuzenden Wand gedeckt
 //!    ist (≥ 30 cm): Türbogen (50–130°, Zentrum an einem Pfosten, Radius = Breite bzw. halbe Breite bei zwei
-//!    Bögen) → Tür mit Anschlag und Aufschlagseite; Linien parallel zur Wand im Band → Fenster; sonst
-//!    Wanddurchbruch.
+//!    Bögen) → Tür mit Anschlag und Aufschlagseite (auch mit Zarge/Futter: Bogen kleiner als die Lücke);
+//!    Pfeil oder versetzte Flügel ohne Bogen → Schiebe-/Hebeschiebetür; Linien parallel zur Wand im Band →
+//!    Fenster; sonst Wanddurchbruch.
 //! 6. **Räume**: Zellen der Wandachsen (`kernel2d::detect_rooms`, lichter Umriss), Name aus dem grössten Text
 //!    darin, SIA-Kategorie (HNF …) und Flächenangabe („17.01 m²“, Abweichung > 5 % → unklar).
 //!
-//! Konzentrische Bögen im Abstand 5–60 cm werden Bogenwände (ohne Öffnungen und Stösse). Ergebnis als Ops
-//! (ein Undo-Schritt, [`ops`]), Vorschau ([`preview`]) und Bericht ([`report`], erkannt / unklar mit Grund).
+//! Vorab **Stützen**: kleine geschlossene Rechtecke/Kreise 15–60 cm mit Füllung oder auf einem Stützen-Layer,
+//! frei stehend; ihre Umrisse zählen nicht als Wandlinien.
+//!
+//! Konzentrische Bögen im Abstand 5–60 cm werden Bogenwände (Lücken: Tür mit Bogen am Pfosten, Fenster,
+//! Durchbruch). Ergebnis als Ops (ein Undo-Schritt, [`ops`]), Vorschau ([`preview`]) und Bericht ([`report`],
+//! erkannt / unklar mit Grund).
 
 use crate::cmd_create::{add_op, category_color, has_category, obj, pv, pvs, s, s_of, Ctx, V};
 use crate::cmd_transform::{IdGen, Shapes};
@@ -51,6 +56,8 @@ const GAP_FREE: f64 = 1.5;
 const GAP_MAX: f64 = 4.0;
 /// Kleinste Öffnung.
 const MIN_OPENING: f64 = 0.3;
+/// Schiebetür ab dieser Breite eine Hebeschiebetür (typisch ≥ 1.4 m).
+const SLIDE_WIDE: f64 = 1.4;
 /// Schutz vor quadratischem Aufwand.
 const MAX_SEGS: usize = 60_000;
 const MAX_ARCS: usize = 6_000;
@@ -93,6 +100,23 @@ pub struct FillIn {
     pub hatch: Option<String>,
 }
 
+/// Stützen-Kandidat: kleiner geschlossener Umriss (Rechteck oder Kreis, Seiten 15–60 cm), wie [`collect`] ihn
+/// liest. Ob er eine Stütze wird (gefüllt oder Stützen-Layer, frei stehend), entscheidet [`analyze`].
+#[derive(Clone, Debug)]
+pub struct ColIn {
+    /// Mitte.
+    pub c: V,
+    /// Breite (entlang `rot`) und Tiefe; Kreis: beide = Durchmesser.
+    pub w: f64,
+    pub d: f64,
+    pub rot: f64,
+    pub round: bool,
+    /// Umriss (Kreis: Polygon).
+    pub ring: Vec<V>,
+    pub filled: bool,
+    pub layer: usize,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Input {
     /// Layer-Namen (Kategorie-Namen; beim DXF-Import = DXF-Layer).
@@ -101,6 +125,7 @@ pub struct Input {
     pub arcs: Vec<ArcIn>,
     pub texts: Vec<TextIn>,
     pub fills: Vec<FillIn>,
+    pub cols: Vec<ColIn>,
 }
 
 impl Input {
@@ -132,6 +157,8 @@ pub struct RWall {
 pub enum RKind {
     /// Tür: Scharnier am Ende (sonst am Anfang), Blatt rechts der Wandrichtung, Flügelzahl.
     Door { hinge_end: bool, swing_right: bool, leaves: u8 },
+    /// Schiebetür (Pfeil oder versetzte Flügel, kein Bogen); `lift` = Hebeschiebetür (breit, Flügel versetzt).
+    Slide { lift: bool },
     Window,
     Void,
 }
@@ -153,6 +180,16 @@ pub struct RRoom {
     pub area_text: Option<f64>,
 }
 
+/// Stütze: Mitte, Querschnitt (Rechteck `w` × `d`, gedreht um `rot`; Kreis: Durchmesser `w`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RColumn {
+    pub c: V,
+    pub w: f64,
+    pub d: f64,
+    pub rot: f64,
+    pub round: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Unclear {
     pub code: &'static str,
@@ -164,6 +201,7 @@ pub struct Recognition {
     pub walls: Vec<RWall>,
     pub openings: Vec<ROpening>,
     pub rooms: Vec<RRoom>,
+    pub columns: Vec<RColumn>,
     pub unclear: Vec<Unclear>,
     /// Nur Linien auf Wand-Layern verwendet.
     pub layer_filter: bool,
@@ -383,6 +421,13 @@ pub fn collect(p: &Project, level: &str, ids: &[String]) -> Input {
                 inp.fills.push(FillIn { ring, layer, hatch: hatch.clone() });
             }
         };
+        let col = |inp: &mut Input, ring: &[V]| {
+            if let Some(mut c) = column_of(ring) {
+                c.filled = filled;
+                c.layer = layer;
+                inp.cols.push(c);
+            }
+        };
         match &d.geom {
             Drawing2DGeom::Line { a, b } => inp.segs.push(Seg { a: (a.x, a.y), b: (b.x, b.y), layer }),
             Drawing2DGeom::Polyline { pts, closed, bulge, .. } if bulge.as_ref().is_none_or(|b| b.iter().all(|x| !(x.abs() > 1e-9))) => {
@@ -392,7 +437,9 @@ pub fn collect(p: &Project, level: &str, ids: &[String]) -> Input {
                 }
                 fit_arcs(&v, layer, &mut inp.segs, &mut inp.arcs);
                 if *closed {
-                    fill(&mut inp, pts.iter().map(|q| (q.x, q.y)).collect());
+                    let ring: Vec<V> = pts.iter().map(|q| (q.x, q.y)).collect();
+                    col(&mut inp, &ring);
+                    fill(&mut inp, ring);
                 }
             }
             Drawing2DGeom::Polyline { pts, closed, bulge, .. } => {
@@ -415,6 +462,7 @@ pub fn collect(p: &Project, level: &str, ids: &[String]) -> Input {
                 for i in 0..4 {
                     inp.segs.push(Seg { a: c[i], b: c[(i + 1) % 4], layer });
                 }
+                col(&mut inp, &c);
                 fill(&mut inp, c.to_vec());
             }
             Drawing2DGeom::Arc { center, r, a0, a1 } => {
@@ -429,6 +477,8 @@ pub fn collect(p: &Project, level: &str, ids: &[String]) -> Input {
             Drawing2DGeom::Circle { center, r } => {
                 if r.is_finite() && *r > 1e-6 {
                     inp.arcs.push(ArcIn { c: (center.x, center.y), r: *r, a0: 0.0, sweep: 2.0 * PI, layer });
+                    let ring: Vec<V> = (0..32).map(|i| add((center.x, center.y), (r * cos(PI * i as f64 / 16.0), r * sin(PI * i as f64 / 16.0)))).collect();
+                    col(&mut inp, &ring);
                 }
             }
             Drawing2DGeom::Text { at, text, height, angle, .. } => {
@@ -440,7 +490,158 @@ pub fn collect(p: &Project, level: &str, ids: &[String]) -> Input {
     inp.segs.retain(|s| fin(s.a) && fin(s.b) && len(sub(s.b, s.a)) > 1e-4);
     inp.arcs.retain(|a| fin(a.c) && a.r.is_finite() && a.a0.is_finite());
     inp.texts.retain(|t| fin(t.at) && !t.text.trim().is_empty());
+    inp.cols.retain(|c| fin(c.c) && c.ring.iter().all(|p| fin(*p)));
     inp
+}
+
+// ── Stützen ──────────────────────────────────────────────────────────────────
+
+/// Querschnitt einer Stütze (Seite bzw. Durchmesser).
+const COL_MIN: f64 = 0.15;
+const COL_MAX: f64 = 0.60;
+const COL_WORDS: [&str; 6] = ["stütz", "stuetz", "column", "säule", "saeule", "pfeiler"];
+
+/// Layer mit Stützen-Namen („Stützen“, „S-COLS“ …)?
+pub fn column_layer(name: &str) -> bool {
+    let l = name.to_lowercase();
+    COL_WORDS.iter().any(|w| l.contains(w)) || l.split(|c: char| !c.is_alphanumeric()).any(|w| w == "col" || w == "cols")
+}
+
+/// Kleiner geschlossener Umriss → Stützen-Kandidat: Rechteck (4 Ecken, rechte Winkel ± 0.6°, Seiten 15–60 cm)
+/// oder Kreis (≥ 8 Ecken, alle ± 3 mm auf einem Kreis, Ø 15–60 cm).
+fn column_of(ring: &[V]) -> Option<ColIn> {
+    let mut p: Vec<V> = Vec::with_capacity(ring.len());
+    for &q in ring {
+        if !fin(q) {
+            return None;
+        }
+        if p.last().is_none_or(|l| len(sub(q, *l)) > 1e-6) {
+            p.push(q);
+        }
+    }
+    while p.len() > 1 && len(sub(p[0], p[p.len() - 1])) <= 1e-6 {
+        p.pop();
+    }
+    let n = p.len();
+    let in_range = |x: f64| (COL_MIN - 1e-9..=COL_MAX + 1e-9).contains(&x);
+    let mk = |c: V, w: f64, d: f64, rot: f64, round: bool| ColIn { c, w, d, rot, round, ring: p.clone(), filled: false, layer: 0 };
+    if n == 4 {
+        let e: Vec<V> = (0..4).map(|i| sub(p[(i + 1) % 4], p[i])).collect();
+        let l: Vec<f64> = e.iter().map(|v| len(*v)).collect();
+        if l.iter().any(|x| *x < 1e-6) || (l[0] - l[2]).abs() > 0.003 || (l[1] - l[3]).abs() > 0.003 {
+            return None;
+        }
+        if (0..4).any(|i| (dot(e[i], e[(i + 1) % 4]) / (l[i] * l[(i + 1) % 4])).abs() > 0.01) {
+            return None;
+        }
+        let (w, d) = ((l[0] + l[2]) / 2.0, (l[1] + l[3]) / 2.0);
+        if !in_range(w) || !in_range(d) {
+            return None;
+        }
+        let c = mul(add(add(p[0], p[1]), add(p[2], p[3])), 0.25);
+        return Some(mk(c, w, d, atan2(e[0].1, e[0].0), false));
+    }
+    if n >= 8 {
+        let c = mul(p.iter().fold((0.0, 0.0), |s, q| add(s, *q)), 1.0 / n as f64);
+        let r = p.iter().map(|q| len(sub(*q, c))).sum::<f64>() / n as f64;
+        if p.iter().all(|q| (len(sub(*q, c)) - r).abs() <= 0.003) && in_range(2.0 * r) {
+            return Some(mk(c, 2.0 * r, 2.0 * r, 0.0, true));
+        }
+    }
+    None
+}
+
+/// Abstand Punkt – Strecke.
+fn dist_seg(p: V, a: V, b: V) -> f64 {
+    let d = sub(b, a);
+    let l2 = dot(d, d);
+    let t = if l2 > 0.0 { (dot(sub(p, a), d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    len(sub(p, add(a, mul(d, t))))
+}
+
+/// Abstand zweier Strecken (0 bei Schnitt).
+fn dist_segs(a: V, b: V, c: V, d: V) -> f64 {
+    let (r, s) = (sub(b, a), sub(d, c));
+    let den = cross(r, s);
+    if den.abs() > 1e-15 {
+        let t = cross(sub(c, a), s) / den;
+        let u = cross(sub(c, a), r) / den;
+        if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+            return 0.0;
+        }
+    }
+    dist_seg(a, c, d).min(dist_seg(b, c, d)).min(dist_seg(c, a, b)).min(dist_seg(d, a, b))
+}
+
+/// Abstand eines Punkts zum Umriss eines Stützen-Kandidaten.
+fn ring_dist(c: &ColIn, p: V) -> f64 {
+    if c.round {
+        return (len(sub(p, c.c)) - c.w / 2.0).abs();
+    }
+    let n = c.ring.len();
+    (0..n).map(|i| dist_seg(p, c.ring[i], c.ring[(i + 1) % n])).fold(f64::INFINITY, f64::min)
+}
+
+/// Stützen: Kandidaten mit Füllung oder auf einem Stützen-Layer, die frei stehen (keine fremde Linie näher als
+/// 1 cm am Umriss; Linien auf dem Umriss — Füllung, doppelte Kontur — und ganz innen zählen nicht). Doppelte
+/// (gleiche Mitte) einmal. Rückgabe: Stützen und je Linie/Bogen, ob sie zu einer Stütze gehört (fällt für die
+/// Wände weg).
+fn columns(inp: &Input) -> (Vec<RColumn>, Vec<bool>, Vec<bool>) {
+    let mut seg_used = vec![false; inp.segs.len()];
+    let mut arc_used = vec![false; inp.arcs.len()];
+    let mut out: Vec<RColumn> = Vec::new();
+    if inp.cols.len() > MAX_ARCS || inp.segs.len() > MAX_SEGS {
+        return (out, seg_used, arc_used);
+    }
+    let on_ring = |c: &ColIn, p: V| ring_dist(c, p) <= 0.003;
+    for c in &inp.cols {
+        let size = |x: f64| (COL_MIN - 1e-9..=COL_MAX + 1e-9).contains(&x);
+        if !size(c.w) || !size(c.d) || c.ring.len() < 3 {
+            continue;
+        }
+        if !(c.filled || inp.layers.get(c.layer).is_some_and(|l| column_layer(l))) || out.iter().any(|o| len(sub(o.c, c.c)) <= 0.01) {
+            continue;
+        }
+        let reach = c.w.max(c.d) * 0.75 + 0.02;
+        let mut mine = Vec::new();
+        let mut free = true;
+        for (i, s) in inp.segs.iter().enumerate() {
+            if on_ring(c, s.a) && on_ring(c, s.b) && on_ring(c, mul(add(s.a, s.b), 0.5)) {
+                mine.push(i);
+                continue;
+            }
+            // Schnell weg, was weit entfernt ist.
+            if dist_seg(c.c, s.a, s.b) > reach {
+                continue;
+            }
+            let n = c.ring.len();
+            let d = if c.round {
+                (dist_seg(c.c, s.a, s.b) - c.w / 2.0).abs().min(ring_dist(c, s.a)).min(ring_dist(c, s.b))
+            } else {
+                (0..n).map(|k| dist_segs(s.a, s.b, c.ring[k], c.ring[(k + 1) % n])).fold(f64::INFINITY, f64::min)
+            };
+            // Linie ganz innen (Kreuz, Schraffur-Strich) stört nicht; anliegend oder kreuzend schon.
+            let inside = point_in(&c.ring, s.a) && point_in(&c.ring, s.b) && ring_dist(c, s.a) > 0.003 && ring_dist(c, s.b) > 0.003;
+            if d < 0.01 && !inside {
+                free = false;
+                break;
+            }
+        }
+        if !free {
+            continue;
+        }
+        for i in mine {
+            seg_used[i] = true;
+        }
+        for (k, a) in inp.arcs.iter().enumerate() {
+            if c.round && len(sub(a.c, c.c)) <= 0.005 && (a.r - c.w / 2.0).abs() <= 0.005 {
+                arc_used[k] = true;
+            }
+        }
+        let r6 = |x: f64| (x * 1e6).round() / 1e6;
+        out.push(RColumn { c: (r6(c.c.0), r6(c.c.1)), w: r6(c.w), d: r6(c.d), rot: c.rot, round: c.round });
+    }
+    (out, seg_used, arc_used)
 }
 
 // ── 1. Linien bündeln ────────────────────────────────────────────────────────
@@ -788,13 +989,28 @@ fn door_arcs_at(cx: &Ctx2, b: &Band, g0: f64, g1: f64) -> Vec<(usize, bool, bool
         }
         let at_start = (sc - g0).abs() <= 0.15;
         let at_end = (sc - g1).abs() <= 0.15;
-        if !(at_start || at_end) {
-            continue;
-        }
         let full = (a.r - w).abs() <= 0.12 * w + 0.05;
         let half = (a.r - w / 2.0).abs() <= 0.06 * w + 0.05;
-        if full || half {
+        if (at_start || at_end) && (full || half) {
             out.push((k, at_start && (!at_end || (sc - g0).abs() <= (sc - g1).abs()), full));
+            continue;
+        }
+        // Zarge/Futter: Lücke (Rohbau) breiter als der Bogen. Scharnier bis 30 cm in der Lücke, das Blatt endet
+        // höchstens 30 cm vor dem Gegenpfosten (zweiflüglig: vor der Mitte) und nicht über ihn hinaus.
+        let (o0, o1) = (sc - g0, g1 - sc);
+        let mid = (g0 + g1) / 2.0;
+        for (from_start, off, rest_full, rest_half) in [(true, o0, g1 - (sc + a.r), mid - (sc + a.r)), (false, o1, (sc - a.r) - g0, (sc - a.r) - mid)] {
+            if !(-0.05..=0.3).contains(&off) {
+                continue;
+            }
+            if a.r >= 0.5 * w && (-0.05..=0.3).contains(&rest_full) {
+                out.push((k, from_start, true));
+                break;
+            }
+            if a.r >= 0.25 * w && a.r < 0.5 * w && (-0.05..=0.15).contains(&rest_half) {
+                out.push((k, from_start, false));
+                break;
+            }
         }
     }
     out
@@ -821,8 +1037,93 @@ fn window_lines_at(cx: &Ctx2, b: &Band, g0: f64, g1: f64) -> usize {
         .count()
 }
 
+/// Schiebetür-Hinweise in der Lücke `[g0, g1]`: (Pfeil, versetzte Flügel).
+///
+/// Pfeil: Linie parallel zur Wand (im Band oder bis 30 cm davor, 20–110 % der Lückenbreite, zu ≥ 80 % über der
+/// Lücke) mit einer Spitze — je ein kurzer Strich (5–40 cm, höchstens halb so lang, beide ähnlich lang) links und
+/// rechts ab einem Ende, 10–60° zur Linie (Dämmungs-Zickzack an der Laibung ist keine Spitze).
+/// Versetzte Flügel: zwei Gruppen paralleler Linien im Band auf verschiedener Lage quer (≥ 1 cm), die eine ab
+/// dem ersten, die andere bis zum zweiten Pfosten (± 10 cm), je 30–80 % der Lücke, zusammen ohne Lücke.
+fn slide_at(cx: &Ctx2, b: &Band, g0: f64, g1: f64) -> (bool, bool) {
+    let w = g1 - g0;
+    let sin_tol = PAR_TOL.sin();
+    let (cos10, cos60) = (cos(10f64.to_radians()), cos(60f64.to_radians()));
+    let par = |p: V, q: V| {
+        let d = sub(q, p);
+        let l = len(d);
+        l > 1e-6 && cross(mul(d, 1.0 / l), b.u).abs() <= sin_tol
+    };
+    // Spitze am Ende `e`: je ein Strich links und rechts der Linie, ähnlich lang (± 30 %).
+    let head = |e: V, back: V, shaft: f64| {
+        let mut sides: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
+        for &(x, y) in &cx.all {
+            let (from, to) = if len(sub(x, e)) <= 0.005 {
+                (x, y)
+            } else if len(sub(y, e)) <= 0.005 {
+                (y, x)
+            } else {
+                continue;
+            };
+            let d = sub(to, from);
+            let hl = len(d);
+            if !(0.05..=0.4).contains(&hl) || hl > 0.5 * shaft {
+                continue;
+            }
+            let c = dot(d, back) / hl;
+            if c >= cos60 && c <= cos10 {
+                sides[usize::from(cross(back, d) > 0.0)].push(hl);
+            }
+        }
+        sides[0].iter().any(|a| sides[1].iter().any(|b| (a - b).abs() <= 0.3 * a.max(*b)))
+    };
+    let mut arrow = false;
+    let mut groups: Vec<(f64, Vec<(f64, f64)>)> = Vec::new();
+    for &(p, q) in &cx.all {
+        if !par(p, q) {
+            continue;
+        }
+        let ((s0, n0), (s1, n1)) = (b.st(p), b.st(q));
+        let n = (n0 + n1) / 2.0;
+        let l = (s1 - s0).abs();
+        let ov = s0.max(s1).min(g1) - s0.min(s1).max(g0);
+        if !arrow && n.abs() <= b.t / 2.0 + 0.3 && l >= 0.2 * w && l <= 1.1 * w && ov >= 0.8 * l {
+            let dir = mul(sub(q, p), 1.0 / len(sub(q, p)));
+            arrow = head(q, mul(dir, -1.0), l) || head(p, dir, l);
+        }
+        if n.abs() < b.t / 2.0 - 0.005 && ov >= 0.1 * w && l <= w + 0.4 {
+            let iv = (s0.min(s1).max(g0), s0.max(s1).min(g1));
+            match groups.iter_mut().find(|g| (g.0 - n).abs() <= 0.003) {
+                Some(g) => g.1.push(iv),
+                None => groups.push((n, vec![iv])),
+            }
+        }
+    }
+    let leaves: Vec<(f64, f64, f64)> = groups
+        .into_iter()
+        .filter_map(|(n, iv)| {
+            let u = union(iv);
+            (u.len() == 1 && (0.3..=0.8).contains(&((u[0].1 - u[0].0) / w))).then_some((n, u[0].0, u[0].1))
+        })
+        .collect();
+    let staggered = leaves.iter().any(|a| {
+        (a.1 - g0).abs() <= 0.1 && leaves.iter().any(|c| (c.2 - g1).abs() <= 0.1 && (a.0 - c.0).abs() >= 0.01 && a.2 >= c.1 - 0.05)
+    });
+    (arrow, staggered)
+}
+
+/// Schiebetür in der Lücke? `Some(lift)`: mit Pfeil (Hebeschiebetür, wenn die Flügel versetzt sind oder die
+/// Lücke ≥ 1.4 m breit ist), ohne Pfeil nur mit versetzten Flügeln ab 1.4 m (Hebeschiebetür).
+fn slide_kind(cx: &Ctx2, b: &Band, g0: f64, g1: f64) -> Option<bool> {
+    let wide = g1 - g0 >= SLIDE_WIDE - 1e-9;
+    match slide_at(cx, b, g0, g1) {
+        (true, staggered) => Some(staggered || wide),
+        (false, true) if wide => Some(true),
+        _ => None,
+    }
+}
+
 fn evidence(cx: &Ctx2, b: &Band, g0: f64, g1: f64) -> bool {
-    !door_arcs_at(cx, b, g0, g1).is_empty() || window_lines_at(cx, b, g0, g1) > 0
+    !door_arcs_at(cx, b, g0, g1).is_empty() || window_lines_at(cx, b, g0, g1) > 0 || slide_at(cx, b, g0, g1).0
 }
 
 // ── 3. Läufe ─────────────────────────────────────────────────────────────────
@@ -1104,7 +1405,7 @@ fn join_arcs(ws: &mut [W], arcs: &mut [ArcW]) {
 /// der Achse): konzentrische Bögen im Band → Fenster, sonst Wanddurchbruch. Rückgabe: Wände und Öffnungen
 /// (Index der Wand, Lage, Breite, Art).
 #[allow(clippy::type_complexity)]
-fn merge_arc_walls(inp: &Input, arcs: Vec<ArcW>, used: &[bool]) -> (Vec<ArcW>, Vec<(usize, f64, f64, RKind)>) {
+fn merge_arc_walls(inp: &Input, arcs: Vec<ArcW>, used: &[bool], door_arcs: &[usize], taken: &mut [bool]) -> (Vec<ArcW>, Vec<(usize, f64, f64, RKind)>) {
     let mut groups: Vec<Vec<ArcW>> = Vec::new();
     for a in arcs {
         match groups.iter_mut().find(|g| len(sub(g[0].c, a.c)) <= 0.01 && (g[0].r - a.r).abs() <= 0.005 && (g[0].t - a.t).abs() <= 0.006) {
@@ -1125,7 +1426,7 @@ fn merge_arc_walls(inp: &Input, arcs: Vec<ArcW>, used: &[bool]) -> (Vec<ArcW>, V
         })
     };
     let mut walls = Vec::new();
-    let mut openings = Vec::new();
+    let mut raw: Vec<(usize, f64, f64)> = Vec::new();
     for mut g in groups {
         g.sort_by(|a, b| a.a0.total_cmp(&b.a0));
         // Beim grössten Zwischenraum beginnen (Kreis).
@@ -1135,13 +1436,9 @@ fn merge_arc_walls(inp: &Input, arcs: Vec<ArcW>, used: &[bool]) -> (Vec<ArcW>, V
         g.rotate_left(start);
         let mut cur = g[0].clone();
         let mut gaps: Vec<(f64, f64)> = Vec::new();
-        let flush = |cur: &ArcW, gaps: &mut Vec<(f64, f64)>, walls: &mut Vec<ArcW>, openings: &mut Vec<(usize, f64, f64, RKind)>| {
+        let flush = |cur: &ArcW, gaps: &mut Vec<(f64, f64)>, walls: &mut Vec<ArcW>, raw: &mut Vec<(usize, f64, f64)>| {
             let k = walls.len();
-            for (g0, g1) in gaps.drain(..) {
-                let kind = if window_in(cur, g0, g1) { RKind::Window } else { RKind::Void };
-                let r6 = |x: f64| (x * 1e6).round() / 1e6;
-                openings.push((k, r6((g0 - cur.a0) * cur.r), r6((g1 - g0) * cur.r), kind));
-            }
+            raw.extend(gaps.drain(..).map(|(g0, g1)| (k, g0, g1)));
             walls.push(cur.clone());
         };
         for a in g.into_iter().skip(1) {
@@ -1158,11 +1455,40 @@ fn merge_arc_walls(inp: &Input, arcs: Vec<ArcW>, used: &[bool]) -> (Vec<ArcW>, V
                 cur.filled |= a.filled;
                 cur.material = cur.material.or(a.material);
             } else {
-                flush(&cur, &mut gaps, &mut walls, &mut openings);
+                flush(&cur, &mut gaps, &mut walls, &mut raw);
                 cur = a;
             }
         }
-        flush(&cur, &mut gaps, &mut walls, &mut openings);
+        flush(&cur, &mut gaps, &mut walls, &mut raw);
+    }
+    // Lücken: Türbogen am Pfosten (Zentrum im Band ± 15 cm an einem Pfosten, Radius = Sehne) → Tür, sonst
+    // Fensterbogen → Fenster, sonst Durchbruch. Wand gegen den Uhrzeigersinn: links = innen (zum Mittelpunkt).
+    let mut openings = Vec::new();
+    for (k, g0, g1) in raw {
+        let w = &walls[k];
+        let (p0, p1) = (w.at(g0), w.at(g1));
+        let chord = len(sub(p1, p0));
+        let door = door_arcs.iter().copied().find_map(|i| {
+            let a = &inp.arcs[i];
+            if taken[i] || (len(sub(a.c, w.c)) - w.r).abs() > w.t / 2.0 + 0.15 || (a.r - chord).abs() > 0.12 * chord + 0.05 {
+                return None;
+            }
+            let (d0, d1) = (len(sub(a.c, p0)), len(sub(a.c, p1)));
+            if d0.min(d1) > 0.15 {
+                return None;
+            }
+            Some((i, d1 < d0, len(sub(arc_mid(a), w.c)) > w.r))
+        });
+        let kind = match door {
+            Some((i, hinge_end, swing_right)) => {
+                taken[i] = true;
+                RKind::Door { hinge_end, swing_right, leaves: 1 }
+            }
+            None if window_in(w, g0, g1) => RKind::Window,
+            None => RKind::Void,
+        };
+        let r6 = |x: f64| (x * 1e6).round() / 1e6;
+        openings.push((k, r6((g0 - w.a0) * w.r), r6((g1 - g0) * w.r), kind));
     }
     (walls, openings)
 }
@@ -1339,6 +1665,19 @@ pub fn analyze(inp: &Input) -> Recognition {
         rec.flag("tooMany", inp.segs.first().map_or((0.0, 0.0), |s| s.a));
         return rec;
     }
+    // Stützen zuerst: ihre Umrisse sind keine Wandlinien (ein Quadrat 30 × 30 wäre sonst ein Wandstück).
+    let (cols, seg_col, arc_col) = columns(inp);
+    rec.columns = cols;
+    let rest;
+    let inp = if rec.columns.is_empty() {
+        inp
+    } else {
+        let mut r = inp.clone();
+        r.segs = inp.segs.iter().zip(&seg_col).filter(|(_, u)| !**u).map(|(s, _)| s.clone()).collect();
+        r.arcs = inp.arcs.iter().zip(&arc_col).filter(|(_, u)| !**u).map(|(a, _)| a.clone()).collect();
+        rest = r;
+        &rest
+    };
     let wallish: Vec<bool> = inp.layers.iter().map(|l| wallish_layer(l)).collect();
     let n_wallish = inp.segs.iter().filter(|s| wallish[s.layer]).count() + inp.arcs.iter().filter(|a| wallish[a.layer]).count();
     rec.layer_filter = n_wallish >= 4;
@@ -1454,6 +1793,8 @@ pub fn analyze(inp: &Input) -> Recognition {
                     rec.flag("doorHalf", mid);
                 }
                 RKind::Door { hinge_end: !at_start, swing_right: nm < 0.0, leaves }
+            } else if let Some(lift) = slide_kind(&cx, &b, g0, g1) {
+                RKind::Slide { lift }
             } else if window_lines_at(&cx, &b, g0, g1) > 0 {
                 RKind::Window
             } else if wdt > GAP_FREE + 1e-6 {
@@ -1466,15 +1807,14 @@ pub fn analyze(inp: &Input) -> Recognition {
             rec.openings.push(ROpening { wall: wi, pos: r6(g0), width: r6(wdt), kind });
         }
     }
+    rec.walls = ws.iter().map(|w| RWall { a: w.a, b: w.b, bulge: None, t: w.t, material: w.material, filled: w.filled }).collect();
+    arc_ws.retain(|a| a.sweep > 1e-6 && a.sweep * a.r >= 0.1);
+    let (arc_ws, arc_openings) = merge_arc_walls(inp, arc_ws, &arc_used, &cx.door_arcs, &mut arc_taken);
     for &k in &cx.door_arcs {
         if !arc_taken[k] {
             rec.flag("doorArc", inp.arcs[k].c);
         }
     }
-
-    rec.walls = ws.iter().map(|w| RWall { a: w.a, b: w.b, bulge: None, t: w.t, material: w.material, filled: w.filled }).collect();
-    arc_ws.retain(|a| a.sweep > 1e-6 && a.sweep * a.r >= 0.1);
-    let (arc_ws, arc_openings) = merge_arc_walls(inp, arc_ws, &arc_used);
     let base = rec.walls.len();
     rec.walls.extend(arc_ws.iter().map(ArcW::wall));
     rec.openings.extend(arc_openings.into_iter().map(|(k, pos, width, kind)| ROpening { wall: base + k, pos, width, kind }));
@@ -1554,6 +1894,27 @@ fn door_type(p: &Project, leaves: u8) -> Option<String> {
         .map(|d| d.id.clone())
 }
 
+/// Schiebetür-Typ (`schiebe`, Hebeschiebetür `hebeschiebe`): vorhanden oder neu (Name aus der Anfrage).
+fn slide_type(p: &Project, v: &Value, lift: bool, made: &mut Vec<(bool, String, Value)>, ids: &mut IdGen) -> String {
+    use crate::model::DoorTypeKind;
+    let want = if lift { DoorTypeKind::Hebeschiebe } else { DoorTypeKind::Schiebe };
+    if let Some(d) = p.door_types.iter().flatten().find(|d| d.kind == want) {
+        return d.id.clone();
+    }
+    if let Some(m) = made.iter().find(|m| m.0 == lift) {
+        return m.1.clone();
+    }
+    let id = ids.next("DT");
+    let (key, def) = if lift { ("liftSlideTypeName", "Hebeschiebetür (erkannt)") } else { ("slideTypeName", "Schiebetür (erkannt)") };
+    let name = v.get(key).and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or(def);
+    let t = json!({
+        "id": id, "name": name, "kind": if lift { "hebeschiebe" } else { "schiebe" },
+        "leafCount": if lift { 2 } else { 1 }, "leafStyle": if lift { "glas" } else { "glatt" }, "frameThickness": 0.05,
+    });
+    made.push((lift, id.clone(), t));
+    id
+}
+
 fn cat(p: &Project, code: &str, ctx: &Ctx) -> String {
     if has_category(p, code) { code.to_string() } else { ctx.cat.to_string() }
 }
@@ -1585,6 +1946,7 @@ pub fn ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let sill = 0.9f64.min((height - 0.6).max(0.0));
     let win_h = 1.2f64.min(height - sill - 0.1).max(0.3);
     let window_type = p.window_types.as_ref().and_then(|l| l.first()).map(|w| w.id.clone());
+    let mut made_doors = Vec::new();
     let mut openings = Vec::new();
     for o in &rec.openings {
         let mut f = vec![("id", s(&ids.next("O"))), ("type", s("opening")), ("hostWallId", s(&wall_ids[o.wall])), ("categoryCode", s(&ocat))];
@@ -1597,6 +1959,11 @@ pub fn ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
                 f.extend([("position", js_num(o.pos)), ("width", js_num(o.width)), ("height", js_num(door_h)), ("sillHeight", js_num(0.0))]);
                 f.push(("swing", s(if swing_right { "right" } else { "left" })));
                 f.push(("hinge", s(if hinge_end { "end" } else { "start" })));
+            }
+            RKind::Slide { lift } => {
+                f.push(("kind", s("door")));
+                f.push(("typeId", s(&slide_type(p, v, lift, &mut made_doors, ids))));
+                f.extend([("position", js_num(o.pos)), ("width", js_num(o.width)), ("height", js_num(door_h)), ("sillHeight", js_num(0.0))]);
             }
             RKind::Window => {
                 f.push(("kind", s("window")));
@@ -1632,9 +1999,35 @@ pub fn ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
             ("stampDoc", doc),
         ]));
     }
+    // Stützen: Kategorie „25“ (Stützen), sonst „50“ (Tragwerk), sonst die aktive; Höhe = Geschosshöhe.
+    let ccat = if has_category(p, "25") { "25".to_string() } else { cat(p, "50", ctx) };
+    let columns: Vec<Value> = rec
+        .columns
+        .iter()
+        .map(|c| {
+            let profile = if c.round {
+                json!({"kind": "round", "radius": js_num(c.w / 2.0)})
+            } else {
+                json!({"kind": "rect", "width": js_num(c.w), "depth": js_num(c.d)})
+            };
+            obj(vec![
+                ("id", s(&ids.next("C"))),
+                ("type", s("column")),
+                ("floorId", s(ctx.level)),
+                ("categoryCode", s(&ccat)),
+                ("position", pv(c.c)),
+                ("profile", profile),
+                ("rotation", js_num(c.rot)),
+                ("height", js_num(height)),
+            ])
+        })
+        .collect();
     let mut out = Vec::new();
     if !made.is_empty() {
         out.extend(add_op("wallTypes", made.into_iter().map(|m| m.3).collect()));
+    }
+    if !made_doors.is_empty() {
+        out.extend(add_op("doorTypes", made_doors.into_iter().map(|m| m.2).collect()));
     }
     out.extend(add_op("walls", walls));
     if !openings.is_empty() {
@@ -1643,18 +2036,22 @@ pub fn ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     if !rooms.is_empty() {
         out.extend(add_op("rooms", rooms));
     }
+    if !columns.is_empty() {
+        out.extend(add_op("columns", columns));
+    }
     out
 }
 
-/// Zähler `[Wände, Türen, Fenster, Durchbrüche, Räume, unklar]`.
-pub fn counts(r: &Recognition) -> [usize; 6] {
+/// Zähler `[Wände, Türen (mit Schiebetüren), Fenster, Durchbrüche, Räume, unklar, Stützen]`.
+pub fn counts(r: &Recognition) -> [usize; 7] {
     [
         r.walls.len(),
-        r.count(|k| matches!(k, RKind::Door { .. })),
+        r.count(|k| matches!(k, RKind::Door { .. } | RKind::Slide { .. })),
         r.count(|k| matches!(k, RKind::Window)),
         r.count(|k| matches!(k, RKind::Void)),
         r.rooms.len(),
         r.unclear.len(),
+        r.columns.len(),
     ]
 }
 
@@ -1703,6 +2100,16 @@ pub fn preview(p: &Project, v: &Value, ctx: &Ctx, out: &mut Shapes, info: &mut V
                     leaf(s0, 1.0, o.width, out);
                 }
             }
+            RKind::Slide { .. } => {
+                // Zwei versetzte Flügel und ein Pfeil.
+                let m = (s0 + s1) / 2.0;
+                out.line(at(s0, h / 3.0), at(m + 0.03, h / 3.0));
+                out.line(at(m - 0.03, -h / 3.0), at(s1, -h / 3.0));
+                let k = (s1 - s0) / 4.0;
+                out.line(at(m + k, 0.0), at(m - k, 0.0));
+                out.line(at(m - k, 0.0), at(m - k + 0.1, h / 4.0));
+                out.line(at(m - k, 0.0), at(m - k + 0.1, -h / 4.0));
+            }
             RKind::Window => {
                 out.line(at(s0, h / 3.0), at(s1, h / 3.0));
                 out.line(at(s0, -h / 3.0), at(s1, -h / 3.0));
@@ -1715,6 +2122,18 @@ pub fn preview(p: &Project, v: &Value, ctx: &Ctx, out: &mut Shapes, info: &mut V
     }
     for room in &r.rooms {
         out.poly(&room.ring);
+    }
+    for c in &r.columns {
+        if c.round {
+            let ring: Vec<V> = (0..24).map(|i| add(c.c, (c.w / 2.0 * cos(PI * i as f64 / 12.0), c.w / 2.0 * sin(PI * i as f64 / 12.0)))).collect();
+            out.poly(&ring);
+        } else {
+            let (u, n) = ((cos(c.rot), sin(c.rot)), (-sin(c.rot), cos(c.rot)));
+            let at = |a: f64, b: f64| add(add(c.c, mul(u, a * c.w / 2.0)), mul(n, b * c.d / 2.0));
+            out.poly(&[at(-1.0, -1.0), at(1.0, -1.0), at(1.0, 1.0), at(-1.0, 1.0)]);
+            out.line(at(-1.0, -1.0), at(1.0, 1.0));
+            out.line(at(-1.0, 1.0), at(1.0, -1.0));
+        }
     }
     for u in &r.unclear {
         let k = 0.15;
@@ -1737,7 +2156,8 @@ pub fn report(p: &Project, v: &Value) -> Value {
     thick.sort_by(f64::total_cmp);
     thick.dedup();
     json!({
-        "walls": c[0], "doors": c[1], "windows": c[2], "voids": c[3], "rooms": c[4],
+        "walls": c[0], "doors": c[1], "windows": c[2], "voids": c[3], "rooms": c[4], "columns": c[6],
+        "slidingDoors": r.count(|k| matches!(k, RKind::Slide { .. })),
         "arcWalls": arcs, "filledWalls": filled, "unnamedRooms": unnamed,
         "thicknesses": thick.iter().map(|t| js_num(*t)).collect::<Vec<_>>(),
         "layerFilter": r.layer_filter,

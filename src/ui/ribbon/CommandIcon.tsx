@@ -106,6 +106,17 @@ export const CommandIcon = memo(function CommandIcon({ name }: { name: string })
           <line x1="2.5" y1="12" x2="13.5" y2="12" />
         </svg>
       );
+    case "erkennen":
+      // Bauteile aus Zeichnung erkennen ([154]): Linienpaar (Wand) mit Türbogen, Lupe.
+      return (
+        <svg {...common}>
+          <line x1="1.5" y1="4" x2="10" y2="4" />
+          <line x1="1.5" y1="7" x2="5" y2="7" />
+          <path d="M5 7 A4 4 0 0 1 9 3" strokeDasharray="1.4 1.2" />
+          <circle cx="10.5" cy="10.5" r="2.8" />
+          <line x1="12.5" y1="12.5" x2="14.5" y2="14.5" />
+        </svg>
+      );
     case "trim":
       // Schere (Stutzen).
       return (

@@ -1,7 +1,7 @@
 // [154] Rundreise: eigener DXF-Export eines Geschosses → DXF-Import (Layer als Kategorien, neue Zeichnungsebene)
 // → „Bauteile aus Zeichnung erkennen“ → Wände/Öffnungen mit dem Original vergleichen (Quote auf der Konsole).
-// Wände: Achse (beide Richtungen, ±1 cm) und Dicke (±1 mm); Öffnungen: Art und Pfosten (±2 cm), Türen zusätzlich
-// Scharnierpunkt und Aufschlagseite. Mit `DOSSIER_RECOGNIZE_OUT=<ordner>` werden Import und Ergebnis als .obp
+// Wände: Achse (beide Richtungen, ±1 cm) und Dicke (±1 mm); Öffnungen: Art (Schiebe-/Hebeschiebetür eigene Art) und
+// Pfosten (±2 cm), Drehtüren zusätzlich Scharnierpunkt und Aufschlagseite; Stützen (15–60 cm): Mitte (±2 cm). Mit `DOSSIER_RECOGNIZE_OUT=<ordner>` werden Import und Ergebnis als .obp
 // geschrieben (Bilder für den Bericht).
 
 import { writeFileSync } from "node:fs";
@@ -27,7 +27,7 @@ const thickness = (p: Project, w: Wall) => (p.wallTypes.find((t) => t.id === w.w
 const dist = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.y - b.y);
 
 interface Jambs {
-  kind: "door" | "window" | "void";
+  kind: "door" | "slide" | "window" | "void";
   a: Vec2;
   b: Vec2;
   /** Tür: Scharnierpunkt und Aufschlagseite (Einheitsvektor quer zur Wand). */
@@ -46,8 +46,10 @@ function jambs(p: Project, o: Opening): Jambs | null {
     arc
       ? { x: arc.center.x + arc.r * Math.cos(arc.a0 + Math.sign(arc.sweep) * (s / arc.r)), y: arc.center.y + arc.r * Math.sin(arc.a0 + Math.sign(arc.sweep) * (s / arc.r)) }
       : { x: w.start.x + u.x * s, y: w.start.y + u.y * s };
-  const voidish = o.kind === "door" && (o.doorType === "wandoeffnung" || p.doorTypes?.find((t) => t.id === o.typeId)?.kind === "wandoeffnung");
-  const kind = voidish ? "void" : o.kind;
+  const typeKind = o.kind === "door" ? p.doorTypes?.find((t) => t.id === o.typeId)?.kind : undefined;
+  const voidish = o.kind === "door" && (o.doorType === "wandoeffnung" || typeKind === "wandoeffnung");
+  const slide = typeKind === "schiebe" || typeKind === "hebeschiebe";
+  const kind = voidish ? "void" : slide ? "slide" : o.kind;
   const j: Jambs = { kind, a: at(o.position), b: at(o.position + o.width) };
   if (kind === "door") {
     j.hinge = at(o.position + (o.hinge === "end" ? o.width : 0));
@@ -63,6 +65,7 @@ interface Quote {
   axis: number;
   openings: [number, number];
   doors: [number, number];
+  columns: [number, number];
   report: RecognizeReport;
   imported: Project;
   result: Project;
@@ -135,15 +138,20 @@ function roundtrip(orig: Project, levelId: string): Quote {
   const doorOk = od.filter((x) =>
     no.some((y) => same(x, y) && dist(x.hinge!, y.hinge!) < 0.02 && dist(x.side!, y.side!) < 1e-6),
   ).length;
-  return { walls: [wallOk, ow.length], axis: axisAll ? axisOk / axisAll : 1, openings: [openOk, oo.length], doors: [doorOk, od.length], report, imported, result };
+  // Stützen mit Querschnitt 15–60 cm (kleinere, z. B. Carport-Pfosten 12 cm, sind keine Kandidaten).
+  const size = (x: number) => x >= 0.15 - 1e-9 && x <= 0.6 + 1e-9;
+  const oc = (orig.columns ?? []).filter((c) => c.floorId === levelId && (c.profile.kind === "round" ? size(2 * c.profile.radius) : size(c.profile.width) && size(c.profile.depth)));
+  const nc = (result.columns ?? []).filter((c) => c.floorId === levelId);
+  const colOk = oc.filter((c) => nc.some((n) => dist(c.position, n.position) < 0.02)).length;
+  return { walls: [wallOk, ow.length], axis: axisAll ? axisOk / axisAll : 1, openings: [openOk, oo.length], doors: [doorOk, od.length], columns: [colOk, oc.length], report, imported, result };
 }
 
 const pct = ([a, b]: [number, number]) => `${a}/${b} (${b ? Math.round((100 * a) / b) : 100} %)`;
 
 function log(name: string, q: Quote) {
   console.log(
-    `[154] ${name}: Wände ${pct(q.walls)} (Achsen ${Math.round(q.axis * 100)} %), Öffnungen ${pct(q.openings)}, Türen mit Anschlag/Aufschlag ${pct(q.doors)}; ` +
-      `erkannt ${q.report.walls} Wände, ${q.report.doors} Türen, ${q.report.windows} Fenster, ${q.report.voids} Durchbrüche, ${q.report.rooms} Räume, unklar ${q.report.unclear.length} (${[...new Set(q.report.unclear.map((u) => u.code))].join(", ")})`,
+    `[154] ${name}: Wände ${pct(q.walls)} (Achsen ${Math.round(q.axis * 100)} %), Öffnungen ${pct(q.openings)}, Türen mit Anschlag/Aufschlag ${pct(q.doors)}, Stützen ${pct(q.columns)}; ` +
+      `erkannt ${q.report.walls} Wände, ${q.report.doors} Türen (${q.report.slidingDoors} Schiebetüren), ${q.report.windows} Fenster, ${q.report.voids} Durchbrüche, ${q.report.columns} Stützen, ${q.report.rooms} Räume, unklar ${q.report.unclear.length} (${[...new Set(q.report.unclear.map((u) => u.code))].join(", ")})`,
   );
   if (OUT) {
     writeFileSync(join(OUT, `${name}-import.obp`), serializeProject(q.imported));
@@ -177,7 +185,7 @@ describe("[154] Rundreise DXF-Export → Import → Bauteile erkennen", () => {
   it("Musterhaus komplex: Quote je Geschoss", () => {
     const p = buildComplexSampleProject();
     const floors = p.drawingLevels.filter((l) => l.kind === "floor" && p.walls.some((w) => w.floorId === l.id));
-    let [w, wn, o, on, ax] = [0, 0, 0, 0, 0];
+    let [w, wn, o, on, ax, c, cn] = [0, 0, 0, 0, 0, 0, 0];
     for (const l of floors) {
       const q = roundtrip(p, l.id);
       log(`komplex-${l.id}`, q);
@@ -186,9 +194,14 @@ describe("[154] Rundreise DXF-Export → Import → Bauteile erkennen", () => {
       wn += q.walls[1];
       o += q.openings[0];
       on += q.openings[1];
+      c += q.columns[0];
+      cn += q.columns[1];
     }
-    console.log(`[154] Musterhaus komplex gesamt: Wände ${pct([w, wn])} (Achsen ${Math.round(ax * 100)} %), Öffnungen ${pct([o, on])}`);
+    console.log(`[154] Musterhaus komplex gesamt: Wände ${pct([w, wn])} (Achsen ${Math.round(ax * 100)} %), Öffnungen ${pct([o, on])}, Stützen ${pct([c, cn])}`);
     expect(wn).toBeGreaterThan(0);
     expect(w / wn).toBeGreaterThan(0.6);
+    // 7.11.: Schiebe-/Hebeschiebetüren (5) und die Stütze im UG werden erkannt (vorher Fenster bzw. nichts).
+    expect(o / on).toBeGreaterThan(0.85);
+    expect(c).toBe(cn);
   }, 120_000);
 });

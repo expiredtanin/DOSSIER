@@ -82,11 +82,39 @@ describe("recognizeCommand", () => {
 
   it("Bericht-Text zählt unklare Stellen je Grund", () => {
     const txt = reportText({
-      walls: 1, doors: 0, windows: 0, voids: 0, rooms: 0, arcWalls: 0, filledWalls: 0, unnamedRooms: 0, thicknesses: [0.3], layerFilter: true,
+      walls: 1, doors: 0, slidingDoors: 0, windows: 0, voids: 0, rooms: 0, columns: 0, arcWalls: 0, filledWalls: 0, unnamedRooms: 0, thicknesses: [0.3], layerFilter: true,
       unclear: [{ code: "doorArc", x: 0, y: 0 }, { code: "doorArc", x: 1, y: 0 }, { code: "gapWide", x: 0, y: 0 }],
     });
     expect(txt).toContain("2×");
     expect(txt).toContain("1×");
+  });
+
+  it("Schiebetür (Blatt vor der Wand + Pfeil statt Bogen) und Stütze: Türtyp mit Namen aus i18n, Stütze im Geschoss", () => {
+    const line = (id: string, a: [number, number], b: [number, number]): Drawing2D =>
+      ({ id, type: "drawing2d", levelId: "imp", categoryCode: "102", geom: { shape: "line", a: { x: a[0], y: a[1] }, b: { x: b[0], y: b[1] } } }) as Drawing2D;
+    const base = project();
+    const p: Project = {
+      ...base,
+      drawings2d: [
+        ...base.drawings2d.filter((d) => d.id !== "arc"),
+        poly("blatt", "102", [[1, 0.17], [1.9, 0.17], [1.9, 0.21], [1, 0.21]]),
+        line("pfeil", [1.675, 0.3], [1.225, 0.3]),
+        line("spitze1", [1.225, 0.3], [1.34, 0.25]),
+        line("spitze2", [1.225, 0.3], [1.34, 0.35]),
+        { ...poly("stuetze", "102", [[3.5, 1.85], [3.8, 1.85], [3.8, 2.15], [3.5, 2.15]]), fillColor: "#000000" } as Drawing2D,
+      ],
+    };
+    const ctx = ctxOf(p);
+    const start = recognizeCommand.autoRun!(ctx);
+    expect(start.notice?.params).toMatchObject({ walls: 5, doors: 1, sliding: 1, columns: 1 });
+    const [, r] = recognizeCommand.onConfirm(recognizeCommand.init(), ctx);
+    const next = r.commit!(p);
+    const door = next.openings?.find((o) => o.kind === "door");
+    const type = next.doorTypes?.find((t) => t.id === door?.typeId);
+    expect(type?.kind).toBe("schiebe");
+    expect(type?.name).toBe("Schiebetür (erkannt)");
+    expect(next.columns?.length).toBe(1);
+    expect(next.columns?.[0]).toMatchObject({ floorId: "eg", position: { x: 3.65, y: 2 }, profile: { kind: "rect", width: 0.3, depth: 0.3 }, height: 2.8 });
   });
 
   it("ohne Zeichnung: Vorbedingung meldet, nichts erkannt → kein Commit", () => {

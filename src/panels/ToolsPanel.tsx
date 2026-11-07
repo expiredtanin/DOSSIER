@@ -380,7 +380,7 @@ const TOOLS_2D: ToolId[] = [
 ];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
 const COMMANDS_3D = ["column", "tree", "circlestotrees", "ceilingopening", "roof", "roofhole", "roofwindow", "dormer", "extrude", "revolve", "loft", "solid", "solidbool", "sectionline", "viewline", "autodim", "excavation"];
-const COMMANDS_EDIT = ["move", "copy", "array", "rotate", "mirror", "offset", "multiline", "trim", "break", "split", "extend", "fillet", "chamfer", "join", "defblock", "measure"];
+const COMMANDS_EDIT = ["move", "copy", "array", "rotate", "mirror", "offset", "multiline", "trim", "break", "split", "extend", "fillet", "chamfer", "join", "defblock", "measure", "erkennen"];
 
 type ToolsView = "list" | "icons";
 const VIEW_STORAGE_KEY = "dossier.toolsPanel.view";

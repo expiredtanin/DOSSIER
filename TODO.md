@@ -3540,11 +3540,30 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   EG 5/5 Wände, 3/3 Öffnungen, Tür mit Anschlag/Aufschlag; OG 4/4; Musterhaus komplex (UG/EG/OG/DG) Wände 45/57 exakt (79 %),
   Achsen-Abdeckung 96 % (Rest v. a. kollineare Wände über einen T-Stoss, die als eine Wand erkannt werden; Fundament-/
   Stützmauern), Öffnungen 35/46 (76 %). Geprüft: cargo test Kern, WASM (Linux, `--no-opt`), tsc, vitest (Goldens
-  unverändert), CLI + Chromium-Bilder (Musterhaus, komplex EG/OG). **Offen:** Schiebe-/Hebeschiebetüren werden Fenster
-  (Symbol ohne Bogen), Türen mit Futter/Zarge breiter als der Bogen bleiben Durchbruch + „Türbogen ohne Lücke“, Türen in
-  Bogenwänden, Stösse von Bogenwänden untereinander, schräg anstossende Enden in einer Wandfläche, Stützen/Treppen/Decken,
-  Blöcke (INSERT) werden schon beim Import aufgelöst (Tür-Blöcke als Linien), Brüstungs-/Sturzhöhen nicht aus 2D ableitbar;
-  nur Linux-Container, nicht in der Tauri-App geklickt (kein Knopf in der Werkzeugleiste, nur Befehlszeile).
+  unverändert), CLI + Chromium-Bilder (Musterhaus, komplex EG/OG). **Offen:** Stösse von Bogenwänden untereinander,
+  schräg anstossende Enden in einer Wandfläche, Treppen/Decken, Fenster über der Schnitthöhe (Wand im Plan ohne Lücke,
+  nur Fenstersymbol im Band: 5 der 6 fehlenden Öffnungen im Musterhaus komplex), Wanddurchbruch mit Schwellen-Rechteck
+  wird Fenster, Schiebetüren in Bogenwänden, Blöcke (INSERT) werden schon beim Import aufgelöst (Tür-Blöcke als Linien),
+  Brüstungs-/Sturzhöhen nicht aus 2D ableitbar; nur Linux-Container, nicht in der Tauri-App geklickt.
+  - ✅ **Nachtrag 7.11.:** **Schiebe-/Hebeschiebetüren** (`RKind::Slide`): Pfeil in der Lücke (Linie parallel zur Wand im
+    Band oder bis 30 cm davor, mit Spitze aus je einem Strich links und rechts, 10–60°, 5–40 cm — ein Dämmungs-Zickzack an
+    der Laibung zählt nicht) → Schiebetür, ab 1.4 m oder mit versetzten Flügeln Hebeschiebetür; ohne Pfeil zwei versetzte
+    Flügel (Liniengruppen im Band auf verschiedener Lage, je 30–80 % der Lücke, ab dem einen bzw. bis zum anderen Pfosten)
+    ab 1.4 m → Hebeschiebetür. Türtyp `schiebe`/`hebeschiebe` aus dem Projekt, sonst neu („Schiebetür (erkannt)“, i18n).
+    **Zarge/Futter:** Türbogen bis 30 cm in der Lücke, Blatt endet höchstens 30 cm vor dem Gegenpfosten (zweiflüglig: vor
+    der Mitte) → Tür mit der Lückenbreite, Anschlag am nahen Pfosten (vorher Durchbruch + „Türbogen ohne Lücke“). **Türen
+    in Bogenwänden:** Türbogen am Pfosten einer Bogenwand-Lücke (Radius = Sehne) → Tür, Aufschlag innen/aussen.
+    **Stützen:** geschlossene Rechtecke (rechte Winkel) und Kreise (auch in Sehnen zerlegt) 15–60 cm mit Füllung/Schraffur
+    oder auf einem Stützen-Layer (Stütze, Säule, Pfeiler, COL …), frei stehend (keine fremde Linie ≤ 1 cm am Umriss) →
+    Stütze (Kategorie 25, sonst 50; Höhe = Geschosshöhe, Drehung aus dem Rechteck); ihre Umrisse fallen für die Wandpaare
+    weg. Zähler/Meldung/Bericht mit Schiebetüren und Stützen, Vorschau (Flügel + Pfeil, Stütze mit Kreuz). **Knopf** „Bauteile
+    aus Zeichnung erkennen“ in der Werkzeug-Palette, Gruppe Ändern (`panels/ToolsPanel.tsx`, Symbol `CommandIcon`).
+    Tests: Rust +7 (Schiebetür vor der Wand, Hebeschiebetür mit/ohne Pfeil + Fenster bleiben Fenster, Zarge, Tür in
+    Bogenwand, Stützen frei/anliegend/zu gross/ungefüllt, Stützen aus dem Projekt + Ops, Schiebetür-Typ neu); vitest Befehl
+    (Schiebetür + Stütze), Rundreise vergleicht Schiebetüren als eigene Art und Stützen. **Quote Musterhaus komplex:**
+    Öffnungen 35/46 (76 %) → 40/46 (87 %) (alle 5 Schiebe-/Hebeschiebetüren), Drehtüren mit Anschlag/Aufschlag 15/15,
+    Stützen 1/1 (UG; Carport-Pfosten 12 cm unter 15 cm), Wände unverändert 45/57 (Achsen 96 %). Geprüft: cargo test Kern,
+    WASM `--no-opt`, tsc, vitest, CLI + Chromium-Bild EG vorher/nachher; nur Linux-Container, Knopf nicht in Tauri geklickt.
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
@@ -4065,6 +4084,15 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   Reihenfolge, Ebenen, Strichstärken, True-Color, Koordinaten ≤ 5e-7 m (Rundung des alten Writers auf 6 Stellen;
   neu volle f64). Neu: 2D-Texte als TEXT (fehlten bisher), CLI exportiert georeferenziert wie die App.
   Gegencheck ezdxf (`scripts/validate-dxf.py`, Test übersprungen ohne `pip install ezdxf`): 0 Auditor-Fehler.
+  - ✅ **Georeferenzierter Export: alle Entitäten in LV95** (7.11., Befund aus [154]): Baugrube (Kontext `excavation`,
+    Ebene CONTEXT) und Parzelle/Baulinien (`siteRules`, Ebene SYMBOLS) blieben beim Export mit `geoAnchor` (App, CLI `dxf`/`dwg`)
+    lokal und lagen nach dem Import 2.7 Mio. m neben dem Gebäude. Ursache: die Projekt-Verschiebung (`geo_translate.rs`,
+    `translatePatch`/`translateOps`; auch „Neuer Bezugspunkt“) nahm Baugrube und Baurecht nicht mit (Baugrube bekam sogar ein
+    leeres `positions`); `geo_rebase.rs` (IFC) vergass Baurecht und Bäume. Jetzt Baugrube (Umriss), Baurecht (Parzelle,
+    Baulinien, Feld-Op `siteRules`) und Bäume überall. Test `export/exportDxf.georef.test.ts`: Musterhaus komplex je Geschoss
+    bei 1:50, DXF alle Punkt-Codes (10/11/13/14: Linien, Polylinien, Bögen, Texte, INSERT + ATTRIB, Bemassung, HATCH, Kontext)
+    und DWG (libredwg) im LV95-Rahmen ± 200 m, Rundreise Export → Import gemeinsam in einem Rahmen; Rust je 1 Test.
+    Linksbündige TEXT tragen im DWG den Ausrichtungspunkt (0, 0) wie AutoCAD (`(11 0 0 0)`, ohne Wirkung). Nur Linux-Container.
   - ✅ **Binär-DXF-Export** (28.10.): `export_dxf_binary` (acadrust `DxfWriter::new_binary`, R2018 UTF-8),
     Dialog-Format „DXF binär“, CLI `dxf --binary`. Rundreise acadrust + ezdxf (gleiche Entitäten/Ebenen wie
     ASCII, 0 Auditor-Fehler, kleiner als der Text). Offen: in AutoCAD/BricsCAD selbst nicht geöffnet.
