@@ -65,15 +65,16 @@ fn lod_segments(f: impl Fn(f64) -> Vec<(P, P)>) -> Vec<(P, P, u8)> {
 }
 
 /// Bodenbelag im Grundriss: Muster der obersten Deckenschicht auf dem Deckenumriss (ohne Aussparungen),
-/// in Plan-Koordinaten; Ausrichtung am Plan (x), Ursprung am ersten Umrisspunkt.
-pub fn floor_finish_segments(p: &Project, ce: &Ceiling, scale: f64) -> Option<(Vec<(P, P)>, f64, String)> {
+/// in Plan-Koordinaten; Ausrichtung am Plan (x), Ursprung am ersten Umrisspunkt. [156] Teilung auf dem
+/// Papier nicht enger als `plan::floor_finish::MIN_PAPER_MM`, Strich als feine Tusche (0.02–0.05 mm, grau).
+/// Dazu das Bauteil der Belagsschicht (Name für Regeln, Plattenbelag?).
+pub fn floor_finish_segments<'a>(p: &'a Project, ce: &Ceiling, scale: f64) -> Option<(Vec<(P, P)>, f64, String, &'a Component)> {
     let layers = crate::model3d::ceiling_type_ref(p, ce).map(|t| t.2)?;
     let (pat, comp, spec) = spec_for(layers.first().and_then(|l| p.component(&l.component_id)), 0.0)?;
     let (outer, holes) = ceiling_rings(ce)?;
-    let segs = sp::segments(&ring_with_holes(&outer, &holes), &spec, outer[0], scale);
-    let w = pat.weight_mm.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(0.1);
-    let ink = pat.color.as_deref().or(comp.foreground.as_deref()).filter(|c| !c.trim().is_empty()).unwrap_or(INK).to_string();
-    Some((segs, w, ink))
+    let segs = sp::segments(&ring_with_holes(&outer, &holes), &spec, outer[0], crate::plan::floor_finish::thinning_scale(scale));
+    let w = crate::plan::floor_finish::weight(pat.weight_mm);
+    Some((segs, w, crate::plan::floor_finish::INK.to_string(), comp))
 }
 
 /// Deckenuntersicht im Deckenspiegel ([100]): Muster der untersten Deckenschicht auf dem Deckenumriss
@@ -394,7 +395,7 @@ mod tests {
         let top = crate::model3d::ceiling_type_ref(&p, &ce).unwrap().2[0].component_id.clone();
         assert!(floor_finish_segments(&p, &ce, 50.0).is_none());
         with_pattern(&mut p, &top, 0.12);
-        let (segs, w, _) = floor_finish_segments(&p, &ce, 50.0).unwrap();
+        let (segs, w, _, _) = floor_finish_segments(&p, &ce, 50.0).unwrap();
         assert!(segs.len() > 20, "{}", segs.len());
         assert!(w > 0.0);
         // 3D: Oberseite der Decke auf OK Decke.

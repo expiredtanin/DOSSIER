@@ -198,7 +198,7 @@ function findLevel(project: Project, kinds: string[], name: string | undefined) 
 }
 
 /** Ansichts-Felder einer Vorlage, die am Geschoss/Schnitt/Ansicht stehen (wie `state/viewTemplates.ts`). */
-const TEMPLATE_LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch"] as const;
+const TEMPLATE_LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch", "floorFinish"] as const;
 
 /**
  * [33]/[34] `--template <Name|id>`: Ansichtsvorlage auf die Ebene anwenden (Override-Regeln nach

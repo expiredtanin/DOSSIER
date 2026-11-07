@@ -3516,6 +3516,29 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Absturzsicherung nur im Grundriss (kein Geländer-Bauteil in 3D/IFC am Deckenloch); Ende eines ganz freien Lochrings
   ohne Gehrung; dichtes Belagsmuster im 1:100 (Musterhaus: Parkett 60×10) ggf. Ausdünnung prüfen; nur Linux, nicht in der
   Tauri-App/Metal angesehen. · M
+- ◐ **[156] Bodenbelag-Muster im Grundriss massstabsgerecht.** (7.11., Folge aus [155]: seit die eigene Decke nicht
+  mehr deckt, lag im 1:100 überall dichtes Parkett-/Plattenraster.) Neu `plan/floor_finish.rs`: Belagsmuster
+  automatisch nur ab 1:50 bzw. Detail „fein" (ausdrücklich „grob" nie); 1:100 und gröber ohne. Feld **„Bodenbelag
+  zeigen"** an Ebene und Ansichtsvorlage (`floorFinish`: `off`/`wet`/`all`, Rust-Modell `FloorFinishDisplay`,
+  `gen:types`; Vorlage → Ebene über `LEVEL_KEYS`, CLI `--template`; UI Ressourcen › Ansichtsvorlagen): „aus" nie,
+  „Nassräume" gröber als 1:50 nur Plattenbeläge (Muster „Raster" oder Name Platte/Fliese/Keramik …) beschnitten auf
+  Räume mit Namen Bad/WC/Dusche/Nasszelle/Toilette …, „alle" in jedem Massstab. **Regeln** [33]: neue Bauteilart
+  `floor_finish` (nur Regeln, die sie ausdrücklich nennen, wie Schatten/Gelände): `hide` blendet aus, `hide: false`
+  erzwingt auch im 1:100, Farbe/Stärke/Linientyp. **Strich:** Tusche-grau #8c8c8c, 0.02–0.05 mm (Muster-Stärke
+  geklemmt, Vorgabe 0.035; Regel-Stärke ebenso), Teilung auf dem Papier nicht enger als 1.5 mm (sonst jede 2./4./8.
+  Linie, Verbands-Stossfugen entfallen, noch enger kein Muster). **Aussparungen:** Treppen (schon [155]),
+  Raumstempel-Rechteck (+1 mm Luft; Belag darum nach den Räumen gerechnet, `domains_after`), Blöcke der 2D-Zeichnungen
+  (Möbel/Sanitär, konvexe Hülle, `drawings::block_footprints`) und Körper auf dem Boden (Einbauten, ohne
+  Abzugskörper). Bildschirm = Druck (kein Unterschied nach `forPrint`/`compact`, getestet). Tests:
+  `belag_nur_ab_1_50_oder_fein`, `belag_nassraeume_im_1_100`, `belag_mindestteilung_und_feiner_strich`,
+  `belag_spart_stempel_und_moebel_aus`, `belag_regeln`, `darstellung_je_massstab_und_einstellung`, vitest
+  Ansichtsvorlage → Ebene. Goldens neu (komplex Grundrisse EG/OG/DG 1:100 ohne Belag, 1:50 feiner/ausgespart; CLI-Golden
+  unverändert). Geprüft: cargo test Kern, WASM (`--no-opt`), tsc, vitest, CLI-SVG Musterhaus komplex EG 1:100/1:50
+  und 1:100 mit „Nassräume" in Chromium. **Offen:** Nassraum-Erkennung nur nach Name (kein Nutzungs-/Belagsfeld am
+  Raum; Belag hängt an der Decke, nicht am Raum — Bad mit Parkett-Decke zeigt im Nassraum-Modus nichts); Möbel nur als
+  Blöcke/Körper (geschlossene 2D-Formen der Kategorie „Möbel" sparen nicht aus); Deckenspiegel-Untersicht unverändert
+  (0.1 mm, alte Ausdünnung); Level-Feld nur über Ansichtsvorlage einstellbar (kein eigenes Feld im Ebenen-Panel); nur
+  Linux, nicht in der Tauri-App/Metal angesehen. · S
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

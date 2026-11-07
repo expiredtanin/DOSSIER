@@ -1124,6 +1124,10 @@ export type DrawingLevel = {
    */
   cutHatch?: boolean;
   /**
+   * [156] Bodenbelag-Muster im Grundriss: fehlt = automatisch (ab 1:50 bzw. Detail „fein" alle, gröber keine).
+   */
+  floorFinish?: FloorFinishDisplay;
+  /**
    * Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
    * Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
    * linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
@@ -1286,6 +1290,12 @@ export type ExtrudedSolid = {
    */
   brep?: { spec: Record<string, unknown>; origin: Vec2; label?: string };
 };
+
+/**
+ * [156] Bodenbelag-Muster im Grundriss (Ansichtsvorlage/Ebene): „aus" nie, „Nassräume" ab 1:50/„fein"
+ * alle und gröber nur Plattenbeläge in Nassräumen (Bad/WC/Dusche), „alle" in jedem Massstab.
+ */
+export type FloorFinishDisplay = "off" | "wet" | "all";
 
 /**
  * Ein Türtyp (Türstil) — wiederverwendbares Preset für {@link Opening} mit
@@ -3477,6 +3487,8 @@ export type ViewTemplate = {
   sketch?: boolean;
   /** [140] Schnittflächen ab 1:100 schraffiert statt schwarz (s. `DrawingLevel::cut_hatch`). */
   cutHatch?: boolean;
+  /** [156] Bodenbelag-Muster im Grundriss (s. `DrawingLevel::floor_finish`). */
+  floorFinish?: FloorFinishDisplay;
   /** Strichstärken mit dem Massstab skalieren. */
   scaleLineWeights?: boolean;
   /** Schnitthöhe über OKFF ([36]). */

@@ -1440,6 +1440,33 @@ fn prims_where(c: &Ctx, pred: impl Fn(&Drawing2DGeom) -> bool) -> Vec<Primitive>
     out.prims
 }
 
+/// [156] Grundflächen der gezeichneten Blöcke (Möbel, Sanitär-/Einbau-Symbole) des Geschosses als konvexe
+/// Hülle ihrer Striche: der Bodenbelag spart sie aus.
+pub fn block_footprints(c: &Ctx) -> Vec<Vec<[f64; 2]>> {
+    let mut memo = Memo::default();
+    let mut res = Vec::new();
+    for d in c.p.drawings2d.iter().filter(|d| matches!(d.geom, Drawing2DGeom::Block { .. }) && on_floor(c, d)) {
+        let m = memo.get(c, d);
+        if !m.shown {
+            continue;
+        }
+        let mut out = Out::default();
+        let mut sink = Sink::new(Target::Vec(&mut out), Keep::All);
+        if emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, m.greyed, c.a.scale, &mut sink, 0).is_err() {
+            continue;
+        }
+        let mut o = super::stamp_place::Obstacles::default();
+        for q in &out.prims {
+            o.add_prim(q);
+        }
+        let hull = super::floor_finish::convex_hull(o.points());
+        if hull.len() >= 3 {
+            res.push(hull);
+        }
+    }
+    res
+}
+
 /// Mittlere Grösse eines Stücks der 2D-Zeichnungen (Elemente) und Obergrenze.
 const CHUNK_MEAN: u64 = 256;
 const CHUNK_MAX: usize = 2048;

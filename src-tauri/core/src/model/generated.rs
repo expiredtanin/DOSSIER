@@ -1852,6 +1852,10 @@ pub struct DrawingLevel {
     #[serde(rename = "cutHatch", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cut_hatch: Option<bool>,
+    /// [156] Bodenbelag-Muster im Grundriss: fehlt = automatisch (ab 1:50 bzw. Detail „fein" alle, gröber keine).
+    #[serde(rename = "floorFinish", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub floor_finish: Option<FloorFinishDisplay>,
     /// Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
     /// Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
     /// linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
@@ -1951,6 +1955,10 @@ pub struct ViewTemplate {
     #[serde(rename = "cutHatch", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cut_hatch: Option<bool>,
+    /// [156] Bodenbelag-Muster im Grundriss (s. `DrawingLevel::floor_finish`).
+    #[serde(rename = "floorFinish", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub floor_finish: Option<FloorFinishDisplay>,
     /// Strichstärken mit dem Massstab skalieren.
     #[serde(rename = "scaleLineWeights", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -2877,6 +2885,22 @@ pub enum DetailLevel {
     Mittel,
     #[serde(rename = "fein")]
     Fein,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [156] Bodenbelag-Muster im Grundriss (Ansichtsvorlage/Ebene): „aus" nie, „Nassräume" ab 1:50/„fein"
+/// alle und gröber nur Plattenbeläge in Nassräumen (Bad/WC/Dusche), „alle" in jedem Massstab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum FloorFinishDisplay {
+    #[default]
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "wet")]
+    Wet,
+    #[serde(rename = "all")]
+    All,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
