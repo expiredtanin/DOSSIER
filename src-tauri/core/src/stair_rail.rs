@@ -460,55 +460,26 @@ fn flight_rails(geo: &StairGeometry, railing: u8) -> Vec<Rail> {
     out
 }
 
-/// Grundriss-Stücke eines Handlaufs: zusammenhängende Polygonzüge mit `true` = über der Schnitthöhe
-/// (gestrichelt). Grenze ist die Gehhöhe `z_break` (Mitte des ersten geschnittenen Tritts, wie die
-/// Bruchlinie); `None` = ganz unter dem Schnitt. Gerade Folgepunkte werden zusammengefasst.
-pub fn plan_pieces(rail: &Rail, z_break: Option<f64>) -> Vec<(Vec<P>, bool)> {
-    let above = |z_walk: f64| z_break.is_some_and(|b| z_walk > b + 1e-9);
-    let mut out: Vec<(Vec<P>, bool)> = Vec::new();
-    let path = &rail.path;
-    // Teilstrecke (p → q, Gehhöhe in der Mitte) anhängen; Stilwechsel beginnt ein neues Stück.
-    let mut add = |p: P, q: P, z_mid: f64| {
-        if near(p, q) {
-            return;
+/// Grundriss-Achse eines Handlaufs als Polygonzug (ohne doppelte und ohne gerade Zwischenpunkte). Die
+/// Teilung in ausgezogen/gestrichelt an der Bruchlinie macht `plan/stair_symbol.rs` ([155]).
+pub fn plan_path(rail: &Rail) -> Vec<P> {
+    let mut v: Vec<P> = Vec::with_capacity(rail.path.len());
+    for q in &rail.path {
+        let p = [q[0], q[1]];
+        if v.last().is_some_and(|l| near(*l, p)) {
+            continue;
         }
-        let up = above(z_mid);
-        match out.last_mut() {
-            Some((pts, u)) if *u == up && pts.last().is_some_and(|l| near(*l, p)) => pts.push(q),
-            _ => out.push((vec![p, q], up)),
-        }
-    };
-    for w in path.windows(2) {
-        let (a, q) = (w[0], w[1]);
-        let (za, zq) = (a[2] - RAIL_HEIGHT, q[2] - RAIL_HEIGHT);
-        let (pa, pq) = ([a[0], a[1]], [q[0], q[1]]);
-        match z_break {
-            Some(b) if (za - b) * (zq - b) < 0.0 => {
-                let t = (b - za) / (zq - za);
-                let m = [a[0] + (q[0] - a[0]) * t, a[1] + (q[1] - a[1]) * t];
-                add(pa, m, (za + b) / 2.0);
-                add(m, pq, (b + zq) / 2.0);
+        if v.len() >= 2 {
+            let (a, b) = (v[v.len() - 2], v[v.len() - 1]);
+            let cr = (b[0] - a[0]) * (p[1] - b[1]) - (b[1] - a[1]) * (p[0] - b[0]);
+            let dot = (b[0] - a[0]) * (p[0] - b[0]) + (b[1] - a[1]) * (p[1] - b[1]);
+            if cr.abs() < 1e-9 && dot > 0.0 {
+                v.pop();
             }
-            _ => add(pa, pq, (za + zq) / 2.0),
         }
+        v.push(p);
     }
-    // Gerade Zwischenpunkte zusammenfassen.
-    for (pts, _) in out.iter_mut() {
-        let mut v: Vec<P> = Vec::with_capacity(pts.len());
-        for &p in pts.iter() {
-            if v.len() >= 2 {
-                let (a, b) = (v[v.len() - 2], v[v.len() - 1]);
-                let cr = (b[0] - a[0]) * (p[1] - b[1]) - (b[1] - a[1]) * (p[0] - b[0]);
-                let dot = (b[0] - a[0]) * (p[0] - b[0]) + (b[1] - a[1]) * (p[1] - b[1]);
-                if cr.abs() < 1e-9 && dot > 0.0 {
-                    v.pop();
-                }
-            }
-            v.push(p);
-        }
-        *pts = v;
-    }
-    out
+    v
 }
 
 #[cfg(test)]
@@ -652,28 +623,20 @@ mod tests {
     }
 
     #[test]
-    fn grundriss_stuecke_an_der_bruchhoehe() {
+    fn grundriss_achse_zusammengefasst() {
         let mut p = params("straight");
         p.run_length = 3.0;
         p.step_count = 10;
         let geo = stair_geometry(&p, 2.8);
         let rail = &rails(&p, &geo, 1)[0];
-        // ganz unter dem Schnitt: ein Stück, durchgezogen
-        let all = plan_pieces(rail, None);
-        assert_eq!(all.len(), 1);
-        assert!(!all[0].1 && all[0].0.len() == 2);
-        // Bruch bei Gehhöhe 1.12 (x = 1.2 auf der Linie 0 → 2.8 über 3 m): unten durchgezogen, oben gestrichelt
-        let parts = plan_pieces(rail, Some(1.12));
-        assert_eq!(parts.len(), 2);
-        assert!(!parts[0].1 && parts[1].1);
-        assert!((parts[0].0[1][0] - 1.2).abs() < 1e-9 && (parts[1].0[0][0] - 1.2).abs() < 1e-9);
+        // gerade Treppe: eine Strecke (Zwischenpunkte der Pfosten/Tritte zusammengefasst)
+        assert_eq!(plan_path(rail).len(), 2);
         // U mit Kropf: Zwischenpunkte auf Geraden zusammengefasst (Ecken bleiben)
         let u = params("U");
         let geo = stair_geometry(&u, 2.89);
         for rail in rails(&u, &geo, 3) {
-            let pieces = plan_pieces(&rail, None);
-            assert_eq!(pieces.len(), 1);
-            assert!(pieces[0].0.len() <= 6, "{:?}", pieces[0].0);
+            let path = plan_path(&rail);
+            assert!(path.len() >= 3 && path.len() <= 6, "{path:?}");
         }
     }
 

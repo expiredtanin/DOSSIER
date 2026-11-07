@@ -35,6 +35,11 @@ function withTemplate(p: Project): Project {
 }
 
 describe("viewTemplates", () => {
+  it("[156] setzt „Bodenbelag zeigen“ am Geschoss", () => {
+    const p = applyOps(base(), addTemplateOps({ id: "tb", name: "Nass", floorFinish: "wet" }));
+    const q = applyOps(p, applyToLevelOps(p, "tb", "eg", false));
+    expect(q.drawingLevels.find((l) => l.id === "eg")?.floorFinish).toBe("wet");
+  });
   it("erfasst Geschoss- und Anzeigewerte", () => {
     const p = base();
     const t = captureTemplate("t", "V", p.drawingLevels.find((l) => l.id === "eg"), ui);

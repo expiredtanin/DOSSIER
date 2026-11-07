@@ -38,6 +38,11 @@ fn finite(p: &P) -> bool {
 }
 
 impl Obstacles {
+    /// [156] Alle Punkte der Strecken und Flächen (für eine Hülle).
+    pub fn points(&self) -> Vec<P> {
+        self.segs.iter().flat_map(|s| s.iter().copied()).chain(self.areas.iter().flatten().copied()).collect()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.segs.is_empty() && self.areas.is_empty()
     }

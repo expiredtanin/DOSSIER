@@ -35,6 +35,7 @@ pub mod ceiling_plan;
 pub mod line_ends;
 pub mod line_pattern;
 pub mod stamp_place;
+pub mod floor_finish;
 pub mod trees;
 pub mod mesh_plan;
 pub(crate) mod wall_columns;

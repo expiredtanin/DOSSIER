@@ -3564,6 +3564,59 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
     Öffnungen 35/46 (76 %) → 40/46 (87 %) (alle 5 Schiebe-/Hebeschiebetüren), Drehtüren mit Anschlag/Aufschlag 15/15,
     Stützen 1/1 (UG; Carport-Pfosten 12 cm unter 15 cm), Wände unverändert 45/57 (Achsen 96 %). Geprüft: cargo test Kern,
     WASM `--no-opt`, tsc, vitest, CLI + Chromium-Bild EG vorher/nachher; nur Linux-Container, Knopf nicht in Tauri geklickt.
+- ◐ **[155] Treppensymbol im Grundriss bereinigt.** (7.11., Befund Musterhaus komplex EG 1:50, Treppenhaus: unter
+  gestrichelten Tritten lag deckungsgleich die volle Kante des Tritt-Vielecks, Wange voll und gestrichelt übereinander,
+  Plattenraster durch die Treppe, Bruchlinie als zwei Querstriche neben der Trittkante; Wendel: Trittkanten als Sehnen auf
+  dem Aussenbogen und 12-Eck des Auges über dem Innenbogen; OG ohne Spur der ankommenden Treppe.) `plan/stair_symbol.rs`
+  neu aufgebaut: keine Tritt-/Podest-Vielecke mehr (nur eine unsichtbare Pick-Fläche = Grundfläche), jede Kante genau
+  einmal (Aussenlinie vor Trittkanten vor Podestkanten, deckungsgleiche Stücke entfallen); das erste Element über der
+  Schnitthöhe (Tritt oder Podest) trägt die **Bruchlinie** quer über den Lauf mit Zickzack in der Mitte (Wendel radial auf
+  der Trittmitte, Podest einen halben Auftritt hinter der Antrittskante); Wange, Tritt-/Podestkanten und Handlauf ([151])
+  sind davor ausgezogen, dahinter gestrichelt — dieselbe geometrische Teilung für alle (Handlauf vorher nach Gehhöhe;
+  `stair_rail::plan_pieces` → `plan_path`). Wendel: Trittkanten radial, Innen-/Aussenbogen an der Bruchlinie geteilt
+  (Bogen-Kodierung mit Strich-Flag, 10 Zahlen). **Linienhierarchie** relativ zur Kategorie (Treppen 0.18 @1:100): Tritte,
+  Podest, Lauflinie, Pfeil 0.1, Umriss/Wange und Bruchlinie 0.13 (`TREAD_FACTOR`/`OUTLINE_FACTOR`); Pfeilflügel als ein
+  Zug über die Spitze, Lauflinie endet in der Spitze. **Belag:** Treppen des Geschosses sparen das Bodenbelag-Muster aus
+  (`stair_symbol::footprint`, `surface_pattern::clip_outside_poly`). **Eigene Decke über der Schnittebene deckt nicht
+  mehr** (Füllung/Schraffur nur noch über Regeln): vorher verdeckte sie den Bodenbelag überall ausser im Treppenloch —
+  der Belag erscheint jetzt in allen Räumen von EG/OG (Musterhaus komplex: Parkett/Platten), wie bisher schon im DG.
+  **Treppenloch oben:** Treppen tieferer Geschosse, die auf dem Geschoss ankommen, erscheinen im Loch der Decke, auf der
+  das Geschoss steht (ausgezogen, auf das Loch beschnitten, ohne Bruchlinie, mit Handlauf), dazu die **Absturzsicherung**
+  (`stair-guard`, 0.1 mm, 4 cm auf der Decke, ab 1:50/fein doppelt) an den freien Lochrändern — nicht unter Wänden, nicht
+  an der Austrittskante (15 cm Toleranz). Tests: `keine_deckungsgleichen_linien` (alle Formen, 8 Schnitthöhen, mit/ohne
+  Handlauf, sichtbare Vieleck-Kanten mitgezählt), `vor_der_bruchlinie_voll_dahinter_gestrichelt`, `bruch_auf_dem_podest`,
+  `strichstaerken_tritte_fein_umriss_mittel`, `pfeil_schliesst_an_der_spitze`, `wendel_radiale_trittkanten_und_geteilte_boegen`,
+  `beschnitten_auf_das_loch`, `belag_ausgespart_unter_treppe`, `ankommende_treppe_im_deckenloch_mit_absturzsicherung`,
+  `eigene_decke_ueber_schnitt_deckt_nicht`. Goldens neu (Grundrisse Muster EG, komplex UG–DG, CLI EG). Geprüft: cargo test
+  Kern, WASM (`--no-opt`), tsc, vitest, CLI-SVG Musterhaus komplex EG/OG 1:50/1:100, UG-Wendel und Formen-Testprojekt
+  (U, U mit Mittellauf, gerade mit Podest, L, gerade, Wendel) vorher/nachher in Chromium. **Offen:** Raumstempel weichen
+  den neuen Linien aus (OG 1:100: „O.05 Treppenhaus“ eine Stufe kleiner); Lauflinie bleibt über der Bruchlinie ausgezogen;
+  Absturzsicherung nur im Grundriss (kein Geländer-Bauteil in 3D/IFC am Deckenloch); Ende eines ganz freien Lochrings
+  ohne Gehrung; dichtes Belagsmuster im 1:100 (Musterhaus: Parkett 60×10) ggf. Ausdünnung prüfen; nur Linux, nicht in der
+  Tauri-App/Metal angesehen. · M
+- ◐ **[156] Bodenbelag-Muster im Grundriss massstabsgerecht.** (7.11., Folge aus [155]: seit die eigene Decke nicht
+  mehr deckt, lag im 1:100 überall dichtes Parkett-/Plattenraster.) Neu `plan/floor_finish.rs`: Belagsmuster
+  automatisch nur ab 1:50 bzw. Detail „fein" (ausdrücklich „grob" nie); 1:100 und gröber ohne. Feld **„Bodenbelag
+  zeigen"** an Ebene und Ansichtsvorlage (`floorFinish`: `off`/`wet`/`all`, Rust-Modell `FloorFinishDisplay`,
+  `gen:types`; Vorlage → Ebene über `LEVEL_KEYS`, CLI `--template`; UI Ressourcen › Ansichtsvorlagen): „aus" nie,
+  „Nassräume" gröber als 1:50 nur Plattenbeläge (Muster „Raster" oder Name Platte/Fliese/Keramik …) beschnitten auf
+  Räume mit Namen Bad/WC/Dusche/Nasszelle/Toilette …, „alle" in jedem Massstab. **Regeln** [33]: neue Bauteilart
+  `floor_finish` (nur Regeln, die sie ausdrücklich nennen, wie Schatten/Gelände): `hide` blendet aus, `hide: false`
+  erzwingt auch im 1:100, Farbe/Stärke/Linientyp. **Strich:** Tusche-grau #8c8c8c, 0.02–0.05 mm (Muster-Stärke
+  geklemmt, Vorgabe 0.035; Regel-Stärke ebenso), Teilung auf dem Papier nicht enger als 1.5 mm (sonst jede 2./4./8.
+  Linie, Verbands-Stossfugen entfallen, noch enger kein Muster). **Aussparungen:** Treppen (schon [155]),
+  Raumstempel-Rechteck (+1 mm Luft; Belag darum nach den Räumen gerechnet, `domains_after`), Blöcke der 2D-Zeichnungen
+  (Möbel/Sanitär, konvexe Hülle, `drawings::block_footprints`) und Körper auf dem Boden (Einbauten, ohne
+  Abzugskörper). Bildschirm = Druck (kein Unterschied nach `forPrint`/`compact`, getestet). Tests:
+  `belag_nur_ab_1_50_oder_fein`, `belag_nassraeume_im_1_100`, `belag_mindestteilung_und_feiner_strich`,
+  `belag_spart_stempel_und_moebel_aus`, `belag_regeln`, `darstellung_je_massstab_und_einstellung`, vitest
+  Ansichtsvorlage → Ebene. Goldens neu (komplex Grundrisse EG/OG/DG 1:100 ohne Belag, 1:50 feiner/ausgespart; CLI-Golden
+  unverändert). Geprüft: cargo test Kern, WASM (`--no-opt`), tsc, vitest, CLI-SVG Musterhaus komplex EG 1:100/1:50
+  und 1:100 mit „Nassräume" in Chromium. **Offen:** Nassraum-Erkennung nur nach Name (kein Nutzungs-/Belagsfeld am
+  Raum; Belag hängt an der Decke, nicht am Raum — Bad mit Parkett-Decke zeigt im Nassraum-Modus nichts); Möbel nur als
+  Blöcke/Körper (geschlossene 2D-Formen der Kategorie „Möbel" sparen nicht aus); Deckenspiegel-Untersicht unverändert
+  (0.1 mm, alte Ausdünnung); Level-Feld nur über Ansichtsvorlage einstellbar (kein eigenes Feld im Ebenen-Panel); nur
+  Linux, nicht in der Tauri-App/Metal angesehen. · S
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

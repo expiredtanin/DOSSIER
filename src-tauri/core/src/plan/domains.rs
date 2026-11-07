@@ -343,31 +343,87 @@ pub(super) fn view_hatch_override(p: &Project, o: Option<&overrides::LayerAction
 
 /// Bodenbeläge ([100]): Ansichtsmuster der obersten Schicht der Decke, auf der das Geschoss steht (OK
 /// Decke zwischen 0.3 m unter dem Geschossboden und der Schnitthöhe) — von oben gesehen, unter Wänden
-/// und Räumen gezeichnet.
-fn floor_finishes(c: &Ctx, out: &mut Vec<Primitive>) {
+/// und Räumen gezeichnet. [156] Massstabsgerecht (`floor_finish`): automatisch erst ab 1:50/„fein",
+/// Einstellung der Ebene (`floorFinish`), Regeln der Bauteilart „floor_finish"; spart Treppen, Möbel/
+/// Einbauten und die Raumstempel `rooms` (schon gesetzt) aus.
+fn floor_finishes(c: &Ctx, rooms: &[Primitive], out: &mut Vec<Primitive>) {
+    use super::floor_finish as ff;
     let p = c.p;
-    let base = p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
-    let cut = super::extras::cut_z(p, &c.a.floor);
-    for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| c.vis(&x.category_code, &x.id)) {
-        let top = p.ceiling_vertical_extent(ce).1;
-        if !(top >= base - 0.3 && top <= cut) {
-            continue;
-        }
+    let setting = p.floor(&c.a.floor).and_then(|l| l.floor_finish);
+    let mode = ff::show(setting, c.a.detail, c.a.scale);
+    let ceilings: Vec<&Ceiling> = {
+        let base = p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
+        let cut = super::extras::cut_z(p, &c.a.floor);
+        p.ceilings
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter(|x| c.vis(&x.category_code, &x.id))
+            .filter(|ce| {
+                let top = p.ceiling_vertical_extent(ce).1;
+                top >= base - 0.3 && top <= cut
+            })
+            .collect()
+    };
+    if ceilings.is_empty() {
+        return;
+    }
+    // Aussparungen und Nassräume erst rechnen, wenn ein Belag gezeichnet wird.
+    let mut excl: Option<Vec<Vec<[f64; 2]>>> = None;
+    let mut wet: Option<Vec<Vec<[f64; 2]>>> = None;
+    for ce in ceilings {
         // [33] Schicht-Override mit eigener Schraffur bzw. ohne Muster: kein Belagsmuster.
         if view_hatch_override(p, ceiling_view_override(c, ce, true).as_ref(), no_hatch()).1 {
             continue;
         }
-        let Some((segs, w, ink)) = crate::surface_pattern3d::floor_finish_segments(p, ce, c.a.scale) else { continue };
+        let Some((segs, w, ink, comp)) = crate::surface_pattern3d::floor_finish_segments(p, ce, c.a.scale) else { continue };
+        // [156] Regeln der Bauteilart „floor_finish": ausblenden, erzwingen (`hide: false`), Farbe/Stärke.
+        let ov = c.overrides(Some("floor_finish"), &ce.category_code, Some(&comp.name));
+        let mode = match ov.hide {
+            Some(true) => ff::Show::Off,
+            Some(false) => ff::Show::All,
+            None => mode,
+        };
+        let segs = match mode {
+            ff::Show::Off => continue,
+            ff::Show::All => segs,
+            ff::Show::Wet => {
+                if !ff::is_tile(comp) {
+                    continue;
+                }
+                ff::clip_inside_any(&segs, wet.get_or_insert_with(|| ff::wet_rooms(c)))
+            }
+        };
+        if segs.is_empty() {
+            continue;
+        }
+        let excl = excl.get_or_insert_with(|| {
+            // [155] Treppen des Geschosses stehen auf dem Belag: ihre Grundfläche spart ihn aus.
+            let mut v: Vec<Vec<[f64; 2]>> = p
+                .stairs
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .filter(|s| s.floor_id == c.a.floor && c.vis(&s.category_code, &s.id))
+                .filter_map(|s| crate::stair::decode_params(&s.encode()))
+                .flat_map(|sp| super::stair_symbol::footprint(&sp))
+                .collect();
+            v.extend(ff::exclusions(c, rooms));
+            v
+        });
+        let segs = ff::clip_outside_all(segs, excl);
+        let w = ov.lineweight.map_or(w, |x| ff::weight(Some(x)));
+        let ink = ov.color.unwrap_or(ink);
+        let dash = overrides::linetype_dash(p, ov.linetype_id.as_deref());
         let greyed = Some(c.greyed(&ce.category_code));
         for (a, b) in segs {
-            out.push(line(pv(a), pv(b), "floor-finish-pattern", w, None, &ink, greyed));
+            out.push(line(pv(a), pv(b), "floor-finish-pattern", w, dash.clone(), &ink, greyed));
         }
     }
 }
 
 fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<(), String> {
     let p = c.p;
-    floor_finishes(c, out);
     let range = super::view_range::ViewRange::of(p, &c.a.floor);
     // Ansichtsbereich ([36]): Decken anderer Geschosse „über Schnitt“ (bis Oberkante, z. B. Galerie
     // darüber) bzw. „unter Schnitt“ (bis „darunter sichtbar bis“) kommen dazu.
@@ -411,11 +467,15 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         };
         let stroke = color.unwrap_or(POCHE_STROKE);
         let view_hatch_id = resolve_hatch_id(ce.hatch_id.as_deref(), ce.hatch_source, category, comp.and_then(|k| k.view_hatch_id.as_deref()));
-        let hatch = match (c.a.detail != Detail::Grob, comp, view_hatch_id.filter(|s| !s.is_empty())) {
+        // [155] Eigene Decke über der Schnittebene: nur der strichpunktierte Umriss, die Fläche deckt nicht
+        // (sonst verschwänden Bodenbelag und Treppen darunter ausser im Deckenloch); Regeln wirken weiter.
+        let overhead = ce.floor_id == c.a.floor && zone == super::view_range::Zone::Above;
+        let hatch = match (c.a.detail != Detail::Grob && !overhead, comp, view_hatch_id.filter(|s| !s.is_empty())) {
             (true, Some(k), Some(id)) => resolve_hatch_or_none(p, id, None, resolve_foreground(k, ce.foreground.as_deref(), category, ce.foreground_source)),
             _ => no_hatch(),
         };
         let fill = match comp {
+            _ if overhead => "none".to_string(),
             Some(k) => resolve_background(k, ce.background.as_deref(), category, ce.background_source).unwrap_or(poche_fill(hatch.pattern)).to_string(),
             None => "none".to_string(),
         };
@@ -1170,6 +1230,12 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
     }
     let obstacles = stamp_obstacles_with(out, drawn);
     rooms(c, &mut out.rooms, bounds, &obstacles);
+    // [156] Bodenbelag nach den Raumstempeln (spart sie aus), zuunterst in der Gruppe der Decken.
+    let mut finish = Vec::new();
+    floor_finishes(c, &out.rooms, &mut finish);
+    if !finish.is_empty() {
+        out.ceilings.splice(0..0, finish);
+    }
 }
 
 /// Reihenfolge der Gruppen im Plan-Puffer der Abfrage `planDomains`: Schatten und Baurecht
@@ -1992,6 +2058,256 @@ mod tests {
         // Decke C1 (über dem EG) ist der Boden des OG: Belag im OG, nicht im EG.
         assert!(count("og") > 10);
         assert_eq!(count("eg"), 0);
+    }
+
+    /// [156] Beispiel mit Belagsmuster auf C1 (Boden des OG) und einem Raum im OG.
+    fn belag_projekt(kind: SurfacePatternKind, spacing: f64, height: f64) -> Project {
+        let mut p = sample();
+        let ce = p.ceilings.as_ref().unwrap()[0].clone();
+        let top = crate::model3d::ceiling_type_ref(&p, &ce).unwrap().2[0].component_id.clone();
+        let c = p.components.iter_mut().find(|c| c.id == top).unwrap();
+        c.surface_pattern = Some(SurfacePattern { kind, spacing, height: Some(height), ..Default::default() });
+        p
+    }
+
+    /// [156] Belagslinien des Grundrisses `floor` (Detail 0/1/2, Massstab, weitere Argumente).
+    fn belag(p: &Project, floor: &str, detail: f64, scale: f64, extra: serde_json::Value) -> Vec<(Vec2, Vec2, f64, String)> {
+        let mut t = serde_json::json!({ "floor": floor, "show": ["30", "40", "50", "60", "20"], "grey": [], "scale": scale });
+        if let (Some(o), Some(e)) = (t.as_object_mut(), extra.as_object()) {
+            o.extend(e.clone());
+        }
+        let r = plan_domains(p, &PlanArgs::parse(detail, &t.to_string()).unwrap()).unwrap();
+        r.ceilings
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Line { a, b, cls, weight_mm, color, .. } if cls == "floor-finish-pattern" => Some((*a, *b, *weight_mm, color.clone().unwrap_or_default())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn set_finish(p: &mut Project, floor: &str, v: Option<FloorFinishDisplay>) {
+        p.drawing_levels.iter_mut().find(|l| l.id == floor).unwrap().floor_finish = v;
+    }
+
+    /// [156] Belagsmuster automatisch nur ab 1:50 bzw. Detail „fein"; 1:100 ohne, „alle" zeigt es auch dort.
+    #[test]
+    fn belag_nur_ab_1_50_oder_fein() {
+        let mut p = belag_projekt(SurfacePatternKind::Grid, 0.3, 0.3);
+        let none = serde_json::json!({});
+        assert!(belag(&p, "og", 1.0, 50.0, none.clone()).len() > 10);
+        assert!(belag(&p, "og", 1.0, 100.0, none.clone()).is_empty());
+        assert!(belag(&p, "og", 2.0, 100.0, none.clone()).len() > 10, "fein auch im 1:100");
+        assert!(belag(&p, "og", 0.0, 50.0, none.clone()).is_empty(), "ausdrücklich grob");
+        set_finish(&mut p, "og", Some(FloorFinishDisplay::All));
+        assert!(belag(&p, "og", 1.0, 100.0, none.clone()).len() > 10);
+        set_finish(&mut p, "og", Some(FloorFinishDisplay::Off));
+        assert!(belag(&p, "og", 1.0, 50.0, none.clone()).is_empty());
+        // Bildschirm wie Druck (forPrint, kompakte Unterlage).
+        set_finish(&mut p, "og", None);
+        let screen = belag(&p, "og", 1.0, 50.0, serde_json::json!({ "compact": true }));
+        let print = belag(&p, "og", 1.0, 50.0, serde_json::json!({ "forPrint": true }));
+        assert_eq!(screen.len(), print.len());
+        assert!(!screen.is_empty());
+    }
+
+    /// [156] „Nassräume": im 1:100 nur Plattenbeläge, nur in Bad/WC/Dusche; Parkett nicht.
+    #[test]
+    fn belag_nassraeume_im_1_100() {
+        let mut p = belag_projekt(SurfacePatternKind::Grid, 0.3, 0.3);
+        let mut bad = p.rooms.as_ref().unwrap()[0].clone();
+        bad.id = "R-bad".into();
+        bad.floor_id = "og".into();
+        bad.name = "Bad".into();
+        bad.stamp_anchor = Some(Vec2 { x: 4.4, y: 3.6 });
+        bad.boundary = vec![Vec2 { x: 3.0, y: 2.0 }, Vec2 { x: 4.8, y: 2.0 }, Vec2 { x: 4.8, y: 3.8 }, Vec2 { x: 3.0, y: 3.8 }];
+        let mut wohnen = bad.clone();
+        wohnen.id = "R-wohnen".into();
+        wohnen.name = "Wohnen".into();
+        wohnen.stamp_anchor = Some(Vec2 { x: 1.0, y: 1.0 });
+        wohnen.boundary = vec![Vec2 { x: 0.2, y: 0.2 }, Vec2 { x: 2.8, y: 0.2 }, Vec2 { x: 2.8, y: 3.8 }, Vec2 { x: 0.2, y: 3.8 }];
+        p.rooms.as_mut().unwrap().extend([bad.clone(), wohnen]);
+        set_finish(&mut p, "og", Some(FloorFinishDisplay::Wet));
+        let wet = belag(&p, "og", 1.0, 100.0, serde_json::json!({}));
+        assert!(wet.len() >= 4, "{}", wet.len());
+        let ring: Vec<[f64; 2]> = bad.boundary.iter().map(|v| [v.x, v.y]).collect();
+        for (a, b, ..) in &wet {
+            let m = [(a.x + b.x) / 2.0, (a.y + b.y) / 2.0];
+            assert!(crate::surface_pattern::point_in(m, &ring), "Belag ausserhalb des Bads: {a:?}–{b:?}");
+        }
+        // 1:50: alle Räume.
+        assert!(belag(&p, "og", 1.0, 50.0, serde_json::json!({})).len() > wet.len());
+        // Parkett (Verband, kein Plattenname) im Nassraum-Modus: kein Belag im 1:100.
+        let mut q = belag_projekt(SurfacePatternKind::RunningBond, 0.6, 0.1);
+        let ce = q.ceilings.as_ref().unwrap()[0].clone();
+        let top = crate::model3d::ceiling_type_ref(&q, &ce).unwrap().2[0].component_id.clone();
+        let comp = q.components.iter_mut().find(|c| c.id == top).unwrap();
+        comp.name = "Parkett".into();
+        assert!(!super::super::floor_finish::is_tile(comp), "{}", comp.id);
+        q.rooms = p.rooms.clone();
+        set_finish(&mut q, "og", Some(FloorFinishDisplay::Wet));
+        assert!(belag(&q, "og", 1.0, 100.0, serde_json::json!({})).is_empty());
+        assert!(!belag(&q, "og", 1.0, 50.0, serde_json::json!({})).is_empty());
+    }
+
+    /// [156] Teilung auf dem Papier nicht enger als 1.5 mm; Strich fein (0.02–0.05 mm) in Tusche-Grau.
+    #[test]
+    fn belag_mindestteilung_und_feiner_strich() {
+        let p = belag_projekt(SurfacePatternKind::Lines, 0.05, 0.05);
+        let gaps = |scale: f64| {
+            let mut xs: Vec<f64> = belag(&p, "og", 1.0, scale, serde_json::json!({})).iter().filter(|(a, b, ..)| (a.x - b.x).abs() < 1e-9).map(|(a, ..)| a.x).collect();
+            xs.sort_by(f64::total_cmp);
+            xs.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+            assert!(xs.len() > 3, "{scale}: {xs:?}");
+            xs.windows(2).map(|w| w[1] - w[0]).fold(f64::INFINITY, f64::min)
+        };
+        // 1:20: 5 cm = 2.5 mm auf dem Papier, volle Teilung.
+        assert!((gaps(20.0) - 0.05).abs() < 1e-6);
+        // 1:50: 5 cm = 1 mm → jede 2. Linie (2 mm).
+        let g = gaps(50.0);
+        assert!(g * 1000.0 / 50.0 >= super::super::floor_finish::MIN_PAPER_MM - 1e-9, "{g}");
+        for (_, _, w, color) in belag(&p, "og", 1.0, 50.0, serde_json::json!({})) {
+            assert!((0.02..=0.05).contains(&w), "{w}");
+            assert_eq!(color, super::super::floor_finish::INK);
+        }
+    }
+
+    /// [156] Belag spart Raumstempel und Möbel/Einbauten (Blöcke, Körper) aus.
+    #[test]
+    fn belag_spart_stempel_und_moebel_aus() {
+        let mut p = belag_projekt(SurfacePatternKind::Grid, 0.1, 0.1);
+        let mut r = p.rooms.as_ref().unwrap()[0].clone();
+        r.floor_id = "og".into();
+        r.id = "R-og".into();
+        p.rooms.as_mut().unwrap().push(r);
+        p.block_defs = Some(vec![serde_json::from_value(serde_json::json!({ "id": "tisch", "name": "Tisch", "geom2d": [
+            { "shape": "rect", "min": {"x": -0.4, "y": -0.4}, "max": {"x": 0.4, "y": 0.4} } ] })).unwrap()]);
+        p.drawings2d.push(serde_json::from_value(serde_json::json!({ "id": "m1", "type": "drawing2d", "levelId": "og", "categoryCode": "20",
+            "geom": {"shape": "block", "blockDefId": "tisch", "at": {"x": 1.0, "y": 1.0}, "rotation": 0} })).unwrap());
+        p.extruded_solids = Some(vec![serde_json::from_value(serde_json::json!({ "id": "kueche", "type": "extrudedSolid", "levelId": "og",
+            "points": [{"x": 3.6, "y": 0.2}, {"x": 4.8, "y": 0.2}, {"x": 4.8, "y": 0.8}, {"x": 3.6, "y": 0.8}], "height": 0.9 })).unwrap()]);
+        let t = serde_json::json!({ "floor": "og", "show": ["30", "60", "20"], "grey": [], "scale": 50 }).to_string();
+        let d = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        let stamp = d.rooms.iter().find_map(|q| match q { Primitive::Text { at, doc, extra_lines, base_pt, .. } => Some((*at, stamp_size_m(doc, extra_lines, *base_pt, 50.0))), _ => None }).unwrap();
+        let (at, (w, h)) = stamp;
+        let inside = |m: [f64; 2], x0: f64, y0: f64, x1: f64, y1: f64| m[0] > x0 + 1e-6 && m[0] < x1 - 1e-6 && m[1] > y0 + 1e-6 && m[1] < y1 - 1e-6;
+        let lines = belag(&p, "og", 1.0, 50.0, serde_json::json!({}));
+        assert!(lines.len() > 20);
+        for (a, b, ..) in &lines {
+            for k in 1..10 {
+                let t = k as f64 / 10.0;
+                let m = [a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t];
+                assert!(!inside(m, at.x - w / 2.0, at.y - h / 2.0, at.x + w / 2.0, at.y + h / 2.0), "Belag im Stempel {m:?}");
+                assert!(!inside(m, 0.6, 0.6, 1.4, 1.4), "Belag unter dem Möbel {m:?}");
+                assert!(!inside(m, 3.6, 0.2, 4.8, 0.8), "Belag unter dem Einbau {m:?}");
+            }
+        }
+    }
+
+    /// [156] Override-Regeln der Bauteilart „floor_finish": ausblenden, erzwingen, färben.
+    #[test]
+    fn belag_regeln() {
+        let mut p = belag_projekt(SurfacePatternKind::Grid, 0.3, 0.3);
+        let rule = |actions: serde_json::Value| -> OverrideRule {
+            serde_json::from_value(serde_json::json!({"id": "b", "name": "b", "enabled": true, "condition": {"type": "element_kind", "operator": "equals", "value": "floor_finish"}, "actions": actions})).unwrap()
+        };
+        p.override_rules = Some(vec![rule(serde_json::json!({"hide": true}))]);
+        assert!(belag(&p, "og", 1.0, 50.0, serde_json::json!({})).is_empty());
+        p.override_rules = Some(vec![rule(serde_json::json!({"hide": false, "color": "#336699", "lineweight": 0.5}))]);
+        let l = belag(&p, "og", 1.0, 100.0, serde_json::json!({}));
+        assert!(l.len() > 10);
+        assert!(l.iter().all(|(_, _, w, c)| c == "#336699" && (*w - 0.05).abs() < 1e-12));
+        // Eine allgemeine Regel (Ebene) färbt den Belag nicht.
+        p.override_rules = Some(vec![serde_json::from_value(serde_json::json!({"id": "x", "name": "x", "enabled": true, "condition": {"type": "layer_name", "operator": "not_equals", "value": "zzz"}, "actions": {"color": "#ff0000"}})).unwrap()]);
+        assert!(belag(&p, "og", 1.0, 50.0, serde_json::json!({})).iter().all(|(.., c)| c == super::super::floor_finish::INK));
+    }
+
+    /// [155] Die eigene Decke über der Schnittebene deckt nicht (Bodenbelag und Treppen bleiben sichtbar).
+    #[test]
+    fn eigene_decke_ueber_schnitt_deckt_nicht() {
+        let p = sample();
+        let poly = |floor: &str| {
+            let t = serde_json::json!({ "floor": floor, "show": ["30"], "grey": [], "scale": 50 }).to_string();
+            let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            let v = serde_json::to_value(&r.ceilings).unwrap();
+            v.as_array().unwrap().iter().find(|q| q["ceilingId"] == "C1" && q["kind"] == "polygon").map(|q| q["fill"].as_str().unwrap_or("").to_string())
+        };
+        assert_eq!(poly("eg").as_deref(), Some("none"));
+    }
+
+    /// [155] Treppen sparen den Bodenbelag aus: kein Musterstück schneidet die Treppen-Grundfläche.
+    #[test]
+    fn belag_ausgespart_unter_treppe() {
+        let mut p = sample();
+        let ce = p.ceilings.as_ref().unwrap()[0].clone();
+        let top = crate::model3d::ceiling_type_ref(&p, &ce).unwrap().2[0].component_id.clone();
+        let c = p.components.iter_mut().find(|c| c.id == top).unwrap();
+        c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Grid, spacing: 0.3, height: Some(0.3), ..Default::default() });
+        // Treppe im OG (steht auf C1)
+        let mut st = p.stairs.as_ref().unwrap()[0].clone();
+        st.id = "ST2".into();
+        st.floor_id = "og".into();
+        p.stairs.as_mut().unwrap().push(st.clone());
+        let t = serde_json::json!({ "floor": "og", "show": ["30", "40"], "grey": [], "scale": 50 }).to_string();
+        let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        let fp = super::super::stair_symbol::footprint(&crate::stair::decode_params(&st.encode()).unwrap()).remove(0);
+        let mut n = 0;
+        for q in &r.ceilings {
+            if let Primitive::Line { a, b, cls, .. } = q {
+                if cls != "floor-finish-pattern" {
+                    continue;
+                }
+                n += 1;
+                for k in 1..10 {
+                    let t = k as f64 / 10.0;
+                    let m = [a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t];
+                    let edge = (0..fp.len()).any(|i| {
+                        let (u, w) = (fp[i], fp[(i + 1) % fp.len()]);
+                        let d = [w[0] - u[0], w[1] - u[1]];
+                        let s = (((m[0] - u[0]) * d[0] + (m[1] - u[1]) * d[1]) / (d[0] * d[0] + d[1] * d[1])).clamp(0.0, 1.0);
+                        (m[0] - u[0] - d[0] * s).hypot(m[1] - u[1] - d[1] * s) < 1e-6
+                    });
+                    assert!(!crate::surface_pattern::point_in(m, &fp) || edge, "Belag in der Treppe: {a:?}–{b:?}");
+                }
+            }
+        }
+        assert!(n > 10, "Belag ausserhalb bleibt");
+    }
+
+    /// [155] Treppe aus dem Geschoss darunter im Deckenloch: ausgezogen, auf das Loch beschnitten, mit
+    /// Absturzsicherung an den freien Lochrändern, nicht an der Austrittskante.
+    #[test]
+    fn ankommende_treppe_im_deckenloch_mit_absturzsicherung() {
+        let mut p = sample();
+        // ST1: x 3.2 … 4.2, y 0.4 → 3.6 (Austritt bei y = 3.6); Loch in C1 darüber
+        let hole = vec![Vec2 { x: 3.2, y: 1.6 }, Vec2 { x: 4.2, y: 1.6 }, Vec2 { x: 4.2, y: 3.6 }, Vec2 { x: 3.2, y: 3.6 }];
+        p.ceilings.as_mut().unwrap()[0].openings = Some(vec![hole]);
+        let run = |p: &Project| {
+            let t = serde_json::json!({ "floor": "og", "show": ["30", "40"], "grey": [], "scale": 50 }).to_string();
+            plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().stairs
+        };
+        let st = run(&p);
+        let lines: Vec<(String, Vec2, Vec2, bool)> = st
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Line { a, b, cls, dash, stair_id, .. } if stair_id.as_deref() == Some("ST1") => Some((cls.clone(), *a, *b, dash.as_ref().is_some_and(|d| d.is_some()))),
+                _ => None,
+            })
+            .collect();
+        let sym: Vec<_> = lines.iter().filter(|l| l.0 != "stair-guard").collect();
+        assert!(sym.iter().any(|l| l.0 == "stair-tread"), "Tritte im Loch sichtbar");
+        assert!(sym.iter().all(|l| !l.3), "von oben: alles ausgezogen");
+        assert!(sym.iter().all(|l| l.1.y >= 1.6 - 1e-9 && l.2.y >= 1.6 - 1e-9), "auf das Loch beschnitten");
+        assert!(sym.iter().all(|l| l.0 != "stair-break"));
+        let guard: Vec<_> = lines.iter().filter(|l| l.0 == "stair-guard").collect();
+        assert!(!guard.is_empty(), "Absturzsicherung");
+        // nicht an der Austrittskante (y = 3.6), aber an der Lochkante y = 1.6 (ausserhalb des Lochs)
+        assert!(guard.iter().all(|l| !((l.1.y - 3.6).abs() < 0.1 && (l.2.y - 3.6).abs() < 0.1 && (l.1.x - l.2.x).abs() > 0.2)), "{guard:?}");
+        assert!(guard.iter().any(|l| l.1.y < 1.6 && l.2.y < 1.6 && (l.1.x - l.2.x).abs() > 0.5));
+        // ohne Loch: nichts von ST1 im OG
+        let mut q = p.clone();
+        q.ceilings.as_mut().unwrap()[0].openings = None;
+        assert!(run(&q).iter().all(|x| !matches!(x, Primitive::Line { stair_id, .. } if stair_id.as_deref() == Some("ST1"))));
     }
 
     #[test]

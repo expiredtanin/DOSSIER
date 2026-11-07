@@ -157,6 +157,15 @@ function TemplateDetail({
       {bool("scaleLineWeights", t("resources.viewTemplates.scaleLineWeights"))}
       {bool("sketch", t("resources.viewTemplates.sketch"))}
       {bool("cutHatch", t("resources.viewTemplates.cutHatch"))}
+      <Optional label={t("resources.viewTemplates.floorFinish")} on={tpl.floorFinish !== undefined} onToggle={(on) => patch({ floorFinish: on ? "off" : null })}>
+        <select className="res-input" aria-label={t("resources.viewTemplates.floorFinish")} value={tpl.floorFinish ?? "off"} onChange={(e) => patch({ floorFinish: e.target.value })}>
+          {(["off", "wet", "all"] as const).map((v) => (
+            <option key={v} value={v}>
+              {t(`resources.viewTemplates.floorFinish.${v}`)}
+            </option>
+          ))}
+        </select>
+      </Optional>
       <RulesSection tpl={tpl} project={project} h={h} />
       <div className="res-hint">{t("resources.viewTemplates.rangeHint")}</div>
       {num("cutHeight", t("resources.viewTemplates.cutHeight"), 1.0)}

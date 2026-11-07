@@ -63,7 +63,8 @@ pub struct Subject<'a> {
     /// Element-/Typ-Name (Wandtyp, Raum, Öffnungs-Label …).
     pub object_name: Option<&'a str>,
     /// [33] Bauteilart: "wall", "slab", "ground_slab", "roof", "stair", "column", "opening", "room", dazu
-    /// [`SPECIAL_KINDS`] "shadow" (Schlagschatten der Ansicht) und "terrain" (Gelände/Höhenlinien).
+    /// [`SPECIAL_KINDS`] "shadow" (Schlagschatten der Ansicht), "terrain" (Gelände/Höhenlinien) und "floor_finish"
+    /// (Bodenbelag-Muster im Grundriss, [156]).
     pub element_kind: Option<&'a str>,
     /// [33] Funktion der Schicht ([`function_key`]).
     pub layer_function: Option<&'a str>,
@@ -101,7 +102,7 @@ impl Actions {
 /// [33] Bauteilarten ohne eigenes Element im Modell (Schlagschatten der Ansicht, Gelände/Höhenlinien): Sie
 /// folgen nur Regeln, die die Bauteilart ausdrücklich nennen (gleich/enthält/beginnt mit) — sonst würden
 /// allgemeine Regeln („Ebene ≠ …“, „Bauteilart ≠ Fenster/Tür“) sie plötzlich mitfärben.
-pub const SPECIAL_KINDS: [&str; 2] = ["shadow", "terrain"];
+pub const SPECIAL_KINDS: [&str; 3] = ["shadow", "terrain", "floor_finish"];
 
 /// [33] Wirkt die Regel auf diese Bauteilart? Für [`SPECIAL_KINDS`] nur mit positiver Bauteilart-Bedingung.
 fn kind_ok(rule: &OverrideRule, s: &Subject) -> bool {
