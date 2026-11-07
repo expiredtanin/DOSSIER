@@ -76,7 +76,7 @@ const SCALEBAR_TEXT_MM: f64 = 3.0;
 // Konstruktionslinie / Strahl.
 const XLINE_EXTEND_M: f64 = 1000.0;
 const XLINE_WEIGHT_MM: f64 = 0.13;
-const XLINE_DASH: [f64; 4] = [0.3, 0.1, 0.03, 0.1];
+const XLINE_DASH: [f64; 4] = super::line_pattern::CONSTRUCTION;
 
 /// Default-Grösse der Linienenden (Papier-mm).
 const END_MARK_DEFAULT_SIZE_MM: f64 = 3.0;
@@ -877,7 +877,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             if let Some(spec) = crate::grid::Spec::of(geom) {
                 // [140] Achsen enden an der Gebäudegrundfläche (alle Geschosse vereinigt).
                 let house = super::context::building_rings(p);
-                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), scale, &house);
+                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), &house);
             }
         }
         Drawing2DGeom::Text { at, text: s, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts, paper_height } => {
@@ -1007,10 +1007,10 @@ fn dimension_segment(em: &mut Em, a: Vec2, b: Vec2, offset: f64, st: &DimStyle) 
 }
 
 /// Achsraster ([112]): Achsen strichpunktiert, an den Enden Blasen mit der Beschriftung.
-fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, scale: f64, house: &[Vec<Vec2>]) {
+fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<Vec2>]) {
     use crate::grid::Shape;
-    let mm = |x: f64| mm_to_model(x, scale);
-    let dash = [mm(12.0), mm(2.5), mm(1.5), mm(2.5)];
+    // [153] Achsen strichpunktiert in Papier-mm (vorher mit dem Massstab in Modell-Meter vorskaliert).
+    let dash = super::line_pattern::AXIS;
     let dash_ref = em.sink.fresh_ref();
     let w = jsnum::min(em.weight, XLINE_WEIGHT_MM.max(0.18));
     let r = diameter / 2.0;

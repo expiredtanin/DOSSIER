@@ -327,7 +327,7 @@ describe("generatePlan — Auf-/Untersicht-Andeutung (WindowType.sillLine)", () 
     const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
     const lines = linesOfClass(p, "window-sill", "mittel");
     expect(lines.length).toBe(1);
-    expect(lines[0].kind === "line" && lines[0].dash).toEqual([0.4, 0.12, 0, 0.12]);
+    expect(lines[0].kind === "line" && lines[0].dash).toEqual([6, 1.5, 0, 1.5]);
   });
 });
 

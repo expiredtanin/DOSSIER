@@ -13,7 +13,7 @@
 //! 3 arc      [3, weightMm, cx, cy, fromX, fromY, toX, toY, r]            (cls immer stair-outline)
 //! cls        0 stair-outline · 1 stair-tread · 2 stair-break · 3 stair-run · 4 stair-arrow · 5 stair-handrail
 //! ```
-//! Gestrichelte Linien tragen das Strichmuster `[0.12, 0.08]` (Meter, `DASH`).
+//! Gestrichelte Linien tragen das Strichmuster `DASH` (verdeckt, Papier-mm, [153]).
 //!
 //! [151] Handlauf (`railing` 0 keiner, 1 links, 2 rechts, 3 beide): Achse aus [`crate::stair_rail`] (wie im
 //! 3D), unter der Bruchhöhe ausgezogen, darüber gestrichelt; `double` (1:50/fein) zeichnet die beiden
@@ -24,7 +24,7 @@ use crate::stair::decode_params;
 use kernel2d::{stair_cut, stair_geometry, stair_outline, Vec2};
 use std::collections::HashSet;
 
-pub const DASH: [f64; 2] = [0.12, 0.08];
+pub const DASH: [f64; 2] = super::line_pattern::HIDDEN;
 
 const CLS_OUTLINE: f64 = 0.0;
 const CLS_TREAD: f64 = 1.0;

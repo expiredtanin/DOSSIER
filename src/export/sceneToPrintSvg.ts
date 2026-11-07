@@ -22,6 +22,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { core } from "../engine/coreWasm";
 import { lineEndsSvgAttrs } from "../model/lineEnds";
 import type {
   RArc,
@@ -278,8 +279,25 @@ function appendStroke(
     el.setAttribute("stroke-dasharray", dash.map((d) => round(d)).join(" "));
     // Punkte (Strich 0) brauchen runde Enden, sonst unsichtbar ([96]).
     if (dash.some((d) => d === 0)) el.setAttribute("stroke-linecap", "round");
+    setDashOffset(el, pts.map((p) => map(p)), closed, dash);
   }
   svg.appendChild(el);
+}
+
+/**
+ * [153] Musterphase eines gestrichelten Zugs (Papier-mm-Punkte): Kern `plan::line_pattern::phase`,
+ * damit beide Enden möglichst auf einem Strich liegen — gleich wie Plan-/Druck-SVG und Bildschirm.
+ */
+function setDashOffset(el: Element, ptsMm: [number, number][], closed: boolean, dash: number[]): void {
+  let len = 0;
+  const n = ptsMm.length;
+  for (let i = 0; i + 1 < n + (closed ? 1 : 0); i++) {
+    const [ax, ay] = ptsMm[i];
+    const [bx, by] = ptsMm[(i + 1) % n];
+    len += Math.hypot(bx - ax, by - ay);
+  }
+  const ph = core().line_dash_phase(len, Float64Array.from(dash));
+  if (ph > 1e-9) el.setAttribute("stroke-dashoffset", String(round(ph)));
 }
 
 /** Freies Liniensegment (Tuerblatt, Referenzlinie, Symbol). */
@@ -298,6 +316,7 @@ function appendLine(svg: SVGSVGElement, l: RLine, map: Mapper, _mmPerM: number):
   if (l.dash && l.dash.length) {
     el.setAttribute("stroke-dasharray", l.dash.map((d) => round(d)).join(" "));
     if (l.dash.some((d) => d === 0)) el.setAttribute("stroke-linecap", "round");
+    setDashOffset(el, [[ax, ay], [bx, by]], false, l.dash);
   }
   svg.appendChild(el);
 }

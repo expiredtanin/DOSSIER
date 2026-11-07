@@ -1848,7 +1848,7 @@ mod tests {
         assert!(!s3.contains("\"unten\""), "{s3}");
         p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_depth = Some(0.3);
         let (_, s4) = walls(&p);
-        assert!(s4.contains("\"unten\"") && s4.contains("[0.04,0.08]"), "{s4}");
+        assert!(s4.contains("\"unten\"") && s4.contains("[0.0,1.0]"), "{s4}");
     }
 
     fn set_range(p: &mut Project, floor: &str, top: Option<f64>, bottom: Option<f64>, depth: Option<f64>) {
@@ -1874,11 +1874,11 @@ mod tests {
         assert!(!ceil(&p, "eg").contains("\"GAL\""));
         set_range(&mut p, "eg", Some(3.0), None, None);
         let e1 = ceil(&p, "eg");
-        assert!(e1.contains("\"GAL\"") && e1.contains("[0.4,0.12,0.0,0.12]"), "{e1}");
+        assert!(e1.contains("\"GAL\"") && e1.contains("[6.0,1.5,0.0,1.5]"), "{e1}");
         // OG mit Unterkante 0.1 m und Tiefe: EG-Decke (bis OK OG-Boden) gepunktet „unter Schnitt“.
         set_range(&mut p, "og", None, Some(0.1), Some(0.5));
         let o1 = ceil(&p, "og");
-        assert!(o1.contains("\"GAL\"") && o1.contains("[0.04,0.08]") && !o1.contains("[0.4,0.12,0.0,0.12]"), "{o1}");
+        assert!(o1.contains("\"GAL\"") && o1.contains("[0.0,1.0]") && !o1.contains("[6.0,1.5,0.0,1.5]"), "{o1}");
         // Ohne Tiefe: entfällt wieder.
         set_range(&mut p, "og", None, Some(0.1), None);
         assert!(!ceil(&p, "og").contains("\"GAL\""));
@@ -1893,8 +1893,8 @@ mod tests {
         // EG mit Oberkante bis über die Traufe: Dach des OG strichpunktiert (Vordach/Dach darüber).
         set_range(&mut p, "eg", Some(9.0), None, None);
         let e1 = roofs(&p, "eg");
-        assert!(e1.contains("RF1") && e1.contains("roof-eaves") && e1.contains("[0.4,0.12,0.0,0.12]"), "{e1}");
-        assert!(!e1.contains("[0.04,0.08]"));
+        assert!(e1.contains("RF1") && e1.contains("roof-eaves") && e1.contains("[6.0,1.5,0.0,1.5]"), "{e1}");
+        assert!(!e1.contains("[0.0,1.0]"));
         // Oberkante darunter: weiterhin nicht.
         set_range(&mut p, "eg", Some(3.0), None, None);
         assert!(!roofs(&p, "eg").contains("RF1"));
@@ -1905,10 +1905,10 @@ mod tests {
         dg.cut_height = Some(1.0);
         p.drawing_levels.push(dg);
         let d0 = roofs(&p, "dg");
-        assert!(d0.contains("RF1") && !d0.contains("[0.04,0.08]"), "{d0}");
+        assert!(d0.contains("RF1") && !d0.contains("[0.0,1.0]"), "{d0}");
         set_range(&mut p, "dg", None, Some(0.0), Some(9.0));
         let d1 = roofs(&p, "dg");
-        assert!(d1.contains("RF1") && d1.contains("[0.04,0.08]"), "{d1}");
+        assert!(d1.contains("RF1") && d1.contains("[0.0,1.0]"), "{d1}");
         set_range(&mut p, "dg", None, Some(0.0), None);
         assert!(!roofs(&p, "dg").contains("RF1"));
     }
@@ -1926,7 +1926,7 @@ mod tests {
         };
         let of = |v: &serde_json::Value, id: &str| -> Vec<serde_json::Value> { v.as_array().unwrap().iter().filter(|x| x["openingId"] == id).cloned().collect() };
         let w1_polys = |v: &serde_json::Value| v.as_array().unwrap().iter().filter(|x| x["kind"] == "polygon" && x["wallId"] == "W1").count();
-        let dashed = |xs: &[serde_json::Value]| xs.iter().filter(|x| x["kind"] == "line").all(|x| x["dash"] == serde_json::json!([0.4, 0.12, 0.0, 0.12]));
+        let dashed = |xs: &[serde_json::Value]| xs.iter().filter(|x| x["kind"] == "line").all(|x| x["dash"] == serde_json::json!([6.0, 1.5, 0.0, 1.5]));
         // Ohne Grenzen: wie bisher (Lücke in der Wand, Symbol ausgezogen).
         let (w0, r0) = run(&p);
         assert!(!of(&w0, "O1").is_empty() && !dashed(&of(&w0, "O1")));
@@ -1960,7 +1960,7 @@ mod tests {
         let run = |p: &Project| serde_json::to_value(&plan_domains(p, &args("eg", 1.0, &codes)).unwrap().walls).unwrap();
         let of = |v: &serde_json::Value, id: &str| -> Vec<serde_json::Value> { v.as_array().unwrap().iter().filter(|x| x["openingId"] == id).cloned().collect() };
         let w1_polys = |v: &serde_json::Value| v.as_array().unwrap().iter().filter(|x| x["kind"] == "polygon" && x["wallId"] == "W1").count();
-        let dotted = |xs: &[serde_json::Value]| xs.iter().filter(|x| x["kind"] == "line").all(|x| x["dash"] == serde_json::json!([0.04, 0.08]));
+        let dotted = |xs: &[serde_json::Value]| xs.iter().filter(|x| x["kind"] == "line").all(|x| x["dash"] == serde_json::json!([0.0, 1.0]));
         let w0 = run(&p);
         assert!(!of(&w0, "O1").is_empty() && !dotted(&of(&w0, "O1")));
         // Unterkante 0 m: Schlitz liegt im Bereich unter dem Schnitt → Wand geschlossen, Symbol gepunktet.

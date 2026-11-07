@@ -23,9 +23,10 @@ const LINE_CLS: [&str; 11] = [
 
 fn dash_of(code: f64) -> Option<Vec<f64>> {
     match code as i64 {
-        1 => Some(vec![0.18, 0.09]),
+        // Papier-mm ([153]): 1 gestrichelt, 2 Überkopf, 3 punktiert.
+        1 => Some(super::line_pattern::HIDDEN.to_vec()),
         2 => Some(OVERHEAD_DASH.to_vec()),
-        3 => Some(vec![0.04, 0.08]),
+        3 => Some(super::line_pattern::DOTTED.to_vec()),
         _ => None,
     }
 }

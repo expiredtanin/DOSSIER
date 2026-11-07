@@ -187,6 +187,7 @@ mod tests {
             ("fill", super::shaders::FILL_WGSL),
             ("line", super::shaders::LINE_WGSL),
             ("arc", super::shaders::ARC_WGSL),
+            ("dash", super::shaders::DASH_LINE_WGSL),
         ] {
             let module = naga::front::wgsl::parse_str(src)
                 .unwrap_or_else(|e| panic!("{name}: WGSL-Parse-Fehler: {e:?}"));

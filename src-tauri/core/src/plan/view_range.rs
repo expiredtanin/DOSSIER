@@ -9,8 +9,8 @@ use crate::model::*;
 
 /// Strichmuster „über Schnitt“ (wie die Dach-/Deckenkanten, Strichpunkt nach SIA 400 B.3.3).
 pub const ABOVE_DASH: [f64; 4] = super::style::OVERHEAD_DASH;
-/// Strichmuster „unter Schnitt“ (gepunktet).
-pub const UNDER_DASH: [f64; 2] = [0.04, 0.08];
+/// Strichmuster „unter Schnitt“ (gepunktet, Papier-mm, [153]).
+pub const UNDER_DASH: [f64; 2] = super::line_pattern::DOTTED;
 
 /// Lage eines Bauteils zum Ansichtsbereich.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

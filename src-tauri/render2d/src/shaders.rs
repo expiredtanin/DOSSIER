@@ -283,7 +283,8 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 /// das Strichmuster rechnet der Fragment-Shader aus der Lauflaenge (frueher zerlegte die CPU jeden
 /// Zug in seine Striche, je mit runden Kappen — bei grossen Schnitten mit verdeckten Kanten
 /// Hunderte Millionen Indizes). Gleiche Semantik wie damals (`tessellate::dash_coverage` ist der
-/// CPU-Spiegel dieses Shaders): Phase ab Zuganfang ueber Ecken durch, Striche mit runden Enden
+/// CPU-Spiegel dieses Shaders): Phase ueber Ecken durch, am Zuganfang so gewaehlt, dass beide Enden
+/// moeglichst auf einem Strich liegen ([153], `dash_phase`), Striche mit runden Enden
 /// (Radius = halbe Strichbreite), hinter dem Zugende kein neuer Strich.
 ///
 /// Das Quad liegt um das Segment, an beiden Enden um die halbe Breite verlaengert (Kappen/Ecken).
@@ -309,10 +310,56 @@ struct VsOut {
     @builtin(position) pos : vec4<f32>,
     @location(0)                    sy  : vec2<f32>,
     @location(1) @interpolate(flat) seg : vec4<f32>,
-    @location(2) @interpolate(flat) pat : vec2<f32>,
+    @location(2) @interpolate(flat) pat : vec4<f32>,
     @location(3) @interpolate(flat) d0  : vec4<f32>,
     @location(4) @interpolate(flat) d1  : vec4<f32>,
 };
+
+// [153] Sichtbares Strichstueck an einem Zugende (Spiegel `tessellate::dash_stub`).
+fn dash_stub(p : f32, len : f32, total : f32, n : i32, c : array<f32, 8>, at_end : bool) -> f32 {
+    var cyc = c;
+    var m = p - floor(p / total) * total;
+    if (at_end && m <= 0.0) { m = total; }
+    var acc = 0.0;
+    var r = 0.0;
+    for (var i = 0; i < 8; i = i + 1) {
+        if (i >= n) { break; }
+        let d = cyc[i];
+        var hit = m >= acc && m < acc + d;
+        var v = acc + d - m;
+        if (at_end) {
+            hit = m > acc && m <= acc + d;
+            v = m - acc;
+        }
+        if (hit) {
+            if ((i % 2) == 0) { r = min(v, len); } else { r = -v; }
+        }
+        acc = acc + d;
+    }
+    return r;
+}
+
+// [153] Musterphase am Zuganfang: beide Enden moeglichst auf einem Strich (Spiegel `tessellate::dash_phase`).
+fn dash_phase(len : f32, total : f32, n : i32, c : array<f32, 8>) -> f32 {
+    if (!(len > 0.0) || !(total > 1e-6) || n < 2) { return 0.0; }
+    var cyc = c;
+    var best_p = 0.0;
+    var best = min(dash_stub(0.0, len, total, n, c, false), dash_stub(len, len, total, n, c, true));
+    var acc = 0.0;
+    for (var i = 0; i < 8; i = i + 1) {
+        if (i >= n) { break; }
+        let d = cyc[i];
+        let q = acc + 0.5 * d - 0.5 * len;
+        let p = q - floor(q / total) * total;
+        let s = min(dash_stub(p, len, total, n, c, false), dash_stub(p + len, len, total, n, c, true));
+        if (s > best + 1e-4 * total) {
+            best = s;
+            best_p = p;
+        }
+        acc = acc + d;
+    }
+    return best_p;
+}
 
 @vertex
 fn vs_main(
@@ -354,9 +401,12 @@ fn vs_main(
     out.seg = vec4<f32>(s0, s0 + seg_px, run.y * pps, hw);
     // Muster bei 1:100 kompiliert, auf dem Papier in mm: mit dem Massstab mitskalieren ([96]).
     let ds = select(1.0, globals.dash_scale, globals.dash_scale > 0.0);
-    out.pat = vec2<f32>(run.z * pps * ds, run.w);
+    let total = run.z * pps * ds;
     out.d0 = d0 * pps * ds;
     out.d1 = d1 * pps * ds;
+    let n = i32(run.w + 0.5) % 16;
+    let cyc = array<f32, 8>(out.d0.x, out.d0.y, out.d0.z, out.d0.w, out.d1.x, out.d1.y, out.d1.z, out.d1.w);
+    out.pat = vec4<f32>(total, run.w, dash_phase(run.y * pps, total, n, cyc), 0.0);
     return out;
 }
 
@@ -374,8 +424,10 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let cap_kind = nc / 16;
     var e_in = 0.0;
     if (n > 0 && total > 1e-6) {
-        let k = floor(sc / total);
-        let m = sc - k * total;
+        let ph = in.pat.z;
+        let sp = sc + ph;
+        let k = floor(sp / total);
+        let m = sp - k * total;
         var cyc = array<f32, 8>(in.d0.x, in.d0.y, in.d0.z, in.d0.w, in.d1.x, in.d1.y, in.d1.z, in.d1.w);
         var acc = 0.0;
         var on = true;
@@ -393,9 +445,11 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
         }
         if (!on) {
             let b = k * total;
-            let pe = sc - (b + prev_end);
-            var ne = b + next_start - sc;
-            if (b + next_start > in.seg.z) { ne = 1e30; }
+            // Striche vor dem Zuganfang/hinter dem Zugende gibt es nicht.
+            var pe = sp - (b + prev_end);
+            if (b + prev_end < ph) { pe = 1e30; }
+            var ne = b + next_start - sp;
+            if (b + next_start > in.seg.z + ph) { ne = 1e30; }
             e_in = max(min(pe, ne), 0.0);
         }
     }
