@@ -171,6 +171,32 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
     out.append(&mut late);
 }
 
+/// [157] Sohle und Böschungsoberkante der Baugruben, die dieser Grundriss zeigt (Gelände sichtbar, Kategorie
+/// der Baugrube gezeigt), als Strecken — Hindernisse der Aussenbemassung und der Schnittmarken-Beschriftung.
+pub(super) fn excavation_segments(c: &Ctx) -> Vec<([f64; 2], [f64; 2])> {
+    let pits: Vec<&Excavation> = crate::excavation::excavations(c.p).into_iter().filter(|e| e.category_code.as_deref().is_none_or(|k| c.shown(k))).collect();
+    if pits.is_empty() || !terrain_shown(c) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for e in pits {
+        let ring: Vec<[f64; 2]> = e.outline.iter().filter(|q| q.x.is_finite() && q.y.is_finite()).map(|q| [q.x, q.y]).collect();
+        for i in 0..ring.len() {
+            out.push((ring[i], ring[(i + 1) % ring.len()]));
+        }
+        for t in crate::excavation::terrains(c.p) {
+            let st = crate::excavation::site_terrain(c.p, t);
+            if let Some((_, _, daylight)) = st.items.iter().find(|(id, ..)| *id == e.id) {
+                for l in daylight {
+                    out.extend(l.windows(2).map(|w| (w[0], w[1])));
+                }
+                break;
+            }
+        }
+    }
+    out
+}
+
 /// [157] Gelände, Höhenlinien und Baugruben in diesem Grundriss: Feld `showTerrain` der Ebene, sonst nur im
 /// Geschoss nächst ±0.00 (`extras::ground_floor_id`) und in der Situation (ab 1:500). Ohne Geschoss-Ebenen
 /// bzw. für eine unbekannte Ebene immer (Ausschnitte, Tests).
@@ -761,9 +787,21 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     for q in super::drawings::stamp_obstacle_prims(c).iter().chain(super::drawings::grid_bubble_prims(c).iter()) {
         obst.add_prim(q);
     }
+    // [157] Sohle, Böschungsoberkante und Böschungsschraffur der sichtbaren Baugruben.
+    if !excavation_segments(c).is_empty() {
+        let house = terrain_footprint(c.p, &c.a.floor);
+        let (mut pit, mut bands) = (Vec::new(), Vec::new());
+        for e in crate::excavation::excavations(c.p).into_iter().filter(|e| e.category_code.as_deref().is_none_or(|k| c.shown(k))) {
+            excavation_lines(c, e, &mut pit, &mut bands, &house);
+        }
+        for q in &pit {
+            obst.add_prim(q);
+        }
+    }
     let h = SECTION_LABEL_H * k;
     // Kandidaten (Vielfache der Schrifthöhe): vor der Spitze, weiter hinaus entlang der Linie bzw. des Pfeils.
-    const STEPS: [(f64, f64); 13] = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (2.0, 0.0), (1.0, 1.0), (0.0, 2.0), (3.0, 0.0), (2.0, 1.0), (1.0, 2.0), (4.0, 0.0), (0.0, 3.0), (3.0, 2.0), (-1.0, 0.0)];
+    // [157] Weiter hinaus (5–6 Schrifthöhen) für Marken hinter Massketten und Böschung.
+    const STEPS: [(f64, f64); 17] = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (2.0, 0.0), (1.0, 1.0), (0.0, 2.0), (3.0, 0.0), (2.0, 1.0), (1.0, 2.0), (4.0, 0.0), (0.0, 3.0), (3.0, 2.0), (5.0, 0.0), (5.0, 1.0), (6.0, 0.0), (6.0, 1.0), (-1.0, 0.0)];
     for (at, tag, bn, outward) in labels {
         let w = crate::text_layout::text_width_em(&tag, false) * h;
         let rect = |a: Vec2| -> Vec<[f64; 2]> {
@@ -1144,6 +1182,83 @@ mod tests {
             assert!(!(m > 18.5 && m < 21.5), "Sohle im Anbau: {a:?}–{b:?}");
         }
         assert_eq!(sohle.iter().filter(|(a, b)| (a.x - 12.0).abs() < 1e-9 && (b.x - 12.0).abs() < 1e-9).count(), 1, "Westrand ganz");
+    }
+
+    /// [157] Schnittmarken-Beschriftung nicht auf der Böschungsschraffur: Sohle, Böschungsoberkante und Schraffur
+    /// der sichtbaren Baugrube sind Hindernisse („B-B“ lag im Musterhaus komplex in der Böschung).
+    #[test]
+    fn schnittmarke_nicht_auf_der_boeschung() {
+        let mut p = sample_with_walls(serde_json::json!([["h1", "eg", 14.0, 0.0, 26.0, 0.0]]));
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, -10.0, 0.0, 40.0, -10.0, 0.0, 40.0, 30.0, 0.0, 0.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        let pit = Excavation { id: "bg".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, slope: Some(45.0), ..Default::default() };
+        p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]);
+        // Schnittlinie mit den Enden in der West- und Ostböschung.
+        p.drawing_levels.push(serde_json::from_value(serde_json::json!({ "id": "s", "name": "Schnitt B-B", "kind": "section", "visible": true, "locked": false,
+            "linePoints": [{ "x": 10.5, "y": 4.0 }, { "x": 29.5, "y": 4.0 }] })).unwrap());
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["90", "80", "02"], "scale": 100}"#).unwrap();
+        let c = Ctx::new(&p, &a);
+        let mut out = Vec::new();
+        plan_section_lines(&c, &mut out);
+        let mut ctx = Vec::new();
+        plan_context(&c, &mut ctx);
+        let pit_lines: Vec<(Vec2, Vec2)> = ctx.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(k), .. } if k == EXCAVATION_INK => Some((*a, *b)), _ => None }).collect();
+        assert!(!pit_lines.is_empty());
+        let mut n = 0;
+        for q in &out {
+            let Primitive::DrawingText { at, text, height_m, .. } = q else { continue };
+            if text != "B-B" {
+                continue;
+            }
+            n += 1;
+            let w = crate::text_layout::text_width_em(text, false) * height_m;
+            let flat = [at.x, at.y, at.x + w, at.y, at.x + w, at.y + 0.75 * height_m, at.x, at.y + 0.75 * height_m];
+            for (a, b) in &pit_lines {
+                for k in 0..=20 {
+                    let f = k as f64 / 20.0;
+                    assert!(!crate::plan::pick::point_in_polygon(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, &flat), "{text} auf der Böschung bei {at:?}");
+                }
+            }
+        }
+        assert_eq!(n, 2);
+    }
+
+    /// [157] Aussenbemassung und Böschung: zeigt der Grundriss die Baugrube und schneidet eine Kette der
+    /// automatischen Aussenbemassung sie, rücken beim Zeichnen alle Ketten dieser Seite hinter die
+    /// Böschungsoberkante (Abstände bleiben); ohne Gelände im Grundriss stehen sie wie im Modell.
+    #[test]
+    fn aussenbemassung_rueckt_hinter_die_boeschung() {
+        let mut p = sample_with_walls(serde_json::json!([
+            ["h1", "eg", 14.0, 0.0, 26.0, 0.0], ["h2", "eg", 26.0, 0.0, 26.0, 8.0], ["h3", "eg", 26.0, 8.0, 14.0, 8.0], ["h4", "eg", 14.0, 8.0, 14.0, 0.0]
+        ]));
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, -10.0, 0.0, 40.0, -10.0, 0.0, 40.0, 30.0, 0.0, 0.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        // Sohle 2 m ausserhalb, 3 m tief, 45°: Böschungsoberkante West bei x ≈ 9.
+        let pit = Excavation { id: "bg".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, slope: Some(45.0), ..Default::default() };
+        p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]);
+        let dim = |id: &str, off: f64| serde_json::from_value::<Drawing2D>(serde_json::json!({"id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "dimension", "pts": [{"x": 13.8, "y": 0}, {"x": 13.8, "y": 8}], "offset": off}})).unwrap();
+        p.drawings2d = vec![dim("autodim-eg-west-openings", 1.0), dim("autodim-eg-west-total", 2.4), dim("eigene", 1.5)];
+        // Masslinien (senkrecht, über die ganze Kette) je Zeichnung.
+        let lines = |p: &Project| -> Vec<(String, f64)> {
+            let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100, "show": ["20"]}"#).unwrap();
+            let mut out = Vec::new();
+            for q in super::super::drawings::stamp_obstacle_prims(&Ctx::new(p, &a)) {
+                if let Primitive::Line { a, b, drawing_id: Some(id), .. } = q {
+                    if (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() > 7.9 {
+                        out.push((id, a.x));
+                    }
+                }
+            }
+            out
+        };
+        let x = |l: &[(String, f64)], id: &str| l.iter().find(|(i, _)| i == id).map(|(_, x)| *x).unwrap();
+        let l = lines(&p);
+        let daylight = 9.0;
+        assert!(x(&l, "autodim-eg-west-openings") < daylight - 0.3, "{l:?}");
+        assert!((x(&l, "autodim-eg-west-openings") - x(&l, "autodim-eg-west-total") - 1.4).abs() < 1e-9, "Abstand bleibt: {l:?}");
+        assert!((x(&l, "eigene") - 12.3).abs() < 1e-9, "eigene Masse bleiben: {l:?}");
+        // Ohne Gelände im Grundriss: wie im Modell.
+        p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().show_terrain = Some(false);
+        let l = lines(&p);
+        assert!((x(&l, "autodim-eg-west-openings") - 12.8).abs() < 1e-9 && (x(&l, "autodim-eg-west-total") - 11.4).abs() < 1e-9, "{l:?}");
     }
 
     /// [157] Gelände, Höhenlinien und Baugrube erscheinen standardmässig nur im Geschoss nächst ±0.00 (und in der
