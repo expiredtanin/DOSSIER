@@ -4018,6 +4018,15 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   Reihenfolge, Ebenen, Strichstärken, True-Color, Koordinaten ≤ 5e-7 m (Rundung des alten Writers auf 6 Stellen;
   neu volle f64). Neu: 2D-Texte als TEXT (fehlten bisher), CLI exportiert georeferenziert wie die App.
   Gegencheck ezdxf (`scripts/validate-dxf.py`, Test übersprungen ohne `pip install ezdxf`): 0 Auditor-Fehler.
+  - ✅ **Georeferenzierter Export: alle Entitäten in LV95** (7.11., Befund aus [154]): Baugrube (Kontext `excavation`,
+    Ebene CONTEXT) und Parzelle/Baulinien (`siteRules`, Ebene SYMBOLS) blieben beim Export mit `geoAnchor` (App, CLI `dxf`/`dwg`)
+    lokal und lagen nach dem Import 2.7 Mio. m neben dem Gebäude. Ursache: die Projekt-Verschiebung (`geo_translate.rs`,
+    `translatePatch`/`translateOps`; auch „Neuer Bezugspunkt“) nahm Baugrube und Baurecht nicht mit (Baugrube bekam sogar ein
+    leeres `positions`); `geo_rebase.rs` (IFC) vergass Baurecht und Bäume. Jetzt Baugrube (Umriss), Baurecht (Parzelle,
+    Baulinien, Feld-Op `siteRules`) und Bäume überall. Test `export/exportDxf.georef.test.ts`: Musterhaus komplex je Geschoss
+    bei 1:50, DXF alle Punkt-Codes (10/11/13/14: Linien, Polylinien, Bögen, Texte, INSERT + ATTRIB, Bemassung, HATCH, Kontext)
+    und DWG (libredwg) im LV95-Rahmen ± 200 m, Rundreise Export → Import gemeinsam in einem Rahmen; Rust je 1 Test.
+    Linksbündige TEXT tragen im DWG den Ausrichtungspunkt (0, 0) wie AutoCAD (`(11 0 0 0)`, ohne Wirkung). Nur Linux-Container.
   - ✅ **Binär-DXF-Export** (28.10.): `export_dxf_binary` (acadrust `DxfWriter::new_binary`, R2018 UTF-8),
     Dialog-Format „DXF binär“, CLI `dxf --binary`. Rundreise acadrust + ezdxf (gleiche Entitäten/Ebenen wie
     ASCII, 0 Auditor-Fehler, kleiner als der Text). Offen: in AutoCAD/BricsCAD selbst nicht geöffnet.

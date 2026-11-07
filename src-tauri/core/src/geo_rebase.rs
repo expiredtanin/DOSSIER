@@ -81,7 +81,8 @@ fn shift_positions(pos: &mut [f64], dx: f64, dy: f64) {
     }
 }
 
-/// Verschiebt sämtliche Modell-Koordinaten (`translateProject`), auch die Innenhöfe der Dächer.
+/// Verschiebt sämtliche Modell-Koordinaten (`translateProject`), auch die Innenhöfe der Dächer, Bäume und
+/// das Baurecht (Parzelle, Baulinien).
 pub fn translate_project(p: &Project, dx: f64, dy: f64) -> Project {
     if dx == 0.0 && dy == 0.0 {
         return p.clone();
@@ -113,6 +114,16 @@ pub fn translate_project(p: &Project, dx: f64, dy: f64) -> Project {
     }
     for c in out.columns.iter_mut().flatten() {
         c.position = shift(c.position, dx, dy);
+    }
+    for t in out.trees.iter_mut().flatten() {
+        t.position = shift(t.position, dx, dy);
+    }
+    if let Some(r) = &mut out.site_rules {
+        shift_all(&mut r.parcel, dx, dy);
+        for l in r.building_lines.iter_mut().flatten() {
+            l.a = shift(l.a, dx, dy);
+            l.b = shift(l.b, dx, dy);
+        }
     }
     for s in out.extruded_solids.iter_mut().flatten() {
         shift_all(&mut s.points, dx, dy);
@@ -189,6 +200,23 @@ mod tests {
         let r = &t.roofs.as_ref().unwrap()[0];
         assert_eq!(r.outline[0], Vec2 { x: p.roofs.as_ref().unwrap()[0].outline[0].x + 10.0, y: p.roofs.as_ref().unwrap()[0].outline[0].y - 5.0 });
         assert_eq!(r.holes.as_ref().unwrap()[0][2], Vec2 { x: 12.0, y: -3.0 });
+    }
+
+    #[test]
+    fn baurecht_baeume_und_baugrube_wandern_mit() {
+        // Befund [154]: Parzelle/Baulinien blieben in Welt-Exporten lokal.
+        let mut p: Project = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        p.site_rules = Some(SiteRules {
+            parcel: vec![Vec2 { x: -1.0, y: -1.0 }, Vec2 { x: 5.0, y: -1.0 }, Vec2 { x: 5.0, y: 4.0 }],
+            building_lines: Some(vec![SiteRulesBuildingLines { a: Vec2 { x: 0.0, y: 3.0 }, b: Vec2 { x: 4.0, y: 3.0 }, ..Default::default() }]),
+            ..Default::default()
+        });
+        p.trees = Some(vec![Tree { id: "t".into(), position: Vec2 { x: 1.0, y: 1.0 }, ..Default::default() }]);
+        let t = translate_project(&p, 10.0, -5.0);
+        let s = t.site_rules.as_ref().unwrap();
+        assert_eq!(s.parcel[2], Vec2 { x: 15.0, y: -1.0 });
+        assert_eq!(s.building_lines.as_ref().unwrap()[0].a, Vec2 { x: 10.0, y: -2.0 });
+        assert_eq!(t.trees.as_ref().unwrap()[0].position, Vec2 { x: 11.0, y: -4.0 });
     }
 
     #[test]

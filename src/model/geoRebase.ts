@@ -24,8 +24,9 @@ import type { Project } from "./types";
 /**
  * Verschiebt SÄMTLICHE Modell-Koordinaten eines Projekts um den festen Vektor
  * (dx,dy) — Wände, Decken, Dächer, Öffnungen-Host (folgt automatisch der Wand),
- * Treppen, Räume, Stützen, Extrusionen, freie 2D-Geometrie, Kontext-Schicht
- * (Import/Terrain/Konturen), Schnitt-/Ansichtslinien sowie den Geo-Anker
+ * Treppen, Räume, Stützen, Bäume, Extrusionen, freie 2D-Geometrie, Kontext-Schicht
+ * (Import/Terrain/Konturen/Baugrube), Schnitt-/Ansichtslinien, Baurecht (Parzelle,
+ * Baulinien; bis 7.11. vergessen, [154]) sowie den Geo-Anker
  * (`geoAnchor.model`, damit der LV95-Bezug exakt erhalten bleibt). Richtungs-
  * Vektoren (z. B. `Stair.dir`) und Winkel-Felder bleiben unangetastet — eine
  * reine Translation ändert keine Orientierung. Unveränderte Teile behalten ihre Identität;
