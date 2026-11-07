@@ -1091,7 +1091,9 @@ fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
                 }
             }
         }
-        if let Some(d) = range.restyle_dash(zone) {
+        // [152] Über der Schnitthöhe immer als Überkopf-Linie (Träger, Pfetten), auch ohne eigenen Ansichtsbereich.
+        let dash = if zone == super::view_range::Zone::Above { Some(&super::view_range::ABOVE_DASH[..]) } else { range.restyle_dash(zone) };
+        if let Some(d) = dash {
             super::view_range::restyle(out, out_start, d);
         }
     }
@@ -1821,9 +1823,16 @@ mod tests {
             ..Default::default()
         };
         p.extruded_solids = Some(vec![mk("oben", 1.4, 0.6), mk("unten", 0.0, 0.5)]);
-        // Standard: unverändert, kein „view-range“.
+        // Standard: Wände unverändert; [152] der Schrank über der Schnitthöhe gestrichelt (Überkopf), der Sockel nicht.
         let (w0, s0) = walls(&p);
-        assert!(!w0.contains("view-range") && !s0.contains("view-range"));
+        assert!(!w0.contains("view-range"));
+        let r = plan_domains(&p, &args("eg", 1.0, &["20", "30", "60"])).unwrap();
+        let dashed: Vec<&str> = r.solids.iter().filter_map(|q| match q {
+            Primitive::Line { cls, dash: Some(Some(d)), .. } if cls == "view-range" && d[..] == super::super::view_range::ABOVE_DASH[..] => Some("x"),
+            _ => None,
+        }).collect();
+        assert_eq!(dashed.len(), 4, "{s0}");
+        assert!(r.solids.iter().any(|q| matches!(q, Primitive::Polygon { stroke, extruded_solid_id: Some(id), .. } if id == "unten" && stroke != "none")), "Sockel als Aufsicht");
         // Oberkante 1.2 m: Schrank (ab 1.4) fällt weg.
         p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_top = Some(1.2);
         let (_, s1) = walls(&p);

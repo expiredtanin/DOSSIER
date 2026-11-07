@@ -3406,6 +3406,40 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Mittellauf immer mittig im Auge (ungleiche Viertelpodeste nicht abbildbar); kein Wendelpodest/Wendelstufen am
   Podest; Plan zeigt weiterhin keinen Handlauf; Griffe nur per tsc (nicht in der App gezogen); nur Linux, nicht in der
   Tauri-App/Metal angesehen. · M
+- ◐ **[152] Importierte Netze in Schnitt, Ansicht und Grundriss.** (6.11., Befund: `ImportedMesh` (IFC/OBJ/glTF) fehlte im
+  Schnitt und in der Ansicht ganz, im Grundriss nur als Sockel-Fussabdruck aller Netze auf jedem Geschoss — Tonnendach,
+  U-Treppen, Träger, Pfetten importierter Projekte unsichtbar.) Gemeinsam `core/src/mesh_view.rs`: sichtbare Netze mit
+  Hüllbox und Topologie (Ecken verschweisst 1e-6; geschlossen + einheitlich orientiert → einseitig, nach innen
+  orientiert → umgekehrt, sonst beidseitig), je Netz nach Inhalt gemerkt (Hash über id/Ecken/Indizes); Ebenenschnitt über
+  `mesh_section` ([G1]), ungerichtet schliessbare Züge werden Ringe, der Rest bleibt offen. **Schnitt** (`section.rs`,
+  `Kind::Mesh`, `Output::meshes`/`mesh_lines`): Netze, deren Hüllbox die Ebene kreuzt, als Schnittflächen (Löcher als
+  Schlüsselloch, Füllung wie Körper, ab 1:100 schwarz über `solid_cut`, Pick `contextObjectId`), offene Züge als schwere
+  Schnittlinie; Projektion dahinter exakt mit `hlr` (Glättungsgruppe je Netz, Knickwinkel 20°), verdeckt durch Bauteile und
+  Schnittflächen, Ansichtsbereich (Tiefe) per Hüllbox. **Ansicht** (`elevation.rs`, `Role::Mesh`): zugewandte Dreiecke
+  (offene Netze beidseitig) in Importfarbe, koplanare Gruppen bis 64 Dreiecke zu Polygonen vereinigt (Haarsplitter nicht),
+  Kanten exakt verdeckt; Silhouette mit Netzen über ein Raster (die Vereinigung von 10⁵ Dreiecken dauerte 46 s bzw. hing
+  an Haarsplittern), ohne Netze unverändert exakt. **Grundriss** (`plan/mesh_plan.rs`, nur Geschosse; Zeichnungsebenen
+  behalten den Fussabdruck): Zone nach Ansichtsbereich [36] — durch die Schnitthöhe: waagrechter Schnitt als Poché (Tusche-
+  Regeln wie Körper) bzw. Schnittlinie, Aufsicht darunter; darunter (im Geschoss): Aufsicht von oben (`hlr`, verdeckt durch
+  höhere Netze und Schnittflächen); darüber bis OK Geschoss: Überkopf-Linien gestrichelt (`OVERHEAD_DASH`, Kanten von unten);
+  Netze anderer Geschosse (am Boden endend bzw. an der OK beginnend) entfallen. **Extrusionskörper über der Schnitthöhe**
+  jetzt immer gestrichelt (vorher nur mit eigenem Ansichtsbereich). **Regeln** [33]: Bauteilart „mesh" (Auswahl „Importiertes
+  Netz"), Ebene, Name — Füllung/Schraffur/Umriss der Schnittfläche, Linienfarbe/-stärke/-stil, Ausblenden (`hidden_elements`,
+  `without_elements`). Tests: Rust `mesh_view` (Würfel/Suppe/umgekehrt/offen/Unsinn, Prisma, Tonne, Züge schliessen),
+  `section::mesh_tests` (Würfel-Schnitt Fläche/Lage/Pick/schwarz/Kategorie/[137], Tonnen-Halbring = Analytik, Rahmen mit
+  Loch als Schlüsselloch, offenes Netz → Linie, Verdeckung hinter Wand/teilweise darüber/Tiefe, Rückseite verdeckt,
+  Regel Füllung + Ausblenden), `elevation::importierte_netze_in_der_ansicht`, `mesh_plan::tests` (Stütze Poché 1:100/1:50,
+  Träger gestrichelt, Tisch als Aufsicht, OG-Wand nicht im EG, Verdeckung, offenes Netz), `domains` (Körper über Schnitt
+  gestrichelt); vitest `generatePlan.context.test.ts` (neu statt Fussabdruck); `tests/bench152.rs` (Zeitprofil).
+  Geprüft: cargo test Kern, WASM (Linux, `--no-opt`), tsc, vitest (Goldens unverändert), CLI `import-ifc` (Netze und
+  `--elements`) → Schnitt/Ansicht/Grundriss in Chromium angesehen: Institute (Tonnendach im Schnitt), FZK-Haus (DG mit
+  Sparren geschnitten, Pfetten als Aufsicht, First gestrichelt; Schnitt mit First/Pfetten/Unterzug), Schependomlaan.
+  Zeiten Schependomlaan (260k Dreiecke, CLI/WASM ohne Opt.): Schnitt 2–5 s, Ansicht 6–7 s (nativ 2.3 s; vorher ohne
+  Netze 1.6 s), Grundriss 1.8 s. **Offen:** keine Materialschraffur je Netz (kein Materialfeld, nur Kategorie/Regeln);
+  Bauteile verdecken Netze im Grundriss nicht (nur Netze und deren Schnittflächen); die Ansicht zeichnet sehr viele
+  Dreiecksflächen (Schependomlaan-SVG 20–27 MB); Schnitt-Projektion ohne Zellen-Cache je Netz (Topologie gemerkt, Sichtbarkeit
+  je Aufruf); Gelände-Netze aus IFC („Gelaende") erscheinen als Körper statt als Geländelinie; nicht in der Tauri-App/Metal
+  geprüft. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

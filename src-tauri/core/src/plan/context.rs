@@ -27,7 +27,7 @@ fn context_line(a: Vec2, b: Vec2) -> Primitive {
     Primitive::Line { a, b, cls: "context-line".into(), weight_mm: CONTEXT_LINE_MM, dash: None, zigzag: None, motif: None, color: Some(CONTEXT_LINE_COLOR.into()), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None }
 }
 
-fn pick_band(pts: Vec<Vec2>, context_id: Option<&str>, section_id: Option<&str>) -> Primitive {
+pub(super) fn pick_band(pts: Vec<Vec2>, context_id: Option<&str>, section_id: Option<&str>) -> Primitive {
     Primitive::Polygon {
         pts,
         fill: "none".into(),
@@ -76,7 +76,12 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
     let mut house_cache: Option<Vec<Vec<Vec2>>> = None;
     let mut house = || -> Vec<Vec<Vec2>> { house_cache.get_or_insert_with(|| terrain_footprint(c.p, &c.a.floor)).clone() };
     let mut label_obst: Option<super::stamp_place::Obstacles> = None;
+    // [152] Importierte Netze im Geschoss nach dem Ansichtsbereich (`mesh_plan.rs`); sonst Fussabdruck.
+    let meshes_done = super::mesh_plan::plan_meshes(c, out);
     for obj in c.p.context.as_deref().unwrap_or(&[]) {
+        if meshes_done && matches!(obj, ContextObject::ImportedMesh(_)) {
+            continue;
+        }
         let code = match obj {
             ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
             ContextObject::ContourSet(s) => s.category_code.as_deref(),
