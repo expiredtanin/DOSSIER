@@ -595,12 +595,76 @@ fn tube_along(path: &[V3], radius: f64) -> Option<(Vec<f64>, Vec<u32>)> {
 
 /// Handlauf und Pfosten (Rohre) aus der gemeinsamen Handlauf-Achse ([`crate::stair_rail`]): je Gehseite
 /// ein durchgehender Rohrzug samt Kropfstücken, runde Pfosten; bei der Wendel alles in einem Netz.
-fn railings_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
+/// Wangendicke (m) und Lage zur Steigungslinie (über / unter der Trittvorderkante).
+pub const STRINGER_THICK: f64 = 0.05;
+const STRINGER_ABOVE: f64 = 0.05;
+const STRINGER_BELOW: f64 = 0.30;
+
+/// [157] Wangen je geradem Lauf (gerade, L, U, gerade mit Podest): ein Brett aussen an jeder Seite der Tritte,
+/// Oberkante [`STRINGER_ABOVE`] über der Steigungslinie (Trittvorderkanten), [`STRINGER_BELOW`] darunter, unten
+/// auf dem Antritt (Boden bzw. Podest) abgeschnitten, oben waagrecht auf Austrittshöhe. Für den Schnitt
+/// (Ansichtskanten); die Eingabe enthält nur die Treppen, die Wangen haben.
+pub fn stringers(buf: &[f64]) -> Vec<Mesh> {
+    let mut out = Vec::new();
+    let Some(stairs) = decode(buf) else { return out };
+    for (i, s) in stairs.iter().enumerate() {
+        let Some(s) = s.as_ref().filter(|s| s.flights()) else { continue };
+        let Some((geo, _)) = geometry_of(s) else { continue };
+        for r in run_ranges(&geo) {
+            let n = r.len();
+            let Some((ax, len)) = run_axes(&geo, &r) else { continue };
+            let base = s.z_bottom + geo.treads[r.start].base_rise;
+            let lift = geo.treads[r.end - 1].top_rise - geo.treads[r.start].base_rise;
+            if n == 0 || !(lift > EPS) {
+                continue;
+            }
+            let (rise, going) = (lift / n as f64, len / n as f64);
+            let pitch = |run: f64| base + rise + run * lift / len;
+            let top_end = base + lift + STRINGER_ABOVE;
+            // Seitenprofil (Lauf, Höhe), gegen den Uhrzeigersinn.
+            let rf = ((STRINGER_BELOW - rise) * len / lift).clamp(0.0, len);
+            let prof = [(0.0, base), (rf, base), (len, pitch(len) - STRINGER_BELOW), (len, top_end), (len - going, top_end), (0.0, pitch(0.0) + STRINGER_ABOVE)];
+            let sides: Vec<f64> = geo.treads[r.clone()].iter().flat_map(|t| t.pts.iter().map(|q| ax.side_of(pt(q)))).collect();
+            let (lo, hi) = sides.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &x| (a.min(x), b.max(x)));
+            if !(hi - lo > EPS) {
+                continue;
+            }
+            for (w0, w1) in [(hi, hi + STRINGER_THICK), (lo - STRINGER_THICK, lo)] {
+                let at = |run: f64, w: f64, z: f64| [ax.start[0] + ax.u[0] * run + ax.w[0] * w, ax.start[1] + ax.u[1] * run + ax.w[1] * w, z];
+                let mut positions: Vec<f64> = Vec::new();
+                for w in [w0, w1] {
+                    for &(run, z) in &prof {
+                        positions.extend(at(run, w, z));
+                    }
+                }
+                let k = prof.len() as u32;
+                let mut indices: Vec<u32> = Vec::new();
+                for j in 1..k - 1 {
+                    indices.extend([0, j + 1, j]); // Seite w0
+                    indices.extend([k, k + j, k + j + 1]); // Seite w1
+                }
+                for j in 0..k {
+                    let j1 = (j + 1) % k;
+                    indices.extend([j, j1, k + j1, j, k + j1, k + j]);
+                }
+                let mut mesh = Mesh { src: i, positions, indices };
+                if signed_volume(&mesh) < 0.0 {
+                    for t in mesh.indices.chunks_mut(3) {
+                        t.swap(1, 2);
+                    }
+                }
+                out.push(mesh);
+            }
+        }
+    }
+    out
+}
+
+fn railings_of(s: &StairIn, idx: usize, half: f64, out: &mut Vec<Mesh>) {
     if s.railing == 0 {
         return;
     }
     let Some((geo, _)) = geometry_of(s) else { return };
-    let half = RAIL_THICK / 2.0;
     let z0 = s.z_bottom;
     let mut tubes: Vec<(Vec<f64>, Vec<u32>)> = Vec::new();
     for rail in crate::stair_rail::rails(&s.params, &geo, s.railing) {
@@ -658,11 +722,17 @@ pub fn slab_meshes(buf: &[f64]) -> Vec<Mesh> {
 }
 
 pub fn railings(buf: &[f64]) -> Vec<Mesh> {
+    railings_with(buf, RAIL_THICK / 2.0)
+}
+
+/// [157] Wie [`railings`] mit Rohr-Halbmesser `half` (Schnitt: dünn, damit Handlauf und Pfosten als je eine
+/// Linie erscheinen statt als Doppellinie im Rohrabstand).
+pub fn railings_with(buf: &[f64], half: f64) -> Vec<Mesh> {
     let mut out = Vec::new();
     let Some(stairs) = decode(buf) else { return out };
     for (i, s) in stairs.iter().enumerate() {
         if let Some(s) = s {
-            railings_of(s, i, &mut out);
+            railings_of(s, i, half, &mut out);
         }
     }
     out
@@ -766,7 +836,7 @@ mod tests {
         let s = stairs[0].as_ref().unwrap();
         let (geo, _) = geometry_of(s).unwrap();
         let mut out = Vec::new();
-        railings_of(s, 0, &mut out);
+        railings_of(s, 0, RAIL_THICK / 2.0, &mut out);
         let rail = &out[0];
         // Podesthöhe: Oberkante Podest + 0.9 kommt als Ebene im Handlauf vor
         let z_land = geo.treads.iter().find(|t| t.index > 2).unwrap().base_rise + RAIL_HEIGHT;

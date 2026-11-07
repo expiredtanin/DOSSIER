@@ -2421,8 +2421,13 @@ fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3
         mesh_faces(&mut faces, &wmesh, start..end, owners.len() as u32 - 1, smooth);
         start = end;
     }
-    // Platten und Treppenstufen: Prismen (Deckel, Boden, Seiten) direkt aus dem Umriss.
+    let mut group = p.walls.len() as u32 + 1;
+    // Platten und Treppenstufen: Prismen (Deckel, Boden, Seiten) direkt aus dem Umriss. [157] Die Seiten einer
+    // Platte bilden eine Glättungsgruppe: ein rundes Treppenloch oder ein Bogen-Rand zeigt nur seine
+    // Silhouetten, keine senkrechten Facettenfugen (echte Ecken bleiben über dem Knickwinkel).
     for (i, s) in slabs_r.iter().enumerate() {
+        let side_group = group;
+        group += 1;
         owners.push((Kind::Slab, i));
         let owner = owners.len() as u32 - 1;
         let (o, n) = (&s.outline, s.outline.len());
@@ -2443,10 +2448,9 @@ fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3
                 continue;
             }
             let side = [[a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]]];
-            push(&mut faces, &side, [dy * sign, 0.0, -dx * sign], owner, 0, false);
+            push(&mut faces, &side, [dy * sign, 0.0, -dx * sign], owner, side_group, false);
         }
     }
-    let mut group = p.walls.len() as u32 + 1;
     // Modell [x, y, Höhe] → Welt [x, Höhe, y].
     let model_tris = |faces: &mut Vec<hlr::Face>, pos: &[f64], idx: &mut dyn Iterator<Item = usize>, owner: u32, smooth: u32, push: &mut dyn FnMut(&mut Vec<hlr::Face>, &[[f64; 3]], [f64; 3], u32, u32, bool)| {
         let q = |i: usize| -> Option<[f64; 3]> { Some([*pos.get(3 * i)?, *pos.get(3 * i + 2)?, *pos.get(3 * i + 1)?]) };
@@ -2482,6 +2486,15 @@ fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3
         let owner = owners.len() as u32 - 1;
         let mut idx = b.indices.iter().filter(|&&i| i >= 0.0 && i.fract() == 0.0).map(|&i| i as usize);
         model_tris(&mut faces, &b.positions, &mut idx, owner, group, &mut push);
+        group += 1;
+    }
+    // [157] Wangen und Geländer der Treppen (im Schnitt sonst nur Tritte und Setzstufen): Ansichtskanten mit
+    // Verdeckung, Besitzer = eine Stufe derselben Treppe.
+    for (si, m) in model3d::stair_view_meshes(p) {
+        let Some(i) = slabs_r.iter().position(|s| matches!(s.source, SlabSource::Stair { index } if index == si)) else { continue };
+        owners.push((Kind::Slab, i));
+        let owner = owners.len() as u32 - 1;
+        model_tris(&mut faces, &m.positions, &mut m.indices.iter().map(|&k| k as usize), owner, group, &mut push);
         group += 1;
     }
     // [152] Importierte Netze hinter der Ebene (Hüllbox vorgefiltert): Facetten innerhalb des Knickwinkels
@@ -3655,6 +3668,49 @@ mod tests {
         // Keine Kante des Abzugskörpers in der Projektion (Prisma-Enden bei x = 3.8 liegen hinter der Ebene).
         let apex = |q: [f64; 2]| (q[0] - 1.0).abs() < 1e-6 && (q[1] - 2.0).abs() < 1e-6;
         assert!(!out.visible.iter().chain(&out.hidden).any(|e| apex(e.a) || apex(e.b)));
+    }
+
+    /// [157] Wangentreppe hinter der Schnittebene (von vorn gesehen): neben den Tritten die Wangen (Ansichtskante
+    /// aussen an der Treppe, bis zur Austrittshöhe) und der Handlauf beidseitig — vorher schwebten die Tritte
+    /// als „graue Streifen“ ohne Wange und Geländer.
+    #[test]
+    fn wangentreppe_hinter_dem_schnitt_mit_wange_und_handlauf() {
+        let mut p = sample();
+        p.walls.clear();
+        p.ceilings = Some(vec![]);
+        p.openings = None;
+        let st = &mut p.stairs.as_mut().unwrap()[0];
+        st.type_id = Some("stair-wange-holz".into());
+        let ty = p.stair_types.as_mut().unwrap().iter_mut().find(|t| t.id == "stair-wange-holz").unwrap();
+        ty.railing = Some(StairTypeRailing::Beide);
+        // Ebene vor dem Antritt (y = 0.2), Blick nach +y; u = x + 1. Treppe x 3.2 … 4.2 ⇒ u 4.2 … 5.2.
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: -1.0, y: 0.2 }, Vec2 { x: 8.0, y: 0.2 }]), ..Default::default() };
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let top = |at: f64| out.visible.iter().filter(|e| (e.a[0] - at).abs() < 1e-6 && (e.b[0] - at).abs() < 1e-6).map(|e| e.a[1].max(e.b[1])).fold(f64::NEG_INFINITY, f64::max);
+        // Wangen 5 cm aussen an den Tritten, Oberkante 5 cm über dem Austritt (2.6).
+        assert!((top(4.15) - 2.65).abs() < 1e-6 && (top(5.25) - 2.65).abs() < 1e-6, "{} {}", top(4.15), top(5.25));
+        // Handlauf 0.9 m über dem obersten Tritt.
+        let high = out.visible.iter().filter(|e| e.a[0] > 4.1 && e.a[0] < 5.3 && e.a[1].max(e.b[1]) > 3.3).count();
+        assert!(high > 0, "Handlauf fehlt");
+    }
+
+    /// [157] Gekrümmte Platten-Seiten (Treppenloch rund, Bogen-Rand) hinter der Schnittebene ohne senkrechte
+    /// Facettenfugen: nur die Silhouetten links und rechts.
+    #[test]
+    fn runde_platte_ohne_facettenfugen() {
+        let mut p = sample();
+        p.walls.clear();
+        p.stairs = Some(vec![]);
+        let c = &mut p.ceilings.as_mut().unwrap()[0];
+        c.outline = (0..32).map(|k| {
+            let a = std::f64::consts::TAU * k as f64 / 32.0;
+            Vec2 { x: 2.0 + 1.5 * a.cos(), y: 4.0 + 1.5 * a.sin() }
+        }).collect();
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: -1.0, y: 1.0 }, Vec2 { x: 8.0, y: 1.0 }]), ..Default::default() };
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let vertical: Vec<f64> = out.visible.iter().filter(|e| e.kind == Kind::Slab && (e.a[0] - e.b[0]).abs() < 1e-9).map(|e| e.a[0]).collect();
+        // Silhouetten bei u = 3 − 1.5 und 3 + 1.5 (Ecken bei 0° und 180°); keine Fugen dazwischen.
+        assert!(vertical.iter().all(|u| (u - 1.5).abs() < 1e-6 || (u - 4.5).abs() < 1e-6), "{vertical:?}");
     }
 
     /// [G1] Treppenuntersicht: gerade Betontreppe längs geschnitten — die Laufplatte unten als gerade
