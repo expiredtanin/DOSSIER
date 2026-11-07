@@ -856,14 +856,18 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 i += 1.0;
             }
             let mut i = 0.0;
+            let mut labels: Vec<(f64, String)> = Vec::new();
             while i <= *segments {
                 let x = at.x + i * segment_length;
                 em.seg(v(x, at.y), v(x, at.y - tick_len));
                 let dist = i * segment_length;
                 let dist_text = if dist.is_finite() && dist.trunc() == dist { js_number(dist) } else { to_fixed(dist, 2) };
                 let label = if i == *segments { format!("{dist_text}m") } else { dist_text };
-                em.text(v(x + text_h * 0.25, at.y - tick_len - text_h * 1.2), label, text_h);
+                labels.push((i, label));
                 i += 1.0;
+            }
+            for (i, label) in scalebar_labels(labels, segment_length.abs(), text_h) {
+                em.text(v(at.x + i * segment_length + text_h * 0.25, at.y - tick_len - text_h * 1.2), label, text_h);
             }
         }
         Drawing2DGeom::Pointmarker { at } => {
@@ -1007,6 +1011,56 @@ fn dimension_segment(em: &mut Em, a: Vec2, b: Vec2, offset: f64, st: &DimStyle) 
 }
 
 /// Achsraster ([112]): Achsen strichpunktiert, an den Enden Blasen mit der Beschriftung.
+/// [157] Beschriftungen des Massstabsbalkens (Teilstrich-Index, Text), ausgedünnt: liegen die Teilstriche
+/// (`seg` Modell-m) enger als eine Zahl breit ist (Schrift `text_h`, Inter-Metrik + 0.4 Schrifthöhe Luft),
+/// nur jeder k-te (k = 1, 2, 5, 10 …); 0 und das Ende („…m“) immer, die Zahl vor dem Ende entfällt, wenn sie
+/// sonst hineinragt.
+fn scalebar_labels(labels: Vec<(f64, String)>, seg: f64, text_h: f64) -> Vec<(f64, String)> {
+    let width = |s: &str| crate::text_layout::text_width_em(s, false) * text_h + 0.4 * text_h;
+    let Some(last) = labels.last().map(|l| l.0) else { return labels };
+    if !(seg > 0.0) || !seg.is_finite() {
+        return labels;
+    }
+    let need = labels.iter().filter(|l| l.0 < last).map(|l| width(&l.1)).fold(0.0, f64::max);
+    let k = [1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0].into_iter().find(|k| k * seg >= need).unwrap_or(last.max(1.0));
+    let mut out: Vec<(f64, String)> = labels.into_iter().filter(|l| l.0 % k == 0.0 || l.0 == last).collect();
+    // Vor dem Ende: die vorletzte Zahl muss neben dem Ende Platz haben (sonst weg, ausser der 0).
+    while out.len() >= 2 {
+        let (j, ref s) = out[out.len() - 2];
+        if (last - j) * seg >= width(s) || j == 0.0 {
+            break;
+        }
+        out.remove(out.len() - 2);
+    }
+    // Reicht der ganze Balken nicht für „0“ und das Ende: nur das Ende.
+    if out.len() == 2 && out[0].0 == 0.0 && last * seg < width(&out[0].1) {
+        out.remove(0);
+    }
+    out
+}
+
+/// [157] Wie weit die Blase (Radius `r`) am Achsende `end` in Richtung `dir` hinaus muss, damit sie mit Luft
+/// (10 % des Radius) ausserhalb jedes Gebäuderings liegt; 0, wenn sie schon frei ist (höchstens 60 m).
+fn bubble_shift(end: Vec2, dir: Vec2, r: f64, house: &[Vec<Vec2>]) -> f64 {
+    if !(r > 0.0) || house.is_empty() || !(end.x.is_finite() && end.y.is_finite() && dir.x.is_finite() && dir.y.is_finite()) {
+        return 0.0;
+    }
+    let clear = |c: Vec2| {
+        house.iter().all(|ring| {
+            !super::context::inside(c, ring) && (0..ring.len()).all(|k| super::context::seg_dist(c, [ring[k].x, ring[k].y], [ring[(k + 1) % ring.len()].x, ring[(k + 1) % ring.len()].y]) > r * 1.1)
+        })
+    };
+    let step = r / 4.0;
+    let mut t = 0.0;
+    while t <= 60.0 {
+        if clear(v(end.x + dir.x * (t + r), end.y + dir.y * (t + r))) {
+            return t;
+        }
+        t += step;
+    }
+    0.0
+}
+
 fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<Vec2>]) {
     use crate::grid::Shape;
     // [153] Achsen strichpunktiert in Papier-mm (vorher mit dem Massstab in Modell-Meter vorskaliert).
@@ -1015,11 +1069,34 @@ fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<
     let w = jsnum::min(em.weight, XLINE_WEIGHT_MM.max(0.18));
     let r = diameter / 2.0;
     let text_h = diameter * 0.5;
-    for ax in spec.axes() {
+    // [157] Blasen vor das Gebäude: endet eine gerade Achse im Gebäude (Anbau über die Rasterlinie), rückt
+    // ihre Blase entlang der Achse hinaus; alle Blasen derselben Seite (gleiche Richtung) gleich weit.
+    let axes = spec.axes();
+    let side = |d: (f64, f64)| ((d.0 * 1e3).round() as i64, (d.1 * 1e3).round() as i64);
+    let mut shift: HashMap<(i64, i64), f64> = HashMap::new();
+    for ax in axes.iter().filter(|ax| matches!(ax.shape, Shape::Line { .. })) {
+        for (end, dir) in ax.bubbles.iter().flatten() {
+            let t = bubble_shift(v(end.0, end.1), v(dir.0, dir.1), r, house);
+            let e = shift.entry(side(*dir)).or_insert(0.0);
+            *e = e.max(t);
+        }
+    }
+    for ax in axes {
+        let line = matches!(ax.shape, Shape::Line { .. });
+        let shift_of = |dir: (f64, f64)| if line { shift.get(&side(dir)).copied().unwrap_or(0.0) } else { 0.0 };
         match ax.shape {
             Shape::Line { a, b } => {
                 for (p0, p1) in super::context::outside(v(a.0, a.1), v(b.0, b.1), house) {
                     em.line(p0, p1, w, Some(&dash), dash_ref);
+                }
+                // Verlängerung bis zur hinausgerückten Blase (nur ausserhalb des Gebäudes).
+                for (end, dir) in ax.bubbles.iter().flatten() {
+                    let t = shift_of(*dir);
+                    if t > 0.0 {
+                        for (p0, p1) in super::context::outside(v(end.0, end.1), v(end.0 + dir.0 * t, end.1 + dir.1 * t), house) {
+                            em.line(p0, p1, w, Some(&dash), dash_ref);
+                        }
+                    }
                 }
             }
             Shape::Arc { c, r: rad, a0, a1 } => {
@@ -1038,7 +1115,8 @@ fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<
             }
         }
         for (end, dir) in ax.bubbles.iter().flatten() {
-            let c = v(end.0 + dir.0 * r, end.1 + dir.1 * r);
+            let t = shift_of(*dir);
+            let c = v(end.0 + dir.0 * (t + r), end.1 + dir.1 * (t + r));
             em.circle(c, r, "none", Some(None));
             let n = ax.label.chars().count() as f64;
             em.text(v(c.x - text_h * 0.3 * n, c.y - text_h * 0.35), ax.label.clone(), text_h);
@@ -1867,6 +1945,62 @@ mod tests {
             assert!(!(m.x > -1.0 && m.x < 6.0 && m.y > 1.0 && m.y < 3.0), "Achse im Gebäude: {a:?} {b:?}");
         }
         assert_eq!(prims.iter().filter(|q| matches!(q, Primitive::DrawingCircle { .. })).count(), 8, "Blasen bleiben");
+    }
+
+    /// [157] Blasen gehören vor das Gebäude: endet eine Achse im Gebäude (Anbau über die Rasterlinie), rückt
+    /// die Blase entlang der Achse nach aussen, alle Blasen derselben Seite gleich weit (eine Reihe), die Achse
+    /// läuft ausserhalb bis zur Blase; Blasen, die schon frei liegen, bleiben auf der Reihe.
+    #[test]
+    fn achsblasen_ausserhalb_des_gebaeudes() {
+        // Anbau 1.5..3.5 × 3..6.5: das obere Ende von Achse 2 (x = 2.5, extend 1 → y = 5) liegt darin.
+        let p = project(serde_json::json!({"extrudedSolids": [{"id": "s", "type": "extrudedSolid", "levelId": "eg", "height": 3,
+            "points": [{"x": 1.5, "y": 3}, {"x": 3.5, "y": 3}, {"x": 3.5, "y": 6.5}, {"x": 1.5, "y": 6.5}]}]}));
+        let grid = drawing(serde_json::json!({"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+            "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 2.5}, {"label": "3", "pos": 5}], "b": [{"label": "A", "pos": 0}, {"label": "B", "pos": 4}], "extend": 1}));
+        let prims = render(&p, grid, 100.0);
+        let circles: Vec<(Vec2, f64)> = prims.iter().filter_map(|q| if let Primitive::DrawingCircle { center, r, .. } = q { Some((*center, *r)) } else { None }).collect();
+        assert_eq!(circles.len(), 10);
+        let inside = |q: Vec2, r: f64| q.x + r > 1.5 && q.x - r < 3.5 && q.y + r > 3.0 && q.y - r < 6.5;
+        for (c, r) in &circles {
+            assert!(!inside(*c, *r), "Blase im Gebäude: {c:?}");
+        }
+        // Obere Reihe (Achsen 1–3) auf einer Höhe über dem Anbau.
+        let top: Vec<f64> = circles.iter().filter(|(c, _)| c.y > 4.5).map(|(c, _)| c.y).collect();
+        assert_eq!(top.len(), 3, "{circles:?}");
+        assert!(top.iter().all(|y| (y - top[0]).abs() < 1e-9 && *y > 6.5), "{top:?}");
+        // Untere Reihe unverändert (y = -1 − r).
+        assert!(circles.iter().filter(|(c, _)| c.y < 0.0).all(|(c, r)| (c.y - (-1.0 - r)).abs() < 1e-9));
+        // Achse 2 läuft oberhalb des Anbaus bis an die Blase.
+        let segs: Vec<(Vec2, Vec2)> = prims.iter().filter_map(|q| match q { Primitive::Line { a, b, dash: Some(Some(_)), .. } => Some((*a, *b)), _ => None }).collect();
+        let r = circles[0].1;
+        assert!(segs.iter().any(|(a, b)| (a.x - 2.5).abs() < 1e-9 && (a.y.max(b.y) - (top[0] - r)).abs() < 1e-6 && a.y.min(b.y) >= 6.5 - 1e-9), "{segs:?}");
+    }
+
+    /// [157] Massstabsbalken im kleinen Massstab: die Zahlen (3 mm Papier) stehen nicht ineinander — liegen
+    /// die Teilstriche enger als eine Beschriftung, wird nur jede k-te beschriftet (immer 0 und das Ende mit „m“).
+    #[test]
+    fn massstabsbalken_zahlen_ueberlappen_nicht() {
+        let p = project(serde_json::json!({}));
+        let bar = drawing(serde_json::json!({"shape": "scalebar", "at": {"x": 0, "y": 0}, "segmentLength": 1, "segments": 5}));
+        let labels = |scale: f64| -> Vec<(f64, String, f64)> {
+            render(&p, bar.clone(), scale).iter().filter_map(|q| if let Primitive::DrawingText { at, text, height_m, .. } = q { Some((at.x, text.clone(), *height_m)) } else { None }).collect()
+        };
+        // 1:100: 1 m = 10 mm Papier, alle sechs Zahlen.
+        assert_eq!(labels(100.0).iter().map(|l| l.1.as_str()).collect::<Vec<_>>(), ["0", "1", "2", "3", "4", "5m"]);
+        // 1:500: 1 m = 2 mm Papier — jede zweite Zahl, die 4 entfällt neben „5m“; nichts überlappt.
+        let l = labels(500.0);
+        assert_eq!(l.iter().map(|l| l.1.as_str()).collect::<Vec<_>>(), ["0", "2", "5m"], "{l:?}");
+        for w in l.windows(2) {
+            let width = crate::text_layout::text_width_em(&w[0].1, false) * w[0].2;
+            assert!(w[1].0 - w[0].0 > width, "{l:?}");
+        }
+        // 1:200: 1 m = 5 mm Papier — 0 vorne, „5m“ am Ende, nichts überlappt.
+        let l = labels(200.0);
+        assert!(l.first().is_some_and(|x| x.1 == "0") && l.last().is_some_and(|x| x.1 == "5m"), "{l:?}");
+        for w in l.windows(2) {
+            let width = crate::text_layout::text_width_em(&w[0].1, false) * w[0].2;
+            assert!(w[1].0 - w[0].0 > width, "{l:?}");
+        }
     }
 
     /// [112] Raster erscheint in jedem Geschoss, bei `levels` nur in den genannten.

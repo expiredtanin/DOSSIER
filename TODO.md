@@ -3617,6 +3617,50 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Blöcke/Körper (geschlossene 2D-Formen der Kategorie „Möbel" sparen nicht aus); Deckenspiegel-Untersicht unverändert
   (0.1 mm, alte Ausdünnung); Level-Feld nur über Ansichtsvorlage einstellbar (kein eigenes Feld im Ebenen-Panel); nur
   Linux, nicht in der Tauri-App/Metal angesehen. · S
+  unverändert), CLI + Chromium-Bilder (Musterhaus, komplex EG/OG). **Offen:** Schiebe-/Hebeschiebetüren werden Fenster
+  (Symbol ohne Bogen), Türen mit Futter/Zarge breiter als der Bogen bleiben Durchbruch + „Türbogen ohne Lücke“, Türen in
+  Bogenwänden, Stösse von Bogenwänden untereinander, schräg anstossende Enden in einer Wandfläche, Stützen/Treppen/Decken,
+  Blöcke (INSERT) werden schon beim Import aufgelöst (Tür-Blöcke als Linien), Brüstungs-/Sturzhöhen nicht aus 2D ableitbar;
+  nur Linux-Container, nicht in der Tauri-App geklickt (kein Knopf in der Werkzeugleiste, nur Befehlszeile).
+- ◐ **[157] Plan-Review Musterhaus komplex (Schweizer Praxis).** (7.11.) Alle Grundrisse UG/EG/OG/DG 1:100 und 1:50,
+  Schnitte A-A/B-B 1:100/1:50, vier Ansichten 1:100, Situation (EG 1:500) als CLI-SVG mit `--hatch` in Chromium angesehen,
+  Ausschnitte in Originalgrösse. **Behoben** (Kern, je ein Test): (1) helle Haarfugen zwischen aneinanderstossenden
+  schwarzen Schnittflächen (Gehrungs-Diagonalen an jeder Wandecke 1:100, Schichtfugen in den schwarzen Schnitten) —
+  deckend dunkle Flächen ohne Strich bekommen einen 0.05-mm-Haarstrich in ihrer Farbe (`svg::seam_fill`, Plan-SVG und
+  Druck-/PDF-SVG; `schwarze_flaechen_ohne_haarfuge`, `schwarze_flaeche_mit_haarstrich`); (2) verdeckte Kanten im Schnitt
+  lagen als Strichlinien auf den schwarzen Wänden — jetzt unter den Schnittflächen gezeichnet
+  (`verdeckte_kanten_unter_den_schnittflaechen`); (3) Massstabsbalken 1:500: Zahlen 0…5m ineinander — Beschriftung
+  ausgedünnt nach Inter-Breite (jede k-te, 0 und Ende immer; `massstabsbalken_zahlen_ueberlappen_nicht`);
+  (4) Schnittführung A-A/B-B lief durch Raumnamen/Flächen (OG, DG) — Schnittlinien sind Hindernisse der Raumstempel
+  (`raumstempel_weicht_schnittlinie_aus`); (5) Achsblasen 2/3 standen im Eingangs-Anbau (auf Fenster, Garderobe) —
+  liegt eine Blase im/am Gebäude, rückt die ganze Blasenreihe dieser Seite hinaus, Achse bis zur Blase
+  (`achsblasen_ausserhalb_des_gebaeudes`); (6) Schnitt-/Ansichtsmarken mit fester Modellgrösse (1:500 „A-A“ 1 mm,
+  1:50 10 mm) — jetzt Papiergrösse (bis 1:100 konstant, darüber ×(100/n)^0.5), Beschriftung vor der Pfeilspitze
+  statt auf dem Pfeil („Nord“ lag auf dem Pfeil; `misc::section_line_sized`); (7) Marken/Beschriftungen der Schnittführung
+  oben abgeschnitten (UG/DG „Nord“) — zählen zum Planausmass (`schnittmarken_papiergroesse_beschriftung_frei`);
+  (8) Baugrubensohle lief als 0.25-mm-Linie quer durch „E.07 Eingang“ — endet am Gebäude-Fussabdruck
+  (`baugrubensohle_endet_am_gebaeude`); (9) Höhenkoten „-2.5/-2.2“ auf der Böschungsschraffur — Baugruben-Linien sind
+  Hindernisse der Höhenlinien-Beschriftung (`hoehenkoten_nicht_auf_der_baugrube`). Goldens neu (Grundrisse, Schnitte,
+  Ansicht Süd, CLI). Vorher/Nachher-Bilder lokal (nicht im Repo). Geprüft: cargo test Kern, tsc, vitest, CLI-SVG in
+  Chromium (nur Linux, nicht in der Tauri-App/Metal; Bildschirm-Renderer render2d unverändert — Haarfugen dort nicht geprüft).
+  **Offen** (gefunden, nicht behoben): Gelände, Höhenlinien und Baugrube auch in OG/DG-Grundrissen (Entscheid nötig:
+  Umgebung nur EG/UG?); Höhenkoten-Beschriftungen und Masszahlen auf der Baugruben-Bemassung (EG/OG West/Ost:
+  Masskette liegt in der Böschungsschraffur); „B-B“ auf Masszahl „15.39“ (EG/OG Ost); Situation 1:500: Ansichtsmarken
+  an den Ecken überlagern sich („West“/„Nord“, „Ost“/„Süd“ — Marken-Enden treffen sich), „Kat.-Nr. 2417“ auf Nordpfeil
+  und Ansichtsmarke (Daten), „Detail und Situation“ auf Masskette/Höhenkote; Baum-Kreis über der Haustür (EG, Daten);
+  Gebäudeschatten als Keil-Rest an Bogenwand/Anbau (EG, grauer Keil ausserhalb der Wand); Bodenbelag (Schiffsboden)
+  füllt im DG 1:100 alle Räume und das Anbau-Dach, im EG/OG keiner (zu dominant in 1:100, uneinheitlich); Raumstempel
+  verlieren beim Ausweichen die Nutzungszeile (E.02 Atelier 1:100); Stempel „D.03 Galerie“ an der Firstlinie (DG,
+  Firstlinie kein Hindernis); Achsblasen ab 1:200 überdecken Höhenkoten (EG „-0.5“ an Blase 3); Schnitt A-A 1:100:
+  dunkle senkrechte Linie in der Aussenwand unter/über dem Fenster (Fensterkante hinter der Ebene?); Schnitt B-B:
+  Wendeltreppe UG nur geschnittene Stufen (Zickzack schwebt im Raum, Ansicht der Treppe fehlt), Treppe EG→OG als graue
+  Streifen; Schnitte zeigen viele verdeckte Kanten (Gaube, Türen dahinter) — Standard „hiddenLines“ der Vorlage prüfen;
+  CLI-Schnitt/-Ansicht ohne Höhenkoten (App ergänzt `levelMarkerPrimitives`, CLI nicht); Ansichten: Schlagschatten der
+  Erker-Decken treppig (je Facette ein achsparalleles Parallelogramm, `elevation_geom::shadows`), Deckenstirnen des Erkers
+  als zerrissene Strichstücke, dünne schwebende Linie unter Fenster OG (Süd); Ansicht Nord: Achsstummel unten weit unter
+  dem Terrain; Ansicht West: Teile unter dem Terrain sichtbar (rechts unten); Bogenwand-Fenster im Schnitt 1:50 nur Umriss.
+  · M
+
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

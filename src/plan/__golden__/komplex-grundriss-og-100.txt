@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 viewBox -4.243 0 25.297 23.11
 bytes 49755
 circle 14
@@ -10,3 +11,17 @@ svg 1
 text 90
 tspan 22
 hash f34a5df35938ec79
+=======
+viewBox -12.8 0 37.6 33.6
+bytes 348993
+circle 14
+g 1
+line 3307
+polygon 67
+polyline 158
+rect 1
+svg 1
+text 90
+tspan 21
+hash 937c57f380dd771c
+>>>>>>> bbef69e
