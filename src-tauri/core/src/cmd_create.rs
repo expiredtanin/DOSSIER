@@ -255,7 +255,7 @@ pub(crate) fn category_or(p: &Project, code: &str, ctx: &Ctx) -> Value {
 
 /// Farbe der Kategorie `code` (erste im Baum), sonst `def` (auch bei leerer Farbe: fehlt sie in der
 /// Datei, liest die typisierte Sicht "").
-fn category_color(p: &Project, code: &str, def: &str) -> Value {
+pub(crate) fn category_color(p: &Project, code: &str, def: &str) -> Value {
     match find_category(&p.layers, code) {
         Some(c) if !c.color.is_empty() => s(&c.color),
         _ => s(def),
@@ -1093,6 +1093,8 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "ceiling" => ceiling_ops(p, v, &ctx, ids),
         "room" => room_ops(p, v, &ctx, ids),
         "wand" => wand_ops(p, v, &ctx, ids),
+        // [154] Bauteile aus Zeichnung erkennen.
+        "recognize" => crate::drawing_recognize::ops(p, v, &ctx, ids),
         "stair" => stair_ops(p, v, &ctx, ids),
         "opening" => opening_ops(root, p, v, &ctx, ids),
         "roof" => roof_ops(p, v, &ctx, ids),
@@ -1173,6 +1175,7 @@ pub fn preview_req(root: &Map<String, Value>, project: &Project, req: &Req, pts:
             }
             None => p.ok = false,
         },
+        "recognize" => p.ok = crate::drawing_recognize::preview(project, v, &ctx, out, &mut p.info),
         "column" => {
             if let Some(at) = pts.first() {
                 out.poly(&column_footprint(*at, v));
@@ -1217,6 +1220,7 @@ pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Result
             }
             None => json!({ "hit": null }),
         },
+        "recognize" => crate::drawing_recognize::report(p, v),
         "pickProfile" => json!({ "hit": pick_profile(root, level, at).map_or(Value::Null, profile_json) }),
         "profile" => json!({ "hit": find(root, "drawings2d", s_of(v, "id")).map_or(Value::Null, profile_json) }),
         _ => return crate::cmd_draw::query(root, p, v).or_else(|| crate::cmd_solid::query(root, p, v)).map(Ok),

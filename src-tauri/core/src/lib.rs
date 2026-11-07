@@ -128,5 +128,6 @@ pub mod opening_slide;
 #[cfg(feature = "web")]
 mod web;
 pub mod presentation_sheet;
+pub mod drawing_recognize;
 #[cfg(test)]
 mod wall_join3d_tests;

@@ -3508,6 +3508,43 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   (beginnen mit Strich); DXF/DWG ohne Phase je Objekt (Linientyp beginnt am Anfang, Massstab stimmt); Metal-Pfad verkettet
   abgeleitete gestrichelte Linien nur über das Ketten-Flag (Zeichnungen), React-SVG-Ansicht ohne Phase; nur Linux, nicht in
   der Tauri-App/Metal angesehen. · M
+- ◐ **[154] Bauteile aus Zeichnung erkennen.** (7.11.) Befehl `erkennen` (Kürzel `bauteileerkennen`, `recognize`; nur
+  Geschosse): aus den 2D-Linien eines Bestandsplans (DXF/DWG-Import aus ArchiCAD/Vectorworks/AutoCAD) werden Wände, Öffnungen
+  und Räume. Quelle: gewählte 2D-Elemente, sonst die Zeichnung des aktiven Geschosses, sonst die erste Ebene mit Zeichnung
+  (Option E schaltet durch). Beim Start Vorschau (Wandbänder, Türbögen/Fensterlinien/Durchbruch-Kreuze, Raumumrisse, unklare
+  Stellen als Kreuz) mit Zählern als Meldung und am Cursor; B = Bericht (Wanddicken, mit Füllung bestätigt, Bogenwände,
+  Räume ohne Namen, unklar je Grund); Enter übernimmt als EIN Undo-Schritt ins aktive Geschoss (Wandhöhe = Geschosshöhe,
+  Tür 2.10, Fenster 1.20 auf 0.90). Kern `drawing_recognize.rs` (über `cmd_create`: `cmd: "recognize"` Ops/Vorschau,
+  Abfrage `q: "recognize"` Bericht), TS dünn: `io/recognizeDrawing.ts` (Fassade, auch CLI), `commands/cmds/recognize.ts`.
+  Erkennung: Linien/Polylinien/Rechtecke/Bögen (Bulges; in Sehnen zerlegte Bögen ≥ 3 Kanten mit gleichsinniger Drehung
+  ≤ 25° und Ecken ± 3 mm auf einem Kreis werden Bögen) nach Richtung gebündelt, deckungsgleiche verschmolzen; parallele
+  Paare 5–60 cm mit Überlappung ≥ 50 % gierig nach Abstand (Füllung/Schraffur dazwischen zuerst, je Linienseite einmal),
+  Schicht-/Achslinie dazwischen → eine Wand; Layer mit Wand-Namen (Wand, Wände, Mauer, WALL …) → nur deren Linien für Paare;
+  Stücke gleicher Achse/Dicke → eine Wand (Lücke ≤ 1.5 m immer, ≤ 4 m mit Tür-/Fensterhinweis); was ganz im Band einer
+  grösseren Wand liegt (Fensterrahmen, Abschlusslinien anstossender Wände) entfällt; Enden auf Achsen anderer Wände (L/T/Kreuz,
+  Tür in der Ecke bis 4 m mit Hinweis) und auf Bogenwand-Achsen; Umlauf um den Schwerpunkt (rechts = aussen, wie [B4]).
+  Öffnungen = ungedeckte Achsstrecken ≥ 30 cm: Türbogen 50–130° am Pfosten (Radius = Breite, zwei halbe = zweiflüglig) →
+  Tür mit Anschlag (`hinge`) und Aufschlagseite (`swing`), Linien parallel im Band (nicht länger als Lücke + 40 cm) → Fenster,
+  sonst Wanddurchbruch (`doorType: wandoeffnung`); Bogenwände aus konzentrischen Bögen, Stücke einer Achse mit Lücken →
+  eine Bogenwand mit Fenster (Bogen im Band)/Durchbruch (Lage als Bogenlänge). Wandtyp nach Gesamtdicke (± 5 mm, gleicher
+  Baustoff bevorzugt) wiederverwendet, sonst einschichtig neu („Wand {cm} cm (erkannt)“; Baustoff aus Layer-/Schraffurname
+  Beton/Mauerwerk/KS/Holz/Dämmung/Leichtbau, sonst tragender Projekt-Baustoff). Räume: Zellen der Achsen minus Wandbänder
+  (lichte Fläche), Name = grösster Text darin (sonst Raumnummer, sonst „Raum n“), SIA-Kategorie aus „HNF/NNF/VF …“,
+  Flächenangabe („17.01 m²“) > 5 % daneben → unklar. Unklar mit Grund: Flächenangabe abweichend/ausserhalb, Wandlinie ohne
+  Gegenlinie, Türbogen ohne Lücke, halber Türbogen, Lücke > 1.5 m ohne Hinweis, > 60 000 Linien. CLI
+  `dossier-cli <p.obp> erkennen [--level] [--source] [--out]` (z. B. `convert plan.dxf p.obp --cmd "erkennen --out e.obp"`).
+  Tests: Rust 16 (L-Haus mit T- und Kreuzstoss + Raumtexte, Flächenangabe, Tür mit Bogen/Fenster/Durchbruch, zweiflüglig,
+  breite Lücke, Tür in der Ecke, Bogenwand aus Bögen und aus Bulges, tessellierter Erker mit Fenster im Bogen, Layer-Filter,
+  Schicht-/Achslinie, Schraffur → Material, Ops/Typen/Auswahl/Vorschau/Bericht, Unsinn ohne Panic); vitest Befehl (6) und
+  Rundreise (`io/recognizeDrawing.roundtrip.test.ts`): eigener DXF-Export → Import → erkennen → Vergleich. Quote: Musterhaus
+  EG 5/5 Wände, 3/3 Öffnungen, Tür mit Anschlag/Aufschlag; OG 4/4; Musterhaus komplex (UG/EG/OG/DG) Wände 45/57 exakt (79 %),
+  Achsen-Abdeckung 96 % (Rest v. a. kollineare Wände über einen T-Stoss, die als eine Wand erkannt werden; Fundament-/
+  Stützmauern), Öffnungen 35/46 (76 %). Geprüft: cargo test Kern, WASM (Linux, `--no-opt`), tsc, vitest (Goldens
+  unverändert), CLI + Chromium-Bilder (Musterhaus, komplex EG/OG). **Offen:** Schiebe-/Hebeschiebetüren werden Fenster
+  (Symbol ohne Bogen), Türen mit Futter/Zarge breiter als der Bogen bleiben Durchbruch + „Türbogen ohne Lücke“, Türen in
+  Bogenwänden, Stösse von Bogenwänden untereinander, schräg anstossende Enden in einer Wandfläche, Stützen/Treppen/Decken,
+  Blöcke (INSERT) werden schon beim Import aufgelöst (Tür-Blöcke als Linien), Brüstungs-/Sturzhöhen nicht aus 2D ableitbar;
+  nur Linux-Container, nicht in der Tauri-App geklickt (kein Knopf in der Werkzeugleiste, nur Befehlszeile).
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
