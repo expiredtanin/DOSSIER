@@ -28,7 +28,7 @@ const OVERRIDE_TYPE_OPTIONS: { value: OverrideConditionType; labelKey: string }[
 
 /** [33] Feste Werte je Kriterium (Auswahl statt Freitext); Beschriftung `resources.overrides.val.<typ>.<wert>`. */
 const ENUM_VALUES: Partial<Record<OverrideConditionType, readonly string[]>> = {
-  element_kind: ["wall", "slab", "ground_slab", "roof", "stair", "column", "opening", "room", "shadow", "terrain"],
+  element_kind: ["wall", "slab", "ground_slab", "roof", "stair", "column", "opening", "room", "shadow", "terrain", "mesh"],
   layer_function: ["structure", "insulation", "screed", "finish", "plaster", "substructure", "membrane", "cladding", "air"],
   layer_position: ["above", "structure", "below"],
   view_kind: ["plan", "section", "elevation"],

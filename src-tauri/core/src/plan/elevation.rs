@@ -37,6 +37,8 @@ const SILL_FILL_COLOR: &str = "#cccccb";
 const DOOR_LEAF_FILL_COLOR: &str = "#ececec";
 const SYMBOL_INK: &str = "#7d858f";
 const ROOF_RGB_FALLBACK: [f64; 3] = [0.72, 0.45, 0.36];
+/// [152] Kontext-Grau importierter Netze ohne eigene Farbe (wie `model3d::IMPORTED_RGB`).
+const IMPORTED_RGB: [f64; 3] = [159.0 / 255.0, 166.0 / 255.0, 174.0 / 255.0];
 const EPS: f64 = 1e-6;
 const HIDDEN_INK: &str = "#8a929c";
 const HIDDEN_MM: f64 = 0.13;
@@ -74,6 +76,8 @@ enum Role {
     Roof,
     /// Stütze ([132]): Prisma aus dem Querschnitt, Flächen wie eine Platte.
     Column,
+    /// [152] Importiertes Netz (`ImportedMesh`): Dreiecke, id = Netz-id.
+    Mesh,
 }
 
 struct Face {
@@ -89,6 +93,8 @@ struct Face {
     normal: [f64; 3],
     /// [33] Override-Regeln dieser Fläche (Bauteil + sichtbare Schicht); `None` = keine.
     ov: Option<Rc<SurfOv>>,
+    /// [152] Fläche eines offenen importierten Netzes (beidseitig, s. `hlr::Face::two_sided`).
+    two_sided: bool,
 }
 
 /// [33] Override einer Ansichtsfläche bzw. Öffnung (`overrides::effective_surface`).
@@ -189,6 +195,10 @@ fn face_overrides(p: &Project, faces: &mut [Face], v: RuleView) {
                 surf_ov(p, v, "roof", &r.category_code, None, &layers, Some(0))
             }),
             Role::Column => p.columns.as_deref().unwrap_or(&[]).iter().find(|c| c.id == id).and_then(|c| surf_ov(p, v, "column", &c.category_code, Some(&super::domains::column_label(c)), &[], None)),
+            Role::Mesh => p.context.as_deref().unwrap_or(&[]).iter().find_map(|c| match c {
+                ContextObject::ImportedMesh(m) if m.id == id => Some(m),
+                _ => None,
+            }).and_then(|m| surf_ov(p, v, super::section::MESH_KIND, m.category_code.as_deref().unwrap_or(""), Some(&m.name), &[], None)),
         };
         memo.insert(key, o.clone());
         f.ov = o;
@@ -648,11 +658,11 @@ fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[Ro
         };
         let (id, fill) = match role {
             Role::Wall => (walls[f.src].wall_id.clone(), walls[f.src].color),
-            Role::Slab | Role::Column => (slabs[f.src].ceiling_id.clone(), slabs[f.src].color),
+            Role::Slab | Role::Column | Role::Mesh => (slabs[f.src].ceiling_id.clone(), slabs[f.src].color),
             Role::Roof => (roofs[f.src].id.clone(), roofs[f.src].fill),
         };
         let pts = f.pts.iter().map(|q| [q.0, q.1]).collect();
-        out.push(Face { pts, pd: f.pd, depth: f.depth, depth_min: f.depth_min, depth_max: f.depth_max, role, id, fill, normal: f.normal, ov: None });
+        out.push(Face { pts, pd: f.pd, depth: f.depth, depth_min: f.depth_min, depth_max: f.depth_max, role, id, fill, normal: f.normal, ov: None, two_sided: false });
     }
     out
 }
@@ -694,6 +704,121 @@ fn collect_column_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
         f.role = Role::Column;
     }
     faces
+}
+
+/// [152] Importierte Netze als Dreiecksflächen vor der Ansichtsebene (Hüllbox vorgefiltert): geschlossene
+/// Netze nur die zugewandten Dreiecke, offene beidseitig (Normale zum Betrachter). Farbe aus dem Import,
+/// sonst Kontext-Grau wie im 3D.
+fn collect_mesh_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
+    let (o, n, u) = ([frame[0], frame[1], frame[2]], [frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    // Modell [x, y, z] → Welt [x, Höhe, y].
+    let world = |q: [f64; 3]| [q[0], q[2], q[1]];
+    let mut out = Vec::new();
+    for m in crate::mesh_view::meshes(p) {
+        let b = &m.info.bbox;
+        // Tiefe der Hüllbox: ganz vor der Ebene (Tiefe ≤ 0) entfällt.
+        let far = [(b[0], b[1]), (b[3], b[1]), (b[0], b[4]), (b[3], b[4])].iter().map(|&(x, y)| dot([x - o[0], 0.0, y - o[2]], n)).fold(f64::NEG_INFINITY, f64::max);
+        if !(far > EPS) {
+            continue;
+        }
+        let fill = m.mesh.color.as_deref().map_or(IMPORTED_RGB, |c| hex_to_rgb(c, IMPORTED_RGB));
+        let pos = &m.mesh.positions;
+        let pt = |i: u32| world([pos[3 * i as usize], pos[3 * i as usize + 1], pos[3 * i as usize + 2]]);
+        // Zugewandte Dreiecke derselben Ebene werden zu Polygonen vereinigt (weniger Flächen für Maler und
+        // Sichtbarkeit; Wände und Platten aus zwei bis wenigen Dreiecken werden eine Fläche).
+        let mut groups: Vec<((i64, i64, i64, i64), Vec<Face>)> = Vec::new();
+        let mut slot: HashMap<(i64, i64, i64, i64), usize> = HashMap::new();
+        for t in &m.info.tris {
+            let w = [pt(t[0]), pt(t[1]), pt(t[2])];
+            let (e1, e2) = ([w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]], [w[2][0] - w[0][0], w[2][1] - w[0][1], w[2][2] - w[0][2]]);
+            // Achsentausch spiegelt: Kreuzprodukt umkehren, damit die Normale aussen bleibt.
+            let c = [-(e1[1] * e2[2] - e1[2] * e2[1]), -(e1[2] * e2[0] - e1[0] * e2[2]), -(e1[0] * e2[1] - e1[1] * e2[0])];
+            let l = hypot(&c);
+            if !(l > 1e-15) {
+                continue;
+            }
+            let mut normal = [c[0] / l, c[1] / l, c[2] / l];
+            if m.info.flip {
+                normal = [-normal[0], -normal[1], -normal[2]];
+            }
+            let facing = dot(n, normal);
+            if m.info.closed && facing >= -1e-9 {
+                continue;
+            }
+            if !m.info.closed && facing > 0.0 {
+                normal = [-normal[0], -normal[1], -normal[2]];
+            }
+            let mut pts = Vec::with_capacity(3);
+            let mut pd = Vec::with_capacity(3);
+            for q in w {
+                let r = [q[0] - o[0], q[1] - o[1], q[2] - o[2]];
+                pts.push([dot(r, u), q[1]]);
+                pd.push(dot(r, n));
+            }
+            let depth = (pd[0] + pd[1] + pd[2]) / 3.0;
+            if depth <= EPS {
+                continue;
+            }
+            let (dmin, dmax) = (pd.iter().copied().fold(f64::INFINITY, f64::min), pd.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+            let key = ((normal[0] * 1e4).round() as i64, (normal[1] * 1e4).round() as i64, (normal[2] * 1e4).round() as i64, (dot(normal, w[0]) * 1e3).round() as i64);
+            let k = *slot.entry(key).or_insert_with(|| {
+                groups.push((key, Vec::new()));
+                groups.len() - 1
+            });
+            groups[k].1.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: Role::Mesh, id: m.mesh.id.clone(), fill, normal, ov: None, two_sided: !m.info.closed });
+        }
+        for (_, tris) in groups {
+            merge_coplanar(tris, &mut out);
+        }
+    }
+    out
+}
+
+const MERGE_MAX: usize = 64;
+
+/// Haarsplitter in der Ansicht: Fläche klein gegen das Quadrat der längsten Kante (oder winzig).
+fn sliver(f: &Face) -> bool {
+    let p = &f.pts;
+    if p.len() != 3 {
+        return false;
+    }
+    let area2 = ((p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1])).abs();
+    let e2 = (0..3).map(|i| (p[(i + 1) % 3][0] - p[i][0]).powi(2) + (p[(i + 1) % 3][1] - p[i][1]).powi(2)).fold(0.0, f64::max);
+    area2 < 0.01 * e2 || area2 < 1e-6
+}
+
+/// [152] Dreiecke einer Ebene (Ansichtskoordinaten) zu Polygonen vereinigen; Tiefe je Ecke aus der Ebene.
+/// Ergibt die Vereinigung Löcher (die `hlr` als Kanten zeigen würde), bleiben es die Dreiecke.
+fn merge_coplanar(tris: Vec<Face>, out: &mut Vec<Face>) {
+    // Grosse Gruppen (Belag aus vielen Platten, überlappende Dreiecke) bleiben Dreiecke: die Vereinigung
+    // wird dort teuer und spart in der Ansicht wenig.
+    // Streifend gesehene Ebenen (fast auf die Kante) ergeben Haarsplitter, an denen die Vereinigung hängen kann.
+    let grazing = tris.iter().any(sliver);
+    if tris.len() < 2 || tris.len() > MERGE_MAX || grazing {
+        out.extend(tris);
+        return;
+    }
+    let polys: Vec<crate::flat::Polygon> = tris.iter().map(|f| vec![f.pts.clone()]).collect();
+    let merged = crate::polygon_bool::union(&polys);
+    // Ebene in Ansichtskoordinaten aus dem ersten Dreieck: Tiefe = a·u + b·v + c.
+    let f0 = &tris[0];
+    let (p, d) = (&f0.pts, &f0.pd);
+    let det = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+    if merged.is_empty() || merged.iter().any(|poly| poly.len() != 1) || !(det.abs() > 1e-12) {
+        out.extend(tris);
+        return;
+    }
+    let a = ((d[1] - d[0]) * (p[2][1] - p[0][1]) - (d[2] - d[0]) * (p[1][1] - p[0][1])) / det;
+    let b = ((p[1][0] - p[0][0]) * (d[2] - d[0]) - (p[2][0] - p[0][0]) * (d[1] - d[0])) / det;
+    let depth_at = |q: &Pt| d[0] + a * (q[0] - p[0][0]) + b * (q[1] - p[0][1]);
+    for poly in merged {
+        let pts = poly.into_iter().next().unwrap();
+        let pd: Vec<f64> = pts.iter().map(depth_at).collect();
+        let depth = pd.iter().sum::<f64>() / pd.len() as f64;
+        let (dmin, dmax) = (pd.iter().copied().fold(f64::INFINITY, f64::min), pd.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        out.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: Role::Mesh, id: f0.id.clone(), fill: f0.fill, normal: f0.normal, ov: None, two_sided: f0.two_sided });
+    }
 }
 
 /// `collectRoofFaces`.
@@ -1199,6 +1324,95 @@ fn outline_line(a: Pt, b: Pt) -> Primitive {
 }
 
 /// [140] Aussenränder der vereinigten Bauteilflächen (Silhouette des Baukörpers in der Ansicht).
+/// [152] Bis zu so vielen Flächen ohne importierte Netze exakt (Vereinigung); sonst (Netze: viele, teils haarfeine
+/// Dreiecke, deren Vereinigung Minuten dauert oder hängt) über ein Raster.
+const SILHOUETTE_EXACT_MAX: usize = 4000;
+
+/// Aussenumriss aller Flächen: exakt als Ringe oder gerastert (Deckung, aussen per Flutfüllung vom Rand).
+enum Silhouette {
+    Rings(Vec<Vec<Pt>>),
+    Raster { x0: f64, y0: f64, cell: f64, w: usize, h: usize, px: Vec<u8> },
+}
+
+impl Silhouette {
+    fn of(faces: &[Face]) -> Silhouette {
+        if faces.len() <= SILHOUETTE_EXACT_MAX && !faces.iter().any(|f| f.role == Role::Mesh) {
+            return Silhouette::Rings(silhouette_rings(faces));
+        }
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for q in faces.iter().flat_map(|f| f.pts.iter()) {
+            (x0, y0, x1, y1) = (x0.min(q[0]), y0.min(q[1]), x1.max(q[0]), y1.max(q[1]));
+        }
+        if !(x1 > x0 || y1 > y0) {
+            return Silhouette::Rings(Vec::new());
+        }
+        // Zelle so, dass die längere Seite ≤ 2048 Zellen hat, höchstens 4 Mio. Zellen; Rand von zwei Zellen.
+        let cell = ((x1 - x0).max(y1 - y0) / 2040.0).max(SILHOUETTE_TOL / 2.0);
+        let (w, h) = (((x1 - x0) / cell) as usize + 5, ((y1 - y0) / cell) as usize + 5);
+        let (x0, y0) = (x0 - 2.0 * cell, y0 - 2.0 * cell);
+        let mut px = vec![0u8; w * h];
+        // Deckung je Fläche (Zeilen-Füllung über die Zellmitten, Spannen grosszügig gerundet, Ecken immer).
+        for f in faces.iter().filter(|f| f.pts.len() >= 3) {
+            let g: Vec<(f64, f64)> = f.pts.iter().map(|q| ((q[0] - x0) / cell, (q[1] - y0) / cell)).collect();
+            let (lo, hi) = g.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.1), hi.max(q.1)));
+            for q in &g {
+                px[(q.1 as usize).min(h - 1) * w + (q.0 as usize).min(w - 1)] = 1;
+            }
+            let mut xs: Vec<f64> = Vec::new();
+            for row in (lo.floor().max(0.0) as usize)..=(hi.ceil() as usize).min(h - 1) {
+                let yc = row as f64 + 0.5;
+                xs.clear();
+                for i in 0..g.len() {
+                    let (a, b) = (g[i], g[(i + 1) % g.len()]);
+                    if (a.1 <= yc) != (b.1 <= yc) {
+                        xs.push(a.0 + (yc - a.1) / (b.1 - a.1) * (b.0 - a.0));
+                    }
+                }
+                xs.sort_by(|a, b| a.total_cmp(b));
+                for s in xs.chunks_exact(2) {
+                    let (c0, c1) = ((s[0].floor().max(0.0)) as usize, (s[1].ceil() as usize).min(w - 1));
+                    px[row * w + c0..=row * w + c1.max(c0)].fill(1);
+                }
+            }
+        }
+        // Aussen: vom Rand her erreichbare freie Zellen.
+        let mut stack: Vec<usize> = (0..w).chain((0..w).map(|x| (h - 1) * w + x)).chain((0..h).map(|y| y * w)).chain((0..h).map(|y| y * w + w - 1)).filter(|&i| px[i] == 0).collect();
+        while let Some(i) = stack.pop() {
+            if px[i] != 0 {
+                continue;
+            }
+            px[i] = 2;
+            let (x, y) = (i % w, i / w);
+            if x > 0 { stack.push(i - 1); }
+            if x + 1 < w { stack.push(i + 1); }
+            if y > 0 { stack.push(i - w); }
+            if y + 1 < h { stack.push(i + w); }
+        }
+        Silhouette::Raster { x0, y0, cell, w, h, px }
+    }
+
+    /// Liegt die Kante a–b auf dem Aussenumriss?
+    fn on(&self, a: Pt, b: Pt) -> bool {
+        let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+        match self {
+            Silhouette::Rings(r) => on_rings(r, m),
+            Silhouette::Raster { x0, y0, cell, w, h, px } => {
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let l = hypot2(dx, dy);
+                if !(l > 0.0) {
+                    return false;
+                }
+                let d = 2.0 * cell;
+                let outside = |x: f64, y: f64| {
+                    let (c, r) = (((x - x0) / cell).floor(), ((y - y0) / cell).floor());
+                    c < 0.0 || r < 0.0 || c as usize >= *w || r as usize >= *h || px[r as usize * w + c as usize] == 2
+                };
+                outside(m[0] - dy / l * d, m[1] + dx / l * d) || outside(m[0] + dy / l * d, m[1] - dx / l * d)
+            }
+        }
+    }
+}
+
 fn silhouette_rings(faces: &[Face]) -> Vec<Vec<Pt>> {
     let polys: Vec<crate::flat::Polygon> = faces.iter().filter(|f| f.pts.len() >= 3).map(|f| vec![f.pts.clone()]).collect();
     // Nur Aussenringe: Löcher der Vereinigung (Gauben-Ausschnitte, Fugen zwischen Dachflächen) sind keine Silhouette.
@@ -1243,6 +1457,7 @@ fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpening], frame:
     let round_cols: HashMap<&str, u32> = p.columns.as_deref().unwrap_or(&[]).iter().filter(|c| matches!(c.profile, ColumnProfile::Round { .. })).enumerate().map(|(i, c)| (c.id.as_str(), i as u32)).collect();
     let (n, u) = ([frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
     let mut hf: Vec<crate::hlr::Face> = Vec::with_capacity(faces.len() + openings.len());
+    let mut mesh_groups: HashMap<&str, u32> = HashMap::new();
     for (fi, f) in faces.iter().enumerate() {
         let pts = f.pts.iter().zip(&f.pd).map(|(q, &d)| [q[0], q[1], d]).collect();
         let m = f.normal;
@@ -1254,6 +1469,12 @@ fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpening], frame:
         // Runde Stützen ([132]): Mantelfacetten ohne Fugen (eigene Gruppen hinter denen der Bogenwände).
         if f.role == Role::Column {
             h.smooth = round_cols.get(f.id.as_str()).map_or(0, |i| arc_ids.len() as u32 + 1 + i);
+        }
+        // [152] Importierte Netze: Facetten innerhalb des Knickwinkels glätten (eine Gruppe je Netz), offene beidseitig.
+        if f.role == Role::Mesh {
+            let next = mesh_groups.len() as u32;
+            h.smooth = *mesh_groups.entry(f.id.as_str()).or_insert(arc_ids.len() as u32 + round_cols.len() as u32 + 1 + next);
+            h.two_sided = f.two_sided;
         }
         hf.push(h);
     }
@@ -1357,6 +1578,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     cull_under_roofs(p, &frame, &walls, &mut faces);
     faces.extend(collect_roof_faces(p, &frame, &walls)?);
     faces.extend(collect_column_faces(p, &frame));
+    faces.extend(collect_mesh_faces(p, &frame));
     // Ansichtsbereich ([36]): Bauteile, deren nächster Punkt weiter als `depth` hinter der Ansichtsebene
     // liegt, entfallen ganz (samt ihren Öffnungen, s. unten).
     let far = level.depth.filter(|d| *d > 0.0).map(|d| (d, drop_far_faces(&mut faces, d)));
@@ -1378,6 +1600,14 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     for c in p.columns.as_deref().unwrap_or(&[]) {
         col_cat.entry(c.id.as_str()).or_insert(c.category_code.as_str());
     }
+    let mut mesh_cat: HashMap<&str, &str> = HashMap::new();
+    for c in p.context.as_deref().unwrap_or(&[]) {
+        if let ContextObject::ImportedMesh(m) = c {
+            if let Some(code) = m.category_code.as_deref() {
+                mesh_cat.entry(m.id.as_str()).or_insert(code);
+            }
+        }
+    }
     let category = |f: &Face| -> Option<&str> {
         if f.id.is_empty() {
             return None;
@@ -1387,6 +1617,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
             Role::Slab => ceil_cat.get(f.id.as_str()).copied(),
             Role::Roof => roof_cat.get(f.id.as_str()).copied(),
             Role::Column => col_cat.get(f.id.as_str()).copied(),
+            Role::Mesh => mesh_cat.get(f.id.as_str()).copied(),
         }
     };
     if vis.has_vis && vis.has_display {
@@ -1460,10 +1691,11 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         // Verschnittene Dächer ([G5]) kommen teils als Dreiecke: ein Hauch Kontur in der Füllfarbe deckt
         // die Haarfugen zwischen ihnen.
         let fill = face_fill(f);
-        let seam = is_roof && assembled.contains(f.id.as_str());
+        // [152] Importierte Netze ebenso (Dreiecke).
+        let seam = (is_roof && assembled.contains(f.id.as_str())) || f.role == Role::Mesh;
         let hatch = f.ov.as_ref().and_then(|o| o.hatch.clone()).unwrap_or_else(no_hatch);
         let mut prim = if seam { polygon(pts, &fill, &fill, 0.15, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
-        if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, column_id, .. } = &mut prim {
+        if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, column_id, context_object_id, .. } = &mut prim {
             *g = Some(greyed(f));
             if !f.id.is_empty() {
                 match f.role {
@@ -1471,12 +1703,13 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
                     Role::Slab => *ceiling_id = Some(f.id.clone()),
                     Role::Roof => *roof_id = Some(f.id.clone()),
                     Role::Column => *column_id = Some(f.id.clone()),
+                    Role::Mesh => *context_object_id = Some(f.id.clone()),
                 }
             }
         }
         let rank = match f.role {
             Role::Slab => 0.0,
-            Role::Wall | Role::Column => 1.0,
+            Role::Wall | Role::Column | Role::Mesh => 1.0,
             Role::Roof => 2.0,
         };
         pending.push(Pending::Item { depth: f.depth, rank: Some(rank), prim });
@@ -1679,7 +1912,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     });
     let mut prims: Vec<Primitive> = items.into_iter().map(|it| it.prim).collect();
     // Exakt sichtbare Kanten liegen über allen Füllungen (die Füllungen bleiben Maler-Ordnung).
-    let silhouette = silhouette_rings(&faces);
+    let silhouette = Silhouette::of(&faces);
     for e in &edges {
         acc.add(e.a[0], e.a[1]);
         acc.add(e.b[0], e.b[1]);
@@ -1694,7 +1927,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
                 *dash = Some(Some(HIDDEN_DASH.to_vec()));
             }
             prims.push(l);
-        } else if on_rings(&silhouette, [(e.a[0] + e.b[0]) / 2.0, (e.a[1] + e.b[1]) / 2.0]) {
+        } else if silhouette.on(e.a, e.b) {
             let l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "elevation-outline", SILHOUETTE_MM, EDGE_INK);
             prims.push(match ov { Some(o) => o.restyle(l), None => l });
         } else {
@@ -2028,6 +2261,48 @@ mod tests {
         assert!(b[2] > b[0]);
         // Painter: die Bodenlinie zuletzt
         assert!(matches!(prims.last(), Some(Primitive::Line { cls, .. }) if cls == "elevation-ground"));
+    }
+
+    /// [152] Importierte Netze in der Ansicht: Flächen (Pick über die Kontext-Id), Kanten exakt verdeckt durch
+    /// Bauteile davor; offene Netze beidseitig; ausgeblendete Kategorie entfällt.
+    #[test]
+    fn importierte_netze_in_der_ansicht() {
+        use crate::mesh_view::tests::cube;
+        let mesh = |id: &str, (positions, indices): (Vec<f64>, Vec<f64>)| ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: id.into(), category_code: Some("10".into()), color: Some("#ff0000".into()), positions, indices, ..Default::default() });
+        // Ansicht von y = −1 nach +y, u = x + 5.
+        let level = LevelSpec { kind: "elevation".into(), line: Some([Vec2 { x: -5.0, y: -1.0 }, Vec2 { x: 8.0, y: -1.0 }]), direction_sign: Some(1.0), ..Default::default() };
+        let lines = |prims: &[Primitive]| -> Vec<([f64; 2], [f64; 2])> {
+            prims.iter().filter_map(|q| match q {
+                Primitive::Line { a, b, cls, .. } if cls != "elevation-ground" => Some(([a.x, a.y], [b.x, b.y])),
+                _ => None,
+            }).collect()
+        };
+        let mut p = Project { context: Some(vec![mesh("n", cube(0.0, 2.0, 2.0, 3.0, 0.0, 2.0))]), ..Default::default() };
+        let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { fill, context_object_id: Some(id), .. } if id == "n" && fill == "#ff0000")));
+        let l = lines(&prims);
+        assert_eq!(l.len(), 4, "Umriss der Vorderseite ohne Diagonale: {l:?}");
+        assert!(l.iter().all(|(a, b)| a[0].min(b[0]) > 5.0 - 1e-9 && a[0].max(b[0]) < 7.0 + 1e-9));
+        // Eine 1 m hohe Wand davor verdeckt den unteren Teil.
+        p.walls = vec![Wall { id: "w".into(), start: Vec2 { x: -1.0, y: 0.5 }, end: Vec2 { x: 5.0, y: 0.5 }, height: 1.0, ..Default::default() }];
+        let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        let mesh_lines: Vec<_> = lines(&prims).into_iter().filter(|(a, b)| a[0].min(b[0]) > 5.0 - 1e-6 && a[0].max(b[0]) < 7.0 + 1e-6).collect();
+        assert_eq!(mesh_lines.len(), 3, "{mesh_lines:?}");
+        assert!(mesh_lines.iter().all(|(a, b)| a[1].min(b[1]) > 1.0 - 1e-6), "{mesh_lines:?}");
+        assert!(lines(&prims).iter().any(|(a, b)| (a[0] - 7.0).abs() < 1e-9 && (b[0] - 7.0).abs() < 1e-9 && (a[1].max(b[1]) - 2.0).abs() < 1e-9), "Kante über der Wand sichtbar");
+        // Offene Fläche, von hinten gesehen: trotzdem gezeichnet.
+        let pos = vec![0.0, 2.0, 0.0, 0.0, 2.0, 2.0, 3.0, 2.0, 2.0, 3.0, 2.0, 0.0];
+        for idx in [vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], vec![0.0, 2.0, 1.0, 0.0, 3.0, 2.0]] {
+            let q = Project { context: Some(vec![mesh("f", (pos.clone(), idx))]), ..Default::default() };
+            let (prims, _) = elevation_primitives(&q, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+            assert!(prims.iter().any(|x| matches!(x, Primitive::Polygon { context_object_id: Some(id), .. } if id == "f")));
+            assert_eq!(lines(&prims).len(), 4);
+        }
+        // Kategorie ausgeblendet: weder Fläche noch Kante.
+        let vis = Visibility { has_vis: true, has_display: true, invisible: ["10".to_string()].into(), ..Default::default() };
+        p.walls.clear();
+        let r = elevation_primitives(&p, &level, false, false, &vis, 100.0).unwrap();
+        assert!(r.is_none_or(|(prims, _)| !prims.iter().any(|x| matches!(x, Primitive::Polygon { context_object_id: Some(_), .. })) && lines(&prims).is_empty()));
     }
 
     /// [G4] Verdeckte Kanten der Ansicht gestrichelt nur mit `hiddenLines`; Kanten liegen über den

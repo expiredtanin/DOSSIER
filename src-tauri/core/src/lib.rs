@@ -61,6 +61,7 @@ pub mod delaunay;
 pub mod document;
 pub mod ops;
 pub mod mesh_section;
+pub mod mesh_view;
 pub mod model;
 pub mod model3d;
 pub mod model3d_cache;

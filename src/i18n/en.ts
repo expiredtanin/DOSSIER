@@ -1235,6 +1235,7 @@ export const en: Record<TranslationKey, string> = {
   "resources.overrides.val.element_kind.room": "Room",
   "resources.overrides.val.element_kind.shadow": "Shadow",
   "resources.overrides.val.element_kind.terrain": "Terrain",
+  "resources.overrides.val.element_kind.mesh": "Imported mesh",
   "resources.overrides.action.hide": "Hide",
   "resources.overrides.value.material": "Name, id or std-c-…",
   "resources.overrides.and": "and",

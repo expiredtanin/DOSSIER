@@ -163,6 +163,8 @@ pub enum Kind {
     Slab,
     Roof,
     Body,
+    /// [152] Importiertes Netz (`ImportedMesh`); `index` zeigt in `Output::meshes`.
+    Mesh,
 }
 
 /// Ein geschnittenes Band (`SectionCutPolygon`).
@@ -233,6 +235,8 @@ pub struct CutRules {
     pub terrain_dash: Option<Option<Vec<f64>>>,
     /// [33] Projekt-Schraffur der Gelände-Regel fürs Erdreich.
     pub terrain_hatch: Option<HatchRender>,
+    /// [152] Linien-Aktionen (Farbe, Stärke, Linienstil) je importiertem Netz (`Output::meshes`-Index).
+    pub mesh: HashMap<usize, MeshLineStyle>,
 }
 
 impl CutRules {
@@ -243,8 +247,66 @@ impl CutRules {
         let terrain = if out.profiles.is_empty() && out.earth.is_empty() { None } else { t.and_then(|t| super::overrides::terrain_override(p, v, t.category_code.as_deref(), &t.name)) };
         let terrain_dash = terrain.as_ref().and_then(|(a, _)| super::overrides::linetype_dash(p, a.linetype_id.as_deref()));
         let terrain_hatch = terrain.as_ref().and_then(|(_, l)| l.hatch.as_deref()).filter(|h| !matches!(*h, "none" | "material")).and_then(|id| resolve_hatch(p, id, None, None, None));
-        CutRules { loose: loose_fill_components(p), ov: cut_overrides(p, &out.cuts, v), terrain, terrain_dash, terrain_hatch }
+        let mut ov = cut_overrides(p, &out.cuts, v);
+        let mut mesh = HashMap::new();
+        // [152] Importierte Netze: Regeln über Ebene, Name und Bauteilart „mesh" (Fläche und Linien).
+        if !out.meshes.is_empty() && super::overrides::has_active(p, v) {
+            let rules: Vec<Option<(super::overrides::Actions, Option<CutOv>)>> = out.meshes.iter().map(|m| mesh_override(p, m, v)).collect();
+            if out.cuts.iter().any(|c| c.kind == Kind::Mesh && rules.get(c.index).is_some_and(|r| r.as_ref().is_some_and(|r| r.1.is_some()))) {
+                ov.resize(out.cuts.len(), None);
+                for (i, c) in out.cuts.iter().enumerate().filter(|(_, c)| c.kind == Kind::Mesh) {
+                    ov[i] = rules.get(c.index).and_then(|r| r.as_ref()).and_then(|r| r.1.clone());
+                }
+            }
+            mesh = rules.into_iter().enumerate().filter_map(|(i, r)| r.filter(|r| r.0.any()).map(|r| (i, MeshLineStyle { color: r.0.color.clone(), weight: r.0.lineweight.filter(|w| w.is_finite() && *w >= 0.0), dash: super::overrides::linetype_dash(p, r.0.linetype_id.as_deref()) }))).collect();
+        }
+        CutRules { loose: loose_fill_components(p), ov, terrain, terrain_dash, terrain_hatch, mesh }
     }
+}
+
+/// [152] Linien-Stil einer Regel für ein importiertes Netz (Schnittlinien, Projektion).
+#[derive(Clone, Debug, Default)]
+pub struct MeshLineStyle {
+    pub color: Option<String>,
+    pub weight: Option<f64>,
+    pub dash: Option<Option<Vec<f64>>>,
+}
+
+impl MeshLineStyle {
+    fn apply(&self, l: &mut Primitive) {
+        if let Primitive::Line { color, weight_mm, dash, .. } = l {
+            if let Some(c) = &self.color {
+                *color = Some(c.clone());
+            }
+            if let Some(w) = self.weight {
+                *weight_mm = w;
+            }
+            if let Some(d) = &self.dash {
+                *dash = Some(d.clone());
+            }
+        }
+    }
+}
+
+/// [152] Bauteilart importierter Netze in Override-Regeln.
+pub const MESH_KIND: &str = "mesh";
+
+/// [152] Regeln eines importierten Netzes: die Fläche ist das Netz selbst, Element- und Schicht-Regeln zählen
+/// gleich (`effective_surface`, Bauteilart „mesh", Ebene, Name). (Linien-Aktionen, Override der Schnittfläche).
+fn mesh_override(p: &Project, m: &MeshMeta, v: RuleView) -> Option<(super::overrides::Actions, Option<CutOv>)> {
+    let code = m.category.as_deref();
+    let s = super::overrides::Subject { layer_name: code.and_then(|k| p.layer_category(k)).map(|k| k.name.as_str()), layer_code: code, object_name: Some(&m.name), element_kind: Some(MESH_KIND), ..Default::default() };
+    let (el, ly, _) = super::overrides::effective_surface(p.override_rules.as_deref(), &s, v);
+    let dash = super::overrides::linetype_dash(p, el.linetype_id.as_deref());
+    let cut = ly.any().then(|| {
+        let hatch = match ly.hatch.as_deref() {
+            None | Some("material") => HatchOv::Keep,
+            Some("none") => HatchOv::None,
+            Some(id) => resolve_hatch(p, id, Some(SECTION_SLAB_AXIS_ANGLE_DEG), None, None).map_or(HatchOv::Keep, HatchOv::Pattern),
+        };
+        CutOv { fill: ly.fill_color.clone(), hatch, outline: ly.outline, dash: dash.clone() }
+    });
+    (el.any() || cut.is_some()).then_some((el, cut))
 }
 
 /// [33] Projekt ohne die Elemente `ids` (Regel „Ausblenden“ im Schnitt): verdecken dann auch nichts.
@@ -268,6 +330,10 @@ pub fn without_elements(p: &Project, ids: &HashSet<String>) -> Project {
     }
     if let Some(v) = &mut q.rooms {
         v.retain(|x| !ids.contains(&x.id));
+    }
+    // [152] Importierte Netze.
+    if let Some(v) = &mut q.context {
+        v.retain(|x| !matches!(x, ContextObject::ImportedMesh(m) if ids.contains(&m.id)));
     }
     q
 }
@@ -293,6 +359,7 @@ pub fn cut_overrides(p: &Project, cuts: &[Cut], v: RuleView) -> Vec<Option<CutOv
                 Kind::Slab => 1,
                 Kind::Roof => 2,
                 Kind::Body => return None,
+                Kind::Mesh => return None,
             };
             let key = (tag, src.to_string());
             if !memo.contains_key(&key) {
@@ -361,6 +428,18 @@ pub struct Output {
     pub earth: Vec<(Vec<[f64; 2]>, HatchRender)>,
     /// [137] Gelände, zu dem das Erdreich-Band gehört (Pick-Id: Klick ins Band wählt das Gelände).
     pub terrain_id: Option<String>,
+    /// [152] Importierte Netze im Schnitt (Index = `Cut::index`/`Edge::index` bei `Kind::Mesh`).
+    pub meshes: Vec<MeshMeta>,
+    /// [152] Offene Schnittlinien importierter Netze (offene/nicht-mannigfaltige Netze): Netz-Index, Linienzug.
+    pub mesh_lines: Vec<(usize, Vec<[f64; 2]>)>,
+}
+
+/// [152] Ein importiertes Netz im Schnitt.
+#[derive(Clone, Debug)]
+pub struct MeshMeta {
+    pub id: String,
+    pub name: String,
+    pub category: Option<String>,
 }
 
 /// Ein truck-Körper (aus TS, asynchron gebaut): Index in `extrudedSolids` + Netz.
@@ -1906,7 +1985,7 @@ fn cut_mesh(positions: &[f64], indices: &[f64], base: (f64, f64), u: (f64, f64))
 }
 
 /// `ringsToPolygons`.
-fn rings_to_polygons(rings: &[Vec<[f64; 2]>]) -> Vec<Vec<Vec<[f64; 2]>>> {
+pub(crate) fn rings_to_polygons(rings: &[Vec<[f64; 2]>]) -> Vec<Vec<Vec<[f64; 2]>>> {
     let refs: Vec<&[[f64; 2]]> = rings.iter().map(|r| r.as_slice()).collect();
     let f = crate::mesh_section::rings_to_polygons(&encode_rings(&refs));
     if f.is_empty() {
@@ -1930,7 +2009,7 @@ fn rings_to_polygons(rings: &[Vec<[f64; 2]>]) -> Vec<Vec<Vec<[f64; 2]>>> {
 }
 
 /// `keyhole` (Rechnung: `voids::keyhole_flat`).
-fn keyhole(poly: &[Vec<[f64; 2]>]) -> (Vec<[f64; 2]>, Vec<f64>) {
+pub(crate) fn keyhole(poly: &[Vec<[f64; 2]>]) -> (Vec<[f64; 2]>, Vec<f64>) {
     let refs: Vec<&[[f64; 2]]> = poly.iter().map(|r| r.as_slice()).collect();
     let f = crate::voids::keyhole_flat(&encode_rings(&refs));
     let n = f.first().copied().unwrap_or(0.0) as usize;
@@ -1959,6 +2038,50 @@ fn append_body_sections(cuts: &mut Vec<Cut>, p: &Project, bodies: &[&BodyMesh], 
             c.source_id = solids.get(b.index).map(|s| s.id.clone());
             cuts.push(c);
         }
+    }
+}
+
+/// [152] Tiefenbereich (hinter der Ebene positiv) der Hüllbox eines Netzes zur senkrechten Ebene.
+fn mesh_depth_range(m: &crate::mesh_view::MeshRef, base: (f64, f64), u: (f64, f64)) -> (f64, f64) {
+    let b = &m.info.bbox;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for (x, y) in [(b[0], b[1]), (b[3], b[1]), (b[0], b[4]), (b[3], b[4])] {
+        // Abstand wie `mesh_section` (vorn positiv), Tiefe = −Abstand.
+        let d = -((x - base.0) * u.1 - (y - base.1) * u.0);
+        lo = lo.min(d);
+        hi = hi.max(d);
+    }
+    (lo, hi)
+}
+
+/// [152] Importierte Netze, die die Ebene schneiden: Ebenenschnitt (Ringe mit Löchern als Schlüsselloch,
+/// Füllung wie freie Körper; ab 1:100 schwarz über die gemeinsamen Regeln), offene Züge als Linien.
+fn append_mesh_sections(cuts: &mut Vec<Cut>, lines: &mut Vec<(usize, Vec<[f64; 2]>)>, meshes: &[crate::mesh_view::MeshRef], base: (f64, f64), u: (f64, f64)) {
+    for (k, m) in meshes.iter().enumerate() {
+        let (lo, hi) = mesh_depth_range(m, base, u);
+        if !(lo < 0.0 && hi > 0.0) {
+            continue;
+        }
+        let (rings, open) = crate::mesh_view::cut(m, &[0.0, base.0, base.1, u.0, u.1]);
+        for poly in rings_to_polygons(&rings) {
+            let (pts, nse) = if poly.len() > 1 {
+                let (pts, bridges) = keyhole(&poly);
+                let n = pts.len() as f64;
+                (pts, Some(bridges.into_iter().filter(|&i| i < n).collect()))
+            } else {
+                (poly[0].clone(), None)
+            };
+            if pts.len() < 3 || ring_area(&pts).abs() < 1e-10 {
+                continue;
+            }
+            let mut c = Cut::new(Kind::Mesh, k, pts);
+            c.fill = Some(BODY_FILL.into());
+            c.nse = nse;
+            c.source_id = Some(m.mesh.id.clone());
+            c.category = m.mesh.category_code.clone();
+            cuts.push(c);
+        }
+        lines.extend(open.into_iter().map(|l| (k, l)));
     }
 }
 
@@ -2158,7 +2281,8 @@ fn quad_of(t: &[[f64; 3]; 3], n: [f64; 3], next: &[u32], vert: &dyn Fn(u32) -> (
 /// Dreiecke (Wände samt Gehrung und Löchern wie im 3D-Modell, Platten, Treppen, Dächer, Körper),
 /// auf die Seite hinter der Ebene zugeschnitten; die Schnittflächen verdecken in Tiefe 0. Bogenwände,
 /// verschnittene Dächer und Körper glätten ihre Facetten (keine Fugen, nur Knicke und Silhouetten).
-fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], cuts: &[Cut], hidden: bool, max_depth: Option<f64>) -> (Vec<Edge>, Vec<Edge>) {
+#[allow(clippy::too_many_arguments)]
+fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], meshes: &[crate::mesh_view::MeshRef], cuts: &[Cut], hidden: bool, max_depth: Option<f64>) -> (Vec<Edge>, Vec<Edge>) {
     use crate::hlr;
     let nl = crate::jsmath::hypot(&plane.normal);
     if !(nl > 1e-12) {
@@ -2288,6 +2412,19 @@ fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3
         model_tris(&mut faces, &b.positions, &mut idx, owner, group, &mut push);
         group += 1;
     }
+    // [152] Importierte Netze hinter der Ebene (Hüllbox vorgefiltert): Facetten innerhalb des Knickwinkels
+    // glätten (eine Gruppe je Netz), offene Netze beidseitig.
+    let (base, um) = (plane.base(), plane.u_model());
+    for (k, m) in meshes.iter().enumerate() {
+        let (lo, hi) = mesh_depth_range(m, base, um);
+        if !(hi > 0.0) || max_depth.is_some_and(|d| d > 0.0 && lo > d + 1e-6) {
+            continue;
+        }
+        owners.push((Kind::Mesh, k));
+        let owner = owners.len() as u32 - 1;
+        crate::mesh_view::hlr_faces(m, &|q| view([q[0], q[2], q[1]]), owner, group, true, &mut faces);
+        group += 1;
+    }
     // Ansichtsbereich ([36]): Bauteile, deren nächster Punkt weiter als `max_depth` hinter der Ebene
     // liegt, entfallen ganz (auch als Verdecker — sie liegen ohnehin hinter allem Gezeigten).
     if let Some(d) = max_depth.filter(|d| *d > 0.0) {
@@ -2364,10 +2501,15 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let cuts = subtract_pockets_in_section(cuts, p, base, u);
     let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
     append_body_sections(&mut cuts, p, &bodies, base, u);
+    // [152] Importierte Netze: geschnitten (Flächen bzw. offene Linien) und in der Projektion.
+    let meshes = crate::mesh_view::meshes(p);
+    let mut mesh_lines = Vec::new();
+    append_mesh_sections(&mut cuts, &mut mesh_lines, &meshes, base, u);
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
-    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &cuts, level.hidden_lines, level.depth);
+    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth);
     shaped_projection(&mut visible, p, &walls_r, &plane);
-    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None };
+    let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: m.mesh.category_code.clone() }).collect();
+    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None, meshes, mesh_lines };
     append_terrain_profiles(&mut out, p, base, u);
     Ok(Some(out))
 }
@@ -2738,7 +2880,9 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
             }
         }
         let mut pr = if stroked && dash.is_none() { polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
-        if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, no_stroke_edges, greyed, .. } = &mut pr {
+        if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, no_stroke_edges, greyed, context_object_id, .. } = &mut pr {
+            // [152] Importiertes Netz: Pick über die Kontext-Id.
+            *context_object_id = if cp.kind == Kind::Mesh { src.clone() } else { None };
             *wall_id = if cp.kind == Kind::Wall { src.clone() } else { None };
             *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() { src.clone() } else { None };
             *roof_id = if cp.kind == Kind::Roof { src.clone() } else { None };
@@ -2794,8 +2938,17 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
             prims.push(l);
         }
     }
+    // [152] Importierte Netze: Kanten nur, wenn die Kategorie gezeigt wird; Linien nach den Regeln des Netzes.
+    let mesh_shown = |e: &Edge| e.kind != Kind::Mesh || out.meshes.get(e.index).and_then(|m| m.category.as_deref()).is_none_or(shown);
+    let mesh_style = |e: &Edge, l: &mut Primitive| {
+        if e.kind == Kind::Mesh {
+            if let Some(s) = rules.mesh.get(&e.index) {
+                s.apply(l);
+            }
+        }
+    };
     if hidden_lines {
-        for e in &out.hidden {
+        for e in out.hidden.iter().filter(|e| mesh_shown(e)) {
             acc.add(e.a[0], e.a[1]);
             acc.add(e.b[0], e.b[1]);
             let mut l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "section-hidden", SECTION_HIDDEN_MM, SECTION_HIDDEN_INK);
@@ -2805,10 +2958,27 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
             prims.push(l);
         }
     }
-    for e in &out.visible {
+    for e in out.visible.iter().filter(|e| mesh_shown(e)) {
         acc.add(e.a[0], e.a[1]);
         acc.add(e.b[0], e.b[1]);
-        prims.push(line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "section-visible", SECTION_VISIBLE_MM, SECTION_VISIBLE_INK));
+        let mut l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "section-visible", SECTION_VISIBLE_MM, SECTION_VISIBLE_INK);
+        mesh_style(e, &mut l);
+        prims.push(l);
+    }
+    // [152] Offene Schnittlinien importierter Netze (Flächen ohne Dicke, nicht-mannigfaltige Netze): schwer
+    // wie der Umriss der geschnittenen Masse.
+    for (k, pts) in &out.mesh_lines {
+        let e = Edge { kind: Kind::Mesh, index: *k, a: [0.0; 2], b: [0.0; 2] };
+        if !mesh_shown(&e) {
+            continue;
+        }
+        for w in pts.windows(2) {
+            acc.add(w[0][0], w[0][1]);
+            acc.add(w[1][0], w[1][1]);
+            let mut l = line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), "section-cut-outline", SECTION_CUT_OUTLINE_MM, SECTION_INK);
+            mesh_style(&e, &mut l);
+            prims.push(l);
+        }
     }
     // Mit Gelände ersetzt die Geländelinie die Grundlinie ([T6]).
     if acc.min_x.is_finite() && acc.max_x > acc.min_x && !(terrain_shown && !out.profiles.is_empty()) {
@@ -3197,6 +3367,10 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
     }
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "section_mesh_tests.rs"]
+mod mesh_tests;
 
 // ── Abfrage ───────────────────────────────────────────────────────────────────
 

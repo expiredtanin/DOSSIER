@@ -1241,6 +1241,7 @@ export const de = {
   "resources.overrides.val.element_kind.room": "Raum",
   "resources.overrides.val.element_kind.shadow": "Schatten",
   "resources.overrides.val.element_kind.terrain": "Gelände",
+  "resources.overrides.val.element_kind.mesh": "Importiertes Netz",
   "resources.overrides.action.hide": "Ausblenden",
   "resources.overrides.value.material": "Name, Kennung oder std-c-…",
   "resources.overrides.and": "und",
