@@ -780,6 +780,9 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
         Drawing2DGeom::Dimension { .. } if c.a.auto_coarse && c.a.scale >= super::domains::OVERVIEW_FROM => {}
         Drawing2DGeom::Dimension { pts, offset, gap_mm, overshoot_mm, tick_len_mm, text_height_mm, line_weight_mm, ext_weight_mm, tick_weight_mm, text_offsets_mm, refs, kind, arc_center } => {
             let mm = |x: f64| mm_to_model(x, scale);
+            // [157] Aussenbemassung hinter der sichtbaren Böschung (nur beim Zeichnen).
+            let shifted = if arc_center.is_none() && kind.is_none() { *offset + autodim_shift(c, d, scale) } else { *offset };
+            let offset = &shifted;
             if let Some(k) = kind {
                 let st = DimStyle {
                     gap: mm(gap_mm.unwrap_or(DIM_GAP_MM)),
@@ -1465,6 +1468,69 @@ fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds) {
 }
 
 /// Liegt die Zeichnung auf dem Geschoss (und ist sie im Druck nicht ausgenommen, `noPrint`)?
+/// [157] Zusätzlicher Abstand einer Kette der automatischen Aussenbemassung (`autodim-<Geschoss>-<Seite>-<Kette>`,
+/// gerade) beim Zeichnen: zeigt der Grundriss die Baugrube und schneidet eine Kette dieser Seite Sohle oder
+/// Böschung (bis zur Böschungsoberkante), rücken alle Ketten der Seite gleich weit hinaus — die innerste mit
+/// 4 mm Papier Luft hinter die Böschung. Im Modell bleiben die Ketten, wo sie sind (Geschosse ohne Gelände,
+/// Ausmass des Präsentationsplans).
+fn autodim_shift(c: &Ctx, d: &Drawing2D, scale: f64) -> f64 {
+    let prefix = format!("autodim-{}-", d.level_id);
+    let Some(rest) = d.id.strip_prefix(&prefix) else { return 0.0 };
+    let Some((side, _)) = rest.rsplit_once('-') else { return 0.0 };
+    if side == "arc" || side.starts_with("arc-") {
+        return 0.0;
+    }
+    let obst = super::context::excavation_segments(c);
+    if obst.is_empty() {
+        return 0.0;
+    }
+    let group = format!("{prefix}{side}-");
+    let margin = mm_to_model(4.0, scale);
+    let mut need: f64 = 0.0;
+    for g in c.p.drawings2d.iter().filter(|g| g.id.starts_with(&group)) {
+        let Drawing2DGeom::Dimension { pts, offset, arc_center: None, kind: None, .. } = &g.geom else { continue };
+        let (Some(a), Some(b)) = (pts.first(), pts.last()) else { continue };
+        let len = hypot2(b.x - a.x, b.y - a.y);
+        if !(len > 1e-6) || !offset.is_finite() || offset.abs() < 1e-9 {
+            continue;
+        }
+        let u = ((b.x - a.x) / len, (b.y - a.y) / len);
+        // Aussen = Seite des Versatzes (wie `dimension_segment`).
+        let sg = offset.signum();
+        let n = (-u.1 * sg, u.0 * sg);
+        let (t0, t1) = (-margin, len + margin);
+        let mut s_max = f64::NEG_INFINITY;
+        for &(p, q) in &obst {
+            let (tp, tq) = ((p[0] - a.x) * u.0 + (p[1] - a.y) * u.1, (q[0] - a.x) * u.0 + (q[1] - a.y) * u.1);
+            let (sp, sq) = ((p[0] - a.x) * n.0 + (p[1] - a.y) * n.1, (q[0] - a.x) * n.0 + (q[1] - a.y) * n.1);
+            // Teilstück im Streifen der Kette.
+            let (lo, hi) = if (tq - tp).abs() < 1e-12 {
+                if tp < t0 || tp > t1 { continue } else { (0.0, 1.0) }
+            } else {
+                let (f0, f1) = ((t0 - tp) / (tq - tp), (t1 - tp) / (tq - tp));
+                (f0.min(f1).max(0.0), f0.max(f1).min(1.0))
+            };
+            if lo > hi {
+                continue;
+            }
+            s_max = s_max.max(sp + (sq - sp) * lo).max(sp + (sq - sp) * hi);
+        }
+        // Nur was aussen vor der Kette liegt und sie erreicht.
+        if s_max > 0.0 && s_max + margin > offset.abs() {
+            need = need.max(s_max + margin - offset.abs());
+        }
+    }
+    need * d_sign(d)
+}
+
+/// Vorzeichen des Versatzes einer Masskette (der Abstand wächst in seiner Richtung).
+fn d_sign(d: &Drawing2D) -> f64 {
+    match &d.geom {
+        Drawing2DGeom::Dimension { offset, .. } if *offset < 0.0 => -1.0,
+        _ => 1.0,
+    }
+}
+
 fn on_floor(c: &Ctx, d: &Drawing2D) -> bool {
     crate::grid::visible_on(d, &c.a.floor) && !(c.a.for_print && d.no_print == Some(true))
 }

@@ -95,6 +95,8 @@ struct Face {
     ov: Option<Rc<SurfOv>>,
     /// [152] Fläche eines offenen importierten Netzes (beidseitig, s. `hlr::Face::two_sided`).
     two_sided: bool,
+    /// [157] Facette einer gekrümmten Deckenstirn, um `SLAB_BEHIND_WALL` nach hinten gerückt.
+    curved_slab: bool,
 }
 
 /// [33] Override einer Ansichtsfläche bzw. Öffnung (`overrides::effective_surface`).
@@ -662,7 +664,7 @@ fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[Ro
             Role::Roof => (roofs[f.src].id.clone(), roofs[f.src].fill),
         };
         let pts = f.pts.iter().map(|q| [q.0, q.1]).collect();
-        out.push(Face { pts, pd: f.pd, depth: f.depth, depth_min: f.depth_min, depth_max: f.depth_max, role, id, fill, normal: f.normal, ov: None, two_sided: false });
+        out.push(Face { pts, pd: f.pd, depth: f.depth, depth_min: f.depth_min, depth_max: f.depth_max, role, id, fill, normal: f.normal, ov: None, two_sided: false, curved_slab: false });
     }
     out
 }
@@ -766,7 +768,7 @@ fn collect_mesh_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
                 groups.push((key, Vec::new()));
                 groups.len() - 1
             });
-            groups[k].1.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: Role::Mesh, id: m.mesh.id.clone(), fill, normal, ov: None, two_sided: !m.info.closed });
+            groups[k].1.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: Role::Mesh, id: m.mesh.id.clone(), fill, normal, ov: None, two_sided: !m.info.closed, curved_slab: false });
         }
         for (_, tris) in groups {
             merge_coplanar(tris, &mut out);
@@ -817,7 +819,7 @@ fn merge_coplanar(tris: Vec<Face>, out: &mut Vec<Face>) {
         let pd: Vec<f64> = pts.iter().map(depth_at).collect();
         let depth = pd.iter().sum::<f64>() / pd.len() as f64;
         let (dmin, dmax) = (pd.iter().copied().fold(f64::INFINITY, f64::min), pd.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-        out.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: Role::Mesh, id: f0.id.clone(), fill: f0.fill, normal: f0.normal, ov: None, two_sided: f0.two_sided });
+        out.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: Role::Mesh, id: f0.id.clone(), fill: f0.fill, normal: f0.normal, ov: None, two_sided: f0.two_sided, curved_slab: false });
     }
 }
 
@@ -850,6 +852,46 @@ fn edge_dist2(q: Pt, pts: &[Pt]) -> f64 {
 
 /// Höchstens so viele Zellen hat das Raster für das Weglassen verdeckter Netz-Flächen.
 const CULL_CELLS: f64 = 2_000_000.0;
+
+/// [157] So weit (m) gelten Deckenflächen der Ansicht als hinter einer gleich tiefen Wand (bündige Deckenstirn).
+const SLAB_BEHIND_WALL: f64 = 0.02;
+
+/// [157] Deckenflächen, die Facetten eines gekrümmten Rands sind: eine Nachbarfläche derselben Decke (gemeinsames
+/// u-Ende, überlappende Höhe) knickt um mehr als 0.5° und weniger als 25° ab (frontale Facette: beidseits).
+fn curved_slab_facets(faces: &[Face]) -> Vec<bool> {
+    let mut out = vec![false; faces.len()];
+    let mut by_id: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, f) in faces.iter().enumerate().filter(|(_, f)| f.role == Role::Slab && !f.id.is_empty() && !f.pts.is_empty()) {
+        by_id.entry(f.id.as_str()).or_default().push(i);
+    }
+    let span = |f: &Face| f.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY), |(a, b, c, d), q| (a.min(q[0]), b.max(q[0]), c.min(q[1]), d.max(q[1])));
+    let unit = |n: [f64; 3]| {
+        let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        if l > 0.0 { [n[0] / l, n[1] / l, n[2] / l] } else { n }
+    };
+    let (lo, hi) = (25f64.to_radians().cos(), 0.5f64.to_radians().cos());
+    for idx in by_id.values() {
+        let spans: Vec<_> = idx.iter().map(|&i| span(&faces[i])).collect();
+        for (a, &i) in idx.iter().enumerate() {
+            let (sa, na) = (spans[a], unit(faces[i].normal));
+            // Nachbar am linken (0) bzw. rechten (1) Ende, der weich abknickt.
+            let soft = |end: usize| {
+                idx.iter().enumerate().any(|(b, &j)| {
+                    let sb = spans[b];
+                    let touch = if end == 0 { (sb.1 - sa.0).abs() < 1e-6 } else { (sa.1 - sb.0).abs() < 1e-6 };
+                    let nb = unit(faces[j].normal);
+                    let c = na[0] * nb[0] + na[1] * nb[1] + na[2] * nb[2];
+                    i != j && touch && sa.2 < sb.3 - 1e-9 && sb.2 < sa.3 - 1e-9 && c > lo && c < hi
+                })
+            };
+            // Schräge Facette mit einem weichen Nachbarn, frontale (Scheitel des Bogens) mit zweien — die ebene
+            // Fassade neben einem tangential anschliessenden Bogen bleibt eben.
+            let oblique = faces[i].depth_max - faces[i].depth_min > 1e-6;
+            out[i] = if oblique { soft(0) || soft(1) } else { soft(0) && soft(1) };
+        }
+    }
+    out
+}
 
 /// Maler-Rang einer Fläche bei gleicher Tiefe (Decke < Wand/Stütze/Netz < Dach), wie die Sortierung der Ansicht.
 fn paint_rank(r: Role) -> f64 {
@@ -1455,26 +1497,20 @@ fn surface_openings(p: &Project, frame: &[f64; 9], out: &mut Vec<ProjOpening>) {
     }
 }
 
-fn encode_shadow_faces(faces: &[&Face]) -> Vec<f64> {
-    let mut b = vec![faces.len() as f64];
-    for f in faces {
-        b.extend([f.depth, f.depth_min, f.pts.len() as f64]);
-        for q in &f.pts {
-            b.extend(q);
-        }
-    }
-    b
-}
-
-/// [157] Wie [`encode_shadow_faces`] für Werfer, mit der kleinsten Tiefe am linken und am rechten Ende (u).
-fn encode_shadow_casters(faces: &[&Face]) -> Vec<f64> {
+/// Flächen für `elevation_geom::shadows`: Kopf Mittel-, Mindesttiefe und [157] die kleinste Tiefe am linken und
+/// am rechten Ende (u) — für Werfer (Stirn) wie Empfänger (Bogenwand-Facetten). Ohne Tiefe je Ecke gilt an beiden
+/// Enden die Mindest- (`receiver` = false) bzw. die Mitteltiefe.
+fn encode_shadow_polys(faces: &[&Face], receiver: bool) -> Vec<f64> {
     let mut b = vec![faces.len() as f64];
     for f in faces {
         let (u0, u1) = f.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, z), q| (a.min(q[0]), z.max(q[0])));
         let tol = 1e-6 * (1.0 + (u1 - u0).abs());
         let at = |u: f64| f.pts.iter().zip(&f.pd).filter(|(q, _)| (q[0] - u).abs() <= tol).map(|(_, d)| *d).fold(f64::INFINITY, f64::min);
-        let (dl, dr) = if f.pd.len() == f.pts.len() { (at(u0), at(u1)) } else { (f.depth_min, f.depth_min) };
-        b.extend([f.depth, f.depth_min, dl, dr, f.pts.len() as f64]);
+        let flat = if receiver { f.depth } else { f.depth_min };
+        let (dl, dr) = if f.pd.len() == f.pts.len() { (at(u0), at(u1)) } else { (flat, flat) };
+        // Schatten mit der wahren Tiefe der Decken (ohne den Vorrang der Wand, s. `SLAB_BEHIND_WALL`).
+        let k = if f.curved_slab { SLAB_BEHIND_WALL } else { 0.0 };
+        b.extend([f.depth - k, f.depth_min - k, dl - k, dr - k, f.pts.len() as f64]);
         for q in &f.pts {
             b.extend(q);
         }
@@ -1761,6 +1797,18 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     slabs.extend(model3d::emit_stairs_elevation(p));
     extend_wall_corners(p, &mut walls, (frame[6], frame[8]));
     let mut faces = project_faces(&frame, &walls, &slabs, &[]);
+    // [157] Gekrümmte Deckenstirnen (Facetten eines Bogenrands) bündig mit der Fassade liegen hinter der Wand:
+    // Bogenwand und Deckenrand sind verschieden fein facettiert, die Sehnen beider Netze schneiden einander um
+    // Millimeter — ohne Vorrang schauten an jeder Ecke des Deckenrands Stücke der Schichtbänder (und Schatten von
+    // ihnen) durch die Erkerwand. Ebene Stirnen bleiben, wie sie waren (Geschosslinie der Fassade).
+    let curved = curved_slab_facets(&faces);
+    for (f, _) in faces.iter_mut().zip(&curved).filter(|(_, c)| **c) {
+        f.curved_slab = true;
+        f.depth += SLAB_BEHIND_WALL;
+        f.depth_min += SLAB_BEHIND_WALL;
+        f.depth_max += SLAB_BEHIND_WALL;
+        f.pd.iter_mut().for_each(|d| *d += SLAB_BEHIND_WALL);
+    }
     cull_under_roofs(p, &frame, &walls, &mut faces);
     faces.extend(collect_roof_faces(p, &frame, &walls)?);
     faces.extend(collect_column_faces(p, &frame));
@@ -1978,7 +2026,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         let wall_faces: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Wall).collect();
         let mut casters: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Slab).collect();
         casters.extend(faces.iter().filter(|f| f.role == Role::Roof));
-        let f = crate::plan::elevation_geom::shadows(&encode_shadow_faces(&wall_faces), &encode_shadow_casters(&casters));
+        let f = crate::plan::elevation_geom::shadows(&encode_shadow_polys(&wall_faces, true), &encode_shadow_polys(&casters, false));
         let mut i = 1;
         for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
             let depth = f[i];
@@ -2635,6 +2683,41 @@ mod tests {
         assert!(reach >= 5.5 - 1e-6, "Oberkante endet bei {reach}: {segs:?}");
     }
 
+    /// [157] Erker: Decke bündig mit der Aussenseite einer Bogenwand, aber gröber facettiert. Die Deckenstirn liegt
+    /// hinter der Wand — keine Stücke ihrer Schichtbänder in der Wandfläche (vorher an jeder Ecke des Deckenrands).
+    #[test]
+    fn buendige_deckenstirn_hinter_bogenwand() {
+        let mut p = sample();
+        p.walls.retain(|w| w.id == "W1");
+        p.openings = Some(vec![]);
+        p.roofs = Some(vec![]);
+        p.stairs = Some(vec![]);
+        p.walls[0].bulge = Some(-0.5);
+        // Achsbogen: Sehne 5, Pfeil 1.25 ⇒ r = 3.125, Mitte (2.5, 1.875); Aussenseite r + 0.1725.
+        let (cx, cy, ro) = (2.5, 1.875, 3.125 + 0.1725);
+        let a0 = std::f64::consts::PI + (1.875f64 / 2.5).atan();
+        let a1 = 2.0 * std::f64::consts::PI - (1.875f64 / 2.5).atan();
+        let mut outline: Vec<Vec2> = (0..=5).map(|k| {
+            let a = a0 + (a1 - a0) * k as f64 / 5.0;
+            Vec2 { x: cx + ro * a.cos(), y: cy + ro * a.sin() }
+        }).collect();
+        outline.extend([Vec2 { x: 5.0, y: 4.0 }, Vec2 { x: 0.0, y: 4.0 }]);
+        let mut ce = p.ceilings.as_ref().unwrap()[0].clone();
+        ce.outline = outline;
+        p.ceilings = Some(vec![ce]);
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let (prims, _) = elevation_primitives(&p, &level, true, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        // Waagrechte Linien in der Wandfläche (Ansichts-x 1.3 … 5.7, unter der Wandkrone 2.6).
+        let inner: Vec<(Vec2, Vec2)> = prims.iter().filter_map(|q| match q {
+            Primitive::Line { a, b, cls, .. } if cls.starts_with("elevation-") && (a.y - b.y).abs() < 1e-9 && a.y > 0.05 && a.y < 2.6 - 1e-3 && a.x.max(b.x) > 1.3 && a.x.min(b.x) < 5.7 => Some((*a, *b)),
+            _ => None,
+        }).collect();
+        assert!(inner.is_empty(), "Schichtband-Stücke: {inner:?}");
+        let shadow: Vec<&Vec<Vec2>> = prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, pts, .. } if fill == SHADOW_FILL => Some(pts), _ => None }).collect();
+        assert!(shadow.is_empty(), "Schatten einer bündigen Stirn: {shadow:?}");
+    }
+
     /// [T2] Bogenwand in der Ansicht: keine Facetten-Fugen der Sehnen-Teilkörper, Umriss bleibt.
     #[test]
     fn bogenwand_ohne_facettenfugen() {
@@ -3136,3 +3219,4 @@ mod tests {
         assert!(super::super::overrides::effective_layer(p.override_rules.as_deref(), &s, rv.view("plan")).fill_color.is_none());
     }
 }
+

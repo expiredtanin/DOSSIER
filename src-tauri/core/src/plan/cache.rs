@@ -31,7 +31,7 @@ pub const NOT_FOR_DRAWINGS: &[&str] = &[
     "columns",
     "trees",
     "extrudedSolids",
-    "context",
+    // [157] `context` lesen die Zeichnungen: die Aussenbemassung rückt hinter die sichtbare Baugrube.
     "groups",
     "parametricWalls",
     "viewSnapshots",
