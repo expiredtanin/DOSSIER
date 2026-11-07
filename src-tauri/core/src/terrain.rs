@@ -99,11 +99,17 @@ impl Tin {
 /// Raster-Index der Dreiecke für Punktabfragen.
 pub struct TinIndex<'a> {
     pub tin: &'a Tin,
+    g: TinGrid,
+}
+
+/// [159] Raster eines [`TinIndex`] ohne das Netz (geteilt, z. B. im Cache des Geländes `SiteTerrain`).
+#[derive(Clone, Debug)]
+pub struct TinGrid {
     b: [f64; 4],
     cell: f64,
     nx: usize,
     ny: usize,
-    cells: Vec<Vec<u32>>,
+    cells: std::rc::Rc<Vec<Vec<u32>>>,
 }
 
 impl<'a> TinIndex<'a> {
@@ -117,7 +123,7 @@ impl<'a> TinIndex<'a> {
         let cell_x = w / nx as f64;
         let cell = cell_x.max(h / ny as f64);
         let mut cells = vec![Vec::new(); nx * ny];
-        let mut s = TinIndex { tin, b, cell, nx, ny, cells: Vec::new() };
+        let mut s = TinIndex { tin, g: TinGrid { b, cell, nx, ny, cells: Default::default() } };
         for (ti, t) in tin.tris.iter().enumerate() {
             let p = t.map(|i| tin.xy[i as usize]);
             let (x0, x1) = (p[0][0].min(p[1][0]).min(p[2][0]), p[0][0].max(p[1][0]).max(p[2][0]));
@@ -130,14 +136,24 @@ impl<'a> TinIndex<'a> {
                 }
             }
         }
-        s.cells = cells;
+        s.g.cells = std::rc::Rc::new(cells);
         s
     }
 
+    /// [159] Index aus einem gemerkten Raster ([`TinIndex::grid`]) desselben Netzes.
+    pub fn with_grid(tin: &'a Tin, g: TinGrid) -> TinIndex<'a> {
+        TinIndex { tin, g }
+    }
+
+    /// [159] Das Raster (zum Merken).
+    pub fn grid(&self) -> TinGrid {
+        self.g.clone()
+    }
+
     fn cell_of(&self, x: f64, y: f64) -> (usize, usize) {
-        let i = ((x - self.b[0]) / self.cell).floor().max(0.0) as usize;
-        let j = ((y - self.b[1]) / self.cell).floor().max(0.0) as usize;
-        (i.min(self.nx - 1), j.min(self.ny - 1))
+        let i = ((x - self.g.b[0]) / self.g.cell).floor().max(0.0) as usize;
+        let j = ((y - self.g.b[1]) / self.g.cell).floor().max(0.0) as usize;
+        (i.min(self.g.nx - 1), j.min(self.g.ny - 1))
     }
 
     /// Höhe am Punkt (x, y); `None` ausserhalb des Netzes.
@@ -147,12 +163,12 @@ impl<'a> TinIndex<'a> {
 
     /// Dreieck (Eckindizes) und Schwerpunktkoordinaten am Punkt (x, y); `None` ausserhalb des Netzes.
     pub fn bary_at(&self, x: f64, y: f64) -> Option<([usize; 3], [f64; 3])> {
-        if !(x >= self.b[0] - 1e-9 && x <= self.b[2] + 1e-9 && y >= self.b[1] - 1e-9 && y <= self.b[3] + 1e-9) {
+        if !(x >= self.g.b[0] - 1e-9 && x <= self.g.b[2] + 1e-9 && y >= self.g.b[1] - 1e-9 && y <= self.g.b[3] + 1e-9) {
             return None;
         }
         let (i, j) = self.cell_of(x, y);
         let t = self.tin;
-        for &ti in &self.cells[j * self.nx + i] {
+        for &ti in &self.g.cells[j * self.g.nx + i] {
             let [a, b, c] = t.tris[ti as usize].map(|k| k as usize);
             let (pa, pb, pc) = (t.xy[a], t.xy[b], t.xy[c]);
             let d = (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pc[0] - pa[0]) * (pb[1] - pa[1]);

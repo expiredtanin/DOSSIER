@@ -631,7 +631,7 @@ pub fn facade_terrain(p: &Project) -> Vec<FacadePoint> {
     if crate::excavation::terrains(p).is_empty() {
         return Vec::new();
     }
-    let mut out = Vec::new();
+    let mut pts = Vec::new();
     for poly in building_footprint(p) {
         let Some(ring) = poly.first() else { continue };
         let n = ring.len();
@@ -640,12 +640,13 @@ pub fn facade_terrain(p: &Project) -> Vec<FacadePoint> {
             let k = (hypot2(b.x - a.x, b.y - a.y) / 2.0).ceil().max(1.0) as usize;
             for j in 0..k {
                 let f = j as f64 / k as f64;
-                let (x, y) = (a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
-                out.push(FacadePoint { x, y, natural: crate::excavation::terrain_z(p, x, y, false), designed: crate::excavation::terrain_z(p, x, y, true) });
+                pts.push([a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f]);
             }
         }
     }
-    out
+    // [159] Gelände und Suchindex einmal für alle Punkte (vorher je Punkt neu: ~1.4 s im Musterhaus komplex).
+    let z = crate::excavation::terrain_z_many(p, &pts);
+    pts.into_iter().zip(z).map(|(q, (natural, designed))| FacadePoint { x: q[0], y: q[1], natural, designed }).collect()
 }
 
 fn flat_rules(r: &crate::model::SiteRules) -> SiteRules {

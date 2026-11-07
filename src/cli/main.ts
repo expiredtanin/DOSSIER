@@ -957,6 +957,15 @@ async function execute(project: Project, file: string, command: string, rest: st
           rows.push(["projectToModel3d (kalt)", performance.now() - t0]);
         });
       }
+      // [159] Grundriss auf einem frischen Dokument (ohne Plan-Cache), erster Aufruf.
+      for (const f of project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId)) {
+        const cold = structuredClone(project);
+        withDocument(cold, () => {
+          const t0 = performance.now();
+          generatePlan(cold, f.id, allCodes, undefined, "mittel", false, false, true, scale);
+          rows.push([`Grundriss ${f.id} 1:${scale} (kalt)`, performance.now() - t0]);
+        });
+      }
       await time("projectToModel3d (unverändert)", () => projectToModel3d(project));
       if (sec) await time("Schnitt (Kern)", async () => generateSectionPlan((await computeSection(project, sec))!, false, { visibleCodes: allCodes }), Math.max(3, runs / 2));
       if (elev) await time("generateElevationPlan", () => generateElevationPlan(project, elev), Math.max(3, runs / 2));
@@ -995,6 +1004,28 @@ async function execute(project: Project, file: string, command: string, rest: st
             const r = doc.commit(cur, opsFor({ ...cur, walls: cur.walls.slice(0, 1) } as Project, 0.01 * ++k).slice(0, 1), undefined, Date.now());
             if ("project" in r) cur = r.project;
           }, runs * 5);
+          // [159] Grundriss je Geschoss und Massstab nach einer kleinen Änderung (Wand um 1 cm verschieben): die
+          // Domänen neu, die 2D-Zeichnungen aus dem Cache des Dokuments.
+          const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId);
+          // Erste Wand des Erdgeschosses (Musterhaus: Aussenwand, der Fussabdruck ändert) und eine Innenwand.
+          const ground = cur.walls.filter((w) => w.floorId === "eg");
+          const movers = [ground[0] ?? cur.walls[0], ground.find((w) => /-iw-/.test(w.id))].filter((w): w is NonNullable<typeof w> => !!w);
+          for (const f of floors) {
+            for (const s of [100, 50]) {
+              const plan = () => generatePlan(cur, f.id, allCodes, undefined, "mittel", false, false, true, s);
+              plan();
+              for (const [mi, moved] of movers.entries()) {
+                if (mi > 0 && f.id !== "eg") continue;
+                lap(`Grundriss ${f.id} 1:${s} nach ${mi ? "Innenwand" : "Wand"} verschieben`, () => {
+                  const w = cur.walls.find((x) => x.id === moved.id)!;
+                  const dx = 0.01; // immer weiter (Hin und Her träfe die Zwischenspeicher)
+                  const r = doc.commit(cur, patchItem(cur, "walls", w.id, { start: { x: w.start.x + dx, y: w.start.y }, end: { x: w.end.x + dx, y: w.end.y } }), undefined, Date.now());
+                  if ("project" in r) cur = r.project;
+                  plan();
+                });
+              }
+            }
+          }
           // [58] Inkrementelle 3D-Ableitung (Cache im Dokument, Änderungs-Antworten): eine Änderung, dann das ganze
           // 3D-Modell neu abfragen; zum Vergleich die volle Abfrage ohne Cache-Weg in TS.
           lap("projectToModel3d (Dokument)", () => projectToModel3d(cur));

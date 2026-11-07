@@ -177,6 +177,12 @@ impl<'a> Ground<'a> {
         Ground { idx: crate::terrain::TinIndex::new(tin), datum, z_min: if z_min.is_finite() { z_min } else { GROUND_Z } }
     }
 
+    /// [159] Wie `new(st.current(), st.datum)`, mit dem gemerkten Suchraster des Geländes.
+    pub fn of_site(st: &'a crate::excavation::SiteTerrain) -> Ground<'a> {
+        let z_min = st.current().z_range().0 - st.datum;
+        Ground { idx: st.index_current(), datum: st.datum, z_min: if z_min.is_finite() { z_min } else { GROUND_Z } }
+    }
+
     /// Geländehöhe am Punkt; `None` ausserhalb des Netzes.
     pub fn z(&self, x: f64, y: f64) -> Option<f64> {
         self.idx.z_at(x, y).map(|z| z - self.datum)
@@ -955,7 +961,7 @@ fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, with_ground: boo
     let Some(k) = shadow_shift(sun) else { return vec![] };
     // [142] Mit Geländenetz fällt der Schatten aufs Gelände (inkl. Baugruben), sonst auf ±0.00.
     let site = shadow_terrain(p);
-    let ground = site.as_ref().map(|st| Ground::new(st.current(), st.datum));
+    let ground = site.as_deref().map(Ground::of_site);
     let (casters, covers, recvs) = collect(p, k, cut, ground.as_ref());
     let mask = |above: f64| -> Vec<Polygon> {
         covers.iter().filter(|c| c.bottom > above + LEVEL_EPS).map(|c| c.region.clone()).chain(recvs.iter().filter(|r| r.top > above + LEVEL_EPS).map(|r| r.region.clone())).collect()

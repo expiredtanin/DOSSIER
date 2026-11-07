@@ -483,11 +483,25 @@ pub struct SiteTerrain {
     pub modified: Option<Tin>,
     /// (Baugrube, Spezifikation, Böschungsoberkante)
     pub items: Vec<(String, ExSpec, Vec<Vec<P2>>)>,
+    /// [159] Inhalts-Schlüssel (Netz, Höhenbezug, Baugruben) für abgeleitete Caches.
+    pub key: u64,
+    /// [159] Suchraster von `orig` bzw. `current()`, einmal gebaut.
+    grids: [std::cell::OnceCell<crate::terrain::TinGrid>; 2],
 }
 
 impl SiteTerrain {
     pub fn current(&self) -> &Tin {
         self.modified.as_ref().unwrap_or(&self.orig)
+    }
+
+    /// [159] Suchindex des gewachsenen Netzes (`orig`), Raster gemerkt.
+    pub fn index_orig(&self) -> TinIndex<'_> {
+        TinIndex::with_grid(&self.orig, self.grids[0].get_or_init(|| TinIndex::new(&self.orig).grid()).clone())
+    }
+
+    /// [159] Suchindex des Netzes mit Baugruben (`current()`), Raster gemerkt.
+    pub fn index_current(&self) -> TinIndex<'_> {
+        TinIndex::with_grid(self.current(), self.grids[1].get_or_init(|| TinIndex::new(self.current()).grid()).clone())
     }
 }
 
@@ -535,7 +549,7 @@ pub fn site_terrain(p: &Project, t: &TerrainMesh) -> Rc<SiteTerrain> {
             cur = Some(r.tin);
         }
     }
-    let st = Rc::new(SiteTerrain { datum: dz, orig, modified: cur, items });
+    let st = Rc::new(SiteTerrain { datum: dz, orig, modified: cur, items, key, grids: Default::default() });
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         c.insert(0, (key, st.clone()));
@@ -640,10 +654,41 @@ pub fn terrain_z(p: &Project, x: f64, y: f64, designed: bool) -> Option<f64> {
     None
 }
 
+/// [159] Wie [`terrain_z`] für viele Punkte: Gelände (samt Baugruben) und Suchindex einmal statt je Punkt.
+/// Antwort je Punkt `(gewachsen, gestaltet)`.
+pub fn terrain_z_many(p: &Project, pts: &[P2]) -> Vec<(Option<f64>, Option<f64>)> {
+    let sts: Vec<Rc<SiteTerrain>> = terrains(p).into_iter().map(|t| site_terrain(p, t)).collect();
+    let idx: Vec<(TinIndex, TinIndex, f64)> = sts.iter().map(|st| (st.index_orig(), st.index_current(), st.datum)).collect();
+    let z = |q: &P2, designed: bool| idx.iter().find_map(|(o, c, d)| (if designed { c } else { o }).z_at(q[0], q[1]).map(|z| z - d));
+    pts.iter().map(|q| (z(q, false), z(q, true))).collect()
+}
+
 // ── Grundriss: Böschungsschraffur ────────────────────────────────────────────
 
 /// Böschungsschraffur: Striche von der Oberkante zur Unterkante, abwechselnd lang und halb, im Abstand
 /// `spacing` entlang des Umrisses (an konvexen Ecken gefächert). `t` = Gelände vor dieser Baugrube.
+type HatchCache = Vec<((u64, String, u64), Rc<Vec<(P2, P2)>>)>;
+thread_local! {
+    static HATCH: RefCell<HatchCache> = const { RefCell::new(Vec::new()) };
+}
+
+/// [159] [`slope_hatch`] der Baugrube `id` auf dem Gelände davor ([`terrain_before`]), zwischengespeichert
+/// (Schlüssel: Inhalt des Geländes, Baugrube, Abstand); `None` ohne die Baugrube.
+pub fn slope_hatch_of(st: &SiteTerrain, id: &str, spec: &ExSpec, spacing: f64) -> Option<Rc<Vec<(P2, P2)>>> {
+    let key = (st.key, id.to_string(), spacing.to_bits());
+    if let Some(hit) = HATCH.with(|c| c.borrow().iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
+        return Some(hit);
+    }
+    let before = terrain_before(st, id)?;
+    let v = Rc::new(slope_hatch(&before, spec, spacing));
+    HATCH.with(|c| {
+        let mut c = c.borrow_mut();
+        c.insert(0, (key, v.clone()));
+        c.truncate(8);
+    });
+    Some(v)
+}
+
 pub fn slope_hatch(t: &Tin, ex: &ExSpec, spacing: f64) -> Vec<(P2, P2)> {
     let idx = TinIndex::new(t);
     let r = ex.reach_in(t, &idx).max(spacing);

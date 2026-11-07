@@ -3707,6 +3707,52 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   nur Umriss; Höhenkoten im CLI-Schnitt weit links (wie in der App: links von Gelände-Ausmass).
   · M
 
+- ◐ **[159] Leistung nach den Darstellungs-Änderungen.** (7.11.) Musterhaus komplex, Linux-Container (nicht macOS).
+  Messen: `dossier-cli :musterhaus-komplex bench` (neu: Grundriss je Geschoss kalt und nach „Wand um 1 cm verschieben"
+  1:100/1:50, aussen und innen; immer weiter verschoben, kein Hin und Her) und nativ
+  `BENCH_FILE=mk.obp cargo test --release --lib bench159 -- --ignored --nocapture` (`plan/perf_tests.rs`: Zeit je Domäne,
+  je Geschoss/Massstab, Schatten, Schnitt/Ansicht, 3D, Änderung über die Dokument-Caches). Stand 31.10. (a0098ab) nativ mit
+  derselben Datei (dort unbekannte Felder entfernt; ohne Gelände-Schatten, Netze, Beschriftungen der Höhenlinien …).
+  **Grösste Kosten (vorher, nativ EG 1:100):** 1. Baurecht `facade_terrain`: je Fassadenpunkt zweimal `terrain_z`, das
+  jedes Mal das Gelände hasht und einen Suchindex über 35 000 Dreiecke baut — 1 415 ms (schon am 31.10. so: 1 174 ms);
+  2. Höhenlinien (Äquidistanz 5 cm): Isolinien + Index je Aufruf 26 ms, Beschriftungs-Suche 26 ms (`Iso::bend` über alle
+  Ecken je Kandidat, Hindernisse linear), Linien gegen den Fussabdruck 20 ms; 3. Abzugskörper: 30 000 Kontext-Linien je
+  Aufruf umkopiert (7–14 ms), Booleans je Wand-Polygon auch weit weg vom Körper; 4. Schatten: Gelände-Index je Aufruf
+  (6 ms), Böschungsschraffur (Gelände kopieren + Index, 5 ms je Aufruf).
+  **Behoben (Verhalten gleich, Goldens unverändert):** `excavation::terrain_z_many` (Gelände/Index einmal für alle
+  Punkte); Suchraster des Geländes einmal je `SiteTerrain` (`terrain::TinGrid`, `index_orig/index_current`; Schatten,
+  Bäume, 3D, Höhenlinien); Höhenlinien zwischengespeichert (Linien/Ausdünnung/Raster je Gelände-Inhalt, Äquidistanz,
+  Massstab; fertige Primitive zusätzlich je Fussabdruck und Hindernissen, `Obstacles::sig`; je 2–4 Einträge);
+  `Iso::bend` nur über den Bogenlängen-Bereich; `ObstacleGrid` (Raster der Hindernisse) und Rechteck-Vortests für
+  Beschriftungen/Kreuzungen; `outside_bb` (Rechteck des Fussabdrucks vorab); Böschungsschraffur zwischengespeichert
+  (`slope_hatch_of`); `subtract_voids`: Liste ohne betroffene Primitive unverändert zurück, Polygone weit neben allen
+  Abzugskörpern (Rechteck + 1 mm) ohne Booleans. Tests: `hoehenlinien_aus_dem_zwischenspeicher_wie_neu`,
+  `ausserhalb_mit_rechteck_wie_ohne`, `knick_ueber_bereich_wie_ueber_alle` (bitgleich), `raster_wie_ohne`.
+
+  | Musterhaus komplex | 31.10. nativ | vorher nativ | nachher nativ | vorher WASM | nachher WASM |
+  |---|---|---|---|---|---|
+  | EG 1:100 (ohne Cache) | 1 174 | 1 587 | 37 | 1 943 (kalt) | 120 (kalt, mit Schatten) |
+  | EG 1:50 | 1 171 | 1 624 | 47 | — | — |
+  | EG 1:100 mit Schatten | 1 160 (kein Gelände-Schatten) | 1 566 | 70 | — | — |
+  | UG / OG / DG 1:100 | 33 / 32 / 30 | 115 / 102 / 102 | 36 / 34 / 13 | 262 / 262 / 292 (kalt) | 75 / 90 / 64 |
+  | UG / OG / DG 1:50 | 29 / 33 / 32 | 219 / 178 / 179 | 44 / 54 / 35 | — | — |
+  | EG 1:100 nach Wand verschieben (aussen) | — | 1 633 | 52 (Schatten: 77) | 1 885 | 104 |
+  | EG 1:100 nach Innenwand verschieben | — | — | 22 (Schatten: 72) | — | 101 |
+  | EG 1:50 nach Wand verschieben | — | 1 812 | 114 (innen 76) | 2 057 | 154 (innen 150) |
+  | Schnitt A / B | 3.7 / 5.9 | 8.7 / 13.4 | 8.8 / 13.4 | 103–174 (TS gesamt) | 57–72 |
+  | Ansicht S / O / N / W | 5.0 / 5.8 / 4.9 / 4.3 | 14 / 25 / 13 / 18 | unverändert | 39–66 | 19–32 |
+  | 3D model3dParts voll | 7.9 | 14.9 | unverändert | 56–68 (TS) | 40 |
+
+  (ms; WASM = CLI-Bench ohne wasm-opt, TS-Seite eingeschlossen, Mittel über 5, verrauscht durch parallele Builds; der
+  CLI-Bench zeichnet mit der Sonnenstudie des Projekts.) Ziel EG 1:100 im WASM unter 150 ms erreicht; „kleine Änderung
+  unter 50 ms" nicht: nach jeder Wand-Änderung rechnet der Rest-Cache alle Domänen neu.
+  **Offen (grösste Restkosten, nativ EG):** Gelände-Schatten 30–35 ms (Strahlen über das Gelände je Werferpunkt, Union von
+  ~680 Teilen, Differenz; hängt an allen Wänden — Cache je Werfer denkbar); Höhenlinien-Primitive aus dem Speicher kopieren
+  6 ms (1:100) bzw. 19 ms (1:50, 36 000 Linien mit `String`-Feldern) — besser als eigener Puffer-Abschnitt im Rest-Cache
+  (Abhängigkeit: Gelände, Fussabdruck, Hindernisse), dann entfiele auch das Schreiben; Raumstempel 1:50 15 ms (Kandidaten ×
+  Stufen × Hindernisse); Puffer schreiben 5–9 ms; Rest-Cache feiner nach Domäne (Wand ändert nicht Kontext/Schatten anderer
+  Geschosse). Schnitt/Ansicht nativ 2–4× langsamer als am 31.10. (neue Darstellung, nicht untersucht). Nicht auf macOS/in
+  der App gemessen. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
