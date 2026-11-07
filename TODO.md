@@ -3712,9 +3712,23 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   (`SLAB_BEHIND_WALL`, `curved_slab_facets`; ebene Fassaden unverändert; `buendige_deckenstirn_hinter_bogenwand`).
   Golden Ansicht Süd (komplex) neu. Vorher/Nachher-Bilder lokal. Geprüft: cargo test Kern, WASM `--no-opt`, tsc, vitest,
   CLI-SVG in Chromium (nur Linux, nicht in Tauri/Metal; Bildschirm-Renderer nicht angesehen).
+  **Teil 4 (7.11.)**, behoben (Kern): (24) **Ansicht Süd, Schatten unter dem Erkerdach** (Bogen-Flachdach, [148]) war
+  gezackt: Ursache nicht die Tiefe, sondern die Paarung — ein Werfer traf nur Empfängerflächen, die er in u überdeckt;
+  sein Schatten liegt aber um δ in Sonnenrichtung versetzt, das Stück hinter jeder Facetten-Ecke der Dachstirn fehlte
+  (je Facette ein Sägezahn). Jetzt Empfänger bis `MAX_SHADOW_DELTA` neben dem Werfer; Schatten je Empfängerfläche
+  vereinigt (i_overlay, statt je Werfer-Facette ein Stück); Mikrostufen (kurze Kante < 0.2 mm Papier,
+  `SHADOW_SMOOTH_MM`) geglättet, Ecken am Flächenrand bleiben; an der Kante gleich tiefer Nachbarfacetten überlappt der
+  Schatten um ¼ der Toleranz (keine helle Kantenglättungs-Fuge). Tests `schatten_einer_facettierten_stirn_ohne_saegezahn`
+  (Fläche = Parallelogramm), `schatten_unter_bogen_vordach_glatt` (8-Facetten-Bogendach über 24-Facetten-Bogenwand:
+  lückenlos, keine Sprünge, nahe der analytischen Kreis-über-Kreis-Kante), `schatten_mikrostufen_geglaettet`,
+  `schatten_ueberlappt_an_facettenkante`. Grundriss-Schatten der Sonnenstudie (Bogen-Erkerdach, 3 Zeitpunkte) geprüft:
+  schon glatt (Projektion + Vereinigung), keine Änderung. Goldens Ansicht Süd (Muster, komplex, CLI) neu (weniger
+  Polygone; sichtbar nur am Erker). Vorher/Nachher 1:100/1:50 lokal. Geprüft: cargo test Kern, WASM `--no-opt`, tsc,
+  vitest, CLI-SVG in Chromium (nur Linux; nicht in Tauri/Metal, Bildschirm-Renderer nicht angesehen).
   **Offen:** Erker in der Ansicht zeigt keine Geschosslinie (Deckenstirn hinter der Erkerwand), die ebene Fassade daneben
-  schon (bündige Stirn gleich tief wie die Wand) — Regel für bündige Stirnen vereinheitlichen; Schatten unter dem
-  Erkerdach hat an den Facetten der Dach-Stirn noch kleine Absätze (Dachflächen als Werfer); Wangen nur im Schnitt
+  schon (bündige Stirn gleich tief wie die Wand) — Regel für bündige Stirnen vereinheitlichen; Ansicht-Schatten:
+  streifend beschienene Bogenwand-Facetten (`den` ≤ 0.2) bleiben ohne Schatten (helles Band rechts am Erker), kein
+  Eigenschatten abgewandter Flächen, Schatten nur von Decken/Dächern (nicht von Wandvorsprüngen); Wangen nur im Schnitt
   (3D, Ansicht und Schnittfläche ohne Wangen; Wendel-/Podestwangen fehlen); „B-B“ steht bis ~2.5 m neben seiner Marke,
   wenn Ketten und Böschung dazwischen liegen. Situation 1:500: die Marken selbst (Pfeile, Striche) der Ansichten
   Nord/West bzw. Süd/Ost treffen sich weiter an den Ecken. Weiter offen aus Teil 1: „Detail und Situation“ auf

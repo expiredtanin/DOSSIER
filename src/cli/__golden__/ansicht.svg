@@ -6,7 +6,8 @@
 <polygon points="5.4,7.08564 5.4,6.18564 4,6.18564 4,7.08564" fill="#ffffff" stroke="none" stroke-width="0"/>
 <polygon points="5.4,4.88564 5.4,4.48564 4,4.48564 4,4.88564" fill="#ffffff" stroke="none" stroke-width="0"/>
 <polygon points="4,7.08564 4,4.48564 0.8275,4.48564 0.8275,7.08564" fill="#ffffff" stroke="none" stroke-width="0"/>
-<polygon points="5.4,6.18564 5.4,6.46781 5.28083,6.46781 4.99867,6.18564" fill="#8f959e" stroke="none" stroke-width="0"/>
+<polygon points="5.395,6.46781 6.1725,6.46781 6.1725,6.35947 5.89417,6.08114 6.0675,6.08114 5.68083,5.69447 5.85417,5.69447 5.4675,5.30781 5.64083,5.30781 5.395,5.06197" fill="#8f959e" stroke="none" stroke-width="0"/>
+<polygon points="5.405,6.18564 5.405,6.46781 5.28083,6.46781 4.99867,6.18564" fill="#8f959e" stroke="none" stroke-width="0"/>
 <polygon points="4.2,4.86697 5.2,4.86697 5.21867,4.88564 4.21867,4.88564" fill="#8f959e" stroke="none" stroke-width="0"/>
 <polygon points="4.2,4.86697 5.2,4.86697 5.2,4.48564 4.2,4.48564" fill="#9aa0a6" stroke="none" stroke-width="0"/>
 <polygon points="4.2,5.04031 5.2,5.04031 5.2,4.65897 4.2,4.65897" fill="#9aa0a6" stroke="none" stroke-width="0"/>
@@ -34,12 +35,9 @@
 <polygon points="1,4.48564 6,4.48564 6,2.05885 1,2.05885" fill="#ffffff" stroke="none" stroke-width="0"/>
 <polygon points="5.8275,4.48564 6.1725,4.48564 6.1725,1.88564 5.8275,1.88564" fill="#ffffff" stroke="none" stroke-width="0"/>
 <polygon points="1.1725,4.48564 1.1725,1.88564 0.8275,1.88564 0.8275,4.48564" fill="#ffffff" stroke="none" stroke-width="0"/>
-<polygon points="6,2.05885 6,2.28564 1,2.28564 1,2.05885" fill="#8f959e" stroke="none" stroke-width="0"/>
-<polygon points="5.8275,1.88564 6.1725,1.88564 6.1725,2.28564 5.8275,2.28564" fill="#8f959e" stroke="none" stroke-width="0"/>
-<polygon points="0.8275,1.88564 1.1725,1.88564 1.1725,2.28564 1,2.28564 0.8275,2.11314" fill="#8f959e" stroke="none" stroke-width="0"/>
-<polygon points="1,2.05885 6,2.05885 6,2.45885 1,2.45885" fill="#8f959e" stroke="none" stroke-width="0"/>
-<polygon points="5.8275,2.05885 6.1725,2.05885 6.1725,2.45885 5.8275,2.45885" fill="#8f959e" stroke="none" stroke-width="0"/>
-<polygon points="0.8275,2.05885 1.1725,2.05885 1.1725,2.45885 1,2.45885 0.8275,2.28635" fill="#8f959e" stroke="none" stroke-width="0"/>
+<polygon points="1,2.45885 6,2.45885 6,2.05885 1,2.05885" fill="#8f959e" stroke="none" stroke-width="0"/>
+<polygon points="5.8275,2.45885 6.1725,2.45885 6.1725,1.88564 5.8275,1.88564" fill="#8f959e" stroke="none" stroke-width="0"/>
+<polygon points="0.8275,2.28635 1,2.45885 1.1725,2.45885 1.1725,1.88564 0.8275,1.88564" fill="#8f959e" stroke="none" stroke-width="0"/>
 <polygon points="0.8275,7.08564 1.8,7.08564 1.8,4.48564 0.8275,4.48564" fill="#ffffff" stroke="none" stroke-width="0"/>
 <polygon points="1.8,4.98564 2.7,4.98564 2.7,4.48564 1.8,4.48564" fill="#ffffff" stroke="none" stroke-width="0"/>
 <polygon points="2.7,7.08564 4,7.08564 4,4.48564 2.7,4.48564" fill="#ffffff" stroke="none" stroke-width="0"/>
@@ -47,8 +45,7 @@
 <polygon points="4,4.98564 5,4.98564 5,4.48564 4,4.48564" fill="#ffffff" stroke="none" stroke-width="0"/>
 <polygon points="5,7.08564 6.1725,7.08564 6.1725,4.48564 5,4.48564" fill="#ffffff" stroke="none" stroke-width="0"/>
 <polygon points="1,4.48564 6,4.48564 6,2.05885 1,2.05885" fill="#ffffff" stroke="none" stroke-width="0"/>
-<polygon points="6,2.05885 6,2.11314 1,2.11314 1,2.05885" fill="#8f959e" stroke="none" stroke-width="0"/>
-<polygon points="1,2.05885 6,2.05885 6,2.28635 1,2.28635" fill="#8f959e" stroke="none" stroke-width="0"/>
+<polygon points="1,2.28635 6,2.28635 6,2.05885 1,2.05885" fill="#8f959e" stroke="none" stroke-width="0"/>
 <polygon points="1.8,7.08564 2.7,7.08564 2.7,4.98564 1.8,4.98564" fill="#dcdcdc" stroke="#2b3039" stroke-width="0.013"/>
 <polygon points="1.836,7.08564 2.664,7.08564 2.664,5.04864 1.836,5.04864" fill="#ececec" stroke="#2b3039" stroke-width="0.013"/>
 <polygon points="1.8,5.06564 2.7,5.06564 2.7,4.98564 1.8,4.98564" fill="#a7adb5" stroke="none" stroke-width="0"/>

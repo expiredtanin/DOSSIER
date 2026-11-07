@@ -29,6 +29,8 @@ const OPENING_SHADOW_FILL_MONO: &str = "#d2d2d2";
 /// [140] Glas hellgrau statt blau (Farbe nur, wo der Nutzer sie setzt).
 const GLASS_FILL_COLOR: &str = "#d3d8dd";
 const SHADOW_FILL: &str = "#8f959e";
+/// [157] Teil 4: Schattenkanten-Absätze unter so viel Papier-mm entfallen.
+const SHADOW_SMOOTH_MM: f64 = 0.2;
 const OPENING_SHADOW_FILL: &str = "#a7adb5";
 const GROUND_INK: &str = "#1f242c";
 const GROUND_MM: f64 = 0.25;
@@ -2026,7 +2028,9 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         let wall_faces: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Wall).collect();
         let mut casters: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Slab).collect();
         casters.extend(faces.iter().filter(|f| f.role == Role::Roof));
-        let f = crate::plan::elevation_geom::shadows(&encode_shadow_polys(&wall_faces, true), &encode_shadow_polys(&casters, false));
+        // [157] Teil 4: Absätze unter 0.2 mm Papier glätten.
+        let tol = SHADOW_SMOOTH_MM * 1e-3 * if scale.is_finite() && scale > 0.0 { scale } else { 100.0 };
+        let f = crate::plan::elevation_geom::shadows(&encode_shadow_polys(&wall_faces, true), &encode_shadow_polys(&casters, false), tol);
         let mut i = 1;
         for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
             let depth = f[i];
