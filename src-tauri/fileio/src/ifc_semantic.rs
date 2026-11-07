@@ -95,8 +95,27 @@ pub struct Info {
     pub common: BTreeMap<String, String>,
 }
 
-/// Eigenschaften der gemeinsamen Psets, die ins Modell übernommen werden.
-const COMMON_PROPS: [&str; 7] = ["IsExternal", "LoadBearing", "FireRating", "AcousticRating", "ThermalTransmittance", "SecurityRating", "Reference"];
+/// Eigenschaften der gemeinsamen Psets, die ins Modell übernommen werden; [158] dazu die Raum-Oberflächen
+/// (`Pset_SpaceCoveringRequirements`, IFC2x3 `Pset_SpaceCommon`) und Nutzung/Bodenaufbau (`Dossier_RoomBook`).
+const COMMON_PROPS: [&str; 12] = [
+    "IsExternal",
+    "LoadBearing",
+    "FireRating",
+    "AcousticRating",
+    "ThermalTransmittance",
+    "SecurityRating",
+    "Reference",
+    "FloorCovering",
+    "WallCovering",
+    "CeilingCovering",
+    "Usage",
+    "FloorBuildUp",
+];
+
+/// Psets, deren Eigenschaften aus [`COMMON_PROPS`] gelesen werden: `Pset_*Common` und die Raumbuch-Psets.
+fn reads_common(name: &str) -> bool {
+    (name.starts_with("Pset_") && name.ends_with("Common")) || name == "Pset_SpaceCoveringRequirements" || name == "Dossier_RoomBook"
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Wall {
@@ -1514,7 +1533,7 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
                 if ps.ty != "IFCPROPERTYSET" {
                     continue;
                 }
-                let is_common = ps.arg(2).and_then(|v| v.as_str()).is_some_and(|n| n.starts_with("Pset_") && n.ends_with("Common"));
+                let is_common = ps.arg(2).and_then(|v| v.as_str()).is_some_and(reads_common);
                 for p in refs(ps.arg(4)) {
                     let Some(pe) = f.get(p) else { continue };
                     if is_common && pe.ty == "IFCPROPERTYSINGLEVALUE" {
@@ -2220,6 +2239,20 @@ ENDSEC;\nEND-ISO-10303-21;\n"
         let c = &s.spaces[0].info.common;
         assert_eq!((c.get("IsExternal").map(String::as_str), c.get("FireRating").map(String::as_str), c.get("ThermalTransmittance").map(String::as_str)), (Some("true"), Some("EI30"), Some("1.3")));
         assert!(!c.contains_key("Fremd"), "nur bekannte Eigenschaften");
+    }
+
+    /// [158] Raumbuch-Psets: Oberflächen (Pset_SpaceCoveringRequirements), Nutzung/Bodenaufbau (Dossier_RoomBook).
+    #[test]
+    fn room_book_psets_are_read() {
+        let psets = "#620=IFCPROPERTYSINGLEVALUE('FloorCovering',$,IFCLABEL('Parkett Eiche'),$);#621=IFCPROPERTYSINGLEVALUE('WallCovering',$,IFCLABEL('Abrieb'),$);\
+#622=IFCPROPERTYSINGLEVALUE('CeilingCovering',$,IFCLABEL('Weissputz'),$);#623=IFCPROPERTYSET('cp',$,'Pset_SpaceCoveringRequirements',$,(#620,#621,#622));\
+#624=IFCRELDEFINESBYPROPERTIES('cr',$,$,$,(#500),#623);#630=IFCPROPERTYSINGLEVALUE('Usage',$,IFCLABEL('bath'),$);\
+#631=IFCPROPERTYSINGLEVALUE('FloorBuildUp',$,IFCLABEL('UB 80'),$);#632=IFCPROPERTYSET('rb',$,'Dossier_RoomBook',$,(#630,#631));\
+#633=IFCRELDEFINESBYPROPERTIES('rr',$,$,$,(#500),#632);";
+        let (_, s) = sem(&space_file(psets));
+        let c = &s.spaces[0].info.common;
+        let g = |k: &str| c.get(k).map(String::as_str);
+        assert_eq!((g("FloorCovering"), g("WallCovering"), g("CeilingCovering"), g("Usage"), g("FloorBuildUp")), (Some("Parkett Eiche"), Some("Abrieb"), Some("Weissputz"), Some("bath"), Some("UB 80")));
     }
 
     #[test]

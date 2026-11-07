@@ -95,6 +95,23 @@ const EARTHWORKS: &[Col] = &[
     c("backfill", "sheetTable.col.backfill", 1.6, true, true),
 ];
 
+/// [158] Raumbuch: Oberflächen je Raum.
+const ROOM_BOOK: &[Col] = &[
+    c("floor", "openings.col.floor", 1.2, false, true),
+    c("number", "roomBook.col.number", 1.0, false, true),
+    c("name", "sheetTable.col.room", 2.4, false, true),
+    c("area", "sheetTable.col.area", 1.2, true, true),
+    c("usage", "roomBook.col.usage", 1.6, false, true),
+    c("floorFinish", "roomBook.col.floorFinish", 2.4, false, true),
+    c("wallFinish", "roomBook.col.wallFinish", 2.4, false, true),
+    c("ceilingFinish", "roomBook.col.ceilingFinish", 2.4, false, true),
+    c("buildUp", "roomBook.col.buildUp", 3.0, false, false),
+    c("clearHeight", "roomBook.col.clearHeight", 1.2, true, false),
+    c("wallArea", "roomBook.col.wallArea", 1.3, true, false),
+    c("perimeter", "roomBook.col.perimeter", 1.2, true, false),
+    c("wet", "roomBook.col.wet", 1.0, false, false),
+];
+
 /// Schlüssel der Werttexte (Art, aussen/innen, Aufschlag …).
 pub const VALUE_KEYS: &[&str] = &[
     "sheetTable.v.window",
@@ -112,6 +129,20 @@ pub const VALUE_KEYS: &[&str] = &[
     "openings.swing.right",
     "openings.dir.in",
     "openings.dir.out",
+    "roomBook.usage.living",
+    "roomBook.usage.sleeping",
+    "roomBook.usage.kitchen",
+    "roomBook.usage.dining",
+    "roomBook.usage.bath",
+    "roomBook.usage.wc",
+    "roomBook.usage.shower",
+    "roomBook.usage.laundry",
+    "roomBook.usage.circulation",
+    "roomBook.usage.technical",
+    "roomBook.usage.storage",
+    "roomBook.usage.office",
+    "roomBook.usage.other",
+    "roomBook.wet",
 ];
 
 pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
@@ -121,6 +152,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
         LayoutTableSource::Rooms => ROOMS,
         LayoutTableSource::Elements => ELEMENTS,
         LayoutTableSource::Earthworks => EARTHWORKS,
+        LayoutTableSource::RoomBook => ROOM_BOOK,
     }
 }
 
@@ -128,7 +160,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
 pub fn catalog_json() -> Value {
     let one = |s: &[Col]| s.iter().map(|k| json!({"id": k.id, "key": k.key, "numeric": k.numeric, "default": k.default})).collect::<Vec<_>>();
     json!({
-        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS)},
+        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS), "roomBook": one(ROOM_BOOK)},
         "valueKeys": VALUE_KEYS,
     })
 }
@@ -261,7 +293,34 @@ fn data_of(p: &Project, t: &LayoutTable, lb: &Labels) -> Data {
         LayoutTableSource::Rooms => rooms_data(p),
         LayoutTableSource::Elements => elements_data(p, lb),
         LayoutTableSource::Earthworks => earthworks_data(p, lb),
+        LayoutTableSource::RoomBook => room_book_data(p, lb),
     }
+}
+
+/// [158] Raumbuch: eine Zeile je Raum (Reihenfolge wie `room_book`).
+fn room_book_data(p: &Project, lb: &Labels) -> Data {
+    let rows = crate::room_book::room_book(p)
+        .rows
+        .into_iter()
+        .map(|r| {
+            vec![
+                txt(r.floor),
+                txt(r.number),
+                txt(r.name),
+                num(r.area, 2),
+                txt(if r.usage.is_empty() { String::new() } else { lb.get(&format!("roomBook.usage.{}", r.usage)) }),
+                txt(r.floor_finish),
+                txt(r.wall_finish),
+                txt(r.ceiling_finish),
+                txt(r.floor_build_up),
+                num(r.clear_height, 2),
+                num(r.wall_area, 2),
+                num(r.perimeter, 2),
+                txt(if r.wet { lb.get("roomBook.wet") } else { String::new() }),
+            ]
+        })
+        .collect();
+    Data { rows, total_last: false }
 }
 
 /// [68] Erdarbeiten je Baugrube (m³ gegen das gewachsene Terrain) mit Summenzeile.
@@ -610,6 +669,35 @@ mod tests {
         assert_eq!(r.len(), 4);
         assert_eq!(r[1].total, 1, "eine Wand");
         assert!(r[0].total >= 1, "Summenzeile");
+    }
+
+    /// [158] Raumbuch als Blatt-Tabelle: Standard-Spalten, Nutzung beschriftet, Material-Name.
+    #[test]
+    fn raumbuch_tabelle() {
+        let mut t = table("rb", None);
+        t.source = LayoutTableSource::RoomBook;
+        let mut p = project(0, vec![t]);
+        p.components = vec![Component { id: "par".into(), name: "Parkett".into(), ..Default::default() }];
+        p.rooms = Some(vec![Room {
+            id: "r".into(),
+            floor_id: "eg".into(),
+            name: "Wohnen".into(),
+            usage: Some(RoomUsage::Living),
+            floor_finish: Some("par".into()),
+            wall_finish: Some("Abrieb".into()),
+            boundary: vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 4.0, y: 0.0 }, Vec2 { x: 4.0, y: 5.0 }, Vec2 { x: 0.0, y: 5.0 }],
+            stamp: Some(RoomStamp { number: Some("0.01".into()), name: "Wohnen".into(), ..Default::default() }),
+            ..Default::default()
+        }]);
+        let lb = Labels::parse(&json!({"roomBook.usage.living": "WOHN", "roomBook.col.floorFinish": "Boden"}));
+        let r = render(&p, &p.layouts.as_ref().unwrap()[0], &lb);
+        assert_eq!(r[0].total, 1);
+        let tx = texts(&r[0]);
+        for s in ["Boden", "EG", "0.01", "Wohnen", "20.00", "WOHN", "Parkett", "Abrieb"] {
+            assert!(tx.contains(&s.to_string()), "{s}: {tx:?}");
+        }
+        assert_eq!(catalog_json()["sources"]["roomBook"].as_array().unwrap().iter().filter(|c| c["default"] == true).count(), 8);
+        assert_eq!(serde_json::to_value(LayoutTableSource::RoomBook).unwrap(), "roomBook");
     }
 
     #[test]

@@ -115,7 +115,7 @@ pub fn reveal_areas(p: &Project, w: &Wall, o: &Opening) -> Vec<RevealArea> {
     acc
 }
 
-fn in_ring(x: f64, y: f64, ring: &[Vec2]) -> bool {
+pub(crate) fn in_ring(x: f64, y: f64, ring: &[Vec2]) -> bool {
     let mut inside = false;
     let mut j = ring.len().wrapping_sub(1);
     for i in 0..ring.len() {
@@ -139,18 +139,27 @@ fn room_at(p: &Project, floor_id: &str, x: f64, y: f64) -> Option<String> {
     p.rooms.as_deref().unwrap_or(&[]).iter().find(|r| r.floor_id == floor_id && in_ring(x, y, &r.boundary)).map(room_label)
 }
 
-/// Räume links/rechts der Wand an der Achsposition `at` (Meter ab Wandanfang).
-fn rooms_beside(p: &Project, w: &Wall, at: f64) -> (Option<String>, Option<String>) {
+/// Prüfpunkte links/rechts der Wand an der Achsposition `at` (Meter ab Wandanfang), je eine halbe
+/// Wanddicke plus 10 cm neben der Achse; `None` bei entarteter Wand.
+pub(crate) fn side_points(p: &Project, w: &Wall, at: f64) -> Option<([f64; 2], [f64; 2])> {
     let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
     let len = hypot2(dx, dy);
     if !(len > 1e-9) {
-        return (None, None);
+        return None;
     }
     let (ux, uy) = (dx / len, dy / len);
     let (px, py) = (w.start.x + ux * at, w.start.y + uy * at);
     let (nx, ny) = (-uy, ux);
     let d = Project::type_thickness(&p.wall_type_or_fallback(w).layers) + 0.1;
-    (room_at(p, &w.floor_id, px + nx * d, py + ny * d), room_at(p, &w.floor_id, px - nx * d, py - ny * d))
+    Some(([px + nx * d, py + ny * d], [px - nx * d, py - ny * d]))
+}
+
+/// Räume links/rechts der Wand an der Achsposition `at` (Meter ab Wandanfang).
+fn rooms_beside(p: &Project, w: &Wall, at: f64) -> (Option<String>, Option<String>) {
+    match side_points(p, w, at) {
+        Some((l, r)) => (room_at(p, &w.floor_id, l[0], l[1]), room_at(p, &w.floor_id, r[0], r[1])),
+        None => (None, None),
+    }
 }
 
 fn has_rooms(p: &Project, floor_id: &str) -> bool {

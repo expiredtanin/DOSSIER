@@ -16,7 +16,7 @@
 //                                                  das Massstab-Kriterium einer Regel (ab/bis 1:n) gilt nach --scale
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
-//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
 //                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
@@ -75,6 +75,8 @@ import {
   buildOpeningReport,
   openingSchedule,
   elementSchedule,
+  roomBook,
+  buildRoomBookReport,
   buildElementReport,
   areaReportToCsv,
   areaReportToSvg,
@@ -833,6 +835,20 @@ async function execute(project: Project, file: string, command: string, rest: st
         if (format === "json") out(args, JSON.stringify(openingSchedule(project), null, 2), `${stem}.json`);
         else {
           const report = buildOpeningReport(project);
+          if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
+          else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
+          else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);
+          else throw new Error("--format: json, csv, svg oder pdf");
+        }
+        return 0;
+      }
+      // --rooms: Raumbuch mit Oberflächen und Mengen ([158]) [--format json|csv|svg|pdf] (Default csv)
+      if (args.flags.has("rooms")) {
+        const format = args.flags.get("format") ?? "csv";
+        const stem = `${project.name || "projekt"}-raumbuch`;
+        if (format === "json") out(args, JSON.stringify(roomBook(project), null, 2), `${stem}.json`);
+        else {
+          const report = buildRoomBookReport(project);
           if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
           else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
           else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);

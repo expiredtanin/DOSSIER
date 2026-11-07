@@ -16,6 +16,7 @@ import { KennzahlenSection } from "./KennzahlenSection";
 import { AreaTableSection } from "./AreaTableSection";
 import { OpeningScheduleSection } from "./OpeningScheduleSection";
 import { ElementScheduleSection } from "./ElementScheduleSection";
+import { RoomBookSection } from "./RoomBookSection";
 import { downloadCsv } from "./downloadFile";
 
 /** Löst je Raum die anrechenbare (Netto-)Fläche + Kategorie auf. */
@@ -86,6 +87,9 @@ export function RoomBalancePanel() {
 
       {/* Bauteilliste mit U-Werten ([71]). */}
       <ElementScheduleSection />
+
+      {/* Raumbuch: Oberflächen je Raum ([158]). */}
+      <RoomBookSection />
 
       {/* Raumliste (je Raum: Name · Geschoss · SIA · Fläche). */}
       <div className="balance-section-label">{t("balance.rooms")}</div>

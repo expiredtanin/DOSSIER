@@ -118,6 +118,25 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
     expect(p.walls.filter((x) => x.isExternal === true && x.loadBearing === true).length).toBe(1);
   });
 
+  it("[158] Raumbuch: Nutzung, Oberflächen und Bodenaufbau am IfcSpace (Rundreise)", async () => {
+    const comp = sampleProject.components[0]!;
+    const room0 = sampleProject.rooms![0]!;
+    const src: Project = {
+      ...sampleProject,
+      rooms: [{ ...room0, usage: "bath", floorFinish: comp.id, wallFinish: "Abrieb 1 mm", ceilingFinish: "Weissputz", floorBuildUp: "UB 80, TSD 20" }],
+    };
+    const spf = exportIfcSpf(src);
+    expect(spf).toContain("Pset_SpaceCoveringRequirements");
+    expect(spf).toContain("Dossier_RoomBook");
+    // In ein Projekt mit demselben Material: Verweis über den Namen; sonst Freitext.
+    const { project: p } = await importInto({ ...emptyProject, components: [comp] }, src);
+    expect(p.rooms![0]).toMatchObject({ usage: "bath", floorFinish: comp.id, wallFinish: "Abrieb 1 mm", ceilingFinish: "Weissputz", floorBuildUp: "UB 80, TSD 20" });
+    const { project: q } = await importInto({ ...emptyProject, components: [] }, src);
+    expect(q.rooms![0]!.floorFinish).toBe(comp.name);
+    // Ohne Angaben: keine Raumbuch-Psets.
+    expect(exportIfcSpf(sampleProject)).not.toContain("Dossier_RoomBook");
+  });
+
   it("Tür-Anschlag/Aufschlag und Fensterteilung aus OperationType/PartitioningType (Rundreise)", async () => {
     // Lage im Raum vergleichen (die Wand kann umgekehrt ankommen): Scharnierpunkt und Aufschlagrichtung.
     const physical = (o: Opening, w: Wall) => {

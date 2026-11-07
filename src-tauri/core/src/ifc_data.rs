@@ -1184,7 +1184,31 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         w_pts(&mut f, &room.boundary);
         let cat = f.str(&sia_key(room.sia_category));
         f.nums(&[area.net, area.gross, cat]);
-        w_psets(&mut f, &[Pset { name: "Pset_SpaceCommon", props: common }]);
+        // [158] Raumbuch: Oberflächen als Pset_SpaceCoveringRequirements (IFC2x3: in Pset_SpaceCommon),
+        // Nutzung und Bodenaufbau im eigenen Pset; nur mit Angaben im Modell.
+        let label = |v: Option<&str>| crate::room_book::finish_label(&p, v);
+        let coverings: Vec<Prop> = [("FloorCovering", label(room.floor_finish.as_deref())), ("WallCovering", label(room.wall_finish.as_deref())), ("CeilingCovering", label(room.ceiling_finish.as_deref()))]
+            .into_iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, v)| Prop::Label(k, v))
+            .collect();
+        let mut psets = Vec::new();
+        if opt.ifc2x3 {
+            common.extend(coverings);
+            psets.push(Pset { name: "Pset_SpaceCommon", props: common });
+        } else {
+            psets.push(Pset { name: "Pset_SpaceCommon", props: common });
+            if !coverings.is_empty() {
+                psets.push(Pset { name: "Pset_SpaceCoveringRequirements", props: coverings });
+            }
+        }
+        let mut book: Vec<Prop> = Vec::new();
+        book.extend(room.usage.map(|u| u.key()).filter(|k| !k.is_empty()).map(|k| Prop::Label("Usage", k.to_string())));
+        book.extend(room.floor_build_up.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| Prop::Label("FloorBuildUp", s.to_string())));
+        if !book.is_empty() {
+            psets.push(Pset { name: "Dossier_RoomBook", props: book });
+        }
+        w_psets(&mut f, &psets);
     }
     f.num(REC_END_SPACES);
 

@@ -148,6 +148,7 @@ export type QueryName =
   | "roofCutLayers"
   | "openingSchedule"
   | "elementSchedule"
+  | "roomBook"
   | "uValue"
   | "componentLayerFunctions"
   | "sheetTables"

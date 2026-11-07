@@ -3617,6 +3617,33 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Blöcke/Körper (geschlossene 2D-Formen der Kategorie „Möbel" sparen nicht aus); Deckenspiegel-Untersicht unverändert
   (0.1 mm, alte Ausdünnung); Level-Feld nur über Ansichtsvorlage einstellbar (kein eigenes Feld im Ebenen-Panel); nur
   Linux, nicht in der Tauri-App/Metal angesehen. · S
+- ◐ **[158] Raumbuch (Oberflächen je Raum).** (7.11., Folge aus [156] „Offen": Nassräume nur über Namen, Belag
+  nur an der Decke.) **Modell** (Rust, `gen:types`): `Room.usage` (`RoomUsage`: living/sleeping/kitchen/dining/bath/wc/
+  shower/laundry/circulation/technical/storage/office/other; Nassraum = Bad/WC/Dusche/Waschküche), `floorFinish`/
+  `wallFinish`/`ceilingFinish` (Kennung eines Bauteil-Materials aus `components` oder Freitext), `floorBuildUp` (Freitext),
+  `RoomStamp.showFinish`; Blatt-Tabellenquelle `roomBook`. Ohne Felder alles wie bisher (Goldens unverändert). **Kern**
+  `room_book.rs` (Abfrage `roomBook`): Zeile je Raum (Geschoss, Nr., Name, Fläche, Nutzung, Nassraum, Boden/Wand/Decke
+  als Material-Name oder Text, Aufbau, lichte Höhe, Wandfläche netto) sortiert nach Geschoss und Nummer (natürlich), dazu
+  Mengen je Oberfläche und Material (Boden = Decke = Raumfläche netto; Wand = Umfang × lichte Höhe − Öffnungen in den
+  Wänden am Raum; lichte Höhe = UK Decke darüber − OK Decke darunter am Raum-Innenpunkt, sonst Geschosshöhe).
+  **Grundriss** ([156] erweitert): Raum mit Material-Belag (mit Oberflächenmuster) zeigt dessen Muster auf dem Raumumriss
+  statt des Deckenbelags (Deckenbelag dort ausgeschnitten); Darstellung/Regeln/Aussparungen wie [156]; Freitext-Belag
+  ändert nichts. Nassraum-Erkennung über `usage`, Rückfall Name (`is_wet_name`). Raumstempel: Belagszeile über
+  „Bodenbelag anzeigen" im Stempel-Editor (Vorgabe aus). **Objekt-Info Raum:** Nutzung (Auswahl), Nassraum-Anzeige,
+  Boden/Wand/Decke (Eingabe mit Vorschlagsliste der Projekt-Materialien; ein Material-Name wird als Verweis gespeichert,
+  sonst Freitext), Bodenaufbau. **Liste:** Abschnitt „Raumbuch" im Flächenbilanz-Panel (Tabelle + Mengen, CSV/PDF über
+  das Berichtsmodell, `export/roomBook.ts`), Blatt-Tabelle Quelle „Raumbuch (Oberflächen)" (Spalten Geschoss, Nr., Raum,
+  Fläche, Nutzung, Boden, Wand, Decke; optional Aufbau, lichte Höhe, Wandfläche, Umfang, Nassraum), CLI
+  `schedule --rooms [--format json|csv|svg|pdf]`. **IFC:** IfcSpace mit `Pset_SpaceCoveringRequirements`
+  (Floor/Wall/CeilingCovering; IFC2x3 in `Pset_SpaceCommon`) und `Dossier_RoomBook` (Usage, FloorBuildUp); Import liest
+  beide (fileio `reads_common`) und setzt Nutzung, Oberflächen (Material gleichen Namens → Kennung) und Aufbau. Tests:
+  Rust `room_book` (7: Modell-Rundreise/Alt-Daten, Nassraum aus Nutzung, Reihenfolge, Mengen, lichte Höhe, Unsinn),
+  `belag_aus_raum_statt_decke`, `belag_nassraum_aus_nutzung`, `stempel_belagszeile`, `raumbuch_tabelle`,
+  `space_room_book_props`, fileio `room_book_psets_are_read`; vitest `export/roomBook.test.ts` (Zeilen, CSV, Blatt-Tabelle),
+  IFC-Rundreise in `io/ifcImport.elements.test.ts`. **Offen:** keine IfcCovering-Bauteile (nur Pset-Texte); Wandoberfläche
+  nicht je Wandseite (eine Angabe je Raum), keine Sockel-/Leibungsflächen; lichte Höhe ohne Dachschrägen; Belagsmuster im
+  Raum am ersten Umrisspunkt ausgerichtet (keine Drehung/Ursprung je Raum); Belag im 3D und im Deckenspiegel nicht nach
+  Raum; Raumbuch-Zeilen im Panel nicht klickbar (keine Auswahl); nur Linux, nicht in der Tauri-App angesehen. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

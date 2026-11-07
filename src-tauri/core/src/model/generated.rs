@@ -3468,6 +3468,10 @@ pub struct RoomStamp {
     #[serde(rename = "roundingStep", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub rounding_step: Option<f64>,
+    /// [158] Bodenbelag des Raums als Zeile anzeigen (Live-Zeile). Fehlt/false: keine Belagszeile.
+    #[serde(rename = "showFinish", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub show_finish: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3531,9 +3535,65 @@ pub struct Room {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub stamp: Option<RoomStamp>,
+    /// [158] Raumbuch: Nutzung (Wohnen, Bad, Verkehr …); Nassraum wird daraus abgeleitet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub usage: Option<RoomUsage>,
+    /// [158] Bodenbelag: Kennung eines Bauteil-Materials (`components`) oder Freitext. Ein Material mit
+    /// Oberflächenmuster gilt im Grundriss im Raum statt des Belags der Decke.
+    #[serde(rename = "floorFinish", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub floor_finish: Option<String>,
+    /// [158] Wandoberfläche (Material-Kennung oder Freitext).
+    #[serde(rename = "wallFinish", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wall_finish: Option<String>,
+    /// [158] Deckenoberfläche (Material-Kennung oder Freitext).
+    #[serde(rename = "ceilingFinish", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ceiling_finish: Option<String>,
+    /// [158] Bodenaufbau als Freitext (z. B. „Parkett 15, UB 80, TSD 20").
+    #[serde(rename = "floorBuildUp", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub floor_build_up: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
+}
+
+/// [158] Nutzung eines Raums (Raumbuch). Nassräume: Bad, WC, Dusche, Waschküche.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum RoomUsage {
+    #[default]
+    #[serde(rename = "living")]
+    Living,
+    #[serde(rename = "sleeping")]
+    Sleeping,
+    #[serde(rename = "kitchen")]
+    Kitchen,
+    #[serde(rename = "dining")]
+    Dining,
+    #[serde(rename = "bath")]
+    Bath,
+    #[serde(rename = "wc")]
+    Wc,
+    #[serde(rename = "shower")]
+    Shower,
+    #[serde(rename = "laundry")]
+    Laundry,
+    #[serde(rename = "circulation")]
+    Circulation,
+    #[serde(rename = "technical")]
+    Technical,
+    #[serde(rename = "storage")]
+    Storage,
+    #[serde(rename = "office")]
+    Office,
+    #[serde(rename = "other")]
+    Other,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
 }
 
 // ── Freie 2D-Zeichengeometrie (Drawing2D) ──────────────────────────────────
@@ -4534,6 +4594,9 @@ pub enum LayoutTableSource {
     /// [68] Erdarbeiten: Baugruben mit Abtrag/Auftrag/Hinterfüllung.
     #[serde(rename = "earthworks")]
     Earthworks,
+    /// [158] Raumbuch: Oberflächen je Raum.
+    #[serde(rename = "roomBook")]
+    RoomBook,
     #[serde(other)]
     #[ts(skip)]
     Unknown,

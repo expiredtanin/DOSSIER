@@ -862,10 +862,25 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         let n = boundary.len() as f64;
         let (sx, sy) = boundary.iter().fold((0.0, 0.0), |(a, b), p| (a + p["x"].as_f64().unwrap_or(f64::NAN), b + p["y"].as_f64().unwrap_or(f64::NAN)));
         let name = [s.long_name.as_deref(), s.name.as_deref()].into_iter().flatten().find(|x| !x.is_empty()).map(str::to_string).unwrap_or_else(|| format!("Raum {}", rooms_before + rooms.len() + 1));
-        rooms.push(json!({
+        let mut room = json!({
             "id": ctx.new_id("room"), "type": "room", "floorId": fid, "categoryCode": ROOM_CATEGORY, "siaCategory": sia,
             "name": name, "boundary": boundary, "color": room_color, "stampAnchor": {"x": js_num(sx / n), "y": js_num(sy / n)},
-        }));
+        });
+        // [158] Raumbuch aus den Psets: Nutzung (bekannte Kennung), Oberflächen (Material gleichen Namens →
+        // seine Kennung, sonst Freitext), Bodenaufbau.
+        if let Some(u) = s.info.text("Usage").and_then(|u| crate::model::RoomUsage::from_key(&u)) {
+            room["usage"] = u.key().into();
+        }
+        for (prop, field) in [("FloorCovering", "floorFinish"), ("WallCovering", "wallFinish"), ("CeilingCovering", "ceilingFinish")] {
+            if let Some(t) = s.info.text(prop) {
+                let comp = root.get("components").and_then(Value::as_array).and_then(|cs| cs.iter().find(|c| c.get("name").and_then(Value::as_str).map(str::trim) == Some(t.as_str()))).and_then(|c| c.get("id")).and_then(Value::as_str);
+                room[field] = comp.map_or_else(|| t.clone(), str::to_string).into();
+            }
+        }
+        if let Some(t) = s.info.text("FloorBuildUp") {
+            room["floorBuildUp"] = t.into();
+        }
+        rooms.push(room);
     }
 
     let mut roof_types = list_of(root, "roofTypes");
@@ -1173,6 +1188,33 @@ mod tests {
         .as_object()
         .cloned()
         .unwrap()
+    }
+
+    /// [158] Raumbuch-Eigenschaften eines IfcSpace: Nutzung, Oberflächen (Material gleichen Namens → Kennung,
+    /// sonst Freitext), Bodenaufbau; unbekannte Nutzung fällt weg.
+    #[test]
+    fn space_room_book_props() {
+        let data = vec![0.0, 2.6, 4.0, 0.0, 0.0, 3.0, 0.0, 3.0, 2.0, 0.0, 2.0];
+        let mut sp = json!({"kind": "space", "at": 0, "n": 11, "storey": 0, "layers": [], "classifications": [], "longName": "Bad",
+            "common": {"Usage": "bath", "FloorCovering": "Feinsteinzeug", "WallCovering": "Abrieb 1 mm", "FloorBuildUp": "UB 80"}});
+        let meta = |sp: &Value| json!({
+            "schema": "IFC4", "lengthScale": 1, "products": [], "skippedItems": {}, "skippedProducts": {},
+            "productsWithoutGeometry": 0, "simplifiedBooleans": 0, "voidsApplied": 0, "voidsIgnored": 0, "parseErrors": 0, "truncated": false,
+            "elements": {"storeys": [{"globalId": "s", "name": "EG", "elevation": 0.0}], "elements": [sp], "kept": {}, "keptReasons": {}},
+        });
+        let mut base = root();
+        base.remove("geoAnchor");
+        base.insert("components".into(), json!([{"id": "fl", "name": "Feinsteinzeug", "color": "#ccc"}]));
+        let opts = IfcOptions { file_name: "a.ifc".into(), group: None, elements: true };
+        let r = ifc_import(&base, &meta(&sp).to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+        let rooms = added(&r.ops, "rooms");
+        assert_eq!(rooms.len(), 1);
+        let room = &rooms[0];
+        assert_eq!((room["usage"].as_str(), room["floorFinish"].as_str(), room["wallFinish"].as_str(), room["floorBuildUp"].as_str()), (Some("bath"), Some("fl"), Some("Abrieb 1 mm"), Some("UB 80")));
+        assert!(room.get("ceilingFinish").is_none());
+        sp["common"] = json!({"Usage": "sauna"});
+        let r = ifc_import(&base, &meta(&sp).to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+        assert!(added(&r.ops, "rooms")[0].get("usage").is_none());
     }
 
     #[test]

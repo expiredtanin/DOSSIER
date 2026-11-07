@@ -33,7 +33,9 @@ import type {
   Dormer,
   DormerKind,
   DrawingLevel,
+  Project,
   RoofShape,
+  Room,
   SiaCategory,
   SliceTermination,
   StairShape,
@@ -46,6 +48,7 @@ import type {
   WallReferenceLine,
 } from "../model/types";
 import { SIA_CATEGORIES, siaLabelFull, surfaceOpeningInfo } from "../core";
+import { ROOM_USAGES, roomBook, usageLabel } from "../core";
 import type { EdgeSpec, RoofEdge } from "../core";
 import { Dropdown } from "../ui/Dropdown";
 import type { DetailLevel } from "../model/viewTypes";
@@ -465,6 +468,9 @@ export function RoomSection({
         <span className="objinfo-fval">{room.floorName}</span>
       </div>
 
+      {/* [158] Raumbuch: Nutzung und Oberflächen. */}
+      <RoomFinishFields roomId={roomId} host={host} />
+
       {/* Stempel bearbeiten (öffnet den Rich-Text-Editor). */}
       <button
         type="button"
@@ -473,6 +479,74 @@ export function RoomSection({
       >
         {t("objinfo.room.editStamp")}
       </button>
+    </>
+  );
+}
+
+type RoomFinishField = "floorFinish" | "wallFinish" | "ceilingFinish" | "floorBuildUp";
+
+/** [158] Nutzung (Nassraum abgeleitet) und Oberflächen Boden/Wand/Decke (Material aus dem Projekt oder
+ *  Freitext; ein eingegebener Material-Name wird als Verweis gespeichert) und Bodenaufbau. */
+function RoomFinishFields({ roomId, host }: { roomId: string; host: ReturnType<typeof usePanelHost> }) {
+  const applyChange = useStore((s) => s.applyChange);
+  const project = host.project;
+  const room = (project.rooms ?? []).find((r) => r.id === roomId);
+  if (!room) return null;
+  const comps = project.components;
+  const listId = `room-finish-materials-${roomId}`;
+  const shown = (v: string | undefined) => comps.find((c) => c.id === v)?.name ?? v ?? "";
+  const set = (field: RoomFinishField | "usage", value: string | undefined) =>
+    applyChange((p: Project) => patchItem(p, "rooms", roomId, { [field]: value } as Partial<Room>), `room:${roomId}:${field}`);
+  const setFinish = (field: RoomFinishField, text: string) => {
+    const v = text.trim();
+    if (!v) return set(field, undefined);
+    const comp = field === "floorBuildUp" ? undefined : comps.find((c) => c.name.trim() === v);
+    set(field, comp ? comp.id : text);
+  };
+  // Nassraum wie im Kern (Nutzung, sonst Name), für [156] „Nassräume" im Grundriss.
+  const wet = roomBook(project).rows.find((r) => r.id === roomId)?.wet ?? false;
+  const finishInput = (field: RoomFinishField, label: TranslationKey) => (
+    <div className="objinfo-field">
+      <span className="objinfo-flabel">{t(label)}</span>
+      <input
+        type="text"
+        className="objinfo-text"
+        list={field === "floorBuildUp" ? undefined : listId}
+        value={shown(room[field])}
+        placeholder={field === "floorBuildUp" ? undefined : t("objinfo.room.finishHint")}
+        onChange={(e) => setFinish(field, e.target.value)}
+        title={t(label)}
+      />
+    </div>
+  );
+  return (
+    <>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.room.usage")}</span>
+        <Dropdown
+          value={room.usage ?? ""}
+          onChange={(v) => set("usage", v || undefined)}
+          options={[{ value: "", label: t("objinfo.room.usageNone") }, ...ROOM_USAGES.map((u) => ({ value: u, label: usageLabel(u) }))]}
+          title={t("objinfo.room.usage")}
+          width={170}
+        />
+      </div>
+      {wet && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.room.wet")}</span>
+          <span className="objinfo-fval">✓</span>
+        </div>
+      )}
+      <div className="objinfo-section-label">{t("objinfo.room.finishes")}</div>
+      <datalist id={listId}>
+        {comps.map((c) => (
+          <option key={c.id} value={c.name} />
+        ))}
+      </datalist>
+      {finishInput("floorFinish", "objinfo.room.floorFinish")}
+      {finishInput("wallFinish", "objinfo.room.wallFinish")}
+      {finishInput("ceilingFinish", "objinfo.room.ceilingFinish")}
+      {finishInput("floorBuildUp", "objinfo.room.buildUp")}
     </>
   );
 }

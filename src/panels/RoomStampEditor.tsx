@@ -220,6 +220,13 @@ export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorPro
             />
           </div>
 
+          <div className="roomstamp-row">
+            <label className="roomstamp-check">
+              <input type="checkbox" checked={draft.showFinish === true} onChange={(e) => patch({ showFinish: e.target.checked ? true : undefined })} />
+              <span>{t("roomStamp.showFinish")}</span>
+            </label>
+          </div>
+
           <label className="roomstamp-field">
             <span className="roomstamp-label">{t("roomStamp.occupancy")}</span>
             <input

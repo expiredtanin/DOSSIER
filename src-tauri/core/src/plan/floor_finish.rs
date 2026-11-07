@@ -58,8 +58,13 @@ fn has_any(text: &str, words: &[&str]) -> bool {
     words.iter().any(|w| t.contains(w))
 }
 
-/// Nassraum nach Name (auch Stempel-Name): Bad, WC, Dusche, Nasszelle, Toilette, Sanitär …
+/// Nassraum: [158] aus der Nutzung (`Room.usage`), ohne Nutzung nach dem Namen ([`is_wet_name`]).
 pub fn is_wet_room(r: &Room) -> bool {
+    crate::room_book::is_wet(r)
+}
+
+/// Nassraum nach Name (auch Stempel-Name): Bad, WC, Dusche, Nasszelle, Toilette, Sanitär …
+pub fn is_wet_name(r: &Room) -> bool {
     const WET: [&str; 12] = ["bad", "wc", "dusche", "nasszelle", "toilette", "sanitär", "sanitaer", "waschraum", "bath", "shower", "toilet", "lavabo"];
     let names = [Some(r.name.as_str()), r.stamp.as_ref().map(|s| s.name.as_str()), r.stamp.as_ref().and_then(|s| s.name_line2.as_deref())];
     names.into_iter().flatten().any(|n| has_any(n, &WET))
@@ -81,6 +86,31 @@ pub fn weight(w: Option<f64>) -> f64 {
 pub fn thinning_scale(scale: f64) -> f64 {
     let s = if scale.is_finite() && scale > 0.0 { scale } else { 100.0 };
     s * MIN_PAPER_MM / crate::surface_pattern::MIN_PAPER_MM
+}
+
+/// [158] Räume des Geschosses mit eigenem Bodenbelag aus den Bauteil-Materialien (sichtbar, gültiger
+/// Umriss): Raum, Material, Umriss. Freitext-Beläge gelten nicht (kein Muster bekannt).
+pub fn own_finish_rooms<'a>(c: &Ctx<'a>) -> Vec<(&'a Room, &'a Component, Vec<P>)> {
+    c.p.rooms
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|r| r.floor_id == c.a.floor && r.boundary.len() >= 3 && c.vis(&r.category_code, &r.id))
+        .filter_map(|r| {
+            let comp = crate::room_book::finish_component(c.p, r.floor_finish.as_deref())?;
+            let ring: Vec<P> = r.boundary.iter().map(|v| [v.x, v.y]).collect();
+            ring.iter().all(|q| q[0].is_finite() && q[1].is_finite()).then_some((r, comp, ring))
+        })
+        .collect()
+}
+
+/// [158] Belagsmuster eines Raums: Muster des Materials auf dem Raumumriss (Ursprung erster Punkt,
+/// Ausrichtung am Plan), ausgedünnt wie der Deckenbelag; dazu die Strichstärke.
+pub fn room_segments(comp: &Component, ring: &[P], scale: f64) -> Option<(Vec<(P, P)>, f64)> {
+    let pat = comp.surface_pattern.as_ref()?;
+    let spec = crate::surface_pattern::spec_of(pat, 0.0)?;
+    let segs = crate::surface_pattern::segments(ring, &spec, *ring.first()?, thinning_scale(scale));
+    Some((segs, weight(pat.weight_mm)))
 }
 
 /// Umrisse der Nassräume des Geschosses.

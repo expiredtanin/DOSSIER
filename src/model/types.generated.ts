@@ -1807,7 +1807,7 @@ export type LayoutTable = {
 };
 
 /** Quelle einer Blatt-Tabelle ([111]). */
-export type LayoutTableSource = "openings" | "areas" | "rooms" | "elements" | "earthworks";
+export type LayoutTableSource = "openings" | "areas" | "rooms" | "elements" | "earthworks" | "roomBook";
 
 /**
  * Einfache Textfelder des Titelblocks (Master). Alle optional — leere Felder
@@ -2849,6 +2849,19 @@ export type Room = {
    * Zeilen (Bodenfläche/Nutzung) aus den Flags. Fehlt er, gilt der Alt-Pfad.
    */
   stamp?: RoomStamp;
+  /** [158] Raumbuch: Nutzung (Wohnen, Bad, Verkehr …); Nassraum wird daraus abgeleitet. */
+  usage?: RoomUsage;
+  /**
+   * [158] Bodenbelag: Kennung eines Bauteil-Materials (`components`) oder Freitext. Ein Material mit
+   * Oberflächenmuster gilt im Grundriss im Raum statt des Belags der Decke.
+   */
+  floorFinish?: string;
+  /** [158] Wandoberfläche (Material-Kennung oder Freitext). */
+  wallFinish?: string;
+  /** [158] Deckenoberfläche (Material-Kennung oder Freitext). */
+  ceilingFinish?: string;
+  /** [158] Bodenaufbau als Freitext (z. B. „Parkett 15, UB 80, TSD 20"). */
+  floorBuildUp?: string;
 };
 
 /**
@@ -2913,7 +2926,25 @@ export type RoomStamp = {
    * Schrittrundung.
    */
   roundingStep?: number;
+  /** [158] Bodenbelag des Raums als Zeile anzeigen (Live-Zeile). Fehlt/false: keine Belagszeile. */
+  showFinish?: boolean;
 };
+
+/** [158] Nutzung eines Raums (Raumbuch). Nassräume: Bad, WC, Dusche, Waschküche. */
+export type RoomUsage =
+  | "living"
+  | "sleeping"
+  | "kitchen"
+  | "dining"
+  | "bath"
+  | "wc"
+  | "shower"
+  | "laundry"
+  | "circulation"
+  | "technical"
+  | "storage"
+  | "office"
+  | "other";
 
 /**
  * Ein Eintrag der Flügeleinteilung eines Fensters (VW „Flügeltabelle"): entweder

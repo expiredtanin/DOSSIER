@@ -6,6 +6,7 @@
 
 pub mod export_schedule;
 pub mod opening_schedule;
+pub mod room_book;
 pub mod u_value;
 pub mod sheet_table;
 pub mod terrain;

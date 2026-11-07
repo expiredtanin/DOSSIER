@@ -365,11 +365,14 @@ fn floor_finishes(c: &Ctx, rooms: &[Primitive], out: &mut Vec<Primitive>) {
             })
             .collect()
     };
-    if ceilings.is_empty() {
+    // [158] Räume mit eigenem Bodenbelag (Bauteil-Material): dort gilt ihr Belag statt dem der Decke.
+    let own = ff::own_finish_rooms(c);
+    if ceilings.is_empty() && own.is_empty() {
         return;
     }
-    // Aussparungen und Nassräume erst rechnen, wenn ein Belag gezeichnet wird.
-    let mut excl: Option<Vec<Vec<[f64; 2]>>> = None;
+    let own_rings: Vec<Vec<[f64; 2]>> = own.iter().map(|(_, _, ring)| ring.clone()).collect();
+    // Belag je Quelle nach Darstellung und Regeln: (Stücke, Stärke, Farbe, Ebene).
+    let mut jobs: Vec<(Vec<([f64; 2], [f64; 2])>, f64, String, &str, Option<String>)> = Vec::new();
     let mut wet: Option<Vec<Vec<[f64; 2]>>> = None;
     for ce in ceilings {
         // [33] Schicht-Override mit eigener Schraffur bzw. ohne Muster: kein Belagsmuster.
@@ -394,6 +397,31 @@ fn floor_finishes(c: &Ctx, rooms: &[Primitive], out: &mut Vec<Primitive>) {
                 ff::clip_inside_any(&segs, wet.get_or_insert_with(|| ff::wet_rooms(c)))
             }
         };
+        let segs = if own_rings.is_empty() { segs } else { ff::clip_outside_all(segs, &own_rings) };
+        let w = ov.lineweight.map_or(w, |x| ff::weight(Some(x)));
+        jobs.push((segs, w, ov.color.unwrap_or(ink), &ce.category_code, ov.linetype_id));
+    }
+    for (room, comp, ring) in &own {
+        let ov = c.overrides(Some("floor_finish"), &room.category_code, Some(&comp.name));
+        let show = match ov.hide {
+            Some(true) => false,
+            Some(false) => true,
+            None => match mode {
+                ff::Show::Off => false,
+                ff::Show::All => true,
+                ff::Show::Wet => ff::is_tile(comp) && ff::is_wet_room(room),
+            },
+        };
+        if !show {
+            continue;
+        }
+        let Some((segs, w)) = ff::room_segments(comp, ring, c.a.scale) else { continue };
+        let w = ov.lineweight.map_or(w, |x| ff::weight(Some(x)));
+        jobs.push((segs, w, ov.color.unwrap_or_else(|| ff::INK.to_string()), &room.category_code, ov.linetype_id));
+    }
+    // Aussparungen erst rechnen, wenn ein Belag gezeichnet wird.
+    let mut excl: Option<Vec<Vec<[f64; 2]>>> = None;
+    for (segs, w, ink, cat, linetype) in jobs {
         if segs.is_empty() {
             continue;
         }
@@ -412,10 +440,8 @@ fn floor_finishes(c: &Ctx, rooms: &[Primitive], out: &mut Vec<Primitive>) {
             v
         });
         let segs = ff::clip_outside_all(segs, excl);
-        let w = ov.lineweight.map_or(w, |x| ff::weight(Some(x)));
-        let ink = ov.color.unwrap_or(ink);
-        let dash = overrides::linetype_dash(p, ov.linetype_id.as_deref());
-        let greyed = Some(c.greyed(&ce.category_code));
+        let dash = overrides::linetype_dash(p, linetype.as_deref());
+        let greyed = Some(c.greyed(cat));
         for (a, b) in segs {
             out.push(line(pv(a), pv(b), "floor-finish-pattern", w, dash.clone(), &ink, greyed));
         }
@@ -968,6 +994,14 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
                 (room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)), lines)
             }
         };
+        // [158] Belagszeile (Einstellung am Stempel, Vorgabe aus): Bodenbelag des Raums.
+        let mut extra_lines = extra_lines;
+        if !overview && room.stamp.as_ref().and_then(|s| s.show_finish) == Some(true) {
+            let label = crate::room_book::finish_label(c.p, room.floor_finish.as_deref());
+            if !label.is_empty() {
+                extra_lines.push(StampLine { text: label, align: Align::Center });
+            }
+        }
         let candidates = if room.stamp_anchor.is_some() { vec![at] } else { stamp_candidates(&pts, pole) };
         // [140] Teil 6: ohne eigenen Anker weicht der Stempel anderem Planinhalt im Raum aus (`place_stamp`).
         let obst = if room.stamp_anchor.is_some() { Default::default() } else { obstacles.within(ring_bounds(&pts)) };
@@ -2202,6 +2236,91 @@ mod tests {
                 assert!(!inside(m, 3.6, 0.2, 4.8, 0.8), "Belag unter dem Einbau {m:?}");
             }
         }
+    }
+
+    /// [158] Raum mit eigenem Bodenbelag (Material mit Muster): im Raum gilt sein Muster, auf den Raum
+    /// beschnitten, statt des Deckenbelags; ausserhalb bleibt der Deckenbelag.
+    #[test]
+    fn belag_aus_raum_statt_decke() {
+        let mut p = belag_projekt(SurfacePatternKind::Grid, 0.3, 0.3);
+        p.components.push(Component { id: "fliese".into(), name: "Feinsteinzeug".into(), surface_pattern: Some(SurfacePattern { kind: SurfacePatternKind::Grid, spacing: 0.6, height: Some(0.6), ..Default::default() }), ..Default::default() });
+        let mut bad = p.rooms.as_ref().unwrap()[0].clone();
+        bad.id = "R-bad".into();
+        bad.floor_id = "og".into();
+        bad.name = "Raum 7".into();
+        bad.stamp_anchor = Some(Vec2 { x: 4.5, y: 3.6 });
+        bad.boundary = vec![Vec2 { x: 3.0, y: 2.0 }, Vec2 { x: 4.8, y: 2.0 }, Vec2 { x: 4.8, y: 3.8 }, Vec2 { x: 3.0, y: 3.8 }];
+        p.rooms.as_mut().unwrap().push(bad.clone());
+        let before = belag(&p, "og", 1.0, 50.0, serde_json::json!({}));
+        let ring: Vec<[f64; 2]> = bad.boundary.iter().map(|v| [v.x, v.y]).collect();
+        let inside = |l: &[(Vec2, Vec2, f64, String)]| l.iter().filter(|(a, b, ..)| crate::surface_pattern::point_in([(a.x + b.x) / 2.0, (a.y + b.y) / 2.0], &ring)).count();
+        let n_before = inside(&before);
+        p.rooms.as_mut().unwrap().last_mut().unwrap().floor_finish = Some("fliese".into());
+        let after = belag(&p, "og", 1.0, 50.0, serde_json::json!({}));
+        let n_after = inside(&after);
+        assert!(n_after > 0 && n_before > 0, "{n_after} / {n_before}");
+        // Im Raum nur noch Linien des 0.6-Rasters (x bzw. y auf 3.0 + k·0.6).
+        for (a, b, ..) in after.iter().filter(|(a, b, ..)| crate::surface_pattern::point_in([(a.x + b.x) / 2.0, (a.y + b.y) / 2.0], &ring)) {
+            let on = |v: f64| ((v - 3.0) / 0.6 - ((v - 3.0) / 0.6).round()).abs() < 1e-6 || ((v - 2.0) / 0.6 - ((v - 2.0) / 0.6).round()).abs() < 1e-6;
+            assert!((a.x - b.x).abs() < 1e-9 && on(a.x) || (a.y - b.y).abs() < 1e-9 && on(a.y), "{a:?}–{b:?}");
+        }
+        // Ausserhalb unverändert der Deckenbelag (gleiche Linienlänge ausserhalb des Raums).
+        let outside_len = |l: &[(Vec2, Vec2, f64, String)]| {
+            let mut rest = Vec::new();
+            for (a, b, ..) in l {
+                crate::surface_pattern::clip_outside_poly([a.x, a.y], [b.x, b.y], &ring, &mut rest);
+            }
+            rest.iter().map(|(a, b)| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()).sum::<f64>()
+        };
+        assert!((outside_len(&before) - outside_len(&after)).abs() < 1e-6, "{} {}", outside_len(&before), outside_len(&after));
+        // Freitext-Belag: kein Muster bekannt, der Deckenbelag bleibt.
+        p.rooms.as_mut().unwrap().last_mut().unwrap().floor_finish = Some("Linoleum".into());
+        assert_eq!(belag(&p, "og", 1.0, 50.0, serde_json::json!({})).len(), before.len());
+    }
+
+    /// [158] Nassraum aus der Nutzung: im Modus „Nassräume" (1:100) zeigt der Raum mit Nutzung „Dusche"
+    /// und Plattenbelag sein Muster, auch ohne Deckenbelag und ohne passenden Namen.
+    #[test]
+    fn belag_nassraum_aus_nutzung() {
+        let mut p = belag_projekt(SurfacePatternKind::RunningBond, 0.6, 0.1);
+        p.components.push(Component { id: "fliese".into(), name: "Feinsteinzeug".into(), surface_pattern: Some(SurfacePattern { kind: SurfacePatternKind::Grid, spacing: 0.3, height: Some(0.3), ..Default::default() }), ..Default::default() });
+        let mut r = p.rooms.as_ref().unwrap()[0].clone();
+        r.id = "R-d".into();
+        r.floor_id = "og".into();
+        r.name = "Raum 7".into();
+        r.stamp_anchor = Some(Vec2 { x: 4.5, y: 3.6 });
+        r.boundary = vec![Vec2 { x: 3.0, y: 2.0 }, Vec2 { x: 4.8, y: 2.0 }, Vec2 { x: 4.8, y: 3.8 }, Vec2 { x: 3.0, y: 3.8 }];
+        r.floor_finish = Some("fliese".into());
+        p.rooms.as_mut().unwrap().push(r);
+        set_finish(&mut p, "og", Some(FloorFinishDisplay::Wet));
+        assert!(belag(&p, "og", 1.0, 100.0, serde_json::json!({})).is_empty(), "ohne Nutzung, Name kein Nassraum");
+        p.rooms.as_mut().unwrap().last_mut().unwrap().usage = Some(RoomUsage::Shower);
+        let l = belag(&p, "og", 1.0, 100.0, serde_json::json!({}));
+        assert!(l.len() >= 4, "{}", l.len());
+        // Nutzung „Lager" schlägt den Namen „Bad".
+        let last = p.rooms.as_mut().unwrap().last_mut().unwrap();
+        last.usage = Some(RoomUsage::Storage);
+        last.name = "Bad".into();
+        assert!(belag(&p, "og", 1.0, 100.0, serde_json::json!({})).is_empty());
+    }
+
+    /// [158] Belagszeile im Raumstempel nur mit Einstellung (Vorgabe aus).
+    #[test]
+    fn stempel_belagszeile() {
+        let mut p = sample();
+        p.components.push(Component { id: "par".into(), name: "Parkett Eiche".into(), ..Default::default() });
+        let r = &mut p.rooms.as_mut().unwrap()[0];
+        r.floor_finish = Some("par".into());
+        r.stamp = Some(RoomStamp { name: "Wohnen".into(), show_floor_area: true, ..Default::default() });
+        let (floor, cat) = (r.floor_id.clone(), r.category_code.clone());
+        let lines = |p: &Project| {
+            let t = serde_json::json!({ "floor": floor, "show": [cat], "grey": [], "scale": 50 }).to_string();
+            let d = plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            d.rooms.iter().find_map(|q| match q { Primitive::Text { extra_lines, room_id: Some(_), .. } => Some(extra_lines.iter().map(|l| l.text.clone()).collect::<Vec<_>>()), _ => None }).unwrap()
+        };
+        assert!(!lines(&p).iter().any(|l| l == "Parkett Eiche"));
+        p.rooms.as_mut().unwrap()[0].stamp.as_mut().unwrap().show_finish = Some(true);
+        assert!(lines(&p).iter().any(|l| l == "Parkett Eiche"), "{:?}", lines(&p));
     }
 
     /// [156] Override-Regeln der Bauteilart „floor_finish": ausblenden, erzwingen, färben.
