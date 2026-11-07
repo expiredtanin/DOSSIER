@@ -3309,6 +3309,11 @@ export type Tree = {
   species?: string;
   /** [149] Art-Name als Beschriftung im Grundriss zeigen (nahe am Stamm; Vorgabe aus). */
   showLabel?: boolean;
+  /**
+   * [149] Lage der Beschriftung (Griff): linker Rand der Zeile (Mitte) relativ zur Stammmitte (m); fehlt =
+   * rechts neben dem Stamm (1 mm Papier Abstand). Wandert mit dem Baum.
+   */
+  labelOffset?: Vec2;
   /** Höhenversatz des Fusses gegenüber Gelände bzw. Geschoss-UK (m, Vorgabe 0). */
   baseOffset?: number;
   /**

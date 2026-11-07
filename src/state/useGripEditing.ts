@@ -40,6 +40,7 @@ import type { CommandEngine } from "../commands/engine";
 import { single } from "./selection";
 import { getState as storeState } from "./appStore";
 import { patchItem } from "../core";
+import { treeGripPatch, treeGripPoints } from "./treeGrips";
 import type { Selection } from "./selection";
 
 export interface GripEditFieldsState {
@@ -170,10 +171,8 @@ export function useGripEditing(opts: {
   // [149] Baum: Griff in der Stammmitte (verschieben) und am Kronenrand (Kronendurchmesser).
   const selectedTreeId = single(selection, "trees");
   const selectedTree = selectedTreeId ? (project.trees ?? []).find((x) => x.id === selectedTreeId) : undefined;
-  const treeGrips = (tr: NonNullable<typeof selectedTree>): Vec2[] => [
-    tr.position,
-    { x: tr.position.x + tr.crownDiameter / 2, y: tr.position.y },
-  ];
+  // Mit gezeigter Beschriftung dazu ihr Griff (`labelOffset`, s. `treeGrips.ts`).
+  const treeGrips = (tr: NonNullable<typeof selectedTree>): Vec2[] => treeGripPoints(tr, scaleDenominator);
   const selectedRoomId = single(selection, "rooms");
   const selectedCeilingId = single(selection, "ceilings");
   const selectedDrawingId = single(selection, "drawings");
@@ -852,14 +851,11 @@ export function useGripEditing(opts: {
       else if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
       return;
     }
-    // [149] Baum: Stammmitte bzw. Kronenrand live, ein Undo-Schritt je Zug (gleicher coalesceKey).
+    // [149] Baum: Stammmitte, Kronenrand bzw. Beschriftung live, ein Undo-Schritt je Zug (gleicher coalesceKey).
     if (selectedTree) {
       const tr = selectedTree;
       if (tr.locked) return;
-      const patch =
-        index === 0
-          ? { position: { x: pt.x, y: pt.y } }
-          : { crownDiameter: Math.max(0.2, 2 * Math.hypot(pt.x - tr.position.x, pt.y - tr.position.y)) };
+      const patch = treeGripPatch(tr, index, pt);
       storeState().applyChange((p) => patchItem(p, "trees", tr.id, patch), `treeGrip:${tr.id}:${index}`);
       return;
     }

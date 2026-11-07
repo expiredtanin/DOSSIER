@@ -3345,6 +3345,12 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   EG 1:100 mit Baum-Objekten samt Beschriftung in Chromium. Offen: Rahmen/Gruppen nicht per e2e und nicht in der
   Tauri-App geprüft; Beschriftung fest rechts vom Stamm (kein Ausweichen, kein Griff); 3D-Klick erweitert nicht auf
   die Gruppe; Krone im Schatten als konvexe Hülle; Schnitt durch die Krone zeigt die ganze Silhouette.
+  (7.11., Reste) **3D-Klick auf ein Gruppenmitglied** wählt die ganze Gruppe wie im Grundriss (`groupActions.pick3dGroup`,
+  Isolation beachtet, Shift-Klick einzeln). **Beschriftung mit Griff:** neues Feld `Tree.labelOffset` (Rust-Modell, linker
+  Rand der Zeile ab Stammmitte, m; wandert mit dem Baum), dritter Griff bei gezeigter Beschriftung (`state/treeGrips.ts`,
+  ein Undo-Schritt je Zug). Tests: `plan::trees::beschriftung_mit_art_name` (Versatz), vitest `groupActions.test.ts`
+  (3D-Klick), `treeGrips.test.ts`. Nicht in der Tauri-App/per e2e geprüft. Offen: Krone im Schatten als konvexe Hülle;
+  Schnitt durch die Krone zeigt die ganze Silhouette; Beschriftung weicht nicht aus.
 - ◐ **[150] Gelände im Grundriss sauber am Gebäude.** (6.11., Rest aus [140] Teil 6: in „E.07 Eingang“ stapelten sich
   Höhenlinien-Beschriftungen, die Beschriftung lag stets in der Linienmitte, auch im Gebäude.) **Fussabdruck je
   Geschoss** (`plan/context.rs::terrain_footprint`): Wände (Bogenwände über `arc_footprint`, gerade Wände an
