@@ -3125,10 +3125,13 @@ pub struct Opening {
     pub extra: Extra,
 }
 
-/// Grundform einer Treppe (DOSSIER: gerade / L / Wendel).
+/// Grundform einer Treppe (DOSSIER: gerade / L / Wendel / U / gerade mit Podest).
 ///   • "straight" — ein gerader Lauf (Lauflinie = Start → Richtung).
 ///   • "L"        — zwei rechtwinklige Läufe mit Zwischenpodest an der Ecke.
 ///   • "spiral"   — Wendeltreppe um ein Zentrum (keilförmige Tritte).
+///   • "U"        — [151] zwei gegenläufige Läufe mit Halbpodest (Treppenauge `gap`, Drehsinn `turn`),
+///                  wahlweise mit Mittellauf quer über das Auge und zwei Viertelpodesten (`midSteps`).
+///   • "straightLanding" — [151] zwei Läufe in einer Richtung mit Zwischenpodest (`landingLength`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 pub enum StairShape {
     #[default]
@@ -3138,6 +3141,10 @@ pub enum StairShape {
     L,
     #[serde(rename = "spiral")]
     Spiral,
+    #[serde(rename = "U")]
+    U,
+    #[serde(rename = "straightLanding")]
+    StraightLanding,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -3214,14 +3221,36 @@ pub struct Stair {
     /// Lauflänge des (ersten) Laufs in Metern (entlang `dir`).
     #[serde(rename = "runLength")]
     pub run_length: f64,
-    /// Nur L: Lauflänge des zweiten Laufs in Metern.
+    /// Nur L / U / gerade mit Podest: Lauflänge des zweiten (bei U: des letzten) Laufs in Metern.
     #[serde(rename = "run2Length", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub run2_length: Option<f64>,
-    /// Nur L: Abbiegerichtung des zweiten Laufs (+1 = links, −1 = rechts).
+    /// Nur L / U: Abbiegerichtung des zweiten Laufs bzw. Drehsinn (+1 = links, −1 = rechts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "1 | -1")]
     pub turn: Option<f64>,
+    /// [151] Nur U: lichte Weite des Treppenauges zwischen erstem und letztem Lauf (Meter; fehlt = 0.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gap: Option<f64>,
+    /// [151] Nur U / gerade mit Podest: Podesttiefe in Laufrichtung (Meter; fehlt = Laufbreite).
+    #[serde(rename = "landingLength", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub landing_length: Option<f64>,
+    /// [151] Nur L / U / gerade mit Podest: Steigungen im ersten Lauf bis zum Podest (fehlt = nach
+    /// Lauflängen aufgeteilt). Jedes Podest zählt als eine Steigung.
+    #[serde(rename = "run1Steps", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub run1_steps: Option<f64>,
+    /// [151] Nur U: Steigungen im Mittellauf quer über das Auge (zwei Viertelpodeste); fehlt/0 =
+    /// Halbpodest. Auftritt wie Lauf 1, höchstens Augenweite / Steigungen.
+    #[serde(rename = "midSteps", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mid_steps: Option<f64>,
+    /// [151] Nur U: Versatz des letzten Laufs ins Podest hinein (Meter, entlang Lauf 1; fehlt = 0).
+    #[serde(rename = "run2Offset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub run2_offset: Option<f64>,
     /// Nur Wendel: Zentrum der Wendeltreppe (Meter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

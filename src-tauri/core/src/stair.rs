@@ -1,13 +1,16 @@
 //! Treppen-Geometrie als flache Aufrufe für `src/geometry/stair.ts`. Die Mathematik steht in
 //! `kernel2d` (`stair_geometry`, `stair_outline`, `stair_cut`, `stair_bbox`); hier Kodierung.
 //!
-//! Parameter (16 Zahlen): `[form (0 gerade, 1 L, 2 Wendel), startX, startY, dirX, dirY, lauf, lauf2,
-//! richtung, zentrumX, zentrumY, radius, winkel°, breite, stufen, auf, referenz]`; optionale
-//! Felder (`lauf2 … winkel`, `auf`) als NaN = fehlend; `richtung` ±1; `auf` 0/1; `referenz`
-//! 0 mitte, 1 links, 2 rechts. Pflichtfelder müssen endlich sein, sonst leeres Ergebnis.
+//! Parameter ([`PARAMS`] = 21 Zahlen): `[form (0 gerade, 1 L, 2 Wendel, 3 U, 4 gerade mit Podest),
+//! startX, startY, dirX, dirY, lauf, lauf2, richtung, zentrumX, zentrumY, radius, winkel°, breite,
+//! stufen, auf, referenz, auge, podestlänge, stufenLauf1, stufenMitte, versatzLauf2]`; optionale
+//! Felder (`lauf2 … winkel`, `auf`, ab `auge`) als NaN = fehlend; `richtung` ±1; `auf` 0/1; `referenz`
+//! 0 mitte, 1 links, 2 rechts. Pflichtfelder müssen endlich sein, sonst leeres Ergebnis. Die fünf
+//! letzten ([151]) dürfen fehlen (kürzerer Puffer = alle NaN).
 //!
 //! Geometrie `[hoeheSetz, auftritt, steigung, nTritte, (index, oben, unten, x0, y0 … x3, y3)…,
-//! nPodest (−1 = keins), x, y …, nLauf, x, y …, schaft ax, ay, bx, by, spitze 6 Zahlen]`.
+//! nPodest (−1 = keins), x, y …, nLauf, x, y …, schaft ax, ay, bx, by, spitze 6 Zahlen,
+//! nPodest2 (−1 = keins), x, y …]`.
 //! Aussenlinie `[0, n, x, y …]` (Polygon) oder `[1, 4 Linien-Zahlen ×2, (cx, cy, r, a0, a1) ×2]`.
 //! Schnitt `[nUnter, idx…, nUeber, idx…, nBruch (0|2), 8 Zahlen]`; Rahmen `[minX, minY, maxX, maxY]`.
 
@@ -19,6 +22,9 @@ use kernel2d::{
 
 /// Obergrenze der Stufenzahl (Schutz vor Endlosschleifen bei Unsinn).
 const MAX_STEPS: f64 = 10_000.0;
+
+/// Länge des Parameter-Puffers einer Treppe.
+pub const PARAMS: usize = 21;
 
 fn opt(v: f64) -> Option<f64> {
     if v.is_nan() {
@@ -38,12 +44,17 @@ pub fn decode_params(buf: &[f64]) -> Option<StairParams> {
     if !required.iter().all(|x| x.is_finite()) || steps.abs() > MAX_STEPS {
         return None;
     }
+    // [151] Zusatzfelder (dürfen fehlen).
+    let extra = |i: usize| buf.get(16 + i).copied().filter(|v| v.is_finite());
+    let count = |i: usize| extra(i).filter(|v| v.abs() <= MAX_STEPS).map(|v| (v + 0.5).floor() as i64);
     let center = if cx.is_nan() || cy.is_nan() { None } else { Some(Vec2::new(cx, cy)) };
     // JS `Math.round`: .5 rundet auf
     let step_count = (steps + 0.5).floor() as i64;
     let shape = match form as i64 {
         1 => "L",
         2 => "spiral",
+        3 => "U",
+        4 => "straightLanding",
         _ => "straight",
     };
     let referenz = match refz as i64 {
@@ -65,6 +76,11 @@ pub fn decode_params(buf: &[f64]) -> Option<StairParams> {
         step_count,
         up: opt(up).map(|u| u != 0.0),
         referenz,
+        gap: extra(0),
+        landing_length: extra(1),
+        run1_steps: count(2),
+        mid_steps: count(3),
+        run2_offset: extra(4),
     })
 }
 
@@ -95,6 +111,13 @@ pub fn encode_geometry(g: &StairGeometry) -> Vec<f64> {
     out.push(g.run_line.len() as f64);
     push_pts(&mut out, &g.run_line);
     push_pts(&mut out, &[g.arrow.shaft.0, g.arrow.shaft.1, g.arrow.head.0, g.arrow.head.1, g.arrow.head.2]);
+    match &g.landing2 {
+        Some(l) => {
+            out.push(l.len() as f64);
+            push_pts(&mut out, l);
+        }
+        None => out.push(-1.0),
+    }
     out
 }
 
@@ -118,9 +141,17 @@ pub fn decode_geometry(buf: &[f64]) -> Option<StairGeometry> {
     };
     let run_line = to_vec2(r.ring()?);
     let a = to_vec2(r.points(5)?);
+    // Zweites Podest ([151]); ältere Puffer enden hier.
+    let landing2 = match r.num() {
+        Some(n) if n >= 0.0 && n.fract() == 0.0 && n < 1e6 => Some(to_vec2(r.points(n as usize)?)),
+        Some(n) if n < 0.0 => None,
+        None => None,
+        Some(_) => return None,
+    };
     Some(StairGeometry {
         treads,
         landing,
+        landing2,
         riser_height,
         tread_depth,
         run_line,

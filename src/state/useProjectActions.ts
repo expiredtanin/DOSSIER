@@ -382,6 +382,7 @@ export function useProjectActions(
   const setCeilingThickness = useStore((s) => s.setCeilingThickness);
   const updateStair = useStore((s) => s.updateStair);
   const moveStairBy = useStore((s) => s.moveStairBy);
+  const dragStairParam = useStore((s) => s.dragStairParam);
   const updateRoom = useStore((s) => s.updateRoom);
   const moveRoomBy = useStore((s) => s.moveRoomBy);
   const moveRoomGrip = useStore((s) => s.moveRoomGrip);
@@ -501,6 +502,7 @@ export function useProjectActions(
     setCeilingThickness,
     updateStair,
     moveStairBy,
+    dragStairParam,
     updateRoom,
     moveRoomBy,
     moveRoomGrip,

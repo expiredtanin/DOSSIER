@@ -309,6 +309,75 @@ pub fn stair_handle(spiral: bool, center: Option<P>, start: P, dir: P, run_lengt
     add(start, scale(normalize(dir), run_length / 2.0))
 }
 
+/// [151] Lauf-Achsen einer Podesttreppe (L, U, gerade mit Podest) aus den Treppen-Parametern (`stair.rs`):
+/// Antritt-Mitte, Laufrichtung, linke Normale, Geometrie und Index des ersten Tritts im letzten Lauf.
+fn flight_frame(params: &[f64]) -> Option<(P, P, P, kernel2d::StairGeometry, usize, String)> {
+    let sp = crate::stair::decode_params(params)?;
+    if !matches!(sp.shape.as_str(), "L" | "U" | "straightLanding") {
+        return None;
+    }
+    let g = kernel2d::stair_geometry(&sp, 1.0);
+    let tr = &g.treads;
+    if tr.len() < 2 || tr.iter().any(|t| t.pts.len() < 4) {
+        return None;
+    }
+    let last_run = (1..tr.len()).rev().find(|&k| tr[k].index != tr[k - 1].index + 1)?;
+    let p = |v: kernel2d::Vec2| (v.x, v.y);
+    let f = &tr[0].pts;
+    let b = scale(add(p(f[0]), p(f[3])), 0.5);
+    let u = normalize(sub(p(f[1]), p(f[0])));
+    Some((b, u, (-u.1, u.0), g, last_run, sp.shape))
+}
+
+/// [151] Parameter-Griffe einer Podesttreppe: Ende des ersten Laufs, Ende des letzten Laufs, bei U und
+/// gerade mit Podest der Podestrand (Mitte). Andere Formen: keine.
+pub fn stair_param_points(params: &[f64]) -> Vec<P> {
+    let Some((b, u, n, g, last_run, shape)) = flight_frame(params) else { return Vec::new() };
+    let p = |v: kernel2d::Vec2| (v.x, v.y);
+    let tr = &g.treads;
+    let end_of = |k: usize| scale(add(p(tr[k].pts[1]), p(tr[k].pts[2])), 0.5);
+    let run1_last = (1..tr.len()).find(|&k| tr[k].index != tr[k - 1].index + 1).map_or(0, |k| k - 1);
+    let mut out = vec![end_of(run1_last), end_of(tr.len() - 1)];
+    if shape != "L" {
+        let far = g.landing.iter().chain(g.landing2.iter()).flatten().map(|q| dot(sub(p(*q), b), u)).fold(f64::NEG_INFINITY, f64::max);
+        let front = scale(add(p(tr[last_run].pts[0]), p(tr[last_run].pts[3])), 0.5);
+        let across = dot(sub(front, b), n) / 2.0;
+        out.push(add(add(b, scale(u, far)), scale(n, across)));
+    }
+    out
+}
+
+/// [151] Parameter-Griff `index` (s. [`stair_param_points`]) nach `pt` ziehen: neue Feldwerte. Ende Lauf 1 →
+/// `runLength`; Ende letzter Lauf → `run2Length` (U: zusätzlich quer `gap` und `turn`); Podestrand →
+/// `landingLength`. Längen mindestens 0.3 m.
+pub fn stair_param_drag(params: &[f64], index: usize, pt: P) -> Vec<(&'static str, f64)> {
+    let Some((b, u, n, g, last_run, shape)) = flight_frame(params) else { return Vec::new() };
+    if !(pt.0.is_finite() && pt.1.is_finite()) {
+        return Vec::new();
+    }
+    let p = |v: kernel2d::Vec2| (v.x, v.y);
+    let tr = &g.treads;
+    let run1 = params.get(5).copied().unwrap_or(0.0);
+    match index {
+        0 => vec![("runLength", jsnum::max(0.3, dot(sub(pt, b), u)))],
+        1 => {
+            let f = &tr[last_run].pts;
+            let s2 = scale(add(p(f[0]), p(f[3])), 0.5);
+            let u2 = normalize(sub(p(f[1]), p(f[0])));
+            let mut out = vec![("run2Length", jsnum::max(0.3, dot(sub(pt, s2), u2)))];
+            if shape == "U" {
+                let v = dot(sub(pt, b), n);
+                let w = params.get(12).copied().unwrap_or(1.0);
+                out.push(("turn", if v < 0.0 { -1.0 } else { 1.0 }));
+                out.push(("gap", jsnum::max(0.0, v.abs() - w)));
+            }
+            out
+        }
+        2 if shape != "L" => vec![("landingLength", jsnum::max(0.3, dot(sub(pt, b), u) - run1))],
+        _ => Vec::new(),
+    }
+}
+
 /// Griffe einer Wand: Start, Ende und bei einer Bogenwand ([T2]) der Bogenscheitel (Pfeilhöhe = halbe
 /// Sehne · bulge, links der Sehne).
 pub fn wall_grips(s: P, e: P, bulge: f64) -> Vec<P> {
@@ -354,6 +423,32 @@ pub fn coincident(corners: &[P], groups: &[Vec<P>]) -> Vec<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn treppen_parameter_griffe() {
+        // U: Start (0,0) +x, Läufe 3 m, Linkswendung, Breite 1, Auge 0.2, 17 Steigungen
+        let nan = f64::NAN;
+        let u = [3.0, 0.0, 0.0, 1.0, 0.0, 3.0, 3.0, 1.0, nan, nan, nan, nan, 1.0, 17.0, nan, 0.0, 0.2, nan, nan, nan, nan];
+        let g = stair_param_points(&u);
+        assert_eq!(g.len(), 3);
+        assert!((g[0].0 - 3.0).abs() < 1e-9 && g[0].1.abs() < 1e-9, "{g:?}");
+        assert!(g[1].0.abs() < 1e-9 && (g[1].1 - 1.2).abs() < 1e-9, "{g:?}");
+        assert!((g[2].0 - 4.0).abs() < 1e-9 && (g[2].1 - 0.6).abs() < 1e-9, "{g:?}");
+        assert_eq!(stair_param_drag(&u, 0, (3.5, 0.3)), vec![("runLength", 3.5)]);
+        let d = stair_param_drag(&u, 1, (0.5, -1.5));
+        assert!((d[0].1 - 2.5).abs() < 1e-9 && d[1] == ("turn", -1.0) && (d[2].1 - 0.5).abs() < 1e-9, "{d:?}");
+        assert_eq!(stair_param_drag(&u, 2, (4.5, 0.0)), vec![("landingLength", 1.5)]);
+        // Gerade Treppe: keine Parameter-Griffe; Unsinn: nichts
+        let mut s = u;
+        s[0] = 0.0;
+        assert!(stair_param_points(&s).is_empty() && stair_param_drag(&s, 0, (1.0, 1.0)).is_empty());
+        assert!(stair_param_drag(&u, 0, (nan, 0.0)).is_empty() && stair_param_drag(&u, 7, (1.0, 1.0)).is_empty());
+        assert!(stair_param_points(&[1.0]).is_empty());
+        // L: zwei Griffe (kein Podestrand)
+        let mut l = u;
+        l[0] = 1.0;
+        assert_eq!(stair_param_points(&l).len(), 2);
+    }
 
     fn close(a: P, b: P) -> bool {
         (a.0 - b.0).abs() < 1e-12 && (a.1 - b.1).abs() < 1e-12

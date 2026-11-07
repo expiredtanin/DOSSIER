@@ -1554,6 +1554,17 @@ fn stair_flight_sections(p: &Project, base: (f64, f64), u: (f64, f64)) -> HashMa
         let (rings, _) = cut_mesh(&m.positions, &idx, base, u);
         polys.entry(st.id.clone()).or_default().extend(rings_to_polygons(&rings));
     }
+    // [151] Podestplatten derselben Treppen gehören zur exakten Fläche (sonst ersetzt die Laufplatte sie).
+    let with_flights: std::collections::HashSet<String> = polys.keys().cloned().collect();
+    for s in model3d::emit_stairs(p, false) {
+        if !with_flights.contains(&s.ceiling_id) || s.monolith.is_none() {
+            continue;
+        }
+        let m = crate::solid_bool::Mesh::prism(&s.outline, s.z_bottom, s.z_top);
+        let idx: Vec<f64> = m.indices.iter().map(|&i| i as f64).collect();
+        let (rings, _) = cut_mesh(&m.positions, &idx, base, u);
+        polys.entry(s.ceiling_id.clone()).or_default().extend(rings_to_polygons(&rings));
+    }
     polys
         .into_iter()
         .map(|(id, list)| {
@@ -3415,6 +3426,32 @@ mod tests {
         assert!(pts.iter().all(|q| q[1] >= soffit(q[0]) - 1e-6), "{pts:?}");
         assert!(pts.iter().filter(|q| q[1] > 0.1 && (q[1] - soffit(q[0])).abs() < 1e-6).count() >= 2, "{pts:?}");
         assert!(pts.len() < 2 * 15 + 10, "{pts:?}");
+    }
+
+    /// [151] U-Betontreppe längs durch Lauf 1 geschnitten: Laufplatte exakt UND die Podestplatte im Schnitt.
+    #[test]
+    fn u_treppe_lauf_und_podest_im_schnitt() {
+        let mut p = sample();
+        let st = &mut p.stairs.as_mut().unwrap()[0];
+        st.shape = StairShape::U;
+        st.start = Vec2 { x: 3.15, y: 0.35 };
+        st.dir = Vec2 { x: 0.0, y: 1.0 };
+        st.run_length = 2.0;
+        st.run2_length = Some(2.0);
+        st.turn = Some(-1.0);
+        st.gap = Some(0.1);
+        st.landing_length = Some(0.9);
+        st.width = 0.9;
+        st.step_count = 15.0;
+        st.total_rise = Some(2.6);
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: 3.15, y: -1.0 }, Vec2 { x: 3.15, y: 5.0 }]), ..Default::default() };
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let pts: Vec<[f64; 2]> = out.cuts.iter().filter(|c| c.stair_id.as_deref() == Some("ST1")).flat_map(|c| c.pts.clone()).collect();
+        // Podest: y 2.35 … 3.25 (u = y + 1), Oberkante 8 Steigungen
+        let top = 8.0 * 2.6 / 15.0;
+        assert!(pts.iter().any(|q| (q[0] - 4.25).abs() < 1e-6 && (q[1] - top).abs() < 1e-6), "{pts:?}");
+        // Lauf 1 ab y = 0.35 (u = 1.35) bis zum Podest
+        assert!(pts.iter().any(|q| (q[0] - 1.35).abs() < 1e-6), "{pts:?}");
     }
 
     /// [95][T2] Schnitt durch die Tasche in der Bogenwand (radial) und unter schräger Oberkante.

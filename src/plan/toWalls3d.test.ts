@@ -2143,7 +2143,7 @@ describe("emitStairRailings (Handlauf/Geländer, StairType.railing)", () => {
   });
   const stairProject = (
     railing: "keine" | "links" | "rechts" | "beide",
-    shape: "straight" | "L" = "straight",
+    shape: "straight" | "L" | "U" = "straight",
   ): Project => ({
     ...sampleProject,
     stairTypes: [stairType(railing)],
@@ -2193,8 +2193,9 @@ describe("emitStairRailings (Handlauf/Geländer, StairType.railing)", () => {
     expect(railMeshes(stairProject("beide")).length).toBe(2 * (1 + 16));
   });
 
-  it("L-Treppe: bewusst (noch) kein Geländer (nur gerade Läufe unterstützt)", () => {
-    expect(railMeshes(stairProject("beide", "L")).length).toBe(0);
+  it("[151] L- und U-Treppe: Geländer je Gehseite über das Podest (Handlauf + Pfosten)", () => {
+    expect(railMeshes(stairProject("beide", "L")).length).toBeGreaterThan(2);
+    expect(railMeshes(stairProject("beide", "U")).length).toBeGreaterThan(2);
   });
 
   it("Handlauf-Oberkante liegt RAIL_HEIGHT (0.9 m) über Boden- bzw. Austrittshöhe", () => {

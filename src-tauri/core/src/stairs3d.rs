@@ -1,9 +1,9 @@
 //! Treppen im 3D (aus `src/plan/toWalls3d/stairs.ts`): Tritt-Prismen und Podeste als Slabs
-//! (`slabs`), glatte Ortbeton-Laufplatte als Mesh (`slab_meshes`), Handlauf und Pfosten als Quader
-//! (`railings`). Die Treppengeometrie selbst kommt aus `kernel2d` (`stair_geometry`); TS sammelt aus
+//! (`slabs`), glatte Ortbeton-Laufplatten (je Lauf) als Mesh (`slab_meshes`), Handlauf und Pfosten
+//! als Rohre (`railings`). Die Treppengeometrie selbst kommt aus `kernel2d` (`stair_geometry`); TS sammelt aus
 //! dem `Project` nur Parameter, Höhen und Tragart und färbt die Ergebnisse ein.
 //!
-//! Eingabe (je Treppe 24 Zahlen, davor die Anzahl): die 16 Treppen-Parameter (s. [`crate::stair`]),
+//! Eingabe (je Treppe 29 Zahlen, davor die Anzahl): die 21 Treppen-Parameter (s. [`crate::stair`]),
 //! `zUnten, zOben, tragart (0 massiv, 1 beton, 2 offen: Wange/aufgesattelt/Spindel),
 //! trittdicke, nase, geschlosseneSetzstufen (0/1), gelaender (0 keine, 1 links, 2 rechts, 3 beide),
 //! saeulenRadius (0 keine; nur Wendel)`.
@@ -52,6 +52,10 @@ impl StairIn {
     fn spiral(&self) -> bool {
         self.params.shape == "spiral"
     }
+    /// Treppe aus geraden Läufen (gerade, L, U, gerade mit Podest).
+    fn flights(&self) -> bool {
+        matches!(self.params.shape.as_str(), "straight" | "L" | "U" | "straightLanding")
+    }
 }
 
 fn decode(buf: &[f64]) -> Option<Vec<Option<StairIn>>> {
@@ -59,7 +63,7 @@ fn decode(buf: &[f64]) -> Option<Vec<Option<StairIn>>> {
     let n = r.count()?;
     let mut out = Vec::with_capacity(n.min(1 << 16));
     for _ in 0..n {
-        let mut p = [0.0; 16];
+        let mut p = [0.0; crate::stair::PARAMS];
         for v in p.iter_mut() {
             *v = r.num()?;
         }
@@ -202,7 +206,7 @@ fn geometry_of(s: &StairIn) -> Option<(StairGeometry, f64)> {
     Some((geo, total_rise))
 }
 
-/// Lauf-/Querparameter einer geraden Treppe (Laufrichtung normiert, Quer = linke Normale).
+/// Lauf-/Querparameter eines geraden Laufs (Laufrichtung normiert, Quer = linke Normale).
 struct RunAxes {
     start: P,
     u: P,
@@ -210,12 +214,6 @@ struct RunAxes {
 }
 
 impl RunAxes {
-    fn of(s: &StairIn) -> Self {
-        let (dx, dy) = (s.params.dir.x, s.params.dir.y);
-        let l = or(hypot2(dx, dy), 1.0);
-        let u = [dx / l, dy / l];
-        RunAxes { start: [s.params.start.x, s.params.start.y], u, w: [-u[1], u[0]] }
-    }
     fn run_of(&self, p: P) -> f64 {
         (p[0] - self.start[0]) * self.u[0] + (p[1] - self.start[1]) * self.u[1]
     }
@@ -239,7 +237,70 @@ fn tread_edges(ax: &RunAxes, pts: &[P]) -> ([P; 2], [P; 2]) {
     (a, b)
 }
 
-fn slabs_of(s: &StairIn, idx: usize, for_section: bool, out: &mut Vec<Slab>) {
+/// Läufe einer Treppe aus geraden Läufen: Tritt-Bereiche zwischen den Podesten (Sprung im Tritt-Index).
+fn run_ranges(geo: &StairGeometry) -> Vec<std::ops::Range<usize>> {
+    let tr = &geo.treads;
+    let mut out = Vec::new();
+    let mut a = 0;
+    for k in 1..tr.len() {
+        if tr[k].index != tr[k - 1].index + 1 {
+            out.push(a..k);
+            a = k;
+        }
+    }
+    if a < tr.len() {
+        out.push(a..tr.len());
+    }
+    out
+}
+
+/// [151] Podeste (Umriss, Oberkante über der Treppen-UK): Podest k liegt auf der Antrittshöhe des
+/// Laufs k + 1 (jedes Podest belegt eine Steigung). Ohne Folgelauf: halbe Steighöhe.
+fn landings_of(geo: &StairGeometry) -> Vec<(Vec<P>, f64)> {
+    let runs = run_ranges(geo);
+    geo.landing
+        .iter()
+        .chain(geo.landing2.iter())
+        .enumerate()
+        .filter(|(_, l)| l.len() >= 3)
+        .map(|(k, l)| {
+            let top = runs.get(k + 1).map_or(geo.total_rise * 0.5, |r| geo.treads[r.start].base_rise);
+            (l.iter().map(pt).collect(), top)
+        })
+        .collect()
+}
+
+/// Achsen eines geraden Laufs aus seinem ersten Tritt (Ecken: links vorn, links hinten, rechts
+/// hinten, rechts vorn) und die Lauflänge bis zur Hinterkante des letzten Tritts.
+fn run_axes(geo: &StairGeometry, r: &std::ops::Range<usize>) -> Option<(RunAxes, f64)> {
+    let first = &geo.treads[r.start].pts;
+    let last = &geo.treads[r.end - 1].pts;
+    if first.len() < 4 || last.len() < 4 {
+        return None;
+    }
+    let start = [(first[0].x + first[3].x) / 2.0, (first[0].y + first[3].y) / 2.0];
+    let (dx, dy) = (first[1].x - first[0].x, first[1].y - first[0].y);
+    let l = hypot2(dx, dy);
+    if !(l > EPS) {
+        return None;
+    }
+    let u = [dx / l, dy / l];
+    let ax = RunAxes { start, u, w: [-u[1], u[0]] };
+    let len = ax.run_of([(last[1].x + last[2].x) / 2.0, (last[1].y + last[2].y) / 2.0]);
+    (len > EPS).then_some((ax, len))
+}
+
+/// Untersicht einer Ortbeton-Laufplatte entlang des Laufs (parallel zur Steigungslinie, Laufplattendicke
+/// senkrecht gemessen, nicht unter der Treppen-UK).
+fn soffit_fn<'a>(s: &'a StairIn, geo: &'a StairGeometry, r: &std::ops::Range<usize>, len: f64) -> impl Fn(f64) -> f64 + 'a {
+    let base = s.z_bottom + geo.treads[r.start].base_rise;
+    let lift = geo.treads[r.end - 1].top_rise - geo.treads[r.start].base_rise;
+    let waist_v = concrete_waist(geo.riser_height);
+    let z_bottom = s.z_bottom;
+    move |run_s: f64| z_bottom.max(base + (run_s.max(0.0).min(len) / len) * lift - waist_v)
+}
+
+fn slabs_of(s: &StairIn, idx: usize, for_section: bool, coarse: bool, out: &mut Vec<Slab>) {
     let Some((geo, total_rise)) = geometry_of(s) else { return };
     let z_bottom = s.z_bottom;
     let structure = s.structure;
@@ -256,45 +317,59 @@ fn slabs_of(s: &StairIn, idx: usize, for_section: bool, out: &mut Vec<Slab>) {
             column = Some(Slab { src: idx, monolith: true, z_bottom, z_top: s.z_top, pts });
         }
     }
-    if structure == BETON && (s.straight() || s.spiral()) && !for_section {
+    let riser = geo.riser_height;
+    let monolith = structure == MASSIV || structure == BETON;
+    // Podeste der Laufformen (die Wendel hat stattdessen ihr Auge, s. unten).
+    let landings: Vec<Slab> = if s.flights() {
+        landings_of(&geo)
+            .into_iter()
+            .map(|(pts, top_rise)| {
+                let top = z_bottom + top_rise;
+                Slab { src: idx, monolith, z_bottom: if structure == BETON { z_bottom.max(top - riser - CONCRETE_WAIST) } else { z_bottom }, z_top: top, pts }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    // Ortbeton: Läufe als glatte Laufplatten (`meshes_of`), hier nur Podeste und Säule; im Schnitt die
+    // Läufe in dünnen Scheiben bis zur Untersicht.
+    if structure == BETON && (s.flights() || s.spiral()) && !for_section {
+        out.extend(landings);
         out.extend(column);
         return;
     }
-    let riser = geo.riser_height;
     let open = structure != MASSIV;
-    let monolith = structure == MASSIV || structure == BETON;
     let nosing = if open { s.nosing } else { 0.0 };
     let treads: Vec<(Vec<P>, f64, f64)> =
         geo.treads.iter().map(|t| (t.pts.iter().map(pt).collect(), t.top_rise, t.base_rise)).collect();
     let neighbor_pts: Vec<Vec<P>> = treads.iter().map(|t| t.0.clone()).collect();
 
-    if structure == BETON && s.straight() && for_section && s.params.run_length > EPS {
-        let ax = RunAxes::of(s);
-        let run_length = s.params.run_length;
-        let waist_v = concrete_waist(riser);
-        let soffit = |run_s: f64| {
-            let t = run_s.max(0.0).min(run_length);
-            z_bottom.max(z_bottom + (t / run_length) * total_rise - waist_v)
-        };
-        let n = ((riser / SOFFIT_SLICE_STEP).ceil()).max(1.0);
+    if structure == BETON && s.flights() && for_section {
+        // Ansicht (`coarse`): ein Block je Tritt bis zur Untersicht an seiner Vorderkante.
+        let n = if coarse { 1.0 } else { ((riser / SOFFIT_SLICE_STEP).ceil()).max(1.0) };
         let n_int = n as usize;
-        for (pts, top_rise, _) in &treads {
-            if pts.len() < 4 {
-                continue;
-            }
-            let (a, b) = tread_edges(&ax, pts);
-            let top = z_bottom + top_rise;
-            for j in 0..n_int {
-                let t0 = j as f64 / n;
-                let t1 = (j + 1) as f64 / n;
-                let bottom = soffit(ax.run_of(lerp(a[0], b[0], t0)));
-                if top - bottom <= EPS {
+        for r in run_ranges(&geo) {
+            let Some((ax, len)) = run_axes(&geo, &r) else { continue };
+            let soffit = soffit_fn(s, &geo, &r, len);
+            for (pts, top_rise, _) in &treads[r] {
+                if pts.len() < 4 {
                     continue;
                 }
-                let quad = vec![lerp(a[0], b[0], t0), lerp(a[0], b[0], t1), lerp(a[1], b[1], t1), lerp(a[1], b[1], t0)];
-                out.push(Slab { src: idx, monolith, z_bottom: bottom, z_top: top, pts: quad });
+                let (a, b) = tread_edges(&ax, pts);
+                let top = z_bottom + top_rise;
+                for j in 0..n_int {
+                    let t0 = j as f64 / n;
+                    let t1 = (j + 1) as f64 / n;
+                    let bottom = soffit(ax.run_of(lerp(a[0], b[0], t0)));
+                    if top - bottom <= EPS {
+                        continue;
+                    }
+                    let quad = vec![lerp(a[0], b[0], t0), lerp(a[0], b[0], t1), lerp(a[1], b[1], t1), lerp(a[1], b[1], t0)];
+                    out.push(Slab { src: idx, monolith, z_bottom: bottom, z_top: top, pts: quad });
+                }
             }
         }
+        out.extend(landings);
         return;
     }
 
@@ -325,16 +400,20 @@ fn slabs_of(s: &StairIn, idx: usize, for_section: bool, out: &mut Vec<Slab>) {
             }
         }
     }
-    if let Some(landing) = &geo.landing {
-        if landing.len() >= 3 {
-            let landing_top = z_bottom + total_rise * 0.5;
-            out.push(Slab {
-                src: idx,
-                monolith,
-                z_bottom: if structure == BETON { z_bottom.max(landing_top - riser - CONCRETE_WAIST) } else { z_bottom },
-                z_top: landing_top,
-                pts: landing.iter().map(pt).collect(),
-            });
+    out.extend(landings);
+    // Wendel: Auge als Block bis zur halben Höhe (bisheriges Verhalten).
+    if s.spiral() {
+        if let Some(landing) = &geo.landing {
+            if landing.len() >= 3 {
+                let landing_top = z_bottom + total_rise * 0.5;
+                out.push(Slab {
+                    src: idx,
+                    monolith,
+                    z_bottom: if structure == BETON { z_bottom.max(landing_top - riser - CONCRETE_WAIST) } else { z_bottom },
+                    z_top: landing_top,
+                    pts: landing.iter().map(pt).collect(),
+                });
+            }
         }
     }
     out.extend(column);
@@ -445,57 +524,55 @@ fn meshes_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
     if s.structure == BETON && s.spiral() {
         return spiral_mesh(s, idx, out);
     }
-    if s.structure != BETON || !s.straight() || s.params.run_length <= EPS {
+    if s.structure != BETON || !s.flights() || s.params.run_length <= EPS {
         return;
     }
-    let Some((geo, total_rise)) = geometry_of(s) else { return };
+    let Some((geo, _)) = geometry_of(s) else { return };
     let z_bottom = s.z_bottom;
-    let ax = RunAxes::of(s);
-    let run_total = s.params.run_length;
-    let waist_v = concrete_waist(geo.riser_height);
-    let soffit_h = |run_s: f64| {
-        let t = run_s.max(0.0).min(run_total);
-        z_bottom.max(z_bottom + (t / run_total) * total_rise - waist_v)
-    };
-    let mut positions: Vec<f64> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    for tr in &geo.treads {
-        if tr.pts.len() < 4 {
-            continue;
+    // Je Lauf eine Laufplatte (gerade Treppe: eine; L/U/gerade mit Podest: eine je Lauf).
+    for r in run_ranges(&geo) {
+        let Some((ax, len)) = run_axes(&geo, &r) else { continue };
+        let soffit_h = soffit_fn(s, &geo, &r, len);
+        let mut positions: Vec<f64> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+        for tr in &geo.treads[r] {
+            if tr.pts.len() < 4 {
+                continue;
+            }
+            let pts: Vec<P> = tr.pts.iter().map(pt).collect();
+            let mut by_run = pts.clone();
+            by_run.sort_by(|a, b| cmp(ax.run_of(*a), ax.run_of(*b)));
+            let (start_edge, end_edge) = tread_edges(&ax, &pts);
+            let run_s = ax.run_of(by_run[0]).min(ax.run_of(by_run[1]));
+            let run_e = ax.run_of(by_run[2]).max(ax.run_of(by_run[3]));
+            let top_h = z_bottom + tr.top_rise;
+            let (b_s, b_e) = (soffit_h(run_s), soffit_h(run_e));
+            if top_h - b_s.max(b_e) <= EPS {
+                continue;
+            }
+            let base = (positions.len() / 3) as u32;
+            let mut push = |p: P, z: f64| positions.extend([p[0], p[1], z]);
+            push(start_edge[0], b_s);
+            push(start_edge[1], b_s);
+            push(end_edge[0], b_e);
+            push(end_edge[1], b_e);
+            push(start_edge[0], top_h);
+            push(start_edge[1], top_h);
+            push(end_edge[0], top_h);
+            push(end_edge[1], top_h);
+            let mut quad = |a: u32, b: u32, c: u32, d: u32| {
+                indices.extend([base + a, base + b, base + c, base + a, base + c, base + d])
+            };
+            quad(0, 1, 3, 2); // Untersicht
+            quad(4, 6, 7, 5); // Oberseite
+            quad(0, 4, 5, 1); // Startkante
+            quad(2, 3, 7, 6); // Endkante
+            quad(0, 2, 6, 4); // linke Wange
+            quad(1, 5, 7, 3); // rechte Wange
         }
-        let pts: Vec<P> = tr.pts.iter().map(pt).collect();
-        let mut by_run = pts.clone();
-        by_run.sort_by(|a, b| cmp(ax.run_of(*a), ax.run_of(*b)));
-        let (start_edge, end_edge) = tread_edges(&ax, &pts);
-        let run_s = ax.run_of(by_run[0]).min(ax.run_of(by_run[1]));
-        let run_e = ax.run_of(by_run[2]).max(ax.run_of(by_run[3]));
-        let top_h = z_bottom + tr.top_rise;
-        let (b_s, b_e) = (soffit_h(run_s), soffit_h(run_e));
-        if top_h - b_s.max(b_e) <= EPS {
-            continue;
+        if !indices.is_empty() {
+            out.push(Mesh { src: idx, positions, indices });
         }
-        let base = (positions.len() / 3) as u32;
-        let mut push = |p: P, z: f64| positions.extend([p[0], p[1], z]);
-        push(start_edge[0], b_s);
-        push(start_edge[1], b_s);
-        push(end_edge[0], b_e);
-        push(end_edge[1], b_e);
-        push(start_edge[0], top_h);
-        push(start_edge[1], top_h);
-        push(end_edge[0], top_h);
-        push(end_edge[1], top_h);
-        let mut quad = |a: u32, b: u32, c: u32, d: u32| {
-            indices.extend([base + a, base + b, base + c, base + a, base + c, base + d])
-        };
-        quad(0, 1, 3, 2); // Untersicht
-        quad(4, 6, 7, 5); // Oberseite
-        quad(0, 4, 5, 1); // Startkante
-        quad(2, 3, 7, 6); // Endkante
-        quad(0, 2, 6, 4); // linke Wange
-        quad(1, 5, 7, 3); // rechte Wange
-    }
-    if !indices.is_empty() {
-        out.push(Mesh { src: idx, positions, indices });
     }
 }
 
@@ -627,87 +704,124 @@ fn spiral_railing(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
     }
 }
 
-/// Handlauf und Pfosten einer L-Treppe: je Gehseite ein durchgehender Rohrzug (Lauf 1 ansteigend,
-/// Podest eben, Lauf 2 ansteigend; Podest-Ecken bei der Aussenseite, an der Innenecke Sprung um eine
-/// Steighöhe), runde Pfosten am Lauf-Anfang, auf jedem Tritt und auf den Podest-Ecken.
-fn l_railing(s: &StairIn, geo: &StairGeometry, idx: usize, out: &mut Vec<Mesh>) {
-    let Some(landing) = geo.landing.as_ref().filter(|l| l.len() == 4) else { return };
+/// Weg auf dem Rand eines Podests von `a` nach `b` (beide auf dem Rand), auf der Seite, die keinen der
+/// Punkte `avoid` berührt (die Gegenseite der Treppe); sonst der kürzere. `a` ≈ `b` ergibt `[a]`.
+fn boundary_arc(poly: &[P], a: P, b: P, avoid: &[P]) -> Vec<P> {
+    let near = |p: P, q: P| (p[0] - q[0]).abs() < 1e-6 && (p[1] - q[1]).abs() < 1e-6;
+    if near(a, b) {
+        return vec![a];
+    }
+    let mut ring: Vec<P> = poly.to_vec();
+    // Punkt auf den Rand legen: als Ecke vorhanden oder in die Kante einfügen; `None` = nicht auf dem Rand.
+    let place = |q: P, ring: &mut Vec<P>| -> Option<usize> {
+        if let Some(i) = ring.iter().position(|p| near(*p, q)) {
+            return Some(i);
+        }
+        let n = ring.len();
+        for i in 0..n {
+            let (p0, p1) = (ring[i], ring[(i + 1) % n]);
+            let (dx, dy) = (p1[0] - p0[0], p1[1] - p0[1]);
+            let l2 = dx * dx + dy * dy;
+            if !(l2 > 1e-18) {
+                continue;
+            }
+            let t = ((q[0] - p0[0]) * dx + (q[1] - p0[1]) * dy) / l2;
+            let f = [p0[0] + dx * t, p0[1] + dy * t];
+            if (0.0..=1.0).contains(&t) && hypot2(f[0] - q[0], f[1] - q[1]) < 1e-6 {
+                ring.insert(i + 1, q);
+                return Some(i + 1);
+            }
+        }
+        None
+    };
+    for q in avoid {
+        let _ = place(*q, &mut ring);
+    }
+    let (Some(_), Some(_)) = (place(a, &mut ring), place(b, &mut ring)) else { return vec![a, b] };
+    let n = ring.len();
+    let ia = ring.iter().position(|p| near(*p, a)).unwrap_or(0);
+    let ib = ring.iter().position(|p| near(*p, b)).unwrap_or(0);
+    let walk = |step: usize| {
+        let mut path = vec![ring[ia]];
+        let mut k = ia;
+        while k != ib {
+            k = (k + step) % n;
+            path.push(ring[k]);
+        }
+        path
+    };
+    let length = |p: &[P]| p.windows(2).map(|w| hypot2(w[1][0] - w[0][0], w[1][1] - w[0][1])).sum::<f64>();
+    let touches = |p: &[P]| p[1..p.len() - 1].iter().any(|q| avoid.iter().any(|x| near(*x, *q)));
+    let (fwd, bwd) = (walk(1), walk(n - 1));
+    match (touches(&fwd), touches(&bwd)) {
+        (false, true) => fwd,
+        (true, false) => bwd,
+        _ if length(&fwd) <= length(&bwd) => fwd,
+        _ => bwd,
+    }
+}
+
+/// Handlauf und Pfosten einer Treppe aus geraden Läufen mit Podesten (L, U, gerade mit Podest): je
+/// Gehseite ein durchgehender Rohrzug — Läufe ansteigend, über jedes Podest eben entlang seines Randes
+/// (aussen über die Ecken, innen um das Treppenauge), an der Podestkante Sprung um eine Steighöhe —
+/// runde Pfosten am Lauf-Anfang, auf jedem Tritt und auf den Ecken des Podestrandes.
+fn flight_railing(s: &StairIn, geo: &StairGeometry, idx: usize, out: &mut Vec<Mesh>) {
     let tr = &geo.treads;
-    // Lauf 2 beginnt dort, wo der Tritt-Index springt (Podest dazwischen).
-    let Some(split) = (1..tr.len()).find(|&k| tr[k].index != tr[k - 1].index + 1) else { return };
-    if tr.iter().any(|t| t.pts.len() < 4) {
+    let runs = run_ranges(geo);
+    let landings = landings_of(geo);
+    if runs.len() != landings.len() + 1 || tr.iter().any(|t| t.pts.len() < 4) {
         return;
     }
-    let landing: Vec<P> = landing.iter().map(pt).collect();
-    let z_land = s.z_bottom + tr[split].base_rise;
     let sides: &[bool] = match s.railing {
         3 => &[true, false],
         1 => &[true],
         _ => &[false],
     };
     let half = RAIL_THICK / 2.0;
+    let h = RAIL_HEIGHT;
     let near = |a: P, b: P| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
-    let closest = |p: P| {
-        (0..4)
-            .min_by(|&i, &j| {
-                let d = |k: usize| (landing[k][0] - p[0]).powi(2) + (landing[k][1] - p[1]).powi(2);
-                d(i).total_cmp(&d(j))
-            })
-            .unwrap_or(0)
-    };
     for &left in sides {
+        // Ecken je Tritt: 0 links vorn, 1 links hinten, 2 rechts hinten, 3 rechts vorn.
         let (i_start, i_end) = if left { (0, 1) } else { (3, 2) };
-        let start = pt(&tr[0].pts[i_start]);
-        let e = pt(&tr[split - 1].pts[i_end]);
-        let st2 = pt(&tr[split].pts[i_start]);
-        let end = pt(&tr[tr.len() - 1].pts[i_end]);
-        // Podest-Weg von der Lauf-1-Ecke zur Lauf-2-Ecke (kürzerer Bogen; bei Gleichstand über Ecke 2).
-        let (a, b) = (closest(e), closest(st2));
-        let mut corners = vec![landing[a]];
-        if a != b {
-            let fwd = (b + 4 - a) % 4;
-            let step = match fwd {
-                1 => 1,
-                3 => 3,
-                _ => if (a + 1) % 4 == 2 { 1 } else { 3 },
-            };
-            let mut k = a;
-            while k != b {
-                k = (k + step) % 4;
-                corners.push(landing[k]);
+        let (o_start, o_end) = if left { (3, 2) } else { (0, 1) };
+        let mut path: Vec<V3> = Vec::new();
+        let mut landing_posts: Vec<(P, f64)> = Vec::new();
+        let mut run_posts: Vec<(P, f64)> = Vec::new();
+        for (k, r) in runs.iter().enumerate() {
+            let (first, last) = (&tr[r.start], &tr[r.end - 1]);
+            let a = pt(&first.pts[i_start]);
+            let e = pt(&last.pts[i_end]);
+            path.push([a[0], a[1], s.z_bottom + first.base_rise + h]);
+            path.push([e[0], e[1], s.z_bottom + last.top_rise + h]);
+            if k == 0 {
+                run_posts.push((a, s.z_bottom + first.base_rise));
+            }
+            for t in &tr[r.clone()] {
+                run_posts.push((pt(&t.pts[i_end]), s.z_bottom + t.top_rise));
+            }
+            let Some((poly, top)) = landings.get(k) else { continue };
+            let next = &tr[runs[k + 1].start];
+            let b = pt(&next.pts[i_start]);
+            let avoid = [pt(&last.pts[o_end]), pt(&next.pts[o_start])];
+            let z_land = s.z_bottom + top;
+            for p in boundary_arc(poly, e, b, &avoid) {
+                path.push([p[0], p[1], z_land + h]);
+                landing_posts.push((p, z_land));
             }
         }
-        let h = RAIL_HEIGHT;
-        let mut path: Vec<V3> = vec![
-            [start[0], start[1], s.z_bottom + tr[0].base_rise + h],
-            [e[0], e[1], s.z_bottom + tr[split - 1].top_rise + h],
-        ];
-        for c in &corners {
-            path.push([c[0], c[1], z_land + h]);
-        }
-        path.push([st2[0], st2[1], z_land + h]);
-        path.push([end[0], end[1], s.z_bottom + tr[tr.len() - 1].top_rise + h]);
-        // doppelte Punkte (gleiche Lage und Höhe) entfernen; der Sprung an der Innenecke bleibt
+        // doppelte Punkte (gleiche Lage und Höhe) entfernen; der Sprung an der Podestkante bleibt
         path.dedup_by(|b, a| near([a[0], a[1]], [b[0], b[1]]) && (a[2] - b[2]).abs() < 1e-9);
         if let Some((positions, indices)) = tube_along(&path, half) {
             out.push(Mesh { src: idx, positions, indices });
         }
-        // Pfosten: Podest-Ecken zuerst, dann Lauf-Anfang und Tritte (ohne Doppelungen in der Lage)
-        let mut posts: Vec<(P, f64)> = corners.iter().map(|c| (*c, z_land)).collect();
-        posts.push((st2, z_land));
-        posts.push((start, s.z_bottom + tr[0].base_rise));
-        for t in tr {
-            posts.push((pt(&t.pts[i_end]), s.z_bottom + t.top_rise));
-        }
+        // Pfosten: Podestrand zuerst (Podesthöhe), dann Lauf-Anfang und Tritte (ohne Doppelungen in der Lage)
         let mut placed: Vec<P> = Vec::new();
-        for (p, z) in posts {
+        for (p, z) in landing_posts.into_iter().chain(run_posts) {
             if placed.iter().any(|q| near(*q, p)) {
                 continue;
             }
             placed.push(p);
-            if let Some((positions, indices)) =
-                tube_along(&[[p[0], p[1], z], [p[0], p[1], z + h]], half * 0.75)
-            {
+            if let Some((positions, indices)) = tube_along(&[[p[0], p[1], z], [p[0], p[1], z + h]], half * 0.75) {
                 out.push(Mesh { src: idx, positions, indices });
             }
         }
@@ -722,8 +836,8 @@ fn railings_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
         return spiral_railing(s, idx, out);
     }
     let Some((geo, _)) = geometry_of(s) else { return };
-    if s.params.shape == "L" {
-        return l_railing(s, &geo, idx, out);
+    if matches!(s.params.shape.as_str(), "L" | "U" | "straightLanding") {
+        return flight_railing(s, &geo, idx, out);
     }
     if !s.straight() {
         return;
@@ -767,11 +881,20 @@ fn railings_of(s: &StairIn, idx: usize, out: &mut Vec<Mesh>) {
 }
 
 pub fn slabs(buf: &[f64], for_section: bool) -> Vec<Slab> {
+    slabs_with(buf, for_section, false)
+}
+
+/// [151] Für die Ansicht: wie im Schnitt, Ortbeton-Läufe aber als ein Block je Tritt (Untersicht gestuft).
+pub fn slabs_coarse(buf: &[f64]) -> Vec<Slab> {
+    slabs_with(buf, true, true)
+}
+
+fn slabs_with(buf: &[f64], for_section: bool, coarse: bool) -> Vec<Slab> {
     let mut out = Vec::new();
     let Some(stairs) = decode(buf) else { return out };
     for (i, s) in stairs.iter().enumerate() {
         if let Some(s) = s {
-            slabs_of(s, i, for_section, &mut out);
+            slabs_of(s, i, for_section, coarse, &mut out);
         }
     }
     out
@@ -810,6 +933,7 @@ mod tests {
         vec![
             1.0, // eine Treppe
             0.0, 0.0, 0.0, 1.0, 0.0, 3.0, nan, nan, nan, nan, nan, nan, 1.0, 10.0, nan, 0.0, // Parameter
+            nan, nan, nan, nan, nan,
             0.0, 2.8, structure, 0.04, nosing, closed, railing, 0.0,
         ]
     }
@@ -858,6 +982,7 @@ mod tests {
         let nan = f64::NAN;
         vec![
             1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.5, turn, nan, nan, nan, nan, 1.0, 10.0, nan, 0.0,
+            nan, nan, nan, nan, nan,
             0.0, 2.8, 0.0, 0.04, 0.0, 0.0, railing, 0.0,
         ]
     }
@@ -895,7 +1020,7 @@ mod tests {
         let s = stairs[0].as_ref().unwrap();
         let (geo, _) = geometry_of(s).unwrap();
         let mut out = Vec::new();
-        l_railing(s, &geo, 0, &mut out);
+        flight_railing(s, &geo, 0, &mut out);
         let rail = &out[0];
         // Podesthöhe: Oberkante Podest + 0.9 kommt als Ebene im Handlauf vor
         let z_land = geo.treads.iter().find(|t| t.index > 2).unwrap().base_rise + RAIL_HEIGHT;
@@ -942,11 +1067,11 @@ mod tests {
         assert!(railings(&[1e300]).is_empty());
         // Steighöhe 0 und unendliche Höhen
         let mut flat = straight(1.0, 3.0, 0.0, 0.0);
-        flat[18] = 0.0;
-        flat[17] = 0.0;
+        flat[23] = 0.0;
+        flat[22] = 0.0;
         assert!(slabs(&flat, true).is_empty() && railings(&flat).is_empty());
         let mut inf = straight(1.0, 3.0, 0.0, 0.0);
-        inf[18] = f64::INFINITY;
+        inf[23] = f64::INFINITY;
         assert!(slabs(&inf, true).is_empty() && slab_meshes(&inf).is_empty());
         // Stufenzahl riesig
         let mut huge = straight(0.0, 0.0, 0.0, 0.0);
@@ -959,14 +1084,18 @@ mod tests {
         let nan = f64::NAN;
         let l = vec![
             1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.5, 1.0, nan, nan, nan, nan, 1.0, 10.0, nan, 0.0, // L
+            nan, nan, nan, nan, nan,
             0.0, 2.8, 0.0, 0.04, 0.0, 0.0, 0.0, 0.0,
         ];
         let s = slabs(&l, false);
         assert!(s.len() >= 10);
+        // [151] Podest auf der Antrittshöhe von Lauf 2: 9 Steigungen ohne Podest, Lauf 1 = round(9·2/3.5) = 5,
+        // Podest = 6. Steigung (vorher fälschlich halbe Steighöhe 1.4)
         let last = s.last().unwrap();
-        assert!((last.z_top - 1.4).abs() < 1e-9 && last.z_bottom == 0.0);
+        assert!((last.z_top - 6.0 * 0.28).abs() < 1e-9 && last.z_bottom == 0.0, "{}", last.z_top);
         let w = vec![
             1.0, 2.0, 1.0, 0.0, 1.0, 0.0, 1.0, nan, nan, 0.0, 0.0, 1.5, 270.0, 1.0, 12.0, nan, 0.0, // Wendel
+            nan, nan, nan, nan, nan,
             0.0, 2.8, 2.0, 0.04, 0.0, 0.0, 3.0, 0.0,
         ];
         assert!(!slabs(&w, false).is_empty());
@@ -977,6 +1106,7 @@ mod tests {
         let nan = f64::NAN;
         vec![
             1.0, 2.0, 1.0, 0.0, 1.0, 0.0, 1.0, nan, nan, 0.0, 0.0, 1.5, 270.0, 1.0, 12.0, nan, 0.0, // Wendel
+            nan, nan, nan, nan, nan,
             0.0, 2.8, structure, 0.04, 0.0, 0.0, railing, column,
         ]
     }
@@ -1099,5 +1229,133 @@ mod tests {
         assert!(col.pts.iter().all(|p| (p[0].hypot(p[1]) - 0.12).abs() < 1e-9));
         // auch bei Beton (Grundriss ohne Tritt-Prismen) und nur für Wendel
         assert_eq!(slabs(&spiral(1.0, 0.0, 0.12), false).len(), 1);
+    }
+
+    /// [151] U-Treppe: Start (0,0), +x, Läufe je 2.5 m, Linkswendung, Breite 1 m, Auge 0.2, 17 Steigungen
+    /// (Steighöhe 2.89), optional Mittellauf.
+    fn u_stair(structure: f64, railing: f64, mid: f64) -> Vec<f64> {
+        let nan = f64::NAN;
+        vec![
+            1.0, 3.0, 0.0, 0.0, 1.0, 0.0, 2.5, 2.5, 1.0, nan, nan, nan, nan, 1.0, 17.0, nan, 0.0,
+            0.2, nan, nan, mid, nan,
+            0.0, 2.89, structure, 0.04, 0.0, 0.0, railing, 0.0,
+        ]
+    }
+
+    /// Ringmitten eines Rohrs (je Profilring).
+    fn tube_centers(m: &Mesh) -> Vec<V3> {
+        let pos = &m.positions;
+        let ring = 3 * TUBE_SEGMENTS;
+        let n = (pos.len() / 3 - 2) / TUBE_SEGMENTS;
+        (0..n)
+            .map(|i| {
+                let (mut x, mut y, mut z) = (0.0, 0.0, 0.0);
+                for k in 0..TUBE_SEGMENTS {
+                    x += pos[i * ring + 3 * k];
+                    y += pos[i * ring + 3 * k + 1];
+                    z += pos[i * ring + 3 * k + 2];
+                }
+                let m = TUBE_SEGMENTS as f64;
+                [x / m, y / m, z / m]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn u_massiv_stufen_steigung_und_podesthoehe() {
+        let s = slabs(&u_stair(0.0, 0.0, f64::NAN), false);
+        assert_eq!(s.len(), 16 + 1); // 17 Steigungen − Podest = 16 Tritte, dazu das Podest
+        let h = 2.89 / 17.0;
+        let mut tops: Vec<f64> = s.iter().map(|x| x.z_top).collect();
+        tops.sort_by(f64::total_cmp);
+        // jede Oberkante eine Steigung über der vorigen (Podest = 9. Steigung), letzte = Geschoss oben
+        for (k, z) in tops.iter().enumerate() {
+            assert!((z - (k + 1) as f64 * h).abs() < 1e-9, "{k}: {z}");
+        }
+        let land = s.last().unwrap();
+        assert!((land.z_top - 9.0 * h).abs() < 1e-9 && land.pts.len() == 4);
+        // Podest über beide Läufe und das Auge: 1 m tief, 2.2 m breit
+        let area: f64 = (0..4).map(|i| {
+            let (a, b) = (land.pts[i], land.pts[(i + 1) % 4]);
+            a[0] * b[1] - b[0] * a[1]
+        }).sum::<f64>() / 2.0;
+        assert!((area.abs() - 2.2).abs() < 1e-9, "{area}");
+        // Mittellauf: zwei Podeste (Antrittshöhe des folgenden Laufs)
+        let m = slabs(&u_stair(0.0, 0.0, 2.0), false);
+        assert_eq!(m.len(), 15 + 2);
+        let lands: Vec<&Slab> = m.iter().filter(|x| x.pts.len() == 4 && (x.pts[0][0] - x.pts[1][0]).abs() + (x.pts[0][1] - x.pts[1][1]).abs() > 0.0).filter(|x| x.z_top > 0.0).collect();
+        assert!(lands.len() >= 2);
+    }
+
+    #[test]
+    fn u_beton_laufplatten_je_lauf_mit_volumen() {
+        let b = u_stair(1.0, 0.0, f64::NAN);
+        let m = slab_meshes(&b);
+        assert_eq!(m.len(), 2, "eine Laufplatte je Lauf");
+        // Grundriss/3D: nur das Podest als Platte; im Schnitt Scheiben bis zur Untersicht + Podest
+        let s = slabs(&b, false);
+        assert_eq!(s.len(), 1);
+        assert!(slabs(&b, true).len() > 16);
+        // Lauf 2 (8 Tritte à 2.5/8, Steigung h, Laufplatte senkrecht w): Volumen = n·a·(h/2 + w)·Breite
+        let h = 2.89 / 17.0;
+        let w = concrete_waist(h);
+        let v2 = volume(&m[1]);
+        assert!((v2 - 2.5 * (h / 2.0 + w)).abs() < 1e-6, "{v2}");
+        // Lauf 1 knapp weniger (Untersicht am Antritt auf die UK gekappt)
+        let v1 = volume(&m[0]);
+        assert!(v1 > 0.0 && v1 < v2, "{v1} {v2}");
+        // Podestplatte unter der Podest-Oberkante: Steigung + Plattenstärke
+        assert!((s[0].z_top - 9.0 * h).abs() < 1e-9 && (s[0].z_top - s[0].z_bottom - h - CONCRETE_WAIST).abs() < 1e-9);
+    }
+
+    #[test]
+    fn u_gelaender_um_das_auge_lueckenlos() {
+        for mid in [f64::NAN, 2.0] {
+            let both = railings(&u_stair(2.0, 3.0, mid));
+            let left = railings(&u_stair(2.0, 1.0, mid));
+            let right = railings(&u_stair(2.0, 2.0, mid));
+            assert_eq!(both.len(), left.len() + right.len());
+            for (rail, inner) in [(&left[0], true), (&right[0], false)] {
+                let c = tube_centers(rail);
+                for w in c.windows(2) {
+                    let d = ((w[0][0] - w[1][0]).powi(2) + (w[0][1] - w[1][1]).powi(2) + (w[0][2] - w[1][2]).powi(2)).sqrt();
+                    assert!(d > 1e-6 && d < 3.0, "Lücke {d}");
+                }
+                // Anfang 0.9 über dem Antritt, Ende 0.9 über der Austrittskante, beide auf der Laufseite
+                assert!((c[0][2] - 0.9).abs() < 1e-9 && (c[c.len() - 1][2] - (2.89 + 0.9)).abs() < 1e-9);
+                assert!(c[0][0].abs() < 1e-9 && c[c.len() - 1][0].abs() < 1e-9);
+                if inner {
+                    // links = Innenseite (Linkswendung): Handlauf quert das Auge (y 0.5 … 0.7) am Podestrand
+                    assert!(c.iter().all(|p| p[0] <= 2.5 + 1e-9 || mid.is_finite()));
+                    assert!(c.iter().any(|p| (p[1] - 0.5).abs() < 1e-9) && c.iter().any(|p| (p[1] - 0.7).abs() < 1e-9));
+                } else {
+                    // rechts = Aussenseite: über die äusseren Podestecken (x = 3.5, y = −0.5 und 1.7)
+                    assert!(c.iter().any(|p| (p[0] - 3.5).abs() < 1e-9 && (p[1] + 0.5).abs() < 1e-9));
+                    assert!(c.iter().any(|p| (p[0] - 3.5).abs() < 1e-9 && (p[1] - 1.7).abs() < 1e-9));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gerade_mit_podest_massiv_und_beton() {
+        let nan = f64::NAN;
+        let b = |structure: f64| {
+            vec![
+                1.0, 4.0, 0.0, 0.0, 1.0, 0.0, 2.0, 2.0, nan, nan, nan, nan, nan, 1.0, 16.0, nan, 0.0,
+                nan, 1.2, 8.0, nan, nan,
+                0.0, 2.8, structure, 0.04, 0.0, 0.0, 3.0, 0.0,
+            ]
+        };
+        let s = slabs(&b(0.0), false);
+        assert_eq!(s.len(), 15 + 1);
+        let land = s.last().unwrap();
+        assert!((land.z_top - 9.0 * 0.175).abs() < 1e-9);
+        assert!(land.pts.iter().all(|p| (p[0] - 2.0).abs() < 1e-9 || (p[0] - 3.2).abs() < 1e-9));
+        assert_eq!(slab_meshes(&b(1.0)).len(), 2);
+        let r = railings(&b(0.0));
+        assert!(!r.is_empty());
+        let c = tube_centers(&r[0]);
+        assert!((c[c.len() - 1][0] - 5.2).abs() < 1e-9 && (c[c.len() - 1][2] - 3.7).abs() < 1e-9);
     }
 }

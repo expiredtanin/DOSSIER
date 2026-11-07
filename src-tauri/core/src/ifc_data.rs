@@ -386,6 +386,17 @@ fn cross_extent(wall: &Wall, bands: &[&RWall]) -> (f64, f64) {
 /// Kontrollpunkte bzw. des Wendel-Kreises, um die halbe Laufbreite erweitert).
 fn stair_footprint(st: &Stair) -> Vec<Vec2> {
     let half_w = max(st.width, 0.0) / 2.0;
+    // [151] U / gerade mit Podest: Box um die Aussenlinie.
+    if matches!(st.shape, StairShape::U | StairShape::StraightLanding) {
+        if let Some(poly) = crate::stair::decode_params(&st.encode()).and_then(|p| kernel2d::stair_outline(&p).polygon) {
+            let (mut lo, mut hi) = (Vec2 { x: f64::INFINITY, y: f64::INFINITY }, Vec2 { x: f64::NEG_INFINITY, y: f64::NEG_INFINITY });
+            for q in &poly {
+                lo = Vec2 { x: min(lo.x, q.x), y: min(lo.y, q.y) };
+                hi = Vec2 { x: max(hi.x, q.x), y: max(hi.y, q.y) };
+            }
+            return vec![lo, Vec2 { x: hi.x, y: lo.y }, hi, Vec2 { x: lo.x, y: hi.y }];
+        }
+    }
     if st.shape == StairShape::Straight {
         let u = normalize(st.dir);
         let n = left_normal(u);
@@ -1127,11 +1138,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let (z_bottom, z_top) = p.stair_vertical_extent(st);
         let structure = structure_of(&st.floor_id);
         classified.push((format!("stair/{}", st.id), Kind::Stair, st.category_code.clone()));
-        let predefined = match st.shape {
-            StairShape::Straight => "STRAIGHT_RUN_STAIR",
-            StairShape::Spiral => "SPIRAL_STAIR",
-            _ => "QUARTER_TURN_STAIR",
-        };
+        let predefined = crate::ifc_stairs::stair_predefined(st);
         let base = base_of(structure);
         p.stairs = Some(vec![st.clone()]);
         let parts = stair_parts(&p, st, base);
@@ -1424,17 +1431,14 @@ fn w_stair(f: &mut Flat, structure: f64, id: &str, predefined: &str, footprint: 
             }
         }
     }
-    match &parts.landing {
-        Some(l) => {
-            let n = f.str("Podest");
-            f.nums(&[1.0, n]);
-            w_pts(f, &l.pts);
-            f.nums(&[l.z_rel, l.depth]);
-            w_psets(f, &qto("Qto_SlabBaseQuantities", l.quantities.clone()));
-        }
-        None => {
-            f.num(0.0);
-        }
+    // Podeste: Anzahl, dann je Podest (ein Podest heisst „Podest“, mehrere „Podest 1“, „Podest 2“).
+    f.num(parts.landings.len() as f64);
+    for (k, l) in parts.landings.iter().enumerate() {
+        let n = f.str(&if parts.landings.len() > 1 { format!("Podest {}", k + 1) } else { "Podest".to_string() });
+        f.num(n);
+        w_pts(f, &l.pts);
+        f.nums(&[l.z_rel, l.depth]);
+        w_psets(f, &qto("Qto_SlabBaseQuantities", l.quantities.clone()));
     }
     match &parts.rail {
         Some(r) => {

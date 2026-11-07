@@ -297,6 +297,24 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             })
             .into()
         }
+        // [151] Parameter-Griff einer Podesttreppe (Lauflängen, Podesttiefe, Auge/Drehsinn).
+        "stairParam" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("stairs", r.s("id"), &|s| {
+                let st: crate::model::Stair = serde_json::from_value(s.clone()).ok()?;
+                let i = index_in(index, 3)?;
+                let changes = crate::grip_drag::stair_param_drag(&st.encode(), i, (x, y));
+                if changes.is_empty() {
+                    return None;
+                }
+                let mut out = s.clone();
+                for (k, v) in changes {
+                    out = with(&out, k, js_num(v));
+                }
+                Some(out)
+            })
+            .into()
+        }
         "roomBy" => {
             let (dx, dy) = r.p("delta");
             patch("rooms", r.s("id"), &|rm| {

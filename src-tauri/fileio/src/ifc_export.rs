@@ -66,7 +66,7 @@
 //     IfcOpeningElement = Profil-Extrusion entlang z_dir (Position origin/x_dir/z_dir) im Geschoss-
 //     Placement, IfcRelVoidsElement zum Wirt; IfcWindow/IfcDoor mit dem Netz, IfcRelFillsElement.
 //   STAIR       = 5, structure, id, predefined (Text), PTS, z_rel, depth (Ersatzkörper, nur ohne Läufe/Podest),
-//                 PSETS, n_flights, FLIGHT × n_flights, has_landing, [LANDING], has_rail, [RAIL],
+//                 PSETS, n_flights, FLIGHT × n_flights, n_landings, LANDING × n_landings, has_rail, [RAIL],
 //                 has_column, [COLUMN]
 //     FLIGHT  = name, n_risers, n_treads, riser_height, tread_length, predefined (Text, IfcStairFlightTypeEnum),
 //               PSETS, shape (0 = Extrusionen, 1 = Dreiecks-Mesh), 0: n, (PTS, z_rel, depth) × n | 1: MESH
@@ -1901,13 +1901,16 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 for _ in 0..r.idx()? {
                     flights.push(r.stair_flight()?);
                 }
-                let landing = if r.flag()? { Some(r.stair_landing()?) } else { None };
+                let mut landings = Vec::new();
+                for _ in 0..r.idx()? {
+                    landings.push(r.stair_landing()?);
+                }
                 let rail = if r.flag()? { Some(r.stair_rail()?) } else { None };
                 let column = if r.flag()? { Some(r.stair_landing()?) } else { None };
                 let key = format!("stair/{id}");
                 let parent = w.placement_of(structure);
                 let g = w.gid(&key);
-                let entity = if flights.is_empty() && landing.is_none() && rail.is_none() && column.is_none() {
+                let entity = if flights.is_empty() && landings.is_empty() && rail.is_none() && column.is_none() {
                     // Ohne Teile: ein Ersatzkörper (Fussabdruck) wie bisher.
                     let (placement, shape) = w.emit_box_product(&pts, z_rel, depth, parent);
                     w.emit_building_element("IFCSTAIR", g, "Treppe", placement, shape, Some(enum_(&predefined)))
@@ -1949,9 +1952,10 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                         }
                         parts.push(flight);
                     }
-                    if let Some(l) = &landing {
+                    for (k, l) in landings.iter().enumerate() {
                         let (placement, shape) = w.emit_box_product(&l.pts, l.z_rel, l.depth, stair_placement);
-                        let lkey = format!("{key}/landing");
+                        // erstes Podest mit dem bisherigen Schlüssel (stabile GlobalId)
+                        let lkey = if k == 0 { format!("{key}/landing") } else { format!("{key}/landing/{k}") };
                         let guid = w.gid(&lkey);
                         let slab = w.emit_building_element("IFCSLAB", guid, &l.name, placement, shape, Some(enum_("LANDING")));
                         for p in &l.psets {

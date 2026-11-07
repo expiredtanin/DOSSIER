@@ -255,7 +255,9 @@ fn stair_shape(e: &Value) -> Option<Shape> {
     let t = |q: &kernel2d::Vec2| (q.x, q.y);
     if let Some(poly) = o.polygon {
         let mut sh = Shape::new(poly.iter().map(t).collect(), true, None);
-        if let Some(l) = kernel2d::stair_geometry(&sp, 3.0).landing {
+        let g = kernel2d::stair_geometry(&sp, 3.0);
+        // Podest(e): L/gerade mit Podest/U eines, U mit Mittellauf zwei ([151]).
+        for l in g.landing.iter().chain(g.landing2.iter()) {
             sh.more.push(l.iter().map(t).collect());
         }
         return Some(sh);

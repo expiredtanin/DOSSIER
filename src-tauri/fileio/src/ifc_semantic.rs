@@ -205,11 +205,12 @@ pub struct Roof {
     pub parts: Vec<u64>,
 }
 
-/// Treppe ([B4]) aus IfcStair/IfcStairFlight: gerade, L (Podest an der Ecke) oder Wendel.
+/// Treppe ([B4]) aus IfcStair/IfcStairFlight: gerade, L (Podest an der Ecke), Wendel, U (Halbpodest
+/// oder Mittellauf) oder gerade mit Zwischenpodest ([151]).
 #[derive(Clone, Debug, Default)]
 pub struct Stair {
     pub info: Info,
-    /// Dossier-Grundform: "straight", "L", "spiral".
+    /// Dossier-Grundform: "straight", "L", "spiral", "U", "straightLanding".
     pub shape: &'static str,
     /// Mitte der Antrittskante (unten); Wendel: Punkt der Lauflinie an der Antrittskante.
     pub start: V2,
@@ -228,6 +229,13 @@ pub struct Stair {
     pub radius: f64,
     pub sweep_deg: f64,
     pub center_column: f64,
+    /// [151] U: Treppenauge; U/gerade mit Podest: Podesttiefe; L/U/gerade mit Podest: Tritte Lauf 1 (0 =
+    /// nach Lauflängen); U: Tritte im Mittellauf (0 = Halbpodest), Versatz des letzten Laufs.
+    pub gap: f64,
+    pub landing_length: f64,
+    pub run1_steps: usize,
+    pub mid_steps: usize,
+    pub run2_offset: f64,
 }
 
 /// Träger ([B4], IfcBeam) als senkrechtes Prisma: Dossier-Extrusionskörper (Grundriss + Höhe).
@@ -1423,19 +1431,44 @@ fn stairs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64,
                         ..Default::default()
                     })
                 }
-                Err(_) => crate::ifc_shapes::fit_l_stair(&meshes).and_then(|l| {
-                    // Dossier: Lauf 1 = n1 Tritte, Podest = ein Tritt, Lauf 2 bis zum Austritt; die Aufteilung der
-                    // Stufen auf die Läufe folgt den Lauflängen und muss die der Datei ergeben.
-                    let z_top = l.z0 + l.riser * (l.n1 + 1 + l.n2) as f64;
-                    let s2 = if l.top_is_exit || elevations.iter().any(|z| (z - z_top).abs() <= 0.02) { l.n2 } else { l.n2 + 1 };
-                    let (run1, run2) = (l.going1 * l.n1 as f64, l.going2 * s2 as f64);
-                    let body = (l.n1 + s2) as f64;
-                    if (body * run1 / (run1 + run2)).round() as usize != l.n1 || s2 < 1 {
-                        return Err(crate::ifc_shapes::R_STAIR_TURN);
-                    }
-                    let steps = l.n1 + 1 + s2;
-                    Ok(Stair { shape: "L", start: l.start, dir: l.dir, run_length: run1, width: l.width, step_count: steps, z0: l.z0, total_rise: l.riser * steps as f64, run2_length: run2, turn: l.turn, ..Default::default() })
-                }),
+                Err(_) => crate::ifc_shapes::fit_l_stair(&meshes)
+                    .and_then(|l| {
+                        // Dossier: Lauf 1 = n1 Tritte (`run1Steps`), Podest = ein Tritt, Lauf 2 bis zum Austritt.
+                        let z_top = l.z0 + l.riser * (l.n1 + 1 + l.n2) as f64;
+                        let s2 = if l.top_is_exit || elevations.iter().any(|z| (z - z_top).abs() <= 0.02) { l.n2 } else { l.n2 + 1 };
+                        if s2 < 1 {
+                            return Err(crate::ifc_shapes::R_STAIR_TURN);
+                        }
+                        let (run1, run2) = (l.going1 * l.n1 as f64, l.going2 * s2 as f64);
+                        let steps = l.n1 + 1 + s2;
+                        Ok(Stair { shape: "L", start: l.start, dir: l.dir, run_length: run1, width: l.width, step_count: steps, z0: l.z0, total_rise: l.riser * steps as f64, run2_length: run2, turn: l.turn, run1_steps: l.n1, ..Default::default() })
+                    })
+                    .or_else(|why_l| {
+                        // [151] U (Halbpodest/Mittellauf) und gerade mit Zwischenpodest; jedes Podest = eine Steigung.
+                        let t = crate::ifc_shapes::fit_turn_stair(&meshes).map_err(|why| if why == crate::ifc_shapes::R_STAIR_FORM { why_l } else { why })?;
+                        let below_last = t.n1 + 1 + if t.n_mid > 0 { t.n_mid + 1 } else { 0 };
+                        let z_top = t.z0 + t.riser * (below_last + t.n2) as f64;
+                        let s2 = if t.top_is_exit || elevations.iter().any(|z| (z - z_top).abs() <= 0.02) { t.n2 } else { t.n2 + 1 };
+                        let steps = below_last + s2;
+                        Ok(Stair {
+                            shape: t.shape,
+                            start: t.start,
+                            dir: t.dir,
+                            run_length: t.going1 * t.n1 as f64,
+                            width: t.width,
+                            step_count: steps,
+                            z0: t.z0,
+                            total_rise: t.riser * steps as f64,
+                            run2_length: t.going2 * s2 as f64,
+                            turn: t.turn,
+                            gap: t.gap,
+                            landing_length: t.landing,
+                            run1_steps: t.n1,
+                            mid_steps: t.n_mid,
+                            run2_offset: t.offset,
+                            ..Default::default()
+                        })
+                    }),
             },
         };
         match fit {
@@ -1842,6 +1875,7 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
     for st in &s.stairs {
         let nums = vec![
             st.start[0], st.start[1], st.dir[0], st.dir[1], st.run_length, st.width, st.step_count as f64, st.z0, st.total_rise, st.run2_length, st.turn, st.center[0], st.center[1], st.radius, st.sweep_deg, st.center_column,
+            st.gap, st.landing_length, st.run1_steps as f64, st.mid_steps as f64, st.run2_offset,
         ];
         push("stair", &st.info, json!({ "shape": st.shape }), nums, &mut data);
     }

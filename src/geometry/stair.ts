@@ -11,7 +11,7 @@ import { core } from "../engine/coreWasm";
 export const IDEAL_TREAD = 0.29;
 export const MIN_STEPS = 2;
 
-const FORM = { straight: 0, L: 1, spiral: 2 } as const;
+const FORM = { straight: 0, L: 1, spiral: 2, U: 3, straightLanding: 4 } as const;
 const REFERENZ = { mitte: 0, links: 1, rechts: 2 } as const;
 
 const pt = (f: Float64Array, i: number): Vec2 => ({ x: f[i], y: f[i + 1] });
@@ -22,7 +22,7 @@ function ptsAt(f: Float64Array, i: number, n: number): Vec2[] {
   return out;
 }
 
-/** Treppen-Parameter als 16 Zahlen (Aufbau: `src-tauri/core/src/stair.rs`); fehlend = NaN. */
+/** Treppen-Parameter als 21 Zahlen (Aufbau: `src-tauri/core/src/stair.rs`); fehlend = NaN. */
 export function encodeStair(s: Stair): Float64Array {
   const n = (v: number | undefined) => (v === undefined ? Number.NaN : v);
   return Float64Array.of(
@@ -39,6 +39,12 @@ export function encodeStair(s: Stair): Float64Array {
     s.stepCount,
     s.up === undefined ? Number.NaN : s.up ? 1 : 0,
     REFERENZ[s.referenz ?? "mitte"] ?? 0,
+    // [151] U / gerade mit Podest
+    n(s.gap),
+    n(s.landingLength),
+    n(s.run1Steps),
+    n(s.midSteps),
+    n(s.run2Offset),
   );
 }
 
@@ -58,6 +64,7 @@ export interface SpiralOutlineSegments {
  * Aussenlinie einer Treppe im Grundriss je nach Form:
  *   • gerade → geschlossenes Rechteck als Polygon-Punkte.
  *   • L       → L-Polygon via Linien-Schnittpunkten.
+ *   • U / gerade mit Podest → Umriss um Läufe und Podest(e), bei U innen um das Auge.
  *   • Wendel  → `SpiralOutlineSegments` (Bögen + radiale Linien).
  *
  * Genau einer von `polygon` / `spiral` ist nicht null (bei Unsinn-Eingabe beide null).
