@@ -3617,11 +3617,6 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Blöcke/Körper (geschlossene 2D-Formen der Kategorie „Möbel" sparen nicht aus); Deckenspiegel-Untersicht unverändert
   (0.1 mm, alte Ausdünnung); Level-Feld nur über Ansichtsvorlage einstellbar (kein eigenes Feld im Ebenen-Panel); nur
   Linux, nicht in der Tauri-App/Metal angesehen. · S
-  unverändert), CLI + Chromium-Bilder (Musterhaus, komplex EG/OG). **Offen:** Schiebe-/Hebeschiebetüren werden Fenster
-  (Symbol ohne Bogen), Türen mit Futter/Zarge breiter als der Bogen bleiben Durchbruch + „Türbogen ohne Lücke“, Türen in
-  Bogenwänden, Stösse von Bogenwänden untereinander, schräg anstossende Enden in einer Wandfläche, Stützen/Treppen/Decken,
-  Blöcke (INSERT) werden schon beim Import aufgelöst (Tür-Blöcke als Linien), Brüstungs-/Sturzhöhen nicht aus 2D ableitbar;
-  nur Linux-Container, nicht in der Tauri-App geklickt (kein Knopf in der Werkzeugleiste, nur Befehlszeile).
 - ◐ **[157] Plan-Review Musterhaus komplex (Schweizer Praxis).** (7.11.) Alle Grundrisse UG/EG/OG/DG 1:100 und 1:50,
   Schnitte A-A/B-B 1:100/1:50, vier Ansichten 1:100, Situation (EG 1:500) als CLI-SVG mit `--hatch` in Chromium angesehen,
   Ausschnitte in Originalgrösse. **Behoben** (Kern, je ein Test): (1) helle Haarfugen zwischen aneinanderstossenden
