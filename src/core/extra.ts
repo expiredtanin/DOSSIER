@@ -88,3 +88,5 @@ export { lineEndsOf, lineEndsCode, lineEndsFromCode, lineEndsSvgAttrs, planLineE
 export type { LineEnds } from "../model/lineEnds";
 export type { LineCap, LineJoin } from "../model/types";
 export { standardOverrideRules } from "../model/standards";
+export { recognizeMutation, recognizeReport, recognizeSourceLevels } from "../io/recognizeDrawing";
+export type { RecognizeOptions, RecognizeReport, RecognizeUnclear } from "../io/recognizeDrawing";

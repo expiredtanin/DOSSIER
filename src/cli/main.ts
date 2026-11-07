@@ -26,6 +26,9 @@
 //                                                  Bauteile ([B4]); Bericht als JSON auf stdout
 //   dossier-cli <projekt.obp> import-mesh <datei.obj|stl|gltf|glb|ply> [--out neu.obp] [--unit mm|cm|m|inch|foot] [--up z|y|auto]
 //                                                  [--placement center|original]   3D-Modell als Kontext-Meshes; Bericht als JSON
+//   dossier-cli <projekt.obp> erkennen [--level EG] [--source ebene] [--out neu.obp]
+//                                                  [154] Bauteile aus 2D-Zeichnung erkennen (Wände, Öffnungen, Räume
+//                                                  ins Geschoss); Bericht als JSON. Z. B. convert plan.dxf p.obp --cmd "erkennen --out e.obp"
 //   dossier-cli <projekt.obp> model3d [--explode 3] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
 //                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
@@ -119,6 +122,9 @@ import {
   withDocument,
   AI_BRIDGE_DEFAULT_PORT,
   standardOverrideRules,
+  recognizeMutation,
+  recognizeReport,
+  recognizeSourceLevels,
 } from "../core";
 import type { Project } from "../core";
 import { serveStdio } from "./mcp";
@@ -363,7 +369,7 @@ export async function run(argv: string[]): Promise<number> {
   if (file === "mcp" && args.flags.has("app")) return runAppBridge(args);
   if (!file || (!command && args.cmds.length === 0)) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|step|obj|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d> [Optionen]\n" +
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|erkennen|step|obj|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d> [Optionen]\n" +
         "        dossier-cli convert <eingabe.dxf|dwg|ifc|pdf|obj|stl|gltf|glb|ply|obp> <ausgabe.obp|dxf|dwg|ifc|obj|stl|glb|gltf|step> [--cmd \"befehl …\"]…\n" +
         "        dossier-cli <projekt.obp> --cmd \"befehl …\" [--cmd …]   ({last} = zuletzt geschriebene Datei)\n" +
         "        dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n" +
@@ -870,6 +876,24 @@ async function execute(project: Project, file: string, command: string, rest: st
       process.stdout.write(JSON.stringify(r.report, null, 2) + "\n");
       const target = args.flags.get("out");
       if (target) out(args, serializeProject(r.next), target);
+      return 0;
+    }
+    case "erkennen": {
+      // [154] Quelle: --source (Ebene, id oder Name), sonst die Zeichnung des Geschosses, sonst die erste Ebene mit Zeichnung.
+      const lvl = findLevel(project, ["floor"], args.flags.get("level"));
+      if (!lvl) fail("Geschoss nicht gefunden");
+      const sources = recognizeSourceLevels(project);
+      const want = args.flags.get("source")?.toLowerCase();
+      const src = want
+        ? project.drawingLevels.find((l) => l.id.toLowerCase() === want || l.name.toLowerCase() === want)?.id
+        : sources.includes(lvl.id)
+          ? lvl.id
+          : sources[0];
+      if (!src) fail("erkennen: keine 2D-Zeichnung (--source)");
+      const opts = { levelId: lvl.id, floorHeight: lvl.floorHeight, sourceLevelId: src, wallTypeId: project.wallTypes[0]?.id, typeName: "Wand {cm} cm (erkannt)" };
+      process.stdout.write(JSON.stringify(recognizeReport(project, opts), null, 2) + "\n");
+      const target = args.flags.get("out");
+      if (target) out(args, serializeProject(recognizeMutation(opts)(project)), target);
       return 0;
     }
     case "import-mesh": {
