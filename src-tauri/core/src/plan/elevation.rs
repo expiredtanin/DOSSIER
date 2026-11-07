@@ -1466,6 +1466,22 @@ fn encode_shadow_faces(faces: &[&Face]) -> Vec<f64> {
     b
 }
 
+/// [157] Wie [`encode_shadow_faces`] für Werfer, mit der kleinsten Tiefe am linken und am rechten Ende (u).
+fn encode_shadow_casters(faces: &[&Face]) -> Vec<f64> {
+    let mut b = vec![faces.len() as f64];
+    for f in faces {
+        let (u0, u1) = f.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, z), q| (a.min(q[0]), z.max(q[0])));
+        let tol = 1e-6 * (1.0 + (u1 - u0).abs());
+        let at = |u: f64| f.pts.iter().zip(&f.pd).filter(|(q, _)| (q[0] - u).abs() <= tol).map(|(_, d)| *d).fold(f64::INFINITY, f64::min);
+        let (dl, dr) = if f.pd.len() == f.pts.len() { (at(u0), at(u1)) } else { (f.depth_min, f.depth_min) };
+        b.extend([f.depth, f.depth_min, dl, dr, f.pts.len() as f64]);
+        for q in &f.pts {
+            b.extend(q);
+        }
+    }
+    b
+}
+
 /// Eintrag des Painter-Stroms.
 struct Item {
     depth: f64,
@@ -1632,6 +1648,12 @@ fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpening], frame:
         // Runde Stützen ([132]): Mantelfacetten ohne Fugen (eigene Gruppen hinter denen der Bogenwände).
         if f.role == Role::Column {
             h.smooth = round_cols.get(f.id.as_str()).map_or(0, |i| arc_ids.len() as u32 + 1 + i);
+        }
+        // [157] Decken: Stirnfacetten eines gekrümmten Randes (Erker als Vieleck) ohne Fugen, eine Gruppe je Decke;
+        // echte Ecken (über dem Knickwinkel) bleiben Kanten.
+        if f.role == Role::Slab && !f.id.is_empty() {
+            let next = mesh_groups.len() as u32;
+            h.smooth = *mesh_groups.entry(f.id.as_str()).or_insert(arc_ids.len() as u32 + round_cols.len() as u32 + 1 + next);
         }
         // [152] Importierte Netze: Facetten innerhalb des Knickwinkels glätten (eine Gruppe je Netz), offene beidseitig.
         if f.role == Role::Mesh {
@@ -1956,7 +1978,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         let wall_faces: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Wall).collect();
         let mut casters: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Slab).collect();
         casters.extend(faces.iter().filter(|f| f.role == Role::Roof));
-        let f = crate::plan::elevation_geom::shadows(&encode_shadow_faces(&wall_faces), &encode_shadow_faces(&casters));
+        let f = crate::plan::elevation_geom::shadows(&encode_shadow_faces(&wall_faces), &encode_shadow_casters(&casters));
         let mut i = 1;
         for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
             let depth = f[i];
@@ -2574,6 +2596,43 @@ mod tests {
         let w = view("w");
         let ridge_under = 7.5 - 0.3 * 2f64.sqrt();
         assert!((wall_top(&w, "WW") - ridge_under).abs() < 1e-6, "{}", wall_top(&w, "WW"));
+    }
+
+    /// [157] Decke mit gekrümmtem Rand (Erker, als Vieleck): keine Fugen zwischen den Facetten der Stirn, die
+    /// Ober- und Unterkante laufen durch.
+    #[test]
+    fn deckenstirn_bogen_ohne_facettenfugen() {
+        let mut p = sample();
+        p.walls.clear();
+        p.openings = Some(vec![]);
+        p.roofs = Some(vec![]);
+        p.stairs = Some(vec![]);
+        let mut ce = p.ceilings.as_ref().unwrap()[0].clone();
+        let mut outline = vec![Vec2 { x: 0.0, y: 4.0 }, Vec2 { x: 0.0, y: 0.0 }];
+        for k in 0..=12 {
+            let t = std::f64::consts::PI * (1.0 + k as f64 / 12.0);
+            outline.push(Vec2 { x: 3.0 + 1.5 * t.cos(), y: 1.5 * t.sin() });
+        }
+        outline.extend([Vec2 { x: 6.0, y: 0.0 }, Vec2 { x: 6.0, y: 4.0 }]);
+        ce.outline = outline;
+        p.ceilings = Some(vec![ce]);
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        let lines: Vec<(Vec2, Vec2)> = prims.iter().filter_map(|q| match q { Primitive::Line { a, b, cls, .. } if cls.starts_with("elevation-") && cls != "elevation-ground" => Some((*a, *b)), _ => None }).collect();
+        // Ansichts-x = Welt-x + 1: Bogen von 2.5 bis 5.5; innen keine senkrechten Fugen.
+        let inner: Vec<f64> = lines.iter().filter(|(a, b)| (a.x - b.x).abs() < 1e-6 && a.x > 2.7 && a.x < 5.3).map(|(a, _)| a.x).collect();
+        assert!(inner.is_empty(), "Facetten-Fugen: {inner:?}");
+        // Oberkante über den Bogen 2.5..5.5 lückenlos.
+        let top = lines.iter().filter(|(a, b)| (a.y - b.y).abs() < 1e-6).map(|(a, _)| a.y).fold(f64::NEG_INFINITY, f64::max);
+        let mut segs: Vec<(f64, f64)> = lines.iter().filter(|(a, b)| (a.y - top).abs() < 1e-6 && (b.y - top).abs() < 1e-6).map(|(a, b)| (a.x.min(b.x), a.x.max(b.x))).collect();
+        segs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut reach = 2.5;
+        for (x0, x1) in &segs {
+            assert!(*x0 <= reach + 1e-6, "Lücke in der Oberkante bei {reach}: {segs:?}");
+            reach = f64::max(reach, *x1);
+        }
+        assert!(reach >= 5.5 - 1e-6, "Oberkante endet bei {reach}: {segs:?}");
     }
 
     /// [T2] Bogenwand in der Ansicht: keine Facetten-Fugen der Sehnen-Teilkörper, Umriss bleibt.

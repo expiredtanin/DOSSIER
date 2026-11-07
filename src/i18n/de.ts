@@ -1171,6 +1171,7 @@ export const de = {
   "resources.viewTemplates.shadows": "Schatten",
   "resources.viewTemplates.hiddenLines": "Verdeckte Kanten",
   "resources.viewTemplates.cutHatch": "Schnittflächen 1:100 schraffiert (statt schwarz)",
+  "resources.viewTemplates.showTerrain": "Gelände, Höhenlinien und Baugrube zeigen (ohne: nur Geschoss ±0.00 und Situation)",
   "resources.viewTemplates.floorFinish": "Bodenbelag zeigen (ohne: ab 1:50 bzw. „fein“)",
   "resources.viewTemplates.floorFinish.off": "aus",
   "resources.viewTemplates.floorFinish.wet": "Nassräume (Platten, gröber als 1:50)",

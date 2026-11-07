@@ -134,6 +134,15 @@ describe("dossier-cli", () => {
     expect(bytes.length).toBeGreaterThan(10_000);
   }, 60_000);
 
+  it("[157] Schnitt und Ansicht mit Höhenkoten wie in der App", async () => {
+    for (const kind of ["section", "elevation"] as const) {
+      const lvl = sampleProject.drawingLevels.find((l) => l.kind === kind);
+      if (!lvl) continue;
+      const out = join(dir, `koten-${kind}.svg`);
+      expect(await call(kind, lvl.name, "--out", out)).toBe(0);
+      expect(readFileSync(out, "utf8")).toContain("±0.00");
+    }
+  }, 60_000);
   it("Schnitt und STEP über das WASM", async () => {
     const section = sampleProject.drawingLevels.find((l) => l.kind === "section");
     if (section) {

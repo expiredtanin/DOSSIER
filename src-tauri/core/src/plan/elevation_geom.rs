@@ -14,7 +14,8 @@
 //! `occluded_points(occ, pts)` mit `pts = [m, (u, v, tiefe) × m]` → `[m, 0/1 × m]`.
 //!
 //! ## Schatten
-//! `shadows(walls, slabs)`, je `[n, (tiefe, tiefeMin, k, u, v …) × n]` (Wände: tiefeMin ungenutzt) →
+//! `shadows(walls, slabs)`, Wände `[n, (tiefe, tiefeMin, k, u, v …) × n]` (tiefeMin ungenutzt), Werfer
+//! `[n, (tiefe, tiefeMin, tiefeLinks, tiefeRechts, k, u, v …) × n]` (Tiefe am linken/rechten Ende, [157]) →
 //! `[r, (tiefe, k, u, v …) × r]`.
 //!
 //! ## Flächen
@@ -352,7 +353,7 @@ fn clip_polygon_to_rect(poly: &[P], r: [f64; 4]) -> Vec<P> {
 }
 
 pub fn shadows(walls: &[f64], slabs: &[f64]) -> Vec<f64> {
-    let (Some(walls), Some(slabs)) = (read_polys(walls, 2), read_polys(slabs, 2)) else {
+    let (Some(walls), Some(slabs)) = (read_polys(walls, 2), read_polys(slabs, 4)) else {
         return Vec::new();
     };
     let mut res: Vec<(f64, Vec<P>)> = Vec::new();
@@ -373,11 +374,15 @@ pub fn shadows(walls: &[f64], slabs: &[f64]) -> Vec<f64> {
                 continue;
             }
             let v_top = so[2];
+            // [157] Tiefe am linken/rechten Ende der Stirn: bei schräger/gekrümmter Stirn (Erker-Facetten) wandert
+            // die Schattenkante mit, die Facetten schliessen aneinander (vorher je Facette ein Treppenabsatz).
+            let end = |d: f64| if d.is_finite() && wh[0] - d > EPS { (wh[0] - d).min(MAX_SHADOW_DELTA) } else { delta };
+            let (dl, dr) = (end(sh[2]), end(sh[3]));
             let par = [
                 (so[0], v_top),
                 (so[1], v_top),
-                (so[1] + delta * SUN_U, v_top + delta * SUN_V),
-                (so[0] + delta * SUN_U, v_top + delta * SUN_V),
+                (so[1] + dr * SUN_U, v_top + dr * SUN_V),
+                (so[0] + dl * SUN_U, v_top + dl * SUN_V),
             ];
             let clipped = clip_polygon_to_rect(&par, wo);
             if clipped.len() >= 3 {
@@ -1244,11 +1249,35 @@ mod tests_ts {
     fn ueberstand_wirft_schatten_nur_bei_ueberlapp() {
         // Wandfläche u 1..5, v 0..3, Tiefe 1.9; Überstand näher (Tiefe 1.4, depthMin 1.4), unten v 2.8.
         let wall = [1.0, 1.9, 1.9, 4.0, 1.0, 0.0, 5.0, 0.0, 5.0, 3.0, 1.0, 3.0];
-        let slab = |u0: f64, u1: f64| vec![1.0, 1.4, 1.4, 4.0, u0, 2.8, u1, 2.8, u1, 3.0, u0, 3.0];
+        let slab = |u0: f64, u1: f64| vec![1.0, 1.4, 1.4, 1.4, 1.4, 4.0, u0, 2.8, u1, 2.8, u1, 3.0, u0, 3.0];
         let f = shadows(&wall, &slab(1.0, 5.0));
         assert_eq!(f[0], 1.0);
         assert_eq!(f[1], 1.9);
         assert_eq!(shadows(&wall, &slab(20.0, 24.0)), vec![0.0]);
+    }
+
+    /// [157] Gekrümmte Deckenstirn (Erker, Facetten mit wachsender Tiefe): die Schatten der Facetten schliessen
+    /// lückenlos aneinander (Unterkante je Ende nach der Tiefe dort), nicht je Facette ein waagrechter Treppenabsatz.
+    #[test]
+    fn schatten_gekruemmter_stirn_ohne_treppe() {
+        let wall = [1.0, 2.0, 2.0, 4.0, 0.0, 0.0, 6.0, 0.0, 6.0, 3.0, 0.0, 3.0];
+        // Zwei Facetten u 1..2 (Tiefe 1.4 → 1.6) und 2..3 (1.6 → 1.8), Unterkante v 2.8.
+        let mut slabs = vec![2.0];
+        slabs.extend([1.5, 1.4, 1.4, 1.6, 4.0, 1.0, 2.8, 2.0, 2.8, 2.0, 3.0, 1.0, 3.0]);
+        slabs.extend([1.7, 1.6, 1.6, 1.8, 4.0, 2.0, 2.8, 3.0, 2.8, 3.0, 3.0, 2.0, 3.0]);
+        let f = shadows(&wall, &slabs);
+        assert_eq!(f[0], 2.0);
+        let polys = read_polys(&f, 1).unwrap();
+        // Schattenecke (unter der Stirn) ganz links bzw. ganz rechts.
+        let low = |pts: &[P], right: bool| pts.iter().copied().filter(|q| q.1 < 2.8 - 1e-9).max_by(|a, b| if right { a.0.total_cmp(&b.0) } else { b.0.total_cmp(&a.0) }).unwrap();
+        let a = &polys[0].1;
+        let b = &polys[1].1;
+        // Unterkante A rechts = Unterkante B links: Tiefe 1.6 → δ = 0.4 → (2.4, 2.4).
+        let ar = a.iter().copied().filter(|q| (q.0 - 2.4).abs() < 1e-9).map(|q| q.1).fold(f64::INFINITY, f64::min);
+        let bl = b.iter().copied().filter(|q| (q.0 - 2.4).abs() < 1e-9).map(|q| q.1).fold(f64::INFINITY, f64::min);
+        assert!((ar - 2.4).abs() < 1e-9 && (bl - 2.4).abs() < 1e-9, "{a:?} {b:?}");
+        // Linkes Ende von A tiefer im Schatten (δ = 0.6), rechtes Ende von B weniger tief (δ = 0.2).
+        assert!((low(a, false).1 - 2.2).abs() < 1e-9 && (low(b, true).1 - 2.6).abs() < 1e-9, "{a:?} {b:?}");
     }
 
     #[test]

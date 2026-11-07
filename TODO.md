@@ -3644,6 +3644,69 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   nicht je Wandseite (eine Angabe je Raum), keine Sockel-/Leibungsflächen; lichte Höhe ohne Dachschrägen; Belagsmuster im
   Raum am ersten Umrisspunkt ausgerichtet (keine Drehung/Ursprung je Raum); Belag im 3D und im Deckenspiegel nicht nach
   Raum; Raumbuch-Zeilen im Panel nicht klickbar (keine Auswahl); nur Linux, nicht in der Tauri-App angesehen. · M
+- ◐ **[157] Plan-Review Musterhaus komplex (Schweizer Praxis).** (7.11.) Alle Grundrisse UG/EG/OG/DG 1:100 und 1:50,
+  Schnitte A-A/B-B 1:100/1:50, vier Ansichten 1:100, Situation (EG 1:500) als CLI-SVG mit `--hatch` in Chromium angesehen,
+  Ausschnitte in Originalgrösse. **Behoben** (Kern, je ein Test): (1) helle Haarfugen zwischen aneinanderstossenden
+  schwarzen Schnittflächen (Gehrungs-Diagonalen an jeder Wandecke 1:100, Schichtfugen in den schwarzen Schnitten) —
+  deckend dunkle Flächen ohne Strich bekommen einen 0.05-mm-Haarstrich in ihrer Farbe (`svg::seam_fill`, Plan-SVG und
+  Druck-/PDF-SVG; `schwarze_flaechen_ohne_haarfuge`, `schwarze_flaeche_mit_haarstrich`); (2) verdeckte Kanten im Schnitt
+  lagen als Strichlinien auf den schwarzen Wänden — jetzt unter den Schnittflächen gezeichnet
+  (`verdeckte_kanten_unter_den_schnittflaechen`); (3) Massstabsbalken 1:500: Zahlen 0…5m ineinander — Beschriftung
+  ausgedünnt nach Inter-Breite (jede k-te, 0 und Ende immer; `massstabsbalken_zahlen_ueberlappen_nicht`);
+  (4) Schnittführung A-A/B-B lief durch Raumnamen/Flächen (OG, DG) — Schnittlinien sind Hindernisse der Raumstempel
+  (`raumstempel_weicht_schnittlinie_aus`); (5) Achsblasen 2/3 standen im Eingangs-Anbau (auf Fenster, Garderobe) —
+  liegt eine Blase im/am Gebäude, rückt die ganze Blasenreihe dieser Seite hinaus, Achse bis zur Blase
+  (`achsblasen_ausserhalb_des_gebaeudes`); (6) Schnitt-/Ansichtsmarken mit fester Modellgrösse (1:500 „A-A“ 1 mm,
+  1:50 10 mm) — jetzt Papiergrösse (bis 1:100 konstant, darüber ×(100/n)^0.5), Beschriftung vor der Pfeilspitze
+  statt auf dem Pfeil („Nord“ lag auf dem Pfeil; `misc::section_line_sized`); (7) Marken/Beschriftungen der Schnittführung
+  oben abgeschnitten (UG/DG „Nord“) — zählen zum Planausmass (`schnittmarken_papiergroesse_beschriftung_frei`);
+  (8) Baugrubensohle lief als 0.25-mm-Linie quer durch „E.07 Eingang“ — endet am Gebäude-Fussabdruck
+  (`baugrubensohle_endet_am_gebaeude`); (9) Höhenkoten „-2.5/-2.2“ auf der Böschungsschraffur — Baugruben-Linien sind
+  Hindernisse der Höhenlinien-Beschriftung (`hoehenkoten_nicht_auf_der_baugrube`). Goldens neu (Grundrisse, Schnitte,
+  Ansicht Süd, CLI). Vorher/Nachher-Bilder lokal (nicht im Repo). Geprüft: cargo test Kern, tsc, vitest, CLI-SVG in
+  Chromium (nur Linux, nicht in der Tauri-App/Metal; Bildschirm-Renderer render2d unverändert — Haarfugen dort nicht geprüft).
+  **Teil 2 (7.11.)**, behoben (Kern, je ein Test): (10) **Gelände, Höhenlinien und Baugrube** im Grundriss nur noch im
+  Geschoss nächst ±0.00 und in der Situation (ab 1:500), nicht in UG/OG/DG; neues Feld **„Gelände zeigen"**
+  (`showTerrain`) an Ebene und Ansichtsvorlage (Rust-Modell, `gen:types`, `LEVEL_KEYS`, CLI `--template`, Ressourcen ›
+  Ansichtsvorlagen, i18n) übersteuert (`context::terrain_shown`; `gelaende_nur_im_erdgeschoss`); Schatten der
+  Sonnenstudie unverändert je Geschoss ([142]); (11) Schnitt-/Ansichtsmarken: die Beschriftung weicht Masszahlen,
+  Texten, Achsblasen, Linien/Marken anderer Schnittführungen und schon gesetzten Beschriftungen aus („B-B“ nicht mehr
+  auf „15.39“, Situation „West“/„Nord“ und „Ost“/„Süd“ getrennt; `schnittmarke_weicht_masszahl_und_nachbarmarke_aus`);
+  (12) grauer Schattenkeil neben dem Erker: kleine Schattenreste (< 0.25 m²), die zu mehr als der Hälfte von Abdeckungen
+  (Decke, Dachvorsprung) begrenzt sind, entfallen (`sun::drop_cover_rests`; `schattenrest_an_abdeckung_entfaellt`);
+  (13) „D.03 Galerie“ nicht mehr auf dem First: Dachlinien (First, Grat, Kehle, Traufe) sind Hindernisse der
+  Raumstempel (`raumstempel_weicht_firstlinie_aus`); (14) Achsblasen stehen nicht auf Massketten des Geschosses (OG/UG:
+  Blase C lag auf der Kette „15.39“) — die Blasenreihe rückt hinter die Ketten (`achsblasen_nicht_auf_der_bemassung`);
+  (15) Achsen in Schnitt und Ansicht nur als Stummel auf der Seite der Blase (oben): keine dunkle Strichlinie mehr durch
+  die geschnittene Aussenwand und das Fenster (A-A), kein Stummel im Erdreich unter dem Terrain (Ansicht Nord/West;
+  `grid_view` Test angepasst); (16) Schnitte standardmässig ohne verdeckte Kanten: Musterhaus komplex Schnitte A/B und
+  Vorlage „Schnitt 1:100“ ohne `hiddenLines`, neue Vorlage „Schnitt mit verdeckten Kanten“ (Kern-Standard war schon
+  aus; vitest); (17) CLI `section`/`elevation` über `viewportLevelPlan` wie die App: Höhenkoten, eigene 2D-Elemente
+  (`cli.test.ts`); dabei gefunden und behoben: auf der 2D-Ebene eines Schnitts erschienen die ankommende Wendeltreppe
+  ([155], Symbol mitten im Schnitt A-A) und im 1:50 das Bodenbelag-Muster ([156]) — beide nur noch in Geschoss-Grundrissen
+  (Tests in `ankommende_treppe…`, `belag_nur_ab_1_50_oder_fein`); (18) Ansicht: Schlagschatten mit der Tiefe am linken
+  und rechten Ende der werfenden Stirn (`schatten_gekruemmter_stirn_ohne_treppe`), Decken-Stirnfacetten als
+  Glättungsgruppe ohne Fugen (`deckenstirn_bogen_ohne_facettenfugen`) — am Musterhaus-Erker sichtbar kaum besser, s. Offen;
+  (19) Nordpfeil im Musterhaus komplex an den Ostrand der Parzelle (lag auf „Kat.-Nr. 2417“ und der Ansichtslinie Ost;
+  Daten, keine Ausweich-Logik für Blöcke). DG-Bodenbelag: seit [156] im 1:100 kein Muster mehr — erledigt. Goldens neu
+  (Grundrisse beider Muster, komplex Schnitt/Ansicht Süd, CLI EG). Vorher/Nachher-Bilder lokal. Geprüft: cargo test Kern,
+  WASM `--no-opt`, tsc, vitest, CLI-SVG in Chromium (nur Linux, nicht in Tauri/Metal).
+  **Offen:** Masskette der Baugrube in der Böschungsschraffur (EG West/Ost) — versucht: Aussenbemassung (`autodim`) rückt
+  hinter die Böschung; verworfen, weil die Ketten statisch im Modell liegen und auch dort weit draussen stehen, wo das
+  Gelände nicht gezeigt wird (Präsentationsplan fiel von 1:200 auf 1:500); braucht einen Versatz beim Zeichnen (nur wenn
+  die Baugrube sichtbar ist) für Ketten der Aussenbemassung. „B-B“ liegt jetzt neben „15.39“, aber auf der
+  Böschungsschraffur (Baugrube kein Hindernis der Marken-Beschriftung). Situation 1:500: die Marken selbst (Pfeile,
+  Striche) der Ansichten Nord/West bzw. Süd/Ost treffen sich weiter an den Ecken (nur die Beschriftungen weichen aus).
+  Schnitt B-B: Wendeltreppe UG zeigt nur die geschnittenen Stufen, die Stufen hinter dem Schnitt fehlen in der Projektion
+  (Ursache nicht gefunden: die Stufen gehen als Platten in `projection_edges` ein) — grösser, eigener Punkt; Treppe EG→OG
+  als graue Streifen. Ansicht Erker: Schlagschatten weiter treppig, weil die Empfänger (Facetten der Bogenwand) je eine
+  Tiefe haben — braucht Schatten mit Tiefe je Punkt der Empfängerfläche; Schichtbänder der Erker-Deckenstirn als
+  Bruchstücke (Flächen je Schicht und Facette ohne Fugenlinie). Weiter offen aus Teil 1: „Detail und Situation“ auf
+  Masskette/Höhenkote; Baum-Kreis über der Haustür (Daten); Raumstempel verlieren beim Ausweichen die Nutzungszeile;
+  Achsblasen ab 1:200 über Höhenkoten; dünne schwebende Linie unter Fenster OG (Süd); Bogenwand-Fenster im Schnitt 1:50
+  nur Umriss; Höhenkoten im CLI-Schnitt weit links (wie in der App: links von Gelände-Ausmass).
+  · M
+
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

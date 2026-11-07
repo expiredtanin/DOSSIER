@@ -217,6 +217,7 @@ fn split_alpha(color: &str) -> (String, Option<String>) {
 
 fn poly_node(pts: &str, fill: &str, stroke: &str, stroke_mm: f64) -> Vec<(&'static str, String)> {
     let (fill, fill_opacity) = split_alpha(fill);
+    let opaque = fill_opacity.is_none();
     let mut a = vec![("points", pts.to_string()), ("fill", fill)];
     if let Some(o) = fill_opacity {
         a.push(("fill-opacity", o));
@@ -224,6 +225,10 @@ fn poly_node(pts: &str, fill: &str, stroke: &str, stroke_mm: f64) -> Vec<(&'stat
     if stroke != "none" && stroke_mm > 0.0 {
         a.push(("stroke", stroke.to_string()));
         a.push(("stroke-width", js_number(stroke_mm)));
+    } else if opaque && super::svg::seam_fill(&a[1].1) {
+        // [157] Dunkle, deckende Fläche: Haarstrich in der Füllfarbe gegen die Fuge zur Nachbarfläche.
+        a.push(("stroke", a[1].1.clone()));
+        a.push(("stroke-width", js_number(super::svg::SEAM_MM)));
     } else {
         a.push(("stroke", "none".to_string()));
     }
@@ -701,6 +706,17 @@ pub fn print_svg_ops(parts: &mut [Part], o: &PrintOptions) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schwarze_flaeche_mit_haarstrich() {
+        // [157] Dunkle deckende Fläche ohne Strich: Haarstrich in der Füllfarbe (keine helle Fuge im PDF).
+        let a = poly_node("0,0 1,0 1,1", "#0f0f0f", "none", 0.0);
+        assert!(a.contains(&("stroke", "#0f0f0f".to_string())) && a.contains(&("stroke-width", "0.05".to_string())), "{a:?}");
+        let b = poly_node("0,0 1,0 1,1", "#ffffff", "none", 0.0);
+        assert!(b.contains(&("stroke", "none".to_string())), "{b:?}");
+        let c = poly_node("0,0 1,0 1,1", "#0f0f0f", "#222", 0.35);
+        assert!(c.contains(&("stroke", "#222".to_string())), "{c:?}");
+    }
 
     #[test]
     fn raumfuellung_mit_alpha_als_deckkraft() {

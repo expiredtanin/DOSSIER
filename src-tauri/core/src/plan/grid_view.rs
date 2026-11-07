@@ -1,5 +1,5 @@
 //! Achsraster in Schnitt und Ansicht ([112]): Rasterachsen quer zur Blickebene als senkrechte
-//! strichpunktierte Linien (x = Lage entlang der Schnittlinie, y = Höhe) mit Blase und Beschriftung
+//! strichpunktierte Stummel über (bzw. unter) dem Bild ([157]) (x = Lage entlang der Schnittlinie, y = Höhe) mit Blase und Beschriftung
 //! oben (bzw. unten bei „nur Anfang"). Hängt als eigene Gruppe hinter dem Schnitt/der Ansicht.
 
 use super::prim::Primitive;
@@ -91,8 +91,11 @@ fn one(spec: &Spec, plane: &Plane, level: &LevelSpec, bounds: [f64; 4], diameter
         if x < lo - 1e-9 || x > hi + 1e-9 {
             continue;
         }
-        // [140] Ansicht: die Achse läuft nicht über die Fassade, nur Stummel unter und über dem Bild.
-        let spans: &[(f64, f64)] = if level.kind == "elevation" { &[(y0, bounds[1]), (bounds[3], y1)] } else { &[(y0, y1)] };
+        // [140] Ansicht: die Achse läuft nicht über die Fassade. [157] Schnitt ebenso (sonst liegt sie als dunkle
+        // Strichlinie in der geschnittenen Wand und im Fenster), und nur auf der Seite der Blase: unten stünde der
+        // Stummel im Erdreich unter dem Terrain.
+        let start = bubbles == GridBubbles::Start;
+        let spans: &[(f64, f64)] = if start { &[(y0, bounds[1])] } else { &[(bounds[3], y1)] };
         for &(ya, yb) in spans {
             out.push(Primitive::Line {
                 a: v2(x, ya),
@@ -158,7 +161,9 @@ mod tests {
         let lines: Vec<(f64, f64, f64)> = prims.iter().filter_map(|q| if let Primitive::Line { a, b, .. } = q { Some((a.x, a.y, b.y)) } else { None }).collect();
         assert_eq!(lines.len(), 2, "{prims:?}");
         assert!((lines[0].0 - 1.0).abs() < 1e-9 && (lines[1].0 - 5.0).abs() < 1e-9);
-        assert!(lines[0].1 < 0.0 && lines[0].2 > 6.0);
+        // [157] Auch im Schnitt nur ein Stummel über dem Bild bis zur Blase: keine Achse durch die geschnittene
+        // Aussenwand (dunkle Strichlinie im Poché und im Fenster, Musterhaus komplex A-A).
+        assert!(lines.iter().all(|l| l.1.min(l.2) >= 6.0 - 1e-9 && l.1.max(l.2) > 6.0), "{lines:?}");
         assert_eq!(texts(&prims), ["1", "2"]);
         // [153] Achsmuster in Papier-mm, unabhängig vom Massstab (vorher mit N/1000 vorskaliert).
         for n in [50.0, 200.0] {
@@ -176,9 +181,17 @@ mod tests {
         let level = LevelSpec { kind: "elevation".into(), line: Some([v2(-1.0, -3.0), v2(8.0, -3.0)]), ..Default::default() };
         let prims = grid_prims(&p, &level, [0.0, 0.0, 9.0, 6.0], 100.0);
         assert_eq!(texts(&prims), ["1", "2"]);
-        // [140] In der Ansicht laufen die Achsen nicht über die Fassade: nur Stummel unter und über dem Bild.
+        // [140] In der Ansicht laufen die Achsen nicht über die Fassade; [157] nur der Stummel auf der Seite der Blase
+        // (oben), keiner unten im Erdreich unter dem Terrain.
         let lines: Vec<(f64, f64)> = prims.iter().filter_map(|q| if let Primitive::Line { a, b, .. } = q { Some((a.y.min(b.y), a.y.max(b.y))) } else { None }).collect();
-        assert_eq!(lines.len(), 4, "{lines:?}");
-        assert!(lines.iter().all(|(lo, hi)| *hi <= 0.0 + 1e-9 || *lo >= 6.0 - 1e-9), "{lines:?}");
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines.iter().all(|(lo, _)| *lo >= 6.0 - 1e-9), "{lines:?}");
+        // Blase unten („nur Anfang"): Stummel unten.
+        let mut q = p.clone();
+        if let Drawing2DGeom::Grid { bubbles, .. } = &mut q.drawings2d[0].geom {
+            *bubbles = Some(GridBubbles::Start);
+        }
+        let lines: Vec<(f64, f64)> = grid_prims(&q, &level, [0.0, 0.0, 9.0, 6.0], 100.0).iter().filter_map(|q| if let Primitive::Line { a, b, .. } = q { Some((a.y.min(b.y), a.y.max(b.y))) } else { None }).collect();
+        assert!(lines.len() == 2 && lines.iter().all(|(_, hi)| *hi <= 1e-9), "{lines:?}");
     }
 }

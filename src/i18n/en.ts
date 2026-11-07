@@ -1165,6 +1165,7 @@ export const en: Record<TranslationKey, string> = {
   "resources.viewTemplates.shadows": "Shadows",
   "resources.viewTemplates.hiddenLines": "Hidden lines",
   "resources.viewTemplates.cutHatch": "Hatched cut areas at 1:100 (instead of solid black)",
+  "resources.viewTemplates.showTerrain": "Show terrain, contours and excavation (unset: only the ±0.00 storey and site plan)",
   "resources.viewTemplates.floorFinish": "Show floor finish (unset: from 1:50 or “fine”)",
   "resources.viewTemplates.floorFinish.off": "off",
   "resources.viewTemplates.floorFinish.wet": "Wet rooms (tiles, coarser than 1:50)",
