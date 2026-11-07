@@ -162,6 +162,24 @@ fn op_json(v: &Value) -> String {
     op(greyed, v.get("opacity").map(|o| o.as_f64().unwrap_or(f64::NAN)))
 }
 
+/// [157] Haarstrich (Papier-mm) gegen die Fuge zwischen aneinanderstossenden dunklen Flächen.
+pub(crate) const SEAM_MM: f64 = 0.05;
+
+/// [157] Deckend dunkle Füllfarbe (`#rgb`, `#rrggbb`, `#rrggbbff`; jeder Kanal ≤ 0x40), die zwischen zwei
+/// Flächen eine helle Haarfuge zeigt (Chromium/PDF glätten aneinanderstossende Flächen einzeln): solche
+/// Flächen ohne eigenen Strich bekommen einen Haarstrich [`SEAM_MM`] in ihrer Farbe — schwarze
+/// Schnittflächen (Wandecken, Schichten im Schnitt 1:100) bleiben ohne helle Linien dazwischen.
+pub(crate) fn seam_fill(fill: &str) -> bool {
+    let h = fill.trim().strip_prefix('#').unwrap_or("");
+    let ch = |i: usize, n: usize| u8::from_str_radix(&h[i * n..i * n + n], 16).ok().map(|v| if n == 1 { v * 17 } else { v });
+    let (rgb, alpha) = match h.len() {
+        3 if h.is_ascii() => ([ch(0, 1), ch(1, 1), ch(2, 1)], Some(255)),
+        6 | 8 if h.is_ascii() => ([ch(0, 2), ch(1, 2), ch(2, 2)], if h.len() == 8 { u8::from_str_radix(&h[6..8], 16).ok() } else { Some(255) }),
+        _ => return false,
+    };
+    alpha == Some(255) && rgb.iter().all(|c| c.is_some_and(|c| c <= 0x40))
+}
+
 fn op(greyed: bool, opacity: Option<f64>) -> String {
     if greyed {
         " opacity=\"0.35\"".into()
@@ -252,8 +270,12 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                         Some((o, len)) => part.view.pool(o, len)?.iter().filter(|e| e.is_finite() && **e >= 0.0).map(|e| *e as usize).collect(),
                         None => Vec::new(),
                     };
+                    // [157] Dunkle, deckende Fläche ohne eigenen Strich: Haarstrich in der Füllfarbe gegen die Fuge.
+                    let seam = !greyed && opacity(4).is_none_or(|a| a >= 1.0) && seam_fill(&fill);
+                    let seam_attr = || format!(" stroke=\"{fill}\" stroke-width=\"{}\"", num(SEAM_MM * mm_to_m));
                     if !nse.is_empty() && stroke != "none" && !stroke.is_empty() {
-                        out.push(format!("<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"none\"{}/>", op(greyed, opacity(4))));
+                        let st = if seam { seam_attr() } else { " stroke=\"none\"".to_string() };
+                        out.push(format!("<polygon points=\"{pl}\" fill=\"{fill}\"{st}{}/>", op(greyed, opacity(4))));
                         // Sichtbare Kantenläufe zum Zusammennähen ([146]), Kanten in Ring-Reihenfolge.
                         let nse_f: Vec<f64> = nse.iter().map(|&e| e as f64).collect();
                         let attrs = format!(" stroke=\"{stroke}\" stroke-width=\"{}\"{}", num(f[2] * mm_to_m), op(greyed, opacity(4)));
@@ -261,6 +283,8 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                             out.push(String::new());
                             stitch.add(attrs.clone(), run, out.len() - 1);
                         }
+                    } else if seam && (stroke == "none" || stroke.is_empty() || !(f[2] > 0.0)) {
+                        out.push(format!("<polygon points=\"{pl}\" fill=\"{fill}\"{}{}/>", seam_attr(), op(greyed, opacity(4))));
                     } else {
                         out.push(format!(
                             "<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\"{}/>",
@@ -498,6 +522,58 @@ mod tests {
         // Block um den Anker (SVG y = 4 − 2 = 2) zentriert: erste Grundlinie darüber, zweite darunter.
         let y = |t: &str| t.split("y=\"").nth(1).unwrap().split('"').next().unwrap().parse::<f64>().unwrap();
         assert!(y(texts[0]) < 2.0 && y(texts[1]) > 2.0, "{texts:?}");
+    }
+
+    /// [157] Haarfuge: zwei schwarze Schnittflächen (Wandecke, Schichten im Schnitt 1:100) stossen aneinander;
+    /// jede deckend dunkle Fläche ohne Strich bekommt einen Haarstrich in ihrer Farbe, der die Fuge schliesst
+    /// (Chromium/PDF glätten die Kanten einzeln → helle Linie). Helle oder durchscheinende Flächen nicht.
+    #[test]
+    fn schwarze_flaechen_ohne_haarfuge() {
+        use crate::model::Vec2;
+        use crate::plan::buf::{View, Writer};
+        use crate::plan::prim::Primitive;
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let poly = |pts: Vec<Vec2>, fill: &str, nse: Option<Vec<f64>>| Primitive::Polygon {
+            pts,
+            fill: fill.into(),
+            stroke: if nse.is_some() { "#1a1a1a".into() } else { "none".into() },
+            stroke_width_mm: if nse.is_some() { 0.25 } else { 0.0 },
+            hatch: crate::plan::style::no_hatch(),
+            greyed: None,
+            opacity: None,
+            no_stroke_edges: nse,
+            wall_id: None,
+            drawing_id: None,
+            ceiling_id: None,
+            opening_id: None,
+            stair_id: None,
+            room_id: None,
+            extruded_solid_id: None,
+            context_object_id: None,
+            column_id: None,
+            roof_id: None,
+            section_line_id: None,
+        };
+        let mut w = Writer::new(false);
+        let g = w.begin_group();
+        w.push(&poly(vec![v(0.0, 0.0), v(2.0, 0.0), v(2.0, 0.3), v(0.0, 0.3)], "#0f0f0f", None));
+        w.push(&poly(vec![v(2.0, 0.0), v(4.0, 0.0), v(4.0, 0.3), v(2.0, 0.3)], "#111111", Some(vec![3.0])));
+        w.push(&poly(vec![v(0.0, 1.0), v(4.0, 1.0), v(4.0, 2.0)], "#ffffff", None));
+        w.push(&poly(vec![v(0.0, 3.0), v(4.0, 3.0), v(4.0, 4.0)], "#3c3c3c29", None));
+        w.end_group(g);
+        let bytes = w.finish();
+        let view = View::parse(&bytes).unwrap();
+        let n = view.len();
+        let mut parts = vec![Part::new(view, 0, n).unwrap()];
+        let o = SvgOptions { scale_denominator: 100.0, margin_m: 0.5, min_x: 0.0, min_y: 0.0, max_x: 4.0, max_y: 4.0, hatch: false, line_ends: LineEnds::default() };
+        let svg = plan_svg(&mut parts, &o).unwrap();
+        let polys: Vec<&str> = svg.lines().filter(|l| l.starts_with("<polygon")).collect();
+        assert_eq!(polys.len(), 4, "{svg}");
+        assert!(polys[0].contains("fill=\"#0f0f0f\" stroke=\"#0f0f0f\" stroke-width=\"0.005\""), "{}", polys[0]);
+        assert!(polys[1].contains("fill=\"#111111\" stroke=\"#111111\" stroke-width=\"0.005\""), "Kantenlauf-Fläche: {}", polys[1]);
+        assert!(polys[2].contains("stroke=\"none\""), "weiss: {}", polys[2]);
+        assert!(polys[3].contains("stroke=\"none\""), "durchscheinend: {}", polys[3]);
+        assert!(seam_fill("#000") && seam_fill("#1a1a1aff") && !seam_fill("#6e6e6e") && !seam_fill("none") && !seam_fill("#00000080"));
     }
 
     /// [146] Wand-Umrisse als volle Linie bzw. offene Kantenläufe (Stossfugen nicht gestrichen) werden

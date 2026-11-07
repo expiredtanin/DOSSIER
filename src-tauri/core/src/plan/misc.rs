@@ -11,7 +11,7 @@
 //! bei zu kurzer Linie):
 //! ```text
 //! 2 line     [2, art (0 Hauptlinie | 1 Marke), ax, ay, bx, by]
-//! 5 label    [5, x, y]                              (Kurz-Tag setzt TS)
+//! 5 label    [5, x, y]                              (unten links; Kurz-Tag setzt der Aufrufer)
 //! 1 polygon  [1, x0, y0 … x3, y3]                   (unsichtbares Pick-Band)
 //! ```
 //!
@@ -135,9 +135,18 @@ pub fn bbox(positions: &[f64]) -> Vec<f64> {
 }
 
 pub fn section_line(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64) -> Vec<f64> {
-    if ![p0x, p0y, p1x, p1y, sign].iter().all(|x| x.is_finite()) {
+    section_line_sized(p0x, p0y, p1x, p1y, sign, 1.0, SECTION_LABEL_H * 1.5)
+}
+
+/// [157] Wie [`section_line`], Marken × `k` (Papiergrösse: Massstab/100) und die Beschriftung (Breite
+/// `label_w`, Schrift `SECTION_LABEL_H · k`, Ankerpunkt unten links) mit ihrem Kasten vor der Pfeilspitze —
+/// in Pfeilrichtung abgesetzt, so dass sie den Pfeil in keiner Richtung überdeckt.
+pub fn section_line_sized(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64, k: f64, label_w: f64) -> Vec<f64> {
+    if ![p0x, p0y, p1x, p1y, sign, k, label_w].iter().all(|x| x.is_finite()) || !(k > 0.0) {
         return Vec::new();
     }
+    let mark = SECTION_MARK_LEN * k;
+    let label_h = SECTION_LABEL_H * k * 0.75;
     let (ax, ay) = (p1x - p0x, p1y - p0y);
     let len = hypot2(ax, ay);
     if len < 1e-6 {
@@ -153,19 +162,20 @@ pub fn section_line(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64) -> Vec<f6
         *n += 1;
     };
     line(&mut o, &mut n, 0.0, (p0x, p0y), (p1x, p1y));
-    let half = SECTION_MARK_LEN / 2.0;
+    let half = mark / 2.0;
     for end in [(p0x, p0y), (p1x, p1y)] {
         line(&mut o, &mut n, 1.0, (end.0 - nx * half, end.1 - ny * half), (end.0 + nx * half, end.1 + ny * half));
         let base = (end.0 + bnx * half, end.1 + bny * half);
-        let tip = (base.0 + bnx * SECTION_MARK_LEN, base.1 + bny * SECTION_MARK_LEN);
-        let wing_back = (tip.0 - bnx * SECTION_MARK_LEN * 0.4, tip.1 - bny * SECTION_MARK_LEN * 0.4);
-        let w = SECTION_MARK_LEN * 0.25;
+        let tip = (base.0 + bnx * mark, base.1 + bny * mark);
+        let wing_back = (tip.0 - bnx * mark * 0.4, tip.1 - bny * mark * 0.4);
+        let w = mark * 0.25;
         line(&mut o, &mut n, 1.0, base, tip);
         line(&mut o, &mut n, 1.0, tip, (wing_back.0 + ux * w, wing_back.1 + uy * w));
         line(&mut o, &mut n, 1.0, tip, (wing_back.0 - ux * w, wing_back.1 - uy * w));
-        let lx = tip.0 + bnx * SECTION_MARK_LEN * 0.4 - SECTION_LABEL_H * 0.3;
-        let ly = tip.1 + bny * SECTION_MARK_LEN * 0.4 + SECTION_LABEL_H * 0.5;
-        o.extend([5.0, lx, ly]);
+        // Kastenmitte vor der Spitze: Abstand + halbe Ausdehnung des Kastens in Pfeilrichtung.
+        let reach = mark * 0.3 + bnx.abs() * label_w / 2.0 + bny.abs() * label_h / 2.0;
+        let (cx, cy) = (tip.0 + bnx * reach, tip.1 + bny * reach);
+        o.extend([5.0, cx - label_w / 2.0, cy - label_h / 2.0]);
         n += 1;
     }
     let (ox, oy) = (nx * SECTION_PICK_HALF, ny * SECTION_PICK_HALF);

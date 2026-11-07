@@ -2889,6 +2889,8 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
             prims.push(q);
         }
     }
+    // [157] Verdeckte Kanten kommen hier hinein (unter die Schnittflächen, die sie verdecken).
+    let cut_start = prims.len();
     for cp in &merged {
         if cp.pts.len() < 3 {
             continue;
@@ -3021,6 +3023,7 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
         }
     };
     if hidden_lines {
+        let mut hidden: Vec<Primitive> = Vec::new();
         for e in out.hidden.iter().filter(|e| mesh_shown(e)) {
             acc.add(e.a[0], e.a[1]);
             acc.add(e.b[0], e.b[1]);
@@ -3028,8 +3031,9 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
             if let Primitive::Line { dash, .. } = &mut l {
                 *dash = Some(Some(SECTION_HIDDEN_DASH.to_vec()));
             }
-            prims.push(l);
+            hidden.push(l);
         }
+        prims.splice(cut_start..cut_start, hidden);
     }
     for e in out.visible.iter().filter(|e| mesh_shown(e)) {
         acc.add(e.a[0], e.a[1]);
@@ -4222,6 +4226,23 @@ mod tests {
         assert!(!out.hidden.is_empty());
         let (prims, _) = section_primitives(&out, false, true, &Visibility::default());
         assert!(serde_json::to_string(&prims).unwrap().contains("section-hidden"));
+    }
+
+    /// [157] Verdeckte Kanten liegen hinter der Schnittebene: die Schnittflächen decken sie zu (vorher lagen
+    /// dunkle Strichlinien auf den schwarzen Wänden 1:100, Musterhaus komplex Schnitt A-A Aussenwand).
+    #[test]
+    fn verdeckte_kanten_unter_den_schnittflaechen() {
+        let p = sample();
+        let mut l = level(&p, "schnitt-a");
+        l.hidden_lines = true;
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        for scale in [50.0, 100.0] {
+            let (prims, _) = section_primitives_at(&out, true, true, &Visibility::default(), scale, Detail::Mittel, false, &CutRules::default());
+            let first_cut = prims.iter().position(|q| matches!(q, Primitive::Polygon { fill, .. } if fill != "none")).expect("Schnittfläche");
+            let hidden: Vec<usize> = prims.iter().enumerate().filter(|(_, q)| matches!(q, Primitive::Line { cls, .. } if cls == "section-hidden")).map(|(i, _)| i).collect();
+            assert!(!hidden.is_empty());
+            assert!(hidden.iter().all(|&i| i < first_cut), "1:{scale}: verdeckte Kante über einer Schnittfläche");
+        }
     }
 
     /// [T6]/[68] Gelände mit Baugrube: gestaltetes + gewachsenes Terrain, Erdreich ohne Gebäude-Inneres;

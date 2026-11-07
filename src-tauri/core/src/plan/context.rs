@@ -150,6 +150,10 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
                     for q in super::drawings::grid_bubble_prims(c) {
                         o.add_prim(&q);
                     }
+                    // [157] Baugruben (Sohle, Böschungsoberkante, Böschungsschraffur): keine Höhenkote darauf.
+                    for q in out.iter().filter(|q| matches!(q, Primitive::Line { cls, color: Some(k), .. } if cls == "context-line" && k == EXCAVATION_INK)) {
+                        o.add_prim(q);
+                    }
                     o
                 });
                 terrain_contours(c, t, out, &house(), obst);
@@ -247,14 +251,14 @@ pub(super) fn terrain_footprint(p: &Project, floor: &str) -> Vec<Vec<Vec2>> {
     crate::polygon_bool::union(&parts).into_iter().filter_map(|poly| poly.into_iter().next()).filter(|r| r.len() >= 3).map(|r| r.iter().map(|q| v2(q[0], q[1])).collect()).collect()
 }
 
-fn seg_dist(q: Vec2, a: [f64; 2], b: [f64; 2]) -> f64 {
+pub(super) fn seg_dist(q: Vec2, a: [f64; 2], b: [f64; 2]) -> f64 {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let l2 = dx * dx + dy * dy;
     let t = if l2 > 0.0 { (((q.x - a[0]) * dx + (q.y - a[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
     (q.x - a[0] - t * dx).hypot(q.y - a[1] - t * dy)
 }
 
-fn inside(q: Vec2, ring: &[Vec2]) -> bool {
+pub(super) fn inside(q: Vec2, ring: &[Vec2]) -> bool {
     let mut c = false;
     let n = ring.len();
     for i in 0..n {
@@ -608,14 +612,18 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
 }
 
 /// [68] Baugrube im Grundriss: Sohle (Böschungsfuss) und Böschungsoberkante, Böschungsschraffur.
-/// [150] Böschungsoberkante und -schraffur (Gelände) enden am Fussabdruck `house`; die Sohle bleibt.
+/// [150] Böschungsoberkante und -schraffur (Gelände) enden am Fussabdruck `house`; [157] die Sohle auch.
 fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &mut Vec<Primitive>, house: &[Vec<Vec2>]) {
     let ring: Vec<Vec2> = e.outline.iter().copied().filter(|q| q.x.is_finite() && q.y.is_finite()).collect();
     if ring.len() < 3 {
         return;
     }
+    // [157] Die Sohle endet ebenfalls am Gebäude: wo es über die Grube reicht (Anbau ohne Untergeschoss),
+    // liegt sie unter dem Boden — vorher lief sie als 0.25-mm-Linie quer durch den Raum.
     for i in 0..ring.len() {
-        out.push(ink_line(ring[i], ring[(i + 1) % ring.len()], 0.25, EXCAVATION_INK, None));
+        for (a, b) in outside(ring[i], ring[(i + 1) % ring.len()], house) {
+            out.push(ink_line(a, b, 0.25, EXCAVATION_INK, None));
+        }
     }
     // [137] Pick-Fläche = Wirkbereich (Sohle + Böschungen), ohne Gelände nur die Sohle.
     let hull = crate::excavation::terrains(c.p).into_iter().map(|t| crate::excavation::affected_hull(&crate::excavation::site_terrain(c.p, t), &e.id)).find(|h| h.len() >= 3);
@@ -665,12 +673,18 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
         return;
     }
     let greyed = Some(c.greyed(SECTION_LINE_CATEGORY));
+    // [157] Marken und Beschriftung in Papiergrösse (bei 1:100 wie bisher 6 mm Marke, 5 mm Schrift); kleiner als
+    // 1:100 (Situation 1:200/1:500) auf dem Papier mit (100/n)^0.5 kleiner, sonst stehen die Marken ineinander.
+    let n = if c.a.scale.is_finite() && c.a.scale > 0.0 { c.a.scale } else { 100.0 };
+    let k = if n <= 100.0 { n / 100.0 } else { (n / 100.0).sqrt() };
     for level in &c.p.drawing_levels {
         if !matches!(level.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation) {
             continue;
         }
         let Some([p0, p1]) = level.line_points else { continue };
-        let f = crate::plan::misc::section_line(p0.x, p0.y, p1.x, p1.y, level.direction_sign.unwrap_or(1.0));
+        let tag = section_label_tag(&level.name);
+        let label_w = crate::text_layout::text_width_em(&tag, false) * SECTION_LABEL_H * k;
+        let f = crate::plan::misc::section_line_sized(p0.x, p0.y, p1.x, p1.y, level.direction_sign.unwrap_or(1.0), k, label_w);
         if f.is_empty() {
             continue;
         }
@@ -698,8 +712,8 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
             } else if f[i] == 5.0 {
                 out.push(Primitive::DrawingText {
                     at: v2(f[i + 1], f[i + 2]),
-                    text: section_label_tag(&level.name),
-                    height_m: SECTION_LABEL_H,
+                    text: tag.clone(),
+                    height_m: SECTION_LABEL_H * k,
                     angle: 0.0,
                     color: SECTION_LINE_INK.into(),
                     marks: None,
@@ -767,6 +781,57 @@ mod tests {
         assert_eq!(top_context(&out, 50.0, 5.0).as_deref(), Some("t"), "Gelände");
         assert_eq!(top_context(&out, -10.0, 0.0).as_deref(), Some("hl"), "Höhenlinien");
         assert_eq!(top_context(&out, -30.0, 0.0), None);
+    }
+
+    /// [157] Schnitt-/Ansichtsmarken in Papiergrösse (1:50 wie 1:100, 1:500 um √5 kleiner statt 1/5), die
+    /// Beschriftung steht vor der Pfeilspitze (auch bei senkrechtem Pfeil nicht auf dem Pfeil, „Nord“ oben) und
+    /// zählt zum Ausmass des Plans (oben nicht abgeschnitten).
+    #[test]
+    fn schnittmarken_papiergroesse_beschriftung_frei() {
+        let level = |name: &str, a: [f64; 2], b: [f64; 2]| -> DrawingLevel {
+            serde_json::from_value(serde_json::json!({ "id": name, "name": name, "kind": "elevation", "visible": true, "locked": false,
+                "linePoints": [{ "x": a[0], "y": a[1] }, { "x": b[0], "y": b[1] }] })).unwrap()
+        };
+        // Pfeil nach unten (Ansicht Nord, oben im Plan) und nach links/rechts.
+        let p = Project { drawing_levels: vec![level("Ansicht Nord", [10.0, 20.0], [0.0, 20.0]), level("Ansicht West", [-5.0, 10.0], [-5.0, 0.0]), level("Ansicht Ost", [15.0, 0.0], [15.0, 10.0])], ..Default::default() };
+        let run = |scale: f64| {
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["90"], "scale": {scale}, "global": true}}"#)).unwrap();
+            let mut out = Vec::new();
+            plan_section_lines(&Ctx::new(&p, &a), &mut out);
+            out
+        };
+        let marks = |out: &[Primitive]| -> Vec<(Vec2, Vec2)> { out.iter().filter_map(|q| match q { Primitive::Line { a, b, dash: None, .. } => Some((*a, *b)), _ => None }).collect() };
+        let len = |m: &[(Vec2, Vec2)]| m.iter().map(|(a, b)| (b.x - a.x).hypot(b.y - a.y)).fold(0.0, f64::max);
+        // 1:50 gleich gross auf dem Papier (halb im Modell), 1:500 auf dem Papier um (1/5)^0.5 kleiner.
+        let (m50, m100, m500) = (marks(&run(50.0)), marks(&run(100.0)), marks(&run(500.0)));
+        assert!((len(&m50) / len(&m100) - 0.5).abs() < 1e-9, "{} {}", len(&m50), len(&m100));
+        assert!((len(&m500) / len(&m100) - 5.0f64.sqrt()).abs() < 1e-9, "{} {}", len(&m100), len(&m500));
+        for scale in [100.0, 500.0] {
+            let out = run(scale);
+            let m = marks(&out);
+            for q in &out {
+                let Primitive::DrawingText { at, text, height_m, .. } = q else { continue };
+                // Schriftkasten (Inter-Breite, Versalhöhe 0.75) gegen alle Markenstriche.
+                let w = crate::text_layout::text_width_em(text, false) * height_m;
+                let (x0, y0, x1, y1) = (at.x, at.y, at.x + w, at.y + 0.75 * height_m);
+                for (a, b) in &m {
+                    for k in 0..=20 {
+                        let t = k as f64 / 20.0;
+                        let (x, y) = (a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+                        assert!(!(x > x0 && x < x1 && y > y0 && y < y1), "1:{scale} {text} {at:?} auf Strich {a:?}–{b:?}");
+                    }
+                }
+            }
+        }
+        // Ausmass des Plans umfasst die Beschriftung der Ansicht Nord (über y = 20).
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["90"], "scale": 100, "global": true}"#).unwrap();
+        let d = super::super::domains::plan_domains(&p, &a).unwrap();
+        let top = out_top(&run(100.0));
+        assert!(d.bounds.is_some_and(|b| b[3] >= top - 1e-9), "{:?} < {top}", d.bounds);
+    }
+
+    fn out_top(out: &[Primitive]) -> f64 {
+        out.iter().filter_map(|q| if let Primitive::DrawingText { at, height_m, .. } = q { Some(at.y + height_m) } else { None }).fold(f64::NEG_INFINITY, f64::max)
     }
 
     /// [140] Höhenlinien enden an der Gebäudegrundfläche (Wände vereinigt, ganzer Aussenring).
@@ -930,6 +995,56 @@ mod tests {
         assert!(labels.iter().any(|(t, _)| t == "1.0"), "{:?}", labels.iter().map(|l| &l.0).collect::<Vec<_>>());
         for (t, r) in &labels {
             assert!(r.iter().all(|q| !in_house(q[0], q[1])), "Beschriftung {t} im Gebäude: {r:?}");
+        }
+    }
+
+    /// [157] Die Sohle der Baugrube liegt unter dem Gebäude, wo es über die Grube reicht (Eingangs-Anbau ohne
+    /// Untergeschoss): dort keine Sohlenlinie quer durch den Raum (vorher 0.25 mm durch „E.07 Eingang“);
+    /// ausserhalb des Gebäudes bleibt sie.
+    #[test]
+    fn baugrubensohle_endet_am_gebaeude() {
+        let mut p = sample_with_walls(serde_json::json!([
+            ["h1", "eg", 14.0, 0.0, 26.0, 0.0], ["h2", "eg", 26.0, 0.0, 26.0, 8.0], ["h3", "eg", 26.0, 8.0, 14.0, 8.0], ["h4", "eg", 14.0, 8.0, 14.0, 0.0],
+            ["a1", "eg", 18.5, 8.0, 18.5, 12.0], ["a2", "eg", 18.5, 12.0, 21.5, 12.0], ["a3", "eg", 21.5, 12.0, 21.5, 8.0]
+        ]));
+        // Grube mit Arbeitsraum: Nordrand bei y = 10 läuft durch den Anbau.
+        let pit = Excavation { id: "bg".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, ..Default::default() };
+        p.context = Some(vec![ContextObject::Excavation(pit)]);
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100}"#).unwrap();
+        let mut out = Vec::new();
+        plan_context(&Ctx::new(&p, &a), &mut out);
+        let sohle: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), weight_mm, .. } if c == EXCAVATION_INK && (*weight_mm - 0.25).abs() < 1e-9 => Some((*a, *b)), _ => None }).collect();
+        let north: Vec<&(Vec2, Vec2)> = sohle.iter().filter(|(a, b)| (a.y - 10.0).abs() < 1e-9 && (b.y - 10.0).abs() < 1e-9).collect();
+        assert!(north.iter().any(|(a, b)| a.x.min(b.x) < 13.0), "Sohle ausserhalb fehlt: {north:?}");
+        for (a, b) in &north {
+            let m = (a.x + b.x) / 2.0;
+            assert!(!(m > 18.5 && m < 21.5), "Sohle im Anbau: {a:?}–{b:?}");
+        }
+        assert_eq!(sohle.iter().filter(|(a, b)| (a.x - 12.0).abs() < 1e-9 && (b.x - 12.0).abs() < 1e-9).count(), 1, "Westrand ganz");
+    }
+
+    /// [157] Höhenkoten nicht auf der Baugrube: die Beschriftung einer Höhenlinie liegt nicht auf Sohle,
+    /// Böschungsoberkante oder Böschungsschraffur (vorher „-2.5“/„-2.2“ in der Böschung, Musterhaus komplex EG).
+    #[test]
+    fn hoehenkoten_nicht_auf_der_baugrube() {
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let pit = Excavation { id: "bg".into(), outline: vec![v2(20.0, 5.0), v2(40.0, 5.0), v2(40.0, 35.0), v2(20.0, 35.0)], bottom: 0.5, ..Default::default() };
+        let p = Project { context: Some(vec![ContextObject::Excavation(pit), ContextObject::TerrainMesh(t)]), ..Default::default() };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "scale": 100}"#).unwrap();
+        let mut out = Vec::new();
+        plan_context(&Ctx::new(&p, &a), &mut out);
+        let pit_lines: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == EXCAVATION_INK => Some((*a, *b)), _ => None }).collect();
+        let labels: Vec<(String, Vec<[f64; 2]>)> = out.iter().filter_map(label_rect).collect();
+        assert!(!pit_lines.is_empty() && !labels.is_empty(), "{} {}", pit_lines.len(), labels.len());
+        for (t, r) in &labels {
+            let flat: Vec<f64> = r.iter().flat_map(|q| [q[0], q[1]]).collect();
+            for (a, b) in &pit_lines {
+                for k in 0..=20 {
+                    let f = k as f64 / 20.0;
+                    let (x, y) = (a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+                    assert!(!crate::plan::pick::point_in_polygon(x, y, &flat), "Kote {t} auf der Baugrube: {a:?}–{b:?}");
+                }
+            }
         }
     }
 

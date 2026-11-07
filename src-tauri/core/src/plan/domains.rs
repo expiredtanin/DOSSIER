@@ -788,7 +788,7 @@ fn abbreviate(text: &str, n: usize) -> String {
 }
 
 /// [140] Hindernisse für Raumstempel aus den schon erzeugten Domänen: Treppen (alle Striche), Türschwenk-Bögen,
-/// Stützen, Beschriftungen des Kontexts (Höhenlinien-Koten) und die Zeichnungen, denen Stempel ausweichen
+/// Stützen, Beschriftungen des Kontexts (Höhenlinien-Koten), Schnittführungen ([157]) und die Zeichnungen, denen Stempel ausweichen
 /// (Bemassung, Koten, Texte, Symbole; `drawings::stamp_obstacle_prims`).
 #[cfg(test)]
 fn stamp_obstacles(c: &Ctx, d: &DomainPrims) -> super::stamp_place::Obstacles {
@@ -818,6 +818,12 @@ fn stamp_obstacles_with(d: &DomainPrims, drawn: super::stamp_place::Obstacles) -
     }
     for q in &d.context {
         if matches!(q, Primitive::DrawingText { .. }) {
+            o.add_prim(q);
+        }
+    }
+    // [157] Schnittführungen (Linie, Marken, Beschriftung): der Stempel steht neben der Linie, nicht darauf.
+    for q in &d.sections {
+        if matches!(q, Primitive::Line { .. } | Primitive::DrawingText { .. }) {
             o.add_prim(q);
         }
     }
@@ -1162,6 +1168,20 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
     if c.a.global {
         // [150] Schnittführungen zuerst: ihre Beschriftungen sind Hindernisse der Höhenlinien-Beschriftungen.
         super::context::plan_section_lines(c, &mut out.sections);
+        // [157] Marken und Beschriftungen der Schnittführungen gehören zum Ausmass (sonst oben abgeschnitten).
+        for q in &out.sections {
+            match q {
+                Primitive::Line { a, b, .. } => {
+                    bounds.acc(a.x, a.y);
+                    bounds.acc(b.x, b.y);
+                }
+                Primitive::DrawingText { at, text, height_m, .. } => {
+                    bounds.acc(at.x, at.y);
+                    bounds.acc(at.x + crate::text_layout::text_width_em(text, false) * height_m, at.y + height_m);
+                }
+                _ => {}
+            }
+        }
         let mut o = drawn.clone();
         for q in out.sections.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })) {
             o.add_prim(q);
@@ -1563,6 +1583,34 @@ mod tests {
         p.drawings2d.clear();
         p.drawings2d.push(mk(serde_json::json!({ "shape": "text", "at": { "x": 49.0, "y": 49.0 }, "text": "XXXXXXXXXXXXXXXXXXXXXXXXXX", "height": 6.0, "angle": 0.0 })));
         assert_eq!(stamp(&p).0, pole);
+    }
+
+    /// [157] Schnittführung quer durch den Raum: der Stempel steht neben der strichpunktierten Linie, nicht
+    /// darauf (vorher lief „A-A“ durch Raumnamen und Fläche, Musterhaus komplex OG/DG).
+    #[test]
+    fn raumstempel_weicht_schnittlinie_aus() {
+        let mut p = sample();
+        let r = p.rooms.as_mut().unwrap().iter_mut().find(|r| r.floor_id == "eg").unwrap();
+        let q = [(0.0, 0.0), (7.0, 0.0), (7.0, 5.0), (0.0, 5.0)];
+        r.boundary = q.iter().map(|&(x, y)| Vec2 { x: x + 50.0, y: y + 50.0 }).collect();
+        r.stamp_anchor = None;
+        r.stamp = None;
+        let id = r.id.clone();
+        p.drawing_levels.retain(|l| !matches!(l.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation));
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "60", "80", "90"], "grey": [], "scale": 100, "global": true }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let stamp = |p: &Project| {
+            let out = plan_domains(p, &a).unwrap();
+            out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, extra_lines, base_pt, .. } if *rid == id => Some((*at, doc.clone(), extra_lines.clone(), *base_pt)), _ => None }).unwrap()
+        };
+        let (pole, ..) = stamp(&p);
+        // Schnitt A-A senkrecht durch den Pol (x = 53.5), über den Raum hinaus.
+        let level: DrawingLevel = serde_json::from_value(serde_json::json!({ "id": "sx", "name": "Schnitt A-A", "kind": "section", "visible": true, "locked": false,
+            "linePoints": [{ "x": 53.5, "y": 44.0 }, { "x": 53.5, "y": 61.0 }] })).unwrap();
+        p.drawing_levels.push(level);
+        let (at, doc, extra, pt) = stamp(&p);
+        let (w, _) = stamp_size_m(&doc, &extra, pt, 100.0);
+        assert!((at.x - 53.5).abs() > w / 2.0, "Stempel auf der Schnittlinie: {at:?} (Pol {pole:?}, Breite {w})");
     }
 
     /// [140] Teil 6: Treppe und Türschwenk sind Hindernisse (Strecken bzw. Sektor), Bogenwände nicht.

@@ -1,12 +1,12 @@
-viewBox -4.243 0 23.243 18.205
-bytes 298010
+viewBox -12.8 0 37.6 33.6
+bytes 315635
 circle 14
 g 1
 line 3222
 polygon 22
-polyline 70
+polyline 72
 rect 1
 svg 1
-text 36
-tspan 12
-hash 735e870f40a3c586
+text 34
+tspan 9
+hash dc8c243d62798e55
