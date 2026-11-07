@@ -167,3 +167,37 @@ fn netz_override_fuellung_und_ausblenden() {
     let q = without_elements(&p, &hidden);
     assert!(mesh_cuts(&compute_section(&q, &lv(false), &[]).unwrap().unwrap()).is_empty());
 }
+
+/// [152] IFC-Gelände (Netz „Gelaende" der Klasse IfcSite, 1 m dicke Platte) als Geländelinie mit Erdreich statt als
+/// geschnittener Körper; ein Netz ohne Gelände-Merkmal bleibt Körper.
+#[test]
+fn ifc_gelaende_als_gelaendelinie() {
+    let terrain = |name: &str, layer: Option<&str>| {
+        let (positions, indices) = cube(-4.0, 7.0, -3.0, 3.0, -1.0, 0.0);
+        ContextObject::ImportedMesh(ImportedMesh { id: "g".into(), name: name.into(), layer: layer.map(String::from), category_code: Some("10".into()), positions, indices, ..Default::default() })
+    };
+    for (name, layer) in [("Gelaende", Some("IfcSite")), ("Terrain", None), ("Site (3)", Some("IfcSite")), ("Gelände 1", Some("IfcGeographicElement"))] {
+        let p = with(vec![terrain(name, layer), mesh("w", cube(1.0, 3.0, -1.0, 2.0, 0.0, 2.5))]);
+        let ContextObject::ImportedMesh(g) = &p.context.as_ref().unwrap()[0] else { unreachable!() };
+        assert!(crate::mesh_view::is_terrain(g), "{name}");
+        let o = compute_section(&p, &lv(false), &[]).unwrap().unwrap();
+        let c = mesh_cuts(&o);
+        assert_eq!(c.len(), 1, "nur der Würfel als Schnittfläche ({name})");
+        assert_eq!(c[0].source_id.as_deref(), Some("w"));
+        // Geländelinie = Oberkante z = 0 über die ganze Breite (u 1 … 12), kein Unterrand.
+        let len: f64 = o.profiles.iter().flat_map(|pr| pr.pts.windows(2)).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum();
+        assert!(o.profiles.iter().all(|pr| !pr.natural && pr.pts.iter().all(|q| q[1].abs() < 1e-9)), "{:?}", o.profiles);
+        assert!((len - 11.0).abs() < 1e-6, "{len}");
+        assert_eq!(o.terrain_id.as_deref(), Some("g"));
+        assert!(!o.earth.is_empty(), "Erdreich-Band unter der Linie");
+        // Keine Projektionskanten des Geländes.
+        assert!(o.visible.iter().all(|e| e.kind != Kind::Mesh || o.meshes.get(e.index).is_some_and(|m| m.id == "w")));
+        let (prims, _) = section_primitives_at(&o, false, false, &Visibility::default(), 100.0, Detail::Mittel, false, &CutRules::default());
+        assert!(prims.iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "section-terrain")));
+    }
+    // Gewöhnliches Netz gleicher Form: Körper.
+    let p = with(vec![terrain("Bodenplatte", Some("IfcSlab"))]);
+    let o = compute_section(&p, &lv(false), &[]).unwrap().unwrap();
+    assert_eq!(mesh_cuts(&o).len(), 1);
+    assert!(o.profiles.is_empty());
+}

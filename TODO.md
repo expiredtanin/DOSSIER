@@ -3451,6 +3451,11 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Maler-Platz über der Zellmitte, Kacheln 16×16 zum schnellen Ausschluss; Kanten weiter exakt aus allen Flächen).
   Schependomlaan Ansicht Süd 1:100 (CLI, WASM ohne Opt.): nur Netze 27.0 → 2.2 MB, mit `--elements` 19.3 → 2.4 MB, Bild
   bei 2400 px pixelgleich (bzw. 1 Pixel), Zeit 6.3 → 6.8 s. Test `elevation::verdeckte_netzflaechen_entfallen`.
+  **IFC-Gelände im Schnitt** (`mesh_view::is_terrain`: Layer/Klasse `IfcSite` oder Name mit „Gelände"/„Gelaende"/„Terrain",
+  z. B. `IfcGeographicElement` „Terrain"): kein Körper mehr, sondern Geländelinie aus der Oberkante des Ebenenschnitts
+  (offene Züge ganz) samt Erdreich-Band wie `TerrainMesh` (`section::upper_edge`, `append_terrain_profiles`), keine
+  Projektionskanten. Test `section::mesh_tests::ifc_gelaende_als_gelaendelinie`. FZK Schnitt A: schwarze Geländeplatte →
+  Linie. Ansicht/Grundriss behandeln das Netz weiter als Netz.
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
