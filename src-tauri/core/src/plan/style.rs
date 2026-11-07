@@ -16,14 +16,14 @@ pub const GLASS_LINE_MM: f64 = 0.02;
 /// [140] Schichtfugen im Wandschnitt ohne eigene Fugenstärke (`Layer.jointWeightMm`): fein, aber druckbar
 /// (vorher 0.02); bewusst unter der Schraffur-Stärke, damit dünne Schichten in 1:100 nicht zulaufen.
 pub const LAYER_JOINT_MM: f64 = 0.09;
-/// Kanten über der Schnittebene (Decken-/Dachränder, Bauteile „über Schnitt"): Strichpunktlinie nach
-/// SIA 400 B.3.3 (Strich, Lücke, Punkt, Lücke; Punkt = Länge 0 mit runder Kappe).
-pub const OVERHEAD_DASH: [f64; 4] = [0.4, 0.12, 0.0, 0.12];
+/// Kanten über der Schnittebene (Decken-/Dachränder, Bauteile „über Schnitt"): Strichpunktlinie
+/// (Strich, Lücke, Punkt, Lücke; Punkt = Länge 0 mit runder Kappe), Papier-mm ([153]).
+pub const OVERHEAD_DASH: [f64; 4] = super::line_pattern::OVERHEAD;
 pub const ROOF_EAVES_MM: f64 = 0.13;
 pub const ROOF_RIDGE_MM: f64 = 0.25;
 pub const ROOF_HIP_MM: f64 = 0.18;
 pub const ROOF_BREAK_MM: f64 = 0.09;
-pub const ROOF_BREAK_DASH: [f64; 2] = [0.12, 0.08];
+pub const ROOF_BREAK_DASH: [f64; 2] = super::line_pattern::HIDDEN;
 pub const WALL_FALLBACK_MM: f64 = 0.18;
 pub const HATCH_PAPER: &str = "#f0f0f0";
 pub const HATCH_INK: &str = "#0f0f0f";

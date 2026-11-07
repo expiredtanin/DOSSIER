@@ -173,6 +173,31 @@ fn op(greyed: bool, opacity: Option<f64>) -> String {
     }
 }
 
+/// Gestrichelter Zug aus aneinander anschliessenden Linien gleicher Darstellung ([153]).
+struct DashRun {
+    /// Attribute ohne Geometrie (Farbe, Breite, Muster, Deckkraft).
+    key: String,
+    /// Muster in Papier-mm.
+    dash: Vec<f64>,
+    pts: Vec<V2>,
+    /// Platz in der Ausgabe (erste Linie des Zugs).
+    slot: usize,
+}
+
+/// Schreibt einen Zug als `<line>`/`<polyline>` mit der Musterphase ([`super::line_pattern::phase`]):
+/// beide Enden möglichst auf einem Strich, Phase über die Ecken.
+fn flush_dash_run(run: Option<DashRun>, out: &mut [String], mm_to_m: f64, xs: &dyn Fn(f64) -> String, ys: &dyn Fn(f64) -> String) {
+    let Some(r) = run else { return };
+    let len: f64 = r.pts.windows(2).map(|w| crate::jsmath::hypot2(w[1].x - w[0].x, w[1].y - w[0].y)).sum();
+    let ph = if mm_to_m > 0.0 { super::line_pattern::phase(len / mm_to_m, &r.dash) } else { 0.0 };
+    let off = if ph > 1e-9 { format!(" stroke-dashoffset=\"{}\"", num(ph * mm_to_m)) } else { String::new() };
+    out[r.slot] = if r.pts.len() == 2 {
+        format!("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{off}/>", xs(r.pts[0].x), ys(r.pts[0].y), xs(r.pts[1].x), ys(r.pts[1].y), r.key)
+    } else {
+        format!("<polyline points=\"{}\" fill=\"none\"{}{off}/>", r.pts.iter().map(|q| format!("{},{}", xs(q.x), ys(q.y))).collect::<Vec<_>>().join(" "), r.key)
+    };
+}
+
 /// SVG-Text des Plans; `None` bei kaputtem Puffer.
 pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
     let n = o.scale_denominator;
@@ -186,12 +211,17 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
     let ys = |y: f64| num(top - y);
     let mut out: Vec<String> = Vec::new();
     let mut stitch = Stitcher::default();
+    // [153] Gestrichelte Linien, die aneinander anschliessen, als EIN Zug (Phase über die Ecken).
+    let mut run: Option<DashRun> = None;
     for part in parts.iter_mut() {
         let hatches = if o.hatch { part.view.hatch_table()? } else { Vec::new() };
         for i in part.from..part.to {
             let rec = part.view.rec(i)?;
             let f = rec.f.clone();
             let fl = rec.flags;
+            if rec.tag != T_LINE || fl & F_DASH_LIST == 0 {
+                flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys);
+            }
             let greyed = fl & F_GREYED != 0;
             let opacity = |k: usize| (fl & F_OPACITY != 0).then_some(f[k]);
             let dash_attr = |part: &Part| -> Option<String> {
@@ -281,9 +311,25 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                 T_LINE => {
                     let color = if fl & F_COLOR != 0 { esc(part.str(f[1]).unwrap_or("")) } else { "#000".into() };
                     let dash = dash_attr(part)?;
+                    if !dash.is_empty() {
+                        // Muster (Papier-mm) für die Phase; Zug fortsetzen oder neu beginnen.
+                        let (po, plen) = rec.dash?;
+                        let pat = part.view.pool(po, plen)?;
+                        let key = format!(" stroke=\"{color}\" stroke-width=\"{}\"{dash}{}", num(f[2] * mm_to_m), op(greyed, opacity(3)));
+                        let (a, b) = (V2 { x: f[4], y: f[5] }, V2 { x: f[6], y: f[7] });
+                        if let Some(r) = run.as_mut().filter(|r| r.key == key && r.pts.last().is_some_and(|p| (p.x - a.x).abs() < 1e-9 && (p.y - a.y).abs() < 1e-9)) {
+                            r.pts.push(b);
+                        } else {
+                            flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys);
+                            out.push(String::new());
+                            run = Some(DashRun { key, dash: pat, pts: vec![a, b], slot: out.len() - 1 });
+                        }
+                        continue;
+                    }
+                    flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys);
                     // [146] Volle Linien: mit Kantenläufen gleicher Farbe/Breite zusammennähen (Ecke statt
                     // zweier Enden); Enden und Ecken erben die Projekt-Einstellung vom `<g>`.
-                    if dash.is_empty() && f[2] > 0.0 {
+                    if f[2] > 0.0 {
                         out.push(String::new());
                         let attrs = format!(" stroke=\"{color}\" stroke-width=\"{}\"{}", num(f[2] * mm_to_m), op(greyed, opacity(3)));
                         stitch.add(attrs, vec![V2 { x: f[4], y: f[5] }, V2 { x: f[6], y: f[7] }], out.len() - 1);
@@ -385,6 +431,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                 _ => {}
             }
         }
+        flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys);
     }
     stitch.finish(&mut out, &xs, &ys);
     out.retain(|s| !s.is_empty());

@@ -551,7 +551,10 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                             Some(s) => part.str(s).is_some_and(|s| !s.is_empty()),
                             None => false,
                         };
-                        if drawing {
+                        // [153] Auch abgeleitete gestrichelte Linien (Handlauf, Terrain …), die aneinander
+                        // anschliessen, laufen als EIN Zug: Musterphase über die Ecken wie im Plan-/Druck-SVG.
+                        let dashed = matches!(&dash, SDash::List(d) if !d.is_empty());
+                        if drawing || dashed {
                             let src = RunSrc { cls, color: col_s, weight: w, dash, greyed };
                             let cont = match &b.cur {
                                 Some((pts, c)) => {

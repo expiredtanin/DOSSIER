@@ -34,7 +34,7 @@ const SITE_PROFILE_OPACITY: f64 = 0.25;
 const PARCEL_COLOR: &str = "#3a3a3a";
 const ALLOWED_COLOR: &str = "#6e6e6e";
 const PARCEL_DASH: [f64; 4] = [6.0, 1.5, 0.5, 1.5];
-const ALLOWED_DASH: [f64; 2] = [2.0, 1.0];
+const ALLOWED_DASH: [f64; 2] = super::line_pattern::HIDDEN;
 
 /// Geschoss, auf dem Boden-Schatten und Baurecht erscheinen: Basishöhe am nächsten bei 0 (das erste
 /// bei Gleichstand).

@@ -60,10 +60,10 @@
 <polygon points="4.12,6.06564 4.88,6.06564 4.88,5.10564 4.12,5.10564" fill="#d3d8dd" stroke="#2b3039" stroke-width="0.013"/>
 <polygon points="4,5.06564 5,5.06564 5,4.98564 4,4.98564" fill="#a7adb5" stroke="none" stroke-width="0"/>
 <polygon points="4,6.18564 4.08,6.18564 4.08,5.06564 4,5.06564" fill="#a7adb5" stroke="none" stroke-width="0"/>
-<line x1="4.88" y1="6.06564" x2="4.12" y2="5.58564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18"/>
-<line x1="4.88" y1="5.10564" x2="4.12" y2="5.58564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18"/>
-<line x1="4.12" y1="6.06564" x2="4.5" y2="5.10564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18"/>
-<line x1="4.88" y1="6.06564" x2="4.5" y2="5.10564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18"/>
+<line x1="4.88" y1="6.06564" x2="4.12" y2="5.58564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18" stroke-dashoffset="0.06056"/>
+<line x1="4.88" y1="5.10564" x2="4.12" y2="5.58564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18" stroke-dashoffset="0.06056"/>
+<line x1="4.12" y1="6.06564" x2="4.5" y2="5.10564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18" stroke-dashoffset="0.19376"/>
+<line x1="4.88" y1="6.06564" x2="4.5" y2="5.10564" stroke="#7d858f" stroke-width="0.01" stroke-dasharray="0.22 0.18" stroke-dashoffset="0.19376"/>
 <polygon points="0.6,1.88564 6.4,1.88564 6.4,2.05885 0.6,2.05885" fill="#b8735c" stroke="none" stroke-width="0"/>
 <polyline points="1.8,7.08564 1.8,4.98564 2.7,4.98564 2.7,7.08564" fill="none" stroke="#2b3039" stroke-width="0.013"/>
 <polygon points="5,6.18564 4,6.18564 4,4.98564 5,4.98564" fill="none" stroke="#2b3039" stroke-width="0.013"/>

@@ -30,32 +30,32 @@
 <polygon points="3.2,3.41917 3.2,3.20583 4.2,3.20583 4.2,3.41917" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
 <line x1="3.2" y1="3.20583" x2="4.2" y2="3.20583" stroke="#1a1a1a" stroke-width="0.018"/>
 <polygon points="3.2,3.20583 3.2,2.9925 4.2,2.9925 4.2,3.20583" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="2.9925" x2="4.2" y2="2.9925" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="2.9925" x2="4.2" y2="2.9925" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <polygon points="3.2,2.9925 3.2,2.77917 4.2,2.77917 4.2,2.9925" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="2.77917" x2="4.2" y2="2.77917" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="2.77917" x2="4.2" y2="2.77917" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <polygon points="3.2,2.77917 3.2,2.56583 4.2,2.56583 4.2,2.77917" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="2.56583" x2="4.2" y2="2.56583" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="2.56583" x2="4.2" y2="2.56583" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <polygon points="3.2,2.56583 3.2,2.3525 4.2,2.3525 4.2,2.56583" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="2.3525" x2="4.2" y2="2.3525" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="2.3525" x2="4.2" y2="2.3525" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <polygon points="3.2,2.3525 3.2,2.13917 4.2,2.13917 4.2,2.3525" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="2.13917" x2="4.2" y2="2.13917" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="2.13917" x2="4.2" y2="2.13917" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <polygon points="3.2,2.13917 3.2,1.92583 4.2,1.92583 4.2,2.13917" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="1.92583" x2="4.2" y2="1.92583" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="1.92583" x2="4.2" y2="1.92583" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <polygon points="3.2,1.92583 3.2,1.7125 4.2,1.7125 4.2,1.92583" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="1.7125" x2="4.2" y2="1.7125" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="1.7125" x2="4.2" y2="1.7125" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <polygon points="3.2,1.7125 3.2,1.49917 4.2,1.49917 4.2,1.7125" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="1.49917" x2="4.2" y2="1.49917" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="1.49917" x2="4.2" y2="1.49917" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <polygon points="3.2,1.49917 3.2,1.28583 4.2,1.28583 4.2,1.49917" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="1.28583" x2="4.2" y2="1.28583" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="1.28583" x2="4.2" y2="1.28583" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <polygon points="3.2,1.28583 3.2,1.0725 4.2,1.0725 4.2,1.28583" fill="none" stroke="#1a1a1a" stroke-width="0.0126"/>
-<line x1="3.2" y1="1.0725" x2="4.2" y2="1.0725" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.012 0.008"/>
+<line x1="3.2" y1="1.0725" x2="4.2" y2="1.0725" stroke="#1a1a1a" stroke-width="0.0108" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.05"/>
 <line x1="3.2" y1="3.03917" x2="4.2" y2="3.03917" stroke="#1a1a1a" stroke-width="0.018"/>
 <line x1="3.2" y1="3.15917" x2="4.2" y2="3.15917" stroke="#1a1a1a" stroke-width="0.018"/>
 <line x1="3.7" y1="4.16583" x2="3.7" y2="1.1045" stroke="#1a1a1a" stroke-width="0.018"/>
 <line x1="3.579" y1="1.3245" x2="3.7" y2="1.1045" stroke="#1a1a1a" stroke-width="0.018"/>
 <line x1="3.821" y1="1.3245" x2="3.7" y2="1.1045" stroke="#1a1a1a" stroke-width="0.018"/>
 <polygon points="3.2,4.2725 4.2,4.2725 4.2,1.0725 3.2,1.0725" fill="none" stroke="#1a1a1a" stroke-width="0.018"/>
-<line x1="-1" y1="2.6725" x2="6" y2="2.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15"/>
+<line x1="-1" y1="2.6725" x2="6" y2="2.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15" stroke-dashoffset="0.09"/>
 <polyline points="-1,2.9725 -1,2.3725 -1,1.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="-1" y1="1.7725" x2="-0.85" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="-1" y1="1.7725" x2="-1.15" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
@@ -65,7 +65,7 @@
 <line x1="6" y1="1.7725" x2="5.85" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
 <text x="5.85" y="1.2825" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.85 1.2825)">A</text>
 <polygon points="-1,2.3725 6,2.3725 6,2.9725 -1,2.9725" fill="none" stroke="none" stroke-width="0"/>
-<line x1="-1" y1="6.6725" x2="6" y2="6.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15"/>
+<line x1="-1" y1="6.6725" x2="6" y2="6.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15" stroke-dashoffset="0.09"/>
 <polyline points="-1,6.9725 -1,6.3725 -1,5.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="-1" y1="5.7725" x2="-0.85" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>
 <line x1="-1" y1="5.7725" x2="-1.15" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>

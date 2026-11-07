@@ -42,7 +42,7 @@ const IMPORTED_RGB: [f64; 3] = [159.0 / 255.0, 166.0 / 255.0, 174.0 / 255.0];
 const EPS: f64 = 1e-6;
 const HIDDEN_INK: &str = "#8a929c";
 const HIDDEN_MM: f64 = 0.13;
-const HIDDEN_DASH: [f64; 2] = [0.12, 0.08];
+const HIDDEN_DASH: [f64; 2] = super::line_pattern::HIDDEN;
 
 type Pt = [f64; 2];
 

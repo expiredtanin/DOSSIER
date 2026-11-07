@@ -33,6 +33,7 @@ pub mod pick;
 pub mod sketch;
 pub mod ceiling_plan;
 pub mod line_ends;
+pub mod line_pattern;
 pub mod stamp_place;
 pub mod trees;
 pub mod mesh_plan;

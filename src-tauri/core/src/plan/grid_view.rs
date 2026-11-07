@@ -28,7 +28,7 @@ pub fn grid_prims(p: &Project, level: &LevelSpec, bounds: [f64; 4], scale: f64) 
         let Some(spec) = Spec::of(&d.geom) else { continue };
         // [137] Achsen, Blasen und Beschriftung tragen die Raster-Id: im Schnitt/in der Ansicht anwählbar.
         let id = Some(d.id.clone());
-        out.extend(one(&spec, &plane, level, bounds, scale, bubble_diameter(*bubble_mm, scale), bubbles.unwrap_or(GridBubbles::Both)).into_iter().map(|mut q| {
+        out.extend(one(&spec, &plane, level, bounds, bubble_diameter(*bubble_mm, scale), bubbles.unwrap_or(GridBubbles::Both)).into_iter().map(|mut q| {
             match &mut q {
                 Primitive::Line { drawing_id, .. } | Primitive::DrawingCircle { drawing_id, .. } | Primitive::DrawingText { drawing_id, .. } => *drawing_id = id.clone(),
                 _ => {}
@@ -70,7 +70,7 @@ pub fn union_bounds(bounds: [f64; 4], grid: &[Primitive]) -> [f64; 4] {
     extent(grid).map_or(bounds, |g| [bounds[0].min(g[0]), bounds[1].min(g[1]), bounds[2].max(g[2]), bounds[3].max(g[3])])
 }
 
-fn one(spec: &Spec, plane: &Plane, level: &LevelSpec, bounds: [f64; 4], scale: f64, diameter: f64, bubbles: GridBubbles) -> Vec<Primitive> {
+fn one(spec: &Spec, plane: &Plane, level: &LevelSpec, bounds: [f64; 4], diameter: f64, bubbles: GridBubbles) -> Vec<Primitive> {
     let (bx, by) = plane.base();
     let (ux, uy) = plane.u_model();
     let l = ux.hypot(uy);
@@ -82,8 +82,8 @@ fn one(spec: &Spec, plane: &Plane, level: &LevelSpec, bounds: [f64; 4], scale: f
     let [p0, p1] = level.line.unwrap_or([v2(bx, by), v2(bx, by)]);
     let e = (p1.x - p0.x) * u.0 + (p1.y - p0.y) * u.1;
     let (lo, hi) = (e.min(0.0), e.max(0.0));
-    let mm = |x: f64| x * scale / 1000.0;
-    let dash = vec![mm(12.0), mm(2.5), mm(1.5), mm(2.5)];
+    // [153] Achsen strichpunktiert in Papier-mm (vorher mit dem Massstab vorskaliert).
+    let dash = super::line_pattern::AXIS.to_vec();
     let (y0, y1) = (bounds[1] - OVER_BOTTOM, bounds[3] + OVER_TOP);
     let (r, text_h) = (diameter / 2.0, diameter * 0.5);
     let mut out = Vec::new();
@@ -160,6 +160,11 @@ mod tests {
         assert!((lines[0].0 - 1.0).abs() < 1e-9 && (lines[1].0 - 5.0).abs() < 1e-9);
         assert!(lines[0].1 < 0.0 && lines[0].2 > 6.0);
         assert_eq!(texts(&prims), ["1", "2"]);
+        // [153] Achsmuster in Papier-mm, unabhängig vom Massstab (vorher mit N/1000 vorskaliert).
+        for n in [50.0, 200.0] {
+            let dashes: Vec<Vec<f64>> = grid_prims(&p, &level, [0.0, 0.0, 9.0, 6.0], n).iter().filter_map(|q| if let Primitive::Line { dash: Some(Some(d)), .. } = q { Some(d.clone()) } else { None }).collect();
+            assert!(!dashes.is_empty() && dashes.iter().all(|d| d[..] == super::super::line_pattern::AXIS[..]), "1:{n} {dashes:?}");
+        }
         // [137] alles mit der Raster-Id (anwählbar)
         assert!(prims.iter().all(|q| matches!(q, Primitive::Line { drawing_id: Some(i), .. } | Primitive::DrawingCircle { drawing_id: Some(i), .. } | Primitive::DrawingText { drawing_id: Some(i), .. } if i == "G")), "{prims:?}");
         // Schnitt längs der Achsen 1/2: nur die waagrechten Achsen A, B queren.

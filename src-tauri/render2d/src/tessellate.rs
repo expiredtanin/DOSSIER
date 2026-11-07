@@ -117,6 +117,56 @@ fn dash_cycle_m(dash: &[f32]) -> Option<Vec<f32>> {
     (total > 1e-9).then_some(cycle)
 }
 
+/// Sichtbares Strichstück an einem Zugende ([153]): `p` = Musterlage am Zuganfang (`at_end` falsch,
+/// Strich ab `p` bis Elementende) bzw. am Zugende (`at_end` wahr, Strich vom Elementanfang bis `p`).
+/// Positiv = Länge des Strichstücks (höchstens `len`), negativ = Länge der Lücke am Ende.
+/// Spiegel von `dash_stub` im WGSL und `line_pattern::end_stub` im Kern.
+fn dash_stub(p: f32, len: f32, total: f32, cyc: &[f32], at_end: bool) -> f32 {
+    let mut m = p - (p / total).floor() * total;
+    if at_end && m <= 0.0 {
+        m = total;
+    }
+    let mut acc = 0.0f32;
+    let mut r = 0.0f32;
+    for (i, &d) in cyc.iter().enumerate() {
+        let hit = if at_end { m > acc && m <= acc + d } else { m >= acc && m < acc + d };
+        if hit {
+            let v = if at_end { m - acc } else { acc + d - m };
+            r = if i % 2 == 0 { v.min(len) } else { -v };
+        }
+        acc += d;
+    }
+    r
+}
+
+/// [153] Musterphase eines gestrichelten Zugs der Länge `len` (gleiche Einheit wie der gerade Zyklus
+/// `cyc`): Lage im Muster am Zuganfang, so gewählt, dass beide Enden möglichst auf einem Strich liegen.
+/// Kandidaten: Phase 0 (voller Strich am Anfang) und das Muster um die Zugmitte zentriert auf jedes
+/// Element (symmetrische Enden); gewinnt das kürzere der beiden End-Strichstücke, bei Gleichstand der
+/// frühere Kandidat. Spiegel des WGSL-`dash_phase` (`DASH_LINE_WGSL`) und von
+/// `dossier_core::plan::line_pattern::phase` (gleiche Rechenschritte).
+pub fn dash_phase(len: f32, cyc: &[f32]) -> f32 {
+    let total: f32 = cyc.iter().sum();
+    if !(len > 0.0) || !(total > 1e-6) || cyc.len() < 2 {
+        return 0.0;
+    }
+    let score = |p: f32| dash_stub(p, len, total, cyc, false).min(dash_stub(p + len, len, total, cyc, true));
+    let mut best_p = 0.0f32;
+    let mut best = score(0.0);
+    let mut acc = 0.0f32;
+    for &d in cyc {
+        let q = acc + 0.5 * d - 0.5 * len;
+        let p = q - (q / total).floor() * total;
+        let s = score(p);
+        if s > best + 1e-4 * total {
+            best = s;
+            best_p = p;
+        }
+        acc += d;
+    }
+    best_p
+}
+
 /// Deckung eines Pixels durch einen gestrichelten Zug — CPU-Spiegel des Fragment-Shaders
 /// (`DASH_LINE_WGSL`, gleiche Rechenschritte), fuer Tests. Alles in Geraete-px: `s` Lauflaenge
 /// des Pixels (auch vor/hinter dem Segment, im Kappen-Bereich), `y` Abstand quer zur Achse,
@@ -128,8 +178,11 @@ pub fn dash_coverage(s: f32, y: f32, seg: [f32; 4], total: f32, cyc: &[f32]) -> 
     let e_out = (s - sc).abs();
     let mut e_in = 0.0f32;
     if !cyc.is_empty() && total > 1e-6 {
-        let k = (sc / total).floor();
-        let m = sc - k * total;
+        // [153] Musterphase des ganzen Zugs (Striche an beiden Enden, s. `dash_phase`).
+        let ph = dash_phase(seg[2], cyc);
+        let sp = sc + ph;
+        let k = (sp / total).floor();
+        let m = sp - k * total;
         let mut acc = 0.0f32;
         let mut on = true;
         let mut prev_end = 0.0f32;
@@ -144,8 +197,9 @@ pub fn dash_coverage(s: f32, y: f32, seg: [f32; 4], total: f32, cyc: &[f32]) -> 
         }
         if !on {
             let base = k * total;
-            let pe = sc - (base + prev_end);
-            let ne = if base + next_start > seg[2] { f32::INFINITY } else { base + next_start - sc };
+            // Ein Strich vor dem Zuganfang bzw. hinter dem Zugende wird nicht gezeichnet.
+            let pe = if base + prev_end < ph { f32::INFINITY } else { sp - (base + prev_end) };
+            let ne = if base + next_start > seg[2] + ph { f32::INFINITY } else { base + next_start - sp };
             e_in = pe.min(ne).max(0.0);
         }
     }
@@ -247,7 +301,20 @@ fn split_dash(pts: &[Point], dash: &[f32]) -> Vec<Vec<Point>> {
     let mut idx = 0usize;
     let mut dash_left = cycle[0];
     let mut on = true;
-    let mut piece: Option<Vec<Point>> = Some(vec![pts[0]]);
+    // [153] Musterphase des ganzen Laufs (wie der Shader): vor dem ersten Punkt vorspulen.
+    let run: f32 = pts.windows(2).map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt()).filter(|l| *l >= 1e-12).sum();
+    let mut skip = dash_phase(run, &cycle);
+    while skip > 1e-9 {
+        let st = skip.min(dash_left);
+        skip -= st;
+        dash_left -= st;
+        if dash_left <= 1e-9 {
+            on = !on;
+            idx += 1;
+            dash_left = cycle[idx % cycle.len()];
+        }
+    }
+    let mut piece: Option<Vec<Point>> = on.then(|| vec![pts[0]]);
 
     for w in pts.windows(2) {
         let mut a = w[0];
@@ -1286,6 +1353,31 @@ mod tests {
         assert!(geo.dash_segments.is_empty() && !geo.line_idx.is_empty());
     }
 
+    /// [153] Musterphase wie im Kern (`line_pattern::phase`, gleiche Werte): kurze Stücke ganz Strich,
+    /// sonst beide Enden auf einem Strich; die Deckung beginnt und endet mit Strich.
+    #[test]
+    fn musterphase_enden_auf_strich() {
+        assert_eq!(dash_phase(1.5, &[2.0, 1.0]), 0.0);
+        assert!((dash_phase(10.0, &[2.0, 1.0]) - 0.5).abs() < 1e-5);
+        assert!((dash_phase(4.0, &[2.0, 1.0]) - 0.5).abs() < 1e-5);
+        assert!((dash_phase(3.0, &[2.0, 1.0]) - 1.0).abs() < 1e-5);
+        assert!((dash_phase(7.0, &[6.0, 1.5, 0.0, 1.5]) - 4.0).abs() < 1e-5);
+        assert_eq!(dash_phase(f32::NAN, &[2.0, 1.0]), 0.0);
+        // Zug 3 px, Muster [2, 1]: Phase 1 → Strich 0–1, Lücke 1–2, Strich 2–3 (statt Strich 0–2, Lücke bis zum Ende).
+        let seg = [0.0, 3.0, 3.0, 0.5];
+        let cyc = [2.0f32, 1.0];
+        assert!(dash_coverage(0.0, 0.0, seg, 3.0, &cyc) < 1e-6);
+        assert!(dash_coverage(2.9, 0.0, seg, 3.0, &cyc) < 1e-6, "Ende auf einem Strich");
+        assert!(dash_coverage(1.5, 0.0, seg, 3.0, &cyc) > 0.4, "Mitte in der Lücke");
+        // Kein Phantom-Strich vor dem Anfang: Zug 10, Phase 0.5 → Anfang im Strich [−0.5+…]; 2.0 liegt in der Lücke (1.5–2.5).
+        let seg = [0.0, 10.0, 10.0, 0.25];
+        assert!(dash_coverage(2.0, 0.0, seg, 3.0, &cyc) > 0.4);
+        // CPU-Zerlegung mit derselben Phase.
+        let pieces = split_dash(&[[0.0, 0.0], [0.3, 0.0]], &[2.0, 1.0]);
+        assert_eq!(pieces.len(), 2, "{pieces:?}");
+        assert!((pieces[0][1][0] - 0.1).abs() < 1e-5 && (pieces[1][0][0] - 0.2).abs() < 1e-5, "{pieces:?}");
+    }
+
     /// [96] Punkte (AN = 0) bleiben im Zyklus: Strichpunktlinie [12, 1.5, 0, 1.5] behaelt vier
     /// Eintraege (Strich, Luecke, Punkt, Luecke) statt zu [12, 1.5, 1.5] zusammenzufallen.
     #[test]
@@ -1302,7 +1394,9 @@ mod tests {
         let cyc: Vec<f32> = c.iter().map(|d| d * px).collect();
         let total: f32 = cyc.iter().sum();
         let seg = [0.0, 5.0 * px, 5.0 * px, 0.5];
-        let dot = (12.0 + 1.5) * DASH_MM_TO_M * px;
+        // [153] Musterphase des Zugs: der Punkt liegt um sie verschoben (im nächsten Zyklus, damit s > 0).
+        let ph = dash_phase(seg[2], &cyc);
+        let dot = (12.0 + 1.5) * DASH_MM_TO_M * px - ph + total;
         assert!(dash_coverage(dot, 0.0, seg, total, &cyc) < 0.01);
         assert!(dash_coverage(dot - 0.7 * DASH_MM_TO_M * px, 0.0, seg, total, &cyc) > 0.5);
     }
@@ -1383,10 +1477,11 @@ mod tests {
     #[test]
     fn split_dash_gerade_linie_erwartete_stueckzahl_und_laenge() {
         let pts = [[0.0, 0.0], [10.0, 0.0]];
-        // 10mm/10mm bei Referenz-Skala (DASH_MM_TO_M=0.1) -> 1m/1m Zyklus,
-        // 10m Gesamtlaenge -> 5 "an"-Stuecke a 1m (50% Tastverhaeltnis).
+        // 10mm/10mm bei Referenz-Skala (DASH_MM_TO_M=0.1) -> 1m/1m Zyklus, 10m Gesamtlaenge.
+        // [153] Phase: beide Enden mit einem halben Strich -> 0.5 + 4 x 1 + 0.5 m in 6 Stuecken.
         let pieces = split_dash(&pts, &[10.0, 10.0]);
-        assert_eq!(pieces.len(), 5, "5 an-Stuecke erwartet");
+        assert_eq!(pieces.len(), 6, "6 an-Stuecke erwartet");
+        assert!((pieces[0][0][0]).abs() < 1e-5 && (pieces[5][1][0] - 10.0).abs() < 1e-4, "{pieces:?}");
         let total: f32 = pieces
             .iter()
             .map(|p| {

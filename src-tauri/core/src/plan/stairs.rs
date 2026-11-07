@@ -11,7 +11,7 @@ use crate::model::*;
 /// Linienklassen der Kern-Kodierung (`plan_stairs.rs`).
 const LINE_CLS: [&str; 6] = ["stair-outline", "stair-tread", "stair-break", "stair-run", "stair-arrow", "stair-handrail"];
 /// Strichmuster der verdeckten Tritte.
-const TREAD_DASH: [f64; 2] = [0.12, 0.08];
+const TREAD_DASH: [f64; 2] = super::line_pattern::HIDDEN;
 
 /// `stairLabel` (für `object_name`).
 pub fn stair_label(s: &Stair) -> String {

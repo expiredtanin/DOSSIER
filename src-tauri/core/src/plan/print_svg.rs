@@ -69,14 +69,53 @@ struct Out {
     /// Volle Einzel-Linien je (Farbe, Stift, Deckkraft) zum Zusammennähen ([146]): Wand-Umrisse zweier
     /// Wände treffen sich als EIN Zug mit Ecke; jeder Zug steht an der Stelle seiner spätesten Linie.
     solid: Vec<((String, String, String), Vec<Vec<V2>>, Vec<usize>)>,
+    /// [153] Laufender gestrichelter Zug: aneinander anschliessende Linien gleicher Darstellung
+    /// (Farbe, Stift, Muster in mm, Deckkraft) werden EIN `<polyline>` mit Musterphase.
+    dash_run: Option<((String, String, Vec<f64>, String), Vec<V2>)>,
 }
 
 impl Out {
     fn rec(&mut self, fields: &[&str]) {
+        self.flush_dash();
         self.recs.push(fields.join("\u{1f}"));
     }
 
+    /// Gestrichelte Linie (Papier-mm) an den laufenden Zug hängen oder einen neuen beginnen.
+    fn dash_line(&mut self, key: (String, String, Vec<f64>, String), a: V2, b: V2) {
+        if let Some((k, pts)) = self.dash_run.as_mut() {
+            if *k == key && pts.last().is_some_and(|p| (p.x - a.x).abs() < 1e-9 && (p.y - a.y).abs() < 1e-9) {
+                pts.push(b);
+                return;
+            }
+        }
+        self.flush_dash();
+        self.dash_run = Some((key, vec![a, b]));
+    }
+
+    /// Schreibt den laufenden gestrichelten Zug ([`super::line_pattern::phase`]: Enden auf einem Strich).
+    fn flush_dash(&mut self) {
+        let Some(((color, pen, dash, o), pts)) = self.dash_run.take() else { return };
+        let len: f64 = pts.windows(2).map(|w| crate::jsmath::hypot2(w[1].x - w[0].x, w[1].y - w[0].y)).sum();
+        let pen_mm: f64 = pen.parse().unwrap_or(0.0);
+        let mut attrs = if pts.len() == 2 { line_attrs(pts[0], pts[1], &color, pen_mm, Some(&dash)) } else { polyline_attrs(&pts, &color, pen_mm, Some(&dash)) };
+        let ph = super::line_pattern::phase(len, &dash);
+        if ph > 1e-9 {
+            attrs.push(("stroke-dashoffset", r3(ph)));
+        }
+        if !o.is_empty() {
+            attrs.push(("opacity", o));
+        }
+        let tag = if pts.len() == 2 { "line" } else { "polyline" };
+        let mut f: Vec<&str> = vec!["E", "0", tag];
+        for (k, v) in &attrs {
+            f.push(k);
+            f.push(v);
+        }
+        self.recs.push(f.join("\u{1f}"));
+    }
+
     fn defer_solid(&mut self, key: (String, String, String), a: V2, b: V2) {
+        self.flush_dash();
         self.recs.push(String::new());
         let slot = self.recs.len() - 1;
         let gi = match self.solid.iter().position(|g| g.0 == key) {
@@ -91,6 +130,7 @@ impl Out {
     }
 
     fn finish(mut self) -> String {
+        self.flush_dash();
         for ((color, pen, o), runs, slots) in std::mem::take(&mut self.solid) {
             for (pts, closed, members) in crate::plan::scene::stitch_runs_members(&runs) {
                 let slot = members.iter().map(|&m| slots[m]).max().unwrap_or(0);
@@ -434,6 +474,10 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                     out.defer_solid((color, js_number(pen), o), a, b);
                     return Some(());
                 }
+                if let Some(dd) = d.as_ref().filter(|d| !d.is_empty()) {
+                    out.dash_line((color, js_number(pen), dd.clone(), o), a, b);
+                    return Some(());
+                }
                 line_attrs(a, b, &color, pen, d.as_deref())
             };
             let tag = if rec.zigzag.is_some() || rec.motif.is_some() { "polyline" } else { "line" };
@@ -644,7 +688,7 @@ pub fn print_svg_ops(parts: &mut [Part], o: &PrintOptions) -> Option<String> {
     let content_w = (max_x - min_x) * k;
     let content_h = (max_y - min_y) * k;
     let m = Map { off_x: (o.page_w - content_w) / 2.0, off_y: (o.page_h - content_h) / 2.0, min_x, max_y, k };
-    let mut out = Out { recs: Vec::new(), solid: Vec::new() };
+    let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None };
     for part in parts.iter_mut() {
         let hatches = part.view.hatch_table()?;
         for i in part.from..part.to {
@@ -689,7 +733,7 @@ mod tests {
         let js = "{\"kind\":\"drawingText\",\"at\":{\"x\":1,\"y\":2},\"text\":\"aa bb\",\"heightM\":0.5,\"angle\":0.5,\"color\":\"#123\",\"wrapWidth\":2,\"marks\":{\"bold\":true}}";
         let t: SingleText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
-        let mut out = Out { recs: Vec::new(), solid: Vec::new() };
+        let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None };
         text_node(&mut out, &t, m, "0.5".into());
         let s = out.finish();
         let recs: Vec<Vec<&str>> = s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
@@ -708,7 +752,7 @@ mod tests {
         let js = r##"{"at":{"x":0,"y":10},"text":"","heightM":0.25,"angle":0,"wrapWidth":2,"doc":{"version":1,"paragraphs":[{"runs":[{"text":"aaaa bbbb","marks":{}}]},{"runs":[{"text":"c","marks":{"sizePt":72}}],"lineHeight":2}]}}"##;
         let t: SingleText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
-        let mut out = Out { recs: Vec::new(), solid: Vec::new() };
+        let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None };
         text_node(&mut out, &t, m, String::new());
         let s = out.finish();
         let recs: Vec<Vec<&str>> = s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
@@ -725,7 +769,7 @@ mod tests {
         let js = r##"{"at":{"x":2,"y":3},"doc":{"version":1,"paragraphs":[{"runs":[{"text":"Wohnen","marks":{"bold":true}}],"align":"center"}]},"extraLines":[{"text":"17.01 m²","align":"center"}],"basePt":10,"color":"#333"}"##;
         let t: StampText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 20.0 };
-        let mut out = Out { recs: Vec::new(), solid: Vec::new() };
+        let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None };
         stamp_node(&mut out, &t, m, "0.3".into());
         let s = out.finish();
         let recs: Vec<Vec<&str>> = s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();

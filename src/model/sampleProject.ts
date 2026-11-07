@@ -32,7 +32,7 @@ export const sampleProject: Project = {
   lineStyles: [
     { id: "thin", name: "Volllinie", color: "#1a1a1a", dash: null },
     // Gestrichelte Linie (z. B. Dämmung, Striche quer durch die Wanddicke).
-    { id: "hatch-dash", name: "Dämmungsstrich", color: "#1a1a1a", dash: [0.35, 0.3] },
+    { id: "hatch-dash", name: "Dämmungsstrich", color: "#1a1a1a", dash: [1.5, 1] },
   ],
   // Schraffuren: color = Linien-/Vollfüllfarbe des Musters; angle in Grad.
   // "none" = keine Schraffur (nur Component-Füllung).

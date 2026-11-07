@@ -29,10 +29,10 @@ const SECTION_JOINT_MM: f64 = 0.13;
 const SECTION_VISIBLE_MM: f64 = 0.18;
 const SECTION_GROUND_MM: f64 = 0.25;
 const SECTION_HIDDEN_MM: f64 = 0.13;
-const SECTION_HIDDEN_DASH: [f64; 2] = [0.12, 0.08];
+const SECTION_HIDDEN_DASH: [f64; 2] = super::line_pattern::HIDDEN;
 /// [T6] gewachsenes Terrain im Schnitt: gestrichelt, dünner als das gestaltete.
 const SECTION_NATURAL_MM: f64 = 0.25;
-const SECTION_NATURAL_DASH: [f64; 2] = [0.4, 0.2];
+const SECTION_NATURAL_DASH: [f64; 2] = super::line_pattern::DASHED_LONG;
 /// Achswinkel geschnittener Wände/Decken für wandrelative Muster (s. `toSection.ts`).
 const SECTION_WALL_AXIS_ANGLE_DEG: f64 = 90.0;
 /// Decken liegen: wandbezogene Muster laufen waagrecht entlang der Schicht ([109]; vorher 90° wie Wände,

@@ -3461,6 +3461,31 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Dreiecksflächen (Schependomlaan-SVG 20–27 MB); Schnitt-Projektion ohne Zellen-Cache je Netz (Topologie gemerkt, Sichtbarkeit
   je Aufruf); Gelände-Netze aus IFC („Gelaende") erscheinen als Körper statt als Geländelinie; nicht in der Tauri-App/Metal
   geprüft. · M
+- ◐ **[153] Strichmuster einheitlich in Papier-mm.** (7.11., Befund [151] „Offen“: gestrichelte Linien im CLI-SVG
+  fein punktiert.) Ursache: alle Ausgaben lesen Strichmuster als Papier-mm (render2d im Plot-Massstab, Plan-SVG ×N/1000,
+  Druck-SVG in mm, DXF-Linientyp ×N/1000), mehrere Erzeuger setzten aber Modell-Meter-Werte (Treppe/Handlauf, verdeckt in
+  Schnitt/Ansicht, Dachbruch `[0.12, 0.08]`, Überkopf `[0.4, 0.12, 0, 0.12]`, Öffnungen `[0.18, 0.09]`/`[0.04, 0.08]`,
+  unter Sichtweite, Konstruktionslinie, gewachsenes Terrain) → überall 0.1-mm-Punkte; Achsraster (Grundriss + Schnitt/Ansicht)
+  waren mit N/1000 vorskaliert → je Massstab anders lang. Neu: Kern `plan/line_pattern.rs` mit allen Linientypen in
+  Papier-mm (verdeckt 2/1, Überkopf 6/1.5/Punkt/1.5, Achse 12/2.5/1.5/2.5, punktiert 0/1, Terrain 4/2, Konstruktion,
+  Schnittführung), `scaled` (Strichmuster-Massstab `dashScale` multiplikativ, wie bisher bei Zeichnungen), `model_m`, und
+  **Musterphase** `phase`: Zug beginnt/endet möglichst mit Strich (Kandidaten Phase 0 und Muster um die Zugmitte auf jedes
+  Element zentriert, bestes kürzeres End-Strichstück). Wirkt in: Plan-SVG (`svg.rs`) und Druck-SVG (`print_svg.rs`, Blätter):
+  aneinander anschliessende gestrichelte Linien gleicher Darstellung als EIN `<polyline>` mit `stroke-dashoffset`;
+  Bildschirm (render2d-Strich-Shader `DASH_LINE_WGSL`, WebGPU und Metal über dieselbe Pipeline): Phase im Vertex-Shader aus
+  Zuglänge und Muster (keine Striche vor dem Anfang/hinter dem Ende), CPU-Spiegel `tessellate::dash_phase`/`dash_coverage`,
+  CPU-Zerlegung `split_dash` mit derselben Phase; Szene (`scene.rs`) verkettet jetzt auch abgeleitete gestrichelte Linien
+  (Handlauf, Terrain) wie Zeichnungs-Linien; PDF-Druck-SVG (`sceneToPrintSvg.ts`) über die Bindung `line_dash_phase`.
+  Beispiel „Dämmungsstrich“ `[0.35, 0.3]` → `[1.5, 1]`. Tests: Rust `line_pattern` (Musterlängen 1:50/100/200 gleich in
+  Plan-SVG, Druck-SVG und DXF-Linientyp; Zug als eine Polylinie mit gleicher Phase in mm; Enden auf Strich für verdeckt und
+  strichpunktiert), `grid_view` (Achsmuster unabhängig vom Massstab), render2d `musterphase_enden_auf_strich` (gleiche Werte
+  wie der Kern), WGSL mit naga validiert (Test lokal ohne `render`-Feature-Sperre laufen lassen); vitest
+  `sceneToPrintSvg.dash.test.ts`. Goldens neu (Plan/Schnitt/Ansicht Muster + komplex, CLI). Geprüft: cargo test Kern +
+  render2d, WASM Kern/render2d (`--no-opt`), tsc, vitest, CLI-SVG Musterhaus komplex EG 1:50/1:100 vorher/nachher in
+  Chromium (Treppe, Achsen, Überkopf am Erker). **Offen:** Bögen/Kreise (Bogen-Shader, SVG-`path`/`circle`) ohne Phase
+  (beginnen mit Strich); DXF/DWG ohne Phase je Objekt (Linientyp beginnt am Anfang, Massstab stimmt); Metal-Pfad verkettet
+  abgeleitete gestrichelte Linien nur über das Ketten-Flag (Zeichnungen), React-SVG-Ansicht ohne Phase; nur Linux, nicht in
+  der Tauri-App/Metal angesehen. · M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum
