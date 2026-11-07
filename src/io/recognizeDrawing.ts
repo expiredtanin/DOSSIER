@@ -1,5 +1,5 @@
 // [154] Bauteile aus Zeichnung erkennen — dünne Fassade über den Kern (`src-tauri/core/src/drawing_recognize.rs`):
-// aus den 2D-Linien eines Grundrisses (DXF/DWG-Import) Wände, Öffnungen und Räume. Erkennung, Vorschau, Bericht
+// aus den 2D-Linien eines Grundrisses (DXF/DWG-Import) Wände, Öffnungen (auch Schiebetüren), Stützen und Räume. Erkennung, Vorschau, Bericht
 // und Ops rechnet der Kern; hier nur die Anfrage (Quell-Ebene, Auswahl, Namensvorlagen, Ziel-Geschoss).
 
 import type { Project } from "../model/types";
@@ -16,10 +16,15 @@ export interface RecognizeUnclear {
 /** Bericht der Erkennung (Abfrage `recognize`). */
 export interface RecognizeReport {
   walls: number;
+  /** Türen einschliesslich Schiebe-/Hebeschiebetüren. */
   doors: number;
+  /** Davon Schiebe- und Hebeschiebetüren (Pfeil oder versetzte Flügel, kein Bogen). */
+  slidingDoors: number;
   windows: number;
   voids: number;
   rooms: number;
+  /** Stützen (kleine gefüllte Rechtecke/Kreise 15–60 cm oder auf einem Stützen-Layer, frei stehend). */
+  columns: number;
   arcWalls: number;
   /** Wände mit Füllung/Schraffur zwischen den Linien. */
   filledWalls: number;
@@ -48,6 +53,9 @@ export interface RecognizeOptions {
   typeName?: string;
   /** Namensvorlage unbenannter Räume, `{n}` = laufende Nummer. */
   roomName?: string;
+  /** Name eines neuen Schiebe- bzw. Hebeschiebetür-Typs (falls das Projekt keinen hat). */
+  slideTypeName?: string;
+  liftSlideTypeName?: string;
 }
 
 let seq = 0;
@@ -59,6 +67,8 @@ function request(o: RecognizeOptions): Record<string, unknown> {
     ids: o.ids && o.ids.length > 0 ? [...o.ids] : [],
     typeName: o.typeName ?? "",
     roomName: o.roomName ?? "",
+    slideTypeName: o.slideTypeName ?? "",
+    liftSlideTypeName: o.liftSlideTypeName ?? "",
     ctx: { level: o.levelId, floorHeight: o.floorHeight ?? null, cat: o.categoryCode ?? "20", wallType: o.wallTypeId ?? "" },
   };
 }

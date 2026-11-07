@@ -412,7 +412,7 @@ fn auswahl_vorschau_und_bericht() {
     assert_eq!(n, 1);
     let pv = crate::cmd_create::preview(&root, &p, &req(json!({})), &[]);
     assert!(pv.ok);
-    assert_eq!(pv.info, vec![5.0, 1.0, 0.0, 0.0, 2.0, 1.0]);
+    assert_eq!(pv.info, vec![5.0, 1.0, 0.0, 0.0, 2.0, 1.0, 0.0]);
     let rep = report(&p, &json!({"q": "recognize", "level": "eg", "src": "imp"}));
     assert_eq!(rep["walls"], 5);
     assert_eq!(rep["doors"], 1);
@@ -483,4 +483,231 @@ fn tessellierter_erker() {
     fit_arcs(&[(0.0, 0.0), (1.0, 0.1), (2.0, 0.0), (3.0, 0.1), (4.0, 0.0)], 0, &mut segs, &mut arcs);
     assert!(arcs.is_empty());
     assert_eq!(segs.len(), 8);
+}
+
+// ── Schiebetüren, Zarge/Futter, Türen in Bogenwänden, Stützen (7.11.) ───────
+
+impl B {
+    /// Pfeil von `from` nach `to` mit zwei Spitzen-Strichen (24°, 13 cm) am Ziel.
+    fn arrow(&mut self, layer: &str, from: V, to: V) -> &mut B {
+        let d = sub(from, to);
+        let u = mul(d, 1.0 / len(d));
+        let (c, s) = (24f64.to_radians().cos(), 24f64.to_radians().sin());
+        let h1 = (u.0 * c - u.1 * s, u.0 * s + u.1 * c);
+        let h2 = (u.0 * c + u.1 * s, -u.0 * s + u.1 * c);
+        self.line(layer, from, to).line(layer, to, add(to, mul(h1, 0.13))).line(layer, to, add(to, mul(h2, 0.13)))
+    }
+    /// Stütze als Kandidat (wie `collect` sie aus einem geschlossenen Umriss liest) samt Umriss.
+    fn column(&mut self, layer: &str, c: V, w: f64, d: f64, round: bool, filled: bool) -> &mut B {
+        let l = self.inp.layer(layer);
+        let ring: Vec<V> = if round {
+            (0..32)
+                .map(|i| {
+                    let a = 2.0 * PI * i as f64 / 32.0;
+                    (c.0 + w / 2.0 * a.cos(), c.1 + w / 2.0 * a.sin())
+                })
+                .collect()
+        } else {
+            vec![(c.0 - w / 2.0, c.1 - d / 2.0), (c.0 + w / 2.0, c.1 - d / 2.0), (c.0 + w / 2.0, c.1 + d / 2.0), (c.0 - w / 2.0, c.1 + d / 2.0)]
+        };
+        if round {
+            self.inp.arcs.push(ArcIn { c, r: w / 2.0, a0: 0.0, sweep: 2.0 * PI, layer: l });
+        } else {
+            self.ring(layer, &ring);
+        }
+        self.inp.cols.push(ColIn { c, w, d, rot: 0.0, round, ring, filled, layer: l });
+        self
+    }
+}
+
+/// Weltkoordinaten (x) der Pfosten einer Öffnung in einer Wand entlang x.
+fn xs_of(r: &Recognition, o: &ROpening) -> (f64, f64) {
+    let w = &r.walls[o.wall];
+    let u = mul(sub(w.b, w.a), 1.0 / len(sub(w.b, w.a)));
+    let p0 = add(w.a, mul(u, o.pos));
+    let p1 = add(w.a, mul(u, o.pos + o.width));
+    (p0.0.min(p1.0), p0.0.max(p1.0))
+}
+
+#[test]
+fn schiebetuer_vor_der_wand_mit_pfeil() {
+    // Lücke 2.0–2.9 (90 cm), Blatt vor der Wand (+y), Rahmen im Band, Pfeil in Schieberichtung.
+    let mut b = wall_with_gaps(&[(2.0, 2.9)]);
+    b.rect("Türen", 1.95, 0.16, 2.95, 0.20).rect("Türen", 2.04, -0.03, 2.86, 0.03);
+    b.arrow("Türen", (2.675, 0.27), (2.225, 0.27));
+    let r = analyze(&b.inp);
+    assert_eq!(r.openings.len(), 1, "{:?}", r.openings);
+    assert_eq!(r.openings[0].kind, RKind::Slide { lift: false });
+    let (x0, x1) = xs_of(&r, &r.openings[0]);
+    assert!((x0 - 2.0).abs() < EPS && (x1 - 2.9).abs() < EPS);
+    assert!(r.unclear.is_empty(), "{:?}", r.unclear);
+}
+
+/// Hebeschiebetür 3 m (Lücke 1.0–4.0): zwei Flügel versetzt im Band, je mit Glaslinie, Rahmen.
+fn lift_slide(arrow: bool) -> B {
+    let mut b = wall_with_gaps(&[(1.0, 4.0)]);
+    b.rect("Fenster", 1.0, -0.007, 2.53, 0.041).line("Fenster", (1.0, 0.017), (2.53, 0.017));
+    b.rect("Fenster", 2.47, 0.049, 4.0, 0.097).line("Fenster", (2.47, 0.073), (4.0, 0.073));
+    b.rect("Fenster", 1.0, -0.015, 4.0, 0.085);
+    if arrow {
+        b.arrow("Fenster", (3.55, 0.137), (2.2, 0.137));
+    }
+    b
+}
+
+#[test]
+fn hebeschiebetuer_mit_versetzten_fluegeln() {
+    for arrow in [true, false] {
+        let r = analyze(&lift_slide(arrow).inp);
+        assert_eq!(r.walls.len(), 1, "Pfeil {arrow}: {:#?}", r.walls);
+        assert_eq!(r.openings.len(), 1, "Pfeil {arrow}: {:?}", r.openings);
+        assert_eq!(r.openings[0].kind, RKind::Slide { lift: true }, "Pfeil {arrow}");
+        let (x0, x1) = xs_of(&r, &r.openings[0]);
+        assert!((x0 - 1.0).abs() < EPS && (x1 - 4.0).abs() < EPS);
+    }
+    // Schmal (1.2 m) und ohne Pfeil: zweiflügliges Fenster mit versetzten Flügeln bleibt Fenster.
+    let mut b = wall_with_gaps(&[(1.0, 2.2)]);
+    b.rect("Fenster", 1.0, -0.007, 1.63, 0.041).rect("Fenster", 1.57, 0.049, 2.2, 0.097);
+    let r = analyze(&b.inp);
+    assert_eq!(r.openings.len(), 1);
+    assert_eq!(r.openings[0].kind, RKind::Window);
+    // Gewöhnliches Fenster (Rahmen + Glas über die ganze Breite, gleiche Lage) bleibt Fenster.
+    let mut b = wall_with_gaps(&[(1.0, 2.8)]);
+    b.rect("Fenster", 1.0, -0.04, 2.8, 0.04).line("Fenster", (1.0, 0.0), (2.8, 0.0));
+    let r = analyze(&b.inp);
+    assert_eq!(r.openings[0].kind, RKind::Window);
+}
+
+#[test]
+fn tuer_mit_zarge_breiter_als_bogen() {
+    // Rohbaulücke 1.0–2.0 (1 m), Zarge 10 cm: Scharnier bei x = 1.1, Blatt 80 cm, Aufschlag nach −y.
+    let mut b = wall_with_gaps(&[(1.0, 2.0)]);
+    b.rect("Türen", 1.0, -0.15, 1.1, 0.15).rect("Türen", 1.9, -0.15, 2.0, 0.15);
+    b.arc("Türen", (1.1, -0.12), 0.8, 270.0, 90.0).line("Türen", (1.1, -0.12), (1.1, -0.92));
+    let r = analyze(&b.inp);
+    assert_eq!(r.openings.len(), 1, "{:?} {:?}", r.openings, r.unclear);
+    let o = &r.openings[0];
+    let RKind::Door { hinge_end, swing_right, leaves: 1 } = o.kind else { panic!("{o:?}") };
+    // Tür mit Lückenbreite, Anschlag am linken Pfosten.
+    let (x0, x1) = xs_of(&r, o);
+    assert!((x0 - 1.0).abs() < EPS && (x1 - 2.0).abs() < EPS, "{x0} {x1}");
+    let w = &r.walls[0];
+    let u = mul(sub(w.b, w.a), 1.0 / len(sub(w.b, w.a)));
+    let hinge = add(w.a, mul(u, if hinge_end { o.pos + o.width } else { o.pos }));
+    assert!((hinge.0 - 1.0).abs() < EPS, "{hinge:?}");
+    let side = if swing_right { -1.0 } else { 1.0 };
+    assert!(mul((-u.1, u.0), side).1 < 0.0);
+    assert!(r.unclear.is_empty(), "{:?}", r.unclear);
+}
+
+#[test]
+fn tuer_in_bogenwand() {
+    // Bogenwand r = 5 (30 cm), 0°–90° mit Lücke 30°–40° (≈ 0.87 m); Tür: Scharnier am Pfosten bei 30°,
+    // Blatt schlägt nach innen (zum Mittelpunkt) auf.
+    let (ri, ro) = (4.85, 5.15);
+    let mut b = B::new();
+    for (r0, a0, sw) in [(ri, 0.0, 30.0), (ro, 0.0, 30.0), (ri, 40.0, 50.0), (ro, 40.0, 50.0)] {
+        b.arc("Wand", (0.0, 0.0), r0, a0, sw);
+    }
+    let a30 = 30f64.to_radians();
+    let a40 = 40f64.to_radians();
+    let hinge = (5.0 * a30.cos(), 5.0 * a30.sin());
+    let other = (5.0 * a40.cos(), 5.0 * a40.sin());
+    let w = len(sub(other, hinge));
+    // Offenstellung: senkrecht zur Sehne nach innen.
+    let ch = mul(sub(other, hinge), 1.0 / w);
+    let inward = (-ch.1, ch.0);
+    let open = add(hinge, mul(inward, w));
+    let a_closed = atan2(ch.1, ch.0).to_degrees();
+    b.arc("Tür", hinge, w, a_closed, 90.0).line("Tür", hinge, open);
+    let r = analyze(&b.inp);
+    assert_eq!(r.walls.len(), 1, "{:#?}", r.walls);
+    assert_eq!(r.openings.len(), 1, "{:?} {:?}", r.openings, r.unclear);
+    let o = &r.openings[0];
+    let RKind::Door { hinge_end, swing_right, leaves: 1 } = o.kind else { panic!("{o:?}") };
+    // Wand gegen den Uhrzeigersinn ab 0°: Scharnier am Lückenanfang, Aufschlag links (= innen).
+    assert!(!hinge_end && !swing_right, "{o:?}");
+    assert!((o.pos - 5.0 * a30).abs() < 1e-6 && (o.width - 5.0 * (a40 - a30)).abs() < 1e-6, "{o:?}");
+    assert!(r.unclear.is_empty(), "{:?}", r.unclear);
+}
+
+#[test]
+fn stuetzen_aus_kleinen_gefuellten_umrissen() {
+    let mut b = l_house();
+    // Freistehend: Rechteck 30 × 30 gefüllt, Kreis Ø 25 gefüllt, Rechteck 40 × 20 auf Stützen-Layer (ohne Füllung).
+    b.column("Beton", (3.0, 3.0), 0.3, 0.3, false, true);
+    b.column("Beton", (9.0, 3.0), 0.25, 0.25, true, true);
+    b.column("Stützen", (3.0, 8.0), 0.4, 0.2, false, false);
+    // Nicht: ungefüllt auf fremdem Layer (Möbel), zu gross, an einer Wand anliegend.
+    b.column("Möbel", (4.0, 4.0), 0.4, 0.4, false, false);
+    b.column("Beton", (9.0, 4.5), 0.8, 0.8, false, true);
+    b.column("Beton", (6.075 + 0.15, 2.0), 0.3, 0.3, false, true);
+    let r = analyze(&b.inp);
+    // Wände wie ohne Stützen.
+    assert_eq!(r.walls.len(), 8, "{:#?}", r.walls);
+    assert_eq!(r.columns.len(), 3, "{:#?}", r.columns);
+    let at = |c: V| r.columns.iter().find(|x| near(x.c, c, 1e-9)).unwrap_or_else(|| panic!("{c:?}: {:?}", r.columns));
+    let a = at((3.0, 3.0));
+    assert!(!a.round && (a.w - 0.3).abs() < EPS && (a.d - 0.3).abs() < EPS);
+    let k = at((9.0, 3.0));
+    assert!(k.round && (k.w - 0.25).abs() < EPS);
+    let s = at((3.0, 8.0));
+    assert!((s.w - 0.4).abs() < EPS && (s.d - 0.2).abs() < EPS);
+}
+
+#[test]
+fn stuetzen_aus_dem_projekt_und_ops() {
+    let mut d = small_house();
+    d.push(json!({"id": "c1", "type": "drawing2d", "levelId": "imp", "categoryCode": "103", "fillColor": "#000000",
+        "geom": {"shape": "rect", "min": {"x": 3.5, "y": 1.85}, "max": {"x": 3.8, "y": 2.15}}}));
+    d.push(json!({"id": "c2", "type": "drawing2d", "levelId": "imp", "categoryCode": "103", "fillColor": "#000000",
+        "geom": {"shape": "circle", "center": {"x": 1.2, "y": 3.0}, "r": 0.15}}));
+    // Gedrehtes Quadrat 30 × 30 (45°) als Polylinie.
+    let h = 0.15 * 2f64.sqrt();
+    let mut c3 = dl("c3", "103", poly(&[(4.0, 3.0 - h), (4.0 + h, 3.0), (4.0, 3.0 + h), (4.0 - h, 3.0)]));
+    c3["hatchId"] = json!("x");
+    d.push(c3);
+    let (p, root) = project(d);
+    let ops = crate::cmd_create::ops(&root, &p, &req(json!({}))).unwrap();
+    assert_eq!(added(&ops, "walls").len(), 5);
+    let cols = added(&ops, "columns");
+    assert_eq!(cols.len(), 3, "{cols:#?}");
+    for c in &cols {
+        let col: crate::model::Column = serde_json::from_value(c.clone()).unwrap();
+        assert_eq!(col.floor_id, "eg");
+        assert!((col.height - 2.8).abs() < 1e-9);
+    }
+    let round = cols.iter().find(|c| c["profile"]["kind"] == "round").unwrap();
+    assert!((round["profile"]["radius"].as_f64().unwrap() - 0.15).abs() < 1e-9);
+    assert!((round["position"]["x"].as_f64().unwrap() - 1.2).abs() < 1e-9);
+    let rot = cols.iter().find(|c| (c["position"]["x"].as_f64().unwrap() - 4.0).abs() < 1e-9).unwrap();
+    assert!((rot["profile"]["width"].as_f64().unwrap() - 0.3).abs() < 1e-9);
+    let a = rot["rotation"].as_f64().unwrap().rem_euclid(PI / 2.0);
+    assert!((a - PI / 4.0).abs() < 1e-9, "{a}");
+    let rep = report(&p, &json!({"q": "recognize", "level": "eg", "src": "imp"}));
+    assert_eq!(rep["columns"], 3);
+}
+
+#[test]
+fn schiebetuer_ops_mit_typ() {
+    // Ohne Schiebetür-Typ im Projekt: neuer Türtyp „schiebe“ (Name aus der Anfrage).
+    let mut d = small_house();
+    d.retain(|x| x["id"] != "arc");
+    let lines = [((1.0, 0.17), (1.9, 0.17)), ((1.9, 0.17), (1.9, 0.21)), ((1.9, 0.21), (1.0, 0.21)), ((1.0, 0.21), (1.0, 0.17)), ((1.675, 0.3), (1.225, 0.3)), ((1.225, 0.3), (1.34, 0.25)), ((1.225, 0.3), (1.34, 0.35))];
+    for (i, (a, b)) in lines.iter().enumerate() {
+        d.push(dl(&format!("s{i}"), "102", json!({"shape": "line", "a": {"x": a.0, "y": a.1}, "b": {"x": b.0, "y": b.1}})));
+    }
+    let (p, root) = project(d);
+    let ops = crate::cmd_create::ops(&root, &p, &req(json!({"slideTypeName": "Schiebetür (erkannt)"}))).unwrap();
+    let types = added(&ops, "doorTypes");
+    assert_eq!(types.len(), 1, "{types:?}");
+    let t: crate::model::DoorType = serde_json::from_value(types[0].clone()).unwrap();
+    assert_eq!(t.kind, crate::model::DoorTypeKind::Schiebe);
+    assert_eq!(t.name, "Schiebetür (erkannt)");
+    let o = &added(&ops, "openings")[0];
+    assert_eq!(o["kind"], "door");
+    assert_eq!(o["typeId"], types[0]["id"]);
+    let rep = report(&p, &json!({"q": "recognize", "level": "eg", "src": "imp"}));
+    assert_eq!(rep["doors"], 1);
+    assert_eq!(rep["slidingDoors"], 1);
 }
