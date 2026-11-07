@@ -13,6 +13,7 @@ import {
   expandToGroups,
   groupSelection,
   isInsideActiveGroup,
+  pick3dGroup,
   transitiveMembership,
   ungroup,
 } from "./groupActions";
@@ -200,6 +201,22 @@ describe("[149] Bäume in Gruppen", () => {
     const outside = { kind: "polygon", pts: [], contextObjectId: "@tree:b9" } as unknown as Primitive;
     const out = applyGroupDimming([inside, outside], p, [res!.groupId]);
     expect([out[0].greyed, out[1].greyed]).toEqual([undefined, true]);
+  });
+});
+
+describe("[149] 3D-Klick auf ein Gruppenmitglied", () => {
+  it("wählt die ganze Gruppe wie im Grundriss; Element ohne Gruppe bzw. ohne Gruppen-Art → null", () => {
+    const res = groupSelection({ ...EMPTY_MEM, wallIds: ["w1"], treeIds: ["b1"], columnIds: ["c1"] }, []);
+    const p = applyOps(project([]), res!.ops);
+    for (const [kind, id] of [["tree", "b1"], ["wall", "w1"], ["column", "c1"]] as const) {
+      const g = pick3dGroup(p, kind, id, []);
+      expect(g?.groupIds).toEqual([res!.groupId]);
+      expect([g!.expanded.wallIds, g!.expanded.treeIds, g!.expanded.columnIds]).toEqual([["w1"], ["b1"], ["c1"]]);
+    }
+    expect(pick3dGroup(p, "wall", "w9", [])).toBeNull();
+    expect(pick3dGroup(p, "contextObject", "w1", [])).toBeNull();
+    // In der Gruppe (Isolation): einzeln.
+    expect(pick3dGroup(p, "wall", "w1", [res!.groupId])).toBeNull();
   });
 });
 

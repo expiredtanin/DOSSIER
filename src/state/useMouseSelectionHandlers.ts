@@ -24,6 +24,7 @@ import {
   EMPTY_MEMBERSHIP,
   expandToGroups,
   isInsideActiveGroup,
+  pick3dGroup,
   type GroupMembership,
   type MemberKind,
 } from "./groupActions";
@@ -374,6 +375,12 @@ export function useMouseSelectionHandlers(opts: {
   const onViewport3dPick = (hit: Pick3dHit, additive: boolean) => {
     if (!hit) {
       setSelection(clearKinds());
+      return;
+    }
+    // [149] Gruppenmitglied: die ganze Gruppe wählen (wie der Klick im Grundriss).
+    const group = additive ? null : pick3dGroup(project, hit.kind, hit.id, groupPath);
+    if (group) {
+      setSelection({ ...clearKinds(), ...fromIdLists(group.expanded), groups: group.groupIds });
       return;
     }
     // Öffnung (Fenster/Tür), Treppe, Kontext-Objekt, 2D-Element und Dach ersetzen

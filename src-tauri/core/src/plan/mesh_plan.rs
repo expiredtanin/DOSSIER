@@ -85,6 +85,93 @@ fn view_line(a: [f64; 2], b: [f64; 2], dash: Option<&[f64]>, greyed: bool, ov: O
     Primitive::Line { a: Vec2 { x: a[0], y: a[1] }, b: Vec2 { x: b[0], y: b[1] }, cls: "mesh-view".into(), weight_mm: w, dash: d, zigzag: None, motif: None, color: Some(color), drawing_id: None, opening_id: None, stair_id: None, greyed: Some(greyed), opacity: None }
 }
 
+/// Verdecker-Fläche (nur Verdecker, beidseitig) in Ansichtstiefe `depth` (Schnitthöhe − z).
+fn occluder(ring: &[[f64; 2]], depth: f64) -> Option<crate::hlr::Face> {
+    if ring.len() < 3 || !depth.is_finite() || ring.iter().any(|q| !q[0].is_finite() || !q[1].is_finite()) {
+        return None;
+    }
+    let mut f = crate::hlr::Face::new(ring.iter().map(|q| [q[0], q[1], depth.max(0.0)]).collect(), [0.0, 0.0, -1.0], u32::MAX);
+    f.edges = false;
+    f.two_sided = true;
+    Some(f)
+}
+
+/// [152] Wände, Stützen und Decken des Grundrisses als Verdecker der Netz-Aufsicht: geschnitten in Tiefe 0
+/// (die Netz-Linien laufen nicht durch die Poché), ganz unter der Schnitthöhe in Höhe der Oberkante (eine
+/// Brüstung, eine Platte über dem Netz). Was über der Schnitthöhe liegt, verdeckt nichts. Wand-Enden, die an
+/// eine andere Wand stossen, um die halbe Dicke verlängert (Ecken geschlossen); Öffnungen bleiben unberücksichtigt.
+fn component_occluders(c: &Ctx, range: &ViewRange, out: &mut Vec<crate::hlr::Face>) {
+    let p = c.p;
+    let depth = |zb: f64, zt: f64| match range.classify(zb, zt) {
+        Zone::Cut => Some(0.0),
+        Zone::Below | Zone::Under => Some(range.cut - zb.max(zt)),
+        _ => None,
+    };
+    let walls: Vec<(&Wall, f64, f64)> = p
+        .walls
+        .iter()
+        .filter(|w| w.floor_id == c.a.floor && c.vis(&w.category_code, &w.id))
+        .filter_map(|w| {
+            let (zb, zt) = p.wall_vertical_extent(w);
+            let t = p.wall_thickness(w, 0.2);
+            (t.is_finite() && t > 0.0).then_some(())?;
+            Some((w, t, depth(zb, zt)?))
+        })
+        .collect();
+    let fps: Vec<super::wall_poche::WallFootprint> = walls
+        .iter()
+        .map(|(w, t, _)| super::wall_poche::wall_footprint([w.start.x, w.start.y], [w.end.x, w.end.y], *t, crate::joins::reference_offset(crate::model3d::wall_reference(w), *t)))
+        .collect();
+    // Punkt in (bzw. 1 cm an) einer anderen Wand.
+    let rect = |f: &super::wall_poche::WallFootprint, s0: f64, s1: f64| -> Vec<[f64; 2]> {
+        let at = |s: f64, o: f64| [f.a[0] + f.u[0] * s + f.m[0] * o, f.a[1] + f.u[1] * s + f.m[1] * o];
+        let (o0, o1) = (f.ref_off - f.half, f.ref_off + f.half);
+        vec![at(s0, o0), at(s1, o0), at(s1, o1), at(s0, o1)]
+    };
+    let touches = |i: usize, q: [f64; 2]| {
+        fps.iter().enumerate().any(|(j, f)| {
+            if j == i {
+                return false;
+            }
+            let r = [q[0] - f.a[0], q[1] - f.a[1]];
+            let (s, o) = (r[0] * f.u[0] + r[1] * f.u[1], r[0] * f.m[0] + r[1] * f.m[1]);
+            s > -0.01 && s < f.len + 0.01 && o > f.ref_off - f.half - 0.01 && o < f.ref_off + f.half + 0.01
+        })
+    };
+    for (i, ((w, t, d), f)) in walls.iter().zip(&fps).enumerate() {
+        if !(f.len > 1e-9) {
+            continue;
+        }
+        let ring = match crate::wall_arc::arc_footprint(w, *t) {
+            Some(r) => r,
+            None => {
+                let e0 = if touches(i, [w.start.x, w.start.y]) { f.half } else { 0.0 };
+                let e1 = if touches(i, [w.end.x, w.end.y]) { f.half } else { 0.0 };
+                rect(f, -e0, f.len + e1)
+            }
+        };
+        out.extend(occluder(&ring, *d));
+    }
+    for col in p.columns.as_deref().unwrap_or(&[]).iter().filter(|k| k.floor_id == c.a.floor && c.vis(&k.category_code, &k.id)) {
+        let (zb, zt) = p.column_vertical_extent(col);
+        if let Some(d) = depth(zb, zt) {
+            let ring: Vec<[f64; 2]> = crate::model3d::column_footprint(col).iter().map(|q| [q.x, q.y]).collect();
+            out.extend(occluder(&ring, d));
+        }
+    }
+    for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| c.vis(&x.category_code, &x.id)) {
+        let (zb, zt) = p.ceiling_vertical_extent(ce);
+        let zone = range.classify(zb, zt);
+        if ce.floor_id != c.a.floor && !range.admits_other_floor(zone) {
+            continue;
+        }
+        if let Some(d) = depth(zb, zt) {
+            let ring: Vec<[f64; 2]> = ce.outline.iter().map(|q| [q.x, q.y]).collect();
+            out.extend(occluder(&ring, d));
+        }
+    }
+}
+
 /// Importierte Netze des Geschosses in `out`; `false`, wenn die Ebene kein Geschoss ist (dann zeichnet
 /// `context.rs` den Fussabdruck wie bisher).
 pub fn plan_meshes(c: &Ctx, out: &mut Vec<Primitive>) -> bool {
@@ -153,6 +240,8 @@ pub fn plan_meshes(c: &Ctx, out: &mut Vec<Primitive>) -> bool {
             }
         }
     }
+    // Bauteile verdecken die Aufsicht: geschnitten in Tiefe 0 (Poché), darunter in Höhe ihrer Oberkante.
+    component_occluders(c, &range, &mut below);
     // Aufsicht von oben (Tiefe = Schnitthöhe − z, nur unter der Schnittebene) und Überkopf von unten.
     let mut above: Vec<crate::hlr::Face> = Vec::new();
     for (k, (m, z)) in meshes.iter().enumerate() {
@@ -208,7 +297,7 @@ mod tests {
     }
 
     fn run(p: &Project, floor: &str, scale: f64) -> Vec<Primitive> {
-        let a = PlanArgs::parse(1.0, &serde_json::json!({"floor": floor, "show": ["10"], "global": true, "scale": scale}).to_string()).unwrap();
+        let a = PlanArgs::parse(1.0, &serde_json::json!({"floor": floor, "show": ["10", "20", "30"], "global": true, "scale": scale}).to_string()).unwrap();
         let c = Ctx::new(p, &a);
         let mut out = Vec::new();
         assert!(plan_meshes(&c, &mut out));
@@ -294,5 +383,51 @@ mod tests {
         let cutl: Vec<_> = prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "mesh-cut")).collect();
         let len: f64 = cutl.iter().map(|q| match q { Primitive::Line { a, b, .. } => crate::jsmath::hypot2(b.x - a.x, b.y - a.y), _ => 0.0 }).sum();
         assert!((len - 2.0).abs() < 1e-9, "{prims:?}");
+    }
+
+    fn wall(id: &str, a: (f64, f64), b: (f64, f64), height: f64) -> Wall {
+        Wall { id: id.into(), floor_id: "eg".into(), category_code: "20".into(), start: Vec2 { x: a.0, y: a.1 }, end: Vec2 { x: b.0, y: b.1 }, height, ..Default::default() }
+    }
+
+    /// Kein Mittelpunkt einer gezeichneten Aufsichtskante liegt (echt) im Rechteck.
+    fn none_inside(l: &[([f64; 2], [f64; 2])], r: [f64; 4]) -> bool {
+        l.iter().all(|(a, b)| {
+            let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+            !(m[0] > r[0] + 1e-6 && m[0] < r[2] - 1e-6 && m[1] > r[1] + 1e-6 && m[1] < r[3] - 1e-6)
+        })
+    }
+
+    #[test]
+    fn bauteile_verdecken_die_aufsicht() {
+        // Tisch 0–0.75 (x 0–4, y 0–2) unter einer geschnittenen Wand (Achse y = 1, 0.2 dick, x −1…5):
+        // die Tischkanten unter der Poché (y 0.9–1.1) fehlen, der Rest bleibt.
+        let mut p = project(vec![mesh("b", cube(0.0, 4.0, 0.0, 2.0, 0.0, 0.75))]);
+        p.walls.push(wall("w", (-1.0, 1.0), (5.0, 1.0), 2.7));
+        let solid = lines(&run(&p, "eg", 100.0), false);
+        assert!(none_inside(&solid, [-1.0, 0.9, 5.0, 1.1]), "{solid:?}");
+        let len: f64 = solid.iter().map(|(a, b)| (b[0] - a[0]).hypot(b[1] - a[1])).sum();
+        assert!((len - (8.0 + 4.0 - 0.4)).abs() < 1e-6, "Umriss ohne 2 × 0.2 m unter der Wand: {len} {solid:?}");
+        // Niedrige Mauer 0–0.9 (unter der Schnitthöhe) über dem Tisch verdeckt ebenso; unter dem Tisch (0–0.5) nicht.
+        p.walls[0].height = 0.9;
+        assert!(none_inside(&lines(&run(&p, "eg", 100.0), false), [-1.0, 0.9, 5.0, 1.1]));
+        p.walls[0].height = 0.5;
+        let solid = lines(&run(&p, "eg", 100.0), false);
+        let len: f64 = solid.iter().map(|(a, b)| (b[0] - a[0]).hypot(b[1] - a[1])).sum();
+        assert!((len - 12.0).abs() < 1e-6, "{len}");
+        // Stütze (geschnitten) über einer Tischecke.
+        p.walls.clear();
+        p.columns = Some(vec![Column { id: "c".into(), floor_id: "eg".into(), category_code: "20".into(), position: Vec2 { x: 4.0, y: 2.0 }, profile: ColumnProfile::Rect { width: 0.4, depth: 0.4 }, height: 2.7, ..Default::default() }]);
+        let solid = lines(&run(&p, "eg", 100.0), false);
+        let len: f64 = solid.iter().map(|(a, b)| (b[0] - a[0]).hypot(b[1] - a[1])).sum();
+        assert!((len - 11.6).abs() < 1e-6, "Ecke unter der Stütze fehlt: {len} {solid:?}");
+        // Decke (OK 0.9, unter dem Schnitt) über dem halben Tisch.
+        p.columns = None;
+        let mut ce = Ceiling { id: "d".into(), floor_id: "eg".into(), category_code: "30".into(), outline: vec![Vec2 { x: 2.0, y: -1.0 }, Vec2 { x: 6.0, y: -1.0 }, Vec2 { x: 6.0, y: 3.0 }, Vec2 { x: 2.0, y: 3.0 }], thickness: Some(0.1), ..Default::default() };
+        ce.top = Some(VerticalAnchor::Custom { z: 0.9 });
+        ce.bottom = Some(VerticalAnchor::Custom { z: 0.8 });
+        p.ceilings = Some(vec![ce]);
+        let solid = lines(&run(&p, "eg", 100.0), false);
+        assert!(none_inside(&solid, [2.0, -1.0, 6.0, 3.0]), "{solid:?}");
+        assert!(!solid.is_empty());
     }
 }

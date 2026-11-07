@@ -150,8 +150,12 @@ pub fn tree_label(t: &Tree, g: &TreeGeom, scale: f64, greyed: Option<bool>) -> O
     let doc = super::domains::doc_from_text(name);
     let pt = label_pt(scale);
     let (w, _) = crate::text_layout::stamp_block_size(&doc, &[], pt, crate::text_layout::PT_TO_MM * scale / 1000.0);
-    let gap = 1.0 * scale / 1000.0;
-    let at = v(g.c[0] + g.trunk_r + gap + w / 2.0, g.c[1]);
+    // Linker Rand der Zeile: mit Griff verschoben (`labelOffset` ab Stammmitte), sonst 1 mm Papier rechts neben dem Stamm.
+    let left = match t.label_offset.filter(|o| o.x.is_finite() && o.y.is_finite()) {
+        Some(o) => [g.c[0] + o.x, g.c[1] + o.y],
+        None => [g.c[0] + g.trunk_r + 1.0 * scale / 1000.0, g.c[1]],
+    };
+    let at = v(left[0] + w / 2.0, left[1]);
     Some(Primitive::Text { at, doc, extra_lines: vec![], base_pt: pt, color: MONO_INK.into(), room_id: None, greyed, opacity: None })
 }
 
@@ -288,6 +292,15 @@ mod tests {
         assert!((base_pt - 8.0).abs() < 1e-9, "1:100: 0.8 × 10 pt");
         assert!(at.x > 0.2 && at.x < 3.0 && at.y.abs() < 1e-9, "rechts neben dem Stamm: {at:?}");
         assert!((label_pt(200.0) - 5.6).abs() < 1e-9);
+        // Mit Griff verschoben ([149]): linker Rand der Zeile an Stamm + Versatz, Textmitte um die halbe Breite rechts.
+        // Standard: linker Rand 0.2 m (Stamm) + 0.1 m (1 mm bei 1:100) rechts der Stammmitte.
+        let half_w = at.x - 0.3;
+        assert!(half_w > 0.0);
+        t["labelOffset"] = serde_json::json!({"x": -2.0, "y": 3.0});
+        let got = texts(&project(serde_json::json!([t.clone()])));
+        let Primitive::Text { at: moved, .. } = &got[0] else { unreachable!() };
+        assert!((moved.y - 3.0).abs() < 1e-9 && (moved.x - (-2.0 + half_w)).abs() < 1e-9, "{moved:?}");
+        t.as_object_mut().unwrap().remove("labelOffset");
         t["species"] = serde_json::json!("  ");
         assert!(texts(&project(serde_json::json!([t]))).is_empty(), "ohne Art keine Beschriftung");
     }

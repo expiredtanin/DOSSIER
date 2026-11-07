@@ -159,6 +159,13 @@ pub fn meshes(p: &Project) -> Vec<MeshRef<'_>> {
     out
 }
 
+/// [152] Gelände aus einem IFC-Import (Klasse `IfcSite` im Layer bzw. Namen, oder Name mit „Gelände"/„Terrain",
+/// z. B. ein `IfcGeographicElement` „Terrain"): im Schnitt Geländelinie statt Körper.
+pub fn is_terrain(m: &ImportedMesh) -> bool {
+    let (name, layer) = (m.name.to_lowercase(), m.layer.as_deref().unwrap_or("").to_lowercase());
+    layer == "ifcsite" || name.contains("ifcsite") || ["gelände", "gelaende", "terrain"].iter().any(|k| name.contains(k))
+}
+
 /// Linienzüge ungerichtet aneinanderhängen (Netze mit wechselnder Orientierung): was sich schliesst,
 /// wird Ring, der Rest bleibt offen. Endpunkte gleich auf 1e-6 (wie `mesh_section`).
 pub fn close_chains(lines: Vec<Vec<[f64; 2]>>) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>) {

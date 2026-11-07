@@ -3345,6 +3345,12 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   EG 1:100 mit Baum-Objekten samt Beschriftung in Chromium. Offen: Rahmen/Gruppen nicht per e2e und nicht in der
   Tauri-App geprüft; Beschriftung fest rechts vom Stamm (kein Ausweichen, kein Griff); 3D-Klick erweitert nicht auf
   die Gruppe; Krone im Schatten als konvexe Hülle; Schnitt durch die Krone zeigt die ganze Silhouette.
+  (7.11., Reste) **3D-Klick auf ein Gruppenmitglied** wählt die ganze Gruppe wie im Grundriss (`groupActions.pick3dGroup`,
+  Isolation beachtet, Shift-Klick einzeln). **Beschriftung mit Griff:** neues Feld `Tree.labelOffset` (Rust-Modell, linker
+  Rand der Zeile ab Stammmitte, m; wandert mit dem Baum), dritter Griff bei gezeigter Beschriftung (`state/treeGrips.ts`,
+  ein Undo-Schritt je Zug). Tests: `plan::trees::beschriftung_mit_art_name` (Versatz), vitest `groupActions.test.ts`
+  (3D-Klick), `treeGrips.test.ts`. Nicht in der Tauri-App/per e2e geprüft. Offen: Krone im Schatten als konvexe Hülle;
+  Schnitt durch die Krone zeigt die ganze Silhouette; Beschriftung weicht nicht aus.
 - ◐ **[150] Gelände im Grundriss sauber am Gebäude.** (6.11., Rest aus [140] Teil 6: in „E.07 Eingang“ stapelten sich
   Höhenlinien-Beschriftungen, die Beschriftung lag stets in der Linienmitte, auch im Gebäude.) **Fussabdruck je
   Geschoss** (`plan/context.rs::terrain_footprint`): Wände (Bogenwände über `arc_footprint`, gerade Wände an
@@ -3461,6 +3467,22 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Dreiecksflächen (Schependomlaan-SVG 20–27 MB); Schnitt-Projektion ohne Zellen-Cache je Netz (Topologie gemerkt, Sichtbarkeit
   je Aufruf); Gelände-Netze aus IFC („Gelaende") erscheinen als Körper statt als Geländelinie; nicht in der Tauri-App/Metal
   geprüft. · M
+  (7.11., Reste) **Bauteile verdecken die Aufsicht** (`mesh_plan::component_occluders`): Wände, Stützen und Decken des
+  Grundrisses sind Verdecker der Netz-Aufsicht — geschnitten in Tiefe 0 (Netz-Linien laufen nicht mehr durch die Poché),
+  ganz unter der Schnitthöhe in Höhe ihrer Oberkante (Brüstung, Platte über dem Netz); darüber verdeckt nichts. Wand-Enden
+  an einer anderen Wand um die halbe Dicke verlängert; Öffnungen und Deckenaussparungen bleiben unberücksichtigt (Netz
+  unter einer Tür ist verdeckt). Test `mesh_plan::bauteile_verdecken_die_aufsicht` (Wand geschnitten/niedrig/zu niedrig,
+  Stütze, Decke). FZK-DG: Pfetten-Linie endet an der Giebelwand.
+  **Ansicht grosser Netze** (`elevation::mesh_faces_needed`): Netz-Flächen, die im fertigen Maler-Bild überall von
+  später gemalten Flächen zugedeckt sind, entfallen aus der Füllungs-Liste (Raster ≤ 2 Mio. Zellen, je Zelle der späteste
+  Maler-Platz über der Zellmitte, Kacheln 16×16 zum schnellen Ausschluss; Kanten weiter exakt aus allen Flächen).
+  Schependomlaan Ansicht Süd 1:100 (CLI, WASM ohne Opt.): nur Netze 27.0 → 2.2 MB, mit `--elements` 19.3 → 2.4 MB, Bild
+  bei 2400 px pixelgleich (bzw. 1 Pixel), Zeit 6.3 → 6.8 s. Test `elevation::verdeckte_netzflaechen_entfallen`.
+  **IFC-Gelände im Schnitt** (`mesh_view::is_terrain`: Layer/Klasse `IfcSite` oder Name mit „Gelände"/„Gelaende"/„Terrain",
+  z. B. `IfcGeographicElement` „Terrain"): kein Körper mehr, sondern Geländelinie aus der Oberkante des Ebenenschnitts
+  (offene Züge ganz) samt Erdreich-Band wie `TerrainMesh` (`section::upper_edge`, `append_terrain_profiles`), keine
+  Projektionskanten. Test `section::mesh_tests::ifc_gelaende_als_gelaendelinie`. FZK Schnitt A: schwarze Geländeplatte →
+  Linie. Ansicht/Grundriss behandeln das Netz weiter als Netz.
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

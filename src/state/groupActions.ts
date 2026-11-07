@@ -11,7 +11,7 @@ import { uniqueId } from "../tools/types";
 import type { Primitive } from "../core";
 import type { CoreOp } from "../core";
 import { addItems, removeItems } from "../core";
-import { transitiveMembership } from "../core";
+import { EMPTY_MEMBERSHIP, expandToGroups, transitiveMembership } from "../core";
 import type { GroupMembership, MemberKind } from "../core";
 
 export type { GroupMembership, MemberKind } from "../core";
@@ -34,6 +34,28 @@ export function mergeMembership(a: GroupMembership, b: GroupMembership): GroupMe
   const out = { ...a };
   for (const k of KEYS) out[k] = [...new Set([...a[k], ...b[k]])];
   return out;
+}
+
+/** 3D-Pick-Art → Gruppen-Art (Kontext-Netze, 2D-Zeichnungen im 3D und Körper sind nicht gruppierbar). */
+const PICK3D_KIND: Partial<Record<string, MemberKind>> = {
+  wall: "wallIds",
+  ceiling: "ceilingIds",
+  opening: "openingIds",
+  stair: "stairIds",
+  roof: "roofIds",
+  column: "columnIds",
+  tree: "treeIds",
+};
+
+/**
+ * [149] 3D-Klick auf ein Element: gehört es zu einer (im Isolations-Kontext `groupPath` sichtbaren) Gruppe,
+ * die erweiterte Auswahl der ganzen Gruppe (wie der Klick im Grundriss), sonst `null`.
+ */
+export function pick3dGroup(project: Project, kind: string, id: string, groupPath: string[]): { expanded: GroupMembership; groupIds: string[] } | null {
+  const k = PICK3D_KIND[kind];
+  if (!k) return null;
+  const r = expandToGroups(project, { ...EMPTY_MEMBERSHIP, [k]: [id] }, groupPath);
+  return r.groupIds.length > 0 ? r : null;
 }
 
 /** [149] Präfix der Baum-Pick-Id im Feld `contextObjectId` (Kern `tree::TREE_PICK_PREFIX`). */

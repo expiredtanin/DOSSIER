@@ -4012,6 +4012,11 @@ pub struct Tree {
     #[serde(rename = "showLabel", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub show_label: Option<bool>,
+    /// [149] Lage der Beschriftung (Griff): linker Rand der Zeile (Mitte) relativ zur Stammmitte (m); fehlt =
+    /// rechts neben dem Stamm (1 mm Papier Abstand). Wandert mit dem Baum.
+    #[serde(rename = "labelOffset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub label_offset: Option<Vec2>,
     /// Höhenversatz des Fusses gegenüber Gelände bzw. Geschoss-UK (m, Vorgabe 0).
     #[serde(rename = "baseOffset", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

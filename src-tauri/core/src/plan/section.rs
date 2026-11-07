@@ -2096,6 +2096,42 @@ fn append_mesh_sections(cuts: &mut Vec<Cut>, lines: &mut Vec<(usize, Vec<[f64; 2
     }
 }
 
+/// [152] Oberkante eines Rings (u rechts, Höhe oben): Kanten, über denen aussen liegt — gegen den Uhrzeigersinn die
+/// nach links laufenden —, zu Zügen verkettet (von links nach rechts).
+fn upper_edge(ring: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
+    let n = ring.len();
+    if n < 3 {
+        return Vec::new();
+    }
+    let ccw = (0..n).map(|i| ring[i][0] * ring[(i + 1) % n][1] - ring[(i + 1) % n][0] * ring[i][1]).sum::<f64>() > 0.0;
+    let r: Vec<[f64; 2]> = if ccw { ring.to_vec() } else { ring.iter().rev().copied().collect() };
+    let top = |i: usize| r[(i + 1) % n][0] < r[i][0] - 1e-9;
+    // Beginn nach einer Nicht-Oberkante, damit kein Zug über das Ringende zerfällt.
+    let Some(start) = (0..n).find(|&i| !top(i)) else { return Vec::new() };
+    let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut cur: Vec<[f64; 2]> = Vec::new();
+    for k in 1..=n {
+        let i = (start + k) % n;
+        if top(i) {
+            if cur.is_empty() {
+                cur.push(r[i]);
+            }
+            cur.push(r[(i + 1) % n]);
+        } else if cur.len() >= 2 {
+            out.push(std::mem::take(&mut cur));
+        } else {
+            cur.clear();
+        }
+    }
+    if cur.len() >= 2 {
+        out.push(cur);
+    }
+    for l in &mut out {
+        l.reverse();
+    }
+    out
+}
+
 /// `clipLineToU`.
 fn clip_line_to_u(pts: &[[f64; 2]], lo: f64, hi: f64) -> Vec<Vec<[f64; 2]>> {
     let mut out = Vec::new();
@@ -2133,9 +2169,10 @@ fn clip_line_to_u(pts: &[[f64; 2]], lo: f64, hi: f64) -> Vec<Vec<[f64; 2]>> {
 }
 
 /// `appendTerrainProfiles`.
-fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) {
+/// [152] Dazu IFC-Gelände-Netze (`mesh_view::is_terrain`): Oberkante ihres Ebenenschnitts (offene Züge ganz).
+fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64), terrain_meshes: &[crate::mesh_view::MeshRef]) {
     let terrains: Vec<&TerrainMesh> = p.context.as_deref().unwrap_or(&[]).iter().filter_map(|c| if let ContextObject::TerrainMesh(t) = c { Some(t) } else { None }).collect();
-    if terrains.is_empty() {
+    if terrains.is_empty() && terrain_meshes.is_empty() {
         return;
     }
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -2172,6 +2209,30 @@ fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (
                 for pts in parts {
                     out.profiles.push(Profile { category: t.category_code.clone(), pts, natural });
                 }
+            }
+        }
+    }
+    for m in terrain_meshes {
+        let (lo, hi) = mesh_depth_range(m, base, u);
+        if !(lo < 0.0 && hi > 0.0) {
+            continue;
+        }
+        let (rings, open) = crate::mesh_view::cut(m, &[0.0, base.0, base.1, u.0, u.1]);
+        let mut lines = open;
+        for poly in rings_to_polygons(&rings) {
+            lines.extend(upper_edge(&poly[0]));
+        }
+        if lines.is_empty() {
+            continue;
+        }
+        out.terrain_id.get_or_insert_with(|| m.mesh.id.clone());
+        for line in lines {
+            let parts = match range {
+                Some((lo, hi)) => clip_line_to_u(&line, lo - TERRAIN_MARGIN, hi + TERRAIN_MARGIN),
+                None => vec![line],
+            };
+            for pts in parts {
+                out.profiles.push(Profile { category: m.mesh.category_code.clone(), pts, natural: false });
             }
         }
     }
@@ -2513,7 +2574,8 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
     append_body_sections(&mut cuts, p, &bodies, base, u);
     // [152] Importierte Netze: geschnitten (Flächen bzw. offene Linien) und in der Projektion.
-    let meshes = crate::mesh_view::meshes(p);
+    // IFC-Gelände ([152]) wird Geländelinie (`append_terrain_profiles`), kein Körper.
+    let (terrain_meshes, meshes): (Vec<_>, Vec<_>) = crate::mesh_view::meshes(p).into_iter().partition(|m| crate::mesh_view::is_terrain(m.mesh));
     let mut mesh_lines = Vec::new();
     append_mesh_sections(&mut cuts, &mut mesh_lines, &meshes, base, u);
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
@@ -2521,7 +2583,7 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: m.mesh.category_code.clone() }).collect();
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None, meshes, mesh_lines };
-    append_terrain_profiles(&mut out, p, base, u);
+    append_terrain_profiles(&mut out, p, base, u, &terrain_meshes);
     Ok(Some(out))
 }
 
