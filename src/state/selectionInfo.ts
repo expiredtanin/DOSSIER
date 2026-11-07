@@ -283,6 +283,8 @@ export interface StairInfo {
   run1Steps?: number;
   midSteps?: number;
   run2Offset?: number;
+  /** [151] U mit Mittellauf: Verschiebung des Mittellaufs im Auge zur Wendeseite hin (fehlt → mittig). */
+  midOffset?: number;
   /** Zugewiesener Treppentyp (Bibliothek, `Stair.typeId`) oder undefined. */
   typeId?: string;
   /** Geschoss, dem die Treppe zugeordnet ist. */

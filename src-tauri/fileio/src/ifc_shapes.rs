@@ -784,6 +784,8 @@ pub(crate) struct TurnFit {
     pub landing: f64,
     /// U: Versatz des letzten Laufs ins Podest hinein (entlang Lauf 1).
     pub offset: f64,
+    /// U mit Mittellauf: Verschiebung des Mittellaufs im Auge zur Wendeseite hin (0 = mittig).
+    pub mid_offset: f64,
     pub z0: f64,
     pub top_is_exit: bool,
 }
@@ -863,7 +865,7 @@ pub(crate) fn fit_turn_stair(meshes: &[Mesh]) -> Result<TurnFit, &'static str> {
     }
     let z0 = levels[0].z - riser;
     let top_is_exit = top == k && (z_hi - levels[k - 1].z).abs() <= 0.03;
-    let fit = |shape, turn, gap, landing, offset, n_mid| TurnFit {
+    let fit = |shape, turn, gap, landing, offset, n_mid, mid_offset| TurnFit {
         shape,
         start,
         dir: u,
@@ -878,6 +880,7 @@ pub(crate) fn fit_turn_stair(meshes: &[Mesh]) -> Result<TurnFit, &'static str> {
         gap,
         landing,
         offset,
+        mid_offset,
         z0,
         top_is_exit,
     };
@@ -886,7 +889,7 @@ pub(crate) fn fit_turn_stair(meshes: &[Mesh]) -> Result<TurnFit, &'static str> {
         // Gerade mit Zwischenpodest: gleiche Achse, Podest zwischen den Läufen über die Laufbreite.
         let landing = rl.front - e1;
         let ok = (rl.mid - r1.mid).abs() <= 0.03 && landing >= 0.1 && (u1 - rl.front).abs() <= 0.05 && (v0 - (r1.mid - hw)).abs() <= 0.05 && (v1 - (r1.mid + hw)).abs() <= 0.05;
-        return if ok { Ok(fit("straightLanding", 0.0, 0.0, landing, 0.0, 0)) } else { Err(R_STAIR_TURN) };
+        return if ok { Ok(fit("straightLanding", 0.0, 0.0, landing, 0.0, 0, 0.0)) } else { Err(R_STAIR_TURN) };
     }
     if same_dir > -0.98 {
         return Err(R_STAIR_TURN);
@@ -910,7 +913,7 @@ pub(crate) fn fit_turn_stair(meshes: &[Mesh]) -> Result<TurnFit, &'static str> {
         let landing = u1 - e1;
         let (a, b) = vs(v0, v1);
         let ok = landing >= 0.3 && offset >= -(n1 as f64) * r1.going - 0.05 && offset <= landing + 0.05 && (a + hw).abs() <= 0.05 && (b - (off + hw)).abs() <= 0.05;
-        return if ok { Ok(fit("U", turn, gap, landing, offset, 0)) } else { Err(R_STAIR_TURN) };
+        return if ok { Ok(fit("U", turn, gap, landing, offset, 0, 0.0)) } else { Err(R_STAIR_TURN) };
     }
     // Zwei Viertelpodeste, Mittellauf quer über das Auge zur Wendeseite.
     let rm = &runs[1];
@@ -921,17 +924,20 @@ pub(crate) fn fit_turn_stair(meshes: &[Mesh]) -> Result<TurnFit, &'static str> {
     let ext = (gap - n_mid as f64 * td_mid).max(0.0) / 2.0;
     let mid_u = e1 + landing.max(w) - hw;
     let side_dir = [n[0] * turn, n[1] * turn];
-    // Mittellauf: Richtung zur Wendeseite, Auftritt wie Dossier, mittig auf der Wende-Lauflinie, Antritt am Auge.
+    // Mittellauf: Richtung zur Wendeseite, Auftritt wie Dossier, mittig auf der Wende-Lauflinie, Antritt im
+    // Auge frei ([151] `midOffset`: ungleiche Viertelpodeste, höchstens die Reserve im Auge).
     let rm_center_u = -rm.mid * turn; // links(side) = −u·turn … Mitte quer zum Mittellauf = Lage entlang u
+    let mid_offset = (rm.front - dot(start, side_dir)) - (hw + ext);
     let ok = dot(rm.dir, side_dir) > 0.98
         && (rm.width - w).abs() <= 0.03
         && (rm.going - td_mid).abs() <= 0.03
         && (rm_center_u - mid_u).abs() <= 0.06
-        && ((rm.front - dot(start, side_dir)) - (hw + ext)).abs() <= 0.12
+        && mid_offset.abs() <= ext + 0.03
         && landing >= w - 0.05
         && offset.abs() <= 0.05;
     if ok {
-        Ok(fit("U", turn, gap, landing, 0.0, n_mid))
+        let mid_offset = if mid_offset.abs() < 0.002 { 0.0 } else { mid_offset.clamp(-ext, ext) };
+        Ok(fit("U", turn, gap, landing, 0.0, n_mid, mid_offset))
     } else {
         Err(R_STAIR_TURN)
     }
@@ -1304,6 +1310,25 @@ mod tests {
         let u = fit_turn_stair(&[m]).unwrap();
         assert_eq!((u.shape, u.n1, u.n_mid, u.n2, u.turn), ("U", 7, 4, 5, -1.0), "{u:?}");
         assert!((u.gap - 1.6).abs() < 1e-9 && (u.landing - 1.2).abs() < 1e-9 && u.offset.abs() < 1e-9, "{u:?}");
+        assert!(u.mid_offset.abs() < 1e-9, "{u:?}");
+        // [151] Mittellauf 9 cm aus der Mitte (Institute: ungleiche Viertelpodeste) → `mid_offset`
+        let m = flight_blocks(
+            &[([0.0, 0.0], [0.0, 1.0], 7, g), ([0.89, 2.7], [1.0, 0.0], 4, g), ([2.8, 2.1], [0.0, -1.0], 5, g)],
+            &[[[-0.6, 2.1], [0.89, 3.3]], [[2.09, 2.1], [3.4, 3.3]]],
+            1.2,
+            h,
+        );
+        let u = fit_turn_stair(&[m]).unwrap();
+        assert_eq!((u.shape, u.n_mid), ("U", 4), "{u:?}");
+        assert!((u.mid_offset - 0.09).abs() < 1e-9 && (u.gap - 1.6).abs() < 1e-9, "{u:?}");
+        // ausserhalb der Reserve im Auge (0.2): keine Dossier-Form
+        let m = flight_blocks(
+            &[([0.0, 0.0], [0.0, 1.0], 7, g), ([1.1, 2.7], [1.0, 0.0], 4, g), ([2.8, 2.1], [0.0, -1.0], 5, g)],
+            &[[[-0.6, 2.1], [1.1, 3.3]], [[2.3, 2.1], [3.4, 3.3]]],
+            1.2,
+            h,
+        );
+        assert!(fit_turn_stair(&[m]).map_or(true, |u| u.mid_offset.abs() <= 0.2 + 1e-9));
         // gerade mit Zwischenpodest
         let m = flight_blocks(&[([0.0, 0.0], [1.0, 0.0], 5, 0.3), ([2.5, 0.0], [1.0, 0.0], 6, 0.3)], &[[[1.5, -0.5], [2.5, 0.5]]], 1.0, h);
         let s = fit_turn_stair(&[m]).unwrap();

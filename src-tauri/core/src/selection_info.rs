@@ -949,6 +949,7 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
         .raw("run1Steps", s, "run1Steps")
         .raw("midSteps", s, "midSteps")
         .raw("run2Offset", s, "run2Offset")
+        .raw("midOffset", s, "midOffset")
         .raw("typeId", s, "typeId")
         .raw("floorId", s, "floorId")
         .o("floorName", floor_name(floor, field(s, "floorId")))

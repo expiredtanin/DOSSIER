@@ -3070,6 +3070,11 @@ export type Stair = {
   midSteps?: number;
   /** [151] Nur U: Versatz des letzten Laufs ins Podest hinein (Meter, entlang Lauf 1; fehlt = 0). */
   run2Offset?: number;
+  /**
+   * [151] Nur U mit Mittellauf: Verschiebung des Mittellaufs im Treppenauge zur Wendeseite hin (Meter;
+   * fehlt = mittig). Ergibt ungleiche Viertelpodeste; begrenzt auf die Reserve im Auge.
+   */
+  midOffset?: number;
   /** Nur Wendel: Zentrum der Wendeltreppe (Meter). */
   center?: Vec2;
   /** Nur Wendel: Radius (Meter) von der Mitte zur Lauflinie. */

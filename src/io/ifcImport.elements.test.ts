@@ -221,6 +221,7 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
     ["U Halbpodest, Beton", "stair-standard", { shape: "U", start: { x: 0.6, y: 2.3 }, dir: { x: 1, y: 0 }, runLength: 2.4, run2Length: 2.4, turn: -1, gap: 0.15, landingLength: 1.0, stepCount: 15 }],
     ["U versetzt, massiv", "stair-massiv", { shape: "U", start: { x: 0.6, y: 0.6 }, dir: { x: 1, y: 0 }, runLength: 2.1, run2Length: 1.8, turn: 1, gap: 0.2, landingLength: 1.2, run2Offset: 0.3, run1Steps: 8, stepCount: 15 }],
     ["U Mittellauf, massiv", "stair-massiv", { shape: "U", start: { x: 0.8, y: 0.4 }, dir: { x: 0, y: 1 }, runLength: 1.5, run2Length: 1.5, turn: -1, gap: 1.2, landingLength: 1.0, midSteps: 4, run1Steps: 5, stepCount: 16 }],
+    ["U Mittellauf versetzt, massiv", "stair-massiv", { shape: "U", start: { x: 0.8, y: 0.4 }, dir: { x: 0, y: 1 }, runLength: 1.5, run2Length: 1.5, turn: 1, gap: 1.5, landingLength: 1.0, midSteps: 4, midOffset: 0.09, run1Steps: 5, stepCount: 16 }],
     ["gerade mit Podest, Beton", "stair-standard", { shape: "straightLanding", start: { x: 0.5, y: 0.6 }, dir: { x: 1, y: 0 }, runLength: 1.5, run2Length: 1.5, landingLength: 1.0, run1Steps: 7, stepCount: 15 }],
   ];
   for (const [name, typeId, patch] of cases) {
@@ -237,6 +238,7 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
       expect(st.landingLength!).toBeCloseTo(st0.landingLength!, 4);
       if (st0.shape === "U") expect(st.gap!).toBeCloseTo(st0.gap!, 4);
       expect(st.run2Offset ?? 0).toBeCloseTo(st0.run2Offset ?? 0, 4);
+      expect(st.midOffset ?? 0, JSON.stringify(st)).toBeCloseTo(st0.midOffset ?? 0, 4);
       expect(st.totalRise!).toBeCloseTo(st0.totalRise!, 4);
       expect(validateProject(p)).toEqual([]);
     });

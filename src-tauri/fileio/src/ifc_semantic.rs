@@ -236,6 +236,8 @@ pub struct Stair {
     pub run1_steps: usize,
     pub mid_steps: usize,
     pub run2_offset: f64,
+    /// [151] U mit Mittellauf: Verschiebung des Mittellaufs im Auge (0 = mittig).
+    pub mid_offset: f64,
 }
 
 /// Träger ([B4], IfcBeam) als senkrechtes Prisma: Dossier-Extrusionskörper (Grundriss + Höhe).
@@ -1466,6 +1468,7 @@ fn stairs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64,
                             run1_steps: t.n1,
                             mid_steps: t.n_mid,
                             run2_offset: t.offset,
+                            mid_offset: t.mid_offset,
                             ..Default::default()
                         })
                     }),
@@ -1875,7 +1878,7 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
     for st in &s.stairs {
         let nums = vec![
             st.start[0], st.start[1], st.dir[0], st.dir[1], st.run_length, st.width, st.step_count as f64, st.z0, st.total_rise, st.run2_length, st.turn, st.center[0], st.center[1], st.radius, st.sweep_deg, st.center_column,
-            st.gap, st.landing_length, st.run1_steps as f64, st.mid_steps as f64, st.run2_offset,
+            st.gap, st.landing_length, st.run1_steps as f64, st.mid_steps as f64, st.run2_offset, st.mid_offset,
         ];
         push("stair", &st.info, json!({ "shape": st.shape }), nums, &mut data);
     }

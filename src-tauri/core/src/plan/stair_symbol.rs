@@ -3,7 +3,7 @@
 //! kommt aus `kernel2d` (`stair_geometry`, `stair_cut`, `stair_outline`), Farbe, Pick-ID und
 //! Graustufen setzt der Aufrufer (`plan/stairs.rs`, [K3d]).
 //!
-//! Eingabe: Treppen-Parameter (21 Zahlen, s. `stair.rs`), Gesamt-Steighöhe, Schnitthöhe über der
+//! Eingabe: Treppen-Parameter (22 Zahlen, s. `stair.rs`), Gesamt-Steighöhe, Schnitthöhe über der
 //! Treppen-UK, Strichstärke `lw_mm` (Papier-mm), `filled_arrow` (0/1).
 //!
 //! Ausgabe `[n, Eintrag × n]`, Reihenfolge = Zeichenreihenfolge:
@@ -11,9 +11,13 @@
 //! 1 polygon  [1, strokeMm, gefüllt (0 = nur Umriss, 1 = Füllung in Strichfarbe), nPts, x, y …]
 //! 2 line     [2, cls, weightMm, gestrichelt (0|1), ax, ay, bx, by]
 //! 3 arc      [3, weightMm, cx, cy, fromX, fromY, toX, toY, r]            (cls immer stair-outline)
-//! cls        0 stair-outline · 1 stair-tread · 2 stair-break · 3 stair-run · 4 stair-arrow
+//! cls        0 stair-outline · 1 stair-tread · 2 stair-break · 3 stair-run · 4 stair-arrow · 5 stair-handrail
 //! ```
 //! Gestrichelte Linien tragen das Strichmuster `[0.12, 0.08]` (Meter, `DASH`).
+//!
+//! [151] Handlauf (`railing` 0 keiner, 1 links, 2 rechts, 3 beide): Achse aus [`crate::stair_rail`] (wie im
+//! 3D), unter der Bruchhöhe ausgezogen, darüber gestrichelt; `double` (1:50/fein) zeichnet die beiden
+//! Rohrkanten statt der Achse. Strichstärke [`HANDRAIL_MM`] (Tusche 0.1 mm).
 
 use crate::jsnum;
 use crate::stair::decode_params;
@@ -27,6 +31,9 @@ const CLS_TREAD: f64 = 1.0;
 const CLS_BREAK: f64 = 2.0;
 const CLS_RUN: f64 = 3.0;
 const CLS_ARROW: f64 = 4.0;
+const CLS_HANDRAIL: f64 = 5.0;
+/// Strichstärke des Handlaufs (Papier-mm).
+pub const HANDRAIL_MM: f64 = 0.1;
 
 #[derive(Default)]
 struct Out {
@@ -55,7 +62,8 @@ impl Out {
 /// Ecken des Säulenkreises im Grundriss.
 const COLUMN_SEGMENTS: usize = 48;
 
-pub fn plan_stair(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, filled_arrow: bool, column_r: f64) -> Vec<f64> {
+#[allow(clippy::too_many_arguments)]
+pub fn plan_stair(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, filled_arrow: bool, column_r: f64, railing: u8, double: bool) -> Vec<f64> {
     let Some(p) = decode_params(params) else { return Vec::new() };
     if !(total_rise.is_finite() && cut_rise.is_finite() && lw_mm.is_finite()) {
         return Vec::new();
@@ -124,6 +132,24 @@ pub fn plan_stair(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, fi
         o.polygon(&pts, lw_mm, cut);
     }
 
+    // [151] Handlauf: über der Bruchhöhe (Mitte des ersten geschnittenen Tritts) gestrichelt.
+    let z_break = cut.above_indices.first().and_then(|i| geo.treads.iter().find(|t| t.index == *i)).map(|t| (t.base_rise + t.top_rise) / 2.0);
+    let r = crate::stair_rail::RAIL_THICK / 2.0;
+    for rail in crate::stair_rail::rails(&p, &geo, railing) {
+        for (pts, dashed) in crate::stair_rail::plan_pieces(&rail, z_break) {
+            let lines: Vec<Vec<[f64; 2]>> = if double {
+                vec![crate::stair_rail::offset_polyline(&pts, r), crate::stair_rail::offset_polyline(&pts, -r)]
+            } else {
+                vec![pts]
+            };
+            for l in lines {
+                for w in l.windows(2) {
+                    o.line(CLS_HANDRAIL, Vec2::new(w[0][0], w[0][1]), Vec2::new(w[1][0], w[1][1]), HANDRAIL_MM, dashed);
+                }
+            }
+        }
+    }
+
     let mut out = Vec::with_capacity(o.buf.len() + 1);
     out.push(o.n as f64);
     out.extend(o.buf);
@@ -160,7 +186,7 @@ mod tests {
 
     #[test]
     fn gerade_treppe_hat_tritte_lauflinie_pfeil_und_aussenlinie() {
-        let b = plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0);
+        let b = plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0, 0, false);
         let t = tags(&b);
         // 16 Tritte × (Polygon + Kante) + 2 Bruchstriche + Lauflinie + 2 Pfeilflügel + Aussenlinie
         assert_eq!(t.iter().filter(|x| **x == 1.0).count(), 16 + 1);
@@ -171,15 +197,15 @@ mod tests {
 
     #[test]
     fn gefuellter_pfeil_ist_ein_dreieck() {
-        let offen = tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0));
-        let voll = tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, true, 0.0));
+        let offen = tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0, 0, false));
+        let voll = tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, true, 0.0, 0, false));
         assert_eq!(voll.len() + 1, offen.len());
     }
 
     #[test]
     fn wendel_liefert_boegen() {
         let p = vec![2.0, 0.0, 0.0, 1.0, 0.0, 3.0, NAN, NAN, 0.0, 0.0, 1.5, 270.0, 1.0, 14.0, NAN, 0.0];
-        let t = tags(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0));
+        let t = tags(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0, 0, false));
         assert_eq!(t.iter().filter(|x| **x == 3.0).count(), 2);
     }
 
@@ -205,28 +231,115 @@ mod tests {
     #[test]
     fn wendel_saeule_geschnitten_gefuellt_sonst_umriss() {
         let p = vec![2.0, 0.0, 0.0, 1.0, 0.0, 3.0, NAN, NAN, 0.0, 0.0, 1.5, 270.0, 1.0, 14.0, NAN, 0.0];
-        let ohne = tags(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0));
-        let mit = plan_stair(&p, 2.8, 1.0, 0.25, false, 0.15);
+        let ohne = tags(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0, 0, false));
+        let mit = plan_stair(&p, 2.8, 1.0, 0.25, false, 0.15, 0, false);
         assert_eq!(tags(&mit).len(), ohne.len() + 1);
         let (filled, pts) = last_polygon(&mit).unwrap();
         assert!(filled, "Schnitthöhe in der Treppe: Säule geschnitten (Poché)");
         assert_eq!(pts.len(), COLUMN_SEGMENTS);
         assert!(pts.iter().all(|q| (q[0].hypot(q[1]) - 0.15).abs() < 1e-12), "Kreis um das Zentrum");
         // Schnittebene über der Treppe: nur Umriss.
-        let (filled, _) = last_polygon(&plan_stair(&p, 2.8, 3.5, 0.25, false, 0.15)).unwrap();
+        let (filled, _) = last_polygon(&plan_stair(&p, 2.8, 3.5, 0.25, false, 0.15, 0, false)).unwrap();
         assert!(!filled);
         // Gerade Treppe: keine Säule.
-        assert_eq!(tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.15)).len(), tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0)).len());
+        assert_eq!(tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.15, 0, false)).len(), tags(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0, 0, false)).len());
         // Unsinn-Radius: keine Säule, kein Panic.
-        assert_eq!(tags(&plan_stair(&p, 2.8, 1.0, 0.25, false, NAN)).len(), ohne.len());
+        assert_eq!(tags(&plan_stair(&p, 2.8, 1.0, 0.25, false, NAN, 0, false)).len(), ohne.len());
+    }
+
+    /// Linien je Klasse: (cls, gestrichelt, a, b).
+    fn lines(buf: &[f64]) -> Vec<(f64, bool, [f64; 2], [f64; 2])> {
+        let n = buf[0] as usize;
+        let mut i = 1;
+        let mut out = Vec::new();
+        for _ in 0..n {
+            match buf[i] as i64 {
+                1 => i += 4 + 2 * buf[i + 3] as usize,
+                2 => {
+                    out.push((buf[i + 1], buf[i + 3] != 0.0, [buf[i + 4], buf[i + 5]], [buf[i + 6], buf[i + 7]]));
+                    i += 8;
+                }
+                _ => i += 9,
+            }
+        }
+        out
+    }
+
+    fn handrail(buf: &[f64]) -> Vec<(bool, [f64; 2], [f64; 2])> {
+        lines(buf).into_iter().filter(|l| l.0 == CLS_HANDRAIL).map(|l| (l.1, l.2, l.3)).collect()
+    }
+
+    /// [151] Formen mit Geländer: gerade, L, U, U mit Mittellauf, gerade mit Podest, Wendel (21er-Puffer).
+    fn forms() -> Vec<(&'static str, Vec<f64>)> {
+        let mut v = vec![("gerade", straight())];
+        let l = vec![1.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.5, 1.0, NAN, NAN, NAN, NAN, 1.0, 16.0, NAN, 0.0];
+        v.push(("L", l));
+        let u = vec![3.0, 0.0, 0.0, 1.0, 0.0, 2.5, 2.5, 1.0, NAN, NAN, NAN, NAN, 1.0, 17.0, NAN, 0.0, 0.2, NAN, NAN, NAN, NAN];
+        let mut um = u.clone();
+        um[19] = 2.0;
+        v.push(("U", u));
+        v.push(("U Mittellauf", um));
+        v.push(("gerade mit Podest", vec![4.0, 0.0, 0.0, 1.0, 0.0, 2.0, 2.0, NAN, NAN, NAN, NAN, NAN, 1.0, 16.0, NAN, 0.0, NAN, 1.2, 8.0, NAN, NAN]));
+        v.push(("Wendel", vec![2.0, 0.0, 0.0, 1.0, 0.0, 3.0, NAN, NAN, 0.0, 0.0, 1.5, 270.0, 1.0, 14.0, NAN, 0.0]));
+        v
+    }
+
+    #[test]
+    fn handlauf_je_form_unten_ausgezogen_oben_gestrichelt() {
+        for (name, p) in forms() {
+            assert!(handrail(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0, 0, false)).is_empty(), "{name}: ohne Geländer");
+            let one = handrail(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0, 1, false));
+            let both = handrail(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0, 3, false));
+            assert!(!one.is_empty() && both.len() > one.len(), "{name}");
+            // Schnitt bei 1 m: unten ausgezogen, darüber gestrichelt
+            assert!(one.iter().any(|l| !l.0) && one.iter().any(|l| l.0), "{name}: {one:?}");
+            // Schnitt über der Treppe: alles ausgezogen
+            assert!(handrail(&plan_stair(&p, 2.8, 3.5, 0.25, false, 0.0, 3, false)).iter().all(|l| !l.0), "{name}");
+            // fein (1:50): Doppellinie im Abstand des Rohrdurchmessers
+            let fine = handrail(&plan_stair(&p, 2.8, 1.0, 0.25, false, 0.0, 1, true));
+            assert_eq!(fine.len(), 2 * one.len(), "{name}");
+        }
+        // Tusche: dünn (0.1 mm)
+        let b = plan_stair(&forms()[0].1, 2.8, 1.0, 0.25, false, 0.0, 1, false);
+        let n = b[0] as usize;
+        let mut i = 1;
+        for _ in 0..n {
+            match b[i] as i64 {
+                1 => i += 4 + 2 * b[i + 3] as usize,
+                2 => {
+                    if b[i + 1] == CLS_HANDRAIL {
+                        assert_eq!(b[i + 2], HANDRAIL_MM);
+                    }
+                    i += 8;
+                }
+                _ => i += 9,
+            }
+        }
+    }
+
+    #[test]
+    fn handlauf_gerade_lage_und_bruch() {
+        // gerade Treppe 3 m nach +x, 1 m breit, 16 Steigungen à 0.175: Bruch-Tritt = erster über 1 m
+        // (Index 5, Oberkante 1.05), Mitte bei x = 5.5 · 3/16
+        let one = handrail(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0, 1, false));
+        assert_eq!(one.len(), 2);
+        let y = 0.6 - crate::stair_rail::RAIL_INSET;
+        assert!(one.iter().all(|l| (l.1[1] - y).abs() < 1e-9 && (l.2[1] - y).abs() < 1e-9));
+        let x_break = 5.5 * 3.0 / 16.0;
+        assert!(!one[0].0 && (one[0].2[0] - x_break).abs() < 1e-9 && one[1].0);
+        // Doppellinie ± Rohrradius
+        let fine = handrail(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0, 1, true));
+        let ys: Vec<f64> = fine.iter().map(|l| l.1[1]).collect();
+        let r = crate::stair_rail::RAIL_THICK / 2.0;
+        assert!(ys.iter().any(|v| (v - y - r).abs() < 1e-9) && ys.iter().any(|v| (v - y + r).abs() < 1e-9));
     }
 
     #[test]
     fn unsinn_ergibt_leeres_ergebnis() {
-        assert!(plan_stair(&[1.0, 2.0], 2.8, 1.0, 0.25, false, 0.1).is_empty());
-        assert!(plan_stair(&straight(), NAN, 1.0, 0.25, false, 0.0).is_empty());
+        assert!(plan_stair(&[1.0, 2.0], 2.8, 1.0, 0.25, false, 0.1, 0, false).is_empty());
+        assert!(plan_stair(&straight(), NAN, 1.0, 0.25, false, 0.0, 0, false).is_empty());
         let mut kaputt = straight();
         kaputt[1] = NAN;
-        assert!(plan_stair(&kaputt, 2.8, 1.0, 0.25, false, 0.0).is_empty());
+        assert!(plan_stair(&kaputt, 2.8, 1.0, 0.25, false, 0.0, 0, false).is_empty());
     }
 }

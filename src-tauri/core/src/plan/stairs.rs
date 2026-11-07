@@ -9,7 +9,7 @@ use crate::js_fmt::js_number;
 use crate::model::*;
 
 /// Linienklassen der Kern-Kodierung (`plan_stairs.rs`).
-const LINE_CLS: [&str; 5] = ["stair-outline", "stair-tread", "stair-break", "stair-run", "stair-arrow"];
+const LINE_CLS: [&str; 6] = ["stair-outline", "stair-tread", "stair-break", "stair-run", "stair-arrow", "stair-handrail"];
 /// Strichmuster der verdeckten Tritte.
 const TREAD_DASH: [f64; 2] = [0.12, 0.08];
 
@@ -57,7 +57,15 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 bounds.acc(q.x, q.y);
             }
         }
-        let f = crate::plan::stair_symbol::plan_stair(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0));
+        // [151] Handlauf nach Geländer des Treppentyps; Doppellinie ab 1:50 bzw. Detailstufe fein.
+        let railing = match p.stair_type(s).and_then(|t| t.railing) {
+            Some(StairTypeRailing::Links) => 1,
+            Some(StairTypeRailing::Rechts) => 2,
+            Some(StairTypeRailing::Beide) => 3,
+            _ => 0,
+        };
+        let double = c.a.scale <= 50.0 || c.a.detail == Detail::Fein;
+        let f = crate::plan::stair_symbol::plan_stair(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0), railing, double);
         if f.is_empty() {
             continue;
         }
@@ -93,7 +101,7 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 }
                 2 => {
                     let cls = LINE_CLS.get(f[i + 1] as usize).copied().unwrap_or("");
-                    let dash = (cls == "stair-tread").then(|| (f[i + 3] != 0.0).then(|| TREAD_DASH.to_vec()));
+                    let dash = (cls == "stair-tread" || cls == "stair-handrail").then(|| (f[i + 3] != 0.0).then(|| TREAD_DASH.to_vec()));
                     out.push(Primitive::Line {
                         a: v2(f[i + 4], f[i + 5]),
                         b: v2(f[i + 6], f[i + 7]),

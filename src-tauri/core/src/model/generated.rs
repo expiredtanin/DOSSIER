@@ -3251,6 +3251,11 @@ pub struct Stair {
     #[serde(rename = "run2Offset", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub run2_offset: Option<f64>,
+    /// [151] Nur U mit Mittellauf: Verschiebung des Mittellaufs im Treppenauge zur Wendeseite hin (Meter;
+    /// fehlt = mittig). Ergibt ungleiche Viertelpodeste; begrenzt auf die Reserve im Auge.
+    #[serde(rename = "midOffset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mid_offset: Option<f64>,
     /// Nur Wendel: Zentrum der Wendeltreppe (Meter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

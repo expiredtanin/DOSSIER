@@ -1,11 +1,11 @@
 //! Treppen-Geometrie als flache Aufrufe für `src/geometry/stair.ts`. Die Mathematik steht in
 //! `kernel2d` (`stair_geometry`, `stair_outline`, `stair_cut`, `stair_bbox`); hier Kodierung.
 //!
-//! Parameter ([`PARAMS`] = 21 Zahlen): `[form (0 gerade, 1 L, 2 Wendel, 3 U, 4 gerade mit Podest),
+//! Parameter ([`PARAMS`] = 22 Zahlen): `[form (0 gerade, 1 L, 2 Wendel, 3 U, 4 gerade mit Podest),
 //! startX, startY, dirX, dirY, lauf, lauf2, richtung, zentrumX, zentrumY, radius, winkel°, breite,
-//! stufen, auf, referenz, auge, podestlänge, stufenLauf1, stufenMitte, versatzLauf2]`; optionale
+//! stufen, auf, referenz, auge, podestlänge, stufenLauf1, stufenMitte, versatzLauf2, versatzMitte]`; optionale
 //! Felder (`lauf2 … winkel`, `auf`, ab `auge`) als NaN = fehlend; `richtung` ±1; `auf` 0/1; `referenz`
-//! 0 mitte, 1 links, 2 rechts. Pflichtfelder müssen endlich sein, sonst leeres Ergebnis. Die fünf
+//! 0 mitte, 1 links, 2 rechts. Pflichtfelder müssen endlich sein, sonst leeres Ergebnis. Die sechs
 //! letzten ([151]) dürfen fehlen (kürzerer Puffer = alle NaN).
 //!
 //! Geometrie `[hoeheSetz, auftritt, steigung, nTritte, (index, oben, unten, x0, y0 … x3, y3)…,
@@ -24,7 +24,7 @@ use kernel2d::{
 const MAX_STEPS: f64 = 10_000.0;
 
 /// Länge des Parameter-Puffers einer Treppe.
-pub const PARAMS: usize = 21;
+pub const PARAMS: usize = 22;
 
 fn opt(v: f64) -> Option<f64> {
     if v.is_nan() {
@@ -81,6 +81,7 @@ pub fn decode_params(buf: &[f64]) -> Option<StairParams> {
         run1_steps: count(2),
         mid_steps: count(3),
         run2_offset: extra(4),
+        mid_offset: extra(5),
     })
 }
 

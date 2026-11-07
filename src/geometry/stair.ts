@@ -22,7 +22,7 @@ function ptsAt(f: Float64Array, i: number, n: number): Vec2[] {
   return out;
 }
 
-/** Treppen-Parameter als 21 Zahlen (Aufbau: `src-tauri/core/src/stair.rs`); fehlend = NaN. */
+/** Treppen-Parameter als 22 Zahlen (Aufbau: `src-tauri/core/src/stair.rs`); fehlend = NaN. */
 export function encodeStair(s: Stair): Float64Array {
   const n = (v: number | undefined) => (v === undefined ? Number.NaN : v);
   return Float64Array.of(
@@ -45,6 +45,7 @@ export function encodeStair(s: Stair): Float64Array {
     n(s.run1Steps),
     n(s.midSteps),
     n(s.run2Offset),
+    n(s.midOffset),
   );
 }
 

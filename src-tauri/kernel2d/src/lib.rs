@@ -1439,6 +1439,10 @@ pub struct StairParams {
     /// [151] U: Versatz des letzten Laufs ins Podest hinein (Meter, entlang Lauf 1).
     #[serde(default)]
     pub run2_offset: Option<f64>,
+    /// [151] U mit Mittellauf: Verschiebung des Mittellaufs im Auge zur Wendeseite hin (Meter; fehlend = mittig).
+    /// Podest 1 wird um den Betrag tiefer, Podest 2 kürzer; begrenzt auf die Reserve im Auge.
+    #[serde(default)]
+    pub mid_offset: Option<f64>,
 }
 
 /// Achse auf die visuelle Treppen-MITTE versetzen (Referenz links/rechts): `start` und `center`
@@ -1648,10 +1652,12 @@ struct UFrame {
     off: f64,
     /// Versatz des letzten Laufs ins Podest hinein.
     offset: f64,
-    /// Steigungen im Mittellauf (0 = Halbpodest), Auftritt dort, Verlängerung der Podeste ins Auge.
+    /// Steigungen im Mittellauf (0 = Halbpodest), Auftritt dort, Verlängerung von Podest 1 und Podest 2
+    /// ins Auge (ungleich bei versetztem Mittellauf).
     mid: i64,
     td_mid: f64,
     ext: f64,
+    ext2: f64,
 }
 
 impl UFrame {
@@ -1664,16 +1670,18 @@ impl UFrame {
         let run2 = stair.run2_length.unwrap_or(stair.run_length).max(0.1);
         let gap = len_or(stair.gap, 0.1);
         let mut landing = len_or(stair.landing_length, w).max(0.1);
-        let (td_mid, ext) = if mid > 0 {
+        let (td_mid, ext, ext2) = if mid > 0 {
             landing = landing.max(w);
             let td = td1.min(gap / mid as f64);
-            (td, (gap - mid as f64 * td).max(0.0) / 2.0)
+            let e = (gap - mid as f64 * td).max(0.0) / 2.0;
+            let o = stair.mid_offset.filter(|o| o.is_finite()).unwrap_or(0.0).max(-e).min(e);
+            (td, e + o, e - o)
         } else {
-            (0.0, 0.0)
+            (0.0, 0.0, 0.0)
         };
         let offset = stair.run2_offset.filter(|o| o.is_finite()).unwrap_or(0.0).max(-run1).min(landing);
         let side = if stair.turn.unwrap_or(1) > 0 { n } else { scale(n, -1.0) };
-        UFrame { start: stair.start, u, side, half_w, run1, run2, landing, gap, off: w + gap, offset, mid, td_mid, ext }
+        UFrame { start: stair.start, u, side, half_w, run1, run2, landing, gap, off: w + gap, offset, mid, td_mid, ext, ext2 }
     }
     fn from_params(stair: &StairParams, half_w: f64, u: Vec2, n: Vec2) -> Self {
         let run1 = stair.run_length.max(0.1);
@@ -1695,7 +1703,7 @@ impl UFrame {
         let end = r1 + self.landing;
         if self.mid > 0 {
             let a = clean_ccw(vec![self.at(r1, -hw), self.at(end, -hw), self.at(end, hw + self.ext), self.at(r1, hw + self.ext)]);
-            let v0 = off - hw - self.ext;
+            let v0 = off - hw - self.ext2;
             let b = clean_ccw(vec![self.at(r1 + o, v0), self.at(end, v0), self.at(end, off + hw), self.at(r1 + o, off + hw)]);
             return (a, Some(b));
         }
@@ -1712,7 +1720,7 @@ impl UFrame {
         if self.mid > 0 {
             // Innenkante des Mittellaufs (Podeste sind mindestens so tief wie der Lauf breit).
             let inner = end - 2.0 * hw;
-            let (v0, v1) = (off - hw - self.ext, hw + self.ext);
+            let (v0, v1) = (off - hw - self.ext2, hw + self.ext);
             pts.extend([self.at(r1 + o, v0), self.at(inner, v0), self.at(inner, v1), self.at(r1, v1)]);
         } else {
             let mid_v = hw + self.gap / 2.0;
@@ -2926,6 +2934,7 @@ mod tests {
             run1_steps: None,
             mid_steps: None,
             run2_offset: None,
+            mid_offset: None,
         }
     }
 
@@ -3069,6 +3078,39 @@ mod tests {
         assert_eq!(g.run_line.len(), 4);
         let poly = stair_outline(&q).polygon.unwrap();
         assert!(!point_in_polygon(Vec2 { x: 1.0, y: 1.6 }, &poly) && point_in_polygon(Vec2 { x: 3.6, y: 1.6 }, &poly));
+    }
+
+    #[test]
+    fn stair_u_mittellauf_versetzt() {
+        // [151] Mittellauf aus der Mitte des Auges verschoben: ungleiche Viertelpodeste.
+        let mut q = stair("U");
+        q.run2_length = Some(2.0);
+        q.gap = Some(2.0);
+        q.mid_steps = Some(4);
+        q.step_count = 18;
+        q.run1_steps = Some(7);
+        let td = 3.0 / 7.0;
+        let ext = (2.0 - 4.0 * td) / 2.0;
+        let y_min = |pts: &[Vec2]| pts.iter().map(|q| q.y).fold(f64::INFINITY, f64::min);
+        let y_max = |pts: &[Vec2]| pts.iter().map(|q| q.y).fold(f64::NEG_INFINITY, f64::max);
+        for (o, eff) in [(0.1, 0.1), (-0.05, -0.05), (5.0, ext), (-5.0, -ext)] {
+            q.mid_offset = Some(o);
+            let g = stair_geometry(&q, 3.06);
+            let mid = &g.treads[7..11];
+            // Antritt des Mittellaufs um den Versatz verschoben (begrenzt auf die Reserve im Auge)
+            assert!((y_min(&mid[0].pts) - (0.6 + ext + eff)).abs() < 1e-9, "{o}: {}", y_min(&mid[0].pts));
+            assert!((y_max(&mid[3].pts) - (0.6 + ext + eff + 4.0 * td)).abs() < 1e-9);
+            // Podest 1 reicht bis zum Antritt, Podest 2 beginnt am Austritt des Mittellaufs
+            assert!((y_max(g.landing.as_ref().unwrap()) - (0.6 + ext + eff)).abs() < 1e-9);
+            assert!((y_min(g.landing2.as_ref().unwrap()) - (0.6 + ext + eff + 4.0 * td)).abs() < 1e-9);
+        }
+        // ohne Mittellauf wirkungslos
+        let mut h = stair("U");
+        h.gap = Some(0.2);
+        let a = stair_geometry(&h, 2.8);
+        h.mid_offset = Some(0.3);
+        let b = stair_geometry(&h, 2.8);
+        assert_eq!(format!("{:?}", a.landing), format!("{:?}", b.landing));
     }
 
     #[test]

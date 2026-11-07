@@ -255,6 +255,7 @@ impl Stair {
             n(self.run1_steps),
             n(self.mid_steps),
             n(self.run2_offset),
+            n(self.mid_offset),
         ]
     }
 }

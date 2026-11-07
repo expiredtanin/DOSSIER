@@ -871,6 +871,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.stair.landing": "Landing depth",
   "objinfo.stair.midSteps": "Risers middle flight",
   "objinfo.stair.run2Offset": "Offset of return flight",
+  "objinfo.stair.midOffset": "Offset of middle flight",
   // ── Room attributes (object info panel) ──────────────────────────────────
   "objinfo.room.section": "Room",
   "objinfo.room.name": "Name",

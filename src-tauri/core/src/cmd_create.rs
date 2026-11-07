@@ -618,7 +618,7 @@ fn build_stair(p: &Project, v: &Value, ctx: &Ctx, id: Value) -> StairBuilt {
         "rechts" => 2.0,
         _ => 0.0,
     };
-    let mut params = [form, start.0, start.1, dir.0, dir.1, run_length, nan, nan, nan, nan, nan, nan, width, steps, if up { 1.0 } else { 0.0 }, refz, nan, nan, nan, nan, nan];
+    let mut params = [form, start.0, start.1, dir.0, dir.1, run_length, nan, nan, nan, nan, nan, nan, width, steps, if up { 1.0 } else { 0.0 }, refz, nan, nan, nan, nan, nan, nan];
     if shape == "L" {
         f.push(("run2Length", js_num(run_length)));
         f.push(("turn", js_num(1.0)));

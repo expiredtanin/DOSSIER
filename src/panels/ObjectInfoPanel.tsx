@@ -1481,6 +1481,13 @@ function StairFlightFields({ stair, host }: { stair: StairInfo; host: ReturnType
             unit="" step={1} digits={0} value={stair.midSteps ?? 0}
             onCommit={(v) => host.onSetStairPatch({ midSteps: v >= 1 ? Math.round(v) : undefined })}
           />
+          {(stair.midSteps ?? 0) >= 1 && (
+            <DimensionField
+              label={t("objinfo.stair.midOffset")}
+              min={-10} value={stair.midOffset ?? 0}
+              onCommit={(v) => host.onSetStairPatch({ midOffset: v !== 0 ? v : undefined })}
+            />
+          )}
           <DimensionField
             label={t("objinfo.stair.run2Offset")}
             min={-10} value={stair.run2Offset ?? 0}

@@ -156,6 +156,7 @@ struct StairData {
     run1_steps: f64,
     mid_steps: f64,
     run2_offset: f64,
+    mid_offset: f64,
 }
 
 /// Träger als senkrechtes Prisma → Extrusionskörper.
@@ -321,7 +322,7 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
             }
             "stair" => {
                 let shape = s_of(e.get("shape")).unwrap_or_else(|| "straight".into());
-                let ok = (v.len() == 9 || v.len() == 16 || v.len() == 21) && v[6] >= 2.0 && v[6] <= 200.0 && v[4] > 0.0 && v[5] > 0.0;
+                let ok = (v.len() == 9 || v.len() == 16 || v.len() == 21 || v.len() == 22) && v[6] >= 2.0 && v[6] <= 200.0 && v[4] > 0.0 && v[5] > 0.0;
                 let x = |i: usize| v.get(i).copied().unwrap_or(0.0);
                 let shape_ok = match shape.as_str() {
                     "straight" => true,
@@ -353,6 +354,7 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
                         run1_steps: x(18).round(),
                         mid_steps: x(19).round(),
                         run2_offset: x(20),
+                        mid_offset: x(21),
                     });
                 }
             }
@@ -920,6 +922,9 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
                     if s.run2_offset.abs() > 1e-6 {
                         v["run2Offset"] = js_num(round(s.run2_offset, 1e-6));
                     }
+                    if s.mid_steps >= 1.0 && s.mid_offset.abs() > 1e-6 {
+                        v["midOffset"] = js_num(round(s.mid_offset, 1e-6));
+                    }
                 }
             }
             "spiral" => {
@@ -1232,8 +1237,9 @@ mod tests {
             2.8, 3.0, 0.0, 1.0, 4.54, 1.0, 13.0, 0.0, 2.34, 0.0, 0.0, 2.0, 3.0, 0.8, 325.0, 0.3,
             // Träger: z0, z1, Ring
             2.6, 3.0, 4.0, 0.0, 0.0, 4.0, 0.0, 4.0, 0.2, 0.0, 0.2,
-            // [151] U-Treppe mit Mittellauf: … wie L, dazu Auge, Podesttiefe, Tritte Lauf 1, Mittellauf, Versatz
-            5.0, 0.0, 0.0, 1.0, 2.1, 1.2, 18.0, 0.0, 3.06, 1.5, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.6, 1.2, 7.0, 4.0, 0.0,
+            // [151] U-Treppe mit Mittellauf: … wie L, dazu Auge, Podesttiefe, Tritte Lauf 1, Mittellauf, Versatz,
+            // Versatz des Mittellaufs
+            5.0, 0.0, 0.0, 1.0, 2.1, 1.2, 18.0, 0.0, 3.06, 1.5, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.6, 1.2, 7.0, 4.0, 0.0, 0.09,
         ];
         let info = |kind: &str, at: usize, n: usize| json!({"kind": kind, "at": at, "n": n, "storey": 0, "layers": [], "classifications": [], "common": {}});
         let mut roof = info("roof", 8, 12);
@@ -1245,7 +1251,7 @@ mod tests {
         l["shape"] = "L".into();
         let mut sp = info("stair", 36, 16);
         sp["shape"] = "spiral".into();
-        let mut u = info("stair", 63, 21);
+        let mut u = info("stair", 63, 22);
         u["shape"] = "U".into();
         let meta = json!({
             "schema": "IFC4", "lengthScale": 1, "products": [], "skippedItems": {}, "skippedProducts": {},
@@ -1281,6 +1287,7 @@ mod tests {
         let u = stairs[2];
         assert_eq!((u["shape"].as_str(), u["turn"].as_f64(), u["midSteps"].as_f64(), u["run1Steps"].as_f64()), (Some("U"), Some(-1.0), Some(4.0), Some(7.0)), "{u}");
         assert!((u["gap"].as_f64().unwrap() - 1.6).abs() < 1e-9 && (u["landingLength"].as_f64().unwrap() - 1.2).abs() < 1e-9 && u.get("run2Offset").is_none());
+        assert!((u["midOffset"].as_f64().unwrap() - 0.09).abs() < 1e-9, "{u}");
         let typed: crate::model::Stair = serde_json::from_value(u.clone()).unwrap();
         assert_eq!(typed.shape, crate::model::StairShape::U);
         let solids = added(&r.ops, "extrudedSolids");

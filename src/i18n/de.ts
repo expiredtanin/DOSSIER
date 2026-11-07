@@ -853,6 +853,7 @@ export const de = {
   "objinfo.stair.landing": "Podesttiefe",
   "objinfo.stair.midSteps": "Steigungen Mittellauf",
   "objinfo.stair.run2Offset": "Versatz Gegenlauf",
+  "objinfo.stair.midOffset": "Versatz Mittellauf",
   "objinfo.stair.width": "Laufbreite",
   "objinfo.stair.column": "Mittelsäule (Radius)",
   "objinfo.stair.steps": "Stufenanzahl",

@@ -473,7 +473,7 @@ fn mv_stair(s: &Value, xf: &Xf, k: f64) -> Value {
         f.push(("turn", Some(flip("turn"))));
     }
     // [151] U / gerade mit Podest: Auge, Podesttiefe, Versatz skalieren mit.
-    for key in ["gap", "landingLength", "run2Offset"] {
+    for key in ["gap", "landingLength", "run2Offset", "midOffset"] {
         if field(s, key).is_some() {
             f.push((key, Some(times(key))));
         }
