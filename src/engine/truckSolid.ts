@@ -1,3 +1,6 @@
+// Lader und Fassade des truck-WASM (`src-tauri/trucksolid`, `npm run build:truck`): B-Rep-Körper, Booleans,
+// STEP, Kennwerte und Kollision, alle asynchron. Eigenes Modul neben dem Kern, damit ein Panic in truck
+// den Kern nicht lahmlegt; `guarded()` instanziiert es nach einem Panic neu.
 import { wasmInitArg } from "./wasmSource";
 
 let modulePromise: Promise<any> | null = null;

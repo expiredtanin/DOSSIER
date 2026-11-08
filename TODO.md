@@ -3783,6 +3783,21 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
   Stufen × Hindernisse); Puffer schreiben 5–9 ms; Rest-Cache feiner nach Domäne (Wand ändert nicht Kontext/Schatten anderer
   Geschosse). Schnitt/Ansicht nativ 2–4× langsamer als am 31.10. (neue Darstellung, nicht untersucht). Nicht auf macOS/in
   der App gemessen. · M
+- ◐ **[160] Entwickler-Doku: wie die Teile zusammenspielen.** (8.11.) Ziel: eine erfahrene Entwicklerin ohne
+  Vorwissen findet sich in 1–2 Tagen zurecht, auch ohne KI. `doc/ARCHITEKTUR.md` (im Repo; `docs/*.md` und
+  `/ARCHITECTURE.md` sind gitignored): Gesamtbild mit Mermaid-Skizze, WASM-Grenze, der Weg eines Grundrisses
+  (`generatePlan` → `planDomains` → Domänen → Plan-Puffer → render2d/SVG/PDF/DXF), Schnitt, Ansicht, 3D,
+  Schatten, IFC-Import/-Export, eine Benutzeraktion (Klick → Befehl → Kern → Ops → Leseansicht → Ableitung),
+  Glossar, Testen/Ergebnis ansehen, acht Einstiegsaufgaben aus dieser Liste, „Aufräumen" (Dateien über 2000
+  Zeilen mit Teilungsvorschlag, bekannte veraltete Kopf-Kommentare). Kurze READMEs in `src-tauri`,
+  `src-tauri/core/src`, `src-tauri/core/src/plan`, `src/plan`, `src/commands`, `src/state`. Kopf-Kommentare
+  ergänzt in `src/main.tsx`, `src/engine/truckSolid.ts`, `src/model/sampleProject.ts`. Verweis in `CLAUDE.md`
+  und `README.md`. Geprüft: Skript über alle Code-Spans und Links der Doku (≈ 800 Pfade, ≈ 230 Funktionsnamen
+  im Code gefunden; bewusst fehlend nur Teilungsvorschläge und die als veraltet genannten Pfade), Mermaid mit
+  `@mermaid-js/mermaid-cli` gerendert, CLI-Befehle der Doku ausgeführt, tsc und vitest. Offen: veraltete
+  Kopf-Kommentare korrigieren (Liste in der Doku), weitere READMEs (`src/views`, `src/panels`, `fileio`),
+  Doku in der Website (`website/content/docs/entwickler/`) mit `doc/ARCHITEKTUR.md` abgleichen; die Doku
+  veraltet mit jeder Verschiebung, darum nachführen im selben Commit (Regel in `CLAUDE.md`). · S–M
 - ◐ **[68] Baugrube / Geländebearbeitung.** (30.10.) Kontext-Objekt `excavation` (Rust-Modell, `ContextObject`):
   Sohle (`outline`, `bottom` m ±0.00), Böschung `slope` (Standard 45°, je Kante `edgeSlopes`), Schüttung `fillSlope`
   (33.7°), Bermen `bermWidth`/`bermHeight`. Neues Gelände = clamp(t, b − d·tan β, b + H(d)) mit d = Abstand zum

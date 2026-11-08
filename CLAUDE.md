@@ -3,6 +3,9 @@
 CAAD-Desktop-App für Architekt:innen (Tauri/macOS als Hauptplattform, Electron/Linux). Ein semantisches
 Modell (`Project`) ist die einzige Wahrheit; Grundriss, Schnitt, Ansicht und 3D werden daraus abgeleitet.
 Anzeige nur über die zwei Rust-Engines `render2d` und `render3d` (WebGPU/Metal) — kein three.js, kein WebGL.
+Wie die Teile zusammenspielen (Datenflüsse, Glossar, Einstiegsaufgaben, Aufräum-Vorschläge): `doc/ARCHITEKTUR.md`,
+dazu kurze `README.md` in `src-tauri`, `src-tauri/core/src`, `src-tauri/core/src/plan`, `src/plan`, `src/commands`, `src/state`.
+Wer Dateien verschiebt oder umbenennt, führt diese Doku im selben Commit nach.
 
 ## Arbeitsablauf (jeder Agent, jede Aufgabe)
 

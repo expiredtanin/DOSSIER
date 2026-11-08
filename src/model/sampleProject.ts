@@ -1,3 +1,5 @@
+// Eingebaute Projekte: `sampleProject` (kleines Demo-Haus, CLI `:beispiel`, Store-Vorgabe beim Start, viele
+// Tests) und `emptyProject` (leeres Projekt für „Neu"). Das grosse Beispiel steht in `sampleProjectComplex.ts`.
 import type { Project } from "./types";
 import { MATERIAL_LIBRARY } from "../materials/library";
 import { materialFromAsset } from "../materials/runtime";

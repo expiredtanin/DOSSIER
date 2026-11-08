@@ -174,7 +174,9 @@ website/           Dokumentation (Hugo)
 ```
 
 Wer mitarbeiten will: Arbeitsregeln stehen in [`CLAUDE.md`](CLAUDE.md), der
-Stand der Arbeit in [`TODO.md`](TODO.md).
+Stand der Arbeit in [`TODO.md`](TODO.md). Wie die Teile zusammenspielen
+(Datenflüsse, Glossar, Einstiegsaufgaben) erklärt
+[`doc/ARCHITEKTUR.md`](doc/ARCHITEKTUR.md).
 
 ## Lizenz
 

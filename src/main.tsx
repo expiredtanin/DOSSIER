@@ -1,3 +1,5 @@
+// Einstieg der Oberfläche (Vite, `index.html`): setzt Hell/Dunkel, unterdrückt Browser-Gesten, lädt den
+// Rust-Kern (`initCore`) und mountet dann die App oder, je nach `?window=…`, ein macOS-Nebenfenster.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
