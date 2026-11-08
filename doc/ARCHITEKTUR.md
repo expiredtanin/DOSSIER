@@ -11,7 +11,8 @@ Weitere Quellen:
 
 - [`CLAUDE.md`](../CLAUDE.md): verbindliche Arbeitsregeln (für Menschen und Agenten), Modulkarte.
 - [`TODO.md`](../TODO.md): Arbeitsliste mit stabilen Nummern wie `[63]`. Viele Kommentare im Code
-  verweisen auf diese Nummern; dort steht der Hintergrund einer Entscheidung.
+  verweisen auf diese Nummern; den Hintergrund einer Entscheidung (Befunde, Messwerte) findet man im Archiv
+  [`doc/archiv/TODO-bis-2026-11-08.md`](archiv/TODO-bis-2026-11-08.md) unter `**[ID]`.
 - `website/content/docs/entwickler/`: Bauen, Testen, Konventionen, Mitarbeiten (Hugo-Website).
 - Kurze README-Dateien in den grossen Ordnern: [`src-tauri/README.md`](../src-tauri/README.md),
   [`src-tauri/core/src/README.md`](../src-tauri/core/src/README.md),
@@ -540,7 +541,7 @@ Vorschau darauf. Alle Befehle der CLI stehen im Kopf von `src/cli/main.ts`.
 ## 12. Wo fange ich an?
 
 Einstiegsaufgaben aus `TODO.md`, nach Aufwand sortiert. Vor dem Start den Eintrag in `TODO.md` lesen:
-dort steht, was schon versucht wurde.
+dort steht, was fehlt; was schon versucht wurde, steht im Archiv (`doc/archiv/TODO-bis-2026-11-08.md`).
 
 1. **Ungenutzte Übersetzungs-Schlüssel aufräumen** (Rest aus `[123]`). Nach dem Umbau der
    Transformations-Befehle sind Schlüssel wie `cmd.move.base` und `transform.bar` übrig.

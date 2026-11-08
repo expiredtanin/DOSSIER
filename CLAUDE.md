@@ -9,7 +9,7 @@ Wer Dateien verschiebt oder umbenennt, führt diese Doku im selben Commit nach.
 
 ## Arbeitsablauf (jeder Agent, jede Aufgabe)
 
-1. **Lesen:** `TODO.md` (Arbeitsliste mit stabilen IDs wie `[63]`, Stand ✅ ◐ ○), dann diese Datei.
+1. **Lesen:** `TODO.md` (Arbeitsliste mit stabilen IDs wie `[63]`, Stand ◐ ○, Erledigtes als Liste am Ende; Historie mit allen Details: `doc/archiv/TODO-bis-2026-11-08.md`), dann diese Datei.
 2. **Test zuerst**, dann Code. Rust: `cargo test` im Crate; TS: vitest neben der Datei (`*.test.ts`).
 3. **Neuer Kern-Code in Rust** (s. „Rust-Kern"). Wer eine TS-Kernfunktion ersetzt, löscht die TS-Fassung
    im selben Schritt — keine Doppelspur, kein toter Code.
@@ -28,7 +28,7 @@ npm run build:cli        # nötig für dossier-cli, wenn src/cli oder der Kern g
 ## Rust-Kern (Umstellung läuft, Entscheid 27.10.)
 
 Der ganze Kern wandert nach Rust (`src-tauri/core`, Crate `dossier-core`); die UI bleibt TSX. Etappen
-(`TODO.md`, [K0]–[K4]): Lader · 2D-Geometrie · Geometrie-Ableitungen · Plan/Schnitt/Ansicht · Modell+Ops.
+(`TODO.md` und Archiv, [K0]–[K4], alle erledigt): Lader · 2D-Geometrie · Geometrie-Ableitungen · Plan/Schnitt/Ansicht · Modell+Ops.
 
 - **Neues Rust-Modul:** `src-tauri/core/src/<modul>.rs` (+ `mod` in `lib.rs`), Bindungen in
   `src-tauri/core/src/web/<modul>.rs` (+ `mod` in `web/mod.rs`). TS-Seite als dünne Fassade mit
