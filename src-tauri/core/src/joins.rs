@@ -123,6 +123,11 @@ pub struct WallCuts {
     /// Muster an der Schnittlinie spiegelbildlich ineinander über. Über die Ketten verbundener Wände
     /// zweifarbig verteilt (bei ungerader Masche gewinnt die erste Zuordnung).
     pub pattern_flip: bool,
+    /// [141] Prioritärere Stützen (oder gleiches Bauteil), die den Wandkörper überlappen: Grundriss-Kontur
+    /// (konvex) und Höhenbereich `[z_unten, z_oben]`. Das 3D (`model3d::carve_at_columns`) spart sie aus den
+    /// Wandkörpern aus — runde Stütze an der Kontur, Wand durch/breiter als die Stütze, Stütze kürzer als die
+    /// Wand. Nur 3D/Schnitt/Ansicht/IFC; der Grundriss beschneidet seine Flächen selbst.
+    pub column_carves: Vec<(Vec<Vec2>, [f64; 2])>,
 }
 
 /// Eine benötigte Angabe fehlt: Wandtyp oder Bauteil der Wand mit diesem Index ist unbekannt

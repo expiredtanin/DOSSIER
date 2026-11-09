@@ -1106,14 +1106,28 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
             hatch = no_hatch();
         }
         let fp = crate::model3d::column_footprint(col);
+        // [141] Nach Schnitthöhe: eine Stütze ganz unter (oder über) der Schnittebene ist nicht geschnitten —
+        // Ansichtskante ohne Füllung und Schraffur (unsichtbare Pick-Fläche), unter geschnittenen Wänden
+        // verdeckt (`hide_column_views`).
+        if zone != super::view_range::Zone::Cut {
+            let n = fp.len();
+            out.push(polygon(fp.clone(), "none", "none", 0.0, no_hatch(), greyed, None, Pick::Column(&col.id)));
+            for i in 0..n {
+                out.push(line(fp[i], fp[(i + 1) % n], "column-view", LAYER_JOINT_MM * c.a.detail.layer_factor(), None, stroke, greyed));
+            }
+            if let Some(d) = range.restyle_dash(zone) {
+                super::view_range::restyle(out, out_start, d);
+            }
+            continue;
+        }
         // [141] Geschnittene Wände, die in der (geschnittenen) Stütze enden: prioritärere Wand beschneidet
         // die Stütze, gleiches Bauteil verschmilzt (Kontur über diesen Schichten fehlt).
         let (mut clip, mut merge): (Vec<Vec<Vec2>>, Vec<crate::plan::wall_poche::WallFootprint>) = (Vec::new(), Vec::new());
         if zone == super::view_range::Zone::Cut {
-            use super::wall_columns::{band_polys, end_in_column, relation, Rel};
+            use super::wall_columns::{band_polys, relation, wall_meets_column, Rel};
             for w in p.walls.iter().filter(|w| w.floor_id == c.a.floor && c.vis(&w.category_code, &w.id)) {
                 let (zb, zt) = p.wall_vertical_extent(w);
-                if range.classify(zb, zt) != super::view_range::Zone::Cut || end_in_column(w, &fp).is_none() {
+                if range.classify(zb, zt) != super::view_range::Zone::Cut || !wall_meets_column(p, w, &fp) {
                     continue;
                 }
                 match relation(p, w, col) {
@@ -1268,6 +1282,18 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
     super::walls::plan_walls(c, c.a.reference_lines, &mut out.walls, bounds)?;
     super::stairs::plan_stairs(c, &mut out.stairs, bounds);
     columns(c, &mut out.columns);
+    // [141] Wandflächen unter geschnittenen Stützen ausgespart; Ansichtskanten nicht geschnittener Stützen
+    // unter geschnittenen Wänden verdeckt.
+    let filled = |ps: &[Primitive], col: bool| -> Vec<Vec<Vec2>> {
+        ps.iter()
+            .filter_map(|q| match q {
+                Primitive::Polygon { pts, fill, column_id, wall_id, .. } if fill != "none" && (if col { column_id.is_some() } else { wall_id.is_some() }) => Some(pts.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    super::wall_columns::carve_walls_under_columns(&mut out.walls, &filled(&out.columns, true));
+    super::wall_columns::hide_column_views(&mut out.columns, &filled(&out.walls, false));
     // [149] Bäume (Planzeichen) mit den Stützen in einer Gruppe.
     super::trees::plan_trees(c, &mut out.columns);
     solids(c, &mut out.solids);

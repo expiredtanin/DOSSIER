@@ -285,6 +285,219 @@ pub(crate) fn trim_at_columns(p: &Project, idx: &[usize], cuts: &mut [WallCuts])
         if !cover.is_empty() {
             crate::plan::wall_columns::trim_walls_at_columns(p, &[w], &cover, &mut cuts[k..k + 1]);
         }
+        // [141] Überlappende prioritärere Stützen (auch kürzer als die Wand, rund, Wand hindurch oder breiter):
+        // aus den Wandkörpern aussparen ([`carve_at_columns`]).
+        let band = wall_band_bbox(p, w);
+        cuts[k].column_carves = cols
+            .iter()
+            .filter(|c| c.2 .1 - c.2 .0 > 1e-6 && c.2 .1.min(wt) - c.2 .0.max(wb) > 1e-6)
+            .filter(|c| bbox_overlap(band, bbox_of(c.1.iter().map(|v| [v.x, v.y]))))
+            .filter(|c| crate::plan::wall_columns::relation(p, w, c.0) != crate::plan::wall_columns::Rel::Wall)
+            .map(|c| (c.1.iter().map(|v| KVec::new(v.x, v.y)).collect(), [c.2 .0, c.2 .1]))
+            .collect();
+    }
+}
+
+type BBox = [f64; 4];
+
+fn bbox_of(pts: impl Iterator<Item = [f64; 2]>) -> BBox {
+    pts.fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
+}
+
+fn bbox_overlap(a: BBox, b: BBox) -> bool {
+    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+}
+
+/// Ausmass des Wandbands (ganze Dicke, gerade Wand bzw. Sehnen-Teilwände einer Bogenwand).
+fn wall_band_bbox(p: &Project, w: &Wall) -> BBox {
+    let total = p.wall_thickness(w, 0.2);
+    let ro = joins::reference_offset(wall_reference(w), total);
+    let polys = crate::plan::wall_columns::band_polys(w, ro - total / 2.0, ro + total / 2.0, true);
+    bbox_of(polys.iter().flatten().map(|v| [v.x, v.y]))
+}
+
+/// [141] Wandkörper `pieces` um prioritärere Stützen (`WallCuts::column_carves`, konvexe Kontur und
+/// Höhenbereich) aussparen. Ein Körper, den die Kontur trifft, wird im Höhenbereich der Stütze (darunter und
+/// darüber bleibt er ganz) quer zur Dicke in Streifen geteilt — Grenzen an den Ecken der Kontur, die in der
+/// Dicke liegen —, so dass in jedem Streifen genau eine Konturkante ein- und eine austritt; der Streifen endet
+/// an ihr (Schnittlinie = Konturkante) bzw. beginnt hinter ihr. Exakt für Rechteck- und runde Stützen (Kontur
+/// als 32-Eck wie der Stützenkörper); Löcher (Öffnungen) bleiben am Körper.
+pub(crate) fn carve_at_columns(pieces: &mut Vec<RWall>, from: usize, carves: &[(Vec<KVec>, [f64; 2])]) {
+    for (outline, [z0, z1]) in carves {
+        if outline.len() < 3 {
+            continue;
+        }
+        let tail = pieces.split_off(from);
+        for q in tail {
+            carve_piece(q, outline, *z0, *z1, pieces);
+        }
+    }
+}
+
+/// Achsmass (ab `origin`) des Schnitts der Geraden `origin + n·m + u·t` mit der Schnittlinie `cut`
+/// (`[px, py, dx, dy]`), `None` ohne Schnitt oder weiter als `reach` weg.
+fn along_cut(origin: [f64; 2], u: [f64; 2], n: [f64; 2], m: f64, cut: Option<[f64; 4]>, reach: f64) -> Option<f64> {
+    let [cx, cy, ex, ey] = cut?;
+    let q = [origin[0] + n[0] * m, origin[1] + n[1] * m];
+    let den = u[0] * ey - u[1] * ex;
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    let t = ((cx - q[0]) * ey - (cy - q[1]) * ex) / den;
+    (t.is_finite() && t.abs() < reach).then_some(t)
+}
+
+fn carve_piece(q: RWall, outline: &[KVec], z0: f64, z1: f64, out: &mut Vec<RWall>) {
+    const EPS: f64 = 1e-7;
+    let (dx, dy) = (q.end[0] - q.start[0], q.end[1] - q.start[1]);
+    let l = hypot2(dx, dy);
+    let (qb, qt) = (q.base_elevation, q.base_elevation + q.height);
+    if !(l > 1e-9) || !(q.thickness > 0.0) || z1 <= qb + EPS || z0 >= qt - EPS {
+        out.push(q);
+        return;
+    }
+    let u = [dx / l, dy / l];
+    let n = [-u[1], u[0]];
+    let h = q.thickness / 2.0;
+    // Kontur im Körper-Rahmen (Achsmass s ab Anfang, Querversatz m).
+    let loc: Vec<[f64; 2]> = outline.iter().map(|c| {
+        let r = [c.x - q.start[0], c.y - q.start[1]];
+        [r[0] * u[0] + r[1] * u[1], r[0] * n[0] + r[1] * n[1]]
+    }).collect();
+    if loc.iter().all(|c| c[1] >= h - EPS) || loc.iter().all(|c| c[1] <= -h + EPS) {
+        out.push(q);
+        return;
+    }
+    // Ein- und Austritt der Kontur auf der Querlinie m: (s, Kantenindex).
+    let span = |m: f64| -> Option<((f64, usize), (f64, usize))> {
+        let k = loc.len();
+        let (mut lo, mut hi): (Option<(f64, usize)>, Option<(f64, usize)>) = (None, None);
+        for i in 0..k {
+            let (a, b) = (loc[i], loc[(i + 1) % k]);
+            if (a[1] - m) * (b[1] - m) > 0.0 || (a[1] - b[1]).abs() < 1e-15 {
+                continue;
+            }
+            let s = a[0] + (b[0] - a[0]) * (m - a[1]) / (b[1] - a[1]);
+            if lo.is_none_or(|x| s < x.0) {
+                lo = Some((s, i));
+            }
+            if hi.is_none_or(|x| s > x.0) {
+                hi = Some((s, i));
+            }
+        }
+        lo.zip(hi).filter(|(a, b)| b.0 - a.0 > EPS)
+    };
+    let edge = |i: usize| -> [f64; 4] {
+        let k = outline.len();
+        let (a, b) = (outline[i], outline[(i + 1) % k]);
+        [a.x, a.y, b.x - a.x, b.y - a.y]
+    };
+    let mut ms: Vec<f64> = vec![-h, h];
+    ms.extend(loc.iter().map(|c| c[1]).filter(|m| *m > -h + EPS && *m < h - EPS));
+    ms.sort_by(f64::total_cmp);
+    ms.dedup_by(|a, b| (*a - *b).abs() <= EPS);
+    // Querstreifen, von der Kontur getroffen: (m_a, m_b, Eintritt (s, Kante), Austritt (s, Kante)).
+    let mut hit: Vec<(f64, f64, Option<((f64, usize), (f64, usize))>)> = Vec::new();
+    for w in ms.windows(2) {
+        let (ma, mb) = (w[0], w[1]);
+        if mb - ma <= EPS {
+            continue;
+        }
+        let mm = (ma + mb) / 2.0;
+        let us = along_cut(q.start, u, n, mm, q.start_cut, l).unwrap_or(0.0);
+        let ue = l + along_cut(q.end, u, n, mm, q.end_cut, l).unwrap_or(0.0);
+        hit.push((ma, mb, span(mm).filter(|((sa, _), (sb, _))| *sb > us + EPS && *sa < ue - EPS)));
+    }
+    if hit.iter().all(|s| s.2.is_none()) {
+        out.push(q);
+        return;
+    }
+    // Entlang nur im Bereich der Kontur teilen: davor und dahinter bleibt der Körper ganz (Teilfuge
+    // rechtwinklig, `joint` — in der Ansicht keine Kante), sonst entstünden Nähte über die ganze Wand.
+    let perp = |s: f64| Some([q.start[0] + u[0] * s, q.start[1] + u[1] * s, n[0], n[1]]);
+    let face_u = |cut: Option<[f64; 4]>, from: [f64; 2], base: f64| [-h, h].map(|m| base + along_cut(from, u, n, m, cut, l).unwrap_or(0.0));
+    let (us_f, ue_f) = (face_u(q.start_cut, q.start, 0.0), face_u(q.end_cut, q.end, l));
+    // Achsmass der Konturkante `i` auf der Querlinie m (Kante innerhalb des Streifens linear).
+    let s_on = |i: usize, m: f64| {
+        let (a, b) = (loc[i], loc[(i + 1) % loc.len()]);
+        if (b[1] - a[1]).abs() < 1e-15 { a[0].min(b[0]) } else { a[0] + (b[0] - a[0]) * (m - a[1]) / (b[1] - a[1]) }
+    };
+    let s_lo = hit.iter().filter_map(|s| s.2.map(|e| s_on(e.0 .1, s.0).min(s_on(e.0 .1, s.1)))).fold(f64::INFINITY, f64::min);
+    let s_hi = hit.iter().filter_map(|s| s.2.map(|e| s_on(e.1 .1, s.0).max(s_on(e.1 .1, s.1)))).fold(f64::NEG_INFINITY, f64::max);
+    let lo = (s_lo > us_f[0].max(us_f[1]) + 1e-4).then_some(s_lo);
+    let hi = (s_hi < ue_f[0].min(ue_f[1]) - 1e-4).then_some(s_hi);
+    let mut mid = q.clone();
+    if let Some(s) = lo {
+        let mut a = q.clone();
+        a.end_cut = perp(s);
+        a.joint[1] = true;
+        out.push(a);
+        mid.start_cut = perp(s);
+        mid.joint[0] = true;
+    }
+    if let Some(s) = hi {
+        let mut c = q.clone();
+        c.start_cut = perp(s);
+        c.joint[0] = true;
+        out.push(c);
+        mid.end_cut = perp(s);
+        mid.joint[1] = true;
+    }
+    // Höhenteilung der getroffenen Streifen: unter und über der Stütze bleibt der Streifen ganz.
+    let part = |src: &RWall, zb: f64, zt: f64| -> Option<RWall> {
+        if zt - zb <= EPS {
+            return None;
+        }
+        let mut r = src.clone();
+        r.base_elevation = zb;
+        r.height = zt - zb;
+        if let Some(d) = r.top_drop {
+            // Oberkante am Anfang/Ende `qt − d`: über dem neuen Deckel entfällt die Absenkung.
+            let cut = qt - zt;
+            let nd = [(d[0] - cut).max(0.0), (d[1] - cut).max(0.0)];
+            r.top_drop = (nd[0] > wall_bands::EPS || nd[1] > wall_bands::EPS).then_some(nd);
+        }
+        let holes: Vec<RHole> = src.holes.as_deref().unwrap_or(&[]).iter().filter_map(|k| {
+            let (hb, ht) = (k.z_bottom.max(zb), k.z_top.min(zt));
+            (ht - hb > EPS).then(|| RHole { z_bottom: hb, z_top: ht, ..k.clone() })
+        }).collect();
+        r.holes = (!holes.is_empty()).then_some(holes);
+        refit_sloped_top(&mut r);
+        (r.height > EPS).then_some(r)
+    };
+    let strip = |ma: f64, mb: f64, sc: Option<[f64; 4]>, ec: Option<[f64; 4]>, j: [bool; 2]| -> RWall {
+        let sh = (ma + mb) / 2.0;
+        let mut r = mid.clone();
+        r.start = [mid.start[0] + n[0] * sh, mid.start[1] + n[1] * sh];
+        r.end = [mid.end[0] + n[0] * sh, mid.end[1] + n[1] * sh];
+        r.thickness = mb - ma;
+        r.start_cut = sc;
+        r.end_cut = ec;
+        r.joint = j;
+        if let Some(t) = &mut r.top_plane {
+            t[0] += t[1] * n[0] * sh + t[2] * n[1] * sh;
+        }
+        refit_sloped_top(&mut r);
+        r
+    };
+    let (zm0, zm1) = (z0.max(qb), z1.min(qt));
+    for (ma, mb, e) in hit {
+        let whole = strip(ma, mb, mid.start_cut, mid.end_cut, mid.joint);
+        let Some(((sa, ea), (sb, eb))) = e else {
+            out.push(whole);
+            continue;
+        };
+        out.extend(part(&whole, qb, zm0));
+        let mm = (ma + mb) / 2.0;
+        let us = along_cut(mid.start, u, n, mm, mid.start_cut, l).unwrap_or(0.0);
+        let ue = l + along_cut(mid.end, u, n, mm, mid.end_cut, l).unwrap_or(0.0);
+        if sa > us + EPS {
+            out.extend(part(&strip(ma, mb, mid.start_cut, Some(edge(ea)), [mid.joint[0], false]), zm0, zm1));
+        }
+        if sb < ue - EPS {
+            out.extend(part(&strip(ma, mb, Some(edge(eb)), mid.end_cut, [false, mid.joint[1]]), zm0, zm1));
+        }
+        out.extend(part(&whole, zm1, qt));
     }
 }
 
@@ -298,6 +511,7 @@ pub(crate) fn section_cuts(c: &WallCuts) -> WallCuts {
         at_column: c.at_column,
         start_cut: c.start_cut.filter(|_| c.collinear[0] || c.at_column[0]),
         end_cut: c.end_cut.filter(|_| c.collinear[1] || c.at_column[1]),
+        column_carves: c.column_carves.clone(),
         ..Default::default()
     }
 }
@@ -437,6 +651,8 @@ pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &Floor
     if cuts.covered {
         return;
     }
+    let carves = cuts.column_carves.clone();
+    let carve_from = out.len();
     {
         let (bands, stacked) = resolve_wall_bands(p, maps, wall, layered);
         let (z_bottom, z_top) = p.wall_vertical_extent(wall);
@@ -522,6 +738,7 @@ pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &Floor
             cut_wall_pockets([wall.start.x, wall.start.y], [wall.end.x - wall.start.x, wall.end.y - wall.start.y], &pocket_cuts, out, first_piece);
         }
     }
+    carve_at_columns(out, carve_from, &carves);
 }
 
 /// [95] Taschen der Taschen-Schiebetüren einer Wand: je Tasche `[u0, u1, n0, n1, z0, z1]` im Wandrahmen

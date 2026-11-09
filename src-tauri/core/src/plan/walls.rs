@@ -1232,7 +1232,7 @@ fn unroll_cuts(u: &mut Unroll, c: &WallCuts, lo: f64, hi: f64) -> WallCuts {
         start_side: lc.start_side.iter().map(|l| one(l, 0.0)).collect(),
         end_side: lc.end_side.iter().map(|l| one(l, len)).collect(),
     });
-    WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone(), start_cut2, end_cut2, covered: c.covered, collinear: c.collinear, at_column: c.at_column, pattern_flip: false }
+    WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone(), start_cut2, end_cut2, covered: c.covered, collinear: c.collinear, at_column: c.at_column, pattern_flip: false, column_carves: Vec::new() }
 }
 
 fn kv(p: Vec2) -> kernel2d::Vec2 {

@@ -161,16 +161,16 @@ pub fn ear_clip(ring: &[[f64; 2]]) -> Vec<[usize; 3]> {
         guard += 1;
         let m = idx.len();
         let mut found = false;
+        // [141] Kollineare Ecke ohne Fläche erst entfernen, wenn kein echtes Ohr mehr da ist: sonst fehlt die
+        // Ecke im Deckel, die Seitenwand hat sie (T-Stoss, Netz nicht mannigfaltig).
+        let mut flat: Option<usize> = None;
         for k in 0..m {
             let (ia, ib, ic) = (idx[(k + m - 1) % m], idx[k], idx[(k + 1) % m]);
             let (a, b, c) = (ring[ia], ring[ib], ring[ic]);
             let cr = cross(a, b, c);
             if cr <= 1e-14 {
-                // Kollineare Ecke ohne Fläche: entfernen.
-                if cr.abs() <= 1e-14 {
-                    idx.remove(k);
-                    found = true;
-                    break;
+                if cr.abs() <= 1e-14 && flat.is_none() {
+                    flat = Some(k);
                 }
                 continue;
             }
@@ -189,7 +189,12 @@ pub fn ear_clip(ring: &[[f64; 2]]) -> Vec<[usize; 3]> {
             }
         }
         if !found {
-            break;
+            match flat {
+                Some(k) => {
+                    idx.remove(k);
+                }
+                None => break,
+            }
         }
     }
     if idx.len() == 3 && cross(ring[idx[0]], ring[idx[1]], ring[idx[2]]) > 1e-14 {

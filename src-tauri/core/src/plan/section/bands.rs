@@ -265,6 +265,68 @@ fn wall_layers_reversed_in_u(w: &Wall, u: (f64, f64)) -> bool {
     bx * u.0 + by * u.1 < 0.0
 }
 
+/// [141] Schnitt (fast) längs einer Wand: die Schnittfläche quert die Dicke nicht ganz (Länge statt
+/// Dicke in u). Die Schichten liegen dann dort, wo die Schnittlinie ihre Bänder trifft — Querversatz der
+/// Schnittlinie `off(u) = off0 + k·u` gegen die Schichtgrenzen, je Schicht der Streifen `[u_a, u_b]` der
+/// Schnittfläche (genau in der Wandachse: die ganze Fläche in der getroffenen Schicht). `None`: die Fläche
+/// quert die ganze Dicke (übliche Verteilung). Anschlag-Nasen/Schichteinzug entfallen in diesem Fall.
+fn split_layers_along(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_world: (f64, f64), plane: &Plane, total: f64) -> Result<Option<Vec<Cut>>, String> {
+    let [u_min, u_max, v_min, v_max] = bbox(&cp.pts);
+    let (ax, ay) = (owner.end.x - owner.start.x, owner.end.y - owner.start.y);
+    let l = hypot2(ax, ay);
+    if !(l > 1e-9) {
+        return Ok(None);
+    }
+    let n = (-ay / l, ax / l);
+    let k = u_world.0 * n.0 + u_world.1 * n.1;
+    if k.abs() > 1e-12 && (total / k.abs() - (u_max - u_min)).abs() < 1e-6 {
+        return Ok(None);
+    }
+    if k.abs() > 1e-12 && (u_max - u_min) >= total / k.abs() {
+        return Ok(None);
+    }
+    let base = plane.base();
+    let off0 = (base.0 - owner.start.x) * n.0 + (base.1 - owner.start.y) * n.1;
+    let mut lo = crate::joins::reference_offset(crate::model3d::wall_reference(owner), total) - total / 2.0;
+    let category = p.layer_category(&owner.category_code);
+    let ring = vec![cp.pts.clone()];
+    let mut out = Vec::new();
+    for (li, layer) in layers.iter().enumerate() {
+        let hi = lo + layer.thickness;
+        let (ua, ub) = if k.abs() <= 1e-12 {
+            // Genau parallel: ganze Fläche, wenn die Linie in dieser Schicht liegt (Grenze: die erste).
+            if off0 >= lo - 1e-9 && (off0 < hi - 1e-9 || li + 1 == layers.len()) { (u_min - 1.0, u_max + 1.0) } else { (0.0, 0.0) }
+        } else {
+            let (a, b) = ((lo - off0) / k, (hi - off0) / k);
+            (a.min(b), a.max(b))
+        };
+        lo = hi;
+        let (ua, ub) = (ua.max(u_min - 1.0), ub.min(u_max + 1.0));
+        if ub - ua <= 1e-9 {
+            continue;
+        }
+        // Streifen knapp über das Ausmass (i_overlay rechnet auf einem Raster relativ zur Ausdehnung).
+        let whole = ua <= u_min && ub >= u_max;
+        let strip = vec![vec![[ua, v_min - 1.0], [ub, v_min - 1.0], [ub, v_max + 1.0], [ua, v_max + 1.0]]];
+        let comp = p.component_or_fallback(&layer.component_id);
+        let (fill, hatch) = layer_style(p, comp, owner.hatch_id.as_deref(), owner.hatch_source, owner.foreground.as_deref(), owner.foreground_source, owner.background.as_deref(), owner.background_source, category, SECTION_WALL_AXIS_ANGLE_DEG)?;
+        let parts = if whole { vec![ring.clone()] } else { crate::polygon_bool::intersection(&[ring.clone()], &[strip]) };
+        for pl in parts {
+            let Some(pts) = pl.into_iter().next() else { continue };
+            let mut c = Cut::new(cp.kind, cp.index, pts);
+            c.fill = Some(fill.clone());
+            c.hatch = Some(hatch.clone());
+            c.join_priority = Some(comp.join_priority);
+            c.component_id = Some(comp.id.clone());
+            c.source_id = cp.source_id.clone();
+            c.category = cp.category.clone();
+            c.layer_index = Some(li);
+            out.push(c);
+        }
+    }
+    Ok((!out.is_empty()).then_some(out))
+}
+
 /// `splitWallLayers`: stehende Teil-Rechtecke je Schicht quer zur Dicke (u).
 pub(super) fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_world: (f64, f64), plane: &Plane) -> Result<Vec<Cut>, String> {
     let total = sum_thickness(layers);
@@ -272,6 +334,9 @@ pub(super) fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: 
     let u_span = u_max - u_min;
     if total <= 1e-9 || u_span <= 1e-9 {
         return Ok(vec![cp.clone()]);
+    }
+    if let Some(out) = split_layers_along(cp, p, layers, owner, u_world, plane, total)? {
+        return Ok(out);
     }
     let scale = u_span / total;
     let reversed = wall_layers_reversed_in_u(owner, u_world);
