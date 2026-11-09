@@ -108,8 +108,10 @@ pub fn hatches() -> Vec<Value> {
         layer("std-h-daemmung-weich", "SIA Dämmung weich", "insulation", 1.0, 0.1),
         layer("std-h-daemmung-holzfaser", "SIA Dämmung Holzfaser", "insulation", 1.4, 0.1),
         // Fig. 34 Dämmstoffe (Fig. 37/38): Parallelen quer zur Schicht über die ganze Dicke — für harte
-        // Dämmung (EPS/XPS), damit sie sich von der weichen unterscheidet.
-        lines("std-h-daemmstoffe-sia", "Dämmstoffe (SIA-Linien)", "diagonal", 0.035, 90.0, true, 0.1, ""),
+        // Dämmung (EPS/XPS), damit sie sich von der weichen unterscheidet. Winkel 0 relativ zur Wand =
+        // Striche QUER zur Wandachse (Musterlinie läuft wie in der SVG-Kachel senkrecht zur Achse 0°; 90° wäre
+        // längs wie Glas). [166]: 90° zeichnete nur das CLI-/Druck-SVG quer, Bildschirm und PDF längs.
+        lines("std-h-daemmstoffe-sia", "Dämmstoffe (SIA-Linien)", "diagonal", 0.035, 0.0, true, 0.1, ""),
         // Fig. 34 Mörtel, Gips, Verputz: leer (Farbe violett nur bei farbiger Darstellung). Estrich ist Mörtel.
         empty("std-h-gips", "SIA Gips"),
         empty("std-h-putz", "SIA Putz"),
@@ -801,7 +803,7 @@ mod tests {
         assert_eq!((of("std-c-backstein").pattern, of("std-c-backstein").angle), (P::Diagonal, 45.0));
         assert_eq!((of("std-c-kalksandstein").pattern, of("std-c-kalksandstein").angle), (P::Diagonal, 135.0));
         assert!((spacing("std-c-backstein") - spacing("std-c-kalksandstein")).abs() < 1e-9);
-        // Weiche Dämmung: Dämmschlange (Holzfaser weiter); harte Dämmung: SIA-Parallelen quer zur Schicht (90° zur Wand, Maintainer 5.11.).
+        // Weiche Dämmung: Dämmschlange (Holzfaser weiter); harte Dämmung: SIA-Parallelen quer zur Schicht (Striche 90° zur Wand = Schraffur-Winkel 0 relativ zur Wand, [166]).
         for c in ["std-c-mineralwolle", "std-c-steinwolle", "std-c-trittschall"] {
             let h = of(c);
             assert_eq!((h.id.as_str(), h.pattern, h.scale, h.relative_to_wall), ("std-h-daemmung-weich", P::Insulation, 1.0, Some(true)), "{c}");
@@ -809,7 +811,7 @@ mod tests {
         assert_eq!((of("std-c-holzfaser").pattern, of("std-c-holzfaser").scale), (P::Insulation, 1.4));
         for c in ["std-c-eps", "std-c-xps"] {
             let h = of(c);
-            assert_eq!((h.id.as_str(), h.pattern, h.angle, h.relative_to_wall), ("std-h-daemmstoffe-sia", P::Diagonal, 90.0, Some(true)), "{c}");
+            assert_eq!((h.id.as_str(), h.pattern, h.angle, h.relative_to_wall), ("std-h-daemmstoffe-sia", P::Diagonal, 0.0, Some(true)), "{c}");
         }
         // Mörtel, Gips, Verputz (und Estrich) leer; Metall leer, Stahl schwarz.
         for c in ["std-c-innenputz", "std-c-aussenputz", "std-c-gipskarton", "std-c-zementestrich", "std-c-aluminium"] {

@@ -946,6 +946,7 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 Some(u) => {
                     let mut tmp = Vec::new();
                     opening_symbol(c, &mut tmp, wv, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?;
+                    polar_layer_pieces(u, &mut tmp);
                     bend_prims(u, tmp, out);
                 }
                 None => opening_symbol(c, out, w, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?,
@@ -1256,6 +1257,22 @@ fn bend_poly(u: &Unroll, pts: &[Vec2], ns: &[f64]) -> (Vec<Vec2>, Vec<f64>) {
 /// Grundriss-Primitive der abgewickelten Ersatzwand biegen ([T2]): Flächen über die Bogenkanten
 /// zerlegt, Linien mit konstantem Querversatz als Bögen (≤ 90° je Stück, Gegenuhrzeigersinn, wie
 /// es Bildschirm, SVG und DXF erwarten), übrige Linien gerade.
+/// [166] Schichtstücke an Öffnungen einer Bogenwand (Anschlag-Nasen, je Wandschicht): polare Schraffur wie
+/// die Wandbänder (`wall_poche`, Laufrichtung 180° im Gegenuhrzeigersinn) — sonst stand das Muster nach dem
+/// Biegen im Winkel der abgewickelten Ersatzwand (Dämm-Striche senkrecht im Blatt statt radial).
+fn polar_layer_pieces(u: &Unroll, prims: &mut [Primitive]) {
+    for q in prims {
+        if let Primitive::Polygon { hatch, wall_id: Some(_), .. } = q {
+            if hatch.polar.is_none() && !matches!(hatch.pattern, HatchPattern::None | HatchPattern::Solid) {
+                if u.arc.sigma() > 0.0 {
+                    hatch.angle -= 180.0;
+                }
+                hatch.polar = Some([u.arc.center.x, u.arc.center.y, u.arc.r]);
+            }
+        }
+    }
+}
+
 fn bend_prims(u: &Unroll, prims: Vec<Primitive>, out: &mut Vec<Primitive>) {
     for mut p in prims {
         match &mut p {

@@ -359,6 +359,19 @@ fn migrate_line_weights(mut raw: Map<String, Value>) -> Map<String, Value> {
     raw
 }
 
+/// [166] Standard-Schraffur „Dämmstoffe (SIA-Linien)" (EPS/XPS) mit Winkel 90° relativ zur Wand (Standards
+/// vom 5. bis 9.11.): 90° zeichnet die Striche längs der Wand (Bildschirm, PDF), gemeint war quer = 0°. Beim
+/// Laden zurückgestellt — unabhängig von der Formatversion (Dateien dieser Tage tragen schon Format 5).
+fn repair_insulation_hatch_angle(obj: &mut Map<String, Value>) {
+    let Some(Value::Array(hatches)) = obj.get_mut("hatches") else { return };
+    for h in hatches.iter_mut().filter_map(Value::as_object_mut) {
+        let std = h.get("id").and_then(Value::as_str) == Some("std-h-daemmstoffe-sia");
+        if std && h.get("pattern").and_then(Value::as_str) == Some("diagonal") && h.get("angle").and_then(Value::as_f64) == Some(90.0) && h.get("relativeToWall").and_then(Value::as_bool) == Some(true) {
+            h.insert("angle".into(), 0.into());
+        }
+    }
+}
+
 /// Wie [`parse_project_file`], für ein bereits geparstes Objekt.
 pub fn parse_project_object(raw: Value, now_ms: f64) -> Parsed {
     let Value::Object(mut obj) = raw else { return Parsed::Err("Die Datei enthält kein Dossier-Projekt.".into()) };
@@ -399,6 +412,7 @@ pub fn parse_project_object(raw: Value, now_ms: f64) -> Parsed {
         };
     }
     obj.insert("formatVersion".into(), PROJECT_FORMAT_VERSION.into());
+    repair_insulation_hatch_angle(&mut obj);
 
     for key in DEFAULT_ARRAYS {
         match obj.get(key) {
@@ -630,6 +644,22 @@ mod tests {
         assert_eq!(d[1]["weightMm"], json!(0.7));
         assert!(d[2].get("weightMm").is_none());
         assert_eq!(p["overrideRules"][0]["actions"], json!({"linetypeId":"hair","lineweight":0.13}));
+    }
+
+    /// [166] EPS/XPS-Schraffur mit Winkel 90° (Standards 5.–9.11.) wird beim Laden auf 0° (Striche quer zur
+    /// Wand) zurückgestellt; eigene Schraffuren und andere Winkel bleiben.
+    #[test]
+    fn daemmstoffe_winkel_90_wird_quer() {
+        let h = |id: &str, angle: f64| json!({"id": id, "name": "D", "pattern": "diagonal", "scale": 0.39, "angle": angle, "relativeToWall": true, "color": "#1a1a1a"});
+        let v = json!({"formatVersion": 5, "id":"p","name":"N","walls":[],"layers":[],"drawingLevels":[],"lineStyles":[],"components":[],"wallTypes":[],
+            "hatches": [h("std-h-daemmstoffe-sia", 90.0), h("eigen", 90.0)]});
+        let Parsed::Ok { project, .. } = parse_project_object(v, 0.0) else { panic!() };
+        let angles: Vec<f64> = project["hatches"].as_array().unwrap().iter().map(|h| h["angle"].as_f64().unwrap()).collect();
+        assert_eq!(angles, vec![0.0, 90.0]);
+        let v = json!({"formatVersion": 5, "id":"p","name":"N","walls":[],"layers":[],"drawingLevels":[],"lineStyles":[],"components":[],"wallTypes":[],
+            "hatches": [h("std-h-daemmstoffe-sia", 45.0)]});
+        let Parsed::Ok { project, .. } = parse_project_object(v, 0.0) else { panic!() };
+        assert_eq!(project["hatches"][0]["angle"], 45.0);
     }
 
     #[test]

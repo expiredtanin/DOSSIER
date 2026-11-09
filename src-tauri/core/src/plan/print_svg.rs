@@ -292,85 +292,6 @@ fn push_dash(v: &mut Vec<(&'static str, String)>, dash: Option<&[f64]>) {
     }
 }
 
-/// Parallele Linien im Winkel/Abstand, aufs Polygon geklippt (`fillParallel`).
-fn fill_parallel(poly: &[V2], angle: f64, spacing: f64, out: &mut Vec<(V2, V2)>) {
-    if poly.len() < 3 || spacing <= 0.0 {
-        return;
-    }
-    let dir = V2 { x: jsnum::cos(angle), y: jsnum::sin(angle) };
-    let nrm = V2 { x: -dir.y, y: dir.x };
-    let mut t_min = f64::INFINITY;
-    let mut t_max = f64::NEG_INFINITY;
-    for p in poly {
-        let t = p.x * nrm.x + p.y * nrm.y;
-        if t < t_min {
-            t_min = t;
-        }
-        if t > t_max {
-            t_max = t;
-        }
-    }
-    let mut t = (t_min / spacing).ceil() * spacing;
-    while t <= t_max {
-        let mut xs: Vec<f64> = Vec::new();
-        let n = poly.len();
-        let mut j = n - 1;
-        for i in 0..n {
-            let a = poly[j];
-            let b = poly[i];
-            j = i;
-            let ta = a.x * nrm.x + a.y * nrm.y;
-            let tb = b.x * nrm.x + b.y * nrm.y;
-            if ta == tb {
-                continue;
-            }
-            let f = (t - ta) / (tb - ta);
-            if f < 0.0 || f > 1.0 {
-                continue;
-            }
-            let px = a.x + (b.x - a.x) * f;
-            let py = a.y + (b.y - a.y) * f;
-            xs.push(px * dir.x + py * dir.y);
-        }
-        if xs.len() >= 2 {
-            // `xs.sort((u, v) => u - v)`: stabil; NaN zählt als gleich.
-            xs.sort_by(|u, v| (u - v).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
-            let mut k = 0;
-            while k + 1 < xs.len() {
-                let (u0, u1) = (xs[k], xs[k + 1]);
-                k += 2;
-                if u1 - u0 < 1e-6 {
-                    continue;
-                }
-                out.push((V2 { x: nrm.x * t + dir.x * u0, y: nrm.y * t + dir.y * u0 }, V2 { x: nrm.x * t + dir.x * u1, y: nrm.y * t + dir.y * u1 }));
-            }
-        }
-        t += spacing;
-    }
-}
-
-/// Muster, die der Kern-Generator als Linien/Polylinien erzeugt (Schichtmuster, Streu-/Punktmuster, Doppellinien).
-pub(super) fn is_generated(p: Pattern) -> bool {
-    matches!(
-        p,
-        Pattern::Insulation | Pattern::InsulationHard | Pattern::InsulationWave | Pattern::Timber | Pattern::Earth | Pattern::Gravel | Pattern::Stone | Pattern::Dots | Pattern::WoodBased | Pattern::Wood | Pattern::Barrier
-    )
-}
-
-/// Schraffurlinien in Papier-mm (`hatchLines`).
-pub(super) fn hatch_lines(poly_mm: &[V2], h: &Hatch, mm_per_m: f64) -> Vec<(V2, V2)> {
-    let unit_mm = (1.0 / 90.0) * mm_per_m;
-    let tile_mm = 8.0 * h.scale * unit_mm;
-    let spacing = jsnum::max(0.5, tile_mm);
-    let angle = (h.angle * PI) / 180.0;
-    let mut segs = Vec::new();
-    fill_parallel(poly_mm, angle, spacing, &mut segs);
-    if h.pattern == Pattern::Crosshatch {
-        fill_parallel(poly_mm, angle + PI / 2.0, spacing, &mut segs);
-    }
-    segs
-}
-
 /// Strichmuster der Schraffurlinien in Papier-mm: dieselben Modell-Längen wie Szene/Chunk-Pfad
 /// (`hatch::hatch_dash` × `DASH_MM_TO_M`), nur auf das Blatt (`mm_per_m`) abgebildet.
 pub(super) fn hatch_dash_paper(h: &Hatch, mm_per_m: f64) -> Vec<f64> {
@@ -464,8 +385,11 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                         let (a, b) = (run[0], run[run.len() - 1]);
                         out.el(1, "line", &line_attrs(m.at(a.x, a.y), m.at(b.x, b.y), &hatch_color, pen, Some(&hdash)));
                     }
-                } else if is_generated(h.pattern) {
-                    // Schicht-/Streumuster ([109]): dieselben Linien wie Szene und Chunk-Pfad (Kern-Generator).
+                } else {
+                    // Alle Vektor-Schraffuren aus dem Kern-Generator: dieselben Linien wie Szene, PDF-Export und
+                    // Chunk-Pfad ([109] Schicht-/Streumuster; [166] auch Geraden-/Kreuzschar und Motiv: die
+                    // frühere eigene Linienschar las den Winkel um 90° verdreht — Dämm-Striche längs statt quer —
+                    // und kannte die polare Schraffur der Bogenwand nicht).
                     for run in hatch::build_hatch_runs(&pts, &h) {
                         let p: Vec<V2> = run.iter().map(|q| m.at(q.x, q.y)).collect();
                         match p.len() {
@@ -473,11 +397,6 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                             2 => out.el(1, "line", &line_attrs(p[0], p[1], &hatch_color, pen, Some(&hdash))),
                             _ => out.el(1, "polyline", &polyline_attrs(&p, &hatch_color, pen, Some(&hdash))),
                         }
-                    }
-                } else {
-                    // Strichmuster der Schraffur (null und [] gleich: keins).
-                    for (a, b) in hatch_lines(&pts_mm, &h, k) {
-                        out.el(1, "line", &line_attrs(a, b, &hatch_color, pen, Some(&hdash)));
                     }
                 }
                 if stroke_mm > 0.0 {
@@ -824,16 +743,6 @@ mod tests {
         let y0: f64 = recs[1][5].parse().unwrap();
         let y1: f64 = recs[3][5].parse().unwrap();
         assert!(y0 < 140.0 && y1 > 140.0 && (y1 - y0 - 10.0 * PT_TO_MM * 1.3).abs() < 1e-3);
-    }
-
-    #[test]
-    fn schraffur_parallel_geklippt() {
-        let sq = [V2 { x: 0.0, y: 0.0 }, V2 { x: 10.0, y: 0.0 }, V2 { x: 10.0, y: 10.0 }, V2 { x: 0.0, y: 10.0 }];
-        let mut segs = Vec::new();
-        fill_parallel(&sq, 0.0, 2.0, &mut segs);
-        // Waagrechte Linien bei y = 0, 2, …, 10 über die volle Breite.
-        assert_eq!(segs.len(), 6);
-        assert!(segs.iter().all(|(a, b)| (b.x - a.x - 10.0).abs() < 1e-9 || (a.x - b.x - 10.0).abs() < 1e-9));
     }
 
     /// [146] Nicht gestrichene Kanten (`noStrokeEdges`) bleiben im Druck-SVG ohne Strich: Füllung ohne
