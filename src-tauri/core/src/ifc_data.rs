@@ -51,6 +51,7 @@ const REC_WALL_ARC: f64 = 16.0;
 const REC_WALL_ARC_SOLID: f64 = 17.0;
 const REC_GRID: f64 = 18.0;
 const REC_TREE: f64 = 19.0;
+const REC_COLUMN_PIECES: f64 = 20.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -1352,36 +1353,49 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
 
     // ── Stützen → IfcColumn (Profil-Extrusion, Material = Bauteil) ──────────
     for col in p.columns.as_deref().unwrap_or(&[]) {
-        // [141] Von einer prioritäreren Wand beschnitten: Querschnitt ohne das Wandband (wie im 3D), wenn
-        // die Aussparung über die ganze Höhe geht (ein Abschnitt); sonst der volle Querschnitt.
-        let (footprint, z_bottom, z_top) = match model3d::column_pieces(&p, col).as_slice() {
-            [one] => one.clone(),
-            _ => {
-                let (zb, zt) = p.column_vertical_extent(col);
-                (model3d::column_footprint(col), zb, zt)
-            }
+        // [141] Von einer prioritäreren Wand beschnitten: je Höhenabschnitt ein eigenes Profil (wie im 3D),
+        // als Datensatz COLUMN_PIECES mit mehreren Extrusionen in einer Darstellung; ein Abschnitt = COLUMN.
+        let pieces: Vec<(Vec<Vec2>, f64, f64)> = model3d::column_pieces(&p, col).into_iter().filter(|(fp, zb, zt)| fp.len() >= 3 && zt > zb).collect();
+        let pieces = if pieces.is_empty() {
+            let (zb, zt) = p.column_vertical_extent(col);
+            vec![(model3d::column_footprint(col), zb, zt)]
+        } else {
+            pieces
         };
-        if footprint.len() < 3 {
-            continue;
-        }
-        if !(z_top > z_bottom) {
+        let z_bottom = pieces.iter().fold(f64::INFINITY, |m, q| m.min(q.1));
+        let z_top = pieces.iter().fold(f64::NEG_INFINITY, |m, q| m.max(q.2));
+        if pieces.iter().any(|(fp, zb, zt)| fp.len() < 3 || !(zt > zb)) {
             continue;
         }
         let structure = structure_of(&col.floor_id);
         classified.push((format!("column/{}", col.id), Kind::Column, col.category_code.clone()));
         let label = crate::plan::domains::column_label(col);
         let mut psets = vec![Pset { name: "Pset_ColumnCommon", props: vec![ident("Reference", &label)] }];
-        psets.extend(qto("Qto_ColumnBaseQuantities", qty::column_quantities(&footprint, z_top - z_bottom)));
+        let quantities = if let [(footprint, zb, zt)] = pieces.as_slice() {
+            qty::column_quantities(footprint, zt - zb)
+        } else {
+            qty::column_pieces_quantities(&pieces)
+        };
+        psets.extend(qto("Qto_ColumnBaseQuantities", quantities));
         let (id, lab) = (f.str(&col.id), f.str(&label));
-        f.nums(&[REC_COLUMN, structure, id, lab]);
-        w_pts(&mut f, &footprint);
+        if let [(footprint, _, _)] = pieces.as_slice() {
+            f.nums(&[REC_COLUMN, structure, id, lab]);
+            w_pts(&mut f, footprint);
+            f.nums(&[z_bottom - base_of(structure), z_top - z_bottom]);
+        } else {
+            f.nums(&[REC_COLUMN_PIECES, structure, id, lab, pieces.len() as f64]);
+            for (footprint, zb, zt) in &pieces {
+                w_pts(&mut f, footprint);
+                f.nums(&[zb - base_of(structure), zt - zb]);
+            }
+        }
         let comp = col.component_id.as_deref().filter(|s| !s.is_empty());
         let cid = comp.map_or(-1.0, |c| f.str(c));
         let cname = comp.map_or(-1.0, |c| {
             let n = component_name(&p, c);
             f.str(&n)
         });
-        f.nums(&[z_bottom - base_of(structure), z_top - z_bottom, cid, cname]);
+        f.nums(&[cid, cname]);
         w_psets(&mut f, &psets);
     }
     f.num(REC_END_COLUMNS);

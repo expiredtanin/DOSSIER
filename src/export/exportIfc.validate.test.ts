@@ -191,6 +191,35 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", { timeout: 60
     expect(r.out).toContain("0 Befunde");
     expect(r.status).toBe(0);
   });
+  it("[141] Stütze mit Höhenabschnitten: eine IfcColumn, zwei Extrusionen, Volumen = Summe = Qto", () => {
+    // Wand (aw, nur 1.5 m hoch) prioritärer als die Putz-Stütze (render-ext): unten beschnittenes Profil, oben voller Querschnitt.
+    const p = {
+      ...sampleProject,
+      walls: [{ id: "W1", type: "wall" as const, floorId: "eg", categoryCode: "20", start: { x: 0, y: 0 }, end: { x: 3, y: 0 }, wallTypeId: "aw", height: 1.5 }],
+      openings: [],
+      columns: [{ id: "S1", type: "column" as const, floorId: "eg", categoryCode: "50", position: { x: 3, y: 0 }, profile: { kind: "rect" as const, width: 0.4, depth: 0.4 }, rotation: 0, height: 2.6, componentId: "render-ext" }],
+    } as unknown as Project;
+    const ifc = exportIfcSpf(p);
+    expect(validate("stuetze-abschnitte", ifc).out).toContain("0 Befunde");
+    const script = `
+import json, sys
+import ifcopenshell, ifcopenshell.geom, ifcopenshell.util.shape as us, ifcopenshell.util.element as ue
+m = ifcopenshell.open(sys.argv[1])
+c = m.by_type("IfcColumn")
+sh = ifcopenshell.geom.create_shape(ifcopenshell.geom.settings(), c[0])
+body = [r for r in c[0].Representation.Representations if r.RepresentationIdentifier == "Body"][0]
+q = ue.get_psets(c[0])["Qto_ColumnBaseQuantities"]
+print(json.dumps({"n": len(c), "solids": len(body.Items), "volume": us.get_volume(sh.geometry), "net": q["NetVolume"]}))
+`;
+    const r = spawnSync("python3", ["-c", script, writeIfc("stuetze-abschnitte-q", ifc)], { encoding: "utf8", timeout: 120_000 });
+    expect(r.status, r.stderr).toBe(0);
+    const o = JSON.parse(r.stdout);
+    expect(o.n).toBe(1);
+    expect(o.solids).toBeGreaterThanOrEqual(2);
+    expect(o.volume).toBeCloseTo(o.net, 4);
+    expect(o.net).toBeLessThan(0.4 * 0.4 * 2.6 - 1e-3); // unten um das Wandband gekürzt
+    expect(o.net).toBeGreaterThan(0.4 * 0.4 * 1.1); // oben voller Querschnitt
+  });
   it("[B5] Wand als Extrusion mit IfcOpeningElement: Volumen = Wand − Öffnung", () => {
     const ifc = exportIfcSpf(singleWall(false));
     const r = validate("oeffnung", ifc);

@@ -81,6 +81,10 @@
 //   END_SPACES  = 8   (bündelt die Räume je Geschoss zu IfcRelAggregates)
 //   ROOF        = 9, structure, id, name, predefined (Text), TYPEREF, PSETS, MESH
 //   COLUMN      = 10, structure, id, label, PTS, z_rel, depth, component_id (−1 = keine), component_name, PSETS
+//   COLUMN_PIECES = 20, structure, id, label, n, (PTS, z_rel, depth) × n, component_id (−1 = keine),
+//                 component_name, PSETS   ([141] Stütze mit Höhenabschnitten, je Abschnitt ein eigenes beschnittenes
+//                 Profil; EIN IfcColumn mit n Extrusionen in einer SweptSolid-Darstellung, Placement auf dem tiefsten
+//                 Abschnitt; Material und Materialzuordnung wie COLUMN; die Mengen stehen fertig in PSETS)
 //   END_COLUMNS = 11  (Materialzuordnung der Stützen)
 //   CLASSIFICATION = 12, name, source, edition (Text, leer = keine), n_refs, (key, code, ref_name) × n_refs
 //                 ([B5], 28.10.) Ein Klassifikationssystem (IfcClassification) mit je Code einer
@@ -147,6 +151,7 @@ pub const REC_WALL_ARC: f64 = 16.0;
 pub const REC_WALL_ARC_SOLID: f64 = 17.0;
 pub const REC_GRID: f64 = 18.0;
 pub const REC_TREE: f64 = 19.0;
+pub const REC_COLUMN_PIECES: f64 = 20.0;
 
 mod format;
 mod reader;
@@ -175,6 +180,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_ATTACH => "ATTACH",
         c if c == REC_GRID => "GRID",
         c if c == REC_TREE => "TREE",
+        c if c == REC_COLUMN_PIECES => "COLUMN_PIECES",
         _ => "?",
     }
 }
@@ -937,17 +943,33 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
                 w.finish_typed("IFCROOF", format!("roof/{id}"), &name, &ty, &psets, structure, placement, shape, Some(enum_(&predefined)), false);
             }
-            c if c == REC_COLUMN => {
+            c if c == REC_COLUMN || c == REC_COLUMN_PIECES => {
                 let structure = r.structure(n_storeys)?;
                 let id = r.string()?;
                 let label = r.string()?;
-                let pts = r.pts()?;
-                let z_rel = r.f()?;
-                let depth = r.f()?;
+                let pieces: Vec<(Vec<(f64, f64)>, f64, f64)> = if c == REC_COLUMN {
+                    let pts = r.pts()?;
+                    vec![(pts, r.f()?, r.f()?)]
+                } else {
+                    let n = r.idx()?;
+                    if n == 0 {
+                        return Err(format!("Stütze ohne Abschnitte bei {}", r.pos - 1));
+                    }
+                    let mut v = Vec::new();
+                    for _ in 0..n {
+                        let pts = r.pts()?;
+                        v.push((pts, r.f()?, r.f()?));
+                    }
+                    v
+                };
                 let component = r.opt_string()?;
                 let component_name = r.opt_string()?;
                 let psets = r.psets()?;
-                let (placement, shape) = w.emit_box_product(&pts, z_rel, depth, w.placement_of(structure));
+                let (placement, shape) = if let [(pts, z_rel, depth)] = pieces.as_slice() {
+                    w.emit_box_product(pts, *z_rel, *depth, w.placement_of(structure))
+                } else {
+                    w.emit_pieces_product(&pieces, w.placement_of(structure))
+                };
                 let g = w.gid(&format!("column/{id}"));
                 let entity = w.emit_building_element("IFCCOLUMN", g, &label, placement, shape, Some(enum_("COLUMN")));
                 w.add_to_containment(structure, entity);

@@ -1224,3 +1224,31 @@ fn kaputte_puffer_ergeben_fehler_nie_panic() {
     let (f, s) = m.data();
     assert!(build_ifc(f, &s).is_err());
 }
+
+/// [141] Stütze mit zwei Höhenabschnitten: EIN IfcColumn, zwei Extrusionen in einer Darstellung; die
+/// Mengen (Volumen = Summe) stehen im Qto.
+#[test]
+fn stuetze_mit_hoehenabschnitten() {
+    let mut b = mini();
+    b.n(&[REC_COLUMN_PIECES, -1.0]);
+    b.str("C2");
+    b.str("Stütze 30");
+    b.n(&[2.0]);
+    b.pts(&SQUARE);
+    b.n(&[0.0, 1.5]);
+    b.pts(&SQUARE);
+    b.n(&[1.5, 1.1]);
+    b.str("c1");
+    b.str("Beton");
+    b.qto("Qto_ColumnBaseQuantities", &[("NetVolume", 5.0, 0.27)]);
+    b.n(&[REC_END_COLUMNS]);
+    let ifc = build(&b).unwrap();
+    check_structure(&ifc);
+    assert_eq!(count(&ifc, "IFCCOLUMN"), 1);
+    assert_eq!(count(&ifc, "IFCEXTRUDEDAREASOLID"), 2, "eine Extrusion je Höhenabschnitt");
+    assert_eq!(count(&ifc, "IFCSHAPEREPRESENTATION"), 1, "eine Darstellung für beide Extrusionen");
+    assert!(ifc.contains("IFCQUANTITYVOLUME('NetVolume'") && ifc.contains("0.27"), "Summenvolumen");
+    assert_eq!(count(&ifc, "IFCRELASSOCIATESMATERIAL"), 1);
+    // Zweiter Abschnitt sitzt 1.5 m über dem ersten.
+    assert!(ifc.contains("IFCCARTESIANPOINT((0.0,0.0,1.5))"), "Versatz des oberen Abschnitts");
+}

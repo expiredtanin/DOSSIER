@@ -282,6 +282,35 @@ pub fn column_quantities(footprint: &[Vec2], length: f64) -> Vec<Qty> {
     ]
 }
 
+/// [141] Basismengen einer in Höhenabschnitte geteilten Stütze (`model3d::column_pieces`): Länge = Gesamthöhe,
+/// Volumen und Mantel = Summe der Abschnitte, Querschnitt = grösster Abschnitt, Deckel nur an der Unter- und
+/// Oberkante der Stütze (die Fugen zwischen den Abschnitten sind innen).
+pub fn column_pieces_quantities(pieces: &[(Vec<Vec2>, f64, f64)]) -> Vec<Qty> {
+    let z0 = pieces.iter().fold(f64::INFINITY, |m, p| m.min(p.1));
+    let z1 = pieces.iter().fold(f64::NEG_INFINITY, |m, p| m.max(p.2));
+    let (mut cross, mut outer, mut caps, mut volume) = (0.0f64, 0.0, 0.0, 0.0);
+    for (ring, b, t) in pieces {
+        let a = ring_area(ring);
+        cross = cross.max(a);
+        outer += ring_perimeter(ring) * (t - b);
+        volume += a * (t - b);
+        if (b - z0).abs() < 1e-6 {
+            caps += a;
+        }
+        if (t - z1).abs() < 1e-6 {
+            caps += a;
+        }
+    }
+    vec![
+        len("Length", z1 - z0),
+        area("CrossSectionArea", cross),
+        area("OuterSurfaceArea", outer),
+        area("NetSurfaceArea", outer + caps),
+        vol("GrossVolume", volume),
+        vol("NetVolume", volume),
+    ]
+}
+
 /// Tür-/Fenster-Basismengen (lichte Öffnung): Breite, Höhe, Umfang, Fläche.
 pub fn opening_quantities(width: f64, height: f64) -> Vec<Qty> {
     let w = clean(width);
