@@ -190,7 +190,7 @@ describe("Chargen an den Rust-Kern (Kataster-Grössenordnung)", { timeout: 60_00
   });
 
   it("viele Zeichnungen über mehrere Chargen: nichts geht verloren, Reihenfolge bleibt", () => {
-    // Eine Charge fasst 2^18 Doubles (`CHUNK_DOUBLES`, model3d.rs) = 23831 Linien à 11 Zahlen:
+    // Eine Charge fasst 2^18 Doubles (`CHUNK_DOUBLES`, model3d/drawings.rs) = 23831 Linien à 11 Zahlen:
     // 30000 Linien überschreiten die Grenze genau einmal (Mindestmass, Last-schonend).
     const n = 30000;
     const p = projectWith(Array.from({ length: n }, (_, i) => line(i)) as unknown as Project["drawings2d"]);

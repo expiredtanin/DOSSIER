@@ -44,7 +44,16 @@ Herkunft, kein Wegweiser.
 
 | Datei | Inhalt |
 |---|---|
-| `section.rs` | Schnitt: `compute_section()`, `section_primitives_at()`, geschnittene Öffnungen, Abfrage `section_plan_buf()` |
+| `section/mod.rs` | Schnitt: Typen (`LevelSpec`, `Cut`, `Output` …), Override-Regeln der Bänder, Gesamtrechnung `compute_section()` |
+| `section/input.rs` | Eingabe des Prismen-Schnitts (`render3d::section`) aus `model3d`, mit der früheren JSON-Rundung |
+| `section/bands.rs` | Besitzer und Stil der Bänder (`attach_cut_styles()`, `split_wall_layers()`), Leibungen, Terminierung, Dominanz |
+| `section/shapes.rs` | Sonderformen: Formöffnungen, Dach-Schnittspur, Monolith, Treppenläufe, Schnitt parallel zur Wand |
+| `section/voids.rs` | Aussparungen: Abzugskörper, Körper mit Abzugs-Rolle, Taschen |
+| `section/meshes.rs` | Netze (Körper, importierte Netze), Gelände und Erdreich |
+| `section/projection.rs` | Projektion hinter der Ebene (`projection_edges()`, exakte Sichtbarkeit) |
+| `section/primitives.rs` | Primitive (`section_primitives_at()`), dünne Schichten, Bausteine `polygon()`/`line()`/`Acc` |
+| `section/openings.rs` | geschnittene Fenster und Türen (`section_opening_primitives()`) |
+| `section/query.rs` | Abfrage `section_plan_buf()` mit Cache |
 | `section_bands.rs` | Vereinigung achsparalleler Schnitt-Rechtecke, Dach-Schnittspur |
 | `elevation.rs` | Ansicht: `elevation_primitives_with()`, Stil, Maler-Ordnung, Abfrage `elevation_plan_buf()` |
 | `elevation_geom.rs` | Geometrie der Ansicht: Verdeckung, Schlagschatten, Eck-Verlängerung, Öffnungen |
@@ -68,5 +77,6 @@ Herkunft, kein Wegweiser.
 ## Tests
 
 Die meisten Dateien haben `mod tests` am Ende. Eigene Testdateien: `wall_join_tests.rs` (Wandknoten im
-Grundriss), `section_mesh_tests.rs` (importierte Netze im Schnitt), `perf_tests.rs` (Leistung, von Hand:
+Grundriss), im Ordner `section/` die Tests des Schnitts (`tests.rs`, `mesh_tests.rs` für importierte Netze,
+`ts_faelle.rs`, `dach_faelle.rs`, `abzug_faelle.rs`, `wand_an_dach.rs`, Messung `bench.rs`), `perf_tests.rs` (Leistung, von Hand:
 `cargo test --release --lib bench159 -- --ignored --nocapture`, siehe Dateikopf).

@@ -6,7 +6,7 @@
 //    Körper die Schnitthöhe (Wände/Stützen) bzw. die Platte (Decken) durchdringt — rechnet der
 //    Kern (`core/src/plan/extras.rs::subtract_voids`).
 //  • Schnitt:   Cut-Polygone minus Körper-Schnitt (Grundfläche ∩ Schnittspur × Höhenbereich), im Kern
-//               (`core/src/plan/section.rs`).
+//               (`core/src/plan/section/voids.rs`).
 //  • 3D:        Boolean-Differenz (truck, Mesh-CSG-Fallback); welche Bauteile getroffen sind und
 //               ihre Spezifikation rechnet der Kern (`core/src/solid_specs.rs`), s. `toWalls3d/voids3d.ts`.
 //  • STEP:      `exportStep.ts` liest dieselben Kern-Spezifikationen (`model3dParts` mit Abzugskörpern).

@@ -1,6 +1,6 @@
 //! Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Türzargen-Arten ([105]) und Schichteinzug
 //! ([106]) — aus Typ und Öffnungs-Übersteuerung aufgelöst, dazu die gemeinsame Geometrie für
-//! Grundriss (`plan/walls.rs`, `plan/wall_poche.rs`), Schnitt (`plan/section.rs`) und 3D (`model3d.rs`,
+//! Grundriss (`plan/walls.rs`, `plan/wall_poche.rs`), Schnitt (`plan/section/`) und 3D (`model3d/`,
 //! `wall_bands.rs`).
 //!
 //! Koordinaten quer zur Wand: Abstand ab der Aussenfläche (0 = aussen, `total` = innen) — die
@@ -501,7 +501,7 @@ pub fn door_frame_of(p: &Project, o: &Opening) -> Option<DoorFrame> {
 }
 
 /// Liegt die Aufschlagseite (wohin das Blatt aufgeht) auf der Innenfläche (hohe Versätze)?
-/// Gleiche Regel wie der Schnitt einer Schiebetür (`plan/section.rs`).
+/// Gleiche Regel wie der Schnitt einer Schiebetür (`plan/section/openings.rs`).
 pub fn aufschlag_innen(o: &Opening) -> bool {
     let swing = if matches!(o.swing, None | Some(SwingSide::Left)) { 1.0 } else { -1.0 };
     let dir = if matches!(o.opening_dir, None | Some(OpeningOpeningDir::In)) { 1.0 } else { -1.0 };
