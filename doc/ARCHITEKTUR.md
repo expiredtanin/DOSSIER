@@ -276,7 +276,7 @@ Bildschirm, SVG, PDF und DXF lesen also denselben Plan-Puffer. Was in einem Ausg
 als in einem anderen, ist fast immer ein Fehler im jeweiligen Leser, nicht in der Plan-Erzeugung.
 
 `src/views/plan/PlanView.tsx` legt über die GPU-Fläche eine SVG-Ebene für Auswahl, Griffe, Fang und
-Text-Bearbeitung. Läuft kein GPU-Weg, zeichnet dieselbe Ebene den ganzen Plan (Rückfall, `?gl=0`).
+Text-Bearbeitung (Zeiger, Picken, Zoom, Renderer-Anbindung und Hervorhebung liegen als Hooks in `planView/usePlan*.ts`). Läuft kein GPU-Weg, zeichnet dieselbe Ebene den ganzen Plan (Rückfall, `?gl=0`).
 
 ---
 
@@ -309,7 +309,7 @@ Text-Bearbeitung. Läuft kein GPU-Weg, zeichnet dieselbe Ebene den ganzen Plan (
 ## 5. Ansicht
 
 1. `generateElevationPlan()` in `src/plan/toElevation.ts` fragt `queryBin("elevationPlan", …)`.
-2. `elevation_plan_buf()` und `elevation_primitives_with()` in `src-tauri/core/src/plan/elevation.rs`:
+2. `elevation_plan_buf()` und `elevation_primitives_with()` in `src-tauri/core/src/plan/elevation/` (`mod.rs`, Teile je Thema):
    Flächen der Wände, Decken und Dächer in die Ansichtsebene projizieren, Ansichtsbereich anwenden,
    Override-Regeln, Ansichtsschraffur der sichtbaren Bauteilseite (`surface_pattern.rs`), Öffnungen,
    Verdeckung, Schlagschatten, Maler-Ordnung von fern nach nah.
@@ -559,7 +559,7 @@ dort steht, was fehlt; was schon versucht wurde, steht im Archiv (`doc/archiv/TO
    Lernt: i18n, Test `src/i18n/untranslated.test.ts`.
 2. **Auswahl-Namen vereinheitlichen** (Rest aus `[130]`). `PlanView` und der 3D-Griff-Hook nutzen intern
    noch lokale Namen wie `selectedWallIds` statt des einen `Selection`-Werts.
-   Dateien: `src/views/plan/PlanView.tsx`, `src/state/useGrip3dEditing.ts`, `src/state/selection.ts`.
+   Dateien: `src/views/plan/PlanView.tsx`, `src/views/plan/planView/usePlan*.ts`, `src/state/useGrip3dEditing.ts`, `src/state/selection.ts`.
    Lernt: Store, Auswahl, die grösste Komponente der Hülle.
 3. **Veraltete Kopf-Kommentare korrigieren** (siehe Abschnitt 13, „Bekannte veraltete Kommentare").
    Kein Verhalten ändern, nur Kommentare. Lernt: die Wege aus Abschnitt 3.
@@ -572,7 +572,7 @@ dort steht, was fehlt; was schon versucht wurde, steht im Archiv (`doc/archiv/TO
    `PresentationDialogHost` mit `s.project.drawingLevels`, `DrawingTabs` mit `s.project.viewSnapshots`).
    Dateien: `src/panels/*.tsx`, Messung `e2e/renderCount.spec.ts`.
 6. **Abzugskörper in der Ansicht** (Rest aus `[G8]`). Grundriss, Schnitt und 3D sparen Abzugskörper aus,
-   die Ansicht noch nicht. Dateien: `src-tauri/core/src/plan/elevation.rs`, `src-tauri/core/src/voids.rs`;
+   die Ansicht noch nicht. Dateien: `src-tauri/core/src/plan/elevation/`, `src-tauri/core/src/voids.rs`;
    Vorbild `subtract_voids_in_section()` in `plan/section/voids.rs`.
 7. **Polygon-Dominanz im 3D-Live-Schnitt** (Rest aus `[G6]`). Der 2D-Schnitt beschneidet schräge
    Schicht-Bänder über Polygon-Booleans, der 3D-Live-Schnitt nur Rechtecke.
@@ -593,7 +593,7 @@ deutscher Nachricht, die mit der TODO-Nummer beginnt; `TODO.md` im selben Commit
 ### Grosse Dateien (über 2000 Zeilen)
 
 Stand 8.11.2026, ohne Build-Ausgaben. Nur Vorschläge; nichts davon ist beschlossen. Erledigt (`[162]`, 9.11.):
-`plan/section.rs` → Ordner `plan/section/`, `model3d.rs` → Ordner `model3d/`; `[164]` (9.11.): `kernel2d/src/lib.rs` → `vec`, `intersect`, `offset`, `fillet`, `trim`, `outline`, `stairs`, `rooms`, `opening`, `tests` neben `lib.rs`; `fileio/src/ifc_export.rs` → Ordner `ifc_export/` (`format`, `reader`, `types`, `builder`, `tests`; `build_ifc` mit rund 1000 Zeilen bleibt in `mod.rs`, eine Funktion lässt sich nicht ohne Logikänderung teilen). Rust-Tests stehen
+`plan/section.rs` → Ordner `plan/section/`, `model3d.rs` → Ordner `model3d/`; `[165]` (9.11.): `PlanView.tsx` → Hooks in `views/plan/planView/`, `plan/elevation.rs` → Ordner `plan/elevation/`, `ObjectInfoPanel.tsx` → Ordner `panels/objectInfo/` (s. unten); `[164]` (9.11.): `kernel2d/src/lib.rs` → `vec`, `intersect`, `offset`, `fillet`, `trim`, `outline`, `stairs`, `rooms`, `opening`, `tests` neben `lib.rs`; `fileio/src/ifc_export.rs` → Ordner `ifc_export/` (`format`, `reader`, `types`, `builder`, `tests`; `build_ifc` mit rund 1000 Zeilen bleibt in `mod.rs`, eine Funktion lässt sich nicht ohne Logikänderung teilen). Rust-Tests stehen
 meist als `mod tests` am Dateiende; sie in eine eigene Datei `<name>_tests.rs` zu verschieben, ist der
 einfachste erste Schritt (Muster: `drawing_recognize_tests.rs`, `plan/wall_join_tests.rs`).
 
@@ -601,11 +601,8 @@ einfachste erste Schritt (Muster: `drawing_recognize_tests.rs`, `plan/wall_join_
 |---|---|---|
 | `src/styles.css` | 8827 | Je Bereich eine Datei (Panels, Plan-Ansicht, Dialoge, Befehlszeile, Blätter), in `src/main.tsx` importiert. |
 | `src-tauri/core/src/model/generated.rs` | 6089 | Nach Fachgebiet teilen (Bauteile, Typen und Stile, Ebenen und Ansichten, Layouts, Kontext), Wiederexport in `model/mod.rs`. Name „generated" ist irreführend; die Datei wird von Hand gepflegt. |
-| `src/views/plan/PlanView.tsx` | 3902 | Weitere Hooks herauslösen: Engine-Wahl und GPU-Brücke, Picken und Marquee, Kamera und Zoom, SVG-Überlagerung. Teile liegen schon in `src/views/plan/planView/`. |
 | `src/model/types.generated.ts` | 3844 | Erzeugt; nicht teilen. Folgt einer Teilung von `generated.rs` nicht zwingend. |
 | `src/i18n/de.ts`, `src/i18n/en.ts` | 3587, 3571 | Nach Präfix (`cmd.*`, `panel.*`, `menu.*` …) in Teil-Wörterbücher, zusammengeführt in `src/i18n/translate.ts`. Vorher klären, ob parallele Arbeit damit leichter oder schwerer wird. |
-| `src-tauri/core/src/plan/elevation.rs` | 3226 | Flächen-Aufbau, Ansichtsschraffur, Öffnungen, Stil und Maler-Ordnung trennen; Geometrie liegt schon in `elevation_geom.rs`. Tests auslagern. |
-| `src/panels/ObjectInfoPanel.tsx` | 2847 | Je Element-Art eine Datei (`WallSection`, `OpeningSection`, `RoofSection`, `StairSection` …) in einem Ordner `src/panels/objectInfo/`. |
 | `src-tauri/fileio/src/ifc_import.rs` | 2826 | Platzierung und Koordinaten, Darstellungen lesen, Produkte und Geschosse zuordnen; Tests auslagern. |
 | `src/plan/toWalls3d.test.ts` | 2761 | Nach Thema teilen (Wände, Öffnungen, Decken, Dächer, Treppen), wie die bestehenden `toWalls3d.*.test.ts`. |
 | `src-tauri/core/src/plan/domains.rs` | 2753 | Räume und Raumstempel (`rooms()`, `fit_room_stamp()` …) nach `plan/rooms.rs`; Decken und Dächer je eine Datei; Tests (rund 1200 Zeilen) auslagern. |
@@ -614,6 +611,20 @@ einfachste erste Schritt (Muster: `drawing_recognize_tests.rs`, `plan/wall_join_
 | `src-tauri/render3d/src/gpu.rs` | 2535 | Je Pass ein Modul (Netze, Kanten, Schatten, Schnittflächen, Raster), gemeinsame Ressourcen getrennt. |
 | `src-tauri/core/src/plan/drawings.rs` | 2290 | Bemassung und Koten, Texte, Blöcke, Stücke und Unterlage (`plan_drawings_chunked()`, `underlay_groups()`) trennen. |
 | `src-tauri/core/src/drawing_recognize.rs` | 2170 | Stufen trennen: Wände, Öffnungen, Räume (Tests liegen schon getrennt). |
+
+### Erledigt: `PlanView.tsx`, `elevation.rs`, `ObjectInfoPanel.tsx` aufgeteilt ([165], 9.11.2026)
+
+Reines Verschieben, ohne Verhaltensänderung (gleiche Abhängigkeitslisten, gleiche Reihenfolge der Hooks und Effekte).
+
+| Vorher | Nachher |
+|---|---|
+| `src/views/plan/PlanView.tsx` (3902 Zeilen) | rund 1400 Zeilen: Props, Zustand, Hook-Aufrufe, SVG-Ebene. Typen und Konstanten in `planView/types.ts`, `planView/constants.ts`; Hooks `usePlanEngine`, `usePlanCoords`, `usePlanPicking`, `usePlanPointer`, `usePlanPickCycle`, `usePlanZoomInput`, `usePlanHighlights` in `planView/` (je 130 bis 680 Zeilen) |
+| `src-tauri/core/src/plan/elevation.rs` (3226 Zeilen) | Ordner `plan/elevation/`: `mod.rs` (Konstanten, Orchestrierung, Abfrage), `face`, `cull`, `collect`, `mesh_cull`, `openings`, `silhouette`, `patterns`, `tests`; `fascia_quads()` und `corner_shifts()` bleiben über `plan::elevation::` erreichbar |
+| `src/panels/ObjectInfoPanel.tsx` (2847 Zeilen) | rund 370 Zeilen; Abschnitte je Element-Art in `src/panels/objectInfo/` (`WallSection`, `CeilingSection`, `RoofSections`, `OpeningSections`, `StairSection`, `RoomSection`, `SolidSections`, `SectionLineSection`, `RefSections`, `TreeSection`, `fields`, `InfoBlocks`) |
+
+Zwei Stellen in `PlanView` wurden dafür umgestellt, weil ein Hook nur zusammenhängende Anweisungen aufnimmt: der Aufräum-Effekt für den
+ausstehenden Pan steht jetzt bei `panRaf` (in `usePlanPointer`), die Hover-Teilpunkte (Zustand, Funktionen, zwei Effekte) bei den
+Treffer-Abfragen (in `usePlanPicking`). Das ändert nur die Reihenfolge von Aufräum-Effekten beim Entfernen der Ansicht.
 
 ### Erledigt: `src/App.tsx` zerlegt ([163], 9.11.2026)
 

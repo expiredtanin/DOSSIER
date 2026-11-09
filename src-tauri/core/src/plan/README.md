@@ -55,7 +55,15 @@ Herkunft, kein Wegweiser.
 | `section/openings.rs` | geschnittene Fenster und Türen (`section_opening_primitives()`) |
 | `section/query.rs` | Abfrage `section_plan_buf()` mit Cache |
 | `section_bands.rs` | Vereinigung achsparalleler Schnitt-Rechtecke, Dach-Schnittspur |
-| `elevation.rs` | Ansicht: `elevation_primitives_with()`, Stil, Maler-Ordnung, Abfrage `elevation_plan_buf()` |
+| `elevation/mod.rs` | Ansicht: gemeinsame Konstanten, `elevation_primitives_with()` (Stil, Maler-Ordnung), Abfrage `elevation_plan_buf()` |
+| `elevation/face.rs` | Flächen der Ansicht (`Role`, `Face`) und Override-Regeln je Fläche und Öffnung |
+| `elevation/cull.rs` | Dach als Verdeckung: Stirnflächen (`fascia_quads()`), Flächen unter dem Dach weglassen |
+| `elevation/collect.rs` | Flächen aus dem Modell einsammeln und projizieren (Wände, Decken, Dächer, Stützen, Netze), Eck-Verlängerung |
+| `elevation/mesh_cull.rs` | importierte Netze: Dreiecke vereinigen, verdeckte Flächen über ein Raster weglassen |
+| `elevation/openings.rs` | Fenster und Türen: Verglasung, Flügel, Rahmen, Leibungsschatten, Flächenöffnungen |
+| `elevation/silhouette.rs` | Silhouette, Kanten mit exakter Verdeckung, Geländekante |
+| `elevation/patterns.rs` | Oberflächenmuster auf Ansichtsflächen |
+| `elevation/tests.rs` | Tests der Ansicht |
 | `elevation_geom.rs` | Geometrie der Ansicht: Verdeckung, Schlagschatten, Eck-Verlängerung, Öffnungen |
 | `grid_view.rs` | Achsraster in Schnitt und Ansicht |
 | `underlay.rs` | Grundriss-Unterlage unter Schnitt und Ansicht |
