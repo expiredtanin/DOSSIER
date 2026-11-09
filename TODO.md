@@ -1,6 +1,6 @@
 # Dossier — Arbeitsliste
 
-Stand 8.11.2026. Die vollständige bisherige Liste mit allen Details, Messwerten und Befunden steht
+Stand 9.11.2026. Die vollständige bisherige Liste mit allen Details, Messwerten und Befunden steht
 unverändert in [`doc/archiv/TODO-bis-2026-11-08.md`](doc/archiv/TODO-bis-2026-11-08.md) (rund 4500 Zeilen).
 Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `**[ID]`.
 
@@ -46,10 +46,10 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur
   und Schraffur-Löcher beim Ausbreiten fehlen (`src/export/planToSvgString.ts`, Kern `plan/svg.rs`). · S
-- ◐ **[140]** Plandarstellung. CLI-SVG (`plan/svg.rs`) setzt alle Stempelzeilen in Grundgrösse/„sans-serif“ (Breiten
-  weichen von der Messung ab); IFC-Import setzt den Stempel-Anker auf den Eckenmittelwert; dünne Schichten laufen
-  in 1:100 zusammen (Detailgrad sollte sie zusammenfassen); Achsen laufen durch das Gebäude; Raumstempel farbig
-  im Schwarz-Weiss-Druck; Schatten überdeckt Bemassung; eigene Stempel behalten in 1:200 alle Zeilen. · M
+- ◐ **[140]** Plandarstellung. (9.11.: Stempel in Tusche ohne farbige Auszeichnung, eigene Stempel ab 1:200
+  verkleinert, IFC-Räume ohne festen Anker, Schatten-Reihenfolge geprüft; Rest der Liste war schon erledigt.)
+  Offen: Fang-Punkt des Stempels rechnet mit Detail „mittel“; Deckenspiegel-Stempel ohne Hindernisse; Mac-Gegenprobe
+  (Kern `plan/domains.rs`, `plan/extras.rs`). · S
 - ◐ **[141]** Wandecken. Runde Stütze (Sehne statt Kontur, Linse bleibt), Wand breiter als Stütze oder durch sie
   hindurch, Stütze kürzer als Wand, Stütze mit mehreren Höhenabschnitten, Längsschnitt genau in einer Wand
   (`split_wall_layers`), Muster bei ungeraden Maschen (Kern `plan/walls.rs`, `joins.rs`). · M
@@ -285,7 +285,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 Auf dem Mac (Tauri/Metal) noch nicht angesehen oder geprüft; bisher nur Linux-Container, CLI-SVG, Chromium oder
 Unit-Tests: [116] (atomares Speichern), [117] (CSP unter `tauri://`), [118], [122], [123], [126], [110], [101],
-[102], [131], [133], [136], [145], [146], [153], [64], [T2], [T4], [34], [108], [65]. Je Punkt ansehen, dann hier und
+[102], [131], [133], [136], [140], [145], [146], [153], [64], [T2], [T4], [34], [108], [65]. Je Punkt ansehen, dann hier und
 im jeweiligen Eintrag streichen. · M (gesamt)
 
 ---

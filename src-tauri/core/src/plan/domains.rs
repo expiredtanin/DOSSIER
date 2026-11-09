@@ -769,6 +769,16 @@ fn with_alpha(color: &str, alpha: &str) -> String {
     }
 }
 
+/// [140] Eigene Schriftgrössen eines Stempel-Texts (`Marks::size_pt`) mit `k` verkleinern.
+fn scale_doc_pt(mut doc: RichTextDoc, k: f64) -> RichTextDoc {
+    for r in doc.paragraphs.iter_mut().flat_map(|q| q.runs.iter_mut()) {
+        if let Some(pt) = r.marks.size_pt.as_mut() {
+            *pt *= k;
+        }
+    }
+    doc
+}
+
 /// [140] Kleinste Stempelschrift (2 mm Papier) für enge Räume.
 const ROOM_STAMP_MIN_PT: f64 = 2.0 / PT_MM;
 const PT_MM: f64 = crate::text_layout::PT_TO_MM;
@@ -1010,9 +1020,12 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
                 (room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)), lines)
             }
         };
+        // [140] Ab 1:200 auch eigene Stempel verkleinert wie automatische: eigene Schriftgrössen (Name 12 pt,
+        // Nummer 9 pt, Auszeichnungen) im Verhältnis der Grundschrift 7/10, keine Belagszeile.
+        let doc = if small && !overview { scale_doc_pt(doc, ROOM_STAMP_SMALL_PT / ROOM_STAMP_PT) } else { doc };
         // [158] Belagszeile (Einstellung am Stempel, Vorgabe aus): Bodenbelag des Raums.
         let mut extra_lines = extra_lines;
-        if !overview && room.stamp.as_ref().and_then(|s| s.show_finish) == Some(true) {
+        if !overview && !small && room.stamp.as_ref().and_then(|s| s.show_finish) == Some(true) {
             let label = crate::room_book::finish_label(c.p, room.floor_finish.as_deref());
             if !label.is_empty() {
                 extra_lines.push(StampLine { text: label, align: Align::Center });
@@ -1574,6 +1587,29 @@ mod tests {
             plan_domains(&q, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().rooms.iter().find_map(|q| match q { Primitive::Text { extra_lines, .. } => Some(extra_lines.len()), _ => None }).unwrap()
         };
         assert_eq!((lines(100.0), lines(200.0), lines(500.0)), (3, 1, 0));
+        // [140] Eigene Stempel ab 1:200 wie automatische verkleinert: eigene Schriftgrössen (Name 12 pt) im
+        // Verhältnis 7/10, Belagszeile entfällt (nur Name und Fläche).
+        for r in q.rooms.as_mut().unwrap() {
+            r.stamp.as_mut().unwrap().show_finish = Some(true);
+            r.floor_finish = Some("Parkett".into());
+        }
+        let name_pt = |scale: f64| {
+            let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": scale }).to_string();
+            let r = plan_domains(&q, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            r.rooms
+                .iter()
+                .filter_map(|q| match q {
+                    Primitive::Text { doc, extra_lines, .. } => Some((doc.paragraphs.iter().flat_map(|p| &p.runs).filter_map(|r| r.marks.size_pt).fold(0.0, f64::max), extra_lines.len())),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let big = name_pt(100.0);
+        assert!(big.iter().any(|&(pt, n)| pt == NAME_PT && n == 4), "1:100 mit Belagszeile: {big:?}");
+        for (pt, n) in name_pt(200.0) {
+            assert!(pt == 0.0 || (pt - NAME_PT * ROOM_STAMP_SMALL_PT / ROOM_STAMP_PT).abs() < 1e-9, "Name 1:200 {pt}");
+            assert!(n <= 1, "1:200 nur die Fläche: {n}");
+        }
     }
 
     /// [140] Enger Raum: erst ohne Nutzungszeile, dann ohne Fläche, dann 2 mm Schrift; grosser Raum unverändert.
@@ -1779,6 +1815,37 @@ mod tests {
                 let m = Vec2 { x: (center.x * 2.0 + from.x + to.x) / 4.0, y: (center.y * 2.0 + from.y + to.y) / 4.0 };
                 assert_eq!(o.clearance(m, 0.001, 0.001), 0.0);
             }
+        }
+    }
+
+    /// [140] Schatten der Sonnenstudie liegt unter Bemassung, Texten und Raumstempeln: im Plan-Puffer (Quelle
+    /// für Bildschirm, Druck-SVG/PDF und CLI-SVG) kommen alle Schattenflächen vor der ersten Zeichnung, dem
+    /// ersten Stempel und jedem Raum — in Tusche und farbig.
+    #[test]
+    fn schatten_unter_bemassung_und_stempeln() {
+        let mut p = sample();
+        p.sun_study = Some(SunStudy { when: "2026-12-21T09:00:00Z".into(), show: true, ..Default::default() });
+        p.drawings2d.push(serde_json::from_value(serde_json::json!({ "id": "dim1", "type": "drawing2d", "levelId": "eg", "categoryCode": "20",
+            "geom": {"shape": "dimension", "pts": [{"x": -1, "y": -1}, {"x": 8, "y": -1}], "offset": 0.5} })).unwrap());
+        for mono in [true, false] {
+            let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 100, "global": true, "mono": mono, "sunWhen": 1_797_843_600_000.0_f64 }).to_string();
+            let a = PlanArgs::parse(1.0, &t).unwrap();
+            let check = |prims: &[Primitive]| {
+                let is_shadow = |q: &Primitive| matches!(q, Primitive::Polygon { context_object_id: Some(id), .. } if id == super::super::extras::SITE_PICK_SUN);
+                let last_shadow = prims.iter().rposition(is_shadow).expect("Schatten");
+                let first_top = prims
+                    .iter()
+                    .position(|q| match q {
+                        Primitive::Text { .. } | Primitive::DrawingText { .. } => true,
+                        Primitive::Line { drawing_id: Some(_), .. } | Primitive::Polygon { drawing_id: Some(_), .. } => true,
+                        Primitive::Polygon { room_id: Some(_), .. } => true,
+                        _ => false,
+                    })
+                    .expect("Bemassung/Stempel");
+                assert!(last_shadow < first_top, "mono {mono}: Schatten {last_shadow} nach Inhalt {first_top}");
+            };
+            let (prims, _, _) = crate::plan::buf::decode(&plan_domains_buf(&p, &a).unwrap()).unwrap();
+            check(&prims);
         }
     }
 

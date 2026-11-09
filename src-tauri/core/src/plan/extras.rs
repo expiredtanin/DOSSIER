@@ -488,9 +488,15 @@ impl Post {
                     *stroke_width_mm = scale_weight(*stroke_width_mm, self.lw);
                 }
             }
-            Primitive::Text { color, .. } => {
+            Primitive::Text { color, doc, .. } => {
                 if self.mono {
                     *color = MONO_INK.into();
+                    // [140] Raumstempel in Tusche: farbige Auszeichnungen im Stempel-Text werden Tinte.
+                    for r in doc.paragraphs.iter_mut().flat_map(|q| q.runs.iter_mut()) {
+                        if r.marks.color.as_deref().is_some_and(|c| !is_neutral(c)) {
+                            r.marks.color = Some(MONO_INK.into());
+                        }
+                    }
                 }
             }
             Primitive::Line { weight_mm, color, .. } => {
@@ -847,6 +853,25 @@ mod tests {
             _ => unreachable!(),
         }
         assert_eq!(post.line(None, 0.25), (Some(MONO_INK), 0.25));
+    }
+
+    /// [140] Raumstempel in Tusche: auch farbige Auszeichnungen im Stempel-Text (Run-Farbe) werden Tinte,
+    /// Grautöne bleiben; „Farbig" behält die Auszeichnung.
+    #[test]
+    fn mono_raumstempel_ohne_farbige_auszeichnung() {
+        let run = |text: &str, color: &str| TextRun { text: text.into(), marks: Marks { color: Some(color.into()), ..Default::default() }, ..Default::default() };
+        let doc = RichTextDoc { version: 1.0, paragraphs: vec![Paragraph { runs: vec![run("E.01 ", "#808080"), run("Zimmer", "#d0342c")], ..Default::default() }], ..Default::default() };
+        let stamp = || Primitive::Text { at: Vec2 { x: 0.0, y: 0.0 }, doc: doc.clone(), extra_lines: vec![], base_pt: 10.0, color: "#2255cc".into(), room_id: Some("r".into()), greyed: None, opacity: None };
+        let colors = |p: &Primitive| match p {
+            Primitive::Text { doc, color, .. } => (color.clone(), doc.paragraphs[0].runs.iter().map(|r| r.marks.color.clone()).collect::<Vec<_>>()),
+            _ => unreachable!(),
+        };
+        let mut p = stamp();
+        Post { mono: true, lw: 1.0, sketch: 0.0 }.apply(&mut p);
+        assert_eq!(colors(&p), (MONO_INK.to_string(), vec![Some("#808080".into()), Some(MONO_INK.into())]));
+        let mut p = stamp();
+        Post { mono: false, lw: 0.8, sketch: 0.0 }.apply(&mut p);
+        assert_eq!(colors(&p), ("#2255cc".to_string(), vec![Some("#808080".into()), Some("#d0342c".into())]));
     }
 
     /// [140] Schwarz-Weiss als Tusche-Standard: Wandschichten ohne Umriss bleiben ohne Umriss (sonst verdrängt
