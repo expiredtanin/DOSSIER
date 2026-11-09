@@ -357,4 +357,75 @@ fn bogenwand_endet_an_stuetze_3d() {
     }
 }
 
+// ── [141] Reste: runde Stütze, Wand durch/breiter als die Stütze, Stütze kürzer als die Wand ──
+
+/// Wie im Grundriss (`wand_und_stuetze_ueberlappen_nicht`): Wandkörper (geschichtet und Schnitt-Pfad)
+/// und Stütze überlappen nicht, keine Lücke (Vereinigung = Grundriss × Höhe).
+#[test]
+fn wand_und_stuetze_3d_ohne_ueberlappung() {
+    use crate::plan::wall_join_tests::{stuetzen_faelle, stuetzen_projekt};
+    for (t, end, at, prof, comp) in stuetzen_faelle() {
+        let p = stuetzen_projekt(t, end, at, &prof, comp);
+        let what = format!("{t} bis {end:?}, Stütze {comp} {prof:?} in {at:?}");
+        assert_tight(&p, true, true, &what);
+        assert_tight(&p, false, true, &format!("{what} (Schnitt-Pfad)"));
+    }
+}
+
+/// Stütze kürzer als die Wand (Beton, 0.8 bzw. 1.6 m hoch, Wand 2.6 m): die Wand ist nur im Höhenbereich
+/// der Stütze gestutzt — keine Überlappung, darüber läuft die Wand bis zu ihrem Ende.
+#[test]
+fn stuetze_kuerzer_als_die_wand_3d() {
+    use crate::plan::wall_join_tests::stuetzen_projekt;
+    for (h, prof) in [(0.8, ColumnProfile::Rect { width: 0.3, depth: 0.3 }), (1.6, ColumnProfile::Rect { width: 0.3, depth: 0.3 }), (1.6, ColumnProfile::Round { radius: 0.2 })] {
+        for end in [(2.0, 0.0), (4.0, 0.0)] {
+            let mut p = stuetzen_projekt("iw", end, (2.0, 0.0), &prof, "concrete");
+            p.columns.as_mut().unwrap()[0].height = h;
+            let what = format!("Stütze {h} m {prof:?}, Wand bis {end:?}");
+            let v = assert_tight_rev(&p, true, &what);
+            assert_tight_rev(&p, false, &format!("{what} (Schnitt-Pfad)"));
+            // Vereinigung = Wand × 2.6 + Stütze × h − Überlappung × h.
+            let fp: Vec<[f64; 2]> = model3d::column_footprint(&p.columns.as_ref().unwrap()[0]).iter().map(|q| [q.x, q.y]).collect();
+            let band = vec![vec![[0.0, -0.075], [end.0, -0.075], [end.0, 0.075], [0.0, 0.075]]];
+            let inter: f64 = crate::polygon_bool::intersection(&[vec![fp.clone()]], &[band]).iter().map(|pl| ring_area(&pl[0])).sum();
+            let want = end.0 * 0.15 * H + ring_area(&fp) * h - inter * h;
+            assert!((v - want).abs() < 1e-6, "{what}: {v} ≠ {want}");
+        }
+    }
+}
+
+/// Wie [`assert_tight`], die Körper rückwärts vereinigt: Wand (Streifen um eine runde Stütze, Höhe
+/// geteilt) ∪ Stütze verlor in Manifold (exakt) Volumen (3e-5 m³), obwohl der Schnitt leer ist
+/// (reihenfolgeabhängig, wie am Y-Knick, s. [`assert_tight_tol`]); rückwärts stimmt die Summe.
+fn assert_tight_rev(p: &Project, layered: bool, what: &str) -> f64 {
+    let bs = bodies(p, layered);
+    let sum: f64 = bs.iter().map(|(_, m)| m.volume().abs()).sum();
+    let (u, bad) = Solid::union_all(&bs.iter().rev().map(|(_, m)| m.clone()).collect::<Vec<_>>());
+    assert_eq!(bad, 0, "{what}: Körper nicht mannigfaltig");
+    assert!((sum - u.volume()).abs() < 1e-6, "{what}: Überlappung {} (Summe {sum})", sum - u.volume());
+    let per = |id: &str| Solid::union_all(&bs.iter().filter(|(k, _)| k == id).map(|(_, m)| m.clone()).collect::<Vec<_>>()).0;
+    let v = per("W1").intersection(&per("C")).unwrap().volume();
+    assert!(v.abs() < 1e-9, "{what}: Wand ∩ Stütze = {v}");
+    sum
+}
+
+/// Längsschnitt genau in einer Wand: die Schnittfläche zeigt die getroffene Schicht über die ganze Länge
+/// (nicht die Schichten der Dicke nach entlang der Wand verteilt).
+#[test]
+fn laengsschnitt_in_der_wand_zeigt_die_getroffene_schicht() {
+    use crate::plan::section::{compute_section, Kind, LevelSpec};
+    for (t, y, want) in [("iw", 0.0, "brick"), ("iw", 0.07, "render-int"), ("aw", 0.0, "insulation"), ("aw", 0.1, "brick"), ("aw", -0.16, "render-ext"), ("aw", 0.165, "render-int")] {
+        let mut p = base();
+        add_wall(&mut p, t, (0.0, 0.0), (3.0, 0.0));
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: -1.0, y }, Vec2 { x: 4.0, y }]), ..Default::default() };
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let walls: Vec<_> = out.cuts.iter().filter(|c| c.kind == Kind::Wall).collect();
+        assert!(!walls.is_empty(), "{t} y={y}: Wand geschnitten");
+        let comps: Vec<&str> = walls.iter().filter_map(|c| c.component_id.as_deref()).collect();
+        assert!(comps.iter().all(|c| *c == want), "{t} y={y}: {comps:?} statt {want}");
+        let area: f64 = walls.iter().map(|c| ring_area(&c.pts)).sum();
+        assert!((area - 3.0 * H).abs() < 1e-6, "{t} y={y}: ganze Länge {area}");
+    }
+}
+
 

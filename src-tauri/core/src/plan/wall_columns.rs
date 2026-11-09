@@ -55,6 +55,40 @@ pub(crate) fn end_in_column(w: &Wall, fp: &[Vec2]) -> Option<bool> {
     }
 }
 
+/// [141] Trifft die Wand die Stütze: ein Ende in/an der Kontur oder das Wandband (ganze Dicke) überlappt
+/// sie (Wand läuft hindurch, Wand breiter als die Stütze).
+pub(crate) fn wall_meets_column(p: &Project, w: &Wall, fp: &[Vec2]) -> bool {
+    if fp.len() < 3 {
+        return false;
+    }
+    if end_in_column(w, fp).is_some() {
+        return true;
+    }
+    let total = p.wall_thickness(w, 0.2);
+    let ro = joins::reference_offset(crate::model3d::wall_reference(w), total);
+    let ring = |q: &[Vec2]| vec![q.iter().map(|v| [v.x, v.y]).collect::<Vec<[f64; 2]>>()];
+    let bands: Vec<crate::flat::Polygon> = band_polys(w, ro - total / 2.0, ro + total / 2.0, false).iter().map(|q| ring(q)).collect();
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for q in bands.iter().flatten().flatten() {
+        (x0, y0, x1, y1) = (x0.min(q[0]), y0.min(q[1]), x1.max(q[0]), y1.max(q[1]));
+    }
+    if !fp.iter().any(|q| q.x > x0 && q.x < x1) && !(fp.iter().any(|q| q.x <= x0) && fp.iter().any(|q| q.x >= x1)) {
+        return false;
+    }
+    if !fp.iter().any(|q| q.y > y0 && q.y < y1) && !(fp.iter().any(|q| q.y <= y0) && fp.iter().any(|q| q.y >= y1)) {
+        return false;
+    }
+    crate::polygon_bool::intersection(&[ring(fp)], &bands).iter().map(|pl| poly_area(pl)).sum::<f64>() > 1e-8
+}
+
+fn poly_area(pl: &crate::flat::Polygon) -> f64 {
+    let ra = |r: &[[f64; 2]]| {
+        let n = r.len();
+        (0..n).map(|i| r[i][0] * r[(i + 1) % n][1] - r[(i + 1) % n][0] * r[i][1]).sum::<f64>().abs() / 2.0
+    };
+    pl.first().map_or(0.0, |r| ra(r)) - pl.iter().skip(1).map(|r| ra(r)).sum::<f64>()
+}
+
 /// Rangfolge Wand–Stütze: Stütze ohne Bauteil dominiert; sonst `joinPriority` der Stütze gegen die
 /// höchste Schicht der Wand (Gleichstand: Stütze), gleiches Bauteil verschmilzt.
 pub(crate) fn relation(p: &Project, w: &Wall, col: &Column) -> Rel {
@@ -255,4 +289,196 @@ pub(crate) fn arc_merge_footprint(p: &Project, w: &Wall, fp: &[Vec2], lo: f64, h
     let u = [d.x / l, d.y / l];
     let a0 = [a.x + u[0] * (H + 1e-6), a.y + u[1] * (H + 1e-6)];
     Some(crate::plan::wall_poche::WallFootprint { a: a0, u, m: [-u[1], u[0]], len: l - 2.0 * (H + 1e-6), half: H, ref_off: 0.0 })
+}
+
+// ── [141] Grundriss: Wandflächen unter Stützen ausgespart ───────────────────
+
+fn ring_of(q: &[Vec2]) -> crate::flat::Polygon {
+    vec![q.iter().map(|v| [v.x, v.y]).collect()]
+}
+
+/// Liegt `p` echt innerhalb (mehr als `eps` vom Rand) eines der Polygone?
+fn strictly_inside(polys: &[Vec<Vec2>], p: Vec2, eps: f64) -> bool {
+    polys.iter().any(|q| inside(q, p) && (0..q.len()).all(|i| dist_seg(p, q[i], q[(i + 1) % q.len()]) > eps))
+}
+
+/// Teile der Strecke `a`–`b` ausserhalb der Polygone `polys` (Rand zählt als aussen).
+pub(crate) fn clip_segment_outside(a: Vec2, b: Vec2, polys: &[Vec<Vec2>]) -> Vec<(Vec2, Vec2)> {
+    let d = Vec2 { x: b.x - a.x, y: b.y - a.y };
+    let mut ts = vec![0.0, 1.0];
+    for q in polys {
+        for i in 0..q.len() {
+            let (c, e) = (q[i], q[(i + 1) % q.len()]);
+            let f = Vec2 { x: e.x - c.x, y: e.y - c.y };
+            let den = d.x * f.y - d.y * f.x;
+            if den.abs() < 1e-15 {
+                continue;
+            }
+            let (rx, ry) = (c.x - a.x, c.y - a.y);
+            let t = (rx * f.y - ry * f.x) / den;
+            let s = (rx * d.y - ry * d.x) / den;
+            if t > 0.0 && t < 1.0 && (-1e-12..=1.0 + 1e-12).contains(&s) {
+                ts.push(t);
+            }
+        }
+    }
+    ts.sort_by(f64::total_cmp);
+    let at = |t: f64| Vec2 { x: a.x + d.x * t, y: a.y + d.y * t };
+    let mut out: Vec<(Vec2, Vec2)> = Vec::new();
+    for w in ts.windows(2) {
+        if w[1] - w[0] < 1e-12 || strictly_inside(polys, at((w[0] + w[1]) / 2.0), 1e-7) {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if (last.1.x - at(w[0]).x).abs() < 1e-12 && (last.1.y - at(w[0]).y).abs() < 1e-12 => last.1 = at(w[1]),
+            _ => out.push((at(w[0]), at(w[1]))),
+        }
+    }
+    out
+}
+
+/// Polygon mit Löchern in lochfreie Teile: Schnitt quer zur längsten Kante durch die Mitte des ersten
+/// Lochs (die Naht liegt im Loch und quer über die Wand; sie wird nicht gestrichen).
+fn split_holes(pl: crate::flat::Polygon, depth: usize, out: &mut Vec<Vec<[f64; 2]>>) {
+    if pl.len() <= 1 || depth > 8 {
+        if let Some(r) = pl.into_iter().next() {
+            out.push(r);
+        }
+        return;
+    }
+    let outer = &pl[0];
+    let hole = &pl[1];
+    let c = hole.iter().fold([0.0, 0.0], |s, q| [s[0] + q[0] / hole.len() as f64, s[1] + q[1] / hole.len() as f64]);
+    let mut dir = [1.0, 0.0];
+    let mut best = 0.0;
+    for i in 0..outer.len() {
+        let (a, b) = (outer[i], outer[(i + 1) % outer.len()]);
+        let l = (b[0] - a[0]).hypot(b[1] - a[1]);
+        if l > best {
+            best = l;
+            dir = [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
+        }
+    }
+    // Halbebenen beiderseits der Naht (Naht ⟂ dir durch c), als Rechtecke knapp über das Ausmass
+    // (i_overlay rechnet auf einem Raster relativ zur Ausdehnung).
+    let big = outer.iter().map(|q| (q[0] - c[0]).hypot(q[1] - c[1])).fold(0.0, f64::max) + 1.0;
+    let nrm = [-dir[1], dir[0]];
+    let half = |s: f64| -> crate::flat::Polygon {
+        let p0 = [c[0] - nrm[0] * big, c[1] - nrm[1] * big];
+        let p1 = [c[0] + nrm[0] * big, c[1] + nrm[1] * big];
+        vec![vec![p0, p1, [p1[0] + dir[0] * big * s, p1[1] + dir[1] * big * s], [p0[0] + dir[0] * big * s, p0[1] + dir[1] * big * s]]]
+    };
+    for s in [1.0, -1.0] {
+        for part in crate::polygon_bool::intersection(&[pl.clone()], &[half(s)]) {
+            split_holes(part, depth + 1, out);
+        }
+    }
+}
+
+fn area_of(pts: &[Vec2]) -> f64 {
+    let n = pts.len();
+    (0..n).map(|i| pts[i].x * pts[(i + 1) % n].y - pts[(i + 1) % n].x * pts[i].y).sum::<f64>().abs() / 2.0
+}
+
+/// [141] Ansichtskanten nicht geschnittener Stützen (`column-view`) unter geschnittenen Wandflächen
+/// `walls` weglassen (die Wand liegt über der Stütze bzw. verdeckt sie).
+pub(crate) fn hide_column_views(cols: &mut Vec<super::prim::Primitive>, walls: &[Vec<Vec2>]) {
+    use super::prim::Primitive;
+    if walls.is_empty() {
+        return;
+    }
+    let old = std::mem::take(cols);
+    for q in old {
+        match &q {
+            Primitive::Line { a, b, cls, .. } if cls == "column-view" => {
+                for (na, nb) in clip_segment_outside(*a, *b, walls) {
+                    let mut nq = q.clone();
+                    if let Primitive::Line { a, b, .. } = &mut nq {
+                        *a = na;
+                        *b = nb;
+                    }
+                    cols.push(nq);
+                }
+            }
+            _ => cols.push(q),
+        }
+    }
+}
+
+/// [141] Geschnittene Wandflächen und Wand-Umrisslinien unter gezeichneten geschnittenen Stützen entfernen
+/// (`cols` = gefüllte Stützenflächen): runde Stütze ohne Linse unter der Kontur, Wand durch die Stütze oder
+/// breiter als sie ohne Überlappung. Die Stütze ist schon um prioritärere Wände beschnitten (`domains.rs`),
+/// dort ändert sich nichts. Neue Kanten auf der Stützenkontur und Nähte werden nicht gestrichen.
+pub(crate) fn carve_walls_under_columns(walls: &mut Vec<super::prim::Primitive>, cols: &[Vec<Vec2>]) {
+    use super::prim::Primitive;
+    if cols.is_empty() {
+        return;
+    }
+    let bb = |q: &[Vec2]| q.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, v| [b[0].min(v.x), b[1].min(v.y), b[2].max(v.x), b[3].max(v.y)]);
+    let col_bb: Vec<[f64; 4]> = cols.iter().map(|q| bb(q)).collect();
+    let hits = |q: &[Vec2]| -> Vec<usize> {
+        let b = bb(q);
+        (0..cols.len())
+            .filter(|&i| {
+                let c = col_bb[i];
+                b[0] < c[2] - 1e-9 && c[0] < b[2] - 1e-9 && b[1] < c[3] - 1e-9 && c[1] < b[3] - 1e-9
+            })
+            .collect()
+    };
+    let line_hits = |a: Vec2, b: Vec2| -> Vec<Vec<Vec2>> {
+        let s = [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)];
+        (0..cols.len()).filter(|&i| s[0] <= col_bb[i][2] && col_bb[i][0] <= s[2] && s[1] <= col_bb[i][3] && col_bb[i][1] <= s[3]).map(|i| cols[i].clone()).collect()
+    };
+    let old = std::mem::take(walls);
+    for q in old {
+        match &q {
+            // Flächen und Umriss-Polygone (ohne Füllung, gestrichen) gleich: Kanten auf der Kontur ohne Strich.
+            Primitive::Polygon { pts, fill, wall_id: Some(_), no_stroke_edges, stroke, stroke_width_mm, .. } if (fill != "none" || (stroke != "none" && *stroke_width_mm > 0.0)) && pts.len() >= 3 => {
+                let clip: Vec<crate::flat::Polygon> = hits(pts).iter().map(|&i| ring_of(&cols[i])).collect();
+                let over: f64 = if clip.is_empty() { 0.0 } else { crate::polygon_bool::intersection(&[ring_of(pts)], &clip).iter().map(poly_area).sum() };
+                if over <= 1e-9 {
+                    walls.push(q);
+                    continue;
+                }
+                let stroked = stroke != "none" && *stroke_width_mm > 0.0;
+                let skip: Vec<usize> = no_stroke_edges.iter().flatten().map(|k| *k as usize).collect();
+                let edges: Vec<(Vec2, Vec2)> = (0..pts.len()).filter(|i| stroked && !skip.contains(i)).map(|i| (pts[i], pts[(i + 1) % pts.len()])).collect();
+                let mut rings = Vec::new();
+                for pl in crate::polygon_bool::difference(&[ring_of(pts)], &clip) {
+                    split_holes(pl, 0, &mut rings);
+                }
+                for r in rings {
+                    let np: Vec<Vec2> = r.iter().map(|v| Vec2 { x: v[0], y: v[1] }).collect();
+                    if np.len() < 3 || area_of(&np) < 1e-10 {
+                        continue;
+                    }
+                    let k = np.len();
+                    let on = |a: Vec2, b: Vec2| edges.iter().any(|(c, d)| dist_seg(a, *c, *d) < 1e-6 && dist_seg(b, *c, *d) < 1e-6);
+                    let ns: Vec<f64> = (0..k).filter(|&i| !on(np[i], np[(i + 1) % k])).map(|i| i as f64).collect();
+                    let mut nq = q.clone();
+                    if let Primitive::Polygon { pts, no_stroke_edges, .. } = &mut nq {
+                        *pts = np;
+                        *no_stroke_edges = (!ns.is_empty()).then_some(ns);
+                    }
+                    walls.push(nq);
+                }
+            }
+            Primitive::Line { a, b, cls, .. } if cls == "wall-outline" => {
+                let polys = line_hits(*a, *b);
+                if polys.is_empty() {
+                    walls.push(q);
+                    continue;
+                }
+                for (na, nb) in clip_segment_outside(*a, *b, &polys) {
+                    let mut nq = q.clone();
+                    if let Primitive::Line { a, b, .. } = &mut nq {
+                        *a = na;
+                        *b = nb;
+                    }
+                    walls.push(nq);
+                }
+            }
+            _ => walls.push(q),
+        }
+    }
 }

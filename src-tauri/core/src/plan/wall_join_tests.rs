@@ -663,3 +663,92 @@ fn bogenwand_endet_an_stuetze() {
     assert!(ov.abs() < 1e-6, "Beton-Bogen/Backstein-Stütze: Überlappung {ov}");
     assert_eq!(u.len(), 1);
 }
+
+// ── [141] Reste: runde Stütze, Wand durch/breiter als die Stütze, Stütze unter der Schnitthöhe ──
+
+/// Fälle Wand–Stütze (Wandtyp, Wandende ab (0, 0), Stützenmitte, Profil, Bauteil der Stütze): runde Stütze
+/// am Wandende (Innen-/Aussenwand, auch hinter dem Ende), Wand breiter als die Stütze (endet darin bzw. läuft
+/// hindurch), Wand durch eine Rechteck-/runde Stütze, ausmittig, prioritärere Betonwand durch bzw. in eine
+/// Backsteinstütze.
+pub(crate) fn stuetzen_faelle() -> Vec<(&'static str, (f64, f64), (f64, f64), ColumnProfile, &'static str)> {
+    let rect = |w: f64, d: f64| ColumnProfile::Rect { width: w, depth: d };
+    let round = |r: f64| ColumnProfile::Round { radius: r };
+    vec![
+        ("iw", (2.0, 0.0), (2.0, 0.0), round(0.2), "concrete"),
+        ("aw", (2.0, 0.0), (2.0, 0.0), round(0.25), "concrete"),
+        ("iw", (2.0, 0.0), (2.1, 0.0), round(0.2), "concrete"),
+        ("aw", (2.0, 0.0), (2.0, 0.0), rect(0.25, 0.25), "concrete"),
+        ("aw", (4.0, 0.0), (2.0, 0.0), rect(0.25, 0.25), "concrete"),
+        ("iw", (4.0, 0.0), (2.0, 0.0), rect(0.3, 0.3), "concrete"),
+        ("iw", (4.0, 0.0), (2.0, 0.05), round(0.2), "concrete"),
+        ("aw", (4.0, 0.0), (2.0, 0.0), round(0.15), "concrete"),
+        ("bw", (4.0, 0.0), (2.0, 0.0), rect(0.3, 0.3), "brick"),
+        ("bw", (2.0, 0.0), (2.0, 0.0), round(0.2), "brick"),
+    ]
+}
+
+pub(crate) fn stuetzen_projekt(t: &str, end: (f64, f64), at: (f64, f64), prof: &ColumnProfile, comp: &str) -> Project {
+    let mut p = base();
+    add_wall(&mut p, t, (0.0, 0.0), end);
+    add_column(&mut p, "C", at, prof.clone(), Some(comp));
+    p
+}
+
+/// Fläche der Vereinigung von Wandband (ganze Dicke) und Stützenkontur: so gross muss der Grundriss sein.
+fn wall_column_union_area(p: &Project) -> f64 {
+    let w = &p.walls[0];
+    let total = p.wall_thickness(w, 0.2);
+    let ro = crate::joins::reference_offset(crate::model3d::wall_reference(w), total);
+    let band = super::wall_columns::band_rect(w, ro - total / 2.0, ro + total / 2.0);
+    let fp = crate::model3d::column_footprint(&p.columns.as_ref().unwrap()[0]);
+    crate::polygon_bool::union(&[to_poly(&band), to_poly(&fp)]).iter().map(|pl| ring_area(&pl[0]) - pl[1..].iter().map(|h| ring_area(h)).sum::<f64>()).sum()
+}
+
+/// Wand und Stütze überlappen im Grundriss nie: runde Stütze ohne Linse (die Wand endet an der Kontur),
+/// Wand durch die Stütze oder breiter als sie (Stütze prioritärer: Wand ausgespart; Wand prioritärer:
+/// Stütze beschnitten). Ein Körper ohne Lücke (Fläche = Wandband ∪ Stütze), keine Linie durch eine Fläche.
+#[test]
+fn wand_und_stuetze_ueberlappen_nicht() {
+    for (t, end, at, prof, comp) in stuetzen_faelle() {
+        let p = stuetzen_projekt(t, end, at, &prof, comp);
+        let what = format!("{t} bis {end:?}, Stütze {comp} {prof:?} in {at:?}");
+        let ps = prims(&p);
+        let polys = filled(&ps);
+        let (ov, u) = overlap(&polys);
+        assert!(ov.abs() < 1e-6, "{what}: Überlappung {ov}");
+        assert_eq!(u.len(), 1, "{what}: ein Körper");
+        assert_eq!(holes(&u), 0, "{what}: ohne Loch");
+        let ua: f64 = u.iter().map(|pl| ring_area(&pl[0]) - pl[1..].iter().map(|h| ring_area(h)).sum::<f64>()).sum();
+        let want = wall_column_union_area(&p);
+        assert!((ua - want).abs() < 1e-5, "{what}: Fläche {ua} ≠ {want}");
+        let lines = outline(&ps);
+        assert_no_line_through(&polys, &lines, &what);
+    }
+}
+
+/// Stütze ganz unter der Schnitthöhe (0.8 m, Schnitt 1.0 m): nicht geschnitten — keine Füllung, die
+/// geschnittene Wand läuft über ihr bis zum Ende, ihre Ansichtskanten fehlen unter der Wand.
+#[test]
+fn stuetze_unter_der_schnitthoehe() {
+    let mut p = base();
+    add_wall(&mut p, "iw", (0.0, 0.0), (2.0, 0.0));
+    add_column(&mut p, "C", (2.0, 0.0), ColumnProfile::Rect { width: 0.3, depth: 0.3 }, Some("concrete"));
+    p.columns.as_mut().unwrap()[0].height = 0.8;
+    let ps = prims(&p);
+    let polys = filled(&ps);
+    let (ov, u) = overlap(&polys);
+    assert!(ov.abs() < 1e-6, "Überlappung {ov}");
+    let ua: f64 = u.iter().map(|pl| ring_area(&pl[0])).sum();
+    assert!((ua - 2.0 * 0.15).abs() < 1e-6, "nur die Wand gefüllt, ungestutzt: {ua}");
+    let views: Vec<(Vec2, Vec2)> = ps
+        .iter()
+        .filter_map(|q| match q {
+            Primitive::Line { a, b, cls, .. } if cls == "column-view" => Some((*a, *b)),
+            _ => None,
+        })
+        .collect();
+    assert!(!views.is_empty(), "Ansichtskanten der Stütze");
+    assert_no_line_through(&polys, &views, "Stütze unter der Wand");
+    let len: f64 = views.iter().map(|(a, b)| (a.x - b.x).hypot(a.y - b.y)).sum();
+    assert!((len - (0.3 * 4.0 - 0.15)).abs() < 1e-6, "sichtbare Kanten {len}");
+}
