@@ -385,7 +385,8 @@ Es gibt drei Schatten, alle aus derselben Sonnenstudie (`Project.sunStudy`, Ort 
 1. `src/export/exportIfc.ts` fragt `queryBin("ifcExportData", …)`. Im Kern sammelt
    `ifc_export_data()` (`src-tauri/core/src/ifc_data.rs`) Wand-Bänder, Öffnungen, Treppen
    (`ifc_stairs.rs`), Dach-Netze, Räume, Basismengen (`ifc_quantities.rs`), Klassifikation und
-   Georeferenz in einen Export-Puffer (`export_flat.rs`).
+   Georeferenz in einen Export-Puffer (`export_flat.rs`). Stützen mit mehreren Höhenabschnitten
+   ([141], `model3d::column_pieces`) gehen als Satz `COLUMN_PIECES` (eine Extrusion je Abschnitt) hinüber.
 2. `fileio` schreibt daraus die Datei: `export_ifc_flat()` in `src-tauri/fileio/src/ifc_export/mod.rs`
    (Entitäten, GUIDs, Typen mit Materialschichten, Psets, Beziehungen), Öffnungs-Geometrie in
    `ifc_openings.rs`.

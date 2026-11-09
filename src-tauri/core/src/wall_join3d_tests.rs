@@ -429,3 +429,38 @@ fn laengsschnitt_in_der_wand_zeigt_die_getroffene_schicht() {
 }
 
 
+
+/// [141] Wand (Beton) nur 1.5 m hoch, Backsteinstütze 2.6 m: unten das beschnittene Profil (U-Form), oben der
+/// volle Querschnitt. Der IFC-Export schreibt EINEN Datensatz COLUMN_PIECES mit zwei Profilen; die Menge
+/// (Volumen) ist die Summe der Abschnitte.
+#[test]
+fn stuetze_mit_hoehenabschnitten_im_ifc() {
+    use crate::ifc_data::{ifc_export_data, IfcOptions};
+    let mut p = base();
+    add_wall(&mut p, "bw", (0.0, 0.0), (3.0, 0.0));
+    p.walls[0].height = 1.5;
+    add_column(&mut p, "C", (3.0, 0.0), ColumnProfile::Rect { width: 0.3, depth: 0.3 }, Some("brick"));
+    let pieces = model3d::column_pieces(&p, &p.columns.as_ref().unwrap()[0]);
+    assert_eq!(pieces.len(), 2, "{pieces:?}");
+    let vol: f64 = pieces.iter().map(|(fp, z0, z1)| ring_area(&fp.iter().map(|v| [v.x, v.y]).collect::<Vec<_>>()) * (z1 - z0)).sum();
+    let want = (0.09 - 0.15 * 0.2) * 1.5 + 0.09 * 1.1;
+    assert!((vol - want).abs() < 1e-6, "{vol} ≠ {want}");
+    let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+    // Datensatz 20 (COLUMN_PIECES) zwischen Wandsätzen: Anzahl Abschnitte steht an Position +4.
+    let has = f.nums.windows(5).any(|w| w[0] == 20.0 && w[4] == 2.0);
+    assert!(has, "COLUMN_PIECES mit 2 Abschnitten");
+    // Menge im Pset: NetVolume = Summe.
+    let net = f.nums.iter().any(|v| (v - want).abs() < 1e-6);
+    assert!(net, "NetVolume = {want}");
+}
+
+/// Eine nicht geteilte Stütze bleibt beim Datensatz COLUMN (rückwärtskompatibel).
+#[test]
+fn stuetze_ohne_abschnitte_bleibt_column() {
+    use crate::ifc_data::{ifc_export_data, IfcOptions};
+    let mut p = base();
+    add_column(&mut p, "C", (3.0, 0.0), ColumnProfile::Rect { width: 0.3, depth: 0.3 }, Some("brick"));
+    let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+    assert!(f.nums.contains(&10.0));
+    assert!(!f.nums.windows(5).any(|w| w[0] == 20.0 && w[4] == 2.0));
+}

@@ -261,6 +261,16 @@ impl Builder {
         (placement, shape)
     }
 
+    /// [141] Mehrere Extrusionen (je Höhenabschnitt ein Profil `(Profil, z_rel, Tiefe)`) in EINER SweptSolid-
+    /// Darstellung; das Placement liegt auf dem tiefsten Abschnitt, die übrigen sitzen als Versatz der Extrusion.
+    pub(super) fn emit_pieces_product(&mut self, pieces: &[(Vec<(f64, f64)>, f64, f64)], relative_to: usize) -> (usize, usize) {
+        let z0 = pieces.iter().fold(f64::INFINITY, |m, p| m.min(p.1));
+        let solids: Vec<usize> = pieces.iter().map(|(fp, z, d)| self.emit_extrusion_voids(fp, &[], z - z0, *d)).collect();
+        let shape = self.emit_swept_shape(&solids);
+        let placement = self.emit_placement(z0, relative_to);
+        (placement, shape)
+    }
+
     /// Dreiecks-Mesh als IfcTriangulatedFaceSet (IFC2x3: IfcFacetedBrep bzw. IfcShellBasedSurfaceModel) +
     /// Shape + Placement (Punkte tragen die Geometrie absolut im Rahmen der Trägerstruktur).
     pub(super) fn emit_triangulated_product(&mut self, mesh: &Mesh, relative_to: usize) -> (usize, usize) {
