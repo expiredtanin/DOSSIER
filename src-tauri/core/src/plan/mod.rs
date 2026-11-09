@@ -38,8 +38,11 @@ pub mod stamp_place;
 pub mod floor_finish;
 pub mod trees;
 pub mod mesh_plan;
+pub mod arc_fit;
 pub(crate) mod wall_columns;
 #[cfg(test)]
 pub(crate) mod wall_join_tests;
 #[cfg(test)]
 mod hatch_dir_tests;
+#[cfg(test)]
+mod arc_output_tests;

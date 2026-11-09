@@ -46,6 +46,8 @@ const REC_SHEET_VP: f64 = 21.0;
 const REC_SHEET_INSERT: f64 = 22.0;
 /// [146] Linienenden/-ecken des Projekts `[cap | join << 2]` → `$ENDCAPS`/`$JOINSTYLE`.
 const REC_LINE_ENDS: f64 = 23.0;
+/// [169] LWPOLYLINE mit Bulges: `[Ebene, geschlossen, n, n × (x, y, bulge)]`.
+const REC_POLYLINE_BULGE: f64 = 24.0;
 
 /// Sammel-Ebenen für Primitive ohne eigene Kategorie.
 const LAYER_HATCH: &str = "HATCH";
@@ -266,6 +268,25 @@ impl Flat {
         for p in pts {
             self.push(b, &[p.x, p.y]);
         }
+    }
+
+    /// [169] Zug mit erkannten Bögen ([`crate::plan::arc_fit`]): ganzer Kreis als CIRCLE, sonst LWPOLYLINE mit
+    /// Bulges; ohne Bogen `false` (der Aufrufer schreibt den Zug wie bisher).
+    fn add_curve(&mut self, b: &mut Buf, layer: &str, pts: &[V2], closed: bool) -> bool {
+        use crate::plan::arc_fit;
+        let Some(shape) = arc_fit::fit(pts, closed, arc_fit::TOL) else { return false };
+        if let arc_fit::Shape::Circle { c, r, .. } = shape {
+            self.add_circle(b, layer, c, r);
+            return true;
+        }
+        let Some((v, bulge)) = arc_fit::bulges(&shape) else { return false };
+        b.counts[K_POLY] += 1;
+        let l = self.layer(layer);
+        self.push(b, &[REC_POLYLINE_BULGE, l, b01(closed), v.len() as f64]);
+        for (p, g) in v.iter().zip(&bulge) {
+            self.push(b, &[p.x, p.y, *g]);
+        }
+        true
     }
 
     fn add_arc(&mut self, b: &mut Buf, layer: &str, c: V2, r: f64, start: f64, end: f64) {
@@ -962,7 +983,10 @@ impl Ctx<'_> {
                     }
                 }
                 self.flat.set_pen(b, -1.0);
-                self.flat.add_polyline(b, layer, pts, true);
+                // [169] Runde Stütze als CIRCLE, Bogenwand-/Bogen-Umrisse als LWPOLYLINE mit Bulges.
+                if !self.flat.add_curve(b, layer, pts, true) {
+                    self.flat.add_polyline(b, layer, pts, true);
+                }
             }
             Prim::Other => {}
         }
@@ -1283,7 +1307,40 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
     let mut done: HashSet<&(u8, String)> = HashSet::new();
 
     // 4) Jedes Primitiv in Entitäten übersetzen.
+    let plain = |e: &Entry| matches!(&e.prim, Prim::Line { zigzag: None, motif: None, .. });
+    let mut skip_to = 0usize;
     for (i, e) in entries.iter().enumerate() {
+        if i < skip_to {
+            continue;
+        }
+        // [169] Aneinander anschliessende Einzel-Linien gleicher Ebene und gleichen Musters (Ansichtskante einer
+        // runden Stütze, Umriss-Linien an Bogenwänden): erkannte Bögen als CIRCLE bzw. LWPOLYLINE mit Bulges.
+        if keys[i].is_none() && plain(e) {
+            let l = layer_for(e);
+            let Prim::Line { a, b: q, dash, .. } = &e.prim else { unreachable!() };
+            let mut pts = vec![*a, *q];
+            let mut j = i + 1;
+            while j < entries.len() && keys[j].is_none() && plain(&entries[j]) {
+                let Prim::Line { a: aj, b: bj, dash: dj, .. } = &entries[j].prim else { break };
+                let last = pts[pts.len() - 1];
+                if dj != dash || (aj.x - last.x).abs() > 1e-9 || (aj.y - last.y).abs() > 1e-9 || layer_for(&entries[j]) != l {
+                    break;
+                }
+                pts.push(*bj);
+                j += 1;
+            }
+            if pts.len() >= 4 {
+                let closed = (pts[0].x - pts[pts.len() - 1].x).abs() <= 1e-9 && (pts[0].y - pts[pts.len() - 1].y).abs() <= 1e-9;
+                let ring = if closed { &pts[..pts.len() - 1] } else { &pts[..] };
+                let lt = cx.ltype_of(dash);
+                if crate::plan::arc_fit::fit(ring, closed, crate::plan::arc_fit::TOL).is_some() {
+                    cx.flat.set_pen(main, lt);
+                    cx.flat.add_curve(main, &l, ring, closed);
+                    skip_to = j;
+                    continue;
+                }
+            }
+        }
         if let Some(key) = &keys[i] {
             if !done.insert(key) {
                 continue;

@@ -79,12 +79,13 @@ Herkunft, kein Wegweiser.
 | `pick.rs` | räumlicher Index für Auswahl und Picken |
 | `svg.rs` | Plan-SVG (CLI, Goldens, Vorschau) |
 | `print_svg.rs` | Druck-SVG in Papier-mm für Layout-Blätter |
+| `arc_fit.rs` | Bögen in Vielecken/Linienzügen erkennen ([169]): Kreis/`A`-Pfad (SVG), Bulges (DXF), feine Tessellierung (Bildschirm) |
 | `dxf.rs` | DXF/DWG-Sammler; die Datei schreibt `src-tauri/fileio/src/export.rs` |
 | `text.rs` | Texte der Ausgaben (Raumstempel, Einzeltexte) |
 
 ## Tests
 
 Die meisten Dateien haben `mod tests` am Ende. Eigene Testdateien: `wall_join_tests.rs` (Wandknoten im
-Grundriss), im Ordner `section/` die Tests des Schnitts (`tests.rs`, `mesh_tests.rs` für importierte Netze,
+Grundriss), `arc_output_tests.rs` (runde Stütze/Bogenwand als Kreis und Bogen in allen Ausgaben), im Ordner `section/` die Tests des Schnitts (`tests.rs`, `mesh_tests.rs` für importierte Netze,
 `ts_faelle.rs`, `dach_faelle.rs`, `abzug_faelle.rs`, `wand_an_dach.rs`, Messung `bench.rs`), `perf_tests.rs` (Leistung, von Hand:
 `cargo test --release --lib bench159 -- --ignored --nocapture`, siehe Dateikopf).

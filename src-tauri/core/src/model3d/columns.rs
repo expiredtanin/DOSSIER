@@ -4,19 +4,35 @@
 
 use super::*;
 
-const COLUMN_ROUND_SEGMENTS: usize = 32;
 pub(crate) const COLUMN_RGB: Rgb = [0.7, 0.7, 0.72];
+/// [169] Pfeilhöhe der runden Stütze (Meter): höchstens 0.5 mm, Schritt höchstens 7.5° (wie Bogenwände).
+const COLUMN_CHORD_TOL: f64 = 5e-4;
+/// Knickwinkel (Grad) der glatten Schattierung runder Stützen: Mantel glatt, Kanten zu Deckel/Boden scharf.
+const COLUMN_CREASE_DEG: f64 = 30.0;
+
+/// [169] Segmentzahl des runden Querschnitts: Pfeilhöhe ≤ [`COLUMN_CHORD_TOL`], Schritt ≤ 7.5°, Vielfaches
+/// von 4 (symmetrisch zu den Achsen), mindestens 48 (Radius 0.15 m → 48, 0.5 m → 72), höchstens 256.
+pub fn column_round_segments(radius: f64) -> usize {
+    let r = if radius.is_finite() { radius.max(1e-6) } else { 1e-6 };
+    let c = (1.0 - COLUMN_CHORD_TOL / r).clamp(-1.0, 1.0);
+    let step = (2.0 * crate::jsnum::acos(c)).clamp(1e-3, std::f64::consts::PI / 24.0);
+    let n = ((2.0 * std::f64::consts::PI / step).ceil() as usize).clamp(48, 256);
+    n.div_ceil(4) * 4
+}
 
 /// Grundriss-Querschnitt einer Stütze (`columnFootprint`).
 pub fn column_footprint(col: &Column) -> Vec<Vec2> {
     let (cx, cy) = (col.position.x, col.position.y);
     match &col.profile {
-        ColumnProfile::Round { radius } => (0..COLUMN_ROUND_SEGMENTS)
+        ColumnProfile::Round { radius } => {
+            let n = column_round_segments(*radius);
+            (0..n)
             .map(|i| {
-                let t = (i as f64 / COLUMN_ROUND_SEGMENTS as f64) * std::f64::consts::PI * 2.0;
+                let t = (i as f64 / n as f64) * std::f64::consts::PI * 2.0;
                 Vec2 { x: cx + radius * cos(t), y: cy + radius * sin(t) }
             })
-            .collect(),
+            .collect()
+        }
         ColumnProfile::Rect { width, depth } => {
             let (hw, hd) = (width / 2.0, depth / 2.0);
             let rot = col.rotation;
@@ -137,7 +153,9 @@ pub fn emit_columns(p: &Project) -> Vec<RMesh> {
             .as_deref()
             .and_then(|id| p.component(id))
             .map_or(COLUMN_RGB, |c| hex_to_rgb(&c.color, COLUMN_RGB));
-        out.push(RMesh { crease_angle: None, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index: None });
+        // [169] Runde Stütze glatt schattiert (Mantel ohne Facetten), eckige kantig.
+        let crease_angle = matches!(col.profile, ColumnProfile::Round { .. }).then_some(COLUMN_CREASE_DEG);
+        out.push(RMesh { crease_angle, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index: None });
     }
     out
 }
@@ -170,4 +188,30 @@ pub fn pick_trees(p: &Project) -> Vec<PickTree> {
             PickTree { tris, tree_id: trees[i].id.clone() }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod round_tests {
+    use super::*;
+
+    /// [169] Runde Stütze feiner (Pfeilhöhe ≤ 0.5 mm, Schritt ≤ 7.5°) und im 3D glatt schattiert.
+    #[test]
+    fn runde_stuetze_fein_und_glatt() {
+        assert_eq!(column_round_segments(0.15), 48);
+        assert_eq!(column_round_segments(0.5), 72);
+        assert_eq!(column_round_segments(f64::NAN), 48);
+        for r in [0.1, 0.15, 0.3, 0.5, 1.0, 3.0] {
+            let n = column_round_segments(r) as f64;
+            assert!(r * (1.0 - (std::f64::consts::PI / n).cos()) <= COLUMN_CHORD_TOL + 1e-12, "r = {r}");
+        }
+        let mut p = Project::default();
+        for (id, profile) in [("r", ColumnProfile::Round { radius: 0.15 }), ("q", ColumnProfile::Rect { width: 0.3, depth: 0.3 })] {
+            p.columns.get_or_insert_with(Vec::new).push(Column { id: id.into(), r#type: "column".into(), floor_id: "eg".into(), profile, height: 2.6, ..Default::default() });
+        }
+        let m = emit_columns(&p);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0].crease_angle, Some(COLUMN_CREASE_DEG));
+        assert_eq!(m[1].crease_angle, None);
+        assert_eq!(column_footprint(&p.columns.as_ref().unwrap()[0]).len(), 48);
+    }
 }

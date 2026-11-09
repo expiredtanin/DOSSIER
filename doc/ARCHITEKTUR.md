@@ -272,6 +272,10 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
 | Layout-Blatt, Blatt-PDF | `planToPrintSvg()` in `src/export/planToPrintSvg.ts`, aufgerufen von `src/ui/LayoutSheet.tsx` und `src/export/layoutPdf.ts` | `plan_print_svg_ops()` → `print_svg_ops()` in `plan/print_svg.rs` | SVG-Knoten in Papier-mm |
 | DXF, DWG | `src/export/exportDxf.ts` | `plan_dxf_flat()` → `collect()`, `encode()` in `plan/dxf.rs` | `fileio`: `export_dxf()`, `export_dwg()` in `src-tauri/fileio/src/export.rs` |
 
+Runde Formen (Stütze, Bogenwand, Bogen-Umrisse) reisen im Puffer als Vielecke; die Ausgaben erkennen die Bögen
+darin (`plan/arc_fit.rs`) und schreiben Kreise, SVG-`A`-Pfade bzw. DXF-Bulges, der Bildschirm tesselliert sie fein
+nach ([169]).
+
 Bildschirm, SVG, PDF und DXF lesen also denselben Plan-Puffer. Was in einem Ausgabeweg anders aussieht
 als in einem anderen, ist fast immer ein Fehler im jeweiligen Leser, nicht in der Plan-Erzeugung.
 

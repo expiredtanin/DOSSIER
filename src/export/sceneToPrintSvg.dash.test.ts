@@ -57,3 +57,31 @@ describe("Druck-SVG: Strichmuster", () => {
     expect(seen.every((s) => s[1] === seen[0][1])).toBe(true);
   });
 });
+
+// [169] Runde Stütze (in der Szene fein nachtesselliert) als Pfad mit Bögen statt Vieleck; gestrichelter
+// Bogen (Türschwenk) mit Musterphase.
+describe("Druck-SVG: Kreise und Bögen", () => {
+  it("Kreis-Fläche und -Umriss als <path> mit A, Bogen mit stroke-dashoffset", () => {
+    const ring: [number, number][] = Array.from({ length: 180 }, (_, i) => {
+      const t = (2 * Math.PI * i) / 180;
+      return [1 + 0.15 * Math.cos(t), 1 + 0.15 * Math.sin(t)];
+    });
+    const sc = {
+      fills: [{ pts: ring, color: [0, 0, 0, 1], z: 0 }],
+      outlines: [{ pts: ring, color: [0, 0, 0, 1], widthMm: 0.35, dash: null, z: 1 }],
+      polylines: [],
+      arcs: [{ center: [0, 0], from: [2, 0], to: [0, 2], r: 2, color: [0, 0, 0, 1], widthMm: 0.18, dash: [2, 1] }],
+      lines: [],
+      texts: [],
+      images: [],
+      bounds: { minX: -1, minY: -1, maxX: 3, maxY: 3 },
+    } as unknown as RScene;
+    const svg = sceneToPrintSvg(sc, { scaleDenominator: 50, pageWidthMm: 100, pageHeightMm: 100 }).svg as unknown as FakeEl;
+    const paths = svg.children.filter((c) => c.tag === "path");
+    expect(svg.children.some((c) => c.tag === "polygon")).toBe(false);
+    // Fläche und Umriss (je zwei Halbkreise r = 3 mm bei 1:50) und der Bogen.
+    expect(paths.filter((p) => (p.attrs.get("d") ?? "").includes(" A 3 3 ")).length).toBe(2);
+    const arc = paths.find((p) => p.attrs.has("stroke-dasharray"))!;
+    expect(arc.attrs.get("stroke-dashoffset")).toBeDefined();
+  });
+});
