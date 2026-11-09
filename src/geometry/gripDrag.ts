@@ -130,6 +130,16 @@ export function openingSheetSlide(
   return f.length ? { position: f[0], du: f[1] } : null;
 }
 
+/**
+ * Punkt im Umriss lassen (Dach-/Deckenöffnung): ausserhalb → nächster Randpunkt, 5 cm nach innen gerückt.
+ * Gerechnet im Kern (`opening_slide::clamp_inside`), derselbe Wert wie beim Verschieben-Befehl.
+ */
+export function clampInside(pt: Vec2, ring: readonly Vec2[]): Vec2 {
+  const flat = new Float64Array(ring.length * 2);
+  ring.forEach((q, i) => { flat[2 * i] = q.x; flat[2 * i + 1] = q.y; });
+  return v(core().grip_clamp_inside(pt.x, pt.y, flat));
+}
+
 /** Bewegpunkt einer Treppe (Mitte des ersten Laufs, Wendeltreppe im Zentrum). */
 export function stairMoveHandle(st: Stair): Vec2 {
   const c = st.center;

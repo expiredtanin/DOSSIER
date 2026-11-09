@@ -793,10 +793,26 @@ fn opening_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids
     add_op("openings", vec![obj(f)])
 }
 
+/// Lage der Lücke, wie das Setzen sie ergibt ([`opening_ops`]): Breite und Anfang in die Wand geklemmt,
+/// bei Überlappung an die nächste freie Stelle gerückt ([145]: die Vorschau zeigt die gesetzte Lage, nicht
+/// den Cursor). Ohne Platz bleibt die geklemmte Lage (das Setzen bewirkt dann nichts). `(pos, width)`.
+fn placed_gap(root: &Map<String, Value>, v: &Value, len: f64, pos: f64) -> (f64, f64) {
+    let width = jsnum::max(0.1, jsnum::min(n_of(v, "width"), len));
+    let pos = jsnum::max(0.0, jsnum::min(pos, jsnum::max(0.0, len - width)));
+    match crate::opening_slide::place(root, s_of(v, "wall"), len, width, None, pos, &|_| false) {
+        Some(pl) if pl.clamped => (pl.position, width),
+        _ => (pos, width),
+    }
+}
+
 /// Öffnungs-Vorschau (Lücken-Balken + Symbol). `pos` fehlt → aus dem Cursor projiziert.
 /// `info = [pos, von, ax, ay, bx, by, mx, my]` (Position für den Zustand, HUD/Stützpunkte).
-fn opening_preview(v: &Value, cursor: Option<V>, out: &mut Shapes, info: &mut Vec<f64>) {
+fn opening_preview(root: &Map<String, Value>, v: &Value, cursor: Option<V>, out: &mut Shapes, info: &mut Vec<f64>) {
     let (st, en) = (p_of(v, "start"), p_of(v, "end"));
+    let wall_len = match arc_of(st, en, opt_n(v, "bulge")) {
+        Some(a) => a.length(),
+        None => hypot2(en.0 - st.0, en.1 - st.1),
+    };
     // Bogenwand ([T2]): Lücke und Symbol entlang des Bogens, Position = Bogenlänge.
     if let Some(arc) = arc_of(st, en, opt_n(v, "bulge")) {
         let len = arc.length();
@@ -805,7 +821,7 @@ fn opening_preview(v: &Value, cursor: Option<V>, out: &mut Shapes, info: &mut Ve
             (None, Some(c)) => project_onto_any(st, en, opt_n(v, "bulge"), c).0,
             (None, None) => 0.0,
         };
-        let width = n_of(v, "width");
+        let (pos, width) = placed_gap(root, v, wall_len, pos);
         let from = jsnum::max(0.0, jsnum::min(pos, len));
         let to = jsnum::max(from, jsnum::min(from + width, len));
         let at = |s: f64, n: f64| {
@@ -836,12 +852,12 @@ fn opening_preview(v: &Value, cursor: Option<V>, out: &mut Shapes, info: &mut Ve
         (None, Some(c)) => project_onto_wall(st, en, c).0,
         (None, None) => 0.0,
     };
+    let (pos, width) = placed_gap(root, v, wall_len, pos);
     let ax = (en.0 - st.0, en.1 - st.1);
     let l = hypot2(ax.0, ax.1);
     let len = if l == 0.0 || l.is_nan() { 1e-9 } else { l };
     let u = (ax.0 / len, ax.1 / len);
     let n = (-u.1, u.0);
-    let width = n_of(v, "width");
     let from = jsnum::max(0.0, jsnum::min(pos, len));
     let to = jsnum::max(from, jsnum::min(from + width, len));
     let a = (st.0 + u.0 * from, st.1 + u.1 * from);
@@ -1163,7 +1179,7 @@ pub fn preview_req(root: &Map<String, Value>, project: &Project, req: &Req, pts:
     match req.cmd.as_str() {
         "wall" => wall_preview(root, v, &ctx, &pts, out),
         "stair" => stair_preview(project, v, &ctx, out, &mut p.info),
-        "opening" => opening_preview(v, pts.first().copied(), out, &mut p.info),
+        "opening" => opening_preview(root, v, pts.first().copied(), out, &mut p.info),
         "roomInside" => p.ok = pts.first().and_then(|at| room_inside(project, ctx.level, *at)).is_some_and(|b| b.len() >= 3),
         // Zauberstab ([77]): die gefundene Masche unter dem Cursor.
         "wand" => match pts.first().and_then(|at| crate::magic_wand::region_at(project, ctx.level, *at)) {
@@ -1443,6 +1459,31 @@ mod tests {
         let p = preview(&r, &crate::model::lenient::typed_for_test(&r), &json!({"cmd": "opening", "start": [0, 0], "end": [6, 0], "kind": "window", "width": 1.2, "pos": null}), &[2.0, 1.0]);
         assert_eq!(p.info[0], 2.0);
         assert_eq!(p.shapes.count, 2);
+    }
+
+    /// [145] Die Vorschau zeigt die Lage, die das Setzen ergibt (an die Wand geklemmt, an die nächste freie
+    /// Stelle gerückt), nicht den Cursor-Ort.
+    #[test]
+    fn oeffnung_vorschau_zeigt_gerueckte_lage() {
+        let r = root(json!({"walls": [{"id": "w", "floorId": "F1", "start": {"x": 0, "y": 0}, "end": {"x": 6, "y": 0}}], "openings": [{"id": "a", "hostWallId": "w", "position": 2, "width": 1}], "windowTypes": [{"id": "FT"}]}));
+        let t = crate::model::lenient::typed_for_test(&r);
+        let pos_of = |width: f64, cursor: f64, pos: Value| {
+            let v = json!({"cmd": "opening", "wall": "w", "start": [0, 0], "end": [6, 0], "kind": "window", "width": width, "pos": pos});
+            let pv = preview(&r, &t, &v, &[cursor, 0.0]);
+            let set = ops(&r, &t, &req(json!({"cmd": "opening", "wall": "w", "start": [0, 0], "end": [6, 0], "kind": "window", "pos": pos_or(&pv), "width": width, "height": 1.2, "sill": 0.9}))).unwrap();
+            (pv.info[0], pv.info[1], items(&set, 0)[0]["position"].as_f64().unwrap())
+        };
+        // Cursor über der Nachbaröffnung: rückt neben sie (Steg 5 cm), Setzen an derselben Stelle.
+        let (p, from, set) = pos_of(1.0, 2.6, Value::Null);
+        assert_eq!((p, from), (3.05, 3.05));
+        assert_eq!(set, 3.05);
+        // Cursor am Wandende: die Lücke behält ihre Breite und rückt in die Wand.
+        let (p, from, set) = pos_of(1.2, 5.9, Value::Null);
+        assert_eq!((p, from, set), (4.8, 4.8, 4.8));
+    }
+
+    fn pos_or(p: &Preview) -> f64 {
+        p.info[0]
     }
 }
 

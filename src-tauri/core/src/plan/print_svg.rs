@@ -235,6 +235,28 @@ fn poly_node(pts: &str, fill: &str, stroke: &str, stroke_mm: f64) -> Vec<(&'stat
     a
 }
 
+/// Polygon mit Füllung und Strich; mit `nse` (nicht gestrichene Kanten, [146]) die Füllung ohne Strich
+/// und die sichtbaren Kantenläufe als offene Linienzüge — wie das Plan-SVG (`plan/svg.rs`).
+fn poly_stroked(out: &mut Out, attr: &str, pts_mm: &[V2], nse: &[f64], fill: &str, stroke: &str, stroke_mm: f64) {
+    if nse.is_empty() || stroke_mm <= 0.0 || stroke == "none" {
+        out.el(1, "polygon", &poly_node(attr, fill, stroke, stroke_mm));
+        return;
+    }
+    out.el(1, "polygon", &poly_node(attr, fill, "none", 0.0));
+    poly_outline(out, pts_mm, nse, stroke, stroke_mm);
+}
+
+/// Nur der Umriss (Füllung oder Schraffur liegt schon darunter).
+fn poly_outline(out: &mut Out, pts_mm: &[V2], nse: &[f64], stroke: &str, stroke_mm: f64) {
+    if nse.is_empty() {
+        out.el(1, "polygon", &poly_node(&pts_attr(pts_mm), "none", stroke, stroke_mm));
+        return;
+    }
+    for run in crate::plan::scene::visible_edge_runs(pts_mm, nse) {
+        out.el(1, "polyline", &polyline_attrs(&run, stroke, stroke_mm, None));
+    }
+}
+
 fn line_attrs(a: V2, b: V2, color: &str, stroke_mm: f64, dash: Option<&[f64]>) -> Vec<(&'static str, String)> {
     let mut v = vec![
         ("x1", r3(a.x)),
@@ -398,6 +420,10 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
             let opacity = opacity_of(greyed, obj(4));
             let pts_mm: Vec<V2> = pts.iter().map(|p| m.at(p.x, p.y)).collect();
             let attr = pts_attr(&pts_mm);
+            let nse: Vec<f64> = match rec.nse {
+                Some((o, n)) => view.pool(o, n)?.into_iter().filter(|e| e.is_finite() && *e >= 0.0).collect(),
+                None => Vec::new(),
+            };
             let sw = f[2];
             let stroke_mm = if sw > 0.0 { quantize_pen(sw) } else { 0.0 };
             let fill = s(f[0])?;
@@ -418,12 +444,12 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                 }
                 out.rec(&["I", &attr, &img]);
                 if stroke_mm > 0.0 {
-                    out.el(1, "polygon", &poly_node(&attr, "none", &stroke, stroke_mm));
+                    poly_outline(out, &pts_mm, &nse, &stroke, stroke_mm);
                 }
             } else if h.pattern == Pattern::None {
-                out.el(1, "polygon", &poly_node(&attr, &fill, &stroke, stroke_mm));
+                poly_stroked(out, &attr, &pts_mm, &nse, &fill, &stroke, stroke_mm);
             } else if h.pattern == Pattern::Solid {
-                out.el(1, "polygon", &poly_node(&attr, &hatch_color, &stroke, stroke_mm));
+                poly_stroked(out, &attr, &pts_mm, &nse, &hatch_color, &stroke, stroke_mm);
             } else {
                 if fill != "none" {
                     out.el(1, "polygon", &poly_node(&attr, &fill, "none", 0.0));
@@ -455,7 +481,7 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                     }
                 }
                 if stroke_mm > 0.0 {
-                    out.el(1, "polygon", &poly_node(&attr, "none", &stroke, stroke_mm));
+                    poly_outline(out, &pts_mm, &nse, &stroke, stroke_mm);
                 }
             }
             out.rec(&["g"]);
@@ -808,5 +834,53 @@ mod tests {
         // Waagrechte Linien bei y = 0, 2, …, 10 über die volle Breite.
         assert_eq!(segs.len(), 6);
         assert!(segs.iter().all(|(a, b)| (b.x - a.x - 10.0).abs() < 1e-9 || (a.x - b.x - 10.0).abs() < 1e-9));
+    }
+
+    /// [146] Nicht gestrichene Kanten (`noStrokeEdges`) bleiben im Druck-SVG ohne Strich: Füllung ohne
+    /// Umriss, die übrigen Kanten als offener Linienzug.
+    #[test]
+    fn ungestrichene_kante_ohne_strich() {
+        use crate::model::Vec2;
+        use crate::plan::buf::{View, Writer};
+        use crate::plan::prim::Primitive;
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let mut w = Writer::new(false);
+        let g = w.begin_group();
+        w.push(&Primitive::Polygon {
+            pts: vec![v(0.0, 0.0), v(1.0, 0.0), v(1.0, 1.0), v(0.0, 1.0)],
+            fill: "#fff".into(),
+            stroke: "#123456".into(),
+            stroke_width_mm: 0.5,
+            hatch: crate::plan::style::no_hatch(),
+            greyed: None,
+            opacity: None,
+            no_stroke_edges: Some(vec![3.0]),
+            wall_id: None,
+            drawing_id: None,
+            ceiling_id: None,
+            opening_id: None,
+            stair_id: None,
+            room_id: None,
+            extruded_solid_id: None,
+            context_object_id: None,
+            column_id: None,
+            roof_id: None,
+            section_line_id: None,
+        });
+        w.end_group(g);
+        let bytes = w.finish();
+        let view = View::parse(&bytes).unwrap();
+        let n = view.len();
+        let mut parts = vec![Part::new(view, 0, n).unwrap()];
+        let o = PrintOptions { scale_denominator: 1000.0, page_w: 10.0, page_h: 10.0, bounds: [0.0, 0.0, 1.0, 1.0] };
+        let ops = print_svg_ops(&mut parts, &o).unwrap();
+        let recs: Vec<&str> = ops.split('\x1e').collect();
+        let poly = recs.iter().find(|r| r.contains("\x1fpolygon")).expect("Füllung");
+        assert!(!poly.contains("#123456"), "Füllung ohne Strich: {poly:?}");
+        let line = recs.iter().find(|r| r.contains("\x1fpolyline")).expect("Kantenzug");
+        assert!(line.contains("#123456"), "{line:?}");
+        // Drei sichtbare Kanten = vier Punkte; die vierte Kante (0,1)→(0,0) fehlt.
+        let pts = line.split('\x1f').skip_while(|x| *x != "points").nth(1).unwrap();
+        assert_eq!(pts.split(' ').count(), 4, "{pts}");
     }
 }

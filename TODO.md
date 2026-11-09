@@ -54,10 +54,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   hindurch, Stütze kürzer als Wand, Stütze mit mehreren Höhenabschnitten, Längsschnitt genau in einer Wand
   (`split_wall_layers`), Muster bei ungeraden Maschen (Kern `plan/walls.rs`, `joins.rs`). · M
 - ◐ **[145]** Texte beim Zoomen synchron. Falls der Mac noch nachläuft: Raumstempel nativ zeichnen (vtext kann nur
-  einzeilig/linksbündig, eine Schrift, kein Fett). Zudem: Vorschau beim Setzen zeigt den Cursor-Ort statt der
-  verrückten Lage; `clampInside` steht in TS (Griff) und Rust (Befehl) doppelt. · S
-- ◐ **[146]** Linienenden/-ecken. Druck-SVG streicht Polygone rundum (kein `noStrokeEdges`); Nähen in Metal-Chunks nur
-  innerhalb eines Chunks (Kern `plan/line_ends.rs`, `render2d`). · M
+  einzeilig/linksbündig, eine Schrift, kein Fett). 9.11.: `clampInside` nur noch im Kern (`grip_clamp_inside`,
+  Fassade `clampInside` in `src/core`); die Öffnungs-Vorschau beim Setzen zeigt die geklemmte/gerückte Lage
+  (`placed_gap`, Test `oeffnung_vorschau_zeigt_gerueckte_lage`). Offen: Dach-/Deckenöffnung hat beim Setzen keine
+  eigene Vorschau; Raumstempel setzt ohne Klemmung (nichts zu zeigen). · S
+- ◐ **[146]** Linienenden/-ecken. Druck-SVG achtet seit 9.11. auf `noStrokeEdges` (offene Kantenzüge, Test
+  `ungestrichene_kante_ohne_strich`); Nähen in Metal-Chunks nur innerhalb eines Chunks (Kern `plan/line_ends.rs`, `render2d`). · M
 - ◐ **[150]** Gelände im Grundriss am Gebäude. Raumstempel ausserhalb ihres Raums sind kein Hindernis für
   Höhenlinien-Beschriftungen; Beschriftungen an Bündeln fehlen statt versetzt zu werden. · S
 - ◐ **[153]** Strichmuster in Papier-mm. Bögen/Kreise ohne Phase (beginnen mit Strich), DXF/DWG ohne Phase je Objekt,
