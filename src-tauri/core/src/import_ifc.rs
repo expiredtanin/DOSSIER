@@ -859,12 +859,10 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         let boundary: Vec<Value> = s.boundary.iter().map(|&p| mv(p)).collect();
         let sia_key = s.sia.as_deref().map(|x| x.trim().to_uppercase());
         let sia = SIA.iter().find(|c| Some(**c) == sia_key.as_deref()).copied().unwrap_or("HNF");
-        let n = boundary.len() as f64;
-        let (sx, sy) = boundary.iter().fold((0.0, 0.0), |(a, b), p| (a + p["x"].as_f64().unwrap_or(f64::NAN), b + p["y"].as_f64().unwrap_or(f64::NAN)));
         let name = [s.long_name.as_deref(), s.name.as_deref()].into_iter().flatten().find(|x| !x.is_empty()).map(str::to_string).unwrap_or_else(|| format!("Raum {}", rooms_before + rooms.len() + 1));
         let mut room = json!({
             "id": ctx.new_id("room"), "type": "room", "floorId": fid, "categoryCode": ROOM_CATEGORY, "siaCategory": sia,
-            "name": name, "boundary": boundary, "color": room_color, "stampAnchor": {"x": js_num(sx / n), "y": js_num(sy / n)},
+            "name": name, "boundary": boundary, "color": room_color,
         });
         // [158] Raumbuch aus den Psets: Nutzung (bekannte Kennung), Oberflächen (Material gleichen Namens →
         // seine Kennung, sonst Freitext), Bodenaufbau.
@@ -1212,6 +1210,9 @@ mod tests {
         let room = &rooms[0];
         assert_eq!((room["usage"].as_str(), room["floorFinish"].as_str(), room["wallFinish"].as_str(), room["floorBuildUp"].as_str()), (Some("bath"), Some("fl"), Some("Abrieb 1 mm"), Some("UB 80")));
         assert!(room.get("ceilingFinish").is_none());
+        // [140] Kein fester Stempel-Anker (Eckenmittelwert liegt in L-Räumen ausserhalb): der Grundriss
+        // setzt den Stempel an den Pol der Unzugänglichkeit und lässt ihn Hindernissen ausweichen.
+        assert!(room.get("stampAnchor").is_none(), "{room}");
         sp["common"] = json!({"Usage": "sauna"});
         let r = ifc_import(&base, &meta(&sp).to_string(), &[], &[], &data, &opts, 0.0).unwrap();
         assert!(added(&r.ops, "rooms")[0].get("usage").is_none());
