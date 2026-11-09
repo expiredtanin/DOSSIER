@@ -4,7 +4,7 @@
 // Leseansicht (`current`). Abfragen finden ihr Dokument über die Leseansicht (`documentFor`); ein
 // abgewandeltes Projekt wird ausdrücklich geöffnet (`withDocument`) statt abgeglichen ([122]).
 
-import type { Project } from "../model/types";
+import type { Project, UiState } from "../model/types";
 import { core, registerCoreRestore } from "../engine/coreWasm";
 import { applyOps, opsToJson } from "./ops";
 import { fromMarkedJson, toMarkedJson } from "./ops";
@@ -334,8 +334,10 @@ export class ProjectDocument {
   }
 
   /** Datei-Text des Projekts (Formatversion vorn, Einrückung 2, Zeichen für Zeichen wie `JSON.stringify`). */
-  serialize(): string {
-    return this.handle ? core().doc_serialize(this.handle) : "";
+  serialize(ui?: UiState): string {
+    if (!this.handle) return "";
+    // `ui` ([136], offene Reiter) ersetzt `uiState` nur in der Datei; das Dokument bleibt unverändert.
+    return ui ? core().doc_serialize_with_ui(this.handle, JSON.stringify(ui)) : core().doc_serialize(this.handle);
   }
 
   /** Boden-Spuren der 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]`. */

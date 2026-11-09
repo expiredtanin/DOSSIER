@@ -15,7 +15,7 @@ const REQUIRED_ARRAYS: [&str; 3] = ["walls", "layers", "drawingLevels"];
 const DEFAULT_ARRAYS: [&str; 5] = ["lineStyles", "hatches", "components", "wallTypes", "drawings2d"];
 
 /// Bekannte Felder von `Project` (für die Meldung unbekannter Felder).
-const KNOWN_KEYS: [&str; 54] = [
+const KNOWN_KEYS: [&str; 55] = [
     "formatVersion", "id", "name", "lineStyles", "textStyles", "hatches", "components", "wallTypes",
     "ceilingTypes", "roofTypes", "blockDefs", "doorTypes", "windowTypes", "stairTypes", "pens",
     "penSets", "activePenSetId", "customPalettes", "builtinPaletteBanks", "drawingLevels", "layers",
@@ -23,7 +23,7 @@ const KNOWN_KEYS: [&str; 54] = [
     "extrudedSolids", "columns", "groups", "parametricWalls", "overrideRules", "viewSnapshots",
     "viewSnapshotFolders", "viewTemplates", "layouts", "masterLayouts", "layoutFolders", "publishSets", "publishLog", "projectNumber", "referenceElevationMasl",
     "geoAnchor", "roomProgram", "roomProgramTolerance", "parcelArea", "sunStudy", "siteRules", "scaleLineWeights",
-    "lineCap", "lineJoin", "trees",
+    "lineCap", "lineJoin", "trees", "uiState",
 ];
 
 /// Ergebnis des Einlesens.
@@ -441,21 +441,40 @@ fn to_base36(mut n: u64) -> String {
 /// Serialisiert ein Projekt für die Datei: aktuelle Formatversion vorne, Einrückung 2 — Zeichen für
 /// Zeichen wie `JSON.stringify({ formatVersion, ...rest }, null, 2)` (Zahlen über [`JsFormatter`]).
 pub fn serialize_project(project: &Map<String, Value>) -> String {
-    to_js_json_pretty(&FileView(project))
+    to_js_json_pretty(&FileView(project, None))
 }
 
-/// Das Projekt mit `formatVersion` vorn, ohne Kopie des Baums.
-struct FileView<'a>(&'a Map<String, Value>);
+/// Wie [`serialize_project`], aber das Feld `key` trägt `value` statt des Wertes im Dokument (UI-Zustand,
+/// der nicht im Dokument liegt, [136]); `None` lässt es weg. Ohne Eintrag im Dokument hinten angehängt.
+pub fn serialize_project_with(project: &Map<String, Value>, key: &str, value: Option<&Value>) -> String {
+    to_js_json_pretty(&FileView(project, Some((key, value))))
+}
+
+/// Das Projekt mit `formatVersion` vorn, ohne Kopie des Baums; optional ein ersetztes Feld.
+struct FileView<'a>(&'a Map<String, Value>, Option<(&'a str, Option<&'a Value>)>);
 
 impl serde::Serialize for FileView<'_> {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        let n = self.0.len() + usize::from(!self.0.contains_key("formatVersion"));
-        let mut m = s.serialize_map(Some(n))?;
+        let mut m = s.serialize_map(None)?;
         m.serialize_entry("formatVersion", &PROJECT_FORMAT_VERSION)?;
+        let over = self.1;
         for (k, v) in self.0 {
-            if k != "formatVersion" {
-                m.serialize_entry(k, v)?;
+            if k == "formatVersion" {
+                continue;
+            }
+            match over {
+                Some((ok, ov)) if ok == k => {
+                    if let Some(ov) = ov {
+                        m.serialize_entry(k, ov)?;
+                    }
+                }
+                _ => m.serialize_entry(k, v)?,
+            }
+        }
+        if let Some((ok, Some(ov))) = over {
+            if !self.0.contains_key(ok) {
+                m.serialize_entry(ok, ov)?;
             }
         }
         m.end()
@@ -578,6 +597,31 @@ mod tests {
         model.sort();
         known.sort();
         assert_eq!(known, model, "KNOWN_KEYS an die Felder von model::Project angleichen");
+    }
+
+    /// [136] `uiState` wird beim Speichern ersetzt, angehängt oder weggelassen; alles andere bleibt gleich.
+    #[test]
+    fn ui_state_beim_speichern() {
+        let mut root = match minimal() { Value::Object(m) => m, _ => unreachable!() };
+        let plain = serialize_project(&root);
+        let ui = json!({"viewTabs": {"tabs": [{"id": "a"}], "activeId": "a"}});
+        let with = serialize_project_with(&root, "uiState", Some(&ui));
+        let back: Value = serde_json::from_str(&with).unwrap();
+        assert_eq!(back["uiState"], ui);
+        assert_eq!(serialize_project_with(&root, "uiState", None), plain);
+        // Vorhandener Wert im Dokument wird ersetzt bzw. weggelassen.
+        root.insert("uiState".into(), json!({"viewTabs": {"tabs": [], "activeId": "x"}}));
+        let back: Value = serde_json::from_str(&serialize_project_with(&root, "uiState", Some(&ui))).unwrap();
+        assert_eq!(back["uiState"], ui);
+        assert!(serde_json::from_str::<Value>(&serialize_project_with(&root, "uiState", None)).unwrap().get("uiState").is_none());
+        // Als Feld des Modells gelesen, ohne Warnung über unbekannte Felder.
+        match parse_project_file(&with, 0.0) {
+            Parsed::Ok { project, warnings, .. } => {
+                assert!(warnings.iter().all(|w| !w.contains("uiState")), "{warnings:?}");
+                assert_eq!(project["uiState"], ui);
+            }
+            Parsed::Err(e) => panic!("{e}"),
+        }
     }
 
     fn minimal() -> Value {

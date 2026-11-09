@@ -2043,6 +2043,43 @@ pub struct RoomProgramRow {
     pub extra: Extra,
 }
 
+/// UI-Zustand der App, mit der Projektdatei gesichert ([136]); gehört nicht ins semantische Modell.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct UiState {
+    /// Offene Zeichnungs-Reiter samt Reihenfolge und aktivem Reiter.
+    #[serde(rename = "viewTabs", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_tabs: Option<UiViewTabs>,
+}
+
+/// Offene Zeichnungs-Reiter (`state/viewTabs.ts`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct UiViewTabs {
+    pub tabs: Vec<UiViewTab>,
+    /// Id des aktiven Reiters.
+    #[serde(rename = "activeId")]
+    pub active_id: String,
+}
+
+/// Ein Reiter: Verweis auf den Ausschnitt (nur Titel), fester Titel und gemerkte Ansicht.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct UiViewTab {
+    pub id: String,
+    #[serde(rename = "snapshotId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub snapshot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
+    /// Darstellungszustand (`ViewSnapshotState`: Ansicht, Zoom, Ebene, Sichtbarkeit …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "Record<string, unknown>")]
+    pub state: Option<serde_json::Value>,
+}
+
 /// Schattenstudie (`analysis/sun.ts`): der Schatten liegt auf dem Geschoss nächst ±0.00.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
@@ -5093,6 +5130,11 @@ pub struct Project {
     #[serde(rename = "lineJoin", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub line_join: Option<LineJoin>,
+    /// UI-Zustand beim Speichern ([136]: offene Zeichnungs-Reiter). Kein Modell: nie über Ops, nie im Verlauf;
+    /// die App schreibt es beim Speichern (`serializeProject`) und liest es beim Öffnen.
+    #[serde(rename = "uiState", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ui_state: Option<UiState>,
     /// Grafik-Kategorie-Baum (geschossübergreifend).
     pub layers: Vec<LayerCategory>,
     pub walls: Vec<Wall>,
@@ -5915,6 +5957,12 @@ impl Project {
             "lineJoin" => {
                 self.line_join = match v {
                     Some(v) => <Option<LineJoin>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "uiState" => {
+                self.ui_state = match v {
+                    Some(v) => <Option<UiState>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

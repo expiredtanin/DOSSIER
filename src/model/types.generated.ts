@@ -2444,6 +2444,11 @@ export type Project = {
   lineCap?: LineCap;
   /** Linienecken aller Striche ([146]); fehlt = Gehrung (`miter`, Grenze 4). */
   lineJoin?: LineJoin;
+  /**
+   * UI-Zustand beim Speichern ([136]: offene Zeichnungs-Reiter). Kein Modell: nie über Ops, nie im Verlauf;
+   * die App schreibt es beim Speichern (`serializeProject`) und liest es beim Öffnen.
+   */
+  uiState?: UiState;
   /** Grafik-Kategorie-Baum (geschossübergreifend). */
   layers: Array<LayerCategory>;
   walls: Array<Wall>;
@@ -3387,6 +3392,30 @@ export type TreeShape = "round" | "oval" | "columnar" | "conical";
  * zu fällen (gelb bzw. durchgekreuzt).
  */
 export type TreeStatus = "existing" | "new" | "remove";
+
+/**
+ * UI-Zustand der App, mit der Projektdatei gesichert ([136]); gehört nicht ins semantische Modell.
+ */
+export type UiState = {
+  /** Offene Zeichnungs-Reiter samt Reihenfolge und aktivem Reiter. */
+  viewTabs?: UiViewTabs;
+};
+
+/** Ein Reiter: Verweis auf den Ausschnitt (nur Titel), fester Titel und gemerkte Ansicht. */
+export type UiViewTab = {
+  id: string;
+  snapshotId?: string;
+  title?: string;
+  /** Darstellungszustand (`ViewSnapshotState`: Ansicht, Zoom, Ebene, Sichtbarkeit …). */
+  state?: Record<string, unknown>;
+};
+
+/** Offene Zeichnungs-Reiter (`state/viewTabs.ts`). */
+export type UiViewTabs = {
+  tabs: Array<UiViewTab>;
+  /** Id des aktiven Reiters. */
+  activeId: string;
+};
 
 export type Vec2 = { x: number; y: number };
 

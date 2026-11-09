@@ -1,8 +1,10 @@
 // Zeichnungs-Reiter ([136]) — offene Ansichten über der Zeichenfläche, ENTKOPPELT von den Ausschnitten.
 //
-// Ein Reiter ist reiner UI-Zustand (nicht im Projekt, kein Undo-Schritt, nicht gespeichert): er merkt sich
+// Ein Reiter ist reiner UI-Zustand (nicht im Modell, kein Undo-Schritt): er merkt sich
 // den Darstellungszustand, den er beim Verlassen hatte (`state`), und optional den Ausschnitt, aus dem er
-// geöffnet wurde (`snapshotId`, nur für den Titel). Ausschnitte (`Project.viewSnapshots`) leben allein im
+// geöffnet wurde (`snapshotId`, nur für den Titel). Beim Speichern geht er als `uiState.viewTabs` in die
+// Projektdatei (nicht ins Modell, kein Op; s. `uiStateForSave`), beim Öffnen wird er wiederhergestellt
+// (`restoreViewTabs`: Reiter auf gelöschte Ausschnitte fallen weg). Ausschnitte (`Project.viewSnapshots`) leben allein im
 // Panel „Ausschnitte"; einen Reiter schliessen löscht nie einen Ausschnitt, eine Änderung der Ansicht im
 // Reiter schreibt nie still in den Ausschnitt zurück (dafür gibt es „Ausschnitt aktualisieren").
 //
@@ -17,6 +19,7 @@
 // Pure Funktionen + ein kleiner externer Store (Muster liveScaleStore.ts).
 
 import { useSyncExternalStore } from "react";
+import type { Project, UiState } from "../model/types";
 import type { ViewSnapshotState } from "./viewSnapshots";
 
 export interface ViewTab {
@@ -141,6 +144,92 @@ export function setViewTabs(next: ViewTabsState): void {
   if (next === current) return;
   current = next;
   for (const l of listeners) l();
+}
+
+// ── Mit dem Projekt sichern / wiederherstellen ([136]) ──────────────────────
+
+/** Liest/setzt den Darstellungszustand der laufenden App (vom Panel-Host je Render eingetragen). */
+export interface ViewStateBridge {
+  live: () => ViewSnapshotState;
+  apply: (st: ViewSnapshotState) => void;
+}
+let bridge: ViewStateBridge | null = null;
+
+export function setViewStateBridge(b: ViewStateBridge | null): void {
+  bridge = b;
+}
+
+/** Reiter für die Datei: der aktive trägt den Live-Zustand `live` (sonst seinen gemerkten). */
+export function serializeViewTabs(s: ViewTabsState, live?: ViewSnapshotState): UiState {
+  const tabs = s.tabs.map((t) => {
+    const state = t.id === s.activeId && live ? live : t.state;
+    return {
+      id: t.id,
+      ...(t.snapshotId ? { snapshotId: t.snapshotId } : {}),
+      ...(t.title ? { title: t.title } : {}),
+      ...(state ? { state: state as unknown as Record<string, unknown> } : {}),
+    };
+  });
+  return { viewTabs: { tabs, activeId: s.activeId } };
+}
+
+/** `uiState` beim Speichern: aktuelle Reiter samt Live-Zustand des aktiven. */
+export function uiStateForSave(): UiState {
+  let live: ViewSnapshotState | undefined;
+  try {
+    live = bridge?.live();
+  } catch {
+    live = undefined;
+  }
+  return serializeViewTabs(current, live);
+}
+
+/**
+ * Gesicherte Reiter aus einem geladenen Projekt. Reiter auf Ausschnitte, die es nicht mehr gibt, fallen
+ * weg (war der aktive darunter, wird der nächste aktiv); fehlt das Feld oder bleibt kein Reiter,
+ * `null` (dann gilt: ein Reiter mit der aktuellen Ansicht).
+ */
+export function restoreViewTabs(project: Pick<Project, "uiState" | "viewSnapshots">): ViewTabsState | null {
+  const saved = project.uiState?.viewTabs;
+  if (!saved || !Array.isArray(saved.tabs)) return null;
+  const snapIds = new Set((project.viewSnapshots ?? []).map((v) => v.id));
+  const seen = new Set<string>();
+  const keep: ViewTab[] = [];
+  let activeIndex = -1; // Position des aktiven Reiters unter den behaltenen (oder des nächsten)
+  for (const raw of saved.tabs) {
+    if (!raw || typeof raw.id !== "string" || !raw.id || seen.has(raw.id)) continue;
+    seen.add(raw.id);
+    const dropped = typeof raw.snapshotId === "string" && !snapIds.has(raw.snapshotId);
+    if (raw.id === saved.activeId && !dropped) activeIndex = keep.length;
+    else if (raw.id === saved.activeId) activeIndex = -2; // nächster behaltener folgt
+    if (dropped) continue;
+    if (activeIndex === -2) activeIndex = keep.length;
+    const state = raw.state && typeof raw.state === "object" ? (raw.state as unknown as ViewSnapshotState) : undefined;
+    keep.push({
+      id: raw.id,
+      ...(typeof raw.snapshotId === "string" ? { snapshotId: raw.snapshotId } : {}),
+      ...(typeof raw.title === "string" && raw.title ? { title: raw.title } : {}),
+      ...(state ? { state } : {}),
+    });
+  }
+  if (keep.length === 0) return null;
+  const idx = activeIndex >= 0 ? activeIndex : activeIndex === -2 ? keep.length - 1 : 0;
+  return { tabs: keep, activeId: keep[Math.min(idx, keep.length - 1)].id };
+}
+
+/**
+ * Projekt geöffnet: gesicherte Reiter wiederherstellen (sonst ein Reiter) und den Zustand des aktiven
+ * Reiters nach dem Neuaufbau der Ansichten anwenden.
+ */
+export function restoreViewTabsFromProject(project: Pick<Project, "uiState" | "viewSnapshots">): void {
+  const restored = restoreViewTabs(project);
+  if (!restored) {
+    resetViewTabs();
+    return;
+  }
+  setViewTabs(restored);
+  const st = activeTab(restored).state;
+  if (st && bridge) setTimeout(() => bridge?.apply(st), 0);
 }
 
 /** Neues/geöffnetes Projekt: ein Reiter mit der aktuellen Ansicht. */
