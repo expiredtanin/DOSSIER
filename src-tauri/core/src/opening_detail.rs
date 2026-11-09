@@ -164,7 +164,7 @@ pub fn frame_of(p: &Project, o: &Opening) -> Option<Frame> {
     Some(Frame {
         sides: Sides::with(d.and_then(|d| d.frame_sides.as_ref()), Sides::all(width)),
         depth: fin(d.and_then(|d| d.frame_depth)).or(fin(depth)).unwrap_or(nan),
-        inset: fin(d.and_then(|d| d.inset_from_face)).or(fin(inset)).unwrap_or(0.0).max(0.0),
+        inset: fin(d.and_then(|d| d.inset_from_face)).or(fin(inset)).or_else(|| default_frame_inset(p, o)).unwrap_or(0.0).max(0.0),
         face,
         sash_width: num(|d| d.sash_width),
         sash_depth: num(|d| d.sash_depth),
@@ -204,15 +204,57 @@ impl Frame {
     }
 }
 
+// ── Vorgabe bei Aussendämmung ([168]) ───────────────────────────────────────
+
+/// Aussendämmung einer Wand: Dämmschicht(en) aussen vor der ersten tragenden Schicht (Funktion aus
+/// `layer_function`: eigenes Feld oder Baustoff). Ergebnis: Lage der Aussenfläche der tragenden
+/// Schicht (ab Wand-Aussenfläche) und die Indizes der Dämmschichten davor; `None` ohne solche.
+pub fn external_insulation(p: &Project, w: &Wall) -> Option<(f64, Vec<usize>)> {
+    let wt = p.wall_type(w)?;
+    let f = |l: &Layer| crate::plan::overrides::layer_function(p, l);
+    let s = wt.layers.iter().position(|l| f(l) == Some(LayerFunction::Structure))?;
+    let ins: Vec<usize> = (0..s).filter(|&i| f(&wt.layers[i]) == Some(LayerFunction::Insulation) && wt.layers[i].thickness > EPS).collect();
+    if ins.is_empty() {
+        return None;
+    }
+    Some((wt.layers[..s].iter().map(|l| l.thickness.max(0.0)).sum(), ins))
+}
+
+fn host_wall<'a>(p: &'a Project, o: &Opening) -> Option<&'a Wall> {
+    p.walls.iter().find(|w| w.id == o.host_wall_id)
+}
+
+/// [168] Vorgabe der Rahmenlage, wo am Typ und an der Öffnung nichts gesetzt ist (weder Einzug noch
+/// Bezugsfläche, auch nicht im Rahmen-Detail): in einer Wand mit Aussendämmung sitzt der Rahmen in der
+/// Leibung der tragenden Schicht, bündig mit deren Aussenfläche — Mauerwerk/Beton stösst stumpf an den
+/// Rahmen (kein Anschlag), nur die Dämmung davor überdeckt ihn (`reveal_rules`). Gibt den Einzug ab
+/// der Aussenfläche (Bezugsfläche aussen) zurück, sonst `None` (bisherige Vorgabe: aussen bündig).
+pub fn default_frame_inset(p: &Project, o: &Opening) -> Option<f64> {
+    let (inset, face, detail) = if o.kind == ElementKind::Door {
+        let t = p.door_type(o)?;
+        (t.inset_from_face, t.inset_face.is_some(), t.frame_detail.as_ref())
+    } else {
+        let t = p.window_type(o)?;
+        (t.inset_from_face, t.inset_face.is_some(), t.frame_detail.as_ref())
+    };
+    let set = |d: Option<&FrameDetail>| d.is_some_and(|d| d.inset_from_face.is_some() || d.inset_face.is_some());
+    if inset.is_some() || face || set(detail) || set(o.frame_detail.as_ref()) {
+        return None;
+    }
+    external_insulation(p, host_wall(p, o)?).map(|(face, _)| face)
+}
+
 // ── Schichteinzug ([106]) ───────────────────────────────────────────────────
 
-/// Schichteinzug-Regeln einer Öffnung: Öffnung > Typ > veraltetes `innerLayerRecess`.
+/// Schichteinzug-Regeln einer Öffnung: Öffnung > Typ > veraltetes `innerLayerRecess` > [168] Vorgabe
+/// bei Aussendämmung (Dämmung vor der tragenden Schicht überdeckt den Rahmen um `DEFAULT_OVERLAP`).
 pub fn reveal_rules(p: &Project, o: &Opening) -> Vec<LayerReveal> {
     if let Some(r) = o.layer_reveals.as_ref() {
         return r.clone();
     }
     if o.kind == ElementKind::Door {
-        return p.door_type(o).and_then(|t| t.layer_reveals.clone()).unwrap_or_default();
+        let Some(t) = p.door_type(o) else { return Vec::new() };
+        return t.layer_reveals.clone().unwrap_or_else(|| default_reveals(p, o));
     }
     let Some(t) = p.window_type(o) else { return Vec::new() };
     if let Some(r) = t.layer_reveals.as_ref() {
@@ -221,7 +263,17 @@ pub fn reveal_rules(p: &Project, o: &Opening) -> Vec<LayerReveal> {
     if t.inner_layer_recess == Some(true) {
         return vec![LayerReveal { layer: -1.0, mode: RevealMode::Zurueck, ..Default::default() }];
     }
-    Vec::new()
+    default_reveals(p, o)
+}
+
+/// [168] Vorgabe-Schichteinzug: nur mit der Vorgabe-Rahmenlage (`default_frame_inset`) — die
+/// Aussendämmung überdämmt den Rahmen; Lage/Anschlag eigens gesetzt ⇒ keine Vorgabe.
+fn default_reveals(p: &Project, o: &Opening) -> Vec<LayerReveal> {
+    if default_frame_inset(p, o).is_none() {
+        return Vec::new();
+    }
+    let Some((_, ins)) = host_wall(p, o).and_then(|w| external_insulation(p, w)) else { return Vec::new() };
+    ins.into_iter().map(|i| LayerReveal { layer: i as f64, mode: RevealMode::Ueberdaemmt, ..Default::default() }).collect()
 }
 
 /// Anschluss EINER Schicht an EINER Seite: Rücksprung (`shift` ≥ 0, die Schicht endet um so viel
@@ -815,6 +867,71 @@ mod tests {
         // Ohne Regeln: kein Block, keine Stücke.
         let p0 = wand_mit(Some(WindowType { id: "t".into(), ..Default::default() }), None);
         assert_eq!(plan_reveal_block(&p0, &p0.walls[0], &[&p0.openings.as_ref().unwrap()[0]]), vec![0.0]);
+    }
+
+    /// [168] Wand mit Aussendämmung aus Standard-Baustoffen (Putz 2 · EPS 18 · Backstein 17.5 · Putz 1.5 cm,
+    /// Schichtfunktion aus dem Baustoff), Fenster 1.0..2.2 eines Typs `t`.
+    fn aussendaemmung_mit(t: WindowType) -> Project {
+        let mut p = Project::default();
+        for c in crate::standards::components() {
+            p.components.push(serde_json::from_value(c).unwrap());
+        }
+        let wt = crate::standards::wall_types().into_iter().find(|t| t["id"] == "std-wt-aw-kompakt").unwrap();
+        p.wall_types.push(serde_json::from_value(wt).unwrap());
+        p.drawing_levels.push(DrawingLevel { id: "eg".into(), kind: DrawingLevelKind::Floor, floor_height: Some(2.6), ..Default::default() });
+        p.walls.push(Wall { id: "w".into(), floor_id: "eg".into(), wall_type_id: "std-wt-aw-kompakt".into(), start: Vec2 { x: 0.0, y: 0.0 }, end: Vec2 { x: 5.0, y: 0.0 }, height: 2.6, ..Default::default() });
+        p.window_types = Some(vec![WindowType { id: "t".into(), ..t }]);
+        p.openings = Some(vec![Opening { id: "o".into(), host_wall_id: "w".into(), kind: ElementKind::Window, type_id: Some("t".into()), position: 1.0, width: 1.2, height: 1.4, sill_height: 0.9, ..Default::default() }]);
+        p
+    }
+
+    /// [168] Vorgabe bei Aussendämmung (nichts gesetzt): Rahmen in der Leibung der tragenden Schicht,
+    /// bündig mit deren Aussenfläche (Einzug 0.20 = Putz + EPS), kein Anschlag, nur die Dämmung
+    /// überdeckt den Rahmen (3 cm). 3D: Rahmen ∩ Mauerwerk = 0 — der Rahmen liegt quer ganz in der
+    /// Backstein-Schicht und längs/vertikal ganz in deren (unverengtem) Loch. Gesetzte Werte bleiben.
+    #[test]
+    fn aussendaemmung_vorgabe_rahmen_in_der_leibung() {
+        let p = aussendaemmung_mit(WindowType { frame_depth: Some(0.07), ..Default::default() });
+        let o = p.openings.as_ref().unwrap()[0].clone();
+        assert_eq!(external_insulation(&p, &p.walls[0]).map(|e| e.1), Some(vec![1]));
+        let f = frame_of(&p, &o).unwrap();
+        assert!((f.inset - 0.2).abs() < 1e-12 && f.face == Face::Aussen && f.rebate == Sides::default(), "{f:?}");
+        let r = reveal_rules(&p, &o);
+        assert_eq!(r.len(), 1);
+        assert_eq!((r[0].layer, r[0].mode), (1.0, RevealMode::Ueberdaemmt));
+        // Zusatzstück nur in der Dämmung (vor dem Rahmen), keins im Backstein.
+        let rv = opening_reveal(&p, &p.walls[0], &o).unwrap();
+        for side in &rv.sides {
+            assert!(side.iter().all(|a| a.layer == 1), "{side:?}");
+        }
+        // 3D: Backstein-Band (17.5 cm) mit Loch = Öffnung; Rahmen darin.
+        let walls = crate::model3d::emit_walls(&p, true).unwrap();
+        let brick = walls.iter().find(|w| (w.thickness - 0.175).abs() < 1e-9 && w.holes.as_ref().is_some_and(|h| !h.is_empty())).expect("Backstein mit Loch");
+        let hole = &brick.holes.as_ref().unwrap()[0];
+        assert!((hole.from - 1.0).abs() < 1e-9 && (hole.to - 2.2).abs() < 1e-9, "Mauerwerk ohne Anschlag: {hole:?}");
+        let (b0, b1) = (brick.start[1] - 0.0875, brick.start[1] + 0.0875);
+        let frames: Vec<_> = crate::model3d::emit_opening_meshes(&p, 1.0).into_iter().filter(|m| m.color == crate::model3d::PART_RGB[1]).collect();
+        assert!(!frames.is_empty());
+        for m in &frames {
+            for c in m.positions.chunks_exact(3) {
+                assert!(c[1] > b0 - 1e-6 && c[1] < b1 + 1e-6, "Rahmen quer ausserhalb der Backstein-Leibung: {} ∉ [{b0}, {b1}]", c[1]);
+                assert!(c[0] > hole.from - 1e-6 && c[0] < hole.to + 1e-6, "Rahmen längs im Mauerwerk: {}", c[0]);
+            }
+        }
+        // Ausdrücklich gesetzt: Lage (auch nur die Bezugsfläche), Schichteinzug — keine Vorgabe.
+        let p1 = aussendaemmung_mit(WindowType { inset_from_face: Some(0.18), ..Default::default() });
+        assert!((frame_of(&p1, &p1.openings.as_ref().unwrap()[0]).unwrap().inset - 0.18).abs() < 1e-12);
+        assert!(reveal_rules(&p1, &p1.openings.as_ref().unwrap()[0]).is_empty());
+        let p2 = aussendaemmung_mit(WindowType { inset_face: Some(WindowTypeInsetFace::Aussen), ..Default::default() });
+        assert_eq!(frame_of(&p2, &p2.openings.as_ref().unwrap()[0]).unwrap().inset, 0.0);
+        let p3 = aussendaemmung_mit(WindowType { layer_reveals: Some(vec![]), ..Default::default() });
+        assert!(reveal_rules(&p3, &p3.openings.as_ref().unwrap()[0]).is_empty());
+        assert!((frame_of(&p3, &p3.openings.as_ref().unwrap()[0]).unwrap().inset - 0.2).abs() < 1e-12);
+        // Wand ohne Aussendämmung (Backstein verputzt): alte Vorgabe, aussen bündig.
+        let mut p4 = aussendaemmung_mit(WindowType::default());
+        p4.wall_types[0].layers.remove(1);
+        assert_eq!(frame_of(&p4, &p4.openings.as_ref().unwrap()[0]).unwrap().inset, 0.0);
+        assert!(reveal_rules(&p4, &p4.openings.as_ref().unwrap()[0]).is_empty());
     }
 
     /// [T2]/[106] Schichteinzug in der Bogenwand: Zusatzstücke im 3D (auf der Sehne über die Öffnung

@@ -117,7 +117,7 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
         sashes: sashes_of_window_type(t),
         frame_width: t.frame_width.unwrap_or(DEFAULT_FRAME_WIDTH),
         frame_depth: t.frame_depth.unwrap_or(f64::NAN),
-        inset_from_face: t.inset_from_face.unwrap_or(f64::NAN),
+        inset_from_face: t.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, o)).unwrap_or(f64::NAN),
         inset_inner: t.inset_face == Some(WindowTypeInsetFace::Innen),
         inset_mid: t.inset_face == Some(WindowTypeInsetFace::Mitte),
         frame_width_end: f64::NAN,

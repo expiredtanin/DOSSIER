@@ -406,13 +406,13 @@ pub(super) fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: 
             }
         }
         let rect_pts = |r: [f64; 4]| vec![[r[0], r[3]], [r[1], r[3]], [r[1], r[2]], [r[0], r[2]]];
-        if nibs.is_empty() {
+        if nibs.is_empty() && pieces.is_empty() {
             if vt - vb > 1e-6 {
                 out.push(mk(rect_pts([u_left, u_right, vb, vt])));
             }
-            out.extend(pieces.into_iter().map(|r| mk(rect_pts(r))));
         } else {
-            // Band, Nase(n) und Zusatzstücke der Schicht als EIN Umriss (keine Fuge an der Nase).
+            // Band, Nase(n) und Zusatzstücke der Schicht als EIN Umriss (keine Fuge an der Nase, [168]
+            // auch ohne Nase keine am Schichteinzug).
             let mut rects = nibs;
             if vt - vb > 1e-6 {
                 rects.push([u_left, u_right, vb, vt]);

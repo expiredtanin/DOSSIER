@@ -765,6 +765,9 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
     let x_lo = if cutouts.iter().any(|c| c.lo() < s - CUTOUT_EPS) { ends_at(g.sc, s, false) } else { s };
     let x_hi = if cutouts.iter().any(|c| c.hi() > e + CUTOUT_EPS) { ends_at(g.ec, e, true) } else { e };
     let mut rects: Vec<(f64, f64, f64, f64, usize)> = Vec::new();
+    // [168] Flächen je Schicht (Band-Stücke, Zusatzstücke, Anschlag-Nasen) — am Ende je Schicht vereinigt.
+    let mut fills: Vec<(usize, Vec<V>)> = Vec::new();
+    let mut side_lines: Vec<(usize, V, V)> = Vec::new();
     for li in 0..n_layers {
         let (mut a, mut b) = (x_lo, x_hi);
         for ad in adj.iter().filter(|ad| ad.layer == li) {
@@ -782,7 +785,7 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
             for (pa, pb) in subtract_intervals(a, b, &holes) {
                 let bsc = if pa <= s + CUTOUT_EPS { start_cut } else { None };
                 let bec = if pb >= e - CUTOUT_EPS { end_cut } else { None };
-                o.polygon(ART_BAND, li, band_join_edges, &clipped_band(axis_pt(pa), axis_pt(pb), lo, hi, bsc, bec));
+                fills.push((li, clipped_band(axis_pt(pa), axis_pt(pb), lo, hi, bsc, bec).to_vec()));
                 rects.push((pa, pb, lo, hi, li));
             }
         }
@@ -796,10 +799,10 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
             line_intersect(pt, u_seg, cut.point, cut.dir).unwrap_or(pt)
         };
         if let Some(c) = side_start {
-            o.line(LINE_JOINT_L, li, side_point(g.p1, lo, c), side_point(g.p1, hi, c));
+            side_lines.push((li, side_point(g.p1, lo, c), side_point(g.p1, hi, c)));
         }
         if let Some(c) = side_end {
-            o.line(LINE_JOINT_L, li, side_point(g.p2, lo, c), side_point(g.p2, hi, c));
+            side_lines.push((li, side_point(g.p2, lo, c), side_point(g.p2, hi, c)));
         }
     }
     for ad in adj {
@@ -809,9 +812,42 @@ fn adjusted_segment(o: &mut Out, g: &Seg, thick: &[f64], off0: f64, layer_cuts: 
             if x1 - x0 <= CUTOUT_EPS || y1 - y0 <= CUTOUT_EPS {
                 continue;
             }
-            o.polygon(ART_BAND, ad.layer, &[], &clipped_band(axis_pt(x0), axis_pt(x1), y0, y1, None, None));
+            fills.push((ad.layer, clipped_band(axis_pt(x0), axis_pt(x1), y0, y1, None, None).to_vec()));
             rects.push((x0, x1, y0, y1, ad.layer));
         }
+    }
+    // [168] Je Schicht EINE Fläche aus Band, Einzug und Nase (i_overlay): Füllung und Schraffur laufen
+    // durch, wie in der Schicht selbst. Nur Einzelringe; mit Loch (kommt hier nicht vor) die Stücke.
+    for li in 0..n_layers {
+        let group: Vec<&Vec<V>> = fills.iter().filter(|f| f.0 == li).map(|f| &f.1).collect();
+        if group.len() > 1 {
+            let polys: Vec<crate::flat::Polygon> = group.iter().map(|r| vec![r.iter().map(|p| [p.x, p.y]).collect()]).collect();
+            let merged = crate::polygon_bool::union(&polys);
+            if !merged.is_empty() && merged.iter().all(|m| m.len() == 1) {
+                // i_overlay rechnet auf einem Ganzzahlraster: Ecken auf die Eingabe zurückrasten (die
+                // Bogenwand biegt nur Kanten mit exakt gleichem Querversatz, `Unroll::is_arc_edge`).
+                let inp: Vec<V> = group.iter().flat_map(|r| r.iter().copied()).collect();
+                let snap1 = |x: f64, pick: fn(&V) -> f64| inp.iter().map(pick).filter(|c| (c - x).abs() < 1e-6).min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs())).unwrap_or(x);
+                let snap = |q: &[f64; 2]| -> V {
+                    let p = v(q[0], q[1]);
+                    match inp.iter().filter(|r| (r.x - p.x).hypot(r.y - p.y) < 1e-6).min_by(|a, b| (a.x - p.x).hypot(a.y - p.y).total_cmp(&(b.x - p.x).hypot(b.y - p.y))) {
+                        Some(r) => *r,
+                        None => v(snap1(p.x, |r| r.x), snap1(p.y, |r| r.y)),
+                    }
+                };
+                for m in &merged {
+                    let pts: Vec<V> = m[0].iter().map(snap).collect();
+                    o.polygon(ART_BAND, li, &[], &pts);
+                }
+                continue;
+            }
+        }
+        for r in group {
+            o.polygon(ART_BAND, li, band_join_edges, r);
+        }
+    }
+    for (li, a, b) in side_lines {
+        o.line(LINE_JOINT_L, li, a, b);
     }
     // Raster der Teilflächen.
     let mut xs: Vec<f64> = vec![x_lo, x_hi];

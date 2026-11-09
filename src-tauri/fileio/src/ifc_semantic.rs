@@ -627,6 +627,57 @@ fn prism(s: &Shape) -> Option<(Vec<V2>, Vec<Vec<V2>>)> {
 
 /// Ausdehnung eines Körpers im Rahmen (Ursprung `o`, Richtung `d`, Normale `left(d)`):
 /// [u0,u1,v0,v1,z0,z1] und Füllgrad (Volumen / Quader).
+/// [168] Mitte der Hüllbox eines Netzes.
+fn mesh_center(m: &Mesh) -> Option<[f64; 3]> {
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for c in m.positions.chunks_exact(3) {
+        for k in 0..3 {
+            lo[k] = lo[k].min(c[k]);
+            hi[k] = hi[k].max(c[k]);
+        }
+    }
+    let c = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
+    c.iter().all(|v| v.is_finite()).then_some(c)
+}
+
+/// [168] Punkt im geschlossenen Netz (Strahl in eine schiefe Richtung, Schnitte zählen).
+fn inside_mesh(m: &Mesh, p: [f64; 3]) -> bool {
+    let dir = [0.577_215_664_9, 0.301_029_995_7, 0.759_134_673_4];
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let at = |i: u32| -> Option<[f64; 3]> {
+        let j = i as usize * 3;
+        Some([*m.positions.get(j)?, *m.positions.get(j + 1)?, *m.positions.get(j + 2)?])
+    };
+    let mut hits = 0usize;
+    for t in m.indices.chunks_exact(3) {
+        let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else { continue };
+        let (e1, e2) = (sub(b, a), sub(c, a));
+        let h = cross(dir, e2);
+        let det = dot(e1, h);
+        if det.abs() < 1e-12 {
+            continue;
+        }
+        let f = 1.0 / det;
+        let s = sub(p, a);
+        let u = f * dot(s, h);
+        if !(0.0..=1.0).contains(&u) {
+            continue;
+        }
+        let q = cross(s, e1);
+        let v = f * dot(dir, q);
+        if v < 0.0 || u + v > 1.0 {
+            continue;
+        }
+        if f * dot(e2, q) > 1e-9 {
+            hits += 1;
+        }
+    }
+    hits % 2 == 1
+}
+
 fn box_in_frame(m: &Mesh, o: V2, d: V2) -> Option<([f64; 6], f64)> {
     let n = left(d);
     let mut b = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
@@ -904,7 +955,25 @@ impl Ctx<'_, '_> {
         let vc0 = (v0 + v1) / 2.0;
         let o = lerp_dir([n[0] * vc0, n[1] * vc0], d, u0);
         let mut loose_in: Vec<usize> = Vec::new();
-        if !((0.7..=1.0 + 1e-3).contains(&ratio) && s.top_area >= 0.35 * rect && s.bottom_area >= 0.6 * rect) {
+        // [168] Wandkörper mit den Löchern schon im Netz (Dossier: Wand mit Schichteinzug-Stücken in der
+        // Öffnung, Öffnungskörper nur in der Rahmenlage): das fehlende Volumen sind die Öffnungskästen über
+        // die ganze Wanddicke (Stücke, wenige Prozent, in der Toleranz).
+        // Erkennung: die Mitte jedes Öffnungskörpers liegt ausserhalb des Wandkörpers (Loch schon im Netz).
+        let void_ids: Vec<u64> = self.rels.voids.get(&id).cloned().unwrap_or_default();
+        let mut void_cut = 0.0;
+        let mut holed = !void_ids.is_empty();
+        for &v in &void_ids {
+            match self.body(v).and_then(|(m, _)| box_in_frame(&m, o, d).map(|x| (x, m))) {
+                Some(((b, _), m)) => {
+                    void_cut += (b[1].min(len) - b[0].max(0.0)).max(0.0) * t * (b[5].min(s.z1) - b[4].max(s.z0)).max(0.0);
+                    let c = mesh_center(&m);
+                    holed &= c.is_some_and(|c| !inside_mesh(&mesh, c));
+                }
+                None => holed = false,
+            }
+        }
+        let holed = holed && s.top_area >= 0.35 * rect && (0.7..=1.0 + 1e-3).contains(&((s.volume + void_cut) / (rect * h)));
+        if !(((0.7..=1.0 + 1e-3).contains(&ratio) && s.top_area >= 0.35 * rect && s.bottom_area >= 0.6 * rect) || holed) {
             // Türen/Fenster ohne Öffnungsbeziehung, deren Löcher schon im Wandkörper sind: das fehlende
             // Volumen muss genau ihren Kästen über die Wanddicke entsprechen.
             let mut cut = 0.0;
@@ -946,7 +1015,9 @@ impl Ctx<'_, '_> {
         for &o in self.rels.voids.get(&id).map(Vec::as_slice).unwrap_or(&[]) {
             let (om, _) = self.body(o).ok_or(R_OPENING)?;
             let (b, fill) = box_in_frame(&om, start, d).ok_or(R_OPENING)?;
-            let through = b[2] <= -t / 2.0 + 1e-3 && b[3] >= t / 2.0 - 1e-3;
+            // [168] Im Körper schon gelocht: der Öffnungskörper darf in der Wanddicke enden (Rahmenlage).
+            let within = holed && b[2] >= -t / 2.0 - 0.01 && b[3] <= t / 2.0 + 0.01 && b[3] - b[2] > 1e-3;
+            let through = (b[2] <= -t / 2.0 + 1e-3 && b[3] >= t / 2.0 - 1e-3) || within;
             let inside = b[0] >= -0.01 && b[1] <= len + 0.01 && b[5] > s.z0 + 0.01 && b[4] < s.z1 - 0.01;
             // Rund (Dossier `shape: "rund"`, Ellipse im Rechteck): Füllgrad π/4, alle Punkte auf der Ellipse.
             let round = (0.76..=0.81).contains(&fill) && on_ellipse(&om, start, d, &b);

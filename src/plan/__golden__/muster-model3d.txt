@@ -16,16 +16,16 @@ slabs[].color [3] x3
 slabs[].cut.lineColor [3]
 slabs[].outline [4] x3
 slabs[].outline[] [2] x12
-walls [47]
-walls[].color [3] x47
-walls[].cut.lineColor [3] x11
-walls[].end [2] x47
+walls [59]
+walls[].color [3] x59
+walls[].cut.lineColor [3] x23
+walls[].end [2] x59
 walls[].endCut [4] x47
 walls[].holes [1] x5
 walls[].holes [2] x5
-walls[].layers [0] x47
-walls[].start [2] x47
+walls[].layers [0] x59
+walls[].start [2] x59
 walls[].startCut [4] x47
 walls[].topDrop [2] x6
 walls[].topPlane [3] x6
-hash 43431f51d1e44e8b
+hash d9b519437e8b0665
