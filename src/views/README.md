@@ -15,7 +15,7 @@ Grundriss auf den Bildschirm kommt: `doc/ARCHITEKTUR.md`, Abschnitt 3.4.
 
 | Datei | Inhalt |
 |---|---|
-| `plan/PlanView.tsx` | die Plan-Ansicht: Kamera, Picken, Marquee, Werkzeug-Eingaben. Legt über die GPU-Fläche eine SVG-Ebene für Auswahl, Griffe, Fang und Text; ohne GPU-Weg zeichnet diese Ebene den ganzen Plan (`?gl=0`) |
+| `plan/PlanView.tsx` | die Plan-Ansicht: Props, Zustand, Aufruf der Hooks aus `planView/` in fester Reihenfolge und die SVG-Ebene. Legt über die GPU-Fläche eine SVG-Ebene für Auswahl, Griffe, Fang und Text; ohne GPU-Weg zeichnet diese Ebene den ganzen Plan (`?gl=0`) |
 | `plan/useWasmPlanRenderer.ts` | Hook für render2d als WASM/WebGPU (Browser, Electron): verbindet Canvas, Plan und Ausschnitt mit der Renderer-Sitzung |
 | `plan/wasmRendererSession.ts` | Besitzer des WASM-Renderers eines Canvas: der eine Ort, der render2d aufruft (Bild, Grösse, Verlust des GPU-Geräts) |
 | `plan/useNativePlanRenderer.ts` | Hook für den nativen Metal-Weg auf macOS (Tauri); dieselbe Schnittstelle, die Pixel entstehen in einer Fläche unter der Webansicht |
@@ -38,5 +38,16 @@ Massstab als Props bekommt.
 | `planView/liveMeet.tsx` | bildschirmkonstanter Massstab für Überlagerungen während einer Pan-/Zoom-Geste |
 | `planView/gripCull.ts` | welche Griffe bei sehr vielen Stützpunkten gezeichnet werden (nur im Ausschnitt) |
 | `planView/PlanGrid.tsx`, `planView/PlanRulers.tsx` | sichtbares Raster und Lineale am Rand |
+| `planView/types.ts`, `planView/constants.ts` | öffentliche Typen (`PlanSelection`, `PlanViewProps`, `GripHandlers` …) und Konstanten (Zoom-Grenzen, Treffer-Toleranzen, Culling) |
+| `planView/usePlanEngine.ts` | Renderer-Anbindung: Pick-Index, Engine-Wahl (nativ, WASM, SVG), aufbereiteter Plan, Culling, Papier-Massstab, GL-Effekte |
+| `planView/usePlanCoords.ts` | Steuerhandle (`useImperativeHandle`), Zieh-Zustände, Umrechnung Bildschirm ↔ Ansicht ↔ Modell, Griff-Treffer |
+| `planView/usePlanPicking.ts` | Treffer-Abfragen (Bauteile, 2D-Elemente, Lage, Bäume), Hover-Teilpunkte, gegriffener Körper |
+| `planView/usePlanPointer.ts` | `onPointerDown`/`onPointerMove`, imperativer Pan, Drosselung der Drags, Standard-Auswahl |
+| `planView/usePlanPickCycle.ts` | Durchschalten übereinanderliegender Objekte (Liste, Zyklus) und `endDrag` (Pointer-Up) |
+| `planView/usePlanZoomInput.ts` | Rad-Zoom, Doppelklick, Kontextmenü |
+| `planView/usePlanHighlights.ts` | Hervorhebung der Auswahl und des Hover-Treffers |
+
+Die Hooks sind aus dem Körper von `PlanView` herausgelöst (`[165]`): jeder bekommt die Werte, die er liest, als ein
+Objekt und gibt zurück, was `PlanView` danach braucht; die Reihenfolge der Aufrufe ist die der Effekte.
 
 Picken, Culling, Marquee und Massstab-Helfer ohne React liegen in `src/plan/planView/`.
