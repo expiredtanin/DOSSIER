@@ -96,7 +96,8 @@ describe("selectionHighlightLines", () => {
     // hinzu. Beide stehen unter der Geschossdecke C1, deren Beton-Schicht (100)
     // den Backstein (50) im z-Band [2.3,2.5] spaltet -> 5 Körper (per-Schicht-
     // Decken-Dominanz, s. Backstein-Boxen [0,2.3] + [2.5,2.6]).
-    const noW9: Project = { ...sampleProject, walls: sampleProject.walls.filter((w) => w.id !== "W9") };
+    // Ohne Schichteinzug (die [168]-Vorgabe bei Aussendämmung setzt sonst Überdämmungs-Stücke als Körper).
+    const noW9: Project = { ...sampleProject, walls: sampleProject.walls.filter((w) => w.id !== "W9"), openings: (sampleProject.openings ?? []).map((o) => ({ ...o, layerReveals: [] })) };
     const w1 = selectionHighlightLines(noW9, ["W1"], [], RGB);
     const w2 = selectionHighlightLines(noW9, ["W2"], [], RGB);
     expect(w1.length).toBe(5 * 12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
@@ -291,7 +292,8 @@ describe("Öffnungen als echte Löcher in EINEM Körper (3D-Pfad, layeredWalls:t
   it("Tür = Loch bis zur Wand-UK (zBottom == baseElevation)", () => {
     // Eine Tür (D1 auf W1) muss im 3D-Pfad als Loch bis zum Boden erscheinen:
     // zBottom des Lochs == Wand-UK (0), NICHT ab einer Brüstung.
-    const p: Project = { ...sampleProject, openings: (sampleProject.openings ?? []).filter((o) => o.id === "D1") };
+    // Ohne Schichteinzug ([168]-Vorgabe): nur die Bänder mit dem Loch.
+    const p: Project = { ...sampleProject, openings: (sampleProject.openings ?? []).filter((o) => o.id === "D1").map((o) => ({ ...o, layerReveals: [] })) };
     const w1 = projectToWalls3d(p, true).filter((w) => w.wallId === "W1");
     // W1 ist Durchgangswand für W9 (T-Stoss) -> innerste Putzschicht span-cutout-
     // gebrochen. Zusätzlich spaltet die Decke C1 (Beton 100) den Backstein (50) im

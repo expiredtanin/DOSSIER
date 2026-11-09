@@ -78,7 +78,7 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
             Some(WindowTypeInsetFace::Mitte) => 2.0,
             _ => 0.0,
         };
-        write_common(w, wt.frame_depth, wt.inset_from_face, side, wt.frame_corner_join, wt.frame_width, wt.transom_height, wt.rebate_depth);
+        write_common(w, wt.frame_depth, wt.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, op)), side, wt.frame_corner_join, wt.frame_width, wt.transom_height, wt.rebate_depth);
         let sturz = wt.shading.as_ref().is_some_and(|s| s.mount == Some(WindowShadingMount::Sturz));
         let rails = sturz && wt.shading.as_ref().is_some_and(|s| s.kind != WindowShadingKind::Markise);
         let shading = wt.shading.as_ref().filter(|s| s.create).map(|s| &s.r#box);
@@ -137,7 +137,7 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
         Some(DoorTypeInsetFace::Mitte) => 2.0,
         _ => 0.0,
     };
-    write_common(w, dt.frame_depth, dt.inset_from_face, side, dt.frame_corner_join, dt.frame_width, dt.transom_height, dt.rebate_depth);
+    write_common(w, dt.frame_depth, dt.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, op)), side, dt.frame_corner_join, dt.frame_width, dt.transom_height, dt.rebate_depth);
     w.nums(&[
         flag(dt.threshold == Some(true)),
         dt.leaf_count,
@@ -432,9 +432,9 @@ pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef,
     let mut out: Vec<RMesh> = shaped_wall_fill(p, wall, op, wr.total, w, h).into_iter().map(|(q, n0, n1, rgb)| box_mesh(os::quad_box(&q, n0, n1, &map), rgb)).collect();
     let door = op.kind == ElementKind::Door;
     let ty = if door {
-        p.door_type(op).map(|t| (t.frame_depth, t.inset_from_face, t.inset_face == Some(DoorTypeInsetFace::Innen), t.inset_face == Some(DoorTypeInsetFace::Mitte), t.frame_width))
+        p.door_type(op).map(|t| (t.frame_depth, t.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, op)), t.inset_face == Some(DoorTypeInsetFace::Innen), t.inset_face == Some(DoorTypeInsetFace::Mitte), t.frame_width))
     } else {
-        p.window_type(op).map(|t| (t.frame_depth, t.inset_from_face, t.inset_face == Some(WindowTypeInsetFace::Innen), t.inset_face == Some(WindowTypeInsetFace::Mitte), t.frame_width))
+        p.window_type(op).map(|t| (t.frame_depth, t.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, op)), t.inset_face == Some(WindowTypeInsetFace::Innen), t.inset_face == Some(WindowTypeInsetFace::Mitte), t.frame_width))
     };
     let glass = PART_RGB[0];
     let Some((fd, inset_face, inner, mid, fw)) = ty else {

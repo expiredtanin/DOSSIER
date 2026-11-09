@@ -242,6 +242,10 @@ fn sample() -> Project {
 #[test]
 fn formoeffnung_fuellkoerper_rahmen_glas() {
     let mut p = sample();
+    // Ohne die [168]-Vorgabe (Dämmung überdeckt den Rahmen): Fenster ausdrücklich aussen bündig.
+    for t in p.window_types.iter_mut().flatten() {
+        t.inset_face = Some(WindowTypeInsetFace::Aussen);
+    }
     let plain = emit_opening_meshes(&p, 2.0).len();
     for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
         o.shape = Some(OpeningShape::Rundbogen);

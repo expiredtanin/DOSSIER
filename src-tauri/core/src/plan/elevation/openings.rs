@@ -119,8 +119,8 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening
                 wt.map_or(0.0, |t| sash_kind(t.kind)),
                 // Anschlag nur mit Leibung (Einzug > 0 oder mittig), sonst gibt es keine Wandnase.
                 match (dt, wt) {
-                    (Some(t), _) if t.inset_face == Some(DoorTypeInsetFace::Mitte) || t.inset_from_face.unwrap_or(0.0) > 1e-4 => t.rebate_depth.unwrap_or(0.0),
-                    (_, Some(t)) if t.inset_face == Some(WindowTypeInsetFace::Mitte) || t.inset_from_face.unwrap_or(0.0) > 1e-4 => t.rebate_depth.unwrap_or(0.0),
+                    (Some(t), _) if t.inset_face == Some(DoorTypeInsetFace::Mitte) || t.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, op)).unwrap_or(0.0) > 1e-4 => t.rebate_depth.unwrap_or(0.0),
+                    (_, Some(t)) if t.inset_face == Some(WindowTypeInsetFace::Mitte) || t.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, op)).unwrap_or(0.0) > 1e-4 => t.rebate_depth.unwrap_or(0.0),
                     _ => 0.0,
                 },
                 if (door && dt.and_then(|t| t.inset_face) == Some(DoorTypeInsetFace::Innen)) || (!door && wt.and_then(|t| t.inset_face) == Some(WindowTypeInsetFace::Innen)) { -1.0 } else { 1.0 },

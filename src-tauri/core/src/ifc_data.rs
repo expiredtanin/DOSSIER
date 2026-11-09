@@ -372,6 +372,63 @@ fn bands_match_openings(wall: &Wall, bands: &[&RWall], cutouts: &[Cutout]) -> bo
     true
 }
 
+/// [168] Rahmenlage quer zur Wand (Versatz entlang der linken Normalen ab `wall.start`, wie
+/// `cross_extent`), wenn der Schichteinzug der Öffnung Stücke in die Öffnung setzt; sonst `None`.
+fn reveal_frame_slice(p: &Project, wall: &Wall, o: &Opening) -> Option<(f64, f64)> {
+    let r = crate::opening_detail::opening_reveal(p, wall, o)?;
+    if r.sides.iter().flatten().all(|a| a.pieces.is_empty()) {
+        return None;
+    }
+    let total: f64 = r.thick.iter().sum();
+    let (lo, hi) = crate::opening_detail::frame_of(p, o)?.range(total);
+    let face = crate::joins::reference_offset(model3d::wall_reference(wall), total) - total / 2.0;
+    (hi - lo > 1e-4).then_some((face + lo, face + hi))
+}
+
+/// [168] Bänder einer Wand als EIN Körper (Manifold, exakt): je Band der volle Quader (Enden an den
+/// Schnittlinien wie das 3D) minus die Löcher, dann alle vereinigt — IFC-Koordinaten (x, y, z − `base`).
+/// `None` bei Bändern mit schräger Oberkante oder wenn Manifold ablehnt (dann bleibt das Schalen-Netz).
+fn union_bands(bands: &[&RWall], base: f64) -> Option<(Vec<f64>, Vec<u32>)> {
+    use crate::solid_bool::{Mesh, Solid};
+    let solid = |w: &CutWall, shift: Option<&RWall>| -> Option<Solid> {
+        let mut cut = wall_cut_mesh_checked(w);
+        if let Some(b) = shift {
+            crate::mesh_data::shift_cut_ends(&mut cut, b);
+        }
+        let positions: Vec<f64> = cut.chunks_exact(3).flat_map(|c| [c[0], c[2], c[1] - base]).collect();
+        let n = (positions.len() / 3) as u32;
+        Solid::new(&Mesh { positions, indices: (0..n).collect() }).ok()
+    };
+    let mut acc: Option<Solid> = None;
+    for b in bands {
+        if b.top_plane.is_some() || b.top_drop.is_some_and(|d| d[0].abs() > 1e-9 || d[1].abs() > 1e-9) {
+            return None;
+        }
+        let mut m = solid(&CutWall { start: b.start, end: b.end, thickness: b.thickness, base_elevation: b.base_elevation, height: b.height, holes: vec![] }, Some(b))?;
+        let (dx, dy) = (b.end[0] - b.start[0], b.end[1] - b.start[1]);
+        let len = hypot2(dx, dy);
+        if !(len > 1e-9) {
+            return None;
+        }
+        let (ux, uy) = (dx / len, dy / len);
+        for h in b.holes.as_deref().unwrap_or(&[]) {
+            let at = |d: f64| [b.start[0] + ux * d, b.start[1] + uy * d];
+            // Bündig mit Band-UK/-OK (Tür): über die Fläche hinaus, keine deckungsgleichen Flächen.
+            let (z0, z1) = (b.base_elevation, b.base_elevation + b.height);
+            let lo = if h.z_bottom <= z0 + 1e-6 { z0 - 0.1 } else { h.z_bottom };
+            let hi = if h.z_top >= z1 - 1e-6 { z1 + 0.1 } else { h.z_top };
+            let hole = solid(&CutWall { start: at(h.from), end: at(h.to), thickness: b.thickness + 0.1, base_elevation: lo, height: hi - lo, holes: vec![] }, None)?;
+            m = m.difference(&hole).ok()?;
+        }
+        acc = Some(match acc {
+            None => m,
+            Some(a) => a.union(&m).ok()?,
+        });
+    }
+    let m = acc?.to_mesh();
+    (!m.indices.is_empty()).then_some((m.positions, m.indices))
+}
+
 /// Ausdehnung aller Bänder quer zur Wandachse (entlang der linken Normalen ab `wall.start`).
 fn cross_extent(wall: &Wall, bands: &[&RWall]) -> (f64, f64) {
     let n = left_normal(normalize(sub(wall.end, wall.start)));
@@ -490,7 +547,7 @@ fn fill_params(p: &Project, o: &Opening) -> FillParams {
     let wt = if is_door { None } else { p.window_type(o) };
     FillParams {
         frame_depth: dt.map_or(wt.and_then(|t| t.frame_depth), |t| t.frame_depth),
-        inset: dt.map_or(wt.and_then(|t| t.inset_from_face), |t| t.inset_from_face),
+        inset: dt.map_or(wt.and_then(|t| t.inset_from_face), |t| t.inset_from_face).or_else(|| crate::opening_detail::default_frame_inset(p, o)),
         inset_outside: match (dt, wt) {
             (Some(t), _) => matches!(t.inset_face, None | Some(DoorTypeInsetFace::Aussen)),
             (None, Some(t)) => matches!(t.inset_face, None | Some(WindowTypeInsetFace::Aussen)),
@@ -980,6 +1037,15 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             }
         }
         let arc = crate::wall_arc::WallArc::of_wall(wall);
+        // [168] Schichteinzug-Stücke (Überdämmung, Leibungsputz) berühren die Bänder nur teilweise: dann die
+        // Bänder zu EINEM Körper vereinigen (Manifold, exakt) — mehrere sich teilweise berührende Schalen
+        // verrechnet ein IFC-Leser beim Abzug der Öffnungskörper (ifcopenshell: Volumen falsch).
+        let pieces = arc.is_none() && openings.iter().any(|o| o.host_wall_id == wall.id && reveal_frame_slice(&p, wall, o).is_some());
+        if pieces {
+            if let Some((up, ui)) = union_bands(bands, base) {
+                (positions, indices) = (up, ui);
+            }
+        }
         // Formöffnungen ([G3]): Füllkörper zwischen Rechteck-Loch und Umriss gehören zur Wand (nicht bei
         // Bogenwänden: dort bleibt das Rechteck-Loch).
         for &(k, c) in cutouts_by_wall.get(&wall.id).map_or(&[][..], |v| v.as_slice()).iter().filter(|_| arc.is_none()) {
@@ -1119,7 +1185,13 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             let oid = f.str(&o.id);
             let lab = f.str(&label);
             f.nums(&[REC_OPENING, a, structure, oid, if is_door { 1.0 } else { 0.0 }, lab]);
-            let (vlo, vhi) = (host.0 - sag - OPENING_OVERSHOOT, host.1 + sag + OPENING_OVERSHOOT);
+            // [168] Schichteinzug mit Stücken in der Öffnung (Überdämmung, Leibungsputz): das Wandnetz trägt
+            // die Löcher schon; der Öffnungskörper bleibt in der Rahmenlage (frei von Stücken), sonst schnitte
+            // er die Stücke wieder aus der Wand.
+            let (vlo, vhi) = match reveal_frame_slice(&p, wall, o).filter(|_| chord.is_none()) {
+                Some(s) => s,
+                None => (host.0 - sag - OPENING_OVERSHOOT, host.1 + sag + OPENING_OVERSHOOT),
+            };
             match &radial {
                 Some(q) => w_pts(&mut f, q),
                 None => w_pts(&mut f, &axis_rect(wall, c.from + shrink, c.to - shrink, vlo, vhi)),
@@ -1837,5 +1909,32 @@ mod tests {
         assert_eq!(layer_classification(&p, "777"), Some(("777".to_string(), "777".to_string())));
         assert_eq!(layer_classification(&p, ""), None);
         assert_eq!(layer_classification(&p, " "), None);
+    }
+
+    /// [168] Wand mit Schichteinzug-Stücken (Beispiel W1: Vorgabe bei Aussendämmung, Dämmung überdeckt
+    /// den Rahmen): die Bänder als EIN geschlossener Körper mit dem Volumen der 3D-Bänder; der
+    /// Öffnungskörper bleibt in der Rahmenlage (schneidet die Stücke nicht weg).
+    #[test]
+    fn schichteinzug_wand_als_ein_koerper() {
+        let p = sample();
+        let all = model3d::emit_walls(&p, true).unwrap();
+        let bands: Vec<&RWall> = all.iter().filter(|b| b.wall_id == "W1").collect();
+        let shells: f64 = bands
+            .iter()
+            .map(|b| {
+                let cut = wall_cut_mesh_checked(&CutWall { start: b.start, end: b.end, thickness: b.thickness, base_elevation: b.base_elevation, height: b.height, holes: b.holes.as_deref().unwrap_or(&[]).iter().map(|h| [h.from, h.to, h.z_bottom, h.z_top]).collect() });
+                let n = (cut.len() / 3) as u32;
+                crate::export_flat::mesh_volume(&cut, &(0..n).collect::<Vec<_>>()).abs()
+            })
+            .sum();
+        assert!(bands.iter().any(|b| b.holes.as_ref().is_none_or(|h| h.is_empty()) && b.thickness < 0.2), "Stücke fehlen");
+        let (pos, idx) = union_bands(&bands, 0.0).expect("ein Körper");
+        assert!(is_watertight(&pos, &idx, 1e-6));
+        let v = crate::export_flat::mesh_volume(&pos, &idx);
+        assert!((v - shells).abs() < 1e-6, "{v} vs {shells}");
+        let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap();
+        let o = p.openings.as_ref().unwrap().iter().find(|o| o.host_wall_id == "W1" && o.kind == ElementKind::Window).unwrap();
+        let (lo, hi) = reveal_frame_slice(&p, w1, o).expect("Stücke ⇒ Rahmenlage");
+        assert!(hi > lo);
     }
 }

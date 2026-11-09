@@ -254,7 +254,7 @@ describe('GpuChunkCache: Kern-Abschnitte (Plan-Puffer v2, Inhalts-Hash)', () => 
   });
 
   it('eine verschobene Wand kompiliert nur wenige Chunks neu', () => {
-    const p = bigSampleProject(8);
+    const p = bigSampleProject(10);
     const { gl } = makeGl();
     const cache = new GpuChunkCache(gl);
     // 1:50: Wände mit Schichten (ab 1:100 eine schwarze Fläche je Wand, [140]) → genug Chunks.

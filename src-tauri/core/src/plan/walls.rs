@@ -232,9 +232,10 @@ pub fn thin_layer_targets(thick: &[f64], detail: Detail, scale: f64) -> Vec<usiz
         .collect()
 }
 
-/// Wand-Poché (`addWallPoche`).
+/// Wand-Poché (`addWallPoche`). `true`: in Schichten gezeichnet — Schichteinzug und Anschlag-Nasen
+/// (`reveals`) sind darin enthalten ([168]); sonst (Ansicht, schwarze Sammelfläche) nicht.
 #[allow(clippy::too_many_arguments)]
-fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)], cuts: &WallCuts, greyed: bool, wall_lw: f64, category: Option<&LayerCategory>, view_only: bool, reveals: &[f64], bend: Option<&Unroll>) -> Result<(), String> {
+fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)], cuts: &WallCuts, greyed: bool, wall_lw: f64, category: Option<&LayerCategory>, view_only: bool, reveals: &[f64], bend: Option<&Unroll>) -> Result<bool, String> {
     let p = c.p;
     let w = e.w;
     let detail = c.a.detail;
@@ -255,8 +256,9 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, solid && !layered_solid, view_only, reveals));
     let target = thin_layer_targets(&thick, detail, c.a.scale);
     if f.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
+    let layered = !view_only && !(solid && !layered_solid);
     let ov_of = |li: usize| lov.get(target.get(li).copied().unwrap_or(li));
     // Stil einer Schicht mit Override bzw. schwarz (Schicht ohne Override in `layered_solid`).
     let apply_ov = |li: usize, (hatch, fill): (HatchRender, String)| -> (HatchRender, String) {
@@ -372,7 +374,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             }
         }
     }
-    Ok(())
+    Ok(layered)
 }
 
 /// [141] Gerichtete Schichtmuster (Dämmschlange, Zickzack, Welle, Holzkreuz) an den Wandenden
@@ -538,7 +540,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             1.0,
             t.frame_width.unwrap_or(0.06),
             b01(t.frame_kind == Some(DoorTypeFrameKind::Blockrahmen)),
-            t.inset_from_face.unwrap_or(0.0),
+            t.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, o)).unwrap_or(0.0),
             match t.inset_face {
                 Some(DoorTypeInsetFace::Innen) => 1.0,
                 Some(DoorTypeInsetFace::Mitte) => 2.0,
@@ -564,7 +566,8 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         None => {
             b.push(wt.map_or(0.0, |t| t.frame_width.unwrap_or(0.06)));
             b.push(wt.and_then(|t| t.frame_depth).unwrap_or(f64::NAN));
-            b.push(wt.and_then(|t| t.inset_from_face).unwrap_or(f64::NAN));
+            // [168] Ohne Lage: Vorgabe bei Aussendämmung (Rahmen in der Leibung der tragenden Schicht).
+            b.push(wt.and_then(|t| t.inset_from_face).or_else(|| crate::opening_detail::default_frame_inset(p, o)).unwrap_or(f64::NAN));
             b.push(match wt.and_then(|t| t.inset_face) {
                 Some(WindowTypeInsetFace::Innen) => 1.0,
                 Some(WindowTypeInsetFace::Mitte) => 2.0,
@@ -888,7 +891,7 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         let cut = cut_by_id.get(w.id.as_str()).copied().unwrap_or(&empty);
         let (zb, zt) = p.wall_vertical_extent(w);
         let view_only = zt < cut_z || zb > cut_z;
-        let reveals = crate::opening_detail::plan_reveal_block(p, w, &openings);
+        let mut reveals = crate::opening_detail::plan_reveal_block(p, w, &openings);
         let (unroll, cut_u) = match &arc_wall {
             Some((arc, _)) => {
                 let total = p.wall_thickness(w, 0.2);
@@ -899,14 +902,42 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             }
             None => (None, WallCuts::default()),
         };
+        // [168] Öffnungs-Symbole vorab (auf der Ersatzwand `wv`, noch nicht gebogen): ihre Anschlag-Nasen
+        // (Schichtstücke an den Leibungen) zeichnet die Poché als Teil ihrer Schicht mit — eine Fläche,
+        // durchlaufende Schraffur, keine Linie zwischen Schicht und Nase.
+        let mut syms: Vec<(Vec<Primitive>, Vec<Primitive>, Option<&'static [f64]>)> = Vec::new();
+        for (o, oz) in &all_openings {
+            let (o, oz) = (o.as_ref(), *oz);
+            if !c.vis(&o.category_code, &o.id) || oz == Zone::Hidden {
+                continue;
+            }
+            let ov = c.overrides(Some("opening"), &o.category_code, Some(&opening_label(o)));
+            let olw = ov.lineweight.unwrap_or_else(|| c.cat(&o.category_code).map_or(LAYER_LINE_MM, |k| k.lw));
+            let color = ov.color.as_deref().or(o.color.as_deref());
+            let detail = match o.detail_level {
+                Some(DetailLevel::Grob) => Detail::Grob,
+                Some(DetailLevel::Mittel) => Detail::Mittel,
+                Some(DetailLevel::Fein) => Detail::Fein,
+                _ => c.a.detail,
+            };
+            let wall_line = (e.color.as_deref().unwrap_or(POCHE_STROKE), lw * c.a.detail.outline_factor());
+            let mut tmp = Vec::new();
+            opening_symbol(c, &mut tmp, wv, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?;
+            // Nur Öffnungen mit Wandlücke (sonst schliesst die Wand, die Nase hätte keine Leibung).
+            let in_gap = openings.iter().any(|g| std::ptr::eq(*g, o));
+            let noses = if in_gap && !view_only && !cut.covered { take_noses(&mut tmp) } else { Vec::new() };
+            syms.push((noses, tmp, closed_dash(oz)));
+        }
+        append_nose_reveals(&mut reveals, p, wv, &gaps, syms.iter().flat_map(|s| s.0.iter()));
         // [95] Taschen der Taschen-Schiebetüren (Hohlraum in der Wand, aus der Schraffur ausgespart).
         let pockets = if view_only { WallPockets { o: wv.start, u: v2(1.0, 0.0), n: v2(0.0, 1.0), cuts: vec![] } } else { wall_pockets(p, wv, &openings) };
+        let mut layered = false;
         match &unroll {
             Some(u) => {
                 let mut tmp = Vec::new();
                 // [141] Ganz in einer Bogenwand gleichen Kreises und Typs: deren Körper zeigt sie mit.
                 if !cut.covered {
-                    wall_poche(c, &mut tmp, &ev, &gaps, &cut_u, greyed, lw, category, view_only, &reveals, Some(u))?;
+                    layered = wall_poche(c, &mut tmp, &ev, &gaps, &cut_u, greyed, lw, category, view_only, &reveals, Some(u))?;
                 }
                 cut_pockets(&mut tmp, 0, &pockets);
                 if reference_lines {
@@ -918,7 +949,7 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 let at = out.len();
                 // [141] Ganz in einer kollinearen Wand gleichen Typs: deren Körper zeigt sie mit.
                 if !cut.covered {
-                    wall_poche(c, out, e, &gaps, cut, greyed, lw, category, view_only, &reveals, None)?;
+                    layered = wall_poche(c, out, e, &gaps, cut, greyed, lw, category, view_only, &reveals, None)?;
                 }
                 cut_pockets(out, at, &pockets);
                 if reference_lines {
@@ -926,32 +957,19 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 }
             }
         }
-        for (o, oz) in &all_openings {
-            let (o, oz) = (o.as_ref(), *oz);
-            if !c.vis(&o.category_code, &o.id) || oz == Zone::Hidden {
-                continue;
-            }
+        for (noses, prims, dash) in syms {
             let sym_start = out.len();
-            let ov = c.overrides(Some("opening"), &o.category_code, Some(&opening_label(o)));
-            let olw = ov.lineweight.unwrap_or_else(|| c.cat(&o.category_code).map_or(LAYER_LINE_MM, |k| k.lw));
-            let color = ov.color.as_deref().or(o.color.as_deref());
-            let detail = match o.detail_level {
-                Some(DetailLevel::Grob) => Detail::Grob,
-                Some(DetailLevel::Mittel) => Detail::Mittel,
-                Some(DetailLevel::Fein) => Detail::Fein,
-                _ => c.a.detail,
-            };
-            let wall_line = (e.color.as_deref().unwrap_or(POCHE_STROKE), lw * c.a.detail.outline_factor());
+            // Ohne Schicht-Poché (schwarze Sammelfläche) bleiben die Nasen eigene Stücke wie bisher.
+            let mut all = if layered { Vec::new() } else { noses };
+            all.extend(prims);
             match &unroll {
                 Some(u) => {
-                    let mut tmp = Vec::new();
-                    opening_symbol(c, &mut tmp, wv, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?;
-                    polar_layer_pieces(u, &mut tmp);
-                    bend_prims(u, tmp, out);
+                    polar_layer_pieces(u, &mut all);
+                    bend_prims(u, all, out);
                 }
-                None => opening_symbol(c, out, w, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?,
+                None => out.extend(all),
             }
-            if let Some(d) = closed_dash(oz) {
+            if let Some(d) = dash {
                 super::view_range::restyle(out, sym_start, d);
             }
         }
@@ -1268,6 +1286,70 @@ fn polar_layer_pieces(u: &Unroll, prims: &mut [Primitive]) {
                     hatch.angle -= 180.0;
                 }
                 hatch.polar = Some([u.arc.center.x, u.arc.center.y, u.arc.r]);
+            }
+        }
+    }
+}
+
+/// [168] Anschlag-Nasen (Schichtstücke an einer Öffnung: Fläche mit Wand- UND Öffnungs-id) aus den
+/// Symbol-Primitiven nehmen.
+fn take_noses(prims: &mut Vec<Primitive>) -> Vec<Primitive> {
+    let (noses, rest): (Vec<Primitive>, Vec<Primitive>) = std::mem::take(prims).into_iter().partition(|q| matches!(q, Primitive::Polygon { wall_id: Some(_), opening_id: Some(_), .. }));
+    *prims = rest;
+    noses
+}
+
+/// [168] Anschlag-Nasen als Zusatzstücke an den Schichteinzug-Block der Poché (`plan_reveal_block`)
+/// hängen: je Nase und geschnittener Schicht ein Stück `[x0, x1, o0, o1]` an der nächsten Leibung
+/// (x ab Rohbaukante in die Öffnung, o quer ab Aussenfläche). So entstehen Umriss und Fugen aus dem
+/// Raster der Teilflächen (`wall_poche::adjusted_segment`): Nase und Schicht sind eine Fläche.
+fn append_nose_reveals<'a>(reveals: &mut Vec<f64>, p: &Project, w: &Wall, gaps: &[(f64, f64)], noses: impl Iterator<Item = &'a Primitive>) {
+    let Some(wt) = p.wall_type(w) else { return };
+    let total = thickness(&wt.layers);
+    let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
+    let len = dx.hypot(dy);
+    if !(total > 1e-9) || !(len > 1e-9) {
+        return;
+    }
+    let u = v2(dx / len, dy / len);
+    let n = v2(-u.y, u.x);
+    let face = joins::reference_offset(crate::model3d::wall_reference(w), total) - total / 2.0;
+    let mut bounds = Vec::with_capacity(wt.layers.len());
+    let mut acc = 0.0;
+    for l in &wt.layers {
+        bounds.push((acc, acc + l.thickness));
+        acc += l.thickness;
+    }
+    if reveals.is_empty() {
+        reveals.push(0.0);
+    }
+    for q in noses {
+        let Primitive::Polygon { pts, .. } = q else { continue };
+        let (mut x0, mut x1, mut o0, mut o1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        for pt in pts {
+            let (rx, ry) = (pt.x - w.start.x, pt.y - w.start.y);
+            let (x, o) = (rx * u.x + ry * u.y, rx * n.x + ry * n.y - face);
+            (x0, x1, o0, o1) = (x0.min(x), x1.max(x), o0.min(o), o1.max(o));
+        }
+        if !(x1 - x0 > 1e-6 && o1 - o0 > 1e-6) {
+            continue;
+        }
+        let xm = (x0 + x1) / 2.0;
+        // Nächste Leibung: links (Öffnung beginnt) oder rechts (Öffnung endet).
+        let Some((jamb, dir)) = gaps
+            .iter()
+            .filter(|g| xm > g.0 - 1e-6 && xm < g.1 + 1e-6)
+            .map(|g| if xm - g.0 <= g.1 - xm { (g.0, 1.0) } else { (g.1, -1.0) })
+            .next()
+        else {
+            continue;
+        };
+        let (a, b) = if dir > 0.0 { (x0 - jamb, x1 - jamb) } else { (jamb - x1, jamb - x0) };
+        for (li, &(l0, l1)) in bounds.iter().enumerate() {
+            let (s0, s1) = (o0.max(l0), o1.min(l1));
+            if s1 - s0 > 1e-6 {
+                reveals.extend([jamb, dir, li as f64, 0.0, 1.0, a.max(0.0), b, s0, s1]);
+                reveals[0] += 1.0;
             }
         }
     }
@@ -1600,6 +1682,99 @@ pub(crate) mod tests {
         // Rundbogen, Schnitt im Bogen (Kämpfer auf 0.2 + 0.6, Schnitt 0.2 darüber).
         let g = gap(&shaped_window(OpeningShape::Rundbogen, 0.2, 1.2));
         assert!((g - 2.0 * (0.36f64 - 0.04).sqrt() * 0.16).abs() < 0.003, "{g}");
+    }
+
+    /// [168] Aussenwand Putz 2 · EPS 18 · Backstein 17.5 · Putz 1.5 cm entlang +x, Fenster 1.0..2.2 mit
+    /// Rahmen 18 cm hinter der Aussenfläche, Anschlag 5 cm (Nase aus Putz + EPS vor dem Rahmen) und
+    /// Schichteinzug „EPS überdämmt 3 cm".
+    fn reveal_window_project() -> Project {
+        let mut p = Project::default();
+        let std_h = crate::standards::hatches().into_iter().find(|h| h["id"] == "std-h-daemmstoffe-sia").expect("Standard-Schraffur");
+        p.hatches.push(serde_json::from_value(std_h).unwrap());
+        for (id, h) in [("putz", ""), ("eps", "std-h-daemmstoffe-sia"), ("bs", "")] {
+            p.components.push(Component { id: id.into(), hatch_id: h.into(), ..Default::default() });
+        }
+        let l = |c: &str, t: f64| Layer { component_id: c.into(), thickness: t, ..Default::default() };
+        p.wall_types.push(WallType { id: "aw".into(), layers: vec![l("putz", 0.02), l("eps", 0.18), l("bs", 0.175), l("putz", 0.015)], ..Default::default() });
+        p.drawing_levels.push(DrawingLevel { id: "eg".into(), kind: DrawingLevelKind::Floor, floor_height: Some(2.6), ..Default::default() });
+        p.walls.push(Wall { id: "w".into(), floor_id: "eg".into(), wall_type_id: "aw".into(), category_code: "20".into(), start: Vec2 { x: 0.0, y: 0.0 }, end: Vec2 { x: 4.0, y: 0.0 }, height: 2.6, ..Default::default() });
+        p.window_types = Some(vec![serde_json::from_value(serde_json::json!({
+            "id": "f", "name": "F", "kind": "drehkipp", "wingCount": 1, "frameWidth": 0.08, "frameDepth": 0.08,
+            "insetFromFace": 0.18, "insetFace": "aussen", "rebateDepth": 0.05,
+            "layerReveals": [{ "layer": 1, "mode": "ueberdaemmt", "amount": 0.03 }],
+        })).unwrap()]);
+        p.openings = Some(vec![Opening { id: "o".into(), host_wall_id: "w".into(), kind: ElementKind::Window, type_id: Some("f".into()), category_code: "20".into(), position: 1.0, width: 1.2, height: 1.4, sill_height: 0.9, ..Default::default() }]);
+        p
+    }
+
+    /// [168] Schichteinzug und Anschlag-Nase gehören zur Schicht: im Grundriss (1:20, Schichten) liegt die
+    /// EPS-Nase vor dem Rahmen in DERSELBEN Fläche wie das EPS-Band (gleiche Schraffur, durchlaufend),
+    /// keine Linie (Umriss/Fuge) auf der Grenze Schicht ↔ Einzug (Rohbaukante quer durch das EPS), kein
+    /// eigens umrandetes Stück an der Öffnung; die Aussenkontur (Stirn der Nase) bleibt Umriss.
+    #[test]
+    fn schichteinzug_ein_stueck_mit_der_schicht() {
+        for bulge in [None, Some(0.05)] {
+            let mut p = reveal_window_project();
+            p.walls[0].bulge = bulge;
+            let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": 20.0 }).to_string();
+            let prims = super::super::domains::plan_domains(&p, &super::super::domains::PlanArgs::parse(1.0, &t).unwrap()).unwrap().walls;
+            assert!(
+                !prims.iter().any(|q| matches!(q, Primitive::Polygon { wall_id: Some(_), opening_id: Some(_), .. })),
+                "{bulge:?}: Nase als eigenes Element"
+            );
+            if bulge.is_some() {
+                continue;
+            }
+            // Querlage: Aussenfläche y = −0.195, EPS 0.02..0.20 ⇒ y −0.175..0.005; Rohbaukante x = 1.0 (bzw. 0.4..1.6 je nach Lage).
+            let (js, je) = crate::opening_geom::opening_interval(
+                &crate::opening_geom::WallRef { start: crate::opening_geom::v(0.0, 0.0), end: crate::opening_geom::v(4.0, 0.0), total: 0.39, ref_off: 0.0 },
+                1.0,
+                1.2,
+            )
+            .unwrap();
+            let eps_y = -0.195 + 0.1;
+            let polys: Vec<(&Vec<Vec2>, &HatchRender)> = prims
+                .iter()
+                .filter_map(|q| match q {
+                    Primitive::Polygon { pts, hatch, wall_id: Some(_), fill, .. } if fill != "none" => Some((pts, hatch)),
+                    _ => None,
+                })
+                .collect();
+            let containing = |x: f64, y: f64| polys.iter().find(|(pts, _)| point_in(pts, x, y)).copied();
+            for (jamb, into) in [(js, 1.0), (je, -1.0)] {
+                let nose = containing(jamb + into * 0.025, eps_y).expect("Nase gefüllt");
+                let band = containing(jamb - into * 0.3, eps_y).expect("EPS-Band");
+                assert!(nose.1.pattern == HatchPattern::Diagonal && nose.1 == band.1, "Nase in der EPS-Schraffur");
+                assert!(std::ptr::eq(nose.0, band.0), "Nase und Band als eine Fläche");
+                // Keine Linie auf der Rohbaukante im EPS.
+                for q in &prims {
+                    if let Primitive::Line { a, b, cls, .. } = q {
+                        let on = (a.x - jamb).abs() < 1e-6 && (b.x - jamb).abs() < 1e-6 && a.y.max(b.y) > eps_y - 0.05 && a.y.min(b.y) < eps_y + 0.05;
+                        assert!(!on, "Linie {cls} auf der Grenze Schicht/Einzug: {a:?} {b:?}");
+                    }
+                }
+                // Stirn der Nase (x = Rohbaukante + 5 cm) ist Umriss.
+                let face = jamb + into * 0.05;
+                assert!(
+                    prims.iter().any(|q| matches!(q, Primitive::Line { a, b, cls, .. } if cls == "wall-outline" && (a.x - face).abs() < 1e-6 && (b.x - face).abs() < 1e-6)),
+                    "Stirn der Nase ohne Umriss"
+                );
+            }
+        }
+    }
+
+    fn point_in(pts: &[Vec2], x: f64, y: f64) -> bool {
+        let n = pts.len();
+        let mut c = false;
+        let mut j = n - 1;
+        for i in 0..n {
+            let (a, b) = (pts[i], pts[j]);
+            if (a.y > y) != (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x {
+                c = !c;
+            }
+            j = i;
+        }
+        c
     }
 
     /// [G3][36] Bogen über der Schnitthöhe vorbei (Schräg: links bis 0.5 tief): die Wand bleibt

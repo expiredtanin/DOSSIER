@@ -6,6 +6,16 @@ fn sample() -> Project {
     serde_json::from_str(include_str!("../../../tests/fixtures/sample_project.json")).unwrap()
 }
 
+/// Beispiel mit ausdrücklich aussen bündigen Fenstern (ohne die [168]-Vorgabe bei Aussendämmung:
+/// Rahmen in der Leibung, Dämmung überdeckt ihn).
+fn sample_flush() -> Project {
+    let mut p = sample();
+    for t in p.window_types.iter_mut().flatten() {
+        t.inset_face = Some(WindowTypeInsetFace::Aussen);
+    }
+    p
+}
+
 fn level(p: &Project, id: &str) -> LevelSpec {
     let l = p.drawing_levels.iter().find(|l| l.id == id).unwrap();
     LevelSpec::from_json(&serde_json::to_value(l).unwrap())
@@ -446,7 +456,7 @@ fn sturz_baenke_und_storenkasten_im_schnitt() {
 /// Bands (ein Umriss, keine Fuge), nicht als eigenes Öffnungs-Stück. Ohne Anschlag bleibt das Loch glatt.
 #[test]
 fn anschlag_im_schnitt_sturz_nase_und_bruestung() {
-    let mut p = sample();
+    let mut p = sample_flush();
     let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
     let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap().clone();
     let (u, n) = axis_frame(&w1);
@@ -514,12 +524,20 @@ fn anschlag_im_schnitt_sturz_nase_und_bruestung() {
     }
     let without = section_opening_primitives(&p, &l, &Visibility::default()).unwrap().len();
     assert_eq!(with, without);
+    // [168] Ohne Anschlag (keine Nase): der Schichteinzug (Dämmung überdämmt 3 cm) ist trotzdem Teil des
+    // Schicht-Bands — eine Fläche, kein eigens umrandetes Stück unter dem Sturz.
+    for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+        o.layer_reveals = Some(reveal(0.03));
+    }
+    let (h, s, k) = edges(&p, "insulation");
+    assert!((h - (zt - 0.03)).abs() < 1e-6 && (s - (zb + 0.03)).abs() < 1e-6, "{h} {s}");
+    assert_eq!(k, count["insulation"], "Einzug gehört zum Band");
 }
 
 /// [G3] Rundbogen-Fenster: an der Schnittstelle reicht die Wand bis an den Bogen, Rahmen/Glas folgen.
 #[test]
 fn rundbogen_im_schnitt() {
-    let mut p = sample();
+    let mut p = sample_flush();
     let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
     let w1 = p.walls.iter().find(|w| w.id == o1.host_wall_id).unwrap().clone();
     let (u, n) = axis_frame(&w1);
@@ -547,7 +565,7 @@ fn rundbogen_im_schnitt() {
 /// am Sturz (Sehne zwischen den Laibungen).
 #[test]
 fn rundbogen_und_einzug_in_bogenwand() {
-    let mut p = sample();
+    let mut p = sample_flush();
     p.walls.iter_mut().find(|w| w.id == "W1").unwrap().bulge = Some(-0.3);
     let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
     let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap().clone();

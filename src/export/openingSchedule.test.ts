@@ -30,9 +30,11 @@ describe("Fenster- und Türliste", () => {
     expect(all.some((r) => r[0] === "T-Haus" && r.includes('Eingang; mit "Zusatz"'))).toBe(true);
   });
   it("[106] Leibungsflächen je Schicht als optionale Spalten", () => {
-    const plain = buildOpeningReport(p);
+    // Ohne Schichteinzug (auch ohne die [168]-Vorgabe bei Aussendämmung): ausdrücklich leer.
+    const bare: Project = { ...p, openings: p.openings!.map((o) => ({ ...o, layerReveals: [] })) };
+    const plain = buildOpeningReport(bare);
     const o0 = p.openings![0]!;
-    const withRev: Project = { ...p, openings: p.openings!.map((o) => (o.id === o0.id ? { ...o, layerReveals: [{ layer: 0, mode: "zurueck" as const }] } : o)) };
+    const withRev: Project = { ...bare, openings: bare.openings!.map((o) => (o.id === o0.id ? { ...o, layerReveals: [{ layer: 0, mode: "zurueck" as const }] } : o)) };
     const rows = openingSchedule(withRev);
     const r0 = rows.find((r) => r.id === o0.id)!;
     expect(r0.revealAreas.length).toBe(1);

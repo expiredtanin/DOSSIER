@@ -299,7 +299,7 @@ fn daemm_striche_quer_zur_wand_im_grundriss() {
         }
     }
     // Fenster mit Anschlag: die Wandnasen (Schichtstücke in der Leibung) schraffiert wie ihre Wand, auch in
-    // der Bogenwand (radial).
+    // der Bogenwand (radial) — [168] als Teil der Schicht-Fläche (kein eigenes Öffnungs-Stück mehr).
     for (what, arc) in [("Fenster in schräger Wand", false), ("Fenster in Bogenwand", true)] {
         let mut p = base();
         if arc {
@@ -309,7 +309,7 @@ fn daemm_striche_quer_zur_wand_im_grundriss() {
         }
         add_window(&mut p, "W1", 1.8);
         for scale in [50.0, 20.0] {
-            assert!(plan_case(&p, scale, what) > 0, "{what}: keine Nasen-Stücke");
+            assert_eq!(plan_case(&p, scale, what), 0, "{what}: Nase als eigenes Stück");
         }
     }
 }
