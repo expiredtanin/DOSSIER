@@ -41,19 +41,15 @@ const END_MARK_OPTIONS: EndMark[] = ["none", "arrow", "arrowOpen", "dot", "tick"
 // Element-spezifische Attribut-Abschnitte (Wand/Decke/Öffnung/Treppe/Raum) —
 // aus ObjectInfoPanel hierher verschoben (Ribbon Phase 3: ObjectInfo trägt nur
 // noch Bezugspunkt + Masse).
-import {
-  WallSection,
-  CeilingSection,
-  RoofSection,
-  OpeningSection,
-  StairSection,
-  RoomSection,
-  ExtrudedSolidSection,
-  ColumnSection,
-  SectionLineSection,
-  DetailRefSection,
-  DimRefsSection,
-} from "./ObjectInfoPanel";
+import { WallSection } from "./objectInfo/WallSection";
+import { CeilingSection } from "./objectInfo/CeilingSection";
+import { RoofSection } from "./objectInfo/RoofSections";
+import { OpeningSection } from "./objectInfo/OpeningSections";
+import { StairSection } from "./objectInfo/StairSection";
+import { RoomSection } from "./objectInfo/RoomSection";
+import { ExtrudedSolidSection, ColumnSection } from "./objectInfo/SolidSections";
+import { SectionLineSection } from "./objectInfo/SectionLineSection";
+import { DetailRefSection, DimRefsSection } from "./objectInfo/RefSections";
 import { SurfacePatternPlacement } from "./SurfacePatternPlacement";
 
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
