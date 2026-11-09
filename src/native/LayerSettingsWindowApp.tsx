@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { EditorField } from "../ui/EditorField";
 import type { LayerSettingsCommandHandlers, LayerSettingsSyncState } from "./layerSettingsWindow";
 import { t } from "../i18n";
+import { listenBridgeState } from "./windowBridge";
 
 function initialCodeFromUrl(): string {
   return new URLSearchParams(window.location.search).get("code") ?? "";
@@ -27,11 +28,8 @@ export function LayerSettingsWindowApp() {
     void (async () => {
       const { listen, emitTo } = await import("@tauri-apps/api/event");
       if (disposed) return;
-      unlisten.push(
-        await listen<LayerSettingsSyncState | null>("layer-settings-sync-state", (e) =>
-          setState(e.payload),
-        ),
-      );
+      // Ganzer Zustand und Patches der Sync-Brücke ([121], `windowBridge.ts`).
+      unlisten.push(...(await listenBridgeState<LayerSettingsSyncState>("layer-settings", setState)));
       // Beim Wechsel auf eine andere Ebene (erneutes Öffnen desselben
       // Fensters aus dem Kontextmenü) — nur der Titel/URL-Code als Hinweis;
       // der eigentliche State kommt weiterhin per Sync vom Hauptfenster.

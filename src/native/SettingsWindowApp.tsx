@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SettingsDialog } from "../ui/SettingsDialog";
 import type { SettingsCommandHandlers, SettingsSyncState } from "./settingsWindow";
 import { t } from "../i18n";
+import { listenBridgeState } from "./windowBridge";
 import { applyThemeMode } from "../theme/themeMode";
 
 type HandlerName = keyof SettingsCommandHandlers;
@@ -27,11 +28,10 @@ export function SettingsWindowApp() {
     let disposed = false;
     const unlisten: Array<() => void> = [];
     void (async () => {
-      const { listen, emitTo } = await import("@tauri-apps/api/event");
+      const { emitTo } = await import("@tauri-apps/api/event");
       if (disposed) return;
-      unlisten.push(
-        await listen<SettingsSyncState>("settings-sync-state", (e) => setState(e.payload)),
-      );
+      // Ganzer Zustand und Patches der Sync-Brücke ([121], `windowBridge.ts`).
+      unlisten.push(...(await listenBridgeState<SettingsSyncState>("settings", setState)));
       // Hauptfenster um den aktuellen Stand bitten (Race-Schutz: dieses
       // Fenster könnte nach dem letzten Sync-Push gestartet sein).
       await emitTo("main", "settings-window-ready").catch(() => {});

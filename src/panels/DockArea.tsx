@@ -3,8 +3,12 @@
 // Panels und das Drag-Overlay. Jede Gruppe bzw. jedes schwebende Panel bekommt einen eigenen
 // Host-Provider (`hostWithMode`), damit der Darstellungsmodus dem eigenen Tab folgt. Gerendert von
 // `App.tsx`; der Drag-Zustand kommt aus `useDockDragState` in der App.
+//
+// [121] Die Docks sind memoisiert und bekommen hier stabile Rückrufe: ein App-Render (z. B. nach einer
+// Op) rendert sie nicht mit, solange Layout, Host (stabil, s. `usePanelHostBase`), Darstellungsmodi
+// und Messwert gleich bleiben. Die Panels selbst abonnieren ihre Projektdaten im Store.
 
-import type { ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import type { MeasurementReadout } from "../tools/types";
 import { useStore, type RootState } from "../state/appStore";
 import type { useDockDragState } from "../state/useDockDragState";
@@ -12,6 +16,7 @@ import { Dock } from "./Dock";
 import { FloatingPanel } from "./FloatingPanel";
 import { hostWithMode, PanelHostProvider } from "./host";
 import { DragOverlay } from "./panelDrag";
+import { useEvent } from "../state/useEvent";
 
 export function DockArea(props: {
   layout: RootState["layout"];
@@ -34,6 +39,28 @@ export function DockArea(props: {
   const resizeFloat = useStore((s) => s.resizeFloat);
   const closeFloat = useStore((s) => s.closeFloat);
   const redockFloat = useStore((s) => s.redockFloat);
+  // `modeFor` ist eine stabile Store-Funktion; die Modi selbst abonnieren, damit sich die Rückrufe
+  // unten (und damit die memoisierten Docks) bei einem Moduswechsel ändern.
+  const displayModes = useStore((s) => s.displayModes);
+  const onStartTabDrag = useEvent(startTabDrag);
+  const resizeLeft = useCallback((size: number) => resizeDock("left", size), [resizeDock]);
+  const resizeRight = useCallback((size: number) => resizeDock("right", size), [resizeDock]);
+  const resizeGroupsLeft = useCallback((w: number[]) => resizeGroups("left", w), [resizeGroups]);
+  const resizeGroupsRight = useCallback((w: number[]) => resizeGroups("right", w), [resizeGroups]);
+  const buildHost = useCallback(
+    (activeTab: string | null) => hostWithMode(baseHost, activeTab, modeFor, setModeFor, measure),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [baseHost, modeFor, setModeFor, measure, displayModes],
+  );
+  const displayModeFor = useCallback(
+    (activeTab: string | null) => modeFor(activeTab),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [modeFor, displayModes],
+  );
+  const onDisplayModeChange = useCallback(
+    (activeTab: string | null, m: Parameters<typeof setModeFor>[1]) => setModeFor(activeTab, m),
+    [setModeFor],
+  );
   return (
     <>
       <div className="body">
@@ -45,14 +72,12 @@ export function DockArea(props: {
           <Dock
             side="left"
             dock={layout.left}
-            onStartTabDrag={startTabDrag}
-            onResize={(size) => resizeDock("left", size)}
-            onResizeGroups={(w) => resizeGroups("left", w)}
-            buildHost={(activeTab) =>
-              hostWithMode(baseHost, activeTab, modeFor, setModeFor, measure)
-            }
-            displayModeFor={(activeTab) => modeFor(activeTab)}
-            onDisplayModeChange={(activeTab, m) => setModeFor(activeTab, m)}
+            onStartTabDrag={onStartTabDrag}
+            onResize={resizeLeft}
+            onResizeGroups={resizeGroupsLeft}
+            buildHost={buildHost}
+            displayModeFor={displayModeFor}
+            onDisplayModeChange={onDisplayModeChange}
           />
         )}
         {props.children}
@@ -64,14 +89,12 @@ export function DockArea(props: {
           <Dock
             side="right"
             dock={layout.right}
-            onStartTabDrag={startTabDrag}
-            onResize={(size) => resizeDock("right", size)}
-            onResizeGroups={(w) => resizeGroups("right", w)}
-            buildHost={(activeTab) =>
-              hostWithMode(baseHost, activeTab, modeFor, setModeFor, measure)
-            }
-            displayModeFor={(activeTab) => modeFor(activeTab)}
-            onDisplayModeChange={(activeTab, m) => setModeFor(activeTab, m)}
+            onStartTabDrag={onStartTabDrag}
+            onResize={resizeRight}
+            onResizeGroups={resizeGroupsRight}
+            buildHost={buildHost}
+            displayModeFor={displayModeFor}
+            onDisplayModeChange={onDisplayModeChange}
           />
         )}
 

@@ -1,6 +1,6 @@
 // Inhalts-Panel „Gelände & Kontext" — verwaltet die Kontext-Schicht
-// (importierte Meshes, Höhenlinien-Sätze, abgeleitetes Gelände-TIN). Daten/
-// Handler kommen über usePanelHost (kein Prop-Drilling).
+// (importierte Meshes, Höhenlinien-Sätze, abgeleitetes Gelände-TIN). Handler
+// kommen über usePanelHost, die Kontext-Objekte aus dem Store (`project.context`, [121]).
 //
 // Aufbau:
 //   • Aktions-Zeile: „DXF importieren" (öffnet den in App montierten Datei-
@@ -79,12 +79,15 @@ function groupByLayer(objects: ContextObject[]): { layer: string; items: Context
   return order.map((layer) => ({ layer, items: byLayer.get(layer)! }));
 }
 
+const NO_CONTEXT: ContextObject[] = [];
+
 export function SitePanel() {
   const host = usePanelHost();
+  const project = useStore((s) => s.project);
   // Gewählte Kontext-Objekte schmal aus dem Store ([121], [130]).
   const selectedContextObjectIds = useStore((s) => s.selection.contextObjects);
   const notify = useStore((s) => s.notify);
-  const objects = host.contextObjects;
+  const objects = project.context ?? NO_CONTEXT;
   const contourSets = objects.filter((o) => o.type === "contourSet");
 
   // Standort-Import-Dialog (geo.admin/OSM) offen?
@@ -100,7 +103,7 @@ export function SitePanel() {
   // [T6] Glätten beim Erzeugen (Bruchkanten werden immer erzwungen).
   const [smooth, setSmooth] = useState(true);
   // [68] Mengen der Baugruben (Kern), nur neu, wenn sich das Projekt ändert.
-  const quantities = useMemo(() => excavationQuantities(host.project), [host.project]);
+  const quantities = useMemo(() => excavationQuantities(project), [project]);
 
   const onGenerate = () => {
     if (!effectiveSet) return;
@@ -147,7 +150,7 @@ export function SitePanel() {
         <ContextImportDialog
           onImport={(objs) => host.onAddContextObjects(objs)}
           onClose={() => setCtxImportOpen(false)}
-          geoAnchor={host.project.geoAnchor}
+          geoAnchor={project.geoAnchor}
           onSetGeoAnchor={host.onSetGeoAnchor}
         />
       )}

@@ -5,7 +5,9 @@ Zustand der Oberfläche: ein Store mit Slices, Hooks, die `App.tsx` entlasten, u
 die **Leseansicht** (`project`) und ändert sie ausschliesslich über Ops, die der Kern angenommen hat.
 
 Kein Zustand-/Redux-Paket: `store.ts` ist ein kleiner eigener Store auf `useSyncExternalStore`.
-Komponenten lesen mit `useStore(selector)` nur ihren Ausschnitt.
+Komponenten lesen mit `useStore(selector)` nur ihren Ausschnitt — möglichst schmal
+(`s.project.drawingLevels` statt `s.project`), denn jede Op erzeugt ein neues `project`, aber nur die
+geänderten Listen sind neu ([121]).
 
 ## Store und Slices
 
@@ -40,7 +42,8 @@ Ergebnisse weiter; Komponenten-Teile der App liegen in `src/ui/AppDialogs.tsx`, 
 | `useKeyboardShortcuts.ts`, `keyboardShortcuts.ts`, `commandKeys.ts` | Tastenkürzel, Esc/Enter laufender Befehle |
 | `useDisplayResolvers.ts` | sichtbar, gedimmt, gesperrt je Ebene und Kategorie |
 | `useTextTarget.ts`, `useSectionLineState.ts`, `useStatusBarInfo.ts` | Text-Ziel der Formatierleiste; Objekt-Info, Schnittlinie, 3D-Live-Schnitt; Status-Leiste |
-| `usePanelHostBase.ts` | Host-Wert für die Panels |
+| `usePanelHostBase.ts`, `panelHost/` | Host-Wert für die Panels: Zusammenbau aus Teil-Bauern je Bereich (`toolsHost`, `selectionStyleHost`, `elementAttributesHost`, `siteHost`, `viewSnapshotsHost` + `viewState`, `layoutsHost`); `stableHost.ts` hält die Identität fest (Handler als Trampoline), solange sich kein Wert-Feld ändert |
+| `useSelectionInfo.ts` | Objekt-Info der Auswahl für Panels (`useSelectionInfo()`) und App (`selectionInfoFor`), einmal je Projekt/Auswahl gerechnet, inhaltlich stabil |
 | `useProjectFileActions.ts`, `useImportHandling.ts`, `useModelImport.ts`, `useExportHandlers.ts` | Datei öffnen und speichern, Importe (Bild, Drag & Drop; IFC/STEP/Mesh), Plan-Export |
 | `useResourceHandlers.ts`, `useSettingsHost.ts` | Ressourcen-Fenster; Einstellungen, Offline, KI-Zugriff, Start-Protokoll |
 | `useNativeWindowHosts.ts`, `useNativeMenu.ts` | native Nebenfenster und macOS-Menüleiste (ausserhalb von Tauri No-ops) |
@@ -51,6 +54,7 @@ Ergebnisse weiter; Komponenten-Teile der App liegen in `src/ui/AppDialogs.tsx`, 
 | Datei | Inhalt |
 |---|---|
 | `selectionInfo.ts` | Objekt-Info der Auswahl (Fassade über den Kern, `selection_info.rs`) |
+| `dataEqual.ts` | Strukturvergleich reiner Daten (Objekt-Info, Zustand der Nebenfenster) |
 | `viewTemplates.ts` | Ansichtsvorlagen als Ops |
 | `viewSnapshots.ts`, `viewSnapshotFolders.ts`, `viewTabs.ts` | Ausschnitte, ihre Ordner, Zeichnungs-Reiter |
 | `groupActions.ts` | Gruppen erzeugen, auflösen, betreten |
@@ -63,5 +67,8 @@ Ergebnisse weiter; Komponenten-Teile der App liegen in `src/ui/AppDialogs.tsx`, 
 - Das Projekt ändert sich nur über Ops: `applyChange(ops | (p) => ops, coalesceKey?)` mit den Helfern aus
   `src/core/opsBuild.ts`. Kein direktes Setzen von `project`.
 - Öffnen und Neu über `openProjectFile()` bzw. `loadProject()`; danach ist der Verlauf leer.
+- Panels lesen Projektdaten selbst aus dem Store, nicht über den Panel-Host (der trägt nur Handler und
+  kleine Ansichts-Werte); die Objekt-Info über `useSelectionInfo()`. So rendert eine Op nur die Panels,
+  deren Daten sich geändert haben ([121], Messung `e2e/renderCount.spec.ts`).
 - macOS-Nebenfenster (`src/native/*WindowApp.tsx`) haben keinen gemeinsamen Store; ihr Zustand läuft über
-  die Sync-Brücken in `src/native/`.
+  die Sync-Brücken in `src/native/` (`windowBridge.ts`: erst ganz, dann nur geänderte Felder als Patch).

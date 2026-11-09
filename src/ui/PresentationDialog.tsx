@@ -3,7 +3,7 @@
 // Layouts-Panel ihn öffnen. Beim Bestätigen entsteht das Blatt in EINEM Undo-Schritt
 // (`state/presentationSheet.ts`); `onCreated` öffnet es. Overlay wie `LayoutCreateDialogs` (kein window.prompt).
 
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import { presentationDefaults, type PresentationOptions } from "../core";
 import type { LayoutOrientation, LayoutPaperFormat } from "../model/types";
@@ -12,9 +12,14 @@ import { getState, useStore } from "../state/appStore";
 import { setPresentationDialogOpener } from "../state/presentationSheetHook";
 import { createPresentationSheet } from "../state/presentationSheet";
 
-export function PresentationDialogHost({ onCreated }: { onCreated: (layoutId: string) => void }) {
+/** Memoisiert und nur auf die Zeichnungsebenen abonniert ([121]): rendert nicht bei jeder Op. */
+export const PresentationDialogHost = memo(function PresentationDialogHost({
+  onCreated,
+}: {
+  onCreated: (layoutId: string) => void;
+}) {
   const [opts, setOpts] = useState<PresentationOptions | null>(null);
-  const project = useStore((s) => s.project);
+  const drawingLevels = useStore((s) => s.project.drawingLevels);
 
   useEffect(() => {
     setPresentationDialogOpener(() => setOpts(presentationDefaults(getState().project)));
@@ -42,9 +47,9 @@ export function PresentationDialogHost({ onCreated }: { onCreated: (layoutId: st
   }, [opts, close, confirm]);
 
   if (!opts) return null;
-  const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId);
-  const sections = project.drawingLevels.filter((l) => l.kind === "section");
-  const hasElevations = project.drawingLevels.some((l) => l.kind === "elevation");
+  const floors = drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId);
+  const sections = drawingLevels.filter((l) => l.kind === "section");
+  const hasElevations = drawingLevels.some((l) => l.kind === "elevation");
   const set = (patch: Partial<PresentationOptions>) => setOpts({ ...opts, ...patch });
   const toggleFloor = (id: string, on: boolean) =>
     // Blattreihenfolge = Reihenfolge der Geschosse im Projekt.
@@ -162,4 +167,4 @@ export function PresentationDialogHost({ onCreated }: { onCreated: (layoutId: st
       </div>
     </div>
   );
-}
+});

@@ -566,9 +566,11 @@ dort steht, was fehlt; was schon versucht wurde, steht im Archiv (`doc/archiv/TO
 4. **Formatierung und Clippy in den Check** (`[C6]`, `[22]`). Mit einem kleinen Crate anfangen
    (`src-tauri/hatchgen`), `cargo fmt` und `cargo clippy` dort sauber machen und in
    `scripts/check.mjs` aufnehmen. Die übrigen Crates folgen einzeln (sonst ein Riesen-Diff).
-5. **Panels schmal abonnieren** (`[121]`). Die meisten Panels lesen noch den ganzen Host
-   (`usePanelHost`); `src/panels/ToolsPanel.tsx` zeigt das Muster mit `usePanelHostSelect`.
-   Dateien: `src/panels/host.ts`, `src/state/usePanelHostBase.ts`, Messung `e2e/renderCount.spec.ts`.
+5. **Panels noch schmaler abonnieren** (Rest aus `[121]`). Projekt und Objekt-Info lesen die Panels seit
+   9.11. selbst aus dem Store (der Panel-Host trägt nur Handler und kleine Ansichts-Werte); viele tun das
+   aber noch mit `useStore((s) => s.project)` statt mit dem Ausschnitt, den sie zeigen (Muster:
+   `PresentationDialogHost` mit `s.project.drawingLevels`, `DrawingTabs` mit `s.project.viewSnapshots`).
+   Dateien: `src/panels/*.tsx`, Messung `e2e/renderCount.spec.ts`.
 6. **Abzugskörper in der Ansicht** (Rest aus `[G8]`). Grundriss, Schnitt und 3D sparen Abzugskörper aus,
    die Ansicht noch nicht. Dateien: `src-tauri/core/src/plan/elevation.rs`, `src-tauri/core/src/voids.rs`;
    Vorbild `subtract_voids_in_section()` in `plan/section/voids.rs`.
@@ -630,7 +632,27 @@ Reihenfolge aufrufen, Gerüst rendern. Herausgelöst, ohne Verhaltensänderung (
 | `src/panels/DockArea.tsx` | Docks links/rechts, Andockzonen, schwebende Panels um die Mitte |
 | `src/ui/AppDialogs.tsx`, `HiddenFileInputs.tsx`, `BootScreen.tsx`, `useTopBarElements.tsx` | Dialoge und Overlays; versteckte Datei-Felder; Splash/Start; Menüleiste und Ansichts-Ribbon |
 
-Offen bleibt aus `[121]`: App abonniert weiter das ganze Projekt; `usePanelHostBase` ist gross.
+### Neurendern und Panel-Host ([121], 9.11.2026)
+
+- Panels lesen Projektdaten selbst aus dem Store (`useStore`), die Objekt-Info der Auswahl über
+  `src/state/useSelectionInfo.ts` (einmal je Projekt/Auswahl gerechnet, inhaltlich gleiche Info behält
+  ihre Referenz). `project`, `selection` und `contextObjects` sind keine Felder des Panel-Hosts mehr.
+- `src/state/usePanelHostBase.ts` ist nur noch der Zusammenbau; die Teile liegen in `src/state/panelHost/`
+  (`toolsHost`, `selectionStyleHost`, `elementAttributesHost`, `siteHost`, `viewSnapshotsHost` mit
+  `viewState`, `layoutsHost`, Typen in `types.ts`). `stableHost.ts` gibt dem Host eine feste Identität:
+  Handler sind Trampoline auf die neueste Fassung, neu wird er nur bei geänderten Wert-Feldern.
+- Docks (`Dock` mit stabilen Rückrufen aus `DockArea`), versteckte Datei-Felder, Zeichnungs-Reiter und
+  der Präsentations-Dialog sind memoisiert.
+- Nebenfenster (`src/native/windowBridge.ts`): nach dem ersten ganzen Zustand nur noch Patches mit den
+  inhaltlich geänderten Feldern; gleicher Zustand wird nicht gesendet. Das Ressourcen-Fenster schickt
+  weiter seine Projekt-Differenz (`projectDelta.ts`).
+- Gemessen (`e2e/renderCount.spec.ts`, Musterhaus): Wand-Änderung 55 → 42 Renders, Zoom-Schritt 8,
+  5 Zeiger-Schritte 20 (unverändert).
+
+Offen: `App.tsx` abonniert weiter das ganze Projekt. Die Griffe (`useGripEditing`, `useGrip3dEditing`), die
+Befehle auf der Auswahl und die Objekt-Info hängen im App-Render am Projekt; solange sie dort gerechnet
+werden, rendert App bei jeder Op (die Kinder dank Memo meist nicht mit). Nächster Schritt: Griffe in die
+Hauptansicht (`Content`) verlegen, dann App nur noch auf Ebenen/Layer/Name abonnieren.
 
 ### Bekannte veraltete Kommentare
 

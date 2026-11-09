@@ -18,7 +18,7 @@
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
-import { useCallback, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { PanelFrame } from "./PanelFrame";
 import { TabStrip } from "./TabStrip";
@@ -83,7 +83,7 @@ function clamp(value: number, min: number, max: number): number {
  * aktives Panel (im eigenen Host-Provider) und erlaubt das Verändern von Breite
  * (innere Kante) und Gruppen-Höhen (Splitter zwischen Gruppen).
  */
-export function Dock({
+export const Dock = memo(function Dock({
   side,
   dock,
   onStartTabDrag,
@@ -265,4 +265,4 @@ export function Dock({
       />
     </aside>
   );
-}
+});

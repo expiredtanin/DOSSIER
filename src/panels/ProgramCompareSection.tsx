@@ -40,7 +40,7 @@ function SumRow({ s, label, total }: { s: CompareSum; label: string; total?: boo
 
 export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: CompareRow["status"]) => string }) {
   const host = usePanelHost();
-  const project = host.project;
+  const project = useStore((s) => s.project);
   const applyChange = useStore((s) => s.applyChange);
   const notify = useStore((s) => s.notify);
   const c = compareRoomProgram(project);

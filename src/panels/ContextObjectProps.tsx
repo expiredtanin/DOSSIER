@@ -63,6 +63,7 @@ const RESMOOTH_PASSES = [1, 2, 4] as const;
 /** Felder eines Kontext-Objekts; `null` für Arten ohne eigene Einstellungen (Höhenlinien, Luftbild). */
 export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; quantities: readonly ExcavationQuantity[] }) {
   const host = usePanelHost();
+  const project = useStore((s) => s.project);
   const notify = useStore((s) => s.notify);
   const regenerateTerrain = useStore((s) => s.regenerateTerrain);
   const resmoothTerrain = useStore((s) => s.resmoothTerrain);
@@ -100,8 +101,8 @@ export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; qu
   }
 
   if (obj.type === "terrainMesh") {
-    const cat = obj.categoryCode ? flattenCategories(host.project.layers).find((c) => c.code === obj.categoryCode) : undefined;
-    const hasSource = (host.project.context ?? []).some((o) => o.type === "contourSet");
+    const cat = obj.categoryCode ? flattenCategories(project.layers).find((c) => c.code === obj.categoryCode) : undefined;
+    const hasSource = (project.context ?? []).some((o) => o.type === "contourSet");
     return (
       <div className="site-props">
         <label className="site-check" title={t("site.terrain.meshVisible.hint")}>

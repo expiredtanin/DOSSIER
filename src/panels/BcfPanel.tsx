@@ -14,7 +14,6 @@
 
 import { useMemo, useRef } from "react";
 import { t } from "../i18n";
-import { usePanelHost } from "./host";
 import { getState, useStore } from "../state/appStore";
 import { fromIdLists, toIdLists } from "../state/selection";
 import { saveBinaryFile } from "../native/saveFile";
@@ -92,7 +91,7 @@ function cameraText(c: BcfCamera): string {
 }
 
 export function BcfPanel() {
-  const host = usePanelHost();
+  const project = useStore((s) => s.project);
   const notify = useStore((s) => s.notify);
   const session = useBcfSession();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -117,7 +116,7 @@ export function BcfPanel() {
 
   /** Kamera, Schnittebene und Bauteile eines Viewpoints im Modell zeigen. */
   const showViewpoint = (vp: BcfViewpoint | null, topicGuids: string[]) => {
-    const origin = projectGeoOrigin(host.project);
+    const origin = projectGeoOrigin(project);
     if (vp?.camera || (vp && vp.clippingPlanes.length > 0)) {
       if (!viewportAvailable()) {
         notify(t("bcf.noViewport"), "warning");
@@ -141,7 +140,7 @@ export function BcfPanel() {
     if (guids.length === 0) return;
     // GlobalIds brauchen das Format-Modul (Rust-Hash); nach dem Öffnen ist es geladen.
     void loadFileio().then(() => {
-      const { selection } = resolveGuids(host.project, guids);
+      const { selection } = resolveGuids(project, guids);
       const found = bcfSelectionSize(selection);
       applySelection(selection);
       notify(t("bcf.components", { found, total: guids.length }), found > 0 ? "info" : "warning");
@@ -161,18 +160,18 @@ export function BcfPanel() {
   const captureViewpoint = async (): Promise<BcfViewpoint> => {
     await loadFileio();
     const sel = currentSelection();
-    const guids = bcfSelectionSize(sel) > 0 ? selectionToGuids(host.project, sel) : [];
+    const guids = bcfSelectionSize(sel) > 0 ? selectionToGuids(project, sel) : [];
     const camera = getCamera();
     const png = camera ? await captureSnapshot() : null;
     if (camera && !png) notify(t("bcf.noSnapshot"), "info");
-    return viewpointForTopic({ guid: uuid(), ifcGuids: guids, camera, snapshotPng: png, origin: projectGeoOrigin(host.project) });
+    return viewpointForTopic({ guid: uuid(), ifcGuids: guids, camera, snapshotPng: png, origin: projectGeoOrigin(project) });
   };
 
   const save = async () => {
     if (!file) return;
     try {
       const bytes = await writeBcf(file, session.version);
-      const name = session.fileName.replace(/\.(bcf|bcfzip|zip)$/i, "") || host.project.name || "themen";
+      const name = session.fileName.replace(/\.(bcf|bcfzip|zip)$/i, "") || project.name || "themen";
       if (await saveBinaryFile(bytes, `${name}.bcfzip`, "application/zip")) {
         setBcfSession({ dirty: false, fileName: `${name}.bcfzip` });
         notify(t("bcf.saved"), "info");
@@ -197,7 +196,7 @@ export function BcfPanel() {
       now: now(),
       viewpoints: vp.selection.length > 0 || vp.camera ? [vp] : [],
     });
-    const base = file ?? emptyBcf(host.project.id, host.project.name ?? "");
+    const base = file ?? emptyBcf(project.id, project.name ?? "");
     setBcfSession({ file: addTopic(base, tp), dirty: true, selectedGuid: topicGuid });
   };
 
@@ -233,7 +232,6 @@ export function BcfPanel() {
   const clipping = topic?.viewpoints.flatMap((v) => v.clippingPlanes) ?? [];
   const camera = topic?.viewpoints.find((v) => v.camera)?.camera ?? null;
   const topicGuids = topic ? [...new Set(topic.viewpoints.flatMap(viewpointGuids))] : [];
-  const project = host.project;
   const foundCount = useMemo(
     () => (topicGuids.length > 0 && fileioLoaded() ? bcfSelectionSize(resolveGuids(project, topicGuids).selection) : 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -244,7 +242,7 @@ export function BcfPanel() {
     <div className="bcf-panel">
       <div className="bcf-bar">
         <button type="button" className="bcf-btn" onClick={() => inputRef.current?.click()}>{t("bcf.open")}</button>
-        <button type="button" className="bcf-btn" onClick={() => setBcfSession({ file: emptyBcf(host.project.id, host.project.name ?? ""), fileName: "", dirty: false, selectedGuid: null })}>{t("bcf.new")}</button>
+        <button type="button" className="bcf-btn" onClick={() => setBcfSession({ file: emptyBcf(project.id, project.name ?? ""), fileName: "", dirty: false, selectedGuid: null })}>{t("bcf.new")}</button>
         <button type="button" className="bcf-btn" disabled={!file} onClick={() => void save()}>{t("bcf.save")}{session.dirty ? " •" : ""}</button>
         <input ref={inputRef} type="file" accept=".bcf,.bcfzip,.zip" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void openFile(f); }} />
       </div>

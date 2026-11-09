@@ -11,7 +11,7 @@
 // Wert"; ein Wechsel auf „Nach Ebene"/„Nach Bauteil" löscht den Wert wieder
 // (siehe host.ts: onSetSelection{Foreground,Background,StrokeWeight,Hatch}Source).
 //
-// Daten/Handler kommen ausschließlich über usePanelHost (kein Prop-Drilling).
+// Handler kommen über usePanelHost, Projekt und Objekt-Info aus dem Store ([121]).
 // Es werden NUR Eigenschaften angeboten, die der Host-Kontrakt tatsächlich
 // setzen kann — keine Stubs/Fake-Setter (Konvention wire-dont-stub). Felder ohne
 // echten Setter (Linienstil) werden read-only/informativ gezeigt; Felder, die
@@ -23,6 +23,8 @@
 // Alle sichtbaren Texte über t(...).
 
 import { Fragment } from "react";
+import { useSelectionInfo } from "../state/useSelectionInfo";
+import { useStore } from "../state/appStore";
 import type { ReactNode } from "react";
 import { t } from "../i18n";
 import { formatM, wallTypeLabel } from "../model/types";
@@ -78,8 +80,8 @@ function uiSourceOf(
 
 export function AttributesPanel() {
   const host = usePanelHost();
-  const sel = host.selection;
-  const { project } = host;
+  const project = useStore((s) => s.project);
+  const sel = useSelectionInfo();
 
   // Wandtyp-/Deckentyp-Wahl für das NEUE Bauteil (was gezeichnet wird) — früher
   // in der Werkzeug-Sidebar (ToolsPanel), seit deren Entfernung hier. Erscheint
@@ -127,7 +129,7 @@ export function AttributesPanel() {
   }
 
   const isDrawing = sel.kind === "drawing2d";
-  const sheetUnits = unitsForLevel(host.project.drawingLevels.find((z) => z.id === sel.floorId));
+  const sheetUnits = unitsForLevel(project.drawingLevels.find((z) => z.id === sel.floorId));
   const sizeText = (m: number): string => (sheetUnits.perMeter === 1 ? formatM(m) : `${fmtLength(sheetUnits, m).replace(/mm$/, "")} mm`);
   // Strichstärke: Wand/Decke/Stütze/Drawing2D tragen einen eigenen Override
   // (`strokeWeight`/`weightMm`) + Quellen-Dropdown; andere Elementarten erben

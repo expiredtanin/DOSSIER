@@ -14,6 +14,7 @@ import { ContextImportDialog } from "../ui/ContextImportDialog";
 import type { GeoAnchor } from "../ui/ContextImportDialog";
 import type { ContextImportSyncState } from "./contextImportWindow";
 import { t } from "../i18n";
+import { listenBridgeState } from "./windowBridge";
 
 export function ContextImportWindowApp() {
   const [state, setState] = useState<ContextImportSyncState | null>(null);
@@ -22,13 +23,10 @@ export function ContextImportWindowApp() {
     let disposed = false;
     const unlisten: Array<() => void> = [];
     void (async () => {
-      const { listen, emitTo } = await import("@tauri-apps/api/event");
+      const { emitTo } = await import("@tauri-apps/api/event");
       if (disposed) return;
-      unlisten.push(
-        await listen<ContextImportSyncState>("context-import-sync-state", (e) =>
-          setState(e.payload),
-        ),
-      );
+      // Ganzer Zustand und Patches der Sync-Brücke ([121], `windowBridge.ts`).
+      unlisten.push(...(await listenBridgeState<ContextImportSyncState>("context-import", setState)));
       await emitTo("main", "context-import-window-ready").catch(() => {});
     })();
     return () => {

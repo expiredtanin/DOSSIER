@@ -4,11 +4,11 @@
 // (KennzahlenSection). Fläche/Bilanz werden LIVE aus den Raum-Umrissen abgeleitet
 // (geometry/roomArea: evaluateRoom/balance/roomsToCsv) — nie gespeichert.
 //
-// Daten kommen über usePanelHost (project.rooms). Bezeichner englisch, UI-Text
+// Daten kommen aus dem Store (project.rooms). Bezeichner englisch, UI-Text
 // deutsch via t() (CONVENTIONS.md).
 
 import { t } from "../i18n";
-import { usePanelHost } from "./host";
+import { useStore } from "../state/appStore";
 import { balance, evaluateRoom, roomsToCsv, siaLabelFull } from "../core";
 import type { Room } from "../model/types";
 import { roomDisplayName } from "../model/roomStamp";
@@ -36,9 +36,9 @@ function floorNameOf(
 }
 
 export function RoomBalancePanel() {
-  const host = usePanelHost();
-  const rooms = host.project.rooms ?? [];
-  const levels = host.project.drawingLevels;
+  const project = useStore((s) => s.project);
+  const rooms = project.rooms ?? [];
+  const levels = project.drawingLevels;
 
   if (rooms.length === 0) {
     return (

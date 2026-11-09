@@ -351,7 +351,7 @@ export const Content = memo(function Content({
   if ((level.kind === "section" || level.kind === "elevation") && viewType === "perspektive") {
     return (
       <main className="content">
-        <DrawingTabs project={project} handlers={viewSnapshotTabs} />
+        <DrawingTabs handlers={viewSnapshotTabs} />
         {view3dPane}
       </main>
     );
@@ -360,7 +360,7 @@ export const Content = memo(function Content({
   if (level.kind === "section" || level.kind === "elevation") {
     return (
       <main className="content">
-        <DrawingTabs project={project} handlers={viewSnapshotTabs} />
+        <DrawingTabs handlers={viewSnapshotTabs} />
         <SectionPlanView
           project={project}
           level={level}
@@ -483,7 +483,7 @@ export const Content = memo(function Content({
     }
     return (
       <main className="content">
-        <DrawingTabs project={project} handlers={viewSnapshotTabs} />
+        <DrawingTabs handlers={viewSnapshotTabs} />
         {plan()}
       </main>
     );
@@ -494,7 +494,7 @@ export const Content = memo(function Content({
   // Geschoss im Panel „Zeichnungsebenen"), nicht mehr hier in der Kopfzeile.
   return (
     <main className="content">
-      <DrawingTabs project={project} handlers={viewSnapshotTabs} />
+      <DrawingTabs handlers={viewSnapshotTabs} />
       {viewType === "perspektive" ? (
         view3dPane
       ) : (

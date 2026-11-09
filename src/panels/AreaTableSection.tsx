@@ -8,7 +8,6 @@
 
 import { useMemo, useState } from "react";
 import { t } from "../i18n";
-import { usePanelHost } from "./host";
 import { areaReportToCsv, buildAreaReport, buildAreaReportPdf } from "../core";
 import type { AgfBasis } from "../core";
 import { DEFAULT_AREA_INPUTS, ivhbOptionsOf, type AreaInputs } from "./areaInputs";
@@ -18,8 +17,7 @@ import { useStore } from "../state/appStore";
 const BASES: AgfBasis[] = ["ngf", "gf", "nf"];
 
 export function AreaTableSection() {
-  const host = usePanelHost();
-  const project = host.project;
+  const project = useStore((s) => s.project);
   const [inputs, setInputs] = useState<AreaInputs>(DEFAULT_AREA_INPUTS);
   const notify = useStore((s) => s.notify);
   const report = useMemo(

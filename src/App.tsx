@@ -832,21 +832,32 @@ export default function App() {
     onToolClick: toolHandlers.onToolClick,
     onToolCommit: toolHandlers.onToolCommit,
     onMeshImport,
+    // Versteckte Datei-Felder (memoisiert).
+    openImportForAnyFile,
+    importStepFile,
+    importIfcFile,
+    onImageOrPdfFileChosen,
+    onProjectFileChosen,
+    onProjectTemplateFileChosen,
   });
   const contentToolHandlers: ToolHandlers = useMemo(
     () => ({ onToolMove: ev.onToolMove, onToolClick: ev.onToolClick, onToolCommit: ev.onToolCommit, draft }),
     [ev, draft],
   );
   const viewTabsState = useViewTabs();
+  // `autoName` liest die Zeichnungsebenen (Name, Sichtbarkeit): neue Funktion, wenn sie sich ändern,
+  // damit die Reiter-Titel nachziehen (die Host-Handler selbst sind stabil, [121]).
+  const drawingLevels = project.drawingLevels;
   const viewSnapshotTabs = useMemo(
     () => ({
       tabs: viewTabsState,
       onActivate: baseHost.onActivateViewTab,
       onNew: baseHost.onNewViewTab,
       onClose: baseHost.onCloseViewTab,
-      autoName: baseHost.viewTabAutoName,
+      autoName: (levelId?: string) => baseHost.viewTabAutoName(levelId),
     }),
-    [baseHost, viewTabsState],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [baseHost, viewTabsState, drawingLevels],
   );
   // In-App-Menüleiste (nur ohne natives Menü) und Ansichts-Ribbon als memoisierte Elemente → ui/useTopBarElements.tsx.
   const { menuBarEl, viewControlsEl } = useTopBarElements({
@@ -896,12 +907,12 @@ export default function App() {
         imageInputRef={imageInputRef}
         projectFileInputRef={projectFileInputRef}
         projectTemplateFileInputRef={projectTemplateFileInputRef}
-        openImportForAnyFile={openImportForAnyFile}
-        importStepFile={importStepFile}
-        importIfcFile={importIfcFile}
-        onImageOrPdfFileChosen={onImageOrPdfFileChosen}
-        onProjectFileChosen={onProjectFileChosen}
-        onProjectTemplateFileChosen={onProjectTemplateFileChosen}
+        openImportForAnyFile={ev.openImportForAnyFile}
+        importStepFile={ev.importStepFile}
+        importIfcFile={ev.importIfcFile}
+        onImageOrPdfFileChosen={ev.onImageOrPdfFileChosen}
+        onProjectFileChosen={ev.onProjectFileChosen}
+        onProjectTemplateFileChosen={ev.onProjectTemplateFileChosen}
         notify={notify}
         onMeshImport={ev.onMeshImport}
       />
