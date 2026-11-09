@@ -104,8 +104,9 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Höhenkoten im Schnitt; Geschosse als Auswahl-Art; Achsraster im Blatt nicht verschiebbar; Texte im 3D nur anwählbar,
   nicht gezeichnet; Klick auf Griff an der Stelle des letzten Klicks schaltet statt zu bewaffnen. · M
 - ◐ **[77]** Zauberstab (Befehl `wand`). In der App nicht geklickt; Splines ohne. · S
-- ◐ **[81]** Automatische Aussenbemassung (`auto_dimensions`). Schiefe Kette in Einbuchtung kann Geometrie kreuzen;
-  Seitenketten umfassen alle Gebäude des Geschosses. · S
+- ◐ **[81]** Automatische Aussenbemassung (`auto_dimensions`). (9.11.) Schiefe Ketten kreuzen den Grundriss nicht mehr
+  (sonst vor alles im Streifen hinausgerückt), getrennte Gebäude eigene Seitenketten (`south2` …), Erker-Facetten ohne
+  Stufe. Offen: schiefe Kette kann eine achsparallele Kette kreuzen; Radius von Bogenwänden nicht automatisch. · S
 - ◐ **[154]** Bauteile aus Zeichnung erkennen (Befehl `erkennen`). Stösse von Bogenwänden, schräg anstossende Enden,
   Treppen/Decken, Fenster über der Schnitthöhe (5 von 6 fehlenden Öffnungen im Musterhaus komplex), Wanddurchbruch
   mit Schwellen-Rechteck wird Fenster, Schiebetüren in Bogenwänden, Blöcke. · L
