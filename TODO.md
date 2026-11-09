@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 162);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 163);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -230,7 +230,8 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 ## App und UI
 
 - ◐ **[121]** `App.tsx` zerlegen, Neurendern stoppen. App abonniert weiter das ganze Projekt; Panels lesen `usePanelHost`;
-  `usePanelHostBase` (1515 Z.) und Kontextmenü-Verdrahtung noch in App; Nebenfenster senden ihren ganzen Zustand. · L
+  `usePanelHostBase` (1565 Z.) gross; Nebenfenster senden ihren ganzen Zustand. Zerlegung selbst erledigt mit [163]
+  (9.11.: App.tsx 2957 → ~1120 Z., Teile in `src/state/use*.ts`, `src/ui/AppDialogs.tsx` u. a.). · L
 - ◐ **[130]** Kleinkram. PlanView/`useGrip3dEditing` nutzen lokale `selected…Ids`-Namen statt `Selection`. · S
 - ◐ **[128]** Restlogik nach Rust. Griffe: Zusammenstellen der Griff-/Kanten-Listen (`gripOwners`), Höhen-Griff-Lagen,
   Vorschau, Zug-Anwendung bleiben in `useGripEditing.ts`; nächster Schritt: Griff-Listen als Dokument-Abfrage. · L
@@ -335,3 +336,5 @@ exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Fläch
 - Gestrichen als überholt oder Regel: [24] Test first, [60] Nur versprechen, was getestet ist (jetzt Regel in
   `CLAUDE.md`), [B6] Wand unter Dach (analytisch gelöst in [G2]), [B7] Dach-Verschneidung (per Booleans in [G5]),
   [C3] (in [9]), [C8] (in [30]), [21] (in [160]), [R2] (in [46]).
+- [163] `App.tsx` weiter zerlegt, ohne Verhaltensänderung: Hooks und Teil-Komponenten (9.11.; Liste in
+  `doc/ARCHITEKTUR.md` Abschnitt 13; nicht in der Tauri-App geprüft)

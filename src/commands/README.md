@@ -21,7 +21,8 @@ Einstieg `commands.rs`. Hier bleiben nur die Abläufe. Ein Beispiel von Klick bi
 | `cmds/` | ein Modul je Befehl, Test daneben |
 
 Die Brücke für Editier-Befehle und Vorschau-Formen liegt in `src/tools/coreCmd.ts`. Wo die Engine lebt und
-wie ihr Ergebnis in den Store gelangt: `src/state/useCommandEngineHost.ts`.
+wie ihr Ergebnis in den Store gelangt: `src/state/useCommandEngineHost.ts`; wie Klicks, Werkzeugwahl und
+Ribbon-Befehle sie erreichen: `src/state/useToolInput.ts`.
 
 ## Befehle in `cmds/` (Auswahl)
 
