@@ -4,7 +4,7 @@
 //! dieselben Ableitungen wie im 3D (`emit_stairs` Tritt-Prismen und Podest, `emit_stair_meshes`
 //! glatte Ortbeton-Laufplatte, `emit_stair_railings`), je Treppe mit einem Projekt aufgerufen, das
 //! nur diese Treppe enthält (die Ableitungen liefern keine ids). Hier: Zuordnung und Basismengen;
-//! die Entitäten schreibt `fileio` (`ifc_export.rs`, STAIR).
+//! die Entitäten schreibt `fileio` (`ifc_export/mod.rs`, STAIR).
 //!
 //! Zuordnung der Tritt-Prismen: bei Podesttreppen (L, U, gerade mit Podest; [151]) ist ein Podest das
 //! Prisma mit dem Umriss eines Podest-Polygons der Treppengeometrie; die Tritte zwischen zwei

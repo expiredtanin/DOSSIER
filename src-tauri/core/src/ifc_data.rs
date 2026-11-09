@@ -1,10 +1,10 @@
 //! IFC-Export: Sammler im Kern ([K4] S2, [B5]; vorher `src/export/exportIfc.ts`, `ifcOpenings.ts`,
 //! `ifcClassification.ts`). Liest das Projekt-Dokument und erzeugt den flachen Puffer, den der
-//! Schreiber in `src-tauri/fileio/src/ifc_export.rs` zur STEP-Datei macht (Kodierung dort im Kopf,
+//! Schreiber in `src-tauri/fileio/src/ifc_export/mod.rs` zur STEP-Datei macht (Kodierung dort im Kopf,
 //! FLAT_VERSION 4). TS gibt nur noch Optionen (Schema, Klassifikation) und den Zeitstempel weiter und
 //! reicht die Bytes an `fileio` (zwei WASM-Module, keine gemischten Crates).
 //!
-//! Abbildung (Einzelheiten im Kopf von `ifc_export.rs` und in `TODO.md` [B5]):
+//! Abbildung (Einzelheiten im Kopf von `ifc_export/mod.rs` und in `TODO.md` [B5]):
 //!   • Geschosse: je "floor"-Ebene ein IfcBuildingStorey; Bauteile mit verwaister Geschoss-id hängen
 //!     am Gebäude (Struktur −1, Basis 0).
 //!   • Wand: Schicht-Bänder wie im 3D (`emit_walls`). Extrusion je Band + IfcOpeningElement, wenn das
@@ -459,7 +459,7 @@ struct FillSash {
     width: Option<f64>,
 }
 
-/// Parameter der Füllung einer Öffnung (Kodierung FILL im Kopf von `ifc_export.rs`), aus Typ und
+/// Parameter der Füllung einer Öffnung (Kodierung FILL im Kopf von `ifc_export/mod.rs`), aus Typ und
 /// Öffnung; fehlende Typwerte bleiben „keine", die Standardmasse kennt nur `fileio`.
 #[derive(Debug, Clone, PartialEq)]
 struct FillParams {

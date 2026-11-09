@@ -3,7 +3,7 @@
 // Decken, Extrusionen, optional Verglasung/Rahmen) und gibt sie fertig gerechnet hierher; Rust schreibt
 // nur die Datei. OBJ/STL sind Zeichen für Zeichen die Ausgabe der früheren TS-Fassung.
 //
-// Flache Kodierung (Muster `ifc_export.rs`): Zahlen als `f64`-Puffer, Zeichenketten getrennt als EINE
+// Flache Kodierung (Muster `ifc_export/mod.rs`): Zahlen als `f64`-Puffer, Zeichenketten getrennt als EINE
 // Zeichenkette, Teile durch `\0` getrennt; im Zahlenpuffer steht ihr Index (−1 = keine).
 //
 //   [FLAT_VERSION, flags, MATERIALS, LEVELS, GROUPS]

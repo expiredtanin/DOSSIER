@@ -1,4 +1,4 @@
-// Geometrie-Helfer für Treppen (Stairs) — Fassade über den Rust-Kern (`src-tauri/kernel2d/src/lib.rs`:
+// Geometrie-Helfer für Treppen (Stairs) — Fassade über den Rust-Kern (`src-tauri/kernel2d/src/stairs.rs`:
 // `stair_outline`; Bindung `src-tauri/core/src/web/stair.rs`, Kodierung `src-tauri/core/src/stair.rs`):
 // die Plan-Aussenlinie (`stairOutline`, Fang). Tritte, Podest, Lauflinie und Schnitt rechnet der Kern
 // direkt (Plan, 3D, Zeichenbefehl `cmd_create.rs`).

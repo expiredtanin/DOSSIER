@@ -1,9 +1,9 @@
 // Geometrie der Türen und Fenster für den IFC-Export ([B5], Port von `src/export/ifcOpenings.ts`, 28.10.):
 // statt einer Box getrennte Körper im selben Bauteil — Rahmen/Zarge, Türblatt bzw. Glas — plus
 // OperationType (Tür) und PartitioningType (Fenster). Alles sind vertikale Extrusionen von Grundriss-
-// Rechtecken (wie die Wände), Profile in Welt-XY, Höhen ab Öffnungs-Unterkante; `ifc_export.rs` rechnet sie
+// Rechtecken (wie die Wände), Profile in Welt-XY, Höhen ab Öffnungs-Unterkante; `ifc_export/mod.rs` rechnet sie
 // ins Füllungssystem. TS sammelt nur die Parameter aus dem Modell (`FillParams`, Kodierung im Kopf von
-// `ifc_export.rs`).
+// `ifc_export/mod.rs`).
 //
 // Masse kommen aus dem Modell, soweit es sie hergibt (Rahmenbreite/-tiefe, Schichteinzug, Flügelzahl und
 // -tabelle, Verglasung, Blattzahl, Glasanteil, Oberlicht). Fehlendes füllen dieselben Konstanten wie das 3D
