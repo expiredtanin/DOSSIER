@@ -20,8 +20,14 @@
 // src/state/ in fester Reihenfolge aufrufen (Befehls-Engine, Griffe, Auswahl-Befehle, Datei-Aktionen,
 // Einstellungen, native Fenster und Menü …) und das Gerüst rendern (Kopfzeile, Docks um die Mitte,
 // Status-Leiste, Dialoge). Wer was übernimmt: src/state/README.md und doc/ARCHITEKTUR.md.
+//
+// [121] App abonniert das Projekt NICHT: nur schmale Ausschnitte (Zeichnungsebenen, Ebenen-Baum, Name,
+// Textstile …), die sich bei einer Op an Bauteilen nicht ändern. Was das ganze Projekt liest, liegt in
+// den Komponenten, die es brauchen: Griffe und Befehlszeile in `ViewportCenter`, das Kontextmenü in
+// `AppContextMenu`, Dialoge in `AppDialogs`, Abgleiche ohne Anzeige in `ProjectSync`; Handler lesen
+// das Projekt beim Aufruf aus dem Store (`getState()`).
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type ComponentProps } from "react";
 import { patchItem } from "./core";
 import { collectVisibleCodes } from "./model/types";
 import { isSheetLevel, effectiveSheetSizeMm, findMaster, sheetMmToModel, SHEET_SCALE_DENOMINATOR } from "./model/layoutModel";
@@ -48,18 +54,13 @@ import { useSelectionState } from "./state/useSelectionState";
 import { useContextMenuState } from "./menus/useContextMenuState";
 
 // Verdrahtung (Hooks aus App.tsx herausgelöst, s. src/state/README.md).
-import { useDormerNotice } from "./state/useDormerNotice";
 import { useProjectActions } from "./state/useProjectActions";
 import { useCommandEngineHost } from "./state/useCommandEngineHost";
 import { TRANSFORM_COMMANDS, useToolInput } from "./state/useToolInput";
-import { useGripInputs } from "./state/useGripInputs";
 import { useSelectionCommands } from "./state/useSelectionCommands";
-import { useGripEditing } from "./state/useGripEditing";
-import { useGrip3dEditing } from "./state/useGrip3dEditing";
 import {
   useActiveToolKeys,
   useElementClipboardShortcut,
-  useToolNumberShortcuts,
   useUndoRedoShortcut,
 } from "./state/useKeyboardShortcuts";
 import { useProjectFileActions } from "./state/useProjectFileActions";
@@ -75,7 +76,6 @@ import { useNativeWindowHosts } from "./state/useNativeWindowHosts";
 import { useNativeMenu } from "./state/useNativeMenu";
 import { useStatusBarInfo } from "./state/useStatusBarInfo";
 import { useExportHandlers } from "./state/useExportHandlers";
-import { useCommandLineBinding } from "./state/useCommandLineBinding";
 import { useMouseSelectionHandlers } from "./state/useMouseSelectionHandlers";
 import { useFileDropImport, useImageImportHandling } from "./state/useImportHandling";
 import { usePanelHostBase } from "./state/usePanelHostBase";
@@ -83,7 +83,8 @@ import { useEventBundle } from "./state/useEvent";
 
 // Oberfläche.
 import type { PlanViewHandle } from "./views/plan/PlanView";
-import { Content } from "./views/viewportContent";
+import type { Content } from "./views/viewportContent";
+import { ViewportCenter } from "./views/ViewportCenter";
 import { revealPanel, saveLayout } from "./panels/layout";
 import { DockArea } from "./panels/DockArea";
 // Seiteneffekt: registriert die zwei dockbaren Kern-Panels in der Registry.
@@ -92,8 +93,8 @@ import { AppContextMenu } from "./menus/AppContextMenu";
 import { LayerInlineEditor, LevelInlineEditor } from "./menus/InlineEditors";
 import { AppDialogs } from "./ui/AppDialogs";
 import { BootScreen, useBootPhase } from "./ui/BootScreen";
-import { CommandLine } from "./ui/CommandLine";
 import { HiddenFileInputs } from "./ui/HiddenFileInputs";
+import { ProjectSync } from "./ui/ProjectSync";
 import { StatusBar } from "./ui/StatusBar";
 import { Toast } from "./ui/Toast";
 import { TopBar } from "./ui/TopBar";
@@ -110,12 +111,18 @@ export default function App() {
   // ── Globaler Zustand aus dem Store (Slices: project/selection/view/layout) ─
   // Pro useStore-Aufruf EIN Feld selektieren (Referenz-Gleichheit, sonst
   // Endlosschleife). Actions leben ebenfalls im Zustand und sind referenzstabil.
-  const project = useStore((s) => s.project);
+  // Vom Projekt nur schmale Ausschnitte ([121]): eine Op an Bauteilen ändert keinen davon.
+  const drawingLevels = useStore((s) => s.project.drawingLevels);
+  const projectLayers = useStore((s) => s.project.layers);
+  const projectName = useStore((s) => s.project.name);
+  const textStyles = useStore((s) => s.project.textStyles);
+  const masterLayouts = useStore((s) => s.project.masterLayouts);
+  const firstWallTypeId = useStore((s) => s.project.wallTypes[0].id);
+  const firstLineStyleId = useStore((s) => s.project.lineStyles[0].id);
   const setProject = useStore((s) => s.setProject);
   const applyChange = useStore((s) => s.applyChange);
   const groupChanges = useStore((s) => s.groupChanges);
   const notify = useStore((s) => s.notify);
-  useDormerNotice(project, notify);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const canUndo = useStore((s) => s.canUndo);
@@ -153,7 +160,7 @@ export default function App() {
     activeTool, setActiveTool, activeWallTypeId, setActiveWallTypeId, activeCategoryCode, setActiveCategoryCode,
     activeLineStyleId, snap, setSnap, draft, setDraft, pendingCopyMode, setPendingCopyMode, requestCopyCount,
     commitCopyCount,
-  } = useDrawingToolState(project.wallTypes[0].id, project.lineStyles[0].id);
+  } = useDrawingToolState(firstWallTypeId, firstLineStyleId);
 
   // ── Auswahl (Store-Slice, ein `Selection`-Wert, [130]) ──────────────────────
   const {
@@ -240,8 +247,8 @@ export default function App() {
   }, [resourcesOpen]);
 
   const activeLevel =
-    project.drawingLevels.find((z) => z.id === activeLevelId) ??
-    project.drawingLevels[0];
+    drawingLevels.find((z) => z.id === activeLevelId) ??
+    drawingLevels[0];
   // Massstab der Arbeitsebene: auf einem Blatt Papier 1:1, sonst der gewählte Plan-Massstab.
   const planScale = isSheetLevel(activeLevel) ? SHEET_SCALE_DENOMINATOR : scaleDenominator;
   // Anzeige-Einheiten (Lineale, Statusleiste, HUD, Befehlszeile): auf einem Blatt Papier-mm ([93]).
@@ -249,8 +256,8 @@ export default function App() {
 
   // Sichtbare Kategorie-Codes — Basisfilter für Grundriss & 3D.
   const visibleCodes = useMemo(
-    () => collectVisibleCodes(project.layers),
-    [project.layers],
+    () => collectVisibleCodes(projectLayers),
+    [projectLayers],
   );
 
   // ── Projekt-Mutationen (aus dem Store-Slice) ─────────────────────────────
@@ -260,10 +267,8 @@ export default function App() {
   const pa = useProjectActions(applyChange, notify, planViewRef);
   const {
     patchCategory, snapshotLayerVisibility, applyLayerVisibility, snapshotDrawingVisibility,
-    applyDrawingVisibility, patchLevel, addColorToCustomPalette, fitToContextObjects, moveGripOf, moveElementByOf,
-    moveEdgeOf, updateDrawing2D, updateWall, updateOpening, slideOpening, moveCeilingGrip, moveExcavationGrip,
-    moveExcavationEdge, moveCeilingBy, moveCeilingEdge, moveStairBy, dragStairParam, moveRoomBy, moveRoomGrip,
-    moveRoomEdge, moveRoomStamp, setRoomStampDoc,
+    applyDrawingVisibility, patchLevel, addColorToCustomPalette, fitToContextObjects, updateDrawing2D,
+    moveRoomStamp, setRoomStampDoc,
   } = pa;
 
   // ── Plan-Eingabe → Befehls-Engine ─────────────────────────────────────────
@@ -284,7 +289,6 @@ export default function App() {
     engineRef, engine, engineView, commandActive, commandLineRef, setAliasOverrides, shortcutOverrides,
     setShortcutOverrides, cmdTyped, setCmdTyped,
   } = useCommandEngineHost({
-    project,
     activeLevel,
     activeCategoryCode,
     activeLineStyleId,
@@ -316,23 +320,10 @@ export default function App() {
 
   // Esc/Enter/Backspace für das aktive Zeichenwerkzeug. Siehe
   // state/useKeyboardShortcuts.ts. Die Zifferntasten-Werkzeugwahl
-  // (useToolNumberShortcuts) folgt weiter unten, NACH useGripEditing() — sie
+  // (useToolNumberShortcuts) läuft in `ViewportCenter` NACH useGripEditing() — sie
   // braucht dessen gripDragInfoRef, um Zifferntasten während einer Griff-
   // Bearbeitung nicht als Werkzeug-Wechsel misszuverstehen.
   useActiveToolKeys(activeTool, engineRef, setActiveTool);
-
-  // ── Einzeln gewählte Elemente, Blatt, Fang für die Griffe → state/useGripInputs.ts ──
-  const { selectedDrawing, selectedCeiling, selectedExcavation, selectedRoom, roomStamp, sectionSheet, snapFor } = useGripInputs({
-    project,
-    activeLevel,
-    selection,
-    selectedDrawingId,
-    selectedCeilingId,
-    selectedRoomId,
-    visibleCodes,
-    snap,
-    planScale,
-  });
 
   // Option der Befehlszeile (Klick, Kürzel): „N Kopien"/„Verteilen" fragen erst die Anzahl ab
   // (Dialog), dann geht die Option mit der Zahl an den laufenden Befehl.
@@ -343,7 +334,6 @@ export default function App() {
 
   // ── Befehle auf der Auswahl + ihre Tastenkürzel → state/useSelectionCommands.ts ──
   const selCmds = useSelectionCommands({
-    project,
     setProject,
     applyChange,
     groupChanges,
@@ -357,7 +347,6 @@ export default function App() {
     engine,
     engineView,
     shortcutOverrides,
-    menu,
     drawingStyleClipboard,
     setDrawingStyleClipboard,
     onCommandOption,
@@ -365,58 +354,8 @@ export default function App() {
   });
   const { hasSelectionToDelete, deleteSelection, selectionLockMembers, selectionLockIds } = selCmds;
 
-  // ── 2D-Griffe (Eckpunkt-/Kanten-Griffe + Feld-Controller) der Auswahl → state/useGripEditing.ts ──
-  const grip2d = useGripEditing({
-    project,
-    selectedDrawing,
-    selectedCeiling,
-    selectedExcavation,
-    selectedRoom,
-    selection,
-    levelId: activeLevel.id,
-    modelEditable: activeLevel.kind !== "section" && activeLevel.kind !== "elevation",
-    sheet: sectionSheet,
-    visibleCodes,
-    scaleDenominator: planScale,
-    snap,
-    setDraft,
-    snapFor,
-    engineRef,
-    commandLineRef,
-    updateOpening,
-    slideOpening,
-    updateWall,
-    moveStairBy,
-    dragStairParam,
-    moveRoomGrip,
-    moveCeilingGrip,
-    moveExcavationGrip,
-    moveExcavationEdge,
-    moveGripOf,
-    moveRoomEdge,
-    moveCeilingEdge,
-    moveEdgeOf,
-    moveRoomBy,
-    moveCeilingBy,
-    moveElementByOf,
-    groupChanges,
-  });
-  const {
-    grips, gripHandleLines, edgeGrips, gripHandlers, gripDragInfoRef, edgeDragInfoRef,
-  } = grip2d;
-
-  // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 1 Text, 2 Linie,
-  // 3 Kreis, 4 Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum.
-  // Siehe state/useKeyboardShortcuts.ts. Braucht gripDragInfoRef/edgeDragInfoRef
-  // (s. o.), daher erst hier nach useGripEditing() registriert.
-  useToolNumberShortcuts(
-    onSelectTool,
-    activeLevel.kind === "floor",
-    engineRef,
-    shortcutOverrides,
-    gripDragInfoRef,
-    edgeDragInfoRef,
-  );
+  // 2D-/3D-Griffe der Auswahl, Zifferntasten der Werkzeuge und die Befehlszeile: in `ViewportCenter`
+  // (lesen das ganze Projekt, [121]).
 
   const clipboardIds = useMemo(() => toIdLists(selection), [selection]);
   // Ctrl/Cmd+C / Ctrl/Cmd+V = Bauteile kopieren/einfügen (alle 9 Auswahl-Kanäle,
@@ -426,7 +365,6 @@ export default function App() {
     elementClipboard,
     setElementClipboard,
     activeLevelId,
-    project,
     applyChange,
     setSelection,
     shortcutOverrides,
@@ -436,7 +374,6 @@ export default function App() {
   // und die Ausführung eines bestätigten DXF/DWG-Imports — gebündelt in
   // useProjectFileActions(), siehe dort.
   const files = useProjectFileActions(
-    project,
     setImportState,
     setExportSaveFormat,
     activeCategoryCode,
@@ -454,37 +391,10 @@ export default function App() {
   const { importIfcFile, openImportForAnyFile, importStepFile, onMeshImport } = modelImport;
 
   // Text-Ziel der Oberleisten-Text-Gruppe (Raumstempel bzw. freier Text) → state/useTextTarget.ts.
-  const textTarget = useTextTarget({ project, selectedRoom, selectedDrawingId, setRoomStampDoc, updateDrawing2D });
+  const textTarget = useTextTarget({ selectedRoomId, selectedDrawingId, setRoomStampDoc, updateDrawing2D });
 
-  // ── 3D-Editier-Griffe (direkt im Viewport3D) → state/useGrip3dEditing.ts ───
-  const grip3d = useGrip3dEditing({
-    project,
-    levelId: activeLevel.id,
-    visibleCodes,
-    snap,
-    setDraft,
-    undo,
-    commandLineRef,
-    selection,
-    updateRoof,
-    moveRoofGrip,
-    moveRoofBy,
-    moveCeilingGrip,
-    moveCeilingBy,
-    moveCeilingEdge,
-    moveGripOf,
-    moveElementByOf,
-    updateWall,
-  });
-  const {
-    edit3dWalls, edit3dDrawings, edit3dCeilings, edit3dRoofs, onEdit3dVertex, onEdit3dBody, onEdit3dEdge,
-    onEdit3dRoofPitch, onEdit3dWallTop, onEdit3dEnd, cycleGrip3dEditField, cancelGrip3dEdit,
-  } = grip3d;
-
-  // ── Objekt-Info der Auswahl, gewählte Schnittlinie, 3D-Live-Schnitt → state/useSectionLineState.ts ──
-  const { selectionInfo, sectionLine, section3dPlane, onToggleSection3dCut } = useSectionLineState({
-    project,
-    selection,
+  // ── Gewählte Schnittlinie, 3D-Live-Schnitt → state/useSectionLineState.ts ──
+  const { sectionLine, section3dPlane, onToggleSection3dCut } = useSectionLineState({
     activeLevel,
     viewType,
     selectedSectionLineId,
@@ -515,7 +425,6 @@ export default function App() {
 
   // Ressourcen-Fenster: Handler-Bündel, natives Fenster, Öffnen/Umschalten → state/useResourceHandlers.ts.
   const { resourceHandlers, openResources, toggleResources } = useResourceHandlers({
-    project,
     applyChange,
     groupChanges,
     activeLevel,
@@ -535,7 +444,6 @@ export default function App() {
 
   // ── Layout-Blatt (DOSSIER A3) → state/useSheetPane.ts ─────────────────────
   const sheetPane = useSheetPane({
-    project,
     activeLayoutId,
     setActiveLayoutId,
     activeLevelId,
@@ -545,7 +453,6 @@ export default function App() {
 
   // ── Effektive Darstellung für die Hauptansicht → state/useDisplayResolvers.ts ──
   const { floorDisplay, categoryDisplay, displayKey, drawingLevelsMode } = useDisplayResolvers({
-    project,
     activeLevelId,
     activeCategoryCode,
   });
@@ -559,7 +466,6 @@ export default function App() {
   const has3dView = activeLevel.kind !== "drawing" && activeLevel.kind !== "ceiling";
   // Start-Protokoll, Offline, KI-Zugriff, Hell/Dunkel, Einstellungsfenster → state/useSettingsHost.ts.
   const settings = useSettingsHost({
-    project,
     applyChange,
     groupChanges,
     notify,
@@ -576,7 +482,6 @@ export default function App() {
 
   // Native Nebenfenster (Ebeneneinstellungen, Standort-Import, Zeichnungsebenen) → state/useNativeWindowHosts.ts.
   const { openLayerSettings } = useNativeWindowHosts({
-    project,
     applyChange,
     activeLevelId,
     setActiveLevelId,
@@ -590,7 +495,6 @@ export default function App() {
 
   // Native macOS-Menüleiste → state/useNativeMenu.ts.
   useNativeMenu({
-    project,
     files,
     notify,
     undo,
@@ -627,7 +531,7 @@ export default function App() {
     activeTool !== "select" || commandActive;
 
   // Werkzeug-Hinweis und aktive Ebene der Status-Leiste → state/useStatusBarInfo.ts.
-  const { toolHint, activeLayerName } = useStatusBarInfo({ project, selection, activeCategoryCode });
+  const { toolHint, activeLayerName } = useStatusBarInfo({ selection, activeCategoryCode });
 
   // Solange keine Plan-Ansicht montiert ist, gibt es keinen Live-Massstab.
   // (PlanView meldet beim Montieren/Zoomen sofort wieder einen Wert.)
@@ -650,7 +554,6 @@ export default function App() {
   // Plan-Export (PDF/SVG/DXF) samt Inhaltsmass für den Dialog → state/useExportHandlers.ts.
   const planExport = useExportHandlers({
     exportOpen,
-    project,
     activeLevelId: activeLevel.id,
     activeLevelName: activeLevel.name,
     visibleCodes,
@@ -663,19 +566,12 @@ export default function App() {
     setExportDxfOpen,
   });
 
-  // Befehlszeile + Cursor-HUD: Feld-Controller der Griffe oder Engine → state/useCommandLineBinding.ts.
-  const {
-    hudFields, cmdLineActive, cmdLinePromptKey, cmdLineOptions, cmdLineFields, cmdLineSteps, onCmdSubmit,
-    onCmdCycleField, onCmdCancel,
-  } = useCommandLineBinding({ engine, engineView, commandActive, cmdTyped, displayUnits, planViewRef, grip2d, grip3d });
-
   // Maus-Schema: Auswahl + Kontextmenü aus Grundriss / 3D — siehe
   // state/useMouseSelectionHandlers.ts.
   const {
     onOpenStampEditor, onEditDrawingText, commitTextEdit, closeTextEdit, onPlanSelect, onPlanMarquee,
     onPlanContextMenu, onViewport3dPick,
   } = useMouseSelectionHandlers({
-    project,
     setProject,
     activeLevelId: activeLevel.id,
     visibleCodes,
@@ -692,7 +588,7 @@ export default function App() {
     // Auf einem Blatt: 60 mm breit, mitten aufs Papier.
     imagePlacement: sheetPane
       ? (() => {
-          const m = findMaster(project, sheetPane.layout);
+          const m = findMaster({ masterLayouts }, sheetPane.layout);
           const size = effectiveSheetSizeMm(m ?? sheetPane.layout);
           return { widthM: 0.06, center: sheetMmToModel(size.w / 2, size.h / 2) };
         })()
@@ -717,7 +613,6 @@ export default function App() {
 
   // Host-Context für die Panels — siehe state/usePanelHostBase.ts.
   const baseHost = usePanelHostBase({
-    project,
     setProject,
     applyChange,
     activeLevelId,
@@ -736,7 +631,6 @@ export default function App() {
     openResources,
     dxfInputRef,
     planViewRef,
-    selection: selectionInfo,
     projectActions: pa,
     selectionState: { updateRoof, setSelection, selectedSectionLineId, section3dCutId },
     toolState: {
@@ -806,9 +700,6 @@ export default function App() {
       if (ids) applyDrawingVisibility(ids);
     },
     onCommandOption,
-    onCmdSubmit,
-    onCmdCycleField,
-    onCmdCancel,
     cmdStillActive: () => engine.isActive(),
     cmdSuggest: (prefix: string) => engine.suggest(prefix),
     // Hauptansicht (Grundriss/3D).
@@ -847,7 +738,6 @@ export default function App() {
   const viewTabsState = useViewTabs();
   // `autoName` liest die Zeichnungsebenen (Name, Sichtbarkeit): neue Funktion, wenn sie sich ändern,
   // damit die Reiter-Titel nachziehen (die Host-Handler selbst sind stabil, [121]).
-  const drawingLevels = project.drawingLevels;
   const viewSnapshotTabs = useMemo(
     () => ({
       tabs: viewTabsState,
@@ -885,14 +775,104 @@ export default function App() {
     setPlanColorMode,
     activeLevel,
     textTarget,
-    textStyles: project.textStyles ?? DEFAULT_PRESETS,
+    textStyles: textStyles ?? DEFAULT_PRESETS,
   });
 
+  // Props der Hauptansicht, die `App` selbst liefert (der Rest entsteht in `ViewportCenter`).
+  const contentProps: Omit<
+    ComponentProps<typeof Content>,
+    | "project"
+    | "roomStamp"
+    | "hudFields"
+    | "grips"
+    | "gripHandleLines"
+    | "edgeGrips"
+    | "gripHandlers"
+    | "edit3dWalls"
+    | "edit3dDrawings"
+    | "edit3dCeilings"
+    | "edit3dRoofs"
+    | "onEdit3dVertex"
+    | "onEdit3dBody"
+    | "onEdit3dEdge"
+    | "onEdit3dRoofPitch"
+    | "onEdit3dWallTop"
+    | "onEdit3dEnd"
+    | "onGrip3dEditTab"
+    | "onGrip3dEditCancel"
+  > = {
+    sheet: sheetPane,
+    level: activeLevel,
+    viewType,
+    visibleCodes,
+    detail,
+    referenceLines,
+    scaleDenominator,
+    hairline: lineMode === "display",
+    showGrid: snap.showGrid,
+    marqueeColor,
+    snapColor,
+    hoverDivideDelayMs: snap.hoverDivideDelayMs,
+    hoverDivideCount: snap.hoverDivideCount,
+    renderMode,
+    view3d,
+    fov,
+    grid3dVisible,
+    onToggleGrid3d: ev.onToggleGrid3d,
+    section3d: section3dPlane,
+    onClearSection3d: ev.onClearSection3d,
+    mono: planColorMode === "mono",
+    viewSnapshotTabs,
+    onSelectLevel: setActiveLevelId,
+    floorDisplay,
+    categoryDisplay,
+    displayKey,
+    planViewRef,
+    onCursor: setCursor,
+    onScale: setLiveScale,
+    selection,
+    onStampMove: ev.moveRoomStamp,
+    onStampEdit: ev.onOpenStampEditor,
+    onEditDrawingText: ev.onEditDrawingText,
+    onEnterGroup: ev.onEnterGroup,
+    onLeaveGroup: ev.onLeaveGroup,
+    groupPath,
+    editTextId,
+    editTextMinHeightM,
+    onCommitTextEdit: ev.commitTextEdit,
+    onCloseTextEdit: ev.closeTextEdit,
+    onPlanSelect: ev.onPlanSelect,
+    onPlanMarquee: ev.onPlanMarquee,
+    onSegmentCut: ev.onSegmentCut,
+    onPlanContextMenu: ev.onPlanContextMenu,
+    onViewport3dPick: ev.onViewport3dPick,
+    // Zeichnen-Modus des 3D-Viewports (auch Bewegen/Drehen/Spiegeln sind Befehle).
+    commandActive,
+    draft,
+    onWorkplanePoint: ev.onWorkplanePoint,
+    onWorkplaneConfirm: ev.onWorkplaneConfirm,
+    activeTool,
+    toolInputActive,
+    toolHandlers: contentToolHandlers,
+    onEdit3dGroup: groupChanges,
+  };
+
+  // Abgleiche ohne Anzeige (Gauben-Hinweis, natives Ressourcen-Fenster), an derselben Stelle im Baum
+  // vor Start- und Editor-Ansicht.
+  const projectSync = <ProjectSync notify={notify} resourceHandlers={resourceHandlers} />;
+
   if (bootPhase !== "editor") {
-    return <BootScreen phase={bootPhase} setPhase={setBootPhase} files={files} notify={notify} />;
+    return (
+      <>
+        {projectSync}
+        <BootScreen phase={bootPhase} setPhase={setBootPhase} files={files} notify={notify} />
+      </>
+    );
   }
 
   return (
+    <>
+    {projectSync}
     <div
       className="app"
       onDragEnter={onAppDragEnter}
@@ -919,7 +899,7 @@ export default function App() {
       {/* Schmale globale Leiste: Marke/Menü · Datei/Export/Einstellungen.
           Ansichts-/Zoom-/Darstellungs-Steuerung folgt direkt darunter
           (ViewRibbonTab, permanent — kein Tab-Umschalter mehr). */}
-      <TopBar projectName={project.name} menuBar={menuBarEl} viewControls={viewControlsEl} />
+      <TopBar projectName={projectName} menuBar={menuBarEl} viewControls={viewControlsEl} />
 
       {/* Docks links/rechts, Andock-Zonen, schwebende Panels und Drag-Overlay um die Mitte → panels/DockArea.tsx. */}
       <DockArea
@@ -934,106 +914,39 @@ export default function App() {
               Befehlszeile nur so breit wie der Viewport (nicht die ganze App),
               und die Docks nehmen die volle Body-Höhe ein (inkl. der Zeile). */}
           <div className="center-col">
-          {(
-          <>
-          {/* Hauptansicht (Mitte) — füllt den verbleibenden Platz. Die Plan-
-              Ansicht meldet Cursor + Zoom an die Status-/Oberleiste und nimmt
-              das Zoom-Handle entgegen. */}
-          <Content
-            sheet={sheetPane}
-            project={project}
-            level={activeLevel}
-            viewType={viewType}
-            visibleCodes={visibleCodes}
-            detail={detail}
-            referenceLines={referenceLines}
-            scaleDenominator={scaleDenominator}
-            hairline={lineMode === "display"}
-            showGrid={snap.showGrid}
-            marqueeColor={marqueeColor}
-            snapColor={snapColor}
-            hoverDivideDelayMs={snap.hoverDivideDelayMs}
-            hoverDivideCount={snap.hoverDivideCount}
-            renderMode={renderMode}
-            view3d={view3d}
-            fov={fov}
-            grid3dVisible={grid3dVisible}
-            onToggleGrid3d={ev.onToggleGrid3d}
-            section3d={section3dPlane}
-            onClearSection3d={ev.onClearSection3d}
-            mono={planColorMode === "mono"}
-            viewSnapshotTabs={viewSnapshotTabs}
-            onSelectLevel={setActiveLevelId}
-            floorDisplay={floorDisplay}
-            categoryDisplay={categoryDisplay}
-            displayKey={displayKey}
-            planViewRef={planViewRef}
-            onCursor={setCursor}
-            onScale={setLiveScale}
+          {/* Hauptansicht und Befehlszeile samt Griffen → views/ViewportCenter.tsx. */}
+          <ViewportCenter
+            content={contentProps}
+            activeLevel={activeLevel}
             selection={selection}
-            roomStamp={roomStamp}
-            onStampMove={ev.moveRoomStamp}
-            onStampEdit={ev.onOpenStampEditor}
-            onEditDrawingText={ev.onEditDrawingText}
-            onEnterGroup={ev.onEnterGroup}
-            onLeaveGroup={ev.onLeaveGroup}
-            groupPath={groupPath}
-            editTextId={editTextId}
-            editTextMinHeightM={editTextMinHeightM}
-            onCommitTextEdit={ev.commitTextEdit}
-            onCloseTextEdit={ev.closeTextEdit}
-            onPlanSelect={ev.onPlanSelect}
-            onPlanMarquee={ev.onPlanMarquee}
-            onSegmentCut={ev.onSegmentCut}
-            onPlanContextMenu={ev.onPlanContextMenu}
-            onViewport3dPick={ev.onViewport3dPick}
-            // Zeichnen-Modus des 3D-Viewports (auch Bewegen/Drehen/Spiegeln sind Befehle).
+            selectedDrawingId={selectedDrawingId}
+            selectedCeilingId={selectedCeilingId}
+            selectedRoomId={selectedRoomId}
+            visibleCodes={visibleCodes}
+            snap={snap}
+            planScale={planScale}
+            setDraft={setDraft}
+            undo={undo}
+            groupChanges={groupChanges}
+            pa={pa}
+            updateRoof={updateRoof}
+            moveRoofGrip={moveRoofGrip}
+            moveRoofBy={moveRoofBy}
+            engineRef={engineRef}
+            engine={engine}
+            engineView={engineView}
             commandActive={commandActive}
-            draft={draft}
-            onWorkplanePoint={ev.onWorkplanePoint}
-            onWorkplaneConfirm={ev.onWorkplaneConfirm}
-            activeTool={activeTool}
-            toolInputActive={toolInputActive}
-            toolHandlers={contentToolHandlers}
-            hudFields={hudFields}
-            grips={grips}
-            gripHandleLines={gripHandleLines}
-            edgeGrips={edgeGrips}
-            gripHandlers={gripHandlers}
-            edit3dWalls={edit3dWalls}
-            edit3dDrawings={edit3dDrawings}
-            edit3dCeilings={edit3dCeilings}
-            edit3dRoofs={edit3dRoofs}
-            onEdit3dVertex={onEdit3dVertex}
-            onEdit3dBody={onEdit3dBody}
-            onEdit3dEdge={onEdit3dEdge}
-            onEdit3dRoofPitch={onEdit3dRoofPitch}
-            onEdit3dWallTop={onEdit3dWallTop}
-            onEdit3dEnd={onEdit3dEnd}
-            onEdit3dGroup={groupChanges}
-            onGrip3dEditTab={cycleGrip3dEditField}
-            onGrip3dEditCancel={cancelGrip3dEdit}
+            commandLineRef={commandLineRef}
+            cmdTyped={cmdTyped}
+            setCmdTyped={setCmdTyped}
+            shortcutOverrides={shortcutOverrides}
+            onSelectTool={onSelectTool}
+            displayUnits={displayUnits}
+            planViewRef={planViewRef}
+            onCommandOption={ev.onCommandOption}
+            cmdStillActive={ev.cmdStillActive}
+            cmdSuggest={ev.cmdSuggest}
           />
-          {/* Command-Line (Rhino-artig) UNTER dem Viewport — nur Viewport-breit.
-              Prompt + klickbare Inline-Optionen + Texteingabe + Autocomplete. */}
-          <CommandLine
-            ref={commandLineRef}
-            units={displayUnits}
-            active={cmdLineActive}
-            promptKey={cmdLinePromptKey}
-            options={cmdLineOptions}
-            fields={cmdLineFields}
-            onSubmit={ev.onCmdSubmit}
-            onOption={ev.onCommandOption}
-            onCycleField={ev.onCmdCycleField}
-            onCancel={ev.onCmdCancel}
-            stillActive={ev.cmdStillActive}
-            steps={cmdLineSteps}
-            suggest={ev.cmdSuggest}
-            onTextChange={setCmdTyped}
-          />
-          </>
-          )}
           </div>
       </DockArea>
 
@@ -1061,7 +974,6 @@ export default function App() {
 
       {/* Dialoge und Overlays (Ressourcen, Import/Export, Einstellungen, Projektdatei …) → ui/AppDialogs.tsx. */}
       <AppDialogs
-        project={project}
         applyChange={applyChange}
         layout={layout}
         setLayout={setLayout}
@@ -1094,7 +1006,6 @@ export default function App() {
       {menu && (
         <AppContextMenu
           menu={menu}
-          project={project}
           selection={selection}
           setSelection={setSelection}
           selectedWallId={selectedWallId}
@@ -1128,5 +1039,6 @@ export default function App() {
           notifySlice.ts) — top-level, damit sie über allen Docks/Modals liegen. */}
       <Toast />
     </div>
+    </>
   );
 }

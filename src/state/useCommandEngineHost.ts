@@ -6,7 +6,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import type { DrawingLevel, Project } from "../model/types";
+import type { DrawingLevel } from "../model/types";
 import type { SnapSettings, ToolDraft } from "../tools/types";
 import type { TransformSelection } from "../tools/transform";
 import { computeSnap } from "../tools/snapping";
@@ -52,7 +52,6 @@ type Sel = ReturnType<typeof useSelectionState>;
 type Menu = ReturnType<typeof useContextMenuState>;
 
 export function useCommandEngineHost(opts: {
-  project: Project;
   activeLevel: DrawingLevel;
   activeCategoryCode: string;
   activeLineStyleId: string;
@@ -68,7 +67,6 @@ export function useCommandEngineHost(opts: {
   setEditTextMinHeightM: Menu["setEditTextMinHeightM"];
 }) {
   const {
-    project,
     activeLevel,
     activeCategoryCode,
     activeLineStyleId,
@@ -91,7 +89,6 @@ export function useCommandEngineHost(opts: {
   // ein Befehl, übernimmt er die linke Maustaste der Plan-Ansicht über denselben
   // toolHandlers-Pfad wie die Alt-Tools (siehe unten).
   const cmdLatest = useRef({
-    project,
     activeLevel,
     activeCategoryCode,
     activeLineStyleId,
@@ -104,7 +101,6 @@ export function useCommandEngineHost(opts: {
     setDraft,
   });
   cmdLatest.current = {
-    project,
     activeLevel,
     activeCategoryCode,
     activeLineStyleId,
@@ -123,7 +119,8 @@ export function useCommandEngineHost(opts: {
       context: (lastPoint): CommandContext => {
         const c = cmdLatest.current;
         return {
-          project: c.project,
+          // Das Projekt immer frisch aus dem Store ([121]: App abonniert es nicht mehr).
+          project: getState().project,
           level: c.activeLevel,
           defaultCategoryCode: c.activeCategoryCode,
           scaleDenominator: getState().scaleDenominator,
@@ -141,7 +138,7 @@ export function useCommandEngineHost(opts: {
         const c = cmdLatest.current;
         return computeSnap({
           raw,
-          project: c.project,
+          project: getState().project,
           levelId: c.activeLevel.id,
           visibleCodes: c.visibleCodes,
           settings: c.snap,

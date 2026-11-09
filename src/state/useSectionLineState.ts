@@ -1,35 +1,26 @@
-// Auswahl-Sicht und Schnittlinien ([163], aus App.tsx herausgelöst): die Objekt-Info der Auswahl
-// (`deriveSelection`), die gewählte bzw. aktive Schnitt-/Ansichtslinie für das Objekt-Info-Panel und
-// die 3D-Schnittebene des Live-Schnitts samt Umschalter. Aufgerufen von `App.tsx`; die Werte gehen an
-// die Panels (`usePanelHostBase`) und die Hauptansicht.
+// Schnittlinien ([163], aus App.tsx herausgelöst): die gewählte bzw. aktive Schnitt-/Ansichtslinie für
+// das Objekt-Info-Panel und die 3D-Schnittebene des Live-Schnitts samt Umschalter. Aufgerufen von
+// `App.tsx`; die Werte gehen an die Panels (`usePanelHostBase`) und die Hauptansicht. Liest nur die
+// Zeichnungsebenen aus dem Store ([121]); die Objekt-Info der Auswahl rechnen Panels selbst
+// (`useSelectionInfo`), der Panel-Host beim Aufruf eines Handlers.
 
 import { useCallback, useEffect, useMemo } from "react";
-import type { DrawingLevel, Project, ViewType } from "../model/types";
+import type { DrawingLevel, ViewType } from "../model/types";
 import { sectionPlaneFromLevel } from "../core";
-import { selectionInfoFor } from "./useSelectionInfo";
-import type { SelectionInfo } from "./selectionInfo";
+import { useStore } from "./appStore";
 import type { useSelectionState } from "./useSelectionState";
 
 type Sel = ReturnType<typeof useSelectionState>;
 
 export function useSectionLineState(opts: {
-  project: Project;
-  selection: Sel["selection"];
   activeLevel: DrawingLevel;
   viewType: ViewType;
   selectedSectionLineId: string | null;
   section3dCutId: Sel["section3dCutId"];
   setSection3dCutId: Sel["setSection3dCutId"];
 }) {
-  const { project, selection, activeLevel, viewType, selectedSectionLineId, section3dCutId, setSection3dCutId } = opts;
-
-  // ── Selektions-Attribut-Kontrakt (Attributes-/Object-Info-Paletten) ───────
-  // Normalisierte, effektiv aufgelöste Sicht auf das erste selektierte Element (gemeinsamer Cache mit
-  // `useSelectionInfo` der Panels, inhaltlich stabil).
-  const selectionInfo = useMemo(
-    (): SelectionInfo | null => selectionInfoFor(project, selection),
-    [project, selection],
-  );
+  const { activeLevel, viewType, selectedSectionLineId, section3dCutId, setSection3dCutId } = opts;
+  const drawingLevels = useStore((s) => s.project.drawingLevels);
 
   // Gewählte Schnitt-/Ansichtslinie (DrawingLevel) — separat von `selection`, da
   // eine Schnittlinie KEIN Projekt-Bauteil ist. Speist die Schnittlinien-Sektion
@@ -43,13 +34,13 @@ export function useSectionLineState(opts: {
   const sectionLine = useMemo(
     () =>
       sectionLineId
-        ? project.drawingLevels.find(
+        ? drawingLevels.find(
             (z) =>
               z.id === sectionLineId &&
               (z.kind === "section" || z.kind === "elevation"),
           ) ?? null
         : null,
-    [project.drawingLevels, sectionLineId],
+    [drawingLevels, sectionLineId],
   );
 
   // Abgeleitete 3D-Schnittebene der gebundenen Schnittlinie (world point+normal
@@ -57,13 +48,13 @@ export function useSectionLineState(opts: {
   // Linie (gelöscht/ohne linePoints), liefert der Helfer null → kein Schnitt.
   const section3dPlane = useMemo(() => {
     if (!section3dCutId) return null;
-    const lvl = project.drawingLevels.find(
+    const lvl = drawingLevels.find(
       (z) =>
         z.id === section3dCutId &&
         (z.kind === "section" || z.kind === "elevation"),
     );
     return lvl ? sectionPlaneFromLevel(lvl) : null;
-  }, [project.drawingLevels, section3dCutId]);
+  }, [drawingLevels, section3dCutId]);
 
   // Aus einem Schnitt ins 3D ([115]): der Live-Schnitt folgt der Schnittlinie dieses Schnitts (einmal
   // beim Wechsel; im 3D lässt er sich wie sonst aufheben).
@@ -78,5 +69,5 @@ export function useSectionLineState(opts: {
     [],
   );
 
-  return { selectionInfo, sectionLine, section3dPlane, onToggleSection3dCut };
+  return { sectionLine, section3dPlane, onToggleSection3dCut };
 }

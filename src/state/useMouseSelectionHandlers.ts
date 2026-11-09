@@ -6,7 +6,7 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { opsMutation, patchItem, removeItems } from "../core";
-import type { Project, Vec2 } from "../model/types";
+import type { Vec2 } from "../model/types";
 import type { CategoryDisplayResolver, ProjectMutation } from "../core";
 import type { DisplayResolver } from "../viewport/Viewport3D";
 import type { PlanSelection, MarqueeSelection } from "../views/plan/PlanView";
@@ -44,7 +44,6 @@ function selHit(sel: PlanSelection): { kind: MemberKind; id: string } | null {
 }
 
 export function useMouseSelectionHandlers(opts: {
-  project: Project;
   /** `coalesceKey`: s. `projectSlice.ts` `setProject` — von `commitTextEdit`
    *  genutzt, damit EIN Tipp-Vorgang EINEN Undo-Schritt erzeugt (wie beim
    *  Griff-Ziehen), statt bei jedem Tastendruck einen neuen zu pushen. */
@@ -62,7 +61,8 @@ export function useMouseSelectionHandlers(opts: {
     "setMenu" | "setStampEditorRoomId" | "editTextId" | "setEditTextId" | "setEditTextMinHeightM"
   >;
 }) {
-  const { project, setProject, activeLevelId, visibleCodes, categoryDisplay, floorDisplay, selectionState, contextMenuState } = opts;
+  // [121] Das Projekt liest jeder Handler beim Aufruf aus dem Store (App abonniert es nicht mehr).
+  const { setProject, activeLevelId, visibleCodes, categoryDisplay, floorDisplay, selectionState, contextMenuState } = opts;
   const { selection, setSelection, groupPath } = selectionState;
   const { setMenu, setStampEditorRoomId, editTextId, setEditTextId, setEditTextMinHeightM } = contextMenuState;
 
@@ -77,7 +77,7 @@ export function useMouseSelectionHandlers(opts: {
   };
   // Doppelklick auf ein Text-2D-Element: selektieren + Inhalts-Editor öffnen.
   const onEditDrawingText = (drawingId: string) => {
-    const d = project.drawings2d.find((x) => x.id === drawingId);
+    const d = getState().project.drawings2d.find((x) => x.id === drawingId);
     if (!d || d.geom.shape !== "text") return;
     setSelection({ ...clearKinds(), drawings: [drawingId] });
     // Bestehendes Element per Doppelklick: keine Rahmen-Mindesthöhe (nur bei
@@ -132,6 +132,7 @@ export function useMouseSelectionHandlers(opts: {
   // nur die Kanäle, deren Modell-Typ eine categoryCode trägt (ExtrudedSolid/
   // Kontext-Objekte bewusst ohne, siehe deren Typdefinitionen).
   const categoryCodeOfSelection = (sel: PlanSelection): string | undefined => {
+    const project = getState().project;
     if (sel.wallId) return project.walls.find((w) => w.id === sel.wallId)?.categoryCode;
     if (sel.ceilingId)
       return (project.ceilings ?? []).find((c) => c.id === sel.ceilingId)?.categoryCode;
@@ -153,6 +154,7 @@ export function useMouseSelectionHandlers(opts: {
   // und `generateVisibleLevelsPlan`. Öffnungen gehören zur Wand (keine eigene
   // Ebenen-Referenz) — bewusst ausgelassen, wie schon bei categoryCodeOfSelection.
   const floorIdOfSelection = (sel: PlanSelection): string | undefined => {
+    const project = getState().project;
     if (sel.wallId) return project.walls.find((w) => w.id === sel.wallId)?.floorId;
     if (sel.ceilingId) return (project.ceilings ?? []).find((c) => c.id === sel.ceilingId)?.floorId;
     if (sel.stairId) return (project.stairs ?? []).find((s) => s.id === sel.stairId)?.floorId;
@@ -164,6 +166,7 @@ export function useMouseSelectionHandlers(opts: {
   };
 
   const onPlanSelect = (sel: PlanSelection) => {
+    const project = getState().project;
     // Darstellungsmodus „Andere grau & gesperrt": ein gesperrtes Element lässt
     // sich nicht anwählen (und damit auch nicht verschieben/bearbeiten) — der
     // Klick wird ignoriert, als läge dort nichts.
@@ -304,6 +307,7 @@ export function useMouseSelectionHandlers(opts: {
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
   // (nach CAD-Konvention von PlanView bestimmt). Ersetzt die bisherige Auswahl.
   const onPlanMarquee = (sel: MarqueeSelection) => {
+    const project = getState().project;
     // Objekt-Sperre: NICHT hier filtern (s. Kommentar bei `onPlanSelect`) —
     // Auswahl bleibt für gesperrte Elemente uneingeschränkt möglich, die
     // Mutations-Stellen selbst prüfen `isLocked`.
@@ -361,6 +365,7 @@ export function useMouseSelectionHandlers(opts: {
     clientY: number;
     model: Vec2;
   }) => {
+    const project = getState().project;
     // [33] Per Regel ausgeblendete Wände sind im Grundriss nicht anwählbar (wie über den Plan-Pick).
     const wallId = hitTestWall(project, activeLevelId, visibleCodes, info.model, hiddenElementIds(project, getState().scaleDenominator));
     if (wallId && !selection.walls.includes(wallId)) setSelection({ walls: [wallId] });
@@ -373,6 +378,7 @@ export function useMouseSelectionHandlers(opts: {
   // (Einzel-Selektion über Arten hinweg, konsistent mit dem 2D-Verhalten).
   // Leertreffer (kein Bauteil) → alle Selektionen leeren.
   const onViewport3dPick = (hit: Pick3dHit, additive: boolean) => {
+    const project = getState().project;
     if (!hit) {
       setSelection(clearKinds());
       return;

@@ -16,9 +16,11 @@ const PRESETS: { key: "sun.equinox" | "sun.summer" | "sun.winter"; md: string }[
 ];
 
 export function SunStudySection() {
-  const project = useStore((s) => s.project);
+  // Schmale Abos ([121]): Sonnenstudie und Standort-Bezug.
+  const sunStudy = useStore((s) => s.project.sunStudy);
+  const geoAnchor = useStore((s) => s.project.geoAnchor);
   const applyChange = useStore((s) => s.applyChange);
-  const study: SunStudy = project.sunStudy ?? { when: defaultStudyIso(), show: false };
+  const study: SunStudy = sunStudy ?? { when: defaultStudyIso(), show: false };
   const local = isoToLocal(study.when) ?? isoToLocal(defaultStudyIso())!;
 
   const write = (next: SunStudy, key?: string) => applyChange([setField("sunStudy", next)], key);
@@ -27,7 +29,7 @@ export function SunStudySection() {
     if (iso) write({ ...study, when: iso }, key);
   };
 
-  const { lat, lon } = projectLatLon(project);
+  const { lat, lon } = projectLatLon({ geoAnchor });
   const sun = sunPosition(lat, lon, new Date(study.when));
   const year = local.date.slice(0, 4);
 
@@ -90,7 +92,7 @@ export function SunStudySection() {
         {sun.elevation > 0
           ? t("sun.position", { az: sun.azimuth.toFixed(0), el: sun.elevation.toFixed(1) })
           : t("sun.belowHorizon")}
-        {!project.geoAnchor && <span title={t("sun.noAnchor.hint")}> · {t("sun.noAnchor")}</span>}
+        {!geoAnchor && <span title={t("sun.noAnchor.hint")}> · {t("sun.noAnchor")}</span>}
       </div>
     </div>
   );

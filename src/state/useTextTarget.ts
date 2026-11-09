@@ -1,10 +1,11 @@
 // Text-Ziel der Oberleisten-Formatierung ([163], aus App.tsx herausgelöst): der Stempel-Text des
 // einzeln gewählten Raums oder ein gewählter freier Text, mit einem Setter, der live ins Projekt
 // schreibt. Ohne passendes Element `null` (die Leiste setzt dann nur Vorgaben). Aufgerufen von
-// `App.tsx`; das Ergebnis geht an `ViewRibbonTab`.
+// `App.tsx`; das Ergebnis geht an `ViewRibbonTab`. Abonniert nur den gewählten Raum bzw. das gewählte
+// 2D-Element ([121]), nicht das ganze Projekt.
 
 import { useMemo } from "react";
-import type { Project, Room } from "../model/types";
+import { useStore } from "./appStore";
 import { docFromText, plainText } from "../text/richText";
 import type { RichTextDoc } from "../text/richText";
 import { useEventBundle } from "./useEvent";
@@ -13,13 +14,16 @@ import type { useProjectActions } from "./useProjectActions";
 type ProjectActions = ReturnType<typeof useProjectActions>;
 
 export function useTextTarget(opts: {
-  project: Project;
-  selectedRoom: Room | null;
+  selectedRoomId: string | null;
   selectedDrawingId: string | null;
   setRoomStampDoc: ProjectActions["setRoomStampDoc"];
   updateDrawing2D: ProjectActions["updateDrawing2D"];
 }) {
-  const { project, selectedRoom, selectedDrawingId, setRoomStampDoc, updateDrawing2D } = opts;
+  const { selectedRoomId, selectedDrawingId, setRoomStampDoc, updateDrawing2D } = opts;
+  const selectedRoom = useStore((s) => (s.project.rooms ?? []).find((r) => r.id === selectedRoomId) ?? null);
+  const selectedDrawing = useStore((s) =>
+    selectedDrawingId ? (s.project.drawings2d.find((x) => x.id === selectedDrawingId) ?? null) : null,
+  );
   // Text-Ziel der Oberleisten-Text-Gruppe: der Stempel-Text des (einzeln)
   // gewählten Raums. Ohne aktive Editor-Auswahl wirkt Formatierung auf das ganze
   // Doc (range: null). Ist kein Raum gewählt → null (Controls setzen nur
@@ -38,9 +42,9 @@ export function useTextTarget(opts: {
     // auf Schriftfamilie/fett/kursiv/Farbe des ganzen Texts. Die GRÖSSE bleibt
     // bewusst über die Modell-Höhe (Meter, height) geführt — nicht über sizePt,
     // damit der Text im Massstab bleibt (Punkt-Grössen wären massstabslos).
-    if (selectedDrawingId) {
-      const d = project.drawings2d.find((x) => x.id === selectedDrawingId);
-      if (d && d.geom.shape === "text") {
+    if (selectedDrawing) {
+      const d = selectedDrawing;
+      if (d.geom.shape === "text") {
         const g = d.geom;
         // Trägt das Element bereits ein reiches Doc (Doppelklick-Editor), wirkt
         // die Oberleiste per Bereichs-Operation (toggleMark/applyMark) DARAUF —
@@ -63,6 +67,6 @@ export function useTextTarget(opts: {
       }
     }
     return null;
-  }, [selectedRoom, textActions, selectedDrawingId, project.drawings2d]);
+  }, [selectedRoom, textActions, selectedDrawing]);
   return textTarget;
 }

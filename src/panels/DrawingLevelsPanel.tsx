@@ -67,7 +67,8 @@ export const CATEGORY_ADD_KEY: Record<DrawingLevelKind, string> = {
 export function DrawingLevelsPanel() {
   const host = usePanelHost();
   const { activeLevelId, displayMode } = host;
-  const project = useStore((s) => s.project);
+  // Nur die Zeichnungsebenen abonnieren ([121]).
+  const drawingLevels = useStore((s) => s.project.drawingLevels);
 
   // Auf-/Zu-Zustand je Kategorie, lokal — Default: alle aufgeklappt.
   const [collapsed, setCollapsed] = useState<Record<DrawingLevelKind, boolean>>(
@@ -86,7 +87,7 @@ export function DrawingLevelsPanel() {
 
   // Oberstes Geschoss zuoberst (wie DOSSIER): Anzeige umkehren.
   // Blatt-Ebenen (Layout-Zeichnung) gehören zum Blatt, nicht in den Navigator.
-  const levelsTopDown = project.drawingLevels.filter((z) => !z.layoutId).reverse();
+  const levelsTopDown = drawingLevels.filter((z) => !z.layoutId).reverse();
 
   // Klick aufs Auge in „Alle anzeigen"/„Nur aktive" schaltet automatisch auf
   // „Ausgewählte" (DOSSIER-Regel), damit das Sichtbarkeits-Flag sofort greift.

@@ -20,13 +20,12 @@ import { projectToWorldCoords } from "../model/geoRebase";
 import type { Project } from "../model/types";
 import { filterProjectToSelection } from "./exportScope";
 import type { GroupMembership } from "./groupActions";
-import { getState } from "./appStore";
+import { getState, useStore } from "./appStore";
 import { t } from "../i18n";
 
 export function useExportHandlers(opts: {
   /** PDF-Export-Dialog offen? Nur dann wird das Inhaltsmass gerechnet. */
   exportOpen: boolean;
-  project: Project;
   activeLevelId: string;
   activeLevelName: string;
   visibleCodes: Set<string>;
@@ -46,7 +45,6 @@ export function useExportHandlers(opts: {
 } {
   const {
     exportOpen,
-    project,
     activeLevelId,
     activeLevelName,
     visibleCodes,
@@ -60,9 +58,11 @@ export function useExportHandlers(opts: {
   } = opts;
 
   // Massstäbliche Inhalts-Maße (Meter) des aktuellen Plans — nur berechnet, wenn
-  // der Export-Dialog offen ist (für die „passt aufs Blatt?"-Warnung).
+  // der Export-Dialog offen ist (für die „passt aufs Blatt?"-Warnung). Das Projekt nur dann abonnieren
+  // ([121]: sonst rendert der Aufrufer `App` bei jeder Modelländerung).
+  const project = useStore((s) => (exportOpen ? s.project : null));
   const exportContentMeters = useMemo(() => {
-    if (!exportOpen) return undefined;
+    if (!project) return undefined;
     const b = generatePlan(
       project,
       activeLevelId,
@@ -84,8 +84,10 @@ export function useExportHandlers(opts: {
     planColorMode,
   ]);
 
-  const scopedProject = (selectionOnly: boolean): Project =>
-    selectionOnly ? filterProjectToSelection(project, selectionMembers) : project;
+  const scopedProject = (selectionOnly: boolean): Project => {
+    const p = getState().project;
+    return selectionOnly ? filterProjectToSelection(p, selectionMembers) : p;
+  };
 
   // Gefilterte/verschobene Kopie = eigenes, kurzlebiges Kern-Dokument ([122]); das ganze Projekt läuft
   // direkt über das Dokument des Stores.
@@ -108,8 +110,8 @@ export function useExportHandlers(opts: {
       paper: decision.paper,
       orientation: decision.orientation,
       title: activeLevelName,
-      subtitle: project.name,
-      fileName: `${project.name}-${activeLevelName}`,
+      subtitle: getState().project.name,
+      fileName: `${getState().project.name}-${activeLevelName}`,
     });
     setExportOpen(false);
   };
@@ -135,7 +137,7 @@ export function useExportHandlers(opts: {
       scaleDenominator: decision.scaleDenominator,
       paper: decision.paper,
       orientation: decision.orientation,
-      fileName: `${project.name}-${activeLevelName}`,
+      fileName: `${getState().project.name}-${activeLevelName}`,
     });
     setExportOpen(false);
   };
@@ -174,7 +176,7 @@ export function useExportHandlers(opts: {
         dimUnit: decision.dimUnit,
         paperLayout: decision.paperLayout,
         levelId: activeLevelId,
-        fileName: `${project.name}-${activeLevelName}`,
+        fileName: `${getState().project.name}-${activeLevelName}`,
       });
     } catch (err) {
       getState().notify(`${t("exportDxf.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error");

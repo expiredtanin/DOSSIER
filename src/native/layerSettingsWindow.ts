@@ -63,7 +63,7 @@ export async function openLayerSettingsWindowNative(code: string): Promise<void>
 }
 
 /** Baut den Sync-Zustand für eine Kategorie (bzw. `null`, wenn der Code nicht mehr existiert — z. B. gelöscht). */
-function stateFor(project: Project, code: string): LayerSettingsSyncState | null {
+function stateFor(project: Pick<Project, "layers" | "hatches">, code: string): LayerSettingsSyncState | null {
   const cat = findCategory(project.layers, code);
   if (!cat) return null;
   return {
@@ -78,10 +78,10 @@ function stateFor(project: Project, code: string): LayerSettingsSyncState | null
 
 /** Hauptfenster-Seite der Sync-Brücke. `code` = aktuell im Fenster editierte Ebene (folgt `openLayerSettingsWindowNative`-Aufrufen). */
 export function useLayerSettingsWindowHost(
-  project: Project,
+  project: Pick<Project, "layers" | "hatches">,
   code: string | null,
   onPatchCategory: (code: string, patch: Partial<LayerCategory>) => void,
 ): void {
   const state: LayerSettingsSyncState | null = code ? stateFor(project, code) : null;
-  useWindowBridgeHost(LAYER_SETTINGS_WINDOW_LABEL, "layer-settings", state, { onPatchCategory: (c: string, patch: Partial<LayerCategory>) => onPatchCategory(c, patch) }, [project, code]);
+  useWindowBridgeHost(LAYER_SETTINGS_WINDOW_LABEL, "layer-settings", state, { onPatchCategory: (c: string, patch: Partial<LayerCategory>) => onPatchCategory(c, patch) }, [project.layers, project.hatches, code]);
 }

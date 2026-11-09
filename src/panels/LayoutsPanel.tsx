@@ -356,10 +356,10 @@ function MasterRow({
 
 export function LayoutsPanel() {
   const host = usePanelHost();
-  const project = useStore((s) => s.project);
-  const layouts = project.layouts ?? [];
-  const masters = project.masterLayouts ?? [];
-  const folders = project.layoutFolders ?? [];
+  // Schmale Abos ([121]): Layouts, Master, Ordner.
+  const layouts = useStore((s) => s.project.layouts) ?? [];
+  const masters = useStore((s) => s.project.masterLayouts) ?? [];
+  const folders = useStore((s) => s.project.layoutFolders) ?? [];
   // Getrennte Bäume je `kind` — Layout- und Master-Ordner werden NIE vermischt.
   const layoutFolders = folders.filter((f) => f.kind !== "master");
   const masterFolders = folders.filter((f) => f.kind === "master");

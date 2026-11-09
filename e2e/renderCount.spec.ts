@@ -9,19 +9,23 @@
 // 9.11.: Wand-Änderung 55 → 42 (Panels lesen Projekt und Objekt-Info selbst aus dem Store, Panel-Host
 // mit stabiler Identität, Docks/Datei-Felder/Reiter/Präsentations-Dialog memoisiert). Der Rest ist die
 // Objekt-Info der geänderten Wand samt Feldern, die Plan-Ansicht und `App` selbst (Griffe der Auswahl).
-// Die Schranken unten fangen den Rückfall ab, dass wieder ganze Bäume mitrendern.
+// 9.11. (Teil 3): `App` abonniert das Projekt nicht mehr (Griffe/Befehlszeile in `ViewportCenter`,
+// Kontextmenü, Dialoge und Abgleiche lesen selbst), Wand-Änderung 42 → 40, `App` 0× (vorher 1×, dazu
+// `DockArea` und `AppDialogs`). Geprüft wird das über die Komponente, die `div.app` rendert (Namen sind im
+// minifizierten Build nicht lesbar). Die Schranken unten fangen den Rückfall ab, dass wieder ganze Bäume
+// mitrendern.
 import type { Page } from "@playwright/test";
 import { blurFocus, elementRows, expect, openSample, openTab, startNewProject, test } from "./app";
 
 declare global {
   interface Window {
-    __renderCounts?: { on: boolean; total: number; byName: Record<string, number> };
+    __renderCounts?: { on: boolean; total: number; app: number; byName: Record<string, number> };
   }
 }
 
 async function installCounter(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const stats = { on: false, total: 0, byName: {} as Record<string, number> };
+    const stats = { on: false, total: 0, app: 0, byName: {} as Record<string, number> };
     window.__renderCounts = stats;
     const seen = new WeakMap<object, { p: unknown; s: unknown }>();
     // Funktions-, Klassen-, forwardRef-, einfache memo-Komponenten (React-18-Fiber-Tags). Die Hülle
@@ -42,6 +46,13 @@ async function installCounter(page: Page): Promise<void> {
       if (!t) return "?";
       return t.displayName || t.name || t.render?.name || t.type?.name || "anon";
     };
+    // `App` erkennen ohne Namen: die Komponente, die direkt das Wurzel-Element `div.app` rendert.
+    const isApp = (f: Fiber): boolean => {
+      for (let c = f.child; c; c = c.sibling) {
+        if (c.tag === 5 && (c.memoizedProps as { className?: string } | null)?.className === "app") return true;
+      }
+      return false;
+    };
     const walk = (root: Fiber | null) => {
       const stack: Fiber[] = root ? [root] : [];
       while (stack.length) {
@@ -52,6 +63,7 @@ async function installCounter(page: Page): Promise<void> {
           if (!prev || prev.p !== f.memoizedProps || prev.s !== f.memoizedState) {
             if (stats.on) {
               stats.total++;
+              if (isApp(f)) stats.app++;
               const n = nameOf(f);
               stats.byName[n] = (stats.byName[n] ?? 0) + 1;
             }
@@ -75,12 +87,13 @@ async function installCounter(page: Page): Promise<void> {
   });
 }
 
-/** Zählt die Renders während `action` (plus Ausklingen) und gibt sie aus. */
-async function measure(page: Page, label: string, action: () => Promise<void>): Promise<number> {
+/** Zählt die Renders während `action` (plus Ausklingen) und gibt sie aus: alle und die von `App`. */
+async function measure(page: Page, label: string, action: () => Promise<void>): Promise<{ total: number; app: number }> {
   await page.evaluate(() => {
     const s = window.__renderCounts!;
     s.on = true;
     s.total = 0;
+    s.app = 0;
     s.byName = {};
   });
   await action();
@@ -88,14 +101,14 @@ async function measure(page: Page, label: string, action: () => Promise<void>): 
   const stats = await page.evaluate(() => {
     const s = window.__renderCounts!;
     s.on = false;
-    return { total: s.total, byName: s.byName };
+    return { total: s.total, app: s.app, byName: s.byName };
   });
   const byName = Object.entries(stats.byName)
     .sort((a, b) => b[1] - a[1])
     .map(([n, c]) => `${n}:${c}`)
     .join(" ");
-  console.log(`[121] Renders ${label}: ${stats.total} — ${byName}`);
-  return stats.total;
+  console.log(`[121] Renders ${label}: ${stats.total} (App ${stats.app}) — ${byName}`);
+  return { total: stats.total, app: stats.app };
 }
 
 test("Neurendern zählen: Wand-Änderung, Zoom- und Zeiger-Schritt", async ({ page }) => {
@@ -131,7 +144,10 @@ test("Neurendern zählen: Wand-Änderung, Zoom- und Zeiger-Schritt", async ({ pa
     for (let k = 1; k <= 5; k++) await page.mouse.move(box.x + box.width / 2 + k * 7, box.y + box.height / 2 + k * 5);
   });
 
-  expect(edit, "Renders je Wand-Änderung").toBeLessThan(50);
-  expect(zoom, "Renders je Zoom-Schritt").toBeLessThan(12);
-  expect(pointer, "Renders je 5 Zeiger-Schritte").toBeLessThan(25);
+  expect(edit.total, "Renders je Wand-Änderung").toBeLessThan(45);
+  expect(edit.app, "App-Renders je Wand-Änderung").toBe(0);
+  expect(zoom.total, "Renders je Zoom-Schritt").toBeLessThan(12);
+  expect(zoom.app, "App-Renders je Zoom-Schritt").toBe(0);
+  expect(pointer.total, "Renders je 5 Zeiger-Schritte").toBeLessThan(25);
+  expect(pointer.app, "App-Renders je 5 Zeiger-Schritte").toBe(0);
 });

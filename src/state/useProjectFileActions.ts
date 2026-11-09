@@ -81,7 +81,6 @@ function openProjectOrReport(content: string, notify: (msg: string, kind?: Notif
 }
 
 export function useProjectFileActions(
-  project: Project,
   setImportState: (next: ImportDialogState) => void,
   setExportSaveFormat: (format: ExportSaveFormat | null) => void,
   activeCategoryCode: string,
@@ -120,7 +119,8 @@ export function useProjectFileActions(
   // genügt daher als billiger "ungespeicherte Änderungen"-Test, ganz ohne
   // JSON-Diff. Start = das beim allerersten Render aktive Projekt (Startzustand
   // gilt als "gespeichert", noch nichts zu verlieren).
-  const lastSavedProjectRef = useRef(project);
+  // [121] Das Projekt kommt beim Aufruf aus dem Store (`getState()`); App abonniert es nicht mehr.
+  const lastSavedProjectRef = useRef(getState().project);
   // Eine verworfene Aktion (Neu/Öffnen), die erst nach Bestätigung des
   // "Ungespeicherte Änderungen"-Dialogs ausgeführt wird — s. `guardDiscard`.
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
@@ -132,7 +132,7 @@ export function useProjectFileActions(
    * kommentarlose Überschreiben (Bug: Cmd+N löschte bisher stillschweigend).
    */
   const guardDiscard = (action: () => void) => {
-    if (project !== lastSavedProjectRef.current) {
+    if (getState().project !== lastSavedProjectRef.current) {
       // Bewusst verworfen (oder vorher gespeichert) → Wiederherstellungskopie ist hinfällig.
       const path = openedProjectPathRef.current;
       setPendingDiscard(() => () => {
@@ -144,13 +144,11 @@ export function useProjectFileActions(
   };
 
   // ── Autosave + Wiederherstellen (s. state/autosave.ts) ─────────────────────
-  const projectRef = useRef(project);
-  projectRef.current = project;
   const autosaveTracker = useRef(createAutosaveTracker()).current;
   const [recovery, setRecovery] = useState<AutosaveRecovery | null>(null);
   useEffect(() => {
     const id = window.setInterval(() => {
-      const p = projectRef.current;
+      const p = getState().project;
       if (!autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) return;
       void writeAutosave(openedProjectPathRef.current, serializeProject(p));
     }, AUTOSAVE_INTERVAL_MS);
@@ -376,6 +374,7 @@ export function useProjectFileActions(
   // Cmd/Ctrl+S „Speichern": bekannter Pfad → ohne Dialog; sonst wie „Speichern unter".
   // Cmd/Ctrl+Shift+S „Speichern unter" fragt immer nach dem Ziel.
   const saveProjectTo = (asNew: boolean): Promise<boolean> => {
+    const project = getState().project;
     const json = serializeProject(project);
     return saveProjectFile(json, project.name, (path) => {
       savePathRef.current = path;
@@ -546,11 +545,12 @@ export function useProjectFileActions(
   ) => {
     void saveTextFile(content, filename, mime);
   };
-  const projectFileName = () => project.name || "modell";
+  const projectFileName = () => getState().project.name || "modell";
   // Führt den gewählten Direkt-Export (CSV/IFC/OBJ/STL) mit dem im Dialog
   // gewählten Dateinamen aus. Erzeugung aus dem jeweiligen reinen Kern, Download
   // über den robusten Helfer.
   const runExport = (format: ExportSaveFormat, filename: string, ifcOptions?: IfcExportOptions) => {
+    const project = getState().project;
     switch (format) {
       case "csv":
         downloadTextFile("﻿" + exportScheduleCsv(project), filename, "text/csv;charset=utf-8;");

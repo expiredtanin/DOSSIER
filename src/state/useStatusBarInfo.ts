@@ -2,35 +2,42 @@
 // und aktive Ebene (Kategorie der einzeln gewählten Wand, sonst die aktive Kategorie). Gewählte Wände,
 // die es nicht mehr gibt, fallen heraus. Aufgerufen von `App.tsx`; die Werte gehen an `StatusBar`.
 
-import { useMemo } from "react";
-import type { Project } from "../model/types";
 import { categoryLabel } from "../model/layers";
+import { useStore } from "./appStore";
 import { t } from "../i18n";
 import type { useSelectionState } from "./useSelectionState";
 
 export function useStatusBarInfo(opts: {
-  project: Project;
   selection: ReturnType<typeof useSelectionState>["selection"];
   activeCategoryCode: string;
 }) {
-  const { project, selection, activeCategoryCode } = opts;
+  const { selection, activeCategoryCode } = opts;
 
   // Tatsächlich (noch) existierende gewählte Wände — IDs, die es nicht mehr gibt
-  // (z. B. nach Löschen/Geschosswechsel), fallen heraus.
-  const selectedWalls = useMemo(() => {
-    const ids = new Set(selection.walls);
-    return project.walls.filter((w) => ids.has(w.id));
-  }, [project.walls, selection.walls]);
-  const selectionCount = selectedWalls.length;
-  // Erste gewählte Wand (für Status-Leiste / Kontextmenü-Aktionen mit Einzelbezug).
-  const selectedWall = selectedWalls[0] ?? null;
+  // (z. B. nach Löschen/Geschosswechsel), fallen heraus. Schmale Selektoren ([121]): nur Anzahl und
+  // Kategorie der ersten gewählten Wand, damit eine Wand-Änderung den Aufrufer (`App`) nicht rendert.
+  const selWalls = selection.walls;
+  const selectionCount = useStore((s) => {
+    if (selWalls.length === 0) return 0;
+    const ids = new Set(selWalls);
+    let n = 0;
+    for (const w of s.project.walls) if (ids.has(w.id)) n++;
+    return n;
+  });
+  // Kategorie der ersten gewählten Wand (Reihenfolge des Projekts, wie zuvor `filter(...)[0]`).
+  const selectedWallCategory = useStore((s) => {
+    if (selWalls.length === 0) return null;
+    const ids = new Set(selWalls);
+    return s.project.walls.find((w) => ids.has(w.id))?.categoryCode ?? null;
+  });
+  const layers = useStore((s) => s.project.layers);
 
   // Aktive Ebene (Kategorie) der Status-Leiste: die Kategorie der (ersten)
   // gewählten Wand, sonst „—" (es gibt keine eigenständige Kategorie-Selektion).
   const activeLayerName =
-    selectionCount === 1 && selectedWall
-      ? categoryLabel(project.layers, selectedWall.categoryCode)
-      : categoryLabel(project.layers, activeCategoryCode);
+    selectionCount === 1 && selectedWallCategory !== null
+      ? categoryLabel(layers, selectedWallCategory)
+      : categoryLabel(layers, activeCategoryCode);
   // Kontextueller Werkzeug-Hinweis (links). Zeigt die Anzahl gewählter Wände:
   // 0 → „Auswahl", 1 → „Auswahl: 1 Wand", n → „Auswahl: n Wände".
   const toolHint =

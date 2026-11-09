@@ -1,12 +1,14 @@
 // Ressourcen-Fenster der App ([163], aus App.tsx herausgelöst): Handler-Bündel für den
 // `ResourceManager` (Typen, Bauteile, Schraffuren, Linien-/Textstile, Stifte, Paletten,
-// Ansichtsvorlagen), der Abgleich mit dem nativen Ressourcen-Fenster (Tauri) und das Öffnen bzw.
-// Umschalten. Aufgerufen von `App.tsx`; `openResources` geht an die Panels, `toggleResources` an Menüs.
+// Ansichtsvorlagen) und das Öffnen bzw. Umschalten. Aufgerufen von `App.tsx`; `openResources` geht an
+// die Panels, `toggleResources` an Menüs. Den Abgleich mit dem nativen Ressourcen-Fenster (Tauri, braucht
+// das ganze Projekt) macht `ProjectSync` (`src/ui/ProjectSync.tsx`), damit `App` das Projekt nicht
+// abonniert ([121]).
 
 import type { RefObject } from "react";
-import type { DrawingLevel, Project } from "../model/types";
+import type { DrawingLevel } from "../model/types";
 import { isTauriRuntime } from "../native/projectFile";
-import { openResourceWindowNative, useResourceWindowHost } from "../native/resourceWindow";
+import { openResourceWindowNative } from "../native/resourceWindow";
 import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
 import type { ResourceManagerHandlers, TabId as ResourceTabId } from "../ui/ResourceManager";
 import type { PlanViewHandle } from "../views/plan/PlanView";
@@ -20,7 +22,6 @@ type TopBar = ReturnType<typeof useTopBarState>;
 type Dialogs = ReturnType<typeof useDialogState>;
 
 export function useResourceHandlers(opts: {
-  project: Project;
   applyChange: RootState["applyChange"];
   groupChanges: RootState["groupChanges"];
   activeLevel: DrawingLevel;
@@ -38,7 +39,6 @@ export function useResourceHandlers(opts: {
   setResourcesOpen: Dialogs["setResourcesOpen"];
 }) {
   const {
-    project,
     applyChange,
     groupChanges,
     activeLevel,
@@ -113,7 +113,6 @@ export function useResourceHandlers(opts: {
 
   // Ansichtsvorlagen ([34]): Ressourcen-Handler + Abgleich der verknüpften Vorlage der aktiven Ansicht.
   const viewTemplateHandlers = useViewTemplateHandlers({
-    project,
     applyChange,
     groupChanges,
     activeLevel,
@@ -187,11 +186,6 @@ export function useResourceHandlers(opts: {
     onAddColorToCustomPalette: addColorToCustomPalette,
   };
 
-  // Ressourcen-Manager als eigenes natives Fenster (Tauri) statt Overlay im
-  // Hauptfenster — hält es (falls offen) synchron zum Projekt, wendet dessen
-  // Befehle auf die ECHTEN Handler oben an (siehe native/resourceWindow.ts).
-  // No-op ausserhalb von Tauri.
-  useResourceWindowHost(project, resourceHandlers);
   // Öffnet die Ressourcen: unter Tauri das native Zweitfenster, sonst (reiner
   // Browser, kein OS-Fenster-Konzept) das bisherige schwebende Overlay.
   const openResources = (tab?: ResourceTabId) => {

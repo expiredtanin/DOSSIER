@@ -65,12 +65,16 @@ export function stabilizeHost<T extends object>(
   return { out: out as T, values, fns };
 }
 
-/** Stabile Fassung von `value` (s. Kopf). */
-export function useStableHost<T extends object>(value: T): T {
+/**
+ * Stabile Fassung von `value` (s. Kopf). Ohne `target` rufen die Trampoline die Fassung des letzten
+ * Renders; mit `target` dessen `current` (z. B. ein Getter, der bei geändertem Store neu baut, s.
+ * `usePanelHostBase`).
+ */
+export function useStableHost<T extends object>(value: T, target?: { readonly current: T }): T {
   const latest = useRef(value);
   // Im Render nachführen: Handler-Aufrufe danach treffen die neue Fassung.
   latest.current = value;
   const stable = useRef<StableHost<T> | null>(null);
-  stable.current = stabilizeHost(stable.current, value, latest);
+  stable.current = stabilizeHost(stable.current, value, target ?? latest);
   return stable.current.out;
 }

@@ -1,9 +1,11 @@
 // Handler und Wirkung der Ansichtsvorlagen ([34]) in der App: Ressourcen-Tab „Ansichtsvorlagen" und
 // der Abgleich des Anzeigezustands (Detail, Massstab, Kategorien, Override-Regeln, Darstellungsmodus,
 // Schwarz-Weiss) mit der verknüpften Vorlage der aktiven Ansicht. Die reine Logik liegt in
-// `viewTemplates.ts`; hier nur die Verdrahtung mit Store und Ansichts-Zustand.
+// `viewTemplates.ts`; hier nur die Verdrahtung mit Store und Ansichts-Zustand. Abonniert nur die
+// verknüpfte Vorlage der aktiven Ansicht ([121]); Handler lesen das Projekt beim Aufruf.
 
 import { useEffect, useRef } from "react";
+import { getState, useStore } from "./appStore";
 import type { RefObject } from "react";
 import { applyOverrideRuleEnabled } from "./viewSnapshots";
 import { fieldOps, findItem } from "../core";
@@ -30,7 +32,6 @@ import {
 } from "./viewTemplates";
 
 interface Deps {
-  project: Project;
   applyChange: (ops: CoreOp[] | ((p: Project) => CoreOp[]), coalesceKey?: string) => void;
   groupChanges: (fn: () => void, key?: string) => void;
   activeLevel: DrawingLevel | undefined;
@@ -48,9 +49,9 @@ interface Deps {
 }
 
 export function useViewTemplateHandlers(d: Deps): ViewTemplateHandlers {
-  const { project, applyChange, groupChanges, activeLevel } = d;
+  const { applyChange, groupChanges, activeLevel } = d;
 
-  const liveUi = (): ViewTemplateUi => ({
+  const liveUi = (project = getState().project): ViewTemplateUi => ({
     detail: d.detail,
     scaleDenominator: d.scaleDenominator,
     layerVisibility: d.snapshotLayerVisibility(),
@@ -61,8 +62,8 @@ export function useViewTemplateHandlers(d: Deps): ViewTemplateHandlers {
   });
 
   /** Anzeigezustand der aktiven Ansicht an die Vorlage angleichen (nur Abweichendes). */
-  const syncUi = (tpl: ViewTemplate) => {
-    const patch = uiPatch(tpl, liveUi());
+  const syncUi = (tpl: ViewTemplate, project = getState().project) => {
+    const patch = uiPatch(tpl, liveUi(project));
     if (Object.keys(patch).length === 0) return;
     groupChanges(() => {
       if (patch.layerVisibility) d.applyLayerVisibility(patch.layerVisibility);
@@ -82,7 +83,7 @@ export function useViewTemplateHandlers(d: Deps): ViewTemplateHandlers {
   // Verknüpfte Vorlage der aktiven Ansicht: bei Wechsel der Ansicht und bei jeder Änderung der Vorlage
   // anwenden. Der Schlüssel enthält den Inhalt der Vorlage, damit Handänderungen an den Kategorien
   // nicht ständig überschrieben werden (nur Vorlage/Ansicht wechseln lösen aus).
-  const tpl = linkedTemplate(project, activeLevel);
+  const tpl = useStore((s) => linkedTemplate(s.project, activeLevel));
   const key = tpl ? `${activeLevel?.id}|${JSON.stringify(tpl)}` : "";
   const last = useRef("");
   useEffect(() => {
@@ -93,22 +94,24 @@ export function useViewTemplateHandlers(d: Deps): ViewTemplateHandlers {
   }, [key]);
 
   const onApply = (id: string, target: ViewTemplateTarget, linked: boolean) => {
-    const tplNow = findItem(project, "viewTemplates", id);
+    // Stand vor der Änderung (wie früher die Fassung des letzten Renders) für den Abgleich unten.
+    const before = getState().project;
+    const tplNow = findItem(before, "viewTemplates", id);
     if (!tplNow) return;
     const levelId = target.kind === "active" ? activeLevel?.id : target.kind === "level" ? target.id : undefined;
     applyChange((p) => (target.kind === "snapshot" ? applyToSnapshotOps(p, id, target.id, linked) : levelId ? applyToLevelOps(p, id, levelId, linked) : []));
     // Wirkt das Ziel auf die aktive Ansicht, gleich den Anzeigezustand mitziehen.
-    if (target.kind !== "snapshot" && levelId === activeLevel?.id) syncUi(tplNow);
+    if (target.kind !== "snapshot" && levelId === activeLevel?.id) syncUi(tplNow, before);
   };
 
   return {
     onAddViewTemplate: () => {
-      const n = (project.viewTemplates ?? []).length + 1;
+      const n = (getState().project.viewTemplates ?? []).length + 1;
       const tplNew = captureTemplate(uniqueId("vt"), t("resources.viewTemplates.defaultName", { n }), activeLevel, liveUi());
       applyChange(addTemplateOps(tplNew));
     },
     onDuplicateViewTemplate: (id) => {
-      const src = findItem(project, "viewTemplates", id);
+      const src = findItem(getState().project, "viewTemplates", id);
       if (!src) return;
       applyChange((p) => duplicateTemplateOps(p, id, uniqueId("vt"), t("resources.viewTemplates.copyName", { name: src.name })));
     },

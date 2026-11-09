@@ -35,7 +35,8 @@ import { t } from "../i18n";
 export function LayersPanel() {
   const host = usePanelHost();
   const { displayMode } = host;
-  const project = useStore((s) => s.project);
+  // Nur den Ebenen-Baum abonnieren ([121]).
+  const layers = useStore((s) => s.project.layers);
 
   // Klick aufs Auge in „Alle anzeigen"/„Nur aktive" schaltet automatisch auf
   // „Ausgewählte" (DOSSIER-Regel), damit das Sichtbarkeits-Flag sofort greift.
@@ -61,7 +62,7 @@ export function LayersPanel() {
         <DisplayModeSelect value={displayMode.mode} onChange={displayMode.setMode} />
       </div>
       <div className="nav-list">
-        {project.layers.map((cat) => (
+        {layers.map((cat) => (
           <CategoryRow
             key={cat.code}
             category={cat}

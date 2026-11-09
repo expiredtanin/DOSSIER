@@ -115,7 +115,6 @@ function host(h: ReturnType<typeof holder>, selection: any) {
   (globalThis as any).requestAnimationFrame = () => 0;
   return capture(() =>
     usePanelHostBase({
-      project: h.p,
       setProject: (n: any) => {
         h.p = typeof n === "function" ? n(h.p) : n;
       },
@@ -125,7 +124,6 @@ function host(h: ReturnType<typeof holder>, selection: any) {
       setViewType: () => {},
       activeLevel: sampleProject.drawingLevels[0],
       viewType: "grundriss",
-      selection,
       projectActions: stubObj({ snapshotLayerVisibility: () => ({}), snapshotDrawingVisibility: () => ({}), applyLayerVisibility: () => {}, applyDrawingVisibility: () => {} }),
       selectionState: stubObj({ selection: EMPTY_SELECTION }),
       toolState: stubObj({}),
@@ -138,7 +136,9 @@ function host(h: ReturnType<typeof holder>, selection: any) {
       dxfInputRef: { current: null },
       activeLayout: undefined,
       patchOpenLayout: () => {},
-    } as any),
+    } as any,
+    // Projekt und Objekt-Info aus dem Halter statt aus dem Store ([121]).
+    () => ({ project: h.p, key: selection, selection })),
   ) as any;
 }
 
