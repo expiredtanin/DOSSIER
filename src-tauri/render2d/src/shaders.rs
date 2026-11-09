@@ -145,6 +145,53 @@ const PI : f32 = 3.14159265358979;
 // Instanz-Geometrie bereits in Bildschirm-Raum vorliegt (to_screen skaliert *90).
 const PX_PER_M_2D : f32 = 90.0;
 
+// [153]/[169] Sichtbares Strichstueck an einem Bogenende (Spiegel `tessellate::dash_stub`, Muster bis 4).
+fn arc_dash_stub(p : f32, len : f32, total : f32, n : i32, c : vec4<f32>, at_end : bool) -> f32 {
+    var cyc = array<f32, 4>(c.x, c.y, c.z, c.w);
+    var m = p - floor(p / total) * total;
+    if (at_end && m <= 0.0) { m = total; }
+    var acc = 0.0;
+    var r = 0.0;
+    for (var i = 0; i < 4; i = i + 1) {
+        if (i >= n) { break; }
+        let d = cyc[i];
+        var hit = m >= acc && m < acc + d;
+        var v = acc + d - m;
+        if (at_end) {
+            hit = m > acc && m <= acc + d;
+            v = m - acc;
+        }
+        if (hit) {
+            if ((i % 2) == 0) { r = min(v, len); } else { r = -v; }
+        }
+        acc = acc + d;
+    }
+    return r;
+}
+
+// [153]/[169] Musterphase am Bogenanfang: beide Enden moeglichst auf einem Strich (Spiegel
+// `tessellate::dash_phase`, wie die gestrichelten Linienzuege `DASH_LINE_WGSL`).
+fn arc_dash_phase(len : f32, total : f32, n : i32, c : vec4<f32>) -> f32 {
+    if (!(len > 0.0) || !(total > 1e-6) || n < 2) { return 0.0; }
+    var cyc = array<f32, 4>(c.x, c.y, c.z, c.w);
+    var best_p = 0.0;
+    var best = min(arc_dash_stub(0.0, len, total, n, c, false), arc_dash_stub(len, len, total, n, c, true));
+    var acc = 0.0;
+    for (var i = 0; i < 4; i = i + 1) {
+        if (i >= n) { break; }
+        let d = cyc[i];
+        let q = acc + 0.5 * d - 0.5 * len;
+        let p = q - floor(q / total) * total;
+        let s = min(arc_dash_stub(p, len, total, n, c, false), arc_dash_stub(p + len, len, total, n, c, true));
+        if (s > best + 1e-4 * total) {
+            best = s;
+            best_p = p;
+        }
+        acc = acc + d;
+    }
+    return best_p;
+}
+
 struct VsOut {
     @builtin(position) pos : vec4<f32>,
     @location(0)                    frag   : vec2<f32>,
@@ -247,7 +294,9 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
         progress = max(progress, 0.0);
         // Muster mit dem Massstab mitskalieren ([96]): statt das Muster zu strecken, die Lauflaenge stauchen.
         let ds = select(1.0, g.dash_scale, g.dash_scale > 0.0);
-        let s_model = progress * r_m / ds;
+        // [153]/[169] Musterphase des ganzen Bogens (Striche an beiden Enden), wie die Linienzuege.
+        let ph = arc_dash_phase(abs(sweep) * r_m / ds, dash_total, dash_count, in.dash);
+        let s_model = progress * r_m / ds + ph;
         let m = s_model - dash_total * floor(s_model / dash_total);
 
         var cyc = array<f32, 4>(in.dash.x, in.dash.y, in.dash.z, in.dash.w);

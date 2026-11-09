@@ -62,6 +62,14 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   lasen den Schraffur-Winkel um 90° verschieden (Standard 0°↔90° hin und her); jetzt alle über `hatch::build_hatch_runs`
   (DXF 90° − Winkel), Standard 0°, Laden stellt 90° zurück, Bogenwand-Nasen polar; Test `plan/hatch_dir_tests.rs`.
   Offen: render3d-Live-Schnitt und Mac nicht angesehen. · S
+- ◐ **[169]** Runde Formen als echte Kreise/Bögen. 9.11.: Ausgaben erkennen Bögen in Vielecken/Linienzügen (Kern
+  `plan/arc_fit.rs`: ≥ 4 Punkte auf einem Kreis ± 10 µm, Schritt ≤ 25°, Pfeilhöhe ≥ 0.5 mm): Plan-SVG/Druck-SVG/PDF
+  `<circle>` bzw. `<path>` mit `A`, DXF/DWG CIRCLE bzw. LWPOLYLINE mit Bulges (fileio Satz 24, auch Linienzüge aus
+  Einzel-Linien), Bildschirm fein nachtesselliert (Szene ≤ 2°, Metal-Pfad nach Zoom); Schraffur am Bogen beschnitten.
+  Runde Stütze 48–256-Eck (Pfeilhöhe ≤ 0.5 mm), im 3D glatt. Tests `plan/arc_output_tests.rs`. Offen: Bögen auf
+  schiefen Wänden in der Ansicht (Ellipsen) bleiben Vielecke; Ringe aus Versatz/Boolean ohne exakte Kreispunkte
+  (Treppenloch-Rand Musterhaus) bleiben Vielecke; DXF-HATCH-Ränder ohne Bögen; Bogenwände im 3D kantig schattiert;
+  Bildschirm (WebGPU, Metal) nicht angesehen. · M
 - ◐ **[145]** Texte beim Zoomen synchron. Falls der Mac noch nachläuft: Raumstempel nativ zeichnen (vtext kann nur
   einzeilig/linksbündig, eine Schrift, kein Fett). 9.11.: `clampInside` nur noch im Kern (`grip_clamp_inside`,
   Fassade `clampInside` in `src/core`); die Öffnungs-Vorschau beim Setzen zeigt die geklemmte/gerückte Lage
@@ -71,7 +79,8 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   `ungestrichene_kante_ohne_strich`); Nähen in Metal-Chunks nur innerhalb eines Chunks (Kern `plan/line_ends.rs`, `render2d`). · M
 - ◐ **[150]** Gelände im Grundriss am Gebäude. Raumstempel ausserhalb ihres Raums sind kein Hindernis für
   Höhenlinien-Beschriftungen; Beschriftungen an Bündeln fehlen statt versetzt zu werden. · S
-- ◐ **[153]** Strichmuster in Papier-mm. Bögen/Kreise ohne Phase (beginnen mit Strich), DXF/DWG ohne Phase je Objekt,
+- ◐ **[153]** Strichmuster in Papier-mm. Bögen mit Phase seit 9.11. ([169]: Plan-/Druck-SVG, PDF, Bogen-Shader),
+  Kreise ohne (geschlossen), DXF/DWG ohne Phase je Objekt,
   Metal-Chunks verketten nur über das Ketten-Flag, React-SVG-Ansicht ohne Phase. · M
 - ◐ **[155]** Treppensymbol. Raumstempel weichen den neuen Linien nicht aus; Lauflinie über Bruchlinie ausgezogen;
   Absturzsicherung nur im Grundriss (kein Geländer-Bauteil in 3D/IFC); Ende eines freien Lochrings ohne Gehrung;
@@ -315,7 +324,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 Auf dem Mac (Tauri/Metal) noch nicht angesehen oder geprüft; bisher nur Linux-Container, CLI-SVG, Chromium oder
 Unit-Tests: [116] (atomares Speichern), [117] (CSP unter `tauri://`), [118], [122], [123], [126], [110], [101],
-[102], [131], [133], [136], [140], [145], [146], [153], [64], [T2], [T4], [34], [108], [65]. Je Punkt ansehen, dann hier und
+[102], [131], [133], [136], [140], [145], [146], [153], [64], [T2], [T4], [34], [108], [65], [169]. Je Punkt ansehen, dann hier und
 im jeweiligen Eintrag streichen. · M (gesamt)
 
 ---

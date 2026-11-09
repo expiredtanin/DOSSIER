@@ -14,10 +14,6 @@ export {
 } from "../geometry/bulge";
 
 export {
-  columnFootprint,
-} from "../geometry/column";
-
-export {
   sampleBezierChain,
   sampleCatmullRom,
   sampleUniformBSpline,

@@ -337,9 +337,21 @@ struct Compiler {
     /// Wände treffen sich an der Ecke als EIN Zug mit Ecke statt zwei Enden (keine Kerbe).
     solid: Vec<(Rgba, f64, Vec<Vec<V2>>)>,
     solid_of: std::collections::HashMap<[u64; 5], usize>,
+    /// Bildschirm-px je Meter (Feinheit nachtessellierter Bögen, [169]).
+    ppm: f64,
 }
 
 impl Compiler {
+    /// [169] Erkannte Bögen (runde Stütze, Bogenwand) nach Zoom fein nachtesselliert (Pfeilhöhe ≤ 0.5 px, wie
+    /// [`arc_segments`]); `None` = unverändert.
+    fn smooth(&self, pts: &[V2], closed: bool) -> Option<Vec<V2>> {
+        if pts.len() < 4 {
+            return None;
+        }
+        let ppm = self.ppm;
+        crate::plan::arc_fit::refine(pts, closed, crate::plan::arc_fit::TOL, &|r, sw| arc_segments(r, sw, ppm, 4.0) as usize)
+    }
+
     #[inline]
     fn scr(&mut self, p: V2) -> V2 {
         let sx = p.x * PX_PER_M;
@@ -466,6 +478,8 @@ impl Compiler {
         if pts_m.len() < 2 {
             return;
         }
+        let fine = self.smooth(pts_m, closed);
+        let pts_m: &[V2] = fine.as_deref().unwrap_or(pts_m);
         // Maler-Reihenfolge: vorgemerkte volle Züge vor diesem Strich zeichnen ([146]).
         self.flush_solid();
         let close = closed && pts_m.len() > 2 && (pts_m[0].x != pts_m[pts_m.len() - 1].x || pts_m[0].y != pts_m[pts_m.len() - 1].y);
@@ -570,6 +584,8 @@ impl Compiler {
 
     /// Zusammenhängender Linienzug (Modell-Meter) mit runden Kappen/Ecken.
     fn stroke_polyline(&mut self, pts_m: &[V2], closed: bool, color: Rgba, stroke_mm: f64, screen_px: bool) {
+        let fine = self.smooth(pts_m, closed);
+        let pts_m: &[V2] = fine.as_deref().unwrap_or(pts_m);
         let mut s_pts = std::mem::take(&mut self.scratch);
         s_pts.clear();
         for &p in pts_m {
@@ -866,6 +882,7 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool, ends: LineEnds) 
         scratch: Vec::new(),
         seg_dir: Vec::new(),
         seg_ang: Vec::new(),
+        ppm: px_per_meter,
     };
     let prims = &plan.prims;
     let plain_line = |p: &Prim| matches!(p, Prim::Line { zigzag: None, motif: None, .. });
@@ -913,7 +930,11 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool, ends: LineEnds) 
         }
         match prim {
             Prim::Placeholder => {}
-            Prim::Polygon { style, fill, stroke, stroke_width_mm, hatch, pts, no_stroke_edges } => {
+            Prim::Polygon { style, fill, stroke, stroke_width_mm, hatch, pts: pts_raw, no_stroke_edges } => {
+                // [169] Fläche und Schraffur-Beschnitt am fein nachtessellierten Ring (Bögen), Umriss-Kanten aus
+                // dem Original (`no_stroke_edges` zählt dessen Kanten; die Züge werden beim Zeichnen verfeinert).
+                let fine = c.smooth(pts_raw, true);
+                let pts: &Vec<V2> = fine.as_ref().unwrap_or(pts_raw);
                 if let Some(fc) = plan.color(*fill) {
                     let tris = triangulate(pts);
                     if !tris.is_empty() {
@@ -931,8 +952,8 @@ pub fn compile(plan: &PlanBuf, px_per_meter: f64, packed: bool, ends: LineEnds) 
                     }
                 }
                 if let Some(sc) = plan.color(*stroke) {
-                    if *stroke_width_mm > 0.0 && pts.len() >= 2 {
-                        c.stroke_polygon_outline(pts, dim(sc, style), *stroke_width_mm, no_stroke_edges);
+                    if *stroke_width_mm > 0.0 && pts_raw.len() >= 2 {
+                        c.stroke_polygon_outline(pts_raw, dim(sc, style), *stroke_width_mm, no_stroke_edges);
                     }
                 }
             }

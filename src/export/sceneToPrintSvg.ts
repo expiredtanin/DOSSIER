@@ -228,11 +228,35 @@ function ptsAttrOf(pts: RPoint[], map: Mapper): string {
   return pts.map((p) => map(p)).map(([x, y]) => `${round(x)},${round(y)}`).join(" ");
 }
 
+/**
+ * [169] Zug mit Boegen (runde Stuetze, Bogenwand; in der Szene fein nachtesselliert) als `<path>` mit
+ * `A`-Befehlen statt Vieleck: Kern `plan_arc_path_d` (Bogenerkennung `plan/arc_fit.rs`) auf den
+ * Papier-mm-Punkten. Ohne erkannten Bogen `null` (dann `polygon`/`polyline`).
+ */
+function arcPathEl(pts: RPoint[], closed: boolean, map: Mapper): SVGElement | null {
+  if (pts.length < 4) return null;
+  const flat = new Float64Array(pts.length * 2);
+  pts.forEach((p, i) => {
+    const [x, y] = map(p);
+    flat[2 * i] = x;
+    flat[2 * i + 1] = y;
+  });
+  const d = core().plan_arc_path_d(flat, closed, ARC_TOL_MM);
+  if (!d) return null;
+  const el = document.createElementNS(SVG_NS, "path");
+  el.setAttribute("d", d);
+  return el;
+}
+
+/** Toleranz der Bogenerkennung auf dem Blatt (mm). */
+const ARC_TOL_MM = 1e-4;
+
 /** Gefuelltes Polygon (Wand-Poche, Raeume, Decken, Grundfuellung vor Schraffur). */
 function appendFill(svg: SVGSVGElement, f: RFill, map: Mapper): void {
   if (f.pts.length < 3) return;
-  const el = document.createElementNS(SVG_NS, "polygon");
-  el.setAttribute("points", ptsAttrOf(f.pts, map));
+  const arc = arcPathEl(f.pts, true, map);
+  const el = arc ?? document.createElementNS(SVG_NS, "polygon");
+  if (!arc) el.setAttribute("points", ptsAttrOf(f.pts, map));
   el.setAttribute("fill", rgbCss(f.color));
   setOpacityAttr(el, "fill-opacity", f.color[3]);
   el.setAttribute("stroke", "none");
@@ -267,8 +291,9 @@ function appendStroke(
   const effectiveMm = widthScreen ? widthMm * HATCH_DENSITY_MM : widthMm;
   const strokeMm = quantizePen(effectiveMm);
 
-  const el = document.createElementNS(SVG_NS, closed ? "polygon" : "polyline");
-  el.setAttribute("points", ptsAttrOf(pts, map));
+  const arc = widthScreen ? null : arcPathEl(pts, closed, map);
+  const el = arc ?? document.createElementNS(SVG_NS, closed ? "polygon" : "polyline");
+  if (!arc) el.setAttribute("points", ptsAttrOf(pts, map));
   el.setAttribute("fill", "none");
   el.setAttribute("stroke", rgbCss(color));
   setOpacityAttr(el, "stroke-opacity", color[3]);
@@ -343,6 +368,11 @@ function appendArc(svg: SVGSVGElement, a: RArc, map: Mapper, mmPerM: number): vo
   el.setAttribute("stroke-width", String(quantizePen(a.widthMm)));
   if (a.dash && a.dash.length) {
     el.setAttribute("stroke-dasharray", a.dash.map((x) => round(x)).join(" "));
+    // [153]/[169] Musterphase auch auf Boegen (kuerzerer Bogen, wie gezeichnet).
+    let sw = Math.abs(Math.atan2(v2.y, v2.x) - Math.atan2(v1.y, v1.x));
+    if (sw > Math.PI) sw = 2 * Math.PI - sw;
+    const ph = core().line_dash_phase(r * sw, Float64Array.from(a.dash));
+    if (ph > 1e-9) el.setAttribute("stroke-dashoffset", String(round(ph)));
   }
   svg.appendChild(el);
 }

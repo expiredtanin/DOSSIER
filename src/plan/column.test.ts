@@ -11,7 +11,6 @@
 import { describe, it, expect } from "vitest";
 import { generatePlan } from "./generatePlan";
 import { projectToModel3d } from "./toWalls3d";
-import { columnFootprint } from "../geometry/column";
 import type { Column, Project } from "../model/types";
 
 /** Minimalprojekt (zwei Geschosse gestapelt) mit einer konfigurierbaren Stütze. */
@@ -111,7 +110,7 @@ describe("Stütze — 3D (projectToModel3d / emitColumns)", () => {
     expect(Math.max(...zs)).toBeCloseTo(3, 6);
   });
 
-  it("erzeugt ein tesselliertes Kreis-Prisma (64 Ecken)", () => {
+  it("erzeugt ein tesselliertes Kreis-Prisma (96 Ecken)", () => {
     const round: Column = {
       ...rectColumn,
       profile: { kind: "round", radius: 0.15 },
@@ -119,20 +118,8 @@ describe("Stütze — 3D (projectToModel3d / emitColumns)", () => {
     const model = projectToModel3d(projectWithColumn(round));
     const mesh = model.meshes.find((m) => m.kind === "extrusion");
     if (!mesh) throw new Error("kein Prisma-Mesh");
-    // 32-Eck × (unten + oben) = 64 Vertices.
-    expect(mesh.positions.length).toBe(64 * 3);
-  });
-});
-
-describe("Stütze — Footprint-Helfer (columnFootprint)", () => {
-  it("tesselliert ein rundes Profil als 32-Eck um die Position", () => {
-    const round: Column = { ...rectColumn, profile: { kind: "round", radius: 0.15 } };
-    const pts = columnFootprint(round);
-    expect(pts.length).toBe(32);
-    // Alle Punkte liegen im Radius 0.15 um (2,3).
-    for (const p of pts) {
-      const d = Math.hypot(p.x - 2, p.y - 3);
-      expect(d).toBeCloseTo(0.15, 6);
-    }
+    // [169] 48-Eck (Pfeilhöhe ≤ 0.5 mm, Kern `column_round_segments`) × (unten + oben) = 96 Vertices, glatt.
+    expect(mesh.positions.length).toBe(96 * 3);
+    expect(mesh.creaseAngle).toBe(30);
   });
 });

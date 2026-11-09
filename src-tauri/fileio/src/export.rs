@@ -108,6 +108,9 @@ pub const REC_SHEET_INSERT: f64 = 22.0;
 /// [146] Linienenden/-ecken des Projekts: `[cap | join << 2]` (Kern `plan/line_ends.rs`) →
 /// Kopfvariablen `$ENDCAPS`/`$JOINSTYLE` (DXF und DWG).
 pub const REC_LINE_ENDS: f64 = 23.0;
+/// [169] LWPOLYLINE mit Bögen: `[Ebene, geschlossen, n, n × (x, y, bulge)]` (Bulge = tan(Winkel/4), positiv
+/// gegen den Uhrzeiger; Kern `plan/arc_fit.rs`).
+pub const REC_POLYLINE_BULGE: f64 = 24.0;
 
 /// DXF-Ausgabeversion (s. Kopf).
 pub const DXF_VERSION: DxfVersion = DxfVersion::AC1032;
@@ -630,6 +633,18 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
                 pl.is_closed = closed;
                 EntityType::LwPolyline(pl)
             })
+        } else if tag == REC_POLYLINE_BULGE {
+            let closed = r.f()? != 0.0;
+            let n = r.idx()?;
+            let v = r.take(n.checked_mul(3).ok_or("Überlauf")?)?;
+            (n >= 2 && all_finite(v)).then(|| {
+                let mut pl = LwPolyline::from_points(v.chunks_exact(3).map(|p| Vector2::new(p[0], p[1])).collect());
+                for (vx, p) in pl.vertices.iter_mut().zip(v.chunks_exact(3)) {
+                    vx.bulge = p[2];
+                }
+                pl.is_closed = closed;
+                EntityType::LwPolyline(pl)
+            })
         } else if tag == REC_ARC {
             let v = r.take(5)?;
             (all_finite(v) && v[2] > 0.0)
@@ -1076,6 +1091,19 @@ mod tests {
         assert_eq!((ascii(&dxf, "$ENDCAPS", 0), ascii(&dxf, "$JOINSTYLE", 2)), (1, 1));
         assert_eq!(line_end_vars(f64::NAN), (0, 2));
         assert_eq!(line_end_vars(4.0 + 2.0), (3, 1));
+    }
+
+    /// [169] LWPOLYLINE mit Bulges (Bogenwand-Umriss): Bulges bleiben beim Schreiben und Lesen erhalten.
+    #[test]
+    fn polylinie_mit_bulges() {
+        let b = (std::f64::consts::PI / 8.0).tan();
+        let flat = vec![FLAT_VERSION, REC_LAYER, 0.0, -1.0, 25.0, REC_POLYLINE_BULGE, 0.0, 1.0, 4.0, 5.0, 0.0, b, 0.0, 5.0, 0.0, 0.0, 4.7, -b, 4.7, 0.0, 0.0];
+        let doc = read_dxf(export_dxf(&flat, "a").unwrap());
+        let pl = doc.entities().find_map(|e| if let EntityType::LwPolyline(p) = e { Some(p.clone()) } else { None }).unwrap();
+        assert!(pl.is_closed);
+        let bs: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
+        assert!((bs[0] - b).abs() < 1e-9 && bs[1] == 0.0 && (bs[2] + b).abs() < 1e-9 && bs[3] == 0.0, "{bs:?}");
+        assert!(export_dxf(&[FLAT_VERSION, REC_LAYER, 0.0, -1.0, 25.0, REC_POLYLINE_BULGE, 0.0, 0.0, 2.0, 0.0, 0.0], "a").is_err());
     }
 
     #[test]

@@ -28,6 +28,13 @@ use crate::plan::parts::{greyed_of, in_ranges, pick_id, Part};
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
+/// [169] Erkannte Bögen (runde Stütze, Bogenwand, Bogen-Umrisse) für den Bildschirm fein nachtesselliert
+/// ([`crate::plan::arc_fit::refine`]: Schritt ≤ 2°, Pfeilhöhe ≤ 0.05 mm), sonst der Zug unverändert.
+fn smooth(pts: Vec<V2>, closed: bool) -> Vec<V2> {
+    use crate::plan::arc_fit;
+    arc_fit::refine(&pts, closed, arc_fit::TOL, &arc_fit::fine_segments).unwrap_or(pts)
+}
+
 pub type Rgba = [f64; 4];
 
 /// Strichmuster eines Szenen-Elements.
@@ -407,9 +414,9 @@ impl Builder {
                 if closed {
                     let mut p = pts;
                     p.pop();
-                    self.s.outlines.push(SStroke { pts: p, color: col, width_mm: src.weight, dash, z, width_screen: false });
+                    self.s.outlines.push(SStroke { pts: smooth(p, true), color: col, width_mm: src.weight, dash, z, width_screen: false });
                 } else {
-                    self.s.polylines.push(SStroke { pts, color: col, width_mm: src.weight, dash, z, width_screen: false });
+                    self.s.polylines.push(SStroke { pts: smooth(pts, false), color: col, width_mm: src.weight, dash, z, width_screen: false });
                 }
             }
         }
@@ -476,10 +483,12 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                     if pts.len() < 2 {
                         continue;
                     }
+                    // [169] Ring mit Bögen fein (Fläche, Schraffur-Beschnitt, Umriss); Kantenläufe aus `pts`.
+                    let fine = if pts.len() >= 4 { smooth(pts.clone(), true) } else { pts.clone() };
                     if let Some(fc) = color(part, f[0]) {
                         if pts.len() >= 3 {
                             let z = b.z();
-                            b.s.fills.push(SFill { pts: pts.clone(), color: with_fill_opacity(fc, greyed), z });
+                            b.s.fills.push(SFill { pts: fine.clone(), color: with_fill_opacity(fc, greyed), z });
                         }
                     }
                     if f[3] != -1.0 {
@@ -490,7 +499,7 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                         if h.kind != HatchKind::Image && h.kind != HatchKind::Gradient && h.pattern != Pattern::None && h.pattern != Pattern::Solid {
                             let hatch_col = with_opacity(color(part, hc as f64).unwrap_or(INK), None, greyed);
                             let hatch_mm = if h.line_weight > 0.0 { h.line_weight } else { 0.13 };
-                            let runs = if pts.len() < 3 { Vec::new() } else { hatch::build_hatch_runs(&pts, &h) };
+                            let runs = if pts.len() < 3 { Vec::new() } else { hatch::build_hatch_runs(&fine, &h) };
                             let runs = hatch::apply_dash_runs(runs, &hatch::hatch_dash(&h));
                             let hz = b.z();
                             for run in runs {
@@ -510,7 +519,7 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                             };
                             if nse.is_empty() {
                                 let z = b.z();
-                                b.s.outlines.push(SStroke { pts, color: sc, width_mm: w, dash: SDash::Absent, z, width_screen: false });
+                                b.s.outlines.push(SStroke { pts: fine, color: sc, width_mm: w, dash: SDash::Absent, z, width_screen: false });
                             } else {
                                 let rz = b.z();
                                 for run in visible_edge_runs(&pts, &nse) {
@@ -635,7 +644,7 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                 continue;
             }
             let z = members.iter().fold(f64::NEG_INFINITY, |m, &i| jsnum::max(m, g.zs[i]));
-            let s = SStroke { pts, color: g.color, width_mm: g.width_mm, dash: SDash::Absent, z, width_screen: false };
+            let s = SStroke { pts: smooth(pts, closed), color: g.color, width_mm: g.width_mm, dash: SDash::Absent, z, width_screen: false };
             if closed {
                 b.s.outlines.push(s);
             } else {

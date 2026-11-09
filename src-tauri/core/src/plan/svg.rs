@@ -13,6 +13,7 @@ use crate::plan::buf::{whole, F_COLOR, F_DASH_LIST, F_GREYED, F_OPACITY, T_ARC, 
 use crate::plan::line_ends::LineEnds;
 use crate::plan::parts::Part;
 use crate::plan::scene::stitch_runs_members;
+use crate::plan::arc_fit;
 use std::collections::HashMap;
 use serde_json::Value;
 use std::f64::consts::PI;
@@ -119,20 +120,16 @@ impl Stitcher {
         self.groups[gi].2.push(slot);
     }
 
-    fn finish(self, out: &mut [String], xs: &dyn Fn(f64) -> String, ys: &dyn Fn(f64) -> String) {
+    fn finish(self, out: &mut [String], xs: &dyn Fn(f64) -> String, ys: &dyn Fn(f64) -> String, top: f64) {
         for (attrs, runs, slots) in self.groups {
             for (pts, closed, members) in stitch_runs_members(&runs) {
                 if pts.len() < 2 {
                     continue;
                 }
                 let slot = members.iter().map(|&m| slots[m]).max().unwrap_or(0);
-                let el = if !closed && pts.len() == 2 {
-                    format!("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{attrs}/>", xs(pts[0].x), ys(pts[0].y), xs(pts[1].x), ys(pts[1].y))
-                } else {
-                    let pl = pts.iter().map(|q| format!("{},{}", xs(q.x), ys(q.y))).collect::<Vec<_>>().join(" ");
-                    let tag = if closed { "polygon" } else { "polyline" };
-                    format!("<{tag} points=\"{pl}\" fill=\"none\"{attrs}/>")
-                };
+                // [169] Bögen (runde Stütze, Bogenwand) als Kreis bzw. Pfad mit `A`.
+                let (g, _) = shape_el(&pts, closed, xs, ys, top);
+                let el = if g.starts_with("line ") { format!("<{g}{attrs}/>") } else { format!("<{g} fill=\"none\"{attrs}/>") };
                 if out[slot].is_empty() {
                     out[slot] = el;
                 } else {
@@ -191,6 +188,43 @@ fn op(greyed: bool, opacity: Option<f64>) -> String {
     }
 }
 
+/// [169] Geometrie eines Rings oder Zugs als Element-Anfang (Tag und Geometrie-Attribute): ganzer Kreis als
+/// `circle`, Zug mit erkannten Bögen als `path` mit `A`-Befehlen ([`arc_fit`]), sonst `polygon`/`polyline`
+/// bzw. `line`. Zweiter Wert = Länge (für die Musterphase).
+fn shape_el(pts: &[V2], closed: bool, xs: &dyn Fn(f64) -> String, ys: &dyn Fn(f64) -> String, top: f64) -> (String, f64) {
+    if let Some(sh) = arc_fit::fit(pts, closed, arc_fit::TOL) {
+        let len = arc_fit::length(&sh);
+        if let arc_fit::Shape::Circle { c, r, .. } = sh {
+            return (format!("circle cx=\"{}\" cy=\"{}\" r=\"{}\"", xs(c.x), ys(c.y), num(r)), len);
+        }
+        let d = arc_fit::svg_d(&sh, &|p| V2 { x: p.x, y: top - p.y }, 1.0, &num);
+        return (format!("path d=\"{d}\""), len);
+    }
+    let mut len: f64 = pts.windows(2).map(|w| crate::jsmath::hypot2(w[1].x - w[0].x, w[1].y - w[0].y)).sum();
+    if !closed && pts.len() == 2 {
+        return (format!("line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"", xs(pts[0].x), ys(pts[0].y), xs(pts[1].x), ys(pts[1].y)), len);
+    }
+    if closed && pts.len() > 1 {
+        len += crate::jsmath::hypot2(pts[0].x - pts[pts.len() - 1].x, pts[0].y - pts[pts.len() - 1].y);
+    }
+    let pl = pts.iter().map(|q| format!("{},{}", xs(q.x), ys(q.y))).collect::<Vec<_>>().join(" ");
+    (format!("{} points=\"{pl}\"", if closed { "polygon" } else { "polyline" }), len)
+}
+
+/// [153]/[169] `stroke-dashoffset` eines gestrichelten Bogens der Modell-Länge `len_m` (Muster in Papier-mm).
+fn arc_dash_offset(part: &Part, rec: &crate::plan::buf::Rec, len_m: f64, mm_to_m: f64) -> String {
+    if rec.flags & F_DASH_LIST == 0 || !(mm_to_m > 0.0) {
+        return String::new();
+    }
+    let Some(d) = rec.dash.and_then(|(o, n)| part.view.pool(o, n)) else { return String::new() };
+    let ph = super::line_pattern::phase(len_m / mm_to_m, &d);
+    if ph > 1e-9 {
+        format!(" stroke-dashoffset=\"{}\"", num(ph * mm_to_m))
+    } else {
+        String::new()
+    }
+}
+
 /// Gestrichelter Zug aus aneinander anschliessenden Linien gleicher Darstellung ([153]).
 struct DashRun {
     /// Attribute ohne Geometrie (Farbe, Breite, Muster, Deckkraft).
@@ -204,16 +238,13 @@ struct DashRun {
 
 /// Schreibt einen Zug als `<line>`/`<polyline>` mit der Musterphase ([`super::line_pattern::phase`]):
 /// beide Enden möglichst auf einem Strich, Phase über die Ecken.
-fn flush_dash_run(run: Option<DashRun>, out: &mut [String], mm_to_m: f64, xs: &dyn Fn(f64) -> String, ys: &dyn Fn(f64) -> String) {
+fn flush_dash_run(run: Option<DashRun>, out: &mut [String], mm_to_m: f64, xs: &dyn Fn(f64) -> String, ys: &dyn Fn(f64) -> String, top: f64) {
     let Some(r) = run else { return };
-    let len: f64 = r.pts.windows(2).map(|w| crate::jsmath::hypot2(w[1].x - w[0].x, w[1].y - w[0].y)).sum();
+    // [169] Bögen im Zug als `A`; Phase über die Länge mit Bögen.
+    let (g, len) = shape_el(&r.pts, false, xs, ys, top);
     let ph = if mm_to_m > 0.0 { super::line_pattern::phase(len / mm_to_m, &r.dash) } else { 0.0 };
     let off = if ph > 1e-9 { format!(" stroke-dashoffset=\"{}\"", num(ph * mm_to_m)) } else { String::new() };
-    out[r.slot] = if r.pts.len() == 2 {
-        format!("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{off}/>", xs(r.pts[0].x), ys(r.pts[0].y), xs(r.pts[1].x), ys(r.pts[1].y), r.key)
-    } else {
-        format!("<polyline points=\"{}\" fill=\"none\"{}{off}/>", r.pts.iter().map(|q| format!("{},{}", xs(q.x), ys(q.y))).collect::<Vec<_>>().join(" "), r.key)
-    };
+    out[r.slot] = if g.starts_with("line ") { format!("<{g}{}{off}/>", r.key) } else { format!("<{g} fill=\"none\"{}{off}/>", r.key) };
 }
 
 /// SVG-Text des Plans; `None` bei kaputtem Puffer.
@@ -238,7 +269,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
             let f = rec.f.clone();
             let fl = rec.flags;
             if rec.tag != T_LINE || fl & F_DASH_LIST == 0 {
-                flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys);
+                flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys, top);
             }
             let greyed = fl & F_GREYED != 0;
             let opacity = |k: usize| (fl & F_OPACITY != 0).then_some(f[k]);
@@ -261,7 +292,10 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                     if pts.len() < 3 {
                         continue;
                     }
-                    let pl = pts.iter().map(|q| format!("{},{}", xs(q.x), ys(q.y))).collect::<Vec<_>>().join(" ");
+                    // [169] Ganzer Kreis bzw. Ring mit Bögen als `<circle>`/`<path>`; Schraffur am fein
+                    // nachtesselierten Ring beschnitten (endet am Bogen, nicht an der Sehne).
+                    let (geo, _) = shape_el(&pts, true, &xs, &ys, top);
+                    let hatch_pts = if geo.starts_with("polygon") { pts.clone() } else { arc_fit::refine(&pts, true, arc_fit::TOL, &arc_fit::fine_segments).unwrap_or_else(|| pts.clone()) };
                     let fill = esc(part.str(f[0]).unwrap_or(""));
                     let stroke = esc(part.str(f[1]).unwrap_or(""));
                     // Nicht gestrichene Kanten (Stossfugen, Lücken an Anschlüssen): Fläche ohne Strich,
@@ -275,7 +309,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                     let seam_attr = || format!(" stroke=\"{fill}\" stroke-width=\"{}\"", num(SEAM_MM * mm_to_m));
                     if !nse.is_empty() && stroke != "none" && !stroke.is_empty() {
                         let st = if seam { seam_attr() } else { " stroke=\"none\"".to_string() };
-                        out.push(format!("<polygon points=\"{pl}\" fill=\"{fill}\"{st}{}/>", op(greyed, opacity(4))));
+                        out.push(format!("<{geo} fill=\"{fill}\"{st}{}/>", op(greyed, opacity(4))));
                         // Sichtbare Kantenläufe zum Zusammennähen ([146]), Kanten in Ring-Reihenfolge.
                         let nse_f: Vec<f64> = nse.iter().map(|&e| e as f64).collect();
                         let attrs = format!(" stroke=\"{stroke}\" stroke-width=\"{}\"{}", num(f[2] * mm_to_m), op(greyed, opacity(4)));
@@ -284,10 +318,10 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                             stitch.add(attrs.clone(), run, out.len() - 1);
                         }
                     } else if seam && (stroke == "none" || stroke.is_empty() || !(f[2] > 0.0)) {
-                        out.push(format!("<polygon points=\"{pl}\" fill=\"{fill}\"{}{}/>", seam_attr(), op(greyed, opacity(4))));
+                        out.push(format!("<{geo} fill=\"{fill}\"{}{}/>", seam_attr(), op(greyed, opacity(4))));
                     } else {
                         out.push(format!(
-                            "<polygon points=\"{pl}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\"{}/>",
+                            "<{geo} fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\"{}/>",
                             num(f[2] * mm_to_m),
                             op(greyed, opacity(4))
                         ));
@@ -308,11 +342,11 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                             };
                             let mut runs: Vec<Vec<V2>> = Vec::new();
                             if h.random {
-                                runs.extend(hatch::build_random_hatch_runs(&pts, &h, None).into_iter().filter(|r| r.len() >= 2).map(|r| vec![r[0], r[r.len() - 1]]));
+                                runs.extend(hatch::build_random_hatch_runs(&hatch_pts, &h, None).into_iter().filter(|r| r.len() >= 2).map(|r| vec![r[0], r[r.len() - 1]]));
                             } else {
                                 // [166] Alle Vektor-Schraffuren aus dem Kern-Generator wie Szene/PDF (Winkel-Lesart
                                 // der SVG-Kachel, polare Schraffur der Bogenwand).
-                                runs.extend(hatch::build_hatch_runs(&pts, &h));
+                                runs.extend(hatch::build_hatch_runs(&hatch_pts, &h));
                             }
                             for run in runs {
                                 match run.len() {
@@ -343,13 +377,13 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                         if let Some(r) = run.as_mut().filter(|r| r.key == key && r.pts.last().is_some_and(|p| (p.x - a.x).abs() < 1e-9 && (p.y - a.y).abs() < 1e-9)) {
                             r.pts.push(b);
                         } else {
-                            flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys);
+                            flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys, top);
                             out.push(String::new());
                             run = Some(DashRun { key, dash: pat, pts: vec![a, b], slot: out.len() - 1 });
                         }
                         continue;
                     }
-                    flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys);
+                    flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys, top);
                     // [146] Volle Linien: mit Kantenläufen gleicher Farbe/Breite zusammennähen (Ecke statt
                     // zweier Enden); Enden und Ecken erben die Projekt-Einstellung vom `<g>`.
                     if f[2] > 0.0 {
@@ -375,7 +409,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                     while sweep < 0.0 && sweep.is_finite() {
                         sweep += PI * 2.0;
                     }
-                    let dash = dash_attr(part)?;
+                    let dash = dash_attr(part)? + &arc_dash_offset(part, &rec, r * sweep.abs(), mm_to_m);
                     out.push(format!(
                         "<path d=\"M {} {} A {} {} 0 {} 0 {} {}\" fill=\"none\" stroke=\"#000\" stroke-width=\"{}\"{dash}{}/>",
                         xs(fx),
@@ -413,7 +447,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                         sweep += PI * 2.0;
                     }
                     let stroke = esc(part.str(f[0]).unwrap_or(""));
-                    let dash = dash_attr(part)?;
+                    let dash = dash_attr(part)? + &arc_dash_offset(part, &rec, r * sweep.abs(), mm_to_m);
                     out.push(format!(
                         "<path d=\"M {} {} A {} {} 0 {} 0 {} {}\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{}\"{dash}{}/>",
                         xs(sx),
@@ -454,9 +488,9 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                 _ => {}
             }
         }
-        flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys);
+        flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys, top);
     }
-    stitch.finish(&mut out, &xs, &ys);
+    stitch.finish(&mut out, &xs, &ys, top);
     out.retain(|s| !s.is_empty());
     Some(format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} 0 {} {}\" width=\"{}mm\" height=\"{}mm\">\n<rect x=\"{}\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"#ffffff\"/>\n<g {}>\n{}\n</g>\n</svg>\n",
@@ -624,5 +658,64 @@ mod tests {
         let mut parts = vec![Part::new(View::parse(&bytes).unwrap(), 0, n).unwrap()];
         let svg = plan_svg(&mut parts, &opts(LineEnds { cap: 1, join: 2 })).unwrap();
         assert!(svg.contains("<g stroke-linecap=\"round\" stroke-linejoin=\"bevel\""), "{svg}");
+    }
+
+    /// [169] Runde Stütze (32-Eck) als `<circle>`, Bogenwand-Band mit offenen Stirnkanten als Pfad mit `A`,
+    /// gestrichelter Bogen mit Musterphase.
+    #[test]
+    fn kreise_und_boegen_statt_vielecke() {
+        use crate::model::Vec2;
+        use crate::plan::buf::{View, Writer};
+        use crate::plan::prim::Primitive;
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let poly = |pts: Vec<Vec2>, nse: Option<Vec<f64>>| Primitive::Polygon {
+            pts,
+            fill: "#ffffff".into(),
+            stroke: "#000000".into(),
+            stroke_width_mm: 0.35,
+            hatch: crate::plan::style::no_hatch(),
+            greyed: None,
+            opacity: None,
+            no_stroke_edges: nse,
+            wall_id: None,
+            drawing_id: None,
+            ceiling_id: None,
+            opening_id: None,
+            stair_id: None,
+            room_id: None,
+            extruded_solid_id: None,
+            context_object_id: None,
+            column_id: None,
+            roof_id: None,
+            section_line_id: None,
+        };
+        let col: Vec<Vec2> = (0..32).map(|i| { let t = PI * 2.0 * i as f64 / 32.0; v(1.0 + 0.15 * t.cos(), 1.0 + 0.15 * t.sin()) }).collect();
+        let n = 12;
+        let mut band: Vec<Vec2> = (0..=n).map(|i| { let t = PI / 2.0 * i as f64 / n as f64; v(5.0 * t.cos(), 5.0 * t.sin()) }).collect();
+        band.extend((0..=n).rev().map(|i| { let t = PI / 2.0 * i as f64 / n as f64; v(4.7 * t.cos(), 4.7 * t.sin()) }));
+        // Stirnkanten (Index n und 2n+1) nicht gestrichen.
+        let nse = vec![n as f64, (2 * n + 1) as f64];
+        let mut w = Writer::new(false);
+        let g = w.begin_group();
+        w.push(&poly(col, None));
+        w.push(&poly(band, Some(nse)));
+        w.push(&Primitive::Arc { center: v(0.0, 0.0), from: v(2.0, 0.0), to: v(0.0, 2.0), r: 2.0, cls: "door-swing".into(), weight_mm: 0.18, dash: Some(Some(vec![2.0, 1.0])), color: None, opening_id: None, stair_id: None, greyed: None, opacity: None });
+        w.end_group(g);
+        let bytes = w.finish();
+        let view = View::parse(&bytes).unwrap();
+        let len = view.len();
+        let mut parts = vec![Part::new(view, 0, len).unwrap()];
+        let o = SvgOptions { scale_denominator: 50.0, margin_m: 0.5, min_x: -1.0, min_y: -1.0, max_x: 6.0, max_y: 6.0, hatch: false, line_ends: LineEnds::default() };
+        let svg = plan_svg(&mut parts, &o).unwrap();
+        let circle = svg.lines().find(|l| l.starts_with("<circle")).unwrap_or_else(|| panic!("{svg}"));
+        assert!(circle.contains("cx=\"1\" cy=\"5.5\" r=\"0.15\"") && circle.contains("stroke=\"#000000\""), "{circle}");
+        assert!(!svg.contains("<polygon"), "{svg}");
+        // Band: Fläche als Pfad mit zwei Bögen, sichtbare Kanten (die zwei Bögen) als offene Pfade.
+        let paths: Vec<&str> = svg.lines().filter(|l| l.starts_with("<path")).collect();
+        assert!(paths.iter().any(|p| p.matches(" A ").count() == 2 && p.contains(" Z\"") && p.contains("fill=\"#ffffff\"")), "{paths:?}");
+        assert_eq!(paths.iter().filter(|p| p.matches(" A ").count() == 1 && p.contains("fill=\"none\"") && p.contains("stroke=\"#000000\"")).count(), 2, "{paths:?}");
+        // Gestrichelter Viertelbogen r = 2 m: Länge π m = 62.83 mm Papier, Muster 2/1 mm → Phase ≠ 0.
+        let arc = paths.iter().find(|p| p.contains("stroke-dasharray")).unwrap();
+        assert!(arc.contains("stroke-dashoffset"), "{arc}");
     }
 }

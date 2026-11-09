@@ -26,6 +26,7 @@ use crate::js_fmt::js_number;
 use crate::jsnum;
 use crate::plan::buf::{whole, Rec, View, F_COLOR, F_DASH_NULL, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT};
 use crate::plan::parts::{greyed_of, Part};
+use crate::plan::arc_fit;
 use crate::plan::text::{SingleText, StampText};
 use crate::text_layout::{place_lines, stamp_block, stamp_line_offsets, wrap_doc_to_lines, Line, LayoutOpts, LineAlign, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use std::f64::consts::PI;
@@ -72,6 +73,25 @@ struct Out {
     /// [153] Laufender gestrichelter Zug: aneinander anschliessende Linien gleicher Darstellung
     /// (Farbe, Stift, Muster in mm, Deckkraft) werden EIN `<polyline>` mit Musterphase.
     dash_run: Option<((String, String, Vec<f64>, String), Vec<V2>)>,
+    /// [169] Toleranz der Bogenerkennung in Papier-mm.
+    tol: f64,
+}
+
+/// [169] Geometrie eines Rings/Zugs in Papier-mm: ganzer Kreis als `circle`, Zug mit erkannten Bögen als
+/// `path` mit `A`-Befehlen ([`arc_fit`]), sonst `polygon`/`polyline` (`points`). Dritter Wert = Länge.
+fn geo_mm(pts: &[V2], closed: bool, tol: f64) -> (&'static str, Vec<(&'static str, String)>, f64) {
+    if let Some(sh) = arc_fit::fit(pts, closed, tol) {
+        let len = arc_fit::length(&sh);
+        if let arc_fit::Shape::Circle { c, r, .. } = sh {
+            return ("circle", vec![("cx", r3(c.x)), ("cy", r3(c.y)), ("r", r3(r))], len);
+        }
+        return ("path", vec![("d", arc_fit::svg_d_with(&sh, &|p| p, 1.0, &r3, true))], len);
+    }
+    let mut len: f64 = pts.windows(2).map(|w| crate::jsmath::hypot2(w[1].x - w[0].x, w[1].y - w[0].y)).sum();
+    if closed && pts.len() > 1 {
+        len += crate::jsmath::hypot2(pts[0].x - pts[pts.len() - 1].x, pts[0].y - pts[pts.len() - 1].y);
+    }
+    (if closed { "polygon" } else { "polyline" }, vec![("points", pts_attr(pts))], len)
 }
 
 impl Out {
@@ -95,9 +115,18 @@ impl Out {
     /// Schreibt den laufenden gestrichelten Zug ([`super::line_pattern::phase`]: Enden auf einem Strich).
     fn flush_dash(&mut self) {
         let Some(((color, pen, dash, o), pts)) = self.dash_run.take() else { return };
-        let len: f64 = pts.windows(2).map(|w| crate::jsmath::hypot2(w[1].x - w[0].x, w[1].y - w[0].y)).sum();
         let pen_mm: f64 = pen.parse().unwrap_or(0.0);
-        let mut attrs = if pts.len() == 2 { line_attrs(pts[0], pts[1], &color, pen_mm, Some(&dash)) } else { polyline_attrs(&pts, &color, pen_mm, Some(&dash)) };
+        // [169] Bögen im Zug als Pfad mit `A`; Phase über die Länge mit Bögen.
+        let (gtag, geo, len) = geo_mm(&pts, false, self.tol);
+        let tag = if pts.len() == 2 { "line" } else { gtag };
+        let mut attrs = if pts.len() == 2 {
+            line_attrs(pts[0], pts[1], &color, pen_mm, Some(&dash))
+        } else {
+            let mut a = geo;
+            a.extend([("fill", "none".to_string()), ("stroke", color.clone()), ("stroke-width", js_number(pen_mm))]);
+            push_dash(&mut a, Some(&dash));
+            a
+        };
         let ph = super::line_pattern::phase(len, &dash);
         if ph > 1e-9 {
             attrs.push(("stroke-dashoffset", r3(ph)));
@@ -105,7 +134,6 @@ impl Out {
         if !o.is_empty() {
             attrs.push(("opacity", o));
         }
-        let tag = if pts.len() == 2 { "line" } else { "polyline" };
         let mut f: Vec<&str> = vec!["E", "0", tag];
         for (k, v) in &attrs {
             f.push(k);
@@ -135,15 +163,19 @@ impl Out {
             for (pts, closed, members) in crate::plan::scene::stitch_runs_members(&runs) {
                 let slot = members.iter().map(|&m| slots[m]).max().unwrap_or(0);
                 let line = pts.len() == 2 && !closed;
+                // [169] Bögen (runde Stütze, Bogenwand) als Kreis bzw. Pfad mit `A`.
+                let (gtag, geo, _) = if line { ("line", Vec::new(), 0.0) } else { geo_mm(&pts, closed, self.tol) };
                 let mut attrs = if line {
                     vec![("x1", r3(pts[0].x)), ("y1", r3(pts[0].y)), ("x2", r3(pts[1].x)), ("y2", r3(pts[1].y)), ("stroke", color.clone()), ("stroke-width", pen.clone())]
                 } else {
-                    vec![("points", pts_attr(&pts)), ("fill", "none".to_string()), ("stroke", color.clone()), ("stroke-width", pen.clone())]
+                    let mut a = geo;
+                    a.extend([("fill", "none".to_string()), ("stroke", color.clone()), ("stroke-width", pen.clone())]);
+                    a
                 };
                 if !o.is_empty() {
                     attrs.push(("opacity", o.clone()));
                 }
-                let tag = if line { "line" } else if closed { "polygon" } else { "polyline" };
+                let tag = gtag;
                 let mut f: Vec<&str> = vec!["E", "0", tag];
                 for (k, v) in &attrs {
                     f.push(k);
@@ -215,19 +247,23 @@ fn split_alpha(color: &str) -> (String, Option<String>) {
     (color.to_string(), None)
 }
 
-fn poly_node(pts: &str, fill: &str, stroke: &str, stroke_mm: f64) -> Vec<(&'static str, String)> {
+/// Geometrie-Element eines Rings: Tag und Geometrie-Attribute ([`geo_mm`]).
+type Geo = (&'static str, Vec<(&'static str, String)>);
+
+fn poly_node(geo: &[(&'static str, String)], fill: &str, stroke: &str, stroke_mm: f64) -> Vec<(&'static str, String)> {
     let (fill, fill_opacity) = split_alpha(fill);
     let opaque = fill_opacity.is_none();
-    let mut a = vec![("points", pts.to_string()), ("fill", fill)];
+    let mut a = geo.to_vec();
+    a.push(("fill", fill.clone()));
     if let Some(o) = fill_opacity {
         a.push(("fill-opacity", o));
     }
     if stroke != "none" && stroke_mm > 0.0 {
         a.push(("stroke", stroke.to_string()));
         a.push(("stroke-width", js_number(stroke_mm)));
-    } else if opaque && super::svg::seam_fill(&a[1].1) {
+    } else if opaque && super::svg::seam_fill(&fill) {
         // [157] Dunkle, deckende Fläche: Haarstrich in der Füllfarbe gegen die Fuge zur Nachbarfläche.
-        a.push(("stroke", a[1].1.clone()));
+        a.push(("stroke", fill));
         a.push(("stroke-width", js_number(super::svg::SEAM_MM)));
     } else {
         a.push(("stroke", "none".to_string()));
@@ -237,23 +273,25 @@ fn poly_node(pts: &str, fill: &str, stroke: &str, stroke_mm: f64) -> Vec<(&'stat
 
 /// Polygon mit Füllung und Strich; mit `nse` (nicht gestrichene Kanten, [146]) die Füllung ohne Strich
 /// und die sichtbaren Kantenläufe als offene Linienzüge — wie das Plan-SVG (`plan/svg.rs`).
-fn poly_stroked(out: &mut Out, attr: &str, pts_mm: &[V2], nse: &[f64], fill: &str, stroke: &str, stroke_mm: f64) {
+fn poly_stroked(out: &mut Out, geo: &Geo, pts_mm: &[V2], nse: &[f64], fill: &str, stroke: &str, stroke_mm: f64) {
     if nse.is_empty() || stroke_mm <= 0.0 || stroke == "none" {
-        out.el(1, "polygon", &poly_node(attr, fill, stroke, stroke_mm));
+        out.el(1, geo.0, &poly_node(&geo.1, fill, stroke, stroke_mm));
         return;
     }
-    out.el(1, "polygon", &poly_node(attr, fill, "none", 0.0));
-    poly_outline(out, pts_mm, nse, stroke, stroke_mm);
+    out.el(1, geo.0, &poly_node(&geo.1, fill, "none", 0.0));
+    poly_outline(out, geo, pts_mm, nse, stroke, stroke_mm);
 }
 
 /// Nur der Umriss (Füllung oder Schraffur liegt schon darunter).
-fn poly_outline(out: &mut Out, pts_mm: &[V2], nse: &[f64], stroke: &str, stroke_mm: f64) {
+fn poly_outline(out: &mut Out, geo: &Geo, pts_mm: &[V2], nse: &[f64], stroke: &str, stroke_mm: f64) {
     if nse.is_empty() {
-        out.el(1, "polygon", &poly_node(&pts_attr(pts_mm), "none", stroke, stroke_mm));
+        out.el(1, geo.0, &poly_node(&geo.1, "none", stroke, stroke_mm));
         return;
     }
     for run in crate::plan::scene::visible_edge_runs(pts_mm, nse) {
-        out.el(1, "polyline", &polyline_attrs(&run, stroke, stroke_mm, None));
+        let (tag, mut a, _) = geo_mm(&run, false, out.tol);
+        a.extend([("fill", "none".to_string()), ("stroke", stroke.to_string()), ("stroke-width", js_number(stroke_mm))]);
+        out.el(1, tag, &a);
     }
 }
 
@@ -288,6 +326,16 @@ fn push_dash(v: &mut Vec<(&'static str, String)>, dash: Option<&[f64]>) {
         v.push(("stroke-dasharray", dash_attr(d)));
         if d.iter().any(|x| *x == 0.0) {
             v.push(("stroke-linecap", "round".to_string()));
+        }
+    }
+}
+
+/// [153]/[169] `stroke-dashoffset` eines gestrichelten Bogens der Papier-Länge `len_mm`.
+fn push_phase(v: &mut Vec<(&'static str, String)>, dash: Option<&[f64]>, len_mm: f64) {
+    if let Some(d) = dash.filter(|d| !d.is_empty()) {
+        let ph = super::line_pattern::phase(len_mm, d);
+        if ph > 1e-9 {
+            v.push(("stroke-dashoffset", r3(ph)));
         }
     }
 }
@@ -341,6 +389,11 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
             let opacity = opacity_of(greyed, obj(4));
             let pts_mm: Vec<V2> = pts.iter().map(|p| m.at(p.x, p.y)).collect();
             let attr = pts_attr(&pts_mm);
+            // [169] Kreis bzw. Ring mit Bögen als `<circle>`/`<path>`; Schraffur am fein nachtesselierten Ring
+            // beschnitten (endet am Bogen, nicht an der Sehne).
+            let (gtag, gattrs, _) = geo_mm(&pts_mm, true, out.tol);
+            let geo: Geo = (gtag, gattrs);
+            let pts = if gtag == "polygon" { pts } else { arc_fit::refine(&pts, true, arc_fit::TOL, &arc_fit::fine_segments).unwrap_or(pts) };
             let nse: Vec<f64> = match rec.nse {
                 Some((o, n)) => view.pool(o, n)?.into_iter().filter(|e| e.is_finite() && *e >= 0.0).collect(),
                 None => Vec::new(),
@@ -361,19 +414,19 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
             let hatch_color = if color >= 0 { view.string(color as usize)? } else { "undefined".to_string() };
             if let Some(img) = image {
                 if fill != "none" {
-                    out.el(1, "polygon", &poly_node(&attr, &fill, "none", 0.0));
+                    out.el(1, geo.0, &poly_node(&geo.1, &fill, "none", 0.0));
                 }
                 out.rec(&["I", &attr, &img]);
                 if stroke_mm > 0.0 {
-                    poly_outline(out, &pts_mm, &nse, &stroke, stroke_mm);
+                    poly_outline(out, &geo, &pts_mm, &nse, &stroke, stroke_mm);
                 }
             } else if h.pattern == Pattern::None {
-                poly_stroked(out, &attr, &pts_mm, &nse, &fill, &stroke, stroke_mm);
+                poly_stroked(out, &geo, &pts_mm, &nse, &fill, &stroke, stroke_mm);
             } else if h.pattern == Pattern::Solid {
-                poly_stroked(out, &attr, &pts_mm, &nse, &hatch_color, &stroke, stroke_mm);
+                poly_stroked(out, &geo, &pts_mm, &nse, &hatch_color, &stroke, stroke_mm);
             } else {
                 if fill != "none" {
-                    out.el(1, "polygon", &poly_node(&attr, &fill, "none", 0.0));
+                    out.el(1, geo.0, &poly_node(&geo.1, &fill, "none", 0.0));
                 }
                 let pen = quantize_pen(h.line_weight);
                 let hdash = hatch_dash_paper(&h, k);
@@ -400,7 +453,7 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                     }
                 }
                 if stroke_mm > 0.0 {
-                    poly_outline(out, &pts_mm, &nse, &stroke, stroke_mm);
+                    poly_outline(out, &geo, &pts_mm, &nse, &stroke, stroke_mm);
                 }
             }
             out.rec(&["g"]);
@@ -446,7 +499,15 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
             let sweep = if cross > 0.0 { 1 } else { 0 };
             let d = format!("M {} {} A {} {} 0 0 {} {} {}", r3(from.x), r3(from.y), r3(r), r3(r), sweep, r3(to.x), r3(to.y));
             let mut attrs = vec![("d", d), ("fill", "none".to_string()), ("stroke", "#111111".to_string()), ("stroke-width", js_number(quantize_pen(f[2])))];
-            push_dash(&mut attrs, dash(&rec)?.as_deref());
+            let dd = dash(&rec)?;
+            push_dash(&mut attrs, dd.as_deref());
+            // [153]/[169] Musterphase auch auf Bögen (kürzerer Bogen, wie gezeichnet).
+            let ang = |p: V2| jsnum::atan2(p.y - c.y, p.x - c.x);
+            let mut sw = (ang(to) - ang(from)).abs();
+            if sw > PI {
+                sw = 2.0 * PI - sw;
+            }
+            push_phase(&mut attrs, dd.as_deref(), r * sw);
             let o = opacity_of(greyed, obj(3));
             if !o.is_empty() {
                 attrs.push(("opacity", o));
@@ -481,7 +542,9 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
             let large = if sweep > PI { 1 } else { 0 };
             let d = format!("M {} {} A {} {} 0 {} 1 {} {}", r3(from.x), r3(from.y), r3(rr), r3(rr), large, r3(to.x), r3(to.y));
             let mut attrs = vec![("d", d), ("fill", "none".to_string()), ("stroke", s(f[0])?), ("stroke-width", js_number(quantize_pen(f[1])))];
-            push_dash(&mut attrs, dash(&rec)?.as_deref());
+            let dd = dash(&rec)?;
+            push_dash(&mut attrs, dd.as_deref());
+            push_phase(&mut attrs, dd.as_deref(), rr * sweep);
             let o = opacity_of(greyed, obj(2));
             if !o.is_empty() {
                 attrs.push(("opacity", o));
@@ -638,7 +701,7 @@ pub fn print_svg_ops(parts: &mut [Part], o: &PrintOptions) -> Option<String> {
     let content_w = (max_x - min_x) * k;
     let content_h = (max_y - min_y) * k;
     let m = Map { off_x: (o.page_w - content_w) / 2.0, off_y: (o.page_h - content_h) / 2.0, min_x, max_y, k };
-    let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None };
+    let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None, tol: arc_fit::TOL * k };
     for part in parts.iter_mut() {
         let hatches = part.view.hatch_table()?;
         for i in part.from..part.to {
@@ -655,20 +718,20 @@ mod tests {
     #[test]
     fn schwarze_flaeche_mit_haarstrich() {
         // [157] Dunkle deckende Fläche ohne Strich: Haarstrich in der Füllfarbe (keine helle Fuge im PDF).
-        let a = poly_node("0,0 1,0 1,1", "#0f0f0f", "none", 0.0);
+        let a = poly_node(&[("points", "0,0 1,0 1,1".to_string())], "#0f0f0f", "none", 0.0);
         assert!(a.contains(&("stroke", "#0f0f0f".to_string())) && a.contains(&("stroke-width", "0.05".to_string())), "{a:?}");
-        let b = poly_node("0,0 1,0 1,1", "#ffffff", "none", 0.0);
+        let b = poly_node(&[("points", "0,0 1,0 1,1".to_string())], "#ffffff", "none", 0.0);
         assert!(b.contains(&("stroke", "none".to_string())), "{b:?}");
-        let c = poly_node("0,0 1,0 1,1", "#0f0f0f", "#222", 0.35);
+        let c = poly_node(&[("points", "0,0 1,0 1,1".to_string())], "#0f0f0f", "#222", 0.35);
         assert!(c.contains(&("stroke", "#222".to_string())), "{c:?}");
     }
 
     #[test]
     fn raumfuellung_mit_alpha_als_deckkraft() {
-        let a = poly_node("0,0 1,0 1,1", "#4a6fa526", "none", 0.0);
+        let a = poly_node(&[("points", "0,0 1,0 1,1".to_string())], "#4a6fa526", "none", 0.0);
         assert!(a.contains(&("fill", "#4a6fa5".to_string())));
         assert!(a.contains(&("fill-opacity", "0.149".to_string())));
-        let b = poly_node("0,0 1,0 1,1", "#ffffff", "none", 0.0);
+        let b = poly_node(&[("points", "0,0 1,0 1,1".to_string())], "#ffffff", "none", 0.0);
         assert!(b.iter().all(|e| e.0 != "fill-opacity"));
     }
 
@@ -694,7 +757,7 @@ mod tests {
         let js = "{\"kind\":\"drawingText\",\"at\":{\"x\":1,\"y\":2},\"text\":\"aa bb\",\"heightM\":0.5,\"angle\":0.5,\"color\":\"#123\",\"wrapWidth\":2,\"marks\":{\"bold\":true}}";
         let t: SingleText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
-        let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None };
+        let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None, tol: arc_fit::TOL };
         text_node(&mut out, &t, m, "0.5".into());
         let s = out.finish();
         let recs: Vec<Vec<&str>> = s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
@@ -713,7 +776,7 @@ mod tests {
         let js = r##"{"at":{"x":0,"y":10},"text":"","heightM":0.25,"angle":0,"wrapWidth":2,"doc":{"version":1,"paragraphs":[{"runs":[{"text":"aaaa bbbb","marks":{}}]},{"runs":[{"text":"c","marks":{"sizePt":72}}],"lineHeight":2}]}}"##;
         let t: SingleText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
-        let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None };
+        let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None, tol: arc_fit::TOL };
         text_node(&mut out, &t, m, String::new());
         let s = out.finish();
         let recs: Vec<Vec<&str>> = s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
@@ -730,7 +793,7 @@ mod tests {
         let js = r##"{"at":{"x":2,"y":3},"doc":{"version":1,"paragraphs":[{"runs":[{"text":"Wohnen","marks":{"bold":true}}],"align":"center"}]},"extraLines":[{"text":"17.01 m²","align":"center"}],"basePt":10,"color":"#333"}"##;
         let t: StampText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 20.0 };
-        let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None };
+        let mut out = Out { recs: Vec::new(), solid: Vec::new(), dash_run: None, tol: arc_fit::TOL };
         stamp_node(&mut out, &t, m, "0.3".into());
         let s = out.finish();
         let recs: Vec<Vec<&str>> = s.split('\u{1e}').map(|r| r.split('\u{1f}').collect()).collect();
