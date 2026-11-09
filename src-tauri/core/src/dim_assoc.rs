@@ -1086,6 +1086,23 @@ mod tests {
         assert!(n_refs >= 4, "{n_refs}");
     }
 
+    /// [81] Zweites, getrenntes Gebäude: eigene Seitenketten mit Kennung `south2` …
+    #[test]
+    fn autodim_getrenntes_gebaeude_eigene_kennung() {
+        let mut r = project();
+        let walls = r.get_mut("walls").and_then(Value::as_array_mut).unwrap();
+        walls.push(json!({"id": "G", "floorId": "eg", "wallTypeId": "T", "start": {"x": 20, "y": 0}, "end": {"x": 24, "y": 0}}));
+        let ops = crate::commands::ops(&r, &crate::model::lenient::typed_for_test(&r), &json!({"cmd": "autodim", "ctx": {"level": "eg"}, "stamp": "s"}).to_string()).unwrap();
+        let ids: Vec<String> = ops
+            .iter()
+            .filter_map(|o| if let Op::Add { items, .. } = o { Some(items) } else { None })
+            .flatten()
+            .filter_map(|d| d["id"].as_str().map(str::to_owned))
+            .collect();
+        assert!(ids.iter().any(|i| i == "autodim-eg-south-total"), "{ids:?}");
+        assert!(ids.iter().any(|i| i == "autodim-eg-south2-total"), "{ids:?}");
+    }
+
     /// Aussenbemassung im Massstab der Ansicht: 1:50 setzt die Ketten halb so weit von der Wand wie 1:100.
     #[test]
     fn autodim_im_massstab_der_ansicht() {

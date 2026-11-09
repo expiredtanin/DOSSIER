@@ -5,7 +5,8 @@
 //!   3. Gesamtmass.
 //! Grundlage ist die vereinigte Grundfläche der Wände des Geschosses (an verbundenen Enden um die
 //! halbe Dicke verlängert, schiefe Eckstösse auf Gehrung). Achsparallele Kanten gehören zu den vier Seiten;
-//! schiefe Fassaden bekommen eigene Ketten (`oblique_chains`). Bogenwände ([T2]) gehen mit ihrem Kreisring in die Grundfläche
+//! schiefe Fassaden bekommen eigene Ketten (`oblique_chains`); kreuzt eine davon den Grundriss, rückt sie hinaus.
+//! Getrennte Gebäude (entlang einer Seite ohne Überlappung) haben je eigene Seitenketten (`DimChain::part`). Bogenwände ([T2]) gehen mit ihrem Kreisring in die Grundfläche
 //! ein; liegt ihre gewölbte Seite aussen, bekommen sie eine eigene Bogenmass-Kette (Ecken und
 //! Leibungen auf dieser Fläche, gemessen entlang des Bogens). TS liefert Wände (Achse + Dicke) und Öffnungs-Leibungen,
 //! baut aus den Ketten die Bemassungs-Objekte.
@@ -53,6 +54,9 @@ pub const CHAIN_STEPS: usize = 1;
 pub const CHAIN_TOTAL: usize = 2;
 /// Abstand der Ketten von der äussersten Kante in Papier-mm (1:100 → 1.0 / 1.7 / 2.4 m).
 const CHAIN_MM: [f64; 3] = [10.0, 17.0, 24.0];
+/// [81] Bogenmass-Kette: nahe am Bogen, damit ihre Masszahl nicht in die der Seitenketten fällt (deren erste liegt
+/// 10 mm vor dem Scheitel, Text innen; Schrift 2.5 mm).
+const ARC_CHAIN_MM: f64 = 4.0;
 
 /// Eine Masskette.
 #[derive(Clone, Debug, PartialEq)]
@@ -67,6 +71,9 @@ pub struct DimChain {
     pub src: Vec<Vec2>,
     /// [T2] Bogenmass-Kette einer Bogenwand: (Bogenmitte, Wand-Index); `side` ist dann ohne Bedeutung.
     pub arc: Option<(Vec2, usize)>,
+    /// [81] Teil der Seite: getrennte Gebäude des Geschosses (entlang der Seite nicht überlappend) bekommen je
+    /// eigene Ketten; 0 = das breiteste, dann nach Lage.
+    pub part: usize,
 }
 
 const EPS: f64 = 1e-6;
@@ -255,74 +262,146 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
     }
     let scale = if scale_denominator.is_finite() && scale_denominator > 0.0 { scale_denominator } else { 100.0 };
     let mut out = vec![];
+    let circles = arc_circles(walls);
+    // [81] Getrennte Gebäude: Ringe, die entlang der Seite weiter als 5 mm Papier auseinander liegen, bekommen eigene Ketten.
+    let gap = CLUSTER_GAP_MM / 1000.0 * scale;
     for (side, &n) in SIDES.iter().enumerate() {
         // Laufrichtung so, dass die linke Normale = Aussennormale ist (positiver Abstand = aussen).
         let u = [n[1], -n[0]];
-        let (mut s_max, mut t_min, mut t_max) = (f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
-        let mut corners = vec![];
-        // Merkmale (Lage entlang u, Punkt, Tiefe entlang n) für `src`.
-        let mut feats: Vec<(f64, Vec2, f64)> = vec![];
-        // Kanten, die nach `n` schauen: Aussennormale (rechte Normale eines CCW-Rings) ≈ n.
-        let mut faces: Vec<(f64, f64, f64)> = vec![];
-        for ring in &rings {
-            for &p in ring {
-                feats.push((dot(p, u), p, dot(p, n)));
-                s_max = s_max.max(dot(p, n));
-                t_min = t_min.min(dot(p, u));
-                t_max = t_max.max(dot(p, u));
-            }
-            for i in 0..ring.len() {
-                let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
-                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-                let len = dx.hypot(dy);
-                if len < EPS {
-                    continue;
+        let mut spans: Vec<(f64, f64, Vec<usize>)> = rings
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let (lo, hi) = r.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &p| (l.min(dot(p, u)), h.max(dot(p, u))));
+                (lo, hi, vec![i])
+            })
+            .collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut clusters: Vec<(f64, f64, Vec<usize>)> = vec![];
+        for s in spans {
+            match clusters.last_mut() {
+                Some(c) if s.0 <= c.1 + gap => {
+                    c.1 = c.1.max(s.1);
+                    c.2.extend(s.2);
                 }
-                if dot([dy / len, -dx / len], n) < 1.0 - 1e-6 {
-                    continue; // nur achsparallele, nach n schauende Kanten
-                }
-                let (ta, tb) = (dot(a, u), dot(b, u));
-                faces.push((dot(a, n), ta.min(tb), ta.max(tb)));
-                corners.push(ta);
-                corners.push(tb);
+                _ => clusters.push(s),
             }
         }
-        if faces.is_empty() {
-            continue;
-        }
-
-        // Öffnungen in Wänden, deren Aussenseite auf einer dieser Kanten liegt.
-        let mut jambs = vec![];
-        for o in openings {
-            let Some(outer_s) = walls.get(o.wall).and_then(|w| outer_face_s(w, n)) else { continue };
-            let (ja, jb) = (dot(o.jamb_start, u), dot(o.jamb_end, u));
-            if !ja.is_finite() || !jb.is_finite() {
-                continue;
-            }
-            let on_face = faces
-                .iter()
-                .any(|&(s, t0, t1)| (s - outer_s).abs() < 1e-3 && ja.min(jb) >= t0 - 1e-3 && ja.max(jb) <= t1 + 1e-3);
-            if on_face {
-                jambs.push(ja);
-                jambs.push(jb);
-                for j in [o.jamb_start, o.jamb_end] {
-                    let k = outer_s - dot(j, n);
-                    feats.push((dot(j, u), [j[0] + n[0] * k, j[1] + n[1] * k], outer_s + 1.0));
-                }
+        // Das breiteste zuerst (behält die bisherige Kennung), dann nach Lage.
+        clusters.sort_by(|a, b| (b.1 - b.0).total_cmp(&(a.1 - a.0)).then(a.0.total_cmp(&b.0)));
+        let mut part = 0;
+        for (_, _, idx) in clusters {
+            let sub: Vec<&Ring> = idx.iter().map(|&i| &rings[i]).collect();
+            if side_chains(&mut out, side, part, &sub, walls, openings, &circles, scale) {
+                part += 1;
             }
         }
-
-        emit_chains(&mut out, side, n, s_max, (t_min, t_max), &corners, jambs, &feats, scale);
     }
     out.extend(arc_chains(walls, openings, &rings, scale));
-    out.extend(oblique_chains(walls, openings, &rings, scale));
+    let bands: Vec<Ring> = out.iter().filter_map(|c| chain_band(c, scale)).collect();
+    out.extend(oblique_chains(walls, openings, &rings, &bands, scale));
     out
+}
+
+/// Abstand (Papier-mm), ab dem Gebäude entlang einer Seite getrennte Ketten bekommen.
+const CLUSTER_GAP_MM: f64 = 5.0;
+
+/// Ketten der Seite `side` für die Ringe `rings` (ein Gebäude bzw. entlang der Seite überlappende Gebäude).
+/// `false`, wenn die Seite dort keine Fläche hat.
+#[allow(clippy::too_many_arguments)]
+fn side_chains(out: &mut Vec<DimChain>, side: usize, part: usize, rings: &[&Ring], walls: &[WallIn], openings: &[OpeningIn], circles: &[(Vec2, f64, f64)], scale: f64) -> bool {
+    let n = SIDES[side];
+    let u = [n[1], -n[0]];
+    let (mut s_max, mut t_min, mut t_max) = (f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    let mut corners = vec![];
+    // Merkmale (Lage entlang u, Punkt, Tiefe entlang n) für `src`.
+    let mut feats: Vec<(f64, Vec2, f64)> = vec![];
+    // Kanten, die nach `n` schauen: Aussennormale (rechte Normale eines CCW-Rings) ≈ n.
+    let mut faces: Vec<(f64, f64, f64)> = vec![];
+    let mut on_arc = false;
+    for ring in rings {
+        for &p in ring.iter() {
+            feats.push((dot(p, u), p, dot(p, n)));
+            s_max = s_max.max(dot(p, n));
+            t_min = t_min.min(dot(p, u));
+            t_max = t_max.max(dot(p, u));
+        }
+        for i in 0..ring.len() {
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let len = dx.hypot(dy);
+            if len < EPS {
+                continue;
+            }
+            if dot([dy / len, -dx / len], n) < 1.0 - 1e-6 {
+                continue; // nur achsparallele, nach n schauende Kanten
+            }
+            // [81] Facette einer Bogenwand (Erker-Scheitel): keine Stufe; der Bogen hat seine eigene Kette.
+            if on_circles(circles, a, b) {
+                on_arc = true;
+                continue;
+            }
+            let (ta, tb) = (dot(a, u), dot(b, u));
+            faces.push((dot(a, n), ta.min(tb), ta.max(tb)));
+            corners.push(ta);
+            corners.push(tb);
+        }
+    }
+    if faces.is_empty() && !on_arc {
+        return false;
+    }
+
+    // Öffnungen in Wänden, deren Aussenseite auf einer dieser Kanten liegt.
+    let mut jambs = vec![];
+    for o in openings {
+        let Some(outer_s) = walls.get(o.wall).and_then(|w| outer_face_s(w, n)) else { continue };
+        let (ja, jb) = (dot(o.jamb_start, u), dot(o.jamb_end, u));
+        if !ja.is_finite() || !jb.is_finite() {
+            continue;
+        }
+        let on_face = faces
+            .iter()
+            .any(|&(s, t0, t1)| (s - outer_s).abs() < 1e-3 && ja.min(jb) >= t0 - 1e-3 && ja.max(jb) <= t1 + 1e-3);
+        if on_face {
+            jambs.push(ja);
+            jambs.push(jb);
+            for j in [o.jamb_start, o.jamb_end] {
+                let k = outer_s - dot(j, n);
+                feats.push((dot(j, u), [j[0] + n[0] * k, j[1] + n[1] * k], outer_s + 1.0));
+            }
+        }
+    }
+    emit_chains(out, side, part, n, s_max, (t_min, t_max), &corners, jambs, &feats, scale);
+    true
+}
+
+/// Kreisringe der Bogenwände: (Mitte, innerer, äusserer Radius).
+fn arc_circles(walls: &[WallIn]) -> Vec<(Vec2, f64, f64)> {
+    walls
+        .iter()
+        .filter_map(|w| {
+            let a = w.arc()?;
+            let h = thick(w) / 2.0;
+            Some(([a.center.x, a.center.y], a.radius_at(-h), a.radius_at(h)))
+        })
+        .collect()
+}
+
+/// Liegen beide Punkte auf einer Fläche derselben Bogenwand (Facette)?
+fn on_circles(circles: &[(Vec2, f64, f64)], a: Vec2, b: Vec2) -> bool {
+    circles.iter().any(|&(c, r0, r1)| {
+        let on = |q: Vec2| {
+            let d = (q[0] - c[0]).hypot(q[1] - c[1]);
+            (d - r0).abs() < 1e-4 || (d - r1).abs() < 1e-4
+        };
+        on(a) && on(b)
+    })
 }
 
 /// Ketten einer Seite (Aussennormale `n`, Masslinie bei `s_line` entlang `n`): Öffnungen (Ecken +
 /// Leibungen), Vor-/Rücksprünge (nur bei mehr als zwei Ecken), Gesamt `t_range`.
 #[allow(clippy::too_many_arguments)]
-fn emit_chains(out: &mut Vec<DimChain>, side: usize, n: Vec2, s_line: f64, t_range: (f64, f64), corners: &[f64], jambs: Vec<f64>, feats: &[(f64, Vec2, f64)], scale: f64) {
+fn emit_chains(out: &mut Vec<DimChain>, side: usize, part: usize, n: Vec2, s_line: f64, t_range: (f64, f64), corners: &[f64], jambs: Vec<f64>, feats: &[(f64, Vec2, f64)], scale: f64) {
     let u = [n[1], -n[0]];
     let min_gap = MIN_SEGMENT_MM / 1000.0 * scale;
     let steps = thin(unique_sorted(corners), min_gap);
@@ -348,7 +427,7 @@ fn emit_chains(out: &mut Vec<DimChain>, side: usize, n: Vec2, s_line: f64, t_ran
             .zip(&pts)
             .map(|(&t, &p)| feats.iter().filter(|f| (f.0 - t).abs() <= 1e-3).max_by(|a, b| a.2.total_cmp(&b.2)).map_or(p, |f| f.1))
             .collect();
-        out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale, src, arc: None });
+        out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale, src, arc: None, part });
     }
 }
 
@@ -373,26 +452,11 @@ fn outer_face_s(w: &WallIn, n: Vec2) -> Option<f64> {
 /// Kanten kürzer als die dickste Wand (Stirnseiten, Gehrungsreste) fallen weg. Bogenwände: Facetten und
 /// Stirnseiten fallen weg; die Sehne zwischen den Ecken der gewölbten Aussenfläche gilt als
 /// Fassadenstück, wenn sie schief liegt (achsparallel deckt sie schon die Seitenkette).
-fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scale: f64) -> Vec<DimChain> {
+fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], bands: &[Ring], scale: f64) -> Vec<DimChain> {
     let min_gap = MIN_SEGMENT_MM / 1000.0 * scale;
     let min_len = (walls.iter().map(thick).fold(0.0, f64::max) + 1e-3).max(min_gap);
-    let circles: Vec<(Vec2, f64, f64)> = walls
-        .iter()
-        .filter_map(|w| {
-            let a = w.arc()?;
-            let h = thick(w) / 2.0;
-            Some(([a.center.x, a.center.y], a.radius_at(-h), a.radius_at(h)))
-        })
-        .collect();
-    let on_arc = |a: Vec2, b: Vec2| {
-        circles.iter().any(|&(c, r0, r1)| {
-            let on = |q: Vec2| {
-                let d = (q[0] - c[0]).hypot(q[1] - c[1]);
-                (d - r0).abs() < 1e-4 || (d - r1).abs() < 1e-4
-            };
-            on(a) && on(b)
-        })
-    };
+    let circles = arc_circles(walls);
+    let on_arc = |a: Vec2, b: Vec2| on_circles(&circles, a, b);
     // Fassadenstücke (a, b): Aussennormale rechts der Laufrichtung (CCW-Ring).
     let mut edges: Vec<(Vec2, Vec2, Vec2)> = vec![];
     for ring in rings {
@@ -498,10 +562,140 @@ fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scal
                 }
             }
         }
-        emit_chains(&mut out, side, n, s_line, (t_min, t_max), &corners, jambs, &feats, scale);
+        // [81] Kreuzt eine Kette (Masslinie oder Hilfslinie) den Grundriss — schiefe Fläche in einer Einbuchtung mit
+        // spitzem Winkel, Flügel davor —, rückt die Grundlinie hinaus vor alles, was im Streifen der Kette liegt.
+        let mut chains = vec![];
+        emit_chains(&mut chains, side, 0, n, s_line, (t_min, t_max), &corners, jambs.clone(), &feats, scale);
+        if chains.iter().any(|c| chain_segments(c, scale).iter().any(|&(a, b)| seg_in_interior(a, b, rings))) {
+            let m = 3.0 / 1000.0 * scale;
+            // Dabei auch vor die Ketten der Hauptseiten (Masslinien samt Text), sonst lägen sie übereinander.
+            let obst: Vec<Ring> = rings.iter().chain(bands).cloned().collect();
+            let s_free = strip_max(&obst, n, (t_min - m, t_max + m));
+            chains.clear();
+            emit_chains(&mut chains, side, 0, n, s_line.max(s_free), (t_min, t_max), &corners, jambs, &feats, scale);
+        }
+        out.extend(chains);
         side += 1;
     }
     out
+}
+
+/// Hilfslinien-Abstand und -Überstand der Darstellung (Papier-mm, wie `plan/drawings.rs`).
+const DIM_GAP_MM: f64 = 1.0;
+const DIM_OVERSHOOT_MM: f64 = 1.0;
+
+/// Strecken, die eine gerade Kette zeichnet: Masslinie (mit Überstand) und je Punkt die Hilfslinie.
+fn chain_segments(d: &DimChain, scale: f64) -> Vec<(Vec2, Vec2)> {
+    let (Some(&a), Some(&b)) = (d.pts.first(), d.pts.last()) else { return vec![] };
+    let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+    if !(len >= EPS) {
+        return vec![];
+    }
+    let u = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+    let n = [-u[1], u[0]];
+    let (gap, ov, off) = (DIM_GAP_MM / 1000.0 * scale, DIM_OVERSHOOT_MM / 1000.0 * scale, d.offset);
+    let at = |p: Vec2, k: f64, t: f64| [p[0] + n[0] * k + u[0] * t, p[1] + n[1] * k + u[1] * t];
+    let mut out = vec![(at(a, off, -ov), at(b, off, ov))];
+    out.extend(d.pts.iter().map(|&p| (at(p, gap, 0.0), at(p, off + ov, 0.0))));
+    out
+}
+
+/// Fläche, die eine gerade Kette mit Masslinie und Text belegt (von ihren Punkten bis 4 mm Papier über die Masslinie).
+fn chain_band(d: &DimChain, scale: f64) -> Option<Ring> {
+    let (&a, &b) = (d.pts.first()?, d.pts.last()?);
+    let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+    if d.arc.is_some() || !(len >= EPS) {
+        return None;
+    }
+    let u = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+    let n = [-u[1], u[0]];
+    let (ov, top) = (DIM_OVERSHOOT_MM / 1000.0 * scale, d.offset + 4.0 / 1000.0 * scale);
+    let at = |p: Vec2, k: f64, t: f64| [p[0] + n[0] * k + u[0] * t, p[1] + n[1] * k + u[1] * t];
+    Some(vec![at(a, 0.0, -ov), at(b, 0.0, ov), at(b, top, ov), at(a, top, -ov)])
+}
+
+/// Punkt echt im Innern eines Rings (Strahlverfahren)?
+fn in_ring(p: Vec2, r: &[Vec2]) -> bool {
+    let mut inside = false;
+    let k = r.len();
+    for i in 0..k {
+        let (a, b) = (r[i], r[(i + k - 1) % k]);
+        if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0] {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+fn seg_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let l2 = dx * dx + dy * dy;
+    let t = if l2 > 0.0 { (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    (a[0] + t * dx - p[0]).hypot(a[1] + t * dy - p[1])
+}
+
+/// [81] Verläuft die Strecke a–b (ein Stück weit) im Innern der Grundfläche? Berühren des Randes zählt nicht.
+fn seg_in_interior(a: Vec2, b: Vec2, rings: &[Ring]) -> bool {
+    if !finite2(a) || !finite2(b) {
+        return false;
+    }
+    let d = [b[0] - a[0], b[1] - a[1]];
+    for r in rings {
+        // Schnittstellen mit den Kanten teilen die Strecke; je Stück entscheidet der Mittelpunkt.
+        let mut ts = vec![0.0, 1.0];
+        let k = r.len();
+        for i in 0..k {
+            let (p, q) = (r[i], r[(i + 1) % k]);
+            let e = [q[0] - p[0], q[1] - p[1]];
+            let den = d[0] * e[1] - d[1] * e[0];
+            if den.abs() < 1e-15 {
+                continue;
+            }
+            let w = [p[0] - a[0], p[1] - a[1]];
+            let (t, s) = ((w[0] * e[1] - w[1] * e[0]) / den, (w[0] * d[1] - w[1] * d[0]) / den);
+            if (0.0..=1.0).contains(&t) && (-1e-9..=1.0 + 1e-9).contains(&s) {
+                ts.push(t);
+            }
+        }
+        ts.sort_by(f64::total_cmp);
+        for w in ts.windows(2) {
+            if w[1] - w[0] < 1e-9 {
+                continue;
+            }
+            let t = (w[0] + w[1]) / 2.0;
+            let m = [a[0] + d[0] * t, a[1] + d[1] * t];
+            if in_ring(m, r) && (0..k).all(|i| seg_dist(m, r[i], r[(i + 1) % k]) > 1e-6) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Äusserste Lage (entlang `n`) des Grundrisses im Streifen `t` (entlang der Laufrichtung u = (n.y, −n.x)).
+fn strip_max(rings: &[Ring], n: Vec2, t: (f64, f64)) -> f64 {
+    let u = [n[1], -n[0]];
+    let mut s_max = f64::NEG_INFINITY;
+    for r in rings {
+        for i in 0..r.len() {
+            let (p, q) = (r[i], r[(i + 1) % r.len()]);
+            let (tp, tq, sp, sq) = (dot(p, u), dot(q, u), dot(p, n), dot(q, n));
+            let (lo, hi) = if (tq - tp).abs() < 1e-12 {
+                if tp < t.0 || tp > t.1 {
+                    continue;
+                }
+                (0.0, 1.0)
+            } else {
+                let (f0, f1) = ((t.0 - tp) / (tq - tp), (t.1 - tp) / (tq - tp));
+                (f0.min(f1).max(0.0), f0.max(f1).min(1.0))
+            };
+            if lo > hi {
+                continue;
+            }
+            s_max = s_max.max(sp + (sq - sp) * lo).max(sp + (sq - sp) * hi);
+        }
+    }
+    s_max
 }
 
 /// Bogenwand, deren gewölbte (äussere) Fläche auf dem Umriss liegt: (Bogen, Seitenlage der gewölbten
@@ -545,7 +739,7 @@ fn arc_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scale: f
             continue;
         }
         let pts: Vec<Vec2> = st.iter().map(|&s| a.point(s, n_out)).map(|q| [q.x, q.y]).collect();
-        out.push(DimChain { side: 0, chain: CHAIN_OPENINGS, src: pts.clone(), pts, offset: CHAIN_MM[CHAIN_OPENINGS] / 1000.0 * scale, arc: Some(([a.center.x, a.center.y], wi)) });
+        out.push(DimChain { side: 0, chain: CHAIN_OPENINGS, src: pts.clone(), pts, offset: ARC_CHAIN_MM / 1000.0 * scale, arc: Some(([a.center.x, a.center.y], wi)), part: 0 });
     }
     out
 }
@@ -646,6 +840,8 @@ mod tests {
         assert_eq!(wi, 0);
         assert!((c[0] - a.center.x).abs() < 1e-9 && (c[1] - a.center.y).abs() < 1e-9);
         assert_eq!(d.pts.len(), 4, "zwei Ecken, zwei Leibungen");
+        // [81] Zwischen Bogen und Seitenketten (die Öffnungskette liegt 1.0 vor dem Scheitel).
+        assert!(d.offset > 0.0 && d.offset < 0.9, "{}", d.offset);
         let r_out = a.radius_at(if a.radius_at(0.15) > a.radius_at(-0.15) { 0.15 } else { -0.15 });
         assert!(d.pts.iter().all(|q| ((q[0] - c[0]).hypot(q[1] - c[1]) - r_out).abs() < 1e-6));
         // Öffnung entlang der Aussenfläche: 1.5 m Achse · r_out / r.
@@ -812,6 +1008,107 @@ mod tests {
         let dd = dir(obl[0]);
         assert!(-dd[1] < 0.0, "{obl:?}");
         assert!((total(obl[0]) - 5.0).abs() < 1e-6);
+    }
+
+    fn ring_walls(axis: &[Vec2]) -> Vec<WallIn> {
+        (0..axis.len()).map(|i| WallIn { start: axis[i], end: axis[(i + 1) % axis.len()], thickness: 0.3, shift: 0.0, bulge: 0.0 }).collect()
+    }
+    /// Keine gerade Kette (Masslinie, Hilfslinien) dringt in die Grundfläche ein.
+    fn assert_frei(walls: &[WallIn], dims: &[DimChain]) {
+        let rings = outer_rings(walls);
+        for d in dims.iter().filter(|d| d.arc.is_none()) {
+            for (a, b) in chain_segments(d, 100.0) {
+                assert!(!seg_in_interior(a, b, &rings), "Kette kreuzt den Grundriss bei {a:?}–{b:?}: {d:?}");
+            }
+        }
+    }
+
+    /// Prüfhilfe selbst: Strecke durchs Rechteck trifft, Strecke aussen und entlang der Kante nicht.
+    #[test]
+    fn strecke_im_innern() {
+        let rings = outer_rings(&ring_walls(&[[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]]));
+        assert!(seg_in_interior([-1.0, 2.0], [5.0, 2.0], &rings));
+        assert!(seg_in_interior([1.0, 1.0], [2.0, 2.0], &rings));
+        assert!(!seg_in_interior([-1.0, -1.0], [5.0, -1.0], &rings));
+        assert!(!seg_in_interior([-0.15, -0.15], [-0.15, -3.0], &rings));
+    }
+
+    /// [81] U-Grundriss, Einbuchtung mit schiefem Grund (spitzer Winkel zum Ostflügel): die schiefe Kette
+    /// läge vor der eigenen Fläche im Flügel — sie rückt hinaus, bis Masslinie und Hilfslinien frei sind.
+    #[test]
+    fn schiefe_kette_in_einbuchtung_kreuzt_nicht() {
+        let walls = ring_walls(&[[0.0, 0.0], [16.0, 0.0], [16.0, 10.0], [11.0, 10.0], [11.0, 4.0], [5.0, 6.0], [5.0, 10.0], [0.0, 10.0]]);
+        let a = [11.0, 4.0];
+        let u = [-6.0 / 40f64.sqrt(), 2.0 / 40f64.sqrt()];
+        let o = OpeningIn { wall: 4, jamb_start: [a[0] + u[0] * 2.0, a[1] + u[1] * 2.0], jamb_end: [a[0] + u[0] * 3.8, a[1] + u[1] * 3.8] };
+        let dims = auto_exterior_dimensions(&walls, &[o], 100.0);
+        let obl: Vec<&DimChain> = dims.iter().filter(|d| d.side >= 4).collect();
+        assert!(obl.iter().any(|d| d.chain == CHAIN_TOTAL), "{obl:?}");
+        assert!(obl.iter().any(|d| d.chain == CHAIN_OPENINGS), "{obl:?}");
+        assert_frei(&walls, &dims);
+        // Die Leibungen hängen weiter an der schiefen Fläche (assoziativ), nicht an der verschobenen Linie.
+        let op = obl.iter().find(|d| d.chain == CHAIN_OPENINGS).unwrap();
+        let n = [u[1], -u[0]]; // Aussennormale der Fläche (nach Nordost)
+        let face = dot(a, n) + 0.15;
+        assert!(op.src.iter().any(|q| (dot(*q, n) - face).abs() < 1e-6), "{:?}", op.src);
+        assert!(dot(op.pts[0], n) > face + 1.0, "Linie hinausgerückt: {:?}", op.pts);
+        // Die hinausgerückten Masslinien kreuzen die Ketten der Nordseite nicht.
+        let x = |(a, b): (Vec2, Vec2), (c, d): (Vec2, Vec2)| {
+            let cr = |o: Vec2, p: Vec2, q: Vec2| (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+            cr(a, b, c) * cr(a, b, d) < 0.0 && cr(c, d, a) * cr(c, d, b) < 0.0
+        };
+        for o in &obl {
+            for d in dims.iter().filter(|d| d.side < 4 && d.arc.is_none()) {
+                assert!(!x(chain_segments(o, 100.0)[0], chain_segments(d, 100.0)[0]), "{o:?} kreuzt {d:?}");
+            }
+        }
+    }
+
+    /// [81] L-Grundriss mit schiefer Wand im stumpfen einspringenden Winkel: frei, die Kette bleibt vor ihrer Fläche.
+    #[test]
+    fn schiefe_kette_stumpfer_winkel_bleibt_bei_sich() {
+        let walls = ring_walls(&[[0.0, 0.0], [16.0, 0.0], [16.0, 5.0], [9.0, 5.0], [6.0, 10.0], [0.0, 10.0]]);
+        let dims = auto_exterior_dimensions(&walls, &[], 100.0);
+        assert_frei(&walls, &dims);
+        let d = dims.iter().find(|d| d.side >= 4 && d.chain == CHAIN_TOTAL).expect("schiefe Kette");
+        let n = [5.0 / 34f64.sqrt(), 3.0 / 34f64.sqrt()];
+        assert!((dot(d.pts[0], n) - (dot([9.0, 5.0], n) + 0.15)).abs() < 1e-6, "{d:?}");
+    }
+
+    /// [81] Zwei getrennte Gebäude nebeneinander: Süd/Nord je eigene Ketten (eigene Länge), Ost/West (überlappend) eine.
+    #[test]
+    fn getrennte_gebaeude_eigene_seitenketten() {
+        let mut walls = ring_walls(&[[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [0.0, 6.0]]);
+        walls.extend(ring_walls(&[[14.0, -2.0], [20.0, -2.0], [20.0, 4.0], [14.0, 4.0]]));
+        let dims = auto_exterior_dimensions(&walls, &[], 100.0);
+        let totals = |side: usize| {
+            let mut v: Vec<(usize, f64)> = dims.iter().filter(|d| d.side == side && d.chain == CHAIN_TOTAL).map(|d| (d.part, (total(d) * 1000.0).round() / 1000.0)).collect();
+            v.sort_by(|a, b| a.0.cmp(&b.0));
+            v
+        };
+        assert_eq!(totals(0), vec![(0, 10.3), (1, 6.3)]);
+        assert_eq!(totals(2), vec![(0, 10.3), (1, 6.3)]);
+        assert_eq!(totals(1), vec![(0, 8.3)]);
+        // Jede Südkette liegt vor ihrem eigenen Gebäude.
+        let south: Vec<&DimChain> = dims.iter().filter(|d| d.side == 0 && d.chain == CHAIN_TOTAL).collect();
+        assert!(south.iter().any(|d| (d.pts[0][1] + 0.15).abs() < 1e-6), "{south:?}");
+        assert!(south.iter().any(|d| (d.pts[0][1] + 2.15).abs() < 1e-6), "{south:?}");
+        assert_frei(&walls, &dims);
+    }
+
+    /// [81] Erker (Bogenwand) in der Südfassade: die Bogen-Facetten erzeugen keine Stufe am Scheitel; die
+    /// Stufen-Kette misst die Erker-Ecken.
+    #[test]
+    fn erker_ohne_facetten_stufe() {
+        let mut walls = ring_walls(&[[0.0, 0.0], [6.0, 0.0], [10.0, 0.0], [16.0, 0.0], [16.0, 10.0], [0.0, 10.0]]);
+        walls[1].bulge = -0.5;
+        let dims = auto_exterior_dimensions(&walls, &[], 100.0);
+        let steps = dims.iter().find(|d| d.side == 0 && d.chain == CHAIN_STEPS).expect("Stufen-Kette");
+        assert_eq!(steps.pts.len(), 4, "{steps:?}");
+        assert!(steps.pts.iter().all(|p| (p[0] - 8.0).abs() > 1.0), "kein Punkt am Scheitel: {steps:?}");
+        let total_s = dims.iter().find(|d| d.side == 0 && d.chain == CHAIN_TOTAL).unwrap();
+        assert!(total_s.pts[0][1] < -0.9, "Gesamtkette vor dem Scheitel: {total_s:?}");
+        assert_eq!(dims.iter().filter(|d| d.arc.is_some()).count(), 1);
     }
 
     /// Achsparallele Grundrisse: keine schiefen Ketten.
