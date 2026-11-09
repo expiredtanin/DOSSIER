@@ -1,0 +1,48 @@
+# Flatpak-Manifest für Dossier ([170]). Ungetestet (im Entwicklungscontainer gibt es kein flatpak-builder);
+# als Quelle dient das von electron-builder entpackte Verzeichnis, es entsteht also kein zweiter Build:
+#
+#   npm run build && npm run electron:pack          # erzeugt release/linux-unpacked
+#   flatpak install flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08 org.electronjs.Electron2.BaseApp//24.08
+#   flatpak-builder --user --install --force-clean build-flatpak packaging/linux/ch.dossier.cad.yml
+#   flatpak run ch.dossier.cad [datei.obp]
+app-id: ch.dossier.cad
+runtime: org.freedesktop.Platform
+runtime-version: "24.08"
+sdk: org.freedesktop.Sdk
+base: org.electronjs.Electron2.BaseApp
+base-version: "24.08"
+command: dossier
+separate-locales: false
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --device=dri            # GPU: WebGPU läuft über Vulkan/ANGLE, braucht /dev/dri
+  - --filesystem=home       # Projekte (.obp), Importe und Exporte liegen im Home
+  - --share=network         # Lage-/Geodaten und Materialbibliothek (nur die Hosts aus src/net)
+  - --talk-name=org.freedesktop.Notifications
+modules:
+  - name: dossier
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib/dossier
+      - cp -r --no-preserve=ownership . /app/lib/dossier
+      - install -Dm755 dossier.sh /app/bin/dossier
+      - install -Dm644 ch.dossier.cad.desktop /app/share/applications/ch.dossier.cad.desktop
+      - install -Dm644 ch.dossier.cad.metainfo.xml /app/share/metainfo/ch.dossier.cad.metainfo.xml
+      - install -Dm644 dossier-project.xml /app/share/mime/packages/ch.dossier.cad.xml
+      - install -Dm644 icon.png /app/share/icons/hicolor/512x512/apps/ch.dossier.cad.png
+    sources:
+      - type: dir
+        path: ../../release/linux-unpacked
+      - type: file
+        path: dossier.sh
+      - type: file
+        path: ch.dossier.cad.desktop
+      - type: file
+        path: ch.dossier.cad.metainfo.xml
+      - type: file
+        path: dossier-project.xml
+      - type: file
+        path: ../../src-tauri/icons/icon.png
+        dest-filename: icon.png

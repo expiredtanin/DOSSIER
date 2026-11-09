@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Dossier
+Comment=CAAD für Architektinnen und Architekten
+Exec=dossier %F
+Icon=ch.dossier.cad
+Terminal=false
+Type=Application
+Categories=Graphics;Engineering;
+MimeType=application/x-dossier-project;
+StartupWMClass=Dossier
+Keywords=CAD;CAAD;Architektur;BIM;IFC;DXF;

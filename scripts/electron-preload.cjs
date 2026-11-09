@@ -17,3 +17,14 @@ contextBridge.exposeInMainWorld("dossierWindow", {
     return () => ipcRenderer.removeListener("window:maximized-changed", listener);
   },
 });
+
+// [170] Projektdatei, mit der die App gestartet wurde (`dossier datei.obp`), und spätere Aufrufe
+// einer zweiten Instanz. Inhalt wird im Hauptprozess gelesen: {name, path, text} oder null.
+contextBridge.exposeInMainWorld("dossierLaunch", {
+  takeOpenFile: () => ipcRenderer.invoke("launch:take-open-file"),
+  onOpenFile: (callback) => {
+    const listener = (_event, file) => callback(file);
+    ipcRenderer.on("launch:open-file", listener);
+    return () => ipcRenderer.removeListener("launch:open-file", listener);
+  },
+});

@@ -5,6 +5,7 @@ node_modules/
 dist/
 dist-test/
 dist-cli/
+release/
 *.tsbuildinfo
 target/
 /src-tauri/gen/

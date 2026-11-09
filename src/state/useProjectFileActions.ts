@@ -63,6 +63,20 @@ export type ImportDialogState = {
 } | null;
 
 /** Meldung eines abgefangenen Fehlers (Rust-Fehler kommen als String, Worker-Fehler als Error). */
+/** Von electron-preload.cjs injiziert (nur Electron/Linux, [170]): Projektdatei aus `dossier datei.obp`. */
+interface LaunchProject {
+  name: string;
+  text: string;
+}
+declare global {
+  interface Window {
+    dossierLaunch?: {
+      takeOpenFile: () => Promise<LaunchProject | null>;
+      onOpenFile: (callback: (file: LaunchProject) => void) => () => void;
+    };
+  }
+}
+
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 
@@ -621,6 +635,18 @@ export function useProjectFileActions(
     };
     r.readAsText(file);
   };
+
+  // [170] Electron: per Kommandozeile/Doppelklick übergebene .obp (beim Start und von einer zweiten
+  // Instanz) wie eine im Browser gewählte Datei öffnen. Der Ref hält die jeweils aktuelle Fassung.
+  const chosenRef = useRef(onProjectFileChosen);
+  chosenRef.current = onProjectFileChosen;
+  useEffect(() => {
+    const api = window.dossierLaunch;
+    if (!api) return;
+    const open = (f: LaunchProject) => chosenRef.current(new File([f.text], f.name));
+    void api.takeOpenFile().then((f) => f && open(f));
+    return api.onOpenFile(open);
+  }, []);
 
   const importParentName = (decision: ImportDecision): string =>
     decision.target.kind === "new" ? decision.target.name : "DXF";

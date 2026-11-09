@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MIME-Typ für Dossier-Projekte ([170]); wird von Flatpak/deb nach share/mime/packages installiert. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-dossier-project">
+    <comment>Dossier project</comment>
+    <comment xml:lang="de">Dossier-Projekt</comment>
+    <icon name="ch.dossier.cad"/>
+    <glob pattern="*.obp"/>
+  </mime-type>
+</mime-info>

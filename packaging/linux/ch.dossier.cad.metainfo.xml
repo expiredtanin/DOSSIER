@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ch.dossier.cad</id>
+  <name>Dossier</name>
+  <summary>CAAD für Architektinnen und Architekten</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <description>
+    <p>Dossier ist ein CAAD-Programm mit einem semantischen Gebäudemodell. Grundriss, Schnitt, Ansicht und 3D werden daraus abgeleitet.</p>
+  </description>
+  <launchable type="desktop-id">ch.dossier.cad.desktop</launchable>
+  <provides><mediatype>application/x-dossier-project</mediatype></provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-09"/>
+  </releases>
+</component>

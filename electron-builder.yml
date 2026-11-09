@@ -1,0 +1,46 @@
+# electron-builder ([170]): Linux-Pakete der Electron-Hülle (scripts/electron-main.cjs).
+# Bauen: `npm run build` (dist) und `npm run electron:pack` -> release/Dossier-<Version>-x86_64.AppImage
+# Die WebGPU-Flags (ANGLE-Vulkan) setzt electron-main.cjs selbst; die Oberfläche kommt aus dist/.
+appId: ch.dossier.cad
+productName: Dossier
+copyright: Karim Gabriele Varano, AGPL-3.0-or-later
+directories:
+  output: release
+  buildResources: packaging/linux
+electronVersion: 43.0.0
+asar: true
+publish: null
+# Nur die Hülle und das gebaute dist; die npm-Abhängigkeiten stecken schon gebündelt im Vite-Build.
+files:
+  - scripts/electron-main.cjs
+  - scripts/electron-preload.cjs
+  - scripts/csp.cjs
+  - dist/**
+  - package.json
+  - "!**/node_modules/**"
+extraMetadata:
+  main: scripts/electron-main.cjs
+linux:
+  target:
+    - target: AppImage
+      arch: x64
+  executableName: dossier
+  icon: src-tauri/icons/icon.png
+  category: Graphics;Engineering;
+  synopsis: CAAD für Architektinnen und Architekten
+  description: CAAD für Architektinnen und Architekten
+  syncDesktopName: true
+  desktop:
+    entry:
+      Name: Dossier
+      Comment: CAAD für Architektinnen und Architekten
+      Keywords: CAD;CAAD;Architektur;BIM;IFC;DXF;
+      StartupWMClass: Dossier
+fileAssociations:
+  - ext: obp
+    name: Dossier-Projekt
+    description: Dossier-Projekt
+    mimeType: application/x-dossier-project
+    role: Editor
+appImage:
+  artifactName: Dossier-${version}-${arch}.AppImage

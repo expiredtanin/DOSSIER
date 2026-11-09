@@ -303,8 +303,16 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[120]** macOS in CI (`.github/workflows/macos.yml`). Bildvergleich Metal ↔ WebGPU (gleiche Szene per
   `render2d::headless` und Chromium, Pixeltoleranz aus `tests/golden.rs`); Golden-Bilder für 3D in der CI ([R1]). · M
 - ◐ **[30]** Release-Workflow (`release.yml`). Updater-Endpunkt (zeigt auf git.openbureau.ch), Secrets setzen,
-  Linux-Build; nicht auf GitHub gelaufen. Zielbild laut [C8]: macOS universal signiert/notarisiert, Windows MSI,
+  Linux-Job (AppImage, [170]) ergänzt; nicht auf GitHub gelaufen. Zielbild laut [C8]: macOS universal signiert/notarisiert, Windows MSI,
   Linux AppImage/Flatpak/deb/rpm, `SHA256SUMS.txt`. · M
+- ◐ **[170]** Linux-Paket (9.11.). AppImage x86_64 mit electron-builder (`electron-builder.yml`, `npm run electron:pack`
+  nach `npm run build`): Desktop-Eintrag (Graphics;Engineering;), MIME `application/x-dossier-project` für `.obp`,
+  `dossier datei.obp` / Doppelklick (Hauptprozess liest die Datei, einzige Instanz, `useProjectFileActions`);
+  gepackt lädt die App `dist` über das Schema `dossier://app`, WebGPU-Flags unverändert; Job `linux` in `release.yml`.
+  Geprüft nur im Container (Xvfb, SwiftShader): entpacktes Paket startet, Oberfläche rendert, `navigator.gpu` liefert
+  einen Adapter, AppImage enthält Desktop-Datei, MIME und Icon. Offen: Start des AppImage selbst (FUSE) und echte
+  AMD-GPU/ANGLE-Vulkan, Öffnen einer gültigen `.obp` per Argument, Flatpak-Manifest (`packaging/linux/ch.dossier.cad.yml`)
+  nie gebaut, deb/rpm, `--no-sandbox` im Desktop-Eintrag (AppImage-Vorgabe) ersetzen, Workflow nicht auf GitHub gelaufen. · M
 - ◐ **[57]** Tests bei jedem Push (`check.yml`). Nicht auf GitHub gelaufen. · S
 - ○ **[51]** Herkunft übernommenen Codes: Dateikopf + `NOTICE` je übernommene Datei; fällig für Manifold ([107]). · S
 - ○ **[C6]** `cargo xtask ci`: Formatierung, Clippy, Tests, Crate-Schichtung, Asset-Herkunft, WASM-Build in einem

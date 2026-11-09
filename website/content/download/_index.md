@@ -4,7 +4,7 @@ description: "Dossier aus dem Quellcode bauen: macOS (Tauri), Linux (Electron), 
 ---
 
 Fertige Installer gibt es noch nicht. Die Release-Pipeline (macOS-App,
-universal für Apple Silicon und Intel) steht, veröffentlichte Versionen
+universal für Apple Silicon und Intel; Linux als AppImage) steht, veröffentlichte Versionen
 erscheinen künftig unter
 [Releases auf GitHub](https://github.com/expiredtanin/DOSSIER/releases). Bis
 dahin baut man Dossier aus dem Quellcode – das dauert beim ersten Mal einige
@@ -16,12 +16,27 @@ Minuten, weil der Rust-Kern und die beiden Anzeige-Engines zu WebAssembly
 | Plattform | Hülle | Anzeige | Stand |
 |---|---|---|---|
 | macOS (Apple Silicon, Intel) | Tauri | nativ über Metal | Hauptplattform |
-| Linux | Electron (Chromium) | WebGPU | läuft, ohne Release-Build |
+| Linux (x86_64) | Electron (Chromium) | WebGPU | läuft; AppImage im Release |
 | Browser (Chromium mit WebGPU) | – | WebGPU | für Entwicklung und Tests; ohne Dateisperre und native Dialoge |
 | Windows | – | – | nicht geprüft |
 
 Linux nutzt Electron statt Tauri, weil die WebKitGTK-Webansicht von Tauri unter
 Linux kein verlässliches WebGPU bietet.
+
+## Linux: AppImage installieren
+
+Das AppImage lädt man aus den Releases auf GitHub. Es braucht einen Mesa-Vulkan-Treiber (AMD, Intel) oder den
+proprietären NVIDIA-Treiber, damit WebGPU läuft.
+
+```bash
+chmod +x Dossier-*-x86_64.AppImage     # ausführbar machen
+./Dossier-*-x86_64.AppImage            # starten
+./Dossier-*-x86_64.AppImage datei.obp  # Projekt direkt öffnen
+```
+
+Fehlt FUSE 2 (`libfuse2`), hängt man `--appimage-extract-and-run` an. Einen Menüeintrag und die Zuordnung der
+Endung `.obp` richtet ein Werkzeug wie AppImageLauncher ein. Ein Flatpak-Manifest liegt im Quellcode unter
+`packaging/linux/` (noch nicht veröffentlicht). Selbst bauen: `npm run build && npm run electron:pack`.
 
 ## Voraussetzungen
 

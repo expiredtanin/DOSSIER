@@ -80,7 +80,7 @@ Blätter, `render3d` für 3D. Beide laufen als WASM über WebGPU. Auf macOS zeic
 Grundriss zusätzlich nativ über Metal in eine Fläche hinter der Webansicht. Kein three.js, kein WebGL.
 
 **Plattformen.** macOS: Tauri (`src-tauri/src`, WKWebView). Linux: Electron (`scripts/electron-main.cjs`,
-Chromium mit WebGPU). Browser: für Entwicklung und e2e-Tests. Dazu die Kommandozeile `dossier-cli`
+Chromium mit WebGPU; Paket: AppImage über `electron-builder.yml` und `packaging/linux/`, [170]). Browser: für Entwicklung und e2e-Tests. Dazu die Kommandozeile `dossier-cli`
 (`src/cli/main.ts`), die nur `src/core` importiert und alles ohne Oberfläche kann (Pläne als SVG, IFC,
 DXF, Kennzahlen, Benchmarks).
 

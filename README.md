@@ -104,6 +104,22 @@ npm run dev           # nur im Browser, für Entwicklung
 Prüfen: `npm run check` (TypeScript, Vitest und die Rust-Tests aller Crates),
 `npm run e2e` für die Oberflächentests mit Playwright.
 
+## Linux installieren
+
+Linux (x86_64) läuft in Electron (Chromium mit WebGPU über ANGLE-Vulkan; Mesa-Vulkan-Treiber nötig). Das
+AppImage stammt aus den Releases auf GitHub:
+
+```bash
+chmod +x Dossier-*-x86_64.AppImage     # ausführbar machen
+./Dossier-*-x86_64.AppImage datei.obp  # starten, Projekt optional als Argument
+```
+
+Das AppImage braucht FUSE 2 (`libfuse2`); sonst `--appimage-extract-and-run` anhängen. Für Menüeintrag und
+Doppelklick auf `.obp` ein Werkzeug wie AppImageLauncher nutzen oder den Desktop-Eintrag selbst anlegen.
+Selbst bauen: `npm run build && npm run electron:pack` (erzeugt `release/Dossier-<Version>-x86_64.AppImage`).
+Ein Flatpak-Manifest liegt unter `packaging/linux/ch.dossier.cad.yml` (nicht veröffentlicht, ungetestet; Aufruf im
+Dateikopf).
+
 ## Releases
 
 Ein Release entsteht aus einem Tag: Version in `src-tauri/tauri.conf.json` anheben, committen, dann
@@ -118,7 +134,8 @@ entstehen unsignierte Artefakte. Optionale Repository-Secrets:
   (passend zum `pubkey` in `tauri.conf.json`; ohne Schlüssel entfallen die Updater-Artefakte)
 
 Der Updater-Endpunkt in `tauri.conf.json` zeigt noch auf `git.openbureau.ch`; soll er GitHub nutzen,
-dort `…/releases/latest/download/latest.json` eintragen. Linux (Electron) hat keinen Release-Build.
+dort `…/releases/latest/download/latest.json` eintragen. Für Linux baut der Job `linux` ein AppImage
+(Electron, electron-builder, kein Secret nötig) und hängt es samt `SHA256SUMS-linux.txt` an dasselbe Release.
 
 ## Kommandozeile
 
