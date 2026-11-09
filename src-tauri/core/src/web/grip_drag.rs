@@ -102,6 +102,18 @@ pub fn grip_opening_slide_sheet(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64, 
     gd::opening_slide_sheet((sx, sy), (ex, ey), bulge, (ux, uy), position, width, du).map(|(p, d)| vec![p, d]).unwrap_or_default()
 }
 
+/// Punkt im Umriss halten (`opening_slide::clamp_inside`, Dach-/Deckenöffnung): `[x, y]`; Ring als
+/// flacher Puffer, kaputte Eingabe (NaN, weniger als 3 Ecken) = Punkt unverändert.
+#[wasm_bindgen]
+pub fn grip_clamp_inside(x: f64, y: f64, ring: &[f64]) -> Vec<f64> {
+    let r = pts(ring);
+    if !x.is_finite() || !y.is_finite() || r.len() < 3 || r.iter().any(|p| !p.0.is_finite() || !p.1.is_finite()) {
+        return vec![x, y];
+    }
+    let q = crate::opening_slide::clamp_inside((x, y), &r);
+    vec![q.0, q.1]
+}
+
 /// Bewegpunkt einer Treppe (Zentrum NaN = keines): `[x, y]`.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
