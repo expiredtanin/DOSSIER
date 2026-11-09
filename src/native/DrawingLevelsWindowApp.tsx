@@ -21,6 +21,7 @@ import {
 import type { DrawingLevelsCommandHandlers, DrawingLevelsSyncState } from "./drawingLevelsWindow";
 import type { DrawingLevelKind } from "../model/types";
 import { t } from "../i18n";
+import { listenBridgeState } from "./windowBridge";
 
 type HandlerName = keyof DrawingLevelsCommandHandlers;
 
@@ -40,13 +41,10 @@ export function DrawingLevelsWindowApp() {
     let disposed = false;
     const unlisten: Array<() => void> = [];
     void (async () => {
-      const { listen, emitTo } = await import("@tauri-apps/api/event");
+      const { emitTo } = await import("@tauri-apps/api/event");
       if (disposed) return;
-      unlisten.push(
-        await listen<DrawingLevelsSyncState>("drawing-levels-sync-state", (e) =>
-          setState(e.payload),
-        ),
-      );
+      // Ganzer Zustand und Patches der Sync-Brücke ([121], `windowBridge.ts`).
+      unlisten.push(...(await listenBridgeState<DrawingLevelsSyncState>("drawing-levels", setState)));
       await emitTo("main", "drawing-levels-window-ready").catch(() => {});
     })();
     return () => {
