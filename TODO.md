@@ -58,6 +58,10 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Extrusion pro Abschnitt in einer SweptSolid-Darstellung, Menge = Summe (`column_pieces_quantities`); ein
   Abschnitt bleibt `COLUMN` (10). Offen: Längsschnitt ohne Anschlag-Nasen/Schichteinzug; Muster bei ungeraden Maschen;
   Schnitt genau in einer Wand-Stirnfläche: Lücke in der Projektionskante über den Streifen. · M
+- ◐ **[166]** Dämm-Striche (EPS/XPS, „Dämmstoffe (SIA-Linien)") quer zur Wand. 9.11.: Szene/PDF und CLI-/Druck-SVG/DXF
+  lasen den Schraffur-Winkel um 90° verschieden (Standard 0°↔90° hin und her); jetzt alle über `hatch::build_hatch_runs`
+  (DXF 90° − Winkel), Standard 0°, Laden stellt 90° zurück, Bogenwand-Nasen polar; Test `plan/hatch_dir_tests.rs`.
+  Offen: render3d-Live-Schnitt und Mac nicht angesehen. · S
 - ◐ **[145]** Texte beim Zoomen synchron. Falls der Mac noch nachläuft: Raumstempel nativ zeichnen (vtext kann nur
   einzeilig/linksbündig, eine Schrift, kein Fett). 9.11.: `clampInside` nur noch im Kern (`grip_clamp_inside`,
   Fassade `clampInside` in `src/core`); die Öffnungs-Vorschau beim Setzen zeigt die geklemmte/gerückte Lage

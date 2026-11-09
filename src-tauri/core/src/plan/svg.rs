@@ -8,7 +8,7 @@
 use crate::js_fmt::js_number;
 use crate::hatch::{self, Pattern, V2};
 use crate::jsnum;
-use crate::plan::print_svg::{hatch_dash_paper, hatch_lines, is_generated, quantize_pen};
+use crate::plan::print_svg::{hatch_dash_paper, quantize_pen};
 use crate::plan::buf::{whole, F_COLOR, F_DASH_LIST, F_GREYED, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
 use crate::plan::line_ends::LineEnds;
 use crate::plan::parts::Part;
@@ -309,11 +309,10 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                             let mut runs: Vec<Vec<V2>> = Vec::new();
                             if h.random {
                                 runs.extend(hatch::build_random_hatch_runs(&pts, &h, None).into_iter().filter(|r| r.len() >= 2).map(|r| vec![r[0], r[r.len() - 1]]));
-                            } else if is_generated(h.pattern) {
-                                runs.extend(hatch::build_hatch_runs(&pts, &h));
                             } else {
-                                let pts_mm: Vec<V2> = pts.iter().map(|q| V2 { x: q.x * k, y: q.y * k }).collect();
-                                runs.extend(hatch_lines(&pts_mm, &h, k).into_iter().map(|(a, b)| vec![V2 { x: a.x / k, y: a.y / k }, V2 { x: b.x / k, y: b.y / k }]));
+                                // [166] Alle Vektor-Schraffuren aus dem Kern-Generator wie Szene/PDF (Winkel-Lesart
+                                // der SVG-Kachel, polare Schraffur der Bogenwand).
+                                runs.extend(hatch::build_hatch_runs(&pts, &h));
                             }
                             for run in runs {
                                 match run.len() {

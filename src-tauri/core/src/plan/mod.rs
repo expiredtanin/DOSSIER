@@ -41,3 +41,5 @@ pub mod mesh_plan;
 pub(crate) mod wall_columns;
 #[cfg(test)]
 pub(crate) mod wall_join_tests;
+#[cfg(test)]
+mod hatch_dir_tests;

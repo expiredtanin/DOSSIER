@@ -546,10 +546,13 @@ fn hatch_families(h: &Hatch) -> Vec<(f64, f64)> {
     if !spacing.is_finite() {
         return Vec::new();
     }
-    let angle = (h.angle * PI) / 180.0;
+    // [166] Lesart wie Szene/SVG-Kachel (`hatch::build_hatch_runs`): Winkel 0 = Musterlinie senkrecht, die
+    // Drehung im Bildschirm-Uhrzeigersinn → Linienrichtung im Modell (y nach oben, DXF) = 90° − Winkel.
+    // Vorher Winkel = Linienrichtung: 0°/90°-Scharen (Dämm-Striche, Glas) lagen um 90° verdreht.
+    let angle = (PI / 2.0 - (h.angle * PI) / 180.0).rem_euclid(PI);
     let mut out = vec![(angle, spacing)];
     if h.pattern == Pattern::Crosshatch {
-        out.push((angle + PI / 2.0, spacing));
+        out.push(((angle + PI / 2.0).rem_euclid(PI), spacing));
     }
     out
 }

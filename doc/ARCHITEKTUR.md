@@ -532,7 +532,9 @@ node dist-cli/dossier-cli.mjs :musterhaus-komplex migrate --out mk.obp   # als D
 node dist-cli/dossier-cli.mjs mk.obp ifc --out mk.ifc
 ```
 
-Ohne `--hatch` enthält das SVG nur die Grundfüllung, keine Schraffurlinien. Das SVG öffnet man im
+Ohne `--hatch` enthält das SVG nur die Grundfüllung, keine Schraffurlinien. Mit `--hatch` kommen die Linien aus
+demselben Generator wie Bildschirm und PDF (`hatch::build_hatch_runs`); Schraffur-Winkel wie die SVG-Kachel:
+0° = Musterlinie senkrecht, relativ zur Wand also quer zur Wandachse (Dämm-Striche: Winkel 0, [166]). Das SVG öffnet man im
 Browser oder rastert es mit Playwright (im Container liegt Chromium unter `/opt/pw-browsers`):
 
 ```js

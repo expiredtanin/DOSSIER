@@ -54,7 +54,8 @@ describe("buildPlanDxf — Verlauf-Schraffur", () => {
     expect(countEntities(dxf, "LINE")).toBe(0); // keine einzelnen Schraffurlinien mehr
     expect(countEntities(dxf, "LWPOLYLINE")).toBe(1); // der Umriss
     const h = readDxf(dxf).entities.find((e) => e.type === "HATCH")!;
-    expect(nums(h, 53).map((a) => Math.round(a))).toEqual([0, 90]);
+    // [166] Winkel 0 wie Bildschirm/SVG-Kachel: erste Schar senkrecht (90°), zweite waagrecht.
+    expect(nums(h, 53).map((a) => Math.round(a))).toEqual([90, 0]);
   });
 
   it("gradient: eine Gradient-HATCH (LINEAR, zwei Farben, Winkel) plus Umriss, keine Musterlinien", () => {
