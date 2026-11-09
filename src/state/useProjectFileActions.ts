@@ -633,7 +633,7 @@ export function useProjectFileActions(
     // der Aufbau nach dem Einhängen blockiert noch einmal mehrere Sekunden.
     beginBusy(t("busy.import"));
     const center = decision.placement === "viewCenter" ? planViewRef.current?.viewCenterModel() : undefined;
-    let r: { levelId: string } | null = null;
+    let r: { levelId: string; terrainContours?: number } | null = null;
     try {
       r = getState().commitImport((doc, base, now) =>
         doc.importDrawing(
@@ -644,6 +644,8 @@ export function useProjectFileActions(
             categoryMode: decision.categoryMode,
             activeCategoryCode,
             importMeshes: decision.importMeshes,
+            terrainContours: decision.terrainContours,
+            terrainName: t("import.terrain.setName"),
             ...(center ? { viewCenter: [center.x, center.y] as [number, number] } : {}),
             levelNameTemplate: t("default.drawingName", { n: "{n}" }),
             parentName: t("import.layers.parentName", { name: importParentName(decision) }),
@@ -659,7 +661,11 @@ export function useProjectFileActions(
     }
     setImportState(null);
     // Auf die Ziel-Ebene wechseln, damit die importierte Geometrie sichtbar ist (zurückgewiesen: Hinweis weg).
-    if (r) setActiveLevelId(r.levelId);
+    if (r) {
+      setActiveLevelId(r.levelId);
+      // [143] Bericht: wie viele Linien als Gelände-Höhenlinien übernommen wurden.
+      if (r.terrainContours) notify(t("import.terrain.done", { n: r.terrainContours }), "info");
+    }
     else endBusy();
   };
 

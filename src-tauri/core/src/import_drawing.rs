@@ -24,6 +24,8 @@ use std::collections::{HashMap, HashSet};
 
 /// Kategorie generischer Importe (`GENERIC_IMPORT_CATEGORY`, „10 Situation").
 pub const GENERIC_IMPORT_CODE: &str = "10";
+/// [143] Kategorie der importierten Gelände-Höhenlinien (02 Gelände).
+const TERRAIN_CATEGORY: &str = "02";
 /// Füllfarbe aus HATCH importierter Flächen (`DXF_HATCH_FILL`).
 const DXF_HATCH_FILL: &str = "#c8c8c8";
 /// Papier-Millimeter je PDF-Punkt.
@@ -74,6 +76,8 @@ pub struct Contour {
     pub closed: bool,
     pub filled: bool,
     pub curve: Option<Curve>,
+    /// [143] Höhe wechselt entlang der Linie (3D-Polylinie mit Gefälle): keine Höhenlinie.
+    pub z_varies: bool,
     pub pts: Vec<[f64; 2]>,
     /// Polylinie mit Bögen: Stützpunkte + DXF-Bulge je Stützpunkt.
     pub bulge: Option<(Vec<[f64; 2]>, Vec<f64>)>,
@@ -180,7 +184,7 @@ pub fn decode_drawing(geom: &[f64], strings: &[String], id_prefix: &str, now: f6
         let layer = r.str()?;
         let flags = jsnum::to_int32(r.num()?);
         let z = r.num()?;
-        let mut c = Contour { layer, z, closed: flags & 1 != 0, filled: flags & 2 != 0, curve: None, pts: Vec::new(), bulge: None };
+        let mut c = Contour { layer, z, closed: flags & 1 != 0, filled: flags & 2 != 0, curve: None, z_varies: flags & 16 != 0, pts: Vec::new(), bulge: None };
         if flags & 4 != 0 {
             let circle = r.num()? == 1.0;
             let v = r.take(5)?;
@@ -391,7 +395,7 @@ pub fn pdf_to_import(page: &PdfPage, scale: f64, with_texts: bool) -> DrawingImp
                 if !out.layer_line_weights.get(&layer).is_some_and(|v| !v.is_null()) {
                     out.layer_line_weights.insert(layer.clone(), json!(0.05));
                 }
-                out.contours.push(Contour { layer, z: 0.0, closed: true, filled: true, curve: None, pts: to_m(&p.pts), bulge: None });
+                out.contours.push(Contour { layer, z: 0.0, closed: true, filled: true, curve: None, z_varies: false, pts: to_m(&p.pts), bulge: None });
                 n_fill += 1.0;
             }
         }
@@ -403,7 +407,7 @@ pub fn pdf_to_import(page: &PdfPage, scale: f64, with_texts: bool) -> DrawingImp
                 out.layer_dashes.push((layer.clone(), pdf_dash_mm(&p.dash)));
             }
             let curve = p.curve.as_ref().map(|c| Curve { circle: c.circle, cx: c.cx * k, cy: c.cy * k, r: c.r * k, a0: c.a0, a1: c.a1 });
-            out.contours.push(Contour { layer, z: 0.0, closed: p.closed, filled: false, curve, pts: to_m(&p.pts), bulge: None });
+            out.contours.push(Contour { layer, z: 0.0, closed: p.closed, filled: false, curve, z_varies: false, pts: to_m(&p.pts), bulge: None });
             n_stroke += 1.0;
         }
     }
@@ -571,6 +575,14 @@ pub fn summary_json(d: &DrawingImport) -> Value {
         m.insert("layout".into(), l.clone().into());
     }
     m.insert("recovered".into(), d.recovered.into());
+    // [143] Erkannte Gelände-Höhenlinien (Dialog: Option „Höhenlinien als Gelände übernehmen").
+    let det = crate::import_terrain::detect(d);
+    if !det.lines.is_empty() {
+        m.insert("terrainContours".into(), det.lines.len().into());
+        if det.from_texts > 0 {
+            m.insert("terrainFromTexts".into(), det.from_texts.into());
+        }
+    }
     Value::Object(m)
 }
 
@@ -684,6 +696,13 @@ pub struct Decision {
     pub parent_name: String,
     #[serde(default)]
     pub dash_style_template: String,
+    /// [143] Erkannte Höhenlinien (`import_terrain::detect`) als Gelände-Höhenlinien (`contourSet`) statt als
+    /// 2D-Zeichnung übernehmen.
+    #[serde(default)]
+    pub terrain_contours: bool,
+    /// [143] Name des Höhenlinien-Satzes (übersetzt von der Hülle); leer = „Höhenlinien".
+    #[serde(default)]
+    pub terrain_name: String,
 }
 
 /// Ergebnis von [`import_ops`].
@@ -693,6 +712,8 @@ pub struct ImportResult {
     pub level_id: String,
     pub drawings: usize,
     pub meshes: usize,
+    /// [143] Höhenlinien, die als Gelände (`contourSet`) übernommen wurden.
+    pub terrain_contours: usize,
 }
 
 fn layer_list(root: &Map<String, Value>) -> Vec<Value> {
@@ -885,8 +906,15 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
         (Some(c), Some(b)) => (c[0] - (b[0] + b[2]) / 2.0, c[1] - (b[1] + b[3]) / 2.0),
         _ => (0.0, 0.0),
     };
+    // [143] Höhenlinien nicht als Zeichnung, sondern als Gelände-Höhenlinien.
+    let det = if dec.terrain_contours { crate::import_terrain::detect(d) } else { Default::default() };
+    let terrain_idx: HashSet<usize> = det.lines.iter().map(|(i, _)| *i).collect();
+    let terrain_text: HashSet<usize> = det.used_texts.iter().copied().collect();
     let mut drawings = Vec::with_capacity(d.contours.len() + d.texts.len());
-    for c in &d.contours {
+    for (ci, c) in d.contours.iter().enumerate() {
+        if terrain_idx.contains(&ci) {
+            continue;
+        }
         let Some(geom) = contour_geom(c, dx, dy) else { continue };
         let is_polyline = geom.get("shape").and_then(Value::as_str) == Some("polyline");
         let mut o = Map::new();
@@ -906,7 +934,10 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
         }
         drawings.push(Value::Object(o));
     }
-    for t in &d.texts {
+    for (ti, t) in d.texts.iter().enumerate() {
+        if terrain_text.contains(&ti) {
+            continue;
+        }
         drawings.push(json!({
             "id": format!("dxf2d-{stamp}-{}", next_seq()),
             "type": "drawing2d",
@@ -918,6 +949,38 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
     let n_drawings = drawings.len();
     if !drawings.is_empty() {
         ops.push(Op::Add { collection: "drawings2d".into(), items: drawings, at: None });
+    }
+    if !det.lines.is_empty() {
+        let contours: Vec<Value> = det
+            .lines
+            .iter()
+            .map(|&(i, z)| {
+                let c = &d.contours[i];
+                let mut o = Map::new();
+                o.insert("z".into(), js_num(z));
+                o.insert("pts".into(), c.pts.iter().map(|&p| pt(p, dx, dy)).collect::<Vec<_>>().into());
+                o.insert("closed".into(), c.closed.into());
+                if c.layer != "0" && !c.layer.is_empty() {
+                    o.insert("layer".into(), c.layer.clone().into());
+                }
+                Value::Object(o)
+            })
+            .collect();
+        let name = if dec.terrain_name.trim().is_empty() { "Höhenlinien" } else { dec.terrain_name.trim() };
+        ops.push(Op::Add {
+            collection: "context".into(),
+            items: vec![json!({
+                "id": format!("dxf-contours-{stamp}-{}", next_seq()),
+                "type": "contourSet",
+                "name": name,
+                "categoryCode": TERRAIN_CATEGORY,
+                "contours": contours,
+            })],
+            at: None,
+        });
+        if crate::import_context::ensure_context_categories(&mut layers, [TERRAIN_CATEGORY]) {
+            layers_changed = true;
+        }
     }
     let mut n_meshes = 0;
     if dec.import_meshes && !d.meshes.is_empty() {
@@ -931,7 +994,7 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
     if layers_changed {
         ops.push(Op::SetField { key: "layers".into(), value: Some(Value::Array(layers)), at: None });
     }
-    ImportResult { ops, level_id, drawings: n_drawings, meshes: n_meshes }
+    ImportResult { ops, level_id, drawings: n_drawings, meshes: n_meshes, terrain_contours: det.lines.len() }
 }
 
 #[cfg(test)]

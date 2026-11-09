@@ -41,6 +41,10 @@ export interface DrawingImportDecision {
   parentName?: string;
   /** Name neuer Linienstile aus PDF-Strichmustern, `{pattern}` = Muster. */
   dashStyleTemplate?: string;
+  /** [143] Erkannte Höhenlinien als Gelände-Höhenlinien (`contourSet`) statt als 2D-Zeichnung übernehmen. */
+  terrainContours?: boolean;
+  /** [143] Name des Höhenlinien-Satzes (übersetzt). */
+  terrainName?: string;
 }
 
 /** Rohergebnis des IFC-Lesers (`fileio`): Bericht (JSON), Positionen, Indizes, Zahlen der Bauteil-Erkennung. */
@@ -506,7 +510,7 @@ export class ProjectDocument {
    * Linienstile, 2D-Zeichnungen, Kontext-Meshes) und wendet sie als EINEN Undo-Schritt an.
    */
   importDrawing(base: Project, src: ImportSource, decision: DrawingImportDecision, now: number) {
-    return this.commitCore<{ levelId: string; drawings: number; meshes: number }>(base, (h) =>
+    return this.commitCore<{ levelId: string; drawings: number; meshes: number; terrainContours: number }>(base, (h) =>
       core().doc_import_drawing(h, src.geom, JSON.stringify(src.strings), JSON.stringify(src.source), JSON.stringify(decision), "", now),
     );
   }

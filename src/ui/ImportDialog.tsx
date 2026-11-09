@@ -51,6 +51,8 @@ export interface ImportDecision {
   categoryMode: CategoryMode;
   /** Ob die Meshes als Kontext-Geometrie übernommen werden. */
   importMeshes: boolean;
+  /** [143] Ob erkannte Höhenlinien als Gelände (Kontext) statt als 2D-Zeichnung übernommen werden. */
+  terrainContours: boolean;
   /**
    * Platzierung der importierten Geometrie: `origin` = 1:1 an den DXF-Koordinaten
    * (relativ zum Nullpunkt); `viewCenter` = der Gesamt-Umriss wird in die Mitte
@@ -185,6 +187,10 @@ export function ImportDialog({
   const [categoryModeChoice, setCategoryMode] = useState<CategoryMode | null>(null);
   const categoryMode: CategoryMode = categoryModeChoice ?? (layers.length > 0 ? "byLayer" : "active");
   const [importMeshes, setImportMeshes] = useState<boolean>(true);
+  // [143] Vorgabe an, sobald Höhenlinien erkannt sind; erst eine Wahl des Nutzers überschreibt sie.
+  const terrainFound = summary?.terrainContours ?? 0;
+  const [terrainChoice, setTerrainChoice] = useState<boolean | null>(null);
+  const terrainContours = terrainFound > 0 && (terrainChoice ?? true);
   const [placement, setPlacement] = useState<"origin" | "viewCenter">("origin");
   // Zwischen Klick auf „Importieren" und dem (synchronen, u. U. mehrere
   // Sekunden dauernden — Drawings ins Projekt einhängen + Plan/3D neu bauen)
@@ -218,7 +224,7 @@ export function ImportDialog({
     // GEMALT. Ein setTimeout(0) feuert oft vor dem Paint — der Dialog sah dann
     // bis zum Ende des (blockierenden) Imports unverändert eingefroren aus.
     requestAnimationFrame(() =>
-      requestAnimationFrame(() => onImport({ target, categoryMode, importMeshes, placement, parsed })),
+      requestAnimationFrame(() => onImport({ target, categoryMode, importMeshes, terrainContours, placement, parsed })),
     );
   };
 
@@ -517,6 +523,25 @@ export function ImportDialog({
                     />
                     <span>{t("import.placement.viewCenter")}</span>
                   </label>
+                </section>
+              )}
+
+              {/* [143] Höhenlinien als Gelände. */}
+              {terrainFound > 0 && (
+                <section className="imp-section">
+                  <div className="imp-section-title">{t("import.terrain.heading")}</div>
+                  <label className="imp-check">
+                    <input
+                      type="checkbox"
+                      checked={terrainContours}
+                      onChange={(e) => setTerrainChoice(e.target.checked)}
+                    />
+                    <span>{t("import.terrain.asTerrain", { n: terrainFound })}</span>
+                  </label>
+                  <div className="imp-note">
+                    {t("import.terrain.note")}
+                    {(summary?.terrainFromTexts ?? 0) > 0 && ` ${t("import.terrain.fromTexts", { n: summary?.terrainFromTexts ?? 0 })}`}
+                  </div>
                 </section>
               )}
 
