@@ -11,6 +11,7 @@ import { onCoreRestart } from "../engine/coreWasm";
 import { historyPatch, storeDocument } from "./historySlice";
 import type { NotifyKind } from "./notifySlice";
 import { serializeProject } from "../io/projectFormat";
+import { uiStateForSave } from "./viewTabs";
 import { AUTOSAVE_INTERVAL_MS, clearAutosave, createAutosaveTracker, readAutosave, writeAutosave } from "./autosave";
 import type { AutosaveRecovery } from "./autosave";
 import { useEffect, useRef, useState } from "react";
@@ -150,7 +151,7 @@ export function useProjectFileActions(
     const id = window.setInterval(() => {
       const p = getState().project;
       if (!autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) return;
-      void writeAutosave(openedProjectPathRef.current, serializeProject(p));
+      void writeAutosave(openedProjectPathRef.current, serializeProject(p, uiStateForSave()));
     }, AUTOSAVE_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, []);
@@ -165,7 +166,7 @@ export function useProjectFileActions(
         if (info.quiet) return;
         const p = getState().project;
         try {
-          if (autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) void writeAutosave(openedProjectPathRef.current, serializeProject(p));
+          if (autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) void writeAutosave(openedProjectPathRef.current, serializeProject(p, uiStateForSave()));
         } catch (e) {
           console.error("Autosave nach Kern-Neustart fehlgeschlagen.", e);
         }
@@ -375,7 +376,7 @@ export function useProjectFileActions(
   // Cmd/Ctrl+Shift+S „Speichern unter" fragt immer nach dem Ziel.
   const saveProjectTo = (asNew: boolean): Promise<boolean> => {
     const project = getState().project;
-    const json = serializeProject(project);
+    const json = serializeProject(project, uiStateForSave());
     return saveProjectFile(json, project.name, (path) => {
       savePathRef.current = path;
       addRecentProject(path, project.name || "modell");

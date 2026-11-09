@@ -7,7 +7,7 @@ import { addItems, fieldOps, patchItem, removeItems } from "../../core";
 import { t } from "../../i18n";
 import { getState } from "../appStore";
 import { captureViewSnapshot, matchingComboName, readViewSnapshot } from "../viewSnapshots";
-import { activateTab, activeTab, closeTab, detachSnapshots, getViewTabs, linkActiveTab, openTab, setViewTabs, storeActiveState, type ViewTabsState } from "../viewTabs";
+import { setViewStateBridge, activateTab, activeTab, closeTab, detachSnapshots, getViewTabs, linkActiveTab, openTab, setViewTabs, storeActiveState, type ViewTabsState } from "../viewTabs";
 import { createViewSnapshotFolder, deleteFolder as deleteViewSnapshotFolder, moveSnapshotToFolder, moveFolder as moveViewSnapshotFolder } from "../viewSnapshotFolders";
 import { listDrawingCombos, listLayerCombos, loadDrawingCombo, loadLayerCombo } from "../visibilitySets";
 import type { FlatHostOpts, HostPart } from "./types";
@@ -19,6 +19,7 @@ let lastPanelClick: { id: string; at: number; tabs: ViewTabsState } | null = nul
 export function buildViewSnapshotsHost(c: FlatHostOpts, view: ViewStateFns) {
   const { activeLevelId, applyChange, project, selectedViewSnapshotId, setSelectedViewSnapshotId, snapshotDrawingVisibility } = c;
   const { liveViewState, applyViewState } = view;
+  setViewStateBridge({ live: liveViewState, apply: applyViewState }); // [136] Reiter mit dem Projekt sichern
   return {
     // ── Ausschnitte / View-Snapshots (DOSSIER A2) und Reiter ([136]) ──────
     // Ausschnitte leben im Projekt (Panel „Ausschnitte"), Reiter sind reiner UI-Zustand

@@ -16,7 +16,7 @@
 // Fassade lädt ins gemeinsame Abfrage-Dokument (CLI, MCP, Tests) — die Abfragen auf dem gelesenen
 // Projekt laufen danach ohne erneute Übergabe.
 
-import type { Project } from "../model/types";
+import type { Project, UiState } from "../model/types";
 import { sharedDocument, withDocument } from "../core/document";
 import type { LoadFileResult } from "../core/document";
 
@@ -34,6 +34,6 @@ export function parseProjectFile(text: string): ParseProjectResult {
  * Serialisiert ein Projekt für die Datei (mit aktueller Formatversion vorne): über das Dokument des
  * Stores bzw. CLI, sonst ein eigenes, kurzlebiges Dokument (z. B. ältere Autosave-Stände, [122]).
  */
-export function serializeProject(project: Project): string {
-  return withDocument(project, (d) => d.serialize());
+export function serializeProject(project: Project, ui?: UiState): string {
+  return withDocument(project, (d) => d.serialize(ui));
 }

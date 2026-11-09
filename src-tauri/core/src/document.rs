@@ -310,6 +310,12 @@ impl Document {
         crate::project_format::serialize_project(&self.root)
     }
 
+    /// Wie [`Document::serialize`], mit `uiState` ([136]) aus `ui` (UI-Zustand liegt nicht im Dokument,
+    /// keine Op, kein Undo); `None` = Feld weglassen.
+    pub fn serialize_with_ui(&self, ui: Option<&Value>) -> String {
+        crate::project_format::serialize_project_with(&self.root, "uiState", ui)
+    }
+
     pub fn to_json(&self) -> String {
         serde_json::to_string(&self.root).unwrap_or_default()
     }

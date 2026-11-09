@@ -71,7 +71,7 @@ import type { StoreApi } from "./store";
 import { createHistorySlice, historyPatch, labelCommit, storeDocument } from "./historySlice";
 import type { HistorySlice } from "./historySlice";
 import { opsLabel } from "./historyLabels";
-import { resetViewTabs } from "./viewTabs";
+import { resetViewTabs, restoreViewTabsFromProject } from "./viewTabs";
 import type { NotifyKind } from "./notifySlice";
 
 /** Felder, die diese Slice in den RootState beisteuert. */
@@ -638,7 +638,7 @@ export function createProjectSlice(
       const r = doc.loadFile(text);
       if (r.ok) {
         set({ project: r.project, projectEpoch: get().projectEpoch + 1, ...historyPatch(doc) });
-        resetViewTabs(); // [136]
+        restoreViewTabsFromProject(r.project); // [136] gesicherte Reiter, sonst ein Reiter
       }
       return r;
     },

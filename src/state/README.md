@@ -64,7 +64,7 @@ in `ProjectSync`.
 | `selectionInfo.ts` | Objekt-Info der Auswahl (Fassade über den Kern, `selection_info.rs`) |
 | `dataEqual.ts` | Strukturvergleich reiner Daten (Objekt-Info, Zustand der Nebenfenster) |
 | `viewTemplates.ts` | Ansichtsvorlagen als Ops |
-| `viewSnapshots.ts`, `viewSnapshotFolders.ts`, `viewTabs.ts` | Ausschnitte, ihre Ordner, Zeichnungs-Reiter |
+| `viewSnapshots.ts`, `viewSnapshotFolders.ts`, `viewTabs.ts` | Ausschnitte, ihre Ordner, Zeichnungs-Reiter (mit dem Projekt als `uiState.viewTabs` gesichert, [136]) |
 | `groupActions.ts` | Gruppen erzeugen, auflösen, betreten |
 | `exportScope.ts`, `objectLock.ts` | Export „nur Auswahl"; Objekt-Sperre |
 | `autosave.ts`, `projectStore.ts`, `recentProjects.ts`, `startupGuard.ts` | Autosave und Wiederherstellen, IndexedDB, zuletzt geöffnet, Start-Protokoll |

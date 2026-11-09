@@ -324,6 +324,14 @@ pub fn doc_serialize(h: u32) -> String {
     with_doc(h, |d| d.serialize()).unwrap_or_default()
 }
 
+/// Wie [`doc_serialize`], mit dem Feld `uiState` ([136], offene Reiter) aus `ui_json` statt aus dem
+/// Dokument; leerer Text oder kaputtes JSON = Feld weglassen. Das Dokument bleibt unverändert.
+#[wasm_bindgen]
+pub fn doc_serialize_with_ui(h: u32, ui_json: &str) -> String {
+    let ui = serde_json::from_str::<Value>(ui_json).ok().filter(Value::is_object);
+    with_doc(h, |d| d.serialize_with_ui(ui.as_ref())).unwrap_or_default()
+}
+
 /// Abfrage mit binärer Antwort (`crate::queries::run_bin`, z. B. `planDomains` als Plan-Puffer v2).
 /// Fehler kommen als Fehlerpuffer (`plan_buf::encode_error`).
 #[wasm_bindgen]
