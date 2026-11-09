@@ -6,8 +6,8 @@
 // (Referenzlinie, Aufbau-Typ/Dicke/Preset, Referenzgeschoss + UK/OK) — analog
 // Vectorworks. Die Referenzlinie sitzt rechts oben im Kopf.
 //
-// Alle Daten/Handler kommen über usePanelHost (kein Prop-Drilling, kein
-// Modellzugriff). Der gewählte Bezugspunkt (fx,fy ∈ {0,0.5,1}) ist lokaler
+// Handler kommen über usePanelHost, Projekt und Objekt-Info aus dem Store
+// (`useStore`, `useSelectionInfo`, [121]). Der gewählte Bezugspunkt (fx,fy ∈ {0,0.5,1}) ist lokaler
 // State und wird als Anker an onResizeSelection durchgereicht: Beim Ändern
 // der Maße bleibt genau dieser Punkt fix.
 //
@@ -15,6 +15,7 @@
 // Texte über t(...).
 
 import { UValueRow } from "./UValueRow";
+import { useSelectionInfo } from "../state/useSelectionInfo";
 import { lengthFromDisplay, lengthToDisplay, unitsForLevel, xToDisplay, yFromDisplay, yToDisplay } from "../tools/displayUnits";
 import { solidProps } from "../engine/truckSolid";
 import type { SolidProps, SolidSpec } from "../engine/truckSolid";
@@ -90,7 +91,8 @@ function toDeg360(rad: number): number {
 
 export function ObjectInfoPanel() {
   const host = usePanelHost();
-  const sel = host.selection;
+  const project = useStore((s) => s.project);
+  const sel = useSelectionInfo();
 
   // Gewählter Bezugspunkt — Default Mitte (Vectorworks-Standardanker beim
   // Skalieren). Bleibt erhalten, solange das Panel montiert ist.
@@ -107,10 +109,10 @@ export function ObjectInfoPanel() {
   // [137] Lage-Darstellung angeklickt (Schattenfläche / Baurechtslinie): Einstellungen der Quelle.
   const site = useStore((s) => s.selection.site);
   const treeSel = useStore((s) => s.selection.trees);
-  const ctxObj = sel?.kind === "contextObject" ? (host.project.context ?? []).find((o) => o.id === sel.id) : undefined;
+  const ctxObj = sel?.kind === "contextObject" ? (project.context ?? []).find((o) => o.id === sel.id) : undefined;
   const quantities = useMemo(
-    () => (ctxObj?.type === "excavation" ? excavationQuantities(host.project) : []),
-    [ctxObj?.type, host.project],
+    () => (ctxObj?.type === "excavation" ? excavationQuantities(project) : []),
+    [ctxObj?.type, project],
   );
 
   // ── Leerzustand ───────────────────────────────────────────────────────────
@@ -150,7 +152,7 @@ export function ObjectInfoPanel() {
   const px = bbox.minX + anchor.fx * width;
   const py = bbox.minY + anchor.fy * height;
   // Auf einem Layout-Blatt zeigt und liest das Panel Papier-mm mit y nach unten ([93]).
-  const u = unitsForLevel(host.project.drawingLevels.find((z) => z.id === sel.floorId));
+  const u = unitsForLevel(project.drawingLevels.find((z) => z.id === sel.floorId));
   const len = (m: number): number => lengthToDisplay(u, m);
   const unlen = (v: number): number => lengthFromDisplay(u, v);
   const lenProps = { unit: u.suffix, digits: u.digits };
@@ -160,7 +162,7 @@ export function ObjectInfoPanel() {
   // keine Geometrieform, daher direkter (Lese-)Zugriff aufs Projekt.
   const rawDrawing =
     sel.kind === "drawing2d"
-      ? host.project.drawings2d.find((d) => d.id === sel.id)
+      ? project.drawings2d.find((d) => d.id === sel.id)
       : undefined;
   const drawingShape = rawDrawing?.geom.shape;
 
@@ -188,7 +190,7 @@ export function ObjectInfoPanel() {
           <Dropdown
             value={sel.categoryCode}
             onChange={(v) => host.onSetSelectionCategory(v)}
-            options={flattenCategories(host.project.layers).map((c) => ({
+            options={flattenCategories(project.layers).map((c) => ({
               value: c.code,
               label: `${c.code} ${c.name}`,
             }))}
@@ -203,7 +205,7 @@ export function ObjectInfoPanel() {
           <Dropdown
             value={sel.floorId}
             onChange={(v) => host.onSetSelectionLevel(v)}
-            options={host.project.drawingLevels
+            options={project.drawingLevels
               // Geschosse + die aktuelle Ebene (2D-Zeichnungen können auch auf
               // Schnitt-/Zeichnungs-Ebenen liegen — die darf nicht verschwinden).
               .filter((z) => z.kind === "floor" || z.id === sel.floorId)
@@ -469,7 +471,7 @@ export function RoomSection({
       </div>
 
       {/* [158] Raumbuch: Nutzung und Oberflächen. */}
-      <RoomFinishFields roomId={roomId} host={host} />
+      <RoomFinishFields roomId={roomId} />
 
       {/* Stempel bearbeiten (öffnet den Rich-Text-Editor). */}
       <button
@@ -487,9 +489,9 @@ type RoomFinishField = "floorFinish" | "wallFinish" | "ceilingFinish" | "floorBu
 
 /** [158] Nutzung (Nassraum abgeleitet) und Oberflächen Boden/Wand/Decke (Material aus dem Projekt oder
  *  Freitext; ein eingegebener Material-Name wird als Verweis gespeichert) und Bodenaufbau. */
-function RoomFinishFields({ roomId, host }: { roomId: string; host: ReturnType<typeof usePanelHost> }) {
+function RoomFinishFields({ roomId }: { roomId: string }) {
   const applyChange = useStore((s) => s.applyChange);
-  const project = host.project;
+  const project = useStore((s) => s.project);
   const room = (project.rooms ?? []).find((r) => r.id === roomId);
   if (!room) return null;
   const comps = project.components;
@@ -563,6 +565,7 @@ export function SectionLineSection({
   level: DrawingLevel;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  const project = useStore((s) => s.project);
   const line = level.linePoints;
   const kindLabel =
     level.kind === "elevation"
@@ -700,7 +703,7 @@ export function SectionLineSection({
             onChange={(v) => host.onSetSectionLinePatch({ planUnderlayId: v || undefined })}
             options={[
               { value: "", label: t("objinfo.sectionLine.planUnderlay.none") },
-              ...host.project.drawingLevels
+              ...project.drawingLevels
                 .filter((l) => l.kind === "floor")
                 .map((l) => ({ value: l.id, label: l.name })),
             ]}
@@ -1096,8 +1099,9 @@ function rectOutline(x0: number, y0: number, w: number, d: number) {
 
 /** Gauben ([G5]) des Dachs: Art, Masse, Neigung, Aufbau je Gaube; Hinzufügen über den Befehl „Gaube". */
 function DormersSection({ roof, host }: { roof: RoofInfo; host: ReturnType<typeof usePanelHost> }) {
+  const project = useStore((s) => s.project);
   const dormers = roof.dormers ?? [];
-  const status = useMemo(() => dormerStatus(host.project), [host.project]);
+  const status = useMemo(() => dormerStatus(project), [project]);
   const patch = (i: number, p: Partial<Dormer>) =>
     host.onSetRoofPatch({ dormers: dormers.map((d, k) => (k === i ? { ...d, ...p } : d)) }, `dormer-${i}`);
   const num = (labelKey: TranslationKey, value: number, step: number, apply: (v: number) => void) => (
@@ -1171,7 +1175,7 @@ function DormersSection({ roof, host }: { roof: RoofInfo; host: ReturnType<typeo
               onChange={(v) => patch(i, { wallTypeId: v || undefined })}
               options={[
                 { value: "", label: t("objinfo.dormer.wallType.default") },
-                ...host.project.wallTypes.map((wt) => ({ value: wt.id, label: wt.name })),
+                ...project.wallTypes.map((wt) => ({ value: wt.id, label: wt.name })),
               ]}
               title={t("objinfo.dormer.wallType")}
               width={130}
@@ -1184,7 +1188,7 @@ function DormersSection({ roof, host }: { roof: RoofInfo; host: ReturnType<typeo
               onChange={(v) => patch(i, { roofTypeId: v || undefined })}
               options={[
                 { value: "", label: t("objinfo.dormer.roofType.host") },
-                ...(host.project.roofTypes ?? []).map((rt) => ({ value: rt.id, label: rt.name })),
+                ...(project.roofTypes ?? []).map((rt) => ({ value: rt.id, label: rt.name })),
               ]}
               title={t("objinfo.dormer.roofType")}
               width={130}
@@ -1209,6 +1213,7 @@ export function RoofSection({
   roof: RoofInfo;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  const project = useStore((s) => s.project);
   const numField = (
     labelKey: TranslationKey,
     value: number,
@@ -1262,13 +1267,13 @@ export function RoofSection({
           onChange={(v) => host.onSetRoofPatch({ roofTypeId: v || undefined })}
           options={[
             { value: "", label: t("objinfo.roof.type.single") },
-            ...(host.project.roofTypes ?? []).map((rt) => ({ value: rt.id, label: rt.name })),
+            ...(project.roofTypes ?? []).map((rt) => ({ value: rt.id, label: rt.name })),
           ]}
           title={t("objinfo.roof.type")}
           width={130}
         />
       </div>
-      <UValueRow project={host.project} kind="roof" typeId={roof.roofTypeId} />
+      <UValueRow project={project} kind="roof" typeId={roof.roofTypeId} />
 
       {/* Firstrichtung (X/Y) — nur bei Formen mit First relevant. */}
       {roof.shape !== "flach" && roof.shape !== "zelt" && (
@@ -1580,6 +1585,7 @@ export function StairSection({
   stair: StairInfo;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  const project = useStore((s) => s.project);
   return (
     <>
       <div className="objinfo-sep" />
@@ -1593,7 +1599,7 @@ export function StairSection({
           onChange={(v) => host.onSetStairType(v)}
           options={[
             { value: "", label: t("objinfo.type.none") },
-            ...(host.project.stairTypes ?? []).map((st) => ({
+            ...(project.stairTypes ?? []).map((st) => ({
               value: st.id,
               label: st.name,
             })),
@@ -1757,6 +1763,7 @@ export function OpeningSection({
   opening: OpeningInfo;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  const project = useStore((s) => s.project);
   const isDoor = opening.kind === "door";
   if (opening.hostRoofId || opening.hostCeilingId) {
     return <SurfaceOpeningSection opening={opening} host={host} />;
@@ -1776,8 +1783,8 @@ export function OpeningSection({
           options={[
             { value: "", label: t("objinfo.type.none") },
             ...(isDoor
-              ? host.project.doorTypes ?? []
-              : host.project.windowTypes ?? []
+              ? project.doorTypes ?? []
+              : project.windowTypes ?? []
             ).map((ty) => ({ value: ty.id, label: ty.name })),
           ]}
           title={t("objinfo.opening.type")}
@@ -2010,7 +2017,8 @@ function SurfaceOpeningSection({
   opening: OpeningInfo;
   host: ReturnType<typeof usePanelHost>;
 }) {
-  const info = surfaceOpeningInfo(host.project, opening.id);
+  const project = useStore((s) => s.project);
+  const info = surfaceOpeningInfo(project, opening.id);
   const roof = !!opening.hostRoofId;
   const hp = opening.hostPoint ?? { x: 0, y: 0 };
   return (
@@ -2024,7 +2032,7 @@ function SurfaceOpeningSection({
           onChange={(v) => host.onSetOpeningType(v)}
           options={[
             { value: "", label: t("objinfo.type.none") },
-            ...(host.project.windowTypes ?? []).map((ty) => ({ value: ty.id, label: ty.name })),
+            ...(project.windowTypes ?? []).map((ty) => ({ value: ty.id, label: ty.name })),
           ]}
           title={t("objinfo.opening.type")}
           width={106}
@@ -2105,6 +2113,7 @@ export function CeilingSection({
   ceiling: CeilingInfo;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  const project = useStore((s) => s.project);
   const isSingle = ceiling.singleLayer;
   const multiPresets = ceiling.ceilingTypes.filter((ct) => ct.layerCount > 1);
 
@@ -2175,7 +2184,7 @@ export function CeilingSection({
         <span className="objinfo-flabel">{t("objinfo.ceiling.refFloor")}</span>
         <span className="objinfo-fval">{ceiling.floorName}</span>
       </div>
-      <UValueRow project={host.project} kind="ceiling" typeId={ceiling.typeId} />
+      <UValueRow project={project} kind="ceiling" typeId={ceiling.typeId} />
 
       {/* Fläche + Volumen (read-only). */}
       <div className="objinfo-field">
@@ -2254,6 +2263,7 @@ export function WallSection({
   wall: WallInfo;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  const project = useStore((s) => s.project);
   // Aufbau-Typ-Segment: einschichtig vs. mehrschichtig. Aus dem Modell
   // abgeleitet (singleLayer); der Umschalter auf „mehrschichtig" wählt einen
   // mehrschichtigen Wandtyp-Preset (erster mit >1 Schicht), auf „einschichtig"
@@ -2393,7 +2403,7 @@ export function WallSection({
         <span className="objinfo-flabel">{t("objinfo.wall.refFloor")}</span>
         <span className="objinfo-fval">{wall.floorName}</span>
       </div>
-      <UValueRow project={host.project} kind="wall" typeId={wall.wallTypeId} />
+      <UValueRow project={project} kind="wall" typeId={wall.wallTypeId} />
 
       {/* Länge + Volumen (read-only). Volumen ist NETTO — Fenster/Türen
           abgezogen; der Titel zeigt zusätzlich das Bruttovolumen. */}
@@ -2562,15 +2572,15 @@ const TREE_STATUS: TreeStatus[] = ["existing", "new", "remove"];
 const TREE_FOLIAGE: TreeFoliage[] = ["deciduous", "conifer"];
 
 export function TreeSection({ ids }: { ids: readonly string[] }) {
-  const host = usePanelHost();
+  const project = useStore((s) => s.project);
   const applyChange = useStore((s) => s.applyChange);
-  const trees = (host.project.trees ?? []).filter((x) => ids.includes(x.id));
+  const trees = (project.trees ?? []).filter((x) => ids.includes(x.id));
   const tree = trees[0];
   if (!tree) return <div className="objinfo-panel"><div className="objinfo-empty">{t("objinfo.empty")}</div></div>;
   const locked = !!tree.locked;
   const set = (patch: Partial<Tree>, all = false) =>
     applyChange((p) => (all ? trees : [tree]).filter((x) => !x.locked).flatMap((x) => patchItem(p, "trees", x.id, patch)));
-  const level = host.project.drawingLevels.find((l) => l.id === tree.floorId);
+  const level = project.drawingLevels.find((l) => l.id === tree.floorId);
   return (
     <div className="objinfo-panel objinfo-tree">
       <div className="objinfo-head">

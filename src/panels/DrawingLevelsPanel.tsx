@@ -10,7 +10,7 @@
 // Das Panel deklariert hasDisplayMode und liest den gewählten DisplayMode aus
 // dem Host-Context. `itemDisplay` entscheidet je Zeile, ob sie gezeichnet und
 // ob sie ausgegraut wird (aktives Element = Arbeitsfokus, immer sichtbar).
-// Daten/Handler kommen über usePanelHost — kein Prop-Drilling.
+// Handler kommen über usePanelHost, die Zeichnungsebenen aus dem Store ([121]).
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
@@ -18,6 +18,7 @@ import { useState } from "react";
 import { EyeIcon } from "../ui/EyeIcon";
 import { itemDisplay } from "./displayMode";
 import { usePanelHost } from "./host";
+import { useStore } from "../state/appStore";
 import type { DrawingLevel } from "./host";
 import type { DisplayMode } from "./types";
 import { DisplayModeSelect } from "./DisplayModeSelect";
@@ -65,7 +66,8 @@ export const CATEGORY_ADD_KEY: Record<DrawingLevelKind, string> = {
 /** Inhalt des Panels „Zeichnungsebenen". */
 export function DrawingLevelsPanel() {
   const host = usePanelHost();
-  const { project, activeLevelId, displayMode } = host;
+  const { activeLevelId, displayMode } = host;
+  const project = useStore((s) => s.project);
 
   // Auf-/Zu-Zustand je Kategorie, lokal — Default: alle aufgeklappt.
   const [collapsed, setCollapsed] = useState<Record<DrawingLevelKind, boolean>>(

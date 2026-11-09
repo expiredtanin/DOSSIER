@@ -3,7 +3,7 @@
 // Grundriss entsteht aus `Project.siteRules` (`plan/generatePlan/siteRules.ts`).
 
 import { t } from "../i18n";
-import { usePanelHost } from "./host";
+import { useSelectionInfo } from "../state/useSelectionInfo";
 import { useStore } from "../state/appStore";
 import { checkSiteRules, patchItem, setField } from "../core";
 import type { Project, SiteRules } from "../model/types";
@@ -45,15 +45,15 @@ function withProjection<T extends { siteProjection?: boolean }>(e: T, on: boolea
 }
 
 export function SiteRulesSection() {
-  const host = usePanelHost();
+  const project = useStore((s) => s.project);
   const applyChange = useStore((s) => s.applyChange);
-  const rules = host.project.siteRules;
-  const sel = host.selection;
-  const selDrawing = sel?.kind === "drawing2d" ? host.project.drawings2d.find((d) => d.id === sel.id) : undefined;
+  const rules = project.siteRules;
+  const sel = useSelectionInfo();
+  const selDrawing = sel?.kind === "drawing2d" ? project.drawings2d.find((d) => d.id === sel.id) : undefined;
   const selParcel = parcelFromDrawing(selDrawing);
   const selLine = lineFromDrawing(selDrawing);
   // Vorsprung markieren: gewählte Decke (Balkon), freier Körper oder Wand (Erker).
-  const selProjection = projectionTarget(host.project, sel);
+  const selProjection = projectionTarget(project, sel);
 
   const write = (fn: (r: SiteRules) => SiteRules | undefined, key?: string) =>
     applyChange((p: Project) => {
@@ -83,7 +83,7 @@ export function SiteRulesSection() {
     );
   }
 
-  const check = checkSiteRules(host.project);
+  const check = checkSiteRules(project);
   const n = rules.parcel.length;
   const ok = check !== null && check.violationArea < 0.01 && !check.heightExceeded && !check.profileExceeded;
 

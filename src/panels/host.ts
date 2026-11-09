@@ -30,7 +30,6 @@ import type {
   LineStyle,
   MasterLayout,
   PublishSet,
-  Project,
   SiaCategory,
   SliceTermination,
   Stair,
@@ -42,7 +41,6 @@ import type {
 } from "../model/types";
 import type { MeasurementReadout, SnapSettings, ToolId } from "../tools/types";
 import type { TerrainOptions } from "../model/terrain";
-import type { SelectionInfo } from "../state/selectionInfo";
 import type { TextStylePreset } from "../text/richText";
 import type { ScheduleKind } from "../export/exportSchedule";
 import type { DetailLevel } from "../model/viewTypes";
@@ -69,8 +67,9 @@ export interface DisplayModeControl {
  * Closure über setProject existiert.
  */
 export interface PanelHostValue {
-  // Projektzustand (Single Source of Truth aus App).
-  project: Project;
+  // Projekt und Objekt-Info der Auswahl sind KEINE Host-Felder ([121]): Panels lesen sie selbst
+  // aus dem Store (`useStore((s) => s.project…)`, `useSelectionInfo()`), damit eine Op nur die
+  // Panels neu rendert, die die geänderten Daten zeigen.
 
   // Aktive Auswahl (Zeichnungsebene) — Arbeitsfokus für „active"/„grey".
   activeLevelId: string;
@@ -173,12 +172,7 @@ export interface PanelHostValue {
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
 
   // ── Selektions-Attribute (Attributes-/Object-Info-Paletten) ─────────────
-  /**
-   * Normalisierte, effektiv aufgelöste Sicht auf das ERSTE selektierte Element
-   * (oder `null`). Die Paletten lesen daraus Farbe/Strichstärke/Füllung/bbox
-   * und grauen nicht-anwendbare Felder per `selection.kind` aus.
-   */
-  selection: SelectionInfo | null;
+  // Die Sicht auf das erste gewählte Element liefert `useSelectionInfo()` (state/useSelectionInfo.ts).
   /**
    * Live-Messwerte des Mess-Werkzeugs (Länge/Fläche/Winkel), oder `null`, wenn
    * gerade nicht gemessen wird. Das Objekt-Info-Panel zeigt sie dauerhaft an,
@@ -597,8 +591,7 @@ export interface PanelHostValue {
   onSetColumnRotation: (deg: number) => void;
 
   // ── Site-/Kontext-Schicht (SitePanel) ───────────────────────────────────
-  /** Aktuelle Kontext-Objekte (Meshes/Konturen/Gelände) aus `project.context`. */
-  contextObjects: ContextObject[];
+  // Die Kontext-Objekte selbst liest das Panel aus dem Store (`project.context`).
   /** Fügt mehrere Kontext-Objekte hinzu (z. B. aus einem DXF-Import). */
   onAddContextObjects: (objs: ContextObject[]) => void;
   /** Entfernt ein Kontext-Objekt per ID. */

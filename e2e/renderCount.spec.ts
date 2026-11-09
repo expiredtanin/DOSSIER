@@ -6,6 +6,9 @@
 // Minifizierung: `vite build --minify false`). Gemessen 3.11. (Musterhaus): Wand-Änderung 413 → 290,
 // Zoom-Schritt 240 → 61. 4.11.: Wand-Änderung 290 → 51 (Plan-Primitive/Schraffur-Muster mit
 // Strukturvergleich), Zoom-Schritt 61 → 8, 5 Zeiger-Schritte 75 → 20 (Live-Anzeigen abonnieren selbst).
+// 9.11.: Wand-Änderung 55 → 42 (Panels lesen Projekt und Objekt-Info selbst aus dem Store, Panel-Host
+// mit stabiler Identität, Docks/Datei-Felder/Reiter/Präsentations-Dialog memoisiert). Der Rest ist die
+// Objekt-Info der geänderten Wand samt Feldern, die Plan-Ansicht und `App` selbst (Griffe der Auswahl).
 // Die Schranken unten fangen den Rückfall ab, dass wieder ganze Bäume mitrendern.
 import type { Page } from "@playwright/test";
 import { blurFocus, elementRows, expect, openSample, openTab, startNewProject, test } from "./app";
@@ -128,7 +131,7 @@ test("Neurendern zählen: Wand-Änderung, Zoom- und Zeiger-Schritt", async ({ pa
     for (let k = 1; k <= 5; k++) await page.mouse.move(box.x + box.width / 2 + k * 7, box.y + box.height / 2 + k * 5);
   });
 
-  expect(edit, "Renders je Wand-Änderung").toBeLessThan(90);
-  expect(zoom, "Renders je Zoom-Schritt").toBeLessThan(25);
-  expect(pointer, "Renders je 5 Zeiger-Schritte").toBeLessThan(40);
+  expect(edit, "Renders je Wand-Änderung").toBeLessThan(50);
+  expect(zoom, "Renders je Zoom-Schritt").toBeLessThan(12);
+  expect(pointer, "Renders je 5 Zeiger-Schritte").toBeLessThan(25);
 });

@@ -5,7 +5,6 @@
 
 import { useMemo } from "react";
 import { t } from "../i18n";
-import { usePanelHost } from "./host";
 import { areaReportToCsv, buildAreaReportPdf, buildRoomBookReport, roomBook, usageLabel } from "../core";
 import { downloadCsv } from "./downloadFile";
 import { useStore } from "../state/appStore";
@@ -13,7 +12,7 @@ import { useStore } from "../state/appStore";
 const m2 = (v: number) => v.toFixed(2);
 
 export function RoomBookSection() {
-  const project = usePanelHost().project;
+  const project = useStore((s) => s.project);
   const notify = useStore((s) => s.notify);
   const book = useMemo(() => roomBook(project), [project]);
   const stem = `${project.name || "projekt"}-raumbuch`;

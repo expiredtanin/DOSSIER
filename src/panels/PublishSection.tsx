@@ -3,6 +3,7 @@
 // Reine Verdrahtung über den Host; Logik in `export/publishSet.ts`, `state/publishActions.ts`.
 
 import { useState } from "react";
+import { useStore } from "../state/appStore";
 import { usePanelHost } from "./host";
 import type { LayoutPaperFormat, PublishSet } from "../model/types";
 import { PAPER_FORMATS } from "../model/layoutModel";
@@ -27,7 +28,7 @@ export function move(list: readonly string[], i: number, d: number): string[] {
 
 function SetEditor({ set }: { set: PublishSet }) {
   const host = usePanelHost();
-  const project = host.project;
+  const project = useStore((s) => s.project);
   const patch = (p: Partial<Omit<PublishSet, "id">>) => host.onPatchPublishSet(set.id, p);
   const layouts = project.layouts ?? [];
   const snapshots = project.viewSnapshots ?? [];
@@ -149,7 +150,7 @@ function SetEditor({ set }: { set: PublishSet }) {
 
 export function PublishSection() {
   const host = usePanelHost();
-  const project = host.project;
+  const project = useStore((s) => s.project);
   const sets = project.publishSets ?? [];
   const log = (project.publishLog ?? []).slice(-LOG_SHOWN).reverse();
   const [open, setOpen] = useState<string | null>(null);

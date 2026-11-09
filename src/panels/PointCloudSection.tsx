@@ -3,8 +3,8 @@
 // (`state/pointCloudStore.ts`), nicht im Projekt — Änderungen hier sind kein Undo-Schritt.
 
 import { t } from "../i18n";
+import { useStore } from "../state/appStore";
 import type { TranslationKey } from "../i18n";
-import { usePanelHost } from "./host";
 import {
   MAX_POINT_SIZE,
   MIN_POINT_SIZE,
@@ -26,7 +26,7 @@ const MODE_KEY: Record<PointColorMode, TranslationKey> = {
 };
 
 export function PointCloudSection() {
-  const host = usePanelHost();
+  const project = useStore((s) => s.project);
   const clouds = usePointClouds();
   return (
     <div className="site-rules" data-testid="pointcloud-section">
@@ -91,7 +91,7 @@ export function PointCloudSection() {
             {t("pointCloud.count", { n: c.data.report.pointsKept.toLocaleString("de-CH") })}
             {c.data.report.epsg !== null && <> · EPSG {c.data.report.epsg}</>}
             {" · "}
-            {placementHints(placementOf(c.data, host.project))
+            {placementHints(placementOf(c.data, project))
               .map((k) => t(k))
               .join(" ")}
           </div>

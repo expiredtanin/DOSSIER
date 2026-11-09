@@ -3,7 +3,6 @@
 // und im 3D (render3d-Shadow-Mapping, `viewport/sun3d.ts`, [64]) aus `Project.sunStudy`; der Regler schreibt mit coalesceKey (ein Undo-Schritt je Ziehen).
 
 import { t } from "../i18n";
-import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
 import { projectLatLon, setField, sunPosition } from "../core";
 import type { SunStudy } from "../model/types";
@@ -17,9 +16,9 @@ const PRESETS: { key: "sun.equinox" | "sun.summer" | "sun.winter"; md: string }[
 ];
 
 export function SunStudySection() {
-  const host = usePanelHost();
+  const project = useStore((s) => s.project);
   const applyChange = useStore((s) => s.applyChange);
-  const study: SunStudy = host.project.sunStudy ?? { when: defaultStudyIso(), show: false };
+  const study: SunStudy = project.sunStudy ?? { when: defaultStudyIso(), show: false };
   const local = isoToLocal(study.when) ?? isoToLocal(defaultStudyIso())!;
 
   const write = (next: SunStudy, key?: string) => applyChange([setField("sunStudy", next)], key);
@@ -28,7 +27,7 @@ export function SunStudySection() {
     if (iso) write({ ...study, when: iso }, key);
   };
 
-  const { lat, lon } = projectLatLon(host.project);
+  const { lat, lon } = projectLatLon(project);
   const sun = sunPosition(lat, lon, new Date(study.when));
   const year = local.date.slice(0, 4);
 
@@ -91,7 +90,7 @@ export function SunStudySection() {
         {sun.elevation > 0
           ? t("sun.position", { az: sun.azimuth.toFixed(0), el: sun.elevation.toFixed(1) })
           : t("sun.belowHorizon")}
-        {!host.project.geoAnchor && <span title={t("sun.noAnchor.hint")}> · {t("sun.noAnchor")}</span>}
+        {!project.geoAnchor && <span title={t("sun.noAnchor.hint")}> · {t("sun.noAnchor")}</span>}
       </div>
     </div>
   );

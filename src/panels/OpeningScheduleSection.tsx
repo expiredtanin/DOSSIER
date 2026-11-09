@@ -19,7 +19,7 @@ const m2 = (v: number) => v.toFixed(2);
 
 export function OpeningScheduleSection() {
   const host = usePanelHost();
-  const project = host.project;
+  const project = useStore((s) => s.project);
   const applyChange = useStore((s) => s.applyChange);
   const notify = useStore((s) => s.notify);
   const rows = useMemo(() => openingSchedule(project), [project]);

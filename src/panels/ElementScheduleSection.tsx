@@ -4,14 +4,12 @@
 
 import { useMemo } from "react";
 import { t } from "../i18n";
-import { usePanelHost } from "./host";
 import { areaReportToCsv, buildAreaReportPdf, buildElementReport, elementSchedule } from "../core";
 import { downloadCsv } from "./downloadFile";
 import { useStore } from "../state/appStore";
 
 export function ElementScheduleSection() {
-  const host = usePanelHost();
-  const project = host.project;
+  const project = useStore((s) => s.project);
   const notify = useStore((s) => s.notify);
   const rows = useMemo(() => elementSchedule(project), [project]);
   const stem = `${project.name || "projekt"}-bauteile`;

@@ -8,7 +8,6 @@
 
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
-import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
 import { checkRoomProgram, computeKennzahlen, polygonArea } from "../core";
 import type { Project, RoomProgramRow } from "../model/types";
@@ -41,10 +40,9 @@ function parseNum(text: string): number | null {
 const fmt = (n: number, d = 1) => n.toLocaleString("de-CH", { minimumFractionDigits: d, maximumFractionDigits: d });
 
 export function KennzahlenSection() {
-  const host = usePanelHost();
   const applyChange = useStore((s) => s.applyChange);
   const notify = useStore((s) => s.notify);
-  const project = host.project;
+  const project = useStore((s) => s.project);
   const k = computeKennzahlen(project);
   const prog = checkRoomProgram(project);
   const rows = project.roomProgram ?? [];

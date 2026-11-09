@@ -129,7 +129,8 @@ function host(h: ReturnType<typeof holder>, selection: any) {
       projectActions: stubObj({ snapshotLayerVisibility: () => ({}), snapshotDrawingVisibility: () => ({}), applyLayerVisibility: () => {}, applyDrawingVisibility: () => {} }),
       selectionState: stubObj({ selection: EMPTY_SELECTION }),
       toolState: stubObj({}),
-      topBarState: stubObj({}),
+      // Bündel werden ausgepackt (Spread): Felder, die die Aktionen brauchen, ausdrücklich angeben.
+      topBarState: stubObj({ setSelectedViewSnapshotId: () => {} }),
       dialogState: stubObj({ setActiveLayoutId: () => {} }),
       contextMenuState: stubObj({}),
       engineView: { commandName: null },

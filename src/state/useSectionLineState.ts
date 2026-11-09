@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import type { DrawingLevel, Project, ViewType } from "../model/types";
 import { sectionPlaneFromLevel } from "../core";
-import { deriveSelection } from "./selectionInfo";
+import { selectionInfoFor } from "./useSelectionInfo";
 import type { SelectionInfo } from "./selectionInfo";
 import type { useSelectionState } from "./useSelectionState";
 
@@ -24,9 +24,10 @@ export function useSectionLineState(opts: {
   const { project, selection, activeLevel, viewType, selectedSectionLineId, section3dCutId, setSection3dCutId } = opts;
 
   // ── Selektions-Attribut-Kontrakt (Attributes-/Object-Info-Paletten) ───────
-  // Normalisierte, effektiv aufgelöste Sicht auf das erste selektierte Element.
+  // Normalisierte, effektiv aufgelöste Sicht auf das erste selektierte Element (gemeinsamer Cache mit
+  // `useSelectionInfo` der Panels, inhaltlich stabil).
   const selectionInfo = useMemo(
-    (): SelectionInfo | null => deriveSelection(project, selection),
+    (): SelectionInfo | null => selectionInfoFor(project, selection),
     [project, selection],
   );
 

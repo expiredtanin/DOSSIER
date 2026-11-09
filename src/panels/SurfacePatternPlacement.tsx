@@ -4,6 +4,7 @@
 
 import { t } from "../i18n";
 import type { usePanelHost } from "./host";
+import { useStore } from "../state/appStore";
 
 export function SurfacePatternPlacement({
   kind,
@@ -14,7 +15,7 @@ export function SurfacePatternPlacement({
   id: string;
   host: ReturnType<typeof usePanelHost>;
 }) {
-  const p = host.project;
+  const p = useStore((s) => s.project);
   const el = kind === "wall" ? p.walls.find((w) => w.id === id) : p.roofs?.find((r) => r.id === id);
   if (!el || !host.onSetSurfacePatternPlacement) return null;
   const typeId = kind === "wall" ? (el as { wallTypeId?: string }).wallTypeId : (el as { roofTypeId?: string }).roofTypeId;

@@ -1,16 +1,17 @@
 // Versteckte Datei-Felder der App ([163], aus App.tsx herausgelöst): DXF/DWG/IFC/PDF, STEP, IFC,
 // Bild/PDF, Projektdatei und Vorlage, dazu die Hosts für Punktwolken- und Mesh-Import. Menüs, Befehle
 // und Werkzeuge öffnen den Dateidialog über die Refs (`ref.current.click()`); die gewählte Datei geht
-// an den jeweiligen Handler. Gerendert von `App.tsx` ganz oben im Editor.
+// an den jeweiligen Handler. Gerendert von `App.tsx` ganz oben im Editor; memoisiert ([121]), die
+// Handler kommen mit stabiler Identität aus dem Handler-Bündel der App.
 
-import type { RefObject } from "react";
+import { memo, type RefObject } from "react";
 import { PROJECT_TEMPLATE_EXT } from "../native/projectFile";
 import type { MeshPlacement, MeshRead } from "../io/meshImport";
 import { MeshImportHost } from "./MeshImportDialog";
 import { PointCloudImportHost } from "./PointCloudImportDialog";
 import type { NotifyKind } from "../state/notifySlice";
 
-export function HiddenFileInputs(props: {
+export const HiddenFileInputs = memo(function HiddenFileInputs(props: {
   dxfInputRef: RefObject<HTMLInputElement>;
   stepInputRef: RefObject<HTMLInputElement>;
   ifcInputRef: RefObject<HTMLInputElement>;
@@ -123,4 +124,4 @@ export function HiddenFileInputs(props: {
     />
     </>
   );
-}
+});

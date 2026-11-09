@@ -9,7 +9,9 @@
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
-import type { Project } from "./model/types";
+import { memo } from "react";
+import type { ViewSnapshot } from "./model/types";
+import { useStore } from "./state/appStore";
 import { tabTitle, type ViewTab, type ViewTabsState } from "./state/viewTabs";
 import { t } from "./i18n";
 
@@ -23,14 +25,11 @@ export interface ViewSnapshotTabsHandlers {
   autoName: (levelId?: string) => string;
 }
 
-export function DrawingTabs({
-  project,
-  handlers,
-}: {
-  project: Project;
-  handlers: ViewSnapshotTabsHandlers;
-}) {
-  const snapshots = project.viewSnapshots ?? [];
+const NO_SNAPSHOTS: ViewSnapshot[] = [];
+
+/** Memoisiert ([121]): rendert nur, wenn sich Ausschnitte oder Reiter-Handler ändern, nicht bei jeder Op. */
+export const DrawingTabs = memo(function DrawingTabs({ handlers }: { handlers: ViewSnapshotTabsHandlers }) {
+  const snapshots = useStore((s) => s.project.viewSnapshots) ?? NO_SNAPSHOTS;
   const { tabs, onActivate, onNew, onClose, autoName } = handlers;
   const title = (tab: ViewTab) =>
     tabTitle(tab, snapshots, (tb) => autoName(tb.id === tabs.activeId ? undefined : tb.state?.activeLevelId));
@@ -78,4 +77,4 @@ export function DrawingTabs({
       </button>
     </div>
   );
-}
+});

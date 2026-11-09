@@ -229,9 +229,11 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## App und UI
 
-- ◐ **[121]** `App.tsx` zerlegen, Neurendern stoppen. App abonniert weiter das ganze Projekt; Panels lesen `usePanelHost`;
-  `usePanelHostBase` (1565 Z.) gross; Nebenfenster senden ihren ganzen Zustand. Zerlegung selbst erledigt mit [163]
-  (9.11.: App.tsx 2957 → ~1120 Z., Teile in `src/state/use*.ts`, `src/ui/AppDialogs.tsx` u. a.). · L
+- ◐ **[121]** `App.tsx` zerlegen, Neurendern stoppen. 9.11.: Panels lesen Projekt/Objekt-Info selbst aus dem Store
+  (`useSelectionInfo`), Panel-Host stabil und in `src/state/panelHost/` zerlegt, Docks u. a. memoisiert, Nebenfenster
+  senden Patches; Wand-Änderung 55 → 42 Renders (Zoom 8, Zeiger 20). Offen: App abonniert weiter das ganze Projekt
+  (Griffe, Auswahl-Befehle im App-Render; nächster Schritt Griffe nach `Content`); viele Panels noch mit
+  `s.project` statt schmalem Ausschnitt. Nicht in Tauri geprüft (Nebenfenster-Patches nur per Unit-Test). · L
 - ◐ **[130]** Kleinkram. PlanView/`useGrip3dEditing` nutzen lokale `selected…Ids`-Namen statt `Selection`. · S
 - ◐ **[128]** Restlogik nach Rust. Griffe: Zusammenstellen der Griff-/Kanten-Listen (`gripOwners`), Höhen-Griff-Lagen,
   Vorschau, Zug-Anwendung bleiben in `useGripEditing.ts`; nächster Schritt: Griff-Listen als Dokument-Abfrage. · L

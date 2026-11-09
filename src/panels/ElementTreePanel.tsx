@@ -17,6 +17,7 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useMemo, useState } from "react";
+import { useStore } from "../state/appStore";
 import { usePanelHost } from "./host";
 import type { ScheduleKind, ScheduleRow } from "./host";
 import { scheduleRows } from "../export/exportSchedule";
@@ -99,13 +100,14 @@ function matchesQuery(row: ScheduleRow, classLabel: string, query: string): bool
 
 export function ElementTreePanel() {
   const host = usePanelHost();
+  const project = useStore((s) => s.project);
   const [query, setQuery] = useState("");
   const [collapsedFloors, setCollapsedFloors] = useState<Set<string>>(new Set());
   const [collapsedClasses, setCollapsedClasses] = useState<Set<string>>(new Set());
 
   const allRows = useMemo(
-    () => scheduleRows(host.project).filter((r) => r.kind !== "Tür"),
-    [host.project],
+    () => scheduleRows(project).filter((r) => r.kind !== "Tür"),
+    [project],
   );
 
   const q = query.trim().toLowerCase();
@@ -119,8 +121,8 @@ export function ElementTreePanel() {
   }, [allRows, q, searching]);
 
   const floorGroups = useMemo(
-    () => buildFloorGroups(visibleRows, host.project.drawingLevels),
-    [visibleRows, host.project.drawingLevels],
+    () => buildFloorGroups(visibleRows, project.drawingLevels),
+    [visibleRows, project.drawingLevels],
   );
 
   const toggleFloor = (key: string) =>

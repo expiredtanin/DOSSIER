@@ -14,6 +14,7 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useState } from "react";
+import { useStore } from "../state/appStore";
 import { usePanelHost } from "./host";
 import type {
   Layout,
@@ -355,9 +356,10 @@ function MasterRow({
 
 export function LayoutsPanel() {
   const host = usePanelHost();
-  const layouts = host.project.layouts ?? [];
-  const masters = host.project.masterLayouts ?? [];
-  const folders = host.project.layoutFolders ?? [];
+  const project = useStore((s) => s.project);
+  const layouts = project.layouts ?? [];
+  const masters = project.masterLayouts ?? [];
+  const folders = project.layoutFolders ?? [];
   // Getrennte Bäume je `kind` — Layout- und Master-Ordner werden NIE vermischt.
   const layoutFolders = folders.filter((f) => f.kind !== "master");
   const masterFolders = folders.filter((f) => f.kind === "master");

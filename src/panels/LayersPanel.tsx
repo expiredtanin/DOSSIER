@@ -2,7 +2,7 @@
 //
 // Zeigt den Grafik-Kategorie-Baum (LayerCategory) exakt wie der bisherige
 // Navigator: Farb-Swatch, Code, Name, EyeIcon zum Schalten, eingerückte
-// Kinder, Kopfzeile mit + Ebene. Daten/Handler über usePanelHost.
+// Kinder, Kopfzeile mit + Ebene. Handler über usePanelHost, Ebenen aus dem Store ([121]).
 //
 // Das Panel deklariert hasDisplayMode. „Aktiv" ist die per Klick gewählte
 // Kategorie (activeCategoryCode, Zeichen-Ziel für neue Elemente); dieselbe
@@ -25,6 +25,7 @@
 import { EyeIcon } from "../ui/EyeIcon";
 import { itemDisplay } from "./displayMode";
 import { usePanelHost } from "./host";
+import { useStore } from "../state/appStore";
 import type { LayerCategory } from "./host";
 import type { DisplayMode } from "./types";
 import { DisplayModeSelect } from "./DisplayModeSelect";
@@ -33,7 +34,8 @@ import { t } from "../i18n";
 /** Inhalt des Panels „Ebenen". */
 export function LayersPanel() {
   const host = usePanelHost();
-  const { project, displayMode } = host;
+  const { displayMode } = host;
+  const project = useStore((s) => s.project);
 
   // Klick aufs Auge in „Alle anzeigen"/„Nur aktive" schaltet automatisch auf
   // „Ausgewählte" (DOSSIER-Regel), damit das Sichtbarkeits-Flag sofort greift.
