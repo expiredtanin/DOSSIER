@@ -1,7 +1,7 @@
 //! Wand-Verschneidung (Gehrung, T-Stoss, Kreuzung): berechnet je Wand die optionalen
 //! Schnittlinien an Start- und Endpunkt, materialbewusste Pro-Schicht-Cuts am T-Stoss und die
 //! Nah-Putz-Aussparungen der Durchgangswand. Portiert aus `src/model/joins.ts`; gesammelt wird im
-//! Kern (`model3d.rs` für 3D, `plan/walls.rs` für den Grundriss).
+//! Kern (`model3d/walls.rs` für 3D, `plan/walls.rs` für den Grundriss).
 //!
 //! Behandelt: L-Ecken (zwei Wandenden im Knoten), T-Knoten (drei Enden, zwei kollinear),
 //! Mittelspannen-T-Stösse (freies Ende trifft auf die Seite einer anderen Wand) und

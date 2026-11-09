@@ -1,7 +1,7 @@
 // Gemeinsame Grundlage der 3D-Ableitung: das Serde-Vokabular (`RWall`/`RSlab`/
 // `RMesh`/…, matcht 1:1 render3d::types) sowie die Farb-/Schraffur-/Material-
 // Auflösung, die über mehrere Bauteil-Domänen hinweg identisch gelten muss
-// (Hex→RGB). Die Ableitung selbst rechnet der Rust-Kern (`src-tauri/core/src/model3d.rs`).
+// (Hex→RGB). Die Ableitung selbst rechnet der Rust-Kern (`src-tauri/core/src/model3d/`).
 //
 // Jede Datei unter `toWalls3d/` importiert von hier, NIE von `../toWalls3d`
 // selbst — das hielte die Orchestrator-Datei (`toWalls3d.ts`) andernfalls in

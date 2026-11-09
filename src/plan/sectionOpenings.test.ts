@@ -1,4 +1,4 @@
-// Geschnittene Fenster/Türen im Schnitt (Kern, `core/src/plan/section.rs`), über `generateSectionPlan`
+// Geschnittene Fenster/Türen im Schnitt (Kern, `core/src/plan/section/openings.rs`), über `generateSectionPlan`
 // mit `openings: true` wie in der Schnitt-Ansicht.
 import { describe, expect, it } from "vitest";
 import { sampleProject } from "../model/sampleProject";

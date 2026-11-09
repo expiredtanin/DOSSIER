@@ -1,0 +1,593 @@
+//! Tests zur 3D-Ableitung (`model3d/`): Wände, Decken, Öffnungen, Treppen, Dächer, Kontext, Pick-Geometrie.
+
+use super::*;
+
+/// [149] Bäume im 3D (Stamm + Krone bei den Stützen-Meshes), im Pick und mit Fuss auf dem Gelände.
+#[test]
+fn baeume_im_3d_und_pick() {
+    let mut p = sample();
+    let n0 = parts(&p, true, 1.0, false).unwrap().column_meshes.len();
+    p.trees = Some(vec![Tree { id: "T1".into(), r#type: "tree".into(), floor_id: "eg".into(), category_code: "13".into(), position: Vec2 { x: 20.0, y: 5.0 }, trunk_diameter: 0.4, crown_diameter: 6.0, crown_base: 3.0, height: 12.0, species: Some("Quercus robur".into()), ..Default::default() }, Tree { id: "T2".into(), shape: TreeShape::Conical, foliage: TreeFoliage::Conifer, base_offset: Some(0.5), ..Tree { id: "T1".into(), r#type: "tree".into(), floor_id: "eg".into(), category_code: "13".into(), position: Vec2 { x: 20.0, y: 5.0 }, trunk_diameter: 0.4, crown_diameter: 6.0, crown_base: 3.0, height: 12.0, species: Some("Quercus robur".into()), ..Default::default() } }]);
+    let m = parts(&p, true, 1.0, false).unwrap().column_meshes;
+    assert_eq!(m.len(), n0 + 4);
+    let crown = &m[n0 + 1];
+    assert_eq!(crown.color, crate::tree::CROWN_RGB);
+    assert_eq!(m[n0 + 3].color, crate::tree::CONIFER_RGB);
+    let zmax = crown.positions.chunks_exact(3).map(|q| q[2]).fold(f64::NEG_INFINITY, f64::max);
+    let base = p.floor("eg").map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
+    assert!((zmax - (base + 12.0)).abs() < 1e-9, "{zmax}");
+    let z2 = m[n0 + 2].positions.chunks_exact(3).map(|q| q[2]).fold(f64::INFINITY, f64::min);
+    assert!((z2 - (base + 0.5)).abs() < 1e-9, "Fuss mit Versatz: {z2}");
+    // Wenige Dreiecke je Baum.
+    assert!(m[n0..].iter().map(|x| x.indices.len() / 3).sum::<usize>() < 2 * 250);
+    let g = pick_geometry(&p).unwrap();
+    assert_eq!(g.trees.len(), 2);
+    assert_eq!(g.trees[0].tree_id, "T1");
+    // Welt-Dreiecke (x, Höhe, y): Höhe bis zur Spitze.
+    let h = g.trees[0].tris.iter().flatten().map(|v| v[1]).fold(f64::NEG_INFINITY, f64::max);
+    assert!((h - (base + 12.0)).abs() < 1e-9);
+}
+
+/// [112] Achsraster mit `show3d` erscheint als Boden-Spur (eine Strecke je Achse), ohne Flag nicht.
+#[test]
+fn achsraster_im_3d_nur_mit_flag() {
+    let mk = |show: serde_json::Value| -> Project {
+        serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+            "drawingLevels": [{"id": "F", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 1.0}],
+            "drawings2d": [{"id": "G", "type": "drawing2d", "levelId": "F", "categoryCode": "20", "geom": {"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+                "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 4}], "b": [{"label": "A", "pos": 0}], "show3d": show}}]
+        }))
+        .unwrap()
+    };
+    assert!(drawing_line_verts(&mk(serde_json::json!(false))).is_empty());
+    let v = drawing_line_verts(&mk(serde_json::json!(true)));
+    // 3 Achsen × 1 Segment × 2 Endpunkte × 6 Zahlen.
+    assert_eq!(v.len(), 3 * 2 * 6);
+    assert!((v[1] - 1.01).abs() < 1e-4, "Höhe = Geschoss-UK + 0.01: {}", v[1]);
+}
+
+/// Walmdach 12×7 m: zwei Trapeze + zwei Walm-Dreiecke, First (3,3)-(8,3).
+fn walm_planes() -> Vec<Vec<V3>> {
+    vec![
+        vec![[-0.5, -0.5, 5.2], [11.5, -0.5, 5.2], [8.0, 3.0, 7.061], [3.0, 3.0, 7.061]],
+        vec![[-0.5, 6.5, 5.2], [11.5, 6.5, 5.2], [8.0, 3.0, 7.061], [3.0, 3.0, 7.061]],
+        vec![[-0.5, -0.5, 5.2], [-0.5, 6.5, 5.2], [3.0, 3.0, 7.061]],
+        vec![[11.5, -0.5, 5.2], [11.5, 6.5, 5.2], [8.0, 3.0, 7.061]],
+    ]
+}
+
+fn near(a: V3, b: V3) -> bool {
+    hypot(&[a[0] - b[0], a[1] - b[1], a[2] - b[2]]) < 1e-6
+}
+
+/// [T6]/[114] Gelände in ausgeblendeter Kategorie kommt nicht ins 3D.
+#[test]
+fn gelaende_ausgeblendet_nicht_im_3d() {
+    let t = crate::model::TerrainMesh { id: "t".into(), category_code: Some("02".into()), positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], ..Default::default() };
+    let cat = |visible| crate::model::LayerCategory { code: "02".into(), name: "Gelände".into(), visible, ..Default::default() };
+    let mk = |visible| Project { context: Some(vec![ContextObject::TerrainMesh(t.clone())]), layers: vec![cat(visible)], ..Default::default() };
+    assert_eq!(emit_context_meshes(&mk(true)).len(), 1);
+    assert!(emit_context_meshes(&mk(false)).is_empty());
+    // Elternebene „05 Kontext" aus blendet das Kind „02" mit aus.
+    let parent = |visible| crate::model::LayerCategory { code: "05".into(), name: "Kontext".into(), visible, children: Some(vec![cat(true)]), ..Default::default() };
+    let pp = |visible| Project { layers: vec![parent(visible)], ..mk(true) };
+    assert_eq!(emit_context_meshes(&pp(true)).len(), 1);
+    assert!(emit_context_meshes(&pp(false)).is_empty());
+}
+
+/// [137] 3D-Picken: Dreiecke der Baugrube (Sohle, Böschung) tragen die Id der Baugrube, das übrige
+/// Gelände die des Netzes.
+#[test]
+fn pick_gelaende_und_baugrube_im_3d() {
+    let t = crate::model::TerrainMesh {
+        id: "t".into(),
+        positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0],
+        indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+        ..Default::default()
+    };
+    let v = |x: f64, y: f64| crate::model::Vec2 { x, y };
+    let pit = crate::model::Excavation { id: "bg".into(), outline: vec![v(20.0, 15.0), v(30.0, 15.0), v(30.0, 25.0), v(20.0, 25.0)], bottom: 1.0, ..Default::default() };
+    let p = Project { context: Some(vec![ContextObject::Excavation(pit), ContextObject::TerrainMesh(t)]), ..Default::default() };
+    let g = pick_geometry(&p).unwrap();
+    let of = |id: &str| g.context_meshes.iter().find(|m| m.context_object_id == id).map(|m| m.tris.clone()).unwrap_or_default();
+    let (bg, terr) = (of("bg"), of("t"));
+    assert!(!bg.is_empty() && !terr.is_empty(), "{} {}", bg.len(), terr.len());
+    // Welt (x, z, −y): alle Baugruben-Dreiecke liegen im Wirkbereich (x 18…32, y 13…27), Sohle auf 1 m dabei.
+    for tri in &bg {
+        let (cx, cy) = ((tri[0][0] + tri[1][0] + tri[2][0]) / 3.0, -(tri[0][2] + tri[1][2] + tri[2][2]) / 3.0);
+        assert!((17.0..=33.0).contains(&cx) && (12.0..=28.0).contains(&cy), "{cx} {cy}");
+    }
+    assert!(bg.iter().any(|tri| tri.iter().all(|q| (q[1] - 1.0).abs() < 1e-6)));
+}
+
+/// [137] Stützen sind im 3D anwählbar: ihr Prisma kommt mit Id in die Pick-Geometrie (Welt: x, Höhe, y —
+/// wie render3d `Extrusion`; vorher −y, d. h. gespiegelt zur Darstellung).
+#[test]
+fn pick_stuetzen_im_3d() {
+    let p: Project = serde_json::from_value(serde_json::json!({
+        "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+        "drawingLevels": [{"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0.0}],
+        "columns": [{"id": "k1", "type": "column", "floorId": "EG", "categoryCode": "25", "position": {"x": 2, "y": 3}, "profile": {"kind": "rect", "width": 0.3, "depth": 0.3}, "rotation": 0, "height": 2.5}],
+        "drawings2d": []
+    }))
+    .unwrap();
+    let g = pick_geometry(&p).unwrap();
+    assert_eq!(g.columns.len(), 1);
+    assert_eq!(g.columns[0].column_id, "k1");
+    let v: Vec<&V3> = g.columns[0].tris.iter().flatten().collect();
+    assert!(v.iter().all(|q| (q[0] - 2.0).abs() <= 0.15 + 1e-9 && (q[2] - 3.0).abs() <= 0.15 + 1e-9 && q[1] >= -1e-9 && q[1] <= 2.5 + 1e-9));
+    assert!(v.iter().any(|q| (q[1] - 2.5).abs() < 1e-9));
+}
+
+fn solid_project() -> Project {
+    serde_json::from_value(serde_json::json!({
+        "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+        "drawingLevels": [
+            {"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0.0},
+            {"id": "OG", "name": "OG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 3.0}],
+        "extrudedSolids": [
+            {"id": "s1", "type": "extrudedSolid", "levelId": "OG", "points": [{"x": 1, "y": 2}, {"x": 3, "y": 2}, {"x": 3, "y": 5}, {"x": 1, "y": 5}], "height": 1.5, "baseOffset": 0.5},
+            {"id": "v1", "type": "extrudedSolid", "levelId": "EG", "points": [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 1, "y": 1}], "height": 1.0, "operation": "subtract"}],
+        "drawings2d": []
+    }))
+    .unwrap()
+}
+
+/// [137] Freie Körper sind im 3D anwählbar: Prisma über dem Umriss (Welt x, Höhe, y), UK = Geschoss + Versatz;
+/// Abzugskörper (nur Umriss) nicht. Mit Explosion wandern sie mit ihrem Geschoss.
+#[test]
+fn pick_freie_koerper_im_3d() {
+    let p = solid_project();
+    let g = pick_geometry(&p).unwrap();
+    assert_eq!(g.solids.len(), 1);
+    assert_eq!(g.solids[0].solid_id, "s1");
+    let v: Vec<&V3> = g.solids[0].tris.iter().flatten().collect();
+    assert!(v.iter().all(|q| (1.0 - 1e-9..=3.0 + 1e-9).contains(&q[0]) && (2.0 - 1e-9..=5.0 + 1e-9).contains(&q[2]) && (3.5 - 1e-9..=5.0 + 1e-9).contains(&q[1])));
+    assert!(v.iter().any(|q| (q[1] - 5.0).abs() < 1e-9) && v.iter().any(|q| (q[1] - 3.5).abs() < 1e-9));
+    let e = crate::explode3d::pick_geometry(&p, 2.0).unwrap();
+    let top = e.solids[0].tris.iter().flatten().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max);
+    assert!((top - 7.0).abs() < 1e-9, "{top}");
+}
+
+/// [137] Dachfenster sind im 3D anwählbar (Netz mit Id); das Dach hat dort ein Loch statt der vollen Fläche.
+#[test]
+fn pick_dachfenster_im_3d() {
+    let mut p = sample();
+    p.openings.as_mut().unwrap().push(Opening {
+        id: "DF".into(),
+        kind: ElementKind::Window,
+        width: 0.78,
+        height: 1.18,
+        host_roof_id: Some("RF1".into()),
+        host_point: Some(Vec2 { x: 2.5, y: 1.0 }),
+        ..Default::default()
+    });
+    let g = pick_geometry(&p).unwrap();
+    let df = g.opening_meshes.iter().find(|m| m.opening_id == "DF").expect("Dachfenster in der Pick-Geometrie");
+    assert!(df.tris.len() > 12);
+    // Welt (x, Höhe, y): um den Wirtpunkt (2.5, 1.0).
+    let (cx, cz) = df.tris.iter().flatten().fold((0.0, 0.0), |a, q| (a.0 + q[0], a.1 + q[2]));
+    let n = (df.tris.len() * 3) as f64;
+    assert!((cx / n - 2.5).abs() < 1.0 && (cz / n - 1.0).abs() < 1.5, "{} {}", cx / n, cz / n);
+    assert!(g.roofs.iter().any(|r| r.roof_id == "RF1" && !r.tris.is_empty()));
+}
+
+/// [137] Einzeln ausgeblendetes Gelände (`hidden`) und Gelände einer ausgeblendeten Kategorie fehlen im 3D
+/// und in der Pick-Geometrie; ein zweites Netz bleibt.
+#[test]
+fn gelaende_einzeln_ausblenden() {
+    let mk = |id: &str, hidden: Option<bool>, code: Option<&str>| {
+        ContextObject::TerrainMesh(TerrainMesh {
+            id: id.into(),
+            positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 10.0, 10.0, 1.0],
+            indices: vec![0.0, 1.0, 2.0],
+            hidden,
+            category_code: code.map(Into::into),
+            ..Default::default()
+        })
+    };
+    let mut p = Project { context: Some(vec![mk("a", Some(true), None), mk("b", None, None), mk("c", Some(false), Some("02"))]), ..Default::default() };
+    let ids = |p: &Project| pick_geometry(p).unwrap().context_meshes.iter().map(|m| m.context_object_id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&p), vec!["b", "c"]);
+    assert_eq!(emit_context_meshes(&p).len(), 2);
+    p.layers = serde_json::from_value(serde_json::json!([{"code": "02", "name": "Gelände", "color": "#000000", "visible": false}])).unwrap();
+    assert_eq!(ids(&p), vec!["b"]);
+    assert_eq!(emit_context_meshes(&p).len(), 1);
+}
+
+/// [T4] Import-Mesh glatt: Knickwinkel geht ans 3D (Vorgabe 30°), kantig ohne; JSON `creaseAngle`.
+#[test]
+fn import_mesh_glatt_mit_knickwinkel() {
+    let mesh = |smooth: Option<bool>, crease: Option<f64>| {
+        let m = ImportedMesh { id: "m".into(), positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], smooth_shading: smooth, crease_angle: crease, ..Default::default() };
+        let p = Project { context: Some(vec![ContextObject::ImportedMesh(m)]), ..Default::default() };
+        emit_context_meshes(&p).remove(0)
+    };
+    assert_eq!(mesh(None, Some(45.0)).crease_angle, None);
+    assert_eq!(mesh(Some(true), None).crease_angle, Some(DEFAULT_CREASE_DEG));
+    assert_eq!(mesh(Some(true), Some(12.5)).crease_angle, Some(12.5));
+    assert_eq!(mesh(Some(true), Some(f64::NAN)).crease_angle, Some(DEFAULT_CREASE_DEG));
+    let js = serde_json::to_value(mesh(Some(true), Some(12.5))).unwrap();
+    assert_eq!(js["creaseAngle"], serde_json::json!(12.5));
+    assert!(serde_json::to_value(mesh(None, None)).unwrap().get("creaseAngle").is_none());
+}
+
+#[test]
+fn gehrung_erkennt_first_und_grate_als_geteilt() {
+    let planes = walm_planes();
+    let m = Mitre::new(&planes);
+    assert_eq!(m.shared[0], vec![false, true, true, true]); // Traufe, Grat, First, Grat
+    assert_eq!(m.shared[2], vec![false, true, true]);
+}
+
+#[test]
+fn unterseiten_treffen_sich_am_first_apex() {
+    let planes = walm_planes();
+    let m = Mitre::new(&planes);
+    let d = 0.27;
+    let (a, b, c) = (m.at(0, d)[3], m.at(1, d)[3], m.at(2, d)[2]);
+    assert!(near(a, b) && near(a, c));
+    assert!(a[2] < 7.061);
+    assert_eq!(m.at(0, 0.0), planes[0]);
+    assert!(m.at(0, 0.2)[0][2] < 5.2);
+}
+
+fn sample() -> Project {
+    serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap()
+}
+
+/// [G3] Rundbogen: Füllkörper in Wandfarbe zwischen Rechteck-Loch und Bogen, Rahmen und Glas entlang
+/// des Umrisses; alle Quader innerhalb des Öffnungs-Rechtecks.
+#[test]
+fn formoeffnung_fuellkoerper_rahmen_glas() {
+    let mut p = sample();
+    let plain = emit_opening_meshes(&p, 2.0).len();
+    for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+        o.shape = Some(OpeningShape::Rundbogen);
+    }
+    let meshes = emit_opening_meshes(&p, 2.0);
+    assert_ne!(meshes.len(), plain);
+    let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap();
+    let wall_rgb = resolve_wall_bands(&p, &wall_material_color_maps(&p), w1, false).0[0].color;
+    let fills: Vec<&RMesh> = meshes.iter().filter(|m| m.color == wall_rgb).collect();
+    assert!(fills.len() >= 10, "Bogenzwickel als Streifen: {}", fills.len());
+    let (zb, _) = p.wall_vertical_extent(w1);
+    // O1: x 3…4 an der Wand y = 0, Brüstung 0,9, Höhe 1,2: Füllung nur über dem Kämpfer (0,7).
+    for m in &fills {
+        for c in m.positions.chunks_exact(3) {
+            assert!(c[0] > 3.0 - 1e-9 && c[0] < 4.0 + 1e-9 && c[2] >= zb + 0.9 + 0.7 - 1e-9 && c[2] <= zb + 2.1 + 1e-9, "{c:?}");
+        }
+    }
+    assert!(meshes.iter().any(|m| m.color == PART_RGB[0]) && meshes.iter().any(|m| m.color == PART_RGB[1]));
+}
+
+/// [103] Dachfenster: jede Dachschicht bleibt ein geschlossener Körper mit Loch; Fensterteile kommen dazu.
+#[test]
+fn dachfenster_schneidet_alle_schichten() {
+    let mut p = sample();
+    let before = emit_roofs(&p, None).unwrap();
+    p.openings.as_mut().unwrap().push(Opening {
+        id: "DF".into(),
+        kind: ElementKind::Window,
+        width: 0.78,
+        height: 1.18,
+        host_roof_id: Some("RF1".into()),
+        host_point: Some(Vec2 { x: 2.5, y: 1.0 }),
+        ..Default::default()
+    });
+    let after = emit_roofs(&p, None).unwrap();
+    assert_eq!(before.len(), after.len());
+    for m in &after {
+        assert!(crate::wall_mesh_cut::is_watertight(&m.positions, &m.indices, 1e-6), "Schicht dicht");
+    }
+    let vol = |ms: &[RMesh]| ms.iter().map(|m| crate::export_flat::mesh_volume(&m.positions, &m.indices)).sum::<f64>();
+    let removed = vol(&before) - vol(&after);
+    let t: f64 = p.roof_layers(&p.roofs.as_ref().unwrap()[0]).iter().map(|l| l.thickness).sum();
+    assert!((removed - 0.78 * 1.18 * t).abs() < 1e-6, "Loch = Fläche × Dicke: {removed}");
+    let parts = emit_opening_meshes(&p, 2.0).len() - emit_opening_meshes(&sample(), 2.0).len();
+    assert!(parts >= 9, "Rahmen, Glas, Eindeckrahmen: {parts}");
+    let layers = emit_roof_cut_layers(&p).unwrap().len();
+    assert!(layers > emit_roof_cut_layers(&sample()).unwrap().len());
+}
+
+/// Flachdach auf L-Umriss ([148]): Körper = L × Dachaufbau (nicht Bounding-Box), jede Schicht dicht;
+/// ein Dachfenster genau über der Fuge zweier Teilflächen schneidet beide, Laibung nur einmal.
+#[test]
+fn flachdach_l_volumen_und_dachfenster_ueber_der_fuge() {
+    let mut p = sample();
+    let l = [(0.0, 0.0), (11.0, 0.0), (11.0, 4.0), (8.0, 4.0), (8.0, 6.0), (0.0, 6.0)];
+    {
+        let r = &mut p.roofs.as_mut().unwrap()[0];
+        r.outline = l.iter().map(|&(x, y)| Vec2 { x, y }).collect();
+        r.shape = crate::model::RoofShape::Flach;
+        r.pitch_deg = 0.0;
+        r.overhang = 0.0;
+        r.overhang_gable = None;
+    }
+    let t: f64 = p.roof_layers(&p.roofs.as_ref().unwrap()[0]).iter().map(|l| l.thickness).sum();
+    let vol = |ms: &[RMesh]| ms.iter().map(|m| crate::export_flat::mesh_volume(&m.positions, &m.indices)).sum::<f64>();
+    let before = emit_roofs(&p, None).unwrap();
+    assert!((vol(&before) - 60.0 * t).abs() < 1e-6, "L-Fläche × Dicke: {} statt {}", vol(&before), 60.0 * t);
+    for m in &before {
+        assert!(crate::wall_mesh_cut::is_watertight(&m.positions, &m.indices, 1e-6), "Schicht dicht");
+        assert!(m.positions.chunks_exact(3).all(|c| !(c[0] > 8.0 + 1e-9 && c[1] > 4.0 + 1e-9)), "nichts über der Aussparung");
+    }
+    // Fuge = gemeinsame Kante zweier Teilflächen; Dachfenster mitten darauf.
+    let g = crate::roof::roof_geometry(&p.roofs.as_ref().unwrap()[0].params(), 0.0);
+    assert!(g.planes.len() >= 2);
+    let (a, b) = (0..g.planes.len())
+        .flat_map(|i| (0..g.planes[i].len()).map(move |k| (i, k)))
+        .find_map(|(i, k)| {
+            let pl = &g.planes[i];
+            let (u, v) = (pl[k], pl[(k + 1) % pl.len()]);
+            g.planes.iter().enumerate().any(|(j, q)| j != i && q.contains(&u) && q.contains(&v)).then_some((u, v))
+        })
+        .expect("Fuge");
+    let mid = Vec2 { x: (a[0] + b[0]) / 2.0, y: (a[1] + b[1]) / 2.0 };
+    p.openings.as_mut().unwrap().push(Opening { id: "DF".into(), kind: ElementKind::Window, width: 0.6, height: 0.6, host_roof_id: Some("RF1".into()), host_point: Some(mid), ..Default::default() });
+    let after = emit_roofs(&p, None).unwrap();
+    for m in &after {
+        assert!(crate::wall_mesh_cut::is_watertight(&m.positions, &m.indices, 1e-6), "Schicht mit Loch über der Fuge dicht");
+    }
+    let removed = vol(&before) - vol(&after);
+    assert!((removed - 0.36 * t).abs() < 1e-6, "Loch = Fläche × Dicke: {removed}");
+}
+
+/// [103] Deckenöffnung: Aussparung im Slab.
+#[test]
+fn deckenoeffnung_im_slab() {
+    let mut p = sample();
+    let n0: usize = emit_slabs(&p).iter().map(|s| s.outline.len()).sum();
+    p.openings.as_mut().unwrap().push(Opening { id: "DO".into(), kind: ElementKind::Window, width: 1.0, height: 1.0, host_ceiling_id: Some("C1".into()), host_point: Some(Vec2 { x: 2.0, y: 2.0 }), ..Default::default() });
+    let n1: usize = emit_slabs(&p).iter().map(|s| s.outline.len()).sum();
+    assert!(n1 > n0, "Loch-Ring eingebunden");
+}
+
+#[test]
+fn beispielprojekt_hat_decken_und_gueltige_farben() {
+    let p: Project = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+    let slabs = emit_slabs(&p);
+    assert!(!slabs.is_empty());
+    assert!(slabs.iter().all(|s| s.z_top > s.z_bottom && s.outline.len() >= 3));
+}
+
+/// Dachkörper einer Schicht (Versatz `d0` bis `d1` unter der Oberkante) wie in `emit_roofs`.
+fn roof_slab_closed(planes: &[Vec<V3>], d0: f64, d1: f64) -> bool {
+    let mitre = Mitre::new(planes);
+    let (mut positions, mut indices) = (Vec::new(), Vec::new());
+    for (i, plane) in planes.iter().enumerate() {
+        if plane.len() >= 3 {
+            push_roof_slab_between(&mut positions, &mut indices, &mitre.at(i, d0), &mitre.at(i, d1), &mitre.shared[i]);
+        }
+    }
+    crate::wall_mesh_cut::is_watertight(&positions, &indices, 1e-6)
+}
+
+/// [G9] Gehrung an Punkten mit mehr als zwei Dachflächen (Zeltspitze auf Rechteck mit zwei
+/// Neigungen, Kehlpunkte, konvexe Teilstücke einer Skelett-Fläche, Mansardknick): jede
+/// Dachschicht ist ein geschlossener Körper. Vorher klafften dort Lücken (Zelt 7×5 m:
+/// 1.1e-3 m², Walm auf L: 0.77 m²).
+#[test]
+fn g9_dachschichten_geschlossen() {
+    use crate::roof::{roof_geometry, MansardType, RoofParams, Shape};
+    use crate::roof_skeleton::Axis;
+    let l = vec![[0.0, 0.0], [11.0, 0.0], [11.0, 4.0], [8.0, 4.0], [8.0, 6.0], [0.0, 6.0]];
+    let u = vec![[0.0, 0.0], [12.0, 0.0], [12.0, 9.0], [8.0, 9.0], [8.0, 4.0], [4.0, 4.0], [4.0, 9.0], [0.0, 9.0]];
+    let rect = vec![[0.0, 0.0], [7.0, 0.0], [7.0, 5.0], [0.0, 5.0]];
+    let star = vec![[0.0, 0.0], [8.0, 0.0], [10.0, 5.0], [4.0, 3.0], [-2.0, 5.0]];
+    let skew = vec![[0.0, 0.0], [10.0, 0.0], [13.0, 5.0], [3.0, 5.0]];
+    let shapes = [
+        (Shape::Walm, MansardType::Giebel),
+        (Shape::Zelt, MansardType::Giebel),
+        (Shape::Sattel, MansardType::Giebel),
+        (Shape::Mansarde, MansardType::Giebel),
+        (Shape::Mansarde, MansardType::Walm),
+        (Shape::Mansarde, MansardType::Zelt),
+    ];
+    for outline in [&rect, &l, &u, &star, &skew] {
+        for (shape, mt) in shapes {
+            for axis in [Axis::X, Axis::Y] {
+                let p = RoofParams {
+                    outline: outline.clone(),
+                    shape,
+                    pitch_deg: 35.0,
+                    pitch_upper_deg: None,
+                    mansard_type: mt,
+                    mansard_knee_ratio: None,
+                    half_hip_ratio: None,
+                    overhang: 0.5,
+                    overhang_gable: None,
+                    ridge_axis: axis,
+                    holes: vec![],
+                    edge_pitch_deg: None,
+                };
+                let g = roof_geometry(&p, 6.0);
+                for (d0, d1) in [(0.0, 0.3), (0.3, 0.42)] {
+                    assert!(roof_slab_closed(&g.planes, d0, d1), "{outline:?} {shape:?} {mt:?} {axis:?} {d0}–{d1}");
+                }
+            }
+        }
+    }
+}
+/// [26] Dächer mit Innenhof und Neigung je Kante: jede Dachschicht ist ein geschlossener Körper
+/// (auch an den Hofkanten, mit Giebeln und verschieden geneigten Kanten).
+#[test]
+fn dachschichten_mit_hof_und_kantenneigung_geschlossen() {
+    use crate::roof::{roof_geometry, MansardType, RoofParams, Shape};
+    use crate::roof_skeleton::Axis;
+    let big = vec![[0.0, 0.0], [12.0, 0.0], [12.0, 8.0], [0.0, 8.0]];
+    let court = vec![[4.0, 2.0], [4.0, 6.0], [8.0, 6.0], [8.0, 2.0]];
+    let tri = vec![[2.0, 1.5], [2.0, 3.5], [3.5, 2.5]];
+    let variants: Vec<(Vec<Vec<[f64; 2]>>, Option<Vec<Option<f64>>>)> = vec![
+        (vec![court.clone()], None),
+        (vec![court.clone(), vec![[9.0, 2.0], [9.0, 4.0], [11.0, 4.0], [11.0, 2.0]]], None),
+        (vec![tri], None),
+        (vec![], Some(vec![Some(20.0), Some(50.0), Some(30.0), Some(60.0)])),
+        (vec![court.clone()], Some(vec![Some(20.0), None, Some(-1.0), Some(45.0), Some(10.0)])),
+        (vec![], Some(vec![Some(-1.0), None, Some(-1.0), None])),
+    ];
+    for (holes, edges) in variants {
+        for (shape, mt) in [(Shape::Walm, MansardType::Giebel), (Shape::Zelt, MansardType::Giebel), (Shape::Sattel, MansardType::Giebel), (Shape::Mansarde, MansardType::Giebel), (Shape::Mansarde, MansardType::Walm)] {
+            for overhang in [0.0, 0.4] {
+                let p = RoofParams {
+                    outline: big.clone(),
+                    shape,
+                    pitch_deg: 35.0,
+                    pitch_upper_deg: None,
+                    mansard_type: mt,
+                    mansard_knee_ratio: None,
+                    half_hip_ratio: None,
+                    overhang,
+                    overhang_gable: None,
+                    ridge_axis: Axis::X,
+                    holes: holes.clone(),
+                    edge_pitch_deg: edges.clone(),
+                };
+                let g = roof_geometry(&p, 6.0);
+                assert!(!g.planes.is_empty());
+                // Mansarde mit Hof UND verschieden geneigten Kanten: die zweite Schicht (Versatz bis 0.42 m)
+                // ist dort schmaler als der Versatz — bekannte Grenze, nur die erste Schicht prüfen.
+                let layers: &[(f64, f64)] = if shape == Shape::Mansarde && !holes.is_empty() && edges.is_some() { &[(0.0, 0.3)] } else { &[(0.0, 0.3), (0.3, 0.42)] };
+                for &(d0, d1) in layers {
+                    assert!(roof_slab_closed(&g.planes, d0, d1), "{holes:?} {edges:?} {shape:?} {mt:?} oh {overhang} {d0}–{d1}");
+                }
+            }
+        }
+    }
+}
+
+/// [95] Taschen-Schiebetür: der Hohlraum (Blattbreite + 5 cm × 7 cm × Türhöhe) fehlt im Wandkörper,
+/// geschichtet wie einschichtig; Tasche auf der Bandseite.
+#[test]
+fn tasche_aus_dem_wandkoerper_ausgeschnitten() {
+    use crate::plan::walls::tests::pocket_project;
+    let vol = |ws: &[RWall]| -> f64 {
+        ws.iter().map(|w| wall_piece_volume(w) - w.holes.as_deref().unwrap_or(&[]).iter().map(|h| (h.to - h.from) * (h.z_top - h.z_bottom) * w.thickness).sum::<f64>()).sum()
+    };
+    for layered in [false, true] {
+        let full = vol(&emit_walls(&pocket_project(DoorTypeKind::Schiebe, None, 1.0), layered).unwrap());
+        for (hinge, x_pocket, x_other) in [(None, 0.5, 2.5), (Some(OpeningHinge::End), 2.4, 0.5)] {
+            let ws = emit_walls(&pocket_project(DoorTypeKind::Tasche, hinge, 1.0), layered).unwrap();
+            let v = vol(&ws);
+            assert!((full - v - 0.95 * 0.07 * 2.0).abs() < 1e-9, "{layered} {full} {v}");
+            // Wandmitte (y = 0): in der Tasche kein Körper bis zur Türhöhe, darüber schon.
+            let solid_at = |x: f64, z: f64| {
+                ws.iter().any(|w| {
+                    let lo_hi = |a: f64, b: f64| (a.min(b), a.max(b));
+                    let (x0, x1) = lo_hi(w.start[0], w.end[0]);
+                    x0 < x && x < x1 && w.start[1].abs() < w.thickness / 2.0 && w.base_elevation < z && z < w.base_elevation + w.height
+                })
+            };
+            assert!(!solid_at(x_pocket, 1.0), "{layered} {hinge:?}");
+            assert!(solid_at(x_pocket, 2.3), "{layered} {hinge:?}");
+            assert!(solid_at(x_other, 1.0), "{layered} {hinge:?}");
+        }
+        let ws = emit_walls(&pocket_project(DoorTypeKind::Tasche, None, 2.0), layered).unwrap();
+        assert!((full - vol(&ws) - 2.0 * 0.5 * 0.07 * 2.0).abs() < 1e-9, "zweiflügelig {layered}");
+    }
+}
+
+/// [95][T2] Tasche in der Bogenwand (entlang der Sehnen-Teilkörper, Länge = Achsmass) und unter
+/// schräger Oberkante (Dachanschluss, `top_plane`/`top_drop`): Volumen −Hohlraum wie gerade.
+#[test]
+fn tasche_in_bogenwand_und_unter_dach() {
+    use crate::plan::walls::tests::{pocket_project_with, POCKET_BULGE};
+    let vol = |ws: &[RWall]| -> f64 {
+        ws.iter().map(|w| wall_piece_volume(w) - w.holes.as_deref().unwrap_or(&[]).iter().map(|h| (h.to - h.from) * (h.z_top - h.z_bottom) * w.thickness).sum::<f64>()).sum()
+    };
+    for (bulge, roof, tol) in [(Some(POCKET_BULGE), false, 2e-4), (None, true, 1e-9)] {
+        for layered in [false, true] {
+            for (hinge, leaves, k) in [(None, 1.0, 0.95), (Some(OpeningHinge::End), 1.0, 0.95), (None, 2.0, 1.0)] {
+                let full = emit_walls(&pocket_project_with(DoorTypeKind::Schiebe, hinge, leaves, bulge, roof), layered).unwrap();
+                if roof {
+                    assert!(full.iter().any(|w| w.top_plane.is_some() && w.top_drop.is_some()), "schräge Oberkante");
+                }
+                let ws = emit_walls(&pocket_project_with(DoorTypeKind::Tasche, hinge, leaves, bulge, roof), layered).unwrap();
+                let d = vol(&full) - vol(&ws);
+                assert!((d - k * 0.07 * 2.0).abs() < tol, "{bulge:?} {roof} {layered} {hinge:?} {leaves}: {d}");
+                // Unter dem Dach: Oberkante der Teilkörper weiter auf der Dachebene (nicht über die Ursprungshöhe).
+                for w in ws.iter().filter(|w| w.top_plane.is_some()) {
+                    let fp = wall_footprint(w).unwrap();
+                    let top = fp.iter().map(|q| wall_top_at(w, *q)).fold(f64::MIN, f64::max);
+                    assert!(top <= w.base_elevation + w.height + 1e-9 && top > 2.0, "{w:?}");
+                }
+            }
+        }
+    }
+}
+
+fn pick_base(extra: serde_json::Value) -> Project {
+    let mut v = serde_json::json!({
+        "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+        "drawingLevels": [{"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 1.0}],
+        "drawings2d": []
+    });
+    for (k, x) in extra.as_object().unwrap() {
+        v[k] = x.clone();
+    }
+    serde_json::from_value(v).unwrap()
+}
+
+/// [137] Treppengeländer sind im 3D anwählbar: Handlauf-Dreiecke tragen die Treppen-Id und reichen über die Hülle.
+#[test]
+fn pick_treppengelaender_im_3d() {
+    let mk = |railing: &str| {
+        pick_base(serde_json::json!({
+            "stairTypes": [{"id": "t", "name": "T", "structure": "massiv", "closedRisers": false, "treadThickness": 0.04, "railing": railing, "defaultWidth": 1.0}],
+            "stairs": [{"id": "s1", "type": "stair", "floorId": "EG", "categoryCode": "35", "shape": "straight", "start": {"x": 0, "y": 0}, "dir": {"x": 1, "y": 0},
+                "runLength": 3.0, "width": 1.0, "stepCount": 16, "totalRise": 2.8, "typeId": "t"}]
+        }))
+    };
+    assert!(pick_geometry(&mk("keine")).unwrap().stair_meshes.is_empty());
+    let g = pick_geometry(&mk("beide")).unwrap();
+    assert_eq!(g.stair_meshes.len(), 1);
+    assert_eq!(g.stair_meshes[0].stair_id, "s1");
+    assert!(!g.stair_meshes[0].tris.is_empty());
+    let top = g.stair_meshes[0].tris.iter().flatten().map(|q| q[1]).fold(f64::MIN, f64::max);
+    assert!(top > g.stairs[0].z_top, "Geländer über der OK der Treppe: {top} > {}", g.stairs[0].z_top);
+}
+
+/// [137] Kreis, Bogen und Text (Bäume, Symbole) bekommen flache Pick-Flächen auf Geschosshöhe.
+#[test]
+fn pick_kreis_bogen_text_im_3d() {
+    let d = |id: &str, geom: serde_json::Value| serde_json::json!({"id": id, "type": "drawing2d", "levelId": "EG", "categoryCode": "20", "geom": geom});
+    let p = pick_base(serde_json::json!({"drawings2d": [
+        d("c", serde_json::json!({"shape": "circle", "center": {"x": 2, "y": 3}, "r": 1.5})),
+        d("a", serde_json::json!({"shape": "arc", "center": {"x": 10, "y": 0}, "r": 2.0, "a0": 0.0, "a1": std::f64::consts::FRAC_PI_2})),
+        d("t", serde_json::json!({"shape": "text", "at": {"x": 20, "y": 0}, "text": "Baum", "height": 0.5, "angle": 0.0})),
+        d("l", serde_json::json!({"shape": "line", "a": {"x": 0, "y": 0}, "b": {"x": 1, "y": 0}}))
+    ]}));
+    let g = pick_geometry(&p).unwrap();
+    let ids: Vec<&str> = g.drawing_meshes.iter().map(|m| m.drawing_id.as_str()).collect();
+    assert_eq!(ids, ["c", "a", "t"]);
+    for m in &g.drawing_meshes {
+        assert!(m.tris.iter().flatten().all(|q| (q[1] - 1.01).abs() < 1e-9), "Geschosshöhe + EPS");
+    }
+    // Scheibe: Mittelpunkt (2, 3) liegt in einem Dreieck, ein Punkt ausserhalb nicht.
+    let inside = |tris: &[Tri], x: f64, z: f64| {
+        tris.iter().any(|t| {
+            let s = |a: V3, b: V3| (b[0] - a[0]) * (z - a[2]) - (b[2] - a[2]) * (x - a[0]);
+            let (d1, d2, d3) = (s(t[0], t[1]), s(t[1], t[2]), s(t[2], t[0]));
+            !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
+        })
+    };
+    assert!(inside(&g.drawing_meshes[0].tris, 2.5, 3.5) && !inside(&g.drawing_meshes[0].tris, 4.0, 3.0));
+    // Bogen: auf dem Bogen ja, im Zentrum nein.
+    assert!(inside(&g.drawing_meshes[1].tris, 10.0 + 2.0 * 0.5f64.sqrt(), 2.0 * 0.5f64.sqrt()) && !inside(&g.drawing_meshes[1].tris, 10.0, 0.0));
+    // Text: 4 Zeichen · 0.6 · 0.5 = 1.2 m breit.
+    assert!(inside(&g.drawing_meshes[2].tris, 21.0, 0.2) && !inside(&g.drawing_meshes[2].tris, 22.0, 0.2));
+}
+
+/// [137] Einzeln ausgeblendetes importiertes Netz: weder im 3D noch als Pick-Dreiecke.
+#[test]
+fn importiertes_netz_einzeln_ausgeblendet() {
+    let mk = |hidden: Option<bool>| Project {
+        context: Some(vec![ContextObject::ImportedMesh(ImportedMesh { id: "m".into(), hidden, positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], ..Default::default() })]),
+        ..Default::default()
+    };
+    assert_eq!(emit_context_meshes(&mk(None)).len(), 1);
+    assert_eq!(pick_geometry(&mk(None)).unwrap().context_meshes.len(), 1);
+    assert!(emit_context_meshes(&mk(Some(true))).is_empty());
+    assert!(pick_geometry(&mk(Some(true))).unwrap().context_meshes.is_empty());
+}

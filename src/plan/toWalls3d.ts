@@ -66,7 +66,7 @@ export type { RVec2, RRgb, RWall, RSlab, RModel3d };
  * Boden-Spuren aller 2D-Zeichnungen (Linie, Polylinie, Rechteck) als LineList-Vertices
  * `[px, py, pz, r, g, b]` in Welt-Metern für render3d (`set_drawing_lines`, Binärkanal — ein
  * Kataster-DXF kann Millionen Segmente liefern, als JSON-Mesh sprengte das Speicher und
- * String-Länge). Rechnet der Kern (`model3d.rs`, Chargen).
+ * String-Länge). Rechnet der Kern (`model3d/drawings.rs`, Chargen).
  */
 export function emitDrawingLineVerts(
   project: Project,
@@ -100,7 +100,7 @@ export function emitSurfacePatternLines(
 /**
  * Nur die Wände (Rückwärts-Kompatibilität / bestehende Aufrufer). Zerlegt Wände mit Öffnungen in
  * Teilquader bzw. (layered) in Schicht-Bänder. Rechnet der Kern auf dem Projekt-Dokument
- * (`model3d.rs`: Verschneidung je Geschoss, Bänder, Öffnungen, Decken-/Dach-Dominanz).
+ * (`model3d/`: Verschneidung je Geschoss, Bänder, Öffnungen, Decken-/Dach-Dominanz).
  */
 export function projectToWalls3d(project: Project, layered = true): RWall[] {
   return documentFor(project).query<RWall[]>("walls", [layered ? 1 : 0]);

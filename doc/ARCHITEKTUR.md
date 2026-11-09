@@ -280,21 +280,22 @@ Text-Bearbeitung. Läuft kein GPU-Weg, zeichnet dieselbe Ebene den ganzen Plan (
 2. `computeSection()` in `src/plan/toSection.ts` baut vorab die Netze freier Körper über truck
    (asynchron, mit Cache) und gibt sie flach weiter. Senkrechte Abzugsprismen rechnet der Kern selbst.
 3. `generateSectionPlan()` fragt `queryBin("sectionPlan", …)`. Im Kern: `section_plan_buf()` in
-   `src-tauri/core/src/plan/section.rs`. Ein Cache merkt sich die letzten Schnitte, damit Umschalten von
-   Schwarz-Weiss oder verdeckten Kanten nicht neu rechnet.
-4. `compute_section()` ist die eigentliche Rechnung:
+   `src-tauri/core/src/plan/section/query.rs`. Ein Cache merkt sich die letzten Schnitte, damit Umschalten von
+   Schwarz-Weiss oder verdeckten Kanten nicht neu rechnet. Der Schnitt liegt im Ordner `plan/section/`
+   (Übersicht der Dateien: `src-tauri/core/src/plan/README.md`).
+4. `compute_section()` (`plan/section/mod.rs`) ist die eigentliche Rechnung:
    - Wände, Decken, Treppen und Stützen als Prismen aus dem 3D-Modell (`model3d::emit_walls_with()`,
      `emit_slabs()`, `emit_stairs()`, `column_slabs()`).
    - Analytischer Schnitt dieser Prismen mit der Ebene: `render3d::section::cut_polygons()`
      (`src-tauri/render3d/src/section.rs`).
-   - Dächer, Bogenwände, Schicht-Bänder mit Stil (`attach_cut_styles()`), Dominanz zwischen Bauteilen
-     nach Priorität (`subtract_dominant_bands()`, gemeinsame Fassung in
-     `src-tauri/hatchgen/src/section_dominance.rs`), Monolith-Vereinigung, Abzugskörper, Körper,
-     importierte Netze, Gelände.
-   - Projektion hinter der Ebene mit exakter Sichtbarkeit (`projection_edges()`, Hidden-Line-Removal in
-     `src-tauri/core/src/hlr.rs`).
-5. `section_primitives_at()` macht daraus Primitive (Massstabsregeln wie `solid_cut()`), dazu
-   geschnittene Fenster und Türen (`section_opening_primitives()`), Bäume, Achsraster
+   - Dächer, Bogenwände, Schicht-Bänder mit Stil (`attach_cut_styles()` in `bands.rs`), Dominanz zwischen
+     Bauteilen nach Priorität (`subtract_dominant_bands()`, gemeinsame Fassung in
+     `src-tauri/hatchgen/src/section_dominance.rs`), Monolith-Vereinigung (`shapes.rs`), Abzugskörper
+     (`voids.rs`), Körper, importierte Netze, Gelände (`meshes.rs`).
+   - Projektion hinter der Ebene mit exakter Sichtbarkeit (`projection_edges()` in `projection.rs`,
+     Hidden-Line-Removal in `src-tauri/core/src/hlr.rs`).
+5. `section_primitives_at()` (`primitives.rs`) macht daraus Primitive (Massstabsregeln wie `solid_cut()`), dazu
+   geschnittene Fenster und Türen (`section_opening_primitives()` in `openings.rs`), Bäume, Achsraster
    (`plan/grid_view.rs`). Ausgabe ist wieder ein Plan-Puffer; ab hier gelten die Ausgaben aus 3.4.
 
 ---
@@ -321,11 +322,14 @@ Text-Bearbeitung. Läuft kein GPU-Weg, zeichnet dieselbe Ebene den ganzen Plan (
    (`ProjectDocument.model3dPartsKeyed()`, Abfrage `model3dPartsDelta`). Im Kern:
    `run_doc()` in `queries.rs` → `Document::model3d_parts()` → `src-tauri/core/src/model3d_cache.rs`
    (Cache je Wand und je Öffnung, TODO `[58]`), das für alles Ungültige die `emit_*`-Funktionen aus
-   `src-tauri/core/src/model3d.rs` aufruft (ohne Cache: `model3d::parts()`).
-3. `model3d.rs` speist die Geometrie-Module aus dem Projekt: Wände mit Wandknoten (`joins.rs`) und
-   Schicht-Bändern (`wall_bands.rs`), Decken (`ceilings3d.rs`), Öffnungen (`openings3d.rs`), Treppen
-   (`stairs3d.rs`), Stützen (`columns3d.rs`), Dächer (`emit_roofs()`, Dach an Dach und Gauben über
-   Manifold in `roof_assembly.rs`), Kontext-Netze.
+   dem Ordner `src-tauri/core/src/model3d/` aufruft (ohne Cache: `model3d::parts()` in `model3d/mod.rs`).
+3. `model3d/` speist die Geometrie-Module aus dem Projekt, je Bauteil eine Datei: Wände mit Wandknoten
+   (`joins.rs`) und Schicht-Bändern (`wall_bands.rs`) in `model3d/walls.rs`, Decken (`ceilings3d.rs`) in
+   `model3d/ceilings.rs`, Öffnungen (`openings3d.rs`) in `model3d/openings.rs`, Treppen (`stairs3d.rs`) in
+   `model3d/stairs.rs`, Stützen (`columns3d.rs`) und Bäume in `model3d/columns.rs`, Dächer (`emit_roofs()`
+   in `model3d/roofs.rs`, Dach an Dach und Gauben über Manifold in `roof_assembly.rs`), Kontext-Netze
+   (`model3d/context.rs`), Boden-Spuren der Zeichnungen (`model3d/drawings.rs`), Pick-Geometrie
+   (`model3d/pick.rs`).
 4. Die Teile reisen als JSON. `src/viewport/model3dPartsSync.ts` schickt nur neue, geänderte und
    entfernte Teile an render3d (`set_parts()` in `src-tauri/render3d/src/web.rs`). Dort baut
    `scene.rs` die Szene aus Teilen, `mesh.rs` extrudiert Wände und Platten zu Dreiecksnetzen,
@@ -336,7 +340,7 @@ Text-Bearbeitung. Läuft kein GPU-Weg, zeichnet dieselbe Ebene den ganzen Plan (
 6. Headless-Bilder (nur macOS, braucht Metal): `dossier-cli … model3d --out m.json`, dann
    `render_png` (siehe `CLAUDE.md`, „Ergebnis ansehen").
 
-Schnitt und Ansicht nutzen dieselben Prismen aus `model3d.rs`. Eine Änderung an der 3D-Ableitung einer
+Schnitt und Ansicht nutzen dieselben Prismen aus `model3d/`. Eine Änderung an der 3D-Ableitung einer
 Wand wirkt deshalb oft auch dort.
 
 ---
@@ -561,7 +565,7 @@ dort steht, was fehlt; was schon versucht wurde, steht im Archiv (`doc/archiv/TO
    Dateien: `src/panels/host.ts`, `src/state/usePanelHostBase.ts`, Messung `e2e/renderCount.spec.ts`.
 6. **Abzugskörper in der Ansicht** (Rest aus `[G8]`). Grundriss, Schnitt und 3D sparen Abzugskörper aus,
    die Ansicht noch nicht. Dateien: `src-tauri/core/src/plan/elevation.rs`, `src-tauri/core/src/voids.rs`;
-   Vorbild `subtract_voids_in_section()` in `plan/section.rs`.
+   Vorbild `subtract_voids_in_section()` in `plan/section/voids.rs`.
 7. **Polygon-Dominanz im 3D-Live-Schnitt** (Rest aus `[G6]`). Der 2D-Schnitt beschneidet schräge
    Schicht-Bänder über Polygon-Booleans, der 3D-Live-Schnitt nur Rechtecke.
    Dateien: `src-tauri/render3d/src/section_boolean.rs`, `src-tauri/hatchgen/src/section_dominance.rs`.
@@ -580,7 +584,8 @@ deutscher Nachricht, die mit der TODO-Nummer beginnt; `TODO.md` im selben Commit
 
 ### Grosse Dateien (über 2000 Zeilen)
 
-Stand 8.11.2026, ohne Build-Ausgaben. Nur Vorschläge; nichts davon ist beschlossen. Rust-Tests stehen
+Stand 8.11.2026, ohne Build-Ausgaben. Nur Vorschläge; nichts davon ist beschlossen. Erledigt (`[162]`, 9.11.):
+`plan/section.rs` → Ordner `plan/section/`, `model3d.rs` → Ordner `model3d/`. Rust-Tests stehen
 meist als `mod tests` am Dateiende; sie in eine eigene Datei `<name>_tests.rs` zu verschieben, ist der
 einfachste erste Schritt (Muster: `drawing_recognize_tests.rs`, `plan/wall_join_tests.rs`).
 
@@ -588,12 +593,10 @@ einfachste erste Schritt (Muster: `drawing_recognize_tests.rs`, `plan/wall_join_
 |---|---|---|
 | `src/styles.css` | 8827 | Je Bereich eine Datei (Panels, Plan-Ansicht, Dialoge, Befehlszeile, Blätter), in `src/main.tsx` importiert. |
 | `src-tauri/core/src/model/generated.rs` | 6089 | Nach Fachgebiet teilen (Bauteile, Typen und Stile, Ebenen und Ansichten, Layouts, Kontext), Wiederexport in `model/mod.rs`. Name „generated" ist irreführend; die Datei wird von Hand gepflegt. |
-| `src-tauri/core/src/plan/section.rs` | 5054 | Ordner `plan/section/`: Besitzer und Stil der Bänder (`attach_cut_styles()`, `split_wall_layers()`), Aussparungen (Abzugskörper, Taschen, Körper), Netze und Gelände, Projektion (`projection_edges()`), Primitive (`section_primitives_at()`), geschnittene Öffnungen (`section_opening_primitives()`), Abfrage und Cache. Tests (rund 1500 Zeilen) auslagern. |
 | `src/views/plan/PlanView.tsx` | 3902 | Weitere Hooks herauslösen: Engine-Wahl und GPU-Brücke, Picken und Marquee, Kamera und Zoom, SVG-Überlagerung. Teile liegen schon in `src/views/plan/planView/`. |
 | `src/model/types.generated.ts` | 3844 | Erzeugt; nicht teilen. Folgt einer Teilung von `generated.rs` nicht zwingend. |
 | `src-tauri/fileio/src/ifc_export.rs` | 3656 | Entitäten und GUIDs, Typen mit Materialschichten, Psets und Mengen, Beziehungen, Klassifikation; Tests (rund 1200 Zeilen) auslagern. |
 | `src/i18n/de.ts`, `src/i18n/en.ts` | 3587, 3571 | Nach Präfix (`cmd.*`, `panel.*`, `menu.*` …) in Teil-Wörterbücher, zusammengeführt in `src/i18n/translate.ts`. Vorher klären, ob parallele Arbeit damit leichter oder schwerer wird. |
-| `src-tauri/core/src/model3d.rs` | 3562 | Ordner `model3d/`: Wände (Knoten, Teile, Taschen), Öffnungen, Treppen, Dächer, Kontext, Pick-Geometrie; `parts()` im `mod.rs`. Tests auslagern. |
 | `src-tauri/kernel2d/src/lib.rs` | 3246 | Module je Werkzeug: Vektor-Grundlagen, Schnittpunkte, Offset, Fillet und Fase, Trim und Extend, Split und Join, Flächen. Tests (rund 600 Zeilen) auslagern. |
 | `src-tauri/core/src/plan/elevation.rs` | 3226 | Flächen-Aufbau, Ansichtsschraffur, Öffnungen, Stil und Maler-Ordnung trennen; Geometrie liegt schon in `elevation_geom.rs`. Tests auslagern. |
 | `src/App.tsx` | 2957 | Fortsetzung von `[121]`: Kontextmenü-Verdrahtung und Werkzeug-Handler in Hooks unter `src/state/`. |

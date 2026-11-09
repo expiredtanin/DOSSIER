@@ -1,4 +1,4 @@
-// Schnitt aus dem Kern ([K3c]): die Abfrage `sectionPlan` (`src-tauri/core/src/plan/section.rs`) rechnet
+// Schnitt aus dem Kern ([K3c]): die Abfrage `sectionPlan` (`src-tauri/core/src/plan/section/`) rechnet
 // den Schnitt auf dem Projekt-Dokument — Prismen-Schnitt (render3d `cut_section`), Besitzer, Schicht-Bänder,
 // Stil, Dominanz, Treppen, Abzugskörper, Gelände, Tiefe, geschnittene Fenster/Türen — und liefert den
 // Plan-Puffer v2 samt Pick-Ids (lazy gelesen wie `generatePlan`). TS reicht nur die Ebene, die
@@ -178,7 +178,7 @@ export interface SectionPlaneSpec {
  *
  * Gibt `null` zurück, wenn die Ebene (noch) keine Schnittlinie trägt (z. B. eine
  * frisch angelegte Ansicht ohne gesetzte Linie) — der Aufrufer zeigt dann einen
- * Hinweis statt eines leeren Plans. Gegenstück im Kern: `LevelSpec::plane` (`plan/section.rs`).
+ * Hinweis statt eines leeren Plans. Gegenstück im Kern: `LevelSpec::plane` (`plan/section/mod.rs`).
  */
 export function sectionPlaneFromLevel(level: DrawingLevel): SectionPlaneSpec | null {
   const line = level.linePoints;
@@ -206,7 +206,7 @@ export function sectionPlaneFromLevel(level: DrawingLevel): SectionPlaneSpec | n
  * Ebene (Modell-2D: model.x = world.x, model.y = world.z).
  *
  * Muss EXAKT der u-Achse des Kern-Schnitts entsprechen (render3d `SectionPlane::u_axis`,
- * `core/src/plan/section.rs` `Plane::u_model`): dort `u = normalize(cross(up, normal))` mit up = (0,1,0) —
+ * `core/src/plan/section/mod.rs` `Plane::u_model`): dort `u = normalize(cross(up, normal))` mit up = (0,1,0) —
  * das Blickrichtungs-RECHTS des Betrachters (Entspiegelung; wer nach Norden
  * blickt, hat Osten rechts). Für eine horizontale Normale `[Nx, Ny, Nz]` sind
  * die Grundriss-Komponenten (x, z) also `(Nz, -Nx)`. (Nicht normiert; für das
@@ -214,7 +214,7 @@ export function sectionPlaneFromLevel(level: DrawingLevel): SectionPlaneSpec | n
  */
 export function sectionUAxisModel(plane: SectionPlaneSpec): Vec2 {
   // Blickrichtungs-RECHTS (cross(up, N)) — muss EXAKT `SectionPlane::u_axis`
-  // in section.rs spiegeln (dort seit der Entspiegelung dieselbe Formel).
+  // in plan/section/mod.rs spiegeln (dort seit der Entspiegelung dieselbe Formel).
   const [nx, , nz] = plane.normal;
   return { x: nz, y: -nx };
 }

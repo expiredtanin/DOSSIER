@@ -1,7 +1,7 @@
 /**
  * u-Achse der Schnittebene (`sectionUAxisModel`, `sectionPlaneFromLevel`): Blickrichtungs-RECHTS wie
  * im Kern-Schnitt. Die Aussen/Innen-Lage der Schicht-Bänder prüft der Kern
- * (`core/src/plan/section.rs`, `schichten_aussen_aussen_und_override_auf_allen_schichten`).
+ * (`core/src/plan/section/ts_faelle.rs`, `schichten_aussen_aussen_und_override_auf_allen_schichten`).
  */
 
 import { describe, it, expect } from "vitest";

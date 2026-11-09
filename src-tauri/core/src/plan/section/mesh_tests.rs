@@ -1,4 +1,4 @@
-//! [152] Importierte Netze im Schnitt (Tests zu `section.rs`).
+//! [152] Importierte Netze im Schnitt (Tests zu `plan/section/`).
 
 use super::*;
 use crate::mesh_view::tests::{barrel, cube, prism};
