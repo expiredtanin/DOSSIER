@@ -1,10 +1,12 @@
 // Bündelt die PDF-/DXF-Plan-Export-Handler (Papier-/Modell-Space-Export der
 // aktuellen Grundriss-Ansicht) — die Schnellexporte (CSV/IFC/OBJ/STL) liegen
 // bereits in useProjectFileActions(). Nur aus App.tsx herausgezogen, um die
-// Funktion zu entlasten — reine Verlagerung, keine Verhaltensänderung.
+// Funktion zu entlasten — reine Verlagerung, keine Verhaltensänderung. Dazu das Inhaltsmass
+// des Plans für die „passt aufs Blatt?"-Warnung im PDF-Dialog ([163]).
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { useMemo } from "react";
 import { generatePlan, withDocument } from "../core";
 import type { CategoryDisplayResolver } from "../core";
 import type { DetailLevel } from "../model/viewTypes";
@@ -22,6 +24,8 @@ import { getState } from "./appStore";
 import { t } from "../i18n";
 
 export function useExportHandlers(opts: {
+  /** PDF-Export-Dialog offen? Nur dann wird das Inhaltsmass gerechnet. */
+  exportOpen: boolean;
   project: Project;
   activeLevelId: string;
   activeLevelName: string;
@@ -35,11 +39,13 @@ export function useExportHandlers(opts: {
   setExportOpen: (open: boolean) => void;
   setExportDxfOpen: (open: boolean) => void;
 }): {
+  exportContentMeters: { w: number; h: number } | undefined;
   onExportPdf: (decision: ExportPdfDecision) => Promise<void>;
   onExportSvg: (decision: ExportPdfDecision) => void;
   onExportDxf: (decision: ExportDxfDecision) => Promise<void>;
 } {
   const {
+    exportOpen,
     project,
     activeLevelId,
     activeLevelName,
@@ -52,6 +58,31 @@ export function useExportHandlers(opts: {
     setExportOpen,
     setExportDxfOpen,
   } = opts;
+
+  // Massstäbliche Inhalts-Maße (Meter) des aktuellen Plans — nur berechnet, wenn
+  // der Export-Dialog offen ist (für die „passt aufs Blatt?"-Warnung).
+  const exportContentMeters = useMemo(() => {
+    if (!exportOpen) return undefined;
+    const b = generatePlan(
+      project,
+      activeLevelId,
+      visibleCodes,
+      categoryDisplay,
+      detail,
+      referenceLines,
+      planColorMode === "mono",
+    ).bounds;
+    return { w: b.maxX - b.minX, h: b.maxY - b.minY };
+  }, [
+    exportOpen,
+    project,
+    activeLevelId,
+    visibleCodes,
+    categoryDisplay,
+    detail,
+    referenceLines,
+    planColorMode,
+  ]);
 
   const scopedProject = (selectionOnly: boolean): Project =>
     selectionOnly ? filterProjectToSelection(project, selectionMembers) : project;
@@ -152,5 +183,5 @@ export function useExportHandlers(opts: {
     setExportDxfOpen(false);
   };
 
-  return { onExportPdf, onExportSvg, onExportDxf };
+  return { exportContentMeters, onExportPdf, onExportSvg, onExportDxf };
 }

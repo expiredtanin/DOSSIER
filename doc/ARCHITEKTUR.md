@@ -391,8 +391,8 @@ OBJ/STL/glTF, `plan/dxf.rs` für DXF/DWG), `fileio` schreibt die Datei.
 
 Beispiel: Werkzeug „Wand" gewählt, zwei Klicks in den Grundriss.
 
-1. **Klick.** `PlanView` meldet den Klick über `onToolClick` an die Handler in `src/App.tsx`
-   (`toolHandlers`). Läuft ein Befehl, geht der Punkt an `CommandEngine.pick()`
+1. **Klick.** `PlanView` meldet den Klick über `onToolClick` an die Handler aus
+   `src/state/useToolInput.ts` (`toolHandlers`, von `src/App.tsx` verdrahtet). Läuft ein Befehl, geht der Punkt an `CommandEngine.pick()`
    (`src/commands/engine.ts`); sonst wird der zum Werkzeug gekoppelte Befehl gestartet
    (`coupledCommandFor()`, Werkzeugliste `src/tools/tools.ts`).
 2. **Fang.** Die Engine fragt den Host nach dem Fangpunkt (`computeSnap()` in `src/tools/snapping.ts`;
@@ -596,7 +596,6 @@ einfachste erste Schritt (Muster: `drawing_recognize_tests.rs`, `plan/wall_join_
 | `src-tauri/core/src/model3d.rs` | 3562 | Ordner `model3d/`: Wände (Knoten, Teile, Taschen), Öffnungen, Treppen, Dächer, Kontext, Pick-Geometrie; `parts()` im `mod.rs`. Tests auslagern. |
 | `src-tauri/kernel2d/src/lib.rs` | 3246 | Module je Werkzeug: Vektor-Grundlagen, Schnittpunkte, Offset, Fillet und Fase, Trim und Extend, Split und Join, Flächen. Tests (rund 600 Zeilen) auslagern. |
 | `src-tauri/core/src/plan/elevation.rs` | 3226 | Flächen-Aufbau, Ansichtsschraffur, Öffnungen, Stil und Maler-Ordnung trennen; Geometrie liegt schon in `elevation_geom.rs`. Tests auslagern. |
-| `src/App.tsx` | 2957 | Fortsetzung von `[121]`: Kontextmenü-Verdrahtung und Werkzeug-Handler in Hooks unter `src/state/`. |
 | `src/panels/ObjectInfoPanel.tsx` | 2847 | Je Element-Art eine Datei (`WallSection`, `OpeningSection`, `RoofSection`, `StairSection` …) in einem Ordner `src/panels/objectInfo/`. |
 | `src-tauri/fileio/src/ifc_import.rs` | 2826 | Platzierung und Koordinaten, Darstellungen lesen, Produkte und Geschosse zuordnen; Tests auslagern. |
 | `src/plan/toWalls3d.test.ts` | 2761 | Nach Thema teilen (Wände, Öffnungen, Decken, Dächer, Treppen), wie die bestehenden `toWalls3d.*.test.ts`. |
@@ -606,6 +605,25 @@ einfachste erste Schritt (Muster: `drawing_recognize_tests.rs`, `plan/wall_join_
 | `src-tauri/render3d/src/gpu.rs` | 2535 | Je Pass ein Modul (Netze, Kanten, Schatten, Schnittflächen, Raster), gemeinsame Ressourcen getrennt. |
 | `src-tauri/core/src/plan/drawings.rs` | 2290 | Bemassung und Koten, Texte, Blöcke, Stücke und Unterlage (`plan_drawings_chunked()`, `underlay_groups()`) trennen. |
 | `src-tauri/core/src/drawing_recognize.rs` | 2170 | Stufen trennen: Wände, Öffnungen, Räume (Tests liegen schon getrennt). |
+
+### Erledigt: `src/App.tsx` zerlegt ([163], 9.11.2026)
+
+`App.tsx` (vorher 2957 Zeilen, jetzt rund 1120) ist nur noch Verdrahtung: Store lesen, Hooks in fester
+Reihenfolge aufrufen, Gerüst rendern. Herausgelöst, ohne Verhaltensänderung (gleiche Abhängigkeitslisten):
+
+| Datei | Inhalt |
+|---|---|
+| `src/state/useToolInput.ts` | Plan-Handler (`toolHandlers`), Werkzeugwahl, Ribbon-Befehle, 3D-Arbeitsebene → Engine |
+| `src/state/useSelectionCommands.ts` | Befehle auf der Auswahl (Löschen, Split, Booleans, Sperren, Gruppen …) samt Tastenkürzeln |
+| `src/state/useGripInputs.ts`, `useCommandLineBinding.ts` | Eingaben der Griffe; Befehlszeile und Cursor-HUD (Feld-Controller oder Engine) |
+| `src/state/useModelImport.ts` | IFC-, STEP- und Mesh-Import, Datei-Verteiler für Dialog und Drag & Drop |
+| `src/state/useTextTarget.ts`, `useSectionLineState.ts`, `useStatusBarInfo.ts` | Text-Ziel der Formatierleiste; Objekt-Info, Schnittlinie, 3D-Live-Schnitt; Status-Leiste |
+| `src/state/useResourceHandlers.ts`, `useSettingsHost.ts`, `useNativeWindowHosts.ts`, `useNativeMenu.ts` | Ressourcen-Fenster, Einstellungen, native Nebenfenster, native Menüleiste |
+| `src/menus/AppContextMenu.tsx` | Kontextmenü-Verdrahtung |
+| `src/panels/DockArea.tsx` | Docks links/rechts, Andockzonen, schwebende Panels um die Mitte |
+| `src/ui/AppDialogs.tsx`, `HiddenFileInputs.tsx`, `BootScreen.tsx`, `useTopBarElements.tsx` | Dialoge und Overlays; versteckte Datei-Felder; Splash/Start; Menüleiste und Ansichts-Ribbon |
+
+Offen bleibt aus `[121]`: App abonniert weiter das ganze Projekt; `usePanelHostBase` ist gross.
 
 ### Bekannte veraltete Kommentare
 

@@ -1,0 +1,95 @@
+// Native Nebenfenster der App ([163], aus App.tsx herausgelöst): Ebeneneinstellungen,
+// Standort-Import und Zeichnungsebenen-Manager als eigene Tauri-Fenster, je über ihre Sync-Brücke
+// (`src/native/*Window.ts`). Ausserhalb von Tauri sind die Hosts No-ops; `openLayerSettings` öffnet
+// dann den Inline-Editor. Aufgerufen von `App.tsx`.
+
+import type { ContextObject, Project } from "../model/types";
+import { setFieldIfChanged } from "../core";
+import { isTauriRuntime } from "../native/projectFile";
+import { useContextImportWindowHost } from "../native/contextImportWindow";
+import { useDrawingLevelsWindowHost } from "../native/drawingLevelsWindow";
+import { openLayerSettingsWindowNative, useLayerSettingsWindowHost } from "../native/layerSettingsWindow";
+import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
+import type { useContextMenuState } from "../menus/useContextMenuState";
+import type { RootState } from "./appStore";
+import type { useDisplayResolvers } from "./useDisplayResolvers";
+import type { useProjectActions } from "./useProjectActions";
+
+type Menu = ReturnType<typeof useContextMenuState>;
+
+export function useNativeWindowHosts(opts: {
+  project: Project;
+  applyChange: RootState["applyChange"];
+  activeLevelId: string;
+  setActiveLevelId: RootState["setActiveLevelId"];
+  setModeFor: RootState["setModeFor"];
+  drawingLevelsMode: ReturnType<typeof useDisplayResolvers>["drawingLevelsMode"];
+  nativeLayerSettingsCode: Menu["nativeLayerSettingsCode"];
+  setNativeLayerSettingsCode: Menu["setNativeLayerSettingsCode"];
+  setEditor: Menu["setEditor"];
+  pa: ReturnType<typeof useProjectActions>;
+}) {
+  const {
+    project,
+    applyChange,
+    activeLevelId,
+    setActiveLevelId,
+    setModeFor,
+    drawingLevelsMode,
+    nativeLayerSettingsCode,
+    setNativeLayerSettingsCode,
+    setEditor,
+  } = opts;
+  const {
+    patchCategory,
+    addContextObjectsAndFit,
+    toggleLevelVisible,
+    addFloor,
+    addSection,
+    addElevation,
+    addCeiling,
+    addDrawing,
+  } = opts.pa;
+
+  // Ebeneneinstellungen als eigenes natives Fenster (DOSSIER-Rhino-Referenz)
+  // — ersetzt unter Tauri den InlineEditor-Popover, s. native/layerSettingsWindow.ts.
+  useLayerSettingsWindowHost(project, nativeLayerSettingsCode, patchCategory);
+  const openLayerSettings = (code: string, x: number, y: number) => {
+    if (isTauriRuntime()) {
+      setNativeLayerSettingsCode(code);
+      void openLayerSettingsWindowNative(code);
+    } else {
+      setEditor({ kind: "layer", code, x, y });
+    }
+  };
+
+  // Standort-Import als eigenes natives Fenster — s. native/contextImportWindow.ts.
+  useContextImportWindowHost(project.geoAnchor, {
+    onImport: (objs) => addContextObjectsAndFit(objs as ContextObject[]),
+    onSetGeoAnchor: (anchor) => applyChange((p) => setFieldIfChanged(p, "geoAnchor", anchor)),
+  });
+
+  // Zeichnungsebenen-Manager als eigenes natives Fenster (DOSSIER-Rhino-
+  // Referenz) — additiv NEBEN dem bestehenden Dock-Panel, siehe
+  // native/drawingLevelsWindow.ts Kopfkommentar (Rechtsklick-Kontextmenü
+  // bewusst nicht mitgenommen).
+  useDrawingLevelsWindowHost(
+    {
+      drawingLevels: project.drawingLevels.filter((z) => !z.layoutId),
+      activeLevelId,
+      displayMode: drawingLevelsMode,
+    },
+    {
+      onSelectLevel: setActiveLevelId,
+      onToggleLevel: toggleLevelVisible,
+      onAddFloor: addFloor,
+      onAddSection: addSection,
+      onAddElevation: addElevation,
+      onAddCeiling: addCeiling,
+      onAddDrawing: addDrawing,
+      onSetDisplayMode: (mode) => setModeFor(BUILTIN_PANEL_IDS.drawingLevels, mode),
+    },
+  );
+
+  return { openLayerSettings };
+}

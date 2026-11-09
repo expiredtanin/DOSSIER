@@ -23,15 +23,27 @@ Komponenten lesen mit `useStore(selector)` nur ihren Ausschnitt.
 
 ## Verdrahtung (aus `App.tsx` herausgelöst)
 
+`App.tsx` ruft diese Hooks in fester Reihenfolge auf (Effekte laufen in dieser Reihenfolge) und reicht die
+Ergebnisse weiter; Komponenten-Teile der App liegen in `src/ui/AppDialogs.tsx`, `HiddenFileInputs.tsx`,
+`BootScreen.tsx`, `useTopBarElements.tsx`, `src/menus/AppContextMenu.tsx` und `src/panels/DockArea.tsx`.
+
 | Datei | Inhalt |
 |---|---|
+| `useProjectActions.ts` | Projekt-Aktionen als Store-Actions (früh aufgerufen, nur Selektoren) |
 | `useCommandEngineHost.ts` | Host der Befehls-Engine: Kontext, Fang, Vorschau, Commit in den Store |
+| `useToolInput.ts` | Plan-Handler (`toolHandlers`), Werkzeugwahl, Ribbon-Befehle, 3D-Arbeitsebene → Engine |
+| `useGripInputs.ts` | einzeln gewähltes Element je Art, Schnitt-/Ansichts-Blatt, Fang für Griffe |
+| `useSelectionCommands.ts` | Befehle auf der Auswahl (Löschen, Split, Booleans, Stil, Sperren, Ebenen, Gruppen) samt Kürzeln |
 | `useGripEditing.ts`, `useGrip3dEditing.ts` | Griffe in 2D und 3D; die Rechnung je Mausschritt liegt im Kern (`grips.rs`, `grip_drag.rs`) |
+| `useCommandLineBinding.ts` | Befehlszeile und Cursor-HUD: Feld-Controller eines Griff-Drags oder die Engine |
 | `useMouseSelectionHandlers.ts` | Auswahl und Kontextmenü aus Grundriss und 3D |
 | `useKeyboardShortcuts.ts`, `keyboardShortcuts.ts`, `commandKeys.ts` | Tastenkürzel, Esc/Enter laufender Befehle |
 | `useDisplayResolvers.ts` | sichtbar, gedimmt, gesperrt je Ebene und Kategorie |
+| `useTextTarget.ts`, `useSectionLineState.ts`, `useStatusBarInfo.ts` | Text-Ziel der Formatierleiste; Objekt-Info, Schnittlinie, 3D-Live-Schnitt; Status-Leiste |
 | `usePanelHostBase.ts` | Host-Wert für die Panels |
-| `useProjectFileActions.ts`, `useImportHandling.ts`, `useExportHandlers.ts` | Datei öffnen und speichern, Importe, Plan-Export |
+| `useProjectFileActions.ts`, `useImportHandling.ts`, `useModelImport.ts`, `useExportHandlers.ts` | Datei öffnen und speichern, Importe (Bild, Drag & Drop; IFC/STEP/Mesh), Plan-Export |
+| `useResourceHandlers.ts`, `useSettingsHost.ts` | Ressourcen-Fenster; Einstellungen, Offline, KI-Zugriff, Start-Protokoll |
+| `useNativeWindowHosts.ts`, `useNativeMenu.ts` | native Nebenfenster und macOS-Menüleiste (ausserhalb von Tauri No-ops) |
 | `useSheetPane.ts` | offenes Layout-Blatt |
 
 ## Reine Logik
