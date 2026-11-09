@@ -58,7 +58,8 @@ npm run e2e              # Playwright-Suite gegen den Browser-Build (dist-test)
 - **cargo test** in jedem Crate; im Kern auch der Abgleich der generierten
   TS-Typen und der `KNOWN_KEYS`.
 - **Golden-Tests** (`src/plan/golden.test.ts`): Grundriss je Geschoss,
-  Schnitte und Ansichten beider Musterprojekte als SVG in
+  Schnitte, Ansichten und 3D beider Musterprojekte als lesbare Text-Digests
+  (Zähler je Element-Art, Rahmen, Hash der gerundeten Zahlen, keine SVGs) in
   `src/plan/__golden__` [119]. Gewollte Änderungen:
   `npx vitest run -u src/plan/golden.test.ts` und den Diff im Commit prüfen.
 - **IFC** gegen IfcOpenShell: `scripts/validate-ifc.py`
@@ -74,6 +75,8 @@ Verlässliches zeichnet. Der Konsolen-Wächter lässt jeden Test scheitern, der
 unerwartete Fehler loggt. Gemeinsame Helfer in `e2e/app.ts`.
 
 ## Ergebnis ansehen
+
+Ausführlicher mit allen CLI-Befehlen: [`doc/ARCHITEKTUR.md`](https://github.com/expiredtanin/DOSSIER/blob/master/doc/ARCHITEKTUR.md), Abschnitt 11.
 
 Zahlen allein reichen nicht. Plan, Schnitt und Ansicht headless:
 

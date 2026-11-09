@@ -6,6 +6,9 @@ weight: 3
 
 ## Zwei Engines, kein three.js
 
+Die Datenflüsse im Einzelnen (Plan-Puffer, Ausgabewege, 3D-Teile, Schatten, IFC) beschreibt
+[`doc/ARCHITEKTUR.md`](https://github.com/expiredtanin/DOSSIER/blob/master/doc/ARCHITEKTUR.md); dieser Abschnitt gibt den Überblick.
+
 Angezeigt wird ausschliesslich über zwei eigene Rust-Engines auf
 [wgpu](https://wgpu.rs/) – kein three.js, kein WebGL:
 
@@ -31,7 +34,7 @@ Ebenenangaben). Daraus lesen:
 Der Skizzenstil [67] wirkt beim Schreiben des Puffers – darum sehen
 Bildschirm, SVG und PDF gleich aus.
 
-**Ablauf 3D:** Der Kern erzeugt Netze je Bauteil (`model3d.rs`,
+**Ablauf 3D:** Der Kern erzeugt Netze je Bauteil (Ordner `model3d/`,
 zwischengespeichert), `render3d` zeichnet sie. Headless (nur macOS):
 `dossier-cli … model3d --out m.json`, dann
 `src-tauri/target/release/render_png m.json out.png --view iso --style shaded-edges`
@@ -52,7 +55,7 @@ Text) zuständig; die native Fläche liefert nur die Pixel der Geometrie.
 | Wandanschlüsse | Kern (`joins.rs`, Schichten nach Priorität) |
 | 3D-Körper im Modell (Öffnungen, Wandverbindungen, Abzugskörper, Dach ↔ Dach) | **Manifold** (`solid_bool.rs`): exakt, synchron |
 | B-Rep, STEP, Kennwerte, Kollision | **truck** (`trucksolid`): eigenes WASM, Panic-isoliert über `guarded()` |
-| IFC-Import (IfcBooleanResult, Halbräume) | **BSP** (`fileio/csg.rs`, Port von csg.js): toleriert offene Netze, fällt bei Budget-Überschreitung auf den ersten Operanden zurück |
+| IFC-Import (IfcBooleanResult, Halbräume) | **BSP** (`src-tauri/fileio/src/csg.rs`, Port von csg.js): toleriert offene Netze, fällt bei Budget-Überschreitung auf den ersten Operanden zurück |
 | Gelände | Constrained Delaunay mit Bruchkanten (`terrain.rs`, `delaunay.rs`) |
 | Sonnenstand, Schatten | Kern (`sun.rs`) |
 

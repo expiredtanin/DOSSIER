@@ -8,6 +8,10 @@ Der Kern ist das Crate `dossier-core` in `src-tauri/core`. Er läuft als
 WebAssembly in der App, in Electron, im Browser, in Vitest und in
 `dossier-cli`, und nativ in der Tauri-App.
 
+Die WASM-Grenze und die Abfragen mit Dateien und Funktionen im Einzelnen stehen in
+[`doc/ARCHITEKTUR.md`](https://github.com/expiredtanin/DOSSIER/blob/master/doc/ARCHITEKTUR.md), Abschnitte 1 und 2; hier die Regeln, nach
+denen man am Kern arbeitet.
+
 ## Dokument, Ops, Verlauf
 
 Der Kern **hält das Projekt-Dokument** (`document.rs`). Die Oberfläche hält

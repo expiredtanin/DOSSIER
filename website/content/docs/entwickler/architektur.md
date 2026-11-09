@@ -14,7 +14,10 @@ wird in Metern gerechnet, Strichstärken sind Papier-Millimeter.
 Der Grundriss wird analytisch aus den Bauteilparametern erzeugt (Wandachse,
 Schichten, Öffnungen, Anschlüsse nach Priorität), nicht aus einem 3D-Netz
 geschnitten. Schnitte verschneiden die Bauteile nach derselben Priorität.
-Bildschirm, PDF, SVG und DXF lesen denselben Plan-Puffer.
+Bildschirm, PDF, SVG und DXF lesen denselben Plan-Puffer. Datenflüsse im
+Einzelnen (Weg eines Grundrisses, Schnitt, 3D, IFC, eine Benutzeraktion) und ein
+Glossar stehen in
+[`doc/ARCHITEKTUR.md`](https://github.com/expiredtanin/DOSSIER/blob/master/doc/ARCHITEKTUR.md).
 
 ```text
                         ┌──────────────────────────────┐
@@ -56,40 +59,29 @@ Harte Grenze, geprüft vom Test `src/core/boundary.test.ts`:
 
 ## Modulkarte
 
-| Ort | Inhalt |
-|---|---|
-| `src-tauri/core` | Crate `dossier-core`: Dokument, Ops, Verlauf, Projektformat; Plan/Schnitt/Ansicht (`plan/`), 3D-Modell, Export-Sammler, Text-Layout, Griffe, Objekt-Info, Befehle, Ebenen, Stifte, Layouts; Geometrie (Booleans, Dächer, Treppen, Wand-Anschlüsse, Gelände, Schatten, Baurecht, Kennzahlen, U-Wert) |
-| `src-tauri/kernel2d` | 2D-Geometrie: Offset, Trim, Fillet, Split, Join (in `core` eingebunden) |
-| `src-tauri/hatchgen` | Schraffur- und Linienmuster-Geometrie |
-| `src-tauri/render2d` | 2D-Anzeige (Pläne, Blätter) |
-| `src-tauri/render3d` | 3D-Anzeige; `render_png` für Headless-Bilder |
-| `src-tauri/trucksolid` | B-Rep über truck 0.6: Körper, Booleans, STEP, Kennwerte, Kollision; eigenes WASM |
-| `src-tauri/fileio` | Dateiformate: DXF/DWG (acadrust), IFC, PDF, Meshes, Punktwolken, Tabellen; eigenes WASM, nachgeladen |
-| `src-tauri/src` | Tauri-App: Fenster, Menüs, atomares Speichern, Dateisperre, native Metal-Anzeige |
-| `src/model` | Typen (generiert aus Rust), Fassaden, Ansichtstypen |
-| `src/plan` | Fassaden `generatePlan`, `toSection`, `toElevation`; Plan-Puffer lesen; Goldens |
-| `src/views/plan`, `src/viewport` | Plan-Ansicht und 3D-Viewport mit Renderer-Hooks, Raycast, Griffen |
-| `src/commands` | Befehls-Engine, Registry, Befehle als Zustandsautomaten |
-| `src/state` | Store (Zustand), Autosave, Datei- und Export-Aktionen, Tastenkürzel |
-| `src/panels`, `src/ui` | Dock-Panels und Dialoge |
-| `src/io`, `src/export` | Import/Export-Fassaden, Projektformat, PDF |
-| `src/native` | Tauri-Adapter (Dateien, Fenster, Menü, Farbprofile), Nebenfenster |
-| `src/engine` | WASM-Lader (`coreWasm.ts`, `engine3d.ts`, `truckSolid.ts`, `fileioWasm.ts`) |
-| `src/cli` | `dossier-cli` |
-| `e2e` | Oberflächentests (Playwright) |
-| `website` | diese Website (Hugo) |
+Die Crates in `src-tauri`, die Ordner unter `src` und was wohin gehört, steht an einer Stelle:
+[`doc/ARCHITEKTUR.md`](https://github.com/expiredtanin/DOSSIER/blob/master/doc/ARCHITEKTUR.md) (Abschnitt „Die Crates in `src-tauri`") und die
+Modulkarte in [`CLAUDE.md`](https://github.com/expiredtanin/DOSSIER/blob/master/CLAUDE.md). Ausserdem hat jeder grosse Ordner eine kurze
+`README.md` mit einer Zeile je wichtiger Datei, zum Beispiel
+[`src/plan`](https://github.com/expiredtanin/DOSSIER/blob/master/src/plan/README.md), [`src/panels`](https://github.com/expiredtanin/DOSSIER/blob/master/src/panels/README.md) und
+[`src-tauri/core/src`](https://github.com/expiredtanin/DOSSIER/blob/master/src-tauri/core/src/README.md).
+
+Grob: `src-tauri/core` ist der Rust-Kern, `render2d` und `render3d` sind die Anzeige-Engines, `fileio` liest und
+schreibt Dateiformate, `trucksolid` rechnet B-Rep, `src-tauri/src` ist die Tauri-App. `src` ist die
+Oberfläche und die dünne TypeScript-Seite des Kerns, `e2e` die Oberflächentests, `website` diese Seite.
 
 ## Plattformen
 
-- **macOS (Tauri):** WKWebView für die Oberfläche; Plan und 3D zeichnet die
-  Tauri-Seite nativ über Metal in eine Ebene unter der Webansicht.
+- **macOS (Tauri):** WKWebView für die Oberfläche; den Grundriss zeichnet die
+  Tauri-Seite zusätzlich nativ über Metal in eine Fläche unter der Webansicht.
 - **Linux (Electron):** Chromium mit WebGPU; die Engines laufen als WASM.
   Tauri unter Linux (WebKitGTK) hat kein verlässliches WebGPU.
 - **Browser:** wie Electron, für Entwicklung und e2e-Tests.
 
 Es gibt bewusst keinen Ersatz-Renderer ohne WebGPU [46]: lieber eine klare
-Meldung als ein zweiter Zeichenweg. Für den Plan gibt es einen SVG-Weg, der
-für Interaktion, Export und Tests genutzt wird.
+Meldung als ein zweiter Zeichenweg. Über der GPU-Fläche liegt im Plan eine
+SVG-Ebene für Auswahl, Griffe, Fang und Text; läuft kein GPU-Weg, zeichnet sie
+den ganzen Plan (Rückfall, `?gl=0`). SVG als Datei entsteht getrennt im Kern.
 
 ## Sicherheit
 

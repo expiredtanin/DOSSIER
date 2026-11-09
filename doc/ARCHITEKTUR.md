@@ -13,12 +13,18 @@ Weitere Quellen:
 - [`TODO.md`](../TODO.md): Arbeitsliste mit stabilen Nummern wie `[63]`. Viele Kommentare im Code
   verweisen auf diese Nummern; den Hintergrund einer Entscheidung (Befunde, Messwerte) findet man im Archiv
   [`doc/archiv/TODO-bis-2026-11-08.md`](archiv/TODO-bis-2026-11-08.md) unter `**[ID]`.
-- `website/content/docs/entwickler/`: Bauen, Testen, Konventionen, Mitarbeiten (Hugo-Website).
+- `website/content/docs/entwickler/`: Überblick, Bauen, Testen, Konventionen, Mitarbeiten (Hugo-Website); verweist für Einzelheiten auf dieses Dokument.
 - Kurze README-Dateien in den grossen Ordnern: [`src-tauri/README.md`](../src-tauri/README.md),
   [`src-tauri/core/src/README.md`](../src-tauri/core/src/README.md),
   [`src-tauri/core/src/plan/README.md`](../src-tauri/core/src/plan/README.md),
   [`src/plan/README.md`](../src/plan/README.md), [`src/commands/README.md`](../src/commands/README.md),
-  [`src/state/README.md`](../src/state/README.md).
+  [`src/state/README.md`](../src/state/README.md),
+  [`src/views/README.md`](../src/views/README.md), [`src/panels/README.md`](../src/panels/README.md),
+  [`src/viewport/README.md`](../src/viewport/README.md), [`src/io/README.md`](../src/io/README.md),
+  [`src/export/README.md`](../src/export/README.md), [`src/ui/README.md`](../src/ui/README.md),
+  [`src-tauri/fileio/src/README.md`](../src-tauri/fileio/src/README.md),
+  [`src-tauri/render2d/src/README.md`](../src-tauri/render2d/src/README.md),
+  [`src-tauri/render3d/src/README.md`](../src-tauri/render3d/src/README.md).
 
 Vorschlag für die ersten zwei Tage:
 

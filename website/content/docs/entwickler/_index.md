@@ -11,6 +11,8 @@ Menschen und Agenten stehen in
 [`CLAUDE.md`](https://github.com/expiredtanin/DOSSIER/blob/master/CLAUDE.md),
 der Stand jeder Aufgabe in
 [`TODO.md`](https://github.com/expiredtanin/DOSSIER/blob/master/TODO.md).
+Wie die Teile zusammenspielen, mit Dateien, Datenflüssen und Glossar, beschreibt
+[`doc/ARCHITEKTUR.md`](https://github.com/expiredtanin/DOSSIER/blob/master/doc/ARCHITEKTUR.md); die Seiten hier geben den Überblick und die Regeln.
 
 {{< cards >}}
   {{< card link="architektur" title="Architektur" subtitle="Ein Modell, Kern und Hülle, Modulkarte, harte Grenzen." >}}
