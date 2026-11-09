@@ -149,9 +149,11 @@ interface Renaming {
 
 export function ViewSnapshotsPanel() {
   const host = usePanelHost();
-  const project = useStore((s) => s.project);
-  const snaps = project.viewSnapshots ?? [];
-  const folders = project.viewSnapshotFolders ?? [];
+  // Schmale Abos ([121]): Ausschnitte, Ordner, Override-Regeln, Ansichtsvorlagen.
+  const snaps = useStore((s) => s.project.viewSnapshots) ?? [];
+  const folders = useStore((s) => s.project.viewSnapshotFolders) ?? [];
+  const overrideRules = useStore((s) => s.project.overrideRules);
+  const viewTemplates = useStore((s) => s.project.viewTemplates);
 
   const tree = useMemo(
     () => buildViewSnapshotTree(folders, snaps),
@@ -204,11 +206,11 @@ export function ViewSnapshotsPanel() {
       selectedSnap.drawingVisibility,
     );
     const ids = new Set(selectedSnap.enabledOverrideRuleIds ?? []);
-    const overrideNames = (project.overrideRules ?? [])
+    const overrideNames = (overrideRules ?? [])
       .filter((r) => ids.has(r.id))
       .map((r) => r.name);
     return { layerCombo, drawingCombo, overrideNames };
-  }, [selectedSnap, host, project.overrideRules]);
+  }, [selectedSnap, host, overrideRules]);
 
   // ── Auf-/Zuklappen ────────────────────────────────────────────────────────
   const isExpanded = (id: string) => !collapsed.has(id);
@@ -675,7 +677,7 @@ export function ViewSnapshotsPanel() {
                 }}
               >
                 <option value="">{t("viewsnap.footer.none")}</option>
-                {(project.viewTemplates ?? []).map((tpl) => (
+                {(viewTemplates ?? []).map((tpl) => (
                   <option key={tpl.id} value={tpl.id}>
                     {tpl.name}
                   </option>

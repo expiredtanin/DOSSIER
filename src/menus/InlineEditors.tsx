@@ -148,8 +148,9 @@ export function LevelInlineEditor({
   onClose: () => void;
   patchLevel: (id: string, patch: Partial<DrawingLevel>) => void;
 }) {
-  const project = useStore((s) => s.project);
-  const level = project.drawingLevels.find((z) => z.id === editor.id);
+  // Nur die Zeichnungsebenen abonnieren ([121]).
+  const drawingLevels = useStore((s) => s.project.drawingLevels);
+  const level = drawingLevels.find((z) => z.id === editor.id);
   if (!level) return null;
   const isFloor = level.kind === "floor";
   return (
@@ -172,7 +173,7 @@ export function LevelInlineEditor({
           {/* [131] OK fertig Boden relativ zu ±0.00 (aus dem Stapel); ein Geschoss ist der Bezug. */}
           <EditorField label={t("editor.levelElevation")}>
             <span className="editor-num">
-              {isZeroLevel(project.drawingLevels, level.id) ? (
+              {isZeroLevel(drawingLevels, level.id) ? (
                 <span data-testid="level-elevation">{formatElevation(level.baseElevation ?? 0)}</span>
               ) : (
                 <input
@@ -185,11 +186,11 @@ export function LevelInlineEditor({
                   onKeyDown={(e) => {
                     if (e.key !== "Enter") return;
                     e.stopPropagation();
-                    const fix = elevationFix(project.drawingLevels, level.id, Number((e.target as HTMLInputElement).value));
+                    const fix = elevationFix(drawingLevels, level.id, Number((e.target as HTMLInputElement).value));
                     if (fix) patchLevel(fix.id, { floorHeight: fix.floorHeight });
                   }}
                   onBlur={(e) => {
-                    const fix = elevationFix(project.drawingLevels, level.id, Number(e.target.value));
+                    const fix = elevationFix(drawingLevels, level.id, Number(e.target.value));
                     if (fix) patchLevel(fix.id, { floorHeight: fix.floorHeight });
                   }}
                 />
@@ -202,11 +203,11 @@ export function LevelInlineEditor({
               type="checkbox"
               data-testid="level-zero"
               title={t("editor.zeroLevel.hint")}
-              checked={isZeroLevel(project.drawingLevels, level.id)}
-              disabled={isZeroLevel(project.drawingLevels, level.id)}
+              checked={isZeroLevel(drawingLevels, level.id)}
+              disabled={isZeroLevel(drawingLevels, level.id)}
               onChange={(e) => {
                 if (!e.target.checked) return;
-                const prev = project.drawingLevels.find((z) => z.kind === "floor" && z.zeroLevel && z.id !== level.id);
+                const prev = drawingLevels.find((z) => z.kind === "floor" && z.zeroLevel && z.id !== level.id);
                 // Ein Undo-Schritt: altes Kennzeichen weg, neues setzen; der Kern stapelt neu.
                 if (prev) getState().groupChanges(() => {
                   patchLevel(prev.id, { zeroLevel: undefined });
@@ -279,7 +280,7 @@ export function LevelInlineEditor({
             value={level.ceilingOfId ?? ""}
             onChange={(e) => patchLevel(level.id, { ceilingOfId: e.target.value || undefined })}
           >
-            {project.drawingLevels
+            {drawingLevels
               .filter((z) => z.kind === "floor" && !z.layoutId)
               .map((z) => (
                 <option key={z.id} value={z.id}>

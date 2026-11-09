@@ -68,7 +68,8 @@ export async function openResourceWindowNative(initialTab?: TabId): Promise<void
  * `resourceHandlers`).
  */
 export function useResourceWindowHost(
-  project: Project,
+  /** Aktuelles Projekt; `null` ausserhalb von Tauri (dann abonniert der Aufrufer es nicht, [121]). */
+  project: Project | null,
   handlers: ResourceManagerHandlers,
 ): void {
   const handlersRef = useRef(handlers);
@@ -102,6 +103,7 @@ export function useResourceWindowHost(
       unlisten.push(
         await listen("resource-window-ready", () => {
           const full = projectRef.current;
+          if (!full) return;
           sentRef.current = full;
           void emitTo(RESOURCE_WINDOW_LABEL, "resource-sync-project", full).catch(() => {
             sentRef.current = null;
@@ -123,7 +125,7 @@ export function useResourceWindowHost(
   // gar nicht da ist. Kurz gebündelt, damit schnelle Folgeänderungen (Ziehen)
   // nicht jedes Mal das ganze Projekt serialisieren.
   useEffect(() => {
-    if (!isTauriRuntime()) return;
+    if (!isTauriRuntime() || !project) return;
     let cancelled = false;
     const timer = setTimeout(() => {
       void (async () => {

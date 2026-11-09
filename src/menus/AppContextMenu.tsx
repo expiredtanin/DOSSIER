@@ -1,16 +1,17 @@
 // Kontextmenü der App ([163], aus App.tsx herausgelöst): verdrahtet das offene Menü (`MenuState`,
 // genau eines: Ebene, Zeichnungsebene, Grundriss, 3D) mit den Projekt-Aktionen und den Befehlen auf
 // der Auswahl. Die Einträge selbst baut `buildMenuItems` (contextMenu.tsx). Gerendert von `App.tsx`,
-// solange ein Menü offen ist.
+// solange ein Menü offen ist. Das Projekt abonniert das Menü selbst ([121], App liest es nicht mehr);
+// die Anzeige-Werte zur Auswahl rechnet `selectionMenuState`.
 
 import type { RefObject } from "react";
-import type { Project } from "../model/types";
+import { useStore } from "../state/appStore";
 import { ContextMenu } from "../ui/ContextMenu";
 import type { PlanViewHandle } from "../views/plan/PlanView";
 import { countClosedAreas, differenceDrawings, intersectionDrawings, unionDrawings } from "../editors/booleanOps";
 import { categoryNames } from "../state/selectionLayers";
 import type { useProjectActions } from "../state/useProjectActions";
-import type { useSelectionCommands } from "../state/useSelectionCommands";
+import { selectionMenuState, type useSelectionCommands } from "../state/useSelectionCommands";
 import type { useSelectionState } from "../state/useSelectionState";
 import { buildMenuItems, menuTitle, type MenuState } from "./contextMenu";
 import type { useContextMenuState } from "./useContextMenuState";
@@ -20,7 +21,6 @@ type Sel = ReturnType<typeof useSelectionState>;
 
 export function AppContextMenu(props: {
   menu: NonNullable<MenuState>;
-  project: Project;
   selection: Sel["selection"];
   setSelection: Sel["setSelection"];
   selectedWallId: string | null;
@@ -36,7 +36,6 @@ export function AppContextMenu(props: {
 }) {
   const {
     menu,
-    project,
     selection,
     setSelection,
     selectedWallId,
@@ -67,16 +66,18 @@ export function AppContextMenu(props: {
     copyDrawingStyle,
     pasteDrawingStyle,
     selectionLockIds,
-    selectionAllLocked,
     toggleSelectionLock,
-    selectionLayerCodes,
     hideSelectionLayers,
     isolateSelectionLayers,
-    selectionAllNoPrint,
     toggleSelectionNoPrint,
-    attachedDimensionIds,
     detachDimensions,
   } = props.selCmds;
+  const project = useStore((s) => s.project);
+  const { selectionAllLocked, selectionLayerCodes, selectionAllNoPrint, attachedDimensionIds } = selectionMenuState(
+    project,
+    selection,
+    true,
+  );
   return (
     <ContextMenu
       x={menu.x}

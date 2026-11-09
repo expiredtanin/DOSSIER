@@ -5,7 +5,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useMemo } from "react";
-import { flattenCategories, type Project } from "../model/types";
+import { flattenCategories } from "../model/types";
 import { isSheetLevel } from "../model/layoutModel";
 import type { CategoryDisplayResolver } from "../core";
 import type { DisplayResolver } from "../viewport/Viewport3D";
@@ -15,11 +15,13 @@ import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
 import { useStore } from "./appStore";
 
 export function useDisplayResolvers(opts: {
-  project: Project;
   activeLevelId: string;
   activeCategoryCode: string;
 }) {
-  const { project, activeLevelId, activeCategoryCode } = opts;
+  const { activeLevelId, activeCategoryCode } = opts;
+  // Nur Ebenen-Baum und Zeichnungsebenen abonnieren ([121]).
+  const layers = useStore((s) => s.project.layers);
+  const drawingLevels = useStore((s) => s.project.drawingLevels);
   const displayModes = useStore((s) => s.displayModes) as Record<string, DisplayMode | undefined>;
   // ── Effektive Darstellung für die Hauptansicht ────────────────────────────
   // 3D: Geschosse nach dem Modus des Zeichnungsebenen-Panels, Kategorien nach
@@ -33,24 +35,24 @@ export function useDisplayResolvers(opts: {
   // Sichtbarkeit je Kategorie-Code (für categoryDisplay), Baum berücksichtigt.
   const codeVisible = useMemo(() => {
     const map = new Map<string, boolean>();
-    for (const c of flattenCategories(project.layers)) map.set(c.code, c.visible);
+    for (const c of flattenCategories(layers)) map.set(c.code, c.visible);
     return map;
-  }, [project.layers]);
+  }, [layers]);
 
   // Resolver: je Geschoss-ID die Render-Entscheidung (aktiv = Arbeitsfokus).
   // Memoisiert, damit Plan/3D nicht bei jedem Render neu rechnen.
   const floorDisplay: CategoryDisplayResolver & DisplayResolver = useMemo(() => {
     const visible = new Map(
-      project.drawingLevels.map((z) => [z.id, z.visible]),
+      drawingLevels.map((z) => [z.id, z.visible]),
     );
     // Blatt-Ebenen stehen für sich: nur sichtbar, wenn ihr Blatt offen ist, und dann allein.
-    const sheets = new Set(project.drawingLevels.filter(isSheetLevel).map((z) => z.id));
+    const sheets = new Set(drawingLevels.filter(isSheetLevel).map((z) => z.id));
     const onSheet = sheets.has(activeLevelId);
     return (id) =>
       onSheet || sheets.has(id)
         ? { render: id === activeLevelId, greyed: false, locked: false }
         : itemDisplay(drawingLevelsMode, id === activeLevelId, visible.get(id) ?? false);
-  }, [project.drawingLevels, drawingLevelsMode, activeLevelId]);
+  }, [drawingLevels, drawingLevelsMode, activeLevelId]);
 
   // Resolver: je Kategorie-Code die Render-Entscheidung. „Aktiv" = die per
   // Klick im Ebenen-Panel gewählte Kategorie (activeCategoryCode, wie schon

@@ -661,10 +661,28 @@ Reihenfolge aufrufen, Gerüst rendern. Herausgelöst, ohne Verhaltensänderung (
 - Gemessen (`e2e/renderCount.spec.ts`, Musterhaus): Wand-Änderung 55 → 42 Renders, Zoom-Schritt 8,
   5 Zeiger-Schritte 20 (unverändert).
 
-Offen: `App.tsx` abonniert weiter das ganze Projekt. Die Griffe (`useGripEditing`, `useGrip3dEditing`), die
-Befehle auf der Auswahl und die Objekt-Info hängen im App-Render am Projekt; solange sie dort gerechnet
-werden, rendert App bei jeder Op (die Kinder dank Memo meist nicht mit). Nächster Schritt: Griffe in die
-Hauptansicht (`Content`) verlegen, dann App nur noch auf Ebenen/Layer/Name abonnieren.
+Teil 3 (9.11.): `App` abonniert das Projekt nicht mehr, nur schmale Ausschnitte (Zeichnungsebenen,
+Ebenen-Baum, Name, Textstile, Master-Layouts, erste Typ-Ids); eine Op an Bauteilen rendert `App` nicht.
+
+- Was das ganze Projekt liest, liegt in den Komponenten, die es brauchen: `src/views/ViewportCenter.tsx`
+  (Hauptansicht und Befehlszeile) rechnet Griff-Eingaben, 2D-/3D-Griffe, Zifferntasten und die Bindung
+  von Befehlszeile und HUD; `AppContextMenu` die Anzeige-Werte zur Auswahl (`selectionMenuState`);
+  `AppDialogs` abonniert das Projekt nur, solange ein Dialog es zeigt; `src/ui/ProjectSync.tsx` macht die
+  Abgleiche ohne Anzeige (Gauben-Hinweis, natives Ressourcen-Fenster nur unter Tauri).
+- Handler (Befehle auf der Auswahl, Maus-Auswahl, Datei-Aktionen, Tastenkürzel, Befehls-Engine, Menü)
+  lesen das Projekt beim Aufruf aus dem Store (`getState()`), nicht aus dem App-Render.
+- Der Panel-Host baut seine Handler lazy: die Trampoline von `useStableHost` rufen eine Fassung, die bei
+  geändertem Projekt, geänderter Auswahl oder neuen Eingaben erst beim Aufruf neu gebaut wird
+  (`usePanelHostBase`, Quelle austauschbar für Tests).
+- Hooks in `App` mit Projektbezug abonnieren schmal (`useSheetPane`, `useDisplayResolvers`,
+  `useStatusBarInfo` mit Anzahl/Kategorie der gewählten Wände, `useTextTarget` mit dem gewählten Raum bzw.
+  Text, `useViewTemplateHandlers` mit der verknüpften Vorlage, Einstellungs- und Nebenfenster-Hosts mit
+  ihren Feldern, `useExportHandlers` nur bei offenem Export-Dialog). Einige Panels ebenso (Ebenen,
+  Zeichnungsebenen, Ausschnitte, Layouts, Sonnenstudie, Geschoss-Editor).
+- Gemessen: Wand-Änderung 42 → 40 Renders, davon `App` 0 (vorher 1, dazu `DockArea` und `AppDialogs`);
+  der e2e-Test prüft `App` = 0 über die Komponente, die `div.app` rendert. Übrig: Objekt-Info der Wand mit
+  ihren Feldern, Elementbaum, Attribute, Plan-Ansicht samt `ViewportCenter`/`Content`. Zoom 8, Zeiger 20.
+  Beim ersten Undo-Schritt nach dem Öffnen rendert `App` einmal (`canUndo` wechselt).
 
 ### Bekannte veraltete Kommentare
 

@@ -4,7 +4,7 @@
 // Aufgerufen von `App.tsx`, nachdem Einstellungen, Ressourcen und Nebenfenster verdrahtet sind.
 
 import { useMemo, type RefObject } from "react";
-import type { Project, ViewType } from "../model/types";
+import type { ViewType } from "../model/types";
 import { computeKennzahlen, checkRoomProgram } from "../core";
 import { useNativeAppMenu } from "../native/appMenu";
 import { openContextImportWindowNative } from "../native/contextImportWindow";
@@ -14,7 +14,7 @@ import { programStatusLabel } from "../panels/KennzahlenSection";
 import { revealPanel } from "../panels/layout";
 import { listPanels } from "../panels/registry";
 import { t } from "../i18n";
-import type { RootState } from "./appStore";
+import { getState, type RootState } from "./appStore";
 import { openMeshFileDialog } from "./meshImportStore";
 import { openPointCloudFileDialog } from "./pointCloudStore";
 import type { useDialogState } from "./useDialogState";
@@ -25,7 +25,6 @@ type TopBar = ReturnType<typeof useTopBarState>;
 type Dialogs = ReturnType<typeof useDialogState>;
 
 export function useNativeMenu(opts: {
-  project: Project;
   files: ReturnType<typeof useProjectFileActions>;
   notify: RootState["notify"];
   undo: () => void;
@@ -54,7 +53,6 @@ export function useNativeMenu(opts: {
   activeCategoryCode: string;
 }) {
   const {
-    project,
     notify,
     undo,
     redo,
@@ -134,6 +132,7 @@ export function useNativeMenu(opts: {
         void runClashAndStore();
       },
       onKennzahlen: () => {
+        const project = getState().project;
         const k = computeKennzahlen(project);
         const prog = checkRoomProgram(project);
         const f = (n: number, d = 1) => n.toFixed(d);

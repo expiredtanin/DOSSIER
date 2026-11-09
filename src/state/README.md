@@ -27,22 +27,30 @@ geänderten Listen sind neu ([121]).
 
 `App.tsx` ruft diese Hooks in fester Reihenfolge auf (Effekte laufen in dieser Reihenfolge) und reicht die
 Ergebnisse weiter; Komponenten-Teile der App liegen in `src/ui/AppDialogs.tsx`, `HiddenFileInputs.tsx`,
-`BootScreen.tsx`, `useTopBarElements.tsx`, `src/menus/AppContextMenu.tsx` und `src/panels/DockArea.tsx`.
+`BootScreen.tsx`, `useTopBarElements.tsx`, `ProjectSync.tsx`, `src/menus/AppContextMenu.tsx`,
+`src/panels/DockArea.tsx` und `src/views/ViewportCenter.tsx`.
+
+`App` abonniert das Projekt nicht ([121]): nur schmale Ausschnitte (Zeichnungsebenen, Ebenen-Baum, Name …).
+Hooks in `App` lesen das Projekt in Handlern über `getState()` und im Render nur über schmale Selektoren.
+Was das ganze Projekt im Render braucht, läuft in einer Komponente: Griffe, Zifferntasten und Befehlszeile in
+`ViewportCenter`, Anzeige-Werte des Kontextmenüs in `AppContextMenu`, Gauben-Hinweis und Ressourcen-Fenster
+in `ProjectSync`.
 
 | Datei | Inhalt |
 |---|---|
 | `useProjectActions.ts` | Projekt-Aktionen als Store-Actions (früh aufgerufen, nur Selektoren) |
 | `useCommandEngineHost.ts` | Host der Befehls-Engine: Kontext, Fang, Vorschau, Commit in den Store |
 | `useToolInput.ts` | Plan-Handler (`toolHandlers`), Werkzeugwahl, Ribbon-Befehle, 3D-Arbeitsebene → Engine |
-| `useGripInputs.ts` | einzeln gewähltes Element je Art, Schnitt-/Ansichts-Blatt, Fang für Griffe |
-| `useSelectionCommands.ts` | Befehle auf der Auswahl (Löschen, Split, Booleans, Stil, Sperren, Ebenen, Gruppen) samt Kürzeln |
-| `useGripEditing.ts`, `useGrip3dEditing.ts` | Griffe in 2D und 3D; die Rechnung je Mausschritt liegt im Kern (`grips.rs`, `grip_drag.rs`) |
-| `useCommandLineBinding.ts` | Befehlszeile und Cursor-HUD: Feld-Controller eines Griff-Drags oder die Engine |
+| `useGripInputs.ts` | einzeln gewähltes Element je Art, Schnitt-/Ansichts-Blatt, Fang für Griffe (in `ViewportCenter`) |
+| `useSelectionCommands.ts` | Befehle auf der Auswahl (Löschen, Split, Booleans, Stil, Sperren, Ebenen, Gruppen) samt Kürzeln; `selectionMenuState` für die Anzeige im Kontextmenü |
+| `useGripEditing.ts`, `useGrip3dEditing.ts` | Griffe in 2D und 3D (in `ViewportCenter`); die Rechnung je Mausschritt liegt im Kern (`grips.rs`, `grip_drag.rs`) |
+| `useCommandLineBinding.ts` | Befehlszeile und Cursor-HUD (in `ViewportCenter`): Feld-Controller eines Griff-Drags oder die Engine |
+| `useDormerNotice.ts` | Gauben-Hinweis (in `ProjectSync`, abonniert nur Dächer und Projekt-Id) |
 | `useMouseSelectionHandlers.ts` | Auswahl und Kontextmenü aus Grundriss und 3D |
 | `useKeyboardShortcuts.ts`, `keyboardShortcuts.ts`, `commandKeys.ts` | Tastenkürzel, Esc/Enter laufender Befehle |
 | `useDisplayResolvers.ts` | sichtbar, gedimmt, gesperrt je Ebene und Kategorie |
-| `useTextTarget.ts`, `useSectionLineState.ts`, `useStatusBarInfo.ts` | Text-Ziel der Formatierleiste; Objekt-Info, Schnittlinie, 3D-Live-Schnitt; Status-Leiste |
-| `usePanelHostBase.ts`, `panelHost/` | Host-Wert für die Panels: Zusammenbau aus Teil-Bauern je Bereich (`toolsHost`, `selectionStyleHost`, `elementAttributesHost`, `siteHost`, `viewSnapshotsHost` + `viewState`, `layoutsHost`); `stableHost.ts` hält die Identität fest (Handler als Trampoline), solange sich kein Wert-Feld ändert |
+| `useTextTarget.ts`, `useSectionLineState.ts`, `useStatusBarInfo.ts` | Text-Ziel der Formatierleiste; Schnittlinie, 3D-Live-Schnitt; Status-Leiste (je mit schmalen Selektoren) |
+| `usePanelHostBase.ts`, `panelHost/` | Host-Wert für die Panels: Zusammenbau aus Teil-Bauern je Bereich (`toolsHost`, `selectionStyleHost`, `elementAttributesHost`, `siteHost`, `viewSnapshotsHost` + `viewState`, `layoutsHost`); `stableHost.ts` hält die Identität fest (Handler als Trampoline), solange sich kein Wert-Feld ändert. Projekt und Objekt-Info kommen beim Bau aus dem Store; die Fassung hinter den Trampolinen wird bei geändertem Projekt/Auswahl erst beim Aufruf neu gebaut |
 | `useSelectionInfo.ts` | Objekt-Info der Auswahl für Panels (`useSelectionInfo()`) und App (`selectionInfoFor`), einmal je Projekt/Auswahl gerechnet, inhaltlich stabil |
 | `useProjectFileActions.ts`, `useImportHandling.ts`, `useModelImport.ts`, `useExportHandlers.ts` | Datei öffnen und speichern, Importe (Bild, Drag & Drop; IFC/STEP/Mesh), Plan-Export |
 | `useResourceHandlers.ts`, `useSettingsHost.ts` | Ressourcen-Fenster; Einstellungen, Offline, KI-Zugriff, Start-Protokoll |
@@ -70,5 +78,8 @@ Ergebnisse weiter; Komponenten-Teile der App liegen in `src/ui/AppDialogs.tsx`, 
 - Panels lesen Projektdaten selbst aus dem Store, nicht über den Panel-Host (der trägt nur Handler und
   kleine Ansichts-Werte); die Objekt-Info über `useSelectionInfo()`. So rendert eine Op nur die Panels,
   deren Daten sich geändert haben ([121], Messung `e2e/renderCount.spec.ts`).
+- `App` abonniert nie das ganze Projekt (`useStore((s) => s.project)`); der e2e-Test prüft, dass sie bei einer
+  Wand-Änderung nicht rendert. Neue Hooks in `App` lesen das Projekt in Handlern über `getState()`, im
+  Render über schmale Selektoren; was das ganze Projekt im Render braucht, gehört in eine Kind-Komponente.
 - macOS-Nebenfenster (`src/native/*WindowApp.tsx`) haben keinen gemeinsamen Store; ihr Zustand läuft über
   die Sync-Brücken in `src/native/` (`windowBridge.ts`: erst ganz, dann nur geänderte Felder als Patch).

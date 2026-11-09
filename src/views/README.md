@@ -9,6 +9,7 @@ Grundriss auf den Bildschirm kommt: `doc/ARCHITEKTUR.md`, Abschnitt 3.4.
 | Datei | Inhalt |
 |---|---|
 | `viewportContent.tsx` | `Content`: Router der Bildschirmmitte. Geschoss zeigt Grundriss oder 3D, Schnitt und Ansicht zeigen die Schnitt-/Ansichts-Plan-Ansicht, freie Zeichnung die Ebenen-Ansicht, ein Layout das Blatt (`src/ui/LayoutSheet.tsx`) |
+| `ViewportCenter.tsx` | Bildschirmmitte samt Befehlszeile: abonniert das Projekt und rechnet Griff-Eingaben, 2D-/3D-Griffe, Zifferntasten der Werkzeuge und die Bindung von Befehlszeile und HUD, damit `App` das Projekt nicht abonniert ([121]) |
 | `InlineEditor.tsx` | kleiner schwebender Editor am Anker (Ebenen- und Geschoss-Eigenschaften); rein darstellend, die Felder rufen die übergebenen Patch-Handler |
 
 ## plan/

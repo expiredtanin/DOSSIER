@@ -4,7 +4,6 @@
 // `SettingsDialog` (Browser) und `openSettings` die Menüs und Panels.
 
 import { useEffect, useState, type RefObject } from "react";
-import type { Project } from "../model/types";
 import { lineEndsOf, setFieldIfChanged, type LineEnds } from "../core";
 import { isOffline, setOffline } from "../net/net";
 import { isTauriRuntime } from "../native/projectFile";
@@ -12,7 +11,7 @@ import { openSettingsWindowNative, useSettingsWindowHost } from "../native/setti
 import { useThemeModeState } from "../theme/useThemeMode";
 import type { PlanViewHandle } from "../views/plan/PlanView";
 import { t } from "../i18n";
-import type { RootState } from "./appStore";
+import { useStore, type RootState } from "./appStore";
 import { setAiAccessEnabled, setAiView, useAiAccess } from "./aiAccess";
 import { reconcileLayout } from "./layoutSlice";
 import { markSessionClean, markSessionStart } from "./startupGuard";
@@ -22,7 +21,6 @@ import type { useTopBarState } from "./useTopBarState";
 type TopBar = ReturnType<typeof useTopBarState>;
 
 export function useSettingsHost(opts: {
-  project: Project;
   applyChange: RootState["applyChange"];
   groupChanges: RootState["groupChanges"];
   notify: RootState["notify"];
@@ -36,7 +34,6 @@ export function useSettingsHost(opts: {
   setSettingsOpen: ReturnType<typeof useDialogState>["setSettingsOpen"];
 }) {
   const {
-    project,
     applyChange,
     groupChanges,
     notify,
@@ -93,14 +90,19 @@ export function useSettingsHost(opts: {
       applyChange((p) => setFieldIfChanged(p, "lineCap", e.cap === "butt" ? undefined : e.cap));
       applyChange((p) => setFieldIfChanged(p, "lineJoin", e.join === "miter" ? undefined : e.join));
     });
+  // Nur die drei Projekt-Felder abonnieren, die das Fenster zeigt ([121]).
+  const referenceElevationMasl = useStore((s) => s.project.referenceElevationMasl);
+  const scaleLineWeights = useStore((s) => s.project.scaleLineWeights === true);
+  const lineCap = useStore((s) => s.project.lineCap);
+  const lineJoin = useStore((s) => s.project.lineJoin);
   useSettingsWindowHost(
     {
       themeMode,
       marqueeColor,
       snapColor,
-      referenceElevationMasl: project.referenceElevationMasl,
-      scaleLineWeights: project.scaleLineWeights === true,
-      lineEnds: lineEndsOf(project),
+      referenceElevationMasl,
+      scaleLineWeights,
+      lineEnds: lineEndsOf({ lineCap, lineJoin }),
       offline,
       aiAccess,
       layout,

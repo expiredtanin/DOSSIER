@@ -27,9 +27,9 @@ export type BaseHost = Omit<PanelHostValue, "displayMode">;
 export type HostPart = Partial<BaseHost>;
 
 /**
- * Eingaben von `usePanelHostBase` (aus `App.tsx`). `project` und `selection` (Objekt-Info) sind keine
- * Host-Felder mehr ([121]): Panels lesen sie selbst aus dem Store (`useStore`, `useSelectionInfo`).
- * Die Handler brauchen sie aber weiter (jeweils die Fassung des letzten App-Renders).
+ * Eingaben der Teil-Bauer. `project` und `selection` (Objekt-Info) sind keine Host-Felder ([121]):
+ * Panels lesen sie selbst aus dem Store (`useStore`, `useSelectionInfo`). Die Handler brauchen sie
+ * aber weiter; `usePanelHostBase` setzt sie beim Bau aus dem Store (die App gibt nur `PanelHostInput`).
  */
 export type PanelHostOpts = {
   project: Project;
@@ -143,11 +143,14 @@ export type PanelHostOpts = {
   contextMenuState: Pick<ReturnType<typeof useContextMenuState>, "setMenu">;
 };
 
+/** Was `App` an `usePanelHostBase` gibt: alles ausser Projekt und Objekt-Info (die kommen aus dem Store). */
+export type PanelHostInput = Omit<PanelHostOpts, "project" | "selection">;
+
 /**
  * Packt die Unter-Bündel aus: ein flaches Objekt mit allen Werten und Handlern. Die Felder der obersten
  * Ebene (`selection` = Objekt-Info …) gehen vor gleichnamigen Feldern der Bündel.
  */
-export function flatHostOpts(o: PanelHostOpts) {
+export function flatHostOpts<O extends PanelHostInput>(o: O) {
   return {
     ...o.projectActions,
     ...o.selectionState,
@@ -160,4 +163,4 @@ export function flatHostOpts(o: PanelHostOpts) {
 }
 
 /** Flache Sicht auf die Eingaben (s. `flatHostOpts`). */
-export type FlatHostOpts = ReturnType<typeof flatHostOpts>;
+export type FlatHostOpts = ReturnType<typeof flatHostOpts<PanelHostOpts>>;

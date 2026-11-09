@@ -5,7 +5,8 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useMemo, useRef } from "react";
-import type { Layout, LayoutLegend, LayoutTable, LayoutTitleBlock, LayoutViewport, Project } from "../model/types";
+import type { Layout, LayoutLegend, LayoutTable, LayoutTitleBlock, LayoutViewport } from "../model/types";
+import { useStore } from "./appStore";
 import { addItems, patchItem } from "../core";
 import type { ProjectSlice } from "./projectSlice";
 import {
@@ -24,14 +25,16 @@ import { addLegend, patchLegend, removeLegend } from "../analysis/legend";
 import { useEventBundle } from "./useEvent";
 
 export function useSheetPane(opts: {
-  project: Project;
   activeLayoutId: string | null;
   setActiveLayoutId: (id: string | null) => void;
   activeLevelId: string;
   setActiveLevelId: (id: string) => void;
   applyChange: ProjectSlice["applyChange"];
 }) {
-  const { project, activeLayoutId, setActiveLayoutId, activeLevelId, setActiveLevelId, applyChange } = opts;
+  const { activeLayoutId, setActiveLayoutId, activeLevelId, setActiveLevelId, applyChange } = opts;
+  // Nur Layouts und Zeichnungsebenen abonnieren ([121]): eine Op an Bauteilen rendert den Aufrufer nicht.
+  const layouts = useStore((s) => s.project.layouts);
+  const drawingLevels = useStore((s) => s.project.drawingLevels);
   // ── Layout-Blatt (DOSSIER A3, Phase 2b): das offene Blatt + Viewport-Handler ─
   // Das offene Layout wird live aus dem Projekt gelesen (Single Source of Truth);
   // wurde es zwischenzeitlich gelöscht, ist es undefined → der Haupt-Viewport
@@ -39,7 +42,7 @@ export function useSheetPane(opts: {
   // pure CRUD-Ebene (panels/layoutModel.ts).
   const activeLayout =
     activeLayoutId !== null
-      ? (project.layouts ?? []).find((l) => l.id === activeLayoutId)
+      ? (layouts ?? []).find((l) => l.id === activeLayoutId)
       : undefined;
   const patchOpenLayout = (id: string, fn: (l: Layout) => Layout, coalesceKey?: string) =>
     applyChange((p) => patchItem(p, "layouts", id, fn), coalesceKey);
@@ -48,11 +51,11 @@ export function useSheetPane(opts: {
   // damit Werkzeuge, Befehle, Fang, Griffe, Auswahl und Undo genau wie im Grundriss wirken. Beim
   // Schliessen kehrt die vorige Ebene zurück; wählt man im Navigator eine andere Ebene, schliesst
   // das Blatt.
-  const sheetLevel = activeLayout ? sheetLevelOf(project, activeLayout.id) : undefined;
+  const sheetLevel = activeLayout ? sheetLevelOf({ drawingLevels }, activeLayout.id) : undefined;
   const levelBeforeSheetRef = useRef<string | null>(null);
   const enteredSheetRef = useRef<string | null>(null);
   useEffect(() => {
-    const current = project.drawingLevels.find((l) => l.id === activeLevelId);
+    const current = drawingLevels.find((l) => l.id === activeLevelId);
     if (activeLayout) {
       if (!sheetLevel) {
         // Layout ohne Blatt-Ebene (z. B. per CLI angelegt): einmal nachtragen.
@@ -75,8 +78,8 @@ export function useSheetPane(opts: {
     enteredSheetRef.current = null;
     if (current && !isSheetLevel(current)) return;
     const back =
-      project.drawingLevels.find((l) => l.id === levelBeforeSheetRef.current && !isSheetLevel(l)) ??
-      project.drawingLevels.find((l) => !isSheetLevel(l));
+      drawingLevels.find((l) => l.id === levelBeforeSheetRef.current && !isSheetLevel(l)) ??
+      drawingLevels.find((l) => !isSheetLevel(l));
     if (back && back.id !== activeLevelId) setActiveLevelId(back.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLayout?.id, sheetLevel?.id, activeLevelId]);

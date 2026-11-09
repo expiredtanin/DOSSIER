@@ -3,12 +3,16 @@
 // betreten/verlassen, Segment schneiden — samt der zugehörigen Tastenkürzel (gleiche Reihenfolge wie
 // zuvor in App). Aufgerufen von `App.tsx`; die Rückgaben speisen Kontextmenü (`AppContextMenu`),
 // Menüleisten, Export-Dialoge und die Hauptansicht.
+//
+// [121] Ohne Projekt-Abo: Handler lesen das Projekt beim Aufruf aus dem Store (`getState()`); was das
+// Kontextmenü im Render anzeigt (alles gesperrt? Ebenen der Auswahl …), rechnet `selectionMenuState`
+// im Menü selbst (`AppContextMenu` abonniert das Projekt, solange es offen ist).
 
 import { useMemo } from "react";
 import type { Drawing2D, DrawingLevel, Project, Vec2 } from "../model/types";
+import type { Selection } from "./selection";
 import { addItems, cmdMutation, fieldOps, opsMutation, patchItems, removeItems } from "../core";
 import type { ToolId } from "../tools/types";
-import type { MenuState } from "../menus/contextMenu";
 import type { DrawingStyle } from "../editors/matchProps";
 import { applyDrawingStyleOps, readDrawingStyle } from "../editors/matchProps";
 import { cutSegmentOps, splitOps } from "../editors/splitJoin";
@@ -28,15 +32,36 @@ import {
   useTransformShortcuts,
 } from "./useKeyboardShortcuts";
 import { TRANSFORM_COMMANDS } from "./useToolInput";
-import type { RootState } from "./appStore";
+import { getState, type RootState } from "./appStore";
 import type { useSelectionState } from "./useSelectionState";
 import type { useProjectActions } from "./useProjectActions";
 import type { useCommandEngineHost } from "./useCommandEngineHost";
 
 type Sel = ReturnType<typeof useSelectionState>;
 
+/**
+ * Anzeige-Werte des Kontextmenüs zur Auswahl (rein, aus Projekt + Auswahl): alles gesperrt, alles
+ * „nicht drucken", Ebenen der Auswahl (nur mit `withLayers`, teuer bei grossen Importen), Bemassungen
+ * mit Bezügen. Dieselbe Rechnung nutzen die Handler beim Aufruf.
+ */
+export function selectionMenuState(project: Project, selection: Selection, withLayers: boolean) {
+  const members: Partial<Record<MemberKind, string[]>> = toMembership(selection);
+  const lockIds = (Object.entries(members) as [MemberKind, string[]][]).flatMap(([kind, ids]) =>
+    ids.map((id) => [kind, id] as const),
+  );
+  const selectionAllLocked = lockIds.length > 0 && lockIds.every(([kind, id]) => isLocked(project, kind, id));
+  const selectionLayerCodes = withLayers ? selectionCategoryCodes(project, members) : [];
+  const selectionAllNoPrint =
+    selection.drawings.length > 0 &&
+    selection.drawings.every((id) => project.drawings2d.find((d) => d.id === id)?.noPrint);
+  const attachedDimensionIds = selection.drawings.filter((id) => {
+    const g = project.drawings2d.find((d) => d.id === id)?.geom;
+    return g?.shape === "dimension" && !!g.refs?.some(Boolean);
+  });
+  return { selectionAllLocked, selectionLayerCodes, selectionAllNoPrint, attachedDimensionIds };
+}
+
 export function useSelectionCommands(opts: {
-  project: Project;
   setProject: RootState["setProject"];
   applyChange: RootState["applyChange"];
   groupChanges: RootState["groupChanges"];
@@ -50,14 +75,12 @@ export function useSelectionCommands(opts: {
   engine: ReturnType<typeof useCommandEngineHost>["engine"];
   engineView: EngineView;
   shortcutOverrides: ShortcutOverrides;
-  menu: MenuState;
   drawingStyleClipboard: DrawingStyle | null;
   setDrawingStyleClipboard: (s: DrawingStyle | null) => void;
   onCommandOption: (id: string) => void;
   onRunCommand: (name: string) => void;
 }) {
   const {
-    project,
     setProject,
     applyChange,
     groupChanges,
@@ -71,12 +94,13 @@ export function useSelectionCommands(opts: {
     engine,
     engineView,
     shortcutOverrides,
-    menu,
     drawingStyleClipboard,
     setDrawingStyleClipboard,
     onCommandOption,
     onRunCommand,
   } = opts;
+  // Anzeige-Werte des Menüs, beim Aufruf eines Handlers frisch gerechnet.
+  const menuState = (withLayers = false) => selectionMenuState(getState().project, selection, withLayers);
 
   // Ob irgendeine löschbare Auswahl ansteht — geteilt zwischen dem Entf-
   // Tastatur-Handler unten und dem Menüpunkt „Bearbeiten > Löschen" (AppMenuBar).
@@ -101,6 +125,7 @@ export function useSelectionCommands(opts: {
     // `moveGrip`/`moveElementBy` im Kern, `grips.rs`, für dieselbe Prüfung
     // beim Ziehen). ExtrudedSolid/Kontext-Objekte haben kein `locked`-Feld
     // (s. deren Typdefinitionen) — bleiben ungefiltert.
+    const project = getState().project;
     const notLocked = (kind: MemberKind, ids: string[]) =>
       ids.filter((id) => !isLocked(project, kind, id));
     const dids = new Set(notLocked("drawingIds", selection.drawings));
@@ -138,7 +163,6 @@ export function useSelectionCommands(opts: {
   useSelectAllAndDeleteShortcut({
     activeTool,
     transformActive: TRANSFORM_COMMANDS.has(engineView.commandName ?? ""),
-    project,
     activeLevelId: activeLevel.id,
     shortcutOverrides,
     selection,
@@ -179,7 +203,7 @@ export function useSelectionCommands(opts: {
   ) => {
     const order = selection.drawings;
     if (order.length < 2) return;
-    const byId = new Map(project.drawings2d.map((d) => [d.id, d]));
+    const byId = new Map(getState().project.drawings2d.map((d) => [d.id, d]));
     // In Auswahl-Reihenfolge (Basis zuerst) auflösen.
     const srcs = order
       .map((id) => byId.get(id))
@@ -190,13 +214,13 @@ export function useSelectionCommands(opts: {
     applyChange((p) => [...removeItems(p, "drawings2d", replaced), ...addItems("drawings2d", result.created)]);
     setSelection({ drawings: result.created.map((d) => d.id), walls: [] });
   };
-  useBooleanOpsShortcut(selection.drawings, project.drawings2d, applyBoolean, shortcutOverrides);
+  useBooleanOpsShortcut(selection.drawings, applyBoolean, shortcutOverrides);
 
   // „Eigenschaften übertragen" (2D-Kontextmenü) — dasselbe Zwischenablage-
   // Muster wie beim Ebenen-Menü (`layerClipboard`), nur für den vollen
   // Aussehen-Stil eines 2D-Elements (s. `editors/matchProps.ts`).
   const copyDrawingStyle = () => {
-    const d = project.drawings2d.find((x) => x.id === selection.drawings[0]);
+    const d = getState().project.drawings2d.find((x) => x.id === selection.drawings[0]);
     if (d) setDrawingStyleClipboard(readDrawingStyle(d));
   };
   const pasteDrawingStyle = () => {
@@ -214,25 +238,23 @@ export function useSelectionCommands(opts: {
   const selectionLockIds = (
     Object.entries(selectionLockMembers) as [MemberKind, string[]][]
   ).flatMap(([kind, ids]) => ids.map((id) => [kind, id] as const));
-  const selectionAllLocked =
-    selectionLockIds.length > 0 &&
-    selectionLockIds.every(([kind, id]) => isLocked(project, kind, id));
   const toggleSelectionLock = () => {
     if (selectionLockIds.length === 0) return;
+    const { selectionAllLocked } = menuState();
     applyChange((p) => lockMembersOps(p, selectionLockMembers, !selectionAllLocked));
   };
 
-  // Ebene(n) der Auswahl ausblenden / isolieren (Kontextmenü). Nur bei geöffnetem
-  // Menü berechnet — bei Kataster-Importen (~10^5 Zeichnungen) nicht bei jedem Render.
-  const selectionLayerCodes = menu
-    ? selectionCategoryCodes(project, groupMembers)
-    : [];
+  // Ebene(n) der Auswahl ausblenden / isolieren (Kontextmenü). Die Codes rechnet das offene Menü
+  // (`selectionMenuState`) bzw. der Handler beim Aufruf — bei Kataster-Importen (~10^5 Zeichnungen)
+  // nicht bei jedem Render.
   const hideSelectionLayers = () => {
+    const { selectionLayerCodes } = menuState(true);
     if (selectionLayerCodes.length === 0) return;
     const codes = new Set(selectionLayerCodes);
     applyChange((p) => fieldOps(p, "layers", setCategoriesVisible(p.layers, codes, false)));
   };
   const isolateSelectionLayers = () => {
+    const { selectionLayerCodes } = menuState(true);
     if (selectionLayerCodes.length === 0) return;
     const codes = new Set(selectionLayerCodes);
     applyChange((p) => fieldOps(p, "layers", isolateCategories(p.layers, codes)));
@@ -241,21 +263,15 @@ export function useSelectionCommands(opts: {
   // „Nicht drucken"/„Drucken" (Kontextmenü) — nur `Drawing2D` kennt
   // `noPrint` (Nutzer-Wunsch „Kein 'nicht druckend'-Flag im Modell"), daher
   // simpler als die Sperre oben: direkt über `selection.drawings`.
-  const selectionAllNoPrint =
-    selection.drawings.length > 0 &&
-    selection.drawings.every((id) => project.drawings2d.find((d) => d.id === id)?.noPrint);
   const toggleSelectionNoPrint = () => {
     if (selection.drawings.length === 0) return;
-    const next = !selectionAllNoPrint;
+    const next = !menuState().selectionAllNoPrint;
     applyChange((p) => patchItems(p, "drawings2d", selection.drawings, (d) => ({ ...d, noPrint: next })));
   };
 
   // „Bemassung lösen" ([38]): gewählte Bemassungen mit Bezügen auf Modell-Elemente.
-  const attachedDimensionIds = selection.drawings.filter((id) => {
-    const g = project.drawings2d.find((d) => d.id === id)?.geom;
-    return g?.shape === "dimension" && !!g.refs?.some(Boolean);
-  });
   const detachDimensions = () => {
+    const { attachedDimensionIds } = menuState();
     if (attachedDimensionIds.length) applyChange((p) => cmdMutation({ cmd: "dimdetach", ids: attachedDimensionIds }).toOps(p));
   };
 
@@ -265,7 +281,6 @@ export function useSelectionCommands(opts: {
   const applyGroupSelection = (mem: GroupMembership, groupIds: string[]) =>
     setSelection({ ...fromIdLists(mem), groups: groupIds });
   useGroupShortcut(
-    project,
     applyChange,
     groupMembers,
     selection.groups,
@@ -304,7 +319,7 @@ export function useSelectionCommands(opts: {
                   : null;
     const id = hit.wallId ?? hit.drawingId ?? hit.ceilingId ?? hit.roomId ?? hit.stairId ?? hit.columnId ?? hit.roofId;
     if (!kind || !id) return false;
-    const gid = containingGroupId(project, kind, id, groupPath);
+    const gid = containingGroupId(getState().project, kind, id, groupPath);
     if (!gid) return false;
     setGroupPath([...groupPath, gid]);
     applyGroupSelection({ ...EMPTY_MEMBERSHIP }, []);
@@ -350,14 +365,10 @@ export function useSelectionCommands(opts: {
     pasteDrawingStyle,
     selectionLockMembers,
     selectionLockIds,
-    selectionAllLocked,
     toggleSelectionLock,
-    selectionLayerCodes,
     hideSelectionLayers,
     isolateSelectionLayers,
-    selectionAllNoPrint,
     toggleSelectionNoPrint,
-    attachedDimensionIds,
     detachDimensions,
     onEnterGroup,
     onLeaveGroup,

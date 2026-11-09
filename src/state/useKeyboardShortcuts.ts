@@ -22,6 +22,7 @@ import type { BooleanResult } from "../editors/booleanOps";
 import { groupSelection, mergeMembership, ungroup, EMPTY_MEMBERSHIP } from "./groupActions";
 import type { GroupMembership } from "./groupActions";
 import { clearKinds, fromIdLists, isEmpty } from "./selection";
+import { getState } from "./appStore";
 import type { Selection } from "./selection";
 import {
   collectElementClipboard,
@@ -250,7 +251,6 @@ export function useSelectAllAndDeleteShortcut(opts: {
   activeTool: ToolId;
   /** Läuft Bewegen/Drehen/Spiegeln? Dann löscht Entf nicht. */
   transformActive: boolean;
-  project: Project;
   activeLevelId: string;
   shortcutOverrides: ShortcutOverrides;
   selection: Selection;
@@ -261,7 +261,6 @@ export function useSelectAllAndDeleteShortcut(opts: {
   const {
     activeTool,
     transformActive,
-    project,
     activeLevelId,
     shortcutOverrides,
     setSelection,
@@ -286,6 +285,8 @@ export function useSelectAllAndDeleteShortcut(opts: {
       // Alles auswählen (alle Bauteilarten des aktiven Geschosses/der Ebene +
       // die Schnittlinien-Symbole, die auf JEDEM Grundriss erscheinen).
       if (matchesShortcut(e, "selectAll", shortcutOverrides)) {
+        // Projekt beim Tastendruck aus dem Store ([121]: App abonniert es nicht mehr).
+        const project = getState().project;
         const wallIds = project.walls
           .filter((w) => w.floorId === activeLevelId)
           .map((w) => w.id);
@@ -377,16 +378,6 @@ export function useSelectAllAndDeleteShortcut(opts: {
     opts.transformActive,
     opts.shortcutOverrides,
     opts.selection,
-    opts.project.walls,
-    opts.project.drawings2d,
-    opts.project.ceilings,
-    opts.project.openings,
-    opts.project.roofs,
-    opts.project.stairs,
-    opts.project.rooms,
-    opts.project.extrudedSolids,
-    opts.project.columns,
-    opts.project.drawingLevels,
     opts.activeLevelId,
   ]);
 }
@@ -458,7 +449,6 @@ export function useElementClipboardShortcut(
   elementClipboard: ElementClipboard | null,
   setElementClipboard: (c: ElementClipboard | null) => void,
   activeLevelId: string,
-  project: Project,
   applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[])) => void,
   setSelection: (patch: Partial<Selection>) => void,
   overrides: ShortcutOverrides,
@@ -470,7 +460,7 @@ export function useElementClipboardShortcut(
       if (!isCopy && !isPaste) return;
       if (isEditableTarget(e)) return;
       if (isCopy) {
-        const clip = collectElementClipboard(project, sel);
+        const clip = collectElementClipboard(getState().project, sel);
         if (!clip) return; // nichts gewählt → natives Browser-Copy zulassen
         e.preventDefault();
         setElementClipboard(clip);
@@ -511,7 +501,7 @@ export function useElementClipboardShortcut(
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel, elementClipboard, activeLevelId, project, overrides]);
+  }, [sel, elementClipboard, activeLevelId, overrides]);
 }
 
 /**
@@ -522,7 +512,6 @@ export function useElementClipboardShortcut(
  */
 export function useBooleanOpsShortcut(
   selectedDrawingIds: string[],
-  drawings2d: Drawing2D[],
   applyBoolean: (op: (srcs: Drawing2D[]) => BooleanResult) => void,
   overrides: ShortcutOverrides,
 ): void {
@@ -544,7 +533,7 @@ export function useBooleanOpsShortcut(
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDrawingIds, drawings2d, overrides]);
+  }, [selectedDrawingIds, overrides]);
 }
 
 /**
@@ -611,7 +600,6 @@ export function useTransformShortcuts(
  * Gruppen-Erweiterung beim Klicken in `useMouseSelectionHandlers.ts`).
  */
 export function useGroupShortcut(
-  project: Project,
   applyChange: (ops: readonly CoreOp[]) => void,
   currentSelection: GroupMembership,
   selectedGroupIds: string[],
@@ -629,6 +617,7 @@ export function useGroupShortcut(
         // Ungruppieren: für jede gewählte Gruppe eine Hülle auflösen; ihre
         // direkten Mitglieder (+ Untergruppen) werden die neue Auswahl.
         if (selectedGroupIds.length === 0) return;
+        const project = getState().project;
         const ops: CoreOp[] = [];
         let members: GroupMembership = { ...EMPTY_MEMBERSHIP };
         const newGroupIds: string[] = [];
@@ -652,5 +641,5 @@ export function useGroupShortcut(
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, currentSelection, selectedGroupIds, overrides]);
+  }, [currentSelection, selectedGroupIds, overrides]);
 }

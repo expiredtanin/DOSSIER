@@ -4,9 +4,9 @@
 // Raumstempel-Editor und der Drop-Rahmen — in derselben Reihenfolge wie zuvor. Gerendert von
 // `App.tsx` nach der Status-Leiste; Zustand und Handler kommen aus den Hooks der App.
 
-import type { Project, DrawingLevel } from "../model/types";
+import type { DrawingLevel } from "../model/types";
 import { lineEndsOf, setFieldIfChanged } from "../core";
-import type { RootState } from "../state/appStore";
+import { getState, useStore, type RootState } from "../state/appStore";
 import { setAiAccessEnabled } from "../state/aiAccess";
 import { reconcileLayout } from "../state/layoutSlice";
 import type { useCommandEngineHost } from "../state/useCommandEngineHost";
@@ -43,7 +43,6 @@ type ToolState = ReturnType<typeof useDrawingToolState>;
 type Menu = ReturnType<typeof useContextMenuState>;
 
 export function AppDialogs(props: {
-  project: Project;
   applyChange: RootState["applyChange"];
   layout: RootState["layout"];
   setLayout: RootState["setLayout"];
@@ -73,7 +72,6 @@ export function AppDialogs(props: {
   setStampEditorRoomId: Menu["setStampEditorRoomId"];
 }) {
   const {
-    project,
     applyChange,
     layout,
     setLayout,
@@ -134,6 +132,11 @@ export function AppDialogs(props: {
   const { themeMode, setThemeMode, offline, onOfflineChange, aiAccess, setScaleLineWeights, setLineEnds } = props.settings;
   const { exportContentMeters, onExportPdf, onExportSvg, onExportDxf } = props.planExport;
   const { patchWindowType, patchDoorType, updateOpening, saveOpeningStyle, setRoomStamp, setRoomStampDoc } = props.pa;
+  // Das Projekt nur abonnieren, solange ein Dialog offen ist, der es zeigt ([121]): sonst rendert eine Op
+  // am Modell hier nichts. `App` reicht es nicht mehr durch.
+  const needsProject = resourcesOpen || openingEditorId != null || !!importState || settingsOpen;
+  const subscribed = useStore((s) => (needsProject ? s.project : null));
+  const project = subscribed ?? getState().project;
   return (
     <>
     {/* Frei schwebendes, NICHT-modales Ressourcen-Fenster: kein Backdrop, der

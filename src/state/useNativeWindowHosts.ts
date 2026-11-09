@@ -3,7 +3,7 @@
 // (`src/native/*Window.ts`). Ausserhalb von Tauri sind die Hosts No-ops; `openLayerSettings` öffnet
 // dann den Inline-Editor. Aufgerufen von `App.tsx`.
 
-import type { ContextObject, Project } from "../model/types";
+import type { ContextObject } from "../model/types";
 import { setFieldIfChanged } from "../core";
 import { isTauriRuntime } from "../native/projectFile";
 import { useContextImportWindowHost } from "../native/contextImportWindow";
@@ -11,14 +11,13 @@ import { useDrawingLevelsWindowHost } from "../native/drawingLevelsWindow";
 import { openLayerSettingsWindowNative, useLayerSettingsWindowHost } from "../native/layerSettingsWindow";
 import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
 import type { useContextMenuState } from "../menus/useContextMenuState";
-import type { RootState } from "./appStore";
+import { useStore, type RootState } from "./appStore";
 import type { useDisplayResolvers } from "./useDisplayResolvers";
 import type { useProjectActions } from "./useProjectActions";
 
 type Menu = ReturnType<typeof useContextMenuState>;
 
 export function useNativeWindowHosts(opts: {
-  project: Project;
   applyChange: RootState["applyChange"];
   activeLevelId: string;
   setActiveLevelId: RootState["setActiveLevelId"];
@@ -30,7 +29,6 @@ export function useNativeWindowHosts(opts: {
   pa: ReturnType<typeof useProjectActions>;
 }) {
   const {
-    project,
     applyChange,
     activeLevelId,
     setActiveLevelId,
@@ -53,7 +51,12 @@ export function useNativeWindowHosts(opts: {
 
   // Ebeneneinstellungen als eigenes natives Fenster (DOSSIER-Rhino-Referenz)
   // — ersetzt unter Tauri den InlineEditor-Popover, s. native/layerSettingsWindow.ts.
-  useLayerSettingsWindowHost(project, nativeLayerSettingsCode, patchCategory);
+  // Schmale Abos ([121]): Ebenen-Baum, Schraffuren, Standort-Bezug, Zeichnungsebenen.
+  const layers = useStore((s) => s.project.layers);
+  const hatches = useStore((s) => s.project.hatches);
+  const geoAnchor = useStore((s) => s.project.geoAnchor);
+  const drawingLevels = useStore((s) => s.project.drawingLevels);
+  useLayerSettingsWindowHost({ layers, hatches }, nativeLayerSettingsCode, patchCategory);
   const openLayerSettings = (code: string, x: number, y: number) => {
     if (isTauriRuntime()) {
       setNativeLayerSettingsCode(code);
@@ -64,7 +67,7 @@ export function useNativeWindowHosts(opts: {
   };
 
   // Standort-Import als eigenes natives Fenster — s. native/contextImportWindow.ts.
-  useContextImportWindowHost(project.geoAnchor, {
+  useContextImportWindowHost(geoAnchor, {
     onImport: (objs) => addContextObjectsAndFit(objs as ContextObject[]),
     onSetGeoAnchor: (anchor) => applyChange((p) => setFieldIfChanged(p, "geoAnchor", anchor)),
   });
@@ -75,7 +78,7 @@ export function useNativeWindowHosts(opts: {
   // bewusst nicht mitgenommen).
   useDrawingLevelsWindowHost(
     {
-      drawingLevels: project.drawingLevels.filter((z) => !z.layoutId),
+      drawingLevels: drawingLevels.filter((z) => !z.layoutId),
       activeLevelId,
       displayMode: drawingLevelsMode,
     },

@@ -454,7 +454,7 @@ export function isSheetLevel(level: Pick<DrawingLevel, "layoutId"> | undefined |
 }
 
 /** Die Blatt-Ebene des Layouts `layoutId`, falls vorhanden. */
-export function sheetLevelOf(project: Project, layoutId: string): DrawingLevel | undefined {
+export function sheetLevelOf(project: Pick<Project, "drawingLevels">, layoutId: string): DrawingLevel | undefined {
   return project.drawingLevels.find((l) => l.layoutId === layoutId);
 }
 
@@ -488,7 +488,7 @@ export function findSnapshot(
 
 /** Findet das Masterlayout eines Layouts (falls gebunden). */
 export function findMaster(
-  project: Project,
+  project: Pick<Project, "masterLayouts">,
   layout: Layout,
 ): MasterLayout | undefined {
   if (!layout.masterId) return undefined;

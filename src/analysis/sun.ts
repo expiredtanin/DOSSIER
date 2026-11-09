@@ -26,7 +26,7 @@ export function sunPosition(latDeg: number, lonDeg: number, when: Date): SunPosi
 }
 
 /** Breite/Länge des Projekts aus `geoAnchor` (LV95), sonst Zürich als Platzhalter. */
-export function projectLatLon(project: Project): { lat: number; lon: number } {
+export function projectLatLon(project: Pick<Project, "geoAnchor">): { lat: number; lon: number } {
   const a = project.geoAnchor;
   if (a) {
     const p = lv95ToWgs84(a.lv95.e, a.lv95.n);
