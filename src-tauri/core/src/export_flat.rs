@@ -1,6 +1,6 @@
 //! Gemeinsames für die Export-Sammler im Kern ([K4], [B5], [C11]): der flache Puffer, den die
 //! Schreiber in `src-tauri/fileio` lesen (Zahlen + Zeichenkettenliste, Kodierung dort in
-//! `ifc_export.rs`/`mesh_export.rs`), die Byte-Hülle für die Übergabe an TS und Netz-Helfer
+//! `ifc_export/mod.rs`/`mesh_export.rs`), die Byte-Hülle für die Übergabe an TS und Netz-Helfer
 //! (Wicklung nach aussen, Volumen). Port von `src/export/meshOrient.ts` und den Puffer-Klassen aus
 //! `exportIfc.ts`/`exportMesh.ts`; Rechenreihenfolge wie dort, damit die Dateien zeichengleich bleiben.
 //!

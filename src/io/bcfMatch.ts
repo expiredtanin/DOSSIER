@@ -1,6 +1,6 @@
 // BCF ↔ Dossier: IFC-GlobalId eines Komponenten-Verweises ↔ Bauteil-ids des Projekts.
 //
-// Dieselbe Ableitung wie der IFC-Export (`exportIfc.ts`/`ifc_export.rs`: `ifcGuid("<Projekt-id>/<Art>/<id>")`),
+// Dieselbe Ableitung wie der IFC-Export (`exportIfc.ts`/`ifc_export/mod.rs`: `ifcGuid("<Projekt-id>/<Art>/<id>")`),
 // damit die Rundreise Dossier → IFC → Solibri → BCF → Dossier trifft. Importierte Meshes tragen die
 // GlobalId ihres Quell-Bauteils (`ImportedMesh.ifcGlobalId`). Bauteile, die im Export nicht vorkommen
 // (2D-Zeichnungen, Gruppen), haben keine GlobalId.

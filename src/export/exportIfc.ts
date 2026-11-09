@@ -4,12 +4,12 @@
 // Puffer (`src-tauri/core/src/ifc_data.rs`, Abfrage `ifcExportData`: Wand-Bänder, Öffnungen samt
 // Füllungs-Parametern, Treppen-Teile, Dach-Netze, Räume, Zonen, Geschoss-Kennwerte, Basismengen,
 // Klassifikation, Georeferenz), das Format-Modul schreibt daraus die Datei
-// (`src-tauri/fileio/src/ifc_export.rs`: Entitäten, GUIDs, Typen mit Materialschichten, Psets,
+// (`src-tauri/fileio/src/ifc_export/mod.rs`: Entitäten, GUIDs, Typen mit Materialschichten, Psets,
 // Beziehungen). Zwei WASM-Module, die Bytes reichen von einem zum anderen; TS gibt nur Optionen und
 // den Zeitstempel weiter. Verlangt das geladene Format-Modul (`await loadFileio()`, wie
 // `buildPlanDxf`). Der Download passiert im App-Layer.
 //
-// Abbildung und Grenzen: Kopf von `ifc_data.rs` und `ifc_export.rs`, `TODO.md` [B5].
+// Abbildung und Grenzen: Kopf von `ifc_data.rs` und `ifc_export/mod.rs`, `TODO.md` [B5].
 
 import type { Project } from "../model/types";
 import { fileio } from "../engine/fileioWasm";
@@ -31,12 +31,12 @@ export interface IfcExportOptions {
   layerCodes?: boolean;
 }
 
-/** Deterministische 22-stellige IFC-GUID aus einem Namen (Rust, `ifc_export.rs::ifc_guid`). */
+/** Deterministische 22-stellige IFC-GUID aus einem Namen (Rust, `ifc_export::ifc_guid`). */
 export function ifcGuid(name: string): string {
   return fileio().ifc_guid(name);
 }
 
-/** STEP-String-Literal mit Apostrophen, Nicht-ASCII als `\X2\`/`\X4\` (Rust, `ifc_export.rs::ifc_string`). */
+/** STEP-String-Literal mit Apostrophen, Nicht-ASCII als `\X2\`/`\X4\` (Rust, `ifc_export::ifc_string`). */
 export function ifcString(s: string): string {
   return fileio().ifc_string(s);
 }

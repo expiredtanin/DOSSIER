@@ -380,7 +380,7 @@ Es gibt drei Schatten, alle aus derselben Sonnenstudie (`Project.sunStudy`, Ort 
    `ifc_export_data()` (`src-tauri/core/src/ifc_data.rs`) Wand-Bänder, Öffnungen, Treppen
    (`ifc_stairs.rs`), Dach-Netze, Räume, Basismengen (`ifc_quantities.rs`), Klassifikation und
    Georeferenz in einen Export-Puffer (`export_flat.rs`).
-2. `fileio` schreibt daraus die Datei: `export_ifc_flat()` in `src-tauri/fileio/src/ifc_export.rs`
+2. `fileio` schreibt daraus die Datei: `export_ifc_flat()` in `src-tauri/fileio/src/ifc_export/mod.rs`
    (Entitäten, GUIDs, Typen mit Materialschichten, Psets, Beziehungen), Öffnungs-Geometrie in
    `ifc_openings.rs`.
 3. Prüfung gegen IfcOpenShell: `scripts/validate-ifc.py`, Test `src/export/exportIfc.validate.test.ts`
@@ -585,7 +585,7 @@ deutscher Nachricht, die mit der TODO-Nummer beginnt; `TODO.md` im selben Commit
 ### Grosse Dateien (über 2000 Zeilen)
 
 Stand 8.11.2026, ohne Build-Ausgaben. Nur Vorschläge; nichts davon ist beschlossen. Erledigt (`[162]`, 9.11.):
-`plan/section.rs` → Ordner `plan/section/`, `model3d.rs` → Ordner `model3d/`. Rust-Tests stehen
+`plan/section.rs` → Ordner `plan/section/`, `model3d.rs` → Ordner `model3d/`; `[164]` (9.11.): `kernel2d/src/lib.rs` → `vec`, `intersect`, `offset`, `fillet`, `trim`, `outline`, `stairs`, `rooms`, `opening`, `tests` neben `lib.rs`; `fileio/src/ifc_export.rs` → Ordner `ifc_export/` (`format`, `reader`, `types`, `builder`, `tests`; `build_ifc` mit rund 1000 Zeilen bleibt in `mod.rs`, eine Funktion lässt sich nicht ohne Logikänderung teilen). Rust-Tests stehen
 meist als `mod tests` am Dateiende; sie in eine eigene Datei `<name>_tests.rs` zu verschieben, ist der
 einfachste erste Schritt (Muster: `drawing_recognize_tests.rs`, `plan/wall_join_tests.rs`).
 
@@ -595,9 +595,7 @@ einfachste erste Schritt (Muster: `drawing_recognize_tests.rs`, `plan/wall_join_
 | `src-tauri/core/src/model/generated.rs` | 6089 | Nach Fachgebiet teilen (Bauteile, Typen und Stile, Ebenen und Ansichten, Layouts, Kontext), Wiederexport in `model/mod.rs`. Name „generated" ist irreführend; die Datei wird von Hand gepflegt. |
 | `src/views/plan/PlanView.tsx` | 3902 | Weitere Hooks herauslösen: Engine-Wahl und GPU-Brücke, Picken und Marquee, Kamera und Zoom, SVG-Überlagerung. Teile liegen schon in `src/views/plan/planView/`. |
 | `src/model/types.generated.ts` | 3844 | Erzeugt; nicht teilen. Folgt einer Teilung von `generated.rs` nicht zwingend. |
-| `src-tauri/fileio/src/ifc_export.rs` | 3656 | Entitäten und GUIDs, Typen mit Materialschichten, Psets und Mengen, Beziehungen, Klassifikation; Tests (rund 1200 Zeilen) auslagern. |
 | `src/i18n/de.ts`, `src/i18n/en.ts` | 3587, 3571 | Nach Präfix (`cmd.*`, `panel.*`, `menu.*` …) in Teil-Wörterbücher, zusammengeführt in `src/i18n/translate.ts`. Vorher klären, ob parallele Arbeit damit leichter oder schwerer wird. |
-| `src-tauri/kernel2d/src/lib.rs` | 3246 | Module je Werkzeug: Vektor-Grundlagen, Schnittpunkte, Offset, Fillet und Fase, Trim und Extend, Split und Join, Flächen. Tests (rund 600 Zeilen) auslagern. |
 | `src-tauri/core/src/plan/elevation.rs` | 3226 | Flächen-Aufbau, Ansichtsschraffur, Öffnungen, Stil und Maler-Ordnung trennen; Geometrie liegt schon in `elevation_geom.rs`. Tests auslagern. |
 | `src/App.tsx` | 2957 | Fortsetzung von `[121]`: Kontextmenü-Verdrahtung und Werkzeug-Handler in Hooks unter `src/state/`. |
 | `src/panels/ObjectInfoPanel.tsx` | 2847 | Je Element-Art eine Datei (`WallSection`, `OpeningSection`, `RoofSection`, `StairSection` …) in einem Ordner `src/panels/objectInfo/`. |
