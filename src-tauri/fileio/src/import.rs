@@ -80,6 +80,9 @@ pub struct Contour {
     pub closed: bool,
     pub filled: bool,
     pub curve: Option<Curve>,
+    /// [143] Die Höhen der Stützpunkte sind nicht einheitlich (3D-Polylinie mit Gefälle): `z` ist dann nur der
+    /// erste Wert und die Kontur keine Höhenlinie.
+    pub z_varies: bool,
     /// Polylinie mit Bögen (LWPOLYLINE/POLYLINE, Schraffur-Rand aus einer Polylinie): die Stützpunkte
     /// `[x, y, bulge]` (abgebildet, in Metern), damit die 2D-Zeichnung echte Bogen-Segmente bekommt
     /// statt des fein zerlegten Linienzugs (`pts` bleibt tesselliert für Kontext und Fang). Nur wenn
@@ -535,6 +538,15 @@ fn finite2(p: &Vector3) -> bool {
     p.x.is_finite() && p.y.is_finite()
 }
 
+/// [143] Wechselt die Höhe der Stützpunkte (mehr als 1 mm)?
+fn z_varies(verts: &[(Vector3, f64)]) -> bool {
+    let mut zs = verts.iter().filter(|(v, _)| finite2(v)).map(|(v, _)| fz(v.z));
+    match zs.next() {
+        Some(first) => zs.any(|z| (z - first).abs() > 1e-3),
+        None => false,
+    }
+}
+
 fn fz(z: f64) -> f64 {
     if z.is_finite() {
         z
@@ -589,8 +601,18 @@ impl<'a> Mapper<'a> {
             closed,
             filled: false,
             curve: None,
+            z_varies: false,
             bulge_verts: None,
         });
+    }
+
+    /// [143] Kennzeichnet die zuletzt angelegte Kontur als „Höhe wechselt".
+    fn mark_z_varies(&mut self, varies: bool) {
+        if varies {
+            if let Some(c) = self.contours.last_mut() {
+                c.z_varies = true;
+            }
+        }
     }
 
     /// Polylinie mit Bulges: tesselliert wie bisher, dazu (wenn sinnvoll) die Stützpunkte mit Bulge
@@ -650,7 +672,9 @@ impl<'a> Mapper<'a> {
                     p.vertices.iter().filter(|v| v.flags & 16 == 0).map(|v| (v.position, 0.0)).collect();
                 let z = verts.iter().find(|(v, _)| finite2(v)).map(|(v, _)| fz(v.z)).unwrap_or(fz(p.elevation));
                 let pts = bulge_points(&verts, false);
+                let varies = z_varies(&verts);
                 self.push_contour(layer, z, pts, p.flags.closed, xf);
+                self.mark_z_varies(varies);
             }
             EntityType::Polyline(p) => {
                 let verts: Vec<(Vector3, f64)> = p
@@ -661,7 +685,9 @@ impl<'a> Mapper<'a> {
                     .collect();
                 let z = verts.iter().find(|(v, _)| finite2(v)).map(|(v, _)| fz(v.z)).unwrap_or(0.0);
                 let pts = bulge_points(&verts, false);
+                let varies = z_varies(&verts);
                 self.push_contour(layer, z, pts, p.flags.is_closed(), xf);
+                self.mark_z_varies(varies);
             }
             EntityType::Arc(a) => self.arc(a.center, a.radius, a.start_angle, a.end_angle, layer, xf),
             EntityType::Circle(c) => self.circle(c.center, c.radius, layer, xf),
@@ -1916,7 +1942,8 @@ pub fn encode(data: &ImportData) -> (Vec<f64>, Vec<String>) {
         let flags = u8::from(c.closed)
             | (u8::from(c.filled) << 1)
             | (u8::from(c.curve.is_some()) << 2)
-            | (u8::from(c.bulge_verts.is_some()) << 3);
+            | (u8::from(c.bulge_verts.is_some()) << 3)
+            | (u8::from(c.z_varies) << 4);
         g.push(f64::from(flags));
         g.push(c.z);
         if let Some(cv) = c.curve {

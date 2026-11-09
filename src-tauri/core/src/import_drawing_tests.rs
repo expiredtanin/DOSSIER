@@ -259,3 +259,112 @@ fn zeitmessung_kataster() {
     doc.commit(r.ops, None, 0.0, false).unwrap();
     eprintln!("commit {:?}", t.elapsed());
 }
+
+// ── [143] Höhenlinien als Gelände ────────────────────────────────────────────
+
+fn line(layer: &str, z: f64, pts: &[[f64; 2]]) -> Contour {
+    Contour { layer: layer.into(), z, closed: false, filled: false, curve: None, z_varies: false, pts: pts.to_vec(), bulge: None }
+}
+
+fn text(layer: &str, s: &str, x: f64, y: f64) -> Text {
+    Text { layer: layer.into(), text: s.into(), x, y, height: 0.5, angle: 0.0 }
+}
+
+#[test]
+fn hoehenlinien_layername_und_erhebung() {
+    use crate::import_terrain::{detect, is_contour_layer_name};
+    for n in ["Höhenlinien", "HL", "A-CONTOUR_5m", "Kote", "hoehenlinie_neu", "ISO-Linien"] {
+        assert!(is_contour_layer_name(n), "{n}");
+    }
+    for n in ["Wände", "0", "Strassen", "Hilfslinien", "Text"] {
+        assert!(!is_contour_layer_name(n), "{n}");
+    }
+    let d = DrawingImport {
+        contours: vec![
+            line("Höhenlinien", 432.0, &[[0.0, 0.0], [5.0, 1.0], [9.0, 0.0]]),
+            line("Höhenlinien", 433.0, &[[0.0, 3.0], [9.0, 3.0]]),
+            line("Wände", 0.0, &[[0.0, 0.0], [1.0, 0.0]]),
+        ],
+        ..Default::default()
+    };
+    let det = detect(&d);
+    assert_eq!(det.lines, vec![(0, 432.0), (1, 433.0)]);
+}
+
+#[test]
+fn hoehenlinien_ohne_hinweis_nur_bei_eindeutigem_muster() {
+    use crate::import_terrain::detect;
+    let mk = |zs: &[f64]| DrawingImport {
+        contours: zs.iter().enumerate().map(|(i, &z)| line("Linien", z, &[[0.0, i as f64], [4.0, i as f64]])).collect(),
+        ..Default::default()
+    };
+    assert_eq!(detect(&mk(&[430.0, 431.0, 432.0])).lines.len(), 3);
+    assert!(detect(&mk(&[430.0, 431.0])).lines.is_empty(), "zu wenige Linien");
+    assert!(detect(&mk(&[3.0, 3.0, 3.0])).lines.is_empty(), "eine Höhe = Geschossdecke o. Ä.");
+    assert!(detect(&mk(&[0.0, 0.0, 0.0])).lines.is_empty(), "ohne Höhe");
+    // 3D-Polylinie mit Gefälle ist keine Höhenlinie.
+    let mut d = mk(&[430.0, 431.0, 432.0, 433.0]);
+    d.contours[1].z_varies = true;
+    assert_eq!(detect(&d).lines.len(), 3);
+}
+
+#[test]
+fn hoehenlinien_aus_hoehentexten() {
+    use crate::import_terrain::{detect, parse_height};
+    assert_eq!(parse_height("432.50"), Some(432.5));
+    assert_eq!(parse_height(" +432,5 m "), Some(432.5));
+    assert_eq!(parse_height("-1.2"), Some(-1.2));
+    assert_eq!(parse_height("EG 432"), None);
+    assert_eq!(parse_height(""), None);
+    let d = DrawingImport {
+        contours: vec![
+            line("Höhenlinien", 0.0, &[[0.0, 0.0], [10.0, 0.0]]),
+            line("Höhenlinien", 0.0, &[[0.0, 5.0], [10.0, 5.0]]),
+            line("Höhenlinien", 0.0, &[[0.0, 50.0], [10.0, 50.0]]), // ohne Text
+        ],
+        texts: vec![text("Beschriftung", "432.5", 5.0, 0.2), text("Beschriftung", "433,0", 5.0, 4.9), text("Beschriftung", "Haus", 5.0, 0.1), text("Beschriftung", "99", 80.0, 80.0)],
+        ..Default::default()
+    };
+    let det = detect(&d);
+    assert_eq!(det.lines, vec![(0, 432.5), (1, 433.0)]);
+    assert_eq!(det.used_texts, vec![0, 1]);
+    assert_eq!(det.from_texts, 2);
+}
+
+#[test]
+fn import_hoehenlinien_als_contour_set() {
+    let d = DrawingImport {
+        contours: vec![
+            line("Höhenlinien", 432.0, &[[0.0, 0.0], [5.0, 1.0], [9.0, 0.0]]),
+            line("Höhenlinien", 433.0, &[[0.0, 3.0], [9.0, 3.0]]),
+            line("Wände", 0.0, &[[0.0, 0.0], [1.0, 0.0]]),
+        ],
+        texts: vec![text("Wände", "Haus", 1.0, 1.0)],
+        ..Default::default()
+    };
+    let dec = |on: bool| decision(json!({"target": {"kind": "new", "name": "HL"}, "categoryMode": "active", "activeCategoryCode": "20", "terrainContours": on, "terrainName": "Höhenlinien (Import)"}));
+    let r = import_ops(&project(), &d, &dec(true), 1000.0);
+    assert_eq!(r.terrain_contours, 2);
+    assert_eq!(r.drawings, 2, "Wand-Linie und Text bleiben Zeichnung");
+    let set = r
+        .ops
+        .iter()
+        .find_map(|o| match o {
+            Op::Add { collection, items, .. } if collection == "context" => Some(items[0].clone()),
+            _ => None,
+        })
+        .expect("contourSet");
+    assert_eq!(set["type"], json!("contourSet"));
+    assert_eq!(set["name"], json!("Höhenlinien (Import)"));
+    assert_eq!(set["contours"].as_array().unwrap().len(), 2);
+    assert_eq!(set["contours"][0]["z"], json!(432));
+    assert_eq!(set["contours"][0]["layer"], json!("Höhenlinien"));
+    assert_eq!(set["contours"][1]["pts"].as_array().unwrap().len(), 2);
+    // Kategorie 02 Gelände wird angelegt.
+    assert!(r.ops.iter().any(|o| matches!(o, Op::SetField { key, .. } if key == "layers")));
+    // Ohne die Option bleibt alles Zeichnung.
+    let r = import_ops(&project(), &d, &dec(false), 1000.0);
+    assert_eq!((r.terrain_contours, r.drawings), (0, 4));
+    assert!(!r.ops.iter().any(|o| matches!(o, Op::Add { collection, .. } if collection == "context")));
+    assert_eq!(summary_json(&d)["terrainContours"], json!(2));
+}

@@ -158,8 +158,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[68]** Baugrube/Geländebearbeitung (Kontext-Objekt `excavation`). Verbau als echte Wand im Schnitt mit Dicke/
   Schraffur; Überlappung der Sohlenfläche nur gerastert; Arbeitsraum an konkaven Ecken ohne Prüfung; IVHB-Terrain
   nach kantonalem Recht. · M
-- ◐ **[143]** Baugrube erstellen. DXF-Höhenlinien landen als 2D-Zeichnung statt als `contourSet` (im leeren Projekt
-  kein Weg zu „Gelände erzeugen“ ausser Standort-Import); Option „Baugrube aus Gebäudegrundfläche“. · S
+- ◐ **[143]** Baugrube erstellen. (9.11.) DXF/DWG-Höhenlinien werden beim Import erkannt (Layer-Name Höhenlinie/HL/
+  Contour/Kote …, Erhebung Gruppe 38, 3D-Polylinien mit konstantem Z, sonst Höhentexte nahe der Linie) und als
+  `contourSet` „02 Gelände“ statt als 2D-Zeichnung übernommen: Kern `import_terrain.rs`, Option „Höhenlinien als Gelände
+  übernehmen“ im Import-Dialog (Vorgabe an, wenn erkannt), Zähler in Dialog und Meldung; „Gelände erzeugen“ geht damit im
+  leeren Projekt. Geprüft: Rust (fileio, Kern), vitest `src/io/dxfTerrainImport.test.ts`; nicht in der Tauri-App/im
+  Dialog angesehen, DWG nur über denselben Pfad. Offen: Option „Baugrube aus Gebäudegrundfläche“; Höhenlinien aus
+  Splines/Bögen und mit abweichender Texthöhe-Zuordnung (Text weiter als 2.5× Höhe von der Linie) werden nicht erkannt. · S
 - ◐ **[27]** Punktwolken Stufe 1 (render3d `points.rs`). Beim Neuladen sind die Wolken weg (Stufe 2: Modellfeld
   `Project.pointClouds` + Asset, Vorschlag unter [B9]/`src/state/pointCloudStore.ts`); Speicher doppelt; Grundriss/
   Schnitt (Punkte in Scheibe), Fang an Punkten, Clip-Box. · L

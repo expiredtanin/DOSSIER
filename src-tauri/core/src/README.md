@@ -95,7 +95,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | Datei | Inhalt |
 |---|---|
 | `import_ifc.rs`, `import_context.rs` | IFC zu Bauteilen bzw. Kontext-Netzen (gelesen hat vorher `fileio`) |
-| `import_drawing.rs`, `geo_mesh.rs` | DXF/DWG-Zeichnungen ins Projekt; swissBUILDINGS3D-Netze |
+| `import_drawing.rs`, `import_terrain.rs`, `geo_mesh.rs` | DXF/DWG-Zeichnungen ins Projekt (`import_terrain`: Höhenlinien erkennen, [143]); swissBUILDINGS3D-Netze |
 | `ifc_data.rs`, `ifc_quantities.rs`, `ifc_stairs.rs` | IFC-Export-Sammler, Basismengen, Treppen |
 | `mesh_data.rs` | Sammler für OBJ, STL, glTF |
 | `export_schedule.rs`, `opening_schedule.rs` | Bauteilliste, Fenster- und Türliste |

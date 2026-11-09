@@ -1021,3 +1021,36 @@ fn kodierung_bulge_stuetzpunkte() {
     assert_eq!(g[j], 4.0);
     assert_eq!(&g[j + 1..j + 4], &[2_600_000.0, 1_200_000.0, 0.12]);
 }
+
+// ── [143] Höhenlinien: Erhebung und konstantes Z ─────────────────────────────
+
+#[test]
+fn lwpolyline_erhebung_gruppe_38() {
+    let d = import_bytes(&dxf(
+        &[],
+        &[&["0", "LWPOLYLINE", "8", "Hoehenlinie", "90", "3", "70", "0", "38", "432.5", "10", "0", "20", "0", "10", "5", "20", "1", "10", "9", "20", "0"]],
+    ))
+    .unwrap();
+    let c = only_contour(&d);
+    assert_eq!(c.z, 432.5);
+    assert!(!c.z_varies);
+}
+
+#[test]
+fn polyline3d_konstantes_und_wechselndes_z() {
+    fn pl<'a>(zs: [&'a str; 3]) -> Vec<&'a str> {
+        let mut v = vec!["0", "POLYLINE", "8", "HL", "70", "8"];
+        for (i, z) in zs.iter().enumerate() {
+            let x = ["0", "5", "9"][i];
+            v.extend(["0", "VERTEX", "8", "HL", "70", "32", "10", x, "20", "1", "30", z]);
+        }
+        v.extend(["0", "SEQEND"]);
+        v
+    }
+    let d = import_bytes(&dxf(&[], &[&pl(["430", "430", "430"])])).unwrap();
+    let c = only_contour(&d);
+    assert_eq!(c.z, 430.0);
+    assert!(!c.z_varies);
+    let d = import_bytes(&dxf(&[], &[&pl(["430", "431", "432"])])).unwrap();
+    assert!(only_contour(&d).z_varies);
+}

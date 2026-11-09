@@ -486,6 +486,8 @@ async function importAny(path: string, args: Args): Promise<Project> {
         categoryMode: "byLayer",
         activeCategoryCode: base.layers[0].code,
         importMeshes: true,
+        terrainContours: (parsed.summary.terrainContours ?? 0) > 0,
+        terrainName: "Höhenlinien",
         parentName: `Import ${fileName}`,
         dashStyleTemplate: "PDF-Strich {pattern} mm",
       },

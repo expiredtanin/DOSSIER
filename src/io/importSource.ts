@@ -33,6 +33,10 @@ export interface ImportSummary {
   layout?: string;
   /** Die Datei war beschädigt/abgeschnitten und wurde nur teilweise gelesen. */
   recovered: boolean;
+  /** [143] Erkannte Gelände-Höhenlinien (Layer-Name, Erhebung, Höhentexte); fehlt, wenn keine gefunden wurden. */
+  terrainContours?: number;
+  /** [143] Davon Linien, deren Höhe aus einem Höhentext stammt. */
+  terrainFromTexts?: number;
 }
 
 /** Gelesene Datei + Zusammenfassung (Zustand des Import-Dialogs). */

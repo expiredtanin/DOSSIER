@@ -111,6 +111,7 @@ pub mod cmd_draw;
 pub mod cmd_solid;
 pub mod polyline_vertex;
 pub mod import_drawing;
+pub mod import_terrain;
 pub mod import_context;
 pub mod import_ifc;
 pub mod cmd_paste;

@@ -76,7 +76,7 @@ pub fn import_drawing_meshes(geom: &[f64], strings_json: &str, source_json: &str
 }
 
 /// Bestätigten Zeichnungs-Import (DXF/DWG/PDF) als EINEN Undo-Schritt ins Dokument `h` übernehmen.
-/// `decision_json` s. [`Decision`]. Antwort: `{"ops":[…],"levelId":"…","drawings":n,"meshes":n}`.
+/// `decision_json` s. [`Decision`]. Antwort: `{"ops":[…],"levelId":"…","drawings":n,"meshes":n,"terrainContours":n}`.
 #[wasm_bindgen]
 pub fn doc_import_drawing(h: u32, geom: &[f64], strings_json: &str, source_json: &str, decision_json: &str, key: &str, now_ms: f64) -> String {
     let now = now_of(now_ms);
@@ -90,7 +90,7 @@ pub fn doc_import_drawing(h: u32, geom: &[f64], strings_json: &str, source_json:
     };
     with_doc(h, |doc| {
         let r = imp::import_ops(doc.root(), &d, &dec, now);
-        let extra = [("levelId", Value::from(r.level_id)), ("drawings", r.drawings.into()), ("meshes", r.meshes.into())];
+        let extra = [("levelId", Value::from(r.level_id)), ("drawings", r.drawings.into()), ("meshes", r.meshes.into()), ("terrainContours", r.terrain_contours.into())];
         commit(doc, r.ops, &extra, key, now)
     })
     .unwrap_or_else(|| err("Dokument nicht offen"))
