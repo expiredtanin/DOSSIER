@@ -29,6 +29,8 @@ export type GripRequest =
   | { op: "roomStamp"; id: string; delta: P; pt?: P }
   | { op: "ceilingEdge" | "roomEdge"; id: string; a: number; b: number; delta: P }
   | { op: "excavationGrip"; id: string; index: number; pt: P }
+  // [176] Schnittlinie: 0 = Anfang, dann `bendPoints`, zuletzt das Ende.
+  | { op: "sectionLineGrip"; id: string; index: number; pt: P }
   // [151] Parameter-Griff einer Podesttreppe (Kern `grip_drag::stair_param_drag`).
   | { op: "stairParam"; id: string; index: number; pt: P }
   | { op: "excavationEdge"; id: string; a: number; b: number; delta: P }

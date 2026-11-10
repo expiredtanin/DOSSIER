@@ -830,6 +830,13 @@ fn sectionline_ops(root: &Map<String, Value>, v: &Value, ids: &mut IdGen) -> Vec
     }
     let kind = s_of(v, "kind");
     let line = Value::Array(vec![pv(a), pv(b)]);
+    // [176] Knickpunkte zwischen a und b (geknickter Schnitt, nur Schnitt); ohne = gerade Linie wie bisher.
+    let bends: Vec<Value> = if kind == "section" {
+        v.get("bends").and_then(Value::as_array).into_iter().flatten().filter_map(|q| Some((q.get("x")?.as_f64()?, q.get("y")?.as_f64()?))).filter(|q| q.0.is_finite() && q.1.is_finite()).map(pv).collect()
+    } else {
+        Vec::new()
+    };
+    let bend_points = (!bends.is_empty()).then_some(Value::Array(bends));
     let levels = arr(root.get("drawingLevels"));
     let of_kind: Vec<&Value> = levels.iter().filter(|z| field(z, "kind").and_then(Value::as_str) == Some(kind)).collect();
     let orphans: Vec<&&Value> = of_kind.iter().filter(|z| !truthy(field(z, "linePoints"))).collect();
@@ -839,21 +846,26 @@ fn sectionline_ops(root: &Map<String, Value>, v: &Value, ids: &mut IdGen) -> Vec
             None | Some(Value::Null) => js_num(1.0),
             Some(x) => x.clone(),
         };
-        return vec![Op::Replace { collection: "drawingLevels".into(), entity: crate::json_util::with_all(z, vec![("linePoints", line), ("directionSign", sign)]) }];
+        let entity = match bend_points {
+            Some(bp) => crate::json_util::with_all(z, vec![("linePoints", line), ("directionSign", sign), ("bendPoints", bp)]),
+            None => crate::json_util::with_all(z, vec![("linePoints", line), ("directionSign", sign)]),
+        };
+        return vec![Op::Replace { collection: "drawingLevels".into(), entity }];
     }
     let name = s_of(v, "name").replace('\u{1}', &level_letters(of_kind.len()));
-    add_op(
-        "drawingLevels",
-        vec![obj(vec![
-            ("id", s(&ids.next(kind))),
-            ("name", s(&name)),
-            ("kind", s(kind)),
-            ("visible", Value::Bool(true)),
-            ("locked", Value::Bool(false)),
-            ("linePoints", line),
-            ("directionSign", js_num(1.0)),
-        ])],
-    )
+    let mut fields = vec![
+        ("id", s(&ids.next(kind))),
+        ("name", s(&name)),
+        ("kind", s(kind)),
+        ("visible", Value::Bool(true)),
+        ("locked", Value::Bool(false)),
+        ("linePoints", line),
+        ("directionSign", js_num(1.0)),
+    ];
+    if let Some(bp) = bend_points {
+        fields.push(("bendPoints", bp));
+    }
+    add_op("drawingLevels", vec![obj(fields)])
 }
 
 /// Richtungspfeil der Schnittlinie (Mitte → Blickrichtung, zwei Flügel).
@@ -913,9 +925,10 @@ pub fn preview(root: &Map<String, Value>, v: &Value, pts: &[V], p: &mut Preview)
             }
         }
         "sectionline" => {
-            if let [a, c] = pts {
-                p.shapes.line(*a, *c);
-                direction_arrow(*a, *c, 1.0, &mut p.shapes);
+            // [176] Geknickt: Linienzug, Richtungspfeil je Segment.
+            for w in pts.windows(2) {
+                p.shapes.line(w[0], w[1]);
+                direction_arrow(w[0], w[1], 1.0, &mut p.shapes);
             }
         }
         _ => return false,
@@ -939,6 +952,25 @@ pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Value>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [176] Geknickter Schnitt: Knickpunkte landen als `bendPoints` auf der Ebene (nur Schnitt).
+    #[test]
+    fn schnittlinie_mit_knicken() {
+        let root = json!({"drawingLevels": []});
+        let root = root.as_object().unwrap();
+        let run = |kind: &str, bends: Value| {
+            let mut ids = IdGen::new("s");
+            let v = json!({"cmd": "sectionline", "a": {"x": 0, "y": 0}, "b": {"x": 6, "y": 10}, "bends": bends, "kind": kind, "name": "Schnitt \u{1}"});
+            let o = sectionline_ops(root, &v, &mut ids);
+            let Op::Add { items, .. } = &o[0] else { panic!() };
+            items[0].clone()
+        };
+        let l = run("section", json!([{"x": 6, "y": 0}]));
+        assert_eq!(l["bendPoints"], json!([{"x": 6, "y": 0}]));
+        assert_eq!(l["linePoints"], json!([{"x": 0, "y": 0}, {"x": 6, "y": 10}]));
+        assert!(run("section", json!([])).get("bendPoints").is_none());
+        assert!(run("elevation", json!([{"x": 6, "y": 0}])).get("bendPoints").is_none());
+    }
 
     #[test]
     fn buchstaben_der_ebenen() {

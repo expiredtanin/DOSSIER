@@ -108,6 +108,8 @@ export function levelArg(level: DrawingLevel) {
   return {
     kind: level.kind,
     linePoints: level.linePoints,
+    // [176] Knickpunkte (geknickter Schnitt, Abwicklung im Kern `plan/section/unfold.rs`).
+    bendPoints: level.bendPoints,
     directionSign: level.directionSign,
     depth: level.depth,
     shadows: level.shadows,

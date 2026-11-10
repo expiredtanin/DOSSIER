@@ -176,6 +176,13 @@ export function useGripEditing(opts: {
   // [149] Baum: Griff in der Stammmitte (verschieben) und am Kronenrand (Kronendurchmesser).
   const selectedTreeId = single(selection, "trees");
   const selectedTree = selectedTreeId ? (project.trees ?? []).find((x) => x.id === selectedTreeId) : undefined;
+  // [176] Schnitt-/Ansichtslinie im Grundriss: Griffe an Anfang, Knickpunkten (`bendPoints`) und Ende.
+  const selectedSectionLineId = single(selection, "sectionLines");
+  const selectedSectionLine = modelEditable && selectedSectionLineId
+    ? project.drawingLevels.find((l) => l.id === selectedSectionLineId && l.linePoints)
+    : undefined;
+  const sectionLineGrips = (l: NonNullable<typeof selectedSectionLine>): Vec2[] =>
+    l.linePoints ? [l.linePoints[0], ...(l.bendPoints ?? []), l.linePoints[1]] : [];
   // Mit gezeigter Beschriftung dazu ihr Griff (`labelOffset`, s. `treeGrips.ts`).
   const treeGrips = (tr: NonNullable<typeof selectedTree>): Vec2[] => treeGripPoints(tr, scaleDenominator);
   const selectedRoomId = single(selection, "rooms");
@@ -312,6 +319,11 @@ export function useGripEditing(opts: {
     }
     if (selectedTree && modelEditable && !selectedTree.locked) {
       const pts = treeGrips(selectedTree);
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
+    }
+    if (selectedSectionLine && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+      const pts = sectionLineGrips(selectedSectionLine);
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
       return pts;
     }
@@ -909,6 +921,11 @@ export function useGripEditing(opts: {
       if (tr.locked) return;
       const patch = treeGripPatch(tr, index, pt);
       storeState().applyChange((p) => patchItem(p, "trees", tr.id, patch), `treeGrip:${tr.id}:${index}`);
+      return;
+    }
+    // [176] Schnittlinie: Endpunkt bzw. Knickpunkt live, ein Undo-Schritt je Zug (Kern `grips.rs`).
+    if (selectedSectionLine && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+      storeState().moveSectionLineGrip(selectedSectionLine.id, index, pt);
       return;
     }
     // [68] Baugrube: Sohlen-Griff sofort (Höhe), Ecken als Vorschau bis zum Setzen.

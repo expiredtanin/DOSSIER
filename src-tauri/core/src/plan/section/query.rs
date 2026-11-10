@@ -93,18 +93,34 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     crate::plan::extras::scale_line_weights(p, scale, &mut prims);
     // [149] Bäume hinter der Schnittebene: transparente Silhouette unter dem Schnitt (Bauteile verdecken sie).
-    let mut trees: Vec<Primitive> = crate::plan::trees::view_trees(p, &level, &vis, None).into_iter().flat_map(|(_, t)| t).collect();
+    // [176] Geknickter Schnitt: Bäume, Öffnungen und Achsen je Segment, auf den Streifen geschnitten und abgewickelt.
+    let parts = unfold::parts(&level);
+    let mut trees: Vec<Primitive> = parts.iter().flat_map(|(l, s)| crate::plan::trees::view_trees(p, l, &vis, None).into_iter().flat_map(move |(_, t)| unfold::keep_group(t, s.as_ref()))).collect();
     let bounds = crate::plan::trees::union_bounds(bounds, &trees);
     crate::plan::extras::scale_line_weights(p, scale, &mut trees);
     trees.extend(prims);
+    // [176] Knicklinien (nur geknickter Schnitt).
+    trees.extend(unfold::bend_lines(&level, bounds));
     let prims = trees;
     w.group(&prims);
     let (door_detail, window_detail) = mvo.as_ref().map_or((true, true), |o| (o.door.section_detail, o.window.section_detail));
-    let mut ops = if openings { section_opening_primitives_mv(p, &level, &vis, door_detail, window_detail)? } else { Vec::new() };
+    let mut ops = Vec::new();
+    if openings {
+        for (l, s) in &parts {
+            ops.extend(unfold::clip_prims(section_opening_primitives_mv(p, l, &vis, door_detail, window_detail)?, s.as_ref()));
+        }
+    }
     crate::plan::extras::scale_line_weights(p, scale, &mut ops);
     w.group(&ops);
     // Achsraster ([112]): Achsen quer zur Schnittebene.
-    let grid = crate::plan::grid_view::grid_prims(p, &level, bounds, scale);
+    let grid: Vec<Primitive> = parts
+        .iter()
+        .flat_map(|(l, s)| {
+            let off = s.as_ref().map_or(0.0, |s| s.offset);
+            let b = if off == 0.0 { bounds } else { [bounds[0] - off, bounds[1], bounds[2] - off, bounds[3]] };
+            unfold::clip_prims(crate::plan::grid_view::grid_prims(p, l, b, scale), s.as_ref())
+        })
+        .collect();
     if !grid.is_empty() {
         w.group(&grid);
     }
