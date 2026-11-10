@@ -16,6 +16,8 @@ import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
 import {
   coincidentGripPoints,
   excavationGripPoints,
+  gripArcWallRadius,
+  gripArcWallResize,
   gripArcWallTarget,
   gripAxisLock,
   gripEdgeTarget,
@@ -116,6 +118,7 @@ export function useGripEditing(opts: {
     pt: Vec2,
     scaleDenominator?: number,
     free?: boolean,
+    arcLength?: number,
   ) => void;
   moveRoomEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   moveCeilingEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
@@ -565,7 +568,7 @@ export function useGripEditing(opts: {
   const pendingGripRef = useRef<{ drawingId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
   // Dasselbe für das Verschieben eines ganzen 2D-Elements (Gesamt-Delta) und für
   // Kanten-Griffe von Polylinien (Ziel-Delta): bis zum Loslassen nur Vorschau.
-  const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
+  const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2; arcLength?: number } | null>(null);
   const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling" | "excavation"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaMoveRef = useRef<{ kind: "ceiling" | "room" | "stair"; id: string; total: Vec2 } | null>(null);
   const pendingWallMoveRef = useRef<{ wallId: string; total: Vec2 } | null>(null);
@@ -594,7 +597,15 @@ export function useGripEditing(opts: {
     const wall = owner?.wallId ? project.walls.find((x) => x.id === owner.wallId) : undefined;
     return wall && wall.bulge && (owner?.localIndex === 0 || owner?.localIndex === 1) ? { wall, end: owner.localIndex } : null;
   };
+  // [T2] Scheitel-Griff einer Bogenwand: Tab-Feld ist der Radius (Shift = fester Mittelpunkt statt fester Endpunkte).
+  const arcWallApex = (index: number): Wall | null => {
+    const owner = gripOwners[index];
+    const wall = owner?.wallId ? project.walls.find((x) => x.id === owner.wallId) : undefined;
+    return wall && wall.bulge && owner?.localIndex === 2 ? wall : null;
+  };
   const gripEditPoint = (anchor: Vec2, locks: GripLocks, raw: Vec2, index?: number): Vec2 => {
+    const apex = index != null ? arcWallApex(index) : null;
+    if (apex) return gripArcWallRadius(apex, gripFreeRef.current, locks.length, raw)?.pt ?? raw;
     const arc = index != null ? arcWallEnd(index) : null;
     return (arc && gripArcWallTarget(arc.wall, arc.end, locks.length, raw)?.pt) ?? gripPolarPoint(anchor, locks, raw);
   };
@@ -604,6 +615,11 @@ export function useGripEditing(opts: {
     const ge = gripEdit;
     const info = gripDragInfoRef.current;
     if (!ge || !info) return [];
+    const apex = arcWallApex(info.index);
+    if (apex) {
+      const live = gripArcWallRadius(apex, gripFreeRef.current, undefined, info.raw)?.radius ?? 0;
+      return [{ id: "length", labelKey: "cmd.field.radius", value: ge.locks.length ?? live, locked: ge.locks.length != null, active: true }];
+    }
     const arc = arcWallEnd(info.index);
     if (arc) {
       const live = gripArcWallTarget(arc.wall, arc.end, undefined, info.raw)?.arcLength ?? 0;
@@ -688,7 +704,14 @@ export function useGripEditing(opts: {
     if (!anchor) return; // ohne Anker keine polare Eingabe möglich
     const wallDir = openingWallDir();
     const arcEnd = arcWallEnd(info.index);
+    const apex = arcWallApex(info.index);
     setGripEdit((prev) => {
+      if (apex) {
+        // Bogenwand-Scheitel ([T2]): nur das Radiusfeld, eingefroren auf dem aktuellen Radius.
+        if (prev) return prev;
+        const radius = gripArcWallRadius(apex, gripFreeRef.current, undefined, grips[info.index])?.radius;
+        return radius != null ? { anchor, active: "length", locks: { length: radius } } : prev;
+      }
       if (arcEnd) {
         // Bogenwand ([T2]): nur das Längenfeld (Bogenlänge), eingefroren auf der aktuellen Länge.
         if (prev) return prev;
@@ -727,7 +750,7 @@ export function useGripEditing(opts: {
     const info = gripDragInfoRef.current;
     if (!ge || !info) return;
     const locks = { ...ge.locks, [ge.active]: value };
-    const next = ge.active === "length" && !arcWallEnd(info.index) ? "angle" : "length";
+    const next = ge.active === "length" && !arcWallEnd(info.index) && !arcWallApex(info.index) ? "angle" : "length";
     setGripEdit({ ...ge, locks, active: next });
     // Zielpunkt mit dem frischen Lock anwenden (live, ohne Maus-Bewegung).
     const pt = gripEditPoint(ge.anchor, locks, info.raw, info.index);
@@ -742,6 +765,9 @@ export function useGripEditing(opts: {
     const at0 = gripOpeningPos0Ref.current;
     if (op && !op.locked && host?.bulge && at0 && length != null) {
       slideOpening(op.id, { position: openingTypedPosition(at0.position, length, anchor, pt, at0.dir) }, `slideOpening:${op.id}`);
+    } else if (length != null && arcWallEnd(index)) {
+      // Bogenwand-Ende ([T2]): der rohe Cursor legt nur die Seite fest, die Länge der Kern (auch über dem Halbkreis).
+      applyGrip(index, gripDragInfoRef.current?.raw ?? pt, length);
     } else applyGrip(index, pt);
   };
 
@@ -847,7 +873,7 @@ export function useGripEditing(opts: {
 
   // Editier-Dispatch: bei gewählter Decke auf die Decken-Aktionen umleiten, sonst
   // auf die Wand/2D-Aktionen. So teilen Plan- UND 3D-Griffe denselben Pfad.
-  const applyGrip = (index: number, pt: Vec2) => {
+  const applyGrip = (index: number, pt: Vec2, arcLength?: number) => {
     // Öffnung: den gezogenen Punkt auf die Wandachse projizieren → neue
     // `position` (Abstand des ersten Pfostens vom Wand-Start), sodass die
     // Öffnung entlang der Wand gleitet. Griff sitzt in der Öffnungsmitte, daher
@@ -919,11 +945,11 @@ export function useGripEditing(opts: {
       if (wId && !dId && local <= 1) {
         const w = project.walls.find((x) => x.id === wId);
         if (w && !w.locked) {
-          pendingWallGripRef.current = { wallId: wId, localIndex: local, flat: index, pt };
+          pendingWallGripRef.current = { wallId: wId, localIndex: local, flat: index, pt, arcLength };
           return;
         }
       }
-      moveGripOf(dId, wId, local, pt, scaleDenominator, gripFreeRef.current);
+      moveGripOf(dId, wId, local, pt, scaleDenominator, gripFreeRef.current, arcLength);
     }
   };
 
@@ -946,13 +972,20 @@ export function useGripEditing(opts: {
       if (!w) return [];
       const wt = project.wallTypes.find((t) => t.id === w.wallTypeId);
       const th = wt ? wallTypeThickness(wt) : 0.2;
-      const a = pw.localIndex === 0 ? pw.pt : w.start;
-      const b = pw.localIndex === 0 ? w.end : pw.pt;
-      // Bogenwand: der Bogen behält seinen Öffnungswinkel (Bulge), Vorschau als Band samt Achse.
+      let a = pw.localIndex === 0 ? pw.pt : w.start;
+      let b = pw.localIndex === 0 ? w.end : pw.pt;
+      // Bogenwand ([T2]): der Endpunkt läuft auf dem Kreis, der Bulge folgt (Kern `gripArcWallResize`);
+      // Vorschau als Band samt Achse.
       if (w.bulge) {
-        const arc = wallArcBand(a, b, w.bulge, th);
+        const nw = pw.localIndex <= 1 ? gripArcWallResize(w, pw.localIndex as 0 | 1, pw.arcLength, pw.pt) : null;
+        if (nw) {
+          a = nw.start;
+          b = nw.end;
+        }
+        const bulge = nw?.bulge ?? w.bulge;
+        const arc = wallArcBand(a, b, bulge, th);
         if (arc) return [{ kind: "poly", pts: arc.band, closed: true }, { kind: "poly", pts: arc.axis, closed: false }];
-        return [{ kind: "poly", pts: bulgeArcPoints(a, b, w.bulge), closed: false }];
+        return [{ kind: "poly", pts: bulgeArcPoints(a, b, bulge), closed: false }];
       }
       return [
         { kind: "poly", pts: wallCorners(a, b, th), closed: true },
@@ -985,7 +1018,7 @@ export function useGripEditing(opts: {
     }
     const pw = pendingWallGripRef.current;
     pendingWallGripRef.current = null;
-    if (pw) moveGripOf(null, pw.wallId, pw.localIndex, pw.pt, scaleDenominator);
+    if (pw) moveGripOf(null, pw.wallId, pw.localIndex, pw.pt, scaleDenominator, undefined, pw.arcLength);
     const pend = pendingGripRef.current;
     pendingGripRef.current = null;
     if (pend) moveGripOf(pend.drawingId, null, pend.localIndex, pend.pt, scaleDenominator);
@@ -1098,7 +1131,10 @@ export function useGripEditing(opts: {
     // Bogenwand ([T2]): Länge = Bogenlänge der Wand mit dem Endpunkt am Cursor.
     const arc = arcWallEnd(index);
     const arcLength = arc ? gripArcWallTarget(arc.wall, arc.end, undefined, pt)?.arcLength : undefined;
-    return { at: pt, length: arcLength ?? length, angleDeg };
+    // Scheitel einer Bogenwand: Länge = Radius der Wand mit dem Scheitel am Cursor.
+    const apex = arcWallApex(index);
+    const radius = apex ? gripArcWallRadius(apex, gripFreeRef.current, undefined, pt)?.radius : undefined;
+    return { at: pt, length: radius ?? arcLength ?? length, angleDeg };
   };
   // Dasselbe für einen gezogenen Kanten-Griff: freie Kanten zeigen Länge+Winkel
   // (wie ein Punkt-Griff), geführte Kanten nur EINEN Wert (Abstand entlang der
@@ -1270,6 +1306,16 @@ export function useGripEditing(opts: {
       // also nutzlos für „entlang der bestehenden Kante weiterziehen". Der Lock
       // dominiert (kein Snap), damit die Endkoordinate garantiert eine Achse
       // trifft — identisch zum bisherigen Ortho-Verhalten.
+      // [T2] Scheitel einer Bogenwand: Shift = Radius mit festem Mittelpunkt (Kern, `free` im Zug), kein Achsen-Lock.
+      const apexWall = arcWallApex(index);
+      if (apexWall) {
+        gripFreeRef.current = !!mods.shift;
+        if (mods.shift) {
+          applyGrip(index, raw);
+          setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, raw) });
+          return;
+        }
+      }
       if (mods.shift && anchor) {
         const origin = gripOriginRef.current;
         const ring = origin ? resolvePolygonRing(index) : null;
@@ -1279,10 +1325,10 @@ export function useGripEditing(opts: {
         return;
       }
       // [172] Masszahl-Griff: der Kern rastet an festen Stellen ein (Alt = frei); Objektfang würde das stören.
-      gripFreeRef.current = !!mods.alt;
+      gripFreeRef.current = !apexWall && !!mods.alt;
       if (owner?.drawingId) {
         const od = project.drawings2d.find((x) => x.id === owner.drawingId);
-        if (od?.geom.shape === "dimension" && !od.geom.kind && owner.localIndex > od.geom.pts.length) {
+        if (od?.geom.shape === "dimension" && owner.localIndex > od.geom.pts.length) {
           applyGrip(index, raw);
           setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, raw) });
           return;

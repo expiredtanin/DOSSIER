@@ -52,6 +52,26 @@ export function gripArcWallTarget(w: Pick<Wall, "start" | "end" | "bulge">, inde
 }
 
 /**
+ * [T2] Endpunkt-Griff einer Bogenwand: die ganze Wand danach (Start, Ende, Bulge). `arcLength` = getippte Bogenlänge
+ * ab dem festen Ende (auch über dem Halbkreis; der Cursor `raw` bestimmt nur die Seite), sonst der auf den Kreis
+ * projizierte Cursor. `null` bei Unsinn.
+ */
+export function gripArcWallResize(w: Pick<Wall, "start" | "end" | "bulge">, index: 0 | 1, arcLength: number | undefined, raw: Vec2): { start: Vec2; end: Vec2; bulge: number } | null {
+  const f = core().grip_arc_wall_resize(w.start.x, w.start.y, w.end.x, w.end.y, w.bulge ?? 0, index, arcLength ?? NaN, raw.x, raw.y);
+  return f.length >= 5 ? { start: { x: f[0], y: f[1] }, end: { x: f[2], y: f[3] }, bulge: f[4] } : null;
+}
+
+/**
+ * [T2] Scheitel-Griff einer Bogenwand: Zielpunkt und Radius der Wand danach. `fixedCenter` (Shift) = Radius um den
+ * festen Mittelpunkt (Enden wandern radial), sonst Endpunkte fest. `radius` = getippter Radius, sonst folgt der
+ * Punkt dem Cursor `raw`. `null` bei Unsinn (z. B. Radius unter der halben Sehne).
+ */
+export function gripArcWallRadius(w: Pick<Wall, "start" | "end" | "bulge">, fixedCenter: boolean, radius: number | undefined, raw: Vec2): { pt: Vec2; radius: number } | null {
+  const f = core().grip_arc_wall_radius(w.start.x, w.start.y, w.end.x, w.end.y, w.bulge ?? 0, fixedCenter, radius ?? NaN, raw.x, raw.y);
+  return f.length >= 3 ? { pt: v(f), radius: f[2] } : null;
+}
+
+/**
  * Shift-Achsen-Lock eines Punkt-Griffs: Welt-H/V durch den Nachbar-Griff `anchor`, bei einem Vielecks-
  * Eckpunkt (`ring` = Punkte des Elements, `index` darin, `origin` = Lage vor dem Zug) zusätzlich die Flucht
  * der beiden fixen Nachbarkanten. Die nächstliegende Achse gewinnt.

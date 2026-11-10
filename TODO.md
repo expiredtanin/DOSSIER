@@ -173,7 +173,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   manuelle und automatische Bemassung, Griff steht an derselben Stelle. Masszahl-Griff rastet an Mitte · innen links/rechts ·
   aussen links/rechts · über/unter der Linie ein, frei mit gehaltener Alt-Taste (`grips.rs::dim_text_slot`; Objektfang
   entfällt beim Ziehen). Gespeichert bleibt `textOffsetsMm` (kein neues Feld); (0,0) = Vorgabe, frei verschobene Texte alter
-  Projekte bleiben stehen. „Text zurücksetzen" in Objekt-Info und Kontextmenü. DXF/DWG-Export setzt die Textposition der DIMENSION an die ausgewichene Lage (`plan/dxf.rs`, 10.11.). Radius-/Durchmesser-/Bogenlängenmass: Zahl mittig über dem Ankerpunkt; Offen: kein Einrast-Griff für Rundmasse (Griff sitzt noch an der Kettenmitte); in der App nicht geklickt. · S
+  Projekte bleiben stehen. „Text zurücksetzen" in Objekt-Info und Kontextmenü. DXF/DWG-Export setzt die Textposition der DIMENSION an die ausgewichene Lage (`plan/dxf.rs`, 10.11.). Radius-/Durchmesser-/Bogenlängenmass: Zahl mittig über dem Ankerpunkt; Masszahl-Griff der Rundmasse rastet wie bei linearen Massen ein (10.11.: Mitte · innen/aussen links/rechts entlang der Masslinie · über/unter, Alt = frei; ein Griff an der Zahl selbst, `grips.rs::round_dim_label`, Versatz in `textOffsetsMm[0]`, im Plan `plan/drawings.rs::round_label`; „Text zurücksetzen" gilt mit). Offen: DXF/DWG-Export setzt die Textposition der Rundmasse noch nicht an den Versatz; in der App nicht geklickt. · S
 - ◐ **[154]** Bauteile aus Zeichnung erkennen (Befehl `erkennen`). Stösse von Bogenwänden, schräg anstossende Enden,
   Treppen/Decken, Fenster über der Schnitthöhe (5 von 6 fehlenden Öffnungen im Musterhaus komplex), Wanddurchbruch
   mit Schwellen-Rechteck wird Fenster, Schiebetüren in Bogenwänden, Blöcke. · L
@@ -247,9 +247,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Start/Ende einer Bogenwand laufen auf dem Kreis (Mittelpunkt/Radius fest, anderes Ende fest, Bulge nachgeführt;
   Kern `grip_drag::arc_wall_endpoint`), Tab = Bogenlänge ab dem festen Ende (nur Längenfeld, `arc_wall_point_at_length`);
   Randpunkte von Radius-/Durchmesser-/Bogenmassen bleiben auf dem Kreis um den Mittelpunkt (`grips.rs`). Öffnungen in
-  Bogenwänden liefen schon über Bogenlänge ([144]). Geprüft: Rust-Tests; nicht in der App angesehen. Offen: Radius-Griff
-  mit festem Mittelpunkt (Option; der Scheitel-Griff ändert den Radius bei festen Endpunkten), Bogenlänge > Halbkreis
-  per Tab (nächstliegender Bogen gewinnt). · M
+  Bogenwänden liefen schon über Bogenlänge ([144]). Geprüft: Rust-Tests; nicht in der App angesehen.
+  (10.11.) Scheitel-Griff: Shift = Radius mit festem Mittelpunkt (Öffnungswinkel bleibt, Enden wandern radial,
+  `grip_drag::arc_wall_radius_fixed_center`; im Zug über `free`), ohne Shift Endpunkte fest wie bisher; Tab = Radius
+  (fester Mittelpunkt: Strahl Mitte → Cursor; feste Endpunkte: Klein-/Grossbogen, Seite und Gross/Klein vom Cursor,
+  `arc_wall_radius_target`). Bogenlänge per Tab auch über dem Halbkreis: Seite eindeutig aus dem Cursor, Öffnungswinkel
+  genau l/r (`arc_wall_resize`, `moveGrip` mit `arcLength`); Vorschau mit echtem Bulge. Geprüft: Rust-/vitest-Tests; nicht in der
+  App geklickt (Shift-Griff, Tab-Feld „Radius", HUD). · M
 - ◐ **[T3]** Wendeltreppe. Kein Handlauf-Profil im Modell (rund fest). · S
 - ◐ **[T4]** Import-Meshes glätten oder kantig. Metal-Pfad nicht gebaut/gesehen. · S
 - ◐ **[T6]** Glattes Gelände aus Höhenlinien (`terrain.rs`). Natural-Neighbour/Clough-Tocher statt Hermite-Teilung;

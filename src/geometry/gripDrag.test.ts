@@ -2,6 +2,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  gripArcWallRadius,
+  gripArcWallResize,
   gripArcWallTarget,
   coincidentGripPoints,
   gripAxisLock,
@@ -95,5 +97,28 @@ describe("[T2] Bogenwand-Endpunkt-Griff", () => {
     expect(r?.pt.x).toBeCloseTo(2, 9);
     expect(r?.pt.y).toBeCloseTo(2, 9);
     expect(gripArcWallTarget(wall, 1, -1, { x: 3, y: 3 })).toBeNull();
+  });
+});
+
+describe("[T2] Bogenwand: Länge über dem Halbkreis, Radius-Griff", () => {
+  const wall = { start: { x: 0, y: 0 }, end: { x: 4, y: 0 }, bulge: 1 };
+  it("Bogenlänge 3π: Öffnungswinkel 270°, Seite vom Cursor", () => {
+    const up = gripArcWallResize(wall, 1, 3 * Math.PI, { x: 3, y: 3 });
+    const down = gripArcWallResize(wall, 1, 3 * Math.PI, { x: 3, y: -3 });
+    expect(up?.end.x).toBeCloseTo(2, 9);
+    expect(up?.end.y).toBeCloseTo(-2, 9);
+    expect(down?.end.y).toBeCloseTo(2, 9);
+    expect(up?.bulge).toBeCloseTo(Math.tan((3 * Math.PI) / 8), 9);
+    expect(down?.bulge).toBeCloseTo(-Math.tan((3 * Math.PI) / 8), 9);
+    expect(gripArcWallResize(wall, 1, 5 * Math.PI, { x: 3, y: 3 })).toBeNull();
+  });
+  it("Radius mit festem Mittelpunkt und mit festen Endpunkten", () => {
+    const fixed = gripArcWallRadius(wall, true, 5, { x: 2, y: 1 });
+    expect(fixed?.pt.x).toBeCloseTo(2, 9);
+    expect(fixed?.pt.y).toBeCloseTo(5, 9);
+    expect(fixed?.radius).toBe(5);
+    const ends = gripArcWallRadius(wall, false, 5, { x: 2, y: 1 });
+    expect(ends?.pt.y).toBeCloseTo(5 - Math.sqrt(21), 9);
+    expect(gripArcWallRadius(wall, false, 1, { x: 2, y: 1 })).toBeNull();
   });
 });
