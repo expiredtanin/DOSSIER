@@ -15,7 +15,7 @@ const REQUIRED_ARRAYS: [&str; 3] = ["walls", "layers", "drawingLevels"];
 const DEFAULT_ARRAYS: [&str; 5] = ["lineStyles", "hatches", "components", "wallTypes", "drawings2d"];
 
 /// Bekannte Felder von `Project` (für die Meldung unbekannter Felder).
-const KNOWN_KEYS: [&str; 55] = [
+const KNOWN_KEYS: [&str; 56] = [
     "formatVersion", "id", "name", "lineStyles", "textStyles", "hatches", "components", "wallTypes",
     "ceilingTypes", "roofTypes", "blockDefs", "doorTypes", "windowTypes", "stairTypes", "pens",
     "penSets", "activePenSetId", "customPalettes", "builtinPaletteBanks", "drawingLevels", "layers",
@@ -24,6 +24,7 @@ const KNOWN_KEYS: [&str; 55] = [
     "viewSnapshotFolders", "viewTemplates", "layouts", "masterLayouts", "layoutFolders", "publishSets", "publishLog", "projectNumber", "referenceElevationMasl",
     "geoAnchor", "roomProgram", "roomProgramTolerance", "parcelArea", "sunStudy", "siteRules", "scaleLineWeights",
     "lineCap", "lineJoin", "trees", "uiState",
+    "modelViewOptions",
 ];
 
 /// Ergebnis des Einlesens.

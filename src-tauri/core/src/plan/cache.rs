@@ -37,6 +37,8 @@ pub const NOT_FOR_DRAWINGS: &[&str] = &[
     "viewSnapshots",
     "viewSnapshotFolders",
     "viewTemplates",
+    // [173] Modelldarstellungen wirken nur auf Bauteile, nicht auf 2D-Zeichnungen.
+    "modelViewOptions",
     "roomProgram",
     "roomProgramTolerance",
     "parcelArea",
@@ -140,7 +142,7 @@ pub fn ctx_key(a: &PlanArgs) -> String {
         v.sort_unstable();
         v.join("\u{2}")
     });
-    format!("{}\u{1}{:?}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}", a.floor, a.detail, a.reference_lines, a.global, a.scale.to_bits(), a.for_print, a.compact, a.mono, a.auto_coarse, rules)
+    format!("{}\u{1}{:?}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}", a.floor, a.detail, a.reference_lines, a.global, a.scale.to_bits(), a.for_print, a.compact, a.mono, a.auto_coarse, rules) + &a.model_view.as_deref().map_or(String::new(), |m| format!("\u{1}mv:{m}"))
 }
 
 /// Sichtbarkeit und Dimmen als vergleichbarer Text (Mengen sortiert).

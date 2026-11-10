@@ -254,7 +254,10 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
 
     // Ansichtsfarbe und -schraffur ([100]) der sichtbaren Bauteilseite.
     let (mut pattern_lines, mut pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
-    let mut openings = collect_openings(p, &frame);
+    // [173] Öffnungslinien der Fenster nach der Modelldarstellung der Ebene (Element und Typ gehen vor).
+    let mv = level.model_view.as_deref().and_then(|id| crate::plan::model_view::find(p, id));
+    let win = crate::plan::model_view::resolve(mv, crate::plan::style::Detail::Mittel, scale).window;
+    let mut openings = collect_openings(p, &frame, &win);
     // [171] Formöffnung: Fassaden-Schraffur auch auf den Füllstücken zwischen Umriss und Rechteck-Loch der Wand
     // (sonst bleibt um ein Rundfenster ein ungemustertes Quadrat).
     {

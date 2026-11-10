@@ -24,6 +24,7 @@ Herkunft, kein Wegweiser.
 | `mesh_plan.rs` | importierte Netze im Grundriss: geschnitten, darunter, darüber |
 | `ceiling_plan.rs` | Deckenspiegel als eigene Ebenen-Art |
 | `floor_finish.rs` | Bodenbelag-Muster nach Massstab |
+| `model_view.rs` | Modelldarstellung ([173]): Optionen je Bauteilart über dem Detailgrad, Rangfolge Element > Typ > Stufe > Basis |
 | `trees.rs` | Bäume in Grundriss, Schnitt und Ansicht |
 | `stamp_place.rs` | Hindernisse für die Lage der Raumstempel |
 | `view_range.rs` | Ansichtsbereich: Schnitthöhe, Ober- und Unterkante der Sicht |

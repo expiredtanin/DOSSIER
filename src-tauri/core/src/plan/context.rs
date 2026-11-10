@@ -202,6 +202,11 @@ pub(super) fn excavation_segments(c: &Ctx) -> Vec<([f64; 2], [f64; 2])> {
 /// Geschoss nächst ±0.00 (`extras::ground_floor_id`) und in der Situation (ab 1:500). Ohne Geschoss-Ebenen
 /// bzw. für eine unbekannte Ebene immer (Ausschnitte, Tests).
 pub(super) fn terrain_shown(c: &Ctx) -> bool {
+    // [173] Ebene > Modelldarstellung > automatisch.
+    let level = c.p.drawing_levels.iter().find(|l| l.id == c.a.floor && l.kind == DrawingLevelKind::Floor);
+    if let Some(v) = c.mv().terrain(level.and_then(|l| l.show_terrain)) {
+        return v;
+    }
     terrain_shown_on(c.p, &c.a.floor, c.a.scale)
 }
 

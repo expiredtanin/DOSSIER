@@ -7,7 +7,7 @@ import type { DrawingLevel, Project, ViewTemplate } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 
 /** Ebenen-Felder, die eine Vorlage setzt (fehlt das Vorlagen-Feld, bleibt die Ansicht unberührt). */
-export const TEMPLATE_LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch", "floorFinish", "showTerrain"] as const;
+export const TEMPLATE_LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch", "floorFinish", "showTerrain", "modelViewOptionId"] as const;
 
 /** Teilobjekt für die Ebene aus den gesetzten Feldern der Vorlage. */
 export function templateLevelPatch(t: ViewTemplate): Partial<DrawingLevel> {

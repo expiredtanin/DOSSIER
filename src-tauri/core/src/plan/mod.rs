@@ -36,6 +36,7 @@ pub mod line_ends;
 pub mod line_pattern;
 pub mod stamp_place;
 pub mod floor_finish;
+pub mod model_view;
 pub mod trees;
 pub mod mesh_plan;
 pub mod arc_fit;

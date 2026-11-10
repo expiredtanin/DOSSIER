@@ -69,6 +69,7 @@ import { useTextTarget } from "./state/useTextTarget";
 import { useSectionLineState } from "./state/useSectionLineState";
 import { useDockDragState } from "./state/useDockDragState";
 import { useResourceHandlers } from "./state/useResourceHandlers";
+import { selectModelView } from "./state/useModelViewHandlers";
 import { useSheetPane } from "./state/useSheetPane";
 import { useDisplayResolvers } from "./state/useDisplayResolvers";
 import { useSettingsHost } from "./state/useSettingsHost";
@@ -116,6 +117,7 @@ export default function App() {
   const projectLayers = useStore((s) => s.project.layers);
   const projectName = useStore((s) => s.project.name);
   const textStyles = useStore((s) => s.project.textStyles);
+  const modelViewOptions = useStore((s) => s.project.modelViewOptions);
   const masterLayouts = useStore((s) => s.project.masterLayouts);
   const firstWallTypeId = useStore((s) => s.project.wallTypes[0].id);
   const firstLineStyleId = useStore((s) => s.project.lineStyles[0].id);
@@ -687,6 +689,8 @@ export default function App() {
     zoomToApplied,
     onShadows: (v: boolean) => applyChange((p) => patchItem(p, "drawingLevels", activeLevel.id, { shadows: v })),
     onSketch: (v: boolean) => applyChange((p) => patchItem(p, "drawingLevels", activeLevel.id, { sketch: v })),
+    // [173] Modelldarstellung der aktiven Ansicht (Ebenen-Feld) samt Detailgrad der Anzeige.
+    onModelView: (id: string) => selectModelView(applyChange, setDetail, activeLevel.id, id),
     // Ebenen-Kombinationen: Speichern = Snapshot des Layer-Baums → localStorage; Laden = Map
     // lesen → Sichtbarkeits-Flags anwenden. Zeichnungs-Kombinationen analog über drawingLevels[].visible.
     saveLayerCombo: (name: string) => saveLayerCombo(name, snapshotLayerVisibility()),
@@ -774,6 +778,7 @@ export default function App() {
     planColorMode,
     setPlanColorMode,
     activeLevel,
+    modelViewOptions,
     textTarget,
     textStyles: textStyles ?? DEFAULT_PRESETS,
   });

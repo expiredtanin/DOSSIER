@@ -9,6 +9,7 @@ import { flattenCategories } from "../../model/layers";
 import { standardOverrideRules } from "../../model/standards";
 import { t } from "../../i18n";
 import { DeleteButton, FieldRow, NumberField } from "./fields";
+import { modelViewChoices } from "../../state/modelViews";
 
 /** Ziel einer Anwendung: aktive Ansicht, ein Geschoss/Schnitt/Ansicht oder ein Ausschnitt. */
 export type ViewTemplateTarget = { kind: "active" } | { kind: "level"; id: string } | { kind: "snapshot"; id: string };
@@ -135,6 +136,25 @@ function TemplateDetail({
           {(["grob", "mittel", "fein"] as const).map((d) => (
             <option key={d} value={d}>
               {t(`topbar.detail.${d}`)}
+            </option>
+          ))}
+        </select>
+      </Optional>
+      <Optional
+        label={t("resources.viewTemplates.modelView")}
+        on={tpl.modelViewOptionId !== undefined}
+        onToggle={(on) => patch({ modelViewOptionId: on ? (tpl.detail ?? "mittel") : null })}
+      >
+        <select
+          className="res-input"
+          aria-label={t("resources.viewTemplates.modelView")}
+          data-testid="view-template-model-view"
+          value={tpl.modelViewOptionId ?? "mittel"}
+          onChange={(e) => patch({ modelViewOptionId: e.target.value })}
+        >
+          {modelViewChoices(project.modelViewOptions).map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.builtin ? t(`topbar.detail.${c.builtin}`) : c.name}
             </option>
           ))}
         </select>

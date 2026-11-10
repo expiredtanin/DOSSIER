@@ -68,7 +68,7 @@ fn sash_kind(k: OpeningKind) -> f64 {
 }
 
 /// `collectOpenings`.
-pub(super) fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening> {
+pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan::model_view::WindowOpts) -> Vec<ProjOpening> {
     let mut b = vec![0.0];
     let mut ids: Vec<&str> = Vec::new();
     let mut shapes: Vec<Option<ShapeNorm>> = Vec::new();
@@ -167,7 +167,8 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening
             }
             // [95] Brüstungsfeld unten und Öffnungslinien ein/aus (Öffnung vor Typ).
             b.push(wt.and_then(|t| t.bottom_panel_height).unwrap_or(f64::NAN));
-            b.push(if !door && op.sash_symbols.or(wt.and_then(|t| t.sash_symbols)) == Some(false) { 1.0 } else { 0.0 });
+            // [173] Element > Fenstertyp > Modelldarstellung > ja.
+            b.push(if !door && !win.sash_symbols(op.sash_symbols, wt.and_then(|t| t.sash_symbols)) { 1.0 } else { 0.0 });
             let mullion = det.as_ref().map_or(f64::NAN, |f| f.mullion_width);
             // Flügel: (pfosten, postWidth, autoWidth, width, opening, hingeLeft).
             let mut sashes: Vec<[f64; 6]> = Vec::new();

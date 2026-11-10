@@ -102,7 +102,7 @@ pub fn level_with_template(l: &DrawingLevel, t: &ViewTemplate) -> DrawingLevel {
     macro_rules! take {
         ($($f:ident),*) => { $(if t.$f.is_some() { l.$f = t.$f.clone(); })* };
     }
-    take!(cut_height, view_top, view_bottom, view_depth, shadows, hidden_lines, sketch, cut_hatch, floor_finish, show_terrain);
+    take!(cut_height, view_top, view_bottom, view_depth, shadows, hidden_lines, sketch, cut_hatch, floor_finish, show_terrain, model_view_option_id);
     l
 }
 
@@ -123,7 +123,7 @@ pub fn snapshot_project<'a>(p: &'a Project, snap: &ViewSnapshot) -> Cow<'a, Proj
 /// Plan-Argumente eines Viewports (wie `ViewportPlanSvg`: projektglobal, nicht für den Druck).
 pub fn viewport_args(p: &Project, snap: &ViewSnapshot, scale: f64, mono: bool) -> PlanArgs {
     let (detail, auto_coarse) = crate::plan::domains::effective_detail(detail_of(snap.detail), scale);
-    PlanArgs {
+    let mut a = PlanArgs {
         floor: snap.active_level_id.clone(),
         detail,
         show: snap.layer_visibility.iter().filter(|(_, v)| **v).map(|(k, _)| k.clone()).collect::<HashSet<String>>(),
@@ -137,7 +137,11 @@ pub fn viewport_args(p: &Project, snap: &ViewSnapshot, scale: f64, mono: bool) -
         sun_when: None,
         auto_coarse,
         rules: snapshot_rule_ids(p, snap),
-    }
+        // [173] Modelldarstellung des Ausschnitts (sonst die der Ebene, auch über die verknüpfte Vorlage).
+        model_view: snap.model_view_option_id.clone().filter(|s| !s.is_empty()),
+    };
+    a.apply_model_view(p);
+    a
 }
 
 /// Massstab eines Viewports (`resolveViewportScale`): eigener, sonst der des Ausschnitts, sonst 1:100.

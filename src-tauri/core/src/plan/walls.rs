@@ -205,12 +205,29 @@ fn v2(x: f64, y: f64) -> Vec2 {
 /// [140] Regel und Schwelle: `style::simplify_thin_layers` / `is_thin_layer` (unter 0.5 mm Papier ab 1:75,
 /// nicht im Detail „fein"); die dünne Schicht trägt dann Füllung/Schraffur der Zielschicht.
 pub fn thin_layer_targets(thick: &[f64], detail: Detail, scale: f64) -> Vec<usize> {
+    thin_targets(thick, simplify_thin_layers(detail, scale), scale, THIN_LAYER_PAPER_MM)
+}
+
+/// [173] Ziel-Schichten nach der Modelldarstellung (`plan/model_view.rs`): alle, vereinfacht (Schwelle
+/// `thin_mm`) oder nur das Kern-Material (alle Schichten zeigen auf die tragende Schicht).
+fn layer_targets(c: &Ctx, layers: &[Layer], thick: &[f64]) -> Vec<usize> {
+    let o = c.mv();
+    if o.wall.layers == super::model_view::LayerMode::Core && !layers.is_empty() {
+        let structure = |i: &usize| super::overrides::layer_function(c.p, &layers[*i]) == Some(LayerFunction::Structure);
+        let thickest = |a: &usize, b: &usize| thick[*a].total_cmp(&thick[*b]).then(b.cmp(a));
+        let core = (0..layers.len()).filter(structure).max_by(thickest).or_else(|| (0..layers.len()).max_by(thickest)).unwrap_or(0);
+        return vec![core; layers.len()];
+    }
+    thin_targets(thick, o.simplify_thin(c.a.scale), c.a.scale, o.wall.thin_mm)
+}
+
+fn thin_targets(thick: &[f64], simplify: bool, scale: f64, thin_mm: f64) -> Vec<usize> {
     let n = thick.len();
     let ident: Vec<usize> = (0..n).collect();
-    if !simplify_thin_layers(detail, scale) {
+    if !simplify {
         return ident;
     }
-    let thin: Vec<bool> = thick.iter().map(|t| is_thin_layer(*t, scale)).collect();
+    let thin: Vec<bool> = thick.iter().map(|t| !(*t * 1000.0 / scale >= thin_mm)).collect();
     if thin.iter().all(|t| *t) {
         return ident;
     }
@@ -254,7 +271,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     // [33] ausser eine Regel stylt eine Schicht: dann Schichten, die übrigen schwarz ohne Fugen dazwischen.
     let layered_solid = solid && lov.iter().any(|a| a.styles());
     let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, solid && !layered_solid, view_only, reveals));
-    let target = thin_layer_targets(&thick, detail, c.a.scale);
+    let target = layer_targets(c, &wt.layers, &thick);
     if f.is_empty() {
         return Ok(false);
     }
@@ -480,9 +497,11 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         o.sill_line_style.as_ref().and_then(|l| l.color.as_deref()).unwrap_or(stroke),
     ];
     let b01 = |b: bool| if b { 1.0 } else { 0.0 };
+    // [173] Modelldarstellung (bei eigenem Detailgrad der Öffnung über deren Basis).
+    let mo = c.mv_for(detail);
     let detail_code = match detail {
-        // [140] Übersicht (1:500 und kleiner): Türen ohne Aufschlag-Bogen.
-        Detail::Grob if c.a.scale >= super::domains::OVERVIEW_FROM => -1.0,
+        // [140] Übersicht (1:500 und kleiner): Türen ohne Aufschlag-Bogen (ausser die Modelldarstellung will ihn).
+        Detail::Grob if c.a.scale >= super::domains::OVERVIEW_FROM && mo.door.swing_arc != Some(true) => -1.0,
         Detail::Grob => 0.0,
         Detail::Mittel => 1.0,
         Detail::Fein => 2.0,
@@ -524,7 +543,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     b.push(b01(o.swing.is_some_and(|s| s != SwingSide::Left)));
     b.push(b01(o.opening_dir.is_some_and(|s| s != OpeningOpeningDir::In)));
     b.push(b01(o.hinge.is_some_and(|s| s != OpeningHinge::Start)));
-    b.push(o.swing_angle.unwrap_or(f64::NAN));
+    b.push(mo.door.swing_angle(o.swing_angle).unwrap_or(f64::NAN));
     b.push(b01(o.door_type == Some(OpeningDoorType::Wandoeffnung) || (door && door_type(p, o).is_some_and(|t| t.kind == DoorTypeKind::Wandoeffnung))));
     b.push(if door { crate::jsnum::max(1.0, round(door_type(p, o).map_or(1.0, |t| t.leaf_count))) } else { 1.0 });
     b.push(match o.lintel_lines.unwrap_or(OpeningLintelLines::Beide) {
@@ -535,7 +554,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         OpeningLintelLines::Unknown => f64::NAN,
     });
     // Rahmenband (Tür mit Typ; Zargen-Arten [105] zeichnet `opening_detail_plan`)
-    match dt.filter(|_| dframe.is_none()) {
+    match dt.filter(|_| dframe.is_none() && mo.door.frame) {
         Some(t) => b.extend([
             1.0,
             t.frame_width.unwrap_or(0.06),
@@ -641,9 +660,9 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     // [105] Anhang: Rahmenbreite rechts (Fenster), Drehpunkt des Türblatts im Falz (Einzug, Versatz) und
     // Blattdicke (nur fein: Blatt als Rechteck).
     b.push(det.as_ref().filter(|f| wt.is_some() && (f.sides.right - f.sides.left).abs() > 1e-9).map_or(f64::NAN, |f| f.sides.right));
-    b.extend(hinge.map_or([f64::NAN; 3], |(x, off, t)| [x, off, if detail == Detail::Fein { t } else { f64::NAN }]));
-    // [105] Linientyp der Sturzlinien (Öffnung vor Türtyp): Strichcode wie `dash_of`, −1 = keine.
-    b.push(match o.lintel_line_style.or(dt.and_then(|t| t.lintel_line_style)) {
+    b.extend(hinge.map_or([f64::NAN; 3], |(x, off, t)| [x, off, if mo.door.leaf_rect { t } else { f64::NAN }]));
+    // [105] Linientyp der Sturzlinien (Öffnung vor Türtyp vor Modelldarstellung [173]): Strichcode wie `dash_of`, −1 = keine.
+    b.push(match Some(mo.door.lintel(o.lintel_line_style, dt.and_then(|t| t.lintel_line_style))) {
         Some(LintelLineStyle::Durchgehend) => 0.0,
         Some(LintelLineStyle::Punktiert) => 3.0,
         Some(LintelLineStyle::Keine) => -1.0,
@@ -651,7 +670,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     });
     // [95] Aufschlagbogen der Drehflügel (Fenster, Öffnung vor Typ): je Flügel 0 keiner, 1 Band am Anfang,
     // 2 Band am Ende.
-    let arcs = wt.is_some_and(|t| o.plan_swing_arcs.or(t.plan_swing_arcs) == Some(true));
+    let arcs = wt.is_some_and(|t| mo.window.plan_swing_arcs(o.plan_swing_arcs, t.plan_swing_arcs));
     b.push(if arcs { sash_list.len() as f64 } else { 0.0 });
     if arcs {
         for s in &sash_list {
@@ -663,10 +682,14 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             });
         }
     }
+    // [173] Flügelrahmen und Fensterbank (Basis: nur „fein").
+    b.extend([b01(mo.window.sash_frames), b01(mo.window.sill)]);
     let f = crate::plan::openings::plan_opening(&b);
     if f.is_empty() {
         return Ok(());
     }
+    // [173] Aufschlagbogen der Tür ausgeblendet.
+    let no_door_arc = door && mo.door.swing_arc == Some(false);
     let id = Some(o.id.as_str());
     let slot = |k: f64| colors.get(k as usize).copied().unwrap_or("");
     let n = f[0] as usize;
@@ -711,6 +734,8 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             let cls = LINE_CLS.get(f[i + 1] as usize).copied().unwrap_or("");
             out.push(mk_line(v2(f[i + 5], f[i + 6]), v2(f[i + 7], f[i + 8]), cls, f[i + 2], dash_of(f[i + 4]).map(Some), (s != 0.0).then(|| slot(s)), greyed, id));
             i += 9;
+        } else if no_door_arc {
+            i += 9;
         } else {
             out.push(Primitive::Arc {
                 center: v2(f[i + 2], f[i + 3]),
@@ -730,7 +755,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         }
     }
     let ctx = DetailCtx { stroke: frame_color, weight: frame_weight, greyed, detail, wall_line };
-    opening_detail_plan(c, out, w, o, &ctx, rebate_sides, (ext_l, ext_r), dframe.as_ref())
+    opening_detail_plan(c, out, w, o, &ctx, rebate_sides, (ext_l, ext_r), dframe.as_ref().filter(|_| mo.door.frame))
 }
 
 /// Stil der Detail-Zeichnung einer Öffnung.
@@ -917,7 +942,8 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         let cut = cut_by_id.get(w.id.as_str()).copied().unwrap_or(&empty);
         let (zb, zt) = p.wall_vertical_extent(w);
         let view_only = zt < cut_z || zb > cut_z;
-        let mut reveals = crate::opening_detail::plan_reveal_block(p, w, &openings);
+        // [173] Schichteinzug nach der Modelldarstellung (Basis: an).
+        let mut reveals = if c.mv().wall.reveals { crate::opening_detail::plan_reveal_block(p, w, &openings) } else { Vec::new() };
         let (unroll, cut_u) = match &arc_wall {
             Some((arc, _)) => {
                 let total = p.wall_thickness(w, 0.2);

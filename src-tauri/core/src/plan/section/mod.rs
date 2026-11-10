@@ -122,6 +122,8 @@ pub struct LevelSpec {
     pub sketch: bool,
     /// [140] Schnittflächen auch ab 1:100 schraffiert statt schwarz (`style::solid_cut`).
     pub cut_hatch: bool,
+    /// [173] Modelldarstellung der Ebene (`modelViewOptionId`; Ansicht: Öffnungslinien der Fenster).
+    pub model_view: Option<String>,
 }
 
 impl LevelSpec {
@@ -138,6 +140,7 @@ impl LevelSpec {
             hidden_lines: v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false),
             sketch: v.get("sketch").and_then(|b| b.as_bool()).unwrap_or(false),
             cut_hatch: v.get("cutHatch").and_then(|b| b.as_bool()).unwrap_or(false),
+            model_view: v.get("modelViewOptionId").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
         }
     }
 

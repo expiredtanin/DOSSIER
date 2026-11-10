@@ -4,7 +4,8 @@
 // zuvor ([121]), damit ein App-Render sie nicht neu zeichnet. Aufgerufen von `App.tsx` für die `TopBar`.
 
 import { useMemo } from "react";
-import type { DrawingLevel, ViewType } from "../model/types";
+import type { DrawingLevel, ModelViewOption, ViewType } from "../model/types";
+import { currentModelViewId, modelViewChoices } from "../state/modelViews";
 import type { TextStylePreset } from "../text/richText";
 import { isTauriRuntime } from "../native/projectFile";
 import type { useTopBarState } from "../state/useTopBarState";
@@ -50,6 +51,8 @@ export type TopBarEvents = Required<
   zoomToApplied: ViewRibbonTabProps["onZoom100"];
   onShadows: ViewRibbonTabProps["onShadows"];
   onSketch: ViewRibbonTabProps["onSketch"];
+  /** [173] Modelldarstellung der aktiven Ansicht wählen (Werkzeugleiste). */
+  onModelView: (id: string) => void;
   saveLayerCombo: ComboMenuHandlers["saveLayerCombo"];
   loadLayerCombo: ComboMenuHandlers["loadLayerCombo"];
   saveDrawingCombo: ComboMenuHandlers["saveDrawingCombo"];
@@ -80,6 +83,8 @@ export function useTopBarElements(opts: {
   planColorMode: TopBar["planColorMode"];
   setPlanColorMode: TopBar["setPlanColorMode"];
   activeLevel: DrawingLevel;
+  /** [173] Eigene Modelldarstellungen des Projekts. */
+  modelViewOptions?: ModelViewOption[];
   textTarget: TextTarget | null;
   textStyles: TextStylePreset[];
 }) {
@@ -107,6 +112,7 @@ export function useTopBarElements(opts: {
     planColorMode,
     setPlanColorMode,
     activeLevel,
+    modelViewOptions,
     textTarget,
     textStyles,
   } = opts;
@@ -181,6 +187,9 @@ export function useTopBarElements(opts: {
         onView3d={setView3d}
         detail={detail}
         onDetail={setDetail}
+        modelViews={modelViewChoices(modelViewOptions)}
+        modelViewId={currentModelViewId(activeLevel, detail, modelViewOptions)}
+        onModelView={ev.onModelView}
         // Detailgrad wirkt im Grundriss UND in der 3D-Sicht
         // (projectToModel3d bekommt `detail` durchgereicht).
         detailEnabled={planActive || viewType === "perspektive"}
@@ -228,6 +237,8 @@ export function useTopBarElements(opts: {
       sketch,
       textTarget,
       textStyles,
+      activeLevel.modelViewOptionId,
+      modelViewOptions,
     ],
   );
 

@@ -5,6 +5,7 @@
 import { core, coreEpoch, coreReady } from "../engine/coreWasm";
 import { getState } from "./appStore";
 import { storeDocument } from "./historySlice";
+import { generatePlan } from "../core";
 
 declare global {
   interface Window {
@@ -30,6 +31,10 @@ declare global {
       dimPts: (id: string) => { x: number; y: number }[];
       /** [144] Texte der Hinweise (Benachrichtigungen). */
       notices: () => string[];
+      /** [173] Linien einer Klasse (z. B. "door-lintel") im Grundriss der aktiven Ebene (alle Kategorien, 1:50, Detailgrad der Anzeige). */
+      planLines: (cls: string) => number;
+      /** [173] Modelldarstellung der aktiven Ebene (Feld `modelViewOptionId`). */
+      modelView: () => string | undefined;
     };
   }
 }
@@ -61,6 +66,19 @@ export function installTestHooks(): void {
       return g?.shape === "dimension" ? g.pts.map((p) => ({ x: p.x, y: p.y })) : [];
     },
     notices: () => getState().notifications.map((n) => n.message),
+    planLines: (cls) => {
+      const s = getState();
+      const codes = new Set<string>();
+      const walk = (cs: { code: string; children?: unknown[] }[]): void => {
+        for (const c of cs) {
+          codes.add(c.code);
+          walk((c.children ?? []) as { code: string; children?: unknown[] }[]);
+        }
+      };
+      walk(s.project.layers);
+      return generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 50).primitives.filter((q) => q.kind === "line" && q.cls === cls).length;
+    },
+    modelView: () => getState().project.drawingLevels.find((l) => l.id === getState().activeLevelId)?.modelViewOptionId,
     selected: () => ({ drawings: [...getState().selection.drawings], groups: [...getState().selection.groups], all: JSON.stringify(getState().selection) }),
   };
 }

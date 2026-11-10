@@ -15,7 +15,8 @@
 //                                                  Detailgrad, Massstab, Tusche/Farbe, ausgeblendete Kategorien, Override-Regeln;
 //                                                  --scale/--color gehen vor; ohne Flag gilt die an der Ebene verknüpfte Vorlage [34]), --rule <Regel> schaltet eine
 //                                                  Override-Regel ein (auch Standard-Baustein, z. B. --rule "Deckenaufbau weiss") [33];
-//                                                  das Massstab-Kriterium einer Regel (ab/bis 1:n) gilt nach --scale
+//                                                  das Massstab-Kriterium einer Regel (ab/bis 1:n) gilt nach --scale;
+//                                                  --model-view <Name> wählt eine Modelldarstellung (eigene Stufe oder grob/mittel/fein) [173]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
@@ -260,6 +261,15 @@ function withTemplate(project: Project, levelId: string, tpl: ViewTemplate | und
       if (!std) fail(`Override-Regel nicht gefunden: ${rName}`);
       p = { ...p, overrideRules: [...rules, { ...std, enabled: true }] };
     }
+  }
+  // [173] `--model-view <Name|id>`: Modelldarstellung der Ebene (eigene Stufe oder grob/mittel/fein); geht der Vorlage vor.
+  const mName = args.flags.get("model-view");
+  if (mName) {
+    const n = mName.toLowerCase();
+    const builtin = ["grob", "mittel", "fein"].find((b) => b === n);
+    const mv = builtin ?? (p.modelViewOptions ?? []).find((m) => m.id.toLowerCase() === n || m.name.toLowerCase() === n)?.id;
+    if (!mv) fail(`Modelldarstellung nicht gefunden: ${mName} (vorhanden: grob, mittel, fein${(p.modelViewOptions ?? []).map((m) => `, ${m.name}`).join("")})`);
+    p = { ...p, drawingLevels: p.drawingLevels.map((l) => (l.id === levelId ? { ...l, modelViewOptionId: mv } : l)) };
   }
   return p;
 }

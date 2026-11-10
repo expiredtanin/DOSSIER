@@ -52,6 +52,8 @@ fn floor_args(a: &PlanArgs, floor: &str) -> PlanArgs {
         sun_when: None,
         auto_coarse: a.auto_coarse,
         rules: a.rules.clone(),
+        // [173] Die Modelldarstellung der Deckenspiegel-Ebene gilt auch für das Bezugsgeschoss.
+        model_view: a.model_view.clone(),
     }
 }
 
