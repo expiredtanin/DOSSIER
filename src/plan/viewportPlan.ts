@@ -5,7 +5,9 @@
 // Blatt zeigte bloss seine 2D-Elemente. Nur Zusammensetzen vorhandener Kern-Abfragen.
 
 import type { DetailLevel } from "../model/viewTypes";
-import type { Project } from "../model/types";
+import type { Project, ViewTemplate } from "../model/types";
+import { withDocument } from "../core/document";
+import { linkedViewTemplate, projectWithTemplate } from "./viewTemplate";
 import { generatePlan, type Plan, type Primitive } from "./generatePlan";
 import { computeSection, generateSectionPlan } from "./toSection";
 import { generateElevationPlan } from "./toElevation";
@@ -33,6 +35,14 @@ export function snapshotOverrideRuleIds(
   return tpl?.enabledOverrideRuleIds ?? snap.enabledOverrideRuleIds ?? undefined;
 }
 
+/** [34] Verknüpfte Ansichtsvorlage eines Ausschnitts, für {@link viewportLevelPlan} (Kern: `sheet_viewports::snapshot_template`). */
+export function snapshotTemplate(
+  project: Pick<Project, "viewTemplates">,
+  snap: { templateId?: string | null; templateLinked?: boolean | null },
+): ViewTemplate | undefined {
+  return linkedViewTemplate(project, snap);
+}
+
 const EMPTY: Plan = { primitives: [], bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
 
 /**
@@ -49,6 +59,24 @@ export async function viewportLevelPlan(
   mono = true,
   /** [33] Eingeschaltete Override-Regeln ({@link snapshotOverrideRuleIds}); fehlt = Schalter im Projekt. */
   overrideRuleIds?: readonly string[] | null,
+  /** [34] Verknüpfte Ansichtsvorlage des Ausschnitts: ihre Ebenen-Felder (verdeckte Kanten, Schnittflächen
+   * schraffiert, Schatten, Skizzenstil …) und Detailgrad gelten für diesen Viewport (Kern: `sheet_viewports::snapshot_project`). */
+  template?: ViewTemplate | null,
+): Promise<Plan> {
+  if (!template) return levelPlan(project, levelId, visibleCodes, detail, scaleDenominator, forPrint, mono, overrideRuleIds);
+  const tp = projectWithTemplate(project, levelId, template);
+  return withDocument(tp, () => levelPlan(tp, levelId, visibleCodes, template.detail ?? detail, scaleDenominator, forPrint, mono, overrideRuleIds));
+}
+
+async function levelPlan(
+  project: Project,
+  levelId: string,
+  visibleCodes: Set<string>,
+  detail: DetailLevel | undefined,
+  scaleDenominator: number,
+  forPrint: boolean,
+  mono: boolean,
+  overrideRuleIds: readonly string[] | null | undefined,
 ): Promise<Plan> {
   const level = project.drawingLevels.find((l) => l.id === levelId);
   if (!level) return EMPTY;

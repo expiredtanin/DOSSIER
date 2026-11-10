@@ -10,8 +10,10 @@
 //   dossier-cli <projekt.obp> section <Name> [--sketch] [--hatch] [--color] [--out schnitt.svg]       (--format json: render2d-Szene)
 //   dossier-cli <projekt.obp> elevation <Name> [--sketch] [--hatch] [--color] [--out ansicht.svg]     (--sketch: Skizzenstil [67])
 //                                                  --color: Darstellung „Farbig" statt Tusche (Standard, [140])
-//                                                  plan/section/elevation: --template <Vorlage> wendet eine Ansichtsvorlage an
-//                                                  (Override-Regeln, Schnittflächen schraffiert …), --rule <Regel> schaltet eine
+//                                                  plan/section/elevation: --template <Vorlage> wendet eine Ansichtsvorlage ganz an
+//                                                  (Ebenen-Felder wie verdeckte Kanten/Schnittflächen schraffiert/Schatten/Skizze,
+//                                                  Detailgrad, Massstab, Tusche/Farbe, ausgeblendete Kategorien, Override-Regeln;
+//                                                  --scale/--color gehen vor; ohne Flag gilt die an der Ebene verknüpfte Vorlage [34]), --rule <Regel> schaltet eine
 //                                                  Override-Regel ein (auch Standard-Baustein, z. B. --rule "Deckenaufbau weiss") [33];
 //                                                  das Massstab-Kriterium einer Regel (ab/bis 1:n) gilt nach --scale
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
@@ -125,11 +127,14 @@ import {
   withDocument,
   AI_BRIDGE_DEFAULT_PORT,
   standardOverrideRules,
+  linkedViewTemplate,
+  projectWithTemplate,
+  templateDisplay,
   recognizeMutation,
   recognizeReport,
   recognizeSourceLevels,
 } from "../core";
-import type { Project } from "../core";
+import type { Project, ViewTemplate } from "../core";
 import { serveStdio } from "./mcp";
 import { startBridge } from "./mcpBridge";
 
@@ -206,27 +211,44 @@ function findLevel(project: Project, kinds: string[], name: string | undefined) 
   return levels.find((l) => l.id.toLowerCase() === n || l.name.toLowerCase() === n);
 }
 
-/** Ansichts-Felder einer Vorlage, die am Geschoss/Schnitt/Ansicht stehen (wie `state/viewTemplates.ts`). */
-const TEMPLATE_LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch", "floorFinish", "showTerrain"] as const;
-
 /**
- * [33]/[34] `--template <Name|id>`: Ansichtsvorlage auf die Ebene anwenden (Override-Regeln nach
- * `enabledOverrideRuleIds`, Ebenen-Felder wie „Schnittflächen schraffiert"); `--rule <Name|id>`: eine
- * Override-Regel einschalten — fehlt sie im Projekt, aus den Standard-Bausteinen (z. B. „Deckenaufbau weiss").
+ * [33]/[34] Wirksame Ansichtsvorlage der Ebene: `--template <Name|id>`, sonst die an der Ebene verknüpfte
+ * (`templateLinked`). Gilt vollständig für Grundriss, Schnitt und Ansicht: Ebenen-Felder (Schnitthöhe,
+ * Ansichtsbereich, Schatten, verdeckte Kanten, Skizze, Schnittflächen schraffiert, Bodenbelag, Gelände),
+ * Override-Regeln, Strichstärken nach Massstab, dazu Detailgrad, Massstab, Tusche/Farbe und ausgeblendete
+ * Kategorien ({@link templateView}).
  */
-function withTemplate(project: Project, levelId: string, args: Args): Project {
-  let p = project;
+function templateFor(project: Project, levelId: string, args: Args): ViewTemplate | undefined {
   const tName = args.flags.get("template");
   if (tName) {
     const n = tName.toLowerCase();
-    const tpl = (p.viewTemplates ?? []).find((x) => x.id.toLowerCase() === n || x.name.toLowerCase() === n);
+    const tpl = (project.viewTemplates ?? []).find((x) => x.id.toLowerCase() === n || x.name.toLowerCase() === n);
     if (!tpl) fail(`Ansichtsvorlage nicht gefunden: ${tName}`);
-    const ids = tpl.enabledOverrideRuleIds;
-    if (ids) p = { ...p, overrideRules: (p.overrideRules ?? []).map((r) => ({ ...r, enabled: ids.includes(r.id) })) };
-    const patch: Record<string, unknown> = {};
-    for (const k of TEMPLATE_LEVEL_KEYS) if (tpl[k] !== undefined) patch[k] = tpl[k];
-    p = { ...p, drawingLevels: p.drawingLevels.map((l) => (l.id === levelId ? { ...l, ...patch } : l)) };
+    return tpl;
   }
+  return linkedViewTemplate(project, project.drawingLevels.find((l) => l.id === levelId));
+}
+
+/** Darstellung einer Ebene nach Vorlage und Aufruf: ausdrückliche Optionen (`--scale`, `--color`) gehen vor. */
+function templateView(project: Project, levelId: string, args: Args, allCodes: Set<string>) {
+  const tpl = templateFor(project, levelId, args);
+  const d = templateDisplay(tpl);
+  const hidden = new Set(d.hiddenCodes);
+  return {
+    tpl,
+    detail: d.detail,
+    scale: args.flags.has("scale") ? Number(args.flags.get("scale")) : (d.scaleDenominator ?? 100),
+    mono: args.flags.has("color") ? inkArg(args) : (d.mono ?? true),
+    codes: hidden.size ? new Set([...allCodes].filter((c) => !hidden.has(c))) : allCodes,
+  };
+}
+
+/**
+ * [33]/[34] Ansichtsvorlage `tpl` auf die Ebene anwenden; `--rule <Name|id>`: eine Override-Regel einschalten —
+ * fehlt sie im Projekt, aus den Standard-Bausteinen (z. B. „Deckenaufbau weiss").
+ */
+function withTemplate(project: Project, levelId: string, tpl: ViewTemplate | undefined, args: Args): Project {
+  let p = tpl ? projectWithTemplate(project, levelId, tpl, true) : project;
   const rName = args.flags.get("rule");
   if (rName) {
     const n = rName.toLowerCase();
@@ -664,12 +686,13 @@ async function execute(project: Project, file: string, command: string, rest: st
         if (!own) planProject = { ...project, drawingLevels: [...project.drawingLevels, lvl] };
       }
       // Massstab geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken nach Massstab).
-      const plan = generatePlan(withSketch(withTemplate(planProject, lvl.id, args), lvl.id, args), lvl.id, allCodes, undefined, "mittel", false, inkArg(args), true, scale);
+      const tv = templateView(planProject, lvl.id, args, allCodes);
+      const plan = generatePlan(withSketch(withTemplate(planProject, lvl.id, tv.tpl, args), lvl.id, args), lvl.id, tv.codes, undefined, tv.detail ?? "mittel", false, tv.mono, true, tv.scale);
       if (args.flags.get("format") === "json") {
-        out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
+        out(args, JSON.stringify(planToRenderScene(plan, tv.scale)), `${lvl.name}.scene.json`);
         return 0;
       }
-      out(args, planToSvgString(plan, { scaleDenominator: scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }), `${lvl.name}.svg`);
+      out(args, planToSvgString(plan, { scaleDenominator: tv.scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }), `${lvl.name}.svg`);
       return 0;
     }
       return 0;
@@ -679,17 +702,18 @@ async function execute(project: Project, file: string, command: string, rest: st
       const kind = command === "section" ? "section" : "elevation";
       const found = findLevel(project, [kind], name);
       if (!found) fail(`${command} nicht gefunden: ${name ?? "(erste)"}`);
-      const sp = withSketch(withTemplate(project, found.id, args), found.id, args);
+      const tv = templateView(project, found.id, args, allCodes);
+      const sp = withSketch(withTemplate(project, found.id, tv.tpl, args), found.id, args);
       const lvl = sp.drawingLevels.find((l) => l.id === found.id) ?? found;
       // [157] Wie die App (`viewportLevelPlan`): verdeckte Kanten nach der Ebene, geschnittene Fenster/Türen,
       // automatische Höhenkoten (`levelMarks`) und die eigenen 2D-Elemente der Schnitt-/Ansichtsebene.
-      const plan = await viewportLevelPlan(sp, lvl.id, allCodes, undefined, scale, false, inkArg(args));
+      const plan = await viewportLevelPlan(sp, lvl.id, tv.codes, tv.detail, tv.scale, false, tv.mono);
       if (plan.primitives.length === 0) fail(kind === "section" ? "keine gültige Schnittlinie" : "keine gültige Ansichtslinie");
       if (args.flags.get("format") === "json") {
-        out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
+        out(args, JSON.stringify(planToRenderScene(plan, tv.scale)), `${lvl.name}.scene.json`);
         return 0;
       }
-      out(args, planToSvgString(plan, { scaleDenominator: scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }), `${lvl.name}.svg`);
+      out(args, planToSvgString(plan, { scaleDenominator: tv.scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }), `${lvl.name}.svg`);
       return 0;
     }
     case "dxf":

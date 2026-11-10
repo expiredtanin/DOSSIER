@@ -247,6 +247,8 @@ export {
 export { viewportLevelPlan } from "../plan/viewportPlan";
 export { snapshotMono } from "../plan/viewportPlan";
 export { snapshotOverrideRuleIds } from "../plan/viewportPlan";
+export { snapshotTemplate } from "../plan/viewportPlan";
+export { TEMPLATE_LEVEL_KEYS, linkedViewTemplate, projectWithTemplate, templateDisplay, templateLevelPatch } from "../plan/viewTemplate";
 
 export {
   TRUCK_MESH_READY_EVENT,

@@ -10,7 +10,7 @@
 // (`patchTemplateOps` schreibt sie in einem Schritt in alle verknüpften Ansichten/Ausschnitte).
 // Alles liefert Ops (`applyChange`); eine Änderung = ein Undo-Schritt.
 
-import { addItems, fieldOps, findItem, itemsOf, patchItem, removeItems } from "../core";
+import { addItems, fieldOps, findItem, itemsOf, patchItem, removeItems, TEMPLATE_LEVEL_KEYS, templateLevelPatch } from "../core";
 import type { CoreOp } from "../core";
 import type { DrawingLevel, OverrideRule, Project, ViewSnapshot, ViewTemplate } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
@@ -28,15 +28,8 @@ export interface ViewTemplateUi {
   scaleLineWeights: boolean;
 }
 
-/** Geschoss-Felder, die eine Vorlage setzt (fehlt das Vorlagen-Feld, bleibt die Ansicht unberührt). */
-const LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewDepth", "shadows", "hiddenLines", "sketch", "cutHatch", "floorFinish", "showTerrain"] as const;
-
-/** Teilobjekt für das Geschoss aus den gesetzten Feldern der Vorlage. */
-export function levelPatch(t: ViewTemplate): Partial<DrawingLevel> {
-  const out: Record<string, unknown> = {};
-  for (const k of LEVEL_KEYS) if (t[k] !== undefined) out[k] = t[k];
-  return out as Partial<DrawingLevel>;
-}
+/** Teilobjekt für das Geschoss aus den gesetzten Feldern der Vorlage (fehlt das Feld, bleibt die Ansicht unberührt). */
+export const levelPatch = templateLevelPatch;
 
 /** Teilobjekt für einen Ausschnitt (Kategorien werden zusammengeführt, nicht ersetzt). */
 export function snapshotPatch(t: ViewTemplate, s: ViewSnapshot): Partial<ViewSnapshot> {
@@ -61,7 +54,7 @@ export function captureTemplate(id: string, name: string, level: DrawingLevel | 
     mono: ui.mono,
     scaleLineWeights: ui.scaleLineWeights,
   };
-  if (level) for (const k of LEVEL_KEYS) if (level[k] !== undefined) (t as unknown as Record<string, unknown>)[k] = level[k];
+  if (level) for (const k of TEMPLATE_LEVEL_KEYS) if (level[k] !== undefined) (t as unknown as Record<string, unknown>)[k] = level[k];
   return t;
 }
 
