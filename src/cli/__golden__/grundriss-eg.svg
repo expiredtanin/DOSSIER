@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.82287 0 8.64575 7.1725" width="86.4575mm" height="71.725mm">
-<rect x="-1.82287" y="0" width="8.64575" height="7.1725" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.62075 0 8.2415 7.30258" width="82.415mm" height="73.02581mm">
+<rect x="-1.62075" y="0" width="8.2415" height="7.30258" fill="#ffffff"/>
 <g stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4">
 <polygon points="0,4.6725 5,4.6725 5,0.6725 0,0.6725" fill="none" stroke="none" stroke-width="0"/>
 <polygon points="0.1725,4.5 4.8275,4.5 4.8275,0.845 0.1725,0.845" fill="#6b728000" stroke="#6b7280" stroke-width="0.002"/>
@@ -44,15 +44,12 @@
 <polyline points="4.8,2.6725 6,2.6725 6,1.8725" fill="none" stroke="#1f242c" stroke-width="0.05"/>
 <polygon points="6,1.8725 6.13,2.2225 5.87,2.2225" fill="#1f242c" stroke="#1f242c" stroke-width="0.012"/>
 <polygon points="-1,2.3725 6,2.3725 6,2.9725 -1,2.9725" fill="none" stroke="none" stroke-width="0"/>
-<line x1="-1" y1="6.6725" x2="6" y2="6.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15" stroke-dashoffset="0.09"/>
-<line x1="-1" y1="6.6725" x2="-1" y2="5.8725" stroke="#1f242c" stroke-width="0.05"/>
-<polygon points="-1,5.8725 -0.87,6.2225 -1.13,6.2225" fill="#1f242c" stroke="#1f242c" stroke-width="0.012"/>
-<line x1="6" y1="6.6725" x2="6" y2="5.8725" stroke="#1f242c" stroke-width="0.05"/>
-<polygon points="6,5.8725 6.13,6.2225 5.87,6.2225" fill="#1f242c" stroke="#1f242c" stroke-width="0.012"/>
-<polygon points="-1,6.3725 6,6.3725 6,6.9725 -1,6.9725" fill="none" stroke="none" stroke-width="0"/>
+<path d="M 2.9 6.6725 A 0.4 0.4 0 0 0 2.1 6.6725" fill="none" stroke="#000" stroke-width="0.025"/>
+<path d="M 2.1 6.6725 A 0.4 0.4 0 0 0 2.9 6.6725" fill="none" stroke="#000" stroke-width="0.025"/>
+<polygon points="2.5,5.9225 2.66,6.2725 2.34,6.2725" fill="#1f242c" stroke="#1f242c" stroke-width="0.012"/>
+<polygon points="2.9,7.0725 2.9,5.9225 2.1,5.9225 2.1,7.0725" fill="none" stroke="none" stroke-width="0"/>
+<text x="2.18" y="6.80258" font-size="0.34688" fill="#1f242c" font-family="sans-serif" transform="rotate(0 2.18 6.80258)">Süd</text>
 <text x="-1.12075" y="1.7725" font-size="0.35" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.12075 1.7725)">A</text>
 <text x="5.87925" y="1.7725" font-size="0.35" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.87925 1.7725)">A</text>
-<text x="-1.32287" y="5.7725" font-size="0.35" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.32287 5.7725)">Süd</text>
-<text x="5.67713" y="5.7725" font-size="0.35" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.67713 5.7725)">Süd</text>
 </g>
 </svg>

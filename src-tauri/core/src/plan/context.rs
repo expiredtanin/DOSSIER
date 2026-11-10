@@ -20,6 +20,8 @@ const SECTION_LINE_MARK_MM: f64 = 0.5;
 const SECTION_LINE_DASH: [f64; 4] = super::line_pattern::SECTION_LINE;
 /// [176] Beschriftungshöhe in Papier-mm (Modell-Meter = mm · Massstab/1000).
 const SECTION_LABEL_MM: f64 = 3.5;
+const VIEW_MARKER_RING_MM: f64 = 0.25;
+const VIEW_MARKER_MIN_FONT_MM: f64 = 2.4;
 
 fn v2(x: f64, y: f64) -> Vec2 {
     Vec2 { x, y }
@@ -831,6 +833,87 @@ pub fn section_label_tag(name: &str) -> String {
     }
 }
 
+/// [176] Ansichtsmarker als eigenes Symbol: Kreis (Ø 8 mm Papier, 0.25 mm) in der Mitte der Ansichtslinie, gefülltes
+/// Dreieck in Blickrichtung, Bezeichnung waagrecht im Kreis (verkleinert, wenn nötig) bzw. rechts daneben; Pick-Band
+/// über dem ganzen Symbol. Keine durchgehende Linie.
+#[allow(clippy::too_many_arguments)]
+fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: f64, tag: &str, greyed: Option<bool>, obst: &mut super::stamp_place::Obstacles, out: &mut Vec<Primitive>) {
+    let _ = c;
+    let f = crate::plan::misc::view_marker_sized(p0.x, p0.y, p1.x, p1.y, sign, k);
+    if f.is_empty() {
+        return;
+    }
+    let (mut i, mut center, mut r) = (1, v2(0.0, 0.0), 0.0);
+    for _ in 0..f[0] as usize {
+        if f[i] == 4.0 {
+            center = v2(f[i + 1], f[i + 2]);
+            r = f[i + 3];
+            for (from, to) in [(v2(center.x + r, center.y), v2(center.x - r, center.y)), (v2(center.x - r, center.y), v2(center.x + r, center.y))] {
+                let arc = Primitive::Arc {
+                    center,
+                    from,
+                    to,
+                    r,
+                    cls: "section-line".into(),
+                    weight_mm: VIEW_MARKER_RING_MM,
+                    dash: None,
+                    color: Some(SECTION_LINE_INK.into()),
+                    opening_id: None,
+                    stair_id: None,
+                    greyed,
+                    opacity: None,
+                };
+                obst.add_prim(&arc);
+                out.push(arc);
+            }
+            i += 4;
+        } else if f[i] == 3.0 {
+            let pts: Vec<Vec2> = (0..3).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
+            let ring: Vec<[f64; 2]> = pts.iter().map(|q| [q.x, q.y]).collect();
+            obst.area(ring);
+            let mut tri = pick_band(pts, None, None);
+            if let Primitive::Polygon { fill, .. } = &mut tri {
+                *fill = SECTION_LINE_INK.into();
+            }
+            out.push(tri);
+            i += 7;
+        } else {
+            let pts = (0..4).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
+            out.push(pick_band(pts, None, Some(&level.id)));
+            i += 9;
+        }
+    }
+    // Bezeichnung: im Kreis, solange sie mit mindestens 2.4 mm Schrift in 1.6 · r passt, sonst rechts neben dem Kreis.
+    let w_em = crate::text_layout::text_width_em(tag, false);
+    if !(w_em > 0.0) {
+        return;
+    }
+    let inner_mm = 1.6 * r / k;
+    let font_mm = SECTION_LABEL_MM.min(inner_mm / w_em);
+    let (h, at) = if font_mm >= VIEW_MARKER_MIN_FONT_MM {
+        let h = font_mm * k;
+        (h, v2(center.x - w_em * h / 2.0, center.y - 0.375 * h))
+    } else {
+        let h = SECTION_LABEL_MM * k;
+        (h, v2(center.x + r + k, center.y - 0.375 * h))
+    };
+    let (w, pad) = (w_em * h, 0.1 * h);
+    obst.area(vec![[at.x - pad, at.y - pad], [at.x + w + pad, at.y - pad], [at.x + w + pad, at.y + 0.75 * h + pad], [at.x - pad, at.y + 0.75 * h + pad]]);
+    out.push(Primitive::DrawingText {
+        at,
+        text: tag.to_string(),
+        height_m: h,
+        angle: 0.0,
+        color: SECTION_LINE_INK.into(),
+        marks: None,
+        wrap_width: None,
+        doc: None,
+        drawing_id: None,
+        greyed,
+        opacity: None,
+    });
+}
+
 /// Schnittführungs-Symbole aller Schnitt-/Ansichtsebenen mit Linie (`addSectionLines`).
 pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     if !c.shown(SECTION_LINE_CATEGORY) {
@@ -857,14 +940,27 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
         let tag = section_label_tag(&level.name);
         let label_w = crate::text_layout::text_width_em(&tag, false) * SECTION_LABEL_MM * k;
         let sign = level.direction_sign.unwrap_or(1.0);
-        let f = crate::plan::misc::section_line_sized(p0.x, p0.y, p1.x, p1.y, sign, k, label_w, matches!(level.kind, DrawingLevelKind::Elevation));
+        if matches!(level.kind, DrawingLevelKind::Elevation) {
+            view_marker(c, level, p0, p1, sign, k, &tag, greyed, &mut obst, out);
+            continue;
+        }
+        // [176] Geknickte Schnittlinie: Anfang, Knickpunkte, Ende.
+        let mut path: Vec<(f64, f64)> = vec![(p0.x, p0.y)];
+        path.extend(level.bend_points.iter().flatten().map(|q| (q.x, q.y)));
+        path.push((p1.x, p1.y));
+        let f = crate::plan::misc::section_polyline_sized(&path, sign, k, label_w);
         if f.is_empty() {
             continue;
         }
-        // Richtungen je Ende: Blickrichtung (Pfeil) und entlang der Linie nach aussen.
-        let len = (p1.x - p0.x).hypot(p1.y - p0.y);
-        let (ux, uy) = ((p1.x - p0.x) / len, (p1.y - p0.y) / len);
-        let bn = v2(-uy * sign, ux * sign);
+        // Richtungen je Ende: Blickrichtung (Pfeil) und entlang der Linie nach aussen (erstes bzw. letztes Segment).
+        let seg_dir = |a: (f64, f64), b: (f64, f64)| {
+            let l = (b.0 - a.0).hypot(b.1 - a.1);
+            if l < 1e-6 { None } else { Some(((b.0 - a.0) / l, (b.1 - a.1) / l)) }
+        };
+        let m = path.len();
+        let first = (1..m).find_map(|i| seg_dir(path[0], path[i])).unwrap_or((1.0, 0.0));
+        let last = (0..m - 1).rev().find_map(|i| seg_dir(path[i], path[m - 1])).unwrap_or((1.0, 0.0));
+        let ends = [(v2(-first.0, -first.1), v2(-first.1 * sign, first.0 * sign)), (v2(last.0, last.1), v2(-last.1 * sign, last.0 * sign))];
         let mut end_no = 0;
         let n = f[0] as usize;
         let mut i = 1;
@@ -898,7 +994,7 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
                 out.push(tri);
                 i += 7;
             } else if f[i] == 5.0 {
-                let outward = if end_no == 0 { v2(-ux, -uy) } else { v2(ux, uy) };
+                let (outward, bn) = ends[end_no.min(1)];
                 end_no += 1;
                 labels.push((v2(f[i + 1], f[i + 2]), tag.clone(), bn, outward));
                 i += 3;
@@ -1018,11 +1114,11 @@ mod tests {
     #[test]
     fn schnittmarken_papiergroesse_beschriftung_frei() {
         let level = |name: &str, a: [f64; 2], b: [f64; 2]| -> DrawingLevel {
-            serde_json::from_value(serde_json::json!({ "id": name, "name": name, "kind": "elevation", "visible": true, "locked": false,
+            serde_json::from_value(serde_json::json!({ "id": name, "name": name, "kind": if name.starts_with("Schnitt") { "section" } else { "elevation" }, "visible": true, "locked": false,
                 "linePoints": [{ "x": a[0], "y": a[1] }, { "x": b[0], "y": b[1] }] })).unwrap()
         };
         // Pfeil nach unten (Ansicht Nord, oben im Plan) und nach links/rechts.
-        let p = Project { drawing_levels: vec![level("Ansicht Nord", [10.0, 20.0], [0.0, 20.0]), level("Ansicht West", [-5.0, 10.0], [-5.0, 0.0]), level("Ansicht Ost", [15.0, 0.0], [15.0, 10.0])], ..Default::default() };
+        let p = Project { drawing_levels: vec![level("Ansicht Nord", [10.0, 20.0], [0.0, 20.0]), level("Ansicht West", [-5.0, 10.0], [-5.0, 0.0]), level("Ansicht Ost", [15.0, 0.0], [15.0, 10.0]), level("Schnitt A-A", [0.0, 5.0], [60.0, 5.0])], ..Default::default() };
         let run = |scale: f64| {
             let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["90"], "scale": {scale}, "global": true}}"#)).unwrap();
             let mut out = Vec::new();
@@ -1059,13 +1155,65 @@ mod tests {
         assert!(d.bounds.is_some_and(|b| b[3] >= top - 1e-9), "{:?} < {top}", d.bounds);
     }
 
+    /// [176] Ansichtsmarker: Kreis (Ø 8 mm Papier) mit gefülltem Dreieck in Blickrichtung und Bezeichnung im Kreis,
+    /// keine durchgehende Linie; Pick-Band trägt die Ebenen-ID.
+    #[test]
+    fn ansichtsmarker_ist_kreis_mit_pfeil_und_bezeichnung() {
+        let p = Project {
+            drawing_levels: vec![serde_json::from_value(serde_json::json!({ "id": "n", "name": "Ansicht Süd", "kind": "elevation", "visible": true, "locked": false,
+                "linePoints": [{ "x": 0.0, "y": -2.0 }, { "x": 10.0, "y": -2.0 }] })).unwrap()],
+            ..Default::default()
+        };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["90"], "scale": 100, "global": true}"#).unwrap();
+        let mut out = Vec::new();
+        plan_section_lines(&Ctx::new(&p, &a), &mut out);
+        assert!(!out.iter().any(|q| matches!(q, Primitive::Line { .. })), "keine Linie");
+        let arcs: Vec<f64> = out.iter().filter_map(|q| match q { Primitive::Arc { r, center, .. } => { assert!((center.x - 5.0).abs() < 1e-9 && (center.y + 2.0).abs() < 1e-9); Some(*r) } _ => None }).collect();
+        assert_eq!(arcs.len(), 2);
+        assert!((arcs[0] - 0.4).abs() < 1e-9, "Ø 8 mm bei 1:100 = r 0.4 m, ist {}", arcs[0]);
+        let tri = out.iter().find_map(|q| match q { Primitive::Polygon { pts, fill, .. } if fill != "none" => Some(pts.clone()), _ => None }).unwrap();
+        // Blickrichtung +y (Linie von links nach rechts, Vorzeichen 1): Spitze oberhalb des Kreises.
+        assert!(tri[0].y > -2.0 + 0.4, "{tri:?}");
+        assert!(out.iter().any(|q| matches!(q, Primitive::Polygon { section_line_id: Some(id), .. } if id == "n")));
+        let t = out.iter().find_map(|q| match q { Primitive::DrawingText { at, text, height_m, .. } => Some((*at, text.clone(), *height_m)), _ => None }).unwrap();
+        assert_eq!(t.1, "Süd");
+        let w = crate::text_layout::text_width_em("Süd", false) * t.2;
+        assert!(t.0.x > 5.0 - 0.4 && t.0.x + w < 5.0 + 0.4, "Text im Kreis: {t:?}");
+    }
+
+    /// [176] Geknickter Schnitt: Knickpunkte aus `bendPoints` erscheinen als kräftige Stücke im Grundriss; ohne
+    /// Knickpunkte (altes Format) bleibt die gerade Linie; Beschriftung nur an den zwei Enden.
+    #[test]
+    fn geknickter_schnitt_zeigt_knickstuecke() {
+        let mk = |bend: serde_json::Value| -> Project {
+            Project {
+                drawing_levels: vec![serde_json::from_value(serde_json::json!({ "id": "s", "name": "Schnitt A-A", "kind": "section", "visible": true, "locked": false,
+                    "linePoints": [{ "x": 0.0, "y": 0.0 }, { "x": 10.0, "y": 8.0 }], "bendPoints": bend })).unwrap()],
+                ..Default::default()
+            }
+        };
+        let run = |p: &Project| {
+            let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["90"], "scale": 100, "global": true}"#).unwrap();
+            let mut out = Vec::new();
+            plan_section_lines(&Ctx::new(p, &a), &mut out);
+            out
+        };
+        let heavy_at = |out: &[Primitive], x: f64, y: f64| out.iter().any(|q| matches!(q, Primitive::Line { a, b, dash: None, weight_mm, .. } if *weight_mm > 0.4 && ((a.x - x).hypot(a.y - y) < 1e-9 || (b.x - x).hypot(b.y - y) < 1e-9)));
+        let gerade = run(&mk(serde_json::json!([])));
+        assert!(!heavy_at(&gerade, 10.0, 0.0));
+        let out = run(&mk(serde_json::json!([{ "x": 10.0, "y": 0.0 }])));
+        assert!(heavy_at(&out, 10.0, 0.0), "kräftige Stücke am Knick");
+        assert_eq!(out.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })).count(), 2);
+        assert_eq!(out.iter().filter(|q| matches!(q, Primitive::Polygon { section_line_id: Some(_), .. })).count(), 2, "Pick-Band je Segment");
+    }
+
     /// [157] Beschriftung der Schnitt-/Ansichtsmarken weicht Masszahlen und Texten des Geschosses aus („B-B“ lag
     /// auf „15.39“) sowie den Marken und Beschriftungen anderer Schnittlinien (Situation 1:500: „West“/„Nord“ an
     /// der Ecke ineinander).
     #[test]
     fn schnittmarke_weicht_masszahl_und_nachbarmarke_aus() {
         let level = |name: &str, a: [f64; 2], b: [f64; 2]| -> DrawingLevel {
-            serde_json::from_value(serde_json::json!({ "id": name, "name": name, "kind": "elevation", "visible": true, "locked": false,
+            serde_json::from_value(serde_json::json!({ "id": name, "name": name, "kind": if name.starts_with("Schnitt") { "section" } else { "elevation" }, "visible": true, "locked": false,
                 "linePoints": [{ "x": a[0], "y": a[1] }, { "x": b[0], "y": b[1] }] })).unwrap()
         };
         let labels = |out: &[Primitive]| -> Vec<(String, Vec<[f64; 2]>)> {
@@ -1107,7 +1255,7 @@ mod tests {
         let p = Project { drawing_levels: vec![level("Ansicht Nord", [12.0, 20.0], [0.0, 20.0]), level("Ansicht West", [-0.5, 19.0], [-0.5, 0.0]), level("Ansicht Süd", [0.0, -1.0], [12.0, -1.0]), level("Ansicht Ost", [12.5, 0.0], [12.5, 19.0])], ..Default::default() };
         let out = run(&p, 500.0);
         let ls = labels(&out);
-        assert_eq!(ls.len(), 8);
+        assert_eq!(ls.len(), 4, "ein Ansichtsmarker trägt eine Bezeichnung");
         let marks: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, dash: None, .. } => Some((*a, *b)), _ => None }).collect();
         for i in 0..ls.len() {
             for j in i + 1..ls.len() {

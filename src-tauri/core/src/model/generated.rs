@@ -1841,6 +1841,12 @@ pub struct DrawingLevel {
     #[serde(rename = "linePoints", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub line_points: Option<[Vec2; 2]>,
+    /// Knickpunkte einer geknickten Schnittlinie ([176]), der Reihe nach zwischen `linePoints[0]` und
+    /// `linePoints[1]`. Fehlt/leer ⇒ gerade Linie (altes Format). Nur Darstellung im Grundriss; der Schnitt selbst
+    /// folgt weiter der Verbindung der Endpunkte.
+    #[serde(rename = "bendPoints", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bend_points: Option<Vec<Vec2>>,
     /// Blickrichtung relativ zur Schnittlinie (nur Schnitt/Ansicht).
     #[serde(rename = "directionSign", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "1 | -1")]

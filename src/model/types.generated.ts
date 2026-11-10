@@ -1094,6 +1094,12 @@ export type DrawingLevel = {
   ceilingOfId?: string;
   /** Schnitt-/Ansichtslinie im Grundriss (nur Schnitt/Ansicht). */
   linePoints?:[Vec2, Vec2];
+  /**
+   * Knickpunkte einer geknickten Schnittlinie ([176]), der Reihe nach zwischen `linePoints[0]` und
+   * `linePoints[1]`. Fehlt/leer ⇒ gerade Linie (altes Format). Nur Darstellung im Grundriss; der Schnitt selbst
+   * folgt weiter der Verbindung der Endpunkte.
+   */
+  bendPoints?: Array<Vec2>;
   /** Blickrichtung relativ zur Schnittlinie (nur Schnitt/Ansicht). */
   directionSign?: 1 | -1;
   /**

@@ -142,6 +142,9 @@ pub fn translate_project(p: &Project, dx: f64, dy: f64) -> Project {
             pts[0] = shift(pts[0], dx, dy);
             pts[1] = shift(pts[1], dx, dy);
         }
+        for q in l.bend_points.iter_mut().flatten() {
+            *q = shift(*q, dx, dy);
+        }
     }
     if let Some(a) = &mut out.geo_anchor {
         a.model = shift(a.model, dx, dy);

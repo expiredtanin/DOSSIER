@@ -187,6 +187,9 @@ fn shift_element(key: &str, e: &Value, dx: f64, dy: f64) -> (Value, bool) {
                 Some(a) if truthy(e.get("linePoints")) => {
                     let n = vec![shift(&a[0], dx, dy), shift(a.get(1).unwrap_or(&Value::Null), dx, dy)];
                     m.insert("linePoints".into(), Value::Array(n));
+                    if let Some(b) = e.get("bendPoints").and_then(Value::as_array) {
+                        m.insert("bendPoints".into(), Value::Array(b.iter().map(|q| shift(q, dx, dy)).collect()));
+                    }
                     (Value::Object(m), true)
                 }
                 _ => (e.clone(), false),
