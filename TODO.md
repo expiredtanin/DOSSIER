@@ -131,9 +131,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Schnittlinie (einfaches Musterhaus). Nachtrag 10.11. (Reste): Dämm-Polylinien mit Sehnenfehler ≤ 0.5 mm Modell
   (≙ 0.05 mm Papier ab 1:10) statt festen 5° (DG 1:50 komplex 14 MB → 2.6 MB); Haarstrich gegen Fugen
   `SEAM_MM` 0.05 → 0.12 (graue Schichtfugen in der schwarzen Schnittfläche 1:100 bei Zoom ≥ 12 px/mm); Stempel-Kürzung
-  nach Wörtern („Wo./Ess./Küc.“ statt „Wohnen/Essen.“); Reststrich rechts am Rundfenster (Ansicht West) — Lochkanten im
-  Band um den Rahmen entfallen (`drop_hole_edges`). Weiter offen: Holzwand-Ecke DG 1:50: die Dämmschlaufen beider
-  Wände treffen sich an der Gehrung versetzt (Schenkel-Knicke, keine Spiegelung; Phase/Gehrung `anchor_band_pattern`);
+  nach Wörtern (10.11. weiter: Reihenfolge bei Platzmangel erst Name auf zwei Zeilen umbrechen, dann Schrift bis 2 mm,
+  dann nur die Raumnummer, erst zuletzt Wortenden kürzen, je Wort ≥ 3 Buchstaben + Punkt — „Wohn./Ess./Küche“ statt
+  „Wo./Ess./Küc.“; `fit_room_stamp`/`abbreviate`); Reststrich rechts am Rundfenster (Ansicht West) — Lochkanten im
+  Band um den Rahmen entfallen (`drop_hole_edges`). Holzwand-Ecke DG 1:50 (10.11.): die Musterphase sitzt jetzt an der
+  Schichtfläche statt an der Wandfläche (`anchor_band_pattern`), die Gehrung geht an der Innenseite durch einen ganzen Bogen
+  bzw. eine Spitze, beide Wände bilden dort eine gefaltete Schlaufe. Weiter offen: die Schenkel an der Gehrung bleiben
+  Winkel (Spiegelbild, ein Knick je Schenkel, rund 5 je Ecke bei 24 cm Dämmung) — Spiegelprinzip, nicht behoben;
   Ansicht Ost: Schatten-Keile neben dem Erker mit Lücken je Geschoss und Strichreste am Erker. Nicht in der Tauri-App/auf dem Mac
   angesehen. · M
 - ◐ **[142]** Schatten in zwei Richtungen. Schatten nur im Geschoss nächst ±0.00; Decken/Dächer werfen keinen eigenen
