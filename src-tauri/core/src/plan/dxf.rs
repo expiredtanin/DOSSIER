@@ -1051,6 +1051,8 @@ impl Ctx<'_> {
         );
         let mm = |v: f64| (v / 1000.0) * scale;
         let text_h = mm(th);
+        // [172] Vorgabe-Lage wie im Plan: passt die Zahl nicht zwischen die Hilfslinien, steht sie ausserhalb.
+        let auto = super::drawings::dim_auto_offsets(pts, text_h);
         for i in 0..pts.len().saturating_sub(1) {
             let a = V2 { x: pts[i].x, y: pts[i].y };
             let q = V2 { x: pts[i + 1].x, y: pts[i + 1].y };
@@ -1061,9 +1063,9 @@ impl Ctx<'_> {
             let nx = -(q.y - a.y) / len;
             let ny = (q.x - a.x) / len;
             let on = V2 { x: a.x + nx * offset, y: a.y + ny * offset };
-            let text_at = text_offsets_mm.as_ref().and_then(|l| l.get(i)).filter(|o| o.along != 0.0 || o.perp != 0.0).map(|o| {
+            let stored = text_offsets_mm.as_ref().and_then(|l| l.get(i)).filter(|o| o.along != 0.0 || o.perp != 0.0).map(|o| (mm(o.along), mm(o.perp)));
+            let text_at = stored.or(auto.get(i).copied().filter(|o| o.0 != 0.0 || o.1 != 0.0)).map(|(al, pe)| {
                 let (base, read, up) = dim_text_frame(a, q, *offset, text_h);
-                let (al, pe) = (mm(o.along), mm(o.perp));
                 let pos = V2 { x: base.x + read.x * al + up.x * pe, y: base.y + read.y * al + up.y * pe };
                 V2 { x: pos.x + up.x * (text_h / 2.0), y: pos.y + up.y * (text_h / 2.0) }
             });
@@ -1562,6 +1564,31 @@ pub const DXF_MAGIC: f64 = 0x4458_4631 as f64;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [172] Passt die Masszahl nicht zwischen die Hilfslinien, steht sie im DXF an der ausgewichenen Lage (Textposition
+    /// gesetzt, ausserhalb des Segments); passt sie, bleibt die Vorgabe (kein Text-Override).
+    #[test]
+    fn masszahl_ausgewichen_im_dxf() {
+        let mut v = crate::sheet_viewports::tests::json();
+        let dim = |id: &str, x1: f64| serde_json::json!({"id": id, "levelId": "eg", "categoryCode": "20", "geom": {"shape": "dimension", "pts": [{"x": 0.0, "y": 0.0}, {"x": x1, "y": 0.0}], "offset": 0.5}});
+        v["drawings2d"].as_array_mut().unwrap().push(dim("kurz", 0.1));
+        v["drawings2d"].as_array_mut().unwrap().push(dim("lang", 3.0));
+        let p: Project = serde_json::from_value(v).unwrap();
+        let a = crate::plan::domains::PlanArgs::parse(1.0, r#"{"floor":"eg","show":["20"],"scale":100}"#).unwrap();
+        let buf = crate::plan::domains::plan_domains_buf(&p, &a).unwrap();
+        let view = View::parse(&buf).unwrap();
+        let len = view.len();
+        let mut parts = [Part::new(view, 0, len).unwrap()];
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: false, bounds: [0.0, 0.0, 10.0, 4.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+        let f = collect(&mut parts, &p, &o).unwrap();
+        let dims: Vec<&[f64]> = f.nums.windows(12).filter(|w| w[0] == REC_DIM).collect();
+        assert_eq!(dims.len(), 2);
+        let kurz = dims.iter().find(|w| (w[5] - 0.1).abs() < 1e-9).expect("kurz");
+        let lang = dims.iter().find(|w| (w[5] - 3.0).abs() < 1e-9).expect("lang");
+        assert_eq!(kurz[9], 1.0, "ausgewichen: Textposition gesetzt");
+        assert!(kurz[10] < -1e-6, "links vom Segment, x = {}", kurz[10]);
+        assert_eq!(lang[9], 0.0, "passt: Vorgabe");
+    }
 
     /// [93] Mit Papierbereich: das Projekt-Layout als Blatt, sein Ansichtsfenster auf das exportierte
     /// Geschoss und die Blatt-Zeichnung als Block, eingefügt mit Faktor 1000 oben links.
